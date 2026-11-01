@@ -37,7 +37,7 @@ import { expandoMemberRead, expandoWritableTarget, exportEqualsNamedMemberRead }
 import { LITERAL_IGNORED_KEYS, lowerSocketInstanceOf, lowerTlsRootCertificates } from "./lower-server.js";
 import { fenceNamespaceConditionalValue, lowerNamespaceConditionalDecl } from "./lower-nsvalue.js";
 import { detachedMethodVariant, findGenericMethodOn, lowerStaticFieldRead, superGuardedThis } from "./lower-classes.js";
-import { jsLetReadStaysDyn, type GenericFnInfo, type GenericInstance, type ParamShape, detachedThisClassOf, detachedDeclinable, inStrictCode, implicitDefaultInstance, implicitDetachedInstance, bindingNeverReassigned, classHasOwnValueOf, dynSpreadSource, classInstanceToString, implicitMonoFile, lowerIntlDefaultLocaleProperty, lowerTaggedTemplate, nullishGenericBindingUnitOf, objLitGenericFnInfoOf, objLitGenericFnNodeOf, requireObjLitGenericReceiver } from "./lower-calls.js";
+import { jsLetReadStaysDyn, type GenericFnInfo, type GenericInstance, type ParamShape, detachedThisClassOf, detachedDeclinable, inStrictCode, implicitDefaultInstance, implicitDetachedInstance, bindingNeverReassigned, classHasOwnValueOf, dynSpreadSource, classInstanceToString, implicitMonoFile, lowerIntlDefaultLocaleProperty, lowerTaggedTemplate, nullishGenericBindingUnitOf, objLitGenericFnInfoOf, objLitGenericFnNodeOf, requireObjLitGenericReceiver, v8CallSite } from "./lower-calls.js";
 import { mixinFnOfCallee } from "./lower-mixins.js";
 import { esOwnKeyOrder, isArrayIndexKey, isConstAssertionTypeNode, isGenericCallableMemberType, overflowShapeKey, overflowShapeKeys, overflowShapeKeysDenied, underConstAssertion, unitOnlyUnion } from "../types.js";
 import { lowerYield } from "./lower-generators.js";
@@ -8011,7 +8011,26 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
         return L.maybeNarrow({ kind: "dynKeyGet", key, optional: true, value: receiver, type: DYN, loc }, expr);
       }
       if (dotNode === expr && ts.isElementAccessExpression(expr)) {
-        const key = L.lowerExpr(expr.argumentExpression);
+        // A computed key with effects (`o?.[next()]`) is evaluated only when
+        // the receiver is not nullish, exactly JS: the key lowers inside an
+        // optional chain body over the bound receiver. Literal keys have no
+        // effects and keep the direct read below.
+        const argNode = expr.argumentExpression;
+        if (!ts.isStringLiteralLike(argNode) && !ts.isNumericLiteral(argNode)) {
+          const key = L.lowerExpr(argNode);
+          let skey: IrExpr | null = null;
+          if (key.type.kind === "string") skey = key;
+          else if (key.type.kind === "f64") skey = { kind: "toString", operand: key, type: STRING, loc: key.loc };
+          else if (key.type.kind === "dyn") skey = L.ensureString(key, argNode);
+          if (skey !== null) {
+            const id = `chain.${L.chainCounter++}`;
+            const recvRef: IrExpr = { kind: "chainRecv", id, type: DYN, loc };
+            const body: IrExpr = { kind: "dynKeyGet", key: skey, value: recvRef, type: DYN, loc };
+            return L.maybeNarrow({ kind: "optChain", id, receiver, body, type: DYN, loc }, expr);
+          }
+          L.unsupported("SC1100", expr, `optional element reads on 'unknown' values with a '${L.fmt(key.type)}' key`);
+        }
+        const key = L.lowerExpr(argNode);
         if (key.type.kind === "string") {
           return L.maybeNarrow({ kind: "dynKeyGet", key, optional: true, value: receiver, type: DYN, loc }, expr);
         }
@@ -8022,6 +8041,13 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
         if (key.type.kind === "f64") {
           const skey: IrExpr = { kind: "toString", operand: key, type: STRING, loc: key.loc };
           return L.maybeNarrow({ kind: "dynKeyGet", key: skey, optional: true, value: receiver, type: DYN, loc }, expr);
+        }
+        // A CHECKED-DYNAMIC key (`owner.slots?.[slot]` with an untyped
+        // `slot`): ToPropertyKey, exactly the non-optional read's rule
+        // (lower-exprs' keyed read ensures a string for dyn keys too).
+        if (key.type.kind === "dyn") {
+          const dkey = L.ensureString(key, expr.argumentExpression);
+          return L.maybeNarrow({ kind: "dynKeyGet", key: dkey, optional: true, value: receiver, type: DYN, loc }, expr);
         }
       }
       // The METHOD-call step (`rawName?.match(re)` on a dyn value): a
@@ -8040,15 +8066,23 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
         const m = dotNode.name.text;
         const id = `chain.${L.chainCounter++}`;
         const recvRef: IrExpr = { kind: "chainRecv", id, type: DYN, loc: locOf(recvNode) };
-        L.chainRecvByNode.set(recvNode, recvRef);
-        L.chainHandled.add(dotNode);
-        let body: IrExpr;
-        try {
-          body = L.lowerExpr(expr);
-        } finally {
-          L.chainRecvByNode.delete(recvNode);
-          L.chainHandled.delete(dotNode);
+        // The method dispatches dynamically on the bound receiver (dynInvoke:
+        // this-binding, Node's "<spelling> is not a function" on a non-function,
+        // the promise arm for then/catch/finally). Built directly, not through
+        // lowerCall, which would decline the `?.` on the callee it is handed.
+        if (expr.arguments.some((x) => ts.isSpreadElement(x))) {
+          L.unsupported("SC1100", expr, `spread arguments to '.${m}' on a checked-dynamic receiver`);
         }
+        const dynArgs = expr.arguments.map((x) => L.lowerExprExpecting(x, DYN));
+        let body: IrExpr = {
+          kind: "dynInvoke",
+          recv: recvRef,
+          method: m,
+          calleeName: v8CallSite(dotNode),
+          args: dynArgs,
+          type: DYN,
+          loc,
+        };
         if (body.type.kind !== "dyn") {
           if (body.type.kind !== "void" && !L.dynConvertible(body.type)) {
             L.unsupported(
@@ -8063,6 +8097,26 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
           }
           body = { kind: "dynFrom", value: body, type: DYN, loc };
         }
+        return { kind: "optChain", id, receiver, body, type: DYN, loc };
+      }
+      // `f?.(args)` on a checked-dynamic callee: a nullish callee short-
+      // circuits to undefined (the arguments never evaluate, exactly JS);
+      // anything else is the ordinary dynamic call on the bound receiver.
+      if (ts.isCallExpression(expr) && dotNode === expr) {
+        if (expr.arguments.some((x) => ts.isSpreadElement(x))) {
+          L.unsupported("SC1100", expr, "spread arguments to an optional call on 'unknown' values");
+        }
+        const id = `chain.${L.chainCounter++}`;
+        const recvRef: IrExpr = { kind: "chainRecv", id, type: DYN, loc: locOf(recvNode) };
+        const args = expr.arguments.map((x) => L.lowerExprExpecting(x, DYN));
+        const body: IrExpr = {
+          kind: "dynCall",
+          callee: recvRef,
+          calleeName: ts.isIdentifier(recvNode) ? recvNode.text : recvNode.getText(),
+          args,
+          type: DYN,
+          loc,
+        };
         return { kind: "optChain", id, receiver, body, type: DYN, loc };
       }
       L.unsupported("SC1100", expr, "optional chaining on 'unknown' values");
