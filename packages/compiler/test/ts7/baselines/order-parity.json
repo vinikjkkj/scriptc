@@ -23339,6 +23339,24 @@
     "<repo>/tests/corpus/21105-reflect-apply-wrapper.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/21106-reflect-construct-bound.ts": {
+   "order": [
+    "<repo>/tests/corpus/21106-reflect-construct-bound.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21107-reflect-construct-nonctor-text.ts": {
+   "order": [
+    "<repo>/tests/corpus/21107-reflect-construct-nonctor-text.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21108-reflect-apply-bytes-list.ts": {
+   "order": [
+    "<repo>/tests/corpus/21108-reflect-apply-bytes-list.ts"
+   ],
+   "diags": []
   }
  }
 }
