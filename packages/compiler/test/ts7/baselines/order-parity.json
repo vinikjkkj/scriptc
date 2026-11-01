@@ -10064,6 +10064,13 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/21600-builtin-ctor-foreach-exports/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/21600-builtin-ctor-foreach-exports/lib.cjs",
+    "<repo>/tests/corpus/21600-builtin-ctor-foreach-exports/main.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2140-uri-component-codecs.ts": {
    "order": [
     "<repo>/tests/corpus/2140-uri-component-codecs.ts"
