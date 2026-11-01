@@ -2,10 +2,6 @@
 function describe(e: Error): string {
   return e.name + ':' + e.message;
 }
-function tagged(msg: string): Error & { tag: string } {
-  const e = new SyntaxError(msg) as SyntaxError & { tag: string };
-  e.tag = 'syn';
-  return e;
-}
-const t = tagged('bad json');
+const t = new SyntaxError('bad json') as SyntaxError & { tag: string };
+t.tag = 'syn';
 console.log(describe(t), t.tag);

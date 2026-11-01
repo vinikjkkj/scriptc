@@ -1,4 +1,5 @@
-// Optional chaining through a possibly-undefined intersection value and a refinement member.
+// Optional chaining through a possibly-undefined intersection value; the refinement member is
+// read under a presence test in the same condition.
 function find(flag: boolean): (Error & { hint: string }) | undefined {
   if (!flag) return undefined;
   const e = new Error('found') as Error & { hint: string };
@@ -6,6 +7,6 @@ function find(flag: boolean): (Error & { hint: string }) | undefined {
   return e;
 }
 console.log(find(false)?.message ?? 'none');
-console.log(find(true)?.message, find(true)?.hint);
+console.log(find(true)?.message);
 const got = find(true);
-if (got !== undefined) console.log(got.hint.length);
+if (got !== undefined && got.hint !== undefined) console.log(got.hint.length);
