@@ -23269,6 +23269,12 @@
     "<repo>/tests/corpus/21109-reflect-bind-dyn-construct.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/21110-reflect-local-bind-escape.ts": {
+   "order": [
+    "<repo>/tests/corpus/21110-reflect-local-bind-escape.ts"
+   ],
+   "diags": []
   }
  }
 }
