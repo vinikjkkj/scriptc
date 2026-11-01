@@ -10501,13 +10501,22 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
       // to the dyn tree once, here, and installed after the construction.
       const v = L.lowerExpr(args[1]!);
       if (v.kind === "unitLit" && (v.unit === "undefined" || v.unit === "null")) return { effects: [], cause: null, options: null };
+      // Which installer is EXACT depends on what the value can tell at run time.
+      // A dyn value is a complete tree: its own presence test decides
+      // (error.installOptions). A static record that REQUIRES `cause` has the
+      // member present whatever the box holds (error.installRequiredCause).
+      // Anything else -- an optional `cause?` (an undefined-armed slot reads
+      // absent, so `cause: undefined` cannot be told from no cause) or no
+      // `cause` member at all (the record drops keys it does not declare) --
+      // has no exact answer here, and is refused as before.
+      const isDyn = v.type.kind === "dyn";
+      const causeSym = isDyn ? undefined : L.checker.getPropertyOfType(L.typeOf(args[1]!), "cause");
+      const requiredCause = causeSym !== undefined && (causeSym.flags & ts.SymbolFlags.Optional) === 0;
+      if (!isDyn && !requiredCause) {
+        L.unsupported("SC1090", args[1] ?? blame, "Error constructor options ('cause') other than an object literal");
+      }
       const boxed = L.coerceToExpected(v, DYN);
       const h = L.declareHiddenLocal("%errOpts", DYN);
-      // A `cause` member the STATIC type requires is present whatever the box
-      // holds (the box can drop an undefined-valued member); otherwise the
-      // run-time presence test decides.
-      const causeSym = L.checker.getPropertyOfType(L.typeOf(args[1]!), "cause");
-      const requiredCause = causeSym !== undefined && (causeSym.flags & ts.SymbolFlags.Optional) === 0;
       return {
         effects: [{ kind: "varDecl", localId: h.id, init: boxed, loc: locOf(args[1]!) }],
         cause: null,
