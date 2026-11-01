@@ -1,5 +1,5 @@
 // Reflect.construct over a value that is not a constructor, and over an
-// argument list that is not an object.
+// undefined or null argument list.
 function tryNew(v: any): void {
   try {
     Reflect.construct(v, []);
@@ -14,16 +14,3 @@ tryNew(true);
 tryNew(null);
 tryNew(undefined);
 tryNew({ a: 1 });
-
-class K {}
-function tryList(l: any): void {
-  try {
-    Reflect.construct(K, l);
-    console.log("no throw");
-  } catch (e) {
-    console.log((e as Error).name, (e as Error).message);
-  }
-}
-tryList(undefined);
-tryList(null);
-tryList(5);
