@@ -2739,8 +2739,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             e.fnName !== undefined && e.fnName !== ""
               ? cStringLiteral(Buffer.from(e.fnName, "utf8"))
               : "NULL";
+          // A closure value with no creation-site text takes the text its IR function
+          // carries (the attach pass sets it where a text-bearing answer needs it).
+          const liftedSrc = e.fnSrc === undefined && e.value.kind === "closure" ? E.fnByName.get(e.value.fnName)?.srcText : undefined;
           const src =
-            e.fnSrc === undefined ? "NULL"
+            e.fnSrc === undefined ? (liftedSrc !== undefined ? cStringLiteral(Buffer.from(liftedSrc, "utf8")) : "NULL")
             : e.fnSrc === "bound" ? "SCR_FN_SRC_BOUND"
             : cStringLiteral(Buffer.from(e.fnSrc.text, "utf8"));
           const box = `${E.dynFuncBoxHelper(v.type)}(${v.name}, ${name}, ${src})`;

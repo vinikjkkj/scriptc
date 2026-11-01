@@ -25,15 +25,54 @@
 import * as ts from "../ts7/adapter.js";
 import type { IrFunction, SrcLoc } from "../../ir/nodes.js";
 import { functionSourceText, isValueFunctionNode } from "../fn-srctext.js";
+import { irFunctionValueCode } from "../../ir/nodes.js";
 
 export interface FnTextAttachResult {
   /** The first fn.text use, when the program uses one at all. */
   used: SrcLoc | null;
   /** The first closure target with no exact text, when there is one. */
   missing: { loc: SrcLoc; fnName: string } | null;
+  /** A program with a construct site over a checked-dynamic value (dyn.construct,
+   * dyn.reflectConstruct): the first function value it can reach that has no exact
+   * [[Construct]] answer, with the reason. Null when every reachable value is exact. */
+  constructMissing: { loc: SrcLoc; fnName: string; reason: string } | null;
 }
 
 const BUILTIN_VALUE = /^%builtin\.([A-Za-z_$][A-Za-z0-9_$]*)\.value$/;
+
+/** A value a non-plain-object prototype would come from: an array, a typed array, a function or a map. */
+function nonPlainObjectValue(value: unknown): boolean {
+  const v = value as { kind?: string; value?: { type?: { kind?: string } } } | undefined;
+  if (v === undefined) return false;
+  if (v.kind === "dynObjLit") return false;
+  if (v.kind === "dynArrLit" || v.kind === "dynArrNew" || v.kind === "dynArrFrom" || v.kind === "dynMapNew") return true;
+  if (v.kind === "dynFrom") {
+    const t = v.value?.type?.kind;
+    return t === "array" || t === "bytes" || t === "func" || t === "map" || t === "set";
+  }
+  return false;
+}
+
+/** Why a function value reachable from a construct site has no exact [[Construct]]
+ * answer, or null when it has one. A plain user function constructs exactly (its
+ * instance is the receiver). A non-constructor needs its text for Node's message.
+ * The primitive constructors answer a wrapper object the runtime cannot hold, and a
+ * static bind of a constructible target would construct with the wrong receiver. */
+function constructReasonOf(name: string, fn: IrFunction | undefined): string | null {
+  if (PRIMITIVE_CTOR_CLOSURE.test(name)) {
+    return "the primitive constructor answers a wrapper object (new String / Number / Boolean) this build does not represent";
+  }
+  if (fn === undefined) return "the function is not one this lowering emitted";
+  const code = irFunctionValueCode(fn);
+  const nonCtor = (code & 7) !== 0;
+  if (name.startsWith("%bindthis.")) {
+    return "a statically bound function reaching a checked-dynamic value: its [[Construct]] answer is not carried exactly by the bound closure";
+  }
+  if (nonCtor && fn.srcText === undefined) {
+    return "a non-constructor function has no exact source text for Node's TypeError message";
+  }
+  return null;
+}
 
 /** Visit every IR node once; `visit` sees each object with a `kind`. */
 function forEachIrNode(root: unknown, visit: (node: { kind: string } & Record<string, unknown>) => void): void {
@@ -71,6 +110,8 @@ function indexFile(sf: ts.SourceFile): Map<string, ts.Node> {
   return out;
 }
 
+const PRIMITIVE_CTOR_CLOSURE = /^%builtin\.(String|Number|Boolean)$/;
+
 export function attachFnSrcText(
   functions: IrFunction[],
   globals: unknown,
@@ -79,16 +120,55 @@ export function attachFnSrcText(
   const byName = new Map<string, IrFunction>();
   for (const fn of functions) byName.set(fn.name, fn);
   let used: SrcLoc | null = null;
+  let construct: SrcLoc | null = null;
+  let reflectConstruct: SrcLoc | null = null;
+  let protoWrite: SrcLoc | null = null;
+  let staticBoundReach: SrcLoc | null = null;
   const targets = new Map<string, IrFunction | null>();
   const closureNames: string[] = [];
+  // Closures a checked-dynamic value is minted from (dynFrom over a closure):
+  // only these can reach a construct site as a value.
+  const dynNames = new Map<string, SrcLoc>();
   forEachIrNode({ functions, globals }, (node) => {
     if (node.kind === "libCall" && node.fn === "fn.text" && used === null) used = node.loc as SrcLoc;
+    if (
+      node.kind === "libCall" && (node.fn === "dyn.construct" || node.fn === "dyn.reflectConstruct") &&
+      construct === null
+    ) construct = node.loc as SrcLoc;
+    if (node.kind === "libCall" && node.fn === "dyn.reflectConstruct" && reflectConstruct === null) {
+      reflectConstruct = node.loc as SrcLoc;
+    }
+    // `o.prototype = <value>` on a checked-dynamic `o` with a literal key. A plain object
+    // literal is a [[Prototype]] link this build holds; any other object kind is not.
+    if (node.kind === "libCall" && node.fn === "dyn.keySet" && protoWrite === null) {
+      const args = node.args as { kind?: string; value?: unknown }[] | undefined;
+      const key = args?.[1];
+      const value = args?.[2];
+      if (key?.kind === "strLit" && key.value === "prototype" && nonPlainObjectValue(value)) {
+        protoWrite = node.loc as SrcLoc;
+      }
+    }
     if (node.kind === "closure" && typeof node.fnName === "string") closureNames.push(node.fnName);
+    if (node.kind === "dynFrom") {
+      const v = node.value as { kind?: string; fnName?: unknown; type?: { kind?: string } } | undefined;
+      // A statically bound function (`f.bind(...)`, reached through a variable or a member
+      // as well as directly): its box carries the bind's text, not its target's.
+      if (node.fnSrc === "bound" && staticBoundReach === null) staticBoundReach = node.loc as SrcLoc;
+      if (v !== undefined && v.kind === "closure" && typeof v.fnName === "string" && !dynNames.has(v.fnName)) {
+        dynNames.set(v.fnName, node.loc as SrcLoc);
+      }
+    }
   });
-  const result: FnTextAttachResult = { used, missing: null };
-  if (used === null) return result;
+  const result: FnTextAttachResult = { used, missing: null, constructMissing: null };
+  // Texts are needed for the fn.text answer and for the non-constructor message of a
+  // construct site; a program with neither needs none.
+  if (used === null && construct === null) return result;
   const fileIndex = new Map<string, Map<string, ts.Node> | null>();
   for (const name of closureNames) {
+    if (targets.has(name)) continue;
+    targets.set(name, byName.get(name) ?? null);
+  }
+  for (const name of dynNames.keys()) {
     if (targets.has(name)) continue;
     targets.set(name, byName.get(name) ?? null);
   }
@@ -116,10 +196,33 @@ export function attachFnSrcText(
       if (node !== undefined) text = functionSourceText(node);
     }
     if (text === null) {
-      if (result.missing === null) result.missing = { loc: used, fnName: name };
+      if (used !== null && result.missing === null) result.missing = { loc: used, fnName: name };
       continue;
     }
     fn!.srcText = text;
+  }
+  if (construct !== null && staticBoundReach !== null) {
+    result.constructMissing ??= {
+      loc: staticBoundReach,
+      fnName: "<statically bound function>",
+      reason: "a statically bound function reaching a checked-dynamic value: its [[Construct]] answer is not carried exactly by the bound closure",
+    };
+  }
+  if (reflectConstruct !== null && protoWrite !== null) {
+    result.constructMissing = {
+      loc: protoWrite,
+      fnName: "prototype",
+      reason: "a write of a non-literal-object 'prototype' on a checked-dynamic value can make a constructed instance's [[Prototype]] a non-plain object, which this build does not link",
+    };
+  }
+  if (construct !== null) {
+    for (const [name, loc] of dynNames) {
+      const reason = constructReasonOf(name, byName.get(name));
+      if (reason !== null) {
+        result.constructMissing = { loc, fnName: name, reason };
+        break;
+      }
+    }
   }
   return result;
 }
