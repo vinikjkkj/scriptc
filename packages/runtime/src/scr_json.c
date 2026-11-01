@@ -12715,7 +12715,7 @@ bool scr_dyn_fn_is_ctor(const ScrDyn *fn) {
     ScrDyn *target = dyn_bound_target(fn);
     bool ok = true;
     if (target->kind == SCR_DYN_FUNC) ok = scr_dyn_fn_is_ctor(target);
-    else if (target->kind == SCR_DYN_PROXY) ok = scr_dyn_proxy_is_function(target);
+    else if (target->kind == SCR_DYN_PROXY) ok = SCR_PX->is_function(target);
     scr_dyn_release(target);
     return ok;
   }
