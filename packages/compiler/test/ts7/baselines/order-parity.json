@@ -10191,6 +10191,126 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/21800-error-intersection-aggregate-guard.ts": {
+   "order": [
+    "<repo>/tests/corpus/21800-error-intersection-aggregate-guard.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21801-error-intersection-member-reads.ts": {
+   "order": [
+    "<repo>/tests/corpus/21801-error-intersection-member-reads.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21802-error-intersection-cause-write-read.ts": {
+   "order": [
+    "<repo>/tests/corpus/21802-error-intersection-cause-write-read.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21803-error-intersection-code-refinement.ts": {
+   "order": [
+    "<repo>/tests/corpus/21803-error-intersection-code-refinement.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21804-error-intersection-class-field-and-refinement.ts": {
+   "order": [
+    "<repo>/tests/corpus/21804-error-intersection-class-field-and-refinement.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21805-error-intersection-guard-narrowing.ts": {
+   "order": [
+    "<repo>/tests/corpus/21805-error-intersection-guard-narrowing.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21806-error-intersection-optional-member-undefined.ts": {
+   "order": [
+    "<repo>/tests/corpus/21806-error-intersection-optional-member-undefined.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21807-error-intersection-rangeerror-tag.ts": {
+   "order": [
+    "<repo>/tests/corpus/21807-error-intersection-rangeerror-tag.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21808-error-intersection-user-subclass-extra.ts": {
+   "order": [
+    "<repo>/tests/corpus/21808-error-intersection-user-subclass-extra.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21809-error-intersection-dyn-view-of-subclass.ts": {
+   "order": [
+    "<repo>/tests/corpus/21809-error-intersection-dyn-view-of-subclass.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21810-error-intersection-object-assign-cause.ts": {
+   "order": [
+    "<repo>/tests/corpus/21810-error-intersection-object-assign-cause.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21811-error-intersection-object-assign-refinement.ts": {
+   "order": [
+    "<repo>/tests/corpus/21811-error-intersection-object-assign-refinement.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21812-error-intersection-array-of-errors.ts": {
+   "order": [
+    "<repo>/tests/corpus/21812-error-intersection-array-of-errors.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21813-error-intersection-throw-rethrow.ts": {
+   "order": [
+    "<repo>/tests/corpus/21813-error-intersection-throw-rethrow.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21814-error-intersection-promise-reject.ts": {
+   "order": [
+    "<repo>/tests/corpus/21814-error-intersection-promise-reject.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21815-error-intersection-optional-chain.ts": {
+   "order": [
+    "<repo>/tests/corpus/21815-error-intersection-optional-chain.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21816-error-intersection-function-parameter.ts": {
+   "order": [
+    "<repo>/tests/corpus/21816-error-intersection-function-parameter.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21817-error-intersection-write-then-read-loop.ts": {
+   "order": [
+    "<repo>/tests/corpus/21817-error-intersection-write-then-read-loop.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21818-error-intersection-stack-name-read.ts": {
+   "order": [
+    "<repo>/tests/corpus/21818-error-intersection-stack-name-read.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21819-error-intersection-dyn-keyed-write.ts": {
+   "order": [
+    "<repo>/tests/corpus/21819-error-intersection-dyn-keyed-write.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2190-new-object-and-string-wrappers.ts": {
    "order": [
     "<repo>/tests/corpus/2190-new-object-and-string-wrappers.ts"
