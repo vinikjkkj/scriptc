@@ -12782,7 +12782,7 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
     // need the flattening walk `dynCall`'s spread arm has, and no
     // measured site spells it.
     if (
-      isJsSourceFile(expr.getSourceFile()) &&
+      (isJsSourceFile(expr.getSourceFile()) || (L.typeOf(expr.expression).flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0) &&
       !(expr.arguments ?? []).some((a) => ts.isSpreadElement(a))
     ) {
       // Two spellings reach the same runtime value. A receiver that
