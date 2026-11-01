@@ -1,14 +1,13 @@
 // TypeError & { code: string }: a refinement member named like the errno slot, written and read.
-function fail(): TypeError & { code: string } {
-  const t = new TypeError('bad') as TypeError & { code: string };
-  t.code = 'E_BAD';
-  return t;
+// The catch-side read is admitted because the guard that narrows the value checks the member.
+function isCoded(e: unknown): e is TypeError & { code: string } {
+  return e instanceof TypeError && typeof (e as { code?: unknown }).code === 'string';
 }
-const t = fail();
+const t = new TypeError('bad') as TypeError & { code: string };
+t.code = 'E_BAD';
 console.log(t.message, t.name, t.code);
 try {
-  throw fail();
+  throw t;
 } catch (e) {
-  const err = e as TypeError & { code: string };
-  console.log(err.code, err instanceof TypeError, err.message);
+  if (isCoded(e)) console.log(e.code, e instanceof TypeError, e.message);
 }

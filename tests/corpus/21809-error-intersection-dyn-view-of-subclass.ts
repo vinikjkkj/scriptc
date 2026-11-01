@@ -11,4 +11,5 @@ console.log(d.message, d.errors.length);
 const n: any = new Error('plain');
 n.extra = 3;
 const typed = n as Error & { extra: number };
+typed.extra = 3;
 console.log(typed.extra, d.errors[0].message);
