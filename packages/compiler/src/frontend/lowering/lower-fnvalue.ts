@@ -926,9 +926,11 @@ export function dynBuiltinFnValueOf(L: Lowerer, key: string, loc: SrcLoc): IrExp
   if (!L.liftedFns.some((f) => f.name === fnName)) {
     const params = Array.from({ length: sig.arity }, (_, i) => ({ localId: `p${i}.0`, name: `p${i}`, type: DYN }));
     const args: IrExpr[] = params.map((p) => ({ kind: "varRef", localId: p.localId, type: DYN, loc }));
+    const primitiveCtor = key === "String" || key === "Number" || key === "Boolean";
     L.liftedFns.push({
       name: fnName,
-      valueCode: NATIVE_NOPROTO_CODE,
+      // String / Number / Boolean are constructors (a wrapper object); the rest are natives.
+      ...(primitiveCtor ? {} : { valueCode: NATIVE_NOPROTO_CODE, srcText: nativeFnText(key) }),
       params,
       returnType: sig.ret,
       locals: params.map((p) => ({ id: p.localId, name: p.name, type: DYN, mutable: false })),
