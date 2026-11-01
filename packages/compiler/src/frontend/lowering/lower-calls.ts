@@ -5408,7 +5408,9 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       // stored-member path below (the runtime-arity lane owns them).
       if (
         ts.isPropertyAccessExpression(expr.expression) &&
-        !expr.expression.questionDotToken &&
+        // `recv?.m(args)` inside an optional chain whose receiver is bound
+        // (the chain has already tested nullish): the callee's `?.` is spent.
+        (!expr.expression.questionDotToken || L.chainHandled.has(expr.expression)) &&
         !expr.questionDotToken &&
         !expr.arguments.some((a) => ts.isSpreadElement(a))
       ) {
@@ -6974,7 +6976,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
  * the dyn array and validated-extracts the survivors into the element type
  * the checker committed the result to. Null when the receiver isn't a dyn
  * value or the method isn't claimable (the method-call fence stays). */
-  function lowerDynReceiverMethodCall(L: Lowerer, call: ts.CallExpression,
+  export function lowerDynReceiverMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (L.chainBlocked(call, access)) return null;
     // Only checker-untyped receivers: `any`/`unknown`, or the `any[]` an
