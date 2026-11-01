@@ -37,6 +37,7 @@ import { EXE_SUFFIX } from "./exe.js";
 import { tapPhase } from "../../packages/compiler/src/phase-tap.js";
 import { holdScratch } from "./scratch-lease.mjs";
 import { normalizeWarningPid } from "./stderr-pid.js";
+import { posixOnlySkipReason } from "./posix-only-corpus.js";
 
 const repoRoot = join(import.meta.dirname, "../..");
 const corpusDir = join(repoRoot, "tests/corpus");
@@ -332,12 +333,21 @@ export function defineLlvmDifferentialSuite(part = 1, parts = 1): void {
   console.log(`corpus programs selected in this job: ${files.length} (llvm-differential${shardSuffix()}${partSuffix(part, parts)})`);
   const claimed: string[] = [];
   const refused: string[] = [];
+  const platformSkipped: string[] = [];
   const refusalKinds = new Map<string, number>();
   const refusalPrograms = new Map<string, string[]>();
   describe(`llvm differential corpus (${files.length} programs${sanitize ? ", sanitized" : ""}${shardSuffix()}${partSuffix(part, parts)})`, () => {
     test.for(files.map((f) => [f.slice(corpusDir.length + 1), f] as const))(
       "%s",
       async ([rel, file], ctx) => {
+        // Posix-only programs (signal delivery to this process) have no
+        // Windows meaning: skipped on win32 before any build, and counted in
+        // the ledger as platform-skipped (the accounting test sums all three).
+        const platformSkip = posixOnlySkipReason(rel);
+        if (platformSkip) {
+          platformSkipped.push(rel);
+          ctx.skip(platformSkip);
+        }
         const llvmRes = await build(file, "llvm");
         if (!llvmRes.ok) {
           // Recorded FIRST, before any assertion: the tier ledger must
@@ -487,7 +497,7 @@ export function defineLlvmDifferentialSuite(part = 1, parts = 1): void {
     // either was recorded, and the count printed below would understate the
     // refusals rather than say so.
     test("tier accounting: claimed + refused covers every program", () => {
-      expect(claimed.length + refused.length).toBe(files.length);
+      expect(claimed.length + refused.length + platformSkipped.length).toBe(files.length);
       expect(claimed.filter((r) => refused.includes(r))).toEqual([]);
     });
 
