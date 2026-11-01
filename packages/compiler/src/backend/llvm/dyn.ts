@@ -555,6 +555,8 @@ export class LlDyn {
         return "Map";
       case "set":
         return "Set";
+      case "promise":
+        return "Promise";
       default: {
         const h = DYN_HANDLE_KINDS.get(t.kind);
         if (h) return h.cls;
@@ -1244,6 +1246,17 @@ export class LlDyn {
       case "dyn": {
         // An `unknown` slot: the checked-dynamic tree subtree passes through as-is.
         const r = this.retainDyn(B, "%d");
+        B.terminate(`ret ptr ${r}`);
+        break;
+      }
+      case "promise": {
+        // `u as Promise<unknown>`: the SAME ScrPromise back, retained, through
+        // the runtime's kind check and path TypeError (the C twin's arm).
+        if (t.inner.kind !== "dyn") throw new Error(`emitter bug: dynCheck of promise<${t.inner.kind}>`);
+        softPre("dapr", () => kindEq(DK.PROMISE));
+        host.declare(`declare ptr @scr_dyn_promise_unbox(ptr, ptr, ptr)`);
+        const r = B.tmp();
+        B.line(`${r} = call ptr @scr_dyn_promise_unbox(ptr %d, ptr %path, ptr ${want})`);
         B.terminate(`ret ptr ${r}`);
         break;
       }

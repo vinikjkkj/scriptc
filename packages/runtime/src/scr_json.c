@@ -4478,6 +4478,17 @@ ScrBigInt *scr_dyn_big_of(const ScrDyn *d) {
   return d != NULL && d->kind == SCR_DYN_BIG ? d->v.big : NULL;
 }
 
+/* `u as Promise<unknown>` (the dyn→Promise<T> edge's checked read): the
+ * SAME ScrPromise back, retained (+1), so identity survives the crossing.
+ * A non-promise kind throws the path-annotated dynCheck TypeError. */
+ScrPromise *scr_dyn_promise_unbox(const ScrDyn *d, const ScrDynPath *path, const char *want) {
+  if (d == NULL || d->kind != SCR_DYN_PROMISE) {
+    scr_dyn_check_fail(path, want, d);
+    return NULL;
+  }
+  return scr_promise_retain(d->v.promise);
+}
+
 ScrBigInt *scr_dyn_big_unbox(const ScrDyn *d, const ScrDynPath *path, const char *want) {
   if (d == NULL || d->kind != SCR_DYN_BIG) {
     scr_dyn_check_fail(path, want, d);

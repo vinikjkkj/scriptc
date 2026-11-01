@@ -4431,7 +4431,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         return {
           kind: "dynCall",
           callee: { kind: "dynKeyGet", key: { kind: "strLit", value: expr.expression.name.text, type: STRING, loc }, optional: true, value: liveBagRef(L, ld, loc), type: DYN, loc },
-          calleeName: expr.expression.getText(),
+          calleeName: v8CallSite(expr.expression),
           args: expr.arguments.map((a) => L.lowerExprExpecting(a, DYN)),
           type: DYN,
           loc,
@@ -4508,7 +4508,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         return {
           kind: "dynCall",
           callee: member,
-          calleeName: expr.expression.getText(),
+          calleeName: v8CallSite(expr.expression),
           args: expr.arguments.map((a) => L.lowerExprExpecting(a, DYN)),
           type: DYN,
           loc,
@@ -5419,7 +5419,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
             kind: "dynInvoke",
             recv: recvProbe,
             method: expr.expression.name.text,
-            calleeName: expr.expression.getText(),
+            calleeName: v8CallSite(expr.expression),
             args,
             type: DYN,
             loc,
@@ -5434,7 +5434,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       if (callee.type.kind === "dyn") {
         const args = expr.arguments.map((a) => L.lowerExprExpecting(a, DYN));
         const calleeName = ts.isPropertyAccessExpression(expr.expression)
-          ? expr.expression.getText()
+          ? v8CallSite(expr.expression)
           : ts.isIdentifier(expr.expression)
             ? expr.expression.text
             : "value";
@@ -6382,7 +6382,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
             kind: "dynInvoke",
             recv: boxed,
             method: expr.expression.name.text,
-            calleeName: expr.expression.getText(),
+            calleeName: v8CallSite(expr.expression),
             args,
             type: DYN,
             loc,
@@ -6666,7 +6666,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       }
       const args = expr.arguments.map((a) => L.lowerExprExpecting(a, DYN));
       const calleeName = ts.isPropertyAccessExpression(expr.expression) || ts.isElementAccessExpression(expr.expression)
-        ? expr.expression.getText()
+        ? v8CallSite(expr.expression)
         : ts.isIdentifier(expr.expression)
           ? expr.expression.text
           : "value";
@@ -6814,7 +6814,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     if (callee.type.kind !== "dyn" && callee.type.kind !== "func" && callee.type.kind !== "jsval") return null;
     const calleeName =
       ts.isPropertyAccessExpression(expr.expression) || ts.isElementAccessExpression(expr.expression)
-        ? expr.expression.getText()
+        ? v8CallSite(expr.expression)
         : ts.isIdentifier(expr.expression)
           ? expr.expression.text
           : "value";
@@ -6954,7 +6954,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       // present -- the runtime reads the key, not this string.
       method: access.argumentExpression.getText(),
       methodKey: key,
-      calleeName: access.getText(),
+      calleeName: v8CallSite(access),
       args,
       type: DYN,
       loc: locOf(call),
@@ -7089,7 +7089,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
           kind: "dynInvoke",
           recv,
           method: "toString",
-          calleeName: access.getText(),
+          calleeName: v8CallSite(access),
           args: [L.lowerExprExpecting(call.arguments[0]!, DYN)],
           type: DYN,
           loc: locOf(call),
@@ -7182,7 +7182,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         kind: "dynInvoke",
         recv,
         method: access.name.text,
-        calleeName: access.getText(),
+        calleeName: v8CallSite(access),
         args,
         type: DYN,
         loc: locOf(call),
@@ -7225,7 +7225,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         kind: "dynInvoke",
         recv,
         method: access.name.text,
-        calleeName: access.getText(),
+        calleeName: v8CallSite(access),
         args: [],
         type: DYN,
         loc: locOf(call),
@@ -7265,7 +7265,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       kind: "dynInvoke",
       recv,
       method: access.name.text,
-      calleeName: access.getText(),
+      calleeName: v8CallSite(access),
       args,
       type: DYN,
       loc,
@@ -7388,7 +7388,7 @@ function lowerDynEmitterReceiverCall(L: Lowerer, call: ts.CallExpression,
       kind: "dynInvoke",
       recv: ref,
       method: member,
-      calleeName: access.getText(),
+      calleeName: v8CallSite(access),
       args: lowerDynCallArgs(L, call.arguments),
       type: DYN,
       loc,
@@ -7431,7 +7431,7 @@ function lowerDynEmitterReceiverCall(L: Lowerer, call: ts.CallExpression,
     kind: "dynInvoke",
     recv: ref,
     method: member,
-    calleeName: access.getText(),
+    calleeName: v8CallSite(access),
     args: dynArmArgs(nameRef),
     type: DYN,
     loc,
@@ -10320,6 +10320,19 @@ export function reconcileOverloadMemberDyn(L: Lowerer, expr: ts.CallExpression, 
     }
   }
 
+/** The spelling V8 gives a callee in its "x is not a function" TypeError:
+ * an argument list prints as `(...)`, so `id(5).then` reads `id(...).then`
+ * (the source text would carry the literal arguments). Chains V8 prints as
+ * plain names and member reads are rebuilt; any other shape keeps its text. */
+export function v8CallSite(e: ts.Expression): string {
+  if (ts.isParenthesizedExpression(e)) return v8CallSite(e.expression);
+  if (ts.isIdentifier(e)) return e.text;
+  if (e.kind === ts.SyntaxKind.ThisKeyword) return "this";
+  if (ts.isPropertyAccessExpression(e)) return `${v8CallSite(e.expression)}${e.questionDotToken ? "?." : "."}${e.name.text}`;
+  if (ts.isCallExpression(e)) return `${v8CallSite(e.expression)}(...)`;
+  return e.getText();
+}
+
 export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     // chainBlocked, not a raw token test. A raw test declines the
@@ -10391,6 +10404,32 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     }
     // The receiver evaluates FIRST, in the enclosing function, like JS.
     let receiver = L.lowerExpr(access.expression);
+    // A CHECKED-DYNAMIC receiver: the checker types the call a Promise, but
+    // the value LOWERED as unknown (an untyped call's result, ioredis's
+    // pipeline exec / tracing wrapper). The promise methods then dispatch
+    // dynamically: dynInvoke's PROMISE arm answers then/catch/finally through
+    // scr_dyn_promise_then (microtask-exact), and a receiver that is not a
+    // thenable takes the same "<spelling> is not a function" TypeError every
+    // dynamic method call takes. The result converts into the call's mapped
+    // promise type through the dyn→Promise edge (coerceToExpected).
+    if (receiver.type.kind === "dyn") {
+      if (call.arguments.some((x) => ts.isSpreadElement(x))) {
+        L.unsupported("SC1090", call, `spread arguments to '.${member}' on a checked-dynamic promise`);
+      }
+      const dynArgs = call.arguments.map((x) => L.lowerExprExpecting(x, DYN));
+      const dynCall: IrExpr = {
+        kind: "dynInvoke",
+        recv: receiver,
+        method: member,
+        calleeName: v8CallSite(access),
+        args: dynArgs,
+        type: DYN,
+        loc,
+      };
+      const resT = L.mapTypeOf(callTs);
+      if (resT?.kind === "promise") return L.coerceToExpected(dynCall, resT);
+      return dynCall;
+    }
     // A PACKAGE-returned promise lowers as an island value (jsval): the
     // promise lives in the engine, so bridge it — a static promise the
     // engine promise settles (fulfillment = the retained handle or void,
@@ -13794,7 +13833,7 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverr
         L.unsupported("SC1090", call, "spread arguments in calls through 'unknown' values");
       }
       const args = call.arguments.map((a) => L.lowerExprExpecting(a, DYN));
-      return { kind: "dynCall", callee, calleeName: access.getText(), args, type: DYN, loc: locOf(call) };
+      return { kind: "dynCall", callee, calleeName: v8CallSite(access), args, type: DYN, loc: locOf(call) };
     }
     if (callee.type.kind !== "func") L.badType(access, L.typeOf(access));
     const params = callee.type.params;
@@ -15323,7 +15362,7 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverr
                 kind: "dynInvoke",
                 recv: { kind: "dynFrom", value: fn, type: DYN, loc },
                 method: "apply",
-                calleeName: access.getText(),
+                calleeName: v8CallSite(access),
                 args: [thisArg, pack],
                 type: DYN,
                 loc,
@@ -15620,7 +15659,7 @@ function lowerPrototypeGenericMethodCall(L: Lowerer, call: ts.CallExpression, ac
               return dynCallWithThis(L, recv, callee, args, access.getText(), locOf(call));
             }
           }
-          return { kind: "dynCall", callee, calleeName: access.getText(), args, type: DYN, loc: locOf(call) };
+          return { kind: "dynCall", callee, calleeName: v8CallSite(access), args, type: DYN, loc: locOf(call) };
         }
       }
       return null;
@@ -16409,7 +16448,7 @@ function bufOnlyDynCall(L: Lowerer, call: ts.CallExpression, access: ts.Property
     kind: "dynInvoke",
     recv: { kind: "dynFrom", value: recv, type: DYN, loc },
     method: m,
-    calleeName: access.getText(),
+    calleeName: v8CallSite(access),
     args: call.arguments.map((x) => L.lowerExprExpecting(x, DYN)),
     type: DYN,
     loc,
