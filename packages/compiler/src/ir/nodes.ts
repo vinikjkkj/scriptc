@@ -5735,6 +5735,16 @@ export type IrLibFn =
    * creates an ordinary enumerable property, and only the constructor
    * option is hidden. Never throws. */
   | "error.setCause"
+  /** `super(message, options)` / `new Error(message, options)` with a
+   * NON-literal options value (a dyn box): InstallErrorCause (ES2022) at
+   * run time. Borrowed receiver and dyn options; scr_error_install_options
+   * does the [[HasProperty]] test, the single [[Get]] of `cause`, and the
+   * own non-enumerable install. */
+  | "error.installOptions"
+  /** The same install for an options value whose static type REQUIRES a
+   * `cause` member: present by type, so installed unconditionally
+   * (scr_error_install_required_cause). */
+  | "error.installRequiredCause"
   /** `new DOMException(message?, nameOrOptions?)` (scr_error.c): both args
    * are borrowed dyn values (the lowering passes the dyn undefined for an
    * absent argument, so WebIDL's optionality lives in one place). The
@@ -14280,4 +14290,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // target-dispatching one was not, so the same throw was catchable
   // through one spelling and swallowed through the other.
   "url.pathToFileURL",
+  // error.installOptions: InstallErrorCause reads options.cause ([[Get]]), and a
+  // getter that throws leaves its exception pending for the construction.
+  "error.installOptions",
+  "error.installRequiredCause",
 ]);

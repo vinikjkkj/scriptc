@@ -10130,7 +10130,15 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
               : L.completeArgs(superCall.arguments, base.ctorParams, locOf(stmt), stmt);
         if (causeOpts !== null) out.push(...causeOpts.effects);
         out.push(L.superCallStmt(info, thisLocal, args, locOf(stmt)));
-        if (causeOpts !== null && causeOpts.cause !== null) {
+        if (causeOpts !== null && causeOpts.options !== null) {
+          const sloc = locOf(stmt);
+          const selfRef: IrExpr = { kind: "varRef", localId: thisLocal.id, type: { kind: "object", className: info.def.name }, loc: sloc };
+          out.push({
+            kind: "exprStmt",
+            expr: { kind: "libCall", fn: causeOpts.options.fn, args: [L.upcastTo(selfRef, "%Error"), causeOpts.options.value], type: VOID, loc: sloc },
+            loc: sloc,
+          });
+        } else if (causeOpts !== null && causeOpts.cause !== null) {
           const sloc = locOf(stmt);
           const selfRef: IrExpr = { kind: "varRef", localId: thisLocal.id, type: { kind: "object", className: info.def.name }, loc: sloc };
           out.push({
@@ -10480,14 +10488,34 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
     L: Lowerer,
     args: readonly ts.Expression[],
     blame: ts.Node,
-  ): { effects: IrStmt[]; cause: IrExpr | null } | null {
+  ): { effects: IrStmt[]; cause: IrExpr | null; options: { value: IrExpr; fn: "error.installOptions" | "error.installRequiredCause" } | null } | null {
     if (args.length < 2) return null;
     if (args.length > 2) L.unsupported("SC1090", args[2]!, "Error constructor with more than two arguments");
     let opts: ts.Expression = args[1]!;
     while (ts.isParenthesizedExpression(opts) || ts.isAsExpression(opts) || ts.isSatisfiesExpression(opts)) opts = opts.expression;
-    if (ts.isIdentifier(opts) && opts.text === "undefined") return { effects: [], cause: null };
+    if (ts.isIdentifier(opts) && opts.text === "undefined") return { effects: [], cause: null, options: null };
     if (!ts.isObjectLiteralExpression(opts)) {
-      L.unsupported("SC1090", args[1] ?? blame, "Error constructor options ('cause') other than an object literal");
+      // Any other options value (a variable, a parameter, a call, a
+      // record-typed or dyn value): its runtime [[HasProperty]] / [[Get]]
+      // decide the cause (scr_error_install_options). The value is boxed
+      // to the dyn tree once, here, and installed after the construction.
+      const v = L.lowerExpr(args[1]!);
+      if (v.kind === "unitLit" && (v.unit === "undefined" || v.unit === "null")) return { effects: [], cause: null, options: null };
+      const boxed = L.coerceToExpected(v, DYN);
+      const h = L.declareHiddenLocal("%errOpts", DYN);
+      // A `cause` member the STATIC type requires is present whatever the box
+      // holds (the box can drop an undefined-valued member); otherwise the
+      // run-time presence test decides.
+      const causeSym = L.checker.getPropertyOfType(L.typeOf(args[1]!), "cause");
+      const requiredCause = causeSym !== undefined && (causeSym.flags & ts.SymbolFlags.Optional) === 0;
+      return {
+        effects: [{ kind: "varDecl", localId: h.id, init: boxed, loc: locOf(args[1]!) }],
+        cause: null,
+        options: {
+          value: { kind: "varRef", localId: h.id, type: DYN, loc: locOf(args[1]!) },
+          fn: requiredCause ? "error.installRequiredCause" : "error.installOptions",
+        },
+      };
     }
     const effects: IrStmt[] = [];
     let cause: IrExpr | null = null;
@@ -10513,7 +10541,7 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
       }
     }
     if (causeHolder !== null) cause = { kind: "varRef", localId: causeHolder.id, type: DYN, loc: locOf(opts) };
-    return { effects, cause };
+    return { effects, cause, options: null };
   }
 
 /** `new Error(...)`/`Error(...)` result with its options' own `cause`
@@ -10529,11 +10557,28 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
     const c = errorOptionsCause(L, args, blame);
     if (c === null) return made;
     const loc = made.loc;
-    if (c.cause === null) {
+    if (c.cause === null && c.options === null) {
       return c.effects.length === 0 ? made : { kind: "seqExpr", stmts: c.effects, result: made, type: made.type, loc };
+    }
+    if (c.options !== null) {
+      // A non-literal options value: the install reads it at run time.
+      const h = L.declareHiddenLocal("%errNew", made.type);
+      const ref: IrExpr = { kind: "varRef", localId: h.id, type: made.type, loc };
+      const stmts: IrStmt[] = [
+        ...c.effects,
+        { kind: "varDecl", localId: h.id, init: made, loc },
+        {
+          kind: "exprStmt",
+          expr: { kind: "libCall", fn: c.options.fn, args: [L.upcastTo(ref, "%Error"), c.options.value], type: VOID, loc },
+          loc,
+        },
+      ];
+      return { kind: "seqExpr", stmts, result: ref, type: made.type, loc };
     }
     // Node evaluates the message before the options; both are lowered
     // already, the construction itself runs after the options' effects.
+    // (Here c.options is null, so the literal path always carries a cause.)
+    const cause: IrExpr = c.cause!;
     const h = L.declareHiddenLocal("%errNew", made.type);
     const ref: IrExpr = { kind: "varRef", localId: h.id, type: made.type, loc };
     const stmts: IrStmt[] = [
@@ -10544,7 +10589,7 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
         expr: {
           kind: "libCall",
           fn: "error.setCause",
-          args: [L.upcastTo(ref, "%Error"), c.cause],
+          args: [L.upcastTo(ref, "%Error"), cause],
           type: VOID,
           loc,
         },
