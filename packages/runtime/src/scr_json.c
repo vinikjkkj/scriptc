@@ -13867,6 +13867,64 @@ void scr_error_set_cause(ScrError *e, ScrDyn *value) {
   scr_dyn_obj_define_hidden_data(e->props, "cause", 5, value, true, true);
 }
 
+/* ES2022 InstallErrorCause(O, options) for an options value known only at
+ * run time (both args borrowed). Node: nothing unless options is an Object
+ * (a function counts; null does not), and then only when HasProperty(options,
+ * "cause") -- own OR inherited, `cause: undefined` included. The cause is
+ * READ once ([[Get]]: a getter runs here) and installed as the own
+ * non-enumerable, writable, configurable data property. A getter that threw
+ * leaves its exception pending (NULL from key_get): nothing is installed and
+ * the construction unwinds with it. */
+/* The install for an options value whose STATIC type REQUIRES a `cause` member
+ * (`{ cause: undefined }`, `{ cause: Error }`): the member is present, so the
+ * cause is installed unconditionally with the value Get reads. The checked-
+ * dynamic box can drop an undefined-valued member, so presence cannot be asked
+ * of it; the static type already decided it. A non-object box takes the
+ * general path. */
+void scr_error_install_required_cause(ScrError *e, ScrDyn *options) {
+  if (options == NULL || options->kind != SCR_DYN_OBJ) {
+    scr_error_install_options(e, options);
+    return;
+  }
+  ScrDyn *c = scr_dyn_obj_key_get(options, "cause", 5); /* +1: undefined when absent; NULL with a pending throw */
+  if (c == NULL) return;
+  scr_error_set_cause(e, c); /* borrows, see above */
+  scr_dyn_release(c);
+}
+
+void scr_error_install_options(ScrError *e, ScrDyn *options) {
+  if (options == NULL || options->kind == SCR_DYN_NULL) return;
+  if (!scr_dyn_typeof_is_object(options) &&
+      strcmp(scr_dyn_typeof_native(options), "function") != 0) return;
+  /* A function keeps its own properties in the closure's table, which the
+   * object walk does not read: presence and [[Get]] go through the FUNC
+   * accessors (the same pair the keyed read uses). */
+  if (options->kind == SCR_DYN_ARR) {
+    /* An array's named properties live in its extras object (the same
+     * table `"k" in arr` and arr.k read). */
+    ScrDyn *ax = scr_dyn_arr_extras(options);
+    if (ax == NULL || !scr_dyn_obj_key_present(ax, "cause", 5)) return;
+    ScrDyn *ac = scr_dyn_obj_key_get(ax, "cause", 5); /* +1, NULL on a pending throw */
+    if (ac == NULL) return;
+    scr_error_set_cause(e, ac); /* borrows, see above */
+    scr_dyn_release(ac);
+    return;
+  }
+  if (options->kind == SCR_DYN_FUNC) {
+    if (!scr_dyn_fn_has(options, "cause", 5)) return;
+    ScrDyn *fc = scr_dyn_fn_get(options, "cause", 5); /* +1, NULL on a pending throw */
+    if (fc == NULL) return;
+    scr_error_set_cause(e, fc); /* borrows, see above */
+    scr_dyn_release(fc);
+    return;
+  }
+  if (!scr_dyn_obj_key_present(options, "cause", 5)) return;
+  ScrDyn *c = scr_dyn_obj_key_get(options, "cause", 5); /* +1, NULL on a pending throw */
+  if (c == NULL) return;
+  scr_error_set_cause(e, c); /* borrows, see above */
+  scr_dyn_release(c);
+}
+
 ScrDyn *scr_error_prop_get(ScrError *e, ScrStr *key) {
   if (e->props != NULL && e->props->kind == SCR_DYN_OBJ) {
     /* own data, hidden data (the constructor's `cause`) and accessors */
