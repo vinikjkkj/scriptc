@@ -23269,6 +23269,18 @@
     "<repo>/tests/corpus/22510-cause-options-no-new.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/22501-cause-options-empty-and-undefined-member.ts": {
+   "order": [
+    "<repo>/tests/corpus/22501-cause-options-empty-and-undefined-member.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/22511-cause-options-nested-inspect.ts": {
+   "order": [
+    "<repo>/tests/corpus/22511-cause-options-nested-inspect.ts"
+   ],
+   "diags": []
   }
  }
 }
