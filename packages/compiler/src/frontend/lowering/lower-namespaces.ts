@@ -45,6 +45,7 @@ import { nearestPackageTypeOf, nearestPkgJsonPath } from "../resolve.js";
 import { F64, IrExpr, IrStmt, IrType, STRING } from "../../ir/nodes.js";
 import { normalize as nativePath } from "node:path";
 import { ambientBufferProven } from "../buffer-refinement.js";
+import { canonicalBuiltinModule } from "../shared.js";
 
 /** True when this module declaration produces NO runtime construct at all:
  * ambient (`declare namespace/module`, `declare global`, string-named
@@ -1220,6 +1221,11 @@ export function lowerImportEquals(L: Lowerer, stmt: ts.ImportEqualsDeclaration):
   // A declaration file's alias is type surface only: no statement runs.
   if (stmt.getSourceFile().isDeclarationFile) return null;
   if (ts.isExternalModuleReference(stmt.moduleReference)) {
+    // The runtime form of a supported builtin: the binding is the module
+    // object (see builtinNamespaceModuleOf / the default-import twin); the
+    // require itself has no statement effect on a builtin, so nothing emits.
+    const spec = ts.isStringLiteral(stmt.moduleReference.expression) ? stmt.moduleReference.expression.text : null;
+    if (spec !== null && canonicalBuiltinModule(spec) !== null) return null;
     L.unsupported("SC1013", stmt, "import = require(...) assignments");
   }
   // A BARE-identifier entity target (`import g = f` inside a block):

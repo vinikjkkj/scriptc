@@ -1024,6 +1024,16 @@ export function isExportEqualsModule(sf: ts.SourceFile): boolean {
  * under a package that is not "type": "module" is a CommonJS module whose
  * `export =` is module.exports. Everywhere else (the repo's ESM tree, user
  * files) `export =` keeps main's refusals: SC0001 (TS1203) and SC1012. */
+/** `import X = require(m)` whose target is a SUPPORTED builtin module: the
+ * runtime form is the binding a default import of that module makes (see
+ * the import-equals gate in loadProgram). Any other target is not this form. */
+export function importEqualsBuiltinRuntime(stmt: ts.ImportEqualsDeclaration): boolean {
+  if (!ts.isExternalModuleReference(stmt.moduleReference)) return false;
+  const expr = stmt.moduleReference.expression;
+  if (!ts.isStringLiteral(expr)) return false;
+  return canonicalBuiltinModule(expr.text) !== null;
+}
+
 export function exportEqualsIsCjs(sf: ts.SourceFile): boolean {
   return /\.ts$/.test(sf.fileName) && !sf.isDeclarationFile &&
     isProvenanceSourceFile(sf.fileName) && nearestPackageTypeOf(sf.fileName) !== "module";
@@ -2828,6 +2838,19 @@ function preflight7(load: LoadResult): {
    * assignment (exportEqualsModuleView), so the forced module world's
    * objection is to a shape the lowering supports. Only .ts export=
    * statements are forgiven; the rest of the checker stays on. */
+  /* TS1202 "Import assignment cannot be used when targeting ECMAScript
+   * modules" fires on a TS `import x = require(m)` under the forced ESNext
+   * module world. Forgiven for the statements whose runtime form is the
+   * supported-builtin binding (importEqualsBuiltinRuntime) in .ts files;
+   * every other import-equals keeps the passthrough. */
+  const importEqualsTsSuppressed = (p: ts.Program, d: ts.Diagnostic): boolean => {
+    if (d.code !== 1202 || d.fileName === undefined || d.pos === undefined) return false;
+    const sf = p.getSourceFile(d.fileName);
+    if (sf === undefined || sf.isDeclarationFile || !/\.ts$/.test(sf.fileName)) return false;
+    return sf.statements.some(
+      (s) => ts.isImportEqualsDeclaration(s) && s.getStart(sf) === d.pos && importEqualsBuiltinRuntime(s),
+    );
+  };
   const exportEqualsTsSuppressed = (p: ts.Program, d: ts.Diagnostic): boolean => {
     if (d.code !== 1203 || d.fileName === undefined || d.pos === undefined) return false;
     const sf = p.getSourceFile(d.fileName);
@@ -2854,7 +2877,8 @@ function preflight7(load: LoadResult): {
         !namespaceCalleeSuppressed(p, d) &&
         !workspaceImplicitAnySuppressed(p, d) &&
         !jsdocTypeSuppressed(p, d, commentDup) &&
-        !exportEqualsTsSuppressed(p, d),
+        !exportEqualsTsSuppressed(p, d) &&
+        !importEqualsTsSuppressed(p, d),
     );
   };
 
@@ -3013,10 +3037,20 @@ function preflight7(load: LoadResult): {
         // only nested/namespace-internal sites can reach the lowering's
         // fence); `import type x = require(...)` is pure type surface and
         // lowers to nothing.
-        // A DECLARATION file's `import X = require(m)` emits nothing: it is
-        // a type-level alias of the module's export= (the checker resolves it;
+        // A DECLARATION file's `import X = require(m)` emits nothing: it is a
+        // type-level alias of the module's export= (the checker resolves it;
         // the JS twin supplies the value), so it is not a runtime gate.
-        if (ts.isExternalModuleReference(stmt.moduleReference) && !stmt.isTypeOnly && !sf.isDeclarationFile) {
+        // In a .ts program the RUNTIME form of a SUPPORTED BUILTIN module is
+        // the same binding a default import makes (Node's require returns the
+        // module object; `import X = require("events")` is the EventEmitter
+        // class, `import p = require("path")` the path namespace), so it
+        // lowers through that path; the TS1202 that tsc raises for it under
+        // the forced ESNext world is forgiven by errorsOf (importEqualsTsSuppressed).
+        // Every other external target (program, npm or unknown module) keeps SC1013.
+        if (
+          ts.isExternalModuleReference(stmt.moduleReference) && !stmt.isTypeOnly &&
+          !sf.isDeclarationFile && !importEqualsBuiltinRuntime(stmt)
+        ) {
           diags.push(unsupportedDiag("SC1013", locOf7(stmt), "import = require(...) assignments"));
         }
         continue;
