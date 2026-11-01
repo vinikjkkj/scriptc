@@ -6316,6 +6316,44 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         if (fnRecv.type.kind === "func") {
           return { kind: "libCall", fn: "fn.text", args: [fnRecv], type: STRING, loc: locOf(expr) };
         }
+        // A receiver the checker narrowed to its function arm but whose slot
+        // keeps the string | function union (`const x: string | Function = f;
+        // x.toString()`): the same arm-by-arm conversion as below.
+        const fnRecvDef = fnRecv.type.kind === "union" ? L.unions.get(fnRecv.type.unionId) : undefined;
+        if (fnRecvDef !== undefined && fnRecvDef.arms.every((a) => a.kind === "string" || a.kind === "func")) {
+          return L.ensureString(fnRecv, expr.expression.expression);
+        }
+      }
+      // A receiver that is a union of string and function arms (bson's
+      // `code: string | Function`, Code.toString) converts exactly as String(x)
+      // does: ensureString's union arm answers the string arm by itself and
+      // each function arm by its source text (fn.text). A union with any other
+      // arm falls through to the stdlib fence below, as before.
+      const strFnRecvTy = L.typeOf(expr.expression.expression);
+      // The checker may have narrowed the receiver to the global Function (an
+      // assignment narrows `string | Function` to its function constituent), so a
+      // single Function type is in as well. A receiver with no function constituent
+      // (plain string, string literal unions) keeps its own lowering.
+      const strFnConstituent = (p: ts.Type): boolean =>
+        L.checker.typeToString(p) === "Function" || L.checker.getCallSignatures(p).length > 0;
+      const strFnRecvOk = strFnRecvTy.isUnionType()
+        ? ts.constituentTypes(strFnRecvTy).every((p) => (p.flags & ts.TypeFlags.StringLike) !== 0 || strFnConstituent(p)) &&
+          ts.constituentTypes(strFnRecvTy).some(strFnConstituent)
+        : strFnConstituent(strFnRecvTy);
+      if (
+        ts.isPropertyAccessExpression(expr.expression) &&
+        expr.expression.name.text === "toString" &&
+        expr.arguments.length === 0 &&
+        strFnRecvOk
+      ) {
+        const strFnRecv = L.lowerExpr(expr.expression.expression);
+        const strFnDef = strFnRecv.type.kind === "union" ? L.unions.get(strFnRecv.type.unionId) : undefined;
+        if (
+          strFnRecv.type.kind === "string" || strFnRecv.type.kind === "func" ||
+          (strFnDef !== undefined && strFnDef.arms.every((a) => a.kind === "string" || a.kind === "func"))
+        ) {
+          return L.ensureString(strFnRecv, expr.expression.expression);
+        }
       }
       L.stdlibMemberFence(expr.expression);
       // The npm METHOD-CALL chokepoint: a call on a package-typed receiver
