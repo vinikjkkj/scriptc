@@ -4297,7 +4297,7 @@ export function topLevelJsStatementOf(expr: ts.Expression): ts.Statement | null 
  * named by its source text. That test is self-protecting — whichever of the
  * two spellings a scanner stored in `.text`, only the canonical one passes,
  * so the gate cannot mis-name a property however the literal was written. */
-function staticElementKey(
+export function staticElementKey(
   arg: ts.Expression,
 ): { node: ts.StringLiteral | ts.NumericLiteral; text: string } | null {
   if (ts.isStringLiteral(arg)) return { node: arg, text: arg.text };

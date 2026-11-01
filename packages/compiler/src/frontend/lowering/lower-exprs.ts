@@ -21,7 +21,7 @@ import { TIMER_GLOBAL_VALUE_NAMES, bigStaticHolderSlotFence, builtinFnValueOf, b
 import { lowerNavigatorProperty, requireFnValueOf, requireMemberFence, valuesCountdown, voidCountdown } from "./lower-builtins.js";
 import { funcObjectPropOf } from "./lower-fnprops.js";
 import { recordKeyReadRow, recordNarrowBridgeRow } from "./keyread-census.js";
-import { cjsClassExprWholeExportOf, cjsExportsGetterDefineOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
+import { cjsClassExprWholeExportOf, cjsExportsGetterDefineOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf, staticElementKey } from "../program.js";
 import { absentGlobalMemberValue, absentProcessMemberValue, absentRecordMemberValue, ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, objectStaticFnValueOf, stdlibExistenceTestOf, stringMethodFnValueOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf, stdlibHandleObjectTypeOf, stdlibHandleTypeOfAnswersObject, stdlibHandleDeclaresMember } from "./surfaces.js";
 import { UNSUPPORTED, assertionDropsMembersDiag, assertionOverflowsMembersDiag, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { PoisonError, dynUndefinedExpr, jsFuncValueNameOf, jsFuncValueSourceOf, neverTaintedJsType, nodeThrowExpr, own } from "./lowerer.js";
@@ -14619,10 +14619,64 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     return chain;
   }
 
+  /** `exports["key"]` (a static key) read as a VALUE in a CommonJS file: the member's own global, the storage the
+   * write `exports["key"] = …` registered (lower-modules registerExport keys the member by the string literal's symbol,
+   * or by the module's export-table symbol). Read the same way a bare `exports.key` member read is. Null for every
+   * other shape, and for a file whose export object is a record or a live bag (those answer their own reads). */
+  export function cjsElementExportRead(L: Lowerer, expr: ts.ElementAccessExpression, loc: SrcLoc): IrExpr | null {
+    if (expr.questionDotToken !== undefined) return null;
+    const recv = expr.expression;
+    if (!ts.isIdentifier(recv) || recv.text !== "exports" || L.resolveLocal(recv) !== null) return null;
+    const sf = expr.getSourceFile();
+    if (!isCjsJsFile(sf) || liveExportsOf(L, sf)) return null;
+    const key = staticElementKey(expr.argumentExpression);
+    if (key === null) return null;
+    // A file whose export object is a record answers a member the record holds through the record (the same
+    // read a bare `exports.key` makes); a key written only by an element-access statement is not a record member.
+    const rec = cjsExportRecordOf(L, sf);
+    if (rec !== null && cjsExportRecordField(rec, key.text) !== undefined) {
+      return rec.unsafeReads.has(expr) ? cjsExportRecordReadDyn(rec, key.text, expr) : cjsExportRecordRead(rec, key.text, expr);
+    }
+    const sym = L.checker.getSymbolAtLocation(key.node) ?? L.cjsModuleExportSymbol(sf, key.text);
+    if (sym === undefined || sym === null) return null;
+    let g = L.globalsBySymbol.get(sym) ?? null;
+    if (g === null) {
+      for (const d of L.checker.declarationsOf(sym)) {
+        const byDecl = L.globalsByDeclNode.get(d);
+        if (byDecl !== undefined) { g = byDecl; break; }
+      }
+    }
+    if (g === null) return null;
+    // A top-level read that runs at or before the member's first top-level write sees Node's undefined, which the
+    // member's global cannot hold (a zero value). Keep the refusal there; a read inside a function is the same
+    // residual the bare `exports.key` read has.
+    if (readBeforeFirstExportWrite(sf, key.text, expr)) return null;
+    return L.maybeNarrow({ kind: "varRef", localId: g.id, type: g.type, loc }, expr);
+  }
+
+  function readBeforeFirstExportWrite(sf: ts.SourceFile, name: string, node: ts.Node): boolean {
+    for (let p: ts.Node | undefined = node.parent; p !== undefined && !ts.isSourceFile(p); p = p.parent) {
+      if (ts.isFunctionLike(p)) return false;
+    }
+    let top: ts.Node = node;
+    while (top.parent !== undefined && !ts.isSourceFile(top.parent)) top = top.parent;
+    const at = sf.statements.indexOf(top as ts.Statement);
+    if (at < 0) return true;
+    for (let i = 0; i < sf.statements.length; i++) {
+      const cjs = cjsExportAssignmentOf(sf.statements[i]!);
+      if (cjs !== null && cjs.kind === "member" && cjs.text === name) return at <= i;
+    }
+    return true;
+  }
+
 /** `a[i]` reads. Only f64 indices into array receivers are modeled; JS
    * string-key element access (`a["length"]`) and string indexing (`s[0]`
    * typechecks against the lib's index signature; use .charAt) stay out. */
   export function lowerElementAccess(L: Lowerer, expr: ts.ElementAccessExpression): IrExpr {
+    {
+      const ev = cjsElementExportRead(L, expr, locOf(expr));
+      if (ev !== null) return ev;
+    }
     // STEP 2a: a read of a flagged number[] (hole-tracked, see hole-flag.ts)
     // answers the stored double; a hole or a miss reads Node's undefined.
     if (!expr.questionDotToken && isHoleFlaggedRef(L, expr.expression)) {

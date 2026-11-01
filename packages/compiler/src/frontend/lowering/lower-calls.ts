@@ -23,7 +23,7 @@ import { erasedUnionOfArms, genResultRecord, instantiatedConstraint, isGenericCa
 import { PoisonError, dynFallbackType, dynUndefinedExpr, fnValueCodeOfNode, importCallHandleType, jsFuncNameOf, jsFuncValueNameOf, jsFuncValueSourceOf, newFnCtx, nodeThrowExpr, staticFnCodeOf, boundCodeOf } from "./lowerer.js";
 import { pairedProtoClassOfValue, protoThisType } from "./proto-class-consume.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
-import { checkedArmBridge, lowerWebCryptoGetRandomValues, refuseUnloweredSubtleCall, refuseUnloweredWebCrypto, refuseWebCryptoDestructuredArgs, refuseWebCryptoOwnKeys, sameValueDynOperand, unboundMethodThunk, undefinedArmedInAnswer, lowerWebCryptoMemberCall } from "./lower-exprs.js";
+import { checkedArmBridge, lowerWebCryptoGetRandomValues, refuseUnloweredSubtleCall, refuseUnloweredWebCrypto, refuseWebCryptoDestructuredArgs, refuseWebCryptoOwnKeys, sameValueDynOperand, unboundMethodThunk, undefinedArmedInAnswer, lowerWebCryptoMemberCall, cjsElementExportRead } from "./lower-exprs.js";
 import { NARROW_FIRST, builtinFenceHintOf, builtinModuleFnOf, dynOwnNamesHelper } from "./surfaces.js";
 import { OBJECT_PROTOTYPE_METHODS } from "./lowerer.js";
 import { ffiBindingDiag, ffiSignatureDiag, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
@@ -4356,6 +4356,23 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     // A codec reaching a string sink (String, JSON, Object.prototype.toString, toString/join): refuse.
     refuseCodecCoercionCall(L, expr);
     const loc = locOf(expr);
+    // `exports["key"](args)` in a CommonJS file: the member's own storage (cjsElementExportRead) called through its
+    // function value, the same call `exports.key(args)` makes. A member that is not a function value keeps its refusal.
+    if (ts.isElementAccessExpression(expr.expression) && !expr.expression.questionDotToken && !expr.questionDotToken) {
+      const ecallee = cjsElementExportRead(L, expr.expression, loc);
+      if (ecallee !== null && ecallee.type.kind === "func") {
+        const params = ecallee.type.params;
+        const eargs = expr.arguments.map((a, i) => L.lowerArgExpecting(a, params[i]));
+        for (let i = eargs.length; i < params.length; i++) {
+          const absent = omittedArgFor(L, params[i]!, loc);
+          if (!absent) {
+            L.unsupported("SC1090", expr, "calls omitting a non-optional parameter of the callee's type");
+          }
+          eargs.push(absent);
+        }
+        return { kind: "callValue", callee: ecallee, args: eargs, type: ecallee.type.ret, loc };
+      }
+    }
     // `(0, mod_1.fn)(args)` on a builtin module namespace: the same lowering as
     // `mod_1.fn(args)`. The receiver is dropped on purpose (module functions are
     // plain functions in Node). An Object.prototype method reached this way is
