@@ -24,11 +24,11 @@
  * the claimed count print at the end — phase 2's queue.
  */
 import { createHash } from "node:crypto";
-import { globSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { globSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterAll, describe, expect, test } from "vitest";
-import ts5 from "typescript";
+import { oracleTextFor, publishOracle } from "./oracle-route.js";
 import { compile } from "@scriptc/compiler";
 import { corpusSlice, partSuffix, shardSuffix } from "./shard.js";
 import { oracleNote, runCaptured } from "./captured-run.js";
@@ -216,22 +216,10 @@ function wantsTscDecorators(file: string): boolean {
 }
 
 function nodeOracleFile(file: string): string {
-  if (!wantsTscDecorators(file)) return file;
   const src = readFileSync(file, "utf8");
-  const out = ts5.transpileModule(src, {
-    compilerOptions: { target: ts5.ScriptTarget.ES2022, module: ts5.ModuleKind.ESNext },
-    fileName: file,
-  }).outputText;
-  const key = createHash("sha256").update(ts5.version).update("\0").update(src).digest("hex").slice(0, 16);
-  const path = join(cacheDir, `dec-oracle-${key}.mjs`);
-  mkdirSync(cacheDir, { recursive: true });
-  // Atomic publish: concurrent suites (the other flavor's full run, or
-  // another lane over the same program) write this same content-keyed
-  // path; rename keeps readers from ever seeing a truncated oracle.
-  const tmp = `${path}.${process.pid}.tmp`;
-  writeFileSync(tmp, out);
-  renameSync(tmp, path);
-  return path;
+  const o = oracleTextFor(file, src, wantsTscDecorators(file));
+  if (o === null) return file;
+  return publishOracle(cacheDir, `${o.kind}-oracle-${o.key}.${o.ext}`, o.text);
 }
 
 function wantsNoDeprecation(file: string): boolean {

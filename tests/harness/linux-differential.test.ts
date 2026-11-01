@@ -38,11 +38,11 @@
  * to matching corpus/fixture names for triage. */
 import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, globSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, globSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
-import ts5 from "typescript";
+import { oracleTextFor, publishOracle } from "./oracle-route.js";
 import { compile } from "@scriptc/compiler";
 import { npmCases } from "./npm-cases.js";
 import { normalizeNodeTestOutput } from "./node-test-normalize.js";
@@ -104,22 +104,10 @@ function wantsTscDecorators(file: string): boolean {
  * programs) its deterministic ES2022 downlevel — differential.test.ts's
  * nodeOracleFile, byte for byte the same transform and cache key. */
 function nodeOracleFile(file: string): string {
-  if (!wantsTscDecorators(file)) return file;
   const src = readFileSync(file, "utf8");
-  const out = ts5.transpileModule(src, {
-    compilerOptions: { target: ts5.ScriptTarget.ES2022, module: ts5.ModuleKind.ESNext },
-    fileName: file,
-  }).outputText;
-  const key = createHash("sha256").update(ts5.version).update("\0").update(src).digest("hex").slice(0, 16);
-  const path = join(cacheDir, `dec-oracle-${key}.mjs`);
-  mkdirSync(cacheDir, { recursive: true });
-  // Atomic publish: concurrent suites (the other flavor's full run, or
-  // another lane over the same program) write this same content-keyed
-  // path; rename keeps readers from ever seeing a truncated oracle.
-  const tmp = `${path}.${process.pid}.tmp`;
-  writeFileSync(tmp, out);
-  renameSync(tmp, path);
-  return path;
+  const o = oracleTextFor(file, src, wantsTscDecorators(file));
+  if (o === null) return file;
+  return publishOracle(cacheDir, `${o.kind}-oracle-${o.key}.${o.ext}`, o.text);
 }
 
 /* Programs whose expected output depends on spawn EXEC-FAILURE errno
