@@ -14949,20 +14949,27 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverr
         // TypeScript types a bind with its partially applied signature, so the slot it lands in
         // decides: a contextual type that is checked-dynamic (`const f: any = g.bind(...)`, an
         // `any` member) takes the runtime bind.
-        const bindCtx = L.checker.getContextualType(call);
+        // `any` only, and only where the value is stored: a declaration or an assignment target
+        // typed any. An argument to an untyped parameter keeps the static path (a dyn function
+        // handed to a typed callee such as String.prototype.replace has no static form).
         const bindParent = call.parent;
-        // `any` only: an `unknown` slot (`x.bind(y) as unknown as T`) reads the bind as a value
-        // of the asserted type, which the static path answers.
-        const isDynTs = (t: ts.Type): boolean =>
-          (t.flags & ts.TypeFlags.Any) !== 0 ||
-          ((t.flags & ts.TypeFlags.Unknown) === 0 && L.mapTypeOf(t)?.kind === "dyn");
+        const isAnyTs = (t: ts.Type): boolean => (t.flags & ts.TypeFlags.Any) !== 0;
+        // An argument of a plain function call whose parameter is any (`register(1, f.bind(null, a))`
+        // with an untyped parameter) is stored by that callee, so it takes the runtime bind too.
+        // A method call on an any receiver (`s.replace(re, f.bind(...))`) keeps the static path.
+        const argOfPlainCall =
+          ts.isCallExpression(bindParent) && bindParent.arguments.includes(call) &&
+          ts.isIdentifier(bindParent.expression) && (() => {
+            const ctx = L.checker.getContextualType(call);
+            return ctx !== undefined && isAnyTs(ctx);
+          })();
         const dynSlot =
-          (bindCtx !== undefined && isDynTs(bindCtx)) ||
           (ts.isVariableDeclaration(bindParent) && bindParent.initializer === call &&
-            isDynTs(L.typeOf(bindParent.name))) ||
+            isAnyTs(L.typeOf(bindParent.name))) ||
           (ts.isBinaryExpression(bindParent) && bindParent.right === call &&
             bindParent.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
-            isDynTs(L.typeOf(bindParent.left)));
+            isAnyTs(L.typeOf(bindParent.left))) ||
+          argOfPlainCall;
         if (dynSlot && call.arguments.every((a) => !ts.isSpreadElement(a))) {
           const target = L.lowerExprExpecting(access.expression, DYN);
           const ops: IrExpr[] = call.arguments.map((a) => L.lowerExprExpecting(a, DYN));
