@@ -1016,7 +1016,12 @@ ScrStr *scr_insp_error(ScrError *e, double recurse, double depth) {
   }
   ib_char(&base, ']');
   ScrStr *base_str = ib_take(&base);
-  if (!has_code) return base_str;
+  /* The constructor's own non-enumerable `cause` (Node's formatError lists it
+   * after the enumerable keys, as `[cause]`), read as a value. */
+  ScrDyn *cause_v = NULL;
+  if (e->props != NULL && e->props->kind == SCR_DYN_OBJ && scr_dyn_obj_has_own_prop(e->props, "cause", 5))
+    cause_v = scr_dyn_obj_key_get(e->props, "cause", 5); /* +1; NULL only with a pending throw */
+  if (!has_code && cause_v == NULL) return base_str;
   scr_insp_begin(recurse + 1);
   if (has_ext) {
     InspBuf entry = {0};
@@ -1051,6 +1056,17 @@ ScrStr *scr_insp_error(ScrError *e, double recurse, double depth) {
       scr_insp_entry(entry_str, false);
       scr_str_release(entry_str);
     }
+  }
+  if (cause_v != NULL) {
+    InspBuf eb = {0};
+    ScrStr *val = scr_insp_dyn(cause_v, recurse + 1, depth);
+    ib_cstr(&eb, "[cause]: ");
+    ib_bytes(&eb, val->data, val->len);
+    scr_str_release(val);
+    ScrStr *entry = ib_take(&eb);
+    scr_insp_entry(entry, false);
+    scr_str_release(entry);
+    scr_dyn_release(cause_v);
   }
   ScrStr *b0 = scr_str_new("{", 1);
   ScrStr *b1 = scr_str_new("}", 1);
