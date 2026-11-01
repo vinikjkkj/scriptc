@@ -34,7 +34,7 @@ import { namespaceConditionalOf } from "./lower-nsvalue.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl, nodeRequireArgumentError, requireFnValueDeclType } from "./lower-builtins.js";
 import { lowerEnumDeclaration } from "./lower-enums.js";
 import { liveCompoundStmtOf, liveExportsOf, liveKeyOf, liveRecvBagOf, liveTableStmt, liveWriteBagOf, dynValueOf, orphanTableWriteOf, liveAccessorTargetOf } from "./cjs-live-exports.js";
-import { cjsExportsBagOf, cjsMemberOnlyInFunctions, ctorObjectGlobalValue, webCryptoGlobalDestructure, dynAssertionReceiver, errorExpandoReceiver, errorRefinementMember, lowerUndeclaredMemberWrite, isDynSafeReadWidth, isImmutablePrimitiveWidth, refuseUnloweredWebCryptoPattern, refuseUnloweredWebCryptoAssign, refuseWebCryptoIntrospection } from "./lower-exprs.js";
+import { cjsExportsBagOf, cjsMemberOnlyInFunctions, ctorObjectGlobalValue, webCryptoGlobalDestructure, dynAssertionReceiver, errorExpandoReceiver, errorRefinementMember, lowerObjectAssignErrorStatement, lowerUndeclaredMemberWrite, isDynSafeReadWidth, isImmutablePrimitiveWidth, refuseUnloweredWebCryptoPattern, refuseUnloweredWebCryptoAssign, refuseWebCryptoIntrospection } from "./lower-exprs.js";
 import { detachedThisWriteFirst, hoistDetachedWriteRhs, keyedAccessOverIndexSignature, localTakesWidenedKeyedRead, narrowBridgeUnion, seqExprSafeStmt, unionFieldReadAt, unitArmsOf, cjsExportAccessorWriteStmt, cjsExportSetterWrite } from "./lower-exprs.js";
 import { abstractPropertyDeclOf, aliasTypeofNarrows, checkedJsNumber, compoundCombine, unionNumericCompoundRead, writeTypeOf, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, isMatchSliceType, lowerGroupsProjection, matchResultNamedGroupsOf, probeLower, pureReemittable, symbolFieldInfo, tonumWhy } from "./lower-exprs.js";
 import { UNSUPPORTED, checkerPanicDiag, isCheckerPanic, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
@@ -1131,6 +1131,8 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
     if (ts.isExpressionStatement(stmt)) {
       const superStmt = lowerSuperFlagStatement(L, stmt);
       if (superStmt !== null) return superStmt;
+      const assignStmt = lowerObjectAssignErrorStatement(L, stmt.expression);
+      if (assignStmt !== null) return assignStmt;
       return L.lowerExprStatement(stmt.expression);
     }
     // `export default <expr>` (top-level only — preflight admitted it):
