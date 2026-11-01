@@ -34,7 +34,7 @@ import { namespaceConditionalOf } from "./lower-nsvalue.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl, nodeRequireArgumentError, requireFnValueDeclType } from "./lower-builtins.js";
 import { lowerEnumDeclaration } from "./lower-enums.js";
 import { liveCompoundStmtOf, liveExportsOf, liveKeyOf, liveRecvBagOf, liveTableStmt, liveWriteBagOf, dynValueOf, orphanTableWriteOf, liveAccessorTargetOf } from "./cjs-live-exports.js";
-import { cjsExportsBagOf, cjsMemberOnlyInFunctions, ctorObjectGlobalValue, webCryptoGlobalDestructure, dynAssertionReceiver, errorExpandoReceiver, lowerUndeclaredMemberWrite, isDynSafeReadWidth, isImmutablePrimitiveWidth, refuseUnloweredWebCryptoPattern, refuseUnloweredWebCryptoAssign, refuseWebCryptoIntrospection } from "./lower-exprs.js";
+import { cjsExportsBagOf, cjsMemberOnlyInFunctions, ctorObjectGlobalValue, webCryptoGlobalDestructure, dynAssertionReceiver, errorExpandoReceiver, errorRefinementMember, lowerUndeclaredMemberWrite, isDynSafeReadWidth, isImmutablePrimitiveWidth, refuseUnloweredWebCryptoPattern, refuseUnloweredWebCryptoAssign, refuseWebCryptoIntrospection } from "./lower-exprs.js";
 import { detachedThisWriteFirst, hoistDetachedWriteRhs, keyedAccessOverIndexSignature, localTakesWidenedKeyedRead, narrowBridgeUnion, seqExprSafeStmt, unionFieldReadAt, unitArmsOf, cjsExportAccessorWriteStmt, cjsExportSetterWrite } from "./lower-exprs.js";
 import { abstractPropertyDeclOf, aliasTypeofNarrows, checkedJsNumber, compoundCombine, unionNumericCompoundRead, writeTypeOf, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, isMatchSliceType, lowerGroupsProjection, matchResultNamedGroupsOf, probeLower, pureReemittable, symbolFieldInfo, tonumWhy } from "./lower-exprs.js";
 import { UNSUPPORTED, checkerPanicDiag, isCheckerPanic, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
@@ -7673,6 +7673,25 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
                 );
               }
             }
+          }
+          // A refinement member of an error-rooted intersection is written as a
+          // dyn KEY of the receiver (the storage a field of a user error class
+          // or the expando bag, whichever the object has).
+          if (errorRefinementMember(L, expr.left, expr.left.name.text) !== null) {
+            const loc = locOf(expr);
+            const recv = L.lowerExpr(expr.left.expression);
+            const value = L.lowerExprExpecting(expr.right, DYN);
+            return {
+              kind: "exprStmt",
+              expr: {
+                kind: "libCall",
+                fn: "dyn.keySet",
+                args: [L.coerceInto(expr.left.expression, recv, DYN), { kind: "strLit", value: expr.left.name.text, type: STRING, loc: locOf(expr.left.name) }, value],
+                type: VOID,
+                loc,
+              },
+              loc,
+            };
           }
           // `err.fatal = true` over an error object: the property no
           // declaration names is an own EXPANDO of the error (the dyn bag in

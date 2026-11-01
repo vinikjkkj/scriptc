@@ -19701,7 +19701,9 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
    * `cause`, `message` or a subclass field is not an expando). Null
    * otherwise, so the ordinary field paths keep their say. */
   export function errorExpandoReceiver(L: Lowerer, access: ts.PropertyAccessExpression | ts.ElementAccessExpression, name: string, forWrite = false): IrType | null {
-    if (access.questionDotToken !== undefined) return null;
+    // `a?.b` reaches here only as the chain's re-dispatch (chainHandled), with
+    // the receiver narrowed to its non-nullish arm by L.typeOf.
+    if (access.questionDotToken !== undefined && !L.chainHandled.has(access)) return null;
     const recvT = L.mapTypeOf(L.typeOf(access.expression));
     if (recvT?.kind !== "object") return null;
     let info = L.classes.get(recvT.className) ?? null;
@@ -19717,19 +19719,61 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     // declares `cause?: unknown`, the runtime keeps it as the error's own
     // property (the read has its own lowering).
     const causeWrite = forWrite && name === "cause" && ts.isPropertyAccessExpression(access) && L.isStdlibMember(access);
-    if (!stackWrite && !causeWrite && L.checker.getPropertyOfType(L.typeOf(access.expression), name) !== undefined) return null;
+    // A member an error-rooted intersection's refinement declares and the
+    // Error part does not is an expando of the bag, whatever the checker
+    // finds on the intersection (errorRefinementMember).
+    if (!stackWrite && !causeWrite && !errorRefinementMember(L, access, name) && L.checker.getPropertyOfType(L.typeOf(access.expression), name) !== undefined) return null;
     return recvT;
+  }
+
+  /** A member that an error-rooted intersection's refinement declares and
+   * the Error part does not: `errors` of `Error & { errors: Error[] }`,
+   * `tag` of `TypeError & { tag: string }`. Such a member is the error's
+   * expando bag entry (error.propGet / error.propSet); the checker's type is
+   * the refinement's. Null for every other receiver. */
+  export function errorRefinementMember(L: Lowerer, access: ts.PropertyAccessExpression | ts.ElementAccessExpression, name: string): IrType | null {
+    const recvTs = L.typeOf(access.expression);
+    if (!recvTs.isIntersectionType()) return null;
+    let errPart: ts.Type | null = null;
+    for (const part of ts.constituentTypes(recvTs)) {
+      if (errorRootedObjectOf(L, part) === null) continue;
+      if (errPart !== null) return null;
+      errPart = part;
+    }
+    if (errPart === null) return null;
+    if (L.checker.getPropertyOfType(errPart, name) !== undefined) return null;
+    if (L.checker.getPropertyOfType(recvTs, name) === undefined) return null;
+    return L.mapTypeOf(recvTs);
   }
 
 /** `err.fatal` over an error object: the bag read (error.propGet), a dyn
    * value — `undefined` when no write ever stored the name. The JS-only
    * spelling: a TypeScript program cannot name a property its type lacks. */
   function lowerErrorExpandoRead(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
-    if (!isJsSourceFile(expr.getSourceFile())) return null;
+    const refined = errorRefinementMember(L, expr, expr.name.text) !== null;
+    if (!refined && !isJsSourceFile(expr.getSourceFile())) return null;
     if (errorExpandoReceiver(L, expr, expr.name.text) === null) return null;
     const loc = locOf(expr);
     const receiver = L.lowerExpr(expr.expression);
     if (receiver.type.kind !== "object") return null;
+    if (refined) {
+      // A refinement member is read as a dyn KEY of the receiver, the same
+      // read `(e as any).name` makes: it reaches whatever storage the object
+      // really has (the bag, or a field of a user error subclass that
+      // declares the name).
+      const declared = L.mapTypeOf(L.typeOf(expr));
+      if (declared === null) return null;
+      const keyed: IrExpr = {
+        kind: "dynKeyGet",
+        key: { kind: "strLit", value: expr.name.text, type: STRING, loc: locOf(expr.name) },
+        value: L.coerceInto(expr.expression, receiver, DYN),
+        type: DYN,
+        loc,
+      };
+      // The declared type, checked at the read; an optional member's type includes undefined.
+      if (declared.kind === "dyn" || typeEquals(declared, DYN)) return keyed;
+      return { kind: "dynCheck", value: keyed, type: declared, loc };
+    }
     return {
       kind: "libCall",
       fn: "error.propGet",
