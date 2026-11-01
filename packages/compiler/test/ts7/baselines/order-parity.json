@@ -9764,6 +9764,60 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/21200-signal-two-signals-tick-job-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/21200-signal-two-signals-tick-job-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21201-signal-delivery-order-not-registry.ts": {
+   "order": [
+    "<repo>/tests/corpus/21201-signal-delivery-order-not-registry.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21202-signal-two-listeners-then-second-signal.ts": {
+   "order": [
+    "<repo>/tests/corpus/21202-signal-two-listeners-then-second-signal.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21203-signal-remove-listener-mid-emit.ts": {
+   "order": [
+    "<repo>/tests/corpus/21203-signal-remove-listener-mid-emit.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21204-signal-throw-in-first-delivery.ts": {
+   "order": [
+    "<repo>/tests/corpus/21204-signal-throw-in-first-delivery.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21205-signal-tick-schedules-job-across-deliveries.ts": {
+   "order": [
+    "<repo>/tests/corpus/21205-signal-tick-schedules-job-across-deliveries.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21206-signal-same-twice-one-batch.ts": {
+   "order": [
+    "<repo>/tests/corpus/21206-signal-same-twice-one-batch.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21207-signal-two-listeners-one-emit.ts": {
+   "order": [
+    "<repo>/tests/corpus/21207-signal-two-listeners-one-emit.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21208-signal-once-batch-then-rearm.ts": {
+   "order": [
+    "<repo>/tests/corpus/21208-signal-once-batch-then-rearm.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2091-index-signature-string-intersection.ts": {
    "order": [
     "<repo>/tests/corpus/2091-index-signature-string-intersection.ts"
