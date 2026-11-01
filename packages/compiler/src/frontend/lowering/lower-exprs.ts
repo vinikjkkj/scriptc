@@ -17461,6 +17461,14 @@ export function lowerPrefixUnary(L: Lowerer, expr: ts.PrefixUnaryExpression): Ir
           tonumWhy(expr, "unary-plus");
           return { kind: "libCall", fn: "dyn.toNumber", args: [operand], type: F64, loc };
         }
+        // Unary `+` over a union (`number | string`): ToNumber of the
+        // boxed value, which is exact for each arm (a string arm runs the
+        // runtime's StringToNumber, a number arm is identity).
+        if (operand.type.kind === "union" && L.dynConvertible(operand.type)) {
+          tonumWhy(expr, "unary-plus-union");
+          const boxed: IrExpr = { kind: "dynFrom", value: operand, type: DYN, loc };
+          return { kind: "libCall", fn: "num.canon", args: [{ kind: "libCall", fn: "dyn.toNumber", args: [boxed], type: F64, loc }], type: F64, loc };
+        }
         const plusOperand = boolAsNumber(operand);
         if (plusOperand.type.kind !== "f64") L.unsupported("SC1043", expr);
         // ToNumber of the NaN-marked undefined is a plain NaN (scr_runtime.h).
@@ -17957,6 +17965,47 @@ function detachedThisNullTest(L: Lowerer, expr: ts.BinaryExpression): IrExpr | n
     : { kind: "dynTest", test, value: raw, type: BOOL, loc };
 }
 
+/** A bitwise operand is ToNumber'd by the operator's own conversion, as
+ * unary `+`/`-` already do: an untyped JS value (dyn) through dyn.toNumber
+ * (`P >>> 0` on a JS param), and a string through the runtime's
+ * StringToNumber (`P >>> 0` after `typeof P !== "string"` returned, where
+ * tsc narrows P to string). Other operands pass through unchanged. */
+function bitNumOperand(L: Lowerer, e: IrExpr, node: ts.Expression, blame: ts.Node, loc: SrcLoc): IrExpr {
+  if (e.type.kind === "dyn" && (isJsSourceFile(node.getSourceFile()) || L.dynOperandOrigin(node))) {
+    tonumWhy(blame, "bitwise-dyn");
+    return { kind: "libCall", fn: "dyn.toNumber", args: [e], type: F64, loc };
+  }
+  if (e.type.kind === "string") {
+    tonumWhy(blame, "bitwise-string");
+    return { kind: "libCall", fn: "num.fromString", args: [e], type: F64, loc };
+  }
+  return e;
+}
+
+/** `x op= e` over a union local: the flow type tsc gives the reference is
+ * its f64 arm (`numBits` after `numBits = numBits.toInt()`), so the read
+ * goes through the checked arm bridge (maybeNarrow) and the f64 result is
+ * stored back into the arm. Null when the union has no f64 arm or the read
+ * does not narrow to one. */
+export function unionNumericCompoundRead(
+  L: Lowerer,
+  target: { id: string; type: IrType },
+  leftNode: ts.Node,
+  loc: SrcLoc,
+): { read: IrExpr; wrap: (e: IrExpr) => IrExpr } | null {
+  if (target.type.kind !== "union") return null;
+  const unionId = target.type.unionId;
+  const tag = L.armTag(unionId, F64);
+  if (tag < 0) return null;
+  const slot: IrExpr = { kind: "varRef", localId: target.id, type: target.type, loc };
+  const read = L.maybeNarrow(slot, leftNode);
+  if (read.type.kind !== "f64") return null;
+  return {
+    read,
+    wrap: (e) => ({ kind: "unionWrap", unionId, tag, value: e, type: target.type, loc }),
+  };
+}
+
 /** ToNumber of a static JS boolean: `true` is 1, `false` is 0. A numeric
  * operator over a boolean (`flag | 0`, `-flag`, `flag + 1`, `flag < 2`) is
  * a number operation on the converted operand, which is what JS does; the
@@ -18419,7 +18468,17 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           if (varTarget) {
             const read: IrExpr = { kind: "varRef", localId: varTarget.id, type: varTarget.type, loc: locOf(expr.left) };
             const rhs = L.lowerExpr(expr.right);
-            const combined = compoundCombine(L, compound, read, rhs, varTarget.type, expr, expr.left, expr.right, loc);
+            // A union local whose flow type is its f64 arm (`numBits` after
+            // `numBits = numBits.toInt()`): combine as f64 and store back
+            // into the arm. See unionNumericCompoundRead.
+            const uw = varTarget.type.kind === "union" && rhs.type.kind === "f64"
+              ? unionNumericCompoundRead(L, varTarget, expr.left, loc) : null;
+            const uwCombined = uw !== null
+              ? compoundCombine(L, compound, uw.read, rhs, F64, expr, expr.left, expr.right, loc)
+              : null;
+            const combined = uw !== null && uwCombined !== null
+              ? { natural: uwCombined.natural, toSlot: (v: IrExpr): IrExpr => uw.wrap(uwCombined.toSlot(v)) }
+              : compoundCombine(L, compound, read, rhs, varTarget.type, expr, expr.left, expr.right, loc);
             if (!combined) L.unsupported("SC1043", expr);
             const type = combined.natural.type;
             const tmp = L.declareHiddenLocal("%cmpVal", type);
@@ -19406,8 +19465,10 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       case ts.SyntaxKind.LessThanLessThanToken:
       case ts.SyntaxKind.GreaterThanGreaterThanToken:
       case ts.SyntaxKind.GreaterThanGreaterThanGreaterThanToken: {
-        const nl = boolAsNumber(left);
-        const nr = boolAsNumber(right);
+        // An untyped JS operand is ToNumber first (`P >>> 0` on a JS
+        // param), the same conversion unary `-` already runs.
+        const nl = bitNumOperand(L, boolAsNumber(left), expr.left, expr, loc);
+        const nr = bitNumOperand(L, boolAsNumber(right), expr.right, expr, loc);
         if (nl.type.kind !== "f64" || nr.type.kind !== "f64") L.unsupported("SC1043", expr);
         const bitOp = op === ts.SyntaxKind.AmpersandToken ? "&"
           : op === ts.SyntaxKind.BarToken ? "|"

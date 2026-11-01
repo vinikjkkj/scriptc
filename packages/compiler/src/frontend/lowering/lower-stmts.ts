@@ -36,7 +36,7 @@ import { lowerEnumDeclaration } from "./lower-enums.js";
 import { liveCompoundStmtOf, liveExportsOf, liveKeyOf, liveRecvBagOf, liveTableStmt, liveWriteBagOf, dynValueOf, orphanTableWriteOf, liveAccessorTargetOf } from "./cjs-live-exports.js";
 import { cjsExportsBagOf, cjsMemberOnlyInFunctions, ctorObjectGlobalValue, webCryptoGlobalDestructure, dynAssertionReceiver, errorExpandoReceiver, lowerUndeclaredMemberWrite, isDynSafeReadWidth, isImmutablePrimitiveWidth, refuseUnloweredWebCryptoPattern, refuseUnloweredWebCryptoAssign, refuseWebCryptoIntrospection } from "./lower-exprs.js";
 import { detachedThisWriteFirst, hoistDetachedWriteRhs, keyedAccessOverIndexSignature, localTakesWidenedKeyedRead, narrowBridgeUnion, seqExprSafeStmt, unionFieldReadAt, unitArmsOf, cjsExportAccessorWriteStmt, cjsExportSetterWrite } from "./lower-exprs.js";
-import { abstractPropertyDeclOf, aliasTypeofNarrows, checkedJsNumber, compoundCombine, writeTypeOf, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, isMatchSliceType, lowerGroupsProjection, matchResultNamedGroupsOf, probeLower, pureReemittable, symbolFieldInfo, tonumWhy } from "./lower-exprs.js";
+import { abstractPropertyDeclOf, aliasTypeofNarrows, checkedJsNumber, compoundCombine, unionNumericCompoundRead, writeTypeOf, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, isMatchSliceType, lowerGroupsProjection, matchResultNamedGroupsOf, probeLower, pureReemittable, symbolFieldInfo, tonumWhy } from "./lower-exprs.js";
 import { UNSUPPORTED, checkerPanicDiag, isCheckerPanic, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
 import { isUnitOnlyBoundTsType, isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
 import { canonicalBuiltinModule, isRelativeSpecifier } from "../shared.js";
@@ -8771,6 +8771,15 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
     const w = widenedNumericTarget(L, target, locOf(expr.left), expr.left);
     const read: IrExpr = w !== null ? w.read : { kind: "varRef", localId: target.id, type: target.type, loc: locOf(expr.left) };
     const rhs = L.lowerExpr(expr.right);
+    // A union local whose flow type is its f64 arm (`numBits &= 63;` after
+    // `numBits = numBits.toInt()`): combine as f64, store back into the arm.
+    if (w === null && target.type.kind === "union" && rhs.type.kind === "f64") {
+      const uw = unionNumericCompoundRead(L, target, expr.left, loc);
+      if (uw !== null) {
+        const uc = compoundCombine(L, compound, uw.read, rhs, F64, expr, expr.left, expr.right, loc);
+        if (uc !== null) return { kind: "assign", localId: target.id, value: uw.wrap(uc.toSlot(uc.natural)), loc };
+      }
+    }
     const combined = compoundCombine(L, compound, read, rhs, w !== null ? w.plain : target.type, expr, expr.left, expr.right, loc);
     if (!combined) L.unsupported("SC1043", expr);
     const out = combined.toSlot(combined.natural);
