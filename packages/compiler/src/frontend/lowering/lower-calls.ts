@@ -15,7 +15,7 @@ import { lowerStreamAsyncIteratorCall } from "./lower-stream.js";
 import { protoDataCallee } from "./lower-protodata.js";
 import { lowerAbortMethodCall } from "./lower-abort.js";
 import { lowerFetchMethodCall } from "./lower-fetch.js";
-import { BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, F64, IrExpr, IrFunction, IrLibFn, IrLocal, IrParam, IrStmt, IrType, JSVAL, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxClassIntoDyn, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, dynCopyIsObservable, dynCopyHasLiveView, canMarshalTypedFuncIntoIsland, funcOf, isUnitType, RUNTIME_EMITTER_CLASS, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
+import { BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, F64, canAdaptDynFuncTo, IrExpr, IrFunction, IrLibFn, IrLocal, IrParam, IrStmt, IrType, JSVAL, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxClassIntoDyn, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, dynCopyIsObservable, dynCopyHasLiveView, canMarshalTypedFuncIntoIsland, funcOf, isUnitType, RUNTIME_EMITTER_CLASS, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import type { IrFfiImport } from "../../ir/nodes.js";
 import { isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
 import { siblingDtsMethodReturnKind } from "../npm.js";
@@ -4364,6 +4364,11 @@ function bindLocalEscapesToDyn(L: Lowerer, decl: ts.VariableDeclaration): boolea
   if (!ts.isIdentifier(decl.name)) return false;
   const sym = L.resolveValueSymbol(decl.name);
   if (sym === null) return false;
+  // The local is coerced from the runtime box at its declaration, and a runtime box carries no
+  // type key, so only a function type with an adapter accepts it (canAdaptDynFuncTo). A
+  // promise-returning target has none: its declaration would throw at start-up (row 18309).
+  const staticTy = L.mapTypeOf(L.typeOf(decl.name));
+  if (staticTy === null || !canAdaptDynFuncTo(staticTy, (id) => L.shapes.get(id), (id) => L.unions.get(id))) return false;
   let scope: ts.Node = decl;
   while (!ts.isFunctionLike(scope) && !ts.isSourceFile(scope)) scope = scope.parent;
   const isDyn = (t: ts.Type): boolean => (t.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0;
