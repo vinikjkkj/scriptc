@@ -6579,3 +6579,35 @@ void scr_gen_resume_throw(ScrGen *g) {
   }
   }
 }
+
+/* One Node callback-scope close, for the signal dispatcher: user ticks to
+ * exhaustion, then promise jobs, and back while either has work. Its loop
+ * body is the checkpoint's own (scr_loop_run_inner), without the stream,
+ * unhandled-rejection and loop-exit steps, which belong to the loop's turn.
+ * False when an uncaught throw is pending: the caller stops, as the loop does. */
+bool scr_loop_drain_ticks_jobs(void) {
+  for (;;) {
+    if (scr_exc_pending()) return false;
+    if (scr_nt_head == NULL && scr_ready_len == 0) return true;
+    while (scr_nt_head != NULL) {
+      ScrNtick *t = scr_nt_head;
+      scr_nt_head = t->next;
+      if (scr_nt_head == NULL) scr_nt_tail = NULL;
+      ScrClosure *cb = t->cb;
+      void (*raw)(void) = t->raw;
+      free(t);
+      if (cb) {
+        ((void (*)(ScrClosure *))cb->fn)(cb);
+        scr_closure_release(cb);
+      } else {
+        raw();
+      }
+      if (scr_exc_pending()) return false;
+    }
+    while (scr_ready_len > 0) {
+      ScrFiber *f = scr_ready[scr_ready_head++];
+      scr_ready_len--;
+      scr_resume_fiber(f);
+    }
+  }
+}
