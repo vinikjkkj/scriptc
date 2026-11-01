@@ -10178,6 +10178,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/21905-dyn-async-return-non-promise.js": {
+   "order": [
+    "<repo>/tests/corpus/21905-dyn-async-return-non-promise.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2160-dc-tracing-channel.cjs": {
    "order": [
     "<repo>/tests/corpus/2160-dc-tracing-channel.cjs"
