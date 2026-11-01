@@ -1217,6 +1217,8 @@ export function nsWritableTarget(L: Lowerer, access: ts.PropertyAccessExpression
  * assigns it from the target's storage, exactly when Node does. */
 export function lowerImportEquals(L: Lowerer, stmt: ts.ImportEqualsDeclaration): IrStmt | null {
   if (stmt.isTypeOnly) return null;
+  // A declaration file's alias is type surface only: no statement runs.
+  if (stmt.getSourceFile().isDeclarationFile) return null;
   if (ts.isExternalModuleReference(stmt.moduleReference)) {
     L.unsupported("SC1013", stmt, "import = require(...) assignments");
   }

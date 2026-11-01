@@ -3013,7 +3013,10 @@ function preflight7(load: LoadResult): {
         // only nested/namespace-internal sites can reach the lowering's
         // fence); `import type x = require(...)` is pure type surface and
         // lowers to nothing.
-        if (ts.isExternalModuleReference(stmt.moduleReference) && !stmt.isTypeOnly) {
+        // A DECLARATION file's `import X = require(m)` emits nothing: it is
+        // a type-level alias of the module's export= (the checker resolves it;
+        // the JS twin supplies the value), so it is not a runtime gate.
+        if (ts.isExternalModuleReference(stmt.moduleReference) && !stmt.isTypeOnly && !sf.isDeclarationFile) {
           diags.push(unsupportedDiag("SC1013", locOf7(stmt), "import = require(...) assignments"));
         }
         continue;
