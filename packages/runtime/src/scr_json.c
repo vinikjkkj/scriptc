@@ -5934,10 +5934,12 @@ ScrDyn *scr_dyn_from_error(const ScrError *e) {
       }
       /* The constructor's own NON-ENUMERABLE `cause` lives in the bag's hidden
        * table, which the entry walk above does not see. */
-      {
-        ScrDyn *oc = scr_dyn_obj_key_get(old, "cause", 5); /* +1; the undefined singleton when absent */
-        if (oc != NULL && oc->kind != SCR_DYN_UNDEF) scr_err_hide(d, "cause", 5, oc);
-        else scr_dyn_release(oc);
+      /* PRESENCE, not the value, decides it: `cause: undefined` (an own
+       * property Node keeps) reads the undefined singleton just like an absent
+       * key does, so the value test dropped it. */
+      if (scr_dyn_obj_has_own_prop(old, "cause", 5)) {
+        ScrDyn *oc = scr_dyn_obj_key_get(old, "cause", 5); /* +1; NULL only with a pending throw */
+        if (oc != NULL) scr_err_hide(d, "cause", 5, oc);
       }
       /* AggregateError's non-enumerable `errors`, the same way */
       {
