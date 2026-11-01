@@ -33,7 +33,10 @@ export interface FnTextAttachResult {
   missing: { loc: SrcLoc; fnName: string } | null;
 }
 
-const BUILTIN_VALUE = /^%builtin\.([A-Za-z_$][A-Za-z0-9_$]*)\.value$/;
+// Builtin members used as values: %builtin.<n>, %builtin.js.<n>, %number.<n>,
+// %math.<n>, %string.<n>.<arity> (lower-fnvalue, lower-builtins, lower-island,
+// surfaces). Node's text names the member: `function <n>() { [native code] }`.
+const BUILTIN_VALUE = /^%(?:builtin(?:\.js)?|number|math|string)\.([A-Za-z_$][A-Za-z0-9_$]*)(?:\.[0-9]+)?\.value$/;
 const ADAPTER_IMPL = /^%fn\.adapt\.[0-9]+\.impl$/;
 const INTERNAL_THEN = /^%fn[0-9]+_then$/;
 
