@@ -1752,6 +1752,9 @@ static void scr_dyn_obj_put(ScrDyn *obj, char *key, size_t key_len, ScrDyn *valu
 
 /* THE undefined value: one immortal node (rc == SIZE_MAX skips every
  * retain/release and the freelists never see it). */
+/* The function-text lookup of scr_fntext.c, installed when that unit is linked (NULL otherwise). */
+const char *(*scr_fn_text_row_hook)(const ScrClosure *c) = NULL;
+
 ScrDyn *scr_dyn_undefined(void) {
   static ScrDyn undef = { SIZE_MAX, SCR_DYN_UNDEF, { false } };
   return &undef;
@@ -2499,6 +2502,8 @@ ScrDyn *scr_dyn_new_func(ScrClosure *clo, ScrDynThunk thunk, uint32_t arity, con
  * line and exit 0. Silent is exactly what this whole item is about. The
  * circular-structure conversion trap two hundred lines up is the same
  * stance for the same reason. */
+static bool dyn_fn_is_bound_box(const ScrDyn *fn);
+
 ScrStr *scr_fn_to_string(const ScrDyn *d) {
   const char *src = scr_dyn_fn_src(d);
   if (src == NULL) {
@@ -2525,6 +2530,12 @@ ScrStr *scr_fn_to_string(const ScrDyn *d) {
      * "bound f", but its toString is the nameless native form. */
     static const char f[] = "function () { [native code] }";
     return scr_str_new(f, sizeof f - 1);
+  }
+  if (src == SCR_FN_SRC_NATIVE && dyn_fn_is_bound_box(d)) {
+    /* A runtime-minted bound function prints the nameless native form, like the
+     * SCR_FN_SRC_BOUND arm above (its name is "bound <target>", not its text). */
+    static const char bf[] = "function () { [native code] }";
+    return scr_str_new(bf, sizeof bf - 1);
   }
   if (src == SCR_FN_SRC_NATIVE) {
     ScrJsonBuf b;
@@ -12686,8 +12697,31 @@ static ScrDyn *scr_u8_construct(const ScrDyn *args) {
  * the box inherits it from the closure's entry (scr_fn_code_of). Node: none
  * of those four is a constructor. A bound function (its target decides, and
  * the box does not record the target) keeps the ordinary construction path. */
+/* A runtime-minted BOUND function (scr_dyn_invoke.c's dyn_bind_func): its box names
+ * itself with the bound mark, and its closure holds the target (caps[0]), the bound
+ * receiver (caps[1]), the name (caps[2]) and the bound arguments (caps[3..]). */
+static bool dyn_fn_is_bound_box(const ScrDyn *fn) {
+  return fn->kind == SCR_DYN_FUNC && scr_rva_str(fn->v.fn.name) == scr_dyn_bound_name_mark;
+}
+
+/* The target of a bound box, +1 (the caller releases it). */
+static ScrDyn *dyn_bound_target(const ScrDyn *fn) {
+  return (ScrDyn *)scr_box_get_ref(fn->v.fn.clo->caps[0]);
+}
+
 bool scr_dyn_fn_is_ctor(const ScrDyn *fn) {
-  if (scr_dyn_fn_src(fn) == SCR_FN_SRC_BOUND) return true;
+  if (dyn_fn_is_bound_box(fn)) {
+    /* Node: a bound function constructs exactly when its target does. */
+    ScrDyn *target = dyn_bound_target(fn);
+    bool ok = true;
+    if (target->kind == SCR_DYN_FUNC) ok = scr_dyn_fn_is_ctor(target);
+    else if (target->kind == SCR_DYN_PROXY) ok = scr_dyn_proxy_is_function(target);
+    scr_dyn_release(target);
+    return ok;
+  }
+  /* Every other box, a static bind included (its text is the bound form and its
+   * kind code is the bind's: the compiler refuses a static bind of a constructible
+   * target at build time in a construct program), answers by its kind code. */
   return (scr_dyn_fn_code(fn) & (SCR_FNK_NOPROTO | SCR_FNK_ASYNC | SCR_FNK_GEN)) == 0;
 }
 
@@ -12724,6 +12758,20 @@ ScrDyn *scr_dyn_construct(const ScrDyn *fn, const ScrDyn *args, const ScrStr *wh
     scr_jb_puts(&nb, " is not a constructor");
     scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&nb));
     return NULL;
+  }
+  if (dyn_fn_is_bound_box(fn)) {
+    /* [[Construct]] of a bound function: the target constructs with the bound
+     * arguments first; the bound receiver is ignored (the new instance is the
+     * target's own). */
+    ScrDyn *target = dyn_bound_target(fn);
+    size_t nb = fn->v.fn.clo->ncaps - 3;
+    ScrDyn *all = scr_dyn_new_arr();
+    for (size_t i = 0; i < nb; i++) scr_dyn_arr_push(all, (ScrDyn *)scr_box_get_ref(fn->v.fn.clo->caps[3 + i]));
+    for (size_t j = 0; j < args->v.arr.len; j++) scr_dyn_arr_push(all, scr_dyn_retain(args->v.arr.items[j]));
+    ScrDyn *made = scr_dyn_construct(target, all, what);
+    scr_dyn_release(all);
+    scr_dyn_release(target);
+    return made;
   }
   ScrDyn *proto = scr_dyn_fn_prototype((ScrDyn *)fn); /* +1 */
   ScrDyn *inst = scr_dyn_new_obj();                   /* +1 */
