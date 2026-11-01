@@ -19726,6 +19726,72 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     return recvT;
   }
 
+  /** `Object.assign(e, { k: v, ... })` as a STATEMENT over an error object
+   * (ioredis's `Object.assign(newReason, { cause })`): the source keys, in
+   * order, are the member writes the assignment makes. Exact only for the
+   * shapes that can be stated without an evaluation-order question: a bare
+   * identifier target, shorthand or `key: identifier|literal` properties
+   * (no computed, method, accessor or spread), and keys that are either
+   * `cause` or not declared on the target at all (an expando, or a
+   * refinement member: the writes errorRefinementMember and the expando
+   * path already make). A key the target declares otherwise (message, name,
+   * a user class field) keeps its refusal. Null outside that shape. */
+  export function lowerObjectAssignErrorStatement(L: Lowerer, expr: ts.Expression): IrStmt | null {
+    if (!ts.isCallExpression(expr) || expr.arguments.length < 2) return null;
+    const callee = expr.expression;
+    if (!ts.isPropertyAccessExpression(callee) || callee.name.text !== "assign" || !L.isStdlibGlobal(callee.expression, "Object")) return null;
+    const target = expr.arguments[0]!;
+    if (!ts.isIdentifier(target)) return null;
+    const targetTs = L.typeOf(target);
+    if (errorRootedObjectOf(L, targetTs) === null || L.mapTypeOf(targetTs)?.kind !== "object") return null;
+    const loc = locOf(expr);
+    // A refinement member of the target (declared by the intersection's
+    // refinement, not by its Error part): the errorRefinementMember write.
+    const isRefinement = (name: string): boolean => {
+      if (!targetTs.isIntersectionType()) return false;
+      const errParts = ts.constituentTypes(targetTs).filter((p) => errorRootedObjectOf(L, p) !== null);
+      return (
+        errParts.length === 1 &&
+        L.checker.getPropertyOfType(errParts[0]!, name) === undefined &&
+        L.checker.getPropertyOfType(targetTs, name) !== undefined
+      );
+    };
+    const writes: IrStmt[] = [];
+    for (const src of expr.arguments.slice(1)) {
+      if (!ts.isObjectLiteralExpression(src)) return null;
+      for (const prop of src.properties) {
+        let name: string;
+        let valueNode: ts.Expression;
+        if (ts.isShorthandPropertyAssignment(prop)) {
+          const shorthand = prop.name as ts.Identifier;
+          name = shorthand.text;
+          valueNode = shorthand;
+        } else if (ts.isPropertyAssignment(prop) && (ts.isIdentifier(prop.name) || ts.isStringLiteral(prop.name))) {
+          name = prop.name.text;
+          valueNode = prop.initializer;
+        } else {
+          return null;
+        }
+        // The source value is evaluated before any write in JS; a value
+        // that is a plain name or literal has no effect to reorder.
+        if (!(ts.isIdentifier(valueNode) || ts.isStringLiteral(valueNode) || ts.isNumericLiteral(valueNode) ||
+              valueNode.kind === ts.SyntaxKind.TrueKeyword || valueNode.kind === ts.SyntaxKind.FalseKeyword ||
+              valueNode.kind === ts.SyntaxKind.NullKeyword)) return null;
+        const declared = L.checker.getPropertyOfType(targetTs, name) !== undefined;
+        if (declared && name !== "cause" && !isRefinement(name)) return null;
+        const value = L.lowerExprExpecting(valueNode, DYN);
+        const key: IrExpr = { kind: "strLit", value: name, type: STRING, loc };
+        const recv = L.lowerExpr(target);
+        if (isRefinement(name)) {
+          writes.push({ kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.keySet", args: [L.coerceInto(target, recv, DYN), key, value], type: VOID, loc }, loc });
+        } else {
+          writes.push({ kind: "exprStmt", expr: { kind: "libCall", fn: "error.propSet", args: [L.upcastTo(recv, "%Error"), key, value], type: VOID, loc }, loc });
+        }
+      }
+    }
+    return { kind: "block", body: writes, loc };
+  }
+
   /** A member that an error-rooted intersection's refinement declares and
    * the Error part does not: `errors` of `Error & { errors: Error[] }`,
    * `tag` of `TypeError & { tag: string }`. Such a member is the error's
