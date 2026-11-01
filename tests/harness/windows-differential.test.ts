@@ -38,12 +38,12 @@
  * windows-dev). */
 import { execFile, spawn } from "node:child_process";
 import { createHash } from "node:crypto";
-import { existsSync, globSync, mkdirSync, readFileSync, renameSync, rmdirSync, writeFileSync } from "node:fs";
+import { existsSync, globSync, mkdirSync, readFileSync, rmdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import { afterAll, beforeAll, describe, expect, test } from "vitest";
-import ts5 from "typescript";
+import { oracleTextFor, publishOracle } from "./oracle-route.js";
 import { compile } from "@scriptc/compiler";
 import { holdScratch } from "./scratch-lease.mjs";
 
@@ -206,31 +206,19 @@ function wantsTscDecorators(file: string): boolean {
   return directiveHead(file).some((l) => /^\/\/ @tsc-decorators\s*$/.test(l));
 }
 
-/** The downleveled oracle entry's box-side name: unique per program, and
- * .mjs so the box's module detection cannot re-guess. */
-function decOracleName(file: string): string {
-  return `${laneName(file)}.dec-oracle.mjs`;
-}
-
-/** Materializes the decorator downlevel under the test cache (a pure
- * function of the program bytes and the typescript version) and answers
- * the local path to ship. */
-function decOraclePath(file: string): string {
+/** The oracle entry a program runs as on the box, or null when the box's
+ * Node runs the .ts as written. Shared routing (oracle-route.ts): decorator
+ * programs get tsc's ES2022 downlevel (.mjs), `import x = require` programs
+ * get tsc's CommonJS transpile (.cjs), both materialized under the test
+ * cache (pure functions of the program bytes and the typescript version)
+ * and named uniquely per program so the box's module detection cannot
+ * re-guess. */
+function windowsOracle(file: string): { name: string; path: string } | null {
   const src = readFileSync(file, "utf8");
-  const out = ts5.transpileModule(src, {
-    compilerOptions: { target: ts5.ScriptTarget.ES2022, module: ts5.ModuleKind.ESNext },
-    fileName: file,
-  }).outputText;
-  const key = createHash("sha256").update(ts5.version).update("\0").update(src).digest("hex").slice(0, 16);
-  const dir = join(cacheDir, "win-dec-oracle", key);
-  mkdirSync(dir, { recursive: true });
-  const path = join(dir, decOracleName(file));
-  // Atomic publish: a concurrent run writes this same content-keyed path;
-  // rename keeps readers from ever seeing a truncated oracle.
-  const tmp = `${path}.${process.pid}.tmp`;
-  writeFileSync(tmp, out);
-  renameSync(tmp, path);
-  return path;
+  const o = oracleTextFor(file, src, wantsTscDecorators(file));
+  if (o === null) return null;
+  const name = `${laneName(file)}.${o.kind}-oracle.${o.ext}`;
+  return { name, path: publishOracle(join(cacheDir, "win-dec-oracle", o.key), name, o.text) };
 }
 
 const filter = process.env["SCRIPTC_WIN_FILTER"];
@@ -311,8 +299,9 @@ async function scpToLane(paths: string[]): Promise<void> {
  * type-strips .ts natively (same pinned version as the macOS lanes). */
 async function runWindowsNode(file: string): Promise<RunResult> {
   const name = laneName(file);
-  const entry = wantsTscDecorators(file)
-    ? decOracleName(file)
+  const oracle = windowsOracle(file);
+  const entry = oracle !== null
+    ? oracle.name
     : name === basename(file)
       ? name
       : `${name}\\${basename(file)}`;
@@ -377,8 +366,9 @@ async function shipProgram(file: string): Promise<void> {
   const programRoot = /[\\/]main\.(ts|js|mjs|cjs)$/.test(file) ? join(file, "..") : file;
   // Decorator programs additionally ship the tsc downlevel the oracle
   // executes (the compiler still eats the real source above).
-  const oracleExtra = wantsTscDecorators(file) ? [decOraclePath(file)] : [];
-  await scpToLane([binary, programRoot, ...oracleExtra]);
+  const oracleExtra = windowsOracle(file)?.path;
+  const extra = oracleExtra === undefined ? [] : [oracleExtra];
+  await scpToLane([binary, programRoot, ...extra]);
 }
 
 /* ── the LISTENING-fixture legs (tests/fixtures/server, tests/fixtures/dgram)

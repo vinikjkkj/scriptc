@@ -17,6 +17,7 @@ import { promisify } from "node:util";
 import { describe, expect, test } from "vitest";
 import ts5 from "typescript";
 import { compile } from "@scriptc/compiler";
+import { oracleTextFor, publishOracle } from "./oracle-route.js";
 import { corpusSlice, partOf, partSuffix, shardSuffix } from "./shard.js";
 import { defineEmptyShardTest } from "./shard-guard.js";
 import { tapPhase } from "../../packages/compiler/src/phase-tap.js";
@@ -129,29 +130,10 @@ function wantsTscDecorators(file: string): boolean {
  * test cache — a pure function of the program bytes and the typescript
  * version (both in the oracle cache key). */
 function nodeOracleFile(file: string): string {
-  // `import x = require(m)` is not erasable syntax (Node's type stripping
-  // refuses it), so a program that uses it runs as the CommonJS transpile
-  // tsc emits: the module.exports binding the statement names.
-  const cjs = /^\s*import\s+(?:type\s+)?[A-Za-z_$][\w$]*\s*=\s*require\s*\(/m.test(readFileSync(file, "utf8"));
-  if (!wantsTscDecorators(file) && !cjs) return file;
   const src = readFileSync(file, "utf8");
-  const out = ts5.transpileModule(src, {
-    compilerOptions: {
-      target: ts5.ScriptTarget.ES2022,
-      module: cjs ? ts5.ModuleKind.CommonJS : ts5.ModuleKind.ESNext,
-    },
-    fileName: file,
-  }).outputText;
-  const key = createHash("sha256").update(ts5.version).update("\0").update(src).digest("hex").slice(0, 16);
-  const path = join(cacheDir, `${cjs ? "cjs" : "dec"}-oracle-${key}.${cjs ? "cjs" : "mjs"}`);
-  mkdirSync(cacheDir, { recursive: true });
-  // Atomic publish: concurrent suites (the other flavor's full run, or
-  // another lane over the same program) write this same content-keyed
-  // path; rename keeps readers from ever seeing a truncated oracle.
-  const tmp = `${path}.${process.pid}.tmp`;
-  writeFileSync(tmp, out);
-  renameSync(tmp, path);
-  return path;
+  const o = oracleTextFor(file, src, wantsTscDecorators(file));
+  if (o === null) return file;
+  return publishOracle(cacheDir, `${o.kind}-oracle-${o.key}.${o.ext}`, o.text);
 }
 
 /** `// @no-deprecation` in the directive head: the Node oracle runs with
