@@ -24,6 +24,7 @@ import { oracleCrashed, reduceNativeReport, reduceNodeReport } from "./uncaught-
 import { oracleIsTrustworthy as oracleTrustworthy } from "./oracle-trust.js";
 import { holdScratch } from "./scratch-lease.mjs";
 import { normalizeWarningPid } from "./stderr-pid.js";
+import { posixOnlySkipReason } from "./posix-only-corpus.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
@@ -474,7 +475,11 @@ export function defineDifferentialSuite(part = 1, parts = 1): void {
     test.for(files.map((f) => [f.slice(corpusDir.length + 1), f] as const))(
       "%s",
       { retry: 1 },
-      async ([, file]) => {
+      async ([rel, file], ctx) => {
+        // Posix-only programs (signal delivery to this process) have no
+        // Windows meaning: skipped on win32, run everywhere else.
+        const platformSkip = posixOnlySkipReason(rel);
+        if (platformSkip) ctx.skip(platformSkip);
         const [nodeRes, nativeRes] = await Promise.all([runNode(file), compileAndRun(file)]);
         // Compare as bytes; decode only for the failure diff.
         if (!nodeRes.stdout.equals(nativeRes.stdout)) {
