@@ -37,7 +37,7 @@ import { expandoMemberRead, expandoWritableTarget, exportEqualsNamedMemberRead }
 import { LITERAL_IGNORED_KEYS, lowerSocketInstanceOf, lowerTlsRootCertificates } from "./lower-server.js";
 import { fenceNamespaceConditionalValue, lowerNamespaceConditionalDecl } from "./lower-nsvalue.js";
 import { detachedMethodVariant, findGenericMethodOn, lowerStaticFieldRead, superGuardedThis } from "./lower-classes.js";
-import { jsLetReadStaysDyn, type GenericFnInfo, type GenericInstance, type ParamShape, detachedThisClassOf, detachedDeclinable, inStrictCode, implicitDefaultInstance, implicitDetachedInstance, bindingNeverReassigned, classHasOwnValueOf, dynSpreadSource, classInstanceToString, implicitMonoFile, lowerIntlDefaultLocaleProperty, lowerTaggedTemplate, nullishGenericBindingUnitOf, objLitGenericFnInfoOf, objLitGenericFnNodeOf, requireObjLitGenericReceiver, v8CallSite } from "./lower-calls.js";
+import { jsLetReadStaysDyn, type GenericFnInfo, type GenericInstance, type ParamShape, detachedThisClassOf, detachedDeclinable, inStrictCode, implicitDefaultInstance, implicitDetachedInstance, bindingNeverReassigned, classHasOwnValueOf, dynSpreadSource, classInstanceToString, implicitMonoFile, lowerIntlDefaultLocaleProperty, lowerTaggedTemplate, nullishGenericBindingUnitOf, objLitGenericFnInfoOf, objLitGenericFnNodeOf, requireObjLitGenericReceiver, lowerDynReceiverMethodCall } from "./lower-calls.js";
 import { mixinFnOfCallee } from "./lower-mixins.js";
 import { esOwnKeyOrder, isArrayIndexKey, isConstAssertionTypeNode, isGenericCallableMemberType, overflowShapeKey, overflowShapeKeys, overflowShapeKeysDenied, underConstAssertion, unitOnlyUnion } from "../types.js";
 import { lowerYield } from "./lower-generators.js";
@@ -8066,23 +8066,20 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
         const m = dotNode.name.text;
         const id = `chain.${L.chainCounter++}`;
         const recvRef: IrExpr = { kind: "chainRecv", id, type: DYN, loc: locOf(recvNode) };
-        // The method dispatches dynamically on the bound receiver (dynInvoke:
-        // this-binding, Node's "<spelling> is not a function" on a non-function,
-        // the promise arm for then/catch/finally). Built directly, not through
-        // lowerCall, which would decline the `?.` on the callee it is handed.
-        if (expr.arguments.some((x) => ts.isSpreadElement(x))) {
-          L.unsupported("SC1100", expr, `spread arguments to '.${m}' on a checked-dynamic receiver`);
+        L.chainRecvByNode.set(recvNode, recvRef);
+        L.chainHandled.add(dotNode);
+        let body: IrExpr;
+        try {
+          // This branch is reached only when the receiver LOWERED checked-dynamic.
+          // The helper dispatches it by receiver kind, as a non-optional call does:
+          // string methods keep their typed lowering and checks, other names take the
+          // dynamic dispatch (a checker-typed spelling of a dynamic value included).
+          // Names it declines keep the ordinary lowering of the whole call.
+          body = lowerDynReceiverMethodCall(L, expr, dotNode) ?? L.lowerExpr(expr);
+        } finally {
+          L.chainRecvByNode.delete(recvNode);
+          L.chainHandled.delete(dotNode);
         }
-        const dynArgs = expr.arguments.map((x) => L.lowerExprExpecting(x, DYN));
-        let body: IrExpr = {
-          kind: "dynInvoke",
-          recv: recvRef,
-          method: m,
-          calleeName: v8CallSite(dotNode),
-          args: dynArgs,
-          type: DYN,
-          loc,
-        };
         if (body.type.kind !== "dyn") {
           if (body.type.kind !== "void" && !L.dynConvertible(body.type)) {
             L.unsupported(
