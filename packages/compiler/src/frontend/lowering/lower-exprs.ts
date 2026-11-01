@@ -1461,6 +1461,12 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           "a codec is an object in Node; its lowered value is a string (OPEN, mgtextcodec)",
         );
       }
+      // `typeof (e as R).m` over an error object's record view: the member is the
+      // error's storage (errorRecordViewRead), answered by the dyn kind table.
+      if (ts.isPropertyAccessExpression(expr.expression)) {
+        const viewRead = errorRecordViewRead(L, expr.expression);
+        if (viewRead !== null) return { kind: "libCall", fn: "dyn.typeof", args: [viewRead], type: STRING, loc };
+      }
       // `typeof queueMicrotask` / `typeof Math` on a STDLIB global: folds
       // to Node's answer BEFORE the operand lowers — read off the declared
       // type, because `typeof` is the one consumer that never needs the
@@ -3589,6 +3595,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         L.lowerErrorCodeProperty(expr) ??
         // An own EXPANDO property read off an error object (`err.fatal`,
         // `e.errno`): the property no declaration names.
+        errorRecordViewRead(L, expr) ??
         lowerErrorExpandoRead(L, expr) ??
         // signal.aborted / signal.reason / controller.signal. Its own
         // entry rather than a lowerIntrinsicProperty arm because that
@@ -20051,6 +20058,42 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     return isUndefinedOrNullExpr(other);
   }
 
+  /** `(e as R).m` where e is an error-rooted value and R is a record view
+   * that does not declare the Error part's own member: the view is a cast,
+   * not a copy, so the member is the error's storage (the dyn key read reaches
+   * a code slot, the expando bag or a subclass field). Admitted for a member
+   * whose declared type admits undefined; a required member goes through the
+   * presence proof of refinementPresenceProven. Null for every other read. */
+  function errorRecordViewRead(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
+    if (expr.questionDotToken !== undefined) return null;
+    let view: ts.Expression = expr.expression;
+    while (ts.isParenthesizedExpression(view)) view = view.expression;
+    if (!ts.isAsExpression(view) && !ts.isAssertionExpression(view)) return null;
+    const src = skipWrapperExprs((view as ts.AsExpression).expression);
+    const srcT = L.typeOf(src);
+    if (errorRootedObjectOf(L, srcT) === null) return null;
+    const name = expr.name.text;
+    if (L.checker.getPropertyOfType(srcT, name) !== undefined) return null;
+    const declared = L.mapTypeOf(L.typeOf(expr));
+    if (declared === null) return null;
+    const viewT = L.typeOf(expr.expression);
+    const prop = L.checker.getPropertyOfType(viewT, name);
+    const optional = prop !== undefined && (prop.flags & ts.SymbolFlags.Optional) !== 0;
+    const admitsUndefined = optional || declared.kind === "dyn" || typeEquals(declared, DYN) ||
+      ts.constituentTypes(L.typeOf(expr)).some((t) => (t.flags & ts.TypeFlags.Undefined) !== 0);
+    if (!admitsUndefined) return null;
+    const loc = locOf(expr);
+    const keyed: IrExpr = {
+      kind: "dynKeyGet",
+      key: { kind: "strLit", value: name, type: STRING, loc: locOf(expr.name) },
+      value: L.coerceInto(src, L.lowerExpr(src), DYN),
+      type: DYN,
+      loc,
+    };
+    if (declared.kind === "dyn" || typeEquals(declared, DYN)) return keyed;
+    return { kind: "dynCheck", value: keyed, type: declared, loc };
+  }
+
   function lowerErrorExpandoRead(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
     const refined = errorRefinementMember(L, expr, expr.name.text) !== null;
     if (!refined && !isJsSourceFile(expr.getSourceFile())) return null;
@@ -20173,19 +20216,23 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       }
       if (!ts.isStringLiteral(b)) continue;
       if (b.text !== "string" && b.text !== "undefined") continue;
-      const codeType = L.envValueType();
-      if (codeType.kind !== "union") throw new Error("lowerer bug: error code type is not a union");
-      const undefTag = L.armTag(codeType.unionId, UNDEFINED_T);
-      const read: IrExpr = { kind: "libCall", fn: "error.code", args: [receiver], type: codeType, loc };
-      // typeof === "string" ⇔ the code slot is present (NOT the undefined
-      // arm); === "undefined" ⇔ absent. `!==` flips either.
-      const isNotUndef = b.text === "string" ? !negated : negated;
+      // The member is read as a dyn KEY, the way every other read of `code` on
+      // an error-rooted value is: an own `code` written through the expando
+      // bag (`(e as any).code = v`, a refinement write) is answered there, and
+      // the slot-only error.code read would miss it. typeof of the read is the
+      // answer, so the test is typeof(read) === literal (negated for !==).
+      const keyed: IrExpr = {
+        kind: "dynKeyGet",
+        key: { kind: "strLit", value: "code", type: STRING, loc },
+        value: L.coerceInto(recv, receiver, DYN),
+        type: DYN,
+        loc,
+      };
       return {
-        kind: "unionIsTag",
-        unionId: codeType.unionId,
-        tag: undefTag,
-        ...(isNotUndef ? { negated: true as const } : {}),
-        value: read,
+        kind: "strEq",
+        negated,
+        left: { kind: "libCall", fn: "dyn.typeof", args: [keyed], type: STRING, loc },
+        right: { kind: "strLit", value: b.text, type: STRING, loc },
         type: BOOL,
         loc,
       };
