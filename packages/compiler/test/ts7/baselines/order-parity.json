@@ -23167,6 +23167,66 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
+  },
+  "<repo>/tests/corpus/22500-cause-options-variable.ts": {
+   "order": [
+    "<repo>/tests/corpus/22500-cause-options-variable.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/22502-cause-options-undefined-null-number.ts": {
+   "order": [
+    "<repo>/tests/corpus/22502-cause-options-undefined-null-number.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/22503-cause-options-inherited.ts": {
+   "order": [
+    "<repo>/tests/corpus/22503-cause-options-inherited.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/22504-cause-options-getter-counter.ts": {
+   "order": [
+    "<repo>/tests/corpus/22504-cause-options-getter-counter.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/22505-cause-options-getter-throws.ts": {
+   "order": [
+    "<repo>/tests/corpus/22505-cause-options-getter-throws.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/22506-cause-options-function-object.ts": {
+   "order": [
+    "<repo>/tests/corpus/22506-cause-options-function-object.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/22507-cause-options-super-forward.ts": {
+   "order": [
+    "<repo>/tests/corpus/22507-cause-options-super-forward.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/22508-cause-options-super-tagged.ts": {
+   "order": [
+    "<repo>/tests/corpus/22508-cause-options-super-tagged.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/22509-cause-options-json-dyn.ts": {
+   "order": [
+    "<repo>/tests/corpus/22509-cause-options-json-dyn.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/22510-cause-options-no-new.ts": {
+   "order": [
+    "<repo>/tests/corpus/22510-cause-options-no-new.ts"
+   ],
+   "diags": []
   }
  }
 }
