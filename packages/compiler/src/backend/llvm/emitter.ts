@@ -11195,6 +11195,18 @@ class LlEmitter {
         // The ELEMENT spelling evaluates its key between the receiver and
         // the arguments, which is JS's order for `o[k](a)`.
         const keyv = e.methodKey === undefined ? null : this.emitExpr(e.methodKey);
+        // JS reads the member BEFORE it evaluates the arguments: a nullish
+        // receiver throws here, so no argument runs (see emit-exprs.ts).
+        if (e.args.length > 0) {
+          if (keyv !== null) {
+            this.declare(`declare void @scr_dyn_invoke_guard_key(ptr, ptr)`);
+            B.line(`call void @scr_dyn_invoke_guard_key(ptr ${recv.name}, ptr ${keyv.name})`);
+          } else {
+            this.declare(`declare void @scr_dyn_invoke_guard(ptr, ptr)`);
+            B.line(`call void @scr_dyn_invoke_guard(ptr ${recv.name}, ptr ${this.cstr(e.method)})`);
+          }
+          this.emitPendingCheck();
+        }
         const args = e.args.map((a) => this.emitExpr(a));
         let argsPtr = "null";
         if (args.length > 0) {
@@ -19152,7 +19164,21 @@ class LlEmitter {
     const sym = LIB_FN_SYMS[e.fn];
     if (sym === undefined) throw new LlvmUnsupportedError(`libCall:${e.fn}`, e.loc);
     const tail = LIB_FN_TAIL[e.fn] ?? [];
-    const args = e.args.map((a) => this.emitExpr(a));
+    let args: LlValue[];
+    if (e.fn === "dyn.invokePack") {
+      // A spread call on a dyn callee: JS reads the member before it
+      // evaluates the argument pack, so the nullish guard runs between the
+      // receiver and the pack (emit-exprs.ts holds the C twin).
+      args = [this.emitExpr(e.args[0]!)];
+      args[2] = this.emitExpr(e.args[2]!);
+      this.declare(`declare void @scr_dyn_invoke_guard_key(ptr, ptr)`);
+      B.line(`call void @scr_dyn_invoke_guard_key(ptr ${args[0]!.name}, ptr ${args[2]!.name})`);
+      this.emitPendingCheck();
+      args[1] = this.emitExpr(e.args[1]!);
+      args[3] = this.emitExpr(e.args[3]!);
+    } else {
+      args = e.args.map((a) => this.emitExpr(a));
+    }
     // The frame stops owning an argument the runtime keeps (see
     // LIB_FN_MOVE_ARGS) — before the call, like the C tier's E.moveTemp.
     for (const i of LIB_FN_MOVE_ARGS[e.fn] ?? []) this.moveTemp(args[i]!);
