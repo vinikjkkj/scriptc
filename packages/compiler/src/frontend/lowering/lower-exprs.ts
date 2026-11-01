@@ -37,7 +37,7 @@ import { expandoMemberRead, expandoWritableTarget, exportEqualsNamedMemberRead }
 import { LITERAL_IGNORED_KEYS, lowerSocketInstanceOf, lowerTlsRootCertificates } from "./lower-server.js";
 import { fenceNamespaceConditionalValue, lowerNamespaceConditionalDecl } from "./lower-nsvalue.js";
 import { detachedMethodVariant, findGenericMethodOn, lowerStaticFieldRead, superGuardedThis } from "./lower-classes.js";
-import { jsLetReadStaysDyn, type GenericFnInfo, type GenericInstance, type ParamShape, detachedThisClassOf, detachedDeclinable, inStrictCode, implicitDefaultInstance, implicitDetachedInstance, bindingNeverReassigned, classHasOwnValueOf, dynSpreadSource, classInstanceToString, implicitMonoFile, lowerIntlDefaultLocaleProperty, lowerTaggedTemplate, nullishGenericBindingUnitOf, objLitGenericFnInfoOf, objLitGenericFnNodeOf, requireObjLitGenericReceiver, lowerDynReceiverMethodCall } from "./lower-calls.js";
+import { dynCallWithThis, jsLetReadStaysDyn, type GenericFnInfo, type GenericInstance, type ParamShape, detachedThisClassOf, detachedDeclinable, inStrictCode, implicitDefaultInstance, implicitDetachedInstance, bindingNeverReassigned, classHasOwnValueOf, dynSpreadSource, classInstanceToString, implicitMonoFile, lowerIntlDefaultLocaleProperty, lowerTaggedTemplate, nullishGenericBindingUnitOf, objLitGenericFnInfoOf, objLitGenericFnNodeOf, requireObjLitGenericReceiver, lowerDynReceiverMethodCall } from "./lower-calls.js";
 import { mixinFnOfCallee } from "./lower-mixins.js";
 import { esOwnKeyOrder, isArrayIndexKey, isConstAssertionTypeNode, isGenericCallableMemberType, overflowShapeKey, overflowShapeKeys, overflowShapeKeysDenied, underConstAssertion, unitOnlyUnion } from "../types.js";
 import { lowerYield } from "./lower-generators.js";
@@ -8103,24 +8103,35 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
         }
         return { kind: "optChain", id, receiver, body, type: DYN, loc };
       }
-      // `f?.(args)` on a checked-dynamic callee: a nullish callee short-
-      // circuits to undefined (the arguments never evaluate, exactly JS);
-      // anything else is the ordinary dynamic call on the bound receiver.
-      if (ts.isCallExpression(expr) && dotNode === expr) {
+      // The CALL step of an optional chain on a checked-dynamic callee:
+      // `f?.(args)` and `recv.m?.(args)` (ioredis's `this.hooks.onCreate?.(
+      // redis, readOnly)`). The guarded value is the callee (`receiver`):
+      // nullish short-circuits to undefined with the arguments unevaluated;
+      // otherwise the call runs. A property callee keeps its receiver as
+      // `this` (the method-call rule), re-reading a plain receiver chain the
+      // guard has already proved side-effect free. Anything else refuses.
+      if (dotNode === expr && ts.isCallExpression(expr)) {
         if (expr.arguments.some((x) => ts.isSpreadElement(x))) {
           L.unsupported("SC1100", expr, "spread arguments to an optional call on 'unknown' values");
         }
+        let thisRecv: IrExpr | null = null;
+        if (ts.isPropertyAccessExpression(recvNode)) {
+          const holder = recvNode.expression;
+          if (recvNode.questionDotToken !== undefined || !plainThisOrReadChain(holder)) {
+            L.unsupported("SC1100", expr, "optional calls of a member of an optional chain on 'unknown' values");
+          }
+          thisRecv = L.lowerExpr(holder);
+          if (thisRecv.type.kind !== "dyn") {
+            L.unsupported("SC1100", expr, "optional calls of a member of a non-'unknown' receiver on 'unknown' values");
+          }
+        }
         const id = `chain.${L.chainCounter++}`;
-        const recvRef: IrExpr = { kind: "chainRecv", id, type: DYN, loc: locOf(recvNode) };
-        const args = expr.arguments.map((x) => L.lowerExprExpecting(x, DYN));
-        const body: IrExpr = {
-          kind: "dynCall",
-          callee: recvRef,
-          calleeName: ts.isIdentifier(recvNode) ? recvNode.text : recvNode.getText(),
-          args,
-          type: DYN,
-          loc,
-        };
+        const calleeRef: IrExpr = { kind: "chainRecv", id, type: DYN, loc: locOf(recvNode) };
+        const args = expr.arguments.map((a) => L.lowerExprExpecting(a, DYN));
+        const calleeName = ts.isPropertyAccessExpression(recvNode) ? recvNode.getText() : ts.isIdentifier(recvNode) ? recvNode.text : "value";
+        const body: IrExpr = thisRecv !== null
+          ? dynCallWithThis(L, thisRecv, calleeRef, args, calleeName, loc)
+          : { kind: "dynCall", callee: calleeRef, calleeName, args, type: DYN, loc };
         return { kind: "optChain", id, receiver, body, type: DYN, loc };
       }
       L.unsupported("SC1100", expr, "optional chaining on 'unknown' values");
@@ -27488,4 +27499,16 @@ function moduleExportsGlobalRead(L: Lowerer, expr: ts.PropertyAccessExpression):
     if (ts.isClassDeclaration(p) && p.getStart(sf) < stmtEnd) return null;
   }
   return { kind: "varRef", localId: g.id, type: g.type, loc: locOf(expr) };
+}
+
+/** A plain read chain rooted at an identifier OR `this` (no `?.`), the
+ * receiver shape an optional method call may re-read after its guard. */
+function plainThisOrReadChain(recv: ts.Expression): boolean {
+  let n: ts.Expression = recv;
+  while (ts.isParenthesizedExpression(n)) n = n.expression;
+  while (ts.isPropertyAccessExpression(n) && n.questionDotToken === undefined) {
+    n = n.expression;
+    while (ts.isParenthesizedExpression(n)) n = n.expression;
+  }
+  return ts.isIdentifier(n) || n.kind === ts.SyntaxKind.ThisKeyword;
 }
