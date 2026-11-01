@@ -19815,6 +19815,242 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
 /** `err.fatal` over an error object: the bag read (error.propGet), a dyn
    * value — `undefined` when no write ever stored the name. The JS-only
    * spelling: a TypeScript program cannot name a property its type lacks. */
+  function skipWrapperExprs(e: ts.Expression): ts.Expression {
+    let m = e;
+    while (ts.isParenthesizedExpression(m) || ts.isAsExpression(m) || ts.isNonNullExpression(m) || ts.isAssertionExpression(m)) m = m.expression;
+    return m;
+  }
+
+  /** `a && b && c` flattened into its conjuncts. */
+  function conjunctsOfExpr(e: ts.Expression): ts.Expression[] {
+    const out: ts.Expression[] = [];
+    const stack: ts.Expression[] = [e];
+    while (stack.length > 0) {
+      const n = skipWrapperExprs(stack.pop()!);
+      if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken) stack.push(n.right, n.left);
+      else out.push(n);
+    }
+    return out;
+  }
+
+  const assignedSymbolCache = new WeakMap<ts.SourceFile, Set<ts.Symbol>>();
+  /** Every symbol the file assigns to by an identifier target (assignment,
+   * compound assignment, ++/--, for-in/of over an existing name). A binding
+   * in this set can change between a presence check and a read. */
+  function assignedSymbolsOf(L: Lowerer, sf: ts.SourceFile): Set<ts.Symbol> {
+    const cached = assignedSymbolCache.get(sf);
+    if (cached !== undefined) return cached;
+    const set = new Set<ts.Symbol>();
+    const ASSIGN_OPS = new Set<ts.SyntaxKind>([
+      ts.SyntaxKind.EqualsToken, ts.SyntaxKind.PlusEqualsToken, ts.SyntaxKind.MinusEqualsToken,
+      ts.SyntaxKind.AsteriskEqualsToken, ts.SyntaxKind.AsteriskAsteriskEqualsToken, ts.SyntaxKind.SlashEqualsToken,
+      ts.SyntaxKind.PercentEqualsToken, ts.SyntaxKind.LessThanLessThanEqualsToken,
+      ts.SyntaxKind.GreaterThanGreaterThanEqualsToken, ts.SyntaxKind.GreaterThanGreaterThanGreaterThanEqualsToken,
+      ts.SyntaxKind.AmpersandEqualsToken, ts.SyntaxKind.BarEqualsToken, ts.SyntaxKind.CaretEqualsToken,
+      ts.SyntaxKind.AmpersandAmpersandEqualsToken, ts.SyntaxKind.BarBarEqualsToken, ts.SyntaxKind.QuestionQuestionEqualsToken,
+    ]);
+    const note = (t: ts.Node | undefined): void => {
+      if (t === undefined || !ts.isIdentifier(t)) return;
+      const s = L.checker.getSymbolAtLocation(t);
+      if (s !== undefined) set.add(s);
+    };
+    const stack: ts.Node[] = [sf];
+    while (stack.length > 0) {
+      const n = stack.pop()!;
+      if (ts.isBinaryExpression(n) && ASSIGN_OPS.has(n.operatorToken.kind)) note(n.left);
+      else if ((ts.isPrefixUnaryExpression(n) || ts.isPostfixUnaryExpression(n)) &&
+        (n.operator === ts.SyntaxKind.PlusPlusToken || n.operator === ts.SyntaxKind.MinusMinusToken)) note(n.operand);
+      else if ((ts.isForInStatement(n) || ts.isForOfStatement(n)) && !ts.isVariableDeclarationList(n.initializer)) note(n.initializer);
+      ts.forEachChild(n, (c) => { stack.push(c); return undefined; });
+    }
+    assignedSymbolCache.set(sf, set);
+    return set;
+  }
+
+  /** The receiver expression is the identifier bound to `sym`. */
+  function isSymbolRef(L: Lowerer, e: ts.Expression, sym: ts.Symbol): boolean {
+    const m = skipWrapperExprs(e);
+    return ts.isIdentifier(m) && L.checker.getSymbolAtLocation(m) === sym;
+  }
+
+  /** `sym.name` (any wrapping of the receiver). */
+  function isMemberOfSymbol(L: Lowerer, e: ts.Expression, sym: ts.Symbol, name: string): boolean {
+    const m = skipWrapperExprs(e);
+    return ts.isPropertyAccessExpression(m) && m.name.text === name && isSymbolRef(L, m.expression, sym);
+  }
+
+  function isUndefinedOrNullExpr(e: ts.Expression): boolean {
+    const m = skipWrapperExprs(e);
+    return (ts.isIdentifier(m) && m.text === "undefined") || m.kind === ts.SyntaxKind.NullKeyword;
+  }
+
+  /** A conjunct that is true only when `sym.name` is present: `'name' in sym`,
+   * `sym.name !== undefined` / `!= null`, `typeof sym.name` compared with a
+   * non-"undefined" literal, `Array.isArray(sym.name)`, or a call of a guard
+   * whose body proves the same of its parameter. */
+  function presenceConjunct(L: Lowerer, c: ts.Expression, sym: ts.Symbol, name: string, depth: number): boolean {
+    const m = skipWrapperExprs(c);
+    if (ts.isBinaryExpression(m)) {
+      const op = m.operatorToken.kind;
+      if (op === ts.SyntaxKind.InKeyword) {
+        return ts.isStringLiteral(m.left) && m.left.text === name && isSymbolRef(L, m.right, sym);
+      }
+      const eqOp = op === ts.SyntaxKind.EqualsEqualsToken || op === ts.SyntaxKind.EqualsEqualsEqualsToken;
+      const neqOp = op === ts.SyntaxKind.ExclamationEqualsToken || op === ts.SyntaxKind.ExclamationEqualsEqualsToken;
+      if (neqOp) {
+        if (isMemberOfSymbol(L, m.left, sym, name) && isUndefinedOrNullExpr(m.right)) return true;
+        if (isMemberOfSymbol(L, m.right, sym, name) && isUndefinedOrNullExpr(m.left)) return true;
+      }
+      if (eqOp || neqOp) {
+        const l = skipWrapperExprs(m.left);
+        const r = skipWrapperExprs(m.right);
+        const typeofSide = ts.isTypeOfExpression(l) ? l : ts.isTypeOfExpression(r) ? r : null;
+        if (typeofSide !== null) {
+          const lit = typeofSide === l ? r : l;
+          if (ts.isStringLiteral(lit) && isMemberOfSymbol(L, typeofSide.expression, sym, name)) {
+            const isUndefLit = lit.text === "undefined";
+            if (eqOp ? !isUndefLit : isUndefLit) return true;
+          }
+        }
+      }
+      return false;
+    }
+    if (ts.isCallExpression(m)) {
+      const callee = skipWrapperExprs(m.expression);
+      if (
+        ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) &&
+        callee.expression.text === "Array" && callee.name.text === "isArray" &&
+        m.arguments.length === 1 && isMemberOfSymbol(L, m.arguments[0]!, sym, name)
+      ) return true;
+      return guardCallPresence(L, m, sym, name, depth);
+    }
+    return false;
+  }
+
+  /** A call `g(..., sym, ...)` whose callee is a function declared in this
+   * program with a single `return <expr>` body: the call is true only when
+   * the returned expression is, so a conjunct of that expression that proves
+   * the parameter's member proves it for the argument. */
+  function guardCallPresence(L: Lowerer, call: ts.CallExpression, sym: ts.Symbol, name: string, depth: number): boolean {
+    if (depth > 3) return false;
+    const idx = call.arguments.findIndex((a) => isSymbolRef(L, a, sym));
+    if (idx < 0) return false;
+    const callee = skipWrapperExprs(call.expression);
+    if (!ts.isIdentifier(callee)) return false;
+    let fsym = L.checker.getSymbolAtLocation(callee);
+    if (fsym === undefined) return false;
+    if ((fsym.flags & ts.SymbolFlags.Alias) !== 0) fsym = L.checker.getAliasedSymbol(fsym);
+    const decls = L.checker.declarationsOf(fsym);
+    if (decls.length !== 1) return false;
+    const d = decls[0]!;
+    let fn: ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction | undefined;
+    if (ts.isFunctionDeclaration(d)) fn = d;
+    else if (ts.isVariableDeclaration(d) && d.initializer !== undefined &&
+      (ts.isArrowFunction(d.initializer) || ts.isFunctionExpression(d.initializer))) fn = d.initializer;
+    if (fn === undefined || fn.body === undefined) return false;
+    const param = fn.parameters[idx];
+    if (param === undefined || !ts.isIdentifier(param.name)) return false;
+    const pSym = L.checker.getSymbolAtLocation(param.name);
+    if (pSym === undefined) return false;
+    let ret: ts.Expression | undefined;
+    if (ts.isBlock(fn.body)) {
+      const only = fn.body.statements.length === 1 ? fn.body.statements[0] : undefined;
+      if (only === undefined || !ts.isReturnStatement(only)) return false;
+      ret = only.expression;
+    } else {
+      ret = fn.body;
+    }
+    if (ret === undefined) return false;
+    return conjunctsOfExpr(ret).some((c) => presenceConjunct(L, c, pSym, name, depth + 1));
+  }
+
+  /** An earlier statement of the same block that makes `sym.name` present
+   * for everything after it: an assignment `sym.name = v` (v not undefined),
+   * an `Object.assign(sym, {name: v}, ...)`, or `if (!C) return/throw;` with a
+   * presence conjunct in C. */
+  function earlierStatementProves(L: Lowerer, stmt: ts.Statement, sym: ts.Symbol, name: string): boolean {
+    const exits = (s: ts.Statement): boolean =>
+      ts.isReturnStatement(s) || ts.isThrowStatement(s) ||
+      (ts.isBlock(s) && s.statements.length > 0 && exits(s.statements[s.statements.length - 1]!));
+    if (ts.isExpressionStatement(stmt)) {
+      const e = skipWrapperExprs(stmt.expression);
+      if (ts.isBinaryExpression(e) && e.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        isMemberOfSymbol(L, e.left, sym, name) && !isUndefinedOrNullExpr(e.right)) return true;
+      if (ts.isCallExpression(e)) {
+        const callee = skipWrapperExprs(e.expression);
+        if (ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) &&
+          callee.expression.text === "Object" && callee.name.text === "assign" &&
+          e.arguments.length >= 2 && isSymbolRef(L, e.arguments[0]!, sym)) {
+          for (const src of e.arguments.slice(1)) {
+            if (!ts.isObjectLiteralExpression(src)) continue;
+            for (const p of src.properties) {
+              if (ts.isShorthandPropertyAssignment(p) && (p.name as ts.Identifier).text === name) return true;
+              if (ts.isPropertyAssignment(p) && (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name)) &&
+                (p.name as ts.Identifier | ts.StringLiteral).text === name && !isUndefinedOrNullExpr(p.initializer)) return true;
+            }
+          }
+        }
+      }
+      return false;
+    }
+    if (ts.isIfStatement(stmt) && exits(stmt.thenStatement) && stmt.elseStatement === undefined) {
+      const c = skipWrapperExprs(stmt.expression);
+      if (ts.isPrefixUnaryExpression(c) && c.operator === ts.SyntaxKind.ExclamationToken) {
+        return conjunctsOfExpr(c.operand).some((x) => presenceConjunct(L, x, sym, name, 0));
+      }
+    }
+    return false;
+  }
+
+  /** Whether a REQUIRED refinement member is present at `expr` on every path
+   * that reaches it: a narrowing condition that encloses the read (an `&&`
+   * right operand, the then-branch of an `if`, the true arm of `?:`) checks
+   * the member, or an earlier statement of an enclosing block (same function)
+   * writes it or checks it and exits. The receiver must be an identifier that
+   * the file never reassigns. */
+  function refinementPresenceProven(L: Lowerer, expr: ts.PropertyAccessExpression, name: string): boolean {
+    const recv = skipWrapperExprs(expr.expression);
+    if (!ts.isIdentifier(recv)) return false;
+    const sym = L.checker.getSymbolAtLocation(recv);
+    if (sym === undefined || assignedSymbolsOf(L, expr.getSourceFile()).has(sym)) return false;
+    let child: ts.Node = expr;
+    let p: ts.Node | undefined = expr.parent;
+    while (p !== undefined && !ts.isFunctionLike(p)) {
+      let cond: ts.Expression | undefined;
+      if (ts.isBinaryExpression(p) && p.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken && child === p.right) cond = p.left;
+      else if (ts.isIfStatement(p) && child === p.thenStatement) cond = p.expression;
+      else if (ts.isConditionalExpression(p) && child === p.whenTrue) cond = p.condition;
+      if (cond !== undefined && conjunctsOfExpr(cond).some((c) => presenceConjunct(L, c, sym, name, 0))) return true;
+      child = p;
+      p = p.parent;
+    }
+    child = expr;
+    p = expr.parent;
+    while (p !== undefined && !ts.isFunctionLike(p)) {
+      if (ts.isBlock(p) || ts.isSourceFile(p) || ts.isCaseClause(p) || ts.isDefaultClause(p) || ts.isModuleBlock(p)) {
+        const stmts = p.statements;
+        const i = stmts.indexOf(child as ts.Statement);
+        for (let j = 0; j < i; j++) {
+          if (earlierStatementProves(L, stmts[j]!, sym, name)) return true;
+        }
+      }
+      child = p;
+      p = p.parent;
+    }
+    return false;
+  }
+
+  /** `e.m` used only as the operand of a presence test against undefined/null. */
+  function isPresenceTestOperand(expr: ts.PropertyAccessExpression): boolean {
+    const p = expr.parent;
+    if (!ts.isBinaryExpression(p)) return false;
+    const op = p.operatorToken.kind;
+    if (op !== ts.SyntaxKind.ExclamationEqualsToken && op !== ts.SyntaxKind.ExclamationEqualsEqualsToken &&
+        op !== ts.SyntaxKind.EqualsEqualsToken && op !== ts.SyntaxKind.EqualsEqualsEqualsToken) return false;
+    const other = p.left === expr ? p.right : p.left;
+    return isUndefinedOrNullExpr(other);
+  }
+
   function lowerErrorExpandoRead(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
     const refined = errorRefinementMember(L, expr, expr.name.text) !== null;
     if (!refined && !isJsSourceFile(expr.getSourceFile())) return null;
@@ -19836,8 +20072,23 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         type: DYN,
         loc,
       };
-      // The declared type, checked at the read; an optional member's type includes undefined.
-      if (declared.kind === "dyn" || typeEquals(declared, DYN)) return keyed;
+      // Presence tests (`e.m !== undefined`, `e.m == null`) read the key
+      // raw: an absent member is undefined there, which is the answer.
+      if (declared.kind === "dyn" || typeEquals(declared, DYN) || isPresenceTestOperand(expr)) return keyed;
+      // A member whose declared type admits undefined (an optional member,
+      // or a union with undefined) reads undefined exactly when absent.
+      const recvTs = L.typeOf(expr.expression);
+      const prop = L.checker.getPropertyOfType(recvTs, expr.name.text);
+      const optional = prop !== undefined && (prop.flags & ts.SymbolFlags.Optional) !== 0;
+      const admitsUndefined = optional || ts.constituentTypes(L.typeOf(expr)).some((t) => (t.flags & ts.TypeFlags.Undefined) !== 0);
+      if (!admitsUndefined && !refinementPresenceProven(L, expr, expr.name.text)) {
+        L.unsupported(
+          "SC1090",
+          expr,
+          `reading the required member '${expr.name.text}' of '${L.checker.typeToString(recvTs)}' without proof that it is present`,
+          `admitted when a narrowing guard's body checks the member ('${expr.name.text}' in e, e.${expr.name.text} !== undefined, Array.isArray(e.${expr.name.text})) and the guard is what narrowed this value, or when the member is written earlier in the same block; an optional member reads undefined`,
+        );
+      }
       return { kind: "dynCheck", value: keyed, type: declared, loc };
     }
     return {
