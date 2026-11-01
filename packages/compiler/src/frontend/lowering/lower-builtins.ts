@@ -2101,7 +2101,7 @@ function fsWriteOptionsSignalFree(L: Lowerer, fn: string, expr: ts.CallExpressio
       const packed = L.lowerExprExpecting(call.arguments[2]!, arrayOf(STRING));
       return { kind: "libCall", fn: fn.fn, args: [packed], type: fn.result, loc };
     }
-    return lowerReflectDynOperands(L, call, loc, "dyn.reflectApply", 3);
+    return lowerReflectDynOperands(L, call, loc, "dyn.reflectApply", 3, 2);
   }
 
   /** `Reflect.construct(target, argumentsList[, newTarget])`. The checked-
@@ -2125,7 +2125,39 @@ function fsWriteOptionsSignalFree(L: Lowerer, fn: string, expr: ts.CallExpressio
       L.noLowering("Reflect.construct with a newTarget other than its target", newTargetNode,
         "a different newTarget picks the instance's prototype (newTarget.prototype), which the checked-dynamic construction cannot carry exactly; pass the target itself as newTarget, or spell the construction directly");
     }
-    return lowerReflectDynOperands(L, call, loc, "dyn.reflectConstruct", 2);
+    return lowerReflectDynOperands(L, call, loc, "dyn.reflectConstruct", 2, 1);
+  }
+
+  /** The argument list of Reflect.apply / Reflect.construct must be a value the
+   * runtime converts EXACTLY: a literal, an array (any element type), a typed
+   * array / Buffer, or undefined / null (Node's own CreateListFromArrayLike
+   * refusal). Any other static type (a class instance, a promise, an ArrayBuffer,
+   * any / unknown) has no exact conversion here, so it refuses at build time
+   * rather than reaching a run-time "not supported yet" throw. */
+  function reflectListFence(L: Lowerer, call: ts.CallExpression, node: ts.Expression, fn: "dyn.reflectApply" | "dyn.reflectConstruct"): void {
+    let x: ts.Expression = node;
+    while (ts.isParenthesizedExpression(x)) x = x.expression;
+    if (ts.isArrayLiteralExpression(x)) return;
+    const t = L.typeOf(node);
+    const mapped = L.mapTypeOf(t);
+    if (mapped !== null && (isUnitType(mapped) || mapped.kind === "array" || mapped.kind === "bytes")) return;
+    // An `any[]` / `T[]` / tuple binding maps to the dyn-element array, which the runtime
+    // converts element by element like any array.
+    if (isArrayOrTupleType(L, t)) return;
+    const which = fn === "dyn.reflectApply" ? "Reflect.apply" : "Reflect.construct";
+    L.noLowering(
+      `${which} with an argument list of type '${L.checker.typeToString(t)}'`,
+      node,
+      "the runtime converts an array, a typed array or a literal list exactly; other object kinds (class instances, promises, ArrayBuffers) and untyped values have no exact list conversion here. Spell the list as an array (e.g. [...xs] or an any[] binding)",
+    );
+  }
+
+  /** A TypeScript Array / ReadonlyArray reference or a tuple (their runtime value is always an array). */
+  function isArrayOrTupleType(L: Lowerer, t: ts.Type): boolean {
+    if ((((t as ts.ObjectType).objectFlags ?? 0) & ts.ObjectFlags.Tuple) !== 0) return true;
+    // `T[]`, `readonly T[]`, `Array<T>`: the checker prints an array type with its brackets,
+    // and a union (`any[] | undefined`) does not end with them.
+    return /\[\]$/.test(L.checker.typeToString(t));
   }
 
   /** The checked-dynamic operands of a Reflect call: the target, thisArg
@@ -2134,11 +2166,12 @@ function fsWriteOptionsSignalFree(L: Lowerer, fn: string, expr: ts.CallExpressio
    * Node's own message. The result is dyn; a statically typed call result
    * (Reflect.apply's TypeScript signature returns R) leaves the dyn through
    * the validated exit. */
-  function lowerReflectDynOperands(L: Lowerer, call: ts.CallExpression, loc: SrcLoc, fn: "dyn.reflectApply" | "dyn.reflectConstruct", arity: number): IrExpr {
+  function lowerReflectDynOperands(L: Lowerer, call: ts.CallExpression, loc: SrcLoc, fn: "dyn.reflectApply" | "dyn.reflectConstruct", arity: number, listIndex: number): IrExpr {
     const nodes: (ts.Expression | undefined)[] = [];
     for (let i = 0; i < arity; i++) nodes.push(call.arguments[i]);
-    const ops: IrExpr[] = nodes.map((n) => {
+    const ops: IrExpr[] = nodes.map((n, idx) => {
       if (n === undefined) return dynUndefinedExpr(loc);
+      if (idx === listIndex) reflectListFence(L, call, n, fn);
       // An array literal is built element by element as a dyn array (the
       // `new` arm's pack). Its checker type here is the parameter's
       // (ArrayLike<any> for construct), which has no static lowering of its own.
