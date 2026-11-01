@@ -10070,6 +10070,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/21400-fn-union-tostring-string-arm.ts": {
+   "order": [
+    "<repo>/tests/corpus/21400-fn-union-tostring-string-arm.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21401-fn-union-tostring-function-arms.ts": {
+   "order": [
+    "<repo>/tests/corpus/21401-fn-union-tostring-function-arms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21402-fn-union-tostring-constructor-shape.ts": {
+   "order": [
+    "<repo>/tests/corpus/21402-fn-union-tostring-constructor-shape.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/21403-fn-union-tostring-adapter-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/21403-fn-union-tostring-adapter-slot.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2160-dc-tracing-channel.cjs": {
    "order": [
     "<repo>/tests/corpus/2160-dc-tracing-channel.cjs"
