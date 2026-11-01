@@ -3903,6 +3903,16 @@ export class Lowerer {
     // its exact source text, or the program is refused (fn-srctext-attach.ts).
     {
       const fnText = attachFnSrcText(functions, this.globalsList, this.program);
+      if (fnText.constructMissing !== null) {
+        const cm = fnText.constructMissing;
+        this.pushDiag({
+          code: "SC2020",
+          message:
+            `Reflect.construct / new over a checked-dynamic function value: the function '${cm.fnName}' ` +
+            `reaches a construct site with no exact [[Construct]] answer (${cm.reason})`,
+          loc: cm.loc,
+        } as ScrDiagnostic);
+      }
       if (fnText.missing !== null && fnText.used !== null) {
         this.pushDiag({
           code: "SC2020",

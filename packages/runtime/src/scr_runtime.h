@@ -4978,6 +4978,9 @@ typedef struct ScrFnText {
 } ScrFnText;
 void scr_fn_texts_install(const ScrFnText *tbl, size_t n);
 ScrStr *scr_fn_text(const ScrClosure *c);
+/* The table text for a closure entry point, or NULL (no default). Installed by
+ * scr_fn_texts_install in scr_fntext.c, so a program without the table keeps it NULL. */
+extern const char *(*scr_fn_text_row_hook)(const ScrClosure *c);
 
 /* Object member. `key` is UTF-8 bytes, NUL-terminated for convenience,
  * and `key_len` excludes the NUL — duplicate keys were already collapsed
