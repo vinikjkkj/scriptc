@@ -20,7 +20,7 @@ import type { IrFfiImport } from "../../ir/nodes.js";
 import { isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
 import { siblingDtsMethodReturnKind } from "../npm.js";
 import { erasedUnionOfArms, genResultRecord, instantiatedConstraint, isGenericCallableMemberType, isSymbolicCandidateType, typeKey} from "../types.js";
-import { PoisonError, dynFallbackType, dynUndefinedExpr, fnValueCodeOfNode, importCallHandleType, jsFuncNameOf, jsFuncValueNameOf, jsFuncValueSourceOf, newFnCtx, nodeThrowExpr, staticFnCodeOf, boundCodeOf } from "./lowerer.js";
+import { PoisonError, dynFallbackType, dynUndefinedExpr, fnValueCodeOfNode, importCallHandleType, jsFuncNameOf, jsFuncValueNameOf, jsFuncValueSourceOf, newFnCtx, nodeThrowExpr, staticFnCodeOf, boundCodeOf, bindValueTargetIsCtor } from "./lowerer.js";
 import { pairedProtoClassOfValue, protoThisType } from "./proto-class-consume.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
 import { checkedArmBridge, lowerWebCryptoGetRandomValues, refuseUnloweredSubtleCall, refuseUnloweredWebCrypto, refuseWebCryptoDestructuredArgs, refuseWebCryptoOwnKeys, sameValueDynOperand, unboundMethodThunk, undefinedArmedInAnswer, lowerWebCryptoMemberCall } from "./lower-exprs.js";
@@ -15055,7 +15055,11 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverr
             const ctx = L.checker.getContextualType(call);
             return ctx !== undefined && isAnyTs(ctx);
           })();
-        const dynSlot =
+        // Only a CONSTRUCTIBLE target needs the runtime bind: a static bound closure answers a
+        // non-constructor (arrow, method, async, generator) exactly, and the runtime box of a
+        // stored method would hold its receiver in a cycle (the bindmethod RC audit).
+        const ctorTarget = bindValueTargetIsCtor(L, call);
+        const dynSlot = ctorTarget && (
           (ts.isVariableDeclaration(bindParent) && bindParent.initializer === call &&
             isAnyTs(L.typeOf(bindParent.name))) ||
           (ts.isBinaryExpression(bindParent) && bindParent.right === call &&
@@ -15064,7 +15068,7 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverr
           argOfPlainCall ||
           // A local holding the bind that escapes into checked-dynamic code (see bindLocalEscapesToDyn).
           (ts.isVariableDeclaration(bindParent) && bindParent.initializer === call &&
-            bindLocalEscapesToDyn(L, bindParent));
+            bindLocalEscapesToDyn(L, bindParent)));
         if (dynSlot && call.arguments.every((a) => !ts.isSpreadElement(a))) {
           const target = L.lowerExprExpecting(access.expression, DYN);
           const ops: IrExpr[] = call.arguments.map((a) => L.lowerExprExpecting(a, DYN));
