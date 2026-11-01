@@ -30,6 +30,9 @@ const TS5_ISLANDS = [
   "packages/compiler/src/frontend/js-desugar.ts",
   // Function-constructor staging, called from js-desugar.ts: text in, text out.
   "packages/compiler/src/frontend/fn-ctor-desugar.ts",
+  // The forEach-over-builtin-constructors unroll: text in, text out, inside the same fs shadow read hook (program.ts
+  // loadProgram) before the 7.0.2 program reads the file. The same shape as npm-static-rewrite.ts.
+  "packages/compiler/src/frontend/ctor-foreach-rewrite.ts",
 ];
 
 const ts5Fence = {

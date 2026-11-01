@@ -56,6 +56,7 @@ import { deadTopLevelStatements, type RequireThrowCtx } from "./require-throws.j
 import { isNpmStaticPackage, npmStaticActive, npmStaticFsShadow, npmStaticPackageOfPath, npmStaticPackages, npmStaticRewroteExports, reportNpmStaticOffender, setNpmStaticPackages } from "./npm-static.js";
 import { isProvenanceSourceFile, isProvenanceSpecifier, provenancePaths } from "./provenance-registry.js";
 import { provenanceAliasRewrite, readSourceForRewrite } from "./provenance-rewrite.js";
+import { unrollBuiltinCtorForEach } from "./ctor-foreach-rewrite.js";
 import { setServedSourceText } from "../source-text.js";
 import { jsDesugar } from "./js-desugar.js";
 import { applySeedPins, computeSeedPins, type SeedPin } from "./seed-pin.js";
@@ -414,6 +415,11 @@ export function loadProgram(
         let served: string | undefined = above;
         const rewritten = provenanceAliasRewrite(path, () => above ?? readSourceForRewrite(path));
         if (rewritten !== null) served = rewritten;
+        // A forEach over a literal array of builtin constructors that exports one member per constructor
+        // (ctor-foreach-rewrite.ts): unrolled as served text, so every export key is a literal. Null for every
+        // other file and every other shape.
+        const unrolled = path.endsWith(".js") || path.endsWith(".cjs") ? unrollBuiltinCtorForEach(path, served ?? readSourceForRewrite(path) ?? "") : null;
+        if (unrolled !== null) served = unrolled;
         // SEED PINS (seed-pin.ts): the second load re-serves the files whose
         // seeded containers must be dyn-flavoured, with each seed wrapped in
         // an `any` cast. Applied on top of whatever the shadows above
@@ -466,7 +472,7 @@ export function loadProgram(
           }
           served = text;
         }
-        if (served !== undefined && (rewritten !== null || filePins !== undefined || fileRetype !== undefined || edits !== undefined)) {
+        if (served !== undefined && (rewritten !== null || unrolled !== null || filePins !== undefined || fileRetype !== undefined || edits !== undefined)) {
           // srcSite (the C emitter) turns a SrcLoc OFFSET into file:line:col
           // by reading the file off disk a second time. A rewrite changes no
           // lines but does change the offsets after each edit, so the disk
