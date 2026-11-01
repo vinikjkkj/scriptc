@@ -6472,6 +6472,13 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         const grafted = lowerEmitterMixinCall(L, expr);
         if (grafted !== null) return grafted;
       }
+      // A spent optional callee (`recv?.m(args)` inside its own chain, whose
+      // receiver the chain has already tested nullish): the checked-dynamic
+      // dispatch serves an untyped receiver, as it does for a plain call.
+      if (ts.isPropertyAccessExpression(expr.expression) && L.chainHandled.has(expr.expression)) {
+        const served = lowerDynReceiverMethodCall(L, expr, expr.expression);
+        if (served) return served;
+      }
       L.unsupported("SC1090", expr, `method calls like '${expr.expression.getText()}'`);
     }
 
@@ -7125,7 +7132,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     // ToIntegerOrInfinity in the runtime, because JS coerces them where a
     // static f64 conversion would throw.
     if (access.name.text === "toString" && call.arguments.length >= 2 &&
-        call.arguments.length <= 3 && !call.questionDotToken && !access.questionDotToken &&
+        call.arguments.length <= 3 &&
         !call.arguments.some((a) => ts.isSpreadElement(a))) {
       // A RUN-TIME encoding (an untyped parameter): the runtime normalises it
       // for the one receiver kind that uses it.
@@ -7175,7 +7182,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       const bo = bufOnlyDynCall(L, call, access, recv);
       if (bo !== null) return bo;
     }
-    if (DYN_DISPATCH_METHODS.has(access.name.text) && !call.questionDotToken && !access.questionDotToken) {
+    if (DYN_DISPATCH_METHODS.has(access.name.text)) {
       if (call.arguments.some((a) => ts.isSpreadElement(a))) {
         return dynInvokeWithSpread(L, call, recv, access);
       }
@@ -7236,7 +7243,6 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     if (DYN_PROTO_METHOD_NAMES.has(access.name.text)) { mcallWhy("byname", access, access.name.text); return null; }
     // Optional forms (`obj.cb?.()`, `obj?.cb()`) belong to the chain
     // machinery's short-circuit semantics — not modeled here yet.
-    if (call.questionDotToken || access.questionDotToken) { mcallWhy("optchain", access, access.name.text); return null; }
     const loc = locOf(call);
     if (call.arguments.some((a) => ts.isSpreadElement(a))) {
       return dynInvokeWithSpread(L, call, recv, access);
