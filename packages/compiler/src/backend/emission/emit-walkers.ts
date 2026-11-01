@@ -380,6 +380,8 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
         return "Map";
       case "set":
         return "Set";
+      case "promise":
+        return "Promise";
       default: {
         // Runtime HANDLE targets name the class ("expected
         // IncomingMessage at $, got string").
@@ -2285,6 +2287,16 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         if (soft) d.push(`  (void)ok;`);
         d.push(`  return scr_dyn_retain((ScrDyn *)d);`);
         break;
+      case "promise": {
+        // `u as Promise<unknown>` (the dyn→Promise<T> edge): the SAME
+        // ScrPromise back, retained, through the runtime's kind check and
+        // path TypeError. Only the dyn payload is checkable here; a typed
+        // payload reaches the promise through the coerce adapter's await.
+        if (t.inner.kind !== "dyn") throw new Error(`emitter bug: dynCheck of promise<${t.inner.kind}>`);
+        if (soft) d.push(`  if (d->kind != SCR_DYN_PROMISE) { *ok = false; return NULL; }`);
+        d.push(`  return scr_dyn_promise_unbox(d, path, ${want});`);
+        break;
+      }
       case "bigint":
         // `u as bigint`, and the bigint arm of a checked union: the SAME
         // digits back, retained. Not a copy — the u8 arm below copies
