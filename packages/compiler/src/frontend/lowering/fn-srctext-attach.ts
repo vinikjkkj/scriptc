@@ -26,6 +26,7 @@ import * as ts from "../ts7/adapter.js";
 import type { IrFunction, SrcLoc } from "../../ir/nodes.js";
 import { functionSourceText, isValueFunctionNode } from "../fn-srctext.js";
 import { irFunctionValueCode } from "../../ir/nodes.js";
+import { isJsSourceFileName } from "../shared.js";
 
 export interface FnTextAttachResult {
   /** The first fn.text use, when the program uses one at all. */
@@ -129,6 +130,10 @@ export function attachFnSrcText(
   for (const fn of functions) byName.set(fn.name, fn);
   let used: SrcLoc | null = null;
   let construct: SrcLoc | null = null;
+  // A construct site that did not compile on main: Reflect.construct, and a checked-dynamic `new`
+  // written in TypeScript (main refused any/unknown TS callees). The JS dyn.construct sites compiled
+  // on main with the answers they already had, so no construct refusal may be placed on account of them.
+  let newConstruct: SrcLoc | null = null;
   let reflectConstruct: SrcLoc | null = null;
   let protoWrite: SrcLoc | null = null;
   let staticBoundReach: SrcLoc | null = null;
@@ -145,6 +150,11 @@ export function attachFnSrcText(
       node.kind === "libCall" && (node.fn === "dyn.construct" || node.fn === "dyn.reflectConstruct") &&
       construct === null
     ) construct = node.loc as SrcLoc;
+    if (
+      node.kind === "libCall" &&
+      (node.fn === "dyn.reflectConstruct" || (node.fn === "dyn.construct" && !isJsSourceFileName((node.loc as SrcLoc).file))) &&
+      newConstruct === null
+    ) newConstruct = node.loc as SrcLoc;
     if (node.kind === "libCall" && node.fn === "dyn.reflectConstruct" && reflectConstruct === null) {
       reflectConstruct = node.loc as SrcLoc;
     }
@@ -232,14 +242,14 @@ export function attachFnSrcText(
     }
     fn!.srcText = text;
   }
-  if (construct !== null && primitiveStored !== null) {
+  if (newConstruct !== null && primitiveStored !== null) {
     result.constructMissing ??= {
       loc: primitiveStored,
       fnName: "<primitive constructor>",
       reason: "the primitive constructor (String / Number / Boolean) is stored as a value, and constructing it answers a wrapper object this build does not represent",
     };
   }
-  if (construct !== null && staticBoundReach !== null) {
+  if (newConstruct !== null && staticBoundReach !== null) {
     result.constructMissing ??= {
       loc: staticBoundReach,
       fnName: "<statically bound function>",
@@ -253,7 +263,7 @@ export function attachFnSrcText(
       reason: "a write of a non-literal-object 'prototype' on a checked-dynamic value can make a constructed instance's [[Prototype]] a non-plain object, which this build does not link",
     };
   }
-  if (construct !== null) {
+  if (newConstruct !== null) {
     for (const [name, loc] of dynNames) {
       const reason = constructReasonOf(name, byName.get(name));
       if (reason !== null) {
