@@ -129,14 +129,21 @@ function wantsTscDecorators(file: string): boolean {
  * test cache — a pure function of the program bytes and the typescript
  * version (both in the oracle cache key). */
 function nodeOracleFile(file: string): string {
-  if (!wantsTscDecorators(file)) return file;
+  // `import x = require(m)` is not erasable syntax (Node's type stripping
+  // refuses it), so a program that uses it runs as the CommonJS transpile
+  // tsc emits: the module.exports binding the statement names.
+  const cjs = /^\s*import\s+(?:type\s+)?[A-Za-z_$][\w$]*\s*=\s*require\s*\(/m.test(readFileSync(file, "utf8"));
+  if (!wantsTscDecorators(file) && !cjs) return file;
   const src = readFileSync(file, "utf8");
   const out = ts5.transpileModule(src, {
-    compilerOptions: { target: ts5.ScriptTarget.ES2022, module: ts5.ModuleKind.ESNext },
+    compilerOptions: {
+      target: ts5.ScriptTarget.ES2022,
+      module: cjs ? ts5.ModuleKind.CommonJS : ts5.ModuleKind.ESNext,
+    },
     fileName: file,
   }).outputText;
   const key = createHash("sha256").update(ts5.version).update("\0").update(src).digest("hex").slice(0, 16);
-  const path = join(cacheDir, `dec-oracle-${key}.mjs`);
+  const path = join(cacheDir, `${cjs ? "cjs" : "dec"}-oracle-${key}.${cjs ? "cjs" : "mjs"}`);
   mkdirSync(cacheDir, { recursive: true });
   // Atomic publish: concurrent suites (the other flavor's full run, or
   // another lane over the same program) write this same content-keyed
