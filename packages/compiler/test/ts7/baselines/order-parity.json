@@ -10184,6 +10184,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/21906-dyn-optional-method-on-parsed-strings.js": {
+   "order": [
+    "<repo>/tests/corpus/21906-dyn-optional-method-on-parsed-strings.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2160-dc-tracing-channel.cjs": {
    "order": [
     "<repo>/tests/corpus/2160-dc-tracing-channel.cjs"
