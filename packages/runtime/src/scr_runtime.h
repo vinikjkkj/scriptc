@@ -8061,6 +8061,10 @@ bool scr_loop_run(ScrPromise *top_level);
 /* The same loop for a CommonJS entry: its main body's nextTicks drain before
  * its promise jobs (Node's order for a synchronously evaluated main module). */
 bool scr_loop_run_cjs(ScrPromise *top_level);
+/* One Node callback-scope close for the signal dispatcher (scr_events.c): user
+ * ticks to exhaustion, then promise jobs, repeated while either has work. False
+ * when an uncaught throw is pending. */
+bool scr_loop_drain_ticks_jobs(void);
 /* SCR_LOOP_WHY (a build define, reached through SCRIPTC_PROF_CFLAGS):
  * names what is keeping the loop alive. A program whose main() RETURNS but
  * whose process never comes back has a live handle nobody can see, and
