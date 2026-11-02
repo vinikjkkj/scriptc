@@ -56,6 +56,11 @@ jobs:
       matrix:
         driver: ${{ fromJSON(needs.plan.outputs.matrix) }}
     steps:
+      - name: Record the runner hardware
+        run: |
+          lscpu | grep -E 'Model name|^CPU\(s\)|Thread|MHz' || true
+          free -m | sed -n 1,2p
+          df -h / | tail -1
       - uses: actions/checkout@v4
         with:
           path: rigsrc
