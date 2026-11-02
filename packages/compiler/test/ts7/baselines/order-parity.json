@@ -23375,6 +23375,12 @@
     "<repo>/tests/corpus/21110-reflect-local-bind-escape.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/23015-dyn-emitter-typed-listener-types-register-boxed.ts": {
+   "order": [
+    "<repo>/tests/corpus/23015-dyn-emitter-typed-listener-types-register-boxed.ts"
+   ],
+   "diags": []
   }
  }
 }
