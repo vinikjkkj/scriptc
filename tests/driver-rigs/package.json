@@ -1,0 +1,1 @@
+{"name":"d","private":true,"dependencies":{"@zapo-js/store-postgres":"1.2.0","@zapo-js/store-redis":"1.3.0","@zapo-js/store-mongo":"1.2.0","@zapo-js/store-mysql":"1.2.0","zapo-js":"1.8.2","pg":"8.23.1","ioredis":"6.0.0","mongodb":"7.7.0","mysql2":"3.24.5","typescript":"^7.0.2"},"devDependencies":{"@types/node":"24.13.3","@types/pg":"^8.11.0"}}
