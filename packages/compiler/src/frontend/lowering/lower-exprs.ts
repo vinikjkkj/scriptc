@@ -37,7 +37,7 @@ import { expandoMemberRead, expandoWritableTarget, exportEqualsNamedMemberRead }
 import { LITERAL_IGNORED_KEYS, lowerSocketInstanceOf, lowerTlsRootCertificates } from "./lower-server.js";
 import { fenceNamespaceConditionalValue, lowerNamespaceConditionalDecl } from "./lower-nsvalue.js";
 import { detachedMethodVariant, findGenericMethodOn, lowerStaticFieldRead, superGuardedThis } from "./lower-classes.js";
-import { jsLetReadStaysDyn, type GenericFnInfo, type GenericInstance, type ParamShape, detachedThisClassOf, detachedDeclinable, inStrictCode, implicitDefaultInstance, implicitDetachedInstance, bindingNeverReassigned, classHasOwnValueOf, dynSpreadSource, classInstanceToString, implicitMonoFile, lowerIntlDefaultLocaleProperty, lowerTaggedTemplate, nullishGenericBindingUnitOf, objLitGenericFnInfoOf, objLitGenericFnNodeOf, requireObjLitGenericReceiver, lowerDynReceiverMethodCall } from "./lower-calls.js";
+import { restPackedArgs, jsLetReadStaysDyn, type GenericFnInfo, type GenericInstance, type ParamShape, detachedThisClassOf, detachedDeclinable, inStrictCode, implicitDefaultInstance, implicitDetachedInstance, bindingNeverReassigned, classHasOwnValueOf, dynSpreadSource, classInstanceToString, implicitMonoFile, lowerIntlDefaultLocaleProperty, lowerTaggedTemplate, nullishGenericBindingUnitOf, objLitGenericFnInfoOf, objLitGenericFnNodeOf, requireObjLitGenericReceiver, lowerDynReceiverMethodCall } from "./lower-calls.js";
 import { mixinFnOfCallee } from "./lower-mixins.js";
 import { esOwnKeyOrder, isArrayIndexKey, isConstAssertionTypeNode, isGenericCallableMemberType, overflowShapeKey, overflowShapeKeys, overflowShapeKeysDenied, underConstAssertion, unitOnlyUnion } from "../types.js";
 import { lowerYield } from "./lower-generators.js";
@@ -8250,7 +8250,13 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     if (dotNode === expr && ts.isCallExpression(expr)) {
       if (narrowed.kind !== "func") L.badType(recvNode, L.typeOf(recvNode));
       const params = narrowed.params;
-      const args = expr.arguments.map((a, i) => L.lowerExprExpecting(a, params[i]));
+      // A callee whose signature ends in a rest slot (`(...xs: unknown[]) => void`, whose one
+      // compiled slot is the array): the surplus arguments PACK into it exactly as a direct
+      // value call packs them. Without this the first argument was handed to the pack slot
+      // as itself (`l?.("opt")` read the string where the array belongs).
+      const args =
+        restPackedArgs(L, expr, params, loc, narrowed.restIn === true) ??
+        expr.arguments.map((a, i) => L.lowerExprExpecting(a, params[i]));
       const body: IrExpr = { kind: "callValue", callee: recvRef, args, type: narrowed.ret, loc };
       return L.finishOptionalChain(expr, id, receiver, body, loc, slotWidenedRecv);
     }

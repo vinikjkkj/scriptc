@@ -975,7 +975,7 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
    * resolved signature has no rest slot, when a spread argument makes the
    * count run-time, or when the callee's own type never spelled the array
    * (an island or dyn-tier slot keeps its existing story). */
-  function restPackedArgs(L: Lowerer, expr: ts.CallExpression, params: readonly IrType[],
+  export function restPackedArgs(L: Lowerer, expr: ts.CallExpression, params: readonly IrType[],
     loc: SrcLoc, calleeRestIn = false,): IrExpr[] | null {
     if (params.length === 0) return null;
     // A closure whose slot is ONE dyn pack (a merged overload set that holds
