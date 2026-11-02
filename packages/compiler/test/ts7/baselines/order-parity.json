@@ -23364,6 +23364,12 @@
     "<repo>/tests/corpus/23014-dyn-emitter-grafted-instance-into-untyped-parameter.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/23015-dyn-emitter-typed-listener-types-register-boxed.ts": {
+   "order": [
+    "<repo>/tests/corpus/23015-dyn-emitter-typed-listener-types-register-boxed.ts"
+   ],
+   "diags": []
   }
  }
 }
