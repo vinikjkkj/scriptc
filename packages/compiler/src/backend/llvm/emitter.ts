@@ -73,10 +73,10 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { moduleUsesTextMb, moduleUsesDc, moduleUsesTls, ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, presenceMaskStores, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesFnText, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, isDynPackFunc, moduleUsesBigInt, moduleUsesRegexExecDyn, moduleUsesBytesOwn, moduleUsesAsym, moduleUsesDynAsync, moduleBoxesProcStream, moduleUsesNodeTest, irFunctionValueCode, fnNameTableRows } from "../../ir/nodes.js";
+import { moduleUsesTextMb, moduleUsesDc, moduleUsesTls, ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, presenceMaskStores, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesFnText, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, moduleUsesEmitter, moduleBoxesEmitters, canBoxFuncIntoDyn, isDynPackFunc, moduleUsesBigInt, moduleUsesRegexExecDyn, moduleUsesBytesOwn, moduleUsesAsym, moduleUsesDynAsync, moduleBoxesProcStream, moduleUsesNodeTest, irFunctionValueCode, fnNameTableRows } from "../../ir/nodes.js";
 import { setDynOrderPlan } from "../dyn-members.js";
 import { orderRecordPlanCached } from "../../ir/nodes.js";
-import { dynClassDisplayName, dynRuntimeRoot, dynEnumerationFenced, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
+import { dynClassDisplayName, dynEmitterSlot, dynRuntimeRoot, dynEnumerationFenced, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals, stackCheckPolicy, stackCheckTargetHasFloor, stackMarginBytes, stackMarginSymbol } from "../emission/emit-stmts.js";
 // The stackless lane's admission, read from the ONE place that owns it.
@@ -1129,6 +1129,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "emitter.removeAll": "scr_emitter_remove_all",
   "emitter.emitError": "scr_emitter_emit_error",
   "emitter.emitDyn": "scr_emitter_emit_dyn_array",
+  "emitter.fromDyn": "scr_dyn_emitter_of",
   "emitter.count": "scr_emitter_listener_count",
   "emitter.countFn": "scr_emitter_listener_count_fn",
   "emitter.names": "scr_emitter_event_names",
@@ -2097,6 +2098,11 @@ class LlEmitter {
   private currentFnName = "";
 
   /** moduleUsesDynView, once (the keyed read asks per call site). */
+  private emitterBoxesListenersMemo: boolean | undefined;
+  /** Does a typed listener registration carry its dyn function box (moduleBoxesEmitters)? */
+  get emitterBoxesListeners(): boolean {
+    return (this.emitterBoxesListenersMemo ??= moduleBoxesEmitters(this.mod));
+  }
   private dynViewMemo: boolean | undefined;
   get usesDynView(): boolean {
     return (this.dynViewMemo ??= moduleUsesDynView(this.mod));
@@ -2686,7 +2692,7 @@ class LlEmitter {
       // always-linked dyn core a descriptor whose `members` read runs off
       // the end of the object — measured, as an access violation on the
       // first boxed method call.
-      `%ScrDynClass = type { ptr, i64, i64, i8, ptr, ptr, ptr, i64, i8, i8, i8, ptr, i64, i8, ptr, i8, i8, i64, i64 }`,
+      `%ScrDynClass = type { ptr, i64, i64, i8, ptr, ptr, ptr, i64, i8, i8, i8, ptr, i64, i8, ptr, i8, i8, i64, i64, i64 }`,
       // One row of a class's instance MEMBER TABLE
       // { name, len, get, call, enumerable } (ScrDynClassMember in
       // scr_runtime.h) — what `x.get()` and `x.v` read through once the
@@ -2866,6 +2872,8 @@ class LlEmitter {
     // not of interning order — the fn-name table's rule, same reason.
     const dynClassDescSyms = [...this.dynClassDescSyms.values()].map((d) => d.sym).sort();
     if (moduleUsesDynClass(this.mod)) out.push(`declare void @scr_dyn_class_install()`, ``);
+    if (dynClassDescSyms.length > 0 && moduleUsesEmitter(this.mod)) out.push(`declare void @scr_dyn_ee_install()`, ``);
+    if (this.emitterBoxesListeners) out.push(`@scr_nonerr_unhandled_fn = external global ptr`, `declare ptr @scr_insp_unhandled_nonerr(ptr)`, ``);
     if (dynClassDescSyms.length > 0) {
       out.push(
         `declare void @scr_dyn_objinst_registry(ptr, i64)`,
@@ -2959,6 +2967,8 @@ class LlEmitter {
         ? [`  call void @scr_dyn_objinst_registry(ptr @sc_dcl_tbl, i64 ${dynClassDescSyms.length})`]
         : []),
       ...(moduleUsesDynClass(this.mod) ? [`  call void @scr_dyn_class_install()`] : []),
+      ...(dynClassDescSyms.length > 0 && moduleUsesEmitter(this.mod) ? [`  call void @scr_dyn_ee_install()`] : []),
+      ...(this.emitterBoxesListeners ? [`  store ptr @scr_insp_unhandled_nonerr, ptr @scr_nonerr_unhandled_fn`] : []),
       ...(fnNameRows.length > 0
         ? [`  call void @scr_fn_names_install(ptr @sc_fn_name_tbl, i64 ${fnNameRows.length})`]
         : []),
@@ -4075,7 +4085,7 @@ class LlEmitter {
       `ptr ${statics === null ? "null" : `@${statics.sym}`}, i64 ${statics === null ? 0 : statics.count}, i8 ${staticsOpaque ? 1 : 0}, ` +
       `ptr ${meta.base === null ? "null" : this.cstr(dynClassDisplayName(meta.base.def))}, i8 ${dynRuntimeRoot(meta)}, ` +
       `i8 ${this.tracedShapes.has(`object:${className}`) ? 1 : 0}, ` +
-      `i64 ${this.ordNordOf(className)}, i64 ${this.ordOffsetOf(className)} }`;
+      `i64 ${this.ordNordOf(className)}, i64 ${this.ordOffsetOf(className)}, i64 ${this.eeOffsetOf(className)} }`;
     this.dynClassDescSyms.set(className, { sym, body });
     // Subclass descriptors join the registry (see the C twin): a base-typed
     // box can hold a derived instance whose own member table must resolve.
@@ -4190,6 +4200,16 @@ class LlEmitter {
   }
   /** ScrDynClass.ord_off: the byte offset of the hierarchy's order record,
    * as a constant expression (0 when the hierarchy has none). */
+  /** The ScrDynClass.ee_off of a class: 0 for an emitter-rooted class (the instance IS the
+   * ScrEmitter prefix), the byte offset of the hidden `__scrEmitter` slot for a grafted class,
+   * -1 for anything else. */
+  eeOffsetOf(className: string): string {
+    const meta = this.classMetaOf(className);
+    const kind = dynEmitterSlot(meta);
+    if (kind === null) return "-1";
+    if (kind === "prefix") return "0";
+    return `ptrtoint (ptr getelementptr inbounds (%${classStructSym(className)}, ptr null, i32 0, i32 ${this.classFieldGep(className, kind.field)}) to i64)`;
+  }
   ordOffsetOf(className: string): string {
     const plan = orderRecordPlanCached(this.mod.classes ?? []);
     const root = plan.rootOf(className);
@@ -11631,21 +11651,17 @@ class LlEmitter {
           // `u instanceof C` over an unknown value: the boxed instance's own
           // preorder position inside C's interval (scr_dyn_objinst_is, the
           // C lane's twin); false for every other kind, never throws.
-          this.declare(`declare zeroext i1 @scr_dyn_objinst_is(ptr, i64, i64)`);
           this.dynClassDesc(e.className!);
           const iv = this.classInterval(e.className!);
           test = B.tmp();
-          B.line(`${test} = call zeroext i1 @scr_dyn_objinst_is(ptr ${d.name}, i64 ${iv.pre}, i64 ${iv.post})`);
           if (e.member !== undefined) {
-            // No class-table member of that name (see the C lane's arm).
-            this.declare(`declare ptr @scr_dyn_objinst_member(ptr, ptr, i64)`);
-            const mem = B.tmp();
-            B.line(`${mem} = call ptr @scr_dyn_objinst_member(ptr ${d.name}, ptr ${this.cstr(e.member)}, i64 ${e.member.length})`);
-            const none = B.tmp();
-            B.line(`${none} = icmp eq ptr ${mem}, null`);
-            const both = B.tmp();
-            B.line(`${both} = and i1 ${test}, ${none}`);
-            test = both;
+            // The emitterApi arm (see the C lane): inside the class interval or a class grafted with
+            // the emitter API, and no class-table member of that name.
+            this.declare(`declare zeroext i1 @scr_dyn_objinst_emitter_api(ptr, i64, i64, ptr, i64)`);
+            B.line(`${test} = call zeroext i1 @scr_dyn_objinst_emitter_api(ptr ${d.name}, i64 ${iv.pre}, i64 ${iv.post}, ptr ${this.cstr(e.member)}, i64 ${e.member.length})`);
+          } else {
+            this.declare(`declare zeroext i1 @scr_dyn_objinst_is(ptr, i64, i64)`);
+            B.line(`${test} = call zeroext i1 @scr_dyn_objinst_is(ptr ${d.name}, i64 ${iv.pre}, i64 ${iv.post})`);
           }
         } else if (e.test === "truthy") {
           this.declare(`declare zeroext i1 @scr_dyn_truthy(ptr)`);
@@ -17525,13 +17541,32 @@ class LlEmitter {
       const cbr = B.tmp();
       B.line(`${cbr} = call ptr @scr_closure_retain_v(ptr ${args[2]!.name})`);
       const wrapped = this.wrapEmitterListener(cbr, adapterFn);
+      let proto: string | null = null;
+      if (
+        this.emitterBoxesListeners && canBoxFuncIntoDyn(cbT, (id: string) => this.recordsById.get(id), (id: string) => this.unionsById.get(id))
+      ) {
+        // The listener's dyn function box (moduleBoxesEmitters): its payload rides the entry so a
+        // dynamic-list emit reaches this typed listener through the box's checked thunk.
+        proto = B.tmp();
+        B.line(`${proto} = call ptr @${this.dyn.dynFuncBoxHelper(cbT)}(ptr ${args[2]!.name}, ptr null, ptr null)`);
+      }
       this.moveTemp(args[2]!);
-      this.declare(`declare ptr @scr_emitter_on_via(ptr, ptr, ptr, ptr, ptr, i1 zeroext, i1 zeroext)`);
       const t = B.tmp();
-      B.line(
-        `${t} = call ptr @scr_emitter_on_via(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ` +
-          `ptr ${args[2]!.name}, ptr ${wrapped}, ptr @${shim}, i1 ${args[3]!.name}, i1 ${args[4]!.name})`,
-      );
+      if (proto !== null) {
+        this.declare(`declare ptr @scr_emitter_on_via_boxed(ptr, ptr, ptr, ptr, ptr, ptr, i1 zeroext, i1 zeroext)`);
+        this.declare(`declare void @scr_dyn_release(ptr)`);
+        B.line(
+          `${t} = call ptr @scr_emitter_on_via_boxed(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ` +
+            `ptr ${args[2]!.name}, ptr ${wrapped}, ptr ${proto}, ptr @${shim}, i1 ${args[3]!.name}, i1 ${args[4]!.name})`,
+        );
+        B.line(`call void @scr_dyn_release(ptr ${proto})`);
+      } else {
+        this.declare(`declare ptr @scr_emitter_on_via(ptr, ptr, ptr, ptr, ptr, i1 zeroext, i1 zeroext)`);
+        B.line(
+          `${t} = call ptr @scr_emitter_on_via(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ` +
+            `ptr ${args[2]!.name}, ptr ${wrapped}, ptr @${shim}, i1 ${args[3]!.name}, i1 ${args[4]!.name})`,
+        );
+      }
       const out = this.own({ name: t, type: e.type });
       this.emitPendingCheck();
       return out;

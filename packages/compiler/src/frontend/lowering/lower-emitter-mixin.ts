@@ -17,14 +17,14 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import type { IrExpr } from "../../ir/nodes.js";
-import { RUNTIME_EMITTER_CLASS, UNDEFINED_T } from "../../ir/nodes.js";
+import { EMITTER_MIXIN_FIELD_NAME, RUNTIME_EMITTER_CLASS, UNDEFINED_T } from "../../ir/nodes.js";
 import { locOf } from "../program.js";
 import { lowerEmitterMethodCall } from "./lower-emitter.js";
 import type { ClassInfo } from "./lower-classes.js";
 import { dtsWitnessClassOf } from "./lower-twin-witness.js";
 
 /** The hidden instance slot holding the ScrEmitter for a mixin-grafted class. */
-export const EMITTER_MIXIN_FIELD = "__scrEmitter";
+export const EMITTER_MIXIN_FIELD = EMITTER_MIXIN_FIELD_NAME;
 
 /** The EventEmitter API members a graft installs on Y (Node's prototype names). */
 const EMITTER_API = new Set([

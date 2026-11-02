@@ -14,7 +14,7 @@ function canonNum(type: { kind: string }, expr: string): string {
   return type.kind === "f64" ? `scr_num_canon(${expr})` : expr;
 }
 import { rcSitesRequested, rcSiteLabel } from "./emitter.js";
-import { ORD_MEMBER, orderRecordPlanCached, ABSENT_KEY_TRAP_CODE, arrayOf, BOOL, BYTES_U8, bytesOf, ownMaskKeyBit, presenceMaskStores, OWNMASK_COMPLETED, OWNMASK_VALID, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, IrExpr, IrRecordShape, IrType, irFunctionJsName, irFunctionValueCode, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals, typeKey } from "../../ir/nodes.js";
+import { ORD_MEMBER, orderRecordPlanCached, ABSENT_KEY_TRAP_CODE, arrayOf, canBoxFuncIntoDyn, BOOL, BYTES_U8, bytesOf, ownMaskKeyBit, presenceMaskStores, OWNMASK_COMPLETED, OWNMASK_VALID, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, IrExpr, IrRecordShape, IrType, irFunctionJsName, irFunctionValueCode, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals, typeKey } from "../../ir/nodes.js";
 import { unionKeyClasses, boxAccess, BYTES_NUM_KIND_C, BYTES_NUM_VAR_C, bytesElemKindC, cDecl, cFnPtrCast, cNumberLiteral, cStringLiteral, cType, DV_GET_KIND_C, DV_SET_KIND_C, elemAccess, mapKeyAccess, mapKeyKindC, mapValKindC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassNew, mangleClassRetain, mangleClassStruct, mangleField, mangleFnClosure, mangleFunction, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleVtStruct, mangleWrapper } from "../mangle.js";
 import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
@@ -3257,7 +3257,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           if (e.member !== undefined) {
             // The class table must not declare `member` (a user override
             // keeps the call on the dynamic path, which finds it).
-            t = `(${t} && scr_dyn_objinst_member(${d.name}, ${JSON.stringify(e.member)}, ${e.member.length}) == NULL)`;
+            // A class GRAFTED with the emitter API (applyMixin) answers it too (ee_off > 0).
+            t = `scr_dyn_objinst_emitter_api(${d.name}, ${meta.pre}, ${meta.post}, ${JSON.stringify(e.member)}, ${e.member.length})`;
           }
           return E.newTemp(e.type, e.negated ? `!(${t})` : t);
         }
@@ -7716,6 +7717,15 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             const cbT = e.args[2]!.type;
             const cb = args[2]!;
             E.moveTemp(cb);
+            if (
+              E.emitterBoxesListeners && cbT.kind === "func" &&
+              canBoxFuncIntoDyn(cbT, (id: string) => E.recordsById.get(id), (id: string) => E.unionsById.get(id))
+            ) {
+              const w = E.emitterBoxedOnFor(cbT);
+              return finish(
+                `(${cType(e.type).trim()})${w}((ScrEmitter *)${arg(0)}, ${arg(1)}, ${cb.name}, ${arg(3)}, ${arg(4)})`,
+              );
+            }
             const thunk = E.emitterInvokeThunkFor(cbT);
             return finish(
               `(${cType(e.type).trim()})scr_emitter_on((ScrEmitter *)${arg(0)}, ${arg(1)}, ${cb.name}, &${thunk}, ${arg(3)}, ${arg(4)})`,
@@ -7796,6 +7806,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(
               `scr_emitter_emit((ScrEmitter *)${arg(0)}, ${arg(1)}${e.args.slice(2).map((_, i) => `, ${arg(i + 2)}`).join("")})`,
             );
+          case "emitter.fromDyn":
+            // The emitter (+1) of a dyn-boxed emitter instance (the emitterApi test held).
+            return finish(`scr_dyn_emitter_of(${arg(0)})`);
           case "emitter.emitDyn":
             // emit.apply(this, arr): the runtime reads the name and the listener
             // arguments from one dyn array (may-throw: listeners and unhandled error).

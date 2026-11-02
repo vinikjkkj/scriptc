@@ -7397,8 +7397,10 @@ function lowerDynEmitterReceiverCall(L: Lowerer, call: ts.CallExpression,
   const localId = fresh("%dynem");
   ctx.locals.push({ id: localId, name: "%dynem", type: DYN, mutable: false, boxed: true });
   const ref: IrExpr = { kind: "varRef", localId, type: DYN, loc };
+  // The emitter of the boxed instance: its ScrEmitter prefix, or the hidden slot of a class grafted
+  // with the emitter API (only evaluated once the emitterApi test below held).
   const emitterRecv: IrExpr = {
-    kind: "dynCheck", value: ref, type: { kind: "object", className: RUNTIME_EMITTER_CLASS }, loc,
+    kind: "libCall", fn: "emitter.fromDyn", args: [ref], type: { kind: "object", className: RUNTIME_EMITTER_CLASS }, loc,
   };
   // The emitter arm, probed: a refusal (or any diagnostic) declines the claim.
   const probe = (run: () => IrExpr | null): IrExpr | null => {
@@ -7429,7 +7431,11 @@ function lowerDynEmitterReceiverCall(L: Lowerer, call: ts.CallExpression,
       ? emitter
       : emitter.type.kind === "void"
         ? { kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: emitter, loc }], result: dynUndefinedExpr(loc), type: DYN, loc }
-        : { kind: "dynFrom", value: emitter, type: DYN, loc };
+        : emitter.type.kind === "object"
+          // The chaining forms answer `this`: the RECEIVER box itself (identity, and for a class grafted
+          // with the emitter API the instance, not the hidden emitter the arm ran on).
+          ? { kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: emitter, loc }], result: ref, type: DYN, loc }
+          : { kind: "dynFrom", value: emitter, type: DYN, loc };
   };
   const dynArmArgs = (nameValue: IrExpr): IrExpr[] => [
     nameValue,
