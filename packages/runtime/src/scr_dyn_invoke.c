@@ -1727,6 +1727,13 @@ ScrDyn *scr_dyn_objinst_miss(ScrDyn *d, const ScrStr *key) {
    * table lists, so a miss cannot be called absent: the class value has no
    * dyn representation yet, and answering undefined would be the silent
    * wrong answer. The loud ladder stays for exactly this name. */
+  if (key->len == 11 && memcmp(key->data, "constructor", 11) == 0 && scr_dyn_objinst_class_of(d)->ee_off > 0) {
+    /* A class grafted by applyMixin(Y, EventEmitter) has had EventEmitter.prototype's own `constructor`
+     * copied over its own, so `x.constructor` is EventEmitter there, not Y: no class value stands for
+     * that here, and answering Y would be a silent wrong answer. The loud ladder stays. */
+    scr_dyn_objinst_fence(d, "a property read");
+    return NULL;
+  }
   if (key->len == 11 && memcmp(key->data, "constructor", 11) == 0) {
     /* The instance's class value (scr_dyn_class_box): the descriptor of the
      * class the instance ACTUALLY is, so a derived instance answers its own
