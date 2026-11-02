@@ -10714,6 +10714,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/23100-optional-call-through-rest-pack-closure.ts": {
+   "order": [
+    "<repo>/tests/corpus/23100-optional-call-through-rest-pack-closure.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23101-rest-any-function-member.ts": {
+   "order": [
+    "<repo>/tests/corpus/23101-rest-any-function-member.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23102-promise-constructor-like-option.ts": {
+   "order": [
+    "<repo>/tests/corpus/23102-promise-constructor-like-option.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23103-rest-any-and-promise-option-inspect.ts": {
+   "order": [
+    "<repo>/tests/corpus/23103-rest-any-and-promise-option-inspect.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23104-optional-call-one-argument-rest-pack.ts": {
+   "order": [
+    "<repo>/tests/corpus/23104-optional-call-one-argument-rest-pack.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2311-next-tick-js-callbacks.js": {
    "order": [
     "<repo>/tests/corpus/2311-next-tick-js-callbacks.js"
