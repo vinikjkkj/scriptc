@@ -1,7 +1,5 @@
-// A grafted applyMixin(R, EventEmitter) instance flowing into an untyped
-// parameter: its dyn view has no emitter members (typeof x.emit is
-// 'undefined' there, x.on throws), so the build refuses the flow (OPEN dyn
-// emitter model, dynx1). Node prints 'object' for this program.
+// A grafted applyMixin(R, EventEmitter) instance flowing into an untyped parameter keeps its
+// identity and its class: typeof is "object", exactly as in Node.
 import { EventEmitter } from "events";
 
 function applyMixin(derivedConstructor, mixinConstructor) {
