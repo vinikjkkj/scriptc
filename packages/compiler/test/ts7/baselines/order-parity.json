@@ -21681,30 +21681,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/diagnostics/emit-apply-argument-list-reaches-error-listener.js": {
-   "order": [
-    "<repo>/tests/diagnostics/emit-apply-argument-list-reaches-error-listener.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/emit-apply-argument-list-reaches-meta-listener.js": {
-   "order": [
-    "<repo>/tests/diagnostics/emit-apply-argument-list-reaches-meta-listener.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/emit-apply-argument-list-reaches-typed-plain-emitter.js": {
-   "order": [
-    "<repo>/tests/diagnostics/emit-apply-argument-list-reaches-typed-plain-emitter.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/emit-apply-argument-list-reaches-zero-arg-listener.js": {
-   "order": [
-    "<repo>/tests/diagnostics/emit-apply-argument-list-reaches-zero-arg-listener.js"
-   ],
-   "diags": []
-  },
   "<repo>/tests/diagnostics/emitter-projection-declines.ts": {
    "order": [
     "<repo>/tests/diagnostics/emitter-projection-declines.ts"
@@ -22303,12 +22279,6 @@
      }
     }
    ]
-  },
-  "<repo>/tests/diagnostics/mixin-dyn-flow-refused/main.js": {
-   "order": [
-    "<repo>/tests/diagnostics/mixin-dyn-flow-refused/main.js"
-   ],
-   "diags": []
   },
   "<repo>/tests/diagnostics/mixins.ts": {
    "order": [
