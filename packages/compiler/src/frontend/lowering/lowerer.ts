@@ -14151,6 +14151,13 @@ export class Lowerer {
       if (src !== null) e = { ...e, fnSrc: src };
       // A static bind of a constructible target: its [[Construct]] is not exact (see attach).
     }
+    // A bound value whose local was built through the runtime bind (bindLocalEscapesToDyn) is
+    // coerced to its static function type, and that closure has lost the bound kind code: carry
+    // it from the creation site so the re-boxed value still has no `prototype` (%o, row 18309).
+    if (e.kind === "dynFrom" && e.value.type.kind === "func" && e.fnSrc === "bound" && e.fnCode === undefined) {
+      const bcode = staticFnCodeOf(this, node);
+      if (bcode !== null) e = { ...e, fnCode: bcode };
+    }
     // A static bind of a constructible target (whatever set its creation-site text): its [[Construct]] is not exact.
     if (e.kind === "dynFrom" && e.fnSrc === "bound" && e.staticBindCtor === undefined && bindValueTargetIsCtor(this, node)) {
       e = { ...e, staticBindCtor: true };
