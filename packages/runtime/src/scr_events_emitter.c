@@ -348,10 +348,22 @@ static void scr_ee_warn_maybe(ScrEmitter *em, ScrEeBucket *b) {
  * add, like Node. A listener throw inside the meta emit leaves the
  * exception pending; the add still happens (Node's addListener has no
  * try). */
+static ScrEmitter *scr_ee_add2(ScrEmitter *em, ScrStr *name, ScrClosure *cb /*moves*/,
+                               ScrClosure *orig /*moves; may be NULL*/,
+                               const ScrDyn *box /*borrowed; NULL for direct*/,
+                               const ScrDyn *proto /*borrowed; stored only; NULL for none*/,
+                               ScrEeInvoke inv, bool once, bool prepend);
 static ScrEmitter *scr_ee_add(ScrEmitter *em, ScrStr *name, ScrClosure *cb /*moves*/,
                               ScrClosure *orig /*moves; may be NULL*/,
                               const ScrDyn *box /*borrowed; NULL for direct*/,
                               ScrEeInvoke inv, bool once, bool prepend) {
+  return scr_ee_add2(em, name, cb, orig, box, NULL, inv, once, prepend);
+}
+static ScrEmitter *scr_ee_add2(ScrEmitter *em, ScrStr *name, ScrClosure *cb /*moves*/,
+                               ScrClosure *orig /*moves; may be NULL*/,
+                               const ScrDyn *box /*borrowed; NULL for direct*/,
+                               const ScrDyn *proto /*borrowed; stored only; NULL for none*/,
+                               ScrEeInvoke inv, bool once, bool prepend) {
   scr_ee_reg_ensure(em);
   scr_ee_emit_meta(em, "newListener", name, box);
   ScrEeBucket *b = scr_ee_bucket_ensure(em->reg, name);
@@ -361,6 +373,13 @@ static ScrEmitter *scr_ee_add(ScrEmitter *em, ScrStr *name, ScrClosure *cb /*mov
   e->orig = orig;
   if (box != NULL) {
     e->fnproto = *box;
+    e->has_fnproto = true;
+  } else if (proto != NULL) {
+    /* A TYPED listener whose function payload was boxed by the compiler (a module that
+     * can reach this emitter through a dynamic value): kept so emit.apply / emit(...spread) /
+     * listeners() can call and answer it, without the newListener observers seeing it
+     * (they keep the registration's own view). */
+    e->fnproto = *proto;
     e->has_fnproto = true;
   }
   e->inv = inv;
@@ -388,6 +407,15 @@ ScrEmitter *scr_emitter_on(ScrEmitter *em, ScrStr *name, ScrClosure *cb /*moves*
   return scr_ee_add(em, name, cb, NULL, NULL, inv, once, prepend);
 }
 
+/* scr_emitter_on for a module whose emitters can be reached through a dynamic value: `proto`
+ * is the listener's compiler-built dyn function box (borrowed; its payload is copied, the
+ * closure is cb itself), so a dynamic-list emit calls the typed listener through the box's
+ * checked thunk. */
+ScrEmitter *scr_emitter_on_boxed(ScrEmitter *em, ScrStr *name, ScrClosure *cb /*moves*/,
+                                 const ScrDyn *proto, ScrEeInvoke inv, bool once, bool prepend) {
+  return scr_ee_add2(em, name, cb, NULL, NULL, proto, inv, once, prepend);
+}
+
 /* The dyn-adapted registration (JS-lane checked-dynamic listeners): the
  * ADAPTER closure (compiler-built — boxes the event tuple to dyn and
  * calls the original through the checked-dynamic machinery) is what emit
@@ -409,6 +437,13 @@ ScrEmitter *scr_emitter_on_via(ScrEmitter *em, ScrStr *name, ScrClosure *orig /*
                                 ScrClosure *adapter /*moves*/,
                                 ScrEeInvoke inv, bool once, bool prepend) {
   return scr_ee_add(em, name, adapter, orig, NULL, inv, once, prepend);
+}
+
+/* scr_emitter_on_via with the listener's boxed function payload (see scr_emitter_on_boxed). */
+ScrEmitter *scr_emitter_on_via_boxed(ScrEmitter *em, ScrStr *name, ScrClosure *orig /*moves*/,
+                                     ScrClosure *adapter /*moves*/, const ScrDyn *proto,
+                                     ScrEeInvoke inv, bool once, bool prepend) {
+  return scr_ee_add2(em, name, adapter, orig, NULL, proto, inv, once, prepend);
 }
 
 /* ── fixed-arity invoke shims (scr_runtime.h's contract) ──────────────
@@ -683,22 +718,45 @@ bool scr_emitter_emit(ScrEmitter *em, ScrStr *name, ...) {
  * Unhandled 'error' throws the first argument, as emit('error') does. */
 bool scr_emitter_emit_dyn_array(ScrEmitter *em, ScrDyn *arr) {
   size_t total = (size_t)scr_dyn_arr_len(arr);
+  ScrDyn **items = total ? malloc(total * sizeof *items) : NULL;
+  if (total && !items) scr_ee_oom();
+  for (size_t i = 0; i < total; i++) items[i] = scr_dyn_arr_at(arr, (double)i);
+  bool had = scr_emitter_emit_dyn_list(em, NULL, items, total);
+  for (size_t i = 0; i < total; i++) scr_dyn_release(items[i]);
+  free(items);
+  return had;
+}
+
+/* emit(...items) over a borrowed dyn argument vector: items[0] is the event name (undefined
+ * when absent), the rest the listener arguments. `self` (may be NULL) is the dyn box of the
+ * emitter, bound as `this` for each listener call (Node calls a listener with the emitter as
+ * its receiver). Every listener is reached through its function box: a dyn-registered entry
+ * keeps its box, a typed entry the one the compiler built for it. An entry with neither
+ * traps (the module could not box that listener's type; the frontend refuses the reachable
+ * shapes at build time). 'error' with no listener throws Node's way: an Error payload as is,
+ * anything else as ERR_UNHANDLED_ERROR. */
+bool scr_emitter_emit_dyn_list(ScrEmitter *em, ScrDyn *self, ScrDyn *const *items, size_t total) {
   size_t argc = total > 0 ? total - 1 : 0;
-  ScrDyn *key_d = scr_dyn_arr_at(arr, 0);
+  ScrDyn *key_d = total > 0 ? scr_dyn_retain(items[0]) : scr_dyn_retain(scr_dyn_undefined());
   ScrStr *name = scr_dyn_string_coerce_js(key_d);
   scr_dyn_release(key_d);
   if (name == NULL) return false; /* ToPropertyKey threw: the exception is pending */
-  ScrDyn **argv = argc ? malloc(argc * sizeof *argv) : NULL;
-  if (argc && !argv) scr_ee_oom();
-  for (size_t i = 0; i < argc; i++) argv[i] = scr_dyn_arr_at(arr, (double)(i + 1));
+  ScrDyn *const *argv = argc ? items + 1 : NULL;
   ScrEeBucket *b = em->reg ? scr_ee_bucket_find(em->reg, name->data, name->len) : NULL;
   bool had = b != NULL && b->n > 0;
   if (!had && name->len == 5 && memcmp(name->data, "error", 5) == 0) {
-    /* the payload throws (catchable): the first argument, or undefined */
-    ScrDyn *payload = argc ? scr_dyn_retain(argv[0]) : scr_dyn_arr_at(arr, 1.0);
-    for (size_t i = 0; i < argc; i++) scr_dyn_release(argv[i]);
-    free(argv);
+    ScrDyn *payload = argc ? scr_dyn_retain(argv[0]) : scr_dyn_retain(scr_dyn_undefined());
     scr_str_release(name);
+    if (!scr_dyn_instanceof_error(payload) && scr_nonerr_unhandled_fn != NULL) {
+      ScrError *u = scr_nonerr_unhandled_fn(payload);
+      scr_dyn_release(payload);
+      if (u != NULL) {
+        scr_throw_obj(scr_error_retain(u), &scr_error_retain_v, &scr_error_release_v, scr_error_trace_arg());
+        scr_error_release(u);
+        return false;
+      }
+      payload = scr_dyn_retain(scr_dyn_undefined());
+    }
     scr_throw_dyn(payload);
     return false;
   }
@@ -737,14 +795,14 @@ bool scr_emitter_emit_dyn_array(ScrEmitter *em, ScrDyn *arr) {
         }
       }
       if (!e->has_fnproto) scr_trap("scriptc: emit with a dynamic argument list reached a typed listener\n");
-      ScrDyn *r = scr_dyn_call(&e->fnproto, argv, argc, "listener");
+      if (self != NULL) scr_dyn_this_push_dyn(self);
+      ScrDyn *r = scr_dyn_call(&e->fnproto, (ScrDyn **)argv, argc, "listener");
+      if (self != NULL) scr_dyn_this_pop();
       scr_dyn_release(r);
       scr_ee_entry_unref(e);
     }
     free(snap);
   }
-  for (size_t i = 0; i < argc; i++) scr_dyn_release(argv[i]);
-  free(argv);
   scr_str_release(name);
   return had;
 }
@@ -752,7 +810,6 @@ bool scr_emitter_emit_dyn_array(ScrEmitter *em, ScrDyn *arr) {
 /* emit('error', err) — Node's special event: with no 'error' listener the
  * payload THROWS (catchable; uncaught exits 1 with the error report).
  * err is borrowed; the throw takes its own +1. */
-extern ScrError *(*scr_nonerr_unhandled_fn)(const ScrDyn *payload);  /* scr_json.c; set by scr_stream_dyn.c */
 
 bool scr_emitter_emit_error(ScrEmitter *em, ScrStr *name, ScrError *err) {
   if (!scr_ee_has(em->reg, "error")) {
@@ -904,3 +961,184 @@ void scr_emitter_set_default_max(double n) {
   scr_emitter_default_max = n;
 }
 double scr_emitter_get_default_max(void) { return scr_emitter_default_max; }
+
+/* ── the dyn view of the EventEmitter API ─────────────────────────────────
+ * A class instance that is an emitter (a subclass of the runtime EventEmitter, or a class
+ * grafted by applyMixin(Y, EventEmitter)) reaches an untyped slot as an OBJINST box. Its
+ * EventEmitter.prototype members are not rows of the class's member table, so the dyn core
+ * asks THIS table (scr_dyn_ee_ops, installed from the emitted main): a READ of one answers
+ * the interned function below (one immortal closure per member, so `a.emit === b.emit`
+ * and `typeof a.emit` are Node's), a CALL runs it on the instance's emitter with the dyn
+ * arguments. Reads and calls are one body: the read's function calls the same dispatch
+ * with the ambient receiver (`fn.apply(target, args)`, `fn.call(target, ...)`).
+ *
+ * The registration family (on/once/prepend*) with a function argument is NOT answered here:
+ * a listener's adapter (how a static `emit(name, tuple)` reaches it) is built by the
+ * compiler from the event's tuple, so the family is lowered at the call site, where the
+ * tuple is known. Reached through a value (`const f = x.on; f.call(x, ...)`) it throws a
+ * named, catchable error rather than register a listener no static emit could call. */
+enum { EEOP_ON, EEOP_ONCE, EEOP_OFF, EEOP_EMIT, EEOP_ADD, EEOP_REMOVE, EEOP_REMOVE_ALL, EEOP_PREPEND,
+       EEOP_PREPEND_ONCE, EEOP_COUNT, EEOP_LISTENERS, EEOP_RAW, EEOP_NAMES, EEOP_SET_MAX, EEOP_GET_MAX, EEOP_N };
+static const char *const EE_OP_NAMES[EEOP_N] = {
+  "on", "once", "off", "emit", "addListener", "removeListener", "removeAllListeners", "prependListener",
+  "prependOnceListener", "listenerCount", "listeners", "rawListeners", "eventNames", "setMaxListeners",
+  "getMaxListeners",
+};
+
+static int ee_op_of(const char *name, size_t n) {
+  for (int i = 0; i < EEOP_N; i++) {
+    if (strlen(EE_OP_NAMES[i]) == n && memcmp(EE_OP_NAMES[i], name, n) == 0) return i;
+  }
+  return -1;
+}
+
+static bool ee_knows(const char *name, size_t n) { return ee_op_of(name, n) >= 0; }
+
+static ScrDyn *ee_func_box(const ScrEeEntry *e) {
+  ScrDyn *box = scr_dyn_new_func_src(scr_closure_retain(e->fnproto.v.fn.clo), e->fnproto.v.fn.thunk,
+                                     e->fnproto.v.fn.arity, scr_dyn_fn_sig(&e->fnproto),
+                                     scr_dyn_fn_name(&e->fnproto), scr_dyn_fn_src(&e->fnproto));
+  return box;
+}
+
+static ScrDyn *ee_call(ScrDyn *recv, ScrEmitter *em, const char *name, size_t n, ScrDyn *const *args, size_t argc,
+                       const char *what) {
+  int op = ee_op_of(name, n);
+  const ScrDyn *u = scr_dyn_undefined();
+  const ScrDyn *a0 = argc > 0 ? args[0] : u;
+  const ScrDyn *a1 = argc > 1 ? args[1] : u;
+  switch (op) {
+    case EEOP_EMIT: {
+      /* the listeners run with the emitter as `this` */
+      ScrDyn *const empty[1] = {(ScrDyn *)u};
+      bool had = scr_emitter_emit_dyn_list(em, recv, argc ? args : empty, argc ? argc : 1);
+      if (scr_exc_pending()) return NULL;
+      return scr_dyn_new_bool(had);
+    }
+    case EEOP_ON: case EEOP_ONCE: case EEOP_ADD: case EEOP_PREPEND: case EEOP_PREPEND_ONCE: {
+      scr_emitter_check_listener(a1);
+      if (scr_exc_pending()) return NULL;
+      ScrJsonBuf b;
+      scr_jb_init(&b);
+      scr_jb_puts(&b, "'EventEmitter.prototype.");
+      scr_jb_puts(&b, EE_OP_NAMES[op]);
+      scr_jb_puts(&b, "' reached through a value (not a direct member call) is not supported yet");
+      scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
+      return NULL;
+    }
+    case EEOP_OFF: case EEOP_REMOVE: {
+      scr_emitter_check_listener(a1);
+      if (scr_exc_pending()) return NULL;
+      ScrStr *nm = scr_dyn_string_coerce_js(a0);
+      if (nm == NULL) return NULL;
+      ScrEmitter *r = scr_emitter_off_dyn(em, nm, a1);
+      scr_str_release(nm);
+      scr_emitter_release(r);
+      if (scr_exc_pending()) return NULL;
+      return scr_dyn_retain(recv);
+    }
+    case EEOP_REMOVE_ALL: {
+      ScrStr *nm = argc > 0 ? scr_dyn_string_coerce_js(a0) : scr_str_new("", 0);
+      if (nm == NULL) return NULL;
+      ScrEmitter *r = scr_emitter_remove_all(em, nm, argc == 0);
+      scr_str_release(nm);
+      scr_emitter_release(r);
+      if (scr_exc_pending()) return NULL;
+      return scr_dyn_retain(recv);
+    }
+    case EEOP_COUNT: {
+      ScrStr *nm = scr_dyn_string_coerce_js(a0);
+      if (nm == NULL) return NULL;
+      double c;
+      if (argc > 1 && a1->kind != SCR_DYN_UNDEF) {
+        c = a1->kind == SCR_DYN_FUNC ? scr_emitter_listener_count_fn(em, nm, a1->v.fn.clo) : 0;
+      } else {
+        c = scr_emitter_listener_count(em, nm);
+      }
+      scr_str_release(nm);
+      return scr_dyn_new_num(c);
+    }
+    case EEOP_LISTENERS: case EEOP_RAW: {
+      ScrStr *nm = scr_dyn_string_coerce_js(a0);
+      if (nm == NULL) return NULL;
+      ScrDyn *out = scr_dyn_new_arr();
+      ScrEeBucket *b = em->reg ? scr_ee_bucket_find(em->reg, nm->data, nm->len) : NULL;
+      if (b) {
+        for (size_t i = 0; i < b->n; i++) {
+          if (!b->ls[i]->has_fnproto) scr_trap("scriptc: listeners() reached a typed listener the module did not box\n");
+          scr_dyn_arr_push(out, ee_func_box(b->ls[i]));
+        }
+      }
+      scr_str_release(nm);
+      return out;
+    }
+    case EEOP_NAMES: {
+      ScrDyn *out = scr_dyn_new_arr();
+      if (em->reg) {
+        for (ScrEeBucket *b = em->reg->head; b; b = b->next) {
+          if (b->n > 0) scr_dyn_arr_push(out, scr_dyn_new_str(b->name));
+        }
+      }
+      return out;
+    }
+    case EEOP_SET_MAX: {
+      ScrEmitter *r = scr_emitter_set_max_chk(em, a0);
+      scr_emitter_release(r);
+      if (scr_exc_pending()) return NULL;
+      return scr_dyn_retain(recv);
+    }
+    case EEOP_GET_MAX:
+      return scr_dyn_new_num(scr_emitter_get_max(em));
+    default:
+      (void)what;
+      return NULL;
+  }
+}
+
+/* One immortal closure per member: the value a read answers. */
+typedef struct ScrEeFn { ScrClosure clo; int op; } ScrEeFn;
+static ScrEeFn scr_ee_fns[EEOP_N];
+static bool scr_ee_fns_ready = false;
+
+static ScrDyn *ee_method_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  const ScrEeFn *w = (const ScrEeFn *)clo;
+  ScrDyn *recv = scr_dyn_this_get(); /* +1 */
+  ScrEmitter *em = scr_dyn_objinst_emitter(recv);
+  ScrDyn *r = NULL;
+  if (em != NULL) {
+    r = ee_call(recv, em, EE_OP_NAMES[w->op], strlen(EE_OP_NAMES[w->op]), args, argc, "method");
+  } else {
+    scr_throw_error_named(scr_str_new("TypeError", 9),
+                          scr_str_new("Cannot read properties of undefined (reading '_events')", 56));
+  }
+  scr_dyn_release(recv);
+  return r;
+}
+
+static ScrDyn *ee_value(const char *name, size_t n) {
+  int op = ee_op_of(name, n);
+  if (op < 0) return NULL;
+  /* In Node EventEmitter.prototype.on IS addListener and off IS removeListener (one function each). */
+  if (op == EEOP_ON) op = EEOP_ADD;
+  if (op == EEOP_OFF) op = EEOP_REMOVE;
+  if (!scr_ee_fns_ready) {
+    for (int i = 0; i < EEOP_N; i++) {
+      scr_ee_fns[i].clo.rc = SIZE_MAX; /* immortal, like an interned top-level function */
+      scr_ee_fns[i].clo.fn = (void *)ee_method_thunk;
+      scr_ee_fns[i].op = i;
+    }
+    scr_ee_fns_ready = true;
+  }
+  return scr_dyn_new_func(&scr_ee_fns[op].clo, ee_method_thunk, 0, "()", EE_OP_NAMES[op]);
+}
+
+static const ScrDynEeOps scr_ee_dyn_ops = {ee_knows, ee_value, ee_call};
+
+/* Installed by the emitted main of a program with both an emitter and a boxable class. */
+void scr_dyn_ee_install(void) { scr_dyn_ee_ops = &scr_ee_dyn_ops; }
+
+/* The ScrEmitter (+1) of a dyn-boxed emitter instance, for the compiler's emitterApi arm. */
+ScrEmitter *scr_dyn_emitter_of(const ScrDyn *d) {
+  ScrEmitter *em = scr_dyn_objinst_emitter(d);
+  return em != NULL ? scr_emitter_retain(em) : NULL;
+}

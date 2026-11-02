@@ -6125,6 +6125,9 @@ export type IrLibFn =
   | "emitter.emit"
   | "emitter.emitError"
   | "emitter.emitDyn"
+  /** The ScrEmitter (+1) of a dyn-boxed emitter instance: the prefix of an emitter-rooted
+   * class, the hidden slot of a grafted one. Only evaluated after the emitterApi dynTest. */
+  | "emitter.fromDyn"
   | "emitter.count"
   | "emitter.countFn"
   | "emitter.names"
@@ -9238,8 +9241,11 @@ export const GRAFTED_EMITTER_CLASSES = new Set<string>();
  * class, so they never box. Per lowering, reset with the set above. */
 export const EVAL_STATIC_CLASSES = new Set<string>();
 
+/** The hidden instance slot holding the ScrEmitter of an applyMixin(Y, EventEmitter) class. */
+export const EMITTER_MIXIN_FIELD_NAME = "__scrEmitter";
+
 export function canBoxClassIntoDyn(className: string): boolean {
-  return !RUNTIME_ERROR_CLASSES.has(className) && !GRAFTED_EMITTER_CLASSES.has(className) && !EVAL_STATIC_CLASSES.has(className);
+  return !RUNTIME_ERROR_CLASSES.has(className) && !EVAL_STATIC_CLASSES.has(className);
 }
 
 /** A static type that CONVERTS into a dyn value — the dynFrom domain:
@@ -10734,6 +10740,51 @@ export function moduleUsesEmitter(mod: IrModule): boolean {
     for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
   };
   visit(mod);
+  return found;
+}
+
+/** Does the module let an EventEmitter instance reach a dynamic value (a class that is an
+ * emitter, or grafted with the emitter API, boxed into a dyn slot), or emit with a runtime
+ * argument list? Then a dynamic-list emit (`x.emit(...)` through the dyn view, `emit.apply`)
+ * can reach ANY listener the module registers, so each typed listener also carries the dyn
+ * function box the compiler built for it (scr_emitter_on_boxed). False keeps the registration
+ * exactly as it was, byte for byte. */
+export function moduleBoxesEmitters(mod: IrModule): boolean {
+  const byName = new Map((mod.classes ?? []).map((c) => [c.name, c] as const));
+  const emitterish = new Map<string, boolean>();
+  const isEmitterish = (name: string): boolean => {
+    const known = emitterish.get(name);
+    if (known !== undefined) return known;
+    emitterish.set(name, false);
+    const c = byName.get(name);
+    let r = false;
+    if (c !== undefined) {
+      r = c.name === RUNTIME_EMITTER_CLASS || RUNTIME_STREAM_CLASSES.has(c.name) ||
+        c.fields.some((f) => f.name === EMITTER_MIXIN_FIELD_NAME) || (c.base !== undefined && isEmitterish(c.base));
+    }
+    emitterish.set(name, r);
+    return r;
+  };
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown; value?: { type?: { kind?: unknown; className?: unknown } } };
+    if (node.kind === "libCall" && node.fn === "emitter.emitDyn") {
+      found = true;
+      return;
+    }
+    if (node.kind === "dynFrom" && node.value?.type?.kind === "object" && typeof node.value.type.className === "string" &&
+        isEmitterish(node.value.type.className) && canBoxClassIntoDyn(node.value.type.className)) {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod.functions);
   return found;
 }
 
