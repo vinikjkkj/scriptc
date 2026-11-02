@@ -33,7 +33,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { DYN, funcOf, moduleUsesTextMb, moduleUsesDc, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesDynAsync, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesRegexExecDyn, moduleUsesSymbol, moduleUsesFnText, moduleUsesTls, moduleUsesBigInt, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, moduleUsesBytesOwn, moduleUsesAsym , moduleBoxesProcStream} from "../../ir/nodes.js";
+import { DYN, funcOf, moduleBoxesEmitters, moduleUsesEmitter, moduleUsesTextMb, moduleUsesDc, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesDynAsync, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesRegexExecDyn, moduleUsesSymbol, moduleUsesFnText, moduleUsesTls, moduleUsesBigInt, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, moduleUsesBytesOwn, moduleUsesAsym , moduleBoxesProcStream} from "../../ir/nodes.js";
 import { readKindgateDials } from "../kindgate.js";
 import { setDynOrderPlan } from "../dyn-members.js";
 import { orderRecordPlanCached, isRuntimeRootedClassName, moduleUsesObjectWeakKeys, fnNameTableRows } from "../../ir/nodes.js";
@@ -57,7 +57,7 @@ import { VtSlot, ClassMeta, emitStructDefs, vtEntriesFor, vtSlotParams, emitVtab
 import { emitCoroFrames, emitCoroSpawns, coroUnwind } from "./emit-coro.js";
 import { coroPlans } from "../../ir/coro-plans.js";
 import { genCoroUnwind } from "./emit-gen-coro.js";
-import { agenSettleThunkFor, emitAsyncScaffolding, childDataThunkFor, childExitThunkFor, childExitThunkFor2, closeBindThunkFor, connectSockThunkFor, closeOverrideWrapFor, dgramMsgThunkFor, dnsLookupThunkFor, fsStatThunkFor, netLookupAnswerThunkFor, emitterInvokeThunkFor, streamCbThunkFor, streamDataThunkFor, promiseAdoptAdapterFor, raceAdapterFor, resolveThunkFor, sniAnswerThunkFor } from "./emit-async.js";
+import { agenSettleThunkFor, emitterBoxedOnFor, emitAsyncScaffolding, childDataThunkFor, childExitThunkFor, childExitThunkFor2, closeBindThunkFor, connectSockThunkFor, closeOverrideWrapFor, dgramMsgThunkFor, dnsLookupThunkFor, fsStatThunkFor, netLookupAnswerThunkFor, emitterInvokeThunkFor, streamCbThunkFor, streamDataThunkFor, promiseAdoptAdapterFor, raceAdapterFor, resolveThunkFor, sniAnswerThunkFor } from "./emit-async.js";
 import { emitNpmEmbedding, islandAdapter, islandTypedAdapter } from "./emit-island.js";
 import { emitFunction, emitBlock, emitStmts, emitStmt, emitTryCatch, emitSwitch, mergeBrace, emitBranchInto, emitCondition } from "./emit-stmts.js";
 import fs from "node:fs";
@@ -589,6 +589,17 @@ export class CEmitter {
   /** Emitted EventEmitter listener invoke adapters, interned per listener
    * func-type key (emitterInvokeThunkFor). */
   readonly emitterInvokeThunks = new Map<string, string>();
+  /** Typed-listener registration wrappers that also carry the listener's dyn box
+   * (emitterBoxedOnFor), interned per listener func-type key. */
+  readonly emitterBoxedOns = new Map<string, string>();
+  private emitterBoxesListenersMemo: boolean | undefined;
+  /** Does a typed listener registration carry its dyn function box (moduleBoxesEmitters)? */
+  get emitterBoxesListeners(): boolean {
+    return (this.emitterBoxesListenersMemo ??= moduleBoxesEmitters(this.mod));
+  }
+  emitterBoxedOnFor(cbT: IrType & { kind: "func" }): string {
+    return emitterBoxedOnFor(this, cbT);
+  }
   /** Emitted stream option-callback invoke adapters (read/write/final/
    * destroy/transform/flush — the leading-`this` closures), interned per
    * (kind, callback func-type) key (streamCbThunkFor). */
@@ -1815,6 +1826,9 @@ export class CEmitter {
         ? [`  scr_dyn_objinst_registry(sc_dcl_tbl, sizeof sc_dcl_tbl / sizeof sc_dcl_tbl[0]);`]
         : []),
       ...(moduleUsesDynClass(this.mod) ? [`  scr_dyn_class_install();`] : []),
+      // The dyn view of the EventEmitter API (a boxed emitter instance's on/emit/... members).
+      ...(dynClassDescSyms.length > 0 && moduleUsesEmitter(this.mod) ? [`  scr_dyn_ee_install();`] : []),
+      ...(this.emitterBoxesListeners ? [`  scr_nonerr_unhandled_fn = &scr_insp_unhandled_nonerr;`] : []),
       ...(fnNameRows.length > 0
         ? [`  scr_fn_names_install(sc_fn_name_tbl, sizeof sc_fn_name_tbl / sizeof sc_fn_name_tbl[0]);`]
         : []),

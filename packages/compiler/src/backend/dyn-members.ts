@@ -28,6 +28,7 @@ import {
   parseOwnShadowField,
   canConvertToDyn,
   canDynCheckTo,
+  EMITTER_MIXIN_FIELD_NAME,
   RUNTIME_EMITTER_CLASS,
   RUNTIME_ERROR_CLASSES,
   RUNTIME_STREAM_CLASSES,
@@ -123,7 +124,8 @@ export function dynEnumerationFenced(cls: DynMemberClass): boolean {
   for (let c: DynMemberClass | null = cls; c !== null; c = c.base) {
     if (RUNTIME_STREAM_CLASSES.has(c.def.name) || c.def.name === RUNTIME_EMITTER_CLASS) return true;
   }
-  return false;
+  // A grafted class's own keys (_events, _eventsCount, _maxListeners) are the emitter's state too.
+  return cls.def.fields.some((f) => f.name === EMITTER_MIXIN_FIELD_NAME);
 }
 
 /** 1 when the chain reaches the runtime EventEmitter and no runtime stream class, 2 when it
@@ -137,6 +139,20 @@ export function dynEnumerationFenced(cls: DynMemberClass): boolean {
 export function isErrorRootedClass(cls: DynMemberClass): boolean {
   for (let c: DynMemberClass | null = cls; c !== null; c = c.base) if (RUNTIME_ERROR_CLASSES.has(c.def.name)) return true;
   return false;
+}
+
+/** Where an instance of this class keeps its EventEmitter state: "prefix" when the chain roots in
+ * the runtime EventEmitter (or a runtime stream class, which embeds it: the instance IS the
+ * ScrEmitter), `{ field }` for a class grafted by applyMixin(Y, EventEmitter) (a hidden slot
+ * holding the emitter), null for a class that is no emitter. Feeds ScrDynClass.ee_off on both
+ * lanes, so a boxed emitter instance answers the EventEmitter API through the dyn view. */
+export function dynEmitterSlot(cls: DynMemberClass): "prefix" | { field: string } | null {
+  for (let c: DynMemberClass | null = cls; c !== null; c = c.base) {
+    if (RUNTIME_ERROR_CLASSES.has(c.def.name)) return null;
+    if (c.def.name === RUNTIME_EMITTER_CLASS || RUNTIME_STREAM_CLASSES.has(c.def.name)) return "prefix";
+  }
+  if (cls.def.fields.some((f) => f.name === EMITTER_MIXIN_FIELD_NAME)) return { field: EMITTER_MIXIN_FIELD_NAME };
+  return null;
 }
 
 export function dynRuntimeRoot(cls: DynMemberClass): number {
@@ -207,10 +223,15 @@ export function dynMemberTable(
     // EventEmitter, in an untyped field). The table is `opaque` (a miss keeps the loud ladder:
     // on/emit/... are the runtime's) and the descriptor is not enumerable (dynEnumerationFenced):
     // the prefix Node lists (_events, _eventsCount, _maxListeners) is not something rows can state.
-    if (RUNTIME_STREAM_CLASSES.has(c.def.name) || c.def.name === RUNTIME_EMITTER_CLASS) {
+    if (RUNTIME_STREAM_CLASSES.has(c.def.name)) {
       opaque = true;
       continue;
     }
+    // The emitter hierarchy is NOT opaque: the EventEmitter.prototype members are answered by the
+    // dyn view (scr_dyn_ee_ops), the three state cells (_events, _eventsCount, _maxListeners) keep
+    // their fence by name (scr_dyn_objinst_miss), and any other name an emitter instance does not
+    // have reads `undefined`, as in Node.
+    if (c.def.name === RUNTIME_EMITTER_CLASS) continue;
     if (c.def.runtime === true) return { rows: [], opaque: true, errorRooted: false };
   }
   const rows: DynMemberRow[] = [];
@@ -253,6 +274,9 @@ export function dynMemberTable(
     // can spell one, so answering for it would invent a key Node does not
     // have.
     if (f.name.startsWith("%")) continue;
+    // The hidden slot of an applyMixin(Y, EventEmitter) class: the emitter's own state, no
+    // property of the instance (the dyn view answers the EventEmitter API from it).
+    if (f.name === EMITTER_MIXIN_FIELD_NAME) continue;
     // A #PRIVATE field is not an own property in JS: Object.keys(new C(1))
     // is ["v"], not ["v","#h"] -- measured on v25.9.0. The frontend keys
     // privates by their spelled name, which no public identifier can

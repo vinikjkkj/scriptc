@@ -12,7 +12,7 @@ import { CLASS_PROPS_FIELD, dynNeverArm, dynNeverIn, armDiscrimLits, dynErrorCla
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassStruct, mangleField, mangleFunction, mangleFnClosure, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import type { ClassMeta } from "./emit-shapes.js";
-import { dynClassDisplayName, dynRuntimeRoot, dynEnumerationFenced, dynMemberRows, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
+import { dynClassDisplayName, dynEmitterSlot, dynRuntimeRoot, dynEnumerationFenced, dynMemberRows, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
 import { ORD_MEMBER, orderRecordPlanCached } from "../../ir/nodes.js";
 import { KINDGATE_WIDE_KINDS, kindgateWideLane } from "../kindgate.js";
 import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
@@ -107,7 +107,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
         `${statics === null ? "NULL, 0" : `${statics.sym}, ${statics.count}`}, ${staticsOpaque ? "true" : "false"}, ` +
         `${meta.base === null ? "NULL" : cStringLiteral(Buffer.from(dynClassDisplayName(meta.base.def), "utf8"))}, ` +
         `${dynRuntimeRoot(meta)}, ${E.tracedShapes.has(`object:${className}`) ? 1 : 0}, ` +
-        `${dynOrdNord(E, meta)}, ${dynOrdOffsetC(E, meta)} }; ` +
+        `${dynOrdNord(E, meta)}, ${dynOrdOffsetC(E, meta)}, ${dynEeOffsetC(meta, className)} }; ` +
         `/* dyn box: class ${className} */`,
     );
     // A base-typed box can hold a DERIVED instance, and the registry resolves
@@ -144,6 +144,14 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
   /** The inferred-field order record of a class's hierarchy (ir/nodes.ts): the
    * number of inferred fields the hierarchy may write (0 = none), and the
    * byte offset of the record in this class's struct (the root's `sc_ord`). */
+  /** ScrDynClass.ee_off: 0 for an emitter-rooted class (the instance IS the ScrEmitter), the
+   * offset of the hidden slot of a grafted one, -1 for a class that is no emitter. */
+  function dynEeOffsetC(meta: ClassMeta, className: string): string {
+    const slot = dynEmitterSlot(meta);
+    if (slot === null) return "-1";
+    if (slot === "prefix") return "0";
+    return `offsetof(${mangleClassStruct(className)}, ${mangleField(slot.field)})`;
+  }
   function dynOrdNord(E: CEmitter, meta: ClassMeta): string {
     return String(orderRecordPlanCached(E.mod.classes ?? []).namesOf(meta.def.name).length);
   }

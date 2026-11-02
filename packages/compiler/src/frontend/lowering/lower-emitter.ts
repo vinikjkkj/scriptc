@@ -165,6 +165,9 @@ interface EventSig {
    * box (scr_ee_add with no box), so an emit whose argument list is dynamic traps on it
    * at run time. Null when every registration is dyn-flavored. Set once the table is built. */
   typedRegisteredAt: string | null;
+  /** Where a typed listener of this event has a function type with no dyn box (null when every typed
+   * registration boxes): the only registrations a dynamic-list emit cannot reach. */
+  typedUnboxableAt: string | null;
 }
 
 /** Which event names the program REGISTERS a listener for — the syntactic
@@ -236,15 +239,19 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
   const listenedNames = new Set<string>();
   /** Bare event name -> location of the first non-dyn-flavored listener registration (any arity). */
   const typedRegisteredAt = new Map<string, string>();
+  /** Bare event name -> location of the first typed listener registration whose function type has
+   * no dyn function box (canBoxFuncIntoDyn): a dynamic-list emit cannot reach it, so it is the one
+   * reason left to refuse an `emit.apply`. Unknown listener types count as unboxable. */
+  const typedUnboxableAt = new Map<string, string>();
   const sigOf = (name: string): EventSig => {
     let sig = table.get(name);
-    if (!sig) table.set(name, (sig = { tuple: [], fromEmit: false, conflict: null, dynListener: false, listened: false, typedRegisteredAt: null }));
+    if (!sig) table.set(name, (sig = { tuple: [], fromEmit: false, conflict: null, dynListener: false, listened: false, typedRegisteredAt: null, typedUnboxableAt: null }));
     return sig;
   };
   // The two forced tuples (see the header comment).
-  table.set("error", { tuple: [{ kind: "object", className: "%Error" }], fromEmit: true, conflict: null, dynListener: false, listened: false, typedRegisteredAt: null });
-  table.set("newListener", { tuple: [STRING], fromEmit: true, conflict: null, dynListener: false, listened: false, typedRegisteredAt: null });
-  table.set("removeListener", { tuple: [STRING], fromEmit: true, conflict: null, dynListener: false, listened: false, typedRegisteredAt: null });
+  table.set("error", { tuple: [{ kind: "object", className: "%Error" }], fromEmit: true, conflict: null, dynListener: false, listened: false, typedRegisteredAt: null, typedUnboxableAt: null });
+  table.set("newListener", { tuple: [STRING], fromEmit: true, conflict: null, dynListener: false, listened: false, typedRegisteredAt: null, typedUnboxableAt: null });
+  table.set("removeListener", { tuple: [STRING], fromEmit: true, conflict: null, dynListener: false, listened: false, typedRegisteredAt: null, typedUnboxableAt: null });
 
   const fmt = (t: IrType): string => L.fmt(t);
   /** True when `arm` is one of `u`'s own arms. */
@@ -605,26 +612,36 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
             // Any non-dyn listener is registered without a dyn box, parameterless
             // ones included (mergeListener pins only the typed ones).
             if (!typedRegisteredAt.has(evDisplayName(key))) typedRegisteredAt.set(evDisplayName(key), locOf(node).file + "@" + locOf(node).start);
+            if (cbT?.kind !== "func" || !canBoxFuncIntoDyn(cbT, (id: string) => L.shapes.get(id), (id: string) => L.unions.get(id))) {
+              if (!typedUnboxableAt.has(evDisplayName(key))) typedUnboxableAt.set(evDisplayName(key), locOf(node).file + "@" + locOf(node).start);
+            }
           }
         }
       } catch {
         // Not a candidate for the signature, but its registration still exists:
         // an unknown listener type is treated as non-dyn (the conservative side).
         if (!typedRegisteredAt.has(evDisplayName(key))) typedRegisteredAt.set(evDisplayName(key), locOf(node).file + "@" + locOf(node).start);
+        if (!typedUnboxableAt.has(evDisplayName(key))) typedUnboxableAt.set(evDisplayName(key), locOf(node).file + "@" + locOf(node).start);
       }
     }
   }
   for (const { name, node } of metaListeners) {
     if (typedRegisteredAt.has(name) || node.arguments[1] === undefined) continue;
     let dynFlavored = false;
+    let boxable = false;
     try {
       const cbCt = L.typeOf(node.arguments[1]);
       const cbT = L.mapTypeOf(cbCt) ?? dynFallbackType(L, node.arguments[1], cbCt);
       dynFlavored = cbT?.kind === "dyn" || (cbT?.kind === "func" && cbT.params.some((p) => p.kind === "dyn"));
+      boxable = cbT?.kind === "func" && canBoxFuncIntoDyn(cbT, (id: string) => L.shapes.get(id), (id: string) => L.unions.get(id));
     } catch {
       dynFlavored = false;
     }
-    if (!dynFlavored) typedRegisteredAt.set(name, locOf(node).file + "@" + locOf(node).start);
+    if (!dynFlavored) {
+      typedRegisteredAt.set(name, locOf(node).file + "@" + locOf(node).start);
+      // A typed 'error' / meta listener: reachable by a dynamic-list emit only through its dyn box.
+      if (!boxable && !typedUnboxableAt.has(name)) typedUnboxableAt.set(name, locOf(node).file + "@" + locOf(node).start);
+    }
   }
   // The builtin root's own bucket (a dyn receiver, lowerDynEmitterReceiverCall,
   // resolves to it): no class emit site writes it, so it carries the
@@ -663,12 +680,14 @@ function emitterEvents(L: Lowerer): Map<string, EventSig> {
       dynListener: sigs.some((x) => x.dynListener),
       listened: false,
       typedRegisteredAt: null,
+      typedUnboxableAt: null,
     });
   }
   // The listened flag covers the builtin bucket too, so it is set last.
   for (const [key, sig] of table) {
     sig.listened = listenedNames.has(evDisplayName(key));
     sig.typedRegisteredAt = typedRegisteredAt.get(evDisplayName(key)) ?? null;
+    sig.typedUnboxableAt = typedUnboxableAt.get(evDisplayName(key)) ?? null;
   }
   holder.emitterEventTable = table;
   holder.emitterRegistrations = { names: registered, keys: registeredKeys, opaque: opaqueRegistration, opaqueAt, emitted: emittedNames };
@@ -1352,14 +1371,14 @@ export function lowerEmitApplyCall(L: Lowerer, call: ts.CallExpression, loc: Src
   for (const [key, sig] of emitterEvents(L)) {
     // The meta events (newListener, removeListener) and 'error' are program-wide: an emit of them reaches every listener of that name.
     const reachable = key === "error" || META_EVENTS.has(key) || key.startsWith(`${rootKey}\u0000`) || key.startsWith("*\u0000");
-    if (reachable && (sig.listened || sig.typedRegisteredAt !== null)) {
-      const who = sig.typedRegisteredAt !== null
-        ? `a typed listener registered at ${sig.typedRegisteredAt}`
-        : "a typed listener";
+    // A typed listener whose function type has a dyn box IS reachable: the registration carries the box
+    // (scr_emitter_on_boxed) and the runtime calls it through the box's checked thunk, converting each
+    // dynamic argument into the declared parameter. Only a type with no box is out of reach.
+    if (reachable && sig.typedUnboxableAt !== null) {
       L.noLowering(
-        `'emit' applied to a dynamic argument list on '${evDisplayName(key)}', which reaches ${who}`,
+        `'emit' applied to a dynamic argument list on '${evDisplayName(key)}', which reaches a typed listener registered at ${sig.typedUnboxableAt}`,
         call,
-        "Node spreads the list into each listener call, and a listener registered without a dynamic box (typed parameters, or none at all) cannot take a dynamic list at run time. Leave the listener's parameters unannotated so it is checked-dynamic, or emit with literal arguments",
+        "Node spreads the list into each listener call, and a listener whose function type has no dynamic box (a parameter that cannot cross into a dynamic value) cannot take a dynamic list at run time. Leave the listener's parameters unannotated so it is checked-dynamic, or emit with literal arguments",
       );
     }
   }
