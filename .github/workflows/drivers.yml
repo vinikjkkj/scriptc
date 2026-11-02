@@ -1,0 +1,93 @@
+name: drivers
+run-name: drivers ${{ inputs.target }} [${{ inputs.drivers }}] ${{ inputs.tag }}
+
+# Real driver builds (the zapo store entries of mysql2, pg, ioredis, mongodb)
+# for any branch or commit, one runner per driver. The rig inputs and this
+# workflow come from the dispatched ref (main); the compiler under test is
+# checked out from `target`, so a candidate branch needs neither file.
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Branch or commit whose compiler is measured
+        required: true
+      drivers:
+        description: Drivers to build (space or comma separated subset of mysql2 pg ioredis mongodb)
+        required: false
+        default: mysql2 pg ioredis mongodb
+      tag:
+        description: Free text echoed in the run name, to find the run
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Select drivers
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - id: m
+        env:
+          DRIVERS: ${{ inputs.drivers }}
+        run: |
+          set -euo pipefail
+          out=()
+          for d in ${DRIVERS//,/ }; do
+            case "$d" in
+              mysql2|pg|ioredis|mongodb) out+=("\"$d\"") ;;
+              *) echo "unknown driver: $d"; exit 1 ;;
+            esac
+          done
+          [ ${#out[@]} -gt 0 ] || { echo "no driver selected"; exit 1; }
+          echo "matrix=[$(IFS=,; echo "${out[*]}")]" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: driver ${{ matrix.driver }}
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    strategy:
+      fail-fast: false
+      matrix:
+        driver: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: rigsrc
+          sparse-checkout: tests/driver-rigs
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target }}
+          path: wt
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: wt/.node-version
+      - name: Build the compiler under test
+        working-directory: wt
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+      - name: Install the rig
+        working-directory: rigsrc/tests/driver-rigs
+        run: pnpm install --frozen-lockfile --ignore-workspace
+      # The provenance cache holds the checked-out package sources the
+      # compiler maps (a mongodb checkout is ~2 GB); keyed by the rig lockfile.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/scriptc/provenance
+          key: provenance-${{ matrix.driver }}-${{ hashFiles('rigsrc/tests/driver-rigs/pnpm-lock.yaml') }}
+      - name: Build the driver
+        run: bash rigsrc/tests/driver-rigs/build.sh "${{ matrix.driver }}" "$GITHUB_WORKSPACE/wt/packages/cli/dist/main.js" "$GITHUB_WORKSPACE/out/${{ matrix.driver }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: driver-${{ matrix.driver }}
+          path: out/${{ matrix.driver }}.txt
+          retention-days: 14
