@@ -2709,6 +2709,23 @@ bool scr_emitter_emit_error(ScrEmitter *em, ScrStr *name, ScrError *err);
  * original dyn function is called with the full list. arr borrowed; true
  * when the event had listeners. */
 bool scr_emitter_emit_dyn_array(ScrEmitter *em, ScrDyn *arr);
+/* emit over a borrowed dyn vector (items[0] the event name); `self` (nullable) is `this` for each listener. */
+bool scr_emitter_emit_dyn_list(ScrEmitter *em, ScrDyn *self, ScrDyn *const *items, size_t total);
+void scr_dyn_ee_install(void);
+/* The unhandled-'error' text hook (Node's ERR_UNHANDLED_ERROR for a non-Error payload); the emitted main
+ * points it at scr_insp_unhandled_nonerr in a module whose emitters can be reached through a dyn value. */
+extern ScrError *(*scr_nonerr_unhandled_fn)(const ScrDyn *payload);
+ScrError *scr_insp_unhandled_nonerr(const ScrDyn *payload);
+ScrEmitter *scr_dyn_emitter_of(const ScrDyn *d); /* +1 emitter of a dyn-boxed emitter instance, or NULL */
+/* The emitterApi test of lowerDynEmitterReceiverCall: the box is a class instance inside [pre, post]
+ * (a subclass of the runtime emitter) OR a class grafted with the emitter API, and its class table
+ * declares no member of that name (a user override keeps the call on the dynamic path). */
+bool scr_dyn_objinst_emitter_api(const ScrDyn *d, size_t pre, size_t post, const char *member, size_t mlen);
+ScrEmitter *scr_emitter_on_boxed(ScrEmitter *em, ScrStr *name, ScrClosure *cb /*moves*/, const ScrDyn *proto,
+                                 ScrEeInvoke inv, bool once, bool prepend);
+ScrEmitter *scr_emitter_on_via_boxed(ScrEmitter *em, ScrStr *name, ScrClosure *orig /*moves*/,
+                                     ScrClosure *adapter /*moves*/, const ScrDyn *proto,
+                                     ScrEeInvoke inv, bool once, bool prepend);
 double scr_emitter_listener_count(ScrEmitter *em, ScrStr *name);
 double scr_emitter_listener_count_fn(ScrEmitter *em, ScrStr *name, ScrClosure *fn);
 ScrArr *scr_emitter_event_names(ScrEmitter *em);          /* +1 string[] */
@@ -4753,6 +4770,11 @@ typedef struct ScrDynClass {
    * rec[1..rec[0]] = those ordinals in write order (scr_ord_note). */
   size_t nord;
   size_t ord_off;
+  /* The EventEmitter state of an instance of this class, as a byte offset from the instance
+   * pointer to its ScrEmitter: 0 for a class rooted in the runtime EventEmitter (the instance IS the ScrEmitter prefix),
+   * the (positive) offset of the pointer in the hidden `__scrEmitter` slot for a class grafted by applyMixin(Y, EventEmitter),
+   * -1 for a class that is no emitter. APPENDED, like every trailing member. */
+  long long ee_off;
 } ScrDynClass;
 
 /* The order record of an instance whose class has inferred fields: `k` is the
@@ -6993,6 +7015,19 @@ void scr_dyn_objinst_registry(const ScrDynClass *const *descs, size_t n);
  * nothing narrower (an unregistered class, or no registry at all -- the
  * pre-table behaviour, unchanged). Never NULL for an OBJINST box. */
 const ScrDynClass *scr_dyn_objinst_class_of(const ScrDyn *d);
+/* The ScrEmitter an OBJINST box carries (the prefix of an emitter-rooted instance, or the
+ * hidden slot of a grafted one), borrowed, or NULL when the instance is no emitter. */
+ScrEmitter *scr_dyn_objinst_emitter(const ScrDyn *d);
+/* The dyn view of the EventEmitter API (scr_events_emitter.c installs it; NULL when no
+ * emitter unit is linked). `knows` answers the names of EventEmitter.prototype, `value` the
+ * interned function a READ of one answers (+1), `call` runs one on `em` with dyn arguments
+ * (+1 result, or NULL with the exception pending; `recv` is the box a chaining form returns). */
+typedef struct ScrDynEeOps {
+  bool (*knows)(const char *name, size_t n);
+  ScrDyn *(*value)(const char *name, size_t n);
+  ScrDyn *(*call)(ScrDyn *recv, ScrEmitter *em, const char *name, size_t n, ScrDyn *const *args, size_t argc, const char *what);
+} ScrDynEeOps;
+extern const ScrDynEeOps *scr_dyn_ee_ops;
 /* The instance's member `k`, or NULL when its class has no table or the
  * table has no such name. Never throws -- a miss is a fact, and what the
  * caller does with it (Object.prototype, the fence, Node's

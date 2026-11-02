@@ -1195,6 +1195,35 @@ export function emitterInvokeThunkFor(E: CEmitter, cbT: IrType): string {
   return sym;
 }
 
+/** `scr_emitter_on` for a TYPED listener in a module whose emitters can be reached through a
+ * dynamic value (moduleBoxesEmitters): a static wrapper that builds the listener's dyn
+ * function box (the one a dyn-typed read of it would carry: same checked thunk), registers
+ * the listener with the box's payload beside its typed invoke adapter, and drops the temporary
+ * box. A dynamic-list emit (`x.emit(...)` through the dyn view, `emit.apply`) then reaches the
+ * listener through the thunk, which checks each dyn argument into the declared parameter and
+ * so converts exactly as a call through a dyn function value does. Interned per func-type key. */
+export function emitterBoxedOnFor(E: CEmitter, cbT: IrType & { kind: "func" }): string {
+  const key = typeKey(cbT);
+  let sym = E.emitterBoxedOns.get(key);
+  if (sym) return sym;
+  sym = `sc_eeon_${E.emitterBoxedOns.size}`;
+  E.emitterBoxedOns.set(key, sym);
+  const thunk = E.emitterInvokeThunkFor(cbT);
+  const box = E.dynFuncBoxHelper(cbT);
+  const sig = `${E.link}ScrEmitter *${sym}(ScrEmitter *sc_em, ScrStr *sc_name, ScrClosure *sc_cb, bool sc_once, bool sc_prepend)`;
+  E.walkerProtos.push(`${sig};`);
+  E.walkerDefs.push(
+    `${sig} {`,
+    `  ScrDyn *sc_box = ${box}(sc_cb, NULL, NULL);`,
+    `  ScrEmitter *sc_r = scr_emitter_on_boxed(sc_em, sc_name, sc_cb, sc_box, &${thunk}, sc_once, sc_prepend);`,
+    `  scr_dyn_release(sc_box);`,
+    `  return sc_r;`,
+    `}`,
+    ``,
+  );
+  return sym;
+}
+
 /** The stream completion-callback closure fn for one done func type: the
  * `callback` a user's write/final/destroy/transform/flush receives. The
  * closure's one capture box holds the stream (+1); calling it unwraps the

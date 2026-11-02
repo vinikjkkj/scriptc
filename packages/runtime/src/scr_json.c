@@ -3707,6 +3707,7 @@ static const ScrDynClass *const *scr_cls_reg = NULL;
 static size_t scr_cls_reg_n = 0;
 
 const ScrDynClassOps *scr_dyn_class_ops = NULL;
+const ScrDynEeOps *scr_dyn_ee_ops = NULL;
 
 void scr_dyn_objinst_registry(const ScrDynClass *const *descs, size_t n) {
   scr_cls_reg = descs;
@@ -3749,6 +3750,20 @@ const ScrDynClass *scr_dyn_objinst_class_of(const ScrDyn *d) {
     }
   }
   return best != NULL ? best : own;
+}
+
+ScrEmitter *scr_dyn_objinst_emitter(const ScrDyn *d) {
+  if (d == NULL || d->kind != SCR_DYN_OBJINST) return NULL;
+  const ScrDynClass *c = scr_dyn_objinst_class_of(d);
+  if (c->ee_off < 0) return NULL;
+  if (c->ee_off == 0) return (ScrEmitter *)d->v.inst.o; /* the ScrEmitter prefix */
+  return *(ScrEmitter **)((char *)d->v.inst.o + c->ee_off); /* a grafted class's hidden slot */
+}
+
+bool scr_dyn_objinst_emitter_api(const ScrDyn *d, size_t pre, size_t post, const char *member, size_t mlen) {
+  if (d == NULL || d->kind != SCR_DYN_OBJINST) return false;
+  if (!scr_dyn_objinst_is(d, pre, post) && !(scr_dyn_objinst_class_of(d)->ee_off > 0)) return false;
+  return scr_dyn_objinst_member(d, member, mlen) == NULL;
 }
 
 const ScrDynClassMember *scr_dyn_objinst_member(const ScrDyn *d, const char *k, size_t klen) {

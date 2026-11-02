@@ -1581,6 +1581,7 @@ bool scr_dyn_has_intrinsic_method(const ScrDyn *recv, const char *key, size_t ke
   if (recv->kind == SCR_DYN_OBJINST) {
     if (scr_dyn_objinst_error_rooted(recv) && scr_dyn_error_member_has(recv, key, key_len)) return true;
     const ScrDynClassMember *hm = scr_dyn_objinst_member(recv, key, key_len);
+    if (hm == NULL && scr_dyn_ee_ops != NULL && scr_dyn_objinst_emitter(recv) != NULL && scr_dyn_ee_ops->knows(key, key_len)) return true;
     return hm != NULL && !(hm->enumerable == 4 && scr_dyn_member_hidden(hm, recv->v.inst.o));
   }
   (void)key_len; /* the remaining tests are on the NUL-terminated spelling */
@@ -1701,6 +1702,16 @@ ScrDyn *scr_dyn_objinst_member_get(ScrDyn *d, const ScrStr *key) {
  * be a real member, so the old fence stays -- the one answer that is never
  * wrong. +1, or NULL with the exception pending. */
 ScrDyn *scr_dyn_objinst_miss(ScrDyn *d, const ScrStr *key) {
+  if (scr_dyn_ee_ops != NULL && scr_dyn_objinst_emitter(d) != NULL && scr_dyn_ee_ops->knows(key->data, key->len)) {
+    return scr_dyn_ee_ops->value(key->data, key->len); /* EventEmitter.prototype's own member */
+  }
+  if (scr_dyn_ee_ops != NULL && scr_dyn_objinst_emitter(d) != NULL &&
+      ((key->len == 7 && memcmp(key->data, "_events", 7) == 0) || (key->len == 12 && memcmp(key->data, "_eventsCount", 12) == 0) ||
+       (key->len == 13 && memcmp(key->data, "_maxListeners", 13) == 0))) {
+    /* the emitter's own state cells: Node's values are not something this representation holds */
+    scr_dyn_objinst_fence(d, "a property read");
+    return NULL;
+  }
   if (dyn_objproto_knows(key->data)) {
     /* Object.prototype's own methods read as functions, bound over the same
      * dispatch a call takes (the member-method rule above). */
@@ -2201,6 +2212,15 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
    *
    * A class with NO table falls through exactly as before, so a program
    * whose classes carry none cannot tell this arm was added. */
+  /* An EventEmitter instance (a subclass of the runtime emitter, or a class grafted by
+   * applyMixin(Y, EventEmitter)) answers the prototype's API through the emitter unit, unless
+   * the class declares a member of that name (the user's override wins, as in JS). */
+  if (recv->kind == SCR_DYN_OBJINST && scr_dyn_ee_ops != NULL && scr_dyn_ee_ops->knows(method, strlen(method))) {
+    ScrEmitter *em = scr_dyn_objinst_emitter(recv);
+    if (em != NULL && scr_dyn_objinst_member(recv, method, strlen(method)) == NULL) {
+      return scr_dyn_ee_ops->call(recv, em, method, strlen(method), args, argc, what);
+    }
+  }
   if (recv->kind == SCR_DYN_OBJINST && (scr_dyn_objinst_has_members(recv) || scr_dyn_objinst_error_rooted(recv))) {
     const ScrDynClassMember *cm = scr_dyn_objinst_member(recv, method, strlen(method));
     if (cm != NULL && cm->call != NULL) {

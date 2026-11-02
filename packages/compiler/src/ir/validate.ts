@@ -1350,6 +1350,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "emitter.emit": { argTypes: [null, STRING], result: BOOL },
   "emitter.emitError": { argTypes: [null, STRING, null], result: BOOL },
   "emitter.emitDyn": { argTypes: [null, DYN], result: BOOL },
+  "emitter.fromDyn": { argTypes: [DYN], result: VOID },
   "emitter.count": { argTypes: [null, STRING], result: F64 },
   "emitter.countFn": { argTypes: [null, STRING, null], result: F64 },
   "emitter.names": { argTypes: [null], result: VOID },
@@ -5607,6 +5608,12 @@ function validateFunction(
           if (e.fn === "emitter.new") {
             if (e.type.kind !== "object" || e.type.className !== RUNTIME_EMITTER_CLASS) {
               err(`libCall emitter.new must return '%EventEmitter', got ${e.type.kind}`, e.loc);
+            }
+            break;
+          }
+          if (e.fn === "emitter.fromDyn") {
+            if (!(e.type.kind === "object" && e.type.className === RUNTIME_EMITTER_CLASS)) {
+              err(`libCall emitter.fromDyn must be the runtime emitter object`, e.loc);
             }
             break;
           }
