@@ -10769,6 +10769,83 @@ function boundFnOriginOf(
   return null;
 }
 
+/** `new Promise<T>(executor)`: the ambient Promise constructor, reached by the global itself or
+ * by a read of the one handle a PromiseConstructor(Like) slot holds (see promiseCtorHandleRead). */
+function lowerNewPromise(L: Lowerer, expr: ts.NewExpression, loc: SrcLoc): IrExpr {
+  const type = L.irTypeOf(expr);
+  if (type.kind !== "promise") L.badType(expr, L.typeOf(expr));
+  const args = expr.arguments ?? [];
+  if (args.length !== 1) {
+    L.unsupported("SC1090", expr, "Promise construction without an executor");
+  }
+  // `new Promise(setImmediate)` (the Node-suite early-exit shape):
+  // the executor IS the stdlib setImmediate, so resolve rides the
+  // immediate queue — a dedicated runtime constructor arms an
+  // immediate that fulfills with the undefined dyn value.
+  {
+    const a0 = args[0]!;
+    if (ts.isIdentifier(a0) && a0.text === "setImmediate") {
+      const sym = L.checker.getSymbolAtLocation(a0);
+      const decls = sym ? L.checker.declarationsOf(sym) : [];
+      if (decls.length > 0 && decls.every((d) => L.isStdlibFile(d.getSourceFile()))) {
+        // The settled value is the undefined dyn value — the result
+        // is promise<dyn> whatever T the checker inferred for the
+        // unusual executor (Promise<unknown> in the suite's shape).
+        return {
+          kind: "libCall",
+          fn: "timers.immediatePromise",
+          args: [],
+          type: { kind: "promise", inner: DYN },
+          loc,
+        };
+      }
+    }
+  }
+  // An executor that RESOLVES WITH A PROMISE. The lib signature spells
+  // resolve `(value: T | PromiseLike<T>) => void`; mapType collapses
+  // that union to `T`, so the promise possibility is erased from the
+  // parameter and the argument coercion then reaches for the checked
+  // single-arm extraction — an UNCODED TypeError at run time for a
+  // settle-or-value union, and an SC1090 for a plain promise. Both are
+  // gaps against the ambient override's own written contract.
+  //
+  // The parameter is re-bound to the SETTLE-OR-VALUE union instead, the
+  // one shape whose arms a runtime tag can tell apart, and the
+  // emitters adopt off that tag (emit-exprs.ts's newPromise). Only
+  // executors that actually pass a promise-carrying value are
+  // re-bound, so every program that resolves with a plain value keeps
+  // its emitted code to the byte.
+  executorResolveAdoptionUnion(L, args[0]!, type.inner);
+  // Executors bind resolve alone or (resolve, reject): reject is a
+  // real closure rejecting the promise with an Error reason (the
+  // ambient override pins `reason: Error` — rejection payloads share
+  // the thrown-value representation, and the OBJ kind keeps
+  // catch-side instanceof and the uncaught printer working). First
+  // settle wins, exactly JS: reject-after-resolve and double-reject
+  // are no-ops, and an executor throw after any settle is swallowed.
+  const executor = L.lowerExpr(args[0]!);
+  if (executor.type.kind !== "func") L.badType(args[0]!, L.typeOf(args[0]!));
+  if (executor.type.params.length > 1) {
+    const rj = executor.type.params[1]!;
+    if (
+      executor.type.params.length > 2 ||
+      rj.kind !== "func" ||
+      rj.ret.kind !== "void" ||
+      rj.params.length !== 1 ||
+      rj.params[0]!.kind !== "dyn"
+    ) {
+      // A non-contextually-typed executor VALUE whose second param
+      // isn't the pinned (reason: Error) => void shape.
+      L.unsupported(
+        "SC1090",
+        args[0]!,
+        "Promise executors whose reject parameter is not '(reason: unknown) => void'",
+      );
+    }
+  }
+  return { kind: "newPromise", executor, type, loc };
+}
+
 /** A `new Promise<T>(executor)` whose executor RESOLVES WITH A PROMISE:
  * re-bind its resolve parameter to the SETTLE-OR-VALUE union `Promise<T> | T`
  * (paramIrOverrides) and answer that union, or null to leave the executor
@@ -11288,6 +11365,14 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
     {
       const agent = lowerHttpAgentNew(L, expr);
       if (agent) return agent;
+    }
+    // `new P<T>(executor)` where P reads the Promise handle of a PromiseConstructor(Like) slot:
+    // the slot's only value is the global Promise, so this IS `new Promise`.
+    if (
+      L.isStdlibGlobal(expr.expression, "Promise") &&
+      !(ts.isIdentifier(expr.expression) && L.isStdlibSymbol(L.resolveValueSymbol(expr.expression) ?? undefined))
+    ) {
+      return lowerNewPromise(L, expr, loc);
     }
     if (ts.isIdentifier(expr.expression)) {
       // `import C = N.C; new C()` — the alias's own source-order guards
@@ -12367,78 +12452,7 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
       }
       // `new Promise<T>((resolve) => ...)`: the ambient Promise constructor.
       if (symbol?.name === "Promise" && L.isStdlibSymbol(symbol)) {
-        const type = L.irTypeOf(expr);
-        if (type.kind !== "promise") L.badType(expr, L.typeOf(expr));
-        const args = expr.arguments ?? [];
-        if (args.length !== 1) {
-          L.unsupported("SC1090", expr, "Promise construction without an executor");
-        }
-        // `new Promise(setImmediate)` (the Node-suite early-exit shape):
-        // the executor IS the stdlib setImmediate, so resolve rides the
-        // immediate queue — a dedicated runtime constructor arms an
-        // immediate that fulfills with the undefined dyn value.
-        {
-          const a0 = args[0]!;
-          if (ts.isIdentifier(a0) && a0.text === "setImmediate") {
-            const sym = L.checker.getSymbolAtLocation(a0);
-            const decls = sym ? L.checker.declarationsOf(sym) : [];
-            if (decls.length > 0 && decls.every((d) => L.isStdlibFile(d.getSourceFile()))) {
-              // The settled value is the undefined dyn value — the result
-              // is promise<dyn> whatever T the checker inferred for the
-              // unusual executor (Promise<unknown> in the suite's shape).
-              return {
-                kind: "libCall",
-                fn: "timers.immediatePromise",
-                args: [],
-                type: { kind: "promise", inner: DYN },
-                loc,
-              };
-            }
-          }
-        }
-        // An executor that RESOLVES WITH A PROMISE. The lib signature spells
-        // resolve `(value: T | PromiseLike<T>) => void`; mapType collapses
-        // that union to `T`, so the promise possibility is erased from the
-        // parameter and the argument coercion then reaches for the checked
-        // single-arm extraction — an UNCODED TypeError at run time for a
-        // settle-or-value union, and an SC1090 for a plain promise. Both are
-        // gaps against the ambient override's own written contract.
-        //
-        // The parameter is re-bound to the SETTLE-OR-VALUE union instead, the
-        // one shape whose arms a runtime tag can tell apart, and the
-        // emitters adopt off that tag (emit-exprs.ts's newPromise). Only
-        // executors that actually pass a promise-carrying value are
-        // re-bound, so every program that resolves with a plain value keeps
-        // its emitted code to the byte.
-        executorResolveAdoptionUnion(L, args[0]!, type.inner);
-        // Executors bind resolve alone or (resolve, reject): reject is a
-        // real closure rejecting the promise with an Error reason (the
-        // ambient override pins `reason: Error` — rejection payloads share
-        // the thrown-value representation, and the OBJ kind keeps
-        // catch-side instanceof and the uncaught printer working). First
-        // settle wins, exactly JS: reject-after-resolve and double-reject
-        // are no-ops, and an executor throw after any settle is swallowed.
-        const executor = L.lowerExpr(args[0]!);
-        if (executor.type.kind !== "func") L.badType(args[0]!, L.typeOf(args[0]!));
-        if (executor.type.params.length > 1) {
-          const rj = executor.type.params[1]!;
-          if (
-            executor.type.params.length > 2 ||
-            rj.kind !== "func" ||
-            rj.ret.kind !== "void" ||
-            rj.params.length !== 1 ||
-            rj.params[0]!.kind !== "dyn"
-          ) {
-            // A non-contextually-typed executor VALUE whose second param
-            // isn't the pinned (reason: Error) => void shape.
-            L.unsupported(
-              "SC1090",
-              args[0]!,
-              "Promise executors whose reject parameter is not '(reason: unknown) => void'",
-            );
-          }
-        }
-        return { kind: "newPromise", executor, type, loc };
+        return lowerNewPromise(L, expr, loc);
       }
       // The lib fence's CONSTRUCTOR chokepoint: `new` of any other
       // stdlib-declared constructor (Date, WeakMap, Proxy,

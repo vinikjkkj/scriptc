@@ -2232,6 +2232,9 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     if (ts.isAsExpression(expr) || ts.isSatisfiesExpression(expr) || ts.isNonNullExpression(expr)) {
       return stdlibGlobalNameOf(L, expr.expression);
     }
+    // A read of the Promise handle a PromiseConstructor(Like) slot holds IS the global
+    // Promise (the slot's only value), so its members and `new` lower as the global's.
+    if ((ts.isIdentifier(expr) || ts.isPropertyAccessExpression(expr)) && promiseCtorHandleRead(L, expr)) return "Promise";
     if (ts.isIdentifier(expr)) {
       // `globalThis` itself: a reserved intrinsic — tsc rejects user
       // bindings of the name, and its special symbol carries no ordinary
@@ -2268,6 +2271,36 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
       return symbol.name === "global" ? "globalThis" : symbol.name;
     }
     return null;
+  }
+
+/** A READ of the one value a PromiseConstructor / PromiseConstructorLike slot can hold.
+   *
+   * Both types map to the same inert handle (types.ts, IrType "opaque"), and the only value
+   * a static build can put in it is the global `Promise` itself: a record option
+   * (`pool.options.Promise`), a field (`this.Promise`), a binding (`const P = c.Promise ?? Promise`).
+   * Calling a member of it is therefore calling the member of the global, and `new` of it is
+   * `new Promise`. The read must be EFFECT-FREE (an identifier, or `this`/identifier property
+   * chains), since the lowering of the member call drops the receiver read; anything else keeps
+   * the standard-library fence. A union with `undefined` is not this type until a check narrows
+   * it, so the checker's own narrowing decides when the read is the handle. */
+  export function promiseCtorHandleRead(L: Lowerer, expr: ts.Expression): boolean {
+    if (L.dynamic) return false;
+    let e: ts.Expression = expr;
+    while (ts.isParenthesizedExpression(e) || ts.isNonNullExpression(e) || ts.isAsExpression(e) || ts.isSatisfiesExpression(e)) e = e.expression;
+    const pure = (n: ts.Expression): boolean => {
+      if (ts.isIdentifier(n) || n.kind === ts.SyntaxKind.ThisKeyword) return true;
+      return ts.isPropertyAccessExpression(n) && n.questionDotToken === undefined && pure(n.expression);
+    };
+    if (!pure(e)) return false;
+    const t = L.checker.getTypeAtLocation(e);
+    const asym = t.getAliasSymbol();
+    const sym = t.getSymbol();
+    const named =
+      (asym !== undefined && asym.name === "PromiseConstructorLike" && L.checker.declarationsOf(asym).some((d) => ts.isTypeAliasDeclaration(d) && L.isStdlibFile(d.getSourceFile()))) ||
+      (sym !== undefined && sym.name === "PromiseConstructor" && L.isStdlibSymbol(sym));
+    if (!named) return false;
+    const mapped = L.mapTypeOf(t);
+    return mapped?.kind === "opaque" && mapped.name === "PromiseConstructor";
   }
 
 /** True iff `expr` denotes THE standard-library global `name` — name AND

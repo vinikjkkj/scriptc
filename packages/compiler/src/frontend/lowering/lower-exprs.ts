@@ -19712,6 +19712,21 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         ) {
           return { kind: "bin", op: negated ? "!==" : "===", left: idLeft, right: idRight, type: BOOL, loc };
         }
+        // Two reads of the Promise constructor handle are the SAME object: the slot's only value
+        // is the global Promise singleton, so `===` is true (`!==` false). Both operands still
+        // evaluate, left then right; pure reads drop out.
+        if (
+          idLeft.type.kind === "opaque" &&
+          idLeft.type.name === "PromiseConstructor" &&
+          typeEquals(idLeft.type, idRight.type)
+        ) {
+          const stmts: IrStmt[] = [];
+          for (const e of [left, right]) {
+            if (!pureReemittable(e)) stmts.push({ kind: "exprStmt", expr: e, loc });
+          }
+          const answer: IrExpr = { kind: "boolLit", value: !negated, type: BOOL, loc };
+          return stmts.length === 0 ? answer : { kind: "seqExpr", stmts, result: answer, type: BOOL, loc };
+        }
         // Two PRIMITIVE operands of different static kinds are never ===:
         // JS compares the types first, so the answer is false (true for
         // !==) with no conversion. Both operands still evaluate, left then
@@ -20369,6 +20384,8 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         return "object";
       case "bigint": return "bigint";
       case "classval": return "function";
+      // The Promise constructor handle is the global Promise function.
+      case "opaque": return arm.name === "PromiseConstructor" ? "function" : null;
       default:
         return null;
     }

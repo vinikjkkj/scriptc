@@ -5049,6 +5049,22 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   ) {
     return { kind: "opaque", name: psym.name };
   }
+  // `PromiseConstructorLike` (pg's `PoolConfig.Promise`, any options bag that lets the caller
+  // pick the Promise implementation): the standard library's alias for the constructor
+  // SIGNATURE of a promise implementation. The only value of it a static build can hold is the
+  // global `Promise` (the same singleton a PromiseConstructor slot holds), so the alias reads as
+  // that handle; any other constructor flowing in refuses at its own write, never silently.
+  {
+    const asym = widened.getAliasSymbol();
+    if (
+      !ctx.dynamic &&
+      asym !== undefined &&
+      asym.name === "PromiseConstructorLike" &&
+      checker.declarationsOf(asym).some((d) => ts.isTypeAliasDeclaration(d) && ctx.isStdlibFile(d.getSourceFile()))
+    ) {
+      return { kind: "opaque", name: "PromiseConstructor" };
+    }
+  }
   if (isStdlibInterface("PromiseRejectedResult")) {
     return {
       kind: "record",

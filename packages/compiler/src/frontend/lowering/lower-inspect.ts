@@ -401,6 +401,11 @@ function inspectSupport(L: Lowerer, t: IrType, visiting: Set<string>, out: { rec
       visiting.delete(t.className);
       return null;
     }
+    case "opaque":
+      // The Promise constructor handle: the one global Promise, which Node prints as
+      // `[Function: Promise]` at every depth. No other opaque handle has a rendering.
+      if (t.name === "PromiseConstructor") return null;
+      return `'${L.fmt(t)}' values have no inspect lowering`;
     default:
       return `'${L.fmt(t)}' values have no inspect lowering`;
   }
@@ -511,6 +516,8 @@ function inspectExpr(
         type: STRING,
         loc,
       };
+    case "opaque":
+      return { kind: "strLit", value: "[Function: Promise]", type: STRING, loc };
     case "jsval":
       return { kind: "libCall", fn: "insp.jsval", args: [value, recurse, depth], type: STRING, loc };
     case "object":
@@ -1967,6 +1974,8 @@ function sConversionHazard(L: Lowerer, t: IrType, seen: Set<string>): string | n
   switch (t.kind) {
     case "func":
       return "a function value (Node prints its source text)";
+    case "opaque":
+      return "the Promise constructor (Node prints its source text)";
     case "record": {
       const fields = L.shapes.get(t.shapeId)?.fields ?? [];
       if (fields.some((f) => f.name.startsWith("__@toPrimitive") && f.type.kind === "func")) {
