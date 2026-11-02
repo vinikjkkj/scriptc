@@ -5188,7 +5188,11 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         // a callable spelled either way is ONE type and the pack ABI,
         // funcCoerceAdapter's unpack and the dyn call thunks all agree. Fires only when the ENCLOSING function type
         // cleared the .d.ts callable gate, like that rule.
-        if (restT === null && fromUncompiledCallableLiteral) {
+        // The SAME slot for a `...xs: any[]` rest a PROGRAM (or a package's source) spells:
+        // the annotation is what the author wrote, not the checker's implicit `any`, and
+        // pg's `PoolConfig.log?: (...messages: any[]) => void` is one. `any[]` and
+        // `unknown[]` describe one runtime pack, so the two spellings are one type.
+        if (restT === null && (fromUncompiledCallableLiteral || spellsAnyRestPack(decl, ctx))) {
           const restTs = checker.getTypeOfSymbol(p);
           if (checker.isArrayType(restTs)) {
             const el = checker.getTypeArguments(restTs as ts.TypeReference)[0];
@@ -8503,6 +8507,25 @@ function declTwinTupleAsArray(
  * the target is dyn-checkable, a fence where it is not. What tsc would
  * have allowed silently (`const n: number = doc.x`) the lowering still
  * has to answer for, and answers with a path-carrying TypeError. */
+/** True when `decl` is a rest parameter whose annotation is spelled `any[]` /
+ * `Array<any>` / `readonly any[]` in a file that is not the standard library, in a
+ * static build: the library or program author's own `any`, never an inferred one. */
+function spellsAnyRestPack(decl: ts.Node | undefined, ctx: TypeMapperCtx): boolean {
+  if (ctx.dynamic || decl === undefined || !ts.isParameter(decl) || decl.dotDotDotToken === undefined) return false;
+  if (ctx.isStdlibFile(decl.getSourceFile())) return false;
+  let tn: ts.TypeNode | undefined = decl.type;
+  while (tn !== undefined && (ts.isParenthesizedTypeNode(tn) || ts.isTypeOperatorNode(tn))) tn = tn.type;
+  if (tn === undefined) return false;
+  if (ts.isArrayTypeNode(tn)) return tn.elementType.kind === ts.SyntaxKind.AnyKeyword;
+  return (
+    ts.isTypeReferenceNode(tn) &&
+    ts.isIdentifier(tn.typeName) &&
+    (tn.typeName.text === "Array" || tn.typeName.text === "ReadonlyArray") &&
+    tn.typeArguments?.length === 1 &&
+    tn.typeArguments[0]!.kind === ts.SyntaxKind.AnyKeyword
+  );
+}
+
 /** True when a function type's declaration SPELLS its return type as `any`
  * (`(v: any) => any`): an annotation, never the checker's inferred `any` of an
  * unannotated JavaScript function. */
