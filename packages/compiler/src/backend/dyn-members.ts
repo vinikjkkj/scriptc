@@ -130,7 +130,7 @@ export function dynEnumerationFenced(cls: DynMemberClass): boolean {
 
 /** 1 when the chain reaches the runtime EventEmitter and no runtime stream class, 2 when it
  * reaches a runtime stream class (their own-key prefix is far larger than the emitter's three
- * keys), else 0. */
+ * keys) or is a class grafted with the emitter API (its key order is not the class's to state), else 0. */
 /** Does this class's chain root in a runtime Error class (`class DB extends
  * Error`)? Its instances carry the Error hierarchy's vtable prefix, and a
  * caught or rejected one must cross as the instance itself: the error
@@ -164,6 +164,10 @@ export function dynRuntimeRoot(cls: DynMemberClass): number {
     if (RUNTIME_STREAM_CLASSES.has(c.def.name) || c.def.fields.some((f) => f.name === CLASS_PROPS_FIELD)) return 2;
     if (c.def.name === RUNTIME_EMITTER_CLASS) emitter = true;
   }
+  // A class grafted by applyMixin(Y, EventEmitter) carries the emitter's own keys (_events, _eventsCount,
+  // _maxListeners) among its fields, in whatever place its constructor first runs EventEmitter.call(this):
+  // the key ORDER is not a fact of the class, so every enumerating surface keeps its loud fence (2).
+  if (!emitter && cls.def.fields.some((f) => f.name === EMITTER_MIXIN_FIELD_NAME)) return 2;
   return emitter ? 1 : 0;
 }
 
