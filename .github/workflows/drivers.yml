@@ -77,7 +77,10 @@ jobs:
           pnpm build
       - name: Install the rig
         working-directory: rigsrc/tests/driver-rigs
-        run: pnpm install --frozen-lockfile --ignore-workspace
+        # The box installs the rig without running dependency build scripts
+        # (zapo-js's prepare/preinstall); mirror that so pnpm's strict
+        # ignored-builds check does not fail the install.
+        run: pnpm install --frozen-lockfile --ignore-workspace --ignore-scripts --config.strict-dep-builds=false
       # The provenance cache holds the checked-out package sources the
       # compiler maps (a mongodb checkout is ~2 GB); keyed by the rig lockfile.
       - uses: actions/cache@v4
