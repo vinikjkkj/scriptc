@@ -728,6 +728,30 @@ static bool dyn_locale_answerable(ScrDyn *const *args, size_t argc) {
   return scr_nf_hook_dyn != NULL || dyn_locale_args_default(args, argc);
 }
 
+static ScrDyn *scr_dyn_new_str_lit_tag(const char *s) {
+  ScrStr *t = scr_str_new(s, strlen(s));
+  ScrDyn *r = scr_dyn_new_str(t);
+  scr_str_release(t);
+  return r;
+}
+
+/* Object(value): nullish makes a fresh object, an object-like value answers itself. A primitive would need a
+ * wrapper object, which the checked-dynamic tree has no form for: loud, never a wrong answer. */
+static ScrDyn *dyn_object_ctor_call(ScrDyn *const *args, size_t argc) {
+  if (argc == 0 || args[0]->kind == SCR_DYN_UNDEF || args[0]->kind == SCR_DYN_NULL) return scr_dyn_new_obj();
+  switch (args[0]->kind) {
+    case SCR_DYN_OBJ: case SCR_DYN_ARR: case SCR_DYN_FUNC: case SCR_DYN_BYTES: case SCR_DYN_HANDLE:
+    case SCR_DYN_MAP: case SCR_DYN_OBJINST:
+      return scr_dyn_retain(args[0]);
+    default:
+    {
+      static const char msg[] = "Object(value) of a primitive (a wrapper object) is not supported yet";
+      scr_throw_error_msg(SCR_ERR_ERROR, msg, sizeof msg - 1);
+      return NULL;
+    }
+  }
+}
+
 static ScrDyn *dyn_object_proto_method(ScrDyn *recv, const char *method,
                                        ScrDyn *const *args, size_t argc, const char *what) {
   if (dyn_name_is(method, "hasOwnProperty")) {
@@ -758,6 +782,31 @@ static ScrDyn *dyn_object_proto_method(ScrDyn *recv, const char *method,
     ScrDyn *r = scr_dyn_new_str(s);
     scr_str_release(s);
     return r;
+  }
+  /* Object.prototype.toString over a plain dyn object: the lookup that brought the call here found no own or
+   * inherited `toString`, so ToString of the receiver is Object.prototype's answer. */
+  if (recv->kind == SCR_DYN_OBJ && dyn_name_is(method, "toString")) {
+    return scr_dyn_new_str_lit_tag("[object Object]");
+  }
+  /* Object(value) as a method of a plain dyn object: `o.constructor(v)`. */
+  if (recv->kind == SCR_DYN_OBJ && dyn_name_is(method, "constructor")) return dyn_object_ctor_call(args, argc);
+  /* Object.prototype.propertyIsEnumerable / isPrototypeOf over a plain dyn object (the two names a keyed
+   * read of a dictionary answers `function` for, see dyn_plain_obj_knows). */
+  if (recv->kind == SCR_DYN_OBJ && dyn_name_is(method, "propertyIsEnumerable")) {
+    ScrStr *k = argc >= 1 ? scr_dyn_string_coerce(args[0]) : scr_str_new("undefined", 9);
+    if (scr_exc_pending()) { scr_str_release(k); return NULL; }
+    bool r = scr_dyn_obj_own_data(recv, k->data, k->len) != NULL;
+    scr_str_release(k);
+    return scr_dyn_new_bool(r);
+  }
+  if (recv->kind == SCR_DYN_OBJ && dyn_name_is(method, "isPrototypeOf")) {
+    const ScrDyn *v = argc >= 1 ? args[0] : scr_dyn_undefined();
+    bool r = false;
+    if (v->kind == SCR_DYN_OBJ) {
+      for (const ScrDyn *p = scr_dyn_ext(v)->proto; p != NULL && !r; p = p->kind == SCR_DYN_OBJ ? scr_dyn_ext(p)->proto : NULL)
+        r = p == recv;
+    }
+    return scr_dyn_new_bool(r);
   }
   dyn_throw_not_fn(what);
   return NULL;
@@ -1152,6 +1201,20 @@ static bool dyn_objproto_knows(const char *m) {
   return dyn_name_in(m, names);
 }
 
+/* A PLAIN dictionary: an ordinary `{}`-made object with no prototype link, no class label, no
+ * error encoding and no static origin. Only such an object inherits Object.prototype's whole
+ * surface and nothing else, so only for it does a keyed read of one of these names answer
+ * Object.prototype's member (`!row[name]` over a column named toString is false in Node). */
+static bool dyn_plain_obj(const ScrDyn *r) {
+  return r->kind == SCR_DYN_OBJ && !r->null_proto && !r->static_copy && !scr_dyn_is_error_encoding(r) &&
+         scr_dyn_ext(r)->proto == NULL && scr_dyn_ext(r)->cname == NULL;
+}
+
+static bool dyn_plain_obj_knows(const ScrDyn *r, const char *m) {
+  static const char *const names[] = { "toString", "constructor", "isPrototypeOf", "propertyIsEnumerable", NULL };
+  return dyn_plain_obj(r) && dyn_name_in(m, names);
+}
+
 
 /* ── Buffer numeric methods on a DYNAMIC receiver ──────────────────────
  *
@@ -1356,7 +1419,7 @@ static bool dyn_kind_knows(const ScrDyn *recv, const char *m) {
        * refuses it for the same reason. The OWN/chain walk has already
        * missed by the time this is asked (the caller checks), so this is
        * only ever Object.prototype's set. */
-      return !recv->null_proto && dyn_objproto_knows(m);
+      return !recv->null_proto && (dyn_objproto_knows(m) || dyn_plain_obj_knows(recv, m));
     case SCR_DYN_PROMISE:
       /* THE ARM 4242's comment said could not be exercised. It can now: a
        * DOT read of `then` off an `unknown` (`typeof (v as { then?:
@@ -1600,6 +1663,84 @@ bool scr_dyn_has_key_full(const ScrDyn *v, const ScrStr *key) {
   return scr_dyn_has_intrinsic_method(v, key->data, key->len);
 }
 
+/* Object.prototype's `toString`, `constructor`, `isPrototypeOf` and `propertyIsEnumerable` as the ONE function
+ * each is in Node: an immortal closure per name, so `a.toString === b.toString`, and a property written onto
+ * the function (a row keyed `result[tableName][column] = v` where tableName is "toString") lands on the one
+ * shared object, where every later read finds it. The methods run on the ambient receiver (a plain call
+ * through `.call(x)` or a method-position call); `constructor` is the `Object` function. */
+static ScrDyn *dyn_objproto_fn_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc);
+
+static void *dyn_objproto_noop_v(void *p) { return p; }
+static void dyn_objproto_noop_rel_v(void *p) { (void)p; }
+static const char *const dyn_objproto_fn_names[4] = { "toString", "constructor", "isPrototypeOf", "propertyIsEnumerable" };
+/* The registry's own +1 on each minted box; released at exit, which also drops the properties a program wrote
+ * onto the function (they live on its closure), so the leak audit sees a clean heap. */
+static ScrDyn *dyn_objproto_boxes[4];
+static bool dyn_objproto_teardown_set = false;
+
+static void dyn_objproto_teardown(void) {
+  for (size_t i = 0; i < 4; i++) {
+    scr_dyn_release(dyn_objproto_boxes[i]);
+    dyn_objproto_boxes[i] = NULL;
+  }
+  dyn_objproto_teardown_set = false;
+}
+
+static ScrDyn *dyn_objproto_fn_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  const char *name = dyn_objproto_fn_names[(intptr_t)scr_box_get_ref((ScrBox *)clo->caps[0])];
+  if (strcmp(name, "constructor") == 0) return dyn_object_ctor_call(args, argc);
+  ScrDyn *recv = scr_dyn_this_get(); /* +1 */
+  ScrDyn *r = NULL;
+  if (strcmp(name, "toString") == 0) {
+    /* Object.prototype.toString.call(x): "[object " + the builtin tag + "]", whatever x's own toString says. */
+    const char *tag = NULL;
+    switch (recv->kind) {
+      case SCR_DYN_UNDEF: tag = "Undefined"; break;
+      case SCR_DYN_NULL: tag = "Null"; break;
+      case SCR_DYN_BOOL: tag = "Boolean"; break;
+      case SCR_DYN_NUM: tag = "Number"; break;
+      case SCR_DYN_STR: tag = "String"; break;
+      case SCR_DYN_ARR: tag = "Array"; break;
+      case SCR_DYN_FUNC: tag = "Function"; break;
+      case SCR_DYN_OBJ: if (recv->null_proto || dyn_plain_obj(recv)) tag = "Object"; break;
+      default: break;
+    }
+    if (tag != NULL) {
+      char buf[32];
+      int n = snprintf(buf, sizeof buf, "[object %s]", tag);
+      ScrStr *t = scr_str_new(buf, (size_t)n);
+      r = scr_dyn_new_str(t);
+      scr_str_release(t);
+    } else {
+      dyn_throw_unsupported("Object", "toString of this kind of value");
+    }
+  } else if (recv->kind == SCR_DYN_UNDEF || recv->kind == SCR_DYN_NULL) {
+    dyn_throw_not_fn(name);
+  } else {
+    r = scr_dyn_invoke(recv, name, args, argc, name);
+  }
+  scr_dyn_release(recv);
+  return r;
+}
+
+static ScrDyn *dyn_objproto_shared_fn(const char *name) {
+  for (size_t i = 0; i < 4; i++) {
+    if (strcmp(dyn_objproto_fn_names[i], name) != 0) continue;
+    if (dyn_objproto_boxes[i] == NULL) {
+      ScrClosure *clo = scr_closure_new((void *)dyn_objproto_fn_thunk, 1);
+      clo->caps[0] = scr_box_new_obj(dyn_objproto_noop_v, dyn_objproto_noop_rel_v, NULL);
+      scr_box_set_ref((ScrBox *)clo->caps[0], (void *)(intptr_t)i);
+      dyn_objproto_boxes[i] = scr_dyn_new_func(clo, dyn_objproto_fn_thunk, i == 0 ? 0 : 1, "()", i == 1 ? "Object" : dyn_objproto_fn_names[i]);
+      if (!dyn_objproto_teardown_set) {
+        dyn_objproto_teardown_set = true;
+        scr_atexit(dyn_objproto_teardown);
+      }
+    }
+    return scr_dyn_retain(dyn_objproto_boxes[i]);
+  }
+  return NULL;
+}
+
 ScrDyn *scr_dyn_intrinsic_method_get(ScrDyn *recv, const ScrStr *key) {
   /* ScrStr is NUL-terminated (scr_str_new), so ->data is a C string for
    * the same name-keyed tests the dispatch makes. */
@@ -1609,6 +1750,7 @@ ScrDyn *scr_dyn_intrinsic_method_get(ScrDyn *recv, const ScrStr *key) {
    * stores a member whose VALUE is undefined, which the caller cannot
    * tell from a miss. `in` can. */
   if (recv->kind == SCR_DYN_OBJ && scr_dyn_obj_key_present(recv, key->data, key->len)) return NULL;
+  if (dyn_plain_obj_knows(recv, key->data)) return dyn_objproto_shared_fn(key->data);
   ScrClosure *clo = scr_closure_new((void *)dyn_bound_intrinsic_thunk, 2);
   clo->caps[0] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
   scr_box_set_ref(clo->caps[0], scr_dyn_retain(recv));
