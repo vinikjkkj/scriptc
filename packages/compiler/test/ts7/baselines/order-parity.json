@@ -11050,6 +11050,54 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/23350-builtin-error-class-values-redis-shape.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23350-builtin-error-class-values-redis-shape.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23351-builtin-error-class-value-in-es5-ctor-field-pg-shape.js": {
+   "order": [
+    "<repo>/tests/corpus/23351-builtin-error-class-value-in-es5-ctor-field-pg-shape.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23352-builtin-error-ctorless-class-value-through-dyn-construct.js": {
+   "order": [
+    "<repo>/tests/corpus/23352-builtin-error-ctorless-class-value-through-dyn-construct.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23353-builtin-stream-class-value-stored-and-constructed.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23353-builtin-stream-class-value-stored-and-constructed.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23354-builtin-error-class-values-instanceof-through-dyn.js": {
+   "order": [
+    "<repo>/tests/corpus/23354-builtin-error-class-values-instanceof-through-dyn.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23355-builtin-emitter-class-value-typed-flow.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23355-builtin-emitter-class-value-typed-flow.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23356-builtin-error-class-value-typed-ctor-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/23356-builtin-error-class-value-typed-ctor-slot.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23357-builtin-module-safe-load-double-quoted-probe-and-logical-guard.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23357-builtin-module-safe-load-double-quoted-probe-and-logical-guard.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2350-nan-global.ts": {
    "order": [
     "<repo>/tests/corpus/2350-nan-global.ts"
@@ -21412,6 +21460,18 @@
   "<repo>/tests/diagnostics/blocked-binding-cascade.ts": {
    "order": [
     "<repo>/tests/diagnostics/blocked-binding-cascade.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/builtin-ctorless-emitter-class-value-into-unknown.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/builtin-ctorless-emitter-class-value-into-unknown.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/builtin-ctorless-stream-new-through-class-value.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/builtin-ctorless-stream-new-through-class-value.ts"
    ],
    "diags": []
   },
