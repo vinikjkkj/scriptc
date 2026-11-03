@@ -39,6 +39,7 @@ import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerHttpClientFnCall } f
 import { isAnyDynContainer, lowerProxyNew, CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, definePropSlotSiteOf, errorWithCause, definePropTableSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, requireVirtualSlotFit, virtualViewFitsSlot, type ClassInfo } from "./lower-classes.js";
 import { boundEmitDispatcher, boundSubscribeDispatcher, emitterEventNames, emitterRooted, lowerEmitApplyCall, lowerEmitterMethodCall, lowerUnnamedEmitterCall } from "./lower-emitter.js";
 import { emitterCtorCallOnGraft, lowerEmitterMixinCall } from "./lower-emitter-mixin.js";
+import { internalBox } from "./lower-ownshadow.js";
 import { ArgHoist, lowerConsoleInspectArg, lowerFormatCall, lowerUtilFormatApply, refuseCodecCoercionCall, refuseCodecInspect } from "./lower-inspect.js";
 import { STREAM_API_MEMBERS, lowerStreamMethodCall, lowerStreamModuleCall, lowerStreamStaticCall, streamSidesOf } from "./lower-stream.js";
 import { isRequireBindingIdent, ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedFnSymbolOf, contextualUndefReadType, fenceEarlyAliasUse, fenceEarlyNsMemberRef, moduleNsOwnKeys, moduleNsSourceFileOf, nsMemberIdentOf, nsPathPrefix, nsUndefRead } from "./lower-namespaces.js";
@@ -6738,6 +6739,10 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       ) {
         const recv = L.lowerExpr(expr.expression.expression);
         if (recv.type.kind === "dyn") return dynCallWithThis(L, recv, callee, args, calleeName, loc);
+        // an instance of a class carrying the run-time property table (lowerInstanceKeyedRead): the box is the receiver
+        if (recv.type.kind === "object" && isJsSourceFile(expr.getSourceFile()) && L.classes.get(recv.type.className)?.hasPropsTable === true) {
+          return dynCallWithThis(L, internalBox(L, { kind: "dynFrom", value: recv, type: DYN, loc } as IrExpr), callee, args, calleeName, loc);
+        }
       }
       return { kind: "dynCall", callee, calleeName, args, type: DYN, loc };
     }

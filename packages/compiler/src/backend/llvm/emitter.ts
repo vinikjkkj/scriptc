@@ -1038,6 +1038,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "cls.propsCount": "scr_cls_props_count",
   "cls.propsGet": "scr_cls_props_get",
   "cls.propsSet": "scr_cls_props_set",
+  "cls.propsNote": "scr_cls_props_note",
+  "cls.propsKeys": "scr_cls_props_keys",
   "cls.propsRead": "scr_cls_props_read",
   "dyn.typeof": "scr_dyn_typeof",
   "dyn.toString": "scr_dyn_to_string_method",

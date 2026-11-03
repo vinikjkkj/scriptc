@@ -69,6 +69,8 @@ import type {
 } from "../../ir/nodes.js";
 import { protoEscapes, strictAt } from "./lower-protoescape.js";
 import { applyProtoSlots, scanProtoSlots } from "./lower-protoslots.js";
+import { applyProtoTabs, scanProtoTabs } from "./lower-prototab.js";
+import { OWN_SHADOW_ROOTS, applyFieldNotes, applyOwnShadows, inOwnShadowFamily } from "./lower-ownshadow.js";
 import { CLASS_BUILTIN_CTORLESS, CLASS_NO_DYN_NEW, EVAL_NO_SRC_CLASSES, GRAFTED_EMITTER_CLASSES, GRAFTED_EMITTER_CELL_CLASSES, GRAFTED_ROWS_FENCED_OPS, GRAFTED_PROPS_EXACT_OPS, EVAL_STATIC_CLASSES, dynReflectionSite, emitterStateWriteSites, graftedBoxSites, moduleBoxesEmitters } from "../../ir/nodes.js";
 import { computeTwinEdits, type TwinEdits } from "./emitter-twin.js";
 import { canBoxFuncIntoDyn } from "../../ir/nodes.js";
@@ -771,6 +773,7 @@ export function lowerToIr(
     );
   }
   const ffiImports = options.ffiImports ?? [];
+  OWN_SHADOW_ROOTS.clear(); // the families of THIS program: the discovery pass fills it, the emit pass reads it
   const validation = new Lowerer(program, entry, moduleOrder, dynamic, {
     targetPlatform,
     ffiImports,
@@ -3724,6 +3727,7 @@ export class Lowerer {
     for (const info of this.classes.values()) analyzeClassDecoration(this, info);
     this.prepareModuleInits(parts);
     scanProtoSlots(this, parts.map((fp) => fp.sf));
+    scanProtoTabs(this, parts.map((fp) => fp.sf));
     lowerProfileNote(this.remainder ? "%remainder-collect" : "%emit-collect", performance.now() - __colT);
 
     const functions: IrFunction[] = [];
@@ -3847,6 +3851,9 @@ export class Lowerer {
     setMintPhase("tail:lifted");
     mintPhaseControl(this.shapes);
     applyProtoSlots(this, [functions, this.implicitFns]);
+    applyOwnShadows(this, [functions, this.implicitFns]);
+    applyFieldNotes(this, [functions, this.implicitFns]);
+    applyProtoTabs(this, [functions, this.implicitFns]);
     functions.push(...this.liftedFns);
     functions.push(...this.implicitFns);
     // GRAFTED-EMITTER FENCE (graftedDynFence). A class grafted by applyMixin(Y, EventEmitter) crosses into a dyn slot
@@ -3860,7 +3867,7 @@ export class Lowerer {
       // rows (exact in every enumerating surface but GRAFTED_ROWS_FENCED_OPS); one that ALSO carries a run-time
       // property table is exact only for the key-listing surfaces (GRAFTED_PROPS_EXACT_OPS).
       const tierOf = (cn: string): 0 | 1 | 2 =>
-        !GRAFTED_EMITTER_CELL_CLASSES.has(cn) ? 0 : this.classes.get(cn)?.hasPropsTable === true ? 2 : 1;
+        !GRAFTED_EMITTER_CELL_CLASSES.has(cn) ? 0 : this.classes.get(cn)?.hasPropsTable === true && !(this.ownShadowRoots.size > 0 && this.classes.get(cn) !== undefined && inOwnShadowFamily(this, this.classes.get(cn)!)) ? 2 : 1; // a family's table records creation order: exact like member rows
       const boxes = graftedBoxSites(functions);
       const whyOfTier: (string | null)[] = [];
       const seen = new Set<string>();
@@ -4670,6 +4677,8 @@ export class Lowerer {
     // thunks) the emit pass must see.
     for (const info of this.classes.values()) analyzeClassDecoration(this, info);
     this.prepareModuleInits(parts);
+    // the prototype-table scan lowers statements the same way in both passes (the emit pass runs it after its collection)
+    scanProtoTabs(this, parts.map((fp) => fp.sf));
     lowerProfileNote("%discovery-collect", performance.now() - __colT);
 
     // Every lowerable body, by emitted-function name. The names double as
@@ -15545,6 +15554,18 @@ export class Lowerer {
   readonly lateMethodAssigns = new Set<ts.Node>();
   /** Run-time prototype method replacement (lower-protoslots.ts): class name -> method -> the slot global a write stores into. */
   readonly protoSlots = new Map<string, Map<string, IrGlobal>>();
+  /** Computed run-time prototype members (lower-prototab.ts): class name -> the module global holding its prototype table. */
+  readonly protoTabs = new Map<string, IrGlobal>();
+  /** Root classes whose family takes run-time keyed writes on its instances (lower-ownshadow.ts). */
+  readonly ownShadowRoots = OWN_SHADOW_ROOTS;
+  /** The IR call nodes `super.m(...)` lowered to: the own-shadow pass points them at the undispatched body. */
+  readonly superCalls = new Set<IrExpr>();
+  /** The dynFrom boxes the keyed-member lowering builds for its own table access (not counted by the enumeration fence). */
+  readonly internalBoxes = new Set<IrExpr>();
+  markSuperCall<T extends IrExpr>(call: T): T {
+    this.superCalls.add(call);
+    return call;
+  }
   /** The class a keyed forEach value reference stands for while that key is unrolled (`ctor` in `ctor.prototype.m`). */
   readonly keyedProtoClass = new Map<ts.Node, ClassInfo>();
   /** `X.prototype.m` reads of a member the class does not have (undefined): an `if` on one has a dead then-branch. */

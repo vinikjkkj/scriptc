@@ -3674,6 +3674,11 @@ export type IrLibFn =
   | "cls.propsEnsure"
   | "cls.propsDefine"
   | "cls.propsHas"
+  /** Records that own field `key` was just created on the instance whose table is arg 0 (a no-op once recorded): a non-enumerable
+   * marker row in the table, so the table's insertion order is the instance's own-key CREATION order. Statement position; both borrowed. */
+  | "cls.propsNote"
+  /** The enumerable keys of the table as a dyn array of strings (a prototype table's listing for for-in). +1, never throws. */
+  | "cls.propsKeys"
   /** How many ENUMERABLE properties the table holds — the one thing
    * util.inspect has to know BEFORE the depth gate, because Node prints
    * `C {}` for an object with no keys whatever the depth budget says,
@@ -11711,7 +11716,7 @@ export function moduleUsesDynInvoke(mod: IrModule): boolean {
           // the definer would leave that program calling a symbol its
           // link line does not carry.
           node.fn === "cls.propsEnsure" || node.fn === "cls.propsDefine" ||
-          node.fn === "cls.propsHas" || node.fn === "cls.propsGet" || node.fn === "cls.propsSet" || node.fn === "cls.propsRead" ||
+          node.fn === "cls.propsHas" || node.fn === "cls.propsGet" || node.fn === "cls.propsSet" || node.fn === "cls.propsRead" || node.fn === "cls.propsNote" || node.fn === "cls.propsKeys" ||
           node.fn === "cls.propsCount"))
     ) {
       found = true;
