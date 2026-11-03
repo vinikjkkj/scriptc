@@ -7197,6 +7197,14 @@ ScrDyn *scr_dyn_objinst_member_get(ScrDyn *d, const ScrStr *key);
  * member set is fully known, the loud ladder for an `opaque` one. +1, or
  * NULL with the exception pending. */
 ScrDyn *scr_dyn_objinst_miss(ScrDyn *d, const ScrStr *key);
+/* A function box bound to `d` as its receiver (+1): what a method read through [[Get]] hands back. */
+ScrDyn *scr_dyn_bound_method_to(const ScrDyn *m, const ScrDyn *d);
+/* The record builder's INSTANCE lane (scr_json.c): the declared members of a boxed
+ * class instance projected into a plain object, own data members as own keys and
+ * getters/methods on an attached prototype. `kg` is the emitted sc_dyn_key_get. +1,
+ * or NULL with the exception pending. */
+ScrDyn *scr_dyn_rec_wide_inst(const ScrDyn *d, const char *const *keys, const unsigned *lens, size_t n,
+                              bool all_own, ScrDyn *(*kg)(ScrDyn *, ScrStr *, bool));
 
 /* ── maps and sets in the checked-dynamic tree (SCR_DYN_MAP) ──────────
  * The static→dyn BOUNDARY constructor: wraps the SAME ScrMap, retained
