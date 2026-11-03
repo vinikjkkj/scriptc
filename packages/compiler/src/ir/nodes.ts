@@ -10884,34 +10884,91 @@ export function dynReflectionSite(functions: readonly IrFunction[]): string | nu
  * reason: the key may be `_events`, and the receiver may be an emitter or its `_events` view (a live table in
  * Node, a copy here). Returns the sites (loc + what). Plain dyn objects in a program that never boxes an emitter
  * never reach this (the caller gates on moduleBoxesEmitters). */
-export function emitterStateWriteSites(functions: readonly IrFunction[]): { loc: SrcLoc; what: string }[] {
+export function emitterStateWriteSites(functions: readonly IrFunction[], classes: readonly IrClassDef[]): { loc: SrcLoc; what: string }[] {
   const CELLS = new Set(["_events", "_eventsCount", "_maxListeners"]);
   const out: { loc: SrcLoc; what: string }[] = [];
+  const byName = new Map(classes.map((c) => [c.name, c] as const));
+  const emitterish = new Map<string, boolean>();
+  const isEmitterish = (name: string): boolean => {
+    const known = emitterish.get(name);
+    if (known !== undefined) return known;
+    emitterish.set(name, false);
+    const c = byName.get(name);
+    const r = c !== undefined && (c.name === RUNTIME_EMITTER_CLASS || RUNTIME_STREAM_CLASSES.has(c.name) ||
+      c.fields.some((f) => f.name === EMITTER_MIXIN_FIELD_NAME) || (c.base !== undefined && isEmitterish(c.base)));
+    emitterish.set(name, r);
+    return r;
+  };
   const isNumberValue = (v: unknown): boolean => {
     const n = v as { kind?: string; value?: { kind?: string; type?: { kind?: string } }; type?: { kind?: string } } | undefined;
     if (n === undefined) return false;
     if (n.kind === "dynFrom") return n.value?.type?.kind === "f64" || (n.value as { unit?: string } | undefined)?.unit === "undefined";
     return n.type?.kind === "f64";
   };
-  const visit = (v: unknown): void => {
-    if (v === null || typeof v !== "object") return;
-    if (Array.isArray(v)) {
-      for (const item of v) visit(item);
-      return;
+  type Node = { kind?: string; fn?: string; args?: unknown[]; loc?: SrcLoc; localId?: string; init?: unknown; value?: { type?: { kind?: string; className?: string } } };
+  // Every definition of every local of the program (a captured variable is defined in one function and written in
+  // another; a local id shared by two functions simply unions their definitions): a receiver is FRESH (cannot be an
+  // emitter or its view) when each of its definitions is a value built in the program that is not an emitter-rooted
+  // instance (a record, an array, a plain object, a copy of another fresh local). A parameter, or a local with a
+  // definition of any other kind, is not.
+  const defs = new Map<string, unknown[]>();
+  const perFn: Node[][] = [];
+  for (const f of functions) {
+    const sites: Node[] = [];
+    perFn.push(sites);
+    const skip = f.name.includes(".%"); // the compiler's own synthesized members (%dynSet, %dynDel, ...) write the property table by key
+    const stack: unknown[] = [f.body];
+    while (stack.length > 0) {
+      const v = stack.pop();
+      if (v === null || typeof v !== "object") continue;
+      if (Array.isArray(v)) {
+        for (const item of v) stack.push(item);
+        continue;
+      }
+      const n = v as Node;
+      if (n.kind === "varDecl" && typeof n.localId === "string") (defs.get(n.localId) ?? defs.set(n.localId, []).get(n.localId)!).push(n.init ?? null);
+      else if (n.kind === "assign" && typeof n.localId === "string") (defs.get(n.localId) ?? defs.set(n.localId, []).get(n.localId)!).push((n as { value?: unknown }).value ?? null);
+      else if (!skip && n.kind === "libCall" && (n.fn === "dyn.keySet" || n.fn === "dyn.keyDelete") && Array.isArray(n.args) && n.loc !== undefined) sites.push(n);
+      for (const key of Object.keys(v)) stack.push((v as Record<string, unknown>)[key]);
     }
-    const n = v as { kind?: string; fn?: string; args?: unknown[]; loc?: SrcLoc };
-    if (n.kind === "libCall" && (n.fn === "dyn.keySet" || n.fn === "dyn.keyDelete") && Array.isArray(n.args) && n.loc !== undefined) {
-      const key = n.args[1] as { kind?: string; value?: string } | undefined;
+  }
+  {
+    const freshMemo = new Map<string, boolean>();
+    const freshExpr = (e: unknown, seen: Set<string>): boolean => {
+      const x = e as Node | null;
+      if (x === null || x === undefined) return false;
+      if (x.kind === "dynObjLit") return true;
+      if (x.kind === "dynFrom") {
+        const vt = x.value?.type;
+        return vt !== undefined && !(vt.kind === "object" && typeof vt.className === "string" && isEmitterish(vt.className)) && vt.kind !== "dyn";
+      }
+      if (x.kind === "varRef" && typeof x.localId === "string") return freshLocal(x.localId, seen);
+      return false;
+    };
+    const freshLocal = (id: string, seen: Set<string>): boolean => {
+      const known = freshMemo.get(id);
+      if (known !== undefined) return known;
+      if (seen.has(id)) return true; // a cycle of copies adds no new source
+      const ds = defs.get(id);
+      if (ds === undefined || ds.length === 0) return false;
+      seen.add(id);
+      const r = ds.every((d) => freshExpr(d, seen));
+      seen.delete(id);
+      freshMemo.set(id, r);
+      return r;
+    };
+    for (const n of perFn.flat()) {
+      const args = n.args!;
+      if (freshExpr(args[0], new Set())) continue;
+      const key = args[1] as { kind?: string; value?: string } | undefined;
       const lit = key?.kind === "strLit" ? key.value : undefined;
-      if (n.fn === "dyn.keyDelete") out.push({ loc: n.loc, what: lit !== undefined && CELLS.has(lit) ? `delete of ${lit}` : "delete through a dynamic key" });
-      else if (lit === undefined) out.push({ loc: n.loc, what: "write through a computed key" });
-      else if (lit === "_events") out.push({ loc: n.loc, what: "write of _events" });
-      else if ((lit === "_eventsCount" || lit === "_maxListeners") && !isNumberValue(n.args[2])) out.push({ loc: n.loc, what: `write of ${lit} with a value that is not a number` });
+      const loc = n.loc!;
+      if (n.fn === "dyn.keyDelete") out.push({ loc, what: lit !== undefined && CELLS.has(lit) ? `delete of ${lit}` : "delete through a dynamic key" });
+      else if (lit === undefined) out.push({ loc, what: "write through a computed key" });
+      else if (lit === "_events") out.push({ loc, what: "write of _events" });
+      else if ((lit === "_eventsCount" || lit === "_maxListeners") && !isNumberValue(args[2])) out.push({ loc, what: `write of ${lit} with a value that is not a number` });
     }
-    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
-  };
-  // The compiler's own synthesized members (%dynSet, %dynDel, ...) write the run-time property table by key.
-  for (const f of functions) if (!f.name.includes(".%")) visit(f.body);
+  }
   return out;
 }
 
