@@ -10853,51 +10853,68 @@ export function moduleBoxesEmitters(mod: IrModule): boolean {
  * cannot be a [[Prototype]] link over an instance. Computed on demand over every function (a captured local is defined in
  * one function and written in another; a local id shared by two functions simply unions their definitions). A parameter,
  * a loop or catch binding, and a local with a definition of any other kind are NOT fresh. */
-function makeFreshObjectTest(functions: readonly IrFunction[]): (e: unknown) => boolean {
-  type N = { kind?: string; localId?: string; init?: unknown; value?: { kind?: string; type?: { kind?: string } }; params?: { localId?: string; id?: string }[] };
-  const defs = new Map<string, unknown[]>();
-  const opaque = new Set<string>();
+function makeFreshObjectTest(functions: readonly IrFunction[]): (e: unknown, fnIdx: number) => boolean {
+  type N = { kind?: string; localId?: string; init?: unknown; captures?: string[]; value?: { kind?: string; type?: { kind?: string } } };
+  type Scope = { defs: Map<string, unknown[]>; opaque: Set<string>; captured: Set<string>; memo: Map<string, boolean> };
+  const mkScope = (): Scope => ({ defs: new Map(), opaque: new Set(), captured: new Set(), memo: new Map() });
+  // One scope per function (a local id is unique inside its function; the same spelling in another function is another
+  // local), plus a program-wide scope used for a local that a closure captures (it can be written from another function).
+  const global = mkScope();
+  const scopes = functions.map(() => mkScope());
+  const addDef = (sc: Scope, id: string, d: unknown): void => {
+    (sc.defs.get(id) ?? sc.defs.set(id, []).get(id)!).push(d);
+  };
   const seen = new WeakSet<object>();
-  const stack: unknown[] = [];
-  for (const f of functions) {
+  functions.forEach((f, idx) => {
+    const sc = scopes[idx]!;
     for (const p of f.params as unknown as { localId?: string; id?: string }[]) {
       const id = p.localId ?? p.id;
-      if (typeof id === "string") opaque.add(id);
+      if (typeof id === "string") {
+        sc.opaque.add(id);
+        global.opaque.add(id);
+      }
     }
-    stack.push(f.body);
-  }
-  while (stack.length > 0) {
-    const v = stack.pop();
-    if (v === null || typeof v !== "object" || seen.has(v)) continue;
-    seen.add(v);
-    if (Array.isArray(v)) {
-      for (const item of v) stack.push(item);
-      continue;
+    const stack: unknown[] = [f.body];
+    while (stack.length > 0) {
+      const v = stack.pop();
+      if (v === null || typeof v !== "object" || seen.has(v)) continue;
+      seen.add(v);
+      if (Array.isArray(v)) {
+        for (const item of v) stack.push(item);
+        continue;
+      }
+      const n = v as N;
+      if (n.kind === "closure" && Array.isArray(n.captures)) for (const id of n.captures) sc.captured.add(id);
+      if (typeof n.localId === "string") {
+        if (n.kind === "varDecl") {
+          addDef(sc, n.localId, n.init ?? undefined);
+          addDef(global, n.localId, n.init ?? undefined);
+        } else if (n.kind === "assign" || n.kind === "assignExpr") {
+          addDef(sc, n.localId, (n as { value?: unknown }).value);
+          addDef(global, n.localId, (n as { value?: unknown }).value);
+        } else if (n.kind !== "varRef") {
+          sc.opaque.add(n.localId); // a loop / catch binding, an increment: not a value built here
+          global.opaque.add(n.localId);
+        }
+      }
+      for (const key of Object.keys(v)) if (key !== "type" && key !== "loc") stack.push((v as Record<string, unknown>)[key]);
     }
-    const n = v as N;
-    if (typeof n.localId === "string") {
-      if (n.kind === "varDecl") (defs.get(n.localId) ?? defs.set(n.localId, []).get(n.localId)!).push(n.init ?? undefined);
-      else if (n.kind === "assign" || n.kind === "assignExpr") (defs.get(n.localId) ?? defs.set(n.localId, []).get(n.localId)!).push((n as { value?: unknown }).value);
-      else if (n.kind !== "varRef") opaque.add(n.localId); // a loop / catch binding, an increment: not a value built here
-    }
-    for (const key of Object.keys(v)) if (key !== "type" && key !== "loc") stack.push((v as Record<string, unknown>)[key]);
-  }
+  });
   const FRESH_TYPES = new Set(["record", "array", "string", "f64", "bool", "bigint", "map", "set"]);
-  const memo = new Map<string, boolean>();
-  const localFresh = (id: string, active: Set<string>): boolean => {
-    const known = memo.get(id);
+  const localFresh = (sc: Scope, id: string, active: Set<string>): boolean => {
+    const known = sc.memo.get(id);
     if (known !== undefined) return known;
-    if (opaque.has(id)) return false;
+    if (sc.opaque.has(id)) return false;
     if (active.has(id)) return true; // a cycle of copies adds no new source
-    const ds = defs.get(id);
+    const ds = sc.defs.get(id);
     if (ds === undefined) return false;
     active.add(id);
-    const r = ds.every((d) => d === undefined || exprFresh(d, active));
+    const r = ds.every((d) => d === undefined || exprFresh(sc, d, active));
     active.delete(id);
-    memo.set(id, r);
+    sc.memo.set(id, r);
     return r;
   };
-  const exprFresh = (e: unknown, active: Set<string>): boolean => {
+  const exprFresh = (sc: Scope, e: unknown, active: Set<string>): boolean => {
     const x = e as N | null | undefined;
     if (x === null || x === undefined) return false;
     if (x.kind === "dynObjLit") return true;
@@ -10910,14 +10927,21 @@ function makeFreshObjectTest(functions: readonly IrFunction[]): (e: unknown) => 
       const inner = x.value;
       return inner?.kind === "unitLit" || (inner?.type?.kind !== undefined && FRESH_TYPES.has(inner.type.kind));
     }
-    if (x.kind === "varRef" && typeof x.localId === "string") return localFresh(x.localId, active);
+    if (x.kind === "varRef" && typeof x.localId === "string") return localFresh(sc, x.localId, active);
     return false;
   };
-  return (e) => exprFresh(e, new Set());
+  return (e, fnIdx) => {
+    const sc = scopes[fnIdx]!;
+    const x = e as N | null | undefined;
+    // a local that a closure of this function captures can be written from another function: judge it program-wide
+    const useGlobal = x?.kind === "varRef" && typeof x.localId === "string" && sc.captured.has(x.localId);
+    return exprFresh(useGlobal ? global : sc, e, new Set());
+  };
 }
 
 export function dynReflectionSite(functions: readonly IrFunction[], fenced: (op: string) => boolean = () => true): string | null {
-  let fresh: ((e: unknown) => boolean) | null = null;
+  let fresh: ((e: unknown, fnIdx: number) => boolean) | null = null;
+  let curIdx = 0;
   const REFLECT_FNS = new Set([
     "dyn.assign", "dyn.assignAll", "dyn.hasOwn", "dyn.forInKeys", "dyn.forInCertain", "dyn.forInPlain", "dyn.forInAccessor",
     "dyn.objKeys", "dyn.objValues", "dyn.objEntries", "dyn.structuredClone", "dyn.cloneOwn", "dyn.ownNamesCtor",
@@ -10942,7 +10966,7 @@ export function dynReflectionSite(functions: readonly IrFunction[], fenced: (op:
     if (n.kind === "libCall" && typeof n.fn === "string") {
       // Object.create over a value built in the program (an object literal and the like) is no prototype link over an instance.
       if ((n.fn === "dyn.objCreateProto" || n.fn === "dyn.objCreateDescs") && Array.isArray(n.args) && n.args.length > 0 &&
-          (fresh ??= makeFreshObjectTest(functions))(n.args[0])) {
+          (fresh ??= makeFreshObjectTest(functions))(n.args[0], curIdx)) {
         // exact: a plain-object prototype
       } else if (REFLECT_FNS.has(n.fn)) hit(n.fn, n);
       else if ((n.fn.startsWith("insp.") || n.fn.startsWith("util.") || /format|inspect/i.test(n.fn)) && hasDynArg(n.args)) hit(n.fn, n);
@@ -10966,7 +10990,9 @@ export function dynReflectionSite(functions: readonly IrFunction[], fenced: (op:
     else if (n.kind === "dynObjLit" && Array.isArray(n.spreads) && n.spreads.length > 0) hit("object spread", n);
     for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key], n as Parent);
   };
-  for (const f of functions) {
+  for (let fi = 0; fi < functions.length; fi++) {
+    const f = functions[fi]!;
+    curIdx = fi;
     cur = f.name;
     visit(f.body);
     if (found !== null) break;
