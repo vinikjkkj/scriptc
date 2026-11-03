@@ -354,11 +354,13 @@ ScrStr *scr_jb_finish(ScrJsonBuf *b) {
  * hop from it to the top of the stack ("property 'x' -> object with
  * constructor 'Y'" / "index N -> ..."), the middle elided as "..." when
  * there are more than three hops (first two + last one shown), and the
- * closing edge. Constructor names are exactly 'Object'/'Array' — the only
- * containers JSON-safe types admit. */
+ * closing edge. Constructor names are 'Object'/'Array' for the JSON-safe
+ * containers, and the instance's own `constructor.name` for a boxed class
+ * instance (scr_jb_enter_named). */
 typedef struct ScrJsonSeenEnt {
   const void *ptr;
   bool is_array;
+  const char *cname;      /* a class instance's constructor name (NULL: Object/Array by is_array) */
   const char *prop;       /* static property edge (emitted C literal) */
   const ScrStr *prop_str; /* overflow-key edge (borrowed for the write) */
   size_t index;           /* array/tuple index edge */
@@ -376,17 +378,27 @@ static void scr_jb_put_edge(ScrJsonBuf *m, const ScrJsonSeenEnt *e) {
   scr_jb_put_f64(m, (double)e->index);
 }
 
-static void scr_jb_put_ctor(ScrJsonBuf *m, bool is_array) {
+static void scr_jb_put_ctor(ScrJsonBuf *m, bool is_array, const char *cname) {
+  if (cname != NULL) {
+    scr_jb_puts(m, "object with constructor '");
+    scr_jb_puts(m, cname);
+    scr_jb_puts(m, "'");
+    return;
+  }
   scr_jb_puts(m, is_array ? "object with constructor 'Array'" : "object with constructor 'Object'");
 }
 
-bool scr_jb_enter(ScrJsonBuf *b, const void *v, bool is_array) {
+static bool scr_jb_enter_impl(ScrJsonBuf *b, const void *v, bool is_array, const char *cname);
+bool scr_jb_enter(ScrJsonBuf *b, const void *v, bool is_array) { return scr_jb_enter_impl(b, v, is_array, NULL); }
+bool scr_jb_enter_named(ScrJsonBuf *b, const void *v, const char *cname) { return scr_jb_enter_impl(b, v, false, cname); }
+
+static bool scr_jb_enter_impl(ScrJsonBuf *b, const void *v, bool is_array, const char *cname) {
   for (size_t i = 0; i < b->seen_len; i++) {
     if (b->seen[i].ptr != v) continue;
     ScrJsonBuf m;
     scr_jb_init(&m);
     scr_jb_puts(&m, "Converting circular structure to JSON\n    --> starting at ");
-    scr_jb_put_ctor(&m, b->seen[i].is_array);
+    scr_jb_put_ctor(&m, b->seen[i].is_array, b->seen[i].cname);
     const size_t n = b->seen_len;
     const size_t hops = n - 1 - i; /* intermediate lines (j = i+1 .. n-1) */
     for (size_t j = i + 1; j < n; j++) {
@@ -398,7 +410,7 @@ bool scr_jb_enter(ScrJsonBuf *b, const void *v, bool is_array) {
       scr_jb_puts(&m, "\n    |     ");
       scr_jb_put_edge(&m, &b->seen[j - 1]);
       scr_jb_puts(&m, " -> ");
-      scr_jb_put_ctor(&m, b->seen[j].is_array);
+      scr_jb_put_ctor(&m, b->seen[j].is_array, b->seen[j].cname);
     }
     scr_jb_puts(&m, "\n    --- ");
     scr_jb_put_edge(&m, &b->seen[n - 1]);
@@ -416,6 +428,7 @@ bool scr_jb_enter(ScrJsonBuf *b, const void *v, bool is_array) {
   ScrJsonSeenEnt *e = &b->seen[b->seen_len++];
   e->ptr = v;
   e->is_array = is_array;
+  e->cname = cname;
   e->prop = NULL;
   e->prop_str = NULL;
   e->index = 0;
@@ -3795,6 +3808,13 @@ const ScrDynClass *scr_dyn_runtime_emitter_class(void) {
   return NULL;
 }
 
+/* The `constructor.name` of a boxed class instance: its class's display name, except for the class that applied
+ * applyMixin(Y, EventEmitter) (rt_root 7), whose `constructor` is EventEmitter's. */
+const char *scr_dyn_objinst_ctor_name(const ScrDyn *d) {
+  const ScrDynClass *c = scr_dyn_objinst_class_of(d);
+  return c->rt_root == 7 ? "EventEmitter" : scr_dyn_objinst_cls(d);
+}
+
 ScrEmitter *scr_dyn_objinst_emitter(const ScrDyn *d) {
   if (d == NULL || d->kind != SCR_DYN_OBJINST) return NULL;
   const ScrDynClass *c = scr_dyn_objinst_class_of(d);
@@ -5652,7 +5672,7 @@ static bool scr_dyn_json_write_raw(ScrJsonBuf *b, const ScrDyn *d) {
       scr_dyn_objinst_fence(d, "JSON.stringify");
       return true; /* pending exception; caller checks */
     }
-    if (!scr_jb_enter(b, d->v.inst.o, false)) return true; /* cyclic; pending */
+    if (!scr_jb_enter_named(b, d->v.inst.o, scr_dyn_objinst_ctor_name(d))) return true; /* cyclic; pending */
     scr_jb_putc(b, '{');
     bool ifirst = true;
     const size_t inm = scr_dyn_objinst_member_count(d);
@@ -8825,7 +8845,7 @@ static void scr_jb_put_dyn_raw(ScrJsonBuf *b, const ScrDyn *d) {
       scr_jb_puts(b, "null"); /* the buffer never surfaces: the throw wins */
       return;
     }
-    if (!scr_jb_enter(b, d->v.inst.o, false)) { scr_jb_puts(b, "null"); return; }
+    if (!scr_jb_enter_named(b, d->v.inst.o, scr_dyn_objinst_ctor_name(d))) { scr_jb_puts(b, "null"); return; }
     scr_jb_putc(b, '{');
     bool ifirst = true;
     const size_t inm = scr_dyn_objinst_member_count(d);
