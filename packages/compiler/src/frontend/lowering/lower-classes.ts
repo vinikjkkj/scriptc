@@ -30,7 +30,7 @@ import { declSymbolOf } from "./lower-modules.js";
 import { boundedKeyValuesOf, uniqueSymbolKeyOf } from "./lower-exprs.js";
 import { isNetSocketCtor, lowerHttpAgentNew, lowerHttpServerNew, lowerNetSocketNew } from "./lower-server.js";
 import { ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedClassSymbolOf, ambientUndefinedFnSymbolOf, fenceEarlyAliasUse, fenceEarlyNsMemberRef, nsMemberIdentOf, nsUndefRead } from "./lower-namespaces.js";
-import { EVAL_ENV_SYM, dynNewArgExpr, ensureEvalClass, evalDynFns, evalInstanceDynFns, evalStaticInfoOf, isEvalClassNode, lowerEvalClassExpr, lowerEvalClassNew, lowerEvalClassProperty } from "./lower-evalclass.js";
+import { EVAL_ENV_SYM, classCtorLength, dynLenFn, dynNewArgExpr, ensureEvalClass, evalDynFns, evalInstanceDynFns, evalStaticInfoOf, isEvalClassNode, lowerEvalClassExpr, lowerEvalClassNew, lowerEvalClassProperty } from "./lower-evalclass.js";
 import { bodylessMixinCalleeOf, mixinResultBindingClassOf, type MixinInstanceInfo } from "./lower-mixins.js";
 
 /** The weak collections' constructor hints. Shared: the stdlib `new`
@@ -8754,6 +8754,13 @@ export function dynStaticFns(L: Lowerer, info: ClassInfo): { fns: IrFunction[]; 
     });
     list.push({ name: `field:${f.name}`, fn: name });
     fieldNames.push(f.name);
+  }
+
+  // %dynLen(): `C.length`
+  {
+    const name = `%${className}.%dynLen`;
+    fns.push(dynLenFn(name, classCtorLength(info), null, loc));
+    list.push({ name: "%dynLen", fn: name });
   }
 
   // %dynStaticSet(key, val)
