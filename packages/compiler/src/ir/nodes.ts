@@ -10903,6 +10903,9 @@ function makeFreshObjectTest(functions: readonly IrFunction[]): (e: unknown) => 
     if (x.kind === "dynObjLit") return true;
     // Error.prototype (protobufjs's `Object.create(Error.prototype, { ... })`) and a null-prototype object are built-ins, no instance.
     if (x.kind === "libCall" && ((x as { fn?: string }).fn === "dyn.errorProto" || (x as { fn?: string }).fn === "dyn.objCreateNullProto")) return true;
+    // `X.prototype` is a prototype object, never an instance (the ES5 inheritance idiom `Object.create(Base.prototype)`).
+    if (x.kind === "dynKeyGet" && (x as { key?: { kind?: string; value?: string } }).key?.kind === "strLit" &&
+        (x as { key?: { value?: string } }).key?.value === "prototype") return true;
     if (x.kind === "dynFrom") {
       const inner = x.value;
       return inner?.kind === "unitLit" || (inner?.type?.kind !== undefined && FRESH_TYPES.has(inner.type.kind));

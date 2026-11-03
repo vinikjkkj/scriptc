@@ -37,3 +37,15 @@ console.log(String(err), err instanceof Error, err.name, Object.keys(err).join("
 const bare = Object.create(null);
 bare.x = 1;
 console.log(Object.keys(bare).join(","));
+// The ES5 inheritance idiom: Object.create(Base.prototype) links to a prototype object, never to an instance.
+function inherit(Base) {
+  function Child() { Base.call(this); this.c = 2; }
+  Child.prototype = Object.create(Base.prototype);
+  Child.prototype.constructor = Child;
+  return Child;
+}
+function Parent() { this.p = 1; }
+Parent.prototype.hello = function () { return "hi " + this.p + this.c; };
+const Kid = inherit(Parent);
+const kid = new Kid();
+console.log(kid.hello(), kid instanceof Parent, Object.keys(kid).join(","));
