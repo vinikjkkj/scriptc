@@ -8856,7 +8856,7 @@ export function reconcileOverloadMemberDyn(L: Lowerer, expr: ts.CallExpression, 
     L.unsupported(
       "SC1100",
       expr,
-      `the declared result '${L.fmt(rt)}' of this call: the member's implementation answers a checked-dynamic value, and a record or class payload cannot be extracted from it exactly (the checked cast reads a record off a plain object only, so a class instance the implementation hands over unchanged would throw where Node answers)`,
+      `the declared result '${L.fmt(rt)}' of this call: the member's implementation answers a checked-dynamic value, and a class, Map, function or bigint payload cannot be extracted from it exactly (the checked cast reads a record or an array off the value itself, but has no exact answer for these arms of a value the implementation hands over unchanged)`,
     );
   }
   return { kind: "dynCheck", value: call, type: rt, loc: call.loc };
