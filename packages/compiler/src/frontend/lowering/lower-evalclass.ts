@@ -299,7 +299,7 @@ export function evalClassNodeHook(L: Lowerer, decl: ts.ClassLikeDeclaration): bo
 }
 
 import { PoisonError, dynFallbackType } from "./lowerer.js";
-import { namedEvaluationNameOf } from "./lower-classes.js";
+import { namedEvaluationNameOf, inheritsBuiltinStreamCtor } from "./lower-classes.js";
 
 /** The expression `class …` evaluates to: a fresh static-side object holding
  * the captured bindings' CURRENT values. */
@@ -357,7 +357,9 @@ export function dynNewDrivable(L: Lowerer, info: ClassInfo, evaluated: boolean):
   if (info.def.abstract === true || info.generic) return false;
   if (!evaluated) {
     if (info.protoClass === true || info.captures !== undefined) return false;
-    if (L.inheritsBuiltinErrorCtor(info) || L.inheritsBuiltinEmitterCtor(info)) return false;
+    // A ctor-less Error chain is driven by the message rule (see dynStaticFns); an inherited emitter or stream
+    // constructor takes options no dyn row models.
+    if (L.inheritsBuiltinEmitterCtor(info) || inheritsBuiltinStreamCtor(L, info)) return false;
   }
   return info.ctorParams.every(
     (p) =>

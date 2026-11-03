@@ -9268,6 +9268,11 @@ export const EVAL_NO_SRC_CLASSES = new Set<string>();
  * (nested in a record/array/union, or an evaluated class). The BARE declared value predates this and keeps boxing. */
 export const CLASS_NO_DYN_NEW = new Set<string>();
 
+/** Declared classes whose constructor is INHERITED from a runtime emitter or stream base (no declared constructor on the way
+ * up): `new C(opts)` through the class value would have to apply Node's emitter/stream options, which no dyn construct
+ * row models. Such a class value keeps the compile-time refusal into dyn (a typed `new` of it is fenced the same way). */
+export const CLASS_BUILTIN_CTORLESS = new Set<string>();
+
 export function canBoxClassIntoDyn(className: string): boolean {
   return !RUNTIME_ERROR_CLASSES.has(className);
 }
@@ -9317,7 +9322,7 @@ export function canConvertToDyn(
   }
   // A CLASS VALUE boxes as a function object (scr_dyn_class_value; an
   // evaluation's static side as a non-immortal one that holds the evaluation).
-  if (t.kind === "classval" && canBoxClassIntoDyn(t.className)) return !CLASS_NO_DYN_NEW.has(t.className);
+  if (t.kind === "classval" && canBoxClassIntoDyn(t.className)) return !CLASS_NO_DYN_NEW.has(t.className) && !CLASS_BUILTIN_CTORLESS.has(t.className);
   if (t.kind === "func") return canBoxFuncIntoDyn(t, getRecord, getUnion, visiting);
   // A MAP or a SET boxes by REFERENCE (SCR_DYN_MAP): the retained ScrMap
   // plus the interned typeKey of THIS type, a static emitted literal

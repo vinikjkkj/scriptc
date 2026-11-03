@@ -6,7 +6,7 @@ import { isStringCallAliasDecl } from "./lower-builtins.js";
 import * as ts from "../ts7/adapter.js";
 import { poisonedRecordShapeDiag } from "../../diagnostics/diagnostic.js";
 import type { Lowerer } from "./lowerer.js";
-import { CLASS_NO_DYN_NEW } from "../../ir/nodes.js";
+import { CLASS_BUILTIN_CTORLESS, CLASS_NO_DYN_NEW } from "../../ir/nodes.js";
 import { dynNewDrivable } from "./lower-evalclass.js";
 import { uniformTupleArrayExpectation } from "./lower-stmts.js";
 import { registerAbsentGlobal } from "./lower-absent.js";
@@ -37,7 +37,7 @@ import { collectExpandoMembers, expandoBindStmts } from "./lower-expando.js";
 import { collectProtoDataNames } from "./lower-protodata.js";
 import { isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
 import type { ClassInfo } from "./lower-classes.js";
-import { isAnyDynContainer, inferContainerTypeFromUses, decoratorNodesOf, genericIfaceBindingKeepsClass, guaranteedDefinitionThrow, bindingHoldsItsInitializer, castAliasedClassRefOf, constructedClassInfoOf, adoptedInstanceClassOf} from "./lower-classes.js";
+import { isAnyDynContainer, inferContainerTypeFromUses, decoratorNodesOf, genericIfaceBindingKeepsClass, guaranteedDefinitionThrow, bindingHoldsItsInitializer, castAliasedClassRefOf, constructedClassInfoOf, adoptedInstanceClassOf, inheritsBuiltinStreamCtor } from "./lower-classes.js";
 import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
 
 /** One file's declarations, split for collection and init-body lowering. */
@@ -835,6 +835,7 @@ function liftableLocalClass(L: Lowerer, sf: ts.SourceFile, decl: ts.ClassDeclara
         for (const c of L.classes.values()) {
           if (c.evalStaticOf !== undefined || c.evalClass !== undefined || c.def.runtime === true) continue;
           if (bad(c)) CLASS_NO_DYN_NEW.add(c.def.name);
+          if (c.def.runtime !== true && (L.inheritsBuiltinEmitterCtor(c) || inheritsBuiltinStreamCtor(L, c))) CLASS_BUILTIN_CTORLESS.add(c.def.name);
         }
       }
       for (const fp of parts) for (const decl of fp.fnDecls) L.collectSignature(decl);
