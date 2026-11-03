@@ -20,3 +20,20 @@ function table() {
   return [Object.keys(t).join(","), Object.keys(e).join(","), Object.keys(t2).length, t.ONE, e[1]];
 }
 console.log(table().join("|"), Object.keys(v(new Redis())).join(","));
+// protobufjs's error-class idiom: Object.create(Error.prototype, { ...descriptors }), and a null-prototype object. The
+// prototype is a built-in, so it is no link over a grafted instance either.
+function make(label) {
+  function T(m) { this.m = m; }
+  T.prototype = Object.create(Error.prototype, {
+    constructor: { value: T, writable: true, enumerable: false, configurable: true },
+    name: { get: function () { return label; }, set: undefined, enumerable: false, configurable: true },
+    toString: { value: function () { return this.name + ": " + this.m; }, writable: true, enumerable: false, configurable: true },
+  });
+  return T;
+}
+const E = make("MyErr");
+const err = new E("boom");
+console.log(String(err), err instanceof Error, err.name, Object.keys(err).join(","));
+const bare = Object.create(null);
+bare.x = 1;
+console.log(Object.keys(bare).join(","));
