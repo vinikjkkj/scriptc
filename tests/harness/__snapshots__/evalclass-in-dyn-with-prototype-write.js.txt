@@ -1,6 +1,13 @@
-evalclass-in-dyn-with-prototype-write.js:5:23 - error SC1101: converting a class value minted by a class expression inside a function to 'unknown' in a program that also writes to a `prototype` object read from a dynamic value (an instance reaches its members through the class, not through that object, so the write would never be seen by `new V().m()`)
+evalclass-in-dyn-with-prototype-write.js:8:1 - error SC1101: converting a class value minted by a class expression inside a function to 'unknown' in a program where a `prototype` object read from a dynamic value is written to (a write through it could not be tracked: an instance reaches its members through its class, not through that object, so the write would never be seen by `new V().m()`)
 
-  4 | function anyv(x) { return x; }
-  5 | const mk = (n = 0) => class W { m() { return n; } };
-    |                       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  6 | const h = {}; h.W = mk(1);
+  7 | const W = anyv(h.W);
+  8 | W.prototype.extra = function () { return 9; };
+    | ^~~~~~~~~~~
+  9 | const P = W.prototype; P.more = 1;
+
+evalclass-in-dyn-with-prototype-write.js:9:24 - error SC1101: converting a class value minted by a class expression inside a function to 'unknown' in a program where a `prototype` object read from a dynamic value is written to (a write through it could not be tracked: an instance reaches its members through its class, not through that object, so the write would never be seen by `new V().m()`)
+
+   8 | W.prototype.extra = function () { return 9; };
+   9 | const P = W.prototype; P.more = 1;
+     |                        ^
+  10 | console.log(new W().extra());

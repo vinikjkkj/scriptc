@@ -1,0 +1,6 @@
+evalclass-proto-escape-write.js:7:24 - error SC1101: converting a class value minted by a class expression inside a function to 'unknown' in a program where a `prototype` object read from a dynamic value is written to (a write through it could not be tracked: an instance reaches its members through its class, not through that object, so the write would never be seen by `new V().m()`)
+
+  6 | 
+  7 | const P = W.prototype; P.x = 1;
+    |                        ^
+  8 | 
