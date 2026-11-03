@@ -853,18 +853,20 @@ function containsThis(fn: ts.Node): boolean {
   return found;
 }
 
-/** A function a `new` can build instances of: a class constructor, or a named
- * function declaration that uses `this` and has `<name>.prototype` written in
- * its file (an ES5 constructor). Prototype methods are not constructors. */
-function isConstructorLike(file: ts.SourceFile, fn: ts.Node): boolean {
+/** A function a `new` can build instances of: a class constructor, a named
+ * function declaration that uses `this`, or a function expression bound to a
+ * plain variable that uses `this` (an ES5 constructor). Methods (function
+ * expressions stored on a member, class and object-literal methods) are not
+ * constructors, so their parameters are not seeds. */
+function isConstructorLike(_file: ts.SourceFile, fn: ts.Node): boolean {
   if (ts.isConstructorDeclaration(fn)) return true;
-  if (!ts.isFunctionDeclaration(fn) || fn.name === undefined || !containsThis(fn)) return false;
-  const name = fn.name.text;
-  let hit = false;
-  forEachNode(file, (n) => {
-    if (ts.isPropertyAccessExpression(n) && n.name.text === "prototype" && ts.isIdentifier(n.expression) && n.expression.text === name) hit = true;
-  });
-  return hit;
+  if (ts.isFunctionDeclaration(fn)) return fn.name !== undefined && containsThis(fn);
+  if (ts.isFunctionExpression(fn)) {
+    const p = fn.parent;
+    const bound = (ts.isVariableDeclaration(p) && p.initializer === fn) || (ts.isBinaryExpression(p) && p.right === fn && ts.isIdentifier(p.left));
+    return bound && containsThis(fn);
+  }
+  return false;
 }
 
 /** The host's whole exports object is an argument of `new X(.., module.exports)`
