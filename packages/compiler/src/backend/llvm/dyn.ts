@@ -40,7 +40,7 @@ import { mangleClassRelease, mangleClassRetain, mangleClassStruct, mangleFnClosu
 import { dynMemberRows, dynStaticTable, type DynMemberClass } from "../dyn-members.js";
 import { KINDGATE_WIDE_KINDS, kindgateInstanceLane, kindgateWideLane, readKindgateDials } from "../kindgate.js";
 import { BlockBuilder } from "./blocks.js";
-import { arrNewCall, elemAccess, llFieldType, ownMaskSlotIndex, releaseSym, srcProtoSlotIndex, toStrSlotIndex, traceAdapter, traceArg, vAdapters } from "./shapes.js";
+import { arrNewCall, elemAccess, llFieldType, ownMaskSlotIndex, releaseSym, srcProtoSlotIndex, toStrSlotIndex, traceAdapter, traceArg, vAdapters, viewSlotIndex } from "./shapes.js";
 import { LlvmUnsupportedError } from "./unsupported.js";
 import type { WalkerHost } from "./walkers.js";
 
@@ -1575,6 +1575,28 @@ export class LlDyn {
           B.startBlock(lf);
           failRet();
           B.startBlock(lk);
+          // VIEW GRANT, INSTANCE RECEIVER (hard builder only) - emit-walkers.ts's row: the record is a view of
+          // the instance and nothing is read at the cast (a getter runs at each READ of the member).
+          if (inst && !soft && shape.view === true && !shape.fields.some((f) => this.mayHoldFunc(f.type))) {
+            const lLazy = B.newLabel("dcr.vl");
+            const lEager = B.newLabel("dcr.ve");
+            B.condBr(isInst, lLazy, lEager);
+            B.startBlock(lLazy);
+            B.line(`%rl = call ptr @${mangleRecordNew(t.shapeId)}()`);
+            const vlp = B.tmp();
+            B.line(`${vlp} = getelementptr inbounds %${struct}, ptr %rl, i64 0, i32 ${viewSlotIndex(shape)} ; <view>`);
+            B.line(`store ptr ${this.retainDyn(B, "%d")}, ptr ${vlp}`);
+            if (shape.tostr) {
+              host.declare(`declare ptr @scr_dyn_tostr_closure(ptr)`);
+              const ts = B.tmp();
+              const tsp = B.tmp();
+              B.line(`${ts} = call ptr @scr_dyn_tostr_closure(ptr %d)`);
+              B.line(`${tsp} = getelementptr inbounds %${struct}, ptr %rl, i64 0, i32 ${toStrSlotIndex(shape)}`);
+              B.line(`store ptr ${ts}, ptr ${tsp}`);
+            }
+            B.terminate(`ret ptr %rl`);
+            B.startBlock(lEager);
+          }
           const lObj = B.newLabel("dcr.wo");
           const lWide = B.newLabel("dcr.ww");
           const lJoin = B.newLabel("dcr.wj");
@@ -1644,6 +1666,13 @@ export class LlDyn {
           requireKind(DK.OBJ, "dcr");
         }
         B.line(`%r0 = call ptr @${mangleRecordNew(t.shapeId)}()`);
+        // VIEW GRANT: the record is a VIEW of the object it was read off - emit-walkers.ts's row. The ORIGINAL
+        // value (%d), not the projection the instance lane reads the members from.
+        if (shape.view === true) {
+          const vsp = B.tmp();
+          B.line(`${vsp} = getelementptr inbounds %${struct}, ptr %r0, i64 0, i32 ${viewSlotIndex(shape)} ; <view>`);
+          B.line(`store ptr ${this.retainDyn(B, "%d")}, ptr ${vsp}`);
+        }
         // The HIDDEN per-instance OWN-KEY MASK's validity byte —
         // emit-walkers.ts's row. This builder is the one point that holds
         // both the member's VALUE (read through [[Get]], prototype chain
@@ -2749,6 +2778,21 @@ export class LlDyn {
         if (!shape) throw new Error(`llvm emitter bug: to-dyn of unknown shape ${t.shapeId}`);
         const struct = mangleRecordStruct(t.shapeId);
         const fieldIndex = new Map(shape.fields.map((f, i) => [f.name, i + 1]));
+        // VIEW GRANT: a view converts to the OBJECT it is a view of - the same object, not a copy.
+        if (!shape.tuple && shape.view === true) {
+          const vp = B.tmp();
+          B.line(`${vp} = getelementptr inbounds %${struct}, ptr %v, i64 0, i32 ${viewSlotIndex(shape)} ; <view>`);
+          const vw = B.tmp();
+          B.line(`${vw} = load ptr, ptr ${vp}`);
+          const isV = B.tmp();
+          B.line(`${isV} = icmp ne ptr ${vw}, null`);
+          const lV = B.newLabel("tdv.y");
+          const lN = B.newLabel("tdv.n");
+          B.condBr(isV, lV, lN);
+          B.startBlock(lV);
+          B.terminate(`ret ptr ${this.retainDyn(B, vw)}`);
+          B.startBlock(lN);
+        }
         const loadFieldOf = (fname: string, ft: IrType): string => {
           const p = B.tmp();
           B.line(`${p} = getelementptr inbounds %${struct}, ptr %v, i64 0, i32 ${fieldIndex.get(fname)!} ; .${fname}`);
@@ -3222,6 +3266,13 @@ export class LlDyn {
           }
           B.br(lJoin);
           B.startBlock(lJoin);
+        }
+        // VIEW GRANT, PROMOTION - emit-walkers.ts's row: once the record has crossed, it IS the object.
+        if (shape.view === true) {
+          host.declare(`declare void @scr_rec_view_promote(ptr, ptr)`);
+          const vp2 = B.tmp();
+          B.line(`${vp2} = getelementptr inbounds %${struct}, ptr %v, i64 0, i32 ${viewSlotIndex(shape)} ; <view>`);
+          B.line(`call void @scr_rec_view_promote(ptr ${vp2}, ptr ${d})`);
         }
         if (cyclicRec) B.line(`call void @scr_dyn_from_leave()`);
         B.terminate(`ret ptr ${d}`);

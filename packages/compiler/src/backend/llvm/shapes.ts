@@ -81,6 +81,8 @@ export function computeTraced(mod: IrModule): { shapes: Set<string>; unions: Set
         // backend and collected on the other. emitter.ts's C twin is the
         // same list.
         ...(r.srcproto ? [{ name: "<srcproto>", type: DYN }] : []),
+        // ...and the VIEW slot (IrRecordShape.view), a dyn member for the same reason.
+        ...(r.view ? [{ name: "<view>", type: DYN }] : []),
       ],
     })),
   ];
@@ -533,6 +535,8 @@ function rcMembers(shape: IrRecordShape): { index: number; type: IrType; name: s
     // The hidden SOURCE [[Prototype]] slot, LAST — released with the record
     // and TRACED as a dyn edge, the C backend's rcMembers row exactly.
     ...(shape.srcproto ? [{ index: srcProtoSlotIndex(shape), type: DYN, name: "<source prototype> slot" }] : []),
+    // The VIEW slot, LAST - the C backend's rcMembers row exactly.
+    ...(shape.view ? [{ index: viewSlotIndex(shape), type: DYN, name: "<view> slot" }] : []),
   ];
 }
 
@@ -645,6 +649,12 @@ export function srcProtoSlotIndex(shape: IrRecordShape): number {
   return ownMaskSlotIndex(shape) + (shape.ownmask ? 1 : 0);
 }
 
+/** The VIEW slot's field index (IrRecordShape.view): after the source-prototype slot, so no existing member's
+ * index moves. The C twin is VIEW_MEMBER, laid out in the same position. */
+export function viewSlotIndex(shape: IrRecordShape): number {
+  return srcProtoSlotIndex(shape) + (shape.srcproto ? 1 : 0);
+}
+
 /** THE ONE PLACE the cycle header's layout is written down on this side of
  * the compiler.
  *
@@ -715,6 +725,7 @@ export function emitRecordShapes(host: ShapeHost, mod: IrModule): { typeDefs: st
     if (shape.tostr) fieldTys.push("ptr"); // the hidden toString slot (ScrClosure *)
     if (shape.ownmask) fieldTys.push(`[${ownMaskBytes(shape)} x i8]`); // the hidden own-key mask
     if (shape.srcproto) fieldTys.push("ptr"); // the hidden source [[Prototype]] (ScrDyn *)
+    if (shape.view) fieldTys.push("ptr"); // the hidden VIEW slot: the object this record is a view of (ScrDyn *)
     typeDefs.push(
       `%${struct} = type { i64${fieldTys.length ? ", " + fieldTys.join(", ") : ""} } ` +
         `; record ${shape.id} { ${shape.fields.map((f) => f.name).join("; ")}${shape.indexValue ? "; [key: string]" : ""} }`,

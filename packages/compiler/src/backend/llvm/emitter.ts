@@ -162,6 +162,7 @@ import {
   traceAdapter,
   traceArg,
   vAdapters,
+  viewSlotIndex,
 } from "./shapes.js";
 
 export { LlvmCensus, llvmCensusEnabled, LlvmUnsupportedError } from "./unsupported.js";
@@ -9125,6 +9126,26 @@ class LlEmitter {
         const r = emitOwnPresentLl(B, shape, e.field, obj.name, this.undefinedArmTag(f.type), false, e.orSlot === true);
         if (r === null) return { name: "true", type: e.type };
         return { name: r, type: e.type };
+      }
+      case "recordIsView":
+      case "recordView": {
+        // VIEW GRANT: emit-exprs's twin. The `%view` member is NULL for a record built any other way.
+        const obj = this.emitStableReceiver(e.obj, []);
+        const vshape = this.recordsById.get(e.shapeId);
+        if (!vshape) throw new Error(`llvm emitter bug: ${e.kind} of unknown shape ${e.shapeId}`);
+        const vp = B.tmp();
+        B.line(`${vp} = getelementptr inbounds %${mangleRecordStruct(e.shapeId)}, ptr ${obj.name}, i64 0, i32 ${viewSlotIndex(vshape)} ; <view>`);
+        const v = B.tmp();
+        B.line(`${v} = load ptr, ptr ${vp}`);
+        if (e.kind === "recordIsView") {
+          const r = B.tmp();
+          B.line(`${r} = icmp ne ptr ${v}, null`);
+          return { name: r, type: e.type };
+        }
+        this.declare(`declare ptr @scr_rec_view_get(ptr)`);
+        const r = B.tmp();
+        B.line(`${r} = call ptr @scr_rec_view_get(ptr ${v})`);
+        return this.own({ name: r, type: e.type });
       }
       case "recordNullProto": {
         // The null-prototype question, one spelling (nullProtoRule). An

@@ -42,6 +42,9 @@ export const OWNMASK_MEMBER = "sc_own";
  * (IrRecordShape.srcproto). LAST in the struct, so no existing member's
  * offset moves. */
 export const SRCPROTO_MEMBER = "sc_srcproto";
+/** The hidden member of a VIEW-capable shape (IrRecordShape.view): the dyn OBJECT the record is a view of,
+ * NULL when the record was built any other way. Last in the struct, so no existing member moves. */
+export const VIEW_MEMBER = "sc_view";
 
 /** The C condition under which field `fieldName` of `shape` is one of the
  * receiver's OWN keys — the single question Object.keys, JSON.stringify,
@@ -186,6 +189,9 @@ export interface ClassMeta {
        * trailing `ScrDyn *` member, treated as one more (dyn-typed) field
        * by new/release/trace. */
       srcproto?: true;
+      /** View-capable records (IrRecordShape.view): one more trailing `ScrDyn *`, treated as one more
+       * (dyn-typed) field by new/release/trace. */
+      view?: true;
       /** Class shapes whose hierarchy has inferred fields: the bytes of the
        * per-instance order record (ir/nodes.ts ORD_MEMBER), laid out first among
        * the fields so every class of the hierarchy shares its offset. */
@@ -225,6 +231,7 @@ export interface ClassMeta {
         ...(rec.tostr ? { tostr: true as const } : {}),
         ...(rec.ownmask ? { ownmask: true as const } : {}),
         ...(rec.srcproto ? { srcproto: true as const } : {}),
+        ...(rec.view ? { view: true as const } : {}),
         comment: `record ${rec.id} { ${rec.fields.map((f) => f.name).join("; ")}${rec.indexValue ? "; [key: string]" : ""} }`,
         meta: null,
       })),
@@ -252,6 +259,9 @@ export interface ClassMeta {
       // cycle-capability fixpoint's dyn rule says so, and this slot joins
       // that fixpoint the way <overflow> and <toString> do).
       ...(s.srcproto ? [{ member: SRCPROTO_MEMBER, type: DYN, name: "<source prototype> slot" }] : []),
+      // The VIEW slot (IrRecordShape.view): the object the record is a view of, one more dyn member, released
+      // and traced like the source-prototype slot (a dyn graph can point back at the shape holding it).
+      ...(s.view ? [{ member: VIEW_MEMBER, type: DYN, name: "<view> slot" }] : []),
     ];
     // CLASS newFns start every undefined-armed union field at JS's
     // `undefined` — the interned immortal unit instance — instead of the
@@ -328,6 +338,9 @@ export interface ClassMeta {
         decl.push(
           `  ScrDyn *${SRCPROTO_MEMBER}; /* hidden per-instance source [[Prototype]] (NULL = no crossing / no chain) */`,
         );
+      }
+      if (s.view) {
+        decl.push(`  ScrDyn *${VIEW_MEMBER}; /* the object this record is a view of (NULL = a plain struct) */`);
       }
       decl.push(`};`);
     }
