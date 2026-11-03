@@ -1472,10 +1472,21 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       }
       free(ord);
       insp_emit_slots(d, recurse, depth);
-      ScrStr *base = cn != NULL && cn[0] ? scr_str_new(cn, strlen(cn))
-                     : d->null_proto     ? scr_str_new("[Object: null prototype]", 24)
-                                         : scr_str_new("", 0);
-      ScrStr *b0 = scr_str_new("{", 1);
+      /* Node keeps the constructor-name prefix INSIDE braces[0] (`F {`, `[Object: null prototype] {`), and the
+       * single-line test counts it with its separating space: `start = output.length + indentationLvl +
+       * braces[0].length + base.length + 10`. Passing the prefix as `base` dropped that space, so an object
+       * one character from breakLength printed on one line where Node breaks it. */
+      InspBuf pb = {0};
+      if (cn != NULL && cn[0]) {
+        ib_cstr(&pb, cn);
+        ib_cstr(&pb, " {");
+      } else if (d->null_proto) {
+        ib_cstr(&pb, "[Object: null prototype] {");
+      } else {
+        ib_cstr(&pb, "{");
+      }
+      ScrStr *base = scr_str_new("", 0);
+      ScrStr *b0 = ib_take(&pb);
       ScrStr *b1 = scr_str_new("}", 1);
       ScrStr *out = scr_insp_end(base, b0, b1, recurse + 1, false, false);
       scr_str_release(base);
