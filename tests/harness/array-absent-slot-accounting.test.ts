@@ -65,6 +65,10 @@ const RULES: ReadonlyMap<string, Rule> = new Map([
     cls: "propagates",
     why: "get_ref's miss-tolerant twin: a hole (or a missing index) answers NULL for the caller to test instead of trapping, so an absent-flag binding is exact about Node's undefined with no second read",
   }],
+  ["scr_arr_clear_index", { cls: "releases", why: "`delete a[i]`: the displaced element is released through scr_elem_release and the slot becomes a hole (NULL / the number HOLE payload)" }],
+  ["scr_arr_push_all", { cls: "propagates", why: "concat's copy: every slot is copied verbatim, a hole stays a hole, and a present ref slot is retained through scr_elem_retain_p" }],
+  ["scr_arr_copy_ref_or", { cls: "propagates", why: "the spread / for-of copy read where the element type has a value for undefined: a hole answers that value (never traps), a present slot retains" }],
+  ["scr_arr_get_ref_or", { cls: "propagates", why: "the checked read for dyn / undefined-armed union elements: a hole reads as their undefined instead of trapping, a present slot retains" }],
   ["scr_arr_copy_ref", {
     cls: "propagates",
     why: "get_ref's copy twin, and the only read that does not refuse — the emitters' spread / pushSpread loops use it so `[...a]` cannot trap where `a.slice()` succeeds",
@@ -232,7 +236,13 @@ describe("arrayClear and the absent value, in both backends", () => {
     // some of those copies knew about the interned undefined arm.
     expect(files.emitter).toMatch(/absentElemC\(elem: IrType\): string \{/);
     expect(files.llvm).toMatch(/absentElemLl\(elem: IrType\): string \{/);
-    expect(files.emitExprs.match(/E\.absentElemC\(/g) ?? []).toHaveLength(2);
+    // `new Array(n)`, `a.length = n` growth, a write past the end and literal elisions now
+    // push the HOLE marker (holeElemC / holeElemLl, one spelling per backend as well); only the
+    // mapper-less Array.from({ length: n }) (explicit undefined) and the tombstone write keep
+    // the ABSENT value.
+    expect(files.emitter).toMatch(/holeElemC\(elem: IrType\): string \{/);
+    expect(files.llvm).toMatch(/holeElemLl\(elem: IrType\): string \{/);
+    expect(files.emitExprs.match(/E\.absentElemC\(/g) ?? []).toHaveLength(1);
     expect(files.emitStmts.match(/E\.absentElemC\(/g) ?? []).toHaveLength(1);
     expect(files.llvm.match(/this\.absentElemLl\(/g) ?? []).toHaveLength(3);
   });
@@ -241,7 +251,10 @@ describe("arrayClear and the absent value, in both backends", () => {
     // `[...a]` and `b.push(...a)` must not trap where `a.slice()` succeeds.
     // The QUOTED spelling only — the emitted symbol name, not the prose
     // around it, so a comment cannot move this count.
-    expect(files.emitExprs.match(/"scr_arr_copy_ref"/g) ?? []).toHaveLength(2);
+    // The C backend spells the copy read once, in CEmitter.copyReadC, and both of its spread
+    // sites (arrayLit spread, pushSpread) go through it; LLVM spells it once in its copy loop.
+    expect(files.emitter.match(/scr_arr_copy_ref\(/g) ?? []).toHaveLength(1);
+    expect(files.emitExprs.match(/E\.copyReadC\(/g) ?? []).toHaveLength(2);
     expect(files.llvm.match(/"scr_arr_copy_ref"/g) ?? []).toHaveLength(1);
   });
 });
