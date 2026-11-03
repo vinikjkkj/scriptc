@@ -24316,18 +24316,6 @@ function descendantDeclaresGenericMethod(info: ClassInfo, name: string): boolean
   return false;
 }
 
-/** The field a subclass-declared method value is stored to, when the read is exactly
- * `this.F = this.m;` (thunkrecv). Null for any other use of the read (a comparison, a
- * return, an argument, a store on another object, a local). */
-function storedFieldOfMethodRead(expr: ts.PropertyAccessExpression): string | null {
-  const bin = expr.parent;
-  if (!ts.isBinaryExpression(bin) || bin.operatorToken.kind !== ts.SyntaxKind.EqualsToken || bin.right !== expr) return null;
-  if (!ts.isExpressionStatement(bin.parent)) return null;
-  const left = bin.left;
-  if (!ts.isPropertyAccessExpression(left) || left.expression.kind !== ts.SyntaxKind.ThisKeyword) return null;
-  return left.name.text;
-}
-
 /** True when a class that reads `method` as undefined (the base itself, or a strict subclass with no
  * declarer of `method` between it and the base) is constructed somewhere in the program (thunkrecv).
  * Names are matched textually (conservative). Iterative walk. */
@@ -24363,34 +24351,125 @@ function silentReceiverInstantiated(L: Lowerer, info: ClassInfo, method: string)
   return false;
 }
 
-/** Closed-world check (thunkrecv): every read of property `field` in the program is a CALL on `this`
- * (`this.F(...)`) or a truthiness test; a write to it is harmless (it stores a value, it does not read one). Any other read, a write or call on
- * another receiver, a string-keyed element access, a shorthand or destructuring use of the name is a
- * way the stored method value could reach another receiver, so the thunk is refused. Iterative walk. */
-function fieldOnlyUsedOnThis(L: Lowerer, field: string): boolean {
+/** A use of a function value that cannot hand it to a call with a receiver other than the one it
+ * was read for: a comparison, `typeof`, a truth test, or its `.name` / `.length`. */
+function valueConfinedUse(n: ts.Expression): boolean {
+  let c: ts.Node = n;
+  let p: ts.Node = n.parent;
+  while (ts.isParenthesizedExpression(p)) {
+    c = p;
+    p = p.parent;
+  }
+  if (ts.isBinaryExpression(p) && (p.left === c || p.right === c)) {
+    switch (p.operatorToken.kind) {
+      case ts.SyntaxKind.EqualsEqualsEqualsToken:
+      case ts.SyntaxKind.ExclamationEqualsEqualsToken:
+      case ts.SyntaxKind.EqualsEqualsToken:
+      case ts.SyntaxKind.ExclamationEqualsToken:
+        return true;
+      default:
+        return false;
+    }
+  }
+  if (ts.isTypeOfExpression(p)) return true;
+  if (ts.isPrefixUnaryExpression(p) && p.operator === ts.SyntaxKind.ExclamationToken) return true;
+  if ((ts.isIfStatement(p) || ts.isWhileStatement(p) || ts.isDoStatement(p)) && p.expression === c) return true;
+  if (ts.isConditionalExpression(p) && p.condition === c) return true;
+  if (ts.isPropertyAccessExpression(p) && p.expression === c && (p.name.text === "name" || p.name.text === "length")) {
+    const gp = p.parent;
+    return !(ts.isCallExpression(gp) && gp.expression === p);
+  }
+  return false;
+}
+
+const fieldConfinedCache = new WeakMap<object, Map<string, boolean>>();
+/** True when every read of the field `field` of the class family of `info` hands its value to nothing
+ * that could call it with another receiver (thunkrecv2). A call `x.F(...)` supplies x, the object that
+ * holds F: the value got there by its own `this.F = this.m` store, so the receiver is an instance of the
+ * declaring class. What would break that is a COPY of the value (`y.F = x.F`, an argument, a return, an
+ * array slot, `x.F.call(y)`): any read of F that is not a store target, a callee, a comparison,
+ * `typeof`, a test, `.name`/`.length`, or the initializer of a local that is itself only compared. */
+function subclassFieldConfined(L: Lowerer, info: ClassInfo, field: string): boolean {
+  let cache = fieldConfinedCache.get(L);
+  if (cache === undefined) fieldConfinedCache.set(L, (cache = new Map()));
+  const key = `${info.def.name}\u0000${field}`;
+  const known = cache.get(key);
+  if (known !== undefined) return known;
+  const family = new Set<string>();
+  const addNames = (c: ClassInfo): void => {
+    family.add(c.def.name);
+    if (c.def.jsName !== undefined) family.add(c.def.jsName);
+  };
+  for (let c: ClassInfo | null = info; c !== null; c = c.base) addNames(c);
+  const down = (c: ClassInfo): void => {
+    for (const s of c.subclasses) {
+      addNames(s);
+      down(s);
+    }
+  };
+  down(info);
+  const inFamily = (recv: ts.Expression): boolean => {
+    const t = L.mapTypeOf(L.typeOf(recv));
+    if (t === null || t === undefined) return true;
+    if (t.kind === "object") return family.has(t.className);
+    return t.kind === "dyn";
+  };
+  const localOnlyCompared = (decl: ts.VariableDeclaration): boolean => {
+    if (!ts.isIdentifier(decl.name)) return false;
+    const list = decl.parent;
+    if (!ts.isVariableDeclarationList(list) || (list.flags & ts.NodeFlags.Const) === 0) return false;
+    let scope: ts.Node = decl;
+    while (!ts.isFunctionLike(scope) && !ts.isSourceFile(scope) && scope.parent !== undefined) scope = scope.parent;
+    const name = decl.name.text;
+    const stack: ts.Node[] = [scope];
+    while (stack.length > 0) {
+      const n = stack.pop()!;
+      if (ts.isIdentifier(n) && n.text === name && n !== decl.name) {
+        if (!valueConfinedUse(n)) return false;
+      }
+      ts.forEachChild(n, (c) => {
+        stack.push(c);
+      });
+    }
+    return true;
+  };
+  let ok = true;
   const stack: ts.Node[] = [];
-  for (const sf of L.program.getSourceFiles()) stack.push(sf);
-  while (stack.length > 0) {
+  for (const sf of L.program.getSourceFiles()) if (!sf.isDeclarationFile) stack.push(sf);
+  while (ok && stack.length > 0) {
     const n = stack.pop()!;
-    if (ts.isPropertyAccessExpression(n) && n.name.text === field) {
+    if (ts.isPropertyAccessExpression(n) && n.name.text === field && inFamily(n.expression)) {
       const p = n.parent;
-      const okWrite = ts.isBinaryExpression(p) && p.operatorToken.kind === ts.SyntaxKind.EqualsToken && p.left === n;
-      const okCall = ts.isCallExpression(p) && p.expression === n && n.expression.kind === ts.SyntaxKind.ThisKeyword;
-      const okTest = (ts.isPrefixUnaryExpression(p) && p.operator === ts.SyntaxKind.ExclamationToken) ||
-        (ts.isIfStatement(p) && p.expression === n) || (ts.isConditionalExpression(p) && p.condition === n);
-      if (!(okWrite || okCall || okTest)) return false;
+      const store = ts.isBinaryExpression(p) && p.operatorToken.kind === ts.SyntaxKind.EqualsToken && p.left === n;
+      const callee = ts.isCallExpression(p) && p.expression === n;
+      const local = ts.isVariableDeclaration(p) && p.initializer === n && localOnlyCompared(p);
+      if (!(store || callee || local || valueConfinedUse(n))) ok = false;
     } else if (ts.isElementAccessExpression(n) && ts.isStringLiteralLike(n.argumentExpression) && n.argumentExpression.text === field) {
-      return false;
+      ok = false;
     } else if ((ts.isShorthandPropertyAssignment(n) || ts.isBindingElement(n)) && n.name && ts.isIdentifier(n.name) && n.name.text === field) {
-      return false;
+      ok = false;
     }
     ts.forEachChild(n, (c) => {
       stack.push(c);
     });
   }
-  return true;
+  cache.set(key, ok);
+  return ok;
 }
 
+/** The read `this.m` of a subclass-only method may be taken only where its value cannot reach a call with
+ * a foreign receiver (the function runs against ITS declaring class): the stored form `this.F = this.m;`
+ * with F confined (subclassFieldConfined), or a value-confined use (comparison, typeof, test, name). */
+function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpression, info: ClassInfo): boolean {
+  if (valueConfinedUse(expr)) return true;
+  const bin = expr.parent;
+  if (!ts.isBinaryExpression(bin) || bin.operatorToken.kind !== ts.SyntaxKind.EqualsToken || bin.right !== expr) return false;
+  if (!ts.isExpressionStatement(bin.parent)) return false;
+  const left = bin.left;
+  if (!ts.isPropertyAccessExpression(left) || left.expression.kind !== ts.SyntaxKind.ThisKeyword) return false;
+  if (expr.expression.kind !== ts.SyntaxKind.ThisKeyword) return false;
+  return subclassFieldConfined(L, info, left.name.text);
+}
 
 /** `return this.readField` / `this.next = this.start`: a class METHOD read as
    * a VALUE in a JavaScript file. JS hands out the prototype's function with
@@ -24628,6 +24707,8 @@ function fieldOnlyUsedOnThis(L: Lowerer, field: string): boolean {
         const stmt: IrStmt = base.returnType.kind === "void" ? { kind: "exprStmt", expr: call, loc } : { kind: "return", value: call, loc };
         L.liftedFns.push({
           name,
+          jsName: method,
+          valueCode: 4,
           params: irParams,
           returnType: base.returnType,
           locals: [
@@ -24679,6 +24760,8 @@ function fieldOnlyUsedOnThis(L: Lowerer, field: string): boolean {
       const call: IrExpr = { kind: "call", callee: variant, args: [raw, ...args], type: found.sig.ret, loc };
       L.liftedFns.push({
         name,
+        jsName: method,
+        valueCode: 4,
         params: irParams,
         returnType: found.sig.ret,
         locals: irParams.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
@@ -24701,6 +24784,8 @@ function fieldOnlyUsedOnThis(L: Lowerer, field: string): boolean {
           };
       L.liftedFns.push({
         name,
+        jsName: method,
+        valueCode: 4,
         params: irParams,
         returnType: found.sig.ret,
         locals: [
@@ -24732,100 +24817,83 @@ function fieldOnlyUsedOnThis(L: Lowerer, field: string): boolean {
     return slot === null ? thunk : slotReadOr(L, slot, fnT, thunk, loc);
   }
 
-/** `this.start` inside a BASE class that never declares `start` — the
-   * subclasses do (mysql2's Command.execute reads `this.start`, Query and
-   * Execute define it). JS finds the member by the RUNTIME class, so the
-   * detached value is a thunk that dispatches on the receiver the call
-   * supplies (`dyn.this`): the deepest declaring subclass whose instance the
-   * receiver is, down to the last declarer, which is unconditional (a
-   * receiver that is none of them fails its class check — the TypeError a
-   * missing method would throw). Every declarer must spell the same
-   * parameter and result types, since the thunk has one signature. */
+/** `this.start` inside a BASE class that never declares `start` (mysql2's Command.execute reads
+   * `this.start`; Query, Execute, Ping... define it). JS reads the property through the READ
+   * receiver's prototype chain, so the value is picked HERE, by the class of the receiver being
+   * read: the deepest declaring class the receiver is an instance of answers its own interned
+   * function (the one `Sub.prototype.start` and `sub.start` of a declarer instance name too, so
+   * identity holds per (class, method)). A receiver with no declarer on its chain answers `undefined`.
+   * The function itself takes its receiver from the call that eventually invokes it
+   * (`this.next(packet)`, `.call(other)`), exactly as every detached method value does. Declarers
+   * may be typed or implicit-any (generic) methods and may spell different signatures: when the
+   * closures share one type and every instantiated class has a declarer the value stays a typed
+   * closure, otherwise each pick is boxed into the checked-dynamic value (undefined included). */
   function lowerUnboundSubclassMethodValue(L: Lowerer, expr: ts.PropertyAccessExpression, info: ClassInfo): IrExpr | null {
     const method = expr.name.text;
-    const decls: { cls: ClassInfo; depth: number; sig: { params: ParamShape[]; ret: IrType } }[] = [];
+    if (findGenericMethodOn(L, info, method) !== null) return null;
+    if (!isPlainMethodReceiver(expr.expression)) return null;
+    const loc = locOf(expr);
+    const viaPrototype = ts.isPropertyAccessExpression(expr.expression) && expr.expression.name.text === "prototype";
+    const picks: { cls: ClassInfo; depth: number; value: IrExpr }[] = [];
+    let declines = false;
     const walk = (c: ClassInfo, depth: number): void => {
       for (const s of c.subclasses) {
         const sig = s.methods.get(method);
-        if (sig !== undefined) decls.push({ cls: s, depth, sig });
+        if (sig !== undefined) {
+          if (sig.abstract !== true) {
+            if (sig.params.some((p) => (p.mode !== "required" && p.mode !== "omittable"))) declines = true;
+            else picks.push({ cls: s, depth, value: unboundMethodThunk(L, s, method, { declarer: s, sig }, loc, true) });
+          }
+        } else if (s.genericMethods?.get(method) !== undefined) {
+          const g = unboundGenericClosures(L, expr, s, method, false);
+          if (g === null) declines = true;
+          else picks.push({ cls: s, depth, value: g.own });
+        }
         walk(s, depth + 1);
       }
     };
     walk(info, 1);
-    if (decls.length === 0) return null;
-    // Narrowed fence (thunkrecv). (1) A GENERIC declarer (untyped parameters) is not in `decls`, so the
-    // thunk would skip it and call the typed declarer for every receiver (the wrong binary: Query.start(p)
-    // with Hs.start()): refused. (2) The thunk dispatches on the CALL receiver, so it is exact only while
-    // the stored value never leaves its receiver: the read must be `this.F = this.m;` and F only used on
-    // `this` (see fieldOnlyUsedOnThis). Anything else is refused, the caller's SC1090.
-    if (descendantDeclaresGenericMethod(info, method)) return null;
-    const storedField = storedFieldOfMethodRead(expr);
-    if (storedField === null || !fieldOnlyUsedOnThis(L, storedField)) return null;
-    // (3) An instance with no declarer between it and the base (the base itself, or a subclass chain that
-    // never declares `method`) answers undefined for the read in JS; the thunk would hand it a function
-    // (a plain Plain instance, run() then sees the stored method). Refused when such a class is constructed.
-    if (silentReceiverInstantiated(L, info, method)) return null;
-    const first = decls[0]!.sig;
-    for (const d of decls) {
-      if (d.sig.params.some((p) => (p.mode !== "required" && p.mode !== "omittable")) || d.sig.params.length !== first.params.length) return null;
-      if (!typeEquals(d.sig.ret, first.ret) || d.sig.params.some((p, i) => !typeEquals(p.type, first.params[i]!.type))) return null;
-    }
-    if (!isPlainMethodReceiver(expr.expression)) return null;
-    decls.sort((a, b) => b.depth - a.depth);
-    const loc = locOf(expr);
-    const name = `%unbound.${info.def.name}.${method}`;
-    const params = first.params.map((p) => p.type);
-    const irParams: IrParam[] = params.map((t, i) => ({ localId: `p.${i}`, name: `p${i}`, type: t }));
-    for (const d of decls) L.noteEdge(`%${d.cls.def.name}.${method}`);
-    if (!L.liftedFns.some((f) => f.name === name)) {
-      const args: IrExpr[] = irParams.map((p) => ({ kind: "varRef" as const, localId: p.localId, type: p.type, loc }));
-      const locals: IrLocal[] = irParams.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false }));
-      const callOn = (d: (typeof decls)[number], idx: number): IrStmt[] => {
-        const selfT: IrType = { kind: "object", className: d.cls.def.name };
-        const id = `self.${idx}`;
-        locals.push({ id, name: `self${idx}`, type: selfT, mutable: false });
-        const call: IrExpr = {
-          kind: "call",
-          callee: `%${d.cls.def.name}.${method}`,
-          args: [{ kind: "varRef", localId: id, type: selfT, loc }, ...args],
-          type: first.ret,
+    if (picks.length === 0 || declines) return null;
+    // `C.prototype.m` of a class that never declares m is undefined in JS.
+    if (viaPrototype) return dynUndefinedExpr(loc);
+    if (!subclassMethodReadConfined(L, expr, info)) return null;
+    picks.sort((a, b) => b.depth - a.depth);
+    const recv = L.lowerExpr(expr.expression);
+    if (recv.type.kind !== "object") return null;
+    const fnT = picks[0]!.value.type;
+    const typed = picks.every((p) => typeEquals(p.value.type, fnT)) && !silentReceiverInstantiated(L, info, method);
+    if (typed) {
+      let chain: IrExpr = picks[picks.length - 1]!.value;
+      for (let i = picks.length - 2; i >= 0; i--) {
+        chain = {
+          kind: "ternary",
+          cond: { kind: "instanceOf", value: recv, className: picks[i]!.cls.def.name, type: BOOL, loc },
+          then: picks[i]!.value,
+          else_: chain,
+          type: fnT,
           loc,
         };
-        return [
-          {
-            kind: "varDecl",
-            localId: id,
-            init: { kind: "dynCheck", value: { kind: "libCall", fn: "dyn.this", args: [], type: DYN, loc }, type: selfT, loc },
-            loc,
-          },
-          first.ret.kind === "void" ? { kind: "exprStmt", expr: call, loc } : { kind: "return", value: call, loc },
-        ];
-      };
-      const body: IrStmt[] = [];
-      const baseT: IrType = { kind: "object", className: info.def.name };
-      locals.push({ id: "base.0", name: "base", type: baseT, mutable: false });
-      body.push({
-        kind: "varDecl",
-        localId: "base.0",
-        init: { kind: "dynCheck", value: { kind: "libCall", fn: "dyn.this", args: [], type: DYN, loc }, type: baseT, loc },
-        loc,
-      });
-      decls.forEach((d, i) => {
-        if (i === decls.length - 1) {
-          body.push(...callOn(d, i));
-          return;
-        }
-        body.push({
-          kind: "if",
-          cond: { kind: "instanceOf", value: { kind: "varRef", localId: "base.0", type: baseT, loc }, className: d.cls.def.name, type: BOOL, loc },
-          then: callOn(d, i),
-          else_: null,
-          loc,
-        });
-      });
-      L.liftedFns.push({ name, params: irParams, returnType: first.ret, locals, body, loc });
+      }
+      return chain;
     }
-    return { kind: "closure", fnName: name, captures: [], type: funcOf(params, first.ret), loc };
+    const boxed = (value: IrExpr): IrExpr | null =>
+      canBoxFuncIntoDyn(value.type as IrType & { kind: "func" }, (id) => L.shapes.get(id), (id) => L.unions.get(id))
+        ? { kind: "dynFrom", value, type: DYN, loc }
+        : null;
+    let chain: IrExpr = dynUndefinedExpr(loc);
+    for (let i = picks.length - 1; i >= 0; i--) {
+      const v = boxed(picks[i]!.value);
+      if (v === null) return null;
+      chain = {
+        kind: "ternary",
+        cond: { kind: "instanceOf", value: recv, className: picks[i]!.cls.def.name, type: BOOL, loc },
+        then: v,
+        else_: chain,
+        type: DYN,
+        loc,
+      };
+    }
+    return chain;
   }
 
 /** True when `module.exports.<name>` has no symbol, or no top-level statement
