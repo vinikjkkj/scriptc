@@ -38,7 +38,7 @@ import { nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID
 import { INTERNAL_SLOT_WANT_TEXT } from "../emission/emit-walkers.js";
 import { mangleClassRelease, mangleClassRetain, mangleClassStruct, mangleFnClosure, mangleFunction, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import { dynMemberRows, dynStaticTable, type DynMemberClass } from "../dyn-members.js";
-import { KINDGATE_WIDE_KINDS, kindgateWideLane, readKindgateDials } from "../kindgate.js";
+import { KINDGATE_WIDE_KINDS, kindgateInstanceLane, kindgateWideLane, readKindgateDials } from "../kindgate.js";
 import { BlockBuilder } from "./blocks.js";
 import { arrNewCall, elemAccess, llFieldType, ownMaskSlotIndex, releaseSym, srcProtoSlotIndex, toStrSlotIndex, traceAdapter, traceArg, vAdapters } from "./shapes.js";
 import { LlvmUnsupportedError } from "./unsupported.js";
@@ -116,6 +116,8 @@ export const DK = {
 export interface DynHost extends WalkerHost {
   /** The module links the live array view (moduleUsesDynView): the keyed read then consults it. */
   readonly usesDynView: boolean;
+  /** moduleUsesInstanceRecordLane: the record builder's instance lane is emitted. */
+  readonly usesInstanceRecordLane: boolean;
   unitInstanceRef(unionId: string, tag: number): string;
   /** The two-array key table one record shape's WIDE lane projects
    * through — `@sc_kgk_<shapeId>` (the NUL-terminated key bytes) and
@@ -1531,9 +1533,14 @@ export class LlDyn {
         // would throw away.
         originRecover("dcr");
         let dRef = "%d";
-        if (kindgateWideLane(this.kindgateDials, soft, shape)) {
-          const proj = this.recordWideHelper();
-          const tbl = host.recWideTable(t.shapeId, shape.fields);
+        // THE INSTANCE LANE (kindgateInstanceLane), the C twin's `inst`: a boxed class
+        // instance reads through the record type by KIND, ahead of the dial lane, in
+        // both disciplines.
+        const inst = kindgateInstanceLane(shape, host.usesInstanceRecordLane);
+        const dial = kindgateWideLane(this.kindgateDials, soft, shape);
+        if (dial || inst) {
+          const proj = dial ? this.recordWideHelper() : null;
+          const tbl = shape.fields.length > 0 ? host.recWideTable(t.shapeId, shape.fields) : null;
           host.declare(`declare void @scr_dyn_release(ptr)`);
           projSlot = "%dckgp";
           const dSlot = "%dckgd";
@@ -1543,11 +1550,23 @@ export class LlDyn {
           B.line(`store ptr %d, ptr ${dSlot}`);
           const kd = this.kindOf(B, "%d");
           const isObj = B.tmp();
-          const canWide = B.tmp();
-          const gateOk = B.tmp();
           B.line(`${isObj} = icmp eq i32 ${kd}, ${DK.OBJ}`);
-          B.line(`${canWide} = call zeroext i1 @sc_dyn_rec_wideable(ptr %d)`);
-          B.line(`${gateOk} = or i1 ${isObj}, ${canWide}`);
+          let gateOk = isObj;
+          let isInst = "";
+          if (inst) {
+            isInst = B.tmp();
+            const g = B.tmp();
+            B.line(`${isInst} = icmp eq i32 ${kd}, ${DK.OBJINST}`);
+            B.line(`${g} = or i1 ${gateOk}, ${isInst}`);
+            gateOk = g;
+          }
+          if (dial) {
+            const canWide = B.tmp();
+            const g = B.tmp();
+            B.line(`${canWide} = call zeroext i1 @sc_dyn_rec_wideable(ptr %d)`);
+            B.line(`${g} = or i1 ${gateOk}, ${canWide}`);
+            gateOk = g;
+          }
           const lk = B.newLabel("dcr.k");
           const lf = B.newLabel("dcr.f");
           B.condBr(gateOk, lk, lf);
@@ -1559,11 +1578,46 @@ export class LlDyn {
           const lJoin = B.newLabel("dcr.wj");
           B.condBr(isObj, lObj, lWide);
           B.startBlock(lWide);
+          const pSlot = "%dckgq";
+          B.entryAllocas.push(`${pSlot} = alloca ptr`);
+          const callInst = (): void => {
+            host.declare(
+              `declare ptr @scr_dyn_rec_wide_inst(ptr, ptr, ptr, i64, i1 zeroext, ptr)`,
+            );
+            const kgFn = this.dynKeyGetHelper();
+            const pi = B.tmp();
+            B.line(
+              `${pi} = call ptr @scr_dyn_rec_wide_inst(ptr %d, ptr ${tbl ? tbl.keys : "null"}, ptr ${tbl ? tbl.lens : "null"}, i64 ${shape.fields.length}, i1 zeroext ${inst!.allOwn ? "true" : "false"}, ptr @${kgFn})`,
+            );
+            B.line(`store ptr ${pi}, ptr ${pSlot}`);
+          };
+          const callDial = (): void => {
+            const pd = B.tmp();
+            B.line(
+              `${pd} = call ptr @${proj!}(ptr %d, ptr ${tbl!.keys}, ptr ${tbl!.lens}, i64 ${shape.fields.length})`,
+            );
+            B.line(`store ptr ${pd}, ptr ${pSlot}`);
+          };
+          const lProj = B.newLabel("dcr.wp");
+          if (inst && dial) {
+            const lI = B.newLabel("dcr.wi");
+            const lD = B.newLabel("dcr.wd");
+            B.condBr(isInst, lI, lD);
+            B.startBlock(lI);
+            callInst();
+            B.br(lProj);
+            B.startBlock(lD);
+            callDial();
+            B.br(lProj);
+          } else {
+            if (inst) callInst();
+            else callDial();
+            B.br(lProj);
+          }
+          B.startBlock(lProj);
           const p = B.tmp();
           const pNull = B.tmp();
-          B.line(
-            `${p} = call ptr @${proj}(ptr %d, ptr ${tbl.keys}, ptr ${tbl.lens}, i64 ${shape.fields.length})`,
-          );
+          B.line(`${p} = load ptr, ptr ${pSlot}`);
           B.line(`${pNull} = icmp eq ptr ${p}, null`);
           const lThrew = B.newLabel("dcr.wt");
           const lOk = B.newLabel("dcr.wk");
@@ -1630,7 +1684,17 @@ export class LlDyn {
           host.declare(`declare ptr @scr_dyn_tostr_closure(ptr)`);
           const ts = B.tmp();
           const tsp = B.tmp();
-          B.line(`${ts} = call ptr @scr_dyn_tostr_closure(ptr ${dRef})`);
+          let tsSrc = dRef;
+          if (inst) {
+            // An instance receiver: the closure captures the INSTANCE (the C twin's
+            // `sc_orig`), the projection carries no toString of the class's.
+            const isI = B.tmp();
+            const sel = B.tmp();
+            B.line(`${isI} = icmp eq i32 ${this.kindOf(B, "%d")}, ${DK.OBJINST}`);
+            B.line(`${sel} = select i1 ${isI}, ptr %d, ptr ${dRef}`);
+            tsSrc = sel;
+          }
+          B.line(`${ts} = call ptr @scr_dyn_tostr_closure(ptr ${tsSrc})`);
           B.line(`${tsp} = getelementptr inbounds %${mangleRecordStruct(t.shapeId)}, ptr %r0, i64 0, i32 ${toStrSlotIndex(shape)}`);
           B.line(`store ptr ${ts}, ptr ${tsp}`);
         }
@@ -2098,6 +2162,54 @@ export class LlDyn {
         // lands where it landed before.
         const armOk = "%aok";
         B.entryAllocas.push(`${armOk} = alloca i1`);
+        // THE INSTANCE PASS — the C lane's, ahead of both passes: a boxed class instance takes a
+        // CLASS arm before any record arm reads it (kindgateInstanceLane), so `Rec | Hdr` keeps
+        // handing the instance itself back for the value that took the class arm before the
+        // record lane existed. Emitted only for a union with both kinds of arm.
+        if (
+          host.usesInstanceRecordLane &&
+          def.arms.some((a) => a.kind === "record" && host.recordsById.get(a.shapeId)?.tuple !== true) &&
+          def.arms.some((a) => a.kind === "object" && !isDynErrorClass(a.className))
+        ) {
+          const lInst = B.newLabel("dau.io");
+          const lNoInst = B.newLabel("dau.ni");
+          B.condBr(kindEq(DK.OBJINST), lInst, lNoInst);
+          B.startBlock(lInst);
+          order.forEach((i) => {
+            const arm = def.arms[i]!;
+            if (arm.kind !== "object" || isDynErrorClass(arm.className)) return;
+            const a = this.dynArmHelper(arm);
+            B.line(`store i1 true, ptr ${armOk}`);
+            const av = B.tmp();
+            B.line(`${av} = call ptr @${a}(ptr %d, ptr %path, ptr ${armOk})`);
+            const aok = B.tmp();
+            B.line(`${aok} = load i1, ptr ${armOk}`);
+            const lTook = B.newLabel("dau.ik");
+            const lMiss = B.newLabel("dau.im");
+            B.condBr(aok, lTook, lMiss);
+            B.startBlock(lTook);
+            const rc = vAdapters(host, arm);
+            host.declare(`declare ptr @scr_union_new_ref(i32, ptr, ptr, ptr, ptr)`);
+            const u = B.tmp();
+            B.line(
+              `${u} = call ptr @scr_union_new_ref(i32 ${i}, ptr ${av}, ptr ${rc.retain}, ptr ${rc.release}, ptr ${traceArg(host, arm)})`,
+            );
+            B.terminate(`ret ptr ${u}`);
+            B.startBlock(lMiss);
+            host.declare(`declare zeroext i1 @scr_exc_pending()`);
+            const pe = B.tmp();
+            B.line(`${pe} = call zeroext i1 @scr_exc_pending()`);
+            const lProp = B.newLabel("dau.ip");
+            const lGo = B.newLabel("dau.in");
+            B.condBr(pe, lProp, lGo);
+            B.startBlock(lProp);
+            notOk();
+            B.terminate(`ret ptr null`);
+            B.startBlock(lGo);
+          });
+          B.br(lNoInst);
+          B.startBlock(lNoInst);
+        }
         const passes = unionHasDiscrim(def) ? [true, false] : [false];
         for (const withLits of passes) {
           order.forEach((i) => {

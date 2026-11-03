@@ -7,7 +7,7 @@
  * CEmitter and these functions only consult them through it. */
 import type { CEmitter } from "./emitter.js";
 import { rcSitesRequested } from "./emitter.js";
-import { accessorKeyOrderOf, accessorSlotProp, shapeHasAccessorSlots, VOID, arrayTypeHasLiveView, bytesAliasOnExtract, canConvertToDyn, canDynCheckTo, moduleUsesDynView } from "../../ir/nodes.js";
+import { accessorKeyOrderOf, accessorSlotProp, shapeHasAccessorSlots, VOID, arrayTypeHasLiveView, bytesAliasOnExtract, canConvertToDyn, canDynCheckTo, moduleUsesDynView, moduleUsesInstanceRecordLane } from "../../ir/nodes.js";
 import { CLASS_PROPS_FIELD, EVAL_STATIC_CLASSES, dynNeverArm, dynNeverIn, armDiscrimLits, dynErrorClassKind, isDynErrorClass, canAdaptDynFuncTo, dynRestApplyable, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, UNION_ARM_JS_OBJECT_KINDS, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassStruct, mangleField, mangleFunction, mangleFnClosure, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
@@ -15,7 +15,7 @@ import type { ClassMeta } from "./emit-shapes.js";
 import { RUNTIME_EMITTER_CLASS as RUNTIME_EMITTER_CLASS_W } from "../../ir/nodes.js";
 import { classvalCandidates, dynClassDisplayName, dynDescBase, dynEmitterSlot, dynRuntimeRoot, dynEnumerationFenced, dynMemberRows, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
 import { EMITTER_MIXIN_FIELD_NAME, ORD_MEMBER, orderRecordPlanCached } from "../../ir/nodes.js";
-import { KINDGATE_WIDE_KINDS, kindgateWideLane } from "../kindgate.js";
+import { KINDGATE_WIDE_KINDS, kindgateInstanceLane, kindgateWideLane } from "../kindgate.js";
 import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
 
 /** The refusal text a dyn-to-record check uses when the receiver carries
@@ -2544,10 +2544,15 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // recovered record never pays for a projection it would throw
         // away.
         d.push(originRecover(`  `));
-        if (wide) {
+        // THE INSTANCE LANE (kindgateInstanceLane): a boxed class instance reads through
+        // the record type the way Node reads it, its getters and methods and inherited
+        // members included. It is taken by KIND, ahead of the dial lane, and it is on
+        // in both disciplines.
+        const inst = kindgateInstanceLane(shape, moduleUsesInstanceRecordLane(E.mod));
+        if (wide || inst) {
           const keysName = `sc_kgk_${t.shapeId}`;
           const lensName = `sc_kgl_${t.shapeId}`;
-          if (!E.recWideTables.has(t.shapeId)) {
+          if (shape.fields.length > 0 && !E.recWideTables.has(t.shapeId)) {
             E.recWideTables.add(t.shapeId);
             E.walkerData(
               `extern const char *const ${keysName}[];`,
@@ -2563,21 +2568,34 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             );
           }
           d.push(`  ScrDyn *sc_proj = NULL;`);
+          d.push(`  const ScrDyn *sc_orig = d; (void)sc_orig;`);
           // The refusal rides `fail`, so the dial ordinal, the message and
           // the hard/soft discipline all come from the shared helper and
           // this lane cannot invent a second stance for any of them. The
           // condition is the base condition AND "the kind cannot answer",
           // so a shape with no wide lane emits the base statement verbatim.
-          d.push(
-            fail(
-              `  `,
-              "record.kind",
-              `d->kind != SCR_DYN_OBJ && !sc_dyn_rec_wideable(d)`,
-              `NULL`,
-            ),
-          );
+          const kindOk = [
+            `d->kind != SCR_DYN_OBJ`,
+            ...(inst ? [`d->kind != SCR_DYN_OBJINST`] : []),
+            ...(wide ? [`!sc_dyn_rec_wideable(d)`] : []),
+          ].join(" && ");
+          d.push(fail(`  `, "record.kind", kindOk, `NULL`));
           d.push(`  if (d->kind != SCR_DYN_OBJ) {`);
-          d.push(`    sc_proj = ${wide}(d, ${keysName}, ${lensName}, ${shape.fields.length});`);
+          if (inst) {
+            const kt = shape.fields.length > 0 ? keysName : "NULL";
+            const lt = shape.fields.length > 0 ? lensName : "NULL";
+            d.push(`    if (d->kind == SCR_DYN_OBJINST) {`);
+            d.push(
+              `      sc_proj = scr_dyn_rec_wide_inst(d, ${kt}, ${lt}, ${shape.fields.length}, ${inst.allOwn ? "true" : "false"}, &${dynKeyGetHelper(E)});`,
+            );
+            d.push(`    } else {`);
+          }
+          if (wide) {
+            d.push(`    sc_proj = ${wide}(d, ${keysName}, ${lensName}, ${shape.fields.length});`);
+          } else {
+            d.push(`    sc_proj = NULL; /* unreachable: no other kind passes the gate */`);
+          }
+          if (inst) d.push(`    }`);
           d.push(
             `    if (sc_proj == NULL) { ${soft ? "*ok = false; " : ""}return NULL; } /* the read threw */`,
           );
@@ -2633,7 +2651,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // String(r), r.toString() AND `r + ""`, and only a valueOf-free
         // value gives those the same answer).
         if (shape.tostr) {
-          d.push(`  r->${TOSTR_MEMBER} = scr_dyn_tostr_closure(d);`);
+          d.push(`  r->${TOSTR_MEMBER} = scr_dyn_tostr_closure(${wide || inst ? "(sc_orig->kind == SCR_DYN_OBJINST ? sc_orig : d)" : "d"});`);
         }
         const buildInternal = new Set(internalSlotFields(shape));
         for (const f of shape.fields) {
@@ -2883,7 +2901,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           d.push(`    scr_str_release(ek);`);
           d.push(`  }`);
         }
-        if (wide) d.push(`  if (sc_proj) scr_dyn_release(sc_proj);`);
+        if (wide || inst) d.push(`  if (sc_proj) scr_dyn_release(sc_proj);`);
         d.push(`  return r;`);
         break;
       }
@@ -2963,6 +2981,32 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // predicate is tested BEFORE the arm is walked rather than after,
         // which is the same answer and strictly less work: an arm whose
         // discriminant contradicts the value is no longer walked at all.
+        // THE INSTANCE PASS, ahead of both: a boxed class instance takes a CLASS arm of the
+        // union before any record arm gets to read it (kindgateInstanceLane). The record arm
+        // is a COPY of the instance and the class arm is the instance itself, so for `Rec |
+        // Hdr` the value that took the class arm before the record lane existed must keep
+        // taking it, whatever order the arms are walked in. Emitted only for a union that has
+        // both kinds of arm, and only in a module that has the lane.
+        if (
+          moduleUsesInstanceRecordLane(E.mod) &&
+          def.arms.some((a) => a.kind === "record" && E.recordsById.get(a.shapeId)?.tuple !== true) &&
+          def.arms.some((a) => a.kind === "object" && !isDynErrorClass(a.className))
+        ) {
+          d.push(`  if (d->kind == SCR_DYN_OBJINST) {`);
+          order.forEach((i) => {
+            const arm = def.arms[i]!;
+            if (arm.kind !== "object" || isDynErrorClass(arm.className)) return;
+            const a = E.dynArmHelper(arm);
+            const rc = vAdapters(arm);
+            d.push(`    { bool aok = true;`);
+            d.push(`      ${cDecl(arm, "av")} = ${a}(d, path, &aok);`);
+            d.push(
+              `      if (aok) return scr_union_new_ref(${i}, av, &${rc.retain}, &${rc.release}, ${E.traceArgC(arm)});`,
+            );
+            d.push(`      if (scr_exc_pending()) { *ok = false; return NULL; } }`);
+          });
+          d.push(`  }`);
+        }
         const passes = unionHasDiscrim(def) ? [true, false] : [false];
         for (const withLits of passes) {
           order.forEach((i) => {
