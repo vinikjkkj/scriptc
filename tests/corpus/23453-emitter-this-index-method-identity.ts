@@ -1,6 +1,6 @@
-// `this[k]` over the EventEmitter.prototype member names a for-in yields: the functions are identity-stable
-// values (one function per member, `on` is `addListener`, `off` is `removeListener`), the same through two
-// instances, and callable through the read.
+// `this[k]` over the EventEmitter.prototype member names a for-in yields: compared with the same member of
+// another instance (one function per member), and the functions read from an untyped slot behave as Node's
+// (`on` is `addListener`, `off` is `removeListener`, callable through the read).
 import { EventEmitter } from 'events';
 
 class Hub extends EventEmitter {
@@ -8,15 +8,6 @@ class Hub extends EventEmitter {
   constructor(tag: string) {
     super();
     this.tag = tag;
-  }
-  members(): any {
-    const out: any = {};
-    for (const k in this) {
-      // @ts-ignore
-      const v = this[k];
-      out[k] = v;
-    }
-    return out;
   }
   fnNames(): string {
     const out: string[] = [];
@@ -26,6 +17,14 @@ class Hub extends EventEmitter {
     }
     return out.join(',');
   }
+  sameAs(other: any): string {
+    const out: string[] = [];
+    for (const k in this) {
+      // @ts-ignore
+      out.push(k + ':' + (this[k] === other[k]));
+    }
+    return out.join(' ');
+  }
 }
 
 const a = new Hub('a');
@@ -34,18 +33,19 @@ const names: string[] = process.argv.length > 99 ? ['zz'] : ['pub'];
 Object.defineProperty(a, names[0], { value: 7, enumerable: true, writable: true, configurable: true });
 Object.defineProperty(b, names[0], { value: 8, enumerable: true, writable: true, configurable: true });
 
-const ma = a.members();
-const mb = b.members();
 console.log(a.fnNames());
+console.log(a.sameAs(b));
+const da: any = a;
+const db: any = b;
 const fns = ['setMaxListeners', 'getMaxListeners', 'emit', 'addListener', 'on', 'prependListener', 'once',
   'prependOnceListener', 'removeListener', 'off', 'removeAllListeners', 'listeners', 'rawListeners', 'listenerCount',
   'eventNames'];
 for (const m of fns) {
-  console.log(m, ma[m] === mb[m], ma[m] === a.members()[m], typeof ma[m]);
+  console.log(m, da[m] === db[m], da[m] === da[m], typeof da[m]);
 }
-console.log(ma.on === ma.addListener, ma.off === ma.removeListener, ma.on === ma.once);
-console.log(ma.tag, mb.tag, ma.pub, mb.pub, ma.nothing);
+console.log(da.on === da.addListener, da.off === da.removeListener, da.on === da.once);
+console.log(da.tag, db.tag, da.pub, db.pub, da.nothing);
 a.on('ping', (n: unknown) => console.log('ping', n));
-console.log(ma.emit.call(a, 'ping', 3), ma.emit.call(a, 'pong'), ma.listenerCount.call(a, 'ping'));
-ma.setMaxListeners.call(a, 3);
-console.log(a.getMaxListeners(), ma.getMaxListeners.call(a), ma.eventNames.call(a));
+console.log(da.emit.call(a, 'ping', 3), da.emit.call(a, 'pong'), da.listenerCount.call(a, 'ping'));
+da.setMaxListeners.call(a, 3);
+console.log(a.getMaxListeners(), da.getMaxListeners.call(a), da.eventNames.call(a));
