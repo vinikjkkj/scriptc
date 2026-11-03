@@ -11586,6 +11586,38 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/23800-postgres-interval-constructor/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23800-postgres-interval-constructor/xtend-mutable.cjs",
+    "<repo>/tests/corpus/23800-postgres-interval-constructor/postgres-interval.cjs",
+    "<repo>/tests/corpus/23800-postgres-interval-constructor/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23801-dyn-callback-array-hof.js": {
+   "order": [
+    "<repo>/tests/corpus/23801-dyn-callback-array-hof.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23802-hasownproperty-unbound-function.js": {
+   "order": [
+    "<repo>/tests/corpus/23802-hasownproperty-unbound-function.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23803-proven-key-array-read.js": {
+   "order": [
+    "<repo>/tests/corpus/23803-proven-key-array-read.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23804-dyn-object-inspect-prefix-width.js": {
+   "order": [
+    "<repo>/tests/corpus/23804-dyn-object-inspect-prefix-width.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2381-builtin-default-imports.js": {
    "order": [
     "<repo>/tests/corpus/2381-builtin-default-imports.js"
