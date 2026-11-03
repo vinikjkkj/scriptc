@@ -4761,7 +4761,9 @@ typedef struct ScrDynClass {
    * class; 0 otherwise. An emitter instance has the own enumerable keys _events, _eventsCount,
    * _maxListeners ahead of the program's fields (Node's own-key order): Object.keys lists them
    * and every other enumerating surface keeps its fence, as a stream's (which carries a far
-   * larger prefix) all do. */
+   * larger prefix) all do. 3: as 1 AND the class carries a run-time property table; 4: a plain class
+   * with one. For 3 and 4 Object.keys and for-in list the table's enumerable keys after the members
+   * (scr_dyn_class.c dyn_cls_props_keys); values/entries keep the fence. */
   unsigned char rt_root;
   /* 1: the instances are COLLECTOR-OWNED: the class's shape is emitted with
    * scr_cyc_alloc (a cycle header and a trace), so a dyn box may trace the
@@ -6989,6 +6991,9 @@ typedef struct ScrDynClassOps {
   ScrStr *(*class_text)(const ScrDyn *d);
   /* Is this minted prototype object a CLASS's (declared or per-evaluation)? */
   bool (*is_class_proto)(const ScrDyn *p);
+  /* Does the instance's run-time property table hold `key` (an own property, enumerable or not)? 1/0, or -1
+   * when the instance's class carries no table (the caller keeps its own answer). */
+  int (*objinst_props_has)(const ScrDyn *d, const ScrStr *key);
 } ScrDynClassOps;
 bool scr_dyn_sloppy_write(void);
 extern const ScrDynClassOps *scr_dyn_class_ops;
@@ -7071,6 +7076,10 @@ typedef struct ScrDynEeOps {
   bool (*knows)(const char *name, size_t n);
   ScrDyn *(*value)(const char *name, size_t n);
   ScrDyn *(*call)(ScrDyn *recv, ScrEmitter *em, const char *name, size_t n, ScrDyn *const *args, size_t argc, const char *what);
+  /* The emitter's own state cells (`_events`, `_eventsCount`, `_maxListeners`): is `name` one, and its value
+   * (+1, NULL when `name` is not one) read from the registry. */
+  bool (*is_state)(const char *name, size_t n);
+  ScrDyn *(*state)(ScrEmitter *em, const char *name, size_t n);
 } ScrDynEeOps;
 extern const ScrDynEeOps *scr_dyn_ee_ops;
 /* The instance's member `k`, or NULL when its class has no table or the
