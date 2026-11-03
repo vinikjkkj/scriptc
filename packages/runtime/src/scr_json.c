@@ -2506,6 +2506,11 @@ static bool dyn_fn_is_bound_box(const ScrDyn *fn);
 
 ScrStr *scr_fn_to_string(const ScrDyn *d) {
   const char *src = scr_dyn_fn_src(d);
+  if (src == NULL && scr_dyn_class_ops != NULL) {
+    /* A CLASS VALUE: Node prints the class source, which the class unit's `%dynSrc` row carries. */
+    ScrStr *ct = scr_dyn_class_ops->class_text(d);
+    if (ct != NULL) return ct;
+  }
   if (src == NULL) {
     /* A compiled user function whose source text this build did not
      * carry. Printing `[native code]` here would be a silent lie about a

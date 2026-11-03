@@ -35,9 +35,10 @@
  * and declared before the class. Everything else keeps a NAMED fence. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, DYN, EVAL_STATIC_CLASSES, F64, IrExpr, IrFunction, IrLocal, IrStmt, IrType, STRING, VOID, canDynCheckTo, typeEquals } from "../../ir/nodes.js";
+import { BOOL, CLASS_NO_DYN_NEW, DYN, EVAL_NO_SRC_CLASSES, EVAL_STATIC_CLASSES, F64, IrExpr, IrFunction, IrLocal, IrStmt, IrType, STRING, UNDEFINED_T, VOID, canDynCheckTo, typeEquals } from "../../ir/nodes.js";
 import { bindingNeverReassigned } from "./lower-calls.js";
 import { locOf } from "../program.js";
+import { classSourceText } from "../fn-srctext.js";
 import { evalClassSyntaxOk, evalStaticClassName } from "../eval-class-syntax.js";
 import { mixinFnShapeOf } from "./lower-mixins.js";
 import type { ClassInfo } from "./lower-classes.js";
@@ -46,6 +47,9 @@ import type { ClassInfo } from "./lower-classes.js";
  * field, filled from the constructor's trailing parameter. Never a real
  * symbol. */
 export const EVAL_ENV_SYM = { name: "%evalEnv" } as unknown as ts.Symbol;
+/** The hidden static-side field holding the evaluation's cached dyn class-value box, and its marker capture. */
+export const EVAL_BOX_FIELD = "%box";
+const EVAL_BOX_SYM = { name: "%evalBox" } as unknown as ts.Symbol;
 
 /** A class node that is the body of a MIXIN function (lower-mixins.ts keeps
  * those): the mixin machinery owns them, never the evaluated-class one. */
@@ -216,6 +220,11 @@ export function ensureEvalClass(L: Lowerer, expr: ts.ClassExpression): ClassInfo
   for (const c of caps) fields.set(c.field, c.type);
   const defFields = caps.map((c) => ({ name: c.field, type: c.type }));
   const fieldOrder: ClassInfo["fieldOrder"] = caps.map((c) => ({ name: c.field, type: c.type, initializer: undefined }));
+  // The hidden slot caching the evaluation's ONE dyn class-value box (see evalDynFns / scr_dyn_new_evalclass):
+  // two crossings of one evaluation are one JS function object, so they must share one closure (expandos).
+  fields.set(EVAL_BOX_FIELD, DYN);
+  defFields.push({ name: EVAL_BOX_FIELD, type: DYN });
+  fieldOrder.push({ name: EVAL_BOX_FIELD, type: DYN, initializer: undefined });
   for (const sf of info.staticFields) {
     if (fields.has(sf.name)) L.unsupported("SC1090", sf.decl, `a static member '${sf.name}' that shadows a captured binding's slot`);
     fields.set(sf.name, sf.type);
@@ -246,7 +255,7 @@ export function ensureEvalClass(L: Lowerer, expr: ts.ClassExpression): ClassInfo
     subclasses: [],
     throwingSetters: [],
     staticFields: [],
-    captures: caps.map((c) => ({ sym: c.sym, field: c.field, type: c.type })),
+    captures: [...caps.map((c) => ({ sym: c.sym, field: c.field, type: c.type })), { sym: EVAL_BOX_SYM, field: EVAL_BOX_FIELD, type: DYN }],
     evalStaticOf: info,
   };
   // The instance class keeps no static storage: its statics live on the
@@ -255,6 +264,10 @@ export function ensureEvalClass(L: Lowerer, expr: ts.ClassExpression): ClassInfo
   delete info.staticMethods;
   L.classes.set(staticName, staticInfo);
   EVAL_STATIC_CLASSES.add(staticName);
+  if (!dynNewDrivable(L, info, true)) CLASS_NO_DYN_NEW.add(staticName);
+  // A class value crosses into dyn only when its source text is exact (String(V) prints it): a module Node refuses, a
+  // decorated class or a layout the stripper does not reproduce keeps the compile-time refusal.
+  if (classSourceText(expr) === null) EVAL_NO_SRC_CLASSES.add(staticName);
   L.exprClassInfoByNode.set(expr, info);
   L.exprClasses.push(info);
   L.onExprClassCollected?.(info);
@@ -298,6 +311,7 @@ export function lowerEvalClassExpr(L: Lowerer, expr: ts.ClassExpression, info: C
     const raw = L.capturedBindingRead(c.sym, expr);
     return typeEquals(raw.type, c.type) ? raw : L.coerceInto(expr, raw, c.type);
   });
+  args.push({ kind: "dynFrom", value: { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc }, type: DYN, loc });
   L.noteEdge(`%${plan.staticName}.constructor`);
   // Every instance descends from an evaluation, so the evaluated class's own constructor is reachable
   // wherever the class is evaluated (a `new V()` through a container element or a dyn box has no site
@@ -329,6 +343,36 @@ export function dynLenFn(name: string, length: number, thisT: IrType | null, loc
     returnType: F64,
     locals,
     body: [{ kind: "return", value: { kind: "numLit", value: length, type: F64, loc }, loc }],
+    loc,
+  };
+}
+
+/** Can `new` through a dyn class value of `info` be driven by a synthesized `%dynNew`? The structural conditions
+ * dynStaticFns / evalDynFns apply, plus the check of every constructor parameter type. */
+export function dynNewDrivable(L: Lowerer, info: ClassInfo, evaluated: boolean): boolean {
+  const getRec = (id: string) => L.shapes.get(id);
+  const getUni = (id: string) => L.unions.get(id);
+  if (info.def.abstract === true || info.generic) return false;
+  if (!evaluated) {
+    if (info.protoClass === true || info.captures !== undefined) return false;
+    if (L.inheritsBuiltinErrorCtor(info) || L.inheritsBuiltinEmitterCtor(info)) return false;
+  }
+  return info.ctorParams.every(
+    (p) =>
+      (p.mode === "required" || p.mode === "omittable" || p.mode === "rest" || p.mode === "dynRest") &&
+      (p.type.kind === "dyn" || canDynCheckTo(p.type, getRec, getUni)),
+  );
+}
+
+/** `%dynSrc` rows: the class's source text (Node's `String(V)`), carried only when this module has the exact text. */
+export function dynSrcFn(name: string, text: string, thisT: IrType | null, loc: import("../../ir/nodes.js").SrcLoc): IrFunction {
+  const locals: IrLocal[] = thisT === null ? [] : [{ id: "this.0", name: "this", type: thisT, mutable: false }];
+  return {
+    name,
+    params: locals.map((l) => ({ localId: l.id, name: l.name, type: l.type })),
+    returnType: STRING,
+    locals,
+    body: [{ kind: "return", value: { kind: "strLit", value: text, type: STRING, loc }, loc }],
     loc,
   };
 }
@@ -418,6 +462,49 @@ export function evalDynFns(L: Lowerer, staticInfo: ClassInfo): { fns: IrFunction
         loc,
       });
       list.push({ name: "%dynNew", fn: name });
+    }
+  }
+
+  // %dynBoxGet(this) / %dynBoxSet(this, box): the cached class-value box
+  {
+    const thisRef: IrExpr = { kind: "varRef", localId: "this.0", type: staticT, loc };
+    const gl: IrLocal[] = [{ id: "this.0", name: "this", type: staticT, mutable: false }];
+    const getName = `%${staticName}.%dynBoxGet`;
+    fns.push({
+      name: getName,
+      params: gl.map((l) => ({ localId: l.id, name: l.name, type: l.type })),
+      returnType: DYN,
+      locals: gl,
+      body: [{ kind: "return", value: { kind: "fieldGet", obj: thisRef, className: staticName, field: EVAL_BOX_FIELD, type: DYN, loc }, loc }],
+      loc,
+    });
+    list.push({ name: "%dynBoxGet", fn: getName });
+    const sl: IrLocal[] = [
+      { id: "this.0", name: "this", type: staticT, mutable: false },
+      { id: "v.0", name: "v", type: DYN, mutable: false },
+    ];
+    const setName = `%${staticName}.%dynBoxSet`;
+    fns.push({
+      name: setName,
+      params: sl.map((l) => ({ localId: l.id, name: l.name, type: l.type })),
+      returnType: VOID,
+      locals: sl,
+      body: [{
+        kind: "fieldSet", obj: thisRef, className: staticName, field: EVAL_BOX_FIELD,
+        value: { kind: "varRef", localId: "v.0", type: DYN, loc }, loc,
+      }],
+      loc,
+    });
+    list.push({ name: "%dynBoxSet", fn: setName });
+  }
+
+  // %dynSrc(this)
+  {
+    const text = staticInfo.decl !== null ? classSourceText(staticInfo.decl) : null;
+    if (text !== null) {
+      const name = `%${staticName}.%dynSrc`;
+      fns.push(dynSrcFn(name, text, staticT, loc));
+      list.push({ name: "%dynSrc", fn: name });
     }
   }
 

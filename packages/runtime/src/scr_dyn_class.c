@@ -139,10 +139,28 @@ static ScrDyn *dyn_eval_class_thunk(ScrClosure *clo, ScrDyn *const *args, size_t
 
 ScrDyn *scr_dyn_new_evalclass(void *o, const ScrDynClass *cls) {
   ScrDyn *inner = scr_dyn_new_objinst(o, cls); /* +1, owned by the closure's box below */
+  /* ONE box per evaluation: JS has one function object per class, so two crossings must share a closure (its own-property
+   * table, the expandos). The evaluation caches its box in a hidden slot; the ring evaluation -> box -> closure -> inner ->
+   * evaluation is traced (scr_dyn_trace_v on the closure's capture), so the cycle collector owns it. */
+  const ScrDynClassMember *bget = scr_dyn_objinst_member(inner, "%dynBoxGet", 10);
+  const ScrDynClassMember *bset = scr_dyn_objinst_member(inner, "%dynBoxSet", 10);
+  if (bget != NULL && bget->call != NULL) {
+    ScrDyn *cached = bget->call(o, NULL, 0, "class value");
+    if (cached != NULL && cached->kind == SCR_DYN_FUNC) {
+      scr_dyn_release(inner);
+      return cached; /* +1 */
+    }
+    scr_dyn_release(cached);
+  }
   ScrClosure *clo = scr_closure_new((void *)dyn_eval_class_thunk, 1);
-  clo->caps[0] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
+  clo->caps[0] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, scr_dyn_trace_v);
   scr_box_set_ref((ScrBox *)clo->caps[0], inner); /* takes the +1 */
-  return scr_dyn_new_func_src(clo, dyn_eval_class_thunk, 0, "()", cls->name, NULL); /* no source text: see dyn_cls_impl_box */
+  ScrDyn *made = scr_dyn_new_func_src(clo, dyn_eval_class_thunk, 0, "()", cls->name, NULL);
+  if (bset != NULL && bset->call != NULL) {
+    ScrDyn *av[1] = { made };
+    scr_dyn_release(bset->call(o, av, 1, "class value"));
+  }
+  return made;
 }
 
 static void dyn_eval_fence(const ScrDyn *inner, const char *what) {
@@ -171,7 +189,7 @@ static ScrDyn *dyn_eval_static_call_thunk(ScrClosure *clo, ScrDyn *const *args, 
 
 static ScrDyn *dyn_eval_static_method_value(const ScrDyn *inner, const ScrDynClassMember *m) {
   ScrClosure *clo = scr_closure_new((void *)dyn_eval_static_call_thunk, 2);
-  clo->caps[0] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
+  clo->caps[0] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, scr_dyn_trace_v);
   scr_box_set_ref((ScrBox *)clo->caps[0], scr_dyn_retain((ScrDyn *)inner));
   clo->caps[1] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
   ScrStr *s = scr_str_new(m->name, m->len);
@@ -208,6 +226,28 @@ static ScrDyn *dyn_eval_construct(const ScrDyn *inner, const ScrDyn *args) {
   }
   ScrDyn *av[1] = { (ScrDyn *)args };
   return m->call(inner->v.inst.o, av, 1, "new");
+}
+
+static const ScrDynClassMember *dyn_class_static(const ScrDynClass *cls, const char *k, size_t n);
+
+static ScrStr *dyn_cls_ops_class_text(const ScrDyn *d) {
+  const ScrDyn *inner = dyn_cls_eval_inner(d);
+  ScrDyn *r = NULL;
+  if (inner != NULL) {
+    const ScrDynClassMember *m = scr_dyn_objinst_member(inner, "%dynSrc", 7);
+    if (m != NULL && m->call != NULL) r = m->call(inner->v.inst.o, NULL, 0, "String");
+  } else {
+    const ScrDynClass *cls = dyn_cls_impl_of_value(d);
+    const ScrDynClassMember *m = cls != NULL ? dyn_class_static(cls, "%dynSrc", 7) : NULL;
+    if (m != NULL && m->call != NULL) r = m->call(NULL, NULL, 0, "String");
+  }
+  if (r == NULL || r->kind != SCR_DYN_STR) {
+    scr_dyn_release(r);
+    return NULL;
+  }
+  ScrStr *s = scr_dyn_string_coerce(r); /* +1 */
+  scr_dyn_release(r);
+  return s;
 }
 
 static int dyn_cls_ops_class_walk(const ScrDyn *v, ScrObjWalk mode, ScrDyn *out) {
@@ -449,6 +489,19 @@ static ScrDyn *dyn_cls_ops_construct(const ScrDyn *fn, const ScrDyn *args, bool 
 }
 
 static bool dyn_cls_ops_set(ScrDyn *recv, const ScrStr *key, const ScrDyn *value) {
+  if (recv->kind == SCR_DYN_FUNC && key->len == 9 && memcmp(key->data, "prototype", 9) == 0 &&
+      (dyn_cls_eval_inner(recv) != NULL || dyn_cls_impl_of_value(recv) != NULL)) {
+    /* A class's `prototype` is read-only: no expando may stand in for it. */
+    const ScrDyn *in = dyn_cls_eval_inner(recv);
+    const char *nm = in != NULL ? scr_dyn_objinst_class_of(in)->name : dyn_cls_impl_of_value(recv)->name;
+    ScrJsonBuf b;
+    scr_jb_init(&b);
+    scr_jb_puts(&b, "assigning 'prototype' on the class value ");
+    scr_jb_puts(&b, nm);
+    scr_jb_puts(&b, " is not supported yet");
+    scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
+    return true;
+  }
   if (recv->kind == SCR_DYN_OBJINST) {
     /* Node writes the instance's real field. The compiler lists one
      * synthesized member, `%dynSet(key, value): boolean`, on every class a
@@ -774,7 +827,7 @@ static const ScrDynClassOps dyn_cls_ops_impl = {
   dyn_cls_ops_fn_get, dyn_cls_ops_construct, dyn_cls_ops_set, dyn_cls_ops_delete, dyn_cls_ops_walk_error,
   dyn_cls_ops_error_rooted, dyn_cls_ops_error_instanceof,
   dyn_cls_objinst_to_primitive, dyn_cls_objinst_to_string, dyn_cls_objinst_user_tostring,
-  dyn_cls_eval_inner, dyn_cls_ops_instance_of, dyn_cls_ops_class_walk,
+  dyn_cls_eval_inner, dyn_cls_ops_instance_of, dyn_cls_ops_class_walk, dyn_cls_ops_class_text,
 };
 
 void scr_dyn_class_install(void) { scr_dyn_class_ops = &dyn_cls_ops_impl; }

@@ -6,6 +6,8 @@ import { isStringCallAliasDecl } from "./lower-builtins.js";
 import * as ts from "../ts7/adapter.js";
 import { poisonedRecordShapeDiag } from "../../diagnostics/diagnostic.js";
 import type { Lowerer } from "./lowerer.js";
+import { CLASS_NO_DYN_NEW } from "../../ir/nodes.js";
+import { dynNewDrivable } from "./lower-evalclass.js";
 import { uniformTupleArrayExpectation } from "./lower-stmts.js";
 import { registerAbsentGlobal } from "./lower-absent.js";
 import { dirname as dirnamePath, resolve as resolvePath } from "node:path";
@@ -823,6 +825,18 @@ function liftableLocalClass(L: Lowerer, sf: ts.SourceFile, decl: ts.ClassDeclara
         L.collectingClassDecls = false;
       }
       L.classDeclsCollected = true;
+      {
+        // Declared classes whose class value cannot be constructed through dyn (and their ancestors): see CLASS_NO_DYN_NEW.
+        const bad = (c: import("./lower-classes.js").ClassInfo, seen = new Set<string>()): boolean => {
+          if (seen.has(c.def.name)) return false;
+          seen.add(c.def.name);
+          return !dynNewDrivable(L, c, false) || c.subclasses.some((s) => bad(s, seen));
+        };
+        for (const c of L.classes.values()) {
+          if (c.evalStaticOf !== undefined || c.evalClass !== undefined || c.def.runtime === true) continue;
+          if (bad(c)) CLASS_NO_DYN_NEW.add(c.def.name);
+        }
+      }
       for (const fp of parts) for (const decl of fp.fnDecls) L.collectSignature(decl);
     } finally {
       L.collecting = false;
