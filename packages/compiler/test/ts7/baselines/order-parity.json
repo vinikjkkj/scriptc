@@ -11008,6 +11008,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/23260-classval-dyn-source-text-javascript.js": {
+   "order": [
+    "<repo>/tests/corpus/23260-classval-dyn-source-text-javascript.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23261-classval-dyn-source-text-typescript.ts": {
+   "order": [
+    "<repo>/tests/corpus/23261-classval-dyn-source-text-typescript.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23262-classval-dyn-source-text-typescript-members.ts": {
+   "order": [
+    "<repo>/tests/corpus/23262-classval-dyn-source-text-typescript-members.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23263-evalclass-dyn-one-box-per-evaluation.js": {
+   "order": [
+    "<repo>/tests/corpus/23263-evalclass-dyn-one-box-per-evaluation.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23264-evalclass-dyn-ring-through-the-box.js": {
+   "order": [
+    "<repo>/tests/corpus/23264-evalclass-dyn-ring-through-the-box.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2330-tls-server-runtime-options.cjs": {
    "order": [
     "<repo>/tests/corpus/2330-tls-server-runtime-options.cjs"
@@ -21503,6 +21533,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/classval-in-record-with-unconstructible-class.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/classval-in-record-with-unconstructible-class.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/component-fences.ts": {
    "order": [
     "<repo>/tests/diagnostics/component-fences.ts"
@@ -21774,6 +21810,18 @@
   "<repo>/tests/diagnostics/es2025-fences.ts": {
    "order": [
     "<repo>/tests/diagnostics/es2025-fences.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/evalclass-in-dyn-with-prototype-read.js": {
+   "order": [
+    "<repo>/tests/diagnostics/evalclass-in-dyn-with-prototype-read.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/evalclass-in-dyn-without-exact-source-text.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/evalclass-in-dyn-without-exact-source-text.ts"
    ],
    "diags": []
   },
