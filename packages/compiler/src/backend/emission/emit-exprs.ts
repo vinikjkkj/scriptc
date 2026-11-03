@@ -3788,6 +3788,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // All three borrowed, no result; throws catchably for a read-only or
             // getter-only entry (may-throw seed).
             return finish(`scr_cls_props_set(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "cls.propsKeys":
+            // Borrowed table, +1 array of the enumerable keys, never throws.
+            return finish(`scr_cls_props_keys(${arg(0)})`);
+          case "cls.propsNote":
+            // Both borrowed, no result, never throws.
+            return finish(`(void)scr_cls_props_note(${arg(0)}, ${arg(1)})`);
           case "cls.propsGet":
             // Both borrowed, result +1; an ACCESSOR runs its getter, so
             // this is in the may-throw seed set.
