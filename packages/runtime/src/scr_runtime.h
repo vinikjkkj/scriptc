@@ -7065,6 +7065,8 @@ void scr_dyn_objinst_registry(const ScrDynClass *const *descs, size_t n);
  * nothing narrower (an unregistered class, or no registry at all -- the
  * pre-table behaviour, unchanged). Never NULL for an OBJINST box. */
 const ScrDynClass *scr_dyn_objinst_class_of(const ScrDyn *d);
+/* The descriptor of the runtime's own EventEmitter class, or NULL when none is registered. */
+const ScrDynClass *scr_dyn_runtime_emitter_class(void);
 /* The ScrEmitter an OBJINST box carries (the prefix of an emitter-rooted instance, or the
  * hidden slot of a grafted one), borrowed, or NULL when the instance is no emitter. */
 ScrEmitter *scr_dyn_objinst_emitter(const ScrDyn *d);

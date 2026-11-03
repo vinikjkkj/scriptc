@@ -3775,6 +3775,16 @@ const ScrDynClass *scr_dyn_objinst_class_of(const ScrDyn *d) {
   return best != NULL ? best : own;
 }
 
+/* The descriptor of the runtime's own EventEmitter class (the root of every emitter-rooted chain: the instance IS the
+ * ScrEmitter prefix and the class has no base), or NULL when the program registered none. */
+const ScrDynClass *scr_dyn_runtime_emitter_class(void) {
+  for (size_t i = 0; i < scr_cls_reg_n; i++) {
+    const ScrDynClass *c = scr_cls_reg[i];
+    if (c->ee_off == 0 && c->base == NULL && c->rt_root == 1) return c;
+  }
+  return NULL;
+}
+
 ScrEmitter *scr_dyn_objinst_emitter(const ScrDyn *d) {
   if (d == NULL || d->kind != SCR_DYN_OBJINST) return NULL;
   const ScrDynClass *c = scr_dyn_objinst_class_of(d);
@@ -9940,7 +9950,18 @@ const void *scr_dyn_fn_ident(const ScrDyn *d) {
 }
 
 bool scr_dyn_strict_eq(const ScrDyn *a, const ScrDyn *b) {
-  if (a->kind != b->kind) return false;
+  if (a->kind != b->kind) {
+    /* The runtime's EventEmitter class has two dynamic spellings: the class value an emitter instance's `constructor`
+     * answers (a function box over its descriptor), and the identity token the static name `EventEmitter` boxes to
+     * ("[builtin events.EventEmitter]"). They are one JS value. */
+    const ScrDyn *fv = a->kind == SCR_DYN_FUNC ? a : b->kind == SCR_DYN_FUNC ? b : NULL;
+    const ScrDyn *sv = a->kind == SCR_DYN_STR ? a : b->kind == SCR_DYN_STR ? b : NULL;
+    if (fv != NULL && sv != NULL && sv->v.str->len == 29 && memcmp(sv->v.str->data, "[builtin events.EventEmitter]", 29) == 0) {
+      const ScrDynClass *c = scr_dyn_class_of_value(fv);
+      return c != NULL && c == scr_dyn_runtime_emitter_class();
+    }
+    return false;
+  }
   switch (a->kind) {
   case SCR_DYN_PROXY: return a == b; /* a proxy is its own identity */
   case SCR_DYN_UNDEF:

@@ -19220,6 +19220,12 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         ) {
           scalarSide = { kind: "dynFrom", value: scalarSide, type: DYN, loc: scalarSide.loc };
         }
+        // The runtime EventEmitter class named statically is an identity TOKEN string; a dyn value can hold the class value
+        // itself (an emitter instance's `constructor`), so the comparison runs the whole-dyn equality, which knows
+        // the two spellings of that one class (scr_dyn_strict_eq).
+        if (scalarSide.kind === "strLit" && scalarSide.value === "[builtin events.EventEmitter]" && dynSide.type.kind === "dyn") {
+          scalarSide = { kind: "dynFrom", value: scalarSide, type: DYN, loc: scalarSide.loc };
+        }
         if (
           dynSide.type.kind === "dyn" &&
           (scalarSide.type.kind === "f64" || scalarSide.type.kind === "string" || scalarSide.type.kind === "bool" ||
