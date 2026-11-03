@@ -273,7 +273,7 @@ export function evalClassNodeHook(L: Lowerer, decl: ts.ClassLikeDeclaration): bo
   // class (an import from another module) may not be registered yet: the type
   // names the class, and the collection happens at the first mapping after
   // the window (or at the evaluation site).
-  if (L.collectingClassDecls) return true;
+  if (L.collectingClassDecls || !L.classDeclsCollected) return true;
   try {
     ensureEvalClass(L, expr);
   } catch (e) {
@@ -299,6 +299,10 @@ export function lowerEvalClassExpr(L: Lowerer, expr: ts.ClassExpression, info: C
   });
   L.noteEdge(`%${plan.staticName}.constructor`);
   return { kind: "new", className: plan.staticName, args, type: objT, loc };
+  // Every instance descends from an evaluation, so the evaluated class's own constructor is reachable
+  // wherever the class is evaluated (a `new V()` through a container element or a dyn box has no site
+  // of its own the discovery pass is guaranteed to see).
+  L.noteEdge(`%${info.def.name}.constructor`);
 }
 
 /** True for an object type naming a per-evaluation static side. */
