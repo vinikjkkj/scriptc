@@ -90,6 +90,7 @@ typedef struct ScrEeEntry {
   /* The identity Node's `_events` shows for a ONCE listener: its onceWrapper (a distinct function whose
    * `listener` is the original). Minted on the first `_events` read, owned (NULL otherwise). */
   ScrClosure *wrap;
+  ScrBox *wfired; /* the wrapper's shared `fired` flag (Node's wrapper.fired); NULL until a wrapper exists */
   ScrEeInvoke inv;
   bool once;
   bool fired; /* a once entry that already ran (snapshot skip rule) */
@@ -100,7 +101,14 @@ typedef struct ScrEeBucket {
   ScrStr *name; /* owned */
   ScrEeEntry **ls;
   size_t n, cap;
-  bool warned; /* leak warning printed for this name already */
+  bool warned; /* leak warning printed for this name already (Node: the listener ARRAY's `warned` property) */
+  /* Node keeps ONE listener function per name until a second arrives, then an array whose enumerable
+   * symbol events.emitting counts the in-flight emits that started on THAT array. Adding or removing while
+   * one is in flight clones the array (the emit keeps iterating the old one). `epoch` names the current
+   * array object (0: none yet), `emitting` is its counter, `view_epoch` the epoch the `_events` view's
+   * array was built for. */
+  uint32_t epoch, emitting, view_epoch;
+  bool counted; /* contributes to _eventsCount */
   struct ScrEeBucket *next;
 } ScrEeBucket;
 
@@ -118,7 +126,11 @@ struct ScrEeReg {
    * The view is rebuilt in place while `gen` is unchanged, so `this._events === this._events` holds and a
    * held reference keeps seeing the live table, as Node's does. Owned; NULL until first read. */
   ScrDyn *view;
-  uint32_t ver, gen, view_ver, view_gen;
+  uint32_t ver, gen, view_ver, view_gen, epoch_seq;
+  /* Node's _eventsCount, maintained exactly as events.js does (+1 for a new name, -1 for a removed one, a
+   * count reaching 0 replaces `_events`) so a program's own write to it behaves as in Node. */
+  double ecount;
+  bool max_set; /* _maxListeners holds a value (max); false is Node's undefined */
 };
 
 /* The vtable of BARE `new EventEmitter()` instances; the emitted main()
@@ -144,6 +156,7 @@ static void scr_ee_entry_unref(ScrEeEntry *e) {
   scr_closure_release(e->orig); /* NULL-tolerant */
   scr_closure_release(e->twin); /* NULL-tolerant */
   scr_closure_release(e->wrap); /* NULL-tolerant */
+  if (e->wfired) scr_box_release(e->wfired);
   free(e);
 }
 
@@ -155,7 +168,7 @@ static ScrClosure *scr_ee_entry_fn(const ScrEeEntry *e) {
 /* Does the closure name this entry's listener: its identity, or (a dynamic value read back
  * through listeners()) its erased twin. */
 static bool scr_ee_entry_is(const ScrEeEntry *e, const ScrClosure *c) {
-  return scr_ee_entry_fn(e) == c || (e->twin != NULL && e->twin == c);
+  return scr_ee_entry_fn(e) == c || (e->twin != NULL && e->twin == c) || (e->wrap != NULL && e->wrap == c);
 }
 
 static ScrEeReg *scr_ee_reg_ensure(ScrEmitter *em) {
@@ -163,6 +176,7 @@ static ScrEeReg *scr_ee_reg_ensure(ScrEmitter *em) {
     em->reg = calloc(1, sizeof *em->reg);
     if (!em->reg) scr_ee_oom();
     em->reg->max = -1;
+    em->reg->max_set = false;
   }
   return em->reg;
 }
@@ -209,15 +223,20 @@ static void scr_ee_bucket_drop(ScrEeReg *reg, ScrEeBucket *b) {
   ScrEeBucket **link = &reg->head;
   while (*link != b) link = &(*link)->next;
   *link = b->next;
+  /* Node: a removed name decrements _eventsCount, and the count reaching 0 replaces `_events` with a fresh
+   * object. */
+  if (b->counted) {
+    reg->ecount -= 1;
+    if (reg->ecount == 0) reg->gen++;
+  }
   scr_str_release(b->name);
   free(b->ls);
   free(b);
   reg->ver++;
-  /* Node: the count reaching 0 replaces `_events` with a fresh object. */
-  bool live = false;
-  for (ScrEeBucket *w = reg->head; w && !live; w = w->next) live = w->n > 0;
-  if (!live) reg->gen++;
 }
+
+static void scr_ee_mark_fired(ScrEeEntry *e);
+static void scr_ee_emit_done(ScrEmitter *em, ScrStr *name, uint32_t epoch);
 
 static bool scr_ee_has(ScrEeReg *reg, const char *name) {
   ScrEeBucket *b = scr_ee_bucket_find(reg, name, strlen(name));
@@ -367,7 +386,7 @@ static void scr_ee_emit_meta(ScrEmitter *em, const char *meta, ScrStr *name, con
 
 static void scr_ee_warn_maybe(ScrEmitter *em, ScrEeBucket *b) {
   ScrEeReg *reg = em->reg;
-  double max = reg->max >= 0 ? reg->max : scr_emitter_default_max;
+  double max = reg->max_set ? reg->max : scr_emitter_default_max;
   if (b->warned || max <= 0 || (double)b->n <= max) return;
   b->warned = true;
   /* Node's message byte for byte — except the pid, which is OURS (it can
@@ -441,6 +460,17 @@ static ScrEmitter *scr_ee_add3(ScrEmitter *em, ScrStr *name, ScrClosure *cb /*mo
     b->cap = b->cap ? b->cap * 2 : 2;
     b->ls = realloc(b->ls, b->cap * sizeof *b->ls);
     if (!b->ls) scr_ee_oom();
+  }
+  if (b->n == 0) {
+    b->counted = true;
+    em->reg->ecount += 1;
+  } else if (b->n == 1) {
+    b->epoch = ++em->reg->epoch_seq; /* the second listener makes a NEW array */
+    b->emitting = 0;
+    b->warned = false;
+  } else if (b->emitting > 0) {
+    b->epoch = ++em->reg->epoch_seq; /* added during an emit: the array is cloned */
+    b->emitting = 0;
   }
   if (prepend) {
     memmove(b->ls + 1, b->ls, b->n * sizeof *b->ls);
@@ -554,8 +584,13 @@ void scr_ee_inv_fixed4(ScrClosure *cb, va_list ap) {
  * keeps its rank (Node's events[type] = undefined). */
 static void scr_ee_remove_at(ScrEmitter *em, ScrEeBucket *b, size_t i) {
   ScrEeEntry *e = b->ls[i];
+  if (b->n >= 2 && b->emitting > 0) { /* removed during an emit: the array is cloned */
+    b->epoch = ++em->reg->epoch_seq;
+    b->emitting = 0;
+  }
   memmove(b->ls + i, b->ls + i + 1, (b->n - i - 1) * sizeof *b->ls);
   b->n--;
+  if (b->n == 1) b->epoch = ++em->reg->epoch_seq; /* the array collapses to its one function */
   em->reg->ver++;
   ScrStr *name = scr_str_retain(b->name);
   if (b->n == 0 && !em->reg->shape) scr_ee_bucket_drop(em->reg, b);
@@ -697,6 +732,7 @@ ScrEmitter *scr_emitter_remove_all(ScrEmitter *em, ScrStr *name, bool all) {
    * gone and the emitter leaves shape mode. */
   while (reg->head) scr_ee_bucket_drop(reg, reg->head);
   reg->shape = false;
+  reg->ecount = 0;
   reg->gen++; /* removeAllListeners() always installs a fresh `_events` object, even over an empty one */
   reg->ver++;
   return scr_emitter_retain(em);
@@ -722,6 +758,10 @@ static bool scr_ee_emit_core(ScrEmitter *em, ScrStr *name, va_list *ap_template)
     snap[i] = b->ls[i];
     snap[i]->refs++;
   }
+  /* Node: an emit over a listener ARRAY counts itself in the array's events.emitting symbol. */
+  const bool tracked = n >= 2;
+  const uint32_t track_epoch = b->epoch;
+  if (tracked) b->emitting++;
   for (size_t i = 0; i < n; i++) {
     ScrEeEntry *e = snap[i];
     if (scr_exc_pending()) {
@@ -733,7 +773,7 @@ static bool scr_ee_emit_core(ScrEmitter *em, ScrStr *name, va_list *ap_template)
         scr_ee_entry_unref(e);
         continue;
       }
-      e->fired = true;
+      scr_ee_mark_fired(e);
       /* Remove from the live list first (the wrapper's own removal). The
        * bucket may have been dropped/recreated by earlier listeners —
        * re-find it and match by entry identity. */
@@ -757,6 +797,7 @@ static bool scr_ee_emit_core(ScrEmitter *em, ScrStr *name, va_list *ap_template)
     va_end(ap);
     scr_ee_entry_unref(e);
   }
+  if (tracked) scr_ee_emit_done(em, name, track_epoch);
   free(snap);
   return true;
 }
@@ -840,6 +881,9 @@ bool scr_emitter_emit_dyn_list(ScrEmitter *em, ScrDyn *self, ScrDyn *const *item
       snap[i] = b->ls[i];
       snap[i]->refs++;
     }
+    const bool tracked = n >= 2;
+    const uint32_t track_epoch = b->epoch;
+    if (tracked) b->emitting++;
     for (size_t i = 0; i < n; i++) {
       ScrEeEntry *e = snap[i];
       if (scr_exc_pending()) {
@@ -851,7 +895,7 @@ bool scr_emitter_emit_dyn_list(ScrEmitter *em, ScrDyn *self, ScrDyn *const *item
           scr_ee_entry_unref(e);
           continue;
         }
-        e->fired = true;
+        scr_ee_mark_fired(e);
         ScrEeBucket *live = scr_ee_bucket_find(em->reg, name->data, name->len);
         if (live) {
           for (size_t j = 0; j < live->n; j++) {
@@ -873,6 +917,7 @@ bool scr_emitter_emit_dyn_list(ScrEmitter *em, ScrDyn *self, ScrDyn *const *item
       scr_dyn_release(r);
       scr_ee_entry_unref(e);
     }
+    if (tracked) scr_ee_emit_done(em, name, track_epoch);
     free(snap);
   }
   scr_str_release(name);
@@ -1033,11 +1078,12 @@ ScrEmitter *scr_emitter_set_max(ScrEmitter *em, double n) {
     return scr_emitter_retain(em); /* the pending check unwinds */
   }
   scr_ee_reg_ensure(em)->max = n;
+  em->reg->max_set = true;
   return scr_emitter_retain(em);
 }
 
 double scr_emitter_get_max(ScrEmitter *em) {
-  if (em->reg && em->reg->max >= 0) return em->reg->max;
+  if (em->reg && em->reg->max_set) return em->reg->max;
   return scr_emitter_default_max;
 }
 
@@ -1117,6 +1163,8 @@ static ScrDyn *ee_func_box(const ScrEeEntry *e) {
                                      scr_dyn_fn_name(p), scr_dyn_fn_src(p));
   return box;
 }
+
+static ScrDyn *ee_entry_view_box(ScrEeEntry *e, ScrDyn *recv, ScrStr *name);
 
 static ScrDyn *ee_call(ScrDyn *recv, ScrEmitter *em, const char *name, size_t n, ScrDyn *const *args, size_t argc,
                        const char *what) {
@@ -1201,7 +1249,8 @@ static ScrDyn *ee_call(ScrDyn *recv, ScrEmitter *em, const char *name, size_t n,
       if (b) {
         for (size_t i = 0; i < b->n; i++) {
           if (!b->ls[i]->has_fnproto) scr_trap("scriptc: listeners() reached a typed listener the module did not box\n");
-          scr_dyn_arr_push(out, ee_func_box(b->ls[i]));
+          /* listeners() unwraps a once listener; rawListeners() answers its onceWrapper */
+          scr_dyn_arr_push(out, op == EEOP_RAW ? ee_entry_view_box(b->ls[i], recv, b->name) : ee_func_box(b->ls[i]));
         }
       }
       scr_str_release(nm);
@@ -1269,8 +1318,9 @@ static ScrDyn *ee_value(const char *name, size_t n) {
 }
 
 static bool ee_is_state(const char *name, size_t n);
-static ScrDyn *ee_state_read(ScrEmitter *em, const char *name, size_t n);
-static const ScrDynEeOps scr_ee_dyn_ops = {ee_knows, ee_value, ee_call, ee_is_state, ee_state_read};
+static ScrDyn *ee_state_read(ScrDyn *recv, ScrEmitter *em, const char *name, size_t n);
+static bool ee_state_write(ScrEmitter *em, const char *name, size_t n, const ScrDyn *value);
+static const ScrDynEeOps scr_ee_dyn_ops = {ee_knows, ee_value, ee_call, ee_is_state, ee_state_read, ee_state_write};
 
 /* Installed by the emitted main of a program with both an emitter and a boxable class. */
 void scr_dyn_ee_install(void) { scr_dyn_ee_ops = &scr_ee_dyn_ops; }
@@ -1289,18 +1339,70 @@ void scr_dyn_ee_install(void) { scr_dyn_ee_ops = &scr_ee_dyn_ops; }
  * held reference are Node's. The view and its arrays are marked as copies (static_copy): a write through
  * them would land on the copy, never on the table Node's write changes, so the mutators refuse loudly
  * instead of dropping it. */
-static ScrDyn *ee_once_wrap_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
-  (void)clo;
-  (void)args;
-  (void)argc;
-  scr_throw_error(SCR_ERR_ERROR, scr_str_new("calling an EventEmitter once wrapper read from _events is not supported yet", 76));
-  return NULL;
+static void scr_ee_mark_fired(ScrEeEntry *e) {
+  e->fired = true;
+  if (e->wfired) scr_box_set_bool(e->wfired, true);
 }
 
-static ScrDyn *ee_entry_view_box(ScrEeEntry *e) {
+static void scr_ee_emit_done(ScrEmitter *em, ScrStr *name, uint32_t epoch) {
+  ScrEeBucket *b = em->reg ? scr_ee_bucket_find(em->reg, name->data, name->len) : NULL;
+  if (b != NULL && b->epoch == epoch && b->emitting > 0) b->emitting--;
+}
+
+/* Node's onceWrapper: `if (!this.fired) { target.removeListener(type, wrapFn); this.fired = true;
+ * return listener.apply(target, args) }`. Captures: [0] the emitter's dyn box (the listener's `this`), [1] the
+ * listener's function box, [2] the event name, [3] the shared fired flag. */
+static ScrDyn *ee_once_wrap_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  ScrBox *fb = (ScrBox *)clo->caps[3];
+  if (scr_box_get_bool(fb)) return scr_dyn_retain(scr_dyn_undefined());
+  ScrDyn *recv = (ScrDyn *)scr_box_get_ref((ScrBox *)clo->caps[0]);
+  ScrDyn *fn = (ScrDyn *)scr_box_get_ref((ScrBox *)clo->caps[1]);
+  ScrDyn *nm = (ScrDyn *)scr_box_get_ref((ScrBox *)clo->caps[2]);
+  ScrEmitter *em = scr_dyn_objinst_emitter(recv);
+  ScrDyn *r = NULL;
+  if (em != NULL) {
+    ScrEeBucket *b = em->reg ? scr_ee_bucket_find(em->reg, nm->v.str->data, nm->v.str->len) : NULL;
+    if (b != NULL) {
+      for (size_t i = 0; i < b->n; i++) {
+        if (b->ls[i]->wrap == clo) scr_ee_mark_fired(b->ls[i]); /* an emit snapshot still holding it must not run it again */
+      }
+    }
+    ScrEmitter *rm = scr_emitter_off(em, nm->v.str, clo);
+    scr_emitter_release(rm);
+    scr_box_set_bool(fb, true);
+    if (!scr_exc_pending()) {
+      scr_dyn_this_push_dyn(recv);
+      r = scr_dyn_call(fn, (ScrDyn *const *)args, argc, "listener");
+      scr_dyn_this_pop();
+    }
+  }
+  scr_dyn_release(recv);
+  scr_dyn_release(fn);
+  scr_dyn_release(nm);
+  return r;
+}
+
+static ScrBox *ee_dyn_cap(ScrDyn *d /*moves*/) {
+  ScrBox *bx = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, scr_dyn_trace_v);
+  scr_box_set_ref(bx, d);
+  return bx;
+}
+
+/* The function a `_events` read (or rawListeners) shows for one entry: the listener itself, or for a ONCE
+ * listener its onceWrapper (created once per entry, so its identity is stable). `recv` is the emitter's dyn
+ * box. */
+static ScrDyn *ee_entry_view_box(ScrEeEntry *e, ScrDyn *recv, ScrStr *name) {
   if (!e->has_fnproto) scr_trap("scriptc: _events reached a typed listener the module did not box\n");
   if (!e->once) return ee_func_box(e);
-  if (e->wrap == NULL) e->wrap = scr_closure_new((void *)ee_once_wrap_thunk, 0);
+  if (e->wrap == NULL) {
+    e->wfired = scr_box_new(SCR_BOX_BOOL);
+    scr_box_set_bool(e->wfired, false);
+    e->wrap = scr_closure_new((void *)ee_once_wrap_thunk, 4);
+    e->wrap->caps[0] = ee_dyn_cap(scr_dyn_retain(recv));
+    e->wrap->caps[1] = ee_dyn_cap(ee_func_box(e));
+    e->wrap->caps[2] = ee_dyn_cap(scr_dyn_new_str(name));
+    e->wrap->caps[3] = scr_box_retain(e->wfired);
+  }
   ScrDyn *f = scr_dyn_new_func(scr_closure_retain(e->wrap), ee_once_wrap_thunk, 0, "()", "bound onceWrapper");
   ScrDyn *orig = ee_func_box(e);
   ScrStr *k = scr_str_new("listener", 8);
@@ -1310,18 +1412,64 @@ static ScrDyn *ee_entry_view_box(ScrEeEntry *e) {
   return f;
 }
 
-ScrDyn *scr_emitter_events_view(ScrEmitter *em) {
+/* The listener array of one bucket as the view shows it: the listeners, Node's `warned` property once the leak
+ * warning fired for this array, and the enumerable events.emitting symbol (the live in-flight emit count).
+ * `into` (nullable) is the previous array of the SAME epoch, refilled in place so a held reference stays the
+ * live array; otherwise a fresh array. +1. */
+static ScrDyn *ee_bucket_array(ScrEeBucket *b, ScrDyn *recv, ScrDyn *into) {
+  ScrDyn *arr = into != NULL ? scr_dyn_retain(into) : scr_dyn_new_arr();
+  if (into != NULL) {
+    arr->static_copy = false;
+    while (arr->v.arr.len > 0) {
+      ScrDyn *last = arr->v.arr.items[arr->v.arr.len - 1];
+      arr->v.arr.len--;
+      scr_dyn_release(last);
+    }
+  }
+  for (size_t i = 0; i < b->n; i++) scr_dyn_arr_push(arr, ee_entry_view_box(b->ls[i], recv, b->name));
+  if (b->warned) {
+    ScrStr *wk = scr_str_new("warned", 6);
+    ScrDyn *t = scr_dyn_new_bool(true);
+    scr_dyn_key_set(arr, wk, t);
+    scr_dyn_release(t);
+    scr_str_release(wk);
+  }
+  scr_dyn_obj_set_slot(arr, "%eeList", 7, scr_dyn_new_num((double)b->emitting)); /* Node's enumerable events.emitting symbol */
+  arr->static_copy = true;
+  return arr;
+}
+
+ScrDyn *scr_emitter_events_view(ScrDyn *recv, ScrEmitter *em) {
   ScrEeReg *reg = scr_ee_reg_ensure(em);
   if (reg->view != NULL && reg->view_gen != reg->gen) {
     scr_dyn_release(reg->view); /* Node replaced the object: a held reference keeps the old table */
     reg->view = NULL;
+    for (ScrEeBucket *b = reg->head; b; b = b->next) b->view_epoch = 0;
   }
-  if (reg->view != NULL && reg->view_ver == reg->ver) return scr_dyn_retain(reg->view);
+  /* The emit counter lives in the array itself, so a read while an emit is in flight must refresh it. */
+  bool any_emitting = false;
+  for (ScrEeBucket *b = reg->head; b && !any_emitting; b = b->next) any_emitting = b->n >= 2 && b->emitting > 0;
+  if (reg->view != NULL && reg->view_ver == reg->ver && !any_emitting) {
+    bool stale = false; /* an array that was emitting at the last build and no longer is */
+    for (ScrEeBucket *b = reg->head; b && !stale; b = b->next) {
+      if (b->n < 2) continue;
+      const ScrDyn *a = scr_dyn_obj_get(reg->view, b->name->data, b->name->len);
+      const ScrDyn *c = a != NULL && a->kind == SCR_DYN_ARR ? scr_dyn_obj_slot_get(a, "%eeList", 7) : NULL;
+      stale = c == NULL || c->v.num != (double)b->emitting;
+    }
+    if (!stale) return scr_dyn_retain(reg->view);
+  }
   ScrDyn *v = reg->view;
+  ScrDyn *prev = NULL; /* the previous object's entries, so unchanged arrays keep their identity */
   if (v == NULL) {
     v = scr_dyn_new_obj_null_proto();
   } else {
     v->static_copy = false;
+    prev = scr_dyn_new_obj_null_proto();
+    for (size_t i = 0; i < v->v.obj.len; i++) {
+      ScrDyn *val = v->v.obj.entries[i].value;
+      if (val != NULL && val->kind == SCR_DYN_ARR) scr_dyn_obj_set(prev, v->v.obj.entries[i].key, v->v.obj.entries[i].key_len, scr_dyn_retain(val));
+    }
     for (size_t i = v->v.obj.len; i-- > 0;) {
       ScrStr *k = scr_str_new(v->v.obj.entries[i].key, v->v.obj.entries[i].key_len);
       scr_dyn_key_delete(v, k);
@@ -1332,15 +1480,16 @@ ScrDyn *scr_emitter_events_view(ScrEmitter *em) {
     if (b->n == 0) continue;
     ScrDyn *val;
     if (b->n == 1) {
-      val = ee_entry_view_box(b->ls[0]);
+      val = ee_entry_view_box(b->ls[0], recv, b->name);
+      b->view_epoch = 0;
     } else {
-      val = scr_dyn_new_arr();
-      for (size_t i = 0; i < b->n; i++) scr_dyn_arr_push(val, ee_entry_view_box(b->ls[i]));
-      val->static_copy = true;
-      scr_dyn_obj_set_slot(val, "%eeList", 7, scr_dyn_new_num(0)); /* Node's enumerable events.emitting symbol */
+      ScrDyn *old = b->view_epoch == b->epoch && prev != NULL ? scr_dyn_obj_get(prev, b->name->data, b->name->len) : NULL;
+      val = ee_bucket_array(b, recv, old);
+      b->view_epoch = b->epoch;
     }
     scr_dyn_obj_set(v, b->name->data, b->name->len, val);
   }
+  if (prev != NULL) scr_dyn_release(prev);
   v->static_copy = true;
   reg->view = v;
   reg->view_ver = reg->ver;
@@ -1353,21 +1502,44 @@ static bool ee_is_state(const char *name, size_t n) {
          (n == 13 && memcmp(name, "_maxListeners", 13) == 0);
 }
 
-/* The read of one of the three cells (+1), or NULL when `name` is not one. */
-static ScrDyn *ee_state_read(ScrEmitter *em, const char *name, size_t n) {
-  if (n == 7 && memcmp(name, "_events", 7) == 0) return scr_emitter_events_view(em);
-  if (n == 12 && memcmp(name, "_eventsCount", 12) == 0) {
-    double c = 0;
-    if (em->reg != NULL) {
-      for (ScrEeBucket *b = em->reg->head; b; b = b->next) c += b->n > 0 ? 1 : 0;
-    }
-    return scr_dyn_new_num(c);
-  }
+/* A stream's registry is in shape mode (pre-created keys holding undefined): its cells are not these. */
+static bool ee_shape(ScrEmitter *em) { return em->reg != NULL && em->reg->shape; }
+
+/* The read of one of the three cells (+1), or NULL when `name` is not one (or the emitter is a stream: the
+ * caller keeps its fence). */
+static ScrDyn *ee_state_read(ScrDyn *recv, ScrEmitter *em, const char *name, size_t n) {
+  if (ee_shape(em)) return NULL;
+  if (n == 7 && memcmp(name, "_events", 7) == 0) return scr_emitter_events_view(recv, em);
+  if (n == 12 && memcmp(name, "_eventsCount", 12) == 0) return scr_dyn_new_num(em->reg != NULL ? em->reg->ecount : 0);
   if (n == 13 && memcmp(name, "_maxListeners", 13) == 0) {
-    if (em->reg != NULL && em->reg->max >= 0) return scr_dyn_new_num(em->reg->max);
+    if (em->reg != NULL && em->reg->max_set) return scr_dyn_new_num(em->reg->max);
     return scr_dyn_retain(scr_dyn_undefined());
   }
   return NULL;
+}
+
+/* `x._eventsCount = n` / `x._maxListeners = n|undefined` with a number (or undefined for the latter):
+ * the registry stores it as events.js's own field would. true = taken. Everything else is not representable
+ * (the caller refuses by name). */
+static bool ee_state_write(ScrEmitter *em, const char *name, size_t n, const ScrDyn *value) {
+  if (ee_shape(em)) return false;
+  if (n == 12 && memcmp(name, "_eventsCount", 12) == 0 && value->kind == SCR_DYN_NUM) {
+    scr_ee_reg_ensure(em)->ecount = value->v.num;
+    em->reg->ver++;
+    return true;
+  }
+  if (n == 13 && memcmp(name, "_maxListeners", 13) == 0) {
+    if (value->kind == SCR_DYN_NUM) {
+      scr_ee_reg_ensure(em)->max = value->v.num;
+      em->reg->max_set = true;
+      return true;
+    }
+    if (value->kind == SCR_DYN_UNDEF) {
+      scr_ee_reg_ensure(em)->max_set = false;
+      return true;
+    }
+  }
+  return false;
 }
 
 /* The ScrEmitter (+1) of a dyn-boxed emitter instance, for the compiler's emitterApi arm. */
