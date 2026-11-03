@@ -2964,7 +2964,7 @@ export class CEmitter {
   /** The COPY read (spread, pushSpread): a hole copies as undefined where the
    * element type has a value for it (iteration yields undefined, not a hole). */
   copyReadC(elem: IrType, arr: string, idx: string): string {
-    if (elem.kind === "f64") return `scr_arr_copy_f64(${arr}, ${idx})`;
+    if (elem.kind === "f64") return `scr_arr_get_f64(${arr}, ${idx})`; /* a HOLE reads as undefined */
     if (elem.kind === "bool") return `scr_arr_get_bool(${arr}, ${idx})`;
     if (elem.kind === "string") return `scr_arr_copy_ref_or(${arr}, ${idx}, (void *)scr_str_absent())`;
     const u = this.undefHoleReadC(elem);
@@ -2976,10 +2976,9 @@ export class CEmitter {
    * has a value for it (number marker, dyn / undefined-armed union); a string or other ref
    * element keeps the checked read (a hole there refuses loudly, never reads as a value). */
   forOfReadC(elem: IrType, arr: string, idx: string): string {
-    if (elem.kind === "f64") return `scr_arr_copy_f64(${arr}, ${idx})`;
     const u = this.undefHoleReadC(elem);
     if (u !== null) return `scr_arr_copy_ref_or(${arr}, ${idx}, (void *)${u})`;
-    return `scr_arr_get_${elem.kind === "bool" ? "bool" : "ref"}(${arr}, ${idx})`;
+    return `scr_arr_get_${elem.kind === "f64" ? "f64" : elem.kind === "bool" ? "bool" : "ref"}(${arr}, ${idx})`;
   }
 
   absentElemC(elem: IrType): string {

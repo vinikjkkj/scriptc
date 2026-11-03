@@ -595,7 +595,7 @@ double scr_math_min_arr(ScrArr *a) {
 /* ── reads ─────────────────────────────────────────────────────────────── */
 
 double scr_arr_get_f64(ScrArr *a, double i) {
-  return scr_slot_to_f64(a->data[scr_arr_check_index(a, i, false)]);
+  return scr_num_unhole(scr_slot_to_f64(a->data[scr_arr_check_index(a, i, false)]));
 }
 
 /* The NaN-on-miss twin of scr_arr_get_f64: the same fast window, and every
@@ -605,7 +605,7 @@ double scr_arr_get_f64(ScrArr *a, double i) {
 double scr_arr_get_f64_nan(ScrArr *a, double i) {
   if (i >= 0.0 && i < SCR_ARR_FAST_MAX) {
     int64_t n = (int64_t)i;
-    if ((double)n == i && (uint64_t)n < (uint64_t)a->len) return scr_slot_to_f64(a->data[n]);
+    if ((double)n == i && (uint64_t)n < (uint64_t)a->len) return scr_num_unhole(scr_slot_to_f64(a->data[n]));
   }
   return NAN;
 }
@@ -769,6 +769,11 @@ void scr_arr_tombstone(ScrArr *a, double i) {
   a->tomb = 1;
 }
 
+/* The LLVM-inlined hasIndex met a NULL ref slot: a tombstoned array refuses (the slot is null, not a hole). */
+void scr_arr_miss_check(const ScrArr *a, int64_t n) {
+  if (a->tomb) scr_arr_trap_tombstone(a, (size_t)n);
+}
+
 /* The out-of-line hole test for the LLVM-emitted walkers. */
 bool scr_arr_hole_at(const ScrArr *a, double i) {
   return (size_t)i < a->len && scr_arr_slot_is_hole(a, (size_t)i);
@@ -780,11 +785,6 @@ bool scr_arr_has_holes(const ScrArr *a) {
     if (scr_arr_slot_is_hole(a, i)) return true;
   }
   return false;
-}
-
-double scr_arr_copy_f64(ScrArr *a, double i) {
-  double v = scr_slot_to_f64(a->data[scr_arr_check_index(a, i, false)]);
-  return scr_num_is_hole(v) ? scr_num_undef() : v;
 }
 
 void *scr_arr_copy_ref_or(ScrArr *a, double i, void *undef) {
