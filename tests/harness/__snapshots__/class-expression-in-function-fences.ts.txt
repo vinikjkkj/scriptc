@@ -1,0 +1,64 @@
+class-expression-in-function-fences.ts:10:14 - error SC1090: class expressions inside functions that capture 'n', a binding written after its initializer (the per-evaluation class copies each captured binding) is not supported yet
+
+   9 |     get(): number {
+  10 |       return n;
+     |              ^
+  11 |     }
+
+class-expression-in-function-fences.ts:17:13 - error SC1090: method calls like 'new C1().get' is not supported yet
+
+  16 | const C1 = counter();
+  17 | console.log(new C1().get());
+     |             ^~~~~~~~~~~~~~
+  18 | 
+
+class-expression-in-function-fences.ts:23:14 - error SC1090: class expressions inside functions that capture 'later' before its declaration (the evaluation copies the binding when the class is created) is not supported yet
+
+  22 |     get(): number {
+  23 |       return later;
+     |              ^~~~~
+  24 |     }
+
+class-expression-in-function-fences.ts:32:10 - error SC2001: values of type 'typeof (Anonymous class)' cannot be compiled yet (supported: number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
+
+  31 | // A static accessor on the evaluated class.
+  32 | function withAccessor(k: number) {
+     |          ^~~~~~~~~~~~
+  33 |   return class {
+
+class-expression-in-function-fences.ts:39:1 - error SC2004: uses of 'withAccessor' inherit the blocker on its declaration
+
+  38 | }
+  39 | withAccessor(1);
+     | ^~~~~~~~~~~~
+  40 | 
+
+  hint: the declaration of 'withAccessor' did not compile — fix the diagnostic reported there and these sites clear with it
+
+class-expression-in-function-fences.ts:48:20 - error SC1090: converting a class value minted by a class expression inside a function to a string (Node prints the class's source text, which the per-evaluation class does not carry) is not supported yet
+
+  47 | const M = make(3);
+  48 | console.log(String(M));
+     |                    ^
+  49 | 
+
+class-expression-in-function-fences.ts:51:17 - error SC1090: extending classes not declared in the program ('M') is not supported yet
+
+  50 | // Extending a class value minted by a function.
+  51 | class D extends M {
+     |                 ^
+  52 |   m = 1;
+
+class-expression-in-function-fences.ts:54:13 - error SC1090: constructing through a class value whose class has no lowering (the class declaration itself was rejected — see its own diagnostic) is not supported yet
+
+  53 | }
+  54 | console.log(new D().m);
+     |             ^~~~~~~
+  55 | 
+
+class-expression-in-function-fences.ts:57:13 - error SC1090: the member 'prototype' of a class value minted by a class expression inside a function (only '.name' and the declared statics are carried by the per-evaluation class) is not supported yet
+
+  56 | // A class value read through members the per-evaluation class does not carry.
+  57 | console.log(M.prototype);
+     |             ^~~~~~~~~~~
+  58 | 

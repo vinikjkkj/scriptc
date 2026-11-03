@@ -58,12 +58,14 @@ class-values.ts:48:13 - error SC1090: reading the static member 'tag' through a 
      |             ^~~~~~~~~~~~~
   49 | 
 
-class-values.ts:52:10 - error SC1090: class expressions inside functions (each evaluation creates a DISTINCT class in JS — fresh identity, fresh statics; declare the class at top level) are not supported yet
+class-values.ts:52:10 - error SC1101: converting typed values to 'unknown' is not supported yet
 
   51 | function make(): unknown {
   52 |   return class {};
      |          ^~~~~~~~
   53 | }
+
+  hint: numbers, strings, booleans, JSON-safe records/arrays/unions (a deep copy — the 'unknown' value does not alias the original, so a write through it is refused rather than lost), Uint8Array/Buffer (shared by reference — writes through the 'unknown' value DO reach the original), and functions over those (boxed, identity preserved) convert into 'unknown' slots; this value's type has no dynamic representation yet
 
 class-values.ts:59:18 - error SC1090: class expressions with static initializers or static blocks outside a whole-initializer position (their declaration-time code must run exactly where the expression evaluates — bind the class in its own top-level `const C = class …` statement) is not supported yet
 
