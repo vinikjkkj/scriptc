@@ -17789,6 +17789,37 @@ export function checkedJsNumber(L: Lowerer, node: ts.Node, value: IrExpr): IrExp
   if (value.type.kind === "dyn" && isJsSourceFile(node.getSourceFile())) {
     return { kind: "dynCheck", value, type: F64, loc: value.loc };
   }
+  // A `string | number` key in JavaScript (a destructured tuple position the checker
+  // cannot tell apart: `for (const [start, enc] of [[2048, 'x']]) a[start]`): dispatch on
+  // the runtime tag. The number arm is the index itself; the string arm takes the
+  // canonical-index rule below (every other string is NaN, the index that reads absent).
+  if (value.type.kind === "union" && isJsSourceFile(node.getSourceFile())) {
+    const arms = L.unions.get(value.type.unionId)?.arms ?? [];
+    const numTag = arms.findIndex((a) => a.kind === "f64");
+    const strTag = arms.findIndex((a) => a.kind === "string");
+    if (arms.length === 2 && numTag >= 0 && strTag >= 0) {
+      const loc = value.loc;
+      const u = L.declareHiddenLocal("%idxu", value.type);
+      const uRef = (): IrExpr => ({ kind: "varRef", localId: u.id, type: value.type, loc });
+      const strIdx = checkedJsNumber(L, node, { kind: "unionNarrow", unionId: value.type.unionId, tag: strTag, value: uRef(), type: STRING, loc });
+      if (strIdx !== null) {
+        return {
+          kind: "seqExpr",
+          stmts: [{ kind: "varDecl", localId: u.id, init: value, loc }],
+          result: {
+            kind: "ternary",
+            cond: { kind: "unionIsTag", unionId: value.type.unionId, tag: numTag, negated: false, value: uRef(), type: BOOL, loc },
+            then: { kind: "unionNarrow", unionId: value.type.unionId, tag: numTag, value: uRef(), type: F64, loc },
+            else_: strIdx,
+            type: F64,
+            loc,
+          },
+          type: F64,
+          loc,
+        };
+      }
+    }
+  }
   // A STRING key into an array or typed array in JavaScript (`for (i in list)
   // list[i]`, the cursor of a for-in is the string "0", "1", ...): an own
   // element exactly when the string is a CANONICAL array index, otherwise the
