@@ -81,6 +81,12 @@ typedef struct ScrEeEntry {
    * listeners() call it with the value exactly as Node passes it; the typed `cb` still
    * serves the static emits. Identity (off, listenerCount) matches either closure. */
   ScrClosure *twin;
+  /* With a twin, the box payload USERS see: the ORIGINAL listener (the identity Node shows through
+   * listeners()/rawListeners()/the removeListener meta argument) behind its typed checked thunk.
+   * fnproto (the twin) is only the dispatch target of a dynamic emit. Closure unowned (the entry's
+   * identity closure holds it); has_idproto false falls back to fnproto. */
+  ScrDyn idproto;
+  bool has_idproto;
   ScrEeInvoke inv;
   bool once;
   bool fired; /* a once entry that already ran (snapshot skip rule) */
@@ -366,14 +372,14 @@ static ScrEmitter *scr_ee_add3(ScrEmitter *em, ScrStr *name, ScrClosure *cb /*mo
                                ScrClosure *orig /*moves; may be NULL*/,
                                const ScrDyn *box /*borrowed; NULL for direct*/,
                                const ScrDyn *proto /*borrowed; stored only; NULL for none*/,
-                               ScrClosure *twin /*moves; may be NULL*/,
+                               ScrClosure *twin /*moves; may be NULL*/, const ScrDyn *ident /*borrowed; may be NULL*/,
                                ScrEeInvoke inv, bool once, bool prepend);
 static ScrEmitter *scr_ee_add2(ScrEmitter *em, ScrStr *name, ScrClosure *cb /*moves*/,
                                ScrClosure *orig /*moves; may be NULL*/,
                                const ScrDyn *box /*borrowed; NULL for direct*/,
                                const ScrDyn *proto /*borrowed; stored only; NULL for none*/,
                                ScrEeInvoke inv, bool once, bool prepend) {
-  return scr_ee_add3(em, name, cb, orig, box, proto, NULL, inv, once, prepend);
+  return scr_ee_add3(em, name, cb, orig, box, proto, NULL, NULL, inv, once, prepend);
 }
 static ScrEmitter *scr_ee_add(ScrEmitter *em, ScrStr *name, ScrClosure *cb /*moves*/,
                               ScrClosure *orig /*moves; may be NULL*/,
@@ -385,7 +391,7 @@ static ScrEmitter *scr_ee_add3(ScrEmitter *em, ScrStr *name, ScrClosure *cb /*mo
                                ScrClosure *orig /*moves; may be NULL*/,
                                const ScrDyn *box /*borrowed; NULL for direct*/,
                                const ScrDyn *proto /*borrowed; stored only; NULL for none*/,
-                               ScrClosure *twin /*moves; may be NULL*/,
+                               ScrClosure *twin /*moves; may be NULL*/, const ScrDyn *ident /*borrowed; may be NULL*/,
                                ScrEeInvoke inv, bool once, bool prepend) {
   scr_ee_reg_ensure(em);
   scr_ee_emit_meta(em, "newListener", name, box);
@@ -395,6 +401,10 @@ static ScrEmitter *scr_ee_add3(ScrEmitter *em, ScrStr *name, ScrClosure *cb /*mo
   e->cb = cb;
   e->orig = orig;
   e->twin = twin;
+  if (ident != NULL) {
+    e->idproto = *ident;
+    e->has_idproto = true;
+  }
   if (box != NULL) {
     e->fnproto = *box;
     e->has_fnproto = true;
@@ -444,9 +454,9 @@ ScrEmitter *scr_emitter_on_boxed(ScrEmitter *em, ScrStr *name, ScrClosure *cb /*
  * the TWIN (a function whose parameters are dyn), so a dynamic-list emit hands the listener the
  * values exactly as Node does. cb (typed) stays what a static emit invokes. */
 ScrEmitter *scr_emitter_on_twin(ScrEmitter *em, ScrStr *name, ScrClosure *cb /*moves*/,
-                                ScrClosure *twin /*moves*/, const ScrDyn *proto,
+                                ScrClosure *twin /*moves*/, const ScrDyn *proto, const ScrDyn *ident,
                                 ScrEeInvoke inv, bool once, bool prepend) {
-  return scr_ee_add3(em, name, cb, NULL, NULL, proto, twin, inv, once, prepend);
+  return scr_ee_add3(em, name, cb, NULL, NULL, proto, twin, ident, inv, once, prepend);
 }
 
 /* The dyn-adapted registration (JS-lane checked-dynamic listeners): the
@@ -482,8 +492,8 @@ ScrEmitter *scr_emitter_on_via_boxed(ScrEmitter *em, ScrStr *name, ScrClosure *o
 /* scr_emitter_on_via with the erased twin (see scr_emitter_on_twin). */
 ScrEmitter *scr_emitter_on_via_twin(ScrEmitter *em, ScrStr *name, ScrClosure *orig /*moves*/,
                                     ScrClosure *adapter /*moves*/, ScrClosure *twin /*moves*/,
-                                    const ScrDyn *proto, ScrEeInvoke inv, bool once, bool prepend) {
-  return scr_ee_add3(em, name, adapter, orig, NULL, proto, twin, inv, once, prepend);
+                                    const ScrDyn *proto, const ScrDyn *ident, ScrEeInvoke inv, bool once, bool prepend) {
+  return scr_ee_add3(em, name, adapter, orig, NULL, proto, twin, ident, inv, once, prepend);
 }
 
 /* ── fixed-arity invoke shims (scr_runtime.h's contract) ──────────────
@@ -531,7 +541,7 @@ static void scr_ee_remove_at(ScrEmitter *em, ScrEeBucket *b, size_t i) {
   if (b->n == 0 && !em->reg->shape) scr_ee_bucket_drop(em->reg, b);
   /* The removed entry outlives its list slot until the meta event has
    * fired: 'removeListener' hands the listener box it still holds. */
-  scr_ee_emit_meta(em, "removeListener", name, e->has_fnproto ? &e->fnproto : NULL);
+  scr_ee_emit_meta(em, "removeListener", name, e->has_idproto ? &e->idproto : e->has_fnproto ? &e->fnproto : NULL);
   scr_ee_entry_unref(e);
   scr_str_release(name);
 }
@@ -1035,9 +1045,10 @@ static int ee_op_of(const char *name, size_t n) {
 static bool ee_knows(const char *name, size_t n) { return ee_op_of(name, n) >= 0; }
 
 static ScrDyn *ee_func_box(const ScrEeEntry *e) {
-  ScrDyn *box = scr_dyn_new_func_src(scr_closure_retain(e->fnproto.v.fn.clo), e->fnproto.v.fn.thunk,
-                                     e->fnproto.v.fn.arity, scr_dyn_fn_sig(&e->fnproto),
-                                     scr_dyn_fn_name(&e->fnproto), scr_dyn_fn_src(&e->fnproto));
+  const ScrDyn *p = e->has_idproto ? &e->idproto : &e->fnproto;
+  ScrDyn *box = scr_dyn_new_func_src(scr_closure_retain(p->v.fn.clo), p->v.fn.thunk,
+                                     p->v.fn.arity, scr_dyn_fn_sig(p),
+                                     scr_dyn_fn_name(p), scr_dyn_fn_src(p));
   return box;
 }
 
