@@ -26,20 +26,6 @@ emitter-state-cell-dyn-writes-refused.ts:19:1 - error SC1090: delete of _maxList
      | ^~~~~~~~~~~~~~~~~~~~~~
   20 | delete some[key];
 
-emitter-state-cell-dyn-writes-refused.ts:20:1 - error SC1090: delete through a dynamic key in a program that lets an EventEmitter instance reach a dynamic value (an emitter's _events, _eventsCount and _maxListeners belong to its listener registry; the write could change them, which this lowering cannot reproduce) is not supported yet
-
-  19 | delete d._maxListeners;
-  20 | delete some[key];
-     | ^~~~~~~~~~~~~~~~
-  21 | some[key] = 1;
-
-emitter-state-cell-dyn-writes-refused.ts:21:1 - error SC1090: write through a computed key in a program that lets an EventEmitter instance reach a dynamic value (an emitter's _events, _eventsCount and _maxListeners belong to its listener registry; the write could change them, which this lowering cannot reproduce) is not supported yet
-
-  20 | delete some[key];
-  21 | some[key] = 1;
-     | ^~~~~~~~~~~~~
-  22 | d[key] = 2;
-
 emitter-state-cell-dyn-writes-refused.ts:22:1 - error SC1090: write through a computed key in a program that lets an EventEmitter instance reach a dynamic value (an emitter's _events, _eventsCount and _maxListeners belong to its listener registry; the write could change them, which this lowering cannot reproduce) is not supported yet
 
   21 | some[key] = 1;
