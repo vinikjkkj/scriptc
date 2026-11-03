@@ -24308,14 +24308,6 @@ function descendantDeclaresPlainMethod(info: ClassInfo, name: string): boolean {
   return false;
 }
 
-/** True when a strict subclass of `info` declares `name` as a GENERIC (untyped-parameter) method (thunkrecv). */
-function descendantDeclaresGenericMethod(info: ClassInfo, name: string): boolean {
-  for (const s of info.subclasses) {
-    if (s.genericMethods?.get(name) !== undefined || descendantDeclaresGenericMethod(s, name)) return true;
-  }
-  return false;
-}
-
 /** True when a class that reads `method` as undefined (the base itself, or a strict subclass with no
  * declarer of `method` between it and the base) is constructed somewhere in the program (thunkrecv).
  * Names are matched textually (conservative). Iterative walk. */
