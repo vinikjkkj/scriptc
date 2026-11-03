@@ -7051,7 +7051,10 @@ typedef struct ScrDynEeOps {
   /* The emitter's own state cells (`_events`, `_eventsCount`, `_maxListeners`): is `name` one, and its value
    * (+1, NULL when `name` is not one) read from the registry. */
   bool (*is_state)(const char *name, size_t n);
-  ScrDyn *(*state)(ScrEmitter *em, const char *name, size_t n);
+  ScrDyn *(*state)(ScrDyn *recv, ScrEmitter *em, const char *name, size_t n);
+  /* A write of one of them the registry can hold (_eventsCount / _maxListeners as a number, _maxListeners
+   * as undefined): true = stored. false = not representable (the caller refuses by name). */
+  bool (*state_set)(ScrEmitter *em, const char *name, size_t n, const ScrDyn *value);
 } ScrDynEeOps;
 extern const ScrDynEeOps *scr_dyn_ee_ops;
 /* The instance's member `k`, or NULL when its class has no table or the
