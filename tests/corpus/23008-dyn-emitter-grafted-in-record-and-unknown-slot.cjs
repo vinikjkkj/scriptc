@@ -1,4 +1,7 @@
 const { EventEmitter } = require("events");
+// Printing goes through String() so no dynamic value is inspected: a grafted instance in a dynamic slot is refused
+// in a program that inspects dynamic values (tests/diagnostics/grafted-emitter-dyn-reflection-refused.cjs).
+const out = (...a) => { process.stdout.write(a.map((v) => String(v)).join(" ") + "\n"); };
 
 function applyMixin(derivedConstructor, mixinConstructor) {
   Object.getOwnPropertyNames(mixinConstructor.prototype).forEach((name) => {
@@ -28,25 +31,25 @@ let holder = { inner: c2, first: c1 };
 // handlers written over untyped receivers, as the ioredis event handlers are
 const handlers = {
   hook(self, event) {
-    self.on(event, (a, b) => { self.attempts = self.attempts + 1; console.log(self.label, event, a, b); });
+    self.on(event, (a, b) => { self.attempts = self.attempts + 1; out(self.label, event, a, b); });
     return () => self.label + ":" + self.kind() + ":" + self.listenerCount(event);
   },
   fire(self, event, ...args) { return self.emit(event, ...args); },
 };
 const h1 = handlers.hook(slots.first.target, "ready");
 const h2 = handlers.hook(bag["c2"], "ready");
-console.log(h1(), h2());
-console.log(handlers.fire(loose, "ready", 1, "x"), handlers.fire(holder.inner, "ready", 2), handlers.fire(slots.first.target, "none"));
-console.log(c1.attempts, c2.attempts);
+out(h1(), h2());
+out(handlers.fire(loose, "ready", 1, "x"), handlers.fire(holder.inner, "ready", 2), handlers.fire(slots.first.target, "none"));
+out(c1.attempts, c2.attempts);
 // typed use of the same instances keeps working
-c1.on("typed", (n) => console.log("typed", n));
-console.log(handlers.fire(loose, "typed", 5), c1.emit("typed", 6), c1.listenerCount("typed"));
+c1.on("typed", (n) => out("typed", n));
+out(handlers.fire(loose, "typed", 5), c1.emit("typed", 6), c1.listenerCount("typed"));
 // identity survives the round trip through the untyped slots
-console.log(loose === c1, holder.inner === c2, slots.first.target === c1, bag["c2"] === c2, holder.first === c1);
+out(loose === c1, holder.inner === c2, slots.first.target === c1, bag["c2"] === c2, holder.first === c1);
 // once and removal through the untyped view
-loose.once("go", () => console.log("go once"));
-console.log(handlers.fire(loose, "go"), handlers.fire(loose, "go"));
+loose.once("go", () => out("go once"));
+out(handlers.fire(loose, "go"), handlers.fire(loose, "go"));
 holder.inner.removeAllListeners("ready");
-console.log(c2.listenerCount("ready"), handlers.fire(holder.inner, "ready", 3));
+out(c2.listenerCount("ready"), handlers.fire(holder.inner, "ready", 3));
 // the instance's own members still answer through the slot
-console.log(holder.first.kind(), holder.inner.kind(), holder.first.label + holder.first.attempts, holder.inner.label + holder.inner.attempts);
+out(holder.first.kind(), holder.inner.kind(), holder.first.label + holder.first.attempts, holder.inner.label + holder.inner.attempts);
