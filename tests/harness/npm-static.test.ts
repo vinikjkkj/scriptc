@@ -238,6 +238,14 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     ["bindmethod", "bindmethod-cli.ts"],
     // protogeneric: Class.prototype.m.call/.apply over methods with untyped parameters (non-virtual, on a dynamic or typed receiver), and the prototype read of such a method is a function
     ["protogeneric", "protogeneric-cli.ts"],
+    // rtkeyed*: run-time KEYED members of a class instance and of its prototype (ioredis Commander): `this[name] = fn` writes an own
+    // property that shadows a method of the same name (dispatch, super, detached values, boxed reads), a prototype table written
+    // under computed keys, the Pipeline-style copy of one instance's members onto another, and symbol keys spelled through an
+    // exported symbol and a one-assignment alias (`this[_a]`).
+    ["rtkeyedpipe", "rtkeyedpipe-cli.ts"],
+    ["rtkeyedshadow", "rtkeyedshadow-cli.ts"],
+    ["rtkeyedsym", "rtkeyedsym-cli.ts"],
+    ["rtkeyedown", "rtkeyedown-cli.ts"],
   ] as const)("%s compiles statically and byte-matches Node", async ([pkg, file]) => {
     const entry = join(pilotRoot, file);
     const binary = await buildStatic(entry, [pkg]);
