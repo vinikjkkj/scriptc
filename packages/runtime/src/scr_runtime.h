@@ -7571,6 +7571,10 @@ void scr_jb_init(ScrJsonBuf *b);
  * constructor name in the message ('Array' for arrays AND tuple shapes —
  * their JS values are arrays — 'Object' for records). */
 bool scr_jb_enter(ScrJsonBuf *b, const void *v, bool is_array);
+/* scr_jb_enter for a boxed class instance: `cname` is its constructor name, spelled in the circular-structure message. */
+bool scr_jb_enter_named(ScrJsonBuf *b, const void *v, const char *cname);
+/* The constructor.name of a boxed class instance (EventEmitter for the class that applied the emitter graft). */
+const char *scr_dyn_objinst_ctor_name(const ScrDyn *d);
 void scr_jb_leave(ScrJsonBuf *b);
 /* Record the edge currently being serialized on the stack top: a static
  * property name (emitted C literal), an overflow key (borrowed for the
