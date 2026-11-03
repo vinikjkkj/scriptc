@@ -95,23 +95,43 @@ export function renderDiagnostic(
       return next === undefined ? text.slice(from) : text.slice(from, next - 1);
     };
     const gutterWidth = String(Math.min(lineNum + 1, lineStarts.length)).length;
+    /* A MINIFIED or bundled file puts hundreds of thousands of characters on one line (a bundled protobuf is a single
+     * 1.8 MB line). Printing that line, three times, with a caret row padded to the column, made one diagnostic cost
+     * megabytes and a few thousand of them gigabytes: the build died rendering its own errors. A line longer than
+     * LONG_LINE is shown as a window around the span, with an ellipsis where it was cut. */
+    const LONG_LINE = 400;
+    const WINDOW = 120;
     const emitLine = (n: number) => {
       const t = lineAt(n);
       if (t === undefined) return;
-      frame.push(c(DIM, `  ${String(n).padStart(gutterWidth)} | `) + t);
+      const shown = t.length > LONG_LINE ? t.slice(0, WINDOW * 2) + "…" : t;
+      frame.push(c(DIM, `  ${String(n).padStart(gutterWidth)} | `) + shown);
     };
     emitLine(lineNum - 1);
-    emitLine(lineNum);
     const lineText = lineAt(lineNum) ?? "";
     const spanOnLine = Math.max(
       1,
       Math.min(diag.loc.end - diag.loc.start, lineText.length - (colNum - 1)),
     );
-    frame.push(
-      c(DIM, `  ${" ".repeat(gutterWidth)} | `) +
-        " ".repeat(colNum - 1) +
-        c(mark, "^" + "~".repeat(spanOnLine - 1)),
-    );
+    if (lineText.length > LONG_LINE) {
+      const cutFrom = Math.max(0, colNum - 1 - WINDOW);
+      const shownSpan = Math.min(spanOnLine, WINDOW);
+      const cutTo = Math.min(lineText.length, colNum - 1 + shownSpan + WINDOW);
+      const lead = cutFrom > 0 ? "…" : "";
+      frame.push(c(DIM, `  ${String(lineNum).padStart(gutterWidth)} | `) + lead + lineText.slice(cutFrom, cutTo) + (cutTo < lineText.length ? "…" : ""));
+      frame.push(
+        c(DIM, `  ${" ".repeat(gutterWidth)} | `) +
+          " ".repeat(lead.length + colNum - 1 - cutFrom) +
+          c(mark, "^" + "~".repeat(shownSpan - 1)),
+      );
+    } else {
+      emitLine(lineNum);
+      frame.push(
+        c(DIM, `  ${" ".repeat(gutterWidth)} | `) +
+          " ".repeat(colNum - 1) +
+          c(mark, "^" + "~".repeat(spanOnLine - 1)),
+      );
+    }
     emitLine(lineNum + 1);
   }
 
