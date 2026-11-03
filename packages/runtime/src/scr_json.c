@@ -10348,6 +10348,12 @@ bool scr_dyn_instance_of(const ScrDyn *v, ScrDyn *fn) {
     scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
     return false;
   }
+  /* A BUILTIN ERROR CLASS value (`Error`, `TypeError`, ...): the kind's interval in the error hierarchy, which a
+   * user subclass instance and a caught runtime error both carry. A primitive left operand is false (step 3). */
+  if (err_cls_is(fn)) {
+    if (!scr_dyn_is_object_kind(v)) return false;
+    return scr_dyn_err_instanceof(v, (double)err_cls_kind_of_clo(fn->v.fn.clo));
+  }
   /* A CLASS VALUE (declared, or minted per evaluation) answers from the class unit. */
   if (scr_dyn_class_ops != NULL) {
     bool handled = false;
