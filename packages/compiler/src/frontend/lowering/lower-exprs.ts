@@ -18783,6 +18783,14 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       // an operand value, so both operands must share one IR kind (which is
       // also what tsc's type says, modulo literal-union collapsing that
       // mapType already handles). Mixed kinds (`n && s`) stay rejected.
+      // A BUILTIN MODULE binding on the left of `&&` (`dc && typeof dc.tracingChannel === "function"`, the
+      // feature probe of a library that loads the module only when the host has it): the module object is
+      // always truthy and reading the binding has no effect, so `m && x` IS `x`. The module is not lowered as
+      // a VALUE (it has no representation); `||` and `??` would hand the module back as the result and keep
+      // the namespace-value refusal.
+      if (op === ts.SyntaxKind.AmpersandAmpersandToken && L.builtinNamespaceModuleOf(expr.left) !== null) {
+        return L.lowerExpr(expr.right);
+      }
       let left = L.lowerExpr(expr.left);
       // A left operand that already DECIDED at compile time: JavaScript
       // does not evaluate the right one, so neither does this — the dead
