@@ -1,0 +1,17 @@
+evalclass-in-dyn-with-async-method.js:5:21 - error SC1101: converting typed values to 'unknown' is not supported yet
+
+  4 | const mk = () => class G { async load() { return 1; } sync() { return 2; } };
+  5 | const h = {}; h.G = mk();
+    |                     ^~~~
+  6 | const G = anyv(h.G);
+
+  hint: numbers, strings, booleans, JSON-safe records/arrays/unions (a deep copy — the 'unknown' value does not alias the original, so a write through it is refused rather than lost), Uint8Array/Buffer (shared by reference — writes through the 'unknown' value DO reach the original), and functions over those (boxed, identity preserved) convert into 'unknown' slots; this value's type has no dynamic representation yet
+
+evalclass-in-dyn-with-async-method.js:6:16 - error SC1101: converting typed values to 'unknown' is not supported yet
+
+  5 | const h = {}; h.G = mk();
+  6 | const G = anyv(h.G);
+    |                ^~~
+  7 | console.log(Object.getOwnPropertyNames(G.prototype), typeof G.prototype.load);
+
+  hint: numbers, strings, booleans, JSON-safe records/arrays/unions (a deep copy — the 'unknown' value does not alias the original, so a write through it is refused rather than lost), Uint8Array/Buffer (shared by reference — writes through the 'unknown' value DO reach the original), and functions over those (boxed, identity preserved) convert into 'unknown' slots; this value's type has no dynamic representation yet
