@@ -118,6 +118,8 @@ export interface DynHost extends WalkerHost {
   readonly usesDynView: boolean;
   /** moduleUsesInstanceRecordLane: the record builder's instance lane is emitted. */
   readonly usesInstanceRecordLane: boolean;
+  /** moduleInstanceLaneNeedsKg: the instance lane reads through the emitted keyed read. */
+  readonly instanceLaneNeedsKg: boolean;
   unitInstanceRef(unionId: string, tag: number): string;
   /** The two-array key table one record shape's WIDE lane projects
    * through — `@sc_kgk_<shapeId>` (the NUL-terminated key bytes) and
@@ -1584,10 +1586,10 @@ export class LlDyn {
             host.declare(
               `declare ptr @scr_dyn_rec_wide_inst(ptr, ptr, ptr, i64, i1 zeroext, ptr)`,
             );
-            const kgFn = this.dynKeyGetHelper();
+            const kgFn = host.instanceLaneNeedsKg ? `@${this.dynKeyGetHelper()}` : "null";
             const pi = B.tmp();
             B.line(
-              `${pi} = call ptr @scr_dyn_rec_wide_inst(ptr %d, ptr ${tbl ? tbl.keys : "null"}, ptr ${tbl ? tbl.lens : "null"}, i64 ${shape.fields.length}, i1 zeroext ${inst!.allOwn ? "true" : "false"}, ptr @${kgFn})`,
+              `${pi} = call ptr @scr_dyn_rec_wide_inst(ptr %d, ptr ${tbl ? tbl.keys : "null"}, ptr ${tbl ? tbl.lens : "null"}, i64 ${shape.fields.length}, i1 zeroext ${inst!.allOwn ? "true" : "false"}, ptr ${kgFn})`,
             );
             B.line(`store ptr ${pi}, ptr ${pSlot}`);
           };
