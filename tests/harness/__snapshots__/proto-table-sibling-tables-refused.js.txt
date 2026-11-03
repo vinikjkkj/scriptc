@@ -1,0 +1,6 @@
+proto-table-sibling-tables-refused.js:6:3 - error SC1090: writing computed members of 'Base.prototype' at run time: its subclass 'Sub' also writes computed prototype members are not supported yet
+
+  5 | ["a"].forEach(function (n) {
+  6 |   Base.prototype[n] = function () {
+    |   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  7 |     return "base-" + n;
