@@ -3812,7 +3812,7 @@ const ScrDynClass *scr_dyn_runtime_emitter_class(void) {
  * applyMixin(Y, EventEmitter) (rt_root 7), whose `constructor` is EventEmitter's. */
 const char *scr_dyn_objinst_ctor_name(const ScrDyn *d) {
   const ScrDynClass *c = scr_dyn_objinst_class_of(d);
-  return c->rt_root == 7 ? "EventEmitter" : scr_dyn_objinst_cls(d);
+  return c->rt_root == 7 || c->rt_root == 8 ? "EventEmitter" : scr_dyn_objinst_cls(d);
 }
 
 ScrEmitter *scr_dyn_objinst_emitter(const ScrDyn *d) {
@@ -3841,6 +3841,12 @@ const ScrDynClassMember *scr_dyn_objinst_member(const ScrDyn *d, const char *k, 
      * belongs to the method row that follows it. */
     if (c->members[i].enumerable == 3) continue;
     if (c->members[i].len == klen && memcmp(c->members[i].name, k, klen) == 0) {
+      /* A METHOD row of a class carrying the run-time property table is on the PROTOTYPE: an own property of the same
+       * name (`this[k] = v` with k naming the method) shadows it, and the name then belongs to the table. */
+      if (c->members[i].call != NULL && c->members[i].get == NULL && klen > 0 && k[0] != '%' && scr_dyn_class_ops != NULL &&
+          scr_dyn_class_ops->objinst_own_shadows != NULL && scr_dyn_class_ops->objinst_own_shadows(d, k, klen)) {
+        return NULL;
+      }
       return &c->members[i];
     }
   }
@@ -3959,6 +3965,15 @@ void scr_ord_forget(uint8_t *rec, uint8_t k) {
 bool scr_dyn_objinst_has_members(const ScrDyn *d) {
   if (d == NULL || d->kind != SCR_DYN_OBJINST) return false;
   return scr_dyn_objinst_class_of(d)->nmembers > 0;
+}
+
+ScrDyn *scr_dyn_objinst_snapshot(const ScrDyn *d, bool *unsup) {
+  if (d == NULL || d->kind != SCR_DYN_OBJINST || !scr_dyn_objinst_class_of(d)->props || scr_dyn_class_ops == NULL ||
+      scr_dyn_class_ops->objinst_snapshot == NULL) {
+    *unsup = true;
+    return NULL;
+  }
+  return scr_dyn_class_ops->objinst_snapshot(d, unsup);
 }
 
 bool scr_dyn_objinst_has_props(const ScrDyn *d) {
@@ -5668,6 +5683,37 @@ static bool scr_dyn_json_write_raw(ScrJsonBuf *b, const ScrDyn *d) {
      * cycle down an unguarded writer is an infinite recursion -- which is
      * worse than the fence this replaces, not better. Guarded, a cycle is
      * V8's own "Converting circular structure to JSON". */
+    if (scr_dyn_objinst_has_props(d) && !scr_dyn_objinst_error_rooted(d)) {
+      bool unsup = false;
+      ScrDyn *sn = scr_dyn_objinst_snapshot(d, &unsup);
+      if (sn != NULL) {
+        if (!scr_jb_enter_named(b, d->v.inst.o, scr_dyn_objinst_ctor_name(d))) { scr_dyn_release(sn); return true; } /* cyclic; pending */
+        scr_jb_putc(b, '{');
+        bool pfirst = true;
+        size_t *ord = scr_dyn_obj_key_order(sn);
+        for (size_t oi = 0; oi < sn->v.obj.len; oi++) {
+          const ScrDynEntry *e = &sn->v.obj.entries[ord != NULL ? ord[oi] : oi];
+          ScrDyn *mv = scr_dyn_retain(e->value);
+          if (scr_dyn_json_absent(mv)) { scr_dyn_release(mv); continue; }
+          ScrStr *mk = scr_str_new(e->key, e->key_len);
+          if (!pfirst) scr_jb_putc(b, ',');
+          pfirst = false;
+          scr_jb_put_json_str(b, mk);
+          scr_jb_putc(b, ':');
+          scr_jb_edge_key(b, mk);
+          scr_dyn_json_write_raw(b, mv);
+          scr_str_release(mk);
+          scr_dyn_release(mv);
+          if (scr_exc_pending()) break;
+        }
+        free(ord);
+        scr_dyn_release(sn);
+        scr_jb_putc(b, '}');
+        scr_jb_leave(b);
+        return true;
+      }
+      if (!unsup) return true; /* a read threw; pending */
+    }
     if (!scr_dyn_objinst_enumerable(d)) {
       scr_dyn_objinst_fence(d, "JSON.stringify");
       return true; /* pending exception; caller checks */
@@ -8293,8 +8339,16 @@ bool scr_dyn_has_key(const ScrDyn *v, const ScrStr *key) {
       return true;
     }
     /* a key of the run-time property table (Object.defineProperty with a run-time name) is a property too */
-    return scr_dyn_class_ops != NULL && scr_dyn_class_ops->objinst_props_has != NULL &&
-           scr_dyn_class_ops->objinst_props_has(v, key) == 1;
+    if (scr_dyn_class_ops != NULL && scr_dyn_class_ops->objinst_props_has != NULL && scr_dyn_class_ops->objinst_props_has(v, key) == 1) return true;
+    /* ... and so is a member of the class's prototype table (`in` walks the chain) */
+    if (scr_dyn_class_ops != NULL && scr_dyn_class_ops->objinst_extra_get != NULL) {
+      ScrDyn *ex = scr_dyn_class_ops->objinst_extra_get(v, key->data, key->len);
+      if (ex != NULL) {
+        scr_dyn_release(ex);
+        return true;
+      }
+    }
+    return false;
   }
   return false;
 }
@@ -8840,6 +8894,37 @@ static void scr_jb_put_dyn_raw(ScrJsonBuf *b, const ScrDyn *d) {
      * here exactly as it does for a plain object's member. A class with
      * NO table keeps the fence, and a cycle through a field is V8's
      * circular TypeError rather than an infinite recursion. */
+    if (scr_dyn_objinst_has_props(d) && !scr_dyn_objinst_error_rooted(d)) {
+      bool unsup = false;
+      ScrDyn *sn = scr_dyn_objinst_snapshot(d, &unsup);
+      if (sn != NULL) {
+        if (!scr_jb_enter_named(b, d->v.inst.o, scr_dyn_objinst_ctor_name(d))) { scr_dyn_release(sn); scr_jb_puts(b, "null"); return; }
+        scr_jb_putc(b, '{');
+        bool pfirst = true;
+        size_t *ord = scr_dyn_obj_key_order(sn);
+        for (size_t oi = 0; oi < sn->v.obj.len; oi++) {
+          const ScrDynEntry *e = &sn->v.obj.entries[ord != NULL ? ord[oi] : oi];
+          ScrDyn *mv = scr_dyn_retain(e->value);
+          if (scr_dyn_json_absent(mv)) { scr_dyn_release(mv); continue; }
+          ScrStr *mk = scr_str_new(e->key, e->key_len);
+          if (!pfirst) scr_jb_putc(b, ',');
+          pfirst = false;
+          scr_jb_put_json_str(b, mk);
+          scr_jb_putc(b, ':');
+          scr_jb_edge_key(b, mk);
+          scr_jb_put_dyn_keyed(b, mv, mk->data, mk->len);
+          scr_str_release(mk);
+          scr_dyn_release(mv);
+          if (scr_exc_pending()) break;
+        }
+        free(ord);
+        scr_dyn_release(sn);
+        scr_jb_putc(b, '}');
+        scr_jb_leave(b);
+        return;
+      }
+      if (!unsup) { scr_jb_puts(b, "null"); return; }
+    }
     if (!scr_dyn_objinst_enumerable(d)) {
       scr_dyn_objinst_fence(d, "JSON.stringify");
       scr_jb_puts(b, "null"); /* the buffer never surfaces: the throw wins */
@@ -13378,6 +13463,26 @@ ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode) {
   if (v->kind == SCR_DYN_OBJINST && scr_dyn_objinst_error_rooted(v) && scr_dyn_class_ops != NULL) {
     scr_dyn_release(out); /* the class unit builds its own */
     return scr_dyn_class_ops->walk_error(v, mode);
+  }
+  if (v->kind == SCR_DYN_OBJINST && scr_dyn_objinst_has_props(v) && !scr_dyn_objinst_error_rooted(v)) {
+    /* A class carrying the run-time property table: its own enumerable keys in creation order (the snapshot), then the usual projection. */
+    bool unsup = false;
+    ScrDyn *sn = scr_dyn_objinst_snapshot(v, &unsup);
+    if (sn != NULL) {
+      size_t *ord = scr_dyn_obj_key_order(sn);
+      for (size_t oi = 0; oi < sn->v.obj.len; oi++) {
+        const ScrDynEntry *e = &sn->v.obj.entries[ord != NULL ? ord[oi] : oi];
+        if (mode == SCR_OBJWALK_KEYS) scr_dyn_arr_push(out, scr_dyn_objwalk_key(e->key, e->key_len));
+        else scr_dyn_objwalk_push(out, mode, e->key, e->key_len, e->value);
+      }
+      free(ord);
+      scr_dyn_release(sn);
+      return out;
+    }
+    if (!unsup) { /* a read threw */
+      scr_dyn_release(out);
+      return NULL;
+    }
   }
   if (v->kind == SCR_DYN_OBJINST && scr_dyn_objinst_enumerable(v)) {
     /* An instance's OWN ENUMERABLE properties are its declared FIELDS, in
