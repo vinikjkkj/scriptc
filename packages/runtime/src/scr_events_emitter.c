@@ -1016,15 +1016,33 @@ static ScrDyn *ee_call(ScrDyn *recv, ScrEmitter *em, const char *name, size_t n,
       return scr_dyn_new_bool(had);
     }
     case EEOP_ON: case EEOP_ONCE: case EEOP_ADD: case EEOP_PREPEND: case EEOP_PREPEND_ONCE: {
+      /* The registration reached without a call site (the member read as a value, `x.on.call(x, ...)`, a
+       * bound `on`, `x[k](...)`): a listener's adapter is built from the event's tuple, which only the
+       * compiler knows, so the instance's class table carries one `%eeReg(mode, name, fn)` row (the
+       * program's by-name registration, see synthEeRegFns) and the registration runs through it. */
       scr_emitter_check_listener(a1);
       if (scr_exc_pending()) return NULL;
-      ScrJsonBuf b;
-      scr_jb_init(&b);
-      scr_jb_puts(&b, "'EventEmitter.prototype.");
-      scr_jb_puts(&b, EE_OP_NAMES[op]);
-      scr_jb_puts(&b, "' reached through a value (not a direct member call) is not supported yet");
-      scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
-      return NULL;
+      const ScrDynClassMember *row = scr_dyn_objinst_member(recv, "%eeReg", 6);
+      if (row == NULL || row->call == NULL) {
+        ScrJsonBuf b;
+        scr_jb_init(&b);
+        scr_jb_puts(&b, "'EventEmitter.prototype.");
+        scr_jb_puts(&b, EE_OP_NAMES[op]);
+        scr_jb_puts(&b, "' on this emitter has no registration table");
+        scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
+        return NULL;
+      }
+      const char *mode = op == EEOP_ONCE ? "once" : op == EEOP_PREPEND ? "prependListener"
+                         : op == EEOP_PREPEND_ONCE ? "prependOnceListener" : "on";
+      ScrStr *ms = scr_str_new(mode, strlen(mode));
+      ScrDyn *md = scr_dyn_new_str(ms); /* retains */
+      scr_str_release(ms);
+      ScrDyn *av[3] = {md, (ScrDyn *)a0, (ScrDyn *)a1};
+      ScrDyn *r = row->call(recv->v.inst.o, av, 3, what);
+      scr_dyn_release(md);
+      if (r == NULL) return NULL;
+      scr_dyn_release(r);
+      return scr_dyn_retain(recv);
     }
     case EEOP_OFF: case EEOP_REMOVE: {
       scr_emitter_check_listener(a1);

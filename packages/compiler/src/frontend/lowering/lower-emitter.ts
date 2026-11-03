@@ -44,7 +44,7 @@ import { dynFallbackType, dynUndefinedExpr, newFnCtx } from "./lowerer.js";
 import type { ClassInfo } from "./lower-classes.js";
 import { isJsSourceFile, locOf } from "../program.js";
 import { lowerDynObjectLiteral } from "./lower-exprs.js";
-import { funcOf, strandTrap, arrayOf, BOOL, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, DYN, F64, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, isUnitType, STRING, SrcLoc, typeEquals, typeKey, VOID, RUNTIME_EMITTER_CLASS } from "../../ir/nodes.js";
+import { EMITTER_MIXIN_FIELD_NAME, funcOf, strandTrap, arrayOf, BOOL, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, DYN, F64, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, isUnitType, STRING, SrcLoc, typeEquals, typeKey, VOID, RUNTIME_EMITTER_CLASS } from "../../ir/nodes.js";
 import { streamForcedTuple, streamSidesOf } from "./lower-stream.js";
 import { handlerFnTypeNodeOf } from "../types.js";
 
@@ -1317,6 +1317,116 @@ function dynListenerRegistration(
     type: recvT,
     loc,
   };
+}
+
+/** The by-NAME registration of a dyn-held emitter, for the runtime's EventEmitter view: `%eeReg` rows.
+ *
+ * `x.on(name, fn)` written as a direct call on a dyn receiver is lowered at the call site, where the event's
+ * argument tuple is known (lowerDynEmitterReceiverCall). The same registration reached any other way (the member
+ * read as a value, `x.on.call(x, ...)`, a bound `on`, `x[k](...)` with a run-time key) has no call site, so the runtime
+ * asks the instance's class table for the `%eeReg` row instead: `(mode, name, fn)` over the program's closed set of
+ * event names, each arm being the very registration the call-site arm lowers (dynListenerRegistration over the
+ * event's tuple). A name nothing in the program emits registers with the empty tuple (it can never be invoked
+ * statically). `mode` is one of on, once, prependListener, prependOnceListener. The row lives on the runtime emitter
+ * class (so every subclass inherits it through the flattened table) and, for a class grafted with the emitter API,
+ * on a wrapper that hands over its hidden emitter. Returns the functions to add to the module. */
+export function synthEeRegFns(L: Lowerer, graftedClasses: ClassInfo[], loc: SrcLoc): IrFunction[] {
+  const bInfo = L.classes.get(RUNTIME_EMITTER_CLASS);
+  if (bInfo === undefined) return [];
+  const table = emitterEvents(L);
+  const emT: IrType = { kind: "object", className: RUNTIME_EMITTER_CLASS };
+  const ref = (localId: string, type: IrType): IrExpr => ({ kind: "varRef", localId, type, loc });
+  const lit = (v: string): IrExpr => strLit(v, loc);
+  const eq = (a: IrExpr, b: IrExpr): IrExpr => ({ kind: "strEq", negated: false, left: a, right: b, type: BOOL, loc });
+  const params = [
+    { localId: "r.0", name: "r", type: emT },
+    { localId: "m.0", name: "m", type: STRING },
+    { localId: "n.0", name: "n", type: DYN },
+    { localId: "f.0", name: "f", type: DYN },
+  ];
+  const locals: IrLocal[] = [
+    ...params.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
+    { id: "s.0", name: "s", type: STRING, mutable: false },
+  ];
+  const modes: { mode: string; once: boolean; prepend: boolean }[] = [
+    { mode: "on", once: false, prepend: false },
+    { mode: "once", once: true, prepend: false },
+    { mode: "prependListener", once: false, prepend: true },
+    { mode: "prependOnceListener", once: true, prepend: true },
+  ];
+  const regArms = (tuple: IrType[], nameExpr: IrExpr): IrStmt[] =>
+    modes.map((m) => ({
+      kind: "if" as const,
+      cond: eq(ref("m.0", STRING), lit(m.mode)),
+      then: [{
+        kind: "exprStmt" as const,
+        expr: dynListenerRegistration(L, tuple, ref("r.0", emT), nameExpr, ref("f.0", DYN), true, m.once, m.prepend, false, loc),
+        loc,
+      }],
+      else_: null,
+      loc,
+    }));
+  let chain: IrStmt[] = regArms([], ref("s.0", STRING));
+  for (const name of emitterEventNames(L).reverse()) {
+    const sig = sigAt(table, evTableKey(bInfo, name));
+    if (sig?.conflict) continue; // an event with conflicting tuples refuses at every static site: nothing can emit it
+    chain = [{
+      kind: "if",
+      cond: eq(ref("s.0", STRING), lit(name)),
+      then: regArms(sig?.tuple ?? [], lit(name)),
+      else_: chain,
+      loc,
+    }];
+  }
+  const sharedName = "%eeReg.shared";
+  const shared: IrFunction = {
+    name: sharedName,
+    params,
+    returnType: VOID,
+    locals,
+    body: [
+      { kind: "varDecl", localId: "s.0", init: { kind: "libCall", fn: "dyn.toStringCoerce", args: [ref("n.0", DYN)], type: STRING, loc }, loc },
+      ...chain,
+    ],
+    loc,
+  };
+  const out: IrFunction[] = [shared];
+  const rtDef = bInfo.def;
+  rtDef.dynMethods = [...(rtDef.dynMethods ?? []).filter((d) => d.name !== "%eeReg"), { name: "%eeReg", fn: sharedName }];
+  for (const info of graftedClasses) {
+    const cn = info.def.name;
+    const cT: IrType = { kind: "object", className: cn };
+    const wp = [
+      { localId: "t.0", name: "t", type: cT },
+      { localId: "m.0", name: "m", type: STRING },
+      { localId: "n.0", name: "n", type: DYN },
+      { localId: "f.0", name: "f", type: DYN },
+    ];
+    const wname = `%${cn}.%eeReg`;
+    out.push({
+      name: wname,
+      params: wp,
+      returnType: VOID,
+      locals: wp.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
+      body: [{
+        kind: "exprStmt",
+        expr: {
+          kind: "call",
+          callee: sharedName,
+          args: [
+            { kind: "fieldGet", obj: ref("t.0", cT), className: cn, field: EMITTER_MIXIN_FIELD_NAME, type: emT, loc },
+            ref("m.0", STRING), ref("n.0", DYN), ref("f.0", DYN),
+          ],
+          type: VOID,
+          loc,
+        },
+        loc,
+      }],
+      loc,
+    });
+    info.def.dynMethods = [...(info.def.dynMethods ?? []).filter((d) => d.name !== "%eeReg"), { name: "%eeReg", fn: wname }];
+  }
+  return out;
 }
 
 /** Every event name the program can name in an emitter call, sorted: the
