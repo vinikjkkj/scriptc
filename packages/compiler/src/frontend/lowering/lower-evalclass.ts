@@ -306,6 +306,33 @@ export function lowerEvalClassExpr(L: Lowerer, expr: ts.ClassExpression, info: C
   return { kind: "new", className: plan.staticName, args, type: objT, loc };
 }
 
+/** `V.length` of a class value: the own constructor's parameters before the first default or rest parameter
+ * (a class with no constructor of its own answers 0, like JS's implicit one). */
+export function classCtorLength(info: ClassInfo): number {
+  const c = info.ctor;
+  if (c === null) return 0;
+  let n = 0;
+  for (const p of c.parameters) {
+    if (p.initializer !== undefined || p.dotDotDotToken !== undefined) break;
+    n++;
+  }
+  return n;
+}
+
+/** `%C.%dynLen(): number` (a static row, receiver-free) or `%E.%static.%dynLen(this): number`: the value of
+ * `V.length` through a dyn class value. */
+export function dynLenFn(name: string, length: number, thisT: IrType | null, loc: import("../../ir/nodes.js").SrcLoc): IrFunction {
+  const locals: IrLocal[] = thisT === null ? [] : [{ id: "this.0", name: "this", type: thisT, mutable: false }];
+  return {
+    name,
+    params: locals.map((l) => ({ localId: l.id, name: l.name, type: l.type })),
+    returnType: F64,
+    locals,
+    body: [{ kind: "return", value: { kind: "numLit", value: length, type: F64, loc }, loc }],
+    loc,
+  };
+}
+
 /** One constructor argument of a `%dynNew(args)` function, checked out of the dyn argument array: parameter
  * `i` reads `args[i]` (a missing one is undefined); a REST parameter takes `args.slice(i)` checked into its
  * array type. Null when the parameter's type has no dyn check (the class then gets no `%dynNew`). */
@@ -394,6 +421,13 @@ export function evalDynFns(L: Lowerer, staticInfo: ClassInfo): { fns: IrFunction
       });
       list.push({ name: "%dynNew", fn: name });
     }
+  }
+
+  // %dynLen(this)
+  {
+    const name = `%${staticName}.%dynLen`;
+    fns.push(dynLenFn(name, classCtorLength(inst), staticT, loc));
+    list.push({ name: "%dynLen", fn: name });
   }
 
   // %dynIsInst(this, x)
