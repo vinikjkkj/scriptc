@@ -1,0 +1,8 @@
+builtin-ctorless-stream-new-through-class-value.ts:11:17 - error SC2020: 'new Plain with arguments through an inherited stream constructor' is part of the standard library types but has no scriptc lowering yet
+
+  10 | const K = Plain;
+  11 | const t = new K({ objectMode: true });
+     |                 ^~~~~~~~~~~~~~~~~~~~
+  12 | void t;
+
+  hint: declare a constructor that passes an inline options object to super(...)

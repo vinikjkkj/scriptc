@@ -21,11 +21,6 @@ class Unrelated {
 // Builtin classes as values: their construction is libCall-shaped.
 const E = Error;
 
-// Classes extending builtin bases as values (the error-message completion
-// rule has no thunk ABI).
-class MyErr extends Error {}
-const M = MyErr;
-
 // Structural class-value flows between unrelated classes: nominal identity
 // is the IR's only class subtyping.
 const structural: typeof Base = Unrelated;
