@@ -23,3 +23,14 @@ for (const x of [new Redis(), new Cluster(), new Sub(), new Plain(), new Bare(),
 }
 function isCluster(redis) { return redis.constructor.name === "Cluster" || redis.isCluster; }
 console.log(isCluster(v(new Redis())), isCluster(v(new Cluster())));
+// A static member read or call off the class value that EventEmitter's function object does not have is undefined (the
+// protobufjs writer's `this.constructor.alloc(n)`), and calling it is Node's TypeError; a subclass's own statics answer.
+class Sub2 extends Redis { static alloc(n) { return "sub" + n; } constructor() { super(); this.s = 1; } }
+class Writer { finish() { return this.constructor.alloc(3); } }
+Writer.alloc = (n) => "w" + n;
+function t(n, f) { try { console.log(n, f()); } catch (e) { console.log(n, "THROW", e.constructor.name, e.message); } }
+t("grafted read", () => typeof v(new Redis()).constructor.alloc);
+t("grafted call", () => v(new Redis()).constructor.alloc(3));
+t("sub call", () => v(new Sub2()).constructor.alloc(3));
+t("sub read", () => typeof v(new Sub2()).constructor.other);
+t("writer", () => v(new Writer()).finish());
