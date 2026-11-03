@@ -8567,6 +8567,28 @@ function declSpellsAny(decls: readonly ts.Node[]): boolean {
   });
 }
 
+/** A member whose DECLARED annotation resolves to `any` without spelling the
+ * keyword: `pool: Pool` where `Pool` is an alias of `any`, or a type the
+ * checker could not resolve (a package whose types are hidden under
+ * provenance/npm-static: the error type is `any`), or `Pool | PoolConfig`
+ * with every arm resolving to `any`. The author wrote an annotation, so the
+ * slot is the same checked-dynamic one a spelled `any` takes; an object
+ * LITERAL's member (no declared annotation) keeps its refusal. Callers pass
+ * the member's already-resolved type and require its Any flag.
+ *
+ * REQUIRED members only (no `?`): a required key is present on every value, so
+ * the dyn slot answers `in`, inspect and Object.keys exactly. An OPTIONAL dyn
+ * member needs absent-vs-undefined presence tracking that no surface has for a
+ * dyn slot (MEASURED: spelled `h?: any` prints `h: undefined` and answers
+ * `'h' in o` true where Node omits it), so an optional alias-any member keeps
+ * its refusal rather than reach that divergence. */
+function declAnnotatedAny(fieldTs: ts.Type, decls: readonly ts.Node[]): boolean {
+  if ((fieldTs.flags & ts.TypeFlags.Any) === 0 || decls.length === 0) return false;
+  return decls.every(
+    (d) => (ts.isPropertySignature(d) || ts.isPropertyDeclaration(d)) && d.type !== undefined && (d as { questionToken?: unknown }).questionToken === undefined,
+  );
+}
+
 function mapIndexSignatureValue(t: ts.Type, ctx: TypeMapperCtx): IrType | null {
   if ((t.flags & ts.TypeFlags.Any) !== 0 && !ctx.dynamic) return DYN;
   return mapType(t, ctx);
@@ -9215,7 +9237,7 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
       // (`type BindOpts = { values?: any[] }`): the declared slot is the
       // checked-dynamic one. An object LITERAL's member (`{ item: {} as
       // any }`) is not a spelled declaration and keeps its refusal.
-      if (pt === null && !ctx.dynamic && declSpellsAny(checker.declarationsOf(p))) {
+      if (pt === null && !ctx.dynamic && (declSpellsAny(checker.declarationsOf(p)) || declAnnotatedAny(fieldTs, checker.declarationsOf(p)))) {
         pt = DYN;
       }
       // dyn FIELDS map now (`{ v: unknown }`, `[string, unknown]` tuples):
@@ -9685,7 +9707,7 @@ export function describeRecordMemberBlocker(widened: ts.Type, ctx: TypeMapperCtx
     ) {
       continue;
     }
-    if (pt === null && !ctx.dynamic && declSpellsAny(checker.declarationsOf(p))) continue;
+    if (pt === null && !ctx.dynamic && (declSpellsAny(checker.declarationsOf(p)) || declAnnotatedAny(fieldTs, checker.declarationsOf(p)))) continue;
     if (!pt || pt.kind === "void") {
       return `the record shape is supported, but its member '${p.name}' has type '${checker.typeToString(fieldTs)}', which does not compile`;
     }
