@@ -822,6 +822,7 @@ function liftableLocalClass(L: Lowerer, sf: ts.SourceFile, decl: ts.ClassDeclara
       } finally {
         L.collectingClassDecls = false;
       }
+      L.classDeclsCollected = true;
       for (const fp of parts) for (const decl of fp.fnDecls) L.collectSignature(decl);
     } finally {
       L.collecting = false;
