@@ -1323,7 +1323,13 @@ static ScrDyn *ee_value(const char *name, size_t n) {
 static bool ee_is_state(const char *name, size_t n);
 static ScrDyn *ee_state_read(ScrDyn *recv, ScrEmitter *em, const char *name, size_t n);
 static bool ee_state_write(ScrEmitter *em, const char *name, size_t n, const ScrDyn *value);
-static const ScrDynEeOps scr_ee_dyn_ops = {ee_knows, ee_value, ee_call, ee_is_state, ee_state_read, ee_state_write};
+static ScrDyn *ee_create(const ScrDynClass *cls) {
+  ScrEmitter *em = scr_emitter_new();
+  ScrDyn *box = scr_dyn_new_objinst(em, cls);
+  scr_emitter_release(em);
+  return box;
+}
+static const ScrDynEeOps scr_ee_dyn_ops = {ee_knows, ee_value, ee_call, ee_is_state, ee_state_read, ee_state_write, ee_create};
 
 /* Installed by the emitted main of a program with both an emitter and a boxable class. */
 void scr_dyn_ee_install(void) { scr_dyn_ee_ops = &scr_ee_dyn_ops; }
