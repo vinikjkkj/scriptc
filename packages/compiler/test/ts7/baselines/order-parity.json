@@ -11056,6 +11056,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/23268-evalclass-dyn-prototype-accessors-of-the-base.js": {
+   "order": [
+    "<repo>/tests/corpus/23268-evalclass-dyn-prototype-accessors-of-the-base.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23269-evalclass-dyn-prototype-extends-error.js": {
+   "order": [
+    "<repo>/tests/corpus/23269-evalclass-dyn-prototype-extends-error.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2330-tls-server-runtime-options.cjs": {
    "order": [
     "<repo>/tests/corpus/2330-tls-server-runtime-options.cjs"
@@ -21867,9 +21879,9 @@
    ],
    "diags": []
   },
-  "<repo>/tests/diagnostics/evalclass-in-dyn-with-accessor.js": {
+  "<repo>/tests/diagnostics/evalclass-in-dyn-with-async-method.js": {
    "order": [
-    "<repo>/tests/diagnostics/evalclass-in-dyn-with-accessor.js"
+    "<repo>/tests/diagnostics/evalclass-in-dyn-with-async-method.js"
    ],
    "diags": []
   },
