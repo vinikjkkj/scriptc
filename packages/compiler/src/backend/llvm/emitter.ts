@@ -16215,6 +16215,12 @@ class LlEmitter {
         B.line(`call void @scr_regex_set_last_index(ptr ${r.name}, double ${args[0]!.name})`);
         return { name: "", type: e.type };
       }
+      case "rowAbsent": {
+        this.declare(`declare zeroext i1 @scr_regex_row_absent(ptr, double)`);
+        const t = B.tmp();
+        B.line(`${t} = call zeroext i1 @scr_regex_row_absent(ptr ${r.name}, double ${args[0]!.name})`);
+        return { name: t, type: e.type };
+      }
       case "execIndexOf": {
         this.declare(`declare double @scr_regex_index_of(ptr)`);
         const t = B.tmp();

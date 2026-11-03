@@ -3386,6 +3386,9 @@ export type IrRegexIntrinsicMethod =
   /** The `.index` of a match result: the receiver is the string[] an exec/match/
    * matchAll built; the runtime recorded its UTF-16 start against the array. */
   | "execIndexOf"
+  /** Did capture group `args[0]` of this match row NOT participate (the row holds "" there, SEMANTICS.md 51;
+   * Node's slot is undefined)? False for an index outside the row and for an array no regex built. Never throws. */
+  | "rowAbsent"
   /** `s.matchAll(re)` — every match as its honest string[] slice (match's
    * rule), drained EAGERLY into a fresh string[][]: the lazy iterator is
    * unobservable across the lowered surface (strings are immutable; the
