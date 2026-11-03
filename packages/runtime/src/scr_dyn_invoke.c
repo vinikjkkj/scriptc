@@ -1908,10 +1908,18 @@ ScrDyn *scr_dyn_objinst_miss(ScrDyn *d, const ScrStr *key) {
    * wrong answer. The loud ladder stays for exactly this name. */
   if (key->len == 11 && memcmp(key->data, "constructor", 11) == 0 && scr_dyn_objinst_class_of(d)->ee_off > 0) {
     /* A class grafted by applyMixin(Y, EventEmitter) has had EventEmitter.prototype's own `constructor`
-     * copied over its own, so `x.constructor` is EventEmitter there, not Y: no class value stands for
-     * that here, and answering Y would be a silent wrong answer. The loud ladder stays. */
-    scr_dyn_objinst_fence(d, "a property read");
-    return NULL;
+     * copied over its own, so `x.constructor` is EventEmitter there, not Y (rt_root 7: the class that applied the
+     * graft). A subclass of it (rt_root 5) keeps its own `constructor` property and falls to the generic answer
+     * below. Any other grafted shape keeps the loud ladder: answering Y would be a silent wrong answer. */
+    const unsigned char rtg = scr_dyn_objinst_class_of(d)->rt_root;
+    if (rtg == 7) {
+      const ScrDynClass *ee = scr_dyn_runtime_emitter_class();
+      if (ee != NULL) return scr_dyn_class_box(ee);
+    }
+    if (rtg != 5) {
+      scr_dyn_objinst_fence(d, "a property read");
+      return NULL;
+    }
   }
   if (key->len == 11 && memcmp(key->data, "constructor", 11) == 0) {
     /* The instance's class value (scr_dyn_class_box): the descriptor of the

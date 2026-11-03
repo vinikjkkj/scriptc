@@ -3880,7 +3880,7 @@ export class Lowerer {
           "converting an applyMixin(Y, EventEmitter) instance to 'unknown' in a program that also enumerates or prints dynamic values (" + why + "): " + (tier === 0
             ? "the instance's own keys (the emitter's state cells and listener tables) cannot be reproduced by that operation (its constructor does not run EventEmitter.call(this) at its top level, so the keys appear where the order record cannot state), so the flow is refused"
             : tier === 1
-              ? "that operation cannot be answered exactly for this instance (a clone would have to duplicate its emitter, a prototype link over it is not representable, and its `constructor` is EventEmitter, a class value no dynamic representation stands for), so the flow is refused"
+              ? "that operation cannot be answered exactly for this instance (a clone would have to duplicate its emitter, a prototype link over it is not representable, and its `constructor` (EventEmitter, a class value that is lowered only for `.name` and strict comparisons) cannot be used otherwise), so the flow is refused"
               : "that operation cannot be answered exactly for this instance (its run-time property table keeps the values, entries and printed form out of reach; only the key-listing surfaces are exact), so the flow is refused"),
         ));
       }
