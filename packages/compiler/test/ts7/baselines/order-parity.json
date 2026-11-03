@@ -11080,6 +11080,48 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/23550-method-value-subclass-only-state-machine.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23550-method-value-subclass-only-state-machine.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23551-method-value-subclass-only-mixed-signatures.js": {
+   "order": [
+    "<repo>/tests/corpus/23551-method-value-subclass-only-mixed-signatures.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23552-method-value-subclass-only-identity-and-name.js": {
+   "order": [
+    "<repo>/tests/corpus/23552-method-value-subclass-only-identity-and-name.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23553-method-value-subclass-only-deeper-override.js": {
+   "order": [
+    "<repo>/tests/corpus/23553-method-value-subclass-only-deeper-override.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23554-method-value-subclass-only-missing-undefined.js": {
+   "order": [
+    "<repo>/tests/corpus/23554-method-value-subclass-only-missing-undefined.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23555-method-value-subclass-only-state-name-fields.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23555-method-value-subclass-only-state-name-fields.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23556-method-value-subclass-only-read-contexts.js": {
+   "order": [
+    "<repo>/tests/corpus/23556-method-value-subclass-only-read-contexts.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2360-tuple-to-array.ts": {
    "order": [
     "<repo>/tests/corpus/2360-tuple-to-array.ts"
@@ -22384,6 +22426,12 @@
   "<repo>/tests/diagnostics/merged-namespace-collect-probe.ts": {
    "order": [
     "<repo>/tests/diagnostics/merged-namespace-collect-probe.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/method-value-subclass-only-escapes-refused.js": {
+   "order": [
+    "<repo>/tests/diagnostics/method-value-subclass-only-escapes-refused.js"
    ],
    "diags": []
   },
