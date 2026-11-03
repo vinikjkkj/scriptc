@@ -918,7 +918,7 @@ static ScrDyn *dyn_cls_props_keys(const ScrDyn *v) {
 
 static ScrDyn *dyn_cls_ops_walk_error(const ScrDyn *v, ScrObjWalk mode) {
   const unsigned char rt = scr_dyn_objinst_class_of(v)->rt_root;
-  if (rt == 3 || rt == 4) {
+  if (rt == 3 || rt == 4 || rt == 6) {
     /* A run-time property table's keys are listed here (dyn_cls_props_keys); values and entries
      * keep the loud fence, since the table's values are not a row of the class. */
     if (mode != SCR_OBJWALK_KEYS) {
@@ -1135,7 +1135,7 @@ static ScrStr *dyn_cls_objinst_to_string(const ScrDyn *d) {
 
 static int dyn_cls_objinst_props_has(const ScrDyn *d, const ScrStr *key) {
   const unsigned char rt = scr_dyn_objinst_class_of(d)->rt_root;
-  if (rt != 3 && rt != 4) return -1;
+  if (rt != 3 && rt != 4 && rt != 6) return -1;
   ScrDyn *bag = dyn_cls_props_bag(d);
   if (bag == NULL) return 0;
   const ScrDyn *e = scr_dyn_obj_get(bag, key->data, key->len);
@@ -1219,14 +1219,14 @@ static bool ee_rooted_instance(const ScrDyn *v) {
 static bool ee_keys_instance(const ScrDyn *v) {
   if (v == NULL || v->kind != SCR_DYN_OBJINST) return false;
   const unsigned char rt = scr_dyn_objinst_class_of(v)->rt_root;
-  return rt == 1 || rt == 3;
+  return rt == 1 || rt == 3 || rt == 5 || rt == 6 || rt == 7; /* 5-7: a grafted class whose emitter keys are member rows */
 }
 
 /* An instance with a run-time property table (rt_root 3 or 4). */
 static bool props_instance(const ScrDyn *v) {
   if (v == NULL || v->kind != SCR_DYN_OBJINST) return false;
   const unsigned char rt = scr_dyn_objinst_class_of(v)->rt_root;
-  return rt == 3 || rt == 4;
+  return rt == 3 || rt == 4 || rt == 6;
 }
 
 ScrDyn *scr_dyn_forin_keys(const ScrDyn *v) {
@@ -1236,10 +1236,15 @@ ScrDyn *scr_dyn_forin_keys(const ScrDyn *v) {
     scr_handle_forin_hook(v, keys);
   }
   if (keys == NULL || !ee_keys_instance(v)) return keys;
-  for (size_t i = 3; i < SCR_EE_PROTO_KEY_COUNT; i++) { /* [0..2] are the emitter's own keys, listed already */
+  /* [0..2] are the emitter's own keys, listed already for a class rooted in EventEmitter; a grafted class lists them
+   * as member rows once EventEmitter.call(this) ran, and before that they are the prototype's own enumerable keys. */
+  const unsigned char rtk = scr_dyn_objinst_class_of(v)->rt_root;
+  const bool grafted = rtk == 5 || rtk == 6 || rtk == 7;
+  for (size_t i = grafted ? 0 : 3; i < SCR_EE_PROTO_KEY_COUNT; i++) {
     const char *name = SCR_EE_PROTO_KEYS[i];
     const size_t len = strlen(name);
-    if (scr_dyn_objinst_member(v, name, len) != NULL) continue; /* shadowed by a member */
+    const ScrDynClassMember *sm = scr_dyn_objinst_member(v, name, len);
+    if (sm != NULL && !scr_dyn_member_hidden(sm, v->v.inst.o)) continue; /* shadowed by a live member */
     scr_dyn_arr_push(keys, dyn_cls_objwalk_key(name, len));
   }
   return keys;
@@ -1264,7 +1269,7 @@ bool scr_dyn_forin_certain(const ScrDyn *v, const ScrStr *key) {
     if (strlen(own_pre[i]) == n && memcmp(own_pre[i], s, n) == 0) return true;
   }
   const ScrDynClassMember *m = scr_dyn_objinst_member(v, s, n);
-  if (m != NULL) return !scr_dyn_member_hidden(m, v->v.inst.o);
+  if (m != NULL && !scr_dyn_member_hidden(m, v->v.inst.o)) return true;
   if (props_instance(v)) {
     /* A table key is visited while the table lists it (enumerable): the same key list Object.keys walks. */
     ScrDyn *bag = dyn_cls_props_bag(v);

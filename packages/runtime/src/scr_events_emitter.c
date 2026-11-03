@@ -1521,6 +1521,24 @@ static ScrDyn *ee_state_read(ScrDyn *recv, ScrEmitter *em, const char *name, siz
   return NULL;
 }
 
+/* The member-row read of one emitter key of a GRAFTED instance (a class whose constructor runs EventEmitter.call(this)):
+ * `self` is the instance's dyn box, `em` its hidden emitter, `rec` its order record and `k` the ordinal the record
+ * notes when the keys are born (cell 0 _events, 1 _eventsCount, 2 _maxListeners). Before they are born the answer is
+ * the absent marker, which the walks skip as a missing key. +1. */
+ScrDyn *scr_ee_cell_get(ScrDyn *self, ScrEmitter *em, const uint8_t *rec, uint32_t k, int cell) {
+  bool born = false;
+  for (uint8_t j = 1; j <= rec[0]; j++) {
+    if (rec[j] == k) {
+      born = true;
+      break;
+    }
+  }
+  if (!born || em == NULL) return scr_dyn_retain(scr_dyn_absent());
+  static const char *const names[3] = {"_events", "_eventsCount", "_maxListeners"};
+  static const size_t lens[3] = {7, 12, 13};
+  return ee_state_read(self, em, names[cell], lens[cell]);
+}
+
 /* `x._eventsCount = n` / `x._maxListeners = n|undefined` with a number (or undefined for the latter):
  * the registry stores it as events.js's own field would. true = taken. Everything else is not representable
  * (the caller refuses by name). */

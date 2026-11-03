@@ -31,7 +31,7 @@
  *   ScrBytes { rc +0; len +8; elem +16; data +24 }.
  *   ScrDynPath { parent, key, index } — the %ScrDynPath type. */
 import type { IrBytesElem, IrFunction, IrRecordShape, IrType } from "../../ir/nodes.js";
-import { RUNTIME_EMITTER_CLASS, accessorKeyOrderOf, accessorSlotProp, shapeHasAccessorSlots, VOID, arrayTypeHasLiveView, bytesAliasOnExtract, canConvertToDyn, canDynCheckTo, dynErrorClassKind, isDynErrorClass } from "../../ir/nodes.js";
+import { EMITTER_MIXIN_FIELD_NAME, RUNTIME_EMITTER_CLASS, accessorKeyOrderOf, accessorSlotProp, shapeHasAccessorSlots, VOID, arrayTypeHasLiveView, bytesAliasOnExtract, canConvertToDyn, canDynCheckTo, dynErrorClassKind, isDynErrorClass } from "../../ir/nodes.js";
 import { armDiscrimLits, dynNeverArm, dynNeverIn, canAdaptDynFuncTo, dynRestApplyable, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey } from "../../ir/nodes.js";
 import { EVAL_STATIC_CLASSES } from "../../ir/nodes.js";
 import { nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit as maskKeyBit } from "../../ir/nodes.js";
@@ -163,6 +163,8 @@ export interface DynHost extends WalkerHost {
   /** The GEP index of a declared field inside the class's own struct
    * (the hierarchy prefix already counted). */
   classFieldGep(className: string, field: string): number;
+  /** The GEP index of a class's per-instance order record (-1 when its hierarchy has none). */
+  classOrdGep(className: string): number;
 }
 
 /** Exact double literal (the emitter's f64Lit — the walkers' copy). */
@@ -5219,6 +5221,34 @@ export class LlDyn {
           ``,
         );
         entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 3, i8 ${row.ordk}, ptr null }`);
+        continue;
+      }
+      if (row.kind === "eeCell") {
+        // The C twin's rule (emit-walkers.ts): the registry's value of one emitter key, absent until the order
+        // record notes it. The instance is boxed for the read (the once wrappers of the _events view keep it).
+        const B = new BlockBuilder();
+        const objTy: IrType = { kind: "object", className };
+        const box = B.tmp();
+        B.line(`${box} = call ptr @${this.toDynHelper(objTy)}(ptr %o)`);
+        const ep = B.tmp();
+        B.line(`${ep} = getelementptr inbounds %${struct}, ptr %o, i64 0, i32 ${host.classFieldGep(className, EMITTER_MIXIN_FIELD_NAME)} ; .${EMITTER_MIXIN_FIELD_NAME}`);
+        const em = B.tmp();
+        B.line(`${em} = load ptr, ptr ${ep}`);
+        const rp = B.tmp();
+        B.line(`${rp} = getelementptr inbounds %${struct}, ptr %o, i64 0, i32 ${host.classOrdGep(className)}`);
+        host.declare(`declare ptr @scr_ee_cell_get(ptr, ptr, ptr, i32, i32)`);
+        const r = B.tmp();
+        B.line(`${r} = call ptr @scr_ee_cell_get(ptr ${box}, ptr ${em}, ptr ${rp}, i32 ${row.ordk - 1}, i32 ${row.cell})`);
+        host.declare(`declare void @scr_dyn_release(ptr)`);
+        B.line(`call void @scr_dyn_release(ptr ${box})`);
+        B.terminate(`ret ptr ${r}`);
+        this.defs.push(
+          `define internal ptr @${sym}(ptr %o) ${FN_ATTRS} { ; member get ${className}.${row.name} (emitter key)`,
+          B.render(),
+          `}`,
+          ``,
+        );
+        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 4, i8 ${row.ordk}, ptr null }`);
         continue;
       }
       if (row.kind === "field") {

@@ -69,7 +69,7 @@ import type {
 } from "../../ir/nodes.js";
 import { protoEscapes, strictAt } from "./lower-protoescape.js";
 import { applyProtoSlots, scanProtoSlots } from "./lower-protoslots.js";
-import { CLASS_BUILTIN_CTORLESS, CLASS_NO_DYN_NEW, EVAL_NO_SRC_CLASSES, GRAFTED_EMITTER_CLASSES, EVAL_STATIC_CLASSES, dynReflectionSite, emitterStateWriteSites, graftedBoxSites, moduleBoxesEmitters } from "../../ir/nodes.js";
+import { CLASS_BUILTIN_CTORLESS, CLASS_NO_DYN_NEW, EVAL_NO_SRC_CLASSES, GRAFTED_EMITTER_CLASSES, GRAFTED_EMITTER_CELL_CLASSES, GRAFTED_ROWS_FENCED_OPS, GRAFTED_PROPS_EXACT_OPS, EVAL_STATIC_CLASSES, dynReflectionSite, emitterStateWriteSites, graftedBoxSites, moduleBoxesEmitters } from "../../ir/nodes.js";
 import { computeTwinEdits, type TwinEdits } from "./emitter-twin.js";
 import { canBoxFuncIntoDyn } from "../../ir/nodes.js";
 import { procStreamDynMemberFence, NULL_T, strandTrap, armDiscrimLits, arrayOf, BOOL, canBoxClassIntoDyn, internalSlotFields, isRefCounted, canAdaptDynFuncTo, dynRestApplyable, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, shapeHasAccessorSlots, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
@@ -2600,6 +2600,7 @@ export class Lowerer {
   ) {
     // The grafted-emitter set is per lowering (see GRAFTED_EMITTER_CLASSES).
     GRAFTED_EMITTER_CLASSES.clear();
+    GRAFTED_EMITTER_CELL_CLASSES.clear();
     EVAL_STATIC_CLASSES.clear();
     EVAL_NO_SRC_CLASSES.clear();
     CLASS_NO_DYN_NEW.clear();
@@ -3854,20 +3855,34 @@ export class Lowerer {
     // for-in / JSON.stringify / console / util.inspect / hasOwnProperty / `.constructor` over a dyn value. A program
     // that boxes such an instance AND contains any of those on a dyn value keeps the refusal at the boxing sites.
     if (GRAFTED_EMITTER_CLASSES.size > 0) {
-      const sites = graftedBoxSites(functions);
-      const why = sites.length > 0 ? dynReflectionSite(functions) : null;
-      if (why !== null) {
-        const seen = new Set<string>();
-        for (const loc of sites) {
-          const k = `${loc.file}@${loc.start}`;
-          if (seen.has(k)) continue;
-          seen.add(k);
-          this.pushDiag(unsupportedDiag(
-            "SC1101",
-            loc,
-            "converting an applyMixin(Y, EventEmitter) instance to 'unknown' in a program that also enumerates or prints dynamic values (" + why + "): the instance's own keys (the emitter's state cells and listener tables) cannot be reproduced by that operation, so the flow is refused",
-          ));
+      // Three tiers of grafted class. A class whose constructor does not run EventEmitter.call(this) at its top level keeps
+      // the whole fence (its emitter keys appear where the order record cannot state); one that does lists them as member
+      // rows (exact in every enumerating surface but GRAFTED_ROWS_FENCED_OPS); one that ALSO carries a run-time
+      // property table is exact only for the key-listing surfaces (GRAFTED_PROPS_EXACT_OPS).
+      const tierOf = (cn: string): 0 | 1 | 2 =>
+        !GRAFTED_EMITTER_CELL_CLASSES.has(cn) ? 0 : this.classes.get(cn)?.hasPropsTable === true ? 2 : 1;
+      const boxes = graftedBoxSites(functions);
+      const whyOfTier: (string | null)[] = [];
+      const seen = new Set<string>();
+      for (const { loc, className } of boxes) {
+        const tier = tierOf(className);
+        if (whyOfTier[tier] === undefined) {
+          whyOfTier[tier] = dynReflectionSite(functions, tier === 0 ? () => true : tier === 1 ? (op) => GRAFTED_ROWS_FENCED_OPS.has(op) : (op) => !GRAFTED_PROPS_EXACT_OPS.has(op));
         }
+        const why = whyOfTier[tier]!;
+        if (why === null) continue;
+        const k = `${loc.file}@${loc.start}`;
+        if (seen.has(k)) continue;
+        seen.add(k);
+        this.pushDiag(unsupportedDiag(
+          "SC1101",
+          loc,
+          "converting an applyMixin(Y, EventEmitter) instance to 'unknown' in a program that also enumerates or prints dynamic values (" + why + "): " + (tier === 0
+            ? "the instance's own keys (the emitter's state cells and listener tables) cannot be reproduced by that operation (its constructor does not run EventEmitter.call(this) at its top level, so the keys appear where the order record cannot state), so the flow is refused"
+            : tier === 1
+              ? "that operation cannot be answered exactly for this instance (a clone would have to duplicate its emitter, a prototype link over it is not representable, and its `constructor` is EventEmitter, a class value no dynamic representation stands for), so the flow is refused"
+              : "that operation cannot be answered exactly for this instance (its run-time property table keeps the values, entries and printed form out of reach; only the key-listing surfaces are exact), so the flow is refused"),
+        ));
       }
     }
     // The by-name registration rows of dyn-held emitters (synthEeRegFns): only in a program that lets an emitter

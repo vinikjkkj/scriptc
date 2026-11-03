@@ -7106,6 +7106,8 @@ typedef struct ScrDynEeOps {
   bool (*state_set)(ScrEmitter *em, const char *name, size_t n, const ScrDyn *value);
 } ScrDynEeOps;
 extern const ScrDynEeOps *scr_dyn_ee_ops;
+/* One emitter key of a grafted instance as a member-row read (+1; the absent marker before the keys are born). */
+ScrDyn *scr_ee_cell_get(ScrDyn *self, ScrEmitter *em, const uint8_t *rec, uint32_t k, int cell);
 /* The instance's member `k`, or NULL when its class has no table or the
  * table has no such name. Never throws -- a miss is a fact, and what the
  * caller does with it (Object.prototype, the fence, Node's

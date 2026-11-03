@@ -4134,6 +4134,10 @@ class LlEmitter {
   classFieldGep(className: string, field: string): number {
     return classFieldIndex(this.classMetaOf(className), field).index;
   }
+  /** The GEP index of a class's per-instance order record (llOrdIndexOf; -1 when its hierarchy has none). */
+  classOrdGep(className: string): number {
+    return llOrdIndexOf(this.classMetaOf(className));
+  }
 
   /** The classes whose class VALUE a dyn function box may hold under `classval:className` (dyn-members.ts
    * classvalCandidates), each with its preorder position and its class object's symbol (registered here). */

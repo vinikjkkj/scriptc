@@ -2474,7 +2474,7 @@ function validateFunction(
       case "seqExpr": {
         // Statements in an expression: straight-line writes only — no
         // control flow, no jumps (the C emission point is mid-expression).
-        const allowed = new Set(["varDecl", "assign", "exprStmt", "fieldSet", "recordSet", "recordKeySet", "recordKeyDelete", "arraySet", "bytesSet", "block"]);
+        const allowed = new Set(["varDecl", "assign", "exprStmt", "fieldSet", "ordNote", "recordSet", "recordKeySet", "recordKeyDelete", "arraySet", "bytesSet", "block"]);
         // The one branch admitted: a GUARD, `if (c) {} else { throw-fence }`.
         // Its cold side leaves the region by unwinding, exactly like a throw
         // anywhere else in an expression.

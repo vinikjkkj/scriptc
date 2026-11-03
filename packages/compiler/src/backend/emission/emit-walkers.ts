@@ -14,7 +14,7 @@ import { mangleClassStruct, mangleField, mangleFunction, mangleFnClosure, mangle
 import type { ClassMeta } from "./emit-shapes.js";
 import { RUNTIME_EMITTER_CLASS as RUNTIME_EMITTER_CLASS_W } from "../../ir/nodes.js";
 import { classvalCandidates, dynClassDisplayName, dynDescBase, dynEmitterSlot, dynRuntimeRoot, dynEnumerationFenced, dynMemberRows, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
-import { ORD_MEMBER, orderRecordPlanCached } from "../../ir/nodes.js";
+import { EMITTER_MIXIN_FIELD_NAME, ORD_MEMBER, orderRecordPlanCached } from "../../ir/nodes.js";
 import { KINDGATE_WIDE_KINDS, kindgateWideLane } from "../kindgate.js";
 import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
 
@@ -190,6 +190,26 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
         entries.push(
           `  { ${cStringLiteral(Buffer.from(row.name, "utf8"))}, ${Buffer.byteLength(row.name, "utf8")}, ` +
             `&${sym}, NULL, 3, ${row.ordk} },`,
+        );
+        continue;
+      }
+      if (row.kind === "eeCell") {
+        // One of the emitter's own keys on a grafted instance: the registry's value (the runtime reads it from the
+        // hidden emitter slot), absent until the order record notes the key (EventEmitter.call(this) ran).
+        E.walkerProtos.push(`${E.link}ScrDyn *${sym}(void *o); /* member get ${className}.${row.name} (emitter key) */`);
+        defs.push(
+          `${E.link}ScrDyn *${sym}(void *o) { /* member get ${className}.${row.name} (emitter key) */`,
+          `  ${struct} *self = (${struct} *)o;`,
+          `  ScrDyn *box = ${toDynExprC(E, { kind: "object", className }, "self")};`,
+          `  ScrDyn *r = scr_ee_cell_get(box, (ScrEmitter *)self->${mangleField(EMITTER_MIXIN_FIELD_NAME)}, self->${ORD_MEMBER}, ${row.ordk - 1}, ${row.cell});`,
+          `  scr_dyn_release(box);`,
+          `  return r;`,
+          `}`,
+          ``,
+        );
+        entries.push(
+          `  { ${cStringLiteral(Buffer.from(row.name, "utf8"))}, ${Buffer.byteLength(row.name, "utf8")}, ` +
+            `&${sym}, NULL, 4, ${row.ordk} },`,
         );
         continue;
       }
