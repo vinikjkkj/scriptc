@@ -7731,6 +7731,21 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
               `(${cType(e.type).trim()})scr_emitter_on((ScrEmitter *)${arg(0)}, ${arg(1)}, ${cb.name}, &${thunk}, ${arg(3)}, ${arg(4)})`,
             );
           }
+          case "emitter.onTwin": {
+            // (recv, name, cb /moves/, once, prepend, twin /moves/): emitter.on for a listener a dynamic
+            // emit can reach; the ERASED TWIN's dyn box is what such an emit calls.
+            const cbT = e.args[2]!.type;
+            const twT = e.args[5]!.type;
+            if (cbT.kind !== "func" || twT.kind !== "func") throw new Error("emitter bug: emitter.onTwin listener/twin not a func");
+            const cb = args[2]!;
+            const tw = args[5]!;
+            E.moveTemp(cb);
+            E.moveTemp(tw);
+            const w = E.emitterTwinOnFor(cbT, twT);
+            return finish(
+              `(${cType(e.type).trim()})${w}((ScrEmitter *)${arg(0)}, ${arg(1)}, ${cb.name}, ${tw.name}, ${arg(3)}, ${arg(4)})`,
+            );
+          }
           case "emitter.off":
             // (recv, name, cb /borrowed — identity match/). May-throw:
             // 'removeListener' meta listeners run inside.

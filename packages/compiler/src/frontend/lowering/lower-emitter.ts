@@ -45,6 +45,7 @@ import type { ClassInfo } from "./lower-classes.js";
 import { isJsSourceFile, locOf } from "../program.js";
 import { lowerDynObjectLiteral } from "./lower-exprs.js";
 import { EMITTER_MIXIN_FIELD_NAME, funcOf, strandTrap, arrayOf, BOOL, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, DYN, F64, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, isUnitType, STRING, SrcLoc, typeEquals, typeKey, VOID, RUNTIME_EMITTER_CLASS } from "../../ir/nodes.js";
+import { twinIdentOf, twinMarkOf } from "./emitter-twin.js";
 import { streamForcedTuple, streamSidesOf } from "./lower-stream.js";
 import { handlerFnTypeNodeOf } from "../types.js";
 
@@ -1921,6 +1922,26 @@ export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
       return lowerDynListenerCall(
         L, member, name, tuple, receiver, args[1]!, "dyn", registering, once, prepend, loc, false,
       );
+    }
+    if (registering && cb.type.kind === "func" && cb.type.params.some((p) => p.kind !== "dyn") &&
+        (ts.isArrowFunction(args[1]!) || ts.isFunctionExpression(args[1]!) || ts.isIdentifier(args[1]!))) {
+      // A typed listener a dynamic emit may reach: the second lowering (emitter-twin.ts) hands it an erased
+      // twin; the marker the reload left finds it.
+      const k = twinMarkOf(args[1]!);
+      const id = k === null ? null : twinIdentOf(args[1]!, k);
+      if (id !== null) {
+        const tw = L.lowerExpr(id);
+        if (tw.type.kind === "func") {
+          return {
+            kind: "libCall",
+            fn: "emitter.onTwin",
+            args: [receiver, strLit(name, loc), cb, boolLit(once, loc), boolLit(prepend, loc), tw],
+            type: receiver.type,
+            loc,
+          };
+        }
+      }
+      L.twinCandidates.push(args[1]!);
     }
     return {
       kind: "libCall",

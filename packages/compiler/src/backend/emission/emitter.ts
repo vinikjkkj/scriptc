@@ -57,7 +57,7 @@ import { VtSlot, ClassMeta, emitStructDefs, vtEntriesFor, vtSlotParams, emitVtab
 import { emitCoroFrames, emitCoroSpawns, coroUnwind } from "./emit-coro.js";
 import { coroPlans } from "../../ir/coro-plans.js";
 import { genCoroUnwind } from "./emit-gen-coro.js";
-import { agenSettleThunkFor, emitterBoxedOnFor, emitAsyncScaffolding, childDataThunkFor, childExitThunkFor, childExitThunkFor2, closeBindThunkFor, connectSockThunkFor, closeOverrideWrapFor, dgramMsgThunkFor, dnsLookupThunkFor, fsStatThunkFor, netLookupAnswerThunkFor, emitterInvokeThunkFor, streamCbThunkFor, streamDataThunkFor, promiseAdoptAdapterFor, raceAdapterFor, resolveThunkFor, sniAnswerThunkFor } from "./emit-async.js";
+import { agenSettleThunkFor, emitterBoxedOnFor, emitterTwinOnFor, emitAsyncScaffolding, childDataThunkFor, childExitThunkFor, childExitThunkFor2, closeBindThunkFor, connectSockThunkFor, closeOverrideWrapFor, dgramMsgThunkFor, dnsLookupThunkFor, fsStatThunkFor, netLookupAnswerThunkFor, emitterInvokeThunkFor, streamCbThunkFor, streamDataThunkFor, promiseAdoptAdapterFor, raceAdapterFor, resolveThunkFor, sniAnswerThunkFor } from "./emit-async.js";
 import { emitNpmEmbedding, islandAdapter, islandTypedAdapter } from "./emit-island.js";
 import { emitFunction, emitBlock, emitStmts, emitStmt, emitTryCatch, emitSwitch, mergeBrace, emitBranchInto, emitCondition } from "./emit-stmts.js";
 import fs from "node:fs";
@@ -592,10 +592,14 @@ export class CEmitter {
   /** Typed-listener registration wrappers that also carry the listener's dyn box
    * (emitterBoxedOnFor), interned per listener func-type key. */
   readonly emitterBoxedOns = new Map<string, string>();
+  readonly emitterTwinOns = new Map<string, string>();
   private emitterBoxesListenersMemo: boolean | undefined;
   /** Does a typed listener registration carry its dyn function box (moduleBoxesEmitters)? */
   get emitterBoxesListeners(): boolean {
     return (this.emitterBoxesListenersMemo ??= moduleBoxesEmitters(this.mod));
+  }
+  emitterTwinOnFor(cbT: IrType & { kind: "func" }, twT: IrType & { kind: "func" }): string {
+    return emitterTwinOnFor(this, cbT, twT);
   }
   emitterBoxedOnFor(cbT: IrType & { kind: "func" }): string {
     return emitterBoxedOnFor(this, cbT);

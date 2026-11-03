@@ -6117,6 +6117,11 @@ export type IrLibFn =
   | "emitter.new"
   | "emitter.ctor"
   | "emitter.on"
+  /* emitter.onTwin: (recv, name, cb /moves/, once, prepend, twin /moves/) -- emitter.on for a listener a
+   * dynamic emit can reach: `twin` is the SAME listener lowered a second time with its annotated parameter
+   * types erased to dyn (frontend twin reload), the function a dynamic-list emit calls so the listener sees
+   * each value exactly as Node passes it. cb stays what the static emits invoke. */
+  | "emitter.onTwin"
   | "emitter.off"
   | "emitter.checkListener"
   | "emitter.onDyn"
@@ -13806,6 +13811,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "emitter.emitError",
   "emitter.emitDyn",
   "emitter.on",
+  "emitter.onTwin",
   "emitter.off",
   "emitter.checkListener",
   "emitter.onDyn",
