@@ -12215,6 +12215,43 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/23950-instance-read-through-record-members.ts": {
+   "order": [
+    "<repo>/tests/corpus/23950-instance-read-through-record-members.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23951-instance-read-through-record-union.ts": {
+   "order": [
+    "<repo>/tests/corpus/23951-instance-read-through-record-union.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23952-instance-read-through-record-class-arm-first.ts": {
+   "order": [
+    "<repo>/tests/corpus/23952-instance-read-through-record-class-arm-first.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23953-instance-read-through-record-index-signature.ts": {
+   "order": [
+    "<repo>/tests/corpus/23953-instance-read-through-record-index-signature.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23954-instance-read-through-record-tostring.ts": {
+   "order": [
+    "<repo>/tests/corpus/23954-instance-read-through-record-tostring.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23955-instance-read-through-record-js-twin/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/23955-instance-read-through-record-js-twin/lib.js",
+    "<repo>/tests/corpus/23955-instance-read-through-record-js-twin/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2396-born-narrowed-decl.ts": {
    "order": [
     "<repo>/tests/corpus/2396-born-narrowed-decl.ts"
