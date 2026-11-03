@@ -50,6 +50,7 @@ import { lowerDateLocaleFormat } from "./lower-numfmt.js";
 import { STATS_TYPE_INDEX, KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, CHILD_T, CHILDSTREAM_T, DYN, F64, FSWATCHER_T, PROCSTREAM_T, IrExpr, IrFunction, IrLibFn, IrLocal, IrStmt, IrType, JSVAL, NULL_T, SEARCH_PARAMS_T, SPAWNRES_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, DATE_T, canBoxFuncIntoDyn, canConvertToDyn, funcOf, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
 import { FN_CTOR_EXPORT_GLOBALS, jsonModuleOfRequire } from "./lower-modules.js";
 import { requireDepValueOf } from "./lower-island.js";
+import { lowerProvenRuntimeRequire } from "./lower-require-dead.js";
 
 
 
@@ -579,6 +580,11 @@ import { requireDepValueOf } from "./lower-island.js";
     // the old fence rather than handing that context a dyn.
     const mapped = L.mapTypeOf(L.typeOf(call));
     if (mapped !== null && mapped.kind !== "dyn") return null;
+    // A require whose enclosing function a whole-file value-flow proof pins
+    // down (never invoked, or invoked only with specifiers Node cannot
+    // resolve) is exact without any module value (lower-require-dead).
+    const proven = lowerProvenRuntimeRequire(L, call, loc);
+    if (proven !== null) return proven;
     return runtimeSpecifierRequire(L, call);
   }
 

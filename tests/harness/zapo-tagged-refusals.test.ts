@@ -123,6 +123,13 @@ const PLANTS: readonly {
     name: "require-with-a-computed-specifier",
     ext: "cjs",
     zapoSite: "spec/proto/index.js:1 -- protobufjs inquire()'s require(moduleName)",
+    // sq4 (2026-11-03): zapo's own site CLOSED (see the CLOSED row
+    // `require-with-a-computed-specifier-never-invoked`: the function holding
+    // the run-time require is proved never invoked), and a call whose every
+    // specifier Node cannot resolve ('long' absent) is now exact too. What
+    // is left of this plant is the case that genuinely needs a module
+    // VALUE: 'buffer' resolves in Node, and a builtin namespace has no value
+    // form (docs/sonnet-queue.md item 3), so the build still refuses it.
     // ONE ARM now, and the change is the point. This used to reach the
     // callee-as-a-VALUE fence, which named whatever the checker had made
     // of the `require` binding: with @types/node adopted the named
@@ -150,7 +157,7 @@ const PLANTS: readonly {
       "  } catch (e) { /* Node's MODULE_NOT_FOUND -- protobufjs swallows it */ }",
       "  return null",
       "}",
-      "console.log('inquire', String(inquire('long')))",
+      "console.log('inquire', String(typeof inquire('buffer')))",
       "",
     ].join("\n"),
   },
@@ -173,6 +180,27 @@ const CLOSED: readonly {
   provedBy: string;
   src: string;
 }[] = [
+  {
+    name: "require-with-a-computed-specifier-never-invoked",
+    ext: "cjs",
+    zapoSite: "spec/proto/index.js:1:5701 -- protobufjs inquire()'s require(moduleName), bundled by esbuild",
+    provedBy:
+      "tests/corpus/23300 (never invoked), 23301 (called through the exported util object with " +
+      "specifiers Node cannot resolve), 23302 (the exact MODULE_NOT_FOUND escaping), 23303 " +
+      "(verbatim inquire with constant callers), 23304 (module cycle); every one byte-identical " +
+      "to Node on both backends, plus the negative controls in the sq4 report",
+    src: [
+      "\"use strict\";var e,t,n,o=Object.getOwnPropertyNames,r=(e,t)=>function(){return t||(0,e[o(e)[0]])((t={exports:{}}).exports,t),t.exports},",
+      "l=r({\"node_modules/protobufjs/src/util/inquire.js\"(e,t){t.exports=function(e){try{if(\"function\"!=typeof require)return null;var t=require(e);return t&&(t.length||Object.keys(t).length)?t:null}catch(e){return null}}}}),",
+      "y=r({\"node_modules/protobufjs/src/util/minimal.js\"(e){var t=e;t.inquire=l();t.isNode=true}}),",
+      "k=r({\"node_modules/protobufjs/src/roots.js\"(e,t){t.exports=Object.create(null)}}),",
+      "v=r({\"node_modules/protobufjs/src/index-minimal.js\"(e){var t=e;t.build=\"minimal\",t.util=y(),t.roots=k()}}),",
+      "_=r({\"node_modules/protobufjs/minimal.js\"(e,t){t.exports=v()}})(),M=_.util,j=_.roots.default||(_.roots.default={});",
+      "module.exports=j;",
+      "console.log(typeof M.isNode);",
+      "",
+    ].join("\n"),
+  },
   {
     name: "the-undici-dispatcher-written-onto-a-fetch-init",
     ext: "ts",
