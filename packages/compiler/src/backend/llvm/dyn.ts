@@ -3095,6 +3095,24 @@ export class LlDyn {
         B.line(`${cont} = fcmp olt double ${i}, ${len}`);
         B.condBr(cont, lb, le);
         B.startBlock(lb);
+        // A HOLE crosses as the dyn array's hole (the absent node), not as undefined.
+        const tdInc = B.newLabel("tda.inc");
+        if (elem.kind !== "bool") {
+          host.declare(`declare zeroext i1 @scr_arr_hole_at(ptr, double)`);
+          host.declare(`declare ptr @scr_dyn_absent()`);
+          host.declare(`declare void @scr_dyn_arr_push_slot(ptr, ptr)`);
+          const hole = B.tmp();
+          const lHole = B.newLabel("tda.hole");
+          const lElem = B.newLabel("tda.elem");
+          B.line(`${hole} = call zeroext i1 @scr_arr_hole_at(ptr %v, double ${i})`);
+          B.condBr(hole, lHole, lElem);
+          B.startBlock(lHole);
+          const ab = B.tmp();
+          B.line(`${ab} = call ptr @scr_dyn_absent()`);
+          B.line(`call void @scr_dyn_arr_push_slot(ptr ${d}, ptr ${ab})`);
+          B.br(tdInc);
+          B.startBlock(lElem);
+        }
         if (elem.kind === "f64" || elem.kind === "bool") {
           const acc = elem.kind;
           const accTy = elem.kind === "f64" ? "double" : "i1";
@@ -3119,6 +3137,8 @@ export class LlDyn {
           B.line(`call void @scr_dyn_arr_push(ptr ${d}, ptr ${conv})`);
           B.line(`call void ${releaseSym(host, elem)}(ptr ${e})`);
         }
+        B.br(tdInc);
+        B.startBlock(tdInc);
         const i2 = B.tmp();
         B.line(`${i2} = fadd double ${i}, ${f64Lit(1)}`);
         B.line(`store double ${i2}, ptr ${iSlot}`);

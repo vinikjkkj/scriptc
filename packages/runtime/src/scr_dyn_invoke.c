@@ -302,6 +302,7 @@ static size_t dyn_rel_index(double rel, size_t len) {
 static bool dyn_flatten_into(ScrDyn *out, ScrDyn *src, double depth) {
   size_t n = src->v.arr.len;
   for (size_t i = 0; i < n && i < src->v.arr.len; i++) {
+    if (scr_dyn_is_hole(src->v.arr.items[i])) continue; /* flat drops holes */
     ScrDyn *item = scr_dyn_retain(src->v.arr.items[i]);
     if (depth > 0 && item->kind == SCR_DYN_ARR) {
       bool ok = dyn_flatten_into(out, item, depth - 1);
@@ -488,6 +489,9 @@ static ScrStr *dyn_sort_str(const ScrDyn *e) {
   return scr_jb_finish(&b);
 }
 static int dyn_sort_compare(ScrDyn *x, ScrDyn *y, ScrDyn *cmp, bool *failed) {
+  /* values < undefined < holes (a hole sorts last, after the undefineds). */
+  bool xh = scr_dyn_is_hole(x), yh = scr_dyn_is_hole(y);
+  if (xh || yh) return (xh && yh) ? 0 : xh ? 1 : -1;
   bool xu = x->kind == SCR_DYN_UNDEF, yu = y->kind == SCR_DYN_UNDEF;
   if (xu || yu) return (xu && yu) ? 0 : xu ? 1 : -1;
   if (cmp) {
@@ -1962,7 +1966,7 @@ static ScrDyn *dyn_seq_snapshot(ScrDyn *recv, int mode) {
   ScrDyn *out = scr_dyn_new_arr();
   size_t n = recv->kind == SCR_DYN_ARR ? recv->v.arr.len : (size_t)scr_bytes_len(recv->v.bytes);
   for (size_t i = 0; i < n; i++) {
-    ScrDyn *el = recv->kind == SCR_DYN_ARR ? scr_dyn_retain(recv->v.arr.items[i])
+    ScrDyn *el = recv->kind == SCR_DYN_ARR ? scr_dyn_retain(scr_dyn_elem_val(recv->v.arr.items[i]))
                                            : scr_dyn_bytes_elem(recv->v.bytes, i);
     if (mode == 2) {
       scr_dyn_arr_push(out, el);
@@ -2613,14 +2617,14 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
     }
     if (dyn_name_is(method, "pop")) {
       if (len == 0) return scr_dyn_retain(scr_dyn_undefined());
-      return recv->v.arr.items[--recv->v.arr.len]; /* ownership moves out */
+      return scr_dyn_elem_val(recv->v.arr.items[--recv->v.arr.len]); /* ownership moves out (a hole is undefined) */
     }
     if (dyn_name_is(method, "shift")) {
       if (len == 0) return scr_dyn_retain(scr_dyn_undefined());
       ScrDyn *first = recv->v.arr.items[0];
       memmove(recv->v.arr.items, recv->v.arr.items + 1, (len - 1) * sizeof(ScrDyn *));
       recv->v.arr.len = len - 1;
-      return first; /* ownership moves out */
+      return scr_dyn_elem_val(first); /* ownership moves out (a hole is undefined) */
     }
     if (dyn_name_is(method, "unshift")) {
       /* Append first (the push path grows capacity and takes the +1s),
@@ -2698,7 +2702,7 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
       size_t start = dyn_rel_index(startD, len);
       size_t end = dyn_rel_index(endD, len);
       ScrDyn *out = scr_dyn_new_arr();
-      for (size_t i = start; i < end; i++) scr_dyn_arr_push(out, scr_dyn_retain(recv->v.arr.items[i]));
+      for (size_t i = start; i < end; i++) scr_dyn_arr_push_slot(out, scr_dyn_retain(recv->v.arr.items[i]));
       return out;
     }
     if (dyn_name_is(method, "at")) {
@@ -2706,14 +2710,14 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
       if (scr_exc_pending()) return NULL;
       double idx = iD < 0 ? (double)len + iD : iD;
       if (idx < 0 || idx >= (double)len) return scr_dyn_retain(scr_dyn_undefined());
-      return scr_dyn_retain(recv->v.arr.items[(size_t)idx]);
+      return scr_dyn_retain(scr_dyn_elem_val(recv->v.arr.items[(size_t)idx]));
     }
     if (dyn_name_is(method, "indexOf") || dyn_name_is(method, "lastIndexOf") ||
         dyn_name_is(method, "includes")) {
       ScrDyn *needle = argc > 0 ? args[0] : scr_dyn_undefined();
       if (dyn_name_is(method, "lastIndexOf")) {
         for (size_t i = len; i > 0; i--) {
-          if (scr_dyn_strict_eq(recv->v.arr.items[i - 1], needle)) return scr_dyn_new_num((double)(i - 1));
+          if (!scr_dyn_is_hole(recv->v.arr.items[i - 1]) && scr_dyn_strict_eq(recv->v.arr.items[i - 1], needle)) return scr_dyn_new_num((double)(i - 1));
         }
         return scr_dyn_new_num(-1);
       }
@@ -2723,6 +2727,7 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
       bool inc = dyn_name_is(method, "includes");
       for (size_t i = 0; i < len; i++) {
         ScrDyn *el = recv->v.arr.items[i];
+        if (!inc && scr_dyn_is_hole(el)) continue; /* indexOf skips holes; includes reads undefined */
         bool hit = scr_dyn_strict_eq(el, needle) ||
                    (inc && el->kind == SCR_DYN_NUM && needle->kind == SCR_DYN_NUM &&
                     el->v.num != el->v.num && needle->v.num != needle->v.num);
@@ -2782,11 +2787,11 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
     }
     if (dyn_name_is(method, "concat")) {
       ScrDyn *out = scr_dyn_new_arr();
-      for (size_t i = 0; i < len; i++) scr_dyn_arr_push(out, scr_dyn_retain(recv->v.arr.items[i]));
+      for (size_t i = 0; i < len; i++) scr_dyn_arr_push_slot(out, scr_dyn_retain(recv->v.arr.items[i]));
       for (size_t a = 0; a < argc; a++) {
         if (args[a]->kind == SCR_DYN_ARR) {
           for (size_t i = 0; i < args[a]->v.arr.len; i++) {
-            scr_dyn_arr_push(out, scr_dyn_retain(args[a]->v.arr.items[i]));
+            scr_dyn_arr_push_slot(out, scr_dyn_retain(args[a]->v.arr.items[i]));
           }
         } else {
           scr_dyn_arr_push(out, scr_dyn_retain(args[a]));
@@ -2811,8 +2816,15 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
       ScrDyn *out = (dyn_name_is(method, "map") || dyn_name_is(method, "filter")) ? scr_dyn_new_arr() : NULL;
       /* JS iterates the LIVE array (a push mid-loop is visited); reading
        * len fresh each step matches that. */
+      const bool visits_holes = dyn_name_is(method, "find") || dyn_name_is(method, "findIndex");
       for (size_t i = 0; i < recv->v.arr.len; i++) {
-        ScrDyn *item = scr_dyn_retain(recv->v.arr.items[i]);
+        /* forEach/map/filter/some/every skip holes (map keeps the hole in its
+         * result); find/findIndex visit them as undefined. */
+        if (!visits_holes && scr_dyn_is_hole(recv->v.arr.items[i])) {
+          if (dyn_name_is(method, "map")) scr_dyn_arr_push_slot(out, scr_dyn_retain(scr_dyn_absent()));
+          continue;
+        }
+        ScrDyn *item = scr_dyn_retain(scr_dyn_elem_val(recv->v.arr.items[i]));
         ScrDyn *r = dyn_call_cb(cb, item, i, recv);
         if (!r) { scr_dyn_release(item); scr_dyn_release(out); return NULL; }
         if (dyn_name_is(method, "map")) {
@@ -2857,7 +2869,7 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
         /* the first PRESENT element seeds the accumulator */
         for (; k < len0 && acc == NULL; k++) {
           const size_t i = right ? len0 - 1 - k : k;
-          if (i < recv->v.arr.len) acc = scr_dyn_retain(recv->v.arr.items[i]);
+          if (i < recv->v.arr.len && !scr_dyn_is_hole(recv->v.arr.items[i])) acc = scr_dyn_retain(recv->v.arr.items[i]);
         }
         if (acc == NULL) {
           static const char msg[] = "Reduce of empty array with no initial value";
@@ -2868,6 +2880,7 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
       for (; k < len0; k++) {
         const size_t i = right ? len0 - 1 - k : k;
         if (i >= recv->v.arr.len) continue; /* the callback shrank it: a missing index is skipped */
+        if (scr_dyn_is_hole(recv->v.arr.items[i])) continue; /* reduce skips holes */
         ScrDyn *item = scr_dyn_retain(recv->v.arr.items[i]);
         ScrDyn *idx = scr_dyn_new_num((double)i);
         ScrDyn *av[4] = { acc, item, idx, recv };
@@ -2891,7 +2904,7 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
       for (size_t step = 0; step < len0; step++) {
         const size_t i = len0 - 1 - step;
         /* findLast visits EVERY index (a shrunk one reads undefined) */
-        ScrDyn *item = i < recv->v.arr.len ? scr_dyn_retain(recv->v.arr.items[i]) : scr_dyn_retain(scr_dyn_undefined());
+        ScrDyn *item = i < recv->v.arr.len ? scr_dyn_retain(scr_dyn_elem_val(recv->v.arr.items[i])) : scr_dyn_retain(scr_dyn_undefined());
         scr_dyn_this_push_dyn(thisArg);
         ScrDyn *r = dyn_call_cb(cb, item, i, recv);
         scr_dyn_this_pop();
@@ -2989,6 +3002,7 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
       ScrDyn *out = scr_dyn_new_arr();
       size_t n = recv->v.arr.len;
       for (size_t i = 0; i < n && i < recv->v.arr.len; i++) {
+        if (scr_dyn_is_hole(recv->v.arr.items[i])) continue; /* flatMap skips holes */
         ScrDyn *item = scr_dyn_retain(recv->v.arr.items[i]);
         ScrDyn *r = dyn_call_cb(cb, item, i, recv);
         scr_dyn_release(item);
@@ -3059,7 +3073,7 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
        * result — nothing below releases those slots, which is what makes
        * the moves that follow reference-neutral. */
       ScrDyn *out = scr_dyn_new_arr();
-      for (size_t i = 0; i < del; i++) scr_dyn_arr_push(out, recv->v.arr.items[start + i]);
+      for (size_t i = 0; i < del; i++) scr_dyn_arr_push_slot(out, recv->v.arr.items[start + i]);
       /* Room for a longer array comes from the ordinary push path (it owns
        * capacity growth). EVERY slot above the old length is overwritten below
        * — [start, start+ins) by the inserts and [start+ins, newLen) by the

@@ -692,7 +692,8 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
       `  size_t n = (size_t)scr_arr_len(a);`,
       `  for (size_t i = 0; i < n; i++) {`,
       `    if (i) for (size_t j = 0; j < sep->len; j++) scr_jb_putc(&b, sep->data[j]);`,
-      `    ScrUnion *u = (ScrUnion *)scr_arr_get_ref(a, (double)i);`,
+      `    ScrUnion *u = (ScrUnion *)scr_arr_get_ref_or(a, (double)i, NULL);`,
+      `    if (u == NULL) continue; /* a HOLE joins as empty */`,
       ...(unitTags.length > 0
         ? [`    if (${unitTags.map((t) => `u->tag == ${t}`).join(" || ")}) { scr_union_release(u); continue; }`]
         : []),
@@ -1195,6 +1196,8 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         d.push(`  for (size_t i = 0; i < v->len; i++) {`);
         d.push(`    if (i > 0) scr_jb_putc(b, ',');`);
         if (cyclic) d.push(`    scr_jb_edge_idx(b, i);`);
+        // A HOLE serializes as null (Node: JSON.stringify([,1]) is "[null,1]").
+        if (elem.kind !== "bool") d.push(`    if (scr_arr_slot_is_hole(v, i)) { scr_jb_puts(b, "null"); continue; }`);
         if (elem.kind === "f64") {
           d.push(`    ${w}(b, scr_arr_get_f64(v, (double)i));`);
         } else if (elem.kind === "bool") {
@@ -3664,6 +3667,8 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         if (cyclicArr) d.push(`  scr_dyn_from_enter(v);`);
         d.push(`  ScrDyn *d = scr_dyn_new_arr();`);
         d.push(`  for (size_t i = 0; i < v->len; i++) {`);
+        // A HOLE crosses as the dyn array's hole (the absent node), not as undefined.
+        if (elem.kind !== "bool") d.push(`    if (scr_arr_slot_is_hole(v, i)) { scr_dyn_arr_push_slot(d, scr_dyn_retain(scr_dyn_absent())); continue; }`);
         if (elem.kind === "f64") {
           d.push(`    scr_dyn_arr_push(d, scr_dyn_new_num(scr_arr_get_f64(v, (double)i)));`);
         } else if (elem.kind === "bool") {

@@ -10549,22 +10549,36 @@ export class Lowerer {
           },
           body: [
             {
-              kind: "exprStmt",
-              expr: {
-                kind: "arrIntrinsic",
-                method: "push",
-                receiver: ref("out.0", outT),
-                args: [
-                  this.applyWidthLift(
-                    elemLift,
-                    { kind: "arrayGet", arr: ref("a.0", arrT), index: ref("i.0", f64), type: fromElem, loc },
-                    toElem,
-                    loc,
-                  ),
-                ],
-                type: f64,
+              // A HOLE stays a hole in the widened copy (the slot is not an element to lift).
+              kind: "if",
+              cond: { kind: "arrIntrinsic", method: "hasIndex", receiver: ref("a.0", arrT), args: [ref("i.0", f64)], type: BOOL, loc },
+              then: [{
+                kind: "exprStmt",
+                expr: {
+                  kind: "arrIntrinsic",
+                  method: "push",
+                  receiver: ref("out.0", outT),
+                  args: [
+                    this.applyWidthLift(
+                      elemLift,
+                      { kind: "arrayGet", arr: ref("a.0", arrT), index: ref("i.0", f64), type: fromElem, loc },
+                      toElem,
+                      loc,
+                    ),
+                  ],
+                  type: f64,
+                  loc,
+                },
                 loc,
-              },
+              }],
+              else_: [{
+                kind: "exprStmt",
+                expr: {
+                  kind: "arrIntrinsic", method: "setLength", receiver: ref("out.0", outT),
+                  args: [{ kind: "bin", op: "+", left: ref("i.0", f64), right: num(1), type: f64, loc }], type: { kind: "void" }, loc,
+                },
+                loc,
+              }],
               loc,
             },
           ],

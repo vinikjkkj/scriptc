@@ -2956,6 +2956,15 @@ export type IrArrIntrinsicMethod =
    * question behind Node's `a[i] !== undefined` for a dense array (a
    * negative, fractional, NaN or past-the-end index reads undefined). */
   | "hasIndex"
+  /** `hasHoles()` -> bool: some slot is a HOLE (the in-band marker; see scr_arr_slot_is_hole). */
+  | "hasHoles"
+  /** `compactHoles()` -> f64: move every HOLE to the end (the present elements keep their order) and
+   * answer how many are present. sort()'s first step: holes sort after everything. */
+  | "compactHoles"
+  /** `pushAll(src)` -> length: append src's slots in order, HOLES KEPT (concat's copy; pushSpread yields undefined for them). */
+  | "pushAll"
+  /** `delete a[i]` -> void: the slot at an in-range integer index becomes a HOLE (a miss is a no-op). */
+  | "clearIndex"
   /** `a.length = n` — JS's two-in-one: shrinking DROPS the tail
    * (refcounted elements release), growing appends ABSENT slots, n equal
    * to the current length is a no-op. Which one happens is a RUNTIME
@@ -7391,7 +7400,7 @@ export type IrExpr =
    * untouched). Allocates; the result is owned (+1); ownership of
    * refcounted plain elements MOVES into the array, spread sources are
    * BORROWED (their elements copy in retained). */
-  | { kind: "arrayLit"; elems: IrExpr[]; spreads?: number[]; type: IrType; loc: SrcLoc }
+  | { kind: "arrayLit"; elems: IrExpr[]; spreads?: number[]; /** Positions that are elisions (`[1,,3]`): the slot is a HOLE; the element there is a typed placeholder that is never emitted. */ holes?: number[]; type: IrType; loc: SrcLoc }
   /** Mapper-less `Array.from({ length: n })` — a length-n array of ABSENT
    * slots: unions carrying an undefined arm hold the interned undefined
    * instance (reads are JS-exact), every other refcounted element kind
@@ -8042,7 +8051,7 @@ export type IrExpr =
    * where the callee's rest slot is one checked-dynamic array, so the
    * array's length is the call's arity and no fixed ABI slot has to be
    * decided at compile time. */
-  | { kind: "dynArrLit"; elems: IrExpr[]; spreads?: { at: number; what: string | null }[]; type: IrType; loc: SrcLoc }
+  | { kind: "dynArrLit"; elems: IrExpr[]; spreads?: { at: number; what: string | null }[]; /** Element positions that are elisions (`[1,,3]`): the slot is a HOLE, not undefined. */ holes?: number[]; type: IrType; loc: SrcLoc }
   /** The `Array` CONSTRUCTOR over a runtime-arity length — the dyn twin of
    * arrayNewLen, for `new Array(n)` where the element type has no static
    * home (`any[]` in a JavaScript source, an `unknown[]` slot). `arg` is
