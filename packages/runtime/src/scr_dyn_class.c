@@ -259,6 +259,13 @@ static ScrDyn *dyn_cls_ops_construct(const ScrDyn *fn, const ScrDyn *args, bool 
 
 static bool dyn_cls_ops_set(ScrDyn *recv, const ScrStr *key, const ScrDyn *value) {
   if (recv->kind == SCR_DYN_OBJINST) {
+    /* An emitter's own state cells (_events, _eventsCount, _maxListeners) are the registry's: a write would
+     * land in the run-time property table (or a field) and shadow nothing Node's emitter reads, so the
+     * write refuses loudly rather than diverge silently. */
+    if (scr_dyn_ee_ops != NULL && scr_dyn_objinst_emitter(recv) != NULL && scr_dyn_ee_ops->is_state(key->data, key->len)) {
+      scr_dyn_objinst_fence(recv, "assigning an EventEmitter state cell (_events, _eventsCount, _maxListeners)");
+      return true;
+    }
     /* Node writes the instance's real field. The compiler lists one
      * synthesized member, `%dynSet(key, value): boolean`, on every class a
      * dyn box can hold (dynSetFn): it runs what the static side would have
@@ -318,6 +325,11 @@ static bool dyn_cls_ops_set(ScrDyn *recv, const ScrStr *key, const ScrDyn *value
 
 /* -1: not ours (the caller's ladder runs); 0/1: the delete's answer. */
 static int dyn_cls_ops_delete(ScrDyn *recv, const ScrStr *key) {
+  if (recv->kind == SCR_DYN_OBJINST && scr_dyn_ee_ops != NULL && scr_dyn_objinst_emitter(recv) != NULL &&
+      scr_dyn_ee_ops->is_state(key->data, key->len)) {
+    scr_dyn_objinst_fence(recv, "'delete' of an EventEmitter state cell (_events, _eventsCount, _maxListeners)");
+    return 0;
+  }
   {
     /* The class's own `%dynDel(key): boolean` (dynDelFn) takes what a fixed
      * layout can hold -- a field whose slot admits undefined takes the
@@ -358,8 +370,95 @@ static int dyn_cls_ops_delete(ScrDyn *recv, const ScrStr *key) {
   return -1;
 }
 
+/* The run-time property table (%props) of an instance whose class carries one (rt_root 3 or 4):
+ * +1, or NULL when the table is not created yet. The table is an OBJ whose enumerable entries are
+ * the run-time keys; its own key order is the insertion order Node uses. */
+static ScrDyn *dyn_cls_props_bag(const ScrDyn *v) {
+  const ScrDynClassMember *m = scr_dyn_objinst_member(v, "%props", 6);
+  if (m == NULL || m->get == NULL) return NULL;
+  ScrDyn *b = m->get(v->v.inst.o); /* +1; NULL only when a read threw (none for a hidden field) */
+  if (b == NULL) return NULL;
+  if (b->kind != SCR_DYN_OBJ) {
+    scr_dyn_release(b);
+    return NULL;
+  }
+  return b;
+}
+
+/* True when `k` (a dyn string) is already in `keys`. */
+static bool dyn_keys_has(const ScrDyn *keys, const ScrDyn *k) {
+  const ScrStr *ks = scr_dyn_str_value(k);
+  for (size_t i = 0; i < keys->v.arr.len; i++) {
+    const ScrDyn *e = keys->v.arr.items[i];
+    const ScrStr *es = scr_dyn_str_value(e);
+    if (es->len == ks->len && memcmp(es->data, ks->data, ks->len) == 0) return true;
+  }
+  return false;
+}
+
+/* The ENUMERABLE keys of a run-time property table, in its own key order (+1 array of +1 strings).
+ * A table entry's value is a descriptor row (data flag, value, getter, setter, enumerable): an entry
+ * whose row says enumerable 0 is not listed, whatever the OBJ layer would say about it. */
+static ScrDyn *dyn_bag_keys(const ScrDyn *bag) {
+  ScrDyn *out = scr_dyn_new_arr();
+  size_t *ord = scr_dyn_obj_key_order(bag);
+  const size_t n = bag->v.obj.len;
+  for (size_t oi = 0; oi < n; oi++) {
+    const ScrDynEntry *e = &bag->v.obj.entries[ord != NULL ? ord[oi] : oi];
+    const ScrDyn *q = e->value;
+    if (e->key == NULL || q == NULL || q->kind != SCR_DYN_ARR) continue;
+    if (!(q->v.arr.len >= 5 && scr_dyn_truthy(q->v.arr.items[4]))) continue;
+    scr_dyn_arr_push(out, dyn_cls_objwalk_key(e->key, e->key_len));
+  }
+  free(ord);
+  return out;
+}
+
+/* Object.keys (and for-in's own keys) of an instance whose class carries a run-time property
+ * table: the EventEmitter's own three keys when the chain roots in EventEmitter (rt_root 3), then
+ * the enumerable declared and inferred members in creation order, then the table's enumerable keys
+ * in insertion order. A key listed already (a table key that re-defines a member) keeps its first
+ * place, as JS's [[OwnPropertyKeys]] does. */
+static ScrDyn *dyn_cls_props_keys(const ScrDyn *v) {
+  ScrDyn *keys = scr_dyn_new_arr();
+  if (scr_dyn_objinst_class_of(v)->rt_root == 3) {
+    static const char *const pre[] = {"_events", "_eventsCount", "_maxListeners"};
+    for (size_t i = 0; i < 3; i++) scr_dyn_arr_push(keys, dyn_cls_objwalk_key(pre[i], strlen(pre[i])));
+  }
+  const size_t nm = scr_dyn_objinst_member_count(v);
+  for (size_t i = 0; i < nm; i++) {
+    const ScrDynClassMember *m = scr_dyn_objinst_member_at(v, i);
+    if (scr_dyn_member_hidden(m, v->v.inst.o)) continue;
+    ScrDyn *k = dyn_cls_objwalk_key(m->name, m->len);
+    if (dyn_keys_has(keys, k)) scr_dyn_release(k);
+    else scr_dyn_arr_push(keys, k); /* the array takes the +1 */
+  }
+  ScrDyn *bag = dyn_cls_props_bag(v);
+  if (bag != NULL) {
+    ScrDyn *bk = dyn_bag_keys(bag);
+    scr_dyn_release(bag);
+    for (size_t i = 0; i < bk->v.arr.len; i++) {
+      ScrDyn *k = bk->v.arr.items[i];
+      if (dyn_keys_has(keys, k)) continue;
+      scr_dyn_arr_push(keys, scr_dyn_retain(k));
+    }
+    scr_dyn_release(bk);
+  }
+  return keys;
+}
+
 static ScrDyn *dyn_cls_ops_walk_error(const ScrDyn *v, ScrObjWalk mode) {
-  if (scr_dyn_objinst_class_of(v)->rt_root != 0) {
+  const unsigned char rt = scr_dyn_objinst_class_of(v)->rt_root;
+  if (rt == 3 || rt == 4) {
+    /* A run-time property table's keys are listed here (dyn_cls_props_keys); values and entries
+     * keep the loud fence, since the table's values are not a row of the class. */
+    if (mode != SCR_OBJWALK_KEYS) {
+      scr_dyn_objinst_fence(v, mode == SCR_OBJWALK_VALUES ? "Object.values" : "Object.entries");
+      return NULL;
+    }
+    return dyn_cls_props_keys(v);
+  }
+  if (rt != 0) {
     /* A class rooted in the runtime's EventEmitter has the own enumerable keys _events,
      * _eventsCount and _maxListeners ahead of the program's fields. The key LIST is a fact of
      * the class (the values are the emitter's own state, which no row states), so Object.keys
@@ -565,12 +664,23 @@ static ScrStr *dyn_cls_objinst_to_string(const ScrDyn *d) {
   return ps;
 }
 
+static int dyn_cls_objinst_props_has(const ScrDyn *d, const ScrStr *key) {
+  const unsigned char rt = scr_dyn_objinst_class_of(d)->rt_root;
+  if (rt != 3 && rt != 4) return -1;
+  ScrDyn *bag = dyn_cls_props_bag(d);
+  if (bag == NULL) return 0;
+  const ScrDyn *e = scr_dyn_obj_get(bag, key->data, key->len);
+  scr_dyn_release(bag);
+  return e != NULL ? 1 : 0;
+}
+
 static const ScrDynClassOps dyn_cls_ops_impl = {
   dyn_cls_impl_box, dyn_cls_impl_of_value,
   dyn_cls_impl_err_get, dyn_cls_impl_err_set, dyn_cls_impl_err_has, dyn_cls_impl_err_delete,
   dyn_cls_ops_fn_get, dyn_cls_ops_construct, dyn_cls_ops_set, dyn_cls_ops_delete, dyn_cls_ops_walk_error,
   dyn_cls_ops_error_rooted, dyn_cls_ops_error_instanceof,
   dyn_cls_objinst_to_primitive, dyn_cls_objinst_to_string, dyn_cls_objinst_user_tostring,
+  dyn_cls_objinst_props_has,
 };
 
 void scr_dyn_class_install(void) { scr_dyn_class_ops = &dyn_cls_ops_impl; }
@@ -610,13 +720,28 @@ static bool ee_rooted_instance(const ScrDyn *v) {
   return v != NULL && v->kind == SCR_DYN_OBJINST && scr_dyn_objinst_class_of(v)->rt_root == 1;
 }
 
+/* An instance whose chain roots in EventEmitter, with or without a run-time property table (rt_root 1 or 3):
+ * the inherited EventEmitter.prototype keys are visited. */
+static bool ee_keys_instance(const ScrDyn *v) {
+  if (v == NULL || v->kind != SCR_DYN_OBJINST) return false;
+  const unsigned char rt = scr_dyn_objinst_class_of(v)->rt_root;
+  return rt == 1 || rt == 3;
+}
+
+/* An instance with a run-time property table (rt_root 3 or 4). */
+static bool props_instance(const ScrDyn *v) {
+  if (v == NULL || v->kind != SCR_DYN_OBJINST) return false;
+  const unsigned char rt = scr_dyn_objinst_class_of(v)->rt_root;
+  return rt == 3 || rt == 4;
+}
+
 ScrDyn *scr_dyn_forin_keys(const ScrDyn *v) {
   ScrDyn *keys = scr_dyn_obj_keys(v);
   /* A native handle's inherited enumerable members (a Stats box's prototype, listed by its unit). */
   if (keys != NULL && v->kind == SCR_DYN_HANDLE && scr_handle_forin_hook != NULL && keys->kind == SCR_DYN_ARR) {
     scr_handle_forin_hook(v, keys);
   }
-  if (keys == NULL || !ee_rooted_instance(v)) return keys;
+  if (keys == NULL || !ee_keys_instance(v)) return keys;
   for (size_t i = 3; i < SCR_EE_PROTO_KEY_COUNT; i++) { /* [0..2] are the emitter's own keys, listed already */
     const char *name = SCR_EE_PROTO_KEYS[i];
     const size_t len = strlen(name);
@@ -636,15 +761,32 @@ bool scr_dyn_forin_certain(const ScrDyn *v, const ScrStr *key) {
       scr_handle_inherited_has_hook(v, key->data, key->len)) {
     return true;
   }
-  if (!ee_rooted_instance(v) || key == NULL) return false;
+  if (key == NULL || !(ee_keys_instance(v) || props_instance(v))) return false;
   const char *s = key->data;
   const size_t n = key->len;
+  const unsigned char rt = scr_dyn_objinst_class_of(v)->rt_root;
   static const char *const own_pre[] = {"_events", "_eventsCount", "_maxListeners"};
-  for (size_t i = 0; i < 3; i++) {
+  for (size_t i = 0; i < 3 && (rt == 1 || rt == 3); i++) {
     if (strlen(own_pre[i]) == n && memcmp(own_pre[i], s, n) == 0) return true;
   }
   const ScrDynClassMember *m = scr_dyn_objinst_member(v, s, n);
   if (m != NULL) return !scr_dyn_member_hidden(m, v->v.inst.o);
+  if (props_instance(v)) {
+    /* A table key is visited while the table lists it (enumerable): the same key list Object.keys walks. */
+    ScrDyn *bag = dyn_cls_props_bag(v);
+    bool listed = false;
+    if (bag != NULL) {
+      ScrDyn *bk = dyn_bag_keys(bag);
+      scr_dyn_release(bag);
+      for (size_t i = 0; i < bk->v.arr.len && !listed; i++) {
+        const ScrStr *ks = scr_dyn_str_value(bk->v.arr.items[i]);
+        listed = ks->len == n && memcmp(ks->data, s, n) == 0;
+      }
+      scr_dyn_release(bk);
+    }
+    if (listed) return true;
+    if (rt == 4) return false;
+  }
   size_t idx = 0;
   return ee_proto_key_index(s, n, &idx);
 }
@@ -652,6 +794,6 @@ bool scr_dyn_forin_certain(const ScrDyn *v, const ScrStr *key) {
 /* for-in's own-key test for every receiver that is NOT EventEmitter-rooted (the same answer
  * Object.hasOwn gives). EventEmitter-rooted instances answer through scr_dyn_forin_certain. */
 bool scr_dyn_forin_plain(const ScrDyn *v, const ScrStr *key) {
-  if (ee_rooted_instance(v)) return false;
+  if (ee_keys_instance(v) || props_instance(v)) return false;
   return scr_dyn_has_own(v, key);
 }
