@@ -11302,6 +11302,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/23456-emitter-events-emitting-counter.ts": {
+   "order": [
+    "<repo>/tests/corpus/23456-emitter-events-emitting-counter.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23457-emitter-once-wrapper-call-and-cell-writes.ts": {
+   "order": [
+    "<repo>/tests/corpus/23457-emitter-once-wrapper-call-and-cell-writes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23458-dyn-keyed-writes-without-an-emitter.ts": {
+   "order": [
+    "<repo>/tests/corpus/23458-dyn-keyed-writes-without-an-emitter.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2350-nan-global.ts": {
    "order": [
     "<repo>/tests/corpus/2350-nan-global.ts"
@@ -22144,9 +22162,21 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/emitter-for-in-key-value-escapes-refused.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/emitter-for-in-key-value-escapes-refused.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/emitter-projection-declines.ts": {
    "order": [
     "<repo>/tests/diagnostics/emitter-projection-declines.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/emitter-state-cell-dyn-writes-refused.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/emitter-state-cell-dyn-writes-refused.ts"
    ],
    "diags": []
   },
