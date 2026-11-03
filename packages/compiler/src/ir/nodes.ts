@@ -10913,6 +10913,8 @@ function makeFreshObjectTest(functions: readonly IrFunction[]): (e: unknown) => 
     const x = e as N | null | undefined;
     if (x === null || x === undefined) return false;
     if (x.kind === "dynObjLit") return true;
+    // Error.prototype (protobufjs's `Object.create(Error.prototype, { ... })`) and a null-prototype object are built-ins, no instance.
+    if (x.kind === "libCall" && ((x as { fn?: string }).fn === "dyn.errorProto" || (x as { fn?: string }).fn === "dyn.objCreateNullProto")) return true;
     if (x.kind === "dynFrom") {
       const inner = x.value;
       return inner?.kind === "unitLit" || (inner?.type?.kind !== undefined && FRESH_TYPES.has(inner.type.kind));
