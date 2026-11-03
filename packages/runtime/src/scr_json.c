@@ -7576,7 +7576,11 @@ void scr_dyn_own_names_ctor(ScrDyn *names, const ScrDyn *o) {
    * table's insertion order, right after `constructor`. */
   if (o->kind == SCR_DYN_OBJ && o->v.obj.len == 0 && scr_dyn_ext(o)->hidden != NULL) {
     const ScrDyn *h = scr_dyn_ext(o)->hidden;
-    for (size_t i = 0; i < h->v.obj.len; i++) scr_dyn_arr_push(names, scr_dyn_objwalk_key(h->v.obj.entries[i].key, h->v.obj.entries[i].key_len));
+    for (size_t i = 0; i < h->v.obj.len; i++) {
+      /* `constructor` was put at index 0 above: a hidden row of the same name (an assignment kept its attributes) is that property. */
+      if (h->v.obj.entries[i].key_len == 11 && memcmp(h->v.obj.entries[i].key, "constructor", 11) == 0) continue;
+      scr_dyn_arr_push(names, scr_dyn_objwalk_key(h->v.obj.entries[i].key, h->v.obj.entries[i].key_len));
+    }
   }
 }
 
