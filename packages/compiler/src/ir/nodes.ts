@@ -1787,6 +1787,12 @@ export interface IrClassDef {
    * OWN statics only (a subclass's table is flattened over its chain at
    * emission, derived first). Only classes some dyn box can hold carry it. */
   dynStatics?: { name: string; fn: string }[];
+  /** On the STATIC-SIDE class of a per-evaluation class (`%E.%static`): the
+   * name of the instance class `%E` it is the evaluation of. A dyn box of an
+   * evaluation is a class VALUE (a function object), not an instance box, and
+   * its descriptor names the base the `[class X extends Y]` line prints from
+   * this class's chain. */
+  evalOf?: string;
   /** Declared `abstract class` — never instantiated (tsc rejects `new` on
    * it, including through class values), so its own vtable entries for
    * abstract slots may stay empty. */
@@ -9242,15 +9248,16 @@ export const GRAFTED_EMITTER_CLASSES = new Set<string>();
 
 /** The per-evaluation STATIC-SIDE classes (frontend/lowering/lower-evalclass.ts):
  * objects standing for a CLASS VALUE minted by a class expression inside a
- * function. Their dyn view would be a bag of hidden captured fields, not a
- * class, so they never box. Per lowering, reset with the set above. */
+ * function. They box into dyn as a class VALUE (a function object that holds the
+ * evaluation: scr_dyn_new_evalclass), never as an instance bag of hidden captured
+ * fields. Per lowering, reset with the set above. */
 export const EVAL_STATIC_CLASSES = new Set<string>();
 
 /** The hidden instance slot holding the ScrEmitter of an applyMixin(Y, EventEmitter) class. */
 export const EMITTER_MIXIN_FIELD_NAME = "__scrEmitter";
 
 export function canBoxClassIntoDyn(className: string): boolean {
-  return !RUNTIME_ERROR_CLASSES.has(className) && !EVAL_STATIC_CLASSES.has(className);
+  return !RUNTIME_ERROR_CLASSES.has(className);
 }
 
 /** A static type that CONVERTS into a dyn value — the dynFrom domain:
@@ -9294,6 +9301,9 @@ export function canConvertToDyn(
   // type does, which is what lets a deep-copying record carry a class
   // member without the copy lying about it.
   if (t.kind === "object" && canBoxClassIntoDyn(t.className)) return true;
+  // A CLASS VALUE boxes as a function object (scr_dyn_class_value; an
+  // evaluation's static side as a non-immortal one that holds the evaluation).
+  if (t.kind === "classval" && canBoxClassIntoDyn(t.className)) return true;
   if (t.kind === "func") return canBoxFuncIntoDyn(t, getRecord, getUnion, visiting);
   // A MAP or a SET boxes by REFERENCE (SCR_DYN_MAP): the retained ScrMap
   // plus the interned typeKey of THIS type, a static emitted literal
@@ -9736,6 +9746,9 @@ export function canDynCheckTo(
   // walker below): the emitted matcher has an interval test to answer a
   // class leaf with, which is exactly what the handle kinds lack.
   if (t.kind === "object" && canBoxClassIntoDyn(t.className)) return true;
+  // The OUT direction of a declared class's VALUE: the function box's class descriptor names the class (a
+  // per-evaluation class value is an `object` of its static side, above).
+  if (t.kind === "classval" && canBoxClassIntoDyn(t.className) && !EVAL_STATIC_CLASSES.has(t.className)) return true;
   // A FUNCTION target, at the TOP level, answers exactly what the same
   // type answers as a nested LEAF (`nestedOk`'s func case below): YES,
   // unconditionally. The two used to disagree — the leaf said true with a
@@ -9918,6 +9931,11 @@ export function canDynCheckTo(
       const okObj = isDynErrorClass(x.className) || canBoxClassIntoDyn(x.className);
       nestedMemo.set(x, okObj);
       return okObj;
+    }
+    if (x.kind === "classval") {
+      const okCv = canBoxClassIntoDyn(x.className) && !EVAL_STATIC_CLASSES.has(x.className);
+      nestedMemo.set(x, okCv);
+      return okCv;
     }
     // A MAP or SET leaf — the record field a widened value carries one
     // container down, which is the ONLY shape zapo needs: the

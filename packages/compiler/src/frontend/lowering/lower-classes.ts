@@ -30,7 +30,7 @@ import { declSymbolOf } from "./lower-modules.js";
 import { boundedKeyValuesOf, uniqueSymbolKeyOf } from "./lower-exprs.js";
 import { isNetSocketCtor, lowerHttpAgentNew, lowerHttpServerNew, lowerNetSocketNew } from "./lower-server.js";
 import { ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedClassSymbolOf, ambientUndefinedFnSymbolOf, fenceEarlyAliasUse, fenceEarlyNsMemberRef, nsMemberIdentOf, nsUndefRead } from "./lower-namespaces.js";
-import { EVAL_ENV_SYM, ensureEvalClass, evalStaticInfoOf, isEvalClassNode, lowerEvalClassExpr, lowerEvalClassNew, lowerEvalClassProperty } from "./lower-evalclass.js";
+import { EVAL_ENV_SYM, dynNewArgExpr, ensureEvalClass, evalDynFns, evalInstanceDynFns, evalStaticInfoOf, isEvalClassNode, lowerEvalClassExpr, lowerEvalClassNew, lowerEvalClassProperty } from "./lower-evalclass.js";
 import { bodylessMixinCalleeOf, mixinResultBindingClassOf, type MixinInstanceInfo } from "./lower-mixins.js";
 
 /** The weak collections' constructor hints. Shared: the stdlib `new`
@@ -8814,16 +8814,15 @@ export function dynStaticFns(L: Lowerer, info: ClassInfo): { fns: IrFunction[]; 
     !L.inheritsBuiltinErrorCtor(info) &&
     !L.inheritsBuiltinEmitterCtor(info) &&
     !inheritsBuiltinStreamCtor(L, info) &&
-    info.ctorParams.every((p) => p.mode === "required" || p.mode === "omittable");
+    info.ctorParams.every((p) => p.mode === "required" || p.mode === "omittable" || p.mode === "rest" || p.mode === "dynRest");
   if (drivable) {
     const locals: IrLocal[] = [{ id: "args.0", name: "args", type: DYN, mutable: false }];
     const args: IrExpr[] = [];
     let ok = true;
     info.ctorParams.forEach((p, i) => {
-      const got: IrExpr = { kind: "dynKeyGet", key: { kind: "strLit", value: String(i), type: STRING, loc }, value: ref(locals[0]!), type: DYN, loc };
-      if (p.type.kind === "dyn") args.push(got);
-      else if (canDynCheckTo(p.type, getRec, getUni)) args.push({ kind: "dynCheck", value: got, type: p.type, loc });
-      else ok = false;
+      const a = dynNewArgExpr(L, p, i, ref(locals[0]!), loc);
+      if (a === null) ok = false;
+      else args.push(a);
     });
     if (ok) {
       const name = `%${className}.%dynNew`;
@@ -8950,8 +8949,20 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
           out.push(delFn);
           info.def.dynMethods = [...(info.def.dynMethods ?? []), { name: "%dynDel", fn: delFn.name }];
         }
+        // A per-evaluation class's instances answer `.constructor` with their evaluation's class value.
+        if (info.evalClass !== undefined) {
+          const ei = evalInstanceDynFns(L, info);
+          out.push(...ei.fns);
+          info.def.dynMethods = [...(info.def.dynMethods ?? []), ...ei.list];
+        }
+        // A per-evaluation static side: the members its class-value box answers through.
+        if (info.evalStaticOf !== undefined) {
+          const ev = evalDynFns(L, info);
+          out.push(...ev.fns);
+          info.def.dynMethods = [...(info.def.dynMethods ?? []), ...ev.list];
+        }
         // ...and the static side (dynStaticFns): the class value's table.
-        const stat = L.reachable?.has(`%${className}.%dynclass`) === true ? dynStaticFns(L, info) : null;
+        const stat = info.evalStaticOf === undefined && L.reachable?.has(`%${className}.%dynclass`) === true ? dynStaticFns(L, info) : null;
         if (stat !== null) {
           out.push(...stat.fns);
           info.def.dynStatics = stat.list;
@@ -12869,9 +12880,10 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
     // form (`new F(...xs)`) keeps the fence — the argument pack would
     // need the flattening walk `dynCall`'s spread arm has, and no
     // measured site spells it.
+    // The SPREAD form (`new C(...args)`, the pass-through factory) builds the same pack
+    // with the spreads flattened at run time (dynArrLit's `spreads`, as dynInvokeWithSpread).
     if (
-      (isJsSourceFile(expr.getSourceFile()) || (L.typeOf(expr.expression).flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0) &&
-      !(expr.arguments ?? []).some((a) => ts.isSpreadElement(a))
+      (isJsSourceFile(expr.getSourceFile()) || (L.typeOf(expr.expression).flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0)
     ) {
       // Two spellings reach the same runtime value. A receiver that
       // probes to DYN already IS the box (a module binding holding an
@@ -12897,11 +12909,17 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
           ? probed
           : fnOwnPropBox(L, calleeNode, loc);
       if (boxed) {
-        const args: IrExpr[] = [...(bound?.boundArgs ?? []), ...(expr.arguments ?? [])].map((a) =>
-          L.lowerExprExpecting(a, DYN),
-        );
+        const spreads: { at: number; what: string | null }[] = [];
+        const argNodes = [...(bound?.boundArgs ?? []), ...(expr.arguments ?? [])];
+        const args: IrExpr[] = argNodes.map((a, i) => {
+          if (a !== undefined && ts.isSpreadElement(a as ts.Node)) {
+            spreads.push({ at: i, what: i === argNodes.length - 1 ? (a as ts.SpreadElement).expression.getText() : null });
+            return L.lowerExprExpecting((a as ts.SpreadElement).expression, DYN);
+          }
+          return L.lowerExprExpecting(a, DYN);
+        });
         if (args.every((a) => a.type.kind === "dyn")) {
-          const pack: IrExpr = { kind: "dynArrLit", elems: args, type: DYN, loc };
+          const pack: IrExpr = { kind: "dynArrLit", elems: args, ...(spreads.length > 0 ? { spreads } : {}), type: DYN, loc };
           const what: IrExpr = {
             kind: "strLit",
             value: expr.expression.getText(),
@@ -14173,9 +14191,7 @@ function isClassPrototypeOf(L: Lowerer, e: ts.Expression): boolean {
   const d = sym ? L.checker.valueDeclarationOf(sym) : undefined;
   return d !== undefined && ts.isClassDeclaration(d);
 }
-
-
-/** True when `stmt` is `this.x = p` and `p` is an authored-JS parameter
+/** True when `stmt` is `this.x = p` and `p` is an authored-JS parameter
  * defaulted to an empty object literal (`p = {}`), the parameter the param
  * rule types checked-dynamic (lower-calls paramShape). Its checker type is
  * the empty `{}`, which has no members, so a field inferred from it would

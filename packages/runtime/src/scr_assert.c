@@ -432,7 +432,7 @@ static bool scr_assert_dyn_same_value(const ScrDyn *a, const ScrDyn *b) {
       return a->v.str->len == b->v.str->len &&
              memcmp(a->v.str->data, b->v.str->data, a->v.str->len) == 0;
     case SCR_DYN_FUNC:
-      return a == b || a->v.fn.clo == b->v.fn.clo;
+      return a == b || scr_dyn_fn_ident(a) == scr_dyn_fn_ident(b);
     case SCR_DYN_HANDLE:
       /* Identity is the HANDLE (the strict_eq stance). */
       return a->v.handle.tag == b->v.handle.tag && a->v.handle.ptr == b->v.handle.ptr;
@@ -564,7 +564,7 @@ static bool scr_assert_dyn_deep_eq(const ScrDyn *a, const ScrDyn *b) {
       return a->v.str->len == b->v.str->len &&
              memcmp(a->v.str->data, b->v.str->data, a->v.str->len) == 0;
     case SCR_DYN_FUNC:
-      return a->v.fn.clo == b->v.fn.clo;
+      return scr_dyn_fn_ident(a) == scr_dyn_fn_ident(b);
     case SCR_DYN_HANDLE:
       /* Node's deepStrictEqual over two distinct live handles walks own
        * enumerable props we do not model; same-handle is the only case a

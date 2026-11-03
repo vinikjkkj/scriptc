@@ -35,7 +35,7 @@
  * and declared before the class. Everything else keeps a NAMED fence. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, EVAL_STATIC_CLASSES, IrExpr, IrStmt, IrType, STRING, VOID, typeEquals } from "../../ir/nodes.js";
+import { BOOL, DYN, EVAL_STATIC_CLASSES, F64, IrExpr, IrFunction, IrLocal, IrStmt, IrType, STRING, VOID, canDynCheckTo, typeEquals } from "../../ir/nodes.js";
 import { bindingNeverReassigned } from "./lower-calls.js";
 import { locOf } from "../program.js";
 import { evalClassSyntaxOk, evalStaticClassName } from "../eval-class-syntax.js";
@@ -231,6 +231,7 @@ export function ensureEvalClass(L: Lowerer, expr: ts.ClassExpression): ClassInfo
     def: {
       name: staticName,
       jsName: info.def.jsName ?? "",
+      evalOf: info.def.name,
       fields: defFields,
       ...(methods.size > 0 ? { methods: [...methods.keys()] } : {}),
       loc,
@@ -298,11 +299,150 @@ export function lowerEvalClassExpr(L: Lowerer, expr: ts.ClassExpression, info: C
     return typeEquals(raw.type, c.type) ? raw : L.coerceInto(expr, raw, c.type);
   });
   L.noteEdge(`%${plan.staticName}.constructor`);
-  return { kind: "new", className: plan.staticName, args, type: objT, loc };
   // Every instance descends from an evaluation, so the evaluated class's own constructor is reachable
   // wherever the class is evaluated (a `new V()` through a container element or a dyn box has no site
   // of its own the discovery pass is guaranteed to see).
   L.noteEdge(`%${info.def.name}.constructor`);
+  return { kind: "new", className: plan.staticName, args, type: objT, loc };
+}
+
+/** One constructor argument of a `%dynNew(args)` function, checked out of the dyn argument array: parameter
+ * `i` reads `args[i]` (a missing one is undefined); a REST parameter takes `args.slice(i)` checked into its
+ * array type. Null when the parameter's type has no dyn check (the class then gets no `%dynNew`). */
+export function dynNewArgExpr(
+  L: Lowerer,
+  p: { mode: string; type: IrType },
+  i: number,
+  argsRef: IrExpr,
+  loc: import("../../ir/nodes.js").SrcLoc,
+): IrExpr | null {
+  const getRec = (id: string) => L.shapes.get(id);
+  const getUni = (id: string) => L.unions.get(id);
+  let got: IrExpr;
+  if (p.mode === "rest" || p.mode === "dynRest") {
+    got = {
+      kind: "dynInvoke", recv: argsRef, method: "slice", calleeName: "args.slice",
+      args: [{ kind: "dynFrom", value: { kind: "numLit", value: i, type: F64, loc }, type: DYN, loc }], type: DYN, loc,
+    };
+  } else {
+    got = { kind: "dynKeyGet", key: { kind: "strLit", value: String(i), type: STRING, loc }, value: argsRef, type: DYN, loc };
+  }
+  if (p.type.kind === "dyn") return got;
+  if (canDynCheckTo(p.type, getRec, getUni)) return { kind: "dynCheck", value: got, type: p.type, loc };
+  return null;
+}
+
+/** The two synthesized members a DYN BOX of an evaluation answers through, both
+ * instance methods of the static side (`this` = the evaluation), listed as
+ * dynMethods rows:
+ *
+ *   %dynNew(args): dyn       `new V(...args)` through the class value: each
+ *                            constructor parameter checked out of the dyn
+ *                            argument array (a missing one is undefined), the
+ *                            evaluation passed as the hidden trailing
+ *                            parameter, the instance boxed back by reference.
+ *   %dynIsInst(x): boolean   `x instanceof V`: x is an instance of the evaluated
+ *                            class AND carries this very evaluation.
+ *
+ * A class whose constructor cannot be driven that way (rest parameters, an
+ * inherited builtin constructor, abstract) gets no `%dynNew`: `new` through
+ * its value then meets the runtime's loud fence. */
+export function evalDynFns(L: Lowerer, staticInfo: ClassInfo): { fns: IrFunction[]; list: { name: string; fn: string }[] } {
+  const inst = staticInfo.evalStaticOf!;
+  const instName = inst.def.name;
+  const staticName = staticInfo.def.name;
+  const loc = locOf(staticInfo.decl!);
+  const fns: IrFunction[] = [];
+  const list: { name: string; fn: string }[] = [];
+  const staticT: IrType = { kind: "object", className: staticName };
+  const instT: IrType = { kind: "object", className: instName };
+  const ref = (l: IrLocal): IrExpr => ({ kind: "varRef", localId: l.id, type: l.type, loc });
+
+  // %dynNew(this, args)
+  const drivable =
+    inst.def.abstract !== true &&
+    !inst.generic &&
+    !L.inheritsBuiltinErrorCtor(inst) &&
+    !L.inheritsBuiltinEmitterCtor(inst) &&
+    inst.ctorParams.every((p) => p.mode === "required" || p.mode === "omittable" || p.mode === "rest" || p.mode === "dynRest");
+  if (drivable) {
+    const locals: IrLocal[] = [
+      { id: "this.0", name: "this", type: staticT, mutable: false },
+      { id: "args.0", name: "args", type: DYN, mutable: false },
+    ];
+    const args: IrExpr[] = [];
+    let ok = true;
+    inst.ctorParams.forEach((p, i) => {
+      const a = dynNewArgExpr(L, p, i, ref(locals[1]!), loc);
+      if (a === null) ok = false;
+      else args.push(a);
+    });
+    if (ok) {
+      args.push(ref(locals[0]!));
+      const name = `%${staticName}.%dynNew`;
+      fns.push({
+        name,
+        params: locals.map((l) => ({ localId: l.id, name: l.name, type: l.type })),
+        returnType: DYN,
+        locals,
+        body: [{
+          kind: "return",
+          value: { kind: "dynFrom", value: { kind: "new", className: instName, args, type: instT, loc }, type: DYN, loc },
+          loc,
+        }],
+        loc,
+      });
+      list.push({ name: "%dynNew", fn: name });
+    }
+  }
+
+  // %dynIsInst(this, x)
+  {
+    const locals: IrLocal[] = [
+      { id: "this.0", name: "this", type: staticT, mutable: false },
+      { id: "x.0", name: "x", type: DYN, mutable: false },
+    ];
+    const test: IrExpr = { kind: "dynTest", test: "class", className: instName, value: ref(locals[1]!), type: BOOL, loc };
+    const down: IrExpr = { kind: "dynCheck", value: ref(locals[1]!), type: instT, loc };
+    const clsOf: IrExpr = { kind: "fieldGet", obj: down, className: instName, field: "%cls", type: staticT, loc };
+    const same: IrExpr = { kind: "bin", op: "===", left: clsOf, right: ref(locals[0]!), type: BOOL, loc };
+    const name = `%${staticName}.%dynIsInst`;
+    fns.push({
+      name,
+      params: locals.map((l) => ({ localId: l.id, name: l.name, type: l.type })),
+      returnType: BOOL,
+      locals,
+      body: [{ kind: "return", value: { kind: "logical", op: "&&", left: test, right: same, type: BOOL, loc }, loc }],
+      loc,
+    });
+    list.push({ name: "%dynIsInst", fn: name });
+  }
+  return { fns, list };
+}
+
+/** `%E.%dynCls(this): dyn` on the INSTANCE class of a per-evaluation class, listed as the `%dynCls` row:
+ * `x.constructor` through a dyn box answers the evaluation the instance carries (its class value). */
+export function evalInstanceDynFns(L: Lowerer, info: ClassInfo): { fns: IrFunction[]; list: { name: string; fn: string }[] } {
+  const plan = info.evalClass!;
+  const loc = info.decl !== null ? locOf(info.decl) : info.def.loc;
+  const thisT: IrType = { kind: "object", className: info.def.name };
+  const locals: IrLocal[] = [{ id: "this.0", name: "this", type: thisT, mutable: false }];
+  const staticT: IrType = { kind: "object", className: plan.staticName };
+  const name = `%${info.def.name}.%dynCls`;
+  const get: IrExpr = {
+    kind: "fieldGet", obj: { kind: "varRef", localId: locals[0]!.id, type: thisT, loc }, className: info.def.name, field: "%cls", type: staticT, loc,
+  };
+  return {
+    fns: [{
+      name,
+      params: locals.map((l) => ({ localId: l.id, name: l.name, type: l.type })),
+      returnType: DYN,
+      locals,
+      body: [{ kind: "return", value: { kind: "dynFrom", value: get, type: DYN, loc }, loc }],
+      loc,
+    }],
+    list: [{ name: "%dynCls", fn: name }],
+  };
 }
 
 /** True for an object type naming a per-evaluation static side. */
@@ -357,6 +497,12 @@ export function lowerEvalClassProperty(L: Lowerer, expr: ts.PropertyAccessExpres
 export function lowerEvalClassInstanceOf(L: Lowerer, expr: ts.BinaryExpression, staticInfo: ClassInfo, loc: import("../../ir/nodes.js").SrcLoc): IrExpr {
   const inst = staticInfo.evalStaticOf!;
   const left = L.lowerExpr(expr.left);
+  if (left.type.kind === "dyn") {
+    // An untyped operand: the run-time test over the class value's box (scr_dyn_instance_of).
+    const right = L.lowerExpr(expr.right);
+    const rightBox: IrExpr = { kind: "dynFrom", value: right, type: DYN, loc };
+    return { kind: "libCall", fn: "dyn.instanceOf", args: [left, rightBox], type: BOOL, loc };
+  }
   if (left.type.kind !== "object") {
     L.unsupported("SC1090", expr, "'instanceof' on values other than class instances (narrow union-typed values first)");
   }
