@@ -10877,6 +10877,44 @@ export function dynReflectionSite(functions: readonly IrFunction[]): string | nu
   return found;
 }
 
+/** The writes and deletes a program that lets an EventEmitter instance reach a dynamic value may not contain,
+ * because the runtime cannot make them behave as events.js does: any delete of a dyn key, any write of a dyn
+ * key that is not a literal `_eventsCount` / `_maxListeners` stored with a number (the registry holds those two
+ * exactly), and any write of a literal `_events`. A write through a computed key is refused for the same
+ * reason: the key may be `_events`, and the receiver may be an emitter or its `_events` view (a live table in
+ * Node, a copy here). Returns the sites (loc + what). Plain dyn objects in a program that never boxes an emitter
+ * never reach this (the caller gates on moduleBoxesEmitters). */
+export function emitterStateWriteSites(functions: readonly IrFunction[]): { loc: SrcLoc; what: string }[] {
+  const CELLS = new Set(["_events", "_eventsCount", "_maxListeners"]);
+  const out: { loc: SrcLoc; what: string }[] = [];
+  const isNumberValue = (v: unknown): boolean => {
+    const n = v as { kind?: string; value?: { kind?: string; type?: { kind?: string } }; type?: { kind?: string } } | undefined;
+    if (n === undefined) return false;
+    if (n.kind === "dynFrom") return n.value?.type?.kind === "f64" || (n.value as { unit?: string } | undefined)?.unit === "undefined";
+    return n.type?.kind === "f64";
+  };
+  const visit = (v: unknown): void => {
+    if (v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const n = v as { kind?: string; fn?: string; args?: unknown[]; loc?: SrcLoc };
+    if (n.kind === "libCall" && (n.fn === "dyn.keySet" || n.fn === "dyn.keyDelete") && Array.isArray(n.args) && n.loc !== undefined) {
+      const key = n.args[1] as { kind?: string; value?: string } | undefined;
+      const lit = key?.kind === "strLit" ? key.value : undefined;
+      if (n.fn === "dyn.keyDelete") out.push({ loc: n.loc, what: lit !== undefined && CELLS.has(lit) ? `delete of ${lit}` : "delete through a dynamic key" });
+      else if (lit === undefined) out.push({ loc: n.loc, what: "write through a computed key" });
+      else if (lit === "_events") out.push({ loc: n.loc, what: "write of _events" });
+      else if ((lit === "_eventsCount" || lit === "_maxListeners") && !isNumberValue(n.args[2])) out.push({ loc: n.loc, what: `write of ${lit} with a value that is not a number` });
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  // The compiler's own synthesized members (%dynSet, %dynDel, ...) write the run-time property table by key.
+  for (const f of functions) if (!f.name.includes(".%")) visit(f.body);
+  return out;
+}
+
 /** The dynFrom sites that box an instance of a class grafted with the emitter API (loc of each). */
 export function graftedBoxSites(functions: readonly IrFunction[]): SrcLoc[] {
   const out: SrcLoc[] = [];
