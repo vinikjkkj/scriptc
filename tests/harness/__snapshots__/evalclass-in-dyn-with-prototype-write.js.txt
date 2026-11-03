@@ -1,0 +1,6 @@
+evalclass-in-dyn-with-prototype-write.js:5:23 - error SC1101: converting a class value minted by a class expression inside a function to 'unknown' in a program that also writes to a `prototype` object read from a dynamic value (an instance reaches its members through the class, not through that object, so the write would never be seen by `new V().m()`)
+
+  4 | function anyv(x) { return x; }
+  5 | const mk = (n = 0) => class W { m() { return n; } };
+    |                       ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  6 | const h = {}; h.W = mk(1);
