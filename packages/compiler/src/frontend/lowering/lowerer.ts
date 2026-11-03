@@ -3878,7 +3878,7 @@ export class Lowerer {
         // An emitter's state cells and `_events` table are its registry's: a program that lets one reach a dyn value
         // may not delete a dyn key or write one through a computed key (the key may be `_events`, the receiver the
         // emitter or its `_events` view), nor write `_events` or a non-number into `_eventsCount` / `_maxListeners`.
-        for (const s of emitterStateWriteSites(functions)) {
+        for (const s of emitterStateWriteSites(functions, defs)) {
           this.pushDiag(unsupportedDiag(
             "SC1090",
             s.loc,
