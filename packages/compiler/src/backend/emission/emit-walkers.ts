@@ -7,7 +7,7 @@
  * CEmitter and these functions only consult them through it. */
 import type { CEmitter } from "./emitter.js";
 import { rcSitesRequested } from "./emitter.js";
-import { accessorKeyOrderOf, accessorSlotProp, shapeHasAccessorSlots, VOID, arrayTypeHasLiveView, bytesAliasOnExtract, canConvertToDyn, canDynCheckTo, moduleUsesDynView, moduleUsesInstanceRecordLane } from "../../ir/nodes.js";
+import { accessorKeyOrderOf, accessorSlotProp, shapeHasAccessorSlots, VOID, arrayTypeHasLiveView, bytesAliasOnExtract, canConvertToDyn, canDynCheckTo, moduleUsesDynView, moduleInstanceLaneNeedsKg, moduleUsesInstanceRecordLane } from "../../ir/nodes.js";
 import { CLASS_PROPS_FIELD, EVAL_STATIC_CLASSES, dynNeverArm, dynNeverIn, armDiscrimLits, dynErrorClassKind, isDynErrorClass, canAdaptDynFuncTo, dynRestApplyable, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, UNION_ARM_JS_OBJECT_KINDS, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassStruct, mangleField, mangleFunction, mangleFnClosure, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
@@ -2586,7 +2586,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             const lt = shape.fields.length > 0 ? lensName : "NULL";
             d.push(`    if (d->kind == SCR_DYN_OBJINST) {`);
             d.push(
-              `      sc_proj = scr_dyn_rec_wide_inst(d, ${kt}, ${lt}, ${shape.fields.length}, ${inst.allOwn ? "true" : "false"}, &${dynKeyGetHelper(E)});`,
+              `      sc_proj = scr_dyn_rec_wide_inst(d, ${kt}, ${lt}, ${shape.fields.length}, ${inst.allOwn ? "true" : "false"}, ${moduleInstanceLaneNeedsKg(E.mod) ? `&${dynKeyGetHelper(E)}` : "NULL"});`,
             );
             d.push(`    } else {`);
           }
