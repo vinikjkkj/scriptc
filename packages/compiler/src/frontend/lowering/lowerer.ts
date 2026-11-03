@@ -3946,6 +3946,7 @@ export class Lowerer {
     // needs no interning, so it only has to wait for the WRITE SET, which
     // is not complete until the last body is lowered.
     this.reportRecordWidthCopies(functions);
+    this.fenceWrittenInstancePayloads(functions);
     this.fenceDynArrFromOnStrandedBox(functions);
 
     if (this.remainder) {
@@ -8032,11 +8033,12 @@ export class Lowerer {
     }
   }
 
-  /** True when the validated extraction of ANY JavaScript value into `t` has an exact answer: a
-   * scalar, an array or a tuple of dyn/scalars. A RECORD (or class) arm is not: the runtime's
-   * checked cast reads a record only off a plain object, so a class instance that Node hands over
-   * unchanged (mysql2's ResultSetHeader) would throw a TypeError here, and picking a union arm
-   * by shape is the silent-divergence family (kindgate.ts). Those payloads stay refused. */
+  /** True when the validated extraction of a JavaScript value into `t` is the checked cast's own
+   * answer: a scalar, an array, a tuple, a record (a plain object or a class INSTANCE alike: the
+   * instance lane of the record builder reads every declared member off the value itself, a
+   * getter or an inherited method included) and a union of those. A class, Map, function or
+   * bigint arm stays refused. A value that violates the declared type keeps the standing
+   * checked-dynamic contract (a catchable, path-annotated TypeError). */
   dynPayloadTotal(t: IrType, depth = 0): boolean {
     if (depth > 8) return false;
     switch (t.kind) {
@@ -8050,8 +8052,18 @@ export class Lowerer {
         return this.dynPayloadTotal(t.elem, depth + 1);
       case "record": {
         const sh = this.shapes.get(t.shapeId);
-        return sh !== undefined && sh.tuple === true && sh.indexValue === undefined && sh.fields.every((f) => this.dynPayloadTotal(f.type, depth + 1));
+        if (sh === undefined) return false;
+        // A RECORD arm is read off the value by the checked cast, which takes a plain object
+        // and a class instance alike (kindgateInstanceLane): every declared member is answered
+        // by the value itself, a getter or an inherited method included.
+        if (sh.tuple !== true && sh.fields.some((f) => f.name.startsWith("%"))) return false;
+        return (
+          (sh.indexValue === undefined || this.dynPayloadTotal(sh.indexValue, depth + 1)) &&
+          sh.fields.every((f) => this.dynPayloadTotal(f.type, depth + 1))
+        );
       }
+      case "union":
+        return (this.unions.get(t.unionId)?.arms ?? []).every((a) => isUnitType(a) || this.dynPayloadTotal(a, depth + 1));
       default:
         return false;
     }
@@ -8072,7 +8084,9 @@ export class Lowerer {
     if (!this.dynPayloadTotal(want.inner) || !this.coercibleValue(viaDyn, want, true)) return null;
     const adopted: IrExpr = { kind: "libCall", fn: "dyn.adoptPromise", args: [expr], type: viaDyn, loc: expr.loc };
     const out = this.coerceToExpected(adopted, want);
-    return typeEquals(out.type, want) ? out : null;
+    if (!typeEquals(out.type, want)) return null;
+    this.recordPayloadSites.push({ loc: expr.loc, payload: want.inner });
+    return out;
   }
 
   coerceToExpected(expr: IrExpr, expected: IrType): IrExpr {
@@ -10535,6 +10549,80 @@ export class Lowerer {
     // whole walk (the write set is a program-wide fact).
     if (src !== undefined && (src.kind === "recordLit" || src.kind === "arrayLit")) return;
     this.widthCopySites.push({ fromId, toId, dropped, loc });
+  }
+
+  /** The declared Promise payloads a call site READS through the checked cast (adoptDynIntoTypedPromise)
+   * whose payload holds a record: the value the implementation hands over may be a class INSTANCE, which
+   * the record builder's instance lane reads into a COPY. Decided in run() once the write set is known. */
+  readonly recordPayloadSites: { loc: SrcLoc; payload: IrType }[] = [];
+
+  /** The copy is exact for everything the program READS, and a WRITE through the record is the one use
+   * of it that an instance holder would see in JavaScript (one object, one answer): a program that writes
+   * a field of a record shape reachable from such a payload keeps a compile-time refusal, named at the
+   * call that reads the payload. The write set is program-wide (recordSet nodes), as SC6004's is. */
+  fenceWrittenInstancePayloads(functions: IrFunction[]): void {
+    if (this.recordPayloadSites.length === 0) return;
+    const written = new Map<string, Set<string>>();
+    const seen = new Set<object>();
+    const stack: unknown[] = [functions.map((fn) => fn.body)];
+    while (stack.length > 0) {
+      const n = stack.pop();
+      if (n === null || typeof n !== "object" || seen.has(n)) continue;
+      seen.add(n);
+      if (Array.isArray(n)) {
+        for (const x of n) stack.push(x);
+        continue;
+      }
+      const o = n as Record<string, unknown>;
+      if (o["kind"] === "recordSet" && typeof o["shapeId"] === "string" && typeof o["field"] === "string") {
+        const s = written.get(o["shapeId"]) ?? new Set<string>();
+        s.add(o["field"]);
+        written.set(o["shapeId"], s);
+      }
+      for (const v of Object.values(o)) stack.push(v);
+    }
+    const reported = new Set<string>();
+    for (const site of this.recordPayloadSites) {
+      const hit = new Set<string>();
+      const visited = new Set<string>();
+      const walk = (t: IrType, depth: number): void => {
+        if (depth > 12) return;
+        switch (t.kind) {
+          case "array":
+            walk(t.elem, depth + 1);
+            return;
+          case "union":
+            for (const a of this.unions.get(t.unionId)?.arms ?? []) walk(a, depth + 1);
+            return;
+          case "record": {
+            if (visited.has(t.shapeId)) return;
+            visited.add(t.shapeId);
+            const sh = this.shapes.get(t.shapeId);
+            if (sh === undefined) return;
+            for (const f of written.get(t.shapeId) ?? []) hit.add(f);
+            for (const f of sh.fields) walk(f.type, depth + 1);
+            if (sh.indexValue !== undefined) walk(sh.indexValue, depth + 1);
+            return;
+          }
+          default:
+            return;
+        }
+      };
+      walk(site.payload, 0);
+      if (hit.size === 0) continue;
+      const key = `${site.loc.file}:${site.loc.start}`;
+      if (reported.has(key)) continue;
+      reported.add(key);
+      const names = [...hit].sort().map((f) => `'${f}'`).join(", ");
+      this.pushDiag(
+        unsupportedDiag(
+          "SC1100",
+          site.loc,
+          `the declared result '${this.fmt(site.payload)}' of this call: the member's implementation answers a checked-dynamic value that may be a class instance, the record read off it is a COPY, and this program writes ${hit.size === 1 ? "the field" : "the fields"} ${names} of a record shape reachable from that payload (JavaScript has one object: a write through the record is seen by whoever holds the instance, a copy's is not)`,
+          "read the payload without writing its fields (build your own record from it before a write), so the copy and the instance cannot disagree",
+        ),
+      );
+    }
   }
 
   /** SC6004's sites, decided in run() once the write set is known. */
