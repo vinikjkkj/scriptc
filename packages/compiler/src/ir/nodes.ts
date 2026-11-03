@@ -10782,6 +10782,68 @@ export function moduleBoxesEmitters(mod: IrModule): boolean {
   return found;
 }
 
+/** The first IR node that ENUMERATES or PRINTS a dynamic value (Object.keys/values/entries/assign, spread, for-in,
+ * hasOwnProperty, structuredClone, JSON.stringify, console / util.inspect / format over a dyn argument, Object.create
+ * over a dyn source, a `.constructor` read), as `fn@file:line`, or null. A class grafted with the emitter API owns the
+ * emitter's state keys (_events, _eventsCount, _maxListeners, two symbols) at a position its constructor decides and
+ * with listener tables as values: none of the surfaces above can answer for such an instance exactly, so a program that
+ * both boxes one and contains any of them keeps the compile-time refusal (graftedDynFence). */
+export function dynReflectionSite(functions: readonly IrFunction[]): string | null {
+  const REFLECT_FNS = new Set([
+    "dyn.assign", "dyn.assignAll", "dyn.hasOwn", "dyn.forInKeys", "dyn.forInCertain", "dyn.forInPlain", "dyn.forInAccessor",
+    "dyn.objKeys", "dyn.objValues", "dyn.objEntries", "dyn.structuredClone", "dyn.cloneOwn", "dyn.ownNamesCtor",
+    "dyn.ownNamesFence", "dyn.objCreateProto", "dyn.objCreateDescs",
+  ]);
+  let found: string | null = null;
+  let cur = "";
+  const hit = (what: string, n: { loc?: SrcLoc }): void => {
+    if (found === null) found = `${what} (in ${cur}${n.loc ? ` at ${n.loc.file}@${n.loc.start}` : ""})`;
+  };
+  const hasDynArg = (args: unknown): boolean =>
+    Array.isArray(args) && args.some((a) => (a as { type?: { kind?: string } })?.type?.kind === "dyn");
+  const visit = (v: unknown): void => {
+    if (found !== null || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const n = v as { kind?: string; fn?: string; name?: string; args?: unknown; value?: { type?: { kind?: string } }; method?: string; key?: { kind?: string; value?: string }; fields?: unknown; spreads?: unknown; loc?: SrcLoc };
+    if (n.kind === "libCall" && typeof n.fn === "string") {
+      if (REFLECT_FNS.has(n.fn)) hit(n.fn, n);
+      else if ((n.fn.startsWith("insp.") || n.fn.startsWith("util.") || /format|inspect/i.test(n.fn)) && hasDynArg(n.args)) hit(n.fn, n);
+    } else if (n.kind === "jsonStringify" && n.value?.type?.kind === "dyn") hit("JSON.stringify", n);
+    else if (n.kind === "intrinsic" && (n.name === "console.log" || n.name === "console.error") && hasDynArg(n.args)) hit(n.name, n);
+    else if (n.kind === "dynInvoke" && (n.method === "hasOwnProperty" || n.method === "constructor")) hit(n.method, n);
+    else if (n.kind === "dynKeyGet" && n.key?.kind === "strLit" && n.key.value === "constructor") hit("constructor", n);
+    else if (n.kind === "dynObjLit" && Array.isArray(n.spreads) && n.spreads.length > 0) hit("object spread", n);
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  for (const f of functions) {
+    cur = f.name;
+    visit(f.body);
+    if (found !== null) break;
+  }
+  return found;
+}
+
+/** The dynFrom sites that box an instance of a class grafted with the emitter API (loc of each). */
+export function graftedBoxSites(functions: readonly IrFunction[]): SrcLoc[] {
+  const out: SrcLoc[] = [];
+  const visit = (v: unknown): void => {
+    if (v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const n = v as { kind?: string; value?: { type?: { kind?: string; className?: string } }; loc?: SrcLoc };
+    if (n.kind === "dynFrom" && n.value?.type?.kind === "object" && typeof n.value.type.className === "string" &&
+        GRAFTED_EMITTER_CLASSES.has(n.value.type.className) && n.loc !== undefined) out.push(n.loc);
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  for (const f of functions) visit(f.body);
+  return out;
+}
+
 /** The four lib fns scr_zlib_stream.c implements. Named once because
  * THREE gates read it and they must agree: moduleUsesStream (link
  * scr_stream.c), moduleUsesZlib (link scr_zlib.c + libz), and

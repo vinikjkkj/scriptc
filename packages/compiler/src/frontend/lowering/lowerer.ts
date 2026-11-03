@@ -67,7 +67,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { GRAFTED_EMITTER_CLASSES } from "../../ir/nodes.js";
+import { GRAFTED_EMITTER_CLASSES, dynReflectionSite, graftedBoxSites, moduleBoxesEmitters } from "../../ir/nodes.js";
 import { canBoxFuncIntoDyn } from "../../ir/nodes.js";
 import { procStreamDynMemberFence, NULL_T, strandTrap, armDiscrimLits, arrayOf, BOOL, canBoxClassIntoDyn, internalSlotFields, isRefCounted, canAdaptDynFuncTo, dynRestApplyable, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, shapeHasAccessorSlots, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
 import { type DynamicImportResolution, type NpmBuiltinUse, type NpmLazyTrap } from "../npm.js";
@@ -138,7 +138,7 @@ import { ParamShape, FnSig, GenericFnInfo, GenericInstance, bindingNeverReassign
 import { lowerArrayMethodCall, lowerBufferStaticCall, lowerBytesMethodCall, lowerBytesNew, lowerMapMethodCall, lowerMapForEachCall, buildMapForEachFn, lowerRecordOvfCaptureHelper, ovfCapturePlannable, dynSlotCheckOk, lowerEnvToPairsHelper, lowerSetMethodCall, lowerSetForEachCall, buildSetForEachFn, lowerRegexMethodCall, lowerStringMethodCall } from "./lower-containers.js";
 import { lowerStreamModuleCall, streamInstanceOfExpr } from "./lower-stream.js";
 import { unifyWidthShapes, type UnifyOutcome } from "./shape-unify.js";
-import { lowerEmitOverrideSpec, type EmitSpecCtx, type EmitSpecRequest } from "./lower-emitter.js";
+import { lowerEmitOverrideSpec, synthEeRegFns, type EmitSpecCtx, type EmitSpecRequest } from "./lower-emitter.js";
 import { builtinImportOf, createRequireBindingDecl, createRequireNamespaceDecl, createRequireSpecOf, stripTypeCasts, lowerBuiltinModuleCall, lowerFsToUnixTimestampCall, lowerFsLadderCall, lowerZlibDynCall, lowerChildArgsArg, lowerSpawnSyncCall, lowerSpawnCall, lowerExecSyncCall, recordToEnvPairs, lowerJsonMethodCall, fencedBuiltinImportOf, lowerCryptoComposedCall, lowerUrlMethodCall, lowerSearchParamsMethodCall, lowerStatsMethodCall, lowerFileHandleMethodCall, lowerChildMethodCall, lowerAtomicsCall, lowerBuiltinExtraProperty, promisifiedExecFileDecl, lowerPromisifiedSettledCall, type PromisifiedTarget, lowerExecFileAsyncCall, execFileAsyncHelper, lowerStringDecoderMethodCall, strdecHelper, lowerReadlineMethodCall, lowerDcChannelMethodCall, lowerDcChannelProperty, lowerAlsMethodCall, lowerDcTracingChannelMethodCall, lowerDcTracingChannelProperty, lowerJsonProperty, lowerErrorCodeProperty, lowerErrorPrototypeProperty, lowerUint8ArrayPrototypeProperty, lowerUint8ArrayStaticProperty, lowerProcessProperty, processVersionsMember, isProcessEnv, envValueType, lowerProcessEnvGet, lowerProcessMethodCall, lowerProcessOptionalMethodCall, lowerTimeoutMethodCall, envSnapshotHelper, isConsoleLog, consoleCallMember, lowerNumberStaticCall, lowerNumberStaticProperty, lowerDateCall, lowerTextCodecCall, lowerCryptoModuleCall, lowerFsConstantsProperty, lowerBuiltinConstantsProperty, builtinConstantBindingOf, builtinConstantsDestructureDecl, lowerProcessStreamProperty, lowerProcStreamStateProperty, lowerStringStaticCall, lowerStringLastIndexOfCall, lowerPromiseStaticCall, lowerStringReplaceStrCall } from "./lower-builtins.js";
 import { isIslandExpr, islandRegexpOf, jsvalIn, requireDynamicApi, islandGlobalFnOf, lowerDynamicImportCall, lowerFetchCall, lowerIslandMethodCall, lowerMathProperty, npmPackageOf, npmMemberFence, npmPackageOfSymbol } from "./lower-island.js";
 import { lowerHttpHeadersElement, lowerNetModuleCall, lowerServerMethodCall, lowerServerProperty, lowerTlsRootCertificates } from "./lower-server.js";
@@ -3773,6 +3773,41 @@ export class Lowerer {
     mintPhaseControl(this.shapes);
     functions.push(...this.liftedFns);
     functions.push(...this.implicitFns);
+    // GRAFTED-EMITTER FENCE (graftedDynFence). A class grafted by applyMixin(Y, EventEmitter) crosses into a dyn slot
+    // with its whole EventEmitter API, but its own keys (the emitter's state cells at a constructor-decided position,
+    // listener tables as values) cannot be answered exactly by Object.keys / values / entries / assign / spread /
+    // for-in / JSON.stringify / console / util.inspect / hasOwnProperty / `.constructor` over a dyn value. A program
+    // that boxes such an instance AND contains any of those on a dyn value keeps the refusal at the boxing sites.
+    if (GRAFTED_EMITTER_CLASSES.size > 0) {
+      const sites = graftedBoxSites(functions);
+      const why = sites.length > 0 ? dynReflectionSite(functions) : null;
+      if (why !== null) {
+        const seen = new Set<string>();
+        for (const loc of sites) {
+          const k = `${loc.file}@${loc.start}`;
+          if (seen.has(k)) continue;
+          seen.add(k);
+          this.pushDiag(unsupportedDiag(
+            "SC1101",
+            loc,
+            "converting an applyMixin(Y, EventEmitter) instance to 'unknown' in a program that also enumerates or prints dynamic values (" + why + "): the instance's own keys (the emitter's state cells and listener tables) cannot be reproduced by that operation, so the flow is refused",
+          ));
+        }
+      }
+    }
+    // The by-name registration rows of dyn-held emitters (synthEeRegFns): only in a program that lets an emitter
+    // reach a dynamic value.
+    {
+      const defs = [...this.classes.values()].map((i) => i.def);
+      if (moduleBoxesEmitters({ classes: defs, functions } as unknown as IrModule)) {
+        const before = this.liftedFns.length;
+        const grafted = [...this.classes.values()].filter((i) => i.emitterMixin === true);
+        const loc = grafted[0]?.def.loc ?? defs[0]?.loc;
+        if (loc !== undefined) {
+          functions.push(...synthEeRegFns(this, grafted, loc), ...this.liftedFns.slice(before));
+        }
+      }
+    }
 
     // The deferred key-enumeration decision - after the whole walk, so a
     // construction anywhere in the program can reach a surface anywhere.
