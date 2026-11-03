@@ -73,7 +73,7 @@ import * as ts from "../ts7/adapter.js";
 import * as nodeFs from "node:fs";
 import * as nodePath from "node:path";
 import * as nodeStream from "node:stream";
-import { canonicalBuiltinModule } from "../shared.js";
+import { canonicalBuiltinModule, tsgoPath } from "../shared.js";
 import type { Lowerer } from "./lowerer.js";
 
 class Fail extends Error {}
@@ -825,15 +825,24 @@ function checkConsumer(c: Ctx, sf: ts.SourceFile, call: ts.CallExpression): void
 
 // --- the exports object handed to package code -------------------------
 
-/** Walk up from `file` to the directory holding the nearest package.json. */
-function packageRootOf(file: string): string {
-  let dir = nodePath.dirname(file);
+/** Walk up from `file` to the directory holding the nearest package.json.
+ * Both the input and the answer are slash-normalized (tsgoPath), the form
+ * every SourceFile name has: Node's path APIs print backslashes on win32, and
+ * a prefix test between the two forms never matches there. */
+export function packageRootOf(file: string, exists: (p: string) => boolean = nodeFs.existsSync, platform: NodeJS.Platform = process.platform): string {
+  let dir = nodePath.posix.dirname(tsgoPath(file, platform));
   for (;;) {
-    if (nodeFs.existsSync(nodePath.join(dir, "package.json"))) return dir;
-    const up = nodePath.dirname(dir);
+    if (exists(nodePath.posix.join(dir, "package.json"))) return dir;
+    const up = nodePath.posix.dirname(dir);
     if (up === dir) fail("the host has no package.json");
     dir = up;
   }
+}
+
+/** Is `file` inside directory `root` (both in any separator form)? */
+export function isUnderRoot(file: string, root: string, platform: NodeJS.Platform = process.platform): boolean {
+  const r = tsgoPath(root, platform);
+  return tsgoPath(file, platform).startsWith(r.endsWith("/") ? r : r + "/");
 }
 
 function containsThis(fn: ts.Node): boolean {
@@ -885,8 +894,8 @@ function isConstructorLike(_file: ts.SourceFile, fn: ts.Node): boolean {
  * indexed by a key built at run time that spells a DF name. No file names a
  * DF name (checkProgram), so such a key must be assembled from pieces. */
 function auditEscape(c: Ctx): void {
-  const root = packageRootOf(c.host.fileName) + nodePath.sep;
-  const files = c.L.program.getSourceFiles().filter((f) => !f.isDeclarationFile && f.fileName.startsWith(root) && isJsFile(f));
+  const root = packageRootOf(c.host.fileName);
+  const files = c.L.program.getSourceFiles().filter((f) => !f.isDeclarationFile && isUnderRoot(f.fileName, root) && isJsFile(f));
   const names = new Set<string>();
   const seedParams = (fn: ts.Node, index: number): void => {
     const params = (fn as ts.FunctionLikeDeclaration).parameters;
@@ -907,7 +916,7 @@ function auditEscape(c: Ctx): void {
       const r = ts.isCallExpression(n) ? requireLiteral(c.L, n) : null;
       if (r === null || canonicalBuiltinModule(r.spec) !== null) return;
       const dep = c.L.requireDepOf(r.spec, r.call);
-      if (dep !== null && dep.fileName.startsWith(root0) && isJsFile(dep) && !candidate.has(dep)) {
+      if (dep !== null && isUnderRoot(dep.fileName, root0) && isJsFile(dep) && !candidate.has(dep)) {
         candidate.add(dep);
         queue.push(dep);
       }
