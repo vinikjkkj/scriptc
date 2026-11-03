@@ -11650,7 +11650,42 @@ export function moduleUsesDynClass(mod: IrModule): boolean {
   return found;
 }
 
+/** The record builder's INSTANCE lane (backend/kindgate.ts kindgateInstanceLane) is emitted
+ * only for a module that can hold both halves of it: a class that boxes into the dyn
+ * tree by reference (an instance receiver can exist) and a `dynCheck` (a checked cast
+ * that can name a record). The lane reads members through `sc_dyn_key_get`, which lives
+ * in the gated dispatch unit, so the same predicate also switches that unit on
+ * (moduleUsesDynInvoke); every other program keeps its exact TU and link line. */
+const INSTANCE_LANE_MEMO = new WeakMap<IrModule, boolean>();
+export function moduleUsesInstanceRecordLane(mod: IrModule): boolean {
+  const memo = INSTANCE_LANE_MEMO.get(mod);
+  if (memo !== undefined) return memo;
+  let found = false;
+  if (
+    (mod.classes ?? []).some(
+      (c) => c.name !== RUNTIME_EMITTER_CLASS && !RUNTIME_STREAM_CLASSES.has(c.name) && canBoxClassIntoDyn(c.name),
+    )
+  ) {
+    const visit = (v: unknown): void => {
+      if (found || v === null || typeof v !== "object") return;
+      if (Array.isArray(v)) {
+        for (const item of v) visit(item);
+        return;
+      }
+      if ((v as { kind?: unknown }).kind === "dynCheck") {
+        found = true;
+        return;
+      }
+      for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+    };
+    visit(mod.functions);
+  }
+  INSTANCE_LANE_MEMO.set(mod, found);
+  return found;
+}
+
 export function moduleUsesDynInvoke(mod: IrModule): boolean {
+  if (moduleUsesInstanceRecordLane(mod)) return true;
   let found = false;
   const visit = (v: unknown): void => {
     if (found || v === null || typeof v !== "object") return;
