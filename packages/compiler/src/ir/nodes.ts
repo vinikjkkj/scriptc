@@ -10873,6 +10873,7 @@ export function emitterStateWriteSites(functions: readonly IrFunction[], classes
   // definition of any other kind, is not.
   const defs = new Map<string, unknown[]>();
   const perFn: Node[][] = [];
+  const visited = new WeakSet<object>();
   for (const f of functions) {
     const sites: Node[] = [];
     perFn.push(sites);
@@ -10881,6 +10882,8 @@ export function emitterStateWriteSites(functions: readonly IrFunction[], classes
     while (stack.length > 0) {
       const v = stack.pop();
       if (v === null || typeof v !== "object") continue;
+      if (visited.has(v)) continue; // IR nodes are shared (a DAG): each is read once
+      visited.add(v);
       if (Array.isArray(v)) {
         for (const item of v) stack.push(item);
         continue;
@@ -10889,7 +10892,7 @@ export function emitterStateWriteSites(functions: readonly IrFunction[], classes
       if (n.kind === "varDecl" && typeof n.localId === "string") (defs.get(n.localId) ?? defs.set(n.localId, []).get(n.localId)!).push(n.init ?? null);
       else if (n.kind === "assign" && typeof n.localId === "string") (defs.get(n.localId) ?? defs.set(n.localId, []).get(n.localId)!).push((n as { value?: unknown }).value ?? null);
       else if (!skip && n.kind === "libCall" && (n.fn === "dyn.keySet" || n.fn === "dyn.keyDelete") && Array.isArray(n.args) && n.loc !== undefined) sites.push(n);
-      for (const key of Object.keys(v)) stack.push((v as Record<string, unknown>)[key]);
+      for (const key of Object.keys(v)) if (key !== "type" && key !== "loc") stack.push((v as Record<string, unknown>)[key]);
     }
   }
   {
