@@ -10874,10 +10874,11 @@ export function dynReflectionSite(functions: readonly IrFunction[], fenced: (op:
   };
   const hasDynArg = (args: unknown): boolean =>
     Array.isArray(args) && args.some((a) => (a as { type?: { kind?: string } })?.type?.kind === "dyn");
-  const visit = (v: unknown): void => {
+  type Parent = { kind?: string; key?: { kind?: string; value?: string } } | null;
+  const visit = (v: unknown, parent: Parent = null): void => {
     if (found !== null || v === null || typeof v !== "object") return;
     if (Array.isArray(v)) {
-      for (const item of v) visit(item);
+      for (const item of v) visit(item, parent);
       return;
     }
     const n = v as { kind?: string; fn?: string; name?: string; args?: unknown; value?: { type?: { kind?: string } }; method?: string; key?: { kind?: string; value?: string }; fields?: unknown; spreads?: unknown; loc?: SrcLoc };
@@ -10886,10 +10887,15 @@ export function dynReflectionSite(functions: readonly IrFunction[], fenced: (op:
       else if ((n.fn.startsWith("insp.") || n.fn.startsWith("util.") || /format|inspect/i.test(n.fn)) && hasDynArg(n.args)) hit(n.fn, n);
     } else if (n.kind === "jsonStringify" && n.value?.type?.kind === "dyn") hit("JSON.stringify", n);
     else if (n.kind === "intrinsic" && (n.name === "console.log" || n.name === "console.error") && hasDynArg(n.args)) hit(n.name, n);
-    else if (n.kind === "dynInvoke" && (n.method === "hasOwnProperty" || n.method === "constructor")) hit(n.method, n);
-    else if (n.kind === "dynKeyGet" && n.key?.kind === "strLit" && n.key.value === "constructor") hit("constructor", n);
+    else if (n.kind === "dynInvoke" && (n.method === "hasOwnProperty" || n.method === "constructor")) hit(n.method === "constructor" ? "constructor-call" : n.method, n);
+    else if (n.kind === "dynKeyGet" && n.key?.kind === "strLit" && n.key.value === "constructor") {
+      // A read whose only use is `.name` or a (strict) comparison is answered exactly for a grafted instance (the class value
+      // is EventEmitter's, or the subclass's own); any other use of the class value (new, .prototype, String) is not.
+      const used = parent !== null && ((parent.kind === "dynKeyGet" && parent.key?.kind === "strLit" && parent.key.value === "name") || parent.kind === "dynScalarEq");
+      hit(used ? "constructor" : "constructor-value", n);
+    }
     else if (n.kind === "dynObjLit" && Array.isArray(n.spreads) && n.spreads.length > 0) hit("object spread", n);
-    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key], n as Parent);
   };
   for (const f of functions) {
     cur = f.name;
@@ -10902,11 +10908,12 @@ export function dynReflectionSite(functions: readonly IrFunction[], fenced: (op:
 /** The reflective operations (dynReflectionSite's op kinds) a grafted instance whose emitter keys are member rows
  * (GRAFTED_EMITTER_CELL_CLASSES, no run-time property table) still cannot answer exactly: a clone that would have to
  * duplicate the emitter (structuredClone, the Object.create(getPrototypeOf(o), getOwnPropertyDescriptors(o)) idiom),
- * a prototype link over the instance, and the `constructor` read (EventEmitter on the grafted class itself, a class
- * value no dyn representation stands for). Every other surface (for-in, Object.keys/values/entries/assign, spread,
+ * a prototype link over the instance, and any use of the `constructor` class value but `.name` and a strict comparison
+ * (a read answers EventEmitter's class value for the class that applied the graft, and the subclass's own otherwise;
+ * `new`, `.prototype` and String() over EventEmitter's class value are not lowered yet). Every other surface (for-in, Object.keys/values/entries/assign, spread,
  * hasOwn, JSON.stringify, util.inspect, console) walks the member rows exactly. */
 export const GRAFTED_ROWS_FENCED_OPS: ReadonlySet<string> = new Set([
-  "dyn.structuredClone", "dyn.cloneOwn", "dyn.objCreateProto", "dyn.objCreateDescs", "constructor",
+  "dyn.structuredClone", "dyn.cloneOwn", "dyn.objCreateProto", "dyn.objCreateDescs", "constructor-call", "constructor-value",
 ]);
 /** The same for such a class that ALSO carries a run-time property table (its values, entries, JSON and inspect keep the
  * table walk's fence): only the key-listing surfaces below are exact there. */
