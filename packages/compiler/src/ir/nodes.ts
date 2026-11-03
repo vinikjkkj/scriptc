@@ -10928,7 +10928,7 @@ export function dynReflectionSite(functions: readonly IrFunction[], fenced: (op:
   };
   const hasDynArg = (args: unknown): boolean =>
     Array.isArray(args) && args.some((a) => (a as { type?: { kind?: string } })?.type?.kind === "dyn");
-  type Parent = { kind?: string; key?: { kind?: string; value?: string } } | null;
+  type Parent = { kind?: string; key?: { kind?: string; value?: string }; value?: unknown; recv?: unknown; method?: string } | null;
   const visit = (v: unknown, parent: Parent = null): void => {
     if (found !== null || v === null || typeof v !== "object") return;
     if (Array.isArray(v)) {
@@ -10949,7 +10949,13 @@ export function dynReflectionSite(functions: readonly IrFunction[], fenced: (op:
     else if (n.kind === "dynKeyGet" && n.key?.kind === "strLit" && n.key.value === "constructor") {
       // A read whose only use is `.name` or a (strict) comparison is answered exactly for a grafted instance (the class value
       // is EventEmitter's, or the subclass's own); any other use of the class value (new, .prototype, String) is not.
-      const used = parent !== null && ((parent.kind === "dynKeyGet" && parent.key?.kind === "strLit" && parent.key.value === "name") || parent.kind === "dynScalarEq");
+      // A static member of the class value that EventEmitter's function object (and Function/Object.prototype) does not have
+      // (protobufjs's `this.constructor.alloc(n)`) reads undefined in Node, as the class value's static table answers.
+      const unknownStatic = (k: string | undefined): boolean => k !== undefined && !EVENT_EMITTER_FUNCTION_NAMES.has(k);
+      const used = parent !== null && (
+        (parent.kind === "dynKeyGet" && parent.value === n && parent.key?.kind === "strLit" && (parent.key.value === "name" || unknownStatic(parent.key.value))) ||
+        (parent.kind === "dynInvoke" && parent.recv === n && unknownStatic(parent.method)) ||
+        parent.kind === "dynScalarEq");
       hit(used ? "constructor" : "constructor-value", n);
     }
     else if (n.kind === "dynObjLit" && Array.isArray(n.spreads) && n.spreads.length > 0) hit("object spread", n);
@@ -10970,6 +10976,15 @@ export function dynReflectionSite(functions: readonly IrFunction[], fenced: (op:
  * (a read answers EventEmitter's class value for the class that applied the graft, and the subclass's own otherwise;
  * `new`, `.prototype` and String() over EventEmitter's class value are not lowered yet). Every other surface (for-in, Object.keys/values/entries/assign, spread,
  * hasOwn, JSON.stringify, util.inspect, console) walks the member rows exactly. */
+/** Every property name Node 24.15's `events.EventEmitter` function object answers (own statics, Function.prototype and
+ * Object.prototype members): reading any other name off its class value is `undefined`. */
+const EVENT_EMITTER_FUNCTION_NAMES: ReadonlySet<string> = new Set([
+  "EventEmitter", "EventEmitterAsyncResource", "__defineGetter__", "__defineSetter__", "__lookupGetter__", "__lookupSetter__", "__proto__",
+  "addAbortListener", "apply", "arguments", "bind", "call", "caller", "captureRejectionSymbol", "captureRejections", "constructor",
+  "defaultMaxListeners", "errorMonitor", "getEventListeners", "getMaxListeners", "hasOwnProperty", "init", "isPrototypeOf",
+  "kMaxEventTargetListeners", "kMaxEventTargetListenersWarned", "length", "listenerCount", "name", "on", "once", "propertyIsEnumerable",
+  "prototype", "setMaxListeners", "toLocaleString", "toString", "usingDomains", "valueOf",
+]);
 export const GRAFTED_ROWS_FENCED_OPS: ReadonlySet<string> = new Set([
   "dyn.structuredClone", "dyn.cloneOwn", "dyn.objCreateProto", "dyn.objCreateDescs", "constructor-call", "constructor-value",
 ]);
