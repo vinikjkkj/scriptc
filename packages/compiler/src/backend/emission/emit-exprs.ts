@@ -17,7 +17,7 @@ import { rcSitesRequested, rcSiteLabel } from "./emitter.js";
 import { ORD_MEMBER, orderRecordPlanCached, ABSENT_KEY_TRAP_CODE, arrayOf, canBoxFuncIntoDyn, BOOL, BYTES_U8, bytesOf, ownMaskKeyBit, presenceMaskStores, OWNMASK_COMPLETED, OWNMASK_VALID, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, IrExpr, IrRecordShape, IrType, irFunctionJsName, irFunctionValueCode, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals, typeKey } from "../../ir/nodes.js";
 import { unionKeyClasses, boxAccess, BYTES_NUM_KIND_C, BYTES_NUM_VAR_C, bytesElemKindC, cDecl, cFnPtrCast, cNumberLiteral, cStringLiteral, cType, DV_GET_KIND_C, DV_SET_KIND_C, elemAccess, mapKeyAccess, mapKeyKindC, mapValKindC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassNew, mangleClassRetain, mangleClassStruct, mangleField, mangleFnClosure, mangleFunction, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleVtStruct, mangleWrapper } from "../mangle.js";
-import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
+import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, VIEW_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
 import { dynDestrCheckHelper, dynIterNHelper, dynKeyGetHelper } from "./emit-walkers.js";
 import { genResultThunkFor } from "./emit-async.js";
 import { emitCoroAwait, emitCoroHop, emitCoroUnionSuspend } from "./emit-coro.js";
@@ -2531,6 +2531,17 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         if (!f) throw new Error(`emitter bug: recordKeyPresent of unknown field ${e.shapeId}.${e.field}`);
         const cond = ownPresentCondC(shape, e.field, obj.name, E.undefinedArmTag(f.type), false, e.orSlot === true);
         return E.newTemp(e.type, cond ?? "true");
+      }
+      case "recordIsView":
+      case "recordView": {
+        // VIEW GRANT: the view member is the object the record is a view of (NULL when the record
+        // was built any other way). recordIsView asks, recordView answers it as an owned dyn.
+        // A BORROW when the record is a plain binding: the check runs on every read and write of a view-capable
+        // shape, and a retain/release pair around each is most of what it would cost.
+        const obj = emitStableReceiver(E, e.obj, []);
+        const slot = `${obj.name}->${VIEW_MEMBER}`;
+        if (e.kind === "recordIsView") return E.newTemp(e.type, `(${slot} != NULL)`);
+        return E.newTemp(e.type, `scr_rec_view_get(${slot})`);
       }
       case "recordNullProto": {
         // The null-prototype question, one spelling (nullProtoCondC). An

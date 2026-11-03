@@ -55,6 +55,19 @@ export const ISLAND_AMBIENT_TYPES = ["Response", "RequestInit", "AbortSignal", "
  * pointer per value, never an answer. */
 export const overflowShapeKeys = new Set<string>();
 
+/** THE VIEW GRANT (value model, 2026-11-03). A record shape named by `viewShapeKeys` carries one
+ * extra hidden member (IrRecordShape.view, a dyn): the OBJECT the record is a view of. A checked cast from a
+ * dynamic value (a plain object, a class instance) to such a shape stores that object there, and
+ * every read and write of a declared member goes through it (viewRewrite, lowering): the record is
+ * the object seen through a type, not a copy of it. A record built by a literal leaves the slot
+ * empty and is the plain struct it always was.
+ *
+ * The same discovery-to-emit hand-off as overflowShapeKeys, for the same reason (the member is part
+ * of the shape's interned identity, so it cannot be added after the fact): the DISCOVERY pass fills
+ * the set from every checked cast it lowers, the EMIT pass's registry consults it while interning.
+ * lowerToIr clears it per compilation. */
+export const viewShapeKeys = new Set<string>();
+
 /** Shape keys the grant must NOT apply to, even though some cast asked for
  * it. DENY WINS, and it is order-independent on purpose: the same shape key
  * can be reached by two casts, one of which moves a member the overflow
@@ -362,6 +375,15 @@ export class ShapeRegistry {
    * SCRIPTC_OVERFLOW_ALL=1 is the MEASUREMENT dial, not a shipping mode:
    * it grants the portion to every ordinary record shape, which is how
    * the price of a universal grant was counted (estado-indexvalue.md). */
+  /** The view grant (viewShapeKeys): does this field list intern as a VIEW-capable shape? False for every
+   * shape the grant does not name, so no other key moves. A builtin rendering declines (its layout belongs to
+   * the library lowering that made it). */
+  private viewGranted(fields: { name: string; type: IrType }[], tuple: boolean, builtin?: IrBuiltinRendering): boolean {
+    if (tuple || viewShapeKeys.size === 0 || fields.length === 0 || builtin !== undefined) return false;
+    if (fields.some((f) => f.name.startsWith("%") || accessorSlotProp(f.name) !== null)) return false;
+    return viewShapeKeys.has(overflowShapeKey(fields));
+  }
+
   private dialIndexValue(fields: { name: string; type: IrType }[], tuple: boolean, indexValue?: IrType): IrType | undefined {
     if (indexValue !== undefined || tuple) return indexValue;
     if (fields.length === 0) return indexValue;
@@ -394,6 +416,7 @@ export class ShapeRegistry {
     declaredOrder?: string[],
     builtin?: IrBuiltinRendering,
     keyOrder?: string[],
+    view = false,
   ): string {
     // The INTERNAL field set (the names declaredOrder omits) is part of
     // the identity — internalFieldNamesOf carries the whole argument. The
@@ -414,6 +437,7 @@ export class ShapeRegistry {
       : "";
     return (
       (tuple ? "tuple!" : "") +
+      (view ? "view!" : "") +
       ord +
       (indexValue ? `idx<${typeKey(indexValue)}>!` : "") +
       (internal.length > 0 ? `int<${[...internal].sort().join(",")}>!` : "") +
@@ -601,6 +625,7 @@ export class ShapeRegistry {
     if (id === undefined) throw new Error("shape registry bug: finalizeRecursive without a placeholder");
     const declaredIndexValue = indexValue;
     indexValue = this.dialIndexValue(fields, false, indexValue);
+    const view = this.viewGranted(fields, false);
     if (indexValue !== declaredIndexValue && !this.granted.has(id)) {
       this.recordUndo(id, () => this.granted.delete(id));
       this.granted.add(id);
@@ -622,8 +647,9 @@ export class ShapeRegistry {
       if (indexValue) shape.indexValue = indexValue;
       if (declaredOrder) shape.declaredOrder = declaredOrder;
       if (keyOrder) shape.keyOrder = keyOrder;
+      if (view) shape.view = true;
       this.pendingRec.delete(id);
-      const key = this.keyOf(fields, false, indexValue, declaredOrder, undefined, keyOrder);
+      const key = this.keyOf(fields, false, indexValue, declaredOrder, undefined, keyOrder, view);
       if (process.env["SCRIPTC_REC_TRACE"]) {
         const owner = this.byKey.get(key);
         process.stderr.write(
@@ -654,7 +680,8 @@ export class ShapeRegistry {
   intern(fields: { name: string; type: IrType }[], tuple = false, indexValue?: IrType, declaredOrder?: string[], builtin?: IrBuiltinRendering, keyOrder?: string[]): string {
     const declaredIndexValue = indexValue;
     indexValue = this.dialIndexValue(fields, tuple, indexValue);
-    const key = this.keyOf(fields, tuple, indexValue, declaredOrder, builtin, keyOrder);
+    const view = this.viewGranted(fields, tuple, builtin);
+    const key = this.keyOf(fields, tuple, indexValue, declaredOrder, builtin, keyOrder, view);
     let id = this.byKey.get(key);
     if (id !== undefined && indexValue !== declaredIndexValue && !this.granted.has(id)) {
       this.recordUndo(id, () => this.granted.delete(id!));
@@ -675,6 +702,7 @@ export class ShapeRegistry {
         ...(keyOrder && fields.some((f) => accessorSlotProp(f.name) !== null) ? { keyOrder } : {}),
         // ...and the builtin rendering, which IS identity (keyOf).
         ...(builtinRenderingKey(builtin) ? { builtin: builtin! } : {}),
+        ...(view ? { view: true as const } : {}),
       };
       this.byKey.set(key, id);
       this.byId.set(id, shape);

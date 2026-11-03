@@ -2003,6 +2003,10 @@ export function httpReqIsReadableIn(from: IrType, to: IrType): boolean {
 }
 
 export interface IrRecordShape {
+  /** VIEW GRANT (frontend/types.ts viewShapeKeys): the struct carries one hidden trailing `ScrDyn *` member,
+   * the OBJECT the record is a view of (NULL when the record was built any other way). Part of the shape's
+   * interned identity, like `indexValue`. */
+  view?: true;
   /** Frontend-assigned shape id (`r0`, `r1`, ...). */
   id: string;
   /** Sorted by field name (canonical order). Types are never void. */
@@ -7922,6 +7926,14 @@ export type IrExpr =
    * prefix in a module that ALSO materialises os.UserInfo out of a
    * dynamic value, while the materialised one prints plain. */
   | { kind: "recordNullProto"; obj: IrExpr; shapeId: string; type: IrType; loc: SrcLoc }
+  /** VIEW GRANT (frontend/types.ts viewShapeKeys). Is `obj` a VIEW: a record a checked cast built over a
+   * dynamic object, whose `%view` member holds that object? False for a record built any other way
+   * (the member is empty). Only a shape carrying the view member (IrRecordShape.view) may ask. Borrowed operand, never
+   * throws. */
+  | { kind: "recordIsView"; obj: IrExpr; shapeId: string; type: IrType; loc: SrcLoc }
+  /** The object `obj` is a view of, as an owned (+1) dyn - THE SAME object the cast read (identity),
+   * not a copy. The undefined singleton when `obj` is not a view (recordIsView asks first). */
+  | { kind: "recordView"; obj: IrExpr; shapeId: string; type: IrType; loc: SrcLoc }
   /** Does `obj`'s SOURCE [[Prototype]] chain carry `key`? — the `in`
    * operator's last question, after the declared names and the overflow
    * map have both answered no. False for any record that did not come out
