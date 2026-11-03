@@ -24,7 +24,6 @@ import { lowerWrtcWrite } from "./lower-wrtc.js";
 import { isProvenanceSourceFile } from "../provenance-registry.js";
 import { ambientUndefVarRootOf, lowerImportEquals, nsUndefRead, nsWritableTarget, trapDeclRootOf } from "./lower-namespaces.js";
 import { expandoWritableTarget, lowerExpandoAssignStmt } from "./lower-expando.js";
-import { isHoleFlaggedRef } from "./hole-flag.js";
 import { bufferSpeciesAliasDecl, ForOfIterProjection, lowerForOfArrayIter, lowerForOfMap, lowerForOfUnionContainer, lowerForOfSearchParams, lowerForOfSet, objectIterOverIndexShape, strCharsCall } from "./lower-containers.js";
 import { jsLetWidened, bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, islandRestFunctionLiteral, nullishExprUnitOf, nullishGenericBindingUnitOf, recordKeysArrayCall, hasOwnPropertyAliasDecl } from "./lower-calls.js";
 import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
@@ -6428,6 +6427,18 @@ function unionCaseLiteralTest(L: Lowerer, disc: IrExpr, test: IrExpr, loc: SrcLo
         "'delete' of required record fields (a monomorphic shape cannot remove its slot — only optional fields delete, becoming the undefined arm)",
       );
     }
+    // `delete a[i]` on an ARRAY leaves a HOLE (the in-band marker); bool[] has none.
+    if (obj.type.kind === "array" && obj.type.elem.kind !== "bool" && ts.isElementAccessExpression(target) && !target.questionDotToken) {
+      const idx = L.lowerExprExpecting(target.argumentExpression, F64);
+      return {
+        pre: [{
+          kind: "exprStmt",
+          expr: { kind: "arrIntrinsic", method: "clearIndex", receiver: obj, args: [idx], type: VOID, loc },
+          loc,
+        }],
+        result: yes,
+      };
+    }
     // `delete this.f` / `delete inst.f` of a declared field of a class instance whose
     // type admits undefined: the record arm's rule on the class side — a class
     // layout cannot remove a slot, and absence IS the undefined arm, so the
@@ -7431,7 +7442,8 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
               // not a lie on read (0/false/"" where Node reads undefined)
               // -- the arrayNewLen / new Array(count) rule, same wording.
               const elem = recvT.elem;
-              const growable = elem.kind === "union" ? L.wrappedUndefined(elem, loc) !== null : isRefCounted(elem);
+              // Growth makes HOLES (the number HOLE payload, NULL for ref slots).
+              const growable = elem.kind === "f64" || isRefCounted(elem);
               // ...unless the array is the RESERVE half of the prefix-fill
               // idiom and this statement is the truncation its proof named
               // (lower-classes.ts). Then the write is a SHRINK by
@@ -7441,9 +7453,7 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
               const provenTruncation =
                 !growable && ts.isExpressionStatement(expr.parent) && ts.isIdentifier(expr.left.expression) &&
                 isProvenPrefixTruncation(expr.parent, expr.left.expression.text);
-              // STEP 2a: a flagged number[] grows with holes (scr_arr_f64 setLength, emitters).
-              const holeGrowable = elem.kind === "f64" && isHoleFlaggedRef(L, expr.left.expression);
-              if (!growable && !provenTruncation && !holeGrowable) {
+              if (!growable && !provenTruncation) {
                 L.noLowering(
                   `assigning '.length' on '${L.fmt(elem)}'-element arrays`,
                   expr.left,
@@ -8790,9 +8800,7 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
     const index = L.lowerExpr(target.argumentExpression);
     return typedArray
       ? { kind: "bytesSet", arr: recv, index, value, loc }
-      : isHoleFlaggedRef(L, target.expression)
-        ? { kind: "arraySet", arr: recv, index, value, holeGrow: true, loc }
-        : { kind: "arraySet", arr: recv, index, value, loc };
+      : { kind: "arraySet", arr: recv, index, value, loc };
   }
   function lowerCompoundToTarget(L: Lowerer, expr: ts.BinaryExpression, compound: CompoundOp,
     target: { id: string; type: IrType },): IrStmt {
@@ -11703,7 +11711,8 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
             body: [
               {
                 kind: "if",
-                cond: { kind: "bin", op: "<", left: iRef(), right: liveLen(), type: BOOL, loc },
+                // for-in visits OWN keys: an index in range whose slot is not a HOLE.
+                cond: { kind: "arrIntrinsic", method: "hasIndex", receiver: arrRef(), args: [iRef()], type: BOOL, loc },
                 then: [keyDecl, ...writes, ...body],
                 else_: null,
                 loc,

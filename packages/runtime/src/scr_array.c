@@ -677,12 +677,18 @@ double scr_arr_get_f64_hole(ScrArr *a, double i) {
 static void scr_arr_grow_holes(ScrArr *a, size_t idx) {
   size_t holes = idx - a->len;
   scr_arr_grow(a, idx + 1);
-  memset(a->data + a->len, 0, holes * sizeof(uint64_t));
+  if (a->elem == SCR_ELEM_F64) {
+    for (size_t k = 0; k < holes; k++) a->data[a->len + k] = SCR_NUM_HOLE_BITS;
+  } else {
+    memset(a->data + a->len, 0, holes * sizeof(uint64_t));
+  }
   a->len = idx;
 }
 
 static void scr_arr_set_slot(ScrArr *a, double i, uint64_t slot) {
-  if (scr_elem_is_ref(a->elem) && i > (double)a->len && i < (double)a->len + SCR_ARR_SPARSE_LIMIT &&
+  /* A write past the end makes holes (f64: the HOLE marker, ref kinds: NULL).
+   * bool[] has no hole value, so its write past the end still traps below. */
+  if (a->elem != SCR_ELEM_BOOL && i > (double)a->len && i < (double)a->len + SCR_ARR_SPARSE_LIMIT &&
       i == trunc(i)) {
     scr_arr_grow_holes(a, (size_t)i);
   }
@@ -707,14 +713,76 @@ void scr_arr_set_f64(ScrArr *a, double i, double v) {
 /* STEP 2a: a write past the end of a flagged number[] fills the gap with holes
  * (no trap); an index that is not an integer in range keeps the trap below. */
 void scr_arr_set_f64_hole(ScrArr *a, double i, double v) {
-  if (i > (double)a->len && i < (double)a->len + SCR_ARR_SPARSE_LIMIT && i == trunc(i)) {
-    size_t idx = (size_t)i;
-    size_t holes = idx - a->len;
-    scr_arr_grow(a, idx + 1);
-    for (size_t k = 0; k < holes; k++) a->data[a->len + k] = scr_slot_from_f64(scr_num_hole());
-    a->len = idx;
+  scr_arr_set_slot(a, i, scr_slot_from_f64(v)); /* every number[] write past the end makes holes now */
+}
+
+/* `delete a[i]`: an in-range integer index becomes a HOLE (the displaced element is released);
+ * anything else is a no-op, as in JS. */
+void scr_arr_clear_index(ScrArr *a, double i) {
+  if (!(i >= 0.0 && i < (double)a->len) || i != trunc(i) || a->elem == SCR_ELEM_BOOL) return;
+  size_t idx = (size_t)i;
+  uint64_t old = a->data[idx];
+  a->data[idx] = a->elem == SCR_ELEM_F64 ? SCR_NUM_HOLE_BITS : 0;
+  if (scr_elem_is_ref(a->elem)) scr_elem_release(a, old);
+}
+
+/* concat's copy: append every slot of src to dst in order, a HOLE staying a hole.
+ * src and dst have the same element kind; refs retain. Answers the new length. */
+static double scr_arr_push_slot(ScrArr *a, uint64_t slot);
+double scr_arr_push_all(ScrArr *dst, ScrArr *src) {
+  size_t n = src->len; /* snapshot: dst may be src */
+  for (size_t i = 0; i < n; i++) {
+    uint64_t s = src->data[i];
+    if (scr_elem_is_ref(src->elem)) {
+      void *p = scr_slot_to_ptr(s);
+      s = scr_slot_from_ptr(p == NULL ? NULL : scr_elem_retain_p(src, p));
+    }
+    scr_arr_push_slot(dst, s);
   }
-  scr_arr_set_slot(a, i, scr_slot_from_f64(v));
+  return (double)dst->len;
+}
+
+/* Move every HOLE to the end, the present elements keeping their order; answer the present
+ * count. A dense array answers its length after one scan. */
+double scr_arr_compact_holes(ScrArr *a) {
+  if (a->elem == SCR_ELEM_BOOL) return (double)a->len;
+  size_t w = 0;
+  for (size_t r = 0; r < a->len; r++) {
+    if (scr_arr_slot_is_hole(a, r)) continue;
+    if (w != r) { uint64_t t = a->data[w]; a->data[w] = a->data[r]; a->data[r] = t; }
+    w++;
+  }
+  return (double)w;
+}
+
+/* The out-of-line hole test for the LLVM-emitted walkers. */
+bool scr_arr_hole_at(const ScrArr *a, double i) {
+  return (size_t)i < a->len && scr_arr_slot_is_hole(a, (size_t)i);
+}
+
+bool scr_arr_has_holes(const ScrArr *a) {
+  if (a->elem == SCR_ELEM_BOOL) return false;
+  for (size_t i = 0; i < a->len; i++) {
+    if (scr_arr_slot_is_hole(a, i)) return true;
+  }
+  return false;
+}
+
+double scr_arr_copy_f64(ScrArr *a, double i) {
+  double v = scr_slot_to_f64(a->data[scr_arr_check_index(a, i, false)]);
+  return scr_num_is_hole(v) ? scr_num_undef() : v;
+}
+
+void *scr_arr_copy_ref_or(ScrArr *a, double i, void *undef) {
+  void *p = scr_slot_to_ptr(a->data[scr_arr_check_index(a, i, false)]);
+  if (p == NULL) return undef;
+  return scr_elem_retain_p(a, p);
+}
+
+void *scr_arr_get_ref_or(ScrArr *a, double i, void *undef) {
+  void *p = scr_slot_to_ptr(a->data[scr_arr_check_index(a, i, false)]);
+  if (p == NULL) return undef;
+  return scr_elem_retain_p(a, p);
 }
 
 void scr_arr_set_bool(ScrArr *a, double i, bool v) {
@@ -953,7 +1021,7 @@ double scr_arr_index_of_ref(ScrArr *a, void *v) {
 bool scr_arr_includes_f64(ScrArr *a, double v) {
   for (size_t i = 0; i < a->len; i++) {
     double x = scr_slot_to_f64(a->data[i]);
-    if (x == v || (x != x && v != v)) return true; /* SameValueZero: NaN hits */
+    if (x == v || (x != x && v != v && !scr_num_is_marker(x))) return true; /* SameValueZero: NaN hits, undefined does not */
   }
   return false;
 }
@@ -1108,7 +1176,7 @@ ScrStr *scr_arr_join(ScrArr *a, ScrStr *sep) {
         break;
       case SCR_ELEM_STR: {
         const ScrStr *s = (const ScrStr *)scr_slot_to_ptr(a->data[i]);
-        scr_join_append(&buf, &len, &cap, s->data, s->len);
+        if (s != NULL) scr_join_append(&buf, &len, &cap, s->data, s->len); /* a hole joins as empty */
         break;
       }
       case SCR_ELEM_ARR:

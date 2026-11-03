@@ -1037,10 +1037,10 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
           // iteration k's element). The box takes ownership of a ref
           // element's +1 and is released with the iteration's scope.
           E.line(`${local} = ${E.boxNewC(elem)}; /* per-iteration ${localInfo.name} */`);
-          E.line(`scr_box_set_${boxAccess(elem)}(${local}, scr_arr_get_${elemAccess(elem)}(${arr.name}, ${idx}));`);
+          E.line(`scr_box_set_${boxAccess(elem)}(${local}, ${E.forOfReadC(elem, arr.name, idx)});`);
           E.scopes[E.scopes.length - 1]!.push({ name: local, type: elem, boxed: true });
         } else {
-          E.line(`${local} = scr_arr_get_${elemAccess(elem)}(${arr.name}, ${idx});`);
+          E.line(`${local} = ${E.forOfReadC(elem, arr.name, idx)};`);
           if (isRefCounted(elem)) E.scopes[E.scopes.length - 1]!.push({ name: local, type: elem });
         }
         E.emitStmts(s.body);

@@ -2937,6 +2937,51 @@ export class CEmitter {
    * scr_arr_get_ref refuses on read. Scalars have no absent value that is
    * not a lie — their zero — so the frontend only builds those nodes where
    * it has proven every slot is written first. */
+  /** HOLE (sq5): the in-band marker a hole-making operation (`new Array(n)`,
+   * `a.length = n` growth, a write past the end) stores: the HOLE NaN payload
+   * for number slots, NULL for every ref slot (bool has none: the frontend
+   * refuses a hole-making write on bool[]). Distinct from absentElemC, which is
+   * an explicit undefined value for unions and dyn. */
+  holeElemC(elem: IrType): string {
+    if (elem.kind === "f64") return "scr_num_hole()";
+    if (elem.kind === "bool") return "false";
+    return "NULL";
+  }
+
+  /** The value a HOLE reads as, for element types that have a value for
+   * undefined (dyn, undefined-armed unions); null otherwise (a plain read of
+   * a ref hole keeps its trap, the documented stance). */
+  undefHoleReadC(elem: IrType): string | null {
+    if (elem.kind === "dyn") return "scr_dyn_undefined()";
+    if (elem.kind === "union") {
+      const def = this.unionsById.get(elem.unionId);
+      const tag = def ? def.arms.findIndex((a) => a.kind === "undefinedT") : -1;
+      if (tag >= 0) return this.unitInstanceRef(elem.unionId, tag);
+    }
+    return null;
+  }
+
+  /** The COPY read (spread, pushSpread): a hole copies as undefined where the
+   * element type has a value for it (iteration yields undefined, not a hole). */
+  copyReadC(elem: IrType, arr: string, idx: string): string {
+    if (elem.kind === "f64") return `scr_arr_copy_f64(${arr}, ${idx})`;
+    if (elem.kind === "bool") return `scr_arr_get_bool(${arr}, ${idx})`;
+    if (elem.kind === "string") return `scr_arr_copy_ref_or(${arr}, ${idx}, (void *)scr_str_absent())`;
+    const u = this.undefHoleReadC(elem);
+    if (u !== null) return `scr_arr_copy_ref_or(${arr}, ${idx}, (void *)${u})`;
+    return `scr_arr_copy_ref(${arr}, ${idx})`;
+  }
+
+  /** The for-of element read: iteration yields undefined for a hole where the element type
+   * has a value for it (number marker, dyn / undefined-armed union); a string or other ref
+   * element keeps the checked read (a hole there refuses loudly, never reads as a value). */
+  forOfReadC(elem: IrType, arr: string, idx: string): string {
+    if (elem.kind === "f64") return `scr_arr_copy_f64(${arr}, ${idx})`;
+    const u = this.undefHoleReadC(elem);
+    if (u !== null) return `scr_arr_copy_ref_or(${arr}, ${idx}, (void *)${u})`;
+    return `scr_arr_get_${elem.kind === "bool" ? "bool" : "ref"}(${arr}, ${idx})`;
+  }
+
   absentElemC(elem: IrType): string {
     if (elem.kind === "union") {
       const def = this.unionsById.get(elem.unionId);

@@ -1263,18 +1263,37 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       if (recurse > depth) return scr_str_new("[Array]", 7);
       scr_insp_begin(recurse + 1);
       size_t shown = insp_shown(d->v.arr.len);
-      for (size_t i = 0; i < shown; i++) {
-        ScrDyn *item = d->v.arr.items[i];
-        ScrStr *s = scr_insp_dyn(item, recurse + 1, depth);
-        scr_insp_entry(s, item->kind == SCR_DYN_NUM);
-        scr_str_release(s);
+      /* Node's formatArray / formatSpecialArray: a run of holes is ONE output
+       * entry `<n empty item(s)>`, and `shown` bounds the ENTRIES. The numeric
+       * alignment flag reads value[entryIndex] (Node's own indexing). */
+      size_t ne = 0, ix = 0;
+      const size_t alen = d->v.arr.len;
+      while (ix < alen && ne < shown) {
+        ScrDyn *item = d->v.arr.items[ix];
+        if (scr_dyn_is_hole(item)) {
+          size_t run = 1;
+          while (ix + run < alen && scr_dyn_is_hole(d->v.arr.items[ix + run])) run++;
+          char hb[64];
+          int hn = snprintf(hb, sizeof hb, "<%zu empty item%s>", run, run > 1 ? "s" : "");
+          ScrStr *hs = scr_str_new(hb, (size_t)hn);
+          scr_insp_entry(hs, ne < alen && d->v.arr.items[ne]->kind == SCR_DYN_NUM);
+          scr_str_release(hs);
+          ix += run;
+        } else {
+          ScrStr *s = scr_insp_dyn(item, recurse + 1, depth);
+          scr_insp_entry(s, ne < alen && d->v.arr.items[ne]->kind == SCR_DYN_NUM);
+          scr_str_release(s);
+          ix++;
+        }
+        ne++;
       }
-      bool more = insp_more(d->v.arr.len);
+      bool more = ix < alen;
       if (more) {
-        ScrStr *m = scr_insp_more_items(insp_rem(d->v.arr.len));
-        scr_insp_entry(m, d->v.arr.items[shown]->kind == SCR_DYN_NUM);
+        ScrStr *m = scr_insp_more_items((double)(alen - ix));
+        scr_insp_entry(m, ne < alen && d->v.arr.items[ne]->kind == SCR_DYN_NUM);
         scr_str_release(m);
       }
+      shown = ne;
       for (size_t i = 0; i < nx; i++) {
         const ScrDynEntry *ent = &xs->v.obj.entries[i];
         ScrStr *val = scr_insp_dyn(ent->value, recurse + 1, depth);

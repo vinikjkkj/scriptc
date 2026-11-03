@@ -10,7 +10,6 @@ import { protoSlotOf, slotReadOr } from "./lower-protoslots.js";
 import * as ts from "../ts7/adapter.js";
 import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
-import { checkHoleFlaggedUse, isHoleFlaggedRef } from "./hole-flag.js";
 import { EVAL_STATIC_CLASSES, RUNTIME_EMITTER_CLASS, STATS_FIELD_INDEX, DATE_T, strandTrap, BIGINT, BOOL, BYTES_ELEM_SIZE, BYTES_U8, bytesValueType, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrGlobal, IrJsOp, IrLocal, type IrParam, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
 import { cjsRequireBindingValueOf, dynImportBindingDeclOf } from "./lower-island.js";
@@ -1016,8 +1015,6 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
   refuseWebCryptoFlowsAt(L, expr);
   if (ts.isBinaryExpression(expr)) refuseUnloweredWebCryptoAssign(L, expr);
     const loc = locOf(expr);
-    // STEP 2a: a flagged number[] may only be indexed, measured, filled or grown.
-    if (ts.isIdentifier(expr)) checkHoleFlaggedUse(L, expr);
     // A holder of a BigInt static (`const f = BigInt.asIntN`) read into a
     // slot of another function type: refused, not adapted (lower-fnvalue.ts).
     // Ahead of the local-variable read, which returns before the stdlib arms.
@@ -9233,15 +9230,17 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     const loc = locOf(expr);
     if (L.dynArrayLiterals.has(expr)) {
       const spreads: { at: number; what: string | null }[] = [];
+      const holes: number[] = [];
       const elems = expr.elements.map((el, i): IrExpr => {
         if (ts.isSpreadElement(el)) return lowerDynLiteralSpread(L, el, i, spreads);
+        if (ts.isOmittedExpression(el)) holes.push(i); // an elision is a HOLE in the slot
         const v = L.coerceToExpected(L.lowerExpr(el), DYN);
         if (v.type.kind !== "dyn") {
           L.unsupported("SC1101", el, `holding '${L.fmt(v.type)}' values in a dynamic (unknown[]) array literal`);
         }
         return v;
       });
-      return { kind: "dynArrLit", elems, ...(spreads.length > 0 ? { spreads } : {}), type: DYN, loc };
+      return { kind: "dynArrLit", elems, ...(spreads.length > 0 ? { spreads } : {}), ...(holes.length > 0 ? { holes } : {}), type: DYN, loc };
     }
     const ctxType = L.checker.getContextualType(expr);
     const tsType = ctxType ?? L.typeOf(expr);
@@ -9451,6 +9450,7 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     const dynElems = dynSpread && (mapped as IrType & { kind: "array" }).elem.kind !== "dyn";
     const type = (dynElems ? arrayOf(DYN) : mapped) as IrType & { kind: "array" };
     const spreads: number[] = [];
+    const holeAt: number[] = [];
     const elems = expr.elements.map((el, i) => {
       if (ts.isSpreadElement(el)) {
         // `[...xs, b]`: xs must be an array of the literal's own element
@@ -9570,8 +9570,18 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
       // methods do not skip the position the way JS skips holes — the
       // documented sparse-literal divergence.
       if (ts.isOmittedExpression(el)) {
-        const hole = type.elem.kind === "union" ? L.wrappedUndefined(type.elem, locOf(el)) : null;
-        if (hole) return hole;
+        // The slot is a HOLE (the in-band marker); the element expression here is a typed
+        // placeholder the emitters never evaluate.
+        const loc0 = locOf(el);
+        const placeholder: IrExpr | null =
+          type.elem.kind === "f64" ? { kind: "numLit", value: 0, type: F64, loc: loc0 }
+          : type.elem.kind === "string" ? { kind: "strLit", value: "", type: STRING, loc: loc0 }
+          : type.elem.kind === "union" ? L.wrappedUndefined(type.elem, loc0)
+          : null;
+        if (placeholder) {
+          holeAt.push(i);
+          return placeholder;
+        }
         L.unsupported("SC1090", el, "holes in array literals of this element type");
       }
       // An ARRAY-LITERAL element under a UNION element slot whose own type
@@ -9617,7 +9627,7 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
       if (!typeEquals(lowered.type, type.elem)) L.badType(el, L.typeOf(el));
       return lowered;
     });
-    return { kind: "arrayLit", elems, ...(spreads.length > 0 ? { spreads } : {}), type, loc };
+    return { kind: "arrayLit", elems, ...(spreads.length > 0 ? { spreads } : {}), ...(holeAt.length > 0 ? { holes: holeAt } : {}), type, loc };
   }
 
 /** `{ a: 1, b: "x" }` → recordLit. The record type comes from the
@@ -14706,15 +14716,6 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
    * string-key element access (`a["length"]`) and string indexing (`s[0]`
    * typechecks against the lib's index signature; use .charAt) stay out. */
   export function lowerElementAccess(L: Lowerer, expr: ts.ElementAccessExpression): IrExpr {
-    // STEP 2a: a read of a flagged number[] (hole-tracked, see hole-flag.ts)
-    // answers the stored double; a hole or a miss reads Node's undefined.
-    if (!expr.questionDotToken && isHoleFlaggedRef(L, expr.expression)) {
-      const recv = L.lowerExpr(expr.expression);
-      if (recv.type.kind === "array" && recv.type.elem.kind === "f64") {
-        const idx = L.lowerExprExpecting(expr.argumentExpression, F64);
-        return { kind: "arrayGet", arr: recv, index: idx, type: F64, holeOnMiss: true, loc: locOf(expr) };
-      }
-    }
     // `module.exports[k]` / `d[k]` over a LIVE export object (cjs-live-exports.ts): the bag's dynamic read.
     if (!expr.questionDotToken) {
       const lb = liveRecvBagOf(L, expr.expression, locOf(expr));
@@ -16459,8 +16460,6 @@ export function staticAssertionOperand(L: Lowerer, node: ts.Expression, field: s
     if (!typeEquals(value.type, receiverIr.elem)) {
       L.badType(expr.right, L.typeOf(expr.right));
     }
-    // STEP 2a: a write to a flagged number[] past the end fills the gap with holes.
-    if (isHoleFlaggedRef(L, target.expression)) return { kind: "arraySet", arr, index, value, holeGrow: true, loc: locOf(expr) };
     return { kind: "arraySet", arr, index, value, loc: locOf(expr) };
   }
 
@@ -22842,15 +22841,19 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
     {
       let kNode = expr.left;
       while (ts.isParenthesizedExpression(kNode)) kNode = kNode.expression;
-      if (ts.isNumericLiteral(kNode) && L.mapTypeOf(L.typeOf(expr.right))?.kind === "array") {
+      // A HOLE is not an own property: the answer is the hole-aware hasIndex (an
+      // integer index in range whose slot is not a hole), for a literal key and
+      // for a plain-name number key (pure, so the JS key-then-receiver order holds).
+      const pureNumKey =
+        ts.isNumericLiteral(kNode) ||
+        (ts.isIdentifier(kNode) && L.mapTypeOf(L.typeOf(kNode))?.kind === "f64");
+      if (pureNumKey && L.mapTypeOf(L.typeOf(expr.right))?.kind === "array") {
         const recvArr = L.lowerExpr(expr.right);
         if (recvArr.type.kind === "array") {
-          const len: IrExpr = { kind: "arrIntrinsic", method: "length", receiver: recvArr, args: [], type: F64, loc };
-          const n = Number(kNode.text);
-          if (Number.isInteger(n) && n >= 0) {
-            return { kind: "bin", op: "<", left: { kind: "numLit", value: n, type: F64, loc }, right: len, type: BOOL, loc };
-          }
-          return { kind: "bin", op: "<", left: len, right: { kind: "numLit", value: 0, type: F64, loc }, type: BOOL, loc };
+          const keyIr: IrExpr = ts.isNumericLiteral(kNode)
+            ? { kind: "numLit", value: Number(kNode.text), type: F64, loc }
+            : L.lowerExprExpecting(kNode, F64);
+          return { kind: "arrIntrinsic", method: "hasIndex", receiver: recvArr, args: [keyIr], type: BOOL, loc };
         }
       }
     }
@@ -26983,7 +26986,8 @@ function arrayLengthCompoundParts(
 
   // The scalar-element growth wall, in the compound spelling.
   const elem = arrT.elem;
-  const growable = elem.kind === "union" ? L.wrappedUndefined(elem, loc) !== null : isRefCounted(elem);
+  // Growth makes HOLES (the in-band marker: the number HOLE payload, NULL for ref slots).
+  const growable = elem.kind === "f64" || isRefCounted(elem);
   // `a.length >>>= k` (k a positive literal) halves: floor(n / 2^k) never
   // exceeds n for a length, so it cannot grow either (the ring buffer's
   // `this._list.length >>>= 1`).

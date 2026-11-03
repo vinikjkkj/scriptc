@@ -6064,6 +6064,14 @@ ScrDyn *scr_dyn_undefined(void);
 /* The absent marker (see scr_json.c): an UNDEF-kind node that marks a
  * DELETED field of a class instance. Immortal. */
 ScrDyn *scr_dyn_absent(void);
+/* ARRAY HOLES (sq5). A hole in a dyn array is the same absent node: every
+ * reader sees the undefined KIND (typeof, ===, ToString, JSON null), and only
+ * the own-slot surfaces (`in`, Object.keys, forEach/map/filter/reduce skips,
+ * inspect `<n empty items>`) ask the pointer. A VALUE read out of a slot must
+ * go through scr_dyn_elem_val so the marker never escapes into another slot. */
+static inline bool scr_dyn_is_hole(const ScrDyn *d) { return d == scr_dyn_absent(); }
+static inline ScrDyn *scr_dyn_elem_val(ScrDyn *d) { return d == scr_dyn_absent() ? scr_dyn_undefined() : d; }
+bool scr_dyn_arr_has_index(const ScrDyn *v, size_t idx);
 ScrDyn *scr_dyn_new_null(void);
 ScrDyn *scr_dyn_new_bool(bool b);
 ScrDyn *scr_dyn_new_num(double n);
@@ -6233,6 +6241,8 @@ ScrDyn *scr_dyn_new_arrbuf_ref(ScrBytes *b);
  * signature and no length). +1, never throws, never NULL. */
 ScrDyn *scr_dyn_arrbuf_key_get(const ScrDyn *d, const ScrStr *k);
 void scr_dyn_arr_push(ScrDyn *arr, ScrDyn *item);
+/* Slot-for-slot push: keeps a hole a hole (copies, map results). */
+void scr_dyn_arr_push_slot(ScrDyn *arr, ScrDyn *item);
 /* Spread completion for a runtime-arity argument list (`f(...xs)` in the
  * checked-dynamic tier): flattens `src` into `arr` per JS's spread over the
  * dyn's iterable kinds — arrays element-by-element (retained), strings by
@@ -8882,7 +8892,8 @@ static inline double scr_num_from_bits(uint64_t b) {
   memcpy(&d, &b, sizeof d);
   return d;
 }
-static inline bool scr_num_is_undef(double x) { return scr_num_bits(x) == SCR_NUM_UNDEF_BITS; }
+/* A HOLE read as a value is undefined too: both markers answer here. */
+static inline bool scr_num_is_undef(double x) { uint64_t b = scr_num_bits(x); return b == SCR_NUM_UNDEF_BITS || b == SCR_NUM_HOLE_BITS; }
 static inline bool scr_num_is_hole(double x) { return scr_num_bits(x) == SCR_NUM_HOLE_BITS; }
 static inline bool scr_num_is_marker(double x) {
   uint64_t b = scr_num_bits(x);
@@ -8891,7 +8902,7 @@ static inline bool scr_num_is_marker(double x) {
 /* Number strict equality: NaN is unequal to itself, but the marker equals the
  * marker (undefined === undefined). */
 static inline bool scr_num_same(double a, double b) {
-  return a == b || (scr_num_is_marker(a) && scr_num_bits(a) == scr_num_bits(b));
+  return a == b || (scr_num_is_marker(a) && scr_num_is_marker(b));
 }
 /* Every NaN becomes the canonical NaN; every other value is returned as is. */
 static inline double scr_num_canon(double x) {
@@ -8899,8 +8910,54 @@ static inline double scr_num_canon(double x) {
 }
 /* The marker as a value: what `undefined` is in a number-typed slot. */
 static inline double scr_num_undef(void) { return scr_num_from_bits(SCR_NUM_UNDEF_BITS); }
-/* The absent element of a flagged number[] (growth fills with it). */
+/* The absent element of a number[] (growth, `new Array(n)` and a write past the end fill with it). */
 static inline double scr_num_hole(void) { return scr_num_from_bits(SCR_NUM_HOLE_BITS); }
+
+/* ARRAY HOLES in a typed ScrArr (sq5). A hole is an IN-BAND marker, so it
+ * survives every copy and every escape (module.exports, fields, returns):
+ *   SCR_ELEM_F64                          the HOLE NaN payload (scr_num_hole)
+ *   SCR_ELEM_STR/ARR/BYTES/REF            NULL
+ *   SCR_ELEM_BOOL                         none (a bool slot has no spare value;
+ *                                         a hole-making write on bool[] still traps)
+ * `a[i]`-style reads that are not hole-aware keep their old behaviour (a ref
+ * slot traps "absent"); the consumers that must tell a hole from undefined
+ * (in, keys, forEach/map/filter/reduce, join, JSON, inspect) ask here. */
+static inline bool scr_arr_slot_is_hole(const ScrArr *a, size_t i) {
+  uint64_t s = a->data[i];
+  if (a->elem == SCR_ELEM_F64) return s == SCR_NUM_HOLE_BITS;
+  if (a->elem == SCR_ELEM_BOOL) return false;
+  return s == 0;
+}
+/* `a[i]` names an element (integer index in range, not a hole), f64 elements. */
+static inline bool scr_arr_has_index_f64(const ScrArr *a, double i) {
+  bool ok = false;
+  if (i >= 0.0 && i < 9007199254740992.0) {
+    int64_t n = (int64_t)i;
+    ok = (double)n == i && (uint64_t)n < (uint64_t)a->len && a->data[n] != SCR_NUM_HOLE_BITS;
+  }
+#if defined(__GNUC__) || defined(__clang__)
+  return __builtin_expect(ok, 1);
+#else
+  return ok;
+#endif
+}
+/* Any hole in the array (a scan): the typed walkers hand such an array to the
+ * dyn tree, whose inspect/JSON/keys know holes. */
+bool scr_arr_has_holes(const ScrArr *a);
+bool scr_arr_hole_at(const ScrArr *a, double i);
+void scr_arr_clear_index(ScrArr *a, double i);
+double scr_arr_push_all(ScrArr *dst, ScrArr *src);
+double scr_arr_compact_holes(ScrArr *a);
+/* The COPY read of an f64 slot (spread, pushSpread): a hole becomes the
+ * undefined marker, because the iteration protocol yields undefined. */
+double scr_arr_copy_f64(ScrArr *a, double i);
+/* The ref-element copy read where the element type has a value for undefined
+ * (strings: the absent string; dyn/union: their undefined): a hole copies as
+ * that value. `undef` is immortal and is returned without a retain. */
+void *scr_arr_copy_ref_or(ScrArr *a, double i, void *undef);
+/* The checked read for elements that can BE undefined (dyn, undefined-armed
+ * unions): a hole reads as `undef` (immortal, no retain) instead of trapping. */
+void *scr_arr_get_ref_or(ScrArr *a, double i, void *undef);
 
 size_t scr_f64_to_str(double x, char *buf);
 
