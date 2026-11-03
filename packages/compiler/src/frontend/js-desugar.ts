@@ -1694,6 +1694,82 @@ function classDictionaryFields(cls: ts.ClassLikeDeclaration): Set<string> {
   return names;
 }
 
+/** `new Array(E)` as an arm of an open-record conditional (mysql2's binary row:
+ * `rowsAsArray ? new Array(fields.length) : {}`). The checked-dynamic array has
+ * no holes (`new Array(n)` there holds n undefined elements), so the arm is
+ * admitted only when the holes cannot be observed: `E` is spelled as the
+ * bound of a counting loop (`for (let i = 0; i < E; i++)`) in the same function
+ * and every iteration writes `name[i] = ...`: the write is a plain statement of
+ * the loop body, or sits in the then-branch of an `if` whose test is the
+ * conditional's own test (the arm is only chosen when that test held), and the
+ * loop has no `continue`/`break` that could skip it. */
+function presizedArrayFilled(a: ts.Expression, test: ts.Expression, scope: ts.Node, name: string): boolean {
+  if (!ts.isNewExpression(a) || !ts.isIdentifier(a.expression) || a.expression.text !== "Array") return false;
+  if (a.arguments === undefined || a.arguments.length !== 1) return false;
+  const lenText = a.arguments[0]!.getText();
+  const testText = test.getText();
+  let ok = false;
+  const walk = (n: ts.Node): void => {
+    if (ok) return;
+    if (
+      ts.isForStatement(n) && n.condition !== undefined && ts.isBinaryExpression(n.condition) &&
+      n.condition.operatorToken.kind === ts.SyntaxKind.LessThanToken && ts.isIdentifier(n.condition.left) &&
+      n.condition.right.getText() === lenText && n.initializer !== undefined && ts.isVariableDeclarationList(n.initializer) &&
+      n.initializer.declarations.length === 1 && n.initializer.declarations[0]!.initializer !== undefined &&
+      n.initializer.declarations[0]!.initializer!.getText() === "0" &&
+      n.incrementor !== undefined && /^(?:\+\+\s*)?\w+(?:\s*\+\+)?$/.test(n.incrementor.getText()) &&
+      fillsEveryIteration(n.statement, name, n.condition.left.text, testText)
+    ) {
+      ok = true;
+      return;
+    }
+    ts.forEachChild(n, walk);
+  };
+  walk(scope);
+  return ok;
+}
+
+/** True when `region` (a loop body) writes `name[counter] = ...` on every path through it: see
+ * presizedArrayFilled. The counter is not assigned elsewhere, and nothing skips the rest of the body. */
+function fillsEveryIteration(region: ts.Node, name: string, counter: string, testText: string): boolean {
+  let found = false;
+  let spoiled = false;
+  const guardedByTest = (w: ts.Node): boolean => {
+    for (let p: ts.Node | undefined = w.parent; p !== undefined && p !== region.parent; p = p.parent) {
+      if (ts.isParenthesizedExpression(p) || ts.isExpressionStatement(p) || ts.isBlock(p)) continue;
+      if (ts.isIfStatement(p)) {
+        let child: ts.Node = w;
+        while (child.parent !== p) child = child.parent!;
+        if (child === p.thenStatement && p.expression.getText() === testText) continue;
+        return false;
+      }
+      if (p === region) return true;
+      return false;
+    }
+    return true;
+  };
+  const walk = (n: ts.Node): void => {
+    if (ts.isFunctionLike(n)) return;
+    if (ts.isContinueStatement(n) || ts.isBreakStatement(n)) spoiled = true;
+    if (ts.isBinaryExpression(n) && ASSIGN_OPS.has(n.operatorToken.kind)) {
+      const l = n.left;
+      if (ts.isIdentifier(l) && l.text === counter) spoiled = true;
+      if (
+        n.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isElementAccessExpression(l) &&
+        ts.isIdentifier(l.expression) && l.expression.text === name &&
+        ts.isIdentifier(l.argumentExpression) && l.argumentExpression.text === counter &&
+        ts.isExpressionStatement(n.parent) && guardedByTest(n.parent)
+      ) found = true;
+    }
+    if (
+      (ts.isPrefixUnaryExpression(n) || ts.isPostfixUnaryExpression(n)) && ts.isIdentifier(n.operand) && n.operand.text === counter
+    ) spoiled = true;
+    ts.forEachChild(n, walk);
+  };
+  walk(region);
+  return found && !spoiled;
+}
+
 function openRecordEdits(fileName: string, text: string): string | null {
   if (!text.includes("{}") && !/=\s*\{/.test(text)) return null;
   if (!OPEN_RECORD_PREFILTER.test(text) && !/\bcaptureStackTrace\s*\(/.test(text) && !/[\w$]\[[^\]\n"'`0-9][^\]\n"'`]*\]/.test(text)) return null;
@@ -1831,7 +1907,11 @@ function openRecordEdits(fileName: string, text: string): string | null {
         ts.isConditionalExpression(init) && n.initializer === init && !ts.isSourceFile(scope) &&
         [init.whenTrue, init.whenFalse].every((a) => {
           while (ts.isParenthesizedExpression(a)) a = a.expression;
-          return ts.isObjectLiteralExpression(a) || (ts.isArrayLiteralExpression(a) && a.elements.length === 0);
+          return (
+            ts.isObjectLiteralExpression(a) ||
+            (ts.isArrayLiteralExpression(a) && a.elements.length === 0) ||
+            presizedArrayFilled(a, init.condition, scope, (n.name as ts.Identifier).text)
+          );
         }) &&
         [init.whenTrue, init.whenFalse].some((a) => {
           while (ts.isParenthesizedExpression(a)) a = a.expression;
