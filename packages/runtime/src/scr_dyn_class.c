@@ -718,7 +718,9 @@ static bool dyn_cls_ops_set(ScrDyn *recv, const ScrStr *key, const ScrDyn *value
      * land in the run-time property table (or a field) and shadow nothing Node's emitter reads, so the
      * write refuses loudly rather than diverge silently. */
     if (scr_dyn_ee_ops != NULL && scr_dyn_objinst_emitter(recv) != NULL && scr_dyn_ee_ops->is_state(key->data, key->len)) {
-      scr_dyn_objinst_fence(recv, "assigning an EventEmitter state cell (_events, _eventsCount, _maxListeners)");
+      if (!scr_dyn_ee_ops->state_set(scr_dyn_objinst_emitter(recv), key->data, key->len, value)) {
+        scr_dyn_objinst_fence(recv, "assigning this EventEmitter state cell");
+      }
       return true;
     }
     /* Node writes the instance's real field. The compiler lists one
