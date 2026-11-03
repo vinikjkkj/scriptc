@@ -44,6 +44,7 @@ import { esOwnKeyOrder, isArrayIndexKey, isConstAssertionTypeNode, isGenericCall
 import { lowerYield } from "./lower-generators.js";
 import { errorRootedType, lowerStreamProperty, lowerStreamStateProperty, streamInstanceOfExpr, streamSidesOf } from "./lower-stream.js";
 import { lowerWebSocketGlobal } from "./lower-ws.js";
+import { lowerProvenKeyArrayRead } from "./lower-keydomain.js";
 import { emitterRooted } from "./lower-emitter.js";
 import { CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, type ClassInfo } from "./lower-classes.js";
 import { refuseWebCryptoFlowsAt } from "./lower-webcrypto-fence.js";
@@ -15010,6 +15011,11 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
         const elemRead = index === null ? null : lowerUnionElementRead(L, expr, obj, index);
         if (elemRead) return L.maybeNarrow(elemRead, expr);
       }
+    }
+    // `matches[position]` with a checked-dynamic key proven to be an index or a miss (lower-keydomain.ts).
+    if (receiverIr?.kind === "array" || receiverIr?.kind === "union") {
+      const proven = lowerProvenKeyArrayRead(L, expr);
+      if (proven !== null) return proven;
     }
     // `env[key]` on a UNION of record shapes (`ProcessEnv | Record<string,
     // string>` — the env-bag parameter pattern): the per-arm keyed read,
