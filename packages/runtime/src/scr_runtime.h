@@ -8973,6 +8973,8 @@ static inline bool scr_arr_has_index_f64(const ScrArr *a, double i) {
 bool scr_arr_has_holes(const ScrArr *a);
 bool scr_arr_hole_at(const ScrArr *a, double i);
 void scr_arr_clear_index(ScrArr *a, double i);
+/* The LLVM-inlined hasIndex met a NULL ref slot: refuses when the array was tombstoned. */
+void scr_arr_miss_check(const ScrArr *a, int64_t n);
 double scr_arr_push_all(ScrArr *dst, ScrArr *src);
 double scr_arr_compact_holes(ScrArr *a);
 /* A number VALUE read out of a slot: a HOLE reads as the undefined marker, so a hole never
