@@ -6135,6 +6135,13 @@ int scr_dyn_is_null_proto(const ScrDyn *d);
 /* The source object's [[Prototype]] (+1, NULL when it has none) — what a
  * record materialised at a crossing carries in IrRecordShape.srcproto. */
 ScrDyn *scr_dyn_obj_proto_ref(const ScrDyn *d);
+/* VIEW GRANT: a record's `%view` member (the dynamic object the record is a view of, NULL when the
+ * record was built any other way) as an owned dyn: the object retained, or the undefined singleton. */
+ScrDyn *scr_rec_view_get(ScrDyn *slot);
+/* VIEW GRANT, PROMOTION: the record's `%view` slot now names `obj` (retained; a previous non-view value is
+ * released), because the record just crossed into a dynamic slot as that object. */
+void scr_rec_view_promote(ScrDyn **slot, ScrDyn *obj);
+
 /* [[Get]] / `in` along a saved [[Prototype]] chain, keyed by a ScrStr:
  * the record's miss path once its own keys have answered nothing. */
 ScrDyn *scr_dyn_proto_get_str(const ScrDyn *proto, const ScrStr *k);

@@ -2296,12 +2296,37 @@ static void dyn_origin_grow(void) {
   free(old);
 }
 
+/* scr_dyn_mark_static_copy over what this crossing BUILT: a node something else also holds (rc > 1: the
+ * object a promoted view record is a view of) is not a copy of anything, and marking it would make the
+ * view's own writes refuse. */
+static void dyn_mark_fresh_copy(ScrDyn *d) {
+  if (d == NULL || d->static_copy) return;
+  if (d->kind == SCR_DYN_ARR) {
+    d->static_copy = true;
+    for (size_t i = 0; i < d->v.arr.len; i++) {
+      ScrDyn *c = d->v.arr.items[i];
+      if (c != NULL && (c->rc == 1 || c->rc == SIZE_MAX)) dyn_mark_fresh_copy(c);
+    }
+  } else if (d->kind == SCR_DYN_OBJ) {
+    d->static_copy = true;
+    for (size_t i = 0; i < d->v.obj.len; i++) {
+      ScrDyn *c = d->v.obj.entries[i].value;
+      if (c != NULL && (c->rc == 1 || c->rc == SIZE_MAX)) dyn_mark_fresh_copy(c);
+    }
+  }
+}
+
 ScrDyn *scr_dyn_origin_mark(ScrDyn *d, void *obj, const char *tkey,
                             void *(*retain)(void *), void (*release)(void *)) {
   /* The crossing's whole effect: the existing static-copy mark over the
    * subtree, plus this node's origin. The mark comes FIRST because the
    * table is only ever consulted behind `static_copy`. */
-  scr_dyn_mark_static_copy(d);
+  /* VIEW GRANT: a converter that answers an object which already EXISTED (a view record's own object,
+   * which the view still holds: rc >= 2) did not build a copy, so there is nothing to mark and no
+   * origin to remember - marking would turn the caller's real object into a "static copy". A fresh
+   * copy is owned by this crossing alone (rc == 1). */
+  if (d != NULL && d->rc != 1) return d;
+  dyn_mark_fresh_copy(d);
   if (d == NULL || obj == NULL) return d;
   if (d->kind != SCR_DYN_ARR && d->kind != SCR_DYN_OBJ) return d;
   /* A module NAMESPACE snapshot carries `static_copy` too and is NOT a
@@ -14610,4 +14635,12 @@ ScrStr *scr_dyn_to_string_range_dyn(const ScrDyn *d, const ScrDyn *enc, ScrDyn *
 /* The public face of the encoding canonicalizer for the gated Buffer-value unit (scr_dyn_ext.c). */
 const char *scr_enc_canon_dyn_pub(const ScrDyn *enc, bool lenient) {
   return scr_enc_canon_dyn(enc, lenient);
+}
+
+/* VIEW GRANT: see scr_runtime.h. */
+ScrDyn *scr_rec_view_get(ScrDyn *slot) { return slot != NULL ? scr_dyn_retain(slot) : scr_dyn_undefined(); }
+void scr_rec_view_promote(ScrDyn **slot, ScrDyn *obj) {
+  ScrDyn *old = *slot;
+  *slot = scr_dyn_retain(obj);
+  if (old != NULL) scr_dyn_release(old);
 }
