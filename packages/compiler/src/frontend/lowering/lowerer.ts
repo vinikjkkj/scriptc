@@ -17405,6 +17405,24 @@ export class Lowerer {
   }
 
   lowerCall(expr: ts.CallExpression): IrExpr {
+    // `Array(n)` / `Array(a, b)` WITHOUT `new`: the ECMAScript Array function
+    // is the same constructor (a call and a `new` build the same array), so
+    // the call takes the construction path of `new Array(...)` (lowerNew's
+    // Array branch). Without this the callee identifier maps to
+    // ArrayConstructor, whose signatures keep type parameters, and the
+    // generic-signature fence (SC2005) refuses the site. Spread arguments
+    // keep the construction's own refusal, as `new Array(...xs)` does.
+    if (
+      ts.isIdentifier(expr.expression) &&
+      expr.expression.text === "Array" &&
+      expr.questionDotToken === undefined &&
+      this.isStdlibSymbol(this.resolveValueSymbol(expr.expression) ?? undefined)
+    ) {
+      // lowerNew's Array branch reads only what a call and a `new` share:
+      // the callee, the argument list, and the parent chain the fill proofs
+      // walk. The cast is that claim, typed once here.
+      return lowerNew(this, expr as unknown as ts.NewExpression);
+    }
     // The island-backed ambient fetch and dynamic import() claim their
     // calls before the general dispatch (the general identifier-call paths
     // have no lowering for a promise-returning ambient global, and

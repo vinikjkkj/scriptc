@@ -13568,7 +13568,7 @@ function boundRootOf(lenArg: ts.Expression): string | null {
  * points agree: the `.length` site asks "is the statement I am lowering the
  * one this proof named", so neither site can be admitted by a proof about a
  * different statement. */
-function prefixFillTruncationOf(expr: ts.NewExpression): ts.ExpressionStatement | null {
+function prefixFillTruncationOf(expr: ts.NewExpression | ts.CallExpression): ts.ExpressionStatement | null {
   const lenArg = expr.arguments?.[0];
   if (!lenArg || (expr.arguments?.length ?? 0) !== 1) return null;
 
@@ -13753,7 +13753,7 @@ export function isProvenPrefixTruncation(stmt: ts.Statement, arrName: string): b
     const d = list.declarations[0]!;
     if (!ts.isIdentifier(d.name) || d.name.text !== arrName) continue;
     const initExpr = d.initializer;
-    if (initExpr === undefined || !ts.isNewExpression(initExpr)) return false;
+    if (initExpr === undefined || !(ts.isNewExpression(initExpr) || ts.isCallExpression(initExpr))) return false;
     if (!ts.isIdentifier(initExpr.expression) || initExpr.expression.text !== "Array") return false;
     return prefixFillTruncationOf(initExpr) === stmt;
   }
