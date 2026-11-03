@@ -17,10 +17,12 @@
  *      it by Node's resolution rule (dyn.adoptPromise) and checks the payload, and the `Promise`
  *      constructor itself is a function object `new` can run (corpus 23851).
  *
- * The refusals that STAY are pinned too: a record or class payload cannot be extracted from the
- * checked-dynamic answer exactly (a class instance Node hands over unchanged would throw), so the
- * store's `{ execute: PoolConnection['execute'] }` and a direct generic call whose declared
- * payload holds record arms fail at compile time, never at run time.
+ * The declared payload's RECORD arms (a result-set header class in the twin) are read off the
+ * instance by the checked cast's instance lane (cases/twinrec/record.ts, corpus 23950-23955).
+ *
+ * The refusal that STAYS is pinned too: the store's `{ execute: PoolConnection['execute'] }` fails
+ * at compile time (its slot's first parameter is a record | string union that would cross into
+ * the untyped method as a COPY), never at run time.
  */
 import { execFile } from "node:child_process";
 import { mkdirSync } from "node:fs";
@@ -57,6 +59,14 @@ const DIRECT_EXPECTED =
   "conn q:Q3:0\n" +
   "caught boom from a\n" +
   "count 1\n" +
+  "ended\n";
+
+/* cases/twinrec/record.ts, recorded the same way. */
+const RECORD_EXPECTED =
+  "header 1 42 0\n" +
+  "union header 1 42\n" +
+  "text SELECT 1:2\n" +
+  "conn header 1 42\n" +
   "ended\n";
 
 const PRIOR = process.env["SCRIPTC_PROVENANCE_MANIFEST"];
@@ -103,9 +113,29 @@ describe("provenance: a twin class with untyped methods behind a program's own r
     if (!result.ok) expect(result.diagnostics.map((d) => d.code)).toContain("SC2002");
   }, 600_000);
 
-  test("23850: a direct generic call whose record-armed payload is READ is a named refusal, not an ICE", async () => {
-    const entry = join(fixtureDir, "cases/twinrec-refused/direct-record-payload.ts");
-    const { result } = await build(entry, "direct-record-payload", "c");
+  for (const backend of ["c", "llvm"] as const) {
+    test(`23950: a record-armed payload read off a class instance matches Node (${backend})`, async () => {
+      const entry = join(fixtureDir, "cases/twinrec/record.ts");
+      const { result, outPath } = await build(entry, "twinrec-record", backend);
+      if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+      const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
+      expect(stdout).toBe(RECORD_EXPECTED);
+    }, 600_000);
+  }
+
+  for (const backend of ["c", "llvm"] as const) {
+    test(`23950: a direct generic call whose record-armed payload is read matches Node (${backend})`, async () => {
+      const entry = join(fixtureDir, "cases/twinrec/direct-record-payload.ts");
+      const { result, outPath } = await build(entry, "direct-record-payload", backend);
+      if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+      const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
+      expect(stdout).toBe("object 0\n");
+    }, 600_000);
+  }
+
+  test("23950: a program that writes a field of the payload's record keeps a named compile-time refusal", async () => {
+    const entry = join(fixtureDir, "cases/twinrec-refused/record-payload-written.ts");
+    const { result } = await build(entry, "record-payload-written", "c");
     expect(result.ok).toBe(false);
     if (!result.ok) {
       const codes = result.diagnostics.map((d) => d.code);
