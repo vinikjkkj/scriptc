@@ -34,6 +34,7 @@ import { provenanceSources } from "./frontend/provenance-registry.js";
 import { resolveBareModule } from "./frontend/resolve.js";
 import { isJsSourceFileName, isRelativeSpecifier } from "./frontend/shared.js";
 import { lowerToIr, type LowerOptions, type LowerResult } from "./frontend/lowering/lowerer.js";
+import { twinBackMap } from "./frontend/lowering/emitter-twin.js";
 import type { CoverageInput, NpmStaticStatus } from "./coverage/report.js";
 import { loadFfiProfile, type FfiProfile } from "./ffi/profile.js";
 import { createRequire } from "node:module";
@@ -557,41 +558,9 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
 
   const finalLoad = load;
   let pinnedLoad: (LoadResult & { dispose: () => void }) | null = null;
-  return {
-    preflight,
-    entryText: () => finalLoad.entry.text,
-    entryExports: () => entryFunctionExports(finalLoad.entry),
-    // The contract scans the PROGRAM's source files, not the runtime
-    // module order: a type-only module (nothing but exported types) has no
-    // runtime edge and never joins moduleOrder, yet its declarations are
-    // contract surface. Declaration files (default libs, @types) stay out,
-    // and so do statically-compiled npm packages' files: their .d.ts is
-    // dropped by construction (inference types the bodies), so no npm
-    // declaration can name a wire-contract type — the contract vocabulary
-    // is authored program surface only, and a workspace-linked package's
-    // shipped .ts must not smuggle same-name declarations into the type
-    // table.
-    entryContract: () =>
-      entryContractFacts(
-        finalLoad.entry,
-        finalLoad.program.getSourceFiles().filter((sf) => !sf.isDeclarationFile && npmStaticPackageOfPath(sf.fileName) === null),
-      ),
-    // Runtime evaluation order first, then any type-only program modules
-    // (no runtime edge, so absent from moduleOrder — but they are contract
-    // surface now, and the library identity hashes cover the WHOLE module
-    // graph; the Map dedups by fileName). Statically-compiled npm modules
-    // are in moduleOrder like any program module, so their bytes join the
-    // library identity hashes (source_hash/build_id) — compiled code is
-    // identity, whatever directory it came from.
-    sourceTexts: () =>
-      new Map<string, string>(
-        [finalLoad.entry, ...finalLoad.moduleOrder, ...finalLoad.program.getSourceFiles().filter((sf) => !sf.isDeclarationFile)].map(
-          (sf) => [sf.fileName, sf.text],
-        ),
-      ),
-    lower: (opts) => {
+  const lowerPinned = (opts: LowerOptions): { result: LowerResult; pins?: NonNullable<LowerResult["pinReload"]> } => {
       const first = lowerToIr(finalLoad.program, finalLoad.entry, finalLoad.moduleOrder, { ...opts, startupCrash: finalLoad.startupCrash ?? null });
-      if (first.pinReload === undefined) return first;
+      if (first.pinReload === undefined) return { result: first };
       // Class fields untyped code writes another type (DynPins): load the
       // program again with those initializers cast to `any`, and lower THAT
       // (its first pass is final: noPinReload). The first load stays the
@@ -629,7 +598,83 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
         return { ...l, start: map(l.start), end: map(l.end) };
       };
       for (const d of [...second.diagnostics, ...second.advisories]) d.loc = back(d.loc);
-      return second;
+      return { result: second, pins: first.pinReload };
+  };
+
+  return {
+    preflight,
+    entryText: () => finalLoad.entry.text,
+    entryExports: () => entryFunctionExports(finalLoad.entry),
+    // The contract scans the PROGRAM's source files, not the runtime
+    // module order: a type-only module (nothing but exported types) has no
+    // runtime edge and never joins moduleOrder, yet its declarations are
+    // contract surface. Declaration files (default libs, @types) stay out,
+    // and so do statically-compiled npm packages' files: their .d.ts is
+    // dropped by construction (inference types the bodies), so no npm
+    // declaration can name a wire-contract type — the contract vocabulary
+    // is authored program surface only, and a workspace-linked package's
+    // shipped .ts must not smuggle same-name declarations into the type
+    // table.
+    entryContract: () =>
+      entryContractFacts(
+        finalLoad.entry,
+        finalLoad.program.getSourceFiles().filter((sf) => !sf.isDeclarationFile && npmStaticPackageOfPath(sf.fileName) === null),
+      ),
+    // Runtime evaluation order first, then any type-only program modules
+    // (no runtime edge, so absent from moduleOrder — but they are contract
+    // surface now, and the library identity hashes cover the WHOLE module
+    // graph; the Map dedups by fileName). Statically-compiled npm modules
+    // are in moduleOrder like any program module, so their bytes join the
+    // library identity hashes (source_hash/build_id) — compiled code is
+    // identity, whatever directory it came from.
+    sourceTexts: () =>
+      new Map<string, string>(
+        [finalLoad.entry, ...finalLoad.moduleOrder, ...finalLoad.program.getSourceFiles().filter((sf) => !sf.isDeclarationFile)].map(
+          (sf) => [sf.fileName, sf.text],
+        ),
+      ),
+    lower: (opts) => {
+      const done = lowerPinned(opts);
+      if (done.result.twinReload === undefined) return done.result;
+      // THE TWIN RELOAD (emitter-twin.ts): the lowering is complete, and a dynamic emit can reach typed
+      // listeners it registers. Load the program again with the erased twins inserted and lower THAT. A
+      // load or lowering that does not come out clean keeps the complete first result: the twin is an
+      // improvement of what a dynamic emit hands a typed listener, never a reason to refuse a program.
+      const keep = done.result;
+      const edits = keep.twinReload!;
+      if (process.env["SCRIPTC_TWIN_WHY"] !== undefined) process.stderr.write(`[twin] reload: ${[...edits.values()].reduce((n, l) => n + l.filter((e) => e.text.startsWith("/*@sctwin")).length, 0)} listener(s)\n`);
+      let twinLoad: (LoadResult & { dispose: () => void }) | null = null;
+      try {
+        twinLoad = loadProgram(entryPath, { npmStatic: effective, ...(done.pins !== undefined ? { textEdits: done.pins } : {}), twinEdits: edits });
+        if (checkPreflight(twinLoad).length > 0) return keep;
+        const again = lowerToIr(twinLoad.program, twinLoad.entry, twinLoad.moduleOrder, {
+          ...opts,
+          startupCrash: twinLoad.startupCrash ?? null,
+          noPinReload: true,
+          noTwinReload: true,
+        });
+        const bad = again.module === null ? [] : validateModule(again.module);
+        if (again.module === null || again.diagnostics.length > 0 || bad.length > 0) {
+          if (process.env["SCRIPTC_TWIN_WHY"] !== undefined) {
+            for (const d of again.diagnostics.slice(0, 5)) process.stderr.write(`[twin] reload refused: ${d.code} ${d.message}\n`);
+            for (const v of bad.slice(0, 5)) process.stderr.write(`[twin] reload invalid: ${v.message}\n`);
+          }
+          return keep;
+        }
+        for (const d of again.advisories) d.loc = twinBack(d.loc);
+        return again;
+      } catch (e) {
+        if (process.env["SCRIPTC_TWIN_WHY"] !== undefined) process.stderr.write(`[twin] reload failed: ${(e as Error).message}\n`);
+        return keep;
+      } finally {
+        twinLoad?.dispose();
+      }
+      function twinBack(l: SrcLoc): SrcLoc {
+        const es = edits.get(l.file) ?? edits.get(l.file.split("\\").join("/"));
+        if (es === undefined) return l;
+        const m = twinBackMap(es);
+        return { ...l, start: m(l.start), end: m(l.end) };
+      }
     },
     npmStatic: statuses,
     npmImportSites: npmSites,

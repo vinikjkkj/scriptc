@@ -62,6 +62,7 @@ import { applySeedPins, computeSeedPins, type SeedPin } from "./seed-pin.js";
 import { programHasTsUntypedWeakNew, setTsUntypedWeakAdmission } from "./types.js";
 import { applyRetypePins, computeRetypePins, shiftRetypePins, type RetypePin } from "./retype-pin.js";
 import { cjsLexerVisibleNames } from "./cjs-lexer.js";
+import { applyTwinEdits, type TwinEdit } from "./lowering/emitter-twin.js";
 import {
   ADOPTED_OPTIONS,
   ambientDtsPath,
@@ -349,6 +350,9 @@ export function loadProgram(
      * wrap in an `any` cast, served on top of whatever the shadows below
      * served. Offsets are into that served text. */
     textEdits?: ReadonlyMap<string, readonly { start: number; end: number; ts: boolean }[]>;
+    /** The twin reload's insertions (LowerResult.twinReload), applied after every other edit: offsets
+     * are into the text the previous lowering's checker saw (emitter-twin.ts). */
+    twinEdits?: ReadonlyMap<string, readonly TwinEdit[]>;
   },
 ): LoadResult & { dispose: () => void } {
   // Absolute from the start: tsgo's world is absolute-path-keyed (the CLI
@@ -403,6 +407,7 @@ export function loadProgram(
   // that shadow's replacement content, and the rewriter is handed the same
   // bytes to work from rather than the disk's.
   const textEdits = opts?.textEdits;
+  const twinEdits = opts?.twinEdits;
   const open = (
     pins: ReadonlyMap<string, readonly SeedPin[]> | null,
     retypePins: ReadonlyMap<string, readonly RetypePin[]> | null = null,
@@ -451,6 +456,7 @@ export function loadProgram(
         // and retype pins (this reload re-derives and re-applies the very same
         // pins first, from the same unedited program, so the texts agree).
         const edits = applyEdits ? (textEdits?.get(path) ?? textEdits?.get(path.split("\\").join("/"))) : undefined;
+        const twins = applyEdits ? (twinEdits?.get(path) ?? twinEdits?.get(path.split("\\").join("/"))) : undefined;
         if (edits !== undefined) {
           let text: string;
           if (filePins !== undefined || fileRetype !== undefined) {
@@ -466,7 +472,18 @@ export function loadProgram(
           }
           served = text;
         }
-        if (served !== undefined && (rewritten !== null || filePins !== undefined || fileRetype !== undefined || edits !== undefined)) {
+        if (twins !== undefined) {
+          let text: string;
+          if (edits !== undefined || filePins !== undefined || fileRetype !== undefined) {
+            text = served!; // already desugared, pinned and edited
+          } else {
+            const raw = served ?? readSourceForRewrite(path);
+            if (raw === undefined) throw new Error(`twin reload: cannot read ${path}`);
+            text = jsDesugar(path, raw) ?? raw;
+          }
+          served = applyTwinEdits(text, twins);
+        }
+        if (served !== undefined && (rewritten !== null || filePins !== undefined || fileRetype !== undefined || edits !== undefined || twins !== undefined)) {
           // srcSite (the C emitter) turns a SrcLoc OFFSET into file:line:col
           // by reading the file off disk a second time. A rewrite changes no
           // lines but does change the offsets after each edit, so the disk
@@ -504,7 +521,7 @@ export function loadProgram(
         for (const pin of list) process.stderr.write(`[seedpin] ${pin.why} at ${file}:${pin.start}\n`);
       }
     }
-    if (pins.size > 0 || retypeKeyed.size > 0 || textEdits !== undefined) {
+    if (pins.size > 0 || retypeKeyed.size > 0 || textEdits !== undefined || twinEdits !== undefined) {
       load.disposeAll();
       host.close();
       ({ host, load } = open(pins.size > 0 ? pins : null, retypeKeyed.size > 0 ? retypeKeyed : null, true));

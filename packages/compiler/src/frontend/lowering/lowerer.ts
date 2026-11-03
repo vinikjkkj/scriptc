@@ -68,6 +68,7 @@ import type {
   SrcLoc,
 } from "../../ir/nodes.js";
 import { GRAFTED_EMITTER_CLASSES, EVAL_STATIC_CLASSES, dynReflectionSite, graftedBoxSites, moduleBoxesEmitters } from "../../ir/nodes.js";
+import { computeTwinEdits, type TwinEdits } from "./emitter-twin.js";
 import { canBoxFuncIntoDyn } from "../../ir/nodes.js";
 import { procStreamDynMemberFence, NULL_T, strandTrap, armDiscrimLits, arrayOf, BOOL, canBoxClassIntoDyn, internalSlotFields, isRefCounted, canAdaptDynFuncTo, dynRestApplyable, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, shapeHasAccessorSlots, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
 import { type DynamicImportResolution, type NpmBuiltinUse, type NpmLazyTrap } from "../npm.js";
@@ -496,6 +497,11 @@ export interface LowerResult {
    * with them applied and lowers that; `module` is null and nothing else in
    * this result is meaningful. */
   pinReload?: DynPinEdits;
+  /** Set ALONGSIDE a complete lowered module (never instead of one): the module boxes emitters a dynamic emit
+   * can reach and registers typed listeners that have an erased twin to hand it (emitter-twin.ts). The
+   * caller loads the program again with these insertions, lowers that, and keeps THIS result if that load or
+   * lowering fails. */
+  twinReload?: TwinEdits;
   /** Present iff diagnostics is empty. */
   module: IrModule | null;
   diagnostics: ScrDiagnostic[];
@@ -556,6 +562,8 @@ export interface LowerOptions {
    * imports; without this option ambient declarations keep Node's ordinary
    * ReferenceError behavior. */
   ffiImports?: readonly IrFfiImport[];
+  /** Do not answer with a twin reload (LowerResult.twinReload): this lowering IS the reload. */
+  noTwinReload?: boolean;
   /** Do not answer with a pin reload (LowerResult.pinReload): this program
    * IS the pinned reload, or the caller cannot reload. */
   noPinReload?: boolean;
@@ -835,6 +843,10 @@ export function lowerToIr(
         ],
       };
     }
+  }
+  if (options.noTwinReload !== true && result.module !== null && emit.twinCandidates.length > 0 && moduleBoxesEmitters(result.module)) {
+    const twinReload = computeTwinEdits(emit.twinCandidates, emit.checker);
+    if (twinReload !== null) result = { ...result, twinReload };
   }
   lowerProfileNote("%emit-run", performance.now() - __t1);
   lowerProfileNote("%ovf-after-discovery", __ovfAfterDiscovery.size);
@@ -2406,6 +2418,9 @@ export class Lowerer {
    * (see DynPins): the classes that crossed into a dyn box, and the value
    * types written through `dyn.keySet`. */
   readonly dynBoxedNames = new Set<string>();
+  /** The inline listener functions registered through the TYPED emitter path whose parameters are not all
+   * dyn (emitter-twin.ts): the candidates for an erased twin if a dynamic emit can reach the emitter. */
+  readonly twinCandidates: ts.Expression[] = [];
   readonly dynWriteByName = new Map<string, Set<string>>();
   readonly dynWriteAnyKey = new Set<string>();
   /** Every inferred, pinnable field slot the class collection met (class

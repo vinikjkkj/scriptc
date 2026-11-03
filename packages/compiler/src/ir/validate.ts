@@ -1340,6 +1340,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "emitter.new": { argTypes: [], result: VOID },
   "emitter.ctor": { argTypes: [null], result: VOID },
   "emitter.on": { argTypes: [null, STRING, null, BOOL, BOOL], result: VOID },
+  "emitter.onTwin": { argTypes: [null, STRING, null, BOOL, BOOL, null], result: VOID },
   "emitter.off": { argTypes: [null, STRING, null], result: VOID },
   // The dyn-adapted registration family (JS-lane checked-dynamic
   // listeners): checkListener has NO receiver (it validates the listener
@@ -5624,7 +5625,7 @@ function validateFunction(
             break;
           }
           // The chaining forms return the receiver's own static class.
-          if (e.fn === "emitter.on" || e.fn === "emitter.off" ||
+          if (e.fn === "emitter.on" || e.fn === "emitter.onTwin" || e.fn === "emitter.off" ||
               e.fn === "emitter.onDyn" || e.fn === "emitter.offDyn" ||
               e.fn === "emitter.onData" || e.fn === "emitter.onDataDyn" ||
               e.fn === "emitter.removeAll" || e.fn === "emitter.setMax" ||
@@ -5634,8 +5635,14 @@ function validateFunction(
             }
             // The listener slots carry closures (the dyn family's checked-
             // dynamic listener is table-checked; its adapter is a func).
-            if ((e.fn === "emitter.on" || e.fn === "emitter.off" || e.fn === "emitter.onData") && e.args[2]?.type.kind !== "func") {
+            if ((e.fn === "emitter.on" || e.fn === "emitter.onTwin" || e.fn === "emitter.off" || e.fn === "emitter.onData") && e.args[2]?.type.kind !== "func") {
               err(`libCall ${e.fn} listener must be a func`, e.loc);
+            }
+            if (e.fn === "emitter.onTwin") {
+              const tw = e.args[5]?.type;
+              if (tw?.kind !== "func") {
+                err(`libCall emitter.onTwin twin must be a func`, e.loc);
+              }
             }
             if ((e.fn === "emitter.onDyn" || e.fn === "emitter.onDataDyn") && e.args[3]?.type.kind !== "func") {
               err(`libCall ${e.fn} adapter must be a func`, e.loc);

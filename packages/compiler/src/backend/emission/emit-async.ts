@@ -1224,6 +1224,32 @@ export function emitterBoxedOnFor(E: CEmitter, cbT: IrType & { kind: "func" }): 
   return sym;
 }
 
+/** `scr_emitter_on_twin` for a listener with an ERASED TWIN (emitter.onTwin): the twin's dyn function
+ * box (the checked thunk of a function whose parameters are all dyn, so it checks nothing) is what a
+ * dynamic-list emit calls; the typed listener keeps serving the static emits through its invoke
+ * adapter. cb and twin MOVE into the registry. Interned per (listener type, twin type). */
+export function emitterTwinOnFor(E: CEmitter, cbT: IrType & { kind: "func" }, twT: IrType & { kind: "func" }): string {
+  const key = `${typeKey(cbT)}|${typeKey(twT)}`;
+  let sym = E.emitterTwinOns.get(key);
+  if (sym) return sym;
+  sym = `sc_eetw_${E.emitterTwinOns.size}`;
+  E.emitterTwinOns.set(key, sym);
+  const thunk = E.emitterInvokeThunkFor(cbT);
+  const box = E.dynFuncBoxHelper(twT);
+  const sig = `${E.link}ScrEmitter *${sym}(ScrEmitter *sc_em, ScrStr *sc_name, ScrClosure *sc_cb, ScrClosure *sc_tw, bool sc_once, bool sc_prepend)`;
+  E.walkerProtos.push(`${sig};`);
+  E.walkerDefs.push(
+    `${sig} {`,
+    `  ScrDyn *sc_box = ${box}(sc_tw, NULL, NULL);`,
+    `  ScrEmitter *sc_r = scr_emitter_on_twin(sc_em, sc_name, sc_cb, sc_tw, sc_box, &${thunk}, sc_once, sc_prepend);`,
+    `  scr_dyn_release(sc_box);`,
+    `  return sc_r;`,
+    `}`,
+    ``,
+  );
+  return sym;
+}
+
 /** The stream completion-callback closure fn for one done func type: the
  * `callback` a user's write/final/destroy/transform/flush receives. The
  * closure's one capture box holds the stream (+1); calling it unwraps the
