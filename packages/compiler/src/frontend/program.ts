@@ -4469,6 +4469,31 @@ export function cjsExportAssignmentOf(stmt: ts.Statement):
   return null;
 }
 
+/** The per-file facts cjsExportDiscardReason needs, computed ONCE per source file: the index of the last statement that
+ * replaces the export object (a `module.exports = {...}` table, or a whole-export replacement parked in a comma operand), and
+ * each statement's position. The per-call scan was O(statements) per export statement, so a bundled file with thousands of
+ * `exports.x = ...` statements cost O(n^2) node reads per lowering pass (and each read of a tsgo node materializes it). */
+const exportScans = new WeakMap<ts.SourceFile, { lastTable: number; index: Map<ts.Statement, number> }>();
+function exportScanOf(sf: ts.SourceFile): { lastTable: number; index: Map<ts.Statement, number> } {
+  const hit = exportScans.get(sf);
+  if (hit !== undefined) return hit;
+  const stmts = sf.statements;
+  const index = new Map<ts.Statement, number>();
+  let lastTable = -1;
+  for (let i = 0; i < stmts.length; i++) {
+    const s = stmts[i]!;
+    if (!index.has(s)) index.set(s, i);
+    // Comma operands count: a replacement Node performs is a replacement
+    // wherever a minifier parked it (cjsWholeExportAssignmentOf), and the
+    // members it discards must fence whether or not the statement that
+    // replaced them was spelled on its own.
+    if (cjsExportAssignmentOf(s)?.kind === "table" || cjsWholeExportAssignmentOf(s) !== null) lastTable = i;
+  }
+  const scan = { lastTable, index };
+  exportScans.set(sf, scan);
+  return scan;
+}
+
 /** Why Node would DISCARD this CommonJS export statement, or null when it
  * survives (Node's export-object identity rules — checker-free, pure
  * AST): `module.exports = {...}` REPLACES the export object, so members
@@ -4483,21 +4508,9 @@ export function cjsExportDiscardReason(stmt: ts.Statement): string | null {
   const mine = cjsExportAssignmentOf(stmt);
   if (!mine) return null;
   const stmts = sf.statements;
-  let lastTable = -1;
-  for (let i = 0; i < stmts.length; i++) {
-    // Comma operands count: a replacement Node performs is a replacement
-    // wherever a minifier parked it (cjsWholeExportAssignmentOf), and the
-    // members it discards must fence whether or not the statement that
-    // replaced them was spelled on its own.
-    if (
-      cjsExportAssignmentOf(stmts[i]!)?.kind === "table" ||
-      cjsWholeExportAssignmentOf(stmts[i]!) !== null
-    ) {
-      lastTable = i;
-    }
-  }
+  const { lastTable, index } = exportScanOf(sf);
   if (lastTable < 0) return null;
-  const myIdx = stmts.indexOf(stmt as never);
+  const myIdx = index.get(stmt) ?? -1;
   // A member written AFTER an `exports = module.exports = X` replacement is
   // live: `exports` now references X itself, so `exports.f =` is X's static.
   if (
