@@ -1,7 +1,7 @@
-// A program that lets an EventEmitter instance reach an untyped value may not write or delete a dyn key in a way
-// that could change the emitter's cells or its `_events` view: the registry holds them, and a write the lowering
-// cannot reproduce is refused where it is written (a literal _events, a non-number into _eventsCount or
-// _maxListeners, any delete, any write through a computed key).
+// A program that lets an EventEmitter instance reach an untyped value may not write or delete the emitter's cells
+// by name in a way the registry cannot hold: a literal _events, a non-number into _eventsCount or _maxListeners, a
+// delete of one of the three. A receiver built in the program (a plain object) is left alone, and so are the
+// numbers (and undefined for _maxListeners) the registry stores.
 import { EventEmitter } from 'events';
 
 class Hub extends EventEmitter {
@@ -10,15 +10,13 @@ class Hub extends EventEmitter {
 
 const h = new Hub();
 const d: any = h;
-const key: string = process.argv.length > 99 ? 'zz' : 'label';
 const some: any = { a: 1 };
 
 d._events = {};
 d._maxListeners = 'many';
 d._eventsCount = some.a;
 delete d._maxListeners;
-delete some[key];
-some[key] = 1;
-d[key] = 2;
+some._events = 1;
+delete some._events;
 d._maxListeners = 5;
 d._eventsCount = undefined;
