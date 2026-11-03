@@ -67,7 +67,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { GRAFTED_EMITTER_CLASSES, EVAL_STATIC_CLASSES, dynReflectionSite, graftedBoxSites, moduleBoxesEmitters } from "../../ir/nodes.js";
+import { GRAFTED_EMITTER_CLASSES, EVAL_STATIC_CLASSES, dynReflectionSite, emitterStateWriteSites, graftedBoxSites, moduleBoxesEmitters } from "../../ir/nodes.js";
 import { computeTwinEdits, type TwinEdits } from "./emitter-twin.js";
 import { canBoxFuncIntoDyn } from "../../ir/nodes.js";
 import { procStreamDynMemberFence, NULL_T, strandTrap, armDiscrimLits, arrayOf, BOOL, canBoxClassIntoDyn, internalSlotFields, isRefCounted, canAdaptDynFuncTo, dynRestApplyable, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, shapeHasAccessorSlots, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
@@ -3865,6 +3865,16 @@ export class Lowerer {
     {
       const defs = [...this.classes.values()].map((i) => i.def);
       if (moduleBoxesEmitters({ classes: defs, functions } as unknown as IrModule)) {
+        // An emitter's state cells and `_events` table are its registry's: a program that lets one reach a dyn value
+        // may not delete a dyn key or write one through a computed key (the key may be `_events`, the receiver the
+        // emitter or its `_events` view), nor write `_events` or a non-number into `_eventsCount` / `_maxListeners`.
+        for (const s of emitterStateWriteSites(functions)) {
+          this.pushDiag(unsupportedDiag(
+            "SC1090",
+            s.loc,
+            `${s.what} in a program that lets an EventEmitter instance reach a dynamic value (an emitter's _events, _eventsCount and _maxListeners belong to its listener registry; the write could change them, which this lowering cannot reproduce)`,
+          ));
+        }
         const before = this.liftedFns.length;
         const grafted = [...this.classes.values()].filter((i) => i.emitterMixin === true);
         const loc = grafted[0]?.def.loc ?? defs[0]?.loc;

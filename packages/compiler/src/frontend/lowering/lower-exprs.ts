@@ -15066,7 +15066,7 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     // read never meets a name the member table might not know. The instance boxes by reference, so a method
     // reads back the identity its static read has, and the table is consulted first (scr_dyn_class /
     // emit-walkers [[Get]]).
-    if (receiverIr?.kind === "object" && classKeyedReadWalked(L, receiverIr.className) && isForInKeyReadOfSameReceiver(L, expr)) {
+    if (receiverIr?.kind === "object" && classKeyedReadWalked(L, receiverIr.className) && isForInKeyReadOfSameReceiver(L, expr) && forInKeyValueStaysRead(L, expr)) {
       const rawKey = L.lowerExpr(expr.argumentExpression);
       const key: IrExpr | null =
         rawKey.type.kind === "string"
@@ -27623,4 +27623,91 @@ function isForInKeyReadOfSameReceiver(L: Lowerer, expr: ts.ElementAccessExpressi
     return true;
   }
   return false;
+}
+
+/** The value a for-in key read yields may be an emitter's `_events` view, a copy of a listener table that Node
+ * lets a program mutate (the mutation would have to reach the table). So the read is lowered only when its value
+ * is CONSUMED without being mutated or kept: compared (===, !==, ==, !=), typeof'd, tested for truthiness, printed
+ * (console.*, String, a template span), or bound to a local whose every use is such a consumption or a read of a
+ * member of it (a member that is not called, assigned, deleted or incremented). Anything else keeps the refusal
+ * this read had before the walk existed. Iterative over the enclosing function's body. */
+function forInKeyValueStaysRead(L: Lowerer, expr: ts.ElementAccessExpression): boolean {
+  const kindOf = (n: ts.Node): ts.SyntaxKind => n.kind;
+  const SK = ts.SyntaxKind;
+  const valueOk = (start: ts.Node): boolean => {
+    let node: ts.Node = start;
+    for (let guard = 0; guard < 64; guard++) {
+      const p = node.parent as ts.Node | undefined;
+      if (p === undefined) return false;
+      const pk = kindOf(p);
+      if (pk === SK.ParenthesizedExpression || pk === SK.NonNullExpression || pk === SK.AsExpression) { node = p; continue; }
+      if (pk === SK.BinaryExpression) {
+        const op = (p as ts.BinaryExpression).operatorToken.kind;
+        if (op === SK.EqualsEqualsEqualsToken || op === SK.ExclamationEqualsEqualsToken || op === SK.EqualsEqualsToken || op === SK.ExclamationEqualsToken) return true;
+        if (op === SK.AmpersandAmpersandToken || op === SK.BarBarToken || op === SK.QuestionQuestionToken) { node = p; continue; }
+        return false;
+      }
+      if (pk === SK.PrefixUnaryExpression) return (p as ts.PrefixUnaryExpression).operator === SK.ExclamationToken;
+      if (pk === SK.TypeOfExpression) return true;
+      if (pk === SK.IfStatement) return (p as ts.IfStatement).expression === node;
+      if (pk === SK.WhileStatement) return (p as ts.WhileStatement).expression === node;
+      if (pk === SK.ConditionalExpression) {
+        if ((p as ts.ConditionalExpression).condition === node) return true;
+        node = p;
+        continue;
+      }
+      if (pk === SK.TemplateSpan) return true;
+      if (pk === SK.CallExpression) {
+        const call = p as ts.CallExpression;
+        if (!call.arguments.includes(node as ts.Expression)) return false;
+        const callee = call.expression;
+        if (ts.isIdentifier(callee)) return callee.text === "String" || callee.text === "Boolean";
+        return ts.isPropertyAccessExpression(callee) && ts.isIdentifier(callee.expression) && callee.expression.text === "console";
+      }
+      return false;
+    }
+    return false;
+  };
+  const refOk = (ref: ts.Node): boolean => {
+    let cur: ts.Node = ref;
+    for (let guard = 0; guard < 64; guard++) {
+      const p = cur.parent as ts.Node | undefined;
+      if (p === undefined) return false;
+      const pk = kindOf(p);
+      if ((pk === SK.PropertyAccessExpression || pk === SK.ElementAccessExpression) && (p as ts.PropertyAccessExpression).expression === cur) {
+        const gp = p.parent as ts.Node | undefined;
+        if (gp === undefined) return false;
+        const gk = kindOf(gp);
+        if (gk === SK.CallExpression && (gp as ts.CallExpression).expression === p) return false;
+        if (gk === SK.DeleteExpression) return false;
+        if (gk === SK.BinaryExpression && (gp as ts.BinaryExpression).left === p) {
+          const op = (gp as ts.BinaryExpression).operatorToken.kind;
+          if (op >= SK.FirstAssignment && op <= SK.LastAssignment) return false;
+        }
+        if ((gk === SK.PrefixUnaryExpression || gk === SK.PostfixUnaryExpression) && (gp as ts.PrefixUnaryExpression).operator !== SK.ExclamationToken) return false;
+        cur = p;
+        continue;
+      }
+      break;
+    }
+    return valueOk(cur);
+  };
+  const parent = expr.parent as ts.Node | undefined;
+  if (parent !== undefined && kindOf(parent) === SK.VariableDeclaration && (parent as ts.VariableDeclaration).initializer === expr) {
+    const name = (parent as ts.VariableDeclaration).name;
+    if (!ts.isIdentifier(name)) return false;
+    const sym = L.checker.getSymbolAtLocation(name);
+    if (sym === undefined) return false;
+    let scope: ts.Node | undefined = parent;
+    while (scope !== undefined && !ts.isFunctionLike(scope) && !ts.isSourceFile(scope)) scope = scope.parent as ts.Node | undefined;
+    if (scope === undefined) return false;
+    const stack: ts.Node[] = [scope];
+    while (stack.length > 0) {
+      const cur = stack.pop()!;
+      if (ts.isIdentifier(cur) && cur !== name && L.checker.getSymbolAtLocation(cur) === sym && !refOk(cur)) return false;
+      ts.forEachChild(cur, (c) => { stack.push(c); });
+    }
+    return true;
+  }
+  return valueOk(expr);
 }
