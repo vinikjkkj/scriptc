@@ -1874,7 +1874,9 @@ ScrDyn *scr_dyn_objinst_miss(ScrDyn *d, const ScrStr *key) {
   }
   if (scr_dyn_ee_ops != NULL && scr_dyn_objinst_emitter(d) != NULL && scr_dyn_ee_ops->is_state(key->data, key->len)) {
     /* the emitter's own state cells, read from its registry */
-    return scr_dyn_ee_ops->state(scr_dyn_objinst_emitter(d), key->data, key->len);
+    ScrDyn *sv = scr_dyn_ee_ops->state(d, scr_dyn_objinst_emitter(d), key->data, key->len);
+    if (sv == NULL && !scr_exc_pending()) scr_dyn_objinst_fence(d, "a property read"); /* a stream's cells keep the fence */
+    return sv;
   }
   if (dyn_objproto_knows(key->data)) {
     /* Object.prototype's own methods read as functions, bound over the same
