@@ -3915,6 +3915,19 @@ function validateFunction(
         }
         break;
       }
+      case "recordIsView":
+      case "recordView": {
+        checkExpr(e.obj);
+        const shape = records.get(e.shapeId);
+        if (!shape) err(`${e.kind} on undeclared shape "${e.shapeId}"`, e.loc);
+        else {
+          expectType(e.obj, { kind: "record", shapeId: e.shapeId }, `${e.kind} receiver`);
+          if (shape.view !== true) err(`${e.kind} on shape ${e.shapeId}, which carries no view member`, e.loc);
+          const want = e.kind === "recordIsView" ? "bool" : "dyn";
+          if (e.type.kind !== want) err(`${e.kind} must be ${want}, got ${e.type.kind}`, e.loc);
+        }
+        break;
+      }
       case "recordNullProto": {
         checkExpr(e.obj);
         const shape = records.get(e.shapeId);

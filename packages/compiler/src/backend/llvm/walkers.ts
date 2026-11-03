@@ -16,7 +16,7 @@ import type { IrRecordShape, IrType, IrUnionDef } from "../../ir/nodes.js";
 import { isRefCounted, typeKey } from "../../ir/nodes.js";
 import { mangleRecordStruct } from "../mangle.js";
 import { BlockBuilder } from "./blocks.js";
-import { emitOwnPresentLl, llFieldType, releaseSym, traceAdapter, type ShapeHost } from "./shapes.js";
+import { emitOwnPresentLl, llFieldType, releaseSym, traceAdapter, viewSlotIndex, type ShapeHost } from "./shapes.js";
 import { LlvmUnsupportedError } from "./unsupported.js";
 
 /** What the walkers need from the emitter beyond the shape tables: union
@@ -238,6 +238,20 @@ export class LlWalkers {
     // CYCLE-CAPABLE shapes bracket the walk with the circular-detection
     // stack; edge labels stamp before members whose walk can re-enter —
     // emit-walkers.ts's contract, ported.
+    // VIEW GRANT: a view is the OBJECT, so the object writes itself - emit-walkers.ts's row.
+    if (!shape.tuple && shape.view === true) {
+      const vw = this.loadField(B, "%v", shapeId, viewSlotIndex(shape), { kind: "dyn" });
+      const isV = B.tmp();
+      B.line(`${isV} = icmp ne ptr ${vw}, null`);
+      const lV = B.newLabel("jwv.y");
+      const lN = B.newLabel("jwv.n");
+      B.condBr(isV, lV, lN);
+      B.startBlock(lV);
+      this.host.declare(`declare void @scr_jb_put_dyn(ptr, ptr)`);
+      B.line(`call void @scr_jb_put_dyn(ptr %b, ptr ${vw})`);
+      B.terminate("ret void");
+      B.startBlock(lN);
+    }
     const cyclic = traceAdapter(this.host, { kind: "record", shapeId }) !== null;
     const edgeable = (ft: IrType): boolean => cyclic && traceAdapter(this.host, ft) !== null;
     if (cyclic) this.jbEnter(B, shape.tuple === true);

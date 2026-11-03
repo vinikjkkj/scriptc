@@ -16,7 +16,7 @@ import { RUNTIME_EMITTER_CLASS as RUNTIME_EMITTER_CLASS_W } from "../../ir/nodes
 import { classvalCandidates, dynClassDisplayName, dynDescBase, dynEmitterSlot, dynRuntimeRoot, dynEnumerationFenced, dynMemberRows, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
 import { EMITTER_MIXIN_FIELD_NAME, ORD_MEMBER, orderRecordPlanCached } from "../../ir/nodes.js";
 import { KINDGATE_WIDE_KINDS, kindgateInstanceLane, kindgateWideLane } from "../kindgate.js";
-import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
+import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, VIEW_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
 
 /** The refusal text a dyn-to-record check uses when the receiver carries
  * no INTERNAL SLOT for a field declaredOrder omits (internalSlotFields).
@@ -1053,6 +1053,10 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
       case "record": {
         const shape = E.recordsById.get(t.shapeId);
         if (!shape) throw new Error(`emitter bug: jsonStringify of unknown shape ${t.shapeId}`);
+        // VIEW GRANT: a view is the OBJECT, so the object writes itself (its undeclared keys, its class's toJSON).
+        if (!shape.tuple && shape.view === true) {
+          d.push(`  if (v->${VIEW_MEMBER}) { scr_jb_put_dyn(b, v->${VIEW_MEMBER}); return; }`);
+        }
         // CYCLE-CAPABLE shapes (recursive record types — the collector-
         // fixpoint set) bracket the walk with the circular-detection
         // stack: a value already being serialized above throws V8's exact
@@ -2580,6 +2584,19 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             ...(wide ? [`!sc_dyn_rec_wideable(d)`] : []),
           ].join(" && ");
           d.push(fail(`  `, "record.kind", kindOk, `NULL`));
+          // VIEW GRANT, INSTANCE RECEIVER (hard builder only): the record is a view of the instance and
+          // nothing is read at the cast - a getter runs at each READ of the member, not here (a union arm
+          // walker, which must read the members to pick an arm, keeps the eager build below, and so does a
+          // shape with a METHOD member: the eager build binds the method to the instance, which a read of the
+          // function value through the dyn path would not).
+          if (inst && !soft && shape.view === true && !shape.fields.some((f) => typeMayHoldFunc(E, f.type))) {
+            d.push(`  if (d->kind == SCR_DYN_OBJINST) {`);
+            d.push(`    ${cDecl(t, "r")} = ${mangleRecordNew(t.shapeId)}();`);
+            d.push(`    r->${VIEW_MEMBER} = scr_dyn_retain((ScrDyn *)d);`);
+            if (shape.tostr) d.push(`    r->${TOSTR_MEMBER} = scr_dyn_tostr_closure(d);`);
+            d.push(`    return r;`);
+            d.push(`  }`);
+          }
           d.push(`  if (d->kind != SCR_DYN_OBJ) {`);
           if (inst) {
             const kt = shape.fields.length > 0 ? keysName : "NULL";
@@ -2606,6 +2623,11 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           d.push(fail(`  `, "record.kind", `d->kind != SCR_DYN_OBJ`, `NULL`));
         }
         d.push(`  ${cDecl(t, "r")} = ${mangleRecordNew(t.shapeId)}();`);
+        // VIEW GRANT: the record is a VIEW of the object it was read off (the declared members below are its
+        // snapshot): the ORIGINAL value, not the projection the instance lane reads the members from.
+        if (shape.view === true) {
+          d.push(`  r->${VIEW_MEMBER} = scr_dyn_retain((ScrDyn *)${wide || inst ? "sc_orig" : "d"});`);
+        }
         // The HIDDEN per-instance OWN-KEY MASK. This builder is the ONE
         // point that still holds both halves of JS's answer: the member's
         // VALUE (read through [[Get]], so a prototype-carried default is
@@ -3433,6 +3455,10 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // CYCLE-CAPABLE shapes guard the deep copy: a cyclic value has no
         // finite dyn copy, so enter TRAPS on re-entry (SEMANTICS.md — Node
         // shares the reference instead of copying).
+        // VIEW GRANT: a view converts to the OBJECT it is a view of - the same object, not a copy.
+        if (!shape.tuple && shape.view === true) {
+          d.push(`  if (v->${VIEW_MEMBER}) return scr_dyn_retain(v->${VIEW_MEMBER});`);
+        }
         const cyclicRec = E.traceAdapterC(t) !== null;
         if (cyclicRec) d.push(`  scr_dyn_from_enter(v);`);
         if (shape.tuple) {
@@ -3750,6 +3776,12 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             d.push(`    scr_dyn_obj_set_proto(d, v->${SRCPROTO_MEMBER}); /* the SOURCE's own chain, one object */`);
           }
           d.push(`  }`);
+        }
+        // VIEW GRANT, PROMOTION: once the record has crossed into a dynamic slot it IS the object it crossed as
+        // (JavaScript has one), so its `%view` now names that object: the callee's writes are the caller's
+        // reads, and casting the object back yields a view of it again.
+        if (shape.view === true) {
+          d.push(`  scr_rec_view_promote(&v->${VIEW_MEMBER}, d);`);
         }
         if (cyclicRec) d.push(`  scr_dyn_from_leave();`);
         d.push(`  return d;`);

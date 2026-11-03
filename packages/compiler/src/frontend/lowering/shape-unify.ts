@@ -414,6 +414,7 @@ export function unifyWidthShapes(L: Lowerer, functions: IrFunction[]): UnifyOutc
       if (s.tostr) shape.tostr = true;
       if (s.ownmask) shape.ownmask = true;
       if (s.srcproto) shape.srcproto = true;
+      if (s.view) shape.view = true;
     }
   }
 
