@@ -10454,6 +10454,10 @@ bool scr_dyn_instance_of(const ScrDyn *v, ScrDyn *fn) {
     if (!scr_dyn_is_object_kind(v)) return false;
     return scr_dyn_err_instanceof(v, (double)err_cls_kind_of_clo(fn->v.fn.clo));
   }
+  /* The Promise constructor value: its instances are the promise boxes. */
+  if (scr_promise_ctor_box != NULL && fn == scr_promise_ctor_box) {
+    return scr_dyn_is_object_kind(v) && v->kind == SCR_DYN_PROMISE;
+  }
   /* A CLASS VALUE (declared, or minted per evaluation) answers from the class unit. */
   if (scr_dyn_class_ops != NULL) {
     bool handled = false;
@@ -12874,6 +12878,9 @@ bool scr_dyn_fn_is_ctor(const ScrDyn *fn) {
   return (scr_dyn_fn_code(fn) & (SCR_FNK_NOPROTO | SCR_FNK_ASYNC | SCR_FNK_GEN)) == 0;
 }
 
+ScrDyn *scr_promise_ctor_box;
+ScrDyn *(*scr_promise_construct_hook)(const ScrDyn *args);
+
 ScrDyn *scr_dyn_construct(const ScrDyn *fn, const ScrDyn *args, const ScrStr *what) {
   if (fn->kind == SCR_DYN_PROXY) return SCR_PX->construct(fn, args, what);
   if (fn->kind != SCR_DYN_FUNC) {
@@ -12890,6 +12897,7 @@ ScrDyn *scr_dyn_construct(const ScrDyn *fn, const ScrDyn *args, const ScrStr *wh
    * its thunk's only job is the requires-'new' throw the plain call form
    * needs. Every other function keeps the ordinary path. */
   if (fn == scr_u8_ctor) return scr_u8_construct(args);
+  if (scr_promise_ctor_box != NULL && fn == scr_promise_ctor_box) return scr_promise_construct_hook(args);
   if (err_cls_is(fn)) {
     return err_cls_make(err_cls_kind_of_clo(fn->v.fn.clo),
                         args->kind == SCR_DYN_ARR && args->v.arr.len > 0 ? args->v.arr.items[0] : NULL);

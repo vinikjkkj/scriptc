@@ -480,6 +480,9 @@ export function ctorObjectGlobalValue(L: Lowerer, canonical: string, loc: SrcLoc
   if (errKind !== undefined && !L.dynamic) {
     return { kind: "libCall", fn: "dyn.errorClass", args: [{ kind: "numLit", value: errKind, type: F64, loc }], type: DYN, loc };
   }
+  // The Promise constructor is a function object too (`this.Promise = thePromise || Promise`, then
+  // `new this.Promise(executor)`): the singleton the runtime constructs through.
+  if (canonical === "Promise" && !L.dynamic) return { kind: "libCall", fn: "dyn.promiseCtor", args: [], type: DYN, loc };
   if (canonical !== "Uint8Array" || L.dynamic) return null;
   return { kind: "libCall", fn: "dyn.u8Ctor", args: [], type: DYN, loc };
 }

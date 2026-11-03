@@ -1007,3 +1007,93 @@ ScrPromise *scr_dyn_adopt_promise(ScrDyn *d) {
   scr_dyn_resolve_into(p, scr_dyn_retain(d));
   return p;
 }
+
+/* ── the Promise constructor as a checked-dynamic VALUE ───────────────────────
+ * `Promise` read from a JavaScript source as a value (mysql2's `this.Promise =
+ * thePromise || Promise`, then `new this.Promise((resolve, reject) => ...)`)
+ * is a function object: typeof "function", one process singleton so `===`
+ * holds, and `new` through it runs a dyn executor with dyn resolving
+ * functions that share one alreadyResolved flag (the thenable job's record,
+ * above). Calling it without `new` throws Node's TypeError; `new` never
+ * reaches the thunk, because scr_dyn_construct routes on pointer identity.
+ * The statics (resolve, all, ...) are not members of this value. */
+static ScrDyn *scr_promise_ctor_value;
+
+static ScrDyn *scr_promise_ctor_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo;
+  (void)args;
+  (void)argc;
+  static const char msg[] = "Promise constructor cannot be invoked without 'new'";
+  scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+  return NULL;
+}
+
+static ScrDyn *scr_dyn_promise_construct_impl(const ScrDyn *args) {
+  ScrDyn *exec = args != NULL && args->kind == SCR_DYN_ARR && args->v.arr.len > 0 ? args->v.arr.items[0] : NULL;
+  if (exec == NULL || exec->kind != SCR_DYN_FUNC) {
+    /* V8: "Promise resolver <value> is not a function" (the value spelled like a
+     * template literal would, objects as #<Object>). */
+    ScrJsonBuf b;
+    scr_jb_init(&b);
+    scr_jb_puts(&b, "Promise resolver ");
+    if (exec == NULL || exec->kind == SCR_DYN_UNDEF) {
+      scr_jb_puts(&b, "undefined");
+    } else if (exec->kind == SCR_DYN_NULL || exec->kind == SCR_DYN_NUM || exec->kind == SCR_DYN_STR ||
+               exec->kind == SCR_DYN_BOOL) {
+      ScrStr *s = scr_dyn_string_coerce(exec);
+      for (size_t i = 0; s != NULL && i < s->len; i++) scr_jb_putc(&b, s->data[i]);
+      if (s != NULL) scr_str_release(s);
+    } else if (exec->kind == SCR_DYN_ARR) {
+      scr_jb_puts(&b, "[object Array]");
+    } else {
+      scr_jb_puts(&b, "#<Object>");
+    }
+    scr_jb_puts(&b, " is not a function");
+    scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
+    return NULL;
+  }
+  ScrPromise *p = scr_promise_new();
+  ScrThenRec *rec = calloc(1, sizeof *rec);
+  if (!rec) scr_then_oom();
+  rec->rc = 1;
+  rec->p = scr_promise_retain(p);
+  ScrDyn *res = scr_then_make_fn(rec, scr_then_resolve_thunk, "resolve", "(value)");
+  ScrDyn *rej = scr_then_make_fn(rec, scr_then_reject_thunk, "reject", "(reason)");
+  ScrDyn *cargs[2] = {res, rej};
+  ScrDyn *r = scr_dyn_call(exec, cargs, 2, "Promise resolver");
+  if (r) {
+    scr_dyn_release(r);
+  } else if (scr_exc_pending()) {
+    /* An executor that throws rejects, unless resolve or reject already ran. */
+    if (!rec->done) {
+      rec->done = true;
+      scr_promise_reject_pending(p);
+    } else {
+      scr_exc_clear();
+    }
+  }
+  scr_dyn_release(res);
+  scr_dyn_release(rej);
+  scr_then_rec_release_v(rec);
+  ScrDyn *out = scr_dyn_new_promise(p);
+  scr_promise_release(p);
+  return out;
+}
+
+static void scr_promise_ctor_teardown(void) {
+  scr_promise_ctor_box = NULL;
+  scr_promise_construct_hook = NULL;
+  scr_dyn_release(scr_promise_ctor_value);
+  scr_promise_ctor_value = NULL;
+}
+
+ScrDyn *scr_dyn_promise_ctor(void) {
+  if (scr_promise_ctor_value == NULL) {
+    scr_promise_ctor_value =
+        scr_dyn_new_func(scr_closure_new((void *)scr_promise_ctor_thunk, 0), scr_promise_ctor_thunk, 1, "()", "Promise");
+    scr_promise_ctor_box = scr_promise_ctor_value;
+    scr_promise_construct_hook = scr_dyn_promise_construct_impl;
+    scr_atexit(scr_promise_ctor_teardown);
+  }
+  return scr_dyn_retain(scr_promise_ctor_value);
+}

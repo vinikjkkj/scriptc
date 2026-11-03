@@ -5970,6 +5970,10 @@ export type IrLibFn =
    * identity. Never throws. Static builds only; under --dynamic the
    * engine owns the real one. */
   | "dyn.u8Ctor"
+  /** The `Promise` global as a VALUE in a JavaScript source (scr_async_dyn.c): a function object,
+   * one process singleton, whose `new` runs a checked-dynamic executor. Never throws. Static
+   * builds only; links the dyn async unit. */
+  | "dyn.promiseCtor"
   /** A builtin `buffer` module member, or the Buffer class, as a VALUE (scr_json.c).
    * `args[0]` is the member index in that section order (0 Buffer ... 11 resolveObjectURL).
    * The class is one process singleton, so `===` holds across spellings. Never throws. */
@@ -11891,6 +11895,8 @@ export function moduleUsesDynAsync(mod: IrModule): boolean {
     "dc.chanBindStore", "dc.chanUnbindStore", "dc.chanRunStores",
     // Blob and File are promise-returning classes (text, arrayBuffer, bytes): their values link scr_async_dyn.c.
     "dyn.bufferValue",
+    // The Promise constructor value (new through a checked-dynamic Promise): the construct hook lives here.
+    "dyn.promiseCtor",
     // WebCrypto (globalThis.crypto.subtle): the subtle members answer promises of the dyn tree (scr_lib.c).
     "dyn.webCrypto",
     // crypto.getRandomValues (static): its link set is scr_webcrypto.c, which rides scr_async_dyn.c.

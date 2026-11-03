@@ -7639,6 +7639,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // `prototype` and `===` both depend on identity). Never
             // throws.
             return finish(`scr_dyn_uint8array_ctor()`);
+          case "dyn.promiseCtor":
+            // `Promise` as a value in a JavaScript source: the process singleton function
+            // object (+1 per read). Never throws.
+            return finish(`scr_dyn_promise_ctor()`);
           case "dyn.bufferValue":
             // A builtin buffer-module member or the Buffer class as a value (+1).
             return finish(`scr_dyn_buffer_value(${arg(0)})`);

@@ -5971,6 +5971,12 @@ void scr_dyn_obj_set_ctor_name(ScrDyn *d, const char *name);
  * "<name> is not a constructor" TypeError. All borrowed; +1 or NULL with
  * the exception pending. */
 ScrDyn *scr_dyn_construct(const ScrDyn *fn, const ScrDyn *args, const ScrStr *what);
+/* The Promise constructor as a checked-dynamic value (scr_async_dyn.c, gated by dyn.promiseCtor):
+ * one process singleton, +1 per read. scr_dyn_construct routes `new` through it by pointer identity
+ * to the hook the unit installs (the hook and the box are NULL until the value is first read). */
+ScrDyn *scr_dyn_promise_ctor(void);
+extern ScrDyn *scr_promise_ctor_box;
+extern ScrDyn *(*scr_promise_construct_hook)(const ScrDyn *args);
 
 /* `v instanceof f` — JS's OrdinaryHasInstance over the chain `new`
  * built: is the object `f.prototype` answers anywhere in v's
