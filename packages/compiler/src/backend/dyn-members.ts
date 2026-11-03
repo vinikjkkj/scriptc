@@ -24,6 +24,7 @@
  */
 import {
   CLASS_PROPS_FIELD,
+  DYN,
   type OrdPlan,
   parseOwnShadowField,
   canConvertToDyn,
@@ -64,7 +65,7 @@ export type DynMemberRow =
   /** A declared FIELD: the emitter reads the struct slot and boxes it
    * through the toDyn walker the type already has. Enumerable — this is
    * what Object.keys and JSON.stringify report. */
-  | { kind: "field"; name: string; type: IrType; absentWhenUndefined: boolean; ordk: number }
+  | { kind: "field"; name: string; type: IrType; absentWhenUndefined: boolean; ordk: number; hidden?: true }
   /** A GETTER (`get:prop`): the emitter calls `fn` with the instance and
    * boxes the result. NOT enumerable, matching JS. */
   | { kind: "accessor"; name: string; fn: IrFunction; isStatic?: true; enumerable?: true }
@@ -157,17 +158,22 @@ export function dynEmitterSlot(cls: DynMemberClass): "prefix" | { field: string 
 
 export function dynRuntimeRoot(cls: DynMemberClass): number {
   let emitter = false;
+  let props = false;
   // An Error-rooted instance has its own walk (errorRooted), whatever its property table holds.
   for (let c: DynMemberClass | null = cls; c !== null; c = c.base) if (RUNTIME_ERROR_CLASSES.has(c.def.name)) return 0;
   for (let c: DynMemberClass | null = cls; c !== null; c = c.base) {
-    // A run-time property table holds keys no row names: the key list is not a fact of the class.
-    if (RUNTIME_STREAM_CLASSES.has(c.def.name) || c.def.fields.some((f) => f.name === CLASS_PROPS_FIELD)) return 2;
+    // A stream root keeps the fence: its own-key prefix is far larger than the emitter's.
+    if (RUNTIME_STREAM_CLASSES.has(c.def.name)) return 2;
+    if (c.def.fields.some((f) => f.name === CLASS_PROPS_FIELD)) props = true;
     if (c.def.name === RUNTIME_EMITTER_CLASS) emitter = true;
   }
   // A class grafted by applyMixin(Y, EventEmitter) carries the emitter's own keys (_events, _eventsCount,
   // _maxListeners) among its fields, in whatever place its constructor first runs EventEmitter.call(this):
   // the key ORDER is not a fact of the class, so every enumerating surface keeps its loud fence (2).
   if (!emitter && cls.def.fields.some((f) => f.name === EMITTER_MIXIN_FIELD_NAME)) return 2;
+  // 3: EventEmitter-rooted WITH a run-time property table; 4: a plain class WITH one. The walk lists the
+  // table's enumerable keys after the members (scr_dyn_class.c walk_error).
+  if (props) return emitter ? 3 : 4;
   return emitter ? 1 : 0;
 }
 
@@ -277,6 +283,17 @@ export function dynMemberTable(
     // The internal '%'-prefixed slots (%props and its family): no program
     // can spell one, so answering for it would invent a key Node does not
     // have.
+    // The run-time property table (%props) is the ONE '%' slot a row names, and only as a HIDDEN
+    // row (enumerable 0): the runtime reads it through the member lookup to walk the table's keys
+    // after the declared fields, which is exactly the table's own key order. Hidden, so no
+    // enumerating surface lists it and no name lookup answers it (no program spells '%props').
+    if (f.name === CLASS_PROPS_FIELD) {
+      if (!seen.has(f.name)) {
+        seen.add(f.name);
+        rows.push({ kind: "field", name: f.name, type: DYN, absentWhenUndefined: false, ordk: 0, hidden: true });
+      }
+      continue;
+    }
     if (f.name.startsWith("%")) continue;
     // The hidden slot of an applyMixin(Y, EventEmitter) class: the emitter's own state, no
     // property of the instance (the dyn view answers the EventEmitter API from it).
