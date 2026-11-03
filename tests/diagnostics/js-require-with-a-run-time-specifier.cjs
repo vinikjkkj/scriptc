@@ -123,3 +123,9 @@ console.log('L18', String(inquire('no-such-pkg-xyz')));
 console.log('L19', tryRequire('no-such-pkg-xyz') === tryRequire('no-such-pkg-xyz'));
 
 console.log('done');
+
+// sq4 (2026-11-03): the require in tryRequire (section 4) and the one in
+// inquire (section 8) are no longer refused: every call site passes a constant
+// Node cannot resolve, so they lower to Node's MODULE_NOT_FOUND (tests/corpus
+// 23303 and 23305 run them against Node). What stays refused here is the
+// require whose call sites pass non-constants or non-strings (sections 6, 7).

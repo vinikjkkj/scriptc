@@ -1,0 +1,8 @@
+js-require-inquire-util-exported.cjs:9:131 - error SC2020: 'require() with a run-time specifier' is part of the standard library types but has no scriptc lowering yet
+
+   8 | "use strict";var e,t,n,o=Object.getOwnPropertyNames,r=(e,t)=>function(){return t||(0,e[o(e)[0]])((t={exports:{}}).exports,t),t.exports},
+   9 | l=r({"node_modules/protobufjs/src/util/inquire.js"(e,t){t.exports=function(e){try{if("function"!=typeof require)return null;var t=require(e);return t&&(t.length||Object.keys(t).length)?t:null}catch(e){return null}}}}),
+     |                                                                                                                                   ^~~~~~~~~~
+  10 | y=r({"node_modules/protobufjs/src/util/minimal.js"(e){var t=e;t.inquire=l();t.isNode=true}}),
+
+  hint: the compiled module graph is fixed at build time: a specifier nothing installed resolves compiles to Node's MODULE_NOT_FOUND, and every other one needs the module's exports as a value
