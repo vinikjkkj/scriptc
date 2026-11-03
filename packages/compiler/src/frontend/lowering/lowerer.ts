@@ -2553,6 +2553,9 @@ export class Lowerer {
    * compiled against an incomplete one, which is why an override of an
    * inherited GENERIC method refuses outside this window (lower-classes). */
   collectingClassDecls = false;
+  /** The program's declared classes are all collected (collectProgram's first loop ran). A class expression
+   * that maps earlier (the discovery pass's container inference) defers like one mapped inside the window. */
+  classDeclsCollected = false;
   /** Non-null redirects pushDiag into a capture buffer (the deferred
    * collection wrapper). */
   diagSink: ScrDiagnostic[] | null = null;
