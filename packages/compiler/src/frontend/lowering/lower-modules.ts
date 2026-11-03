@@ -6,7 +6,7 @@ import { isStringCallAliasDecl } from "./lower-builtins.js";
 import * as ts from "../ts7/adapter.js";
 import { poisonedRecordShapeDiag } from "../../diagnostics/diagnostic.js";
 import type { Lowerer } from "./lowerer.js";
-import { CLASS_BUILTIN_CTORLESS, CLASS_NO_DYN_NEW } from "../../ir/nodes.js";
+import { CLASSVAL_DYN, CLASS_BUILTIN_CTORLESS, CLASS_NO_DYN_NEW } from "../../ir/nodes.js";
 import { dynNewDrivable } from "./lower-evalclass.js";
 import { uniformTupleArrayExpectation } from "./lower-stmts.js";
 import { registerAbsentGlobal } from "./lower-absent.js";
@@ -2620,8 +2620,16 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
                 ) return true;
                 if (!ts.isPropertyAssignment(p) || ts.isComputedPropertyName(p.name)) return false;
                 const mt = L.mapTypeOf(L.typeOf(p.initializer));
-                return mt === null || mt.kind === "dyn" ||
-                  canConvertToDyn(mt, (id) => L.shapes.get(id), (id) => L.unions.get(id));
+                // A class value does not make the literal a dyn global (it did not before class values boxed into dyn):
+                // the static record keeps its class-valued members.
+                if (mt !== null && mt.kind === "classval") return false;
+                CLASSVAL_DYN.off++;
+                try {
+                  return mt === null || mt.kind === "dyn" ||
+                    canConvertToDyn(mt, (id) => L.shapes.get(id), (id) => L.unions.get(id));
+                } finally {
+                  CLASSVAL_DYN.off--;
+                }
               })
             ) {
               const symbol = L.checker.getSymbolAtLocation(nameNode);
