@@ -11272,6 +11272,72 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/23500-proto-method-keyed-wrap/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23500-proto-method-keyed-wrap/packet.cjs",
+    "<repo>/tests/corpus/23500-proto-method-keyed-wrap/query.cjs",
+    "<repo>/tests/corpus/23500-proto-method-keyed-wrap/ping.cjs",
+    "<repo>/tests/corpus/23500-proto-method-keyed-wrap/auth.cjs",
+    "<repo>/tests/corpus/23500-proto-method-keyed-wrap/row.cjs",
+    "<repo>/tests/corpus/23500-proto-method-keyed-wrap/index.cjs",
+    "<repo>/tests/corpus/23500-proto-method-keyed-wrap/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23501-proto-method-replace-instances.js": {
+   "order": [
+    "<repo>/tests/corpus/23501-proto-method-replace-instances.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23502-proto-method-replace-override-super.js": {
+   "order": [
+    "<repo>/tests/corpus/23502-proto-method-replace-override-super.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23503-proto-method-replace-wrapper-conditional.js": {
+   "order": [
+    "<repo>/tests/corpus/23503-proto-method-replace-wrapper-conditional.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23504-proto-method-replace-typed.ts": {
+   "order": [
+    "<repo>/tests/corpus/23504-proto-method-replace-typed.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23505-proto-method-replace-class-expression.js": {
+   "order": [
+    "<repo>/tests/corpus/23505-proto-method-replace-class-expression.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23506-proto-method-replace-capture-retain.js": {
+   "order": [
+    "<repo>/tests/corpus/23506-proto-method-replace-capture-retain.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23507-proto-method-replace-shared-name.js": {
+   "order": [
+    "<repo>/tests/corpus/23507-proto-method-replace-shared-name.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23508-proto-method-keyed-wrap-guard-off/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23508-proto-method-keyed-wrap-guard-off/packet.cjs",
+    "<repo>/tests/corpus/23508-proto-method-keyed-wrap-guard-off/query.cjs",
+    "<repo>/tests/corpus/23508-proto-method-keyed-wrap-guard-off/ping.cjs",
+    "<repo>/tests/corpus/23508-proto-method-keyed-wrap-guard-off/auth.cjs",
+    "<repo>/tests/corpus/23508-proto-method-keyed-wrap-guard-off/row.cjs",
+    "<repo>/tests/corpus/23508-proto-method-keyed-wrap-guard-off/index.cjs",
+    "<repo>/tests/corpus/23508-proto-method-keyed-wrap-guard-off/main.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2351-async-methods.ts": {
    "order": [
     "<repo>/tests/corpus/2351-async-methods.ts"
