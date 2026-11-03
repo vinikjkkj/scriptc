@@ -10848,7 +10848,71 @@ export function moduleBoxesEmitters(mod: IrModule): boolean {
  * emitter's state keys (_events, _eventsCount, _maxListeners, two symbols) at a position its constructor decides and
  * with listener tables as values: none of the surfaces above can answer for such an instance exactly, so a program that
  * both boxes one and contains any of them keeps the compile-time refusal (graftedDynFence). */
+/** Is the expression a value built in the program that cannot be an emitter-rooted or grafted instance (an object literal, a
+ * record, an array, a scalar), or a local every definition of which is one? `Object.create(proto)` over such a value
+ * cannot be a [[Prototype]] link over an instance. Computed on demand over every function (a captured local is defined in
+ * one function and written in another; a local id shared by two functions simply unions their definitions). A parameter,
+ * a loop or catch binding, and a local with a definition of any other kind are NOT fresh. */
+function makeFreshObjectTest(functions: readonly IrFunction[]): (e: unknown) => boolean {
+  type N = { kind?: string; localId?: string; init?: unknown; value?: { kind?: string; type?: { kind?: string } }; params?: { localId?: string; id?: string }[] };
+  const defs = new Map<string, unknown[]>();
+  const opaque = new Set<string>();
+  const seen = new WeakSet<object>();
+  const stack: unknown[] = [];
+  for (const f of functions) {
+    for (const p of f.params as unknown as { localId?: string; id?: string }[]) {
+      const id = p.localId ?? p.id;
+      if (typeof id === "string") opaque.add(id);
+    }
+    stack.push(f.body);
+  }
+  while (stack.length > 0) {
+    const v = stack.pop();
+    if (v === null || typeof v !== "object" || seen.has(v)) continue;
+    seen.add(v);
+    if (Array.isArray(v)) {
+      for (const item of v) stack.push(item);
+      continue;
+    }
+    const n = v as N;
+    if (typeof n.localId === "string") {
+      if (n.kind === "varDecl") (defs.get(n.localId) ?? defs.set(n.localId, []).get(n.localId)!).push(n.init ?? undefined);
+      else if (n.kind === "assign" || n.kind === "assignExpr") (defs.get(n.localId) ?? defs.set(n.localId, []).get(n.localId)!).push((n as { value?: unknown }).value);
+      else if (n.kind !== "varRef") opaque.add(n.localId); // a loop / catch binding, an increment: not a value built here
+    }
+    for (const key of Object.keys(v)) if (key !== "type" && key !== "loc") stack.push((v as Record<string, unknown>)[key]);
+  }
+  const FRESH_TYPES = new Set(["record", "array", "string", "f64", "bool", "bigint", "map", "set"]);
+  const memo = new Map<string, boolean>();
+  const localFresh = (id: string, active: Set<string>): boolean => {
+    const known = memo.get(id);
+    if (known !== undefined) return known;
+    if (opaque.has(id)) return false;
+    if (active.has(id)) return true; // a cycle of copies adds no new source
+    const ds = defs.get(id);
+    if (ds === undefined) return false;
+    active.add(id);
+    const r = ds.every((d) => d === undefined || exprFresh(d, active));
+    active.delete(id);
+    memo.set(id, r);
+    return r;
+  };
+  const exprFresh = (e: unknown, active: Set<string>): boolean => {
+    const x = e as N | null | undefined;
+    if (x === null || x === undefined) return false;
+    if (x.kind === "dynObjLit") return true;
+    if (x.kind === "dynFrom") {
+      const inner = x.value;
+      return inner?.kind === "unitLit" || (inner?.type?.kind !== undefined && FRESH_TYPES.has(inner.type.kind));
+    }
+    if (x.kind === "varRef" && typeof x.localId === "string") return localFresh(x.localId, active);
+    return false;
+  };
+  return (e) => exprFresh(e, new Set());
+}
+
 export function dynReflectionSite(functions: readonly IrFunction[], fenced: (op: string) => boolean = () => true): string | null {
+  let fresh: ((e: unknown) => boolean) | null = null;
   const REFLECT_FNS = new Set([
     "dyn.assign", "dyn.assignAll", "dyn.hasOwn", "dyn.forInKeys", "dyn.forInCertain", "dyn.forInPlain", "dyn.forInAccessor",
     "dyn.objKeys", "dyn.objValues", "dyn.objEntries", "dyn.structuredClone", "dyn.cloneOwn", "dyn.ownNamesCtor",
@@ -10871,7 +10935,11 @@ export function dynReflectionSite(functions: readonly IrFunction[], fenced: (op:
     }
     const n = v as { kind?: string; fn?: string; name?: string; args?: unknown; value?: { type?: { kind?: string } }; method?: string; key?: { kind?: string; value?: string }; fields?: unknown; spreads?: unknown; loc?: SrcLoc };
     if (n.kind === "libCall" && typeof n.fn === "string") {
-      if (REFLECT_FNS.has(n.fn)) hit(n.fn, n);
+      // Object.create over a value built in the program (an object literal and the like) is no prototype link over an instance.
+      if ((n.fn === "dyn.objCreateProto" || n.fn === "dyn.objCreateDescs") && Array.isArray(n.args) && n.args.length > 0 &&
+          (fresh ??= makeFreshObjectTest(functions))(n.args[0])) {
+        // exact: a plain-object prototype
+      } else if (REFLECT_FNS.has(n.fn)) hit(n.fn, n);
       else if ((n.fn.startsWith("insp.") || n.fn.startsWith("util.") || /format|inspect/i.test(n.fn)) && hasDynArg(n.args)) hit(n.fn, n);
     } else if (n.kind === "jsonStringify" && n.value?.type?.kind === "dyn") hit("JSON.stringify", n);
     else if (n.kind === "intrinsic" && (n.name === "console.log" || n.name === "console.error") && hasDynArg(n.args)) hit(n.name, n);
