@@ -3649,6 +3649,12 @@ size_t scr_dyn_objinst_pre(const ScrDyn *d) {
 }
 
 bool scr_dyn_objinst_is(const ScrDyn *d, size_t pre, size_t post) {
+  /* A per-evaluation CLASS VALUE is a function object holding its evaluation's instance box: the
+   * static side's interval (a standalone class) names exactly that box. */
+  if (d->kind == SCR_DYN_FUNC) {
+    const ScrDyn *in = scr_dyn_class_eval_inner(d);
+    return in != NULL && scr_dyn_objinst_is(in, pre, post);
+  }
   if (d->kind != SCR_DYN_OBJINST) return false;
   size_t p = scr_dyn_objinst_pre(d);
   return pre <= p && p <= post;
@@ -3660,6 +3666,7 @@ void *scr_dyn_objinst_unbox(const ScrDyn *d, size_t pre, size_t post,
     scr_dyn_check_fail(path, want, d);
     return NULL;
   }
+  if (d->kind == SCR_DYN_FUNC) d = scr_dyn_class_eval_inner(d); /* the evaluation's own box */
   /* The SAME pointer, retained — identity survives box/unbox. */
   return d->v.inst.cls->retain(d->v.inst.o);
 }
@@ -4120,7 +4127,7 @@ static uint64_t dm_hash_key(void *p) {
       break;
     }
     case SCR_DYN_FUNC:
-      parts[1] = (uint64_t)(uintptr_t)d->v.fn.clo;
+      parts[1] = (uint64_t)(uintptr_t)scr_dyn_fn_ident(d);
       break;
     case SCR_DYN_HANDLE:
       parts[0] ^= ((uint64_t)d->v.handle.tag + 1) << 8;
@@ -9873,6 +9880,16 @@ bool scr_dyn_same_value(const ScrDyn *a, const ScrDyn *b) {
 /* JS === over two dyn values: scalars by value (NaN false, ±0 equal via
  * C ==; strings bytewise), units by kind, everything reference-shaped by
  * node IDENTITY (the checked-dynamic tree's object identity). Never throws. */
+size_t scr_dyn_classval_pre(const ScrDyn *d) {
+  const ScrDynClass *c = scr_dyn_class_of_value(d);
+  return c != NULL ? c->pre : (size_t)-1;
+}
+
+const void *scr_dyn_fn_ident(const ScrDyn *d) {
+  const ScrDyn *in = scr_dyn_class_eval_inner(d);
+  return in != NULL ? (const void *)in->v.inst.o : (const void *)d->v.fn.clo;
+}
+
 bool scr_dyn_strict_eq(const ScrDyn *a, const ScrDyn *b) {
   if (a->kind != b->kind) return false;
   switch (a->kind) {
@@ -9888,7 +9905,7 @@ bool scr_dyn_strict_eq(const ScrDyn *a, const ScrDyn *b) {
     /* The ScrDyn box is a boundary artifact — one closure crossing the
      * dyn boundary twice is still ONE JS function value, so identity
      * lives in the boxed closure, not the box. */
-    return a == b || a->v.fn.clo == b->v.fn.clo;
+    return a == b || scr_dyn_fn_ident(a) == scr_dyn_fn_ident(b);
   case SCR_DYN_HANDLE:
     /* Same story: identity is the HANDLE — one req boxed into two
      * listeners is still one JS object.
@@ -10325,6 +10342,12 @@ bool scr_dyn_instance_of(const ScrDyn *v, ScrDyn *fn) {
     static const char msg[] = "Right-hand side of 'instanceof' is not callable";
     scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
     return false;
+  }
+  /* A CLASS VALUE (declared, or minted per evaluation) answers from the class unit. */
+  if (scr_dyn_class_ops != NULL) {
+    bool handled = false;
+    bool r = scr_dyn_class_ops->instance_of(v, fn, &handled);
+    if (handled) return r;
   }
   /* Step 3: a primitive left operand is false and asks no further
    * question — the prototype check below never runs for it. */
@@ -13176,6 +13199,15 @@ ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode) {
     return scr_dyn_jsval_ops()->obj_walk(v->v.jsval.cell, (int)mode);
   }
   ScrDyn *out = scr_dyn_new_arr();
+  if (v->kind == SCR_DYN_FUNC && scr_dyn_class_ops != NULL) {
+    /* A CLASS VALUE's own enumerable keys are its static fields. */
+    int cw = scr_dyn_class_ops->class_walk(v, mode, out);
+    if (cw < 0) {
+      scr_dyn_release(out);
+      return NULL;
+    }
+    if (cw > 0) return out;
+  }
   if (v->kind == SCR_DYN_OBJ) {
     /* JS's own-key order, from the shared projection. This used to be a
      * private two-pass selection scan living only here, which is how

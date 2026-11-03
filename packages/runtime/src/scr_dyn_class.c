@@ -71,7 +71,9 @@ ScrDyn *dyn_cls_impl_box(const ScrDynClass *cls) {
   ScrClosure *clo = scr_closure_new((void *)dyn_class_box_thunk, 1);
   clo->caps[0] = scr_box_new_obj(dyn_cls_noop_v, dyn_cls_noop_rel_v, NULL);
   scr_box_set_ref((ScrBox *)clo->caps[0], (void *)cls);
-  ScrDyn *b = scr_dyn_new_func(clo, dyn_class_box_thunk, 0, "()", cls->name);
+  /* No source text: Node prints the class's SOURCE, which this build does not carry, so String(V) / V.toString()
+   * trap by name (scr_fn_to_string) instead of answering the `[native code]` form of a runtime-minted closure. */
+  ScrDyn *b = scr_dyn_new_func_src(clo, dyn_class_box_thunk, 0, "()", cls->name, NULL);
   if (dyn_cls_boxes_cap == 0) scr_atexit(dyn_cls_boxes_teardown);
   if (dyn_cls_boxes_n == dyn_cls_boxes_cap) {
     dyn_cls_boxes_cap = dyn_cls_boxes_cap ? dyn_cls_boxes_cap * 2 : 8;
@@ -95,6 +97,173 @@ ScrDyn *scr_dyn_class_value(const ScrClassObj *c) {
    * bug, not a program's. */
   scr_trap("emitter bug: a class value with no registered descriptor");
   return NULL;
+}
+
+/* ── per-evaluation class values ──────────────────────────────────────────
+ *
+ * A class expression inside a function mints a fresh class at every evaluation
+ * (frontend/lowering/lower-evalclass.ts): the evaluation is an object of the
+ * synthetic static-side class, whose fields are the class's static fields and
+ * whose methods are its static methods. Its class VALUE in a dyn slot is a
+ * FUNC box like a declared class's, with two differences. It is NOT immortal: its closure
+ * holds (strongly) a dyn box of the evaluation, so the evaluation lives exactly as long as some
+ * box of it does (plain reference counting; an instance holds its evaluation the same way).
+ * And its statics are the evaluation's own member rows (the inner box answers them
+ * with the evaluation as the receiver), plus two synthesized rows on the static side:
+ * `%dynNew(args)` and `%dynIsInst(x)`. Identity (===, Map keys) is the evaluation's address
+ * (scr_dyn_fn_ident), because two boxes of one evaluation are one JS class. */
+static ScrDyn *dyn_eval_class_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc);
+
+static const ScrDyn *dyn_eval_inner_of_clo(ScrClosure *clo) {
+  ScrDyn *in = (ScrDyn *)scr_box_get_ref((ScrBox *)clo->caps[0]); /* +1, dropped at once: the closure keeps it alive */
+  scr_dyn_release(in);
+  return in;
+}
+
+static const ScrDyn *dyn_cls_eval_inner(const ScrDyn *d) {
+  if (d == NULL || d->kind != SCR_DYN_FUNC || d->v.fn.thunk != dyn_eval_class_thunk) return NULL;
+  return dyn_eval_inner_of_clo(d->v.fn.clo);
+}
+
+static ScrDyn *dyn_eval_class_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)args;
+  (void)argc;
+  ScrJsonBuf b;
+  scr_jb_init(&b);
+  scr_jb_puts(&b, "Class constructor ");
+  scr_jb_puts(&b, scr_dyn_objinst_class_of(dyn_eval_inner_of_clo(clo))->name);
+  scr_jb_puts(&b, " cannot be invoked without 'new'");
+  scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
+  return NULL;
+}
+
+ScrDyn *scr_dyn_new_evalclass(void *o, const ScrDynClass *cls) {
+  ScrDyn *inner = scr_dyn_new_objinst(o, cls); /* +1, owned by the closure's box below */
+  ScrClosure *clo = scr_closure_new((void *)dyn_eval_class_thunk, 1);
+  clo->caps[0] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
+  scr_box_set_ref((ScrBox *)clo->caps[0], inner); /* takes the +1 */
+  return scr_dyn_new_func_src(clo, dyn_eval_class_thunk, 0, "()", cls->name, NULL); /* no source text: see dyn_cls_impl_box */
+}
+
+static void dyn_eval_fence(const ScrDyn *inner, const char *what) {
+  ScrJsonBuf b;
+  scr_jb_init(&b);
+  scr_jb_puts(&b, what);
+  scr_jb_puts(&b, " on the class value ");
+  scr_jb_puts(&b, scr_dyn_objinst_class_of(inner)->name);
+  scr_jb_puts(&b, " is not supported yet");
+  scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
+}
+
+/* A static method read as a VALUE (`const f = V.make`, or the callee of `V.make()`): a function bound to
+ * the evaluation, over the same row a call takes. */
+static ScrDyn *dyn_eval_static_call_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  ScrDyn *inner = (ScrDyn *)scr_box_get_ref((ScrBox *)clo->caps[0]); /* +1 */
+  ScrDyn *nm = (ScrDyn *)scr_box_get_ref((ScrBox *)clo->caps[1]);    /* +1 */
+  const ScrDynClassMember *m = scr_dyn_objinst_member(inner, nm->v.str->data, nm->v.str->len);
+  ScrDyn *r = NULL;
+  if (m != NULL && m->call != NULL) r = m->call(inner->v.inst.o, args, argc, "a static method");
+  else dyn_eval_fence(inner, "a static member");
+  scr_dyn_release(nm);
+  scr_dyn_release(inner);
+  return r;
+}
+
+static ScrDyn *dyn_eval_static_method_value(const ScrDyn *inner, const ScrDynClassMember *m) {
+  ScrClosure *clo = scr_closure_new((void *)dyn_eval_static_call_thunk, 2);
+  clo->caps[0] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
+  scr_box_set_ref((ScrBox *)clo->caps[0], scr_dyn_retain((ScrDyn *)inner));
+  clo->caps[1] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
+  ScrStr *s = scr_str_new(m->name, m->len);
+  ScrDyn *nameBox = scr_dyn_new_str(s);
+  scr_str_release(s);
+  scr_box_set_ref((ScrBox *)clo->caps[1], nameBox); /* takes the +1 */
+  return scr_dyn_new_func(clo, dyn_eval_static_call_thunk, 0, "()", m->name);
+}
+
+/* A keyed read on an evaluation's class value: its static fields and methods (the evaluation's member rows,
+ * the evaluation as the receiver). NULL with nothing pending lets the function-object arms (name, ...) answer. */
+static ScrDyn *dyn_eval_static_get(const ScrDyn *inner, const char *key, size_t key_len) {
+  const ScrDynClassMember *row = scr_dyn_objinst_member(inner, key, key_len);
+  if (row != NULL && row->get == NULL && row->call != NULL && key[0] != '%') return dyn_eval_static_method_value(inner, row);
+  /* a data row: the evaluation's own field (rows with a hidden name are the synthesized ones) */
+  if (row != NULL && row->get != NULL && key[0] != '%') return row->get(inner->v.inst.o); /* +1, or NULL with the throw pending */
+  if ((key_len == 6 && memcmp(key, "length", 6) == 0) || (key_len == 9 && memcmp(key, "prototype", 9) == 0)) {
+    dyn_eval_fence(inner, key_len == 6 ? "reading 'length'" : "reading 'prototype'");
+    return NULL;
+  }
+  return NULL;
+}
+
+static ScrDyn *dyn_eval_construct(const ScrDyn *inner, const ScrDyn *args) {
+  const ScrDynClassMember *m = scr_dyn_objinst_member(inner, "%dynNew", 7);
+  if (m == NULL || m->call == NULL) {
+    dyn_eval_fence(inner, "`new`");
+    return NULL;
+  }
+  ScrDyn *av[1] = { (ScrDyn *)args };
+  return m->call(inner->v.inst.o, av, 1, "new");
+}
+
+static int dyn_cls_ops_class_walk(const ScrDyn *v, ScrObjWalk mode, ScrDyn *out) {
+  const ScrDyn *inner = dyn_cls_eval_inner(v);
+  const ScrDynClass *cls = inner != NULL ? scr_dyn_objinst_class_of(inner) : dyn_cls_impl_of_value(v);
+  if (cls == NULL) return 0;
+  /* An evaluation's statics are the rows of its own box (a receiver: the evaluation); a declared class's are its
+   * statics table (receiver-free). Both list only ENUMERABLE data rows: static methods are not. */
+  const ScrDynClassMember *rows = inner != NULL ? cls->members : cls->statics;
+  size_t n = inner != NULL ? cls->nmembers : cls->nstatics;
+  void *recv = inner != NULL ? inner->v.inst.o : NULL;
+  for (size_t i = 0; i < n; i++) {
+    const ScrDynClassMember *m = &rows[i];
+    if (m->enumerable == 0 || m->enumerable == 3 || m->get == NULL || m->name[0] == '%') continue;
+    if (inner != NULL && scr_dyn_member_hidden(m, recv)) continue;
+    if (mode == SCR_OBJWALK_KEYS) {
+      scr_dyn_objwalk_push(out, mode, m->name, m->len, NULL);
+      continue;
+    }
+    ScrDyn *val = m->get(recv); /* +1 */
+    if (val == NULL) return -1;
+    scr_dyn_objwalk_push(out, mode, m->name, m->len, val);
+    scr_dyn_release(val);
+  }
+  /* ...then the properties a program ADDED to the function object, in creation order. */
+  if (v->v.fn.clo->props != NULL) {
+    ScrDyn *table = (ScrDyn *)scr_box_get_ref(v->v.fn.clo->props); /* +1 */
+    ScrDyn *extra = table != NULL ? scr_dyn_objwalk(table, mode) : NULL;
+    scr_dyn_release(table);
+    if (extra == NULL) return table != NULL ? -1 : 1;
+    for (size_t i = 0; i < extra->v.arr.len; i++) scr_dyn_arr_push(out, scr_dyn_retain(extra->v.arr.items[i]));
+    scr_dyn_release(extra);
+  }
+  return 1;
+}
+
+static bool dyn_cls_ops_instance_of(const ScrDyn *v, const ScrDyn *fn, bool *handled) {
+  *handled = true;
+  const ScrDyn *inner = dyn_cls_eval_inner(fn);
+  if (inner != NULL) {
+    if (v->kind != SCR_DYN_OBJINST) return false;
+    const ScrDynClassMember *m = scr_dyn_objinst_member(inner, "%dynIsInst", 10);
+    if (m == NULL || m->call == NULL) {
+      dyn_eval_fence(inner, "'instanceof'");
+      return false;
+    }
+    ScrDyn *av[1] = { (ScrDyn *)v };
+    ScrDyn *r = m->call(inner->v.inst.o, av, 1, "instanceof");
+    if (r == NULL) return false; /* threw */
+    bool yes = r->kind == SCR_DYN_BOOL && r->v.b;
+    scr_dyn_release(r);
+    return yes;
+  }
+  const ScrDynClass *cls = dyn_cls_impl_of_value(fn);
+  if (cls != NULL) {
+    if (v->kind != SCR_DYN_OBJINST) return false;
+    size_t pre = scr_dyn_objinst_pre(v);
+    return cls->pre <= pre && pre <= cls->post;
+  }
+  *handled = false;
+  return false;
 }
 
 static const ScrDynClassMember *dyn_class_static(const ScrDynClass *cls, const char *k, size_t n) {
@@ -235,6 +404,14 @@ bool dyn_cls_impl_err_delete(ScrDyn *d, const ScrStr *key) {
 }
 
 static ScrDyn *dyn_cls_ops_fn_get(const ScrDyn *d, const char *key, size_t key_len) {
+  {
+    const ScrDyn *inner = dyn_cls_eval_inner(d);
+    if (inner != NULL) {
+      ScrDyn *s = dyn_eval_static_get(inner, key, key_len);
+      if (s != NULL || scr_exc_pending()) return s;
+      return NULL;
+    }
+  }
   /* A CLASS VALUE answers its statics first (dyn_class_static_get). */
   {
     const ScrDynClass *cls = dyn_cls_impl_of_value(d);
@@ -248,6 +425,10 @@ static ScrDyn *dyn_cls_ops_fn_get(const ScrDyn *d, const char *key, size_t key_l
 
 static ScrDyn *dyn_cls_ops_construct(const ScrDyn *fn, const ScrDyn *args, bool *handled) {
   *handled = true;
+  {
+    const ScrDyn *inner = dyn_cls_eval_inner(fn);
+    if (inner != NULL) return dyn_eval_construct(inner, args);
+  }
   /* A CLASS VALUE: the class's own constructor (dyn_class_construct). */
   {
     const ScrDynClass *cls = dyn_cls_impl_of_value(fn);
@@ -293,6 +474,16 @@ static bool dyn_cls_ops_set(ScrDyn *recv, const ScrStr *key, const ScrDyn *value
     }
     return false; /* the caller keeps the loud ladder */
   }
+  if (recv->kind == SCR_DYN_FUNC && dyn_cls_eval_inner(recv) != NULL) {
+    /* A write on an evaluation's class value: the evaluation's own static field or setter
+     * (the inner box's %dynSet), else the loud ladder. */
+    ScrDyn *inner = (ScrDyn *)dyn_cls_eval_inner(recv);
+    if (dyn_cls_ops_set(inner, key, value)) return true;
+    /* A name with no row is a NEW own property of the function object: the generic expando path takes it. */
+    if (scr_dyn_objinst_member(inner, key->data, key->len) == NULL) return false;
+    dyn_eval_fence(inner, "assigning a static member");
+    return true;
+  }
   if (recv->kind == SCR_DYN_FUNC && dyn_cls_impl_of_value(recv) != NULL) {
     /* A write on a CLASS VALUE: the class's own static field or setter
      * (%dynStaticSet), which answers false for a name it cannot hold -- an
@@ -310,6 +501,8 @@ static bool dyn_cls_ops_set(ScrDyn *recv, const ScrStr *key, const ScrDyn *value
       scr_dyn_release(r);
       if (taken) return true;
     }
+    /* A name with no row (and a table that names every static) is a NEW own property: the expando path. */
+    if (!cls->staticsOpaque && dyn_class_static(cls, key->data, key->len) == NULL) return false;
     dyn_class_fence(cls, "assigning a static member");
     return true;
   }
@@ -571,6 +764,7 @@ static const ScrDynClassOps dyn_cls_ops_impl = {
   dyn_cls_ops_fn_get, dyn_cls_ops_construct, dyn_cls_ops_set, dyn_cls_ops_delete, dyn_cls_ops_walk_error,
   dyn_cls_ops_error_rooted, dyn_cls_ops_error_instanceof,
   dyn_cls_objinst_to_primitive, dyn_cls_objinst_to_string, dyn_cls_objinst_user_tostring,
+  dyn_cls_eval_inner, dyn_cls_ops_instance_of, dyn_cls_ops_class_walk,
 };
 
 void scr_dyn_class_install(void) { scr_dyn_class_ops = &dyn_cls_ops_impl; }

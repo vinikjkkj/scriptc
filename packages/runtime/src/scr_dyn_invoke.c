@@ -1738,6 +1738,9 @@ ScrDyn *scr_dyn_objinst_miss(ScrDyn *d, const ScrStr *key) {
     /* The instance's class value (scr_dyn_class_box): the descriptor of the
      * class the instance ACTUALLY is, so a derived instance answers its own
      * class and two instances of one class answer one box. */
+    /* An instance of a per-evaluation class carries its evaluation: the `%dynCls` row answers that class value. */
+    const ScrDynClassMember *ev = scr_dyn_objinst_member(d, "%dynCls", 7);
+    if (ev != NULL && ev->call != NULL) return ev->call(d->v.inst.o, NULL, 0, "constructor");
     return scr_dyn_class_box(scr_dyn_objinst_class_of(d));
   }
   if (scr_dyn_objinst_error_rooted(d)) {

@@ -32,6 +32,7 @@ import {
   RUNTIME_EMITTER_CLASS,
   RUNTIME_ERROR_CLASSES,
   RUNTIME_STREAM_CLASSES,
+  typeEquals,
   type IrClassDef,
   type IrFunction,
   type IrRecordShape,
@@ -476,7 +477,47 @@ export function dynStaticTable(
  * Here, and not in either emitter, for the reason the member rows are
  * here: a name one lane prints and the other spells differently is the
  * two-lanes-one-question defect, and both emitters call this. */
+/** The classes whose CLASS VALUE a dyn function box may hold when it is checked into `classval:C`: C and every
+ * descendant of it whose completed constructor ABI equals C's (the invariant every classval flow keeps, which
+ * `newValue` completion rests on). Preorder-ascending, so the first entry is C itself. */
+export function classvalCandidates(
+  className: string,
+  classMeta: ReadonlyMap<string, DynMemberClass & { pre: number; post: number }>,
+  fnByName: ReadonlyMap<string, IrFunction>,
+): string[] {
+  const root = classMeta.get(className);
+  if (root === undefined) return [];
+  const supCtor = fnByName.get(`%${className}.constructor`);
+  const out: string[] = [];
+  const members = [...classMeta.entries()]
+    .filter(([, m]) => m.pre >= root.pre && m.pre <= root.post)
+    .sort((a, b) => a[1].pre - b[1].pre);
+  for (const [name, m] of members) {
+    if (m.def.runtime === true) continue;
+    if (name !== className) {
+      const ctor = fnByName.get(`%${name}.constructor`);
+      if (ctor === undefined || supCtor === undefined) continue;
+      const same =
+        ctor.params.length === supCtor.params.length &&
+        ctor.params.every((p, i) => i === 0 || typeEquals(p.type, supCtor.params[i]!.type));
+      if (!same) continue;
+    }
+    out.push(name);
+  }
+  return out;
+}
+
+export function dynDescBase<M extends DynMemberClass>(classMeta: ReadonlyMap<string, M>, meta: M): DynMemberClass | null {
+  // The static side of a per-evaluation class extends nothing itself: the
+  // `[class X extends Y]` line prints the evaluated class's own base.
+  if (meta.def.evalOf !== undefined) return classMeta.get(meta.def.evalOf)?.base ?? null;
+  return meta.base;
+}
+
 export function dynClassDisplayName(def: IrClassDef): string {
+  // The static side of a per-evaluation class names the class VALUE: its `.name` exactly (empty for an
+  // anonymous class, which `[class (anonymous)]` and "Class constructor  cannot be invoked" then spell like Node).
+  if (def.evalOf !== undefined) return def.jsName ?? "";
   const js = def.jsName ?? "";
   if (js !== "") return js;
   return def.name.startsWith("%") ? def.name.slice(1) : def.name;
