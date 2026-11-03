@@ -516,6 +516,20 @@ export class LlWalkers {
       B.line(`${idx} = fptoui double ${i} to i64`);
       this.jbEdgeIdx(B, idx);
     }
+    // A HOLE serializes as null (Node: JSON.stringify([,1]) is "[null,1]").
+    const lInc = B.newLabel("jwa.inc");
+    if (elem.kind !== "bool") {
+      host.declare(`declare zeroext i1 @scr_arr_hole_at(ptr, double)`);
+      const hole = B.tmp();
+      const lHole = B.newLabel("jwa.hole");
+      const lElem = B.newLabel("jwa.elem");
+      B.line(`${hole} = call zeroext i1 @scr_arr_hole_at(ptr %v, double ${i})`);
+      B.condBr(hole, lHole, lElem);
+      B.startBlock(lHole);
+      this.puts(B, "%b", "null");
+      B.br(lInc);
+      B.startBlock(lElem);
+    }
     if (elem.kind === "f64" || elem.kind === "bool") {
       const acc = elem.kind;
       const accTy = elem.kind === "f64" ? "double" : "i1";
@@ -531,6 +545,8 @@ export class LlWalkers {
       B.line(`call void @${w}(ptr %b, ptr ${v})`);
       B.line(`call void ${releaseSym(host, elem)}(ptr ${v})`);
     }
+    B.br(lInc);
+    B.startBlock(lInc);
     const i2 = B.tmp();
     B.line(`${i2} = fadd double ${i}, ${f64Lit(1)}`);
     B.line(`store double ${i2}, ptr ${iSlot}`);
@@ -916,7 +932,7 @@ export class LlWalkers {
     host.declare(`declare void @scr_jb_init(ptr)`);
     host.declare(`declare ptr @scr_jb_finish(ptr)`);
     host.declare(`declare double @scr_arr_len(ptr)`);
-    host.declare(`declare ptr @scr_arr_get_ref(ptr, double)`);
+    host.declare(`declare ptr @scr_arr_get_ref_or(ptr, double, ptr)`);
     host.declare(`declare void @scr_union_release(ptr)`);
     host.declare(`declare void @scr_str_release(ptr)`);
     const B = new BlockBuilder();
@@ -950,7 +966,18 @@ export class LlWalkers {
     B.br(lel);
     B.startBlock(lel);
     const u = B.tmp();
-    B.line(`${u} = call ptr @scr_arr_get_ref(ptr %a, double ${i}) ; element (+1)`);
+    B.line(`${u} = call ptr @scr_arr_get_ref_or(ptr %a, double ${i}, ptr null) ; element (+1), null for a HOLE`);
+    {
+      // A HOLE joins as empty.
+      const isHole = B.tmp();
+      const lHole = B.newLabel("uj.h");
+      const lNotHole = B.newLabel("uj.nh");
+      B.line(`${isHole} = icmp eq ptr ${u}, null`);
+      B.condBr(isHole, lHole, lNotHole);
+      B.startBlock(lHole);
+      B.br(ln);
+      B.startBlock(lNotHole);
+    }
     if (unitTags.length > 0) {
       // Nullish arms print empty, exactly JS's join.
       const tag = this.unionTag(B, u);

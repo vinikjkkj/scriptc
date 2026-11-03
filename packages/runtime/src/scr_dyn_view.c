@@ -65,6 +65,7 @@ static const char *dyn_view_elem_name(const ScrArr *a) {
 }
 
 static ScrDyn *dyn_view_box(const ScrArr *a, size_t i) {
+  if (a->elem != SCR_ELEM_BOOL && scr_arr_slot_is_hole(a, i)) return scr_dyn_retain(scr_dyn_absent()); /* a HOLE */
   switch (a->elem) {
     case SCR_ELEM_F64: return scr_dyn_new_num(scr_arr_nochk_f64(a, (double)i));
     case SCR_ELEM_BOOL: return scr_dyn_new_bool(scr_arr_nochk_bool(a, (double)i));
@@ -77,6 +78,7 @@ static ScrDyn *dyn_view_box(const ScrArr *a, size_t i) {
 }
 
 static bool dyn_view_fits(const ScrArr *a, const ScrDyn *v) {
+  if (scr_dyn_is_hole(v)) return a->elem != SCR_ELEM_BOOL; /* a HOLE copies as a hole */
   switch (a->elem) {
     case SCR_ELEM_F64: return v->kind == SCR_DYN_NUM;
     case SCR_ELEM_BOOL: return v->kind == SCR_DYN_BOOL;
@@ -118,7 +120,7 @@ static void dyn_view_pull(ScrDyn *n, const ScrArr *o) {
     n->v.arr.len--;
     scr_dyn_release(gone);
   }
-  for (size_t i = 0; i < o->len; i++) scr_dyn_arr_push(n, dyn_view_box(o, i));
+  for (size_t i = 0; i < o->len; i++) scr_dyn_arr_push_slot(n, dyn_view_box(o, i)); /* slot copy: holes stay holes */
 }
 
 /* Resynchronise unconditionally (a mutation threw half way). */
@@ -130,6 +132,8 @@ static void dyn_view_impl_sync_force(ScrDyn *d) {
 /* Does the copy's item i still say what the origin's slot i says? */
 static bool dyn_view_item_current(const ScrDyn *n, const ScrArr *o, size_t i) {
   const ScrDyn *it = n->v.arr.items[i];
+  if (o->elem != SCR_ELEM_BOOL && scr_arr_slot_is_hole(o, i)) return scr_dyn_is_hole(it);
+  if (scr_dyn_is_hole(it)) return false;
   switch (o->elem) {
     case SCR_ELEM_F64: {
       double v = scr_arr_nochk_f64(o, (double)i);
@@ -182,12 +186,21 @@ ScrDyn *scr_dyn_view_key_get(ScrDyn *d, ScrStr *k) {
   size_t idx;
   if (!dyn_view_index(k, &idx)) return NULL;
   if (idx >= o->len) return scr_dyn_retain(scr_dyn_undefined());
-  return dyn_view_box(o, idx);
+  ScrDyn *b = dyn_view_box(o, idx);
+  return scr_dyn_is_hole(b) ? scr_dyn_retain(scr_dyn_undefined()) : b; /* a hole reads as undefined */
 }
 
 /* Write the value into the origin slot (i == len appends). The caller has
  * checked dyn_view_fits. */
 static void dyn_view_store(ScrArr *o, size_t i, ScrDyn *v) {
+  if (scr_dyn_is_hole(v)) { /* a HOLE copies as a hole */
+    if (o->elem == SCR_ELEM_F64) {
+      if (i == o->len) scr_arr_push_f64(o, scr_num_hole()); else scr_arr_set_f64(o, (double)i, scr_num_hole());
+    } else {
+      if (i == o->len) scr_arr_push_ref(o, NULL); else scr_arr_set_ref(o, (double)i, NULL);
+    }
+    return;
+  }
   switch (o->elem) {
     case SCR_ELEM_F64:
       if (i == o->len) scr_arr_push_f64(o, v->v.num); else scr_arr_set_f64(o, (double)i, v->v.num);

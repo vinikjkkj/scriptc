@@ -4188,6 +4188,21 @@ class LlEmitter {
    * refcounted element kind holds `null`, a hole scr_arr_get_ref refuses on
    * read. Scalars take their zero, which the frontend only allows where
    * every slot is provably written first. */
+  /** HOLE (sq5), absentElemC's sibling: the in-band marker a hole-making
+   * operation stores. The HOLE NaN payload for number slots, null for every ref
+   * slot; unlike absentElemLl this is NOT an undefined value. */
+  holeElemLl(elem: IrType): string {
+    const acc = elemAccess(elem);
+    return acc === "f64" ? "0x7FFC00000000DE02" : acc === "bool" ? "false" : "null";
+  }
+
+  /** The undefined VALUE a hole reads as where the element type has one (dyn,
+   * undefined-armed unions); null otherwise. Emits straight-line in the current block. */
+  undefHoleReadLl(elem: IrType): string | null {
+    if (elem.kind === "dyn" || (elem.kind === "union" && this.undefinedArmTag(elem) >= 0)) return this.absentElemLl(elem);
+    return null;
+  }
+
   absentElemLl(elem: IrType): string {
     const tag = this.undefinedArmTag(elem);
     if (tag >= 0 && elem.kind === "union") return this.unitInstanceRef(elem.unionId, tag);
@@ -7680,11 +7695,23 @@ class LlEmitter {
         const slot = `%${mangleLocal(s.localId)}`;
         const acc = elemAccess(elem);
         const accTy = acc === "f64" ? "double" : acc === "bool" ? "i1" : "ptr";
-        this.declare(
-          `declare ${acc === "bool" ? "zeroext i1" : accTy} @scr_arr_get_${acc}(ptr, double)`,
-        );
+        // Iteration yields undefined for a HOLE where the element type has a value for it
+        // (number marker, dyn / undefined-armed union); string and other ref elements keep
+        // the checked read (a hole refuses loudly).
         const cur = B.tmp();
-        B.line(`${cur} = call ${accTy} @scr_arr_get_${acc}(ptr ${arrRef()}, double ${i})`);
+        const undefFor = acc === "ref" ? this.undefHoleReadLl(elem) : null;
+        if (acc === "f64") {
+          this.declare(`declare double @scr_arr_copy_f64(ptr, double)`);
+          B.line(`${cur} = call double @scr_arr_copy_f64(ptr ${arrRef()}, double ${i})`);
+        } else if (undefFor !== null) {
+          this.declare(`declare ptr @scr_arr_copy_ref_or(ptr, double, ptr)`);
+          B.line(`${cur} = call ptr @scr_arr_copy_ref_or(ptr ${arrRef()}, double ${i}, ptr ${undefFor})`);
+        } else {
+          this.declare(
+            `declare ${acc === "bool" ? "zeroext i1" : accTy} @scr_arr_get_${acc}(ptr, double)`,
+          );
+          B.line(`${cur} = call ${accTy} @scr_arr_get_${acc}(ptr ${arrRef()}, double ${i})`);
+        }
         if (localInfo?.boxed) {
           // Captured loop variable: a fresh box per iteration, matching the
           // fresh const binding. The box takes ownership of a ref element's
@@ -8691,7 +8718,13 @@ class LlEmitter {
         const out = this.own({ name: arr, type: e.type });
         const acc = elemAccess(elem);
         const spreadSet = new Set(e.spreads ?? []);
+        const holeSet = new Set(e.holes ?? []);
         e.elems.forEach((el, i) => {
+          // An elision is a HOLE: the typed placeholder is not evaluated, the slot takes the marker.
+          if (holeSet.has(i)) {
+            this.arrPush(arr, acc, this.holeElemLl(elem));
+            return;
+          }
           // Each element gets its OWN release scope: the intermediates it
           // leaves behind are dead the moment its value has moved into the
           // array, so they release here instead of riding the statement
@@ -8708,7 +8741,7 @@ class LlEmitter {
           try {
             const v = this.emitExpr(el);
             if (spreadSet.has(i)) {
-              this.emitArrayCopyLoop(arr, v.name, acc);
+              this.emitArrayCopyLoop(arr, v.name, acc, (v.type as IrType & { kind: "array" }).elem);
               return;
             }
             if (acc === "ref") this.moveTemp(v);
@@ -8738,7 +8771,8 @@ class LlEmitter {
         B.line(`${arr} = ${arrNewCall(this, elem, "0")}`);
         const out = this.own({ name: arr, type: e.type });
         const acc = elemAccess(elem);
-        const fill = this.absentElemLl(elem);
+        // `new Array(n)` (checked) makes HOLES; Array.from({length: n}) fills explicit undefined.
+        const fill = e.checked === true ? this.holeElemLl(elem) : this.absentElemLl(elem);
         const iSlot = B.slot();
         B.entryAllocas.push(`${iSlot} = alloca double`);
         B.line(`store double ${f64Lit(0)}, ptr ${iSlot}`);
@@ -8788,6 +8822,16 @@ class LlEmitter {
           B.line(`${w} = load i64, ptr ${sp}`);
           B.line(`${v} = icmp ne i64 ${w}, 0`);
           return { name: v, type: e.type };
+        }
+        if (acc === "ref" && !e.tryRef && !e.holeOnMiss && !e.nanOnMiss) {
+          // A dyn / undefined-armed union slot can be a HOLE (null): it reads as undefined.
+          const uh = this.undefHoleReadLl(e.arr.type.elem);
+          if (uh !== null) {
+            this.declare(`declare ptr @scr_arr_get_ref_or(ptr, double, ptr)`);
+            const tu = B.tmp();
+            B.line(`${tu} = call ptr @scr_arr_get_ref_or(ptr ${arr.name}, double ${idx.name}, ptr ${uh})`);
+            return this.own({ name: tu, type: e.type });
+          }
         }
         const getFn = e.holeOnMiss ? "scr_arr_get_f64_hole" : e.nanOnMiss ? "scr_arr_get_f64_nan" : e.tryRef ? "scr_arr_try_ref" : `scr_arr_get_${acc}`;
         this.declare(`declare ${acc === "bool" ? "zeroext i1" : accTy} @${getFn}(ptr, double)`);
@@ -11365,7 +11409,16 @@ class LlEmitter {
             return;
           }
           this.moveTemp(v);
-          B.line(`call void @scr_dyn_arr_push(ptr ${arr}, ptr ${v.name})`);
+          if (e.holes !== undefined && e.holes.includes(i)) {
+            // An elision is a HOLE: the slot takes the absent node.
+            this.declare(`declare void @scr_dyn_arr_push_slot(ptr, ptr)`);
+            this.declare(`declare ptr @scr_dyn_absent()`);
+            const ab = B.tmp();
+            B.line(`${ab} = call ptr @scr_dyn_absent()`);
+            B.line(`call void @scr_dyn_arr_push_slot(ptr ${arr}, ptr ${ab})`);
+          } else {
+            B.line(`call void @scr_dyn_arr_push(ptr ${arr}, ptr ${v.name})`);
+          }
         });
         return out;
       }
@@ -11503,14 +11556,10 @@ class LlEmitter {
         if (e.key === "length") {
           B.line(`store i1 true, ptr ${slot}`);
         } else if (/^(0|[1-9][0-9]*)$/.test(e.key) && Number(e.key) <= Number.MAX_SAFE_INTEGER) {
-          const lenp = B.tmp();
-          const len = B.tmp();
+          // In range and not a hole (the hole is the absent node).
+          this.declare(`declare zeroext i1 @scr_dyn_arr_has_index(ptr, i64)`);
           const inR = B.tmp();
-          B.line(`${lenp} = getelementptr inbounds i8, ptr ${d.name}, i64 16 ; ->v.arr.len`);
-          const lenw = B.tmp();
-          B.line(`${lenw} = load i32, ptr ${lenp}`);
-          B.line(`${len} = zext i32 ${lenw} to i64`);
-          B.line(`${inR} = icmp ugt i64 ${len}, ${e.key}`);
+          B.line(`${inR} = call zeroext i1 @scr_dyn_arr_has_index(ptr ${d.name}, i64 ${e.key})`);
           B.line(`store i1 ${inR}, ptr ${slot}`);
         } else {
           // any other name: the array's own NAMED properties (an exec
@@ -14489,15 +14538,31 @@ class LlEmitter {
   /** The spread/pushSpread copy loop: append `src`'s elements to `dst` in
    * order, count snapshotted before the loop (so `a.push(...a)` duplicates
    * exactly like JS). _get_ref's +1 moves into _push_ref — RC-balanced. */
-  private emitArrayCopyLoop(dst: string, src: string, acc: "f64" | "bool" | "ref"): void {
+  private emitArrayCopyLoop(dst: string, src: string, acc: "f64" | "bool" | "ref", elem: IrType): void {
     const B = this.B;
     this.declare(`declare double @scr_arr_len(ptr)`);
     const accTy = acc === "f64" ? "double" : acc === "bool" ? "i1" : "ptr";
     // A COPY, so an ABSENT slot copies through as absent (JS spreads holes
     // too); scr_arr_get_ref would refuse it. The C backend's two spread
     // sites make the same swap.
-    const readFn = acc === "ref" ? "scr_arr_copy_ref" : `scr_arr_get_${acc}`;
-    this.declare(`declare ${acc === "bool" ? "zeroext i1" : accTy} @${readFn}(ptr, double)`);
+    // A hole copies as undefined where the element type has a value for it
+    // (iteration yields undefined): number -> the undefined marker, string -> the
+    // absent string, dyn / undefined-armed union -> their undefined.
+    const strU = elem.kind === "string";
+    const undefU = acc === "ref" ? (strU ? null : this.undefHoleReadLl(elem)) : null;
+    const readFn = acc === "f64" ? "scr_arr_copy_f64" : acc === "ref" ? (strU || undefU !== null ? "scr_arr_copy_ref_or" : "scr_arr_copy_ref") : `scr_arr_get_${acc}`;
+    if (readFn === "scr_arr_copy_ref_or") this.declare(`declare ptr @scr_arr_copy_ref_or(ptr, double, ptr)`);
+    else this.declare(`declare ${acc === "bool" ? "zeroext i1" : accTy} @${readFn}(ptr, double)`);
+    let undefArg = "";
+    if (readFn === "scr_arr_copy_ref_or") {
+      if (strU) {
+        this.declare(`declare ptr @scr_str_absent()`);
+        undefArg = B.tmp();
+        B.line(`${undefArg} = call ptr @scr_str_absent()`);
+      } else {
+        undefArg = undefU!;
+      }
+    }
     const len = B.tmp();
     B.line(`${len} = call double @scr_arr_len(ptr ${src})`);
     const iSlot = B.slot();
@@ -14515,7 +14580,8 @@ class LlEmitter {
     B.condBr(cont, lb, le);
     B.startBlock(lb);
     const v = B.tmp();
-    B.line(`${v} = call ${accTy} @${readFn}(ptr ${src}, double ${i})`);
+    if (readFn === "scr_arr_copy_ref_or") B.line(`${v} = call ptr @${readFn}(ptr ${src}, double ${i}, ptr ${undefArg})`);
+    else B.line(`${v} = call ${accTy} @${readFn}(ptr ${src}, double ${i})`);
     this.arrPush(dst, acc, v);
     const i2 = B.tmp();
     B.line(`${i2} = fadd double ${i}, ${f64Lit(1)}`);
@@ -14684,6 +14750,31 @@ class LlEmitter {
         B.line(`${t} = call double @scr_arr_len(ptr ${r.name})`);
         return { name: t, type: e.type };
       }
+      case "clearIndex": {
+        const ci = this.emitExpr(e.args[0]!);
+        this.declare(`declare void @scr_arr_clear_index(ptr, double)`);
+        B.line(`call void @scr_arr_clear_index(ptr ${r.name}, double ${ci.name})`);
+        return { name: "", type: e.type };
+      }
+      case "pushAll": {
+        const src = this.emitExpr(e.args[0]!);
+        this.declare(`declare double @scr_arr_push_all(ptr, ptr)`);
+        const t = B.tmp();
+        B.line(`${t} = call double @scr_arr_push_all(ptr ${r.name}, ptr ${src.name})`);
+        return { name: t, type: e.type };
+      }
+      case "compactHoles": {
+        this.declare(`declare double @scr_arr_compact_holes(ptr)`);
+        const t = B.tmp();
+        B.line(`${t} = call double @scr_arr_compact_holes(ptr ${r.name})`);
+        return { name: t, type: e.type };
+      }
+      case "hasHoles": {
+        this.declare(`declare zeroext i1 @scr_arr_has_holes(ptr)`);
+        const t = B.tmp();
+        B.line(`${t} = call zeroext i1 @scr_arr_has_holes(ptr ${r.name})`);
+        return { name: t, type: e.type };
+      }
       case "hasIndex": {
         // Inline: len < 2^63 and an integer index test through the saturating
         // fptosi (NaN -> 0, which sitofp reads back as 0 != NaN), predicted
@@ -14699,8 +14790,10 @@ class LlEmitter {
         B.line(`${back} = sitofp i64 ${n} to double`);
         B.line(`${e1} = fcmp oeq double ${back}, ${hx.name}`);
         B.line(`${e2} = icmp ult i64 ${n}, ${len}`);
-        if (elemAccess(e.receiver.type.kind === "array" ? e.receiver.type.elem : F64) === "ref") {
-          // Reference elements: the slot must also be non-NULL (a hole).
+        const hiAcc = elemAccess(e.receiver.type.kind === "array" ? e.receiver.type.elem : F64);
+        if (hiAcc === "ref" || hiAcc === "f64") {
+          // Reference elements: the slot must also be non-NULL (a hole). Number
+          // elements: the slot must not be the HOLE marker payload.
           const dp = B.tmp(), data = B.tmp(), sp = B.tmp(), sv = B.tmp(), e3 = B.tmp(), e4 = B.tmp();
           B.line(`${dp} = getelementptr inbounds %ScrArr, ptr ${r.name}, i32 0, i32 7`);
           B.line(`${data} = load ptr, ptr ${dp}`);
@@ -14715,7 +14808,7 @@ class LlEmitter {
           B.condBr(e4, lChk, lJoin);
           B.startBlock(lChk);
           B.line(`${sv} = load i64, ptr ${sp}`);
-          B.line(`${e3} = icmp ne i64 ${sv}, 0`);
+          B.line(`${e3} = icmp ne i64 ${sv}, ${hiAcc === "f64" ? "9222246136947990018" : "0"}`);
           B.br(lJoin);
           B.startBlock(lJoin);
           B.line(`${ok0} = phi i1 [ false, %${from} ], [ ${e3}, %${lChk} ]`);
@@ -14803,7 +14896,7 @@ class LlEmitter {
         // bound is already satisfied when the truncate did the work.
         const want = this.emitExpr(e.args[0]!);
         // STEP 2a: a flagged number[] grows with holes (the marker NaN payload).
-        const fill = e.receiver.type.elem.kind === "f64" ? "0x7FFC00000000DE02" : this.absentElemLl(e.receiver.type.elem);
+        const fill = this.holeElemLl(e.receiver.type.elem);
         // ArraySetLength's validity gate FIRST: a negative, fractional, NaN
         // or >= 2^32 length is Node's catchable RangeError and the array is
         // left untouched, so the pending check sits between the gate and
@@ -14844,7 +14937,7 @@ class LlEmitter {
         // `a.push(...src)`: append src's elements in order (borrowed src,
         // count snapshotted). Result: the new length.
         const src = this.emitExpr(e.args[0]!);
-        this.emitArrayCopyLoop(r.name, src.name, acc);
+        this.emitArrayCopyLoop(r.name, src.name, acc, e.receiver.type.kind === "array" ? e.receiver.type.elem : F64);
         this.declare(`declare double @scr_arr_len(ptr)`);
         const t = B.tmp();
         B.line(`${t} = call double @scr_arr_len(ptr ${r.name})`);

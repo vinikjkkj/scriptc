@@ -3125,7 +3125,13 @@ function validateFunction(
               ? { argTypes: [F64], result: VOID }
             : e.method === "hasIndex"
               ? { argTypes: [F64], result: BOOL }
-            : e.method === "pushSpread"
+            : e.method === "hasHoles"
+              ? { argTypes: [], result: BOOL }
+            : e.method === "compactHoles"
+              ? { argTypes: [], result: F64 }
+            : e.method === "clearIndex"
+              ? { argTypes: [F64], result: VOID }
+            : e.method === "pushSpread" || e.method === "pushAll"
               ? { argTypes: [e.receiver.type], result: F64 }
               : e.method === "pop"
               ? { argTypes: [], result: elem }

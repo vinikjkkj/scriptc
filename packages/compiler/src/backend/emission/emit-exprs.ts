@@ -1113,7 +1113,13 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         const arr = E.newTemp(e.type, E.arrNewC(elem, e.elems.length));
         const acc = elemAccess(elem);
         const spreadSet = new Set(e.spreads ?? []);
+        const holeSet = new Set(e.holes ?? []);
         e.elems.forEach((el, i) => {
+          // An elision is a HOLE: the typed placeholder is not evaluated, the slot takes the marker.
+          if (holeSet.has(i)) {
+            E.line(`scr_arr_push_${acc}(${arr.name}, ${E.holeElemC(elem)});`);
+            return;
+          }
           // Each element expression gets its OWN release scope, exactly as a
           // record literal's field initializers do. The element VALUE still
           // moves into the array (moveTemp reaches through every frame);
@@ -1147,7 +1153,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
               // A COPY: an ABSENT slot copies through as absent (JS spreads
               // holes too), which is what scr_arr_copy_ref does and what
               // scr_arr_get_ref refuses.
-              E.line(`scr_arr_push_${acc}(${arr.name}, ${acc === "ref" ? "scr_arr_copy_ref" : `scr_arr_get_${acc}`}(${v.name}, (double)${n}));`);
+              E.line(`scr_arr_push_${acc}(${arr.name}, ${E.copyReadC((v.type as IrType & { kind: "array" }).elem, v.name, `(double)${n}`)});`);
               E.indent--;
               E.line(`}`);
               return;
@@ -1179,7 +1185,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         const arr = E.newTemp(e.type, E.arrNewC(elem, 0));
         // The ABSENT value, one spelling for all three producers (this
         // node, setLength's growth arm, and arrayClear's tombstone write).
-        const fill = E.absentElemC(elem);
+        // `new Array(n)` (checked) makes HOLES (the in-band marker); the
+        // mapper-less Array.from({length: n}) fills explicit undefined.
+        const fill = e.checked === true ? E.holeElemC(elem) : E.absentElemC(elem);
         // SCALAR slots take their zero. They have no absent value that
         // isn't a lie on read, so the frontend only builds this node for
         // them when it has PROVEN every slot is written before any read
@@ -1201,6 +1209,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // registers the owned temp in the frame like any other.
         const acc = elemAccess(e.arr.type.elem);
         if (e.holeOnMiss) return E.newTemp(e.type, `scr_arr_get_f64_hole(${arr.name}, ${idx.name})`);
+        // A dyn / undefined-armed union slot can be a HOLE (NULL): it reads as undefined.
+        if (acc === "ref" && !e.tryRef) {
+          const uh = E.undefHoleReadC(e.arr.type.elem);
+          if (uh !== null) return E.newTemp(e.type, `scr_arr_get_ref_or(${arr.name}, ${idx.name}, (void *)${uh})`);
+        }
         if (e.nanOnMiss) return E.newTemp(e.type, `scr_arr_get_f64_nan(${arr.name}, ${idx.name})`);
         if (e.tryRef) return E.newTemp(e.type, `scr_arr_try_ref(${arr.name}, ${idx.name})`);
         if (e.inRange && acc === "f64") return E.newTemp(e.type, `scr_arr_nochk_f64(${arr.name}, ${idx.name})`);
@@ -1215,8 +1228,17 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         switch (method) {
           case "length":
             return E.newTemp(e.type, `scr_arr_len(${r.name})`);
+          case "hasHoles":
+            return E.newTemp(e.type, `scr_arr_has_holes(${r.name})`);
+          case "compactHoles":
+            return E.newTemp(e.type, `scr_arr_compact_holes(${r.name})`);
+          case "pushAll":
+            return E.newTemp(e.type, `scr_arr_push_all(${r.name}, ${E.emitExpr(e.args[0]!).name})`);
+          case "clearIndex":
+            E.line(`scr_arr_clear_index(${r.name}, ${E.emitExpr(e.args[0]!).name});`);
+            return { name: "", type: e.type };
           case "hasIndex":
-            return E.newTemp(e.type, `scr_arr_has_index${acc === "ref" ? "_ref" : ""}(${r.name}, ${E.emitExpr(e.args[0]!).name})`);
+            return E.newTemp(e.type, `scr_arr_has_index${acc === "ref" ? "_ref" : acc === "f64" ? "_f64" : ""}(${r.name}, ${E.emitExpr(e.args[0]!).name})`);
           case "push": {
             // Variadic like JS: every argument evaluates first (left to
             // right — an argument reading the array sees the pre-push
@@ -1288,7 +1310,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             const want = E.emitExpr(e.args[0]!);
             const elemT = e.receiver.type.elem;
             // STEP 2a: a flagged number[] grows with holes (the marker).
-            const fill = elemT.kind === "f64" ? "scr_num_hole()" : E.absentElemC(elemT);
+            const fill = E.holeElemC(elemT);
             // ArraySetLength's validity gate FIRST: a negative, fractional,
             // NaN or >= 2^32 length is Node's catchable RangeError and the
             // array is left untouched, so the pending check sits between
@@ -1313,7 +1335,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             const n = `sc_i${E.tempCounter++}`;
             E.line(`for (size_t ${n} = 0, ${n}_len = (size_t)scr_arr_len(${src.name}); ${n} < ${n}_len; ${n}++) {`);
             E.indent++;
-            E.line(`scr_arr_push_${acc}(${r.name}, ${acc === "ref" ? "scr_arr_copy_ref" : `scr_arr_get_${acc}`}(${src.name}, (double)${n}));`);
+            E.line(`scr_arr_push_${acc}(${r.name}, ${E.copyReadC((e.receiver.type as IrType & { kind: "array" }).elem, src.name, `(double)${n}`)});`);
             E.indent--;
             E.line(`}`);
             return E.newTemp(e.type, `scr_arr_len(${r.name})`);
@@ -2893,7 +2915,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return;
           }
           E.moveTemp(v);
-          E.line(`scr_dyn_arr_push(${arr.name}, ${v.name});`);
+          // An elision is a HOLE: the slot takes the absent node (the placeholder undefined is dropped).
+          if (e.holes !== undefined && e.holes.includes(i)) E.line(`scr_dyn_arr_push_slot(${arr.name}, scr_dyn_retain(scr_dyn_absent()));`);
+          else E.line(`scr_dyn_arr_push(${arr.name}, ${v.name});`);
         });
         return arr;
       }
@@ -3180,7 +3204,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           e.key === "length"
             ? "true"
             : /^(0|[1-9][0-9]*)$/.test(e.key) && Number(e.key) <= Number.MAX_SAFE_INTEGER
-              ? `${d.name}->v.arr.len > ${e.key}`
+              ? `scr_dyn_arr_has_index(${d.name}, ${e.key})`
               // any other name: the array's own NAMED properties (an exec
               // result's index/input/groups, an expando)
               : `scr_dyn_arr_has_extra(${d.name}, ${keyLit}, ${keyBytes.length})`;

@@ -12008,7 +12008,7 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
           // already carries an absent value.
           const absent =
             filledWhole || fullFillLoopFollows(expr) || ctorFieldFillProven(L, expr) ||
-            (elem.kind === "union" ? L.wrappedUndefined(elem, loc) !== null : isRefCounted(elem)) ||
+            elem.kind === "f64" || isRefCounted(elem) || // HOLES: the in-band marker (f64 payload, NULL for ref slots)
             prefixFillTruncateFollows(expr);
           if (!absent) {
             // Scalars have no absent value that isn't a LIE on read (0

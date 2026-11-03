@@ -692,6 +692,17 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
           loc,
         },
         depthGate("[Array]"),
+        // HOLES: an array with a hole prints through the dyn tree, whose inspect
+        // knows `<n empty items>` (the dyn array's hole is the absent node).
+        ...(L.dynConvertible(t)
+          ? [{
+              kind: "if" as const,
+              cond: { kind: "arrIntrinsic" as const, method: "hasHoles" as const, receiver: v(), args: [], type: BOOL, loc },
+              then: [ret({ kind: "libCall", fn: "insp.dyn", args: [{ kind: "dynFrom", value: v(), type: DYN, loc }, r(), d()], type: STRING, loc })],
+              else_: null,
+              loc,
+            }]
+          : []),
         { kind: "varDecl", localId: "s.0", init: optShown(n(), loc), loc },
         ...begin(),
         {

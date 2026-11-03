@@ -1466,7 +1466,7 @@ void scr_dyn_obj_set_proto(ScrDyn *obj, ScrDyn *proto) {
 
 /* Public: the compiler-emitted static→dyn converters push through this
  * too. Ownership of the item moves in. */
-void scr_dyn_arr_push(ScrDyn *arr, ScrDyn *item) {
+void scr_dyn_arr_push_slot(ScrDyn *arr, ScrDyn *item) {
   if (arr->v.arr.len == arr->v.arr.cap) {
     /* `cap` is a uint32 now (the payload union is 32 bytes instead of 56
      * because of it), so the ceiling is ENFORCED here rather than assumed
@@ -1494,6 +1494,13 @@ void scr_dyn_arr_push(ScrDyn *arr, ScrDyn *item) {
     arr->v.arr.cap = (uint32_t)cap;
   }
   arr->v.arr.items[arr->v.arr.len++] = item; /* ownership moves in */
+}
+
+/* A VALUE push: a hole read out of another slot carries the absent node, and
+ * as a value it is undefined. Slot-for-slot copies that must PRESERVE holes
+ * use scr_dyn_arr_push_slot. */
+void scr_dyn_arr_push(ScrDyn *arr, ScrDyn *item) {
+  scr_dyn_arr_push_slot(arr, scr_dyn_is_hole(item) ? scr_dyn_undefined() : item);
 }
 
 /* The value-describing prefix of the "... is not iterable" TypeError —
@@ -1667,7 +1674,7 @@ ScrDyn *scr_dyn_arr_at(const ScrDyn *d, double i) {
   if (d->kind != SCR_DYN_ARR || i < 0 || i >= (double)d->v.arr.len) {
     return scr_dyn_retain(scr_dyn_undefined());
   }
-  return scr_dyn_retain(d->v.arr.items[(size_t)i]);
+  return scr_dyn_retain(scr_dyn_elem_val(d->v.arr.items[(size_t)i]));
 }
 
 /* Takes ownership of key (malloc'd) and value. Duplicate keys: the LATER
@@ -1864,6 +1871,9 @@ const char *scr_textcodec_name(const ScrDyn *d) {
 }
 
 ScrDyn *scr_dyn_new_str(ScrStr *s) {
+  /* The ABSENT string (a regex capture that did not participate, an undefined string slot)
+   * IS Node's undefined: it crosses to the dyn tree as the undefined value. */
+  if (scr_str_is_absent(s)) return scr_dyn_retain(scr_dyn_undefined());
   /* The two immortal strings new TextEncoder() / new TextDecoder() evaluate
    * to cross as a native handle, not as the plain "utf-8" they spell (see
    * the TextCodec section below). Two header loads on a path that already
@@ -1912,7 +1922,7 @@ ScrDyn *scr_dyn_new_arr_len(double n) {
     d->v.arr.items = items;
     d->v.arr.cap = (uint32_t)len;
   }
-  for (size_t i = 0; i < len; i++) d->v.arr.items[i] = scr_dyn_retain(scr_dyn_undefined());
+  for (size_t i = 0; i < len; i++) d->v.arr.items[i] = scr_dyn_retain(scr_dyn_absent()); /* holes */
   d->v.arr.len = len;
   return d;
 }
@@ -8047,11 +8057,11 @@ bool scr_dyn_key_delete(ScrDyn *recv, ScrStr *key) {
       else idx = idx * 10 + (size_t)(key->data[i] - '0');
     }
     if (is_index && idx < recv->v.arr.len) {
-      ScrJsonBuf sb;
-      scr_jb_init(&sb);
-      scr_jb_puts(&sb, "'delete' of an array element leaves a hole, which this runtime cannot represent (assign undefined, or splice)");
-      scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&sb));
-      return false;
+      /* `delete a[i]` leaves a HOLE: the slot becomes the absent node. */
+      ScrDyn *old = recv->v.arr.items[idx];
+      recv->v.arr.items[idx] = scr_dyn_retain(scr_dyn_absent());
+      scr_dyn_release(old);
+      return true;
     }
     /* A named property (an exec result's `groups`, an expando) is removed
      * like any own property; a name the array never had deletes nothing. */
@@ -8203,6 +8213,11 @@ bool scr_dyn_bytes_in(const ScrDyn *d, const char *k, size_t kl) {
   return false; /* the prototype surface is the caller's (scr_dyn_has_key_full, scr_dyn_invoke.c) */
 }
 
+/* `idx in arr` for a dyn ARRAY with a literal index: in range and not a hole. */
+bool scr_dyn_arr_has_index(const ScrDyn *v, size_t idx) {
+  return idx < v->v.arr.len && !scr_dyn_is_hole(v->v.arr.items[idx]);
+}
+
 bool scr_dyn_has_key(const ScrDyn *v, const ScrStr *key) {
   SCR_VIEW_FRESH(v);
   if (v->kind == SCR_DYN_PROXY) return SCR_PX->has((ScrDyn *)v, key);
@@ -8221,7 +8236,7 @@ bool scr_dyn_has_key(const ScrDyn *v, const ScrStr *key) {
   if (v->kind == SCR_DYN_ARR) {
     if (key->len == 6 && memcmp(key->data, "length", 6) == 0) return true;
     size_t idx = 0;
-    if (dyn_canonical_index(key, &idx)) return idx < v->v.arr.len;
+    if (dyn_canonical_index(key, &idx)) return idx < v->v.arr.len && !scr_dyn_is_hole(v->v.arr.items[idx]);
     ScrDyn *x = scr_dyn_arr_extras(v);
     return x != NULL && scr_dyn_obj_get(x, key->data, key->len) != NULL;
   }
@@ -8467,12 +8482,12 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
     }
     if (is_index) {
       while (recv->v.arr.len <= idx) {
-        scr_dyn_arr_push(recv, scr_dyn_retain(scr_dyn_undefined()));
+        scr_dyn_arr_push_slot(recv, scr_dyn_retain(scr_dyn_absent())); /* the skipped slots are holes */
       }
       /* unlink before release, and retain before either: `value` may BE
        * the element already stored here */
       ScrDyn *old = recv->v.arr.items[idx];
-      recv->v.arr.items[idx] = scr_dyn_retain(value);
+      recv->v.arr.items[idx] = scr_dyn_retain(scr_dyn_elem_val(value));
       scr_dyn_release(old);
       return;
     }
@@ -8494,7 +8509,7 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
         scr_dyn_release(gone);
       }
       while (recv->v.arr.len < want) {
-        scr_dyn_arr_push(recv, scr_dyn_retain(scr_dyn_undefined()));
+        scr_dyn_arr_push_slot(recv, scr_dyn_retain(scr_dyn_absent())); /* length growth makes holes */
       }
       return;
     }
@@ -13347,6 +13362,8 @@ ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode) {
   if (v->kind == SCR_DYN_ARR || v->kind == SCR_DYN_BYTES) {
     size_t n = v->kind == SCR_DYN_ARR ? v->v.arr.len : v->v.bytes->len;
     for (size_t i = 0; i < n; i++) {
+      /* A hole is not an own property: no key, no value, no entry. */
+      if (v->kind == SCR_DYN_ARR && scr_dyn_is_hole(v->v.arr.items[i])) continue;
       char key[24];
       int klen = snprintf(key, sizeof key, "%zu", i);
       ScrDyn *val = NULL;
@@ -13707,7 +13724,7 @@ bool scr_dyn_has_own(const ScrDyn *v, const ScrStr *key) {
   if (v->kind == SCR_DYN_ARR) {
     if (key->len == 6 && memcmp(key->data, "length", 6) == 0) return true;
     size_t idx = 0;
-    if (dyn_canonical_index(key, &idx)) return idx < v->v.arr.len;
+    if (dyn_canonical_index(key, &idx)) return idx < v->v.arr.len && !scr_dyn_is_hole(v->v.arr.items[idx]);
     ScrDyn *x = scr_dyn_arr_extras(v);
     return x != NULL && scr_dyn_obj_get(x, key->data, key->len) != NULL;
   }
