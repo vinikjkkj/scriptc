@@ -6,6 +6,7 @@
  * (FieldTarget). */
 import { evalStaticInfoOf, lowerEvalClassInstanceOf } from "./lower-evalclass.js";
 import { protoDataFieldRead, protoDataHasKey, protoDataMemberRead } from "./lower-protodata.js";
+import { protoSlotOf, slotReadOr } from "./lower-protoslots.js";
 import * as ts from "../ts7/adapter.js";
 import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
@@ -24385,14 +24386,20 @@ function fieldOnlyUsedOnThis(L: Lowerer, field: string): boolean {
    * dynCallWithThis (the dyn-field call arm). Null when the member's
    * parameters are not all required (a detached call cannot say which
    * were omitted) or the receiver is not a plain class instance. */
-  function lowerUnboundClassMethodValue(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
+  export function lowerUnboundClassMethodValue(L: Lowerer, expr: ts.PropertyAccessExpression, infoOverride?: ClassInfo): IrExpr | null {
     if (!isJsSourceFile(expr.getSourceFile())) return null;
     if (expr.questionDotToken !== undefined) return null;
     // `super.m` keeps its own refusal (lower-classes: bound method references through 'super').
     if (expr.expression.kind === ts.SyntaxKind.SuperKeyword) return null;
-    const recvT = L.mapTypeOf(L.typeOf(expr.expression));
-    if (recvT?.kind !== "object") return null;
-    const info = L.classes.get(recvT.className) ?? null;
+    // `ctor.prototype.m` of a keyed forEach (lowerKeyedForEach): the class is the unrolled key's, not the checker's union.
+    let info: ClassInfo | null;
+    if (infoOverride !== undefined) {
+      info = infoOverride;
+    } else {
+      const recvT = L.mapTypeOf(L.typeOf(expr.expression));
+      if (recvT?.kind !== "object") return null;
+      info = L.classes.get(recvT.className) ?? null;
+    }
     if (info === null || info.builtinError) return null;
     const found = L.findMethodOn(info, expr.name.text);
     if (found === null) {
@@ -24615,7 +24622,9 @@ function fieldOnlyUsedOnThis(L: Lowerer, field: string): boolean {
       }
       return { kind: "closure", fnName: name, captures: [], type: fnT, loc };
     };
-    const own = thunkOf(gfound.declarer.def.name, base);
+    const ownThunk = thunkOf(gfound.declarer.def.name, base);
+    const ownSlot = protoSlotOf(L, gfound.declarer.def.name, method);
+    const own = ownSlot === null ? ownThunk : slotReadOr(L, ownSlot, fnT, ownThunk, loc);
     const ovs = withOverrides
       ? [...overrides].sort((a, b) => a.depth - b.depth).map((o) => ({ cls: o.cls.def.name, value: thunkOf(o.cls.def.name, o.inst) }))
       : [];
@@ -24697,7 +24706,10 @@ function fieldOnlyUsedOnThis(L: Lowerer, field: string): boolean {
         loc,
       });
     }
-    return { kind: "closure", fnName: name, captures: [], type: fnT, loc };
+    const thunk: IrExpr = { kind: "closure", fnName: name, captures: [], type: fnT, loc };
+    // A method some statement replaces at run time (lower-protoslots.ts): the value is the slot's function once written.
+    const slot = direct ? protoSlotOf(L, found.declarer.def.name, method) : null;
+    return slot === null ? thunk : slotReadOr(L, slot, fnT, thunk, loc);
   }
 
 /** `this.start` inside a BASE class that never declares `start` — the

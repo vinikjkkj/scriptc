@@ -3,6 +3,8 @@
  * flow (if/while/for/for-of/do, switch, try/catch, jumps with the
  * finally-crossing fence), and blocked-binding poisoning. */
 import { protoDataAssignStmt } from "./lower-protodata.js";
+import { classOfValueNode, protoSlotOf, protoSlotWriteStmt } from "./lower-protoslots.js";
+import { lowerUnboundClassMethodValue } from "./lower-exprs.js";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { isEmitterMixinStatement } from "./lower-emitter-mixin.js";
@@ -1141,6 +1143,10 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
       return L.lowerDefaultExport(stmt);
     }
     if (ts.isIfStatement(stmt)) {
+      // `if (ctor.prototype.m)` of a keyed forEach key whose class has no such member: the member is undefined, the then-branch is dead.
+      if (L.protoMissingReads.has(stmt.expression)) {
+        return { kind: "block", body: stmt.elseStatement === undefined ? [] : L.lowerScopedBlock(stmt.elseStatement), loc: locOf(stmt) };
+      }
       const cond = L.lowerCondition(stmt.expression);
       // A DECIDED test (the condition lowered to a literal): the branch it
       // rules out never runs, so it is not lowered at all — the statement
@@ -7042,6 +7048,8 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
     // `C.prototype.m = fn` adopted as a late method of C: a definition, not
     // a runtime write (registerLateMethods).
     if (L.lateMethodAssigns.has(expr)) return { kind: "block", body: [], loc: locOf(expr) };
+    // `C.prototype.m = f` of a method the program replaces at run time (lower-protoslots.ts): the slot's store.
+    { const ps = protoSlotWriteStmt(L, expr); if (ps !== null) return ps; }
     // `C.prototype.name = v` of a prototype-data slot (lower-protodata.ts): the slot's store.
     if (ts.isBinaryExpression(expr)) {
       const pd = protoDataAssignStmt(L, expr);
@@ -12215,6 +12223,25 @@ export function lowerForStatement(L: Lowerer, stmt: ts.ForStatement): IrStmt {
  * parameter as the literal's value (both substituted at their reads); the `module.exports[k] = v` write
  * registers the members (lower-modules) and lowers to nothing. A key whose registered storage is not the
  * literal value's own alias refuses: a read through a separate global would see a value no statement wrote. */
+/** The checker type of method `name` of the class a keyed-forEach literal value names. */
+function keyedMethodType(L: Lowerer, valueNode: ts.Expression, name: string): ts.Type | null {
+  try {
+    const ctorT = L.typeOf(valueNode);
+    const protoSym = L.checker.getPropertyOfType(ctorT, "prototype");
+    if (protoSym === undefined) return null;
+    const instT = L.checker.getTypeOfSymbol(protoSym);
+    const mSym = L.checker.getPropertyOfType(instT, name);
+    return mSym === undefined ? null : L.checker.getTypeOfSymbol(mSym);
+  } catch {
+    return null;
+  }
+}
+
+function findKeyedGenericMethod(L: Lowerer, info: ClassInfo, name: string): boolean {
+  for (let c: ClassInfo | null = info; c; c = c.base) if (c.genericMethods?.has(name) === true) return true;
+  return false;
+}
+
 export function lowerKeyedForEach(L: Lowerer, kf: CjsKeyedForEach): IrStmt {
   const loc = locOf(kf.stmt);
   const kSym = L.resolveValueSymbol(kf.keyParam);
@@ -12237,23 +12264,31 @@ export function lowerKeyedForEach(L: Lowerer, kf: CjsKeyedForEach): IrStmt {
   }
   // The checker types the value parameter as the union of the literal's values: a read of it (a property read
   // off it, say) would need the per-key arm, which is not lowered. Refuse at the reference, loudly.
-  // A value reference that REPLACES a prototype method (`ctor.prototype.m = fn`, the conditional
-  // install of mysql2's packets/index.js): the previous method is read and called with old.call(this)
-  // by the replacement, which needs a dispatch slot a run-time write re-points. Named precisely.
+  // `ctor.prototype.NAME` uses of the value parameter: a read (`const old = ctor.prototype.toPacket`, `if (ctor.prototype.toPacket)`)
+  // or the replacement `ctor.prototype.NAME = fn` (mysql2's packets/index.js). Both resolve against the unrolled key's class
+  // (lower-protoslots.ts); any other use of the parameter keeps the union fence below.
+  const protoUses = new Map<ts.Identifier, { p2: ts.PropertyAccessExpression; write: boolean }>();
   for (const id of vRefs) {
     const p1 = id.parent;
     if (!ts.isPropertyAccessExpression(p1) || p1.expression !== id || p1.name.text !== "prototype") continue;
     const p2 = p1.parent;
     if (!ts.isPropertyAccessExpression(p2) || p2.expression !== p1) continue;
     const p3 = p2.parent;
-    if (!ts.isBinaryExpression(p3) || p3.left !== p2 || p3.operatorToken.kind !== ts.SyntaxKind.EqualsToken) continue;
-    L.unsupported(
-      "SC1090",
-      p3,
-      `replacing the prototype method '${p2.name.text}' of the keyed class '${kf.valueParam.text}' at run time (a run-time write re-points the method; the class vtables are static constants, so the replacement and its old.call(this) have no lowering)`,
-    );
+    const assignish = (ts.isBinaryExpression(p3) && p3.left === p2 && p3.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && p3.operatorToken.kind <= ts.SyntaxKind.LastAssignment) ||
+      ts.isDeleteExpression(p3) || ts.isPrefixUnaryExpression(p3) && (p3.operator === ts.SyntaxKind.PlusPlusToken || p3.operator === ts.SyntaxKind.MinusMinusToken) || ts.isPostfixUnaryExpression(p3);
+    const write = ts.isBinaryExpression(p3) && p3.left === p2 && p3.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isExpressionStatement(p3.parent);
+    if (assignish && !write) {
+      L.unsupported(
+        "SC1090",
+        p3,
+        `replacing the prototype method '${p2.name.text}' of the keyed class '${kf.valueParam.text}' at run time other than by an assignment statement`,
+      );
+      continue;
+    }
+    protoUses.set(id, { p2, write });
   }
   for (const id of vRefs) {
+    if (protoUses.has(id)) continue;
     if (L.mapTypeOf(L.typeOf(id))?.kind === "union") {
       L.unsupported(
         "SC1090",
@@ -12266,9 +12301,77 @@ export function lowerKeyedForEach(L: Lowerer, kf: CjsKeyedForEach): IrStmt {
   for (const key of kf.keys) {
     const strLit: IrExpr = { kind: "strLit", value: key.name, type: STRING, loc };
     for (const id of kRefs) L.preLowered.set(id, strLit);
+    const keyedSet: ts.Node[] = [];
     if (vRefs.length > 0) {
       const vIr = L.lowerExpr(key.valueNode);
-      for (const id of vRefs) L.preLowered.set(id, vIr);
+      for (const id of vRefs) if (!protoUses.has(id)) L.preLowered.set(id, vIr);
+    }
+    if (protoUses.size > 0) {
+      const info = classOfValueNode(L, key.valueNode);
+      for (const [id, use] of protoUses) {
+        if (info === null) {
+          L.unsupported("SC1090", id, `the keyed value '${kf.valueParam.text}' of a forEach over the literal's keys is not a class of the program (its prototype member '${use.p2.name.text}' has no lowering)`);
+          continue;
+        }
+        L.keyedProtoClass.set(id, info);
+        keyedSet.push(id);
+        const name = use.p2.name.text;
+        const has = L.findMethodOn(info, name) !== null || findKeyedGenericMethod(L, info, name);
+        if (!has) {
+          // The class has no such member: `ctor.prototype.m` is undefined (an `if` on it is dead).
+          L.protoMissingReads.add(use.p2);
+          keyedSet.push(use.p2);
+          if (!use.write) L.preLowered.set(use.p2, dynUndefinedExpr(loc));
+          continue;
+        }
+        if (use.write) {
+          if (protoSlotOf(L, info.def.name, name) === null) {
+            L.unsupported("SC1090", use.p2, `replacing the prototype method '${name}' of the keyed class '${info.def.name}', which inherits it (the write would shadow it on that class only; only a class that declares the method itself takes a run-time replacement)`);
+          }
+          continue;
+        }
+        // The checker types the read as the UNION of every key's method; this key's own method type stands in for it (the
+        // read, and the `const old = ...` binding with its uses), so `old.call(this)` meets one function type.
+        const mt = keyedMethodType(L, key.valueNode, name);
+        if (mt !== null) {
+          const bind = (n: ts.Node, ty: ts.Type): void => {
+            if (L.chainNarrowedType.has(n)) return;
+            L.chainNarrowedType.set(n, ty);
+            keyedSet.push(n);
+          };
+          bind(use.p2, mt);
+          // A `const x = <read>` binding and its uses, then the `const y = x.call(...)` results of those uses.
+          const bindVar = (init: ts.Expression, t: ts.Type, depth: number): void => {
+            const vd = init.parent;
+            if (!ts.isVariableDeclaration(vd) || vd.initializer !== init || !ts.isIdentifier(vd.name)) return;
+            const vsym = L.resolveValueSymbol(vd.name);
+            bind(vd.name, t);
+            if (vsym === null) return;
+            ts.walkPreorder(kf.body, (n) => {
+              if (!ts.isIdentifier(n) || n.text !== (vd.name as ts.Identifier).text || n === vd.name || L.resolveValueSymbol(n) !== vsym) return undefined;
+              bind(n, t);
+              const pa = n.parent;
+              const call = pa !== undefined && ts.isPropertyAccessExpression(pa) && pa.expression === n && pa.name.text === "call" ? pa.parent : undefined;
+              if (depth === 0 && call !== undefined && ts.isCallExpression(call) && call.expression === pa) {
+                const sig = L.checker.getCallSignatures(t)[0];
+                const rt = sig === undefined ? null : L.checker.getReturnTypeOfSignature(sig);
+                if (rt !== null) {
+                  bind(call, rt);
+                  bindVar(call, rt, 1);
+                }
+              }
+              return undefined;
+            });
+          };
+          bindVar(use.p2, mt, 0);
+        }
+        const rd = lowerUnboundClassMethodValue(L, use.p2, info);
+        if (rd === null) {
+          L.unsupported("SC1090", use.p2, `reading the prototype method '${name}' of the keyed class has no lowering (a detached call cannot say which parameters were omitted)`);
+          continue;
+        }
+        L.preLowered.set(use.p2, rd);
+      }
     }
     try {
       for (const s of kf.body.statements) {
@@ -12281,6 +12384,12 @@ export function lowerKeyedForEach(L: Lowerer, kf: CjsKeyedForEach): IrStmt {
     } finally {
       for (const id of kRefs) L.preLowered.delete(id);
       for (const id of vRefs) L.preLowered.delete(id);
+      for (const n of keyedSet) {
+        L.chainNarrowedType.delete(n);
+        L.keyedProtoClass.delete(n);
+        L.preLowered.delete(n);
+        L.protoMissingReads.delete(n);
+      }
     }
   }
   return { kind: "block", body: out, loc };
