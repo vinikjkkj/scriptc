@@ -29,7 +29,9 @@ import {
   parseOwnShadowField,
   canConvertToDyn,
   canDynCheckTo,
+  EMITTER_CELL_NAMES,
   EMITTER_MIXIN_FIELD_NAME,
+  GRAFTED_EMITTER_CELL_CLASSES,
   RUNTIME_EMITTER_CLASS,
   RUNTIME_ERROR_CLASSES,
   RUNTIME_STREAM_CLASSES,
@@ -82,7 +84,11 @@ export type DynMemberRow =
    * the method rows, so a read by name must never find it: the runtime skips
    * these rows (enumerable 3) when it looks a member up and answers the
    * method, whose body forwards to `target` while the flag is set. */
-  | { kind: "shadow"; name: string; target: string; flag: string; flagType: IrType; ordk: number };
+  | { kind: "shadow"; name: string; target: string; flag: string; flagType: IrType; ordk: number }
+  /** One of the three own keys `EventEmitter.call(this)` creates on a grafted instance (_events, _eventsCount,
+   * _maxListeners): enumerable, the value the emitter registry's (the runtime answers it, never a struct slot), born
+   * where the instance's order record notes the key (ordk), absent before. `cell` indexes EMITTER_CELL_NAMES. */
+  | { kind: "eeCell"; name: string; cell: number; ordk: number };
 
 /**
  * The member table rows for one class, FLATTENED over its base chain with
@@ -127,7 +133,9 @@ export function dynEnumerationFenced(cls: DynMemberClass): boolean {
     if (RUNTIME_STREAM_CLASSES.has(c.def.name) || c.def.name === RUNTIME_EMITTER_CLASS) return true;
   }
   // A grafted class's own keys (_events, _eventsCount, _maxListeners) are the emitter's state too.
-  return cls.def.fields.some((f) => f.name === EMITTER_MIXIN_FIELD_NAME);
+  // ... except when its constructor runs EventEmitter.call(this) at a place the order record notes (the member table
+  // then lists the three keys as eeCell rows, exact in every enumerating surface).
+  return cls.def.fields.some((f) => f.name === EMITTER_MIXIN_FIELD_NAME) && !GRAFTED_EMITTER_CELL_CLASSES.has(cls.def.name);
 }
 
 /** 1 when the chain reaches the runtime EventEmitter and no runtime stream class, 2 when it
@@ -171,7 +179,17 @@ export function dynRuntimeRoot(cls: DynMemberClass): number {
   // A class grafted by applyMixin(Y, EventEmitter) carries the emitter's own keys (_events, _eventsCount,
   // _maxListeners) among its fields, in whatever place its constructor first runs EventEmitter.call(this):
   // the key ORDER is not a fact of the class, so every enumerating surface keeps its loud fence (2).
-  if (!emitter && cls.def.fields.some((f) => f.name === EMITTER_MIXIN_FIELD_NAME)) return 2;
+  // 5: a grafted class whose emitter keys are eeCell rows (GRAFTED_EMITTER_CELL_CLASSES), no run-time property table;
+  // 6: the same WITH one (its keys list through the table walk, values and entries keep the fence).
+  if (!emitter && cls.def.fields.some((f) => f.name === EMITTER_MIXIN_FIELD_NAME)) {
+    if (GRAFTED_EMITTER_CELL_CLASSES.has(cls.def.name)) {
+      // 7: the class applyMixin grafted onto itself (its own `constructor` is EventEmitter's: util.inspect names the
+      // nearest ancestor instead); 5: a subclass of it.
+      const target = !(cls.base?.def.fields.some((f) => f.name === EMITTER_MIXIN_FIELD_NAME) ?? false);
+      return props ? 6 : target ? 7 : 5;
+    }
+    return 2;
+  }
   // 3: EventEmitter-rooted WITH a run-time property table; 4: a plain class WITH one. The walk lists the
   // table's enumerable keys after the members (scr_dyn_class.c walk_error).
   if (props) return emitter ? 3 : 4;
@@ -317,6 +335,15 @@ export function dynMemberTable(
     const ordinal = ORDER_PLAN?.ordinalOf(cls.def.name, f.name) ?? null;
     rows.push({ kind: "field", name: f.name, type: f.type, absentWhenUndefined: cls.def.absentFields?.includes(f.name) === true, ordk: ordinal === null ? 0 : ordinal + 1 });
     pushShadows(f.name);
+  }
+  // A grafted class's emitter keys: rows born where the order record notes them (see "eeCell").
+  if (GRAFTED_EMITTER_CELL_CLASSES.has(cls.def.name)) {
+    EMITTER_CELL_NAMES.forEach((name, cell) => {
+      const ordinal = ORDER_PLAN?.ordinalOf(cls.def.name, name) ?? null;
+      if (ordinal === null || seen.has(name)) return;
+      seen.add(name);
+      rows.push({ kind: "eeCell", name, cell, ordk: ordinal + 1 });
+    });
   }
   // A property whose predecessor field has no dyn row still exists; it goes
   // after the last field row.

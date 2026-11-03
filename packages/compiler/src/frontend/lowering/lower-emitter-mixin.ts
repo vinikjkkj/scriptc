@@ -17,7 +17,7 @@
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import type { IrExpr } from "../../ir/nodes.js";
-import { EMITTER_MIXIN_FIELD_NAME, RUNTIME_EMITTER_CLASS, UNDEFINED_T } from "../../ir/nodes.js";
+import { BOOL, EMITTER_CELL_NAMES, EMITTER_MIXIN_FIELD_NAME, RUNTIME_EMITTER_CLASS, UNDEFINED_T } from "../../ir/nodes.js";
 import { locOf } from "../program.js";
 import { lowerEmitterMethodCall } from "./lower-emitter.js";
 import type { ClassInfo } from "./lower-classes.js";
@@ -188,6 +188,51 @@ function graftInfoOfReceiver(L: Lowerer, recvT: ts.Type): ClassInfo | null {
   return null;
 }
 
+/** Is `stmt` the statement `EventEmitter.call(this)` (the emitter's constructor run on `this`)? */
+function isEmitterInitStatement(L: Lowerer, stmt: ts.Statement): boolean {
+  if (!ts.isExpressionStatement(stmt)) return false;
+  let e: ts.Expression = stmt.expression;
+  while (ts.isParenthesizedExpression(e)) e = e.expression;
+  if (!ts.isCallExpression(e) || !ts.isPropertyAccessExpression(e.expression) || e.expression.name.text !== "call") return false;
+  if (e.arguments.length !== 1 || e.arguments[0]!.kind !== ts.SyntaxKind.ThisKeyword) return false;
+  let inner: ts.Expression = e.expression.expression;
+  while (ts.isParenthesizedExpression(inner) || ts.isAsExpression(inner) || ts.isAssertionExpression(inner)) {
+    inner = (inner as ts.ParenthesizedExpression | ts.AsExpression | ts.TypeAssertion).expression;
+  }
+  const innerName = ts.isPropertyAccessExpression(inner) ? inner.name : ts.isIdentifier(inner) ? inner : null;
+  return innerName !== null && L.builtinEmitterInfoOf(symbolOfName(L, innerName)) !== null;
+}
+
+/** Does a statement contain a `return` outside any nested function (it could leave the constructor before a later statement)? */
+function containsReturn(n: ts.Node): boolean {
+  let found = false;
+  ts.walkPreorder(n, (x) => {
+    if (x.kind === ts.SyntaxKind.ReturnStatement) {
+      found = true;
+      return "stop";
+    }
+    if (x !== n && (ts.isFunctionLike(x) || ts.isClassDeclaration(x) || ts.isClassExpression(x))) return "skip";
+    return undefined;
+  });
+  return found;
+}
+
+/** The top-level `EventEmitter.call(this)` statement of a grafted class's own constructor, when every statement before
+ * it is free of `return` (so the call certainly runs, once the constructor gets past it): the place the emitter's own
+ * keys (_events, _eventsCount, _maxListeners) are born on every instance. Null when the class has no such statement
+ * (a conditional call, a call in a method, no call: the keys then appear at a place the order record cannot state). */
+export function graftCtorEmitterInit(L: Lowerer, decl: ts.ClassLikeDeclaration): ts.Statement | null {
+  const ctor = decl.members.find((m): m is ts.ConstructorDeclaration => ts.isConstructorDeclaration(m) && m.body !== undefined);
+  if (ctor === undefined || ctor.body === undefined) return null;
+  const stmts = ctor.body.statements;
+  for (let i = 0; i < stmts.length; i++) {
+    const s = stmts[i]!;
+    if (isEmitterInitStatement(L, s)) return s;
+    if (containsReturn(s)) return null;
+  }
+  return null;
+}
+
 /** `(EventEmitter as any).call(this)` inside a grafted class's own declaration:
  * Node initialises the emitter's own state on `this`, and the hidden slot is
  * created eagerly by the field initialiser, so the call is a no-op. Null for
@@ -204,5 +249,21 @@ export function emitterCtorCallOnGraft(L: Lowerer, call: ts.CallExpression): IrE
   let cls: ts.Node | undefined = call.parent;
   while (cls && !ts.isClassDeclaration(cls)) cls = cls.parent;
   if (!cls || !ts.isClassDeclaration(cls) || !appliesEmitterMixin(L, cls)) return null;
-  return { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc: locOf(call) };
+  const loc = locOf(call);
+  const undef: IrExpr = { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc };
+  // The statement that is the class's constructor-level init: the emitter's own keys are born here, on this
+  // instance, so the order record notes them now (the member table lists them where the record puts them).
+  const initStmt = graftCtorEmitterInit(L, cls);
+  if (initStmt === null || !ts.isExpressionStatement(initStmt) || initStmt.getStart() > call.getStart() || initStmt.getEnd() < call.getEnd()) return undef;
+  const self = L.lowerExpr(call.arguments[0]!);
+  if (self.type.kind !== "object") return undef;
+  const className = self.type.className;
+  return {
+    kind: "seqExpr",
+    stmts: EMITTER_CELL_NAMES.map((field) => ({ kind: "ordNote" as const, obj: self, className, field, loc })),
+    // The statement's value is discarded (the call is the constructor-level statement itself).
+    result: { kind: "boolLit", value: true, type: BOOL, loc },
+    type: BOOL,
+    loc,
+  };
 }

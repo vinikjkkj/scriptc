@@ -9248,6 +9248,15 @@ export function isDynBytes(t: IrType): boolean {
  * lowering by the class collector and reset when a lowerer starts. */
 export const GRAFTED_EMITTER_CLASSES = new Set<string>();
 
+/** The grafted classes (GRAFTED_EMITTER_CLASSES members) whose constructor runs `EventEmitter.call(this)` as an
+ * unconditional top-level statement: the emitter's own keys (_events, _eventsCount, _maxListeners) are born at that
+ * statement, so the instance's order record notes them there (IrClassDef.ordered carries the three names) and the
+ * member table lists them as rows at that place (DynMemberRow "eeCell"). Per lowering, reset with the set above. */
+export const GRAFTED_EMITTER_CELL_CLASSES = new Set<string>();
+
+/** The three own keys `EventEmitter.call(this)` creates, in the order events.js assigns them. */
+export const EMITTER_CELL_NAMES = ["_events", "_eventsCount", "_maxListeners"] as const;
+
 /** The per-evaluation STATIC-SIDE classes (frontend/lowering/lower-evalclass.ts):
  * objects standing for a CLASS VALUE minted by a class expression inside a
  * function. They box into dyn as a class VALUE (a function object that holds the
@@ -10839,7 +10848,7 @@ export function moduleBoxesEmitters(mod: IrModule): boolean {
  * emitter's state keys (_events, _eventsCount, _maxListeners, two symbols) at a position its constructor decides and
  * with listener tables as values: none of the surfaces above can answer for such an instance exactly, so a program that
  * both boxes one and contains any of them keeps the compile-time refusal (graftedDynFence). */
-export function dynReflectionSite(functions: readonly IrFunction[]): string | null {
+export function dynReflectionSite(functions: readonly IrFunction[], fenced: (op: string) => boolean = () => true): string | null {
   const REFLECT_FNS = new Set([
     "dyn.assign", "dyn.assignAll", "dyn.hasOwn", "dyn.forInKeys", "dyn.forInCertain", "dyn.forInPlain", "dyn.forInAccessor",
     "dyn.objKeys", "dyn.objValues", "dyn.objEntries", "dyn.structuredClone", "dyn.cloneOwn", "dyn.ownNamesCtor",
@@ -10848,7 +10857,8 @@ export function dynReflectionSite(functions: readonly IrFunction[]): string | nu
   let found: string | null = null;
   let cur = "";
   const hit = (what: string, n: { loc?: SrcLoc }): void => {
-    if (found === null) found = `${what} (in ${cur}${n.loc ? ` at ${n.loc.file}@${n.loc.start}` : ""})`;
+    // `op` is the operation's kind (the lib fn, or the surface's name), what `fenced` judges per class tier.
+    if (found === null && fenced(what.replace(/ .*/, ""))) found = `${what} (in ${cur}${n.loc ? ` at ${n.loc.file}@${n.loc.start}` : ""})`;
   };
   const hasDynArg = (args: unknown): boolean =>
     Array.isArray(args) && args.some((a) => (a as { type?: { kind?: string } })?.type?.kind === "dyn");
@@ -10876,6 +10886,21 @@ export function dynReflectionSite(functions: readonly IrFunction[]): string | nu
   }
   return found;
 }
+
+/** The reflective operations (dynReflectionSite's op kinds) a grafted instance whose emitter keys are member rows
+ * (GRAFTED_EMITTER_CELL_CLASSES, no run-time property table) still cannot answer exactly: a clone that would have to
+ * duplicate the emitter (structuredClone, the Object.create(getPrototypeOf(o), getOwnPropertyDescriptors(o)) idiom),
+ * a prototype link over the instance, and the `constructor` read (EventEmitter on the grafted class itself, a class
+ * value no dyn representation stands for). Every other surface (for-in, Object.keys/values/entries/assign, spread,
+ * hasOwn, JSON.stringify, util.inspect, console) walks the member rows exactly. */
+export const GRAFTED_ROWS_FENCED_OPS: ReadonlySet<string> = new Set([
+  "dyn.structuredClone", "dyn.cloneOwn", "dyn.objCreateProto", "dyn.objCreateDescs", "constructor",
+]);
+/** The same for such a class that ALSO carries a run-time property table (its values, entries, JSON and inspect keep the
+ * table walk's fence): only the key-listing surfaces below are exact there. */
+export const GRAFTED_PROPS_EXACT_OPS: ReadonlySet<string> = new Set([
+  "dyn.forInKeys", "dyn.forInCertain", "dyn.forInPlain", "dyn.forInAccessor", "dyn.objKeys", "dyn.hasOwn", "hasOwnProperty",
+]);
 
 /** The writes and deletes of an emitter's state cells that a program which lets an EventEmitter instance reach a
  * dynamic value may not contain, because the runtime cannot make them behave as events.js does: a literal
@@ -10980,8 +11005,8 @@ export function emitterStateWriteSites(functions: readonly IrFunction[], classes
 }
 
 /** The dynFrom sites that box an instance of a class grafted with the emitter API (loc of each). */
-export function graftedBoxSites(functions: readonly IrFunction[]): SrcLoc[] {
-  const out: SrcLoc[] = [];
+export function graftedBoxSites(functions: readonly IrFunction[]): { loc: SrcLoc; className: string }[] {
+  const out: { loc: SrcLoc; className: string }[] = [];
   const visit = (v: unknown): void => {
     if (v === null || typeof v !== "object") return;
     if (Array.isArray(v)) {
@@ -10990,7 +11015,7 @@ export function graftedBoxSites(functions: readonly IrFunction[]): SrcLoc[] {
     }
     const n = v as { kind?: string; value?: { type?: { kind?: string; className?: string } }; loc?: SrcLoc };
     if (n.kind === "dynFrom" && n.value?.type?.kind === "object" && typeof n.value.type.className === "string" &&
-        GRAFTED_EMITTER_CLASSES.has(n.value.type.className) && n.loc !== undefined) out.push(n.loc);
+        GRAFTED_EMITTER_CLASSES.has(n.value.type.className) && n.loc !== undefined) out.push({ loc: n.loc, className: n.value.type.className });
     for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
   };
   for (const f of functions) visit(f.body);

@@ -1777,6 +1777,13 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
        * properties -- and running one at a print would be a side effect
        * the program did not ask for, which is the OBJ arm's stance too. */
       const char *icn = scr_dyn_objinst_cls(d);
+      /* The class that applyMixin(Y, EventEmitter) grafted onto (rt_root 7) has had its own `constructor` overwritten by
+       * EventEmitter's, and util.inspect skips a constructor the instance is not an instance of: it names the first
+       * ancestor that still has its own (the immediate base), or prints no prefix when the chain reaches Object. */
+      if (scr_dyn_objinst_class_of(d)->rt_root == 7) {
+        const char *bn = scr_dyn_objinst_class_of(d)->base;
+        icn = bn != NULL ? bn : "";
+      }
       if (!scr_dyn_objinst_enumerable(d)) {
         InspBuf out = {0};
         ib_cstr(&out, "util.inspect of a dynamic ");
@@ -1794,13 +1801,13 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       if (ishown == 0) {
         InspBuf nb = {0};
         ib_cstr(&nb, icn);
-        ib_cstr(&nb, " {}");
+        ib_cstr(&nb, icn[0] != '\0' ? " {}" : "{}");
         return ib_take(&nb);
       }
       if (recurse > depth) {
         InspBuf nb = {0};
         ib_char(&nb, '[');
-        ib_cstr(&nb, icn);
+        ib_cstr(&nb, icn[0] != '\0' ? icn : "Object");
         ib_char(&nb, ']');
         return ib_take(&nb);
       }
@@ -1824,6 +1831,20 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         ScrStr *entry = ib_take(&eb);
         scr_insp_entry(entry, false);
         scr_str_release(entry);
+      }
+      if (!ithrew && (scr_dyn_objinst_class_of(d)->rt_root == 5 || scr_dyn_objinst_class_of(d)->rt_root == 7)) {
+        /* A grafted emitter's constructor (EventEmitter.call(this)) also defines the own enumerable SYMBOL keys
+         * shapeMode and kCapture (both false), after every string key; util.inspect lists them once the emitter's
+         * keys are born. */
+        const ScrDynClassMember *cm = scr_dyn_objinst_member(d, "_eventsCount", 12);
+        if (cm != NULL && !scr_dyn_member_hidden(cm, d->v.inst.o)) {
+          ScrStr *e1 = scr_str_new("Symbol(shapeMode): false", 24);
+          scr_insp_entry(e1, false);
+          scr_str_release(e1);
+          ScrStr *e2 = scr_str_new("Symbol(kCapture): false", 23);
+          scr_insp_entry(e2, false);
+          scr_str_release(e2);
+        }
       }
       ScrStr *ibase = scr_str_new(icn, strlen(icn));
       ScrStr *ib0 = scr_str_new("{", 1);
