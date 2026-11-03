@@ -1,5 +1,6 @@
 import { appendFileSync } from "node:fs";
 import * as ts from "./ts7/adapter.js";
+import { evalStaticClassName } from "./eval-class-syntax.js";
 import type { IrBuiltinRendering, IrRecordShape, IrType, IrUnionDef } from "../ir/nodes.js";
 import { BYTES_ELEM_NAMES, ABORTCONTROLLER_T, ABORTSIGNAL_T, BIGINT, HEADERS_T, REQUEST_T, REQUESTINIT_T, RESPONSE_T, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isRefCounted, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, isSupportedWeakValue, isUnitType, JSVAL, mapOf, weakMapOf, weakRideMapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
 
@@ -1593,6 +1594,11 @@ export interface TypeMapperCtx {
    * inside members, self-referential member types), null outside any
    * mixin context (the type alone cannot name a call site). */
   mixinClassInstance?: (decl: ts.ClassLikeDeclaration) => IrType | null;
+  /** Class expressions INSIDE a function whose every evaluation the lowering
+   * represents as an object of the class's synthetic static-side class
+   * (eval-class-syntax.ts, lowering/lower-evalclass.ts). Absent in checkers
+   * with no lowering attached (those expressions stay unmapped). */
+  evalClassNode?: (decl: ts.ClassLikeDeclaration) => boolean;
   /** RECOGNIZED PROTOTYPE-CLASSES: a JavaScript pre-class constructor
    * (`function S(b) { this.buf = b }` plus `S.prototype.m = function...`)
    * whose instances the frontend synthesizes a class for. The checker
@@ -3212,9 +3218,11 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         return viaMixin;
       }
     }
-    // A class expression inside a function/static block never registers
-    // (a distinct class per evaluation): unmappable for the same reason.
-    if (classExprNeverRegisters(classDecl)) return null;
+    // A class expression inside a function/static block mints a distinct
+    // class per evaluation: its INSTANCE type is the one IR class the body
+    // lowers to when the shape is covered (evalClassNode), unmappable
+    // otherwise.
+    if (classExprNeverRegisters(classDecl) && !ctx.evalClassNode?.(classDecl)) return null;
     // A GENERIC class's instance type (`Box<number>`) maps to the concrete
     // INSTANTIATION's class (`Box%0`), registered on demand — the Lowerer
     // hook owns the instance table (monomorphization by flow).
@@ -3243,7 +3251,12 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         return { kind: "classval", className: viaMixin.className };
       }
     }
-    if (classExprNeverRegisters(classDecl)) return null;
+    // The static side of an evaluated class is the per-evaluation OBJECT.
+    if (classExprNeverRegisters(classDecl)) {
+      return ctx.evalClassNode?.(classDecl)
+        ? { kind: "object", className: evalStaticClassName(classNamer(classDecl)) }
+        : null;
+    }
     // A GENERIC class's static side: only an INSTANTIATED one maps — an
     // instantiation expression's type (`Box<number>` as a value) carries a
     // construct signature returning the concrete instance, which maps to

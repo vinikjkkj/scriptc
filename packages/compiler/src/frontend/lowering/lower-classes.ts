@@ -30,6 +30,7 @@ import { declSymbolOf } from "./lower-modules.js";
 import { boundedKeyValuesOf, uniqueSymbolKeyOf } from "./lower-exprs.js";
 import { isNetSocketCtor, lowerHttpAgentNew, lowerHttpServerNew, lowerNetSocketNew } from "./lower-server.js";
 import { ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedClassSymbolOf, ambientUndefinedFnSymbolOf, fenceEarlyAliasUse, fenceEarlyNsMemberRef, nsMemberIdentOf, nsUndefRead } from "./lower-namespaces.js";
+import { EVAL_ENV_SYM, ensureEvalClass, evalStaticInfoOf, isEvalClassNode, lowerEvalClassExpr, lowerEvalClassNew, lowerEvalClassProperty } from "./lower-evalclass.js";
 import { bodylessMixinCalleeOf, mixinResultBindingClassOf, type MixinInstanceInfo } from "./lower-mixins.js";
 
 /** The weak collections' constructor hints. Shared: the stdlib `new`
@@ -216,6 +217,13 @@ export interface ClassInfo {
    * constructor takes their values as trailing parameters and `new C` sites
    * pass them; reads of the binding inside the class read the field. */
   captures?: { sym: ts.Symbol; field: string; type: IrType }[];
+  /** PER-EVALUATION class (a class expression inside a function,
+   * lower-evalclass.ts): the plan naming its static-side class and the
+   * bindings that class carries. */
+  evalClass?: import("./lower-evalclass.js").EvalClassInfo;
+  /** On a per-evaluation STATIC SIDE class (the object a class value is): the
+   * instance class its evaluations construct. */
+  evalStaticOf?: ClassInfo;
   /** The subset of `collectedFields` whose undefined arm means ABSENT and
    * nothing else — the slots every ENUMERATION surface has to skip while
    * the arm is live, because in Node the property does not exist until its
@@ -4985,7 +4993,14 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       // hidden trailing constructor parameters. The bindings are never
       // written, so the stored VALUE is the binding.
       let captures: { sym: ts.Symbol; field: string; type: IrType }[] | undefined;
-      if (ts.isClassDeclaration(decl) && L.localClassCaptures.has(decl)) {
+      const evalPlan = ts.isClassExpression(decl) ? L.evalClassPlans.get(decl) : undefined;
+      if (evalPlan !== undefined) {
+        // A per-evaluation class: ONE hidden field holding the evaluation object.
+        const clsT: IrType = { kind: "object", className: evalPlan.staticName };
+        fields.set("%cls", clsT);
+        fieldOrder.push({ name: "%cls", type: clsT, initializer: undefined });
+        captures = [{ sym: EVAL_ENV_SYM, field: "%cls", type: clsT }];
+      } else if (ts.isClassDeclaration(decl) && L.localClassCaptures.has(decl)) {
         captures = [];
         L.localClassCaptures.get(decl)!.forEach((cs, i) => {
           const csT = L.checker.getTypeOfSymbolAtLocation(cs, decl);
@@ -6398,6 +6413,27 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
    * by special rules) — are named fences here. The constructor edge is
    * noted at every classRef: a value can always be constructed through. */
   export function classValueRef(L: Lowerer, info: ClassInfo, blame: ts.Node): IrExpr {
+    // A per-evaluation class's own NAME read as a value (`class X { m() { return X } }`):
+    // that evaluation's object, reached through the instance in its own members.
+    if (info.evalClass !== undefined) {
+      const th = L.currentClass === info ? L.resolveThis(blame) : null;
+      if (!th) {
+        L.unsupported(
+          "SC1090",
+          blame,
+          "a class expression inside a function named as a value outside its own instance members (each evaluation is a distinct class)",
+        );
+      }
+      const loc = locOf(blame);
+      return {
+        kind: "fieldGet",
+        obj: { kind: "varRef", localId: th.id, type: th.type, loc },
+        className: info.def.name,
+        field: "%cls",
+        type: info.captures![0]!.type,
+        loc,
+      };
+    }
     const display = info.def.name.replace(/^%|^%m\d+\./, "");
     fenceDecorationThrows(L, info, blame);
     if (info.generic) {
@@ -6790,6 +6826,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
    * assignment / an object-literal property value / a default parameter —
    * "" everywhere else (array elements, call arguments). Verified against
    * Node for each shape. */
+  export function namedEvaluationNameOf(expr: ts.ClassExpression): string { return namedEvaluationName(expr); }
   function namedEvaluationName(expr: ts.ClassExpression): string {
     if (expr.name) return expr.name.text;
     let p: ts.Node = expr.parent;
@@ -6815,6 +6852,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
   export function lowerClassExpressionInfo(L: Lowerer, expr: ts.ClassExpression): ClassInfo {
     const cached = L.exprClassInfoByNode.get(expr);
     if (cached) return cached;
+    if (isEvalClassNode(L, expr)) return ensureEvalClass(L, expr);
     // Reentrancy guard: heritage resolution can DEMAND another class
     // expression's collection (extends through property assignments —
     // propertyAssignedClassInfoOf), so a cyclic base chain would re-enter
@@ -6929,6 +6967,10 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
         }
       }
     }
+    // A class expression inside a function: collected HERE (the evaluation
+    // site — the captured bindings are readable) and evaluated to a fresh
+    // per-evaluation object.
+    if (isEvalClassNode(L, expr)) return lowerEvalClassExpr(L, expr, ensureEvalClass(L, expr));
     return classValueRef(L, lowerClassExpressionInfo(L, expr), expr);
   }
 
@@ -7504,6 +7546,10 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
   export function lowerClassValueProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
     if (L.chainBlocked(expr)) return null;
     const recvT = L.mapTypeOf(L.typeOf(expr.expression));
+    if (recvT?.kind === "object") {
+      const evalStatic = evalStaticInfoOf(L, recvT);
+      if (evalStatic) return lowerEvalClassProperty(L, expr, evalStatic);
+    }
     if (recvT?.kind !== "classval") return null;
     const loc = locOf(expr);
     const member = expr.name.text;
@@ -9010,6 +9056,11 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
           body.push(...L.lowerDerivedCtorBody(info, thisLocal));
         }
       } else {
+        // A per-evaluation class stores its evaluation object BEFORE super():
+        // a base constructor may call an override that reads a captured binding.
+        const evalFirst = info.evalClass !== undefined;
+        const evalCapParams: IrParam[] = [];
+        if (evalFirst) body.push(...captureInitStmts(L, info, thisLocal, evalCapParams));
         if (ctorBase) {
           // Synthetic forwarding params (the inherited ABI signature).
           // Nothing references them by symbol — only the super call below,
@@ -9031,7 +9082,8 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
             if (!(e instanceof PoisonError)) throw e;
           }
         }
-        body.push(...captureInitStmts(L, info, thisLocal, params));
+        if (!evalFirst) body.push(...captureInitStmts(L, info, thisLocal, params));
+        params.push(...evalCapParams);
         body.push(...L.fieldInitStmts(info, thisLocal));
       }
       return {
@@ -12611,6 +12663,11 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
     // fence — annotate the slot with the common constructor type.
     {
       const calleeT = L.mapTypeOf(L.typeOf(expr.expression));
+      // `new V(...)` over an evaluated class's per-evaluation object.
+      if (calleeT?.kind === "object") {
+        const evalStatic = evalStaticInfoOf(L, calleeT);
+        if (evalStatic) return lowerEvalClassNew(L, expr, evalStatic);
+      }
       if (calleeT?.kind === "classval") {
         let info = L.classes.get(calleeT.className);
         if (!info && ts.isPropertyAccessExpression(expr.expression) && ts.isIdentifier(expr.expression.name)) {

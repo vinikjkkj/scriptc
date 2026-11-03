@@ -378,6 +378,7 @@ function inspectSupport(L: Lowerer, t: IrType, visiting: Set<string>, out: { rec
     case "object": {
       const info = L.classes.get(t.className);
       if (!info) return `class '${t.className}' has no inspect lowering`;
+      if (info.evalStaticOf !== undefined) return null; // a class value: the baked [class X] form
       if (isErrorClass(L, t.className)) {
         return errorRenderable(info)
           ? null
@@ -513,12 +514,24 @@ function inspectExpr(
       };
     case "jsval":
       return { kind: "libCall", fn: "insp.jsval", args: [value, recurse, depth], type: STRING, loc };
-    case "object":
+    case "object": {
+      // A CLASS VALUE minted by a class expression inside a function.
+      const evalStatic = L.classes.get(t.className);
+      if (evalStatic?.evalStaticOf !== undefined) {
+        const inst = evalStatic.evalStaticOf;
+        const nm = inst.def.jsName ?? "";
+        const base = inst.base ? ` extends ${inst.base.def.jsName || inst.base.def.name.replace(/^%/, "")}` : "";
+        const text = str(`[class ${nm === "" ? "(anonymous)" : nm}${base}]`, loc);
+        return value.kind === "varRef" || value.kind === "fieldGet"
+          ? text
+          : { kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: value, loc }], result: text, type: STRING, loc };
+      }
       if (isErrorClass(L, t.className)) {
         return { kind: "libCall", fn: "insp.error", args: [value, recurse, depth], type: STRING, loc };
       }
       L.refuseHelperFieldEnumeration(value, loc, "console.log/util.inspect");
       return { kind: "call", callee: inspectHelper(L, t, loc), args: [value, recurse, depth], type: STRING, loc };
+    }
     default:
       if (t.kind === "record") L.noteKeyEnumeration(value, loc, "console.log/util.inspect");
       return { kind: "call", callee: inspectHelper(L, t, loc), args: [value, recurse, depth], type: STRING, loc };
@@ -1084,7 +1097,22 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
       // Node prints the class's OWN name — the declaration's, never the
       // IR name's module qualifier (`m0.Timer` is the frontend's spelling
       // for a class declared in a non-entry module).
-      const display = info.decl?.name?.text ?? info.def.name.replace(/^%/, "");
+      // A class EXPRESSION prints its NamedEvaluation name; an anonymous one
+      // takes the nearest named ancestor's (Node's getConstructorName skips
+      // empty names), and with none the plain-object form (no prefix).
+      let display: string;
+      if (info.decl !== null && ts.isClassExpression(info.decl)) {
+        display = "";
+        for (let c: ClassInfo | null = info; c !== null; c = c.base) {
+          const nm = c.def.jsName ?? c.decl?.name?.text ?? "";
+          if (nm !== "") { display = nm; break; }
+        }
+      } else {
+        display = info.decl?.name?.text ?? info.def.name.replace(/^%/, "");
+      }
+      const braceOpen = display === "" ? "{" : `${display} {`;
+      const braceEmpty = display === "" ? "{}" : `${display} {}`;
+      const depthName = display === "" ? "Object" : display;
       // #private fields never render: they are not properties in any
       // observable way — Node's inspect omits them entirely (verified),
       // so a class whose only fields are private prints as `C {}`.
@@ -1103,7 +1131,8 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
       // reason this arm has to know about the table at all.
       const propsTable = info.hasPropsTable === true;
       const visible = info.def.fields.filter(
-        (f) => !f.name.startsWith("#") && f.name !== CLASS_PROPS_FIELD && hidden?.has(f.name) !== true,
+        (f) => !f.name.startsWith("#") && f.name !== CLASS_PROPS_FIELD && hidden?.has(f.name) !== true &&
+          !(info.evalClass !== undefined && f.name === "%cls"),
       );
       const get = (field: string, type: IrType): IrExpr => ({ kind: "fieldGet", obj: v(), className: t.className, field, type, loc });
       // ABSENT-TRACKED slots (ClassInfo.absentTrackedFields): a JS field
@@ -1171,7 +1200,7 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
         loc,
       });
       if (visible.length === 0 && !propsTable && shadows.length === 0) {
-        body = [ret(str(`${display} {}`, loc))];
+        body = [ret(str(braceEmpty, loc))];
         break;
       }
       body = [];
@@ -1183,7 +1212,7 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
         body.push({
           kind: "if",
           cond: { kind: "unary", op: "!", operand: anyOn, type: BOOL, loc },
-          then: [ret(str(`${display} {}`, loc))],
+          then: [ret(str(braceEmpty, loc))],
           else_: null,
           loc,
         });
@@ -1200,7 +1229,7 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
             left: { kind: "libCall", fn: "cls.propsCount", args: [propsRef()], type: F64, loc },
             right: num(0, loc), type: BOOL, loc,
           },
-          then: [ret(str(`${display} {}`, loc))],
+          then: [ret(str(braceEmpty, loc))],
           else_: null,
           loc,
         });
@@ -1221,12 +1250,12 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
         body.push({
           kind: "if",
           cond: { kind: "unary", op: "!", operand: anyPresent, type: BOOL, loc },
-          then: [ret(str(`${display} {}`, loc))],
+          then: [ret(str(braceEmpty, loc))],
           else_: null,
           loc,
         });
       }
-      body.push(depthGate(`[${display}]`), ...begin());
+      body.push(depthGate(`[${depthName}]`), ...begin());
       if (propsTable) body.push(propsEntries(true));
       // def.fields carries layout order: the base chain first, then own —
       // exactly the own-property insertion order of a constructor that
@@ -1262,7 +1291,7 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
       // constructor has run, so every key in it was inserted later than
       // every field the constructor assigned.
       if (propsTable) body.push(propsEntries(false));
-      body.push(ret(end(str("", loc), str(`${display} {`, loc), str("}", loc), false, boolLit(false, loc))));
+      body.push(ret(end(str("", loc), str(braceOpen, loc), str("}", loc), false, boolLit(false, loc))));
       break;
     }
     default:

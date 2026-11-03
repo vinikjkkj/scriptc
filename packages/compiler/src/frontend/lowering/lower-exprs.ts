@@ -4,6 +4,7 @@
  * comparisons, nullish coalescing and optional chains, conditions and
  * ToBoolean/ToString coercion helpers, and field/element reads and writes
  * (FieldTarget). */
+import { evalStaticInfoOf, lowerEvalClassInstanceOf } from "./lower-evalclass.js";
 import { protoDataFieldRead, protoDataHasKey, protoDataMemberRead } from "./lower-protodata.js";
 import * as ts from "../ts7/adapter.js";
 import { dirname, relative } from "node:path";
@@ -20514,6 +20515,12 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     // emitted descriptor to answer from; they keep their own fences.
     if (info === undefined) return false;
     for (let a: ClassInfo | null = info; a; a = a.base) if (a.def.runtime === true || a.builtinError === true) return false;
+    // A strict descendant minted by a class expression inside a function has a
+    // per-evaluation constructor the static class cannot name.
+    if (info.evalClass === undefined) {
+      const hasEvalBelow = (c: ClassInfo): boolean => c.subclasses.some((s) => s.evalClass !== undefined || hasEvalBelow(s));
+      if (hasEvalBelow(info)) return false;
+    }
     return true;
   }
 
@@ -20554,6 +20561,15 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     const loc = locOf(expr);
     const recv = L.lowerExpr(expr.expression);
     if (recv.type.kind !== "object") return null;
+    // An instance of a per-evaluation class: its constructor IS the evaluation
+    // object its hidden field names.
+    const recvInfo = L.classes.get(recv.type.className);
+    if (recvInfo?.evalClass !== undefined) {
+      return {
+        kind: "fieldGet", obj: recv, className: recvInfo.def.name, field: "%cls",
+        type: recvInfo.captures![0]!.type, loc,
+      };
+    }
     return {
       kind: "dynKeyGet",
       key: { kind: "strLit", value: "constructor", type: STRING, loc },
@@ -21993,6 +22009,10 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
       // (itself — no descendants can flow into the slot), so the answer
       // folds statically exactly like the named-target folds below.
       const rhsClassval = L.mapTypeOf(L.typeOf(expr.right));
+      if (rhsClassval?.kind === "object" && !L.caughtLocalOf(expr.left)) {
+        const evalStatic = evalStaticInfoOf(L, rhsClassval);
+        if (evalStatic) return lowerEvalClassInstanceOf(L, expr, evalStatic, loc);
+      }
       if (rhsClassval?.kind === "classval" && !L.caughtLocalOf(expr.left)) {
         const targetInfo = L.classes.get(rhsClassval.className);
         if (!targetInfo) {

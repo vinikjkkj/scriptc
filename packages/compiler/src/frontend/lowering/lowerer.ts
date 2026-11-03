@@ -67,7 +67,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { GRAFTED_EMITTER_CLASSES } from "../../ir/nodes.js";
+import { GRAFTED_EMITTER_CLASSES, EVAL_STATIC_CLASSES } from "../../ir/nodes.js";
 import { canBoxFuncIntoDyn } from "../../ir/nodes.js";
 import { procStreamDynMemberFence, NULL_T, strandTrap, armDiscrimLits, arrayOf, BOOL, canBoxClassIntoDyn, internalSlotFields, isRefCounted, canAdaptDynFuncTo, dynRestApplyable, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, shapeHasAccessorSlots, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
 import { type DynamicImportResolution, type NpmBuiltinUse, type NpmLazyTrap } from "../npm.js";
@@ -133,6 +133,7 @@ import { scanDefinePropStringTables, scanDefinePropSymbolSlots } from "./lower-c
 import { protoClassArmOn, protoClassInstanceType } from "./proto-class-consume.js";
 import { dynBoxedMethodInstances, ClassInfo, ClassIteratorInfo, GenericClassInfo, registerBuiltinErrorClasses, registerBuiltinEmitterClass, registerBuiltinStreamClasses, builtinErrorInfoOf, builtinEmitterInfoOf, builtinStreamInfoOf, analyzeClassDecoration, classIteratorDrainCall, classIteratorNextCall, classIteratorOf, classIteratorOpenCall, classIteratorRestDrainCall, classMemberNameOf, classValueRef, collectClassShape, exactClassOfReceiver, collectClassShapeInner, ctorAbiEquals, findMethodOn, findStaticOn, findGenericMethodOn, findGenericStaticOn, genericClassInstanceType, isSubclassOf, inHierarchy, overrideBelow, staticShadowBelow, upcastTo, lowerClassMembers, lowerClassCtor, lowerClassExpression, lowerClassExpressionInfo, lowerClassMethodMember, lowerProtoMethodMember, lowerClassValueProperty, lowerConstructorName, lowerStaticMethod, throwingSetterFn, shadowMethodFn, fieldInitStmts, lowerStaticFieldInits, lowerStaticFieldRead, lowerDerivedCtorBody, superCallStmt, lowerSuperMethodCall, superThisRef, lowerSuperAccessorRead, lowerSuperAccessorWrite, inheritsBuiltinErrorCtor, inheritsBuiltinEmitterCtor, errorMessageArg, lowerNew, accessorCall, virtualViewFitsSlot, vtThunkFn, findStaticAccessorOn, staticAccessorWrite, staticCompoundTarget, genericOverrideBelow } from "./lower-classes.js";
 import { MixinFnShape, mixinCallClassInfoOf, mixinIntersectionInstanceType } from "./lower-mixins.js";
+import { EVAL_ENV_SYM, evalClassNodeHook } from "./lower-evalclass.js";
 import { lowerTimersSchedulerCall } from "./lower-builtins.js";
 import { ParamShape, FnSig, GenericFnInfo, GenericInstance, bindingNeverReassigned, bodyReadsArguments, isThisParameter, paramShape, paramShapes, checkDefaultParamBodyType, completeArgs, wrappedUndefined, undefinedArgFor, requireExactArityValue, bodyReturnType, declaredReturnType, collectSignature, collectSignatureInner, collectGenericSignature, genericFnOf, lowerGenericCall, lowerGenericFnValue, inferTypeParamBindings, lowerGenericInstance, lowerCall, reconcileOverloadMemberDyn, lowerFfiCall, lowerTimersMemberCall, lowerPromiseMethodCall, lowerFilterNarrowCall, isTopLevelFnSymbol, lowerNestedFunctionDecl, lambdaSignature, lowerLambda, lowerFunction, validateFfiImports, implicitDefaultInstance } from "./lower-calls.js";
 import { lowerArrayMethodCall, lowerBufferStaticCall, lowerBytesMethodCall, lowerBytesNew, lowerMapMethodCall, lowerMapForEachCall, buildMapForEachFn, lowerRecordOvfCaptureHelper, ovfCapturePlannable, dynSlotCheckOk, lowerEnvToPairsHelper, lowerSetMethodCall, lowerSetForEachCall, buildSetForEachFn, lowerRegexMethodCall, lowerStringMethodCall } from "./lower-containers.js";
@@ -2231,6 +2232,10 @@ export class Lowerer {
    * nothing local, carry no static state and are used in ways one evaluation
    * cannot be told from many. Their statement lowers to nothing. */
   readonly liftedLocalClasses = new Set<ts.ClassDeclaration>();
+  /** Per-evaluation class expressions (lower-evalclass.ts): the plan recorded
+   * before the class shape collects, so collection adds the hidden `%cls`. */
+  readonly evalClassPlans = new Map<ts.ClassExpression, import("./lower-evalclass.js").EvalClassInfo>();
+
   /** >0 while lowering the handler/target literals of `new Proxy(...)`: `this`
    * in their methods is the ambient receiver the run time binds (dyn.this). */
   dynThisInLiterals = 0;
@@ -2572,6 +2577,7 @@ export class Lowerer {
   ) {
     // The grafted-emitter set is per lowering (see GRAFTED_EMITTER_CLASSES).
     GRAFTED_EMITTER_CLASSES.clear();
+    EVAL_STATIC_CLASSES.clear();
     this.reachable = mode.reachable ?? null;
     this.remainder = mode.remainder ?? false;
     this.alreadyFlushed = mode.alreadyFlushed ?? new Set();
@@ -2602,6 +2608,7 @@ export class Lowerer {
       protoClassInstance: protoClassArmOn()
         ? (decl) => protoClassInstanceType(this, decl)
         : undefined,
+      evalClassNode: (decl) => evalClassNodeHook(this, decl),
       mixinClassInstance: (decl) =>
         this.mixinTypeContext && this.mixinTypeContext.classNode === decl
           ? { kind: "object", className: this.mixinTypeContext.className }
@@ -15693,7 +15700,26 @@ export class Lowerer {
   /** The current value of a captured enclosing binding, read at a `new` site
    * of the lifted local class that captures it (where it is in scope). */
   lowerCapturedValue(sym: ts.Symbol, type: IrType, at: ts.Node): IrExpr {
+    const raw = this.capturedBindingRead(sym, at);
+    return typeEquals(raw.type, type) ? raw : this.coerceInto(at, raw, type);
+  }
+
+  /** The current value of a captured enclosing binding at `at`, at its OWN
+   * type (the evaluation site of a per-evaluation class, or a `new` site of a
+   * lifted local class). */
+  capturedBindingRead(sym: ts.Symbol, at: ts.Node): IrExpr {
     const loc = locOf(at);
+    // A per-evaluation class's own evaluation object, read from inside one
+    // of its instance members: the hidden `%cls` field of `this`.
+    if (sym === EVAL_ENV_SYM) {
+      const cls = this.currentClass;
+      const th = this.resolveThis(at);
+      const c = cls?.captures?.find((x) => x.sym === EVAL_ENV_SYM);
+      if (cls === null || cls === undefined || c === undefined || !th) {
+        this.unsupported("SC1090", at, "constructing an evaluated class by its own name outside its instance members");
+      }
+      return { kind: "fieldGet", obj: { kind: "varRef", localId: th.id, type: th.type, loc }, className: cls.def.name, field: "%cls", type: c.type, loc };
+    }
     let raw: IrExpr | null = null;
     const local = this.resolveKey(sym, at);
     if (local) raw = { kind: "varRef", localId: local.id, type: local.type, loc };
@@ -15705,13 +15731,37 @@ export class Lowerer {
     if (raw === null) {
       this.unsupported("SC1090", at, `constructing a class that captures '${sym.name}' from a scope where '${sym.name}' is not readable`);
     }
-    return typeEquals(raw.type, type) ? raw : this.coerceInto(at, raw, type);
+    return raw;
   }
 
   /** A read of captured binding `sym` from inside the lifted local class that
    * captured it: the hidden field of `this`. Null elsewhere. */
   capturedClassFieldRead(sym: ts.Symbol, at: ts.Node): IrExpr | null {
     const cls = this.currentClass;
+    // A per-evaluation class reads its captured binding off the evaluation
+    // object its instance points at: this.%cls.%capN.
+    const ev = cls?.evalClass?.caps.find((x) => x.sym === sym);
+    if (cls !== null && cls !== undefined && ev !== undefined) {
+      const th = this.resolveThis(at);
+      if (!th) return null;
+      const loc = locOf(at);
+      const clsField = cls.captures![0]!;
+      return {
+        kind: "fieldGet",
+        obj: {
+          kind: "fieldGet",
+          obj: { kind: "varRef", localId: th.id, type: th.type, loc },
+          className: cls.def.name,
+          field: "%cls",
+          type: clsField.type,
+          loc,
+        },
+        className: cls.evalClass!.staticName,
+        field: ev.field,
+        type: ev.type,
+        loc,
+      };
+    }
     const c = cls?.captures?.find((x) => x.sym === sym);
     if (cls === null || cls === undefined || c === undefined) return null;
     const th = this.resolveThis(at);

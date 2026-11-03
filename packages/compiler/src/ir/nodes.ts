@@ -9232,8 +9232,14 @@ export function isDynBytes(t: IrType): boolean {
  * lowering by the class collector and reset when a lowerer starts. */
 export const GRAFTED_EMITTER_CLASSES = new Set<string>();
 
+/** The per-evaluation STATIC-SIDE classes (frontend/lowering/lower-evalclass.ts):
+ * objects standing for a CLASS VALUE minted by a class expression inside a
+ * function. Their dyn view would be a bag of hidden captured fields, not a
+ * class, so they never box. Per lowering, reset with the set above. */
+export const EVAL_STATIC_CLASSES = new Set<string>();
+
 export function canBoxClassIntoDyn(className: string): boolean {
-  return !RUNTIME_ERROR_CLASSES.has(className) && !GRAFTED_EMITTER_CLASSES.has(className);
+  return !RUNTIME_ERROR_CLASSES.has(className) && !GRAFTED_EMITTER_CLASSES.has(className) && !EVAL_STATIC_CLASSES.has(className);
 }
 
 /** A static type that CONVERTS into a dyn value — the dynFrom domain:
