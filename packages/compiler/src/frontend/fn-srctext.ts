@@ -37,6 +37,7 @@
  * parsing (js-desugar.ts) is the caller's to fence.
  */
 import * as ts from "./ts7/adapter.js";
+import { twinSpansIn } from "./lowering/emitter-twin.js";
 
 interface FileText {
   /** The file's text with every erasable span blanked, or null when Node
@@ -247,5 +248,15 @@ export function functionSourceText(node: ts.Node): string | null {
   const sf = node.getSourceFile();
   const ft = fileText(sf);
   if (ft.stripped === null || ft.quirk.has(node)) return null;
-  return ft.stripped.slice(valueTextStart(sf, node), node.end);
+  const from = valueTextStart(sf, node);
+  // Text the twin reload inserted inside this function (a nested listener's twin) is not the author's.
+  const spans = twinSpansIn(sf.fileName, from, node.end);
+  if (spans.length === 0) return ft.stripped.slice(from, node.end);
+  let out = "";
+  let at = from;
+  for (const sp of spans) {
+    out += ft.stripped.slice(at, sp.s);
+    at = sp.e;
+  }
+  return out + ft.stripped.slice(at, node.end);
 }
