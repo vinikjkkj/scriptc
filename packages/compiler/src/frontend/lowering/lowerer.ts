@@ -15749,6 +15749,25 @@ export class Lowerer {
     const cls = this.currentClass;
     // A per-evaluation class reads its captured binding off the evaluation
     // object its instance points at: this.%cls.%capN.
+    // `const K = class {…}`: K inside the body is the class itself — this.%cls in
+    // instance members, `this` on the static side.
+    if (cls !== null && cls !== undefined) {
+      const selfOf = cls.evalClass ?? cls.evalStaticOf?.evalClass;
+      if (selfOf?.selfAlias === sym) {
+        const th0 = this.resolveThis(at);
+        if (!th0) return null;
+        const loc0 = locOf(at);
+        if (cls.evalStaticOf !== undefined) return { kind: "varRef", localId: th0.id, type: th0.type, loc: loc0 };
+        return {
+          kind: "fieldGet",
+          obj: { kind: "varRef", localId: th0.id, type: th0.type, loc: loc0 },
+          className: cls.def.name,
+          field: "%cls",
+          type: cls.captures![0]!.type,
+          loc: loc0,
+        };
+      }
+    }
     const ev = cls?.evalClass?.caps.find((x) => x.sym === sym);
     if (cls !== null && cls !== undefined && ev !== undefined) {
       const th = this.resolveThis(at);

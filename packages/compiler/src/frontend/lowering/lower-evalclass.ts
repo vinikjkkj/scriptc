@@ -17,7 +17,11 @@
  *     call an override that reads a captured binding);
  *   - a captured binding read inside the body reads `this.%cls.%capN.<name>`;
  *   - `x instanceof V` is the class test against `%E` plus `x.%cls === V`;
- *   - `V.name` is the class's constant NamedEvaluation name.
+ *   - `V.name` is the class's constant NamedEvaluation name;
+ *   - static fields and static methods are fields and methods of the evaluation
+ *     object (`this` and the class's own name are the evaluation there), and
+ *     constructing the object IS evaluating the class: captures are stored,
+ *     then the static initializers run in order.
  *
  * Lifetime (no GC): the evaluation object and the instances are ordinary
  * refcounted heap objects. An instance holds its evaluation (strong), the
@@ -25,10 +29,10 @@
  * value is a cycle among ordinary objects and the existing cycle collector
  * (cycle-capable classes are decided by the type graph) owns it.
  *
- * Covered shapes: no type parameters, decorators, static members, static
- * blocks or computed names (eval-class-syntax.ts); captures are local
- * bindings that are never written after their initializer. Everything else
- * keeps a NAMED fence. */
+ * Covered shapes: no type parameters, decorators, static blocks, static
+ * accessors, #private statics or computed names (eval-class-syntax.ts);
+ * captures are local bindings that are never written after their initializer
+ * and declared before the class. Everything else keeps a NAMED fence. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { BOOL, EVAL_STATIC_CLASSES, IrExpr, IrStmt, IrType, STRING, VOID, typeEquals } from "../../ir/nodes.js";
@@ -70,6 +74,9 @@ export interface EvalClassInfo {
   /** Captured bindings: the symbol, the field on the static side holding its
    * value, and the IR type. */
   caps: { sym: ts.Symbol; field: string; type: IrType }[];
+  /** `const K = class {…}`: the binding K is, inside the class body, the
+   * class itself (never rebound), so a read of it is not a capture. */
+  selfAlias?: ts.Symbol;
   /** The generic-instantiation context the class collected under; a second
    * instantiation of the enclosing function with different bindings could
    * need a different layout and keeps a fence. */
@@ -83,9 +90,21 @@ const LOCAL_SCOPE_KINDS = new Set<ts.SyntaxKind>([
 
 /** The local bindings a class expression's body (and heritage) reads, in order
  * of first appearance, every unsupported shape a named fence. */
-function evalClassCaptures(L: Lowerer, expr: ts.ClassExpression): ts.Symbol[] {
+function evalClassCaptures(L: Lowerer, expr: ts.ClassExpression): { caps: ts.Symbol[]; selfAlias?: ts.Symbol } {
   const out: ts.Symbol[] = [];
   const selfSym = expr.name ? L.checker.getSymbolAtLocation(expr.name) : undefined;
+  // `const K = class {…}`: K inside the body names this very class.
+  let selfAlias: ts.Symbol | undefined;
+  {
+    let h: ts.Node = expr.parent;
+    while (ts.isParenthesizedExpression(h)) h = h.parent;
+    if (
+      ts.isVariableDeclaration(h) && ts.isIdentifier(h.name) && ts.isVariableDeclarationList(h.parent) &&
+      (h.parent.flags & ts.NodeFlags.Const) !== 0
+    ) {
+      selfAlias = L.checker.getSymbolAtLocation(h.name);
+    }
+  }
   ts.walkPreorder(expr, (n) => {
     if (!ts.isIdentifier(n)) return undefined;
     // Property names and member names are not references.
@@ -100,7 +119,7 @@ function evalClassCaptures(L: Lowerer, expr: ts.ClassExpression): ts.Symbol[] {
       return undefined;
     }
     const s = L.checker.getSymbolAtLocation(n);
-    if (s === undefined || s === selfSym || out.includes(s)) return undefined;
+    if (s === undefined || s === selfSym || s === selfAlias || out.includes(s)) return undefined;
     const decls = L.checker.declarationsOf(s);
     if (decls.length === 0) return undefined;
     for (const d of decls) {
@@ -152,7 +171,7 @@ function evalClassCaptures(L: Lowerer, expr: ts.ClassExpression): ts.Symbol[] {
     }
     return undefined;
   });
-  return out;
+  return { caps: out, ...(selfAlias !== undefined ? { selfAlias } : {}) };
 }
 
 /** Collects a class expression that sits inside a function, ON DEMAND: from
@@ -164,7 +183,7 @@ function evalClassCaptures(L: Lowerer, expr: ts.ClassExpression): ts.Symbol[] {
 export function ensureEvalClass(L: Lowerer, expr: ts.ClassExpression): ClassInfo {
   const cached = L.exprClassInfoByNode.get(expr);
   if (cached) return cached;
-  const capSyms = evalClassCaptures(L, expr);
+  const { caps: capSyms, selfAlias } = evalClassCaptures(L, expr);
   const loc = locOf(expr);
   const className = L.classNamer(expr);
   const staticName = evalStaticClassName(className);
@@ -175,7 +194,7 @@ export function ensureEvalClass(L: Lowerer, expr: ts.ClassExpression): ClassInfo
     if (!mapped || mapped.kind === "void") L.badType(expr, csT);
     caps.push({ sym: s, field: `%cap${i}.${s.name}`, type: mapped });
   });
-  const plan: EvalClassInfo = { staticName, caps, context: L.instantiationContext ?? "" };
+  const plan: EvalClassInfo = { staticName, caps, context: L.instantiationContext ?? "", ...(selfAlias !== undefined ? { selfAlias } : {}) };
   L.evalClassPlans.set(expr, plan);
   L.collectClassShapeInner(expr, namedEvaluationNameOf(expr));
   const info = L.classes.get(className);

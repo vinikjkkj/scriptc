@@ -6864,8 +6864,10 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
    * point (lowerFileInit drains pendingClassExprInits there). */
   export function lowerClassExpressionInfo(L: Lowerer, expr: ts.ClassExpression): ClassInfo {
     const cached = L.exprClassInfoByNode.get(expr);
-    if (cached) return cached;
-    if (isEvalClassNode(L, expr)) return ensureEvalClass(L, expr);
+    // A per-evaluation class is a value of its evaluation, never a static class
+    // some consumer (heritage, property-assigned exports, mixin arguments) can
+    // use by name: those keep the fence below.
+    if (cached && cached.evalClass === undefined) return cached;
     // Reentrancy guard: heritage resolution can DEMAND another class
     // expression's collection (extends through property assignments —
     // propertyAssignedClassInfoOf), so a cyclic base chain would re-enter
@@ -7013,7 +7015,11 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     }
     let init: ts.Expression = decl.initializer;
     while (ts.isParenthesizedExpression(init)) init = init.expression;
-    if (ts.isClassExpression(init)) return L.exprClassInfoByNode.get(init) ?? null;
+    if (ts.isClassExpression(init)) {
+      // A per-evaluation class is a VALUE (the evaluation object), never "exactly" a static class.
+      const ei = L.exprClassInfoByNode.get(init) ?? null;
+      return ei?.evalClass !== undefined ? null : ei;
+    }
     if (ts.isIdentifier(init)) {
       const initSym = L.resolveValueSymbol(init);
       const aliased = initSym ? (L.classBySymbol.get(initSym) ?? null) : null;
