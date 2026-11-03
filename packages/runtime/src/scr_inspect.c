@@ -1792,6 +1792,13 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         scr_throw_error(SCR_ERR_ERROR, ib_take(&out));
         return scr_str_new("", 0); /* the pending throw wins */
       }
+      /* Node's circular check comes first, before the empty and depth answers: an instance that is an ancestor on the
+       * stack renders [Circular *N] and the ancestor gets <ref *N>. Keyed by the INSTANCE, so two boxes of one object
+       * are one value. */
+      {
+        double cid = scr_insp_circ_check(d->v.inst.o);
+        if (cid > 0) return scr_insp_circular(cid);
+      }
       const size_t inm = scr_dyn_objinst_member_count(d);
       size_t ishown = 0;
       for (size_t i = 0; i < inm; i++) {
@@ -1812,6 +1819,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         return ib_take(&nb);
       }
       scr_insp_begin(recurse + 1);
+      scr_insp_seen_push(d->v.inst.o);
       bool ithrew = false;
       for (size_t i = 0; i < inm && !ithrew; i++) {
         const ScrDynClassMember *m = scr_dyn_objinst_member_at(d, i);
@@ -1857,11 +1865,13 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       scr_str_release(ibase);
       scr_str_release(ib0);
       scr_str_release(ib1);
+      ScrStr *iwrapped = scr_insp_ref_wrap(d->v.inst.o, iout); /* <ref *N> when this instance was a circle's target */
+      scr_str_release(iout);
       if (ithrew) {
-        scr_str_release(iout);
+        scr_str_release(iwrapped);
         return scr_str_new("", 0); /* the pending throw wins */
       }
-      return iout;
+      return iwrapped;
     }
     case SCR_DYN_PROXY:
       /* util.inspect (showProxy false) prints the TARGET, running no trap. */
