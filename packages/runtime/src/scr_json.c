@@ -2041,9 +2041,32 @@ ScrDyn *scr_dyn_rec_wide_inst(const ScrDyn *d, const char *const *keys, const un
     const char *kd = keys[i];
     size_t kl = lens[i];
     if (all_own && scr_dyn_obj_get(o, kd, kl) != NULL) continue; /* an own key: already carried */
-    ScrStr *k = scr_str_new(kd, kl);
-    ScrDyn *v = kg((ScrDyn *)d, k, false);
-    scr_str_release(k);
+    ScrDyn *v;
+    if (kg != NULL) {
+      ScrStr *k = scr_str_new(kd, kl);
+      v = kg((ScrDyn *)d, k, false);
+      scr_str_release(k);
+    } else {
+      /* No emitted keyed read in this program (moduleInstanceLaneNeedsKg is false): a member the
+       * table lists answers itself, and the shapes asked for hold no function and name nothing
+       * Object.prototype answers, so a METHOD row can only be a lying declaration. */
+      const ScrDynClassMember *lm = scr_dyn_objinst_member(d, kd, kl);
+      if (lm != NULL && lm->get != NULL) {
+        v = lm->get(d->v.inst.o);
+      } else if (lm != NULL) {
+        scr_dyn_objinst_fence(d, "a property read");
+        v = NULL;
+      } else if (scr_dyn_objinst_error_rooted(d)) {
+        ScrStr *ek = scr_str_new(kd, kl);
+        v = scr_dyn_error_member_get((ScrDyn *)d, ek);
+        scr_str_release(ek);
+      } else if (scr_dyn_objinst_class_of(d)->opaque) {
+        scr_dyn_objinst_fence(d, "a property read");
+        v = NULL;
+      } else {
+        v = scr_dyn_retain(scr_dyn_undefined());
+      }
+    }
     if (v == NULL) {
       scr_dyn_release(o);
       if (proto != NULL) scr_dyn_release(proto);

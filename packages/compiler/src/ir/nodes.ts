@@ -11684,8 +11684,106 @@ export function moduleUsesInstanceRecordLane(mod: IrModule): boolean {
   return found;
 }
 
+/** Does the instance lane need the emitted keyed read (`sc_dyn_key_get`, which lives in the gated
+ * dispatch unit) rather than its own member-table read? Yes exactly when a member it could be asked
+ * for is NOT a table row's data: a record field that may hold a FUNCTION (a method comes back as a
+ * function box the dispatch unit mints), a name Object.prototype answers (`toString`, `constructor`,
+ * ...), or an instance whose class keeps its members somewhere the table does not list (a run-time
+ * property table, an EventEmitter or stream root, an EventEmitter graft). Every other module reads
+ * its instances straight off the always-linked member table, so a program with a class and a checked
+ * cast keeps its size class. */
+const OBJECT_PROTO_NAMES: ReadonlySet<string> = new Set([
+  "constructor", "toString", "toLocaleString", "valueOf", "hasOwnProperty", "isPrototypeOf",
+  "propertyIsEnumerable", "__proto__", "__defineGetter__", "__defineSetter__", "__lookupGetter__", "__lookupSetter__",
+]);
+const INSTANCE_LANE_KG_MEMO = new WeakMap<IrModule, boolean>();
+export function moduleInstanceLaneNeedsKg(mod: IrModule): boolean {
+  const memo = INSTANCE_LANE_KG_MEMO.get(mod);
+  if (memo !== undefined) return memo;
+  const unions = new Map((mod.unions ?? []).map((u) => [u.id, u] as const));
+  const mayHoldFn = (t: IrType): boolean =>
+    t.kind === "func" ||
+    t.kind === "dyn" ||
+    (t.kind === "union" && (unions.get(t.unionId)?.arms ?? []).some((a) => a.kind === "func" || a.kind === "dyn"));
+  let need = false;
+  const byName = new Map((mod.classes ?? []).map((c) => [c.name, c] as const));
+  const errorRooted = (c: IrClassDef): boolean => {
+    for (let x: IrClassDef | undefined = c; x !== undefined; x = x.base === undefined ? undefined : byName.get(x.base)) {
+      if (RUNTIME_ERROR_CLASSES.has(x.name)) return true;
+    }
+    return false;
+  };
+  for (const c of mod.classes ?? []) {
+    // An Error-rooted instance answers its members from the ScrError it holds (the class ops), whatever
+    // property table its layout prefix carries.
+    if (errorRooted(c)) continue;
+    if (
+      c.fields.some((f) => f.name === CLASS_PROPS_FIELD || f.name === EMITTER_MIXIN_FIELD_NAME) ||
+      c.name === RUNTIME_EMITTER_CLASS ||
+      RUNTIME_STREAM_CLASSES.has(c.name)
+    ) {
+      need = true;
+      break;
+    }
+    // A class that EXTENDS the emitter or a stream root carries the root's members outside the table.
+    let b: string | undefined = c.base;
+    while (b !== undefined && !need) {
+      if (b === RUNTIME_EMITTER_CLASS || RUNTIME_STREAM_CLASSES.has(b)) need = true;
+      const up: string = b;
+      b = (mod.classes ?? []).find((x) => x.name === up)?.base;
+    }
+    if (need) break;
+  }
+  if (!need) {
+    // The record shapes a checked cast can name: every dynCheck target, and what its type reaches.
+    const recs = new Map((mod.records ?? []).map((r) => [r.id, r] as const));
+    const seenShapes = new Set<string>();
+    const reach: IrType[] = [];
+    const scan: unknown[] = [mod.functions];
+    while (scan.length > 0) {
+      const n = scan.pop();
+      if (n === null || typeof n !== "object") continue;
+      if (Array.isArray(n)) {
+        for (const x of n) scan.push(x);
+        continue;
+      }
+      const o = n as { kind?: unknown; type?: IrType };
+      if (o.kind === "dynCheck" && o.type !== undefined) reach.push(o.type);
+      for (const v of Object.values(n)) scan.push(v);
+    }
+    const seenTypes = new Set<unknown>();
+    while (reach.length > 0 && !need) {
+      const t = reach.pop()!;
+      if (seenTypes.has(t)) continue;
+      seenTypes.add(t);
+      switch (t.kind) {
+        case "array":
+          reach.push(t.elem);
+          break;
+        case "union":
+          reach.push(...(unions.get(t.unionId)?.arms ?? []));
+          break;
+        case "record": {
+          if (seenShapes.has(t.shapeId)) break;
+          seenShapes.add(t.shapeId);
+          const r = recs.get(t.shapeId);
+          if (r === undefined) break;
+          if (r.tuple !== true && r.fields.some((f) => OBJECT_PROTO_NAMES.has(f.name) || mayHoldFn(f.type))) need = true;
+          for (const f of r.fields) reach.push(f.type);
+          if (r.indexValue !== undefined) reach.push(r.indexValue);
+          break;
+        }
+        default:
+          break;
+      }
+    }
+  }
+  INSTANCE_LANE_KG_MEMO.set(mod, need);
+  return need;
+}
+
 export function moduleUsesDynInvoke(mod: IrModule): boolean {
-  if (moduleUsesInstanceRecordLane(mod)) return true;
+  if (moduleUsesInstanceRecordLane(mod) && moduleInstanceLaneNeedsKg(mod)) return true;
   let found = false;
   const visit = (v: unknown): void => {
     if (found || v === null || typeof v !== "object") return;
