@@ -58,6 +58,24 @@ const RTKEY = "const k = process.argv.length > 99 ? 'zz' : 'plug'\n";
 /** Programs that must COMPILE and print exactly this. */
 const RUNS: readonly { name: string; src: string; out: string }[] = [
   {
+    // MOVED from COMPILE_REFUSALS (sq1): for-in over an instance carrying a table lowers, and it
+    // READS the run-time property table (ClassInfo.hasPropsTable): declared fields in assignment
+    // order, then the table's enumerable keys in definition order; non-enumerable table keys are
+    // skipped and a declared field rewritten after the defines keeps its slot. Both lanes were
+    // compared with $NODE_CI (v24.15.0) byte for byte before this row.
+    name: "for-in over an instance carrying a table: declared fields then enumerable table keys",
+    src:
+      "class C { a: number\n  constructor() { this.a = 1 } }\n" +
+      "const c = new C()\n" +
+      RTKEY +
+      "Object.defineProperty(c, k, { value: 5, enumerable: true, writable: true, configurable: true })\n" +
+      "Object.defineProperty(c, 'late', { value: 6, enumerable: true })\n" +
+      "Object.defineProperty(c, 'hid', { value: 7, enumerable: false })\n" +
+      "c.a = 2\n" +
+      "for (const key in c) { console.log(key, (c as any)[key]) }\n",
+    out: "a 2\nplug 5\nlate 6\n",
+  },
+  {
     // A receiver-free `function` getter (the table calls it with no
     // receiver, and it never reads one). Enumerability is the surface that
     // matters: the enumerable accessor shows as [Getter], the hidden one
@@ -412,16 +430,6 @@ const COMPILE_REFUSALS: readonly { name: string; code: string; src: string }[] =
       RTKEY +
       "Object.defineProperty(c, k, { value: 5, enumerable: true, writable: true, configurable: true })\n" +
       "const s = { ...c }\nconsole.log(String(s.a))\n",
-  },
-  {
-    name: "for-in over an instance carrying a table",
-    code: "SC1052",
-    src:
-      "class C { a: number\n  constructor() { this.a = 1 } }\n" +
-      "const c = new C()\n" +
-      RTKEY +
-      "Object.defineProperty(c, k, { value: 5, enumerable: true, writable: true, configurable: true })\n" +
-      "for (const key in c) { console.log(key) }\n",
   },
   {
     name: "delete of a table key",
