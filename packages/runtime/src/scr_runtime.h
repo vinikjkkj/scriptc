@@ -6969,6 +6969,14 @@ typedef struct ScrDynClassOps {
   /* util.format %s: 1 when the instance's toString is a function (method, or a field holding one),
    * 0 when not, 2 when reading a field threw (pending). */
   int (*objinst_user_tostring)(const ScrDyn *d);
+  /* A per-evaluation CLASS VALUE (scr_dyn_new_evalclass): the dyn box of the evaluation object it
+   * holds (borrowed), or NULL when `d` is not one. */
+  const ScrDyn *(*eval_inner)(const ScrDyn *d);
+  /* `v instanceof fn` when `fn` is a class value (declared or per-evaluation): *handled says so. */
+  bool (*instance_of)(const ScrDyn *v, const ScrDyn *fn, bool *handled);
+  /* Object.keys / values / entries over a class value (declared or per-evaluation): its own ENUMERABLE
+   * static fields, appended to `out`. 0: not a class value; 1: done; -1: a read threw (pending). */
+  int (*class_walk)(const ScrDyn *v, ScrObjWalk mode, ScrDyn *out);
 } ScrDynClassOps;
 extern const ScrDynClassOps *scr_dyn_class_ops;
 void scr_dyn_class_install(void);
@@ -6981,6 +6989,16 @@ ScrStr *scr_dyn_objinst_builtin_string(const ScrDyn *d);
 static inline bool scr_dyn_objinst_error_rooted(const ScrDyn *d) { return scr_dyn_class_ops != NULL && scr_dyn_class_ops->error_rooted(d); }
 static inline ScrDyn *scr_dyn_class_box(const ScrDynClass *cls) { return scr_dyn_class_ops ? scr_dyn_class_ops->class_box(cls) : NULL; }
 static inline const ScrDynClass *scr_dyn_class_of_value(const ScrDyn *d) { return scr_dyn_class_ops ? scr_dyn_class_ops->class_of_value(d) : NULL; }
+/* The preorder position of the DECLARED class whose value `d` is, or SIZE_MAX when `d` is not a declared class
+ * value (the OUT direction of a classval: each candidate class is compared by its `pre`). */
+size_t scr_dyn_classval_pre(const ScrDyn *d);
+static inline const ScrDyn *scr_dyn_class_eval_inner(const ScrDyn *d) { return scr_dyn_class_ops ? scr_dyn_class_ops->eval_inner(d) : NULL; }
+/* A per-evaluation class value: a NON-immortal function object that holds the evaluation (its static side) by
+ * reference, boxed as an instance of the static-side class `cls`. +1. The box's identity is the evaluation. */
+ScrDyn *scr_dyn_new_evalclass(void *o, const ScrDynClass *cls);
+/* The identity a function value compares and hashes by: the evaluation of a per-evaluation class value,
+ * else the closure (one function crossing the dyn boundary twice is one JS function). */
+const void *scr_dyn_fn_ident(const ScrDyn *d);
 ScrDyn *scr_dyn_error_class_box(int kind); /* the builtin error class value of a kind (scr_json.c), always linked; NULL for DOMException */
 ScrDyn *scr_dyn_error_class_value(double kind); /* the same, as a value of the dyn.errorClass libCall (+1) */
 static inline ScrDyn *scr_dyn_error_member_get(ScrDyn *d, const ScrStr *key) { return scr_dyn_class_ops ? scr_dyn_class_ops->error_get(d, key) : NULL; }

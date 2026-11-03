@@ -4881,6 +4881,8 @@ export class Lowerer {
       for (const n of c.staticAccessors?.keys() ?? []) this.noteEdge(`%${c.def.name}.static:${n}`);
     };
     for (let a: ClassInfo | null | undefined = info; a; a = a.base) mark(a);
+    // An evaluation's box answers `new` and `instanceof` through the INSTANCE class.
+    if (info.evalStaticOf !== undefined) this.noteDynBoxedClass(info.evalStaticOf.def.name);
     const below = (c: ClassInfo): void => {
       for (const s of c.subclasses) {
         mark(s);

@@ -33,6 +33,7 @@
 import type { IrBytesElem, IrFunction, IrRecordShape, IrType } from "../../ir/nodes.js";
 import { RUNTIME_EMITTER_CLASS, accessorKeyOrderOf, accessorSlotProp, shapeHasAccessorSlots, VOID, arrayTypeHasLiveView, bytesAliasOnExtract, canConvertToDyn, canDynCheckTo, dynErrorClassKind, isDynErrorClass } from "../../ir/nodes.js";
 import { armDiscrimLits, dynNeverArm, dynNeverIn, canAdaptDynFuncTo, dynRestApplyable, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey } from "../../ir/nodes.js";
+import { EVAL_STATIC_CLASSES } from "../../ir/nodes.js";
 import { nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit as maskKeyBit } from "../../ir/nodes.js";
 import { INTERNAL_SLOT_WANT_TEXT } from "../emission/emit-walkers.js";
 import { mangleClassRelease, mangleClassRetain, mangleClassStruct, mangleFnClosure, mangleFunction, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
@@ -134,6 +135,7 @@ export interface DynHost extends WalkerHost {
   /** The class's preorder interval and hierarchy membership — the same
    * numbers `instanceof` compares against. */
   classInterval(className: string): { pre: number; post: number };
+  classvalCandidateObjs(className: string): { pre: number; sym: string }[];
   /** Every class carrying a run-time `%props` table whose BASE does not,
    * as the three things [[Get]] over a boxed instance needs: the `@`-ref
    * of its SCR_DYN_OBJINST descriptor, its struct spelling and the
@@ -535,6 +537,8 @@ export class LlDyn {
         return "bigint";
       case "object":
         return t.className.replace(/^%/, "");
+      case "classval":
+        return `typeof ${t.className.replace(/^%/, "")}`;
       case "union": {
         const def = this.host.unionsById.get(t.unionId);
         if (!def) throw new Error(`llvm emitter bug: dynDesc of unknown union ${t.unionId}`);
@@ -863,6 +867,24 @@ export class LlDyn {
         const r = B.tmp();
         B.line(`${r} = call zeroext i1 @scr_dyn_objinst_is(ptr %d, i64 ${iv.pre}, i64 ${iv.post})`);
         B.terminate(`ret i1 ${r}`);
+        break;
+      }
+      case "classval": {
+        // "Is this dyn a declared class's VALUE of this type?" -- the C walker's arm: the descriptor's
+        // preorder position against the candidates (the class and its same-ABI descendants).
+        this.host.declare(`declare i64 @scr_dyn_classval_pre(ptr)`);
+        const cands = this.host.classvalCandidateObjs(t.className);
+        const p = B.tmp();
+        B.line(`${p} = call i64 @scr_dyn_classval_pre(ptr %d)`);
+        let acc = "false";
+        for (const c of cands) {
+          const q = B.tmp();
+          B.line(`${q} = icmp eq i64 ${p}, ${c.pre}`);
+          const o = B.tmp();
+          B.line(`${o} = or i1 ${acc}, ${q}`);
+          acc = o;
+        }
+        B.terminate(`ret i1 ${acc}`);
         break;
       }
       case "map":
@@ -1315,6 +1337,26 @@ export class LlDyn {
         const r = B.tmp();
         B.line(`${r} = call ptr @${ub}(ptr %d)`);
         B.terminate(`ret ptr ${r}`);
+        break;
+      }
+      case "classval": {
+        // The OUT direction of a declared class's VALUE: the class's immortal class object, picked by the
+        // preorder position of the descriptor the function box carries. The C walker's arm.
+        host.declare(`declare i64 @scr_dyn_classval_pre(ptr)`);
+        const cands = host.classvalCandidateObjs(t.className);
+        const p = B.tmp();
+        B.line(`${p} = call i64 @scr_dyn_classval_pre(ptr %d)`);
+        for (const c of cands) {
+          const q = B.tmp();
+          B.line(`${q} = icmp eq i64 ${p}, ${c.pre}`);
+          const yes = B.newLabel("cv.y");
+          const no = B.newLabel("cv.n");
+          B.condBr(q, yes, no);
+          B.startBlock(yes);
+          B.terminate(`ret ptr @${c.sym}`);
+          B.startBlock(no);
+        }
+        failRet();
         break;
       }
       case "object": {
@@ -2522,10 +2564,14 @@ export class LlDyn {
         // other class boxes BY REFERENCE through its emitted descriptor —
         // the C walker's arm exactly.
         if (!isDynErrorClass(t.className)) {
-          host.declare(`declare ptr @scr_dyn_new_objinst(ptr, ptr)`);
+          // A per-evaluation STATIC SIDE boxes as a class VALUE (a function
+          // object holding the evaluation); the C walker's arm exactly.
+          const evalStatic = EVAL_STATIC_CLASSES.has(t.className);
+          const ctor = evalStatic ? "scr_dyn_new_evalclass" : "scr_dyn_new_objinst";
+          host.declare(`declare ptr @${ctor}(ptr, ptr)`);
           const desc = host.dynClassDesc(t.className);
           const r = B.tmp();
-          B.line(`${r} = call ptr @scr_dyn_new_objinst(ptr %v, ptr ${desc})`);
+          B.line(`${r} = call ptr @${ctor}(ptr %v, ptr ${desc})`);
           B.terminate(`ret ptr ${r}`);
           break;
         }

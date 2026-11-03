@@ -1464,6 +1464,89 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
        * its own ENUMERABLE static fields in braces (the instance arm's
        * layout: `[class A] { k: 5 }`). Static methods and getters are
        * non-enumerable and never listed. */
+      const ScrDyn *einner = scr_dyn_class_eval_inner(d);
+      if (einner != NULL) {
+        /* A per-evaluation class value: the same line, its own ENUMERABLE static fields
+         * (the evaluation's member rows) in braces. */
+        const ScrDynClass *ecls = scr_dyn_objinst_class_of(einner);
+        ib_cstr(&out, "[class ");
+        ib_cstr(&out, ecls->name[0] != '\0' ? ecls->name : "(anonymous)");
+        if (ecls->base != NULL) {
+          ib_cstr(&out, " extends ");
+          ib_cstr(&out, ecls->base);
+        }
+        ib_char(&out, ']');
+        void *eo = einner->v.inst.o;
+        size_t eshown = 0;
+        for (size_t i = 0; i < ecls->nmembers; i++) {
+          const ScrDynClassMember *m = &ecls->members[i];
+          if (m->enumerable == 0 || m->enumerable == 3 || m->name[0] == '%' || scr_dyn_member_hidden(m, eo)) continue;
+          eshown++;
+        }
+        /* the properties a program ADDED to the function object follow the statics */
+        ScrDyn *eextra = NULL;
+        if (d->v.fn.clo->props != NULL) {
+          ScrDyn *tbl = (ScrDyn *)scr_box_get_ref(d->v.fn.clo->props); /* +1 */
+          eextra = tbl != NULL ? scr_dyn_objwalk(tbl, SCR_OBJWALK_ENTRIES) : NULL;
+          scr_dyn_release(tbl);
+          if (eextra != NULL && eextra->v.arr.len == 0) {
+            scr_dyn_release(eextra);
+            eextra = NULL;
+          }
+        }
+        if (eshown == 0 && eextra == NULL) return ib_take(&out);
+        if (recurse > depth) {
+          scr_dyn_release(eextra);
+          return ib_take(&out);
+        }
+        ScrStr *ebase = ib_take(&out);
+        scr_insp_begin(recurse + 1);
+        bool ethrew = false;
+        for (size_t i = 0; i < ecls->nmembers && !ethrew; i++) {
+          const ScrDynClassMember *m = &ecls->members[i];
+          if (m->enumerable == 0 || m->enumerable == 3 || m->name[0] == '%' || scr_dyn_member_hidden(m, eo)) continue;
+          ScrDyn *mv = m->get(eo); /* +1 */
+          if (mv == NULL) {
+            ethrew = true;
+            break;
+          }
+          ScrStr *val = scr_insp_dyn(mv, recurse + 1, depth);
+          scr_dyn_release(mv);
+          InspBuf eb = {0};
+          insp_key_into(&eb, m->name, m->len);
+          ib_cstr(&eb, ": ");
+          ib_bytes(&eb, val->data, val->len);
+          scr_str_release(val);
+          ScrStr *entry = ib_take(&eb);
+          scr_insp_entry(entry, false);
+          scr_str_release(entry);
+        }
+        for (size_t i = 0; eextra != NULL && i < eextra->v.arr.len; i++) {
+          ScrDyn *pair = eextra->v.arr.items[i];
+          ScrDyn *pk = pair->v.arr.items[0];
+          ScrStr *val = scr_insp_dyn(pair->v.arr.items[1], recurse + 1, depth);
+          InspBuf eb = {0};
+          insp_key_into(&eb, pk->v.str->data, pk->v.str->len);
+          ib_cstr(&eb, ": ");
+          ib_bytes(&eb, val->data, val->len);
+          scr_str_release(val);
+          ScrStr *entry = ib_take(&eb);
+          scr_insp_entry(entry, false);
+          scr_str_release(entry);
+        }
+        scr_dyn_release(eextra);
+        ScrStr *eb0 = scr_str_new("{", 1);
+        ScrStr *eb1 = scr_str_new("}", 1);
+        ScrStr *eout = scr_insp_end(ebase, eb0, eb1, recurse + 1, false, false);
+        scr_str_release(ebase);
+        scr_str_release(eb0);
+        scr_str_release(eb1);
+        if (ethrew) {
+          scr_str_release(eout);
+          return scr_str_new("", 0);
+        }
+        return eout;
+      }
       const ScrDynClass *vcls = scr_dyn_class_of_value(d);
       if (vcls != NULL) {
         ib_cstr(&out, "[class ");

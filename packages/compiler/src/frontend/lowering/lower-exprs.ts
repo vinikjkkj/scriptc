@@ -22306,7 +22306,7 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
       // JavaScript only and last, like the `new` arm it completes: every
       // typed instanceof above already claimed its shape, so this can
       // only turn a refusal into a lowering.
-      if (isJsSourceFile(expr.getSourceFile())) {
+      if (isJsSourceFile(expr.getSourceFile()) || (L.typeOf(expr.right).flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0) {
         // The two spellings the `new` arm takes: a receiver that already
         // lowers dyn (an expando-typed module binding) is the box; a
         // func-typed one goes through the shared per-use box.

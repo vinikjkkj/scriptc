@@ -8,12 +8,12 @@
 import type { CEmitter } from "./emitter.js";
 import { rcSitesRequested } from "./emitter.js";
 import { accessorKeyOrderOf, accessorSlotProp, shapeHasAccessorSlots, VOID, arrayTypeHasLiveView, bytesAliasOnExtract, canConvertToDyn, canDynCheckTo, moduleUsesDynView } from "../../ir/nodes.js";
-import { CLASS_PROPS_FIELD, dynNeverArm, dynNeverIn, armDiscrimLits, dynErrorClassKind, isDynErrorClass, canAdaptDynFuncTo, dynRestApplyable, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, UNION_ARM_JS_OBJECT_KINDS, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
+import { CLASS_PROPS_FIELD, EVAL_STATIC_CLASSES, dynNeverArm, dynNeverIn, armDiscrimLits, dynErrorClassKind, isDynErrorClass, canAdaptDynFuncTo, dynRestApplyable, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, UNION_ARM_JS_OBJECT_KINDS, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassStruct, mangleField, mangleFunction, mangleFnClosure, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import type { ClassMeta } from "./emit-shapes.js";
 import { RUNTIME_EMITTER_CLASS as RUNTIME_EMITTER_CLASS_W } from "../../ir/nodes.js";
-import { dynClassDisplayName, dynEmitterSlot, dynRuntimeRoot, dynEnumerationFenced, dynMemberRows, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
+import { classvalCandidates, dynClassDisplayName, dynDescBase, dynEmitterSlot, dynRuntimeRoot, dynEnumerationFenced, dynMemberRows, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
 import { ORD_MEMBER, orderRecordPlanCached } from "../../ir/nodes.js";
 import { KINDGATE_WIDE_KINDS, kindgateWideLane } from "../kindgate.js";
 import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
@@ -106,7 +106,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
         `${members === null ? "NULL, 0" : `${members.sym}, ${members.count}`}, ` +
         `${meta.def.fields.some((f) => f.name === CLASS_PROPS_FIELD) || dynEnumerationFenced(meta) ? "true" : "false"}, ${opaque ? "true" : "false"}, ${errorRooted ? "true" : "false"}, ` +
         `${statics === null ? "NULL, 0" : `${statics.sym}, ${statics.count}`}, ${staticsOpaque ? "true" : "false"}, ` +
-        `${meta.base === null ? "NULL" : cStringLiteral(Buffer.from(dynClassDisplayName(meta.base.def), "utf8"))}, ` +
+        `${dynDescBase(E.classMeta, meta) === null ? "NULL" : cStringLiteral(Buffer.from(dynClassDisplayName(dynDescBase(E.classMeta, meta)!.def), "utf8"))}, ` +
         `${dynRuntimeRoot(meta)}, ${E.tracedShapes.has(`object:${className}`) ? 1 : 0}, ` +
         `${dynOrdNord(E, meta)}, ${dynOrdOffsetC(E, meta)}, ${dynEeOffsetC(meta, className)} }; ` +
         `/* dyn box: class ${className} */`,
@@ -366,6 +366,9 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
       // caughtCheck's.
       case "object":
         return t.className.replace(/^%/, "");
+      // A declared class's VALUE: "expected typeof A at $.x, got ..." (the class's own name).
+      case "classval":
+        return `typeof ${t.className.replace(/^%/, "")}`;
       case "union": {
         const def = E.unionsById.get(t.unionId);
         if (!def) throw new Error(`emitter bug: dynDesc of unknown union ${t.unionId}`);
@@ -1513,6 +1516,15 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         d.push(`  return scr_dyn_objinst_is(d, ${meta.pre}, ${meta.post});`);
         break;
       }
+      case "classval": {
+        // A declared CLASS VALUE: the function box's descriptor names the class, and only the candidates
+        // `classvalCandidates` lists (the class and its same-ABI descendants) are values of this type.
+        for (const cn of classvalCandidates(t.className, E.classMeta, E.fnByName)) E.classObjSym(cn);
+        E.dynClassDesc(t.className);
+        const pres = classvalCandidates(t.className, E.classMeta, E.fnByName).map((cn) => `p == ${E.classMeta.get(cn)!.pre}`);
+        d.push(`  { size_t p = scr_dyn_classval_pre(d); return ${pres.length > 0 ? pres.join(" || ") : "false"}; }`);
+        break;
+      }
       default: {
         // A runtime HANDLE leaf (Symbol, Date, ...): the tag test.
         const h = DYN_HANDLE_KINDS.get(t.kind);
@@ -2355,6 +2367,19 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           );
         }
         d.push(`  return scr_dyn_map_unbox(d, ${tkeyLit}, path, ${want});`);
+        break;
+      }
+      case "classval": {
+        // The OUT direction of a declared class's VALUE: the class's immortal class object, picked by the
+        // descriptor the function box carries (candidates: the class and its same-ABI descendants).
+        const cands = classvalCandidates(t.className, E.classMeta, E.fnByName);
+        E.dynClassDesc(t.className);
+        d.push(`  size_t p = scr_dyn_classval_pre(d);`);
+        for (const cn of cands) {
+          d.push(`  if (p == ${E.classMeta.get(cn)!.pre}) return (${cType(t).trim()})scr_classobj_retain((ScrClassObj *)&${E.classObjSym(cn)});`);
+        }
+        if (soft) d.push(`  *ok = false; return NULL;`);
+        else d.push(`  scr_dyn_check_fail(path, ${want}, d); return NULL;`);
         break;
       }
       case "object":
@@ -3259,6 +3284,12 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // the same reason: one representation, not two). The descriptor
         // carries the class's own RC pair, so the box's +1 is the
         // ordinary one and the operand stays borrowed.
+        // A per-evaluation STATIC SIDE boxes as a class VALUE: a function
+        // object that holds the evaluation (scr_dyn_new_evalclass).
+        if (EVAL_STATIC_CLASSES.has(t.className)) {
+          d.push(`  return scr_dyn_new_evalclass(v, &${E.dynClassDesc(t.className)});`);
+          break;
+        }
         d.push(`  return scr_dyn_new_objinst(v, &${E.dynClassDesc(t.className)});`);
         break;
       case "classval":

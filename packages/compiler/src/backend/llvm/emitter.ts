@@ -76,7 +76,7 @@ import type {
 import { moduleUsesTextMb, moduleUsesDc, moduleUsesTls, ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, presenceMaskStores, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesFnText, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, moduleUsesEmitter, moduleBoxesEmitters, canBoxFuncIntoDyn, isDynPackFunc, moduleUsesBigInt, moduleUsesRegexExecDyn, moduleUsesBytesOwn, moduleUsesAsym, moduleUsesDynAsync, moduleBoxesProcStream, moduleUsesNodeTest, irFunctionValueCode, fnNameTableRows } from "../../ir/nodes.js";
 import { setDynOrderPlan } from "../dyn-members.js";
 import { orderRecordPlanCached } from "../../ir/nodes.js";
-import { dynClassDisplayName, dynEmitterSlot, dynRuntimeRoot, dynEnumerationFenced, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
+import { classvalCandidates, dynClassDisplayName, dynDescBase, dynEmitterSlot, dynRuntimeRoot, dynEnumerationFenced, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals, stackCheckPolicy, stackCheckTargetHasFloor, stackMarginBytes, stackMarginSymbol } from "../emission/emit-stmts.js";
 // The stackless lane's admission, read from the ONE place that owns it.
@@ -4083,7 +4083,7 @@ class LlEmitter {
       `ptr ${members === null ? "null" : `@${members.sym}`}, i64 ${members === null ? 0 : members.count}, ` +
       `i8 ${meta.def.fields.some((f) => f.name === CLASS_PROPS_FIELD) || dynEnumerationFenced(meta) ? 1 : 0}, i8 ${opaque ? 1 : 0}, i8 ${errorRooted ? 1 : 0}, ` +
       `ptr ${statics === null ? "null" : `@${statics.sym}`}, i64 ${statics === null ? 0 : statics.count}, i8 ${staticsOpaque ? 1 : 0}, ` +
-      `ptr ${meta.base === null ? "null" : this.cstr(dynClassDisplayName(meta.base.def))}, i8 ${dynRuntimeRoot(meta)}, ` +
+      `ptr ${dynDescBase(this.classMeta, meta) === null ? "null" : this.cstr(dynClassDisplayName(dynDescBase(this.classMeta, meta)!.def))}, i8 ${dynRuntimeRoot(meta)}, ` +
       `i8 ${this.tracedShapes.has(`object:${className}`) ? 1 : 0}, ` +
       `i64 ${this.ordNordOf(className)}, i64 ${this.ordOffsetOf(className)}, i64 ${this.eeOffsetOf(className)} }`;
     this.dynClassDescSyms.set(className, { sym, body });
@@ -4132,6 +4132,15 @@ class LlEmitter {
    * classFieldIndex, with the hierarchy rc+vt prefix already counted. */
   classFieldGep(className: string, field: string): number {
     return classFieldIndex(this.classMetaOf(className), field).index;
+  }
+
+  /** The classes whose class VALUE a dyn function box may hold under `classval:className` (dyn-members.ts
+   * classvalCandidates), each with its preorder position and its class object's symbol (registered here). */
+  classvalCandidateObjs(className: string): { pre: number; sym: string }[] {
+    return classvalCandidates(className, this.classMeta, this.fnByName).map((cn) => ({
+      pre: this.classMetaOf(cn).pre,
+      sym: this.classObjSym(cn),
+    }));
   }
 
   classInterval(className: string): { pre: number; post: number } {
