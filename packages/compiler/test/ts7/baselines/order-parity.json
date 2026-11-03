@@ -10996,6 +10996,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/23258-classval-dyn-length-of-declared-and-evaluated.js": {
+   "order": [
+    "<repo>/tests/corpus/23258-classval-dyn-length-of-declared-and-evaluated.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23259-evalclass-dyn-extends-error-through-class-value.js": {
+   "order": [
+    "<repo>/tests/corpus/23259-evalclass-dyn-extends-error-through-class-value.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2330-tls-server-runtime-options.cjs": {
    "order": [
     "<repo>/tests/corpus/2330-tls-server-runtime-options.cjs"
