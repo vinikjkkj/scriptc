@@ -1,0 +1,31 @@
+export type ExecuteValues = any | any[] | { [param: string]: any };
+export interface Row {
+  id: number;
+}
+export interface ResultSetHeader {
+  affectedRows: number;
+  insertId: number;
+}
+export type QueryResult = Row[] | ResultSetHeader | string;
+export interface QueryOptions {
+  sql: string;
+  typeCast?: boolean | ((field: { name: string; type: string }, next: () => unknown) => unknown);
+}
+declare function ExecutableBase<T extends new (...a: any[]) => object>(Base?: T): {
+  new (...args: any[]): {
+    execute<R extends QueryResult>(sql: string, values?: ExecuteValues): Promise<[R, string[]]>;
+    execute<R extends QueryResult>(options: QueryOptions, values?: ExecuteValues): Promise<[R, string[]]>;
+    query<R extends string>(sql: string, values?: ExecuteValues): Promise<[R, string[]]>;
+    query<R extends string>(options: QueryOptions, values?: ExecuteValues): Promise<[R, string[]]>;
+  };
+} & T;
+declare class Base {}
+export declare class PoolConnection extends ExecutableBase(Base) {
+  release(): void;
+}
+export interface Pool extends PoolConnection {
+  getConnection(): Promise<PoolConnection>;
+  end(): Promise<void>;
+  count(): number;
+}
+export declare function createPool(label: string): Pool;

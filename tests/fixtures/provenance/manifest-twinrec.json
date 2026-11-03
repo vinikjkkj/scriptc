@@ -1,0 +1,9 @@
+{
+  "packages": {
+    "twinrec": {
+      "dir": "./attested-src/twinrec",
+      "commit": "7777777777777777777777777777777777777777",
+      "repo": "https://github.com/example/twinrec"
+    }
+  }
+}

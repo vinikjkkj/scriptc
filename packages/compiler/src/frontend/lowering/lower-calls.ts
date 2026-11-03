@@ -8818,6 +8818,19 @@ const inliningPredicates = new Set<ts.Symbol>();
  * Only bodyless signatures (interface / .d.ts members) qualify; an
  * implementation's own `any` return keeps the reconcileOverloadReturn stance.
  * Non-dyn results, void, unit and unmappable resolved returns pass through. */
+/** True when a call's promise is awaited as a bare statement or dropped: no read of its payload exists. */
+function promiseResultDiscarded(expr: ts.CallExpression): boolean {
+  let n: ts.Node = expr;
+  while (n.parent !== undefined && ts.isParenthesizedExpression(n.parent)) n = n.parent;
+  const p = n.parent;
+  if (p === undefined) return false;
+  if (ts.isExpressionStatement(p)) return true;
+  if (!ts.isAwaitExpression(p)) return false;
+  let q: ts.Node = p;
+  while (q.parent !== undefined && ts.isParenthesizedExpression(q.parent)) q = q.parent;
+  return q.parent !== undefined && ts.isExpressionStatement(q.parent);
+}
+
 export function reconcileOverloadMemberDyn(L: Lowerer, expr: ts.CallExpression, call: IrExpr): IrExpr {
   if (call.type.kind !== "dyn") return call;
   const rsig = L.checker.getResolvedSignature(expr);
@@ -8831,6 +8844,21 @@ export function reconcileOverloadMemberDyn(L: Lowerer, expr: ts.CallExpression, 
   if (calleeSigs.length < 2) return call;
   const rt = L.mapTypeOf(L.checker.getReturnTypeOfSignature(rsig));
   if (!rt || rt.kind === "void" || rt.kind === "dyn" || rt.kind === "jsval" || isUnitType(rt)) return call;
+  // A declared Promise<T>: dynCheck has no promise form (the IR validator rejects it), so the
+  // claim is read the way an await reads it: adopt, then check the payload.
+  if (rt.kind === "promise") {
+    const adopted = L.adoptDynIntoTypedPromise(call, rt);
+    if (adopted !== null) return adopted;
+    // Nothing reads the payload (`await pool.execute(sql)` as a statement, or a dropped promise): the
+    // awaited answer is never extracted, so there is nothing to check and the checked-dynamic
+    // promise settles or rejects exactly as the implementation's does.
+    if (promiseResultDiscarded(expr)) return call;
+    L.unsupported(
+      "SC1100",
+      expr,
+      `the declared result '${L.fmt(rt)}' of this call: the member's implementation answers a checked-dynamic value, and a record or class payload cannot be extracted from it exactly (the checked cast reads a record off a plain object only, so a class instance the implementation hands over unchanged would throw where Node answers)`,
+    );
+  }
   return { kind: "dynCheck", value: call, type: rt, loc: call.loc };
 }
 

@@ -8002,6 +8002,49 @@ export class Lowerer {
     };
   }
 
+  /** True when the validated extraction of ANY JavaScript value into `t` has an exact answer: a
+   * scalar, an array or a tuple of dyn/scalars. A RECORD (or class) arm is not: the runtime's
+   * checked cast reads a record only off a plain object, so a class instance that Node hands over
+   * unchanged (mysql2's ResultSetHeader) would throw a TypeError here, and picking a union arm
+   * by shape is the silent-divergence family (kindgate.ts). Those payloads stay refused. */
+  dynPayloadTotal(t: IrType, depth = 0): boolean {
+    if (depth > 8) return false;
+    switch (t.kind) {
+      case "dyn":
+      case "void":
+      case "f64":
+      case "bool":
+      case "string":
+        return true;
+      case "array":
+        return this.dynPayloadTotal(t.elem, depth + 1);
+      case "record": {
+        const sh = this.shapes.get(t.shapeId);
+        return sh !== undefined && sh.tuple === true && sh.indexValue === undefined && sh.fields.every((f) => this.dynPayloadTotal(f.type, depth + 1));
+      }
+      default:
+        return false;
+    }
+  }
+
+  /** A checked-dynamic value that a DECLARATION (a .d.ts member's signature) says is a
+   * `Promise<T>` with a payload beyond dyn/void: Node's resolution rule first (dyn.adoptPromise: a
+   * promise stays the same object, anything else resolves a fresh one), then the payload checks
+   * into T through promiseCoerceAdapter (the validated extraction every dyn-to-static edge has: a
+   * payload that is not a T rejects the adapted promise with a catchable TypeError). Null when
+   * the payload does not convert (the caller keeps its fence). Not a general coercion: only the
+   * sites that read the claim off a declaration call it, so a promise slot typed by program code
+   * keeps requireExactShape's fence. */
+  adoptDynIntoTypedPromise(expr: IrExpr, want: IrType): IrExpr | null {
+    if (expr.type.kind !== "dyn" || want.kind !== "promise") return null;
+    const viaDyn: IrType = { kind: "promise", inner: DYN };
+    if (want.inner.kind === "dyn" || want.inner.kind === "void") return this.adoptDynIntoPromise(expr, want);
+    if (!this.dynPayloadTotal(want.inner) || !this.coercibleValue(viaDyn, want, true)) return null;
+    const adopted: IrExpr = { kind: "libCall", fn: "dyn.adoptPromise", args: [expr], type: viaDyn, loc: expr.loc };
+    const out = this.coerceToExpected(adopted, want);
+    return typeEquals(out.type, want) ? out : null;
+  }
+
   coerceToExpected(expr: IrExpr, expected: IrType): IrExpr {
     // An index-signature keyed read into a DYN slot reads at that slot's
     // width, so an absent key answers undefined the way JS does instead of
