@@ -67,7 +67,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { CLASS_NO_DYN_NEW, EVAL_NO_SRC_CLASSES, GRAFTED_EMITTER_CLASSES, EVAL_STATIC_CLASSES, dynReflectionSite, graftedBoxSites, moduleBoxesEmitters } from "../../ir/nodes.js";
+import { CLASS_BUILTIN_CTORLESS, CLASS_NO_DYN_NEW, EVAL_NO_SRC_CLASSES, GRAFTED_EMITTER_CLASSES, EVAL_STATIC_CLASSES, dynReflectionSite, graftedBoxSites, moduleBoxesEmitters } from "../../ir/nodes.js";
 import { computeTwinEdits, type TwinEdits } from "./emitter-twin.js";
 import { canBoxFuncIntoDyn } from "../../ir/nodes.js";
 import { procStreamDynMemberFence, NULL_T, strandTrap, armDiscrimLits, arrayOf, BOOL, canBoxClassIntoDyn, internalSlotFields, isRefCounted, canAdaptDynFuncTo, dynRestApplyable, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, shapeHasAccessorSlots, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
@@ -2601,6 +2601,7 @@ export class Lowerer {
     EVAL_STATIC_CLASSES.clear();
     EVAL_NO_SRC_CLASSES.clear();
     CLASS_NO_DYN_NEW.clear();
+    CLASS_BUILTIN_CTORLESS.clear();
     this.reachable = mode.reachable ?? null;
     this.remainder = mode.remainder ?? false;
     this.alreadyFlushed = mode.alreadyFlushed ?? new Set();
@@ -8085,7 +8086,7 @@ export class Lowerer {
         this.dynConvertible(expr.type) ||
         // The BARE class value (see widthLiftPlan): its box is the class's one
         // function object, which no composite carries.
-        (expr.type.kind === "classval" && canBoxClassIntoDyn(expr.type.className))
+        (expr.type.kind === "classval" && canBoxClassIntoDyn(expr.type.className) && !CLASS_BUILTIN_CTORLESS.has(expr.type.className))
       ) {
         this.noteKeyCrossingToDyn(expr);
         return { kind: "dynFrom", value: expr, type: DYN, loc: expr.loc };
@@ -8121,7 +8122,16 @@ export class Lowerer {
       }
       if (expr.type.kind === "classval") {
         const info = this.classes.get(expr.type.className);
-        if (info && !info.generic && !info.def.abstract) {
+        // A class whose constructor is INHERITED from a builtin (Error, emitter, stream) takes arguments the
+        // ctor-less parameter list does not list (the message and options, or the options bag): the thunk
+        // would drop them, so such a value keeps the compile-time refusal into an untyped slot.
+        if (
+          info &&
+          !info.generic &&
+          !info.def.abstract &&
+          !CLASS_BUILTIN_CTORLESS.has(expr.type.className) &&
+          !this.inheritsBuiltinErrorCtor(info)
+        ) {
           const slot: IrType & { kind: "func" } = {
             kind: "func",
             params: info.ctorParams.map(() => DYN),
@@ -8767,6 +8777,8 @@ export class Lowerer {
     if (expected.rest === true) return null;
     const info = this.classes.get(className);
     if (!info || info.generic || info.def.abstract) return null;
+    // An inherited builtin constructor takes arguments the thunk's ctor-less parameter list cannot carry.
+    if (CLASS_BUILTIN_CTORLESS.has(className) || this.inheritsBuiltinErrorCtor(info)) return null;
     const inst: IrType = { kind: "object", className };
     // Return side first — planned before anything interns.
     let retConv: ((e: IrExpr) => IrExpr) | null = null;
@@ -9309,7 +9321,7 @@ export class Lowerer {
     // the BARE value crosses -- not canConvertToDyn, which would also admit
     // it inside arrays and records, whose callbacks and round trips have no
     // way back to a class value yet.
-    if (dst.kind === "dyn" && src.kind === "classval" && canBoxClassIntoDyn(src.className)) {
+    if (dst.kind === "dyn" && src.kind === "classval" && canBoxClassIntoDyn(src.className) && !CLASS_BUILTIN_CTORLESS.has(src.className)) {
       return { how: "dynIn" };
     }
     if (dst.kind === "union") {

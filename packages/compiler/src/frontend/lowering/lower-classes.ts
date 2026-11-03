@@ -6470,17 +6470,6 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
         `builtin classes as values ('${display}' is runtime-provided — reference program-declared classes instead)`,
       );
     }
-    if (
-      L.inheritsBuiltinErrorCtor(info) ||
-      inheritsBuiltinStreamCtor(L, info) ||
-      (() => { for (let c = info.base; c; c = c.base) if (c.builtinError || c.builtinStream !== undefined) return true; return false; })()
-    ) {
-      L.unsupported(
-        "SC1090",
-        blame,
-        `classes extending builtin bases as values ('${display}' inherits a runtime-provided constructor)`,
-      );
-    }
     L.noteEdge(`%${info.def.name}.constructor`);
     return {
       kind: "classRef",
@@ -8829,11 +8818,50 @@ export function dynStaticFns(L: Lowerer, info: ClassInfo): { fns: IrFunction[]; 
     info.def.abstract !== true &&
     info.captures === undefined &&
     !info.generic &&
-    !L.inheritsBuiltinErrorCtor(info) &&
     !L.inheritsBuiltinEmitterCtor(info) &&
     !inheritsBuiltinStreamCtor(L, info) &&
     info.ctorParams.every((p) => p.mode === "required" || p.mode === "omittable" || p.mode === "rest" || p.mode === "dynRest");
-  if (drivable) {
+  if (drivable && L.inheritsBuiltinErrorCtor(info)) {
+    // A constructor-less chain into a builtin Error: Node's inherited Error constructor takes (message, options) —
+    // the message is ToString'd ("" for undefined) and `options.cause` installs when the options are an object that
+    // HAS a cause (the runtime's own installer decides). Same two steps the typed `new C(m, opts)` lowers to.
+    const locals: IrLocal[] = [
+      { id: "args.0", name: "args", type: DYN, mutable: false },
+      { id: "err.0", name: "err", type: { kind: "object", className }, mutable: false },
+    ];
+    const argAt = (i: number): IrExpr => ({
+      kind: "dynKeyGet", key: { kind: "strLit", value: String(i), type: STRING, loc }, value: ref(locals[0]!), type: DYN, loc,
+    });
+    const name = `%${className}.%dynNew`;
+    fns.push({
+      name,
+      params: [{ localId: locals[0]!.id, name: locals[0]!.name, type: locals[0]!.type }],
+      returnType: DYN,
+      locals,
+      body: [
+        {
+          kind: "varDecl",
+          localId: locals[1]!.id,
+          init: {
+            kind: "new",
+            className,
+            args: [{ kind: "libCall", fn: "error.msgDyn", args: [argAt(0)], type: STRING, loc }],
+            type: { kind: "object", className },
+            loc,
+          },
+          loc,
+        },
+        {
+          kind: "exprStmt",
+          expr: { kind: "libCall", fn: "error.installOptions", args: [L.upcastTo(ref(locals[1]!), "%Error"), argAt(1)], type: VOID, loc },
+          loc,
+        },
+        { kind: "return", value: { kind: "dynFrom", value: ref(locals[1]!), type: DYN, loc }, loc },
+      ],
+      loc,
+    });
+    list.push({ name: "%dynNew", fn: name });
+  } else if (drivable) {
     const locals: IrLocal[] = [{ id: "args.0", name: "args", type: DYN, mutable: false }];
     const args: IrExpr[] = [];
     let ok = true;
@@ -10761,14 +10789,11 @@ export function fenceDecorationThrows(L: Lowerer, info: ClassInfo, blame: ts.Nod
   );
 }
 
-function lowerProgramClassNew(L: Lowerer, expr: ts.NewExpression, info0: ClassInfo, loc: SrcLoc): IrExpr {
-  const info = genericNewTarget(L, expr, info0);
-  fenceDecorationThrows(L, info, expr);
-  L.noteEdge(`%${info.def.name}.constructor`);
-  // A ctor-less chain into an EventEmitter base inherits `new C()` —
-  // zero arguments (the options bag fences, like the super() form).
-  // Stream subclasses come first: their chain roots at the emitter
-  // too, but the message should name the stream story.
+/** A ctor-less chain into a runtime stream or EventEmitter base inherits that base's constructor, whose
+ * arguments are Node's options bag: there is no lowering for them, and the ctor-less ABI has no parameter to
+ * drop them into, so a construction naming arguments is fenced (the same story whether the class is named or
+ * reached through a class value). */
+function fenceInheritedBuiltinCtorArgs(L: Lowerer, info: ClassInfo, expr: ts.NewExpression): void {
   if (inheritsBuiltinStreamCtor(L, info) && (expr.arguments ?? []).length > 0) {
     L.noLowering(
       `new ${info.def.name.replace(/^%/, "")} with arguments through an inherited stream constructor`,
@@ -10779,6 +10804,17 @@ function lowerProgramClassNew(L: Lowerer, expr: ts.NewExpression, info0: ClassIn
   if (L.inheritsBuiltinEmitterCtor(info) && (expr.arguments ?? []).length > 0) {
     L.unsupported("SC1090", expr.arguments![0]!, "EventEmitter constructor options ('captureRejections')");
   }
+}
+
+function lowerProgramClassNew(L: Lowerer, expr: ts.NewExpression, info0: ClassInfo, loc: SrcLoc): IrExpr {
+  const info = genericNewTarget(L, expr, info0);
+  fenceDecorationThrows(L, info, expr);
+  L.noteEdge(`%${info.def.name}.constructor`);
+  // A ctor-less chain into an EventEmitter base inherits `new C()` —
+  // zero arguments (the options bag fences, like the super() form).
+  // Stream subclasses come first: their chain roots at the emitter
+  // too, but the message should name the stream story.
+  fenceInheritedBuiltinCtorArgs(L, info, expr);
   // A ctor-less chain into a builtin error base inherits `new
   // C(message?)` — completed by the error rule (one plain string),
   // not the general ABI completion.
@@ -11375,6 +11411,7 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
             };
             below(info);
             const callee: IrExpr = { kind: "varRef", localId: g.id, type: g.type, loc };
+            fenceInheritedBuiltinCtorArgs(L, info, expr);
             const args = L.completeArgs(expr.arguments ?? [], info.ctorParams, loc, expr);
             return {
               kind: "newValue",
@@ -12765,6 +12802,7 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
           }
         };
         below(info);
+        fenceInheritedBuiltinCtorArgs(L, info, expr);
         const args = L.completeArgs(expr.arguments ?? [], info.ctorParams, loc, expr);
         return {
           kind: "newValue",
