@@ -11585,6 +11585,54 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/23750-grafted-emitter-dyn-key-surfaces.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23750-grafted-emitter-dyn-key-surfaces.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23751-grafted-emitter-dyn-json-inspect.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23751-grafted-emitter-dyn-json-inspect.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23752-grafted-emitter-dyn-field-delete-and-late-writes.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23752-grafted-emitter-dyn-field-delete-and-late-writes.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23753-grafted-emitter-dyn-call-position-variants.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23753-grafted-emitter-dyn-call-position-variants.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23754-grafted-emitter-dyn-has-any-key-and-copies.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23754-grafted-emitter-dyn-has-any-key-and-copies.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23755-grafted-emitter-dyn-class-field-declarations.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23755-grafted-emitter-dyn-class-field-declarations.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23756-grafted-emitter-dyn-print-of-boxed-instance.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23756-grafted-emitter-dyn-print-of-boxed-instance.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23757-grafted-emitter-dyn-observed-before-emitter-init.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23757-grafted-emitter-dyn-observed-before-emitter-init.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2380-buffer-module-named-import.ts": {
    "order": [
     "<repo>/tests/corpus/2380-buffer-module-named-import.ts"
@@ -22429,6 +22477,30 @@
   "<repo>/tests/diagnostics/generics.ts": {
    "order": [
     "<repo>/tests/diagnostics/generics.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/grafted-emitter-dyn-constructor-read-refused.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/grafted-emitter-dyn-constructor-read-refused.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/grafted-emitter-dyn-late-init-reflection-refused.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/grafted-emitter-dyn-late-init-reflection-refused.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/grafted-emitter-dyn-property-table-values-refused.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/grafted-emitter-dyn-property-table-values-refused.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/grafted-emitter-dyn-structured-clone-refused.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/grafted-emitter-dyn-structured-clone-refused.cjs"
    ],
    "diags": []
   },
