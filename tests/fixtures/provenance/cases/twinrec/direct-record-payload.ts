@@ -1,5 +1,5 @@
 // A direct call of the declared generic `execute` whose declared Promise payload holds record
-// arms: the compile-time refusal replaces the internal compiler error this shape produced.
+// arms and is READ: the checked cast takes the twin's answer (a result-set header instance).
 import { createPool } from "twinrec/promise";
 import type { Pool } from "twinrec/promise";
 async function main(): Promise<void> {
