@@ -17571,6 +17571,35 @@ class LlEmitter {
       this.emitPendingCheck();
       return out;
     }
+    if (e.fn === "emitter.onTwin") {
+      // (recv, name, cb /moves — the identity/, once, prepend, twin /moves/): emitter.on for a listener a
+      // dynamic emit can reach. The ERASED TWIN's dyn function box rides the entry (a dynamic-list emit
+      // calls it); the typed listener keeps serving static emits through the fixed-arity adapter.
+      const cbT = e.args[2]!.type;
+      const twT = e.args[5]!.type;
+      if (cbT.kind !== "func" || twT.kind !== "func") throw new Error("llvm emitter bug: emitter.onTwin listener/twin not a func");
+      const args = e.args.map((a) => this.emitExpr(a));
+      const { fn: adapterFn, shim } = this.emitterFixedAdapter(cbT);
+      this.declare(`declare ptr @scr_closure_retain_v(ptr)`);
+      const cbr = B.tmp();
+      B.line(`${cbr} = call ptr @scr_closure_retain_v(ptr ${args[2]!.name})`);
+      const wrapped = this.wrapEmitterListener(cbr, adapterFn);
+      const proto = B.tmp();
+      B.line(`${proto} = call ptr @${this.dyn.dynFuncBoxHelper(twT)}(ptr ${args[5]!.name}, ptr null, ptr null)`);
+      this.moveTemp(args[2]!);
+      this.moveTemp(args[5]!);
+      const t = B.tmp();
+      this.declare(`declare ptr @scr_emitter_on_via_twin(ptr, ptr, ptr, ptr, ptr, ptr, ptr, i1 zeroext, i1 zeroext)`);
+      this.declare(`declare void @scr_dyn_release(ptr)`);
+      B.line(
+        `${t} = call ptr @scr_emitter_on_via_twin(ptr ${args[0]!.name}, ptr ${args[1]!.name}, ` +
+          `ptr ${args[2]!.name}, ptr ${wrapped}, ptr ${args[5]!.name}, ptr ${proto}, ptr @${shim}, i1 ${args[3]!.name}, i1 ${args[4]!.name})`,
+      );
+      B.line(`call void @scr_dyn_release(ptr ${proto})`);
+      const out = this.own({ name: t, type: e.type });
+      this.emitPendingCheck();
+      return out;
+    }
     if (e.fn === "emitter.onDyn") {
       // (recv, name, cb /borrowed dyn — the identity/, adapter /moves/,
       // once, prepend): the frontend's dyn adapter (it boxes the tuple to
