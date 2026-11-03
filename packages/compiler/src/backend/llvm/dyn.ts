@@ -5248,7 +5248,7 @@ export class LlDyn {
           `}`,
           ``,
         );
-        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 ${row.absentWhenUndefined ? 2 : row.type.kind === "dyn" ? 4 : 1}, i8 ${row.ordk}, ptr null }`);
+        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 ${row.hidden === true ? 0 : row.absentWhenUndefined ? 2 : row.type.kind === "dyn" ? 4 : 1}, i8 ${row.ordk}, ptr null }`);
         continue;
       }
 

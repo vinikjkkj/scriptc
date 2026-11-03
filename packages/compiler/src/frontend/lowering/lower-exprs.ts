@@ -15060,6 +15060,26 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
         }
       }
     }
+    // `this[i]` where `i` is the key of an enclosing `for (const i in this)` over a class instance whose
+    // enumeration the runtime walks (a run-time property table, or an EventEmitter root): the dyn keyed read,
+    // which is the same read `obj[k]` takes for a dyn receiver. Every key the walk yields is a name the class
+    // answers (a declared member, a table key, an emitter cell or an EventEmitter.prototype member), so the
+    // read never meets a name the member table might not know. The instance boxes by reference, so a method
+    // reads back the identity its static read has, and the table is consulted first (scr_dyn_class /
+    // emit-walkers [[Get]]).
+    if (receiverIr?.kind === "object" && classKeyedReadWalked(L, receiverIr.className) && isForInKeyReadOfSameReceiver(L, expr)) {
+      const rawKey = L.lowerExpr(expr.argumentExpression);
+      const key: IrExpr | null =
+        rawKey.type.kind === "string"
+          ? rawKey
+          : rawKey.type.kind === "f64" || rawKey.type.kind === "bool" || rawKey.type.kind === "dyn"
+            ? { kind: "toString", operand: rawKey, type: STRING, loc: rawKey.loc }
+            : null;
+      if (key) {
+        const recvDyn: IrExpr = { kind: "dynFrom", value: L.lowerExpr(expr.expression), type: DYN, loc: locOf(expr.expression) };
+        return L.maybeNarrow({ kind: "dynKeyGet", key, value: recvDyn, type: DYN, loc: locOf(expr) }, expr);
+      }
+    }
     if (receiverIr?.kind !== "array") {
       if (receiverIr?.kind === "string") {
         // `s[i]` with a number index reads a UTF-16 code unit — charAt's
@@ -27570,4 +27590,57 @@ function plainThisOrReadChain(recv: ts.Expression): boolean {
     while (ts.isParenthesizedExpression(n)) n = n.expression;
   }
   return ts.isIdentifier(n) || n.kind === ts.SyntaxKind.ThisKeyword;
+}
+
+/** A class whose chain carries a run-time property table or roots in the runtime EventEmitter: the walk
+ * lists its keys exactly (dyn_cls_props_keys / scr_dyn_forin_keys), and the dyn keyed read answers every one
+ * (the table first, then the member table, then the emitter's own cells and EventEmitter.prototype members). */
+function classKeyedReadWalked(L: Lowerer, className: string): boolean {
+  for (let info: ClassInfo | null | undefined = L.classes.get(className); info; info = info.base) {
+    if (info.hasPropsTable === true || info.builtinEmitter === true) return true;
+  }
+  return false;
+}
+
+/** `r[k]` inside the body of `for (<decl> k in r)` with the SAME receiver `r` (`this` or one identifier) and a
+ * loop variable that is never reassigned: the read is of a key the walk just yielded. Stops at a function
+ * boundary (a closure may run after the loop moved on). Iterative: no recursion on user nesting. */
+function isForInKeyReadOfSameReceiver(L: Lowerer, expr: ts.ElementAccessExpression): boolean {
+  const arg = expr.argumentExpression;
+  if (!ts.isIdentifier(arg)) return false;
+  const recv = expr.expression;
+  if (recv.kind !== ts.SyntaxKind.ThisKeyword && !ts.isIdentifier(recv)) return false;
+  const argSym = L.checker.getSymbolAtLocation(arg);
+  if (argSym === undefined) return false;
+  const recvSym = ts.isIdentifier(recv) ? L.checker.getSymbolAtLocation(recv) : undefined;
+  for (let n: ts.Node | undefined = expr.parent; n !== undefined; n = n.parent) {
+    if (ts.isFunctionLike(n) || ts.isClassDeclaration(n) || ts.isClassExpression(n) || ts.isSourceFile(n)) return false;
+    if (!ts.isForInStatement(n)) continue;
+    // the read must sit in the loop BODY, not in its header expression
+    let inBody = false;
+    for (let m: ts.Node | undefined = expr; m !== undefined && m !== n; m = m.parent) if (m === n.statement) inBody = true;
+    if (!inBody) continue;
+    const init = n.initializer;
+    if (!ts.isVariableDeclarationList(init) || init.declarations.length !== 1) continue;
+    const decl = init.declarations[0]!;
+    if (!ts.isIdentifier(decl.name) || L.checker.getSymbolAtLocation(decl.name) !== argSym) continue;
+    const loopRecv = n.expression;
+    if (recv.kind === ts.SyntaxKind.ThisKeyword ? loopRecv.kind !== ts.SyntaxKind.ThisKeyword : !(ts.isIdentifier(loopRecv) && recvSym !== undefined && L.checker.getSymbolAtLocation(loopRecv) === recvSym)) continue;
+    if ((init.flags & ts.NodeFlags.Const) !== 0) return true;
+    // let / var: no write to the loop variable anywhere in the body (explicit stack)
+    const stack: ts.Node[] = [n.statement];
+    while (stack.length > 0) {
+      const cur = stack.pop()!;
+      if (ts.isIdentifier(cur) && L.checker.getSymbolAtLocation(cur) === argSym && cur !== arg) {
+        const p = cur.parent;
+        if (
+          (ts.isBinaryExpression(p) && p.left === cur && p.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && p.operatorToken.kind <= ts.SyntaxKind.LastAssignment) ||
+          ts.isPrefixUnaryExpression(p) || ts.isPostfixUnaryExpression(p) || ts.isForInStatement(p) || ts.isForOfStatement(p)
+        ) return false;
+      }
+      ts.forEachChild(cur, (c) => { stack.push(c); });
+    }
+    return true;
+  }
+  return false;
 }
