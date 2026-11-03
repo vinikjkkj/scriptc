@@ -12040,6 +12040,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/23851-promise-ctor-value-dyn-new.js": {
+   "order": [
+    "<repo>/tests/corpus/23851-promise-ctor-value-dyn-new.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2386-string-to-chars.ts": {
    "order": [
     "<repo>/tests/corpus/2386-string-to-chars.ts"
