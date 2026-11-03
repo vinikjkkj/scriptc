@@ -259,16 +259,35 @@ export function computeTwinEdits(cands: readonly ts.Expression[], checker: ts.Ty
   return out.size === 0 ? null : out;
 }
 
+/** The inserted spans, in the EDITED text's coordinates, per file of the current twin load. The text of a
+ * function value (Function.prototype.toString) must be the author's, so a function that CONTAINS an insertion
+ * (a nested listener's twin) drops it (functionSourceText). */
+const insertedSpans = new Map<string, { s: number; e: number }[]>();
+
+export function clearTwinSpans(): void {
+  insertedSpans.clear();
+}
+
+/** The spans inserted inside [start, end) of the edited text, ascending. */
+export function twinSpansIn(file: string, start: number, end: number): { s: number; e: number }[] {
+  const all = insertedSpans.get(file.split("\\").join("/"));
+  return all === undefined ? [] : all.filter((x) => x.s >= start && x.e <= end);
+}
+
 /** Apply insertions (offsets into `text`); equal offsets keep their given order. */
-export function applyTwinEdits(text: string, edits: readonly TwinEdit[]): string {
+export function applyTwinEdits(text: string, edits: readonly TwinEdit[], file?: string): string {
   const idx = edits.map((e, i) => ({ e, i }));
   idx.sort((a, b) => a.e.at - b.e.at || a.i - b.i);
   let out = "";
   let at = 0;
+  const spans: { s: number; e: number }[] = [];
   for (const { e } of idx) {
-    out += text.slice(at, e.at) + e.text;
+    out += text.slice(at, e.at);
+    spans.push({ s: out.length, e: out.length + e.text.length });
+    out += e.text;
     at = e.at;
   }
+  if (file !== undefined) insertedSpans.set(file.split("\\").join("/"), spans);
   return out + text.slice(at);
 }
 

@@ -62,7 +62,7 @@ import { applySeedPins, computeSeedPins, type SeedPin } from "./seed-pin.js";
 import { programHasTsUntypedWeakNew, setTsUntypedWeakAdmission } from "./types.js";
 import { applyRetypePins, computeRetypePins, shiftRetypePins, type RetypePin } from "./retype-pin.js";
 import { cjsLexerVisibleNames } from "./cjs-lexer.js";
-import { applyTwinEdits, type TwinEdit } from "./lowering/emitter-twin.js";
+import { applyTwinEdits, clearTwinSpans, type TwinEdit } from "./lowering/emitter-twin.js";
 import {
   ADOPTED_OPTIONS,
   ambientDtsPath,
@@ -407,6 +407,7 @@ export function loadProgram(
   // that shadow's replacement content, and the rewriter is handed the same
   // bytes to work from rather than the disk's.
   const textEdits = opts?.textEdits;
+  clearTwinSpans();
   const twinEdits = opts?.twinEdits;
   const open = (
     pins: ReadonlyMap<string, readonly SeedPin[]> | null,
@@ -481,7 +482,7 @@ export function loadProgram(
             if (raw === undefined) throw new Error(`twin reload: cannot read ${path}`);
             text = jsDesugar(path, raw) ?? raw;
           }
-          served = applyTwinEdits(text, twins);
+          served = applyTwinEdits(text, twins, path);
         }
         if (served !== undefined && (rewritten !== null || filePins !== undefined || fileRetype !== undefined || edits !== undefined || twins !== undefined)) {
           // srcSite (the C emitter) turns a SrcLoc OFFSET into file:line:col
