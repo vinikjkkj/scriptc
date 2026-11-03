@@ -11266,6 +11266,42 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/23450-emitter-for-in-this-index-state-name.ts": {
+   "order": [
+    "<repo>/tests/corpus/23450-emitter-for-in-this-index-state-name.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23451-emitter-for-in-key-order-late-fields.ts": {
+   "order": [
+    "<repo>/tests/corpus/23451-emitter-for-in-key-order-late-fields.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23452-emitter-state-cells-after-on-once-off.ts": {
+   "order": [
+    "<repo>/tests/corpus/23452-emitter-state-cells-after-on-once-off.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23453-emitter-this-index-method-identity.ts": {
+   "order": [
+    "<repo>/tests/corpus/23453-emitter-this-index-method-identity.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23454-emitter-for-in-subclass-chain.ts": {
+   "order": [
+    "<repo>/tests/corpus/23454-emitter-for-in-subclass-chain.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23455-emitter-dyn-own-key-surfaces.ts": {
+   "order": [
+    "<repo>/tests/corpus/23455-emitter-dyn-own-key-surfaces.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2350-nan-global.ts": {
    "order": [
     "<repo>/tests/corpus/2350-nan-global.ts"
@@ -22080,6 +22116,12 @@
   "<repo>/tests/diagnostics/emitter-projection-declines.ts": {
    "order": [
     "<repo>/tests/diagnostics/emitter-projection-declines.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/emitter-state-cell-writes-refused.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/emitter-state-cell-writes-refused.ts"
    ],
    "diags": []
   },
