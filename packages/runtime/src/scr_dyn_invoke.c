@@ -1895,6 +1895,11 @@ ScrDyn *scr_dyn_objinst_member_get(ScrDyn *d, const ScrStr *key) {
  * be a real member, so the old fence stays -- the one answer that is never
  * wrong. +1, or NULL with the exception pending. */
 ScrDyn *scr_dyn_objinst_miss(ScrDyn *d, const ScrStr *key) {
+  if (scr_dyn_class_ops != NULL && scr_dyn_class_ops->objinst_extra_get != NULL) {
+    ScrDyn *ex = scr_dyn_class_ops->objinst_extra_get(d, key->data, key->len);
+    if (ex != NULL) return ex;
+    if (scr_exc_pending()) return NULL;
+  }
   if (scr_dyn_ee_ops != NULL && scr_dyn_objinst_emitter(d) != NULL && scr_dyn_ee_ops->knows(key->data, key->len)) {
     return scr_dyn_ee_ops->value(key->data, key->len); /* EventEmitter.prototype's own member */
   }
@@ -2482,6 +2487,24 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
       if (dyn_objproto_knows(method)) return dyn_object_proto_method(recv, method, args, argc, what);
       dyn_throw_not_fn(what);
       return NULL;
+    }
+    /* A member no row lists: a function stored in the instance's run-time table, or a prototype-table member (JS: Get then
+     * Call, the call binding the instance). */
+    if (scr_dyn_class_ops != NULL && scr_dyn_class_ops->objinst_extra_get != NULL) {
+      ScrDyn *fv = scr_dyn_class_ops->objinst_extra_get(recv, method, strlen(method));
+      if (fv == NULL && scr_exc_pending()) return NULL;
+      if (fv != NULL) {
+        if (fv->kind == SCR_DYN_FUNC || (fv->kind == SCR_DYN_JSVAL && scr_dyn_isl_typeof_is(fv, "function"))) {
+          scr_dyn_this_push_dyn(recv);
+          ScrDyn *r = scr_dyn_call(fv, args, argc, what);
+          scr_dyn_this_pop();
+          scr_dyn_release(fv);
+          return r;
+        }
+        scr_dyn_release(fv);
+        dyn_throw_not_fn(what);
+        return NULL;
+      }
     }
     /* A miss on a class WITH a table: the table is the class's whole
      * member set, so is-not-a-function is now a TRUE statement -- but
@@ -4124,7 +4147,8 @@ ScrDyn *scr_dyn_clone_own(ScrDyn *src) {
 
 bool scr_cls_props_has(const ScrDyn *tbl, const ScrStr *key) {
   if (tbl == NULL || tbl->kind != SCR_DYN_OBJ || key == NULL) return false;
-  return scr_dyn_obj_get(tbl, key->data, key->len) != NULL;
+  const ScrDyn *ent = scr_dyn_obj_get(tbl, key->data, key->len);
+  return ent != NULL && !(ent->kind == SCR_DYN_ARR && ent->v.arr.len == 6); /* a field marker is not a table key */
 }
 
 /* How many ENUMERABLE properties the table holds. util.inspect asks
@@ -4144,7 +4168,7 @@ double scr_cls_props_count(const ScrDyn *tbl) {
 ScrDyn *scr_cls_props_get(const ScrDyn *tbl, const ScrStr *key) {
   if (tbl == NULL || tbl->kind != SCR_DYN_OBJ || key == NULL) return NULL;
   ScrDyn *ent = scr_dyn_obj_get(tbl, key->data, key->len);
-  if (ent == NULL || ent->v.arr.len < 5) return NULL;
+  if (ent == NULL || ent->v.arr.len < 5 || ent->v.arr.len == 6) return NULL; /* a field marker names no table value */
   if (clsprop_is_data(ent)) return scr_dyn_retain(clsprop_value(ent));
   ScrDyn *g = clsprop_getter(ent);
   /* A set-only accessor reads `undefined` — JS's answer, not a fence:
@@ -4164,6 +4188,38 @@ ScrDyn *scr_cls_props_read(const ScrDyn *tbl, const ScrStr *key) {
   if (v != NULL) return v;
   if (scr_exc_pending()) return NULL;
   return scr_dyn_retain(scr_dyn_undefined());
+}
+
+ScrDyn *scr_cls_props_keys(const ScrDyn *tbl) {
+  ScrDyn *out = scr_dyn_new_arr();
+  if (tbl == NULL || tbl->kind != SCR_DYN_OBJ) return out;
+  size_t *ord = scr_dyn_obj_key_order(tbl);
+  for (size_t oi = 0; oi < tbl->v.obj.len; oi++) {
+    const ScrDynEntry *e = &tbl->v.obj.entries[ord != NULL ? ord[oi] : oi];
+    const ScrDyn *q = e->value;
+    if (e->key == NULL || q == NULL || q->kind != SCR_DYN_ARR || !scr_clsprop_enumerable(q)) continue;
+    ScrStr *ks = scr_str_new(e->key, e->key_len);
+    scr_dyn_arr_push(out, scr_dyn_new_str(ks));
+    scr_str_release(ks);
+  }
+  free(ord);
+  return out;
+}
+
+/* The marker row of a field's creation (see scr_runtime.h): [data, undefined, writable, configurable, NOT enumerable, "marker"]. Six
+ * elements, where every real row has five, is what tells the two apart. */
+bool scr_cls_props_note(ScrDyn *tbl, const ScrStr *key) {
+  if (tbl == NULL || tbl->kind != SCR_DYN_OBJ || key == NULL) return false;
+  if (scr_dyn_obj_get(tbl, key->data, key->len) != NULL) return false;
+  ScrDyn *row = scr_dyn_new_arr();
+  scr_dyn_arr_push(row, scr_dyn_new_bool(true));
+  scr_dyn_arr_push(row, scr_dyn_retain(scr_dyn_undefined()));
+  scr_dyn_arr_push(row, scr_dyn_new_bool(true));
+  scr_dyn_arr_push(row, scr_dyn_new_bool(true));
+  scr_dyn_arr_push(row, scr_dyn_new_bool(false));
+  scr_dyn_arr_push(row, scr_dyn_new_bool(true));
+  scr_dyn_obj_set(tbl, key->data, key->len, row); /* ownership moves in */
+  return true;
 }
 
 /* `x.k = v` over the instance property table: a plain [[Set]]. An existing

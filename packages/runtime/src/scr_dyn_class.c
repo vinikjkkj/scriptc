@@ -931,7 +931,7 @@ static ScrDyn *dyn_cls_props_keys(const ScrDyn *v) {
 
 static ScrDyn *dyn_cls_ops_walk_error(const ScrDyn *v, ScrObjWalk mode) {
   const unsigned char rt = scr_dyn_objinst_class_of(v)->rt_root;
-  if (rt == 3 || rt == 4 || rt == 6) {
+  if (rt == 3 || rt == 4 || rt == 6 || rt == 8) {
     /* A run-time property table's keys are listed here (dyn_cls_props_keys); values and entries
      * keep the loud fence, since the table's values are not a row of the class. */
     if (mode != SCR_OBJWALK_KEYS) {
@@ -1148,12 +1148,143 @@ static ScrStr *dyn_cls_objinst_to_string(const ScrDyn *d) {
 
 static int dyn_cls_objinst_props_has(const ScrDyn *d, const ScrStr *key) {
   const unsigned char rt = scr_dyn_objinst_class_of(d)->rt_root;
-  if (rt != 3 && rt != 4 && rt != 6) return -1;
+  if (rt != 3 && rt != 4 && rt != 6 && rt != 8) return -1;
   ScrDyn *bag = dyn_cls_props_bag(d);
   if (bag == NULL) return 0;
   const ScrDyn *e = scr_dyn_obj_get(bag, key->data, key->len);
   scr_dyn_release(bag);
   return e != NULL ? 1 : 0;
+}
+
+/* A data row's value (+1) read straight off the table row; NULL for an accessor row (*acc set) or a missing key. scr_cls_props_get lives in
+ * the dyn-invoke unit, which this unit cannot assume is linked. */
+static ScrDyn *dyn_bag_data_get(const ScrDyn *bag, const char *k, size_t klen, bool *acc) {
+  const ScrDyn *ent = scr_dyn_obj_get(bag, k, klen);
+  if (ent == NULL || ent->kind != SCR_DYN_ARR || ent->v.arr.len != 5) return NULL;
+  if (!scr_dyn_truthy(ent->v.arr.items[0])) {
+    if (acc != NULL) *acc = true;
+    return NULL;
+  }
+  return scr_dyn_retain(ent->v.arr.items[1]);
+}
+
+/* A member the instance answers that no member row lists: a key of its run-time table (a function stored under a run-time key), or a
+ * member of the class's prototype table (a computed write on `C.prototype`, answered through the synthesized %dynProto* rows).
+ * +1, or NULL when there is none. */
+static ScrDyn *dyn_cls_objinst_extra_get(const ScrDyn *d, const char *k, size_t klen) {
+  ScrDyn *bag = dyn_cls_props_bag(d);
+  if (bag != NULL) {
+    const ScrDyn *ent = scr_dyn_obj_get(bag, k, klen);
+    if (ent != NULL && ent->kind == SCR_DYN_ARR && ent->v.arr.len == 5) {
+      ScrDyn *v = dyn_bag_data_get(bag, k, klen, NULL); /* an accessor row is not answered here (NULL: the caller's own miss) */
+      scr_dyn_release(bag);
+      return v;
+    }
+    scr_dyn_release(bag);
+  }
+  const ScrDynClassMember *h = scr_dyn_objinst_member(d, "%dynProtoHas", 12);
+  const ScrDynClassMember *g = scr_dyn_objinst_member(d, "%dynProtoGet", 12);
+  if (h == NULL || g == NULL || h->call == NULL || g->call == NULL) return NULL;
+  ScrStr *ks = scr_str_new(k, klen);
+  ScrDyn *kd = scr_dyn_new_str(ks);
+  scr_str_release(ks);
+  ScrDyn *av[1] = { kd };
+  ScrDyn *r = h->call(d->v.inst.o, av, 1, "a prototype lookup");
+  bool has = r != NULL && r->kind == SCR_DYN_BOOL && r->v.b;
+  if (r != NULL) scr_dyn_release(r);
+  ScrDyn *out = has ? g->call(d->v.inst.o, av, 1, "a prototype lookup") : NULL;
+  scr_dyn_release(kd);
+  return out;
+}
+
+/* The enumerable keys of the class's prototype table (+1 array), or NULL: what for-in lists after the own keys. */
+static ScrDyn *dyn_cls_objinst_proto_keys(const ScrDyn *d) {
+  const ScrDynClassMember *kr = scr_dyn_objinst_member(d, "%dynProtoKeys", 13);
+  if (kr == NULL || kr->call == NULL) return NULL;
+  ScrDyn *r = kr->call(d->v.inst.o, NULL, 0, "a prototype lookup");
+  if (r != NULL && r->kind != SCR_DYN_ARR) { scr_dyn_release(r); return NULL; }
+  return r;
+}
+
+static bool dyn_row_is_marker(const ScrDyn *q) {
+  return q != NULL && q->kind == SCR_DYN_ARR && q->v.arr.len == 6;
+}
+
+/* The own-property snapshot (scr_runtime.h). Marker mode: the table was written with field markers, so ITS insertion order is the
+ * creation order of every own key (a marker names a field, a plain row a table key). Legacy mode (no marker: a class the lowering
+ * never noted): the member rows in their own order, then the table keys. */
+static ScrDyn *dyn_cls_objinst_snapshot(const ScrDyn *v, bool *unsup) {
+  *unsup = false;
+  const unsigned char rt = scr_dyn_objinst_class_of(v)->rt_root;
+  if ((rt != 4 && rt != 6 && rt != 8) || scr_dyn_objinst_error_rooted(v)) { *unsup = true; return NULL; }
+  const size_t nm = scr_dyn_objinst_member_count(v);
+  for (size_t i = 0; i < nm; i++) {
+    const ScrDynClassMember *m = scr_dyn_objinst_member_at(v, i);
+    if (m->len > 7 && memcmp(m->name, "Symbol(", 7) == 0) { *unsup = true; return NULL; } /* a symbol-keyed field: the key is not a string */
+  }
+  ScrDyn *out = scr_dyn_new_obj();
+  ScrDyn *bag = dyn_cls_props_bag(v);
+  bool marked = false;
+  if (bag != NULL) {
+    for (size_t i = 0; i < bag->v.obj.len && !marked; i++) marked = dyn_row_is_marker(bag->v.obj.entries[i].value);
+  }
+  bool ok = true;
+  if (marked) {
+    size_t *ord = scr_dyn_obj_key_order(bag);
+    (void)ord; /* insertion order is what matters here; integer-first projection happens on the OBJ below */
+    free(ord);
+    for (size_t i = 0; i < bag->v.obj.len && ok; i++) {
+      const ScrDynEntry *e = &bag->v.obj.entries[i];
+      const ScrDyn *q = e->value;
+      if (e->key == NULL || q == NULL || q->kind != SCR_DYN_ARR || q->v.arr.len < 5) continue;
+      ScrDyn *val = NULL;
+      if (dyn_row_is_marker(q)) {
+        const ScrDynClassMember *m = scr_dyn_objinst_member(v, e->key, e->key_len);
+        if (m == NULL || m->get == NULL || m->call != NULL || !m->enumerable) continue;
+        val = m->get(v->v.inst.o);
+        if (val == NULL) { ok = false; break; }
+      } else {
+        if (!scr_dyn_truthy(q->v.arr.items[4])) continue;
+        bool acc = false;
+        val = dyn_bag_data_get(bag, e->key, e->key_len, &acc);
+        if (val == NULL) { if (acc) *unsup = true; ok = false; break; } /* an accessor row: the loud fence */
+      }
+      scr_dyn_obj_set(out, e->key, e->key_len, val);
+    }
+  } else {
+    for (size_t i = 0; i < nm && ok; i++) {
+      const ScrDynClassMember *m = scr_dyn_objinst_member_at(v, i);
+      if (scr_dyn_member_hidden(m, v->v.inst.o)) continue;
+      ScrDyn *val = m->get(v->v.inst.o);
+      if (val == NULL) { ok = false; break; }
+      scr_dyn_obj_set(out, m->name, m->len, val);
+    }
+    if (ok && bag != NULL) {
+      ScrDyn *bk = dyn_bag_keys(bag);
+      for (size_t i = 0; i < bk->v.arr.len && ok; i++) {
+        const ScrStr *ks = scr_dyn_str_value(bk->v.arr.items[i]);
+        if (scr_dyn_obj_get(out, ks->data, ks->len) != NULL) continue;
+        bool acc = false;
+        ScrDyn *val = dyn_bag_data_get(bag, ks->data, ks->len, &acc);
+        if (val == NULL) { if (acc) *unsup = true; ok = false; break; }
+        scr_dyn_obj_set(out, ks->data, ks->len, val);
+      }
+      scr_dyn_release(bk);
+    }
+  }
+  if (bag != NULL) scr_dyn_release(bag);
+  if (!ok) { scr_dyn_release(out); return NULL; }
+  return out;
+}
+
+static bool dyn_cls_objinst_own_shadows(const ScrDyn *d, const char *k, size_t klen) {
+  const unsigned char rt = scr_dyn_objinst_class_of(d)->rt_root;
+  if (rt != 3 && rt != 4 && rt != 6 && rt != 8) return false;
+  ScrDyn *bag = dyn_cls_props_bag(d);
+  if (bag == NULL) return false;
+  const ScrDyn *e = scr_dyn_obj_get(bag, k, klen);
+  scr_dyn_release(bag);
+  return e != NULL;
 }
 
 static const ScrDynClassOps dyn_cls_ops_impl = {
@@ -1164,6 +1295,10 @@ static const ScrDynClassOps dyn_cls_ops_impl = {
   dyn_cls_objinst_to_primitive, dyn_cls_objinst_to_string, dyn_cls_objinst_user_tostring,
   dyn_cls_eval_inner, dyn_cls_ops_instance_of, dyn_cls_ops_class_walk, dyn_cls_ops_class_text, dyn_cls_ops_is_class_proto,
   dyn_cls_objinst_props_has,
+  dyn_cls_objinst_own_shadows,
+  dyn_cls_objinst_snapshot,
+  dyn_cls_objinst_extra_get,
+  dyn_cls_objinst_proto_keys,
 };
 
 void scr_dyn_class_install(void) { scr_dyn_class_ops = &dyn_cls_ops_impl; }
@@ -1232,17 +1367,17 @@ static bool ee_rooted_instance(const ScrDyn *v) {
 static bool ee_keys_instance(const ScrDyn *v) {
   if (v == NULL || v->kind != SCR_DYN_OBJINST) return false;
   const unsigned char rt = scr_dyn_objinst_class_of(v)->rt_root;
-  return rt == 1 || rt == 3 || rt == 5 || rt == 6 || rt == 7; /* 5-7: a grafted class whose emitter keys are member rows */
+  return rt == 1 || rt == 3 || rt == 5 || rt == 6 || rt == 7 || rt == 8; /* 5-8: a grafted class whose emitter keys are member rows */
 }
 
 /* An instance with a run-time property table (rt_root 3 or 4). */
 static bool props_instance(const ScrDyn *v) {
   if (v == NULL || v->kind != SCR_DYN_OBJINST) return false;
   const unsigned char rt = scr_dyn_objinst_class_of(v)->rt_root;
-  return rt == 3 || rt == 4 || rt == 6;
+  return rt == 3 || rt == 4 || rt == 6 || rt == 8;
 }
 
-ScrDyn *scr_dyn_forin_keys(const ScrDyn *v) {
+static ScrDyn *dyn_forin_keys_core(const ScrDyn *v) {
   ScrDyn *keys = scr_dyn_obj_keys(v);
   /* A native handle's inherited enumerable members (a Stats box's prototype, listed by its unit). */
   if (keys != NULL && v->kind == SCR_DYN_HANDLE && scr_handle_forin_hook != NULL && keys->kind == SCR_DYN_ARR) {
@@ -1252,7 +1387,7 @@ ScrDyn *scr_dyn_forin_keys(const ScrDyn *v) {
   /* [0..2] are the emitter's own keys, listed already for a class rooted in EventEmitter; a grafted class lists them
    * as member rows once EventEmitter.call(this) ran, and before that they are the prototype's own enumerable keys. */
   const unsigned char rtk = scr_dyn_objinst_class_of(v)->rt_root;
-  const bool grafted = rtk == 5 || rtk == 6 || rtk == 7;
+  const bool grafted = rtk == 5 || rtk == 6 || rtk == 7 || rtk == 8;
   for (size_t i = grafted ? 0 : 3; i < SCR_EE_PROTO_KEY_COUNT; i++) {
     const char *name = SCR_EE_PROTO_KEYS[i];
     const size_t len = strlen(name);
@@ -1261,6 +1396,34 @@ ScrDyn *scr_dyn_forin_keys(const ScrDyn *v) {
     scr_dyn_arr_push(keys, dyn_cls_objwalk_key(name, len));
   }
   return keys;
+}
+
+ScrDyn *scr_dyn_forin_keys(const ScrDyn *v) {
+  ScrDyn *keys = dyn_forin_keys_core(v);
+  if (keys == NULL || v->kind != SCR_DYN_OBJINST || keys->kind != SCR_DYN_ARR) return keys;
+  ScrDyn *pk = dyn_cls_objinst_proto_keys(v); /* the prototype table's enumerable keys follow the own ones */
+  if (pk == NULL) return keys;
+  for (size_t i = 0; i < pk->v.arr.len; i++) {
+    ScrDyn *k = pk->v.arr.items[i];
+    if (dyn_keys_has(keys, k)) continue;
+    scr_dyn_arr_push(keys, scr_dyn_retain(k));
+  }
+  scr_dyn_release(pk);
+  return keys;
+}
+
+/* Is `s` one of the class's prototype-table keys (an enumerable inherited property for-in visits)? */
+static bool dyn_cls_proto_key_visited(const ScrDyn *v, const char *s, size_t n) {
+  if (v->kind != SCR_DYN_OBJINST) return false;
+  ScrDyn *pk = dyn_cls_objinst_proto_keys(v);
+  if (pk == NULL) return false;
+  bool hit = false;
+  for (size_t i = 0; i < pk->v.arr.len && !hit; i++) {
+    const ScrStr *ks = scr_dyn_str_value(pk->v.arr.items[i]);
+    hit = ks->len == n && memcmp(ks->data, s, n) == 0;
+  }
+  scr_dyn_release(pk);
+  return hit;
 }
 
 /* A key for-in visits WITHOUT a value check, on an EventEmitter-rooted instance: one of the
@@ -1297,15 +1460,17 @@ bool scr_dyn_forin_certain(const ScrDyn *v, const ScrStr *key) {
       scr_dyn_release(bk);
     }
     if (listed) return true;
+    if (dyn_cls_proto_key_visited(v, s, n)) return true;
     if (rt == 4) return false;
   }
   size_t idx = 0;
-  return ee_proto_key_index(s, n, &idx);
+  if (ee_proto_key_index(s, n, &idx)) return true;
+  return dyn_cls_proto_key_visited(v, s, n);
 }
 
 /* for-in's own-key test for every receiver that is NOT EventEmitter-rooted (the same answer
  * Object.hasOwn gives). EventEmitter-rooted instances answer through scr_dyn_forin_certain. */
 bool scr_dyn_forin_plain(const ScrDyn *v, const ScrStr *key) {
   if (ee_keys_instance(v) || props_instance(v)) return false;
-  return scr_dyn_has_own(v, key);
+  return scr_dyn_has_own(v, key) || dyn_cls_proto_key_visited(v, key->data, key->len);
 }
