@@ -10837,13 +10837,15 @@ export function dynReflectionSite(functions: readonly IrFunction[]): string | nu
   return found;
 }
 
-/** The writes and deletes a program that lets an EventEmitter instance reach a dynamic value may not contain,
- * because the runtime cannot make them behave as events.js does: any delete of a dyn key, any write of a dyn
- * key that is not a literal `_eventsCount` / `_maxListeners` stored with a number (the registry holds those two
- * exactly), and any write of a literal `_events`. A write through a computed key is refused for the same
- * reason: the key may be `_events`, and the receiver may be an emitter or its `_events` view (a live table in
- * Node, a copy here). Returns the sites (loc + what). Plain dyn objects in a program that never boxes an emitter
- * never reach this (the caller gates on moduleBoxesEmitters). */
+/** The writes and deletes of an emitter's state cells that a program which lets an EventEmitter instance reach a
+ * dynamic value may not contain, because the runtime cannot make them behave as events.js does: a literal
+ * `_events` write, a literal `_eventsCount` / `_maxListeners` write whose value is not a number (undefined for the
+ * latter), and a delete of any of the three. The receiver is skipped when every definition of it is a value built in
+ * the program that is not an emitter-rooted instance (a plain object, a record, an array, a copy of one: it cannot be
+ * an emitter). A COMPUTED key is not judged here: the runtime stores the numbers its registry can hold and names
+ * what it cannot (a key that equals one of the three at run time cannot be known now, and refusing every computed
+ * write of a program that boxes an emitter refused thousands of ordinary sites in the driver builds). Returns the
+ * sites (loc + what). The caller gates on moduleBoxesEmitters. */
 export function emitterStateWriteSites(functions: readonly IrFunction[], classes: readonly IrClassDef[]): { loc: SrcLoc; what: string }[] {
   const CELLS = new Set(["_events", "_eventsCount", "_maxListeners"]);
   const out: { loc: SrcLoc; what: string }[] = [];
@@ -10859,10 +10861,10 @@ export function emitterStateWriteSites(functions: readonly IrFunction[], classes
     emitterish.set(name, r);
     return r;
   };
-  const isNumberValue = (v: unknown): boolean => {
+  const isNumberValue = (v: unknown, orUndefined: boolean): boolean => {
     const n = v as { kind?: string; value?: { kind?: string; type?: { kind?: string } }; type?: { kind?: string } } | undefined;
     if (n === undefined) return false;
-    if (n.kind === "dynFrom") return n.value?.type?.kind === "f64" || (n.value as { unit?: string } | undefined)?.unit === "undefined";
+    if (n.kind === "dynFrom") return n.value?.type?.kind === "f64" || (orUndefined && (n.value as { unit?: string } | undefined)?.unit === "undefined");
     return n.type?.kind === "f64";
   };
   type Node = { kind?: string; fn?: string; args?: unknown[]; loc?: SrcLoc; localId?: string; init?: unknown; value?: { type?: { kind?: string; className?: string } } };
@@ -10926,10 +10928,12 @@ export function emitterStateWriteSites(functions: readonly IrFunction[], classes
       const key = args[1] as { kind?: string; value?: string } | undefined;
       const lit = key?.kind === "strLit" ? key.value : undefined;
       const loc = n.loc!;
-      if (n.fn === "dyn.keyDelete") out.push({ loc, what: lit !== undefined && CELLS.has(lit) ? `delete of ${lit}` : "delete through a dynamic key" });
-      else if (lit === undefined) out.push({ loc, what: "write through a computed key" });
+      // A computed key is judged at run time (the runtime stores what an emitter's registry can hold and names what
+      // it cannot): refusing it here would also refuse every keyed write of a program that merely boxes an emitter.
+      if (lit === undefined || !CELLS.has(lit)) continue;
+      if (n.fn === "dyn.keyDelete") out.push({ loc, what: `delete of ${lit}` });
       else if (lit === "_events") out.push({ loc, what: "write of _events" });
-      else if ((lit === "_eventsCount" || lit === "_maxListeners") && !isNumberValue(args[2])) out.push({ loc, what: `write of ${lit} with a value that is not a number` });
+      else if ((lit === "_eventsCount" || lit === "_maxListeners") && !isNumberValue(args[2], lit === "_maxListeners")) out.push({ loc, what: `write of ${lit} with a value that is not a number` });
     }
   }
   return out;

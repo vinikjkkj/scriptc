@@ -1531,6 +1531,31 @@ static bool ee_state_write(ScrEmitter *em, const char *name, size_t n, const Scr
     em->reg->ver++;
     return true;
   }
+  /* `x._events = {}` / `Object.create(null)` (the emitter-inheritance idiom): Node's table is replaced by that
+   * object, so the listeners leave silently (no removeListener events) and the program's object becomes the view
+   * it reads, rebuilt in place from then on. A non-empty object holds listener functions the registry cannot
+   * adopt, and is not stored. */
+  if (n == 7 && memcmp(name, "_events", 7) == 0 && value->kind == SCR_DYN_OBJ) {
+    ScrEeReg *reg = scr_ee_reg_ensure(em);
+    if (value == reg->view) return true; /* `this._events = this._events` */
+    if (value->v.obj.len != 0 || value->static_copy) return false;
+    ScrDyn *obj = (ScrDyn *)value;
+    while (reg->head) {
+      ScrEeBucket *hb = reg->head;
+      for (size_t i = 0; i < hb->n; i++) scr_ee_entry_unref(hb->ls[i]);
+      hb->n = 0;
+      hb->counted = false; /* Node does not touch _eventsCount here */
+      scr_ee_bucket_drop(reg, hb);
+    }
+    if (reg->view != NULL) scr_dyn_release(reg->view);
+    reg->view = scr_dyn_retain(obj);
+    reg->gen++;
+    reg->view_gen = reg->gen;
+    reg->ver++;
+    reg->view_ver = reg->ver;
+    reg->shape = false;
+    return true;
+  }
   if (n == 13 && memcmp(name, "_maxListeners", 13) == 0) {
     if (value->kind == SCR_DYN_NUM) {
       scr_ee_reg_ensure(em)->max = value->v.num;
