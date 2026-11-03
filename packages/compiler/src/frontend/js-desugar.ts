@@ -2319,6 +2319,54 @@ function defineGetterEdits(fileName: string, text: string): string | null {
   return out + text.slice(at);
 }
 
+/* THE NULL-PROTOTYPE DICTIONARY LITERAL. `{ __proto__: null }` is not an
+ * object with an own `__proto__` member: it SETS the prototype, and builds the
+ * same object as `Object.create(null)` (no prototype, no own keys, `"toString"
+ * in o` false). The record and dyn-object literal lowerings read the member as
+ * an ordinary own key (a record `{ __proto__ }`, listed by Object.keys and
+ * inspect, with Object.prototype members still reachable), so a dictionary
+ * built this way and filled through dynamic keys (iconv-lite's
+ * `module.exports.encodings = { __proto__: null }` merged by
+ * `target[key] = module[key]`) threw `expected null | undefined` at the first
+ * write. `Object.create(null)` has an exact lowering, so the literal whose
+ * ONLY member is `__proto__: null` is spelled that way. A literal with other
+ * members, a computed or shorthand `__proto__`, or a file that binds the name
+ * `Object` itself is left as written. */
+const NULL_PROTO_LITERAL = /__proto__['"]?\s*:\s*null/;
+
+function nullProtoLiteralEdits(fileName: string, text: string): string | null {
+  if (!NULL_PROTO_LITERAL.test(text)) return null;
+  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const edits: Edit[] = [];
+  let shadowed = false;
+  const visit = (n: ts.Node): void => {
+    if (
+      (ts.isVariableDeclaration(n) || ts.isParameter(n) || ts.isFunctionDeclaration(n) || ts.isClassDeclaration(n)) &&
+      n.name !== undefined && ts.isIdentifier(n.name) && n.name.text === "Object"
+    ) shadowed = true;
+    if (ts.isObjectLiteralExpression(n) && n.properties.length === 1) {
+      const p = n.properties[0]!;
+      if (
+        ts.isPropertyAssignment(p) && p.initializer.kind === ts.SyntaxKind.NullKeyword &&
+        ((ts.isIdentifier(p.name) && p.name.text === "__proto__") || (ts.isStringLiteral(p.name) && p.name.text === "__proto__"))
+      ) {
+        edits.push({ start: n.getStart(sf), end: n.getEnd(), text: "Object.create(null)" });
+        return;
+      }
+    }
+    n.forEachChild(visit);
+  };
+  visit(sf);
+  if (edits.length === 0 || shadowed) return null;
+  let out = "";
+  let at = 0;
+  for (const ed of edits) {
+    out += text.slice(at, ed.start) + ed.text;
+    at = ed.end;
+  }
+  return out + text.slice(at);
+}
+
 export function jsDesugar(fileName: string, text: string): string | null {
   if (!/\.(?:c?js)$/.test(fileName) || fileName.endsWith(".d.ts")) return null;
   {
@@ -2340,6 +2388,10 @@ export function jsDesugar(fileName: string, text: string): string | null {
   {
     const shadow = methodShadowEdits(fileName, text);
     if (shadow !== null) return jsDesugar(fileName, shadow) ?? shadow;
+  }
+  {
+    const nullProto = nullProtoLiteralEdits(fileName, text);
+    if (nullProto !== null) return jsDesugar(fileName, nullProto) ?? nullProto;
   }
   {
     const open = openRecordEdits(fileName, text);
