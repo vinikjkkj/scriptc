@@ -367,22 +367,33 @@ export function dynNewDrivable(L: Lowerer, info: ClassInfo, evaluated: boolean):
 }
 
 /** The OWN method names of a class's `prototype` object (what `V.prototype` carries beside `constructor`), or null when this
- * build cannot state that object exactly: accessors (their getter would have to run on the prototype), async and generator
+ * build cannot state that object exactly: async and generator
  * methods (no dyn row), symbol-named members, a runtime-provided or inexact base. */
 export function classProtoPlan(L: Lowerer, info: ClassInfo): string[] | null {
   if (info.decl === null || info.protoClass === true || info.builtinError === true || info.builtinEmitter === true ||
       info.builtinStream !== undefined || info.def.runtime === true) return null;
   const own = new Set<string>();
+  // Members classMethodMembers does not yield (async and generator methods have no member row) or names it cannot resolve.
+  for (const m of info.decl.members) {
+    if (!ts.isMethodDeclaration(m) && !ts.isGetAccessorDeclaration(m) && !ts.isSetAccessorDeclaration(m)) continue;
+    if ((ts.getModifiers(m) ?? []).some((x) => x.kind === ts.SyntaxKind.StaticKeyword)) continue;
+    if (ts.isComputedPropertyName(m.name)) return null;
+    if (ts.isMethodDeclaration(m) && (m.asteriskToken !== undefined || (ts.getModifiers(m) ?? []).some((x) => x.kind === ts.SyntaxKind.AsyncKeyword))) return null;
+  }
   for (const { mName, member } of L.classMethodMembers(info)) {
     if (mName.startsWith("#")) continue;
-    if (mName.startsWith("get:") || mName.startsWith("set:") || mName.startsWith("sym:") || mName.startsWith("%")) return null;
+    if (mName.startsWith("sym:") || mName.startsWith("%")) return null;
+    if (ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member)) {
+      own.add(ts.isGetAccessorDeclaration(member) ? `get:${mName.replace(/^(get|set):/, "")}` : `set:${mName.replace(/^(get|set):/, "")}`);
+      continue;
+    }
     if (ts.isMethodDeclaration(member)) {
       if (member.asteriskToken !== undefined) return null;
       if ((ts.getModifiers(member) ?? []).some((m) => m.kind === ts.SyntaxKind.AsyncKeyword)) return null;
     }
     own.add(mName);
   }
-  if (info.base !== null) {
+  if (info.base !== null && info.base.def.name !== "%Error") {
     if (!canBoxClassIntoDyn(info.base.def.name) || info.base.evalStaticOf !== undefined || info.base.evalClass !== undefined) return null;
     if (classProtoPlan(L, info.base) === null) return null;
   }
@@ -404,7 +415,9 @@ export function dynProtoFns(
   const baseName = `${prefix}.%dynBase`;
   const elems: IrExpr[] = own.map((n) => ({ kind: "dynFrom", value: { kind: "strLit", value: n, type: STRING, loc }, type: DYN, loc }));
   const baseVal: IrExpr =
-    inst.base !== null
+    inst.base !== null && inst.base.def.name === "%Error"
+      ? { kind: "libCall", fn: "dyn.errorProto", args: [], type: DYN, loc }
+      : inst.base !== null
       ? { kind: "dynFrom", value: { kind: "classRef", className: inst.base.def.name, type: { kind: "classval", className: inst.base.def.name }, loc }, type: DYN, loc }
       : { kind: "dynFrom", value: { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc }, type: DYN, loc };
   return {

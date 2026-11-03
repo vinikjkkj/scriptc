@@ -334,6 +334,9 @@ typedef struct DynProtoFn {
   ScrClosure clo; /* first: the closure the thunk is handed */
   const ScrDynClass *idesc;
   const ScrDynClassMember *row;
+  int kind; /* 0 method, 1 getter, 2 setter */
+  const char *name;
+  size_t len;
   struct DynProtoFn *next;
 } DynProtoFn;
 static DynProtoFn *dyn_proto_fns = NULL;
@@ -343,7 +346,27 @@ static ScrDyn *dyn_proto_method_thunk(ScrClosure *clo, ScrDyn *const *args, size
   ScrDyn *recv = scr_dyn_this_get(); /* +1 */
   ScrDyn *r = NULL;
   if (recv->kind == SCR_DYN_OBJINST && scr_dyn_objinst_is(recv, w->idesc->pre, w->idesc->post)) {
-    r = w->row->call(recv->v.inst.o, args, argc, "method");
+    if (w->kind == 1) {
+      r = w->row->get(recv->v.inst.o); /* the getter's value, +1 */
+    } else if (w->kind == 2) {
+      const ScrDynClassMember *ds = scr_dyn_objinst_member(recv, "%dynSet", 7);
+      if (ds == NULL || ds->call == NULL) {
+        dyn_eval_fence(recv, "a property write through the prototype's setter");
+      } else {
+        ScrStr *ks = scr_str_new(w->name, w->len);
+        ScrDyn *kd = scr_dyn_new_str(ks);
+        scr_str_release(ks);
+        ScrDyn *av[2] = { kd, argc > 0 ? args[0] : scr_dyn_undefined() };
+        ScrDyn *rr = ds->call(recv->v.inst.o, av, 2, "a property write");
+        scr_dyn_release(kd);
+        if (rr != NULL) {
+          scr_dyn_release(rr);
+          r = scr_dyn_retain(scr_dyn_undefined());
+        }
+      }
+    } else {
+      r = w->row->call(recv->v.inst.o, args, argc, "method");
+    }
   } else {
     scr_throw_error_named(scr_str_new("TypeError", 9), scr_str_new("Cannot read properties of undefined", 35));
   }
@@ -351,9 +374,9 @@ static ScrDyn *dyn_proto_method_thunk(ScrClosure *clo, ScrDyn *const *args, size
   return r;
 }
 
-static ScrDyn *dyn_proto_method_value(const ScrDynClass *idesc, const ScrDynClassMember *row) {
+static ScrDyn *dyn_proto_method_value(const ScrDynClass *idesc, const ScrDynClassMember *row, int kind, const char *name, size_t len) {
   DynProtoFn *w = dyn_proto_fns;
-  while (w != NULL && !(w->idesc == idesc && w->row == row)) w = w->next;
+  while (w != NULL && !(w->idesc == idesc && w->row == row && w->kind == kind && w->len == len && memcmp(w->name, name, len) == 0)) w = w->next;
   if (w == NULL) {
     w = (DynProtoFn *)calloc(1, sizeof *w);
     if (w == NULL) scr_trap("scriptc: out of memory\n");
@@ -361,10 +384,13 @@ static ScrDyn *dyn_proto_method_value(const ScrDynClass *idesc, const ScrDynClas
     w->clo.fn = (void *)dyn_proto_method_thunk;
     w->idesc = idesc;
     w->row = row;
+    w->kind = kind;
+    w->name = name;
+    w->len = len;
     w->next = dyn_proto_fns;
     dyn_proto_fns = w;
   }
-  return scr_dyn_new_func_src(&w->clo, dyn_proto_method_thunk, 0, "()", row->name, NULL);
+  return scr_dyn_new_func_src(&w->clo, dyn_proto_method_thunk, 0, "()", row != NULL ? row->name : name, NULL);
 }
 
 static const ScrDynClassMember *dyn_row_in(const ScrDynClass *c, const char *k, size_t n) {
@@ -405,10 +431,38 @@ static ScrDyn *dyn_class_prototype(const ScrDyn *d) {
     for (size_t i = 0; i < names->v.arr.len; i++) {
       const ScrDyn *nm = names->v.arr.items[i];
       if (nm->kind != SCR_DYN_STR) continue;
-      const ScrDynClassMember *row = dyn_row_in(idesc, nm->v.str->data, nm->v.str->len);
+      const char *nd = nm->v.str->data;
+      size_t nl = nm->v.str->len;
+      if (nl > 4 && (memcmp(nd, "get:", 4) == 0 || memcmp(nd, "set:", 4) == 0)) {
+        /* an accessor: ONE property per name, defined when its first half appears (a pair in declaration order) */
+        const char *key = nd + 4;
+        size_t kl = nl - 4;
+        bool seen = false;
+        for (size_t j = 0; j < i && !seen; j++) {
+          const ScrDyn *pj = names->v.arr.items[j];
+          seen = pj->kind == SCR_DYN_STR && pj->v.str->len == nl && memcmp(pj->v.str->data + 4, key, kl) == 0 && pj->v.str->len > 4 &&
+                 (memcmp(pj->v.str->data, "get:", 4) == 0 || memcmp(pj->v.str->data, "set:", 4) == 0);
+        }
+        if (seen) continue;
+        bool hasGet = false, hasSet = false;
+        for (size_t j = 0; j < names->v.arr.len; j++) {
+          const ScrDyn *pj = names->v.arr.items[j];
+          if (pj->kind != SCR_DYN_STR || pj->v.str->len != nl || memcmp(pj->v.str->data + 4, key, kl) != 0) continue;
+          if (memcmp(pj->v.str->data, "get:", 4) == 0) hasGet = true;
+          if (memcmp(pj->v.str->data, "set:", 4) == 0) hasSet = true;
+        }
+        const ScrDynClassMember *arow = dyn_row_in(idesc, key, kl);
+        ScrDyn *g = hasGet && arow != NULL && arow->get != NULL ? dyn_proto_method_value(idesc, arow, 1, key, kl) : NULL;
+        ScrDyn *st = hasSet ? dyn_proto_method_value(idesc, NULL, 2, key, kl) : NULL;
+        scr_dyn_obj_define_accessor(P, key, kl, g != NULL ? g : scr_dyn_undefined(), st != NULL ? st : scr_dyn_undefined(), true, false);
+        scr_dyn_release(g);
+        scr_dyn_release(st);
+        continue;
+      }
+      const ScrDynClassMember *row = dyn_row_in(idesc, nd, nl);
       if (row == NULL || row->call == NULL) continue;
-      ScrDyn *f = dyn_proto_method_value(idesc, row);
-      scr_dyn_obj_define_hidden_data(P, nm->v.str->data, nm->v.str->len, f, true, true);
+      ScrDyn *f = dyn_proto_method_value(idesc, row, 0, nd, nl);
+      scr_dyn_obj_define_hidden_data(P, nd, nl, f, true, true);
       scr_dyn_release(f);
     }
   }
@@ -416,7 +470,9 @@ static ScrDyn *dyn_class_prototype(const ScrDyn *d) {
   const ScrDynClassMember *baseRow = inner != NULL ? scr_dyn_objinst_member(inner, "%dynBase", 8) : dyn_class_static(cls, "%dynBase", 8);
   if (baseRow != NULL && baseRow->call != NULL) {
     ScrDyn *b = baseRow->call(recv, NULL, 0, "prototype");
-    if (b != NULL && b->kind == SCR_DYN_FUNC) {
+    if (b != NULL && b->kind == SCR_DYN_OBJ) {
+      scr_dyn_obj_set_proto(P, b); /* a runtime base's own prototype object (Error.prototype) */
+    } else if (b != NULL && b->kind == SCR_DYN_FUNC) {
       ScrDyn *bp = dyn_class_prototype(b);
       if (bp != NULL) {
         scr_dyn_obj_set_proto(P, bp);

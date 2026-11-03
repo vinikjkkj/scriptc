@@ -7383,6 +7383,11 @@ ScrDyn *scr_dyn_obj_key_get(ScrDyn *recv, const char *key, size_t key_len) {
      * value in a static build for the back-link to name, where the
      * function-prototype case has one and refuses the cycle. Both are
      * loud; neither is a silent undefined. */
+    /* A class's OWN minted prototype answers its own constructor even when its chain reaches Error.prototype. */
+    if (scr_dyn_is_minted_proto(recv) && scr_dyn_minted_proto_has_ctor(recv)) {
+      ScrDyn *own = scr_dyn_proto_chain_ctor(recv);
+      if (own != NULL) return own;
+    }
     if (scr_dyn_error_proto_in_chain(recv)) {
       /* An error ENCODING the identity cache knows is a real runtime error:
        * its constructor is its builtin kind's class value. Error.prototype
