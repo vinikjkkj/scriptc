@@ -11368,9 +11368,77 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/23600-string-array-holes.ts": {
+   "order": [
+    "<repo>/tests/corpus/23600-string-array-holes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23601-number-array-holes.ts": {
+   "order": [
+    "<repo>/tests/corpus/23601-number-array-holes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23602-dyn-array-holes.js": {
+   "order": [
+    "<repo>/tests/corpus/23602-dyn-array-holes.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23603-union-array-holes.ts": {
+   "order": [
+    "<repo>/tests/corpus/23603-union-array-holes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23604-object-array-holes.ts": {
+   "order": [
+    "<repo>/tests/corpus/23604-object-array-holes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23605-array-holes-escape/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/23605-array-holes-escape/mod.ts",
+    "<repo>/tests/corpus/23605-array-holes-escape/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23606-charset-encodings-shape/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23606-charset-encodings-shape/table.cjs",
+    "<repo>/tests/corpus/23606-charset-encodings-shape/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23607-array-call-without-new.js": {
+   "order": [
+    "<repo>/tests/corpus/23607-array-call-without-new.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23608-number-array-length-growth.ts": {
+   "order": [
+    "<repo>/tests/corpus/23608-number-array-length-growth.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23609-array-hole-copy-and-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/23609-array-hole-copy-and-order.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2361-assign-index-record.ts": {
    "order": [
     "<repo>/tests/corpus/2361-assign-index-record.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23610-array-hole-elision-literals.js": {
+   "order": [
+    "<repo>/tests/corpus/23610-array-hole-elision-literals.js"
    ],
    "diags": []
   },
