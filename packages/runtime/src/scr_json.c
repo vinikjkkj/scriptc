@@ -1139,6 +1139,12 @@ ScrDyn *scr_dyn_obj_member_get(const ScrDyn *d, const char *key, size_t key_len)
   ScrDyn *m = scr_dyn_proto_get(d, key, key_len);
   if (m == NULL) return NULL;
   if (m->kind != SCR_DYN_FUNC) return scr_dyn_retain(m);
+  return scr_dyn_bound_method_to(m, d);
+}
+
+/* `m` (a function box) bound to `d` as its receiver: the function a method read
+ * through [[Get]] hands back. +1. */
+ScrDyn *scr_dyn_bound_method_to(const ScrDyn *m, const ScrDyn *d) {
   ScrClosure *clo = scr_closure_new((void *)scr_bound_method_thunk, 2);
   clo->caps[0] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
   scr_box_set_ref(clo->caps[0], scr_dyn_retain(m));
@@ -1993,6 +1999,82 @@ int scr_dyn_is_null_proto(const ScrDyn *d) {
 ScrDyn *scr_dyn_obj_proto_ref(const ScrDyn *d) {
   if (d == NULL || d->kind != SCR_DYN_OBJ || scr_dyn_ext(d)->proto == NULL) return NULL;
   return scr_dyn_retain(scr_dyn_ext(d)->proto);
+}
+
+/* The record builder's INSTANCE lane: the declared members of a boxed class
+ * instance, projected into a plain object the ordinary OBJ body then validates.
+ *
+ * `x as R` is erased in JS, so Node answers every member R declares from the
+ * instance itself: a data field, a getter, a method, a member the class
+ * inherited. Each is read through `kg` (the emitted sc_dyn_key_get, so a
+ * run-time defineProperty table and the member table answer exactly as a plain
+ * `x[k]` would), and a getter that throws propagates (NULL, exception pending).
+ * An UNDEFINED answer is JS's absent read, so the key is not written and the OBJ
+ * body's own absent handling decides it.
+ *
+ * What the instance OWNS and what it merely INHERITS stay apart, because
+ * Object.keys / JSON.stringify / hasOwn of the built record read the mask the
+ * OBJ body takes from `own` and `[[Prototype]]`: an own enumerable data member
+ * (a declared field) is written as an own key; a getter or a method rides a
+ * prototype object attached to the projection, which is exactly where the
+ * class keeps it. `all_own` (a shape with an index signature) also carries
+ * every other own enumerable key, which is the overflow Node would show.
+ * +1, or NULL with the exception pending. */
+ScrDyn *scr_dyn_rec_wide_inst(const ScrDyn *d, const char *const *keys, const unsigned *lens, size_t n,
+                              bool all_own, ScrDyn *(*kg)(ScrDyn *, ScrStr *, bool)) {
+  ScrDyn *o = scr_dyn_new_obj();
+  ScrDyn *proto = NULL;
+  if (all_own) {
+    ScrDyn *ents = scr_dyn_objwalk(d, SCR_OBJWALK_ENTRIES);
+    if (ents == NULL) {
+      scr_dyn_release(o);
+      return NULL;
+    }
+    for (size_t i = 0; i < ents->v.arr.len; i++) {
+      const ScrDyn *pair = ents->v.arr.items[i];
+      const ScrDyn *pk = pair->v.arr.items[0];
+      scr_dyn_obj_set(o, pk->v.str->data, pk->v.str->len, scr_dyn_retain(pair->v.arr.items[1])); /* a run-time key: copied */
+    }
+    scr_dyn_release(ents);
+  }
+  for (size_t i = 0; i < n; i++) {
+    const char *kd = keys[i];
+    size_t kl = lens[i];
+    if (all_own && scr_dyn_obj_get(o, kd, kl) != NULL) continue; /* an own key: already carried */
+    ScrStr *k = scr_str_new(kd, kl);
+    ScrDyn *v = kg((ScrDyn *)d, k, false);
+    scr_str_release(k);
+    if (v == NULL) {
+      scr_dyn_release(o);
+      if (proto != NULL) scr_dyn_release(proto);
+      return NULL;
+    }
+    const ScrDynClassMember *m = scr_dyn_objinst_member(d, kd, kl);
+    if (v->kind == SCR_DYN_UNDEF && !(m != NULL && m->get != NULL && m->enumerable == 1)) {
+      /* The absent read: the key is not written and the OBJ body decides. An own member the
+       * table lists as present-when-undefined stays an own key holding undefined. */
+      scr_dyn_release(v);
+      continue;
+    }
+    if (m != NULL && m->call != NULL && v->kind == SCR_DYN_FUNC) {
+      /* A METHOD: the record's field is a COPY, so a call through it has to reach the
+       * INSTANCE. The member read hands back the unbound prototype function. */
+      ScrDyn *bound = scr_dyn_bound_method_to(v, d);
+      scr_dyn_release(v);
+      v = bound;
+    }
+    if (m != NULL && m->get != NULL && m->enumerable != 0) {
+      scr_dyn_obj_set_lit(o, kd, kl, v); /* takes the +1 */
+    } else {
+      if (proto == NULL) proto = scr_dyn_new_obj();
+      scr_dyn_obj_set_lit(proto, kd, kl, v);
+    }
+  }
+  if (proto != NULL) {
+    scr_dyn_obj_set_proto(o, proto);
+    scr_dyn_release(proto);
+  }
+  return o;
 }
 
 /* [[Get]] along a saved [[Prototype]] chain, keyed by a ScrStr — the
@@ -6535,6 +6617,17 @@ static ScrStr *scr_rec_tostr_dyn_fn(ScrClosure *clo) {
 }
 
 ScrClosure *scr_dyn_tostr_closure(const ScrDyn *d) {
+  if (d != NULL && d->kind == SCR_DYN_OBJINST) {
+    /* A class instance crossed into a record keeps the instance's own ToString: its
+     * `toString` method, or the Error.prototype form of an Error-rooted class. A
+     * valueOf member splits the hints, as below, and declines. */
+    if (scr_dyn_objinst_member(d, "valueOf", 7) != NULL) return NULL;
+    if (scr_dyn_objinst_member(d, "toString", 8) == NULL && !scr_dyn_objinst_error_rooted(d)) return NULL;
+    ScrClosure *iclo = scr_closure_new((void *)scr_rec_tostr_dyn_fn, 1);
+    iclo->caps[0] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, scr_dyn_trace_v);
+    scr_box_set_ref(iclo->caps[0], scr_dyn_retain((ScrDyn *)d));
+    return iclo;
+  }
   if (d == NULL || d->kind != SCR_DYN_OBJ) return NULL;
   /* An own-or-inherited valueOf means the DEFAULT hint (`r + ""`) and the
    * STRING hint (String(r)) disagree, and one slot cannot answer both --
