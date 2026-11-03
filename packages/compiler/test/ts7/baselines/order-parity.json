@@ -22843,12 +22843,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/diagnostics/grafted-emitter-dyn-reflection-refused.cjs": {
-   "order": [
-    "<repo>/tests/diagnostics/grafted-emitter-dyn-reflection-refused.cjs"
-   ],
-   "diags": []
-  },
   "<repo>/tests/diagnostics/grafted-emitter-dyn-structured-clone-refused.cjs": {
    "order": [
     "<repo>/tests/diagnostics/grafted-emitter-dyn-structured-clone-refused.cjs"
