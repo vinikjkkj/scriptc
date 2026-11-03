@@ -31,7 +31,7 @@
  *   ScrBytes { rc +0; len +8; elem +16; data +24 }.
  *   ScrDynPath { parent, key, index } — the %ScrDynPath type. */
 import type { IrBytesElem, IrFunction, IrRecordShape, IrType } from "../../ir/nodes.js";
-import { accessorKeyOrderOf, accessorSlotProp, shapeHasAccessorSlots, VOID, arrayTypeHasLiveView, bytesAliasOnExtract, canConvertToDyn, canDynCheckTo, dynErrorClassKind, isDynErrorClass } from "../../ir/nodes.js";
+import { RUNTIME_EMITTER_CLASS, accessorKeyOrderOf, accessorSlotProp, shapeHasAccessorSlots, VOID, arrayTypeHasLiveView, bytesAliasOnExtract, canConvertToDyn, canDynCheckTo, dynErrorClassKind, isDynErrorClass } from "../../ir/nodes.js";
 import { armDiscrimLits, dynNeverArm, dynNeverIn, canAdaptDynFuncTo, dynRestApplyable, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey } from "../../ir/nodes.js";
 import { nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit as maskKeyBit } from "../../ir/nodes.js";
 import { INTERNAL_SLOT_WANT_TEXT } from "../emission/emit-walkers.js";
@@ -5222,7 +5222,7 @@ export class LlDyn {
       // module (emitClassShapes), and a declare beside a define is
       // "invalid redefinition" from llc rather than a link-time nicety.
       const recv = B.tmp();
-      if (recvT !== null) B.line(`${recv} = call ptr @${mangleClassRetain(recvT.className)}(ptr %o)`);
+      if (recvT !== null) B.line(`${recv} = call ptr @${this.eeRecvRc(recvT.className, "retain")}(ptr %o)`);
 
       if (row.kind === "accessor") {
         const callArgs = recvT === null ? "" : `ptr ${recv}`;
@@ -5256,7 +5256,7 @@ export class LlDyn {
       const rest = fn.params.slice(isStatic ? 0 : 1);
       const argNames: string[] = [];
       const undoAll = (upto: number): void => {
-        if (recvT !== null) B.line(`call void @${mangleClassRelease(recvT.className)}(ptr ${recv})`);
+        if (recvT !== null) B.line(`call void @${this.eeRecvRc(recvT.className, "release")}(ptr ${recv})`);
         rest.slice(0, upto).forEach((q, j) => {
           if (isRefCounted(q.type)) B.line(`call void ${releaseSym(host, q.type)}(ptr ${argNames[j]})`);
         });
@@ -5410,6 +5410,16 @@ export class LlDyn {
       ``,
     );
     return name;
+  }
+
+  /** The retain / release symbol a member-row wrapper uses for its receiver class: the runtime emitter class has no
+   * emitted adapters of its own (the runtime's _v pair stands in). */
+  eeRecvRc(className: string, which: "retain" | "release"): string {
+    if (className === RUNTIME_EMITTER_CLASS) {
+      this.host.declare(which === "retain" ? `declare ptr @scr_emitter_retain_v(ptr)` : `declare void @scr_emitter_release_v(ptr)`);
+      return which === "retain" ? "scr_emitter_retain_v" : "scr_emitter_release_v";
+    }
+    return which === "retain" ? mangleClassRetain(className) : mangleClassRelease(className);
   }
 
   dynFuncBoxHelper(t: IrType & { kind: "func" }): string {

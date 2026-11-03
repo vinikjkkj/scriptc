@@ -12,6 +12,7 @@ import { CLASS_PROPS_FIELD, dynNeverArm, dynNeverIn, armDiscrimLits, dynErrorCla
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassStruct, mangleField, mangleFunction, mangleFnClosure, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
 import type { ClassMeta } from "./emit-shapes.js";
+import { RUNTIME_EMITTER_CLASS as RUNTIME_EMITTER_CLASS_W } from "../../ir/nodes.js";
 import { dynClassDisplayName, dynEmitterSlot, dynRuntimeRoot, dynEnumerationFenced, dynMemberRows, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
 import { ORD_MEMBER, orderRecordPlanCached } from "../../ir/nodes.js";
 import { KINDGATE_WIDE_KINDS, kindgateWideLane } from "../kindgate.js";
@@ -219,7 +220,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
       // The receiver is RETAINED into the call: a compiled method consumes
       // its `this` parameter exactly as a constructor does, and the box
       // still holds its own reference afterwards.
-      const recv = recvT === null ? "" : retainCallC(recvT, `((${mangleClassStruct(recvT.className)} *)o)`);
+      const recv = recvT === null ? "" : retainCallC(recvT, `((${recvT.className === RUNTIME_EMITTER_CLASS_W ? "ScrEmitter" : mangleClassStruct(recvT.className)} *)o)`);
       const callee = mangleFunction(fn.name);
       const ret = fn.returnType;
       const d: string[] = [];
