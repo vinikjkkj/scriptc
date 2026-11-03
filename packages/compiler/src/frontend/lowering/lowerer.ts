@@ -2710,6 +2710,46 @@ export class Lowerer {
     return { dep, name: key.text };
   }
 
+  /** `const C = require("pkg")` over a module whose runtime export is exactly
+   * `module.exports = X` with X a class the program declares: that class. The
+   * checker may resolve the require to a package's ESM wrapper (a dual
+   * package's `import` condition), whose module symbol names no class; the
+   * runtime module is the CommonJS one (the same dependency the require
+   * evaluates), so the class is read from its export assignment. */
+  requireBoundClassInfoOf(e: ts.Expression): ClassInfo | null {
+    if (!ts.isIdentifier(e)) return null;
+    const sym = this.checker.getSymbolAtLocation(e);
+    if (!sym) return null;
+    const decls = this.checker.declarationsOf(sym);
+    const decl = decls.length === 1 ? decls[0] : undefined;
+    if (
+      decl === undefined || !ts.isVariableDeclaration(decl) || decl.initializer === undefined ||
+      !ts.isVariableDeclarationList(decl.parent) || (decl.parent.flags & ts.NodeFlags.Const) === 0
+    ) {
+      return null;
+    }
+    const spec = requireSpecOf(decl.initializer);
+    if (spec === null) return null;
+    const sf = decl.getSourceFile();
+    const dep = isRelativeSpecifier(spec) ? resolveImport(this.program, sf, spec) : this.bareRequireDepOf(sf, spec);
+    if (dep === null || dep === undefined || dep.isDeclarationFile) return null;
+    let target: ts.Expression | null = null;
+    for (const st of dep.statements) {
+      if (!ts.isExpressionStatement(st) || !ts.isBinaryExpression(st.expression)) continue;
+      const be = st.expression;
+      if (be.operatorToken.kind !== ts.SyntaxKind.EqualsToken) continue;
+      const l = be.left;
+      if (!ts.isPropertyAccessExpression(l) || l.name.text !== "exports" || !ts.isIdentifier(l.expression) || l.expression.text !== "module") continue;
+      if (target !== null) return null; // reassigned: the export is whichever ran last
+      target = be.right;
+    }
+    if (target === null || !ts.isIdentifier(target)) return null;
+    let xs = this.checker.getSymbolAtLocation(target) ?? null;
+    if (xs && (xs.flags & ts.SymbolFlags.Alias) !== 0) xs = this.checker.getAliasedSymbol(xs);
+    const info = xs ? this.classBySymbol.get(xs) : undefined;
+    return info !== undefined && info.classDecorators?.valueGlobalId === undefined ? info : null;
+  }
+
   /** The `export =` module a named import specifier binds a member of, when
    * the importer is a CJS-run TS file (program.ts isCjsEmitImporter), with the
    * member name. Null for every other import. */

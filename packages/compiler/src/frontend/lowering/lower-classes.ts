@@ -3613,7 +3613,10 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           // may be a MAPPED view of the class (Long minus the members
           // Timestamp redeclares) — a type-world subset of the same
           // layout, so the prefix an `extends` needs is unchanged.
-          castAliasedClassInfoOf(L, symbol) ?? null;
+          castAliasedClassInfoOf(L, symbol) ??
+          // `const Pool = require('pg-pool')` over `module.exports = Pool` when
+          // the checker resolved the require to the package's ESM wrapper.
+          L.requireBoundClassInfoOf(t.expression) ?? null;
         // `extends Box<number>` — a GENERIC program class as the base: the
         // base is the concrete INSTANTIATION, resolved through the heritage
         // type (mapType registers/reuses `Box%0`).
