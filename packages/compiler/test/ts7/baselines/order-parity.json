@@ -22855,6 +22855,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/grafted-emitter-dyn-object-create-over-parameter-refused.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/grafted-emitter-dyn-object-create-over-parameter-refused.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/grafted-emitter-dyn-property-table-values-refused.cjs": {
    "order": [
     "<repo>/tests/diagnostics/grafted-emitter-dyn-property-table-values-refused.cjs"
