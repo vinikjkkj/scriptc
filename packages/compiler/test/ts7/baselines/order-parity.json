@@ -11442,9 +11442,87 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/23611-grown-number-array-aliased.ts": {
+   "order": [
+    "<repo>/tests/corpus/23611-grown-number-array-aliased.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23612-grown-number-array-fill-value.ts": {
+   "order": [
+    "<repo>/tests/corpus/23612-grown-number-array-fill-value.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23613-grown-number-array-forEach.ts": {
+   "order": [
+    "<repo>/tests/corpus/23613-grown-number-array-forEach.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23614-grown-number-array-for-of.ts": {
+   "order": [
+    "<repo>/tests/corpus/23614-grown-number-array-for-of.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23615-grown-number-array-indexOf-join.ts": {
+   "order": [
+    "<repo>/tests/corpus/23615-grown-number-array-indexOf-join.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23616-grown-number-array-in.ts": {
+   "order": [
+    "<repo>/tests/corpus/23616-grown-number-array-in.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23617-grown-number-array-json.ts": {
+   "order": [
+    "<repo>/tests/corpus/23617-grown-number-array-json.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23618-grown-number-array-logged.ts": {
+   "order": [
+    "<repo>/tests/corpus/23618-grown-number-array-logged.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23619-grown-number-array-map.ts": {
+   "order": [
+    "<repo>/tests/corpus/23619-grown-number-array-map.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2362-execsync-inherit.ts": {
    "order": [
     "<repo>/tests/corpus/2362-execsync-inherit.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23620-grown-number-array-passed.ts": {
+   "order": [
+    "<repo>/tests/corpus/23620-grown-number-array-passed.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23621-grown-number-array-returned.ts": {
+   "order": [
+    "<repo>/tests/corpus/23621-grown-number-array-returned.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23622-grown-number-array-slice.ts": {
+   "order": [
+    "<repo>/tests/corpus/23622-grown-number-array-slice.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23623-grown-number-array-spread.ts": {
+   "order": [
+    "<repo>/tests/corpus/23623-grown-number-array-spread.ts"
    ],
    "diags": []
   },
