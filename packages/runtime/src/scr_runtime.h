@@ -2728,10 +2728,10 @@ ScrEmitter *scr_emitter_on_via_boxed(ScrEmitter *em, ScrStr *name, ScrClosure *o
                                      ScrClosure *adapter /*moves*/, const ScrDyn *proto,
                                      ScrEeInvoke inv, bool once, bool prepend);
 ScrEmitter *scr_emitter_on_twin(ScrEmitter *em, ScrStr *name, ScrClosure *cb /*moves*/, ScrClosure *twin /*moves*/,
-                                const ScrDyn *proto, ScrEeInvoke inv, bool once, bool prepend);
+                                const ScrDyn *proto, const ScrDyn *ident, ScrEeInvoke inv, bool once, bool prepend);
 ScrEmitter *scr_emitter_on_via_twin(ScrEmitter *em, ScrStr *name, ScrClosure *orig /*moves*/,
                                     ScrClosure *adapter /*moves*/, ScrClosure *twin /*moves*/,
-                                    const ScrDyn *proto, ScrEeInvoke inv, bool once, bool prepend);
+                                    const ScrDyn *proto, const ScrDyn *ident, ScrEeInvoke inv, bool once, bool prepend);
 double scr_emitter_listener_count(ScrEmitter *em, ScrStr *name);
 double scr_emitter_listener_count_fn(ScrEmitter *em, ScrStr *name, ScrClosure *fn);
 ScrArr *scr_emitter_event_names(ScrEmitter *em);          /* +1 string[] */

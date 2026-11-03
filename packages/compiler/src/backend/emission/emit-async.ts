@@ -5,7 +5,7 @@ import { appendLines, type CEmitter } from "./emitter.js";
 import { emitGenCoroSpawn } from "./emit-gen-coro.js";
 import { mangleAgenSettleThunk, mangleArgPack, mangleAsyncSpawn, mangleChildDataThunk, mangleChildExitThunk, mangleCloseBindThunk, mangleCloseOverrideWrap, mangleConnectSockThunk, mangleDgramMsgThunk, mangleDnsLookupThunk, mangleFsStatThunk, mangleField, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRaceThunk, mangleRawParam, mangleNetLookupAnswerThunk, mangleEmitterInvokeThunk, mangleStreamCbThunk, mangleStreamDoneFn, mangleRecordNew, mangleRecordRelease, mangleRecordStruct, mangleResolveThunk, mangleSniAnswerThunk, mangleTrampoline } from "../mangle.js";
 import { cDecl, cType, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
-import { IrFunction, IrType, isDynPackFunc, isRefCounted, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
+import { IrFunction, IrType, canBoxFuncIntoDyn, isDynPackFunc, isRefCounted, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
 
 /** Per-async-function machinery: an argument pack, a fiber trampoline
    * (unpacks, runs the ordinary compiled body, settles the promise), and a
@@ -1236,13 +1236,20 @@ export function emitterTwinOnFor(E: CEmitter, cbT: IrType & { kind: "func" }, tw
   E.emitterTwinOns.set(key, sym);
   const thunk = E.emitterInvokeThunkFor(cbT);
   const box = E.dynFuncBoxHelper(twT);
+  // The identity box users see through listeners(): the ORIGINAL listener behind its typed thunk (when the
+  // typed signature boxes at all; else the twin's box answers).
+  const identBox = canBoxFuncIntoDyn(cbT, (id: string) => E.recordsById.get(id), (id: string) => E.unionsById.get(id))
+    ? E.dynFuncBoxHelper(cbT)
+    : null;
   const sig = `${E.link}ScrEmitter *${sym}(ScrEmitter *sc_em, ScrStr *sc_name, ScrClosure *sc_cb, ScrClosure *sc_tw, bool sc_once, bool sc_prepend)`;
   E.walkerProtos.push(`${sig};`);
   E.walkerDefs.push(
     `${sig} {`,
     `  ScrDyn *sc_box = ${box}(sc_tw, NULL, NULL);`,
-    `  ScrEmitter *sc_r = scr_emitter_on_twin(sc_em, sc_name, sc_cb, sc_tw, sc_box, &${thunk}, sc_once, sc_prepend);`,
+    `  ScrDyn *sc_id = ${identBox === null ? "NULL" : `${identBox}(sc_cb, NULL, NULL)`};`,
+    `  ScrEmitter *sc_r = scr_emitter_on_twin(sc_em, sc_name, sc_cb, sc_tw, sc_box, sc_id, &${thunk}, sc_once, sc_prepend);`,
     `  scr_dyn_release(sc_box);`,
+    `  if (sc_id) scr_dyn_release(sc_id);`,
     `  return sc_r;`,
     `}`,
     ``,
