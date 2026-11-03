@@ -1258,7 +1258,10 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
        * is also what decides the grid grouping and the "... more items"
        * tail's exclusion, exactly as Node's formatList appends them. */
       const ScrDyn *xs = scr_dyn_arr_extras(d);
-      const size_t nx = xs != NULL ? xs->v.obj.len : 0;
+      /* A listener list of an emitter's `_events` carries Node's enumerable symbol property
+       * (events.emitting), printed after the elements. */
+      const ScrDyn *eel = scr_dyn_obj_slot_get(d, "%eeList", 7);
+      const size_t nx = (xs != NULL ? xs->v.obj.len : 0) + (eel != NULL ? 1 : 0);
       if (d->v.arr.len == 0 && nx == 0) return scr_str_new("[]", 2);
       if (recurse > depth) return scr_str_new("[Array]", 7);
       scr_insp_begin(recurse + 1);
@@ -1276,6 +1279,17 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         scr_str_release(m);
       }
       for (size_t i = 0; i < nx; i++) {
+        if (eel != NULL && i == nx - 1) {
+          ScrStr *val = scr_insp_dyn((ScrDyn *)eel, recurse + 1, depth);
+          InspBuf eb = {0};
+          ib_cstr(&eb, "Symbol(events.emitting): ");
+          ib_bytes(&eb, val->data, val->len);
+          scr_str_release(val);
+          ScrStr *entry = ib_take(&eb);
+          scr_insp_entry(entry, false);
+          scr_str_release(entry);
+          continue;
+        }
         const ScrDynEntry *ent = &xs->v.obj.entries[i];
         ScrStr *val = scr_insp_dyn(ent->value, recurse + 1, depth);
         InspBuf eb = {0};
@@ -1635,7 +1649,51 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         ib_char(&out, ' ');
         ib_cstr(&out, fn_kind_names[finh]);
       }
-      if (!scr_insp_show_hidden) return ib_take(&out);
+      if (!scr_insp_show_hidden) {
+        /* The function's own ENUMERABLE properties follow its base in braces, as an object's do
+         * (`[Function: g] { listener: [Function: f] }`): the closure's property table minus the built-ins
+         * (name, length, prototype are non-enumerable in Node). */
+        ScrDyn *table = d->v.fn.clo->props != NULL ? (ScrDyn *)scr_box_get_ref(d->v.fn.clo->props) : NULL; /* +1 */
+        size_t nown = 0;
+        if (table != NULL && table->kind == SCR_DYN_OBJ) {
+          for (size_t i = 0; i < table->v.obj.len; i++) {
+            const ScrDynEntry *e = &table->v.obj.entries[i];
+            if ((e->key_len == 4 && memcmp(e->key, "name", 4) == 0) || (e->key_len == 6 && memcmp(e->key, "length", 6) == 0) ||
+                (e->key_len == 9 && memcmp(e->key, "prototype", 9) == 0)) continue;
+            nown++;
+          }
+        }
+        if (nown == 0 || recurse > depth) {
+          scr_dyn_release(table);
+          return ib_take(&out);
+        }
+        ScrStr *fbase = ib_take(&out);
+        scr_insp_begin(recurse + 1);
+        size_t *ford = scr_dyn_obj_key_order(table);
+        for (size_t oi = 0; oi < table->v.obj.len; oi++) {
+          const ScrDynEntry *e = &table->v.obj.entries[ford != NULL ? ford[oi] : oi];
+          if ((e->key_len == 4 && memcmp(e->key, "name", 4) == 0) || (e->key_len == 6 && memcmp(e->key, "length", 6) == 0) ||
+              (e->key_len == 9 && memcmp(e->key, "prototype", 9) == 0)) continue;
+          ScrStr *val = scr_insp_dyn(e->value, recurse + 1, depth);
+          InspBuf eb = {0};
+          insp_key_into(&eb, e->key, e->key_len);
+          ib_cstr(&eb, ": ");
+          ib_bytes(&eb, val->data, val->len);
+          scr_str_release(val);
+          ScrStr *entry = ib_take(&eb);
+          scr_insp_entry(entry, false);
+          scr_str_release(entry);
+        }
+        free(ford);
+        scr_dyn_release(table);
+        ScrStr *fb0 = scr_str_new("{", 1);
+        ScrStr *fb1 = scr_str_new("}", 1);
+        ScrStr *fout = scr_insp_end(fbase, fb0, fb1, recurse + 1, false, false);
+        scr_str_release(fbase);
+        scr_str_release(fb0);
+        scr_str_release(fb1);
+        return fout;
+      }
       /* showHidden (%o): Node lists the function's own non-enumerable keys
        * after its base, one per line when they do not fit:
        * [length], [name], [prototype] (for a function that has one, whose
