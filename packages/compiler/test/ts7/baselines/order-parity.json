@@ -12111,9 +12111,83 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/23900-proto-table-command-list.js": {
+   "order": [
+    "<repo>/tests/corpus/23900-proto-table-command-list.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23901-proto-table-declared-method-collision.js": {
+   "order": [
+    "<repo>/tests/corpus/23901-proto-table-declared-method-collision.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23902-proto-table-runtime-keys.js": {
+   "order": [
+    "<repo>/tests/corpus/23902-proto-table-runtime-keys.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23903-own-shadow-and-proto-table-collisions.js": {
+   "order": [
+    "<repo>/tests/corpus/23903-own-shadow-and-proto-table-collisions.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23904-run-time-key-copy-bind-and-super.js": {
+   "order": [
+    "<repo>/tests/corpus/23904-run-time-key-copy-bind-and-super.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23905-own-shadow-calls-and-proto-table-identity.js": {
+   "order": [
+    "<repo>/tests/corpus/23905-own-shadow-calls-and-proto-table-identity.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23906-symbol-key-through-export-and-alias/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23906-symbol-key-through-export-and-alias/sym.cjs",
+    "<repo>/tests/corpus/23906-symbol-key-through-export-and-alias/client.cjs",
+    "<repo>/tests/corpus/23906-symbol-key-through-export-and-alias/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23907-define-command-scripts-and-pipeline-copy.js": {
+   "order": [
+    "<repo>/tests/corpus/23907-define-command-scripts-and-pipeline-copy.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23908-run-time-keyed-members-in-operator.js": {
+   "order": [
+    "<repo>/tests/corpus/23908-run-time-keyed-members-in-operator.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23909-keyed-writes-on-grafted-emitter-key-order.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23909-keyed-writes-on-grafted-emitter-key-order.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2391-default-builtin-imports/main.ts": {
    "order": [
     "<repo>/tests/corpus/2391-default-builtin-imports/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23910-own-key-creation-order-fields-and-keyed-writes.js": {
+   "order": [
+    "<repo>/tests/corpus/23910-own-key-creation-order-fields-and-keyed-writes.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23911-prototype-table-through-untyped-receivers.js": {
+   "order": [
+    "<repo>/tests/corpus/23911-prototype-table-through-untyped-receivers.js"
    ],
    "diags": []
   },
@@ -23646,6 +23720,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/own-key-method-value-refused.js": {
+   "order": [
+    "<repo>/tests/diagnostics/own-key-method-value-refused.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/pkg-import-fences/main.ts": {
    "order": [
     "<repo>/tests/diagnostics/pkg-import-fences/main.ts"
@@ -23737,6 +23817,18 @@
   "<repo>/tests/diagnostics/promiselike-hand-rolled-thenable.ts": {
    "order": [
     "<repo>/tests/diagnostics/promiselike-hand-rolled-thenable.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/proto-table-ancestor-method-refused.js": {
+   "order": [
+    "<repo>/tests/diagnostics/proto-table-ancestor-method-refused.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/proto-table-sibling-tables-refused.js": {
+   "order": [
+    "<repo>/tests/diagnostics/proto-table-sibling-tables-refused.js"
    ],
    "diags": []
   },
