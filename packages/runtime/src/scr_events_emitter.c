@@ -287,7 +287,10 @@ void scr_emitter_reg_gcfree(ScrEeReg *reg) {
   while (b) {
     ScrEeBucket *next = b->next;
     for (size_t i = 0; i < b->n; i++) {
-      if (--b->ls[i]->refs == 0) free(b->ls[i]);
+      if (--b->ls[i]->refs == 0) {
+        if (b->ls[i]->wfired) scr_box_release(b->ls[i]->wfired); /* a plain box: not a collector node */
+        free(b->ls[i]);
+      }
     }
     scr_str_release(b->name);
     free(b->ls);
