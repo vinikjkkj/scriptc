@@ -68,6 +68,7 @@ import type {
   SrcLoc,
 } from "../../ir/nodes.js";
 import { protoEscapes, strictAt } from "./lower-protoescape.js";
+import { applyProtoSlots, scanProtoSlots } from "./lower-protoslots.js";
 import { CLASS_BUILTIN_CTORLESS, CLASS_NO_DYN_NEW, EVAL_NO_SRC_CLASSES, GRAFTED_EMITTER_CLASSES, EVAL_STATIC_CLASSES, dynReflectionSite, graftedBoxSites, moduleBoxesEmitters } from "../../ir/nodes.js";
 import { computeTwinEdits, type TwinEdits } from "./emitter-twin.js";
 import { canBoxFuncIntoDyn } from "../../ir/nodes.js";
@@ -3721,6 +3722,7 @@ export class Lowerer {
     // (valueGlobalId) settled before any body lowers.
     for (const info of this.classes.values()) analyzeClassDecoration(this, info);
     this.prepareModuleInits(parts);
+    scanProtoSlots(this, parts.map((fp) => fp.sf));
     lowerProfileNote(this.remainder ? "%remainder-collect" : "%emit-collect", performance.now() - __colT);
 
     const functions: IrFunction[] = [];
@@ -3843,6 +3845,7 @@ export class Lowerer {
     // implicit-any instances lowered eagerly at their first call sites.
     setMintPhase("tail:lifted");
     mintPhaseControl(this.shapes);
+    applyProtoSlots(this, [functions, this.implicitFns]);
     functions.push(...this.liftedFns);
     functions.push(...this.implicitFns);
     // GRAFTED-EMITTER FENCE (graftedDynFence). A class grafted by applyMixin(Y, EventEmitter) crosses into a dyn slot
@@ -15266,6 +15269,12 @@ export class Lowerer {
    * assignment lowers to nothing), and the checker type that stands in for
    * `this` while such a method's body lowers under C. */
   readonly lateMethodAssigns = new Set<ts.Node>();
+  /** Run-time prototype method replacement (lower-protoslots.ts): class name -> method -> the slot global a write stores into. */
+  readonly protoSlots = new Map<string, Map<string, IrGlobal>>();
+  /** The class a keyed forEach value reference stands for while that key is unrolled (`ctor` in `ctor.prototype.m`). */
+  readonly keyedProtoClass = new Map<ts.Node, ClassInfo>();
+  /** `X.prototype.m` reads of a member the class does not have (undefined): an `if` on one has a dead then-branch. */
+  readonly protoMissingReads = new Set<ts.Node>();
   /** Prototype-data slots of ES classes (`C.prototype.name = v`), keyed by class name then member (lower-protodata.ts). */
   readonly protoDataSlots = new Map<string, Map<string, import("./lower-protodata.js").ProtoDataSlot>>();
   /** The top-level prototype-data write statements and the slot each one stores into. */
