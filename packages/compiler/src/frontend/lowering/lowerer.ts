@@ -4050,12 +4050,15 @@ export class Lowerer {
     // after the whole walk, so the answer does not depend on whether the
     // cast was lowered before or after the surface that enumerates it.
     if (this.diags.length === 0) this.armOwnMasks(functions, artifacts.records);
-    // A per-evaluation class value in dyn has no modeled `prototype` object (its methods, its link to the base's
-    // prototype and the identity of the object would all have to be exact): a program that crosses one into dyn AND
-    // names `prototype` on a dynamic value keeps the compile-time refusal, at the crossing.
+    // A per-evaluation class value's `prototype` object is exact for READS (one object per evaluation, `constructor`,
+    // the own methods as stable function values, the link to the base's prototype). It cannot be exact for MUTATION: an instance
+    // reaches its members through the class's member table, not through the prototype object, so `V.prototype.m = f` or
+    // `Object.defineProperty(V.prototype, ...)` would never be seen by `new V().m()`. Such a write, on a value read from a
+    // `prototype` (directly or through one local alias), keeps a compile-time refusal when the program crosses an evaluated class.
     if (this.diags.length === 0 && EVAL_STATIC_CLASSES.size > 0) {
-      let readsProto = false;
       let crossing: SrcLoc | null = null;
+      const protoLocals = new Set<string>();
+      const mutations: { at: SrcLoc; recv: { kind?: string; localId?: string; key?: { value?: unknown } } }[] = [];
       const stack: unknown[] = [functions];
       while (stack.length > 0) {
         const n = stack.pop();
@@ -4064,24 +4067,27 @@ export class Lowerer {
           for (const x of n) stack.push(x);
           continue;
         }
-        const o = n as { kind?: unknown; key?: { kind?: unknown; value?: unknown }; value?: { type?: IrType }; loc?: SrcLoc };
-        if (o.kind === "dynKeyGet" && o.key?.kind === "strLit" && o.key.value === "prototype") readsProto = true;
-        if (o.kind === "libCall" && (n as { fn?: unknown }).fn === "dyn.keySet") {
-          const a = (n as { args?: { kind?: unknown; value?: unknown }[] }).args;
-          if (a?.[1]?.kind === "strLit" && a[1].value === "prototype") readsProto = true;
+        const o = n as { kind?: string; localId?: string; init?: { kind?: string; key?: { kind?: string; value?: unknown } }; fn?: string; args?: { kind?: string; localId?: string; key?: { value?: unknown } }[]; value?: { type?: IrType }; loc?: SrcLoc };
+        if (o.kind === "varDecl" && o.localId !== undefined && o.init?.kind === "dynKeyGet" && o.init.key?.kind === "strLit" && o.init.key.value === "prototype") protoLocals.add(o.localId);
+        if (o.kind === "libCall" && o.args !== undefined && ["dyn.keySet", "dyn.keyDelete", "dyn.defineProp", "dyn.defineProps", "dyn.assign", "dyn.objCreateDescs"].includes(o.fn ?? "")) {
+          const r = o.args[0];
+          if (r !== undefined) mutations.push({ at: o.loc as SrcLoc, recv: r });
         }
-        if (o.kind === "dynFrom" && o.value?.type?.kind === "object" && EVAL_STATIC_CLASSES.has(o.value.type.className) && crossing === null) {
-          crossing = o.loc ?? null;
-        }
+        if (o.kind === "dynFrom" && o.value?.type?.kind === "object" && EVAL_STATIC_CLASSES.has(o.value.type.className) && crossing === null) crossing = o.loc ?? null;
         for (const v of Object.values(n as Record<string, unknown>)) stack.push(v);
       }
-      if (readsProto && crossing !== null) {
+      const bad = mutations.find(
+        (m) =>
+          (m.recv.kind === "dynKeyGet" && m.recv.key?.value === "prototype") ||
+          (m.recv.kind === "varRef" && m.recv.localId !== undefined && protoLocals.has(m.recv.localId)),
+      );
+      if (bad !== undefined && crossing !== null) {
         this.pushDiag({
           code: "SC1101",
           message:
-            "converting a class value minted by a class expression inside a function to 'unknown' in a program that also reads or writes " +
-            "'prototype' of a dynamic value (the per-evaluation class's prototype object is not modeled: its methods, its link to the " +
-            "base class's prototype and its identity)",
+            "converting a class value minted by a class expression inside a function to 'unknown' in a program that also writes to a " +
+            "`prototype` object read from a dynamic value (an instance reaches its members through the class, not through that object, so " +
+            "the write would never be seen by `new V().m()`)",
           loc: crossing,
         } as ScrDiagnostic);
       }

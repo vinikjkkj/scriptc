@@ -749,6 +749,30 @@ static ScrDyn *dyn_object_proto_method(ScrDyn *recv, const char *method,
   if (dyn_name_is(method, "valueOf")) {
     return scr_dyn_retain(recv);
   }
+  /* Object.prototype.isPrototypeOf: does `recv` stand on the argument's [[Prototype]] chain? A class instance has no
+   * chain object here (it reaches its members through its class), so a CLASS's prototype object answers for it by the
+   * class test `instanceof` makes: the two cannot disagree. */
+  if (dyn_name_is(method, "isPrototypeOf")) {
+    if (argc < 1 || recv->kind != SCR_DYN_OBJ) return scr_dyn_new_bool(false);
+    const ScrDyn *x = args[0];
+    if (x->kind == SCR_DYN_OBJINST) {
+      if (!scr_dyn_is_minted_proto(recv)) return scr_dyn_new_bool(false);
+      ScrDyn *ctor = scr_dyn_proto_chain_ctor_pub(recv); /* +1 */
+      if (ctor == NULL) return scr_dyn_new_bool(false);
+      bool r = scr_dyn_instance_of(x, ctor);
+      scr_dyn_release(ctor);
+      if (scr_exc_pending()) return NULL;
+      return scr_dyn_new_bool(r);
+    }
+    if (x->kind != SCR_DYN_OBJ) return scr_dyn_new_bool(false);
+    const ScrDyn *p = scr_dyn_ext(x)->proto;
+    for (size_t steps = 0; p != NULL && steps < 1000; steps++) {
+      if (p == recv) return scr_dyn_new_bool(true);
+      if (p->kind != SCR_DYN_OBJ) break;
+      p = scr_dyn_ext(p)->proto;
+    }
+    return scr_dyn_new_bool(false);
+  }
   /* Object.prototype.toLocaleString: Invoke(this, "toString"). The Number and Array arms fence their own
    * (locale formatting is not modeled there); a string, boolean or object answers here, and a Date handle
    * answers in its own ops (scr_date_dyn.c). */
@@ -1148,7 +1172,7 @@ static bool dyn_name_in(const char *m, const char *const *names) {
  * claimed `function` would create a fresh disagreement in the other
  * direction. They are priced, not guessed at. */
 static bool dyn_objproto_knows(const char *m) {
-  static const char *const names[] = { "hasOwnProperty", "valueOf", "toLocaleString", NULL };
+  static const char *const names[] = { "hasOwnProperty", "valueOf", "toLocaleString", "isPrototypeOf", NULL };
   return dyn_name_in(m, names);
 }
 

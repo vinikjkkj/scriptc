@@ -7000,6 +7000,8 @@ static inline const ScrDynClass *scr_dyn_class_of_value(const ScrDyn *d) { retur
 /* The preorder position of the DECLARED class whose value `d` is, or SIZE_MAX when `d` is not a declared class
  * value (the OUT direction of a classval: each candidate class is compared by its `pre`). */
 size_t scr_dyn_classval_pre(const ScrDyn *d);
+/* The class VALUE a minted prototype object (or an object whose chain reaches one) answers as `constructor` (+1), or NULL. */
+ScrDyn *scr_dyn_proto_chain_ctor_pub(const ScrDyn *d);
 static inline const ScrDyn *scr_dyn_class_eval_inner(const ScrDyn *d) { return scr_dyn_class_ops ? scr_dyn_class_ops->eval_inner(d) : NULL; }
 /* A per-evaluation class value: a NON-immortal function object that holds the evaluation (its static side) by
  * reference, boxed as an instance of the static-side class `cls`. +1. The box's identity is the evaluation. */

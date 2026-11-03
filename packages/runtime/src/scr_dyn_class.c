@@ -163,6 +163,9 @@ ScrDyn *scr_dyn_new_evalclass(void *o, const ScrDynClass *cls) {
   return made;
 }
 
+static ScrDyn *dyn_class_prototype(const ScrDyn *d);
+static ScrStr *dyn_cls_ops_class_text(const ScrDyn *d);
+
 static void dyn_eval_fence(const ScrDyn *inner, const char *what) {
   ScrJsonBuf b;
   scr_jb_init(&b);
@@ -287,6 +290,13 @@ static int dyn_cls_ops_class_walk(const ScrDyn *v, ScrObjWalk mode, ScrDyn *out)
 static bool dyn_cls_ops_instance_of(const ScrDyn *v, const ScrDyn *fn, bool *handled) {
   *handled = true;
   const ScrDyn *inner = dyn_cls_eval_inner(fn);
+  if (v->kind != SCR_DYN_OBJINST && (inner != NULL || dyn_cls_impl_of_value(fn) != NULL)) {
+    /* an object whose [[Prototype]] chain may hold the class's prototype: the generic walk asks for it, so it must carry
+     * the class's members and base link already */
+    scr_dyn_release(dyn_class_prototype(fn));
+    *handled = false;
+    return false;
+  }
   if (inner != NULL) {
     if (v->kind != SCR_DYN_OBJINST) return false;
     const ScrDynClassMember *m = scr_dyn_objinst_member(inner, "%dynIsInst", 10);
@@ -309,6 +319,114 @@ static bool dyn_cls_ops_instance_of(const ScrDyn *v, const ScrDyn *fn, bool *han
   }
   *handled = false;
   return false;
+}
+
+/* ── the class value's `prototype` object ─────────────────────────────────
+ *
+ * ONE object per class (declared) or per evaluation, minted on first demand by the generic implicit-prototype machinery
+ * (scr_dyn_fn_prototype: stored in the closure's own-property table, so it is collector-owned like the box ring, and answering
+ * `constructor` from the registry with no stored back-link) and then given what a CLASS prototype has: the own methods as
+ * hidden (non-enumerable) data properties, each ONE stable function value, and the [[Prototype]] link to the base class's
+ * prototype. An instance reaches its members through its class, so these function values dispatch on the receiver the call
+ * supplies (`P.m.call(obj, ...)`): an instance of the class runs the method, anything else gets the TypeError a method body
+ * throws on `this` of undefined. */
+typedef struct DynProtoFn {
+  ScrClosure clo; /* first: the closure the thunk is handed */
+  const ScrDynClass *idesc;
+  const ScrDynClassMember *row;
+  struct DynProtoFn *next;
+} DynProtoFn;
+static DynProtoFn *dyn_proto_fns = NULL;
+
+static ScrDyn *dyn_proto_method_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  const DynProtoFn *w = (const DynProtoFn *)clo;
+  ScrDyn *recv = scr_dyn_this_get(); /* +1 */
+  ScrDyn *r = NULL;
+  if (recv->kind == SCR_DYN_OBJINST && scr_dyn_objinst_is(recv, w->idesc->pre, w->idesc->post)) {
+    r = w->row->call(recv->v.inst.o, args, argc, "method");
+  } else {
+    scr_throw_error_named(scr_str_new("TypeError", 9), scr_str_new("Cannot read properties of undefined", 35));
+  }
+  scr_dyn_release(recv);
+  return r;
+}
+
+static ScrDyn *dyn_proto_method_value(const ScrDynClass *idesc, const ScrDynClassMember *row) {
+  DynProtoFn *w = dyn_proto_fns;
+  while (w != NULL && !(w->idesc == idesc && w->row == row)) w = w->next;
+  if (w == NULL) {
+    w = (DynProtoFn *)calloc(1, sizeof *w);
+    if (w == NULL) scr_trap("scriptc: out of memory\n");
+    w->clo.rc = SIZE_MAX; /* immortal, like an interned top-level function */
+    w->clo.fn = (void *)dyn_proto_method_thunk;
+    w->idesc = idesc;
+    w->row = row;
+    w->next = dyn_proto_fns;
+    dyn_proto_fns = w;
+  }
+  return scr_dyn_new_func_src(&w->clo, dyn_proto_method_thunk, 0, "()", row->name, NULL);
+}
+
+static const ScrDynClassMember *dyn_row_in(const ScrDynClass *c, const char *k, size_t n) {
+  for (size_t i = 0; i < c->nmembers; i++) {
+    if (c->members[i].len == n && memcmp(c->members[i].name, k, n) == 0) return &c->members[i];
+  }
+  return NULL;
+}
+
+static const ScrDynClassMember *dyn_class_static(const ScrDynClass *cls, const char *k, size_t n);
+
+/* The prototype of the class value `d`, +1; NULL with nothing pending when `d` carries no prototype rows. */
+static ScrDyn *dyn_class_prototype(const ScrDyn *d) {
+  const ScrDyn *inner = dyn_cls_eval_inner(d);
+  const ScrDynClass *cls = inner != NULL ? scr_dyn_objinst_class_of(inner) : dyn_cls_impl_of_value(d);
+  if (cls == NULL) return NULL;
+  const ScrDynClassMember *ownRow = inner != NULL ? scr_dyn_objinst_member(inner, "%dynOwn", 7) : dyn_class_static(cls, "%dynOwn", 7);
+  if (ownRow == NULL || ownRow->call == NULL) return NULL;
+  void *recv = inner != NULL ? inner->v.inst.o : NULL;
+  const bool first = d->v.fn.clo->implicit_proto == NULL;
+  ScrDyn *P = scr_dyn_fn_prototype((ScrDyn *)d); /* +1 */
+  if (!first) return P;
+  /* the instance class: an evaluation's through a stamped, never-constructed instance; a declared class's is its own */
+  ScrDyn *ib = NULL;
+  const ScrDynClass *idesc = cls;
+  if (inner != NULL) {
+    const ScrDynClassMember *im = scr_dyn_objinst_member(inner, "%dynInst", 8);
+    if (im == NULL || im->call == NULL) return P;
+    ib = im->call(recv, NULL, 0, "prototype");
+    if (ib == NULL || ib->kind != SCR_DYN_OBJINST) {
+      scr_dyn_release(ib);
+      return P;
+    }
+    idesc = scr_dyn_objinst_class_of(ib);
+  }
+  ScrDyn *names = ownRow->call(recv, NULL, 0, "prototype");
+  if (names != NULL && names->kind == SCR_DYN_ARR) {
+    for (size_t i = 0; i < names->v.arr.len; i++) {
+      const ScrDyn *nm = names->v.arr.items[i];
+      if (nm->kind != SCR_DYN_STR) continue;
+      const ScrDynClassMember *row = dyn_row_in(idesc, nm->v.str->data, nm->v.str->len);
+      if (row == NULL || row->call == NULL) continue;
+      ScrDyn *f = dyn_proto_method_value(idesc, row);
+      scr_dyn_obj_define_hidden_data(P, nm->v.str->data, nm->v.str->len, f, true, true);
+      scr_dyn_release(f);
+    }
+  }
+  scr_dyn_release(names);
+  const ScrDynClassMember *baseRow = inner != NULL ? scr_dyn_objinst_member(inner, "%dynBase", 8) : dyn_class_static(cls, "%dynBase", 8);
+  if (baseRow != NULL && baseRow->call != NULL) {
+    ScrDyn *b = baseRow->call(recv, NULL, 0, "prototype");
+    if (b != NULL && b->kind == SCR_DYN_FUNC) {
+      ScrDyn *bp = dyn_class_prototype(b);
+      if (bp != NULL) {
+        scr_dyn_obj_set_proto(P, bp);
+        scr_dyn_release(bp);
+      }
+    }
+    scr_dyn_release(b);
+  }
+  scr_dyn_release(ib);
+  return P;
 }
 
 static const ScrDynClassMember *dyn_class_static(const ScrDynClass *cls, const char *k, size_t n) {
@@ -454,6 +572,10 @@ bool dyn_cls_impl_err_delete(ScrDyn *d, const ScrStr *key) {
 }
 
 static ScrDyn *dyn_cls_ops_fn_get(const ScrDyn *d, const char *key, size_t key_len) {
+  if (key_len == 9 && memcmp(key, "prototype", 9) == 0) {
+    ScrDyn *p = dyn_class_prototype(d);
+    if (p != NULL || scr_exc_pending()) return p;
+  }
   {
     const ScrDyn *inner = dyn_cls_eval_inner(d);
     if (inner != NULL) {
@@ -491,15 +613,22 @@ static ScrDyn *dyn_cls_ops_construct(const ScrDyn *fn, const ScrDyn *args, bool 
 static bool dyn_cls_ops_set(ScrDyn *recv, const ScrStr *key, const ScrDyn *value) {
   if (recv->kind == SCR_DYN_FUNC && key->len == 9 && memcmp(key->data, "prototype", 9) == 0 &&
       (dyn_cls_eval_inner(recv) != NULL || dyn_cls_impl_of_value(recv) != NULL)) {
-    /* A class's `prototype` is read-only: no expando may stand in for it. */
+    /* A class's `prototype` is non-writable: V8's strict-mode text (this runtime does not do silent, see the frozen-object
+     * stance in scr_dyn_key_set). */
+    ScrStr *txt = dyn_cls_ops_class_text(recv);
     const ScrDyn *in = dyn_cls_eval_inner(recv);
     const char *nm = in != NULL ? scr_dyn_objinst_class_of(in)->name : dyn_cls_impl_of_value(recv)->name;
     ScrJsonBuf b;
     scr_jb_init(&b);
-    scr_jb_puts(&b, "assigning 'prototype' on the class value ");
-    scr_jb_puts(&b, nm);
-    scr_jb_puts(&b, " is not supported yet");
-    scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
+    scr_jb_puts(&b, "Cannot assign to read only property 'prototype' of function '");
+    if (txt != NULL) scr_jb_write(&b, txt->data, txt->len);
+    else {
+      scr_jb_puts(&b, "class ");
+      scr_jb_puts(&b, nm);
+    }
+    scr_jb_puts(&b, "'");
+    scr_str_release(txt);
+    scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
     return true;
   }
   if (recv->kind == SCR_DYN_OBJINST) {

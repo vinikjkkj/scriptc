@@ -7553,6 +7553,7 @@ static bool scr_dyn_own_names_skip(const ScrDyn *d, const char *key, size_t key_
  * (Object.hasOwn already says so) and the FIRST one in creation order,
  * so it goes at index 0 of the list the keys walk produced. Borrowed
  * both ways; a no-op for every other receiver. */
+static ScrDyn *scr_dyn_objwalk_key(const char *key, size_t key_len);
 void scr_dyn_own_names_ctor(ScrDyn *names, const ScrDyn *o) {
   if (names == NULL || names->kind != SCR_DYN_ARR) return;
   if (!scr_dyn_minted_proto_has_ctor(o)) return;
@@ -7566,6 +7567,12 @@ void scr_dyn_own_names_ctor(ScrDyn *names, const ScrDyn *o) {
     names->v.arr.items[i] = names->v.arr.items[i - 1];
   }
   names->v.arr.items[0] = v;
+  /* A CLASS's prototype (hidden own methods, no enumerable member at all): creation order is then unambiguous, the hidden
+   * table's insertion order, right after `constructor`. */
+  if (o->kind == SCR_DYN_OBJ && o->v.obj.len == 0 && scr_dyn_ext(o)->hidden != NULL) {
+    const ScrDyn *h = scr_dyn_ext(o)->hidden;
+    for (size_t i = 0; i < h->v.obj.len; i++) scr_dyn_arr_push(names, scr_dyn_objwalk_key(h->v.obj.entries[i].key, h->v.obj.entries[i].key_len));
+  }
 }
 
 /* `Object.getOwnPropertyNames`'s guard. The emitted own-names walk is
@@ -7587,6 +7594,7 @@ void scr_dyn_own_names_ctor(ScrDyn *names, const ScrDyn *o) {
  * argument fail for it: scr_dyn_own_names_skip. */
 void scr_dyn_own_names_fence(const ScrDyn *d) {
   if (d == NULL || d->kind != SCR_DYN_OBJ || scr_dyn_ext(d)->hidden == NULL) return;
+  if (d->v.obj.len == 0 && scr_dyn_minted_proto_has_ctor(d)) return; /* a class prototype: scr_dyn_own_names_ctor lists it */
   if (scr_dyn_ext(d)->hidden->v.obj.len == 0) return;
   size_t refusing = 0;
   for (size_t i = 0; i < scr_dyn_ext(d)->hidden->v.obj.len; i++) {
@@ -9885,6 +9893,8 @@ bool scr_dyn_same_value(const ScrDyn *a, const ScrDyn *b) {
 /* JS === over two dyn values: scalars by value (NaN false, ±0 equal via
  * C ==; strings bytewise), units by kind, everything reference-shaped by
  * node IDENTITY (the checked-dynamic tree's object identity). Never throws. */
+ScrDyn *scr_dyn_proto_chain_ctor_pub(const ScrDyn *d) { return scr_dyn_proto_chain_ctor(d); }
+
 size_t scr_dyn_classval_pre(const ScrDyn *d) {
   const ScrDynClass *c = scr_dyn_class_of_value(d);
   return c != NULL ? c->pre : (size_t)-1;

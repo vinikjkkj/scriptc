@@ -1352,6 +1352,18 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
        * has to go and not the field. Measured on v25.9.0, three
        * spellings, before this line was written. */
       const char *cn = scr_dyn_is_minted_proto(d) ? NULL : scr_dyn_ext(d)->cname;
+      if (scr_dyn_is_minted_proto(d)) {
+        /* ...but when its [[Prototype]] chain reaches ANOTHER class's prototype (a derived class's), Node's walk keeps that
+         * ancestor's constructor (`Derived.prototype instanceof Base` is true): `Base {}`. */
+        const ScrDyn *anc = scr_dyn_ext(d)->proto;
+        for (size_t steps = 0; anc != NULL && anc->kind == SCR_DYN_OBJ && steps < 1000; steps++) {
+          if (scr_dyn_ext(anc)->cname != NULL) {
+            cn = scr_dyn_ext(anc)->cname;
+            break;
+          }
+          anc = scr_dyn_ext(anc)->proto;
+        }
+      }
       /* Node lists own enumerable SYMBOL keys after the string keys, and
        * an INTERNAL SLOT is exactly what this tier keeps where Node keeps
        * a symbol: `Dirent { name: 'a.txt', parentPath: 'kd',

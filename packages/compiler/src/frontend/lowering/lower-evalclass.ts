@@ -35,7 +35,7 @@
  * and declared before the class. Everything else keeps a NAMED fence. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, CLASS_NO_DYN_NEW, DYN, EVAL_NO_SRC_CLASSES, EVAL_STATIC_CLASSES, F64, IrExpr, IrFunction, IrLocal, IrStmt, IrType, STRING, UNDEFINED_T, VOID, canDynCheckTo, typeEquals } from "../../ir/nodes.js";
+import { BOOL, canBoxClassIntoDyn, CLASS_NO_DYN_NEW, DYN, EVAL_NO_SRC_CLASSES, EVAL_STATIC_CLASSES, F64, IrExpr, IrFunction, IrLocal, IrStmt, IrType, STRING, UNDEFINED_T, VOID, canDynCheckTo, typeEquals } from "../../ir/nodes.js";
 import { bindingNeverReassigned } from "./lower-calls.js";
 import { locOf } from "../program.js";
 import { classSourceText } from "../fn-srctext.js";
@@ -264,6 +264,8 @@ export function ensureEvalClass(L: Lowerer, expr: ts.ClassExpression): ClassInfo
   delete info.staticMethods;
   L.classes.set(staticName, staticInfo);
   EVAL_STATIC_CLASSES.add(staticName);
+  // The class value's `prototype` object must be exact, or the class keeps the compile-time refusal into dyn.
+  if (classProtoPlan(L, info) === null) EVAL_NO_SRC_CLASSES.add(staticName);
   if (!dynNewDrivable(L, info, true)) CLASS_NO_DYN_NEW.add(staticName);
   // A class value crosses into dyn only when its source text is exact (String(V) prints it): a module Node refuses, a
   // decorated class or a layout the stripper does not reproduce keeps the compile-time refusal.
@@ -362,6 +364,56 @@ export function dynNewDrivable(L: Lowerer, info: ClassInfo, evaluated: boolean):
       (p.mode === "required" || p.mode === "omittable" || p.mode === "rest" || p.mode === "dynRest") &&
       (p.type.kind === "dyn" || canDynCheckTo(p.type, getRec, getUni)),
   );
+}
+
+/** The OWN method names of a class's `prototype` object (what `V.prototype` carries beside `constructor`), or null when this
+ * build cannot state that object exactly: accessors (their getter would have to run on the prototype), async and generator
+ * methods (no dyn row), symbol-named members, a runtime-provided or inexact base. */
+export function classProtoPlan(L: Lowerer, info: ClassInfo): string[] | null {
+  if (info.decl === null || info.protoClass === true || info.builtinError === true || info.builtinEmitter === true ||
+      info.builtinStream !== undefined || info.def.runtime === true) return null;
+  const own = new Set<string>();
+  for (const { mName, member } of L.classMethodMembers(info)) {
+    if (mName.startsWith("#")) continue;
+    if (mName.startsWith("get:") || mName.startsWith("set:") || mName.startsWith("sym:") || mName.startsWith("%")) return null;
+    if (ts.isMethodDeclaration(member)) {
+      if (member.asteriskToken !== undefined) return null;
+      if ((ts.getModifiers(member) ?? []).some((m) => m.kind === ts.SyntaxKind.AsyncKeyword)) return null;
+    }
+    own.add(mName);
+  }
+  if (info.base !== null) {
+    if (!canBoxClassIntoDyn(info.base.def.name) || info.base.evalStaticOf !== undefined || info.base.evalClass !== undefined) return null;
+    if (classProtoPlan(L, info.base) === null) return null;
+  }
+  return [...own];
+}
+
+/** `%dynOwn` / `%dynBase` rows (static for a declared class, rows of the static side for an evaluated one): the own
+ * method names and the base class's value, from which the runtime materializes the prototype object. */
+export function dynProtoFns(
+  prefix: string,
+  inst: ClassInfo,
+  own: string[],
+  thisT: IrType | null,
+  loc: import("../../ir/nodes.js").SrcLoc,
+): { fns: IrFunction[]; list: { name: string; fn: string }[] } {
+  const locals: IrLocal[] = thisT === null ? [] : [{ id: "this.0", name: "this", type: thisT, mutable: false }];
+  const params = locals.map((l) => ({ localId: l.id, name: l.name, type: l.type }));
+  const ownName = `${prefix}.%dynOwn`;
+  const baseName = `${prefix}.%dynBase`;
+  const elems: IrExpr[] = own.map((n) => ({ kind: "dynFrom", value: { kind: "strLit", value: n, type: STRING, loc }, type: DYN, loc }));
+  const baseVal: IrExpr =
+    inst.base !== null
+      ? { kind: "dynFrom", value: { kind: "classRef", className: inst.base.def.name, type: { kind: "classval", className: inst.base.def.name }, loc }, type: DYN, loc }
+      : { kind: "dynFrom", value: { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc }, type: DYN, loc };
+  return {
+    fns: [
+      { name: ownName, params, returnType: DYN, locals, body: [{ kind: "return", value: { kind: "dynArrLit", elems, type: DYN, loc }, loc }], loc },
+      { name: baseName, params, returnType: DYN, locals, body: [{ kind: "return", value: baseVal, loc }], loc },
+    ],
+    list: [{ name: "%dynOwn", fn: ownName }, { name: "%dynBase", fn: baseName }],
+  };
 }
 
 /** `%dynSrc` rows: the class's source text (Node's `String(V)`), carried only when this module has the exact text. */
@@ -505,6 +557,27 @@ export function evalDynFns(L: Lowerer, staticInfo: ClassInfo): { fns: IrFunction
       const name = `%${staticName}.%dynSrc`;
       fns.push(dynSrcFn(name, text, staticT, loc));
       list.push({ name: "%dynSrc", fn: name });
+    }
+  }
+
+  // %dynInst / %dynOwn / %dynBase: the prototype object's material
+  {
+    const own = classProtoPlan(L, inst);
+    if (own !== null) {
+      const pf = dynProtoFns(`%${staticName}`, inst, own, staticT, loc);
+      fns.push(...pf.fns);
+      list.push(...pf.list);
+      const iname = `%${staticName}.%dynInst`;
+      const il: IrLocal[] = [{ id: "this.0", name: "this", type: staticT, mutable: false }];
+      fns.push({
+        name: iname,
+        params: il.map((l) => ({ localId: l.id, name: l.name, type: l.type })),
+        returnType: DYN,
+        locals: il,
+        body: [{ kind: "return", value: { kind: "dynFrom", value: { kind: "new", className: instName, args: [], type: instT, allocOnly: true, loc }, type: DYN, loc }, loc }],
+        loc,
+      });
+      list.push({ name: "%dynInst", fn: iname });
     }
   }
 

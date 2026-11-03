@@ -31,6 +31,7 @@ import { boundedKeyValuesOf, uniqueSymbolKeyOf } from "./lower-exprs.js";
 import { isNetSocketCtor, lowerHttpAgentNew, lowerHttpServerNew, lowerNetSocketNew } from "./lower-server.js";
 import { ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedClassSymbolOf, ambientUndefinedFnSymbolOf, fenceEarlyAliasUse, fenceEarlyNsMemberRef, nsMemberIdentOf, nsUndefRead } from "./lower-namespaces.js";
 import { classSourceText } from "../fn-srctext.js";
+import { classProtoPlan, dynProtoFns } from "./lower-evalclass.js";
 import { EVAL_ENV_SYM, classCtorLength, dynLenFn, dynSrcFn, dynNewArgExpr, ensureEvalClass, evalDynFns, evalInstanceDynFns, evalStaticInfoOf, isEvalClassNode, lowerEvalClassExpr, lowerEvalClassNew, lowerEvalClassProperty } from "./lower-evalclass.js";
 import { bodylessMixinCalleeOf, mixinResultBindingClassOf, type MixinInstanceInfo } from "./lower-mixins.js";
 
@@ -8764,6 +8765,16 @@ export function dynStaticFns(L: Lowerer, info: ClassInfo): { fns: IrFunction[]; 
       const name = `%${className}.%dynSrc`;
       fns.push(dynSrcFn(name, text, null, loc));
       list.push({ name: "%dynSrc", fn: name });
+    }
+  }
+
+  // %dynOwn / %dynBase: the prototype object's material (only when this build can state that object exactly)
+  {
+    const own = info.protoClass !== true ? classProtoPlan(L, info) : null;
+    if (own !== null) {
+      const pf = dynProtoFns(`%${className}`, info, own, null, loc);
+      fns.push(...pf.fns);
+      list.push(...pf.list);
     }
   }
 
