@@ -1,0 +1,13 @@
+binary-row-presized-array-arm-without-fill-proof.js:7:3 - error SC1090: dynamic keyed writes to records without an index signature (declared fields of ONE shared type dispatch by key — spell the field name otherwise) is not supported yet
+
+  6 |   const row = asArray ? new Array(n) : {};
+  7 |   row[k] = v;
+    |   ^~~~~~
+  8 |   return row;
+
+binary-row-presized-array-arm-without-fill-proof.js:16:5 - error SC1090: dynamic keyed writes to records without an index signature (declared fields of ONE shared type dispatch by key — spell the field name otherwise) is not supported yet
+
+  15 |   for (let i = 0; i < n; i++) {
+  16 |     row[k] = i;
+     |     ^~~~~~
+  17 |   }
