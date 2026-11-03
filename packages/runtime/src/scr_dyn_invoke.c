@@ -1511,9 +1511,11 @@ static bool dyn_kind_knows(const ScrDyn *recv, const char *m) {
  * below — so the value a read produces and the value a call produces are
  * computed by the same code, and cannot drift into two behaviours.
  *
- * A DIVERGENCE stated rather than hidden: Node's `o.hasOwnProperty` is
- * UNBOUND, so `const f = o.hasOwnProperty; f("a")` throws there and
- * answers here. This runtime binds, following scr_dyn_obj_member_get,
+ * `hasOwnProperty` is NOT read through this thunk any more: its read answers
+ * the one unbound Object.prototype function (dyn_objproto_shared_fn), as Node's
+ * does. A DIVERGENCE stated rather than hidden, for every OTHER name here:
+ * Node's `o.toLocaleString` is UNBOUND, so `const f = o.toLocaleString; f()`
+ * throws there and answers here. This runtime binds, following scr_dyn_obj_member_get,
  * whose header records the same choice for the same reason: an unbound
  * native method extracted from a receiver has no `this` to run under,
  * and the shapes that extract-then-call are rarer than the shapes that
@@ -1700,14 +1702,14 @@ static ScrDyn *dyn_objproto_fn_thunk(ScrClosure *clo, ScrDyn *const *args, size_
 
 static void *dyn_objproto_noop_v(void *p) { return p; }
 static void dyn_objproto_noop_rel_v(void *p) { (void)p; }
-static const char *const dyn_objproto_fn_names[4] = { "toString", "constructor", "isPrototypeOf", "propertyIsEnumerable" };
+static const char *const dyn_objproto_fn_names[5] = { "toString", "constructor", "isPrototypeOf", "propertyIsEnumerable", "hasOwnProperty" };
 /* The registry's own +1 on each minted box; released at exit, which also drops the properties a program wrote
  * onto the function (they live on its closure), so the leak audit sees a clean heap. */
-static ScrDyn *dyn_objproto_boxes[4];
+static ScrDyn *dyn_objproto_boxes[5];
 static bool dyn_objproto_teardown_set = false;
 
 static void dyn_objproto_teardown(void) {
-  for (size_t i = 0; i < 4; i++) {
+  for (size_t i = 0; i < 5; i++) {
     scr_dyn_release(dyn_objproto_boxes[i]);
     dyn_objproto_boxes[i] = NULL;
   }
@@ -1743,7 +1745,10 @@ static ScrDyn *dyn_objproto_fn_thunk(ScrClosure *clo, ScrDyn *const *args, size_
       dyn_throw_unsupported("Object", "toString of this kind of value");
     }
   } else if (recv->kind == SCR_DYN_UNDEF || recv->kind == SCR_DYN_NULL) {
-    dyn_throw_not_fn(name);
+    /* Object.prototype.hasOwnProperty over a nullish receiver is ToObject's TypeError; the others keep the
+     * not-a-function answer they had. */
+    if (strcmp(name, "hasOwnProperty") == 0) scr_throw_error_msg(SCR_ERR_TYPE, "Cannot convert undefined or null to object", 42);
+    else dyn_throw_not_fn(name);
   } else {
     r = scr_dyn_invoke(recv, name, args, argc, name);
   }
@@ -1752,7 +1757,7 @@ static ScrDyn *dyn_objproto_fn_thunk(ScrClosure *clo, ScrDyn *const *args, size_
 }
 
 static ScrDyn *dyn_objproto_shared_fn(const char *name) {
-  for (size_t i = 0; i < 4; i++) {
+  for (size_t i = 0; i < 5; i++) {
     if (strcmp(dyn_objproto_fn_names[i], name) != 0) continue;
     if (dyn_objproto_boxes[i] == NULL) {
       ScrClosure *clo = scr_closure_new((void *)dyn_objproto_fn_thunk, 1);
@@ -1779,6 +1784,10 @@ ScrDyn *scr_dyn_intrinsic_method_get(ScrDyn *recv, const ScrStr *key) {
    * tell from a miss. `in` can. */
   if (recv->kind == SCR_DYN_OBJ && scr_dyn_obj_key_present(recv, key->data, key->len)) return NULL;
   if (dyn_plain_obj_knows(recv, key->data)) return dyn_objproto_shared_fn(key->data);
+  /* `hasOwnProperty` is the ONE Object.prototype function whatever kind of value it is read off (an object, a
+   * prototype-linked instance, an array, a string...): UNBOUND, so `names.filter(o.hasOwnProperty, thisArg)`
+   * and `o.hasOwnProperty.call(x, k)` run it over the call's receiver, as Node does. */
+  if (dyn_name_is(key->data, "hasOwnProperty")) return dyn_objproto_shared_fn("hasOwnProperty");
   ScrClosure *clo = scr_closure_new((void *)dyn_bound_intrinsic_thunk, 2);
   clo->caps[0] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
   scr_box_set_ref(clo->caps[0], scr_dyn_retain(recv));
