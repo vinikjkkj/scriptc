@@ -188,6 +188,11 @@ static ScrDyn *dyn_eval_static_get(const ScrDyn *inner, const char *key, size_t 
   if (row != NULL && row->get == NULL && row->call != NULL && key[0] != '%') return dyn_eval_static_method_value(inner, row);
   /* a data row: the evaluation's own field (rows with a hidden name are the synthesized ones) */
   if (row != NULL && row->get != NULL && key[0] != '%') return row->get(inner->v.inst.o); /* +1, or NULL with the throw pending */
+  if (key_len == 6 && memcmp(key, "length", 6) == 0) {
+    /* the constructor's arity: a synthesized row */
+    const ScrDynClassMember *lm = scr_dyn_objinst_member(inner, "%dynLen", 7);
+    if (lm != NULL && lm->call != NULL) return lm->call(inner->v.inst.o, NULL, 0, "length");
+  }
   if ((key_len == 6 && memcmp(key, "length", 6) == 0) || (key_len == 9 && memcmp(key, "prototype", 9) == 0)) {
     dyn_eval_fence(inner, key_len == 6 ? "reading 'length'" : "reading 'prototype'");
     return NULL;
@@ -319,6 +324,11 @@ static ScrDyn *dyn_class_static_get(const ScrDynClass *cls, const char *key, siz
   /* `length` is the constructor's arity and `prototype` the object its
    * instances inherit from: neither is modeled for a class value, and the
    * function-object defaults (0, an empty object) would be wrong answers. */
+  if (key_len == 6 && memcmp(key, "length", 6) == 0) {
+    /* the constructor's arity: a synthesized row (`C.length`) */
+    const ScrDynClassMember *lm = dyn_class_static(cls, "%dynLen", 7);
+    if (lm != NULL && lm->call != NULL) return lm->call(NULL, NULL, 0, "length");
+  }
   if ((key_len == 6 && memcmp(key, "length", 6) == 0) || (key_len == 9 && memcmp(key, "prototype", 9) == 0)) {
     dyn_class_fence(cls, key_len == 6 ? "reading 'length'" : "reading 'prototype'");
     return NULL;
