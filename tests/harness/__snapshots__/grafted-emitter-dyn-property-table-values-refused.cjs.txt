@@ -1,0 +1,17 @@
+grafted-emitter-dyn-property-table-values-refused.cjs:9:1 - error SC1101: converting an applyMixin(Y, EventEmitter) instance to 'unknown' in a program that also enumerates or prints dynamic values (dyn.objValues (in vals at grafted-emitter-dyn-property-table-values-refused.cjs@767)): that operation cannot be answered exactly for this instance (its run-time property table keeps the values, entries and printed form out of reach; only the key-listing surfaces are exact), so the flow is refused are not supported yet
+
+   8 | // the key-listing surfaces are exact, but Object.values over the boxed instance is not, so it stays refused.
+   9 | class Redis {
+     | ^~~~~~~~~~~~~
+  10 |   constructor(names) {
+
+  hint: numbers, strings, booleans, JSON-safe records/arrays/unions (a deep copy — the 'unknown' value does not alias the original, so a write through it is refused rather than lost), Uint8Array/Buffer (shared by reference — writes through the 'unknown' value DO reach the original), and functions over those (boxed, identity preserved) convert into 'unknown' slots; this value's type has no dynamic representation yet
+
+grafted-emitter-dyn-property-table-values-refused.cjs:20:18 - error SC1101: converting an applyMixin(Y, EventEmitter) instance to 'unknown' in a program that also enumerates or prints dynamic values (dyn.objValues (in vals at grafted-emitter-dyn-property-table-values-refused.cjs@767)): that operation cannot be answered exactly for this instance (its run-time property table keeps the values, entries and printed form out of reach; only the key-listing surfaces are exact), so the flow is refused are not supported yet
+
+  19 | }
+  20 | console.log(vals(new Redis(["x1", "x2"])).length);
+     |                  ^~~~~~~~~~~~~~~~~~~~~~~
+  21 | 
+
+  hint: numbers, strings, booleans, JSON-safe records/arrays/unions (a deep copy — the 'unknown' value does not alias the original, so a write through it is refused rather than lost), Uint8Array/Buffer (shared by reference — writes through the 'unknown' value DO reach the original), and functions over those (boxed, identity preserved) convert into 'unknown' slots; this value's type has no dynamic representation yet

@@ -1,0 +1,17 @@
+grafted-emitter-dyn-constructor-read-refused.cjs:9:1 - error SC1101: converting an applyMixin(Y, EventEmitter) instance to 'unknown' in a program that also enumerates or prints dynamic values (constructor (in ctorOf at grafted-emitter-dyn-constructor-read-refused.cjs@625)): that operation cannot be answered exactly for this instance (a clone would have to duplicate its emitter, a prototype link over it is not representable, and its `constructor` is EventEmitter, a class value no dynamic representation stands for), so the flow is refused are not supported yet
+
+   8 | // stands for that in an unknown slot, so the program that reads it keeps the refusal at the boxing site.
+   9 | class Redis {
+     | ^~~~~~~~~~~~~
+  10 |   constructor() { this.a = 1; EventEmitter.call(this); }
+
+  hint: numbers, strings, booleans, JSON-safe records/arrays/unions (a deep copy — the 'unknown' value does not alias the original, so a write through it is refused rather than lost), Uint8Array/Buffer (shared by reference — writes through the 'unknown' value DO reach the original), and functions over those (boxed, identity preserved) convert into 'unknown' slots; this value's type has no dynamic representation yet
+
+grafted-emitter-dyn-constructor-read-refused.cjs:16:20 - error SC1101: converting an applyMixin(Y, EventEmitter) instance to 'unknown' in a program that also enumerates or prints dynamic values (constructor (in ctorOf at grafted-emitter-dyn-constructor-read-refused.cjs@625)): that operation cannot be answered exactly for this instance (a clone would have to duplicate its emitter, a prototype link over it is not representable, and its `constructor` is EventEmitter, a class value no dynamic representation stands for), so the flow is refused are not supported yet
+
+  15 | }
+  16 | console.log(ctorOf(new Redis()));
+     |                    ^~~~~~~~~~~
+  17 | 
+
+  hint: numbers, strings, booleans, JSON-safe records/arrays/unions (a deep copy — the 'unknown' value does not alias the original, so a write through it is refused rather than lost), Uint8Array/Buffer (shared by reference — writes through the 'unknown' value DO reach the original), and functions over those (boxed, identity preserved) convert into 'unknown' slots; this value's type has no dynamic representation yet
