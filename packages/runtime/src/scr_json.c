@@ -7878,7 +7878,7 @@ bool scr_dyn_obj_key_is_index(const char *key, size_t len) {
  * mechanism — a table nothing else consults cannot leak into an answer,
  * and a key nothing else writes cannot be forged by spelling it. */
 void scr_dyn_obj_set_slot(ScrDyn *recv, const char *key, size_t key_len, ScrDyn *v) {
-  if (recv == NULL || recv->kind != SCR_DYN_OBJ) {
+  if (recv == NULL || (recv->kind != SCR_DYN_OBJ && recv->kind != SCR_DYN_ARR)) {
     scr_dyn_release(v);
     return;
   }
@@ -7887,7 +7887,7 @@ void scr_dyn_obj_set_slot(ScrDyn *recv, const char *key, size_t key_len, ScrDyn 
 }
 
 ScrDyn *scr_dyn_obj_slot_get(const ScrDyn *d, const char *key, size_t key_len) {
-  if (d == NULL || d->kind != SCR_DYN_OBJ || scr_dyn_ext(d)->slots == NULL) return NULL;
+  if (d == NULL || (d->kind != SCR_DYN_OBJ && d->kind != SCR_DYN_ARR) || scr_dyn_ext(d)->slots == NULL) return NULL;
   return scr_dyn_obj_get(scr_dyn_ext(d)->slots, key, key_len);
 }
 
@@ -13750,6 +13750,14 @@ bool scr_dyn_has_own(const ScrDyn *v, const ScrStr *key) {
      * answer where the fence is an honest one. */
     const ScrDynClassMember *cm = scr_dyn_objinst_member(v, key->data, key->len);
     if (cm != NULL) return cm->enumerable && !(cm->get != NULL && scr_dyn_member_hidden(cm, v->v.inst.o) && cm->enumerable == 4);
+    /* An emitter's own state cells (_events, _eventsCount, _maxListeners) are own properties; its
+     * EventEmitter.prototype members are not. */
+    if (scr_dyn_ee_ops != NULL && scr_dyn_objinst_emitter(v) != NULL && scr_dyn_ee_ops->is_state(key->data, key->len)) return true;
+    /* A run-time property table answers for the keys it holds. */
+    if (scr_dyn_class_ops != NULL && scr_dyn_class_ops->objinst_props_has != NULL) {
+      const int th = scr_dyn_class_ops->objinst_props_has(v, key);
+      if (th >= 0) return th == 1;
+    }
     if (scr_dyn_objinst_enumerable(v)) return false;
     return scr_dyn_objinst_fence(v, "Object.hasOwn");
   }

@@ -1668,7 +1668,8 @@ bool scr_dyn_has_intrinsic_method(const ScrDyn *recv, const char *key, size_t ke
   if (recv->kind == SCR_DYN_OBJINST) {
     if (scr_dyn_objinst_error_rooted(recv) && scr_dyn_error_member_has(recv, key, key_len)) return true;
     const ScrDynClassMember *hm = scr_dyn_objinst_member(recv, key, key_len);
-    if (hm == NULL && scr_dyn_ee_ops != NULL && scr_dyn_objinst_emitter(recv) != NULL && scr_dyn_ee_ops->knows(key, key_len)) return true;
+    if (hm == NULL && scr_dyn_ee_ops != NULL && scr_dyn_objinst_emitter(recv) != NULL &&
+        (scr_dyn_ee_ops->knows(key, key_len) || scr_dyn_ee_ops->is_state(key, key_len))) return true;
     return hm != NULL && !(hm->enumerable == 4 && scr_dyn_member_hidden(hm, recv->v.inst.o));
   }
   (void)key_len; /* the remaining tests are on the NUL-terminated spelling */
@@ -1871,12 +1872,9 @@ ScrDyn *scr_dyn_objinst_miss(ScrDyn *d, const ScrStr *key) {
   if (scr_dyn_ee_ops != NULL && scr_dyn_objinst_emitter(d) != NULL && scr_dyn_ee_ops->knows(key->data, key->len)) {
     return scr_dyn_ee_ops->value(key->data, key->len); /* EventEmitter.prototype's own member */
   }
-  if (scr_dyn_ee_ops != NULL && scr_dyn_objinst_emitter(d) != NULL &&
-      ((key->len == 7 && memcmp(key->data, "_events", 7) == 0) || (key->len == 12 && memcmp(key->data, "_eventsCount", 12) == 0) ||
-       (key->len == 13 && memcmp(key->data, "_maxListeners", 13) == 0))) {
-    /* the emitter's own state cells: Node's values are not something this representation holds */
-    scr_dyn_objinst_fence(d, "a property read");
-    return NULL;
+  if (scr_dyn_ee_ops != NULL && scr_dyn_objinst_emitter(d) != NULL && scr_dyn_ee_ops->is_state(key->data, key->len)) {
+    /* the emitter's own state cells, read from its registry */
+    return scr_dyn_ee_ops->state(scr_dyn_objinst_emitter(d), key->data, key->len);
   }
   if (dyn_objproto_knows(key->data)) {
     /* Object.prototype's own methods read as functions, bound over the same
