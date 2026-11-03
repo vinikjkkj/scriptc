@@ -1,0 +1,20 @@
+emitter-state-cell-writes-refused.ts:9:5 - error SC1090: assignment to non-variables are not supported yet
+
+   8 |     // @ts-ignore
+   9 |     this._eventsCount = 3;
+     |     ^~~~~~~~~~~~~~~~~
+  10 |     // @ts-ignore
+
+emitter-state-cell-writes-refused.ts:11:5 - error SC1090: assignment to non-array elements are not supported yet
+
+  10 |     // @ts-ignore
+  11 |     this['_events'] = {};
+     |     ^~~~~~~~~~~~~~~
+  12 |     // @ts-ignore
+
+emitter-state-cell-writes-refused.ts:13:5 - error SC1090: assignment to non-array elements are not supported yet
+
+  12 |     // @ts-ignore
+  13 |     this[k] = 1;
+     |     ^~~~~~~
+  14 |   }
