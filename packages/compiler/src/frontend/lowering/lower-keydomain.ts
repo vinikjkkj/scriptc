@@ -183,6 +183,16 @@ export function lowerProvenKeyArrayRead(L: Lowerer, expr: ts.ElementAccessExpres
   if (rawKey.type.kind !== "dyn") return null;
 
   const elemOk = (t: IrType): boolean => t.kind === "array" && (t.elem.kind === "f64" || t.elem.kind === "string" || t.elem.kind === "bool");
+  // Decline before any hidden local is declared: a declined read leaves the caller's path untouched.
+  if (recv.type.kind === "array") {
+    if (!elemOk(recv.type)) return null;
+  } else if (recv.type.kind === "union") {
+    const def0 = L.unions.get(recv.type.unionId);
+    const at = def0 === undefined ? -1 : def0.arms.findIndex((a) => a.kind === "array");
+    if (def0 === undefined || at < 0 || !elemOk(def0.arms[at]!) || !def0.arms.every((a, i) => i === at || isUnitType(a))) return null;
+  } else {
+    return null;
+  }
   const kL = L.declareHiddenLocal("%pkey", DYN);
   const kRef = (): IrExpr => ({ kind: "varRef", localId: kL.id, type: DYN, loc });
   // A number reads its index; every other key value reads undefined (NaN is the index that misses).
