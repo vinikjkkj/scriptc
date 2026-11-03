@@ -8002,6 +8002,27 @@ export class Lowerer {
     };
   }
 
+  /** True when a value of type `t` enters a checked-dynamic parameter WITHOUT losing identity: scalars,
+   * units, and unions of those. Arrays, records, maps and class instances are copied (or boxed) on
+   * the way in, which a callee that keeps or mutates its argument could observe. */
+  dynArgExact(t: IrType): boolean {
+    switch (t.kind) {
+      case "dyn":
+      case "f64":
+      case "bool":
+      case "string":
+      case "bigint":
+      case "undefinedT":
+      case "nullT":
+      case "void":
+        return true;
+      case "union":
+        return (this.unions.get(t.unionId)?.arms ?? []).every((a) => this.dynArgExact(a));
+      default:
+        return false;
+    }
+  }
+
   /** True when the validated extraction of ANY JavaScript value into `t` has an exact answer: a
    * scalar, an array or a tuple of dyn/scalars. A RECORD (or class) arm is not: the runtime's
    * checked cast reads a record only off a plain object, so a class instance that Node hands over
@@ -9097,6 +9118,139 @@ export class Lowerer {
     this.pushAdvice(projectionCopiesAMutatedFieldDiag(className, stale, at));
   }
 
+  /** The undefined an OMITTED trailing argument takes in a slot of type `t`: the
+   * dyn undefined, or a union's undefined arm. Null when the slot cannot hold it. */
+  omittedArgFor(t: IrType, loc: SrcLoc): IrExpr | null {
+    if (t.kind === "dyn") return dynUndefinedExpr(loc);
+    if (t.kind !== "union") return null;
+    const tag = this.unions.get(t.unionId)?.arms.findIndex((a) => a.kind === "undefinedT") ?? -1;
+    if (tag < 0) return null;
+    return { kind: "unionWrap", unionId: t.unionId, tag, value: { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc }, type: t, loc };
+  }
+
+  /** A target record's method field `f` that the class satisfies with an IMPLICIT-ANY
+   * (monomorphized) method: an untyped JS method (`execute(sql, args)` in an npm package) has no
+   * vtable slot and no single signature, so the projection binds its all-dyn DEFAULT instance to
+   * the instance, exactly the function the method VALUE names (boundMethodValue). The slot's
+   * parameters convert into the instance's checked-dynamic ones, surplus slot parameters drop
+   * (JS's extra-argument rule), instance parameters the slot omits take undefined, and the result
+   * converts back: a checked-dynamic result into a Promise slot is Node's resolution rule
+   * (dyn.adoptPromise), whose payload then checks into the slot's. A string answers why this
+   * field cannot project (the compile-time refusal stays). */
+  genericMethodProjectionPlan(
+    info: ClassInfo,
+    f: { name: string; type: IrType },
+    hit: { declarer: ClassInfo; info: GenericFnInfo },
+  ): { how: "dynmeth"; name: string; fnT: IrType & { kind: "func" }; wrap: { unionId: string; tag: number } | undefined; fieldT: IrType; declarer: string; inst: GenericInstance; retMode: "same" | "drop" | "coerce" | "adopt" } | string {
+    if (hit.info.implicitParams === undefined) return "the generic method declares type parameters (only an untyped JS method has a default instance to bind)";
+    if (genericOverrideBelow(this, info, f.name)) return "a subclass re-declares the generic method (no vtable slot carries the override)";
+    let fnT: IrType = f.type;
+    let wrap: { unionId: string; tag: number } | undefined;
+    if (f.type.kind === "union") {
+      const udef = this.unions.get(f.type.unionId);
+      const armIdx = udef ? udef.arms.findIndex((a) => a.kind === "func") : -1;
+      if (!udef || udef.arms.length !== 2 || armIdx < 0 || !udef.arms.some((a) => a.kind === "undefinedT")) {
+        return "a union-typed method field that is not exactly (signature | undefined)";
+      }
+      fnT = udef.arms[armIdx]!;
+      wrap = { unionId: f.type.unionId, tag: armIdx };
+    }
+    if (fnT.kind !== "func" || fnT.rest === true || fnT.restIn === true) return "target member is not a plain (rest-free) function type";
+    let inst: GenericInstance;
+    try {
+      inst = implicitDefaultInstance(this, hit.info.decl, hit.info);
+    } catch (e) {
+      if (!(e instanceof PoisonError)) throw e;
+      return "the method's default instance does not lower";
+    }
+    if (inst.params.some((p) => p.mode === "dynRest" || p.mode === "rest")) return "the method takes a rest parameter";
+    const synth: SrcLoc = { file: "<width>", start: 0, end: 0 };
+    for (let k = 0; k < inst.params.length; k++) {
+      const p = inst.params[k]!;
+      if (k < fnT.params.length) {
+        if (!typeEquals(fnT.params[k]!, p.type) && !this.coercibleValue(fnT.params[k]!, p.type)) {
+          return `slot parameter ${k} (${typeKey(fnT.params[k]!).slice(0, 90)}) does not convert into the method's (${typeKey(p.type).slice(0, 60)})`;
+        }
+        // The conversion into a checked-dynamic parameter COPIES an array or record, where Node hands the
+        // callee the caller's own object: only values with no identity to lose cross exactly.
+        if (p.type.kind === "dyn" && fnT.params[k]!.kind !== "dyn" && !this.dynArgExact(fnT.params[k]!)) {
+          return `slot parameter ${k} (${typeKey(fnT.params[k]!).slice(0, 90)}) would be COPIED into the method's checked-dynamic parameter (Node passes the caller's object itself)`;
+        }
+      } else if (this.omittedArgFor(p.type, synth) === null) {
+        return `the method's parameter ${k} is not optional and the slot omits it`;
+      }
+    }
+    const R = inst.returnType;
+    const T = fnT.ret;
+    let retMode: "same" | "drop" | "coerce" | "adopt";
+    if (T.kind === "void") retMode = "drop";
+    else if (typeEquals(R, T)) retMode = "same";
+    else if (R.kind === "dyn" && T.kind === "promise" && (T.inner.kind === "dyn" || T.inner.kind === "void")) retMode = "coerce";
+    else if (R.kind === "dyn" && T.kind === "promise" && this.dynPayloadTotal(T.inner) && this.coercibleValue({ kind: "promise", inner: DYN }, T, true)) retMode = "adopt";
+    else if (R.kind === "dyn" && !this.dynPayloadTotal(T)) {
+      return `the method's result is checked-dynamic and the slot's (${typeKey(T).slice(0, 80)}) needs a record or class payload extracted from it: the checked cast reads a record off a plain object only, so a class instance Node hands over unchanged would throw`;
+    } else if (this.coercibleValue(R, T, true)) retMode = "coerce";
+    else return `the method's result (${typeKey(R).slice(0, 80)}) does not convert into the slot's (${typeKey(T).slice(0, 80)})`;
+    return { how: "dynmeth", name: f.name, fnT, wrap, fieldT: f.type, declarer: hit.declarer.def.name, inst, retMode };
+  }
+
+  /** The closure a dynmeth plan fills its field with: a lifted function capturing the instance
+   * that converts the slot's arguments, calls the method's default instance, and converts the
+   * result back (genericMethodProjectionPlan decides every conversion beforehand). */
+  dynMethodClosure(
+    m: { name: string; fnT: IrType & { kind: "func" }; declarer: string; inst: GenericInstance; retMode: "same" | "drop" | "coerce" | "adopt" },
+    implName: string,
+    instT: IrType,
+    loc: SrcLoc,
+  ): IrExpr {
+    this.noteEdge(m.inst.name);
+    const fnCtx = newFnCtx(true, null, m.fnT, m.fnT.ret);
+    this.fnStack.push(fnCtx);
+    try {
+      const self: IrExpr = { kind: "varRef", localId: "self.0", type: instT, loc };
+      const params: IrParam[] = m.fnT.params.map((t, k) => ({ localId: `a.${k}`, name: `a${k}`, type: t }));
+      const args: IrExpr[] = [this.upcastTo(self, m.declarer)];
+      m.inst.params.forEach((p, k) => {
+        if (k < m.fnT.params.length) {
+          const a: IrExpr = { kind: "varRef", localId: `a.${k}`, type: m.fnT.params[k]!, loc };
+          args.push(typeEquals(a.type, p.type) ? a : this.coerceToExpected(a, p.type));
+        } else {
+          args.push(this.omittedArgFor(p.type, loc)!);
+        }
+      });
+      const call: IrExpr = { kind: "call", callee: m.inst.name, args, type: m.inst.returnType, loc };
+      let body: IrStmt[];
+      if (m.retMode === "drop") {
+        body = [{ kind: "exprStmt", expr: call, loc }, { kind: "return", value: null, loc }];
+      } else {
+        let value: IrExpr = call;
+        if (m.retMode === "adopt") {
+          value = this.adoptDynIntoTypedPromise(call, m.fnT.ret) ?? call;
+        } else if (m.retMode !== "same") {
+          value = this.coerceToExpected(value, m.fnT.ret);
+        }
+        if (!typeEquals(value.type, m.fnT.ret)) throw new Error("lowerer bug: planned generic-method projection result stopped coercing");
+        body = [{ kind: "return", value, loc }];
+      }
+      this.liftedFns.push({
+        name: implName,
+        params,
+        returnType: m.fnT.ret,
+        captures: [{ localId: "self.0", name: "self", type: instT }],
+        locals: [
+          { id: "self.0", name: "self", type: instT, mutable: false, boxed: true },
+          ...m.fnT.params.map((t, k) => ({ id: `a.${k}`, name: `a${k}`, type: t, mutable: false })),
+          ...fnCtx.locals,
+        ],
+        body,
+        loc,
+      });
+    } finally {
+      this.fnStack.pop();
+    }
+    return { kind: "closure", fnName: implName, captures: ["self.0"], type: m.fnT, loc };
+  }
+
   /** The record a THUNK-constructed instance projects into (the return
    * side of classCtorThunk): method-named fields become closures bound to
    * the instance — the classWitnessRecord stance, sound here because the
@@ -9165,9 +9319,10 @@ export class Lowerer {
     // Probe every field BEFORE interning — a partial projection must not
     // be left half-built in the helper tables.
     type Plan =
-      | { how: "method"; name: string; fnT: IrType & { kind: "func" }; callee: string; declarer: string; virtual: boolean; wrap: { unionId: string; tag: number } | undefined; fieldT: IrType; ret: IrType; extraParams: IrType[] }
+      | { how: "method"; name: string; fnT: IrType & { kind: "func" }; callee: string; declarer: string; virtual: boolean; wrap: { unionId: string; tag: number } | undefined; fieldT: IrType; ret: IrType; extraParams: IrType[]; adopt?: true }
       | { how: "lift"; name: string; src: IrType; lift: WidthLift; fieldT: IrType }
-      | { how: "absent"; name: string; utag: number; fieldT: IrType };
+      | { how: "absent"; name: string; utag: number; fieldT: IrType }
+      | { how: "dynmeth"; name: string; fnT: IrType & { kind: "func" }; wrap: { unionId: string; tag: number } | undefined; fieldT: IrType; declarer: string; inst: GenericInstance; retMode: "same" | "drop" | "coerce" | "adopt" };
     const plan: Plan[] = [];
     for (const f of shape.fields) {
       const found = findMethodOn(this, info, f.name);
@@ -9197,7 +9352,15 @@ export class Lowerer {
         if (found.sig.abstract === true || found.sig.gen !== undefined) return why(`field '${f.name}': the class method is abstract or generic`);
         if (found.sig.params.some((p) => p.mode === "rest")) return why(`field '${f.name}': the class method takes a rest parameter`);
         const methodParamTypes = found.sig.params.map((p) => p.type);
-        const methodT = funcOf(methodParamTypes, found.sig.ret);
+        // A method whose result is checked-dynamic (an untyped JS method that returns
+        // `new this.Promise(...)`) answers a Promise slot by Node's resolution rule: the
+        // closure adopts the value (adoptDynIntoTypedPromise) and the payload checks into the slot's.
+        const retAdopt =
+          found.sig.ret.kind === "dyn" && fnT.ret.kind === "promise" &&
+          (fnT.ret.inner.kind === "dyn" || fnT.ret.inner.kind === "void" ||
+            (this.dynPayloadTotal(fnT.ret.inner) && this.coercibleValue({ kind: "promise", inner: DYN }, fnT.ret, true)));
+        const methodRet = retAdopt ? fnT.ret : found.sig.ret;
+        const methodT = funcOf(methodParamTypes, methodRet);
         // The class method may carry EXTRA TRAILING OPTIONAL parameters
         // beyond the interface field's arity — `query(node, ms, options?)`
         // satisfies a `(node, ms) => R` field: a call through the field
@@ -9211,7 +9374,7 @@ export class Lowerer {
             t.kind === "union" && (this.unions.get(t.unionId)?.arms.some((a) => a.kind === "undefinedT") ?? false);
           const compatible =
             methodParamTypes.length >= fnT.params.length &&
-            typeEquals(found.sig.ret, fnT.ret) &&
+            typeEquals(methodRet, fnT.ret) &&
             fnT.params.every((fp, i) => typeEquals(fp, methodParamTypes[i]!)) &&
             methodParamTypes.slice(fnT.params.length).every(optionalParam);
           if (!compatible) {
@@ -9233,10 +9396,18 @@ export class Lowerer {
           virtual: this.overrideBelow(info, f.name),
           ret: found.sig.ret,
           extraParams,
+          ...(retAdopt ? { adopt: true as const } : {}),
         });
         continue;
       }
-      if (findMethodOn(this, info, `get:${f.name}`) || findGenericMethodOn(this, info, f.name)) {
+      const genericHit = findGenericMethodOn(this, info, f.name);
+      if (genericHit !== null && findMethodOn(this, info, `get:${f.name}`) === null) {
+        const gp = this.genericMethodProjectionPlan(info, f, genericHit);
+        if (typeof gp === "string") return why(`field '${f.name}': ${gp}`);
+        plan.push(gp);
+        continue;
+      }
+      if (findMethodOn(this, info, `get:${f.name}`) || genericHit !== null) {
         return why(`field '${f.name}': satisfied by an ACCESSOR or a generic method`);
       }
       const ft = info.fields.get(f.name);
@@ -9299,6 +9470,14 @@ export class Lowerer {
         fields.push({ name: m.name, value: this.applyWidthLift(m.lift, get, m.fieldT, loc) });
         continue;
       }
+      if (m.how === "dynmeth") {
+        const dclo = this.dynMethodClosure(m, `${builder}.${i}`, instT, loc);
+        fields.push({
+          name: m.name,
+          value: m.wrap === undefined ? dclo : { kind: "unionWrap", unionId: m.wrap.unionId, tag: m.wrap.tag, value: dclo, type: m.fieldT, loc },
+        });
+        continue;
+      }
       if (m.virtual) this.noteVirtualEdge(info, m.name); else this.noteEdge(m.callee);
       const implName = `${builder}.${i}`;
       const params: IrParam[] = m.fnT.params.map((t, k) => ({ localId: `a.${k}`, name: `a${k}`, type: t }));
@@ -9329,18 +9508,31 @@ export class Lowerer {
       const callE: IrExpr = m.virtual
         ? { kind: "virtualCall", className: info.def.name, method: m.name, args, type: m.ret, loc }
         : { kind: "call", callee: m.callee, args, type: m.ret, loc };
+      // A checked-dynamic result adopted into the slot's Promise (retAdopt above).
+      let resultE: IrExpr = callE;
+      const adoptCtx = m.adopt === true ? newFnCtx(true, null, m.fnT, m.fnT.ret) : null;
+      if (adoptCtx !== null) {
+        this.fnStack.push(adoptCtx);
+        try {
+          resultE = this.adoptDynIntoTypedPromise(callE, m.fnT.ret) ?? callE;
+        } finally {
+          this.fnStack.pop();
+        }
+        if (!typeEquals(resultE.type, m.fnT.ret)) throw new Error("lowerer bug: planned method projection result stopped adopting");
+      }
       this.liftedFns.push({
         name: implName,
         params,
-        returnType: m.ret,
+        returnType: m.adopt === true ? m.fnT.ret : m.ret,
         captures: [{ localId: "self.0", name: "self", type: instT }],
         locals: [
           { id: "self.0", name: "self", type: instT, mutable: false, boxed: true },
           ...m.fnT.params.map((t, k) => ({ id: `a.${k}`, name: `a${k}`, type: t, mutable: false })),
+          ...(adoptCtx !== null ? adoptCtx.locals : []),
         ],
         body: m.ret.kind === "void"
           ? [{ kind: "exprStmt", expr: callE, loc }, { kind: "return", value: null, loc }]
-          : [{ kind: "return", value: callE, loc }],
+          : [{ kind: "return", value: resultE, loc }],
         loc,
       });
       const clo: IrExpr = {
