@@ -464,6 +464,7 @@ ScrArr *scr_arr_new(ScrElemKind elem, size_t initial_cap) {
   a->data = NULL;
   a->vmbacked = 0;
   a->execidx = 0;
+  a->tomb = 0;
   if (initial_cap > 0) scr_arr_grow(a, initial_cap);
 #ifdef SCR_RC_AUDIT
   scr_live_arrays++;
@@ -512,6 +513,7 @@ ScrArr *scr_arr_new_ref(void *(*elem_retain)(void *),
   a->data = NULL;
   a->vmbacked = 0;
   a->execidx = 0;
+  a->tomb = 0;
   if (initial_cap > 0) scr_arr_grow(a, initial_cap);
 #ifdef SCR_RC_AUDIT
   scr_live_arrays++;
@@ -753,6 +755,18 @@ double scr_arr_compact_holes(ScrArr *a) {
     w++;
   }
   return (double)w;
+}
+
+SCR_ARR_COLD_TRAP void scr_arr_trap_tombstone(const ScrArr *a, size_t i) {
+  scr_trap_fmt("scriptc: TypeError: array element %zu is null (length %zu) "
+               "-- the slot was cleared with `null as unknown as T`; a hole-aware read "
+               "(in, forEach, keys, inspect ...) of a cleared slot is not supported\n",
+               i, a->len);
+}
+
+void scr_arr_tombstone(ScrArr *a, double i) {
+  scr_arr_set_slot(a, i, scr_slot_from_ptr(NULL));
+  a->tomb = 1;
 }
 
 /* The out-of-line hole test for the LLVM-emitted walkers. */

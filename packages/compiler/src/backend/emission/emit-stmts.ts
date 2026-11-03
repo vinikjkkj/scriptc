@@ -849,8 +849,13 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
         const arr = E.emitExpr(s.arr);
         const idx = E.emitExpr(s.index);
         if (s.arr.type.kind !== "array") throw new Error("emitter bug: arrayClear on non-array");
+        // A NULL absent value is the TOMBSTONE (Node's null, not a hole): it marks the array
+        // so the hole-aware consumers refuse it loudly instead of reading a hole.
+        const absentC = E.absentElemC(s.arr.type.elem);
         E.line(
-          `scr_arr_set_ref(${arr.name}, ${idx.name}, ${E.absentElemC(s.arr.type.elem)});${E.srcComment(s.loc)}`,
+          absentC === "NULL"
+            ? `scr_arr_tombstone(${arr.name}, ${idx.name});${E.srcComment(s.loc)}`
+            : `scr_arr_set_ref(${arr.name}, ${idx.name}, ${absentC});${E.srcComment(s.loc)}`,
         );
         break;
       }

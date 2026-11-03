@@ -1634,6 +1634,12 @@ typedef struct ScrArr {
    * side table; scr_arr_release tells the table when the array dies. Rides the
    * same padding as the two bytes above, so sizeof(ScrArr) is unchanged. */
   uint8_t execidx;
+  /* 1 = a slot was written NULL by the TOMBSTONE idiom `a[i] = null as unknown as T`
+   * (scr_arr_tombstone). That NULL is Node's explicit `null`, NOT a hole, and the
+   * hole-aware consumers (in, forEach, keys, inspect ...) must not read it as one: they
+   * refuse loudly on such an array instead of answering "hole". Rides the padding after
+   * execidx, so sizeof(ScrArr) is unchanged. */
+  uint8_t tomb;
   /* SCR_ELEM_REF only; NULL for every other element kind. elem_trace is
    * non-NULL exactly when the element type carries a cycle header: such
    * arrays are CYCLE-CAPABLE (an element can point back at the array that
@@ -1647,6 +1653,8 @@ typedef struct ScrArr {
   uint64_t *data;
 } ScrArr;
 
+/* A cleared (tombstoned) slot met by a hole-aware consumer: refuses loudly (see ScrArr::tomb). */
+_Noreturn void scr_arr_trap_tombstone(const ScrArr *a, size_t i);
 ScrArr *scr_arr_new(ScrElemKind elem, size_t initial_cap); /* returns +1 */
 
 /* SCR_ELEM_REF construction: retain/release must be non-NULL (the compiler
@@ -1847,6 +1855,7 @@ static inline bool scr_arr_has_index_ref(const ScrArr *a, double i) {
   if (i >= 0.0 && i < 9007199254740992.0) {
     int64_t n = (int64_t)i;
     ok = (double)n == i && (uint64_t)n < (uint64_t)a->len && a->data[n] != 0;
+    if (!ok && a->tomb && (double)n == i && (uint64_t)n < (uint64_t)a->len) scr_arr_trap_tombstone(a, (size_t)n);
   }
 #if defined(__GNUC__) || defined(__clang__)
   return __builtin_expect(ok, 1);
@@ -8922,12 +8931,16 @@ static inline double scr_num_hole(void) { return scr_num_from_bits(SCR_NUM_HOLE_
  * `a[i]`-style reads that are not hole-aware keep their old behaviour (a ref
  * slot traps "absent"); the consumers that must tell a hole from undefined
  * (in, keys, forEach/map/filter/reduce, join, JSON, inspect) ask here. */
+_Noreturn void scr_arr_trap_tombstone(const ScrArr *a, size_t i);
 static inline bool scr_arr_slot_is_hole(const ScrArr *a, size_t i) {
   uint64_t s = a->data[i];
   if (a->elem == SCR_ELEM_F64) return s == SCR_NUM_HOLE_BITS;
   if (a->elem == SCR_ELEM_BOOL) return false;
+  if (s == 0 && a->tomb) scr_arr_trap_tombstone(a, i); /* a cleared slot is null, not a hole */
   return s == 0;
 }
+/* The tombstone write: the slot becomes NULL and the array is marked (see ScrArr::tomb). */
+void scr_arr_tombstone(ScrArr *a, double i);
 /* `a[i]` names an element (integer index in range, not a hole), f64 elements. */
 static inline bool scr_arr_has_index_f64(const ScrArr *a, double i) {
   bool ok = false;
