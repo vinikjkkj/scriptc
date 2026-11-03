@@ -10927,13 +10927,13 @@ export function dynReflectionSite(functions: readonly IrFunction[], fenced: (op:
   let cur = "";
   const hit = (what: string, n: { loc?: SrcLoc }): void => {
     // `op` is the operation's kind (the lib fn, or the surface's name), what `fenced` judges per class tier.
-    if (found === null && fenced(what.replace(/ .*/, ""))) found = `${what} (in ${cur}${n.loc ? ` at ${n.loc.file}@${n.loc.start}` : ""})`;
+    if (fenced(what.replace(/ .*/, ""))) { const s = `${what} (in ${cur}${n.loc ? ` at ${n.loc.file}@${n.loc.start}` : ""})`; found = found === null ? s : (found.length > 90000 ? found : found + " ;; " + s); }
   };
   const hasDynArg = (args: unknown): boolean =>
     Array.isArray(args) && args.some((a) => (a as { type?: { kind?: string } })?.type?.kind === "dyn");
   type Parent = { kind?: string; key?: { kind?: string; value?: string }; value?: unknown; recv?: unknown; method?: string } | null;
   const visit = (v: unknown, parent: Parent = null): void => {
-    if (found !== null || v === null || typeof v !== "object") return;
+    if (v === null || typeof v !== "object") return;
     if (Array.isArray(v)) {
       for (const item of v) visit(item, parent);
       return;
@@ -10944,7 +10944,7 @@ export function dynReflectionSite(functions: readonly IrFunction[], fenced: (op:
       if ((n.fn === "dyn.objCreateProto" || n.fn === "dyn.objCreateDescs") && Array.isArray(n.args) && n.args.length > 0 &&
           (fresh ??= makeFreshObjectTest(functions))(n.args[0])) {
         // exact: a plain-object prototype
-      } else if (REFLECT_FNS.has(n.fn)) hit(n.fn, n);
+      } else if (REFLECT_FNS.has(n.fn)) { hit(n.fn, n); if (n.fn === "dyn.objCreateProto" && fenced(n.fn) && Array.isArray(n.args)) { const sh = (x: unknown, d: number): string => x === null || typeof x !== "object" ? String(x) : Array.isArray(x) ? "[]" : d <= 0 ? "{..}" : "{" + Object.entries(x as Record<string, unknown>).filter(([k]) => k !== "loc" && k !== "type").map(([k, y]) => k + ":" + sh(y, d - 1)).join(",") + "}"; found = found + " <a0=" + sh(n.args[0], 3).slice(0, 220) + ">"; } }
       else if ((n.fn.startsWith("insp.") || n.fn.startsWith("util.") || /format|inspect/i.test(n.fn)) && hasDynArg(n.args)) hit(n.fn, n);
     } else if (n.kind === "jsonStringify" && n.value?.type?.kind === "dyn") hit("JSON.stringify", n);
     else if (n.kind === "intrinsic" && (n.name === "console.log" || n.name === "console.error") && hasDynArg(n.args)) hit(n.name, n);
@@ -10967,7 +10967,6 @@ export function dynReflectionSite(functions: readonly IrFunction[], fenced: (op:
   for (const f of functions) {
     cur = f.name;
     visit(f.body);
-    if (found !== null) break;
   }
   return found;
 }
