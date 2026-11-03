@@ -11068,6 +11068,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/23270-evalclass-dyn-prototype-over-an-emitter-base.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23270-evalclass-dyn-prototype-over-an-emitter-base.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2330-tls-server-runtime-options.cjs": {
    "order": [
     "<repo>/tests/corpus/2330-tls-server-runtime-options.cjs"
