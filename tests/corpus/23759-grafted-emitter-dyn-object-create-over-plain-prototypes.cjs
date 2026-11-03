@@ -49,3 +49,10 @@ Parent.prototype.hello = function () { return "hi " + this.p + this.c; };
 const Kid = inherit(Parent);
 const kid = new Kid();
 console.log(kid.hello(), kid instanceof Parent, Object.keys(kid).join(","));
+// The generated protobuf enum idiom, in many functions that reuse the same local names (some of them parameters): each
+// `var e = {}, t = Object.create(e)` is judged in its own function.
+function other(e, t) { return e + t; }
+const enums = {};
+enums.One = (function () { var e = {}, t = Object.create(e); return t[e[0] = "A"] = 0, t[e[1] = "B"] = 1, t; })();
+enums.Two = (function () { var e = {}, t = Object.create(e); return t[e[0] = "C"] = 0, t; })();
+console.log(Object.keys(enums.One).join(","), Object.keys(enums.Two).join(","), other(1, 2), Object.keys(v(new Redis())).join(","));
