@@ -23569,6 +23569,90 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/23050-dyn-emit-reaches-number-listener-exactly.ts": {
+   "order": [
+    "<repo>/tests/corpus/23050-dyn-emit-reaches-number-listener-exactly.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23051-dyn-emit-reaches-object-listener-with-null.ts": {
+   "order": [
+    "<repo>/tests/corpus/23051-dyn-emit-reaches-object-listener-with-null.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23052-dyn-emit-reaches-string-listener-with-number.ts": {
+   "order": [
+    "<repo>/tests/corpus/23052-dyn-emit-reaches-string-listener-with-number.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23053-dyn-emit-closure-captures-erased-parameter.ts": {
+   "order": [
+    "<repo>/tests/corpus/23053-dyn-emit-closure-captures-erased-parameter.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23054-dyn-emit-default-parameter-values.ts": {
+   "order": [
+    "<repo>/tests/corpus/23054-dyn-emit-default-parameter-values.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23055-dyn-emit-rest-parameter-listener.ts": {
+   "order": [
+    "<repo>/tests/corpus/23055-dyn-emit-rest-parameter-listener.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23056-dyn-emit-two-parameters-missing-and-swapped.ts": {
+   "order": [
+    "<repo>/tests/corpus/23056-dyn-emit-two-parameters-missing-and-swapped.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23057-dyn-emit-class-this-once-prepend.ts": {
+   "order": [
+    "<repo>/tests/corpus/23057-dyn-emit-class-this-once-prepend.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23058-dyn-emit-registrations-in-expression-statements-and-loops.ts": {
+   "order": [
+    "<repo>/tests/corpus/23058-dyn-emit-registrations-in-expression-statements-and-loops.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23059-dyn-emit-destructured-function-and-async-listeners.ts": {
+   "order": [
+    "<repo>/tests/corpus/23059-dyn-emit-destructured-function-and-async-listeners.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23060-dyn-emit-reaches-named-listener-functions.ts": {
+   "order": [
+    "<repo>/tests/corpus/23060-dyn-emit-reaches-named-listener-functions.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23061-dyn-emit-reaches-jsdoc-typed-listeners.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23061-dyn-emit-reaches-jsdoc-typed-listeners.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23062-dyn-emit-nested-registration-in-listener.ts": {
+   "order": [
+    "<repo>/tests/corpus/23062-dyn-emit-nested-registration-in-listener.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23063-dyn-emit-listener-cycles-with-erased-twin.ts": {
+   "order": [
+    "<repo>/tests/corpus/23063-dyn-emit-listener-cycles-with-erased-twin.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/grafted-emitter-dyn-reflection-refused.cjs": {
    "order": [
     "<repo>/tests/diagnostics/grafted-emitter-dyn-reflection-refused.cjs"
