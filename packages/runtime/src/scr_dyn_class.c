@@ -165,6 +165,7 @@ ScrDyn *scr_dyn_new_evalclass(void *o, const ScrDynClass *cls) {
 
 static ScrDyn *dyn_class_prototype(const ScrDyn *d);
 static ScrStr *dyn_cls_ops_class_text(const ScrDyn *d);
+static ScrDyn *dyn_ee_proto(void);
 
 static void dyn_eval_fence(const ScrDyn *inner, const char *what) {
   ScrJsonBuf b;
@@ -470,7 +471,13 @@ static ScrDyn *dyn_class_prototype(const ScrDyn *d) {
   const ScrDynClassMember *baseRow = inner != NULL ? scr_dyn_objinst_member(inner, "%dynBase", 8) : dyn_class_static(cls, "%dynBase", 8);
   if (baseRow != NULL && baseRow->call != NULL) {
     ScrDyn *b = baseRow->call(recv, NULL, 0, "prototype");
-    if (b != NULL && b->kind == SCR_DYN_OBJ) {
+    if (b != NULL && b->kind == SCR_DYN_STR && b->v.str->len == 23 && memcmp(b->v.str->data, "%EventEmitter.prototype", 23) == 0) {
+      ScrDyn *ep = dyn_ee_proto();
+      if (ep != NULL) {
+        scr_dyn_obj_set_proto(P, ep);
+        scr_dyn_release(ep);
+      }
+    } else if (b != NULL && b->kind == SCR_DYN_OBJ) {
       scr_dyn_obj_set_proto(P, b); /* a runtime base's own prototype object (Error.prototype) */
     } else if (b != NULL && b->kind == SCR_DYN_FUNC) {
       ScrDyn *bp = dyn_class_prototype(b);
@@ -1036,6 +1043,30 @@ static const char *const SCR_EE_PROTO_KEYS[] = {
   "listenerCount", "eventNames",
 };
 #define SCR_EE_PROTO_KEY_COUNT (sizeof SCR_EE_PROTO_KEYS / sizeof SCR_EE_PROTO_KEYS[0])
+
+/* EventEmitter.prototype (one process object): the three own enumerable state keys, then the member functions the dyn view of an
+ * emitter instance already answers (one interned function per member, `on` is `addListener`), in Node's key order. */
+static ScrDyn *dyn_ee_proto_cache = NULL;
+static void dyn_ee_proto_teardown(void) {
+  scr_dyn_release(dyn_ee_proto_cache);
+  dyn_ee_proto_cache = NULL;
+}
+static ScrDyn *dyn_ee_proto(void) {
+  if (dyn_ee_proto_cache == NULL) {
+    if (scr_dyn_ee_ops == NULL) return NULL;
+    ScrDyn *p = scr_dyn_new_obj();
+    for (size_t i = 0; i < SCR_EE_PROTO_KEY_COUNT; i++) {
+      const char *nm = SCR_EE_PROTO_KEYS[i];
+      size_t nl = strlen(nm);
+      ScrDyn *v = i == 1 ? scr_dyn_new_num(0) : (i == 0 || i == 2) ? scr_dyn_retain(scr_dyn_undefined()) : scr_dyn_ee_ops->value(nm, nl);
+      if (v == NULL) continue;
+      scr_dyn_obj_set(p, nm, nl, v); /* the object owns the +1 */
+    }
+    dyn_ee_proto_cache = p;
+    scr_atexit(dyn_ee_proto_teardown);
+  }
+  return scr_dyn_retain(dyn_ee_proto_cache);
+}
 
 static bool ee_proto_key_index(const char *s, size_t n, size_t *idx) {
   for (size_t i = 0; i < SCR_EE_PROTO_KEY_COUNT; i++) {

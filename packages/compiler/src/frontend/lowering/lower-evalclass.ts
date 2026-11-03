@@ -35,7 +35,7 @@
  * and declared before the class. Everything else keeps a NAMED fence. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, canBoxClassIntoDyn, CLASS_NO_DYN_NEW, DYN, EVAL_NO_SRC_CLASSES, EVAL_STATIC_CLASSES, F64, IrExpr, IrFunction, IrLocal, IrStmt, IrType, STRING, UNDEFINED_T, VOID, canDynCheckTo, typeEquals } from "../../ir/nodes.js";
+import { BOOL, RUNTIME_EMITTER_CLASS, canBoxClassIntoDyn, CLASS_NO_DYN_NEW, DYN, EVAL_NO_SRC_CLASSES, EVAL_STATIC_CLASSES, F64, IrExpr, IrFunction, IrLocal, IrStmt, IrType, STRING, UNDEFINED_T, VOID, canDynCheckTo, typeEquals } from "../../ir/nodes.js";
 import { bindingNeverReassigned } from "./lower-calls.js";
 import { locOf } from "../program.js";
 import { classSourceText } from "../fn-srctext.js";
@@ -372,6 +372,7 @@ export function dynNewDrivable(L: Lowerer, info: ClassInfo, evaluated: boolean):
 export function classProtoPlan(L: Lowerer, info: ClassInfo): string[] | null {
   if (info.decl === null || info.protoClass === true || info.builtinError === true || info.builtinEmitter === true ||
       info.builtinStream !== undefined || info.def.runtime === true) return null;
+  for (let b = info.base; b !== null; b = b.base) if (b.builtinStream !== undefined) return null;
   const own = new Set<string>();
   // Members classMethodMembers does not yield (async and generator methods have no member row) or names it cannot resolve.
   for (const m of info.decl.members) {
@@ -393,7 +394,7 @@ export function classProtoPlan(L: Lowerer, info: ClassInfo): string[] | null {
     }
     own.add(mName);
   }
-  if (info.base !== null && info.base.def.name !== "%Error") {
+  if (info.base !== null && info.base.def.name !== "%Error" && info.base.def.name !== RUNTIME_EMITTER_CLASS) {
     if (!canBoxClassIntoDyn(info.base.def.name) || info.base.evalStaticOf !== undefined || info.base.evalClass !== undefined) return null;
     if (classProtoPlan(L, info.base) === null) return null;
   }
@@ -417,6 +418,8 @@ export function dynProtoFns(
   const baseVal: IrExpr =
     inst.base !== null && inst.base.def.name === "%Error"
       ? { kind: "libCall", fn: "dyn.errorProto", args: [], type: DYN, loc }
+      : inst.base !== null && inst.base.def.name === RUNTIME_EMITTER_CLASS
+      ? { kind: "dynFrom", value: { kind: "strLit", value: "%EventEmitter.prototype", type: STRING, loc }, type: DYN, loc }
       : inst.base !== null
       ? { kind: "dynFrom", value: { kind: "classRef", className: inst.base.def.name, type: { kind: "classval", className: inst.base.def.name }, loc }, type: DYN, loc }
       : { kind: "dynFrom", value: { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc }, type: DYN, loc };
