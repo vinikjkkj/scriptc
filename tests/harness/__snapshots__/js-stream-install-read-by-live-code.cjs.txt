@@ -1,0 +1,26 @@
+js-stream-install-read-by-live-code.cjs:12:3 - error SC2020: 'util.inherits' is part of the standard library types but has no scriptc lowering yet
+
+  11 |   function UpperStream (options) { Transform.call(this, options) }
+  12 |   util.inherits(UpperStream, Transform)
+     |   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  13 |   UpperStream.prototype._transform = function (chunk, enc, done) { this.push(String(chunk).toUpperCase()); done() }
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+js-stream-install-read-by-live-code.cjs:19:18 - error SC2020: 'require taken as a value' is part of the standard library types but has no scriptc lowering yet
+
+  18 | try {
+  19 |   streamModule = require("stream")
+     |                  ^~~~~~~
+  20 | } catch (e) {}
+
+  hint: calling it would need the run-time-specifier require, which has no static lowering: the compiled module graph is fixed at build time
+
+js-stream-install-read-by-live-code.cjs:22:21 - error SC2020: 'stream.Transform' is part of the standard library types but has no scriptc lowering yet
+
+  21 | 
+  22 | if (streamModule && streamModule.Transform) {
+     |                     ^~~~~~~~~~~~~~~~~~~~~~
+  23 |   module.exports.enableStreamingAPI(streamModule)
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)

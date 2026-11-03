@@ -1,0 +1,26 @@
+js-stream-install-mutates-the-real-transform-prototype.cjs:10:3 - error SC2020: 'util.inherits' is part of the standard library types but has no scriptc lowering yet
+
+   9 |   function UpperStream (options) { Transform.call(this, options) }
+  10 |   util.inherits(UpperStream, Transform)
+     |   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  11 |   Transform.prototype.shout = function () { return "!" }
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
+
+js-stream-install-mutates-the-real-transform-prototype.cjs:17:18 - error SC2020: 'require taken as a value' is part of the standard library types but has no scriptc lowering yet
+
+  16 | try {
+  17 |   streamModule = require("stream")
+     |                  ^~~~~~~
+  18 | } catch (e) {}
+
+  hint: calling it would need the run-time-specifier require, which has no static lowering: the compiled module graph is fixed at build time
+
+js-stream-install-mutates-the-real-transform-prototype.cjs:20:21 - error SC2020: 'stream.Transform' is part of the standard library types but has no scriptc lowering yet
+
+  19 | 
+  20 | if (streamModule && streamModule.Transform) {
+     |                     ^~~~~~~~~~~~~~~~~~~~~~
+  21 |   module.exports.enableStreamingAPI(streamModule)
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)
