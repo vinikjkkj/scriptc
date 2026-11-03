@@ -103,6 +103,14 @@ const NOT_ROUTED: ReadonlyMap<string, string> = new Map([
   // what they exist for (npm-static's 4151) — so routing the name would be
   // a regression, not a fix: it would take the dotted form away from the
   // better lowering. Same structure as toString and flatMap above.
+  // Object.prototype members the runtime answers for a PLAIN dictionary (`row.toString`, `row.constructor`, a keyed read that
+  // finds Object.prototype's own function) and for a class's prototype object (isPrototypeOf). `constructor` is no prototype name
+  // any fence lists, so the generic own-member arm already emits its dynInvoke. isPrototypeOf and propertyIsEnumerable are
+  // answered for those receivers ONLY: routing the names would send arrays, strings and numbers (which have them in Node) into
+  // a TypeError, so they keep the build-time fence on the dotted spelling.
+  ["constructor", "not a prototype name any fence lists: the generic own-member arm already emits dynInvoke"],
+  ["isPrototypeOf", "answered for plain dictionaries and class prototype objects only; every other kind would throw where Node answers, so the dotted spelling keeps its name fence"],
+  ["propertyIsEnumerable", "answered for plain dictionaries only; every other kind would throw where Node answers, so the dotted spelling keeps its name fence"],
   ...(["charAt", "charCodeAt", "endsWith", "padEnd", "padStart", "repeat",
     "startsWith", "substr", "substring", "trim", "trimEnd", "trimStart"] as const).map(
     (n) => [n, "claimed by DYN_STRING_ONLY_METHODS before the dispatch set; the element spelling reaches the runtime arm"] as const,
