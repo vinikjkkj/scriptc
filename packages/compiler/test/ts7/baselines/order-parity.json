@@ -11338,6 +11338,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/23700-any-alias-field-record-instance-plain-class.ts": {
+   "order": [
+    "<repo>/tests/corpus/23700-any-alias-field-record-instance-plain-class.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23701-any-alias-field-record-union-undefined-inspect.ts": {
+   "order": [
+    "<repo>/tests/corpus/23701-any-alias-field-record-union-undefined-inspect.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23702-any-alias-field-record-class-values-statics.ts": {
+   "order": [
+    "<repo>/tests/corpus/23702-any-alias-field-record-class-values-statics.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23703-any-alias-field-store-shaped-ctor-destructure.ts": {
+   "order": [
+    "<repo>/tests/corpus/23703-any-alias-field-store-shaped-ctor-destructure.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2351-async-methods.ts": {
    "order": [
     "<repo>/tests/corpus/2351-async-methods.ts"
