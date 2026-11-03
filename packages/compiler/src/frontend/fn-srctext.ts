@@ -141,6 +141,16 @@ function computeFileText(sf: ts.SourceFile): FileText {
     ) {
       return { stripped: null, quirk };
     }
+    // Class members that are types only: a `declare` field, an overload or abstract method signature (no body), an
+    // index signature. Node blanks the whole member (its `;` included).
+    if (
+      (ts.isPropertyDeclaration(n) && (ts.getModifiers(n) ?? []).some((m) => m.kind === ts.SyntaxKind.DeclareKeyword)) ||
+      (ts.isMethodDeclaration(n) && n.body === undefined) ||
+      ts.isIndexSignatureDeclaration(n)
+    ) {
+      spans.push([n.getStart(sf), n.end]);
+      continue;
+    }
     // Whole statements that are types only.
     if (ts.isInterfaceDeclaration(n) || ts.isTypeAliasDeclaration(n)) {
       spans.push([n.getStart(sf), n.end]);
@@ -157,8 +167,15 @@ function computeFileText(sf: ts.SourceFile): FileText {
     if (marks.exclamationToken !== undefined) {
       spans.push([marks.exclamationToken.getStart(sf), marks.exclamationToken.end]);
     }
-    if (marks.questionToken !== undefined) {
+    // (a conditional expression's `?` is an operator, never an erasable mark)
+    if (marks.questionToken !== undefined && !ts.isConditionalExpression(n)) {
       spans.push([marks.questionToken.getStart(sf), marks.questionToken.end]);
+    }
+    // A class property's `!` / `?` before its annotation (`x!: number`, `y?: string`) and a type-less optional one (`y?;`).
+    if (ts.isPropertyDeclaration(n)) {
+      const nameEnd = n.name.end;
+      const j = skipTriviaForward(text, nameEnd);
+      if (text[j] === "!" || text[j] === "?") spans.push([j, j + 1]);
     }
     if (
       (ts.isParameter(n) || ts.isVariableDeclaration(n) || ts.isPropertyDeclaration(n) || ts.isPropertySignature(n)) &&
@@ -241,10 +258,23 @@ export function isValueFunctionNode(node: ts.Node): boolean {
   );
 }
 
+/** The exact toString text of the CLASS `node` (`class X ... { ... }` from the `class` keyword, or its `abstract`
+ * modifier's stripped blank, to the closing brace), or null when this module has no exact text for it. A decorated
+ * class has none (its decorators print inside the text and the decoration rewrites the value). */
+export function classSourceText(node: ts.Node): string | null {
+  if (!ts.isClassDeclaration(node) && !ts.isClassExpression(node)) return null;
+  if (((node as { modifiers?: readonly ts.Node[] }).modifiers ?? []).some((m) => m.kind === ts.SyntaxKind.Decorator)) return null;
+  return sourceTextOf(node);
+}
+
 /** The exact toString text of the function `node`, or null when this module
  * has no exact text for it (the caller fences). */
 export function functionSourceText(node: ts.Node): string | null {
   if (!isValueFunctionNode(node)) return null;
+  return sourceTextOf(node);
+}
+
+function sourceTextOf(node: ts.Node): string | null {
   const sf = node.getSourceFile();
   const ft = fileText(sf);
   if (ft.stripped === null || ft.quirk.has(node)) return null;

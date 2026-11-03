@@ -6982,6 +6982,9 @@ typedef struct ScrDynClassOps {
   /* Object.keys / values / entries over a class value (declared or per-evaluation): its own ENUMERABLE
    * static fields, appended to `out`. 0: not a class value; 1: done; -1: a read threw (pending). */
   int (*class_walk)(const ScrDyn *v, ScrObjWalk mode, ScrDyn *out);
+  /* `String(V)` of a class value (declared or per-evaluation): its source text (+1), or NULL when `d` is not a class value or
+   * this build carries no exact text for it. */
+  ScrStr *(*class_text)(const ScrDyn *d);
 } ScrDynClassOps;
 extern const ScrDynClassOps *scr_dyn_class_ops;
 void scr_dyn_class_install(void);

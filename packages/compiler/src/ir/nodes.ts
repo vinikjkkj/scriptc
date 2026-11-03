@@ -9256,6 +9256,16 @@ export const EVAL_STATIC_CLASSES = new Set<string>();
 /** The hidden instance slot holding the ScrEmitter of an applyMixin(Y, EventEmitter) class. */
 export const EMITTER_MIXIN_FIELD_NAME = "__scrEmitter";
 
+/** The per-evaluation static sides whose class source text is not exact in this build (a module Node refuses, a decorated
+ * class): their class value keeps the compile-time refusal into dyn, because `String(V)` must print Node's text. */
+export const EVAL_NO_SRC_CLASSES = new Set<string>();
+
+/** Classes whose class value cannot be constructed through dyn (no synthesizable `%dynNew`: abstract, generic, a lifted class
+ * capturing bindings, a prototype-class, a builtin-derived constructor, or a constructor parameter with no dyn check), and every
+ * class with such a descendant. Such a class value keeps the compile-time refusal wherever it would newly cross into dyn
+ * (nested in a record/array/union, or an evaluated class). The BARE declared value predates this and keeps boxing. */
+export const CLASS_NO_DYN_NEW = new Set<string>();
+
 export function canBoxClassIntoDyn(className: string): boolean {
   return !RUNTIME_ERROR_CLASSES.has(className);
 }
@@ -9300,10 +9310,12 @@ export function canConvertToDyn(
   // a record field or union arm of class type boxes exactly as the bare
   // type does, which is what lets a deep-copying record carry a class
   // member without the copy lying about it.
-  if (t.kind === "object" && canBoxClassIntoDyn(t.className)) return true;
+  if (t.kind === "object" && canBoxClassIntoDyn(t.className)) {
+    return !EVAL_NO_SRC_CLASSES.has(t.className) && !(EVAL_STATIC_CLASSES.has(t.className) && CLASS_NO_DYN_NEW.has(t.className));
+  }
   // A CLASS VALUE boxes as a function object (scr_dyn_class_value; an
   // evaluation's static side as a non-immortal one that holds the evaluation).
-  if (t.kind === "classval" && canBoxClassIntoDyn(t.className)) return true;
+  if (t.kind === "classval" && canBoxClassIntoDyn(t.className)) return !CLASS_NO_DYN_NEW.has(t.className);
   if (t.kind === "func") return canBoxFuncIntoDyn(t, getRecord, getUnion, visiting);
   // A MAP or a SET boxes by REFERENCE (SCR_DYN_MAP): the retained ScrMap
   // plus the interned typeKey of THIS type, a static emitted literal

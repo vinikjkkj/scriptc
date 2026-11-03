@@ -67,7 +67,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { GRAFTED_EMITTER_CLASSES, EVAL_STATIC_CLASSES, dynReflectionSite, graftedBoxSites, moduleBoxesEmitters } from "../../ir/nodes.js";
+import { CLASS_NO_DYN_NEW, EVAL_NO_SRC_CLASSES, GRAFTED_EMITTER_CLASSES, EVAL_STATIC_CLASSES, dynReflectionSite, graftedBoxSites, moduleBoxesEmitters } from "../../ir/nodes.js";
 import { computeTwinEdits, type TwinEdits } from "./emitter-twin.js";
 import { canBoxFuncIntoDyn } from "../../ir/nodes.js";
 import { procStreamDynMemberFence, NULL_T, strandTrap, armDiscrimLits, arrayOf, BOOL, canBoxClassIntoDyn, internalSlotFields, isRefCounted, canAdaptDynFuncTo, dynRestApplyable, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, shapeHasAccessorSlots, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
@@ -2599,6 +2599,8 @@ export class Lowerer {
     // The grafted-emitter set is per lowering (see GRAFTED_EMITTER_CLASSES).
     GRAFTED_EMITTER_CLASSES.clear();
     EVAL_STATIC_CLASSES.clear();
+    EVAL_NO_SRC_CLASSES.clear();
+    CLASS_NO_DYN_NEW.clear();
     this.reachable = mode.reachable ?? null;
     this.remainder = mode.remainder ?? false;
     this.alreadyFlushed = mode.alreadyFlushed ?? new Set();
@@ -4048,6 +4050,42 @@ export class Lowerer {
     // after the whole walk, so the answer does not depend on whether the
     // cast was lowered before or after the surface that enumerates it.
     if (this.diags.length === 0) this.armOwnMasks(functions, artifacts.records);
+    // A per-evaluation class value in dyn has no modeled `prototype` object (its methods, its link to the base's
+    // prototype and the identity of the object would all have to be exact): a program that crosses one into dyn AND
+    // names `prototype` on a dynamic value keeps the compile-time refusal, at the crossing.
+    if (this.diags.length === 0 && EVAL_STATIC_CLASSES.size > 0) {
+      let readsProto = false;
+      let crossing: SrcLoc | null = null;
+      const stack: unknown[] = [functions];
+      while (stack.length > 0) {
+        const n = stack.pop();
+        if (n === null || typeof n !== "object") continue;
+        if (Array.isArray(n)) {
+          for (const x of n) stack.push(x);
+          continue;
+        }
+        const o = n as { kind?: unknown; key?: { kind?: unknown; value?: unknown }; value?: { type?: IrType }; loc?: SrcLoc };
+        if (o.kind === "dynKeyGet" && o.key?.kind === "strLit" && o.key.value === "prototype") readsProto = true;
+        if (o.kind === "libCall" && (n as { fn?: unknown }).fn === "dyn.keySet") {
+          const a = (n as { args?: { kind?: unknown; value?: unknown }[] }).args;
+          if (a?.[1]?.kind === "strLit" && a[1].value === "prototype") readsProto = true;
+        }
+        if (o.kind === "dynFrom" && o.value?.type?.kind === "object" && EVAL_STATIC_CLASSES.has(o.value.type.className) && crossing === null) {
+          crossing = o.loc ?? null;
+        }
+        for (const v of Object.values(n as Record<string, unknown>)) stack.push(v);
+      }
+      if (readsProto && crossing !== null) {
+        this.pushDiag({
+          code: "SC1101",
+          message:
+            "converting a class value minted by a class expression inside a function to 'unknown' in a program that also reads or writes " +
+            "'prototype' of a dynamic value (the per-evaluation class's prototype object is not modeled: its methods, its link to the " +
+            "base class's prototype and its identity)",
+          loc: crossing,
+        } as ScrDiagnostic);
+      }
+    }
     // Function-value text (fn.text): every closure the program creates needs
     // its exact source text, or the program is refused (fn-srctext-attach.ts).
     {
