@@ -1,4 +1,7 @@
 const { EventEmitter } = require("events");
+// Printing goes through String() so no dynamic value is inspected: a grafted instance in a dynamic slot is refused
+// in a program that inspects dynamic values (tests/diagnostics/grafted-emitter-dyn-reflection-refused.cjs).
+const out = (...a) => { process.stdout.write(a.map((v) => String(v)).join(" ") + "\n"); };
 function applyMixin(d, m) { Object.getOwnPropertyNames(m.prototype).forEach((name) => { Object.defineProperty(d.prototype, name, Object.getOwnPropertyDescriptor(m.prototype, name)); }); }
 class Redis { constructor(n) { this.n = n; this.last = -1; EventEmitter.call(this); } }
 applyMixin(Redis, EventEmitter);
@@ -7,7 +10,7 @@ const handlers = {
   attach(self) {
     self.on("data", (v) => { self.last = v; });
     self.once("close", () => { self.emit("closed", self.n); });
-    self.on("closed", (n) => console.log("closed", n));
+    self.on("closed", (n) => out("closed", n));
   },
 };
 for (let i = 0; i < 3; i++) {
@@ -19,7 +22,7 @@ for (let i = 0; i < 3; i++) {
   b.emit("data", i * 2);
   a.emit("close");
   b.emit("close");
-  console.log(a.last, b.last, a.listenerCount("data"), b.listenerCount("closed"));
+  out(a.last, b.last, a.listenerCount("data"), b.listenerCount("closed"));
 }
 // cycle that is abandoned with listeners still attached
 function leaky(n) {
@@ -31,4 +34,4 @@ function leaky(n) {
   s.on("x", () => s.listenerCount("x") + r.listenerCount("x"));
 }
 for (let i = 0; i < 4; i++) leaky(i);
-console.log("done");
+out("done");
