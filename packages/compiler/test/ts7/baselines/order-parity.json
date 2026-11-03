@@ -12288,9 +12288,75 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24000-view-identity.ts": {
+   "order": [
+    "<repo>/tests/corpus/24000-view-identity.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24001-view-writes-both-ways.ts": {
+   "order": [
+    "<repo>/tests/corpus/24001-view-writes-both-ways.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24002-view-getters-per-read.ts": {
+   "order": [
+    "<repo>/tests/corpus/24002-view-getters-per-read.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24003-view-enumeration-surfaces.ts": {
+   "order": [
+    "<repo>/tests/corpus/24003-view-enumeration-surfaces.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24004-view-union-arms.ts": {
+   "order": [
+    "<repo>/tests/corpus/24004-view-union-arms.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24005-view-nested-arrays.ts": {
+   "order": [
+    "<repo>/tests/corpus/24005-view-nested-arrays.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24006-view-back-to-js.ts": {
+   "order": [
+    "<repo>/tests/corpus/24006-view-back-to-js.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24007-view-mysql-result.ts": {
+   "order": [
+    "<repo>/tests/corpus/24007-view-mysql-result.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24008-view-options-mutated.ts": {
+   "order": [
+    "<repo>/tests/corpus/24008-view-options-mutated.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24009-view-plain-object-cast.ts": {
+   "order": [
+    "<repo>/tests/corpus/24009-view-plain-object-cast.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2401-kill-break-staging.ts": {
    "order": [
     "<repo>/tests/corpus/2401-kill-break-staging.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24010-view-method-this.ts": {
+   "order": [
+    "<repo>/tests/corpus/24010-view-method-this.ts"
    ],
    "diags": []
   },
