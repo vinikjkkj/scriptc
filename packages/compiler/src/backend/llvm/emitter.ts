@@ -7243,10 +7243,16 @@ class LlEmitter {
         const arr = this.emitExpr(s.arr);
         const idx = this.emitExpr(s.index);
         if (s.arr.type.kind !== "array") throw new Error("llvm emitter bug: arrayClear on non-array");
-        this.declare(`declare void @scr_arr_set_ref(ptr, double, ptr)`);
-        B.line(
-          `call void @scr_arr_set_ref(ptr ${arr.name}, double ${idx.name}, ptr ${this.absentElemLl(s.arr.type.elem)})`,
-        );
+        const absentLl = this.absentElemLl(s.arr.type.elem);
+        if (absentLl === "null") {
+          // The TOMBSTONE (Node's null, not a hole): marks the array so the hole-aware
+          // consumers refuse it loudly.
+          this.declare(`declare void @scr_arr_tombstone(ptr, double)`);
+          B.line(`call void @scr_arr_tombstone(ptr ${arr.name}, double ${idx.name})`);
+        } else {
+          this.declare(`declare void @scr_arr_set_ref(ptr, double, ptr)`);
+          B.line(`call void @scr_arr_set_ref(ptr ${arr.name}, double ${idx.name}, ptr ${absentLl})`);
+        }
         break;
       }
       case "bytesSet": {
