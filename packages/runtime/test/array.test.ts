@@ -50,7 +50,8 @@ test("array runtime: push/pop/set/get, RC recursion, growth", async () => {
 test.each([
   ["--crash-get-oob", "array index 1 out of bounds (length 1)"],
   ["--crash-get-frac", "array index 0.5 out of bounds (length 1)"],
-  ["--crash-set-oob", "array index 2 out of bounds (length 1)"],
+  // A write just past the end makes holes now (Node-exact); the sparse memory guard (len + 2^24) still traps.
+  ["--crash-set-oob", "array index 20000000 out of bounds (length 1)"],
   ["--crash-pop-empty", "pop() on an empty array"],
   ["--crash-get-nan", "array index NaN out of bounds (length 1)"],
   ["--crash-get-neg", "array index -1 out of bounds (length 1)"],

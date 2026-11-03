@@ -4,7 +4,7 @@
  *   (no args)          run all assertions; prints "N/N cases passed"
  *   --crash-get-oob    read past the end        → RangeError + abort()
  *   --crash-get-frac   read a fractional index  → RangeError + abort()
- *   --crash-set-oob    write past len (holes)   → RangeError + abort()
+ *   --crash-set-oob    write past len + 2^24 (sparse guard) → RangeError + abort()
  *   --crash-pop-empty  pop an empty array       → RangeError + abort()
  *
  * and the index minefield, one mode per ARM of scr_arr_check_index, because
@@ -644,7 +644,9 @@ int main(int argc, char **argv) {
     } else if (strcmp(argv[1], "--crash-get-frac") == 0) {
       scr_arr_get_f64(a, 0.5);
     } else if (strcmp(argv[1], "--crash-set-oob") == 0) {
-      scr_arr_set_f64(a, 2, 9); /* would create a hole */
+      /* A write past the end now makes HOLES (Node-exact); only one beyond len + 2^24 slots
+       * (the sparse memory guard) still traps. */
+      scr_arr_set_f64(a, 20000000, 9);
     } else if (strcmp(argv[1], "--crash-pop-empty") == 0) {
       scr_arr_pop_f64(a);
       scr_arr_pop_f64(a); /* now empty */
