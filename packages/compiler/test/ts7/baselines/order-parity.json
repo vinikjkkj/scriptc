@@ -23471,6 +23471,109 @@
     "<repo>/tests/corpus/23015-dyn-emitter-typed-listener-types-register-boxed.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/23000-dyn-emitter-forwarder-inherit-events.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23000-dyn-emitter-forwarder-inherit-events.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23001-dyn-emitter-forwarder-typed-error-listener/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/23001-dyn-emitter-forwarder-typed-error-listener/inh.cjs",
+    "<repo>/tests/corpus/23001-dyn-emitter-forwarder-typed-error-listener/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23002-dyn-emitter-grafted-and-subclass-full-surface.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23002-dyn-emitter-grafted-and-subclass-full-surface.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23003-dyn-emitter-typed-listeners-through-dyn-emit.ts": {
+   "order": [
+    "<repo>/tests/corpus/23003-dyn-emitter-typed-listeners-through-dyn-emit.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23004-dyn-emitter-listener-cycles-grafted-and-subclass.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23004-dyn-emitter-listener-cycles-grafted-and-subclass.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23005-dyn-emitter-emit-apply-spread-and-mutation-during-emit.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23005-dyn-emitter-emit-apply-spread-and-mutation-during-emit.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23006-dyn-emitter-error-without-listener-throws.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23006-dyn-emitter-error-without-listener-throws.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23007-dyn-emitter-identity-typeof-instanceof.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23007-dyn-emitter-identity-typeof-instanceof.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23008-dyn-emitter-grafted-in-record-and-unknown-slot.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23008-dyn-emitter-grafted-in-record-and-unknown-slot.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23009-dyn-emitter-typed-target-emit-apply-forwarder.ts": {
+   "order": [
+    "<repo>/tests/corpus/23009-dyn-emitter-typed-target-emit-apply-forwarder.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23010-dyn-emitter-apply-reaches-error-listener.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23010-dyn-emitter-apply-reaches-error-listener.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23011-dyn-emitter-apply-reaches-meta-listener.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23011-dyn-emitter-apply-reaches-meta-listener.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23012-dyn-emitter-apply-reaches-typed-plain-emitter.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23012-dyn-emitter-apply-reaches-typed-plain-emitter.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23013-dyn-emitter-apply-reaches-zero-arg-listener.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23013-dyn-emitter-apply-reaches-zero-arg-listener.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23014-dyn-emitter-grafted-instance-into-untyped-parameter.js": {
+   "order": [
+    "<repo>/tests/corpus/23014-dyn-emitter-grafted-instance-into-untyped-parameter.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23016-dyn-emitter-registration-reached-as-a-value.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23016-dyn-emitter-registration-reached-as-a-value.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/grafted-emitter-dyn-reflection-refused.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/grafted-emitter-dyn-reflection-refused.cjs"
+   ],
+   "diags": []
   }
  }
 }

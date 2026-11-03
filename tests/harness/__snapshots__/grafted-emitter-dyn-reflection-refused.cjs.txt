@@ -1,0 +1,17 @@
+grafted-emitter-dyn-reflection-refused.cjs:11:1 - error SC1101: converting an applyMixin(Y, EventEmitter) instance to 'unknown' in a program that also enumerates or prints dynamic values (insp.dynS (in show at grafted-emitter-dyn-reflection-refused.cjs@817)): the instance's own keys (the emitter's state cells and listener tables) cannot be reproduced by that operation, so the flow is refused are not supported yet
+
+  10 | }
+  11 | class Redis {
+     | ^~~~~~~~~~~~~
+  12 |   constructor() {
+
+  hint: numbers, strings, booleans, JSON-safe records/arrays/unions (a deep copy — the 'unknown' value does not alias the original, so a write through it is refused rather than lost), Uint8Array/Buffer (shared by reference — writes through the 'unknown' value DO reach the original), and functions over those (boxed, identity preserved) convert into 'unknown' slots; this value's type has no dynamic representation yet
+
+grafted-emitter-dyn-reflection-refused.cjs:21:6 - error SC1101: converting an applyMixin(Y, EventEmitter) instance to 'unknown' in a program that also enumerates or prints dynamic values (insp.dynS (in show at grafted-emitter-dyn-reflection-refused.cjs@817)): the instance's own keys (the emitter's state cells and listener tables) cannot be reproduced by that operation, so the flow is refused are not supported yet
+
+  20 | }
+  21 | show(new Redis());
+     |      ^~~~~~~~~~~
+  22 | 
+
+  hint: numbers, strings, booleans, JSON-safe records/arrays/unions (a deep copy — the 'unknown' value does not alias the original, so a write through it is refused rather than lost), Uint8Array/Buffer (shared by reference — writes through the 'unknown' value DO reach the original), and functions over those (boxed, identity preserved) convert into 'unknown' slots; this value's type has no dynamic representation yet
