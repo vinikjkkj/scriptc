@@ -10948,6 +10948,54 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/23250-evalclass-dyn-es5-this-slot-pg-shape.js": {
+   "order": [
+    "<repo>/tests/corpus/23250-evalclass-dyn-es5-this-slot-pg-shape.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23251-evalclass-dyn-any-field-script-command.ts": {
+   "order": [
+    "<repo>/tests/corpus/23251-evalclass-dyn-any-field-script-command.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23252-evalclass-dyn-class-value-semantics.js": {
+   "order": [
+    "<repo>/tests/corpus/23252-evalclass-dyn-class-value-semantics.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23253-classval-dyn-record-field-connector.ts": {
+   "order": [
+    "<repo>/tests/corpus/23253-classval-dyn-record-field-connector.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23254-classval-dyn-declared-values.ts": {
+   "order": [
+    "<repo>/tests/corpus/23254-classval-dyn-declared-values.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23255-evalclass-dyn-containers-and-identity.js": {
+   "order": [
+    "<repo>/tests/corpus/23255-evalclass-dyn-containers-and-identity.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23256-evalclass-dyn-ctor-shapes-constructor-read.js": {
+   "order": [
+    "<repo>/tests/corpus/23256-evalclass-dyn-ctor-shapes-constructor-read.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23257-evalclass-dyn-statics-expandos-and-inspect.js": {
+   "order": [
+    "<repo>/tests/corpus/23257-evalclass-dyn-statics-expandos-and-inspect.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2330-tls-server-runtime-options.cjs": {
    "order": [
     "<repo>/tests/corpus/2330-tls-server-runtime-options.cjs"
