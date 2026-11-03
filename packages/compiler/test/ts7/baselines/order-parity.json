@@ -11398,6 +11398,37 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/23650-stream-install-never-read-iconv-shape/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23650-stream-install-never-read-iconv-shape/lib.cjs",
+    "<repo>/tests/corpus/23650-stream-install-never-read-iconv-shape/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23651-stream-install-never-read-codec-table-and-null-proto-dictionary/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23651-stream-install-never-read-codec-table-and-null-proto-dictionary/merge.cjs",
+    "<repo>/tests/corpus/23651-stream-install-never-read-codec-table-and-null-proto-dictionary/codecs-plain.cjs",
+    "<repo>/tests/corpus/23651-stream-install-never-read-codec-table-and-null-proto-dictionary/codecs-table.cjs",
+    "<repo>/tests/corpus/23651-stream-install-never-read-codec-table-and-null-proto-dictionary/codecs.cjs",
+    "<repo>/tests/corpus/23651-stream-install-never-read-codec-table-and-null-proto-dictionary/lib.cjs",
+    "<repo>/tests/corpus/23651-stream-install-never-read-codec-table-and-null-proto-dictionary/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23652-null-proto-literal-dictionary-dynamic-keys.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23652-null-proto-literal-dictionary-dynamic-keys.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23653-stream-install-never-read-util-inherits-inline-factory/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23653-stream-install-never-read-util-inherits-inline-factory/lib.cjs",
+    "<repo>/tests/corpus/23653-stream-install-never-read-util-inherits-inline-factory/main.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2366-string-well-formed.ts": {
    "order": [
     "<repo>/tests/corpus/2366-string-well-formed.ts"
@@ -22659,6 +22690,24 @@
   "<repo>/tests/diagnostics/js-require-with-a-run-time-specifier.cjs": {
    "order": [
     "<repo>/tests/diagnostics/js-require-with-a-run-time-specifier.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-stream-install-mutates-the-real-transform-prototype.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/js-stream-install-mutates-the-real-transform-prototype.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-stream-install-read-by-live-code.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/js-stream-install-read-by-live-code.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-stream-install-region-has-an-effect.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/js-stream-install-region-has-an-effect.cjs"
    ],
    "diags": []
   },
