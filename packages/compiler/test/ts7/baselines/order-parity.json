@@ -10954,6 +10954,42 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/23300-runtime-require-inquire-never-invoked.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23300-runtime-require-inquire-never-invoked.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23301-runtime-require-inquire-missing-through-util.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23301-runtime-require-inquire-missing-through-util.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23302-runtime-require-inquire-missing-error-escapes.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23302-runtime-require-inquire-missing-error-escapes.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23303-runtime-require-inquire-verbatim-callers.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23303-runtime-require-inquire-verbatim-callers.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23304-runtime-require-inquire-never-invoked-module-cycle.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23304-runtime-require-inquire-never-invoked-module-cycle.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23305-runtime-require-optional-dependency-idiom-constants.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23305-runtime-require-optional-dependency-idiom-constants.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2331-tls-server-options-typed.ts": {
    "order": [
     "<repo>/tests/corpus/2331-tls-server-options-typed.ts"
@@ -22142,6 +22178,30 @@
   "<repo>/tests/diagnostics/js-reflect-ownkeys-over-a-function-with-added-properties.js": {
    "order": [
     "<repo>/tests/diagnostics/js-reflect-ownkeys-over-a-function-with-added-properties.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-require-inquire-call-with-a-builtin.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/js-require-inquire-call-with-a-builtin.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-require-inquire-call-with-a-computed-specifier.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/js-require-inquire-call-with-a-computed-specifier.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-require-inquire-util-enumerated.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/js-require-inquire-util-enumerated.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/js-require-inquire-util-exported.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/js-require-inquire-util-exported.cjs"
    ],
    "diags": []
   },
