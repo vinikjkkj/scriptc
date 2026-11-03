@@ -389,8 +389,6 @@ export function evalDynFns(L: Lowerer, staticInfo: ClassInfo): { fns: IrFunction
   const drivable =
     inst.def.abstract !== true &&
     !inst.generic &&
-    !L.inheritsBuiltinErrorCtor(inst) &&
-    !L.inheritsBuiltinEmitterCtor(inst) &&
     inst.ctorParams.every((p) => p.mode === "required" || p.mode === "omittable" || p.mode === "rest" || p.mode === "dynRest");
   if (drivable) {
     const locals: IrLocal[] = [
