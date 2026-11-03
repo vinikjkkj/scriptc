@@ -11244,14 +11244,15 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
    * identifier target assigns per pass; destructuring heads are tsc
    * errors. */
   /** True when a class's instances enumerate exactly through the dyn member table:
-   * no class in its chain is a runtime stream, emitter or error class, and it has
-   * no run-time property table (the same conditions the runtime gate checks). */
+   * no class in its chain is a runtime stream or error class (the same conditions the
+   * runtime gate checks). */
   function classEnumerableForIn(L: Lowerer, className: string): boolean {
     for (let info: ClassInfo | null | undefined = L.classes.get(className); info; info = info.base) {
       const n = info.def.name;
       // EventEmitter roots are modelled (scr_dyn_forin_keys walks EventEmitter.prototype's keys).
       if (RUNTIME_STREAM_CLASSES.has(n) || RUNTIME_ERROR_CLASSES.has(n)) return false;
-      if (info.hasPropsTable === true) return false;
+      // A run-time property table walks exactly (dyn walk: the emitter's own keys, the members, then the table's
+      // enumerable keys; scr_dyn_class.c dyn_cls_props_keys).
       if (protoKeyWritten(info)) return false;
     }
     return true;
