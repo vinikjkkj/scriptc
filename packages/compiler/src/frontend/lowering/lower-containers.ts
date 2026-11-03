@@ -18,6 +18,7 @@ import { dynAssertionReceiver, foldedStringKeyOf } from "./lower-exprs.js";
 import { tsUntypedWeakAdmissionOn, typeKey } from "../types.js";
 import { dynUndefinedExpr, nodeThrowExpr, own, WidthLift } from "./lowerer.js";
 import { dynBuiltinHofCallback } from "./lower-fnvalue.js";
+import { dynHofCallbackAdapter } from "./lower-dynhof.js";
 
 /** The nine in-place Array.prototype methods — `scr_dyn_invoke.c`'s own
  * static-copy list, verbatim.
@@ -1132,6 +1133,12 @@ function lowerOptionalDefaultArg(
       for (const n of overridden) L.chainNarrowedType.delete(n);
       for (const n of tsOverridden) L.chainNarrowedType.delete(n);
       for (const p of irOverridden) L.paramIrOverrides.delete(p);
+    }
+    // A checked-dynamic callback (`names.filter(this.hasOwnProperty, this)`): the adapter closure
+    // over the dyn function (lower-dynhof.ts); a thisArg is bound around it below.
+    if (fnArg.type.kind === "dyn") {
+      const adapted = dynHofCallbackAdapter(L, fnArg, lead, arrT, locOf(argNode));
+      if (adapted !== null) fnArg = adapted;
     }
     const full = [...lead, F64, arrT];
     if (fnArg.type.kind !== "func" || fnArg.type.params.length > full.length) {
