@@ -1767,15 +1767,6 @@ function lowerOptionalDefaultArg(
         return t;
       }
     }
-    // A number read in a peel context stays a plain number: a miss or a HOLE reads as the
-    // undefined marker (what a number-typed `undefined` is), which typeof, `=== undefined`,
-    // `??`, templates and number-taking calls (Number.isNaN(n)) already honour. A union here
-    // would make `Number.isNaN(n)` throw at the narrowing.
-    if (ctx === "peel" && elem.kind === "f64") {
-      const g: IrExpr = { kind: "arrayGet", arr, index, type: elem, holeOnMiss: true, loc };
-      L.lyingResults.add(g);
-      return g;
-    }
     if (ctx === "peel") {
       const r = lowerNpmStaticSafeIndexRead(L, arr, index, loc);
       if (r) L.lyingResults.add(r);
