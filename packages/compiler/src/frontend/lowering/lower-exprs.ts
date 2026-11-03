@@ -24408,11 +24408,25 @@ function subclassFieldConfined(L: Lowerer, info: ClassInfo, field: string): bool
     }
   };
   down(info);
+  // A receiver whose type the checker leaves open (any) is taken for a family instance only in a file
+  // that declares a family class: an unrelated package's `n = n.next` is not this field.
+  const familyFiles = new Set<ts.SourceFile>();
+  {
+    const st: ts.Node[] = [];
+    for (const sf of L.program.getSourceFiles()) if (!sf.isDeclarationFile) st.push(sf);
+    while (st.length > 0) {
+      const n = st.pop()!;
+      if (ts.isClassDeclaration(n) && n.name !== undefined && family.has(n.name.text)) familyFiles.add(n.getSourceFile());
+      ts.forEachChild(n, (c) => {
+        st.push(c);
+      });
+    }
+  }
   const inFamily = (recv: ts.Expression): boolean => {
     const t = L.mapTypeOf(L.typeOf(recv));
-    if (t === null || t === undefined) return true;
-    if (t.kind === "object") return family.has(t.className);
-    return t.kind === "dyn";
+    if (t !== null && t !== undefined && t.kind === "object") return family.has(t.className);
+    if (t !== null && t !== undefined && t.kind !== "dyn") return false;
+    return familyFiles.has(recv.getSourceFile());
   };
   const localOnlyCompared = (decl: ts.VariableDeclaration): boolean => {
     if (!ts.isIdentifier(decl.name)) return false;
