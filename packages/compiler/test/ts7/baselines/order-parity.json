@@ -23653,6 +23653,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/23064-dyn-emit-twin-keeps-listener-identity.ts": {
+   "order": [
+    "<repo>/tests/corpus/23064-dyn-emit-twin-keeps-listener-identity.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23065-dyn-emit-twin-leaves-function-text-and-names-alone.ts": {
+   "order": [
+    "<repo>/tests/corpus/23065-dyn-emit-twin-leaves-function-text-and-names-alone.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/grafted-emitter-dyn-reflection-refused.cjs": {
    "order": [
     "<repo>/tests/diagnostics/grafted-emitter-dyn-reflection-refused.cjs"
