@@ -11633,6 +11633,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/23758-grafted-emitter-dyn-constructor-name-and-identity.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23758-grafted-emitter-dyn-constructor-name-and-identity.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2380-buffer-module-named-import.ts": {
    "order": [
     "<repo>/tests/corpus/2380-buffer-module-named-import.ts"
