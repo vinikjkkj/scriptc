@@ -48,6 +48,7 @@ import { deadBranchSkippable, relativeRequireRefusal, statementAlwaysThrowsOnReq
 import { refusalMessage } from "./lower-requirestack.js";
 import { refuseWebCryptoFlowsAt } from "./lower-webcrypto-fence.js";
 import { isStringCallAliasDecl } from "./lower-builtins.js";
+import { isProvenInertStatement } from "./lower-stream-inert.js";
 
 /** `const X = /* @__PURE__ *\/ makeX()` at a module's top level: every
  * declarator initialized by a call (or `new`) carrying the bundler PURE
@@ -1117,6 +1118,8 @@ export function irAlwaysExits(s: IrStmt | readonly IrStmt[]): boolean {
 }
 
 export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | null {
+    // A module-level optional streaming install nothing in the program can observe (lower-stream-inert): not lowered.
+    if (isProvenInertStatement(L, stmt)) return null;
     if (ts.isReturnStatement(stmt)) refuseWebCryptoFlowsAt(L, stmt);
     if (ts.isExpressionStatement(stmt) && ts.isBinaryExpression(stmt.expression)) refuseWebCryptoFlowsAt(L, stmt.expression);
     // `({ encrypt } = subtle);` as a statement: the assignment destructuring is checked here (lower-exprs.ts).
