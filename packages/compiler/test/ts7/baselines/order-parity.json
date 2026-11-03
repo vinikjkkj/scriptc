@@ -11639,6 +11639,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/23759-grafted-emitter-dyn-object-create-over-plain-prototypes.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23759-grafted-emitter-dyn-object-create-over-plain-prototypes.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23760-grafted-emitter-dyn-nested-and-circular-instances.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23760-grafted-emitter-dyn-nested-and-circular-instances.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2380-buffer-module-named-import.ts": {
    "order": [
     "<repo>/tests/corpus/2380-buffer-module-named-import.ts"
