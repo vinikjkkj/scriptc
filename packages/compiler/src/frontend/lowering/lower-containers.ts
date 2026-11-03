@@ -2007,7 +2007,7 @@ function lowerOptionalDefaultArg(
 
     // HOLES (sq5): forEach/map/filter SKIP an index that is not an own element
     // (a hole, or one the callback shrank away); map leaves a hole in its result.
-    const present: IrExpr = { kind: "arrIntrinsic", method: "hasIndex", receiver: ref("a.0", arrT), args: [ref("i.0", F64)], type: BOOL, loc };
+    const present: IrExpr = { kind: "arrIntrinsic", method: "hasSlot", receiver: ref("a.0", arrT), args: [ref("i.0", F64)], type: BOOL, loc };
     let returnType: IrType;
     let body: IrStmt[];
     if (method === "map") {
@@ -2393,7 +2393,7 @@ function lowerOptionalDefaultArg(
       loc,
     });
     // some/every SKIP a hole (and an index the callback shrank away).
-    const presentI: IrExpr = { kind: "arrIntrinsic", method: "hasIndex", receiver: ref("a.0", arrT), args: [ref("i.0", F64)], type: BOOL, loc };
+    const presentI: IrExpr = { kind: "arrIntrinsic", method: "hasSlot", receiver: ref("a.0", arrT), args: [ref("i.0", F64)], type: BOOL, loc };
     const body: IrStmt[] = [
       readLenStmt(arrT, loc),
       countedForLoop(loc, [
@@ -2636,7 +2636,7 @@ function lowerOptionalDefaultArg(
       ...(hasInit ? [{ localId: "z.0", name: "z", type: accT }] : []),
     ];
     const sRef = (): IrExpr => ref("s.0", F64);
-    const hasAt = (idx: IrExpr): IrExpr => ({ kind: "arrIntrinsic", method: "hasIndex", receiver: ref("a.0", arrT), args: [idx], type: BOOL, loc });
+    const hasAt = (idx: IrExpr): IrExpr => ({ kind: "arrIntrinsic", method: "hasSlot", receiver: ref("a.0", arrT), args: [idx], type: BOOL, loc });
     // The seed of the no-initial-value form is the first PRESENT element (holes are
     // skipped): a search loop finds it, and an array with none is the empty-array TypeError.
     const seedStmts: IrStmt[] = hasInit

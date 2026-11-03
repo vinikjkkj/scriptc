@@ -2956,6 +2956,9 @@ export type IrArrIntrinsicMethod =
    * question behind Node's `a[i] !== undefined` for a dense array (a
    * negative, fractional, NaN or past-the-end index reads undefined). */
   | "hasIndex"
+  /** `hasSlot(i)` -> bool: hasIndex for a LOOP COUNTER the caller owns (a non-negative integer): the slot
+   * exists now and is not a hole. No integrality test, so it is the cheap per-iteration check. */
+  | "hasSlot"
   /** `hasHoles()` -> bool: some slot is a HOLE (the in-band marker; see scr_arr_slot_is_hole). */
   | "hasHoles"
   /** `compactHoles()` -> f64: move every HOLE to the end (the present elements keep their order) and

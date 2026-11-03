@@ -7696,10 +7696,7 @@ class LlEmitter {
         // the checked read (a hole refuses loudly).
         const cur = B.tmp();
         const undefFor = acc === "ref" ? this.undefHoleReadLl(elem) : null;
-        if (acc === "f64") {
-          this.declare(`declare double @scr_arr_copy_f64(ptr, double)`);
-          B.line(`${cur} = call double @scr_arr_copy_f64(ptr ${arrRef()}, double ${i})`);
-        } else if (undefFor !== null) {
+        if (undefFor !== null) {
           this.declare(`declare ptr @scr_arr_copy_ref_or(ptr, double, ptr)`);
           B.line(`${cur} = call ptr @scr_arr_copy_ref_or(ptr ${arrRef()}, double ${i}, ptr ${undefFor})`);
         } else {
@@ -8811,7 +8808,12 @@ class LlEmitter {
           B.line(`${sp} = getelementptr inbounds i64, ptr ${data}, i64 ${nn}`);
           const v = B.tmp();
           if (acc === "f64") {
-            B.line(`${v} = load double, ptr ${sp}`);
+            // a HOLE reads as the undefined marker (scr_num_unhole)
+            const wi = B.tmp(), isH = B.tmp(), ui = B.tmp();
+            B.line(`${wi} = load i64, ptr ${sp}`);
+            B.line(`${isH} = icmp eq i64 ${wi}, 9222246136947990018`);
+            B.line(`${ui} = select i1 ${isH}, i64 9222246136947990017, i64 ${wi}`);
+            B.line(`${v} = bitcast i64 ${ui} to double`);
             return { name: v, type: e.type };
           }
           const w = B.tmp();
@@ -14546,7 +14548,7 @@ class LlEmitter {
     // absent string, dyn / undefined-armed union -> their undefined.
     const strU = elem.kind === "string";
     const undefU = acc === "ref" ? (strU ? null : this.undefHoleReadLl(elem)) : null;
-    const readFn = acc === "f64" ? "scr_arr_copy_f64" : acc === "ref" ? (strU || undefU !== null ? "scr_arr_copy_ref_or" : "scr_arr_copy_ref") : `scr_arr_get_${acc}`;
+    const readFn = acc === "f64" ? "scr_arr_get_f64" : acc === "ref" ? (strU || undefU !== null ? "scr_arr_copy_ref_or" : "scr_arr_copy_ref") : `scr_arr_get_${acc}`;
     if (readFn === "scr_arr_copy_ref_or") this.declare(`declare ptr @scr_arr_copy_ref_or(ptr, double, ptr)`);
     else this.declare(`declare ${acc === "bool" ? "zeroext i1" : accTy} @${readFn}(ptr, double)`);
     let undefArg = "";
@@ -14732,7 +14734,11 @@ class LlEmitter {
 
   private emitArrIntrinsic(e: IrExpr & { kind: "arrIntrinsic" }): LlValue {
     const B = this.B;
-    const r = this.emitExpr(e.receiver);
+    // The per-iteration slot tests read a scalar out without running user code, so a stable
+    // binding keeps owning its receiver (no retain/release pair per test).
+    const r = e.method === "hasSlot" || e.method === "hasIndex"
+      ? this.emitStableReceiver(e.receiver, e.args)
+      : this.emitExpr(e.receiver);
     if (e.receiver.type.kind !== "array") throw new Error("llvm emitter bug: arrIntrinsic on non-array");
     const elem = e.receiver.type.elem;
     const acc = elemAccess(elem);
@@ -14771,45 +14777,65 @@ class LlEmitter {
         B.line(`${t} = call zeroext i1 @scr_arr_has_holes(ptr ${r.name})`);
         return { name: t, type: e.type };
       }
+      case "hasSlot":
       case "hasIndex": {
         // Inline: len < 2^63 and an integer index test through the saturating
         // fptosi (NaN -> 0, which sitofp reads back as 0 != NaN), predicted
         // true. No call: the hit path of every tolerant read is this and the
-        // read itself.
+        // read itself. hasSlot is the loop-counter twin: the caller owns a
+        // non-negative integer, so the integrality test is skipped.
         const hx = this.emitExpr(e.args[0]!);
         this.declare(`declare i64 @llvm.fptosi.sat.i64.f64(double)`);
         this.declare(`declare i1 @llvm.expect.i1(i1, i1)`);
-        const lenP = B.tmp(), len = B.tmp(), n = B.tmp(), back = B.tmp(), e1 = B.tmp(), e2 = B.tmp(), ok0 = B.tmp(), ok = B.tmp();
+        const lenP = B.tmp(), len = B.tmp(), n = B.tmp(), e2 = B.tmp(), ok0 = B.tmp(), ok = B.tmp();
         B.line(`${lenP} = getelementptr inbounds %ScrArr, ptr ${r.name}, i32 0, i32 1`);
         B.line(`${len} = load i64, ptr ${lenP}`);
         B.line(`${n} = call i64 @llvm.fptosi.sat.i64.f64(double ${hx.name})`);
-        B.line(`${back} = sitofp i64 ${n} to double`);
-        B.line(`${e1} = fcmp oeq double ${back}, ${hx.name}`);
         B.line(`${e2} = icmp ult i64 ${n}, ${len}`);
+        let inRange = e2;
+        if (method === "hasIndex") {
+          const back = B.tmp(), e1 = B.tmp(), e12 = B.tmp();
+          B.line(`${back} = sitofp i64 ${n} to double`);
+          B.line(`${e1} = fcmp oeq double ${back}, ${hx.name}`);
+          B.line(`${e12} = and i1 ${e1}, ${e2}`);
+          inRange = e12;
+        }
         const hiAcc = elemAccess(e.receiver.type.kind === "array" ? e.receiver.type.elem : F64);
         if (hiAcc === "ref" || hiAcc === "f64") {
           // Reference elements: the slot must also be non-NULL (a hole). Number
           // elements: the slot must not be the HOLE marker payload.
-          const dp = B.tmp(), data = B.tmp(), sp = B.tmp(), sv = B.tmp(), e3 = B.tmp(), e4 = B.tmp();
+          const dp = B.tmp(), data = B.tmp(), sp = B.tmp(), sv = B.tmp(), e3 = B.tmp();
           B.line(`${dp} = getelementptr inbounds %ScrArr, ptr ${r.name}, i32 0, i32 7`);
           B.line(`${data} = load ptr, ptr ${dp}`);
           B.line(`${sp} = getelementptr inbounds i64, ptr ${data}, i64 ${n}`);
           // Only read the slot when the index is in range: select keeps it
           // branch-free but a wild n would fault, so guard with a branch.
           const lChk = B.newLabel("hi.chk"), lJoin = B.newLabel("hi.join");
-          B.line(`${e4} = and i1 ${e1}, ${e2}`);
           const from = B.newLabel("hi.pre");
           B.br(from);
           B.startBlock(from);
-          B.condBr(e4, lChk, lJoin);
+          B.condBr(inRange, lChk, lJoin);
           B.startBlock(lChk);
           B.line(`${sv} = load i64, ptr ${sp}`);
           B.line(`${e3} = icmp ne i64 ${sv}, ${hiAcc === "f64" ? "9222246136947990018" : "0"}`);
-          B.br(lJoin);
-          B.startBlock(lJoin);
-          B.line(`${ok0} = phi i1 [ false, %${from} ], [ ${e3}, %${lChk} ]`);
+          if (hiAcc === "ref") {
+            // A NULL slot is a hole, unless the array was tombstoned (a cleared slot is
+            // Node's null): the cold call refuses loudly in that case.
+            const lMiss = B.newLabel("hi.miss");
+            B.condBr(e3, lJoin, lMiss);
+            B.startBlock(lMiss);
+            this.declare(`declare void @scr_arr_miss_check(ptr, i64)`);
+            B.line(`call void @scr_arr_miss_check(ptr ${r.name}, i64 ${n})`);
+            B.br(lJoin);
+            B.startBlock(lJoin);
+            B.line(`${ok0} = phi i1 [ false, %${from} ], [ true, %${lChk} ], [ false, %${lMiss} ]`);
+          } else {
+            B.br(lJoin);
+            B.startBlock(lJoin);
+            B.line(`${ok0} = phi i1 [ false, %${from} ], [ ${e3}, %${lChk} ]`);
+          }
         } else {
-          B.line(`${ok0} = and i1 ${e1}, ${e2}`);
+          B.line(`${ok0} = and i1 ${inRange}, true`);
         }
         B.line(`${ok} = call i1 @llvm.expect.i1(i1 ${ok0}, i1 true)`);
         return { name: ok, type: e.type };
