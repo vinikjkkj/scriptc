@@ -69,6 +69,8 @@ import type {
 } from "../../ir/nodes.js";
 import { protoEscapes, strictAt } from "./lower-protoescape.js";
 import { applyProtoSlots, scanProtoSlots } from "./lower-protoslots.js";
+import { applyProtoTabs, scanProtoTabs } from "./lower-prototab.js";
+import { OWN_SHADOW_ROOTS, applyOwnShadows, ownShadowBoxSites } from "./lower-ownshadow.js";
 import { CLASS_BUILTIN_CTORLESS, CLASS_NO_DYN_NEW, EVAL_NO_SRC_CLASSES, GRAFTED_EMITTER_CLASSES, GRAFTED_EMITTER_CELL_CLASSES, GRAFTED_ROWS_FENCED_OPS, GRAFTED_PROPS_EXACT_OPS, EVAL_STATIC_CLASSES, dynReflectionSite, emitterStateWriteSites, graftedBoxSites, moduleBoxesEmitters } from "../../ir/nodes.js";
 import { computeTwinEdits, type TwinEdits } from "./emitter-twin.js";
 import { canBoxFuncIntoDyn } from "../../ir/nodes.js";
@@ -771,6 +773,7 @@ export function lowerToIr(
     );
   }
   const ffiImports = options.ffiImports ?? [];
+  OWN_SHADOW_ROOTS.clear(); // the families of THIS program: the discovery pass fills it, the emit pass reads it
   const validation = new Lowerer(program, entry, moduleOrder, dynamic, {
     targetPlatform,
     ffiImports,
@@ -3724,6 +3727,7 @@ export class Lowerer {
     for (const info of this.classes.values()) analyzeClassDecoration(this, info);
     this.prepareModuleInits(parts);
     scanProtoSlots(this, parts.map((fp) => fp.sf));
+    scanProtoTabs(this, parts.map((fp) => fp.sf));
     lowerProfileNote(this.remainder ? "%remainder-collect" : "%emit-collect", performance.now() - __colT);
 
     const functions: IrFunction[] = [];
@@ -3847,6 +3851,8 @@ export class Lowerer {
     setMintPhase("tail:lifted");
     mintPhaseControl(this.shapes);
     applyProtoSlots(this, [functions, this.implicitFns]);
+    applyOwnShadows(this, [functions, this.implicitFns]);
+    applyProtoTabs(this, [functions, this.implicitFns]);
     functions.push(...this.liftedFns);
     functions.push(...this.implicitFns);
     // GRAFTED-EMITTER FENCE (graftedDynFence). A class grafted by applyMixin(Y, EventEmitter) crosses into a dyn slot
@@ -3883,6 +3889,30 @@ export class Lowerer {
               ? "that operation cannot be answered exactly for this instance (a clone would have to duplicate its emitter, a prototype link over it is not representable, and its `constructor` (EventEmitter, a class value that is lowered only for `.name` and strict comparisons) cannot be used otherwise), so the flow is refused"
               : "that operation cannot be answered exactly for this instance (its run-time property table keeps the values, entries and printed form out of reach; only the key-listing surfaces are exact), so the flow is refused"),
         ));
+      }
+    }
+    // OWN PROPERTIES UNDER RUN-TIME KEYS (lower-ownshadow.ts). An instance of such a family lists its table keys after its
+    // fields, but Node lists every own key in the order it was created, which the layout and the table do not both record
+    // (a field first assigned after a keyed write comes later in Node). A program that boxes one of these instances AND
+    // enumerates, prints or copies dynamic values (for-in, Object.keys/values/entries/assign, spread, JSON.stringify,
+    // getOwnPropertyNames, util.inspect/format, console) keeps the refusal at the boxing sites.
+    if (this.ownShadowRoots.size > 0) {
+      const boxes = ownShadowBoxSites(this, functions);
+      if (boxes.length > 0) {
+        const why = dynReflectionSite(functions);
+        if (why !== null) {
+          const seen = new Set<string>();
+          for (const { loc, fn } of boxes) {
+            const k = `${loc.file}@${loc.start}`;
+            if (seen.has(k)) continue;
+            seen.add(k);
+            this.pushDiag(unsupportedDiag(
+              "SC1101",
+              loc,
+              `converting an instance that can carry own properties written under run-time keys to 'unknown' (in ${fn}) in a program that also enumerates, copies or prints dynamic values (${why}): the creation order of such an instance's keys among its fields is not recorded, so that operation cannot answer exactly`,
+            ));
+          }
+        }
       }
     }
     // The by-name registration rows of dyn-held emitters (synthEeRegFns): only in a program that lets an emitter
@@ -4670,6 +4700,8 @@ export class Lowerer {
     // thunks) the emit pass must see.
     for (const info of this.classes.values()) analyzeClassDecoration(this, info);
     this.prepareModuleInits(parts);
+    // the prototype-table scan lowers statements the same way in both passes (the emit pass runs it after its collection)
+    scanProtoTabs(this, parts.map((fp) => fp.sf));
     lowerProfileNote("%discovery-collect", performance.now() - __colT);
 
     // Every lowerable body, by emitted-function name. The names double as
@@ -15545,6 +15577,18 @@ export class Lowerer {
   readonly lateMethodAssigns = new Set<ts.Node>();
   /** Run-time prototype method replacement (lower-protoslots.ts): class name -> method -> the slot global a write stores into. */
   readonly protoSlots = new Map<string, Map<string, IrGlobal>>();
+  /** Computed run-time prototype members (lower-prototab.ts): class name -> the module global holding its prototype table. */
+  readonly protoTabs = new Map<string, IrGlobal>();
+  /** Root classes whose family takes run-time keyed writes on its instances (lower-ownshadow.ts). */
+  readonly ownShadowRoots = OWN_SHADOW_ROOTS;
+  /** The IR call nodes `super.m(...)` lowered to: the own-shadow pass points them at the undispatched body. */
+  readonly superCalls = new Set<IrExpr>();
+  /** The dynFrom boxes the keyed-member lowering builds for its own table access (not counted by the enumeration fence). */
+  readonly internalBoxes = new Set<IrExpr>();
+  markSuperCall<T extends IrExpr>(call: T): T {
+    this.superCalls.add(call);
+    return call;
+  }
   /** The class a keyed forEach value reference stands for while that key is unrolled (`ctor` in `ctor.prototype.m`). */
   readonly keyedProtoClass = new Map<ts.Node, ClassInfo>();
   /** `X.prototype.m` reads of a member the class does not have (undefined): an `if` on one has a dead then-branch. */

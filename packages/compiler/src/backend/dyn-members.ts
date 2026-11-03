@@ -356,10 +356,12 @@ export function dynMemberTable(
   const implOf = (m: string): IrFunction | null => {
     for (let c: DynMemberClass | null = cls; c !== null; c = c.base) {
       const implicit = c.def.dynMethods?.find((d) => d.name === m);
-      if (implicit !== undefined) return fnByName.get(implicit.fn) ?? null;
+      // a method an own property may shadow (lower-ownshadow.ts) splits into a dispatcher and `%ns`: the row looks the name up
+      // first (scr_dyn_objinst_member declines the row when the instance's table holds it), so it runs the body
+      if (implicit !== undefined) return fnByName.get(`${implicit.fn}%ns`) ?? fnByName.get(implicit.fn) ?? null;
       if (!(c.def.methods?.includes(m) ?? false)) continue;
       if (c.def.abstractMethods?.includes(m) ?? false) return null;
-      return fnByName.get(`%${c.def.name}.${m}`) ?? null;
+      return fnByName.get(`%${c.def.name}.${m}%ns`) ?? fnByName.get(`%${c.def.name}.${m}`) ?? null;
     }
     return null;
   };

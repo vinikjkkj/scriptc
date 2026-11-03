@@ -39,6 +39,7 @@ import { boundCodeOf, fnValueCodeOfNode, jsFuncValueNameOf, staticFnCodeOf, type
 import { isJsSourceFile, locOf } from "../program.js";
 import { BOOL, BYTES_ELEM_NAMES, DYN, F64, canBoxFuncIntoDyn, internalSlotFields, parseOwnShadowField, IrExpr, IrStmt, IrType, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, UNDEFINED_T, VOID, shapeHasAccessorSlots, typeKey } from "../../ir/nodes.js";
 import { CLASS_PROPS_FIELD, type ClassInfo } from "./lower-classes.js";
+import { inOwnShadowFamily } from "./lower-ownshadow.js";
 import { pureReemittable } from "./lower-exprs.js";
 import { bindingNeverReassigned, classInstanceToString, dynRestPack } from "./lower-calls.js";
 import { lowerPromisifiedDiffieHellmanValue } from "./lower-builtins.js";
@@ -378,6 +379,9 @@ function inspectSupport(L: Lowerer, t: IrType, visiting: Set<string>, out: { rec
     case "object": {
       const info = L.classes.get(t.className);
       if (!info) return `class '${t.className}' has no inspect lowering`;
+      // An instance that takes own properties under run-time keys lists them after its fields (the table), but Node lists every key in
+      // the order it was created, which the layout and the table do not both record; the boxed printer fences such a class loudly.
+      if (inOwnShadowFamily(L, info)) return `an instance of '${info.def.jsName ?? info.def.name}' can carry own properties written under run-time keys, whose creation order among its fields is not recorded`;
       if (info.evalStaticOf !== undefined) {
         // A class value: the baked [class X] form plus its static fields.
         for (const f of info.def.fields) {

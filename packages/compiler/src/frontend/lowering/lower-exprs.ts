@@ -46,6 +46,8 @@ import { errorRootedType, lowerStreamProperty, lowerStreamStateProperty, streamI
 import { lowerWebSocketGlobal } from "./lower-ws.js";
 import { emitterRooted } from "./lower-emitter.js";
 import { CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, type ClassInfo } from "./lower-classes.js";
+import { hasProtoTab, keyAsString, protoTabHasOr, protoTabReadChain } from "./lower-prototab.js";
+import { inOwnShadowFamily, internalBox, ownShadowWhy, registerOwnShadowFamily } from "./lower-ownshadow.js";
 import { refuseWebCryptoFlowsAt } from "./lower-webcrypto-fence.js";
 import { codecOfType, refuseCodecValue } from "../codec-shadow.js";
 
@@ -14556,6 +14558,9 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
       className = receiverIr.className;
     }
     if (info === null || info.builtinError) return null;
+    // An instance that can hold names this table does not list (the run-time keyed writes of lower-ownshadow.ts, the prototype
+    // table of lower-prototab.ts) answers through the boxed keyed read (lowerInstanceKeyedRead) instead.
+    if (!viaPrototype && ((info.hasPropsTable === true && inOwnShadowFamily(L, info)) || hasProtoTab(L, info))) return null;
     // The member names the class answers: own and inherited fields (instances
     // only; a prototype carries no instance fields), then methods up the chain.
     const names: string[] = [];
@@ -14646,7 +14651,8 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     const kl = L.declareHiddenLocal("%ekKey", STRING);
     stmts.push({ kind: "varDecl", localId: kl.id, init: key, loc });
     const keyRef: IrExpr = { kind: "varRef", localId: kl.id, type: STRING, loc };
-    let chain: IrExpr = dynUndefinedExpr(loc);
+    // `C.prototype[k]` of a class with run-time prototype members (lower-prototab.ts): a name no arm matches ends at the table
+    let chain: IrExpr = viaPrototype && hasProtoTab(L, info) ? protoTabReadChain(L, info, keyRef, null, loc) : dynUndefinedExpr(loc);
     for (let i = plans.length - 1; i >= 0; i--) {
       const p = plans[i]!;
       let value: IrExpr;
@@ -14805,7 +14811,7 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     // symbol key stays fenced: record shapes, runtime-identity keys
     // (symbol parameters, Symbol.for consts), and keys no class declares
     // — the layouts are compile-time field lists.
-    if (L.mapTypeOf(L.typeOf(expr.argumentExpression))?.kind === "symbol") {
+    if (L.mapTypeOf(L.typeOf(expr.argumentExpression))?.kind === "symbol" || uniqueSymbolKeyOf(L, expr.argumentExpression) !== null) {
       // `rec[Symbol.toStringTag]` over a record whose shape carries that
       // well-known key as a declared field (TypeScript spells it
       // `__@toStringTag@<id>`): an ordinary field read of the slot.
@@ -15083,6 +15089,10 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
         const recvDyn: IrExpr = { kind: "dynFrom", value: L.lowerExpr(expr.expression), type: DYN, loc: locOf(expr.expression) };
         return L.maybeNarrow({ kind: "dynKeyGet", key, value: recvDyn, type: DYN, loc: locOf(expr) }, expr);
       }
+    }
+    if (receiverIr?.kind === "object" && expr.questionDotToken === undefined) {
+      const keyed = lowerInstanceKeyedRead(L, expr, receiverIr.className);
+      if (keyed !== null) return keyed;
     }
     if (receiverIr?.kind !== "array") {
       if (receiverIr?.kind === "string") {
@@ -16049,7 +16059,7 @@ export function staticAssertionOperand(L: Lowerer, node: ts.Expression, field: s
     // twin — a statically-resolvable unique-symbol key declared on the
     // receiver's class writes the hidden field slot; everything else keeps
     // the fence (static shapes have no symbol-keyed storage).
-    if (L.mapTypeOf(L.typeOf(target.argumentExpression))?.kind === "symbol") {
+    if (L.mapTypeOf(L.typeOf(target.argumentExpression))?.kind === "symbol" || uniqueSymbolKeyOf(L, target.argumentExpression) !== null) {
       const fieldT = symbolFieldTarget(L, target);
       if (fieldT) {
         const value = L.lowerExprExpecting(expr.right, fieldT.fieldType);
@@ -16441,6 +16451,10 @@ export function staticAssertionOperand(L: Lowerer, node: ts.Expression, field: s
         }
         return { kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.keySet", args: [obj, key, value], type: VOID, loc }, loc };
       }
+    }
+    if (receiverIr?.kind === "object") {
+      const keyed = lowerInstanceKeyedWrite(L, expr, target, receiverIr.className);
+      if (keyed !== null) return keyed;
     }
     if (receiverIr?.kind !== "array") {
       L.unsupported("SC1090", target, "assignment to non-array elements");
@@ -22998,7 +23012,7 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
             // `in` six lines above it in zapo's install.ts cannot
             // disagree about a name.
             const info = L.classes.get(probed.type.className);
-            const answer: IrExpr = info?.hasPropsTable !== true ? declared : {
+            const answer0: IrExpr = info?.hasPropsTable !== true ? declared : {
               kind: "logical",
               op: "||",
               left: declared,
@@ -23015,6 +23029,7 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
               type: BOOL,
               loc,
             };
+            const answer: IrExpr = info !== undefined ? (protoTabHasOr(L, info, kRef(), answer0, loc) ?? answer0) : answer0;
             return {
               kind: "seqExpr",
               stmts: [
@@ -23140,10 +23155,12 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
               return foldedAnswerKeepingOperand(recv, { kind: "boolLit", value: true, type: BOOL, loc });
             }
             const cinfo = L.classes.get(recv.type.className);
+            const tabHas = cinfo !== undefined ? protoTabHasOr(L, cinfo, { kind: "strLit", value: key, type: STRING, loc }, null, loc) : null;
             if (cinfo?.hasPropsTable !== true) {
+              if (tabHas !== null) return tabHas;
               return foldedAnswerKeepingOperand(recv, { kind: "boolLit", value: false, type: BOOL, loc });
             }
-            return {
+            const bagHas: IrExpr = {
               kind: "libCall",
               fn: "cls.propsHas",
               args: [
@@ -23153,6 +23170,7 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
               type: BOOL,
               loc,
             };
+            return tabHas === null ? bagHas : ({ kind: "logical", op: "||", left: bagHas, right: tabHas, type: BOOL, loc } as IrExpr);
           }
         }
       }
@@ -25101,7 +25119,8 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
     };
     walk(info, 1);
     const hasBag = info.hasPropsTable === true;
-    if (decls.length === 0 && !hasBag) return null;
+    const hasTab = hasProtoTab(L, info);
+    if (decls.length === 0 && !hasBag && !hasTab) return null;
     if (!isPlainMethodReceiver(expr.expression)) return null;
     const loc = locOf(expr);
     const recv = L.lowerExpr(expr.expression);
@@ -25120,7 +25139,12 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
     decls.sort((a, b) => b.depth - a.depth);
     // The chain ends at the instance's own run-time property table when the
     // class carries one (a member written from outside), `undefined` otherwise.
-    let chain: IrExpr = hasBag
+    let chain: IrExpr = hasTab
+      ? protoTabReadChain(
+          L, info, { kind: "strLit", value: name, type: STRING, loc },
+          hasBag ? { kind: "fieldGet", obj: recv, className: recv.type.className, field: CLASS_PROPS_FIELD, type: DYN, loc } : null, loc,
+        )
+      : hasBag
       ? {
           kind: "libCall",
           fn: "cls.propsRead",
@@ -25184,13 +25208,33 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
     ) {
       const baseInfo = L.classes.get(receiverIr.className) ?? null;
       const viaSubclass = baseInfo === null ? null : lowerUnboundSubclassMethodValue(L, expr, baseInfo);
-      if (viaSubclass !== null) return viaSubclass;
+      if (viaSubclass !== null) return shadowAwareMethodValue(L, expr, receiverIr.className, viaSubclass);
       // A method only a SUBCLASS declares, read as a value off this class (thunkrecv): the thunk is
       // refused above, and the fallthrough below would answer the instance's property table (undefined)
       // where JS answers the method. Refused here, at compile time.
       if (baseInfo !== null && descendantDeclaresPlainMethod(baseInfo, expr.name.text)) {
         L.unsupported("SC1090", expr, `reading '${expr.name.text}' from a value of type '${L.checker.typeToString(L.typeOf(expr.expression))}' (a method declared only by a subclass, read as a value)`);
         return dynUndefinedExpr(locOf(expr));
+      }
+    }
+    // `C.prototype.n` of a class with run-time prototype members (lower-prototab.ts) naming none the class declares: the table's
+    // value (the function a computed write stored), undefined while no write ran.
+    if (
+      isJsSourceFile(expr.getSourceFile()) && expr.questionDotToken === undefined &&
+      ts.isPropertyAccessExpression(expr.expression) && expr.expression.questionDotToken === undefined &&
+      expr.expression.name.text === "prototype" && ts.isIdentifier(expr.expression.expression) &&
+      !undeclaredMemberExcluded(expr.name.text)
+    ) {
+      const ctorT = L.mapTypeOf(L.typeOf(expr.expression.expression));
+      const cinfo = ctorT?.kind === "classval" ? (L.classes.get(ctorT.className) ?? null) : null;
+      if (
+        cinfo !== null && !cinfo.builtinError && hasProtoTab(L, cinfo) &&
+        L.findMethodOn(cinfo, expr.name.text) === null && !cinfo.fields.has(expr.name.text) &&
+        findGenericMethodOn(L, cinfo, expr.name.text) === null &&
+        L.findMethodOn(cinfo, `get:${expr.name.text}`) === null &&
+        !cinfo.staticFields.some((s) => s.name === expr.name.text)
+      ) {
+        return protoTabReadChain(L, cinfo, { kind: "strLit", value: expr.name.text, type: STRING, loc: locOf(expr) }, null, locOf(expr));
       }
     }
     // `C.prototype.missing` -- a member the class neither declares nor
@@ -25241,7 +25285,7 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
         findGenericMethodOn(L, L.classes.get(receiverIr.className) ?? null, expr.name.text))
     ) {
       const unbound = lowerUnboundClassMethodValue(L, expr);
-      if (unbound !== null) return unbound;
+      if (unbound !== null) return shadowAwareMethodValue(L, expr, receiverIr.className, unbound);
       L.unsupported("SC1090", expr, `bound method references (call '${expr.name.text}' directly)`);
     }
     // An object-literal GENERIC method as a VALUE (`o.m` — the member is
@@ -26312,6 +26356,82 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
    * what JS shares), and computed descriptions (the field name below
    * must BE Node's, for inspect). */
   export function uniqueSymbolKeyOf(L: Lowerer, key: ts.Expression): { sym: ts.Symbol; fieldName: string } | null {
+    const direct = uniqueSymbolKeyDirect(L, key);
+    return direct !== null ? direct : symbolKeyThroughAlias(L, key, 0);
+  }
+
+  /** A symbol key spelled through a CommonJS export or a one-assignment alias of one (what a bundler or tsc emits for a class
+   * field keyed `[sym]`: `let _a;` ... `this[_a] = v` ... `_a = ns.sym;`, `ns` the require of a module that did
+   * `exports.sym = Symbol("desc")` once at its top level). Both spellings resolve to the exporter's property symbol, so the
+   * class slot, the writes and the reads share one identity. Null for anything that is not provably one runtime symbol. */
+  function symbolKeyThroughAlias(L: Lowerer, key: ts.Expression, depth: number): { sym: ts.Symbol; fieldName: string } | null {
+    if (depth > 4) return null;
+    while (ts.isParenthesizedExpression(key)) key = key.expression;
+    if (ts.isIdentifier(key)) {
+      const sym = L.resolveValueSymbol(key);
+      const decl = sym ? L.checker.valueDeclarationOf(sym) : undefined;
+      if (!sym || !decl || !ts.isVariableDeclaration(decl) || ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const) return null;
+      if (!ts.isVariableStatement(decl.parent.parent) || !ts.isSourceFile(decl.parent.parent.parent)) return null;
+      if (decl.initializer !== undefined && !(ts.isVoidExpression(decl.initializer))) return null;
+      const sf = decl.getSourceFile();
+      // exactly one write in the file, a top-level `id = <expr>` statement; every other mention is a read
+      let rhs: ts.Expression | null = null;
+      let writes = 0;
+      const stack: ts.Node[] = [sf];
+      while (stack.length > 0) {
+        const n = stack.pop()!;
+        if (ts.isIdentifier(n) && n.text === key.text && n !== decl.name && L.resolveValueSymbol(n) === sym) {
+          const par = n.parent;
+          const isWrite =
+            (ts.isBinaryExpression(par) && par.left === n && par.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && par.operatorToken.kind <= ts.SyntaxKind.LastAssignment) ||
+            ((ts.isPrefixUnaryExpression(par) || ts.isPostfixUnaryExpression(par)) && (par.operator === ts.SyntaxKind.PlusPlusToken || par.operator === ts.SyntaxKind.MinusMinusToken)) ||
+            ts.isShorthandPropertyAssignment(par);
+          if (isWrite) {
+            writes++;
+            if (ts.isBinaryExpression(par) && par.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isExpressionStatement(par.parent) && ts.isSourceFile(par.parent.parent)) rhs = par.right;
+            else return null;
+          }
+        }
+        n.forEachChild((c) => {
+          stack.push(c);
+        });
+      }
+      if (writes !== 1 || rhs === null) return null;
+      return symbolKeyThroughAlias(L, rhs, depth + 1);
+    }
+    if (ts.isPropertyAccessExpression(key) && ts.isIdentifier(key.name)) {
+      const t = L.typeOf(key);
+      if (!(t.flags & (ts.TypeFlags.UniqueESSymbol | ts.TypeFlags.ESSymbol))) return null;
+      const sym = L.checker.getSymbolAtLocation(key.name);
+      if (!sym) return null;
+      const decls = L.checker.declarationsOf(sym);
+      let init: ts.CallExpression | null = null;
+      for (const d of decls) {
+        // `exports.sym = <rhs>` (the declaration is the whole assignment); a `= void 0` hoist is no value, a Symbol() call is THE value
+        if (!ts.isBinaryExpression(d) || d.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return null;
+        const left = d.left;
+        if (!ts.isPropertyAccessExpression(left) || !ts.isIdentifier(left.expression) || left.expression.text !== "exports") return null;
+        let top: ts.Node = d;
+        let rhs: ts.Expression = d.right;
+        while (ts.isBinaryExpression(rhs) && rhs.operatorToken.kind === ts.SyntaxKind.EqualsToken) rhs = rhs.right; // exports.a = exports.b = void 0
+        while (ts.isParenthesizedExpression(rhs)) rhs = rhs.expression;
+        while (ts.isBinaryExpression(top.parent) && top.parent.operatorToken.kind === ts.SyntaxKind.EqualsToken && top.parent.right === top) top = top.parent;
+        if (!ts.isExpressionStatement(top.parent) || !ts.isSourceFile(top.parent.parent)) return null;
+        if (ts.isVoidExpression(rhs)) continue;
+        if (!ts.isCallExpression(rhs) || init !== null) return null;
+        init = rhs;
+      }
+      if (init === null || init.questionDotToken || !ts.isIdentifier(init.expression) || init.expression.text !== "Symbol") return null;
+      if (!L.isStdlibSymbol(L.checker.getSymbolAtLocation(init.expression))) return null;
+      const arg = init.arguments.length === 0 ? null : init.arguments.length === 1 ? init.arguments[0]! : undefined;
+      if (arg === undefined) return null;
+      if (arg !== null && !ts.isStringLiteral(arg) && !ts.isNoSubstitutionTemplateLiteral(arg)) return null;
+      return { sym, fieldName: `Symbol(${arg?.text ?? ""})` };
+    }
+    return null;
+  }
+
+  function uniqueSymbolKeyDirect(L: Lowerer, key: ts.Expression): { sym: ts.Symbol; fieldName: string } | null {
     if (!ts.isIdentifier(key)) return null;
     const t = L.typeOf(key);
     // tsgo WIDENS a unique-symbol const's type to plain `symbol` through a
@@ -27718,6 +27838,95 @@ function classKeyedReadWalked(L: Lowerer, className: string): boolean {
     if (info.hasPropsTable === true || info.builtinEmitter === true) return true;
   }
   return false;
+}
+
+/** `x.m` read as a VALUE where `m` is a method of a class whose family takes run-time keyed writes (lower-ownshadow.ts): an own
+ * property of the instance named `m` is the value, else the method's function. The receiver is read twice, so it must be plain. */
+function shadowAwareMethodValue(L: Lowerer, expr: ts.PropertyAccessExpression, className: string, original: IrExpr): IrExpr {
+  const info = L.classes.get(className);
+  if (info === undefined || !inOwnShadowFamily(L, info) || original.type.kind !== "func") return original;
+  // An own property written under a run-time key may shadow the method with a value of ANY type, but the read is typed as the
+  // method's function: a shadowing number would meet a checked cast that throws where Node answers the number. Calls are exact
+  // (the dispatcher), values are not, so the read of a family method as a value is refused here.
+  L.unsupported("SC1090", expr, `reading the method '${expr.name.text}' as a value from an instance whose own properties, written under run-time keys, can shadow it with a value of another type (call it directly, or read it through a keyed access)`);
+  return original;
+}
+
+/** `o[k] = v` with a RUN-TIME key on an instance of a JS class that carries the run-time property table
+ * (the implicit-any package lane: ioredis Commander's `this[name] = fn`). Node stores an own property: the
+ * boxed instance's keyed write answers it exactly (a declared field takes the checked store, a setter runs,
+ * any other key lands in the table), the same write a dyn receiver takes. Null when the shape is not this
+ * one (the caller keeps its fence). */
+function lowerInstanceKeyedWrite(L: Lowerer, expr: ts.BinaryExpression, target: ts.ElementAccessExpression, className: string): IrStmt | null {
+  if (target.questionDotToken !== undefined || !isJsSourceFile(target.getSourceFile())) return null;
+  const info = L.classes.get(className);
+  if (info === undefined || info.hasPropsTable !== true || info.builtinError || info.def.runtime === true) return null;
+  registerOwnShadowFamily(info);
+  const why = ownShadowWhy(L, info);
+  if (why !== null) L.unsupported("SC1090", target, `writing an own property under a run-time key (it can shadow a method of the class, and ${why})`);
+  const loc = locOf(expr);
+  const obj = L.lowerExpr(target.expression);
+  if (obj.type.kind !== "object") return null;
+  const key = keyAsString(L, L.lowerExpr(target.argumentExpression), target.argumentExpression);
+  if (key === null) return null;
+  const value = L.coerceToExpected(L.lowerExpr(expr.right), DYN);
+  if (value.type.kind !== "dyn") {
+    L.unsupported("SC1101", expr.right, `storing '${L.fmt(value.type)}' values in an instance's run-time property table (the value cannot convert into the checked-dynamic tree)`);
+  }
+  const recvDyn: IrExpr = internalBox(L, { kind: "dynFrom", value: obj, type: DYN, loc: locOf(target.expression) });
+  return { kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.keySet", args: [recvDyn, key, value], type: VOID, loc }, loc };
+}
+
+/** `o[k]` with a RUN-TIME key on an instance of a JS class that carries the run-time property table: the boxed instance's
+ * keyed read (own fields, the table, then the member table), and, when a prototype table (lower-prototab.ts) is in the class
+ * chain, that table for a name the instance does not answer. Null when the shape is not this one. */
+function lowerInstanceKeyedRead(L: Lowerer, expr: ts.ElementAccessExpression, className: string): IrExpr | null {
+  if (!isJsSourceFile(expr.getSourceFile())) return null;
+  const info = L.classes.get(className);
+  if (info === undefined || (info.hasPropsTable !== true && !hasProtoTab(L, info)) || info.builtinError || info.def.runtime === true) return null;
+  const loc = locOf(expr);
+  const obj = L.lowerExpr(expr.expression);
+  if (obj.type.kind !== "object") return null;
+  const key = keyAsString(L, L.lowerExpr(expr.argumentExpression), expr.argumentExpression);
+  if (key === null) return null;
+  const recvDyn: IrExpr = internalBox(L, { kind: "dynFrom", value: obj, type: DYN, loc: locOf(expr.expression) });
+  const read: IrExpr = { kind: "dynKeyGet", key, value: recvDyn, type: DYN, loc };
+  if (!hasProtoTab(L, info)) return L.maybeNarrow(read, expr);
+  // a name the instance does not answer ends at the prototype table; a declared FIELD of the family is always the instance's own
+  const kTmp = L.declareHiddenLocal("%ikKey", STRING);
+  const tTmp = L.declareHiddenLocal("%ikVal", DYN);
+  const kRef = (): IrExpr => ({ kind: "varRef", localId: kTmp.id, type: STRING, loc });
+  const tRef = (): IrExpr => ({ kind: "varRef", localId: tTmp.id, type: DYN, loc });
+  const fieldNames = new Set<string>();
+  const stack: ClassInfo[] = [info];
+  while (stack.length > 0) {
+    const c = stack.pop()!;
+    for (const f of c.fields.keys()) fieldNames.add(f);
+    stack.push(...c.subclasses);
+  }
+  let tail: IrExpr = {
+    kind: "ternary",
+    cond: { kind: "dynTest", test: "undefined", value: tRef(), type: BOOL, loc },
+    then: protoTabReadChain(L, info, kRef(), null, loc),
+    else_: tRef(),
+    type: DYN,
+    loc,
+  };
+  for (const f of fieldNames) {
+    if (f.startsWith("%")) continue;
+    tail = {
+      kind: "ternary",
+      cond: { kind: "strEq", negated: false, left: kRef(), right: { kind: "strLit", value: f, type: STRING, loc }, type: BOOL, loc },
+      then: tRef(),
+      else_: tail,
+      type: DYN,
+      loc,
+    };
+  }
+  return L.maybeNarrow(
+    { kind: "seqExpr", stmts: [{ kind: "varDecl", localId: kTmp.id, init: key, loc }, { kind: "varDecl", localId: tTmp.id, init: { kind: "dynKeyGet", key: kRef(), value: recvDyn, type: DYN, loc }, loc }], result: tail, type: DYN, loc },
+    expr,
+  );
 }
 
 /** `r[k]` inside the body of `for (<decl> k in r)` with the SAME receiver `r` (`this` or one identifier) and a
