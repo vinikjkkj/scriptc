@@ -34,3 +34,11 @@ t("grafted call", () => v(new Redis()).constructor.alloc(3));
 t("sub call", () => v(new Sub2()).constructor.alloc(3));
 t("sub read", () => typeof v(new Sub2()).constructor.other);
 t("writer", () => v(new Writer()).finish());
+// `new x.constructor()` constructs through the class value: a fresh bare emitter for the class that applied the graft
+// (EventEmitter), an instance of the subclass otherwise.
+function clone(x) { return new x.constructor(); }
+function clone0(x) { return new x.constructor(0); }
+t("new", () => { const o = clone(v(new Redis())); let hit = ""; o.on("x", (a) => { hit = "got " + a; }); o.emit("x", 5); return hit + "," + Object.keys(o).join(",") + "," + (o instanceof EventEmitter) + "," + o.constructor.name + "," + o.listenerCount("x"); });
+t("new arg", () => { const o = clone0(v(new Redis())); return Object.keys(o).join(",") + "," + o.getMaxListeners(); });
+t("new twice", () => { const a = clone(v(new Redis())), b = clone(v(new Redis())); a.on("e", () => 1); return a === b ? "same" : "distinct," + a.listenerCount("e") + b.listenerCount("e"); });
+t("sub new", () => { const o = clone(v(new Sub2())); return Object.keys(o).join(","); });

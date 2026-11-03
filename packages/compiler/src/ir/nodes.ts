@@ -10931,7 +10931,7 @@ export function dynReflectionSite(functions: readonly IrFunction[], fenced: (op:
   };
   const hasDynArg = (args: unknown): boolean =>
     Array.isArray(args) && args.some((a) => (a as { type?: { kind?: string } })?.type?.kind === "dyn");
-  type Parent = { kind?: string; key?: { kind?: string; value?: string }; value?: unknown; recv?: unknown; method?: string } | null;
+  type Parent = { kind?: string; key?: { kind?: string; value?: string }; value?: unknown; recv?: unknown; method?: string; fn?: string; args?: unknown } | null;
   const visit = (v: unknown, parent: Parent = null): void => {
     if (found !== null || v === null || typeof v !== "object") return;
     if (Array.isArray(v)) {
@@ -10958,6 +10958,8 @@ export function dynReflectionSite(functions: readonly IrFunction[], fenced: (op:
       const used = parent !== null && (
         (parent.kind === "dynKeyGet" && parent.value === n && parent.key?.kind === "strLit" && (parent.key.value === "name" || unknownStatic(parent.key.value))) ||
         (parent.kind === "dynInvoke" && parent.recv === n && unknownStatic(parent.method)) ||
+        // `new C(...)` over the class value: EventEmitter's class value constructs a bare emitter (scr_dyn_class.c)
+        (parent.kind === "libCall" && parent.fn === "dyn.construct" && Array.isArray(parent.args) && parent.args[0] === n) ||
         parent.kind === "dynScalarEq");
       hit(used ? "constructor" : "constructor-value", n);
     }

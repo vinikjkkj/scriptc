@@ -582,6 +582,19 @@ static ScrDyn *dyn_class_static_get(const ScrDynClass *cls, const char *key, siz
 
 /* `new C(...args)` over a class value: the class's synthesized `%dynNew`. */
 static ScrDyn *dyn_class_construct(const ScrDynClass *cls, const ScrDyn *args) {
+  if (cls->ee_off == 0 && cls->base == NULL && cls->rt_root == 1 && scr_dyn_ee_ops != NULL && scr_dyn_ee_ops->create != NULL) {
+    /* The runtime's own EventEmitter class value (an emitter instance's `constructor`): a fresh bare emitter. Its only
+     * option, captureRejections, has no lowering anywhere (a static `new EventEmitter({ captureRejections })` is refused
+     * at compile time), so a truthy one reached here is named rather than ignored. */
+    if (args != NULL && args->kind == SCR_DYN_ARR && args->v.arr.len > 0 && args->v.arr.items[0]->kind == SCR_DYN_OBJ) {
+      const ScrDyn *cr = scr_dyn_obj_get(args->v.arr.items[0], "captureRejections", 17);
+      if (cr != NULL && scr_dyn_truthy(cr)) {
+        dyn_class_fence(cls, "`new` with the captureRejections option");
+        return NULL;
+      }
+    }
+    return scr_dyn_ee_ops->create(cls);
+  }
   const ScrDynClassMember *m = dyn_class_static(cls, "%dynNew", 7);
   if (m == NULL || m->call == NULL) {
     dyn_class_fence(cls, "`new`");

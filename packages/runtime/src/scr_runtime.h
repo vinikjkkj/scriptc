@@ -7085,6 +7085,9 @@ typedef struct ScrDynEeOps {
   /* A write of one of them the registry can hold (_eventsCount / _maxListeners as a number, _maxListeners
    * as undefined): true = stored. false = not representable (the caller refuses by name). */
   bool (*state_set)(ScrEmitter *em, const char *name, size_t n, const ScrDyn *value);
+  /* A fresh bare emitter boxed under the runtime EventEmitter class descriptor (+1): `new EventEmitter()` reached
+   * through a dynamic class value. */
+  ScrDyn *(*create)(const struct ScrDynClass *cls);
 } ScrDynEeOps;
 extern const ScrDynEeOps *scr_dyn_ee_ops;
 /* One emitter key of a grafted instance as a member-row read (+1; the absent marker before the keys are born). */
