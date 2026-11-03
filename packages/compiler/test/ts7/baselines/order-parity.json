@@ -11098,6 +11098,84 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/23400-binary-row-object-rows-insertion-order.js": {
+   "order": [
+    "<repo>/tests/corpus/23400-binary-row-object-rows-insertion-order.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23401-binary-row-rowsasarray-holes-and-undefined.js": {
+   "order": [
+    "<repo>/tests/corpus/23401-binary-row-rowsasarray-holes-and-undefined.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23402-binary-row-nesttables-true.js": {
+   "order": [
+    "<repo>/tests/corpus/23402-binary-row-nesttables-true.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23403-binary-row-nesttables-string.js": {
+   "order": [
+    "<repo>/tests/corpus/23403-binary-row-nesttables-string.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23404-binary-row-integer-like-column-names.js": {
+   "order": [
+    "<repo>/tests/corpus/23404-binary-row-integer-like-column-names.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23405-binary-row-proto-chain-column-and-table-names.js": {
+   "order": [
+    "<repo>/tests/corpus/23405-binary-row-proto-chain-column-and-table-names.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23406-binary-row-inspect-and-json-of-nested-values.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23406-binary-row-inspect-and-json-of-nested-values.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23407-binary-row-options-mix-typecast-and-escape.js": {
+   "order": [
+    "<repo>/tests/corpus/23407-binary-row-options-mix-typecast-and-escape.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23408-binary-row-nesttables-table-named-like-object-prototype-member.js": {
+   "order": [
+    "<repo>/tests/corpus/23408-binary-row-nesttables-table-named-like-object-prototype-member.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23409-binary-row-many-columns-delete-and-reinsert-order.js": {
+   "order": [
+    "<repo>/tests/corpus/23409-binary-row-many-columns-delete-and-reinsert-order.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23410-dyn-dictionary-object-prototype-members-read-call-and-persist.js": {
+   "order": [
+    "<repo>/tests/corpus/23410-dyn-dictionary-object-prototype-members-read-call-and-persist.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23411-dyn-dictionary-keyed-read-of-object-prototype-names.js": {
+   "order": [
+    "<repo>/tests/corpus/23411-dyn-dictionary-keyed-read-of-object-prototype-names.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23412-binary-row-typecast-throws-mid-row.js": {
+   "order": [
+    "<repo>/tests/corpus/23412-binary-row-typecast-throws-mid-row.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2350-nan-global.ts": {
    "order": [
     "<repo>/tests/corpus/2350-nan-global.ts"
@@ -21454,6 +21532,12 @@
   "<repo>/tests/diagnostics/awaiting-a-maybe-promise-outside-the-one-unit-rule.ts": {
    "order": [
     "<repo>/tests/diagnostics/awaiting-a-maybe-promise-outside-the-one-unit-rule.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/binary-row-presized-array-arm-without-fill-proof.js": {
+   "order": [
+    "<repo>/tests/diagnostics/binary-row-presized-array-arm-without-fill-proof.js"
    ],
    "diags": []
   },
