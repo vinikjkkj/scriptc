@@ -20,12 +20,27 @@ export function classExprInsideFunction(decl: ts.ClassLikeDeclaration): boolean 
   return false;
 }
 
+/** True when the expression can evaluate MORE THAN ONCE: under a function-like
+ * body, a class static block, or a loop statement. */
+export function classExprRepeats(decl: ts.ClassLikeDeclaration): boolean {
+  if (!ts.isClassExpression(decl)) return false;
+  for (let p: ts.Node = decl.parent; !ts.isSourceFile(p); p = p.parent) {
+    if (
+      ts.isFunctionLike(p) || ts.isClassStaticBlockDeclaration(p) || ts.isForStatement(p) || ts.isForInStatement(p) ||
+      ts.isForOfStatement(p) || ts.isWhileStatement(p) || ts.isDoStatement(p)
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 /** The syntactic shapes the per-evaluation lowering covers: no type
- * parameters, no decorators, no static members or static blocks (a static
- * side with state is a separate piece), no computed member names. Anything
- * else keeps the named fence. */
+ * parameters, no decorators, no static blocks, no computed names, and a static
+ * side of plain public fields (with an initializer) and plain methods.
+ * Anything else keeps the named fence. */
 export function evalClassSyntaxOk(decl: ts.ClassLikeDeclaration): boolean {
-  if (!classExprInsideFunction(decl)) return false;
+  if (!classExprRepeats(decl)) return false;
   if (decl.typeParameters !== undefined) return false;
   const mods = (decl as { modifiers?: readonly ts.Node[] }).modifiers ?? [];
   if (mods.some((m) => m.kind === ts.SyntaxKind.Decorator)) return false;
@@ -37,9 +52,22 @@ export function evalClassSyntaxOk(decl: ts.ClassLikeDeclaration): boolean {
   for (const m of decl.members) {
     if (ts.isClassStaticBlockDeclaration(m)) return false;
     const mm = (m as { modifiers?: readonly ts.Node[] }).modifiers ?? [];
-    if (mm.some((x) => x.kind === ts.SyntaxKind.StaticKeyword || x.kind === ts.SyntaxKind.Decorator)) return false;
+    if (mm.some((x) => x.kind === ts.SyntaxKind.Decorator || x.kind === ts.SyntaxKind.AccessorKeyword)) return false;
     const name = (m as { name?: ts.Node }).name;
     if (name !== undefined && ts.isComputedPropertyName(name as ts.PropertyName)) return false;
+    if (mm.some((x) => x.kind === ts.SyntaxKind.StaticKeyword)) {
+      // The static side carries plain public fields with an initializer and
+      // plain methods; accessors, #private statics and the rest keep the fence.
+      if (name === undefined || !ts.isIdentifier(name as ts.PropertyName)) return false;
+      if (ts.isPropertyDeclaration(m)) {
+        if (m.initializer === undefined || m.postfixToken !== undefined) return false;
+        if (mm.some((x) => x.kind === ts.SyntaxKind.DeclareKeyword)) return false;
+      } else if (ts.isMethodDeclaration(m)) {
+        if (m.body === undefined || m.typeParameters !== undefined || m.asteriskToken !== undefined) return false;
+      } else {
+        return false;
+      }
+    }
   }
   return true;
 }

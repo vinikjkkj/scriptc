@@ -2232,6 +2232,9 @@ export class Lowerer {
    * nothing local, carry no static state and are used in ways one evaluation
    * cannot be told from many. Their statement lowers to nothing. */
   readonly liftedLocalClasses = new Set<ts.ClassDeclaration>();
+  /** A per-evaluation class expression's own name symbol -> its instance class
+   * (kept apart from classBySymbol: its statics live on the evaluation). */
+  readonly evalClassBySymbol = new Map<ts.Symbol, ClassInfo>();
   /** Per-evaluation class expressions (lower-evalclass.ts): the plan recorded
    * before the class shape collects, so collection adds the hidden `%cls`. */
   readonly evalClassPlans = new Map<ts.ClassExpression, import("./lower-evalclass.js").EvalClassInfo>();
@@ -15244,6 +15247,9 @@ export class Lowerer {
     info: ClassInfo,
   ): Generator<{ mName: string; member: ts.MethodDeclaration | ts.AccessorDeclaration }> {
     if (!info.decl) return; // builtin error classes: runtime-provided bodies
+    // The static side of a per-evaluation class lowers the class's STATIC
+    // methods as its own instance methods (`this` is the evaluation).
+    const wantStatic = info.evalStaticOf !== undefined;
     for (const member of info.decl.members) {
       const fnLike =
         ts.isMethodDeclaration(member) || ts.isGetAccessor(member) || ts.isSetAccessor(member)
@@ -15256,7 +15262,7 @@ export class Lowerer {
       // info.methods below and lower a second body under the same %C.name
       // (the duplicate-function ICE, signature 10).
       const mods = ts.canHaveModifiers(fnLike) ? ts.getModifiers(fnLike) : undefined;
-      if (mods?.some((m) => m.kind === ts.SyntaxKind.StaticKeyword)) continue;
+      if ((mods?.some((m) => m.kind === ts.SyntaxKind.StaticKeyword) === true) !== wantStatic) continue;
       // Computed method names resolve exactly like collection did
       // (classMemberNameOf — folded keys and the sym:iterator slot);
       // unresolvable ones never collected, so they skip here too.
@@ -15714,6 +15720,9 @@ export class Lowerer {
     if (sym === EVAL_ENV_SYM) {
       const cls = this.currentClass;
       const th = this.resolveThis(at);
+      if (cls?.evalStaticOf !== undefined && th) {
+        return { kind: "varRef", localId: th.id, type: th.type, loc };
+      }
       const c = cls?.captures?.find((x) => x.sym === EVAL_ENV_SYM);
       if (cls === null || cls === undefined || c === undefined || !th) {
         this.unsupported("SC1090", at, "constructing an evaluated class by its own name outside its instance members");

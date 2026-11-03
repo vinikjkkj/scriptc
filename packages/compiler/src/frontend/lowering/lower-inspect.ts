@@ -378,7 +378,15 @@ function inspectSupport(L: Lowerer, t: IrType, visiting: Set<string>, out: { rec
     case "object": {
       const info = L.classes.get(t.className);
       if (!info) return `class '${t.className}' has no inspect lowering`;
-      if (info.evalStaticOf !== undefined) return null; // a class value: the baked [class X] form
+      if (info.evalStaticOf !== undefined) {
+        // A class value: the baked [class X] form plus its static fields.
+        for (const f of info.def.fields) {
+          if (f.name.startsWith("%")) continue;
+          const why = inspectSupport(L, f.type, visiting, out);
+          if (why !== null) return why;
+        }
+        return null;
+      }
       if (isErrorClass(L, t.className)) {
         return errorRenderable(info)
           ? null
@@ -517,7 +525,7 @@ function inspectExpr(
     case "object": {
       // A CLASS VALUE minted by a class expression inside a function.
       const evalStatic = L.classes.get(t.className);
-      if (evalStatic?.evalStaticOf !== undefined) {
+      if (evalStatic?.evalStaticOf !== undefined && !evalStatic.def.fields.some((f) => !f.name.startsWith("%"))) {
         const inst = evalStatic.evalStaticOf;
         const nm = inst.def.jsName ?? "";
         const base = inst.base ? ` extends ${inst.base.def.jsName || inst.base.def.name.replace(/^%/, "")}` : "";
@@ -1101,7 +1109,14 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
       // takes the nearest named ancestor's (Node's getConstructorName skips
       // empty names), and with none the plain-object form (no prefix).
       let display: string;
-      if (info.decl !== null && ts.isClassExpression(info.decl)) {
+      const evalStaticInst = info.evalStaticOf;
+      if (evalStaticInst !== undefined) {
+        // A class VALUE with own enumerable static fields: Node prints the
+        // function base then the fields in braces (methods stay hidden).
+        const nm = evalStaticInst.def.jsName ?? "";
+        const bs = evalStaticInst.base ? ` extends ${evalStaticInst.base.def.jsName || evalStaticInst.base.def.name.replace(/^%/, "")}` : "";
+        display = `[class ${nm === "" ? "(anonymous)" : nm}${bs}]`;
+      } else if (info.decl !== null && ts.isClassExpression(info.decl)) {
         display = "";
         for (let c: ClassInfo | null = info; c !== null; c = c.base) {
           const nm = c.def.jsName ?? c.decl?.name?.text ?? "";
@@ -1111,8 +1126,8 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
         display = info.decl?.name?.text ?? info.def.name.replace(/^%/, "");
       }
       const braceOpen = display === "" ? "{" : `${display} {`;
-      const braceEmpty = display === "" ? "{}" : `${display} {}`;
-      const depthName = display === "" ? "Object" : display;
+      const braceEmpty = evalStaticInst !== undefined ? display : display === "" ? "{}" : `${display} {}`;
+      const depthName = evalStaticInst !== undefined ? "Function" : display === "" ? "Object" : display;
       // #private fields never render: they are not properties in any
       // observable way — Node's inspect omits them entirely (verified),
       // so a class whose only fields are private prints as `C {}`.
@@ -1132,7 +1147,8 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
       const propsTable = info.hasPropsTable === true;
       const visible = info.def.fields.filter(
         (f) => !f.name.startsWith("#") && f.name !== CLASS_PROPS_FIELD && hidden?.has(f.name) !== true &&
-          !(info.evalClass !== undefined && f.name === "%cls"),
+          !(info.evalClass !== undefined && f.name === "%cls") &&
+          !(info.evalStaticOf !== undefined && f.name.startsWith("%")),
       );
       const get = (field: string, type: IrType): IrExpr => ({ kind: "fieldGet", obj: v(), className: t.className, field, type, loc });
       // ABSENT-TRACKED slots (ClassInfo.absentTrackedFields): a JS field

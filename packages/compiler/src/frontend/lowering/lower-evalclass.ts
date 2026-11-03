@@ -181,35 +181,65 @@ export function ensureEvalClass(L: Lowerer, expr: ts.ClassExpression): ClassInfo
   const info = L.classes.get(className);
   if (!info) throw new PoisonError(); // collection poisoned and reported
   info.evalClass = plan;
-  // The static side: an ordinary standalone class whose fields are the
-  // captured bindings. No constructor function exists: the evaluation site
-  // allocates it (allocOnly) and writes every field itself.
+  // The static side: an ordinary standalone class. Its fields are the
+  // captured bindings (hidden, set by the constructor's trailing parameters)
+  // then the class's static fields in declaration order; its methods are the
+  // static methods, lowered as instance methods whose `this` is the
+  // evaluation. Constructing it IS evaluating the class: captures are stored,
+  // then the static initializers run in order with `this` = the new class.
+  if (
+    (info.uncollectedStatics?.size ?? 0) > 0 || (info.staticAccessors?.size ?? 0) > 0 ||
+    (info.genericStatics?.size ?? 0) > 0 || (info.staticBlocks?.length ?? 0) > 0
+  ) {
+    L.unsupported("SC1090", expr, "class expressions inside functions with static accessors, private statics or static blocks");
+  }
   const fields = new Map<string, IrType>();
   for (const c of caps) fields.set(c.field, c.type);
+  const defFields = caps.map((c) => ({ name: c.field, type: c.type }));
+  const fieldOrder: ClassInfo["fieldOrder"] = caps.map((c) => ({ name: c.field, type: c.type, initializer: undefined }));
+  for (const sf of info.staticFields) {
+    if (fields.has(sf.name)) L.unsupported("SC1090", sf.decl, `a static member '${sf.name}' that shadows a captured binding's slot`);
+    fields.set(sf.name, sf.type);
+    defFields.push({ name: sf.name, type: sf.type });
+    fieldOrder.push({ name: sf.name, type: sf.type, initializer: sf.initializer });
+  }
+  const methods = new Map<string, import("./lower-classes.js").MethodSig>();
+  for (const [name, sm] of info.staticMethods ?? []) {
+    if (fields.has(name)) L.unsupported("SC1090", sm.member, `a static method '${name}' that shares its name with a static field`);
+    methods.set(name, { params: sm.params, ret: sm.ret });
+  }
   const staticInfo: ClassInfo = {
     def: {
       name: staticName,
       jsName: info.def.jsName ?? "",
-      fields: caps.map((c) => ({ name: c.field, type: c.type })),
+      fields: defFields,
+      ...(methods.size > 0 ? { methods: [...methods.keys()] } : {}),
       loc,
     },
     fields,
-    fieldOrder: caps.map((c) => ({ name: c.field, type: c.type, initializer: undefined })),
-    methods: new Map(),
-    decl: null,
+    fieldOrder,
+    methods,
+    decl: expr,
     ctor: null,
     ctorParams: [],
     base: null,
     subclasses: [],
     throwingSetters: [],
     staticFields: [],
+    captures: caps.map((c) => ({ sym: c.sym, field: c.field, type: c.type })),
     evalStaticOf: info,
   };
+  // The instance class keeps no static storage: its statics live on the
+  // evaluation, so no module global or `%C.static:m` function exists for them.
+  info.staticFields = [];
+  delete info.staticMethods;
   L.classes.set(staticName, staticInfo);
   EVAL_STATIC_CLASSES.add(staticName);
   L.exprClassInfoByNode.set(expr, info);
   L.exprClasses.push(info);
   L.onExprClassCollected?.(info);
+  L.exprClasses.push(staticInfo);
+  L.onExprClassCollected?.(staticInfo);
   return info;
 }
 
@@ -220,6 +250,11 @@ export function evalClassNodeHook(L: Lowerer, decl: ts.ClassLikeDeclaration): bo
   if (!isEvalClassNode(L, decl)) return false;
   const expr = decl as ts.ClassExpression;
   if (L.exprClassInfoByNode.has(expr) || L.evalClassPlans.has(expr)) return true;
+  // While the program's declared classes are still being collected, a base
+  // class (an import from another module) may not be registered yet: the type
+  // names the class, and the collection happens at the first mapping after
+  // the window (or at the evaluation site).
+  if (L.collectingClassDecls) return true;
   try {
     ensureEvalClass(L, expr);
   } catch (e) {
@@ -237,17 +272,14 @@ export function lowerEvalClassExpr(L: Lowerer, expr: ts.ClassExpression, info: C
   const plan = info.evalClass!;
   const loc = locOf(expr);
   const objT: IrType = { kind: "object", className: plan.staticName };
-  const tmp = L.declareHiddenLocal("%evalcls", objT);
-  const ref = (): IrExpr => ({ kind: "varRef", localId: tmp.id, type: objT, loc });
-  const stmts: IrStmt[] = [
-    { kind: "varDecl", localId: tmp.id, init: { kind: "new", className: plan.staticName, args: [], type: objT, allocOnly: true, loc }, loc },
-  ];
-  for (const c of plan.caps) {
+  // The constructor stores the captured values, then runs the static field
+  // initializers in order.
+  const args = plan.caps.map((c) => {
     const raw = L.capturedBindingRead(c.sym, expr);
-    const value = typeEquals(raw.type, c.type) ? raw : L.coerceInto(expr, raw, c.type);
-    stmts.push({ kind: "fieldSet", obj: ref(), className: plan.staticName, field: c.field, value, loc });
-  }
-  return { kind: "seqExpr", stmts, result: ref(), type: objT, loc };
+    return typeEquals(raw.type, c.type) ? raw : L.coerceInto(expr, raw, c.type);
+  });
+  L.noteEdge(`%${plan.staticName}.constructor`);
+  return { kind: "new", className: plan.staticName, args, type: objT, loc };
 }
 
 /** True for an object type naming a per-evaluation static side. */
@@ -282,11 +314,14 @@ export { STRING, VOID };
 /** `V.<member>` where V is an evaluation object: `name` is the class's
  * constant NamedEvaluation name; every other member (Function.prototype's
  * `length`/`call`/`prototype`, ...) keeps a named fence. */
-export function lowerEvalClassProperty(L: Lowerer, expr: ts.PropertyAccessExpression, staticInfo: ClassInfo): IrExpr {
+export function lowerEvalClassProperty(L: Lowerer, expr: ts.PropertyAccessExpression, staticInfo: ClassInfo): IrExpr | null {
   const loc = locOf(expr);
   const inst = staticInfo.evalStaticOf!;
-  if (expr.name.text !== "name") {
-    L.unsupported("SC1090", expr, `the member '${expr.name.text}' of a class value minted by a class expression inside a function (only '.name' is carried by the per-evaluation class)`);
+  const member = expr.name.text;
+  // A static field or method is an ordinary member of the evaluation object.
+  if (staticInfo.fields.has(member) || staticInfo.methods.has(member)) return null;
+  if (member !== "name") {
+    L.unsupported("SC1090", expr, `the member '${member}' of a class value minted by a class expression inside a function (only '.name' and the declared statics are carried by the per-evaluation class)`);
   }
   const recv = L.lowerExpr(expr.expression);
   const name: IrExpr = { kind: "strLit", value: inst.def.jsName ?? "", type: STRING, loc };

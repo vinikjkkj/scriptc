@@ -5772,11 +5772,18 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       const classSymbol = inst || mixin
         ? undefined
         : decl.name ? L.checker.getSymbolAtLocation(decl.name) : ts.isClassDeclaration(decl) ? declSymbolOf(L, decl) : undefined;
-      if (classSymbol) L.classBySymbol.set(classSymbol, info);
+      if (classSymbol) {
+        // A per-evaluation class's NAME is not a program-class binding: its
+        // statics live on the evaluation, so the name-keyed static paths
+        // (module globals, the static bag) must not see it.
+        if (ts.isClassExpression(decl) && L.evalClassPlans.has(decl)) L.evalClassBySymbol.set(classSymbol, info);
+        else L.classBySymbol.set(classSymbol, info);
+      }
       // Static-field storage registers with the module's globals only
       // once the whole shape collected (a poisoned class never leaves a
       // half-registered global behind).
       for (const f of staticFields) {
+        if (ts.isClassExpression(decl) && L.evalClassPlans.has(decl)) continue; // lives on the evaluation object
         L.globalsList.push({ id: f.globalId, name: `${info.def.jsName ?? className}.${f.name}`, type: f.type, mutable: !f.readonly });
       }
       if (!inst && !mixin && !familyMode && ts.isClassDeclaration(decl) && classSymbol !== undefined) {
@@ -6416,6 +6423,12 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     // A per-evaluation class's own NAME read as a value (`class X { m() { return X } }`):
     // that evaluation's object, reached through the instance in its own members.
     if (info.evalClass !== undefined) {
+      // Inside the evaluation's own static side (static methods and static
+      // initializers), `this` IS the evaluation.
+      if (L.currentClass?.evalStaticOf === info) {
+        const sth = L.resolveThis(blame);
+        if (sth) return { kind: "varRef", localId: sth.id, type: sth.type, loc: locOf(blame) };
+      }
       const th = L.currentClass === info ? L.resolveThis(blame) : null;
       if (!th) {
         L.unsupported(
@@ -11662,7 +11675,7 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
       const bytesNew = L.lowerBytesNew(expr, symbol);
       if (bytesNew) return bytesNew;
       const info =
-        (symbol ? L.classBySymbol.get(symbol) : undefined) ??
+        (symbol ? L.classBySymbol.get(symbol) ?? L.evalClassBySymbol.get(symbol) : undefined) ??
         // `const C = require('./x'); new C()` over `module.exports =
         // class {…}`: the binding aliases the expression's own symbol —
         // the declaration story, collected on demand.

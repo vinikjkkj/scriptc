@@ -3222,7 +3222,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     // class per evaluation: its INSTANCE type is the one IR class the body
     // lowers to when the shape is covered (evalClassNode), unmappable
     // otherwise.
-    if (classExprNeverRegisters(classDecl) && !ctx.evalClassNode?.(classDecl)) return null;
+    if (ctx.evalClassNode?.(classDecl) !== true && classExprNeverRegisters(classDecl)) return null;
     // A GENERIC class's instance type (`Box<number>`) maps to the concrete
     // INSTANTIATION's class (`Box%0`), registered on demand — the Lowerer
     // hook owns the instance table (monomorphization by flow).
@@ -3252,11 +3252,10 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       }
     }
     // The static side of an evaluated class is the per-evaluation OBJECT.
-    if (classExprNeverRegisters(classDecl)) {
-      return ctx.evalClassNode?.(classDecl)
-        ? { kind: "object", className: evalStaticClassName(classNamer(classDecl)) }
-        : null;
+    if (ctx.evalClassNode?.(classDecl) === true) {
+      return { kind: "object", className: evalStaticClassName(classNamer(classDecl)) };
     }
+    if (classExprNeverRegisters(classDecl)) return null;
     // A GENERIC class's static side: only an INSTANTIATED one maps — an
     // instantiation expression's type (`Box<number>` as a value) carries a
     // construct signature returning the concrete instance, which maps to

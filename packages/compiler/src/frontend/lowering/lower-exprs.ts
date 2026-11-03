@@ -10,7 +10,7 @@ import * as ts from "../ts7/adapter.js";
 import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
 import { checkHoleFlaggedUse, isHoleFlaggedRef } from "./hole-flag.js";
-import { RUNTIME_EMITTER_CLASS, STATS_FIELD_INDEX, DATE_T, strandTrap, BIGINT, BOOL, BYTES_ELEM_SIZE, BYTES_U8, bytesValueType, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrGlobal, IrJsOp, IrLocal, type IrParam, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
+import { EVAL_STATIC_CLASSES, RUNTIME_EMITTER_CLASS, STATS_FIELD_INDEX, DATE_T, strandTrap, BIGINT, BOOL, BYTES_ELEM_SIZE, BYTES_U8, bytesValueType, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrGlobal, IrJsOp, IrLocal, type IrParam, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
 import { cjsRequireBindingValueOf, dynImportBindingDeclOf } from "./lower-island.js";
 import { liveExportsOf, liveBagRef, liveDepOfBinding, isValueUse, liveNamedTwinOf, liveRecvBagOf, liveKeyOf, liveIdentityRefOf, dynValueOf } from "./cjs-live-exports.js";
@@ -1448,6 +1448,18 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       return { kind: "jsOp", op: "arrLit", args, type: JSVAL, loc };
     }
     if (ts.isTypeOfExpression(expr)) {
+      // A class value minted by a class expression inside a function is a
+      // per-evaluation object here, but its typeof is Node's: a class.
+      {
+        const operandT = L.mapTypeOf(L.typeOf(expr.expression));
+        if (operandT?.kind === "object" && evalStaticInfoOf(L, operandT) !== null) {
+          const operand = L.lowerExpr(expr.expression);
+          const answer: IrExpr = { kind: "strLit", value: "function", type: STRING, loc };
+          return operand.kind === "varRef" || operand.kind === "fieldGet"
+            ? answer
+            : { kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: operand, loc }], result: answer, type: STRING, loc };
+        }
+      }
       // typeof on a codec instance: Node answers "object", and the lowered value is its
       // utf-8 string, which would answer "string". OPEN (mgtextcodec): refuse at the build.
       if (
@@ -2363,7 +2375,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // reach here — their hooks claim the property/new forms first).
       {
         const sym = L.resolveValueSymbol(expr);
-        const classInfo = sym ? L.classBySymbol.get(sym) : undefined;
+        const classInfo = sym ? L.classBySymbol.get(sym) ?? L.evalClassBySymbol.get(sym) : undefined;
         // A GENERIC class name whose CONTEXTUAL type pins one instantiation
         // (`const B: new (v: string) => Counter<string> = Counter`): the
         // value is that instantiation's class object — the generic-fn
@@ -16712,6 +16724,11 @@ export function recordArmStringable(L: Lowerer, a: IrType): boolean {
 }
 
 export function ensureString(L: Lowerer, e: IrExpr, node: ts.Node, explicitString = false): IrExpr {
+    // ToString of a class value: Node prints the class's SOURCE TEXT, which a
+    // per-evaluation class does not carry.
+    if (e.type.kind === "object" && EVAL_STATIC_CLASSES.has(e.type.className)) {
+      L.unsupported("SC1090", node, "converting a class value minted by a class expression inside a function to a string (Node prints the class's source text, which the per-evaluation class does not carry)");
+    }
     {
       const atWidth = stringConvAtDynWidth(L, e);
       if (atWidth) return { kind: "toString", operand: atWidth, type: STRING, loc: e.loc };
@@ -20346,6 +20363,8 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
    * "function" (unions never carry them — defensive), and the jsval/dyn/
    * caught/void/union kinds cannot appear as arms. */
   function typeofAnswer(arm: IrType): string | null {
+    // A per-evaluation class value answers like the class it stands for.
+    if (arm.kind === "object" && EVAL_STATIC_CLASSES.has(arm.className)) return "function";
     switch (arm.kind) {
       case "f64": return "number";
       case "string": return "string";
