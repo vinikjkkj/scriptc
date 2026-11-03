@@ -1,0 +1,6 @@
+own-key-method-value-refused.js:14:11 - error SC1090: reading the method 'hello' as a value from an instance whose own properties, written under run-time keys, can shadow it with a value of another type (call it directly, or read it through a keyed access) is not supported yet
+
+  13 | b.put("hello", 5);
+  14 | const f = b.hello;
+     |           ^~~~~~~
+  15 | console.log(typeof f);

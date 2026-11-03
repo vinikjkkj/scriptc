@@ -1,0 +1,6 @@
+own-key-instance-console-log-refused.js:14:13 - error SC1090: console.log of 'Box' values (an instance of 'Box' can carry own properties written under run-time keys, whose creation order among its fields is not recorded) are not supported yet
+
+  13 | b.put("alpha", 1);
+  14 | console.log(b);
+     |             ^
+  15 | 

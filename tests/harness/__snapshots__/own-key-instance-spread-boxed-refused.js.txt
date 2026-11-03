@@ -1,0 +1,8 @@
+own-key-instance-spread-boxed-refused.js:13:19 - error SC1101: converting an instance that can carry own properties written under run-time keys to 'unknown' (in %init.0) in a program that also enumerates, copies or prints dynamic values (dyn.assign (in %init.0 at own-key-instance-spread-boxed-refused.js@306)): the creation order of such an instance's keys among its fields is not recorded, so that operation cannot answer exactly is not supported yet
+
+  12 | b.put("alpha", 1);
+  13 | const copy = { ...b };
+     |                   ^
+  14 | console.log(String(copy.id));
+
+  hint: numbers, strings, booleans, JSON-safe records/arrays/unions (a deep copy — the 'unknown' value does not alias the original, so a write through it is refused rather than lost), Uint8Array/Buffer (shared by reference — writes through the 'unknown' value DO reach the original), and functions over those (boxed, identity preserved) convert into 'unknown' slots; this value's type has no dynamic representation yet
