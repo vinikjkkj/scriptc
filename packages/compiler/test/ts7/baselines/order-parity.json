@@ -11074,6 +11074,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/23271-evalclass-dyn-prototype-write-sloppy.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23271-evalclass-dyn-prototype-write-sloppy.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23272-evalclass-dyn-prototype-write-strict-module.js": {
+   "order": [
+    "<repo>/tests/corpus/23272-evalclass-dyn-prototype-write-strict-module.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23273-evalclass-dyn-prototype-write-use-strict.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23273-evalclass-dyn-prototype-write-use-strict.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2330-tls-server-runtime-options.cjs": {
    "order": [
     "<repo>/tests/corpus/2330-tls-server-runtime-options.cjs"
@@ -21900,6 +21918,60 @@
   "<repo>/tests/diagnostics/evalclass-in-dyn-without-exact-source-text.ts": {
    "order": [
     "<repo>/tests/diagnostics/evalclass-in-dyn-without-exact-source-text.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/evalclass-proto-escape-arg.js": {
+   "order": [
+    "<repo>/tests/diagnostics/evalclass-proto-escape-arg.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/evalclass-proto-escape-array.js": {
+   "order": [
+    "<repo>/tests/diagnostics/evalclass-proto-escape-array.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/evalclass-proto-escape-closure.js": {
+   "order": [
+    "<repo>/tests/diagnostics/evalclass-proto-escape-closure.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/evalclass-proto-escape-field.js": {
+   "order": [
+    "<repo>/tests/diagnostics/evalclass-proto-escape-field.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/evalclass-proto-escape-global.js": {
+   "order": [
+    "<repo>/tests/diagnostics/evalclass-proto-escape-global.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/evalclass-proto-escape-map.js": {
+   "order": [
+    "<repo>/tests/diagnostics/evalclass-proto-escape-map.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/evalclass-proto-escape-object.js": {
+   "order": [
+    "<repo>/tests/diagnostics/evalclass-proto-escape-object.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/evalclass-proto-escape-return.js": {
+   "order": [
+    "<repo>/tests/diagnostics/evalclass-proto-escape-return.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/evalclass-proto-escape-write.js": {
+   "order": [
+    "<repo>/tests/diagnostics/evalclass-proto-escape-write.js"
    ],
    "diags": []
   },
