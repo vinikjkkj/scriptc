@@ -3506,6 +3506,8 @@ export type IrLibFn =
    * SEMANTICS.md notes the sloppy divergence: loud, never silent). Void
    * result; in the may-throw seed set. */
   | "dyn.keySet"
+  /** `dyn.keySet` at a SLOPPY-mode site (CommonJS without "use strict", outside a class body): an assignment to a non-writable property (a class's `prototype`) is ignored silently, as Node does. */
+  | "dyn.keySetSloppy"
   /** Binds a compiled function value's LIFTED member (an expando
    * member the frontend stores in a module global — lower-expando.ts) to
    * an accessor PAIR, so a dyn box over that function reaches the same
@@ -11465,7 +11467,7 @@ const DYN_EXT_LIB_FNS: ReadonlySet<string> = new Set([
  * scr_bytes_own.c and installs its ops (cc.ts / the install call). Programs without one keep their size class. */
 export function moduleUsesBytesOwn(mod: IrModule): boolean {
   let found = false;
-  const SINKS = new Set(["dyn.keySet", "dyn.reflectSet", "dyn.reflectDefine", "dyn.defineProp", "dyn.defineProps", "dyn.assign", "dyn.assignAll"]);
+  const SINKS = new Set(["dyn.keySet", "dyn.keySetSloppy", "dyn.reflectSet", "dyn.reflectDefine", "dyn.defineProp", "dyn.defineProps", "dyn.assign", "dyn.assignAll"]);
   const visit = (v: unknown): void => {
     if (found || v === null || typeof v !== "object") return;
     if (Array.isArray(v)) {
@@ -14086,6 +14088,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // throws Node's catchable SyntaxError at construction.
   "regex.new",
   "dyn.keySet",
+  "dyn.keySetSloppy",
   // new Proxy throws on a non-object target/handler; `in` runs a has trap.
   "dyn.proxyNew",
   "dyn.proxyRevocable",

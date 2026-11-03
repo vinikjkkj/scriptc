@@ -6295,6 +6295,8 @@ void scr_dyn_obj_set_present_lit(ScrDyn *obj, const char *key, size_t key_len, S
  * the member (JS: later writes win, insertion order); undefined/null and
  * non-object kinds throw Node's catchable TypeErrors (strict-mode
  * wording). All three operands BORROWED (the value is retained in). */
+/* `scr_dyn_key_set` at a SLOPPY-mode site: assigning to a class's non-writable `prototype` is ignored silently (Node's sloppy answer); every other write is the strict one. */
+void scr_dyn_key_set_sloppy(ScrDyn *recv, ScrStr *key, ScrDyn *value);
 void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value);
 /* `delete recv[key]` — JS's [[Delete]], own-property only, and an ANSWER:
  * true when nothing of that name is own or when it was removed. Both
@@ -6985,7 +6987,10 @@ typedef struct ScrDynClassOps {
   /* `String(V)` of a class value (declared or per-evaluation): its source text (+1), or NULL when `d` is not a class value or
    * this build carries no exact text for it. */
   ScrStr *(*class_text)(const ScrDyn *d);
+  /* Is this minted prototype object a CLASS's (declared or per-evaluation)? */
+  bool (*is_class_proto)(const ScrDyn *p);
 } ScrDynClassOps;
+bool scr_dyn_sloppy_write(void);
 extern const ScrDynClassOps *scr_dyn_class_ops;
 void scr_dyn_class_install(void);
 /* The registered class descriptors (scr_dyn_objinst_registry's table). */

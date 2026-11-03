@@ -3800,6 +3800,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // registry takes its own +1 on the two accessor boxes. Never
             // throws — the accessors do, from the keyed read/write.
             return finish(`scr_dyn_expando_bind(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
+          case "dyn.keySetSloppy":
+            return finish(`scr_dyn_key_set_sloppy(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "dyn.keySet":
             // Keyed write on a dyn receiver: all three borrowed (the
             // member retains the value in); throws Node's TypeErrors on

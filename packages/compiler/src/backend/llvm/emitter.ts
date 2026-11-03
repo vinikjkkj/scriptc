@@ -1008,6 +1008,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "sqlite.ctorValue": "scr_sqlite_value_ctor",
   "sqlite.errorClassValue": "scr_sqlite_value_error_class",
   "dyn.keySet": "scr_dyn_key_set",
+  "dyn.keySetSloppy": "scr_dyn_key_set_sloppy",
   "dyn.expandoBind": "scr_dyn_expando_bind",
   "dyn.keyDelete": "scr_dyn_key_delete",
   "dyn.proxyNew": "scr_dyn_proxy_new",

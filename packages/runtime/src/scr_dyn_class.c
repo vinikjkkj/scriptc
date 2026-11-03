@@ -254,6 +254,14 @@ static ScrStr *dyn_cls_ops_class_text(const ScrDyn *d) {
   return s;
 }
 
+static bool dyn_cls_ops_is_class_proto(const ScrDyn *p) {
+  ScrDyn *c = scr_dyn_proto_chain_ctor_pub(p); /* +1 */
+  if (c == NULL) return false;
+  bool yes = c->kind == SCR_DYN_FUNC && (dyn_cls_eval_inner(c) != NULL || dyn_cls_impl_of_value(c) != NULL);
+  scr_dyn_release(c);
+  return yes;
+}
+
 static int dyn_cls_ops_class_walk(const ScrDyn *v, ScrObjWalk mode, ScrDyn *out) {
   const ScrDyn *inner = dyn_cls_eval_inner(v);
   const ScrDynClass *cls = inner != NULL ? scr_dyn_objinst_class_of(inner) : dyn_cls_impl_of_value(v);
@@ -687,8 +695,8 @@ static ScrDyn *dyn_cls_ops_construct(const ScrDyn *fn, const ScrDyn *args, bool 
 static bool dyn_cls_ops_set(ScrDyn *recv, const ScrStr *key, const ScrDyn *value) {
   if (recv->kind == SCR_DYN_FUNC && key->len == 9 && memcmp(key->data, "prototype", 9) == 0 &&
       (dyn_cls_eval_inner(recv) != NULL || dyn_cls_impl_of_value(recv) != NULL)) {
-    /* A class's `prototype` is non-writable: V8's strict-mode text (this runtime does not do silent, see the frozen-object
-     * stance in scr_dyn_key_set). */
+    /* A class's `prototype` is non-writable: a SLOPPY site ignores the assignment silently, a strict one throws V8's text. */
+    if (scr_dyn_sloppy_write()) return true;
     ScrStr *txt = dyn_cls_ops_class_text(recv);
     const ScrDyn *in = dyn_cls_eval_inner(recv);
     const char *nm = in != NULL ? scr_dyn_objinst_class_of(in)->name : dyn_cls_impl_of_value(recv)->name;
@@ -1030,7 +1038,7 @@ static const ScrDynClassOps dyn_cls_ops_impl = {
   dyn_cls_ops_fn_get, dyn_cls_ops_construct, dyn_cls_ops_set, dyn_cls_ops_delete, dyn_cls_ops_walk_error,
   dyn_cls_ops_error_rooted, dyn_cls_ops_error_instanceof,
   dyn_cls_objinst_to_primitive, dyn_cls_objinst_to_string, dyn_cls_objinst_user_tostring,
-  dyn_cls_eval_inner, dyn_cls_ops_instance_of, dyn_cls_ops_class_walk, dyn_cls_ops_class_text,
+  dyn_cls_eval_inner, dyn_cls_ops_instance_of, dyn_cls_ops_class_walk, dyn_cls_ops_class_text, dyn_cls_ops_is_class_proto,
 };
 
 void scr_dyn_class_install(void) { scr_dyn_class_ops = &dyn_cls_ops_impl; }

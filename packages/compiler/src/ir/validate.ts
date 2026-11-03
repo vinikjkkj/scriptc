@@ -153,6 +153,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "sqlite.ctorValue": { argTypes: [], result: DYN },
   "sqlite.errorClassValue": { argTypes: [], result: DYN },
   "dyn.keySet": { argTypes: [DYN, STRING, DYN], result: VOID },
+  "dyn.keySetSloppy": { argTypes: [DYN, STRING, DYN], result: VOID },
   "dyn.expandoBind": { argTypes: [DYN, STRING, DYN, DYN], result: VOID },
   "dyn.keyDelete": { argTypes: [DYN, STRING], result: BOOL },
   "dyn.proxyNew": { argTypes: [DYN, DYN, BOOL], result: DYN },

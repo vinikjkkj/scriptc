@@ -67,6 +67,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
+import { protoEscapes, strictAt } from "./lower-protoescape.js";
 import { CLASS_NO_DYN_NEW, EVAL_NO_SRC_CLASSES, GRAFTED_EMITTER_CLASSES, EVAL_STATIC_CLASSES, dynReflectionSite, graftedBoxSites, moduleBoxesEmitters } from "../../ir/nodes.js";
 import { computeTwinEdits, type TwinEdits } from "./emitter-twin.js";
 import { canBoxFuncIntoDyn } from "../../ir/nodes.js";
@@ -4050,46 +4051,64 @@ export class Lowerer {
     // after the whole walk, so the answer does not depend on whether the
     // cast was lowered before or after the surface that enumerates it.
     if (this.diags.length === 0) this.armOwnMasks(functions, artifacts.records);
-    // A per-evaluation class value's `prototype` object is exact for READS (one object per evaluation, `constructor`,
-    // the own methods as stable function values, the link to the base's prototype). It cannot be exact for MUTATION: an instance
-    // reaches its members through the class's member table, not through the prototype object, so `V.prototype.m = f` or
-    // `Object.defineProperty(V.prototype, ...)` would never be seen by `new V().m()`. Such a write, on a value read from a
-    // `prototype` (directly or through one local alias), keeps a compile-time refusal when the program crosses an evaluated class.
-    if (this.diags.length === 0 && EVAL_STATIC_CLASSES.size > 0) {
-      let crossing: SrcLoc | null = null;
-      const protoLocals = new Set<string>();
-      const mutations: { at: SrcLoc; recv: { kind?: string; localId?: string; key?: { value?: unknown } } }[] = [];
-      const stack: unknown[] = [functions];
-      while (stack.length > 0) {
-        const n = stack.pop();
+    // A class value's `prototype` object (one per class or evaluation, scr_dyn_class.c) is exact for READS. A WRITE into it cannot be
+    // (an instance reaches its members through its class): a write, or an escape that could hide one, of a prototype object read from
+    // a dynamic value keeps a compile-time refusal when the program crosses an evaluated class (lower-protoescape.ts), naming the operation.
+    // The same pass marks the dyn write sites whose file is SLOPPY (assignments to a non-writable property are then ignored).
+    if (this.diags.length === 0) {
+      let evalCrossing: SrcLoc | null = null;
+      let classValues = false;
+      const scan: unknown[] = [functions];
+      while (scan.length > 0) {
+        const n = scan.pop();
         if (n === null || typeof n !== "object") continue;
         if (Array.isArray(n)) {
-          for (const x of n) stack.push(x);
+          for (const x of n) scan.push(x);
           continue;
         }
-        const o = n as { kind?: string; localId?: string; init?: { kind?: string; key?: { kind?: string; value?: unknown } }; fn?: string; args?: { kind?: string; localId?: string; key?: { value?: unknown } }[]; value?: { type?: IrType }; loc?: SrcLoc };
-        if (o.kind === "varDecl" && o.localId !== undefined && o.init?.kind === "dynKeyGet" && o.init.key?.kind === "strLit" && o.init.key.value === "prototype") protoLocals.add(o.localId);
-        if (o.kind === "libCall" && o.args !== undefined && ["dyn.keySet", "dyn.keyDelete", "dyn.defineProp", "dyn.defineProps", "dyn.assign", "dyn.objCreateDescs"].includes(o.fn ?? "")) {
-          const r = o.args[0];
-          if (r !== undefined) mutations.push({ at: o.loc as SrcLoc, recv: r });
+        const o = n as { kind?: string; fn?: string; args?: { kind?: string; value?: unknown }[]; value?: { type?: IrType }; loc?: SrcLoc };
+        if (o.kind === "dynFrom" && o.value?.type?.kind === "object" && EVAL_STATIC_CLASSES.has(o.value.type.className)) {
+          classValues = true;
+          if (evalCrossing === null) evalCrossing = o.loc ?? null;
         }
-        if (o.kind === "dynFrom" && o.value?.type?.kind === "object" && EVAL_STATIC_CLASSES.has(o.value.type.className) && crossing === null) crossing = o.loc ?? null;
-        for (const v of Object.values(n as Record<string, unknown>)) stack.push(v);
+        if (o.kind === "dynFrom" && o.value?.type?.kind === "classval") classValues = true;
+        for (const v of Object.values(n as Record<string, unknown>)) scan.push(v);
       }
-      const bad = mutations.find(
-        (m) =>
-          (m.recv.kind === "dynKeyGet" && m.recv.key?.value === "prototype") ||
-          (m.recv.kind === "varRef" && m.recv.localId !== undefined && protoLocals.has(m.recv.localId)),
-      );
-      if (bad !== undefined && crossing !== null) {
-        this.pushDiag({
-          code: "SC1101",
-          message:
-            "converting a class value minted by a class expression inside a function to 'unknown' in a program that also writes to a " +
-            "`prototype` object read from a dynamic value (an instance reaches its members through the class, not through that object, so " +
-            "the write would never be seen by `new V().m()`)",
-          loc: crossing,
-        } as ScrDiagnostic);
+      if (evalCrossing !== null) {
+        for (const esc of protoEscapes(functions)) {
+          this.pushDiag({
+            code: "SC1101",
+            message:
+              `converting a class value minted by a class expression inside a function to 'unknown' in a program where a \`prototype\` object read from a dynamic value ${esc.what} ` +
+              "(a write through it could not be tracked: an instance reaches its members through its class, not through that object, so the write would never be seen by `new V().m()`)",
+            loc: esc.loc,
+          } as ScrDiagnostic);
+        }
+      }
+      if (classValues && this.diags.length === 0) {
+        // Dyn writes whose key could name `prototype`: a computed key, or the literal. The mode of the file decides the answer.
+        const walk: unknown[] = [functions];
+        while (walk.length > 0) {
+          const n = walk.pop();
+          if (n === null || typeof n !== "object") continue;
+          if (Array.isArray(n)) {
+            for (const x of n) walk.push(x);
+            continue;
+          }
+          const o = n as { kind?: string; fn?: string; args?: { kind?: string; value?: unknown }[]; loc?: SrcLoc };
+          if (o.kind === "libCall" && o.fn === "dyn.keySet" && o.args !== undefined && o.loc !== undefined) {
+            const k = o.args[1];
+            if (k?.kind !== "strLit" || k.value === "prototype") {
+              const sf = this.program.getSourceFile(o.loc.file);
+              if (sf === undefined) {
+                this.pushDiag({ code: "SC1101", message: "a dynamic write whose key could be 'prototype' in a source file whose strict/sloppy mode this build cannot determine", loc: o.loc } as ScrDiagnostic);
+              } else if (!strictAt(sf, o.loc.start)) {
+                o.fn = "dyn.keySetSloppy";
+              }
+            }
+          }
+          for (const v of Object.values(n as Record<string, unknown>)) walk.push(v);
+        }
       }
     }
     // Function-value text (fn.text): every closure the program creates needs

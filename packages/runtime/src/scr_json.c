@@ -8270,10 +8270,26 @@ void scr_dyn_static_copy_refuse(const char *what) {
   scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
 }
 
+static int scr_dyn_sloppy_site = 0;
+bool scr_dyn_sloppy_write(void) { return scr_dyn_sloppy_site > 0; }
+void scr_dyn_key_set_sloppy(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
+  scr_dyn_sloppy_site++;
+  scr_dyn_key_set(recv, key, value);
+  scr_dyn_sloppy_site--;
+}
+
 void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
 #ifdef SCR_DYNCEN_ON
   scr_dyncen_note_korigin(SCR_DYNCEN_KO_KEYSET);
 #endif
+  /* A write into a CLASS's prototype object that the compiler could not follow (the object reached this write by a path the
+   * escape analysis cannot see: a computed `v[k]` read): an instance reaches its members through its class, so the write would
+   * silently never be seen. Loud, never silent. */
+  if (recv->kind == SCR_DYN_OBJ && scr_dyn_class_ops != NULL && scr_dyn_is_minted_proto(recv) && scr_dyn_class_ops->is_class_proto(recv)) {
+    static const char msg[] = "writing into a class's prototype object through a dynamic value is not supported yet (an instance reaches its members through its class)";
+    scr_throw_error_msg(SCR_ERR_ERROR, msg, sizeof msg - 1);
+    return;
+  }
   if (recv->kind == SCR_DYN_PROXY) {
     SCR_PX->set(recv, key, value);
     return;
