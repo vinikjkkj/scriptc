@@ -1,0 +1,22 @@
+emitter-for-in-key-value-escapes-refused.ts:12:16 - error SC1090: element access on non-array values are not supported yet
+
+  11 |       // @ts-ignore
+  12 |       out.push(this[i]);
+     |                ^~~~~~~
+  13 |     }
+
+emitter-for-in-key-value-escapes-refused.ts:19:17 - error SC1090: element access on non-array values are not supported yet
+
+  18 |       // @ts-ignore
+  19 |       const v = this[i];
+     |                 ^~~~~~~
+  20 |       if (i === '_events') return v;
+
+emitter-for-in-key-value-escapes-refused.ts:20:35 - error SC2004: uses of 'v' inherit the blocker on its declaration
+
+  19 |       const v = this[i];
+  20 |       if (i === '_events') return v;
+     |                                   ^
+  21 |     }
+
+  hint: the declaration of 'v' did not compile — fix the diagnostic reported there and these sites clear with it
