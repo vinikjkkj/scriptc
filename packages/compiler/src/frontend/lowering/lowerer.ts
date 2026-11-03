@@ -10634,7 +10634,7 @@ export class Lowerer {
             {
               // A HOLE stays a hole in the widened copy (the slot is not an element to lift).
               kind: "if",
-              cond: { kind: "arrIntrinsic", method: "hasIndex", receiver: ref("a.0", arrT), args: [ref("i.0", f64)], type: BOOL, loc },
+              cond: { kind: "arrIntrinsic", method: "hasSlot", receiver: ref("a.0", arrT), args: [ref("i.0", f64)], type: BOOL, loc },
               then: [{
                 kind: "exprStmt",
                 expr: {

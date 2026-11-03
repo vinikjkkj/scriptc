@@ -11712,7 +11712,7 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
               {
                 kind: "if",
                 // for-in visits OWN keys: an index in range whose slot is not a HOLE.
-                cond: { kind: "arrIntrinsic", method: "hasIndex", receiver: arrRef(), args: [iRef()], type: BOOL, loc },
+                cond: { kind: "arrIntrinsic", method: "hasSlot", receiver: arrRef(), args: [iRef()], type: BOOL, loc },
                 then: [keyDecl, ...writes, ...body],
                 else_: null,
                 loc,

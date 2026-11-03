@@ -1221,7 +1221,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         return E.newTemp(e.type, `scr_arr_get_${acc}(${arr.name}, ${idx.name})`);
       }
       case "arrIntrinsic": {
-        const r = E.emitExpr(e.receiver);
+        // The per-iteration slot tests read a scalar out without running user code, so a
+        // stable binding keeps owning its receiver (no retain/release pair per test).
+        const r = e.method === "hasSlot" || e.method === "hasIndex"
+          ? emitStableReceiver(E, e.receiver, e.args)
+          : E.emitExpr(e.receiver);
         if (e.receiver.type.kind !== "array") throw new Error("emitter bug: arrIntrinsic on non-array");
         const acc = elemAccess(e.receiver.type.elem);
         const method = e.method;
@@ -1237,6 +1241,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "clearIndex":
             E.line(`scr_arr_clear_index(${r.name}, ${E.emitExpr(e.args[0]!).name});`);
             return { name: "", type: e.type };
+          case "hasSlot":
+            return E.newTemp(e.type, `scr_arr_has_slot_${acc}(${r.name}, ${E.emitExpr(e.args[0]!).name})`);
           case "hasIndex":
             return E.newTemp(e.type, `scr_arr_has_index${acc === "ref" ? "_ref" : acc === "f64" ? "_f64" : ""}(${r.name}, ${E.emitExpr(e.args[0]!).name})`);
           case "push": {

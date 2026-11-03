@@ -1865,8 +1865,10 @@ static inline bool scr_arr_has_index_ref(const ScrArr *a, double i) {
 }
 /* The reads behind a proven scr_arr_has_index: no bounds check, no call. */
 static inline double scr_arr_nochk_f64(const ScrArr *a, double i) {
+  uint64_t b = a->data[(size_t)i];
+  if (b == 0x7FFC00000000DE02ULL) b = 0x7FFC00000000DE01ULL; /* a HOLE reads as the undefined marker (see scr_num_unhole) */
   double v;
-  memcpy(&v, &a->data[(size_t)i], sizeof v);
+  memcpy(&v, &b, sizeof v);
   return v;
 }
 static inline bool scr_arr_nochk_bool(const ScrArr *a, double i) { return a->data[(size_t)i] != 0; }
@@ -8961,9 +8963,26 @@ bool scr_arr_hole_at(const ScrArr *a, double i);
 void scr_arr_clear_index(ScrArr *a, double i);
 double scr_arr_push_all(ScrArr *dst, ScrArr *src);
 double scr_arr_compact_holes(ScrArr *a);
-/* The COPY read of an f64 slot (spread, pushSpread): a hole becomes the
- * undefined marker, because the iteration protocol yields undefined. */
-double scr_arr_copy_f64(ScrArr *a, double i);
+/* A number VALUE read out of a slot: a HOLE reads as the undefined marker, so a hole never
+ * escapes as a value into another slot (a stored HOLE would BE a hole there). */
+static inline double scr_num_unhole(double x) {
+  return scr_num_bits(x) == SCR_NUM_HOLE_BITS ? scr_num_from_bits(SCR_NUM_UNDEF_BITS) : x;
+}
+/* The loop-counter slot test behind forEach/map/filter/some/every/reduce/for-in: `i` is a
+ * non-negative INTEGER the loop owns (no integrality or range-of-double test), the slot must
+ * exist now (a callback may have shrunk the array) and must not be a hole. */
+static inline bool scr_arr_has_slot_f64(const ScrArr *a, double i) {
+  size_t n = (size_t)(int64_t)i; /* one cvttsd2si: the counter is a small non-negative integer */
+  return n < a->len && a->data[n] != SCR_NUM_HOLE_BITS;
+}
+static inline bool scr_arr_has_slot_ref(const ScrArr *a, double i) {
+  size_t n = (size_t)(int64_t)i; /* one cvttsd2si: the counter is a small non-negative integer */
+  if (n >= a->len) return false;
+  if (a->data[n] != 0) return true;
+  if (a->tomb) scr_arr_trap_tombstone(a, n);
+  return false;
+}
+static inline bool scr_arr_has_slot_bool(const ScrArr *a, double i) { return (size_t)(int64_t)i < a->len; }
 /* The ref-element copy read where the element type has a value for undefined
  * (strings: the absent string; dyn/union: their undefined): a hole copies as
  * that value. `undef` is immortal and is returned without a retain. */
