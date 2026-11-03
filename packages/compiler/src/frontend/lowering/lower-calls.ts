@@ -11501,6 +11501,23 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     shape: { declaredOrder?: string[]; fields: { name: string; type: IrType }[] },
     loc: SrcLoc,
   ): IrExpr {
+    // VIEW GRANT: a view lists the keys of the OBJECT it is a view of (its undeclared keys included).
+    return L.viewSplit(
+      receiver,
+      arrayOf(STRING),
+      (obj) => L.coerceToExpected({ kind: "libCall", fn: "dyn.objKeys", args: [obj], type: DYN, loc }, arrayOf(STRING)),
+      (rcv) => recordKeysArrayCallPlain(L, rcv, argIr, shape, loc),
+      loc,
+    );
+  }
+
+  function recordKeysArrayCallPlain(
+    L: Lowerer,
+    receiver: IrExpr,
+    argIr: IrType & { kind: "record" },
+    shape: { declaredOrder?: string[]; fields: { name: string; type: IrType }[] },
+    loc: SrcLoc,
+  ): IrExpr {
     const resultT = arrayOf(STRING);
     L.noteKeyEnumeration(receiver, loc, "Object.keys");
     const key = `obj.keys:${argIr.shapeId}:${typeKey(resultT)}`;
@@ -11669,6 +11686,38 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
   }
 
   export function lowerHasOwnOver(L: Lowerer, call: ts.CallExpression, recvNode: ts.Expression,
+    keyNode: ts.Expression,): IrExpr | null {
+    // VIEW GRANT: a view asks the OBJECT whether it owns the key (undeclared keys included).
+    {
+      let pure = recvNode;
+      while (ts.isParenthesizedExpression(pure) || ts.isNonNullExpression(pure)) pure = pure.expression;
+      while (ts.isPropertyAccessExpression(pure)) pure = pure.expression;
+      if (ts.isIdentifier(pure)) {
+        const probed = probeLower(L, recvNode);
+        if (probed !== null && L.isViewShape(probed.type)) {
+          let key = L.lowerExpr(keyNode);
+          if (key.type.kind === "f64" || key.type.kind === "bool" || key.type.kind === "dyn") {
+            key = { kind: "toString", operand: key, type: STRING, loc: locOf(keyNode) };
+          }
+          if (key.type.kind === "string") {
+            const keyIr = key;
+            const plainIr = lowerHasOwnOverPlain(L, call, recvNode, keyNode);
+            if (plainIr === null) return null;
+            return L.viewSplit(
+              L.lowerExpr(recvNode),
+              BOOL,
+              (obj) => ({ kind: "libCall", fn: "dyn.hasOwn", args: [obj, keyIr], type: BOOL, loc: locOf(call) }),
+              () => plainIr,
+              locOf(call),
+            );
+          }
+        }
+      }
+    }
+    return lowerHasOwnOverPlain(L, call, recvNode, keyNode);
+  }
+
+  function lowerHasOwnOverPlain(L: Lowerer, call: ts.CallExpression, recvNode: ts.Expression,
     keyNode: ts.Expression,): IrExpr | null {
     const probed = probeLower(L, recvNode);
     const loc = locOf(call);
@@ -13723,7 +13772,15 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
         loc,
       });
     }
-    return { kind: "call", callee: helper, args: [receiver], type: resultT, loc };
+    // VIEW GRANT: a view lists the values / entries of the OBJECT it is a view of.
+    const viaFn = objMember === "values" ? "dyn.objValues" : "dyn.objEntries";
+    return L.viewSplit(
+      receiver,
+      resultT,
+      (obj) => L.coerceToExpected({ kind: "libCall", fn: viaFn, args: [obj], type: DYN, loc }, resultT),
+      (rcv) => ({ kind: "call", callee: helper!, args: [rcv], type: resultT, loc }),
+      loc,
+    );
   }
 
 /** The declaration's real Block body. tsgo's remote child indexing can hand
