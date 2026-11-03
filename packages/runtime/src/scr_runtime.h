@@ -5943,6 +5943,11 @@ bool scr_dyn_obj_key_is_index(const char *key, size_t len);
 ScrDyn *scr_cls_props_get(const ScrDyn *tbl, const ScrStr *key);
 ScrDyn *scr_cls_props_read(const ScrDyn *tbl, const ScrStr *key); /* x.k read: +1, undefined when absent (scr_dyn_invoke.c) */
 void scr_cls_props_set(ScrDyn *tbl, const ScrStr *key, const ScrDyn *value); /* x.k = v over the table (scr_dyn_invoke.c) */
+/* A declared/inferred own field `key` was just created: a non-enumerable MARKER row (a 6-element descriptor) makes the table's
+ * insertion order the instance's own-key creation order. No-op when the key already has a row. Never throws. */
+bool scr_cls_props_note(ScrDyn *tbl, const ScrStr *key);
+/* The enumerable keys of the table, in its insertion order with integer-like keys first (+1 array of +1 strings). */
+ScrDyn *scr_cls_props_keys(const ScrDyn *tbl);
 void scr_cls_props_inspect(const ScrDyn *tbl, double recurse, double depth, bool index_keys);
 
 /* scriptc's INTERNAL-SLOT pair — the `slots` member's whole API. It is
@@ -7021,7 +7026,20 @@ typedef struct ScrDynClassOps {
   /* Does the instance's run-time property table hold `key` (an own property, enumerable or not)? 1/0, or -1
    * when the instance's class carries no table (the caller keeps its own answer). */
   int (*objinst_props_has)(const ScrDyn *d, const ScrStr *key);
+  /* Does the instance's run-time property table hold `k` (raw bytes)? scr_dyn_objinst_member asks it before it answers a METHOD
+   * row: an own property of that name (a keyed write `this[k] = v` over a method's name) shadows the method on the prototype. */
+  bool (*objinst_own_shadows)(const ScrDyn *d, const char *k, size_t klen);
+  /* The own-property snapshot of an instance whose class carries the run-time property table (see scr_dyn_objinst_snapshot). */
+  ScrDyn *(*objinst_snapshot)(const ScrDyn *d, bool *unsup);
+  /* A member the instance answers that no row lists (its table's key, or a prototype-table member): +1 or NULL. */
+  ScrDyn *(*objinst_extra_get)(const ScrDyn *d, const char *k, size_t klen);
+  /* The enumerable keys of the class's prototype table (+1 array) or NULL. */
+  ScrDyn *(*objinst_proto_keys)(const ScrDyn *d);
 } ScrDynClassOps;
+/* +1 OBJ holding the instance's own ENUMERABLE string-keyed properties in Node's order (creation order: the table's insertion order
+ * with the field markers scr_cls_props_note leaves, integer-like keys first ascending), values read once. NULL with *unsup true when
+ * the build cannot answer exactly (the caller keeps its loud fence); NULL with *unsup false when a read threw (pending). */
+ScrDyn *scr_dyn_objinst_snapshot(const ScrDyn *d, bool *unsup);
 bool scr_dyn_sloppy_write(void);
 extern const ScrDynClassOps *scr_dyn_class_ops;
 void scr_dyn_class_install(void);

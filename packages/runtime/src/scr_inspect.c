@@ -1799,38 +1799,50 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       /* The class that applyMixin(Y, EventEmitter) grafted onto (rt_root 7) has had its own `constructor` overwritten by
        * EventEmitter's, and util.inspect skips a constructor the instance is not an instance of: it names the first
        * ancestor that still has its own (the immediate base), or prints no prefix when the chain reaches Object. */
-      if (scr_dyn_objinst_class_of(d)->rt_root == 7) {
+      if (scr_dyn_objinst_class_of(d)->rt_root == 7 || scr_dyn_objinst_class_of(d)->rt_root == 8) {
         const char *bn = scr_dyn_objinst_class_of(d)->base;
         icn = bn != NULL ? bn : "";
       }
+      ScrDyn *isnap = NULL;
       if (!scr_dyn_objinst_enumerable(d)) {
-        InspBuf out = {0};
-        ib_cstr(&out, "util.inspect of a dynamic ");
-        ib_cstr(&out, icn);
-        ib_cstr(&out, " is not supported yet");
-        scr_throw_error(SCR_ERR_ERROR, ib_take(&out));
-        return scr_str_new("", 0); /* the pending throw wins */
+        bool iunsup = false;
+        isnap = scr_dyn_objinst_snapshot(d, &iunsup);
+        if (isnap == NULL) {
+          if (!iunsup) return scr_str_new("", 0); /* a read threw: the pending throw wins */
+          InspBuf out = {0};
+          ib_cstr(&out, "util.inspect of a dynamic ");
+          ib_cstr(&out, icn);
+          ib_cstr(&out, " is not supported yet");
+          scr_throw_error(SCR_ERR_ERROR, ib_take(&out));
+          return scr_str_new("", 0); /* the pending throw wins */
+        }
       }
       /* Node's circular check comes first, before the empty and depth answers: an instance that is an ancestor on the
        * stack renders [Circular *N] and the ancestor gets <ref *N>. Keyed by the INSTANCE, so two boxes of one object
        * are one value. */
       {
         double cid = scr_insp_circ_check(d->v.inst.o);
-        if (cid > 0) return scr_insp_circular(cid);
+        if (cid > 0) {
+          if (isnap != NULL) scr_dyn_release(isnap);
+          return scr_insp_circular(cid);
+        }
       }
       const size_t inm = scr_dyn_objinst_member_count(d);
       size_t ishown = 0;
-      for (size_t i = 0; i < inm; i++) {
+      for (size_t i = 0; i < inm && isnap == NULL; i++) {
         const ScrDynClassMember *m = scr_dyn_objinst_member_at(d, i);
         if (!scr_dyn_member_hidden(m, d->v.inst.o)) ishown++;
       }
+      if (isnap != NULL) ishown = isnap->v.obj.len;
       if (ishown == 0) {
+        if (isnap != NULL) scr_dyn_release(isnap);
         InspBuf nb = {0};
         ib_cstr(&nb, icn);
         ib_cstr(&nb, icn[0] != '\0' ? " {}" : "{}");
         return ib_take(&nb);
       }
       if (recurse > depth) {
+        if (isnap != NULL) scr_dyn_release(isnap);
         InspBuf nb = {0};
         ib_char(&nb, '[');
         ib_cstr(&nb, icn[0] != '\0' ? icn : "Object");
@@ -1840,7 +1852,25 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       scr_insp_begin(recurse + 1);
       scr_insp_seen_push(d->v.inst.o);
       bool ithrew = false;
-      for (size_t i = 0; i < inm && !ithrew; i++) {
+      if (isnap != NULL) {
+        size_t *iord = scr_dyn_obj_key_order(isnap);
+        for (size_t oi = 0; oi < isnap->v.obj.len; oi++) {
+          const ScrDynEntry *e = &isnap->v.obj.entries[iord != NULL ? iord[oi] : oi];
+          ScrStr *val = scr_insp_dyn(e->value, recurse + 1, depth);
+          InspBuf eb = {0};
+          insp_key_into(&eb, e->key, e->key_len);
+          ib_cstr(&eb, ": ");
+          ib_bytes(&eb, val->data, val->len);
+          scr_str_release(val);
+          ScrStr *entry = ib_take(&eb);
+          scr_insp_entry(entry, false);
+          scr_str_release(entry);
+        }
+        free(iord);
+        scr_dyn_release(isnap);
+        isnap = NULL;
+      }
+      for (size_t i = 0; i < inm && !ithrew && isnap == NULL && !scr_dyn_objinst_has_props(d); i++) {
         const ScrDynClassMember *m = scr_dyn_objinst_member_at(d, i);
         if (scr_dyn_member_hidden(m, d->v.inst.o)) continue;
         ScrDyn *mv = m->get(d->v.inst.o); /* +1 */
@@ -1859,7 +1889,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         scr_insp_entry(entry, false);
         scr_str_release(entry);
       }
-      if (!ithrew && (scr_dyn_objinst_class_of(d)->rt_root == 5 || scr_dyn_objinst_class_of(d)->rt_root == 7)) {
+      if (!ithrew && (scr_dyn_objinst_class_of(d)->rt_root == 5 || scr_dyn_objinst_class_of(d)->rt_root == 7 || scr_dyn_objinst_class_of(d)->rt_root == 8 || scr_dyn_objinst_class_of(d)->rt_root == 6)) {
         /* A grafted emitter's constructor (EventEmitter.call(this)) also defines the own enumerable SYMBOL keys
          * shapeMode and kCapture (both false), after every string key; util.inspect lists them once the emitter's
          * keys are born. */
