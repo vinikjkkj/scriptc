@@ -88,3 +88,25 @@ export function kindgateWideLane(
 ): boolean {
   return (soft ? dials.match : dials.wide) && !shape.indexValue && shape.fields.length > 0;
 }
+
+/** The INSTANCE lane: a boxed class instance (SCR_DYN_OBJINST) read through a record
+ * type, the way Node reads it - `x as R` is erased, so every member R declares is
+ * answered by the instance itself, a getter or a method or an inherited one included.
+ *
+ * It is NOT behind the dials. The dials guard kinds whose projection would
+ * manufacture a wrong union tag or answer `length` for an array; an instance has a
+ * member table (scr_dyn_objinst_member_get) and no other record arm can claim it, so
+ * the lane is on for every record target that is not a tuple (a tuple's gate is the
+ * ARRAY kind). Both the hard builder and the soft arm walker take it. The union
+ * builder tries every CLASS arm before a record arm for an instance (see the
+ * instance pass in its emitters), so a `Hdr | Rec` union keeps the class tag.
+ *
+ * `enabled` is moduleUsesInstanceRecordLane: a module with no boxable class or no checked
+ * cast has no instance receiver to read, and keeps its exact TU.
+ *
+ * `allOwn` says the shape has an index signature: the projection then carries every
+ * own enumerable key of the instance, which is the overflow Node would show. */
+export function kindgateInstanceLane(shape: IrRecordShape, enabled: boolean): { allOwn: boolean } | null {
+  if (!enabled || shape.tuple) return null;
+  return { allOwn: shape.indexValue !== undefined };
+}
