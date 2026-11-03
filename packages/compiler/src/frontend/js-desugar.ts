@@ -647,7 +647,7 @@ function safeBuiltinLoadEdits(fileName: string, text: string): string | null {
   const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
   const norm = (t: string): string => t.replace(/\/\/[^\n]*/g, "").replace(/\s+/g, " ").replace(/\( /g, "(").replace(/ \)/g, ")").trim();
   const SHAPE =
-    /^\(\(\) => \{ try \{ return 'getBuiltinModule' in process \? process\.getBuiltinModule\((['"])((?:node:)?[a-z_/]+)\1\) : require\((['"])((?:node:)?[a-z_/]+)\3\); \} catch(?: \(\w+\))? \{ return undefined; \} \}\)\(\);?$/;
+    /^\(\(\) => \{ try \{ return (?:'getBuiltinModule'|"getBuiltinModule") in process \? process\.getBuiltinModule\((['"])((?:node:)?[a-z_/]+)\1\) : require\((['"])((?:node:)?[a-z_/]+)\3\); \} catch(?: \(\w+\))? \{ return undefined; \} \}\)\(\);?$/;
   const edits: Edit[] = [];
   for (const stmt of sf.statements) {
     if (!ts.isVariableStatement(stmt) || stmt.declarationList.declarations.length !== 1) continue;
