@@ -423,7 +423,9 @@ bool scr_regex_test(ScrRegex *re, ScrStr *s) {
  * element, return value). The array's `execidx` byte makes scr_arr_release
  * call scr_regex_idx_died, so an address is never reused with a stale entry.
  * Open addressing, linear probing, backward-shift deletion. */
-typedef struct { ScrArr *key; double idx; } ScrIdxEnt;
+/* `absent` is the row's PARTICIPATION mask: bit k set = capture group k did not participate (the row holds "" there,
+ * where Node's slot is undefined: SEMANTICS.md 51). NULL when every group participated. Owned by the entry. */
+typedef struct { ScrArr *key; double idx; uint8_t *absent; size_t nabs; } ScrIdxEnt;
 static ScrIdxEnt *scr_idx_tab = NULL;
 static size_t scr_idx_cap = 0, scr_idx_n = 0;
 
@@ -433,12 +435,12 @@ static size_t scr_idx_hash(const void *p) {
   return (size_t)x;
 }
 
-static void scr_idx_insert_raw(ScrArr *k, double v) {
-  size_t i = scr_idx_hash(k) & (scr_idx_cap - 1);
-  while (scr_idx_tab[i].key != NULL && scr_idx_tab[i].key != k) i = (i + 1) & (scr_idx_cap - 1);
+/* Moves the entry in (its mask is owned by the table). */
+static void scr_idx_insert_raw(ScrIdxEnt e) {
+  size_t i = scr_idx_hash(e.key) & (scr_idx_cap - 1);
+  while (scr_idx_tab[i].key != NULL && scr_idx_tab[i].key != e.key) i = (i + 1) & (scr_idx_cap - 1);
   if (scr_idx_tab[i].key == NULL) scr_idx_n++;
-  scr_idx_tab[i].key = k;
-  scr_idx_tab[i].idx = v;
+  scr_idx_tab[i] = e;
 }
 
 static void scr_regex_idx_died(void *arr) {
@@ -446,20 +448,23 @@ static void scr_regex_idx_died(void *arr) {
   size_t i = scr_idx_hash(arr) & (scr_idx_cap - 1);
   while (scr_idx_tab[i].key != NULL && scr_idx_tab[i].key != arr) i = (i + 1) & (scr_idx_cap - 1);
   if (scr_idx_tab[i].key == NULL) return;
+  free(scr_idx_tab[i].absent);
   scr_idx_tab[i].key = NULL;
+  scr_idx_tab[i].absent = NULL;
   scr_idx_n--;
   size_t j = (i + 1) & (scr_idx_cap - 1);
   while (scr_idx_tab[j].key != NULL) { /* re-insert the cluster tail */
-    ScrArr *k = scr_idx_tab[j].key;
-    double v = scr_idx_tab[j].idx;
+    ScrIdxEnt e = scr_idx_tab[j];
     scr_idx_tab[j].key = NULL;
+    scr_idx_tab[j].absent = NULL;
     scr_idx_n--;
-    scr_idx_insert_raw(k, v);
+    scr_idx_insert_raw(e);
     j = (j + 1) & (scr_idx_cap - 1);
   }
 }
 
-static void scr_regex_note_index(ScrArr *m, double idx) {
+/* Records the row's `.index` and, when some group did not participate, which ones. */
+static void scr_regex_note_row(ScrArr *m, double idx, uint8_t *const *capture, int count) {
   if (scr_idx_n * 2 >= scr_idx_cap) {
     size_t ncap = scr_idx_cap ? scr_idx_cap * 2 : 64;
     ScrIdxEnt *old = scr_idx_tab;
@@ -468,12 +473,38 @@ static void scr_regex_note_index(ScrArr *m, double idx) {
     if (!scr_idx_tab) scr_regex_oom();
     scr_idx_cap = ncap;
     scr_idx_n = 0;
-    for (size_t i = 0; i < ocap; i++) if (old[i].key) scr_idx_insert_raw(old[i].key, old[i].idx);
+    for (size_t i = 0; i < ocap; i++) if (old[i].key) scr_idx_insert_raw(old[i]);
     free(old);
   }
   scr_arr_idx_died_hook = scr_regex_idx_died;
+  ScrIdxEnt e = { m, idx, NULL, 0 };
+  for (int k = 0; k < count; k++) {
+    if (capture[2 * k] != NULL && capture[2 * k + 1] != NULL) continue;
+    if (e.absent == NULL) {
+      e.nabs = (size_t)count;
+      e.absent = calloc(((size_t)count + 7) / 8, 1);
+      if (!e.absent) scr_regex_oom();
+    }
+    e.absent[k >> 3] |= (uint8_t)(1u << (k & 7));
+  }
   m->execidx = 1;
-  scr_idx_insert_raw(m, idx);
+  scr_idx_insert_raw(e);
+}
+
+/* Did capture group `i` of this match row NOT participate? False for an index outside the row, and for an
+ * array no regex built (so a plain string[] answers false). Borrowed; never throws. */
+bool scr_regex_row_absent(ScrArr *m, double i) {
+  if (m == NULL || scr_idx_cap == 0 || !(i >= 0) || i != (double)(size_t)i) return false;
+  size_t k = (size_t)i;
+  size_t h = scr_idx_hash(m) & (scr_idx_cap - 1);
+  while (scr_idx_tab[h].key != NULL) {
+    if (scr_idx_tab[h].key == m) {
+      const ScrIdxEnt *e = &scr_idx_tab[h];
+      return e->absent != NULL && k < e->nabs && (e->absent[k >> 3] >> (k & 7) & 1u) != 0;
+    }
+    h = (h + 1) & (scr_idx_cap - 1);
+  }
+  return false;
 }
 
 double scr_regex_index_of(ScrArr *m) {
@@ -508,7 +539,7 @@ ScrArr *scr_regex_exec(ScrStr *s, ScrRegex *re) {
             out, scr_str_from_utf16(u, (int)((cs - ubase) >> 1), (int)((ce - ubase) >> 1)));
       }
     }
-    scr_regex_note_index(out, scr_last_exec_idx);
+    scr_regex_note_row(out, scr_last_exec_idx, capture, count);
   }
   free(capture);
   free(u);
@@ -632,7 +663,7 @@ static ScrArr *scr_regex_match_all_core(ScrStr *s, ScrRegex *re, ScrArr *indices
             row, scr_str_from_utf16(u, (int)((cs - ubase) >> 1), (int)((ce - ubase) >> 1)));
       }
     }
-    scr_regex_note_index(row, (double)start);
+    scr_regex_note_row(row, (double)start, capture, capture_count);
     scr_arr_push_ref(out, row);
     if (indices != NULL) scr_arr_push_f64(indices, (double)start);
     if (for_replace && !global) {

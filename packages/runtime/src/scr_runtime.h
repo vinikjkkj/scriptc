@@ -2062,6 +2062,9 @@ double scr_regex_last_exec_index(void);
 /* `.index` of a match result: the UTF-16 start recorded when exec/match/matchAll built the
  * array (NaN for an array no regex built). Borrowed. */
 double scr_regex_index_of(ScrArr *m);
+/* Did capture group `i` of a match row not participate (the row holds "" there; Node: undefined)? False for an
+ * index outside the row or an array no regex built. Borrowed; never throws. */
+bool scr_regex_row_absent(ScrArr *m, double i);
 double scr_regex_get_last_index(ScrRegex *re);
 void scr_regex_set_last_index(ScrRegex *re, double v);
 bool scr_regex_test(ScrRegex *re, ScrStr *s); /* /g or /y: stateful through lastIndex like exec */

@@ -1077,6 +1077,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return { name: "", type: e.type };
           case "execIndexOf":
             return E.newTemp(e.type, `scr_regex_index_of(${r.name})`);
+          case "rowAbsent":
+            return E.newTemp(e.type, `scr_regex_row_absent(${r.name}, ${args[0]!.name})`);
           case "source":
             return E.newTemp(e.type, `scr_regex_source(${r.name})`);
           case "flags":
