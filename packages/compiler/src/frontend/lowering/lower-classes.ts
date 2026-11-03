@@ -1502,6 +1502,25 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
   interface HelperUnrollPlan { decl: ts.VariableDeclaration; calls: ts.ExpressionStatement[]; getFn: ts.FunctionExpression; accessors: HelperAccessorPlan[]; protoNames: string[] }
   const helperPlanMemo = new WeakMap<ts.ClassDeclaration, HelperUnrollPlan[]>();
 
+  /** True when a body of the class contains `this[<non-literal key>] = <rhs>` (an own property under a run-time key). Iterative. */
+  function writesThisUnderRuntimeKey(L: Lowerer, decl: ts.ClassDeclaration): boolean {
+    const stack: ts.Node[] = [decl];
+    while (stack.length > 0) {
+      const n = stack.pop()!;
+      if (
+        ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isElementAccessExpression(n.left) &&
+        n.left.expression.kind === ts.SyntaxKind.ThisKeyword && !ts.isStringLiteral(n.left.argumentExpression) && !ts.isNumericLiteral(n.left.argumentExpression) &&
+        uniqueSymbolKeyOf(L, n.left.argumentExpression) === null
+      ) {
+        return true;
+      }
+      n.forEachChild((c) => {
+        stack.push(c);
+      });
+    }
+    return false;
+  }
+
   function helperPlansOf(L: Lowerer, decl: ts.ClassDeclaration, classSymbol: ts.Symbol): HelperUnrollPlan[] {
     const memo = helperPlanMemo.get(decl);
     if (memo !== undefined) return memo;
@@ -5601,7 +5620,9 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       }
       const ownPropsTable =
         L.definePropStringTable(decl) ||
-        (!inst && !mixin && !familyMode && ts.isClassDeclaration(decl) && implicitMonoFile(decl.getSourceFile()));
+        (!inst && !mixin && !familyMode && ts.isClassDeclaration(decl) && implicitMonoFile(decl.getSourceFile())) ||
+        // a JS class whose own bodies write `this[<run-time key>] = v` (ioredis Commander.defineCommand): the writes land in the table
+        (!inst && !mixin && !familyMode && ts.isClassDeclaration(decl) && isJsSourceFile(decl.getSourceFile()) && writesThisUnderRuntimeKey(L, decl));
       const hasPropsTable = ownPropsTable || base?.hasPropsTable === true;
       if (ownPropsTable && !fields.has(CLASS_PROPS_FIELD)) {
         fields.set(CLASS_PROPS_FIELD, DYN);
@@ -10446,13 +10467,13 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
         const loc = locOf(call);
         const thisRef: IrExpr = { kind: "varRef", localId: thisL.id, type: thisL.type, loc };
         const args = L.completeArgs(call.arguments, instance.params, loc, call);
-        return {
+        return L.markSuperCall({
           kind: "call",
           callee: instance.name,
           args: [L.upcastTo(thisRef, gfound.declarer.def.name), ...args],
           type: instance.returnType,
           loc,
-        };
+        });
       }
       // The runtime-provided emitter surface through `super` —
       // `super.emit('x', v)`, `super.on(...)`: Node's prototype-chain rule
@@ -10477,13 +10498,13 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
     const loc = locOf(call);
     const thisRef: IrExpr = { kind: "varRef", localId: thisLocal.id, type: thisLocal.type, loc };
     const args = L.completeArgs(call.arguments, found.sig.params, loc, call);
-    return {
+    return L.markSuperCall({
       kind: "call",
       callee: `%${found.declarer.def.name}.${access.name.text}`,
       args: [L.upcastTo(thisRef, found.declarer.def.name), ...args],
       type: found.sig.ret,
       loc,
-    };
+    });
   }
 
 /** The `this` reference for super accessor reads/writes, with the shared

@@ -4,6 +4,7 @@
  * finally-crossing fence), and blocked-binding poisoning. */
 import { protoDataAssignStmt } from "./lower-protodata.js";
 import { classOfValueNode, protoSlotOf, protoSlotWriteStmt } from "./lower-protoslots.js";
+import { protoTabWriteStmt } from "./lower-prototab.js";
 import { lowerUnboundClassMethodValue } from "./lower-exprs.js";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
@@ -7064,6 +7065,8 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
     if (L.lateMethodAssigns.has(expr)) return { kind: "block", body: [], loc: locOf(expr) };
     // `C.prototype.m = f` of a method the program replaces at run time (lower-protoslots.ts): the slot's store.
     { const ps = protoSlotWriteStmt(L, expr); if (ps !== null) return ps; }
+    // `C.prototype[k] = v` with a run-time key (lower-prototab.ts): the prototype table's store.
+    { const pt = protoTabWriteStmt(L, expr); if (pt !== null) return pt; }
     // `C.prototype.name = v` of a prototype-data slot (lower-protodata.ts): the slot's store.
     if (ts.isBinaryExpression(expr)) {
       const pd = protoDataAssignStmt(L, expr);

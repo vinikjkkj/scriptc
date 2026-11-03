@@ -190,6 +190,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "cls.propsCount": { argTypes: [DYN], result: F64 },
   "cls.propsGet": { argTypes: [DYN, STRING], result: DYN },
   "cls.propsSet": { argTypes: [DYN, STRING, DYN], result: VOID },
+  "cls.propsNote": { argTypes: [DYN, STRING], result: VOID },
+  "cls.propsKeys": { argTypes: [DYN], result: DYN },
   "cls.propsRead": { argTypes: [DYN, STRING], result: DYN },
   "dyn.typeof": { argTypes: [DYN], result: STRING },
   // The JS operator conversions over dyn operands. `+` answers DYN
