@@ -1349,6 +1349,21 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
     );
   }
 
+  // VIEW GRANT: a view is the OBJECT it was cast from, so the object prints itself (its undeclared keys, its
+  // class prefix, its getters as Node shows them), through the dyn tree's own inspect at the same depth.
+  if (t.kind === "record") {
+    const vs = L.shapes.get(t.shapeId);
+    if (vs && !vs.tuple && vs.view === true) {
+      body.unshift({
+        kind: "if",
+        cond: { kind: "recordIsView", obj: v(), shapeId: t.shapeId, type: BOOL, loc },
+        then: [ret({ kind: "libCall", fn: "insp.dyn", args: [{ kind: "recordView", obj: v(), shapeId: t.shapeId, type: DYN, loc }, r(), d()], type: STRING, loc })],
+        else_: null,
+        loc,
+      });
+    }
+  }
+
   L.liftedFns.push({
     name,
     params: [

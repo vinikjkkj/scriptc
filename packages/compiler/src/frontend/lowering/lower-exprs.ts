@@ -11433,6 +11433,23 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     ) {
       return lowerDynSpreadObjectLiteral(L, expr);
     }
+    // VIEW GRANT: a spread whose source is a VIEW copies the OBJECT's own enumerable keys, which the
+    // declared-field desugar below cannot see (an undeclared key, a class instance's own members). The
+    // literal builds as a dyn object (the source crosses as the object itself, dyn.assign copies it onto
+    // a table of its own) and the result is read back at the literal's own type - a view of the copy
+    // when that shape is granted, the declared members of it otherwise.
+    if (
+      expr.properties.some(
+        (p) =>
+          ts.isSpreadAssignment(p) && conditionalSpreadOf(p.expression) === null &&
+          pureMemberChain(p.expression) && L.isViewShape(probeLower(L, p.expression)?.type ?? DYN),
+      )
+    ) {
+      const want = L.irTypeOf(expr);
+      if (want.kind === "record" && !L.shapes.get(want.shapeId)?.indexValue) {
+        return L.coerceToExpected(lowerDynSpreadObjectLiteral(L, expr), want);
+      }
+    }
     // Syntax fence FIRST: unsupported member forms get their specific
     // message even when they also make the literal's type unmappable
     // (a getter or a `this`-returning method would otherwise surface as an
@@ -22905,6 +22922,26 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
   }
 
   export function lowerInExpression(L: Lowerer, expr: ts.BinaryExpression, loc: SrcLoc): IrExpr {
+    // VIEW GRANT: `"k" in view` asks the OBJECT (undeclared keys, inherited members, a class's own fields).
+    {
+      const key = ts.isPrivateIdentifier(expr.left) ? null : foldedStringKeyOf(L, expr.left);
+      if (key !== null && pureMemberChain(expr.right)) {
+        const probed = probeLower(L, expr.right);
+        if (probed !== null && L.isViewShape(probed.type)) {
+          return L.viewSplit(
+            L.lowerExpr(expr.right),
+            BOOL,
+            (obj) => ({ kind: "dynHasKey", key, value: obj, type: BOOL, loc }),
+            () => lowerInExpressionPlain(L, expr, loc),
+            loc,
+          );
+        }
+      }
+    }
+    return lowerInExpressionPlain(L, expr, loc);
+  }
+
+  function lowerInExpressionPlain(L: Lowerer, expr: ts.BinaryExpression, loc: SrcLoc): IrExpr {
     // `#name in obj` — the ergonomic brand check (ES2022) — resolves
     // before any string-key machinery: the left operand is a private
     // NAME, not a value.

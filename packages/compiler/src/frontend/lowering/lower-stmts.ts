@@ -3114,16 +3114,44 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
             : "rest bindings over index-signature or accessor shapes (the entries would need overflow packing)",
         );
       }
-      const packed: IrExpr = {
+      const packedOf = (src: () => IrExpr): IrExpr => ({
         kind: "recordLit",
         fields: rem.map((f) => ({
           name: f.name,
-          value: { kind: "recordGet", obj: srcRef(), shapeId: srcType.shapeId, field: f.name, type: f.type, loc } as IrExpr,
+          value: { kind: "recordGet", obj: src(), shapeId: srcType.shapeId, field: f.name, type: f.type, loc } as IrExpr,
         })),
         type: { kind: "record", shapeId: L.shapes.intern(rem.map((f) => ({ name: f.name, type: f.type }))) },
         loc,
-      };
-      return L.coerceInto(el, packed, DYN);
+      });
+      // VIEW GRANT: a view's rest is the OBJECT's own enumerable keys that no sibling consumed (an undeclared
+      // key included), copied onto a table of its own - not the declared fields alone.
+      if (L.isViewShape(srcType) && !computedSibling) {
+        return L.viewSplit(
+          srcRef(),
+          DYN,
+          (obj) => {
+            const t = L.declareHiddenLocal("%rest", DYN);
+            const tRef = (): IrExpr => ({ kind: "varRef", localId: t.id, type: DYN, loc });
+            return {
+              kind: "seqExpr",
+              stmts: [
+                { kind: "varDecl", localId: t.id, init: { kind: "libCall", fn: "dyn.assign", args: [{ kind: "dynObjLit", fields: [], type: DYN, loc }, obj], type: DYN, loc }, loc },
+                ...[...consumed].map((c): IrStmt => ({
+                  kind: "exprStmt",
+                  expr: { kind: "libCall", fn: "dyn.keyDelete", args: [tRef(), { kind: "strLit", value: c, type: STRING, loc }], type: BOOL, loc },
+                  loc,
+                })),
+              ],
+              result: tRef(),
+              type: DYN,
+              loc,
+            };
+          },
+          (rcv) => L.coerceInto(el, packedOf(() => ({ ...rcv })), DYN),
+          loc,
+        );
+      }
+      return L.coerceInto(el, packedOf(srcRef), DYN);
     }
     if (restT?.kind !== "record") {
       L.unsupported(

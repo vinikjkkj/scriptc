@@ -123,6 +123,7 @@ import { settleOrValueArms,
   overflowShapeKeys,
   overflowShapeKeysAsked,
   overflowShapeKeysDenied,
+  viewShapeKeys,
   isArrayIndexKey,
   ShapeRegistry,
   typeKey,
@@ -748,6 +749,7 @@ export function lowerToIr(
   overflowShapeKeys.clear();
   overflowShapeKeysDenied.clear();
   overflowShapeKeysAsked.clear();
+  viewShapeKeys.clear();
   const targetPlatform = options.targetPlatform ?? process.platform;
   const startupCrash = options.startupCrash ?? null;
   // Modules reachable only through dynamic import() of the program's own
@@ -799,6 +801,7 @@ export function lowerToIr(
       });
   const __t0 = performance.now();
   const reachable = discovery.discover(options.libRoots);
+  discovery.settleViewDenials();
   lowerProfileNote("%discovery", performance.now() - __t0);
   if (options.noPinReload !== true) {
     const pinReload = discovery.computeDynPinEdits();
@@ -3946,6 +3949,7 @@ export class Lowerer {
     // needs no interning, so it only has to wait for the WRITE SET, which
     // is not complete until the last body is lowered.
     this.reportRecordWidthCopies(functions);
+    this.viewRewrite(functions);
     this.fenceWrittenInstancePayloads(functions);
     this.fenceDynArrFromOnStrandedBox(functions);
 
@@ -5037,6 +5041,17 @@ export class Lowerer {
       if (o.kind === "dynFrom" && o.value?.type !== undefined) {
         this.classesCrossingIntoDyn(o.value.type, found, seen);
       }
+      if (o.kind === "dynCheck" && (o as { type?: IrType }).type !== undefined) {
+        this.noteViewCast((o as { type: IrType }).type, this.viewCastSeen);
+      }
+      // ...and a record handed to a CALLEE as a dynamic argument (an untyped JS method's options object): the
+      // callee may write it, and the caller's next read must see that write, so the record has to be able to
+      // BE the object it crosses as (the converter promotes it to a view - emit-walkers.ts).
+      if (o.kind !== "libCall" && o.kind !== "intrinsic" && Array.isArray((o as { args?: unknown }).args)) {
+        for (const a of (o as unknown as { args: { kind?: string; value?: { type?: IrType } }[] }).args) {
+          if (a !== null && typeof a === "object" && a.kind === "dynFrom" && a.value?.type !== undefined) this.noteViewCast(a.value.type, this.viewCastSeen);
+        }
+      }
       if (o.kind === "libCall" && (o as { fn?: unknown }).fn === "dyn.keySet") {
         this.noteDynKeySet((o as unknown as { args: IrExpr[] }).args);
       }
@@ -5049,6 +5064,128 @@ export class Lowerer {
     };
     walk(fn);
     for (const c of found) this.noteDynBoxedClass(c);
+    this.noteViewArrayMutations(fn);
+  }
+
+  /** Shape ids (this registry) whose array/map/set-typed member the program MUTATES through a read of that
+   * member (`v.tags.push(x)`, or a local that holds the read). A static array is a copy of the object's array
+   * (the dyn and static array representations are different memory), so a view could not make such a write
+   * reach the object: the shape keeps the copy contract it always had - exact until the object is observed
+   * elsewhere - instead of becoming a view whose member writes would be lost (see lowerToIr). */
+  readonly viewDenied = new Set<string>();
+
+  /** Retires the view grant of every shape in viewDenied and of every shape that CONTAINS one (a view of the
+   * parent would hand out a copy of the denied child, and the write to that child's array would be lost). */
+  settleViewDenials(): void {
+    if (this.viewDenied.size === 0 || viewShapeKeys.size === 0) return;
+    const reaches = (t: IrType, denied: Set<string>, seen: Set<string>): boolean => {
+      switch (t.kind) {
+        case "array":
+          return reaches(t.elem, denied, seen);
+        case "union": {
+          if (seen.has(t.unionId)) return false;
+          seen.add(t.unionId);
+          return (this.unions.get(t.unionId)?.arms ?? []).some((a) => reaches(a, denied, seen));
+        }
+        case "record": {
+          if (denied.has(t.shapeId)) return true;
+          if (seen.has(t.shapeId)) return false;
+          seen.add(t.shapeId);
+          const sh = this.shapes.get(t.shapeId);
+          return sh !== undefined && (sh.fields.some((f) => reaches(f.type, denied, seen)) || (sh.indexValue !== undefined && reaches(sh.indexValue, denied, seen)));
+        }
+        default:
+          return false;
+      }
+    };
+    const denied = new Set(this.viewDenied);
+    for (let changed = true; changed;) {
+      changed = false;
+      for (const sh of this.shapes.shapes) {
+        if (denied.has(sh.id)) continue;
+        if (sh.fields.some((f) => reaches(f.type, denied, new Set())) || (sh.indexValue !== undefined && reaches(sh.indexValue, denied, new Set()))) {
+          denied.add(sh.id);
+          changed = true;
+        }
+      }
+    }
+    for (const id of denied) {
+      const sh = this.shapes.get(id);
+      if (sh !== undefined) viewShapeKeys.delete(overflowShapeKey(sh.fields));
+    }
+  }
+
+  private noteViewArrayMutations(fn: IrFunction): void {
+    const MUT = new Set(["pushAll", "clearIndex", "setLength", "fill", "push", "pushSpread", "pop", "unshift", "reverse", "copyWithin", "shift", "splice", "set", "add", "delete", "clear"]);
+    const isContainer = (t: IrType): boolean => t.kind === "array" || t.kind === "map" || t.kind === "set";
+    const aliases = new Map<string, string>(); // local id -> shape id of the member read it holds
+    const memberOf = (e: IrExpr | null | undefined): string | null => {
+      if (e === null || e === undefined) return null;
+      if (e.kind === "recordGet" && isContainer(e.type)) return e.shapeId;
+      if (e.kind === "varRef") return aliases.get(e.localId) ?? null;
+      return null;
+    };
+    const seen = new Set<object>();
+    const visit = (n: unknown): void => {
+      if (n === null || typeof n !== "object" || seen.has(n)) return;
+      seen.add(n);
+      if (Array.isArray(n)) {
+        for (const x of n) visit(x);
+        return;
+      }
+      const o = n as Record<string, unknown> & { kind?: unknown };
+      if ((o.kind === "varDecl" || o.kind === "assign") && typeof o["localId"] === "string") {
+        const s = memberOf(o["init"] as IrExpr | undefined) ?? memberOf(o["value"] as IrExpr | undefined);
+        if (s !== null) aliases.set(o["localId"] as string, s);
+      }
+      let recv: IrExpr | null | undefined = null;
+      if (o.kind === "arrIntrinsic" && MUT.has(o["method"] as string)) recv = o["receiver"] as IrExpr;
+      else if ((o.kind === "mapIntrinsic" || o.kind === "setIntrinsic") && MUT.has(o["method"] as string)) recv = o["receiver"] as IrExpr;
+      else if (o.kind === "arraySet" || o.kind === "arrayClear") recv = o["arr"] as IrExpr;
+      else if (o.kind === "call" && typeof o["callee"] === "string" && /^%(arr|array)\.(sort|reverse|splice|fill)/.test(o["callee"] as string)) recv = (o["args"] as IrExpr[])[0];
+      const s = memberOf(recv);
+      if (s !== null) this.viewDenied.add(s);
+      for (const v of Object.values(o)) visit(v);
+    };
+    visit(fn.body);
+  }
+
+  /** THE VIEW GRANT's census (types.ts viewShapeKeys). A checked cast from a dynamic value to `t` builds
+   * a VIEW over the object for every record shape `t` reaches (through arrays, tuples, union arms,
+   * record members and index values: a member read off a view is itself a cast of the member).
+   * Declines the shapes whose members the view could not answer exactly: tuples (positional, a JSON
+   * array), accessor slots, builtin renderings and compiler-internal members (their layout belongs to
+   * the library lowering that made them) and the empty field list (a pure index shape reads through
+   * the key surface). */
+  /** Shape and union ids the census has already walked: the walk adds keys, never removes them, so a node
+   * visited once answers for every later path to it (a big union graph is walked once per program). */
+  private readonly viewCastSeen = new Set<string>();
+
+  private noteViewCast(t: IrType, seen: Set<string>): void {
+    switch (t.kind) {
+      case "array":
+        this.noteViewCast(t.elem, seen);
+        return;
+      case "union":
+        if (seen.has(t.unionId)) return;
+        seen.add(t.unionId);
+        for (const a of this.unions.get(t.unionId)?.arms ?? []) this.noteViewCast(a, seen);
+        return;
+      case "record": {
+        if (seen.has(t.shapeId)) return;
+        seen.add(t.shapeId);
+        const sh = this.shapes.get(t.shapeId);
+        if (sh === undefined) return;
+        for (const f of sh.fields) this.noteViewCast(f.type, seen);
+        if (sh.indexValue !== undefined) this.noteViewCast(sh.indexValue, seen);
+        if (sh.tuple === true || sh.builtin !== undefined || shapeHasAccessorSlots(sh)) return;
+        if (sh.fields.length === 0 || sh.fields.some((f) => f.name.startsWith("%"))) return;
+        viewShapeKeys.add(overflowShapeKey(sh.fields));
+        return;
+      }
+      default:
+        return;
+    }
   }
 
   /** One `dyn.keySet(recv, key, value)` the lowering produced: the key's
@@ -10623,6 +10760,259 @@ export class Lowerer {
         ),
       );
     }
+  }
+
+  /** True when records of this shape may be VIEWS (the view grant, types.ts viewShapeKeys). */
+  isViewShape(t: IrType): t is IrType & { kind: "record" } {
+    if (t.kind !== "record") return false;
+    const sh = this.shapes.get(t.shapeId);
+    return sh !== undefined && sh.tuple !== true && sh.view === true;
+  }
+
+  /** The two-armed form of an operation on a record of a granted shape: when the receiver is a VIEW the
+   * operation runs over the OBJECT (`viaObject` gets the object as an owned dyn, the answer's type
+   * is `type`), otherwise over the struct (`plain` gets the receiver). The receiver is evaluated once. */
+  viewSplit(
+    receiver: IrExpr,
+    type: IrType,
+    viaObject: (dynRecv: IrExpr) => IrExpr,
+    plain: (recv: IrExpr) => IrExpr,
+    loc: SrcLoc,
+  ): IrExpr {
+    if (!this.isViewShape(receiver.type)) return plain(receiver);
+    const recT = receiver.type;
+    const stmts: IrStmt[] = [];
+    let ref: () => IrExpr;
+    if (receiver.kind === "varRef") {
+      const o = receiver;
+      ref = () => ({ ...o });
+    } else {
+      const tmp = this.declareHiddenLocal("%vw", recT);
+      stmts.push({ kind: "varDecl", localId: tmp.id, init: receiver, loc });
+      ref = () => ({ kind: "varRef", localId: tmp.id, type: recT, loc });
+    }
+    const result: IrExpr = {
+      kind: "ternary",
+      cond: { kind: "recordIsView", obj: ref(), shapeId: recT.shapeId, type: BOOL, loc },
+      then: viaObject({ kind: "recordView", obj: ref(), shapeId: recT.shapeId, type: DYN, loc }),
+      else_: plain(ref()),
+      type,
+      loc,
+    };
+    return stmts.length === 0 ? result : { kind: "seqExpr", stmts, result, type, loc };
+  }
+
+  /** THE VIEW GRANT's rewrite (types.ts viewShapeKeys), run once the whole program is lowered. A record
+   * of a granted shape is EITHER a plain struct (built by a literal) OR a VIEW (built by a checked
+   * cast, `%view` holding the object). Every declared-member read and write is rewritten into the
+   * two-armed form: on a view it goes through the OBJECT (the dyn member path, a getter or a class
+   * accessor answering at each read), on a struct it is the access it always was. A view's struct
+   * slots are a SNAPSHOT taken at the cast: the walkers that read slots directly (the JSON writer,
+   * the to-dyn converter) consult `%view` first, so they never print the snapshot of a live view. */
+  viewRewrite(functions: IrFunction[]): void {
+    const viewShapes = new Set<string>();
+    for (const sh of this.shapes.shapes) if (sh.view === true) viewShapes.add(sh.id);
+    if (viewShapes.size === 0) return;
+    for (const fn of functions) {
+      let n = 0;
+      const temp = (type: IrType): IrLocal => {
+        const local: IrLocal = { id: `%vw.${n}`, name: "%vw", type, mutable: false };
+        n++;
+        fn.locals.push(local);
+        return local;
+      };
+      const isSimple = (e: IrExpr): boolean => e.kind === "varRef";
+      const seen = new Set<object>();
+      const visit = (node: unknown): void => {
+        if (node === null || typeof node !== "object" || seen.has(node)) return;
+        seen.add(node);
+        if (Array.isArray(node)) {
+          for (const x of node) visit(x);
+          return;
+        }
+        for (const v of Object.values(node as Record<string, unknown>)) visit(v);
+        const o = node as Record<string, unknown> & { kind?: unknown };
+        if (o.kind === "recordGet" && viewShapes.has(o["shapeId"] as string) && !this.viewFieldHoldsFunc(o["type"] as IrType)) {
+          this.viewRewriteGet(o as unknown as Extract<IrExpr, { kind: "recordGet" }>, temp, isSimple);
+        } else if (o.kind === "recordSet" && viewShapes.has(o["shapeId"] as string)) {
+          this.viewRewriteSet(o as unknown as Extract<IrStmt, { kind: "recordSet" }>, temp, isSimple);
+        } else if (o.kind === "bin" && (o["op"] === "===" || o["op"] === "!==")) {
+          const b = o as unknown as Extract<IrExpr, { kind: "bin" }>;
+          if (b.left.type.kind === "record" && b.right.type.kind === "record" && b.left.type.shapeId === b.right.type.shapeId && viewShapes.has(b.left.type.shapeId)) {
+            this.viewRewriteEq(b, temp);
+          }
+        } else if (o.kind === "unionEq") {
+          const u = o as unknown as Extract<IrExpr, { kind: "unionEq" }>;
+          if (
+            u.left.type.kind === "union" && u.right.type.kind === "union" && u.left.type.unionId === u.right.type.unionId &&
+            (this.unions.get(u.left.type.unionId)?.arms ?? []).some((a) => a.kind === "record" && viewShapes.has(a.shapeId))
+          ) {
+            this.viewRewriteUnionEq(u, temp, viewShapes);
+          }
+        }
+      };
+      visit(fn.body);
+    }
+  }
+
+  private viewRewriteGet(
+    e: Extract<IrExpr, { kind: "recordGet" }>,
+    temp: (t: IrType) => IrLocal,
+    isSimple: (e: IrExpr) => boolean,
+  ): void {
+    const loc = e.loc;
+    const recT: IrType = { kind: "record", shapeId: e.shapeId };
+    const stmts: IrStmt[] = [];
+    let ref: () => IrExpr;
+    if (isSimple(e.obj)) {
+      const o = e.obj;
+      ref = () => ({ ...o });
+    } else {
+      const t = temp(recT);
+      stmts.push({ kind: "varDecl", localId: t.id, init: e.obj, loc });
+      ref = () => ({ kind: "varRef", localId: t.id, type: recT, loc });
+    }
+    const original: IrExpr = { kind: "recordGet", obj: ref(), shapeId: e.shapeId, field: e.field, type: e.type, loc };
+    const key: IrExpr = { kind: "strLit", value: e.field, type: STRING, loc };
+    const view: IrExpr = { kind: "recordView", obj: ref(), shapeId: e.shapeId, type: DYN, loc };
+    const read: IrExpr = { kind: "dynKeyGet", key, value: view, type: DYN, loc };
+    const viaObject = this.coerceToExpected(read, e.type);
+    const result: IrExpr = {
+      kind: "ternary",
+      cond: { kind: "recordIsView", obj: ref(), shapeId: e.shapeId, type: BOOL, loc },
+      then: viaObject,
+      else_: original,
+      type: e.type,
+      loc,
+    };
+    const out: IrExpr = stmts.length === 0 ? result : { kind: "seqExpr", stmts, result, type: e.type, loc };
+    for (const k of Object.keys(e)) delete (e as unknown as Record<string, unknown>)[k];
+    Object.assign(e, out);
+  }
+
+  /** A member that may hold a FUNCTION keeps its snapshot read: the cast bound the method to the object
+   * (`this` of the instance), which a read of the function value through the dyn path would not. */
+  private viewFieldHoldsFunc(t: IrType, depth = 0): boolean {
+    if (depth > 4) return false;
+    if (t.kind === "func") return true;
+    if (t.kind === "union") return (this.unions.get(t.unionId)?.arms ?? []).some((a) => this.viewFieldHoldsFunc(a, depth + 1));
+    return false;
+  }
+
+  /** `a === b` over two records of one granted shape: two VIEWS are equal exactly when they are views of
+   * the same OBJECT (a member read off a view mints a new view each time; JavaScript has one object),
+   * anything else is the identity of the records themselves. */
+  private viewRewriteEq(e: Extract<IrExpr, { kind: "bin" }>, temp: (t: IrType) => IrLocal): void {
+    const loc = e.loc;
+    const recT = e.left.type as IrType & { kind: "record" };
+    const negated = e.op === "!==";
+    const a = temp(recT);
+    const b = temp(recT);
+    const ref = (l: IrLocal): IrExpr => ({ kind: "varRef", localId: l.id, type: recT, loc });
+    const isV = (l: IrLocal): IrExpr => ({ kind: "recordIsView", obj: ref(l), shapeId: recT.shapeId, type: BOOL, loc });
+    const viewOf = (l: IrLocal): IrExpr => ({ kind: "recordView", obj: ref(l), shapeId: recT.shapeId, type: DYN, loc });
+    const result: IrExpr = {
+      kind: "ternary",
+      cond: { kind: "logical", op: "&&", left: isV(a), right: isV(b), type: BOOL, loc },
+      then: { kind: "dynScalarEq", left: viewOf(a), right: viewOf(b), ...(negated ? { negated: true as const } : {}), type: BOOL, loc },
+      else_: { kind: "bin", op: e.op, left: ref(a), right: ref(b), type: BOOL, loc },
+      type: BOOL,
+      loc,
+    };
+    const out: IrExpr = {
+      kind: "seqExpr",
+      stmts: [
+        { kind: "varDecl", localId: a.id, init: e.left, loc },
+        { kind: "varDecl", localId: b.id, init: e.right, loc },
+      ],
+      result,
+      type: BOOL,
+      loc,
+    };
+    for (const k of Object.keys(e)) delete (e as unknown as Record<string, unknown>)[k];
+    Object.assign(e, out);
+  }
+
+  /** `a === b` over two values of one union with VIEW record arms: when both hold the same view arm, they are
+   * equal exactly when they are views of the same object; every other pairing is the union's own identity. */
+  private viewRewriteUnionEq(e: Extract<IrExpr, { kind: "unionEq" }>, temp: (t: IrType) => IrLocal, viewShapes: Set<string>): void {
+    const loc = e.loc;
+    const uT = e.left.type as IrType & { kind: "union" };
+    const negated = e.negated === true;
+    const original = { ...e };
+    const a = temp(uT);
+    const b = temp(uT);
+    const ref = (l: IrLocal): IrExpr => ({ kind: "varRef", localId: l.id, type: uT, loc });
+    let result: IrExpr = { ...original, left: ref(a), right: ref(b) };
+    const arms = this.unions.get(uT.unionId)?.arms ?? [];
+    for (let tag = arms.length - 1; tag >= 0; tag--) {
+      const arm = arms[tag]!;
+      if (arm.kind !== "record" || !viewShapes.has(arm.shapeId)) continue;
+      const narrow = (l: IrLocal): IrExpr => ({ kind: "unionNarrow", unionId: uT.unionId, tag, value: ref(l), type: arm, loc });
+      const isTag = (l: IrLocal): IrExpr => ({ kind: "unionIsTag", unionId: uT.unionId, tag, negated: false, value: ref(l), type: BOOL, loc });
+      const bothTagged: IrExpr = { kind: "logical", op: "&&", left: isTag(a), right: isTag(b), type: BOOL, loc };
+      const isV = (l: IrLocal): IrExpr => ({ kind: "recordIsView", obj: narrow(l), shapeId: arm.shapeId, type: BOOL, loc });
+      const bothViews: IrExpr = { kind: "logical", op: "&&", left: isV(a), right: isV(b), type: BOOL, loc };
+      const viewOf = (l: IrLocal): IrExpr => ({ kind: "recordView", obj: narrow(l), shapeId: arm.shapeId, type: DYN, loc });
+      const viewEq: IrExpr = { kind: "dynScalarEq", left: viewOf(a), right: viewOf(b), ...(negated ? { negated: true as const } : {}), type: BOOL, loc };
+      result = {
+        kind: "ternary",
+        cond: { kind: "logical", op: "&&", left: bothTagged, right: bothViews, type: BOOL, loc },
+        then: viewEq,
+        else_: result,
+        type: BOOL,
+        loc,
+      };
+    }
+    const out: IrExpr = {
+      kind: "seqExpr",
+      stmts: [
+        { kind: "varDecl", localId: a.id, init: e.left, loc },
+        { kind: "varDecl", localId: b.id, init: e.right, loc },
+      ],
+      result,
+      type: BOOL,
+      loc,
+    };
+    for (const k of Object.keys(e)) delete (e as unknown as Record<string, unknown>)[k];
+    Object.assign(e, out);
+  }
+
+  private viewRewriteSet(
+    s: Extract<IrStmt, { kind: "recordSet" }>,
+    temp: (t: IrType) => IrLocal,
+    isSimple: (e: IrExpr) => boolean,
+  ): void {
+    const loc = s.loc;
+    const recT: IrType = { kind: "record", shapeId: s.shapeId };
+    const body: IrStmt[] = [];
+    let ref: () => IrExpr;
+    if (isSimple(s.obj)) {
+      const o = s.obj;
+      ref = () => ({ ...o });
+    } else {
+      const t = temp(recT);
+      body.push({ kind: "varDecl", localId: t.id, init: s.obj, loc });
+      ref = () => ({ kind: "varRef", localId: t.id, type: recT, loc });
+    }
+    const vt = temp(s.value.type);
+    body.push({ kind: "varDecl", localId: vt.id, init: s.value, loc });
+    const val = (): IrExpr => ({ kind: "varRef", localId: vt.id, type: s.value.type, loc });
+    const key: IrExpr = { kind: "strLit", value: s.field, type: STRING, loc };
+    const view: IrExpr = { kind: "recordView", obj: ref(), shapeId: s.shapeId, type: DYN, loc };
+    const write: IrExpr = s.unset === true
+      ? { kind: "libCall", fn: "dyn.keyDelete", args: [view, key], type: BOOL, loc }
+      : { kind: "libCall", fn: "dyn.keySet", args: [view, key, this.coerceToExpected(val(), DYN)], type: VOID, loc };
+    body.push({
+      kind: "if",
+      cond: { kind: "recordIsView", obj: ref(), shapeId: s.shapeId, type: BOOL, loc },
+      then: [{ kind: "exprStmt", expr: write, loc }],
+      else_: null,
+      loc,
+    });
+    body.push({ kind: "recordSet", obj: ref(), shapeId: s.shapeId, field: s.field, value: val(), ...(s.unset === true ? { unset: true as const } : {}), loc });
+    for (const k of Object.keys(s)) delete (s as unknown as Record<string, unknown>)[k];
+    Object.assign(s, { kind: "block", body, loc });
   }
 
   /** SC6004's sites, decided in run() once the write set is known. */
