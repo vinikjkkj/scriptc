@@ -42,6 +42,10 @@ export function protoSlotOf(L: Lowerer, declarer: string, method: string): IrGlo
 }
 
 /** Can the slot dispatcher stand in for this method? Not for abstract, async or generator members. */
+export function protoSlotSlottable(info: ClassInfo, name: string): boolean {
+  return slottable(info, name);
+}
+
 function slottable(info: ClassInfo, name: string): boolean {
   if (info.builtinError || info.def.runtime === true) return false;
   const typed = info.methods.get(name);
@@ -89,6 +93,10 @@ export function protoRecvClass(L: Lowerer, recv: ts.Expression): ClassInfo | nul
 
 /** Registers the slot of (class `cls`, method `name`). `info` is the class's ClassInfo when it already exists (a class expression's
  * does not until its statement lowers: the write lowering re-checks then). */
+export function registerProtoSlot(L: Lowerer, cls: string, info: ClassInfo | null, name: string): void {
+  register(L, cls, info, name);
+}
+
 function register(L: Lowerer, cls: string, info: ClassInfo | null, name: string): void {
   if (info !== null && (!slottable(info, name) || info.evalClass !== undefined || L.protoClassBodies.get(cls)?.has(name) === true)) return;
   let m = L.protoSlots.get(cls);
