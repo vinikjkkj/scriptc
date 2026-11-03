@@ -3841,6 +3841,12 @@ const ScrDynClassMember *scr_dyn_objinst_member(const ScrDyn *d, const char *k, 
      * belongs to the method row that follows it. */
     if (c->members[i].enumerable == 3) continue;
     if (c->members[i].len == klen && memcmp(c->members[i].name, k, klen) == 0) {
+      /* A METHOD row of a class carrying the run-time property table is on the PROTOTYPE: an own property of the same
+       * name (`this[k] = v` with k naming the method) shadows it, and the name then belongs to the table. */
+      if (c->members[i].call != NULL && c->members[i].get == NULL && klen > 0 && k[0] != '%' && scr_dyn_class_ops != NULL &&
+          scr_dyn_class_ops->objinst_own_shadows != NULL && scr_dyn_class_ops->objinst_own_shadows(d, k, klen)) {
+        return NULL;
+      }
       return &c->members[i];
     }
   }

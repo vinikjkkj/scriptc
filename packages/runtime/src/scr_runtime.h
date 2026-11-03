@@ -7021,6 +7021,9 @@ typedef struct ScrDynClassOps {
   /* Does the instance's run-time property table hold `key` (an own property, enumerable or not)? 1/0, or -1
    * when the instance's class carries no table (the caller keeps its own answer). */
   int (*objinst_props_has)(const ScrDyn *d, const ScrStr *key);
+  /* Does the instance's run-time property table hold `k` (raw bytes)? scr_dyn_objinst_member asks it before it answers a METHOD
+   * row: an own property of that name (a keyed write `this[k] = v` over a method's name) shadows the method on the prototype. */
+  bool (*objinst_own_shadows)(const ScrDyn *d, const char *k, size_t klen);
 } ScrDynClassOps;
 bool scr_dyn_sloppy_write(void);
 extern const ScrDynClassOps *scr_dyn_class_ops;

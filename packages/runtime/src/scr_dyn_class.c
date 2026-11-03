@@ -1156,6 +1156,16 @@ static int dyn_cls_objinst_props_has(const ScrDyn *d, const ScrStr *key) {
   return e != NULL ? 1 : 0;
 }
 
+static bool dyn_cls_objinst_own_shadows(const ScrDyn *d, const char *k, size_t klen) {
+  const unsigned char rt = scr_dyn_objinst_class_of(d)->rt_root;
+  if (rt != 3 && rt != 4 && rt != 6) return false;
+  ScrDyn *bag = dyn_cls_props_bag(d);
+  if (bag == NULL) return false;
+  const ScrDyn *e = scr_dyn_obj_get(bag, k, klen);
+  scr_dyn_release(bag);
+  return e != NULL;
+}
+
 static const ScrDynClassOps dyn_cls_ops_impl = {
   dyn_cls_impl_box, dyn_cls_impl_of_value,
   dyn_cls_impl_err_get, dyn_cls_impl_err_set, dyn_cls_impl_err_has, dyn_cls_impl_err_delete,
@@ -1164,6 +1174,7 @@ static const ScrDynClassOps dyn_cls_ops_impl = {
   dyn_cls_objinst_to_primitive, dyn_cls_objinst_to_string, dyn_cls_objinst_user_tostring,
   dyn_cls_eval_inner, dyn_cls_ops_instance_of, dyn_cls_ops_class_walk, dyn_cls_ops_class_text, dyn_cls_ops_is_class_proto,
   dyn_cls_objinst_props_has,
+  dyn_cls_objinst_own_shadows,
 };
 
 void scr_dyn_class_install(void) { scr_dyn_class_ops = &dyn_cls_ops_impl; }
