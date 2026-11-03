@@ -13,3 +13,5 @@ console.log(P.who.call(m, 1), P.hello.call(m), P["isPrototypeOf"](m), anyv(Base)
 console.log(P, anyv(Base).prototype);
 const k = "prototype"; console.log(anyv(M)[k] === P, "who" in P, "hello" in P);
 console.log(m instanceof M, m instanceof Base);
+console.log(M, Object.keys(M), Object.entries(M));
+M.extra = 1; console.log(M, Object.keys(M));

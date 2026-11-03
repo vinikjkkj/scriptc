@@ -1501,7 +1501,12 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
           ScrDyn *tbl = (ScrDyn *)scr_box_get_ref(d->v.fn.clo->props); /* +1 */
           eextra = tbl != NULL ? scr_dyn_objwalk(tbl, SCR_OBJWALK_ENTRIES) : NULL;
           scr_dyn_release(tbl);
-          if (eextra != NULL && eextra->v.arr.len == 0) {
+          size_t shownExtra = 0;
+          for (size_t i = 0; eextra != NULL && i < eextra->v.arr.len; i++) {
+            const ScrDyn *pk0 = eextra->v.arr.items[i]->v.arr.items[0];
+            if (!(pk0->v.str->len == 9 && memcmp(pk0->v.str->data, "prototype", 9) == 0)) shownExtra++;
+          }
+          if (eextra != NULL && shownExtra == 0) {
             scr_dyn_release(eextra);
             eextra = NULL;
           }
@@ -1536,6 +1541,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         for (size_t i = 0; eextra != NULL && i < eextra->v.arr.len; i++) {
           ScrDyn *pair = eextra->v.arr.items[i];
           ScrDyn *pk = pair->v.arr.items[0];
+          if (pk->v.str->len == 9 && memcmp(pk->v.str->data, "prototype", 9) == 0) continue; /* the minted prototype: non-enumerable */
           ScrStr *val = scr_insp_dyn(pair->v.arr.items[1], recurse + 1, depth);
           InspBuf eb = {0};
           insp_key_into(&eb, pk->v.str->data, pk->v.str->len);

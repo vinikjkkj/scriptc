@@ -280,10 +280,21 @@ static int dyn_cls_ops_class_walk(const ScrDyn *v, ScrObjWalk mode, ScrDyn *out)
   if (v->v.fn.clo->props != NULL) {
     ScrDyn *table = (ScrDyn *)scr_box_get_ref(v->v.fn.clo->props); /* +1 */
     ScrDyn *extra = table != NULL ? scr_dyn_objwalk(table, mode) : NULL;
+    /* the minted `prototype` object lives in this table but is NON-enumerable on a class: it is no expando */
+    ScrDyn *ekeys = table != NULL ? scr_dyn_objwalk(table, SCR_OBJWALK_KEYS) : NULL;
     scr_dyn_release(table);
-    if (extra == NULL) return table != NULL ? -1 : 1;
-    for (size_t i = 0; i < extra->v.arr.len; i++) scr_dyn_arr_push(out, scr_dyn_retain(extra->v.arr.items[i]));
+    if (extra == NULL || ekeys == NULL) {
+      scr_dyn_release(extra);
+      scr_dyn_release(ekeys);
+      return table != NULL ? -1 : 1;
+    }
+    for (size_t i = 0; i < extra->v.arr.len && i < ekeys->v.arr.len; i++) {
+      const ScrDyn *kk = ekeys->v.arr.items[i];
+      if (kk->kind == SCR_DYN_STR && kk->v.str->len == 9 && memcmp(kk->v.str->data, "prototype", 9) == 0) continue;
+      scr_dyn_arr_push(out, scr_dyn_retain(extra->v.arr.items[i]));
+    }
     scr_dyn_release(extra);
+    scr_dyn_release(ekeys);
   }
   return 1;
 }
