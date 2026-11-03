@@ -2714,7 +2714,8 @@ bool scr_emitter_emit_dyn_list(ScrEmitter *em, ScrDyn *self, ScrDyn *const *item
 void scr_dyn_ee_install(void);
 /* The unhandled-'error' text hook (Node's ERR_UNHANDLED_ERROR for a non-Error payload); the emitted main
  * points it at scr_insp_unhandled_nonerr in a module whose emitters can be reached through a dyn value. */
-extern ScrError *(*scr_nonerr_unhandled_fn)(const ScrDyn *payload);
+typedef ScrError *(*ScrNonerrUnhandledFn)(const ScrDyn *payload);
+extern ScrNonerrUnhandledFn scr_nonerr_unhandled_fn;
 ScrError *scr_insp_unhandled_nonerr(const ScrDyn *payload);
 ScrEmitter *scr_dyn_emitter_of(const ScrDyn *d); /* +1 emitter of a dyn-boxed emitter instance, or NULL */
 /* The emitterApi test of lowerDynEmitterReceiverCall: the box is a class instance inside [pre, post]
