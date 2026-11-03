@@ -328,21 +328,22 @@ console.log("unreachable", (u as HasLen).length);
     expect(r.stderr).toContain("Uncaught TypeError: expected object at $, got string");
   });
 
-  test("the KIND GATE refuses a CLASS INSTANCE whose fields all read", async () => {
+  test("the INSTANCE LANE reads a CLASS INSTANCE's declared fields the way Node does", async () => {
     const r = await compileAndRun(
       "kind-gate-objinst",
       `class Holder { a: string = "field-a"; }
 type HasA = { a: string };
 const v: unknown[] = [new Holder()];
 const u: unknown = v[v.length - 1];
-console.log("unreachable", (u as HasA).a);
+console.log("reached", (u as HasA).a);
 `,
     );
     /* Node answers "field-a". The box is SCR_DYN_OBJINST, a different kind
-     * from SCR_DYN_OBJ, so the gate refuses before the field is read — and
-     * the class name is what the message reports, not "object". */
-    expect(r.exitCode).toBe(1);
-    expect(r.stderr).toContain("Uncaught TypeError: expected object at $, got Holder");
+     * from SCR_DYN_OBJ, and the record builder's instance lane
+     * (kindgateInstanceLane) reads every declared member off the instance
+     * through the member table instead of refusing at the kind gate. */
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toBe("reached field-a\n");
   });
 
   /* The kind gate over the rest of the population's receiver kinds. Each of
@@ -449,23 +450,21 @@ console.log(typeof sback, JSON.stringify(sback), String(sback));
     expect(r.stdout).toBe('false {"length":3} [object Object]\nobject {"length":4} [object Object]\n');
   });
 
-  test("WIDE: the kinds that carry no member table keep refusing", async () => {
-    /* A class instance and a Map are not widened even with the dial on: the
-     * boxes carry no member table, sc_dyn_key_get fences on both, and
-     * answering `undefined` for a property Node reads fine would be the
-     * silent wrong answer the fence exists to prevent. Outcome 2, and it does
-     * not move with the dial. */
+  test("WIDE: a class instance reads through the instance lane whatever the dial says", async () => {
+    /* The instance lane is not behind the dials (kindgateInstanceLane): an
+     * instance carries a member table, so the answer is Node's with the dial
+     * on or off. A Map is not widened: the box carries no member table. */
     const r = await compileAndRunWide(
       "kind-gate-wide-objinst",
       `class Holder { a: string = "field-a"; }
 type HasA = { a: string };
 const v: unknown[] = [new Holder()];
 const u: unknown = v[v.length - 1];
-console.log("unreachable", (u as HasA).a);
+console.log("reached", (u as HasA).a);
 `,
     );
-    expect(r.exitCode).toBe(1);
-    expect(r.stderr).toContain("Uncaught TypeError: expected object at $, got Holder");
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toBe("reached field-a\n");
   });
 
   /* WHAT THE MERGE CHANGED ABOUT THE GATE'S REACH, pinned because it is not
