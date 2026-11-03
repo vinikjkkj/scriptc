@@ -10804,9 +10804,208 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/23000-dyn-emitter-forwarder-inherit-events.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23000-dyn-emitter-forwarder-inherit-events.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23001-dyn-emitter-forwarder-typed-error-listener/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/23001-dyn-emitter-forwarder-typed-error-listener/inh.cjs",
+    "<repo>/tests/corpus/23001-dyn-emitter-forwarder-typed-error-listener/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23002-dyn-emitter-grafted-and-subclass-full-surface.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23002-dyn-emitter-grafted-and-subclass-full-surface.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23003-dyn-emitter-typed-listeners-through-dyn-emit.ts": {
+   "order": [
+    "<repo>/tests/corpus/23003-dyn-emitter-typed-listeners-through-dyn-emit.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23004-dyn-emitter-listener-cycles-grafted-and-subclass.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23004-dyn-emitter-listener-cycles-grafted-and-subclass.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23005-dyn-emitter-emit-apply-spread-and-mutation-during-emit.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23005-dyn-emitter-emit-apply-spread-and-mutation-during-emit.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23006-dyn-emitter-error-without-listener-throws.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23006-dyn-emitter-error-without-listener-throws.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23007-dyn-emitter-identity-typeof-instanceof.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23007-dyn-emitter-identity-typeof-instanceof.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23008-dyn-emitter-grafted-in-record-and-unknown-slot.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23008-dyn-emitter-grafted-in-record-and-unknown-slot.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23009-dyn-emitter-typed-target-emit-apply-forwarder.ts": {
+   "order": [
+    "<repo>/tests/corpus/23009-dyn-emitter-typed-target-emit-apply-forwarder.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2301-cjs-export-table-dom-attach.cjs": {
    "order": [
     "<repo>/tests/corpus/2301-cjs-export-table-dom-attach.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23010-dyn-emitter-apply-reaches-error-listener.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23010-dyn-emitter-apply-reaches-error-listener.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23011-dyn-emitter-apply-reaches-meta-listener.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23011-dyn-emitter-apply-reaches-meta-listener.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23012-dyn-emitter-apply-reaches-typed-plain-emitter.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23012-dyn-emitter-apply-reaches-typed-plain-emitter.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23013-dyn-emitter-apply-reaches-zero-arg-listener.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23013-dyn-emitter-apply-reaches-zero-arg-listener.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23014-dyn-emitter-grafted-instance-into-untyped-parameter.js": {
+   "order": [
+    "<repo>/tests/corpus/23014-dyn-emitter-grafted-instance-into-untyped-parameter.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23015-dyn-emitter-typed-listener-types-register-boxed.ts": {
+   "order": [
+    "<repo>/tests/corpus/23015-dyn-emitter-typed-listener-types-register-boxed.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23016-dyn-emitter-registration-reached-as-a-value.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23016-dyn-emitter-registration-reached-as-a-value.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23050-dyn-emit-reaches-number-listener-exactly.ts": {
+   "order": [
+    "<repo>/tests/corpus/23050-dyn-emit-reaches-number-listener-exactly.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23051-dyn-emit-reaches-object-listener-with-null.ts": {
+   "order": [
+    "<repo>/tests/corpus/23051-dyn-emit-reaches-object-listener-with-null.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23052-dyn-emit-reaches-string-listener-with-number.ts": {
+   "order": [
+    "<repo>/tests/corpus/23052-dyn-emit-reaches-string-listener-with-number.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23053-dyn-emit-closure-captures-erased-parameter.ts": {
+   "order": [
+    "<repo>/tests/corpus/23053-dyn-emit-closure-captures-erased-parameter.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23054-dyn-emit-default-parameter-values.ts": {
+   "order": [
+    "<repo>/tests/corpus/23054-dyn-emit-default-parameter-values.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23055-dyn-emit-rest-parameter-listener.ts": {
+   "order": [
+    "<repo>/tests/corpus/23055-dyn-emit-rest-parameter-listener.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23056-dyn-emit-two-parameters-missing-and-swapped.ts": {
+   "order": [
+    "<repo>/tests/corpus/23056-dyn-emit-two-parameters-missing-and-swapped.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23057-dyn-emit-class-this-once-prepend.ts": {
+   "order": [
+    "<repo>/tests/corpus/23057-dyn-emit-class-this-once-prepend.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23058-dyn-emit-registrations-in-expression-statements-and-loops.ts": {
+   "order": [
+    "<repo>/tests/corpus/23058-dyn-emit-registrations-in-expression-statements-and-loops.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23059-dyn-emit-destructured-function-and-async-listeners.ts": {
+   "order": [
+    "<repo>/tests/corpus/23059-dyn-emit-destructured-function-and-async-listeners.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23060-dyn-emit-reaches-named-listener-functions.ts": {
+   "order": [
+    "<repo>/tests/corpus/23060-dyn-emit-reaches-named-listener-functions.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23061-dyn-emit-reaches-jsdoc-typed-listeners.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23061-dyn-emit-reaches-jsdoc-typed-listeners.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23062-dyn-emit-nested-registration-in-listener.ts": {
+   "order": [
+    "<repo>/tests/corpus/23062-dyn-emit-nested-registration-in-listener.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23063-dyn-emit-listener-cycles-with-erased-twin.ts": {
+   "order": [
+    "<repo>/tests/corpus/23063-dyn-emit-listener-cycles-with-erased-twin.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23064-dyn-emit-twin-keeps-listener-identity.ts": {
+   "order": [
+    "<repo>/tests/corpus/23064-dyn-emit-twin-keeps-listener-identity.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23065-dyn-emit-twin-leaves-function-text-and-names-alone.ts": {
+   "order": [
+    "<repo>/tests/corpus/23065-dyn-emit-twin-leaves-function-text-and-names-alone.ts"
    ],
    "diags": []
   },
@@ -11392,30 +11591,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/23700-any-alias-field-record-instance-plain-class.ts": {
-   "order": [
-    "<repo>/tests/corpus/23700-any-alias-field-record-instance-plain-class.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23701-any-alias-field-record-union-undefined-inspect.ts": {
-   "order": [
-    "<repo>/tests/corpus/23701-any-alias-field-record-union-undefined-inspect.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23702-any-alias-field-record-class-values-statics.ts": {
-   "order": [
-    "<repo>/tests/corpus/23702-any-alias-field-record-class-values-statics.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23703-any-alias-field-store-shaped-ctor-destructure.ts": {
-   "order": [
-    "<repo>/tests/corpus/23703-any-alias-field-store-shaped-ctor-destructure.ts"
-   ],
-   "diags": []
-  },
   "<repo>/tests/corpus/2351-async-methods.ts": {
    "order": [
     "<repo>/tests/corpus/2351-async-methods.ts"
@@ -11725,9 +11900,81 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/23700-any-alias-field-record-instance-plain-class.ts": {
+   "order": [
+    "<repo>/tests/corpus/23700-any-alias-field-record-instance-plain-class.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23701-any-alias-field-record-union-undefined-inspect.ts": {
+   "order": [
+    "<repo>/tests/corpus/23701-any-alias-field-record-union-undefined-inspect.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23702-any-alias-field-record-class-values-statics.ts": {
+   "order": [
+    "<repo>/tests/corpus/23702-any-alias-field-record-class-values-statics.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23703-any-alias-field-store-shaped-ctor-destructure.ts": {
+   "order": [
+    "<repo>/tests/corpus/23703-any-alias-field-store-shaped-ctor-destructure.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2371-iterator-helpers.ts": {
    "order": [
     "<repo>/tests/corpus/2371-iterator-helpers.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23750-grafted-emitter-dyn-key-surfaces.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23750-grafted-emitter-dyn-key-surfaces.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23751-grafted-emitter-dyn-json-inspect.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23751-grafted-emitter-dyn-json-inspect.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23752-grafted-emitter-dyn-field-delete-and-late-writes.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23752-grafted-emitter-dyn-field-delete-and-late-writes.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23753-grafted-emitter-dyn-call-position-variants.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23753-grafted-emitter-dyn-call-position-variants.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23754-grafted-emitter-dyn-has-any-key-and-copies.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23754-grafted-emitter-dyn-has-any-key-and-copies.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23755-grafted-emitter-dyn-class-field-declarations.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23755-grafted-emitter-dyn-class-field-declarations.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23756-grafted-emitter-dyn-print-of-boxed-instance.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23756-grafted-emitter-dyn-print-of-boxed-instance.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/23757-grafted-emitter-dyn-observed-before-emitter-init.cjs": {
+   "order": [
+    "<repo>/tests/corpus/23757-grafted-emitter-dyn-observed-before-emitter-init.cjs"
    ],
    "diags": []
   },
@@ -22578,6 +22825,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/grafted-emitter-dyn-constructor-read-refused.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/grafted-emitter-dyn-constructor-read-refused.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/grafted-emitter-dyn-late-init-reflection-refused.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/grafted-emitter-dyn-late-init-reflection-refused.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/grafted-emitter-dyn-property-table-values-refused.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/grafted-emitter-dyn-property-table-values-refused.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/grafted-emitter-dyn-reflection-refused.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/grafted-emitter-dyn-reflection-refused.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/grafted-emitter-dyn-structured-clone-refused.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/grafted-emitter-dyn-structured-clone-refused.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/h2-response-settimeout-refused.ts": {
    "order": [
     "<repo>/tests/diagnostics/h2-response-settimeout-refused.ts"
@@ -23581,6 +23858,90 @@
    ],
    "diags": []
   },
+  "<repo>/tests/fixtures/node-types/argv-env.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/argv-env.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/builtin-fn-value.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/builtin-fn-value.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/child-stdio.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/child-stdio.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/fenced.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/fenced.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/import-fences.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/import-fences.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC1010",
+     "message": "the 'v8' module (it observes V8 engine internals — heap statistics and snapshots, GC and CPU profiles, serialize/deserialize — and a compiled binary embeds no V8 engine to observe) is not supported yet",
+     "loc": {
+      "file": "<repo>/tests/fixtures/node-types/import-fences.ts",
+      "start": 422,
+      "end": 461
+     },
+     "milestone": "M4",
+     "hint": "relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, and module modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported"
+    }
+   ]
+  },
+  "<repo>/tests/fixtures/node-types/path-os.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/path-os.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/pgwritable-state.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/pgwritable-state.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/server-address-states.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/server-address-states.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/stream-capture.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/stream-capture.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/streams.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/streams.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/fixtures/npm/cases/2465-getter-table/main.ts": {
    "order": [
     "<repo>/tests/fixtures/npm/cases/2465-getter-table/main.ts"
@@ -24134,295 +24495,6 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
-  },
-  "<repo>/tests/fixtures/node-types/argv-env.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/argv-env.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/builtin-fn-value.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/builtin-fn-value.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/child-stdio.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/child-stdio.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/fenced.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/fenced.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/import-fences.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/import-fences.ts"
-   ],
-   "diags": [
-    {
-     "code": "SC1010",
-     "message": "the 'v8' module (it observes V8 engine internals — heap statistics and snapshots, GC and CPU profiles, serialize/deserialize — and a compiled binary embeds no V8 engine to observe) is not supported yet",
-     "loc": {
-      "file": "<repo>/tests/fixtures/node-types/import-fences.ts",
-      "start": 422,
-      "end": 461
-     },
-     "milestone": "M4",
-     "hint": "relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, and module modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported"
-    }
-   ]
-  },
-  "<repo>/tests/fixtures/node-types/path-os.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/path-os.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/pgwritable-state.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/pgwritable-state.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/server-address-states.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/server-address-states.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/stream-capture.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/stream-capture.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/streams.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/streams.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23015-dyn-emitter-typed-listener-types-register-boxed.ts": {
-   "order": [
-    "<repo>/tests/corpus/23015-dyn-emitter-typed-listener-types-register-boxed.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23000-dyn-emitter-forwarder-inherit-events.cjs": {
-   "order": [
-    "<repo>/tests/corpus/23000-dyn-emitter-forwarder-inherit-events.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23001-dyn-emitter-forwarder-typed-error-listener/main.ts": {
-   "order": [
-    "<repo>/tests/corpus/23001-dyn-emitter-forwarder-typed-error-listener/inh.cjs",
-    "<repo>/tests/corpus/23001-dyn-emitter-forwarder-typed-error-listener/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23002-dyn-emitter-grafted-and-subclass-full-surface.cjs": {
-   "order": [
-    "<repo>/tests/corpus/23002-dyn-emitter-grafted-and-subclass-full-surface.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23003-dyn-emitter-typed-listeners-through-dyn-emit.ts": {
-   "order": [
-    "<repo>/tests/corpus/23003-dyn-emitter-typed-listeners-through-dyn-emit.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23004-dyn-emitter-listener-cycles-grafted-and-subclass.cjs": {
-   "order": [
-    "<repo>/tests/corpus/23004-dyn-emitter-listener-cycles-grafted-and-subclass.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23005-dyn-emitter-emit-apply-spread-and-mutation-during-emit.cjs": {
-   "order": [
-    "<repo>/tests/corpus/23005-dyn-emitter-emit-apply-spread-and-mutation-during-emit.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23006-dyn-emitter-error-without-listener-throws.cjs": {
-   "order": [
-    "<repo>/tests/corpus/23006-dyn-emitter-error-without-listener-throws.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23007-dyn-emitter-identity-typeof-instanceof.cjs": {
-   "order": [
-    "<repo>/tests/corpus/23007-dyn-emitter-identity-typeof-instanceof.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23008-dyn-emitter-grafted-in-record-and-unknown-slot.cjs": {
-   "order": [
-    "<repo>/tests/corpus/23008-dyn-emitter-grafted-in-record-and-unknown-slot.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23009-dyn-emitter-typed-target-emit-apply-forwarder.ts": {
-   "order": [
-    "<repo>/tests/corpus/23009-dyn-emitter-typed-target-emit-apply-forwarder.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23010-dyn-emitter-apply-reaches-error-listener.cjs": {
-   "order": [
-    "<repo>/tests/corpus/23010-dyn-emitter-apply-reaches-error-listener.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23011-dyn-emitter-apply-reaches-meta-listener.cjs": {
-   "order": [
-    "<repo>/tests/corpus/23011-dyn-emitter-apply-reaches-meta-listener.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23012-dyn-emitter-apply-reaches-typed-plain-emitter.cjs": {
-   "order": [
-    "<repo>/tests/corpus/23012-dyn-emitter-apply-reaches-typed-plain-emitter.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23013-dyn-emitter-apply-reaches-zero-arg-listener.cjs": {
-   "order": [
-    "<repo>/tests/corpus/23013-dyn-emitter-apply-reaches-zero-arg-listener.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23014-dyn-emitter-grafted-instance-into-untyped-parameter.js": {
-   "order": [
-    "<repo>/tests/corpus/23014-dyn-emitter-grafted-instance-into-untyped-parameter.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23016-dyn-emitter-registration-reached-as-a-value.cjs": {
-   "order": [
-    "<repo>/tests/corpus/23016-dyn-emitter-registration-reached-as-a-value.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23050-dyn-emit-reaches-number-listener-exactly.ts": {
-   "order": [
-    "<repo>/tests/corpus/23050-dyn-emit-reaches-number-listener-exactly.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23051-dyn-emit-reaches-object-listener-with-null.ts": {
-   "order": [
-    "<repo>/tests/corpus/23051-dyn-emit-reaches-object-listener-with-null.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23052-dyn-emit-reaches-string-listener-with-number.ts": {
-   "order": [
-    "<repo>/tests/corpus/23052-dyn-emit-reaches-string-listener-with-number.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23053-dyn-emit-closure-captures-erased-parameter.ts": {
-   "order": [
-    "<repo>/tests/corpus/23053-dyn-emit-closure-captures-erased-parameter.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23054-dyn-emit-default-parameter-values.ts": {
-   "order": [
-    "<repo>/tests/corpus/23054-dyn-emit-default-parameter-values.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23055-dyn-emit-rest-parameter-listener.ts": {
-   "order": [
-    "<repo>/tests/corpus/23055-dyn-emit-rest-parameter-listener.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23056-dyn-emit-two-parameters-missing-and-swapped.ts": {
-   "order": [
-    "<repo>/tests/corpus/23056-dyn-emit-two-parameters-missing-and-swapped.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23057-dyn-emit-class-this-once-prepend.ts": {
-   "order": [
-    "<repo>/tests/corpus/23057-dyn-emit-class-this-once-prepend.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23058-dyn-emit-registrations-in-expression-statements-and-loops.ts": {
-   "order": [
-    "<repo>/tests/corpus/23058-dyn-emit-registrations-in-expression-statements-and-loops.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23059-dyn-emit-destructured-function-and-async-listeners.ts": {
-   "order": [
-    "<repo>/tests/corpus/23059-dyn-emit-destructured-function-and-async-listeners.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23060-dyn-emit-reaches-named-listener-functions.ts": {
-   "order": [
-    "<repo>/tests/corpus/23060-dyn-emit-reaches-named-listener-functions.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23061-dyn-emit-reaches-jsdoc-typed-listeners.cjs": {
-   "order": [
-    "<repo>/tests/corpus/23061-dyn-emit-reaches-jsdoc-typed-listeners.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23062-dyn-emit-nested-registration-in-listener.ts": {
-   "order": [
-    "<repo>/tests/corpus/23062-dyn-emit-nested-registration-in-listener.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23063-dyn-emit-listener-cycles-with-erased-twin.ts": {
-   "order": [
-    "<repo>/tests/corpus/23063-dyn-emit-listener-cycles-with-erased-twin.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23064-dyn-emit-twin-keeps-listener-identity.ts": {
-   "order": [
-    "<repo>/tests/corpus/23064-dyn-emit-twin-keeps-listener-identity.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/23065-dyn-emit-twin-leaves-function-text-and-names-alone.ts": {
-   "order": [
-    "<repo>/tests/corpus/23065-dyn-emit-twin-leaves-function-text-and-names-alone.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/grafted-emitter-dyn-reflection-refused.cjs": {
-   "order": [
-    "<repo>/tests/diagnostics/grafted-emitter-dyn-reflection-refused.cjs"
-   ],
-   "diags": []
   }
  }
 }
