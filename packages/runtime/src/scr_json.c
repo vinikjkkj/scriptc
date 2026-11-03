@@ -8240,7 +8240,16 @@ bool scr_dyn_has_key(const ScrDyn *v, const ScrStr *key) {
     if (scr_dyn_objinst_error_rooted(v) && scr_dyn_error_member_has(v, key->data, key->len)) return true;
     const ScrDynClassMember *hm = scr_dyn_objinst_member(v, key->data, key->len);
     /* a field `delete` removed is not a property any more */
-    return hm != NULL && !(hm->enumerable == 4 && scr_dyn_member_hidden(hm, v->v.inst.o));
+    if (hm != NULL) {
+      if (hm->enumerable == 4 && scr_dyn_member_hidden(hm, v->v.inst.o)) {
+        /* a grafted emitter's key before EventEmitter.call(this) ran: still the prototype's, so `in` is true */
+        return scr_dyn_ee_ops != NULL && scr_dyn_objinst_emitter(v) != NULL && scr_dyn_ee_ops->is_state(key->data, key->len);
+      }
+      return true;
+    }
+    /* a key of the run-time property table (Object.defineProperty with a run-time name) is a property too */
+    return scr_dyn_class_ops != NULL && scr_dyn_class_ops->objinst_props_has != NULL &&
+           scr_dyn_class_ops->objinst_props_has(v, key) == 1;
   }
   return false;
 }

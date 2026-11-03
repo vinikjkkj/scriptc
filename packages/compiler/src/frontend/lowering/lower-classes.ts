@@ -4,11 +4,11 @@
  * accessor access, upcasts, `new` expressions, and the builtin Error
  * hierarchy registration. */
 import { protoDataFieldNames, registerProtoData } from "./lower-protodata.js";
-import { appliesEmitterMixin, EMITTER_MIXIN_FIELD } from "./lower-emitter-mixin.js";
+import { appliesEmitterMixin, EMITTER_MIXIN_FIELD, graftCtorEmitterInit } from "./lower-emitter-mixin.js";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { ctorFieldFillProven } from "./ctor-fill-proof.js";
-import { GRAFTED_EMITTER_CLASSES, BOOL, canBoxClassIntoDyn, canBoxFuncIntoDyn, canDynCheckTo, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DATE_T, DYN, F64, bytesOf, canConvertToDyn, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, weakMapOf, isUnitType, mapOf, setOf, typeEquals } from "../../ir/nodes.js";
+import { EMITTER_CELL_NAMES, GRAFTED_EMITTER_CELL_CLASSES, GRAFTED_EMITTER_CLASSES, BOOL, canBoxClassIntoDyn, canBoxFuncIntoDyn, canDynCheckTo, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DATE_T, DYN, F64, bytesOf, canConvertToDyn, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, weakMapOf, isUnitType, mapOf, setOf, typeEquals } from "../../ir/nodes.js";
 import { lowerAbortControllerNew } from "./lower-abort.js";
 import { engineFunctionCtor } from "./lower-engine-fn.js";
 import { implicitDefaultInstance, markDetachedThis, MAX_GENERIC_INSTANCES, inStrictCode, bindingNeverReassigned, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitInstanceLike, implicitMonoFile, omittedArgFor, type GenericFnInfo, type GenericInstance, type ParamShape, appendImplicitUndefinedReturn, bindArgumentsParams, bodyReadsArguments } from "./lower-calls.js";
@@ -118,6 +118,9 @@ function classOrderedNames(
   for (const f of fieldOrder) {
     if (f.redeclared === true || params.has(f.name)) continue;
     if (f.name.startsWith("%") || f.name.startsWith("#")) continue;
+    // The hidden emitter slot of a grafted class is no property of the instance (the emitter's own keys are noted
+    // where EventEmitter.call(this) runs instead).
+    if (f.emitterSlot === true) continue;
     if (!out.includes(f.name)) out.push(f.name);
   }
   // An own-shadow flag (`#__sc_own$<method>$...`, js-desugar.ts) is written on the shadowed
@@ -5588,6 +5591,14 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       if (emitterMixin || base?.emitterMixin === true || (base !== null && base !== undefined && GRAFTED_EMITTER_CLASSES.has(base.def.name))) {
         GRAFTED_EMITTER_CLASSES.add(className);
       }
+      // The emitter's own keys are born at the constructor's top-level EventEmitter.call(this): the instance's order
+      // record notes them there (graftCtorEmitterInit, emitterCtorCallOnGraft), and the member table lists them.
+      const emitterCells =
+        emitterMixin && ts.isClassDeclaration(decl) && graftCtorEmitterInit(L, decl) !== null &&
+        !EMITTER_CELL_NAMES.some((n) => fields.has(n) || (base?.fields.has(n) ?? false));
+      if (emitterCells || (base !== null && base !== undefined && GRAFTED_EMITTER_CELL_CLASSES.has(base.def.name))) {
+        GRAFTED_EMITTER_CELL_CLASSES.add(className);
+      }
       const ownPropsTable =
         L.definePropStringTable(decl) ||
         (!inst && !mixin && !familyMode && ts.isClassDeclaration(decl) && implicitMonoFile(decl.getSourceFile()));
@@ -5644,6 +5655,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       }
       const keyOrder = classKeyOrderNames(decl, base, fieldOrder);
       const orderedNames = classOrderedNames(decl, fieldOrder);
+      if (emitterCells) orderedNames.push(...EMITTER_CELL_NAMES);
 
       const info: ClassInfo = {
         def: {

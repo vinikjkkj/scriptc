@@ -1670,7 +1670,11 @@ bool scr_dyn_has_intrinsic_method(const ScrDyn *recv, const char *key, size_t ke
     const ScrDynClassMember *hm = scr_dyn_objinst_member(recv, key, key_len);
     if (hm == NULL && scr_dyn_ee_ops != NULL && scr_dyn_objinst_emitter(recv) != NULL &&
         (scr_dyn_ee_ops->knows(key, key_len) || scr_dyn_ee_ops->is_state(key, key_len))) return true;
-    return hm != NULL && !(hm->enumerable == 4 && scr_dyn_member_hidden(hm, recv->v.inst.o));
+    if (hm != NULL && hm->enumerable == 4 && scr_dyn_member_hidden(hm, recv->v.inst.o)) {
+      /* a grafted emitter's key before EventEmitter.call(this) ran: still the prototype's, so `in` is true */
+      return scr_dyn_ee_ops != NULL && scr_dyn_objinst_emitter(recv) != NULL && scr_dyn_ee_ops->is_state(key, key_len);
+    }
+    return hm != NULL;
   }
   (void)key_len; /* the remaining tests are on the NUL-terminated spelling */
   return dyn_kind_knows(recv, key);
@@ -1831,7 +1835,16 @@ static ScrDyn *objinst_method_thunk(ScrClosure *clo, ScrDyn *const *args, size_t
 ScrDyn *scr_dyn_objinst_member_get(ScrDyn *d, const ScrStr *key) {
   const ScrDynClassMember *cm = scr_dyn_objinst_member(d, key->data, key->len);
   if (cm == NULL) return NULL;
-  if (cm->get != NULL) return cm->get(d->v.inst.o);
+  if (cm->get != NULL) {
+    ScrDyn *v = cm->get(d->v.inst.o);
+    /* A grafted emitter's keys before EventEmitter.call(this) ran read as the prototype's own values: _eventsCount is 0
+     * (the other two are undefined, which the absent marker already reads as). */
+    if (v == scr_dyn_absent() && cm->enumerable == 4 && key->len == 12 && memcmp(key->data, "_eventsCount", 12) == 0 &&
+        scr_dyn_ee_ops != NULL && scr_dyn_objinst_emitter(d) != NULL) {
+      return scr_dyn_new_num(0);
+    }
+    return v;
+  }
   if (cm->value != NULL) return cm->value();
   const ScrDynClass *cls = scr_dyn_objinst_class_of(d);
   ScrObjinstMethodFn *w = scr_objinst_fns;
