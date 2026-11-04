@@ -12548,6 +12548,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24121-net-connect-with-an-untyped-host-and-dyn-held-socket-methods.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24121-net-connect-with-an-untyped-host-and-dyn-held-socket-methods.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24122-system-error-fields-read-off-an-error-typed-value.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24122-system-error-fields-read-off-an-error-typed-value.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24123-socket-where-a-readable-stream-is-expected.ts": {
+   "order": [
+    "<repo>/tests/corpus/24123-socket-where-a-readable-stream-is-expected.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2413-dowhile-kill-renarrow.ts": {
    "order": [
     "<repo>/tests/corpus/2413-dowhile-kill-renarrow.ts"
