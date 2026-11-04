@@ -11267,13 +11267,7 @@ class LlEmitter {
         // one. See emit-exprs.ts's row for the whole argument.
         if (dynCopyIsObservable(e.value) || dynCopyHasLiveView(e.value)) {
           const { retain, release } = vAdapters(this, v.type);
-          this.declare(
-            `declare ptr @scr_dyn_origin_mark(ptr, ptr, ptr, ptr, ptr)`,
-          );
-          const m = B.tmp();
-          B.line(
-            `${m} = call ptr @scr_dyn_origin_mark(ptr ${t}, ptr ${v.name}, ptr ${this.cstr(typeKey(v.type))}, ptr ${retain}, ptr ${release})`,
-          );
+          const m = this.dyn.originMarkCall(B, v.type, t, v.name, retain, release);
           return this.own({ name: m, type: e.type });
         }
         return this.own({ name: t, type: e.type });

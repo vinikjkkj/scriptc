@@ -6176,6 +6176,17 @@ ScrDyn *scr_dyn_mark_static_copy(ScrDyn *d);
  * table takes its own reference through `retain`). See the long comment
  * on the table in scr_json.c for why it is a side table and not a
  * field. */
+/* The converters a live view of a UNION-element array needs: the element's box into a dyn value, the test that a
+ * dyn value can be held by the union, and the checked unboxing (+1 union). Emitted per union type and carried with the
+ * copy's origin entry (scr_dyn_origin_mark_elem). NULL ops = not a live view. */
+typedef struct ScrDynElemOps {
+  ScrDyn *(*box)(void *slot);
+  bool (*fits)(const ScrDyn *v);
+  void *(*unbox)(const ScrDyn *v);
+} ScrDynElemOps;
+ScrDyn *scr_dyn_origin_mark_elem(ScrDyn *d, void *obj, const char *tkey, void *(*retain)(void *),
+                                 void (*release)(void *), const ScrDynElemOps *ops);
+const ScrDynElemOps *scr_dyn_origin_elem_ops(const ScrDyn *d);
 ScrDyn *scr_dyn_origin_mark(ScrDyn *d, void *obj, const char *tkey,
                             void *(*retain)(void *), void (*release)(void *));
 /* "Was this copy made from a live <tkey>?" — the origin BORROWED, or
