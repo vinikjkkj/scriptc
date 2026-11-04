@@ -2434,7 +2434,8 @@ export async function compileC(opts: CcOptions): Promise<void> {
   // --dynamic + regex shares the archive's libregexp (its host hooks and
   // ours would collide; see scr_regex.c) — the standalone objects are for
   // static builds only.
-  const lreObjects = regex && !dynamic ? await ensureLreObjects(opts.sanitize ?? false, driver) : [];
+  // The engine-only build (SCR_ENGINE) links the same archive, so it shares the archive's libregexp and hooks too.
+  const lreObjects = regex && !dynamic && !engineOnly ? await ensureLreObjects(opts.sanitize ?? false, driver) : [];
   // Vendored zlib is the CROSS story only — host builds keep the exact
   // historical `-lz` system link (see CcOptions.zlib). The native fetch's
   // gzip decoder rides the same objects/link.
