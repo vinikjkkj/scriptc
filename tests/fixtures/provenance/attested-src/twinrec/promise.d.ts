@@ -1,4 +1,19 @@
-export type ExecuteValues = any | any[] | { [param: string]: any };
+export interface TypedParameterValue {
+  readonly type: number;
+  readonly value: unknown;
+  readonly unsigned: boolean;
+}
+export type ExecuteValues =
+  | TypedParameterValue
+  | string
+  | number
+  | bigint
+  | boolean
+  | Date
+  | null
+  | Uint8Array
+  | ExecuteValues[]
+  | { [key: string]: ExecuteValues };
 export interface Row {
   id: number;
 }
