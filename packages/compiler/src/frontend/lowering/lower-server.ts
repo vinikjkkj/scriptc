@@ -25,7 +25,7 @@ import {
   sideEffectFreeOptionValue,
   TLS_SERVER_DOCUMENTED_OPTIONS,
 } from "./surfaces.js";
-import { conditionalSpreadOf, lowerDynObjectLiteral } from "./lower-exprs.js";
+import { conditionalSpreadOf, lowerDynObjectLiteral, probeLower } from "./lower-exprs.js";
 import { inNamespaceConditionalArm } from "./lower-nsvalue.js";
 import { errorRootedType } from "./lower-stream.js";
 
@@ -615,7 +615,45 @@ export function lowerNetModuleCall(L: Lowerer, expr: ts.CallExpression,
     let cbNode: ts.Expression | undefined;
     if (args.length === 2) {
       if (L.mapTypeOf(L.typeOf(args[1]!))?.kind === "string") hostNode = args[1];
-      else cbNode = args[1];
+      else {
+        // An UNTYPED second argument (mysql2: Net.connect(opts.config.port, opts.config.host)) is the host or the listener, and
+        // only the value says which: a function is the listener, undefined the default host, anything else the host.
+        const probed = probeLower(L, args[1]!);
+        if (probed?.type.kind === "dyn") {
+          const pTmp = L.declareHiddenLocal("%netPort", F64);
+          const hTmp = L.declareHiddenLocal("%netArg", DYN);
+          const pRef = (): IrExpr => ({ kind: "varRef", localId: pTmp.id, type: F64, loc });
+          const hRef = (): IrExpr => ({ kind: "varRef", localId: hTmp.id, type: DYN, loc });
+          const localhost: IrExpr = { kind: "strLit", value: "localhost", type: STRING, loc };
+          const hostOf: IrExpr = {
+            kind: "ternary",
+            cond: { kind: "dynTest", test: "nullish", value: hRef(), type: BOOL, loc },
+            then: localhost,
+            else_: { kind: "dynCheck", value: hRef(), type: STRING, loc },
+            type: STRING,
+            loc,
+          };
+          const listener: IrExpr = { kind: "dynCheck", value: hRef(), type: funcOf([], VOID), loc };
+          return {
+            kind: "seqExpr",
+            stmts: [
+              { kind: "varDecl", localId: pTmp.id, init: port, loc },
+              { kind: "varDecl", localId: hTmp.id, init: L.lowerExprExpecting(args[1]!, DYN), loc },
+            ],
+            result: {
+              kind: "ternary",
+              cond: { kind: "dynTest", test: "function", value: hRef(), type: BOOL, loc },
+              then: { kind: "libCall", fn: "net.connectCb", args: [pRef(), localhost, listener], type: NETSOCKET_T, loc },
+              else_: { kind: "libCall", fn: "net.connect", args: [pRef(), hostOf], type: NETSOCKET_T, loc },
+              type: NETSOCKET_T,
+              loc,
+            },
+            type: NETSOCKET_T,
+            loc,
+          };
+        }
+        cbNode = args[1];
+      }
     } else if (args.length === 3) {
       hostNode = args[1];
       cbNode = args[2];
