@@ -33,11 +33,11 @@
  *     5962-a-parked-for-await-wakes-on-a-tick-not-on-the-push
  *     7470-promiselike-is-a-promise-slot  7791-awaiting-a-promise-that-may-be-absent
  *
- * TWO ROWS WHERE THIS RUNTIME DIVERGES FROM NODE BY ONE TURN (Promise.all
- * matches Node since the settle-counting combinator). They are
+ * ONE ROW WHERE THIS RUNTIME DIVERGES FROM NODE BY ONE TURN (Promise.race; the returned-promise row and
+ * Promise.all match Node now). It is
  * pinned here with the scriptc number and the Node number beside it,
- * deliberately and as they are today -- see each row comment. They are NOT
- * bugs this file is waiting to have fixed; changing them is separate work with
+ * deliberately and as it is today -- see the row comment. It is NOT
+ * a bug this file is waiting to have fixed; changing it is separate work with
  * its own differential, because moving observable order and changing the async
  * representation in one diff makes it impossible to say which change moved
  * what.
@@ -71,9 +71,10 @@ const NODE_EXPECTED = [
   "1  await new Promise(r => r(v))",
   "1  await asyncWithNoAwait()",
   // Node resolves the outer promise WITH a promise: NewPromiseResolveThenableJob
-  // plus the inner reaction, two jobs. scriptc lowers `return p` as
-  // `return await p` (lowerer.ts asyncReturnFlatten), one job. SEMANTICS.md 358
-  // numbers the Promise.try face of this; it is the whole construct.
+  // plus the inner reaction, two jobs. scriptc lowers `return p` as one turn
+  // (the thenable's turn, `async.hop`) and then `await p` (lowerer.ts
+  // asyncReturnFlatten), so both lanes match Node here. It used to lower as a
+  // bare `return await p` and was one turn cheaper.
   "3  await (async () => { return p })()",
   "2  await (async () => { return await p })()",
   "2  await (async () => { return await asyncWithNoAwait() })()",
@@ -98,16 +99,12 @@ const NODE_EXPECTED = [
   "",
 ].join("\n");
 
-/* scriptc, both backends. Identical to Node except the two rows whose
- * comments above say why, each of which is ONE turn cheaper here. */
+/* scriptc, both backends. Identical to Node except the one row whose comment above says why, which is ONE turn
+ * cheaper here. */
 const NATIVE_EXPECTED = NODE_EXPECTED.replace(
-  "3  await (async () => { return p })()",
-  "2  await (async () => { return p })()",
-)
-  .replace(
-    "2  await Promise.race([settled, settled])",
-    "1  await Promise.race([settled, settled])",
-  );
+  "2  await Promise.race([settled, settled])",
+  "1  await Promise.race([settled, settled])",
+);
 
 async function run(cmd: string, args: string[], poison: boolean): Promise<string> {
   const env = { ...process.env } as Record<string, string>;
