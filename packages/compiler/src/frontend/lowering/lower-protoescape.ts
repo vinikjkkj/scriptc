@@ -19,18 +19,22 @@ export interface ProtoEscape {
 
 type N = Record<string, unknown> & { kind?: string; loc?: SrcLoc };
 
-const MUTATORS = new Set(["dyn.keySet", "dyn.keySetSloppy", "dyn.keyDelete", "dyn.defineProp", "dyn.defineProps", "dyn.assign", "dyn.assignAll", "dyn.objCreateDescs", "dyn.reflectSet", "dyn.reflectDelete", "dyn.reflectDefine"]);
+const MUTATORS = new Set(["dyn.keySet", "dyn.keySetSloppy", "dyn.keyDelete", "dyn.defineProp", "dyn.defineProps", "dyn.assign", "dyn.assignAll", "dyn.reflectSet", "dyn.reflectDelete", "dyn.reflectDefine"]);
 const READ_ONLY = new Set([
   "dyn.objKeys", "dyn.objValues", "dyn.objEntries", "dyn.hasOwn", "dyn.hasKey", "dyn.typeof", "dyn.instanceOf", "dyn.toString",
   "dyn.toStringCoerce", "dyn.objectToString", "dyn.forInKeys", "dyn.forInCertain", "dyn.forInPlain", "dyn.forInAccessor",
   "dyn.ownNamesFence", "dyn.ownNamesCtor", "dyn.arrLen", "dyn.looseEq", "dyn.numberOf", "dyn.toNumber", "dyn.errInstanceof",
 ]);
+// Object.create(P): the new object only INHERITS from P (reads of P stay exact); the object P is not handed on, and the one way back to it
+// from the child, a `__proto__` read, is itself a source below.
+const PROTO_LINK = new Set(["dyn.objCreateProto", "dyn.objCreateDescs"]);
 const READ_ONLY_CALLS = new Set(["%object.ownNames", "%object.keys", "%object.values", "%object.entries", "%object.hasOwn", "%object.isPrototypeOf"]);
 const PROPAGATE = new Set(["ternary", "logical", "seqExpr", "upcast", "downcast", "unionNarrow"]);
 
 function isSource(n: N): boolean {
   if (n.kind !== "dynKeyGet") return false;
   const k = n["key"] as N | undefined;
+  if (k?.kind === "strLit" && k["value"] === "__proto__") return true;
   if (k?.kind !== "strLit" || k["value"] !== "prototype") return false;
   // The receiver is a FUNCTION value (an ES5 constructor, a plain function): its `prototype` is the ordinary object of the function,
   // which instances reach through the prototype chain, so a write into it is exact. A class value is never typed `func` (a declared
@@ -125,7 +129,7 @@ export function protoEscapes(functions: readonly IrFunction[]): ProtoEscape[] {
             const f = parent["fn"] as string;
             const args = parent["args"] as unknown[];
             if (MUTATORS.has(f) && args[0] === o) report(at, "is written to");
-            else if (f.startsWith("console.") || f.startsWith("insp.") || READ_ONLY.has(f)) {
+            else if (f.startsWith("console.") || f.startsWith("insp.") || READ_ONLY.has(f) || (PROTO_LINK.has(f) && args[0] === o)) {
               /* a read */
             } else report(at, `is passed as an argument to ${f}`);
           } else if (pk === "call" && READ_ONLY_CALLS.has(String(parent["callee"]))) {
