@@ -46,6 +46,7 @@ const PROGRAMS = [
   "tests/corpus/1020-async-basics.ts",
   "tests/corpus/1301-errors-subclass.ts",
   "tests/corpus/2252-class-iterators.ts",
+  "tests/corpus/24111-union-array-live-view-in-a-split-program.js",
 ];
 
 interface Built {
