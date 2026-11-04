@@ -8,6 +8,10 @@ class PromisePoolConnection extends EventEmitter {
     this.Promise = thePromise || Promise;
     this.calls = 0;
   }
+  get probes() {
+    this.probeCount = (this.probeCount || 0) + 1;
+    return this.probeCount;
+  }
   query(sql, args) {
     const core = this.core;
     return new this.Promise((resolve, reject) => {

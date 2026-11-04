@@ -8343,14 +8343,15 @@ export class Lowerer {
     const t = this.declareHiddenLocal("%dynrec", DYN);
     t.boxed = true;
     const tRef = (): IrExpr => ({ kind: "varRef", localId: t.id, type: DYN, loc });
-    const fields: { name: string; value: IrExpr; viewSlot?: true }[] = [];
+    const fields: { name: string; value: IrExpr; viewSlot?: true; viewLazy?: true }[] = [];
     for (const f of sh.fields) {
       const slot = this.dynMethodSlot(t.id, f.name, f.type, loc);
       if (slot !== null) {
         fields.push({ name: f.name, value: slot });
       } else {
-        const read: IrExpr = { kind: "dynKeyGet", key: { kind: "strLit", value: f.name, type: STRING, loc }, value: tRef(), type: DYN, loc };
-        fields.push({ name: f.name, value: this.coerceToExpected(read, f.type) });
+        // A DATA member is read through the view at every access (the type checks there): reading it here too would run
+        // a getter one extra time, an observable divergence from Node.
+        fields.push({ name: f.name, value: { kind: "numLit", value: 0, type: F64, loc }, viewLazy: true });
       }
     }
     fields.push({ name: "%view", value: tRef(), viewSlot: true });

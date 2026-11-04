@@ -81,6 +81,14 @@ const STORE_POOL_EXPECTED =
   "ping gone true\n" +
   "inline 1 true\n";
 
+/* cases/twinrec/store-getter.ts: a data member served by a counting getter runs once per program read (Node's own
+   count), never once more at the projection. */
+const STORE_GETTER_EXPECTED = "first 1\nsecond 2\nafter 3 4 1\nthird 5 true\n";
+
+/* cases/twinrec/store-getter.ts: a data member served by a counting getter runs once per program read (Node's own
+   count), never once more at the projection. */
+const STORE_GETTER_EXPECTED = "first 1\nsecond 2\nafter 3 4 1\nthird 5 true\n";
+
 const PRIOR = process.env["SCRIPTC_PROVENANCE_MANIFEST"];
 afterEach(() => {
   setProvenanceSources(null);
@@ -155,6 +163,16 @@ describe("provenance: a twin class with untyped methods behind a program's own r
       if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
       const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
       expect(stdout).toBe(STORE_POOL_EXPECTED);
+    }, 600_000);
+  }
+
+  for (const backend of ["c", "llvm"] as const) {
+    test(`24023: a getter on a projected data member runs once per read (${backend})`, async () => {
+      const entry = join(fixtureDir, "cases/twinrec/store-getter.ts");
+      const { result, outPath } = await build(entry, "store-getter", backend);
+      if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+      const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
+      expect(stdout).toBe(STORE_GETTER_EXPECTED);
     }, 600_000);
   }
 

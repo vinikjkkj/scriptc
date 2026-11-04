@@ -3800,6 +3800,11 @@ function validateFunction(
         const seen = new Set<string>();
         for (const f of e.fields) {
           checkExpr(f.value);
+          if (f.viewLazy === true) {
+            if (shape.view !== true || !want.has(f.name)) err(`recordLit lazy entry "${f.name}" needs a view-capable shape that declares it`, e.loc);
+            seen.add(f.name);
+            continue;
+          }
           if (f.viewSlot === true) {
             if (shape.view !== true) err(`recordLit view-slot entry on shape ${shape.id}, which carries no view member`, e.loc);
             else expectType(f.value, DYN, "recordLit view-slot entry");

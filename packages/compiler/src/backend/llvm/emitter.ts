@@ -8954,6 +8954,7 @@ class LlEmitter {
               this.emitExpr(f.value);
               continue;
             }
+            if (f.viewLazy === true) continue; // read through the view at each access: nothing runs at construction
             const v = this.emitExpr(f.value);
             if (f.viewSlot === true) {
               this.moveTemp(v);

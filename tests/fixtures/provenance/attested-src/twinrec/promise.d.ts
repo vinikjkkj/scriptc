@@ -38,6 +38,7 @@ declare function ExecutableBase<T extends new (...a: any[]) => object>(Base?: T)
 declare class Base {}
 export declare class PoolConnection extends ExecutableBase(Base) {
   calls: number;
+  readonly probes: number;
   release(): void;
   enablePing(): void;
   disablePing(): void;

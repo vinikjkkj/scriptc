@@ -2612,6 +2612,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
               E.emitExpr(f.value);
               continue;
             }
+            if (f.viewLazy === true) continue; // read through the view at each access: nothing runs at construction
             const v = E.emitExpr(f.value);
             if (f.viewSlot === true) {
               E.moveTemp(v);

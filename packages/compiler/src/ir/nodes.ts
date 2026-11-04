@@ -7872,7 +7872,7 @@ export type IrExpr =
    * used. Ignored when the shape did not arm; the arm is decided after the walk
    * (Lowerer.armOwnMasks). The bits are constants, stored after the last
    * field, so an unwinding half-built literal stays mask-less. */
-  | { kind: "recordLit"; fields: { name: string; value: IrExpr; overflow?: true; drop?: true; own?: true; ownIf?: IrExpr; /** The entry is the VIEW SLOT of a view-capable shape: `value` is the dyn object the new record is a view of (moved in). */ viewSlot?: true }[]; toStr?: IrExpr; ownmask?: true; presence?: true; type: IrType; loc: SrcLoc }
+  | { kind: "recordLit"; fields: { name: string; value: IrExpr; overflow?: true; drop?: true; own?: true; ownIf?: IrExpr; /** The entry is the VIEW SLOT of a view-capable shape: `value` is the dyn object the new record is a view of (moved in). */ viewSlot?: true; /** A DATA member of a view-capable shape whose value is read through the view on every access: nothing is read at construction (a getter must not run), the slot stays zero. `value` is never evaluated. */ viewLazy?: true }[]; toStr?: IrExpr; ownmask?: true; presence?: true; type: IrType; loc: SrcLoc }
   /** Record field read `r.f` — mirrors `fieldGet`: refcounted fields come
    * out retained (+1). */
   | { kind: "recordGet"; obj: IrExpr; shapeId: string; field: string; type: IrType; loc: SrcLoc }
