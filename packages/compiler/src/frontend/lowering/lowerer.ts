@@ -8176,11 +8176,16 @@ export class Lowerer {
         // what it crossed as), so the callee's writes are the caller's reads. DISCOVERY asks for the grant
         // here; the emit pass answers from the interned shape.
         const sh = this.shapes.get(t.shapeId);
-        if (sh === undefined || !this.viewCapableShape(sh)) return false;
+        const why = process.env["SCRIPTC_VIEW_WHY"] !== undefined;
+        if (sh === undefined || !this.viewCapableShape(sh)) {
+          if (why && this.onEdge === undefined && sh !== undefined) console.error(`[viewwhy] ${t.shapeId} not capable: tuple=${String(sh.tuple)} builtin=${String(sh.builtin !== undefined)} acc=${String(shapeHasAccessorSlots(sh))} n=${sh.fields.length} pct=${sh.fields.filter((f) => f.name.startsWith("%")).map((f) => f.name).join(",")}`);
+          return false;
+        }
         if (this.onEdge !== undefined) {
           this.noteViewCast(t, this.viewCastSeen);
           return true;
         }
+        if (why && sh.view !== true) console.error(`[viewwhy] ${t.shapeId} capable but not granted (denied=${String(this.viewDenied.size)})`);
         return sh.view === true;
       }
       default:
