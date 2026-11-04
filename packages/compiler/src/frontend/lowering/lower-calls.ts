@@ -6355,6 +6355,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         // Static method calls — on the class name directly (`C.make()`)
         // or through a class VALUE (devirtualized; shadowing fences).
         lowerStaticMethodCall(L, expr, expr.expression) ??
+        lowerNullableObjectMethodCall(L, expr, expr.expression) ??
         L.lowerObjectMethodCall(expr, expr.expression) ??
         L.lowerRecordFieldCall(expr, expr.expression) ??
         // Object-literal GENERIC methods (excluded from record shapes) —
@@ -14952,6 +14953,58 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverr
     return { kind: "dynInvoke", recv: arr, method: borrowed.name.text, calleeName: borrowed.getText(), args, type: DYN, loc };
   }
 
+  /** A method call on a class instance read through a NULLABLE slot in JavaScript source (`this.shardedSubscribers.start()` where
+   * the field is only assigned in another method, so its type is `Class | undefined`): Node throws its TypeError exactly when
+   * the value IS the nil at run time and otherwise calls the method. The nil arm is tested and the call lowers against the
+   * class arm (exprOverrides), as the nullable array receiver does. Only a pure receiver path (read twice) takes the guard. */
+  function lowerNullableObjectMethodCall(L: Lowerer, call: ts.CallExpression, access: ts.PropertyAccessExpression): IrExpr | null {
+    if (!isJsSourceFile(call.getSourceFile()) || call.questionDotToken !== undefined || access.questionDotToken !== undefined) return null;
+    if (L.exprOverrides.has(access.expression)) return null;
+    let recv: ts.Expression = access.expression;
+    while (ts.isParenthesizedExpression(recv)) recv = recv.expression;
+    const pure = (e: ts.Expression): boolean =>
+      e.kind === ts.SyntaxKind.ThisKeyword || ts.isIdentifier(e) ||
+      (ts.isPropertyAccessExpression(e) && e.questionDotToken === undefined && pure(e.expression));
+    if (!pure(recv)) return null;
+    const recvMap = L.mapTypeOf(L.typeOf(access.expression));
+    if (recvMap?.kind !== "union") return null;
+    const arms = L.unions.get(recvMap.unionId)?.arms ?? [];
+    const objArms = arms.filter((a) => a.kind === "object");
+    const nilArms = arms.filter((a) => a.kind === "nullT" || a.kind === "undefinedT");
+    if (objArms.length !== 1 || nilArms.length !== 1 || arms.length !== 2) return null;
+    const nilArm = nilArms[0]!;
+    const nilTag = L.armTag(recvMap.unionId, nilArm);
+    const objTag = L.armTag(recvMap.unionId, objArms[0]!);
+    if (nilTag < 0 || objTag < 0) return null;
+    const loc = locOf(call);
+    const value = L.lowerExpr(access.expression);
+    const narrowed: IrExpr = { kind: "unionNarrow", unionId: recvMap.unionId, tag: objTag, value, type: objArms[0]!, loc };
+    L.exprOverrides.set(access.expression, narrowed);
+    let inner: IrExpr | null;
+    try {
+      inner = lowerObjectMethodCall(L, call, access);
+    } finally {
+      L.exprOverrides.delete(access.expression);
+    }
+    if (inner === null) return null;
+    const word = nilArm.kind === "nullT" ? "null" : "undefined";
+    const cond: IrExpr = { kind: "unionIsTag", unionId: recvMap.unionId, tag: nilTag, negated: false, value, type: BOOL, loc };
+    const thrown = nodeThrowExpr(1, "", `Cannot read properties of ${word} (reading '${access.name.text}')`, inner.type, loc);
+    if (inner.type.kind === "void") {
+      // A void call cannot be a ternary arm: the nil test runs first as a statement, then the call.
+      const guard: IrExpr = {
+        kind: "ternary",
+        cond,
+        then: nodeThrowExpr(1, "", `Cannot read properties of ${word} (reading '${access.name.text}')`, BOOL, loc),
+        else_: { kind: "boolLit", value: false, type: BOOL, loc },
+        type: BOOL,
+        loc,
+      };
+      return { kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: guard, loc }], result: inner, type: inner.type, loc };
+    }
+    return { kind: "ternary", cond, then: thrown, else_: inner, type: inner.type, loc };
+  }
+
   /** `f.call(t, ...)` / `f.apply(t, [...])` where `f` is a compiled function value that is ALSO
    * undefined and/or null (unguarded: `(() => any) | undefined`, the shape of a descriptor's
    * optional `get`). Node reads `.call` off the receiver FIRST, so a nullish receiver throws
@@ -15790,7 +15843,7 @@ function lowerPrototypeGenericMethodCall(L: Lowerer, call: ts.CallExpression, ac
   export function lowerObjectMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression, adoptedClass?: string,): IrExpr | null {
     if (L.chainBlocked(access, call)) return null;
-    let receiverIr = L.mapTypeOf(L.typeOf(access.expression));
+    let receiverIr = L.exprOverrides.get(access.expression)?.type ?? L.mapTypeOf(L.typeOf(access.expression));
     // `this.m()` inside a SYNTHESIZED prototype-class -- the same
     // checker-answers-`any` story as fieldTarget's. A method reached ONLY this
     // way (one prototype method calling another) is named by no user
