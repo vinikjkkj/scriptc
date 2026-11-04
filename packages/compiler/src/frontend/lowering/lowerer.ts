@@ -2177,6 +2177,8 @@ export class Lowerer {
    * prepended by lowerFileInit so the bindings are live before any
    * top-level statement runs. */
   readonly jsonInitActions = new Map<ts.SourceFile, IrStmt[]>();
+  /** The baked JSON documents any module may read, assigned at the very start of the ENTRY module's init (before its dependencies' inits). */
+  readonly jsonEntryInitActions = new Map<ts.SourceFile, IrStmt[]>();
   /** The baked global of each JSON file `require`d as a value below a declaration, by file name. */
   readonly jsonRequireGlobals = new Map<string, { id: string; name: string; type: IrType; mutable: boolean }>();
   /** The structural TS type of each JSON document, by file (jsonDocTsType). */

@@ -1370,8 +1370,8 @@ function jsonDocGlobal(L: Lowerer, parts: FileParts[], jsonSf: ts.SourceFile, do
   L.globalsList.push(g);
   L.jsonRequireGlobals.set(jsonSf.fileName, g);
   const entry = parts.find((fp) => L.fileTag.get(fp.sf) === "")?.sf ?? parts[0]!.sf;
-  const actions = L.jsonInitActions.get(entry) ?? [];
-  L.jsonInitActions.set(entry, actions);
+  const actions = L.jsonEntryInitActions.get(entry) ?? [];
+  L.jsonEntryInitActions.set(entry, actions);
   actions.push({ kind: "assign", localId: g.id, value, loc: locOf(n) });
   return g;
 }
@@ -1494,8 +1494,8 @@ export function collectJsonRequires(L: Lowerer, parts: FileParts[]): void {
             L.globalsList.push(fg);
             L.jsonBindingTypes.set(sym, fieldType);
             const entry = parts.find((p) => L.fileTag.get(p.sf) === "")?.sf ?? parts[0]!.sf;
-            const actions = L.jsonInitActions.get(entry) ?? [];
-            L.jsonInitActions.set(entry, actions);
+            const actions = L.jsonEntryInitActions.get(entry) ?? [];
+            L.jsonEntryInitActions.set(entry, actions);
             actions.push({ kind: "assign", localId: fg.id, value: ir, loc: locOf(stmt) });
           }
         } catch (e) {
@@ -3914,6 +3914,9 @@ function activationsOf(L: Lowerer, sf: ts.SourceFile): Map<ts.Node, number> {
           loc: loc0,
         });
       }
+      // The baked JSON documents every module may read (jsonDocGlobal and the destructured require): assigned before the first
+      // dependency's init runs, whatever order the graph evaluates in (an ES-module entry calls its imports from this header).
+      header.push(...(L.jsonEntryInitActions.get(sf) ?? []));
       for (const { stmt, dep } of orderedImportsOf(L.program, sf)) {
         const npm = L.npmInitActions.get(sf)?.get(stmt);
         if (npm !== undefined && npm.length > 0) {
