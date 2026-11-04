@@ -8211,6 +8211,158 @@ export class Lowerer {
     }
   }
 
+  /** A function-typed record member a projection over a dynamic value can serve: not rest, every parameter converts
+   * into dyn, the result is void, dyn, a payload the checked cast reads, or a Promise of one. `optional` names the
+   * `(signature | undefined)` union spelling of an optional method. Null when it cannot be served exactly. */
+  projectableFunc(t: IrType): { fnT: IrType & { kind: "func" }; optional: { unionId: string; funcTag: number; undefTag: number } | null } | null {
+    let fnT: IrType = t;
+    let optional: { unionId: string; funcTag: number; undefTag: number } | null = null;
+    if (t.kind === "union") {
+      const udef = this.unions.get(t.unionId);
+      const funcTag = udef ? udef.arms.findIndex((a) => a.kind === "func") : -1;
+      const undefTag = udef ? udef.arms.findIndex((a) => a.kind === "undefinedT") : -1;
+      if (!udef || udef.arms.length !== 2 || funcTag < 0 || undefTag < 0) return null;
+      fnT = udef.arms[funcTag]!;
+      optional = { unionId: t.unionId, funcTag, undefTag };
+    }
+    if (fnT.kind !== "func" || fnT.rest === true || fnT.restIn === true) return null;
+    if (!fnT.params.every((p) => p.kind === "dyn" || this.dynConvertible(p))) return null;
+    const r = fnT.ret;
+    const retOk =
+      r.kind === "void" || r.kind === "dyn" || this.dynPayloadTotal(r, 1) ||
+      (r.kind === "promise" && (r.inner.kind === "void" || r.inner.kind === "dyn" || this.dynPayloadTotal(r.inner, 1)));
+    return retOk ? { fnT, optional } : null;
+  }
+
+  /** A record whose METHOD members the checked cast cannot adapt but a projection can: every function-typed member is
+   * projectableFunc and every other member is one the checked cast reads. Such a record is built over the dynamic value
+   * (dynRecordProjection): data members through the view, methods as closures that call the object by name. */
+  projectableRecord(t: IrType): boolean {
+    if (t.kind !== "record") return false;
+    const sh = this.shapes.get(t.shapeId);
+    if (sh === undefined || !this.viewCapableShape(sh) || sh.indexValue !== undefined || sh.tuple === true) return false;
+    const getR = (id: string) => this.shapes.get(id);
+    const getU = (id: string) => this.unions.get(id);
+    let funcs = 0;
+    let unadaptable = 0;
+    for (const f of sh.fields) {
+      const isFn = f.type.kind === "func" || (f.type.kind === "union" && (this.unions.get(f.type.unionId)?.arms.some((a) => a.kind === "func") ?? false));
+      if (isFn) {
+        const pf = this.projectableFunc(f.type);
+        if (pf === null) return false;
+        funcs++;
+        // The checked cast serves a method only when its signature adapts (or the boxed value IS that signature,
+        // which an untyped twin's method never is): a Promise result does not adapt.
+        if (!canAdaptDynFuncTo(pf.fnT, getR, getU) || pf.optional !== null) unadaptable++;
+      } else if (!canDynCheckTo(f.type, getR, getU)) {
+        return false;
+      }
+    }
+    return funcs > 0 && unadaptable > 0;
+  }
+
+  /** The closure that calls method `name` of the dynamic object held in boxed local `selfId`, with typed arguments
+   * converted into dyn and the answer converted back (a Promise result adopts: Node's resolution rule). */
+  dynMethodProjectionClosure(selfId: string, name: string, fnT: IrType & { kind: "func" }, loc: SrcLoc): IrExpr {
+    const implName = `%dynproj.${this.dynProjCount++}.${name}`;
+    const fnCtx = newFnCtx(true, null, fnT, fnT.ret);
+    this.fnStack.push(fnCtx);
+    try {
+      const params: IrParam[] = fnT.params.map((t, k) => ({ localId: `a.${k}`, name: `a${k}`, type: t }));
+      const self: IrExpr = { kind: "varRef", localId: selfId, type: DYN, loc };
+      const args: IrExpr[] = fnT.params.map((t, k) => {
+        const a: IrExpr = { kind: "varRef", localId: `a.${k}`, type: t, loc };
+        return t.kind === "dyn" ? a : this.coerceToExpected(a, DYN);
+      });
+      const call: IrExpr = { kind: "dynInvoke", recv: self, method: name, calleeName: name, args, type: DYN, loc };
+      let body: IrStmt[];
+      if (fnT.ret.kind === "void") {
+        body = [{ kind: "exprStmt", expr: call, loc }, { kind: "return", value: null, loc }];
+      } else if (fnT.ret.kind === "dyn") {
+        body = [{ kind: "return", value: call, loc }];
+      } else {
+        const value = (fnT.ret.kind === "promise" ? this.adoptDynIntoTypedPromise(call, fnT.ret) : null) ?? this.coerceToExpected(call, fnT.ret);
+        if (!typeEquals(value.type, fnT.ret)) throw new Error("lowerer bug: planned dyn method projection result stopped coercing");
+        body = [{ kind: "return", value, loc }];
+      }
+      this.liftedFns.push({
+        name: implName,
+        params,
+        returnType: fnT.ret,
+        captures: [{ localId: selfId, name: "self", type: DYN }],
+        locals: [
+          { id: selfId, name: "self", type: DYN, mutable: false, boxed: true },
+          ...fnT.params.map((t, k) => ({ id: `a.${k}`, name: `a${k}`, type: t, mutable: false })),
+          ...fnCtx.locals,
+        ],
+        body,
+        loc,
+      });
+    } finally {
+      this.fnStack.pop();
+    }
+    return { kind: "closure", fnName: implName, captures: [selfId], type: fnT, loc };
+  }
+  private dynProjCount = 0;
+
+  /** A method member's value read off the dynamic object in boxed local `selfId`: the closure that calls it, or - for the
+   * optional spelling - the closure when the member is a function now and undefined when it is not. */
+  dynMethodSlot(selfId: string, name: string, fieldT: IrType, loc: SrcLoc): IrExpr | null {
+    const pf = this.projectableFunc(fieldT);
+    if (pf === null) return null;
+    const closure = this.dynMethodProjectionClosure(selfId, name, pf.fnT, loc);
+    if (pf.optional === null) return closure;
+    const self = (): IrExpr => ({ kind: "varRef", localId: selfId, type: DYN, loc });
+    const member: IrExpr = { kind: "dynKeyGet", key: { kind: "strLit", value: name, type: STRING, loc }, value: self(), type: DYN, loc };
+    const o = pf.optional;
+    return {
+      kind: "ternary",
+      cond: { kind: "dynTest", test: "function", value: member, type: BOOL, loc },
+      then: { kind: "unionWrap", unionId: o.unionId, tag: o.funcTag, value: closure, type: fieldT, loc },
+      else_: { kind: "unionWrap", unionId: o.unionId, tag: o.undefTag, value: { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc }, type: fieldT, loc },
+      type: fieldT,
+      loc,
+    };
+  }
+
+  /** `value` (dyn) read through a record whose methods the checked cast cannot adapt: the record is a VIEW of the object
+   * (data members live through the hidden slot, read and written on the object) whose method members are closures
+   * that call the object by name (so the object stays `this`). A shape that is not view-capable in this build is a
+   * named refusal, never a copy. */
+  dynRecordProjection(value: IrExpr, rec: IrType & { kind: "record" }, loc: SrcLoc): IrExpr {
+    const sh = this.shapes.get(rec.shapeId)!;
+    if (this.onEdge !== undefined) this.noteViewCast(rec, this.viewCastSeen);
+    else if (sh.view !== true) {
+      this.pushDiag(unsupportedDiag(
+        "SC1100",
+        loc,
+        `reading a dynamic value through '${this.fmt(rec)}': its methods are served by a record that views the object, and this program writes an array, Map or Set member of that shape, which a view cannot keep live`,
+      ));
+      throw new PoisonError();
+    }
+    const t = this.declareHiddenLocal("%dynrec", DYN);
+    t.boxed = true;
+    const tRef = (): IrExpr => ({ kind: "varRef", localId: t.id, type: DYN, loc });
+    const fields: { name: string; value: IrExpr; viewSlot?: true }[] = [];
+    for (const f of sh.fields) {
+      const slot = this.dynMethodSlot(t.id, f.name, f.type, loc);
+      if (slot !== null) {
+        fields.push({ name: f.name, value: slot });
+      } else {
+        const read: IrExpr = { kind: "dynKeyGet", key: { kind: "strLit", value: f.name, type: STRING, loc }, value: tRef(), type: DYN, loc };
+        fields.push({ name: f.name, value: this.coerceToExpected(read, f.type) });
+      }
+    }
+    fields.push({ name: "%view", value: tRef(), viewSlot: true });
+    return {
+      kind: "seqExpr",
+      stmts: [{ kind: "varDecl", localId: t.id, init: value, loc }],
+      result: { kind: "recordLit", fields, type: rec, loc },
+      type: rec,
+      loc,
+    };
+  }
+
   /** True when the validated extraction of a JavaScript value into `t` is the checked cast's own
    * answer: a scalar, an array, a tuple, a record (a plain object or a class INSTANCE alike: the
    * instance lane of the record builder reads every declared member off the value itself, a
@@ -8234,6 +8386,7 @@ export class Lowerer {
         // A RECORD arm is read off the value by the checked cast, which takes a plain object
         // and a class instance alike (kindgateInstanceLane): every declared member is answered
         // by the value itself, a getter or an inherited method included.
+        if (depth === 0 && this.projectableRecord(t)) return true; // a record of methods: dynRecordProjection answers it exactly
         if (sh.tuple !== true && sh.fields.some((f) => f.name.startsWith("%"))) return false;
         return (
           (sh.indexValue === undefined || this.dynPayloadTotal(sh.indexValue, depth + 1)) &&
@@ -8481,6 +8634,9 @@ export class Lowerer {
     // record of Uint8Array fields — which canDynCheckTo's nested walk
     // grants and both emitters already walk field by field. Everything
     // outside it keeps requireExactShape's SC1100 fence.
+    if (expr.type.kind === "dyn" && expected.kind === "record" && this.projectableRecord(expected)) {
+      return this.dynRecordProjection(expr, expected, expr.loc);
+    }
     if (expr.type.kind === "dyn" && expected.kind !== "dyn") {
       if (canDynCheckTo(expected, (id) => this.shapes.get(id), (id) => this.unions.get(id))) {
         return { kind: "dynCheck", value: expr, type: expected, loc: expr.loc };
@@ -10785,7 +10941,8 @@ export class Lowerer {
     const viewShapes = new Set<string>();
     for (const sh of this.shapes.shapes) if (sh.view === true) viewShapes.add(sh.id);
     if (viewShapes.size === 0) return;
-    for (const fn of functions) {
+    const liftedBefore = this.liftedFns.length;
+    for (const fn of [...functions]) {
       let n = 0;
       const temp = (type: IrType): IrLocal => {
         const local: IrLocal = { id: `%vwr.${n}`, name: "%vwr", type, mutable: false };
@@ -10804,7 +10961,13 @@ export class Lowerer {
         }
         for (const v of Object.values(node as Record<string, unknown>)) visit(v);
         const o = node as Record<string, unknown> & { kind?: unknown };
-        if (o.kind === "recordGet" && viewShapes.has(o["shapeId"] as string) && !this.viewFieldHoldsFunc(o["type"] as IrType)) {
+        if (o.kind === "recordGet" && viewShapes.has(o["shapeId"] as string) && (o["type"] as IrType).kind === "union" && this.projectableFunc(o["type"] as IrType)?.optional != null) {
+          this.viewRewriteOptionalMethod(o as unknown as Extract<IrExpr, { kind: "recordGet" }>, temp, (t) => {
+            const l = temp(t);
+            l.boxed = true;
+            return l;
+          }, isSimple);
+        } else if (o.kind === "recordGet" && viewShapes.has(o["shapeId"] as string) && !this.viewFieldHoldsFunc(o["type"] as IrType)) {
           this.viewRewriteGet(o as unknown as Extract<IrExpr, { kind: "recordGet" }>, temp, isSimple);
         } else if (o.kind === "recordSet" && viewShapes.has(o["shapeId"] as string)) {
           this.viewRewriteSet(o as unknown as Extract<IrStmt, { kind: "recordSet" }>, temp, isSimple);
@@ -10827,6 +10990,50 @@ export class Lowerer {
       };
       visit(fn.body);
     }
+    // Closures minted by the rewrite (an optional method read per access) join the program.
+    functions.push(...this.liftedFns.slice(liftedBefore));
+  }
+
+  /** An optional METHOD member of a view (`(signature | undefined)`), read per access like Node: the closure that calls
+   * the object's member when it is a function now, undefined when it is not. */
+  private viewRewriteOptionalMethod(
+    e: Extract<IrExpr, { kind: "recordGet" }>,
+    temp: (t: IrType) => IrLocal,
+    boxedTemp: (t: IrType) => IrLocal,
+    isSimple: (e: IrExpr) => boolean,
+  ): void {
+    const loc = e.loc;
+    const recT: IrType = { kind: "record", shapeId: e.shapeId };
+    const stmts: IrStmt[] = [];
+    let ref: () => IrExpr;
+    if (isSimple(e.obj)) {
+      const o = e.obj;
+      ref = () => ({ ...o });
+    } else {
+      const t = temp(recT);
+      stmts.push({ kind: "varDecl", localId: t.id, init: e.obj, loc });
+      ref = () => ({ kind: "varRef", localId: t.id, type: recT, loc });
+    }
+    const self = boxedTemp(DYN);
+    const slot = this.dynMethodSlot(self.id, e.field, e.type, loc)!;
+    const original: IrExpr = { kind: "recordGet", obj: ref(), shapeId: e.shapeId, field: e.field, type: e.type, loc };
+    const result: IrExpr = {
+      kind: "ternary",
+      cond: { kind: "recordIsView", obj: ref(), shapeId: e.shapeId, type: BOOL, loc },
+      then: {
+        kind: "seqExpr",
+        stmts: [{ kind: "varDecl", localId: self.id, init: { kind: "recordView", obj: ref(), shapeId: e.shapeId, type: DYN, loc }, loc }],
+        result: slot,
+        type: e.type,
+        loc,
+      },
+      else_: original,
+      type: e.type,
+      loc,
+    };
+    const out: IrExpr = stmts.length === 0 ? result : { kind: "seqExpr", stmts, result, type: e.type, loc };
+    for (const k of Object.keys(e)) delete (e as unknown as Record<string, unknown>)[k];
+    Object.assign(e, out);
   }
 
   private viewRewriteGet(
@@ -12444,7 +12651,7 @@ export class Lowerer {
       // would have emitted on the bare value. Aligning the two spellings
       // is what unblocks it, and promiseCoerceAdapter's own
       // "payload stopped coercing" assertion is the proof they agree.
-      return canDynCheckTo(dst, (id) => this.shapes.get(id), (id) => this.unions.get(id));
+      return canDynCheckTo(dst, (id) => this.shapes.get(id), (id) => this.unions.get(id)) || this.projectableRecord(dst);
     }
     // Promise PAYLOADS convert through promiseCoerceAdapter's async helper
     // (the settle-or-value contract's other half: `Promise<null>` into a
