@@ -13,6 +13,9 @@ class Group {
   stop() {
     this.started = 0;
   }
+  async reset(slots, nodes) {
+    this.started = slots.length + nodes.length;
+  }
   count(channels) {
     return channels.length + this.started;
   }
@@ -35,6 +38,12 @@ class Cluster {
   halt() {
     if (this.options.sharded) this.group.stop();
     return this.options.sharded ? this.group.count(['a', 'b']) : -1;
+  }
+  rebuild(slots) {
+    return this.group
+      .reset(slots, ['n1', 'n2'])
+      .catch((e) => console.log('reset failed', e))
+      .then(() => this.group.count([]));
   }
   breakIt() {
     return this.group.count([]);
