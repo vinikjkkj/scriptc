@@ -211,7 +211,12 @@ const PREFETCH_MAX_DEPTH = 512;
  * profiled, 55.27% of non-idle work was inside canDynCheckTo, and 42.3% of
  * the whole frontend sat under a single caller of it. Do not come to the
  * prefetch sweep looking for a lever. */
-const PREFETCH_MAX_NODES = 100_000;
+/** The size above which a file skips the whole-file sweep. SCRIPTC_PREFETCH_MAX_NODES lowers it for tests, so the windowed
+ * path that serves such files runs over small programs and its output can be compared with the swept path's. */
+const PREFETCH_MAX_NODES = ((): number => {
+  const raw = Number(process.env["SCRIPTC_PREFETCH_MAX_NODES"]);
+  return Number.isInteger(raw) && raw >= 0 ? raw : 100_000;
+})();
 
 /** The 7.0.2 client identity-dedupes immutable types but does NOT memoize
  * constituentTypes(Type): its registry path for constituents is fetchTypes with no
@@ -254,7 +259,7 @@ export function constituentTypes(type: Type): readonly Type[] {
  * recursive forEachChild walk overflowed the stack HERE, in the prefetch
  * sweep, on the binderBinaryExpressionStress chains — before lowering could
  * answer with its SC1090 nesting fence. */
-function collectNodes(sf: SourceFile): Node[] {
+function collectNodes(sf: Node): Node[] {
   const nodes: Node[] = [];
   walkPreorder(sf, (n, depth) => {
     nodes.push(n);
@@ -262,6 +267,18 @@ function collectNodes(sf: SourceFile): Node[] {
     return undefined;
   });
   return nodes;
+}
+
+/** The widest ancestor of `node` (never the source file) whose source span stays within a window: the unit a big file's
+ * queries are fetched in. */
+const WINDOW_SPAN = 40_000;
+function windowOf(node: Node): Node {
+  let best = node;
+  for (let p = node.parent; p !== undefined && p.parent !== undefined; p = p.parent) {
+    if (p.end - p.pos > WINDOW_SPAN) break;
+    best = p;
+  }
+  return best;
 }
 
 /** THE ABSENT-ANSWER SENTINEL, and why the memos store it.
@@ -315,6 +332,10 @@ export class CheckerFacade {
   private readonly typePredicateOf = new WeakMap<Signature, TypePredicate | None>();
   /** Files whose nodes have been batch-prefetched, per query kind. */
   private readonly prefetchedTypes = new WeakSet<SourceFile>();
+  /** Files whose whole-file sweep was skipped for size: their queries are answered a WINDOW at a time (see windowOf). */
+  private readonly sweepSkipped = new WeakSet<SourceFile>();
+  private readonly windowedTypes = new WeakSet<Node>();
+  private readonly windowedSymbols = new WeakSet<Node>();
   private readonly prefetchedSymbols = new WeakSet<SourceFile>();
   private unknownType: Type | null = null;
   /** Intrinsic singletons (string/number/bigint/boolean), fetched once. */
@@ -511,7 +532,10 @@ export class CheckerFacade {
     if (this.prefetchedTypes.has(sf)) return;
     this.prefetchedTypes.add(sf);
     const all = collectNodes(sf);
-    if (all.length > PREFETCH_MAX_NODES) return;
+    if (all.length > PREFETCH_MAX_NODES) {
+      this.sweepSkipped.add(sf);
+      return;
+    }
     const nodes = all.filter((n) => !this.typeAtLocation.has(n));
     const types = chunked(nodes, (chunk) => this.typesWithPanicFence(chunk));
     nodes.forEach((n, i) => this.typeAtLocation.set(n, types[i] ?? NONE));
@@ -527,7 +551,10 @@ export class CheckerFacade {
     if (this.prefetchedSymbols.has(sf)) return;
     this.prefetchedSymbols.add(sf);
     const all = collectNodes(sf);
-    if (all.length > PREFETCH_MAX_NODES) return;
+    if (all.length > PREFETCH_MAX_NODES) {
+      this.sweepSkipped.add(sf);
+      return;
+    }
     const nodes = all.filter((n) => !this.symbolAtLocation.has(n));
     // The same bisecting panic fence as the type sweep: tsgo panics on
     // SYMBOL queries too (observed: GetSymbolAtLocation over an
@@ -552,6 +579,30 @@ export class CheckerFacade {
     const sf = node.getSourceFile();
     if (kind === "types") this.prefetchTypes(sf);
     else this.prefetchSymbols(sf);
+    // A file too big for the whole-file sweep used to answer every query with its own round trip. The lowering walks a
+    // file in source order, so the first miss fetches its whole WINDOW (the enclosing statement, bounded by source span)
+    // in one batch: the same answers the single queries gave, in far fewer requests.
+    if (!this.sweepSkipped.has(sf)) return;
+    if (kind === "types") {
+      if (this.typeAtLocation.has(node)) return;
+      const w = windowOf(node);
+      if (this.windowedTypes.has(w)) return;
+      this.windowedTypes.add(w);
+      const nodes = collectNodes(w).filter((n) => !this.typeAtLocation.has(n));
+      const types = chunked(nodes, (chunk) => this.typesWithPanicFence(chunk));
+      nodes.forEach((n, i) => this.typeAtLocation.set(n, types[i] ?? NONE));
+      return;
+    }
+    if (this.symbolAtLocation.has(node)) return;
+    const w = windowOf(node);
+    if (this.windowedSymbols.has(w)) return;
+    this.windowedSymbols.add(w);
+    const nodes = collectNodes(w).filter((n) => !this.symbolAtLocation.has(n));
+    const symbols = chunked(nodes, (chunk) => withPanicFence(chunk, (c) => this.raw.getSymbolAtLocation(c)));
+    nodes.forEach((n, i) => this.symbolAtLocation.set(n, symbols[i] ?? NONE));
+    const distinct = [...new Set(symbols.filter((x): x is Ts7Symbol => x !== undefined))].filter((x) => !this.typeOfSymbol.has(x));
+    const symbolTypes = chunked(distinct, (chunk) => withPanicFence(chunk, (c) => this.raw.getTypeOfSymbol(c)));
+    distinct.forEach((x, i) => this.typeOfSymbol.set(x, symbolTypes[i] ?? NONE));
   }
 
   getTypeAtLocation(node: Node): Type {
