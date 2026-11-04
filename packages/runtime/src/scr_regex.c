@@ -49,11 +49,12 @@ static void scr_regex_oom(void) {
  * no stack guard — patterns come from source literals and the executor's
  * backtrack stack is heap-allocated). --dynamic builds MUST NOT define
  * them: the engine archive's quickjs.c already does, with the opaque
- * interpreted as the island's JSContext — so under SCR_DYNAMIC every
+ * interpreted as the island's JSContext — so under SCR_DYNAMIC (and under SCR_ENGINE, the Function-constructor engine linked
+ * into an otherwise static program: the same archive, the same hooks) every
  * lre_compile/lre_exec call here passes the island's context instead
  * (forcing lazy engine init on first regex use).
  */
-#ifdef SCR_DYNAMIC
+#if defined(SCR_DYNAMIC) || defined(SCR_ENGINE)
 static void *lre_opaque(void) { return scr_island_lre_opaque(); }
 #else
 static void *lre_opaque(void) { return NULL; }
@@ -77,7 +78,7 @@ void *lre_realloc(void *opaque, void *ptr, size_t size) {
   }
   return realloc(ptr, size);
 }
-#endif /* SCR_DYNAMIC */
+#endif /* SCR_DYNAMIC || SCR_ENGINE */
 
 /* ── lazy compilation ─────────────────────────────────────────────────
  * Compiled bytecodes are cached on the immortal ScrRegex statics and freed
