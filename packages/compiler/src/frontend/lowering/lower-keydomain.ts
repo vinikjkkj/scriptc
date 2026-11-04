@@ -69,18 +69,41 @@ function isWriteTarget(node: ts.Expression): boolean {
 /** Every identifier of `sf` that resolves to `sym` (a walk of the one file: a module-scope or function-scope
  * binding is visible nowhere else unless it is exported, which the callers test separately). */
 function refsOf(L: Lowerer, sf: ts.SourceFile, sym: unknown): ts.Identifier[] {
-  const out: ts.Identifier[] = [];
+  return refIndexOf(L, sf).get(sym) ?? [];
+}
+
+/** The identifiers of one file grouped by the symbol each resolves to, built by ONE walk of the file and kept for the
+ * life of the lowering. refsOf used to walk the whole file (a checker call per identifier) for every symbol asked about,
+ * so a large file with many element reads cost its size times its read count: on mysql2's driver build that was 77% of
+ * the lowering wall time. The answer for a symbol is the same list it always was (its identifiers in the walk's order);
+ * no caller depends on the order. */
+const refIndexByLowerer = new WeakMap<Lowerer, WeakMap<ts.SourceFile, Map<unknown, ts.Identifier[]>>>();
+function refIndexOf(L: Lowerer, sf: ts.SourceFile): Map<unknown, ts.Identifier[]> {
+  let perFile = refIndexByLowerer.get(L);
+  if (perFile === undefined) {
+    perFile = new WeakMap();
+    refIndexByLowerer.set(L, perFile);
+  }
+  const cached = perFile.get(sf);
+  if (cached !== undefined) return cached;
+  const index = new Map<unknown, ts.Identifier[]>();
   const stack: ts.Node[] = [sf];
   // Iterative: this runs before the depth guard, and a generated file can nest deeply.
   while (stack.length > 0) {
     const n = stack.pop()!;
-    if (ts.isIdentifier(n) && L.resolveValueSymbol(n) === sym) out.push(n);
+    if (ts.isIdentifier(n)) {
+      const s = L.resolveValueSymbol(n);
+      const list = index.get(s);
+      if (list === undefined) index.set(s, [n]);
+      else list.push(n);
+    }
     n.forEachChild((c) => {
       stack.push(c);
       return undefined;
     });
   }
-  return out;
+  perFile.set(sf, index);
+  return index;
 }
 
 function singleVarDecl(L: Lowerer, id: ts.Identifier): { sym: unknown; decl: ts.VariableDeclaration } | null {
