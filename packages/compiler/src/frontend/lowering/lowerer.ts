@@ -332,6 +332,8 @@ export interface FnCtx {
    * runtime bool that records whether super() has run; `thisLocal` is the
    * constructor's `this`, whose reads it guards. Absent everywhere else. */
   superFlag?: { flag: IrLocal; thisLocal: IrLocal };
+  /** Async functions: the try regions whose `return <promise>` leaves the try first and adopts the promise after the handlers ran (lower-stmts lowerTry). Innermost last. */
+  deferRet?: { label: string; pend: IrLocal; retP: IrLocal; used: boolean }[];
 }
 
 /** The symbol an identifier READS. In the shorthand `{ name }` the identifier
@@ -15872,11 +15874,10 @@ export class Lowerer {
     const raw = this.lowerExpr(node);
     const e = this.keyedReadAtReturnSlot(raw, expected, node) ?? raw;
     if (expected.kind === "void" && e.kind === "unitLit") return null;
-    if (this.ctx.isAsync && e.type.kind === "promise" && expected.kind !== "promise" && returnRunsHandlers(node)) {
-      // `return <promise>` inside a try that has a catch or a finally: JavaScript does NOT wait for the promise inside
-      // the try (a rejection skips the catch, the finally runs before it settles), but the return here parks on it
-      // first. Until the wait can move outside the try, the build says so instead of answering differently.
-      this.unsupported("SC1090", node, "returning a promise from inside a try with a catch or finally in an async function (JavaScript settles the returned promise after the handlers run, which the compiled return does not yet do; write `return await <promise>` or move the return out of the try)");
+    const deferred = this.deferPromiseReturn(e, expected);
+    if (deferred !== null) {
+      this.deferredReturn = deferred.stmt;
+      return deferred.dummy;
     }
     return this.coerceInto(node, this.asyncReturnFlatten(e, expected, this.ctx.isAsync), expected);
   }
@@ -15962,7 +15963,10 @@ export class Lowerer {
       // value is dropped, but settlement waits for it and a REJECTION on
       // the promise arm has to reach the caller rather than surfacing as
       // an unhandled rejection.
-      const e = this.asyncReturnFlatten(this.lowerExpr(node), expected, this.ctx.isAsync);
+      const raw = this.lowerExpr(node);
+      const deferredVoid = this.deferPromiseReturn(raw, expected);
+      if (deferredVoid !== null) return deferredVoid.stmt;
+      const e = this.asyncReturnFlatten(raw, expected, this.ctx.isAsync);
       if (e.kind === "unitLit") return { kind: "return", value: null, loc };
       if (e.type.kind === "void") return { kind: "return", value: e, loc };
       return {
@@ -15974,7 +15978,40 @@ export class Lowerer {
         loc,
       };
     }
-    return { kind: "return", value: this.lowerReturnValue(node), loc };
+    this.deferredReturn = null;
+    const value = this.lowerReturnValue(node);
+    if (this.deferredReturn !== null) {
+      const stmt = this.deferredReturn;
+      this.deferredReturn = null;
+      return stmt;
+    }
+    return { kind: "return", value, loc };
+  }
+
+  /** The statement a `return <promise>` inside a deferred try region lowers to (see lowerTry): set aside by lowerReturnValue. */
+  deferredReturn: IrStmt | null = null;
+  deferLabelCount = 0;
+
+  /** `return <promise>` in an async function, inside a try that has a catch or a finally. JavaScript does not wait for the
+   * promise there: the catch never sees its rejection and the finally runs before the result settles; the result then adopts
+   * the promise. So the statement keeps the promise, leaves the region (the handlers run on the way out), and lowerTry adopts
+   * it after the try with the same turn a plain returned promise takes. Null when the return is not this shape. */
+  deferPromiseReturn(value: IrExpr, expected: IrType): { stmt: IrStmt; dummy: IrExpr } | null {
+    const frames = this.ctx.deferRet;
+    if (!this.ctx.isAsync || frames === undefined || frames.length === 0 || value.type.kind !== "promise" || expected.kind === "promise") return null;
+    const f = frames[frames.length - 1]!;
+    f.used = true;
+    const loc = value.loc;
+    const stmt: IrStmt = {
+      kind: "block",
+      body: [
+        { kind: "assign", localId: f.retP.id, value: { kind: "unionWrap", unionId: (f.retP.type as IrType & { kind: "union" }).unionId, tag: this.armTag((f.retP.type as IrType & { kind: "union" }).unionId, value.type), value, type: f.retP.type, loc }, loc },
+        { kind: "assign", localId: f.pend.id, value: { kind: "boolLit", value: true, type: BOOL, loc }, loc },
+        { kind: "break", label: f.label, loc },
+      ],
+      loc,
+    };
+    return { stmt, dummy: { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc } };
   }
 
   /** `Number(x)`'s operand at the read's SLOT width -- the twin of the
@@ -19501,17 +19538,4 @@ export class Lowerer {
     access: ts.PropertyAccessExpression,): IrExpr | null {
     return lowerIslandMethodCall(this, call, access);
   }
-}
-
-/** True when `node` (a returned expression) sits where a try's handlers still run after the return: in the try block of a
- * try statement that has a catch or a finally, or in the catch block of one that has a finally. */
-function returnRunsHandlers(node: ts.Node): boolean {
-  for (let cur: ts.Node = node, p: ts.Node | undefined = node.parent; p !== undefined; cur = p, p = p.parent) {
-    if (ts.isFunctionLike(p)) return false;
-    if (ts.isTryStatement(p)) {
-      if (cur === p.tryBlock && (p.catchClause !== undefined || p.finallyBlock !== undefined)) return true;
-      if (cur === p.catchClause && p.finallyBlock !== undefined) return true;
-    }
-  }
-  return false;
 }

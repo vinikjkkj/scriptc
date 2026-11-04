@@ -6258,12 +6258,46 @@ function unionCaseLiteralTest(L: Lowerer, disc: IrExpr, test: IrExpr, loc: SrcLo
 
   export function lowerTry(L: Lowerer, stmt: ts.TryStatement): IrStmt {
     const hasFinally = stmt.finallyBlock !== undefined;
+    // `return <promise>` in an async function's try or catch region leaves the region first and adopts the promise after
+    // the whole statement (Node: the handlers never see the promise, the finally runs before the result settles).
+    const defer = L.ctx.isAsync === true && L.ctx.returnType.kind !== "promise" && tryHasValuedReturn(stmt)
+      ? {
+          pend: L.declareHiddenLocal("%rpend", BOOL),
+          retP: L.declareHiddenLocal("%retp", L.withUndefinedArm({ kind: "promise", inner: L.ctx.returnType } as IrType)),
+          label: `%rt.${L.deferLabelCount++}`,
+          labelCatch: `%rt.${L.deferLabelCount++}`,
+        }
+      : null;
+    if (defer !== null) {
+      defer.pend.mutable = true;
+      defer.retP.mutable = true;
+    }
+    const regionFrames = (label: string): { label: string; pend: IrLocal; retP: IrLocal; used: boolean } => ({ label, pend: defer!.pend, retP: defer!.retP, used: false });
+    const frameT = defer !== null ? regionFrames(defer.label) : null;
+    const frameC = defer !== null ? regionFrames(defer.labelCatch) : null;
+    const withRegion = <T>(frame: { label: string; pend: IrLocal; retP: IrLocal; used: boolean } | null, run: () => T): T => {
+      if (frame === null) return run();
+      const stack = (L.ctx.deferRet ??= []);
+      stack.push(frame);
+      try {
+        return run();
+      } finally {
+        stack.pop();
+      }
+    };
+    const wrapRegion = (frame: { label: string; used: boolean } | null, body: IrStmt[]): IrStmt[] =>
+      frame !== null && frame.used ? [{ kind: "block", body, labels: [frame.label], loc: locOf(stmt) }] : body;
     // try/catch bodies are jump-fenced only when a finally guards them.
-    const lowerGuarded = (block: ts.Block): IrStmt[] =>
-      hasFinally
-        ? L.inCtl("tryFinally", () => L.lowerScopedBlock(block))
-        : L.lowerScopedBlock(block);
-    const tryBody = lowerGuarded(stmt.tryBlock);
+    const lowerGuarded = (block: ts.Block, frame: { label: string; pend: IrLocal; retP: IrLocal; used: boolean } | null): IrStmt[] =>
+      withRegion(frame, () =>
+        wrapRegion(
+          frame,
+          hasFinally
+            ? L.inCtl("tryFinally", () => L.lowerScopedBlock(block))
+            : L.lowerScopedBlock(block),
+        ),
+      );
+    const tryBody = lowerGuarded(stmt.tryBlock, frameT);
     let catchBody: IrStmt[] | null = null;
     let catchLocalId: string | null = null;
     if (stmt.catchClause) {
@@ -6294,7 +6328,7 @@ function unionCaseLiteralTest(L: Lowerer, disc: IrExpr, test: IrExpr, loc: SrcLo
           if (twin && process.env["SCRIPTC_CATCHTWIN_WHY"] !== undefined) {
             console.error(`[catchtwin] ${twinLoc.file}:${twinLoc.start} ${vd.name.text}`);
           }
-          const lowered = lowerGuarded(stmt.catchClause.block);
+          const lowered = lowerGuarded(stmt.catchClause.block, frameC);
           catchBody = twin
             ? [
                 {
@@ -6315,13 +6349,13 @@ function unionCaseLiteralTest(L: Lowerer, disc: IrExpr, test: IrExpr, loc: SrcLo
           L.scopes.pop();
         }
       } else {
-        catchBody = lowerGuarded(stmt.catchClause.block);
+        catchBody = lowerGuarded(stmt.catchClause.block, frameC);
       }
     }
     const finallyBody = stmt.finallyBlock
       ? L.inCtl("finallyBlock", () => L.lowerScopedBlock(stmt.finallyBlock!))
       : null;
-    return {
+    const tryStmt: IrStmt = {
       kind: "tryCatch",
       tryBody,
       catchBody,
@@ -6329,6 +6363,69 @@ function unionCaseLiteralTest(L: Lowerer, disc: IrExpr, test: IrExpr, loc: SrcLo
       finallyBody,
       loc: locOf(stmt),
     };
+    if (defer === null || !(frameT!.used || frameC!.used)) return tryStmt;
+    // After the statement (the handlers have run): when a region set the promise aside, leave an enclosing region the
+    // same way, or - outermost - return it through the ordinary returned-promise path (the thenable turn, then the wait).
+    const loc = locOf(stmt);
+    const outer = L.ctx.deferRet !== undefined && L.ctx.deferRet.length > 0 ? L.ctx.deferRet[L.ctx.deferRet.length - 1]! : null;
+    const expected = L.ctx.returnType;
+    const promiseT: IrType = { kind: "promise", inner: expected };
+    const retUnion = defer.retP.type as IrType & { kind: "union" };
+    const promiseTag = L.armTag(retUnion.unionId, promiseT);
+    let exit: IrStmt[];
+    if (outer !== null) {
+      outer.used = true;
+      exit = [
+        { kind: "assign", localId: outer.retP.id, value: { kind: "varRef", localId: defer.retP.id, type: defer.retP.type, loc }, loc },
+        { kind: "assign", localId: outer.pend.id, value: { kind: "boolLit", value: true, type: BOOL, loc }, loc },
+        { kind: "break", label: outer.label, loc },
+      ];
+    } else {
+      const taken: IrExpr = {
+        kind: "unionNarrow",
+        unionId: retUnion.unionId,
+        tag: promiseTag,
+        value: { kind: "varRef", localId: defer.retP.id, type: defer.retP.type, loc },
+        type: promiseT,
+        loc,
+      };
+      const flat = L.asyncReturnFlatten(taken, expected, true);
+      exit = expected.kind === "void"
+        ? [{ kind: "exprStmt", expr: flat, loc }, { kind: "return", value: null, loc }]
+        : [{ kind: "return", value: L.coerceInto(stmt, flat, expected), loc }];
+    }
+    return {
+      kind: "block",
+      body: [
+        { kind: "varDecl", localId: defer.pend.id, init: { kind: "boolLit", value: false, type: BOOL, loc }, loc },
+        { kind: "varDecl", localId: defer.retP.id, init: L.wrappedUndefined(retUnion, loc)!, loc },
+        tryStmt,
+        {
+          kind: "if",
+          cond: { kind: "varRef", localId: defer.pend.id, type: BOOL, loc },
+          then: exit,
+          else_: null,
+          loc,
+        },
+      ],
+      loc,
+    };
+  }
+
+/** Does a try statement hold, in its try block or its catch block and outside any nested function, a `return` with a value? */
+  function tryHasValuedReturn(stmt: ts.TryStatement): boolean {
+    let found = false;
+    const walk = (n: ts.Node): void => {
+      if (found || ts.isFunctionLike(n) || ts.isClassDeclaration(n) || ts.isClassExpression(n)) return;
+      if (ts.isReturnStatement(n) && n.expression !== undefined) {
+        found = true;
+        return;
+      }
+      n.forEachChild(walk);
+    };
+    walk(stmt.tryBlock);
+    if (stmt.catchClause !== undefined) walk(stmt.catchClause.block);
+    return found;
   }
 
 /** `delete o.k` — the EFFECT and the ANSWER, separately, because JS's
