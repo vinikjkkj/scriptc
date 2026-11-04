@@ -14,14 +14,14 @@
  * Gates (a loud, named SC1090 at the keyed write): the receiver's class is typed at the write (a family registered by the
  * pre-scan), the whole family is JS classes carrying the table, and no member of the family is async, a generator or
  * abstract (the dispatcher forwards through the checked-dynamic call). */
-import { PoisonError, type Lowerer } from "./lowerer.js";
+import { PoisonError, newFnCtx, type Lowerer } from "./lowerer.js";
 import type { ClassInfo } from "./lower-classes.js";
 import { CLASS_PROPS_FIELD } from "./lower-classes.js";
 import { isJsSourceFile } from "../program.js";
 import { dynCallWithThis } from "./lower-calls.js";
 import { protoSlotSlottable } from "./lower-protoslots.js";
 import { unsupportedDiag } from "../../diagnostics/diagnostic.js";
-import { BOOL, DYN, STRING, VOID, type IrExpr, type IrFunction, type IrGlobal, type IrParam, type IrStmt, type SrcLoc } from "../../ir/nodes.js";
+import { BOOL, DYN, STRING, VOID, type IrExpr, type IrFunction, type IrGlobal, type IrLocal, type IrType, type IrParam, type IrStmt, type SrcLoc } from "../../ir/nodes.js";
 
 /** The roots of the families whose instances take a run-time keyed write the lowering lowered. Module-level so the discovery pass's
  * answer is complete when the emit pass starts (class names are the same in both); cleared at the start of every lowering. */
@@ -172,10 +172,23 @@ export function applyOwnShadows(L: Lowerer, fnLists: IrFunction[][]): void {
       const own = { kind: "libCall", fn: "cls.propsRead", args: [bagOf(), { ...key }], type: DYN, loc } as IrExpr;
       const via = dynCallWithThis(L, recv, own, args, `${t.cls.def.jsName ?? t.cls.def.name}.prototype.${t.method}`, loc);
       const rt = raw.returnType;
+      // The result's coercion (a Promise adopts a checked-dynamic value through hidden locals) needs a function frame: this pass runs
+      // after every body is down, so it opens one and hands its locals to the dispatcher.
+      const ctxLocals: IrLocal[] = [];
+      const coerceInCtx = (e: IrExpr, to: IrType): IrExpr => {
+        const ctx = newFnCtx(true, null, null, to);
+        L.fnStack.push(ctx);
+        try {
+          return L.coerceToExpected(e, to);
+        } finally {
+          L.fnStack.pop();
+          ctxLocals.push(...ctx.locals);
+        }
+      };
       const slow: IrStmt[] =
         rt.kind === "void"
           ? [{ kind: "exprStmt", expr: via, loc }, { kind: "return", value: null, loc }]
-          : [{ kind: "return", value: L.coerceToExpected(via, rt), loc }];
+          : [{ kind: "return", value: coerceInCtx(via, rt), loc }];
       const direct: IrExpr = { kind: "call", callee: nsName, args: params.map(ref), type: rt, loc };
       const fast: IrStmt = rt.kind === "void" ? { kind: "exprStmt", expr: direct, loc } : { kind: "return", value: direct, loc };
       const bypassRef = (): IrExpr => ({ kind: "varRef", localId: bypass.id, type: BOOL, loc });
@@ -184,7 +197,7 @@ export function applyOwnShadows(L: Lowerer, fnLists: IrFunction[][]): void {
         ...(raw.jsName !== undefined && { jsName: raw.jsName }),
         params,
         returnType: rt,
-        locals: params.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
+        locals: [...params.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })), ...ctxLocals],
         body: [
           // a detached prototype-function thunk raised the flag: this one call runs the body
           { kind: "if", cond: bypassRef(), then: [{ kind: "assign", localId: bypass.id, value: { kind: "boolLit", value: false, type: BOOL, loc }, loc }, fast], else_: null, loc },
