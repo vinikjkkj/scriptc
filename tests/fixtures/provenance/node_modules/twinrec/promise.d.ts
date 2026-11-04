@@ -13,6 +13,7 @@ export type ExecuteValues =
   | null
   | Uint8Array
   | ExecuteValues[]
+  | readonly unknown[]
   | { [key: string]: ExecuteValues };
 export interface Row {
   id: number;
