@@ -3800,6 +3800,11 @@ function validateFunction(
         const seen = new Set<string>();
         for (const f of e.fields) {
           checkExpr(f.value);
+          if (f.viewSlot === true) {
+            if (shape.view !== true) err(`recordLit view-slot entry on shape ${shape.id}, which carries no view member`, e.loc);
+            else expectType(f.value, DYN, "recordLit view-slot entry");
+            continue;
+          }
           if (seen.has(f.name)) err(`recordLit initializes field "${f.name}" twice`, e.loc);
           seen.add(f.name);
           if (f.drop) {
@@ -3858,7 +3863,7 @@ function validateFunction(
               err(`recordLit omits field "${sf.name}" of shape ${shape.id}, which takes no own-key bit`, e.loc);
             }
           }
-        } else if (e.fields.filter((f) => !f.overflow && !f.drop).length !== shape.fields.length) {
+        } else if (e.fields.filter((f) => !f.overflow && !f.drop && f.viewSlot !== true).length !== shape.fields.length) {
           err(`recordLit does not initialize every field of shape ${shape.id}`, e.loc);
         }
         if (e.toStr) {

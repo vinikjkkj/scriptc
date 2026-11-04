@@ -2613,6 +2613,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
               continue;
             }
             const v = E.emitExpr(f.value);
+            if (f.viewSlot === true) {
+              E.moveTemp(v);
+              E.line(`${rec.name}->${VIEW_MEMBER} = ${v.name};`);
+              continue;
+            }
             if (f.overflow) {
               const lit = E.internLiteral(f.name);
               const acc =

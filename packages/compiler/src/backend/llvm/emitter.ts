@@ -8955,6 +8955,13 @@ class LlEmitter {
               continue;
             }
             const v = this.emitExpr(f.value);
+            if (f.viewSlot === true) {
+              this.moveTemp(v);
+              const vsp = B.tmp();
+              B.line(`${vsp} = getelementptr inbounds %${mangleRecordStruct(shapeId)}, ptr ${rec}, i64 0, i32 ${viewSlotIndex(this.recordsById.get(shapeId)!)} ; <view>`);
+              B.line(`store ptr ${v.name}, ptr ${vsp}`);
+              continue;
+            }
             if (f.overflow) {
               const lit = this.internLiteral(f.name);
               const acc = v.type.kind === "f64" ? "f64" : v.type.kind === "bool" ? "bool" : "ref";
