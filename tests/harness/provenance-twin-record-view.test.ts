@@ -130,6 +130,20 @@ const NULLABLE_RECEIVER_EXPECTED =
   "4\n" +
   "TypeError Cannot read properties of undefined (reading 'count')\n";
 
+/* cases/twinrec/ticks.ts: fire-and-forget promise chains over async methods of JavaScript classes, ordered against awaits
+   on the main path, recorded from node (the tick count of a returned promise). */
+const TICKS_EXPECTED =
+  "B value 2\n" +
+  "C fail x\n" +
+  "1\n" +
+  "A reset done\n" +
+  "D after fail\n" +
+  "2\n" +
+  "3\n" +
+  "E twice 3\n" +
+  "4\n" +
+  "5\n";
+
 const PRIOR = process.env["SCRIPTC_PROVENANCE_MANIFEST"];
 afterEach(() => {
   setProvenanceSources(null);
@@ -254,6 +268,16 @@ describe("provenance: a twin class with untyped methods behind a program's own r
       if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
       const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
       expect(stdout).toBe(NULLABLE_RECEIVER_EXPECTED);
+    }, 600_000);
+  }
+
+  for (const backend of ["c", "llvm"] as const) {
+    test(`24030: promise chains over async methods of JavaScript classes tick like Node (${backend})`, async () => {
+      const entry = join(fixtureDir, "cases/twinrec/ticks.ts");
+      const { result, outPath } = await build(entry, "ticks", backend);
+      if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+      const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
+      expect(stdout).toBe(TICKS_EXPECTED);
     }, 600_000);
   }
 
