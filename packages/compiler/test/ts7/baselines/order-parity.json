@@ -12504,6 +12504,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24111-union-array-live-view-in-a-split-program.js": {
+   "order": [
+    "<repo>/tests/corpus/24111-union-array-live-view-in-a-split-program.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2412-dowhile-guard-trailing-test.ts": {
    "order": [
     "<repo>/tests/corpus/2412-dowhile-guard-trailing-test.ts"
