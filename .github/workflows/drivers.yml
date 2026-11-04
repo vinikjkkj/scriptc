@@ -99,3 +99,10 @@ jobs:
           name: driver-${{ matrix.driver }}
           path: out/${{ matrix.driver }}.txt
           retention-days: 14
+      # The binary of a successful build, to run it (absent when the build is refused).
+      - uses: actions/upload-artifact@v4
+        with:
+          name: driver-${{ matrix.driver }}-bin
+          path: out/${{ matrix.driver }}.bin
+          if-no-files-found: ignore
+          retention-days: 14
