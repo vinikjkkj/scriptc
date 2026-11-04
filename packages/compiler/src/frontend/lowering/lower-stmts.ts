@@ -8171,6 +8171,10 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
           const parts = lowerDestructuringAssignParts(L, expr.left, expr.right, locOf(expr));
           return { kind: "block", body: parts.stmts, loc: locOf(expr) };
         }
+        if (ts.isPropertyAccessExpression(expr.left) && !expr.left.questionDotToken) {
+          const viewed = lowerViewOnlyMemberWrite(L, expr, expr.left);
+          if (viewed !== null) return viewed;
+        }
         if (!ts.isIdentifier(expr.left)) {
           L.unsupported("SC1090", expr.left, "assignment to non-variables");
         }
@@ -9707,6 +9711,40 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
       "destructuring assignment to targets with no static write form (assign a variable, then write the parts out)",
     );
   }
+
+/** `recv.name = v` where `recv` lowered to a view-granted record that declares no `name` (the checker's type for the
+   * receiver does: see lower-exprs viewOnlyMemberRead): a view writes the member on its object; a struct the program
+   * built has no such member and no slot to write. */
+function lowerViewOnlyMemberWrite(L: Lowerer, expr: ts.BinaryExpression, left: ts.PropertyAccessExpression): IrStmt | null {
+  const mapped = L.mapTypeOf(L.typeOf(left.expression));
+  if (mapped?.kind !== "record") return null;
+  const name = left.name.text;
+  if (L.shapes.get(mapped.shapeId)?.fields.some((f) => f.name === name) !== true) return null;
+  const recv = L.lowerExpr(left.expression);
+  if (recv.type.kind !== "record" || !L.isViewShape(recv.type)) return null;
+  const sh = L.shapes.get(recv.type.shapeId);
+  if (sh === undefined || sh.indexValue !== undefined || sh.fields.some((f) => f.name === name)) return null;
+  const loc = locOf(expr);
+  const key: IrExpr = { kind: "strLit", value: name, type: STRING, loc };
+  const value = L.coerceToExpected(L.lowerExpr(expr.right), DYN);
+  if (value.type.kind !== "dyn") {
+    L.unsupported("SC1100", expr.right, `assigning '${L.fmt(value.type)}' values to a member of a viewed object (the value cannot convert into the checked-dynamic tree)`);
+  }
+  const split = L.viewSplit(
+    recv,
+    BOOL,
+    (dynRecv) => ({
+      kind: "seqExpr",
+      stmts: [{ kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.keySet", args: [dynRecv, key, value], type: VOID, loc }, loc }],
+      result: { kind: "boolLit", value: true, type: BOOL, loc },
+      type: BOOL,
+      loc,
+    }),
+    () => nodeThrowExpr(1, "", `Cannot add property ${name}, object is not extensible`, BOOL, loc),
+    loc,
+  );
+  return { kind: "exprStmt", expr: split, loc };
+}
 
 /** One object-pattern property's pieces for the checked-dynamic path:
    * the source FIELD name (or, over ISLAND sources, a runtime KEY
