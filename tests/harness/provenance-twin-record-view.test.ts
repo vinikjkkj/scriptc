@@ -127,6 +127,7 @@ const PROTO_LOOP_EXPECTED =
 const NULLABLE_RECEIVER_EXPECTED =
   "[ 'g', 1 ] 2\n" +
   "[] -1\n" +
+  "4\n" +
   "TypeError Cannot read properties of undefined (reading 'count')\n";
 
 const PRIOR = process.env["SCRIPTC_PROVENANCE_MANIFEST"];

@@ -4626,22 +4626,10 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
             collectGenericMember(member, false);
             continue;
           }
-          // Async METHODS in JS classes simply do not COLLECT — each call
-          // fences at its own site (the JS deferral stance, the
-          // async-static precedent above), so a class whose driven
-          // surface is synchronous still compiles (commander: parse()
-          // works, parseAsync() traps where called). TS async methods
-          // collect below like any method: the body is an async
-          // IrFunction (fiber spawn wrapper, `this` as param 0), a direct
-          // call the emitter routes through that wrapper, and a VIRTUAL
-          // call the same wrapper by way of the synthesized vtable entry
-          // `%C.m%vt` (vtThunkKind).
-          if (
-            member.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword) &&
-            isJsSourceFile(decl.getSourceFile())
-          ) {
-            continue;
-          }
+          // Async METHODS collect like any method, JavaScript source or TypeScript: the body is an async IrFunction (fiber
+          // spawn wrapper, `this` as param 0), a direct call the emitter routes through that wrapper, and a VIRTUAL call the
+          // same wrapper by way of the synthesized vtable entry `%C.m%vt` (vtThunkKind). (They used to be skipped in
+          // JavaScript classes, so every call fenced as having no compiled implementation.)
           // IMPLICIT-ANY monomorphization (npm-static JS): a method whose
           // signature carries bindable untyped params collects like a
           // GENERIC method — into genericMethods, no vtable slot, one
