@@ -410,7 +410,10 @@ export class CEmitter {
     }
     this.pendingWalkerData.length = 0;
     for (let i = 0; i < this.walkerProtos.length; i++) {
-      this.walkerProtos[i] = stripStatic(this.walkerProtos[i]!);
+      // A static data PROTOTYPE (`static const T name;`, a tentative definition) becomes an extern declaration: stripped to a bare
+      // `const T name;` it would define the object in every unit that includes the header (sc_velem_N, multiple definition).
+      const l = this.walkerProtos[i]!;
+      this.walkerProtos[i] = /^static const [A-Za-z_][A-Za-z0-9_ *]*;/.test(l) ? `extern ${l.slice(7)}` : stripStatic(l);
     }
     for (let i = 0; i < this.walkerDefs.length; i++) {
       this.walkerDefs[i] = stripStatic(this.walkerDefs[i]!);
