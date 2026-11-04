@@ -20351,9 +20351,12 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       }
       return { kind: "dynCheck", value: keyed, type: declared, loc };
     }
+    // The system-error fields the runtime stamps on an error object (a socket's connect failure: errno, syscall, address, port; an fs
+    // failure: path, dest) are own properties in Node whatever the static type says: read them from the stamp, not the expando bag.
+    const stamped = ["errno", "syscall", "path", "dest", "hostname", "address", "port"].includes(expr.name.text);
     return {
       kind: "libCall",
-      fn: "error.propGet",
+      fn: stamped ? "error.ext" : "error.propGet",
       args: [L.upcastTo(receiver, "%Error"), { kind: "strLit", value: expr.name.text, type: STRING, loc: locOf(expr.name) }],
       type: DYN,
       loc,
