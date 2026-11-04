@@ -1,6 +1,6 @@
 // The mysql2 shape: an untyped driver answers class instances (a ResultSetHeader, row objects) that the
 // program reads through its own declared records.
-class FieldPacket { name = "f"; type = 3; }
+interface FieldPacket { name: string; type: number }
 class ResultSetHeader {
   fieldCount = 0;
   affectedRows = 0;
@@ -18,7 +18,8 @@ class ResultSetHeader {
 interface RowDataPacket { id: number; name: string }
 interface Header { affectedRows: number; insertId: number; changedRows: number }
 async function execute(sql: string): Promise<unknown> {
-  if (sql.startsWith("SELECT")) return [[{ id: 1, name: "a", extra: 1 }, { id: 2, name: "b" }], [new FieldPacket()]];
+  // A driver hands the rows over as objects of its own making (parsed here), never as a literal of the program.
+  if (sql.startsWith("SELECT")) return JSON.parse('[[{"id":1,"name":"a","extra":1},{"id":2,"name":"b"}],[{"name":"f","type":3}]]');
   return [new ResultSetHeader(2, 9), undefined];
 }
 async function main(): Promise<void> {
