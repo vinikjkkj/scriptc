@@ -10,7 +10,7 @@ async function main(): Promise<void> {
   const [inserted] = await conn.query("INSERT INTO rt (id, name, score, note) VALUES (?, ?, ?, ?), (?, ?, ?, ?)", [1, "alpha", 1.5, null, 2, "beta", 2.25, "x"]);
   console.log("insert", JSON.stringify(inserted));
   const [rows, fields] = await conn.query("SELECT id, name, score, note FROM rt WHERE score > ? ORDER BY id", [1]);
-  console.log("select", (fields as { name: string }[]).map((f) => f.name).join(","), JSON.stringify(rows));
+  console.log("select", Array.isArray(fields) ? fields.length : -1, JSON.stringify(rows));
   const [prepared] = await conn.execute("SELECT id, name FROM rt WHERE id = ?", [2]);
   console.log("execute", JSON.stringify(prepared));
   await conn.beginTransaction();
@@ -25,8 +25,8 @@ async function main(): Promise<void> {
   try {
     await conn.query("INSERT INTO rt (id, name) VALUES (?, ?)", [1, "dup"]);
   } catch (e) {
-    const err = e as { code?: string; errno?: number; sqlState?: string; message: string };
-    console.log("error", err.code, err.errno, err.sqlState, err.message);
+    const err = e as NodeJS.ErrnoException;
+    console.log("error", err.code, err.errno, err.message);
   }
   await conn.query("DROP TABLE rt");
   await conn.end();
