@@ -11,7 +11,7 @@ import { isEmitterMixinStatement } from "./lower-emitter-mixin.js";
 import { timersPromisesIntervalCallOf, lowerForAwaitTimersInterval, lowerForAwaitAsyncGenerator, lowerForOfGenerator, lowerYieldStarStatement } from "./lower-generators.js";
 import { RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, BIGINT, BOOL, isRefCounted, BYTES_U8, bytesValueType, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrLocal, type IrRecordShape, IrStmt, IrType, JSVAL, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import { PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, neverTaintedJsType, nodeThrowExpr, stmtUsesIsland, uncheckedOverloadHandleCall } from "./lowerer.js";
-import { wholeExportRootRebindable } from "./lower-modules.js";
+import { dtsTwinOwnedConst, wholeExportRootRebindable } from "./lower-modules.js";
 import { dynImportBindingDeclOf, dynImportBindingStmts } from "./lower-island.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
 import { recordKeyReadRow } from "./keyread-census.js";
@@ -4661,6 +4661,8 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     // probes below would otherwise claim the call-initializer shape and
     // put its fences on the build.
     if (provenanceElidedConstDecl(L, decl)) return null;
+    // A declaration-file const the compiled twin exports registers no slot, so no statement either (dtsTwinOwnedConst).
+    if (dtsTwinOwnedConst(L, decl)) return null;
     // `const f = String.fromCharCode` whose every reference is a call (lower-builtins.ts):
     // the binding has no storage; each call lowers as the member's own call.
     if (isStringCallAliasDecl(L, decl)) return null;

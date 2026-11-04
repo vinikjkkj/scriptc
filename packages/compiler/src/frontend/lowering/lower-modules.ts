@@ -2342,6 +2342,8 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
         // probes below would otherwise claim the call-initializer shape
         // and put its fences on the build.
         if (provenanceElidedConstDecl(L, decl)) continue;
+        // A declaration-file const the compiled twin owns registers no slot (dtsTwinOwnedConst).
+        if (dtsTwinOwnedConst(L, decl)) continue;
         // A call-only `String.fromCharCode` alias has no storage (lower-builtins.ts).
         if (isStringCallAliasDecl(L, decl)) continue;
         // `var Buffer = require("buffer").Buffer` (or `const B = Buffer`) at file scope: the
@@ -4271,6 +4273,32 @@ function activationsOf(L: Lowerer, sf: ts.SourceFile): Map<ts.Node, number> {
       loc,
     };
   }
+/** A variable declared in a package's own declaration file (`export const
+ * getTypeParser: (id: TypeId) => any;`, no initializer) while the module's
+ * implementation twin is compiled.
+ *
+ * The declaration owns no storage and nothing ever assigns one: the twin
+ * holds the value (declTwinGlobalOf / globalOf's twin bridge). A slot
+ * registered for the declaration is a second, permanently empty global that
+ * a member read through the module binding (`types.getTypeParser(...)`,
+ * `require("pg-types").x`) found FIRST in globalOf and called through NULL.
+ * It is also where an UNREPRESENTABLE claim refused the whole build
+ * (pg-types: `arrayParser` declared as a function with `any` positions, the
+ * twin exporting an object with `create`): the declaration's type is the
+ * author's claim and a twin is free to contradict it, so the twin's storage,
+ * typed by what the JS assigns, is the truth reads must reach, and `typeof`
+ * answers what Node answers. A name the twin
+ * does not export (declared, never defined: Node answers undefined) owns no
+ * slot either, so an unread one costs nothing and a read refuses by name
+ * where the binding has no lowering; program-authored, stdlib and twin-less
+ * declarations are untouched. */
+export function dtsTwinOwnedConst(L: Lowerer, decl: ts.VariableDeclaration): boolean {
+  if (decl.initializer !== undefined || !ts.isIdentifier(decl.name)) return false;
+  const sf = decl.getSourceFile();
+  if (!sf.isDeclarationFile || L.isStdlibFile(sf)) return false;
+  return L.declTwinSourceOf(sf) !== null;
+}
+
 /** The compiled twin's storage behind a declaration-file binding.
  *
  * A generated module ships types in `X.d.ts` and values in `X.js`. The
