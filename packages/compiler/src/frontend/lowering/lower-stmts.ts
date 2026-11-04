@@ -7344,9 +7344,19 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
       // both values are discarded — a block of the two statement
       // lowerings. Chains associate left, so recursion flattens them.
       if (opKind === ts.SyntaxKind.CommaToken) {
+        // The left spine is walked iteratively into ONE block of statements: a minified bundle writes hundreds of operands
+        // (`(n={}).A=..., n.B=..., ...`), and a block per operator nested the emitted C past clang's 256-bracket limit.
+        const operands: ts.Expression[] = [];
+        let spine: ts.Expression = expr;
+        while (ts.isBinaryExpression(spine) && spine.operatorToken.kind === ts.SyntaxKind.CommaToken) {
+          operands.push(spine.right);
+          spine = spine.left;
+        }
+        operands.push(spine);
+        operands.reverse();
         return {
           kind: "block",
-          body: [lowerExprStatement(L, expr.left), lowerExprStatement(L, expr.right)],
+          body: operands.map((o) => lowerExprStatement(L, o)),
           loc: locOf(expr),
         };
       }
