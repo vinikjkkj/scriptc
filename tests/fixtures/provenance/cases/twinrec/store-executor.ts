@@ -1,7 +1,7 @@
 // mysql2's store shape: an executor record typed `{ execute: PoolConnection['execute'] }`. The
-// declared result of `execute` holds record arms (a result-set header class in the twin), which a
-// checked extraction from the twin's checked-dynamic answer cannot produce for a class instance
-// exactly, so the pair stays a COMPILE-TIME refusal.
+// declared result of `execute` holds record arms (a result-set header class in the twin), read off the
+// instance as views, and its first parameter (a record | string union) crosses into the untyped method as
+// the caller's own object.
 import { createPool } from "twinrec/promise";
 import type { Pool, PoolConnection } from "twinrec/promise";
 type Executor = { execute: PoolConnection["execute"] };
