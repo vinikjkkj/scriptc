@@ -13706,6 +13706,25 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       // Index-signature (overflow-carrying) shapes: the runtime walk —
       // declared fields first, then the overflow in JS own-key order
       // (lowerObjectIterOverIndexShape in lower-containers).
+      // VIEW GRANT: an index-signature VIEW lists the keys, values and entries of the OBJECT it is a view of, in the
+      // object's own order (the declared-first order of the snapshot would reorder an inherited object's keys).
+      {
+        let pure: ts.Expression = argNode;
+        while (ts.isParenthesizedExpression(pure) || ts.isNonNullExpression(pure)) pure = pure.expression;
+        while (ts.isPropertyAccessExpression(pure)) pure = pure.expression;
+        if (ts.isIdentifier(pure) && L.isViewShape(argIr)) {
+          const viaFn = objMember === "keys" ? "dyn.objKeys" : objMember === "values" ? "dyn.objValues" : "dyn.objEntries";
+          const resT = reflectOwnKeys ? arrayOf(STRING) : L.irTypeOf(call);
+          const plainIr = lowerObjectIterOverIndexShape(L, call, objMember, argIr, shape, reflectOwnKeys ? arrayOf(STRING) : undefined);
+          return L.viewSplit(
+            L.lowerExpr(argNode),
+            resT,
+            (obj) => L.coerceToExpected({ kind: "libCall", fn: viaFn, args: [obj], type: DYN, loc: locOf(call) }, resT),
+            () => plainIr,
+            locOf(call),
+          );
+        }
+      }
       return lowerObjectIterOverIndexShape(L, call, objMember, argIr, shape, reflectOwnKeys ? arrayOf(STRING) : undefined);
     }
     const loc = locOf(call);
