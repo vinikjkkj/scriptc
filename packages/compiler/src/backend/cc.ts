@@ -2054,6 +2054,13 @@ function objStagingRoot(root: string): string {
   return join(root, "staging");
 }
 
+/** How many compile jobs one build may run at once: SCRIPTC_CC_JOBS, else the CPU count. */
+function ccJobCount(): number {
+  const raw = process.env["SCRIPTC_CC_JOBS"];
+  const n = raw === undefined ? NaN : Number(raw);
+  return Number.isInteger(n) && n >= 1 ? n : availableParallelism();
+}
+
 /** The cached .o set for one flag flavor, compiled on first need. Concurrent
  * first builds (parallel test workers on a cold cache) may duplicate work;
  * per-file atomic renames make every winner equivalent. */
@@ -2452,7 +2459,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     curlFetch && driver.target !== null ? await ensureCurlStub(driver) : null;
   // rt() maps each runtime source's path on the command line: identity for
   // the historical single invocation, cached-.o substitution on cache misses.
-  const buildArgs = (rt: (path: string) => string): string[] => [
+  const buildArgs = (rt: (path: string) => string, pu: (path: string) => string = (p) => p): string[] => [
     "-std=c11",
     ...(engineOnly ? ["-DSCR_ENGINE"] : []),
     ...driver.targetArgs,
@@ -2623,7 +2630,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
           rt(join(rtDir, "scr_ures.c")),
           rt(join(rtDir, "scr_locale.c")),
           ...(opts.icuNf ? [rt(join(rtDir, "scr_nf.c"))] : []),
-          icuFile,
+          pu(icuFile),
         ]
       : []),
     ...(dateUnit
@@ -2770,11 +2777,11 @@ export async function compileC(opts: CcOptions): Promise<void> {
     // note about that. Never present for .c inputs, so the historical C
     // command line cannot change by a byte.
     ...(opts.cPath.endsWith(".ll") ? ["-Wno-override-module"] : []),
-    opts.cPath,
+    pu(opts.cPath),
     // The rest of a SPLIT program. Empty for every program under the
     // emitter's threshold, so their command line is unchanged element for
     // element.
-    ...(opts.programUnits ?? []),
+    ...(opts.programUnits ?? []).map(pu),
     ...(opts.linkInputs ?? []),
     ...(opts.systemLibraries ?? []).map((name) => `-l${name}`),
     ...gcSectionsLinkArgs(driver),
@@ -2979,7 +2986,47 @@ export async function compileC(opts: CcOptions): Promise<void> {
   } catch {
     objects = null; // cache trouble is never a build failure
   }
-  await runClang(buildArgs((p) => objects?.get(p) ?? p));
+  // A program of several translation units (a split program, or one carrying the ICU table) compiles them as parallel
+  // jobs, one `-c` per unit with the option set every unit sees, and links the objects in the order the single command
+  // line gave them. One clang driver compiles its inputs one after another, so the split bought nothing on its own.
+  // A single-unit program keeps the historical one-invocation command line.
+  const units = [opts.cPath, ...(opts.programUnits ?? []), ...(icuFile !== undefined ? [icuFile] : [])];
+  let unitObjects: Map<string, string> | null = null;
+  let unitDir: string | null = null;
+  const jobs = ccJobCount();
+  if (objects !== null && units.length > 1 && jobs > 1) {
+    await mkdir(objStagingRoot(root), { recursive: true });
+    unitDir = await mkdtemp(join(objStagingRoot(root), "units-"));
+    const dir = unitDir;
+    const done = new Map<string, string>();
+    const sizes = await Promise.all(units.map(async (u) => (await stat(u)).size));
+    // Largest first: the pool's wall time is bounded by its biggest unit, so that one starts at once.
+    const order = units.map((_, i) => i).sort((x, y) => sizes[y]! - sizes[x]!);
+    let next = 0;
+    const worker = async (): Promise<void> => {
+      for (;;) {
+        const k = next++;
+        if (k >= order.length) return;
+        const i = order[k]!;
+        const unit = units[i]!;
+        const out = join(dir, `unit${i}.o`);
+        await runClang([...cflags, ...(unit.endsWith(".ll") ? ["-Wno-override-module"] : []), "-c", unit, "-o", out]);
+        done.set(unit, out);
+      }
+    };
+    try {
+      await Promise.all(Array.from({ length: Math.min(jobs, units.length) }, worker));
+      unitObjects = done;
+    } catch (err) {
+      await rm(dir, { recursive: true, force: true });
+      throw err;
+    }
+  }
+  try {
+    await runClang(buildArgs((p) => objects?.get(p) ?? p, (p) => unitObjects?.get(p) ?? p));
+  } finally {
+    if (unitDir !== null) await rm(unitDir, { recursive: true, force: true });
+  }
   try {
     await mkdir(binDir, { recursive: true });
     const tmp = join(binDir, `.tmp-${keyHex.slice(0, 8)}-${process.pid}-${Math.random().toString(36).slice(2)}`);
