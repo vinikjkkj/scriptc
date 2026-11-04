@@ -10,7 +10,7 @@ import { rcSitesRequested } from "./emitter.js";
 import { accessorKeyOrderOf, accessorSlotProp, shapeHasAccessorSlots, VOID, arrayTypeHasLiveView, bytesAliasOnExtract, canConvertToDyn, canDynCheckTo, moduleUsesDynView, moduleInstanceLaneNeedsKg, moduleUsesInstanceRecordLane } from "../../ir/nodes.js";
 import { CLASS_PROPS_FIELD, EVAL_STATIC_CLASSES, dynNeverArm, dynNeverIn, armDiscrimLits, dynErrorClassKind, isDynErrorClass, canAdaptDynFuncTo, dynRestApplyable, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, UNION_ARM_JS_OBJECT_KINDS, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
-import { mangleClassStruct, mangleField, mangleFunction, mangleFnClosure, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
+import { mangleClassStruct, mangleField, mangleFunction, mangleFnClosure, mangleRecordNew, mangleRecordRelease, mangleRecordStruct } from "../mangle.js";
 import type { ClassMeta } from "./emit-shapes.js";
 import { RUNTIME_EMITTER_CLASS as RUNTIME_EMITTER_CLASS_W } from "../../ir/nodes.js";
 import { classvalCandidates, dynClassDisplayName, dynDescBase, dynEmitterSlot, dynRuntimeRoot, dynEnumerationFenced, dynMemberRows, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
@@ -3990,6 +3990,29 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
       ``,
     );
     return `&${name}`;
+  }
+
+  /** The sync of a VIEW's snapshot (recordViewSync): read the object again with the checked builder and exchange the
+   * fresh contents in. Emitted once per shape; a no-op on a record that is not a view. */
+  export function viewSyncHelper(E: CEmitter, shapeId: string): string {
+    const memo = E.viewSyncs.get(shapeId);
+    if (memo !== undefined) return memo;
+    const name = `sc_vsync_${E.viewSyncs.size}`;
+    E.viewSyncs.set(shapeId, name);
+    const st = mangleRecordStruct(shapeId);
+    E.walkerProtos.push(`static void ${name}(${st} *r);`);
+    const dc = E.dynCheckHelper({ kind: "record", shapeId });
+    E.walkerDefs.push(
+      `static void ${name}(${st} *r) { /* refresh the view's snapshot of ${shapeId} */`,
+      `  if (!r->${VIEW_MEMBER}) return;`,
+      `  ${st} *t = ${dc}(r->${VIEW_MEMBER}, NULL);`,
+      `  if (!t) return; /* the read threw: the exception is pending */`,
+      `  scr_rec_swap_body(r, t, sizeof *r);`,
+      `  ${mangleRecordRelease(shapeId)}(t);`,
+      `}`,
+      ``,
+    );
+    return name;
   }
 
   /** scr_dyn_origin_mark over an array crossing, with the converters a union-element array needs. */

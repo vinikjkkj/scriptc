@@ -14664,3 +14664,7 @@ ScrDyn *scr_dyn_origin_mark_elem(ScrDyn *d, void *obj, const char *tkey, void *(
   }
   return r;
 }
+void scr_rec_swap_body(void *a, void *b, size_t size) {
+  unsigned char *x = (unsigned char *)a + sizeof(size_t), *y = (unsigned char *)b + sizeof(size_t);
+  for (size_t i = 0; i + sizeof(size_t) < size; i++) { unsigned char t = x[i]; x[i] = y[i]; y[i] = t; }
+}

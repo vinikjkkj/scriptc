@@ -18,7 +18,7 @@ import { ORD_MEMBER, orderRecordPlanCached, ABSENT_KEY_TRAP_CODE, arrayOf, canBo
 import { unionKeyClasses, boxAccess, BYTES_NUM_KIND_C, BYTES_NUM_VAR_C, bytesElemKindC, cDecl, cFnPtrCast, cNumberLiteral, cStringLiteral, cType, DV_GET_KIND_C, DV_SET_KIND_C, elemAccess, mapKeyAccess, mapKeyKindC, mapValKindC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassNew, mangleClassRetain, mangleClassStruct, mangleField, mangleFnClosure, mangleFunction, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleVtStruct, mangleWrapper } from "../mangle.js";
 import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, VIEW_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
-import { dynDestrCheckHelper, dynIterNHelper, dynKeyGetHelper, originMarkC } from "./emit-walkers.js";
+import { dynDestrCheckHelper, dynIterNHelper, dynKeyGetHelper, originMarkC, viewSyncHelper } from "./emit-walkers.js";
 import { genResultThunkFor } from "./emit-async.js";
 import { emitCoroAwait, emitCoroHop, emitCoroUnionSuspend } from "./emit-coro.js";
 import { isStableReceiverOperand } from "../../ir/analysis.js";
@@ -2531,6 +2531,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         if (!f) throw new Error(`emitter bug: recordKeyPresent of unknown field ${e.shapeId}.${e.field}`);
         const cond = ownPresentCondC(shape, e.field, obj.name, E.undefinedArmTag(f.type), false, e.orSlot === true);
         return E.newTemp(e.type, cond ?? "true");
+      }
+      case "recordViewSync": {
+        const obj = emitStableReceiver(E, e.obj, []);
+        E.line(`${viewSyncHelper(E, e.shapeId)}(${obj.name});`);
+        E.emitPendingCheck();
+        return { name: "", type: e.type };
       }
       case "recordIsView":
       case "recordView": {

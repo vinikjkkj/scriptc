@@ -36,7 +36,7 @@ import { armDiscrimLits, dynNeverArm, dynNeverIn, canAdaptDynFuncTo, dynRestAppl
 import { EVAL_STATIC_CLASSES } from "../../ir/nodes.js";
 import { nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit as maskKeyBit } from "../../ir/nodes.js";
 import { INTERNAL_SLOT_WANT_TEXT } from "../emission/emit-walkers.js";
-import { mangleClassRelease, mangleClassRetain, mangleClassStruct, mangleFnClosure, mangleFunction, mangleRecordNew, mangleRecordStruct } from "../mangle.js";
+import { mangleClassRelease, mangleClassRetain, mangleClassStruct, mangleFnClosure, mangleFunction, mangleRecordNew, mangleRecordRelease, mangleRecordStruct } from "../mangle.js";
 import { dynMemberRows, dynStaticTable, type DynMemberClass } from "../dyn-members.js";
 import { KINDGATE_WIDE_KINDS, kindgateInstanceLane, kindgateWideLane, readKindgateDials } from "../kindgate.js";
 import { BlockBuilder } from "./blocks.js";
@@ -1047,6 +1047,41 @@ export class LlDyn {
     return `@${name}`;
   }
   private readonly viewElemOpsNames = new Map<string, string>();
+
+  /** The sync of a VIEW's snapshot (recordViewSync; the C twin is viewSyncHelper): read the object again with the
+   * checked builder and exchange the fresh contents in. Emitted once per shape. */
+  viewSyncHelper(shapeId: string): string {
+    const memo = this.viewSyncNames.get(shapeId);
+    if (memo !== undefined) return memo;
+    const name = `sc_vsync_${this.viewSyncNames.size}`;
+    this.viewSyncNames.set(shapeId, name);
+    const host = this.host;
+    const shape = host.recordsById.get(shapeId)!;
+    const struct = mangleRecordStruct(shapeId);
+    const dc = this.dynCheckHelper({ kind: "record", shapeId });
+    host.declare(`declare void @scr_rec_swap_body(ptr, ptr, i64)`);
+    this.defs.push(
+      `define internal void @${name}(ptr %r) ${FN_ATTRS} { ; refresh the view's snapshot of ${shapeId}`,
+      `  %vp = getelementptr inbounds %${struct}, ptr %r, i64 0, i32 ${viewSlotIndex(shape)}`,
+      `  %v = load ptr, ptr %vp`,
+      `  %isv = icmp ne ptr %v, null`,
+      `  br i1 %isv, label %go, label %done`,
+      `go:`,
+      `  %t = call ptr @${dc}(ptr %v, ptr null)`,
+      `  %tn = icmp eq ptr %t, null`,
+      `  br i1 %tn, label %done, label %swap`,
+      `swap:`,
+      `  call void @scr_rec_swap_body(ptr %r, ptr %t, i64 ptrtoint (ptr getelementptr (%${struct}, ptr null, i32 1) to i64))`,
+      `  call void @${mangleRecordRelease(shapeId)}(ptr %t)`,
+      `  br label %done`,
+      `done:`,
+      `  ret void`,
+      `}`,
+      ``,
+    );
+    return name;
+  }
+  private readonly viewSyncNames = new Map<string, string>();
 
   /** scr_dyn_origin_mark over an array crossing - with the converters a union-element array carries. */
   originMarkCall(B: BlockBuilder, t: IrType, conv: string, obj: string, retain: string, release: string): string {

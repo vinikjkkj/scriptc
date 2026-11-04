@@ -9127,6 +9127,12 @@ class LlEmitter {
         if (r === null) return { name: "true", type: e.type };
         return { name: r, type: e.type };
       }
+      case "recordViewSync": {
+        const obj = this.emitStableReceiver(e.obj, []);
+        B.line(`call void @${this.dyn.viewSyncHelper(e.shapeId)}(ptr ${obj.name})`);
+        this.emitPendingCheck();
+        return { name: "", type: e.type };
+      }
       case "recordIsView":
       case "recordView": {
         // VIEW GRANT: emit-exprs's twin. The `%view` member is NULL for a record built any other way.
