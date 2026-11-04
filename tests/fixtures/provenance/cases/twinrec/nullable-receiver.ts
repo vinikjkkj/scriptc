@@ -6,6 +6,8 @@ async function main(): Promise<void> {
   console.log(await on.go(), on.halt());
   const off = new Cluster({});
   console.log(await off.go(), off.halt());
+  const again = new Cluster({ sharded: true });
+  console.log(await again.rebuild([["a"], ["b"]]));
   try {
     off.breakIt();
   } catch (e) {
