@@ -24789,6 +24789,10 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
     return result;
   }
 
+  function pinReturnWhileLowering(inst: GenericInstance): void {
+    if (inst.implicitState === "lowering" && inst.implicitInferReturn === true) inst.returnPinned = true;
+  }
+
   /** The detached closures of implicit-any method `method` of `info` (see
    * lowerUnboundGenericMethodValue): the declarer's own, and with `withOverrides` one per
    * override strictly below it, shallowest first. Null when a body or override declines. */
@@ -24810,6 +24814,10 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
     const instOf = (g: GenericFnInfo): GenericInstance =>
       detach ? implicitDetachedInstance(L, blame, g) : implicitDefaultInstance(L, blame, g);
     const base = instOf(gfound.info);
+    // A method that returns another method of its own class (a state machine: `return Cmd.prototype.next`) asks for its own
+    // detached closure while its body is still lowering. The closure type it takes is the pin, so the pin is the ABI:
+    // inference must not later settle the return on a function type the thunk was not built with.
+    pinReturnWhileLowering(base);
     const paramTypes = base.params.map((p) => p.type);
     const fnT = funcOf(paramTypes, base.returnType);
     // Overrides of the generic method strictly below its declarer. A TYPED re-declaration
@@ -24821,7 +24829,14 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
         const g = s.genericMethods?.get(method);
         if (g !== undefined && g.implicitParams !== undefined) {
           const inst = instOf(g);
-          if (!typeEquals(funcOf(inst.params.map((p) => p.type), inst.returnType), fnT)) typedOverride = true;
+          pinReturnWhileLowering(inst);
+          if (!typeEquals(funcOf(inst.params.map((p) => p.type), inst.returnType), fnT)) {
+            // An override whose return inferred narrower than the declarer's checked-dynamic one (it never returns the dyn
+            // arm) differs in the return alone: its thunk adapts the answer to the declarer's dyn.
+            const sameParams = inst.params.length === paramTypes.length && inst.params.every((p, k) => typeEquals(p.type, paramTypes[k]!));
+            const adaptable = sameParams && base.returnType.kind === "dyn" && inst.returnType.kind !== "void" && inst.returnType.kind !== "dyn" && inst.returnType.kind !== "promise";
+            if (!adaptable) typedOverride = true;
+          }
           overrides.push({ cls: s, depth, inst });
         } else if (g !== undefined || s.methods.has(method)) {
           typedOverride = true;
@@ -24843,7 +24858,8 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
         const recv: IrExpr = detach
           ? { kind: "libCall", fn: "dyn.this", args: [], type: DYN, loc }
           : { kind: "varRef", localId: "self.0", type: selfT, loc };
-        const call: IrExpr = { kind: "call", callee: inst.name, args: [recv, ...args], type: base.returnType, loc };
+        const rawCall: IrExpr = { kind: "call", callee: inst.name, args: [recv, ...args], type: inst.returnType, loc };
+        const call: IrExpr = typeEquals(inst.returnType, base.returnType) ? rawCall : L.coerceToExpected(rawCall, base.returnType);
         const stmt: IrStmt = base.returnType.kind === "void" ? { kind: "exprStmt", expr: call, loc } : { kind: "return", value: call, loc };
         L.liftedFns.push({
           name,
