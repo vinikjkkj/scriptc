@@ -8,13 +8,7 @@
 set -u
 driver=$1; cli=$(readlink -f "$2"); out=$(readlink -m "$3")
 here=$(cd "$(dirname "$0")" && pwd)
-case "$driver" in
-  mysql2)  entry=mysql-entry.ts; extra=(--npm-static mysql2) ;;
-  pg)      entry=pg-entry.ts;    extra=() ;;
-  ioredis) entry=redis-entry.ts; extra=() ;;
-  mongodb) entry=mongo-entry.ts; extra=() ;;
-  *) echo "unknown driver: $driver" >&2; exit 2 ;;
-esac
+. "$here/entries.sh"
 mkdir -p "$(dirname "$out")"
 cd "$here"
 timeout 19800 node "$cli" build "$entry" --provenance-sources "${extra[@]}" --backend c -o "$out.bin" > "$out.txt" 2>&1
