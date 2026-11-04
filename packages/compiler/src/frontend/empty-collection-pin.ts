@@ -104,6 +104,14 @@ export function computeEmptyCollectionPins(program: ts.Program): Map<string, Ret
     if (ts.isParenthesizedExpression(p) || ts.isNonNullExpression(p) || ts.isAwaitExpression(p)) {
       return expectedOf(p, depth + 1);
     }
+    // The right of `a ?? b` / `a || b`, and a branch of `c ? a : b`, land where the whole expression lands.
+    if (
+      (ts.isBinaryExpression(p) && p.right === n &&
+        (p.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken || p.operatorToken.kind === ts.SyntaxKind.BarBarToken)) ||
+      (ts.isConditionalExpression(p) && (p.whenTrue === n || p.whenFalse === n))
+    ) {
+      return expectedOf(p, depth + 1);
+    }
     if (ts.isPropertyAssignment(p) && p.initializer === n && ts.isObjectLiteralExpression(p.parent)) {
       const name = ts.isIdentifier(p.name) || ts.isStringLiteral(p.name) ? p.name.text : undefined;
       if (name === undefined) return undefined;
