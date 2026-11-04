@@ -8767,7 +8767,9 @@ export function dynCopyHasLiveView(e: IrExpr): boolean {
 export function arrayTypeHasLiveView(t: IrType): boolean {
   if (t.kind !== "array") return false;
   const k = t.elem.kind;
-  return k === "f64" || k === "bool" || k === "string" || k === "dyn";
+  // A UNION element boxes through the converters its crossing carries (ScrDynElemOps); a union that cannot
+  // be boxed and checked keeps the plain copy (the emitter passes NULL ops).
+  return k === "f64" || k === "bool" || k === "string" || k === "dyn" || k === "union";
 }
 
 export function isJsonSafeType(

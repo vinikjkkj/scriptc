@@ -37,19 +37,24 @@
  * array to be a dyn array from creation. Arrays of arrays, records and class
  * instances keep scr_dyn_static_copy_refuse (their elements are COPIES with
  * no origin of their own). */
+/* The converters of the live view being operated on (set by dyn_view_origin, which every entry calls first). */
+static const ScrDynElemOps *g_view_ops = NULL;
+
 static ScrArr *dyn_view_origin(const ScrDyn *d) {
+  g_view_ops = NULL;
   if (d == NULL || !d->static_copy || d->kind != SCR_DYN_ARR || d->module_ns) return NULL;
   int is_arr = 0;
   void *o = scr_dyn_origin_peek(d, &is_arr);
   if (o == NULL || !is_arr) return NULL;
   ScrArr *a = (ScrArr *)o;
+  g_view_ops = scr_dyn_origin_elem_ops(d);
   switch (a->elem) {
     case SCR_ELEM_F64:
     case SCR_ELEM_BOOL:
     case SCR_ELEM_STR:
       return a;
     case SCR_ELEM_REF:
-      return a->elem_retain == &scr_dyn_retain_v ? a : NULL;
+      return a->elem_retain == &scr_dyn_retain_v || g_view_ops != NULL ? a : NULL;
     default:
       return NULL;
   }
@@ -71,6 +76,8 @@ static ScrDyn *dyn_view_box(const ScrArr *a, size_t i) {
     case SCR_ELEM_BOOL: return scr_dyn_new_bool(scr_arr_nochk_bool(a, (double)i));
     case SCR_ELEM_STR: return scr_dyn_new_str((ScrStr *)(uintptr_t)a->data[i]);
     default: {
+      const ScrDynElemOps *ops = g_view_ops;
+      if (ops != NULL) return ops->box((void *)(uintptr_t)a->data[i]); /* a union element: its own box into dyn */
       ScrDyn *e = (ScrDyn *)(uintptr_t)a->data[i];
       return e != NULL ? scr_dyn_retain(e) : scr_dyn_retain(scr_dyn_undefined());
     }
@@ -83,7 +90,10 @@ static bool dyn_view_fits(const ScrArr *a, const ScrDyn *v) {
     case SCR_ELEM_F64: return v->kind == SCR_DYN_NUM;
     case SCR_ELEM_BOOL: return v->kind == SCR_DYN_BOOL;
     case SCR_ELEM_STR: return v->kind == SCR_DYN_STR;
-    default: return true;
+    default: {
+      const ScrDynElemOps *ops = g_view_ops;
+      return ops == NULL || ops->fits(v);
+    }
   }
 }
 
@@ -141,7 +151,11 @@ static bool dyn_view_item_current(const ScrDyn *n, const ScrArr *o, size_t i) {
     }
     case SCR_ELEM_BOOL: return it->kind == SCR_DYN_BOOL && it->v.b == scr_arr_nochk_bool(o, (double)i);
     case SCR_ELEM_STR: return it->kind == SCR_DYN_STR && it->v.str == (ScrStr *)(uintptr_t)o->data[i];
-    default: return (const void *)it == (const void *)(uintptr_t)o->data[i];
+    default:
+      /* a union element boxes into a fresh dyn node each time, so "still current" cannot be answered by
+       * identity: report stale and let the caller pull */
+      if (g_view_ops != NULL) return false;
+      return (const void *)it == (const void *)(uintptr_t)o->data[i];
   }
 }
 
@@ -212,10 +226,13 @@ static void dyn_view_store(ScrArr *o, size_t i, ScrDyn *v) {
       if (i == o->len) scr_arr_push_ref(o, scr_str_retain(v->v.str));
       else scr_arr_set_ref(o, (double)i, scr_str_retain(v->v.str));
       break;
-    default:
-      if (i == o->len) scr_arr_push_ref(o, scr_dyn_retain(v));
-      else scr_arr_set_ref(o, (double)i, scr_dyn_retain(v));
+    default: {
+      const ScrDynElemOps *ops = g_view_ops;
+      void *slot = ops != NULL ? ops->unbox(v) : (void *)scr_dyn_retain(v);
+      if (i == o->len) scr_arr_push_ref(o, slot);
+      else scr_arr_set_ref(o, (double)i, slot);
       break;
+    }
   }
 }
 

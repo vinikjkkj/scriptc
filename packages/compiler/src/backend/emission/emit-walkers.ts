@@ -3838,7 +3838,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             // views"), exactly as the dynFrom crossing does.
             const { retain, release } = vAdapters(arm);
             const tk = cStringLiteral(Buffer.from(typeKey(arm), "utf8"));
-            d.push(`  case ${i}: { ${cType(arm).trim()} sc_a = (${cType(arm).trim()})scr_union_peek(v); return scr_dyn_origin_mark(${E.toDynHelper(arm)}(sc_a), (void *)sc_a, ${tk}, ${retain}, ${release}); }`);
+            d.push(`  case ${i}: { ${cType(arm).trim()} sc_a = (${cType(arm).trim()})scr_union_peek(v); return ${originMarkC(E, arm, `${E.toDynHelper(arm)}(sc_a)`, "sc_a", tk, retain, release)}; }`);
           } else {
             d.push(`  case ${i}: return ${E.toDynHelper(arm)}((${cType(arm).trim()})scr_union_peek(v));`);
           }
@@ -3966,6 +3966,41 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
    * result uniformly), funcs box (anonymous — the static name is gone by
    * the time a value flows through an adapter; SEMANTICS.md), everything
    * else rides the toDyn converter. `expr` is BORROWED in every arm. */
+  /** The converters of a live view of an array of UNIONS (ScrDynElemOps): the element's box into dyn, the soft
+   * match that says a dyn value can be held, and the checked unboxing. `NULL` when the union cannot be both
+   * boxed and checked (the crossing then stays the plain copy it was). Emitted once per union type. */
+  export function viewElemOpsC(E: CEmitter, arr: IrType): string {
+    if (arr.kind !== "array" || arr.elem.kind !== "union") return "NULL";
+    const u = arr.elem;
+    const getRec = (id: string) => E.recordsById.get(id);
+    const getUni = (id: string) => E.unionsById.get(id);
+    if (!canConvertToDyn(u, getRec, getUni) || !canDynCheckTo(u, getRec, getUni)) return "NULL";
+    const key = typeKey(u);
+    const memo = E.viewElemOps.get(key);
+    if (memo !== undefined) return `&${memo}`;
+    const name = `sc_velem_${E.viewElemOps.size}`;
+    E.viewElemOps.set(key, name);
+    const ct = cType(u).trim();
+    E.walkerProtos.push(`static const ScrDynElemOps ${name}; /* live view of ${key}[] */`);
+    E.walkerDefs.push(
+      `static ScrDyn *${name}_box(void *s) { return ${E.toDynHelper(u)}((${ct})s); }`,
+      `static bool ${name}_fits(const ScrDyn *v) { return ${E.dynMatchHelper(u)}(v); }`,
+      `static void *${name}_unbox(const ScrDyn *v) { return (void *)${E.dynCheckHelper(u)}(v, NULL); }`,
+      `static const ScrDynElemOps ${name} = { ${name}_box, ${name}_fits, ${name}_unbox };`,
+      ``,
+    );
+    return `&${name}`;
+  }
+
+  /** scr_dyn_origin_mark over an array crossing, with the converters a union-element array needs. */
+  export function originMarkC(E: CEmitter, t: IrType, conv: string, obj: string, tk: string, retain: string, release: string): string {
+    if (t.kind === "array" && t.elem.kind === "union") {
+      const ops = viewElemOpsC(E, t);
+      return `scr_dyn_origin_mark_elem(${conv}, (void *)${obj}, ${tk}, ${retain}, ${release}, ${ops})`;
+    }
+    return `scr_dyn_origin_mark(${conv}, (void *)${obj}, ${tk}, ${retain}, ${release})`;
+  }
+
   /** A class FIELD read as dyn: the converter's copy, marked with the field's
    * own array as its origin when the live view applies (arrayTypeHasLiveView). */
   function fieldDynC(E: CEmitter, t: IrType, expr: string): string {
@@ -3973,7 +4008,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     if (!arrayTypeHasLiveView(t)) return conv;
     const { retain, release } = vAdapters(t);
     const tk = cStringLiteral(Buffer.from(typeKey(t), "utf8"));
-    return `scr_dyn_origin_mark(${conv}, (void *)${expr}, ${tk}, ${retain}, ${release})`;
+    return originMarkC(E, t, conv, expr, tk, retain, release);
   }
   function toDynExprC(E: CEmitter, t: IrType, expr: string): string {
     if (t.kind === "dyn") return `scr_dyn_retain(${expr})`;
@@ -4086,7 +4121,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // live view of it, as every other crossing of such an array.
         const { retain, release } = vAdapters(t.ret);
         const tk = cStringLiteral(Buffer.from(typeKey(t.ret), "utf8"));
-        d.push(`  ScrDyn *out = scr_dyn_origin_mark(${toDynExprC(E, t.ret, "r")}, (void *)r, ${tk}, ${retain}, ${release});`);
+        d.push(`  ScrDyn *out = ${originMarkC(E, t.ret, toDynExprC(E, t.ret, "r"), "r", tk, retain, release)};`);
       } else {
         d.push(`  ScrDyn *out = ${toDynExprC(E, t.ret, "r")};`);
       }
