@@ -31,7 +31,17 @@ const PROPAGATE = new Set(["ternary", "logical", "seqExpr", "upcast", "downcast"
 function isSource(n: N): boolean {
   if (n.kind !== "dynKeyGet") return false;
   const k = n["key"] as N | undefined;
-  return k?.kind === "strLit" && k["value"] === "prototype";
+  if (k?.kind !== "strLit" || k["value"] !== "prototype") return false;
+  // The receiver is a FUNCTION value (an ES5 constructor, a plain function): its `prototype` is the ordinary object of the function,
+  // which instances reach through the prototype chain, so a write into it is exact. A class value is never typed `func` (a declared
+  // class is `classval`, a class expression evaluated inside a function is an `object` of its evaluation class), so such a read cannot
+  // be the prototype object of a class whose members live in a vtable.
+  const v = n["value"] as N | undefined;
+  if (v?.kind === "dynFrom") {
+    const inner = v["value"] as { type?: { kind?: string } } | undefined;
+    if (inner?.type?.kind === "func") return false;
+  }
+  return true;
 }
 
 /** Every escape or write of a `prototype` object read through dyn, in function order. */
