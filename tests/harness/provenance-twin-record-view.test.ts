@@ -85,10 +85,6 @@ const STORE_POOL_EXPECTED =
    count), never once more at the projection. */
 const STORE_GETTER_EXPECTED = "first 1\nsecond 2\nafter 3 4 1\nthird 5 true\n";
 
-/* cases/twinrec/store-getter.ts: a data member served by a counting getter runs once per program read (Node's own
-   count), never once more at the projection. */
-const STORE_GETTER_EXPECTED = "first 1\nsecond 2\nafter 3 4 1\nthird 5 true\n";
-
 /* cases/twinrec/state-machine.ts: mysql2's Command state machine (a method answers the next state, itself a method of
    its own class), recorded from node. */
 const STATE_MACHINE_EXPECTED =
