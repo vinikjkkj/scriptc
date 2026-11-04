@@ -26,10 +26,11 @@ class Store {
     if (keys.length === 0) return [];
     return this.withTransaction(async (conn) => {
       const known = new Map<string, number>([["a", conn]]);
+      const maps = new Map<string, Map<string, Uint8Array>>([["a", new Map<string, Uint8Array>([["a", new Uint8Array(3)]])]]);
       return keys.map((k) => {
         const v = known.get(k);
         if (!v) return { initialized: false, version: 0, byKey: new Map(), tags: new Set() };
-        return { initialized: true, version: v, byKey: new Map<string, Uint8Array>([[k, new Uint8Array(v)]]), tags: new Set<string>([k]) };
+        return { initialized: true, version: v, byKey: maps.get(k) ?? new Map(), tags: new Set<string>([k]) };
       });
     });
   }
