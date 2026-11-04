@@ -11,7 +11,7 @@ async function main(): Promise<void> {
   const inserted = await client.query("INSERT INTO rt (id, name, score, note) VALUES ($1, $2, $3, $4), ($5, $6, $7, $8)", [1, "alpha", 1.5, null, 2, "beta", 2.25, "x"]);
   console.log("insert", inserted.command, inserted.rowCount);
   const selected = await client.query("SELECT id, name, score, note FROM rt WHERE score > $1 ORDER BY id", [1]);
-  console.log("select", selected.rowCount, selected.fields.map((f) => f.name).join(","), JSON.stringify(selected.rows));
+  console.log("select", selected.rowCount, selected.fields.map((f: { name: string }) => f.name).join(","), JSON.stringify(selected.rows));
   await client.query("BEGIN");
   await client.query("UPDATE rt SET score = score + $1 WHERE id = $2", [10, 1]);
   await client.query("ROLLBACK");
@@ -24,7 +24,7 @@ async function main(): Promise<void> {
   try {
     await client.query("INSERT INTO rt (id, name) VALUES ($1, $2)", [1, "dup"]);
   } catch (e) {
-    const err = e as { code?: string; message: string };
+    const err = e as NodeJS.ErrnoException;
     console.log("error", err.code, err.message);
   }
   await client.query("DROP TABLE rt");
