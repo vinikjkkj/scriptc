@@ -20,9 +20,10 @@
  * The declared payload's RECORD arms (a result-set header class in the twin) are read off the
  * instance by the checked cast's instance lane (cases/twinrec/record.ts, corpus 23950-23955).
  *
- * The refusal that STAYS is pinned too: the store's `{ execute: PoolConnection['execute'] }` fails
- * at compile time (its slot's first parameter is a record | string union that would cross into
- * the untyped method as a COPY), never at run time.
+ * The record view is the OBJECT, not a copy of it (value model, 2026-11-03): the store's
+ * `{ execute: PoolConnection['execute'] }` lowers (its first parameter, a record | string union, crosses
+ * into the untyped method as the very object, so the callee's writes are the caller's reads), and a
+ * program that writes a field of the payload's record writes the instance's own member.
  */
 import { execFile } from "node:child_process";
 import { mkdirSync } from "node:fs";
@@ -106,12 +107,15 @@ describe("provenance: a twin class with untyped methods behind a program's own r
     }, 600_000);
   }
 
-  test("23850: the store's executor record stays a compile-time refusal (record arms in the payload)", async () => {
-    const entry = join(fixtureDir, "cases/twinrec-refused/store-executor.ts");
-    const { result } = await build(entry, "store-executor", "c");
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.diagnostics.map((d) => d.code)).toContain("SC2002");
-  }, 600_000);
+  for (const backend of ["c", "llvm"] as const) {
+    test(`24000: the store's executor record lowers and matches Node (${backend})`, async () => {
+      const entry = join(fixtureDir, "cases/twinrec/store-executor.ts");
+      const { result, outPath } = await build(entry, "store-executor", backend);
+      if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+      const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
+      expect(stdout).toBe("wrote INSERT INTO t\n");
+    }, 600_000);
+  }
 
   for (const backend of ["c", "llvm"] as const) {
     test(`23950: a record-armed payload read off a class instance matches Node (${backend})`, async () => {
@@ -133,14 +137,13 @@ describe("provenance: a twin class with untyped methods behind a program's own r
     }, 600_000);
   }
 
-  test("23950: a program that writes a field of the payload's record keeps a named compile-time refusal", async () => {
-    const entry = join(fixtureDir, "cases/twinrec-refused/record-payload-written.ts");
-    const { result } = await build(entry, "record-payload-written", "c");
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      const codes = result.diagnostics.map((d) => d.code);
-      expect(codes).toContain("SC1100");
-      expect(codes).not.toContain("SC9001");
-    }
-  }, 600_000);
+  for (const backend of ["c", "llvm"] as const) {
+    test(`24000: a program that writes a field of the payload's record writes the instance (${backend})`, async () => {
+      const entry = join(fixtureDir, "cases/twinrec/record-payload-written.ts");
+      const { result, outPath } = await build(entry, "record-payload-written", backend);
+      if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+      const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
+      expect(stdout).toBe("7\n");
+    }, 600_000);
+  }
 });
