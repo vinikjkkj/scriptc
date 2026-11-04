@@ -107,6 +107,14 @@ const LOOP_FACTORY_EXPECTED =
   "nil 0 null false false\n" +
   "null\n";
 
+/* cases/twinrec/empty-options.ts: a base class that starts `options` as an empty object literal (ioredis' Commander),
+   recorded from node. */
+const EMPTY_OPTIONS_EXPECTED =
+  "a\n" +
+  "p:k|5000|false|1\n" +
+  "k|5000|true|1\n" +
+  "undefined 5000 z\n";
+
 const PRIOR = process.env["SCRIPTC_PROVENANCE_MANIFEST"];
 afterEach(() => {
   setProvenanceSources(null);
@@ -201,6 +209,16 @@ describe("provenance: a twin class with untyped methods behind a program's own r
       if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
       const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
       expect(stdout).toBe(LOOP_FACTORY_EXPECTED);
+    }, 600_000);
+  }
+
+  for (const backend of ["c", "llvm"] as const) {
+    test(`24027: a base class's empty options literal holds the members the subclass puts there (${backend})`, async () => {
+      const entry = join(fixtureDir, "cases/twinrec/empty-options.ts");
+      const { result, outPath } = await build(entry, "empty-options", backend);
+      if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+      const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
+      expect(stdout).toBe(EMPTY_OPTIONS_EXPECTED);
     }, 600_000);
   }
 

@@ -14313,6 +14313,9 @@ function isClassPrototypeOf(L: Lowerer, e: ts.Expression): boolean {
 function dynShapedParamRead(L: Lowerer, stmt: ts.Statement): boolean {
   if (!ts.isExpressionStatement(stmt) || !ts.isBinaryExpression(stmt.expression)) return false;
   const rhs = stmt.expression.right;
+  // `this.options = {}` itself (ioredis' Commander): a JavaScript object literal is open-ended, and the members other
+  // code adds to it (a subclass' `this.options = defaults(...)`, the reads that follow) are what the field holds.
+  if (ts.isObjectLiteralExpression(rhs) && rhs.properties.length === 0) return true;
   if (!ts.isIdentifier(rhs)) return false;
   const sym = L.checker.getSymbolAtLocation(rhs);
   const d = sym ? L.checker.valueDeclarationOf(sym) : undefined;
