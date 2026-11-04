@@ -14963,6 +14963,18 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
             );
           }
         }
+        // ...and one whose VALUE is checked-dynamic (a JS `let ms;` first assigned `process.hrtime()` and then a number:
+        // the binding is the dyn slot, the checker's flow type is the tuple). The element is read off the dyn value by
+        // its index key, as every other dyn read.
+        if (obj.type.kind === "dyn") {
+          const di = tupleLiteralIndex(expr.argumentExpression);
+          if (di !== null) {
+            return L.maybeNarrow(
+              { kind: "dynKeyGet", key: { kind: "strLit", value: String(di), type: STRING, loc: locOf(expr) }, value: obj, type: DYN, loc: locOf(expr) },
+              expr,
+            );
+          }
+        }
         return tupleElementRead(L, expr, obj, receiverIr.shapeId, shape);
       }
       if (shape && !shape.tuple) {
