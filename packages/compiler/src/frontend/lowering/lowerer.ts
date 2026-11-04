@@ -3950,7 +3950,6 @@ export class Lowerer {
     // is not complete until the last body is lowered.
     this.reportRecordWidthCopies(functions);
     this.viewRewrite(functions);
-    this.fenceWrittenInstancePayloads(functions);
     this.fenceDynArrFromOnStrandedBox(functions);
 
     if (this.remainder) {
@@ -5178,8 +5177,7 @@ export class Lowerer {
         if (sh === undefined) return;
         for (const f of sh.fields) this.noteViewCast(f.type, seen);
         if (sh.indexValue !== undefined) this.noteViewCast(sh.indexValue, seen);
-        if (sh.tuple === true || sh.builtin !== undefined || shapeHasAccessorSlots(sh)) return;
-        if (sh.fields.length === 0 || sh.fields.some((f) => f.name.startsWith("%"))) return;
+        if (!this.viewCapableShape(sh)) return;
         viewShapeKeys.add(overflowShapeKey(sh.fields));
         return;
       }
@@ -8165,6 +8163,18 @@ export class Lowerer {
         return true;
       case "union":
         return (this.unions.get(t.unionId)?.arms ?? []).every((a) => this.dynArgExact(a));
+      case "record": {
+        // A record of a VIEW-capable shape crosses as the very object (the converter promotes it to a view of
+        // what it crossed as), so the callee's writes are the caller's reads. DISCOVERY asks for the grant
+        // here; the emit pass answers from the interned shape.
+        const sh = this.shapes.get(t.shapeId);
+        if (sh === undefined || !this.viewCapableShape(sh)) return false;
+        if (this.onEdge !== undefined) {
+          this.noteViewCast(t, this.viewCastSeen);
+          return true;
+        }
+        return sh.view === true;
+      }
       default:
         return false;
     }
@@ -8222,7 +8232,6 @@ export class Lowerer {
     const adopted: IrExpr = { kind: "libCall", fn: "dyn.adoptPromise", args: [expr], type: viaDyn, loc: expr.loc };
     const out = this.coerceToExpected(adopted, want);
     if (!typeEquals(out.type, want)) return null;
-    this.recordPayloadSites.push({ loc: expr.loc, payload: want.inner });
     return out;
   }
 
@@ -10688,78 +10697,10 @@ export class Lowerer {
     this.widthCopySites.push({ fromId, toId, dropped, loc });
   }
 
-  /** The declared Promise payloads a call site READS through the checked cast (adoptDynIntoTypedPromise)
-   * whose payload holds a record: the value the implementation hands over may be a class INSTANCE, which
-   * the record builder's instance lane reads into a COPY. Decided in run() once the write set is known. */
-  readonly recordPayloadSites: { loc: SrcLoc; payload: IrType }[] = [];
-
-  /** The copy is exact for everything the program READS, and a WRITE through the record is the one use
-   * of it that an instance holder would see in JavaScript (one object, one answer): a program that writes
-   * a field of a record shape reachable from such a payload keeps a compile-time refusal, named at the
-   * call that reads the payload. The write set is program-wide (recordSet nodes), as SC6004's is. */
-  fenceWrittenInstancePayloads(functions: IrFunction[]): void {
-    if (this.recordPayloadSites.length === 0) return;
-    const written = new Map<string, Set<string>>();
-    const seen = new Set<object>();
-    const stack: unknown[] = [functions.map((fn) => fn.body)];
-    while (stack.length > 0) {
-      const n = stack.pop();
-      if (n === null || typeof n !== "object" || seen.has(n)) continue;
-      seen.add(n);
-      if (Array.isArray(n)) {
-        for (const x of n) stack.push(x);
-        continue;
-      }
-      const o = n as Record<string, unknown>;
-      if (o["kind"] === "recordSet" && typeof o["shapeId"] === "string" && typeof o["field"] === "string") {
-        const s = written.get(o["shapeId"]) ?? new Set<string>();
-        s.add(o["field"]);
-        written.set(o["shapeId"], s);
-      }
-      for (const v of Object.values(o)) stack.push(v);
-    }
-    const reported = new Set<string>();
-    for (const site of this.recordPayloadSites) {
-      const hit = new Set<string>();
-      const visited = new Set<string>();
-      const walk = (t: IrType, depth: number): void => {
-        if (depth > 12) return;
-        switch (t.kind) {
-          case "array":
-            walk(t.elem, depth + 1);
-            return;
-          case "union":
-            for (const a of this.unions.get(t.unionId)?.arms ?? []) walk(a, depth + 1);
-            return;
-          case "record": {
-            if (visited.has(t.shapeId)) return;
-            visited.add(t.shapeId);
-            const sh = this.shapes.get(t.shapeId);
-            if (sh === undefined) return;
-            for (const f of written.get(t.shapeId) ?? []) hit.add(f);
-            for (const f of sh.fields) walk(f.type, depth + 1);
-            if (sh.indexValue !== undefined) walk(sh.indexValue, depth + 1);
-            return;
-          }
-          default:
-            return;
-        }
-      };
-      walk(site.payload, 0);
-      if (hit.size === 0) continue;
-      const key = `${site.loc.file}:${site.loc.start}`;
-      if (reported.has(key)) continue;
-      reported.add(key);
-      const names = [...hit].sort().map((f) => `'${f}'`).join(", ");
-      this.pushDiag(
-        unsupportedDiag(
-          "SC1100",
-          site.loc,
-          `the declared result '${this.fmt(site.payload)}' of this call: the member's implementation answers a checked-dynamic value that may be a class instance, the record read off it is a COPY, and this program writes ${hit.size === 1 ? "the field" : "the fields"} ${names} of a record shape reachable from that payload (JavaScript has one object: a write through the record is seen by whoever holds the instance, a copy's is not)`,
-          "read the payload without writing its fields (build your own record from it before a write), so the copy and the instance cannot disagree",
-        ),
-      );
-    }
+  /** Can records of this shape be views at all? Not a tuple (positional), not a builtin rendering or an
+   * accessor-carrying shape, not a compiler-internal one, not the empty field list. */
+  viewCapableShape(sh: IrRecordShape): boolean {
+    return sh.tuple !== true && sh.builtin === undefined && !shapeHasAccessorSlots(sh) && sh.fields.length > 0 && !sh.fields.some((f) => f.name.startsWith("%"));
   }
 
   /** True when records of this shape may be VIEWS (the view grant, types.ts viewShapeKeys). */
