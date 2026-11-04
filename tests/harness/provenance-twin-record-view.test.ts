@@ -115,6 +115,13 @@ const EMPTY_OPTIONS_EXPECTED =
   "k|5000|true|1\n" +
   "undefined 5000 z\n";
 
+/* cases/twinrec/proto-loop.ts: methods installed on a base prototype in a loop, called through a typed receiver
+   (ioredis' redis.quit()), recorded from node. */
+const PROTO_LOOP_EXPECTED =
+  "get:a:1\n" +
+  "set:a,b:2\n" +
+  "quit::3 3 r\n";
+
 const PRIOR = process.env["SCRIPTC_PROVENANCE_MANIFEST"];
 afterEach(() => {
   setProvenanceSources(null);
@@ -219,6 +226,16 @@ describe("provenance: a twin class with untyped methods behind a program's own r
       if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
       const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
       expect(stdout).toBe(EMPTY_OPTIONS_EXPECTED);
+    }, 600_000);
+  }
+
+  for (const backend of ["c", "llvm"] as const) {
+    test(`24028: a method installed on a prototype by a loop is called through a typed receiver (${backend})`, async () => {
+      const entry = join(fixtureDir, "cases/twinrec/proto-loop.ts");
+      const { result, outPath } = await build(entry, "proto-loop", backend);
+      if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+      const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
+      expect(stdout).toBe(PROTO_LOOP_EXPECTED);
     }, 600_000);
   }
 

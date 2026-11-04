@@ -23,6 +23,7 @@ import { erasedUnionOfArms, genResultRecord, instantiatedConstraint, isGenericCa
 import { PoisonError, dynFallbackType, dynUndefinedExpr, fnValueCodeOfNode, importCallHandleType, jsFuncNameOf, jsFuncValueNameOf, jsFuncValueSourceOf, newFnCtx, nodeThrowExpr, staticFnCodeOf, boundCodeOf, bindValueTargetIsCtor } from "./lowerer.js";
 import { pairedProtoClassOfValue, protoThisType } from "./proto-class-consume.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
+import { hasProtoTab, protoTabReadChain } from "./lower-prototab.js";
 import { checkedArmBridge, lowerWebCryptoGetRandomValues, refuseUnloweredSubtleCall, refuseUnloweredWebCrypto, refuseWebCryptoDestructuredArgs, refuseWebCryptoOwnKeys, sameValueDynOperand, unboundMethodThunk, undefinedArmedInAnswer, lowerWebCryptoMemberCall } from "./lower-exprs.js";
 import { NARROW_FIRST, builtinFenceHintOf, builtinModuleFnOf, dynOwnNamesHelper } from "./surfaces.js";
 import { OBJECT_PROTOTYPE_METHODS } from "./lowerer.js";
@@ -513,6 +514,55 @@ export interface GenericInstance {
       );
     }
   }
+
+/** `recv.m(args)` where `m` is named only by a declaration file while the receiver's compiled class chain owns a run-time
+ * prototype table (lower-prototab.ts): the member is whatever the program's computed prototype writes stored under that name.
+ * The call reads the table (the receiver's class chain, nearest first) and runs the stored function with the receiver as
+ * `this`; a name nothing stored is the call of undefined, which throws as JavaScript does. Null when the call is not this shape. */
+function lowerProtoTabMethodCall(L: Lowerer, call: ts.CallExpression): IrExpr | null {
+  const access = call.expression;
+  if (!ts.isPropertyAccessExpression(access) || access.questionDotToken !== undefined || call.questionDotToken !== undefined) return null;
+  if (L.dynamic) return null;
+  const methodSym = L.checker.getSymbolAtLocation(access.name);
+  const decls = methodSym ? L.checker.declarationsOf(methodSym) : [];
+  if (decls.length === 0 || !decls.every((d) => d.getSourceFile().isDeclarationFile && !L.isStdlibFile(d.getSourceFile()))) return null;
+  if (call.arguments.some((a) => ts.isSpreadElement(a))) return null;
+  const recvT = L.mapTypeOf(L.typeOf(access.expression));
+  if (recvT?.kind !== "object") return null;
+  const info = L.classes.get(recvT.className);
+  const name = access.name.text;
+  if (info === undefined || info.builtinError || !hasProtoTab(L, info)) return null;
+  if (L.findMethodOn(info, name) !== null || findGenericMethodOn(L, info, name) !== null || L.findMethodOn(info, `get:${name}`) !== null) return null;
+  const loc = locOf(call);
+  const recv = L.lowerExpr(access.expression);
+  if (recv.type.kind !== "object") return null;
+  const recvTmp = L.declareHiddenLocal("%ptRecv", recv.type);
+  const fnTmp = L.declareHiddenLocal("%ptFn", DYN);
+  const recvRef: IrExpr = { kind: "varRef", localId: recvTmp.id, type: recv.type, loc };
+  const boxed: IrExpr = internalBox(L, { kind: "dynFrom", value: recvRef, type: DYN, loc });
+  const fn = protoTabReadChain(L, info, { kind: "strLit", value: name, type: STRING, loc }, null, loc);
+  const args: IrExpr[] = call.arguments.map((a) => {
+    const v = L.coerceToExpected(L.lowerExpr(a), DYN);
+    if (v.type.kind !== "dyn") L.unsupported("SC1100", a, `passing '${L.fmt(v.type)}' values to a prototype-installed method (the value cannot convert into the checked-dynamic tree)`);
+    return v;
+  });
+  const callE = dynCallWithThis(L, boxed, { kind: "varRef", localId: fnTmp.id, type: DYN, loc }, args, access.getText(), loc);
+  const want = L.mapTypeOf(L.typeOf(call));
+  let result: IrExpr = callE;
+  if (want !== null && want.kind !== "dyn") {
+    result = (want.kind === "promise" ? L.adoptDynIntoTypedPromise(callE, want) : null) ?? L.coerceToExpected(callE, want);
+  }
+  return {
+    kind: "seqExpr",
+    stmts: [
+      { kind: "varDecl", localId: recvTmp.id, init: recv, loc },
+      { kind: "varDecl", localId: fnTmp.id, init: fn, loc },
+    ],
+    result,
+    type: result.type,
+    loc,
+  };
+}
 
 /** A method call on a value from an UNCOMPILABLE declaration-only module —
    * a `.d.ts` (workspace or npm) with no compiled implementation twin, the
@@ -6350,6 +6400,12 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         // declaration-only refusal that would otherwise answer a .d.ts-typed receiver.
         const grafted = lowerEmitterMixinCall(L, expr);
         if (grafted !== null) return grafted;
+      }
+      {
+        // A method the declaration names and the class never declares, installed on its prototype by a computed write
+        // (ioredis' Commander loop): the call reads the prototype table and runs with the receiver as this.
+        const viaTab = lowerProtoTabMethodCall(L, expr);
+        if (viaTab !== null) return viaTab;
       }
       refuseUncompilableExternMethod(L, expr, expr.expression);
       // The lib fence's METHOD-CALL chokepoint: a stdlib-declared member
