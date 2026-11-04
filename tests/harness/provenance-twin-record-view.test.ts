@@ -70,6 +70,17 @@ const RECORD_EXPECTED =
   "conn header 1 42\n" +
   "ended\n";
 
+/* cases/twinrec/store-pool.ts, recorded the same way. */
+const STORE_POOL_EXPECTED =
+  "calls 0\n" +
+  "exec true SELECT 1:1 1\n" +
+  "query q:SELECT 2:2 1\n" +
+  "calls after write+exec 11\n" +
+  "ping true function\n" +
+  "ping now false undefined\n" +
+  "ping gone true\n" +
+  "inline 1 true\n";
+
 const PRIOR = process.env["SCRIPTC_PROVENANCE_MANIFEST"];
 afterEach(() => {
   setProvenanceSources(null);
@@ -134,6 +145,16 @@ describe("provenance: a twin class with untyped methods behind a program's own r
       if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
       const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
       expect(stdout).toBe("object 0\n");
+    }, 600_000);
+  }
+
+  for (const backend of ["c", "llvm"] as const) {
+    test(`24020: a Promise of a record of methods and live members is served by a view of the instance (${backend})`, async () => {
+      const entry = join(fixtureDir, "cases/twinrec/store-pool.ts");
+      const { result, outPath } = await build(entry, "store-pool", backend);
+      if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+      const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
+      expect(stdout).toBe(STORE_POOL_EXPECTED);
     }, 600_000);
   }
 

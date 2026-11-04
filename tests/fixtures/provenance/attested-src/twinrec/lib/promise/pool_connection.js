@@ -24,5 +24,11 @@ class PromisePoolConnection extends EventEmitter {
   release() {
     this.emit('release', this.calls);
   }
+  enablePing() {
+    this.ping = () => new this.Promise((resolve) => resolve(undefined));
+  }
+  disablePing() {
+    delete this.ping;
+  }
 }
 module.exports = PromisePoolConnection;
