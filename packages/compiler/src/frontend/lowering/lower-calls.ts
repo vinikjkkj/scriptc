@@ -3116,7 +3116,14 @@ const SYMBOLIC_PAIR_BUDGET = 256;
         // to would copy it on the way (writes through `this` would land on
         // the copy). Calls through a const-bound table never cross a slot.
         const mapped = hasUntypedFnMember(L, t, 2) ? null : L.mapTypeOf(t);
-        if (bindableImplicitIr(mapped)) {
+        // An EMPTY object (`defaults({}, a, b)`) is the accumulator of a function that adds its members at run time
+        // (`object[key] = source[key]`): typing the parameter as the empty record would make the answer an empty
+        // record too, and every member read off it a fence. Such a parameter keeps the checked-dynamic slot.
+        const emptyObject = mapped?.kind === "record" && (() => {
+          const sh = L.shapes.get(mapped.shapeId);
+          return sh !== undefined && sh.fields.length === 0 && sh.indexValue === undefined && sh.tuple !== true;
+        })();
+        if (!emptyObject && bindableImplicitIr(mapped)) {
           bound = mapped;
           argTypes.set(sym, t);
         }
