@@ -12408,6 +12408,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24031-async-return-of-a-promise-ticks.ts": {
+   "order": [
+    "<repo>/tests/corpus/24031-async-return-of-a-promise-ticks.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2404-kill-throw-catch.ts": {
    "order": [
     "<repo>/tests/corpus/2404-kill-throw-catch.ts"
