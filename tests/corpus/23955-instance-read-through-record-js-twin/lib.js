@@ -41,4 +41,4 @@ function execute(kind) {
     [new ColumnDefinition('id', 'rows'), new ColumnDefinition('label', 'rows')],
   ]);
 }
-exports.execute = execute;
+export { execute };
