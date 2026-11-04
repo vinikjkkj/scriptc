@@ -15872,6 +15872,12 @@ export class Lowerer {
     const raw = this.lowerExpr(node);
     const e = this.keyedReadAtReturnSlot(raw, expected, node) ?? raw;
     if (expected.kind === "void" && e.kind === "unitLit") return null;
+    if (this.ctx.isAsync && e.type.kind === "promise" && expected.kind !== "promise" && returnRunsHandlers(node)) {
+      // `return <promise>` inside a try that has a catch or a finally: JavaScript does NOT wait for the promise inside
+      // the try (a rejection skips the catch, the finally runs before it settles), but the return here parks on it
+      // first. Until the wait can move outside the try, the build says so instead of answering differently.
+      this.unsupported("SC1090", node, "returning a promise from inside a try with a catch or finally in an async function (JavaScript settles the returned promise after the handlers run, which the compiled return does not yet do; write `return await <promise>` or move the return out of the try)");
+    }
     return this.coerceInto(node, this.asyncReturnFlatten(e, expected, this.ctx.isAsync), expected);
   }
 
@@ -15915,7 +15921,22 @@ export class Lowerer {
   asyncReturnFlatten(value: IrExpr, expected: IrType, isAsync: boolean | undefined): IrExpr {
     if (!isAsync || expected.kind === "promise") return value;
     if (value.type.kind === "promise") {
-      return { kind: "awaitExpr", value, type: value.type.inner, loc: value.loc };
+      // `return <promise>` from an async function is NOT `return await <promise>`: resolving the result promise with a
+      // thenable costs one more microtask turn (the job that calls its then) before the usual await turn, so a promise
+      // that is already settled delivers one tick later than a plain await would. The hop reproduces that turn; for a
+      // pending promise it changes nothing a program can observe (the result settles one turn after the promise does).
+      const loc = value.loc;
+      const tmp = this.declareHiddenLocal("%retp", value.type);
+      return {
+        kind: "seqExpr",
+        stmts: [
+          { kind: "varDecl", localId: tmp.id, init: value, loc },
+          { kind: "exprStmt", expr: { kind: "libCall", fn: "async.hop", args: [], type: VOID, loc }, loc },
+        ],
+        result: { kind: "awaitExpr", value: { kind: "varRef", localId: tmp.id, type: value.type, loc }, type: value.type.inner, loc },
+        type: value.type.inner,
+        loc,
+      };
     }
     if (value.type.kind !== "union" || typeEquals(value.type, expected)) return value;
     const def = this.unions.get(value.type.unionId);
@@ -19480,4 +19501,17 @@ export class Lowerer {
     access: ts.PropertyAccessExpression,): IrExpr | null {
     return lowerIslandMethodCall(this, call, access);
   }
+}
+
+/** True when `node` (a returned expression) sits where a try's handlers still run after the return: in the try block of a
+ * try statement that has a catch or a finally, or in the catch block of one that has a finally. */
+function returnRunsHandlers(node: ts.Node): boolean {
+  for (let cur: ts.Node = node, p: ts.Node | undefined = node.parent; p !== undefined; cur = p, p = p.parent) {
+    if (ts.isFunctionLike(p)) return false;
+    if (ts.isTryStatement(p)) {
+      if (cur === p.tryBlock && (p.catchClause !== undefined || p.finallyBlock !== undefined)) return true;
+      if (cur === p.catchClause && p.finallyBlock !== undefined) return true;
+    }
+  }
+  return false;
 }
