@@ -1,0 +1,9 @@
+{
+  "packages": {
+    "pgtypes": {
+      "dir": "./attested-src/pgtypes",
+      "commit": "7777777777777777777777777777777777777777",
+      "repo": "https://github.com/example/pgtypes"
+    }
+  }
+}
