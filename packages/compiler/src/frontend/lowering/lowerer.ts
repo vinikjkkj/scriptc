@@ -10788,7 +10788,7 @@ export class Lowerer {
     for (const fn of functions) {
       let n = 0;
       const temp = (type: IrType): IrLocal => {
-        const local: IrLocal = { id: `%vw.${n}`, name: "%vw", type, mutable: false };
+        const local: IrLocal = { id: `%vwr.${n}`, name: "%vwr", type, mutable: false };
         n++;
         fn.locals.push(local);
         return local;
