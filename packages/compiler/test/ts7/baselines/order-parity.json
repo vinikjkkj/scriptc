@@ -12207,6 +12207,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24050-fn-type-any-positions-pass-store-call.ts": {
+   "order": [
+    "<repo>/tests/corpus/24050-fn-type-any-positions-pass-store-call.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2406-switch-clause-sibling-narrow.ts": {
    "order": [
     "<repo>/tests/corpus/2406-switch-clause-sibling-narrow.ts"
