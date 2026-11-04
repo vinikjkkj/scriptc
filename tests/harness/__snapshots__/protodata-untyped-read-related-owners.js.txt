@@ -1,0 +1,6 @@
+protodata-untyped-read-related-owners.js:6:27 - error SC1090: reading the prototype member 'label' through an untyped value (the box answers the instance field, not the prototype's value; give the receiver a class type) is not supported yet
+
+  5 | Derived.prototype.label = "derived-label";
+  6 | function show(x) { return x.label; }
+    |                           ^~~~~~~
+  7 | console.log(show(new Derived()), show(new Base()));
