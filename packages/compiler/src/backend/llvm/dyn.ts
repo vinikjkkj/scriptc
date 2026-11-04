@@ -1619,7 +1619,7 @@ export class LlDyn {
           B.startBlock(lk);
           // VIEW GRANT, INSTANCE RECEIVER (hard builder only) - emit-walkers.ts's row: the record is a view of
           // the instance and nothing is read at the cast (a getter runs at each READ of the member).
-          if (inst && !soft && shape.view === true && !shape.fields.some((f) => this.mayHoldFunc(f.type))) {
+          if (inst && !soft && shape.view === true && shape.indexValue === undefined && !shape.fields.some((f) => this.mayHoldFunc(f.type))) {
             const lLazy = B.newLabel("dcr.vl");
             const lEager = B.newLabel("dcr.ve");
             B.condBr(isInst, lLazy, lEager);
