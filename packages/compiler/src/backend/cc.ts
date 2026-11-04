@@ -90,6 +90,7 @@ const RUNTIME_UNIT_DEPS: Readonly<Record<string, readonly string[]>> = {
   "scr_http_body.c": ["scr_dyn_handle.c", "scr_http.c", "scr_net.c", "scr_stream.c"],
   "scr_http2.c": ["scr_dyn_handle.c", "scr_http.c", "scr_net.c", "scr_tls.c"],
   "scr_net.c": ["scr_dyn_handle.c", "scr_loop_kqueue.c", "scr_loop_epoll.c", "scr_loop_wsapoll.c"],
+  "scr_stream_view.c": ["scr_net.c"],
   "scr_readline.c": ["scr_events.c"],
   "scr_regex.c": ["scr_assert.c"],
   "scr_stream.c": ["scr_events_emitter.c"],
@@ -2672,6 +2673,9 @@ export async function compileC(opts: CcOptions): Promise<void> {
         ]
       : []),
     ...(net ? [rt(join(rtDir, "scr_net.c"))] : []),
+    // A socket where a ReadableStream is expected (net.Socket is a Duplex is a Readable): the view unit names both sides, so it
+    // links exactly when the program holds a socket AND a ReadableStream-typed slot (scr_stream_view.c, the scr_cipher_key.c pattern).
+    ...(net && (opts.childStream ?? false) ? [rt(join(rtDir, "scr_stream_view.c"))] : []),
     ...(http ? [rt(join(rtDir, "scr_http.c"))] : []),
     ...(http2 ? [rt(join(rtDir, "scr_http2.c"))] : []),
     // The WebSocket client family. Three units, one gate: the codec is

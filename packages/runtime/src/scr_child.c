@@ -1219,6 +1219,8 @@ struct ScrChildStream {
   ScrChildStreamEndL *end_ls;
   size_t n_end, cap_end;
   struct ScrChildStream *next; /* the service registry (+1) */
+  const ScrChildStreamForeign *fx; /* non-NULL: a view of a foreign stream object (see scr_child_stream_foreign_new) */
+  void *fobj;                      /* the foreign object (+1), when fx */
 };
 
 static ScrChildStream *scr_child_streams = NULL;
@@ -1308,6 +1310,7 @@ void scr_child_stream_release(ScrChildStream *s) {
   if (!s || s->rc == SIZE_MAX) return;
   if (--s->rc == 0) {
     scr_child_stream_drop_listeners(s); /* only reachable pre-'end' via leaks */
+    if (s->fx != NULL) s->fx->release(s->fobj);
     if (s->h != NULL) CloseHandle(s->h);
     scr_childstream_free_note();
     free(s);
@@ -1456,6 +1459,10 @@ static void scr_child_stream_start_flow(ScrChildStream *s) {
 
 void scr_child_stream_on_data(ScrChildStream *s, ScrClosure *cb /*moves*/,
                               ScrChildStreamDataFn fn, bool once) {
+  if (s->fx != NULL) {
+    s->fx->on_data(s->fobj, cb, fn, once);
+    return;
+  }
   if (s->eof || s->h == NULL) {
     scr_closure_release(cb);
     return;
@@ -1473,6 +1480,10 @@ void scr_child_stream_on_data(ScrChildStream *s, ScrClosure *cb /*moves*/,
 }
 
 void scr_child_stream_on_end(ScrChildStream *s, ScrClosure *cb /*moves*/, bool once) {
+  if (s->fx != NULL) {
+    s->fx->on_end(s->fobj, cb, once);
+    return;
+  }
   (void)once; /* 'end' fires at most once; the flag changes nothing */
   if (s->eof || s->h == NULL) {
     scr_closure_release(cb);
@@ -2818,6 +2829,8 @@ struct ScrChildStream {
   ScrChildStreamEndL *end_ls;
   size_t n_end, cap_end;
   struct ScrChildStream *next; /* the service registry (+1) */
+  const ScrChildStreamForeign *fx; /* non-NULL: a view of a foreign stream object (see scr_child_stream_foreign_new) */
+  void *fobj;                      /* the foreign object (+1), when fx */
 };
 
 static ScrChildStream *scr_child_streams = NULL;
@@ -3065,6 +3078,7 @@ void scr_child_stream_release(ScrChildStream *s) {
   if (!s || s->rc == SIZE_MAX) return;
   if (--s->rc == 0) {
     scr_child_stream_drop_listeners(s); /* only reachable pre-'end' via leaks */
+    if (s->fx != NULL) s->fx->release(s->fobj);
     if (s->fd >= 0) close(s->fd);
     scr_childstream_free_note();
     free(s);
@@ -3271,6 +3285,10 @@ static void scr_child_stream_start_flow(ScrChildStream *s) {
  * and never fire, the stdin rule. */
 void scr_child_stream_on_data(ScrChildStream *s, ScrClosure *cb /*moves*/,
                                ScrChildStreamDataFn fn, bool once) {
+  if (s->fx != NULL) {
+    s->fx->on_data(s->fobj, cb, fn, once);
+    return;
+  }
   if (s->eof || s->fd < 0) {
     scr_closure_release(cb);
     return;
@@ -3290,6 +3308,10 @@ void scr_child_stream_on_data(ScrChildStream *s, ScrClosure *cb /*moves*/,
 /* stream.on/once("end", cb): fires once at EOF; alone it neither reads
  * nor keeps the loop alive (the stdin rule). */
 void scr_child_stream_on_end(ScrChildStream *s, ScrClosure *cb /*moves*/, bool once) {
+  if (s->fx != NULL) {
+    s->fx->on_end(s->fobj, cb, once);
+    return;
+  }
   (void)once; /* 'end' fires at most once; the flag changes nothing */
   if (s->eof || s->fd < 0) {
     scr_closure_release(cb);
@@ -3839,3 +3861,23 @@ void scr_children_poll(void) {
 }
 
 #endif /* !_WIN32 */
+
+/* A VIEW of a foreign stream object behind a ReadableStream-typed value. In Node's class hierarchy a net.Socket IS a stream.Duplex,
+ * which IS a stream.Readable, so a socket handed to a parameter typed ReadableStream (pg-protocol's parse(stream, callback)) is
+ * accepted as itself: the view keeps the socket (+1) and forwards the stream surface (on/once data and end) to it, no copy and no
+ * second implementation of the events. scr_dyn_readable_unadopt answers the original socket when the view is boxed again. */
+ScrChildStream *scr_child_stream_foreign_new(void *obj, const ScrChildStreamForeign *ops) {
+  ScrChildStream *s = (ScrChildStream *)calloc(1, sizeof *s);
+  if (s == NULL) scr_child_oom();
+  s->rc = 1;
+  s->eof = false;
+#ifndef _WIN32
+  s->fd = -1;
+#endif
+  s->fx = ops;
+  s->fobj = ops->retain(obj);
+  scr_childstream_alloc_note();
+  return s;
+}
+
+void *scr_child_stream_foreign_obj(const ScrChildStream *s) { return s != NULL && s->fx != NULL ? s->fobj : NULL; }
