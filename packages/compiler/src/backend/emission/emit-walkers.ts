@@ -2589,7 +2589,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           // walker, which must read the members to pick an arm, keeps the eager build below, and so does a
           // shape with a METHOD member: the eager build binds the method to the instance, which a read of the
           // function value through the dyn path would not).
-          if (inst && !soft && shape.view === true && !shape.fields.some((f) => typeMayHoldFunc(E, f.type))) {
+          if (inst && !soft && shape.view === true && shape.indexValue === undefined && !shape.fields.some((f) => typeMayHoldFunc(E, f.type))) {
             d.push(`  if (d->kind == SCR_DYN_OBJINST) {`);
             d.push(`    ${cDecl(t, "r")} = ${mangleRecordNew(t.shapeId)}();`);
             d.push(`    r->${VIEW_MEMBER} = scr_dyn_retain((ScrDyn *)d);`);
