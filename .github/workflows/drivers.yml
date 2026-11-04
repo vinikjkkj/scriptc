@@ -12,9 +12,13 @@ on:
         description: Branch or commit whose compiler is measured
         required: true
       drivers:
-        description: Drivers to build (space or comma separated subset of mysql2 pg ioredis mongodb)
+        description: Drivers to build (space or comma separated subset of mysql2 pg ioredis mongodb, plus the connect and roundtrip entries mysql2-connect pg-connect mysql2-roundtrip pg-roundtrip)
         required: false
         default: mysql2 pg ioredis mongodb
+      run:
+        description: "true: run the built binary of every selected -connect / -roundtrip entry beside Node (MySQL 8 and Postgres 16 service containers) and diff stdout, stderr and the exit code"
+        required: false
+        default: "false"
       tag:
         description: Free text echoed in the run name, to find the run
         required: false
@@ -30,21 +34,30 @@ jobs:
     timeout-minutes: 5
     outputs:
       matrix: ${{ steps.m.outputs.matrix }}
+      runmatrix: ${{ steps.m.outputs.runmatrix }}
     steps:
       - id: m
         env:
           DRIVERS: ${{ inputs.drivers }}
+          RUN: ${{ inputs.run }}
         run: |
           set -euo pipefail
           out=()
+          runs=()
           for d in ${DRIVERS//,/ }; do
             case "$d" in
               mysql2|pg|ioredis|mongodb) out+=("\"$d\"") ;;
+              mysql2-connect|pg-connect|mysql2-roundtrip|pg-roundtrip) out+=("\"$d\""); runs+=("\"$d\"") ;;
               *) echo "unknown driver: $d"; exit 1 ;;
             esac
           done
           [ ${#out[@]} -gt 0 ] || { echo "no driver selected"; exit 1; }
           echo "matrix=[$(IFS=,; echo "${out[*]}")]" >> "$GITHUB_OUTPUT"
+          if [ "$RUN" = true ]; then
+            echo "runmatrix=[$(IFS=,; echo "${runs[*]:-}")]" >> "$GITHUB_OUTPUT"
+          else
+            echo "runmatrix=[]" >> "$GITHUB_OUTPUT"
+          fi
 
   build:
     name: driver ${{ matrix.driver }}
@@ -104,5 +117,78 @@ jobs:
         with:
           name: driver-${{ matrix.driver }}-bin
           path: out/${{ matrix.driver }}.bin
+          if-no-files-found: ignore
+          retention-days: 14
+
+  # The built binary of a connect or roundtrip entry, run beside Node on the same entry. MySQL 8 and Postgres 16 are service
+  # containers of this job (127.0.0.1:3306 / :5432, password p); the connect entries need no server (a closed port).
+  run:
+    name: run ${{ matrix.driver }}
+    needs: [plan, build]
+    if: ${{ always() && needs.plan.outputs.runmatrix != '[]' && needs.plan.outputs.runmatrix != '' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        driver: ${{ fromJSON(needs.plan.outputs.runmatrix) }}
+    services:
+      mysql:
+        image: mysql:8
+        env:
+          MYSQL_ROOT_PASSWORD: p
+          MYSQL_DATABASE: d
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1 -pp"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: p
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: rigsrc
+          sparse-checkout: tests/driver-rigs
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24.15.0
+      - name: Install the rig
+        working-directory: rigsrc/tests/driver-rigs
+        run: pnpm install --frozen-lockfile --ignore-workspace --ignore-scripts --config.strict-dep-builds=false
+      - uses: actions/download-artifact@v4
+        id: bin
+        continue-on-error: true
+        with:
+          name: driver-${{ matrix.driver }}-bin
+          path: out
+      - name: Run the binary and Node, diff stdout, stderr and the exit code
+        run: |
+          set -u
+          if [ ! -f "out/${{ matrix.driver }}.bin" ]; then
+            echo "no binary: the build of ${{ matrix.driver }} was refused (see the build job)"
+            exit 1
+          fi
+          chmod +x "out/${{ matrix.driver }}.bin"
+          bash rigsrc/tests/driver-rigs/run-compare.sh "${{ matrix.driver }}" "out/${{ matrix.driver }}.bin" "$GITHUB_WORKSPACE/runout"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: run-${{ matrix.driver }}
+          path: runout
           if-no-files-found: ignore
           retention-days: 14
