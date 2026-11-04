@@ -8252,8 +8252,8 @@ export class Lowerer {
         if (pf === null) return false;
         funcs++;
         // The checked cast serves a method only when its signature adapts (or the boxed value IS that signature,
-        // which an untyped twin's method never is): a Promise result does not adapt.
-        if (!canAdaptDynFuncTo(pf.fnT, getR, getU) || pf.optional !== null) unadaptable++;
+        // which an untyped twin's method never is): a Promise result does not adapt. An OPTIONAL method whose signature adapts is served by the checked cast too (its union takes the adapted arm).
+        if (!canAdaptDynFuncTo(pf.fnT, getR, getU)) unadaptable++;
       } else if (!canDynCheckTo(f.type, getR, getU)) {
         return false;
       }
@@ -10962,7 +10962,7 @@ export class Lowerer {
         }
         for (const v of Object.values(node as Record<string, unknown>)) visit(v);
         const o = node as Record<string, unknown> & { kind?: unknown };
-        if (o.kind === "recordGet" && viewShapes.has(o["shapeId"] as string) && (o["type"] as IrType).kind === "union" && this.projectableFunc(o["type"] as IrType)?.optional != null) {
+        if (o.kind === "recordGet" && viewShapes.has(o["shapeId"] as string) && (o["type"] as IrType).kind === "union" && this.projectableFunc(o["type"] as IrType)?.optional != null && this.projectableRecord({ kind: "record", shapeId: o["shapeId"] as string })) {
           this.viewRewriteOptionalMethod(o as unknown as Extract<IrExpr, { kind: "recordGet" }>, temp, (t) => {
             const l = temp(t);
             l.boxed = true;
