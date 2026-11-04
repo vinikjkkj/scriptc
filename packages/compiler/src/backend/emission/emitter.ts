@@ -260,6 +260,8 @@ const SPLIT_MAX_PARTS = 16;
  * program's objects, so it must not also declare them. See `declData`. */
 const UNIT0_GUARD = "SCR_PROGRAM_UNIT0";
 
+const COLD_ATTR = "__attribute__((cold, noinline)) ";
+
 /** Drop a file-scope `static ` from one emitted line.
  *
  * Only ever applied to lines the emitter itself wrote at column 0, and the
@@ -267,7 +269,10 @@ const UNIT0_GUARD = "SCR_PROGRAM_UNIT0";
  * TU, all 67,181 `static` tokens are at the start of a line, none indented.
  * A function-local static would be indented and is therefore never touched. */
 function stripStatic(line: string): string {
-  return line.startsWith("static ") ? line.slice(7) : line;
+  if (line.startsWith("static ")) return line.slice(7);
+  // a cold function's attribute precedes the linkage token (signature())
+  if (line.startsWith(COLD_ATTR + "static ")) return COLD_ATTR + line.slice(COLD_ATTR.length + 7);
+  return line;
 }
 
 /** One emitted program: the shared header (null when there is a single TU)
@@ -3046,7 +3051,7 @@ export class CEmitter {
     // Lifted functions receive their closure first.
     if (fn.captures !== undefined) parts.unshift("ScrClosure *sc_env");
     const params = parts.length ? parts.join(", ") : "void";
-    return `${fn.cold ? "__attribute__((cold, noinline)) " : ""}${this.link}${cType(fn.returnType)} ${mangleFunction(fn.name)}(${params})`;
+    return `${fn.cold ? COLD_ATTR : ""}${this.link}${cType(fn.returnType)} ${mangleFunction(fn.name)}(${params})`;
   }
 
   emitFunction(fn: IrFunction): void {
