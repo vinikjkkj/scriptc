@@ -12522,6 +12522,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24112-engine-function-beside-native-regex.js": {
+   "order": [
+    "<repo>/tests/corpus/24112-engine-function-beside-native-regex.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/24113-esm-entry-reads-json-through-a-commonjs-chain/main.mjs": {
    "order": [
     "<repo>/tests/corpus/24113-esm-entry-reads-json-through-a-commonjs-chain/index.cjs",
