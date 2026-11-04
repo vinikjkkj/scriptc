@@ -74,7 +74,7 @@ import { OWN_SHADOW_ROOTS, applyFieldNotes, applyOwnShadows, inOwnShadowFamily }
 import { CLASS_BUILTIN_CTORLESS, CLASS_NO_DYN_NEW, EVAL_NO_SRC_CLASSES, GRAFTED_EMITTER_CLASSES, GRAFTED_EMITTER_CELL_CLASSES, GRAFTED_ROWS_FENCED_OPS, GRAFTED_PROPS_EXACT_OPS, EVAL_STATIC_CLASSES, dynReflectionSite, emitterStateWriteSites, graftedBoxSites, moduleBoxesEmitters } from "../../ir/nodes.js";
 import { computeTwinEdits, type TwinEdits } from "./emitter-twin.js";
 import { canBoxFuncIntoDyn } from "../../ir/nodes.js";
-import { procStreamDynMemberFence, NULL_T, strandTrap, armDiscrimLits, arrayOf, BOOL, canBoxClassIntoDyn, internalSlotFields, isRefCounted, canAdaptDynFuncTo, dynRestApplyable, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, shapeHasAccessorSlots, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
+import { arrayTypeHasLiveView, procStreamDynMemberFence, NULL_T, strandTrap, armDiscrimLits, arrayOf, BOOL, canBoxClassIntoDyn, internalSlotFields, isRefCounted, canAdaptDynFuncTo, dynRestApplyable, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, shapeHasAccessorSlots, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
 import { type DynamicImportResolution, type NpmBuiltinUse, type NpmLazyTrap } from "../npm.js";
 import { provenanceActive } from "../provenance-registry.js";
 import {
@@ -8155,6 +8155,11 @@ export class Lowerer {
     };
   }
 
+  private dumpArms(t: IrType): string {
+    if (t.kind !== "union") return this.fmt(t).slice(0, 120);
+    return (this.unions.get(t.unionId)?.arms ?? []).map((a) => `${a.kind}${a.kind === "record" ? `(${String(this.shapes.get(a.shapeId)?.fields.length)}f idx=${String(this.shapes.get(a.shapeId)?.indexValue !== undefined)} view=${String(this.shapes.get(a.shapeId)?.view === true)})` : a.kind === "array" ? `<${a.elem.kind}>` : ""}`).join("|");
+  }
+
   /** True when a value of type `t` enters a checked-dynamic parameter WITHOUT losing identity: scalars,
    * units, and unions of those. Arrays, records, maps and class instances are copied (or boxed) on
    * the way in, which a callee that keeps or mutates its argument could observe. */
@@ -8171,6 +8176,9 @@ export class Lowerer {
         return true;
       case "union":
         return (this.unions.get(t.unionId)?.arms ?? []).every((a) => this.dynArgExact(a));
+      case "array":
+        // A dyn copy of a scalar/dyn-element array is a live view of its origin (arrident), so it crosses as the array.
+        return arrayTypeHasLiveView(t);
       case "record": {
         // A record of a VIEW-capable shape crosses as the very object (the converter promotes it to a view of
         // what it crossed as), so the callee's writes are the caller's reads. DISCOVERY asks for the grant
@@ -9356,7 +9364,7 @@ export class Lowerer {
         // The conversion into a checked-dynamic parameter COPIES an array or record, where Node hands the
         // callee the caller's own object: only values with no identity to lose cross exactly.
         if (p.type.kind === "dyn" && fnT.params[k]!.kind !== "dyn" && !this.dynArgExact(fnT.params[k]!)) {
-          return `slot parameter ${k} (${typeKey(fnT.params[k]!).slice(0, 90)}) would be COPIED into the method's checked-dynamic parameter (Node passes the caller's object itself)`;
+          return `slot parameter ${k} (${typeKey(fnT.params[k]!).slice(0, 90)}) would be COPIED into the method's checked-dynamic parameter (Node passes the caller's object itself)${process.env["SCRIPTC_VIEW_WHY"] !== undefined ? ` arms: ${this.dumpArms(fnT.params[k]!)}` : ""}`;
         }
       } else if (this.omittedArgFor(p.type, synth) === null) {
         return `the method's parameter ${k} is not optional and the slot omits it`;
