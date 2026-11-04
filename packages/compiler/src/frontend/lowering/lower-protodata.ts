@@ -37,7 +37,7 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import type { ClassInfo } from "./lower-classes.js";
 import { isJsSourceFile, locOf } from "../program.js";
-import { BOOL, DYN, IrExpr, IrGlobal, IrStmt, IrType, UNDEFINED_T, isUnitType, typeEquals, type SrcLoc } from "../../ir/nodes.js";
+import { BOOL, DYN, IrExpr, IrGlobal, IrStmt, IrType, UNDEFINED_T, canConvertToDyn, isUnitType, typeEquals, type SrcLoc } from "../../ir/nodes.js";
 import { dynFallbackType } from "./lowerer.js";
 
 export interface ProtoDataSlot {
@@ -329,6 +329,8 @@ export function protoDataMemberRead(L: Lowerer, expr: ts.PropertyAccessExpressio
   const recvTs = L.checker.getBaseTypeOfLiteralType(L.typeOf(expr.expression));
   const untypedRecv = (recvTs.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0;
   if (untypedRecv && L.protoDataNonUndef.has(name)) {
+    const exact = untypedProtoDataRead(L, expr, name, loc);
+    if (exact !== null) return exact;
     L.unsupported("SC1090", expr, `reading the prototype member '${name}' through an untyped value (the box answers the instance field, not the prototype's value; give the receiver a class type)`);
   }
   const recvT = L.mapTypeOf(L.typeOf(expr.expression));
@@ -500,4 +502,70 @@ export function protoDataAssignStmt(L: Lowerer, expr: ts.BinaryExpression): IrSt
   if (!slot) return null;
   const value = L.lowerExprExpecting(expr.right, slot.type);
   return { kind: "assign", localId: slot.global.id, value, loc: locOf(expr) };
+}
+
+/** `recv.name` through an UNTYPED receiver, where `name` is prototype data of ES classes. The box answers the instance field
+ * (undefined while unset), never the prototype's value, so the read is completed here: when the field read answers undefined
+ * and the receiver is an instance of a class carrying the datum (a subclass included), the answer is that class's prototype
+ * slot, exactly the typed read's `field is undefined ? slot : field`. The receiver is evaluated once.
+ *
+ * Null (the caller keeps the compile-time refusal) when the answer cannot be built exactly: a datum fenced at collection, two
+ * related classes writing the same name (which slot wins depends on the instance), a slot whose type has no dyn form, or a
+ * receiver that does not lower to a dyn value. */
+function untypedProtoDataRead(L: Lowerer, expr: ts.PropertyAccessExpression, name: string, loc: SrcLoc): IrExpr | null {
+  const owners: ClassInfo[] = [];
+  for (const info of L.classes.values()) {
+    const n = info.def.name;
+    if (L.protoDataFenced.has(`${n}.${name}`)) return null;
+    if (L.protoDataSlots.get(n)?.has(name) === true) owners.push(info);
+  }
+  if (owners.length === 0) return null;
+  const isAncestor = (a: ClassInfo, b: ClassInfo): boolean => {
+    for (let c: ClassInfo | null = b; c; c = c.base) if (c === a) return true;
+    return false;
+  };
+  for (const a of owners) {
+    for (const b of owners) if (a !== b && isAncestor(a, b)) return null;
+  }
+  for (const o of owners) {
+    // a subclass declaring its own storage of the name hides the slot from the family test below
+    if (subclassDeclares(L, o, name)) return null;
+    if (o.generic !== undefined || o.genericSplitBase === true) return null;
+    const slot = L.protoDataSlots.get(o.def.name)!.get(name)!;
+    if (!canConvertToDyn(slot.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))) return null;
+  }
+  const recv = L.lowerExprExpecting(expr.expression, DYN);
+  if (recv.type.kind !== "dyn") return null;
+  const rTmp = L.declareHiddenLocal("%pdRecv", DYN);
+  const vTmp = L.declareHiddenLocal("%pdVal", DYN);
+  const rRef = (): IrExpr => ({ kind: "varRef", localId: rTmp.id, type: DYN, loc });
+  const vRef = (): IrExpr => ({ kind: "varRef", localId: vTmp.id, type: DYN, loc });
+  let answer: IrExpr = vRef();
+  for (const o of owners) {
+    const slot = L.protoDataSlots.get(o.def.name)!.get(name)!;
+    const slotRef: IrExpr = { kind: "varRef", localId: slot.global.id, type: slot.type, loc };
+    const slotDyn: IrExpr = slot.type.kind === "dyn" ? slotRef : { kind: "dynFrom", value: slotRef, type: DYN, loc };
+    const classBox: IrExpr = { kind: "dynFrom", value: { kind: "classRef", className: o.def.name, type: { kind: "classval", className: o.def.name }, loc }, type: DYN, loc };
+    const isUnset: IrExpr = { kind: "dynTest", test: "undefined", value: vRef(), type: BOOL, loc };
+    const isInst: IrExpr = { kind: "libCall", fn: "dyn.instanceOf", args: [rRef(), classBox], type: BOOL, loc };
+    answer = {
+      kind: "ternary",
+      cond: { kind: "logical", op: "&&", left: isUnset, right: isInst, type: BOOL, loc },
+      then: slotDyn,
+      else_: answer,
+      type: DYN,
+      loc,
+    };
+  }
+  const read: IrExpr = { kind: "dynKeyGet", key: { kind: "strLit", value: name, type: { kind: "string" } as IrType, loc }, value: rRef(), type: DYN, loc };
+  return {
+    kind: "seqExpr",
+    stmts: [
+      { kind: "varDecl", localId: rTmp.id, init: recv, loc },
+      { kind: "varDecl", localId: vTmp.id, init: read, loc },
+    ],
+    result: answer,
+    type: DYN,
+    loc,
+  };
 }
