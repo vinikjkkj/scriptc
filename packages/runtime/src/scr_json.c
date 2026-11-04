@@ -2232,6 +2232,7 @@ typedef struct {
   void *obj;        /* the static origin, RETAINED for the copy's lifetime */
   const char *tkey; /* compiler-emitted static literal; never owned */
   void (*release)(void *);
+  const void *elemops; /* the converters of a union-element array's live view (ScrDynElemOps), or NULL */
 } ScrDynOriginEnt;
 
 static ScrDynOriginEnt *dyn_origin_tab = NULL;
@@ -2347,6 +2348,7 @@ ScrDyn *scr_dyn_origin_mark(ScrDyn *d, void *obj, const char *tkey,
   dyn_origin_tab[i].obj = taken;
   dyn_origin_tab[i].tkey = tkey;
   dyn_origin_tab[i].release = release;
+  dyn_origin_tab[i].elemops = NULL;
   /* Re-marking a node that already carries an origin: the LAST crossing
    * wins, which is the only one whose static value is still the one this
    * copy was built from. Cannot happen from the emitted crossing (the
@@ -14643,4 +14645,22 @@ void scr_rec_view_promote(ScrDyn **slot, ScrDyn *obj) {
   ScrDyn *old = *slot;
   *slot = scr_dyn_retain(obj);
   if (old != NULL) scr_dyn_release(old);
+}
+
+/* VIEW GRANT, union-element live arrays: the converters ride the origin entry of the copy (every union array
+ * shares one element retain function, so the array cannot name its own). */
+const ScrDynElemOps *scr_dyn_origin_elem_ops(const ScrDyn *d) {
+  if (d == NULL || !d->static_copy || dyn_origin_cap == 0) return NULL;
+  ScrDynOriginEnt *e = &dyn_origin_tab[dyn_origin_slot(d)];
+  return e->d == d ? (const ScrDynElemOps *)e->elemops : NULL;
+}
+
+ScrDyn *scr_dyn_origin_mark_elem(ScrDyn *d, void *obj, const char *tkey, void *(*retain)(void *),
+                                 void (*release)(void *), const ScrDynElemOps *ops) {
+  ScrDyn *r = scr_dyn_origin_mark(d, obj, tkey, retain, release);
+  if (ops != NULL && r != NULL && r->static_copy && dyn_origin_cap != 0) {
+    ScrDynOriginEnt *e = &dyn_origin_tab[dyn_origin_slot(r)];
+    if (e->d == r) e->elemops = ops;
+  }
+  return r;
 }

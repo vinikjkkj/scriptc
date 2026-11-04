@@ -662,6 +662,8 @@ export class CEmitter {
   readonly unionToStrFns = new Map<string, string>();
   readonly unionJoinFns = new Map<string, string>();
   readonly dynMatchers = new Map<string, string>();
+  /** Union types whose arrays cross as live views: key -> the emitted ScrDynElemOps (emit-walkers viewElemOpsC). */
+  readonly viewElemOps = new Map<string, string>();
   readonly dynBuilders = new Map<string, string>();
   /** The MERGED union-arm walkers (sc_da_*), per typeKey — one function
    * that decides an arm and builds it, so no matcher has to be kept in

@@ -1020,6 +1020,48 @@ export class LlDyn {
   /** `sc_dc_<n>(ptr d, ptr path) -> T` — validate the checked-dynamic tree against T and
    * BUILD the typed value (+1), or throw the catchable path-annotated
    * TypeError and return a dummy with the pending flag set. */
+  /** The converters of a live view of an array of UNIONS (ScrDynElemOps, the C twin is viewElemOpsC): `null` when the
+   * union cannot be both boxed and checked, else the global holding { box, fits, unbox }. */
+  private viewElemOps(arr: IrType): string {
+    if (arr.kind !== "array" || arr.elem.kind !== "union") return "null";
+    const u = arr.elem;
+    const getRec = (id: string) => this.host.recordsById.get(id);
+    const getUni = (id: string) => this.host.unionsById.get(id);
+    if (!canConvertToDyn(u, getRec, getUni) || !canDynCheckTo(u, getRec, getUni)) return "null";
+    const key = typeKey(u);
+    const memo = this.viewElemOpsNames.get(key);
+    if (memo !== undefined) return `@${memo}`;
+    const name = `sc_velem_${this.viewElemOpsNames.size}`;
+    this.viewElemOpsNames.set(key, name);
+    const box = this.toDynHelper(u);
+    const fits = this.dynMatchHelper(u);
+    const check = this.dynCheckHelper(u);
+    this.defs.push(
+      `define internal ptr @${name}_unbox(ptr %d) ${FN_ATTRS} {`,
+      `  %r = call ptr @${check}(ptr %d, ptr null)`,
+      `  ret ptr %r`,
+      `}`,
+      `@${name} = internal constant { ptr, ptr, ptr } { ptr @${box}, ptr @${fits}, ptr @${name}_unbox } ; live view of ${key}[]`,
+      ``,
+    );
+    return `@${name}`;
+  }
+  private readonly viewElemOpsNames = new Map<string, string>();
+
+  /** scr_dyn_origin_mark over an array crossing - with the converters a union-element array carries. */
+  originMarkCall(B: BlockBuilder, t: IrType, conv: string, obj: string, retain: string, release: string): string {
+    const host = this.host;
+    const m = B.tmp();
+    if (t.kind === "array" && t.elem.kind === "union") {
+      host.declare(`declare ptr @scr_dyn_origin_mark_elem(ptr, ptr, ptr, ptr, ptr, ptr)`);
+      B.line(`${m} = call ptr @scr_dyn_origin_mark_elem(ptr ${conv}, ptr ${obj}, ptr ${host.cstr(typeKey(t))}, ptr ${retain}, ptr ${release}, ptr ${this.viewElemOps(t)})`);
+      return m;
+    }
+    host.declare(`declare ptr @scr_dyn_origin_mark(ptr, ptr, ptr, ptr, ptr)`);
+    B.line(`${m} = call ptr @scr_dyn_origin_mark(ptr ${conv}, ptr ${obj}, ptr ${host.cstr(typeKey(t))}, ptr ${retain}, ptr ${release})`);
+    return m;
+  }
+
   dynCheckHelper(t: IrType): string {
     const key = typeKey(t);
     const existing = this.dynBuilders.get(key);
@@ -3427,11 +3469,7 @@ export class LlDyn {
               // The array arm is the SAME array its other holders name: record
               // the origin so the copy is a live view (the C twin's note).
               const { retain, release } = vAdapters(host, arm);
-              host.declare(`declare ptr @scr_dyn_origin_mark(ptr, ptr, ptr, ptr, ptr)`);
-              const m = B.tmp();
-              B.line(
-                `${m} = call ptr @scr_dyn_origin_mark(ptr ${r}, ptr ${p}, ptr ${host.cstr(typeKey(arm))}, ptr ${retain}, ptr ${release})`,
-              );
+              const m = this.originMarkCall(B, arm, r, p, retain, release);
               B.terminate(`ret ptr ${m}`);
             } else {
               B.terminate(`ret ptr ${r}`);
@@ -5307,12 +5345,7 @@ export class LlDyn {
       if (arrayTypeHasLiveView(t.ret)) {
         // The C twin's note: a returned array stays one array with its other holders.
         const { retain, release } = vAdapters(host, t.ret);
-        host.declare(`declare ptr @scr_dyn_origin_mark(ptr, ptr, ptr, ptr, ptr)`);
-        const m = B.tmp();
-        B.line(
-          `${m} = call ptr @scr_dyn_origin_mark(ptr ${out}, ptr ${r}, ptr ${host.cstr(typeKey(t.ret))}, ptr ${retain}, ptr ${release})`,
-        );
-        out = m;
+        out = this.originMarkCall(B, t.ret, out, r, retain, release);
       }
       if (isRefCounted(t.ret)) B.line(`call void ${releaseSym(host, t.ret)}(ptr ${r})`);
       B.terminate(`ret ptr ${out}`);
@@ -5449,12 +5482,7 @@ export class LlDyn {
               // The array field is the SAME array the instance holds: the copy
               // records it as its origin (the C twin is fieldDynC).
               const { retain, release } = vAdapters(host, row.type);
-              host.declare(`declare ptr @scr_dyn_origin_mark(ptr, ptr, ptr, ptr, ptr)`);
-              const m = B.tmp();
-              B.line(
-                `${m} = call ptr @scr_dyn_origin_mark(ptr ${r}, ptr ${v}, ptr ${host.cstr(typeKey(row.type))}, ptr ${retain}, ptr ${release})`,
-              );
-              return m;
+              return this.originMarkCall(B, row.type, r, v, retain, release);
             })();
         B.terminate(`ret ptr ${out}`);
         this.defs.push(
