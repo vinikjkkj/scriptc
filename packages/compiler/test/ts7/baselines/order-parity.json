@@ -12510,6 +12510,14 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24113-esm-entry-reads-json-through-a-commonjs-chain/main.mjs": {
+   "order": [
+    "<repo>/tests/corpus/24113-esm-entry-reads-json-through-a-commonjs-chain/index.cjs",
+    "<repo>/tests/corpus/24113-esm-entry-reads-json-through-a-commonjs-chain/vs.cjs",
+    "<repo>/tests/corpus/24113-esm-entry-reads-json-through-a-commonjs-chain/main.mjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2412-dowhile-guard-trailing-test.ts": {
    "order": [
     "<repo>/tests/corpus/2412-dowhile-guard-trailing-test.ts"
