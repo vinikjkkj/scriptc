@@ -5773,7 +5773,13 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
           const x = L.lowerExprExpecting(expr.arguments[0]!, F64);
           return { kind: "libCall", fn: "num.isNaN", args: [x], type: BOOL, loc };
         }
-        const s = L.lowerExprExpecting(expr.arguments[0]!, STRING);
+        // A checked-dynamic argument (an untyped parameter, pg's `parseInt(val('port', config), 10)` with a numeric port): the
+        // global's first step IS ToString(string) (ECMA 19.2.5), which dyn.toStringCoerce runs over any dyn value.
+        const probedStr = probeLower(L, expr.arguments[0]!);
+        const s: IrExpr =
+          probedStr?.type.kind === "dyn"
+            ? { kind: "libCall", fn: "dyn.toStringCoerce", args: [L.lowerExpr(expr.arguments[0]!)], type: STRING, loc }
+            : L.lowerExprExpecting(expr.arguments[0]!, STRING);
         const radix: IrExpr = expr.arguments[1]
           ? L.lowerExprExpecting(expr.arguments[1], F64)
           : { kind: "numLit", value: 0, type: F64, loc };
