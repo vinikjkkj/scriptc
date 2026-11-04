@@ -3915,6 +3915,17 @@ function validateFunction(
         }
         break;
       }
+      case "recordViewSync": {
+        checkExpr(e.obj);
+        const shape = records.get(e.shapeId);
+        if (!shape) err(`recordViewSync on undeclared shape "${e.shapeId}"`, e.loc);
+        else {
+          expectType(e.obj, { kind: "record", shapeId: e.shapeId }, "recordViewSync receiver");
+          if (shape.view !== true) err(`recordViewSync on shape ${e.shapeId}, which carries no view member`, e.loc);
+          if (e.type.kind !== "void") err(`recordViewSync must be void, got ${e.type.kind}`, e.loc);
+        }
+        break;
+      }
       case "recordIsView":
       case "recordView": {
         checkExpr(e.obj);

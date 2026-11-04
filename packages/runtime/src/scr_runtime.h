@@ -6141,6 +6141,9 @@ ScrDyn *scr_rec_view_get(ScrDyn *slot);
 /* VIEW GRANT, PROMOTION: the record's `%view` slot now names `obj` (retained; a previous non-view value is
  * released), because the record just crossed into a dynamic slot as that object. */
 void scr_rec_view_promote(ScrDyn **slot, ScrDyn *obj);
+/* VIEW GRANT, SYNC: exchange everything after the refcount word of two records of one shape (the view's snapshot
+ * for a freshly read one); the caller then releases the second, which owns the old contents. */
+void scr_rec_swap_body(void *a, void *b, size_t size);
 
 /* [[Get]] / `in` along a saved [[Prototype]] chain, keyed by a ScrStr:
  * the record's miss path once its own keys have answered nothing. */

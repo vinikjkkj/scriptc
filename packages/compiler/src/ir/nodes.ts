@@ -7931,6 +7931,10 @@ export type IrExpr =
    * (the member is empty). Only a shape carrying the view member (IrRecordShape.view) may ask. Borrowed operand, never
    * throws. */
   | { kind: "recordIsView"; obj: IrExpr; shapeId: string; type: IrType; loc: SrcLoc }
+  /** Brings a VIEW's snapshot (the overflow map of an index-signature shape, the declared slots) up to date from the
+   * object it views: the checked builder reads the object again and the fresh contents replace the old. A no-op on a
+   * record that is not a view. Void; MAY THROW (the read can fail a type check or run a getter). */
+  | { kind: "recordViewSync"; obj: IrExpr; shapeId: string; type: IrType; loc: SrcLoc }
   /** The object `obj` is a view of, as an owned (+1) dyn - THE SAME object the cast read (identity),
    * not a copy. The undefined singleton when `obj` is not a view (recordIsView asks first). */
   | { kind: "recordView"; obj: IrExpr; shapeId: string; type: IrType; loc: SrcLoc }

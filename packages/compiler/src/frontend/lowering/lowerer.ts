@@ -124,6 +124,7 @@ import { settleOrValueArms,
   overflowShapeKeysAsked,
   overflowShapeKeysDenied,
   viewShapeKeys,
+  viewShapeKey,
   isArrayIndexKey,
   ShapeRegistry,
   typeKey,
@@ -5118,7 +5119,7 @@ export class Lowerer {
     }
     for (const id of denied) {
       const sh = this.shapes.get(id);
-      if (sh !== undefined) viewShapeKeys.delete(overflowShapeKey(sh.fields));
+      if (sh !== undefined) viewShapeKeys.delete(viewShapeKey(sh.fields, sh.indexValue));
     }
   }
 
@@ -5186,7 +5187,7 @@ export class Lowerer {
         for (const f of sh.fields) this.noteViewCast(f.type, seen);
         if (sh.indexValue !== undefined) this.noteViewCast(sh.indexValue, seen);
         if (!this.viewCapableShape(sh)) return;
-        viewShapeKeys.add(overflowShapeKey(sh.fields));
+        viewShapeKeys.add(viewShapeKey(sh.fields, sh.indexValue));
         return;
       }
       default:
@@ -10730,7 +10731,7 @@ export class Lowerer {
   /** Can records of this shape be views at all? Not a tuple (positional), not a builtin rendering or an
    * accessor-carrying shape, not a compiler-internal one, not the empty field list. */
   viewCapableShape(sh: IrRecordShape): boolean {
-    return sh.tuple !== true && sh.builtin === undefined && !shapeHasAccessorSlots(sh) && sh.fields.length > 0 && !sh.fields.some((f) => f.name.startsWith("%"));
+    return sh.tuple !== true && sh.builtin === undefined && !shapeHasAccessorSlots(sh) && (sh.fields.length > 0 || sh.indexValue !== undefined) && !sh.fields.some((f) => f.name.startsWith("%"));
   }
 
   /** True when records of this shape may be VIEWS (the view grant, types.ts viewShapeKeys). */
@@ -10812,6 +10813,8 @@ export class Lowerer {
           if (b.left.type.kind === "record" && b.right.type.kind === "record" && b.left.type.shapeId === b.right.type.shapeId && viewShapes.has(b.left.type.shapeId)) {
             this.viewRewriteEq(b, temp);
           }
+        } else if (viewShapes.has(o["shapeId"] as string) && (o.kind === "recordKeyGet" || o.kind === "recordKeySet" || o.kind === "recordKeyDelete" || o.kind === "recordKeyPresent" || o.kind === "recordOvfHas" || o.kind === "recordOvfKeys" || o.kind === "recordOvfSlots")) {
+          this.viewRewriteIndexOp(o as unknown as IrExpr & Record<string, unknown>, temp);
         } else if (o.kind === "unionEq") {
           const u = o as unknown as Extract<IrExpr, { kind: "unionEq" }>;
           if (
@@ -10947,6 +10950,75 @@ export class Lowerer {
     };
     for (const k of Object.keys(e)) delete (e as unknown as Record<string, unknown>)[k];
     Object.assign(e, out);
+  }
+
+  /** The index-signature surface of a view (key get/set/delete, presence, the overflow enumeration): the OBJECT answers.
+   * Keyed reads, writes, deletes and presence go straight to it; the overflow KEY LIST and SLOT COUNT (which the
+   * enumeration loops index into) first bring the snapshot up to date (recordViewSync), because a slot is a position
+   * in the snapshot's map. */
+  private viewRewriteIndexOp(e: IrExpr & Record<string, unknown>, temp: (t: IrType) => IrLocal): void {
+    const loc = e["loc"] as SrcLoc;
+    const shapeId = e["shapeId"] as string;
+    const kind = e["kind"] as string;
+    const recT: IrType = { kind: "record", shapeId };
+    const isStmt = kind === "recordKeySet" || kind === "recordKeyDelete";
+    const stmts: IrStmt[] = [];
+    const obj = e["obj"] as IrExpr;
+    let ref: () => IrExpr;
+    if (obj.kind === "varRef") {
+      ref = () => ({ ...obj });
+    } else {
+      const t = temp(recT);
+      stmts.push({ kind: "varDecl", localId: t.id, init: obj, loc });
+      ref = () => ({ kind: "varRef", localId: t.id, type: recT, loc });
+    }
+    const hoist = (x: IrExpr): (() => IrExpr) => {
+      if (x.kind === "varRef" || x.kind === "strLit" || x.kind === "numLit") return () => ({ ...x });
+      const t = temp(x.type);
+      stmts.push({ kind: "varDecl", localId: t.id, init: x, loc });
+      return () => ({ kind: "varRef", localId: t.id, type: x.type, loc });
+    };
+    const view = (): IrExpr => ({ kind: "recordView", obj: ref(), shapeId, type: DYN, loc });
+    const isView = (): IrExpr => ({ kind: "recordIsView", obj: ref(), shapeId, type: BOOL, loc });
+    const copy = { ...e } as Record<string, unknown>;
+    copy["obj"] = ref();
+    let out: IrExpr | IrStmt;
+    if (kind === "recordKeyGet") {
+      const key = hoist(e["key"] as IrExpr);
+      copy["key"] = key();
+      const via = this.coerceToExpected({ kind: "dynKeyGet", key: key(), value: view(), type: DYN, loc }, e["type"] as IrType);
+      out = { kind: "ternary", cond: isView(), then: via, else_: copy as unknown as IrExpr, type: e["type"] as IrType, loc };
+    } else if (kind === "recordKeyPresent") {
+      out = { kind: "ternary", cond: isView(), then: { kind: "dynHasKey", key: e["field"] as string, value: view(), type: BOOL, loc }, else_: copy as unknown as IrExpr, type: BOOL, loc };
+    } else if (kind === "recordOvfHas") {
+      const key = hoist(e["key"] as IrExpr);
+      copy["key"] = key();
+      out = { kind: "ternary", cond: isView(), then: { kind: "libCall", fn: "dyn.hasOwn", args: [view(), key()], type: BOOL, loc }, else_: copy as unknown as IrExpr, type: BOOL, loc };
+    } else if (kind === "recordOvfKeys" || kind === "recordOvfSlots") {
+      stmts.push({ kind: "exprStmt", expr: { kind: "recordViewSync", obj: ref(), shapeId, type: VOID, loc }, loc });
+      out = copy as unknown as IrExpr;
+    } else {
+      // recordKeySet / recordKeyDelete: the object takes the write, then the snapshot does too.
+      const key = hoist(e["key"] as IrExpr);
+      copy["key"] = key();
+      let valRef: (() => IrExpr) | null = null;
+      if (kind === "recordKeySet") {
+        valRef = hoist(e["value"] as IrExpr);
+        copy["value"] = valRef();
+      }
+      const write: IrExpr = kind === "recordKeySet"
+        ? { kind: "libCall", fn: "dyn.keySet", args: [view(), key(), this.coerceToExpected(valRef!(), DYN)], type: VOID, loc }
+        : { kind: "libCall", fn: "dyn.keyDelete", args: [view(), key()], type: BOOL, loc };
+      stmts.push({ kind: "if", cond: isView(), then: [{ kind: "exprStmt", expr: write, loc }], else_: null, loc });
+      out = copy as unknown as IrStmt;
+    }
+    for (const k of Object.keys(e)) delete (e as Record<string, unknown>)[k];
+    if (isStmt) {
+      Object.assign(e, { kind: "block", body: [...stmts, out as IrStmt], loc });
+    } else {
+      const res = out as IrExpr;
+      Object.assign(e, stmts.length === 0 ? res : { kind: "seqExpr", stmts, result: res, type: res.type, loc });
+    }
   }
 
   private viewRewriteSet(

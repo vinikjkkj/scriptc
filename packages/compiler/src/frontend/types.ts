@@ -146,6 +146,13 @@ export function overflowShapeKey(fields: readonly { name: string; type: IrType }
     .join(",");
 }
 
+/** The key a shape is named by in viewShapeKeys: its member names and kinds, and for a PURE index-signature shape
+ * (no declared member) the value type too, since the empty field list alone would name every such shape (the KIND only: shape ids differ between the passes). */
+export function viewShapeKey(fields: readonly { name: string; type: IrType }[], indexValue?: IrType): string {
+  const k = overflowShapeKey(fields);
+  return fields.length === 0 && indexValue !== undefined ? `[${indexValue.kind}]` : k;
+}
+
 /** A registry id's index in its own array (`r17` -> 17). Exact, and it
  * stays exact, because neither registry ever truncates: an id at or above a
  * speculative attempt's mark was minted BY that attempt. */
@@ -378,10 +385,11 @@ export class ShapeRegistry {
   /** The view grant (viewShapeKeys): does this field list intern as a VIEW-capable shape? False for every
    * shape the grant does not name, so no other key moves. A builtin rendering declines (its layout belongs to
    * the library lowering that made it). */
-  private viewGranted(fields: { name: string; type: IrType }[], tuple: boolean, builtin?: IrBuiltinRendering): boolean {
-    if (tuple || viewShapeKeys.size === 0 || fields.length === 0 || builtin !== undefined) return false;
+  private viewGranted(fields: { name: string; type: IrType }[], tuple: boolean, builtin?: IrBuiltinRendering, indexValue?: IrType): boolean {
+    if (tuple || viewShapeKeys.size === 0 || builtin !== undefined) return false;
+    if (fields.length === 0 && indexValue === undefined) return false;
     if (fields.some((f) => f.name.startsWith("%") || accessorSlotProp(f.name) !== null)) return false;
-    return viewShapeKeys.has(overflowShapeKey(fields));
+    return viewShapeKeys.has(viewShapeKey(fields, indexValue));
   }
 
   private dialIndexValue(fields: { name: string; type: IrType }[], tuple: boolean, indexValue?: IrType): IrType | undefined {
@@ -625,7 +633,7 @@ export class ShapeRegistry {
     if (id === undefined) throw new Error("shape registry bug: finalizeRecursive without a placeholder");
     const declaredIndexValue = indexValue;
     indexValue = this.dialIndexValue(fields, false, indexValue);
-    const view = this.viewGranted(fields, false);
+    const view = this.viewGranted(fields, false, undefined, indexValue);
     if (indexValue !== declaredIndexValue && !this.granted.has(id)) {
       this.recordUndo(id, () => this.granted.delete(id));
       this.granted.add(id);
@@ -680,7 +688,7 @@ export class ShapeRegistry {
   intern(fields: { name: string; type: IrType }[], tuple = false, indexValue?: IrType, declaredOrder?: string[], builtin?: IrBuiltinRendering, keyOrder?: string[]): string {
     const declaredIndexValue = indexValue;
     indexValue = this.dialIndexValue(fields, tuple, indexValue);
-    const view = this.viewGranted(fields, tuple, builtin);
+    const view = this.viewGranted(fields, tuple, builtin, indexValue);
     const key = this.keyOf(fields, tuple, indexValue, declaredOrder, builtin, keyOrder, view);
     let id = this.byKey.get(key);
     if (id !== undefined && indexValue !== declaredIndexValue && !this.granted.has(id)) {

@@ -142,6 +142,10 @@ export function computeMayThrow(mod: IrModule): { fns: Set<string>; indirect: bo
         case "varRef":
           if (tdzIds.size > 0 && tdzIds.has(rec["localId"] as string)) f.throws = true;
           break;
+        case "recordViewSync":
+          // The re-read of a view's object runs the checked builder (a getter, a type check): it can throw.
+          f.throws = true;
+          break;
         case "dynCheck":
         case "caughtCheck":
           // A checked cast throws (catchably) on validation failure —
