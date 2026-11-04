@@ -42,6 +42,15 @@ async function inLoop(): Promise<number> {
   }
   return 99;
 }
+async function pad(x: number): Promise<number> { return x + 1; }
+async function narrowPayload(n: number): Promise<number | null> {
+  try {
+    if (n === 0) return null;
+    return pad(n);
+  } catch (e) {
+    return -1;
+  }
+}
 async function plainValue(): Promise<number> {
   try { return 4; } finally { L("plainValue: finally"); }
 }
@@ -59,6 +68,8 @@ nested().then(num("nested")).catch(bad("nested-rej"));
 nestedResolved().then(num("nestedResolved"));
 inLoop().then(num("inLoop"));
 plainValue().then(num("plainValue"));
+narrowPayload(0).then((v) => L("narrowPayload0:" + v));
+narrowPayload(2).then((v) => L("narrowPayload2:" + v));
 awaitedInside().then(num("awaitedInside"));
 (async () => {
   for (let i = 1; i <= 8; i++) { await null; L("t" + i); }
