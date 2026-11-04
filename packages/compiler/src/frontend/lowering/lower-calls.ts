@@ -3348,7 +3348,9 @@ const SYMBOLIC_PAIR_BUDGET = 256;
             // module-scope declarations are reachable from any module
             // function.
             for (let p: ts.Node | undefined = d.parent; p !== undefined && !ts.isSourceFile(p); p = p.parent) {
-              if (ts.isFunctionLike(p)) {
+              // A block-scoped declaration (a loop body, an `if`) is a local of the module-init frame too:
+              // one binding per iteration, with no static storage a module function could name.
+              if (ts.isFunctionLike(p) || ts.isBlock(p) || ts.isForStatement(p) || ts.isForInStatement(p) || ts.isForOfStatement(p) || ts.isCatchClause(p) || ts.isCaseBlock(p)) {
                 captures = true;
                 return;
               }

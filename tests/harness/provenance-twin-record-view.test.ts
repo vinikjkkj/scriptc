@@ -89,6 +89,28 @@ const STORE_GETTER_EXPECTED = "first 1\nsecond 2\nafter 3 4 1\nthird 5 true\n";
    count), never once more at the projection. */
 const STORE_GETTER_EXPECTED = "first 1\nsecond 2\nafter 3 4 1\nthird 5 true\n";
 
+/* cases/twinrec/state-machine.ts: mysql2's Command state machine (a method answers the next state, itself a method of
+   its own class), recorded from node. */
+const STATE_MACHINE_EXPECTED =
+  "false,false,false,false,false,false,false,true | header,field:a,field:b,row:r1,row:r2\n" +
+  "false,false,false,false,false,false,false,true | x-header,x-field:a,x-field:b,x-field:c,x-eof,row:r1\n" +
+  "protocolError expected eof\n" +
+  "false,false,false,false,true | header,field:a,field:b\n" +
+  "protocolError bad header\n" +
+  "false,true | \n" +
+  "false,false,false,true | hello,cmd:ping,cmd:query\n";
+
+/* cases/twinrec/loop-factory.ts: a table of factories built in a loop (mysql2's typed_parameter), recorded from node. */
+const LOOP_FACTORY_EXPECTED =
+  "tiny 1 3 false true\n" +
+  " unsigned 1003 true\n" +
+  "small 2 6 false true\n" +
+  " unsigned 1006 true\n" +
+  "text 3 3 false false\n" +
+  "blob 4 3 false false\n" +
+  "nil 0 null false false\n" +
+  "null\n";
+
 const PRIOR = process.env["SCRIPTC_PROVENANCE_MANIFEST"];
 afterEach(() => {
   setProvenanceSources(null);
@@ -163,6 +185,26 @@ describe("provenance: a twin class with untyped methods behind a program's own r
       if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
       const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
       expect(stdout).toBe(STORE_POOL_EXPECTED);
+    }, 600_000);
+  }
+
+  for (const backend of ["c", "llvm"] as const) {
+    test(`24024: a method that answers another method of its own class as the next state (${backend})`, async () => {
+      const entry = join(fixtureDir, "cases/twinrec/state-machine.ts");
+      const { result, outPath } = await build(entry, "state-machine", backend);
+      if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+      const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
+      expect(stdout).toBe(STATE_MACHINE_EXPECTED);
+    }, 600_000);
+  }
+
+  for (const backend of ["c", "llvm"] as const) {
+    test(`24025: a factory table built in a loop closes over the loop's bindings (${backend})`, async () => {
+      const entry = join(fixtureDir, "cases/twinrec/loop-factory.ts");
+      const { result, outPath } = await build(entry, "loop-factory", backend);
+      if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+      const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
+      expect(stdout).toBe(LOOP_FACTORY_EXPECTED);
     }, 600_000);
   }
 
