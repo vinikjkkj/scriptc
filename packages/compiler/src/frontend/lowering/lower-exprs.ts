@@ -11385,6 +11385,16 @@ function pureMemberChain(e: ts.Expression): boolean {
   return ts.isIdentifier(x);
 }
 
+/** A spread source the view branch of lowerObjectLiteral answers: a record of a view-capable shape whose
+ * key-enumeration risk is at most the dynamic-origin advice (a source the walk proved wrong - built in an
+ * order its shape does not enumerate - keeps the refusal the declared-field desugar gives it). */
+function viewSpreadSource(L: Lowerer, node: ts.Expression): boolean {
+  const probed = probeLower(L, node);
+  if (probed === null || !L.isViewShape(probed.type)) return false;
+  const risk = L.exprKeyRisk(probed);
+  return risk === null || risk.why === "dyn";
+}
+
 export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression): IrExpr {
     const loc = locOf(expr);
     // A literal the LOWERING marked as a dyn object (the property-
@@ -11442,11 +11452,15 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       expr.properties.some(
         (p) =>
           ts.isSpreadAssignment(p) && conditionalSpreadOf(p.expression) === null &&
-          pureMemberChain(p.expression) && L.isViewShape(probeLower(L, p.expression)?.type ?? DYN),
+          pureMemberChain(p.expression) && viewSpreadSource(L, p.expression),
       )
     ) {
       const want = L.irTypeOf(expr);
-      if (want.kind === "record" && !L.shapes.get(want.shapeId)?.indexValue) {
+      // A literal the context types as a UNION (a message field's `A | null`) keeps the declared-field build,
+      // which picks the arm the context asks for; the dyn build would answer the literal's own shape.
+      const ctxTs = L.checker.getContextualType(expr);
+      const ctxIr = ctxTs !== undefined ? L.mapTypeOf(ctxTs) : null;
+      if (want.kind === "record" && !L.shapes.get(want.shapeId)?.indexValue && ctxIr?.kind !== "union") {
         return L.coerceToExpected(lowerDynSpreadObjectLiteral(L, expr), want);
       }
     }
