@@ -2997,6 +2997,10 @@ static void scr_dyn_handle_release(void *h, ScrDynHandleTag tag) {
 ScrDyn *(*scr_dyn_date_box_hook)(double ms) = NULL;
 
 ScrDyn *scr_dyn_new_handle(void *h, ScrDynHandleTag tag) {
+  if (tag == SCR_DYNH_CHILD_STREAM && scr_dyn_readable_unadopt != NULL) {
+    ScrDyn *orig = scr_dyn_readable_unadopt(h); /* a view of a socket boxes as the socket */
+    if (orig != NULL) return orig;
+  }
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_HANDLE);
   d->v.handle.ptr = scr_dyn_handle_ops(tag)->retain(h);
   d->v.handle.tag = tag;
@@ -4865,7 +4869,16 @@ void scr_dyn_isl_tostr_buf(ScrJsonBuf *b, const ScrDyn *d) {
   scr_str_release(s);
 }
 
+void *(*scr_dyn_readable_adopt)(const ScrDyn *d);
+ScrDyn *(*scr_dyn_readable_unadopt)(void *view);
+
 void *scr_dyn_handle_unbox(const ScrDyn *d, ScrDynHandleTag tag, const ScrDynPath *path, const char *want) {
+  /* A ReadableStream-typed slot takes any handle that is a Readable in Node's class hierarchy (a net.Socket: Duplex): the typed
+   * value is a view that forwards to the object itself. */
+  if (tag == SCR_DYNH_CHILD_STREAM && d->kind == SCR_DYN_HANDLE && d->v.handle.tag != tag && scr_dyn_readable_adopt != NULL) {
+    void *view = scr_dyn_readable_adopt(d);
+    if (view != NULL) return view;
+  }
   if (d->kind != SCR_DYN_HANDLE || d->v.handle.tag != tag) {
     scr_dyn_check_fail(path, want, d);
     return NULL;
