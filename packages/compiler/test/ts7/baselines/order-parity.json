@@ -12317,6 +12317,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24100-protoesc-generated-message-classes-with-evalclass.js": {
+   "order": [
+    "<repo>/tests/corpus/24100-protoesc-generated-message-classes-with-evalclass.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24101-protoesc-util-inherits-with-evalclass.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24101-protoesc-util-inherits-with-evalclass.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24102-protoesc-prototype-read-passed-around-with-evalclass.js": {
+   "order": [
+    "<repo>/tests/corpus/24102-protoesc-prototype-read-passed-around-with-evalclass.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24103-protoesc-prototype-link-with-evalclass.js": {
+   "order": [
+    "<repo>/tests/corpus/24103-protoesc-prototype-link-with-evalclass.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2411-exhaustive-switch-terminality.ts": {
    "order": [
     "<repo>/tests/corpus/2411-exhaustive-switch-terminality.ts"
@@ -22868,6 +22892,12 @@
   "<repo>/tests/diagnostics/evalclass-proto-escape-object.js": {
    "order": [
     "<repo>/tests/diagnostics/evalclass-proto-escape-object.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/evalclass-proto-escape-protolink-write.js": {
+   "order": [
+    "<repo>/tests/diagnostics/evalclass-proto-escape-protolink-write.js"
    ],
    "diags": []
   },
