@@ -11,7 +11,7 @@ import { ctorFieldFillProven } from "./ctor-fill-proof.js";
 import { EMITTER_CELL_NAMES, GRAFTED_EMITTER_CELL_CLASSES, GRAFTED_EMITTER_CLASSES, BOOL, canBoxClassIntoDyn, canBoxFuncIntoDyn, canDynCheckTo, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DATE_T, DYN, F64, bytesOf, canConvertToDyn, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, weakMapOf, isUnitType, mapOf, setOf, typeEquals } from "../../ir/nodes.js";
 import { lowerAbortControllerNew } from "./lower-abort.js";
 import { engineFunctionCtor } from "./lower-engine-fn.js";
-import { implicitDefaultInstance, markDetachedThis, MAX_GENERIC_INSTANCES, inStrictCode, bindingNeverReassigned, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitInstanceLike, implicitMonoFile, omittedArgFor, type GenericFnInfo, type GenericInstance, type ParamShape, appendImplicitUndefinedReturn, bindArgumentsParams, bodyReadsArguments } from "./lower-calls.js";
+import { implicitDefaultInstance, implicitDetachedInstance, detachedThisClassOf, markDetachedThis, MAX_GENERIC_INSTANCES, inStrictCode, bindingNeverReassigned, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitInstanceLike, implicitMonoFile, omittedArgFor, type GenericFnInfo, type GenericInstance, type ParamShape, appendImplicitUndefinedReturn, bindArgumentsParams, bodyReadsArguments } from "./lower-calls.js";
 import { admitWeakTableIr, isGenericCallableMemberType, runtimeStreamClassOf, typeKey } from "../types.js";
 import { cjsClassExprWholeExportOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
 import { pairedProtoClassInfoFor, pairedProtoClassOfValue, protoClassArmOn, protoClassInfoFor, protoClassOfNamespaceMember, protoDataGetterFns } from "./proto-class-consume.js";
@@ -10461,12 +10461,20 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
         // An IMPLICIT-any method instantiates over the call's ARGUMENT
         // types — there is no resolved generic signature to read type
         // arguments off. The same split lowerClassGenericMethodCall makes.
-        const instance = gfound.info.implicitParams
-          ? implicitCallInstance(L, call, gfound.info)
-          : genericCallInstance(L, call, gfound.info);
+        // In a DETACHED variant `this` is the raw dyn receiver: `super.m` reaches the base method's own detached
+        // variant with it (JS dispatches `super` statically and hands the base the same `this`, instance or not).
+        const rawThis = detachedThisClassOf(thisL) !== undefined && gfound.info.implicitParams !== undefined;
+        const instance = rawThis
+          ? implicitDetachedInstance(L, call, gfound.info)
+          : gfound.info.implicitParams
+            ? implicitCallInstance(L, call, gfound.info)
+            : genericCallInstance(L, call, gfound.info);
         const loc = locOf(call);
         const thisRef: IrExpr = { kind: "varRef", localId: thisL.id, type: thisL.type, loc };
         const args = L.completeArgs(call.arguments, instance.params, loc, call);
+        if (rawThis) {
+          return L.markSuperCall({ kind: "call", callee: instance.name, args: [thisRef, ...args], type: instance.returnType, loc });
+        }
         return L.markSuperCall({
           kind: "call",
           callee: instance.name,
@@ -10498,6 +10506,12 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
     const loc = locOf(call);
     const thisRef: IrExpr = { kind: "varRef", localId: thisLocal.id, type: thisLocal.type, loc };
     const args = L.completeArgs(call.arguments, found.sig.params, loc, call);
+    if (detachedThisClassOf(thisLocal) !== undefined) {
+      const variant = detachedMethodVariant(L, found.declarer, access.name.text);
+      if (variant !== null) {
+        return L.markSuperCall({ kind: "call", callee: variant, args: [thisRef, ...args], type: found.sig.ret, loc });
+      }
+    }
     return L.markSuperCall({
       kind: "call",
       callee: `%${found.declarer.def.name}.${access.name.text}`,
