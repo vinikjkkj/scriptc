@@ -15,3 +15,6 @@ try {
 } catch (e) {
   console.log((e as Error).message);
 }
+import { Late } from "twinrec/opts";
+console.log(new Late(true).describe());
+console.log(new Late(false).describe());

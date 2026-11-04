@@ -27,4 +27,22 @@ class Derived extends Base {
   }
 }
 
+// The assignment is conditional: when it does not run, `options` is the base's own plain object, and the reads and
+// the write below name members that object never had.
+class Late extends Base {
+  constructor(flag) {
+    super();
+    if (flag) {
+      this.options = (0, utils_1.defaults)({}, {}, DEFAULTS, this.options);
+    }
+    this.seen = [this.options.shardedSubscribers, this.options.slotsRefreshInterval];
+    this.options.slotsRefreshInterval = 99;
+    this.after = this.options.slotsRefreshInterval;
+  }
+  describe() {
+    return [this.seen.join(','), this.after, this.options.keyPrefix].join('|');
+  }
+}
+
 exports.Derived = Derived;
+exports.Late = Late;

@@ -115,7 +115,9 @@ const OPTS_INTERSECTION_EXPECTED =
   "base:|slave|14|false|\n" +
   "14 slave base:\n" +
   "base:|slave|1|false|\n" +
-  "Invalid option scaleReads "bogus"\n";
+  "Invalid option scaleReads \"bogus\"\n" +
+  "false,5000|99|base:\n" +
+  ",|99|base:\n";
 
 const PRIOR = process.env["SCRIPTC_PROVENANCE_MANIFEST"];
 afterEach(() => {

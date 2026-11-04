@@ -10,3 +10,7 @@ export declare class Derived extends Base {
   constructor(options?: DerivedOptions);
   describe(): string;
 }
+export declare class Late extends Base {
+  constructor(flag: boolean);
+  describe(): string;
+}
