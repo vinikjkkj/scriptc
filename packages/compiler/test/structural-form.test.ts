@@ -86,7 +86,7 @@ describe("structural form", () => {
     expect([...structuralIdentityFields.shapeExcluded].sort())
       .toEqual(["id", "ownmask", "reqabsent", "srcproto"]);
     expect([...structuralIdentityFields.shape].sort())
-      .toEqual(["builtin", "declaredOrder", "fields", "indexValue", "keyOrder", "tostr", "tuple"]);
+      .toEqual(["builtin", "declaredOrder", "fields", "indexValue", "keyOrder", "tostr", "tuple", "view"]);
     expect([...structuralIdentityFields.unionExcluded].sort()).toEqual(["id"]);
   });
 

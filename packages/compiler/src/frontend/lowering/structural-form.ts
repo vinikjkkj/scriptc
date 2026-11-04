@@ -241,6 +241,7 @@ function structuralFormOfShape(
   // the same members in another order enumerate differently): see keyOf.
   if (shape.keyOrder !== undefined) out += `|keyorder${J(shape.keyOrder)}`;
   if (shape.tostr === true) out += "|tostr";
+  if (shape.view === true) out += "|view";
   if (shape.builtin !== undefined) out += `|builtin${J(shape.builtin)}`;
   // ownmask / reqabsent / srcproto are NOT here, deliberately: see the
   // header and SHAPE_FIELD_ROLE.
