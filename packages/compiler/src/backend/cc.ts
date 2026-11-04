@@ -2834,9 +2834,79 @@ export async function compileC(opts: CcOptions): Promise<void> {
   assertRuntimeUnitsClosed(buildArgs((p) => p), dynamic, basename(opts.cPath));
 
   const root = cacheRootDir();
+  const rtInputs: string[] = [];
+  const cmdLine = buildArgs((p) => {
+    rtInputs.push(p);
+    return p;
+  });
+  const includeArgs: string[] = [];
+  const seenInclude = new Set<string>();
+  for (let i = 0; i < cmdLine.length; i++) {
+    if (cmdLine[i] !== "-I") continue;
+    const dir = cmdLine[++i];
+    if (dir === undefined || seenInclude.has(dir)) continue;
+    seenInclude.add(dir);
+    includeArgs.push("-I", dir);
+  }
+  const cflags = [
+    "-std=c11",
+    ...driver.targetArgs,
+    ...optAuditArgs(opts.sanitize ?? false),
+    "-fno-math-errno",
+    "-fno-strict-aliasing", // the emitted object model type-puns — see buildArgs
+    ...gcSectionsCompileArgs(),
+    "-Wno-deprecated-declarations",
+    ...includeArgs,
+    ...(dynamic ? ["-DSCR_DYNAMIC"] : []),
+    ...(engineOnly ? ["-DSCR_ENGINE"] : []),
+    // Off the REAL command line, like the -I above and for the same reason the
+    // comment there gives: a restated copy drifts invisibly. rtInputs is what
+    // buildArgs actually emitted, so if scr_coro.c is in this link the define
+    // is in these cflags, and the cached object flavour matches the binary.
+    ...(rtInputs.some((f) => basename(f) === "scr_coro.c") ? ["-DSCR_CORO_LANE"] : []),
+  ];
+
+  // Compile `sources` as parallel `-c` jobs with the option set every unit sees (cflags), largest first so the pool's wall
+  // time is bounded by its biggest unit, into `dir`. A unit that fails throws the build's own compile error. Keys are the
+  // source paths as the command line spells them.
+  const compileParallel = async (sources: string[], dir: string, jobs: number): Promise<Map<string, string>> => {
+    const done = new Map<string, string>();
+    const sizes = await Promise.all(sources.map(async (u) => (await stat(u)).size));
+    const order = sources.map((_, i) => i).sort((x, y) => sizes[y]! - sizes[x]!);
+    let next = 0;
+    const worker = async (): Promise<void> => {
+      for (;;) {
+        const k = next++;
+        if (k >= order.length) return;
+        const i = order[k]!;
+        const unit = sources[i]!;
+        const out = join(dir, `u${i}-${basename(unit).replace(/\.[^.]+$/, "")}.o`);
+        await runClang([...cflags, ...(unit.endsWith(".ll") ? ["-Wno-override-module"] : []), "-c", unit, "-o", out]);
+        done.set(unit, out);
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(jobs, sources.length) }, worker));
+    return done;
+  };
+  const programUnitPaths = [opts.cPath, ...(opts.programUnits ?? []), ...(icuFile !== undefined ? [icuFile] : [])];
+
   if (root === null) {
-    // The exact historical command line, byte for byte.
     tapPhase("cc.nocache", 0);
+    const jobs = ccJobCount();
+    const all = [...new Set([...rtInputs, ...programUnitPaths])];
+    if (jobs > 1 && all.length > 1) {
+      // One clang driver compiles its inputs one after another: the runtime's sources and the program's units are
+      // independent translation units, so they build as parallel jobs and the objects link in command-line order.
+      const dir = await mkdtemp(join(dirname(opts.outPath), ".scr-cc-"));
+      try {
+        const objs = await compileParallel(all, dir, jobs);
+        await runClang(buildArgs((p) => objs.get(p) ?? p, (p) => objs.get(p) ?? p));
+      } finally {
+        await rm(dir, { recursive: true, force: true });
+      }
+      return;
+    }
+    // The exact historical command line, byte for byte.
     await runClang(buildArgs((p) => p));
     return;
   }
@@ -2931,37 +3001,6 @@ export async function compileC(opts: CcOptions): Promise<void> {
   // line, so the binary is correct and only the clock is wrong.
   // One pass over the real command line serves both readers: the header
   // search path above and the runtime sources this build actually compiles.
-  const rtInputs: string[] = [];
-  const cmdLine = buildArgs((p) => {
-    rtInputs.push(p);
-    return p;
-  });
-  const includeArgs: string[] = [];
-  const seenInclude = new Set<string>();
-  for (let i = 0; i < cmdLine.length; i++) {
-    if (cmdLine[i] !== "-I") continue;
-    const dir = cmdLine[++i];
-    if (dir === undefined || seenInclude.has(dir)) continue;
-    seenInclude.add(dir);
-    includeArgs.push("-I", dir);
-  }
-  const cflags = [
-    "-std=c11",
-    ...driver.targetArgs,
-    ...optAuditArgs(opts.sanitize ?? false),
-    "-fno-math-errno",
-    "-fno-strict-aliasing", // the emitted object model type-puns — see buildArgs
-    ...gcSectionsCompileArgs(),
-    "-Wno-deprecated-declarations",
-    ...includeArgs,
-    ...(dynamic ? ["-DSCR_DYNAMIC"] : []),
-    ...(engineOnly ? ["-DSCR_ENGINE"] : []),
-    // Off the REAL command line, like the -I above and for the same reason the
-    // comment there gives: a restated copy drifts invisibly. rtInputs is what
-    // buildArgs actually emitted, so if scr_coro.c is in this link the define
-    // is in these cflags, and the cached object flavour matches the binary.
-    ...(rtInputs.some((f) => basename(f) === "scr_coro.c") ? ["-DSCR_CORO_LANE"] : []),
-  ];
 
   let objects: Map<string, string> | null = null;
   // profFlavor() for the same reason as the binary key above: `cflags` names
@@ -2991,35 +3030,17 @@ export async function compileC(opts: CcOptions): Promise<void> {
   // jobs, one `-c` per unit with the option set every unit sees, and links the objects in the order the single command
   // line gave them. One clang driver compiles its inputs one after another, so the split bought nothing on its own.
   // A single-unit program keeps the historical one-invocation command line.
-  const units = [opts.cPath, ...(opts.programUnits ?? []), ...(icuFile !== undefined ? [icuFile] : [])];
+  const units = programUnitPaths;
   let unitObjects: Map<string, string> | null = null;
   let unitDir: string | null = null;
   const jobs = ccJobCount();
   if (objects !== null && units.length > 1 && jobs > 1) {
     await mkdir(objStagingRoot(root), { recursive: true });
     unitDir = await mkdtemp(join(objStagingRoot(root), "units-"));
-    const dir = unitDir;
-    const done = new Map<string, string>();
-    const sizes = await Promise.all(units.map(async (u) => (await stat(u)).size));
-    // Largest first: the pool's wall time is bounded by its biggest unit, so that one starts at once.
-    const order = units.map((_, i) => i).sort((x, y) => sizes[y]! - sizes[x]!);
-    let next = 0;
-    const worker = async (): Promise<void> => {
-      for (;;) {
-        const k = next++;
-        if (k >= order.length) return;
-        const i = order[k]!;
-        const unit = units[i]!;
-        const out = join(dir, `unit${i}.o`);
-        await runClang([...cflags, ...(unit.endsWith(".ll") ? ["-Wno-override-module"] : []), "-c", unit, "-o", out]);
-        done.set(unit, out);
-      }
-    };
     try {
-      await Promise.all(Array.from({ length: Math.min(jobs, units.length) }, worker));
-      unitObjects = done;
+      unitObjects = await compileParallel(units, unitDir, jobs);
     } catch (err) {
-      await rm(dir, { recursive: true, force: true });
+      await rm(unitDir, { recursive: true, force: true });
       throw err;
     }
   }
