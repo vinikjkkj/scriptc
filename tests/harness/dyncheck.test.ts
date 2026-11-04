@@ -425,7 +425,7 @@ console.log((u as HasLen).length);
     expect(r.stdout).toBe("3\n");
   });
 
-  test("WIDE: and then answers Array.isArray, typeof and String() wrong, silently", async () => {
+  test("WIDE: and then answers Array.isArray, typeof and String() like Node (the record is a view of the value)", async () => {
     const r = await compileAndRunWide(
       "kind-gate-wide-surfaces",
       `type HasLen = { length: number };
@@ -441,13 +441,11 @@ const sback: unknown = s;
 console.log(typeof sback, JSON.stringify(sback), String(sback));
 `,
     );
-    /* Node, for the same six reads:
-     *   true ["a","b","c"] a,b,c
-     *   string "abcd" abcd
-     * Every one of these six is a SILENT divergence the shipped compiler does
-     * not have, because it refuses the cast loudly instead. */
+    /* Node, for the same six reads, and now the compiler's: the record is a VIEW of the value (the
+     * value model of 2026-11-03), so it crosses back as the very array and string. These six used
+     * to be silent divergences of the copying record. */
     expect(r.exitCode).toBe(0);
-    expect(r.stdout).toBe('false {"length":3} [object Object]\nobject {"length":4} [object Object]\n');
+    expect(r.stdout).toBe('true ["a","b","c"] a,b,c\nstring "abcd" abcd\n');
   });
 
   test("WIDE: a class instance reads through the instance lane whatever the dial says", async () => {
@@ -526,7 +524,7 @@ console.log(load('{"port":8080}'), load('{"port":"x"}'), load('{"port":1}'));
     expect(r.stderr).toBe("");
   });
 
-  test("width tolerance really is check-and-extract: extras dropped, no throw", async () => {
+  test("width tolerance: extras are not read, no throw, and the view still shows the object", async () => {
     const r = await compileAndRun(
       "width-tolerant",
       `type Slim = { a: number };
@@ -535,7 +533,7 @@ console.log(s.a, JSON.stringify(s));
 `,
     );
     expect(r.exitCode).toBe(0);
-    expect(r.stdout).toBe('1 {"a":1}\n');
+    expect(r.stdout).toBe('1 {"a":1,"b":{"huge":[1,2,3]},"c":"ignored"}\n');
   });
 
   test("tuple targets validate arity exactly", async () => {
