@@ -3143,6 +3143,8 @@ export function stdlibBufferVarAliasDecl(L: Lowerer, nameNode: ts.Node, init: ts
     const name = access.name.text;
     if (!isJsSourceFile(access.getSourceFile())) return null;
     if (recv.type.kind !== "record") return null;
+    // A record of a VIEW-granted shape may be the object itself (it can hold the member): the read goes to the object.
+    if (L.shapes.get(recv.type.shapeId)?.view === true) return null;
     if (OBJECT_PROTOTYPE_NAMES.has(name)) return null;
     const shape = L.shapes.get(recv.type.shapeId);
     if (!shape || shape.indexValue !== undefined || shape.tuple === true) return null;

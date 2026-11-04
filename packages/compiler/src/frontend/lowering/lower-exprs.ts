@@ -24722,19 +24722,11 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
     if (sh === undefined || sh.indexValue !== undefined || sh.fields.some((f) => f.name === name)) return null;
     const loc = locOf(expr);
     const readT = L.mapTypeOf(L.typeOf(expr)) ?? DYN;
-    // A struct the program built never held the member: JavaScript answers undefined, which a type that does not
-    // admit it rejects exactly as the same absence in a viewed object does (the checked cast throws).
-    const absentOf = (): IrExpr => (readT.kind === "dyn" ? dynUndefinedExpr(loc) : L.wrappedUndefined(readT, loc) ?? L.coerceToExpected(dynUndefinedExpr(loc), readT));
-    return L.viewSplit(
-      recv,
-      readT,
-      (dynRecv) => {
-        const read: IrExpr = { kind: "dynKeyGet", key: { kind: "strLit", value: name, type: STRING, loc }, value: dynRecv, type: DYN, loc };
-        return readT.kind === "dyn" ? read : L.coerceToExpected(read, readT);
-      },
-      absentOf,
-      loc,
-    );
+    // The record AS THE OBJECT: a view is its object, and a struct the program built crosses into dyn as the object it
+    // becomes (the converter promotes it in place), so both read the member exactly as JavaScript does, absent or not.
+    const object: IrExpr = { kind: "dynFrom", value: recv, type: DYN, loc };
+    const read: IrExpr = { kind: "dynKeyGet", key: { kind: "strLit", value: name, type: STRING, loc }, value: object, type: DYN, loc };
+    return readT.kind === "dyn" ? read : L.coerceToExpected(read, readT);
   }
 
   /** `this` inside a DETACHED variant (implicitDetachedInstance): the raw receiver checked
