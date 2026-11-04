@@ -8174,8 +8174,17 @@ export class Lowerer {
       case "nullT":
       case "void":
         return true;
-      case "union":
-        return (this.unions.get(t.unionId)?.arms ?? []).every((a) => this.dynArgExact(a));
+      case "bytes":
+      case "date":
+      case "opaque":
+        // A Uint8Array/Buffer crosses by REFERENCE, a Date as the one ScrDate behind the dynamic handle, and an
+        // opaque handle is never built (its pointer is NULL): no copy exists for the callee to write.
+        return true;
+      case "union": {
+        // Every arm is asked (no short circuit): in discovery each record arm must name itself for the grant.
+        const verdicts = (this.unions.get(t.unionId)?.arms ?? []).map((a) => this.dynArgExact(a));
+        return verdicts.every((v) => v);
+      }
       case "array":
         // A dyn copy of a scalar/dyn-element array is a live view of its origin (arrident), so it crosses as the array.
         return arrayTypeHasLiveView(t);
