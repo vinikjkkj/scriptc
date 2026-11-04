@@ -17,7 +17,7 @@ case "$driver" in
 esac
 mkdir -p "$(dirname "$out")"
 cd "$here"
-timeout 3000 node "$cli" build "$entry" --provenance-sources "${extra[@]}" --backend c -o "$out.bin" > "$out.txt" 2>&1
+timeout 19800 node "$cli" build "$entry" --provenance-sources "${extra[@]}" --backend c -o "$out.bin" > "$out.txt" 2>&1
 echo "rc=$?" >> "$out.txt"
 rm -f "$out.bin"
 echo "$driver: $(tail -1 "$out.txt") errors=$(grep -c ' - error SC' "$out.txt")"

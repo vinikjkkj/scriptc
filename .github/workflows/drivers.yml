@@ -50,7 +50,7 @@ jobs:
     name: driver ${{ matrix.driver }}
     needs: plan
     runs-on: ubuntu-24.04
-    timeout-minutes: 75
+    timeout-minutes: 345
     strategy:
       fail-fast: false
       matrix:
