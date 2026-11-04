@@ -12372,6 +12372,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24013-index-view-reads-writes-enumeration.ts": {
+   "order": [
+    "<repo>/tests/corpus/24013-index-view-reads-writes-enumeration.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24014-index-view-instances-rows-options.ts": {
+   "order": [
+    "<repo>/tests/corpus/24014-index-view-instances-rows-options.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2402-labeled-break-kill.ts": {
    "order": [
     "<repo>/tests/corpus/2402-labeled-break-kill.ts"
