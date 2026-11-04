@@ -3846,6 +3846,22 @@ ScrChildStream *scr_child_stderr(ScrChild *c); /* +1, or NULL */
 void scr_child_stream_on_data(ScrChildStream *s, ScrClosure *cb /*moves*/,
                                ScrChildStreamDataFn fn, bool once);
 void scr_child_stream_on_end(ScrChildStream *s, ScrClosure *cb /*moves*/, bool once);
+/* A view of a FOREIGN stream object behind a ReadableStream-typed value: a net.Socket is a stream.Duplex is a stream.Readable, so a
+ * socket flowing into a parameter typed ReadableStream is accepted as itself (scr_stream_view.c supplies the ops; the child unit
+ * names no socket symbol). The view forwards on/once data and end to the object and keeps it +1. */
+typedef struct ScrChildStreamForeign {
+  void *(*retain)(void *obj);
+  void (*release)(void *obj);
+  void (*on_data)(void *obj, ScrClosure *cb /*moves*/, ScrChildStreamDataFn fn, bool once);
+  void (*on_end)(void *obj, ScrClosure *cb /*moves*/, bool once);
+} ScrChildStreamForeign;
+ScrChildStream *scr_child_stream_foreign_new(void *obj, const ScrChildStreamForeign *ops); /* +1, retains obj */
+void *scr_child_stream_foreign_obj(const ScrChildStream *s); /* borrowed; NULL for a real child pipe */
+/* Registered (constructor) by scr_stream_view.c, linked exactly when the program holds both a socket and a ReadableStream-typed
+ * slot. adopt: a dyn handle that is a Readable in Node's hierarchy -> a +1 ScrChildStream view, or NULL. unadopt: a view -> the
+ * +1 dyn box of the ORIGINAL object (identity survives the round trip), or NULL for a real child stream. */
+extern void *(*scr_dyn_readable_adopt)(const ScrDyn *d);
+extern ScrDyn *(*scr_dyn_readable_unadopt)(void *view);
 void scr_child_stream_thunk0(ScrClosure *cb, ScrBytes *chunk);
 void scr_child_stream_thunk_bytes(ScrClosure *cb, ScrBytes *chunk);
 /* Registers the child-stdio handle-dispatch ops (SCR_DYNH_CHILD_STREAM)
