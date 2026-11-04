@@ -4120,6 +4120,13 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         const absentProcess = absentProcessMemberValue(L, expr);
         if (absentProcess !== null) return L.maybeNarrow(absentProcess, expr);
       }
+      // A member the receiver's checker type has and its LOWERED record does not: a field a derived class re-declares
+      // with a wider record (ioredis' Cluster `options`), whose value is an object the checked cast viewed. The member
+      // is read live off that object; a plain struct built by the program never held it, so it is absent.
+      {
+        const viewed = viewOnlyMemberRead(L, expr, recvLowered);
+        if (viewed !== null) return L.maybeNarrow(viewed, expr);
+      }
       L.unsupported(
         "SC1090",
         expr,
@@ -24706,6 +24713,30 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
    * receiver is the ambient `this` window checked against that class, calling its all-dyn default
    * instance (the one a dyn box of C answers `x.m()` with). Identity is per declaring class, so
    * `x.m === C.prototype.m` when x's runtime class does not override m. Null for any other shape. */
+  /** `recv.name` where `recv` lowered to a view-granted record that declares no `name` while the checker's type for
+   * the same receiver does (see the caller). Null when the record is not a view or is not that case. */
+  function viewOnlyMemberRead(L: Lowerer, expr: ts.PropertyAccessExpression, recv: IrExpr): IrExpr | null {
+    if (recv.type.kind !== "record" || !L.isViewShape(recv.type)) return null;
+    const sh = L.shapes.get(recv.type.shapeId);
+    const name = expr.name.text;
+    if (sh === undefined || sh.indexValue !== undefined || sh.fields.some((f) => f.name === name)) return null;
+    const loc = locOf(expr);
+    const readT = L.mapTypeOf(L.typeOf(expr)) ?? DYN;
+    // A struct the program built never held the member: JavaScript answers undefined, which a type that does not
+    // admit it rejects exactly as the same absence in a viewed object does (the checked cast throws).
+    const absentOf = (): IrExpr => (readT.kind === "dyn" ? dynUndefinedExpr(loc) : L.wrappedUndefined(readT, loc) ?? L.coerceToExpected(dynUndefinedExpr(loc), readT));
+    return L.viewSplit(
+      recv,
+      readT,
+      (dynRecv) => {
+        const read: IrExpr = { kind: "dynKeyGet", key: { kind: "strLit", value: name, type: STRING, loc }, value: dynRecv, type: DYN, loc };
+        return readT.kind === "dyn" ? read : L.coerceToExpected(read, readT);
+      },
+      absentOf,
+      loc,
+    );
+  }
+
   /** `this` inside a DETACHED variant (implicitDetachedInstance): the raw receiver checked
    * against the class, and where it is not an instance a TypeError thrown HERE, at the access. Node
    * throws at the member access of an undefined receiver (its message names the member), so the
