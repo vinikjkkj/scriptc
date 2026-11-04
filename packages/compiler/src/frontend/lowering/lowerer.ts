@@ -9028,6 +9028,33 @@ export class Lowerer {
     return { kind: "unionWrap", unionId: expected.unionId, tag, value: expr, type: expected, loc: expr.loc };
   }
 
+  /** True when `expr` is a record of a VIEW shape flowing into a record that declares every member it does plus more. */
+  private viewWidens(expr: IrExpr, expected: IrType & { kind: "record" }): boolean {
+    if (!this.isViewShape(expr.type)) return false;
+    const src = this.shapes.get(expr.type.shapeId);
+    const dst = this.shapes.get(expected.shapeId);
+    if (src === undefined || dst === undefined || src.tuple === true || dst.tuple === true) return false;
+    if (src.indexValue !== undefined || dst.indexValue !== undefined || !this.viewCapableShape(dst)) return false;
+    if (!dst.fields.some((g) => !src.fields.some((f) => f.name === g.name))) return false;
+    if (!src.fields.every((f) => dst.fields.some((g) => g.name === f.name))) return false;
+    return canDynCheckTo(expected, (id) => this.shapes.get(id), (id) => this.unions.get(id));
+  }
+
+  /** True when the width coercion `expr` -> `expected` (records) must keep the source's members: the source has members the
+   * destination does not declare, the site is JavaScript source (where assignment narrowing exposes them to later
+   * reads), and the destination is a shape a view can stand for. */
+  private widthKeepsObject(expr: IrExpr, expected: IrType & { kind: "record" }): boolean {
+    if (expr.type.kind !== "record" || process.env["SCRIPTC_WIDTH_VIEW"] === "0") return false;
+    if (!/\.[cm]?js$/.test(expr.loc.file)) return false;
+    const src = this.shapes.get(expr.type.shapeId);
+    const dst = this.shapes.get(expected.shapeId);
+    if (src === undefined || dst === undefined || src.tuple === true || dst.tuple === true) return false;
+    if (src.indexValue !== undefined || dst.indexValue !== undefined || !this.viewCapableShape(dst) || !this.viewCapableShape(src)) return false;
+    if (!src.fields.some((f) => !dst.fields.some((g) => g.name === f.name))) return false;
+    if (!dst.fields.every((g) => src.fields.some((f) => f.name === g.name))) return false;
+    return canConvertToDyn(expr.type, (id) => this.shapes.get(id), (id) => this.unions.get(id)) && canDynCheckTo(expected, (id) => this.shapes.get(id), (id) => this.unions.get(id));
+  }
+
   /** Copy-based structural WIDTH coercion — a `Full` record flowing into a
    * narrower `{ id }` slot, or `Full[]` into `{ id }[]` (the Pick-typed
    * display-table pattern): TS's width subtyping is free on erased types,
@@ -9043,6 +9070,20 @@ export class Lowerer {
    * width-coercible. */
   widthCoerce(expr: IrExpr, expected: IrType): IrExpr | null {
     if (expected.kind === "record" && expr.type.kind === "record") {
+      // A record with MORE members than the declared slot, flowing into it in JavaScript source (ioredis' Cluster:
+      // `this.options = defaults({}, options, DEFAULTS, this.options)` stores `CommanderOptions & ClusterOptions` in a
+      // `CommanderOptions` slot, and the flow-narrowed reads that follow name the extra members). The record keeps its
+      // identity as the OBJECT a view reads (the extra members stay live on it), where the copy would drop them.
+      if (this.widthKeepsObject(expr, expected)) {
+        const boxed: IrExpr = { kind: "dynFrom", value: expr, type: DYN, loc: expr.loc };
+        return { kind: "dynCheck", value: boxed, type: expected, loc: expr.loc };
+      }
+      // The converse: a VIEW of a narrower record read as the wider record its flow-narrowed type names (`const o =
+      // this.options` after the assignment above). The object is the same one, checked into the wider shape.
+      if (this.viewWidens(expr, expected)) {
+        const boxed: IrExpr = { kind: "dynFrom", value: expr, type: DYN, loc: expr.loc };
+        return { kind: "dynCheck", value: boxed, type: expected, loc: expr.loc };
+      }
       // Index-signature pairs reshape through the overflow CAPTURE helper
       // (the `Object.fromEntries(e) as ModelPricing` pattern — declared
       // collisions validate at runtime); plain shapes keep the field-copy

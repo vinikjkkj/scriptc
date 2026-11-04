@@ -107,6 +107,16 @@ const LOOP_FACTORY_EXPECTED =
   "nil 0 null false false\n" +
   "null\n";
 
+/* cases/twinrec/opts-intersection.ts: members read and written off an intersection of option records (ioredis'
+   Cluster options), recorded from node. */
+const OPTS_INTERSECTION_EXPECTED =
+  "base:|master|10000|true|sharded\n" +
+  "base:|master|10000|false| base:\n" +
+  "base:|slave|14|false|\n" +
+  "14 slave base:\n" +
+  "base:|slave|1|false|\n" +
+  "Invalid option scaleReads "bogus"\n";
+
 const PRIOR = process.env["SCRIPTC_PROVENANCE_MANIFEST"];
 afterEach(() => {
   setProvenanceSources(null);
@@ -201,6 +211,16 @@ describe("provenance: a twin class with untyped methods behind a program's own r
       if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
       const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
       expect(stdout).toBe(LOOP_FACTORY_EXPECTED);
+    }, 600_000);
+  }
+
+  for (const backend of ["c", "llvm"] as const) {
+    test(`24026: members of an intersection of option records are read and written live (${backend})`, async () => {
+      const entry = join(fixtureDir, "cases/twinrec/opts-intersection.ts");
+      const { result, outPath } = await build(entry, "opts-intersection", backend);
+      if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+      const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
+      expect(stdout).toBe(OPTS_INTERSECTION_EXPECTED);
     }, 600_000);
   }
 
