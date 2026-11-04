@@ -16000,6 +16000,14 @@ export class Lowerer {
     const frames = this.ctx.deferRet;
     if (!this.ctx.isAsync || frames === undefined || frames.length === 0 || value.type.kind !== "promise" || expected.kind === "promise") return null;
     const f = frames[frames.length - 1]!;
+    // The slot holds a promise of the function's declared payload; a returned promise of a narrower payload
+    // (`Promise<Uint8Array>` from a function declared `Promise<Uint8Array | null>`) converts to it first.
+    const promiseT: IrType = { kind: "promise", inner: expected };
+    if (!typeEquals(value.type, promiseT)) {
+      const converted = this.coerceToExpected(value, promiseT);
+      if (!typeEquals(converted.type, promiseT)) return null;
+      value = converted;
+    }
     f.used = true;
     const loc = value.loc;
     const stmt: IrStmt = {
