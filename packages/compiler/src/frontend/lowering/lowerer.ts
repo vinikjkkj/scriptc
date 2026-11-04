@@ -5077,36 +5077,44 @@ export class Lowerer {
    * parent would hand out a copy of the denied child, and the write to that child's array would be lost). */
   settleViewDenials(): void {
     if (this.viewDenied.size === 0 || viewShapeKeys.size === 0) return;
-    const reaches = (t: IrType, denied: Set<string>, seen: Set<string>): boolean => {
+    // The shapes a shape names DIRECTLY (through arrays, unions and index values, one record hop), as a
+    // reverse graph, so the closure is one walk over the edges: the shape graph of a protobuf program is a
+    // DAG with thousands of nodes and must never be walked as a tree.
+    const parents = new Map<string, Set<string>>();
+    const seenUnion = new Set<string>();
+    const hop = (t: IrType, parent: string): void => {
       switch (t.kind) {
         case "array":
-          return reaches(t.elem, denied, seen);
+          hop(t.elem, parent);
+          return;
         case "union": {
-          if (seen.has(t.unionId)) return false;
-          seen.add(t.unionId);
-          return (this.unions.get(t.unionId)?.arms ?? []).some((a) => reaches(a, denied, seen));
+          const key = `${parent}|${t.unionId}`;
+          if (seenUnion.has(key)) return;
+          seenUnion.add(key);
+          for (const a of this.unions.get(t.unionId)?.arms ?? []) hop(a, parent);
+          return;
         }
         case "record": {
-          if (denied.has(t.shapeId)) return true;
-          if (seen.has(t.shapeId)) return false;
-          seen.add(t.shapeId);
-          const sh = this.shapes.get(t.shapeId);
-          return sh !== undefined && (sh.fields.some((f) => reaches(f.type, denied, seen)) || (sh.indexValue !== undefined && reaches(sh.indexValue, denied, seen)));
+          let ps = parents.get(t.shapeId);
+          if (ps === undefined) parents.set(t.shapeId, (ps = new Set()));
+          ps.add(parent);
+          return;
         }
         default:
-          return false;
+          return;
       }
     };
-    const denied = new Set(this.viewDenied);
-    for (let changed = true; changed;) {
-      changed = false;
-      for (const sh of this.shapes.shapes) {
-        if (denied.has(sh.id)) continue;
-        if (sh.fields.some((f) => reaches(f.type, denied, new Set())) || (sh.indexValue !== undefined && reaches(sh.indexValue, denied, new Set()))) {
-          denied.add(sh.id);
-          changed = true;
-        }
-      }
+    for (const sh of this.shapes.shapes) {
+      for (const f of sh.fields) hop(f.type, sh.id);
+      if (sh.indexValue !== undefined) hop(sh.indexValue, sh.id);
+    }
+    const denied = new Set<string>();
+    const queue = [...this.viewDenied];
+    while (queue.length > 0) {
+      const id = queue.pop()!;
+      if (denied.has(id)) continue;
+      denied.add(id);
+      for (const p of parents.get(id) ?? []) queue.push(p);
     }
     for (const id of denied) {
       const sh = this.shapes.get(id);
