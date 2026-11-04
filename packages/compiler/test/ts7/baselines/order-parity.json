@@ -12498,6 +12498,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24110-detached-method-null-field-writes.js": {
+   "order": [
+    "<repo>/tests/corpus/24110-detached-method-null-field-writes.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2412-dowhile-guard-trailing-test.ts": {
    "order": [
     "<repo>/tests/corpus/2412-dowhile-guard-trailing-test.ts"
