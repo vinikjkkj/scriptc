@@ -18090,6 +18090,12 @@ export function hoistDetachedWriteRhs(L: Lowerer, expr: ts.BinaryExpression): Ir
   const loc = locOf(expr);
   const targetT = L.mapTypeOf(L.typeOf(expr.left));
   const rhs = targetT !== null ? L.lowerExprExpecting(expr.right, targetT) : L.lowerExpr(expr.right);
+  // A literal `null` / `undefined` right side has no value to keep in a local (a bare unit type owns no storage) and no effect to
+  // order before the throw: it lowers in place.
+  if (rhs.kind === "unitLit" && isUnitType(rhs.type)) {
+    L.preLowered.set(expr.right, { kind: "unitLit", unit: rhs.unit, type: rhs.type, loc: locOf(expr.right) });
+    return [];
+  }
   const h = L.declareHiddenLocal("mref.rhs", rhs.type);
   L.preLowered.set(expr.right, { kind: "varRef", localId: h.id, type: rhs.type, loc: locOf(expr.right) });
   return [{ kind: "varDecl", localId: h.id, init: rhs, loc }];
