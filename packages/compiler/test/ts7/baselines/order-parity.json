@@ -12510,6 +12510,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24112-engine-function-beside-native-regex.js": {
+   "order": [
+    "<repo>/tests/corpus/24112-engine-function-beside-native-regex.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2412-dowhile-guard-trailing-test.ts": {
    "order": [
     "<repo>/tests/corpus/2412-dowhile-guard-trailing-test.ts"
