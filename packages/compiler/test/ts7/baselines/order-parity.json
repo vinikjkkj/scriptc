@@ -12396,6 +12396,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24022-flow-tuple-then-number-element-read.js": {
+   "order": [
+    "<repo>/tests/corpus/24022-flow-tuple-then-number-element-read.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2403-kill-continue-backedge.ts": {
    "order": [
     "<repo>/tests/corpus/2403-kill-continue-backedge.ts"
