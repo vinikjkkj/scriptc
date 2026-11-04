@@ -252,14 +252,12 @@ console.log(JSON.stringify(o));`;
   });
 });
 
-describe("the remainder this fix does NOT close", () => {
-  /* Pinned, not fixed. The store target is a NAME, so no syntactic rule can
-   * see the assertion that produced it; closing it needs the recovered value
-   * to carry its origin, which is a representation change. estado-fence.md
-   * carries the measurement. This test asserts the CURRENT wrong answer on
-   * purpose: when a future block closes it, this test fails, and that
-   * failure is the notification. */
-  test("a recovery bound to a name first still loses the write (both backends)", { timeout: 480_000 }, async () => {
+describe("what the identity-preserving record view closes", () => {
+  /* Was pinned as a remainder: the store target is a NAME, so no syntactic rule could see the assertion that
+   * produced it, and closing it needed the recovered value to carry its origin - a representation change. The
+   * value model of 2026-11-03 is that change: the record is a VIEW of the object, so the write lands. These
+   * rows now assert Node's own answer. */
+  test("a recovery bound to a name first writes the object (both backends)", { timeout: 480_000 }, async () => {
     const src = `const d: unknown = JSON.parse('{"n":1}');
 const r = d as { n: number };
 r.n = 2;
@@ -268,10 +266,7 @@ console.log(JSON.stringify(d));`;
       const { node, exe } = await bothWays("via-local-binding", backend, src);
       expect(node.out.trim()).toBe('{"n":2}');
       expect(exe.code, `${backend}: ${exe.err}`).toBe(0);
-      expect(
-        exe.out.trim(),
-        `${backend}: if this now prints {"n":2} the remainder is CLOSED — delete this test and move the row into LANDS`,
-      ).toBe('{"n":1}');
+      expect(exe.out.trim(), `${backend}: the view writes the object`).toBe('{"n":2}');
     }
   });
 
@@ -309,20 +304,17 @@ console.log(JSON.stringify(d));`;
   test.for([
     ["intersection-key-order", `const d: unknown = JSON.parse('{"k":1,"j":2}');
 const back = d as Record<string, unknown> & { j: number };
-console.log(JSON.stringify(back), Object.keys(back).join(","));`, '{"k":1,"j":2} k,j', '{"j":2,"k":1} j,k'],
+console.log(JSON.stringify(back), Object.keys(back).join(","));`, '{"k":1,"j":2} k,j'],
     ["interface-index-key-order", `interface WithIx { j: number; [k: string]: unknown }
 const d: unknown = JSON.parse('{"k":1,"j":2}');
 const back = d as WithIx;
-console.log(JSON.stringify(back), Object.keys(back).join(","));`, '{"k":1,"j":2} k,j', '{"j":2,"k":1} j,k'],
-  ] as const)("%s reorders keys (both backends) — a separate open defect", { timeout: 480_000 }, async ([name, src, want, wrong]) => {
+console.log(JSON.stringify(back), Object.keys(back).join(","));`, '{"k":1,"j":2} k,j'],
+  ] as const)("%s keeps the object's key order (both backends)", { timeout: 480_000 }, async ([name, src, want]) => {
     for (const backend of ["c", "llvm"] as const) {
       const { node, exe } = await bothWays(name, backend, src);
       expect(node.out.trim()).toBe(want);
       expect(exe.code, `${backend}: ${exe.err}`).toBe(0);
-      expect(
-        exe.out.trim(),
-        `${backend}: if this now matches Node the defect is CLOSED — move this row into the control below`,
-      ).toBe(wrong);
+      expect(exe.out.trim(), `${backend}: JSON and Object.keys answer for the object itself`).toBe(want);
     }
   });
 
