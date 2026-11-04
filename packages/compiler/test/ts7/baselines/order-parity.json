@@ -12360,6 +12360,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24011-union-array-into-unknown-writes.ts": {
+   "order": [
+    "<repo>/tests/corpus/24011-union-array-into-unknown-writes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24012-union-array-static-writes-seen.ts": {
+   "order": [
+    "<repo>/tests/corpus/24012-union-array-static-writes-seen.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2402-labeled-break-kill.ts": {
    "order": [
     "<repo>/tests/corpus/2402-labeled-break-kill.ts"
