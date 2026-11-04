@@ -61,6 +61,7 @@ import { jsDesugar } from "./js-desugar.js";
 import { applySeedPins, computeSeedPins, type SeedPin } from "./seed-pin.js";
 import { programHasTsUntypedWeakNew, setTsUntypedWeakAdmission } from "./types.js";
 import { applyRetypePins, computeRetypePins, shiftRetypePins, type RetypePin } from "./retype-pin.js";
+import { computeEmptyCollectionPins } from "./empty-collection-pin.js";
 import { cjsLexerVisibleNames } from "./cjs-lexer.js";
 import { applyTwinEdits, clearTwinSpans, type TwinEdit } from "./lowering/emitter-twin.js";
 import {
@@ -504,6 +505,13 @@ export function loadProgram(
   // THE RETYPE PIN (retype-pin.ts) is decided on the same checked program and
   // applied by the same second load as the seed pin.
   const retypePins = process.env["SCRIPTC_RETYPE_PIN"] !== "0" ? computeRetypePins(load.program) : new Map<string, RetypePin[]>();
+  // THE EMPTY-COLLECTION PIN (empty-collection-pin.ts): a fresh `new Map()` the checker leaves `Map<any, any>` takes the
+  // Map<K, V> its destination declares. Same second load, same replacement edits.
+  if (process.env["SCRIPTC_EMPTY_PIN"] !== "0") {
+    for (const [file, list] of computeEmptyCollectionPins(load.program)) {
+      retypePins.set(file, [...(retypePins.get(file) ?? []), ...list]);
+    }
+  }
   if (retypePins.size > 0 && process.env["SCRIPTC_RETYPE_PIN_WHY"] !== undefined) {
     for (const [file, list] of retypePins) {
       for (const pin of list) process.stderr.write(`[retypepin] ${pin.why} at ${file}:${pin.start}\n`);
