@@ -12341,6 +12341,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24104-comma-chain-of-hundreds-of-operands.js": {
+   "order": [
+    "<repo>/tests/corpus/24104-comma-chain-of-hundreds-of-operands.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24105-protodata-name-read-through-an-untyped-value.js": {
+   "order": [
+    "<repo>/tests/corpus/24105-protodata-name-read-through-an-untyped-value.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2411-exhaustive-switch-terminality.ts": {
    "order": [
     "<repo>/tests/corpus/2411-exhaustive-switch-terminality.ts"
@@ -23865,6 +23877,12 @@
   "<repo>/tests/diagnostics/proto-table-sibling-tables-refused.js": {
    "order": [
     "<repo>/tests/diagnostics/proto-table-sibling-tables-refused.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/protodata-untyped-read-related-owners.js": {
+   "order": [
+    "<repo>/tests/diagnostics/protodata-untyped-read-related-owners.js"
    ],
    "diags": []
   },
