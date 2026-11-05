@@ -7,7 +7,7 @@
  * CEmitter and these functions only consult them through it. */
 import type { CEmitter } from "./emitter.js";
 import { rcSitesRequested } from "./emitter.js";
-import { accessorKeyOrderOf, accessorSlotProp, shapeHasAccessorSlots, VOID, arrayTypeHasLiveView, bytesAliasOnExtract, canConvertToDyn, canDynCheckTo, moduleUsesDynView, moduleInstanceLaneNeedsKg, moduleUsesInstanceRecordLane } from "../../ir/nodes.js";
+import { moduleBoxesFunctionLikeValues, accessorKeyOrderOf, accessorSlotProp, shapeHasAccessorSlots, VOID, arrayTypeHasLiveView, bytesAliasOnExtract, canConvertToDyn, canDynCheckTo, moduleUsesDynView, moduleInstanceLaneNeedsKg, moduleUsesInstanceRecordLane } from "../../ir/nodes.js";
 import { CLASS_PROPS_FIELD, EVAL_STATIC_CLASSES, dynNeverArm, dynNeverIn, armDiscrimLits, dynErrorClassKind, isDynErrorClass, canAdaptDynFuncTo, dynRestApplyable, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, UNION_ARM_JS_OBJECT_KINDS, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassStruct, mangleField, mangleFunction, mangleFnClosure, mangleRecordNew, mangleRecordRelease, mangleRecordStruct } from "../mangle.js";
@@ -2620,7 +2620,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // point of its own record body. Restating `soft ? match : wide` in
         // two files is exactly the drift this gate is a warning about.
         const dialWide = kindgateWideLane(E.kindgateDials, soft, shape);
-        const funcOnly = !dialWide && kindgateFuncLane(soft, shape);
+        const funcOnly = !dialWide && moduleBoxesFunctionLikeValues(E.mod) && kindgateFuncLane(soft, shape);
         const wide = dialWide || funcOnly ? E.recordWideHelper() : null;
         // Ahead of the kind gate and the wide lane both: an origin is by
         // construction an OBJ copy of this exact shape, so neither has
