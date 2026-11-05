@@ -2916,6 +2916,14 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       // normalizer shape): the slot has the overflow map's RC/JSON/dyn
       // plumbing, values arrive dyn or convert via dynFrom.
       if (!et || et.kind === "void") return null;
+      // A library's `[rows, FieldPacket[]]`: the declaration promises an
+      // array where the implementation answers `[rows, undefined]` for a
+      // statement without a result set. The slot takes the undefined arm so
+      // that Node's value crosses (reads give undefined, a dereference
+      // throws Node's TypeError). Only positions whose element type a
+      // library declaration file declares: a tuple of the program's own
+      // types keeps its exact slots.
+      if (et.kind === "array" && packageDeclaredArray(args[i]!, checker, ctx)) et = withUndefinedArm(et, unions) ?? et;
       // A jsval MEMBER absorbs the tuple (bare jsval fields have no shape
       // slot — the record-field rule), exactly like record fields below.
       if (et.kind === "jsval") return JSVAL;
@@ -6709,6 +6717,20 @@ export function genResultRecord(
  * fields, tuple/array elements, variable slots) substitute unitOnlyUnion
  * for these; RETURN positions keep the VOID mapping (a void return is not
  * a value). */
+/** An array type whose element is declared by a library's own declaration
+ * file (not the compiler lib, not @types/node). */
+function packageDeclaredArray(t: ts.Type, checker: ts.TypeChecker, ctx: TypeMapperCtx): boolean {
+  if (!checker.isArrayType(t)) return false;
+  const elem = checker.getTypeArguments(t as ts.TypeReference)[0];
+  const sym = elem?.getAliasSymbol() ?? elem?.getSymbol();
+  const decls = sym ? checker.declarationsOf(sym) : [];
+  if (decls.length === 0) return false;
+  return decls.every((d) => {
+    const f = d.getSourceFile();
+    return f.isDeclarationFile && !ctx.isStdlibFile(f) && !f.fileName.includes("/@types/node/");
+  });
+}
+
 export function isUnitOnlyTsType(t: ts.Type): boolean {
   const UNIT = ts.TypeFlags.Undefined | ts.TypeFlags.Void | ts.TypeFlags.Null;
   const parts: readonly ts.Type[] = t.isUnionType() ? ts.constituentTypes(t) : [t];
