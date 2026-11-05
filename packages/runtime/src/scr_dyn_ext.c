@@ -798,6 +798,10 @@ ScrDyn *scr_error_ext_dyn(ScrError *e, const ScrStr *key) {
   double err_no = 0;
   const ScrStr *sys = NULL, *path = NULL, *dest = NULL;
   const char *k = key->data;
+  /* A property the program assigned on the error (mysql2's `err.errno = code`) is an own data property in Node and
+   * wins over whatever the runtime stamped: the bag is consulted first. */
+  if (e->props != NULL && e->props->kind == SCR_DYN_OBJ && scr_dyn_obj_key_present(e->props, key->data, key->len))
+    return scr_error_prop_get(e, (ScrStr *)key);
   if (strcmp(k, "address") == 0) {
     ScrStr *a = scr_error_ext_address(e);
     return a != NULL ? scr_dyn_new_str(a) : scr_dyn_retain(scr_dyn_undefined());
