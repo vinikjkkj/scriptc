@@ -159,6 +159,7 @@ const CLAIM_ORDER_EXPECTED =
 /* cases/twinrec/claim-local.ts: a declaration-claimed promise held in a local before it is returned, recorded from node. */
 const CLAIM_LOCAL_EXPECTED =
   "OK late cb null OK,cb null closed\n";
+
 /* cases/twinrec/symbol-class.ts: a class field keyed by a symbol the dependency exports and declares, recorded from node. */
 const SYMBOL_CLASS_EXPECTED =
   "false a:6379:t\n" +
@@ -182,6 +183,9 @@ const ASYNC_SLOTS_EXPECTED =
 const CLAIM_TUPLES_EXPECTED =
   "2 null OK 7\n" +
   "2 false bad 7\n";
+/* cases/twinrec/static-bag.ts: statics assigned after a class that has a base and subclasses, recorded from node. */
+const STATIC_BAG_EXPECTED =
+  "1 2 b b undefined base function 1:b 1:b s b b\n";
 
 const PRIOR = process.env["SCRIPTC_PROVENANCE_MANIFEST"];
 afterEach(() => {
@@ -363,6 +367,16 @@ describe("provenance: a twin class with untyped methods behind a program's own r
       if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
       const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
       expect(stdout).toBe(CLAIM_TUPLES_EXPECTED);
+    }, 600_000);
+  }
+
+  for (const backend of ["c", "llvm"] as const) {
+    test(`24050: statics assigned after a derived class are its own properties and read down the constructor chain (${backend})`, async () => {
+      const entry = join(fixtureDir, "cases/twinrec/static-bag.ts");
+      const { result, outPath } = await build(entry, "static-bag", backend);
+      if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+      const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
+      expect(stdout).toBe(STATIC_BAG_EXPECTED);
     }, 600_000);
   }
 
