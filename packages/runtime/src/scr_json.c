@@ -14638,7 +14638,9 @@ bool scr_dyn_has_own(const ScrDyn *v, const ScrStr *key) {
       }
     }
 #endif
-    return scr_dyn_obj_has_own_prop(v, key->data, key->len);
+    if (scr_dyn_obj_has_own_prop(v, key->data, key->len)) return true;
+    /* An error's `stack` is an own property in Node (captured at construction); this encoding carries none. */
+    return key->len == 5 && memcmp(key->data, "stack", 5) == 0 && scr_dyn_is_error_encoding(v);
   }
   if (v->kind == SCR_DYN_ARR) {
     if (key->len == 6 && memcmp(key->data, "length", 6) == 0) return true;
@@ -14688,6 +14690,17 @@ bool scr_dyn_has_own(const ScrDyn *v, const ScrStr *key) {
     /* A field that does not exist until its write runs (enumerable 2/3: undefined means unset; 4: the absent marker) is not OWN
      * while unset: a name only the prototype carries is inherited, as `"k" in x` already says. */
     if (cm != NULL) return cm->enumerable && !(cm->get != NULL && scr_dyn_member_hidden(cm, v->v.inst.o));
+    /* An Error-rooted instance's own `stack` (captured at construction) and `message` (a constructed error owns it, as the
+     * dyn error encoding does) are not table rows: the runtime error's cells answer them. */
+    if (scr_dyn_objinst_error_rooted(v)) {
+      const ScrError *oe = (const ScrError *)v->v.inst.o;
+      if (key->len == 5 && memcmp(key->data, "stack", 5) == 0) return true;
+      /* `message` is own once a message was provided or assigned (`new Error()` has none), `name` once the program
+       * assigned one -- even the canonical "Error": both are recorded as facts in the error object. */
+      const bool in_bag = oe->props != NULL && oe->props->kind == SCR_DYN_OBJ && scr_dyn_obj_key_present(oe->props, key->data, key->len);
+      if (key->len == 7 && memcmp(key->data, "message", 7) == 0) return oe->own_message || in_bag;
+      if (key->len == 4 && memcmp(key->data, "name", 4) == 0) return oe->own_name || in_bag;
+    }
     /* An emitter's own state cells (_events, _eventsCount, _maxListeners) are own properties; its
      * EventEmitter.prototype members are not. */
     if (scr_dyn_ee_ops != NULL && scr_dyn_objinst_emitter(v) != NULL && scr_dyn_ee_ops->is_state(key->data, key->len)) return true;
@@ -14697,6 +14710,12 @@ bool scr_dyn_has_own(const ScrDyn *v, const ScrStr *key) {
       if (th >= 0) return th == 1;
     }
     if (scr_dyn_objinst_enumerable(v)) return false;
+    /* An Error-rooted class with a complete member table owns its rows (answered above), `stack` and `message` (above)
+     * and whatever the program assigned or the constructor stored in the error's property bag (`cause`, an expando). */
+    if (scr_dyn_objinst_error_rooted(v) && scr_dyn_objinst_has_members(v)) {
+      const ScrError *err = (const ScrError *)v->v.inst.o;
+      return err->props != NULL && err->props->kind == SCR_DYN_OBJ && scr_dyn_obj_key_present(err->props, key->data, key->len);
+    }
     return scr_dyn_objinst_fence(v, "Object.hasOwn");
   }
   /* A MAP box is exact in the OTHER direction and it is worth saying why
