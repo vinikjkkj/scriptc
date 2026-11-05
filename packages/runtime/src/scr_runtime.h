@@ -5164,6 +5164,12 @@ extern void (*scr_dyn_sym_copy_enum)(ScrDyn *target, const ScrDyn *src);
 extern ScrDyn *(*scr_dyn_sym_row_value)(const ScrDyn *self, const ScrDynSymEnt *row);
 /* Object.prototype.hasOwnProperty / propertyIsEnumerable (op 0 / 1) over a symbol argument, installed with the symbol unit. */
 extern bool (*scr_dyn_sym_proto_test)(int op, ScrDyn *recv, ScrSym *k);
+/* The rest of the table's behaviour lives in scr_symbol.c and is reached through these, so a program that stores no symbol property
+ * links none of it into the always-linked core (a table pointer is NULL until the first store, and these are set with the hooks above):
+ * freeing a table and tracing its values for the cycle collector. */
+extern void (*scr_dyn_sym_free_table)(ScrDynSymTab *t, bool release);
+extern void (*scr_dyn_sym_trace_table)(const ScrDynSymTab *t, ScrTraceVisit visit, void *ctx);
+
 
 /* The all-NULL instance every read of an absent ext answers from. */
 extern const ScrDynObjExt scr_dyn_obj_ext_none;

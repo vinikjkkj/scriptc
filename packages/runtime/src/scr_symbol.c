@@ -239,7 +239,12 @@ static bool scr_dsym_proto_test(int op, ScrDyn *recv, ScrSym *k);
 
 /* Installed by the emitted main exactly when this unit links, so the always-linked core and the gated units that cannot
  * name it (inspect, assert, the dyn invoke dispatch) reach it through these. */
+static void scr_dsym_free_table(ScrDynSymTab *t, bool release);
+static void scr_dsym_trace_table(const ScrDynSymTab *t, ScrTraceVisit visit, void *ctx);
+
 static void scr_dsym_install_hooks(void) {
+  scr_dyn_sym_free_table = &scr_dsym_free_table;
+  scr_dyn_sym_trace_table = &scr_dsym_trace_table;
   scr_dyn_sym_key_release = &scr_sym_key_release_hook;
   scr_dyn_sym_key_str = &scr_sym_to_string;
   scr_dyn_sym_copy_enum = &scr_dsym_copy_enum;
@@ -1072,3 +1077,21 @@ ScrDyn *scr_dyn_sym_tag(ScrDyn *recv) {
   scr_str_release(t);
   return d;
 }
+
+/* ── the table's teardown, collector trace and util.inspect rendering (reached through hooks, see scr_runtime.h) ───────────────────── */
+
+/* The keys are plain refcounts in BOTH teardown paths; the values are released only by the refcount path (the collector's trace
+ * already accounted for them). */
+static void scr_dsym_free_table(ScrDynSymTab *t, bool release) {
+  for (uint32_t i = 0; i < t->len; i++) {
+    scr_sym_release(t->e[i].key);
+    if (release) scr_dyn_release(t->e[i].val);
+  }
+  free(t->e);
+  free(t);
+}
+
+static void scr_dsym_trace_table(const ScrDynSymTab *t, ScrTraceVisit visit, void *ctx) {
+  for (uint32_t i = 0; i < t->len; i++) visit(t->e[i].val, ctx);
+}
+

@@ -155,19 +155,15 @@ ScrDynObjExt *scr_dyn_ext_w(ScrDyn *d) {
 /* The symbol table's teardown. The keys are plain refcounts in BOTH paths; the values are released only by the
  * refcount path (the collector's trace already accounted for them). The release hook was installed by the first
  * store, so a table existing implies it is set. */
+#ifdef SCR_SYMTAB
 void (*scr_dyn_sym_key_release)(ScrSym *k) = NULL;
 ScrStr *(*scr_dyn_sym_key_str)(ScrSym *k) = NULL;
 void (*scr_dyn_sym_copy_enum)(ScrDyn *target, const ScrDyn *src) = NULL;
 ScrDyn *(*scr_dyn_sym_row_value)(const ScrDyn *self, const ScrDynSymEnt *row) = NULL;
 bool (*scr_dyn_sym_proto_test)(int op, ScrDyn *recv, ScrSym *k) = NULL;
-static void scr_dyn_syms_free(ScrDynSymTab *t, bool release) {
-  for (uint32_t i = 0; i < t->len; i++) {
-    scr_dyn_sym_key_release(t->e[i].key);
-    if (release) scr_dyn_release(t->e[i].val);
-  }
-  free(t->e);
-  free(t);
-}
+void (*scr_dyn_sym_free_table)(ScrDynSymTab *t, bool release) = NULL;
+void (*scr_dyn_sym_trace_table)(const ScrDynSymTab *t, ScrTraceVisit visit, void *ctx) = NULL;
+#endif
 
 /* The slow half of scr_dyn_ext_drop, kept out of line so the common "no ext" return stays a leaf with no frame. */
 static __attribute__((noinline)) void scr_dyn_ext_drop_block(ScrDynObjExt *e, bool release) {
@@ -182,7 +178,9 @@ static __attribute__((noinline)) void scr_dyn_ext_drop_block(ScrDynObjExt *e, bo
     scr_dyn_release(e->slots);
     scr_dyn_release(e->extras);
   }
-  if (e->syms != NULL) scr_dyn_syms_free(e->syms, release);
+#ifdef SCR_SYMTAB
+  if (e->syms != NULL) scr_dyn_sym_free_table(e->syms, release);
+#endif
 #if SCR_JSON_KEY_POOL
   if (scr_pool_give(&scr_dyn_ext_blocks, e, sizeof *e)) return;
 #endif
@@ -720,10 +718,6 @@ ScrDyn *scr_dyn_alloc_proxy(void) { return scr_dyn_alloc(SCR_DYN_PROXY); }
 
 /* The traced children: every one is a ScrDyn or a ScrClosure, so every one
  * carries a header (or is immortal, which the visit filter skips). */
-static void scr_dyn_syms_trace(const ScrDynSymTab *t, ScrTraceVisit visit, void *ctx) {
-  for (uint32_t i = 0; i < t->len; i++) visit(t->e[i].val, ctx);
-}
-
 static void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx) {
   ScrDyn *d = (ScrDyn *)o;
   switch (d->kind) {
@@ -731,7 +725,9 @@ static void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx) {
     for (size_t i = 0; i < d->v.arr.len; i++) visit(d->v.arr.items[i], ctx);
     /* the named-property table of an exec result / expando'd array */
     visit(scr_dyn_ext(d)->extras, ctx);
-    if (scr_dyn_ext(d)->syms != NULL) scr_dyn_syms_trace(scr_dyn_ext(d)->syms, visit, ctx);
+#ifdef SCR_SYMTAB
+    if (scr_dyn_ext(d)->syms != NULL) scr_dyn_sym_trace_table(scr_dyn_ext(d)->syms, visit, ctx);
+#endif
     break;
   case SCR_DYN_OBJ:
     for (size_t i = 0; i < d->v.obj.len; i++)
@@ -745,7 +741,9 @@ static void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx) {
     /* scriptc's internal-slot table: an ordinary OBJ dyn holding ordinary
      * dyn values, so a cycle through one collects like any other. */
     visit(scr_dyn_ext(d)->slots, ctx);
-    if (scr_dyn_ext(d)->syms != NULL) scr_dyn_syms_trace(scr_dyn_ext(d)->syms, visit, ctx);
+#ifdef SCR_SYMTAB
+    if (scr_dyn_ext(d)->syms != NULL) scr_dyn_sym_trace_table(scr_dyn_ext(d)->syms, visit, ctx);
+#endif
     break;
   case SCR_DYN_FUNC:
     visit(d->v.fn.clo, ctx);
@@ -13897,6 +13895,7 @@ void (*scr_handle_forin_hook)(const ScrDyn *v, ScrDyn *out) = NULL;
 static void scr_dyn_assign_strs(ScrDyn *target, const ScrDyn *src);
 static void scr_dyn_assign_from(ScrDyn *target, const ScrDyn *src) {
   scr_dyn_assign_strs(target, src);
+#ifdef SCR_SYMTAB
   /* CopyDataProperties lists the string keys first and the ENUMERABLE symbol keys after them. The hook is NULL in every
    * program that links no symbol unit, which is the whole cost of this tail for them: one load and one test. */
   if (scr_dyn_sym_copy_enum == NULL || target->kind != SCR_DYN_OBJ) return;
@@ -13912,6 +13911,7 @@ static void scr_dyn_assign_from(ScrDyn *target, const ScrDyn *src) {
   } else if (src->kind == SCR_DYN_BYTES) {
     if (src->v.bytes->own != NULL && src->v.bytes->own->ext.syms != NULL && !scr_exc_pending()) scr_dyn_sym_copy_enum(target, src);
   }
+#endif
 }
 static void scr_dyn_assign_strs(ScrDyn *target, const ScrDyn *src) {
   if (target->kind != SCR_DYN_OBJ) return;

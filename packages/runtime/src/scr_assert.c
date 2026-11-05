@@ -477,6 +477,7 @@ static bool scr_assert_dyn_deep_eq(const ScrDyn *a, const ScrDyn *b);
 
 /* deepStrictEqual compares the own ENUMERABLE symbol keys too (scr_symbol.c's table): same set of symbols, each pair
  * deep-equal. Bodies of objects that never stored one skip it on two NULL tests. */
+#ifdef SCR_SYMTAB /* the symbol-property comparison and rendering are compiled in only for a program that links scr_symbol.c */
 static const ScrDynSymTab *scr_assert_syms_of(const ScrDyn *d) {
   if (d->kind == SCR_DYN_BYTES) return d->v.bytes->own != NULL ? d->v.bytes->own->ext.syms : NULL;
   return scr_dyn_ext(d)->syms;
@@ -505,7 +506,9 @@ static bool scr_assert_dyn_sym_eq(const ScrDyn *a, const ScrDyn *b) {
   }
   return true;
 }
-
+#else
+#define scr_assert_dyn_sym_eq(a, b) true
+#endif
 
 /* `name` and `message` of two error-encoded dyn objects, compared as
  * STRINGS - Node's isDeepStrictEqual error branch. Absent on either side
@@ -970,15 +973,20 @@ static void scr_assert_cf_value(ScrAssertBuf *b, const ScrDyn *d, size_t indent,
         return;
       }
       ab_char(b, '[');
+#ifdef SCR_SYMTAB
       const ScrDynSymTab *asyms = scr_dyn_ext(d)->syms;
       size_t ansym = 0;
       for (uint32_t si = 0; asyms != NULL && si < asyms->len; si++) ansym += (asyms->e[si].flags & SCR_SYMP_ENUM) != 0;
+#else
+      const size_t ansym = 0;
+#endif
       for (size_t i = 0; i < d->v.arr.len; i++) {
         ab_char(b, '\n');
         scr_assert_cf_pad(b, indent + 2);
         scr_assert_cf_value(b, d->v.arr.items[i], indent + 2, depth - 1);
         if (i + 1 < d->v.arr.len || ansym > 0) ab_char(b, ',');
       }
+#ifdef SCR_SYMTAB
       /* the enumerable symbol-keyed properties follow the elements, in creation order */
       for (uint32_t si = 0, done = 0; asyms != NULL && si < asyms->len; si++) {
         const ScrDynSymEnt *se = &asyms->e[si];
@@ -992,6 +1000,7 @@ static void scr_assert_cf_value(ScrAssertBuf *b, const ScrDyn *d, size_t indent,
         scr_assert_cf_value(b, se->val, indent + 2, depth - 1);
         if (++done < ansym) ab_char(b, ',');
       }
+#endif
       ab_char(b, '\n');
       scr_assert_cf_pad(b, indent);
       ab_char(b, ']');
@@ -1008,9 +1017,13 @@ static void scr_assert_cf_value(ScrAssertBuf *b, const ScrDyn *d, size_t indent,
     case SCR_DYN_OBJ: {
       /* The null-proto dictionary renders with Node's prefix in the
        * failure diff too (assertion_error.js inspects both sides). */
+#ifdef SCR_SYMTAB
       const ScrDynSymTab *cfsyms = scr_dyn_ext(d)->syms;
       size_t cfnsym = 0;
       for (uint32_t si = 0; cfsyms != NULL && si < cfsyms->len; si++) cfnsym += (cfsyms->e[si].flags & SCR_SYMP_ENUM) != 0;
+#else
+      const size_t cfnsym = 0;
+#endif
       if (d->v.obj.len == 0 && cfnsym == 0) {
         ab_cstr(b, d->null_proto ? "[Object: null prototype] {}" : "{}");
         return;
@@ -1061,6 +1074,7 @@ static void scr_assert_cf_value(ScrAssertBuf *b, const ScrDyn *d, size_t indent,
         ents[nents].len = eb.len;
         nents++;
       }
+#ifdef SCR_SYMTAB
       /* the enumerable symbol-keyed properties render as `Symbol(desc): value` and sort with the rest (scr_symbol.c) */
       for (uint32_t si = 0; cfsyms != NULL && si < cfsyms->len; si++) {
         const ScrDynSymEnt *se = &cfsyms->e[si];
@@ -1081,6 +1095,7 @@ static void scr_assert_cf_value(ScrAssertBuf *b, const ScrDyn *d, size_t indent,
         ents[nents].len = sb.len;
         nents++;
       }
+#endif
       qsort(ents, nents, sizeof *ents, scr_assert_cf_entry_cmp);
       ab_char(b, '{');
       for (size_t i = 0; i < nents; i++) {

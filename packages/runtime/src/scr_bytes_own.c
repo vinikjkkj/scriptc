@@ -113,15 +113,9 @@ static bool scr_bytes_own_delete(ScrBytes *b, const char *k, size_t kl) {
 static void scr_bytes_own_free(ScrBytes *b) {
   ScrBytesOwn *t = b->own;
   b->own = NULL;
-  if (t->ext.syms != NULL) { /* symbol-keyed properties: the keys through the symbol unit's hook, the values with the table */
-    ScrDynSymTab *st = t->ext.syms;
-    for (uint32_t i = 0; i < st->len; i++) {
-      scr_dyn_sym_key_release(st->e[i].key);
-      scr_dyn_release_v(st->e[i].val);
-    }
-    free(st->e);
-    free(st);
-  }
+#ifdef SCR_SYMTAB
+  if (t->ext.syms != NULL) scr_dyn_sym_free_table(t->ext.syms, true); /* symbol-keyed properties */
+#endif
   for (size_t i = 0; i < t->n; i++) {
     free(t->ents[i].key);
     scr_dyn_release_v(t->ents[i].val);

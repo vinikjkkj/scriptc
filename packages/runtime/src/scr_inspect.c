@@ -926,6 +926,9 @@ ScrStr *scr_insp_regex(ScrRegex *re) {
  * INSPECT_MAX_BYTES (50); renders fully at any depth (custom inspection
  * runs before the depth check in Node). u8 element kind only (the
  * frontend fences the rest). */
+#ifdef SCR_SYMTAB
+static ScrStr *insp_sym_row_text(const ScrDynSymEnt *row, double recurse, double depth);
+#endif
 ScrStr *scr_insp_buffer(ScrBytes *b) {
   InspBuf out = {0};
   ib_cstr(&out, "<Buffer ");
@@ -944,25 +947,20 @@ ScrStr *scr_insp_buffer(ScrBytes *b) {
     ib_bytes(&out, more, (size_t)n);
   }
   /* the enumerable symbol-keyed own properties follow the bytes, after ", " (`<Buffer 01 02, Symbol(k): 5>`) */
-  const ScrDynSymTab *bst = b->own != NULL ? b->own->ext.syms : NULL;
-  bool first = b->len == 0;
-  for (uint32_t i = 0; bst != NULL && i < bst->len; i++) {
-    if (!(bst->e[i].flags & SCR_SYMP_ENUM)) continue;
-    if (!first) ib_cstr(&out, ", ");
-    first = false;
-    ScrStr *kn = scr_dyn_sym_key_str(bst->e[i].key);
-    ib_bytes(&out, kn->data, kn->len);
-    scr_str_release(kn);
-    ib_cstr(&out, ": ");
-    if (bst->e[i].flags & SCR_SYMP_ACC) {
-      const bool g = bst->e[i].val->v.arr.items[0]->kind == SCR_DYN_FUNC, st = bst->e[i].val->v.arr.items[1]->kind == SCR_DYN_FUNC;
-      ib_cstr(&out, g && st ? "[Getter/Setter]" : g ? "[Getter]" : "[Setter]");
-    } else {
-      ScrStr *v = scr_insp_dyn(bst->e[i].val, 1, 2);
-      ib_bytes(&out, v->data, v->len);
-      scr_str_release(v);
+#ifdef SCR_SYMTAB
+  if (b->own != NULL && b->own->ext.syms != NULL) {
+    const ScrDynSymTab *bst = b->own->ext.syms;
+    bool first = b->len == 0;
+    for (uint32_t i = 0; i < bst->len; i++) {
+      if (!(bst->e[i].flags & SCR_SYMP_ENUM)) continue;
+      if (!first) ib_cstr(&out, ", ");
+      first = false;
+      ScrStr *row = insp_sym_row_text(&bst->e[i], 1, 2);
+      ib_bytes(&out, row->data, row->len);
+      scr_str_release(row);
     }
   }
+#endif
   ib_char(&out, '>');
   return ib_take(&out);
 }
@@ -1143,7 +1141,11 @@ ScrStr *scr_insp_key(ScrStr *k) {
  * holds both families, so the filter is explicit. An ACCESSOR is NOT
  * invoked: Node prints `[Getter]` / `[Setter]` / `[Getter/Setter]` and
  * calls nothing, and calling it here would be a side effect at a print. */
+#ifdef SCR_SYMTAB
 static void insp_emit_syms(const ScrDyn *d, double recurse, double depth);
+#else
+#define insp_emit_syms(d, r, dp) ((void)0)
+#endif
 void scr_cls_props_inspect(const ScrDyn *tbl, double recurse, double depth, bool index_keys) {
   if (tbl == NULL || tbl->kind != SCR_DYN_OBJ) return;
   size_t *ord = scr_dyn_obj_key_order(tbl);
@@ -1196,15 +1198,19 @@ void scr_cls_props_inspect(const ScrDyn *tbl, double recurse, double depth, bool
  * rule stated twice on purpose. */
 /* The ENUMERABLE symbol-keyed own properties (scr_symbol.c's table) -- the ones Node prints, as `Symbol(desc): value`,
  * after the string keys. Non-enumerable ones (a defineProperty default) print nowhere. */
-static size_t insp_sym_count(const ScrDyn *d) {
-  if (d == NULL) return 0;
-  const ScrDynSymTab *t = scr_dyn_ext(d)->syms;
+#ifdef SCR_SYMTAB /* the symbol-property code below is compiled in only for a program that links scr_symbol.c */
+static size_t insp_sym_count_t(const ScrDynSymTab *t) {
   size_t n = 0;
-  for (uint32_t i = 0; t != NULL && i < t->len; i++)
-    if (t->e[i].flags & SCR_SYMP_ENUM) n++;
+  for (uint32_t i = 0; t != NULL && i < t->len; i++) n += (t->e[i].flags & SCR_SYMP_ENUM) != 0;
   return n;
 }
+static size_t insp_sym_count(const ScrDyn *d) { return d == NULL ? 0 : insp_sym_count_t(scr_dyn_ext(d)->syms); }
+#else
+#define insp_sym_count_t(t) ((size_t)0)
+#define insp_sym_count(d) ((size_t)0)
+#endif
 
+#ifdef SCR_SYMTAB
 /* A boxed instance's run-time property table when it hosts symbol-keyed properties (+1), else NULL. */
 static ScrDyn *insp_inst_sym_bag(const ScrDyn *d) {
   const ScrDynClassMember *m = scr_dyn_objinst_member(d, "%props", 6);
@@ -1223,6 +1229,10 @@ static ScrDyn *insp_fn_sym_table(const ScrDyn *d) {
   scr_dyn_release(t);
   return NULL;
 }
+#else
+#define insp_inst_sym_bag(d) ((ScrDyn *)NULL)
+#define insp_fn_sym_table(d) ((ScrDyn *)NULL)
+#endif
 
 static size_t insp_slot_count(const ScrDyn *d) {
   const ScrDyn *s = scr_dyn_ext(d)->slots;
@@ -1238,34 +1248,42 @@ static size_t insp_slot_count(const ScrDyn *d) {
 /* Appends one `Symbol(<desc>): <value>` entry per renderable slot to the
  * frame scr_insp_begin opened. Insertion order, which is the converter's
  * field order and therefore Node's. */
+#ifdef SCR_SYMTAB
 static void insp_emit_symtab(const ScrDynSymTab *t, double recurse, double depth);
 static void insp_emit_syms(const ScrDyn *d, double recurse, double depth) {
   if (d == NULL) return;
   insp_emit_symtab(scr_dyn_ext(d)->syms, recurse, depth);
 }
 
+/* `Symbol(desc): value` for one row; an accessor renders [Getter]/[Setter] and runs nothing. +1. */
+static ScrStr *insp_sym_row_text(const ScrDynSymEnt *row, double recurse, double depth) {
+  ScrStr *kn = scr_dyn_sym_key_str(row->key);
+  InspBuf eb = {0};
+  ib_bytes(&eb, kn->data, kn->len);
+  ib_cstr(&eb, ": ");
+  if (row->flags & SCR_SYMP_ACC) {
+    const bool g = row->val->v.arr.items[0]->kind == SCR_DYN_FUNC, st = row->val->v.arr.items[1]->kind == SCR_DYN_FUNC;
+    ib_cstr(&eb, g && st ? "[Getter/Setter]" : g ? "[Getter]" : "[Setter]");
+  } else {
+    ScrStr *val = scr_insp_dyn(row->val, recurse + 1, depth);
+    ib_bytes(&eb, val->data, val->len);
+    scr_str_release(val);
+  }
+  scr_str_release(kn);
+  return ib_take(&eb);
+}
+
 static void insp_emit_symtab(const ScrDynSymTab *t, double recurse, double depth) {
   for (uint32_t i = 0; t != NULL && i < t->len; i++) {
     if (!(t->e[i].flags & SCR_SYMP_ENUM)) continue;
-    ScrStr *kn = scr_dyn_sym_key_str(t->e[i].key);
-    InspBuf eb = {0};
-    ib_bytes(&eb, kn->data, kn->len);
-    ib_cstr(&eb, ": ");
-    if (t->e[i].flags & SCR_SYMP_ACC) { /* an accessor renders [Getter] / [Setter] and runs nothing */
-      const bool g = t->e[i].val->v.arr.items[0]->kind == SCR_DYN_FUNC;
-      const bool s = t->e[i].val->v.arr.items[1]->kind == SCR_DYN_FUNC;
-      ib_cstr(&eb, g && s ? "[Getter/Setter]" : g ? "[Getter]" : "[Setter]");
-    } else {
-      ScrStr *val = scr_insp_dyn(t->e[i].val, recurse + 1, depth);
-      ib_bytes(&eb, val->data, val->len);
-      scr_str_release(val);
-    }
-    scr_str_release(kn);
-    ScrStr *entry = ib_take(&eb);
+    ScrStr *entry = insp_sym_row_text(&t->e[i], recurse, depth);
     scr_insp_entry(entry, false);
     scr_str_release(entry);
   }
 }
+#else
+#define insp_emit_symtab(t, r, dp) ((void)0)
+#endif
 
 static void insp_emit_slots(const ScrDyn *d, double recurse, double depth) {
   const ScrDyn *s = scr_dyn_ext(d)->slots;
@@ -2307,9 +2325,12 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       }
       char prefix[48];
       int pn = snprintf(prefix, sizeof prefix, "Uint8Array(%zu) [", b->len);
+#ifdef SCR_SYMTAB
       const ScrDynSymTab *ust = b->own != NULL ? b->own->ext.syms : NULL;
-      size_t unsym = 0;
-      for (uint32_t i = 0; ust != NULL && i < ust->len; i++) unsym += (ust->e[i].flags & SCR_SYMP_ENUM) != 0;
+#else
+      const ScrDynSymTab *ust = NULL;
+#endif
+      const size_t unsym = insp_sym_count_t(ust);
       if (b->len == 0 && unsym == 0) {
         InspBuf out = {0};
         ib_bytes(&out, prefix, (size_t)pn);

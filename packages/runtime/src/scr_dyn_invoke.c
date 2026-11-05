@@ -762,11 +762,13 @@ static ScrDyn *dyn_object_proto_method(ScrDyn *recv, const char *method,
     /* ToPropertyKey: a missing argument is the STRING "undefined", which
      * is a real key ({ undefined: 1 }.hasOwnProperty() is true in Node). */
     /* a SYMBOL key never becomes a string (scr_symbol.c) */
+#ifdef SCR_SYMTAB
     if (argc >= 1 && scr_dyn_sym_proto_test != NULL && scr_dyn_is_symbol(args[0])) {
       const bool sr = scr_dyn_sym_proto_test(0, recv, (ScrSym *)args[0]->v.handle.ptr);
       if (scr_exc_pending()) return NULL;
       return scr_dyn_new_bool(sr);
     }
+#endif
     ScrStr *k = argc >= 1 ? scr_dyn_string_coerce(args[0]) : scr_str_new("undefined", 9);
     if (scr_exc_pending()) { scr_str_release(k); return NULL; }
     bool r = scr_dyn_has_own(recv, k);
@@ -827,11 +829,13 @@ static ScrDyn *dyn_object_proto_method(ScrDyn *recv, const char *method,
   /* Object.prototype.propertyIsEnumerable / isPrototypeOf over a plain dyn object (the two names a keyed
    * read of a dictionary answers `function` for, see dyn_plain_obj_knows). */
   if (recv->kind == SCR_DYN_OBJ && dyn_name_is(method, "propertyIsEnumerable")) {
+#ifdef SCR_SYMTAB
     if (argc >= 1 && scr_dyn_sym_proto_test != NULL && scr_dyn_is_symbol(args[0])) {
       const bool sr = scr_dyn_sym_proto_test(1, recv, (ScrSym *)args[0]->v.handle.ptr);
       if (scr_exc_pending()) return NULL;
       return scr_dyn_new_bool(sr);
     }
+#endif
     ScrStr *k = argc >= 1 ? scr_dyn_string_coerce(args[0]) : scr_str_new("undefined", 9);
     if (scr_exc_pending()) { scr_str_release(k); return NULL; }
     bool r = scr_dyn_obj_own_data(recv, k->data, k->len) != NULL;
@@ -4173,9 +4177,11 @@ double scr_cls_props_count(const ScrDyn *tbl) {
     const ScrDyn *q = tbl->v.obj.entries[i].value;
     if (q->kind == SCR_DYN_ARR && scr_clsprop_enumerable(q)) n++;
   }
+#ifdef SCR_SYMTAB
   /* ...and the enumerable symbol-keyed properties the table's ext hosts (scr_symbol.c) */
   const ScrDynSymTab *st = scr_dyn_ext(tbl)->syms;
   for (uint32_t i = 0; st != NULL && i < st->len; i++) n += (st->e[i].flags & SCR_SYMP_ENUM) != 0;
+#endif
   return (double)n;
 }
 

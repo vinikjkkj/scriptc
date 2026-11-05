@@ -1906,6 +1906,7 @@ export async function compileLibArchive(opts: LibArchiveOptions): Promise<void> 
     "-std=c11",
     ...driver.targetArgs,
     ...optAuditArgs(sanitize),
+    ...(opts.symbol ? ["-DSCR_SYMTAB"] : []), // the runtime's symbol-property code is compiled in only for a program that links the symbol unit
     "-fno-math-errno",
     "-fno-strict-aliasing", // the emitted object model type-puns — see compileC's buildArgs
     ...gcSectionsCompileArgs(),
@@ -2535,6 +2536,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...(engineOnly ? ["-DSCR_ENGINE"] : []),
     ...driver.targetArgs,
     ...optAuditArgs(opts.sanitize ?? false),
+    ...(opts.symbol ? ["-DSCR_SYMTAB"] : []), // see the library archive's cflags
     "-fno-math-errno",
     // The emitted object model is deliberately type-punned C: a hierarchy
     // upcast is a raw pointer cast, so one object's header (rc, vt) and
@@ -2926,6 +2928,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     "-std=c11",
     ...driver.targetArgs,
     ...optAuditArgs(opts.sanitize ?? false),
+    ...(opts.symbol ? ["-DSCR_SYMTAB"] : []), // see the library archive's cflags
     "-fno-math-errno",
     "-fno-strict-aliasing", // the emitted object model type-puns — see buildArgs
     ...gcSectionsCompileArgs(),
