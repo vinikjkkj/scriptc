@@ -6644,9 +6644,14 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
    * subclass write would need the inherited own properties walked, which this
    * table does not model, so those keep their fences. */
   export function staticBagEligible(info: ClassInfo, name: string): boolean {
-    return info.base === null && info.subclasses.length === 0 && !info.builtinError &&
-      info.uncollectedStatics?.has(name) !== true && name !== "name" && name !== "length" &&
-      name !== "prototype" && !name.startsWith("#");
+    if (name === "name" || name === "length" || name === "prototype" || name.startsWith("#")) return false;
+    // Every class up the chain must be a program class whose own statics are all collected: the read below walks the chain
+    // bag by bag, which is JS's own-then-inherited lookup, and a builtin or an uncollected static would end it elsewhere.
+    for (let c: ClassInfo | null = info; c; c = c.base) {
+      if (c.builtinError || c.builtinEmitter || c.builtinStream !== undefined || c.decl === null) return false;
+      if (c.uncollectedStatics?.has(name) === true) return false;
+    }
+    return true;
   }
 
   /** The table global and its one-shot init flag. A DYN global is NULL until
@@ -6700,19 +6705,31 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
    * absent (optional dyn key read, like the file's exports bag). */
   function staticBagRead(L: Lowerer, info: ClassInfo, expr: ts.PropertyAccessExpression, loc: SrcLoc): IrExpr | null {
     if (!staticBagEligible(info, expr.name.text)) return null;
-    const fnName = staticBagFn(L, info, loc);
-    L.noteEdge(fnName);
-    return L.maybeNarrow(
-      {
+    const key = (): IrExpr => ({ kind: "strLit", value: expr.name.text, type: STRING, loc });
+    // JS reads the class's own property, then the one its base class has, and so on up: each class owns one table, a write
+    // through a name lands in that class's table, and the read walks the tables until one holds the key.
+    const read = (c: ClassInfo): IrExpr => {
+      const fnName = staticBagFn(L, c, loc);
+      L.noteEdge(fnName);
+      const own: IrExpr = {
         kind: "dynKeyGet",
-        key: { kind: "strLit", value: expr.name.text, type: STRING, loc },
+        key: key(),
         optional: true,
         value: { kind: "call", callee: fnName, args: [], type: DYN, loc },
         type: DYN,
         loc,
-      },
-      expr,
-    );
+      };
+      if (c.base === null) return own;
+      return {
+        kind: "ternary",
+        cond: { kind: "libCall", fn: "cls.propsHas", args: [{ kind: "call", callee: fnName, args: [], type: DYN, loc }, key()], type: BOOL, loc },
+        then: own,
+        else_: read(c.base),
+        type: DYN,
+        loc,
+      };
+    };
+    return L.maybeNarrow(read(info), expr);
   }
 
   /** `C.k = v` statement for an eligible class: the table's keySet. */
