@@ -3954,6 +3954,47 @@ function validateFunction(
         }
         break;
       }
+      case "recordHasSrc":
+      case "recordSrcGet":
+      case "recordSrcSet": {
+        checkExpr(e.obj);
+        if (e.kind === "recordSrcSet") checkExpr(e.value);
+        const shape = records.get(e.shapeId);
+        if (!shape) err(`${e.kind} on undeclared shape "${e.shapeId}"`, e.loc);
+        else {
+          expectType(e.obj, { kind: "record", shapeId: e.shapeId }, `${e.kind} receiver`);
+          if (shape.view !== true) err(`${e.kind} on shape ${e.shapeId}, which carries no view member`, e.loc);
+          if (e.kind === "recordHasSrc") {
+            if (e.type.kind !== "bool") err(`recordHasSrc must be bool, got ${e.type.kind}`, e.loc);
+          } else {
+            const f = shape.fields.find((x) => x.name === e.field);
+            if (!f) err(`${e.kind} of unknown field ${e.shapeId}.${e.field}`, e.loc);
+            else if (e.kind === "recordSrcGet") expectType(e, f.type, "recordSrcGet result");
+            else {
+              expectType(e.value, f.type, "recordSrcSet value");
+              if (e.type.kind !== "void") err(`recordSrcSet must be void, got ${e.type.kind}`, e.loc);
+            }
+          }
+        }
+        break;
+      }
+      case "recordSrcView": {
+        checkExpr(e.src);
+        const to = records.get(e.shapeId);
+        const from = records.get(e.srcShapeId);
+        if (!to || !from) err(`recordSrcView over an undeclared shape "${e.srcShapeId}" -> "${e.shapeId}"`, e.loc);
+        else {
+          expectType(e.src, { kind: "record", shapeId: e.srcShapeId }, "recordSrcView source");
+          if (to.view !== true) err(`recordSrcView into shape ${e.shapeId}, which carries no view member`, e.loc);
+          for (const f of to.fields) {
+            const sf = from.fields.find((x) => x.name === f.name);
+            if (!sf) err(`recordSrcView: ${e.srcShapeId} has no field ${f.name}`, e.loc);
+            else if (typeKey(sf.type) !== typeKey(f.type)) err(`recordSrcView: field ${f.name} changes type`, e.loc);
+          }
+          expectType(e, { kind: "record", shapeId: e.shapeId }, "recordSrcView result");
+        }
+        break;
+      }
       case "recordNullProto": {
         checkExpr(e.obj);
         const shape = records.get(e.shapeId);

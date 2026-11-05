@@ -7949,6 +7949,16 @@ export type IrExpr =
   /** The object `obj` is a view of, as an owned (+1) dyn - THE SAME object the cast read (identity),
    * not a copy. The undefined singleton when `obj` is not a view (recordIsView asks first). */
   | { kind: "recordView"; obj: IrExpr; shapeId: string; type: IrType; loc: SrcLoc }
+  /** STRUCT VIEW (value model). A record of a view-granted shape may be a view of ANOTHER record's struct: its view slot then holds
+   * a SCR_DYNH_RECSRC box naming the source struct and the static map of the (source shape, this shape) pair. recordHasSrc asks
+   * (false for a plain struct and for a view of a dynamic object); recordSrcGet / recordSrcSet read and write the field IN the
+   * source struct, at the offset the map names, with the field kind's own retain and release; a write is an own key of the source
+   * exactly as a recordSet of the source would make it. recordSrcView builds a record of `shapeId` (a view-granted shape) that views
+   * `src`, a record of `srcShapeId`; every field of the target exists in the source at the identical type. */
+  | { kind: "recordHasSrc"; obj: IrExpr; shapeId: string; type: IrType; loc: SrcLoc }
+  | { kind: "recordSrcGet"; obj: IrExpr; shapeId: string; field: string; type: IrType; loc: SrcLoc }
+  | { kind: "recordSrcSet"; obj: IrExpr; shapeId: string; field: string; value: IrExpr; unset?: true; type: IrType; loc: SrcLoc }
+  | { kind: "recordSrcView"; src: IrExpr; srcShapeId: string; shapeId: string; type: IrType; loc: SrcLoc }
   /** Does `obj`'s SOURCE [[Prototype]] chain carry `key`? — the `in`
    * operator's last question, after the declared names and the overflow
    * map have both answered no. False for any record that did not come out
