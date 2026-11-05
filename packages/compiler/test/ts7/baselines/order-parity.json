@@ -12590,6 +12590,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24085-a-class-declaring-symbol-asynciterator-compiles-with-its-other-members.ts": {
+   "order": [
+    "<repo>/tests/corpus/24085-a-class-declaring-symbol-asynciterator-compiles-with-its-other-members.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2405-sibling-arm-narrow.ts": {
    "order": [
     "<repo>/tests/corpus/2405-sibling-arm-narrow.ts"
