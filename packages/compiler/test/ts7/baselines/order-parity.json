@@ -12572,6 +12572,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24082-an-intersection-of-index-signatures-is-a-record-with-its-own-index.ts": {
+   "order": [
+    "<repo>/tests/corpus/24082-an-intersection-of-index-signatures-is-a-record-with-its-own-index.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2405-sibling-arm-narrow.ts": {
    "order": [
     "<repo>/tests/corpus/2405-sibling-arm-narrow.ts"
