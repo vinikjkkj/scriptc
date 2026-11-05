@@ -1140,6 +1140,32 @@ function optAuditArgs(sanitize: boolean): string[] {
   return rcAuditRequested() ? [opt, "-DSCR_RC_AUDIT", ...trap, ...prof] : [opt, ...trap, ...prof];
 }
 
+/** Runs `build` while holding a machine-wide lock named by the directory `lockDir` (mkdir is atomic), unless `product`
+ * appears first: a caller that finds the lock held waits for the holder to publish `product` (or to release the lock, when
+ * it takes over). A lock older than ten minutes is a crashed holder's and is broken. The product is published by an atomic
+ * rename elsewhere, so the lock only schedules work: what is built is exactly what an unlocked build would build. */
+async function withBuildLock(lockDir: string, product: string, build: () => Promise<string>): Promise<string> {
+  const STALE_MS = 10 * 60 * 1000;
+  for (;;) {
+    try {
+      await mkdir(lockDir);
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") return build(); // cannot lock (read-only tree): build unlocked
+      if (await fileExists(product)) return product;
+      const st = await stat(lockDir).catch(() => null);
+      if (st !== null && Date.now() - st.mtimeMs > STALE_MS) await rm(lockDir, { recursive: true, force: true });
+      await new Promise((r) => setTimeout(r, 250));
+      continue;
+    }
+    try {
+      if (await fileExists(product)) return product;
+      return await build();
+    } finally {
+      await rm(lockDir, { recursive: true, force: true });
+    }
+  }
+}
+
 /** The engine archive for one flavor, built lazily on the first --dynamic
  * compile (~10s) and cached under vendor/.cache/<commit>-<flavor>/ — unlike
  * the runtime's own sources (recompiled every build, ~100ms), the engine is
@@ -1168,9 +1194,24 @@ async function ensureEngineArchive(sanitize: boolean, driver: CcDriver): Promise
     await checkToolchain(cacheDir, driver, "qjs");
     return archive;
   }
+  await mkdir(cacheRoot, { recursive: true });
+  // ONE build per machine at a time: the test workers (and a developer's parallel builds) all miss together on a cold
+  // cache, and every one of them used to run the whole CMake build at -j<all cores> beside the others - the same archive
+  // built several times over, each slowed by the rest. The first builds; the others wait for its published archive.
+  return withBuildLock(`${cacheDir}.lock`, archive, () => buildEngineArchiveLocked(sanitize, driver, cacheRoot, cacheDir, flavor, vendor, archive));
+}
+
+async function buildEngineArchiveLocked(
+  sanitize: boolean,
+  driver: CcDriver,
+  cacheRoot: string,
+  cacheDir: string,
+  flavor: string,
+  vendor: string,
+  archive: string,
+): Promise<string> {
   if (driver.target !== null) return buildEngineArchiveCross(sanitize, driver, cacheRoot, cacheDir);
 
-  await mkdir(cacheRoot, { recursive: true });
   const buildDir = await mkdtemp(join(cacheRoot, `build-${flavor}-`));
   const stageDir = `${buildDir}.stage`;
   try {
@@ -1653,6 +1694,21 @@ async function ensureTlsArchive(sanitize: boolean, driver: CcDriver): Promise<st
   }
 
   await mkdir(cacheRoot, { recursive: true });
+  // One mbedTLS build per machine at a time (see withBuildLock): the workers that miss together wait for the first.
+  return withBuildLock(`${cacheDir}.lock`, archive, () => buildTlsArchiveLocked(sanitize, driver, cacheRoot, cacheDir, flavor, vendor, archive, compileArgv, arArgv));
+}
+
+async function buildTlsArchiveLocked(
+  sanitize: boolean,
+  driver: CcDriver,
+  cacheRoot: string,
+  cacheDir: string,
+  flavor: string,
+  vendor: string,
+  archive: string,
+  compileArgv: string[],
+  arArgv: string[],
+): Promise<string> {
   const buildDir = await mkdtemp(join(cacheRoot, `build-mbedtls-${flavor}-`));
   try {
     const sources = (await readdir(join(vendor, "library"))).filter((n) => n.endsWith(".c")).sort();
