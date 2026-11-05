@@ -2758,6 +2758,10 @@ static bool dyn_fn_is_bound_box(const ScrDyn *fn);
 
 /* A function value's OWN `toString` (an expando the program wrote), run with the function as `this`: the text it
  * answers, +1; NULL with no exception when there is none, NULL with the exception pending when it threw. */
+/* Installed when the first function own-property table is allocated (scr_dyn_fn_props): until then no function can carry an own
+ * `toString`, and the always-linked ToString renderer below reaches none of the dyn call machinery. */
+ScrStr *(*scr_fn_own_tostring_hook)(const ScrDyn *d) = NULL;
+
 ScrStr *scr_dyn_fn_own_tostring(const ScrDyn *d) {
   ScrDyn *m = scr_dyn_fn_get(d, "toString", 8);
   if (m == NULL) return NULL;
@@ -2778,9 +2782,11 @@ ScrStr *scr_dyn_fn_own_tostring(const ScrDyn *d) {
 ScrStr *scr_fn_to_string(const ScrDyn *d) {
   /* ToString calls the function's `toString`: an OWN one (an expando) wins over the source text. A throw inside it
    * stays pending and the text is empty (this renderer never answers NULL). */
-  ScrStr *own = scr_dyn_fn_own_tostring(d);
-  if (own != NULL) return own;
-  if (scr_exc_pending()) return scr_str_new("", 0);
+  if (scr_fn_own_tostring_hook != NULL) {
+    ScrStr *own = scr_fn_own_tostring_hook(d);
+    if (own != NULL) return own;
+    if (scr_exc_pending()) return scr_str_new("", 0);
+  }
   const char *src = scr_dyn_fn_src(d);
   if (src == NULL && scr_dyn_class_ops != NULL) {
     /* A CLASS VALUE: Node prints the class source, which the class unit's `%dynSrc` row carries. */
@@ -10848,6 +10854,7 @@ ScrDyn *scr_dyn_fn_get(const ScrDyn *d, const char *key, size_t key_len) {
  * function object per closure, not one per boundary crossing. +1. */
 ScrDyn *scr_dyn_fn_props(ScrDyn *d) {
   if (!d->v.fn.clo->props) {
+    scr_fn_own_tostring_hook = &scr_dyn_fn_own_tostring;
     /* TRACED: the table can hold a function value that captures the very
      * closure this table belongs to (`Foo.create = () => new Foo()`), which
      * is a ring, and scr_closure_trace visits this box for exactly that
