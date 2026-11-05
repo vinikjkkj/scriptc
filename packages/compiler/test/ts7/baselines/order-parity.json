@@ -12610,6 +12610,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24129-refused-dial-to-localhost.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24129-refused-dial-to-localhost.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2413-dowhile-kill-renarrow.ts": {
    "order": [
     "<repo>/tests/corpus/2413-dowhile-kill-renarrow.ts"
