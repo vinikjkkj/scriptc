@@ -14704,7 +14704,120 @@ const char *scr_enc_canon_dyn_pub(const ScrDyn *enc, bool lenient) {
 }
 
 /* VIEW GRANT: see scr_runtime.h. */
-ScrDyn *scr_rec_view_get(ScrDyn *slot) { return slot != NULL ? scr_dyn_retain(slot) : scr_dyn_undefined(); }
+typedef struct ScrRecSrcEnt {
+  void *src;
+  const ScrRecSrcMap *map;
+  void *rec;
+  int state; /* 0 empty, 1 live, 2 deleted */
+} ScrRecSrcEnt;
+static ScrRecSrcEnt *recsrc_tab = NULL;
+static size_t recsrc_cap = 0, recsrc_used = 0;
+static size_t recsrc_hash(const void *src, const ScrRecSrcMap *map, size_t cap) {
+  uintptr_t x = (uintptr_t)src * 0x9E3779B97F4A7C15ull ^ (uintptr_t)map * 0xC2B2AE3D27D4EB4Full;
+  return (size_t)((x >> 17) ^ x) & (cap - 1);
+}
+void *scr_recsrc_find(void *src, const ScrRecSrcMap *map) {
+  if (recsrc_cap == 0) return NULL;
+  for (size_t i = recsrc_hash(src, map, recsrc_cap), n = 0; n < recsrc_cap; i = (i + 1) & (recsrc_cap - 1), n++) {
+    ScrRecSrcEnt *e = &recsrc_tab[i];
+    if (e->state == 0) return NULL;
+    if (e->state == 1 && e->src == src && e->map == map) return e->rec;
+  }
+  return NULL;
+}
+static void recsrc_grow(void) {
+  size_t ncap = recsrc_cap ? recsrc_cap * 2 : 64;
+  ScrRecSrcEnt *nt = (ScrRecSrcEnt *)calloc(ncap, sizeof *nt);
+  if (nt == NULL) scr_json_oom();
+  for (size_t i = 0; i < recsrc_cap; i++) {
+    if (recsrc_tab[i].state != 1) continue;
+    size_t j = recsrc_hash(recsrc_tab[i].src, recsrc_tab[i].map, ncap);
+    while (nt[j].state != 0) j = (j + 1) & (ncap - 1);
+    nt[j] = recsrc_tab[i];
+  }
+  free(recsrc_tab);
+  recsrc_tab = nt;
+  recsrc_cap = ncap;
+  recsrc_used = 0;
+  for (size_t i = 0; i < ncap; i++) if (nt[i].state == 1) recsrc_used++;
+}
+void scr_recsrc_register(void *rec, void *src, const ScrRecSrcMap *map) {
+  if ((recsrc_used + 1) * 2 > recsrc_cap) recsrc_grow();
+  size_t i = recsrc_hash(src, map, recsrc_cap);
+  while (recsrc_tab[i].state == 1) i = (i + 1) & (recsrc_cap - 1);
+  if (recsrc_tab[i].state == 0) recsrc_used++;
+  recsrc_tab[i].src = src;
+  recsrc_tab[i].map = map;
+  recsrc_tab[i].rec = rec;
+  recsrc_tab[i].state = 1;
+}
+static void recsrc_unregister(void *src, const ScrRecSrcMap *map) {
+  if (recsrc_cap == 0) return;
+  for (size_t i = recsrc_hash(src, map, recsrc_cap), n = 0; n < recsrc_cap; i = (i + 1) & (recsrc_cap - 1), n++) {
+    ScrRecSrcEnt *e = &recsrc_tab[i];
+    if (e->state == 0) return;
+    if (e->state == 1 && e->src == src && e->map == map) {
+      e->state = 2;
+      return;
+    }
+  }
+}
+static void *scr_recsrc_h_retain(void *h) {
+  ((ScrRecSrc *)h)->rc++;
+  return h;
+}
+static void scr_recsrc_h_release(void *h) {
+  ScrRecSrc *r = (ScrRecSrc *)h;
+  if (--r->rc != 0) return;
+  recsrc_unregister(r->src, r->map);
+  r->map->release(r->src);
+  free(r);
+}
+static const ScrDynHandleOps scr_recsrc_ops = {
+    .cls = "Object",
+    .retain = scr_recsrc_h_retain,
+    .release = scr_recsrc_h_release,
+};
+ScrDyn *scr_recsrc_box(void *src, const ScrRecSrcMap *map) {
+  if (scr_dynh_ops[SCR_DYNH_RECSRC] == NULL) scr_dyn_handle_install(SCR_DYNH_RECSRC, &scr_recsrc_ops);
+  ScrRecSrc *h = (ScrRecSrc *)malloc(sizeof *h);
+  if (h == NULL) scr_json_oom();
+  h->rc = 1;
+  h->src = map->retain(src);
+  h->map = map;
+  ScrDyn *d = scr_dyn_new_handle(h, SCR_DYNH_RECSRC); /* retains h */
+  scr_recsrc_h_release(h);
+  return d;
+}
+bool scr_recsrc_is(const ScrDyn *slot) {
+  return slot != NULL && slot->kind == SCR_DYN_HANDLE && slot->v.handle.tag == SCR_DYNH_RECSRC;
+}
+const ScrRecSrc *scr_recsrc_of(const ScrDyn *slot) {
+  return scr_recsrc_is(slot) ? (const ScrRecSrc *)slot->v.handle.ptr : NULL;
+}
+void *scr_recsrc_slot(const ScrDyn *slot, size_t idx) {
+  const ScrRecSrc *r = scr_recsrc_of(slot);
+  return (char *)r->src + r->map->off[idx];
+}
+void scr_recsrc_unown(const ScrDyn *slot, size_t idx) {
+  const ScrRecSrc *r = scr_recsrc_of(slot);
+  if (r->map->own_off >= 0 && r->map->own_bit[idx]) ((unsigned char *)r->src + r->map->own_off)[r->map->own_byte[idx]] &= (unsigned char)~r->map->own_bit[idx];
+}
+void scr_recsrc_own(const ScrDyn *slot, size_t idx) {
+  const ScrRecSrc *r = scr_recsrc_of(slot);
+  if (r->map->own_off >= 0 && r->map->own_bit[idx]) ((unsigned char *)r->src + r->map->own_off)[r->map->own_byte[idx]] |= r->map->own_bit[idx];
+}
+ScrDyn *scr_rec_view_get(ScrDyn *slot) {
+  if (slot == NULL) return scr_dyn_undefined();
+  const ScrRecSrc *r = scr_recsrc_of(slot);
+  if (r != NULL) return r->map->snapshot(r->src);
+  return scr_dyn_retain(slot);
+}
+ScrDyn *scr_rec_view_cross(ScrDyn *slot) {
+  const ScrRecSrc *r = scr_recsrc_of(slot);
+  if (r != NULL) return r->map->cross(r->src);
+  return scr_rec_view_get(slot);
+}
 void scr_rec_view_promote(ScrDyn **slot, ScrDyn *obj) {
   ScrDyn *old = *slot;
   *slot = scr_dyn_retain(obj);

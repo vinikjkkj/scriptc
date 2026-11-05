@@ -4852,6 +4852,7 @@ typedef enum {
   SCR_DYNH_KEYOBJ,       /* ScrKeyObject — crypto.KeyObject (scr_asym.c; retained, by reference) */
   SCR_DYNH_STATS,        /* ScrStats — fs.Stats (scr_lib.c; by reference, static ops) */
   SCR_DYNH_PROC_STREAM,  /* process.stdout/stderr (scr_lib.c): the handle pointer is the fd (1 or 2) */
+  SCR_DYNH_RECSRC,       /* scr_json.c — the source struct a STRUCT VIEW record reads and writes in place (ScrRecSrc; never a program-visible value) */
   SCR_DYNH_COUNT,
 } ScrDynHandleTag;
 
@@ -6162,6 +6163,40 @@ ScrDyn *scr_rec_view_get(ScrDyn *slot);
 /* VIEW GRANT, PROMOTION: the record's `%view` slot now names `obj` (retained; a previous non-view value is
  * released), because the record just crossed into a dynamic slot as that object. */
 void scr_rec_view_promote(ScrDyn **slot, ScrDyn *obj);
+/* STRUCT VIEW (value model): a record of a view-granted shape may be a view of ANOTHER record's struct instead of a dynamic
+ * object. Its `%view` slot then holds a SCR_DYNH_RECSRC box: the source struct (retained through the map) and the static map of the
+ * pair (source shape -> this shape), naming for each of this shape's fields the byte offset of the same field in the source.
+ * The slot never leaves the record: scr_rec_view_get answers a SNAPSHOT (a fresh dynamic copy of the source, read by enumeration,
+ * JSON and inspect, none of which can keep or mutate it), and scr_rec_view_cross answers what the source itself would be if it
+ * crossed into a dynamic slot (a copy that remembers its origin, so a write through it is refused exactly as for the source). */
+typedef struct ScrRecSrcMap {
+  size_t n;                        /* the target shape's field count */
+  const long *off;                 /* byte offset in the source struct of each target field */
+  long own_off;                    /* byte offset of the source's own-key mask, or -1 */
+  const unsigned char *own_byte;   /* per target field: byte in the mask */
+  const unsigned char *own_bit;    /* per target field: bit (0 = the field has no mask bit) */
+  void *(*retain)(void *src);
+  void (*release)(void *src);
+  ScrDyn *(*snapshot)(void *src);  /* +1 fresh dynamic copy */
+  ScrDyn *(*cross)(void *src);     /* +1 what the source becomes when it crosses into a dynamic slot */
+} ScrRecSrcMap;
+typedef struct ScrRecSrc {
+  size_t rc;
+  void *src; /* retained through map->retain */
+  const ScrRecSrcMap *map;
+} ScrRecSrc;
+ScrDyn *scr_recsrc_box(void *src, const ScrRecSrcMap *map); /* src BORROWED (retained here); +1 slot box */
+bool scr_recsrc_is(const ScrDyn *slot);
+const ScrRecSrc *scr_recsrc_of(const ScrDyn *slot); /* NULL when the slot is not a struct view */
+ScrDyn *scr_rec_view_cross(ScrDyn *slot);
+void *scr_recsrc_slot(const ScrDyn *slot, size_t idx); /* the field slot in the source struct */
+void scr_recsrc_own(const ScrDyn *slot, size_t idx);  /* a write made it an own key of the source */
+void scr_recsrc_unown(const ScrDyn *slot, size_t idx); /* `delete` removed it */
+/* One view per (source struct, pair): converting the same source to the same shape twice answers the SAME record, so `===`, Map and
+ * Set keys and indexOf, which compare record pointers, see JavaScript's one object. The table does not own the views: a view leaves
+ * it when its box is released. find answers the live view (borrowed) or NULL. */
+void *scr_recsrc_find(void *src, const ScrRecSrcMap *map);
+void scr_recsrc_register(void *rec, void *src, const ScrRecSrcMap *map);
 /* VIEW GRANT, SYNC: exchange everything after the refcount word of two records of one shape (the view's snapshot
  * for a freshly read one); the caller then releases the second, which owns the old contents. */
 void scr_rec_swap_body(void *a, void *b, size_t size);
