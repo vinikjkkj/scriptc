@@ -15423,6 +15423,13 @@ export class Lowerer {
       const witness = this.classWitnessRecord(node, e as IrExpr & { type: IrType & { kind: "object" } }, expected);
       if (witness) return witness;
     }
+    // A checked-dynamic value flowing into a typed Promise slot is the declaration's claim over an untyped implementation
+    // (`const ret = (0, asCallback)(Promise.resolve("OK"), cb)`): the promise itself is adopted (same object, no job) and its
+    // payload converts when it settles (promiseCoerceAdapter), so the slot sees what Node's does one turn after the settle.
+    if (e.type.kind === "dyn" && expected.kind === "promise") {
+      const adopted = this.adoptDynIntoTypedPromise(e, expected);
+      if (adopted !== null) return adopted;
+    }
     this.requireExactShape(node, e.type, expected);
     return e;
   }
