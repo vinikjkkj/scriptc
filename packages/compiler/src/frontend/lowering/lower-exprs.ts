@@ -11471,7 +11471,11 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       // which picks the arm the context asks for; the dyn build would answer the literal's own shape.
       const ctxTs = L.checker.getContextualType(expr);
       const ctxIr = ctxTs !== undefined ? L.mapTypeOf(ctxTs) : null;
-      if (want.kind === "record" && !L.shapes.get(want.shapeId)?.indexValue && ctxIr?.kind !== "union") {
+      // A literal whose own shape is not the shape the context asks for (an empty array member the context types as a record
+      // list, a member the context widens) would be read back at the wrong shape, which then refuses to lift into the context:
+      // it keeps the declared-field build, which converts each member at the contextual type.
+      const ctxSameShape = ctxIr?.kind !== "record" || (want.kind === "record" && ctxIr.shapeId === want.shapeId);
+      if (want.kind === "record" && !L.shapes.get(want.shapeId)?.indexValue && ctxIr?.kind !== "union" && ctxSameShape) {
         return L.coerceToExpected(lowerDynSpreadObjectLiteral(L, expr), want);
       }
     }
