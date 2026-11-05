@@ -14085,7 +14085,7 @@ export class Lowerer {
     const takesOperand = !isUnitType(src);
     if (process.env["SCRIPTC_STRAND_TRACE"]) {
       const arms = (this.unions.get(expected.unionId)?.arms ?? []).map((a) => this.fmt(a)).join(" | ");
-      process.stderr.write(`STRAND value=${this.fmt(src)}
+      process.stderr.write(`STRAND at ${loc.file}:${loc.start} value=${this.fmt(src)}
        arms=${arms}
 `);
       // WHY each record arm declined, named field by field. The classifier
