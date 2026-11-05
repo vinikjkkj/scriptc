@@ -8628,6 +8628,30 @@ export function dynSetFn(L: Lowerer, info: ClassInfo): IrFunction | null {
   };
 }
 
+/** `%C.%dynBag(this): dyn`, listed as `%dynBag`: the instance's run-time property table (%props), created on first use
+ * and answered, so the runtime can keep a symbol-keyed property on an instance it only holds boxed. Null for a class
+ * with no table, and for an Error-rooted one (its `%props` is the runtime's own expando bag). */
+export function dynBagFn(L: Lowerer, info: ClassInfo): IrFunction | null {
+  if (info.hasPropsTable !== true || errorPrefixCells(info) !== null) return null;
+  const className = info.def.name;
+  const loc = info.decl !== null ? locOf(info.decl) : info.def.loc;
+  const thisType: IrType = { kind: "object", className };
+  const locals: IrLocal[] = [{ id: "this.0", name: "this", type: thisType, mutable: false }];
+  const thisRef = (): IrExpr => ({ kind: "varRef", localId: "this.0", type: thisType, loc });
+  const bag = (): IrExpr => ({ kind: "fieldGet", obj: thisRef(), className, field: CLASS_PROPS_FIELD, type: DYN, loc });
+  return {
+    name: `%${className}.%dynBag`,
+    params: locals.map((l) => ({ localId: l.id, name: l.name, type: l.type })),
+    returnType: DYN,
+    locals,
+    body: [
+      { kind: "fieldSet", obj: thisRef(), className, field: CLASS_PROPS_FIELD, value: { kind: "libCall", fn: "cls.propsEnsure", args: [bag()], type: DYN, loc }, loc },
+      { kind: "return", value: bag(), loc },
+    ],
+    loc,
+  };
+}
+
 /** The ScrError prefix cells of an Error-rooted class (name, message, code,
  * stack, the expando bag) -- the layout the runtime owns, whose reads and
  * writes the runtime answers from the box -- or null when the chain does not
@@ -9089,6 +9113,15 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
           out.push(delFn);
           info.def.dynMethods = [...(info.def.dynMethods ?? []), { name: "%dynDel", fn: delFn.name }];
         }
+        // The symbol-keyed half (scr_symbol.c): a program that stores symbol properties through a checked-dynamic
+        // receiver asks a boxed instance for its run-time property table, created on demand.
+        if (L.reachable?.has("%symdyn") === true) {
+          const bagFn = dynBagFn(L, info);
+          if (bagFn !== null) {
+            out.push(bagFn);
+            info.def.dynMethods = [...(info.def.dynMethods ?? []), { name: "%dynBag", fn: bagFn.name }];
+          }
+        }
         // A per-evaluation class's instances answer `.constructor` with their evaluation's class value.
         if (info.evalClass !== undefined) {
           const ei = evalInstanceDynFns(L, info);
@@ -9308,6 +9341,10 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
  * `[Symbol.for('nodejs.util.inspect.custom')]()` on the abstract base of its
  * whole value hierarchy, and the two names alone refused the base and every
  * class under it. */
+  export function registrySymbolKeyOf(L: Lowerer, expr: ts.Expression): string | null {
+    return symbolForRegistryKeyOf(L, expr);
+  }
+
   function symbolForRegistryKeyOf(L: Lowerer, expr: ts.Expression): string | null {
     let e = expr;
     while (ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isTypeAssertion(e)) e = e.expression;

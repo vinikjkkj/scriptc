@@ -48,7 +48,7 @@ import { errorRootedType, lowerStreamProperty, lowerStreamStateProperty, streamI
 import { lowerWebSocketGlobal } from "./lower-ws.js";
 import { lowerProvenKeyArrayRead } from "./lower-keydomain.js";
 import { emitterRooted } from "./lower-emitter.js";
-import { CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, type ClassInfo } from "./lower-classes.js";
+import { CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, registrySymbolKeyOf, type ClassInfo } from "./lower-classes.js";
 import { hasProtoTab, keyAsString, protoTabHasOr, protoTabReadChain } from "./lower-prototab.js";
 import { inOwnShadowFamily, internalBox, ownShadowWhy, registerOwnShadowFamily } from "./lower-ownshadow.js";
 import { refuseWebCryptoFlowsAt } from "./lower-webcrypto-fence.js";
@@ -14920,6 +14920,11 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
       if (dynSym !== null) {
         return L.maybeNarrow({ kind: "libCall", fn: "sym.dynGet", args: [dynSym.recv, dynSym.key], type: DYN, loc: locOf(expr) }, expr);
       }
+      const clsSym = expr.questionDotToken === undefined ? classSymbolBag(L, expr.expression, expr.argumentExpression) : null;
+      if (clsSym !== null) {
+        const loc = locOf(expr);
+        return L.maybeNarrow({ kind: "seqExpr", stmts: clsSym.stmts, result: { kind: "libCall", fn: "sym.dynGet", args: [clsSym.bag(), clsSym.key!], type: DYN, loc }, type: DYN, loc }, expr);
+      }
       if (recvShape === undefined || wellKnownSymbolFieldIn(L, expr.argumentExpression, recvShape) === null) {
         L.unsupported(
           "SC1090",
@@ -15529,9 +15534,54 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     return key === null ? null : { recv, key };
   }
 
+  /** A symbol-keyed access whose receiver is a program-class instance that carries the run-time property table (%props):
+   * the symbol-keyed properties of such an instance live in a table on that bag (scr_symbol.c), exactly where the string-keyed
+   * expandos of an untyped package class already live. Answers the statements that bind the receiver and ensure the bag, and
+   * the bag read. Null when the class has no bag, or when the key names a member the class declares (a field, accessor or
+   * method keyed by that symbol: those keep their own lowering). */
+  export function classSymbolBag(L: Lowerer, recvNode: ts.Expression, keyNode: ts.Expression | null): { stmts: IrStmt[]; bag: () => IrExpr; key: IrExpr | null } | null {
+    const recvT = L.mapTypeOf(L.typeOf(recvNode));
+    if (recvT?.kind !== "object") return null;
+    const info = L.classes.get(recvT.className);
+    if (info === undefined || info.hasPropsTable !== true || info.builtinError) return null;
+    // a member the class declares under this key keeps its own lowering
+    if (keyNode !== null) {
+      let k: ts.Expression = keyNode;
+      while (ts.isParenthesizedExpression(k)) k = k.expression;
+      const slots: string[] = [];
+      const u = uniqueSymbolKeyOf(L, k);
+      if (u !== null) slots.push(`sym.uniq:${u.fieldName}`);
+      const reg = ts.isIdentifier(k) || ts.isPropertyAccessExpression(k) ? registrySymbolKeyOf(L, k) : null;
+      if (reg !== null) slots.push(`sym.for:${reg}`);
+      for (const s of slots) {
+        if (L.findMethodOn(info, s) !== null || L.findMethodOn(info, `get:${s}`) !== null || L.findMethodOn(info, `set:${s}`) !== null) return null;
+      }
+      if (u !== null && info.fields.has(u.fieldName)) return null;
+    }
+    const recv = L.lowerExpr(recvNode);
+    if (recv.type.kind !== "object") return null;
+    const key = keyNode === null ? null : dynSymbolKeyOf(L, keyNode);
+    if (keyNode !== null && key === null) return null;
+    const loc = recv.loc;
+    const className = recv.type.className;
+    const rTmp = L.declareHiddenLocal("%symRecv", recv.type);
+    const rRef = (): IrExpr => ({ kind: "varRef", localId: rTmp.id, type: recv.type, loc });
+    const bag = (): IrExpr => ({ kind: "fieldGet", obj: rRef(), className, field: CLASS_PROPS_FIELD, type: DYN, loc });
+    return {
+      stmts: [
+        { kind: "varDecl", localId: rTmp.id, init: recv, loc },
+        { kind: "fieldSet", obj: rRef(), className, field: CLASS_PROPS_FIELD, value: { kind: "libCall", fn: "cls.propsEnsure", args: [bag()], type: DYN, loc }, loc },
+      ],
+      bag,
+      key,
+    };
+  }
+
   /** `keyNode` lowered as a symbol value: a symbol-typed expression as is, a checked-dynamic one the checker proves
    * symbol-typed through its dynCheck extraction; null for any other key. */
   export function dynSymbolKeyOf(L: Lowerer, keyNode: ts.Expression): IrExpr | null {
+    // a symbol-keyed access over a possibly-boxed receiver: boxed class instances must be able to hand back their bag
+    L.noteEdge("%symdyn");
     const key = L.lowerExpr(keyNode);
     if (key.type.kind === "symbol") return key;
     if (key.type.kind === "dyn" && L.mapTypeOf(L.typeOf(keyNode))?.kind === "symbol") {
@@ -16202,6 +16252,16 @@ export function staticAssertionOperand(L: Lowerer, node: ts.Expression, field: s
           return { kind: "exprStmt", expr: { kind: "libCall", fn: strictAt(expr.getSourceFile(), expr.getStart()) ? "sym.dynSet" : "sym.dynSetSloppy", args: [dynSym.recv, dynSym.key, value], type: VOID, loc }, loc };
         }
         L.unsupported("SC1101", expr.right, `storing '${L.fmt(value.type)}' values under a symbol key on a dynamic receiver (the value cannot convert into the checked-dynamic tree)`);
+      }
+      const clsSym = target.questionDotToken === undefined ? classSymbolBag(L, target.expression, target.argumentExpression) : null;
+      if (clsSym !== null) {
+        const value = L.coerceToExpected(L.lowerExpr(expr.right), DYN);
+        if (value.type.kind === "dyn") {
+          const loc = locOf(expr);
+          const fn = strictAt(expr.getSourceFile(), expr.getStart()) ? "sym.dynSet" : "sym.dynSetSloppy";
+          return { kind: "block", body: [...clsSym.stmts, { kind: "exprStmt", expr: { kind: "libCall", fn, args: [clsSym.bag(), clsSym.key!, value], type: VOID, loc }, loc }], loc };
+        }
+        L.unsupported("SC1101", expr.right, `storing '${L.fmt(value.type)}' values under a symbol key on a class instance (the value cannot convert into the checked-dynamic tree)`);
       }
       L.unsupported(
         "SC1090",
@@ -23127,6 +23187,10 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
       // runtime key table to ask.
       // A SYMBOL key over a checked-dynamic receiver: the runtime's symbol-keyed property table.
       if (L.mapTypeOf(L.typeOf(expr.left))?.kind === "symbol") {
+        const clsIn = classSymbolBag(L, expr.right, expr.left);
+        if (clsIn !== null) {
+          return { kind: "seqExpr", stmts: clsIn.stmts, result: { kind: "libCall", fn: "sym.dynHas", args: [clsIn.bag(), clsIn.key!], type: BOOL, loc }, type: BOOL, loc };
+        }
         const probed = probeLower(L, expr.right);
         if (probed?.type.kind === "dyn") {
           const k = dynSymbolKeyOf(L, expr.left);

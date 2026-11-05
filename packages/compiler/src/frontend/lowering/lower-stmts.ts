@@ -6,7 +6,7 @@ import { protoDataAssignStmt } from "./lower-protodata.js";
 import { classOfValueNode, protoSlotOf, protoSlotWriteStmt } from "./lower-protoslots.js";
 import { protoTabWriteStmt } from "./lower-prototab.js";
 import { strictAt } from "./lower-protoescape.js";
-import { isShadowableMethodRead, lowerUnboundClassMethodValue, dynSymbolKeyOf } from "./lower-exprs.js";
+import { isShadowableMethodRead, lowerUnboundClassMethodValue, dynSymbolKeyOf, classSymbolBag } from "./lower-exprs.js";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { isEmitterMixinStatement } from "./lower-emitter-mixin.js";
@@ -6497,6 +6497,14 @@ function unionCaseLiteralTest(L: Lowerer, disc: IrExpr, test: IrExpr, loc: SrcLo
     // is the ONE arm with a false to answer. The key is a property key,
     // so a number or an untyped key stringifies exactly as an indexed
     // READ does (the o[k] === o[String(k)] rule).
+    if (obj.type.kind === "object" && ts.isElementAccessExpression(target) && target.questionDotToken === undefined &&
+        L.mapTypeOf(L.typeOf(target.argumentExpression))?.kind === "symbol") {
+      // `delete inst[sym]` on a class instance that carries the run-time property table
+      const cs = classSymbolBag(L, target.expression, target.argumentExpression);
+      if (cs !== null) {
+        return { pre: cs.stmts, result: { kind: "libCall", fn: strictAt(expr.getSourceFile(), expr.getStart()) ? "sym.dynDelete" : "sym.dynDeleteSloppy", args: [cs.bag(), cs.key!], type: BOOL, loc } };
+      }
+    }
     if (obj.type.kind === "dyn") {
       // `delete o[sym]`: the runtime's symbol-keyed property table.
       if (ts.isElementAccessExpression(target) && L.mapTypeOf(L.typeOf(target.argumentExpression))?.kind === "symbol") {

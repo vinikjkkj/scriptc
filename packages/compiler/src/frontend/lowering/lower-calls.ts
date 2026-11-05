@@ -35,7 +35,7 @@ import { lowerDateLocaleFormat, lowerNumberLocaleFormat } from "./lower-numfmt.j
 import { lowerBareRequireCall, lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDateMethodCall, lowerDiffieHellmanCallbackCall, lowerRandomBytesCallbackCall, lowerDirentMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerErrorCaptureStackTraceCall, lowerReflectApplyCall, lowerReflectConstructCall, lowerStringFromCharCodeApply, lowerWatcherMethodCall } from "./lower-builtins.js";
 import { lowerSqliteMethodCall } from "./lower-sqlite.js";
 import { lowerWrtcMethodCall } from "./lower-wrtc.js";
-import { dynSymbolKeyOf, lowerSubclassFieldRead, pureReemittable, classHasKeyHelper, classInMemberNames, droppableStatic, dynAssertionReceiver, fnOwnCounters, keyedCalleeAtUndefinedArm, spawnResStreamArg, jsonStringifySpawnStreamArg, unionArmBridge, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf, armTagsTest } from "./lower-exprs.js";
+import { dynSymbolKeyOf, classSymbolBag, lowerSubclassFieldRead, pureReemittable, classHasKeyHelper, classInMemberNames, droppableStatic, dynAssertionReceiver, fnOwnCounters, keyedCalleeAtUndefinedArm, spawnResStreamArg, jsonStringifySpawnStreamArg, unionArmBridge, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf, armTagsTest } from "./lower-exprs.js";
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerHttpClientFnCall } from "./lower-server.js";
 import { isAnyDynContainer, lowerProxyNew, CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, definePropSlotSiteOf, errorWithCause, definePropTableSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, requireVirtualSlotFit, virtualViewFitsSlot, type ClassInfo } from "./lower-classes.js";
 import { boundEmitDispatcher, boundSubscribeDispatcher, emitterEventNames, emitterRooted, lowerEmitApplyCall, lowerEmitterMethodCall, lowerUnnamedEmitterCall } from "./lower-emitter.js";
@@ -11795,6 +11795,12 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       }
       return key.type.kind === "string" ? key : null;
     };
+    if (probed?.type.kind === "object" && L.mapTypeOf(L.typeOf(keyNode))?.kind === "symbol") {
+      const cs = classSymbolBag(L, recvNode, keyNode);
+      if (cs !== null) {
+        return { kind: "seqExpr", stmts: cs.stmts, result: { kind: "libCall", fn: "sym.dynHasOwn", args: [cs.bag(), cs.key!], type: BOOL, loc }, type: BOOL, loc };
+      }
+    }
     if (probed?.type.kind === "dyn") {
       // A SYMBOL key: the runtime's symbol-keyed property table.
       if (L.mapTypeOf(L.typeOf(keyNode))?.kind === "symbol") {
@@ -12354,6 +12360,23 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
   function lowerDefinePropDyn(L: Lowerer, call: ts.CallExpression): IrExpr | null {
     if (call.arguments.length !== 3 || call.arguments.some((a) => ts.isSpreadElement(a))) return null;
     let target = probeLower(L, call.arguments[0]!);
+    // A class instance that carries the run-time property table, with a SYMBOL key: the symbol table on its bag.
+    if (target?.type.kind === "object" && L.mapTypeOf(L.typeOf(call.arguments[1]!))?.kind === "symbol") {
+      const cs = classSymbolBag(L, call.arguments[0]!, call.arguments[1]!);
+      if (cs !== null) {
+        markDescriptorMapLiterals(L, call.arguments[2]!, 0);
+        const cdesc = L.lowerExprExpecting(call.arguments[2]!, DYN);
+        if (cdesc.type.kind !== "dyn") return null;
+        const loc = locOf(call);
+        return {
+          kind: "seqExpr",
+          stmts: [...cs.stmts, { kind: "exprStmt", expr: { kind: "libCall", fn: "sym.dynDefine", args: [cs.bag(), cs.key!, cdesc], type: DYN, loc }, loc }],
+          result: cs.bag(),
+          type: DYN,
+          loc,
+        };
+      }
+    }
     if (
       target && target.type.kind === "func" &&
       canBoxFuncIntoDyn(target.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))
@@ -13607,6 +13630,13 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     // Object.getOwnPropertySymbols over a checked-dynamic receiver: the symbol half of its own keys (scr_symbol.c).
     if (member === "getOwnPropertySymbols" && call.arguments.length === 1 && !ts.isSpreadElement(call.arguments[0]!)) {
       const probedSym = probeLower(L, call.arguments[0]!);
+      if (probedSym?.type.kind === "object") {
+        const cs = classSymbolBag(L, call.arguments[0]!, null);
+        if (cs !== null) {
+          const loc = locOf(call);
+          return { kind: "seqExpr", stmts: cs.stmts, result: { kind: "libCall", fn: "sym.dynOwnKeys", args: [cs.bag()], type: arrayOf(SYMBOL_T), loc }, type: arrayOf(SYMBOL_T), loc };
+        }
+      }
       if (probedSym?.type.kind === "dyn") {
         return { kind: "libCall", fn: "sym.dynOwnKeys", args: [L.lowerExpr(call.arguments[0]!)], type: arrayOf(SYMBOL_T), loc: locOf(call) };
       }
