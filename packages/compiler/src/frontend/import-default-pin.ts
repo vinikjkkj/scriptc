@@ -68,6 +68,7 @@ export function computeImportDefaultPins(program: ts.Program): Map<string, Retyp
   const checker = program.getTypeChecker();
   const out = new Map<string, RetypePin[]>();
   for (const sf of program.getSourceFiles()) {
+    if (sf.text.includes("standard-as-callback") || /built[\\/](transaction|cluster[\\/]index)\.js$/.test(sf.fileName)) process.stderr.write(`[importdefault] visit ${sf.fileName} decl=${sf.isDeclarationFile} has=${sf.text.includes("__importDefault(")} n=${(sf.text.match(/__importDefault/g) ?? []).length}\n`);
     if (sf.isDeclarationFile || !/\.(c|m)?js$/.test(sf.fileName) || !sf.text.includes("__importDefault(")) continue;
     if (/[\\/]node_modules[\\/]typescript[\\/]/.test(sf.fileName)) continue;
     const pins: RetypePin[] = [];
