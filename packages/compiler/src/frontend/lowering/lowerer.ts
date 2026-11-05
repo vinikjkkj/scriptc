@@ -9095,6 +9095,11 @@ export class Lowerer {
     // once its source was granted) would cast into a shape with no view slot, a silent copy, so it keeps the field copy and the
     // key-risk refusals that copy carries.
     if (this.onEdge === undefined && !(this.isViewShape(expr.type) && this.isViewShape(expected))) return null;
+    // Only data shapes (numbers, strings, booleans, arrays, nested records and their unions with undefined/null) take the view: a
+    // record that carries bytes, a promise, a function, a Map/Set or an instance keeps its field copy, a known remainder where the
+    // copy stays the silent defect it is on main.
+    if (!isJsonSafeType(expr.type, (id) => this.shapes.get(id), (id) => this.unions.get(id)) ||
+        !isJsonSafeType(expected, (id) => this.shapes.get(id), (id) => this.unions.get(id))) return null;
     if (!canDynCheckTo(expected, (id) => this.shapes.get(id), (id) => this.unions.get(id))) return null;
     if (!canConvertToDyn(expr.type, (id) => this.shapes.get(id), (id) => this.unions.get(id))) return null;
     if (this.onEdge !== undefined) viewConversionNoted = true;
