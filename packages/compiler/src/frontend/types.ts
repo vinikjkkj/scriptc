@@ -9026,7 +9026,10 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
           checker.getCallSignatures(memberTs).length === 1 &&
           checker.getCallSignatures(memberTs)[0]!.getTypeParameters().length === 0 &&
           checker.getConstructSignatures(memberTs).length === 0 &&
-          checker.declarationsOf(p).every((d) => !ctx.isStdlibFile(d.getSourceFile()));
+          // A member that is a standard-library MODULE's own function (`Pick<typeof os, "release">`: `function release(): string`
+          // in `declare module "os"`) is not the lib interface's type world: it is a function value the module exports, which
+          // the builtin member-value machinery (lower-fnvalue.ts) answers. Its shape is a record of function fields.
+          checker.declarationsOf(p).every((d) => !ctx.isStdlibFile(d.getSourceFile()) || ts.isFunctionDeclaration(d));
         if (!dataMember && !ordinaryCallableMember) return null;
       }
       const fieldTs = checker.getTypeOfSymbol(p);
