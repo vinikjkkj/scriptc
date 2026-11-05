@@ -15437,6 +15437,11 @@ export class Lowerer {
       const witness = this.classWitnessRecord(node, e as IrExpr & { type: IrType & { kind: "object" } }, expected);
       if (witness) return witness;
     }
+    if (e.type.kind === "dyn" && expected.kind === "promise") {
+      console.error(`ADOPTSITE ${locOf(node).file}@${locOf(node).start}`);
+      const adopted = this.adoptDynIntoTypedPromise(e, expected);
+      if (adopted !== null) return adopted;
+    }
     this.requireExactShape(node, e.type, expected);
     return e;
   }
