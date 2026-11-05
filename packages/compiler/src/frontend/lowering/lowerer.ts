@@ -7528,6 +7528,17 @@ export class Lowerer {
         const ok = canDynCheckTo(expected, (id) => this.shapes.get(id), (id) => this.unions.get(id));
         console.error(`DCWHY canDynCheckTo=${ok} :: ${this.dynCheckRefusal(expected)} :: ${typeKey(expected).slice(0, 90)}`);
       }
+      if (expected.kind === "promise" && ts.isCallExpression(node)) {
+        const c = node.expression;
+        const tstr = (x: ts.Node): string => { try { return this.checker.typeToString(this.checker.getTypeAtLocation(x)).slice(0, 160); } catch { return "?"; } };
+        const parts = [`callee=${c.getText().slice(0, 60)} calleeType=${tstr(c)}`];
+        let inner: ts.Node = c;
+        while (ts.isParenthesizedExpression(inner)) inner = inner.expression;
+        if (ts.isBinaryExpression(inner)) inner = inner.right;
+        if (ts.isPropertyAccessExpression(inner)) parts.push(`recv=${inner.expression.getText().slice(0, 40)} recvType=${tstr(inner.expression)} member=${inner.name.text} memberType=${tstr(inner)}`);
+        parts.push(`result=${tstr(node)}`);
+        console.error(`PROMWHY ${parts.join(" | ")}`);
+      }
       this.unsupported(
         "SC1100",
         node,
