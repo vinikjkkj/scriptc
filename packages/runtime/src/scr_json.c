@@ -6101,6 +6101,9 @@ static void scr_err_hide(ScrDyn *d, const char *key, size_t key_len, ScrDyn *v) 
 }
 
 static void scr_error_props_drop_impl(void *obj);
+static bool scr_error_props_code_impl(ScrError *e, ScrStr **out);
+/* Both hooks the error unit consults once a property bag exists. */
+#define scr_error_install_props_drop(fn) (scr_error_install_props_drop((fn)), scr_error_install_props_code(&scr_error_props_code_impl))
 
 /* Enter one (error, dyn node) pair into the identity cache. Retains both. */
 static void scr_errdyn_enter(const ScrError *e, ScrDyn *d) {
@@ -14529,6 +14532,16 @@ static void scr_error_props_drop_impl(void *obj) {
   ScrError *e = (ScrError *)obj;
   scr_dyn_release(e->props);
   e->props = NULL;
+}
+
+/* An `err.code = "X"` the program assigned lands in the bag and wins over a stamped code (own data property); a non-string
+ * value reads as no string. Installed beside the props drop, so a program without bags never reaches this unit. */
+static bool scr_error_props_code_impl(ScrError *e, ScrStr **out) {
+  if (e->props == NULL || e->props->kind != SCR_DYN_OBJ || !scr_dyn_obj_key_present(e->props, "code", 4)) return false;
+  ScrDyn *v = scr_dyn_obj_key_get(e->props, "code", 4);
+  *out = v != NULL && v->kind == SCR_DYN_STR ? scr_str_retain(v->v.str) : NULL;
+  scr_dyn_release(v);
+  return true;
 }
 
 void scr_error_prop_set(ScrError *e, ScrStr *key, ScrDyn *value) {

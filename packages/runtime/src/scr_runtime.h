@@ -1131,6 +1131,8 @@ void scr_error_stack_limit_set(double v);
  * an absent property, falling back to the errno `code` slot and the stack
  * memo for those two names. */
 void scr_error_install_props_drop(void (*fn)(void *obj));
+/* The lookup of a program-assigned `code` in the bag; installed with the props drop (see scr_json.c). */
+void scr_error_install_props_code(bool (*fn)(struct ScrError *e, struct ScrStr **out));
 void scr_error_prop_set(ScrError *e, ScrStr *key, struct ScrDyn *value);
 /* `new Error(m, { cause })` / `super(m, { cause })`: the error's own
  * NON-ENUMERABLE `cause` (hidden data in the bag; an assigned `e.cause = v`
