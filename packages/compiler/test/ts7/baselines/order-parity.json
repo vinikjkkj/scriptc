@@ -12808,6 +12808,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24146-engine-built-rows-read-through-typed-records.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24146-engine-built-rows-read-through-typed-records.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2414-dowhile-continue-kill.ts": {
    "order": [
     "<repo>/tests/corpus/2414-dowhile-continue-kill.ts"

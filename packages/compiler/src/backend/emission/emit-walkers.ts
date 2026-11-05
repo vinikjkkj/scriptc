@@ -7,7 +7,7 @@
  * CEmitter and these functions only consult them through it. */
 import type { CEmitter } from "./emitter.js";
 import { rcSitesRequested } from "./emitter.js";
-import { moduleFuncLaneShapes, accessorKeyOrderOf, accessorSlotProp, shapeHasAccessorSlots, VOID, arrayTypeHasLiveView, bytesAliasOnExtract, canConvertToDyn, canDynCheckTo, moduleUsesDynView, moduleInstanceLaneNeedsKg, moduleUsesInstanceRecordLane } from "../../ir/nodes.js";
+import { moduleFuncLaneShapes, moduleUsesEngineFn, accessorKeyOrderOf, accessorSlotProp, shapeHasAccessorSlots, VOID, arrayTypeHasLiveView, bytesAliasOnExtract, canConvertToDyn, canDynCheckTo, moduleUsesDynView, moduleInstanceLaneNeedsKg, moduleUsesInstanceRecordLane } from "../../ir/nodes.js";
 import { CLASS_PROPS_FIELD, EVAL_STATIC_CLASSES, dynNeverArm, dynNeverIn, armDiscrimLits, dynErrorClassKind, isDynErrorClass, canAdaptDynFuncTo, dynRestApplyable, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, UNION_ARM_JS_OBJECT_KINDS, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassStruct, mangleField, mangleFunction, mangleFnClosure, mangleRecordNew, mangleRecordRelease, mangleRecordStruct } from "../mangle.js";
@@ -15,7 +15,7 @@ import type { ClassMeta } from "./emit-shapes.js";
 import { RUNTIME_EMITTER_CLASS as RUNTIME_EMITTER_CLASS_W } from "../../ir/nodes.js";
 import { classvalCandidates, dynClassDisplayName, dynDescBase, dynEmitterSlot, dynRuntimeRoot, dynEnumerationFenced, dynMemberRows, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
 import { EMITTER_MIXIN_FIELD_NAME, ORD_MEMBER, orderRecordPlanCached } from "../../ir/nodes.js";
-import { KINDGATE_WIDE_KINDS, soleRecordArmWithFuncMember, kindgateFuncLane, kindgateInstanceLane, kindgateWideLane } from "../kindgate.js";
+import { KINDGATE_WIDE_KINDS, kindgateJsvalLane, soleRecordArmWithFuncMember, kindgateFuncLane, kindgateInstanceLane, kindgateWideLane } from "../kindgate.js";
 import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, VIEW_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
 
 /** The refusal text a dyn-to-record check uses when the receiver carries
@@ -2557,7 +2557,8 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // members included. It is taken by KIND, ahead of the dial lane, and it is on
         // in both disciplines.
         const inst = kindgateInstanceLane(shape, moduleUsesInstanceRecordLane(E.mod));
-        if (wide || inst) {
+        const jsv = kindgateJsvalLane(shape, moduleUsesEngineFn(E.mod));
+        if (wide || inst || jsv) {
           const keysName = `sc_kgk_${t.shapeId}`;
           const lensName = `sc_kgl_${t.shapeId}`;
           if (shape.fields.length > 0 && !E.recWideTables.has(t.shapeId)) {
@@ -2585,6 +2586,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           const kindOk = [
             `d->kind != SCR_DYN_OBJ`,
             ...(inst ? [`d->kind != SCR_DYN_OBJINST`] : []),
+            ...(jsv ? [`d->kind != SCR_DYN_JSVAL`] : []),
             ...(wide ? [funcOnly ? `d->kind != SCR_DYN_FUNC` : `!sc_dyn_rec_wideable(d)`] : []),
           ].join(" && ");
           d.push(fail(`  `, "record.kind", kindOk, `NULL`));
@@ -2602,6 +2604,13 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             d.push(`  }`);
           }
           d.push(`  if (d->kind != SCR_DYN_OBJ) {`);
+          if (jsv) {
+            const kt0 = shape.fields.length > 0 ? keysName : "NULL";
+            const lt0 = shape.fields.length > 0 ? lensName : "NULL";
+            d.push(`    if (d->kind == SCR_DYN_JSVAL) {`);
+            d.push(`      sc_proj = scr_dyn_rec_from_jsval(d, ${kt0}, ${lt0}, ${shape.fields.length}, ${jsv.allOwn ? "true" : "false"});`);
+            d.push(`    } else {`);
+          }
           if (inst) {
             const kt = shape.fields.length > 0 ? keysName : "NULL";
             const lt = shape.fields.length > 0 ? lensName : "NULL";
@@ -2617,6 +2626,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             d.push(`    sc_proj = NULL; /* unreachable: no other kind passes the gate */`);
           }
           if (inst) d.push(`    }`);
+          if (jsv) d.push(`    }`);
           d.push(
             `    if (sc_proj == NULL) { ${soft ? "*ok = false; " : ""}return NULL; } /* the read threw */`,
           );
@@ -2630,7 +2640,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // VIEW GRANT: the record is a VIEW of the object it was read off (the declared members below are its
         // snapshot): the ORIGINAL value, not the projection the instance lane reads the members from.
         if (shape.view === true) {
-          d.push(`  r->${VIEW_MEMBER} = scr_dyn_retain((ScrDyn *)${wide || inst ? "sc_orig" : "d"});`);
+          d.push(`  r->${VIEW_MEMBER} = scr_dyn_retain((ScrDyn *)${wide || inst || jsv ? "sc_orig" : "d"});`);
         }
         // The HIDDEN per-instance OWN-KEY MASK. This builder is the ONE
         // point that still holds both halves of JS's answer: the member's
@@ -2677,7 +2687,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // String(r), r.toString() AND `r + ""`, and only a valueOf-free
         // value gives those the same answer).
         if (shape.tostr) {
-          d.push(`  r->${TOSTR_MEMBER} = scr_dyn_tostr_closure(${wide || inst ? "(sc_orig->kind == SCR_DYN_OBJINST ? sc_orig : d)" : "d"});`);
+          d.push(`  r->${TOSTR_MEMBER} = scr_dyn_tostr_closure(${wide || inst || jsv ? "(sc_orig->kind == SCR_DYN_OBJINST ? sc_orig : d)" : "d"});`);
         }
         const buildInternal = new Set(internalSlotFields(shape));
         for (const f of shape.fields) {
@@ -2927,7 +2937,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           d.push(`    scr_str_release(ek);`);
           d.push(`  }`);
         }
-        if (wide || inst) d.push(`  if (sc_proj) scr_dyn_release(sc_proj);`);
+        if (wide || inst || jsv) d.push(`  if (sc_proj) scr_dyn_release(sc_proj);`);
         d.push(`  return r;`);
         break;
       }
