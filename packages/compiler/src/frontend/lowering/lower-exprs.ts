@@ -43,7 +43,7 @@ import { fenceNamespaceConditionalValue, lowerNamespaceConditionalDecl } from ".
 import { detachedMethodVariant, findGenericMethodOn, lowerStaticFieldRead, superGuardedThis } from "./lower-classes.js";
 import { dynCallWithThis, jsLetReadStaysDyn, type GenericFnInfo, type GenericInstance, type ParamShape, detachedThisClassOf, detachedDeclinable, inStrictCode, implicitDefaultInstance, implicitDetachedInstance, bindingNeverReassigned, classHasOwnValueOf, dynSpreadSource, classInstanceToString, implicitMonoFile, lowerIntlDefaultLocaleProperty, lowerTaggedTemplate, nullishGenericBindingUnitOf, objLitGenericFnInfoOf, objLitGenericFnNodeOf, requireObjLitGenericReceiver, lowerDynReceiverMethodCall } from "./lower-calls.js";
 import { mixinFnOfCallee } from "./lower-mixins.js";
-import { esOwnKeyOrder, isArrayIndexKey, isConstAssertionTypeNode, isGenericCallableMemberType, overflowShapeKey, overflowShapeKeys, overflowShapeKeysDenied, underConstAssertion, unitOnlyUnion } from "../types.js";
+import { isUndefWidenedArray, esOwnKeyOrder, isArrayIndexKey, isConstAssertionTypeNode, isGenericCallableMemberType, overflowShapeKey, overflowShapeKeys, overflowShapeKeysDenied, underConstAssertion, unitOnlyUnion } from "../types.js";
 import { lowerYield } from "./lower-generators.js";
 import { errorRootedType, lowerStreamProperty, lowerStreamStateProperty, streamInstanceOfExpr, streamSidesOf } from "./lower-stream.js";
 import { lowerWebSocketGlobal } from "./lower-ws.js";
@@ -5436,6 +5436,23 @@ function instanceofGuardArm(L: Lowerer, rhs: ts.Expression, unionId: string): Ir
   return null;
 }
 
+  /** Is `node` read where the value is handed on (a binding's initializer, an argument, a return, an
+   * assigned or stored member, a comparison, a template) rather than consumed as an array? */
+  function carriesUndefinedArray(node: ts.Node): boolean {
+    let p: ts.Node = node;
+    while (p.parent !== undefined && (ts.isParenthesizedExpression(p.parent) || ts.isNonNullExpression(p.parent) || ts.isAsExpression(p.parent))) p = p.parent;
+    const par = p.parent;
+    if (par === undefined) return false;
+    if (ts.isVariableDeclaration(par) || ts.isReturnStatement(par) || ts.isPropertyAssignment(par) || ts.isShorthandPropertyAssignment(par)) return true;
+    if (ts.isCallExpression(par) || ts.isNewExpression(par)) return par.arguments?.includes(p as ts.Expression) === true;
+    if (ts.isBinaryExpression(par)) {
+      const k = par.operatorToken.kind;
+      if (k === ts.SyntaxKind.EqualsToken) return par.right === p;
+      return true; // comparisons and logical operators: the presence question
+    }
+    return ts.isTemplateSpan(par) || ts.isArrowFunction(par) || ts.isArrayLiteralExpression(par);
+  }
+
   export function maybeNarrow(L: Lowerer, expr: IrExpr, node: ts.Node): IrExpr {
     // A lyingRead result already answered its consumer: narrowing it again
     // would re-trap the peeled union.
@@ -5447,17 +5464,17 @@ function instanceofGuardArm(L: Lowerer, rhs: ts.Expression, unionId: string): Ir
     if (expr.type.kind === "union" && L.armTag(expr.type.unionId, UNDEFINED_T) >= 0) {
       const tgt = L.lyingTargetOf(expr.type);
       if (tgt !== null && tgt.kind === "array" && node.kind !== ts.SyntaxKind.Block) {
-        if (L.checker.isArrayType(L.typeOf(node))) {
+        if (L.checker.isArrayType(L.typeOf(node)) && isUndefWidenedArray(L.typeOf(node), L.typeCtx, L.checker)) {
           // A dereference (member use, call, element access) throws Node's
-          // TypeError at the undefined arm; every other use carries the union
-          // to its destination, which takes it or refuses at the coercion.
-          if (typeof L.classifyLyingRead(node as ts.Expression) === "object") {
-            const lr = L.lyingRead(expr, node as ts.Expression);
-            if (lr) return lr;
-          } else {
+          // TypeError at the undefined arm. A use that hands the value to a
+          // destination (a binding, an argument, a return, a stored member)
+          // carries the union there; any other use needs the array itself.
+          const lr = L.lyingRead(expr, node as ts.Expression);
+          if (typeof L.classifyLyingRead(node as ts.Expression) !== "object" && carriesUndefinedArray(node)) {
             L.lyingResults.add(expr);
             return expr;
           }
+          if (lr) return lr;
         }
       }
     }
