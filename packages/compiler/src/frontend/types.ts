@@ -2098,8 +2098,28 @@ export function admitWeakTableIr(
   return null;
 }
 
+/** A runaway generic expansion: the type is being mapped deep inside a mapping and its own spelling nests generic arguments
+ * several levels (`Filter<WithId<WithId<WithId<...TSchema>>>>`, a package's open generic whose parameter nothing binds). Each
+ * level is a distinct type, so no identity guard ever sees a repeat and the walk only stops at the depth cap or the stack. */
+const OPEN_EXPANSION_DEPTH = 24;
+const OPEN_EXPANSION_NESTING = 6;
+function isOpenExpansion(type: ts.Type, ctx: TypeMapperCtx): boolean {
+  const s = ctx.checker.typeToString(type);
+  let depth = 0;
+  let max = 0;
+  for (let i = 0; i < s.length; i++) {
+    const c = s.charCodeAt(i);
+    if (c === 60) { depth++; if (depth > max) max = depth; } else if (c === 62 && s.charCodeAt(i - 1) !== 61) depth--;
+  }
+  return max >= OPEN_EXPANSION_NESTING;
+}
+
 export function mapType(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   if (mapTypeDepth >= MAP_TYPE_MAX_DEPTH) return null;
+  if (mapTypeDepth >= OPEN_EXPANSION_DEPTH && isOpenExpansion(type, ctx)) {
+    mapTrace(`OPENEXPAND ${ctx.checker.typeToString(type).slice(0, 70)}`);
+    return null;
+  }
   const slots = process.env.SCRIPTC_NO_MEMO ? undefined : mapTypeMemo.get(type);
   const hit = slots?.get(memoModeKey(ctx));
   if (redundNote) {
@@ -8148,6 +8168,17 @@ function isectWhy(t: ts.UnionOrIntersectionType, ctx: TypeMapperCtx): void {
   }
 }
 
+/** Every declaration of a member sits in a file a package wrote (a shipped declaration file that is not the standard library's, or
+ * a provenance source), never in the program's own code. */
+function packageDeclaredMember(decls: readonly ts.Node[], ctx: TypeMapperCtx): boolean {
+  if (decls.length === 0) return false;
+  return decls.every((d) => {
+    const sf = d.getSourceFile();
+    if (ctx.isStdlibFile(sf)) return false;
+    return sf.isDeclarationFile || isProvenanceSourceFile(sf.fileName);
+  });
+}
+
 function mapTrace(message: string): void {
   if (!process.env.SCRIPTC_MAP_TRACE) return;
   // INDENTED BY FRAME DEPTH. Failures print leaf-first as the stack
@@ -9281,6 +9312,21 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
       // overflow entry — same RC adapters, same dynFrom conversion on the
       // way in, same checked casts on the way out. (JSON.stringify of a
       // dyn-field-bearing shape keeps its fence: jsonSafe stays false.)
+      // A member a PACKAGE declares (its own .d.ts or the sources compiled from it) whose type has no static representation is the
+      // checked-dynamic slot: the author wrote a type nothing the caller writes can change, and refusing the whole record for it
+      // would take every other member with it. The member still works exactly - a read is a checked read of the dyn, a write
+      // converts the value in (and is refused at that conversion, loudly, if the value has no dynamic form), `undefined` is the
+      // dyn undefined - because it is the same slot an `any`-typed member of such a record already is. The program's OWN records
+      // keep their refusal, and a failure caused by DEPTH (a runaway expansion cut by OPEN_EXPANSION_DEPTH) is not the member's own.
+      if (
+        pt === null &&
+        !ctx.dynamic &&
+        mapTypeDepth < OPEN_EXPANSION_DEPTH &&
+        packageDeclaredMember(checker.declarationsOf(p), ctx)
+      ) {
+        mapTrace(`MEMBERDYN ${checker.typeToString(widened).slice(0, 46)} . ${p.name} : ${checker.typeToString(fieldTs).slice(0, 60)}`);
+        pt = DYN;
+      }
       if (!pt || pt.kind === "void") {
         mapTrace(`MEMBER ${checker.typeToString(widened).slice(0, 46)} . ${p.name} : ${checker.typeToString(fieldTs).slice(0, 60)}`);
         return null;
