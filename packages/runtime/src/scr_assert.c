@@ -475,6 +475,26 @@ static bool scr_assert_dyn_same_value(const ScrDyn *a, const ScrDyn *b) {
  * memo here where Node carries one (documented divergence). */
 static bool scr_assert_dyn_deep_eq(const ScrDyn *a, const ScrDyn *b);
 
+/* deepStrictEqual compares the own ENUMERABLE symbol keys too (scr_symbol.c's table): same set of symbols, each pair
+ * deep-equal. Bodies of objects that never stored one skip it on two NULL tests. */
+static bool scr_assert_dyn_sym_eq(const ScrDyn *a, const ScrDyn *b) {
+  const ScrDynSymTab *ta = scr_dyn_ext(a)->syms, *tb = scr_dyn_ext(b)->syms;
+  if (ta == NULL && tb == NULL) return true;
+  size_t na = 0, nb = 0;
+  for (uint32_t i = 0; ta != NULL && i < ta->len; i++) na += (ta->e[i].flags & SCR_SYMP_ENUM) != 0;
+  for (uint32_t i = 0; tb != NULL && i < tb->len; i++) nb += (tb->e[i].flags & SCR_SYMP_ENUM) != 0;
+  if (na != nb) return false;
+  for (uint32_t i = 0; ta != NULL && i < ta->len; i++) {
+    if (!(ta->e[i].flags & SCR_SYMP_ENUM)) continue;
+    const ScrDynSymEnt *m = NULL;
+    for (uint32_t j = 0; tb != NULL && j < tb->len; j++)
+      if (tb->e[j].key == ta->e[i].key && (tb->e[j].flags & SCR_SYMP_ENUM)) m = &tb->e[j];
+    if (m == NULL || !scr_assert_dyn_deep_eq(ta->e[i].val, m->val)) return false;
+  }
+  return true;
+}
+
+
 /* `name` and `message` of two error-encoded dyn objects, compared as
  * STRINGS - Node's isDeepStrictEqual error branch. Absent on either side
  * reads as absent on both (the encoding omits a name that is the kind's
@@ -652,6 +672,7 @@ static bool scr_assert_dyn_deep_eq(const ScrDyn *a, const ScrDyn *b) {
           if (bv == NULL || !scr_assert_dyn_deep_eq(ent->value, bv)) return false;
         }
       }
+      if (!scr_assert_dyn_sym_eq(a, b)) return false;
       return true;
     }
     case SCR_DYN_OBJ: {
@@ -700,6 +721,7 @@ static bool scr_assert_dyn_deep_eq(const ScrDyn *a, const ScrDyn *b) {
        * SLOT), and counting one would make two objects Node calls equal
        * compare unequal because one of them had once had a getter. */
       if (scr_dyn_obj_enum_key_count(a) != scr_dyn_obj_enum_key_count(b)) return false;
+      if (!scr_assert_dyn_sym_eq(a, b)) return false;
       for (size_t i = 0; i < a->v.obj.len; i++) {
         const ScrDynEntry *ent = &a->v.obj.entries[i];
         /* Node's deepStrictEqual reads each own enumerable property with
