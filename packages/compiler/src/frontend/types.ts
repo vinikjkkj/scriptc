@@ -8911,7 +8911,10 @@ function mapIndexSignatureValue(t: ts.Type, ctx: TypeMapperCtx): IrType | null {
  * admitted shapes nor the empty-as-top-type rule move. Here the value
  * takes mapType's answer, which for `any` is the pre-change null. */
 function implicitLiteralIndex(widened: ts.Type, ctx: TypeMapperCtx): boolean {
-  return widened.getSymbol() === undefined && ctx.checker.getPropertiesOfType(widened).length === 0;
+  // An INTERSECTION is never the implicit literal affordance: that type is a fresh object-literal type, and an intersection
+  // (`Readonly<Partial<T>> & Record<string, any>`) is something a program wrote, whose index signature is its own.
+  return widened.getSymbol() === undefined && (widened.flags & ts.TypeFlags.Intersection) === 0 &&
+    ctx.checker.getPropertiesOfType(widened).length === 0;
 }
 
 function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | RecordShapeParts | null {
