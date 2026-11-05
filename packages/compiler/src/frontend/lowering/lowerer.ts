@@ -749,6 +749,14 @@ let viewConversionNoted = false;
  * through the dynamic side would never reach the source; such a target keeps the object path, whose crossing IS the object.
  * Both fill during discovery and persist across its reruns. */
 const structViewTargetKeys = new Set<string>();
+
+/** viewShapeKey pairs ("from->to") that SHAPE UNIFICATION closed: the two shapes became one and the copy between them the
+ * identity, which beats any view (no slot, no extra arm, offsets stay constants). The first discovery pass cannot know them,
+ * so it converts nothing through a view and says so (viewConversionNoted); the passes after it convert only the pairs
+ * unification left alone. Per compilation. */
+const unifiedPairKeys = new Set<string>();
+let widthPairsSettled = false;
+let viewConversionAttempted = false;
 const structViewDeniedKeys = new Set<string>();
 
 export function lowerToIr(
@@ -769,6 +777,9 @@ export function lowerToIr(
   viewConversionNoted = false;
   structViewTargetKeys.clear();
   structViewDeniedKeys.clear();
+  unifiedPairKeys.clear();
+  widthPairsSettled = false;
+  viewConversionAttempted = false;
   const targetPlatform = options.targetPlatform ?? process.platform;
   const startupCrash = options.startupCrash ?? null;
   // Modules reachable only through dynamic import() of the program's own
@@ -4934,6 +4945,7 @@ export class Lowerer {
       lowerProfileNote("%discovery-drain", performance.now() - __drT);
     }
     } while (scanProduced() || queue.length > 0);
+    if (!widthPairsSettled) this.settleWidthPairs();
     return reachable;
   }
 
@@ -5095,6 +5107,7 @@ export class Lowerer {
    * still has to answer for it. Costs one traversal per discovered body. */
   noteDynBoxEdges(fn: IrFunction | null | undefined): void {
     if (!this.onEdge || !fn) return;
+    if (!widthPairsSettled) this.discoveredFns.push(fn);
     const found = new Set<string>();
     const seen = new Set<string>();
     const walk = (n: unknown): void => {
@@ -9127,6 +9140,33 @@ export class Lowerer {
   /** Shapes that are the TARGET of a struct view in the program being emitted: their field reads and writes get the extra arm. */
   readonly structViewShapes = new Set<string>();
 
+  /** Every body discovery lowered, kept only until shape unification has been asked which width pairs it closes. */
+  private readonly discoveredFns: IrFunction[] = [];
+
+  /** Runs the part of the tail that decides shape unification over what discovery lowered, so the passes after the first can
+   * leave the pairs it closes alone (unifiedPairKeys). The lowerer this runs on is discarded afterwards: unification rewrites
+   * its shapes and bodies in place. A failure here only means every pair is judged a view candidate, as before. */
+  private settleWidthPairs(): void {
+    widthPairsSettled = true;
+    if (!viewConversionAttempted) return;
+    const fns = [...this.discoveredFns, ...this.liftedFns, ...this.implicitFns];
+    try {
+      this.cdctMemo.clear();
+      this.cdctMemoRetired = true;
+      this.reconcileKeyOrders(fns);
+      unifyWidthShapes(this, fns);
+    } catch {
+      /* keep what was recorded */
+    }
+    this.discoveredFns.length = 0;
+  }
+
+  /** Shape unification closed the pair (shape-unify.ts): it is one shape now, so no view is ever made for it. */
+  noteUnifiedPair(fromKey: string, toKey: string): void {
+    if (fromKey === "" || toKey === "") return;
+    unifiedPairKeys.add(`${fromKey}->${toKey}`);
+  }
+
   /** The identity-preserving form of a record-to-record width coercion (value model, phase 1: members of scalar, string, union and
    * dyn kinds). Null when the pair keeps its field copy: a shape that cannot be a view (tuples, accessors, builtins, index
    * signatures), a plan the copy would decline, or a target the checked cast cannot read. The copy a null leaves is exactly
@@ -9140,6 +9180,15 @@ export class Lowerer {
     if (from.indexValue !== undefined || to.indexValue !== undefined) return null;
     const plan = this.recordWidthPlan(expr.type.shapeId, expected.shapeId);
     if (plan === null) return null;
+    // Shape unification gets the pair first (see unifiedPairKeys): the copy stays until it has judged the edge.
+    if (!widthPairsSettled) {
+      if (this.onEdge !== null) {
+        viewConversionNoted = true;
+        viewConversionAttempted = true;
+      }
+      return null;
+    }
+    if (unifiedPairKeys.has(`${viewShapeKey(from.fields, from.indexValue)}->${viewShapeKey(to.fields, to.indexValue)}`)) return null;
     const srcIsView = this.isViewShape(expr.type as IrType);
     // STRUCT VIEW: when every field of the target exists in the source at the IDENTICAL type, the target reads and writes the
     // source's own struct in place (any field kind: bytes, promises and functions included), and the source shape is left an

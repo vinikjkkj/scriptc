@@ -87,6 +87,7 @@ import type { IrExpr, IrFunction, IrRecordShape, IrType, SrcLoc } from "../../ir
 import { internalSlotFields, typeKey, UNDEFINED_T } from "../../ir/nodes.js";
 import type { Lowerer } from "./lowerer.js";
 import { dynUndefinedExpr } from "./lowerer.js";
+import { viewShapeKey } from "../types.js";
 
 /** The cap, in FIELDS a member may gain. Decided on measurement: it takes
  * the components where the extra members are a rounding error on the struct
@@ -100,6 +101,9 @@ interface Edge {
   to: string;
   /** The interned helper's name — elided when the two ends merge. */
   helper: string;
+  /** viewShapeKey of each end BEFORE any merge, so a pair the pass closes can be named by something that survives the rewrite. */
+  fromKey: string;
+  toKey: string;
 }
 
 /** What the pass did, for the report dial and for the tests. */
@@ -171,7 +175,9 @@ export function unifyWidthShapes(L: Lowerer, functions: IrFunction[]): UnifyOutc
       }
     }
     if (!ok) continue;
-    edges.push({ from, to, helper });
+    const fs = L.shapes.get(from);
+    const ts_ = L.shapes.get(to);
+    edges.push({ from, to, helper, fromKey: fs === undefined ? "" : viewShapeKey(fs.fields, fs.indexValue), toKey: ts_ === undefined ? "" : viewShapeKey(ts_.fields, ts_.indexValue) });
   }
 
   // ── union-find, greedy, tightest first, to a fixpoint ──────────────────
@@ -422,7 +428,10 @@ export function unifyWidthShapes(L: Lowerer, functions: IrFunction[]): UnifyOutc
   // identity now, so the call goes and the function with it.
   const elided = new Set<string>();
   for (const e of edges) {
-    if (find(e.from) === find(e.to)) elided.add(e.helper);
+    if (find(e.from) === find(e.to)) {
+      elided.add(e.helper);
+      L.noteUnifiedPair(e.fromKey, e.toKey);
+    }
   }
 
   substitute(L, functions, remap, elided);
@@ -672,13 +681,15 @@ function substitute(L: Lowerer, functions: IrFunction[], remap: Map<string, stri
     for (const key of Object.keys(o)) {
       if (key === "loc") continue;
       const v = o[key];
-      if ((key === "shapeId" || key === "resultShapeId") && typeof v === "string") {
+      if ((key === "shapeId" || key === "resultShapeId" || key === "srcShapeId") && typeof v === "string") {
         const to = remap.get(v);
         if (to !== undefined) o[key] = to;
         continue;
       }
       o[key] = walk(v);
     }
+    // A view of a record whose two shapes became one is the record itself.
+    if (o["kind"] === "recordSrcView" && o["srcShapeId"] === o["shapeId"]) return o["src"];
     // The copy that is now the identity. Done AFTER the argument is walked,
     // so the value handed up is fully rewritten.
     if (o["kind"] === "call" && typeof o["callee"] === "string" && elided.has(o["callee"])) {
