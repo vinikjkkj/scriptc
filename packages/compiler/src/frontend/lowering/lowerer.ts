@@ -67,6 +67,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
+import { isDynErrorClass } from "../../ir/nodes.js";
 import { protoEscapes, strictAt } from "./lower-protoescape.js";
 import { applyProtoSlots, scanProtoSlots } from "./lower-protoslots.js";
 import { applyProtoTabs, scanProtoTabs } from "./lower-prototab.js";
@@ -8400,6 +8401,10 @@ export class Lowerer {
       }
       case "union":
         return (this.unions.get(t.unionId)?.arms ?? []).every((a) => isUnitType(a) || this.dynPayloadTotal(a, depth + 1));
+      // An Error (or one of its subclasses) comes back out of the checked-dynamic tree as the SAME object: the marker test and
+      // the identity-cached extraction (canDynCheckTo's object leaf), so the payload keeps its identity.
+      case "object":
+        return isDynErrorClass(t.className);
       default:
         return false;
     }
