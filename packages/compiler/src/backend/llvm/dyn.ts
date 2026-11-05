@@ -38,7 +38,7 @@ import { nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID
 import { INTERNAL_SLOT_WANT_TEXT } from "../emission/emit-walkers.js";
 import { mangleClassRelease, mangleClassRetain, mangleClassStruct, mangleFnClosure, mangleFunction, mangleRecordNew, mangleRecordRelease, mangleRecordStruct } from "../mangle.js";
 import { dynMemberRows, dynStaticTable, type DynMemberClass } from "../dyn-members.js";
-import { KINDGATE_WIDE_KINDS, kindgateFuncLane, kindgateInstanceLane, kindgateWideLane, readKindgateDials } from "../kindgate.js";
+import { KINDGATE_WIDE_KINDS, soleRecordArmWithFuncMember, kindgateFuncLane, kindgateInstanceLane, kindgateWideLane, readKindgateDials } from "../kindgate.js";
 import { BlockBuilder } from "./blocks.js";
 import { arrNewCall, elemAccess, llFieldType, ownMaskSlotIndex, releaseSym, srcProtoSlotIndex, toStrSlotIndex, traceAdapter, traceArg, vAdapters, viewSlotIndex } from "./shapes.js";
 import { LlvmUnsupportedError } from "./unsupported.js";
@@ -2392,6 +2392,35 @@ export class LlDyn {
           });
           B.br(lNoInst);
           B.startBlock(lNoInst);
+        }
+        // THE SOLE RECORD ARM WITH A FUNCTION MEMBER (the C lane's twin, emit-walkers.ts): the checked record walker
+        // takes an object, so a callable of another signature adapts and a refusal names the member.
+        const soleRecordFn = soleRecordArmWithFuncMember(def, host.recordsById, host.unionsById);
+        if (soleRecordFn !== null) {
+          const arm = def.arms[soleRecordFn]!;
+          const lObj = B.newLabel("dau.o");
+          const lRest = B.newLabel("dau.r");
+          B.condBr(kindEq(DK.OBJ), lObj, lRest);
+          B.startBlock(lObj);
+          const sv = B.tmp();
+          const sTy = this.valTy(arm) === "i1" ? "zeroext i1" : this.valTy(arm);
+          B.line(`${sv} = call ${sTy} @${this.dynCheckHelper(arm)}(ptr %d, ptr %path)`);
+          host.declare(`declare zeroext i1 @scr_exc_pending()`);
+          const spe = B.tmp();
+          B.line(`${spe} = call zeroext i1 @scr_exc_pending()`);
+          const lSProp = B.newLabel("dau.sp");
+          const lSTook = B.newLabel("dau.st");
+          B.condBr(spe, lSProp, lSTook);
+          B.startBlock(lSProp);
+          notOk();
+          B.terminate(`ret ptr null`);
+          B.startBlock(lSTook);
+          const src = vAdapters(host, arm);
+          host.declare(`declare ptr @scr_union_new_ref(i32, ptr, ptr, ptr, ptr)`);
+          const su = B.tmp();
+          B.line(`${su} = call ptr @scr_union_new_ref(i32 ${soleRecordFn}, ptr ${sv}, ptr ${src.retain}, ptr ${src.release}, ptr ${traceArg(host, arm)})`);
+          B.terminate(`ret ptr ${su}`);
+          B.startBlock(lRest);
         }
         const passes = unionHasDiscrim(def) ? [true, false] : [false];
         for (const withLits of passes) {
