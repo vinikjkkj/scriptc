@@ -8702,6 +8702,16 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
               checker.getConstructSignatures(p).length === 0 &&
               checker.getIndexInfosOfType(p).length === 0),
         ));
+    // PATTERN KEYS (`[key: \`aws:${string}\`]: Cfg`): a template-literal key names every string that matches it, so the shape's
+    // overflow store holds them, and since each pattern types its own prefix the one slot is the checked-dynamic one - a read is a
+    // checked read of the dyn (the contract tsc already states for that key), a write converts the value in. Declared members keep
+    // their own types beside it.
+    const isPattern = (k: ts.Type): boolean => (k.flags & ts.TypeFlags.TemplateLiteral) !== 0;
+    const patternInfos = indexInfos.filter((i) => isPattern(i.keyType));
+    if (patternInfos.length > 0 && !ctx.dynamic) {
+      if (indexInfos.length !== patternInfos.length) return null; // a plain index beside patterns: not this rule
+      indexValue = DYN;
+    } else {
     if (indexInfos.length > 2) return null;
     // The implicit affordance on an inferred literal type takes mapType's
     // answer for its value; a signature the program wrote takes the store's.
@@ -8720,6 +8730,7 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
       v = iv;
     }
     indexValue = v!;
+    }
   }
   // THE SPREAD-ERASED INDEX SIGNATURE, RECOVERED. tsc DISCARDS a spread
   // source's index signature when it infers an object literal's type:
