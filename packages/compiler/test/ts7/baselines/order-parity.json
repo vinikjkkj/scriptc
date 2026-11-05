@@ -13080,6 +13080,54 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24400-a-generator-method-dispatches-virtually-through-a-base-typed-receiver.ts": {
+   "order": [
+    "<repo>/tests/corpus/24400-a-generator-method-dispatches-virtually-through-a-base-typed-receiver.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24401-abstract-and-super-generator-methods-and-generic-class-generator-methods.ts": {
+   "order": [
+    "<repo>/tests/corpus/24401-abstract-and-super-generator-methods-and-generic-class-generator-methods.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24402-a-class-iterator-generator-method-drives-for-of-spread-and-cleanup.ts": {
+   "order": [
+    "<repo>/tests/corpus/24402-a-class-iterator-generator-method-drives-for-of-spread-and-cleanup.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24403-a-private-keyword-generator-method-and-an-iterator-generator-method.ts": {
+   "order": [
+    "<repo>/tests/corpus/24403-a-private-keyword-generator-method-and-an-iterator-generator-method.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24404-a-class-async-iterator-generator-method-drives-for-await.ts": {
+   "order": [
+    "<repo>/tests/corpus/24404-a-class-async-iterator-generator-method-drives-for-await.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24405-a-split-family-cursor-async-iterator-generator-method-with-any.ts": {
+   "order": [
+    "<repo>/tests/corpus/24405-a-split-family-cursor-async-iterator-generator-method-with-any.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24406-async-generator-methods-return-throw-and-failure.ts": {
+   "order": [
+    "<repo>/tests/corpus/24406-async-generator-methods-return-throw-and-failure.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24407-yield-star-in-a-generator-method-closes-its-delegate.ts": {
+   "order": [
+    "<repo>/tests/corpus/24407-yield-star-in-a-generator-method-closes-its-delegate.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2441-console-process-argv.ts": {
    "order": [
     "<repo>/tests/corpus/2441-console-process-argv.ts"
