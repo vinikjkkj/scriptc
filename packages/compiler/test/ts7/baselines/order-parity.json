@@ -12530,6 +12530,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24075-a-generic-naming-a-deeper-instance-of-itself-is-one-shape.ts": {
+   "order": [
+    "<repo>/tests/corpus/24075-a-generic-naming-a-deeper-instance-of-itself-is-one-shape.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24076-two-instances-differing-in-a-member-type-stay-two-shapes.ts": {
+   "order": [
+    "<repo>/tests/corpus/24076-two-instances-differing-in-a-member-type-stay-two-shapes.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2405-sibling-arm-narrow.ts": {
    "order": [
     "<repo>/tests/corpus/2405-sibling-arm-narrow.ts"

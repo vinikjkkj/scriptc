@@ -8010,6 +8010,57 @@ interface RecordShapeParts {
  * otherwise silent. */
 const knotSensitiveMembers = new WeakMap<ts.Type, readonly string[]>();
 
+/** The nearest in-progress ancestor `T` is a structural repeat of, or null.
+ *
+ * A generic whose members name another instantiation of itself with a deeper argument (`Filter<T>` -> `$and: Filter<WithId<T>>[]`)
+ * never repeats a checker type: each level is a new one, so the identity-keyed knot (shapes.inProgress) never closes and the walk
+ * runs to the depth cap. When the checker's own types are equal in every member but those self-instantiations, the levels are one
+ * shape and the later one is the earlier one.
+ *
+ * Conservative on purpose: only the SAME generic symbol, only when that symbol is already nested three deep in the walk, and the
+ * test is EXACT - the same member names, optionality and index signatures, each member type identical (by checker type id) apart
+ * from occurrences of the symbol's own instantiations, which compare equal to each other. Never assignability: `{ _id: ObjectId }`
+ * and `{ _id: any }` are mutually assignable and different shapes. Any type the facade gives no id for answers null. */
+function structuralAncestorOf(t: ts.Type, inProgress: ReadonlySet<ts.Type>, ctx: TypeMapperCtx): ts.Type | null {
+  const symOf = (x: ts.Type): ts.Symbol | undefined => x.getAliasSymbol() ?? x.getSymbol();
+  const sym = symOf(t);
+  if (sym === undefined) return null;
+  const same: ts.Type[] = [];
+  for (const a of inProgress) if (symOf(a) === sym) same.push(a);
+  if (same.length < 3) return null;
+  const { checker } = ctx;
+  const idOf = (x: ts.Type): number | undefined => (x as unknown as { id?: number }).id;
+  let unknown = false;
+  const canon = (x: ts.Type, depth: number): string => {
+    if (symOf(x) === sym) return "#";
+    if (depth > 6) { unknown = true; return "?"; }
+    if (x.isUnionType()) return "U(" + ts.constituentTypes(x).map((c) => canon(c, depth + 1)).sort().join("|") + ")";
+    if (x.isIntersectionType()) return "I(" + ts.constituentTypes(x).map((c) => canon(c, depth + 1)).sort().join("&") + ")";
+    if (checker.isArrayType(x)) {
+      const el = checker.getTypeArguments(x as ts.TypeReference)[0];
+      if (el === undefined) { unknown = true; return "?"; }
+      return "A(" + canon(el, depth + 1) + ")";
+    }
+    const id = idOf(x);
+    if (id === undefined) { unknown = true; return "?"; }
+    return "t" + id;
+  };
+  const sig = (x: ts.Type): string => {
+    const props = [...checker.getPropertiesOfType(x)].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    const parts = props.map((p) => `${p.name}${(p.flags & ts.SymbolFlags.Optional) !== 0 ? "?" : ""}:${canon(checker.getTypeOfSymbol(p), 0)}`);
+    for (const info of checker.getIndexInfosOfType(x)) parts.push(`[${canon(info.keyType, 0)}]:${canon(info.valueType, 0)}`);
+    return parts.join(";");
+  };
+  const mine = sig(t);
+  if (unknown) return null;
+  for (let i = same.length - 1; i >= 0; i--) {
+    const s = sig(same[i]!);
+    if (unknown) return null;
+    if (s === mine) return same[i]!;
+  }
+  return null;
+}
+
 function mapRecordType(widened: ts.Type, ctx: TypeMapperCtx): IrType | null {
   const { shapes } = ctx;
   // A type whose recursive shape already finalized answers its id straight
@@ -8026,6 +8077,15 @@ function mapRecordType(widened: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // as heap references, so the self-reference is an ordinary pointer.
   if (shapes.inProgress.has(widened)) {
     return { kind: "record", shapeId: shapes.recursiveRef(widened) };
+  }
+  // A STRUCTURAL back-reference: an instantiation of a generic that is already nested in the walk, and whose members are exactly an
+  // ancestor's (structuralAncestorOf). It is that ancestor's shape, so the knot closes there instead of at the depth cap.
+  {
+    const ancestor = structuralAncestorOf(widened, shapes.inProgress, ctx);
+    if (ancestor !== null) {
+      mapTrace(`STRUCTTIE ${ctx.checker.typeToString(widened).slice(0, 60)} -> ${ctx.checker.typeToString(ancestor).slice(0, 40)}`);
+      return { kind: "record", shapeId: shapes.recursiveRef(ancestor) };
+    }
   }
   shapes.inProgress.add(widened);
   const sensitivityAtEntry = contextResolutions;
