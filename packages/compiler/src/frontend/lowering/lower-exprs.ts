@@ -11460,7 +11460,11 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         (p) =>
           ts.isSpreadAssignment(p) && conditionalSpreadOf(p.expression) === null &&
           pureMemberChain(p.expression) && viewSpreadSource(L, p.expression),
-      )
+      ) &&
+      // The dyn build reads back at the literal's own type, a view only when THAT shape took the grant in discovery. A shape
+      // that did not (the source became a view only through a conversion elsewhere) would come back as a copy of its declared
+      // members, losing the spread's other keys without a refusal: it keeps the declared-field build and its key-risk fence.
+      (L.onEdge !== undefined || L.isViewShape(L.irTypeOf(expr)))
     ) {
       const want = L.irTypeOf(expr);
       // A literal the context types as a UNION (a message field's `A | null`) keeps the declared-field build,
