@@ -179,6 +179,18 @@ export function dynFnReadable(L: Lowerer, fnT: IrType): boolean {
  * of the call that reaches the closure (a `.call`/`.bind` sets it, as for every method value), and its answer adopts into
  * the declared promise. */
 export function dynFnAsFunc(L: Lowerer, value: IrExpr, fnT: IrType, loc: SrcLoc): IrExpr {
+  // The class-boxing discovery (noteDynBoxedClass) builds method thunks with no function being lowered; the hidden local the
+  // closure holds needs a context to land in, and nothing of it outlives the discovery's discarded expression.
+  if (L.fnStack.length > 0 || fnT.kind !== "func" || fnT.ret.kind !== "promise") return dynFnAsFuncIn(L, value, fnT, loc);
+  L.fnStack.push(newFnCtx(true, null, fnT, fnT.ret));
+  try {
+    return dynFnAsFuncIn(L, value, fnT, loc);
+  } finally {
+    L.fnStack.pop();
+  }
+}
+
+function dynFnAsFuncIn(L: Lowerer, value: IrExpr, fnT: IrType, loc: SrcLoc): IrExpr {
   if (fnT.kind !== "func" || fnT.ret.kind !== "promise" || !dynFnReadable(L, fnT)) return L.coerceToExpected(value, fnT);
   const held = L.declareHiddenLocal("%dynfn", DYN);
   held.boxed = true;
