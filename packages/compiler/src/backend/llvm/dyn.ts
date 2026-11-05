@@ -5854,6 +5854,14 @@ export class LlDyn {
         });
       };
       rest.forEach((p, i) => {
+        if (rest.length === 1 && p.name === "%arguments" && p.type.kind === "dyn") {
+          // A method that reads `arguments` takes the whole argument list as one dyn array (the C twin's row).
+          host.declare(`declare ptr @scr_dyn_pack_args(ptr, i64)`);
+          const packed = B.tmp();
+          B.line(`${packed} = call ptr @scr_dyn_pack_args(ptr %args, i64 %argc)`);
+          argNames.push(packed);
+          return;
+        }
         const adSlot = B.slot();
         B.entryAllocas.push(`${adSlot} = alloca ptr`);
         const has = B.tmp();
