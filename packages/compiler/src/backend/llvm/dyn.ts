@@ -39,7 +39,7 @@ import { nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID
 import { INTERNAL_SLOT_WANT_TEXT } from "../emission/emit-walkers.js";
 import { mangleClassRelease, mangleClassRetain, mangleClassStruct, mangleFnClosure, mangleFunction, mangleRecordNew, mangleRecordRelease, mangleRecordStruct } from "../mangle.js";
 import { dynMemberRows, dynStaticTable, type DynMemberClass } from "../dyn-members.js";
-import { KINDGATE_WIDE_KINDS, soleRecordArmWithFuncMember, kindgateFuncLane, kindgateInstanceLane, kindgateWideLane, readKindgateDials } from "../kindgate.js";
+import { KINDGATE_WIDE_KINDS, kindgateJsvalLane, soleRecordArmWithFuncMember, kindgateFuncLane, kindgateInstanceLane, kindgateWideLane, readKindgateDials } from "../kindgate.js";
 import { BlockBuilder } from "./blocks.js";
 import { keyIxSlotIndex, keyListSlotIndex, arrNewCall, elemAccess, llFieldType, ownMaskSlotIndex, releaseSym, srcProtoSlotIndex, toStrSlotIndex, traceAdapter, traceArg, vAdapters, viewSlotIndex } from "./shapes.js";
 import { LlvmUnsupportedError } from "./unsupported.js";
@@ -121,6 +121,8 @@ export interface DynHost extends WalkerHost {
   readonly usesInstanceRecordLane: boolean;
   /** moduleBoxesFunctionLikeValues: a function value can reach a record cast. */
   readonly funcLaneShapes: ReadonlySet<string>;
+  /** moduleUsesEngineFn: engine-held objects can reach a record cast. */
+  readonly engineModule: boolean;
   /** moduleInstanceLaneNeedsKg: the instance lane reads through the emitted keyed read. */
   readonly instanceLaneNeedsKg: boolean;
   unitInstanceRef(unionId: string, tag: number): string;
@@ -1692,7 +1694,8 @@ export class LlDyn {
         const dialWide = kindgateWideLane(this.kindgateDials, soft, shape);
         const funcOnly = !dialWide && host.funcLaneShapes.has(t.shapeId) && kindgateFuncLane(soft, shape);
         const dial = dialWide || funcOnly;
-        if (dial || inst) {
+        const jsv = kindgateJsvalLane(shape, host.engineModule);
+        if (dial || inst || jsv) {
           const proj = dial ? this.recordWideHelper() : null;
           const tbl = shape.fields.length > 0 ? host.recWideTable(t.shapeId, shape.fields) : null;
           host.declare(`declare void @scr_dyn_release(ptr)`);
@@ -1712,6 +1715,14 @@ export class LlDyn {
             const g = B.tmp();
             B.line(`${isInst} = icmp eq i32 ${kd}, ${DK.OBJINST}`);
             B.line(`${g} = or i1 ${gateOk}, ${isInst}`);
+            gateOk = g;
+          }
+          let isJsv = "";
+          if (jsv) {
+            isJsv = B.tmp();
+            const g = B.tmp();
+            B.line(`${isJsv} = icmp eq i32 ${kd}, ${DK.JSVAL}`);
+            B.line(`${g} = or i1 ${gateOk}, ${isJsv}`);
             gateOk = g;
           }
           if (dial) {
@@ -1776,6 +1787,23 @@ export class LlDyn {
             B.line(`store ptr ${pd}, ptr ${pSlot}`);
           };
           const lProj = B.newLabel("dcr.wp");
+          if (jsv) {
+            // THE ENGINE LANE (kindgateJsvalLane): an engine-held object's declared members, read by the engine's [[Get]].
+            const lJ = B.newLabel("dcr.wj2");
+            const lNJ = B.newLabel("dcr.wn");
+            B.condBr(isJsv, lJ, lNJ);
+            B.startBlock(lJ);
+            host.declare(`declare ptr @scr_dyn_rec_from_jsval(ptr, ptr, ptr, i64, i1 zeroext)`);
+            const pj = B.tmp();
+            B.line(
+              `${pj} = call ptr @scr_dyn_rec_from_jsval(ptr %d, ptr ${tbl ? tbl.keys : "null"}, ptr ${tbl ? tbl.lens : "null"}, i64 ${shape.fields.length}, i1 zeroext ${jsv.allOwn ? "true" : "false"})`,
+            );
+            B.line(`store ptr ${pj}, ptr ${pSlot}`);
+            B.br(lProj);
+            B.startBlock(lNJ);
+            if (!inst && !dial) B.terminate("unreachable");
+          }
+          if (!jsv || inst || dial) {
           if (inst && dial) {
             const lI = B.newLabel("dcr.wi");
             const lD = B.newLabel("dcr.wd");
@@ -1790,6 +1818,7 @@ export class LlDyn {
             if (inst) callInst();
             else callDial();
             B.br(lProj);
+          }
           }
           B.startBlock(lProj);
           const p = B.tmp();
