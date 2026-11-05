@@ -24,6 +24,7 @@ import { invalidJsonModuleDiag, npmEmbedFailedDiag, requiresDynamicImportDiag } 
 import { typeEquals, BOOL, DYN, IrClassDef, IrExpr, IrFunction, IrGlobal, IrLocal, IrRecordShape, IrStmt, IrType, IrUnionDef, JSVAL, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, VOID, arrayOf, canConvertToDyn, isUnitType } from "../../ir/nodes.js";
 import { ENTRY_NAME, PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, newFnCtx, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireNamespaceDecl, createRequireSpecOf, isPromisifyCall, requireFnValueDeclType } from "./lower-builtins.js";
+import { isShadowableMethodRead } from "./lower-exprs.js";
 import { jsLetWidened, bindingNeverReassigned, bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, islandRestSlotType, nullishGenericBindingUnitOf, hasOwnPropertyAliasDecl } from "./lower-calls.js";
 import { deadBranchSkippable, statementAlwaysThrowsOnRequire } from "../require-throws.js";
 import { irAlwaysExits, dynAliasBindingIsDyn, isVarDeclared, jsEvolvingObjectLiteralInit, keyedReadGlobalArmedType, keyedReadGlobalIsDyn, numericIteratorSourceOf, provenanceElidedConstDecl } from "./lower-stmts.js";
@@ -3014,6 +3015,8 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             // `let ms = 0; ms = str` at module scope): the same rule the
             // function-local declaration takes (lower-stmts).
             if (isLet && jsLetWidened(L, decl)) type = DYN;
+            // `const f = x.m` of a replaceable method holds the read's actual value, a checked-dynamic one (lowerVarDecl's rule).
+            if (decl.initializer !== undefined && type.kind === "func" && isShadowableMethodRead(L, decl.initializer)) type = DYN;
             // A const LOOKUP TABLE: `export const T = ['a', 'b'] as const`
             // (an Object.freeze wrapper included). The declared type is a
             // uniform tuple, so the global would hold a fixed-shape record
