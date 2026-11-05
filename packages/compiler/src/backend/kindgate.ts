@@ -137,6 +137,14 @@ export function soleRecordArmWithFuncMember(
   return sh.fields.some((f) => hasFn(f.type)) ? found : null;
 }
 
+/** The ENGINE lane: an object the embedded engine built (a `new Function` result's rows) read through a record by KIND, its declared
+ * members answered by the engine's own [[Get]]. Open only in a module with engine functions; every other module keeps its exact TU. */
+export function kindgateJsvalLane(shape: IrRecordShape, engineModule: boolean): { allOwn: boolean } | null {
+  if (!engineModule || shape.tuple) return null;
+  if (shape.fields.length === 0 && shape.indexValue === undefined) return null;
+  return { allOwn: shape.indexValue !== undefined };
+}
+
 export function kindgateFuncLane(_soft: boolean, shape: IrRecordShape): boolean {
   return (
     !shape.tuple && shape.indexValue === undefined && shape.fields.length > 0 &&
