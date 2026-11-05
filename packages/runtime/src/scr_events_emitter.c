@@ -559,25 +559,25 @@ void scr_ee_inv_fixed0(ScrClosure *cb, va_list ap) {
   ((void (*)(ScrClosure *))cb->fn)(cb);
 }
 void scr_ee_inv_fixed1(ScrClosure *cb, va_list ap) {
-  void *a0 = va_arg(ap, void *);
+  void *a0 = 0 < scr_ee_cur_argc ? va_arg(ap, void *) : (void *)scr_dyn_undefined();
   ((void (*)(ScrClosure *, void *))cb->fn)(cb, a0);
 }
 void scr_ee_inv_fixed2(ScrClosure *cb, va_list ap) {
-  void *a0 = va_arg(ap, void *);
-  void *a1 = va_arg(ap, void *);
+  void *a0 = 0 < scr_ee_cur_argc ? va_arg(ap, void *) : (void *)scr_dyn_undefined();
+  void *a1 = 1 < scr_ee_cur_argc ? va_arg(ap, void *) : (void *)scr_dyn_undefined();
   ((void (*)(ScrClosure *, void *, void *))cb->fn)(cb, a0, a1);
 }
 void scr_ee_inv_fixed3(ScrClosure *cb, va_list ap) {
-  void *a0 = va_arg(ap, void *);
-  void *a1 = va_arg(ap, void *);
-  void *a2 = va_arg(ap, void *);
+  void *a0 = 0 < scr_ee_cur_argc ? va_arg(ap, void *) : (void *)scr_dyn_undefined();
+  void *a1 = 1 < scr_ee_cur_argc ? va_arg(ap, void *) : (void *)scr_dyn_undefined();
+  void *a2 = 2 < scr_ee_cur_argc ? va_arg(ap, void *) : (void *)scr_dyn_undefined();
   ((void (*)(ScrClosure *, void *, void *, void *))cb->fn)(cb, a0, a1, a2);
 }
 void scr_ee_inv_fixed4(ScrClosure *cb, va_list ap) {
-  void *a0 = va_arg(ap, void *);
-  void *a1 = va_arg(ap, void *);
-  void *a2 = va_arg(ap, void *);
-  void *a3 = va_arg(ap, void *);
+  void *a0 = 0 < scr_ee_cur_argc ? va_arg(ap, void *) : (void *)scr_dyn_undefined();
+  void *a1 = 1 < scr_ee_cur_argc ? va_arg(ap, void *) : (void *)scr_dyn_undefined();
+  void *a2 = 2 < scr_ee_cur_argc ? va_arg(ap, void *) : (void *)scr_dyn_undefined();
+  void *a3 = 3 < scr_ee_cur_argc ? va_arg(ap, void *) : (void *)scr_dyn_undefined();
   ((void (*)(ScrClosure *, void *, void *, void *, void *))cb->fn)(cb, a0, a1, a2, a3);
 }
 
@@ -751,7 +751,14 @@ ScrEmitter *scr_emitter_remove_all(ScrEmitter *em, ScrStr *name, bool all) {
  * still holds it (the shared fired flag — Node's wrapper.fired). A
  * listener throw stops the pass (the exception stays pending for the
  * caller). Returns whether the bucket had listeners. */
-static bool scr_ee_emit_core(ScrEmitter *em, ScrStr *name, va_list *ap_template) {
+/* How many arguments the CURRENT emit's call site passed (SCR_EE_ARGC_ALL: unknown, every slot is present). A typed emit site sets
+ * scr_ee_pending_argc just before the variadic call; the core takes it (and resets it) and publishes it to the invoke shims as
+ * scr_ee_cur_argc before each listener runs, so an invoker whose listener declares more parameters than this site passed reads
+ * `undefined` for the missing ones (Node's rule) instead of va_arg-ing past the tail. */
+size_t scr_ee_pending_argc = SCR_EE_ARGC_ALL;
+size_t scr_ee_cur_argc = SCR_EE_ARGC_ALL;
+
+static bool scr_ee_emit_core(ScrEmitter *em, ScrStr *name, va_list *ap_template, size_t argc) {
   ScrEeBucket *b = em->reg ? scr_ee_bucket_find(em->reg, name->data, name->len) : NULL;
   if (!b || b->n == 0) return false;
   size_t n = b->n;
@@ -796,6 +803,7 @@ static bool scr_ee_emit_core(ScrEmitter *em, ScrStr *name, va_list *ap_template)
     }
     va_list ap;
     va_copy(ap, *ap_template);
+    scr_ee_cur_argc = argc;
     e->inv(e->cb, ap);
     va_end(ap);
     scr_ee_entry_unref(e);
@@ -808,7 +816,7 @@ static bool scr_ee_emit_core(ScrEmitter *em, ScrStr *name, va_list *ap_template)
 static bool scr_ee_emit_va(ScrEmitter *em, ScrStr *name, ...) {
   va_list ap;
   va_start(ap, name);
-  bool had = scr_ee_emit_core(em, name, &ap);
+  bool had = scr_ee_emit_core(em, name, &ap, SCR_EE_ARGC_ALL);
   va_end(ap);
   return had;
 }
@@ -818,9 +826,11 @@ static bool scr_ee_emit_va(ScrEmitter *em, ScrStr *name, ...) {
  * argument is BORROWED (adapters retain the +1 each callee owns). May
  * leave an exception pending (a listener threw). */
 bool scr_emitter_emit(ScrEmitter *em, ScrStr *name, ...) {
+  const size_t argc = scr_ee_pending_argc;
+  scr_ee_pending_argc = SCR_EE_ARGC_ALL;
   va_list ap;
   va_start(ap, name);
-  bool had = scr_ee_emit_core(em, name, &ap);
+  bool had = scr_ee_emit_core(em, name, &ap, argc);
   va_end(ap);
   return had;
 }

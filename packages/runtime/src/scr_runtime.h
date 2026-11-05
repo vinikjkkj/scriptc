@@ -2638,6 +2638,11 @@ void scr_closure_trace_v(void *c, ScrTraceVisit visit, void *ctx);
  * unhandled 'error' throws its payload). */
 typedef struct ScrEeReg ScrEeReg; /* the listener registry (lazy) */
 typedef void (*ScrEeInvoke)(ScrClosure *cb, va_list ap);
+/* The argument count of the emit in flight: SCR_EE_ARGC_ALL unless a typed emit site stored its count in scr_ee_pending_argc just
+ * before calling scr_emitter_emit. Invokers of listeners with dyn parameters read slot i only when i < scr_ee_cur_argc. */
+#define SCR_EE_ARGC_ALL ((size_t)-1)
+extern size_t scr_ee_pending_argc;
+extern size_t scr_ee_cur_argc;
 
 typedef struct ScrEmitter {
   size_t rc;

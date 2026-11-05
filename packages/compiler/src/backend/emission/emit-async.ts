@@ -1169,6 +1169,10 @@ export function emitterInvokeThunkFor(E: CEmitter, cbT: IrType): string {
       // bool promotes to int through a variadic call.
       reads.push(`  bool ${name} = (bool)va_arg(sc_ap, int);`);
       passed.push(name);
+    } else if (p.kind === "dyn") {
+      // A checked-dynamic parameter takes undefined when the emit site passed fewer arguments than the event's widest tuple.
+      reads.push(`  ${cDecl(p, name)} = ${i} < scr_ee_cur_argc ? va_arg(sc_ap, ${cType(p).trim()}) : scr_dyn_undefined();`);
+      passed.push(retainCallC(p, name));
     } else {
       reads.push(`  ${cDecl(p, name)} = va_arg(sc_ap, ${cType(p).trim()});`);
       passed.push(retainCallC(p, name));
