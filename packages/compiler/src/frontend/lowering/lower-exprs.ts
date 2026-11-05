@@ -24473,10 +24473,21 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
    * does not need: `this`, an identifier, or `C.prototype` (a class's own
    * prototype object, which the thunk never reads). */
   function isPlainMethodReceiver(e: ts.Expression): boolean {
+    // An assertion or parentheses around a plain receiver (`(value as Redis).get`) is the same pure read: JavaScript has no
+    // assertion, so the receiver is the identifier itself.
+    if (ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isNonNullExpression(e)) {
+      return isPlainMethodReceiver(e.expression);
+    }
     if (e.kind === ts.SyntaxKind.ThisKeyword || ts.isIdentifier(e)) return true;
     return ts.isPropertyAccessExpression(e) && e.questionDotToken === undefined &&
       e.name.text === "prototype" && ts.isIdentifier(e.expression);
   }
+
+/** True when the class was written in a JavaScript file (a package's implementation, as opposed to the TypeScript that reads it). */
+function classDeclaredInJs(L: Lowerer, className: string): boolean {
+  const decl = L.classes.get(className)?.decl;
+  return decl !== undefined && decl !== null && isJsSourceFile(decl.getSourceFile());
+}
 
 /** True when a strict subclass of `info` declares `name` as a PLAIN (typed) method (thunkrecv). */
 function descendantDeclaresPlainMethod(info: ClassInfo, name: string): boolean {
@@ -25401,8 +25412,12 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
     ) {
       L.flushDeferredClass(receiverIr.className);
     }
+    // The read is JavaScript's when the file is, and also when the CLASS is: a package class written in JavaScript installs members at
+    // run time (a computed write on its prototype), and the TypeScript that reads one through the package's declaration
+    // (`typeof (value as Redis).get`) asks the same question of the same instance.
     if (
-      receiverIr?.kind === "object" && isJsSourceFile(expr.getSourceFile()) &&
+      receiverIr?.kind === "object" &&
+      (isJsSourceFile(expr.getSourceFile()) || classDeclaredInJs(L, receiverIr.className)) &&
       expr.questionDotToken === undefined &&
       L.classes.get(receiverIr.className) !== undefined &&
       L.findMethodOn(L.classes.get(receiverIr.className) ?? null, expr.name.text) === null &&
