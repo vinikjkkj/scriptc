@@ -8428,7 +8428,10 @@ export class Lowerer {
     if (expr.type.kind !== "dyn" || want.kind !== "promise") return null;
     const viaDyn: IrType = { kind: "promise", inner: DYN };
     if (want.inner.kind === "dyn" || want.inner.kind === "void") return this.adoptDynIntoPromise(expr, want);
-    if (!this.dynPayloadTotal(want.inner) || !this.coercibleValue(viaDyn, want, true)) return null;
+    if (!this.dynPayloadTotal(want.inner) || !this.coercibleValue(viaDyn, want, true)) {
+      console.error(`ADOPTWHY total=${this.dynPayloadTotal(want.inner)} coercible=${this.coercibleValue(viaDyn, want, true)} :: ${this.dynCheckRefusal(want.inner)} :: ${typeKey(want.inner).slice(0, 200)}`);
+      return null;
+    }
     const adopted: IrExpr = { kind: "libCall", fn: "dyn.adoptPromise", args: [expr], type: viaDyn, loc: expr.loc };
     const out = this.coerceToExpected(adopted, want);
     if (!typeEquals(out.type, want)) return null;
