@@ -39,7 +39,7 @@ import { nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID
 import { INTERNAL_SLOT_WANT_TEXT } from "../emission/emit-walkers.js";
 import { mangleClassRelease, mangleClassRetain, mangleClassStruct, mangleFnClosure, mangleFunction, mangleRecordNew, mangleRecordRelease, mangleRecordStruct } from "../mangle.js";
 import { dynMemberRows, dynStaticTable, type DynMemberClass } from "../dyn-members.js";
-import { KINDGATE_WIDE_KINDS, kindgateInstanceLane, kindgateWideLane, readKindgateDials } from "../kindgate.js";
+import { KINDGATE_WIDE_KINDS, kindgateFuncLane, kindgateInstanceLane, kindgateWideLane, readKindgateDials } from "../kindgate.js";
 import { BlockBuilder } from "./blocks.js";
 import { keyIxSlotIndex, keyListSlotIndex, arrNewCall, elemAccess, llFieldType, ownMaskSlotIndex, releaseSym, srcProtoSlotIndex, toStrSlotIndex, traceAdapter, traceArg, vAdapters, viewSlotIndex } from "./shapes.js";
 import { LlvmUnsupportedError } from "./unsupported.js";
@@ -1687,7 +1687,9 @@ export class LlDyn {
         // instance reads through the record type by KIND, ahead of the dial lane, in
         // both disciplines.
         const inst = kindgateInstanceLane(shape, host.usesInstanceRecordLane);
-        const dial = kindgateWideLane(this.kindgateDials, soft, shape);
+        const dialWide = kindgateWideLane(this.kindgateDials, soft, shape);
+        const funcOnly = !dialWide && kindgateFuncLane(soft, shape);
+        const dial = dialWide || funcOnly;
         if (dial || inst) {
           const proj = dial ? this.recordWideHelper() : null;
           const tbl = shape.fields.length > 0 ? host.recWideTable(t.shapeId, shape.fields) : null;
@@ -1713,7 +1715,8 @@ export class LlDyn {
           if (dial) {
             const canWide = B.tmp();
             const g = B.tmp();
-            B.line(`${canWide} = call zeroext i1 @sc_dyn_rec_wideable(ptr %d)`);
+            if (funcOnly) B.line(`${canWide} = icmp eq i32 ${kd}, ${DK.FUNC}`);
+            else B.line(`${canWide} = call zeroext i1 @sc_dyn_rec_wideable(ptr %d)`);
             B.line(`${g} = or i1 ${gateOk}, ${canWide}`);
             gateOk = g;
           }
