@@ -187,6 +187,7 @@ const METHOD_VALUE_EXPECTED =
   "5 9 5\n" +
   "number 5\n" +
   "TypeError: b.hello.bind is not a function\n" +
+  "TypeError: b.hello is not a function | TypeError: this.hello is not a function\n" +
   "function 12 12 10\n" +
   "function 3\n";
 
