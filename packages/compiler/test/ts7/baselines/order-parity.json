@@ -12748,6 +12748,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24138-class-instance-in-an-interface-slot-keeps-identity/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/24138-class-instance-in-an-interface-slot-keeps-identity/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2414-dowhile-continue-kill.ts": {
    "order": [
     "<repo>/tests/corpus/2414-dowhile-continue-kill.ts"
