@@ -15541,6 +15541,9 @@ export class Lowerer {
    * undefined/null, ??, ||, conditions), "num" (arithmetic: undefined is
    * NaN), a property name (Node throws the member-access TypeError there),
    * or "narrow" (everything else: the checked extraction). */
+  /** Tuple-slot reads whose undefined arm is a declaration-file promise (see tupleElementRead). */
+  readonly undefSlotReads = new Set<ts.Node>();
+
   classifyLyingRead(node: ts.Expression): "peel" | "narrow" | "num" | { prop: string; set: boolean; callText?: string; dynKey?: ts.Expression; msg?: string } {
     let p: ts.Node = node;
     while (
@@ -15591,7 +15594,7 @@ export class Lowerer {
     if (ts.isTemplateSpan(par) || ts.isTypeOfExpression(par)) return "peel";
     // `const x = <may be undefined>`: the binding holds the wider value when
     // the program itself tests it against undefined/null (bindHasEvidence).
-    if (ts.isVariableDeclaration(par) && par.initializer === p && ts.isIdentifier(par.name) && this.bindHasEvidence(par)) return "peel";
+    if (ts.isVariableDeclaration(par) && par.initializer === p && ts.isIdentifier(par.name) && (this.undefSlotReads.has(p) || this.bindHasEvidence(par))) return "peel";
     if (ts.isPrefixUnaryExpression(par)) {
       if (par.operator === ts.SyntaxKind.ExclamationToken) return "peel";
       if (par.operator === ts.SyntaxKind.MinusToken || par.operator === ts.SyntaxKind.PlusToken || par.operator === ts.SyntaxKind.TildeToken) return "num";
@@ -15601,6 +15604,8 @@ export class Lowerer {
     if (ts.isCallExpression(par) && par.arguments.includes(p as ts.Expression)) {
       const c = par.expression;
       if (ts.isPropertyAccessExpression(c) && ts.isIdentifier(c.expression) && c.expression.text === "console") return "peel";
+      // `Array.isArray(v)` asks the runtime tag: it IS the presence question.
+      if (ts.isPropertyAccessExpression(c) && ts.isIdentifier(c.expression) && c.expression.text === "Array" && c.name.text === "isArray") return "peel";
       if (ts.isIdentifier(c) && c.text === "String" && par.arguments.length === 1) return "peel";
     }
     if (ts.isBinaryExpression(par)) {
