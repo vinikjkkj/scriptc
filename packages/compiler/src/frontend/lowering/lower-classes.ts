@@ -9732,7 +9732,6 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
     fnCtx.isAsync = isAsync || sig.ret.kind === "asyncGenerator";
     if (genCh !== null) fnCtx.generator = genCh;
     if (genCh !== null && bodyReturn.kind === "void") fnCtx.genMethodDoneFence = true;
-    if (genCh !== null) fnCtx.genMethodBody = true;
     L.fnStack.push(fnCtx);
     try {
       const thisLocal = L.declareThis(thisType);

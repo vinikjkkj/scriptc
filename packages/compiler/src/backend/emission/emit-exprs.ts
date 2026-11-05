@@ -9149,6 +9149,14 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           // moves it into the fiber, or leaves it pending (non-suspended
           // generators: the .throw call itself throws at the check below).
           if (e.arg === null) throw new Error("emitter bug: genResume throw with no payload");
+          if (e.arg.type.kind === "caught") {
+            // A caught snapshot forwarded by yield*: re-raise it into the caller's cell (the rethrow statement's call).
+            if (e.arg.kind !== "varRef") throw new Error("emitter bug: genResume throw of a non-binding caught value");
+            E.line(`scr_rethrow(${mangleLocal(e.arg.localId)});${E.srcComment(e.loc)}`);
+            E.line(`scr_gen_resume_throw(${g.name});`);
+            const helperC = genResultThunkFor(E, genT, e.type);
+            return E.fallibleTemp(e.type, `${helperC}(${g.name})`);
+          }
           const a = E.emitExpr(e.arg);
           const t = e.arg.type;
           if (isRefCounted(t)) E.moveTemp(a); // the cell takes ownership

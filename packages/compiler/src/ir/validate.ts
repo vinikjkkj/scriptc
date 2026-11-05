@@ -5946,7 +5946,10 @@ function validateFunction(
           // throw: any throwable payload (the throw statement's rule).
           if (e.arg === null) {
             err("genResume throw with no payload", e.loc);
-          } else if (e.arg.type.kind === "void" || e.arg.type.kind === "dyn" || e.arg.type.kind === "caught") {
+          } else if (e.arg.type.kind === "caught") {
+            // yield* forwarding a caught payload into the delegate: a binding read, re-raised by scr_rethrow.
+            if (e.arg.kind !== "varRef") err("genResume throw of a caught value that is not a binding", e.loc);
+          } else if (e.arg.type.kind === "void" || e.arg.type.kind === "dyn") {
             err(`genResume throw of a ${e.arg.type.kind} value`, e.loc);
           }
         }

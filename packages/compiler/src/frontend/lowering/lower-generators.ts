@@ -8,7 +8,7 @@
  * g.next()` binds and reads flow. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, DYN, F64, IrExpr, IrStmt, IrType, SrcLoc, STRING, UNDEFINED_T, VOID, isUnitType, typeEquals } from "../../ir/nodes.js";
+import { BOOL, CAUGHT, DYN, F64, IrExpr, IrStmt, IrType, SrcLoc, STRING, UNDEFINED_T, VOID, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { locOf } from "../program.js";
 import { genResultRecord, typeKey } from "../types.js";
 import { forOfVarTarget } from "./lower-stmts.js";
@@ -780,10 +780,6 @@ export function lowerForAwaitAsyncGenerator(
  * result. Consumer `.return()`/`.throw()` while suspended here unwinds
  * the OUTER generator without forwarding to the delegate (numbered
  * divergence). Null when this is not a yield* statement. */
-function ctxGenMethodBody(L: Lowerer): boolean {
-  return L.ctx.genMethodBody === true;
-}
-
 export function lowerYieldStarStatement(L: Lowerer, expr: ts.Expression): IrStmt | null {
   if (!ts.isYieldExpression(expr) || expr.asteriskToken === undefined) return null;
   const gen = L.ctx.generator;
@@ -833,93 +829,104 @@ export function lowerYieldStarStatement(L: Lowerer, expr: ts.Expression): IrStmt
         `'yield*' over a generator yielding '${L.fmt(dT.yieldT)}' (no per-element extraction exists)`,
       );
     }
-    // The re-yield: the delegate's value coerced into the outer yield
-    // channel; the resumed value (outer nextT) forwards into the
-    // delegate's next slot (or drops on an undefined channel).
-    const reYield: IrExpr = {
-      kind: "yieldExpr",
-      value: typeEquals(dT.yieldT, gen.yieldT) && typeEquals(inner.type, gen.yieldT)
-        ? inner
-        : L.coerceInto(expr.expression!, inner, gen.yieldT),
-      type: gen.nextT.kind === "undefinedT" ? VOID : gen.nextT,
-      loc,
+    // The forwarding loop follows the spec's yield* (14.4.14) for the three completions the consumer can resume with:
+    //   next(v)   -> the delegate's next(v)
+    //   throw(e)  -> the delegate's throw(e): it may catch and keep yielding, or let it propagate out of this generator
+    //   return(v) -> the delegate is closed (its finally blocks run, and a yield in one is re-yielded) before this
+    //                generator completes
+    // The throw arrives as an exception at the re-yield, caught and handed on; the return arrives as the unwind
+    // sentinel that only finally blocks see, so the delegate's close sits in a finally.
+    // The delegate is always a generator object here, and a generator has throw(), so the spec's "no throw method:
+    // close it and raise a TypeError" branch cannot be reached.
+    const sendT: IrType = gen.nextT.kind === "undefinedT" ? VOID : gen.nextT;
+    const needSend = dT.nextT.kind !== "undefinedT" && sendT.kind !== "void";
+    const sendL = needSend ? L.declareHiddenLocal("%dsend", sendT) : null;
+    if (sendL) sendL.mutable = true;
+    const r2 = L.declareHiddenLocal("%dres2", recT);
+    r2.mutable = true;
+    const threw = L.declareHiddenLocal("%dthrew", BOOL);
+    threw.mutable = true;
+    const caught = L.declareHiddenLocal("e", CAUGHT);
+    const r2Ref = (): IrExpr => ({ kind: "varRef", localId: r2.id, type: recT, loc });
+    const doneOf = (ref: () => IrExpr): IrExpr => ({ kind: "recordGet", obj: ref(), shapeId: recT.shapeId, field: "done", type: BOOL, loc });
+    const innerOf = (ref: () => IrExpr): IrExpr => {
+      const read: IrExpr = { kind: "recordGet", obj: ref(), shapeId: recT.shapeId, field: "value", type: valueT, loc };
+      return extractYieldValue(L, dT, valueT, read, loc)!;
     };
-    let forwarded: IrExpr | null;
-    if (dT.nextT.kind === "undefinedT") {
-      forwarded = null; // reYield still evaluates as the arg? no — see below
-    } else if (reYield.type.kind === "void") {
-      forwarded = null;
-    } else if (dT.nextT.kind === "dyn" && reYield.type.kind !== "dyn") {
-      forwarded = { kind: "dynFrom", value: reYield, type: DYN, loc };
-    } else {
-      forwarded = reYield;
-    }
-    const resumeArg: IrExpr | null = forwarded;
-    // When the yield's value cannot ride the resume argument (undefined
-    // channels), it must still EXECUTE before the delegate resumes: the
-    // loop body becomes [exprStmt(yield), assign(next)].
-    const loopBody: IrStmt[] =
-      resumeArg === null
-        ? [
-            { kind: "exprStmt", expr: reYield, loc } satisfies IrStmt,
-            {
-              kind: "assign",
-              localId: r.id,
-              value: { kind: "genResume", mode: "next", gen: dRef(), arg: null, type: recT, loc },
-              loc,
-            },
-          ]
-        : [
-            {
-              kind: "assign",
-              localId: r.id,
-              value: { kind: "genResume", mode: "next", gen: dRef(), arg: resumeArg, type: recT, loc },
-              loc,
-            },
-          ];
+    // The re-yield: the delegate's value coerced into the outer yield channel; the resumed value (outer nextT) is
+    // parked in %dsend and forwards into the delegate's next slot (or drops on an undefined channel).
+    const reYieldStmt = (ref: () => IrExpr): IrStmt => {
+      const innerV = innerOf(ref);
+      const y: IrExpr = {
+        kind: "yieldExpr",
+        value: typeEquals(dT.yieldT, gen.yieldT) && typeEquals(innerV.type, gen.yieldT)
+          ? innerV
+          : L.coerceInto(expr.expression!, innerV, gen.yieldT),
+        type: sendT,
+        loc,
+      };
+      return sendL
+        ? { kind: "assign", localId: sendL.id, value: y, loc }
+        : { kind: "exprStmt", expr: y, loc };
+    };
+    const sendArg = (): IrExpr | null => {
+      if (!sendL) return null;
+      const ref: IrExpr = { kind: "varRef", localId: sendL.id, type: sendT, loc };
+      return dT.nextT.kind === "dyn" && sendT.kind !== "dyn" ? { kind: "dynFrom", value: ref, type: DYN, loc } : ref;
+    };
+    const resume = (mode: "next" | "return", arg: IrExpr | null): IrExpr => ({ kind: "genResume", mode, gen: dRef(), arg, type: recT, loc });
     const delegLoop: IrStmt = {
       kind: "while",
-      cond: {
-        kind: "unary",
-        op: "!",
-        operand: { kind: "recordGet", obj: rRef(), shapeId: recT.shapeId, field: "done", type: BOOL, loc },
-        type: BOOL,
-        loc,
-      },
-      body: loopBody,
+      cond: { kind: "unary", op: "!", operand: doneOf(rRef), type: BOOL, loc },
+      body: [
+        { kind: "assign", localId: threw.id, value: { kind: "boolLit", value: false, type: BOOL, loc }, loc },
+        {
+          kind: "tryCatch",
+          tryBody: [reYieldStmt(rRef)],
+          catchBody: [
+            {
+              kind: "assign",
+              localId: r.id,
+              value: { kind: "genResume", mode: "throw", gen: dRef(), arg: { kind: "varRef", localId: caught.id, type: CAUGHT, loc }, type: recT, loc },
+              loc,
+            },
+            { kind: "assign", localId: threw.id, value: { kind: "boolLit", value: true, type: BOOL, loc }, loc },
+          ],
+          catchLocalId: caught.id,
+          finallyBody: null,
+          loc,
+        },
+        {
+          kind: "if",
+          cond: { kind: "unary", op: "!", operand: { kind: "varRef", localId: threw.id, type: BOOL, loc }, type: BOOL, loc },
+          then: [{ kind: "assign", localId: r.id, value: resume("next", sendArg()), loc }],
+          else_: null,
+          loc,
+        },
+      ],
       loc,
     };
-    // In a generator METHOD, closing the delegating generator while it is suspended here closes the delegate too (JS
-    // forwards return() to it, so the delegate's finally blocks run and its fiber is released). The close sits in a
-    // finally: on normal completion the delegate is done and nothing runs. Module-level generators keep the bare loop.
-    const delegSteps: IrStmt[] = ctxGenMethodBody(L)
-      ? [
-          {
-            kind: "tryCatch",
-            tryBody: [delegLoop],
-            catchBody: null,
-            catchLocalId: null,
-            finallyBody: [
-              {
-                kind: "if",
-                cond: {
-                  kind: "unary",
-                  op: "!",
-                  operand: { kind: "recordGet", obj: rRef(), shapeId: recT.shapeId, field: "done", type: BOOL, loc },
-                  type: BOOL,
-                  loc,
-                },
-                then: [
-                  { kind: "exprStmt", expr: { kind: "genResume", mode: "return", gen: dRef(), arg: null, type: recT, loc }, loc },
-                ],
-                else_: null,
-                loc,
-              },
-            ],
-            loc,
-          },
-        ]
-      : [delegLoop];
+    // Closing this generator while it is suspended here closes the delegate (return() forwarded). The close sits in a
+    // finally: on normal completion the delegate is done and nothing runs; after a delegate that threw it is done too
+    // and its return() answers done at once. A delegate that yields from its own finally is re-yielded.
+    const closeDelegate: IrStmt = {
+      kind: "if",
+      cond: { kind: "unary", op: "!", operand: doneOf(rRef), type: BOOL, loc },
+      then: [
+        { kind: "varDecl", localId: r2.id, init: resume("return", null), loc },
+        {
+          kind: "while",
+          cond: { kind: "unary", op: "!", operand: doneOf(r2Ref), type: BOOL, loc },
+          body: [
+            reYieldStmt(r2Ref),
+            { kind: "assign", localId: r2.id, value: resume("next", sendArg()), loc },
+          ],
+          loc,
+        },
+      ],
+      else_: null,
+      loc,
+    };
     return {
       kind: "block",
       body: [
@@ -927,10 +934,10 @@ export function lowerYieldStarStatement(L: Lowerer, expr: ts.Expression): IrStmt
         {
           kind: "varDecl",
           localId: r.id,
-          init: { kind: "genResume", mode: "next", gen: dRef(), arg: null, type: recT, loc },
+          init: resume("next", null),
           loc,
         },
-        ...delegSteps,
+        { kind: "tryCatch", tryBody: [delegLoop], catchBody: null, catchLocalId: null, finallyBody: [closeDelegate], loc },
       ],
       loc,
     };
