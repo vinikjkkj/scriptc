@@ -115,7 +115,7 @@ function tabWhy(L: Lowerer, info: ClassInfo): string | null {
   }
   for (const m of ownMethodNames(info)) {
     if (protoSlotOf(L, info.def.name, m) === null || !protoSlotSlottable(info, m)) {
-      return `the class declares the method '${m}', which cannot take a replacement slot (abstract, async or generator)`;
+      return `the class declares the method '${m}', which cannot take a replacement slot (abstract or generator)`;
     }
   }
   return null;
