@@ -62,6 +62,7 @@ import { applySeedPins, computeSeedPins, type SeedPin } from "./seed-pin.js";
 import { programHasTsUntypedWeakNew, setTsUntypedWeakAdmission } from "./types.js";
 import { applyRetypePins, computeRetypePins, shiftRetypePins, type RetypePin } from "./retype-pin.js";
 import { computeEmptyCollectionPins } from "./empty-collection-pin.js";
+import { computeImportDefaultPins } from "./import-default-pin.js";
 import { cjsLexerVisibleNames } from "./cjs-lexer.js";
 import { applyTwinEdits, clearTwinSpans, type TwinEdit } from "./lowering/emitter-twin.js";
 import {
@@ -509,6 +510,13 @@ export function loadProgram(
   // Map<K, V> its destination declares. Same second load, same replacement edits.
   if (process.env["SCRIPTC_EMPTY_PIN"] !== "0") {
     for (const [file, list] of computeEmptyCollectionPins(load.program)) {
+      retypePins.set(file, [...(retypePins.get(file) ?? []), ...list]);
+    }
+  }
+  // THE IMPORT-DEFAULT PIN (import-default-pin.ts): tsc's `__importDefault(require("m"))` over a stamped CommonJS module is
+  // `require("m")`, which the checker types as the module. Same second load, same replacement edits.
+  if (process.env["SCRIPTC_IMPORT_DEFAULT_PIN"] !== "0") {
+    for (const [file, list] of computeImportDefaultPins(load.program)) {
       retypePins.set(file, [...(retypePins.get(file) ?? []), ...list]);
     }
   }
