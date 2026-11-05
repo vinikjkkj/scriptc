@@ -13335,6 +13335,12 @@ ScrDyn *(*scr_promise_ctor_provider)(void);
 
 ScrDyn *scr_dyn_construct(const ScrDyn *fn, const ScrDyn *args, const ScrStr *what) {
   if (fn->kind == SCR_DYN_PROXY) return SCR_PX->construct(fn, args, what);
+  /* An engine-held function or class (a `new Function` result the compiler could not fold):
+   * the engine's own [[Construct]]. */
+  if (fn->kind == SCR_DYN_JSVAL && scr_dyn_isl_typeof_is(fn, "function")) {
+    return scr_dyn_jsval_ops()->construct(fn->v.jsval.cell, args->kind == SCR_DYN_ARR ? args->v.arr.items : NULL,
+                                          args->kind == SCR_DYN_ARR ? (size_t)args->v.arr.len : 0);
+  }
   if (fn->kind != SCR_DYN_FUNC) {
     ScrJsonBuf b;
     scr_jb_init(&b);
