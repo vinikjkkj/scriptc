@@ -7424,6 +7424,10 @@ void scr_dyn_big_json_throw(void);
  * count as HANDLED on src — the boxed destination is the tracked one,
  * like a JS .then chain. */
 ScrDyn *scr_dyn_new_promise(ScrPromise *p); /* scr_async_dyn.c (gated) */
+/* scr_promise_fulfill_ref for a payload that is certainly NOT to be resolved (the tail of the resolve procedure itself),
+ * and the hook the gated dynamic unit installs to make the plain one a RESOLVE for dynamic payloads (scr_async.c). */
+void scr_promise_fulfill_ref_raw(ScrPromise *p, void *v, void *(*retain)(void *), void (*release)(void *), ScrTraceFn trace);
+extern bool (*scr_promise_dyn_resolve_hook)(ScrPromise *p, void *v, void (*release)(void *));
 /* The allocator view the gated boxes use; installs the release arm's
  * promise-release edge (runtime-internal). */
 ScrDyn *scr_dyn_alloc_promise(void (*release_fn)(ScrPromise *p));

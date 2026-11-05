@@ -3519,7 +3519,20 @@ void scr_promise_fulfill_bool(ScrPromise *p, bool v) {
   p->b = v;
   scr_promise_settle_wake(p);
 }
+/* The checked-dynamic unit (scr_async_dyn.c) installs this when it is linked: a promise whose payload is a DYNAMIC value is
+ * RESOLVED with it (a promise or a thenable is adopted, anything else fulfills), because a promise is never fulfilled with
+ * a thenable. NULL when no dynamic value can be a promise, which is the only case the plain fulfill below is right. */
+bool (*scr_promise_dyn_resolve_hook)(ScrPromise *p, void *v, void (*release)(void *)) = NULL;
+
 void scr_promise_fulfill_ref(ScrPromise *p, void *v, void *(*retain)(void *), void (*release)(void *), ScrTraceFn trace) {
+  if (scr_promise_dyn_resolve_hook != NULL && p->state == SCR_PROM_PENDING && v != NULL &&
+      scr_promise_dyn_resolve_hook(p, v, release)) {
+    return;
+  }
+  scr_promise_fulfill_ref_raw(p, v, retain, release, trace);
+}
+
+void scr_promise_fulfill_ref_raw(ScrPromise *p, void *v, void *(*retain)(void *), void (*release)(void *), ScrTraceFn trace) {
   if (p->state != SCR_PROM_PENDING) {
     if (release) release(v); /* value was +1 for us; drop it */
     return;

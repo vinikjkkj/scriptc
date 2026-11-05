@@ -996,7 +996,21 @@ static void scr_dyn_resolve_into(ScrPromise *p, ScrDyn *v) {
       return;
     }
   }
-  scr_promise_fulfill_ref(p, v, scr_dyn_retain_v, scr_dyn_release_v, NULL);
+  scr_promise_fulfill_ref_raw(p, v, scr_dyn_retain_v, scr_dyn_release_v, NULL);
+}
+
+/* scr_promise_fulfill_ref over a dynamic payload: a promise or a thenable is ADOPTED (an async function that returns one
+ * resolves its own promise with it), anything else falls through to the plain fulfill. */
+static bool scr_dyn_fulfill_resolves(ScrPromise *p, void *v, void (*release)(void *)) {
+  if (release != scr_dyn_release_v) return false;
+  ScrDyn *d = (ScrDyn *)v;
+  if (d->kind != SCR_DYN_PROMISE && !scr_dyn_may_be_thenable(d)) return false;
+  scr_dyn_resolve_into(p, d); /* the payload's +1 moves in */
+  return true;
+}
+
+__attribute__((constructor)) static void scr_async_dyn_install_resolve_hook(void) {
+  scr_promise_dyn_resolve_hook = scr_dyn_fulfill_resolves;
 }
 
 /* Promise.resolve(d) for a checked-dynamic d (dyn.adoptPromise). Borrows d;
