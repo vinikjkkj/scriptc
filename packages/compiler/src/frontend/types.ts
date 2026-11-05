@@ -7538,7 +7538,9 @@ export function mapRestTupleUnion(type: ts.Type, ctx: TypeMapperCtx): IrType | n
     for (const el of checker.getTypeArguments(arm as ts.TypeReference)) {
       const mapped = mapType(el, ctx);
       if (!mapped || mapped.kind === "void") return null;
-      row.push(mapped);
+      // A position the library's implementation may leave undefined (undefArrayElemNames) keeps the undefined arm in the
+      // array's element union, as the tuple form of the same position does.
+      row.push(undefSlotWiden(mapped, el, ctx, checker));
     }
     rows.push(row);
   }
