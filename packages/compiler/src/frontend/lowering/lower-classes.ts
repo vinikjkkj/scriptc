@@ -9287,7 +9287,7 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
    * too. Real packages hang their whole class on this: mysql2's
    * Connection, Pool and PromiseConnection each declare one, and before
    * this the declaration alone refused the file. */
-  const WELL_KNOWN_SYMBOL_SLOTS = new Set(["iterator", "dispose", "asyncDispose"]);
+  const WELL_KNOWN_SYMBOL_SLOTS = new Set(["iterator", "dispose", "asyncDispose", "asyncIterator"]);
 
 /** The GLOBAL REGISTRY key behind a computed member name — `Symbol.for(k)`
  * written inline, or an identifier resolving to a module-level `const S =
