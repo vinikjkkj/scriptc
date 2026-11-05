@@ -7,3 +7,11 @@ class DbErr extends Error {
 function capture(target) { Error.captureStackTrace(target); return target; }
 const e = capture(new DbErr("dup key", "error"));
 console.log(e instanceof Error, e.name, e.message, typeof e.stack, e.stack.split("\n")[0]);
+// the capture re-forms the header from the CURRENT name and message
+const f = capture(new DbErr("dup key", "error"));
+console.log(f.stack.split("\n")[0]);
+f.name = "renamed";
+console.log(f.stack.split("\n")[0]);
+capture(f);
+console.log(f.stack.split("\n")[0]);
+console.log(Object.keys(f).join(","));
