@@ -4309,6 +4309,9 @@ ScrStr *scr_sp_val_at(ScrSearchParams *sp, double i); /* +1; "" out of range */
 typedef struct ScrSym ScrSym;
 
 ScrSym *scr_sym_new(ScrStr *desc); /* borrows desc (NULL = no description); +1 fresh identity */
+ScrSym *scr_sym_new_tagged(ScrStr *desc, ScrStr *site); /* as scr_sym_new, remembering the creation site */
+ScrSym *scr_sym_new_anon_tagged(ScrStr *site);
+const ScrStr *scr_sym_site(const ScrSym *s); /* the creation site, or NULL when untagged */
 ScrSym *scr_sym_for(ScrStr *key);  /* borrows key; +1 on the interned per-key symbol */
 ScrSym *scr_sym_retain(ScrSym *s);
 void scr_sym_release(ScrSym *s);
@@ -9556,6 +9559,8 @@ typedef struct ScrBytesOwn {
   size_t n;
   size_t cap;
   ScrBytesOwnEnt *ents;
+  /* the symbol-keyed own properties (scr_symbol.c keeps them in ext.syms; only that member is used here) */
+  ScrDynObjExt ext;
 } ScrBytesOwn;
 
 typedef struct ScrBytes {

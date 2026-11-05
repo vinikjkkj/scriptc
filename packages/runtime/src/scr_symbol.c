@@ -23,6 +23,7 @@ struct ScrSym {
   size_t rc;
   ScrStr *desc;    /* owned; NULL = no description (Symbol()) */
   ScrStr *reg_key; /* owned; non-NULL exactly for Symbol.for symbols */
+  ScrStr *site;    /* owned; the creation site ("file:offset") of a Symbol() call the program tagged, else NULL */
   struct ScrSym *reg_next; /* the registry's intrusive chain */
 };
 
@@ -36,6 +37,7 @@ void scr_sym_release(ScrSym *s) {
   if (--s->rc == 0) {
     scr_str_release(s->desc);
     scr_str_release(s->reg_key);
+    scr_str_release(s->site);
     free(s);
   }
 }
@@ -51,9 +53,20 @@ ScrSym *scr_sym_new(ScrStr *desc) {
   s->rc = 1;
   s->desc = desc ? scr_str_retain(desc) : NULL;
   s->reg_key = NULL;
+  s->site = NULL;
   s->reg_next = NULL;
   return s;
 }
+
+/* `Symbol(desc)` whose creation site the compiler recorded: a boxed class instance's member table matches a symbol-keyed
+ * member by this site, so two symbols that share a description stay two keys. */
+ScrSym *scr_sym_new_tagged(ScrStr *desc, ScrStr *site) {
+  ScrSym *s = scr_sym_new(desc);
+  s->site = scr_str_retain(site);
+  return s;
+}
+ScrSym *scr_sym_new_anon_tagged(ScrStr *site) { return scr_sym_new_tagged(NULL, site); }
+const ScrStr *scr_sym_site(const ScrSym *s) { return s->site; }
 
 /* ── the Symbol.for global registry ──────────────────────────────────── */
 
@@ -291,6 +304,27 @@ static void scr_dsym_prim_tail(char *out, size_t cap, const char *lead, const Sc
   scr_str_release(t);
 }
 
+/* A Proxy receiver: the operation falls through to the TARGET unless the handler defines the trap for it (a trap would be called with the
+ * symbol as its property argument, which the trap ABI here does not carry: that fences). A revoked proxy throws V8's TypeError.
+ * Returns the target to forward to, or NULL with the exception pending. */
+static ScrDyn *scr_dsym_proxy_target(ScrDyn *p, const char *trap) {
+  if (p->v.proxy.revoked) {
+    char msg[96];
+    const int n = snprintf(msg, sizeof msg, "Cannot perform '%s' on a proxy that has been revoked", trap);
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)n);
+    return NULL;
+  }
+  const ScrDyn *h = p->v.proxy.handler;
+  if (h != NULL && h->kind == SCR_DYN_OBJ) {
+    const ScrDyn *t = scr_dyn_obj_get(h, trap, strlen(trap));
+    if (t != NULL && t->kind != SCR_DYN_UNDEF && t->kind != SCR_DYN_NULL) {
+      scr_dsym_fence(p, "a trapped symbol-keyed access of");
+      return NULL;
+    }
+  }
+  return p->v.proxy.target;
+}
+
 /* How a receiver kind answers a symbol-keyed READ.
  *   STORE   an OBJ / ARR / FUNC: its own table, then (OBJ) the prototype chain.
  *   ABSENT  a kind with no symbol storage whose user-symbol answer is exactly "absent" (a primitive, bytes, a map,
@@ -304,6 +338,7 @@ static ScrDsymClass scr_dsym_class(const ScrDyn *d) {
   case SCR_DYN_OBJ:
   case SCR_DYN_ARR:
   case SCR_DYN_FUNC:
+  case SCR_DYN_BYTES:
     return SCR_DSYM_STORE;
   case SCR_DYN_OBJINST:
     return SCR_DSYM_INST;
@@ -318,28 +353,46 @@ static ScrDsymClass scr_dsym_class(const ScrDyn *d) {
 /* The class member of `k` on a boxed instance, or NULL. The class lowering names the members it keeps for a symbol key by
  * the key's compile-time identity: a field is "Symbol(desc)", a method or accessor keyed by a module symbol is
  * "sym.uniq:Symbol(desc)", and one keyed by a Symbol.for symbol is "sym.for:<registry key>". */
+static const ScrDynClassMember *scr_dsym_inst_row(const ScrDyn *d, const char *prefix, size_t plen, const char *body, size_t blen) {
+  char *nm = (char *)malloc(plen + blen + 1);
+  if (nm == NULL) scr_trap("scriptc: out of memory\n");
+  memcpy(nm, prefix, plen);
+  memcpy(nm + plen, body, blen);
+  const ScrDynClassMember *m = scr_dyn_objinst_member(d, nm, plen + blen);
+  free(nm);
+  return m;
+}
+
+/* A module symbol's member row names the creation site of its key in a companion `%symid:<row>` member. When both the row and the
+ * symbol carry a site, they must be the same one: two symbols that share a description are two keys. A row or a symbol with no
+ * site recorded (a key the compiler could not trace to its Symbol() call) matches by name alone. */
+static bool scr_dsym_site_ok(const ScrDyn *d, const ScrDynClassMember *m, ScrSym *k) {
+  const ScrStr *ks = scr_sym_site(k);
+  if (m == NULL || ks == NULL) return true;
+  const ScrDynClassMember *cm = scr_dsym_inst_row(d, "%symid:", 7, m->name, m->len);
+  if (cm == NULL || cm->call == NULL) return true;
+  ScrDyn *r = cm->call(d->v.inst.o, NULL, 0, "a symbol-keyed member");
+  if (r == NULL) return true;
+  const bool same = r->kind == SCR_DYN_STR && scr_str_eq(r->v.str, ks);
+  scr_dyn_release(r);
+  return same;
+}
+
 static const ScrDynClassMember *scr_dsym_inst_member(const ScrDyn *d, ScrSym *k) {
   const ScrDynClassMember *m = NULL;
   ScrStr *rk = scr_sym_key_for(k); /* +1 or NULL */
   if (rk != NULL) {
-    char *nm = (char *)malloc(rk->len + 9);
-    if (nm == NULL) scr_trap("scriptc: out of memory\n");
-    memcpy(nm, "sym.for:", 8);
-    memcpy(nm + 8, rk->data, rk->len);
-    m = scr_dyn_objinst_member(d, nm, rk->len + 8);
-    free(nm);
+    m = scr_dsym_inst_row(d, "sym.for:", 8, rk->data, rk->len);
     scr_str_release(rk);
     return m;
   }
   ScrStr *n = scr_sym_to_string(k);
+  /* a field is spelled "Symbol(desc)", a method or accessor "sym.uniq:Symbol(desc)": each candidate must pass the site test */
   m = scr_dyn_objinst_member(d, n->data, n->len);
+  if (m != NULL && !scr_dsym_site_ok(d, m, k)) m = NULL;
   if (m == NULL) {
-    char *nm = (char *)malloc(n->len + 10);
-    if (nm == NULL) scr_trap("scriptc: out of memory\n");
-    memcpy(nm, "sym.uniq:", 9);
-    memcpy(nm + 9, n->data, n->len);
-    m = scr_dyn_objinst_member(d, nm, n->len + 9);
-    free(nm);
+    m = scr_dsym_inst_row(d, "sym.uniq:", 9, n->data, n->len);
+    if (m != NULL && !scr_dsym_site_ok(d, m, k)) m = NULL;
   }
   scr_str_release(n);
   return m;
@@ -380,6 +433,20 @@ static ScrDynObjExt *scr_dsym_host(ScrDyn *recv, bool create, bool *none) {
       return scr_dyn_ext_w(recv);
     }
     return recv->v.obj.ext;
+  }
+  if (recv->kind == SCR_DYN_BYTES) {
+    /* a typed array / Buffer / DataView: the table rides its own-property block, shared by every box of the value */
+    ScrBytes *b = recv->v.bytes;
+    if (b->own == NULL) {
+      if (!create) {
+        *none = true;
+        return NULL;
+      }
+      if (scr_bytes_own_ops == NULL) return NULL; /* the own-property unit is linked by every sym write; a read of a never-written value is "none" */
+      b->own = (struct ScrBytesOwn *)calloc(1, sizeof(ScrBytesOwn));
+      if (b->own == NULL) scr_trap("scriptc: out of memory\n");
+    }
+    return &b->own->ext;
   }
   if (recv->kind == SCR_DYN_FUNC) {
     if (!create && recv->v.fn.clo->props == NULL) {
@@ -444,6 +511,10 @@ static ScrDyn *scr_dsym_row_value(const ScrDyn *self, const ScrDynSymEnt *row) {
 }
 
 static ScrDyn *scr_dsym_get(ScrDyn *recv, ScrSym *k, ScrDyn *self) {
+  if (recv != NULL && recv->kind == SCR_DYN_PROXY) {
+    ScrDyn *t = scr_dsym_proxy_target(recv, "get");
+    return t == NULL ? NULL : scr_dsym_get(t, k, t);
+  }
   if (scr_dsym_nullish(recv)) {
     { char pre[64]; snprintf(pre, sizeof pre, "Cannot read properties of %s (reading '", scr_dsym_kind(recv)); scr_dsym_throw(pre, k, "')"); }
     return NULL;
@@ -518,6 +589,11 @@ static void scr_dsym_read_only(ScrSym *k, const ScrDyn *self) {
 }
 
 static void scr_dsym_set(ScrDyn *recv, ScrSym *k, ScrDyn *v, bool strict, ScrDyn *self) {
+  if (recv != NULL && recv->kind == SCR_DYN_PROXY) {
+    ScrDyn *t = scr_dsym_proxy_target(recv, "set");
+    if (t != NULL) scr_dsym_set(t, k, v, strict, t);
+    return;
+  }
   if (scr_dsym_nullish(recv)) {
     { char pre[64]; snprintf(pre, sizeof pre, "Cannot set properties of %s (setting '", scr_dsym_kind(recv)); scr_dsym_throw(pre, k, "')"); }
     return;
@@ -536,7 +612,7 @@ static void scr_dsym_set(ScrDyn *recv, ScrSym *k, ScrDyn *v, bool strict, ScrDyn
     scr_dyn_release(bag);
     return;
   }
-  if (recv->kind != SCR_DYN_OBJ && recv->kind != SCR_DYN_ARR && recv->kind != SCR_DYN_FUNC) {
+  if (scr_dsym_class(recv) != SCR_DSYM_STORE) {
     if (recv->kind == SCR_DYN_STR || recv->kind == SCR_DYN_NUM || recv->kind == SCR_DYN_BOOL ||
         recv->kind == SCR_DYN_BIG || (recv->kind == SCR_DYN_HANDLE && recv->v.handle.tag == SCR_DYNH_SYMBOL)) {
       if (!strict) return; /* sloppy: the write to a primitive is dropped */
@@ -580,6 +656,10 @@ static void scr_dsym_set(ScrDyn *recv, ScrSym *k, ScrDyn *v, bool strict, ScrDyn
     }
   }
   ScrDynObjExt *x = scr_dsym_host(recv, true, &none);
+  if (x == NULL) {
+    scr_dsym_fence(recv, "writing");
+    return;
+  }
   scr_dsym_add(x, k, scr_dyn_retain(v), SCR_SYMP_ENUM | SCR_SYMP_WRITE | SCR_SYMP_CONFIG);
 }
 
@@ -594,7 +674,7 @@ void scr_dyn_sym_set_self_sloppy(ScrDyn *recv, ScrSym *k, ScrDyn *v, ScrDyn *sel
 /* Does the table on `recv` hold an accessor row? (A class instance's bag: the lowering boxes the instance as `this` only then.) */
 bool scr_dyn_sym_has_acc(ScrDyn *recv) {
   bool none;
-  ScrDynObjExt *x = (recv != NULL && (recv->kind == SCR_DYN_OBJ || recv->kind == SCR_DYN_ARR || recv->kind == SCR_DYN_FUNC)) ? scr_dsym_host(recv, false, &none) : NULL;
+  ScrDynObjExt *x = (recv != NULL && scr_dsym_class(recv) == SCR_DSYM_STORE) ? scr_dsym_host(recv, false, &none) : NULL;
   for (uint32_t i = 0; x != NULL && x->syms != NULL && i < x->syms->len; i++)
     if (x->syms->e[i].flags & SCR_SYMP_ACC) return true;
   return false;
@@ -603,6 +683,10 @@ void scr_dyn_sym_set(ScrDyn *recv, ScrSym *k, ScrDyn *v) { scr_dsym_set(recv, k,
 void scr_dyn_sym_set_sloppy(ScrDyn *recv, ScrSym *k, ScrDyn *v) { scr_dsym_set(recv, k, v, false, recv); }
 
 bool scr_dyn_sym_has_own(ScrDyn *recv, ScrSym *k) {
+  if (recv != NULL && recv->kind == SCR_DYN_PROXY) {
+    ScrDyn *t = scr_dsym_proxy_target(recv, "getOwnPropertyDescriptor");
+    return t != NULL && scr_dyn_sym_has_own(t, k);
+  }
   if (scr_dsym_nullish(recv)) {
     static const char msg[] = "Cannot convert undefined or null to object";
     scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
@@ -612,7 +696,9 @@ bool scr_dyn_sym_has_own(ScrDyn *recv, ScrSym *k) {
   case SCR_DSYM_STORE:
     return scr_dsym_own(recv, k) != NULL;
   case SCR_DSYM_INST: {
-    if (scr_dsym_inst_member(recv, k) != NULL) return true;
+    /* only a FIELD keyed by the symbol is an own property; a method or accessor lives on the prototype (`in` sees it, hasOwn does not) */
+    const ScrDynClassMember *m = scr_dsym_inst_member(recv, k);
+    if (m != NULL && m->len > 7 && memcmp(m->name, "Symbol(", 7) == 0) return true;
     ScrDyn *bag = scr_dsym_inst_bag(recv, false);
     const bool own = bag != NULL && scr_dsym_own(bag, k) != NULL;
     scr_dyn_release(bag);
@@ -628,6 +714,10 @@ bool scr_dyn_sym_has_own(ScrDyn *recv, ScrSym *k) {
 }
 
 bool scr_dyn_sym_has(ScrDyn *recv, ScrSym *k) {
+  if (recv != NULL && recv->kind == SCR_DYN_PROXY) {
+    ScrDyn *t = scr_dsym_proxy_target(recv, "has");
+    return t != NULL && scr_dyn_sym_has(t, k);
+  }
   if (scr_dsym_nullish(recv) || recv->kind == SCR_DYN_STR || recv->kind == SCR_DYN_NUM || recv->kind == SCR_DYN_BOOL ||
       recv->kind == SCR_DYN_BIG || (recv->kind == SCR_DYN_HANDLE && recv->v.handle.tag == SCR_DYNH_SYMBOL)) {
     { char post[192]; scr_dsym_prim_tail(post, sizeof post, "' in ", recv, false); scr_dsym_throw("Cannot use 'in' operator to search for '", k, post); }
@@ -658,6 +748,10 @@ bool scr_dyn_sym_has(ScrDyn *recv, ScrSym *k) {
 }
 
 static bool scr_dsym_delete(ScrDyn *recv, ScrSym *k, bool strict, const ScrDyn *self) {
+  if (recv != NULL && recv->kind == SCR_DYN_PROXY) {
+    ScrDyn *t = scr_dsym_proxy_target(recv, "deleteProperty");
+    return t != NULL && scr_dsym_delete(t, k, strict, t);
+  }
   if (scr_dsym_nullish(recv)) {
     static const char msg[] = "Cannot convert undefined or null to object";
     scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
@@ -703,8 +797,16 @@ static bool scr_dsym_delete(ScrDyn *recv, ScrSym *k, bool strict, const ScrDyn *
 }
 
 ScrDyn *scr_dyn_sym_define(ScrDyn *recv, ScrSym *k, ScrDyn *desc) {
+  if (recv != NULL && recv->kind == SCR_DYN_PROXY) {
+    ScrDyn *t = scr_dsym_proxy_target(recv, "defineProperty");
+    if (t == NULL) return NULL;
+    ScrDyn *r = scr_dyn_sym_define(t, k, desc);
+    if (r == NULL) return NULL;
+    scr_dyn_release(r);
+    return scr_dyn_retain(recv);
+  }
   if (scr_dsym_nullish(recv) ||
-      (recv->kind != SCR_DYN_OBJ && recv->kind != SCR_DYN_ARR && recv->kind != SCR_DYN_FUNC && recv->kind != SCR_DYN_OBJINST)) {
+      (scr_dsym_class(recv) != SCR_DSYM_STORE && recv->kind != SCR_DYN_OBJINST)) {
     static const char msg[] = "Object.defineProperty called on non-object";
     if (scr_dsym_nullish(recv) || recv->kind == SCR_DYN_STR || recv->kind == SCR_DYN_NUM || recv->kind == SCR_DYN_BOOL)
       scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
@@ -803,6 +905,11 @@ ScrDyn *scr_dyn_sym_define(ScrDyn *recv, ScrSym *k, ScrDyn *desc) {
     return scr_dyn_retain(recv);
   }
   ScrDynObjExt *x = scr_dsym_host(recv, true, &none);
+  if (x == NULL) {
+    scr_dyn_release(cell);
+    scr_dsym_fence(recv, "defining");
+    return NULL;
+  }
   scr_dsym_add(x, k, accessor ? cell : scr_dyn_retain(dv != NULL ? dv : scr_dyn_undefined()), flags);
   return scr_dyn_retain(recv);
 }
@@ -811,6 +918,10 @@ bool scr_dyn_sym_delete(ScrDyn *recv, ScrSym *k) { return scr_dsym_delete(recv, 
 bool scr_dyn_sym_delete_sloppy(ScrDyn *recv, ScrSym *k) { return scr_dsym_delete(recv, k, false, recv); }
 
 static ScrArr *scr_dsym_keys(ScrDyn *recv, bool enum_only) {
+  if (recv != NULL && recv->kind == SCR_DYN_PROXY) {
+    ScrDyn *t = scr_dsym_proxy_target(recv, "ownKeys");
+    return t == NULL ? NULL : scr_dsym_keys(t, enum_only);
+  }
   if (scr_dsym_nullish(recv)) {
     static const char msg[] = "Cannot convert undefined or null to object";
     scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
@@ -835,7 +946,7 @@ static ScrArr *scr_dsym_keys(ScrDyn *recv, bool enum_only) {
   bool none;
   ScrDyn *held = cls == SCR_DSYM_INST ? scr_dsym_inst_bag(recv, false) : NULL; /* the instance's table, +1 */
   ScrDynObjExt *x = held != NULL ? scr_dsym_host(held, false, &none)
-                    : (recv->kind == SCR_DYN_OBJ || recv->kind == SCR_DYN_ARR || recv->kind == SCR_DYN_FUNC)
+                    : scr_dsym_class(recv) == SCR_DSYM_STORE
                         ? scr_dsym_host(recv, false, &none)
                         : NULL;
   if (x != NULL && x->syms != NULL) {

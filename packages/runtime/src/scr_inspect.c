@@ -943,6 +943,26 @@ ScrStr *scr_insp_buffer(ScrBytes *b) {
                      remaining > 1 ? "s" : "");
     ib_bytes(&out, more, (size_t)n);
   }
+  /* the enumerable symbol-keyed own properties follow the bytes, after ", " (`<Buffer 01 02, Symbol(k): 5>`) */
+  const ScrDynSymTab *bst = b->own != NULL ? b->own->ext.syms : NULL;
+  bool first = b->len == 0;
+  for (uint32_t i = 0; bst != NULL && i < bst->len; i++) {
+    if (!(bst->e[i].flags & SCR_SYMP_ENUM)) continue;
+    if (!first) ib_cstr(&out, ", ");
+    first = false;
+    ScrStr *kn = scr_dyn_sym_key_str(bst->e[i].key);
+    ib_bytes(&out, kn->data, kn->len);
+    scr_str_release(kn);
+    ib_cstr(&out, ": ");
+    if (bst->e[i].flags & SCR_SYMP_ACC) {
+      const bool g = bst->e[i].val->v.arr.items[0]->kind == SCR_DYN_FUNC, st = bst->e[i].val->v.arr.items[1]->kind == SCR_DYN_FUNC;
+      ib_cstr(&out, g && st ? "[Getter/Setter]" : g ? "[Getter]" : "[Setter]");
+    } else {
+      ScrStr *v = scr_insp_dyn(bst->e[i].val, 1, 2);
+      ib_bytes(&out, v->data, v->len);
+      scr_str_release(v);
+    }
+  }
   ib_char(&out, '>');
   return ib_take(&out);
 }
@@ -1195,6 +1215,15 @@ static ScrDyn *insp_inst_sym_bag(const ScrDyn *d) {
   return NULL;
 }
 
+/* A function value's closure table when it hosts symbol-keyed properties (+1), else NULL. */
+static ScrDyn *insp_fn_sym_table(const ScrDyn *d) {
+  if (d->v.fn.clo->props == NULL) return NULL;
+  ScrDyn *t = (ScrDyn *)scr_box_get_ref(d->v.fn.clo->props); /* +1 */
+  if (t != NULL && t->kind == SCR_DYN_OBJ && scr_dyn_ext(t)->syms != NULL) return t;
+  scr_dyn_release(t);
+  return NULL;
+}
+
 static size_t insp_slot_count(const ScrDyn *d) {
   const ScrDyn *s = scr_dyn_ext(d)->slots;
   if (s == NULL || s->kind != SCR_DYN_OBJ) return insp_sym_count(d);
@@ -1209,9 +1238,13 @@ static size_t insp_slot_count(const ScrDyn *d) {
 /* Appends one `Symbol(<desc>): <value>` entry per renderable slot to the
  * frame scr_insp_begin opened. Insertion order, which is the converter's
  * field order and therefore Node's. */
+static void insp_emit_symtab(const ScrDynSymTab *t, double recurse, double depth);
 static void insp_emit_syms(const ScrDyn *d, double recurse, double depth) {
   if (d == NULL) return;
-  const ScrDynSymTab *t = scr_dyn_ext(d)->syms;
+  insp_emit_symtab(scr_dyn_ext(d)->syms, recurse, depth);
+}
+
+static void insp_emit_symtab(const ScrDynSymTab *t, double recurse, double depth) {
   for (uint32_t i = 0; t != NULL && i < t->len; i++) {
     if (!(t->e[i].flags & SCR_SYMP_ENUM)) continue;
     ScrStr *kn = scr_dyn_sym_key_str(t->e[i].key);
@@ -1315,7 +1348,8 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
        * (events.emitting), printed after the elements. */
       const ScrDyn *eel = scr_dyn_obj_slot_get(d, "%eeList", 7);
       const size_t nx = (xs != NULL ? xs->v.obj.len : 0) + (eel != NULL ? 1 : 0);
-      if (d->v.arr.len == 0 && nx == 0) return scr_str_new("[]", 2);
+      const size_t nsy = insp_sym_count(d); /* enumerable symbol-keyed properties print last (scr_symbol.c) */
+      if (d->v.arr.len == 0 && nx + nsy == 0) return scr_str_new("[]", 2);
       if (recurse > depth) return scr_str_new("[Array]", 7);
       scr_insp_begin(recurse + 1);
       size_t shown = insp_shown(d->v.arr.len);
@@ -1373,14 +1407,15 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         scr_insp_entry(entry, false);
         scr_str_release(entry);
       }
+      insp_emit_syms(d, recurse, depth);
       ScrStr *base = scr_str_new("", 0);
       ScrStr *b0 = scr_str_new("[", 1);
       ScrStr *b1 = scr_str_new("]", 1);
       /* Node drops the LAST entry from the grid whenever the entry list
        * outgrew maxArrayLength (100), which with named properties appended
        * is no longer the "more items" line. */
-      g_sort_tail = nx;
-      ScrStr *out = scr_insp_end(base, b0, b1, recurse + 1, true, insp_over_cap(shown + (more ? 1 : 0) + nx));
+      g_sort_tail = nx + nsy;
+      ScrStr *out = scr_insp_end(base, b0, b1, recurse + 1, true, insp_over_cap(shown + (more ? 1 : 0) + nx + nsy));
       scr_str_release(base);
       scr_str_release(b0);
       scr_str_release(b1);
@@ -1608,9 +1643,14 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
             eextra = NULL;
           }
         }
-        if (eshown == 0 && eextra == NULL) return ib_take(&out);
+        ScrDyn *esyms = insp_fn_sym_table(d);
+        if (eshown == 0 && eextra == NULL && insp_sym_count(esyms) == 0) {
+          scr_dyn_release(esyms);
+          return ib_take(&out);
+        }
         if (recurse > depth) {
           scr_dyn_release(eextra);
+          scr_dyn_release(esyms);
           return ib_take(&out);
         }
         ScrStr *ebase = ib_take(&out);
@@ -1649,6 +1689,8 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
           scr_insp_entry(entry, false);
           scr_str_release(entry);
         }
+        if (!ethrew) insp_emit_syms(esyms, recurse, depth);
+        scr_dyn_release(esyms);
         scr_dyn_release(eextra);
         ScrStr *eb0 = scr_str_new("{", 1);
         ScrStr *eb1 = scr_str_new("}", 1);
@@ -1673,8 +1715,13 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         ib_char(&out, ']');
         size_t vshown = 0;
         for (size_t i = 0; i < vcls->nstatics; i++) if (vcls->statics[i].enumerable) vshown++;
+        ScrDyn *vsyms = insp_fn_sym_table(d);
+        vshown += insp_sym_count(vsyms);
         if (vshown == 0) return ib_take(&out);
-        if (recurse > depth) return ib_take(&out); /* [class A] is already the depth form */
+        if (recurse > depth) {
+          scr_dyn_release(vsyms);
+          return ib_take(&out); /* [class A] is already the depth form */
+        }
         ScrStr *vbase = ib_take(&out);
         scr_insp_begin(recurse + 1);
         bool vthrew = false;
@@ -1697,6 +1744,8 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
           scr_insp_entry(entry, false);
           scr_str_release(entry);
         }
+        if (!vthrew) insp_emit_syms(vsyms, recurse, depth);
+        scr_dyn_release(vsyms);
         ScrStr *vb0 = scr_str_new("{", 1);
         ScrStr *vb1 = scr_str_new("}", 1);
         ScrStr *vout = scr_insp_end(vbase, vb0, vb1, recurse + 1, false, false);
@@ -1746,6 +1795,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
             nown++;
           }
         }
+        nown += insp_sym_count(table);
         if (nown == 0 || recurse > depth) {
           scr_dyn_release(table);
           return ib_take(&out);
@@ -1768,6 +1818,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
           scr_str_release(entry);
         }
         free(ford);
+        insp_emit_syms(table, recurse, depth);
         scr_dyn_release(table);
         ScrStr *fb0 = scr_str_new("{", 1);
         ScrStr *fb1 = scr_str_new("}", 1);
@@ -2256,7 +2307,10 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       }
       char prefix[48];
       int pn = snprintf(prefix, sizeof prefix, "Uint8Array(%zu) [", b->len);
-      if (b->len == 0) {
+      const ScrDynSymTab *ust = b->own != NULL ? b->own->ext.syms : NULL;
+      size_t unsym = 0;
+      for (uint32_t i = 0; ust != NULL && i < ust->len; i++) unsym += (ust->e[i].flags & SCR_SYMP_ENUM) != 0;
+      if (b->len == 0 && unsym == 0) {
         InspBuf out = {0};
         ib_bytes(&out, prefix, (size_t)pn);
         ib_char(&out, ']');
@@ -2276,9 +2330,11 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         scr_insp_entry(m, true);
         scr_str_release(m);
       }
+      insp_emit_symtab(ust, recurse, depth);
       ScrStr *base = scr_str_new("", 0);
       ScrStr *b0 = scr_str_new(prefix, (size_t)pn);
       ScrStr *b1 = scr_str_new("]", 1);
+      g_sort_tail = unsym;
       ScrStr *out = scr_insp_end(base, b0, b1, recurse + 1, true, more);
       scr_str_release(base);
       scr_str_release(b0);

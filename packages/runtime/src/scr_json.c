@@ -169,10 +169,8 @@ static void scr_dyn_syms_free(ScrDynSymTab *t, bool release) {
   free(t);
 }
 
-void scr_dyn_ext_drop(ScrDyn *d, bool release) {
-  ScrDynObjExt *e = d->v.obj.ext;
-  if (e == NULL) return;
-  d->v.obj.ext = NULL;
+/* The slow half of scr_dyn_ext_drop, kept out of line so the common "no ext" return stays a leaf with no frame. */
+static __attribute__((noinline)) void scr_dyn_ext_drop_block(ScrDynObjExt *e, bool release) {
   /* The COLLECTOR's teardown passes false: markGray has already
    * decremented every traced child, and releasing here would be a double
    * free — the trace/teardown complement scr_runtime.h states for every
@@ -189,6 +187,13 @@ void scr_dyn_ext_drop(ScrDyn *d, bool release) {
   if (scr_pool_give(&scr_dyn_ext_blocks, e, sizeof *e)) return;
 #endif
   free(e);
+}
+
+void scr_dyn_ext_drop(ScrDyn *d, bool release) {
+  ScrDynObjExt *e = d->v.obj.ext;
+  if (e == NULL) return;
+  d->v.obj.ext = NULL;
+  scr_dyn_ext_drop_block(e, release);
 }
 
 /* ── named properties on a dyn ARRAY ───────────────────────────────────
@@ -13892,16 +13897,20 @@ void (*scr_handle_forin_hook)(const ScrDyn *v, ScrDyn *out) = NULL;
 static void scr_dyn_assign_strs(ScrDyn *target, const ScrDyn *src);
 static void scr_dyn_assign_from(ScrDyn *target, const ScrDyn *src) {
   scr_dyn_assign_strs(target, src);
-  /* A boxed class instance keeps its symbol-keyed properties in the run-time property table */
-  if (target->kind == SCR_DYN_OBJ && src->kind == SCR_DYN_OBJINST && !scr_exc_pending() && scr_dyn_sym_copy_enum != NULL) {
-    scr_dyn_sym_copy_enum(target, src);
+  /* CopyDataProperties lists the string keys first and the ENUMERABLE symbol keys after them. The hook is NULL in every
+   * program that links no symbol unit, which is the whole cost of this tail for them: one load and one test. */
+  if (scr_dyn_sym_copy_enum == NULL || target->kind != SCR_DYN_OBJ) return;
+  if (src->kind == SCR_DYN_OBJINST) {
+    /* a boxed class instance keeps its symbol-keyed properties in the run-time property table */
+    if (!scr_exc_pending()) scr_dyn_sym_copy_enum(target, src);
     return;
   }
-  /* CopyDataProperties lists the string keys first and the ENUMERABLE symbol keys after them */
-  if (target->kind == SCR_DYN_OBJ && (src->kind == SCR_DYN_OBJ || src->kind == SCR_DYN_ARR || src->kind == SCR_DYN_FUNC) &&
-      !scr_exc_pending()) {
-    const ScrDynObjExt *sx = src->kind == SCR_DYN_FUNC ? NULL : scr_dyn_ext(src);
-    if (src->kind == SCR_DYN_FUNC ? src->v.fn.clo->props != NULL : sx->syms != NULL) scr_dyn_sym_copy_enum(target, src);
+  if (src->kind == SCR_DYN_OBJ || src->kind == SCR_DYN_ARR) {
+    if (scr_dyn_ext(src)->syms != NULL && !scr_exc_pending()) scr_dyn_sym_copy_enum(target, src);
+  } else if (src->kind == SCR_DYN_FUNC) {
+    if (src->v.fn.clo->props != NULL && !scr_exc_pending()) scr_dyn_sym_copy_enum(target, src);
+  } else if (src->kind == SCR_DYN_BYTES) {
+    if (src->v.bytes->own != NULL && src->v.bytes->own->ext.syms != NULL && !scr_exc_pending()) scr_dyn_sym_copy_enum(target, src);
   }
 }
 static void scr_dyn_assign_strs(ScrDyn *target, const ScrDyn *src) {
