@@ -11821,6 +11821,56 @@ export function moduleBoxesFunctionLikeValues(mod: IrModule): boolean {
   BOXES_FN_LIKE_MEMO.set(mod, found);
   return found;
 }
+/** The record shapes the FUNCTION lane of the record kind gate may serve in this module: a record of
+ * `name`/`length` members only whose every use is a plain declared-member read or a hand-off (a binding,
+ * an assignment, a return, a call argument). A function read through such a record answers its members
+ * exactly, but `typeof`, `String`, `JSON.stringify`, `console.log`, spreading and equality would answer
+ * about a plain struct where Node answers about the function; a shape with any such use keeps the
+ * refusal. Memoized per module; the empty set when the module boxes no function-like value. */
+const FUNC_LANE_MEMO = new WeakMap<IrModule, Set<string>>();
+export function moduleFuncLaneShapes(mod: IrModule): Set<string> {
+  const hit = FUNC_LANE_MEMO.get(mod);
+  if (hit !== undefined) return hit;
+  const out = new Set<string>();
+  FUNC_LANE_MEMO.set(mod, out);
+  if (!moduleBoxesFunctionLikeValues(mod)) return out;
+  const eligible = new Set<string>();
+  for (const sh of mod.records ?? []) {
+    if (!sh.tuple && sh.indexValue === undefined && sh.fields.length > 0 && sh.fields.every((f) => f.name === "name" || f.name === "length")) eligible.add(sh.id);
+  }
+  if (eligible.size === 0) return out;
+  const bad = new Set<string>();
+  const allowed = (kind: unknown, key: string): boolean =>
+    ((kind === "recordGet" || kind === "recordIsView" || kind === "recordView") && key === "obj") || (kind === "varDecl" && key === "init") || (kind === "assign" && key === "value") ||
+    (kind === "return" && key === "value") || (kind === "call" && key === "args") || (kind === "ternary" && (key === "then" || key === "else_")) ||
+    (kind === "seqExpr" && key === "result");
+  const isEligibleExpr = (v: unknown): string | null => {
+    const t = (v as { type?: IrType } | null)?.type;
+    return t !== undefined && t.kind === "record" && eligible.has(t.shapeId) ? t.shapeId : null;
+  };
+  const seen = new Set<object>();
+  const walk = (n: unknown): void => {
+    if (n === null || typeof n !== "object" || seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) {
+      for (const x of n) walk(x);
+      return;
+    }
+    const o = n as Record<string, unknown>;
+    for (const [k, v] of Object.entries(o)) {
+      if (k === "type" || k === "loc") continue;
+      const items = Array.isArray(v) ? v : [v];
+      for (const it of items) {
+        const sid = it !== null && typeof it === "object" && typeof (it as { kind?: unknown }).kind === "string" ? isEligibleExpr(it) : null;
+        if (sid !== null && !allowed(o["kind"], k)) bad.add(sid);
+      }
+      walk(v);
+    }
+  };
+  for (const fn of mod.functions) walk(fn.body);
+  for (const id of eligible) if (!bad.has(id)) out.add(id);
+  return out;
+}
 const INSTANCE_LANE_KG_MEMO = new WeakMap<IrModule, boolean>();
 export function moduleInstanceLaneNeedsKg(mod: IrModule): boolean {
   const memo = INSTANCE_LANE_KG_MEMO.get(mod);
