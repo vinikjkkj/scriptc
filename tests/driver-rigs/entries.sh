@@ -1,6 +1,9 @@
 # entries.sh <driver>: sets $entry (the rig file) and $extra (compiler flags) for a driver name. Sourced by build.sh and run-compare.sh.
 # mysql2 is measured WITH --npm-static mysql2 (the defined mysql2 count); the connect and roundtrip entries use the same recipe.
-case "$driver" in
+# A "-llvm" suffix builds the same entry on the LLVM backend (every entry is proven on both).
+backend=c
+case "$driver" in *-llvm) backend=llvm ;; esac
+case "${driver%-llvm}" in
   mysql2)           entry=mysql-entry.ts;      extra=(--npm-static mysql2) ;;
   pg)               entry=pg-entry.ts;         extra=() ;;
   ioredis)          entry=redis-entry.ts;      extra=() ;;
@@ -9,5 +12,6 @@ case "$driver" in
   pg-connect)       entry=pg-connect.ts;       extra=() ;;
   mysql2-roundtrip) entry=mysql-roundtrip.ts;  extra=(--npm-static mysql2) ;;
   pg-roundtrip)     entry=pg-roundtrip.ts;     extra=() ;;
+  mysql2-pool)      entry=mysql-pool.ts;       extra=(--npm-static mysql2) ;;
   *) echo "unknown driver: $driver" >&2; exit 2 ;;
 esac
