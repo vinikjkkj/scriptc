@@ -88,7 +88,7 @@ export function fenceSymbolRecordCrossings(
       "SC1101",
       c.loc,
       "converting a record with a symbol-keyed member to 'unknown' in a program that reads symbol-keyed properties of 'unknown' values",
-      `the member (${c.names.slice(0, 3).join(", ")}) crosses under its checker spelling, which the symbol-keyed read cannot match by identity, so the read would answer undefined where Node answers the value. ` +
+      `the member (${c.names.slice(0, 3).map((n) => n.replace(/@\d+$/, "")).join(", ")}) crosses under its checker spelling, which the symbol-keyed read cannot match by identity, so the read would answer undefined where Node answers the value. ` +
         `Keep the object untyped from its creation (Object.create(null) and assign the symbol key), or read the member through its record type.`,
     ));
   }

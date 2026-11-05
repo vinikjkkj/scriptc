@@ -17182,7 +17182,7 @@ export function ensureString(L: Lowerer, e: IrExpr, node: ts.Node, explicitStrin
           if (arm.kind === "undefinedT") return { kind: "strLit", value: "undefined", type: STRING, loc: e.loc };
           if (arm.kind === "nullT") return { kind: "strLit", value: "null", type: STRING, loc: e.loc };
           const payload: IrExpr = { kind: "unionNarrow", unionId, tag, value: src, type: arm, loc: e.loc };
-          return ensureString(L, payload, node);
+          return ensureString(L, payload, node, explicitString);
         };
         let result = armStr(reach[reach.length - 1]!);
         for (const tag of reach.slice(0, -1).reverse()) {

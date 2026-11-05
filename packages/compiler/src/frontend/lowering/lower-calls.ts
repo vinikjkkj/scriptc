@@ -13762,6 +13762,11 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
           // Reflect.ownKeys is typed `(string | symbol)[]`; the dyn tree holds
           // string keys only, so it crosses as the checked string array and
           // widens into the checker's element union like any other array.
+          if (reflectOwnKeys && !L.untypedSymbolWrites()) {
+            // No source stores a symbol-keyed property through an untyped receiver: the dyn tree holds string keys only, so the walk
+            // crosses as the checked string array (the union element type then widens like any other array).
+            return L.coerceToExpected(names, arrayOf(STRING));
+          }
           if (reflectOwnKeys) {
             // The string names, then the receiver's symbol-keyed own properties (scr_symbol.c): the dyn array crosses
             // into the checker's (string | symbol)[] element union. The receiver evaluates once, into a hidden local.
