@@ -12778,6 +12778,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24141-class-instance-in-a-nullable-binding-aliases.ts": {
+   "order": [
+    "<repo>/tests/corpus/24141-class-instance-in-a-nullable-binding-aliases.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2414-dowhile-continue-kill.ts": {
    "order": [
     "<repo>/tests/corpus/2414-dowhile-continue-kill.ts"
