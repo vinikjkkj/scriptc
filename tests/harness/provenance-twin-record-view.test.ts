@@ -160,6 +160,20 @@ const CLAIM_ORDER_EXPECTED =
 const CLAIM_LOCAL_EXPECTED =
   "OK late cb null OK,cb null closed\n";
 
+/* cases/twinrec/async-slots.ts: async methods of JavaScript classes rebound at run time (this[name] = fn, Class.prototype.m = fn),
+   recorded from node. */
+const ASYNC_SLOTS_EXPECTED =
+  "pong:a! got:k 3\n" +
+  "replaced:k replaced:z\n" +
+  "12\n" +
+  "late\n" +
+  "undefined\n" +
+  "got:k pong:o!\n" +
+  "ping,get get,ping\n" +
+  "11\n" +
+  "proto:5 proto:5 1\n" +
+  "get,tick\n";
+
 const PRIOR = process.env["SCRIPTC_PROVENANCE_MANIFEST"];
 afterEach(() => {
   setProvenanceSources(null);
@@ -314,6 +328,14 @@ describe("provenance: a twin class with untyped methods behind a program's own r
       if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
       const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
       expect(stdout).toBe(CLAIM_LOCAL_EXPECTED);
+    }, 600_000);
+
+    test(`24043: async methods of JavaScript classes can be rebound at run time and read as values (${backend})`, async () => {
+      const entry = join(fixtureDir, "cases/twinrec/async-slots.ts");
+      const { result, outPath } = await build(entry, "async-slots", backend);
+      if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+      const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
+      expect(stdout).toBe(ASYNC_SLOTS_EXPECTED);
     }, 600_000);
   }
 
