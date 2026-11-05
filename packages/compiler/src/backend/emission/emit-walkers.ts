@@ -4042,14 +4042,14 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
       `static const ScrRecSrcMap ${name};`,
     );
     E.walkerDefs.push(
-      `static const long ${name}_off[] = { ${to.fields.map((f) => `(long)offsetof(${st}, ${mangleField(f.name)})`).join(", ") || "0"} };`,
+      `static const long long ${name}_off[] = { ${to.fields.map((f) => `(long long)offsetof(${st}, ${mangleField(f.name)})`).join(", ") || "0"} };`,
       `static const unsigned char ${name}_ob[] = { ${bits.map((x) => (x ? x.byte : 0)).join(", ") || "0"} };`,
       `static const unsigned char ${name}_obit[] = { ${bits.map((x) => (x ? x.bit : 0)).join(", ") || "0"} };`,
       ...(boxable ? [
         `static ScrDyn *${name}_snap(void *p) { return ${toDynExprC(E, srcT, `(${st} *)p`)}; }`,
         `static ScrDyn *${name}_cross(void *p) { return ${originMarkC(E, srcT, toDynExprC(E, srcT, `(${st} *)p`), "p", tk, retain, release)}; }`,
       ] : []),
-      `static const ScrRecSrcMap ${name} = { ${to.fields.length}, ${name}_off, ${from.ownmask === true ? `(long)offsetof(${st}, ${OWNMASK_MEMBER})` : "-1"}, ${name}_ob, ${name}_obit, ${retain}, ${release}, ${boxable ? `${name}_snap, ${name}_cross` : "NULL, NULL"} };`,
+      `static const ScrRecSrcMap ${name} = { ${to.fields.length}, ${name}_off, ${from.ownmask === true ? `(long long)offsetof(${st}, ${OWNMASK_MEMBER})` : "-1"}, ${name}_ob, ${name}_obit, ${retain}, ${release}, ${boxable ? `${name}_snap, ${name}_cross` : "NULL, NULL"} };`,
       `static ${mangleRecordStruct(shapeId)} *${name}_view(void *p) { /* the one view of this source in this shape */`,
       `  ${mangleRecordStruct(shapeId)} *r = (${mangleRecordStruct(shapeId)} *)scr_recsrc_find(p, &${name});`,
       `  if (r != NULL) return ${vAdapters({ kind: "record", shapeId }).retain}((void *)r);`,

@@ -6171,8 +6171,8 @@ void scr_rec_view_promote(ScrDyn **slot, ScrDyn *obj);
  * crossed into a dynamic slot (a copy that remembers its origin, so a write through it is refused exactly as for the source). */
 typedef struct ScrRecSrcMap {
   size_t n;                        /* the target shape's field count */
-  const long *off;                 /* byte offset in the source struct of each target field */
-  long own_off;                    /* byte offset of the source's own-key mask, or -1 */
+  const long long *off;            /* byte offset in the source struct of each target field */
+  long long own_off;               /* byte offset of the source's own-key mask, or -1 */
   const unsigned char *own_byte;   /* per target field: byte in the mask */
   const unsigned char *own_bit;    /* per target field: bit (0 = the field has no mask bit) */
   void *(*retain)(void *src);
