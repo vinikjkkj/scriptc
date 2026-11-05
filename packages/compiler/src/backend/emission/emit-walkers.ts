@@ -16,7 +16,7 @@ import { RUNTIME_EMITTER_CLASS as RUNTIME_EMITTER_CLASS_W } from "../../ir/nodes
 import { isIntegerKeyName } from "../../ir/nodes.js";
 import { classvalCandidates, dynClassDisplayName, dynDescBase, dynEmitterSlot, dynRuntimeRoot, dynEnumerationFenced, dynMemberRows, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
 import { EMITTER_MIXIN_FIELD_NAME, ORD_MEMBER, orderRecordPlanCached } from "../../ir/nodes.js";
-import { KINDGATE_WIDE_KINDS, kindgateInstanceLane, kindgateWideLane } from "../kindgate.js";
+import { KINDGATE_WIDE_KINDS, kindgateInstanceLane, kindgateWideLane, kindgateFuncLane } from "../kindgate.js";
 import { KEYIX_MEMBER, KEYLIST_MEMBER, OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, VIEW_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
 
 /** The refusal text a dyn-to-record check uses when the receiver carries
@@ -2615,9 +2615,9 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // backend/llvm/dyn.ts asks the identical question at the identical
         // point of its own record body. Restating `soft ? match : wide` in
         // two files is exactly the drift this gate is a warning about.
-        const wide = kindgateWideLane(E.kindgateDials, soft, shape)
-          ? E.recordWideHelper()
-          : null;
+        const dialWide = kindgateWideLane(E.kindgateDials, soft, shape);
+        const funcOnly = !dialWide && kindgateFuncLane(soft, shape);
+        const wide = dialWide || funcOnly ? E.recordWideHelper() : null;
         // Ahead of the kind gate and the wide lane both: an origin is by
         // construction an OBJ copy of this exact shape, so neither has
         // anything to decide about it, and taking it here means a
@@ -2657,7 +2657,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           const kindOk = [
             `d->kind != SCR_DYN_OBJ`,
             ...(inst ? [`d->kind != SCR_DYN_OBJINST`] : []),
-            ...(wide ? [`!sc_dyn_rec_wideable(d)`] : []),
+            ...(wide ? [funcOnly ? `d->kind != SCR_DYN_FUNC` : `!sc_dyn_rec_wideable(d)`] : []),
           ].join(" && ");
           d.push(fail(`  `, "record.kind", kindOk, `NULL`));
           // VIEW GRANT, INSTANCE RECEIVER (hard builder only): the record is a view of the instance and
