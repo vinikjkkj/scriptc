@@ -24,6 +24,7 @@ import { flushMintOrder, mintPhaseControl, resetMintLog, setMintPhase } from "..
 import { flushFragmentCensus } from "./fragment-census.js";
 import { fenceDynRecordCasts } from "./dyn-record-fence.js";
 import { fenceNullProtoRecordCasts } from "./null-proto-fence.js";
+import { fenceSymbolRecordCrossings } from "./symbol-record-fence.js";
 import type { EnumRefill, NullProtoPatch, OwnKeyPatch, SlotFilledPatch } from "./ir-patch.js";
 import * as ts from "../ts7/adapter.js";
 import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
@@ -4133,6 +4134,13 @@ export class Lowerer {
         shapeGet: (id) => this.shapes.get(id),
         unionGet: (id) => this.unions.get(id),
       },
+      { irVersion: 4, sourceFile: this.entry.fileName, functions, classes: artifacts.classes, globals: this.globalsList } as unknown as IrModule,
+      (d) => this.pushDiag(d),
+    );
+    // A record with symbol-keyed members crossing into an untyped slot, in a program that reads symbol-keyed properties of untyped
+    // values (symbol-record-fence.ts): the read could not match the member by identity.
+    fenceSymbolRecordCrossings(
+      { shapeGet: (id) => this.shapes.get(id) },
       { irVersion: 4, sourceFile: this.entry.fileName, functions, classes: artifacts.classes, globals: this.globalsList } as unknown as IrModule,
       (d) => this.pushDiag(d),
     );
