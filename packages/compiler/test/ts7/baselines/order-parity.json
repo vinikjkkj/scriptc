@@ -12700,6 +12700,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24130-define-property-on-a-declared-field-reads-back.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24130-define-property-on-a-declared-field-reads-back.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2414-dowhile-continue-kill.ts": {
    "order": [
     "<repo>/tests/corpus/2414-dowhile-continue-kill.ts"
