@@ -1552,14 +1552,9 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
       // A module that opens with tsc's interop stamp (`Object.defineProperty(exports, "__esModule", { value: true })`) answers
       // `true` to `mod.__esModule` and lists it among its own property names, but not among its keys: the `__importDefault`
       // helper every tsc-compiled dependency runs reads it to choose between the module and `{ default: module }`. It is the
-      // first own property (the stamp is the module's first statement), made non-enumerable once the object exists.
+      // first own property (the stamp is the module's first statement): defined on the finished snapshot, non-enumerable
+      // as defineProperty's defaults make it; the runtime places it first (scr_hid_lead).
       const stamped = forRequire && dep.statements.some((st) => ts.isExpressionStatement(st) && isEsModuleStamp(st.expression));
-      if (stamped) {
-        fields.unshift({
-          key: { kind: "strLit", value: "__esModule", type: STRING, loc },
-          value: { kind: "dynFrom", value: { kind: "boolLit", value: true, type: BOOL, loc }, type: DYN, loc },
-        });
-      }
       // INTERNED, because Node answers the SAME namespace object for
       // every import of one module: measured on v25.9.0, two `import()`
       // sites of one package compare `===` true, and two fresh literals
@@ -1586,28 +1581,28 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
             loc,
           },
           ...(stamped
-            ? [{
-                kind: "exprStmt" as const,
-                expr: {
-                  kind: "libCall" as const,
-                  fn: "dyn.defineProp" as const,
-                  args: [
-                    { kind: "varRef" as const, localId: nsGid, type: DYN, loc },
-                    { kind: "strLit" as const, value: "__esModule", type: STRING, loc },
-                    {
-                      kind: "dynObjLit" as const,
-                      fields: [
-                        { key: { kind: "strLit" as const, value: "enumerable", type: STRING, loc }, value: { kind: "dynFrom" as const, value: { kind: "boolLit" as const, value: false, type: BOOL, loc }, type: DYN, loc } },
-                      ],
-                      type: DYN,
-                      loc,
-                    },
-                  ],
-                  type: DYN,
+            ? [
+                {
+                  kind: "exprStmt" as const,
+                  expr: {
+                    kind: "libCall" as const,
+                    fn: "dyn.defineProp" as const,
+                    args: [
+                      { kind: "varRef" as const, localId: nsGid, type: DYN, loc },
+                      { kind: "strLit" as const, value: "__esModule", type: STRING, loc },
+                      {
+                        kind: "dynObjLit" as const,
+                        fields: [{ key: { kind: "strLit" as const, value: "value", type: STRING, loc }, value: { kind: "dynFrom" as const, value: { kind: "boolLit" as const, value: true, type: BOOL, loc }, type: DYN, loc } }],
+                        type: DYN,
+                        loc,
+                      },
+                    ],
+                    type: DYN,
+                    loc,
+                  },
                   loc,
                 },
-                loc,
-              }]
+              ]
             : []),
           { kind: "assign", localId: builtGid, value: { kind: "boolLit", value: true, type: BOOL, loc }, loc },
         ],

@@ -13,6 +13,14 @@ const plain_1 = __importDefault(require("./plain.cjs"));
 console.log(Object.keys(stamped).join(), stamped.__esModule, "__esModule" in stamped, Object.hasOwn(stamped, "__esModule"));
 console.log(plain.__esModule, typeof plain);
 for (const k in stamped) console.log("key", k);
+// ...and it is the FIRST own name, ahead of every export, as the stamp is the module's first statement.
+console.log(Object.getOwnPropertyNames(stamped).join(), Reflect.ownKeys(stamped).join());
+console.log(Object.prototype.hasOwnProperty.call(stamped, "__esModule"), Object.prototype.hasOwnProperty.call(stamped, "twice"), Object.entries(stamped).length);
+// A property defined hidden before any member is first too; one defined after a member is not (and has no list here).
+const lead = {};
+Object.defineProperty(lead, "h", { value: 1 });
+lead.x = 2;
+console.log(Object.getOwnPropertyNames(lead).join(), Object.keys(lead).join());
 console.log(JSON.stringify(stamped));
 
 // The helper's two answers.

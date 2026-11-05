@@ -7377,6 +7377,13 @@ static bool scr_hid_configurable(const ScrDyn *q) { return scr_dyn_truthy(q->v.a
 static bool scr_hid_enumerable(const ScrDyn *q) {
   return q->v.arr.len >= 5 && scr_dyn_truthy(q->v.arr.items[4]);
 }
+/* The SIXTH element, written only by scr_dyn_obj_put_hidden: this non-enumerable property was created while the object had
+ * no member-table entry at all and every hidden property before it was likewise, so it stands BEFORE every enumerable key
+ * in JS's creation order. The lead entries are a prefix of the hidden table, which is what lets Object.getOwnPropertyNames
+ * place them without a creation counter (see scr_dyn_own_names_fence). */
+static bool scr_hid_lead(const ScrDyn *q) {
+  return q->v.arr.len >= 6 && scr_dyn_truthy(q->v.arr.items[5]);
+}
 
 /* Is this key's member-table entry an accessor SLOT rather than a value?
  * Pointer identity against the one immortal node, and nothing else — no
@@ -7753,6 +7760,11 @@ bool scr_dyn_obj_has_own_prop(const ScrDyn *d, const char *key, size_t key_len) 
          (d == scr_error_proto || scr_dyn_minted_proto_has_ctor(d));
 }
 
+/* A hidden property in the LEAD (scr_hid_lead): its creation position is known, before every member. */
+static bool scr_dyn_own_names_lead(const ScrDynEntry *e) {
+  return e->value != NULL && e->value->kind == SCR_DYN_ARR && scr_hid_lead(e->value);
+}
+
 /* The one hidden property whose CREATION POSITION this walk does know:
  * a minted prototype is BORN carrying `constructor`, before any member a
  * program can add, so it is own-key index 0 and every enumerable member
@@ -7790,7 +7802,25 @@ static bool scr_dyn_own_names_skip(const ScrDyn *d, const char *key, size_t key_
 static ScrDyn *scr_dyn_objwalk_key(const char *key, size_t key_len);
 void scr_dyn_own_names_ctor(ScrDyn *names, const ScrDyn *o) {
   if (names == NULL || names->kind != SCR_DYN_ARR) return;
-  if (!scr_dyn_minted_proto_has_ctor(o)) return;
+  if (!scr_dyn_minted_proto_has_ctor(o)) {
+    /* The non-enumerable properties created before any member (a module's `__esModule` stamp is the usual one) come first,
+     * in creation order = the hidden table's order; the keys walk produced everything after them. */
+    if (o == NULL || o->kind != SCR_DYN_OBJ || scr_dyn_ext(o)->hidden == NULL) return;
+    const ScrDyn *h = scr_dyn_ext(o)->hidden;
+    size_t lead = 0;
+    while (lead < h->v.obj.len && scr_dyn_own_names_lead(&h->v.obj.entries[lead])) lead++;
+    if (lead == 0) return;
+    size_t base = names->v.arr.len;
+    for (size_t i = 0; i < lead; i++) scr_dyn_arr_push(names, scr_dyn_objwalk_key(h->v.obj.entries[i].key, h->v.obj.entries[i].key_len));
+    ScrDyn **items = names->v.arr.items;
+    ScrDyn **tmp = (ScrDyn **)malloc(lead * sizeof *tmp);
+    if (tmp == NULL) scr_json_oom();
+    for (size_t i = 0; i < lead; i++) tmp[i] = items[base + i];
+    for (size_t i = base; i > 0; i--) items[i - 1 + lead] = items[i - 1];
+    for (size_t i = 0; i < lead; i++) items[i] = tmp[i];
+    free(tmp);
+    return;
+  }
   ScrStr *s = scr_str_new("constructor", 11);
   ScrDyn *v = scr_dyn_new_str(s); /* retains */
   scr_str_release(s);
@@ -7837,7 +7867,7 @@ void scr_dyn_own_names_fence(const ScrDyn *d) {
   size_t refusing = 0;
   for (size_t i = 0; i < scr_dyn_ext(d)->hidden->v.obj.len; i++) {
     const ScrDynEntry *e = &scr_dyn_ext(d)->hidden->v.obj.entries[i];
-    if (!scr_dyn_own_names_skip(d, e->key, e->key_len)) refusing++;
+    if (!scr_dyn_own_names_skip(d, e->key, e->key_len) && !scr_dyn_own_names_lead(e)) refusing++;
   }
   if (refusing == 0) return;
   ScrJsonBuf b;
@@ -7847,7 +7877,7 @@ void scr_dyn_own_names_fence(const ScrDyn *d) {
   size_t shown = 0;
   for (size_t i = 0; i < scr_dyn_ext(d)->hidden->v.obj.len; i++) {
     const ScrDynEntry *e = &scr_dyn_ext(d)->hidden->v.obj.entries[i];
-    if (scr_dyn_own_names_skip(d, e->key, e->key_len)) continue;
+    if (scr_dyn_own_names_skip(d, e->key, e->key_len) || scr_dyn_own_names_lead(e)) continue;
     if (shown++ > 0) scr_jb_puts(&b, ", ");
     scr_jb_putc(&b, '\'');
     scr_jb_write(&b, e->key, e->key_len);
@@ -7917,6 +7947,27 @@ static void scr_dyn_obj_put_hidden(ScrDyn *recv, const char *key, size_t key_len
    * over the other, so that one goes. */
   bool slot_held = scr_dyn_obj_entry_is_slot(recv, key, key_len);
   if (!slot_held) scr_dyn_obj_unset(recv, key, key_len);
+  {
+    /* Is this property in the LEAD (see scr_hid_lead)? A redefinition keeps the position it had. A new one is in the lead
+     * when no member-table entry exists (not even a slot) and the hidden property created last was in it too. */
+    const ScrDyn *hid = scr_dyn_ext(recv)->hidden;
+    const ScrDyn *old = scr_dyn_obj_get(hid, key, key_len);
+    bool lead = false;
+    if (!enumerable) {
+      if (old != NULL) {
+        lead = old->kind == SCR_DYN_ARR && scr_hid_lead(old);
+      } else if (recv->module_ns && key_len == 10 && memcmp(key, "__esModule", 10) == 0) {
+        /* A compiled module's require() snapshot is built from the module's exports AFTER its first statement, the interop
+         * stamp, defined this property: it is the first own property by construction. */
+        lead = hid->v.obj.len == 0;
+      } else if (recv->v.obj.len == 0) {
+        lead = hid->v.obj.len == 0 ||
+               (hid->v.obj.entries[hid->v.obj.len - 1].value->kind == SCR_DYN_ARR &&
+                scr_hid_lead(hid->v.obj.entries[hid->v.obj.len - 1].value));
+      }
+    }
+    scr_dyn_arr_push(ent, scr_dyn_new_bool(lead));
+  }
   scr_dyn_obj_set(scr_dyn_ext(recv)->hidden, key, key_len, ent); /* ownership moves in */
   /* …and CLAIM a position for a property that is enumerable and has none
    * yet. The claim is made at the end of the member table, which is
