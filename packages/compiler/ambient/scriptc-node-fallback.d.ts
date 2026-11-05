@@ -1383,6 +1383,8 @@ declare module "node:path/win32" {
  * both type worlds map to the same IR structure). */
 declare module "os" {
   export function platform(): string;
+  /* The compiled binary's own architecture ("x64", "arm64"): process.arch. */
+  export function arch(): string;
   export function homedir(): string;
   export function tmpdir(): string;
   /* uname(2)'s release field — Node's own implementation. */
