@@ -5024,7 +5024,11 @@ static void scr_net_dispatch(void) {
           }
         }
         if ((evs[i].events & SCRP_READABLE) && !scr_exc_pending() && s->fd >= 0) {
-          if (s->tops && !s->t_est) scr_net_sock_transport_pump(s);
+          if (s->connecting) {
+            /* Readiness on a socket still dialing without the write bit (a failed connect that the poller reports as
+             * hang-up alone) is the connect's verdict, not data: reading here would answer ENOTCONN for a refusal. */
+            scr_net_sock_connect_done(s);
+          } else if (s->tops && !s->t_est) scr_net_sock_transport_pump(s);
           else scr_net_sock_read(s);
         }
       }
