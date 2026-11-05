@@ -11181,6 +11181,12 @@ export class Lowerer {
     temp: (t: IrType) => IrLocal,
     isSimple: (e: IrExpr) => boolean,
   ): void {
+    // A member the object path cannot read (bytes, an instance, a promise) belongs to a shape that only struct views reach: no
+    // object stands behind its records, so the read is the source struct's slot or the record's own.
+    if (this.structViewShapes.has(e.shapeId) && !isJsonSafeType(e.type, (id) => this.shapes.get(id), (id) => this.unions.get(id))) {
+      this.viewRewriteSrcOnlyGet(e, temp, isSimple);
+      return;
+    }
     const loc = e.loc;
     const recT: IrType = { kind: "record", shapeId: e.shapeId };
     const stmts: IrStmt[] = [];

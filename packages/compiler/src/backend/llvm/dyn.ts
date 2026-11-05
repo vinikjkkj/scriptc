@@ -1101,7 +1101,8 @@ export class LlDyn {
     const st = mangleRecordStruct(srcShapeId);
     const srcT: IrType = { kind: "record", shapeId: srcShapeId };
     const { retain, release } = vAdapters(host, srcT);
-    const conv = this.toDynHelper(srcT);
+    const boxable = canConvertToDyn(srcT, (id) => host.recordsById.get(id), (id) => host.unionsById.get(id));
+    const conv = boxable ? this.toDynHelper(srcT) : "";
     host.declare(`declare ptr @scr_dyn_origin_mark(ptr, ptr, ptr, ptr, ptr)`);
     const offOf = (idx: number): string => `i64 ptrtoint (ptr getelementptr inbounds (%${st}, ptr null, i64 0, i32 ${idx}) to i64)`;
     const offs = to.fields.map((f) => {
@@ -1116,16 +1117,18 @@ export class LlDyn {
       `@${name}_off = internal constant [${Math.max(n, 1)} x i64] [${n === 0 ? "i64 0" : offs.map((o) => o).join(", ")}]`,
       `@${name}_ob = internal constant [${Math.max(n, 1)} x i8] [${n === 0 ? "i8 0" : bits.map((x) => `i8 ${x ? x.byte : 0}`).join(", ")}]`,
       `@${name}_obit = internal constant [${Math.max(n, 1)} x i8] [${n === 0 ? "i8 0" : bits.map((x) => `i8 ${x ? x.bit : 0}`).join(", ")}]`,
-      `define internal ptr @${name}_snap(ptr %p) ${FN_ATTRS} {`,
-      `  %r = call ptr @${conv}(ptr %p)`,
-      `  ret ptr %r`,
-      `}`,
-      `define internal ptr @${name}_cross(ptr %p) ${FN_ATTRS} {`,
-      `  %t = call ptr @${conv}(ptr %p)`,
-      `  %m = call ptr @scr_dyn_origin_mark(ptr %t, ptr %p, ptr ${host.cstr(typeKey(srcT))}, ptr ${retain}, ptr ${release})`,
-      `  ret ptr %m`,
-      `}`,
-      `@${name} = internal constant { i64, ptr, i64, ptr, ptr, ptr, ptr, ptr, ptr } { i64 ${n}, ptr @${name}_off, ${ownOff}, ptr @${name}_ob, ptr @${name}_obit, ptr ${retain}, ptr ${release}, ptr @${name}_snap, ptr @${name}_cross }`,
+      ...(boxable ? [
+        `define internal ptr @${name}_snap(ptr %p) ${FN_ATTRS} {`,
+        `  %r = call ptr @${conv}(ptr %p)`,
+        `  ret ptr %r`,
+        `}`,
+        `define internal ptr @${name}_cross(ptr %p) ${FN_ATTRS} {`,
+        `  %t = call ptr @${conv}(ptr %p)`,
+        `  %m = call ptr @scr_dyn_origin_mark(ptr %t, ptr %p, ptr ${host.cstr(typeKey(srcT))}, ptr ${retain}, ptr ${release})`,
+        `  ret ptr %m`,
+        `}`,
+      ] : []),
+      `@${name} = internal constant { i64, ptr, i64, ptr, ptr, ptr, ptr, ptr, ptr } { i64 ${n}, ptr @${name}_off, ${ownOff}, ptr @${name}_ob, ptr @${name}_obit, ptr ${retain}, ptr ${release}, ptr ${boxable ? `@${name}_snap` : "null"}, ptr ${boxable ? `@${name}_cross` : "null"} }`,
       `define internal ptr @${name}_view(ptr %p) ${FN_ATTRS} { ; the one view of this source in this shape`,
       `  %f = call ptr @scr_recsrc_find(ptr %p, ptr @${name})`,
       `  %has = icmp ne ptr %f, null`,

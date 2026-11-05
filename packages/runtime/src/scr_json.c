@@ -14807,15 +14807,28 @@ void scr_recsrc_own(const ScrDyn *slot, size_t idx) {
   const ScrRecSrc *r = scr_recsrc_of(slot);
   if (r->map->own_off >= 0 && r->map->own_bit[idx]) ((unsigned char *)r->src + r->map->own_off)[r->map->own_byte[idx]] |= r->map->own_bit[idx];
 }
+/* A struct view over a source with a member that has no dynamic form (a platform object): the surfaces that need a dynamic copy
+ * of the record (enumeration, JSON, inspect, crossing into untyped code) have none to give. Loud, never silent. */
+static ScrDyn *scr_rec_view_unboxable(void) {
+  static const char msg[] = "this record has a member with no dynamic form, so it cannot be enumerated, serialised or handed to untyped code through another type's view yet";
+  scr_throw_error_msg(SCR_ERR_ERROR, msg, sizeof msg - 1);
+  return scr_dyn_undefined();
+}
 ScrDyn *scr_rec_view_get(ScrDyn *slot) {
   if (slot == NULL) return scr_dyn_undefined();
   const ScrRecSrc *r = scr_recsrc_of(slot);
-  if (r != NULL) return r->map->snapshot(r->src);
+  if (r != NULL) {
+    if (r->map->snapshot == NULL) return scr_rec_view_unboxable();
+    return r->map->snapshot(r->src);
+  }
   return scr_dyn_retain(slot);
 }
 ScrDyn *scr_rec_view_cross(ScrDyn *slot) {
   const ScrRecSrc *r = scr_recsrc_of(slot);
-  if (r != NULL) return r->map->cross(r->src);
+  if (r != NULL) {
+    if (r->map->cross == NULL) return scr_rec_view_unboxable();
+    return r->map->cross(r->src);
+  }
   return scr_rec_view_get(slot);
 }
 void scr_rec_view_promote(ScrDyn **slot, ScrDyn *obj) {
