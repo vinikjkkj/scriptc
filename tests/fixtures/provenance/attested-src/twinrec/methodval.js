@@ -16,6 +16,9 @@ class Box {
   other(a, b) {
     return a - b;
   }
+  callHello() {
+    return this.hello();
+  }
   pick(flag) {
     return (flag ? this.total : this.other).bind(this);
   }
@@ -37,6 +40,7 @@ function scenario(log) {
   const shadowed = b.hello;
   log(typeof shadowed + " " + shadowed);
   log(attempt(() => b.hello.bind(b)));
+  log(attempt(() => b.hello()) + " | " + attempt(() => b.callHello()));
   b.put("total", (x, y) => x * y);
   const swapped = b.total;
   log(typeof swapped + " " + swapped(3, 4) + " " + b.pick(true)(3, 4) + " " + attempt(() => swapped.call(null, 2, 5)));
