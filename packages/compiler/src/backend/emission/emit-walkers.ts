@@ -1099,6 +1099,10 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           byIndex.forEach((f, i) => {
             if (i > 0) d.push(`  scr_jb_putc(b, ',');`);
             if (edgeable(f.type)) d.push(`  scr_jb_edge_idx(b, ${i});`);
+            // A position holding the undefined arm is an array slot, not a
+            // droppable key: JSON.stringify([1, undefined]) is `[1,null]`.
+            const utag = E.undefinedArmTag(f.type);
+            if (utag >= 0) d.push(`  if (v->${mangleField(f.name)}->tag == ${utag}) scr_jb_puts(b, "null"); else`);
             d.push(`  ${E.jsonWriteHelper(f.type)}(b, v->${mangleField(f.name)});`);
           });
           d.push(`  scr_jb_putc(b, ']');`);
