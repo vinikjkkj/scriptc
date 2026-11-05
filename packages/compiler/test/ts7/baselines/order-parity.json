@@ -12542,6 +12542,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24077-a-mutual-pair-differing-in-the-argument-of-a-named-member-keeps-each-level.ts": {
+   "order": [
+    "<repo>/tests/corpus/24077-a-mutual-pair-differing-in-the-argument-of-a-named-member-keeps-each-level.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24078-levels-alternating-the-argument-of-a-named-member-stay-apart.ts": {
+   "order": [
+    "<repo>/tests/corpus/24078-levels-alternating-the-argument-of-a-named-member-stay-apart.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24079-function-members-typed-by-the-level-keep-the-levels-layout.ts": {
+   "order": [
+    "<repo>/tests/corpus/24079-function-members-typed-by-the-level-keep-the-levels-layout.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24080-a-this-typed-by-the-level-reads-the-levels-own-layout.ts": {
+   "order": [
+    "<repo>/tests/corpus/24080-a-this-typed-by-the-level-reads-the-levels-own-layout.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24081-readonly-any-arrays-are-a-checked-dynamic-member.ts": {
+   "order": [
+    "<repo>/tests/corpus/24081-readonly-any-arrays-are-a-checked-dynamic-member.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2405-sibling-arm-narrow.ts": {
    "order": [
     "<repo>/tests/corpus/2405-sibling-arm-narrow.ts"
