@@ -5065,6 +5065,9 @@ ScrStr *scr_fn_text(const ScrClosure *c);
 /* The table text for a closure entry point, or NULL (no default). Installed by
  * scr_fn_texts_install in scr_fntext.c, so a program without the table keeps it NULL. */
 extern const char *(*scr_fn_text_row_hook)(const ScrClosure *c);
+/* Set when the first function own-property table exists: a function's own `toString`, run as ToString. NULL until then, so the
+ * always-linked renderer carries none of the dyn call machinery. */
+extern ScrStr *(*scr_fn_own_tostring_hook)(const ScrDyn *d);
 
 /* Object member. `key` is UTF-8 bytes, NUL-terminated for convenience,
  * and `key_len` excludes the NUL — duplicate keys were already collapsed
