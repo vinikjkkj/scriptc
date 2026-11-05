@@ -13,7 +13,7 @@ import { EMITTER_CELL_NAMES, GRAFTED_EMITTER_CELL_CLASSES, GRAFTED_EMITTER_CLASS
 import { lowerAbortControllerNew } from "./lower-abort.js";
 import { engineFunctionCtor } from "./lower-engine-fn.js";
 import { implicitDefaultInstance, implicitDetachedInstance, detachedThisClassOf, markDetachedThis, MAX_GENERIC_INSTANCES, inStrictCode, bindingNeverReassigned, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitInstanceLike, implicitMonoFile, omittedArgFor, type GenericFnInfo, type GenericInstance, type ParamShape, appendImplicitUndefinedReturn, bindArgumentsParams, bodyReadsArguments } from "./lower-calls.js";
-import { admitWeakTableIr, isGenericCallableMemberType, runtimeStreamClassOf, typeKey } from "../types.js";
+import { admitWeakTableIr, genResultRecord, isGenericCallableMemberType, runtimeStreamClassOf, typeKey } from "../types.js";
 import { cjsClassExprWholeExportOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
 import { pairedProtoClassInfoFor, pairedProtoClassOfValue, protoClassArmOn, protoClassInfoFor, protoClassOfNamespaceMember, protoDataGetterFns } from "./proto-class-consume.js";
 import { PoisonError, dynFallbackType, dynUndefinedExpr, fnValueCodeOfNode, newFnCtx, own } from "./lowerer.js";
@@ -140,7 +140,7 @@ export interface MethodSig {
   ret: IrType;
   abstract?: true;
   async?: true;
-  gen?: { yieldT: IrType; nextT: IrType };
+  gen?: { yieldT: IrType; nextT: IrType; resultShapeId?: string };
   /** The body reads `arguments` and DECLARES parameters: params is the one
    * trailing dynRest shape carrying the whole argument list, and the
    * prologue re-binds the declared names off it (bindArgumentsParams). A
@@ -4567,20 +4567,14 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           // overrideBelow can never flip), every call is a direct call the
           // emitter routes through the gen-spawn wrapper with `this` as
           // param 0 — the async-method precedent, generator form.
-          if (member.asteriskToken !== undefined && !ts.isPrivateIdentifier(member.name)) {
+          // A GENERIC generator method (own type parameters) keeps the
+          // fence: it owns no vtable slot and monomorphizes per call site.
+          if (member.asteriskToken !== undefined && member.typeParameters !== undefined) {
             L.unsupported(
               "SC1071",
               member,
-              "generator methods (a #private generator method compiles — privates never dispatch dynamically; or declare a module-level function* and call it from the method)",
+              "generic generator methods (a non-generic generator method compiles — or declare a module-level function* and call it from the method)",
             );
-          }
-          // An async #private generator (`async *#m()`) is still an async
-          // generator — the blanket SC1071 fence.
-          if (
-            member.asteriskToken !== undefined &&
-            member.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword)
-          ) {
-            L.unsupported("SC1071", member, "async generators (async function*)");
           }
           // An ABSTRACT method is a signature with no body — type-world,
           // except that it declares the vtable slot: calls through
@@ -4860,8 +4854,24 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           // and every call — direct by construction — enters through the
           // emitted gen-spawn wrapper, answering the suspended generator.
           if (member.asteriskToken !== undefined) {
-            if (ft.ret.kind !== "generator") L.badType(member.name, L.typeOf(member.name));
-            methods.set(mName, { params: shapes, ret: ft.ret, gen: { yieldT: ft.ret.yieldT, nextT: ft.ret.nextT } });
+            // The flavour must match the declaration: an async generator
+            // answers an AsyncGenerator, a sync one a Generator. An async
+            // generator also names the result record its settle thunk is
+            // typed by (genResultRecord already interned it: mapType
+            // required it before answering asyncGenerator).
+            const wantGen = asyncMember ? "asyncGenerator" : "generator";
+            if (ft.ret.kind !== wantGen) L.badType(member.name, L.typeOf(member.name));
+            const rec = ft.ret.kind === "asyncGenerator" ? genResultRecord(ft.ret.yieldT, ft.ret.retT, L.shapes, L.unions) : null;
+            if (ft.ret.kind === "asyncGenerator" && !rec) throw new Error("lowerer bug: mapped generator without a result record");
+            methods.set(mName, {
+              params: shapes,
+              ret: ft.ret,
+              gen: {
+                yieldT: ft.ret.yieldT,
+                nextT: ft.ret.nextT,
+                ...(rec ? { resultShapeId: rec.shapeId } : {}),
+              },
+            });
           } else {
             methods.set(mName, {
               params: shapes,
@@ -8081,7 +8091,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     // EMIT time (lowerClassMembers), which is where the emitted set is
     // decided — discovery may see a smaller graph, and a thunk it misses
     // is only missing from the reachable SET, never from the module.
-    if (own.async !== true || !inHierarchy(L, info)) return null;
+    if ((own.async !== true && own.gen === undefined) || !inHierarchy(L, info)) return null;
     return { own, slot };
   }
 
@@ -9904,15 +9914,17 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
     // ctx.generator, and every call (direct by construction — privates
     // never virtualize) enters through the emitted gen-spawn wrapper with
     // `this` in the argument pack, answering the suspended generator.
-    const genCh = sig.gen !== undefined && sig.ret.kind === "generator" ? sig.gen : null;
+    const genCh = sig.gen !== undefined && (sig.ret.kind === "generator" || sig.ret.kind === "asyncGenerator") ? sig.gen : null;
     const bodyReturn = isAsync && sig.ret.kind === "promise"
       ? sig.ret.inner
       : genCh !== null
         ? L.genBodyReturnType(sig.ret)
         : sig.ret;
     const fnCtx = newFnCtx(false, null, null, bodyReturn);
-    fnCtx.isAsync = isAsync;
+    fnCtx.isAsync = isAsync || sig.ret.kind === "asyncGenerator";
     if (genCh !== null) fnCtx.generator = genCh;
+    if (genCh !== null && bodyReturn.kind === "void") fnCtx.genMethodDoneFence = true;
+    if (genCh !== null) fnCtx.genMethodBody = true;
     L.fnStack.push(fnCtx);
     try {
       const thisLocal = L.declareThis(thisType);
@@ -9943,7 +9955,7 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
         body,
         loc: locOf(fnLike),
       };
-      if (isAsync) fn.async = true;
+      if (isAsync || (genCh !== null && sig.ret.kind === "asyncGenerator")) fn.async = true;
       if (genCh !== null) fn.generator = genCh;
       return fn;
     } finally {
