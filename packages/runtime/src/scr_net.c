@@ -5059,6 +5059,39 @@ static bool scr_net_dynh_name_is(const ScrDyn *name, const char *lit) {
          memcmp(name->v.str->data, lit, n) == 0;
 }
 
+/* removeListener / off / removeAllListeners over one list. `fn` NULL removes every entry; otherwise the LAST entry registered
+ * through the dyn surface with that very function (Node removes the most recently added instance). */
+static void scr_net_ls_remove_dyn(ScrNetLs *l, const ScrDyn *fn) {
+  if (fn == NULL) {
+    scr_net_ls_drop(l);
+    return;
+  }
+  for (size_t i = l->n; i > 0; i--) {
+    ScrNetL *e = &l->ls[i - 1];
+    if (!scr_dyn_listener_is(e->cb)) continue;
+    ScrDyn *have = scr_dyn_listener_fn(e->cb);
+    bool same = scr_dyn_strict_eq(have, fn);
+    scr_dyn_release(have);
+    if (!same) continue;
+    scr_closure_release(e->cb);
+    memmove(e, e + 1, (l->n - i) * sizeof *e);
+    l->n--;
+    return;
+  }
+}
+
+static ScrNetLs *scr_net_sock_ls_named(ScrNetSocket *s, const ScrDyn *name) {
+  if (scr_net_dynh_name_is(name, "data")) return &s->data_ls;
+  if (scr_net_dynh_name_is(name, "end")) return &s->end_ls;
+  if (scr_net_dynh_name_is(name, "close")) return &s->close_ls;
+  if (scr_net_dynh_name_is(name, "error")) return &s->err_ls;
+  if (scr_net_dynh_name_is(name, "connect")) return &s->conn_ls;
+  if (scr_net_dynh_name_is(name, "timeout")) return &s->timeout_ls;
+  if (scr_net_dynh_name_is(name, "readable")) return &s->readable_ls;
+  if (scr_net_dynh_name_is(name, "finish")) return &s->finish_ls;
+  return NULL;
+}
+
 static ScrDyn *scr_net_dynh_sock_invoke(void *h, ScrDyn *self, const char *method,
                                         ScrDyn *const *args, size_t argc, const char *what) {
   ScrNetSocket *s = (ScrNetSocket *)h;
@@ -5103,6 +5136,36 @@ static ScrDyn *scr_net_dynh_sock_invoke(void *h, ScrDyn *self, const char *metho
       scr_jb_puts(&b, "' on a dynamic Socket is not supported yet");
       scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
       return NULL;
+    }
+    return scr_dyn_retain(self);
+  }
+  if (strcmp(method, "removeListener") == 0 || strcmp(method, "off") == 0) {
+    const ScrDyn *name = argc > 0 ? args[0] : scr_dyn_undefined();
+    const ScrDyn *cb = argc > 1 ? args[1] : scr_dyn_undefined();
+    scr_dyn_check_listener(cb, "listener");
+    if (scr_exc_pending()) return NULL;
+    ScrNetLs *l = scr_net_sock_ls_named(s, name);
+    if (l == &s->data_ls && l->n > 0) s->flowing = true; /* a 'data' listener made the stream flow; removing it leaves it flowing */
+    if (l != NULL) scr_net_ls_remove_dyn(l, cb);
+    return scr_dyn_retain(self);
+  }
+  if (strcmp(method, "removeAllListeners") == 0) {
+    const ScrDyn *name = argc > 0 ? args[0] : scr_dyn_undefined();
+    if (name->kind == SCR_DYN_UNDEF) {
+      static const char *const all[] = {"data", "end", "close", "error", "connect", "timeout", "readable", "finish", NULL};
+      for (size_t i = 0; all[i]; i++) {
+        ScrStr *nm = scr_str_new(all[i], strlen(all[i]));
+        ScrDyn *nd = scr_dyn_new_str(nm);
+        scr_str_release(nm);
+        ScrNetLs *l = scr_net_sock_ls_named(s, nd);
+        if (l == &s->data_ls && l->n > 0) s->flowing = true;
+        if (l != NULL) scr_net_ls_remove_dyn(l, NULL);
+        scr_dyn_release(nd);
+      }
+    } else {
+      ScrNetLs *l = scr_net_sock_ls_named(s, name);
+      if (l == &s->data_ls && l->n > 0) s->flowing = true;
+      if (l != NULL) scr_net_ls_remove_dyn(l, NULL);
     }
     return scr_dyn_retain(self);
   }
@@ -5237,7 +5300,7 @@ static ScrDyn *scr_net_dynh_sock_invoke(void *h, ScrDyn *self, const char *metho
   {
     static const char *const known[] = {
       "address", "cork", "uncork", "read", "unpipe",
-      "off", "removeListener", "removeAllListeners", "emit", "prependListener",
+      "emit", "prependListener",
       "prependOnceListener", "listenerCount", "listeners", "resetAndDestroy", NULL };
     for (size_t i = 0; known[i]; i++) {
       if (strcmp(method, known[i]) == 0) {
