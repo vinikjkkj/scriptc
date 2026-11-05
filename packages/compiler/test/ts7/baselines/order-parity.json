@@ -12886,6 +12886,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24148-borrowed-method-value-runs-on-the-borrowers-instance.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24148-borrowed-method-value-runs-on-the-borrowers-instance.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24149-borrowed-method-with-untyped-parameters-on-the-borrowers-instance.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24149-borrowed-method-with-untyped-parameters-on-the-borrowers-instance.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2414-dowhile-continue-kill.ts": {
    "order": [
     "<repo>/tests/corpus/2414-dowhile-continue-kill.ts"

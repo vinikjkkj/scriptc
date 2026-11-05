@@ -25197,7 +25197,9 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
             ...(detach ? [] : [{ id: "self.0", name: "self", type: selfT, mutable: false }]),
             ...irParams.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
           ],
-          body: detach
+          body: cls === gfound.declarer.def.name && L.lateMethodBorrowers.size > 0
+            ? [...borrowerDispatchArms(L, gfound.declarer, method, irParams, base.returnType, loc), ...(detach ? [stmt] : [{ kind: "varDecl" as const, localId: "self.0", init: { kind: "dynCheck" as const, value: { kind: "libCall" as const, fn: "dyn.this" as const, args: [], type: DYN, loc }, type: selfT, loc }, loc }, stmt])]
+            : detach
             ? [stmt]
             : [{ kind: "varDecl", localId: "self.0", init: { kind: "dynCheck", value: { kind: "libCall", fn: "dyn.this", args: [], type: DYN, loc }, type: selfT, loc }, loc }, stmt],
           loc,
@@ -25212,6 +25214,39 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
       ? [...overrides].sort((a, b) => a.depth - b.depth).map((o) => ({ cls: o.cls.def.name, value: thunkOf(o.cls.def.name, o.inst) }))
       : [];
     return { own, overrides: ovs, fnT };
+  }
+
+/** The arms that send a call of a donor method's function value, made on a BORROWER's instance
+   * (`Execute.prototype.row = Query.prototype.row`), to the borrower's own copy of the body: Node shares ONE
+   * function between them and runs it against the receiver it is called on. A borrower whose copy has another
+   * signature is skipped. */
+  function borrowerDispatchArms(L: Lowerer, declarer: ClassInfo, method: string, irParams: IrParam[], ret: IrType, loc: SrcLoc): IrStmt[] {
+    const arms: IrStmt[] = [];
+    const donorDecl = declarer.decl?.members.find((m) => ts.isMethodDeclaration(m) && ts.isIdentifier(m.name) && m.name.text === method &&
+      ts.getModifiers(m)?.some((x) => x.kind === ts.SyntaxKind.StaticKeyword) !== true);
+    if (donorDecl === undefined) return arms;
+    for (const b of L.lateMethodBorrowers.get(donorDecl) ?? []) {
+      const bsig = b.info.methods.get(b.mName);
+      if (b.info === declarer || bsig === undefined || bsig.params.length !== irParams.length ||
+        bsig.params.some((bp, i) => !typeEquals(bp.type, irParams[i]!.type))) continue;
+      L.noteEdge(`%${b.info.def.name}.${b.mName}`);
+      const bSelfT: IrType = { kind: "object", className: b.info.def.name };
+      const rawThis = (): IrExpr => ({ kind: "libCall", fn: "dyn.this", args: [], type: DYN, loc });
+      const bArgs: IrExpr[] = irParams.map((p) => ({ kind: "varRef" as const, localId: p.localId, type: p.type, loc }));
+      const raw: IrExpr = {
+        kind: "call", callee: `%${b.info.def.name}.${b.mName}`,
+        args: [{ kind: "dynCheck", value: rawThis(), type: bSelfT, loc }, ...bArgs], type: bsig.ret, loc,
+      };
+      const bCall = typeEquals(bsig.ret, ret) ? raw : L.coerceToExpected(raw, ret);
+      arms.push({
+        kind: "if",
+        cond: { kind: "dynTest", test: "class", className: b.info.def.name, value: rawThis(), type: BOOL, loc },
+        then: [ret.kind === "void" ? { kind: "exprStmt", expr: bCall, loc } : { kind: "return", value: bCall, loc }],
+        else_: null,
+        loc,
+      });
+    }
+    return arms;
   }
 
 /** The detached-function closure of class method `method` of `info` (see
@@ -25236,6 +25271,10 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
     // A direct (non-virtual) thunk calls the declarer's DETACHED variant with the raw receiver, so
     // the receiver is checked at each `this` access. Null when no variant exists: keep the up-front check.
     const variant = virtual ? null : detachedMethodVariant(L, found.declarer, method);
+    // The ONE function Node shares between a donor and the classes that borrowed it
+    // (`Execute.prototype.row = Query.prototype.row`) runs against whatever receiver it is called on: a
+    // borrower's instance runs the borrower's copy of the body, not a failed Query check.
+    const borrowerArms: IrStmt[] = virtual ? [] : borrowerDispatchArms(L, found.declarer, method, irParams, found.sig.ret, loc);
     if (variant !== null && !L.liftedFns.some((f) => f.name === name)) {
       const raw: IrExpr = { kind: "libCall", fn: "dyn.this", args: [], type: DYN, loc };
       const args: IrExpr[] = irParams.map((p) => ({ kind: "varRef" as const, localId: p.localId, type: p.type, loc }));
@@ -25247,7 +25286,7 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
         params: irParams,
         returnType: found.sig.ret,
         locals: irParams.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
-        body: [found.sig.ret.kind === "void" ? { kind: "exprStmt", expr: call, loc } : { kind: "return", value: call, loc }],
+        body: [...borrowerArms, found.sig.ret.kind === "void" ? { kind: "exprStmt", expr: call, loc } : { kind: "return", value: call, loc }],
         loc,
       });
     }
@@ -25275,6 +25314,7 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
           ...irParams.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
         ],
         body: [
+          ...borrowerArms,
           {
             kind: "varDecl",
             localId: "self.0",
