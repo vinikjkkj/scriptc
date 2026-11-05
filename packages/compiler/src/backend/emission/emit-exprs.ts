@@ -7154,6 +7154,16 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_promise_adapt_get(${arg(0)}, ${arg(1)})`);
           case "promise.adaptPut":
             return finish(`scr_promise_adapt_put(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "promise.claim":
+            return finish(`scr_promise_claim(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "promise.payloadF64":
+            return finish(`scr_promise_payload_f64(${arg(0)})`);
+          case "promise.payloadBool":
+            return finish(`scr_promise_payload_bool(${arg(0)})`);
+          case "promise.payloadStr":
+            return finish(`scr_promise_payload_str(${arg(0)})`);
+          case "promise.payloadRef":
+            return finish(`(${cType(e.type).trim()})scr_promise_payload_ref(${arg(0)})`);
           case "async.awaitDyn":
             E.usesTimers = true; // the hop rides the loop
             // Through fiberOnly for the same reason async.hop is: a

@@ -6727,6 +6727,17 @@ export type IrLibFn =
   | "promise.adaptHas"
   | "promise.adaptGet"
   | "promise.adaptPut"
+  /** Declaration claim of a promise whose payload representation differs
+   * (scr_promise_claim): args (source promise, adapter id, closure of the
+   * conversion helper); answers the derived promise +1, memoised per
+   * (source, id), settling inside the source's own settle. The helper
+   * reads the settled payload with the four accessors below (no await,
+   * so it returns an already-settled promise). None throws. */
+  | "promise.claim"
+  | "promise.payloadF64"
+  | "promise.payloadBool"
+  | "promise.payloadStr"
+  | "promise.payloadRef"
   | "als.new"
   | "als.get"
   | "als.run"
