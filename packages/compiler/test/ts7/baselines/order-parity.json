@@ -13128,6 +13128,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24408-yield-star-forwards-throw-and-return-to-the-delegate.ts": {
+   "order": [
+    "<repo>/tests/corpus/24408-yield-star-forwards-throw-and-return-to-the-delegate.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24409-yield-star-in-a-generator-method-forwards-throw-and-return.ts": {
+   "order": [
+    "<repo>/tests/corpus/24409-yield-star-in-a-generator-method-forwards-throw-and-return.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2441-console-process-argv.ts": {
    "order": [
     "<repo>/tests/corpus/2441-console-process-argv.ts"
