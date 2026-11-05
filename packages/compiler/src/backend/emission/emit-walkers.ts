@@ -299,7 +299,10 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
         d.push(`  ${cDecl(p.type, `a${i}`)};`);
         d.push(`  {`);
         d.push(`    const ScrDyn *ad = ${i} < argc ? args[${i}] : scr_dyn_undefined();`);
-        if (p.type.kind === "dyn") {
+        if (rest.length === 1 && p.name === "%arguments" && p.type.kind === "dyn") {
+          // A method that reads `arguments` takes the whole argument list as one dyn array.
+          d.push(`    a${i} = scr_dyn_pack_args(args, argc);`);
+        } else if (p.type.kind === "dyn") {
           d.push(`    a${i} = scr_dyn_retain((ScrDyn *)ad);`);
         } else {
           d.push(`    ScrDynPath pp = { NULL, NULL, ${i} };`);

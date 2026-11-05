@@ -2150,6 +2150,14 @@ ScrDyn *scr_dyn_obj_proto_ref(const ScrDyn *d) {
  * through the engine's own [[Get]] and projected into a plain object the ordinary OBJ body then validates. An absent
  * member is not written; `all_own` (an index signature) also carries every own enumerable key. +1, or NULL with the
  * exception pending. */
+/* A method that reads `arguments` takes ONE dyn parameter holding every argument it was called with: the dyn array a
+ * member-table call hands it. +1. */
+ScrDyn *scr_dyn_pack_args(ScrDyn *const *args, size_t argc) {
+  ScrDyn *a = scr_dyn_new_arr();
+  for (size_t i = 0; i < argc; i++) scr_dyn_arr_push(a, scr_dyn_retain((ScrDyn *)args[i]));
+  return a;
+}
+
 ScrDyn *scr_dyn_rec_from_jsval(const ScrDyn *d, const char *const *keys, const unsigned *lens, size_t n, bool all_own) {
   ScrDyn *o = scr_dyn_new_obj();
   if (all_own) {
