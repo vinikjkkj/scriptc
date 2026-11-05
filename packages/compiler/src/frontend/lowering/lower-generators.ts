@@ -8,9 +8,9 @@
  * g.next()` binds and reads flow. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, DYN, F64, IrExpr, IrStmt, IrType, SrcLoc, UNDEFINED_T, VOID, isUnitType, typeEquals } from "../../ir/nodes.js";
+import { BOOL, DYN, F64, IrExpr, IrStmt, IrType, SrcLoc, STRING, UNDEFINED_T, VOID, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { locOf } from "../program.js";
-import { genResultRecord } from "../types.js";
+import { genResultRecord, typeKey } from "../types.js";
 import { forOfVarTarget } from "./lower-stmts.js";
 import { lowerTpOptions, timerDelayArg } from "./lower-builtins.js";
 import { unitOnlyUnion } from "../types.js";
@@ -264,6 +264,117 @@ function extractYieldValue(
   const helper = L.unionRetagHelper(valueT.unionId, yt.unionId, loc, trappable);
   if (!helper) return null;
   return { kind: "call", callee: helper, args: [read], type: yt, loc };
+}
+
+/** A CLASS ITERABLE whose protocol method is a generator: the receiver declares (or inherits) `[Symbol.iterator]()`
+ * (`async` false) or `[Symbol.asyncIterator]()` (`async` true) taking no parameters and answering a Generator /
+ * AsyncGenerator, whether the method is itself a generator method or returns a generator object. The loop drives the
+ * generator the method answers, which is exactly what JS does (GetIterator calls the method once, then steps the
+ * result). Null when the class has no such method; callers keep their other arms. */
+export interface GenIterableInfo {
+  className: string;
+  genT: AnyGenType;
+}
+export function genIterableOf(L: Lowerer, t: IrType, async: boolean): GenIterableInfo | null {
+  if (t.kind !== "object") return null;
+  const info = L.classes.get(t.className);
+  if (!info) return null;
+  const found = L.findMethodOn(info, async ? "sym:asyncIterator" : "sym:iterator");
+  if (!found || found.sig.params.length !== 0) return null;
+  const ret = found.sig.ret;
+  if (ret.kind !== (async ? "asyncGenerator" : "generator")) return null;
+  return { className: t.className, genT: ret };
+}
+
+/** `recv[Symbol.iterator]()` / `recv[Symbol.asyncIterator]()` as an ordinary (possibly virtual) method call. */
+export function genIterableOpenCall(L: Lowerer, gi: GenIterableInfo, recv: IrExpr, async: boolean, loc: SrcLoc): IrExpr {
+  return L.accessorCall(gi.className, async ? "sym:asyncIterator" : "sym:iterator", recv, [], gi.genT, loc);
+}
+
+/** `[...bag]` / `f(...bag)` over a generator-method class iterable: the eager drain. An interned
+ * `%iter.drain.<n>(recv)` lifted function opens the generator and steps it to completion into a fresh element array
+ * (a generator that never finishes loops forever, exactly Node). `elemT` is the DESTINATION element (the yield type,
+ * or a union that has it as an arm). Null when the value is not such an iterable or the element does not coerce. */
+export function genIterableDrainCall(L: Lowerer, src: IrExpr, loc: SrcLoc, elemT?: IrType): IrExpr | null {
+  const gi = genIterableOf(L, src.type, false);
+  if (!gi) return null;
+  const genT = gi.genT as GenType;
+  if (genT.yieldT.kind === "void") return null;
+  if (genT.nextT.kind !== "undefinedT" && genT.nextT.kind !== "dyn") return null;
+  const outElem = elemT ?? genT.yieldT;
+  if (!typeEquals(outElem, genT.yieldT)) {
+    if (outElem.kind !== "union" || L.armTag(outElem.unionId, genT.yieldT) < 0) return null;
+  }
+  const outT: IrType = { kind: "array", elem: outElem };
+  const recT = resultRecordOf(L, genT);
+  const valueT = L.shapes.get(recT.shapeId)!.fields.find((f) => f.name === "value")!.type;
+  const key = `gen:${gi.className}:${typeKey(outElem)}`;
+  let name = L.iterDrainHelpers.get(key);
+  if (!name) {
+    const recvT: IrType = { kind: "object", className: gi.className };
+    const gRef: IrExpr = { kind: "varRef", localId: "g.0", type: genT, loc };
+    const outRef: IrExpr = { kind: "varRef", localId: "out.0", type: outT, loc };
+    const resRef: IrExpr = { kind: "varRef", localId: "res.0", type: recT, loc };
+    const valueRead: IrExpr = { kind: "recordGet", obj: resRef, shapeId: recT.shapeId, field: "value", type: valueT, loc };
+    const extracted = extractYieldValue(L, genT, valueT, valueRead, loc);
+    if (!extracted) return null;
+    name = `%iter.drain.${L.iterDrainHelpers.size}`;
+    L.iterDrainHelpers.set(key, name);
+    L.liftedFns.push({
+      name,
+      params: [{ localId: "r.0", name: "r", type: recvT }],
+      returnType: outT,
+      locals: [
+        { id: "r.0", name: "r", type: recvT, mutable: false },
+        { id: "g.0", name: "g", type: genT, mutable: false },
+        { id: "out.0", name: "out", type: outT, mutable: false },
+        { id: "res.0", name: "res", type: recT, mutable: true },
+      ],
+      body: [
+        { kind: "varDecl", localId: "out.0", init: { kind: "arrayLit", elems: [], type: outT, loc }, loc },
+        {
+          kind: "varDecl",
+          localId: "g.0",
+          init: genIterableOpenCall(L, gi, { kind: "varRef", localId: "r.0", type: recvT, loc }, false, loc),
+          loc,
+        },
+        {
+          kind: "while",
+          cond: { kind: "boolLit", value: true, type: BOOL, loc },
+          body: [
+            { kind: "varDecl", localId: "res.0", init: { kind: "genResume", mode: "next", gen: gRef, arg: null, type: recT, loc }, loc },
+            {
+              kind: "if",
+              cond: { kind: "recordGet", obj: resRef, shapeId: recT.shapeId, field: "done", type: BOOL, loc },
+              then: [{ kind: "return", value: outRef, loc }],
+              else_: null,
+              loc,
+            },
+            {
+              kind: "exprStmt",
+              expr: {
+                kind: "arrIntrinsic",
+                method: "push",
+                receiver: outRef,
+                args: [L.coerceToExpected(extracted, outElem)],
+                type: F64,
+                loc,
+              },
+              loc,
+            },
+          ],
+          loc,
+        },
+        {
+          kind: "throw",
+          value: { kind: "strLit", value: "scriptc: internal error: iterator drain fell through", type: STRING, loc },
+          loc,
+        },
+      ],
+      loc,
+    });
+  }
+  return { kind: "call", callee: name, args: [src], type: outT, loc };
 }
 
 /** `for (const x of gen)` — the desugared drive:

@@ -10,7 +10,7 @@ import { isShadowableMethodRead, lowerUnboundClassMethodValue, dynSymbolKeyOf, c
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { isEmitterMixinStatement } from "./lower-emitter-mixin.js";
-import { timersPromisesIntervalCallOf, lowerForAwaitTimersInterval, lowerForAwaitAsyncGenerator, lowerForOfGenerator, lowerYieldStarStatement } from "./lower-generators.js";
+import { timersPromisesIntervalCallOf, lowerForAwaitTimersInterval, lowerForAwaitAsyncGenerator, lowerForOfGenerator, lowerYieldStarStatement, genIterableOf, genIterableOpenCall } from "./lower-generators.js";
 import { RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, BIGINT, BOOL, isRefCounted, BYTES_U8, bytesValueType, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrLocal, type IrRecordShape, IrStmt, IrType, JSVAL, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import { PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, neverTaintedJsType, nodeThrowExpr, stmtUsesIsland, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { dtsTwinOwnedConst, wholeExportRootRebindable } from "./lower-modules.js";
@@ -10155,7 +10155,20 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
           }
         }
       }
-      L.unsupported("SC1070", stmt, "'for await' (async iteration over anything but process.stdin, readable streams, and async generators)");
+      // A CLASS whose `[Symbol.asyncIterator]()` answers an async generator (a generator method, or a method that
+      // returns one): GetIterator calls the method once and the loop steps what it answers.
+      {
+        const srcT = L.mapTypeOf(L.typeOf(stmt.expression));
+        const gi = srcT === null ? null : genIterableOf(L, srcT, true);
+        if (gi !== null && gi.genT.kind === "asyncGenerator") {
+          const recv = L.lowerExpr(stmt.expression);
+          if (recv.type.kind === "object") {
+            const it = genIterableOpenCall(L, gi, recv, true, locOf(stmt.expression));
+            return lowerForAwaitAsyncGenerator(L, stmt, it as IrExpr & { type: IrType & { kind: "asyncGenerator" } }, labels);
+          }
+        }
+      }
+      L.unsupported("SC1070", stmt, "'for await' (async iteration over anything but process.stdin, readable streams, async generators, and classes whose [Symbol.asyncIterator]() answers an async generator)");
     }
     // A stored numeric value iterator declared in this function keeps its
     // built-in protocol state in hidden locals (lowerVarStatement). The
@@ -10341,6 +10354,12 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
         // drive the same protocol with ordinary method calls.
         const cit = L.classIteratorOf(iterable.type);
         if (cit) return lowerForOfClassIterator(L, stmt, iterable, cit, labels);
+        // A class whose `[Symbol.iterator]()` answers a generator (a generator method, or a method that returns one).
+        const gi = genIterableOf(L, iterable.type, false);
+        if (gi !== null && gi.genT.kind === "generator") {
+          const it = genIterableOpenCall(L, gi, iterable, false, locOf(stmt.expression));
+          return lowerForOfGenerator(L, stmt, it as IrExpr & { type: IrType & { kind: "generator" } }, labels);
+        }
         // A declared [Symbol.iterator] whose shape classIteratorOf refused
         // (an `any`-typed iterator or result, a declared return()/throw()):
         // name the protocol, not the class.
