@@ -5575,7 +5575,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
                 }
                 // `this.f = null` anywhere in the class (a timer handle cleared in a method: mysql2's connectTimeout): the checker
                 // drops null from a JavaScript field's type, but Node holds it, so the slot takes the null arm.
-                if (isJsSourceFile(decl.getSourceFile()) && classAssignsNullTo(decl, name) && !isUnitType(type) && type.kind !== "dyn" &&
+                if (isJsSourceFile(decl.getSourceFile()) && classChangesToAnything(decl, name) && !isUnitType(type) && type.kind !== "dyn" &&
                     !(type.kind === "union" && L.armTag(type.unionId, NULL_T) >= 0)) {
                   if (L.dynConvertible(type)) type = DYN;
                 }
@@ -5688,7 +5688,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           if (isJsSourceFile(decl.getSourceFile())) {
             let armed = undefArmedFieldType(L, p, site);
             // `this.f = null` anywhere in the class: the checker drops null, Node holds it (mysql2's connectTimeout) - checked-dynamic slot.
-            if (armed !== null && classAssignsNullTo(decl, p.name) && L.dynConvertible(armed)) armed = DYN;
+            if (armed !== null && classChangesToAnything(decl, p.name) && L.dynConvertible(armed)) armed = DYN;
             if (armed !== null) {
               fields.set(p.name, armed);
               fieldOrder.push({ name: p.name, type: armed, initializer: undefined });
@@ -15074,6 +15074,29 @@ function classAssignsNullTo(decl: ts.ClassLikeDeclaration, name: string): boolea
       ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
       n.right.kind === ts.SyntaxKind.NullKeyword && ts.isPropertyAccessExpression(n.left) &&
       n.left.expression.kind === ts.SyntaxKind.ThisKeyword && n.left.name.text === name
+    ) {
+      found = true;
+      break;
+    }
+    n.forEachChild((c) => {
+      stack.push(c);
+    });
+  }
+  return found;
+}
+
+/** A field some statement of the class assigns the literal null or defines with Object.defineProperty(this, "<name>", ...) (whose value can be
+ * anything - pg's hidden password is a string or null): the checker's inferred type cannot be trusted to hold what Node stores. */
+function classChangesToAnything(decl: ts.ClassLikeDeclaration, name: string): boolean {
+  if (classAssignsNullTo(decl, name)) return true;
+  let found = false;
+  const stack: ts.Node[] = [decl];
+  while (stack.length > 0 && !found) {
+    const n = stack.pop()!;
+    if (
+      ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && n.expression.name.text === "defineProperty" &&
+      ts.isIdentifier(n.expression.expression) && n.expression.expression.text === "Object" && n.arguments.length === 3 &&
+      n.arguments[0]!.kind === ts.SyntaxKind.ThisKeyword && ts.isStringLiteral(n.arguments[1]!) && n.arguments[1]!.text === name
     ) {
       found = true;
       break;
