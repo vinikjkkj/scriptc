@@ -12814,6 +12814,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24140-class-instance-crosses-into-engine-code.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24140-class-instance-crosses-into-engine-code.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2414-dowhile-continue-kill.ts": {
    "order": [
     "<repo>/tests/corpus/2414-dowhile-continue-kill.ts"
