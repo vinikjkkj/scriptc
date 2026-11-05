@@ -2952,14 +2952,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       // normalizer shape): the slot has the overflow map's RC/JSON/dyn
       // plumbing, values arrive dyn or convert via dynFrom.
       if (!et || et.kind === "void") return null;
-      // A library's `[rows, FieldPacket[]]`: the declaration promises an
-      // array where the implementation answers `[rows, undefined]` for a
-      // statement without a result set. The slot takes the undefined arm so
-      // that Node's value crosses (reads give undefined, a dereference
-      // throws Node's TypeError). Only positions whose element type a
-      // library declaration file declares: a tuple of the program's own
-      // types keeps its exact slots.
-      if (et.kind === "array" && packageDeclaredArray(args[i]!, checker, ctx)) et = withUndefinedArm(et, unions) ?? et;
+      et = undefSlotWiden(et, args[i]!, ctx, checker);
       // A jsval MEMBER absorbs the tuple (bare jsval fields have no shape
       // slot — the record-field rule), exactly like record fields below.
       if (et.kind === "jsval") return JSVAL;
@@ -6792,6 +6785,46 @@ export function genResultRecord(
  * fields, tuple/array elements, variable slots) substitute unitOnlyUnion
  * for these; RETURN positions keep the VOID mapping (a void return is not
  * a value). */
+/** Element type names of the arrays a library declaration file spells as a
+ * TUPLE position (`[T, FieldPacket[]]`): the arrays its implementation may
+ * answer undefined for. Filled once per program load (program.ts). */
+export const undefArrayElemNames = new Set<string>();
+
+/** A slot typed by a library-declared array that Node's implementation may
+ * leave undefined (undefArrayElemNames) takes the undefined arm. */
+export function undefSlotWiden(ir: IrType, t: ts.Type, ctx: TypeMapperCtx, checker: ts.TypeChecker): IrType {
+  if (ir.kind !== "array" || undefArrayElemNames.size === 0) return ir;
+  if (!packageDeclaredArray(t, checker, ctx) || !undefArrayElemNames.has(arrayElemName(t, checker))) return ir;
+  return withUndefinedArm(ir, ctx.unions) ?? ir;
+}
+
+function arrayElemName(t: ts.Type, checker: ts.TypeChecker): string {
+  const elem = checker.getTypeArguments(t as ts.TypeReference)[0];
+  const sym = elem?.getAliasSymbol() ?? elem?.getSymbol();
+  return sym?.name ?? "";
+}
+
+/** Scan the program's library declaration files for tuple types whose
+ * element is `Name[]`, recording the names. */
+export function scanUndefArrayElems(program: ts.Program): void {
+  undefArrayElemNames.clear();
+  const visit = (n: ts.Node): void => {
+    if (ts.isTupleTypeNode(n)) {
+      for (const e of n.elements) {
+        const t = ts.isNamedTupleMember(e) ? e.type : e;
+        if (ts.isArrayTypeNode(t) && ts.isTypeReferenceNode(t.elementType) && ts.isIdentifier(t.elementType.typeName)) {
+          undefArrayElemNames.add(t.elementType.typeName.text);
+        }
+      }
+    }
+    ts.forEachChild(n, visit);
+  };
+  for (const sf of program.getSourceFiles()) {
+    if (!sf.isDeclarationFile || sf.fileName.includes("/@types/node/") || /\/typescript\/lib\//.test(sf.fileName)) continue;
+    visit(sf);
+  }
+}
+
 /** An array type whose element is declared by a library's own declaration
  * file (not the compiler lib, not @types/node). */
 function packageDeclaredArray(t: ts.Type, checker: ts.TypeChecker, ctx: TypeMapperCtx): boolean {
@@ -9573,6 +9606,7 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
               ? { ...tagOuterCtx(ctx), declMember: true }
               : ctx;
         pt = mapType(fieldTs, tryCtx);
+        if (pt !== null) pt = undefSlotWiden(pt, fieldTs, tryCtx, checker);
         // A field DECLARED in a `.d.ts` whose IMPLEMENTATION twin this build
         // COMPILES: the twin is the only producer the slot can ever have, and
         // it writes JS — an array literal, whose own inferred type is

@@ -59,7 +59,7 @@ import { provenanceAliasRewrite, readSourceForRewrite } from "./provenance-rewri
 import { setServedSourceText } from "../source-text.js";
 import { jsDesugar } from "./js-desugar.js";
 import { applySeedPins, computeSeedPins, type SeedPin } from "./seed-pin.js";
-import { programHasTsUntypedWeakNew, setTsUntypedWeakAdmission } from "./types.js";
+import { programHasTsUntypedWeakNew, setTsUntypedWeakAdmission, scanUndefArrayElems } from "./types.js";
 import { applyRetypePins, computeRetypePins, shiftRetypePins, type RetypePin } from "./retype-pin.js";
 import { computeEmptyCollectionPins } from "./empty-collection-pin.js";
 import { cjsLexerVisibleNames } from "./cjs-lexer.js";
@@ -538,6 +538,7 @@ export function loadProgram(
   }
   // The untyped WeakMap admission is decided on the FINAL load (see types.ts).
   setTsUntypedWeakAdmission(programHasTsUntypedWeakNew(load.program));
+  scanUndefArrayElems(load.program);
   return {
     ...load,
     dispose: () => {
