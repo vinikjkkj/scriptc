@@ -205,6 +205,7 @@ export type WidthLift =
   | { how: "objWidth" }
   | { how: "clsWidth" }
   | { how: "narrow" }
+  | { how: "narrowWrap"; tag: number; arm: IrType }
   | { how: "dynIn" }
   | { how: "dynOut" }
   | { how: "upcast" }
@@ -9646,6 +9647,10 @@ export class Lowerer {
       if (helper) {
         return { kind: "call", callee: helper, args: [expr], type: expected, loc: expr.loc };
       }
+      // A union with no unit arm into `A | undefined` where A is one of its arms (an erased generic's array-of-union
+      // element read into a tuple position a library declares `A | undefined`): the checked extraction of A, wrapped.
+      const nw = this.unionNarrowWrapPlan(expr.type.unionId, expected.unionId);
+      if (nw !== null) return this.applyWidthLift({ how: "narrowWrap", tag: nw.tag, arm: nw.arm }, expr, expected, expr.loc);
       return expr;
     }
     if (expr.type.kind === "void") {
@@ -10861,7 +10866,9 @@ export class Lowerer {
     }
     if (dst.kind === "union") {
       if (src.kind === "union") {
-        return this.unionRetagMappable(src.unionId, dst.unionId) ? { how: "retag" } : null;
+        if (this.unionRetagMappable(src.unionId, dst.unionId)) return { how: "retag" };
+        const nw = this.unionNarrowWrapPlan(src.unionId, dst.unionId);
+        return nw === null ? null : { how: "narrowWrap", tag: nw.tag, arm: nw.arm };
       }
       // A unit-typed source can't wrap here (unionWrap requires the
       // LITERAL unit — and no lowered shape carries a bare unit field).
@@ -11209,6 +11216,11 @@ export class Lowerer {
       case "wrap": {
         if (dst.kind !== "union") throw new Error("lowerer bug: wrap lift against a non-union");
         return { kind: "unionWrap", unionId: dst.unionId, tag: lift.tag, value, type: dst, loc };
+      }
+      case "narrowWrap": {
+        if (dst.kind !== "union" || value.type.kind !== "union") throw new Error("lowerer bug: narrowWrap lift shape");
+        const helper = this.narrowWrapHelper(value.type.unionId, dst.unionId, lift.tag, lift.arm, loc);
+        return { kind: "call", callee: helper, args: [value], type: dst, loc };
       }
       case "retag": {
         if (dst.kind !== "union" || value.type.kind !== "union") throw new Error("lowerer bug: retag lift shape");
@@ -13742,7 +13754,7 @@ export class Lowerer {
     // strictly smaller types), so any currying depth lowers.
     if (dst.kind === "func" && src.kind === "func") return this.cleanFuncAdaptable(src, dst);
     if (dst.kind === "union") {
-      if (src.kind === "union") return this.unionRetagMappable(src.unionId, dst.unionId);
+      if (src.kind === "union") return this.unionRetagMappable(src.unionId, dst.unionId) || this.unionNarrowWrapPlan(src.unionId, dst.unionId) !== null;
       if (src.kind === "void") return this.armTag(dst.unionId, UNDEFINED_T) >= 0;
       if (!isUnitType(src) && this.armTag(dst.unionId, src) >= 0) return true;
       // A promise whose payload converts into the union's ONE promise arm
@@ -15296,6 +15308,74 @@ export class Lowerer {
    * unchecked unionNarrow would misread the payload where JS lets the
    * impossible value flow on). Null when the target isn't a non-unit arm
    * of the union — those uses keep their erasure/fences. */
+  /** `U` (at most an undefined unit arm) into `A | undefined` where A is one of U's arms: the arm's tag in the destination, else null. */
+  unionNarrowWrapPlan(srcId: string, dstId: string): { tag: number; arm: IrType } | null {
+    const src = this.unions.get(srcId);
+    const dst = this.unions.get(dstId);
+    if (!src || !dst || dst.arms.length !== 2 || src.arms.some((a) => isUnitType(a) && a.kind !== "undefinedT")) return null;
+    if (!dst.arms.some((a) => a.kind === "undefinedT")) return null;
+    const arm = dst.arms.find((a) => !isUnitType(a));
+    if (arm === undefined || this.armTag(srcId, arm) < 0) return null;
+    const tag = this.armTag(dstId, arm);
+    return tag < 0 ? null : { tag, arm };
+  }
+
+  /** Interned `%union.narrowwrap.<n>(u)`: `U` into `A | undefined` -- the undefined arm stays undefined, the A arm is
+   * extracted and wrapped, and any other arm (a value the declaration said this position never holds) throws the catchable
+   * TypeError of a checked extraction. */
+  narrowWrapHelper(fromId: string, toId: string, dstTag: number, arm: IrType, loc: SrcLoc): string {
+    const key = `nw:${fromId}:${toId}`;
+    const existing = this.narrowHelpers.get(key);
+    if (existing) return existing;
+    const name = `%union.narrowwrap.${this.narrowHelpers.size}`;
+    this.narrowHelpers.set(key, name);
+    const from = this.unions.get(fromId)!;
+    const fromT: IrType = { kind: "union", unionId: fromId };
+    const toT: IrType = { kind: "union", unionId: toId };
+    const u: IrExpr = { kind: "varRef", localId: "u.0", type: fromT, loc };
+    const armTag = this.armTag(fromId, arm);
+    const srcUndef = this.armTag(fromId, UNDEFINED_T);
+    const dstUndef = this.armTag(toId, UNDEFINED_T);
+    const body: IrStmt[] = [];
+    if (srcUndef >= 0) {
+      body.push({
+        kind: "if",
+        cond: { kind: "unionIsTag", unionId: fromId, tag: srcUndef, negated: false, value: u, type: BOOL, loc },
+        then: [{
+          kind: "return",
+          value: { kind: "unionWrap", unionId: toId, tag: dstUndef, value: { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc }, type: toT, loc },
+          loc,
+        }],
+        else_: null,
+        loc,
+      });
+    }
+    from.arms.forEach((a, i) => {
+      if (i === armTag || i === srcUndef) return;
+      body.push({
+        kind: "if",
+        cond: { kind: "unionIsTag", unionId: fromId, tag: i, negated: false, value: u, type: BOOL, loc },
+        then: [strandTrap(`a '${this.fmt(a)}' value is not representable in the target union (a value narrowed or asserted past it still held it)`, loc)],
+        else_: null,
+        loc,
+      });
+    });
+    body.push({
+      kind: "return",
+      value: { kind: "unionWrap", unionId: toId, tag: dstTag, value: { kind: "unionNarrow", unionId: fromId, tag: armTag, value: u, type: arm, loc }, type: toT, loc },
+      loc,
+    });
+    this.liftedFns.push({
+      name,
+      params: [{ localId: "u.0", name: "u", type: fromT }],
+      returnType: toT,
+      locals: [{ id: "u.0", name: "u", type: fromT, mutable: true }],
+      body,
+      loc,
+    });
+    return name;
+  }
+
   narrowedArmHelper(fromId: string, target: IrType, loc: SrcLoc): string | null {
     const from = this.unions.get(fromId);
     if (!from || isUnitType(target)) return null;
