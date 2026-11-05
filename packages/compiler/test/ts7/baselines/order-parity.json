@@ -12586,6 +12586,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24125-async-js-methods-bound-as-listeners.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24125-async-js-methods-bound-as-listeners.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2413-dowhile-kill-renarrow.ts": {
    "order": [
     "<repo>/tests/corpus/2413-dowhile-kill-renarrow.ts"
