@@ -2378,6 +2378,94 @@ function nullProtoLiteralEdits(fileName: string, text: string): string | null {
   return out + text.slice(at);
 }
 
+/* A `let x;` / `var x;` (no initializer, no annotation, no JSDoc) that a NESTED FUNCTION assigns and the declaring scope reads afterwards.
+ *
+ * tsc types such a declaration with its flow type: at `return x` after `f()` (which assigns x in a closure) the type is `undefined`,
+ * because closure assignments are invisible to flow analysis. The function's inferred return type is then `undefined`, the returned value is
+ * dropped and the call answers undefined where Node answers what the closure stored (measured: lab/p3/lo2.cjs, a silent wrong answer).
+ * The declaration is rewritten to `let x = /** @type {any} *\/ (undefined);` - the same runtime value, a declared type `any` that no
+ * assignment narrows - so every later read is the checked-dynamic value the closure wrote. Only declarations a closure assigns are touched,
+ * so every other `let x;` keeps its flow type.
+ *
+ * Purely syntactic (typescript5 island): "assigned in a nested function" is decided by name within the declaring block, skipping nested
+ * functions that declare the same name themselves. */
+const CLOSURE_LET_PREFILTER = /\b(?:let|var)\s+[A-Za-z_$][\w$]*\s*(?:[;,]|=\s*(?:undefined|null|void\b))/;
+
+function declaresName(fn: ts.Node, name: string): boolean {
+  let found = false;
+  const walk = (x: ts.Node): void => {
+    if (found) return;
+    if (ts.isParameter(x) && ts.isIdentifier(x.name) && x.name.text === name) { found = true; return; }
+    if (ts.isVariableDeclaration(x) && ts.isIdentifier(x.name) && x.name.text === name) { found = true; return; }
+    if ((ts.isFunctionDeclaration(x) || ts.isClassDeclaration(x)) && x.name !== undefined && x.name.text === name) { found = true; return; }
+    ts.forEachChild(x, walk);
+  };
+  ts.forEachChild(fn, walk);
+  return found;
+}
+
+function closureAssignedLetEdits(fileName: string, text: string): string | null {
+  if (!CLOSURE_LET_PREFILTER.test(text)) return null;
+  const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const edits: Edit[] = [];
+  const isAssign = (b: ts.BinaryExpression): boolean =>
+    b.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && b.operatorToken.kind <= ts.SyntaxKind.LastAssignment;
+  const visit = (n: ts.Node): void => {
+    if (ts.isVariableStatement(n)) {
+      const list = n.declarationList;
+      const kindOk = (list.flags & ts.NodeFlags.Const) === 0;
+      const lead = text.slice(Math.max(0, n.getFullStart()), n.getStart(sf));
+      if (kindOk && !/\/\*\*/.test(lead)) {
+        // the scope the declaration lives in: the nearest enclosing block, source file or function body
+        let scope: ts.Node = n.parent;
+        if ((list.flags & ts.NodeFlags.Let) === 0) {
+          while (scope.parent !== undefined && !ts.isFunctionLike(scope) && !ts.isSourceFile(scope)) scope = scope.parent;
+        }
+        for (const d of list.declarations) {
+          if (!ts.isIdentifier(d.name) || d.type !== undefined) continue;
+          // no initializer, or one that only repeats the unit the flow type already believes (undefined, void 0, null)
+          const init = d.initializer;
+          const unitInit =
+            init !== undefined &&
+            ((ts.isIdentifier(init) && init.text === "undefined") || init.kind === ts.SyntaxKind.NullKeyword ||
+              (ts.isVoidExpression(init) && ts.isNumericLiteral(init.expression)));
+          if (init !== undefined && !unitInit) continue;
+          const name = d.name.text;
+          let assignedInClosure = false;
+          const walk = (x: ts.Node, depth: number): void => {
+            if (assignedInClosure) return;
+            if (depth > 0 && ts.isFunctionLike(x) && declaresName(x, name)) return;
+            const deeper = ts.isFunctionLike(x) && x !== scope ? depth + 1 : depth;
+            if (deeper > 0) {
+              if (ts.isBinaryExpression(x) && isAssign(x) && ts.isIdentifier(x.left) && x.left.text === name) { assignedInClosure = true; return; }
+              if ((ts.isPrefixUnaryExpression(x) || ts.isPostfixUnaryExpression(x)) &&
+                  (x.operator === ts.SyntaxKind.PlusPlusToken || x.operator === ts.SyntaxKind.MinusMinusToken) &&
+                  ts.isIdentifier(x.operand) && x.operand.text === name) { assignedInClosure = true; return; }
+            }
+            ts.forEachChild(x, (c) => walk(c, deeper));
+          };
+          ts.forEachChild(scope, (c) => walk(c, 0));
+          if (assignedInClosure) {
+            if (init === undefined) edits.push({ start: d.name.getEnd(), end: d.name.getEnd(), text: " = /** @type {any} */ (undefined)" });
+            else edits.push({ start: init.getStart(sf), end: init.getEnd(), text: "/** @type {any} */ (" + text.slice(init.getStart(sf), init.getEnd()) + ")" });
+          }
+        }
+      }
+    }
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  if (edits.length === 0) return null;
+  edits.sort((a, b) => a.start - b.start);
+  let out = "";
+  let at = 0;
+  for (const ed of edits) {
+    out += text.slice(at, ed.start) + ed.text;
+    at = ed.end;
+  }
+  return out + text.slice(at);
+}
+
 export function jsDesugar(fileName: string, text: string): string | null {
   if (!/\.(?:c?js)$/.test(fileName) || fileName.endsWith(".d.ts")) return null;
   {
@@ -2411,6 +2499,10 @@ export function jsDesugar(fileName: string, text: string): string | null {
   {
     const argsPack = argumentsPackEdits(fileName, text);
     if (argsPack !== null) return jsDesugar(fileName, argsPack) ?? argsPack;
+  }
+  {
+    const closureLet = closureAssignedLetEdits(fileName, text);
+    if (closureLet !== null) return jsDesugar(fileName, closureLet) ?? closureLet;
   }
   {
     const deferredNew = deferredNewLetEdits(fileName, text);
