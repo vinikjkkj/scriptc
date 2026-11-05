@@ -4134,13 +4134,22 @@ export type IrLibFn =
   | "sym.toString"
   /** Symbol-KEYED properties over a checked-dynamic receiver (scr_symbol.c): arg 0 the receiver dyn, arg 1 the symbol key,
    * borrowed. dynGet answers +1 (undefined when absent; walks the prototype chain), dynSet stores (arg 2 the value),
-   * dynHas is `in`, dynHasOwn Object.hasOwn, dynTag is `recv[Symbol.toStringTag]` (arg 0 the receiver; the built-in tag of its kind), dynGetOpt is the optional-chain read (a nullish receiver answers undefined), dynGetSelf / dynSetSelf (+Sloppy) take the receiver an accessor runs with as a last argument and hasAcc asks whether the
+   * dynHas is `in`, dynHasOwn Object.hasOwn, isSym / any* serve a dynamic key whose static type is not a symbol: isSym tests a dyn value for a Symbol handle, and anySet / anySetSloppy / anyDelete / anyHas /
+   * anyHasOwn / anyDefine take (receiver, the key as a dyn, the key already converted to a string, ...rest) and route a symbol key to the symbol
+   * table and any other key to the string-keyed operation they replace. dynTag is `recv[Symbol.toStringTag]` (arg 0 the receiver; the built-in tag of its kind), dynGetOpt is the optional-chain read (a nullish receiver answers undefined), dynGetSelf / dynSetSelf (+Sloppy) take the receiver an accessor runs with as a last argument and hasAcc asks whether the
    * table holds an accessor row (a class instance keeps its symbol table on a bag, but its accessors run with the instance);
    * dynDelete `delete` (bool; the Sloppy twins of set and delete are the non-strict file's quiet answers), dynDefine is Object.defineProperty (arg 2 the
    * descriptor object; answers the receiver, +1), dynOwnKeys / dynOwnEnumKeys the +1 symbol[]. All
    * can throw Node's TypeErrors on a nullish receiver. */
   | "sym.dynGet"
   | "sym.dynSet"
+  | "sym.isSym"
+  | "sym.anySet"
+  | "sym.anySetSloppy"
+  | "sym.anyDelete"
+  | "sym.anyHas"
+  | "sym.anyHasOwn"
+  | "sym.anyDefine"
   | "sym.dynGetSelf"
   | "sym.dynGetOpt"
   | "sym.dynTag"
@@ -14573,6 +14582,12 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "dyn.keySet",
   "dyn.keySetSloppy",
   "sym.dynGet",
+  "sym.anySet",
+  "sym.anySetSloppy",
+  "sym.anyDelete",
+  "sym.anyHas",
+  "sym.anyHasOwn",
+  "sym.anyDefine",
   "sym.dynGetSelf",
   "sym.dynGetOpt",
   "sym.dynTag",

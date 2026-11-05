@@ -89,6 +89,14 @@ export function emitStableReceiver(E: CEmitter, receiver: IrExpr, following: IrE
   return E.emitExpr(receiver);
 }
 
+/** A read of an initialised plain (unboxed, non-TDZ) dyn local of the current function: the operation that looks at it can borrow
+ * the variable itself instead of a retained copy. */
+function borrowedDynLocal(E: CEmitter, a: IrExpr): boolean {
+  if (a.kind !== "varRef" || a.nullTest || a.type.kind !== "dyn") return false;
+  const local = E.currentLocals.get(a.localId);
+  return local !== undefined && !local.boxed && !local.tdz && !E.globalsById.has(a.localId);
+}
+
 export function emitExpr(E: CEmitter, e: IrExpr): Temp {
     switch (e.kind) {
       case "numLit":
@@ -3678,6 +3686,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           E.emitPendingCheck();
           args[1] = E.emitExpr(e.args[1]!);
           args[3] = E.emitExpr(e.args[3]!);
+        } else if (e.fn === "sym.isSym" && borrowedDynLocal(E, e.args[0]!)) {
+          // The kind test only looks: a plain local is read where it lives, with no retain / release pair around it.
+          args.push({ name: mangleLocal((e.args[0] as { localId: string }).localId), type: e.args[0]!.type });
         } else {
           for (const a of e.args) args.push(E.emitExpr(a));
         }
@@ -4354,6 +4365,20 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_dyn_sym_set_self_sloppy(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
           case "sym.hasAcc":
             return finish(`scr_dyn_sym_has_acc(${arg(0)})`);
+          case "sym.isSym":
+            return finish(`(${arg(0)}->kind == SCR_DYN_HANDLE && ${arg(0)}->v.handle.tag == SCR_DYNH_SYMBOL)`);
+          case "sym.anySet":
+            return finish(`scr_dyn_any_set(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
+          case "sym.anySetSloppy":
+            return finish(`scr_dyn_any_set_sloppy(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
+          case "sym.anyDelete":
+            return finish(`scr_dyn_any_delete(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "sym.anyHas":
+            return finish(`scr_dyn_any_has(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "sym.anyHasOwn":
+            return finish(`scr_dyn_any_has_own(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "sym.anyDefine":
+            return finish(`scr_dyn_any_define(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
           case "sym.dynSet":
             return finish(`scr_dyn_sym_set(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "sym.dynSetSloppy":

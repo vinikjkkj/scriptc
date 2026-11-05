@@ -7065,7 +7065,15 @@ ScrDyn *scr_dyn_sym_get_opt(ScrDyn *recv, ScrSym *k);
 ScrDyn *scr_dyn_sym_tag(ScrDyn *recv); /* recv?.[Symbol.toStringTag]: the built-in tag string of the kind, else undefined (+1) */ /* `recv?.[k]`: a nullish receiver answers undefined */
 void scr_dyn_sym_set_self(ScrDyn *recv, ScrSym *k, ScrDyn *v, ScrDyn *self);
 void scr_dyn_sym_set_self_sloppy(ScrDyn *recv, ScrSym *k, ScrDyn *v, ScrDyn *self);
-bool scr_dyn_sym_has_acc(ScrDyn *recv); /* the table on `recv` holds an accessor row */
+bool scr_dyn_sym_has_acc(ScrDyn *recv);
+/* A dynamic key whose static type is not a symbol: (receiver, the key as a dyn, the same key converted to a string, ...) -- a symbol key
+ * takes the symbol table, anything else the string-keyed operation named. Everything borrowed, like the operation it replaces. */
+void scr_dyn_any_set(ScrDyn *recv, ScrDyn *key, ScrStr *keystr, ScrDyn *v);
+void scr_dyn_any_set_sloppy(ScrDyn *recv, ScrDyn *key, ScrStr *keystr, ScrDyn *v);
+bool scr_dyn_any_delete(ScrDyn *recv, ScrDyn *key, ScrStr *keystr);
+bool scr_dyn_any_has(ScrDyn *recv, ScrDyn *key, ScrStr *keystr);
+bool scr_dyn_any_has_own(ScrDyn *recv, ScrDyn *key, ScrStr *keystr);
+ScrDyn *scr_dyn_any_define(ScrDyn *recv, ScrDyn *key, ScrStr *keystr, ScrDyn *desc); /* the table on `recv` holds an accessor row */
 void scr_dyn_sym_set(ScrDyn *recv, ScrSym *k, ScrDyn *v);
 bool scr_dyn_sym_has(ScrDyn *recv, ScrSym *k);     /* `k in recv`: own, then the chain */
 bool scr_dyn_sym_has_own(ScrDyn *recv, ScrSym *k); /* Object.hasOwn(recv, k) */

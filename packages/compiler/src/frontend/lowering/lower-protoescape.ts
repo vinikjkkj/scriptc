@@ -19,9 +19,9 @@ export interface ProtoEscape {
 
 type N = Record<string, unknown> & { kind?: string; loc?: SrcLoc };
 
-const MUTATORS = new Set(["dyn.keySet", "dyn.keySetSloppy", "dyn.keyDelete", "sym.dynSet", "sym.dynSetSloppy", "sym.dynSetSelf", "sym.dynSetSelfSloppy", "sym.dynDelete", "sym.dynDeleteSloppy", "sym.dynDefine", "dyn.defineProp", "dyn.defineProps", "dyn.assign", "dyn.assignAll", "dyn.reflectSet", "dyn.reflectDelete", "dyn.reflectDefine"]);
+const MUTATORS = new Set(["dyn.keySet", "dyn.keySetSloppy", "dyn.keyDelete", "sym.dynSet", "sym.dynSetSloppy", "sym.anySet", "sym.anySetSloppy", "sym.anyDelete", "sym.anyDefine", "sym.dynSetSelf", "sym.dynSetSelfSloppy", "sym.dynDelete", "sym.dynDeleteSloppy", "sym.dynDefine", "dyn.defineProp", "dyn.defineProps", "dyn.assign", "dyn.assignAll", "dyn.reflectSet", "dyn.reflectDelete", "dyn.reflectDefine"]);
 const READ_ONLY = new Set([
-  "sym.dynGet", "sym.dynTag", "sym.dynGetOpt", "sym.dynGetSelf", "sym.hasAcc", "sym.dynAppendSyms", "sym.dynHas", "sym.dynHasOwn", "sym.dynOwnKeys", "sym.dynOwnEnumKeys", "dyn.objKeys", "dyn.objValues", "dyn.objEntries", "dyn.hasOwn", "dyn.hasKey", "dyn.typeof", "dyn.instanceOf", "dyn.toString",
+  "sym.dynGet", "sym.isSym", "sym.anyHas", "sym.anyHasOwn", "sym.dynTag", "sym.dynGetOpt", "sym.dynGetSelf", "sym.hasAcc", "sym.dynAppendSyms", "sym.dynHas", "sym.dynHasOwn", "sym.dynOwnKeys", "sym.dynOwnEnumKeys", "dyn.objKeys", "dyn.objValues", "dyn.objEntries", "dyn.hasOwn", "dyn.hasKey", "dyn.typeof", "dyn.instanceOf", "dyn.toString",
   "dyn.toStringCoerce", "dyn.objectToString", "dyn.forInKeys", "dyn.forInCertain", "dyn.forInPlain", "dyn.forInAccessor",
   "dyn.ownNamesFence", "dyn.ownNamesCtor", "dyn.arrLen", "dyn.looseEq", "dyn.numberOf", "dyn.toNumber", "dyn.errInstanceof",
 ]);

@@ -1097,3 +1097,26 @@ static void scr_dsym_trace_table(const ScrDynSymTab *t, ScrTraceVisit visit, voi
   for (uint32_t i = 0; i < t->len; i++) visit(t->e[i].val, ctx);
 }
 
+
+/* ── a dynamic key of unknown static type (see scr_runtime.h): a symbol handle takes the table, everything else the string op ───── */
+
+void scr_dyn_any_set(ScrDyn *recv, ScrDyn *key, ScrStr *keystr, ScrDyn *v) {
+  if (scr_any_is_sym(key)) scr_dyn_sym_set(recv, SCR_ANY_SYM(key), v);
+  else scr_dyn_key_set(recv, keystr, v);
+}
+void scr_dyn_any_set_sloppy(ScrDyn *recv, ScrDyn *key, ScrStr *keystr, ScrDyn *v) {
+  if (scr_any_is_sym(key)) scr_dyn_sym_set_sloppy(recv, SCR_ANY_SYM(key), v);
+  else scr_dyn_key_set_sloppy(recv, keystr, v);
+}
+bool scr_dyn_any_delete(ScrDyn *recv, ScrDyn *key, ScrStr *keystr) {
+  return scr_any_is_sym(key) ? scr_dyn_sym_delete(recv, SCR_ANY_SYM(key)) : scr_dyn_key_delete(recv, keystr);
+}
+bool scr_dyn_any_has(ScrDyn *recv, ScrDyn *key, ScrStr *keystr) {
+  return scr_any_is_sym(key) ? scr_dyn_sym_has(recv, SCR_ANY_SYM(key)) : scr_dyn_has_key_full(recv, keystr);
+}
+bool scr_dyn_any_has_own(ScrDyn *recv, ScrDyn *key, ScrStr *keystr) {
+  return scr_any_is_sym(key) ? scr_dyn_sym_has_own(recv, SCR_ANY_SYM(key)) : scr_dyn_has_own(recv, keystr);
+}
+ScrDyn *scr_dyn_any_define(ScrDyn *recv, ScrDyn *key, ScrStr *keystr, ScrDyn *desc) {
+  return scr_any_is_sym(key) ? scr_dyn_sym_define(recv, SCR_ANY_SYM(key), desc) : scr_dyn_define_prop(recv, keystr, desc);
+}

@@ -959,6 +959,13 @@ const LIB_FN_SYMS: Record<string, string> = {
   "sym.toString": "scr_sym_to_string",
   "sym.dynGet": "scr_dyn_sym_get",
   "sym.dynSet": "scr_dyn_sym_set",
+  "sym.anySet": "scr_dyn_any_set",
+  "sym.anySetSloppy": "scr_dyn_any_set_sloppy",
+  "sym.anyDelete": "scr_dyn_any_delete",
+  "sym.anyHas": "scr_dyn_any_has",
+  "sym.anyHasOwn": "scr_dyn_any_has_own",
+  "sym.anyDefine": "scr_dyn_any_define",
+  "sym.isSym": "scr_dyn_is_symbol",
   "sym.dynTag": "scr_dyn_sym_tag",
   "sym.dynGetOpt": "scr_dyn_sym_get_opt",
   "sym.dynGetSelf": "scr_dyn_sym_get_self",
@@ -5961,6 +5968,14 @@ class LlEmitter {
     const g = this.globalTypes.get(id);
     if (!g) throw new Error(`llvm emitter bug: unknown binding ${id}`);
     return { kind: "global", slot: `@${mangleGlobal(id)}`, type: g };
+  }
+
+  /** A read of an initialised plain (unboxed, non-TDZ) dyn local of the current function: the operation that looks at it can load
+   * the variable itself instead of a retained copy. */
+  private borrowedDynLocal(a: IrExpr): boolean {
+    if (a.kind !== "varRef" || a.nullTest || a.type.kind !== "dyn") return false;
+    const local = this.currentLocals.get(a.localId);
+    return local !== undefined && !local.boxed && local.tdz !== true;
   }
 
   /** Evaluate a container receiver as a BORROW: load the pointer out of
@@ -19804,6 +19819,12 @@ class LlEmitter {
       this.emitPendingCheck();
       args[1] = this.emitExpr(e.args[1]!);
       args[3] = this.emitExpr(e.args[3]!);
+    } else if (e.fn === "sym.isSym" && this.borrowedDynLocal(e.args[0]!)) {
+      // The kind test only looks: a plain local is loaded where it lives, with no retain / release pair around it.
+      const b = this.binding((e.args[0] as { localId: string }).localId);
+      const t = B.tmp();
+      B.line(`${t} = load ptr, ptr ${b.slot}`);
+      args = [{ name: t, type: e.args[0]!.type }];
     } else {
       args = e.args.map((a) => this.emitExpr(a));
     }
