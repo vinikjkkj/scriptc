@@ -5884,6 +5884,13 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     if (args.length === gci.typeParams.length) {
       for (const a of args) {
         const m = L.mapTypeOf(a);
+        // `any` as a type ARGUMENT of a SPLIT family (no family type exists to degrade to): the instance is built with the argument
+        // bound to the checked-dynamic type, the reading every `any`-typed slot already takes. A non-split family keeps its
+        // established degrade-to-the-family answer for `Box<any>`.
+        if (!m && familyT === null && (a.flags & ts.TypeFlags.Any) !== 0 && !L.dynamic) {
+          mapped.push(DYN);
+          continue;
+        }
         if (!m || m.kind === "void") {
           // An UNBOUND type parameter argument (`Box<T>` outside any
           // instantiation) stays honestly unmapped — nothing concrete is
