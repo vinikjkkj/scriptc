@@ -2659,12 +2659,41 @@ ScrDyn *scr_dyn_new_func(ScrClosure *clo, ScrDynThunk thunk, uint32_t arity, con
  * stance for the same reason. */
 static bool dyn_fn_is_bound_box(const ScrDyn *fn);
 
+/* A function value's OWN `toString` (an expando the program wrote), run with the function as `this`: the text it
+ * answers, +1; NULL with no exception when there is none, NULL with the exception pending when it threw. */
+ScrStr *scr_dyn_fn_own_tostring(const ScrDyn *d) {
+  ScrDyn *m = scr_dyn_fn_get(d, "toString", 8);
+  if (m == NULL) return NULL;
+  if (m->kind != SCR_DYN_FUNC) {
+    scr_dyn_release(m);
+    return NULL;
+  }
+  scr_dyn_this_push_dyn(d);
+  ScrDyn *r = scr_dyn_call(m, NULL, 0, "toString");
+  scr_dyn_this_pop();
+  scr_dyn_release(m);
+  if (r == NULL) return NULL;
+  ScrStr *out = r->kind == SCR_DYN_STR ? scr_str_retain(r->v.str) : scr_dyn_string_coerce(r);
+  scr_dyn_release(r);
+  return out;
+}
+
 ScrStr *scr_fn_to_string(const ScrDyn *d) {
+  /* ToString calls the function's `toString`: an OWN one (an expando) wins over the source text. A throw inside it
+   * stays pending and the text is empty (this renderer never answers NULL). */
+  ScrStr *own = scr_dyn_fn_own_tostring(d);
+  if (own != NULL) return own;
+  if (scr_exc_pending()) return scr_str_new("", 0);
   const char *src = scr_dyn_fn_src(d);
   if (src == NULL && scr_dyn_class_ops != NULL) {
     /* A CLASS VALUE: Node prints the class source, which the class unit's `%dynSrc` row carries. */
     ScrStr *ct = scr_dyn_class_ops->class_text(d);
     if (ct != NULL) return ct;
+  }
+  if (src == NULL && scr_fn_text_row_hook != NULL) {
+    /* A box minted where the creation site was not provable still names a closure whose text the build's table carries. */
+    const char *row = scr_fn_text_row_hook(d->v.fn.clo);
+    if (row != NULL) return scr_str_new(row, strlen(row));
   }
   if (src == NULL) {
     /* A compiled user function whose source text this build did not
@@ -6942,12 +6971,13 @@ ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc) {
     }
     return out;
   }
-  case SCR_DYN_FUNC:
-    /* Function.prototype.toString, through the ONE renderer — this arm
-     * used to print a nameless native stub while the emitted display
-     * walker printed a NAMED one, so a single value answered two ways
-     * depending on which spelling reached it. */
+  case SCR_DYN_FUNC: {
+    /* ToString calls the function's `toString`: an OWN one (`line.toString = ...`, generate-function's builder) wins over
+     * Function.prototype.toString, through the ONE renderer — this arm used to print a nameless native stub while the
+     * emitted display walker printed a NAMED one, so a single value answered two ways depending on which spelling
+     * reached it. */
     return scr_fn_to_string(d);
+  }
   case SCR_DYN_JSVAL: {
     /* The engine's own ToString (row 2 of the jsval→dyn op table): the
      * real prototype chain runs — user toString included, its throw

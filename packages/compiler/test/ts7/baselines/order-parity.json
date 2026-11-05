@@ -12790,6 +12790,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24145-function-with-its-own-tostring.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24145-function-with-its-own-tostring.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2414-dowhile-continue-kill.ts": {
    "order": [
     "<repo>/tests/corpus/2414-dowhile-continue-kill.ts"
