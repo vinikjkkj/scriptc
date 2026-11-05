@@ -5716,7 +5716,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
           !argNode ||
           (ts.isIdentifier(argNode) && argNode.text === "undefined")
         ) {
-          return { kind: "libCall", fn: "sym.newAnon", args: [], type: SYMBOL_T, loc };
+          return { kind: "libCall", fn: "sym.newAnon", args: [], type: SYMBOL_T, loc, symSite: `${expr.getSourceFile().fileName}:${expr.getStart()}` };
         }
         const desc = L.lowerExpr(argNode);
         if (desc.type.kind !== "string") {
@@ -5726,7 +5726,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
             "only string descriptions lower (Node would ToString the value — convert it explicitly)",
           );
         }
-        return { kind: "libCall", fn: "sym.new", args: [desc], type: SYMBOL_T, loc };
+        return { kind: "libCall", fn: "sym.new", args: [desc], type: SYMBOL_T, loc, symSite: `${expr.getSourceFile().fileName}:${expr.getStart()}` };
       }
       // STATIC parseInt/parseFloat/isNaN/isFinite (num.parseInt /
       // num.parseFloat / num.isNaN / number.isFinite — scr_string.c,

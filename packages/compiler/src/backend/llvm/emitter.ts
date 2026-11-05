@@ -953,6 +953,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "fh.close": "scr_fh_close",
   "fh.fd": "scr_fh_fd",
   "sym.new": "scr_sym_new",
+  "sym.newTagged": "scr_sym_new_tagged",
+  "sym.newAnonTagged": "scr_sym_new_anon_tagged",
   "sym.for": "scr_sym_for",
   "sym.toString": "scr_sym_to_string",
   "sym.dynGet": "scr_dyn_sym_get",

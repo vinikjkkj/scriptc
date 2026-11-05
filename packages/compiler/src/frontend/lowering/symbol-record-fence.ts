@@ -10,7 +10,7 @@
  *
  * Runs once over the final IR (iterative, like null-proto-fence.ts), only when the module holds a sym.dyn* read.
  */
-import { type IrModule, type IrRecordShape, type SrcLoc } from "../../ir/nodes.js";
+import { STRING, type IrExpr, type IrModule, type IrRecordShape, type SrcLoc } from "../../ir/nodes.js";
 import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import { unsupportedDiag } from "../../diagnostics/diagnostic.js";
 
@@ -42,6 +42,8 @@ export function fenceSymbolRecordCrossings(
 ): number {
   const crossings: { loc: SrcLoc; names: string[] }[] = [];
   let reads = 0;
+  let anyDyn = false;
+  const creations: { kind: string; fn: string; args: unknown[]; symSite?: string; loc: SrcLoc }[] = [];
   const seenObj = new Set<object>();
   const stack: unknown[] = [mod.globals ?? [], mod.classes ?? [], mod.functions];
   while (stack.length > 0) {
@@ -52,6 +54,8 @@ export function fenceSymbolRecordCrossings(
     const o = v as Record<string, unknown>;
     if (o["kind"] === "libCall" && typeof o["fn"] === "string") {
       const fn = o["fn"] as string;
+      if (fn.startsWith("sym.dyn") || fn === "sym.hasAcc") anyDyn = true;
+      if ((fn === "sym.new" || fn === "sym.newAnon") && typeof o["symSite"] === "string") creations.push(o as unknown as (typeof creations)[number]);
       if (fn === "sym.dynGet" || fn === "sym.dynGetOpt" || fn === "sym.dynHas" || fn === "sym.dynHasOwn" || fn === "sym.dynOwnKeys") reads++;
     } else if (o["kind"] === "dynFrom") {
       const inner = o["value"] as { type?: { kind?: string; shapeId?: string } } | undefined;
@@ -63,6 +67,20 @@ export function fenceSymbolRecordCrossings(
     }
     const kids: unknown[] = Array.isArray(v) ? v : Object.values(o);
     for (let i = kids.length - 1; i >= 0; i--) stack.push(kids[i]);
+  }
+  // A program that keeps symbol properties on untyped values matches a class's symbol-keyed members by the symbol's creation site
+  // (the class side names it in a %symid member), so every Symbol() call records its site. Other programs emit exactly as before.
+  if (anyDyn) {
+    for (const c of creations) {
+      const site: IrExpr = { kind: "strLit", value: c.symSite!, type: STRING, loc: c.loc };
+      if (c.fn === "sym.new") {
+        c.fn = "sym.newTagged";
+        c.args = [...c.args, site];
+      } else {
+        c.fn = "sym.newAnonTagged";
+        c.args = [site];
+      }
+    }
   }
   if (reads === 0) return 0;
   for (const c of crossings) {

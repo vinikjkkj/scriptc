@@ -138,7 +138,7 @@ import { settleOrValueArms,
 import { CompoundOp, IslandFnEntry, boundaryIntoIslandMsg, boundaryOutOfIslandMsg, BuiltinModuleFn, builtinConstLit, builtinModuleConstOf, builtinModulesArrayLit, builtinFenceHintOf, builtinModuleFnOf, stdlibMemberFence, isStdlibMember, isStdlibSymbol, isStdlibGlobal, stdlibGlobalMember, nodeTypesOnlySymbol } from "./surfaces.js";
 import { FileParts, isNestedClassDeclaration, splitFiles, collectProgram, collectNpmImports, collectJsonImports,
   collectJsonRequires, jsonRequireTypeOverride, jsonAwareChecker, collectDeclTwinExportBridges, moduleArtifacts, collectGlobals, declSymbolOf, defaultExportSymbolOf, lowerFileInit, lowerDefaultExport, buildMain, appendDynamicImportModules } from "./lower-modules.js";
-import { scanDefinePropStringTables, scanDefinePropSymbolSlots } from "./lower-classes.js";
+import { scanDefinePropStringTables, scanDefinePropSymbolSlots, scanUntypedSymbolWrites } from "./lower-classes.js";
 import { protoClassArmOn, protoClassInstanceType } from "./proto-class-consume.js";
 import { dynBoxedMethodInstances, ClassInfo, ClassIteratorInfo, GenericClassInfo, registerBuiltinErrorClasses, registerBuiltinEmitterClass, registerBuiltinStreamClasses, builtinErrorInfoOf, builtinEmitterInfoOf, builtinStreamInfoOf, analyzeClassDecoration, classIteratorDrainCall, classIteratorNextCall, classIteratorOf, classIteratorOpenCall, classIteratorRestDrainCall, classMemberNameOf, symbolSlotAccessorName, classValueRef, collectClassShape, exactClassOfReceiver, collectClassShapeInner, ctorAbiEquals, findMethodOn, findStaticOn, findGenericMethodOn, findGenericStaticOn, genericClassInstanceType, isSubclassOf, inHierarchy, overrideBelow, staticShadowBelow, upcastTo, lowerClassMembers, lowerClassCtor, lowerClassExpression, lowerClassExpressionInfo, lowerClassMethodMember, lowerProtoMethodMember, lowerClassValueProperty, lowerConstructorName, lowerStaticMethod, throwingSetterFn, shadowMethodFn, fieldInitStmts, lowerStaticFieldInits, lowerStaticFieldRead, lowerDerivedCtorBody, superCallStmt, lowerSuperMethodCall, superThisRef, lowerSuperAccessorRead, lowerSuperAccessorWrite, inheritsBuiltinErrorCtor, inheritsBuiltinEmitterCtor, errorMessageArg, lowerNew, accessorCall, virtualViewFitsSlot, vtThunkFn, findStaticAccessorOn, staticAccessorWrite, staticCompoundTarget, genericOverrideBelow } from "./lower-classes.js";
 import { MixinFnShape, mixinCallClassInfoOf, mixinIntersectionInstanceType } from "./lower-mixins.js";
@@ -18250,6 +18250,13 @@ export class Lowerer {
    * declarations that need the `%props` table in their layout. Same
    * timing rule and the same reason for it. */
   private definePropTableCache: Set<ts.ClassLikeDeclaration> | null = null;
+
+  private untypedSymbolWritesCache: boolean | null = null;
+
+  untypedSymbolWrites(): boolean {
+    this.untypedSymbolWritesCache ??= scanUntypedSymbolWrites(this);
+    return this.untypedSymbolWritesCache;
+  }
 
   definePropStringTable(decl: ts.ClassLikeDeclaration): boolean {
     this.definePropTableCache ??= scanDefinePropStringTables(this);

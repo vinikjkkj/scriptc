@@ -4327,6 +4327,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           // +1 on the registry's interned per-key symbol. None throw.
           case "sym.new":
             return finish(`scr_sym_new(${arg(0)})`);
+          case "sym.newTagged":
+            return finish(`scr_sym_new_tagged(${arg(0)}, ${arg(1)})`);
+          case "sym.newAnonTagged":
+            return finish(`scr_sym_new_anon_tagged(${arg(0)})`);
           case "sym.newAnon":
             return finish(`scr_sym_new(NULL)`);
           case "sym.for":

@@ -359,6 +359,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "intl.defaultLocale": { argTypes: [], result: STRING },
   "sym.new": { argTypes: [STRING], result: SYMBOL_T },
   "sym.newAnon": { argTypes: [], result: SYMBOL_T },
+  "sym.newTagged": { argTypes: [STRING, STRING], result: SYMBOL_T },
+  "sym.newAnonTagged": { argTypes: [STRING], result: SYMBOL_T },
   "sym.for": { argTypes: [STRING], result: SYMBOL_T },
   // Result is the interned `string | undefined` union — the libCall case
   // checks the arms (the spawnRes.error pattern).

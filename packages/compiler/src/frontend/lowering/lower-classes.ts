@@ -834,6 +834,40 @@ export interface GenericClassInfo {
    * decided at the site are scanDefinePropSymbolSlots's: a class layout
    * is interned from the TYPE long before the defining call is lowered,
    * and the call usually lives in a different module. */
+  /** True when some source writes a SYMBOL-keyed property (`x[sym] = v`, `Object.defineProperty(x, sym, d)`) through a receiver the
+   * checker types `any`/`unknown`. At run time that receiver may be a program-class instance, whose symbol-keyed properties live in
+   * the run-time property table, so every plain program class carries one in such a program (the program did not compile before:
+   * an untyped symbol write was refused). Well-known symbols (`Symbol.iterator`) are not user keys. */
+  export function scanUntypedSymbolWrites(L: Lowerer): boolean {
+    const isUserSymbolKey = (k: ts.Expression): boolean => {
+      while (ts.isParenthesizedExpression(k)) k = k.expression;
+      if (ts.isPropertyAccessExpression(k) && L.stdlibGlobalMember(k, "Symbol") !== null) return false;
+      return (L.typeOf(k).flags & (ts.TypeFlags.UniqueESSymbol | ts.TypeFlags.ESSymbol)) !== 0;
+    };
+    const untyped = (e: ts.Expression): boolean => (L.typeOf(e).flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0;
+    let found = false;
+    const stack: ts.Node[] = [];
+    for (const sf of L.fileTag.keys()) if (!sf.isDeclarationFile) stack.push(sf);
+    while (stack.length > 0 && !found) {
+      const n = stack.pop()!;
+      if (
+        ts.isBinaryExpression(n) && n.operatorToken.kind >= ts.SyntaxKind.FirstAssignment && n.operatorToken.kind <= ts.SyntaxKind.LastAssignment &&
+        ts.isElementAccessExpression(n.left) && n.left.questionDotToken === undefined &&
+        isUserSymbolKey(n.left.argumentExpression) && untyped(n.left.expression)
+      ) found = true;
+      else if (
+        ts.isCallExpression(n) && n.arguments.length === 3 && ts.isPropertyAccessExpression(n.expression) &&
+        n.expression.name.text === "defineProperty" && L.isStdlibGlobal(n.expression.expression, "Object") &&
+        isUserSymbolKey(n.arguments[1]!) && untyped(n.arguments[0]!)
+      ) found = true;
+      else ts.forEachChild(n, (c) => {
+        stack.push(c);
+        return undefined;
+      });
+    }
+    return found;
+  }
+
   export function scanDefinePropStringTables(L: Lowerer): Set<ts.ClassLikeDeclaration> {
     const out = new Set<ts.ClassLikeDeclaration>();
     const visit = (n: ts.Node): void => {
@@ -5617,6 +5651,8 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       }
       const ownPropsTable =
         L.definePropStringTable(decl) ||
+        // a program that stores symbol-keyed properties through untyped receivers: an instance reaching one needs a table to hold them
+        (!inst && !mixin && !familyMode && ts.isClassDeclaration(decl) && L.untypedSymbolWrites() && !classHasBuiltinBase(L, decl)) ||
         (!inst && !mixin && !familyMode && ts.isClassDeclaration(decl) && implicitMonoFile(decl.getSourceFile())) ||
         // a JS class whose own bodies write `this[<run-time key>] = v` (ioredis Commander.defineCommand): the writes land in the table
         (!inst && !mixin && !familyMode && ts.isClassDeclaration(decl) && isJsSourceFile(decl.getSourceFile()) && writesThisUnderRuntimeKey(L, decl));
@@ -8652,6 +8688,63 @@ export function dynBagFn(L: Lowerer, info: ClassInfo): IrFunction | null {
   };
 }
 
+/** The creation site ("file:offset" of the `Symbol(...)` call) of the module symbol a checker symbol stands for, or null when the
+ * symbol is not initialized by a plain Symbol() call (the same form a symbol-keyed class member requires). */
+export function symbolCreationSiteOf(L: Lowerer, sym: ts.Symbol): string | null {
+  for (const d of L.checker.declarationsOf(sym)) {
+    let init: ts.Expression | undefined;
+    if (ts.isVariableDeclaration(d) || ts.isPropertyAssignment(d)) init = d.initializer;
+    else if (ts.isBinaryExpression(d) && d.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      init = d.right;
+      while (ts.isBinaryExpression(init) && init.operatorToken.kind === ts.SyntaxKind.EqualsToken) init = init.right;
+    }
+    while (init !== undefined && ts.isParenthesizedExpression(init)) init = init.expression;
+    if (init !== undefined && ts.isCallExpression(init) && ts.isIdentifier(init.expression) && init.expression.text === "Symbol") {
+      return `${init.getSourceFile().fileName}:${init.getStart()}`;
+    }
+  }
+  return null;
+}
+
+/** Row name -> creation site for the symbol-keyed members THIS class declares itself (fields keyed `Symbol(desc)`, methods and
+ * accessors keyed `sym.uniq:Symbol(desc)`); members whose symbol has no recoverable site are left out. */
+function symbolMemberSites(L: Lowerer, info: ClassInfo): Map<string, string> {
+  const out = new Map<string, string>();
+  const inherited = info.base?.symbolFields;
+  for (const [sym, row] of info.symbolFields ?? []) {
+    if (inherited?.has(sym) === true) continue;
+    const site = symbolCreationSiteOf(L, sym);
+    if (site !== null) out.set(row, site);
+  }
+  for (const m of info.decl?.members ?? []) {
+    const name = (m as { name?: ts.PropertyName }).name;
+    if (name === undefined || !ts.isComputedPropertyName(name)) continue;
+    let e: ts.Expression = name.expression;
+    while (ts.isParenthesizedExpression(e)) e = e.expression;
+    const u = ts.isIdentifier(e) ? uniqueSymbolKeyOf(L, e) : null;
+    if (u === null) continue;
+    const site = symbolCreationSiteOf(L, u.sym);
+    if (site !== null) out.set(`sym.uniq:${u.fieldName}`, site);
+  }
+  return out;
+}
+
+/** `%C.%symid:<row>(this): string` answering a symbol-keyed member's creation site. */
+function symIdFn(info: ClassInfo, row: string, site: string): IrFunction {
+  const className = info.def.name;
+  const loc = info.decl !== null ? locOf(info.decl) : info.def.loc;
+  const thisType: IrType = { kind: "object", className };
+  const locals: IrLocal[] = [{ id: "this.0", name: "this", type: thisType, mutable: false }];
+  return {
+    name: `%${className}.%symid:${row}`,
+    params: locals.map((l) => ({ localId: l.id, name: l.name, type: l.type })),
+    returnType: STRING,
+    locals,
+    body: [{ kind: "return", value: { kind: "strLit", value: site, type: STRING, loc }, loc }],
+    loc,
+  };
+}
+
 /** The ScrError prefix cells of an Error-rooted class (name, message, code,
  * stack, the expando bag) -- the layout the runtime owns, whose reads and
  * writes the runtime answers from the box -- or null when the chain does not
@@ -9120,6 +9213,13 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
           if (bagFn !== null) {
             out.push(bagFn);
             info.def.dynMethods = [...(info.def.dynMethods ?? []), { name: "%dynBag", fn: bagFn.name }];
+          }
+          // Each member keyed by a module symbol names the creation site of that symbol (%symid:<row>), so a read through an
+          // untyped receiver matches the member by identity and not by description.
+          for (const [row, site] of symbolMemberSites(L, info)) {
+            const fn = symIdFn(info, row, site);
+            out.push(fn);
+            info.def.dynMethods = [...(info.def.dynMethods ?? []), { name: `%symid:${row}`, fn: fn.name }];
           }
         }
         // A per-evaluation class's instances answer `.constructor` with their evaluation's class value.

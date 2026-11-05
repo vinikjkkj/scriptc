@@ -4115,7 +4115,8 @@ export type IrLibFn =
   | "qs.escape"
   | "qs.unescape"
   /** ES Symbol values (scr_symbol.c — link-gated by moduleUsesSymbol).
-   * sym.new: `Symbol(desc)` — a fresh runtime-unique identity (+1) whose
+   * sym.newTagged / sym.newAnonTagged are the same with the creation SITE (a "file:offset" string, arg 1 / arg 0) a class member table
+   * matches by identity; symSite on a sym.new node is the pre-pass form of it. sym.new: `Symbol(desc)` — a fresh runtime-unique identity (+1) whose
    * one arg is the description string (borrowed); sym.newAnon is the
    * description-less `Symbol()` form. sym.for: the Symbol.for global
    * registry — one interned symbol per key (borrowed), +1 on every call.
@@ -4125,6 +4126,8 @@ export type IrLibFn =
    * the child.stdout pattern). None of these throw. */
   | "sym.new"
   | "sym.newAnon"
+  | "sym.newTagged"
+  | "sym.newAnonTagged"
   | "sym.for"
   | "sym.keyFor"
   | "sym.desc"
@@ -8539,7 +8542,7 @@ export type IrExpr =
    * the may-throw seed set (MAY_THROW_LIB_FNS) in their analysis and emit
    * pending checks; process.* members never throw. `process.exit` flushes
    * stdout and terminates the process without running exit handlers. */
-  | { kind: "libCall"; fn: IrLibFn; args: IrExpr[]; type: IrType; loc: SrcLoc }
+  | { kind: "libCall"; fn: IrLibFn; args: IrExpr[]; type: IrType; loc: SrcLoc; symSite?: string }
   /** `JSON.stringify(v)` — type-DIRECTED serialization: `value`'s static IR
    * type must be JSON-safe (f64/string/bool/record/array/union of those,
    * recursively — validated), and backends emit one serializer per type used
@@ -11945,7 +11948,7 @@ const DYN_EXT_LIB_FNS: ReadonlySet<string> = new Set([
  * scr_bytes_own.c and installs its ops (cc.ts / the install call). Programs without one keep their size class. */
 export function moduleUsesBytesOwn(mod: IrModule): boolean {
   let found = false;
-  const SINKS = new Set(["dyn.keySet", "dyn.keySetSloppy", "dyn.reflectSet", "dyn.reflectDefine", "dyn.defineProp", "dyn.defineProps", "dyn.assign", "dyn.assignAll"]);
+  const SINKS = new Set(["dyn.keySet", "dyn.keySetSloppy", "dyn.reflectSet", "dyn.reflectDefine", "dyn.defineProp", "dyn.defineProps", "dyn.assign", "dyn.assignAll", "sym.dynSet", "sym.dynSetSloppy", "sym.dynSetSelf", "sym.dynSetSelfSloppy", "sym.dynDefine"]);
   const visit = (v: unknown): void => {
     if (found || v === null || typeof v !== "object") return;
     if (Array.isArray(v)) {
