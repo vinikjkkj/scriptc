@@ -14226,6 +14226,28 @@ static void scr_dyn_assign_from(ScrDyn *target, const ScrDyn *src) {
 #endif
 }
 static void scr_dyn_assign_strs(ScrDyn *target, const ScrDyn *src) {
+  /* A boxed class INSTANCE target takes each source key through the keyed write (its field, its setter, an Error's cells),
+   * which is what Object.assign's [[Set]] per key does. */
+  if (target->kind == SCR_DYN_OBJINST && src->kind == SCR_DYN_OBJ) {
+    const size_t n = src->v.obj.len;
+    for (size_t i = 0; i < n; i++) {
+      if (src->v.obj.len != n) break; /* a getter below resized the source */
+      const ScrDynEntry *e = &src->v.obj.entries[i];
+      ScrStr *k = scr_str_new(e->key, e->key_len); /* +1 */
+      bool sl_skip = false;
+      ScrDyn *mv = scr_dyn_obj_entry_read((ScrDyn *)src, e, &sl_skip); /* +1 or NULL */
+      if (mv == NULL) {
+        scr_str_release(k);
+        if (sl_skip) continue;
+        return; /* the getter threw; the pending exception unwinds */
+      }
+      scr_dyn_key_set(target, k, mv);
+      scr_dyn_release(mv);
+      scr_str_release(k);
+      if (scr_exc_pending()) return;
+    }
+    return;
+  }
   if (target->kind != SCR_DYN_OBJ) return;
   if (src->kind == SCR_DYN_UNDEF || src->kind == SCR_DYN_NULL) return;
   if (src->kind == SCR_DYN_OBJ) {
