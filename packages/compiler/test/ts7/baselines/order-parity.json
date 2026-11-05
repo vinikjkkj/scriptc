@@ -12512,6 +12512,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24071-a-struct-view-over-a-record-with-a-platform-object-member-reads-in-place.ts": {
+   "order": [
+    "<repo>/tests/corpus/24071-a-struct-view-over-a-record-with-a-platform-object-member-reads-in-place.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2405-sibling-arm-narrow.ts": {
    "order": [
     "<repo>/tests/corpus/2405-sibling-arm-narrow.ts"
