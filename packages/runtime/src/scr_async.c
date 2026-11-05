@@ -227,6 +227,11 @@ struct ScrPromise {
   /* Fibers parked on this promise. */
   ScrFiber **waiters;
   size_t nwaiters, waiters_cap;
+  /* A pending declaration-claimed promise parks its reactions on its SOURCE's
+   * lists (scr_promise_claim): Node keeps one reaction list, in registration
+   * order. Owned (+1, traced: the pair is a cycle while the source is pending),
+   * only followed while this promise is pending, dropped when the claim settles. */
+  struct ScrPromise *alias;
   /* Combinator callbacks (Promise.race / Promise.all): at settle,
    * fulfilled promises run adapt(dst, this) — an emitted adapter
    * converting the payload into the destination's inner type — and
@@ -242,6 +247,14 @@ struct ScrPromise {
     /* A payload-CLAIM waiter (scr_promise_claim): non-NULL runs the
      * conversion closure on the fulfilled source INSIDE its settle. */
     ScrClosure *conv;
+    /* How many direct waiters were already parked when this callback registered:
+     * the settle replays both lists in registration order (Node keeps ONE
+     * reaction list per promise). */
+    size_t wpos;
+    /* Non-NULL when this callback sits on ANOTHER promise's list on behalf of
+     * `via` (a pending claim aliases its source's reaction list): it consumes
+     * `via`, not the list's owner. +1. */
+    struct ScrPromise *via;
   } *cbs;
   size_t ncbs, cbs_cap;
   /* Payload-conversion memo (scr_runtime.h states the contract): the
@@ -316,7 +329,11 @@ static void scr_promise_trace(void *o, ScrTraceVisit visit, void *ctx) {
       p->trace_fn) {
     visit(p->payload, ctx);
   }
-  for (size_t i = 0; i < p->ncbs; i++) visit(p->cbs[i].dst, ctx);
+  if (p->alias) visit(p->alias, ctx);
+  for (size_t i = 0; i < p->ncbs; i++) {
+    visit(p->cbs[i].dst, ctx);
+    if (p->cbs[i].via) visit(p->cbs[i].via, ctx);
+  }
   /* Memo entries are strong and cycle-headered, and the pair IS a
    * cycle while the adapter's fiber still holds the source, so the
    * collector has to be able to see this edge. */
@@ -510,10 +527,12 @@ void scr_promise_release(ScrPromise *p) {
     scr_promise_release_payload(p);
     scr_promise_adapts_free(p, true);
     free(p->waiters);
+    if (p->alias) scr_promise_release(p->alias);
     for (size_t i = 0; i < p->ncbs; i++) {
       scr_promise_release(p->cbs[i].dst);
       if (p->cbs[i].all) scr_promise_all_state_release(p->cbs[i].all);
       if (p->cbs[i].conv) scr_closure_release(p->cbs[i].conv);
+      if (p->cbs[i].via) scr_promise_release(p->cbs[i].via);
     }
     free(p->cbs);
 #ifdef SCR_RC_AUDIT
@@ -1691,27 +1710,60 @@ static void scr_promise_all_settle(ScrAllState *st, ScrPromise *result, size_t i
  * (reasons are dynamically tagged). first-settle-wins rides the
  * destination's own pending check. Promise.all entries dispatch through
  * their shared countdown state instead of the adapt pair. */
+/* Where a reaction on `p` is parked: a pending claim shares its source's lists. */
+static ScrPromise *scr_prom_reg_target(ScrPromise *p) {
+  while (p->state == SCR_PROM_PENDING && p->alias) p = p->alias;
+  return p;
+}
+
+/* A fresh callback entry (zeroed) on `in`'s reaction list, stamped with the
+ * waiters already parked there so the settle replays both in order. */
+static struct ScrPromiseCbWaiter *scr_prom_cb_add(ScrPromise *in) {
+  ScrPromise *t = scr_prom_reg_target(in);
+  if (t->ncbs == t->cbs_cap) {
+    t->cbs_cap = t->cbs_cap ? t->cbs_cap * 2 : 4;
+    t->cbs = realloc(t->cbs, t->cbs_cap * sizeof *t->cbs);
+    if (!t->cbs) scr_oom();
+  }
+  struct ScrPromiseCbWaiter *cb = &t->cbs[t->ncbs++];
+  memset(cb, 0, sizeof *cb);
+  cb->wpos = t->nwaiters;
+  cb->via = t != in ? scr_promise_retain(in) : NULL;
+  return cb;
+}
+
 static void scr_promise_claim_run(ScrPromise *dst, ScrPromise *src, ScrClosure *conv);
 static void scr_promise_settle_wake(ScrPromise *p) {
-  for (size_t i = 0; i < p->nwaiters; i++) scr_ready_push(p->waiters[i]);
+  size_t nw = p->nwaiters, w = 0;
   p->nwaiters = 0;
   for (size_t i = 0; i < p->ncbs; i++) {
+    for (; w < nw && w < p->cbs[i].wpos; w++) scr_ready_push(p->waiters[w]);
+    /* A callback parked here for a claim consumes the CLAIM (already settled: its
+     * own callback sits earlier on this list), everything else consumes p. */
+    ScrPromise *s = p->cbs[i].via ? p->cbs[i].via : p;
     if (p->cbs[i].all) {
-      scr_promise_all_settle(p->cbs[i].all, p->cbs[i].dst, p->cbs[i].all_idx, p);
+      scr_promise_all_settle(p->cbs[i].all, p->cbs[i].dst, p->cbs[i].all_idx, s);
       scr_promise_all_state_release(p->cbs[i].all);
-    } else if (p->state == SCR_PROM_FULFILLED) {
+    } else if (s->state == SCR_PROM_FULFILLED) {
       if (p->cbs[i].conv) {
-        scr_promise_claim_run(p->cbs[i].dst, p, p->cbs[i].conv);
+        scr_promise_claim_run(p->cbs[i].dst, s, p->cbs[i].conv);
         scr_closure_release(p->cbs[i].conv);
       } else {
-        p->cbs[i].adapt(p->cbs[i].dst, p);
+        p->cbs[i].adapt(p->cbs[i].dst, s);
       }
     } else {
-      scr_promise_settle_from(p->cbs[i].dst, p);
+      scr_promise_settle_from(p->cbs[i].dst, s);
       if (p->cbs[i].conv) scr_closure_release(p->cbs[i].conv);
+    }
+    if (p->cbs[i].via) scr_promise_release(p->cbs[i].via);
+    if (p->cbs[i].conv && p->cbs[i].dst->alias) {
+      /* The claim is settled now: it stops sharing this list. */
+      scr_promise_release(p->cbs[i].dst->alias);
+      p->cbs[i].dst->alias = NULL;
     }
     scr_promise_release(p->cbs[i].dst);
   }
+  for (; w < nw; w++) scr_ready_push(p->waiters[w]);
   p->ncbs = 0;
   if (p->state == SCR_PROM_REJECTED) scr_track_rejection(p);
 }
@@ -1731,17 +1783,9 @@ void scr_promise_race_add(ScrPromise *race, ScrPromise *in,
     else scr_promise_settle_from(race, in);
     return;
   }
-  if (in->ncbs == in->cbs_cap) {
-    in->cbs_cap = in->cbs_cap ? in->cbs_cap * 2 : 4;
-    in->cbs = realloc(in->cbs, in->cbs_cap * sizeof *in->cbs);
-    if (!in->cbs) scr_oom();
-  }
-  in->cbs[in->ncbs].adapt = adapt;
-  in->cbs[in->ncbs].dst = scr_promise_retain(race);
-  in->cbs[in->ncbs].all = NULL;
-  in->cbs[in->ncbs].all_idx = 0;
-  in->cbs[in->ncbs].conv = NULL;
-  in->ncbs++;
+  struct ScrPromiseCbWaiter *cb = scr_prom_cb_add(in);
+  cb->adapt = adapt;
+  cb->dst = scr_promise_retain(race);
 }
 
 /* ── Declaration-claimed promises ─────────────────────────────────────
@@ -1772,17 +1816,10 @@ ScrPromise *scr_promise_claim(ScrPromise *src, double id, ScrClosure *conv) {
    * rejected source is copied, whose observe spends it. */
   scr_promise_release(scr_promise_adapt_put(src, id, dst));
   if (src->state == SCR_PROM_PENDING) {
-    if (src->ncbs == src->cbs_cap) {
-      src->cbs_cap = src->cbs_cap ? src->cbs_cap * 2 : 4;
-      src->cbs = realloc(src->cbs, src->cbs_cap * sizeof *src->cbs);
-      if (!src->cbs) scr_oom();
-    }
-    src->cbs[src->ncbs].adapt = NULL;
-    src->cbs[src->ncbs].dst = scr_promise_retain(dst);
-    src->cbs[src->ncbs].all = NULL;
-    src->cbs[src->ncbs].all_idx = 0;
-    src->cbs[src->ncbs].conv = scr_closure_retain(conv);
-    src->ncbs++;
+    struct ScrPromiseCbWaiter *cb = scr_prom_cb_add(src);
+    cb->dst = scr_promise_retain(dst);
+    cb->conv = scr_closure_retain(conv);
+    dst->alias = scr_promise_retain(src);
   } else if (src->state == SCR_PROM_FULFILLED) {
     scr_promise_claim_run(dst, src, conv);
   } else {
@@ -1822,17 +1859,10 @@ ScrPromise *scr_promise_all(ScrArr *ps, ScrArr *values,
     if (in->state != SCR_PROM_PENDING) {
       scr_promise_all_settle(st, result, i, in);
     } else {
-      if (in->ncbs == in->cbs_cap) {
-        in->cbs_cap = in->cbs_cap ? in->cbs_cap * 2 : 4;
-        in->cbs = realloc(in->cbs, in->cbs_cap * sizeof *in->cbs);
-        if (!in->cbs) scr_oom();
-      }
-      in->cbs[in->ncbs].adapt = NULL;
-      in->cbs[in->ncbs].dst = scr_promise_retain(result);
-      in->cbs[in->ncbs].all = st;
-      in->cbs[in->ncbs].all_idx = i;
-      in->cbs[in->ncbs].conv = NULL;
-      in->ncbs++;
+      struct ScrPromiseCbWaiter *cb = scr_prom_cb_add(in);
+      cb->dst = scr_promise_retain(result);
+      cb->all = st;
+      cb->all_idx = i;
       st->rc++;
     }
     scr_promise_release(in);
@@ -3418,6 +3448,7 @@ static void scr_await_park(ScrPromise *p) {
     fputs("scriptc: internal error: await outside an async function\n", stderr);
     abort();
   }
+  p = scr_prom_reg_target(p);
   if (p->nwaiters == p->waiters_cap) {
     p->waiters_cap = p->waiters_cap ? p->waiters_cap * 2 : 4;
     p->waiters = realloc(p->waiters, p->waiters_cap * sizeof *p->waiters);
@@ -4083,6 +4114,7 @@ bool scr_coro_promise_park(ScrPromise *p, void (*fn)(void *), void *arg,
   f->micro_raw = fn;
   f->micro_arg = arg;
   f->micro_arg_release = arg_release;
+  p = scr_prom_reg_target(p);
   if (p->nwaiters == p->waiters_cap) {
     p->waiters_cap = p->waiters_cap ? p->waiters_cap * 2 : 4;
     p->waiters = realloc(p->waiters, p->waiters_cap * sizeof *p->waiters);
