@@ -5579,6 +5579,8 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   if (flags & (ts.TypeFlags.Object | ts.TypeFlags.Intersection) && callSigs.length === 0) {
     const viaAlias = mapGenericUtilityAlias(widened, ctx);
     if (viaAlias) return viaAlias;
+    const viaClass = mapClassNarrowing(widened, ctx);
+    if (viaClass) return viaClass;
     const record = mapRecordType(widened, ctx);
     if (record) return record;
   }
@@ -8239,6 +8241,44 @@ function structFamilyOf(t: ts.Type, ctx: TypeMapperCtx): ts.Type | null {
   if (mine === null) return null;
   for (const f of fams) if (f.sig === mine) return f.target;
   return null;
+}
+
+/** `{ level: Lvl } & ReadConcern`: a class instance narrowed by a plain object type that only restates (a subtype of) members the class
+ * already has. The values of the intersection are exactly the instances of the class, so it is the class: every member the plain
+ * part names exists on the class and maps to the SAME IR type (the narrowing lives in the checker's literal types alone). Anything
+ * else - an extra member, a member of another IR type, two classes - is not this rule and keeps its refusal. */
+function mapClassNarrowing(widened: ts.Type, ctx: TypeMapperCtx): IrType | null {
+  if (!widened.isIntersectionType()) return null;
+  const { checker } = ctx;
+  const parts = ts.constituentTypes(widened);
+  let cls: IrType | null = null;
+  let clsTs: ts.Type | undefined;
+  const plain: ts.Type[] = [];
+  for (const p of parts) {
+    const sym = p.getSymbol();
+    const isClass = sym !== undefined && (sym.flags & ts.SymbolFlags.Class) !== 0 && (p.flags & ts.TypeFlags.Object) !== 0;
+    if (isClass) {
+      if (clsTs !== undefined) return null;
+      const m = mapType(p, ctx);
+      if (m === null || m.kind !== "object") return null;
+      cls = m;
+      clsTs = p;
+    } else if ((p.flags & ts.TypeFlags.Object) !== 0 && checker.getCallSignatures(p).length === 0 &&
+        checker.getConstructSignatures(p).length === 0 && checker.getIndexInfosOfType(p).length === 0) {
+      plain.push(p);
+    } else return null;
+  }
+  if (cls === null || clsTs === undefined || plain.length === 0) return null;
+  for (const pl of plain) {
+    for (const prop of checker.getPropertiesOfType(pl)) {
+      const onClass = checker.getPropertyOfType(clsTs, prop.name);
+      if (onClass === undefined) return null;
+      const a = mapType(checker.getTypeOfSymbol(prop), ctx);
+      const c = mapType(checker.getTypeOfSymbol(onClass), ctx);
+      if (a === null || c === null || !typeEquals(a, c)) return null;
+    }
+  }
+  return cls;
 }
 
 function mapRecordType(widened: ts.Type, ctx: TypeMapperCtx): IrType | null {
