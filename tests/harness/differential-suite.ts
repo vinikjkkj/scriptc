@@ -273,7 +273,7 @@ function programInputs(file: string): string[] {
 // SCRIPTC_CACHE_DIR) disables the cache in both directions — no reads, no writes.
 // Storage shares the compile cache's root and its LRU sweep (see cc.ts).
 const oracleDir =
-  process.env["SCRIPTC_NO_CACHE"] !== "1" && process.env["SCRIPTC_CACHE_DIR"]
+  process.env["SCRIPTC_NO_CACHE"] !== "1" && process.env["SCRIPTC_NO_BIN_CACHE"] !== "1" && process.env["SCRIPTC_CACHE_DIR"]
     ? join(process.env["SCRIPTC_CACHE_DIR"], "oracle")
     : null;
 if (oracleDir !== null) mkdirSync(oracleDir, { recursive: true });

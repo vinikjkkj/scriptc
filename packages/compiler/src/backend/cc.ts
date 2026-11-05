@@ -1949,6 +1949,19 @@ export async function compileLibArchive(opts: LibArchiveOptions): Promise<void> 
 
 export function cacheRootDir(): string | null {
   if (process.env["SCRIPTC_NO_CACHE"] === "1") return null;
+  // SCRIPTC_NO_BIN_CACHE=1: every program is compiled LIVE (no early frontend cache, no cached binary, nothing published),
+  // but the runtime OBJECTS stay cached - see objectCacheRootDir. For a lane whose verdict must come from a live compile of
+  // the program and which would otherwise recompile the runtime's ~60 sources for every one.
+  if (process.env["SCRIPTC_NO_BIN_CACHE"] === "1") return null;
+  const dir = process.env["SCRIPTC_CACHE_DIR"];
+  return dir !== undefined && dir !== "" ? dir : null;
+}
+
+/** The root of the runtime-object cache: the cache root unless SCRIPTC_NO_CACHE=1 turns every cache off. A cached object is
+ * keyed by the driver, its version, the content hash of every runtime and vendored C source and header, and the whole
+ * flag set (ensureRuntimeObjects), so a stale object cannot be served; it holds no program code. */
+export function objectCacheRootDir(): string | null {
+  if (process.env["SCRIPTC_NO_CACHE"] === "1") return null;
   const dir = process.env["SCRIPTC_CACHE_DIR"];
   return dir !== undefined && dir !== "" ? dir : null;
 }
@@ -2833,7 +2846,8 @@ export async function compileC(opts: CcOptions): Promise<void> {
   // away from the build it is checking.
   assertRuntimeUnitsClosed(buildArgs((p) => p), dynamic, basename(opts.cPath));
 
-  const root = cacheRootDir();
+  const root = objectCacheRootDir();
+  const binRoot = cacheRootDir();
   const rtInputs: string[] = [];
   const cmdLine = buildArgs((p) => {
     rtInputs.push(p);
@@ -2966,9 +2980,9 @@ export async function compileC(opts: CcOptions): Promise<void> {
   for (const bytes of linkBytes) key.update("\0ffi-link\0").update(bytes);
   const keyHex = key
     .digest("hex");
-  const binDir = join(root, "bin");
+  const binDir = join(binRoot ?? root, "bin");
   const cachedBin = join(binDir, keyHex);
-  try {
+  if (binRoot !== null) try {
     // NEVER copy over outPath in place: overwriting an already-executed
     // signed binary invalidates the kernel's per-vnode code-signature cache
     // on macOS and the next exec dies with SIGKILL. Copy to a fresh inode
@@ -2985,7 +2999,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     /* miss — build below, then publish */
   }
 
-  tapPhase("cc.miss", 0);
+  tapPhase(binRoot !== null ? "cc.miss" : "cc.objonly", 0);
   // Miss: link the program's own TU against cached per-flavor runtime
   // objects. cflags reproduces exactly the option set every TU sees in the
   // single invocation (the clang driver applies all options to all inputs).
@@ -3049,6 +3063,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
   } finally {
     if (unitDir !== null) await rm(unitDir, { recursive: true, force: true });
   }
+  if (binRoot === null) return;
   try {
     await mkdir(binDir, { recursive: true });
     const tmp = join(binDir, `.tmp-${keyHex.slice(0, 8)}-${process.pid}-${Math.random().toString(36).slice(2)}`);
