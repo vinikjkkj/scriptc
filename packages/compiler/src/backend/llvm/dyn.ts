@@ -118,6 +118,8 @@ export interface DynHost extends WalkerHost {
   readonly usesDynView: boolean;
   /** moduleUsesInstanceRecordLane: the record builder's instance lane is emitted. */
   readonly usesInstanceRecordLane: boolean;
+  /** moduleBoxesFunctionLikeValues: a function value can reach a record cast. */
+  readonly boxesFunctionLikeValues: boolean;
   /** moduleInstanceLaneNeedsKg: the instance lane reads through the emitted keyed read. */
   readonly instanceLaneNeedsKg: boolean;
   unitInstanceRef(unionId: string, tag: number): string;
@@ -1687,7 +1689,7 @@ export class LlDyn {
         // both disciplines.
         const inst = kindgateInstanceLane(shape, host.usesInstanceRecordLane);
         const dialWide = kindgateWideLane(this.kindgateDials, soft, shape);
-        const funcOnly = !dialWide && kindgateFuncLane(soft, shape);
+        const funcOnly = !dialWide && host.boxesFunctionLikeValues && kindgateFuncLane(soft, shape);
         const dial = dialWide || funcOnly;
         if (dial || inst) {
           const proj = dial ? this.recordWideHelper() : null;
