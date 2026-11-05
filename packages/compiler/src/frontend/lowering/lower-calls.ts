@@ -9200,9 +9200,12 @@ export function reconcileOverloadMemberDyn(L: Lowerer, expr: ts.CallExpression, 
    * value rule (requireExactArityValue decides who may become a value). */
   export function lambdaSignature(L: Lowerer, node: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration | ts.MethodDeclaration | ts.GetAccessorDeclaration | ts.SetAccessorDeclaration,): { shapes: ParamShape[]; funcType: IrType & { kind: "func" }; argumentsBound?: true } {
     if (!node.body) L.unsupported("SC1090", node, "function overload signatures");
+    // A CLASS method is the one lambda-like home an async generator has besides a declaration: its calls enter
+    // through the gen-spawn wrapper (and its vtable entry through the `%vt` thunk), the same as the declaration's.
     if (
       node.asteriskToken &&
-      node.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword)
+      node.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword) &&
+      !(ts.isMethodDeclaration(node) && (ts.isClassDeclaration(node.parent) || ts.isClassExpression(node.parent)))
     ) {
       L.unsupported("SC1071", node, "async generators (async function*)");
     }
