@@ -12736,6 +12736,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24136-undefined-array-flows-into-declared-array-slots/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/24136-undefined-array-flows-into-declared-array-slots/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2414-dowhile-continue-kill.ts": {
    "order": [
     "<repo>/tests/corpus/2414-dowhile-continue-kill.ts"
