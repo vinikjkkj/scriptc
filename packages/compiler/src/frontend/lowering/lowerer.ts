@@ -5048,6 +5048,10 @@ export class Lowerer {
       }
       if (o.kind === "dynCheck" && (o as { type?: IrType }).type !== undefined) {
         this.noteViewCast((o as { type: IrType }).type, this.viewCastSeen);
+        // A record cast straight out of its own crossing (a record-to-record conversion, viewConversion): the SOURCE is the
+        // object the target views, so its shape takes the grant too and the crossing promotes it instead of copying it.
+        const crossed = (o as { value?: { kind?: string; value?: { type?: IrType } } }).value;
+        if (crossed?.kind === "dynFrom" && crossed.value?.type !== undefined) this.noteViewCast(crossed.value.type, this.viewCastSeen);
       }
       // ...and a record handed to a CALLEE as a dynamic argument (an untyped JS method's options object): the
       // callee may write it, and the caller's next read must see that write, so the record has to be able to
@@ -9058,12 +9062,36 @@ export class Lowerer {
    * into the target field's union (see recordWidthHelper); anything
    * deeper keeps the exactness fences. Null when the pair isn't
    * width-coercible. */
+  /** The identity-preserving form of a record-to-record width coercion (value model, phase 1: members of scalar, string, union and
+   * dyn kinds). Null when the pair keeps its field copy: a shape that cannot be a view (tuples, accessors, builtins, index
+   * signatures), a plan the copy would decline, or a target the checked cast cannot read. The copy a null leaves is exactly
+   * what the pair compiled to before. */
+  viewConversion(expr: IrExpr, expected: IrType & { kind: "record" }): IrExpr | null {
+    if (process.env["SCRIPTC_RECORD_VIEW"] === "0" || expr.type.kind !== "record") return null;
+    const from = this.shapes.get(expr.type.shapeId);
+    const to = this.shapes.get(expected.shapeId);
+    if (from === undefined || to === undefined) return null;
+    if (!this.viewCapableShape(from) || !this.viewCapableShape(to)) return null;
+    if (from.indexValue !== undefined || to.indexValue !== undefined) return null;
+    if (this.recordWidthPlan(expr.type.shapeId, expected.shapeId) === null) return null;
+    if (!canDynCheckTo(expected, (id) => this.shapes.get(id), (id) => this.unions.get(id))) return null;
+    if (!canConvertToDyn(expr.type, (id) => this.shapes.get(id), (id) => this.unions.get(id))) return null;
+    const loc = expr.loc;
+    const boxed: IrExpr = { kind: "dynFrom", value: expr, type: DYN, loc };
+    return { kind: "dynCheck", value: boxed, type: expected, loc };
+  }
+
   widthCoerce(expr: IrExpr, expected: IrType): IrExpr | null {
     if (expected.kind === "record" && expr.type.kind === "record") {
       // Index-signature pairs reshape through the overflow CAPTURE helper
       // (the `Object.fromEntries(e) as ModelPricing` pattern — declared
       // collisions validate at runtime); plain shapes keep the field-copy
       // width helper. Each declines the other's shapes.
+      // A record into another record of a different layout is the same object seen through another type: both shapes take the
+      // view grant, the source is promoted to a view of the object it owns, and the target is a view of that same object, so a
+      // write through either is a read through the other (viewConversion).
+      const viewed = this.viewConversion(expr, expected);
+      if (viewed !== null) return viewed;
       const helper =
         this.recordWidthHelper(expr.type.shapeId, expected.shapeId, expr.loc) ??
         lowerRecordOvfCaptureHelper(this, expr.type.shapeId, expected.shapeId, expr.loc);
