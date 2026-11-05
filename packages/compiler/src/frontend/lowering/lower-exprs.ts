@@ -27949,9 +27949,13 @@ function classKeyedReadWalked(L: Lowerer, className: string): boolean {
 function shadowAwareMethodValue(L: Lowerer, expr: ts.PropertyAccessExpression, className: string, original: IrExpr): IrExpr {
   const info = L.classes.get(className);
   if (info === undefined || !inOwnShadowFamily(L, info) || original.type.kind !== "func") return original;
-  // An own property written under a run-time key may shadow the method with a value of ANY type, but the read is typed as the
-  // method's function: a shadowing number would meet a checked cast that throws where Node answers the number. Calls are exact
-  // (the dispatcher), values are not, so the read of a family method as a value is refused here.
+  // `Class.prototype.m` is the PROTOTYPE's property: an instance's own property never shadows it, so the read is the method.
+  let recvNode: ts.Expression = expr.expression;
+  while (ts.isParenthesizedExpression(recvNode)) recvNode = recvNode.expression;
+  if (ts.isPropertyAccessExpression(recvNode) && recvNode.name.text === "prototype") return original;
+  // `x.m` on an instance: an own property written under a run-time key may shadow the method with a value of ANY type, but the
+  // read is typed as the method's function: a shadowing number would meet a checked cast that throws where Node answers the number.
+  // Calls are exact (the dispatcher), values are not, so the read of a family method as a value is refused.
   L.unsupported("SC1090", expr, `reading the method '${expr.name.text}' as a value from an instance whose own properties, written under run-time keys, can shadow it with a value of another type (call it directly, or read it through a keyed access)`);
   return original;
 }
