@@ -5097,6 +5097,24 @@ export class Lowerer {
       for (const n of c.staticAccessors?.keys() ?? []) this.noteEdge(`%${c.def.name}.static:${n}`);
     };
     for (let a: ClassInfo | null | undefined = info; a; a = a.base) mark(a);
+    // The member table's FIELD rows hand the field's value out as a dyn value: an instance held in a field of the
+    // class (`this.q = new Q()`) crosses the same way the box itself did, so its own methods are roots too.
+    {
+      const held = new Set<string>();
+      const seenTypes = new Set<string>();
+      const fieldsOf = (c: ClassInfo): void => {
+        for (const f of c.def.fields) this.classesCrossingIntoDyn(f.type, held, seenTypes);
+      };
+      for (let a: ClassInfo | null | undefined = info; a; a = a.base) fieldsOf(a);
+      const belowFields = (c: ClassInfo): void => {
+        for (const s of c.subclasses) {
+          fieldsOf(s);
+          belowFields(s);
+        }
+      };
+      belowFields(info);
+      for (const h of held) if (!this.dynBoxedNames.has(h)) this.noteDynBoxedClass(h);
+    }
     // An evaluation's box answers `new` and `instanceof` through the INSTANCE class.
     if (info.evalStaticOf !== undefined) this.noteDynBoxedClass(info.evalStaticOf.def.name);
     const below = (c: ClassInfo): void => {
