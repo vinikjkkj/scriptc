@@ -2,5 +2,5 @@
   "name": "twinrec",
   "version": "1.0.0",
   "main": "index.js",
-  "exports": { ".": "./index.js", "./package.json": "./package.json", "./promise": "./promise.js", "./machine": "./machine.js", "./claim": "./claim.js", "./asyncslot": "./asyncslot.js", "./nullable": "./nullable.js", "./protoloop": "./protoloop.js", "./emptyopts": "./emptyopts.js", "./factory": "./factory.js", "./promise.js": "./promise.js" }
+  "exports": { ".": "./index.js", "./package.json": "./package.json", "./promise": "./promise.js", "./machine": "./machine.js", "./symuser": "./symuser.js", "./symmod": "./symmod.js", "./claim": "./claim.js", "./asyncslot": "./asyncslot.js", "./nullable": "./nullable.js", "./protoloop": "./protoloop.js", "./emptyopts": "./emptyopts.js", "./factory": "./factory.js", "./promise.js": "./promise.js" }
 }

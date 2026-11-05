@@ -159,6 +159,10 @@ const CLAIM_ORDER_EXPECTED =
 /* cases/twinrec/claim-local.ts: a declaration-claimed promise held in a local before it is returned, recorded from node. */
 const CLAIM_LOCAL_EXPECTED =
   "OK late cb null OK,cb null closed\n";
+/* cases/twinrec/symbol-class.ts: a class field keyed by a symbol the dependency exports and declares, recorded from node. */
+const SYMBOL_CLASS_EXPECTED =
+  "false a:6379:t\n" +
+  "true\n";
 
 /* cases/twinrec/async-slots.ts: async methods of JavaScript classes rebound at run time (this[name] = fn, Class.prototype.m = fn),
    recorded from node. */
@@ -336,6 +340,16 @@ describe("provenance: a twin class with untyped methods behind a program's own r
       if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
       const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
       expect(stdout).toBe(ASYNC_SLOTS_EXPECTED);
+    }, 600_000);
+  }
+
+  for (const backend of ["c", "llvm"] as const) {
+    test(`24048: a class field keyed by an exported symbol that the package declares is one slot (${backend})`, async () => {
+      const entry = join(fixtureDir, "cases/twinrec/symbol-class.ts");
+      const { result, outPath } = await build(entry, "symbol-class", backend);
+      if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+      const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
+      expect(stdout).toBe(SYMBOL_CLASS_EXPECTED);
     }, 600_000);
   }
 
