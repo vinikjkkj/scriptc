@@ -1,4 +1,24 @@
 import { createPool } from "mysql2/promise";
+import type { FieldPacket, PoolConnection, ResultSetHeader } from "mysql2/promise";
+
+// The zapo store-mysql call shape: an executor typed as the pool connection's `execute`, its result handed to helpers that take the
+// [rows, fields] tuple. An INSERT or UPDATE answers [ResultSetHeader, undefined], a SELECT [rows, fields]: both must flow through.
+type QueryOutput = [unknown, FieldPacket[]];
+function queryRows(output: QueryOutput): Record<string, unknown>[] {
+  return output[0] as Record<string, unknown>[];
+}
+function affectedRows(output: QueryOutput): number {
+  return (output[0] as ResultSetHeader).affectedRows;
+}
+async function viaExecutor(executor: { execute: PoolConnection["execute"] }): Promise<void> {
+  const inserted = affectedRows(await executor.execute("INSERT INTO pt (id, name, score) VALUES (?, ?, ?)", [10, "delta", 4.5]));
+  const updated = affectedRows(await executor.execute("UPDATE pt SET score = score + ? WHERE id = ?", [1, 10]));
+  const rows = queryRows(await executor.execute("SELECT id, name, score FROM pt WHERE id = ?", [10]));
+  console.log("executor", inserted, updated, JSON.stringify(rows));
+  const removed = affectedRows(await executor.execute("DELETE FROM pt WHERE id = ?", [10]));
+  console.log("executor delete", removed);
+}
+
 
 // The pool path against a real server (the workflow's mysql service): pool.query and pool.execute (prepared) for DDL, writes, reads and
 // a failing statement, a connection checked out of the pool, pool.end. Every printed line is compared with Node's.
@@ -25,6 +45,9 @@ async function main(): Promise<void> {
   const [held] = await conn.execute("SELECT id FROM pt WHERE name = ?", ["beta"]);
   console.log("held", JSON.stringify(held));
   conn.release();
+  const held2 = await pool.getConnection();
+  await viaExecutor(held2);
+  held2.release();
   try {
     await pool.execute("INSERT INTO pt (id, name) VALUES (?, ?)", [1, "dup"]);
   } catch (e) {
