@@ -12,14 +12,15 @@
  * name. A method no write could shadow is not in a family and keeps its direct body byte for byte.
  *
  * Gates (a loud, named SC1090 at the keyed write): the receiver's class is typed at the write (a family registered by the
- * pre-scan), the whole family is JS classes carrying the table, and no member of the family is async, a generator or
- * abstract (the dispatcher forwards through the checked-dynamic call). */
+ * pre-scan), the whole family is JS classes carrying the table, and no member of the family is a generator or abstract (the
+ * dispatcher forwards through the checked-dynamic call). An async member's dispatcher answers the promise its body's call
+ * answers, and a replacement's answer adopts into it. */
 import { PoisonError, newFnCtx, type Lowerer } from "./lowerer.js";
 import type { ClassInfo } from "./lower-classes.js";
 import { CLASS_PROPS_FIELD } from "./lower-classes.js";
 import { isJsSourceFile } from "../program.js";
 import { dynCallWithThis } from "./lower-calls.js";
-import { protoSlotSlottable } from "./lower-protoslots.js";
+import { dispatcherResult, dispatcherReturnType, protoSlotSlottable } from "./lower-protoslots.js";
 import { unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { BOOL, DYN, STRING, VOID, type IrExpr, type IrFunction, type IrGlobal, type IrLocal, type IrType, type IrParam, type IrStmt, type SrcLoc } from "../../ir/nodes.js";
 
@@ -72,7 +73,7 @@ export function ownShadowWhy(L: Lowerer, info: ClassInfo): string | null {
     if (c.hasPropsTable !== true) return `the class '${c.def.jsName ?? c.def.name}' carries no run-time property table`;
     if (c.evalClass !== undefined) return `the class '${c.def.jsName ?? c.def.name}' is created by an evaluation`;
     for (const m of ownMethodNamesOf(c)) {
-      if (!protoSlotSlottable(c, m)) return `the class '${c.def.jsName ?? c.def.name}' declares the method '${m}' (abstract, async or a generator: an own property of that name could not be dispatched)`;
+      if (!protoSlotSlottable(c, m)) return `the class '${c.def.jsName ?? c.def.name}' declares the method '${m}' (abstract or a generator: an own property of that name could not be dispatched)`;
     }
   }
   return null;
@@ -156,7 +157,7 @@ export function applyOwnShadows(L: Lowerer, fnLists: IrFunction[][]): void {
   const pairs = new Set<string>();
   for (const t of todo) {
     const raw = t.fn;
-    if (raw.async === true || raw.params.length === 0) continue;
+    if (raw.params.length === 0) continue;
     const loc = raw.loc;
     try {
       const nsName = `${raw.name}%ns`;
@@ -171,7 +172,7 @@ export function applyOwnShadows(L: Lowerer, fnLists: IrFunction[][]): void {
       const args = params.slice(1).map((p) => L.coerceToExpected(ref(p), DYN));
       const own = { kind: "libCall", fn: "cls.propsRead", args: [bagOf(), { ...key }], type: DYN, loc } as IrExpr;
       const via = dynCallWithThis(L, recv, own, args, `${t.cls.def.jsName ?? t.cls.def.name}.prototype.${t.method}`, loc);
-      const rt = raw.returnType;
+      const rt = dispatcherReturnType(raw);
       // The result's coercion (a Promise adopts a checked-dynamic value through hidden locals) needs a function frame: this pass runs
       // after every body is down, so it opens one and hands its locals to the dispatcher.
       const ctxLocals: IrLocal[] = [];
@@ -179,7 +180,7 @@ export function applyOwnShadows(L: Lowerer, fnLists: IrFunction[][]): void {
         const ctx = newFnCtx(true, null, null, to);
         L.fnStack.push(ctx);
         try {
-          return L.coerceToExpected(e, to);
+          return dispatcherResult(L, e, to);
         } finally {
           L.fnStack.pop();
           ctxLocals.push(...ctx.locals);
