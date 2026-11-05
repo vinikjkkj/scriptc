@@ -13910,6 +13910,10 @@ static void scr_dyn_assign_from(ScrDyn *target, const ScrDyn *src) {
     if (!scr_exc_pending()) scr_dyn_sym_copy_enum(target, src);
     return;
   }
+  if (src->kind == SCR_DYN_JSVAL) {
+    if (!scr_exc_pending()) scr_dyn_sym_copy_enum(target, src); /* the engine's own symbol keys */
+    return;
+  }
   if (src->kind == SCR_DYN_OBJ || src->kind == SCR_DYN_ARR) {
     if (scr_dyn_ext(src)->syms != NULL && !scr_exc_pending()) scr_dyn_sym_copy_enum(target, src);
   } else if (src->kind == SCR_DYN_FUNC) {
@@ -14026,6 +14030,10 @@ ScrDyn *scr_dyn_assign(ScrDyn *target, const ScrDyn *src) {
                         scr_dyn_retain(pair->v.arr.items[1]));
       }
       scr_dyn_release(entries);
+#ifdef SCR_SYMTAB
+      /* the engine object's enumerable symbol keys follow its string keys */
+      if (scr_dyn_sym_copy_enum != NULL && !scr_exc_pending()) scr_dyn_sym_copy_enum(target, src);
+#endif
     }
     return scr_dyn_retain(target);
   }

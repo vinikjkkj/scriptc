@@ -627,7 +627,21 @@ static ScrDyn *scr_dsym_row_value(const ScrDyn *self, const ScrDynSymEnt *row) {
   return r;
 }
 
+/* An engine value (SCR_DYN_JSVAL): the symbol-keyed operation runs in the engine on THE engine symbol of the runtime symbol's
+ * identity (scr_island.c). +1 result, or NULL with the exception pending. */
+static ScrDyn *scr_dsym_engine(ScrDyn *recv, ScrJsvSymOp op, ScrSym *k, const ScrDyn *arg) {
+  return scr_dyn_jsval_ops()->sym_op(recv->v.jsval.cell, (int)op, k, arg);
+}
+static bool scr_dsym_engine_bool(ScrDyn *recv, ScrJsvSymOp op, ScrSym *k) {
+  ScrDyn *r = scr_dsym_engine(recv, op, k, NULL);
+  if (r == NULL) return false;
+  const bool b = r->kind == SCR_DYN_BOOL && r->v.b;
+  scr_dyn_release(r);
+  return b;
+}
+
 static ScrDyn *scr_dsym_get(ScrDyn *recv, ScrSym *k, ScrDyn *self) {
+  if (recv != NULL && recv->kind == SCR_DYN_JSVAL) return scr_dsym_engine(recv, SCR_JSV_SYM_GET, k, NULL);
   if (recv != NULL && recv->kind == SCR_DYN_PROXY) {
     ScrDyn *kd = scr_dsym_keydyn(k);
     ScrDyn *args[3] = {recv->v.proxy.target, kd, recv};
@@ -711,6 +725,11 @@ static void scr_dsym_read_only(ScrSym *k, const ScrDyn *self) {
 }
 
 static void scr_dsym_set(ScrDyn *recv, ScrSym *k, ScrDyn *v, bool strict, ScrDyn *self) {
+  if (recv != NULL && recv->kind == SCR_DYN_JSVAL) {
+    ScrDyn *r = scr_dsym_engine(recv, SCR_JSV_SYM_SET, k, v);
+    scr_dyn_release(r);
+    return;
+  }
   if (recv != NULL && recv->kind == SCR_DYN_PROXY) {
     ScrDyn *kd = scr_dsym_keydyn(k);
     ScrDyn *args[4] = {recv->v.proxy.target, kd, v, recv};
@@ -816,6 +835,7 @@ void scr_dyn_sym_set(ScrDyn *recv, ScrSym *k, ScrDyn *v) { scr_dsym_set(recv, k,
 void scr_dyn_sym_set_sloppy(ScrDyn *recv, ScrSym *k, ScrDyn *v) { scr_dsym_set(recv, k, v, false, recv); }
 
 bool scr_dyn_sym_has_own(ScrDyn *recv, ScrSym *k) {
+  if (recv != NULL && recv->kind == SCR_DYN_JSVAL) return scr_dsym_engine_bool(recv, SCR_JSV_SYM_HAS_OWN, k);
   if (recv != NULL && recv->kind == SCR_DYN_PROXY) {
     ScrDyn *kd = scr_dsym_keydyn(k);
     ScrDyn *args[2] = {recv->v.proxy.target, kd};
@@ -855,6 +875,7 @@ bool scr_dyn_sym_has_own(ScrDyn *recv, ScrSym *k) {
 }
 
 bool scr_dyn_sym_has(ScrDyn *recv, ScrSym *k) {
+  if (recv != NULL && recv->kind == SCR_DYN_JSVAL) return scr_dsym_engine_bool(recv, SCR_JSV_SYM_HAS, k);
   if (recv != NULL && recv->kind == SCR_DYN_PROXY) {
     ScrDyn *kd = scr_dsym_keydyn(k);
     ScrDyn *args[2] = {recv->v.proxy.target, kd};
@@ -897,6 +918,7 @@ bool scr_dyn_sym_has(ScrDyn *recv, ScrSym *k) {
 }
 
 static bool scr_dsym_delete(ScrDyn *recv, ScrSym *k, bool strict, const ScrDyn *self) {
+  if (recv != NULL && recv->kind == SCR_DYN_JSVAL) return scr_dsym_engine_bool(recv, SCR_JSV_SYM_DELETE, k);
   if (recv != NULL && recv->kind == SCR_DYN_PROXY) {
     ScrDyn *kd = scr_dsym_keydyn(k);
     ScrDyn *args[2] = {recv->v.proxy.target, kd};
@@ -955,6 +977,12 @@ static bool scr_dsym_delete(ScrDyn *recv, ScrSym *k, bool strict, const ScrDyn *
 }
 
 ScrDyn *scr_dyn_sym_define(ScrDyn *recv, ScrSym *k, ScrDyn *desc) {
+  if (recv != NULL && recv->kind == SCR_DYN_JSVAL) {
+    ScrDyn *r = scr_dsym_engine(recv, SCR_JSV_SYM_DEFINE, k, desc);
+    if (r == NULL) return NULL;
+    scr_dyn_release(r);
+    return scr_dyn_retain(recv);
+  }
   if (recv != NULL && recv->kind == SCR_DYN_PROXY) {
     ScrDyn *kd = scr_dsym_keydyn(k);
     ScrDyn *args[3] = {recv->v.proxy.target, kd, desc};
@@ -1089,6 +1117,16 @@ bool scr_dyn_sym_delete(ScrDyn *recv, ScrSym *k) { return scr_dsym_delete(recv, 
 bool scr_dyn_sym_delete_sloppy(ScrDyn *recv, ScrSym *k) { return scr_dsym_delete(recv, k, false, recv); }
 
 static ScrArr *scr_dsym_keys(ScrDyn *recv, bool enum_only) {
+  if (recv != NULL && recv->kind == SCR_DYN_JSVAL) {
+    ScrDyn *flag = scr_dyn_new_bool(enum_only);
+    ScrDyn *list = scr_dsym_engine(recv, SCR_JSV_SYM_KEYS, NULL, flag);
+    scr_dyn_release(flag);
+    if (list == NULL) return NULL;
+    ScrArr *out = scr_arr_new_ref(&scr_sym_retain_v, &scr_sym_release_v, NULL, 4);
+    for (size_t i = 0; i < list->v.arr.len; i++) scr_arr_push_ref(out, scr_sym_retain(SCR_ANY_SYM(list->v.arr.items[i])));
+    scr_dyn_release(list);
+    return out;
+  }
   if (recv != NULL && recv->kind == SCR_DYN_PROXY) {
     ScrDyn *targs[1] = {recv->v.proxy.target};
     bool ran;
@@ -1181,6 +1219,10 @@ static void scr_dsym_copy_enum_keyed(ScrDyn *target, const ScrDyn *src) {
 }
 
 static void scr_dsym_copy_enum(ScrDyn *target, const ScrDyn *src) {
+  if (src->kind == SCR_DYN_JSVAL) {
+    scr_dsym_copy_enum_keyed(target, src);
+    return;
+  }
   bool none;
   if (src->kind == SCR_DYN_PROXY) {
     scr_dsym_copy_enum_keyed(target, src);
@@ -1244,6 +1286,7 @@ static bool scr_dsym_proto_test(int op, ScrDyn *recv, ScrSym *k) {
     scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
     return false;
   }
+  if (recv != NULL && recv->kind == SCR_DYN_JSVAL) return scr_dsym_engine_bool(recv, SCR_JSV_SYM_IS_ENUM, k);
   ScrDyn *held = recv->kind == SCR_DYN_OBJINST ? scr_dsym_inst_bag(recv, false) : NULL;
   const ScrDynSymEnt *r = (scr_dsym_class(recv) == SCR_DSYM_STORE) ? scr_dsym_own(recv, k) : held != NULL ? scr_dsym_own(held, k) : NULL;
   const bool en = r != NULL && (r->flags & SCR_SYMP_ENUM) != 0;

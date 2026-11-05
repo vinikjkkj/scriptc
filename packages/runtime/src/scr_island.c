@@ -384,6 +384,13 @@ enum {
   ISL_H_HASOWN,
   ISL_H_ASSIGN,
   ISL_H_ITERDRAIN,
+#ifdef SCR_SYMTAB
+  ISL_H_HASKEY,
+  ISL_H_DELKEY,
+  ISL_H_DEFINE,
+  ISL_H_OWNSYMS,
+  ISL_H_ISENUM,
+#endif
   ISL_H_COUNT,
 };
 
@@ -453,11 +460,22 @@ static const char isl_prelude[] =
     "else if(typeof v===\"number\")d=\"number \"+v;else if(typeof v===\"boolean\")d=\"boolean \"+v;"
     "else if(typeof v===\"function\")d=\"function\";else d=\"object\";"
     "throw new TypeError(d+\" is not iterable (cannot read property Symbol(Symbol.iterator))\")}"
-    "const o=[];for(const x of v)o.push(x);return o}]";
+    "const o=[];for(const x of v)o.push(x);return o}"
+#ifdef SCR_SYMTAB
+    /* the symbol-keyed Object statics a wrapped receiver routes here (`k in o`, delete, defineProperty, the symbol keys, and
+     * propertyIsEnumerable): the engine's own semantics */
+    ",(o,k)=>k in o,(o,k)=>delete o[k],(o,k,d)=>{Object.defineProperty(o,k,d);return true},"
+    "(o,e)=>{const s=Object.getOwnPropertySymbols(o);return e?s.filter(k=>Object.prototype.propertyIsEnumerable.call(o,k)):s},"
+    "(o,k)=>Object.prototype.propertyIsEnumerable.call(o,k)"
+#endif
+    "]";
 
 static void isl_free_boot(void);
 static void isl_prom_wraps_teardown(void);
 static void isl_cells_teardown(void);
+#ifdef SCR_SYMTAB
+static void isl_syms_teardown(void);
+#endif
 
 static void isl_teardown_at_exit(void) {
   if (!isl_rt) return;
@@ -497,6 +515,9 @@ static void isl_teardown_at_exit(void) {
    * clean. LAST among the value-freeing steps — the ones above may
    * release cells, which unlinks them from this registry. */
   isl_cells_teardown();
+#ifdef SCR_SYMTAB
+  isl_syms_teardown();
+#endif
   for (int i = 0; i < ISL_H_COUNT; i++) JS_FreeValue(isl_ctx, isl_helpers[i]);
   isl_free_boot();
   JS_FreeContext(isl_ctx);
@@ -989,6 +1010,173 @@ ScrJsval *scr_jsval_from_json(const ScrStr *json) {
  * only: a dyn carrying a boxed function, a native handle, or a promise
  * throws the catchable TypeError naming the kind (the box's thunk calls
  * STATIC code the engine cannot re-enter through a data copy). */
+#ifdef SCR_SYMTAB
+/* ── symbols across the engine boundary (a program that links the symbol unit) ───────────────────────────────────────
+ * A runtime symbol and an engine symbol are two representations of one JS value, so a symbol that crosses is ONE symbol on
+ * each side, in both directions: this table pairs the runtime identity with the engine's, the first crossing of either
+ * side minting the other (a registry symbol by its key on both sides: Symbol.for in the engine, scr_sym_for here; any other
+ * by its description, so Symbol() and Symbol("") stay apart). The table holds a reference on each half until the island is
+ * torn down, so a pointer of either side names the same symbol for as long as the program runs. */
+typedef struct { const void *k; size_t v; } IslPm;
+typedef struct { IslPm *t; size_t cap, len; } IslPtrMap;
+typedef struct { ScrSym *sym; JSValue js; } IslSymPair;
+static IslSymPair *isl_sym_pairs;
+static size_t isl_sym_npairs, isl_sym_cappairs;
+static IslPtrMap isl_sym_by_rt, isl_sym_by_js;
+
+static size_t isl_pm_hash(const void *p) { return (size_t)(((uintptr_t)p >> 4) * 11400714819323198485ull); }
+
+static bool isl_pm_get(const IslPtrMap *m, const void *k, size_t *v) {
+  if (m->len == 0) return false;
+  for (size_t i = isl_pm_hash(k) & (m->cap - 1);; i = (i + 1) & (m->cap - 1)) {
+    if (m->t[i].k == k) {
+      *v = m->t[i].v;
+      return true;
+    }
+    if (m->t[i].k == NULL) return false;
+  }
+}
+
+static void isl_pm_put(IslPtrMap *m, const void *k, size_t v) {
+  if ((m->len + 1) * 2 > m->cap) {
+    IslPm *old = m->t;
+    const size_t ocap = m->cap;
+    m->cap = ocap == 0 ? 16 : ocap * 2;
+    m->t = (IslPm *)calloc(m->cap, sizeof *m->t);
+    if (m->t == NULL) scr_trap("scriptc: out of memory\n");
+    m->len = 0;
+    for (size_t i = 0; i < ocap; i++)
+      if (old[i].k != NULL) isl_pm_put(m, old[i].k, old[i].v);
+    free(old);
+  }
+  size_t i = isl_pm_hash(k) & (m->cap - 1);
+  while (m->t[i].k != NULL) i = (i + 1) & (m->cap - 1);
+  m->t[i].k = k;
+  m->t[i].v = v;
+  m->len++;
+}
+
+/* Records a pair (the runtime half is retained, the engine half dup'd). */
+static void isl_sym_record(ScrSym *s, JSValue js) {
+  if (isl_sym_npairs == isl_sym_cappairs) {
+    isl_sym_cappairs = isl_sym_cappairs == 0 ? 8 : isl_sym_cappairs * 2;
+    isl_sym_pairs = (IslSymPair *)realloc(isl_sym_pairs, isl_sym_cappairs * sizeof *isl_sym_pairs);
+    if (isl_sym_pairs == NULL) scr_trap("scriptc: out of memory\n");
+  }
+  isl_sym_pairs[isl_sym_npairs].sym = scr_sym_retain(s);
+  isl_sym_pairs[isl_sym_npairs].js = JS_DupValue(isl_ctx, js);
+  isl_pm_put(&isl_sym_by_rt, s, isl_sym_npairs);
+  isl_pm_put(&isl_sym_by_js, JS_VALUE_GET_PTR(js), isl_sym_npairs);
+  isl_sym_npairs++;
+}
+
+static void isl_syms_teardown(void) {
+  for (size_t i = 0; i < isl_sym_npairs; i++) {
+    JS_FreeValue(isl_ctx, isl_sym_pairs[i].js);
+    scr_sym_release(isl_sym_pairs[i].sym);
+  }
+  free(isl_sym_pairs);
+  free(isl_sym_by_rt.t);
+  free(isl_sym_by_js.t);
+  isl_sym_pairs = NULL;
+  isl_sym_npairs = isl_sym_cappairs = 0;
+  isl_sym_by_rt = (IslPtrMap){0};
+  isl_sym_by_js = (IslPtrMap){0};
+}
+
+/* The engine symbol of the runtime symbol `s`: an owned JSValue, or JS_EXCEPTION. */
+static JSValue isl_sym_to_js(ScrSym *s) {
+  size_t at;
+  if (isl_pm_get(&isl_sym_by_rt, s, &at)) return JS_DupValue(isl_ctx, isl_sym_pairs[at].js);
+  JSValue global = JS_GetGlobalObject(isl_ctx);
+  JSValue ctor = JS_GetPropertyStr(isl_ctx, global, "Symbol");
+  JS_FreeValue(isl_ctx, global);
+  if (JS_IsException(ctor)) return ctor;
+  JSValue out;
+  ScrStr *key = scr_sym_key_for(s); /* +1 or NULL */
+  if (key != NULL) {
+    JSValue forfn = JS_GetPropertyStr(isl_ctx, ctor, "for");
+    JSValue arg = JS_NewStringLen(isl_ctx, key->data, key->len);
+    out = JS_Call(isl_ctx, forfn, ctor, 1, &arg);
+    JS_FreeValue(isl_ctx, arg);
+    JS_FreeValue(isl_ctx, forfn);
+    scr_str_release(key);
+  } else {
+    ScrStr *desc = scr_sym_desc(s); /* +1 or NULL: no description */
+    if (desc != NULL) {
+      JSValue arg = JS_NewStringLen(isl_ctx, desc->data, desc->len);
+      out = JS_Call(isl_ctx, ctor, JS_UNDEFINED, 1, &arg);
+      JS_FreeValue(isl_ctx, arg);
+      scr_str_release(desc);
+    } else {
+      out = JS_Call(isl_ctx, ctor, JS_UNDEFINED, 0, NULL);
+    }
+  }
+  JS_FreeValue(isl_ctx, ctor);
+  if (JS_IsException(out)) return out;
+  /* a registry symbol the engine already knows (a first crossing the other way recorded it) is the table's */
+  size_t seen;
+  if (isl_pm_get(&isl_sym_by_js, JS_VALUE_GET_PTR(out), &seen)) {
+    JS_FreeValue(isl_ctx, out);
+    return JS_DupValue(isl_ctx, isl_sym_pairs[seen].js);
+  }
+  isl_sym_record(s, out);
+  return out;
+}
+
+/* The runtime symbol of the engine symbol `v` (borrowed): +1. */
+static ScrSym *isl_sym_from_js(JSValue v) {
+  size_t at;
+  if (isl_pm_get(&isl_sym_by_js, JS_VALUE_GET_PTR(v), &at)) return scr_sym_retain(isl_sym_pairs[at].sym);
+  JSValue global = JS_GetGlobalObject(isl_ctx);
+  JSValue ctor = JS_GetPropertyStr(isl_ctx, global, "Symbol");
+  JS_FreeValue(isl_ctx, global);
+  JSValue keyfn = JS_GetPropertyStr(isl_ctx, ctor, "keyFor");
+  JSValue kv = JS_Call(isl_ctx, keyfn, ctor, 1, &v);
+  JS_FreeValue(isl_ctx, keyfn);
+  JS_FreeValue(isl_ctx, ctor);
+  ScrSym *s;
+  if (!JS_IsException(kv) && JS_IsString(kv)) {
+    ScrStr *ks = isl_js_to_str(kv);
+    s = scr_sym_for(ks);
+    scr_str_release(ks);
+  } else {
+    JSValue dv = JS_GetPropertyStr(isl_ctx, v, "description");
+    if (JS_IsString(dv)) {
+      ScrStr *ds = isl_js_to_str(dv);
+      s = scr_sym_new(ds);
+      scr_str_release(ds);
+    } else {
+      s = scr_sym_new(NULL);
+    }
+    JS_FreeValue(isl_ctx, dv);
+  }
+  JS_FreeValue(isl_ctx, kv);
+  isl_sym_record(s, v);
+  return s;
+}
+
+static ScrDyn *isl_sym_dyn_from_js(JSValue v) {
+  ScrSym *s = isl_sym_from_js(v);
+  ScrDyn *d = scr_dyn_new_handle(s, SCR_DYNH_SYMBOL);
+  scr_sym_release(s);
+  return d;
+}
+#endif
+
+static const char *isl_dyn_unmarshalable(const ScrDyn *d);
+#ifdef SCR_SYMTAB
+/* The symbol-keyed rows of an OBJ / ARR cross with it; a row value the engine cannot hold names the world like a member's. */
+static const char *isl_dyn_unmarshalable_syms(const ScrDyn *d) {
+  const ScrDynObjExt *x = d->v.obj.ext;
+  if (x == NULL || x->syms == NULL) return NULL;
+  for (uint32_t i = 0; i < x->syms->len; i++) {
+    const char *r = isl_dyn_unmarshalable(x->syms->e[i].val);
+    if (r != NULL) return r;
+  }
+  return NULL;
+}
+#endif
 static const char *isl_dyn_unmarshalable(const ScrDyn *d) {
   switch (d->kind) {
   /* SCR_DYN_FUNC is NOT here: a boxed function crosses as the generic
@@ -998,6 +1186,9 @@ static const char *isl_dyn_unmarshalable(const ScrDyn *d) {
     /* A Date crosses by value (isl_date_from_handle): the engine gets its
      * own Date over the same time value. Every other handle stays named. */
     if (d->v.handle.tag == SCR_DYNH_DATE) return NULL;
+#ifdef SCR_SYMTAB
+    if (d->v.handle.tag == SCR_DYNH_SYMBOL) return NULL; /* the engine symbol of the same identity (isl_sym_to_js) */
+#endif
     return "a runtime handle";
   case SCR_DYN_OBJINST:
     /* A class instance held by reference: the engine has no cell for a
@@ -1030,12 +1221,18 @@ static const char *isl_dyn_unmarshalable(const ScrDyn *d) {
       const char *r = isl_dyn_unmarshalable(d->v.arr.items[i]);
       if (r != NULL) return r;
     }
+#ifdef SCR_SYMTAB
+    { const char *r = isl_dyn_unmarshalable_syms(d); if (r != NULL) return r; }
+#endif
     return NULL;
   case SCR_DYN_OBJ:
     for (size_t i = 0; i < d->v.obj.len; i++) {
       const char *r = isl_dyn_unmarshalable(d->v.obj.entries[i].value);
       if (r != NULL) return r;
     }
+#ifdef SCR_SYMTAB
+    { const char *r = isl_dyn_unmarshalable_syms(d); if (r != NULL) return r; }
+#endif
     return NULL;
   default:
     return NULL;
@@ -1067,10 +1264,53 @@ static JSValue isl_date_from_handle(const ScrDyn *d) {
   return made;
 }
 
+static JSValue isl_from_dyn(const ScrDyn *d);
+#ifdef SCR_SYMTAB
+/* The symbol-keyed rows of an OBJ / ARR onto its engine copy, each with its own attributes; an accessor row crosses as the
+ * engine accessor over the host-function shim of its getter / setter. false = the exception is pending. */
+static bool isl_define_sym_rows(JSValue target, const ScrDyn *d) {
+  const ScrDynObjExt *x = d->v.obj.ext;
+  if (x == NULL || x->syms == NULL) return true;
+  for (uint32_t i = 0; i < x->syms->len; i++) {
+    const ScrDynSymEnt *r = &x->syms->e[i];
+    JSValue key = isl_sym_to_js(r->key);
+    if (JS_IsException(key)) return false;
+    JSAtom atom = JS_ValueToAtom(isl_ctx, key);
+    JS_FreeValue(isl_ctx, key);
+    int flags = ((r->flags & SCR_SYMP_ENUM) ? JS_PROP_ENUMERABLE : 0) | ((r->flags & SCR_SYMP_CONFIG) ? JS_PROP_CONFIGURABLE : 0);
+    int rc;
+    if (r->flags & SCR_SYMP_ACC) {
+      JSValue g = r->val->v.arr.items[0]->kind == SCR_DYN_FUNC ? isl_dynfn_new(r->val->v.arr.items[0]) : JS_UNDEFINED;
+      JSValue s = JS_IsException(g) || r->val->v.arr.items[1]->kind != SCR_DYN_FUNC ? JS_UNDEFINED : isl_dynfn_new(r->val->v.arr.items[1]);
+      if (JS_IsException(g) || JS_IsException(s)) {
+        JS_FreeValue(isl_ctx, g);
+        JS_FreeValue(isl_ctx, s);
+        JS_FreeAtom(isl_ctx, atom);
+        return false;
+      }
+      rc = JS_DefinePropertyGetSet(isl_ctx, target, atom, g, s, flags);
+    } else {
+      JSValue v = isl_from_dyn(r->val);
+      if (JS_IsException(v)) {
+        JS_FreeAtom(isl_ctx, atom);
+        return false;
+      }
+      rc = JS_DefinePropertyValue(isl_ctx, target, atom, v, flags | ((r->flags & SCR_SYMP_WRITE) ? JS_PROP_WRITABLE : 0));
+    }
+    JS_FreeAtom(isl_ctx, atom);
+    if (rc < 0) return false;
+  }
+  return true;
+}
+#endif
+
 static JSValue isl_from_dyn(const ScrDyn *d) {
   switch (d->kind) {
   case SCR_DYN_HANDLE:
     if (d->v.handle.tag == SCR_DYNH_DATE) return isl_date_from_handle(d);
+#ifdef SCR_SYMTAB
+    if (d->v.handle.tag == SCR_DYNH_SYMBOL) return isl_sym_to_js((ScrSym *)d->v.handle.ptr);
+#endif
     return JS_ThrowTypeError(isl_ctx, "a runtime handle cannot enter dynamically-executed code");
   case SCR_DYN_FUNC:
     /* A boxed dyn function enters as ONE generic host-function shim over
@@ -1102,6 +1342,12 @@ static JSValue isl_from_dyn(const ScrDyn *d) {
         return JS_EXCEPTION;
       }
     }
+#ifdef SCR_SYMTAB
+    if (!isl_define_sym_rows(arr, d)) {
+      JS_FreeValue(isl_ctx, arr);
+      return JS_EXCEPTION;
+    }
+#endif
     return arr;
   }
   case SCR_DYN_OBJ: {
@@ -1121,6 +1367,12 @@ static JSValue isl_from_dyn(const ScrDyn *d) {
         return JS_EXCEPTION;
       }
     }
+#ifdef SCR_SYMTAB
+    if (!isl_define_sym_rows(obj, d)) {
+      JS_FreeValue(isl_ctx, obj);
+      return JS_EXCEPTION;
+    }
+#endif
     return obj;
   }
   case SCR_DYN_JSVAL:
@@ -1198,6 +1450,9 @@ static ScrDyn *isl_dyn_from_value(JSValue v) {
     scr_str_release(s);
     return d;
   }
+#ifdef SCR_SYMTAB
+  if (JS_IsSymbol(v)) return isl_sym_dyn_from_js(v); /* the runtime symbol of the same identity */
+#endif
   if (JS_IsDate(v) && scr_dyn_date_box_hook != NULL) {
     /* An engine Date comes back as a native Date by VALUE (the time value
      * is copied; the engine object is not kept). Without the Date handle
@@ -1424,6 +1679,70 @@ static ScrDyn *isl_dynjs_iter_drain(ScrJsval *cell, bool spread, const ScrStr *s
   return out;
 }
 
+#ifdef SCR_SYMTAB
+static ScrDyn *isl_dynjs_sym_op(ScrJsval *cell, int op, ScrSym *k, const ScrDyn *arg) {
+  isl_entry();
+  JSValue key = JS_UNDEFINED;
+  if (op != SCR_JSV_SYM_KEYS) {
+    key = isl_sym_to_js(k);
+    if (JS_IsException(key)) {
+      isl_bridge_exception();
+      return NULL;
+    }
+  }
+  ScrJsval *aj = NULL; /* the value / descriptor argument, crossed into the engine */
+  if (op == SCR_JSV_SYM_SET || op == SCR_JSV_SYM_DEFINE) {
+    aj = scr_jsval_from_dyn(arg);
+    if (aj == NULL) {
+      JS_FreeValue(isl_ctx, key);
+      return NULL;
+    }
+  }
+  JSValue r;
+  switch (op) {
+  case SCR_JSV_SYM_GET: { JSValue a[2] = {cell->v, key}; r = JS_Call(isl_ctx, isl_helpers[ISL_H_GETIDX], JS_UNDEFINED, 2, a); break; }
+  case SCR_JSV_SYM_SET: { JSValue a[3] = {cell->v, key, aj->v}; r = JS_Call(isl_ctx, isl_helpers[ISL_H_SETIDX], JS_UNDEFINED, 3, a); break; }
+  case SCR_JSV_SYM_DEFINE: { JSValue a[3] = {cell->v, key, aj->v}; r = JS_Call(isl_ctx, isl_helpers[ISL_H_DEFINE], JS_UNDEFINED, 3, a); break; }
+  case SCR_JSV_SYM_HAS: { JSValue a[2] = {cell->v, key}; r = JS_Call(isl_ctx, isl_helpers[ISL_H_HASKEY], JS_UNDEFINED, 2, a); break; }
+  case SCR_JSV_SYM_HAS_OWN: { JSValue a[2] = {cell->v, key}; r = JS_Call(isl_ctx, isl_helpers[ISL_H_HASOWN], JS_UNDEFINED, 2, a); break; }
+  case SCR_JSV_SYM_DELETE: { JSValue a[2] = {cell->v, key}; r = JS_Call(isl_ctx, isl_helpers[ISL_H_DELKEY], JS_UNDEFINED, 2, a); break; }
+  case SCR_JSV_SYM_IS_ENUM: { JSValue a[2] = {cell->v, key}; r = JS_Call(isl_ctx, isl_helpers[ISL_H_ISENUM], JS_UNDEFINED, 2, a); break; }
+  default: { /* SCR_JSV_SYM_KEYS */
+    JSValue a[2] = {cell->v, JS_NewBool(isl_ctx, arg != NULL && arg->kind == SCR_DYN_BOOL && arg->v.b)};
+    r = JS_Call(isl_ctx, isl_helpers[ISL_H_OWNSYMS], JS_UNDEFINED, 2, a);
+    break;
+  }
+  }
+  JS_FreeValue(isl_ctx, key);
+  if (aj != NULL) scr_jsval_release(aj);
+  if (JS_IsException(r)) {
+    isl_bridge_exception();
+    return NULL;
+  }
+  ScrDyn *out;
+  if (op == SCR_JSV_SYM_GET) {
+    out = isl_dyn_from_value(r);
+  } else if (op == SCR_JSV_SYM_KEYS) {
+    out = scr_dyn_new_arr();
+    int64_t len = 0;
+    JSValue lv = JS_GetPropertyStr(isl_ctx, r, "length");
+    JS_ToInt64(isl_ctx, &len, lv);
+    JS_FreeValue(isl_ctx, lv);
+    for (int64_t i = 0; i < len; i++) {
+      JSValue e = JS_GetPropertyUint32(isl_ctx, r, (uint32_t)i);
+      scr_dyn_arr_push(out, isl_sym_dyn_from_js(e));
+      JS_FreeValue(isl_ctx, e);
+    }
+  } else if (op == SCR_JSV_SYM_SET || op == SCR_JSV_SYM_DEFINE) {
+    out = scr_dyn_new_bool(true);
+  } else {
+    out = scr_dyn_new_bool(JS_ToBool(isl_ctx, r) > 0);
+  }
+  JS_FreeValue(isl_ctx, r);
+  return out;
+}
+#endif
+
 static const ScrDynJsvalOps isl_dynjs_ops = {
   isl_dynjs_release,
   isl_dynjs_typeof,
@@ -1442,6 +1761,9 @@ static const ScrDynJsvalOps isl_dynjs_ops = {
   isl_dynjs_assign,
   isl_dynjs_to_json,
   isl_dynjs_iter_drain,
+#ifdef SCR_SYMTAB
+  isl_dynjs_sym_op,
+#endif
 };
 
 ScrDyn *scr_dyn_from_jsval(ScrJsval *cell) {
@@ -1465,6 +1787,9 @@ ScrDyn *scr_dyn_from_jsval(ScrJsval *cell) {
     scr_str_release(s);
     return d;
   }
+#ifdef SCR_SYMTAB
+  if (JS_IsSymbol(v)) return isl_sym_dyn_from_js(v);
+#endif
   return scr_dyn_alloc_jsval(scr_jsval_retain(cell), &isl_dynjs_ops);
 }
 

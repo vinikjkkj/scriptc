@@ -7655,7 +7655,17 @@ typedef struct ScrDynJsvalOps {
    * bridges with the ENGINE's message. +1, or NULL with the exception
    * pending. */
   ScrDyn *(*iter_drain)(ScrJsval *cell, bool spread, const ScrStr *spell);
+#ifdef SCR_SYMTAB
+  /* A symbol-keyed operation on the ENGINE object (scr_symbol.c routes here, ScrDsymEngineOp): the runtime symbol `k`
+   * crosses as THE engine symbol of its identity (one per identity, both directions: scr_island.c's table). +1 result, or
+   * NULL with the engine's exception pending. GET answers the value; SET/DEFINE/HAS/HAS_OWN/DELETE answer a dyn bool
+   * (`arg` is the value / descriptor); KEYS answers a dyn array of symbol handles (`arg` a dyn bool: enumerable only). */
+  ScrDyn *(*sym_op)(ScrJsval *cell, int op, ScrSym *k, const ScrDyn *arg);
+#endif
 } ScrDynJsvalOps;
+#ifdef SCR_SYMTAB
+typedef enum { SCR_JSV_SYM_GET, SCR_JSV_SYM_SET, SCR_JSV_SYM_DEFINE, SCR_JSV_SYM_HAS, SCR_JSV_SYM_HAS_OWN, SCR_JSV_SYM_DELETE, SCR_JSV_SYM_KEYS, SCR_JSV_SYM_IS_ENUM } ScrJsvSymOp;
+#endif
 
 /* The allocator view the gated constructor uses (installs the ops);
  * ownership of `cell` MOVES in (the caller retains first). */
