@@ -307,9 +307,6 @@ export interface FnCtx {
   /** A generator METHOD body whose TReturn channel is the VOID sentinel (the checker's any/unknown/void/undefined all ride it):
    * a `return <value>` there would drop the done-value, which a `.next()` consumer observes. Refused at the statement. */
   genMethodDoneFence?: true;
-  /** The body of a generator METHOD of a class: its `yield*` closes the delegate when the delegating generator is closed
-   * (JS forwards return() to the delegate; module-level generators keep their older emission byte-for-byte). */
-  genMethodBody?: true;
   /** VARIADIC `arguments` form (rest-marked func type with no declared
    * rest param): the synthetic trailing dyn-array param `arguments`
    * reads resolve to. Also registered under ARGUMENTS_BINDING in the

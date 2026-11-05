@@ -10811,9 +10811,18 @@ class LlEmitter {
           // moves it into the fiber, or leaves it pending (non-suspended
           // generators: the .throw call itself throws at the check below).
           if (e.arg === null) throw new Error("llvm emitter bug: genResume throw with no payload");
-          const a = this.emitExpr(e.arg);
-          if (isRefCounted(e.arg.type)) this.moveTemp(a); // the cell takes ownership
-          this.emitThrowValue({ name: a.name, type: e.arg.type });
+          if (e.arg.type.kind === "caught") {
+            // A caught snapshot forwarded by yield*: re-raise it into the caller's cell (the rethrow statement's call).
+            if (e.arg.kind !== "varRef") throw new Error("llvm emitter bug: genResume throw of a non-binding caught value");
+            const c = B.tmp();
+            B.line(`${c} = load ptr, ptr %${mangleLocal(e.arg.localId)}`);
+            this.declare(`declare void @scr_rethrow(ptr)`);
+            B.line(`call void @scr_rethrow(ptr ${c})`);
+          } else {
+            const a = this.emitExpr(e.arg);
+            if (isRefCounted(e.arg.type)) this.moveTemp(a); // the cell takes ownership
+            this.emitThrowValue({ name: a.name, type: e.arg.type });
+          }
           this.declare(`declare void @scr_gen_resume_throw(ptr)`);
           B.line(`call void @scr_gen_resume_throw(ptr ${g.name})`);
         }
