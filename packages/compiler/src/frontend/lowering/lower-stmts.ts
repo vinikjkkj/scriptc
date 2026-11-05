@@ -41,7 +41,7 @@ import { cjsExportsBagOf, cjsMemberOnlyInFunctions, ctorObjectGlobalValue, webCr
 import { detachedThisWriteFirst, hoistDetachedWriteRhs, keyedAccessOverIndexSignature, localTakesWidenedKeyedRead, narrowBridgeUnion, seqExprSafeStmt, unionFieldReadAt, unitArmsOf, cjsExportAccessorWriteStmt, cjsExportSetterWrite } from "./lower-exprs.js";
 import { abstractPropertyDeclOf, aliasTypeofNarrows, checkedJsNumber, compoundCombine, unionNumericCompoundRead, writeTypeOf, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, isMatchSliceType, lowerGroupsProjection, matchResultNamedGroupsOf, probeLower, pureReemittable, symbolFieldInfo, tonumWhy } from "./lower-exprs.js";
 import { UNSUPPORTED, checkerPanicDiag, isCheckerPanic, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
-import { isUnitOnlyBoundTsType, isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
+import { undefSlotWiden, isUnitOnlyBoundTsType, isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
 import { canonicalBuiltinModule, isRelativeSpecifier } from "../shared.js";
 import { probeNodeRequireRefusal } from "../npm.js";
 import { lowerAbsentGlobal, lowerAbsentLocal } from "./lower-absent.js";
@@ -3912,6 +3912,13 @@ function tableElemType(L: Lowerer, t: IrType): IrType {
   return arrayOf(tableElemType(L, first));
 }
 
+/** The mapped type of a declared name, with a library-declared array Node may leave undefined widened (irTypeOf's rule). */
+function slotMapped(L: Lowerer, name: ts.Identifier): IrType | null {
+  const t = L.typeOf(name);
+  const m = L.mapTypeOf(t);
+  return m !== null && m.kind === "array" ? undefSlotWiden(m, t, L.typeCtx, L.checker) : m;
+}
+
 /** `const id = node.attrs.id; if (!id) return false` — the read is
  * answerable, the LOCAL is not. tsc types an index-signature read by the
  * signature's VALUE type, so the binding it initializes is spelled
@@ -5174,7 +5181,7 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
       // asked), while the initializer lowered to the runtime's dyn function
       // (lower-exprs, and timerGlobalDeclType in lower-fnvalue.ts). The slot is that dyn value.
       (init.type.kind === "dyn" ? timerGlobalDeclType(L, decl.initializer) : null) ??
-      (bindingTainted ? null : L.mapTypeOf(L.typeOf(decl.name))) ??
+      (bindingTainted ? null : slotMapped(L, decl.name)) ??
       (init.type.kind === "dyn" ? DYN : null) ??
       // A CONST holding a class reference whose DECLARED type is a
       // construct-signature interface: `export const C = Impl as unknown
