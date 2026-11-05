@@ -457,6 +457,13 @@ export class ShapeRegistry {
   /** The shape id a back-reference to an in-progress type resolves to:
    * reuses the type's persistent recursive id or mints a PLACEHOLDER
    * entry (empty fields) the outer frame finalizes. */
+  /** Frames of a proven structural run (all but the outermost), mapped to the outermost frame whose shape they complete as. */
+  readonly structFold = new Map<ts.Type, ts.Type>();
+  /** Proven families per generic symbol: the signature every level has, and the outermost frame whose shape they all are. A type
+   * mapped LATER on its own (a value typed as level 4) joins the family by the same exact test instead of starting a new chain.
+   * Per registry: the target is a type of THIS registry's shapes. */
+  readonly structFamilies = new Map<ts.Symbol, { sig: string; target: ts.Type }[]>();
+
   recursiveRef(t: ts.Type): string {
     let id = this.recIds.get(t);
     if (id === undefined) {
@@ -8010,29 +8017,44 @@ interface RecordShapeParts {
  * otherwise silent. */
 const knotSensitiveMembers = new WeakMap<ts.Type, readonly string[]>();
 
-/** The nearest in-progress ancestor `T` is a structural repeat of, or null.
+/** The in-progress ancestor `T` is a structural repeat of, with the frames between them, or null.
  *
  * A generic whose members name another instantiation of itself with a deeper argument (`Filter<T>` -> `$and: Filter<WithId<T>>[]`)
  * never repeats a checker type: each level is a new one, so the identity-keyed knot (shapes.inProgress) never closes and the walk
- * runs to the depth cap. When the checker's own types are equal in every member but those self-instantiations, the levels are one
- * shape and the later one is the earlier one.
+ * runs to the depth cap. When every level is equal in each member but those self-instantiations, the levels are ONE shape.
  *
- * Conservative on purpose: only the SAME generic symbol, only when that symbol is already nested three deep in the walk, and the
- * test is EXACT - the same member names, optionality and index signatures, each member type identical (by checker type id) apart
- * from occurrences of the symbol's own instantiations, which compare equal to each other. Never assignability: `{ _id: ObjectId }`
- * and `{ _id: any }` are mutually assignable and different shapes. Any type the facade gives no id for answers null. */
-function structuralAncestorOf(t: ts.Type, inProgress: ReadonlySet<ts.Type>, ctx: TypeMapperCtx): ts.Type | null {
-  const symOf = (x: ts.Type): ts.Symbol | undefined => x.getAliasSymbol() ?? x.getSymbol();
-  const sym = symOf(t);
-  if (sym === undefined) return null;
-  const same: ts.Type[] = [];
-  for (const a of inProgress) if (symOf(a) === sym) same.push(a);
-  if (same.length < 3) return null;
+ * Conservative on purpose, and exact:
+ *  - only the SAME generic symbol, in a run of at least three nested frames whose member signatures are all equal to `T`'s;
+ *  - the signature compares member names, optionality and index signatures, each member type identical (by checker type id) apart
+ *    from occurrences of the symbol's own instantiations, which compare equal to each other. Never assignability: `{ _id: ObjectId }`
+ *    and `{ _id: any }` are mutually assignable and different shapes. A type the facade gives no id for answers null;
+ *  - the self-instantiation `T` names is followed PROBE_LEVELS more levels and each must have the same signature, so a conditional
+ *    type that changes the members within that horizon keeps the levels apart (and the walk refuses at the depth cap as before).
+ *    A change beyond the horizon cannot be seen by looking: that is the one residual, shared with the checker's own deep-nesting
+ *    rule, and it is stated in the tests.
+ *
+ * `target` is the outermost frame of the run: every frame in `fold` (the rest of the run) completes as `target`'s shape. */
+const STRUCT_PROBE_LEVELS = 16;
+
+interface StructTools {
+  symOf(x: ts.Type): ts.Symbol | undefined;
+  /** The exact signature of `x` for symbol `sym`, or null when the facade cannot name a member's type. */
+  sig(x: ts.Type): string | null;
+  /** `x`'s signature when it and the next STRUCT_PROBE_LEVELS levels along its own self-instantiation all agree, else null. */
+  proven(x: ts.Type): string | null;
+}
+
+function structTools(sym: ts.Symbol, ctx: TypeMapperCtx): StructTools {
   const { checker } = ctx;
+  const symOf = (x: ts.Type): ts.Symbol | undefined => x.getAliasSymbol() ?? x.getSymbol();
   const idOf = (x: ts.Type): number | undefined => (x as unknown as { id?: number }).id;
   let unknown = false;
+  let selfInstance: ts.Type | undefined;
   const canon = (x: ts.Type, depth: number): string => {
-    if (symOf(x) === sym) return "#";
+    if (symOf(x) === sym) {
+      if (selfInstance === undefined) selfInstance = x;
+      return "#";
+    }
     if (depth > 6) { unknown = true; return "?"; }
     if (x.isUnionType()) return "U(" + ts.constituentTypes(x).map((c) => canon(c, depth + 1)).sort().join("|") + ")";
     if (x.isIntersectionType()) return "I(" + ts.constituentTypes(x).map((c) => canon(c, depth + 1)).sort().join("&") + ")";
@@ -8045,19 +8067,83 @@ function structuralAncestorOf(t: ts.Type, inProgress: ReadonlySet<ts.Type>, ctx:
     if (id === undefined) { unknown = true; return "?"; }
     return "t" + id;
   };
-  const sig = (x: ts.Type): string => {
+  const raw = (x: ts.Type): string => {
+    selfInstance = undefined;
     const props = [...checker.getPropertiesOfType(x)].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     const parts = props.map((p) => `${p.name}${(p.flags & ts.SymbolFlags.Optional) !== 0 ? "?" : ""}:${canon(checker.getTypeOfSymbol(p), 0)}`);
     for (const info of checker.getIndexInfosOfType(x)) parts.push(`[${canon(info.keyType, 0)}]:${canon(info.valueType, 0)}`);
     return parts.join(";");
   };
-  const mine = sig(t);
-  if (unknown) return null;
-  for (let i = same.length - 1; i >= 0; i--) {
-    const s = sig(same[i]!);
-    if (unknown) return null;
-    if (s === mine) return same[i]!;
+  const sig = (x: ts.Type): string | null => {
+    unknown = false;
+    const s = raw(x);
+    return unknown ? null : s;
+  };
+  const proven = (x: ts.Type): string | null => {
+    const mine = sig(x);
+    if (mine === null || selfInstance === undefined) return null;
+    let cur: ts.Type | undefined = selfInstance;
+    for (let i = 0; i < STRUCT_PROBE_LEVELS; i++) {
+      if (cur === undefined) return null;
+      const s = sig(cur);
+      if (s !== mine) return null;
+      cur = selfInstance;
+    }
+    return mine;
+  };
+  return { symOf, sig, proven };
+}
+
+/** The run of nested frames `T` closes: the outermost frame (target) and the rest (fold), or null.
+ *
+ * A generic whose members name another instantiation of itself with a deeper argument (`Filter<T>` -> `$and: Filter<WithId<T>>[]`)
+ * never repeats a checker type: each level is a new one, so the identity-keyed knot (shapes.inProgress) never closes and the walk
+ * runs to the depth cap. When every level is equal in each member but those self-instantiations, the levels are ONE shape.
+ *
+ * Conservative on purpose, and exact:
+ *  - only the SAME generic symbol, in a run of at least three nested frames whose member signatures all equal `T`'s;
+ *  - the signature compares member names, optionality and index signatures, each member type identical (by checker type id) apart
+ *    from occurrences of the symbol's own instantiations, which compare equal to each other. Never assignability: `{ _id: ObjectId }`
+ *    and `{ _id: any }` are mutually assignable and different shapes. A type the facade gives no id for answers null;
+ *  - the self-instantiation `T` names is followed STRUCT_PROBE_LEVELS more levels and each must have the same signature, so a
+ *    conditional type that changes the members within that horizon keeps the levels apart (the walk then refuses at the depth cap
+ *    as before). A change beyond the horizon cannot be seen by looking: that is the one residual, shared with the checker's own
+ *    deep-nesting rule, and the tests state it. */
+function structuralAncestorOf(
+  t: ts.Type,
+  inProgress: ReadonlySet<ts.Type>,
+  ctx: TypeMapperCtx,
+): { target: ts.Type; fold: ts.Type[]; sym: ts.Symbol; sig: string } | null {
+  const sym = t.getAliasSymbol() ?? t.getSymbol();
+  if (sym === undefined) return null;
+  const tools = structTools(sym, ctx);
+  const same: ts.Type[] = [];
+  for (const a of inProgress) if (tools.symOf(a) === sym) same.push(a);
+  if (same.length < 3) return null;
+  const mine = tools.proven(t);
+  if (mine === null) return null;
+  let from = same.length;
+  while (from > 0) {
+    const s = tools.sig(same[from - 1]!);
+    if (s === null) return null;
+    if (s !== mine) break;
+    from--;
   }
+  const run = same.slice(from);
+  if (run.length < 3) return null;
+  return { target: run[0]!, fold: run.slice(1), sym, sig: mine };
+}
+
+/** A type mapped on its own that belongs to a family already proven (structFamilies): that family's outermost frame, or null. */
+function structFamilyOf(t: ts.Type, ctx: TypeMapperCtx): ts.Type | null {
+  if (ctx.shapes.structFamilies.size === 0) return null;
+  const sym = t.getAliasSymbol() ?? t.getSymbol();
+  if (sym === undefined) return null;
+  const fams = ctx.shapes.structFamilies.get(sym);
+  if (fams === undefined) return null;
+  const mine = structTools(sym, ctx).proven(t);
+  if (mine === null) return null;
+  for (const f of fams) if (f.sig === mine) return f.target;
   return null;
 }
 
@@ -8081,16 +8167,31 @@ function mapRecordType(widened: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // A STRUCTURAL back-reference: an instantiation of a generic that is already nested in the walk, and whose members are exactly an
   // ancestor's (structuralAncestorOf). It is that ancestor's shape, so the knot closes there instead of at the depth cap.
   {
-    const ancestor = structuralAncestorOf(widened, shapes.inProgress, ctx);
-    if (ancestor !== null) {
-      mapTrace(`STRUCTTIE ${ctx.checker.typeToString(widened).slice(0, 60)} -> ${ctx.checker.typeToString(ancestor).slice(0, 40)}`);
-      return { kind: "record", shapeId: shapes.recursiveRef(ancestor) };
+    const member = structFamilyOf(widened, ctx);
+    if (member !== null) return { kind: "record", shapeId: shapes.recursiveRef(member) };
+    const tied = structuralAncestorOf(widened, shapes.inProgress, ctx);
+    if (tied !== null) {
+      mapTrace(`STRUCTTIE ${ctx.checker.typeToString(widened).slice(0, 60)} -> ${ctx.checker.typeToString(tied.target).slice(0, 40)}`);
+      // Every level of the run is this shape: the frames still running complete as the target's placeholder.
+      for (const f of tied.fold) shapes.structFold.set(f, tied.target);
+      const fam = shapes.structFamilies.get(tied.sym) ?? [];
+      if (!fam.some((x) => x.sig === tied.sig)) fam.push({ sig: tied.sig, target: tied.target });
+      shapes.structFamilies.set(tied.sym, fam);
+      return { kind: "record", shapeId: shapes.recursiveRef(tied.target) };
     }
   }
   shapes.inProgress.add(widened);
   const sensitivityAtEntry = contextResolutions;
   try {
     const inner = mapRecordTypeInner(widened, ctx);
+    const foldedInto = shapes.structFold.get(widened);
+    if (foldedInto !== undefined) {
+      shapes.structFold.delete(widened);
+      // A level of a proven run: the shape its fields describe IS the run's outermost shape (equal signatures), which finalizes
+      // with the outermost frame. Nothing minted for this type stands on its own.
+      if (inner === null) return null;
+      return { kind: "record", shapeId: shapes.recursiveRef(foldedInto) };
+    }
     if (inner === null) {
       if (process.env["SCRIPTC_DOORS"] !== undefined && shapes.recursivePending(widened)) console.error("[doors] saiu por inner===null");
       // A back-reference minted a placeholder for this type while its frame ran;
