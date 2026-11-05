@@ -412,6 +412,17 @@ static bool scr_dsym_inst_complete(const ScrDyn *d) { return !scr_dyn_objinst_cl
  * (+1), or NULL. `ensure` asks the class's synthesized %dynBag member to create it; a class with no table answers NULL
  * either way. */
 static ScrDyn *scr_dsym_inst_bag(const ScrDyn *d, bool ensure) {
+  if (scr_dyn_objinst_error_rooted(d)) {
+    /* an Error subclass keeps its expando properties in the runtime's own bag (ScrError.props); the symbol table rides its ext */
+    ScrError *e = (ScrError *)d->v.inst.o;
+    if (e->props == NULL || e->props->kind == SCR_DYN_UNDEF) { /* an Error subclass's %props starts as the undefined value */
+      if (!ensure) return NULL;
+      ScrDyn *old = e->props;
+      e->props = scr_dyn_new_obj();
+      scr_dyn_release(old);
+    }
+    return e->props->kind == SCR_DYN_OBJ ? scr_dyn_retain(e->props) : NULL;
+  }
   const ScrDynClassMember *m = scr_dyn_objinst_member(d, "%props", 6);
   if (m == NULL || m->get == NULL) return NULL;
   ScrDyn *b = m->get(d->v.inst.o); /* +1 */

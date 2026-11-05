@@ -839,6 +839,17 @@ export interface GenericClassInfo {
    * checker types `any`/`unknown`. At run time that receiver may be a program-class instance, whose symbol-keyed properties live in
    * the run-time property table, so every plain program class carries one in such a program (the program did not compile before:
    * an untyped symbol write was refused). Well-known symbols (`Symbol.iterator`) are not user keys. */
+  /** Whether a class whose collected base is `base` may carry the run-time property table for symbol-keyed properties: a program root,
+   * or a root that is the runtime's EventEmitter or a runtime stream (the table is an appended field, as for string expandos). An Error
+   * root already has its own expando bag in the runtime layout, and every other runtime root has a layout the program cannot extend. */
+  function symbolTableRootOk(base: ClassInfo | null | undefined): boolean {
+    let b: ClassInfo | null | undefined = base;
+    while (b?.base) b = b.base;
+    if (b === null || b === undefined) return true;
+    if (b.def.runtime !== true) return true;
+    return b.def.name === RUNTIME_EMITTER_CLASS || RUNTIME_STREAM_CLASSES.has(b.def.name);
+  }
+
   export function scanUntypedSymbolWrites(L: Lowerer): boolean {
     const isUserSymbolKey = (k: ts.Expression): boolean => {
       while (ts.isParenthesizedExpression(k)) k = k.expression;
@@ -5653,7 +5664,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       const ownPropsTable =
         L.definePropStringTable(decl) ||
         // a program that stores symbol-keyed properties through untyped receivers: an instance reaching one needs a table to hold them
-        (!inst && !mixin && !familyMode && ts.isClassDeclaration(decl) && L.untypedSymbolWrites() && !classHasBuiltinBase(L, decl)) ||
+        (!inst && !mixin && !familyMode && ts.isClassDeclaration(decl) && L.untypedSymbolWrites() && symbolTableRootOk(base)) ||
         (!inst && !mixin && !familyMode && ts.isClassDeclaration(decl) && implicitMonoFile(decl.getSourceFile())) ||
         // a JS class whose own bodies write `this[<run-time key>] = v` (ioredis Commander.defineCommand): the writes land in the table
         (!inst && !mixin && !familyMode && ts.isClassDeclaration(decl) && isJsSourceFile(decl.getSourceFile()) && writesThisUnderRuntimeKey(L, decl));

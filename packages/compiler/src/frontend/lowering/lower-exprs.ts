@@ -15578,7 +15578,8 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     const recvT = L.mapTypeOf(L.typeOf(recvNode));
     if (recvT?.kind !== "object") return null;
     const info = L.classes.get(recvT.className);
-    if (info === undefined || info.hasPropsTable !== true || info.builtinError) return null;
+    // the table is the `%props` field: the program-class run-time property table, or an Error class's own expando bag
+    if (info === undefined || !(info.hasPropsTable === true || info.def.fields.some((x) => x.name === CLASS_PROPS_FIELD))) return null;
     // a member the class declares under this key keeps its own lowering
     if (keyNode !== null) {
       let k: ts.Expression = keyNode;
