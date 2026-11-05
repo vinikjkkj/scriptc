@@ -73,7 +73,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { moduleFuncLaneShapes, moduleUsesEngineFn, moduleUsesTextMb, moduleUsesDc, moduleUsesTls, ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, presenceMaskStores, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesFnText, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesInstanceRecordLane, moduleInstanceLaneNeedsKg, moduleUsesDynClass, moduleUsesEmitter, moduleBoxesEmitters, canBoxFuncIntoDyn, isDynPackFunc, moduleUsesBigInt, moduleUsesRegexExecDyn, moduleUsesBytesOwn, moduleUsesAsym, moduleUsesDynAsync, moduleBoxesProcStream, moduleUsesNodeTest, irFunctionValueCode, fnNameTableRows } from "../../ir/nodes.js";
+import { errorOwnFlagFor, moduleFuncLaneShapes, moduleUsesEngineFn, moduleUsesTextMb, moduleUsesDc, moduleUsesTls, ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, presenceMaskStores, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesFnText, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesInstanceRecordLane, moduleInstanceLaneNeedsKg, moduleUsesDynClass, moduleUsesEmitter, moduleBoxesEmitters, canBoxFuncIntoDyn, isDynPackFunc, moduleUsesBigInt, moduleUsesRegexExecDyn, moduleUsesBytesOwn, moduleUsesAsym, moduleUsesDynAsync, moduleBoxesProcStream, moduleUsesNodeTest, irFunctionValueCode, fnNameTableRows } from "../../ir/nodes.js";
 import { setDynOrderPlan } from "../dyn-members.js";
 import { orderRecordPlanCached } from "../../ir/nodes.js";
 import { classvalCandidates, dynClassDisplayName, dynDescBase, dynEmitterSlot, dynRuntimeRoot, dynEnumerationFenced, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
@@ -1074,6 +1074,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "dyn.toStringRangeDyn": "scr_dyn_to_string_range_dyn",
   "buffer.fromDynEnc": "scr_bv_from_dyn_enc",
   "dyn.this": "scr_dyn_this_get",
+  "error.noMessage": "scr_error_no_message",
   "dyn.thisSloppy": "scr_dyn_this_get_sloppy",
   "dyn.isGlobalThis": "scr_dyn_is_global_this",
   "dyn.thisPush": "scr_dyn_this_push_dyn",
@@ -2722,12 +2723,12 @@ class LlEmitter {
       // strings objects lay out through it (nothing GEPs into live heap
       // arrays; those stay behind the runtime's own entry points).
       `%ScrArr = type { i64, i64, i64, i32, ptr, ptr, ptr, ptr }`,
-      // The runtime error prefix { rc, vt, name, message, code, stack } and
+      // The runtime error prefix { rc, vt, name, message, code, stack, props, own_name, own_message } and
       // the class-object shape { rc, pre, post, ctor, name } — field reads
       // on builtin errors and classval loads GEP through these. `stack` is
       // the `.stack` memo (scr_runtime.h), appended LAST so the three field
       // indices above it never move.
-      `%ScrError = type { i64, ptr, ptr, ptr, ptr, ptr, ptr }`,
+      `%ScrError = type { i64, ptr, ptr, ptr, ptr, ptr, ptr, i8, i8 }`,
       `%ScrClassObj = type { i64, i64, i64, ptr, ptr }`,
       // The SCR_DYN_OBJINST boxing descriptor { name, pre, post, vt,
       // retain, release } — one internal constant per boxed class
@@ -7371,6 +7372,14 @@ class LlEmitter {
           this.releaseValue(old, type);
         } else {
           this.storeField(ptr, type, v.name);
+        }
+        // An Error's `name` / `message` WRITE is the fact "own property" (emit-stmts.ts's twin): recorded at the store.
+        if (s.kind === "fieldSet") {
+          const flag = errorOwnFlagFor(this.mod.classes ?? [], s.className, s.field);
+          if (flag !== null) {
+            const fp = this.classFieldPtr(obj.name, s.className, flag);
+            this.storeField(fp.ptr, fp.type, "true");
+          }
         }
         // A WRITE creates an own property — JS's [[Set]], and the reason a
         // crossing's mask can only ever gain bits (emit-stmts.ts's twin).
