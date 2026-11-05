@@ -15,7 +15,7 @@ import type { ClassMeta } from "./emit-shapes.js";
 import { RUNTIME_EMITTER_CLASS as RUNTIME_EMITTER_CLASS_W } from "../../ir/nodes.js";
 import { classvalCandidates, dynClassDisplayName, dynDescBase, dynEmitterSlot, dynRuntimeRoot, dynEnumerationFenced, dynMemberRows, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
 import { EMITTER_MIXIN_FIELD_NAME, ORD_MEMBER, orderRecordPlanCached } from "../../ir/nodes.js";
-import { KINDGATE_WIDE_KINDS, kindgateFuncLane, kindgateInstanceLane, kindgateWideLane } from "../kindgate.js";
+import { KINDGATE_WIDE_KINDS, soleRecordArmWithFuncMember, kindgateFuncLane, kindgateInstanceLane, kindgateWideLane } from "../kindgate.js";
 import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, VIEW_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
 
 /** The refusal text a dyn-to-record check uses when the receiver carries
@@ -3031,6 +3031,20 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             );
             d.push(`      if (scr_exc_pending()) { *ok = false; return NULL; } }`);
           });
+          d.push(`  }`);
+        }
+        // THE SOLE RECORD ARM WITH A FUNCTION MEMBER (`BindOpts | undefined`): there is no sibling arm for a
+        // signature to tell apart, so an object takes the arm through the CHECKED record walker, whose function
+        // members adapt a callable of another signature (the arm walker below stops at the exact one) and whose
+        // refusals name the member.
+        const soleRecordFn = soleRecordArmWithFuncMember(def, E.recordsById, E.unionsById);
+        if (soleRecordFn !== null) {
+          const arm = def.arms[soleRecordFn]!;
+          const rc = vAdapters(arm);
+          d.push(`  if (d->kind == SCR_DYN_OBJ) {`);
+          d.push(`    ${cDecl(arm, "av")} = ${E.dynCheckHelper(arm)}(d, path);`);
+          d.push(`    if (scr_exc_pending()) { *ok = false; return NULL; }`);
+          d.push(`    return scr_union_new_ref(${soleRecordFn}, av, &${rc.retain}, &${rc.release}, ${E.traceArgC(arm)});`);
           d.push(`  }`);
         }
         const passes = unionHasDiscrim(def) ? [true, false] : [false];
