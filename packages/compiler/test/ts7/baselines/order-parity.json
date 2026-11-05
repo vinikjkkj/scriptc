@@ -12911,6 +12911,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24152-own-property-questions-on-an-error-subclass-instance-held-dynamically.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24152-own-property-questions-on-an-error-subclass-instance-held-dynamically.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/24153-object-assign-onto-a-class-instance-held-dynamically.cjs": {
    "order": [
     "<repo>/tests/corpus/24153-object-assign-onto-a-class-instance-held-dynamically.cjs"
