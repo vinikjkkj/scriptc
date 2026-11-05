@@ -17,6 +17,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+static void scr_dsym_install_hooks(void);
+
 struct ScrSym {
   size_t rc;
   ScrStr *desc;    /* owned; NULL = no description (Symbol()) */
@@ -193,6 +195,7 @@ static const ScrDynHandleOps scr_sym_dynh_ops = {
 
 void scr_sym_dyn_install(void) {
   scr_dyn_handle_install(SCR_DYNH_SYMBOL, &scr_sym_dynh_ops);
+  scr_dsym_install_hooks();
 }
 
 /* ── symbol-keyed properties on dyn receivers ────────────────────────────
@@ -218,6 +221,18 @@ void scr_sym_dyn_install(void) {
 
 static void scr_sym_key_release_hook(ScrSym *k) { scr_sym_release(k); }
 static void scr_dsym_copy_enum(ScrDyn *target, const ScrDyn *src);
+static ScrDyn *scr_dsym_row_value(const ScrDyn *self, const ScrDynSymEnt *row);
+static bool scr_dsym_proto_test(int op, ScrDyn *recv, ScrSym *k);
+
+/* Installed by the emitted main exactly when this unit links, so the always-linked core and the gated units that cannot
+ * name it (inspect, assert, the dyn invoke dispatch) reach it through these. */
+static void scr_dsym_install_hooks(void) {
+  scr_dyn_sym_key_release = &scr_sym_key_release_hook;
+  scr_dyn_sym_key_str = &scr_sym_to_string;
+  scr_dyn_sym_copy_enum = &scr_dsym_copy_enum;
+  scr_dyn_sym_row_value = &scr_dsym_row_value;
+  scr_dyn_sym_proto_test = &scr_dsym_proto_test;
+}
 
 /* "Symbol(desc)" as a C string in `buf` (truncated, which only shortens a diagnostic). */
 static void scr_dsym_name(ScrSym *k, char *buf, size_t cap) {
@@ -226,6 +241,16 @@ static void scr_dsym_name(ScrSym *k, char *buf, size_t cap) {
   memcpy(buf, s->data, n);
   buf[n] = '\0';
   scr_str_release(s);
+}
+
+/* V8's rendering of a receiver in these messages: a null-prototype object is "[object Object]", an array "[object Array]",
+ * any other object "#<Ctor>" (an instance of a program class: its class name). */
+static void scr_dsym_recv_text(const ScrDyn *r, char *buf, size_t cap) {
+  if (r->kind == SCR_DYN_ARR) snprintf(buf, cap, "[object Array]");
+  else if (r->kind == SCR_DYN_OBJ && r->null_proto) snprintf(buf, cap, "[object Object]");
+  else if (r->kind == SCR_DYN_OBJ) snprintf(buf, cap, "#<%s>", scr_dyn_ext(r)->cname != NULL ? scr_dyn_ext(r)->cname : "Object");
+  else if (r->kind == SCR_DYN_OBJINST) snprintf(buf, cap, "#<%s>", scr_dyn_objinst_cls(r));
+  else snprintf(buf, cap, "#<Object>");
 }
 
 /* TypeError text: pre + "Symbol(desc)" + post. */
@@ -378,11 +403,7 @@ static ScrDynSymEnt *scr_dsym_find(const ScrDynObjExt *x, const ScrSym *k) {
 
 /* Appends a row (the key is retained, the value MOVED in). */
 static ScrDynSymEnt *scr_dsym_add(ScrDynObjExt *x, ScrSym *k, ScrDyn *v, uint32_t flags) {
-  if (scr_dyn_sym_key_release == NULL) {
-    scr_dyn_sym_key_release = &scr_sym_key_release_hook;
-    scr_dyn_sym_key_str = &scr_sym_to_string;
-    scr_dyn_sym_copy_enum = &scr_dsym_copy_enum;
-  }
+  if (scr_dyn_sym_key_release == NULL) scr_dsym_install_hooks();
   if (x->syms == NULL) {
     x->syms = (ScrDynSymTab *)calloc(1, sizeof *x->syms);
     if (x->syms == NULL) scr_trap("scriptc: out of memory\n");
@@ -410,7 +431,19 @@ static ScrDynSymEnt *scr_dsym_own(ScrDyn *recv, ScrSym *k) {
   return scr_dsym_find(x, k);
 }
 
-ScrDyn *scr_dyn_sym_get(ScrDyn *recv, ScrSym *k) {
+/* A row's [[Get]] value (+1, or NULL with the getter's exception pending): the data value, or an accessor's getter run with
+ * `this` bound to `self`. A missing getter reads undefined. */
+static ScrDyn *scr_dsym_row_value(const ScrDyn *self, const ScrDynSymEnt *row) {
+  if (!(row->flags & SCR_SYMP_ACC)) return scr_dyn_retain(row->val);
+  ScrDyn *g = row->val->v.arr.items[0];
+  if (g->kind != SCR_DYN_FUNC) return scr_dyn_retain(scr_dyn_undefined());
+  scr_dyn_this_push_dyn(self);
+  ScrDyn *r = scr_dyn_call(g, NULL, 0, "getter");
+  scr_dyn_this_pop();
+  return r;
+}
+
+static ScrDyn *scr_dsym_get(ScrDyn *recv, ScrSym *k, ScrDyn *self) {
   if (scr_dsym_nullish(recv)) {
     { char pre[64]; snprintf(pre, sizeof pre, "Cannot read properties of %s (reading '", scr_dsym_kind(recv)); scr_dsym_throw(pre, k, "')"); }
     return NULL;
@@ -419,7 +452,7 @@ ScrDyn *scr_dyn_sym_get(ScrDyn *recv, ScrSym *k) {
   case SCR_DSYM_STORE:
     for (ScrDyn *o = recv; o != NULL;) {
       ScrDynSymEnt *r = scr_dsym_own(o, k);
-      if (r != NULL) return scr_dyn_retain(r->val);
+      if (r != NULL) return scr_dsym_row_value(self, r);
       if (o->kind != SCR_DYN_OBJ) break;
       o = scr_dyn_ext(o)->proto;
     }
@@ -435,9 +468,10 @@ ScrDyn *scr_dyn_sym_get(ScrDyn *recv, ScrSym *k) {
     ScrDyn *bag = scr_dsym_inst_bag(recv, false);
     if (bag != NULL) {
       ScrDynSymEnt *r = scr_dsym_own(bag, k);
-      ScrDyn *out = r != NULL ? scr_dyn_retain(r->val) : NULL;
+      ScrDyn *out = r != NULL ? scr_dsym_row_value(self, r) : NULL;
+      const bool threw = r != NULL && out == NULL;
       scr_dyn_release(bag);
-      if (out != NULL) return out;
+      if (out != NULL || threw) return out;
     }
     if (!scr_dsym_inst_complete(recv)) {
       scr_dsym_fence(recv, "reading"); /* a class that does not name all its members */
@@ -454,7 +488,36 @@ ScrDyn *scr_dyn_sym_get(ScrDyn *recv, ScrSym *k) {
   return scr_dyn_retain(scr_dyn_undefined());
 }
 
-static void scr_dsym_set(ScrDyn *recv, ScrSym *k, ScrDyn *v, bool strict) {
+/* [[Set]] reached an accessor row: the setter runs with `this` bound to the receiver; a getter-only accessor is V8's
+ * strict-mode TypeError (quiet in a sloppy file). */
+static void scr_dsym_run_setter(const ScrDynSymEnt *row, ScrSym *k, ScrDyn *v, bool strict, ScrDyn *self) {
+  ScrDyn *st = row->val->v.arr.items[1];
+  if (st->kind != SCR_DYN_FUNC) {
+    if (strict) {
+      char name[192], msg[640];
+      scr_dsym_name(k, name, sizeof name);
+      char rt[96];
+      scr_dsym_recv_text(self, rt, sizeof rt);
+      const int n = snprintf(msg, sizeof msg, "Cannot set property %s of %s which has only a getter", name, rt);
+      scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)(n < 0 ? 0 : n >= (int)sizeof msg ? (int)sizeof msg - 1 : n));
+    }
+    return;
+  }
+  ScrDyn *args[1] = {v};
+  scr_dyn_this_push_dyn(self);
+  ScrDyn *r = scr_dyn_call(st, args, 1, "setter");
+  scr_dyn_this_pop();
+  scr_dyn_release(r);
+}
+
+static void scr_dsym_read_only(ScrSym *k, const ScrDyn *self) {
+  char rt[96], post[128];
+  scr_dsym_recv_text(self, rt, sizeof rt);
+  snprintf(post, sizeof post, "' of object '%s'", rt);
+  scr_dsym_throw("Cannot assign to read only property '", k, post);
+}
+
+static void scr_dsym_set(ScrDyn *recv, ScrSym *k, ScrDyn *v, bool strict, ScrDyn *self) {
   if (scr_dsym_nullish(recv)) {
     { char pre[64]; snprintf(pre, sizeof pre, "Cannot set properties of %s (setting '", scr_dsym_kind(recv)); scr_dsym_throw(pre, k, "')"); }
     return;
@@ -469,7 +532,7 @@ static void scr_dsym_set(ScrDyn *recv, ScrSym *k, ScrDyn *v, bool strict) {
       scr_dsym_fence(recv, "writing"); /* a class member keyed by the symbol, or a class with no property table */
       return;
     }
-    scr_dsym_set(bag, k, v, strict);
+    scr_dsym_set(bag, k, v, strict, recv);
     scr_dyn_release(bag);
     return;
   }
@@ -485,9 +548,13 @@ static void scr_dsym_set(ScrDyn *recv, ScrSym *k, ScrDyn *v, bool strict) {
   }
   bool none;
   ScrDynSymEnt *r = scr_dsym_find(scr_dsym_host(recv, false, &none), k);
+  if (r != NULL && (r->flags & SCR_SYMP_ACC)) {
+    scr_dsym_run_setter(r, k, v, strict, self);
+    return;
+  }
   if (r != NULL) {
     if (!(r->flags & SCR_SYMP_WRITE)) {
-      if (strict) scr_dsym_throw("Cannot assign to read only property '", k, "' of object '#<Object>'");
+      if (strict) scr_dsym_read_only(k, self);
       return;
     }
     ScrDyn *old = r->val;
@@ -499,9 +566,13 @@ static void scr_dsym_set(ScrDyn *recv, ScrSym *k, ScrDyn *v, bool strict) {
   if (recv->kind == SCR_DYN_OBJ) {
     for (ScrDyn *o = scr_dyn_ext(recv)->proto; o != NULL && o->kind == SCR_DYN_OBJ; o = scr_dyn_ext(o)->proto) {
       ScrDynSymEnt *p = scr_dsym_own(o, k);
+      if (p != NULL && (p->flags & SCR_SYMP_ACC)) {
+        scr_dsym_run_setter(p, k, v, strict, self); /* an inherited accessor takes the write, `this` the receiver */
+        return;
+      }
       if (p != NULL) {
         if (!(p->flags & SCR_SYMP_WRITE)) {
-          if (strict) scr_dsym_throw("Cannot assign to read only property '", k, "' of object '#<Object>'");
+          if (strict) scr_dsym_read_only(k, self);
           return;
         }
         break;
@@ -512,8 +583,24 @@ static void scr_dsym_set(ScrDyn *recv, ScrSym *k, ScrDyn *v, bool strict) {
   scr_dsym_add(x, k, scr_dyn_retain(v), SCR_SYMP_ENUM | SCR_SYMP_WRITE | SCR_SYMP_CONFIG);
 }
 
-void scr_dyn_sym_set(ScrDyn *recv, ScrSym *k, ScrDyn *v) { scr_dsym_set(recv, k, v, true); }
-void scr_dyn_sym_set_sloppy(ScrDyn *recv, ScrSym *k, ScrDyn *v) { scr_dsym_set(recv, k, v, false); }
+ScrDyn *scr_dyn_sym_get(ScrDyn *recv, ScrSym *k) { return scr_dsym_get(recv, k, recv); }
+ScrDyn *scr_dyn_sym_get_opt(ScrDyn *recv, ScrSym *k) {
+  if (scr_dsym_nullish(recv)) return scr_dyn_retain(scr_dyn_undefined());
+  return scr_dsym_get(recv, k, recv);
+}
+ScrDyn *scr_dyn_sym_get_self(ScrDyn *recv, ScrSym *k, ScrDyn *self) { return scr_dsym_get(recv, k, self); }
+void scr_dyn_sym_set_self(ScrDyn *recv, ScrSym *k, ScrDyn *v, ScrDyn *self) { scr_dsym_set(recv, k, v, true, self); }
+void scr_dyn_sym_set_self_sloppy(ScrDyn *recv, ScrSym *k, ScrDyn *v, ScrDyn *self) { scr_dsym_set(recv, k, v, false, self); }
+/* Does the table on `recv` hold an accessor row? (A class instance's bag: the lowering boxes the instance as `this` only then.) */
+bool scr_dyn_sym_has_acc(ScrDyn *recv) {
+  bool none;
+  ScrDynObjExt *x = (recv != NULL && (recv->kind == SCR_DYN_OBJ || recv->kind == SCR_DYN_ARR || recv->kind == SCR_DYN_FUNC)) ? scr_dsym_host(recv, false, &none) : NULL;
+  for (uint32_t i = 0; x != NULL && x->syms != NULL && i < x->syms->len; i++)
+    if (x->syms->e[i].flags & SCR_SYMP_ACC) return true;
+  return false;
+}
+void scr_dyn_sym_set(ScrDyn *recv, ScrSym *k, ScrDyn *v) { scr_dsym_set(recv, k, v, true, recv); }
+void scr_dyn_sym_set_sloppy(ScrDyn *recv, ScrSym *k, ScrDyn *v) { scr_dsym_set(recv, k, v, false, recv); }
 
 bool scr_dyn_sym_has_own(ScrDyn *recv, ScrSym *k) {
   if (scr_dsym_nullish(recv)) {
@@ -570,7 +657,7 @@ bool scr_dyn_sym_has(ScrDyn *recv, ScrSym *k) {
   return false;
 }
 
-static bool scr_dsym_delete(ScrDyn *recv, ScrSym *k, bool strict) {
+static bool scr_dsym_delete(ScrDyn *recv, ScrSym *k, bool strict, const ScrDyn *self) {
   if (scr_dsym_nullish(recv)) {
     static const char msg[] = "Cannot convert undefined or null to object";
     scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
@@ -587,7 +674,7 @@ static bool scr_dsym_delete(ScrDyn *recv, ScrSym *k, bool strict) {
     }
     ScrDyn *bag = scr_dsym_inst_bag(recv, false);
     if (bag == NULL) return true;
-    const bool ok = scr_dsym_delete(bag, k, strict);
+    const bool ok = scr_dsym_delete(bag, k, strict, recv);
     scr_dyn_release(bag);
     return ok;
   }
@@ -596,7 +683,12 @@ static bool scr_dsym_delete(ScrDyn *recv, ScrSym *k, bool strict) {
   ScrDynSymEnt *r = scr_dsym_find(x, k);
   if (r == NULL) return true;
   if (!(r->flags & SCR_SYMP_CONFIG)) {
-    if (strict) scr_dsym_throw("Cannot delete property '", k, "' of #<Object>");
+    if (strict) {
+      char rt[96], post[128];
+      scr_dsym_recv_text(self, rt, sizeof rt);
+      snprintf(post, sizeof post, "' of %s", rt);
+      scr_dsym_throw("Cannot delete property '", k, post);
+    }
     return false;
   }
   ScrDynSymTab *t = x->syms;
@@ -640,50 +732,83 @@ ScrDyn *scr_dyn_sym_define(ScrDyn *recv, ScrSym *k, ScrDyn *desc) {
     scr_dyn_release(bag);
     return scr_dyn_retain(recv);
   }
-  if (scr_dyn_obj_get(desc, "get", 3) != NULL || scr_dyn_obj_get(desc, "set", 3) != NULL) {
-    static const char msg[] =
-        "defining a symbol-keyed accessor property on a dynamic value is not supported yet";
-    scr_throw_error_msg(SCR_ERR_ERROR, msg, sizeof msg - 1);
-    return NULL;
-  }
+  ScrDyn *dg = scr_dyn_obj_get(desc, "get", 3);
+  ScrDyn *ds = scr_dyn_obj_get(desc, "set", 3);
   ScrDyn *dv = scr_dyn_obj_get(desc, "value", 5);
   ScrDyn *dw = scr_dyn_obj_get(desc, "writable", 8);
   ScrDyn *de = scr_dyn_obj_get(desc, "enumerable", 10);
   ScrDyn *dc = scr_dyn_obj_get(desc, "configurable", 12);
+  const bool accessor = dg != NULL || ds != NULL;
+  if (accessor && (dv != NULL || dw != NULL)) {
+    char rt[96], msg[256];
+    scr_dsym_recv_text(desc, rt, sizeof rt);
+    const int n = snprintf(msg, sizeof msg, "Invalid property descriptor. Cannot both specify accessors and a value or writable attribute, %s", rt);
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)(n < 0 ? 0 : n >= (int)sizeof msg ? (int)sizeof msg - 1 : n));
+    return NULL;
+  }
+  if ((dg != NULL && dg->kind != SCR_DYN_FUNC && dg->kind != SCR_DYN_UNDEF) ||
+      (ds != NULL && ds->kind != SCR_DYN_FUNC && ds->kind != SCR_DYN_UNDEF)) {
+    const bool bad_get = dg != NULL && dg->kind != SCR_DYN_FUNC && dg->kind != SCR_DYN_UNDEF;
+    ScrStr *t = scr_dyn_to_string(bad_get ? dg : ds, NULL);
+    char msg[256];
+    const int n = snprintf(msg, sizeof msg, "%s must be a function: %.*s", bad_get ? "Getter" : "Setter", (int)t->len, t->data);
+    scr_str_release(t);
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)(n < 0 ? 0 : n >= (int)sizeof msg ? (int)sizeof msg - 1 : n));
+    return NULL;
+  }
   bool none;
   ScrDynSymEnt *r = scr_dsym_find(scr_dsym_host(recv, false, &none), k);
-  /* an omitted attribute is false on a new property and unchanged on an existing one */
+  /* an omitted attribute is false on a new property and unchanged on an existing one; turning a data row into an
+   * accessor (or back) resets the kind-specific bits */
   uint32_t flags = r != NULL ? r->flags : 0;
+  if (r != NULL && accessor != ((r->flags & SCR_SYMP_ACC) != 0)) flags &= ~(SCR_SYMP_WRITE | SCR_SYMP_ACC);
+  if (accessor) flags = (flags | SCR_SYMP_ACC) & ~SCR_SYMP_WRITE;
   if (dw != NULL) flags = scr_dyn_truthy(dw) ? (flags | SCR_SYMP_WRITE) : (flags & ~SCR_SYMP_WRITE);
   if (de != NULL) flags = scr_dyn_truthy(de) ? (flags | SCR_SYMP_ENUM) : (flags & ~SCR_SYMP_ENUM);
   if (dc != NULL) flags = scr_dyn_truthy(dc) ? (flags | SCR_SYMP_CONFIG) : (flags & ~SCR_SYMP_CONFIG);
+  /* the new value cell: an accessor's [getter, setter] pair (an omitted half keeps an existing accessor's), or the data value */
+  ScrDyn *cell = NULL;
+  if (accessor) {
+    cell = scr_dyn_new_arr();
+    ScrDyn *og = r != NULL && (r->flags & SCR_SYMP_ACC) ? r->val->v.arr.items[0] : scr_dyn_undefined();
+    ScrDyn *os = r != NULL && (r->flags & SCR_SYMP_ACC) ? r->val->v.arr.items[1] : scr_dyn_undefined();
+    scr_dyn_arr_push(cell, scr_dyn_retain(dg != NULL ? dg : og));
+    scr_dyn_arr_push(cell, scr_dyn_retain(ds != NULL ? ds : os));
+  }
   if (r != NULL) {
     if (!(r->flags & SCR_SYMP_CONFIG)) {
       /* a non-configurable property admits only an identical attribute set, a same-value redefinition, and
-       * writable -> non-writable */
+       * writable -> non-writable; an accessor admits no change at all */
       const bool same_attrs = (r->flags & (SCR_SYMP_ENUM | SCR_SYMP_CONFIG)) == (flags & (SCR_SYMP_ENUM | SCR_SYMP_CONFIG));
+      const bool same_kind = ((r->flags & SCR_SYMP_ACC) != 0) == accessor;
       const bool writable_ok = (r->flags & SCR_SYMP_WRITE) || !(flags & SCR_SYMP_WRITE);
-      const bool value_ok = dv == NULL || (r->flags & SCR_SYMP_WRITE) || scr_dyn_same_value(r->val, dv);
-      if (!same_attrs || !writable_ok || !value_ok) {
+      const bool value_ok = accessor ? ((dg == NULL || dg == r->val->v.arr.items[0]) && (ds == NULL || ds == r->val->v.arr.items[1]))
+                                     : (dv == NULL || (r->flags & SCR_SYMP_WRITE) || scr_dyn_same_value(r->val, dv));
+      if (!same_attrs || !same_kind || !writable_ok || !value_ok) {
+        scr_dyn_release(cell);
         scr_dsym_throw("Cannot redefine property: ", k, "");
         return NULL;
       }
     }
-    if (dv != NULL) {
+    if (accessor) {
       ScrDyn *old = r->val;
-      r->val = scr_dyn_retain(dv);
+      r->val = cell;
+      scr_dyn_release(old);
+    } else if (dv != NULL || (r->flags & SCR_SYMP_ACC)) {
+      ScrDyn *old = r->val;
+      r->val = scr_dyn_retain(dv != NULL ? dv : scr_dyn_undefined());
       scr_dyn_release(old);
     }
     r->flags = flags;
     return scr_dyn_retain(recv);
   }
   ScrDynObjExt *x = scr_dsym_host(recv, true, &none);
-  scr_dsym_add(x, k, scr_dyn_retain(dv != NULL ? dv : scr_dyn_undefined()), flags);
+  scr_dsym_add(x, k, accessor ? cell : scr_dyn_retain(dv != NULL ? dv : scr_dyn_undefined()), flags);
   return scr_dyn_retain(recv);
 }
 
-bool scr_dyn_sym_delete(ScrDyn *recv, ScrSym *k) { return scr_dsym_delete(recv, k, true); }
-bool scr_dyn_sym_delete_sloppy(ScrDyn *recv, ScrSym *k) { return scr_dsym_delete(recv, k, false); }
+bool scr_dyn_sym_delete(ScrDyn *recv, ScrSym *k) { return scr_dsym_delete(recv, k, true, recv); }
+bool scr_dyn_sym_delete_sloppy(ScrDyn *recv, ScrSym *k) { return scr_dsym_delete(recv, k, false, recv); }
 
 static ScrArr *scr_dsym_keys(ScrDyn *recv, bool enum_only) {
   if (scr_dsym_nullish(recv)) {
@@ -742,9 +867,11 @@ static void scr_dsym_copy_enum(ScrDyn *target, const ScrDyn *src) {
     ScrDynSymEnt *r = &x->syms->e[i];
     if (!(r->flags & SCR_SYMP_ENUM)) continue;
     ScrSym *k = scr_sym_retain(r->key);
-    ScrDyn *v = scr_dyn_retain(r->val);
-    scr_dsym_set(target, k, v, true);
-    scr_dyn_release(v);
+    ScrDyn *v = scr_dsym_row_value(src->kind == SCR_DYN_OBJINST ? src : (held != NULL ? held : src), r); /* a getter runs */
+    if (v != NULL) {
+      scr_dsym_set(target, k, v, true, target);
+      scr_dyn_release(v);
+    }
     scr_sym_release(k);
     if (scr_exc_pending()) break;
   }
@@ -761,4 +888,76 @@ ScrDyn *scr_dyn_sym_append(ScrDyn *names, ScrDyn *recv) {
   }
   scr_arr_release(syms);
   return scr_dyn_retain(names);
+}
+
+/* Object.prototype.hasOwnProperty (op 0) and propertyIsEnumerable (op 1) over a symbol argument. */
+static bool scr_dsym_proto_test(int op, ScrDyn *recv, ScrSym *k) {
+  if (op == 0) return scr_dyn_sym_has_own(recv, k);
+  if (scr_dsym_nullish(recv)) {
+    static const char msg[] = "Cannot convert undefined or null to object";
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+    return false;
+  }
+  ScrDyn *held = recv->kind == SCR_DYN_OBJINST ? scr_dsym_inst_bag(recv, false) : NULL;
+  const ScrDynSymEnt *r = (scr_dsym_class(recv) == SCR_DSYM_STORE) ? scr_dsym_own(recv, k) : held != NULL ? scr_dsym_own(held, k) : NULL;
+  const bool en = r != NULL && (r->flags & SCR_SYMP_ENUM) != 0;
+  scr_dyn_release(held);
+  return en;
+}
+
+/* `recv[Symbol.toStringTag]` over a checked-dynamic receiver: the string tag of the kinds that have a built-in one, else
+ * undefined (+1). Typed arrays answer their own name (a Buffer and a Uint8Array are both "Uint8Array"), a DataView
+ * "DataView", an ArrayBuffer "ArrayBuffer", a Map or Set theirs. A nullish receiver answers undefined (the optional
+ * chain's form); an object whose class or literal sets the tag itself (a well-known symbol property this runtime does not
+ * store) fences, as does an engine value. */
+ScrDyn *scr_dyn_sym_tag(ScrDyn *recv) {
+  if (scr_dsym_nullish(recv)) return scr_dyn_retain(scr_dyn_undefined());
+  const char *tag = NULL;
+  switch (recv->kind) {
+  case SCR_DYN_BYTES:
+    if (recv->v.bytes->flavor == SCR_BF_DATAVIEW) tag = "DataView";
+    else
+      switch (recv->v.bytes->elem) {
+      case SCR_BYTES_U8: tag = "Uint8Array"; break;
+      case SCR_BYTES_U32: tag = "Uint32Array"; break;
+      case SCR_BYTES_F32: tag = "Float32Array"; break;
+      case SCR_BYTES_I32: tag = "Int32Array"; break;
+      case SCR_BYTES_F64: tag = "Float64Array"; break;
+      case SCR_BYTES_I8: tag = "Int8Array"; break;
+      case SCR_BYTES_BUF: tag = "ArrayBuffer"; break;
+      case SCR_BYTES_I16: tag = "Int16Array"; break;
+      case SCR_BYTES_U16: tag = "Uint16Array"; break;
+      case SCR_BYTES_U8C: tag = "Uint8ClampedArray"; break;
+      case SCR_BYTES_F16: tag = "Float16Array"; break;
+      case SCR_BYTES_I64: tag = "BigInt64Array"; break;
+      case SCR_BYTES_U64: tag = "BigUint64Array"; break;
+      default: break;
+      }
+    break;
+  case SCR_DYN_ARRBUF:
+    tag = "ArrayBuffer";
+    break;
+  case SCR_DYN_MAP:
+    tag = scr_dyn_map_cls(recv);
+    break;
+  case SCR_DYN_PROMISE:
+    tag = "Promise";
+    break;
+  case SCR_DYN_STR:
+  case SCR_DYN_NUM:
+  case SCR_DYN_BOOL:
+  case SCR_DYN_BIG:
+  case SCR_DYN_ARR:
+  case SCR_DYN_OBJ:
+  case SCR_DYN_FUNC:
+    break;
+  default:
+    scr_dsym_fence(recv, "reading Symbol.toStringTag of");
+    return NULL;
+  }
+  if (tag == NULL) return scr_dyn_retain(scr_dyn_undefined());
+  ScrStr *t = scr_str_new(tag, strlen(tag));
+  ScrDyn *d = scr_dyn_new_str(t);
+  scr_str_release(t);
+  return d;
 }

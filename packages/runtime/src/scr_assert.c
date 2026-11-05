@@ -489,7 +489,14 @@ static bool scr_assert_dyn_sym_eq(const ScrDyn *a, const ScrDyn *b) {
     const ScrDynSymEnt *m = NULL;
     for (uint32_t j = 0; tb != NULL && j < tb->len; j++)
       if (tb->e[j].key == ta->e[i].key && (tb->e[j].flags & SCR_SYMP_ENUM)) m = &tb->e[j];
-    if (m == NULL || !scr_assert_dyn_deep_eq(ta->e[i].val, m->val)) return false;
+    if (m == NULL) return false;
+    /* [[Get]] on both sides: an accessor's getter runs */
+    ScrDyn *av = scr_dyn_sym_row_value(a, &ta->e[i]);
+    ScrDyn *bv = av != NULL ? scr_dyn_sym_row_value(b, m) : NULL;
+    const bool eq = av != NULL && bv != NULL && scr_assert_dyn_deep_eq(av, bv);
+    scr_dyn_release(av);
+    scr_dyn_release(bv);
+    if (!eq) return false;
   }
   return true;
 }

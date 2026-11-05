@@ -158,6 +158,8 @@ ScrDynObjExt *scr_dyn_ext_w(ScrDyn *d) {
 void (*scr_dyn_sym_key_release)(ScrSym *k) = NULL;
 ScrStr *(*scr_dyn_sym_key_str)(ScrSym *k) = NULL;
 void (*scr_dyn_sym_copy_enum)(ScrDyn *target, const ScrDyn *src) = NULL;
+ScrDyn *(*scr_dyn_sym_row_value)(const ScrDyn *self, const ScrDynSymEnt *row) = NULL;
+bool (*scr_dyn_sym_proto_test)(int op, ScrDyn *recv, ScrSym *k) = NULL;
 static void scr_dyn_syms_free(ScrDynSymTab *t, bool release) {
   for (uint32_t i = 0; i < t->len; i++) {
     scr_dyn_sym_key_release(t->e[i].key);

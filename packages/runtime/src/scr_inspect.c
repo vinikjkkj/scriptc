@@ -1214,14 +1214,20 @@ static void insp_emit_syms(const ScrDyn *d, double recurse, double depth) {
   const ScrDynSymTab *t = scr_dyn_ext(d)->syms;
   for (uint32_t i = 0; t != NULL && i < t->len; i++) {
     if (!(t->e[i].flags & SCR_SYMP_ENUM)) continue;
-    ScrStr *val = scr_insp_dyn(t->e[i].val, recurse + 1, depth);
     ScrStr *kn = scr_dyn_sym_key_str(t->e[i].key);
     InspBuf eb = {0};
     ib_bytes(&eb, kn->data, kn->len);
     ib_cstr(&eb, ": ");
-    ib_bytes(&eb, val->data, val->len);
+    if (t->e[i].flags & SCR_SYMP_ACC) { /* an accessor renders [Getter] / [Setter] and runs nothing */
+      const bool g = t->e[i].val->v.arr.items[0]->kind == SCR_DYN_FUNC;
+      const bool s = t->e[i].val->v.arr.items[1]->kind == SCR_DYN_FUNC;
+      ib_cstr(&eb, g && s ? "[Getter/Setter]" : g ? "[Getter]" : "[Setter]");
+    } else {
+      ScrStr *val = scr_insp_dyn(t->e[i].val, recurse + 1, depth);
+      ib_bytes(&eb, val->data, val->len);
+      scr_str_release(val);
+    }
     scr_str_release(kn);
-    scr_str_release(val);
     ScrStr *entry = ib_take(&eb);
     scr_insp_entry(entry, false);
     scr_str_release(entry);

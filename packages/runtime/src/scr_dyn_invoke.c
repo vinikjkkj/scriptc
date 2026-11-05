@@ -761,6 +761,12 @@ static ScrDyn *dyn_object_proto_method(ScrDyn *recv, const char *method,
   if (dyn_name_is(method, "hasOwnProperty")) {
     /* ToPropertyKey: a missing argument is the STRING "undefined", which
      * is a real key ({ undefined: 1 }.hasOwnProperty() is true in Node). */
+    /* a SYMBOL key never becomes a string (scr_symbol.c) */
+    if (argc >= 1 && scr_dyn_sym_proto_test != NULL && scr_dyn_is_symbol(args[0])) {
+      const bool sr = scr_dyn_sym_proto_test(0, recv, (ScrSym *)args[0]->v.handle.ptr);
+      if (scr_exc_pending()) return NULL;
+      return scr_dyn_new_bool(sr);
+    }
     ScrStr *k = argc >= 1 ? scr_dyn_string_coerce(args[0]) : scr_str_new("undefined", 9);
     if (scr_exc_pending()) { scr_str_release(k); return NULL; }
     bool r = scr_dyn_has_own(recv, k);
@@ -821,6 +827,11 @@ static ScrDyn *dyn_object_proto_method(ScrDyn *recv, const char *method,
   /* Object.prototype.propertyIsEnumerable / isPrototypeOf over a plain dyn object (the two names a keyed
    * read of a dictionary answers `function` for, see dyn_plain_obj_knows). */
   if (recv->kind == SCR_DYN_OBJ && dyn_name_is(method, "propertyIsEnumerable")) {
+    if (argc >= 1 && scr_dyn_sym_proto_test != NULL && scr_dyn_is_symbol(args[0])) {
+      const bool sr = scr_dyn_sym_proto_test(1, recv, (ScrSym *)args[0]->v.handle.ptr);
+      if (scr_exc_pending()) return NULL;
+      return scr_dyn_new_bool(sr);
+    }
     ScrStr *k = argc >= 1 ? scr_dyn_string_coerce(args[0]) : scr_str_new("undefined", 9);
     if (scr_exc_pending()) { scr_str_release(k); return NULL; }
     bool r = scr_dyn_obj_own_data(recv, k->data, k->len) != NULL;

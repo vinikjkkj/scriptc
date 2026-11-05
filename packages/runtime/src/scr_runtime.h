@@ -5140,6 +5140,7 @@ typedef struct ScrDynObjExt {
 #define SCR_SYMP_ENUM 1u
 #define SCR_SYMP_WRITE 2u
 #define SCR_SYMP_CONFIG 4u
+#define SCR_SYMP_ACC 8u /* an ACCESSOR: `val` is a dyn array [getter, setter] (undefined = absent) */
 typedef struct ScrDynSymEnt {
   ScrSym *key; /* owned */
   ScrDyn *val; /* owned, traced */
@@ -5155,6 +5156,11 @@ extern void (*scr_dyn_sym_key_release)(ScrSym *k);
  * spread copy the enumerable rows (target and source borrowed). Set by the same first store. */
 extern ScrStr *(*scr_dyn_sym_key_str)(ScrSym *k);
 extern void (*scr_dyn_sym_copy_enum)(ScrDyn *target, const ScrDyn *src);
+/* A row's [[Get]] value (+1, or NULL with an exception pending): the value of a data row, the getter's result for an
+ * accessor row (`this` bound to `self`). */
+extern ScrDyn *(*scr_dyn_sym_row_value)(const ScrDyn *self, const ScrDynSymEnt *row);
+/* Object.prototype.hasOwnProperty / propertyIsEnumerable (op 0 / 1) over a symbol argument, installed with the symbol unit. */
+extern bool (*scr_dyn_sym_proto_test)(int op, ScrDyn *recv, ScrSym *k);
 
 /* The all-NULL instance every read of an absent ext answers from. */
 extern const ScrDynObjExt scr_dyn_obj_ext_none;
@@ -7043,6 +7049,14 @@ void scr_dyn_obj_set_member(ScrDyn *d, const char *key, size_t key_len, ScrDyn *
  * configurable data property (or updates the value and keeps the attributes of an own one). A nullish receiver throws
  * Node's TypeError; a receiver kind with no symbol storage throws a loud "not supported yet" Error. */
 ScrDyn *scr_dyn_sym_get(ScrDyn *recv, ScrSym *k);
+/* The same with an explicit [[Get]]/[[Set]] receiver `self` (the `this` an accessor runs with): a class instance's symbol
+ * properties live on its table, but their accessors run with the INSTANCE. */
+ScrDyn *scr_dyn_sym_get_self(ScrDyn *recv, ScrSym *k, ScrDyn *self);
+ScrDyn *scr_dyn_sym_get_opt(ScrDyn *recv, ScrSym *k);
+ScrDyn *scr_dyn_sym_tag(ScrDyn *recv); /* recv?.[Symbol.toStringTag]: the built-in tag string of the kind, else undefined (+1) */ /* `recv?.[k]`: a nullish receiver answers undefined */
+void scr_dyn_sym_set_self(ScrDyn *recv, ScrSym *k, ScrDyn *v, ScrDyn *self);
+void scr_dyn_sym_set_self_sloppy(ScrDyn *recv, ScrSym *k, ScrDyn *v, ScrDyn *self);
+bool scr_dyn_sym_has_acc(ScrDyn *recv); /* the table on `recv` holds an accessor row */
 void scr_dyn_sym_set(ScrDyn *recv, ScrSym *k, ScrDyn *v);
 bool scr_dyn_sym_has(ScrDyn *recv, ScrSym *k);     /* `k in recv`: own, then the chain */
 bool scr_dyn_sym_has_own(ScrDyn *recv, ScrSym *k); /* Object.hasOwn(recv, k) */
