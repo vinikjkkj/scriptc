@@ -145,6 +145,16 @@ const CLAIM_TICKS_EXPECTED =
   "then-timer 4@12\n" +
   "await-timer 4@12\n";
 
+/* cases/twinrec/claim-order.ts: reactions registered on a source and on its declaration claim run in registration order, recorded from node. */
+const CLAIM_ORDER_EXPECTED =
+  "src-then-1\n" +
+  "claim-then-1\n" +
+  "src-await\n" +
+  "claim-await\n" +
+  "src-then-2\n" +
+  "claim-then-2\n" +
+  "claim-all\n";
+
 const PRIOR = process.env["SCRIPTC_PROVENANCE_MANIFEST"];
 afterEach(() => {
   setProvenanceSources(null);
@@ -279,6 +289,16 @@ describe("provenance: a twin class with untyped methods behind a program's own r
       if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
       const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
       expect(stdout).toBe(CLAIM_TICKS_EXPECTED);
+    }, 600_000);
+  }
+
+  for (const backend of ["c", "llvm"] as const) {
+    test(`24046: reactions on a promise and on its declaration claim run in registration order (${backend})`, async () => {
+      const entry = join(fixtureDir, "cases/twinrec/claim-order.ts");
+      const { result, outPath } = await build(entry, "claim-order", backend);
+      if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+      const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
+      expect(stdout).toBe(CLAIM_ORDER_EXPECTED);
     }, 600_000);
   }
 
