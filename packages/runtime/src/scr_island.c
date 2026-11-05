@@ -989,8 +989,10 @@ ScrJsval *scr_jsval_from_json(const ScrStr *json) {
  * only: a dyn carrying a boxed function, a native handle, or a promise
  * throws the catchable TypeError naming the kind (the box's thunk calls
  * STATIC code the engine cannot re-enter through a data copy). */
+#ifdef SCR_ISL_INST
 static JSClassID isl_inst_class_id = 0;           /* a compiled class instance seen from the engine, below */
 static JSValue isl_inst_new(const ScrDyn *d);
+#endif
 static JSValue isl_throw_pending(JSContext *ctx);
 
 static const char *isl_dyn_unmarshalable(const ScrDyn *d) {
@@ -1004,9 +1006,14 @@ static const char *isl_dyn_unmarshalable(const ScrDyn *d) {
     if (d->v.handle.tag == SCR_DYNH_DATE) return NULL;
     return "a runtime handle";
   case SCR_DYN_OBJINST:
+#ifdef SCR_ISL_INST
     /* A class instance held by reference crosses as an engine object whose member reads, writes and
      * method calls run on the instance itself (isl_inst_new): the same object on the way back. */
     return NULL;
+#else
+    /* A program that never hands an instance to engine code does not carry the crossing (see cc.ts islInst). */
+    return "a class instance";
+#endif
   case SCR_DYN_MAP:
     /* A Map or Set held by reference: the engine has its own Map, and
      * this bridge does not model the entry-by-entry transfer that
@@ -1130,8 +1137,10 @@ static JSValue isl_from_dyn(const ScrDyn *d) {
     /* An engine value riding inside dyn data: embed the SAME engine
      * value by reference — the identity round trip, member position. */
     return JS_DupValue(isl_ctx, d->v.jsval.cell->v);
+#ifdef SCR_ISL_INST
   case SCR_DYN_OBJINST:
     return isl_inst_new(d);
+#endif
   default:
     /* Pre-scanned away — defensive. */
     return JS_ThrowTypeError(isl_ctx, "unmarshalable dynamic value");
@@ -1203,10 +1212,12 @@ static ScrDyn *isl_dyn_from_value(JSValue v) {
     scr_str_release(s);
     return d;
   }
+#ifdef SCR_ISL_INST
   if (JS_IsObject(v) && isl_inst_class_id != 0) {
     ScrDyn *inst = JS_GetOpaque(v, isl_inst_class_id);
     if (inst != NULL) return scr_dyn_retain(inst); /* a crossed class instance comes back as itself */
   }
+#endif
   if (JS_IsDate(v) && scr_dyn_date_box_hook != NULL) {
     /* An engine Date comes back as a native Date by VALUE (the time value
      * is copied; the engine object is not kept). Without the Date handle
@@ -1798,6 +1809,7 @@ static const JSClassDef isl_hostfn_class = {
 static JSClassID isl_dynfn_class_id;      /* the checked-dynamic tree-function shim, below */
 static const JSClassDef isl_dynfn_class;
 
+#ifdef SCR_ISL_INST
 /* ── a compiled class instance in the engine ─────────────────────────────
  * An engine object of class ScrInst holding ONE reference on the instance's OBJINST box. Every member
  * access runs on the instance: reads through its member table (a method reads as a function that
@@ -2031,11 +2043,15 @@ static JSValue isl_inst_new(const ScrDyn *d) {
   return o;
 }
 
+#endif /* SCR_ISL_INST */
+
 static void isl_register_hostfn_class(void) {
+#ifdef SCR_ISL_INST
   JS_NewClassID(isl_rt, &isl_inst_class_id);
   JS_NewClass(isl_rt, isl_inst_class_id, &isl_inst_class);
   JS_NewClassID(isl_rt, &isl_instcall_class_id);
   JS_NewClass(isl_rt, isl_instcall_class_id, &isl_instcall_class);
+#endif
   JS_NewClassID(isl_rt, &isl_hostfn_class_id);
   JS_NewClass(isl_rt, isl_hostfn_class_id, &isl_hostfn_class);
   JS_NewClassID(isl_rt, &isl_dynfn_class_id);
