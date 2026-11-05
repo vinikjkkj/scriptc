@@ -16814,6 +16814,9 @@ export class Lowerer {
   /** The class and method name an adopted function-like (an object-literal
    * method, typically) became a late method of. */
   readonly lateMethodOwner = new Map<ts.Node, { info: ClassInfo; mName: string }>();
+  /** Every class that BORROWED a function (`C.prototype.m = D.prototype.n`), by the borrowed declaration: the
+   * one function value Node shares among them runs against whichever receiver it is called on. */
+  readonly lateMethodBorrowers = new Map<ts.Node, { info: ClassInfo; mName: string }[]>();
   /** An accessor family's loop variable bound to the literal one unrolled
    * body is lowered for (keyed `<Class>.<method name>`), and the bindings
    * active while such a body lowers. */
