@@ -5124,7 +5124,37 @@ typedef struct ScrDynObjExt {
    * `index`, `input`, `groups` (and `indices`) ride a real array — but any
    * `a.k = v` lands here; indices and `length` stay in the item vector. */
   ScrDyn *extras;
+  /* The SYMBOL-keyed own properties of an OBJ or ARR (scr_symbol.c): a
+   * creation-ordered table of (owned symbol, owned value, attributes). The
+   * string-keyed tables above cannot hold them -- a key there is a byte
+   * string, and two distinct symbols may share a description. NULL for every
+   * object that never stored one, so the hot string-keyed paths do not read
+   * it. The values are TRACED (an impl <-> wrapper pair is an ordinary
+   * cycle the collector reclaims); the symbol keys are plain refcounts and
+   * never part of a cycle. */
+  struct ScrDynSymTab *syms;
 } ScrDynObjExt;
+
+/* Attribute bits of one symbol-keyed property. A plain assignment makes all
+ * three; Object.defineProperty without them makes none. */
+#define SCR_SYMP_ENUM 1u
+#define SCR_SYMP_WRITE 2u
+#define SCR_SYMP_CONFIG 4u
+typedef struct ScrDynSymEnt {
+  ScrSym *key; /* owned */
+  ScrDyn *val; /* owned, traced */
+  uint32_t flags;
+} ScrDynSymEnt;
+typedef struct ScrDynSymTab {
+  uint32_t len, cap;
+  ScrDynSymEnt *e;
+} ScrDynSymTab;
+/* Installed by scr_symbol.c at its first store (the always-linked core must not name that unit): releases one key. */
+extern void (*scr_dyn_sym_key_release)(ScrSym *k);
+/* ...and the two other always-linked consumers of the table: util.inspect names a key "Symbol(desc)", and Object.assign /
+ * spread copy the enumerable rows (target and source borrowed). Set by the same first store. */
+extern ScrStr *(*scr_dyn_sym_key_str)(ScrSym *k);
+extern void (*scr_dyn_sym_copy_enum)(ScrDyn *target, const ScrDyn *src);
 
 /* The all-NULL instance every read of an absent ext answers from. */
 extern const ScrDynObjExt scr_dyn_obj_ext_none;
@@ -7006,6 +7036,31 @@ bool scr_dyn_is_symbol(const ScrDyn *d);
  * scr_json.c). `set_member` is the overflow walk's store (ordinary keys set). */
 void scr_dyn_obj_set_symkey(ScrDyn *d, const char *key, size_t key_len, ScrDyn *v, bool absent_ok);
 void scr_dyn_obj_set_member(ScrDyn *d, const char *key, size_t key_len, ScrDyn *v);
+/* SYMBOL-keyed properties over a dyn receiver (scr_symbol.c; ECMA-262 [[Get]] / [[Set]] / [[HasProperty]] /
+ * [[Delete]] / [[DefineOwnProperty]] with a Symbol key). An OBJ and an ARR keep them in their ext table; a FUNC keeps
+ * them in the table that hangs off its closure, so every box of one function value shows them. Everything borrows;
+ * get answers +1 (undefined when absent) and walks the prototype chain; set stores an ENUMERABLE writable
+ * configurable data property (or updates the value and keeps the attributes of an own one). A nullish receiver throws
+ * Node's TypeError; a receiver kind with no symbol storage throws a loud "not supported yet" Error. */
+ScrDyn *scr_dyn_sym_get(ScrDyn *recv, ScrSym *k);
+void scr_dyn_sym_set(ScrDyn *recv, ScrSym *k, ScrDyn *v);
+bool scr_dyn_sym_has(ScrDyn *recv, ScrSym *k);     /* `k in recv`: own, then the chain */
+bool scr_dyn_sym_has_own(ScrDyn *recv, ScrSym *k); /* Object.hasOwn(recv, k) */
+bool scr_dyn_sym_delete(ScrDyn *recv, ScrSym *k);  /* `delete recv[k]` */
+/* The sloppy-mode twins (a CommonJS file without "use strict"): a write that strict mode refuses (read-only property,
+ * primitive receiver) and a delete of a non-configurable property are quiet there -- the delete answers false. */
+void scr_dyn_sym_set_sloppy(ScrDyn *recv, ScrSym *k, ScrDyn *v);
+bool scr_dyn_sym_delete_sloppy(ScrDyn *recv, ScrSym *k);
+/* Object.defineProperty(recv, k, desc) for a DATA descriptor ({value, writable, enumerable, configurable}); answers the
+ * receiver (+1). An own property keeps the attributes the descriptor omits, a new one gets false for them. An accessor
+ * descriptor (get / set) throws a loud "not supported yet" Error. */
+ScrDyn *scr_dyn_sym_define(ScrDyn *recv, ScrSym *k, ScrDyn *desc);
+/* Object.getOwnPropertySymbols(recv) / the symbol half of Reflect.ownKeys: a fresh symbol[] (+1) in creation order. */
+ScrArr *scr_dyn_sym_own_keys(ScrDyn *recv);
+/* Reflect.ownKeys's symbol half: pushes `recv`'s own symbol keys (symbol values) onto the dyn array `names` and answers it +1. */
+ScrDyn *scr_dyn_sym_append(ScrDyn *names, ScrDyn *recv);
+/* The same list restricted to ENUMERABLE keys (what spread, Object.assign and util.inspect copy or print). */
+ScrArr *scr_dyn_sym_own_enum_keys(ScrDyn *recv);
 /* Replays the source object's key order on a converted record (see scr_json.c). `ks` is scr_map_keys_js_order_all of the overflow store. */
 void scr_dyn_obj_apply_key_order(ScrDyn *d, ScrArr *ks);
 ScrStr *scr_dyn_symbol_descriptive(const ScrDyn *d);

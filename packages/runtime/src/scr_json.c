@@ -122,7 +122,7 @@ static void scr_json_key_free(char *key, size_t key_len) {
  * pool, not the key pool: a pool is only self-consistent if every block
  * in it was sized by one rule.
  */
-const ScrDynObjExt scr_dyn_obj_ext_none = {NULL, NULL, NULL, NULL, NULL};
+const ScrDynObjExt scr_dyn_obj_ext_none = {NULL, NULL, NULL, NULL, NULL, NULL};
 
 #if SCR_JSON_KEY_POOL
 static ScrPool scr_dyn_ext_blocks;
@@ -147,8 +147,24 @@ ScrDynObjExt *scr_dyn_ext_w(ScrDyn *d) {
   e->hidden = NULL;
   e->slots = NULL;
   e->extras = NULL;
+  e->syms = NULL;
   d->v.obj.ext = e;
   return e;
+}
+
+/* The symbol table's teardown. The keys are plain refcounts in BOTH paths; the values are released only by the
+ * refcount path (the collector's trace already accounted for them). The release hook was installed by the first
+ * store, so a table existing implies it is set. */
+void (*scr_dyn_sym_key_release)(ScrSym *k) = NULL;
+ScrStr *(*scr_dyn_sym_key_str)(ScrSym *k) = NULL;
+void (*scr_dyn_sym_copy_enum)(ScrDyn *target, const ScrDyn *src) = NULL;
+static void scr_dyn_syms_free(ScrDynSymTab *t, bool release) {
+  for (uint32_t i = 0; i < t->len; i++) {
+    scr_dyn_sym_key_release(t->e[i].key);
+    if (release) scr_dyn_release(t->e[i].val);
+  }
+  free(t->e);
+  free(t);
 }
 
 void scr_dyn_ext_drop(ScrDyn *d, bool release) {
@@ -166,6 +182,7 @@ void scr_dyn_ext_drop(ScrDyn *d, bool release) {
     scr_dyn_release(e->slots);
     scr_dyn_release(e->extras);
   }
+  if (e->syms != NULL) scr_dyn_syms_free(e->syms, release);
 #if SCR_JSON_KEY_POOL
   if (scr_pool_give(&scr_dyn_ext_blocks, e, sizeof *e)) return;
 #endif
@@ -696,6 +713,10 @@ ScrDyn *scr_dyn_alloc_proxy(void) { return scr_dyn_alloc(SCR_DYN_PROXY); }
 
 /* The traced children: every one is a ScrDyn or a ScrClosure, so every one
  * carries a header (or is immortal, which the visit filter skips). */
+static void scr_dyn_syms_trace(const ScrDynSymTab *t, ScrTraceVisit visit, void *ctx) {
+  for (uint32_t i = 0; i < t->len; i++) visit(t->e[i].val, ctx);
+}
+
 static void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx) {
   ScrDyn *d = (ScrDyn *)o;
   switch (d->kind) {
@@ -703,6 +724,7 @@ static void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx) {
     for (size_t i = 0; i < d->v.arr.len; i++) visit(d->v.arr.items[i], ctx);
     /* the named-property table of an exec result / expando'd array */
     visit(scr_dyn_ext(d)->extras, ctx);
+    if (scr_dyn_ext(d)->syms != NULL) scr_dyn_syms_trace(scr_dyn_ext(d)->syms, visit, ctx);
     break;
   case SCR_DYN_OBJ:
     for (size_t i = 0; i < d->v.obj.len; i++)
@@ -716,6 +738,7 @@ static void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx) {
     /* scriptc's internal-slot table: an ordinary OBJ dyn holding ordinary
      * dyn values, so a cycle through one collects like any other. */
     visit(scr_dyn_ext(d)->slots, ctx);
+    if (scr_dyn_ext(d)->syms != NULL) scr_dyn_syms_trace(scr_dyn_ext(d)->syms, visit, ctx);
     break;
   case SCR_DYN_FUNC:
     visit(d->v.fn.clo, ctx);
@@ -13864,7 +13887,17 @@ void (*scr_handle_forin_hook)(const ScrDyn *v, ScrDyn *out) = NULL;
  * copy nothing (Node skips them) and the scalar/function/handle kinds
  * have no own enumerable string keys. Non-OBJ targets copy nothing (the
  * existing two-arg stance — a dyn array target has no property table). */
+static void scr_dyn_assign_strs(ScrDyn *target, const ScrDyn *src);
 static void scr_dyn_assign_from(ScrDyn *target, const ScrDyn *src) {
+  scr_dyn_assign_strs(target, src);
+  /* CopyDataProperties lists the string keys first and the ENUMERABLE symbol keys after them */
+  if (target->kind == SCR_DYN_OBJ && (src->kind == SCR_DYN_OBJ || src->kind == SCR_DYN_ARR || src->kind == SCR_DYN_FUNC) &&
+      !scr_exc_pending()) {
+    const ScrDynObjExt *sx = src->kind == SCR_DYN_FUNC ? NULL : scr_dyn_ext(src);
+    if (src->kind == SCR_DYN_FUNC ? src->v.fn.clo->props != NULL : sx->syms != NULL) scr_dyn_sym_copy_enum(target, src);
+  }
+}
+static void scr_dyn_assign_strs(ScrDyn *target, const ScrDyn *src) {
   if (target->kind != SCR_DYN_OBJ) return;
   if (src->kind == SCR_DYN_UNDEF || src->kind == SCR_DYN_NULL) return;
   if (src->kind == SCR_DYN_OBJ) {

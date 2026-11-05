@@ -1171,23 +1171,54 @@ void scr_cls_props_inspect(const ScrDyn *tbl, double recurse, double depth, bool
  * KEY because this walk knows no shapes -- the frontend chooses the
  * spelling (ir/nodes.ts, slotStorageKey), and the two halves are one
  * rule stated twice on purpose. */
+/* The ENUMERABLE symbol-keyed own properties (scr_symbol.c's table) -- the ones Node prints, as `Symbol(desc): value`,
+ * after the string keys. Non-enumerable ones (a defineProperty default) print nowhere. */
+static size_t insp_sym_count(const ScrDyn *d) {
+  const ScrDynSymTab *t = scr_dyn_ext(d)->syms;
+  size_t n = 0;
+  for (uint32_t i = 0; t != NULL && i < t->len; i++)
+    if (t->e[i].flags & SCR_SYMP_ENUM) n++;
+  return n;
+}
+
 static size_t insp_slot_count(const ScrDyn *d) {
   const ScrDyn *s = scr_dyn_ext(d)->slots;
-  if (s == NULL || s->kind != SCR_DYN_OBJ) return 0;
+  if (s == NULL || s->kind != SCR_DYN_OBJ) return insp_sym_count(d);
   size_t n = 0;
   for (size_t i = 0; i < s->v.obj.len; i++) {
     const ScrDynEntry *e = &s->v.obj.entries[i];
     if (e->key_len > 0 && e->key[0] != '%') n++;
   }
-  return n;
+  return n + insp_sym_count(d);
 }
 
 /* Appends one `Symbol(<desc>): <value>` entry per renderable slot to the
  * frame scr_insp_begin opened. Insertion order, which is the converter's
  * field order and therefore Node's. */
+static void insp_emit_syms(const ScrDyn *d, double recurse, double depth) {
+  const ScrDynSymTab *t = scr_dyn_ext(d)->syms;
+  for (uint32_t i = 0; t != NULL && i < t->len; i++) {
+    if (!(t->e[i].flags & SCR_SYMP_ENUM)) continue;
+    ScrStr *val = scr_insp_dyn(t->e[i].val, recurse + 1, depth);
+    ScrStr *kn = scr_dyn_sym_key_str(t->e[i].key);
+    InspBuf eb = {0};
+    ib_bytes(&eb, kn->data, kn->len);
+    ib_cstr(&eb, ": ");
+    ib_bytes(&eb, val->data, val->len);
+    scr_str_release(kn);
+    scr_str_release(val);
+    ScrStr *entry = ib_take(&eb);
+    scr_insp_entry(entry, false);
+    scr_str_release(entry);
+  }
+}
+
 static void insp_emit_slots(const ScrDyn *d, double recurse, double depth) {
   const ScrDyn *s = scr_dyn_ext(d)->slots;
-  if (s == NULL || s->kind != SCR_DYN_OBJ) return;
+  if (s == NULL || s->kind != SCR_DYN_OBJ) {
+    insp_emit_syms(d, recurse, depth);
+    return;
+  }
   for (size_t i = 0; i < s->v.obj.len; i++) {
     const ScrDynEntry *e = &s->v.obj.entries[i];
     if (e->key_len == 0 || e->key[0] == '%') continue;
@@ -1202,6 +1233,7 @@ static void insp_emit_slots(const ScrDyn *d, double recurse, double depth) {
     scr_insp_entry(entry, false);
     scr_str_release(entry);
   }
+  insp_emit_syms(d, recurse, depth);
 }
 
 /* A dyn object dumped after a base string (a Date's ISO text with its own expandos). Node's
