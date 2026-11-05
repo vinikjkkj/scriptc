@@ -12718,6 +12718,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24133-let-assigned-by-a-closure-then-returned.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24133-let-assigned-by-a-closure-then-returned.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2414-dowhile-continue-kill.ts": {
    "order": [
     "<repo>/tests/corpus/2414-dowhile-continue-kill.ts"
