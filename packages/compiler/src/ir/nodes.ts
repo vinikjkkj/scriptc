@@ -12349,7 +12349,8 @@ export function moduleUsesSymbol(mod: IrModule): boolean {
       return;
     }
     const node = v as { kind?: unknown; fn?: unknown };
-    if (node.kind === "libCall" && typeof node.fn === "string" && node.fn.startsWith("sym.")) {
+    // sym.isSym is the kind test `typeof v === "symbol"` lowers to: a program that holds no symbol is not made a symbol program by asking
+    if (node.kind === "libCall" && typeof node.fn === "string" && node.fn.startsWith("sym.") && node.fn !== "sym.isSym") {
       found = true;
       return;
     }

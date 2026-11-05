@@ -7010,6 +7010,8 @@ ScrStr *scr_dyn_to_string_method(const ScrDyn *d, const ScrStr *enc, const ScrSt
     scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
     return scr_str_new("", 0);
   }
+  /* `sym.toString()` is Symbol.prototype.toString ("Symbol(desc)"); only the implicit conversion refuses a symbol */
+  if (scr_dyn_is_symbol(d)) return scr_dyn_symbol_descriptive(d);
   return scr_dyn_to_string(d, enc);
 }
 

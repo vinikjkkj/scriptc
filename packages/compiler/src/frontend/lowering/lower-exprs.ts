@@ -21398,14 +21398,17 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
           loc,
         };
       }
-      // "symbol" keeps the fold, and keeps it on the ORIGINAL argument:
-      // the checked-dynamic tree still has no symbol kind, so no
-      // conversion into 'unknown' can produce one and the answer really
-      // is a constant. The capability probes this settles then FOLD their
-      // impossible arm (lowerTernary), which is what lets the reachable
-      // arm compile statically.
+      // `typeof v === "symbol"`: a REAL runtime test since the checked-dynamic tree
+      // carries a Symbol handle (SCR_DYNH_SYMBOL). It used to fold to the constant
+      // `false` on the premise that no conversion into 'unknown' could produce a
+      // symbol: the same stale premise as "bigint" above, with the same silent
+      // consequence (a trap handler's `typeof key === "symbol"` took the string
+      // arm for a symbol key while the bare `typeof key` a line away said
+      // "symbol"). The test reads the box's kind and tag; it links nothing a
+      // program without symbols does not already carry.
       if (b.text === "symbol") {
-        return { kind: "boolLit", value: negated, type: BOOL, loc };
+        const test: IrExpr = { kind: "libCall", fn: "sym.isSym", args: [value], type: BOOL, loc };
+        return negated ? { kind: "unary", op: "!", operand: test, type: BOOL, loc } : test;
       }
       L.unsupported(
         "SC1090",

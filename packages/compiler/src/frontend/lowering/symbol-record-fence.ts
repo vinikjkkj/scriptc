@@ -23,6 +23,33 @@ const WELL_KNOWN = new Set([
   "replace", "search", "species", "split", "unscopables", "dispose", "asyncDispose",
 ]);
 
+/** `typeof v === "symbol"` on an untyped value lowers to a kind test (sym.isSym). A program that creates no symbol cannot hold
+ * one in an untyped value, so there the test is the constant it always was: false, or true under `!==`. */
+export function foldSymbolTestsWithoutSymbols(mod: IrModule): void {
+  if (moduleUsesSymbol(mod)) return;
+  const seen = new Set<object>();
+  const isTest = (x: unknown): boolean => typeof x === "object" && x !== null && (x as Record<string, unknown>)["kind"] === "libCall" && (x as Record<string, unknown>)["fn"] === "sym.isSym";
+  const roots = { fns: mod.functions, globals: mod.globals ?? [], classes: mod.classes ?? [] } as Record<string, unknown>;
+  const stack: [Record<string, unknown> | unknown[], string | number][] = Object.keys(roots).map((k) => [roots, k]);
+  while (stack.length > 0) {
+    const [parent, key] = stack.pop()!;
+    const slot = parent as Record<string | number, unknown>;
+    const v = slot[key];
+    if (v === null || typeof v !== "object" || seen.has(v)) continue;
+    seen.add(v);
+    const o = v as Record<string, unknown>;
+    if (o["kind"] === "unary" && o["op"] === "!" && isTest(o["operand"])) {
+      slot[key] = { kind: "boolLit", value: true, type: BOOL, loc: o["loc"] };
+      continue;
+    }
+    if (isTest(o)) {
+      slot[key] = { kind: "boolLit", value: false, type: BOOL, loc: o["loc"] };
+      continue;
+    }
+    for (const k of Array.isArray(v) ? (v as unknown[]).keys() : Object.keys(o)) stack.push([v as Record<string, unknown>, k as string | number]);
+  }
+}
+
 /** The late-bound member names of a shape that stand for a USER symbol (not a well-known one, not an order marker). */
 function userSymbolMembers(shape: IrRecordShape): string[] {
   const out: string[] = [];

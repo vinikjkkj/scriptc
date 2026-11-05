@@ -26,6 +26,7 @@ import { fenceDynRecordCasts } from "./dyn-record-fence.js";
 import { fenceNullProtoRecordCasts } from "./null-proto-fence.js";
 import { fenceSymbolRecordCrossings, routeAnyKeysToSymbols } from "./symbol-record-fence.js";
 import type { EnumRefill, NullProtoPatch, OwnKeyPatch, SlotFilledPatch } from "./ir-patch.js";
+import { foldSymbolTestsWithoutSymbols } from "./symbol-record-fence.js";
 import * as ts from "../ts7/adapter.js";
 import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import { attachFnSrcText } from "./fn-srctext-attach.js";
@@ -4145,6 +4146,7 @@ export class Lowerer {
       { irVersion: 4, sourceFile: this.entry.fileName, functions, classes: artifacts.classes, globals: this.globalsList } as unknown as IrModule,
       (d) => this.pushDiag(d),
     );
+    foldSymbolTestsWithoutSymbols({ irVersion: 4, sourceFile: this.entry.fileName, functions, classes: artifacts.classes, globals: this.globalsList } as unknown as IrModule);
     // Every shape a dynCheck MATERIALISES arms its hidden own-key mask —
     // after the whole walk, so the answer does not depend on whether the
     // cast was lowered before or after the surface that enumerates it.
