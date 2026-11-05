@@ -34,7 +34,7 @@
  * `String()` and `JSON.stringify` wrong — 11 new SILENT divergences over
  * a generated 35-case surface population against 9 loud refusals turned
  * correct. */
-import type { IrRecordShape } from "../ir/nodes.js";
+import type { IrRecordShape, IrType } from "../ir/nodes.js";
 
 /** The two dials, read once per emitter. */
 export interface KindgateDials {
@@ -115,6 +115,28 @@ export function kindgateInstanceLane(shape: IrRecordShape, enabled: boolean): { 
  * data properties a function owns and never changes - `name` and `length`. A function IS an object in JavaScript, so `fn as { name: string }`
  * answers the name; the projection is exact because those two properties are immutable, so the copy cannot go stale (the reason the
  * array/string wide lane stays off does not apply). FUNC receivers only, in the builder and in the union arm walker (a function does have a name), independent of the dials. */
+/** A union whose ONLY non-unit arm is one record carrying a function-typed member (`BindOpts | undefined`): the
+ * index of that arm, or null. With no sibling arm there is nothing for a function signature to disambiguate. */
+export function soleRecordArmWithFuncMember(
+  def: { readonly arms: readonly IrType[] },
+  records: ReadonlyMap<string, IrRecordShape>,
+  unions: ReadonlyMap<string, { readonly arms: readonly IrType[] }>,
+): number | null {
+  let found = -1;
+  for (let i = 0; i < def.arms.length; i++) {
+    const a = def.arms[i]!;
+    if (a.kind === "undefinedT" || a.kind === "nullT") continue;
+    if (found >= 0 || a.kind !== "record") return null;
+    found = i;
+  }
+  if (found < 0) return null;
+  const sh = records.get((def.arms[found] as IrType & { kind: "record" }).shapeId);
+  if (sh === undefined || sh.tuple === true) return null;
+  const hasFn = (t: IrType): boolean =>
+    t.kind === "func" || (t.kind === "union" && (unions.get(t.unionId)?.arms ?? []).some((x) => x.kind === "func"));
+  return sh.fields.some((f) => hasFn(f.type)) ? found : null;
+}
+
 export function kindgateFuncLane(_soft: boolean, shape: IrRecordShape): boolean {
   return (
     !shape.tuple && shape.indexValue === undefined && shape.fields.length > 0 &&
