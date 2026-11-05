@@ -110,3 +110,14 @@ export function kindgateInstanceLane(shape: IrRecordShape, enabled: boolean): { 
   if (!enabled || shape.tuple) return null;
   return { allOwn: shape.indexValue !== undefined };
 }
+
+/** The FUNCTION lane: a function value (a class value, an arrow, `x.constructor`) read through a record whose declared members are all
+ * data properties a function owns and never changes - `name` and `length`. A function IS an object in JavaScript, so `fn as { name: string }`
+ * answers the name; the projection is exact because those two properties are immutable, so the copy cannot go stale (the reason the
+ * array/string wide lane stays off does not apply). Hard builder only, FUNC receivers only, independent of the dials. */
+export function kindgateFuncLane(soft: boolean, shape: IrRecordShape): boolean {
+  return (
+    !soft && !shape.tuple && shape.indexValue === undefined && shape.fields.length > 0 &&
+    shape.fields.every((f) => f.name === "name" || f.name === "length")
+  );
+}
