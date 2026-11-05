@@ -7636,6 +7636,7 @@ ScrClosure *scr_dyn_listener_closure_fn(const ScrDyn *cb, void *fire);
 ScrDyn *scr_dyn_listener_fn(ScrClosure *cb);
 typedef void (*ScrDynListenerDataFn)(ScrClosure *cb, ScrBytes *chunk);
 typedef void (*ScrDynListenerErrFn)(ScrClosure *cb, ScrStr *msg);
+extern bool scr_dyn_listener_is(const ScrClosure *cb);
 extern void scr_dyn_listener_fire0(ScrClosure *cb);
 extern void scr_dyn_listener_fire_data(ScrClosure *cb, ScrBytes *chunk);
 extern void scr_dyn_listener_fire_err(ScrClosure *cb, ScrStr *msg);
