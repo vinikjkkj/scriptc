@@ -174,6 +174,11 @@ const ASYNC_SLOTS_EXPECTED =
   "proto:5 proto:5 1\n" +
   "get,tick\n";
 
+/* cases/twinrec/claim-tuples.ts: a declaration-claimed promise of [error, result] tuples, recorded from node. */
+const CLAIM_TUPLES_EXPECTED =
+  "2 null OK 7\n" +
+  "2 false bad 7\n";
+
 const PRIOR = process.env["SCRIPTC_PROVENANCE_MANIFEST"];
 afterEach(() => {
   setProvenanceSources(null);
@@ -336,6 +341,16 @@ describe("provenance: a twin class with untyped methods behind a program's own r
       if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
       const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
       expect(stdout).toBe(ASYNC_SLOTS_EXPECTED);
+    }, 600_000);
+  }
+
+  for (const backend of ["c", "llvm"] as const) {
+    test(`24049: a declaration-claimed promise of [error, result] tuples keeps its Error element (${backend})`, async () => {
+      const entry = join(fixtureDir, "cases/twinrec/claim-tuples.ts");
+      const { result, outPath } = await build(entry, "claim-tuples", backend);
+      if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+      const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
+      expect(stdout).toBe(CLAIM_TUPLES_EXPECTED);
     }, 600_000);
   }
 
