@@ -365,6 +365,17 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "sym.keyFor": { argTypes: [SYMBOL_T], result: VOID },
   "sym.desc": { argTypes: [SYMBOL_T], result: VOID },
   "sym.toString": { argTypes: [SYMBOL_T], result: STRING },
+  "sym.dynGet": { argTypes: [DYN, SYMBOL_T], result: DYN },
+  "sym.dynSet": { argTypes: [DYN, SYMBOL_T, DYN], result: VOID },
+  "sym.dynSetSloppy": { argTypes: [DYN, SYMBOL_T, DYN], result: VOID },
+  "sym.dynDeleteSloppy": { argTypes: [DYN, SYMBOL_T], result: BOOL },
+  "sym.dynAppendSyms": { argTypes: [DYN, DYN], result: DYN },
+  "sym.dynHas": { argTypes: [DYN, SYMBOL_T], result: BOOL },
+  "sym.dynHasOwn": { argTypes: [DYN, SYMBOL_T], result: BOOL },
+  "sym.dynDelete": { argTypes: [DYN, SYMBOL_T], result: BOOL },
+  "sym.dynDefine": { argTypes: [DYN, SYMBOL_T, DYN], result: DYN },
+  "sym.dynOwnKeys": { argTypes: [DYN], result: arrayOf(SYMBOL_T) },
+  "sym.dynOwnEnumKeys": { argTypes: [DYN], result: arrayOf(SYMBOL_T) },
   // Function.prototype.toString of a function VALUE (any func-typed operand;
   // the arg is checked below, not by signature). Text answer: the program's
   // own source text, or the native form, from the closure's entry point.

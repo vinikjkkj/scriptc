@@ -4333,6 +4333,29 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_sym_for(${arg(0)})`);
           case "sym.toString":
             return finish(`scr_sym_to_string(${arg(0)})`);
+          // Symbol-keyed properties over a dyn receiver: everything borrowed; the get / key-list results are +1.
+          case "sym.dynGet":
+            return finish(`scr_dyn_sym_get(${arg(0)}, ${arg(1)})`);
+          case "sym.dynAppendSyms":
+            return finish(`scr_dyn_sym_append(${arg(0)}, ${arg(1)})`);
+          case "sym.dynSet":
+            return finish(`scr_dyn_sym_set(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "sym.dynSetSloppy":
+            return finish(`scr_dyn_sym_set_sloppy(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "sym.dynDeleteSloppy":
+            return finish(`scr_dyn_sym_delete_sloppy(${arg(0)}, ${arg(1)})`);
+          case "sym.dynHas":
+            return finish(`scr_dyn_sym_has(${arg(0)}, ${arg(1)})`);
+          case "sym.dynHasOwn":
+            return finish(`scr_dyn_sym_has_own(${arg(0)}, ${arg(1)})`);
+          case "sym.dynDelete":
+            return finish(`scr_dyn_sym_delete(${arg(0)}, ${arg(1)})`);
+          case "sym.dynDefine":
+            return finish(`scr_dyn_sym_define(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "sym.dynOwnKeys":
+            return finish(`scr_dyn_sym_own_keys(${arg(0)})`);
+          case "sym.dynOwnEnumKeys":
+            return finish(`scr_dyn_sym_own_enum_keys(${arg(0)})`);
           case "fn.text":
             return finish(`scr_fn_text(${arg(0)})`);
           case "sym.desc":

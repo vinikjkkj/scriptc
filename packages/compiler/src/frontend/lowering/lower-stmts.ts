@@ -5,7 +5,8 @@
 import { protoDataAssignStmt } from "./lower-protodata.js";
 import { classOfValueNode, protoSlotOf, protoSlotWriteStmt } from "./lower-protoslots.js";
 import { protoTabWriteStmt } from "./lower-prototab.js";
-import { isShadowableMethodRead, lowerUnboundClassMethodValue } from "./lower-exprs.js";
+import { strictAt } from "./lower-protoescape.js";
+import { isShadowableMethodRead, lowerUnboundClassMethodValue, dynSymbolKeyOf } from "./lower-exprs.js";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { isEmitterMixinStatement } from "./lower-emitter-mixin.js";
@@ -6497,6 +6498,11 @@ function unionCaseLiteralTest(L: Lowerer, disc: IrExpr, test: IrExpr, loc: SrcLo
     // so a number or an untyped key stringifies exactly as an indexed
     // READ does (the o[k] === o[String(k)] rule).
     if (obj.type.kind === "dyn") {
+      // `delete o[sym]`: the runtime's symbol-keyed property table.
+      if (ts.isElementAccessExpression(target) && L.mapTypeOf(L.typeOf(target.argumentExpression))?.kind === "symbol") {
+        const sk = dynSymbolKeyOf(L, target.argumentExpression);
+        if (sk !== null) return { pre: [], result: { kind: "libCall", fn: strictAt(expr.getSourceFile(), expr.getStart()) ? "sym.dynDelete" : "sym.dynDeleteSloppy", args: [obj, sk], type: BOOL, loc } };
+      }
       let key: IrExpr = ts.isPropertyAccessExpression(target)
         ? { kind: "strLit", value: target.name.text, type: STRING, loc: locOf(target.name) }
         : L.lowerExpr(target.argumentExpression);

@@ -4129,6 +4129,22 @@ export type IrLibFn =
   | "sym.keyFor"
   | "sym.desc"
   | "sym.toString"
+  /** Symbol-KEYED properties over a checked-dynamic receiver (scr_symbol.c): arg 0 the receiver dyn, arg 1 the symbol key,
+   * borrowed. dynGet answers +1 (undefined when absent; walks the prototype chain), dynSet stores (arg 2 the value),
+   * dynHas is `in`, dynHasOwn Object.hasOwn, dynDelete `delete` (bool; the Sloppy twins of set and delete are the non-strict file's quiet answers), dynDefine is Object.defineProperty (arg 2 the
+   * descriptor object; answers the receiver, +1), dynOwnKeys / dynOwnEnumKeys the +1 symbol[]. All
+   * can throw Node's TypeErrors on a nullish receiver. */
+  | "sym.dynGet"
+  | "sym.dynSet"
+  | "sym.dynAppendSyms"
+  | "sym.dynSetSloppy"
+  | "sym.dynDeleteSloppy"
+  | "sym.dynHas"
+  | "sym.dynHasOwn"
+  | "sym.dynDelete"
+  | "sym.dynDefine"
+  | "sym.dynOwnKeys"
+  | "sym.dynOwnEnumKeys"
   /** Function.prototype.toString of a function VALUE (arg 0, func-typed):
    * the closure entry's exact source text (IrFunction.srcText, emitted as
    * the ScrFnText table only when a program uses this, scr_fntext.c). +1 string. */
@@ -14545,6 +14561,17 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "regex.new",
   "dyn.keySet",
   "dyn.keySetSloppy",
+  "sym.dynGet",
+  "sym.dynAppendSyms",
+  "sym.dynSetSloppy",
+  "sym.dynDeleteSloppy",
+  "sym.dynSet",
+  "sym.dynHas",
+  "sym.dynHasOwn",
+  "sym.dynDelete",
+  "sym.dynDefine",
+  "sym.dynOwnKeys",
+  "sym.dynOwnEnumKeys",
   // new Proxy throws on a non-object target/handler; `in` runs a has trap.
   "dyn.proxyNew",
   "dyn.proxyRevocable",

@@ -35,7 +35,7 @@ import { lowerDateLocaleFormat, lowerNumberLocaleFormat } from "./lower-numfmt.j
 import { lowerBareRequireCall, lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDateMethodCall, lowerDiffieHellmanCallbackCall, lowerRandomBytesCallbackCall, lowerDirentMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerErrorCaptureStackTraceCall, lowerReflectApplyCall, lowerReflectConstructCall, lowerStringFromCharCodeApply, lowerWatcherMethodCall } from "./lower-builtins.js";
 import { lowerSqliteMethodCall } from "./lower-sqlite.js";
 import { lowerWrtcMethodCall } from "./lower-wrtc.js";
-import { lowerSubclassFieldRead, pureReemittable, classHasKeyHelper, classInMemberNames, droppableStatic, dynAssertionReceiver, fnOwnCounters, keyedCalleeAtUndefinedArm, spawnResStreamArg, jsonStringifySpawnStreamArg, unionArmBridge, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf, armTagsTest } from "./lower-exprs.js";
+import { dynSymbolKeyOf, lowerSubclassFieldRead, pureReemittable, classHasKeyHelper, classInMemberNames, droppableStatic, dynAssertionReceiver, fnOwnCounters, keyedCalleeAtUndefinedArm, spawnResStreamArg, jsonStringifySpawnStreamArg, unionArmBridge, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf, armTagsTest } from "./lower-exprs.js";
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerHttpClientFnCall } from "./lower-server.js";
 import { isAnyDynContainer, lowerProxyNew, CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, definePropSlotSiteOf, errorWithCause, definePropTableSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, requireVirtualSlotFit, virtualViewFitsSlot, type ClassInfo } from "./lower-classes.js";
 import { boundEmitDispatcher, boundSubscribeDispatcher, emitterEventNames, emitterRooted, lowerEmitApplyCall, lowerEmitterMethodCall, lowerUnnamedEmitterCall } from "./lower-emitter.js";
@@ -11796,6 +11796,13 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       return key.type.kind === "string" ? key : null;
     };
     if (probed?.type.kind === "dyn") {
+      // A SYMBOL key: the runtime's symbol-keyed property table.
+      if (L.mapTypeOf(L.typeOf(keyNode))?.kind === "symbol") {
+        const receiver = L.lowerExpr(recvNode);
+        const sk = dynSymbolKeyOf(L, keyNode);
+        if (sk === null) return null;
+        return { kind: "libCall", fn: "sym.dynHasOwn", args: [receiver, sk], type: BOOL, loc };
+      }
       const receiver = L.lowerExpr(recvNode);
       const key = keyOf();
       if (key === null) return null;
@@ -12354,6 +12361,15 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       target = { kind: "dynFrom", value: target, type: DYN, loc: locOf(call.arguments[0]!) };
     }
     if (target?.type.kind !== "dyn") return null;
+    // A SYMBOL key: the runtime's symbol-keyed property table (scr_symbol.c).
+    if (L.mapTypeOf(L.typeOf(call.arguments[1]!))?.kind === "symbol") {
+      const sk = dynSymbolKeyOf(L, call.arguments[1]!);
+      if (sk === null) return null;
+      markDescriptorMapLiterals(L, call.arguments[2]!, 0);
+      const sdesc = L.lowerExprExpecting(call.arguments[2]!, DYN);
+      if (sdesc.type.kind !== "dyn") return null;
+      return { kind: "libCall", fn: "sym.dynDefine", args: [target, sk, sdesc], type: DYN, loc: locOf(call) };
+    }
     const key = L.lowerExprExpecting(call.arguments[1]!, STRING);
     if (key.type.kind !== "string") return null;
     markDescriptorMapLiterals(L, call.arguments[2]!, 0);
@@ -13588,6 +13604,13 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     if (member === "hasOwn" && call.arguments.length === 2 && !call.arguments.some((a) => ts.isSpreadElement(a))) {
       return lowerHasOwnOver(L, call, call.arguments[0]!, call.arguments[1]!);
     }
+    // Object.getOwnPropertySymbols over a checked-dynamic receiver: the symbol half of its own keys (scr_symbol.c).
+    if (member === "getOwnPropertySymbols" && call.arguments.length === 1 && !ts.isSpreadElement(call.arguments[0]!)) {
+      const probedSym = probeLower(L, call.arguments[0]!);
+      if (probedSym?.type.kind === "dyn") {
+        return { kind: "libCall", fn: "sym.dynOwnKeys", args: [L.lowerExpr(call.arguments[0]!)], type: arrayOf(SYMBOL_T), loc: locOf(call) };
+      }
+    }
     // getOwnPropertyNames answers the same list as keys for every RECORD
     // this compiles: a record has no non-enumerable own members and no
     // symbol keys, so "own property names" and "own enumerable keys"
@@ -13709,7 +13732,29 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
           // Reflect.ownKeys is typed `(string | symbol)[]`; the dyn tree holds
           // string keys only, so it crosses as the checked string array and
           // widens into the checker's element union like any other array.
-          return reflectOwnKeys ? L.coerceToExpected(names, arrayOf(STRING)) : names;
+          if (reflectOwnKeys) {
+            // The string names, then the receiver's symbol-keyed own properties (scr_symbol.c): the dyn array crosses
+            // into the checker's (string | symbol)[] element union. The receiver evaluates once, into a hidden local.
+            const loc = locOf(call);
+            const resT = L.irTypeOf(call);
+            const recvTmp = L.declareHiddenLocal("%okRecv", DYN);
+            const rref = (): IrExpr => ({ kind: "varRef", localId: recvTmp.id, type: DYN, loc });
+            const keys: IrExpr = {
+              kind: "seqExpr",
+              stmts: [{ kind: "varDecl", localId: recvTmp.id, init: v, loc }],
+              result: {
+                kind: "libCall",
+                fn: "sym.dynAppendSyms",
+                args: [{ kind: "call", callee: helper, args: [rref()], type: DYN, loc }, rref()],
+                type: DYN,
+                loc,
+              },
+              type: DYN,
+              loc,
+            };
+            return L.coerceToExpected(keys, resT);
+          }
+          return names;
         }
         return { kind: "libCall", fn, args: [v], type: DYN, loc: locOf(call) };
       }

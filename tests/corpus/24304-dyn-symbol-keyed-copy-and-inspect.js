@@ -1,0 +1,20 @@
+// Object.assign, spread and util.inspect carry the ENUMERABLE symbol properties (after the string keys); JSON, Object.keys and structuredClone do not; Reflect.ownKeys lists strings first, then symbols.
+const k = Symbol("k");
+const hid = Symbol("hid");
+const o = JSON.parse('{"a":1,"b":{"c":2}}');
+o[k] = 2;
+Object.defineProperty(o, hid, { value: 3 });
+o[Symbol("nested")] = { deep: [1, 2] };
+console.log(o);
+const c = { ...o, z: 9 };
+console.log(Object.getOwnPropertySymbols(c).length, c);
+const d = Object.assign({}, o);
+console.log(Object.getOwnPropertySymbols(d).length);
+console.log(Reflect.ownKeys(o).map((key) => typeof key === "symbol" ? "symbol:" + key.toString() : "string:" + key));
+console.log(JSON.stringify(o), Object.keys(o), Object.entries(o).length);
+const sc = structuredClone(o);
+console.log(Object.getOwnPropertySymbols(sc).length);
+for (const key in o) console.log("for-in", key);
+const empty = JSON.parse("{}");
+empty[k] = "only";
+console.log(empty, Reflect.ownKeys(empty).length);

@@ -11,7 +11,8 @@ import { protoSlotOf, slotReadOr } from "./lower-protoslots.js";
 import * as ts from "../ts7/adapter.js";
 import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
-import { EVAL_STATIC_CLASSES, RUNTIME_EMITTER_CLASS, STATS_FIELD_INDEX, DATE_T, strandTrap, BIGINT, BOOL, BYTES_ELEM_SIZE, BYTES_U8, bytesValueType, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrGlobal, IrJsOp, IrLocal, type IrParam, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
+import { strictAt } from "./lower-protoescape.js";
+import { EVAL_STATIC_CLASSES, RUNTIME_EMITTER_CLASS, STATS_FIELD_INDEX, DATE_T, strandTrap, BIGINT, BOOL, BYTES_ELEM_SIZE, BYTES_U8, bytesValueType, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrGlobal, IrJsOp, IrLocal, type IrParam, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
 import { cjsRequireBindingValueOf, dynImportBindingDeclOf } from "./lower-island.js";
 import { liveExportsOf, liveBagRef, liveDepOfBinding, isValueUse, liveNamedTwinOf, liveRecvBagOf, liveKeyOf, liveIdentityRefOf, dynValueOf } from "./cjs-live-exports.js";
@@ -14913,6 +14914,12 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
       // ordinary field read: fall through to the record read below.
       const recvIr = L.mapTypeOf(L.typeOf(expr.expression));
       const recvShape = recvIr?.kind === "record" ? L.shapes.get(recvIr.shapeId) : undefined;
+      // A symbol key over a checked-dynamic receiver (an untyped parameter, an Object.create result): the runtime's
+      // symbol-keyed property table (scr_symbol.c), not a static shape.
+      const dynSym = dynSymbolAccess(L, expr);
+      if (dynSym !== null) {
+        return L.maybeNarrow({ kind: "libCall", fn: "sym.dynGet", args: [dynSym.recv, dynSym.key], type: DYN, loc: locOf(expr) }, expr);
+      }
       if (recvShape === undefined || wellKnownSymbolFieldIn(L, expr.argumentExpression, recvShape) === null) {
         L.unsupported(
           "SC1090",
@@ -15502,6 +15509,37 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
    * a literal spelling `[Symbol.dispose]` also folds to, literalComputedKey), so
    * the key reads the one field whose name carries that prefix. Null when the
    * key is anything else, or the shape holds no such field (or two). */
+  /** The receiver and symbol key of `recv[key]` when the receiver is a checked-dynamic value (an untyped parameter, an
+   * Object.create result, a JSON-shaped bag) and the key is a symbol: the access rides the runtime's symbol-keyed
+   * property table (scr_symbol.c) instead of a static shape. Null for a statically typed receiver (its layout is a
+   * compile-time field list), an optional-chain access, and any key that does not lower to a symbol. Well-known
+   * symbols (`Symbol.iterator`) have no lowering of their own and refuse before reaching here. */
+  function dynSymbolAccess(L: Lowerer, access: ts.ElementAccessExpression): { recv: IrExpr; key: IrExpr } | null {
+    if (access.questionDotToken !== undefined) return null;
+    const recvIr = L.mapTypeOf(L.typeOf(access.expression));
+    // A function VALUE carries its own properties on its closure, so a box made here shares them with every other box of
+    // the same closure (the defineProperty arm's rule).
+    if (recvIr !== null && recvIr.kind !== "dyn" && recvIr.kind !== "func") return null;
+    let recv = L.lowerExpr(access.expression);
+    if (recv.type.kind === "func" && canBoxFuncIntoDyn(recv.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))) {
+      recv = { kind: "dynFrom", value: recv, type: DYN, loc: recv.loc };
+    }
+    if (recv.type.kind !== "dyn") return null;
+    const key = dynSymbolKeyOf(L, access.argumentExpression);
+    return key === null ? null : { recv, key };
+  }
+
+  /** `keyNode` lowered as a symbol value: a symbol-typed expression as is, a checked-dynamic one the checker proves
+   * symbol-typed through its dynCheck extraction; null for any other key. */
+  export function dynSymbolKeyOf(L: Lowerer, keyNode: ts.Expression): IrExpr | null {
+    const key = L.lowerExpr(keyNode);
+    if (key.type.kind === "symbol") return key;
+    if (key.type.kind === "dyn" && L.mapTypeOf(L.typeOf(keyNode))?.kind === "symbol") {
+      return { kind: "dynCheck", value: key, type: SYMBOL_T, loc: key.loc };
+    }
+    return null;
+  }
+
   function wellKnownSymbolFieldIn(L: Lowerer, keyNode: ts.Expression, shape: IrRecordShape): string | null {
     if (!ts.isPropertyAccessExpression(keyNode) || !ts.isIdentifier(keyNode.name)) return null;
     if (stdlibGlobalNameOf(L, keyNode.expression) !== "Symbol") return null;
@@ -16155,6 +16193,15 @@ export function staticAssertionOperand(L: Lowerer, node: ts.Expression, field: s
       if (fieldT) {
         const value = L.lowerExprExpecting(expr.right, fieldT.fieldType);
         return L.fieldSetStmt(fieldT, value, locOf(expr), target);
+      }
+      const dynSym = dynSymbolAccess(L, target);
+      if (dynSym !== null) {
+        const value = L.coerceToExpected(L.lowerExpr(expr.right), DYN);
+        if (value.type.kind === "dyn") {
+          const loc = locOf(expr);
+          return { kind: "exprStmt", expr: { kind: "libCall", fn: strictAt(expr.getSourceFile(), expr.getStart()) ? "sym.dynSet" : "sym.dynSetSloppy", args: [dynSym.recv, dynSym.key, value], type: VOID, loc }, loc };
+        }
+        L.unsupported("SC1101", expr.right, `storing '${L.fmt(value.type)}' values under a symbol key on a dynamic receiver (the value cannot convert into the checked-dynamic tree)`);
       }
       L.unsupported(
         "SC1090",
@@ -23078,6 +23125,17 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
       // 55), then the overflow map's live keys. Other receivers keep the
       // fence: fixed shapes want the literal folds above, and there is no
       // runtime key table to ask.
+      // A SYMBOL key over a checked-dynamic receiver: the runtime's symbol-keyed property table.
+      if (L.mapTypeOf(L.typeOf(expr.left))?.kind === "symbol") {
+        const probed = probeLower(L, expr.right);
+        if (probed?.type.kind === "dyn") {
+          const k = dynSymbolKeyOf(L, expr.left);
+          if (k !== null) {
+            const recvD = L.lowerExpr(expr.right);
+            if (recvD.type.kind === "dyn") return { kind: "libCall", fn: "sym.dynHas", args: [recvD, k], type: BOOL, loc };
+          }
+        }
+      }
       const rIn = lowerRuntimeKeyIn(L, expr, loc);
       if (rIn) return rIn;
       // A runtime key over a CHECKED-DYNAMIC receiver (`name in
