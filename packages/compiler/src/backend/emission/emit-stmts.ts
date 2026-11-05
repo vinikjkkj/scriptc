@@ -5,7 +5,7 @@
 import type { CEmitter, ScopeEntry } from "./emitter.js";
 import type { IrFunction, IrLocal, IrType } from "../../ir/nodes.js";
 import { mangleField, mangleGlobal, mangleLocal, mangleRawParam } from "../mangle.js";
-import { BOOL, CAUGHT, F64, IrExpr, IrStmt, ORD_MEMBER, orderRecordPlanCached, RUNTIME_ERROR_CLASSES, isRefCounted, ownMaskKeyBit } from "../../ir/nodes.js";
+import { BOOL, CAUGHT, errorOwnFlagFor, F64, IrExpr, IrStmt, ORD_MEMBER, orderRecordPlanCached, RUNTIME_ERROR_CLASSES, isRefCounted, ownMaskKeyBit } from "../../ir/nodes.js";
 import { boxAccess, cDecl, cStringLiteral, elemAccess, vAdapters } from "./emit-types.js";
 import { KEYLIST_MEMBER, OVERFLOW_MEMBER, OWNMASK_MEMBER, ownPresentCondC } from "./emit-shapes.js";
 import { emitStableReceiver } from "./emit-exprs.js";
@@ -938,6 +938,15 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
           E.releaseValue(old, v.type);
         } else {
           E.line(`${field} = ${v.name};${E.srcComment(s.loc)}`);
+        }
+        // An Error's `name` / `message` WRITE is the fact "own property" (an assignment creates it even when the value equals
+        // the prototype's): recorded at the store, whatever the receiver's spelling.
+        if (s.kind === "fieldSet") {
+          const flag = errorOwnFlagFor(E.mod.classes ?? [], s.className, s.field);
+          if (flag !== null) {
+            const fm = RUNTIME_ERROR_CLASSES.has(s.className) ? (flag === "%ownName" ? "own_name" : "own_message") : mangleField(flag);
+            E.line(`${obj.name}->${fm} = true;`);
+          }
         }
         // A WRITE creates an own property — JS's [[Set]], and the reason a
         // crossing's mask can only ever gain bits. Without this, a member

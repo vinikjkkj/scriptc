@@ -640,6 +640,8 @@ void dyn_cls_impl_err_set(ScrDyn *d, const ScrStr *key, const ScrDyn *value) {
     ScrStr *old = *cell;
     *cell = s;
     scr_str_release(old);
+    if (is_msg) e->own_message = true; /* an assignment creates the own property, whatever the value */
+    if (is_name) e->own_name = true;
     if (e->props != NULL && e->props->kind == SCR_DYN_OBJ) scr_dyn_key_delete(e->props, (ScrStr *)key);
     return;
   }

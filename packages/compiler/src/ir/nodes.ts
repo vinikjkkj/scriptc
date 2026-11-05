@@ -1698,6 +1698,19 @@ export interface IrLibIdentity {
  * silently disabling the other. */
 export const CLASS_PROPS_FIELD = "%props";
 
+/** The ScrError flag slot a store to an Error-rooted class's `name` / `message` field records ("the program assigned it"), or
+ * null when the store is to any other field or class. The flag is set AT THE STORE by the emitters, so every spelling of
+ * the write (a call result's receiver, an element, a member chain) records it. */
+export function errorOwnFlagFor(classes: readonly IrClassDef[], className: string, field: string): "%ownName" | "%ownMessage" | null {
+  if (field !== "name" && field !== "message") return null;
+  const byName = new Map<string, IrClassDef>();
+  for (const c of classes) byName.set(c.name, c);
+  for (let c: string | undefined = className; c !== undefined; c = byName.get(c)?.base) {
+    if (RUNTIME_ERROR_CLASSES.has(c)) return field === "name" ? "%ownName" : "%ownMessage";
+  }
+  return null;
+}
+
 /** A class whose instances may carry an OWN property that shadows one of its
  * methods with another method of the same class (`this.parseRow =
  * this._parseRowAsArray`) keeps the choice in a private boolean named
@@ -5499,6 +5512,9 @@ export type IrLibFn =
    * (the strict-mode plain-call answer, the old constant). Zero args →
    * dyn (+1). Never throws. */
   | "dyn.this"
+  /** The ABSENT message of an Error constructor call (`new Error()`, `super(undefined)`): a NULL string, which the error
+   * unit reads as "no own `message`". No arguments. */
+  | "error.noMessage"
   | "dyn.thisSloppy"
   | "dyn.isGlobalThis"
   | "dyn.isAbsent"
