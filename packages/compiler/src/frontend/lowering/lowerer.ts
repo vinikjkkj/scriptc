@@ -17500,6 +17500,9 @@ export class Lowerer {
   /** Function expressions assigned as LATE methods (`C.prototype.m = function ...`): their declared parameters may re-bind off the dyn
    * argument pack whatever type the checker gave them (a contextual type from a declaration file is not an annotation the author wrote). */
   readonly lateMethodFns = new Set<ts.Node>();
+  /** Every class that BORROWED a function (`C.prototype.m = D.prototype.n`), by the borrowed declaration: the
+   * one function value Node shares among them runs against whichever receiver it is called on. */
+  readonly lateMethodBorrowers = new Map<ts.Node, { info: ClassInfo; mName: string }[]>();
   /** An accessor family's loop variable bound to the literal one unrolled
    * body is lowered for (keyed `<Class>.<method name>`), and the bindings
    * active while such a body lowers. */
