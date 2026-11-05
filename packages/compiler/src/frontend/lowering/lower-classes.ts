@@ -2249,6 +2249,10 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
             // libCalls reach. Layout-only like the two above; its DYN type
             // makes the emitted subclass teardown release it NULL-guarded.
             { name: "%props", type: DYN },
+            // `%ownName` / `%ownMessage` are the sixth and seventh slots: the facts "the program assigned `name`" and "a
+            // message was provided or assigned" -- an own property in Node whatever its value, which no value test can say.
+            { name: "%ownName", type: BOOL },
+            { name: "%ownMessage", type: BOOL },
           ],
           loc,
         },
@@ -10903,15 +10907,16 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
     if (args.length > 1 && !optionsHandled) {
       L.unsupported("SC1090", args[1] ?? blame, "Error constructor options ('cause')");
     }
-    if (args.length === 0) return { kind: "strLit", value: "", type: STRING, loc };
+    // No message argument (or an explicit undefined): the constructor installs no own `message`, which the runtime reads
+    // off a NULL string (error.msgDyn answers NULL for the dyn undefined).
+    const noMessage: IrExpr = { kind: "libCall", fn: "error.noMessage", args: [], type: STRING, loc };
+    if (args.length === 0) return noMessage;
     const value = L.lowerExpr(args[0]!);
     if (value.type.kind === "string") return value;
     // An untyped message (a JS file's implicit-any parameter): the
     // runtime does ToString, "" for undefined.
     if (value.type.kind === "dyn") return { kind: "libCall", fn: "error.msgDyn", args: [value], type: STRING, loc };
-    if (value.kind === "unitLit" && value.unit === "undefined") {
-      return { kind: "strLit", value: "", type: STRING, loc };
-    }
+    if (value.kind === "unitLit" && value.unit === "undefined") return noMessage;
     // The constructor's message is ToString(argument) unless the argument is
     // undefined (no message at all, which reads ""): null is "null", a number
     // or boolean its JS spelling, and an UNTYPED value (the usual
