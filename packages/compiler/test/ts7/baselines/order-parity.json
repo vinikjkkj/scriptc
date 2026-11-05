@@ -12724,6 +12724,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24132-index-read-stored-into-a-field-of-a-class-union.ts": {
+   "order": [
+    "<repo>/tests/corpus/24132-index-read-stored-into-a-field-of-a-class-union.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2414-dowhile-continue-kill.ts": {
    "order": [
     "<repo>/tests/corpus/2414-dowhile-continue-kill.ts"
