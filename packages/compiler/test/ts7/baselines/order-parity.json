@@ -12506,6 +12506,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24070-a-view-crossing-into-an-untyped-function-is-the-live-object.ts": {
+   "order": [
+    "<repo>/tests/corpus/24070-a-view-crossing-into-an-untyped-function-is-the-live-object.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2405-sibling-arm-narrow.ts": {
    "order": [
     "<repo>/tests/corpus/2405-sibling-arm-narrow.ts"
