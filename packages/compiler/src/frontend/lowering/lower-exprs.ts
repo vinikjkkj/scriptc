@@ -4,6 +4,7 @@
  * comparisons, nullish coalescing and optional chains, conditions and
  * ToBoolean/ToString coercion helpers, and field/element reads and writes
  * (FieldTarget). */
+import { readFileSync } from "node:fs";
 import { evalStaticInfoOf, lowerEvalClassInstanceOf } from "./lower-evalclass.js";
 import { protoDataFieldRead, protoDataHasKey, protoDataMemberRead } from "./lower-protodata.js";
 import { protoSlotOf, slotReadOr } from "./lower-protoslots.js";
@@ -26509,6 +26510,11 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
       const sym = L.checker.getSymbolAtLocation(key.name);
       if (!sym) return null;
       const decls = L.checker.declarationsOf(sym);
+      // A package that ships declarations: `export declare const k: unique symbol` stands for the implementation's
+      // `exports.k = Symbol("desc")` beside it. Importers see the declaration, the exporter's own file sees the assignment,
+      // so the key's identity is (implementation file, export name), not the checker symbol.
+      const declared = declaredUniqueSymbolOf(L, sym, decls);
+      if (declared !== null) return declared;
       let init: ts.CallExpression | null = null;
       for (const d of decls) {
         // `exports.sym = <rhs>` (the declaration is the whole assignment); a `= void 0` hoist is no value, a Symbol() call is THE value
@@ -26530,9 +26536,43 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
       const arg = init.arguments.length === 0 ? null : init.arguments.length === 1 ? init.arguments[0]! : undefined;
       if (arg === undefined) return null;
       if (arg !== null && !ts.isStringLiteral(arg) && !ts.isNoSubstitutionTemplateLiteral(arg)) return null;
-      return { sym, fieldName: `Symbol(${arg?.text ?? ""})` };
+      return { sym: canonicalSymbolKey(L, `${decls[0]!.getSourceFile().fileName}::${sym.name}`, sym), fieldName: `Symbol(${arg?.text ?? ""})` };
     }
     return null;
+  }
+
+  const canonicalKeys = new WeakMap<object, Map<string, ts.Symbol>>();
+  /** One checker symbol per key identity, so every spelling of the key shares the class slot, the writes and the reads. */
+  function canonicalSymbolKey(L: Lowerer, id: string, sym: ts.Symbol): ts.Symbol {
+    let m = canonicalKeys.get(L);
+    if (m === undefined) canonicalKeys.set(L, (m = new Map()));
+    const have = m.get(id);
+    if (have !== undefined) return have;
+    m.set(id, sym);
+    return sym;
+  }
+
+  /** `export declare const k: unique symbol` in `x.d.ts` whose implementation `x.js` assigns `exports.k = Symbol("desc")` exactly once
+   * at its top level. Null for any other declaration. */
+  function declaredUniqueSymbolOf(L: Lowerer, sym: ts.Symbol, decls: readonly ts.Node[]): { sym: ts.Symbol; fieldName: string } | null {
+    if (decls.length !== 1) return null;
+    const d = decls[0]!;
+    const sf = d.getSourceFile();
+    if (!ts.isVariableDeclaration(d) || !sf.isDeclarationFile) return null;
+    const impl = /\.d\.ts$/.test(sf.fileName) ? sf.fileName.replace(/\.d\.ts$/, ".js") : /\.d\.cts$/.test(sf.fileName) ? sf.fileName.replace(/\.d\.cts$/, ".cjs") : null;
+    if (impl === null) return null;
+    let text: string;
+    try {
+      text = readFileSync(impl, "utf8");
+    } catch {
+      return null;
+    }
+    const name = sym.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const assigns = [...text.matchAll(new RegExp(`^exports\\.${name}\\s*=\\s*(.*?);?\\s*$`, "gm"))].filter((m) => !/^(exports\.\w+\s*=\s*)*void 0$/.test(m[1]!));
+    if (assigns.length !== 1) return null;
+    const call = /^Symbol\((?:"([^"\\]*)"|'([^'\\]*)')?\)$/.exec(assigns[0]![1]!);
+    if (call === null) return null;
+    return { sym: canonicalSymbolKey(L, `${impl}::${sym.name}`, sym), fieldName: `Symbol(${call[1] ?? call[2] ?? ""})` };
   }
 
   function uniqueSymbolKeyDirect(L: Lowerer, key: ts.Expression): { sym: ts.Symbol; fieldName: string } | null {
