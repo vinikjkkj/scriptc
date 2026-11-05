@@ -26,6 +26,7 @@ function runSuite(label, extraEnv) {
   const outputFile = join(outDir, `${label}.json`);
   const env = { ...process.env, ...(san ? { SCRIPTC_SAN: "1" } : {}) };
   delete env.SCRIPTC_NO_CACHE; // the caller's escape hatch must not leak into cached passes
+  delete env.SCRIPTC_NO_BIN_CACHE;
   Object.assign(env, extraEnv);
   console.log(`\n=== ${label} pass (${san ? "SCRIPTC_SAN=1 lane" : "plain lane"}) ===`);
   const t0 = Date.now();

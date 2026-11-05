@@ -49,8 +49,11 @@ function fixture(source: string): Fixture {
 async function buildTu(f: Fixture): Promise<{ tu: string; hit: boolean }> {
   const previousCache = process.env["SCRIPTC_CACHE_DIR"];
   const previousNoCache = process.env["SCRIPTC_NO_CACHE"];
+  const previousNoBinCache = process.env["SCRIPTC_NO_BIN_CACHE"];
   process.env["SCRIPTC_CACHE_DIR"] = f.cache;
   delete process.env["SCRIPTC_NO_CACHE"];
+  // The Windows lanes run under SCRIPTC_NO_BIN_CACHE, which also turns the early cache off: this suite is about that cache.
+  delete process.env["SCRIPTC_NO_BIN_CACHE"];
   const chunks: string[] = [];
   const write = process.stderr.write.bind(process.stderr);
   process.stderr.write = ((chunk: string | Uint8Array) => {
@@ -64,6 +67,7 @@ async function buildTu(f: Fixture): Promise<{ tu: string; hit: boolean }> {
     if (previousCache === undefined) delete process.env["SCRIPTC_CACHE_DIR"];
     else process.env["SCRIPTC_CACHE_DIR"] = previousCache;
     if (previousNoCache !== undefined) process.env["SCRIPTC_NO_CACHE"] = previousNoCache;
+    if (previousNoBinCache !== undefined) process.env["SCRIPTC_NO_BIN_CACHE"] = previousNoBinCache;
   }
   const tuPath = join(f.outDir, "prog.ll");
   let tu: string;
