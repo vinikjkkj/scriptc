@@ -13014,6 +13014,48 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24323-any-typed-key-holding-a-symbol-reaches-the-symbol-table.cjs": {
+    "order": [
+      "<repo>/tests/corpus/24323-any-typed-key-holding-a-symbol-reaches-the-symbol-table.cjs"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/24324-error-eventemitter-stream-subclasses-hold-symbol-properties.cjs": {
+    "order": [
+      "<repo>/tests/corpus/24324-error-eventemitter-stream-subclasses-hold-symbol-properties.cjs"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/24325-map-set-receivers-hold-symbol-properties.cjs": {
+    "order": [
+      "<repo>/tests/corpus/24325-map-set-receivers-hold-symbol-properties.cjs"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/24326-map-set-symbol-properties-free-and-collect.cjs": {
+    "order": [
+      "<repo>/tests/corpus/24326-map-set-symbol-properties-free-and-collect.cjs"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/24327-proxy-traps-receive-the-symbol-as-the-key.cjs": {
+    "order": [
+      "<repo>/tests/corpus/24327-proxy-traps-receive-the-symbol-as-the-key.cjs"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/24328-typeof-symbol-test-and-tostring-on-untyped-values.cjs": {
+    "order": [
+      "<repo>/tests/corpus/24328-typeof-symbol-test-and-tostring-on-untyped-values.cjs"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/24329-engine-symbols-cross-with-one-identity-per-symbol.js": {
+    "order": [
+      "<repo>/tests/corpus/24329-engine-symbols-cross-with-one-identity-per-symbol.js"
+    ],
+    "diags": []
+  },
   "<repo>/tests/corpus/2433-as-const-command-tables.ts": {
    "order": [
     "<repo>/tests/corpus/2433-as-const-command-tables.ts"
