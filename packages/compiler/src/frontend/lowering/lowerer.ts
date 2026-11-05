@@ -20,7 +20,7 @@ import type { RequireThrowCtx } from "../require-throws.js";
 import type { CjsExportRecord } from "./cjs-export-record.js";
 import { isLiveAliasName } from "./cjs-live-exports.js";
 import { applyEnumRefill, applyNullProto, applyOwnKey, applySlotFilled, flushPatchCensus } from "./ir-patch.js";
-import { flushMintOrder, mintPhaseControl, resetMintLog, setMintPhase } from "../types.js";
+import { undefSlotWiden, flushMintOrder, mintPhaseControl, resetMintLog, setMintPhase } from "../types.js";
 import { flushFragmentCensus } from "./fragment-census.js";
 import { fenceDynRecordCasts } from "./dyn-record-fence.js";
 import { fenceNullProtoRecordCasts } from "./null-proto-fence.js";
@@ -7453,6 +7453,15 @@ export class Lowerer {
       const dyn = dynFallbackType(this, node, t);
       if (dyn) return dyn;
       this.badType(node, t);
+    }
+    // A declared slot (parameter, variable, property, binding) of a
+    // library-declared array Node may leave undefined takes the undefined arm.
+    if (
+      mapped.kind === "array" && node.parent !== undefined &&
+      (ts.isParameter(node.parent) || ts.isVariableDeclaration(node.parent) || ts.isPropertyDeclaration(node.parent) || ts.isBindingElement(node.parent)) &&
+      node.parent.name === node
+    ) {
+      return undefSlotWiden(mapped, t, this.typeCtx, this.checker);
     }
     return mapped;
   }
