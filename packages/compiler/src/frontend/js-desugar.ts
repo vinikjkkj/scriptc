@@ -2421,6 +2421,11 @@ function closureAssignedLetEdits(fileName: string, text: string): string | null 
         if ((list.flags & ts.NodeFlags.Let) === 0) {
           while (scope.parent !== undefined && !ts.isFunctionLike(scope) && !ts.isSourceFile(scope)) scope = scope.parent;
         }
+        // Module-level declarations are the module-global machinery's (lower-modules collects them by their declared shape): only a
+        // declaration inside a function body is rewritten.
+        let fnScope: ts.Node | undefined = n.parent;
+        while (fnScope !== undefined && !ts.isFunctionLike(fnScope) && !ts.isSourceFile(fnScope)) fnScope = fnScope.parent;
+        if (fnScope === undefined || ts.isSourceFile(fnScope)) { ts.forEachChild(n, visit); return; }
         for (const d of list.declarations) {
           if (!ts.isIdentifier(d.name) || d.type !== undefined) continue;
           // no initializer, or one that only repeats the unit the flow type already believes (undefined, void 0, null)
