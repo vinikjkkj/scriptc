@@ -333,6 +333,9 @@ jobs:
       # artifact the harness README documents for local parallel suites.
       # GitHub's standard runner provides 4 vCPU; this does not exceed it.
       SCRIPTC_TEST_WORKERS: "4"
+      # Each of the four workers also fans its own clang jobs out across the CPU count (cc.ts ccJobCount): 4 workers x 4 jobs on a 4-vCPU
+      # runner oversubscribes it and starves timing-sensitive rows. One compile job per build here; the worker pool is the parallelism.
+      SCRIPTC_CC_JOBS: "1"
       # san = ASan + RC audit over the same suite; anything but "1" is plain.
       SCRIPTC_SAN: ${{ matrix.flavor == 'san' && '1' || '' }}
       # Linux's ASan ships LeakSanitizer; Apple's does not. The RC audit
@@ -746,6 +749,9 @@ jobs:
       # the ubuntu-24.04 runner `tests` caps at "4" for the same reason
       # (worker-pool oversubscription under the corpus compile fan-out).
       SCRIPTC_TEST_WORKERS: "4"
+      # Each of the four workers also fans its own clang jobs out across the CPU count (cc.ts ccJobCount): 4 workers x 4 jobs on a 4-vCPU
+      # runner oversubscribes it and starves timing-sensitive rows. One compile job per build here; the worker pool is the parallelism.
+      SCRIPTC_CC_JOBS: "1"
       SCRIPTC_TEST_SHARD: ${{ matrix.shard }}/20
       # Per-test phase records (tests/harness/phase-collect.ts): binary-cache hits,
       # misses and compile time, summarized by tests/harness/phase-summary.mjs.
