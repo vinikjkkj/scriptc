@@ -9083,6 +9083,9 @@ export class Lowerer {
    * into the target field's union (see recordWidthHelper); anything
    * deeper keeps the exactness fences. Null when the pair isn't
    * width-coercible. */
+  /** Shapes that are the TARGET of a struct view in the program being emitted: their field reads and writes get the extra arm. */
+  readonly structViewShapes = new Set<string>();
+
   /** The identity-preserving form of a record-to-record width coercion (value model, phase 1: members of scalar, string, union and
    * dyn kinds). Null when the pair keeps its field copy: a shape that cannot be a view (tuples, accessors, builtins, index
    * signatures), a plan the copy would decline, or a target the checked cast cannot read. The copy a null leaves is exactly
@@ -9094,12 +9097,25 @@ export class Lowerer {
     if (from === undefined || to === undefined) return null;
     if (!this.viewCapableShape(from) || !this.viewCapableShape(to)) return null;
     if (from.indexValue !== undefined || to.indexValue !== undefined) return null;
-    if (this.recordWidthPlan(expr.type.shapeId, expected.shapeId) === null) return null;
+    const plan = this.recordWidthPlan(expr.type.shapeId, expected.shapeId);
+    if (plan === null) return null;
+    const srcIsView = this.isViewShape(expr.type as IrType);
+    // STRUCT VIEW: when every field of the target exists in the source at the IDENTICAL type, the target reads and writes the
+    // source's own struct in place (any field kind: bytes, promises and functions included), and the source shape is left an
+    // ordinary struct, so loops over it cost nothing. The target takes the grant, the source never does.
+    if (to.fields.every((f) => { const l = plan.get(f.name); return l !== undefined && "src" in l && typeEquals(l.src, f.type); }) && !srcIsView) {
+      if (this.onEdge !== null) {
+        viewConversionNoted = true;
+        viewShapeKeys.add(viewShapeKey(to.fields, to.indexValue));
+      } else if (!this.isViewShape(expected)) return null;
+      this.structViewShapes.add(expected.shapeId);
+      return { kind: "recordSrcView", src: expr, srcShapeId: (expr.type as IrType & { kind: "record" }).shapeId, shapeId: expected.shapeId, type: expected, loc: expr.loc };
+    }
     // The grant is decided by the DISCOVERY pass, before shapes are interned. The emit pass converts through views only where
     // both shapes were granted there: a conversion that first appears in the emit pass (a spread that became a dynamic copy
     // once its source was granted) would cast into a shape with no view slot, a silent copy, so it keeps the field copy and the
     // key-risk refusals that copy carries.
-    if (this.onEdge === undefined && !(this.isViewShape(expr.type) && this.isViewShape(expected))) return null;
+    if (this.onEdge === null && !(this.isViewShape(expr.type) && this.isViewShape(expected))) return null;
     // Only data shapes (numbers, strings, booleans, arrays, nested records and their unions with undefined/null) take the view: a
     // record that carries bytes, a promise, a function, a Map/Set or an instance keeps its field copy, a known remainder where the
     // copy stays the silent defect it is on main.
@@ -9107,7 +9123,7 @@ export class Lowerer {
         !isJsonSafeType(expected, (id) => this.shapes.get(id), (id) => this.unions.get(id))) return null;
     if (!canDynCheckTo(expected, (id) => this.shapes.get(id), (id) => this.unions.get(id))) return null;
     if (!canConvertToDyn(expr.type, (id) => this.shapes.get(id), (id) => this.unions.get(id))) return null;
-    if (this.onEdge !== undefined) viewConversionNoted = true;
+    if (this.onEdge !== null) viewConversionNoted = true;
     const loc = expr.loc;
     const boxed: IrExpr = { kind: "dynFrom", value: expr, type: DYN, loc };
     return { kind: "dynCheck", value: boxed, type: expected, loc };
@@ -11047,6 +11063,10 @@ export class Lowerer {
           }, isSimple);
         } else if (o.kind === "recordGet" && viewShapes.has(o["shapeId"] as string) && !this.viewFieldHoldsFunc(o["type"] as IrType)) {
           this.viewRewriteGet(o as unknown as Extract<IrExpr, { kind: "recordGet" }>, temp, isSimple);
+        } else if (o.kind === "recordGet" && this.structViewShapes.has(o["shapeId"] as string) && this.viewFieldHoldsFunc(o["type"] as IrType)) {
+          // A function member keeps its snapshot read on a view of an object (the cast bound it to the object), but a struct view
+          // has no snapshot: the source's own slot is the value.
+          this.viewRewriteSrcOnlyGet(o as unknown as Extract<IrExpr, { kind: "recordGet" }>, temp, isSimple);
         } else if (o.kind === "recordSet" && viewShapes.has(o["shapeId"] as string)) {
           this.viewRewriteSet(o as unknown as Extract<IrStmt, { kind: "recordSet" }>, temp, isSimple);
         } else if (o.kind === "bin" && (o["op"] === "===" || o["op"] === "!==")) {
@@ -11136,11 +11156,52 @@ export class Lowerer {
     const view: IrExpr = { kind: "recordView", obj: ref(), shapeId: e.shapeId, type: DYN, loc };
     const read: IrExpr = { kind: "dynKeyGet", key, value: view, type: DYN, loc };
     const viaObject = this.coerceToExpected(read, e.type);
-    const result: IrExpr = {
+    let result: IrExpr = {
       kind: "ternary",
       cond: { kind: "recordIsView", obj: ref(), shapeId: e.shapeId, type: BOOL, loc },
       then: viaObject,
       else_: original,
+      type: e.type,
+      loc,
+    };
+    // A shape that is the target of a struct view reads the SOURCE struct's field in place when its slot names one.
+    if (this.structViewShapes.has(e.shapeId)) {
+      result = {
+        kind: "ternary",
+        cond: { kind: "recordHasSrc", obj: ref(), shapeId: e.shapeId, type: BOOL, loc },
+        then: { kind: "recordSrcGet", obj: ref(), shapeId: e.shapeId, field: e.field, type: e.type, loc },
+        else_: result,
+        type: e.type,
+        loc,
+      };
+    }
+    const out: IrExpr = stmts.length === 0 ? result : { kind: "seqExpr", stmts, result, type: e.type, loc };
+    for (const k of Object.keys(e)) delete (e as unknown as Record<string, unknown>)[k];
+    Object.assign(e, out);
+  }
+
+  private viewRewriteSrcOnlyGet(
+    e: Extract<IrExpr, { kind: "recordGet" }>,
+    temp: (t: IrType) => IrLocal,
+    isSimple: (e: IrExpr) => boolean,
+  ): void {
+    const loc = e.loc;
+    const recT: IrType = { kind: "record", shapeId: e.shapeId };
+    const stmts: IrStmt[] = [];
+    let ref: () => IrExpr;
+    if (isSimple(e.obj)) {
+      const o = e.obj;
+      ref = () => ({ ...o });
+    } else {
+      const t = temp(recT);
+      stmts.push({ kind: "varDecl", localId: t.id, init: e.obj, loc });
+      ref = () => ({ kind: "varRef", localId: t.id, type: recT, loc });
+    }
+    const result: IrExpr = {
+      kind: "ternary",
+      cond: { kind: "recordHasSrc", obj: ref(), shapeId: e.shapeId, type: BOOL, loc },
+      then: { kind: "recordSrcGet", obj: ref(), shapeId: e.shapeId, field: e.field, type: e.type, loc },
+      else_: { kind: "recordGet", obj: ref(), shapeId: e.shapeId, field: e.field, type: e.type, loc },
       type: e.type,
       loc,
     };
@@ -11170,7 +11231,7 @@ export class Lowerer {
     const ref = (l: IrLocal): IrExpr => ({ kind: "varRef", localId: l.id, type: recT, loc });
     const isV = (l: IrLocal): IrExpr => ({ kind: "recordIsView", obj: ref(l), shapeId: recT.shapeId, type: BOOL, loc });
     const viewOf = (l: IrLocal): IrExpr => ({ kind: "recordView", obj: ref(l), shapeId: recT.shapeId, type: DYN, loc });
-    const result: IrExpr = {
+    let result: IrExpr = {
       kind: "ternary",
       cond: { kind: "logical", op: "&&", left: isV(a), right: isV(b), type: BOOL, loc },
       then: { kind: "dynScalarEq", left: viewOf(a), right: viewOf(b), ...(negated ? { negated: true as const } : {}), type: BOOL, loc },
@@ -11178,6 +11239,18 @@ export class Lowerer {
       type: BOOL,
       loc,
     };
+    // A struct view is the ONE canonical record of its (source, shape) pair, so identity is the record pointer.
+    if (this.structViewShapes.has(recT.shapeId)) {
+      const hasSrc = (l: IrLocal): IrExpr => ({ kind: "recordHasSrc", obj: ref(l), shapeId: recT.shapeId, type: BOOL, loc });
+      result = {
+        kind: "ternary",
+        cond: { kind: "logical", op: "||", left: hasSrc(a), right: hasSrc(b), type: BOOL, loc },
+        then: { kind: "bin", op: e.op, left: ref(a), right: ref(b), type: BOOL, loc },
+        else_: result,
+        type: BOOL,
+        loc,
+      };
+    }
     const out: IrExpr = {
       kind: "seqExpr",
       stmts: [
@@ -11331,14 +11404,30 @@ export class Lowerer {
     const write: IrExpr = s.unset === true
       ? { kind: "libCall", fn: "dyn.keyDelete", args: [view, key], type: BOOL, loc }
       : { kind: "libCall", fn: "dyn.keySet", args: [view, key, this.coerceToExpected(val(), DYN)], type: VOID, loc };
-    body.push({
+    const viewWrite: IrStmt = {
       kind: "if",
       cond: { kind: "recordIsView", obj: ref(), shapeId: s.shapeId, type: BOOL, loc },
       then: [{ kind: "exprStmt", expr: write, loc }],
       else_: null,
       loc,
-    });
-    body.push({ kind: "recordSet", obj: ref(), shapeId: s.shapeId, field: s.field, value: val(), ...(s.unset === true ? { unset: true as const } : {}), loc });
+    };
+    const structWrite: IrStmt = { kind: "recordSet", obj: ref(), shapeId: s.shapeId, field: s.field, value: val(), ...(s.unset === true ? { unset: true as const } : {}), loc };
+    if (this.structViewShapes.has(s.shapeId)) {
+      // A struct view writes the SOURCE struct's field in place; every other record takes the object write and its own slot.
+      body.push({
+        kind: "if",
+        cond: { kind: "recordHasSrc", obj: ref(), shapeId: s.shapeId, type: BOOL, loc },
+        then: [{
+          kind: "exprStmt",
+          expr: { kind: "recordSrcSet", obj: ref(), shapeId: s.shapeId, field: s.field, value: val(), ...(s.unset === true ? { unset: true as const } : {}), type: VOID, loc },
+          loc,
+        }],
+        else_: [viewWrite, structWrite],
+        loc,
+      });
+    } else {
+      body.push(viewWrite, structWrite);
+    }
     for (const k of Object.keys(s)) delete (s as unknown as Record<string, unknown>)[k];
     Object.assign(s, { kind: "block", body, loc });
   }

@@ -11464,7 +11464,7 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       // The dyn build reads back at the literal's own type, a view only when THAT shape took the grant in discovery. A shape
       // that did not (the source became a view only through a conversion elsewhere) would come back as a copy of its declared
       // members, losing the spread's other keys without a refusal: it keeps the declared-field build and its key-risk fence.
-      (L.onEdge !== undefined || L.isViewShape(L.irTypeOf(expr)))
+      (L.onEdge !== null || L.isViewShape(L.irTypeOf(expr)))
     ) {
       const want = L.irTypeOf(expr);
       // A literal the context types as a UNION (a message field's `A | null`) keeps the declared-field build,
@@ -11473,6 +11473,26 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       const ctxIr = ctxTs !== undefined ? L.mapTypeOf(ctxTs) : null;
       if (want.kind === "record" && !L.shapes.get(want.shapeId)?.indexValue && ctxIr?.kind !== "union") {
         return L.coerceToExpected(lowerDynSpreadObjectLiteral(L, expr), want);
+      }
+    }
+    // `{ ...x }` and nothing else, into a literal typed as a NARROWER record: JavaScript copies every own key of x, the target
+    // shape holds only some of them. The copy keeps all of x's keys (a fresh record of x's own shape), and the narrower literal
+    // is a view of that copy (structViewConversion), so enumeration, JSON and writes through either agree with Node.
+    if (expr.properties.length === 1 && ts.isSpreadAssignment(expr.properties[0]!) && conditionalSpreadOf(expr.properties[0]!.expression) === null) {
+      const spreadExpr = (expr.properties[0] as ts.SpreadAssignment).expression;
+      const srcT0 = L.mapTypeOf(L.typeOf(spreadExpr));
+      const ctx0 = L.checker.getContextualType(expr);
+      const want0 = (ctx0 !== undefined ? L.mapTypeOf(ctx0) : null) ?? L.irTypeOf(expr);
+      if (srcT0?.kind === "record" && want0.kind === "record" && srcT0.shapeId !== want0.shapeId && pureMemberChain(spreadExpr)) {
+        const helper = L.recordWidthHelper(srcT0.shapeId, srcT0.shapeId, locOf(expr));
+        if (helper !== null) {
+          const src = L.lowerExpr(spreadExpr);
+          if (src.type.kind === "record" && src.type.shapeId === srcT0.shapeId) {
+            const copy: IrExpr = { kind: "call", callee: helper, args: [src], type: src.type, loc: locOf(expr) };
+            const viewed = L.viewConversion(copy, want0);
+            if (viewed !== null && viewed.kind === "recordSrcView") return viewed;
+          }
+        }
       }
     }
     // Syntax fence FIRST: unsupported member forms get their specific
