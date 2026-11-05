@@ -2084,7 +2084,13 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         }
         size_t n = (size_t)scr_map_size(dm);
         InspBuf hb = {0};
-        if (n == 0) {
+#ifdef SCR_SYMTAB
+        const ScrDynSymTab *dmsyms = scr_map_symx_table(dm); /* symbol-keyed expandos print after the entries */
+#else
+        const ScrDynSymTab *dmsyms = NULL;
+#endif
+        const size_t dmsymn = insp_sym_count_t(dmsyms);
+        if (n == 0 && dmsymn == 0) {
           ib_cstr(&hb, cls);
           ib_cstr(&hb, "(0) {}");
           return ib_take(&hb);
@@ -2124,6 +2130,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
           scr_insp_entry(m, false);
           scr_str_release(m);
         }
+        insp_emit_symtab(dmsyms, recurse, depth);
         ib_cstr(&hb, cls);
         ib_char(&hb, '(');
         char nb[32];

@@ -242,7 +242,92 @@ static bool scr_dsym_proto_test(int op, ScrDyn *recv, ScrSym *k);
 static void scr_dsym_free_table(ScrDynSymTab *t, bool release);
 static void scr_dsym_trace_table(const ScrDynSymTab *t, ScrTraceVisit visit, void *ctx);
 
+/* ── Map / Set receivers ───────────────────────────────────────────────────────────────────────────────────────
+ * A ScrMap has no object slots, so a symbol-keyed expando on it (`m[sym] = v`, JS allows it on any object) keeps its
+ * table in a side table keyed by the ScrMap's identity: every dyn box of the same map shares the pointer, so every box
+ * sees one table. The map's has_symx byte (in struct padding) tells its teardown to drop the entry; a map that never
+ * carried a symbol pays that one byte test and links none of this. The values are traced through scr_map_trace, so a
+ * cycle through a map whose values are cycle-capable is collected like an object's. */
+typedef struct { ScrMap *m; ScrDynObjExt *x; } ScrDsymMapRow;
+static ScrDsymMapRow *scr_dsym_maps; /* open addressing, linear probe, backward-shift delete */
+static size_t scr_dsym_maps_cap, scr_dsym_maps_len;
+
+static size_t scr_dsym_map_slot(const ScrMap *m) { return ((uintptr_t)m >> 4) * 11400714819323198485ull; }
+
+static ScrDsymMapRow *scr_dsym_map_find(const ScrMap *m) {
+  if (scr_dsym_maps_len == 0) return NULL;
+  for (size_t i = scr_dsym_map_slot(m) & (scr_dsym_maps_cap - 1);; i = (i + 1) & (scr_dsym_maps_cap - 1)) {
+    if (scr_dsym_maps[i].m == m) return &scr_dsym_maps[i];
+    if (scr_dsym_maps[i].m == NULL) return NULL;
+  }
+}
+
+static void scr_dsym_map_put(ScrMap *m, ScrDynObjExt *x) {
+  size_t i = scr_dsym_map_slot(m) & (scr_dsym_maps_cap - 1);
+  while (scr_dsym_maps[i].m != NULL) i = (i + 1) & (scr_dsym_maps_cap - 1);
+  scr_dsym_maps[i].m = m;
+  scr_dsym_maps[i].x = x;
+}
+
+static ScrDynObjExt *scr_dsym_map_host(ScrMap *m, bool create) {
+  ScrDsymMapRow *r = scr_dsym_map_find(m);
+  if (r != NULL) return r->x;
+  if (!create) return NULL;
+  if ((scr_dsym_maps_len + 1) * 2 > scr_dsym_maps_cap) {
+    ScrDsymMapRow *old = scr_dsym_maps;
+    const size_t ocap = scr_dsym_maps_cap;
+    scr_dsym_maps_cap = ocap == 0 ? 16 : ocap * 2;
+    scr_dsym_maps = (ScrDsymMapRow *)calloc(scr_dsym_maps_cap, sizeof *scr_dsym_maps);
+    if (scr_dsym_maps == NULL) scr_trap("scriptc: out of memory\n");
+    for (size_t i = 0; i < ocap; i++)
+      if (old[i].m != NULL) scr_dsym_map_put(old[i].m, old[i].x);
+    free(old);
+  }
+  ScrDynObjExt *x = (ScrDynObjExt *)calloc(1, sizeof *x);
+  if (x == NULL) scr_trap("scriptc: out of memory\n");
+  scr_dsym_map_put(m, x);
+  scr_dsym_maps_len++;
+  m->has_symx = 1;
+  return x;
+}
+
+static void scr_dsym_map_drop(ScrMap *m, bool release) {
+  ScrDsymMapRow *r = scr_dsym_map_find(m);
+  if (r == NULL) return;
+  ScrDynObjExt *x = r->x;
+  /* backward-shift the cluster over the hole */
+  size_t mask = scr_dsym_maps_cap - 1, i = (size_t)(r - scr_dsym_maps), j = i;
+  for (;;) {
+    j = (j + 1) & mask;
+    if (scr_dsym_maps[j].m == NULL) break;
+    const size_t home = scr_dsym_map_slot(scr_dsym_maps[j].m) & mask;
+    if (((j - home) & mask) >= ((j - i) & mask)) {
+      scr_dsym_maps[i] = scr_dsym_maps[j];
+      i = j;
+    }
+  }
+  scr_dsym_maps[i].m = NULL;
+  scr_dsym_maps[i].x = NULL;
+  scr_dsym_maps_len--;
+  m->has_symx = 0;
+  if (x->syms != NULL) scr_dsym_free_table(x->syms, release);
+  free(x);
+}
+
+static void scr_dsym_map_trace(ScrMap *m, ScrTraceVisit visit, void *ctx) {
+  ScrDsymMapRow *r = scr_dsym_map_find(m);
+  if (r != NULL && r->x->syms != NULL) scr_dsym_trace_table(r->x->syms, visit, ctx);
+}
+
+static const ScrDynSymTab *scr_dsym_map_table(const ScrMap *m) {
+  ScrDsymMapRow *r = scr_dsym_map_find(m);
+  return r == NULL ? NULL : r->x->syms;
+}
+
 static void scr_dsym_install_hooks(void) {
+  scr_map_symx_table_hook = &scr_dsym_map_table;
+  scr_map_symx_drop = &scr_dsym_map_drop;
+  scr_map_symx_trace = &scr_dsym_map_trace;
   scr_dyn_sym_free_table = &scr_dsym_free_table;
   scr_dyn_sym_trace_table = &scr_dsym_trace_table;
   scr_dyn_sym_key_release = &scr_sym_key_release_hook;
@@ -344,6 +429,7 @@ static ScrDsymClass scr_dsym_class(const ScrDyn *d) {
   case SCR_DYN_ARR:
   case SCR_DYN_FUNC:
   case SCR_DYN_BYTES:
+  case SCR_DYN_MAP:
     return SCR_DSYM_STORE;
   case SCR_DYN_OBJINST:
     return SCR_DSYM_INST;
@@ -451,6 +537,11 @@ static ScrDynObjExt *scr_dsym_host(ScrDyn *recv, bool create, bool *none) {
       return scr_dyn_ext_w(recv);
     }
     return recv->v.obj.ext;
+  }
+  if (recv->kind == SCR_DYN_MAP) {
+    ScrDynObjExt *x = scr_dsym_map_host(recv->v.map.m, create);
+    if (x == NULL) *none = true;
+    return x;
   }
   if (recv->kind == SCR_DYN_BYTES) {
     /* a typed array / Buffer / DataView: the table rides its own-property block, shared by every box of the value */

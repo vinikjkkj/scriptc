@@ -593,8 +593,18 @@ static inline bool scr_map_headered(const ScrMap *m) {
   return m->val_trace != NULL || m->key_trace != NULL;
 }
 
+#ifdef SCR_SYMTAB
+void (*scr_map_symx_drop)(ScrMap *m, bool release) = NULL;
+void (*scr_map_symx_trace)(ScrMap *m, ScrTraceVisit visit, void *ctx) = NULL;
+const ScrDynSymTab *(*scr_map_symx_table_hook)(const ScrMap *m) = NULL;
+const ScrDynSymTab *scr_map_symx_table(const ScrMap *m) { return m->has_symx ? scr_map_symx_table_hook(m) : NULL; }
+#endif
+
 static void scr_map_trace(void *o, ScrTraceVisit visit, void *ctx) {
   ScrMap *m = (ScrMap *)o;
+#ifdef SCR_SYMTAB
+  if (m->has_symx) scr_map_symx_trace(m, visit, ctx);
+#endif
   for (size_t e = 0; e < m->nentries; e++) {
     if (!m->live[e]) continue;
     /* Values only when the VALUE side is cycle-capable: a set's values are
@@ -616,6 +626,9 @@ static void scr_map_gcfree(void *o) {
       if (m->live[e]) scr_map_release_key(m, m->entries[e].key);
     }
   }
+#ifdef SCR_SYMTAB
+  if (m->has_symx) scr_map_symx_drop(m, false);
+#endif
   scr_map_sh_unlink(m);
   free(m->entries);
   free(m->live);
@@ -666,6 +679,9 @@ void scr_map_release(ScrMap *m) {
       scr_map_release_key(m, m->entries[e].key);
       scr_map_release_val(m, m->entries[e].val);
     }
+#ifdef SCR_SYMTAB
+    if (m->has_symx) scr_map_symx_drop(m, true);
+#endif
     scr_map_sh_unlink(m);
     free(m->entries);
     free(m->live);

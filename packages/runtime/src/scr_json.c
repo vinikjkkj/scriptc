@@ -13912,6 +13912,8 @@ static void scr_dyn_assign_from(ScrDyn *target, const ScrDyn *src) {
     if (src->v.fn.clo->props != NULL && !scr_exc_pending()) scr_dyn_sym_copy_enum(target, src);
   } else if (src->kind == SCR_DYN_BYTES) {
     if (src->v.bytes->own != NULL && src->v.bytes->own->ext.syms != NULL && !scr_exc_pending()) scr_dyn_sym_copy_enum(target, src);
+  } else if (src->kind == SCR_DYN_MAP) {
+    if (scr_map_symx_table(src->v.map.m) != NULL && !scr_exc_pending()) scr_dyn_sym_copy_enum(target, src);
   }
 #endif
 }

@@ -2228,6 +2228,10 @@ typedef struct ScrMap {
   struct ScrMap *sh_prev;
   struct ScrMap *sh_next;
   uint8_t sh_queued;
+  /* A symbol-keyed expando property was stored on this map or set (`m[sym] = v`): its table lives in a side table keyed by
+   * this map's identity (scr_symbol.c), so the flag costs no size (it fills the padding) and a map that never carried one
+   * pays one byte test at teardown. */
+  uint8_t has_symx;
 } ScrMap;
 
 /* retain/release/trace are NULL for scalar value kinds; retain/release are
@@ -2238,6 +2242,15 @@ ScrMap *scr_map_new(ScrMapKeyKind key_kind, ScrMapValKind val_kind,
                      ScrTraceFn val_trace); /* returns +1 */
 ScrMap *scr_map_retain(ScrMap *m);
 void scr_map_release(ScrMap *m); /* NULL-tolerant */
+#ifdef SCR_SYMTAB
+/* Installed by scr_symbol.c: drop (release=true: the refcount path; false: the collector's, whose trace already accounted the
+ * values) and trace the symbol table a map's has_symx flag says it carries. */
+extern void (*scr_map_symx_drop)(ScrMap *m, bool release);
+extern void (*scr_map_symx_trace)(ScrMap *m, ScrTraceVisit visit, void *ctx);
+/* The symbol table of a map that carries one (has_symx), else NULL; borrowed. */
+const struct ScrDynSymTab *scr_map_symx_table(const ScrMap *m);
+extern const struct ScrDynSymTab *(*scr_map_symx_table_hook)(const ScrMap *m);
+#endif
 void *scr_map_retain_v(void *m);
 void scr_map_release_v(void *m);
 void scr_map_trace_v(void *m, ScrTraceVisit visit, void *ctx);
