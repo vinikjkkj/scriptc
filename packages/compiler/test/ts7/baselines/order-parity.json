@@ -12440,6 +12440,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24051-own-key-method-value-read-is-the-value.js": {
+   "order": [
+    "<repo>/tests/corpus/24051-own-key-method-value-read-is-the-value.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2405-sibling-arm-narrow.ts": {
    "order": [
     "<repo>/tests/corpus/2405-sibling-arm-narrow.ts"
@@ -23998,12 +24004,6 @@
   "<repo>/tests/diagnostics/override-widened-mid-chain-dispatch.ts": {
    "order": [
     "<repo>/tests/diagnostics/override-widened-mid-chain-dispatch.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/own-key-method-value-refused.js": {
-   "order": [
-    "<repo>/tests/diagnostics/own-key-method-value-refused.js"
    ],
    "diags": []
   },

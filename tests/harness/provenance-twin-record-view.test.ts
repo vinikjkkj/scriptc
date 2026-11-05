@@ -177,6 +177,8 @@ const ASYNC_SLOTS_EXPECTED =
   "ping,get get,ping\n" +
   "11\n" +
   "proto:5 proto:5 1\n" +
+  "proto:-1 pong:1!\n" +
+  "own6 own20\n" +
   "get,tick\n";
 
 /* cases/twinrec/claim-tuples.ts: a declaration-claimed promise of [error, result] tuples, recorded from node. */
@@ -186,6 +188,14 @@ const CLAIM_TUPLES_EXPECTED =
 /* cases/twinrec/static-bag.ts: statics assigned after a class that has a base and subclasses, recorded from node. */
 const STATIC_BAG_EXPECTED =
   "1 2 b b undefined base function 1:b 1:b s b b\n";
+/* cases/twinrec/method-value.ts: a method read as a value from an instance that takes own properties under run-time keys, recorded from node. */
+const METHOD_VALUE_EXPECTED =
+  "function hello\n" +
+  "5 9 5\n" +
+  "number 5\n" +
+  "TypeError: b.hello.bind is not a function\n" +
+  "function 12 12 10\n" +
+  "function 3\n";
 
 const PRIOR = process.env["SCRIPTC_PROVENANCE_MANIFEST"];
 afterEach(() => {
@@ -377,6 +387,16 @@ describe("provenance: a twin class with untyped methods behind a program's own r
       if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
       const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
       expect(stdout).toBe(STATIC_BAG_EXPECTED);
+    }, 600_000);
+  }
+
+  for (const backend of ["c", "llvm"] as const) {
+    test(`24052: a method read as a value from an instance with run-time own properties is the actual value (${backend})`, async () => {
+      const entry = join(fixtureDir, "cases/twinrec/method-value.ts");
+      const { result, outPath } = await build(entry, "method-value", backend);
+      if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+      const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
+      expect(stdout).toBe(METHOD_VALUE_EXPECTED);
     }, 600_000);
   }
 
