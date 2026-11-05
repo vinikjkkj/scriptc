@@ -309,9 +309,25 @@ function oracleKeyBase(): Promise<string> {
  * os.networkInterfaces output changes under the harness's feet (macOS
  * rotates the awdl0/llw0 link-local address), so a cached Node verdict
  * goes stale against a live native read (observed with 1480). */
+/** What makes a Node verdict a fact about the MACHINE or the CLOCK, not about the program: timers and races, and the host's own
+ * answers (the kernel release a runner reports, its hostname, cpus, memory, uptime, load, home directory, user, `uname`, /proc).
+ * The cache is seeded on one runner and read on another, so a cached `os.release()` of 7.0.0-1014-aws failed against a live
+ * 7.0.0-1017-azure. Over-matching only costs a live Node spawn. */
+const VOLATILE_HOST_OR_TIME = new RegExp(
+  [
+    "set(Timeout|Interval)",
+    "Promise\\.(race|any)",
+    "networkInterfaces",
+    "\\bos\\.(release|version|hostname|cpus|totalmem|freemem|uptime|loadavg|homedir|userInfo|availableParallelism|machine)\\b",
+    "\\b(hostname|cpus|totalmem|freemem|uptime|loadavg|homedir|userInfo|availableParallelism)\\s*\\(",
+    "\\buname\\b",
+    "/proc/",
+  ].join("|"),
+);
+
 function usesRealTime(inputs: string[]): boolean {
   return inputs.some((f) =>
-    /set(Timeout|Interval)|Promise\.(race|any)|networkInterfaces/.test(readFileSync(f, "utf8")),
+    VOLATILE_HOST_OR_TIME.test(readFileSync(f, "utf8")),
   );
 }
 
