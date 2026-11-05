@@ -2499,6 +2499,8 @@ export async function compileC(opts: CcOptions): Promise<void> {
   // SCR_ENGINE: a program with a non-foldable Function site links the same
   // vendored engine without the --dynamic lane (see the options doc).
   const engineOnly = !dynamic && (opts.engine ?? false);
+  /* The engine marshals a class instance by running its members (scr_island.c isl_inst_*): the dispatch units link with it. */
+  const engineAny = engineOnly || dynamic;
   const engineArchive = dynamic || engineOnly ? await ensureEngineArchive(opts.sanitize ?? false, driver) : null;
   /* The WebRTC path needs the SAME vendored mbedTLS archive (DTLS 1.2,
    * ECDSA P-256, SHA-256) but NOT scr_tls.c, which is the TLS-over-TCP
@@ -2611,13 +2613,13 @@ export async function compileC(opts: CcOptions): Promise<void> {
     // scr_async_dyn.c calls the dispatch unit (a thenable's then is invoked
     // with this = the thenable: scr_dyn_invoke_key, the proxy and class
     // instance [[Get]]), so every binary that links the async unit links it.
-    ...(opts.dynInvoke || opts.dynAsync || opts.dc || tpValue ? [rt(join(rtDir, "scr_dyn_invoke.c"))] : []),
+    ...(opts.dynInvoke || opts.dynAsync || opts.dc || tpValue || engineAny ? [rt(join(rtDir, "scr_dyn_invoke.c"))] : []),
     ...(opts.dynClass ? [rt(join(rtDir, "scr_dyn_class.c"))] : []),
     ...(opts.dynExt ? [rt(join(rtDir, "scr_dyn_ext.c"))] : []),
     ...(opts.bufferVal ? [rt(join(rtDir, "scr_buffer_val.c"))] : []),
     ...(opts.bytesOwn ? [rt(join(rtDir, "scr_bytes_own.c"))] : []),
     ...(opts.dc ? [rt(join(rtDir, "scr_dc.c"))] : []),
-    ...(opts.dynAsync || opts.dynInvoke || opts.dc || tpValue ? [rt(join(rtDir, "scr_async_dyn.c"))] : []),
+    ...(opts.dynAsync || opts.dynInvoke || opts.dc || tpValue || engineAny ? [rt(join(rtDir, "scr_async_dyn.c"))] : []),
     ...(opts.webCrypto ? [rt(join(rtDir, "scr_webcrypto.c"))] : []),
     // The zlib UNIT (scr_zlib.c) gates on zlib.* IR use; the LINK (system
     // libz on hosts, the vendored per-target objects on cross builds)
