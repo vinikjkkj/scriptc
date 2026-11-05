@@ -12578,6 +12578,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24083-a-class-instance-narrowed-by-a-plain-restating-type-is-the-class.ts": {
+   "order": [
+    "<repo>/tests/corpus/24083-a-class-instance-narrowed-by-a-plain-restating-type-is-the-class.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2405-sibling-arm-narrow.ts": {
    "order": [
     "<repo>/tests/corpus/2405-sibling-arm-narrow.ts"
