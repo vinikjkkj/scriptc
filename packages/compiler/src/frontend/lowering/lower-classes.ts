@@ -7625,6 +7625,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     if (!info) return null;
     const found = findStaticOn(L, info, member);
     if (!found) {
+      console.error(`STATICWHY read ${expr.getText()} class=${info.def.name} declKind=${info.decl ? ts.SyntaxKind[info.decl.kind] : "none"} declFile=${info.decl?.getSourceFile().fileName.split("/").slice(-2).join("/")} fields=${info.staticFields.map((s) => s.name).join(",")} methods=${[...(info.staticMethods?.keys() ?? [])].join(",")} uncollected=${[...(info.uncollectedStatics ?? [])].join(",")} base=${info.base?.def.name ?? "-"} recvKind=${recvT.kind}`);
       const acc = staticAccessorRead(L, info, expr, loc, true);
       if (acc) return acc;
       L.unsupported(

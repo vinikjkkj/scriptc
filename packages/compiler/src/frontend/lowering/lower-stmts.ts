@@ -8275,6 +8275,11 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
           return { kind: "block", body: parts.stmts, loc: locOf(expr) };
         }
         if (!ts.isIdentifier(expr.left)) {
+          const lt = ts.isPropertyAccessExpression(expr.left) ? L.mapTypeOf(L.typeOf(expr.left.expression)) : null;
+          const li = lt && (lt.kind === "classval" || lt.kind === "object") ? L.classes.get(lt.className) : undefined;
+          console.error(`STATICWHY write ${expr.left.getText()} recvIr=${lt?.kind} class=${li?.def.name ?? "-"} fields=${li?.staticFields.map((s) => s.name).join(",") ?? "-"} uncollected=${[...(li?.uncollectedStatics ?? [])].join(",")} declKind=${li?.decl ? ts.SyntaxKind[li.decl.kind] : "none"}`);
+        }
+        if (!ts.isIdentifier(expr.left)) {
           L.unsupported("SC1090", expr.left, "assignment to non-variables");
         }
         const target = L.resolveWritable(expr.left);
@@ -8380,6 +8385,11 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
             if (nsT) return lowerCompoundToTarget(L, expr, compound, nsT);
           }
           return L.lowerFieldCompound(expr.left, compound, expr.right, locOf(expr));
+        }
+        if (!ts.isIdentifier(expr.left)) {
+          const lt = ts.isPropertyAccessExpression(expr.left) ? L.mapTypeOf(L.typeOf(expr.left.expression)) : null;
+          const li = lt && (lt.kind === "classval" || lt.kind === "object") ? L.classes.get(lt.className) : undefined;
+          console.error(`STATICWHY write ${expr.left.getText()} recvIr=${lt?.kind} class=${li?.def.name ?? "-"} fields=${li?.staticFields.map((s) => s.name).join(",") ?? "-"} uncollected=${[...(li?.uncollectedStatics ?? [])].join(",")} declKind=${li?.decl ? ts.SyntaxKind[li.decl.kind] : "none"}`);
         }
         if (!ts.isIdentifier(expr.left)) {
           L.unsupported("SC1090", expr.left, "assignment to non-variables");
