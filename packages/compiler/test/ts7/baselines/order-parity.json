@@ -12682,6 +12682,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24128-define-property-value-read-through-a-typed-class.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24128-define-property-value-read-through-a-typed-class.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2413-dowhile-kill-renarrow.ts": {
    "order": [
     "<repo>/tests/corpus/2413-dowhile-kill-renarrow.ts"
