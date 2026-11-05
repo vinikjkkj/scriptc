@@ -842,6 +842,9 @@ function icuFeatureFlags(use: IcuUse): Record<string, boolean> {
   return out;
 }
 
+/** The members of scr_dyn_invoke.c that emitted walkers and thunks call directly. */
+const DYN_DISPATCH_REF = /\bscr_dyn_(?:objinst_member_get|objinst_miss|intrinsic_method_get|proxy_get)\b/;
+
 function programNativeFeatures(
   mod: IrModule,
   backend: "c" | "llvm",
@@ -1513,7 +1516,7 @@ async function compileTracked(
 async function emitLlvmFile(mod: IrModule, llStats: LlvmEmitStats, llPath: string): Promise<boolean> {
   const ll = tapped("emit.llvm", () => emitLlvmModule(mod, llStats));
   await writeFile(llPath, ll);
-  return ll.includes("scr_dyn_objinst_member_get");
+  return DYN_DISPATCH_REF.test(ll);
 }
 
 /** The C units (and the header a split program shares), written; the emitted text stays local to this call. */
@@ -1527,8 +1530,7 @@ async function emitCFiles(
 ): Promise<{ programUnits: string[]; programHeader: string | undefined; readsObjinstMembers: boolean }> {
   const program = tapped("emit.c", () => emitModuleProgram(mod, entryText, headerName));
   await writeFile(cPath, program.units[0]!);
-  const readsObjinstMembers = program.units.some((u) => u.includes("scr_dyn_objinst_member_get(")) ||
-    (program.header?.includes("scr_dyn_objinst_member_get(") ?? false);
+  const readsObjinstMembers = program.units.some((u) => DYN_DISPATCH_REF.test(u)) || (program.header !== null && DYN_DISPATCH_REF.test(program.header));
   let programHeader: string | undefined;
   let programUnits: string[] = [];
   if (program.header !== null) {
