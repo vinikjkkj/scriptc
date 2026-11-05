@@ -302,13 +302,13 @@ export interface FnCtx {
   /** Yield is legal here (generator function body): the yield/next value
    * channels the yield lowering types itself against. */
   generator?: { yieldT: IrType; nextT: IrType } | null;
-  /** VARIADIC `arguments` form (rest-marked func type with no declared
   /** A generator METHOD body whose TReturn channel is the VOID sentinel (the checker's any/unknown/void/undefined all ride it):
    * a `return <value>` there would drop the done-value, which a `.next()` consumer observes. Refused at the statement. */
   genMethodDoneFence?: true;
   /** The body of a generator METHOD of a class: its `yield*` closes the delegate when the delegating generator is closed
    * (JS forwards return() to the delegate; module-level generators keep their older emission byte-for-byte). */
   genMethodBody?: true;
+  /** VARIADIC `arguments` form (rest-marked func type with no declared
    * rest param): the synthetic trailing dyn-array param `arguments`
    * reads resolve to. Also registered under ARGUMENTS_BINDING in the
    * frame's outermost scope, which is what nested arrows capture. */
@@ -16281,7 +16281,6 @@ export class Lowerer {
       const deferredVoid = this.deferPromiseReturn(raw, expected);
       if (deferredVoid !== null) return deferredVoid.stmt;
       const e = this.asyncReturnFlatten(raw, expected, this.ctx.isAsync);
-      if (e.kind === "unitLit") return { kind: "return", value: null, loc };
       if (this.ctx.genMethodDoneFence === true && e.kind !== "unitLit" && e.type.kind !== "void" && !isUnitType(e.type)) {
         this.unsupported(
           "SC1071",
@@ -16289,6 +16288,7 @@ export class Lowerer {
           "a returned value in a generator method whose TReturn channel is any/unknown (the done-value is not representable on that channel and a .next() consumer would read undefined; declare the TReturn type)",
         );
       }
+      if (e.kind === "unitLit") return { kind: "return", value: null, loc };
       if (e.type.kind === "void") return { kind: "return", value: e, loc };
       return {
         kind: "block",
