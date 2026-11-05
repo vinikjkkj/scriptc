@@ -30,10 +30,12 @@ server.listen(0, "127.0.0.1", () => {
   live.stream.setTimeout(5000);
   live.stream.write("hello");
   live.done = () => {
-    server.close();
+    // undefined host = localhost, dialled while the server still listens (a refused localhost dial is platform-specific: it tries
+    // ::1 and 127.0.0.1 in turn, which this row does not pin)
     const noHost = new Conn({ config: { port, host: undefined } });
     noHost.stream.on("connect", () => { note("connected-default-host"); noHost.stream.destroy(); });
     noHost.done = () => {
+      server.close();
       const refused = new Conn({ config: { port: 1, host: "127.0.0.1" } });
       refused.done = () => { console.log(events.join("|")); };
     };
