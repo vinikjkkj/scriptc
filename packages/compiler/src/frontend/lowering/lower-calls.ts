@@ -20,7 +20,7 @@ import { BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, F64, canAdaptDynFuncTo, IrExpr, Ir
 import type { IrFfiImport } from "../../ir/nodes.js";
 import { isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
 import { siblingDtsMethodReturnKind } from "../npm.js";
-import { undefSlotWiden, erasedUnionOfArms, genResultRecord, instantiatedConstraint, isGenericCallableMemberType, isSymbolicCandidateType, typeKey} from "../types.js";
+import { isUndefWidenedArray, undefSlotWiden, erasedUnionOfArms, genResultRecord, instantiatedConstraint, isGenericCallableMemberType, isSymbolicCandidateType, typeKey} from "../types.js";
 import { PoisonError, dynFallbackType, dynUndefinedExpr, fnValueCodeOfNode, importCallHandleType, jsFuncNameOf, jsFuncValueNameOf, jsFuncValueSourceOf, newFnCtx, nodeThrowExpr, staticFnCodeOf, boundCodeOf, bindValueTargetIsCtor } from "./lowerer.js";
 import { pairedProtoClassOfValue, protoThisType } from "./proto-class-consume.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
@@ -8985,7 +8985,7 @@ export function reconcileOverloadMemberDyn(L: Lowerer, expr: ts.CallExpression, 
     // checked per read like every any-origin value.
     if (call.type.kind === "dyn") return call;
     // A library-declared array Node may leave undefined, answered by a call: the union stays (see maybeNarrow).
-    if (call.type.kind === "union" && rt.kind === "array" && L.lyingTargetOf(call.type)?.kind === "array" && L.armTag(call.type.unionId, UNDEFINED_T) >= 0) {
+    if (call.type.kind === "union" && rt.kind === "array" && L.lyingTargetOf(call.type)?.kind === "array" && L.armTag(call.type.unionId, UNDEFINED_T) >= 0 && isUndefWidenedArray(L.typeOf(expr), L.typeCtx, L.checker)) {
       if (typeof L.classifyLyingRead(expr) === "object") {
         const lr = L.lyingRead(call, expr);
         if (lr) return lr;
