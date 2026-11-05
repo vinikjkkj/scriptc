@@ -2992,6 +2992,11 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         return mapType(prims[0]!, ctx);
       }
     }
+    // A class instance narrowed by a plain restating type, or a primitive intersected with a class instance (mapClassNarrowing).
+    {
+      const viaClass = mapClassNarrowing(widened, ctx);
+      if (viaClass) return viaClass;
+    }
     const HANDLE_KINDS = new Set([
       "netServer", "netSocket", "httpReq", "httpRes", "httpClientReq", "dgramSocket",
       // process.stdout's own type IS the refined intersection
@@ -8254,7 +8259,14 @@ function mapClassNarrowing(widened: ts.Type, ctx: TypeMapperCtx): IrType | null 
   let cls: IrType | null = null;
   let clsTs: ts.Type | undefined;
   const plain: ts.Type[] = [];
+  let prim: ts.Type | undefined;
+  const PRIM = ts.TypeFlags.StringLike | ts.TypeFlags.NumberLike | ts.TypeFlags.BooleanLike | ts.TypeFlags.BigIntLike;
   for (const p of parts) {
+    if ((p.flags & PRIM) !== 0) {
+      if (prim !== undefined) return null;
+      prim = p;
+      continue;
+    }
     const sym = p.getSymbol();
     const isClass = sym !== undefined && (sym.flags & ts.SymbolFlags.Class) !== 0 && (p.flags & ts.TypeFlags.Object) !== 0;
     if (isClass) {
@@ -8268,6 +8280,10 @@ function mapClassNarrowing(widened: ts.Type, ctx: TypeMapperCtx): IrType | null 
       plain.push(p);
     } else return null;
   }
+  // A PRIMITIVE intersected with a class instance (`"local" & ReadConcern`, an arm of the distribution of `(Level | Cfg) & Cfg`): at run
+  // time the value is the primitive - a primitive cannot carry the class's members - so the arm is the primitive's own arm. A cast
+  // that puts `"local"` there flows exactly as in Node, instead of trapping where Node answers.
+  if (prim !== undefined) return cls !== null && plain.length === 0 ? mapType(prim, ctx) : null;
   if (cls === null || clsTs === undefined || plain.length === 0) return null;
   for (const pl of plain) {
     for (const prop of checker.getPropertiesOfType(pl)) {
