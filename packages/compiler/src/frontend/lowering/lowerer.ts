@@ -9078,6 +9078,8 @@ export class Lowerer {
    * into the target field's union (see recordWidthHelper); anything
    * deeper keeps the exactness fences. Null when the pair isn't
    * width-coercible. */
+  readonly convStatSeen = new Set<string>();
+
   /** The identity-preserving form of a record-to-record width coercion (value model, phase 1: members of scalar, string, union and
    * dyn kinds). Null when the pair keeps its field copy: a shape that cannot be a view (tuples, accessors, builtins, index
    * signatures), a plan the copy would decline, or a target the checked cast cannot read. The copy a null leaves is exactly
@@ -9102,6 +9104,39 @@ export class Lowerer {
         !isJsonSafeType(expected, (id) => this.shapes.get(id), (id) => this.unions.get(id))) return null;
     if (!canDynCheckTo(expected, (id) => this.shapes.get(id), (id) => this.unions.get(id))) return null;
     if (!canConvertToDyn(expr.type, (id) => this.shapes.get(id), (id) => this.unions.get(id))) return null;
+    if (this.onEdge !== undefined && !this.convStatSeen.has(expr.loc.file + "@" + expr.loc.start)) {
+      this.convStatSeen.add(expr.loc.file + "@" + expr.loc.start);
+      const plan = this.recordWidthPlan(expr.type.shapeId, expected.shapeId)!;
+      const kinds = new Set<string>();
+      const kindOf = (s: IrType, t: IrType): string => {
+        const nameOf = (x: IrType): string => x.kind;
+        if (t.kind === "union" && s.kind !== "union") {
+          const arms = this.unions.get(t.unionId)?.arms ?? [];
+          if (arms.some((a) => typeEquals(a, s))) {
+            const extra = arms.filter((a) => !typeEquals(a, s));
+            return extra.every((a) => a.kind === "undefinedT") ? "T->T|undefined" : extra.every((a) => a.kind === "nullT") ? "T->T|null" : "T->union";
+          }
+          return "T->unionOther";
+        }
+        if (t.kind === "union" && s.kind === "union") {
+          const sa = this.unions.get(s.unionId)?.arms ?? [];
+          const ta = this.unions.get(t.unionId)?.arms ?? [];
+          return sa.every((x) => ta.some((y) => typeEquals(x, y))) ? "union->wider-union" : "union->union-other";
+        }
+        if (s.kind === "record" && t.kind === "record") return "nested-record";
+        if (s.kind === "array" && t.kind === "array") return "array-elem";
+        if (s.kind === "func" && t.kind === "func") return "func-sig";
+        return `${nameOf(s)}->${nameOf(t)}`;
+      };
+      let absent = false;
+      for (const f of to.fields) {
+        const l = plan.get(f.name);
+        if (l === undefined || "absent" in l || "absentDyn" in l || "keyRead" in l) absent = true;
+        else if (!typeEquals(l.src, f.type)) kinds.add(kindOf(l.src, f.type));
+      }
+      const js = isJsonSafeType(expr.type, (id) => this.shapes.get(id), (id) => this.unions.get(id)) && isJsonSafeType(expected, (id) => this.shapes.get(id), (id) => this.unions.get(id));
+      console.error(`[convstat2] ${js ? "data" : "nondata"} ${absent ? "absent+" : ""}${kinds.size === 0 ? "same" : [...kinds].sort().join("+")} ${expr.type.shapeId}->${expected.shapeId}`);
+    }
     if (this.onEdge !== undefined) viewConversionNoted = true;
     const loc = expr.loc;
     const boxed: IrExpr = { kind: "dynFrom", value: expr, type: DYN, loc };
