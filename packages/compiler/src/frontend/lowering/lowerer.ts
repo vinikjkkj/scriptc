@@ -13045,6 +13045,25 @@ export class Lowerer {
     );
   }
 
+  /** The payload accessor libCall for a claim helper, or null when the
+   * payload has no slot to read (see promiseCoerceAdapter). */
+  claimPayloadFn(inner: IrType): "promise.payloadF64" | "promise.payloadBool" | "promise.payloadStr" | "promise.payloadRef" | null {
+    switch (inner.kind) {
+      case "void":
+      case "undefinedT":
+      case "nullT":
+        return null;
+      case "f64":
+        return "promise.payloadF64";
+      case "bool":
+        return "promise.payloadBool";
+      case "string":
+        return "promise.payloadStr";
+      default:
+        return "promise.payloadRef";
+    }
+  }
+
   /** `Promise<U>` into a `Promise<T>` slot, when the PAYLOAD converts:
    * an async helper that awaits the source and coerces what comes out
    * (`async (p) => coerce(await p)`), so the slot receives a promise whose
@@ -13096,7 +13115,16 @@ export class Lowerer {
     try {
       const pLocal = this.declareHiddenLocal("p", fromT);
       const pRef: IrExpr = { kind: "varRef", localId: pLocal.id, type: fromT, loc };
-      const awaited: IrExpr = { kind: "awaitExpr", value: pRef, type: fromT.inner, loc };
+      // The CLAIM form reads the settled payload instead of awaiting it:
+      // scr_promise_claim runs this helper INSIDE the source's settle, so
+      // the source is settled by construction and an await here would only
+      // add the turn Node does not take. A payload with no slot (void,
+      // undefined, null) and the settle-or-value variant (a second await
+      // on the value) keep the awaiting form.
+      const claimForm = !viaSettle && this.claimPayloadFn(fromT.inner) !== null;
+      const awaited: IrExpr = claimForm
+        ? { kind: "libCall", fn: this.claimPayloadFn(fromT.inner)!, args: [pRef], type: fromT.inner, loc }
+        : { kind: "awaitExpr", value: pRef, type: fromT.inner, loc };
       const settled = viaSettle ? this.settleOrValueAwait(awaited, loc) : null;
       const result = this.coerceToExpected(settled ?? awaited, toT.inner);
       if (!typeEquals(result.type, toT.inner)) {
@@ -13116,6 +13144,7 @@ export class Lowerer {
     } finally {
       this.fnStack.pop();
     }
+    const claimOnSettle = !viaSettle && this.claimPayloadFn(fromT.inner) !== null;
     // The wrapper is NOT async: an async body returns a fresh promise by
     // construction, so the memo check has to stand outside the adapter,
     // at the call. One expression -- ask, answer, or make-and-file.
@@ -13125,7 +13154,16 @@ export class Lowerer {
       const wLocal = this.declareHiddenLocal("p", fromT);
       const src = (): IrExpr => ({ kind: "varRef", localId: wLocal.id, type: fromT, loc });
       const idOf = (): IrExpr => ({ kind: "numLit", value: adaptId, type: F64, loc });
-      const memoised: IrExpr = {
+      const claimed: IrExpr = {
+        kind: "libCall",
+        fn: "promise.claim",
+        args: [src(), idOf(), { kind: "closure", fnName: name, captures: [], type: funcType, loc }],
+        type: toT,
+        loc,
+      };
+      const memoised: IrExpr = claimOnSettle
+        ? claimed
+        : {
         kind: "ternary",
         cond: { kind: "libCall", fn: "promise.adaptHas", args: [src(), idOf()], type: BOOL, loc },
         then: { kind: "libCall", fn: "promise.adaptGet", args: [src(), idOf()], type: toT, loc },

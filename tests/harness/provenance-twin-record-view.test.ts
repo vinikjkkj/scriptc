@@ -133,6 +133,22 @@ const NULLABLE_RECEIVER_EXPECTED =
 const IMPORT_DEFAULT_EXPECTED =
   "5 7 cb null 5\n";
 
+/* cases/twinrec/claim-ticks.ts: observers of declaration-claimed promises run on the turn Node runs them, recorded from node. */
+const CLAIM_TICKS_EXPECTED =
+  "sync@0\n" +
+  "then-fulfilled 1@1\n" +
+  "plain-1@1\n" +
+  "then-rejected boom@1\n" +
+  "then-settled 3@1\n" +
+  "plain-2@1\n" +
+  "await-fulfilled 1@1\n" +
+  "await-rejected boom@2\n" +
+  "then-two 5@3\n" +
+  "await-settled 3@3\n" +
+  "await-two 5@4\n" +
+  "then-timer 4@12\n" +
+  "await-timer 4@12\n";
+
 const PRIOR = process.env["SCRIPTC_PROVENANCE_MANIFEST"];
 afterEach(() => {
   setProvenanceSources(null);
@@ -267,6 +283,16 @@ describe("provenance: a twin class with untyped methods behind a program's own r
       if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
       const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
       expect(stdout).toBe(IMPORT_DEFAULT_EXPECTED);
+    }, 600_000);
+  }
+
+  for (const backend of ["c", "llvm"] as const) {
+    test(`24045: a declaration-claimed promise is observed on Node's turn (${backend})`, async () => {
+      const entry = join(fixtureDir, "cases/twinrec/claim-ticks.ts");
+      const { result, outPath } = await build(entry, "claim-ticks", backend);
+      if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+      const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
+      expect(stdout).toBe(CLAIM_TICKS_EXPECTED);
     }, 600_000);
   }
 
