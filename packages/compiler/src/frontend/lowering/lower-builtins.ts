@@ -7698,6 +7698,19 @@ let digestInputValueDispatches = 0;
         loc,
       };
     }
+    // A program Error subclass that DECLARES `code` (pg-protocol's DatabaseError) keeps it in the instance's
+    // field, not in the runtime error's code cell: the keyed read reaches the field first, then the cell.
+    for (const info of L.classes.values()) {
+      if (info.decl === null || !info.def.fields.some((f) => f.name === "code") || !L.isSubclassOf(info.def.name, "%Error")) continue;
+      const boxed = L.coerceToExpected(receiver, DYN);
+      if (boxed.type.kind !== "dyn") break;
+      return {
+        kind: "dynCheck",
+        value: { kind: "dynKeyGet", key: { kind: "strLit", value: "code", type: STRING, loc }, value: boxed, type: DYN, loc },
+        type: L.envValueType(),
+        loc,
+      };
+    }
     return {
       kind: "libCall",
       fn: "error.code",

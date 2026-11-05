@@ -21018,6 +21018,25 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     // The system-error fields the runtime stamps on an error object (a socket's connect failure: errno, syscall, address, port; an fs
     // failure: path, dest) are own properties in Node whatever the static type says: read them from the stamp, not the expando bag.
     const stamped = ["errno", "syscall", "path", "dest", "hostname", "address", "port"].includes(expr.name.text);
+    // A program Error subclass that DECLARES the member (pg-protocol's DatabaseError `code`) keeps it in the
+    // instance's field, not in the runtime's bag: the keyed read reaches the field first, then the bag.
+    if (!stamped) {
+      const name = expr.name.text;
+      let declaredBySubclass = false;
+      for (const info of L.classes.values()) {
+        if (info.decl === null || !info.def.fields.some((f) => f.name === name)) continue;
+        if (L.isSubclassOf(info.def.name, "%Error")) { declaredBySubclass = true; break; }
+      }
+      if (declaredBySubclass) {
+        return {
+          kind: "dynKeyGet",
+          key: { kind: "strLit", value: name, type: STRING, loc: locOf(expr.name) },
+          value: L.coerceInto(expr.expression, receiver, DYN),
+          type: DYN,
+          loc,
+        };
+      }
+    }
     return {
       kind: "libCall",
       fn: stamped ? "error.ext" : "error.propGet",
