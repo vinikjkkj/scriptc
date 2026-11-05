@@ -9013,9 +9013,9 @@ function isJsonSafeAt(
       if (visiting.has(t.shapeId)) return true;
       visiting.add(t.shapeId);
       // TUPLE positions are array slots, not droppable object keys: an
-      // undefined-armed position would stringify as `null` in JS (not
-      // drop), so tuples keep the array rule for their fields.
-      if (!shape.fields.every((f) => isJsonSafeAt(f.type, getRecord, getUnion, !shape.tuple, visiting, dateOk, dynFieldsOk))) {
+      // undefined-armed position stringifies as `null` in JS (not drop),
+      // and both writers spell exactly that.
+      if (!shape.fields.every((f) => isJsonSafeAt(f.type, getRecord, getUnion, true, visiting, dateOk, dynFieldsOk))) {
         return false;
       }
       // Overflow values sit in record-key position too: dyn is JSON-safe
