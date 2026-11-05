@@ -334,7 +334,9 @@ export function dynMemberTable(
     }
     seen.add(f.name);
     const ordinal = ORDER_PLAN?.ordinalOf(cls.def.name, f.name) ?? null;
-    rows.push({ kind: "field", name: f.name, type: f.type, absentWhenUndefined: cls.def.absentFields?.includes(f.name) === true, ordk: ordinal === null ? 0 : ordinal + 1 });
+    let nonEnumerable = false;
+    for (let c: DynMemberClass | null = cls; c !== null; c = c.base) if (c.def.hiddenFields?.includes(f.name) === true) nonEnumerable = true;
+    rows.push({ kind: "field", name: f.name, type: f.type, absentWhenUndefined: cls.def.absentFields?.includes(f.name) === true, ordk: ordinal === null ? 0 : ordinal + 1, ...(nonEnumerable ? { hidden: true as const } : {}) });
     pushShadows(f.name);
   }
   // A grafted class's emitter keys: rows born where the order record notes them (see "eeCell").
