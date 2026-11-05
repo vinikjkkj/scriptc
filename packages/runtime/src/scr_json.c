@@ -159,6 +159,8 @@ ScrDynObjExt *scr_dyn_ext_w(ScrDyn *d) {
 void (*scr_dyn_sym_key_release)(ScrSym *k) = NULL;
 ScrStr *(*scr_dyn_sym_key_str)(ScrSym *k) = NULL;
 void (*scr_dyn_sym_copy_enum)(ScrDyn *target, const ScrDyn *src) = NULL;
+bool (*scr_dyn_has_key_full_hook)(const ScrDyn *v, const ScrStr *key) = NULL;
+ScrDyn *(*scr_dyn_define_prop_hook)(ScrDyn *target, ScrStr *key, ScrDyn *desc) = NULL;
 ScrDyn *(*scr_dyn_sym_row_value)(const ScrDyn *self, const ScrDynSymEnt *row) = NULL;
 bool (*scr_dyn_sym_proto_test)(int op, ScrDyn *recv, ScrSym *k) = NULL;
 void (*scr_dyn_sym_free_table)(ScrDynSymTab *t, bool release) = NULL;

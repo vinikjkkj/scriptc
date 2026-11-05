@@ -5172,6 +5172,11 @@ extern void (*scr_dyn_sym_key_release)(ScrSym *k);
  * spread copy the enumerable rows (target and source borrowed). Set by the same first store. */
 extern ScrStr *(*scr_dyn_sym_key_str)(ScrSym *k);
 extern void (*scr_dyn_sym_copy_enum)(ScrDyn *target, const ScrDyn *src);
+/* The string arms of the untyped-key operations live in the gated dispatch unit (scr_dyn_invoke.c), which a PE/COFF link cannot leave
+ * unresolved from scr_symbol.o: that unit installs these two when it is linked, and the compiler links it for every sym.anyHas /
+ * sym.anyDefine. */
+extern bool (*scr_dyn_has_key_full_hook)(const ScrDyn *v, const ScrStr *key);
+extern ScrDyn *(*scr_dyn_define_prop_hook)(ScrDyn *target, ScrStr *key, ScrDyn *desc);
 /* A row's [[Get]] value (+1, or NULL with an exception pending): the value of a data row, the getter's result for an
  * accessor row (`this` bound to `self`). */
 extern ScrDyn *(*scr_dyn_sym_row_value)(const ScrDyn *self, const ScrDynSymEnt *row);

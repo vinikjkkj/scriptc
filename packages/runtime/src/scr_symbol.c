@@ -1383,11 +1383,11 @@ bool scr_dyn_any_delete(ScrDyn *recv, ScrDyn *key, ScrStr *keystr) {
   return scr_any_is_sym(key) ? scr_dyn_sym_delete(recv, SCR_ANY_SYM(key)) : scr_dyn_key_delete(recv, keystr);
 }
 bool scr_dyn_any_has(ScrDyn *recv, ScrDyn *key, ScrStr *keystr) {
-  return scr_any_is_sym(key) ? scr_dyn_sym_has(recv, SCR_ANY_SYM(key)) : scr_dyn_has_key_full(recv, keystr);
+  return scr_any_is_sym(key) ? scr_dyn_sym_has(recv, SCR_ANY_SYM(key)) : scr_dyn_has_key_full_hook(recv, keystr);
 }
 bool scr_dyn_any_has_own(ScrDyn *recv, ScrDyn *key, ScrStr *keystr) {
   return scr_any_is_sym(key) ? scr_dyn_sym_has_own(recv, SCR_ANY_SYM(key)) : scr_dyn_has_own(recv, keystr);
 }
 ScrDyn *scr_dyn_any_define(ScrDyn *recv, ScrDyn *key, ScrStr *keystr, ScrDyn *desc) {
-  return scr_any_is_sym(key) ? scr_dyn_sym_define(recv, SCR_ANY_SYM(key), desc) : scr_dyn_define_prop(recv, keystr, desc);
+  return scr_any_is_sym(key) ? scr_dyn_sym_define(recv, SCR_ANY_SYM(key), desc) : scr_dyn_define_prop_hook(recv, keystr, desc);
 }

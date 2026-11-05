@@ -11905,7 +11905,9 @@ export function moduleUsesDynInvoke(mod: IrModule): boolean {
         // scr_dyn_has_key_full, which lives in the gated unit for the
         // same reason the read's helper does: scr_json.c is always
         // linked and must not name the dispatch.
-        (node.fn === "dyn.hasKey" || node.fn === "dyn.invokePack" ||
+        // sym.anyHas / sym.anyDefine are those two operations after the untyped-key rewrite (symbol-record-fence.ts): their
+        // string arm calls scr_dyn_has_key_full / scr_dyn_define_prop from scr_symbol.c, so they pull this unit too.
+        (node.fn === "dyn.hasKey" || node.fn === "sym.anyHas" || node.fn === "sym.anyDefine" || node.fn === "dyn.invokePack" ||
           // sloppy this and the globalThis identity: the stand-in and its
           // test live in the gated dispatch unit, so a program that never
           // reads sloppy this links neither.

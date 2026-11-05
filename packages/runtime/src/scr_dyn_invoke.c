@@ -5106,6 +5106,14 @@ static const ScrDynProxyOps scr_px_ops = {
 
 static void scr_dyn_proxy_install(void) { scr_dyn_proxy_ops_ptr = &scr_px_ops; }
 
+#ifdef SCR_SYMTAB
+/* scr_symbol.c reaches the two string operations through these (see scr_runtime.h): set before main, like the async resolve hook. */
+__attribute__((constructor)) static void scr_dyn_invoke_install_symbol_hooks(void) {
+  scr_dyn_has_key_full_hook = &scr_dyn_has_key_full;
+  scr_dyn_define_prop_hook = &scr_dyn_define_prop;
+}
+#endif
+
 /* Error.captureStackTrace(target) over a dyn OBJECT: V8 formats the header
  * AT THE CALL (not lazily, unlike a real Error) as ErrorUtils::ToString does
  * over the target's `name` (absent: "Error") and `message` (absent: ""),
