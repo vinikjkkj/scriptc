@@ -660,7 +660,39 @@ export function builtinNamespaceRecordOf(L: Lowerer, expr: ts.Expression, module
     if (got === null || !typeEquals(got.want, f.type)) return null;
     fields.push({ name: f.name, value: mintBuiltinMemberValue(L, got, loc) });
   }
-  return { kind: "recordLit", fields, type: want, loc };
+  // ONE namespace value per module per process (Node's `ns === ns2`): the record is built the first time any site asks and every
+  // site reads that same record. The lifted getter is keyed on the module AND the record shape, so two slots of different
+  // shapes over one module each get their own namespace value (a slot's shape is part of what the value IS here).
+  const key = `${module}:${typeKey(want)}`;
+  const getter = `%builtin.ns.${key}.get`;
+  if (!L.liftedFns.some((f) => f.name === getter)) {
+    const rec = `%g.builtin.ns.${key}`;
+    const flag = `${rec}.ready`;
+    L.globalsList.push({ id: rec, name: "%nsrec", type: want, mutable: true });
+    L.globalsList.push({ id: flag, name: "%nsready", type: BOOL, mutable: true });
+    const fn: IrFunction = {
+      name: getter,
+      params: [],
+      returnType: want,
+      locals: [],
+      body: [
+        {
+          kind: "if",
+          cond: { kind: "unary", op: "!", operand: { kind: "varRef", localId: flag, type: BOOL, loc }, type: BOOL, loc },
+          then: [
+            { kind: "assign", localId: rec, value: { kind: "recordLit", fields, type: want, loc }, loc },
+            { kind: "assign", localId: flag, value: { kind: "boolLit", value: true, type: BOOL, loc }, loc },
+          ],
+          else_: null,
+          loc,
+        },
+        { kind: "return", value: { kind: "varRef", localId: rec, type: want, loc }, loc },
+      ],
+      loc,
+    };
+    L.liftedFns.push(fn);
+  }
+  return { kind: "call", callee: getter, args: [], type: want, loc };
 }
 
 
