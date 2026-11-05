@@ -12488,6 +12488,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24067-a-record-with-bytes-and-function-members-converted-to-a-narrower-one-is-the-same-object.ts": {
+   "order": [
+    "<repo>/tests/corpus/24067-a-record-with-bytes-and-function-members-converted-to-a-narrower-one-is-the-same-object.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24068-views-of-one-record-are-one-object-for-equality-map-and-set.ts": {
+   "order": [
+    "<repo>/tests/corpus/24068-views-of-one-record-are-one-object-for-equality-map-and-set.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24069-a-view-outlives-the-scope-of-the-record-it-views.ts": {
+   "order": [
+    "<repo>/tests/corpus/24069-a-view-outlives-the-scope-of-the-record-it-views.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2405-sibling-arm-narrow.ts": {
    "order": [
     "<repo>/tests/corpus/2405-sibling-arm-narrow.ts"
