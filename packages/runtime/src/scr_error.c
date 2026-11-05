@@ -510,6 +510,14 @@ void scr_error_set_code(ScrError *e, const char *code) {
 }
 
 ScrStr *scr_error_code(ScrError *e) {
+  /* `err.code = "X"` assigned by the program lands in the property bag and wins over a stamped code (own data property). */
+  if (e->props != NULL && e->props->kind == SCR_DYN_OBJ && scr_dyn_obj_key_present(e->props, "code", 4)) {
+    ScrDyn *v = scr_dyn_obj_key_get(e->props, "code", 4);
+    ScrStr *s = NULL;
+    if (v != NULL && v->kind == SCR_DYN_STR) s = scr_str_retain(v->v.str);
+    scr_dyn_release(v);
+    return s;
+  }
   return e->code ? scr_str_retain(e->code) : NULL;
 }
 

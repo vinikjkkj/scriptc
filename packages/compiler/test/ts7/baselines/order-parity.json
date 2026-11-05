@@ -12874,6 +12874,13 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24150-error-properties-assigned-by-javascript-read-through-errno-exception/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/24150-error-properties-assigned-by-javascript-read-through-errno-exception/lib.d.ts",
+    "<repo>/tests/corpus/24150-error-properties-assigned-by-javascript-read-through-errno-exception/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2414-dowhile-continue-kill.ts": {
    "order": [
     "<repo>/tests/corpus/2414-dowhile-continue-kill.ts"
