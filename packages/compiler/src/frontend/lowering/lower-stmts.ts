@@ -590,7 +590,18 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
     if (!common) return null;
     const recv = L.lowerExpr(left.expression);
     if (recv.type.kind !== "union" || recv.type.unionId !== probe.type.unionId) return null;
-    const value = L.lowerExprExpecting(expr.right, common);
+    // The property-write destination for recordKeyReadAtUndefinedArm (see lowerAssignment's field branch): an absent index-signature read
+    // stored into an undefined-armed field is undefined, not an abort.
+    let value: IrExpr;
+    if (
+      common.kind === "union" && (ts.isPropertyAccessExpression(expr.right) || ts.isElementAccessExpression(expr.right)) &&
+      expr.right.questionDotToken === undefined && probeLower(L, expr.right)?.kind === "recordKeyGet"
+    ) {
+      const raw = L.lowerExpr(expr.right);
+      value = L.recordKeyReadAtUndefinedArm(raw, common) ?? L.coerceInto(expr.right, raw, common);
+    } else {
+      value = L.lowerExprExpecting(expr.right, common);
+    }
     const out: IrStmt[] = [];
     const utmp = L.declareHiddenLocal("%uwU", recv.type);
     out.push({ kind: "varDecl", localId: utmp.id, init: recv, loc });
