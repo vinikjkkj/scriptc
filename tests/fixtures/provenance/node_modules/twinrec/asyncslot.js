@@ -21,6 +21,14 @@ class Commander {
   run(name, ...args) {
     return this[name](...args);
   }
+  viaValue(a, b) {
+    const f = this.total;
+    return f.call(this, a, b);
+  }
+  viaBind(a, b) {
+    const g = (this.flag ? this.total : this.ping).bind(this);
+    return g(a, b);
+  }
 }
 class Redis extends Commander {
   async get(k) {
@@ -53,6 +61,11 @@ async function scenario(log) {
     return 'proto:' + (a - b);
   };
   log([await new Commander().total(9, 4), await other.total(9, 4), await r.total(1, 1)].join(' '));
+  const v = new Redis();
+  log([await v.viaValue(2, 3), await v.viaBind(1, 2)].join(' '));
+  v.install('total', async (a, b) => 'own' + (a * b));
+  v.flag = true;
+  log([await v.viaValue(2, 3), await v.viaBind(4, 5)].join(' '));
   const order = [];
   const p = new Redis().get('q').then(() => order.push('get'));
   await null;
