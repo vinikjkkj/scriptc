@@ -5,9 +5,10 @@
  * EXACTLY equal in each member but its own self-instantiations, in a run of three nested levels, and the next STRUCT_PROBE_LEVELS
  * levels along the self-instantiation agree too. This file pins that rule at the IR:
  *   - a family is ONE record shape (every level is the same id, so a value of one level fits the next);
- *   - a conditional type that changes the members INSIDE the horizon keeps the levels apart;
- *   - the residual: a change BEYOND the horizon cannot be seen by looking, and is tied. That test states the unsoundness and is the
- *     thing to flip if the horizon is ever replaced by a proof.
+ *   - the signature includes the ARGUMENTS of every occurrence of the family, compared by the members they resolve to, so two levels
+ *     are tied only when their arguments are structurally the same: a conditional type that changes the members at any depth
+ *     cannot be tied, because its argument differs at that depth too;
+ *   - the weak form (arguments ignored, a test-only switch) is shown merging shapes that differ.
  */
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -44,24 +45,23 @@ console.log(sum({ label: "r", n: 2, kids: [leaf, leaf] }));
   expect(withField(r.module!, "kids", "array"), "one shape carries `kids`: the levels are tied, not merely mapped").toBe(1);
 });
 
-test("a conditional that changes the members inside the horizon keeps the levels apart", () => {
+test("a conditional that changes the members keeps the levels apart: the walk refuses, it does not tie them", () => {
+  // The self-instantiation's ARGUMENT grows (`Wrap<T>` nests one deeper per level), so no two levels have equal arguments and the
+  // signature, which includes the arguments, never matches: nothing is tied and the unbounded family is refused at the depth cap.
+  // (With the argument ignored the levels from 5 on would have tied, and `v` would be read at the wrong layout.)
   const r = lower(`type Wrap<T> = { a: T };
 type Deep5<T> = T extends { a: { a: { a: { a: { a: unknown } } } } } ? string : number;
 interface C<T> { v: Deep5<T>; next: C<Wrap<T>> | null }
 function first(c: C<{}>): number { return c.v }
 console.log(first({ v: 1, next: null }));
 `);
-  expect(r.module, `lowering refused: ${r.codes.join(",")}`).not.toBeNull();
-  // Levels 0..4 carry `number`, level 5 on carry `string`: never one shape. (The levels from 5 on ARE one shape, since they repeat.)
-  expect(withField(r.module!, "v", "f64"), "the number-valued levels stay separate from each other and from the string ones").toBeGreaterThanOrEqual(2);
-  expect(withField(r.module!, "v", "string"), "the string-valued levels are a shape of their own").toBeGreaterThanOrEqual(1);
+  expect(r.module, "tied levels would compile; a refusal is the safe answer").toBeNull();
+  expect(r.codes).toContain("SC2009");
 });
 
-test("OPEN: a change beyond the horizon cannot be seen and is tied", () => {
-  // The conditional flips only at level 20; the probe looks STRUCT_PROBE_LEVELS (16) levels past the third. Everything the checker
-  // shows the mapper agrees, so the levels are one shape with `v: number` - wrong for a value at level 20 or deeper. Looking can
-  // never prove it away (the checker's own deep-nesting rule has the same blind spot). This test pins the behaviour so that
-  // replacing the horizon with a proof flips it on purpose.
+test("a change far beyond any horizon is refused the same way: the arguments differ at every level", () => {
+  // The conditional flips only at level 20. A tie decided from members alone could not see that and would have tied (and read `v`
+  // as number where it is a string); the arguments differ at every level, so there is no tie to be wrong about.
   const deep = "{ a: ".repeat(21) + "unknown" + " }".repeat(21);
   const r = lower(`type Wrap<T> = { a: T };
 type Deep20<T> = T extends ${deep} ? string : number;
@@ -69,6 +69,37 @@ interface C<T> { v: Deep20<T>; next: C<Wrap<T>> | null }
 function first(c: C<{}>): number { return c.v }
 console.log(first({ v: 1, next: null }));
 `);
-  expect(r.module, `lowering refused: ${r.codes.join(",")}`).not.toBeNull();
-  expect(withField(r.module!, "v", "string"), "no string-valued level was ever seen").toBe(0);
+  expect(r.module, "no silent tie").toBeNull();
+  expect(r.codes).toContain("SC2009");
+});
+
+const PAIR = `type More<T> = T extends number[][][][][][][][] ? undefined : A<T>;
+interface Base<T> { v: T }
+interface B<T> extends Base<T> { tag: string; up?: More<T> | undefined }
+interface A<T> { name: string; next: B<T[]>[] }
+function top(a: A<number>): number { return a.next.length }
+console.log(top({ name: "a", next: [] }));
+`;
+
+test("a mutually recursive pair whose levels differ in the ARGUMENT of the member they name stays one shape per level", () => {
+  // Level k of B has `v: number[]` nested k deep: eight different layouts. Comparing an occurrence of the pair as its bare marker
+  // (the weak form below) cannot tell them apart; the exact form compares the arguments, so no two of them are merged.
+  const saved = { probe: process.env["SCRIPTC_STRUCT_PROBE"], args: process.env["SCRIPTC_STRUCT_ARGS"] };
+  try {
+    process.env["SCRIPTC_STRUCT_PROBE"] = "1";
+    delete process.env["SCRIPTC_STRUCT_ARGS"];
+    const exact = lower(PAIR);
+    expect(exact.module, `lowering refused: ${exact.codes.join(",")}`).not.toBeNull();
+    const exactShapes = exact.module!.records.filter((r) => r.fields.some((f) => f.name === "v")).length;
+    expect(exactShapes, "one `v` shape per level: nothing merged").toBeGreaterThanOrEqual(8);
+    // The NEGATIVE control: the weak form (arguments ignored, test-only switch) merges levels whose `v` differ - which is exactly the
+    // silent wrong shape the exact form exists to prevent. It must be seen doing it, or the exact form proves nothing.
+    process.env["SCRIPTC_STRUCT_ARGS"] = "ignore";
+    const weak = lower(PAIR);
+    const weakShapes = weak.module === null ? 0 : weak.module.records.filter((r) => r.fields.some((f) => f.name === "v")).length;
+    expect(weakShapes, "the weak form merged shapes that differ").toBeLessThan(exactShapes);
+  } finally {
+    if (saved.probe === undefined) delete process.env["SCRIPTC_STRUCT_PROBE"]; else process.env["SCRIPTC_STRUCT_PROBE"] = saved.probe;
+    if (saved.args === undefined) delete process.env["SCRIPTC_STRUCT_ARGS"]; else process.env["SCRIPTC_STRUCT_ARGS"] = saved.args;
+  }
 });
