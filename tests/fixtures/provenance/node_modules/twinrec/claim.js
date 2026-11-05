@@ -27,3 +27,13 @@ exports.watchThen = (log) => {
   held.then(() => log("src-then-2"));
 };
 exports.release = (v) => settleHeld(v);
+// A local that holds the claimed promise before it is returned (ioredis' Cluster#quit shape).
+const cbdep_1 = require("./cbdep");
+exports.quitLike = function quitLike(wait, callback) {
+  if (wait) {
+    const ret = (0, cbdep_1.default)(Promise.resolve("OK"), callback);
+    setImmediate(() => callback && callback(null, "closed"));
+    return ret;
+  }
+  return (0, cbdep_1.default)(new Promise((resolve) => setTimeout(() => resolve("late"), 1)), callback);
+};

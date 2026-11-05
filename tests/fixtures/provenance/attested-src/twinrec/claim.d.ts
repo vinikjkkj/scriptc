@@ -8,3 +8,4 @@ export declare function pend(log: (s: string) => void): Promise<number>;
 export declare function watchAwait(log: (s: string) => void): void;
 export declare function watchThen(log: (s: string) => void): void;
 export declare function release(v: number): void;
+export declare function quitLike(wait: boolean, callback?: (err: Error | null, v?: string) => void): Promise<string>;

@@ -156,6 +156,10 @@ const CLAIM_ORDER_EXPECTED =
   "claim-then-2\n" +
   "claim-all\n";
 
+/* cases/twinrec/claim-local.ts: a declaration-claimed promise held in a local before it is returned, recorded from node. */
+const CLAIM_LOCAL_EXPECTED =
+  "OK late cb null OK,cb null closed\n";
+
 const PRIOR = process.env["SCRIPTC_PROVENANCE_MANIFEST"];
 afterEach(() => {
   setProvenanceSources(null);
@@ -300,6 +304,16 @@ describe("provenance: a twin class with untyped methods behind a program's own r
       if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
       const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
       expect(stdout).toBe(CLAIM_ORDER_EXPECTED);
+    }, 600_000);
+  }
+
+  for (const backend of ["c", "llvm"] as const) {
+    test(`24047: a declaration-claimed promise held in a local is the promise the implementation made (${backend})`, async () => {
+      const entry = join(fixtureDir, "cases/twinrec/claim-local.ts");
+      const { result, outPath } = await build(entry, "claim-local", backend);
+      if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+      const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
+      expect(stdout).toBe(CLAIM_LOCAL_EXPECTED);
     }, 600_000);
   }
 
