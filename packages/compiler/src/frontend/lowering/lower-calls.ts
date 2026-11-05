@@ -12408,7 +12408,52 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     return { kind: "libCall", fn: "dyn.defineProp", args: [target, key, desc], type: DYN, loc: locOf(call) };
   }
 
-/** `Object.defineProperty(<a bare identifier typed as a program class>,
+  /** `Object.defineProperty(recv, "f", { value, writable: true, enumerable: <bool>, configurable: <bool> })` where the class DECLARES the field f
+   * (pg's Client: `this.password` is a collected field because a callback assigns it, and the constructor also defines it hidden).
+   * The define is the field's store - one property, one storage - and `enumerable: false` marks the field non-enumerable for the dyn view.
+   * Anything the literal form does not spell (accessors, a non-literal or non-writable descriptor, a field that is not declared) declines
+   * and keeps the existing run-time table path and its refusals. Statement position only: the call's value is the receiver. */
+  function lowerDefinePropDeclaredField(L: Lowerer, call: ts.CallExpression): IrExpr | null {
+    if (call.parent === undefined || !ts.isExpressionStatement(call.parent)) return null;
+    if (call.arguments.length !== 3 || call.arguments.some(ts.isSpreadElement)) return null;
+    const [recvNode, keyNode, descNode] = [call.arguments[0]!, call.arguments[1]!, call.arguments[2]!];
+    if (!ts.isStringLiteral(keyNode) || !ts.isObjectLiteralExpression(descNode)) return null;
+    const recvIr = L.mapTypeOf(L.typeOf(recvNode));
+    if (recvIr?.kind !== "object") return null;
+    const info = L.classes.get(recvIr.className);
+    if (!info || info.builtinError || info.generic !== undefined) return null;
+    const name = keyNode.text;
+    const fieldType = info.fields.get(name);
+    if (fieldType === undefined || name.startsWith("%")) return null;
+    let valueNode: ts.Expression | null = null;
+    let writable = false;
+    let enumerable: boolean | null = null;
+    for (const p of descNode.properties) {
+      if (!ts.isPropertyAssignment(p) || !ts.isIdentifier(p.name)) return null;
+      const k = p.name.text;
+      const flag = p.initializer.kind === ts.SyntaxKind.TrueKeyword ? true : p.initializer.kind === ts.SyntaxKind.FalseKeyword ? false : null;
+      if (k === "value") valueNode = p.initializer;
+      else if (k === "writable") { if (flag === null) return null; writable = flag; }
+      else if (k === "enumerable") { if (flag === null) return null; enumerable = flag; }
+      else if (k === "configurable") { if (flag === null) return null; }
+      else return null;
+    }
+    if (valueNode === null || !writable || enumerable === null) return null;
+    const loc = locOf(call);
+    const rTmp = L.declareHiddenLocal("%dpRecv", recvIr);
+    const obj = (): IrExpr => ({ kind: "varRef", localId: rTmp.id, type: recvIr, loc });
+    const bind: IrStmt = { kind: "varDecl", localId: rTmp.id, init: L.lowerExpr(recvNode), loc };
+    const value = L.lowerExprExpecting(valueNode, fieldType);
+    const set: IrStmt = { kind: "fieldSet", obj: obj(), className: recvIr.className, field: name, value, loc };
+    if (!enumerable) {
+      const hidden = info.def.hiddenFields ?? [];
+      if (!hidden.includes(name)) info.def.hiddenFields = [...hidden, name];
+    }
+    if (process.env["SCRIPTC_DEFPROP_WHY"]) process.stderr.write(`[defprop] declared-field ${recvIr.className}.${name} at ${loc.file}:${loc.start}\n`);
+    return { kind: "seqExpr", stmts: [bind, set], result: obj(), type: recvIr, loc };
+  }
+
+  /** `Object.defineProperty(<a bare identifier typed as a program class>,
    * <a STRING-typed key>, <an object-literal descriptor>)` — the receiver
    * row that had no lowering at all, and the one zapo's
    * `install.ts:114` is:
@@ -13012,6 +13057,8 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     if (member === "defineProperty") {
       const slot = lowerDefinePropHiddenSlot(L, call);
       if (slot) return slot;
+      const declared = lowerDefinePropDeclaredField(L, call);
+      if (declared) return declared;
       const table = lowerDefinePropClassTable(L, call);
       if (table) return table;
       const dynDefine = lowerDefinePropDyn(L, call);
