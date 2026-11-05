@@ -1019,6 +1019,10 @@ typedef struct ScrError {
                     * a hook scr_json.c installs before any exists, which
                     * keeps this unit linkable without the checked-dynamic
                     * tree (the DOMException cause precedent). */
+  bool own_name;    /* the program ASSIGNED `name` on this instance: an own property in Node even when it equals
+                     * the canonical one (calloc'd false). Sixth/seventh slots of the layout prefix (BOOL
+                     * `%ownName` / `%ownMessage` in %Error's compiler def). */
+  bool own_message; /* a message was PROVIDED (or assigned): `new Error()` has no own `message`, `new Error("")` has. */
 } ScrError;
 
 enum {
@@ -1062,6 +1066,8 @@ typedef struct ScrDomException {
                     * scr_error_gcfree, which releases this slot. */
   struct ScrDyn *props; /* the own-expando bag -- MUST mirror ScrError's
                     * prefix (see there). */
+  bool own_name;    /* mirrors ScrError's */
+  bool own_message;
   double dom_code; /* the WebIDL legacy code (0 when the name is off-table) */
   bool has_cause;  /* the options form carried a `cause` member */
   struct ScrDyn *cause; /* owned; NULL when has_cause is false */
@@ -10409,7 +10415,8 @@ ScrBytes *scr_text_dest_dyn(const ScrDyn *v); /* encodeInto's dest over a checke
 double scr_bytes_byte_length_str(ScrStr *s, const ScrStr *enc);
 bool scr_bytes_is_encoding(const ScrStr *s);
 const char *scr_bytes_enc_canon(const ScrStr *s); /* canonical name, or NULL: the one run-time encoding normaliser (scr_bytes.c) */
-ScrStr *scr_error_message_dyn(const struct ScrDyn *v); /* new Error(m) over an untyped m: "" for undefined, else JS ToString; NULL with the exception pending (scr_dyn_ext.c) */
+ScrStr *scr_error_no_message(void);
+ScrStr *scr_error_message_dyn(const struct ScrDyn *v); /* new Error(m) over an untyped m: NULL (no message) for undefined, else JS ToString; NULL with the exception pending too (scr_dyn_ext.c) */
 double scr_buffer_byte_length_dyn(const struct ScrDyn *v, const struct ScrDyn *enc); /* Buffer.byteLength over an untyped value (scr_dyn_ext.c) */
 bool scr_buffer_is_encoding_dyn(const struct ScrDyn *v); /* Buffer.isEncoding over an untyped value (scr_dyn_ext.c) */
 

@@ -166,11 +166,16 @@ void scr_error_release(ScrError *e) {
 void *scr_error_retain_v(void *e) { return scr_error_retain((ScrError *)e); }
 void scr_error_release_v(void *e) { scr_error_release((ScrError *)e); }
 
+/* The message of an error constructed without one: ONE immortal empty string (a fresh allocation per error is what a literal
+ * "" never cost). */
+static SCR_STR_LIT(1) scr_error_empty_message = {SCR_STR_IMMORTAL, 0, 0, ""};
+
 void scr_error_init(void *obj, int kind, ScrStr *message) {
   ScrError *e = (ScrError *)obj;
   const char *n = scr_error_names[kind];
   e->name = scr_str_new(n, strlen(n));
-  e->message = message ? scr_str_retain(message) : scr_str_new("", 0);
+  e->message = message ? scr_str_retain(message) : (ScrStr *)&scr_error_empty_message;
+  e->own_message = message != NULL; /* NULL = no message argument at all: Node installs no own `message` */
 }
 
 /* The Error hierarchy's trace entry point when the program's cycle fixpoint
@@ -514,6 +519,9 @@ void scr_error_set_code(ScrError *e, const char *code) {
 static bool (*scr_error_props_code)(ScrError *e, ScrStr **out) = NULL;
 
 void scr_error_install_props_code(bool (*fn)(ScrError *e, ScrStr **out)) { scr_error_props_code = fn; }
+
+/* The absent message of an Error constructor call: NULL (the C emitter spells it inline; the LLVM one calls this). */
+ScrStr *scr_error_no_message(void) { return NULL; }
 
 ScrStr *scr_error_code(ScrError *e) {
   /* `err.code = "X"` assigned by the program lands in the property bag and wins over a stamped code (own data property). */
