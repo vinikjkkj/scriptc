@@ -5276,6 +5276,27 @@ function instanceofGuardArm(L: Lowerer, rhs: ts.Expression, unionId: string): Ir
     // A lyingRead result already answered its consumer: narrowing it again
     // would re-trap the peeled union.
     if (L.lyingResults.has(expr)) return expr;
+    // A library-declared array slot Node may leave undefined (see
+    // undefArrayElemNames): the checker types the read as the bare array,
+    // the slot holds the undefined arm. A pass-through keeps the undefined,
+    // a dereference throws Node's own TypeError.
+    if (expr.type.kind === "union" && L.armTag(expr.type.unionId, UNDEFINED_T) >= 0) {
+      const tgt = L.lyingTargetOf(expr.type);
+      if (tgt !== null && tgt.kind === "array" && node.kind !== ts.SyntaxKind.Block) {
+        if (L.checker.isArrayType(L.typeOf(node))) {
+          // A dereference (member use, call, element access) throws Node's
+          // TypeError at the undefined arm; every other use carries the union
+          // to its destination, which takes it or refuses at the coercion.
+          if (typeof L.classifyLyingRead(node as ts.Expression) === "object") {
+            const lr = L.lyingRead(expr, node as ts.Expression);
+            if (lr) return lr;
+          } else {
+            L.lyingResults.add(expr);
+            return expr;
+          }
+        }
+      }
+    }
     // A fs.Stats receiver (lowerStatsReceiver): the member use names the
     // property in Node's TypeError at the undefined arm, not the generic
     // checked-extraction trap.
