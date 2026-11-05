@@ -1372,11 +1372,16 @@ async function compileTracked(
   // lane, which never fills it -- and must, because the C expression below is
   // already exactly right for that lane.
   const llStats: LlvmEmitStats = { coroLowered: 0 };
+  // The emitted text is the honest source for one more link switch: a walker
+  // that reads a class box's members calls into scr_dyn_invoke.c whatever
+  // the IR-level predicates said.
+  let emittedReadsObjinstMembers = false;
   if (opts.backend !== "c") {
     try {
       const ll = tapped("emit.llvm", () => emitLlvmModule(lowered.module!, llStats));
       cPath = join(opts.outDir, `${stem}.ll`);
       await writeFile(cPath, ll);
+      emittedReadsObjinstMembers = ll.includes("scr_dyn_objinst_member_get");
       backend = "llvm";
     } catch (err) {
       if (!(err instanceof LlvmUnsupportedError)) throw err;
@@ -1398,6 +1403,8 @@ async function compileTracked(
   if (backend === "c") {
     const program = tapped("emit.c", () => emitModuleProgram(lowered.module!, entryText, headerName));
     await writeFile(cPath, program.units[0]!);
+    emittedReadsObjinstMembers = program.units.some((u) => u.includes("scr_dyn_objinst_member_get(")) ||
+      (program.header?.includes("scr_dyn_objinst_member_get(") ?? false);
     if (program.header !== null) {
       programHeader = join(opts.outDir, headerName);
       await writeFile(programHeader, program.header);
@@ -1417,6 +1424,7 @@ async function compileTracked(
   await sweepStaleOutputs(opts.outDir, stem, backend, programUnits.length, programHeader !== undefined);
 
   const features = programNativeFeatures(lowered.module!, backend, llStats.coroLowered);
+  if (emittedReadsObjinstMembers) features.dynInvoke = true;
   let irPath: string | undefined;
   if (opts.emitIr) {
     irPath = join(opts.outDir, `${stem}.ir.json`);
