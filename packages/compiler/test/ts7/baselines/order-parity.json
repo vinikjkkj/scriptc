@@ -12598,6 +12598,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24127-function-value-read-through-a-record.ts": {
+   "order": [
+    "<repo>/tests/corpus/24127-function-value-read-through-a-record.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2413-dowhile-kill-renarrow.ts": {
    "order": [
     "<repo>/tests/corpus/2413-dowhile-kill-renarrow.ts"
