@@ -744,6 +744,13 @@ export function lowerProfileFlush(): void {
  * discovery runs again until the grant set stops growing. Per compilation. */
 let viewConversionNoted = false;
 
+/** viewShapeKey of the shapes that are the target of a STRUCT view (viewConversion), and of those whose records the program
+ * hands to a dynamic slot. A struct view's crossing is a copy (the source is a plain struct with no object to be), so a write
+ * through the dynamic side would never reach the source; such a target keeps the object path, whose crossing IS the object.
+ * Both fill during discovery and persist across its reruns. */
+const structViewTargetKeys = new Set<string>();
+const structViewDeniedKeys = new Set<string>();
+
 export function lowerToIr(
   program: ts.Program,
   entry: ts.SourceFile,
@@ -760,6 +767,8 @@ export function lowerToIr(
   overflowShapeKeysAsked.clear();
   viewShapeKeys.clear();
   viewConversionNoted = false;
+  structViewTargetKeys.clear();
+  structViewDeniedKeys.clear();
   const targetPlatform = options.targetPlatform ?? process.platform;
   const startupCrash = options.startupCrash ?? null;
   // Modules reachable only through dynamic import() of the program's own
@@ -817,7 +826,8 @@ export function lowerToIr(
   // stops growing (bounded), so the emit pass interns every shape it will need as a view. Programs with no such conversion
   // never enter the loop.
   for (let round = 0; round < 3 && viewConversionNoted; round++) {
-    const before = [...viewShapeKeys].sort().join("\n");
+    const grantSig = (): string => [...viewShapeKeys].sort().join("\n") + "|" + [...structViewDeniedKeys].sort().join("\n");
+    const before = grantSig();
     discovery = new Lowerer(program, entry, moduleOrder, dynamic, {
       targetPlatform,
       ffiImports,
@@ -825,7 +835,7 @@ export function lowerToIr(
     });
     reachable = discovery.discover(options.libRoots);
     discovery.settleViewDenials();
-    if ([...viewShapeKeys].sort().join("\n") === before) break;
+    if (grantSig() === before) break;
   }
   lowerProfileNote("%discovery", performance.now() - __t0);
   if (options.noPinReload !== true) {
@@ -4936,6 +4946,36 @@ export class Lowerer {
    * Mirrors `canConvertToDyn`'s recursion rather than restating a domain:
    * a leaf this misses is a method the emitted table cannot carry, and a
    * leaf it invents is only a body that stays alive. */
+  /** A value of type `t` crosses into a dynamic slot: every struct-view target it carries loses the struct form (see
+   * structViewDeniedKeys), and discovery runs again so the pair is converted through the object path. */
+  private noteStructViewCrossing(t: IrType, seen: Set<string>): void {
+    switch (t.kind) {
+      case "array":
+        this.noteStructViewCrossing(t.elem, seen);
+        return;
+      case "union":
+        if (seen.has(`u:${t.unionId}`)) return;
+        seen.add(`u:${t.unionId}`);
+        for (const arm of this.unions.get(t.unionId)?.arms ?? []) this.noteStructViewCrossing(arm, seen);
+        return;
+      case "record": {
+        if (seen.has(`r:${t.shapeId}`)) return;
+        seen.add(`r:${t.shapeId}`);
+        const sh = this.shapes.get(t.shapeId);
+        if (sh === undefined) return;
+        const key = viewShapeKey(sh.fields, sh.indexValue);
+        if (structViewTargetKeys.has(key) && !structViewDeniedKeys.has(key)) {
+          structViewDeniedKeys.add(key);
+          viewConversionNoted = true;
+        }
+        for (const f of sh.fields) this.noteStructViewCrossing(f.type, seen);
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
   private classesCrossingIntoDyn(t: IrType, out: Set<string>, seen: Set<string>): void {
     switch (t.kind) {
       case "object":
@@ -5066,6 +5106,7 @@ export class Lowerer {
       const o = n as { kind?: unknown; value?: { type?: IrType } };
       if (o.kind === "dynFrom" && o.value?.type !== undefined) {
         this.classesCrossingIntoDyn(o.value.type, found, seen);
+        if (structViewTargetKeys.size > 0) this.noteStructViewCrossing(o.value.type, new Set());
       }
       if (o.kind === "dynCheck" && (o as { type?: IrType }).type !== undefined) {
         this.noteViewCast((o as { type: IrType }).type, this.viewCastSeen);
@@ -9103,9 +9144,10 @@ export class Lowerer {
     // STRUCT VIEW: when every field of the target exists in the source at the IDENTICAL type, the target reads and writes the
     // source's own struct in place (any field kind: bytes, promises and functions included), and the source shape is left an
     // ordinary struct, so loops over it cost nothing. The target takes the grant, the source never does.
-    if (to.fields.every((f) => { const l = plan.get(f.name); return l !== undefined && "src" in l && typeEquals(l.src, f.type); }) && !srcIsView) {
+    if (to.fields.every((f) => { const l = plan.get(f.name); return l !== undefined && "src" in l && typeEquals(l.src, f.type); }) && !srcIsView && !structViewDeniedKeys.has(viewShapeKey(to.fields, to.indexValue))) {
       if (this.onEdge !== null) {
         viewConversionNoted = true;
+        structViewTargetKeys.add(viewShapeKey(to.fields, to.indexValue));
         viewShapeKeys.add(viewShapeKey(to.fields, to.indexValue));
       } else if (!this.isViewShape(expected)) return null;
       this.structViewShapes.add(expected.shapeId);
