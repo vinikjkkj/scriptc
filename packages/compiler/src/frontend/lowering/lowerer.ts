@@ -17505,6 +17505,9 @@ export class Lowerer {
   readonly installerCaps = new Map<string, { sym: ts.Symbol; global: IrGlobal }[]>();
   /** The captures of the late body being lowered: symbol -> global. */
   readonly activeInstallerCaps = new Map<ts.Symbol, IrGlobal>();
+  /** Every class that BORROWED a function (`C.prototype.m = D.prototype.n`), by the borrowed declaration: the
+   * one function value Node shares among them runs against whichever receiver it is called on. */
+  readonly lateMethodBorrowers = new Map<ts.Node, { info: ClassInfo; mName: string }[]>();
   /** An accessor family's loop variable bound to the literal one unrolled
    * body is lowered for (keyed `<Class>.<method name>`), and the bindings
    * active while such a body lowers. */

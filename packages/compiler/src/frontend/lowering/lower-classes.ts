@@ -2340,6 +2340,9 @@ export function prototypeInstallerSteps(L: Lowerer, e: ts.Expression, classSymbo
       L.lateMethodThis.set(fn, ownType);
       L.lateMethodThisOf.set(`${info.def.name}.${m}`, ownType);
       if (!L.lateMethodOwner.has(fn)) L.lateMethodOwner.set(fn, { info, mName: m });
+      const borrowers = L.lateMethodBorrowers.get(fn) ?? [];
+      borrowers.push({ info, mName: m });
+      L.lateMethodBorrowers.set(fn, borrowers);
     }
   }
 
