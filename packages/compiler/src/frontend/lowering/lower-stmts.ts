@@ -8172,7 +8172,19 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
             // / `set p(v: T)`) takes the bare `T` here -- wrapping it into the
             // getter's union would hand the setter a tagged value it never
             // declared.
-            const value = L.lowerExprExpecting(expr.right, writeTypeOf(target));
+            const writeT = writeTypeOf(target);
+            // THE PROPERTY-WRITE DESTINATION for recordKeyReadAtUndefinedArm: `message.detail = fields.D` stores an index-signature read into
+            // a field that DECLARES the undefined arm (pg-protocol's ErrorResponse parser). An absent key stores undefined, as Node does,
+            // instead of aborting the process; every later read of the field is a checked narrowing, so a stored undefined is never silent.
+            if (
+              writeT.kind === "union" && (ts.isPropertyAccessExpression(expr.right) || ts.isElementAccessExpression(expr.right)) &&
+              expr.right.questionDotToken === undefined && probeLower(L, expr.right)?.kind === "recordKeyGet"
+            ) {
+              const raw = L.lowerExpr(expr.right);
+              const armed = L.recordKeyReadAtUndefinedArm(raw, writeT);
+              return L.fieldSetStmt(target, armed ?? L.coerceInto(expr.right, raw, writeT), locOf(expr), expr.left);
+            }
+            const value = L.lowerExprExpecting(expr.right, writeT);
             return L.fieldSetStmt(target, value, locOf(expr), expr.left);
           }
           // A write to an ABSTRACT property through an abstract-typed
