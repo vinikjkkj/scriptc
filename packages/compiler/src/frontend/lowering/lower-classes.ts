@@ -8,7 +8,7 @@ import { appliesEmitterMixin, EMITTER_MIXIN_FIELD, graftCtorEmitterInit } from "
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { ctorFieldFillProven } from "./ctor-fill-proof.js";
-import { EMITTER_CELL_NAMES, GRAFTED_EMITTER_CELL_CLASSES, GRAFTED_EMITTER_CLASSES, BOOL, canBoxClassIntoDyn, canBoxFuncIntoDyn, canDynCheckTo, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DATE_T, DYN, F64, bytesOf, canConvertToDyn, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, weakMapOf, isUnitType, mapOf, setOf, typeEquals } from "../../ir/nodes.js";
+import { EMITTER_CELL_NAMES, GRAFTED_EMITTER_CELL_CLASSES, GRAFTED_EMITTER_CLASSES, BOOL, canBoxClassIntoDyn, canBoxFuncIntoDyn, canDynCheckTo, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DATE_T, DYN, F64, bytesOf, canConvertToDyn, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, NULL_T, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, weakMapOf, isUnitType, mapOf, setOf, typeEquals } from "../../ir/nodes.js";
 import { lowerAbortControllerNew } from "./lower-abort.js";
 import { engineFunctionCtor } from "./lower-engine-fn.js";
 import { implicitDefaultInstance, implicitDetachedInstance, detachedThisClassOf, markDetachedThis, MAX_GENERIC_INSTANCES, inStrictCode, bindingNeverReassigned, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitInstanceLike, implicitMonoFile, omittedArgFor, type GenericFnInfo, type GenericInstance, type ParamShape, appendImplicitUndefinedReturn, bindArgumentsParams, bodyReadsArguments } from "./lower-calls.js";
@@ -5351,6 +5351,12 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
                   const widened = L.withUndefinedArmOf(type);
                   if (widened !== null) type = widened;
                 }
+                // `this.f = null` anywhere in the class (a timer handle cleared in a method: mysql2's connectTimeout): the checker
+                // drops null from a JavaScript field's type, but Node holds it, so the slot takes the null arm.
+                if (isJsSourceFile(decl.getSourceFile()) && classAssignsNullTo(decl, name) && !isUnitType(type) && type.kind !== "dyn" &&
+                    !(type.kind === "union" && L.armTag(type.unionId, NULL_T) >= 0)) {
+                  if (L.dynConvertible(type)) type = DYN;
+                }
               }
               fields.set(name, type);
               fieldOrder.push({ name, type, initializer: undefined });
@@ -5458,7 +5464,9 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           // TypeScript classes keep the loud fence too: an annotated
           // program can spell `T | undefined` itself.
           if (isJsSourceFile(decl.getSourceFile())) {
-            const armed = undefArmedFieldType(L, p, site);
+            let armed = undefArmedFieldType(L, p, site);
+            // `this.f = null` anywhere in the class: the checker drops null, Node holds it (mysql2's connectTimeout) - checked-dynamic slot.
+            if (armed !== null && classAssignsNullTo(decl, p.name) && L.dynConvertible(armed)) armed = DYN;
             if (armed !== null) {
               fields.set(p.name, armed);
               fieldOrder.push({ name: p.name, type: armed, initializer: undefined });
@@ -14292,6 +14300,27 @@ function reorderFieldsByCtorWrites(body: ts.Block, order: ClassInfo["fieldOrder"
   slots.forEach((slot, k) => {
     order[slot] = sorted[k]!;
   });
+}
+
+/** True when some statement in the class assigns the literal `null` to `this.<name>` (constructor, method, accessor, arrow). */
+function classAssignsNullTo(decl: ts.ClassLikeDeclaration, name: string): boolean {
+  let found = false;
+  const stack: ts.Node[] = [decl];
+  while (stack.length > 0 && !found) {
+    const n = stack.pop()!;
+    if (
+      ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      n.right.kind === ts.SyntaxKind.NullKeyword && ts.isPropertyAccessExpression(n.left) &&
+      n.left.expression.kind === ts.SyntaxKind.ThisKeyword && n.left.name.text === name
+    ) {
+      found = true;
+      break;
+    }
+    n.forEachChild((c) => {
+      stack.push(c);
+    });
+  }
+  return found;
 }
 
 function classSymbolOf(L: Lowerer, decl: ts.ClassLikeDeclaration): ts.Symbol | undefined {
