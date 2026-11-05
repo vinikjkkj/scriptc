@@ -6,7 +6,7 @@
  * (FieldTarget). */
 import { evalStaticInfoOf, lowerEvalClassInstanceOf } from "./lower-evalclass.js";
 import { protoDataFieldRead, protoDataHasKey, protoDataMemberRead } from "./lower-protodata.js";
-import { protoSlotOf, slotReadOr } from "./lower-protoslots.js";
+import { dynFnAsFunc, dynFnReadable, protoSlotOf, slotReadOr } from "./lower-protoslots.js";
 import * as ts from "../ts7/adapter.js";
 import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
@@ -27949,11 +27949,27 @@ function classKeyedReadWalked(L: Lowerer, className: string): boolean {
 function shadowAwareMethodValue(L: Lowerer, expr: ts.PropertyAccessExpression, className: string, original: IrExpr): IrExpr {
   const info = L.classes.get(className);
   if (info === undefined || !inOwnShadowFamily(L, info) || original.type.kind !== "func") return original;
-  // An own property written under a run-time key may shadow the method with a value of ANY type, but the read is typed as the
-  // method's function: a shadowing number would meet a checked cast that throws where Node answers the number. Calls are exact
-  // (the dispatcher), values are not, so the read of a family method as a value is refused here.
-  L.unsupported("SC1090", expr, `reading the method '${expr.name.text}' as a value from an instance whose own properties, written under run-time keys, can shadow it with a value of another type (call it directly, or read it through a keyed access)`);
-  return original;
+  // `Class.prototype.m` is the PROTOTYPE's property: an instance's own property never shadows it, so the read is the method.
+  let recvNode: ts.Expression = expr.expression;
+  while (ts.isParenthesizedExpression(recvNode)) recvNode = recvNode.expression;
+  if (ts.isPropertyAccessExpression(recvNode) && recvNode.name.text === "prototype") return original;
+  // `x.m` on an instance: an own property written under a run-time key shadows the method, so the value is that property when
+  // the instance's table holds the name, else the method. The own value comes back through the checked cast to the method's
+  // function type (a function adapts to it). A non-function own value has no function type to come back as: that read
+  // throws the cast's TypeError where Node answers the value. A receiver read twice must be plain.
+  const plain = recvNode.kind === ts.SyntaxKind.ThisKeyword || ts.isIdentifier(recvNode);
+  if (!plain || !dynFnReadable(L, original.type)) {
+    L.unsupported("SC1090", expr, `reading the method '${expr.name.text}' as a value from an instance whose own properties, written under run-time keys, can shadow it with a value of another type (call it directly, or read it through a keyed access)`);
+    return original;
+  }
+  const loc = locOf(expr);
+  const recv = L.lowerExpr(expr.expression);
+  if (recv.type.kind !== "object") return original;
+  const bag: IrExpr = { kind: "fieldGet", obj: recv, className: recv.type.className, field: CLASS_PROPS_FIELD, type: DYN, loc };
+  const key: IrExpr = { kind: "strLit", value: expr.name.text, type: STRING, loc };
+  const own: IrExpr = dynFnAsFunc(L, { kind: "libCall", fn: "cls.propsRead", args: [bag, key], type: DYN, loc }, original.type, loc);
+  const has: IrExpr = { kind: "libCall", fn: "cls.propsHas", args: [{ ...bag }, { ...key }], type: BOOL, loc };
+  return { kind: "ternary", cond: has, then: own, else_: original, type: original.type, loc };
 }
 
 /** `o[k] = v` with a RUN-TIME key on an instance of a JS class that carries the run-time property table
