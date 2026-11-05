@@ -1402,10 +1402,14 @@ async function compileTracked(
   // lane, which never fills it -- and must, because the C expression below is
   // already exactly right for that lane.
   const llStats: LlvmEmitStats = { coroLowered: 0 };
+  // The emitted text is the honest source for one more link switch: a walker
+  // that reads a class box's members calls into scr_dyn_invoke.c whatever
+  // the IR-level predicates said.
+  let emittedReadsObjinstMembers = false;
   if (opts.backend !== "c") {
     try {
       const llPath = join(opts.outDir, `${stem}.ll`);
-      await emitLlvmFile(lowered.module!, llStats, llPath);
+      emittedReadsObjinstMembers = await emitLlvmFile(lowered.module!, llStats, llPath);
       cPath = llPath;
       backend = "llvm";
     } catch (err) {
@@ -1429,6 +1433,7 @@ async function compileTracked(
     const written = await emitCFiles(lowered.module!, entryText, headerName, cPath, opts.outDir, stem);
     programHeader = written.programHeader;
     programUnits = written.programUnits;
+    emittedReadsObjinstMembers = written.readsObjinstMembers;
   }
   // A previous build of the same program may have been split when this one
   // is not (an edit that shrank it, or a threshold change). Its parts would
@@ -1442,6 +1447,7 @@ async function compileTracked(
   await sweepStaleOutputs(opts.outDir, stem, backend, programUnits.length, programHeader !== undefined);
 
   const features = programNativeFeatures(lowered.module!, backend, llStats.coroLowered);
+  if (emittedReadsObjinstMembers) features.dynInvoke = true;
   let irPath: string | undefined;
   if (opts.emitIr) {
     irPath = join(opts.outDir, `${stem}.ir.json`);
@@ -1501,10 +1507,12 @@ async function compileTracked(
   return linkProgram(entryPath, opts, ffi, plan, sourceTexts);
 }
 
-/** The LLVM unit, written; the emitted text is local to this call so it does not outlive the write in the caller's frame. */
-async function emitLlvmFile(mod: IrModule, llStats: LlvmEmitStats, llPath: string): Promise<void> {
+/** The LLVM unit, written; the emitted text is local to this call so it does not outlive the write in the caller's frame. Answers
+ * whether the text reads class-box members (the dyn dispatch unit must then link). */
+async function emitLlvmFile(mod: IrModule, llStats: LlvmEmitStats, llPath: string): Promise<boolean> {
   const ll = tapped("emit.llvm", () => emitLlvmModule(mod, llStats));
   await writeFile(llPath, ll);
+  return ll.includes("scr_dyn_objinst_member_get");
 }
 
 /** The C units (and the header a split program shares), written; the emitted text stays local to this call. */
@@ -1515,9 +1523,11 @@ async function emitCFiles(
   cPath: string,
   outDir: string,
   stem: string,
-): Promise<{ programUnits: string[]; programHeader: string | undefined }> {
+): Promise<{ programUnits: string[]; programHeader: string | undefined; readsObjinstMembers: boolean }> {
   const program = tapped("emit.c", () => emitModuleProgram(mod, entryText, headerName));
   await writeFile(cPath, program.units[0]!);
+  const readsObjinstMembers = program.units.some((u) => u.includes("scr_dyn_objinst_member_get(")) ||
+    (program.header?.includes("scr_dyn_objinst_member_get(") ?? false);
   let programHeader: string | undefined;
   let programUnits: string[] = [];
   if (program.header !== null) {
@@ -1526,7 +1536,7 @@ async function emitCFiles(
     programUnits = program.units.slice(1).map((_, i) => join(outDir, `${stem}.part${i + 1}.c`));
     await Promise.all(programUnits.map((p, i) => writeFile(p, program.units[i + 1]!)));
   }
-  return { programUnits, programHeader };
+  return { programUnits, programHeader, readsObjinstMembers };
 }
 
 /** Read a verification subject off disk. `roles` maps an artifact's role name
