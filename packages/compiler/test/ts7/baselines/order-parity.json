@@ -12826,6 +12826,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24142-options-object-with-an-adaptable-function-member.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24142-options-object-with-an-adaptable-function-member.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24143-error-subclass-declared-code-read-through-errno.ts": {
+   "order": [
+    "<repo>/tests/corpus/24143-error-subclass-declared-code-read-through-errno.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24144-capture-stack-trace-over-an-error-instance-held-as-dyn.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24144-capture-stack-trace-over-an-error-instance-held-as-dyn.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2414-dowhile-continue-kill.ts": {
    "order": [
     "<repo>/tests/corpus/2414-dowhile-continue-kill.ts"
