@@ -12742,6 +12742,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24137-new-over-an-engine-held-class.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24137-new-over-an-engine-held-class.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2414-dowhile-continue-kill.ts": {
    "order": [
     "<repo>/tests/corpus/2414-dowhile-continue-kill.ts"
