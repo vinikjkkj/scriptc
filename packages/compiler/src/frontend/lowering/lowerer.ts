@@ -8415,9 +8415,12 @@ export class Lowerer {
    * promise stays the same object, anything else resolves a fresh one), then the payload checks
    * into T through promiseCoerceAdapter (the validated extraction every dyn-to-static edge has: a
    * payload that is not a T rejects the adapted promise with a catchable TypeError). Null when
-   * the payload does not convert (the caller keeps its fence). Not a general coercion: only the
-   * sites that read the claim off a declaration call it, so a promise slot typed by program code
-   * keeps requireExactShape's fence. */
+   * the payload does not convert (the caller keeps its fence). Called wherever a checked-dynamic value
+   * reaches a typed Promise slot: the declaration-claim sites (a call whose .d.ts says Promise<T>)
+   * and the generic coercion into any typed Promise slot (coerceToExpected), so a promise slot typed
+   * by program code adopts too. A dynamic value that is not a promise resolves a fresh promise, and a
+   * payload the checked cast rejects rejects the adapted promise with a catchable TypeError, where
+   * Node would pass the value through unchecked. */
   adoptDynIntoTypedPromise(expr: IrExpr, want: IrType): IrExpr | null {
     if (expr.type.kind !== "dyn" || want.kind !== "promise") return null;
     const viaDyn: IrType = { kind: "promise", inner: DYN };
