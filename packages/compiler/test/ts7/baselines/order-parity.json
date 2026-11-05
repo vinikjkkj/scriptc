@@ -12754,6 +12754,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24139-undefined-array-position-iterated-or-spread/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/24139-undefined-array-position-iterated-or-spread/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2414-dowhile-continue-kill.ts": {
    "order": [
     "<repo>/tests/corpus/2414-dowhile-continue-kill.ts"
