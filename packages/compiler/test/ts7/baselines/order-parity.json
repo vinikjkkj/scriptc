@@ -12784,6 +12784,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24131-index-read-stored-into-an-optional-field.ts": {
+   "order": [
+    "<repo>/tests/corpus/24131-index-read-stored-into-an-optional-field.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2414-dowhile-continue-kill.ts": {
    "order": [
     "<repo>/tests/corpus/2414-dowhile-continue-kill.ts"
