@@ -14309,6 +14309,15 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
       type: fieldType,
       loc: locOf(expr),
     };
+    // A slot Node may leave undefined while tsc types the element bare (the
+    // declaration-file `[rows, FieldPacket[]]` answering `[rows, undefined]`):
+    // read it as a lying read, so a pass-through keeps the undefined and a
+    // dereference throws Node's own TypeError.
+    if (get.type.kind === "union" && L.armTag(get.type.unionId, UNDEFINED_T) >= 0) {
+      L.undefSlotReads.add(expr);
+      const lr = L.lyingRead(get, expr);
+      if (lr !== null) return lr;
+    }
     return L.maybeNarrow(get, expr);
   }
 
