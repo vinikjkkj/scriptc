@@ -17,3 +17,16 @@ const s = anyFn() as Sized;
 console.log(f.name, g.length, h.name, h.length, s.length);
 const r = inst() as Header;
 console.log(r.affectedRows, r.constructor.name);
+// the same record as an arm of a union the driver's result type spells (ResultSetHeader | OkPacket | rows)
+interface OkPacket { constructor: { name: "OkPacket" }; affectedRows: number; warningCount: number }
+interface Row { id: number }
+class ResultSetHeader { affectedRows = 2; info = "x"; }
+function q(kind: number): any { return kind === 0 ? new ResultSetHeader() : [{ id: 1 }]; }
+async function query<T extends Row[] | OkPacket | Header>(kind: number): Promise<[T, number]> { return [q(kind) as T, 1]; }
+async function main(): Promise<void> {
+  const [res] = await query(0);
+  console.log(JSON.stringify(res), (res as Header).affectedRows);
+  const [rows] = await query(1);
+  console.log(JSON.stringify(rows));
+}
+main();
