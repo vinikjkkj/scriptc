@@ -817,6 +817,9 @@ function icuFeatureFlags(use: IcuUse): Record<string, boolean> {
   return out;
 }
 
+/** The members of scr_dyn_invoke.c that emitted walkers and thunks call directly. */
+const DYN_DISPATCH_REF = /\bscr_dyn_(?:objinst_member_get|objinst_miss|intrinsic_method_get|proxy_get)\b/;
+
 function programNativeFeatures(
   mod: IrModule,
   backend: "c" | "llvm",
@@ -1381,7 +1384,7 @@ async function compileTracked(
       const ll = tapped("emit.llvm", () => emitLlvmModule(lowered.module!, llStats));
       cPath = join(opts.outDir, `${stem}.ll`);
       await writeFile(cPath, ll);
-      emittedReadsObjinstMembers = ll.includes("scr_dyn_objinst_member_get");
+      emittedReadsObjinstMembers = DYN_DISPATCH_REF.test(ll);
       backend = "llvm";
     } catch (err) {
       if (!(err instanceof LlvmUnsupportedError)) throw err;
@@ -1403,8 +1406,8 @@ async function compileTracked(
   if (backend === "c") {
     const program = tapped("emit.c", () => emitModuleProgram(lowered.module!, entryText, headerName));
     await writeFile(cPath, program.units[0]!);
-    emittedReadsObjinstMembers = program.units.some((u) => u.includes("scr_dyn_objinst_member_get(")) ||
-      (program.header?.includes("scr_dyn_objinst_member_get(") ?? false);
+    emittedReadsObjinstMembers = program.units.some((u) => DYN_DISPATCH_REF.test(u)) ||
+      (program.header !== null && DYN_DISPATCH_REF.test(program.header));
     if (program.header !== null) {
       programHeader = join(opts.outDir, headerName);
       await writeFile(programHeader, program.header);
