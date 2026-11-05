@@ -12440,6 +12440,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24060-a-callee-mutating-a-record-of-another-layout-is-seen-by-the-caller.ts": {
+   "order": [
+    "<repo>/tests/corpus/24060-a-callee-mutating-a-record-of-another-layout-is-seen-by-the-caller.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24061-a-record-assigned-to-another-layout-is-the-same-object.ts": {
+   "order": [
+    "<repo>/tests/corpus/24061-a-record-assigned-to-another-layout-is-the-same-object.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24062-a-nested-record-written-through-another-layout-reads-back.ts": {
+   "order": [
+    "<repo>/tests/corpus/24062-a-nested-record-written-through-another-layout-reads-back.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24063-a-converted-record-keeps-its-key-order-and-absent-members.ts": {
+   "order": [
+    "<repo>/tests/corpus/24063-a-converted-record-keeps-its-key-order-and-absent-members.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24064-a-literal-record-of-a-viewed-shape-that-never-converts-stays-plain.ts": {
+   "order": [
+    "<repo>/tests/corpus/24064-a-literal-record-of-a-viewed-shape-that-never-converts-stays-plain.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2405-sibling-arm-narrow.ts": {
    "order": [
     "<repo>/tests/corpus/2405-sibling-arm-narrow.ts"
