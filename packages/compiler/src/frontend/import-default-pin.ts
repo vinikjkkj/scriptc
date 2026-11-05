@@ -17,15 +17,32 @@
  * `module.exports` (a replacement object would not carry the stamp, and the helper would wrap it). Then
  * `__importDefault(require("m"))` and `require("m")` are the same value, and the checker types the second as the module.
  * Any other shape keeps the dynamic helper. The edit is the retype pin's replacement form, applied by the same second load. */
+import { readFileSync } from "node:fs";
 import * as ts from "./ts7/adapter.js";
 import type { RetypePin } from "./retype-pin.js";
 
 const STAMP = /^\s*Object\.defineProperty\(\s*exports\s*,\s*["']__esModule["']\s*,\s*\{\s*value\s*:\s*true\s*\}\s*\)\s*;?\s*$/;
 const MODULE_EXPORTS_ASSIGN = /\bmodule\.exports\s*=[^=]/;
 
-/** Is `sf` a CommonJS source whose own first export action is the interop stamp, with no replacement of module.exports? */
+/** The first statement that is not a directive, as source text: tsc's output opens with `"use strict";` then the stamp. */
+const STAMPED_TEXT = /^\s*(?:(?:\/\*[\s\S]*?\*\/|\/\/[^\n]*)\s*)*(?:["']use strict["'];?\s*)?Object\.defineProperty\(\s*exports\s*,\s*["']__esModule["']\s*,\s*\{\s*value\s*:\s*true\s*\}\s*\)\s*;?/;
+
+/** Is `sf` a CommonJS module whose own first export action is the interop stamp, with no replacement of module.exports? A package
+ * that ships a declaration file resolves to it, not to the implementation, so the implementation beside it is read off disk
+ * (`x.d.ts` -> `x.js`, `x.d.cts` -> `x.cjs`). */
 function stampedCommonJs(sf: ts.SourceFile): boolean {
-  if (sf.isDeclarationFile || !/\.(c|m)?js$/.test(sf.fileName)) return false;
+  if (sf.isDeclarationFile) {
+    const impl = /\.d\.ts$/.test(sf.fileName) ? sf.fileName.replace(/\.d\.ts$/, ".js") : /\.d\.cts$/.test(sf.fileName) ? sf.fileName.replace(/\.d\.cts$/, ".cjs") : null;
+    if (impl === null) return false;
+    let text: string;
+    try {
+      text = readFileSync(impl, "utf8");
+    } catch {
+      return false;
+    }
+    return STAMPED_TEXT.test(text) && !MODULE_EXPORTS_ASSIGN.test(text);
+  }
+  if (!/\.(c|m)?js$/.test(sf.fileName)) return false;
   if (MODULE_EXPORTS_ASSIGN.test(sf.text)) return false;
   for (const st of sf.statements) {
     if (ts.isExpressionStatement(st) && ts.isStringLiteral(st.expression)) continue; // "use strict"
