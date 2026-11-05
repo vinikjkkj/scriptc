@@ -11825,6 +11825,45 @@ const OBJECT_PROTO_NAMES: ReadonlySet<string> = new Set([
   "constructor", "toString", "toLocaleString", "valueOf", "hasOwnProperty", "isPrototypeOf",
   "propertyIsEnumerable", "__proto__", "__defineGetter__", "__defineSetter__", "__lookupGetter__", "__lookupSetter__",
 ]);
+/** Does the module box a function, a class value or a class instance into the checked-dynamic tree?
+ * Only then can a function value reach a record cast, so only then does the function lane of the record
+ * kind gate (backend/kindgate.ts kindgateFuncLane) have a receiver to serve; every other program keeps
+ * the exact record validator it always had. */
+const BOXES_FN_LIKE_MEMO = new WeakMap<IrModule, boolean>();
+export function moduleBoxesFunctionLikeValues(mod: IrModule): boolean {
+  const memo = BOXES_FN_LIKE_MEMO.get(mod);
+  if (memo !== undefined) return memo;
+  const unions = new Map((mod.unions ?? []).map((u) => [u.id, u] as const));
+  const fnLike = (t: IrType | undefined): boolean => {
+    if (t === undefined) return false;
+    if (t.kind === "func" || t.kind === "classval" || t.kind === "object") return true;
+    if (t.kind === "union") return (unions.get(t.unionId)?.arms ?? []).some((a) => fnLike(a));
+    return false;
+  };
+  let found = false;
+  const seen = new Set<object>();
+  const walk = (n: unknown): void => {
+    if (found || n === null || typeof n !== "object") return;
+    if (seen.has(n as object)) return;
+    seen.add(n as object);
+    if (Array.isArray(n)) {
+      for (const x of n) walk(x);
+      return;
+    }
+    const o = n as { kind?: unknown; value?: { type?: IrType } };
+    if (o.kind === "dynFrom" && fnLike(o.value?.type)) {
+      found = true;
+      return;
+    }
+    for (const v of Object.values(o)) walk(v);
+  };
+  for (const fn of mod.functions) {
+    walk(fn.body);
+    if (found) break;
+  }
+  BOXES_FN_LIKE_MEMO.set(mod, found);
+  return found;
+}
 const INSTANCE_LANE_KG_MEMO = new WeakMap<IrModule, boolean>();
 export function moduleInstanceLaneNeedsKg(mod: IrModule): boolean {
   const memo = INSTANCE_LANE_KG_MEMO.get(mod);
