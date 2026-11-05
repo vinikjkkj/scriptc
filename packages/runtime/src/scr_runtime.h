@@ -6981,6 +6981,8 @@ ScrDyn *scr_dyn_new_func_src(ScrClosure *clo, ScrDynThunk thunk, uint32_t arity,
  * display walkers append the empty string and leave the exception
  * pending, and their call sites run no pending check. */
 ScrStr *scr_fn_to_string(const ScrDyn *d);
+/* A function value's own `toString` (an expando), run with the function as `this`: +1 text, NULL with no exception when there is none, NULL with the exception pending when it threw. */
+ScrStr *scr_dyn_fn_own_tostring(const ScrDyn *d);
 /* Calls a dyn value: a non-function kind throws the catchable TypeError
  * "<what> is not a function" (Node's wording — `what` is the call site's
  * callee spelling) and returns NULL; a function kind delegates to the
