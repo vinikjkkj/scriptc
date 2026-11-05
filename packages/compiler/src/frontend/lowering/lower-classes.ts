@@ -6650,6 +6650,10 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     for (let c: ClassInfo | null = info; c; c = c.base) {
       if (c.builtinError || c.builtinEmitter || c.builtinStream !== undefined || c.decl === null) return false;
       if (c.uncollectedStatics?.has(name) === true) return false;
+      // A static the class chain declares (a field, a method, a generic method, an accessor) is read through its own story, never
+      // through the table of undeclared ones.
+      if (c.staticFields.some((s) => s.name === name) || c.staticMethods?.has(name) === true || c.genericStatics?.has(name) === true ||
+          c.staticAccessors?.has(`get:${name}`) === true || c.staticAccessors?.has(`set:${name}`) === true) return false;
     }
     return true;
   }
