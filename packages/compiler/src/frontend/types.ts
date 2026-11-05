@@ -8838,9 +8838,11 @@ function declSpellsAny(decls: readonly ts.Node[]): boolean {
       return arms.includes(ts.SyntaxKind.AnyKeyword) &&
         arms.every((k) => k === ts.SyntaxKind.AnyKeyword || k === ts.SyntaxKind.UndefinedKeyword || k === ts.SyntaxKind.NullKeyword);
     }
+    // `readonly any[]` is the same slot as `any[]`: readonly-ness has no IR.
+    if (ts.isTypeOperatorNode(tn) && tn.operator === ts.SyntaxKind.ReadonlyKeyword) tn = tn.type;
     if (ts.isArrayTypeNode(tn)) return tn.elementType.kind === ts.SyntaxKind.AnyKeyword;
     return (
-      ts.isTypeReferenceNode(tn) && ts.isIdentifier(tn.typeName) && tn.typeName.text === "Array" &&
+      ts.isTypeReferenceNode(tn) && ts.isIdentifier(tn.typeName) && (tn.typeName.text === "Array" || tn.typeName.text === "ReadonlyArray") &&
       tn.typeArguments?.length === 1 && tn.typeArguments[0]!.kind === ts.SyntaxKind.AnyKeyword
     );
   });
