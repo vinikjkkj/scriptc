@@ -5192,6 +5192,11 @@ void scr_dyn_capture_stack(ScrDyn *target) {
                                  "(their property tables cannot hold a non-enumerable member)"));
       return;
     }
+    if (target->kind == SCR_DYN_OBJINST && scr_dyn_objinst_error_rooted(target)) {
+      /* An Error-rooted instance owns its stack already, and the runtime's stack header is formed from the
+       * instance's own name and message when it is read: the capture has nothing to install. */
+      return;
+    }
     if (target->kind == SCR_DYN_OBJINST) {
       scr_throw_error_msg(SCR_ERR_ERROR,
                           "Error.captureStackTrace over a class instance held as a dynamic value is not supported yet",
