@@ -12880,6 +12880,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24147-method-reading-arguments-called-through-a-dynamic-member.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24147-method-reading-arguments-called-through-a-dynamic-member.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2414-dowhile-continue-kill.ts": {
    "order": [
     "<repo>/tests/corpus/2414-dowhile-continue-kill.ts"
