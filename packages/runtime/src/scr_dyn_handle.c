@@ -37,6 +37,7 @@ static ScrDyn *scr_dyn_listener_peek(ScrClosure *cb) {
  * unit cannot spell: scr_net.c's 'connection', scr_http.c's 'request'). */
 ScrDyn *scr_dyn_listener_fn(ScrClosure *cb) { return scr_dyn_listener_peek(cb); }
 
+
 void scr_dyn_listener_fire0(ScrClosure *cb) {
   ScrDyn *fn = scr_dyn_listener_peek(cb);
   ScrDyn *r = scr_dyn_call(fn, NULL, 0, "listener");
@@ -98,6 +99,15 @@ void scr_dyn_listener_fire_err(ScrClosure *cb, ScrStr *msg) {
   scr_dyn_release(r);
   scr_dyn_release(arg);
   scr_dyn_release(fn);
+}
+
+/* Is `cb` one of the runtime-built dyn listener closures (the thunks below)? Then its box holds the dyn FUNCTION the program
+ * registered, and removeListener can compare it by identity; a compiled (static) listener is never one. */
+bool scr_dyn_listener_is(const ScrClosure *cb) {
+  void *f = cb->fn;
+  return f == (void *)&scr_dyn_listener_fire0 || f == (void *)&scr_dyn_listener_fire_close ||
+         f == (void *)&scr_dyn_listener_fire_data || f == (void *)&scr_dyn_listener_fire_err ||
+         f == (void *)&scr_dyn_listener_fire_err_obj;
 }
 
 static ScrClosure *scr_dyn_listener_closure(const ScrDyn *cb, void *fire) {
