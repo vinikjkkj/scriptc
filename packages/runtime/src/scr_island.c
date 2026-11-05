@@ -1534,6 +1534,22 @@ static ScrDyn *isl_dynjs_call(ScrJsval *cell, ScrDyn *const *args, size_t argc) 
   return d;
 }
 
+static ScrDyn *isl_dynjs_construct(ScrJsval *cell, ScrDyn *const *args, size_t argc) {
+  ScrJsval *stack_cells[8];
+  ScrJsval **cells = argc <= 8 ? stack_cells : malloc(argc * sizeof *cells);
+  if (!isl_dynjs_args_in(args, argc, cells)) {
+    if (cells != stack_cells) free(cells);
+    return NULL;
+  }
+  ScrJsval *r = scr_jsval_construct(cell, (int)argc, cells);
+  for (size_t i = 0; i < argc; i++) scr_jsval_release(cells[i]);
+  if (cells != stack_cells) free(cells);
+  if (!r) return NULL;
+  ScrDyn *d = isl_dyn_from_value(r->v);
+  scr_jsval_release(r);
+  return d;
+}
+
 static ScrDyn *isl_dynjs_invoke(ScrJsval *cell, const char *method, ScrDyn *const *args, size_t argc, const char *what) {
   isl_entry();
   JSValue fn = JS_GetPropertyStr(isl_ctx, cell->v, method); /* owned */
@@ -1754,6 +1770,7 @@ static const ScrDynJsvalOps isl_dynjs_ops = {
   isl_dynjs_key_get,
   isl_dynjs_key_set,
   isl_dynjs_call,
+  isl_dynjs_construct,
   isl_dynjs_invoke,
   isl_dynjs_is_nullish,
   isl_dynjs_obj_walk,
