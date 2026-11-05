@@ -131,7 +131,9 @@ const small = big as Small;
 console.log(JSON.stringify(small));
 `);
   expect(r.advisories.filter((a) => a.code === "SC6001")).toEqual([]);
-  expect(r.advisories.map((a) => a.code)).toContain("SC6004");
+  // Since the value model (recview7) `big as Small` is a VIEW of `big`, not a copy: node's `{"a":"x","b":"y"}` is what the
+  // binary prints (corpus 24065), so there is no copy left for SC6004 to advise about.
+  expect(r.advisories.map((a) => a.code)).not.toContain("SC6004");
 });
 
 test("a program with no assertion at all is silent", () => {
@@ -171,9 +173,9 @@ console.log(Object.keys(small).join(","));
   expect(r.advisories[0]!.message).toContain("DROPS");
   expect(r.advisories[0]!.message).toContain("'0'");
   expect(r.advisories[0]!.hint).toContain("ARRAY-INDEX-like");
-  expect(r.diags.map((d) => d.code)).toEqual(["SC1090"]);
-  expect(r.diags[0]!.message).toContain("Object.keys over a record");
-  expect(r.diags[0]!.hint ?? "").toContain('ends "0"');
+  // Since the value model (recview7) `small` is a view of `big`, and `Object.keys(small)` prints node's `0,a` (the view reads the
+  // object's own keys), so the enumeration is no longer refused. SC6001 above still names the member the cast ends.
+  expect(r.diags).toEqual([]);
 });
 
 test("the same declined grant WITHOUT an enumeration keeps compiling", () => {

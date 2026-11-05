@@ -203,8 +203,9 @@ const narrow: Row = wide;
 const o: object = narrow;
 console.log(JSON.stringify(o));`);
   const rows = crossing(r);
-  expect(rows.length).toBe(1);
-  expect(rows[0]!.message).toContain("a width copy already ended");
+  // A narrowed record is a VIEW of the wide one (value model, recview7): crossing it hands over the keys JS keeps, so there is no
+  // ended key to refuse for. Node's `{"inner":1,"middle":"m","tag":true,"extra":"x"}` is what the binary prints.
+  expect(rows.length).toBe(0);
 });
 
 test("a SPREAD of a bare identifier inherits its source's risk", () => {

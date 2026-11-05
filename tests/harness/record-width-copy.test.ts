@@ -1,4 +1,11 @@
-/* THE RECORD WIDTH COPY, and the three answers it gets wrong.
+/* WIDTH SUBTYPING, now a view: the three answers the record width copy used to get wrong agree with node.
+ *
+ * (History, kept because the rows below were written against it.) THE RECORD WIDTH COPY, and the three answers it got wrong.
+ * Since the value model (recview7) a pair whose shared members keep their type converts to a VIEW of the wide record - a struct
+ * view that reads and writes the source in place - so every row below prints node's answer and SC6004 has nothing to advise
+ * about. The rows stay as the regression guard of that, with the node answers as the oracle. Pairs that still copy (a retyped
+ * or absent member of a kind the object path does not take) keep their refusals and advisories; those are pinned in
+ * packages/compiler/test/key-enumeration-risk.test.ts.
  *
  * TypeScript's width subtyping is a RELABEL: `const n: Narrow = wide`,
  * `take(wide)` and `return wide` all hand over the very object the caller
@@ -151,7 +158,7 @@ const NODE = {
 
 describe("a record flowing into a different shape is copied, not relabelled", () => {
   for (const backend of BACKENDS) {
-    test(`${backend}: the copy ends members, answers undefined, and splits identity`, async () => {
+    test(`${backend}: the narrowed value is the same object: nothing ends, a write is seen both ways`, async () => {
       const { out } = await runCompiled(backend)
 
       // ---- THE CONTROL. Agrees with node and must keep agreeing. -------
@@ -161,44 +168,45 @@ describe("a record flowing into a different shape is copied, not relabelled", ()
       // ---- THE DROP. node: `drop {"a":1,"b":2} a,b` --------------------
       expect(
         lineOf(out, "drop"),
-        "PINNED DEFECT: an ARGUMENT-position upcast copies into the narrower shape and ends " +
+        "an ARGUMENT-position upcast copies into the narrower shape and ends " +
           "'b'. The same flow at an assignment or a return is refused by SC1090; the key-risk " +
           "walk does not follow a value through a PARAMETER (its 'name the site or say nothing' " +
           "rule), so this position is the silent one. If this now reads node's answer the drop " +
           "is FIXED: move this row to tests/corpus.",
-      ).toBe(`drop {"a":1} a`)
+      ).toBe(NODE.drop)
 
       // ---- THE IDENTITY, both directions. node: `9 9` twice ------------
       expect(
         lineOf(out, "through"),
-        "PINNED DEFECT: the narrowed value is a DIFFERENT OBJECT, so a write through it never " +
+        "the narrowed value is a DIFFERENT OBJECT, so a write through it never " +
           "reaches the original. This is the face no overflow grant can fix -- it fires at " +
           "every width copy, including the ones that end no member at all.",
-      ).toBe("through 1 9")
+      ).toBe(NODE.through)
 
       expect(
         lineOf(out, "source"),
-        "PINNED DEFECT: the other direction of the same split -- a write to the ORIGINAL is " +
+        "the other direction of the same split -- a write to the ORIGINAL is " +
           "invisible through the narrowed value.",
-      ).toBe("source 9 1")
+      ).toBe(NODE.source)
 
       // ---- 4701's GRANTED path, still wrong. node: `granted 9 9` -------
       expect(
         lineOf(out, "granted"),
-        "PINNED DEFECT: this is the double assertion 4701's overflow grant already 'fixed'. " +
+        "PINNED DEFECT, STILL OPEN: this is the double assertion 4701's overflow grant already 'fixed'. " +
           "The grant repaired the MEMBERS and left the IDENTITY split, and SC6001 fires here " +
           "saying the members were preserved. That is why the grant is not a fix for this " +
-          "family: it addresses data loss, and this row loses no data.",
+          "family: it addresses data loss, and this row loses no data. The value model's views cover the " +
+          "typed conversions (rows above); a cast THROUGH unknown does not take that path, so a write through it " +
+          "still lands on a copy. When it prints node's `granted 9 9`, move the row up.",
       ).toBe("granted 1 9")
     })
 
-    test(`${backend}: SC6004 names the copy rather than letting it be silent`, async () => {
+    test(`${backend}: no copy is left, so SC6004 has nothing to name`, async () => {
       const { advisories } = await runCompiled(backend)
       expect(
         advisories.filter((c) => c === "SC6004").length,
-        "the width copies above must be reported: a wrong answer with no diagnostic anywhere " +
-          "is the thing this project calls worse than a refusal",
-      ).toBeGreaterThan(0)
+        "every pair above is a view now: an advisory about a copy would be about a copy that does not exist",
+      ).toBe(0)
     })
   }
 })

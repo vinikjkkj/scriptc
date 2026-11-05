@@ -255,5 +255,7 @@ const w: W = wide;
 const o: object = w;
 console.log(Object.keys(o).join(","));
 `);
-  expect(r.codes).toContain("SC1090");
+  // Since the value model (recview7) `w` is a VIEW of `wide`: the key the old width copy dropped is still the object's, so the
+  // crossing hands node's `inner,middle,tag,extra` over and nothing is refused. The refusal this pinned described the copy.
+  expect(r.codes).not.toContain("SC1090");
 });

@@ -66,6 +66,12 @@ const shapeWith = (m: IrModule, ...names: string[]): IrRecordShape | undefined =
 
 const sc6004 = (l: Lowered): number => l.advisories.filter((d) => d.code === "SC6004").length;
 
+/** An edge the pass DECLINED is no longer a copy: the narrow side is a view of the wide record (value model, recview7), which
+ * prints and mutates exactly as Node does (tests/harness/record-width-copy.test.ts). So a declined edge shows as two shapes
+ * kept apart and a view node, never as an interned width helper. */
+const hasView = (m: IrModule): boolean => JSON.stringify(m.functions).includes('"kind":"recordSrcView"');
+const shapesWith = (m: IrModule, name: string): number => m.records.filter((r) => r.fields.some((f) => f.name === name)).length;
+
 /* The flow every case below uses: an ARGUMENT-position upcast, which is the
  * position the width copy is silent at (assignment and return are refused by
  * SC1090). */
@@ -101,12 +107,14 @@ test("an OPTIONAL extra member is carried: the two shapes become one and the cop
 test("a REQUIRED extra member declines: no mask writer, so no merge", () => {
   const l = lower(PAIR("{ a: number; b: number }", "{ a: number }", "{ a: 1, b: 2 }"));
   expect(
-    widthHelpers(l.module).length,
+    shapesWith(l.module, "a"),
     "`b: number` has no undefined arm, so a narrow literal that gained the slot would answer " +
       "`present` to Object.keys for a key the object does not have. Trading the identity bug " +
-      "for an enumeration bug is not a trade: the copy stays",
-  ).toBe(1);
-  expect(sc6004(l), "...and SC6004 keeps speaking at the site it kept").toBeGreaterThan(0);
+      "for an enumeration bug is not a trade: the shapes stay apart",
+  ).toBe(2);
+  expect(widthHelpers(l.module), "...and the pair is a view of the wide record, not a copy").toEqual([]);
+  expect(hasView(l.module), "the view is the declined edge's answer").toBe(true);
+  expect(sc6004(l), "no copy, so SC6004 has nothing to advise about").toBe(0);
 });
 
 test("the cap is +2 members: a third declines the whole edge", () => {
@@ -116,10 +124,12 @@ test("the cap is +2 members: a third declines the whole edge", () => {
     PAIR("{ a: number; b?: number; c?: number; d?: number }", "{ a: number }", "{ a: 1 }"),
   );
   expect(
-    widthHelpers(three.module).length,
+    shapesWith(three.module, "a"),
     "+3 is not. A one-field view is what gets allocated in a loop; growing it without bound to " +
-      "spare a copy is a trade nobody asked for",
-  ).toBe(1);
+      "spare a copy is a trade nobody asked for: the shapes stay apart",
+  ).toBe(2);
+  expect(widthHelpers(three.module), "...and the declined edge is a view, not a copy").toEqual([]);
+  expect(hasView(three.module)).toBe(true);
 });
 
 test("the nested pair proves the FIXPOINT: a conflict its own merge dissolves", () => {
@@ -167,10 +177,12 @@ const w: CWide = { a: 1, b: 2, c: 3 }
 console.log(JSON.stringify(take(w)))
 `);
   expect(
-    widthHelpers(cycle.module).length,
+    shapesWith(cycle.module, "a"),
     "`b` before `a` on one member and after it on the other: no single layout prints both " +
-      "members' own keys in their own order, so the edge is a conflict like any other",
-  ).toBe(1);
+      "members' own keys in their own order, so the edge is a conflict like any other: the shapes stay apart",
+  ).toBe(2);
+  expect(widthHelpers(cycle.module), "...and the declined edge is a view, not a copy").toEqual([]);
+  expect(hasView(cycle.module)).toBe(true);
 });
 
 test("a TUPLE never merges, whatever its arity says", () => {

@@ -64,11 +64,26 @@ const narrow: Narrow = wide;
 console.log(Object.keys(narrow).join("|"));
 `);
   const rows = keyRisk(r);
+  // A narrowed record is a VIEW of the wide one (value model, recview7), so the enumeration prints node's `a|b|extra` and is not
+  // refused. (The refusal stays for the pairs that still copy: retyped and absent members.)
+  expect(rows.length).toBe(0);
+  expect(r.compiled).toBe(true);
+});
+
+test("a RETYPED pair still copies, so the refusal that names the ended keys still stands", () => {
+  // The control for the two tests around it: the view answers only pairs whose shared members keep their type. Here `b` changes
+  // type on the way (Uint8Array into Uint8Array | undefined, a member kind the data-only object path does not take), so the pair is still a field copy and still ends `extra`.
+  const r = lower(`
+interface Wide { readonly a: string; readonly b: Uint8Array; readonly extra: string }
+interface Narrow { readonly a: string; readonly b: Uint8Array | undefined }
+const wide: Wide = { a: "A", b: new Uint8Array(1), extra: "X" };
+const narrow: Narrow = wide;
+console.log(Object.keys(narrow).join("|"));
+`);
+  const rows = keyRisk(r);
   expect(rows.length).toBeGreaterThan(0);
   expect(rows[0]!.code).toBe("SC1090");
-  expect(rows[0]!.message).toContain("width copy");
   expect(rows[0]!.hint ?? "").toContain("extra");
-  expect(r.compiled).toBe(false);
 });
 
 test("the same refusal through a SPREAD, which is width subtyping in spread clothing", () => {
@@ -80,8 +95,9 @@ const narrow: Narrow = { ...wide };
 console.log(JSON.stringify(narrow));
 `);
   const rows = keyRisk(r);
-  expect(rows.length).toBeGreaterThan(0);
-  expect(rows[0]!.hint ?? "").toContain("b");
+  // `{ ...wide }` into the narrower literal is a view of a fresh copy of `wide` (value model, recview7): JSON prints node's
+  // `{"a":"A","b":"B"}`, so nothing is refused.
+  expect(rows.length).toBe(0);
 });
 
 /* ── the ORDER half: one shape, several literal orders ────────────────── */

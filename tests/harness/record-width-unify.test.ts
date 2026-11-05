@@ -22,7 +22,8 @@
  * merged layout has to print each member's own keys in that member's own
  * order — `order` and `orderNarrow` are the two halves of that.
  *
- * THE `declined` ROWS ARE A PINNED DEFECT, not an oversight. Their extra
+ * THE `declined` ROWS WERE A PINNED DEFECT (kept for the history; they agree with node since the value model, where the declined
+ * pair is a view of the wide record). Their extra
  * member is REQUIRED, and a required member has no undefined arm to spell
  * "this instance does not have this key" with. Admitting it needs a
  * per-instance own-key mask WRITER at every record construction (the mask
@@ -193,24 +194,23 @@ describe("a width pair the layout can afford becomes one shape", () => {
 
       expect(
         lineOf(out, "declined"),
-        "PINNED DEFECT: 'd' is REQUIRED, so a narrow instance that gained the slot has no " +
-          "undefined arm to answer Object.keys with. The edge is declined and the copy stays, " +
-          "so this still splits identity where node prints 9 9. Admitting it needs a " +
-          "per-instance own-key mask WRITER at every record construction. If this row starts " +
-          "agreeing with node, that writer landed: move the row up to the matching set.",
-      ).toBe("declined 1 9")
+        "'d' is REQUIRED, so a narrow instance that gained the slot has no undefined arm to " +
+          "answer Object.keys with: the edge is declined and the shapes stay apart. Since the " +
+          "value model (recview7) the declined pair is a VIEW of the wide record, which writes " +
+          "through to it, so this prints node's 9 9 where the copy printed 1 9.",
+      ).toBe(NODE.declined)
     })
 
-    test(`${backend}: SC6004 falls silent where the copy went and speaks where it stayed`, async () => {
+    test(`${backend}: SC6004 falls silent where the copy went, and nothing is left to speak about`, async () => {
       const { advisories } = await runCompiled(backend)
       // The advisory is the cheapest end-to-end check that the pass did what
       // it claims: it is emitted per width-copy SITE, after unification has
-      // pruned the sites it closed. The declined pair keeps its copy, so the
-      // count is neither zero nor what it was before the pass.
+      // pruned the sites it closed. The declined pair is a view now (no copy), so
+      // the advisory has no site left; the merged pairs' silence is the pass's.
       expect(
         advisories.filter((c) => c === "SC6004").length,
-        "the declined pair still copies and must still be named",
-      ).toBeGreaterThan(0)
+        "no pair copies any more: the merged ones are one shape, the declined one is a view",
+      ).toBe(0)
     })
   }
 })
