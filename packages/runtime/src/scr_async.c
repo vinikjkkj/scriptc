@@ -239,6 +239,9 @@ struct ScrPromise {
     ScrPromise *dst;
     struct ScrAllState *all;
     size_t all_idx;
+    /* A payload-CLAIM waiter (scr_promise_claim): non-NULL runs the
+     * conversion closure on the fulfilled source INSIDE its settle. */
+    ScrClosure *conv;
   } *cbs;
   size_t ncbs, cbs_cap;
   /* Payload-conversion memo (scr_runtime.h states the contract): the
@@ -336,6 +339,7 @@ static void scr_promise_gcfree(void *o) {
    * above; the cb destinations stay untouched (trace visits them). */
   for (size_t i = 0; i < p->ncbs; i++) {
     if (p->cbs[i].all) scr_promise_all_state_release(p->cbs[i].all);
+    if (p->cbs[i].conv) scr_closure_release(p->cbs[i].conv);
   }
   /* Memo entries ARE visited by the trace, so only the spine frees
    * here -- the collector owns the adapted promises' releases. */
@@ -509,6 +513,7 @@ void scr_promise_release(ScrPromise *p) {
     for (size_t i = 0; i < p->ncbs; i++) {
       scr_promise_release(p->cbs[i].dst);
       if (p->cbs[i].all) scr_promise_all_state_release(p->cbs[i].all);
+      if (p->cbs[i].conv) scr_closure_release(p->cbs[i].conv);
     }
     free(p->cbs);
 #ifdef SCR_RC_AUDIT
@@ -1686,6 +1691,7 @@ static void scr_promise_all_settle(ScrAllState *st, ScrPromise *result, size_t i
  * (reasons are dynamically tagged). first-settle-wins rides the
  * destination's own pending check. Promise.all entries dispatch through
  * their shared countdown state instead of the adapt pair. */
+static void scr_promise_claim_run(ScrPromise *dst, ScrPromise *src, ScrClosure *conv);
 static void scr_promise_settle_wake(ScrPromise *p) {
   for (size_t i = 0; i < p->nwaiters; i++) scr_ready_push(p->waiters[i]);
   p->nwaiters = 0;
@@ -1694,9 +1700,15 @@ static void scr_promise_settle_wake(ScrPromise *p) {
       scr_promise_all_settle(p->cbs[i].all, p->cbs[i].dst, p->cbs[i].all_idx, p);
       scr_promise_all_state_release(p->cbs[i].all);
     } else if (p->state == SCR_PROM_FULFILLED) {
-      p->cbs[i].adapt(p->cbs[i].dst, p);
+      if (p->cbs[i].conv) {
+        scr_promise_claim_run(p->cbs[i].dst, p, p->cbs[i].conv);
+        scr_closure_release(p->cbs[i].conv);
+      } else {
+        p->cbs[i].adapt(p->cbs[i].dst, p);
+      }
     } else {
       scr_promise_settle_from(p->cbs[i].dst, p);
+      if (p->cbs[i].conv) scr_closure_release(p->cbs[i].conv);
     }
     scr_promise_release(p->cbs[i].dst);
   }
@@ -1728,7 +1740,55 @@ void scr_promise_race_add(ScrPromise *race, ScrPromise *in,
   in->cbs[in->ncbs].dst = scr_promise_retain(race);
   in->cbs[in->ncbs].all = NULL;
   in->cbs[in->ncbs].all_idx = 0;
+  in->cbs[in->ncbs].conv = NULL;
   in->ncbs++;
+}
+
+/* ── Declaration-claimed promises ─────────────────────────────────────
+ * `Promise<T>` claimed over a promise whose payload representation is
+ * another type (untyped JS returning a promise a .d.ts types). In JS this
+ * is the SAME object, so its awaiters wake one microtask after the
+ * source settles and nothing else runs. The payload slot cannot be
+ * reinterpreted, so a derived promise D carries the converted payload --
+ * and it must settle INSIDE the source's settle (a callback waiter), not
+ * one job later (an awaiting helper), or every observer of D runs a turn
+ * after Node's. `conv` is the lowerer's async helper `(src) => coerce(
+ * payload(src))`: its body has no await, so the call returns an already
+ * settled promise H (a failed payload check rejects H with the throw),
+ * and D copies H on the spot. Rejection of the source copies across
+ * unchanged. Memoised per (source, id) for `===`, as the old wrapper was.
+ * Returns D +1. */
+static void scr_promise_claim_run(ScrPromise *dst, ScrPromise *src, ScrClosure *conv) {
+  ScrPromise *h = ((ScrPromise *(*)(ScrClosure *, ScrPromise *))conv->fn)(conv, scr_promise_retain(src));
+  scr_promise_race_add(dst, h, scr_promise_adapt_copy);
+  scr_promise_release(h);
+}
+
+ScrPromise *scr_promise_claim(ScrPromise *src, double id, ScrClosure *conv) {
+  ScrPromiseAdapt *hit = scr_promise_adapt_find(src, id);
+  if (hit) return scr_promise_retain(hit->adapted);
+  ScrPromise *dst = scr_promise_new();
+  /* File first: the credit (adapter_observes_pending) must exist before a
+   * rejected source is copied, whose observe spends it. */
+  scr_promise_release(scr_promise_adapt_put(src, id, dst));
+  if (src->state == SCR_PROM_PENDING) {
+    if (src->ncbs == src->cbs_cap) {
+      src->cbs_cap = src->cbs_cap ? src->cbs_cap * 2 : 4;
+      src->cbs = realloc(src->cbs, src->cbs_cap * sizeof *src->cbs);
+      if (!src->cbs) scr_oom();
+    }
+    src->cbs[src->ncbs].adapt = NULL;
+    src->cbs[src->ncbs].dst = scr_promise_retain(dst);
+    src->cbs[src->ncbs].all = NULL;
+    src->cbs[src->ncbs].all_idx = 0;
+    src->cbs[src->ncbs].conv = scr_closure_retain(conv);
+    src->ncbs++;
+  } else if (src->state == SCR_PROM_FULFILLED) {
+    scr_promise_claim_run(dst, src, conv);
+  } else {
+    scr_promise_settle_from(dst, src);
+  }
+  return dst;
 }
 
 /* ── Promise.all ──────────────────────────────────────────────────────
@@ -1771,6 +1831,7 @@ ScrPromise *scr_promise_all(ScrArr *ps, ScrArr *values,
       in->cbs[in->ncbs].dst = scr_promise_retain(result);
       in->cbs[in->ncbs].all = st;
       in->cbs[in->ncbs].all_idx = i;
+      in->cbs[in->ncbs].conv = NULL;
       in->ncbs++;
       st->rc++;
     }

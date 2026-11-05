@@ -1385,6 +1385,11 @@ const LIB_FN_SYMS: Record<string, string> = {
   "promise.adaptHas": "scr_promise_adapt_has",
   "promise.adaptGet": "scr_promise_adapt_get",
   "promise.adaptPut": "scr_promise_adapt_put",
+  "promise.claim": "scr_promise_claim",
+  "promise.payloadF64": "scr_promise_payload_f64",
+  "promise.payloadBool": "scr_promise_payload_bool",
+  "promise.payloadStr": "scr_promise_payload_str",
+  "promise.payloadRef": "scr_promise_payload_ref",
   // encodeURI never throws; the WHATWG base64 globals throw the
   // catchable DOMException InvalidCharacterError (may-throw), and the
   // zero-argument form always throws ERR_MISSING_ARGS.

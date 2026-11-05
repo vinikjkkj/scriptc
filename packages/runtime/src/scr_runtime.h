@@ -7888,6 +7888,11 @@ ScrPromise *scr_promise_adapt_get(ScrPromise *src, double id); /* +1 */
 /* Files `made` under (src, id) and answers it +1 -- the caller's own
  * reference on `made` is untouched. */
 ScrPromise *scr_promise_adapt_put(ScrPromise *src, double id, ScrPromise *made);
+/* Declaration claim of a promise whose payload representation differs: the
+ * derived promise settles INSIDE the source's settle (Node's turn count),
+ * through `conv`, the async helper `(src) => coerce(payload(src))`. +1,
+ * memoised per (src, id). See scr_async.c. */
+ScrPromise *scr_promise_claim(ScrPromise *src, double id, ScrClosure *conv);
 
 typedef struct ScrFiber ScrFiber;
 /* Spawn + run eagerly to the first suspension; returns the promise, +1. */

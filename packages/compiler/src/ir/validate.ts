@@ -1652,6 +1652,11 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "promise.adaptHas": { argTypes: [null, F64], result: BOOL },
   "promise.adaptGet": { argTypes: [null, F64], result: VOID },
   "promise.adaptPut": { argTypes: [null, F64, null], result: VOID },
+  "promise.claim": { argTypes: [null, F64, null], result: VOID },
+  "promise.payloadF64": { argTypes: [null], result: F64 },
+  "promise.payloadBool": { argTypes: [null], result: BOOL },
+  "promise.payloadStr": { argTypes: [null], result: VOID },
+  "promise.payloadRef": { argTypes: [null], result: VOID },
   "als.new": { argTypes: [], result: F64 },
   "als.get": { argTypes: [F64], result: DYN },
   "als.run": { argTypes: [F64, DYN, DYN, DYN], result: DYN },
@@ -4649,6 +4654,16 @@ function validateFunction(
           if (e.fn !== "promise.adaptHas" && e.type.kind !== "promise") {
             err(`libCall ${e.fn} must return a promise`, e.loc);
           }
+          break;
+        }
+        if (e.fn === "promise.claim") {
+          if (e.args[0]?.type.kind !== "promise") err(`libCall promise.claim arg 0: expected a promise, got ${e.args[0]?.type.kind}`, e.loc);
+          if (e.args[2]?.type.kind !== "func") err(`libCall promise.claim arg 2: expected a function value, got ${e.args[2]?.type.kind}`, e.loc);
+          if (e.type.kind !== "promise") err(`libCall promise.claim must return a promise`, e.loc);
+          break;
+        }
+        if (e.fn === "promise.payloadStr" || e.fn === "promise.payloadRef") {
+          if (e.args[0]?.type.kind !== "promise") err(`libCall ${e.fn} arg 0: expected a promise, got ${e.args[0]?.type.kind}`, e.loc);
           break;
         }
         if (e.fn === "process.envGet") {
