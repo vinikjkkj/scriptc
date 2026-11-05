@@ -737,6 +737,8 @@ export const BUILTIN_MODULE_FNS: Record<string, Record<string, BuiltinModuleFn |
   os: {
     // One platform implementation: os.platform() === process.platform.
     platform: { fn: "process.platform", params: [], result: STRING },
+    // os.arch() === process.arch: the compiled binary's own architecture.
+    arch: { fn: "process.arch", params: [], result: STRING },
     homedir: { fn: "os.homedir", params: [], result: STRING },
     tmpdir: { fn: "os.tmpdir", params: [], result: STRING },
     // uname(2)'s release field — Node's own implementation.
