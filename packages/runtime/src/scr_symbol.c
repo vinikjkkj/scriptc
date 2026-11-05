@@ -323,6 +323,24 @@ static const ScrDynClassMember *scr_dsym_inst_member(const ScrDyn *d, ScrSym *k)
 /* A miss on a boxed instance is "absent" only when its class names every member it has. */
 static bool scr_dsym_inst_complete(const ScrDyn *d) { return !scr_dyn_objinst_class_of(d)->opaque; }
 
+/* The run-time property table (%props) of a boxed instance, which hosts its symbol-keyed own properties: the OBJ bag
+ * (+1), or NULL. `ensure` asks the class's synthesized %dynBag member to create it; a class with no table answers NULL
+ * either way. */
+static ScrDyn *scr_dsym_inst_bag(const ScrDyn *d, bool ensure) {
+  const ScrDynClassMember *m = scr_dyn_objinst_member(d, "%props", 6);
+  if (m == NULL || m->get == NULL) return NULL;
+  ScrDyn *b = m->get(d->v.inst.o); /* +1 */
+  if (b != NULL && b->kind == SCR_DYN_OBJ) return b;
+  scr_dyn_release(b);
+  if (!ensure) return NULL;
+  const ScrDynClassMember *ds = scr_dyn_objinst_member(d, "%dynBag", 7);
+  if (ds == NULL || ds->call == NULL) return NULL;
+  ScrDyn *r = ds->call(d->v.inst.o, NULL, 0, "a symbol-keyed property");
+  if (r != NULL && r->kind == SCR_DYN_OBJ) return r;
+  scr_dyn_release(r);
+  return NULL;
+}
+
 /* The ext that holds a receiver's symbol table: an OBJ's or ARR's own, a FUNC's through the table that hangs off its
  * closure. NULL = the kind has no symbol storage. `create` makes the ext (and a FUNC's table) on demand; without it a
  * receiver that never stored one answers NULL ext via *none. */
@@ -410,8 +428,19 @@ ScrDyn *scr_dyn_sym_get(ScrDyn *recv, ScrSym *k) {
     const ScrDynClassMember *m = scr_dsym_inst_member(recv, k);
     if (m != NULL && m->get != NULL) return m->get(recv->v.inst.o);
     if (m != NULL && m->value != NULL) return m->value();
-    if (m != NULL || !scr_dsym_inst_complete(recv)) {
-      scr_dsym_fence(recv, "reading"); /* a method row with no function value, or a class that does not name all its members */
+    if (m != NULL) {
+      scr_dsym_fence(recv, "reading"); /* a method row with no function value */
+      return NULL;
+    }
+    ScrDyn *bag = scr_dsym_inst_bag(recv, false);
+    if (bag != NULL) {
+      ScrDynSymEnt *r = scr_dsym_own(bag, k);
+      ScrDyn *out = r != NULL ? scr_dyn_retain(r->val) : NULL;
+      scr_dyn_release(bag);
+      if (out != NULL) return out;
+    }
+    if (!scr_dsym_inst_complete(recv)) {
+      scr_dsym_fence(recv, "reading"); /* a class that does not name all its members */
       return NULL;
     }
     break;
@@ -432,6 +461,16 @@ static void scr_dsym_set(ScrDyn *recv, ScrSym *k, ScrDyn *v, bool strict) {
   }
   if (recv->static_copy) {
     scr_dyn_static_copy_refuse("assigning a property");
+    return;
+  }
+  if (recv->kind == SCR_DYN_OBJINST) {
+    ScrDyn *bag = scr_dsym_inst_member(recv, k) == NULL ? scr_dsym_inst_bag(recv, true) : NULL;
+    if (bag == NULL) {
+      scr_dsym_fence(recv, "writing"); /* a class member keyed by the symbol, or a class with no property table */
+      return;
+    }
+    scr_dsym_set(bag, k, v, strict);
+    scr_dyn_release(bag);
     return;
   }
   if (recv->kind != SCR_DYN_OBJ && recv->kind != SCR_DYN_ARR && recv->kind != SCR_DYN_FUNC) {
@@ -485,8 +524,13 @@ bool scr_dyn_sym_has_own(ScrDyn *recv, ScrSym *k) {
   switch (scr_dsym_class(recv)) {
   case SCR_DSYM_STORE:
     return scr_dsym_own(recv, k) != NULL;
-  case SCR_DSYM_INST:
-    return scr_dsym_inst_member(recv, k) != NULL;
+  case SCR_DSYM_INST: {
+    if (scr_dsym_inst_member(recv, k) != NULL) return true;
+    ScrDyn *bag = scr_dsym_inst_bag(recv, false);
+    const bool own = bag != NULL && scr_dsym_own(bag, k) != NULL;
+    scr_dyn_release(bag);
+    return own;
+  }
   case SCR_DSYM_FENCE:
     scr_dsym_fence(recv, "testing");
     return false;
@@ -510,8 +554,13 @@ bool scr_dyn_sym_has(ScrDyn *recv, ScrSym *k) {
       o = scr_dyn_ext(o)->proto;
     }
     return false;
-  case SCR_DSYM_INST:
-    return scr_dsym_inst_member(recv, k) != NULL;
+  case SCR_DSYM_INST: {
+    if (scr_dsym_inst_member(recv, k) != NULL) return true;
+    ScrDyn *bag = scr_dsym_inst_bag(recv, false);
+    const bool own = bag != NULL && scr_dsym_own(bag, k) != NULL;
+    scr_dyn_release(bag);
+    return own;
+  }
   case SCR_DSYM_FENCE:
     scr_dsym_fence(recv, "testing");
     return false;
@@ -530,6 +579,17 @@ static bool scr_dsym_delete(ScrDyn *recv, ScrSym *k, bool strict) {
   if (recv->static_copy) {
     scr_dyn_static_copy_refuse("deleting a property");
     return false;
+  }
+  if (recv->kind == SCR_DYN_OBJINST) {
+    if (scr_dsym_inst_member(recv, k) != NULL) {
+      scr_dsym_fence(recv, "deleting"); /* a class member keyed by the symbol */
+      return false;
+    }
+    ScrDyn *bag = scr_dsym_inst_bag(recv, false);
+    if (bag == NULL) return true;
+    const bool ok = scr_dsym_delete(bag, k, strict);
+    scr_dyn_release(bag);
+    return ok;
   }
   bool none;
   ScrDynObjExt *x = scr_dsym_host(recv, false, &none);
@@ -551,7 +611,8 @@ static bool scr_dsym_delete(ScrDyn *recv, ScrSym *k, bool strict) {
 }
 
 ScrDyn *scr_dyn_sym_define(ScrDyn *recv, ScrSym *k, ScrDyn *desc) {
-  if (scr_dsym_nullish(recv) || (recv->kind != SCR_DYN_OBJ && recv->kind != SCR_DYN_ARR && recv->kind != SCR_DYN_FUNC)) {
+  if (scr_dsym_nullish(recv) ||
+      (recv->kind != SCR_DYN_OBJ && recv->kind != SCR_DYN_ARR && recv->kind != SCR_DYN_FUNC && recv->kind != SCR_DYN_OBJINST)) {
     static const char msg[] = "Object.defineProperty called on non-object";
     if (scr_dsym_nullish(recv) || recv->kind == SCR_DYN_STR || recv->kind == SCR_DYN_NUM || recv->kind == SCR_DYN_BOOL)
       scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
@@ -567,6 +628,17 @@ ScrDyn *scr_dyn_sym_define(ScrDyn *recv, ScrSym *k, ScrDyn *desc) {
   if (recv->static_copy) {
     scr_dyn_static_copy_refuse("defining a property");
     return NULL;
+  }
+  if (recv->kind == SCR_DYN_OBJINST) {
+    ScrDyn *bag = scr_dsym_inst_member(recv, k) == NULL ? scr_dsym_inst_bag(recv, true) : NULL;
+    if (bag == NULL) {
+      scr_dsym_fence(recv, "defining"); /* a class member keyed by the symbol, or a class with no property table */
+      return NULL;
+    }
+    ScrDyn *r = scr_dyn_sym_define(bag, k, desc);
+    scr_dyn_release(r);
+    scr_dyn_release(bag);
+    return scr_dyn_retain(recv);
   }
   if (scr_dyn_obj_get(desc, "get", 3) != NULL || scr_dyn_obj_get(desc, "set", 3) != NULL) {
     static const char msg[] =
@@ -636,7 +708,9 @@ static ScrArr *scr_dsym_keys(ScrDyn *recv, bool enum_only) {
   }
   ScrArr *out = scr_arr_new_ref(&scr_sym_retain_v, &scr_sym_release_v, NULL, 4);
   bool none;
-  ScrDynObjExt *x = (recv->kind == SCR_DYN_OBJ || recv->kind == SCR_DYN_ARR || recv->kind == SCR_DYN_FUNC)
+  ScrDyn *held = cls == SCR_DSYM_INST ? scr_dsym_inst_bag(recv, false) : NULL; /* the instance's table, +1 */
+  ScrDynObjExt *x = held != NULL ? scr_dsym_host(held, false, &none)
+                    : (recv->kind == SCR_DYN_OBJ || recv->kind == SCR_DYN_ARR || recv->kind == SCR_DYN_FUNC)
                         ? scr_dsym_host(recv, false, &none)
                         : NULL;
   if (x != NULL && x->syms != NULL) {
@@ -645,6 +719,7 @@ static ScrArr *scr_dsym_keys(ScrDyn *recv, bool enum_only) {
       scr_arr_push_ref(out, scr_sym_retain(x->syms->e[i].key));
     }
   }
+  scr_dyn_release(held);
   return out;
 }
 
@@ -656,8 +731,13 @@ ScrArr *scr_dyn_sym_own_enum_keys(ScrDyn *recv) { return scr_dsym_keys(recv, tru
  * each step: a setter the copy triggers may grow the source. */
 static void scr_dsym_copy_enum(ScrDyn *target, const ScrDyn *src) {
   bool none;
-  ScrDynObjExt *x = scr_dsym_host((ScrDyn *)src, false, &none);
-  if (x == NULL || x->syms == NULL) return;
+  ScrDyn *held = src->kind == SCR_DYN_OBJINST ? scr_dsym_inst_bag(src, false) : NULL; /* the instance's table, +1 */
+  if (src->kind == SCR_DYN_OBJINST && held == NULL) return;
+  ScrDynObjExt *x = scr_dsym_host(held != NULL ? held : (ScrDyn *)src, false, &none);
+  if (x == NULL || x->syms == NULL) {
+    scr_dyn_release(held);
+    return;
+  }
   for (uint32_t i = 0; i < x->syms->len; i++) {
     ScrDynSymEnt *r = &x->syms->e[i];
     if (!(r->flags & SCR_SYMP_ENUM)) continue;
@@ -666,8 +746,9 @@ static void scr_dsym_copy_enum(ScrDyn *target, const ScrDyn *src) {
     scr_dsym_set(target, k, v, true);
     scr_dyn_release(v);
     scr_sym_release(k);
-    if (scr_exc_pending()) return;
+    if (scr_exc_pending()) break;
   }
+  scr_dyn_release(held);
 }
 
 ScrDyn *scr_dyn_sym_append(ScrDyn *names, ScrDyn *recv) {

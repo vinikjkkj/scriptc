@@ -4162,6 +4162,9 @@ double scr_cls_props_count(const ScrDyn *tbl) {
     const ScrDyn *q = tbl->v.obj.entries[i].value;
     if (q->kind == SCR_DYN_ARR && scr_clsprop_enumerable(q)) n++;
   }
+  /* ...and the enumerable symbol-keyed properties the table's ext hosts (scr_symbol.c) */
+  const ScrDynSymTab *st = scr_dyn_ext(tbl)->syms;
+  for (uint32_t i = 0; st != NULL && i < st->len; i++) n += (st->e[i].flags & SCR_SYMP_ENUM) != 0;
   return (double)n;
 }
 

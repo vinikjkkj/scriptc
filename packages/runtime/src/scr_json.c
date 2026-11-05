@@ -13890,6 +13890,11 @@ void (*scr_handle_forin_hook)(const ScrDyn *v, ScrDyn *out) = NULL;
 static void scr_dyn_assign_strs(ScrDyn *target, const ScrDyn *src);
 static void scr_dyn_assign_from(ScrDyn *target, const ScrDyn *src) {
   scr_dyn_assign_strs(target, src);
+  /* A boxed class instance keeps its symbol-keyed properties in the run-time property table */
+  if (target->kind == SCR_DYN_OBJ && src->kind == SCR_DYN_OBJINST && !scr_exc_pending() && scr_dyn_sym_copy_enum != NULL) {
+    scr_dyn_sym_copy_enum(target, src);
+    return;
+  }
   /* CopyDataProperties lists the string keys first and the ENUMERABLE symbol keys after them */
   if (target->kind == SCR_DYN_OBJ && (src->kind == SCR_DYN_OBJ || src->kind == SCR_DYN_ARR || src->kind == SCR_DYN_FUNC) &&
       !scr_exc_pending()) {

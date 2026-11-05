@@ -1123,6 +1123,7 @@ ScrStr *scr_insp_key(ScrStr *k) {
  * holds both families, so the filter is explicit. An ACCESSOR is NOT
  * invoked: Node prints `[Getter]` / `[Setter]` / `[Getter/Setter]` and
  * calls nothing, and calling it here would be a side effect at a print. */
+static void insp_emit_syms(const ScrDyn *d, double recurse, double depth);
 void scr_cls_props_inspect(const ScrDyn *tbl, double recurse, double depth, bool index_keys) {
   if (tbl == NULL || tbl->kind != SCR_DYN_OBJ) return;
   size_t *ord = scr_dyn_obj_key_order(tbl);
@@ -1149,6 +1150,8 @@ void scr_cls_props_inspect(const ScrDyn *tbl, double recurse, double depth, bool
     scr_str_release(entry);
   }
   free(ord);
+  /* the symbol-keyed properties come after every string key: the second (non-index) pass is the last */
+  if (!index_keys) insp_emit_syms(tbl, recurse, depth);
 }
 
 
@@ -1174,11 +1177,22 @@ void scr_cls_props_inspect(const ScrDyn *tbl, double recurse, double depth, bool
 /* The ENUMERABLE symbol-keyed own properties (scr_symbol.c's table) -- the ones Node prints, as `Symbol(desc): value`,
  * after the string keys. Non-enumerable ones (a defineProperty default) print nowhere. */
 static size_t insp_sym_count(const ScrDyn *d) {
+  if (d == NULL) return 0;
   const ScrDynSymTab *t = scr_dyn_ext(d)->syms;
   size_t n = 0;
   for (uint32_t i = 0; t != NULL && i < t->len; i++)
     if (t->e[i].flags & SCR_SYMP_ENUM) n++;
   return n;
+}
+
+/* A boxed instance's run-time property table when it hosts symbol-keyed properties (+1), else NULL. */
+static ScrDyn *insp_inst_sym_bag(const ScrDyn *d) {
+  const ScrDynClassMember *m = scr_dyn_objinst_member(d, "%props", 6);
+  if (m == NULL || m->get == NULL) return NULL;
+  ScrDyn *b = m->get(d->v.inst.o);
+  if (b != NULL && b->kind == SCR_DYN_OBJ && scr_dyn_ext(b)->syms != NULL) return b;
+  scr_dyn_release(b);
+  return NULL;
 }
 
 static size_t insp_slot_count(const ScrDyn *d) {
@@ -1196,6 +1210,7 @@ static size_t insp_slot_count(const ScrDyn *d) {
  * frame scr_insp_begin opened. Insertion order, which is the converter's
  * field order and therefore Node's. */
 static void insp_emit_syms(const ScrDyn *d, double recurse, double depth) {
+  if (d == NULL) return;
   const ScrDynSymTab *t = scr_dyn_ext(d)->syms;
   for (uint32_t i = 0; t != NULL && i < t->len; i++) {
     if (!(t->e[i].flags & SCR_SYMP_ENUM)) continue;
@@ -1877,7 +1892,11 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         if (!scr_dyn_member_hidden(m, d->v.inst.o)) ishown++;
       }
       if (isnap != NULL) ishown = isnap->v.obj.len;
+      /* the instance's symbol-keyed own properties live in its run-time property table (scr_symbol.c) */
+      ScrDyn *isbag = insp_inst_sym_bag(d);
+      ishown += insp_sym_count(isbag);
       if (ishown == 0) {
+        scr_dyn_release(isbag);
         if (isnap != NULL) scr_dyn_release(isnap);
         InspBuf nb = {0};
         ib_cstr(&nb, icn);
@@ -1886,6 +1905,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       }
       if (recurse > depth) {
         if (isnap != NULL) scr_dyn_release(isnap);
+        scr_dyn_release(isbag);
         InspBuf nb = {0};
         ib_char(&nb, '[');
         ib_cstr(&nb, icn[0] != '\0' ? icn : "Object");
@@ -1946,6 +1966,8 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
           scr_str_release(e2);
         }
       }
+      if (!ithrew && isbag != NULL) insp_emit_syms(isbag, recurse, depth);
+      scr_dyn_release(isbag);
       ScrStr *ibase = scr_str_new(icn, strlen(icn));
       ScrStr *ib0 = scr_str_new("{", 1);
       ScrStr *ib1 = scr_str_new("}", 1);
