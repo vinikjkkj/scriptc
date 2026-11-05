@@ -12864,9 +12864,105 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24300-dyn-symbol-keyed-properties-sloppy.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24300-dyn-symbol-keyed-properties-sloppy.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24301-dyn-symbol-keyed-properties-strict.js": {
+   "order": [
+    "<repo>/tests/corpus/24301-dyn-symbol-keyed-properties-strict.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24302-dyn-symbol-keyed-wrapper-impl-cycle.js": {
+   "order": [
+    "<repo>/tests/corpus/24302-dyn-symbol-keyed-wrapper-impl-cycle.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24303-dyn-symbol-keyed-function-values.js": {
+   "order": [
+    "<repo>/tests/corpus/24303-dyn-symbol-keyed-function-values.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24304-dyn-symbol-keyed-copy-and-inspect.js": {
+   "order": [
+    "<repo>/tests/corpus/24304-dyn-symbol-keyed-copy-and-inspect.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24305-dyn-symbol-keyed-class-instance-read.js": {
+   "order": [
+    "<repo>/tests/corpus/24305-dyn-symbol-keyed-class-instance-read.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24306-dyn-symbol-keyed-key-spellings.js": {
+   "order": [
+    "<repo>/tests/corpus/24306-dyn-symbol-keyed-key-spellings.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24307-class-accessor-keyed-by-symbol-constant.js": {
+   "order": [
+    "<repo>/tests/corpus/24307-class-accessor-keyed-by-symbol-constant.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24308-dyn-symbol-keyed-deep-strict-equal.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24308-dyn-symbol-keyed-deep-strict-equal.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24309-class-instance-symbol-keyed-properties.js": {
+   "order": [
+    "<repo>/tests/corpus/24309-class-instance-symbol-keyed-properties.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2431-primitive-ctor-values.ts": {
    "order": [
     "<repo>/tests/corpus/2431-primitive-ctor-values.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24310-class-instance-symbol-keyed-inspect.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24310-class-instance-symbol-keyed-inspect.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24311-dyn-symbol-keyed-accessors.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24311-dyn-symbol-keyed-accessors.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24312-class-instance-symbol-keyed-accessors.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24312-class-instance-symbol-keyed-accessors.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24313-dyn-symbol-keyed-optional-read.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24313-dyn-symbol-keyed-optional-read.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24314-typed-array-to-string-tag-read.ts": {
+   "order": [
+    "<repo>/tests/corpus/24314-typed-array-to-string-tag-read.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24315-to-string-tag-in-and-read.ts": {
+   "order": [
+    "<repo>/tests/corpus/24315-to-string-tag-in-and-read.ts"
    ],
    "diags": []
   },
@@ -24356,6 +24452,12 @@
   "<repo>/tests/diagnostics/symbol-for-duplicate-slot.ts": {
    "order": [
     "<repo>/tests/diagnostics/symbol-for-duplicate-slot.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/symbol-keyed-record-member-crossing-into-an-untyped-read.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/symbol-keyed-record-member-crossing-into-an-untyped-read.ts"
    ],
    "diags": []
   },
