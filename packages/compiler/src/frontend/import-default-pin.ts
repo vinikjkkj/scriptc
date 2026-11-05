@@ -60,6 +60,10 @@ function isTscHelper(decl: ts.Node | undefined): boolean {
   return /return \(mod && mod\.__esModule\) \? mod : \{ ["']?default["']?: mod \};?/.test(t);
 }
 
+const why = (sf: ts.SourceFile, n: ts.Node, r: string): void => {
+  if (/standard-as-callback|ioredis|built[\\/](transaction|cluster)/.test(sf.fileName) || sf.text.includes("standard-as-callback")) process.stderr.write(`[importdefault] ${sf.fileName}:${n.getStart()} ${r} :: ${n.getText().slice(0, 80)}\n`);
+};
+
 export function computeImportDefaultPins(program: ts.Program): Map<string, RetypePin[]> {
   const checker = program.getTypeChecker();
   const out = new Map<string, RetypePin[]>();
@@ -69,28 +73,28 @@ export function computeImportDefaultPins(program: ts.Program): Map<string, Retyp
     const pins: RetypePin[] = [];
     ts.walkPreorder(sf, (n) => {
       if (!ts.isCallExpression(n) || !ts.isIdentifier(n.expression) || n.expression.text !== "__importDefault") return undefined;
-      if (n.arguments.length !== 1) return undefined;
+      if (n.arguments.length !== 1) return why(sf, n, "args!=1");
       let inner: ts.Expression = n.arguments[0]!;
       // `__importDefault(__sc_r0)` after the loader hoisted the require: the argument names a const bound to it.
       if (ts.isIdentifier(inner)) {
         const sym = checker.getSymbolAtLocation(inner);
         const d = sym === undefined ? undefined : checker.declarationsOf(sym)[0];
-        if (d === undefined || !ts.isVariableDeclaration(d) || d.initializer === undefined) return undefined;
+        if (d === undefined || !ts.isVariableDeclaration(d) || d.initializer === undefined) return why(sf, n, "arg ident has no initializer");
         inner = d.initializer;
       }
       if (
         !ts.isCallExpression(inner) || !ts.isIdentifier(inner.expression) || inner.expression.text !== "require" ||
         inner.arguments.length !== 1 || !ts.isStringLiteral(inner.arguments[0]!)
       ) {
-        return undefined;
+        return why(sf, n, "arg is not require(literal)");
       }
       const helper = checker.getSymbolAtLocation(n.expression);
-      if (!isTscHelper(helper === undefined ? undefined : checker.declarationsOf(helper)[0])) return undefined;
+      if (!isTscHelper(helper === undefined ? undefined : checker.declarationsOf(helper)[0])) return why(sf, n, "not tsc helper");
       // The module the specifier names: the checker resolves a JS `require("m")` to the module's symbol.
       const spec = checker.getSymbolAtLocation(inner.arguments[0]!) ?? checker.getTypeAtLocation(inner).getSymbol();
       const depSf = spec === undefined ? undefined : checker.declarationsOf(spec).find(ts.isSourceFile);
       const stamped = depSf !== undefined && stampedCommonJs(depSf);
-      if (process.env["SCRIPTC_IMPORT_DEFAULT_WHY"] !== undefined) {
+      {
         process.stderr.write(`[importdefault] ${sf.fileName}:${n.getStart()} dep=${depSf?.fileName ?? "unresolved"} stamped=${stamped}\n`);
       }
       if (!stamped) return undefined;
