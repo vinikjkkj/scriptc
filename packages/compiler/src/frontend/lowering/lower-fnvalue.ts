@@ -85,6 +85,7 @@ import {
   DYN,
   VOID,
   typeKey,
+  NULL_T,
   isUnitType,
 } from "../../ir/nodes.js";
 import { type BuiltinModuleFn, builtinMemberFnValueAllowed, builtinModuleFnOf, stdlibGlobalNameOf } from "./surfaces.js";
@@ -521,6 +522,7 @@ export function builtinMemberFnValueType(
   L: Lowerer,
   node: ts.Node,
   bi: { module: string; member: string },
+  memberTs: ts.Type = L.typeOf(node),
 ): { want: IrType; row: BuiltinModuleFn } | null {
   // BOTH SPELLINGS, in TypeScript and JavaScript sources. This used to bail
   // for JS ("the named-import spelling lowers to the token string
@@ -543,14 +545,14 @@ export function builtinMemberFnValueType(
   let row2 = row;
   let want2 = want;
   if (bi.module === "tls" && bi.member === "checkServerIdentity") {
-    const sigs = L.checker.getCallSignatures(L.typeOf(node));
+    const sigs = L.checker.getCallSignatures(memberTs);
     if (sigs.length !== 1) return null;
     const retMapped = L.mapTypeOf(L.checker.getReturnTypeOfSignature(sigs[0]!));
     if (retMapped === null) return null;
     row2 = { ...row, result: retMapped };
     want2 = funcOf([...row2.params], retMapped);
   }
-  const mapped = L.mapTypeOf(L.typeOf(node));
+  const mapped = L.mapTypeOf(memberTs);
   if (mapped === null || !typeEquals(mapped, want2)) return null;
   return { want: want2, row: row2 };
 }
@@ -602,6 +604,12 @@ export function builtinMemberFnValueOf(
   const got = builtinMemberFnValueType(L, node, bi);
   if (got === null) return null;
   memberNarrowedSlotFence(L, node, text, got.want);
+  return mintBuiltinMemberValue(L, got, loc);
+}
+
+/** The interned zero-capture closure over the memoized lift of a member's row: one function per row per program, so every
+ * spelling of the same member is the same pointer. */
+function mintBuiltinMemberValue(L: Lowerer, got: { want: IrType; row: BuiltinModuleFn }, loc: SrcLoc): IrExpr {
   const fnName = `%builtin.${got.row.fn}.value`;
   if (!L.liftedFns.some((f) => f.name === fnName)) {
     const params = got.row.params.map((type, i) => ({ localId: `a.${i}`, name: `a${i}`, type }));
@@ -619,6 +627,40 @@ export function builtinMemberFnValueOf(
     L.liftedFns.push(fn);
   }
   return { kind: "closure", fnName, captures: [], type: got.want, loc };
+}
+
+/** A builtin module NAMESPACE (`os`, `await import("os")`) handed to a slot typed as a record of that module's functions
+ * (`Pick<typeof os, "release" | "type">`, the shape a package declares for an adapter): the record whose fields are the
+ * members' interned closures. Each field IS the value the member reads as anywhere else, so `ns.release === os.release`; the
+ * namespace object itself is built per evaluation (a record, not Node's one namespace object). Null when the contextual type
+ * is not such a record, or any member is not a faithful, gate-checked function value - the caller keeps its fence. */
+export function builtinNamespaceRecordOf(L: Lowerer, expr: ts.Expression, module: string, loc: SrcLoc): IrExpr | null {
+  let ctxTs: ts.Type | undefined;
+  try {
+    ctxTs = L.checker.getContextualType(expr);
+  } catch {
+    return null;
+  }
+  if (ctxTs === undefined) return null;
+  let want = L.mapTypeOf(ctxTs);
+  if (want !== null && want.kind === "union") {
+    const arms = (L.unions.get(want.unionId)?.arms ?? []).filter((a) => a.kind !== "undefinedT" && typeKey(a) !== typeKey(NULL_T));
+    want = arms.length === 1 ? arms[0]! : null;
+  }
+  if (want === null || want.kind !== "record") return null;
+  const shape = L.shapes.get(want.shapeId);
+  if (shape === undefined || shape.indexValue !== undefined || shape.tuple === true || shape.fields.length === 0) return null;
+  const nsType = L.typeOf(expr);
+  const fields: { name: string; value: IrExpr }[] = [];
+  for (const f of shape.fields) {
+    if (f.type.kind !== "func") return null;
+    const sym = L.checker.getPropertyOfType(nsType, f.name);
+    if (sym === undefined) return null;
+    const got = builtinMemberFnValueType(L, expr, { module, member: f.name }, L.checker.getTypeOfSymbol(sym));
+    if (got === null || !typeEquals(got.want, f.type)) return null;
+    fields.push({ name: f.name, value: mintBuiltinMemberValue(L, got, loc) });
+  }
+  return { kind: "recordLit", fields, type: want, loc };
 }
 
 

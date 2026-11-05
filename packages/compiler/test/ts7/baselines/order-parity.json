@@ -12524,6 +12524,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24074-a-builtin-module-namespace-fills-a-record-of-its-functions.ts": {
+   "order": [
+    "<repo>/tests/corpus/24074-a-builtin-module-namespace-fills-a-record-of-its-functions.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2405-sibling-arm-narrow.ts": {
    "order": [
     "<repo>/tests/corpus/2405-sibling-arm-narrow.ts"

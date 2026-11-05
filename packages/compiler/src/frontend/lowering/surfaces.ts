@@ -1104,7 +1104,7 @@ export const BUILTIN_MEMBER_FN_VALUES: Record<string, ReadonlySet<string> | unde
   "path/win32": new Set(["dirname", "extname", "isAbsolute", "normalize", "relative", "toNamespacedPath"]),
   // os: networkInterfaces and userInfo are entirely special-cased (their
   // results are the call site's mapped shapes) and are absent.
-  os: new Set(["homedir", "platform", "release", "tmpdir", "totalmem", "type"]),
+  os: new Set(["arch", "homedir", "platform", "release", "tmpdir", "totalmem", "type"]),
   // crypto.randomBytes is aliased (the composed randomBytes(n).toString(enc)
   // lowering) and is absent.
   crypto: new Set(["randomInt", "randomUUID"]),

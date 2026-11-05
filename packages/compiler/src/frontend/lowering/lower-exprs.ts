@@ -19,7 +19,7 @@ import { cjsExportRecordOf, cjsExportRecordField, cjsExportRecordRead, cjsExport
 import { lowerFetchProperty, lowerRequestInitLiteral } from "./lower-fetch.js";
 import { lowerWrtcProperty } from "./lower-wrtc.js";
 import { lowerSqliteProperty } from "./lower-sqlite.js";
-import { TIMER_GLOBAL_VALUE_NAMES, bigStaticHolderSlotFence, builtinFnValueOf, builtinMemberFnValueOf, builtinMemberIsFunction, jsGlobalFnValueOf, staticMemberDynFnValueOf, dynBuiltinFnPropertyOf, dynReceiverCallbackValue } from "./lower-fnvalue.js";
+import { TIMER_GLOBAL_VALUE_NAMES, bigStaticHolderSlotFence, builtinFnValueOf, builtinNamespaceRecordOf, builtinMemberFnValueOf, builtinMemberIsFunction, jsGlobalFnValueOf, staticMemberDynFnValueOf, dynBuiltinFnPropertyOf, dynReceiverCallbackValue } from "./lower-fnvalue.js";
 import { lowerNavigatorProperty, requireFnValueOf, requireMemberFence, valuesCountdown, voidCountdown } from "./lower-builtins.js";
 import { funcObjectPropOf } from "./lower-fnprops.js";
 import { recordKeyReadRow, recordNarrowBridgeRow } from "./keyread-census.js";
@@ -2102,6 +2102,13 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         if (ts.isIdentifier(expr) && L.builtinNamespaceModuleOf(expr) === null) {
           const tableValue = cjsRequireBindingValueOf(L, expr);
           if (tableValue !== null) return tableValue;
+        }
+        {
+          const nsModule = L.builtinNamespaceModuleOf(expr);
+          if (nsModule !== null) {
+            const rec = builtinNamespaceRecordOf(L, expr, nsModule, loc);
+            if (rec !== null) return rec;
+          }
         }
         L.unsupported(
           "SC1090",
