@@ -12802,6 +12802,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24134-declared-tuple-position-answers-undefined/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/24134-declared-tuple-position-answers-undefined/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24135-declared-tuple-position-undefined-flows-on/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/24135-declared-tuple-position-undefined-flows-on/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2414-dowhile-continue-kill.ts": {
    "order": [
     "<repo>/tests/corpus/2414-dowhile-continue-kill.ts"

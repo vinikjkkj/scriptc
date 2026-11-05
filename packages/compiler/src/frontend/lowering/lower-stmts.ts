@@ -3648,8 +3648,17 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
           const mapped = L.mapTypeOf(L.typeOf(name));
           return mapped === null || (L.dynamic && jsvalFlavoredType(mapped));
         })();
-      const type = dynStays ? DYN : L.irTypeOf(name);
+      let type = dynStays ? DYN : L.irTypeOf(name);
       if (type.kind === "void") L.badType(name, L.typeOf(name));
+      // A tuple slot Node may leave undefined (see tupleElementRead): the
+      // binding keeps the undefined-armed slot width.
+      if (
+        value.kind === "recordGet" && value.type.kind === "union" && type.kind !== "union" &&
+        L.armTag(value.type.unionId, UNDEFINED_T) >= 0 && typeEquals(L.stripUndefinedArm(value.type), type)
+      ) {
+        type = value.type;
+        if (symbol) L.bangSymbols.add(symbol);
+      }
       const coerced = L.coerceInto(name, value, type);
       const local = L.declareLocal(name, name.text, type, isLet);
       out.push({ kind: "varDecl", localId: local.id, init: coerced, loc });
@@ -5475,6 +5484,20 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     // genericIfaceBindingKeepsClass.
     if (type.kind === "record" && init.type.kind === "object" && genericIfaceBindingKeepsClass(L, decl, type)) {
       type = init.type;
+    }
+    // `const f = pair[1]` over a tuple whose slot Node may leave undefined
+    // (the declaration-file `[rows, FieldPacket[]]` a DDL answers with
+    // `[rows, undefined]`): the slot is an undefined-armed union, tsc's
+    // binding type is the bare arm. The binding keeps the union; each
+    // reference is a checked use, so a dereference throws Node's TypeError
+    // and a pass-through carries the undefined.
+    if (
+      init.kind === "recordGet" && init.type.kind === "union" &&
+      L.armTag(init.type.unionId, UNDEFINED_T) >= 0 &&
+      type.kind !== "union" && typeEquals(L.stripUndefinedArm(init.type), type)
+    ) {
+      type = init.type;
+      if (declSymbol) L.bangSymbols.add(declSymbol);
     }
     // A TDZ box minted DURING this very initializer (a callback inside it
     // captured this const — predeclareForwardCapture's current-statement
