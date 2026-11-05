@@ -69,7 +69,7 @@ import type {
 } from "../../ir/nodes.js";
 import { isDynErrorClass } from "../../ir/nodes.js";
 import { protoEscapes, strictAt } from "./lower-protoescape.js";
-import { applyProtoSlots, scanProtoSlots } from "./lower-protoslots.js";
+import { applyProtoSlots, dynFnAsFunc, dynFnReadable, scanProtoSlots } from "./lower-protoslots.js";
 import { applyProtoTabs, scanProtoTabs } from "./lower-prototab.js";
 import { OWN_SHADOW_ROOTS, applyFieldNotes, applyOwnShadows, inOwnShadowFamily } from "./lower-ownshadow.js";
 import { CLASS_BUILTIN_CTORLESS, CLASS_NO_DYN_NEW, EVAL_NO_SRC_CLASSES, GRAFTED_EMITTER_CLASSES, GRAFTED_EMITTER_CELL_CLASSES, GRAFTED_ROWS_FENCED_OPS, GRAFTED_PROPS_EXACT_OPS, EVAL_STATIC_CLASSES, dynReflectionSite, emitterStateWriteSites, graftedBoxSites, moduleBoxesEmitters } from "../../ir/nodes.js";
@@ -8649,6 +8649,11 @@ export class Lowerer {
     // outside it keeps requireExactShape's SC1100 fence.
     if (expr.type.kind === "dyn" && expected.kind === "record" && this.projectableRecord(expected)) {
       return this.dynRecordProjection(expr, expected, expr.loc);
+    }
+    // A checked-dynamic function value into a function slot that answers a Promise: the checked cast has no adapter for it, so the
+    // slot gets a closure over the value (parameters box into dyn, the answer adopts into the declared promise).
+    if (expr.type.kind === "dyn" && expected.kind === "func" && expected.ret.kind === "promise" && dynFnReadable(this, expected)) {
+      return dynFnAsFunc(this, expr, expected, expr.loc);
     }
     if (expr.type.kind === "dyn" && expected.kind !== "dyn") {
       if (canDynCheckTo(expected, (id) => this.shapes.get(id), (id) => this.unions.get(id))) {
