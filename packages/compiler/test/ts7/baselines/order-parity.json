@@ -12887,6 +12887,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24153-object-assign-onto-a-class-instance-held-dynamically.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24153-object-assign-onto-a-class-instance-held-dynamically.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2414-dowhile-continue-kill.ts": {
    "order": [
     "<repo>/tests/corpus/2414-dowhile-continue-kill.ts"
