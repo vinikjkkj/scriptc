@@ -459,6 +459,8 @@ export class ShapeRegistry {
    * entry (empty fields) the outer frame finalizes. */
   /** Frames of a proven structural run (all but the outermost), mapped to the outermost frame whose shape they complete as. */
   readonly structFold = new Map<ts.Type, ts.Type>();
+  /** The signature (and the horizon verdict) of a type under a family, computed once: levels of a chain share their probes. */
+  readonly structSigs = new Map<string, Map<ts.Type, string | null>>();
   /** Proven families per generic symbol: the signature every level has, and the outermost frame whose shape they all are. A type
    * mapped LATER on its own (a value typed as level 4) joins the family by the same exact test instead of starting a new chain.
    * Per registry: the target is a type of THIS registry's shapes. */
@@ -8034,7 +8036,14 @@ const knotSensitiveMembers = new WeakMap<ts.Type, readonly string[]>();
  *    rule, and it is stated in the tests.
  *
  * `target` is the outermost frame of the run: every frame in `fold` (the rest of the run) completes as `target`'s shape. */
-const structProbeLevels = (): number => Number(process.env["SCRIPTC_STRUCT_PROBE"] ?? 16);
+/** SCRIPTC_STRUCT_STATS=1 prints, at exit, how many record mappings asked the tie and how long that took. SCRIPTC_STRUCT_TIE=off
+ * disables the tie for a before/after measurement on the same build. Both are measurement switches and nothing else reads them. */
+const structStats = { on: process.env["SCRIPTC_STRUCT_STATS"] !== undefined, calls: 0, ties: 0, family: 0, ms: 0, symMs: 0, symCalls: 0, sigMs: 0, sigs: 0, ancMs: 0 };
+if (structStats.on) {
+  process.on("exit", () => console.error(`[structstats] mappings=${structStats.calls} ties=${structStats.ties} familyJoins=${structStats.family} ms=${structStats.ms.toFixed(1)} symLookups=${structStats.symCalls} symMs=${structStats.symMs.toFixed(1)} sigs=${structStats.sigs} sigMs=${structStats.sigMs.toFixed(1)}`));
+}
+const STRUCT_TIE_ON = process.env["SCRIPTC_STRUCT_TIE"] !== "off";
+const STRUCT_MIN_DEPTH = 9;
 /** SCRIPTC_STRUCT_ARGS=ignore compares a family occurrence as its bare marker (the weak form this file started with). It exists only
  * so tests/structural-tie.test.ts can show the weak form merging shapes that differ; nothing else sets it. */
 const structIgnoreArgs = (): boolean => process.env["SCRIPTC_STRUCT_ARGS"] === "ignore";
@@ -8043,22 +8052,32 @@ interface StructTools {
   symOf(x: ts.Type): ts.Symbol | undefined;
   /** The exact signature of `x` for the family, or null when the facade cannot name a member's type. */
   sig(x: ts.Type): string | null;
-  /** `x`'s signature when it and the next STRUCT_PROBE_LEVELS levels along its own self-instantiations all agree level by level
-   * (each against the first level of ITS symbol), else null. */
-  proven(x: ts.Type): string | null;
 }
 
 /** `family` is every generic symbol that nests in the walk (a mutually recursive pair such as `Filter` and `RootFilterOperators`
  * is one family): an occurrence of any of them inside a member compares as that symbol's marker, whatever its argument. */
+let structSymSeq = 0;
+const structSymIds = new WeakMap<ts.Symbol, number>();
+function structSymId(s: ts.Symbol): number {
+  let id = structSymIds.get(s);
+  if (id === undefined) { id = ++structSymSeq; structSymIds.set(s, id); }
+  return id;
+}
+
 function structTools(family: readonly ts.Symbol[], ctx: TypeMapperCtx): StructTools {
   const { checker } = ctx;
+  const famKey = family.map(structSymId).join(",");
+  let sigCache = ctx.shapes.structSigs.get(famKey);
+  if (sigCache === undefined) ctx.shapes.structSigs.set(famKey, (sigCache = new Map()));
+
   const symOf = (x: ts.Type): ts.Symbol | undefined => x.getAliasSymbol() ?? x.getSymbol();
   const idOf = (x: ts.Type): number | undefined => (x as unknown as { id?: number }).id;
   const marker = new Map<ts.Symbol, string>();
   family.forEach((s, i) => marker.set(s, "#" + i));
   let unknown = false;
-  let selfInstance: ts.Type | undefined;
   let inArgs = 0;
+  /** The first self-instantiation of a type whose signature is cached (the probe follows it). */
+
   /** The type arguments of a family occurrence: an alias's, or an interface/class reference's. */
   const argsOf = (x: ts.Type): readonly ts.Type[] => {
     const al = x.getAliasTypeArguments();
@@ -8089,7 +8108,6 @@ function structTools(family: readonly ts.Symbol[], ctx: TypeMapperCtx): StructTo
     const own = symOf(x);
     const mk = own === undefined ? undefined : marker.get(own);
     if (mk !== undefined) {
-      if (selfInstance === undefined && inArgs === 0) selfInstance = x;
       if (structIgnoreArgs()) return mk;
       if (depth > 6) { unknown = true; return "?"; }
       // The occurrence's ARGUMENTS stay part of what it is: two members naming `B<string>` and `B<number>` are different members.
@@ -8124,60 +8142,51 @@ function structTools(family: readonly ts.Symbol[], ctx: TypeMapperCtx): StructTo
     if (id === undefined) { unknown = true; return "?"; }
     return "t" + id;
   };
-  const raw = (x: ts.Type): string => {
-    selfInstance = undefined;
-    const props = [...checker.getPropertiesOfType(x)].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-    const parts = props.map((p) => `${p.name}${(p.flags & ts.SymbolFlags.Optional) !== 0 ? "?" : ""}:${canon(checker.getTypeOfSymbol(p), 0)}`);
-    for (const info of checker.getIndexInfosOfType(x)) parts.push(`[${canon(info.keyType, 0)}]:${canon(info.valueType, 0)}`);
-    return parts.join(";");
-  };
+  /** A family instance IS its symbol applied to its arguments: two instances of one symbol whose arguments are structurally the
+   * same are the same type, whatever their checker ids, because every member is that argument pushed through the declaration.
+   * So the signature is the symbol and its arguments, compared by the members THEY resolve to; the instance's own (large,
+   * lazily resolved) member list is never enumerated. No arguments, no signature: a generic with none cannot grow. */
   const sig = (x: ts.Type): string | null => {
-    unknown = false;
-    const s = raw(x);
-    return unknown ? null : s;
-  };
-  const why = process.env["SCRIPTC_STRUCT_WHY"] !== undefined;
-  const proven = (x: ts.Type): string | null => {
-    const mine = sig(x);
-    if (why) console.error(`[structwhy] ${checker.typeToString(x).slice(0, 60)} sig=${mine === null ? "UNKNOWN" : mine.slice(0, 400)} self=${selfInstance === undefined ? "none" : "yes"}`);
-    if (mine === null || selfInstance === undefined) return null;
-    const baseline = new Map<ts.Symbol, string>();
-    const xs = symOf(x);
-    if (xs !== undefined) baseline.set(xs, mine);
-    let cur: ts.Type | undefined = selfInstance;
-    for (let i = 0, n = structProbeLevels(); i < n; i++) {
-      if (cur === undefined) return null;
-      const cs = symOf(cur);
-      const s = sig(cur);
-      if (why) console.error(`[structwhy]   probe ${i} ${checker.typeToString(cur).slice(0, 50)} sig=${s === null ? "UNKNOWN" : s.slice(0, 400)}`);
-      if (s === null || cs === undefined) return null;
-      const seen = baseline.get(cs);
-      if (seen === undefined) baseline.set(cs, s);
-      else if (seen !== s) return null;
-      cur = selfInstance;
+    const hit = sigCache!.get(x);
+    if (hit !== undefined) return hit;
+    const own = symOf(x);
+    const mk = own === undefined ? undefined : marker.get(own);
+    let out: string | null = null;
+    if (mk !== undefined) {
+      if (structIgnoreArgs()) out = mk;
+      else {
+        const args = argsOf(x);
+        if (args.length > 0) {
+          unknown = false;
+          inArgs++;
+          const parts = args.map((a) => canonStruct(a, 1));
+          inArgs--;
+          out = unknown ? null : `${mk}<${parts.join(",")}>`;
+        }
+      }
     }
-    return mine;
+    sigCache!.set(x, out);
+    return out;
   };
-  return { symOf, sig, proven };
+  return { symOf, sig };
 }
 
 /** The run of nested frames `T` closes: the outermost frame (target) and the rest (fold), or null.
  *
  * A generic whose members name another instantiation of itself with a deeper argument (`Filter<T>` -> `$and: Filter<WithId<T>>[]`,
  * through the pair `Filter`/`RootFilterOperators`) never repeats a checker type: each level is a new one, so the identity-keyed knot
- * (shapes.inProgress) never closes and the walk runs to the depth cap. When every level is equal in each member but those
- * self-instantiations, the levels are ONE shape.
+ * (shapes.inProgress) never closes and the walk runs to the depth cap. The levels are ONE shape when their arguments are the same.
  *
  * Conservative on purpose, and exact:
- *  - only the SAME generic symbol, in a run of at least three nested frames whose member signatures all equal `T`'s;
- *  - the signature compares member names, optionality and index signatures, each member type identical (by checker type id) apart
- *    from occurrences of the family's own instantiations, which compare equal per symbol, and from function types, which compare
- *    by parameter and return types. Never assignability: `{ _id: ObjectId }` and `{ _id: any }` are mutually assignable and
- *    different shapes. A type the facade gives no id for answers null;
- *  - the self-instantiations `T` names are followed structProbeLevels() more levels and each must have the same signature as the
- *    first level of its symbol, so a conditional type that changes the members within that horizon keeps the levels apart (the
- *    walk then refuses at the depth cap as before). A change beyond the horizon cannot be seen by looking: that is the one
- *    residual, shared with the checker's own deep-nesting rule, and the tests state it. */
+ *  - only the SAME generic symbol, in a run of at least three nested frames, once the walk is STRUCT_MIN_DEPTH deep;
+ *  - a level's signature is its symbol applied to its arguments, each argument compared by the members it resolves to (names,
+ *    optionality, member types, index signatures, recursively; occurrences of the family inside carry their own arguments, and
+ *    function types compare by parameter and return types). Never assignability: `{ _id: ObjectId }` and `{ _id: any }` are
+ *    mutually assignable and different shapes, and `B<string>` and `B<number>` are different arguments. Equal arguments mean an
+ *    equal instance, because every member is the argument pushed through the declaration; so a conditional type that changes the
+ *    members at any depth cannot be tied (its argument differs at that depth too) and no horizon is needed;
+ *  - anything the facade cannot name, or that nests deeper than the comparison depth, answers null (no tie, the walk refuses at
+ *    the depth cap as before). A generic with no arguments has no signature. */
 function structuralAncestorOf(
   t: ts.Type,
   inProgress: ReadonlySet<ts.Type>,
@@ -8186,6 +8195,8 @@ function structuralAncestorOf(
   const symOf = (x: ts.Type): ts.Symbol | undefined => x.getAliasSymbol() ?? x.getSymbol();
   const sym = symOf(t);
   if (sym === undefined) return null;
+  // A chain of three nested levels is never shallower than this: the gate costs an integer compare on the other mappings.
+  if (mapTypeDepth < STRUCT_MIN_DEPTH) return null;
   const counts = new Map<ts.Symbol, number>();
   for (const a of inProgress) {
     const s = symOf(a);
@@ -8199,7 +8210,7 @@ function structuralAncestorOf(
   const tools = structTools(family, ctx);
   const same: ts.Type[] = [];
   for (const a of inProgress) if (symOf(a) === sym) same.push(a);
-  const mine = tools.proven(t);
+  const mine = tools.sig(t);
   if (mine === null) {
     if (process.env["SCRIPTC_MAP_TRACE"]) mapTrace(`STRUCTNO ${ctx.checker.typeToString(t).slice(0, 50)} nested=${same.length} -> probe/sig unproven`);
     return null;
@@ -8219,11 +8230,17 @@ function structuralAncestorOf(
 /** A type mapped on its own that belongs to a family already proven (structFamilies): that family's outermost frame, or null. */
 function structFamilyOf(t: ts.Type, ctx: TypeMapperCtx): ts.Type | null {
   if (ctx.shapes.structFamilies.size === 0) return null;
+  const ts0 = structStats.on ? performance.now() : 0;
   const sym = t.getAliasSymbol() ?? t.getSymbol();
+  if (structStats.on) { structStats.symMs += performance.now() - ts0; structStats.symCalls++; }
   if (sym === undefined) return null;
   const fams = ctx.shapes.structFamilies.get(sym);
   if (fams === undefined) return null;
-  const mine = structTools(fams[0]!.family, ctx).proven(t);
+  const tools = structTools(fams[0]!.family, ctx);
+  // One signature first: the horizon walk is only worth its cost for a type that already looks like a member of a proven family.
+  const first = tools.sig(t);
+  if (first === null || !fams.some((f) => f.sig === first)) return null;
+  const mine = tools.sig(t);
   if (mine === null) return null;
   for (const f of fams) if (f.sig === mine) return f.target;
   return null;
@@ -8249,9 +8266,14 @@ function mapRecordType(widened: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // A STRUCTURAL back-reference: an instantiation of a generic that is already nested in the walk, and whose members are exactly an
   // ancestor's (structuralAncestorOf). It is that ancestor's shape, so the knot closes there instead of at the depth cap.
   {
-    const member = structFamilyOf(widened, ctx);
-    if (member !== null) return { kind: "record", shapeId: shapes.recursiveRef(member) };
-    const tied = structuralAncestorOf(widened, shapes.inProgress, ctx);
+    const t0 = structStats.on ? performance.now() : 0;
+    const member = STRUCT_TIE_ON ? structFamilyOf(widened, ctx) : null;
+    if (member !== null) {
+      if (structStats.on) { structStats.ms += performance.now() - t0; structStats.family++; }
+      return { kind: "record", shapeId: shapes.recursiveRef(member) };
+    }
+    const tied = STRUCT_TIE_ON ? structuralAncestorOf(widened, shapes.inProgress, ctx) : null;
+    if (structStats.on) { structStats.ms += performance.now() - t0; structStats.calls++; if (tied !== null) structStats.ties++; }
     if (tied !== null) {
       mapTrace(`STRUCTTIE ${ctx.checker.typeToString(widened).slice(0, 60)} -> ${ctx.checker.typeToString(tied.target).slice(0, 40)}`);
       // Every level of the run is this shape: the frames still running complete as the target's placeholder.
