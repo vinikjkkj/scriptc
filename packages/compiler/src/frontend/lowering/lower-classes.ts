@@ -9342,6 +9342,19 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
    * dispatch to it through the iterator protocol). Null for genuinely
    * runtime-keyed names — the computed-member fences stay. */
   export function classMemberNameOf(L: Lowerer, name: ts.PropertyName): string | null {
+    return classMemberNameOfImpl(L, name);
+  }
+
+  /** The method-map slot of an ACCESSOR keyed by a symbol constant (`get [K]()` with K a module `Symbol()` or a
+   * `Symbol.for` const): collection records the accessor under that slot, and its body is lowered and listed like any
+   * other accessor's. Null for every other computed name (those stay as they were). */
+  export function symbolSlotAccessorName(L: Lowerer, name: ts.PropertyName): string | null {
+    if (!ts.isComputedPropertyName(name)) return null;
+    const slot = classMemberNameOfImpl(L, name);
+    return slot !== null && (slot.startsWith("sym.uniq:") || slot.startsWith("sym.for:")) ? slot : null;
+  }
+
+  function classMemberNameOfImpl(L: Lowerer, name: ts.PropertyName): string | null {
     if (ts.isIdentifier(name)) return name.text;
     // #private methods key by their spelled name ('#m') — '#' is
     // unspellable in public identifiers, the accessor-colon precedent.
@@ -9589,7 +9602,7 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
 
   function lowerClassMethodMemberInner(L: Lowerer, info: ClassInfo,
     fnLike: ts.MethodDeclaration | ts.AccessorDeclaration,): IrFunction | null {
-    const memberName = ts.isMethodDeclaration(fnLike) ? classMemberNameOf(L, fnLike.name) : ts.isIdentifier(fnLike.name) || ts.isPrivateIdentifier(fnLike.name) ? fnLike.name.text : null;
+    const memberName = ts.isMethodDeclaration(fnLike) ? classMemberNameOf(L, fnLike.name) : ts.isIdentifier(fnLike.name) || ts.isPrivateIdentifier(fnLike.name) ? fnLike.name.text : symbolSlotAccessorName(L, fnLike.name);
     if (memberName === null) return null;
     const mName = ts.isMethodDeclaration(fnLike)
       ? memberName
