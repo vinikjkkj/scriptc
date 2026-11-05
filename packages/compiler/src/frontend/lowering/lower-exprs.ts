@@ -25944,10 +25944,19 @@ export function slotBypassTarget(L: Lowerer, declarer: ClassInfo, method: string
     const hasBag = info.hasPropsTable === true;
     const hasTab = hasProtoTab(L, info);
     if (decls.length === 0 && !hasBag && !hasTab) return null;
-    if (!isPlainMethodReceiver(expr.expression)) return null;
     const loc = locOf(expr);
-    const recv = L.lowerExpr(expr.expression);
-    if (recv.type.kind !== "object") return null;
+    // The chain reads the receiver several times (class tests, slots, the table): a receiver that is not a plain name or `this`
+    // (`this.connectionParameters.password`) is evaluated ONCE into a hidden local and the chain reads that.
+    const recv0 = L.lowerExpr(expr.expression);
+    if (recv0.type.kind !== "object") return null;
+    const recvObjT = recv0.type;
+    let recv: IrExpr & { type: typeof recvObjT } = recv0 as IrExpr & { type: typeof recvObjT };
+    let pre: IrStmt | null = null;
+    if (!isPlainMethodReceiver(expr.expression)) {
+      const rTmp = L.declareHiddenLocal("%subRecv", recvObjT);
+      pre = { kind: "varDecl", localId: rTmp.id, init: recv0, loc };
+      recv = { kind: "varRef", localId: rTmp.id, type: recvObjT, loc };
+    }
     const boxed = (value: IrExpr): IrExpr | null => {
       const t = value.type;
       if (t.kind === "dyn") return value;
@@ -26000,7 +26009,7 @@ export function slotBypassTarget(L: Lowerer, declarer: ClassInfo, method: string
         loc,
       };
     }
-    return chain;
+    return pre === null ? chain : { kind: "seqExpr", stmts: [pre], result: chain, type: DYN, loc };
   }
 
 /** Field read `obj.f` on class-instance and record receivers, through the
