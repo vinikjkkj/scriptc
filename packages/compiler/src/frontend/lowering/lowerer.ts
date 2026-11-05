@@ -14919,11 +14919,11 @@ export class Lowerer {
    * property named; so this throws that exact TypeError and otherwise
    * extracts the declared arm. `what` is the property clause, e.g.
    * "reading 'length'" or "setting 'id'". */
-  lyingPropHelper(fromId: string, target: IrType, setting: boolean, prop: string, loc: SrcLoc, callText?: string): string | null {
+  lyingPropHelper(fromId: string, target: IrType, setting: boolean, prop: string, loc: SrcLoc, callText?: string, iterText?: string): string | null {
     const from = this.unions.get(fromId);
     const tag = this.armTag(fromId, target);
     if (!from || tag < 0) return null;
-    const key = `lyingprop:${fromId}:${tag}:${setting ? "set" : "get"}:${prop}:${callText ?? ""}`;
+    const key = `lyingprop:${fromId}:${tag}:${setting ? "set" : "get"}:${prop}:${callText ?? ""}:${iterText ?? ""}`;
     const existing = this.narrowHelpers.get(key);
     if (existing) return existing;
     const name = `%lying.prop.${this.narrowHelpers.size}`;
@@ -14934,7 +14934,9 @@ export class Lowerer {
     from.arms.forEach((arm, i) => {
       if (arm.kind !== "undefinedT" && arm.kind !== "nullT") return;
       const what = arm.kind === "undefinedT" ? "undefined" : "null";
-      const msg = callText !== undefined
+      const msg = iterText !== undefined
+        ? `${iterText} is not iterable`
+        : callText !== undefined
         ? `${callText} is not a function`
         : setting
           ? `Cannot set properties of ${what} (setting '${prop}')`
@@ -14968,7 +14970,7 @@ export class Lowerer {
   /** Tuple-slot reads whose undefined arm is a declaration-file promise (see tupleElementRead). */
   readonly undefSlotReads = new Set<ts.Node>();
 
-  classifyLyingRead(node: ts.Expression): "peel" | "narrow" | "num" | { prop: string; set: boolean; callText?: string; dynKey?: ts.Expression; msg?: string } {
+  classifyLyingRead(node: ts.Expression): "peel" | "narrow" | "num" | { prop: string; set: boolean; callText?: string; dynKey?: ts.Expression; msg?: string; iterText?: string } {
     let p: ts.Node = node;
     while (
       p.parent &&
@@ -14977,6 +14979,14 @@ export class Lowerer {
     ) p = p.parent;
     const par = p.parent;
     if (!par) return "narrow";
+    // An iteration or array spread over an undefined slot: V8 names the expression ("f is not iterable").
+    if (
+      (ts.isForOfStatement(par) && par.expression === p) ||
+      (ts.isSpreadElement(par) && ts.isArrayLiteralExpression(par.parent)) ||
+      (ts.isVariableDeclaration(par) && par.initializer === p && ts.isArrayBindingPattern(par.name))
+    ) {
+      return { prop: "", set: false, iterText: p.getText() };
+    }
     const isUnit = (e: ts.Expression): boolean => {
       const f = this.typeOf(e).flags;
       return (f & (ts.TypeFlags.Undefined | ts.TypeFlags.Null)) !== 0;
@@ -15246,7 +15256,7 @@ export class Lowerer {
     const done = (e: IrExpr): IrExpr => { this.lyingResults.add(e); return e; };
     if (ctx === "peel") return done(union);
     if (typeof ctx === "object" && ctx.dynKey === undefined && ctx.msg === undefined) {
-      const h = this.lyingPropHelper(union.type.unionId, target, ctx.set, ctx.prop, loc, ctx.callText);
+      const h = this.lyingPropHelper(union.type.unionId, target, ctx.set, ctx.prop, loc, ctx.callText, ctx.iterText);
       if (h) return done({ kind: "call", callee: h, args: [union], type: target, loc });
     }
     const h = ctx === "num"
