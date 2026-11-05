@@ -13256,10 +13256,10 @@ export class Lowerer {
     // A record naming METHODS is the witness regime (closures bound to the instance, projection plans): only a
     // record of data members is a lossy copy a view must replace.
     if (sh.fields.some((f) => f.type.kind === "func" || (f.type.kind === "union" && (this.unions.get(f.type.unionId)?.arms.some((a) => a.kind === "func") ?? false)))) return null;
-    // A class rooted in a runtime builtin (an emitter, a stream, an Error) keeps its own projection plans:
+    // A class rooted in a runtime emitter or stream keeps its own projection plans:
     // its surface members are the runtime's, not table rows a view could read back.
     for (let c: ClassInfo | null = this.classes.get(className) ?? null; c; c = c.base) {
-      if (c.def.name === RUNTIME_EMITTER_CLASS || RUNTIME_STREAM_CLASSES.has(c.def.name) || RUNTIME_ERROR_CLASSES.has(c.def.name) || c.builtinError) return null;
+      if (c.def.name === RUNTIME_EMITTER_CLASS || RUNTIME_STREAM_CLASSES.has(c.def.name)) return null;
     }
     const toT: IrType = { kind: "record", shapeId: toId };
     if (!canDynCheckTo(toT, (id) => this.shapes.get(id), (id) => this.unions.get(id)) && !this.projectableRecord(toT)) return null;
