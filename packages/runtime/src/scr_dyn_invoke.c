@@ -5108,8 +5108,9 @@ void scr_dyn_capture_stack(ScrDyn *target) {
       return;
     }
     if (target->kind == SCR_DYN_OBJINST && scr_dyn_objinst_error_rooted(target)) {
-      /* An Error-rooted instance owns its stack already, and the runtime's stack header is formed from the
-       * instance's own name and message when it is read: the capture has nothing to install. */
+      /* An Error-rooted instance owns its stack: the capture re-forms the header from the instance's CURRENT name
+       * and message, so the memoised one is forgotten and the next read forms it afresh. */
+      scr_error_capture_stack((ScrError *)target->v.inst.o);
       return;
     }
     if (target->kind == SCR_DYN_OBJINST) {
