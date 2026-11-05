@@ -20,6 +20,7 @@ import { PoisonError, dynFallbackType, dynUndefinedExpr, fnValueCodeOfNode, newF
 import { isBufferSpeciesCtor, lowerFastBufferNew, bufEncoding, lowerMapCloneNew, lowerMapSeedArrayNew } from "./lower-containers.js";
 import { fnOwnCounters, fnOwnPropBox, fnOwnWhy, probeLower, pureReemittable } from "./lower-exprs.js";
 import { lowerDateNumArg, lowerSearchParamsNew } from "./lower-builtins.js";
+import { readFileSync } from "node:fs";
 import { requiresDynamicPackageDiag, requiresDynamicTypeDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { lowerSqliteNew } from "./lower-sqlite.js";
 import { lowerWrtcNew } from "./lower-wrtc.js";
@@ -8692,6 +8693,23 @@ export function dynBagFn(L: Lowerer, info: ClassInfo): IrFunction | null {
  * symbol is not initialized by a plain Symbol() call (the same form a symbol-keyed class member requires). */
 export function symbolCreationSiteOf(L: Lowerer, sym: ts.Symbol): string | null {
   for (const d of L.checker.declarationsOf(sym)) {
+    // A package that ships declarations: `export declare const k: unique symbol` stands for the implementation's
+    // `exports.k = Symbol("desc")`, whose call node is where the runtime symbol is created.
+    if (ts.isVariableDeclaration(d) && d.getSourceFile().isDeclarationFile) {
+      const dts = d.getSourceFile().fileName;
+      const impl = /\.d\.ts$/.test(dts) ? dts.replace(/\.d\.ts$/, ".js") : /\.d\.cts$/.test(dts) ? dts.replace(/\.d\.cts$/, ".cjs") : null;
+      if (impl === null) continue;
+      let text: string;
+      try {
+        text = readFileSync(impl, "utf8");
+      } catch {
+        continue;
+      }
+      const name = sym.name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const hits = [...text.matchAll(new RegExp(`^exports\\.${name}\\s*=\\s*Symbol\\(`, "gm"))];
+      if (hits.length === 1) return `${impl}:${hits[0]!.index + hits[0]![0].length - "Symbol(".length}`;
+      continue;
+    }
     let init: ts.Expression | undefined;
     if (ts.isVariableDeclaration(d) || ts.isPropertyAssignment(d)) init = d.initializer;
     else if (ts.isBinaryExpression(d) && d.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
@@ -8708,13 +8726,14 @@ export function symbolCreationSiteOf(L: Lowerer, sym: ts.Symbol): string | null 
 
 /** Row name -> creation site for the symbol-keyed members THIS class declares itself (fields keyed `Symbol(desc)`, methods and
  * accessors keyed `sym.uniq:Symbol(desc)`); members whose symbol has no recoverable site are left out. */
-function symbolMemberSites(L: Lowerer, info: ClassInfo): Map<string, string> {
+function symbolMemberSites(L: Lowerer, info: ClassInfo, unresolved: ts.Node[]): Map<string, string> {
   const out = new Map<string, string>();
   const inherited = info.base?.symbolFields;
   for (const [sym, row] of info.symbolFields ?? []) {
     if (inherited?.has(sym) === true) continue;
     const site = symbolCreationSiteOf(L, sym);
     if (site !== null) out.set(row, site);
+    else unresolved.push(info.decl ?? ({} as ts.Node));
   }
   for (const m of info.decl?.members ?? []) {
     const name = (m as { name?: ts.PropertyName }).name;
@@ -8725,6 +8744,7 @@ function symbolMemberSites(L: Lowerer, info: ClassInfo): Map<string, string> {
     if (u === null) continue;
     const site = symbolCreationSiteOf(L, u.sym);
     if (site !== null) out.set(`sym.uniq:${u.fieldName}`, site);
+    else unresolved.push(m);
   }
   return out;
 }
@@ -9216,7 +9236,18 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
           }
           // Each member keyed by a module symbol names the creation site of that symbol (%symid:<row>), so a read through an
           // untyped receiver matches the member by identity and not by description.
-          for (const [row, site] of symbolMemberSites(L, info)) {
+          const unresolvedSyms: ts.Node[] = [];
+          const memberSites = symbolMemberSites(L, info, unresolvedSyms);
+          for (const bad of unresolvedSyms) {
+            if (bad.kind === undefined) continue;
+            L.pushDiag(unsupportedDiag(
+              "SC1101",
+              locOf(bad),
+              "a class member keyed by a symbol whose creation site cannot be traced, in a program that reads symbol-keyed properties of 'unknown' values",
+              "the read matches a member by the identity of the symbol, which the runtime takes from the Symbol() call that made it; this key is not initialized by a plain Symbol() call the build can name.",
+            ));
+          }
+          for (const [row, site] of memberSites) {
             const fn = symIdFn(info, row, site);
             out.push(fn);
             info.def.dynMethods = [...(info.def.dynMethods ?? []), { name: `%symid:${row}`, fn: fn.name }];

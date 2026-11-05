@@ -368,16 +368,18 @@ static const ScrDynClassMember *scr_dsym_inst_row(const ScrDyn *d, const char *p
   return m;
 }
 
-/* A module symbol's member row names the creation site of its key in a companion `%symid:<row>` member. When both the row and the
- * symbol carry a site, they must be the same one: two symbols that share a description are two keys. A row or a symbol with no
- * site recorded (a key the compiler could not trace to its Symbol() call) matches by name alone. */
+/* A module symbol's member row names the creation site of its key in a companion `%symid:<row>` member; the symbol carries the
+ * site of the Symbol() call that made it. They must be the same one: two symbols that share a description are two keys. A symbol
+ * with no site (made by engine code) or a row with no companion matches nothing: the build refuses a class member whose key it
+ * cannot trace, so the second cannot arise in a program that reads symbols off untyped values. */
 static bool scr_dsym_site_ok(const ScrDyn *d, const ScrDynClassMember *m, ScrSym *k) {
+  if (m == NULL) return false;
   const ScrStr *ks = scr_sym_site(k);
-  if (m == NULL || ks == NULL) return true;
+  if (ks == NULL) return false; /* a symbol the program did not make from a traced Symbol() call is no class member's key */
   const ScrDynClassMember *cm = scr_dsym_inst_row(d, "%symid:", 7, m->name, m->len);
-  if (cm == NULL || cm->call == NULL) return true;
+  if (cm == NULL || cm->call == NULL) return false;
   ScrDyn *r = cm->call(d->v.inst.o, NULL, 0, "a symbol-keyed member");
-  if (r == NULL) return true;
+  if (r == NULL) return false;
   const bool same = r->kind == SCR_DYN_STR && scr_str_eq(r->v.str, ks);
   scr_dyn_release(r);
   return same;
