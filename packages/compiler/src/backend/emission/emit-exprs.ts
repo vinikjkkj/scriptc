@@ -7326,6 +7326,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_env_pairs()`);
           case "process.pid":
             return finish(`scr_process_pid()`);
+          case "error.noMessage":
+            return finish(`((ScrStr *)NULL)`);
           case "dyn.this":
             return finish(`scr_dyn_this_get()`);
           case "dyn.thisSloppy":
