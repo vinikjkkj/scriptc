@@ -780,6 +780,10 @@ export function lowerForAwaitAsyncGenerator(
  * result. Consumer `.return()`/`.throw()` while suspended here unwinds
  * the OUTER generator without forwarding to the delegate (numbered
  * divergence). Null when this is not a yield* statement. */
+function ctxGenMethodBody(L: Lowerer): boolean {
+  return L.ctx.genMethodBody === true;
+}
+
 export function lowerYieldStarStatement(L: Lowerer, expr: ts.Expression): IrStmt | null {
   if (!ts.isYieldExpression(expr) || expr.asteriskToken === undefined) return null;
   const gen = L.ctx.generator;
@@ -873,6 +877,49 @@ export function lowerYieldStarStatement(L: Lowerer, expr: ts.Expression): IrStmt
               loc,
             },
           ];
+    const delegLoop: IrStmt = {
+      kind: "while",
+      cond: {
+        kind: "unary",
+        op: "!",
+        operand: { kind: "recordGet", obj: rRef(), shapeId: recT.shapeId, field: "done", type: BOOL, loc },
+        type: BOOL,
+        loc,
+      },
+      body: loopBody,
+      loc,
+    };
+    // In a generator METHOD, closing the delegating generator while it is suspended here closes the delegate too (JS
+    // forwards return() to it, so the delegate's finally blocks run and its fiber is released). The close sits in a
+    // finally: on normal completion the delegate is done and nothing runs. Module-level generators keep the bare loop.
+    const delegSteps: IrStmt[] = ctxGenMethodBody(L)
+      ? [
+          {
+            kind: "tryCatch",
+            tryBody: [delegLoop],
+            catchBody: null,
+            catchLocalId: null,
+            finallyBody: [
+              {
+                kind: "if",
+                cond: {
+                  kind: "unary",
+                  op: "!",
+                  operand: { kind: "recordGet", obj: rRef(), shapeId: recT.shapeId, field: "done", type: BOOL, loc },
+                  type: BOOL,
+                  loc,
+                },
+                then: [
+                  { kind: "exprStmt", expr: { kind: "genResume", mode: "return", gen: dRef(), arg: null, type: recT, loc }, loc },
+                ],
+                else_: null,
+                loc,
+              },
+            ],
+            loc,
+          },
+        ]
+      : [delegLoop];
     return {
       kind: "block",
       body: [
@@ -883,18 +930,7 @@ export function lowerYieldStarStatement(L: Lowerer, expr: ts.Expression): IrStmt
           init: { kind: "genResume", mode: "next", gen: dRef(), arg: null, type: recT, loc },
           loc,
         },
-        {
-          kind: "while",
-          cond: {
-            kind: "unary",
-            op: "!",
-            operand: { kind: "recordGet", obj: rRef(), shapeId: recT.shapeId, field: "done", type: BOOL, loc },
-            type: BOOL,
-            loc,
-          },
-          body: loopBody,
-          loc,
-        },
+        ...delegSteps,
       ],
       loc,
     };
