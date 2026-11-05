@@ -7883,7 +7883,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // C variadic tail, every argument borrowed (the invoke
             // adapters retain each callee's +1). May-throw (listeners).
             return finish(
-              `scr_emitter_emit((ScrEmitter *)${arg(0)}, ${arg(1)}${e.args.slice(2).map((_, i) => `, ${arg(i + 2)}`).join("")})`,
+              `(scr_ee_pending_argc = ${e.args.length - 2}, scr_emitter_emit((ScrEmitter *)${arg(0)}, ${arg(1)}${e.args.slice(2).map((_, i) => `, ${arg(i + 2)}`).join("")}))`,
             );
           case "emitter.fromDyn":
             // The emitter (+1) of a dyn-boxed emitter instance (the emitterApi test held).

@@ -17834,6 +17834,10 @@ class LlEmitter {
         return `ptr ${a.name}`;
       });
       this.declare(`declare zeroext i1 @scr_emitter_emit(ptr, ptr, ...)`);
+      // The site's argument count rides a runtime cell the emit reads first: a dyn-parameter listener whose event tuple is wider than
+      // this site reads undefined for the missing positions instead of the variadic tail's garbage.
+      this.declare(`@scr_ee_pending_argc = external global i64`);
+      B.line(`store i64 ${tuple.length}, ptr @scr_ee_pending_argc`);
       const call = `call zeroext i1 (ptr, ptr, ...) @scr_emitter_emit(` +
         [`ptr ${args[0]!.name}`, `ptr ${args[1]!.name}`, ...tuple].join(", ") + `)`;
       if (e.type.kind === "void") {
