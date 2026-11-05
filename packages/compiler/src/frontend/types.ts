@@ -6790,6 +6790,12 @@ export function genResultRecord(
  * answer undefined for. Filled once per program load (program.ts). */
 export const undefArrayElemNames = new Set<string>();
 
+/** True when `t` is an array of the library-declared element a tuple position answers undefined for
+ * (undefArrayElemNames). */
+export function isUndefWidenedArray(t: ts.Type, ctx: TypeMapperCtx, checker: ts.TypeChecker): boolean {
+  return undefArrayElemNames.size > 0 && packageDeclaredArray(t, checker, ctx) && undefArrayElemNames.has(arrayElemName(t, checker));
+}
+
 /** A slot typed by a library-declared array that Node's implementation may
  * leave undefined (undefArrayElemNames) takes the undefined arm. */
 export function undefSlotWiden(ir: IrType, t: ts.Type, ctx: TypeMapperCtx, checker: ts.TypeChecker): IrType {
