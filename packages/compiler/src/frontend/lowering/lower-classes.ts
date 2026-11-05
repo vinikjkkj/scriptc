@@ -7898,8 +7898,16 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       return methodAbiEquals(slot, { params: own.params, ret: own.ret }) ? "exact" : null;
     }
     const shared = Math.min(slot.params.length, own.params.length);
+    // A parameter the override declares at ANOTHER record type that the slot's argument converts into (TS lets an override take a
+    // supertype: `toObject(options?: BSONSerializeOptions)` over a base `toObject(options?: OnDemandDocumentDeserializeOptions)`):
+    // the thunk spelled at the slot converts that argument, a copy that keeps the fields the override declares.
+    let paramsAdapted = false;
     for (let i = 0; i < shared; i++) {
-      if (!typeEquals(slot.params[i]!.type, own.params[i]!.type)) return null;
+      const st = slot.params[i]!.type;
+      const ot = own.params[i]!.type;
+      if (typeEquals(st, ot)) continue;
+      if (!paramAdaptable(L, st, ot)) return null;
+      paramsAdapted = true;
     }
     // Parameters the OVERRIDE adds must be OMITTABLE and must have an
     // absent value the thunk can pass. A required extra parameter has no
@@ -7939,7 +7947,14 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     const retClassWidened = !retExact && slot.ret.kind === "object" && own.ret.kind === "object" &&
       isSubclassOf(L, own.ret.className, slot.ret.className);
     if (!retExact && !retWidened && !retClassWidened) return null;
-    return retExact && arityExact ? "exact" : "widened";
+    return retExact && arityExact && !paramsAdapted ? "exact" : "widened";
+  }
+
+/** Does an argument of the slot's parameter type convert into the override's own parameter type? Record to record only (the
+   * checked width coercion), which is also where the conversion is a plain field copy. */
+  export function paramAdaptable(L: Lowerer, slotT: IrType, ownT: IrType): boolean {
+    const rec = (t: IrType): boolean => t.kind === "record" || (t.kind === "union" && (L.unions.get(t.unionId)?.arms.some((a) => a.kind === "record") ?? false));
+    return rec(slotT) && rec(ownT) && L.coercibleValue(slotT, ownT, false);
   }
 
 /** True when the vtable entry for `info`'s own `mName` cannot be the method
@@ -8029,6 +8044,18 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
         return;
       }
       const l = locals[i + 1];
+      if (l && !typeEquals(l.type, p.type)) {
+        // The override takes another record type than the slot's (overrideSlotFit): the argument converts on the way in.
+        const ctx = newFnCtx(true, null, null, own.ret);
+        L.fnStack.push(ctx);
+        try {
+          args.push(L.coerceToExpected({ kind: "varRef", localId: l.id, type: l.type, loc }, p.type));
+        } finally {
+          L.fnStack.pop();
+          locals.push(...ctx.locals);
+        }
+        return;
+      }
       args.push(l ? { kind: "varRef", localId: l.id, type: l.type, loc } : omittedArgFor(L, p.type, loc)!);
     });
     const call: IrExpr = {

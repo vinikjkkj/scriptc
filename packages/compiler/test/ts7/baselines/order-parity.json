@@ -12440,6 +12440,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24053-an-override-takes-a-wider-record-parameter.ts": {
+   "order": [
+    "<repo>/tests/corpus/24053-an-override-takes-a-wider-record-parameter.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2405-sibling-arm-narrow.ts": {
    "order": [
     "<repo>/tests/corpus/2405-sibling-arm-narrow.ts"
