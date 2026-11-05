@@ -340,7 +340,9 @@ export function dynMemberTable(
       const d = c.def.dynFieldData?.find((x) => x.name === f.name);
       if (d !== undefined) data = fnByName.get(d.fn);
     }
-    rows.push({ kind: "field", name: f.name, type: f.type, absentWhenUndefined: cls.def.absentFields?.includes(f.name) === true && cls.def.absentInit?.includes(f.name) !== true, ordk: ordinal === null ? 0 : ordinal + 1, ...(data !== undefined ? { data } : {}) });
+    let nonEnumerable = false;
+    for (let c: DynMemberClass | null = cls; c !== null; c = c.base) if (c.def.hiddenFields?.includes(f.name) === true) nonEnumerable = true;
+    rows.push({ kind: "field", name: f.name, type: f.type, absentWhenUndefined: cls.def.absentFields?.includes(f.name) === true && cls.def.absentInit?.includes(f.name) !== true, ordk: ordinal === null ? 0 : ordinal + 1, ...(data !== undefined ? { data } : {}), ...(nonEnumerable ? { hidden: true as const } : {}) });
     pushShadows(f.name);
   }
   // A grafted class's emitter keys: rows born where the order record notes them (see "eeCell").
