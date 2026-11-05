@@ -8075,7 +8075,6 @@ function structTools(family: readonly ts.Symbol[], ctx: TypeMapperCtx): StructTo
   const marker = new Map<ts.Symbol, string>();
   family.forEach((s, i) => marker.set(s, "#" + i));
   let unknown = false;
-  let inArgs = 0;
   /** The first self-instantiation of a type whose signature is cached (the probe follows it). */
 
   /** The type arguments of a family occurrence: an alias's, or an interface/class reference's. */
@@ -8111,9 +8110,7 @@ function structTools(family: readonly ts.Symbol[], ctx: TypeMapperCtx): StructTo
       if (structIgnoreArgs()) return mk;
       if (depth > 6) { unknown = true; return "?"; }
       // The occurrence's ARGUMENTS stay part of what it is: two members naming `B<string>` and `B<number>` are different members.
-      inArgs++;
       const args = argsOf(x).map((a) => canonStruct(a, depth + 1)).join(",");
-      inArgs--;
       return `${mk}<${args}>`;
     }
     if (depth > 6) { unknown = true; return "?"; }
@@ -8158,9 +8155,7 @@ function structTools(family: readonly ts.Symbol[], ctx: TypeMapperCtx): StructTo
         const args = argsOf(x);
         if (args.length > 0) {
           unknown = false;
-          inArgs++;
           const parts = args.map((a) => canonStruct(a, 1));
-          inArgs--;
           out = unknown ? null : `${mk}<${parts.join(",")}>`;
         }
       }
