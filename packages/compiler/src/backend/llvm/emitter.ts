@@ -9166,6 +9166,68 @@ class LlEmitter {
         B.line(`${r} = call ptr @scr_rec_view_get(ptr ${v})`);
         return this.own({ name: r, type: e.type });
       }
+      case "recordHasSrc": {
+        // STRUCT VIEW (emit-exprs.ts's twin): is the view slot a source struct?
+        const obj = this.emitStableReceiver(e.obj, []);
+        const vshape = this.recordsById.get(e.shapeId);
+        if (!vshape) throw new Error(`llvm emitter bug: recordHasSrc of unknown shape ${e.shapeId}`);
+        const vp = B.tmp();
+        B.line(`${vp} = getelementptr inbounds %${mangleRecordStruct(e.shapeId)}, ptr ${obj.name}, i64 0, i32 ${viewSlotIndex(vshape)} ; <view>`);
+        const v = B.tmp();
+        B.line(`${v} = load ptr, ptr ${vp}`);
+        this.declare(`declare zeroext i1 @scr_recsrc_is(ptr)`);
+        const r = B.tmp();
+        B.line(`${r} = call zeroext i1 @scr_recsrc_is(ptr ${v})`);
+        return { name: r, type: e.type };
+      }
+      case "recordSrcGet":
+      case "recordSrcSet": {
+        // The field lives in the SOURCE struct (the pair's map names the offset): scr_recsrc_slot answers the slot pointer.
+        const obj = this.emitStableReceiver(e.obj, []);
+        const vshape = this.recordsById.get(e.shapeId);
+        if (!vshape) throw new Error(`llvm emitter bug: ${e.kind} of unknown shape ${e.shapeId}`);
+        const idx = vshape.fields.findIndex((x) => x.name === e.field);
+        if (idx < 0) throw new Error(`llvm emitter bug: ${e.kind} of unknown field ${e.shapeId}.${e.field}`);
+        const ft = vshape.fields[idx]!.type;
+        const vp = B.tmp();
+        B.line(`${vp} = getelementptr inbounds %${mangleRecordStruct(e.shapeId)}, ptr ${obj.name}, i64 0, i32 ${viewSlotIndex(vshape)} ; <view>`);
+        const vslot = B.tmp();
+        B.line(`${vslot} = load ptr, ptr ${vp}`);
+        this.declare(`declare ptr @scr_recsrc_slot(ptr, i64)`);
+        const ptr = B.tmp();
+        B.line(`${ptr} = call ptr @scr_recsrc_slot(ptr ${vslot}, i64 ${idx})`);
+        if (e.kind === "recordSrcGet") {
+          const v = this.loadField(ptr, ft);
+          if (isRefCounted(e.type)) return this.own({ name: this.retainValue(v, e.type), type: e.type });
+          return { name: v, type: e.type };
+        }
+        const nv = this.emitExpr(e.value);
+        if (isRefCounted(ft)) {
+          this.moveTemp(nv);
+          const old = B.tmp();
+          B.line(`${old} = load ptr, ptr ${ptr}`);
+          this.storeField(ptr, ft, nv.name);
+          this.releaseValue(old, ft);
+        } else {
+          this.storeField(ptr, ft, nv.name);
+        }
+        this.declare(`declare void @scr_recsrc_own(ptr, i64)`);
+        this.declare(`declare void @scr_recsrc_unown(ptr, i64)`);
+        B.line(
+          e.unset === true
+            ? `call void @scr_recsrc_unown(ptr ${vslot}, i64 ${idx}) ; delete removes the own key of the source`
+            : `call void @scr_recsrc_own(ptr ${vslot}, i64 ${idx}) ; a write is an own key of the source`,
+        );
+        return { name: "", type: e.type };
+      }
+      case "recordSrcView": {
+        const src = this.emitExpr(e.src);
+        const vshape = this.recordsById.get(e.shapeId);
+        if (!vshape) throw new Error(`llvm emitter bug: recordSrcView into unknown shape ${e.shapeId}`);
+        const rec = B.tmp();
+        B.line(`${rec} = call ptr @${this.dyn.recSrcMap(e.srcShapeId, e.shapeId)}_view(ptr ${src.name})`);
+        return this.own({ name: rec, type: e.type });
+      }
       case "recordNullProto": {
         // The null-prototype question, one spelling (nullProtoRule). An
         // unarmed shape folds to its own claim and emits a literal.

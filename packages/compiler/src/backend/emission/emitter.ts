@@ -672,6 +672,8 @@ export class CEmitter {
   readonly dynMatchers = new Map<string, string>();
   /** Shapes whose view snapshot has a sync helper: shape id -> emitted name (emit-walkers viewSyncHelper). */
   readonly viewSyncs = new Map<string, string>();
+  /** STRUCT VIEW maps: `${sourceShapeId}->${shapeId}` -> the emitted ScrRecSrcMap symbol (emit-walkers recSrcMapC). */
+  readonly recSrcMaps = new Map<string, string>();
   /** Union types whose arrays cross as live views: key -> the emitted ScrDynElemOps (emit-walkers viewElemOpsC). */
   readonly viewElemOps = new Map<string, string>();
   readonly dynBuilders = new Map<string, string>();

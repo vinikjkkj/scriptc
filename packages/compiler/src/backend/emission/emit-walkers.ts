@@ -1055,7 +1055,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         if (!shape) throw new Error(`emitter bug: jsonStringify of unknown shape ${t.shapeId}`);
         // VIEW GRANT: a view is the OBJECT, so the object writes itself (its undeclared keys, its class's toJSON).
         if (!shape.tuple && shape.view === true) {
-          d.push(`  if (v->${VIEW_MEMBER}) { scr_jb_put_dyn(b, v->${VIEW_MEMBER}); return; }`);
+          d.push(`  if (v->${VIEW_MEMBER}) { ScrDyn *vo = scr_rec_view_get(v->${VIEW_MEMBER}); scr_jb_put_dyn(b, vo); scr_dyn_release(vo); return; }`);
         }
         // CYCLE-CAPABLE shapes (recursive record types — the collector-
         // fixpoint set) bracket the walk with the circular-detection
@@ -3457,7 +3457,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // shares the reference instead of copying).
         // VIEW GRANT: a view converts to the OBJECT it is a view of - the same object, not a copy.
         if (!shape.tuple && shape.view === true) {
-          d.push(`  if (v->${VIEW_MEMBER}) return scr_dyn_retain(v->${VIEW_MEMBER});`);
+          d.push(`  if (v->${VIEW_MEMBER}) return scr_rec_view_cross(v->${VIEW_MEMBER});`);
         }
         const cyclicRec = E.traceAdapterC(t) !== null;
         if (cyclicRec) d.push(`  scr_dyn_from_enter(v);`);
@@ -4004,7 +4004,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     const dc = E.dynCheckHelper({ kind: "record", shapeId });
     E.walkerDefs.push(
       `static void ${name}(${st} *r) { /* refresh the view's snapshot of ${shapeId} */`,
-      `  if (!r->${VIEW_MEMBER}) return;`,
+      `  if (!r->${VIEW_MEMBER} || scr_recsrc_is(r->${VIEW_MEMBER})) return; /* a struct view has no snapshot to refresh */`,
       `  ${st} *t = ${dc}(r->${VIEW_MEMBER}, NULL);`,
       `  if (!t) return; /* the read threw: the exception is pending */`,
       `  scr_rec_swap_body(r, t, sizeof *r);`,
@@ -4012,6 +4012,51 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
       `}`,
       ``,
     );
+    return name;
+  }
+
+  /** STRUCT VIEW: the static ScrRecSrcMap of the pair (source shape -> target shape), emitted once per pair. For each target
+   * field (shape order) the byte offset of the same field in the source struct, the source's own-key mask offset and each
+   * field's mask byte and bit, the source's retain and release, and the two dynamic copies a struct view hands out where it must
+   * (snapshot: a read-only copy for enumeration, JSON and inspect; cross: what the source itself becomes when it crosses
+   * into a dynamic slot, a copy that remembers its origin). */
+  export function recSrcMapC(E: CEmitter, srcShapeId: string, shapeId: string): string {
+    const key = `${srcShapeId}->${shapeId}`;
+    const memo = E.recSrcMaps.get(key);
+    if (memo !== undefined) return memo;
+    const name = `sc_rsm_${E.recSrcMaps.size}`;
+    E.recSrcMaps.set(key, name);
+    const from = E.recordsById.get(srcShapeId);
+    const to = E.recordsById.get(shapeId);
+    if (!from || !to) throw new Error(`emitter bug: struct view over unknown shapes ${key}`);
+    const st = mangleRecordStruct(srcShapeId);
+    const srcT: IrType = { kind: "record", shapeId: srcShapeId };
+    const { retain, release } = vAdapters(srcT);
+    const tk = cStringLiteral(Buffer.from(typeKey(srcT), "utf8"));
+    const bits = to.fields.map((f) => ownMaskKeyBit(from, f.name));
+    E.walkerProtos.push(
+      `static ScrDyn *${name}_snap(void *p);`,
+      `static ScrDyn *${name}_cross(void *p);`,
+      `static const ScrRecSrcMap ${name};`,
+    );
+    E.walkerDefs.push(
+      `static const long ${name}_off[] = { ${to.fields.map((f) => `(long)offsetof(${st}, ${mangleField(f.name)})`).join(", ") || "0"} };`,
+      `static const unsigned char ${name}_ob[] = { ${bits.map((x) => (x ? x.byte : 0)).join(", ") || "0"} };`,
+      `static const unsigned char ${name}_obit[] = { ${bits.map((x) => (x ? x.bit : 0)).join(", ") || "0"} };`,
+      `static ScrDyn *${name}_snap(void *p) { return ${toDynExprC(E, srcT, `(${st} *)p`)}; }`,
+      `static ScrDyn *${name}_cross(void *p) { return ${originMarkC(E, srcT, toDynExprC(E, srcT, `(${st} *)p`), "p", tk, retain, release)}; }`,
+      `static const ScrRecSrcMap ${name} = { ${to.fields.length}, ${name}_off, ${from.ownmask === true ? `(long)offsetof(${st}, ${OWNMASK_MEMBER})` : "-1"}, ${name}_ob, ${name}_obit, ${retain}, ${release}, ${name}_snap, ${name}_cross };`,
+      `static ${mangleRecordStruct(shapeId)} *${name}_view(void *p) { /* the one view of this source in this shape */`,
+      `  ${mangleRecordStruct(shapeId)} *r = (${mangleRecordStruct(shapeId)} *)scr_recsrc_find(p, &${name});`,
+      `  if (r != NULL) return ${vAdapters({ kind: "record", shapeId }).retain}((void *)r);`,
+      `  r = ${mangleRecordNew(shapeId)}();`,
+      `  r->${VIEW_MEMBER} = scr_recsrc_box(p, &${name});`,
+      `  scr_recsrc_register(r, p, &${name});`,
+      `  return r;`,
+      `}`,
+      ``,
+    );
+    E.walkerProtos.push(`static ${mangleRecordStruct(shapeId)} *${name}_view(void *p);`);
     return name;
   }
 

@@ -248,7 +248,12 @@ export class LlWalkers {
       B.condBr(isV, lV, lN);
       B.startBlock(lV);
       this.host.declare(`declare void @scr_jb_put_dyn(ptr, ptr)`);
-      B.line(`call void @scr_jb_put_dyn(ptr %b, ptr ${vw})`);
+      this.host.declare(`declare ptr @scr_rec_view_get(ptr)`);
+      const vo = B.tmp();
+      B.line(`${vo} = call ptr @scr_rec_view_get(ptr ${vw}) ; a struct view prints a read-only snapshot of its source`);
+      B.line(`call void @scr_jb_put_dyn(ptr %b, ptr ${vo})`);
+      this.host.declare(`declare void @scr_dyn_release(ptr)`);
+      B.line(`call void @scr_dyn_release(ptr ${vo})`);
       B.terminate("ret void");
       B.startBlock(lN);
     }

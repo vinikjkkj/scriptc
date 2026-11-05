@@ -1060,12 +1060,16 @@ export class LlDyn {
     const struct = mangleRecordStruct(shapeId);
     const dc = this.dynCheckHelper({ kind: "record", shapeId });
     host.declare(`declare void @scr_rec_swap_body(ptr, ptr, i64)`);
+    host.declare(`declare zeroext i1 @scr_recsrc_is(ptr)`);
     this.defs.push(
       `define internal void @${name}(ptr %r) ${FN_ATTRS} { ; refresh the view's snapshot of ${shapeId}`,
       `  %vp = getelementptr inbounds %${struct}, ptr %r, i64 0, i32 ${viewSlotIndex(shape)}`,
       `  %v = load ptr, ptr %vp`,
-      `  %isv = icmp ne ptr %v, null`,
-      `  br i1 %isv, label %go, label %done`,
+      `  %isv0 = icmp ne ptr %v, null`,
+      `  br i1 %isv0, label %chk, label %done`,
+      `chk:`,
+      `  %isrs = call zeroext i1 @scr_recsrc_is(ptr %v)`,
+      `  br i1 %isrs, label %done, label %go`,
       `go:`,
       `  %t = call ptr @${dc}(ptr %v, ptr null)`,
       `  %tn = icmp eq ptr %t, null`,
@@ -1082,6 +1086,69 @@ export class LlDyn {
     return name;
   }
   private readonly viewSyncNames = new Map<string, string>();
+
+  /** STRUCT VIEW (emit-walkers.ts recSrcMapC's twin): the static ScrRecSrcMap of the pair (source shape -> target shape). */
+  recSrcMap(srcShapeId: string, shapeId: string): string {
+    const key = `${srcShapeId}->${shapeId}`;
+    const memo = this.recSrcMapNames.get(key);
+    if (memo !== undefined) return memo;
+    const name = `sc_rsm_${this.recSrcMapNames.size}`;
+    this.recSrcMapNames.set(key, name);
+    const host = this.host;
+    const from = host.recordsById.get(srcShapeId);
+    const to = host.recordsById.get(shapeId);
+    if (!from || !to) throw new Error(`llvm emitter bug: struct view over unknown shapes ${key}`);
+    const st = mangleRecordStruct(srcShapeId);
+    const srcT: IrType = { kind: "record", shapeId: srcShapeId };
+    const { retain, release } = vAdapters(host, srcT);
+    const conv = this.toDynHelper(srcT);
+    host.declare(`declare ptr @scr_dyn_origin_mark(ptr, ptr, ptr, ptr, ptr)`);
+    const offOf = (idx: number): string => `i64 ptrtoint (ptr getelementptr inbounds (%${st}, ptr null, i64 0, i32 ${idx}) to i64)`;
+    const offs = to.fields.map((f) => {
+      const i = from.fields.findIndex((x) => x.name === f.name);
+      if (i < 0) throw new Error(`llvm emitter bug: struct view field ${f.name} missing from ${srcShapeId}`);
+      return offOf(i + 1);
+    });
+    const bits = to.fields.map((f) => maskKeyBit(from, f.name));
+    const n = to.fields.length;
+    const ownOff = from.ownmask === true ? offOf(ownMaskSlotIndex(from)) : "i64 -1";
+    this.defs.push(
+      `@${name}_off = internal constant [${Math.max(n, 1)} x i64] [${n === 0 ? "i64 0" : offs.map((o) => o).join(", ")}]`,
+      `@${name}_ob = internal constant [${Math.max(n, 1)} x i8] [${n === 0 ? "i8 0" : bits.map((x) => `i8 ${x ? x.byte : 0}`).join(", ")}]`,
+      `@${name}_obit = internal constant [${Math.max(n, 1)} x i8] [${n === 0 ? "i8 0" : bits.map((x) => `i8 ${x ? x.bit : 0}`).join(", ")}]`,
+      `define internal ptr @${name}_snap(ptr %p) ${FN_ATTRS} {`,
+      `  %r = call ptr @${conv}(ptr %p)`,
+      `  ret ptr %r`,
+      `}`,
+      `define internal ptr @${name}_cross(ptr %p) ${FN_ATTRS} {`,
+      `  %t = call ptr @${conv}(ptr %p)`,
+      `  %m = call ptr @scr_dyn_origin_mark(ptr %t, ptr %p, ptr ${host.cstr(typeKey(srcT))}, ptr ${retain}, ptr ${release})`,
+      `  ret ptr %m`,
+      `}`,
+      `@${name} = internal constant { i64, ptr, i64, ptr, ptr, ptr, ptr, ptr, ptr } { i64 ${n}, ptr @${name}_off, ${ownOff}, ptr @${name}_ob, ptr @${name}_obit, ptr ${retain}, ptr ${release}, ptr @${name}_snap, ptr @${name}_cross }`,
+      `define internal ptr @${name}_view(ptr %p) ${FN_ATTRS} { ; the one view of this source in this shape`,
+      `  %f = call ptr @scr_recsrc_find(ptr %p, ptr @${name})`,
+      `  %has = icmp ne ptr %f, null`,
+      `  br i1 %has, label %reuse, label %make`,
+      `reuse:`,
+      `  %rr = call ptr ${vAdapters(host, { kind: "record", shapeId }).retain}(ptr %f)`,
+      `  ret ptr %rr`,
+      `make:`,
+      `  %r = call ptr @${mangleRecordNew(shapeId)}()`,
+      `  %box = call ptr @scr_recsrc_box(ptr %p, ptr @${name})`,
+      `  %vp = getelementptr inbounds %${mangleRecordStruct(shapeId)}, ptr %r, i64 0, i32 ${viewSlotIndex(to)}`,
+      `  store ptr %box, ptr %vp`,
+      `  call void @scr_recsrc_register(ptr %r, ptr %p, ptr @${name})`,
+      `  ret ptr %r`,
+      `}`,
+      ``,
+    );
+    host.declare(`declare ptr @scr_recsrc_find(ptr, ptr)`);
+    host.declare(`declare ptr @scr_recsrc_box(ptr, ptr)`);
+    host.declare(`declare void @scr_recsrc_register(ptr, ptr, ptr)`);
+    return name;
+  }
+  private readonly recSrcMapNames = new Map<string, string>();
 
   /** scr_dyn_origin_mark over an array crossing - with the converters a union-element array carries. */
   originMarkCall(B: BlockBuilder, t: IrType, conv: string, obj: string, retain: string, release: string): string {
@@ -2867,7 +2934,11 @@ export class LlDyn {
           const lN = B.newLabel("tdv.n");
           B.condBr(isV, lV, lN);
           B.startBlock(lV);
-          B.terminate(`ret ptr ${this.retainDyn(B, vw)}`);
+          // A struct view crosses as what its source would be (a copy that remembers its origin); a view of an object is that object.
+          host.declare(`declare ptr @scr_rec_view_cross(ptr)`);
+          const vx = B.tmp();
+          B.line(`${vx} = call ptr @scr_rec_view_cross(ptr ${vw})`);
+          B.terminate(`ret ptr ${vx}`);
           B.startBlock(lN);
         }
         const loadFieldOf = (fname: string, ft: IrType): string => {

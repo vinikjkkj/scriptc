@@ -18,7 +18,7 @@ import { ORD_MEMBER, orderRecordPlanCached, ABSENT_KEY_TRAP_CODE, arrayOf, canBo
 import { unionKeyClasses, boxAccess, BYTES_NUM_KIND_C, BYTES_NUM_VAR_C, bytesElemKindC, cDecl, cFnPtrCast, cNumberLiteral, cStringLiteral, cType, DV_GET_KIND_C, DV_SET_KIND_C, elemAccess, mapKeyAccess, mapKeyKindC, mapValKindC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassNew, mangleClassRetain, mangleClassStruct, mangleField, mangleFnClosure, mangleFunction, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleVtStruct, mangleWrapper } from "../mangle.js";
 import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, VIEW_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
-import { dynDestrCheckHelper, dynIterNHelper, dynKeyGetHelper, originMarkC, viewSyncHelper } from "./emit-walkers.js";
+import { dynDestrCheckHelper, dynIterNHelper, dynKeyGetHelper, originMarkC, recSrcMapC, viewSyncHelper } from "./emit-walkers.js";
 import { genResultThunkFor } from "./emit-async.js";
 import { emitCoroAwait, emitCoroHop, emitCoroUnionSuspend } from "./emit-coro.js";
 import { isStableReceiverOperand } from "../../ir/analysis.js";
@@ -2548,6 +2548,48 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         const slot = `${obj.name}->${VIEW_MEMBER}`;
         if (e.kind === "recordIsView") return E.newTemp(e.type, `(${slot} != NULL)`);
         return E.newTemp(e.type, `scr_rec_view_get(${slot})`);
+      }
+      case "recordHasSrc": {
+        // STRUCT VIEW: is this record's view slot a source struct (SCR_DYNH_RECSRC), not a dynamic object?
+        const obj = emitStableReceiver(E, e.obj, []);
+        return E.newTemp(e.type, `scr_recsrc_is(${obj.name}->${VIEW_MEMBER})`);
+      }
+      case "recordSrcGet":
+      case "recordSrcSet": {
+        // The field lives in the SOURCE struct, at the offset the pair's map names. The slot is read and written with the same
+        // retain and release discipline as a field of the record itself; a write is an own key of the source, as a recordSet of
+        // the source would make it (the map carries the source's mask byte and bit per field).
+        const obj = emitStableReceiver(E, e.obj, []);
+        const shape = E.recordsById.get(e.shapeId);
+        const idx = shape ? shape.fields.findIndex((x) => x.name === e.field) : -1;
+        if (!shape || idx < 0) throw new Error(`emitter bug: ${e.kind} of unknown field ${e.shapeId}.${e.field}`);
+        const ft = shape.fields[idx]!.type;
+        const h = `sc_t${E.tempCounter++}`;
+        E.line(`const ScrRecSrc *${h} = scr_recsrc_of(${obj.name}->${VIEW_MEMBER});`);
+        const slot = `(*(${cType(ft)}*)((char *)${h}->src + ${h}->map->off[${idx}]))`;
+        if (e.kind === "recordSrcGet") return E.newTemp(e.type, isRefCounted(ft) ? retainCallC(ft, slot) : slot);
+        const v = E.emitExpr(e.value);
+        if (isRefCounted(v.type)) {
+          E.moveTemp(v);
+          const old = `sc_t${E.tempCounter++}`;
+          E.line(`${cDecl(v.type, old)} = ${slot};`);
+          E.line(`${slot} = ${v.name};${E.srcComment(e.loc)}`);
+          E.releaseValue(old, v.type);
+        } else {
+          E.line(`${slot} = ${v.name};${E.srcComment(e.loc)}`);
+        }
+        E.line(
+          e.unset === true
+            ? `scr_recsrc_unown(${obj.name}->${VIEW_MEMBER}, ${idx}); /* delete removes the own key of the source */`
+            : `scr_recsrc_own(${obj.name}->${VIEW_MEMBER}, ${idx}); /* a write is an own key of the source */`,
+        );
+        return { name: "", type: e.type };
+      }
+      case "recordSrcView": {
+        // A record of the target shape whose view slot is a box of the source struct and the pair's map. The source is borrowed
+        // here (the box retains it).
+        const src = E.emitExpr(e.src);
+        return E.newTemp(e.type, `${recSrcMapC(E, e.srcShapeId, e.shapeId)}_view((void *)${src.name})`);
       }
       case "recordNullProto": {
         // The null-prototype question, one spelling (nullProtoCondC). An
