@@ -1209,6 +1209,10 @@ static const char *isl_dyn_unmarshalable_syms(const ScrDyn *d) {
   return NULL;
 }
 #endif
+static JSClassID isl_inst_class_id = 0;           /* a compiled class instance seen from the engine, below */
+static JSValue isl_inst_new(const ScrDyn *d);
+static JSValue isl_throw_pending(JSContext *ctx);
+
 static const char *isl_dyn_unmarshalable(const ScrDyn *d) {
   switch (d->kind) {
   /* SCR_DYN_FUNC is NOT here: a boxed function crosses as the generic
@@ -1223,10 +1227,9 @@ static const char *isl_dyn_unmarshalable(const ScrDyn *d) {
 #endif
     return "a runtime handle";
   case SCR_DYN_OBJINST:
-    /* A class instance held by reference: the engine has no cell for a
-     * compiled struct, so the crossing names the world honestly rather
-     * than falling into the generic tail. */
-    return "a class instance";
+    /* A class instance held by reference crosses as an engine object whose member reads, writes and
+     * method calls run on the instance itself (isl_inst_new): the same object on the way back. */
+    return NULL;
   case SCR_DYN_MAP:
     /* A Map or Set held by reference: the engine has its own Map, and
      * this bridge does not model the entry-by-entry transfer that
@@ -1411,6 +1414,8 @@ static JSValue isl_from_dyn(const ScrDyn *d) {
     /* An engine value riding inside dyn data: embed the SAME engine
      * value by reference — the identity round trip, member position. */
     return JS_DupValue(isl_ctx, d->v.jsval.cell->v);
+  case SCR_DYN_OBJINST:
+    return isl_inst_new(d);
   default:
     /* Pre-scanned away — defensive. */
     return JS_ThrowTypeError(isl_ctx, "unmarshalable dynamic value");
@@ -1485,6 +1490,10 @@ static ScrDyn *isl_dyn_from_value(JSValue v) {
 #ifdef SCR_SYMTAB
   if (JS_IsSymbol(v)) return isl_sym_dyn_from_js(v); /* the runtime symbol of the same identity */
 #endif
+  if (JS_IsObject(v) && isl_inst_class_id != 0) {
+    ScrDyn *inst = JS_GetOpaque(v, isl_inst_class_id);
+    if (inst != NULL) return scr_dyn_retain(inst); /* a crossed class instance comes back as itself */
+  }
   if (JS_IsDate(v) && scr_dyn_date_box_hook != NULL) {
     /* An engine Date comes back as a native Date by VALUE (the time value
      * is copied; the engine object is not kept). Without the Date handle
@@ -2146,7 +2155,244 @@ static const JSClassDef isl_hostfn_class = {
 static JSClassID isl_dynfn_class_id;      /* the checked-dynamic tree-function shim, below */
 static const JSClassDef isl_dynfn_class;
 
+/* ── a compiled class instance in the engine ─────────────────────────────
+ * An engine object of class ScrInst holding ONE reference on the instance's OBJINST box. Every member
+ * access runs on the instance: reads through its member table (a method reads as a function that
+ * invokes the instance by name, so `this` is the instance), writes through its %dynSet, `in` and the
+ * own-key walk through the dyn key surface. The object crosses back as the very instance. */
+
+static ScrStr *isl_inst_key(JSContext *ctx, JSAtom atom) {
+  JSValue av = JS_AtomToValue(ctx, atom);
+  bool isstr = JS_IsString(av);
+  JS_FreeValue(ctx, av);
+  if (!isstr) return NULL; /* a symbol key: nothing a compiled instance holds */
+  const char *k = JS_AtomToCString(ctx, atom);
+  if (k == NULL) return NULL;
+  ScrStr *s = scr_str_new(k, strlen(k));
+  JS_FreeCString(ctx, k);
+  return s;
+}
+
+typedef struct {
+  ScrDyn *inst;
+  ScrStr *key;
+} IslInstCall;
+
+static JSClassID isl_instcall_class_id = 0;
+
+static void isl_instcall_finalizer(JSRuntime *rt, JSValueConst val) {
+  (void)rt;
+  IslInstCall *c = JS_GetOpaque(val, isl_instcall_class_id);
+  if (c) {
+    scr_dyn_release(c->inst);
+    scr_str_release(c->key);
+    free(c);
+  }
+}
+
+static const JSClassDef isl_instcall_class = {
+    .class_name = "ScrInstCall",
+    .finalizer = isl_instcall_finalizer,
+};
+
+static JSValue isl_instcall_invoke(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv, int magic,
+                                   JSValueConst *func_data) {
+  (void)this_val;
+  (void)magic;
+  IslInstCall *c = JS_GetOpaque(func_data[0], isl_instcall_class_id);
+  if (!c) return JS_ThrowTypeError(ctx, "detached scriptc method");
+  ScrDyn *stack_args[8];
+  ScrDyn **dargs = argc <= 8 ? stack_args : malloc((size_t)argc * sizeof *dargs);
+  for (int i = 0; i < argc; i++) dargs[i] = isl_dyn_from_value(argv[i]);
+  isl_host_depth++;
+  ScrDyn *r = scr_dyn_invoke_key(c->inst, c->key, dargs, (size_t)argc, c->key->data);
+  isl_host_depth--;
+  for (int i = 0; i < argc; i++) scr_dyn_release(dargs[i]);
+  if (dargs != stack_args) free(dargs);
+  if (scr_exc_pending()) {
+    if (r) scr_dyn_release(r);
+    return isl_throw_pending(ctx);
+  }
+  if (!r) return JS_UNDEFINED;
+  const char *bad = isl_dyn_unmarshalable(r);
+  if (bad != NULL) {
+    scr_dyn_release(r);
+    return JS_ThrowTypeError(ctx, "an 'unknown' value holding %s cannot enter dynamically-executed code", bad);
+  }
+  JSValue out = isl_from_dyn(r);
+  scr_dyn_release(r);
+  return out;
+}
+
+static JSValue isl_inst_get(JSContext *ctx, JSValueConst obj, JSAtom atom, JSValueConst receiver) {
+  (void)receiver;
+  ScrDyn *d = JS_GetOpaque(obj, isl_inst_class_id);
+  if (d == NULL) return JS_UNDEFINED;
+  ScrStr *key = isl_inst_key(ctx, atom);
+  if (key == NULL) return JS_UNDEFINED; /* a symbol key: nothing a compiled instance holds */
+  ScrDyn *v = scr_dyn_objinst_member_get(d, key);
+  if (v == NULL && !scr_exc_pending()) {
+    /* Not a member of the instance: Object.prototype's own members (toString, valueOf, hasOwnProperty, ...)
+     * are the engine's, and run with the engine object as `this`. */
+    JSValue global = JS_GetGlobalObject(ctx);
+    JSValue octor = JS_GetPropertyStr(ctx, global, "Object");
+    JSValue oproto = JS_GetPropertyStr(ctx, octor, "prototype");
+    JS_FreeValue(ctx, octor);
+    JS_FreeValue(ctx, global);
+    int onproto = JS_HasProperty(ctx, oproto, atom);
+    if (onproto > 0) {
+      JSValue pv = JS_GetProperty(ctx, oproto, atom);
+      JS_FreeValue(ctx, oproto);
+      scr_str_release(key);
+      return pv;
+    }
+    JS_FreeValue(ctx, oproto);
+    v = scr_dyn_objinst_miss(d, key);
+  }
+  if (scr_exc_pending()) {
+    scr_str_release(key);
+    return isl_throw_pending(ctx);
+  }
+  if (v == NULL) {
+    scr_str_release(key);
+    return JS_UNDEFINED;
+  }
+  JSValue out;
+  if (v->kind == SCR_DYN_FUNC) {
+    IslInstCall *c = malloc(sizeof *c);
+    if (!c) {
+      fprintf(stderr, "scriptc: out of memory\n");
+      abort();
+    }
+    c->inst = scr_dyn_retain(d);
+    c->key = scr_str_retain(key);
+    JSValue boxv = JS_NewObjectClass(ctx, isl_instcall_class_id);
+    JS_SetOpaque(boxv, c);
+    JSValueConst data[1] = {boxv};
+    out = JS_NewCFunctionData(ctx, isl_instcall_invoke, (int)scr_dyn_fn_len(v), 0, 1, data);
+    JS_FreeValue(ctx, boxv);
+  } else {
+    const char *bad = isl_dyn_unmarshalable(v);
+    out = bad != NULL ? JS_ThrowTypeError(ctx, "an 'unknown' value holding %s cannot enter dynamically-executed code", bad)
+                      : isl_from_dyn(v);
+  }
+  scr_dyn_release(v);
+  scr_str_release(key);
+  return out;
+}
+
+static int isl_inst_set(JSContext *ctx, JSValueConst obj, JSAtom atom, JSValueConst value, JSValueConst receiver, int flags) {
+  (void)receiver;
+  (void)flags;
+  ScrDyn *d = JS_GetOpaque(obj, isl_inst_class_id);
+  if (d == NULL) return 1;
+  ScrStr *key = isl_inst_key(ctx, atom);
+  if (key == NULL) return 1;
+  ScrDyn *v = isl_dyn_from_value(value);
+  scr_dyn_key_set(d, key, v);
+  scr_dyn_release(v);
+  scr_str_release(key);
+  if (scr_exc_pending()) {
+    isl_throw_pending(ctx);
+    return -1;
+  }
+  return 1;
+}
+
+static int isl_inst_has(JSContext *ctx, JSValueConst obj, JSAtom atom) {
+  ScrDyn *d = JS_GetOpaque(obj, isl_inst_class_id);
+  if (d == NULL) return 0;
+  ScrStr *key = isl_inst_key(ctx, atom);
+  if (key == NULL) return 0;
+  bool has = scr_dyn_objinst_member(d, key->data, key->len) != NULL;
+  scr_str_release(key);
+  return has ? 1 : 0;
+}
+
+static int isl_inst_own_names(JSContext *ctx, JSPropertyEnum **ptab, uint32_t *plen, JSValueConst obj) {
+  *ptab = NULL;
+  *plen = 0;
+  ScrDyn *d = JS_GetOpaque(obj, isl_inst_class_id);
+  if (d == NULL) return 0;
+  ScrDyn *keys = scr_dyn_obj_keys(d);
+  if (scr_exc_pending()) {
+    isl_throw_pending(ctx);
+    return -1;
+  }
+  if (keys == NULL || keys->kind != SCR_DYN_ARR) {
+    if (keys) scr_dyn_release(keys);
+    return 0;
+  }
+  size_t n = keys->v.arr.len;
+  JSPropertyEnum *tab = n > 0 ? js_malloc(ctx, n * sizeof *tab) : NULL;
+  if (n > 0 && tab == NULL) {
+    scr_dyn_release(keys);
+    return -1;
+  }
+  uint32_t m = 0;
+  for (size_t i = 0; i < n; i++) {
+    const ScrDyn *k = keys->v.arr.items[i];
+    if (k->kind != SCR_DYN_STR) continue;
+    tab[m].atom = JS_NewAtomLen(ctx, k->v.str->data, k->v.str->len);
+    tab[m].is_enumerable = true;
+    m++;
+  }
+  scr_dyn_release(keys);
+  *ptab = tab;
+  *plen = m;
+  return 0;
+}
+
+static int isl_inst_own_prop(JSContext *ctx, JSPropertyDescriptor *desc, JSValueConst obj, JSAtom atom) {
+  ScrDyn *d = JS_GetOpaque(obj, isl_inst_class_id);
+  if (d == NULL) return 0;
+  ScrStr *key = isl_inst_key(ctx, atom);
+  if (key == NULL) return 0;
+  bool has = scr_dyn_objinst_member(d, key->data, key->len) != NULL;
+  scr_str_release(key);
+  if (!has) return 0;
+  if (desc != NULL) {
+    desc->flags = JS_PROP_ENUMERABLE | JS_PROP_WRITABLE | JS_PROP_CONFIGURABLE;
+    desc->value = isl_inst_get(ctx, obj, atom, obj);
+    desc->getter = JS_UNDEFINED;
+    desc->setter = JS_UNDEFINED;
+    if (JS_IsException(desc->value)) return -1;
+  }
+  return 1;
+}
+
+static void isl_inst_finalizer(JSRuntime *rt, JSValueConst val) {
+  (void)rt;
+  ScrDyn *d = JS_GetOpaque(val, isl_inst_class_id);
+  if (d) scr_dyn_release(d);
+}
+
+static const JSClassExoticMethods isl_inst_exotic = {
+    .get_own_property = isl_inst_own_prop,
+    .get_own_property_names = isl_inst_own_names,
+    .has_property = isl_inst_has,
+    .get_property = isl_inst_get,
+    .set_property = isl_inst_set,
+};
+
+static const JSClassDef isl_inst_class = {
+    .class_name = "ScrInst",
+    .finalizer = isl_inst_finalizer,
+    .exotic = (JSClassExoticMethods *)&isl_inst_exotic,
+};
+
+static JSValue isl_inst_new(const ScrDyn *d) {
+  JSValue o = JS_NewObjectClass(isl_ctx, isl_inst_class_id);
+  if (JS_IsException(o)) return o;
+  JS_SetOpaque(o, scr_dyn_retain((ScrDyn *)d));
+  return o;
+}
+
 static void isl_register_hostfn_class(void) {
+  JS_NewClassID(isl_rt, &isl_inst_class_id);
+  JS_NewClass(isl_rt, isl_inst_class_id, &isl_inst_class);
+  JS_NewClassID(isl_rt, &isl_instcall_class_id);
+  JS_NewClass(isl_rt, isl_instcall_class_id, &isl_instcall_class);
   JS_NewClassID(isl_rt, &isl_hostfn_class_id);
   JS_NewClass(isl_rt, isl_hostfn_class_id, &isl_hostfn_class);
   JS_NewClassID(isl_rt, &isl_dynfn_class_id);
