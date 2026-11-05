@@ -9,3 +9,4 @@ export declare function watchAwait(log: (s: string) => void): void;
 export declare function watchThen(log: (s: string) => void): void;
 export declare function release(v: number): void;
 export declare function quitLike(wait: boolean, callback?: (err: Error | null, v?: string) => void): Promise<string>;
+export declare function execLike(fail: boolean, callback?: (err: Error | null, v?: [Error | null, unknown][] | null) => void): Promise<[Error | null, unknown][] | null>;

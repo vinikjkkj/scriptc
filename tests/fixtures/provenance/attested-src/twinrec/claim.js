@@ -37,3 +37,7 @@ exports.quitLike = function quitLike(wait, callback) {
   }
   return (0, cbdep_1.default)(new Promise((resolve) => setTimeout(() => resolve("late"), 1)), callback);
 };
+// A claimed promise whose payload is an array of [error, result] tuples (ioredis' Pipeline#exec shape).
+exports.execLike = function execLike(fail, callback) {
+  return (0, cbdep_1.default)(new Promise((resolve) => setTimeout(() => resolve([[fail ? new Error("bad") : null, fail ? undefined : "OK"], [null, 7]]), 1)), callback);
+};
