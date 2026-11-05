@@ -5,4 +5,4 @@ symbol-keyed-record-member-crossing-into-an-untyped-read.ts:7:21 - error SC1101:
     |                     ^~~~~~~~~~~~~~~~~~~~~
   8 | 
 
-  hint: the member (__@K@56) crosses under its checker spelling, which the symbol-keyed read cannot match by identity, so the read would answer undefined where Node answers the value. Keep the object untyped from its creation (Object.create(null) and assign the symbol key), or read the member through its record type.
+  hint: the member (__@K) crosses under its checker spelling, which the symbol-keyed read cannot match by identity, so the read would answer undefined where Node answers the value. Keep the object untyped from its creation (Object.create(null) and assign the symbol key), or read the member through its record type.

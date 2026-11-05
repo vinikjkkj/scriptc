@@ -12966,9 +12966,51 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24316-class-members-keyed-by-same-description-symbols.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24316-class-members-keyed-by-same-description-symbols.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24317-untyped-symbol-writes-reach-plain-class-instances.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24317-untyped-symbol-writes-reach-plain-class-instances.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24318-bytes-symbol-keyed-properties.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24318-bytes-symbol-keyed-properties.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24319-proxy-symbol-keyed-forwarding.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24319-proxy-symbol-keyed-forwarding.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2432-generic-member-fields-async.ts": {
    "order": [
     "<repo>/tests/corpus/2432-generic-member-fields-async.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24320-array-function-symbol-keys-inspect-and-diff.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24320-array-function-symbol-keys-inspect-and-diff.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24321-deep-strict-equal-diff-symbol-lines.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24321-deep-strict-equal-diff-symbol-lines.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24322-string-of-a-string-or-symbol-union-element.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24322-string-of-a-string-or-symbol-union-element.cjs"
    ],
    "diags": []
   },
