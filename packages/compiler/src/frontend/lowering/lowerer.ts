@@ -9834,6 +9834,8 @@ export class Lowerer {
    * the "sound here" is about the THUNK's caller only — every other caller
    * hands this an instance that does escape. noteMixedProjection above. */
   ctorWitnessProjection(className: string, target: IrType & { kind: "record" }, loc: SrcLoc): string | null {
+    const viewed = this.classViewHelper(className, target.shapeId, loc);
+    if (viewed !== null) return viewed;
     // SCRIPTC_PROJ_WHY: name the declining clause. The projection is
     // per-REQUESTED-FIELD and its declines are numerous; three separate
     // reports guessed the wrong clause before this probe existed.
@@ -12561,9 +12563,76 @@ export class Lowerer {
     return name;
   }
 
+  /** True when the class has a data member or a method the record shape does not name. */
+  classDropsMembers(className: string, shapeId: string): boolean {
+    const sh = this.shapes.get(shapeId);
+    const info = this.classes.get(className);
+    if (sh === undefined || info === undefined) return false;
+    const named = new Set(sh.fields.map((f) => f.name));
+    for (const f of info.def.fields) {
+      if (f.name.startsWith("%") || f.name.startsWith("#")) continue;
+      if (!named.has(f.name)) return true;
+    }
+    for (let c: ClassInfo | null = info; c; c = c.base) {
+      for (const m of c.methods.keys()) {
+        const n = m.startsWith("get:") || m.startsWith("set:") ? m.slice(4) : m;
+        if (n === "constructor" || n.startsWith("%") || n.startsWith("#")) continue;
+        if (!named.has(n)) return true;
+      }
+    }
+    return false;
+  }
+
+  /** A class instance flowing into a record slot that cannot name all of its members is seen THROUGH
+   * the record by every later reader (an untyped consumer reads them back off the value): the record is
+   * a VIEW of the very instance (the checked cast's view over the boxed instance, identity kept), not
+   * a copy that dropped them. The helper takes the instance and answers the view; null when the shape
+   * cannot be a view or the instance cannot box. */
+  classViewHelper(className: string, toId: string, loc: SrcLoc): string | null {
+    const sh = this.shapes.get(toId);
+    if (sh === undefined || !this.viewCapableShape(sh)) return null;
+    if (!this.classDropsMembers(className, toId)) return null;
+    if (!canBoxClassIntoDyn(className)) return null;
+    // A class rooted in a runtime builtin (an emitter, a stream, an Error) keeps its own projection plans:
+    // its surface members are the runtime's, not table rows a view could read back.
+    for (let c: ClassInfo | null = this.classes.get(className) ?? null; c; c = c.base) {
+      if (c.def.name.startsWith("%") || RUNTIME_ERROR_CLASSES.has(c.def.name) || c.builtinError) return null;
+    }
+    const toT: IrType = { kind: "record", shapeId: toId };
+    if (!canDynCheckTo(toT, (id) => this.shapes.get(id), (id) => this.unions.get(id)) && !this.projectableRecord(toT)) return null;
+    const key = `objview:${className}:${toId}`;
+    const existing = this.widthHelpers.get(key);
+    if (existing) return existing;
+    const fromT: IrType = { kind: "object", className };
+    const fnT = funcOf([fromT], toT);
+    const fnCtx = newFnCtx(true, null, fnT, toT);
+    this.fnStack.push(fnCtx);
+    try {
+      const o: IrExpr = { kind: "varRef", localId: "o.0", type: fromT, loc };
+      const boxed = this.coerceToExpected(o, DYN);
+      const out = boxed.type.kind === "dyn" ? this.coerceToExpected(boxed, toT) : null;
+      if (out === null || !typeEquals(out.type, toT)) return null;
+      const name = `%obj.view.${this.widthHelpers.size}`;
+      this.widthHelpers.set(key, name);
+      this.liftedFns.push({
+        name,
+        params: [{ localId: "o.0", name: "o", type: fromT }],
+        returnType: toT,
+        locals: [{ id: "o.0", name: "o", type: fromT, mutable: true }, ...fnCtx.locals],
+        body: [{ kind: "return", value: out, loc }],
+        loc,
+      });
+      return name;
+    } finally {
+      this.fnStack.pop();
+    }
+  }
+
   objRecordWidthHelper(className: string, toId: string, loc: SrcLoc): string | null {
     const to = this.shapes.get(toId);
     if (!to) return null;
+    const viewed = this.classViewHelper(className, toId, loc);
+    if (viewed !== null) return viewed;
     const plan = this.objToRecordPlan(className, toId);
     // The plain plan declines async/optional-method targets (the store
     // interfaces); the constructor-witness projection handles them, and its
