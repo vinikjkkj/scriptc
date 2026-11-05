@@ -739,6 +739,11 @@ export function lowerProfileFlush(): void {
   } catch { /* never fails a build */ }
 }
 
+/** Set by viewConversion while the discovery pass lowers a record-to-record conversion through the view grant: the conversion
+ * can change what later statements lower to (a spread of a record that just became a view builds a dynamic copy), so
+ * discovery runs again until the grant set stops growing. Per compilation. */
+let viewConversionNoted = false;
+
 export function lowerToIr(
   program: ts.Program,
   entry: ts.SourceFile,
@@ -754,6 +759,7 @@ export function lowerToIr(
   overflowShapeKeysDenied.clear();
   overflowShapeKeysAsked.clear();
   viewShapeKeys.clear();
+  viewConversionNoted = false;
   const targetPlatform = options.targetPlatform ?? process.platform;
   const startupCrash = options.startupCrash ?? null;
   // Modules reachable only through dynamic import() of the program's own
@@ -796,7 +802,7 @@ export function lowerToIr(
   // FFI-free builds reuse the validation lowerer (validation is an
   // immediate no-op there), retaining the historical two-pass
   // construction cost.
-  const discovery = ffiImports.length === 0
+  let discovery = ffiImports.length === 0
     ? validation
     : new Lowerer(program, entry, moduleOrder, dynamic, {
         targetPlatform,
@@ -804,8 +810,23 @@ export function lowerToIr(
         ffiBindingSymbols: ffiValidation.symbolsByName,
       });
   const __t0 = performance.now();
-  const reachable = discovery.discover(options.libRoots);
+  let reachable = discovery.discover(options.libRoots);
   discovery.settleViewDenials();
+  // A record-to-record conversion lowered through the view grant makes its shapes views, and a later statement that spreads
+  // such a record lowers differently once the source is one. Discovery runs again, from a fresh lowerer, until the grant set
+  // stops growing (bounded), so the emit pass interns every shape it will need as a view. Programs with no such conversion
+  // never enter the loop.
+  for (let round = 0; round < 3 && viewConversionNoted; round++) {
+    const before = [...viewShapeKeys].sort().join("\n");
+    discovery = new Lowerer(program, entry, moduleOrder, dynamic, {
+      targetPlatform,
+      ffiImports,
+      ...(ffiImports.length === 0 ? {} : { ffiBindingSymbols: ffiValidation.symbolsByName }),
+    });
+    reachable = discovery.discover(options.libRoots);
+    discovery.settleViewDenials();
+    if ([...viewShapeKeys].sort().join("\n") === before) break;
+  }
   lowerProfileNote("%discovery", performance.now() - __t0);
   if (options.noPinReload !== true) {
     const pinReload = discovery.computeDynPinEdits();
@@ -9069,8 +9090,14 @@ export class Lowerer {
     if (!this.viewCapableShape(from) || !this.viewCapableShape(to)) return null;
     if (from.indexValue !== undefined || to.indexValue !== undefined) return null;
     if (this.recordWidthPlan(expr.type.shapeId, expected.shapeId) === null) return null;
+    // The grant is decided by the DISCOVERY pass, before shapes are interned. The emit pass converts through views only where
+    // both shapes were granted there: a conversion that first appears in the emit pass (a spread that became a dynamic copy
+    // once its source was granted) would cast into a shape with no view slot, a silent copy, so it keeps the field copy and the
+    // key-risk refusals that copy carries.
+    if (this.onEdge === undefined && !(this.isViewShape(expr.type) && this.isViewShape(expected))) return null;
     if (!canDynCheckTo(expected, (id) => this.shapes.get(id), (id) => this.unions.get(id))) return null;
     if (!canConvertToDyn(expr.type, (id) => this.shapes.get(id), (id) => this.unions.get(id))) return null;
+    if (this.onEdge !== undefined) viewConversionNoted = true;
     const loc = expr.loc;
     const boxed: IrExpr = { kind: "dynFrom", value: expr, type: DYN, loc };
     return { kind: "dynCheck", value: boxed, type: expected, loc };
