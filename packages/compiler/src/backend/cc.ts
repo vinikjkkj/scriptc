@@ -255,6 +255,8 @@ export interface CcOptions {
    * the engine (lower-engine-fn.ts). Only scr_island.c and its engine
    * surface compile; every other unit keeps its static build. */
   engine?: boolean;
+  /** The engine marshals a class instance (scr_island.c SCR_ISL_INST): the dispatch units link with it and the island carries the crossing. */
+  islInst?: boolean;
   /** The program contains a regex construct (index.ts detects it on the
    * IR): compiles scr_regex.c and links the vendored libregexp — as cached
    * standalone objects in static builds, from the engine archive under
@@ -2501,7 +2503,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
   // vendored engine without the --dynamic lane (see the options doc).
   const engineOnly = !dynamic && (opts.engine ?? false);
   /* The engine marshals a class instance by running its members (scr_island.c isl_inst_*): the dispatch units link with it. */
-  const engineAny = engineOnly || dynamic;
+  const engineAny = (engineOnly || dynamic) && (opts.islInst ?? false);
   const engineArchive = dynamic || engineOnly ? await ensureEngineArchive(opts.sanitize ?? false, driver) : null;
   /* The WebRTC path needs the SAME vendored mbedTLS archive (DTLS 1.2,
    * ECDSA P-256, SHA-256) but NOT scr_tls.c, which is the TLS-over-TCP
@@ -2938,6 +2940,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...includeArgs,
     ...(dynamic ? ["-DSCR_DYNAMIC"] : []),
     ...(engineOnly ? ["-DSCR_ENGINE"] : []),
+    ...(engineAny ? ["-DSCR_ISL_INST"] : []),
     // Off the REAL command line, like the -I above and for the same reason the
     // comment there gives: a restated copy drifts invisibly. rtInputs is what
     // buildArgs actually emitted, so if scr_coro.c is in this link the define
