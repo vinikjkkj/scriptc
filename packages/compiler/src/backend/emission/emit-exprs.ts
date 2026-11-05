@@ -4338,6 +4338,18 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_dyn_sym_get(${arg(0)}, ${arg(1)})`);
           case "sym.dynAppendSyms":
             return finish(`scr_dyn_sym_append(${arg(0)}, ${arg(1)})`);
+          case "sym.dynTag":
+            return finish(`scr_dyn_sym_tag(${arg(0)})`);
+          case "sym.dynGetOpt":
+            return finish(`scr_dyn_sym_get_opt(${arg(0)}, ${arg(1)})`);
+          case "sym.dynGetSelf":
+            return finish(`scr_dyn_sym_get_self(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "sym.dynSetSelf":
+            return finish(`scr_dyn_sym_set_self(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
+          case "sym.dynSetSelfSloppy":
+            return finish(`scr_dyn_sym_set_self_sloppy(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
+          case "sym.hasAcc":
+            return finish(`scr_dyn_sym_has_acc(${arg(0)})`);
           case "sym.dynSet":
             return finish(`scr_dyn_sym_set(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "sym.dynSetSloppy":

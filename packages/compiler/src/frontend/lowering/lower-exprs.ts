@@ -12,7 +12,7 @@ import * as ts from "../ts7/adapter.js";
 import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
 import { strictAt } from "./lower-protoescape.js";
-import { EVAL_STATIC_CLASSES, RUNTIME_EMITTER_CLASS, STATS_FIELD_INDEX, DATE_T, strandTrap, BIGINT, BOOL, BYTES_ELEM_SIZE, BYTES_U8, bytesValueType, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrGlobal, IrJsOp, IrLocal, type IrParam, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
+import { EVAL_STATIC_CLASSES, RUNTIME_EMITTER_CLASS, STATS_FIELD_INDEX, DATE_T, strandTrap, BIGINT, BOOL, BYTES_ELEM_SIZE, BYTES_U8, bytesValueType, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, canBoxClassIntoDyn, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrGlobal, IrJsOp, IrLocal, type IrParam, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
 import { cjsRequireBindingValueOf, dynImportBindingDeclOf } from "./lower-island.js";
 import { liveExportsOf, liveBagRef, liveDepOfBinding, isValueUse, liveNamedTwinOf, liveRecvBagOf, liveKeyOf, liveIdentityRefOf, dynValueOf } from "./cjs-live-exports.js";
@@ -8055,8 +8055,24 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
         // optional chain body over the bound receiver. Literal keys have no
         // effects and keep the direct read below.
         const argNode = expr.argumentExpression;
+        if (ts.isPropertyAccessExpression(argNode) && L.stdlibGlobalMember(argNode, "Symbol") === "toStringTag") {
+          L.noteEdge("%symdyn");
+          const tid = `chain.${L.chainCounter++}`;
+          const trecv: IrExpr = { kind: "chainRecv", id: tid, type: DYN, loc };
+          const tbody: IrExpr = { kind: "libCall", fn: "sym.dynTag", args: [trecv], type: DYN, loc };
+          return L.maybeNarrow({ kind: "optChain", id: tid, receiver, body: tbody, type: DYN, loc }, expr);
+        }
         if (!ts.isStringLiteralLike(argNode) && !ts.isNumericLiteral(argNode)) {
           const key = L.lowerExpr(argNode);
+          // `o?.[sym]`: the symbol-keyed read, evaluated only when the receiver is not nullish
+          if (key.type.kind === "symbol" || (key.type.kind === "dyn" && L.mapTypeOf(L.typeOf(argNode))?.kind === "symbol")) {
+            L.noteEdge("%symdyn");
+            const skeyS: IrExpr = key.type.kind === "symbol" ? key : { kind: "dynCheck", value: key, type: SYMBOL_T, loc: key.loc };
+            const sid = `chain.${L.chainCounter++}`;
+            const srecv: IrExpr = { kind: "chainRecv", id: sid, type: DYN, loc };
+            const sbody: IrExpr = { kind: "libCall", fn: "sym.dynGet", args: [srecv, skeyS], type: DYN, loc };
+            return L.maybeNarrow({ kind: "optChain", id: sid, receiver, body: sbody, type: DYN, loc }, expr);
+          }
           let skey: IrExpr | null = null;
           if (key.type.kind === "string") skey = key;
           else if (key.type.kind === "f64") skey = { kind: "toString", operand: key, type: STRING, loc: key.loc };
@@ -14916,14 +14932,33 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
       const recvShape = recvIr?.kind === "record" ? L.shapes.get(recvIr.shapeId) : undefined;
       // A symbol key over a checked-dynamic receiver (an untyped parameter, an Object.create result): the runtime's
       // symbol-keyed property table (scr_symbol.c), not a static shape.
-      const dynSym = dynSymbolAccess(L, expr);
+      // `x[Symbol.toStringTag]` over bytes or a checked-dynamic value: the built-in tag of its kind
+      if (ts.isPropertyAccessExpression(expr.argumentExpression) && L.stdlibGlobalMember(expr.argumentExpression, "Symbol") === "toStringTag") {
+        let tr = L.lowerExpr(expr.expression);
+        if (tr.type.kind === "bytes" || (tr.type.kind === "union" && L.dynConvertible(tr.type))) tr = { kind: "dynFrom", value: tr, type: DYN, loc: tr.loc };
+        if (tr.type.kind === "dyn") {
+          L.noteEdge("%symdyn");
+          return L.maybeNarrow({ kind: "libCall", fn: "sym.dynTag", args: [tr], type: DYN, loc: locOf(expr) }, expr);
+        }
+      }
+      const dynSym = dynSymbolAccess(L, expr, true);
       if (dynSym !== null) {
-        return L.maybeNarrow({ kind: "libCall", fn: "sym.dynGet", args: [dynSym.recv, dynSym.key], type: DYN, loc: locOf(expr) }, expr);
+        const opt = expr.questionDotToken !== undefined || chainGuardedByQuestionDot(expr.expression);
+        return L.maybeNarrow({ kind: "libCall", fn: opt ? "sym.dynGetOpt" : "sym.dynGet", args: [dynSym.recv, dynSym.key], type: DYN, loc: locOf(expr) }, expr);
       }
       const clsSym = expr.questionDotToken === undefined ? classSymbolBag(L, expr.expression, expr.argumentExpression) : null;
       if (clsSym !== null) {
         const loc = locOf(expr);
-        return L.maybeNarrow({ kind: "seqExpr", stmts: clsSym.stmts, result: { kind: "libCall", fn: "sym.dynGet", args: [clsSym.bag(), clsSym.key!], type: DYN, loc }, type: DYN, loc }, expr);
+        const plain: IrExpr = { kind: "libCall", fn: "sym.dynGet", args: [clsSym.bag(), clsSym.key!], type: DYN, loc };
+        const result: IrExpr = clsSym.self === null ? plain : {
+          kind: "ternary",
+          cond: { kind: "libCall", fn: "sym.hasAcc", args: [clsSym.bag()], type: BOOL, loc },
+          then: { kind: "libCall", fn: "sym.dynGetSelf", args: [clsSym.bag(), clsSym.key!, clsSym.self()], type: DYN, loc },
+          else_: plain,
+          type: DYN,
+          loc,
+        };
+        return L.maybeNarrow({ kind: "seqExpr", stmts: clsSym.stmts, result, type: DYN, loc }, expr);
       }
       if (recvShape === undefined || wellKnownSymbolFieldIn(L, expr.argumentExpression, recvShape) === null) {
         L.unsupported(
@@ -15519,8 +15554,8 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
    * property table (scr_symbol.c) instead of a static shape. Null for a statically typed receiver (its layout is a
    * compile-time field list), an optional-chain access, and any key that does not lower to a symbol. Well-known
    * symbols (`Symbol.iterator`) have no lowering of their own and refuse before reaching here. */
-  function dynSymbolAccess(L: Lowerer, access: ts.ElementAccessExpression): { recv: IrExpr; key: IrExpr } | null {
-    if (access.questionDotToken !== undefined) return null;
+  function dynSymbolAccess(L: Lowerer, access: ts.ElementAccessExpression, allowOptional = false): { recv: IrExpr; key: IrExpr } | null {
+    if (access.questionDotToken !== undefined && !allowOptional) return null;
     const recvIr = L.mapTypeOf(L.typeOf(access.expression));
     // A function VALUE carries its own properties on its closure, so a box made here shares them with every other box of
     // the same closure (the defineProperty arm's rule).
@@ -15539,7 +15574,7 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
    * expandos of an untyped package class already live. Answers the statements that bind the receiver and ensure the bag, and
    * the bag read. Null when the class has no bag, or when the key names a member the class declares (a field, accessor or
    * method keyed by that symbol: those keep their own lowering). */
-  export function classSymbolBag(L: Lowerer, recvNode: ts.Expression, keyNode: ts.Expression | null): { stmts: IrStmt[]; bag: () => IrExpr; key: IrExpr | null } | null {
+  export function classSymbolBag(L: Lowerer, recvNode: ts.Expression, keyNode: ts.Expression | null): { stmts: IrStmt[]; bag: () => IrExpr; key: IrExpr | null; self: (() => IrExpr) | null } | null {
     const recvT = L.mapTypeOf(L.typeOf(recvNode));
     if (recvT?.kind !== "object") return null;
     const info = L.classes.get(recvT.className);
@@ -15567,6 +15602,8 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     const rTmp = L.declareHiddenLocal("%symRecv", recv.type);
     const rRef = (): IrExpr => ({ kind: "varRef", localId: rTmp.id, type: recv.type, loc });
     const bag = (): IrExpr => ({ kind: "fieldGet", obj: rRef(), className, field: CLASS_PROPS_FIELD, type: DYN, loc });
+    // an accessor stored under the key runs with the INSTANCE as `this`: the box is made only when the table holds one
+    const self = canBoxClassIntoDyn(className) ? (): IrExpr => ({ kind: "dynFrom", value: rRef(), type: DYN, loc }) : null;
     return {
       stmts: [
         { kind: "varDecl", localId: rTmp.id, init: recv, loc },
@@ -15574,6 +15611,7 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
       ],
       bag,
       key,
+      self,
     };
   }
 
@@ -16259,7 +16297,28 @@ export function staticAssertionOperand(L: Lowerer, node: ts.Expression, field: s
         if (value.type.kind === "dyn") {
           const loc = locOf(expr);
           const fn = strictAt(expr.getSourceFile(), expr.getStart()) ? "sym.dynSet" : "sym.dynSetSloppy";
-          return { kind: "block", body: [...clsSym.stmts, { kind: "exprStmt", expr: { kind: "libCall", fn, args: [clsSym.bag(), clsSym.key!, value], type: VOID, loc }, loc }], loc };
+          const strict = fn === "sym.dynSet";
+          if (clsSym.self === null) {
+            return { kind: "block", body: [...clsSym.stmts, { kind: "exprStmt", expr: { kind: "libCall", fn, args: [clsSym.bag(), clsSym.key!, value], type: VOID, loc }, loc }], loc };
+          }
+          const vTmp = L.declareHiddenLocal("%symVal", DYN);
+          const vRef = (): IrExpr => ({ kind: "varRef", localId: vTmp.id, type: DYN, loc });
+          const selfFn = strict ? "sym.dynSetSelf" : "sym.dynSetSelfSloppy";
+          return {
+            kind: "block",
+            body: [
+              ...clsSym.stmts,
+              { kind: "varDecl", localId: vTmp.id, init: value, loc },
+              {
+                kind: "if",
+                cond: { kind: "libCall", fn: "sym.hasAcc", args: [clsSym.bag()], type: BOOL, loc },
+                then: [{ kind: "exprStmt", expr: { kind: "libCall", fn: selfFn, args: [clsSym.bag(), clsSym.key!, vRef(), clsSym.self()], type: VOID, loc }, loc }],
+                else_: [{ kind: "exprStmt", expr: { kind: "libCall", fn, args: [clsSym.bag(), clsSym.key!, vRef()], type: VOID, loc }, loc }],
+                loc,
+              },
+            ],
+            loc,
+          };
         }
         L.unsupported("SC1101", expr.right, `storing '${L.fmt(value.type)}' values under a symbol key on a class instance (the value cannot convert into the checked-dynamic tree)`);
       }
@@ -23131,6 +23190,19 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
     // NAME, not a value.
     if (ts.isPrivateIdentifier(expr.left)) {
       return lowerPrivateIn(L, expr, expr.left, loc);
+    }
+    // `Symbol.toStringTag in v` over a checked-dynamic value: whether its kind has a built-in tag (the read's twin)
+    {
+      let lk: ts.Expression = expr.left;
+      while (ts.isParenthesizedExpression(lk)) lk = lk.expression;
+      if (ts.isPropertyAccessExpression(lk) && L.stdlibGlobalMember(lk, "Symbol") === "toStringTag") {
+        let tr = L.lowerExpr(expr.right);
+        if (tr.type.kind === "bytes" || (tr.type.kind === "union" && L.dynConvertible(tr.type))) tr = { kind: "dynFrom", value: tr, type: DYN, loc: tr.loc };
+        if (tr.type.kind === "dyn") {
+          L.noteEdge("%symdyn");
+          return { kind: "dynTest", test: "undefined", negated: true, value: { kind: "libCall", fn: "sym.dynTag", args: [tr], type: DYN, loc }, type: BOOL, loc };
+        }
+      }
     }
     // Compile-time-known STRING keys fold — literals, and the same
     // const/enum-literal and template folding computed property keys get
