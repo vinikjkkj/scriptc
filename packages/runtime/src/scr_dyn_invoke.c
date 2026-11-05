@@ -2687,10 +2687,6 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
       return r;
     }
     if (dyn_name_is(method, "bind")) return dyn_bind_func(recv, args, argc);
-    if (dyn_name_is(method, "toString")) {
-      dyn_throw_unsupported("Function", method);
-      return NULL;
-    }
     /* An OWN property on the FUNC box (defineProperties writes — the
      * mustCall-wrapper expando family): a callable member runs with the
      * box bound (JS's o.m() receiver), everything else keeps Node's
@@ -2707,6 +2703,10 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
         }
         scr_dyn_release(own);
       }
+    }
+    if (dyn_name_is(method, "toString")) {
+      dyn_throw_unsupported("Function", method);
+      return NULL;
     }
     return dyn_object_proto_method(recv, method, args, argc, what);
   }
