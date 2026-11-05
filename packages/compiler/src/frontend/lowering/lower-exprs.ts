@@ -3383,6 +3383,12 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
               return { kind: "dynKeyGet", key: { kind: "strLit", value: expr.name.text, type: STRING, loc }, value: recv, type: DYN, loc };
             }
           }
+          // `mod.__esModule` on a module that never stamped it (a function or a plain object assigned to module.exports):
+          // the name resolves to nothing, so delegating to it as a free identifier threw a ReferenceError where Node answers
+          // undefined. tsc's `__importDefault` helper reads exactly this member of every module it wraps.
+          if (expr.name.text === "__esModule" && isJsSourceFile(expr.getSourceFile()) && ts.isIdentifier(expr.name) && L.resolveValueSymbol(expr.name) === null) {
+            return dynUndefinedExpr(loc);
+          }
           return lowerExpr(L, expr.name);
         }
       }
