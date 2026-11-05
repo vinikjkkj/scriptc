@@ -152,6 +152,53 @@ static int scr_w32_map_err(int e) {
   case WSAEHOSTUNREACH: return EHOSTUNREACH;
   case WSAENETUNREACH: return ENETUNREACH;
   case WSAEINVAL: return EINVAL;
+  /* The rest of libuv's uv_translate_sys_error table for Winsock codes (deps/uv/src/win/error.c), each spelled with the POSIX constant
+   * Node's name for it comes from. A code with no constant on this CRT stays raw rather than being renamed to something else. */
+#ifdef ENOTCONN
+  case WSAENOTCONN: return ENOTCONN;
+#endif
+#ifdef EISCONN
+  case WSAEISCONN: return EISCONN;
+#endif
+#ifdef EMSGSIZE
+  case WSAEMSGSIZE: return EMSGSIZE;
+#endif
+#ifdef ENETDOWN
+  case WSAENETDOWN: return ENETDOWN;
+#endif
+#ifdef ENETRESET
+  case WSAENETRESET: return ENETRESET;
+#endif
+#ifdef ENOBUFS
+  case WSAENOBUFS: return ENOBUFS;
+#endif
+#ifdef ENOTSOCK
+  case WSAENOTSOCK: return ENOTSOCK;
+#endif
+#ifdef EAFNOSUPPORT
+  case WSAEAFNOSUPPORT: return EAFNOSUPPORT;
+#endif
+#ifdef EPROTONOSUPPORT
+  case WSAEPROTONOSUPPORT: return EPROTONOSUPPORT;
+#endif
+#ifdef EPROTOTYPE
+  case WSAEPROTOTYPE: return EPROTOTYPE;
+#endif
+#ifdef EALREADY
+  case WSAEALREADY: return EALREADY;
+#endif
+#ifdef EINPROGRESS
+  case WSAEINPROGRESS: return EINPROGRESS;
+#endif
+#ifdef EDESTADDRREQ
+  case WSAEDESTADDRREQ: return EDESTADDRREQ;
+#endif
+#ifdef EOPNOTSUPP
+  case WSAEOPNOTSUPP: return EOPNOTSUPP;
+#endif
+  case WSAEFAULT: return EFAULT;
+  case WSAEMFILE: return EMFILE;
+  case WSAEBADF: return EBADF;
   default: return e;
   }
 }
@@ -315,6 +362,48 @@ static const char *scr_net_errname(int err) {
   case EHOSTDOWN: return "EHOSTDOWN"; /* absent from the win32 CRT */
 #endif
   case EINVAL: return "EINVAL";
+#ifdef ENOTCONN
+  case ENOTCONN: return "ENOTCONN";
+#endif
+#ifdef EISCONN
+  case EISCONN: return "EISCONN";
+#endif
+#ifdef EMSGSIZE
+  case EMSGSIZE: return "EMSGSIZE";
+#endif
+#ifdef ENETDOWN
+  case ENETDOWN: return "ENETDOWN";
+#endif
+#ifdef ENETRESET
+  case ENETRESET: return "ENETRESET";
+#endif
+#ifdef ENOBUFS
+  case ENOBUFS: return "ENOBUFS";
+#endif
+#ifdef ENOTSOCK
+  case ENOTSOCK: return "ENOTSOCK";
+#endif
+#ifdef EAFNOSUPPORT
+  case EAFNOSUPPORT: return "EAFNOSUPPORT";
+#endif
+#ifdef EPROTONOSUPPORT
+  case EPROTONOSUPPORT: return "EPROTONOSUPPORT";
+#endif
+#ifdef EPROTOTYPE
+  case EPROTOTYPE: return "EPROTOTYPE";
+#endif
+#ifdef EALREADY
+  case EALREADY: return "EALREADY";
+#endif
+#ifdef EDESTADDRREQ
+  case EDESTADDRREQ: return "EDESTADDRREQ";
+#endif
+#ifdef EOPNOTSUPP
+  case EOPNOTSUPP: return "ENOTSUP"; /* libuv maps WSAEOPNOTSUPP to UV_ENOTSUP */
+#endif
+  case EFAULT: return "EFAULT";
+  case EMFILE: return "EMFILE";
+  case EBADF: return "EBADF";
   default: {
     static char nb[32];
     return scr_errno_name(err, nb, sizeof nb);
