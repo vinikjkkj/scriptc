@@ -17,11 +17,11 @@
  * A function the slot holds is called through the checked-dynamic contract (arguments boxed to dyn, the result checked
  * back to the declared type), exactly as any untyped function value is. */
 import * as ts from "../ts7/adapter.js";
-import { ENTRY_NAME, PoisonError, dynUndefinedExpr, type Lowerer } from "./lowerer.js";
+import { ENTRY_NAME, PoisonError, dynUndefinedExpr, newFnCtx, type Lowerer } from "./lowerer.js";
 import type { ClassInfo } from "./lower-classes.js";
 import { cjsKeyedForEachOf } from "../program.js";
 import { dynCallWithThis } from "./lower-calls.js";
-import { BOOL, DYN, type IrExpr, type IrFunction, type IrGlobal, type IrParam, type IrStmt, type IrType, type SrcLoc } from "../../ir/nodes.js";
+import { BOOL, DYN, canDynCheckTo, type IrExpr, type IrFunction, type IrGlobal, type IrParam, type IrStmt, type IrType, type SrcLoc } from "../../ir/nodes.js";
 
 const locOf = (n: ts.Node): SrcLoc => ({ file: n.getSourceFile().fileName, start: n.getStart(), end: n.getEnd() }) as SrcLoc;
 
@@ -41,7 +41,9 @@ export function protoSlotOf(L: Lowerer, declarer: string, method: string): IrGlo
   return L.protoSlots.get(declarer)?.get(method) ?? null;
 }
 
-/** Can the slot dispatcher stand in for this method? Not for abstract, async or generator members. */
+/** Can the slot dispatcher stand in for this method? Not for abstract or generator members. An async member can: its dispatcher is
+ * the same kind of plain wrapper the vtable thunk is (a call of the async body, which the emitter routes through the spawn
+ * wrapper, so it answers the promise), and a replacement function's answer adopts into that promise (dispatcherResult). */
 export function protoSlotSlottable(info: ClassInfo, name: string): boolean {
   return slottable(info, name);
 }
@@ -49,13 +51,24 @@ export function protoSlotSlottable(info: ClassInfo, name: string): boolean {
 function slottable(info: ClassInfo, name: string): boolean {
   if (info.builtinError || info.def.runtime === true) return false;
   const typed = info.methods.get(name);
-  if (typed !== undefined) return typed.abstract !== true && typed.async !== true;
+  if (typed !== undefined) return typed.abstract !== true;
   const g = info.genericMethods?.get(name);
   if (g === undefined) return false;
   const d = g.decl as ts.FunctionLikeDeclaration;
   if (d.asteriskToken !== undefined) return false;
-  const mods = ts.canHaveModifiers(d) ? ts.getModifiers(d) : undefined;
-  return !(mods?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword) ?? false);
+  return true;
+}
+
+/** The type a dispatcher of `raw` answers: the promise an async body's call answers, else its own return type. */
+export function dispatcherReturnType(raw: IrFunction): IrType {
+  return raw.async === true ? { kind: "promise", inner: raw.returnType } : raw.returnType;
+}
+
+/** A replacement function's checked-dynamic answer, as the dispatcher's declared type. An async method's answer is a PROMISE: the
+ * value adopts (Promise.resolve: a promise stays itself, anything else resolves a fresh one), then the payload checks. */
+export function dispatcherResult(L: Lowerer, via: IrExpr, rt: IrType): IrExpr {
+  if (rt.kind === "promise") return L.adoptDynIntoTypedPromise(via, rt) ?? L.coerceToExpected(via, rt);
+  return L.coerceToExpected(via, rt);
 }
 
 /** The class name a value expression's checker type names (a class value), even before the class's own ClassInfo exists (a class
@@ -152,13 +165,68 @@ export function scanProtoSlots(L: Lowerer, files: readonly ts.SourceFile[]): voi
   }
 }
 
+/** Can a checked-dynamic function value come back as a function of type `fnT`? The checked cast covers the signatures it has an
+ * adapter for; a function whose result is a PROMISE has none, but dynFnAsFunc builds the closure for it. */
+export function dynFnReadable(L: Lowerer, fnT: IrType): boolean {
+  if (fnT.kind !== "func") return false;
+  if (fnT.ret.kind !== "promise") return canDynCheckTo(fnT, (id) => L.shapes.get(id), (id) => L.unions.get(id));
+  return fnT.rest !== true && fnT.params.every((p) => p.kind === "dyn" || L.dynConvertible(p));
+}
+
+/** A checked-dynamic function value `value`, as a function of type `fnT`. The checked cast when the result is not a promise (the
+ * cast only succeeds there for a function boxed at the identical signature, and a promise-returning signature has no adapter at
+ * all, so its read can never take that path); for a promise-returning signature a closure over the value: its parameters box into dyn, the value runs with the ambient `this`
+ * of the call that reaches the closure (a `.call`/`.bind` sets it, as for every method value), and its answer adopts into
+ * the declared promise. */
+export function dynFnAsFunc(L: Lowerer, value: IrExpr, fnT: IrType, loc: SrcLoc): IrExpr {
+  if (fnT.kind !== "func" || fnT.ret.kind !== "promise" || !dynFnReadable(L, fnT)) return L.coerceToExpected(value, fnT);
+  const held = L.declareHiddenLocal("%dynfn", DYN);
+  held.boxed = true;
+  const implName = `%dynfn.${L.liftedFns.length}`;
+  const fnCtx = newFnCtx(true, null, fnT, fnT.ret);
+  L.fnStack.push(fnCtx);
+  try {
+    const params: IrParam[] = fnT.params.map((t, k) => ({ localId: `a.${k}`, name: `a${k}`, type: t }));
+    const args: IrExpr[] = params.map((p) => {
+      const a: IrExpr = { kind: "varRef", localId: p.localId, type: p.type, loc };
+      return p.type.kind === "dyn" ? a : L.coerceToExpected(a, DYN);
+    });
+    const fnRef: IrExpr = { kind: "varRef", localId: held.id, type: DYN, loc };
+    const ambient: IrExpr = { kind: "libCall", fn: "dyn.this", args: [], type: DYN, loc };
+    const call = dynCallWithThis(L, ambient, fnRef, args, "function", loc);
+    const answer = L.adoptDynIntoTypedPromise(call, fnT.ret) ?? L.coerceToExpected(call, fnT.ret);
+    L.liftedFns.push({
+      name: implName,
+      params,
+      returnType: fnT.ret,
+      captures: [{ localId: held.id, name: "fn", type: DYN }],
+      locals: [
+        { id: held.id, name: "fn", type: DYN, mutable: false, boxed: true },
+        ...params.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
+        ...fnCtx.locals,
+      ],
+      body: [{ kind: "return", value: answer, loc }],
+      loc,
+    });
+  } finally {
+    L.fnStack.pop();
+  }
+  return {
+    kind: "seqExpr",
+    stmts: [{ kind: "varDecl", localId: held.id, init: value, loc }],
+    result: { kind: "closure", fnName: implName, captures: [held.id], type: fnT, loc },
+    type: fnT,
+    loc,
+  };
+}
+
 /** The ternary `slot !== undefined ? slot : original` typed as the method's function type. */
 export function slotReadOr(L: Lowerer, g: IrGlobal, fnT: IrType, original: IrExpr, loc: SrcLoc): IrExpr {
   const ref = (): IrExpr => ({ kind: "varRef", localId: g.id, type: DYN, loc });
   return {
     kind: "ternary",
     cond: { kind: "dynTest", test: "undefined", negated: true, value: ref(), type: BOOL, loc },
-    then: L.coerceToExpected(ref(), fnT),
+    then: dynFnAsFunc(L, ref(), fnT, loc),
     else_: original,
     type: fnT,
     loc,
@@ -306,11 +374,11 @@ export function applyProtoSlots(L: Lowerer, fnLists: IrFunction[][]): void {
     const recv = L.coerceToExpected(ref(params[0]!), DYN);
     const args = params.slice(1).map((p) => L.coerceToExpected(ref(p), DYN));
     const viaSlot = dynCallWithThis(L, recv, slotRef, args, `${w.owner}.prototype.${w.method}`, loc);
-    const rt = w.raw.returnType;
+    const rt = dispatcherReturnType(w.raw);
     const slow: IrStmt[] =
       rt.kind === "void"
         ? [{ kind: "exprStmt", expr: viaSlot, loc }, { kind: "return", value: null, loc }]
-        : [{ kind: "return", value: L.coerceToExpected(viaSlot, rt), loc }];
+        : [{ kind: "return", value: dispatcherResult(L, viaSlot, rt), loc }];
     const direct: IrExpr = { kind: "call", callee: rawName, args: params.map(ref), type: rt, loc };
     const fast: IrStmt = rt.kind === "void" ? { kind: "exprStmt", expr: direct, loc } : { kind: "return", value: direct, loc };
     const dispatcher: IrFunction = {
