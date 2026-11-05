@@ -4,3 +4,7 @@ export declare function settled(v: number): Promise<number>;
 export declare function timer(v: number): Promise<number>;
 export declare function again(p: Promise<number>): Promise<number>;
 export declare function wrong(): Promise<number>;
+export declare function pend(log: (s: string) => void): Promise<number>;
+export declare function watchAwait(log: (s: string) => void): void;
+export declare function watchThen(log: (s: string) => void): void;
+export declare function release(v: number): void;
