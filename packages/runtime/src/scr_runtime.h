@@ -7740,6 +7740,8 @@ typedef struct ScrDynJsvalOps {
   ScrDyn *(*key_get)(ScrJsval *cell, const ScrStr *k); /* o[k]; +1 or NULL pending */
   bool (*key_set)(ScrJsval *cell, const ScrStr *k, const ScrDyn *v); /* false = pending */
   ScrDyn *(*call)(ScrJsval *cell, ScrDyn *const *args, size_t argc); /* f(...); +1 or NULL pending */
+  /* new f(...) — the ENGINE's [[Construct]]; +1 or NULL pending. */
+  ScrDyn *(*construct)(ScrJsval *cell, ScrDyn *const *args, size_t argc);
   /* o.m(...) — the ENGINE's own prototypes run (JS-exact flatMap/map/
    * forEach/...). A missing or non-callable member throws Node's
    * "<what> is not a function" (the call site's spelling — V8's text,
