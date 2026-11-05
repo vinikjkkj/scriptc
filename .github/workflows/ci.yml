@@ -561,7 +561,10 @@ jobs:
     runs-on: windows-latest
     timeout-minutes: 15
     env:
-      SCRIPTC_NO_CACHE: "1"
+      # Every program is compiled LIVE (no cached binary, no early frontend cache); only the runtime OBJECTS are cached,
+      # content-addressed by compiler, flags and the hash of every runtime source (cc.ts objectCacheRootDir). Recompiling
+      # the runtime for each of the ~800 programs of a shard was the largest cost of this job.
+      SCRIPTC_NO_BIN_CACHE: "1"
       SCRIPTC_CC: zigcc
       SCRIPTC_TARGET: x86_64-windows-gnu
     steps:
@@ -726,7 +729,10 @@ jobs:
       matrix:
         shard: ${{ fromJSON(needs.plan.outputs.windows_shards) }}
     env:
-      SCRIPTC_NO_CACHE: "1"
+      # Every program is compiled LIVE (no cached binary, no early frontend cache); only the runtime OBJECTS are cached,
+      # content-addressed by compiler, flags and the hash of every runtime source (cc.ts objectCacheRootDir). Recompiling
+      # the runtime for each of the ~800 programs of a shard was the largest cost of this job.
+      SCRIPTC_NO_BIN_CACHE: "1"
       SCRIPTC_CC: zigcc
       SCRIPTC_TARGET: x86_64-windows-gnu
       # See the Linux `tests` job's identical line (same github.workspace
