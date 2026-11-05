@@ -1763,6 +1763,9 @@ export interface IrClassDef {
    * a conditional position): enumeration through a dyn box skips them while
    * the arm is live. */
   absentFields?: string[];
+  /** Field names (inherited included) a program made NON-ENUMERABLE with a literal Object.defineProperty(this, 'f', { enumerable: false, ... })
+   * (pg's hidden password): the dyn view answers them by name but no enumerating surface lists them. */
+  hiddenFields?: string[];
   /** Method names DECLARED on this class (not inherited), in declaration
    * order. Every entry EXCEPT the ones listed in `abstractMethods` has a
    * module function `%<name>.<method>`; the backend derives vtable layout
