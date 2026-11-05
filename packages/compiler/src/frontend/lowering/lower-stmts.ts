@@ -35,7 +35,7 @@ import { lowerHttpResPropertyAssignment, lowerServerCloseOverrideAssignment, low
 import { namespaceConditionalOf } from "./lower-nsvalue.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl, nodeRequireArgumentError, requireFnValueDeclType } from "./lower-builtins.js";
 import { lowerEnumDeclaration } from "./lower-enums.js";
-import { liveCompoundStmtOf, liveExportsOf, liveKeyOf, liveRecvBagOf, liveTableStmt, liveWriteBagOf, dynValueOf, orphanTableWriteOf, liveAccessorTargetOf } from "./cjs-live-exports.js";
+import { liveCompoundStmtOf, liveExportsOf, liveKeyOf, liveRecvBagOf, liveTableStmt, liveWriteBagOf, dynValueOf, orphanTableWriteOf, liveAccessorTargetOf, liveDefinePropOf } from "./cjs-live-exports.js";
 import { cjsExportsBagOf, cjsMemberOnlyInFunctions, ctorObjectGlobalValue, webCryptoGlobalDestructure, dynAssertionReceiver, errorExpandoReceiver, errorRefinementMember, lowerObjectAssignErrorStatement, lowerUndeclaredMemberWrite, isDynSafeReadWidth, isImmutablePrimitiveWidth, refuseUnloweredWebCryptoPattern, refuseUnloweredWebCryptoAssign, refuseWebCryptoIntrospection } from "./lower-exprs.js";
 import { detachedThisWriteFirst, hoistDetachedWriteRhs, keyedAccessOverIndexSignature, localTakesWidenedKeyedRead, narrowBridgeUnion, seqExprSafeStmt, unionFieldReadAt, unitArmsOf, cjsExportAccessorWriteStmt, cjsExportSetterWrite } from "./lower-exprs.js";
 import { abstractPropertyDeclOf, aliasTypeofNarrows, checkedJsNumber, compoundCombine, unionNumericCompoundRead, writeTypeOf, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, isMatchSliceType, lowerGroupsProjection, matchResultNamedGroupsOf, probeLower, pureReemittable, symbolFieldInfo, tonumWhy } from "./lower-exprs.js";
@@ -6625,7 +6625,7 @@ function unionCaseLiteralTest(L: Lowerer, disc: IrExpr, test: IrExpr, loc: SrcLo
 
 /** The exact `Object.defineProperty(exports|module.exports, "__esModule",
  * { value: true })` interop stamp (see the no-op lowering above). */
-function isEsModuleStamp(expr: ts.Expression): boolean {
+export function isEsModuleStamp(expr: ts.Expression): boolean {
   if (!ts.isCallExpression(expr) || expr.questionDotToken !== undefined) return false;
   const callee = expr.expression;
   if (
@@ -7406,7 +7406,13 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
       // already modeled statically by the checker and the CJS lexer link
       // check. Every tsc-emitted dist file opens with it, and the generic
       // defineProperty fence would throw at module load.
-      if (isEsModuleStamp(expr)) return { kind: "block", body: [], loc: locOf(expr) };
+      if (isEsModuleStamp(expr)) {
+        // A LIVE export object (cjs-live-exports.ts) is a real object a requirer reads: the stamp defines the member on it
+        // (non-enumerable, as Node's defineProperty default), because the `__importDefault` helper tests `mod.__esModule`.
+        const live = ts.isCallExpression(expr) ? liveDefinePropOf(L, expr, locOf(expr)) : null;
+        if (live !== null) return { kind: "exprStmt", expr: live, loc: locOf(expr) };
+        return { kind: "block", body: [], loc: locOf(expr) };
+      }
       // An accessor export (`Object.defineProperty(exports, "K", { get })`,
       // the tsc re-export idiom and the expansion of __defineGetter__): no
       // storage and no code here. Every read of K lifts the getter
