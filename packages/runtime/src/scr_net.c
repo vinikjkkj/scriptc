@@ -1603,18 +1603,21 @@ static void scr_net_sock_connect_done(ScrNetSocket *s) {
   socklen_t len = sizeof err;
   if (getsockopt(s->fd, SOL_SOCKET, SO_ERROR, &err, &len) != 0) err = errno;
 #ifdef _WIN32
-  /* WSAPoll reports a refused connect as POLLHUP, and the socket's pending error can still read 0 at that
-   * moment: the "connected" verdict would then surface as ENOTCONN on the first recv. A socket that is not
-   * connected after its connect reported readiness failed; the verdict is the pending error once it has
-   * settled, ECONNREFUSED when it still reads 0 (the refusal a loopback dial gets, libuv's own answer). */
-  if (err == 0) {
+  /* WSAPoll reports a refused connect as POLLHUP, and the socket's pending error can still read 0 (or
+   * WSAENOTCONN, which is "not connected yet", not a verdict) at that moment: the "connected" verdict would
+   * then surface as ENOTCONN on the first recv. A socket that is not connected after its connect reported
+   * readiness failed; the verdict is the pending error once it has settled, ECONNREFUSED when it still reads
+   * 0 or ENOTCONN (the refusal a loopback dial gets, libuv's own answer). */
+  if (err == 0 || err == ENOTCONN) {
     struct sockaddr_storage peer;
     socklen_t plen = sizeof peer;
     if (getpeername(s->fd, (struct sockaddr *)&peer, &plen) != 0) {
       int again = 0;
       socklen_t alen = sizeof again;
-      if (getsockopt(s->fd, SOL_SOCKET, SO_ERROR, &again, &alen) == 0 && again != 0) err = again;
+      if (getsockopt(s->fd, SOL_SOCKET, SO_ERROR, &again, &alen) == 0 && again != 0 && again != ENOTCONN) err = again;
       else err = ECONNREFUSED;
+    } else {
+      err = 0;
     }
   }
 #endif
