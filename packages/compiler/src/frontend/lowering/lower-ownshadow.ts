@@ -127,6 +127,24 @@ const bypassGlobal = (L: Lowerer): IrGlobal => {
   return g;
 };
 
+/** The call-site text of the method call that is entering a dispatcher, for the TypeError Node throws when an own property that is
+ * not a function shadows the method (`b.hello is not a function`). A call site stores the text and the validity flag just before
+ * it calls; the dispatcher reads and clears the flag first thing, so a call that did not store one (a thunk, a virtual entry)
+ * falls back to the class-qualified spelling. */
+const siteGlobals = (L: Lowerer): { text: IrGlobal; valid: IrGlobal } => {
+  let text = L.globalsList.find((x) => x.id === "%g.%ossite");
+  if (text === undefined) {
+    text = { id: "%g.%ossite", name: "own-shadow call site", type: STRING, mutable: true };
+    L.globalsList.push(text);
+  }
+  let valid = L.globalsList.find((x) => x.id === "%g.%ossitevalid");
+  if (valid === undefined) {
+    valid = { id: "%g.%ossitevalid", name: "own-shadow call site valid", type: BOOL, mutable: true };
+    L.globalsList.push(valid);
+  }
+  return { text, valid };
+};
+
 /** Splits every method of every registered family into the dispatcher `%C.m` and the body `%C.m%ns`. Runs after
  * applyProtoSlots, before the lifted functions are appended (the dispatchers' helpers land in L.liftedFns). */
 export function applyOwnShadows(L: Lowerer, fnLists: IrFunction[][]): void {
@@ -170,8 +188,12 @@ export function applyOwnShadows(L: Lowerer, fnLists: IrFunction[][]): void {
       const key: IrExpr = { kind: "strLit", value: t.method, type: STRING, loc };
       const recv = internalBox(L, L.coerceToExpected(ref(selfP), DYN));
       const args = params.slice(1).map((p) => L.coerceToExpected(ref(p), DYN));
+      const ownId = `${raw.name}%own`;
+      const okId = `${raw.name}%siteok`;
+      const ownRef = (): IrExpr => ({ kind: "varRef", localId: ownId, type: DYN, loc });
       const own = { kind: "libCall", fn: "cls.propsRead", args: [bagOf(), { ...key }], type: DYN, loc } as IrExpr;
-      const via = dynCallWithThis(L, recv, own, args, `${t.cls.def.jsName ?? t.cls.def.name}.prototype.${t.method}`, loc);
+      const label = `${t.cls.def.jsName ?? t.cls.def.name}.prototype.${t.method}`;
+      const via = dynCallWithThis(L, recv, ownRef(), args, label, loc);
       const rt = dispatcherReturnType(raw);
       // The result's coercion (a Promise adopts a checked-dynamic value through hidden locals) needs a function frame: this pass runs
       // after every body is down, so it opens one and hands its locals to the dispatcher.
@@ -186,10 +208,35 @@ export function applyOwnShadows(L: Lowerer, fnLists: IrFunction[][]): void {
           ctxLocals.push(...ctx.locals);
         }
       };
-      const slow: IrStmt[] =
+      const sg = siteGlobals(L);
+      const siteText: IrExpr = {
+        kind: "ternary",
+        cond: { kind: "varRef", localId: okId, type: BOOL, loc },
+        then: { kind: "varRef", localId: sg.text.id, type: STRING, loc },
+        else_: { kind: "strLit", value: label, type: STRING, loc },
+        type: STRING,
+        loc,
+      };
+      // The own property is read once; a function runs as the method's replacement, anything else is Node's TypeError naming the call.
+      const notFn: IrStmt = {
+        kind: "throw",
+        value: {
+          kind: "libCall",
+          fn: "error.new",
+          args: [{ kind: "strConcat", left: siteText, right: { kind: "strLit", value: " is not a function", type: STRING, loc }, type: STRING, loc }],
+          type: { kind: "object", className: "%TypeError" },
+          loc,
+        },
+        loc,
+      };
+      const call: IrStmt[] =
         rt.kind === "void"
           ? [{ kind: "exprStmt", expr: via, loc }, { kind: "return", value: null, loc }]
           : [{ kind: "return", value: coerceInCtx(via, rt), loc }];
+      const slow: IrStmt[] = [
+        { kind: "varDecl", localId: ownId, init: own, loc },
+        { kind: "if", cond: { kind: "dynTest", test: "function", value: ownRef(), type: BOOL, loc }, then: call, else_: [notFn], loc },
+      ];
       const direct: IrExpr = { kind: "call", callee: nsName, args: params.map(ref), type: rt, loc };
       const fast: IrStmt = rt.kind === "void" ? { kind: "exprStmt", expr: direct, loc } : { kind: "return", value: direct, loc };
       const bypassRef = (): IrExpr => ({ kind: "varRef", localId: bypass.id, type: BOOL, loc });
@@ -198,8 +245,16 @@ export function applyOwnShadows(L: Lowerer, fnLists: IrFunction[][]): void {
         ...(raw.jsName !== undefined && { jsName: raw.jsName }),
         params,
         returnType: rt,
-        locals: [...params.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })), ...ctxLocals],
+        locals: [
+          ...params.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
+          { id: ownId, name: "own", type: DYN, mutable: false },
+          { id: okId, name: "siteOk", type: BOOL, mutable: false },
+          ...ctxLocals,
+        ],
         body: [
+          // the call site's text, if it stored one, is read and cleared before anything can run another call
+          { kind: "varDecl", localId: okId, init: { kind: "varRef", localId: sg.valid.id, type: BOOL, loc }, loc },
+          { kind: "assign", localId: sg.valid.id, value: { kind: "boolLit", value: false, type: BOOL, loc }, loc },
           // a detached prototype-function thunk raised the flag: this one call runs the body
           { kind: "if", cond: bypassRef(), then: [{ kind: "assign", localId: bypass.id, value: { kind: "boolLit", value: false, type: BOOL, loc }, loc }, fast], else_: null, loc },
           { kind: "if", cond: { kind: "libCall", fn: "cls.propsHas", args: [bagOf(), { ...key }], type: BOOL, loc }, then: slow, else_: null, loc },
@@ -279,6 +334,70 @@ export function applyOwnShadows(L: Lowerer, fnLists: IrFunction[][]): void {
       }
     }
   }
+  // Each call of a dispatched method that has a plain callee spelling (`b.hello(...)`, `this.total(...)`) stores that text just
+  // before it calls, so a non-function own property shadowing the method throws Node's `b.hello is not a function`. A call whose
+  // arguments hold another call keeps the fallback spelling (the inner call would store its own text first).
+  const sg = siteGlobals(L);
+  const texts = new Map<string, string>();
+  for (const sf of L.program.getSourceFiles()) texts.set(sf.fileName, sf.text);
+  const dispatched = new Set(nsOf.keys());
+  const methodNames = new Set(todo.map((t) => t.method));
+  const done = new WeakSet<object>();
+  const callsIn = (root: unknown): boolean => {
+    const stack: unknown[] = [root];
+    while (stack.length > 0) {
+      const n = stack.pop();
+      if (n === null || typeof n !== "object") continue;
+      if (Array.isArray(n)) {
+        for (const x of n) stack.push(x);
+        continue;
+      }
+      const o = n as Record<string, unknown>;
+      const k = o["kind"];
+      if (k === "call" || k === "virtualCall" || k === "dynCall" || k === "closureCall" || k === "new") return true;
+      for (const [kk, v] of Object.entries(o)) if (!FN_FIELDS.has(kk)) stack.push(v);
+    }
+    return false;
+  };
+  const wrapSites = (root: unknown): void => {
+    const stack: unknown[] = [root];
+    while (stack.length > 0) {
+      const n = stack.pop();
+      if (n === null || typeof n !== "object") continue;
+      if (Array.isArray(n)) {
+        for (const x of n) stack.push(x);
+        continue;
+      }
+      const o = n as Record<string, unknown>;
+      const isDispatched =
+        (o["kind"] === "call" && typeof o["callee"] === "string" && dispatched.has(o["callee"])) ||
+        (o["kind"] === "virtualCall" && typeof o["method"] === "string" && methodNames.has(o["method"]));
+      if (isDispatched && !done.has(o)) {
+        done.add(o);
+        const loc = o["loc"] as SrcLoc;
+        const src = texts.get(loc.file)?.slice(loc.start, loc.end);
+        const callee = src === undefined ? null : /^([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)\(/.exec(src);
+        if (callee !== null && !callsIn(o["args"])) {
+          const inner = { ...o } as unknown as IrExpr;
+          done.add(inner);
+          for (const k of Object.keys(o)) delete o[k];
+          Object.assign(o, {
+            kind: "seqExpr",
+            stmts: [
+              { kind: "assign", localId: sg.text.id, value: { kind: "strLit", value: callee[1]!, type: STRING, loc }, loc },
+              { kind: "assign", localId: sg.valid.id, value: { kind: "boolLit", value: true, type: BOOL, loc }, loc },
+            ],
+            result: inner,
+            type: inner.type,
+            loc,
+          });
+        }
+      }
+      for (const [k, v] of Object.entries(o)) if (!FN_FIELDS.has(k)) stack.push(v);
+    }
+  };
+  for (const list of [...fnLists, L.liftedFns]) for (const f of list) wrapSites(f.body);
+
 }
 
 /** The own-key CREATION ORDER of a family's instances (the run-time table's insertion order is the order). After every body is
