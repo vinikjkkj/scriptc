@@ -5,7 +5,7 @@
 import { protoDataAssignStmt } from "./lower-protodata.js";
 import { classOfValueNode, protoSlotOf, protoSlotWriteStmt } from "./lower-protoslots.js";
 import { protoTabWriteStmt } from "./lower-prototab.js";
-import { lowerUnboundClassMethodValue } from "./lower-exprs.js";
+import { isShadowableMethodRead, lowerUnboundClassMethodValue } from "./lower-exprs.js";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { isEmitterMixinStatement } from "./lower-emitter-mixin.js";
@@ -5346,6 +5346,8 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     // checker spells the unmappable union of two module types; the slot
     // holds a bool, and every use that is not a member call fences.
     if (declSymbol && namespaceConditionalOf(L, declSymbol)) type = init.type;
+    // `const f = x.m` of a replaceable method: the read is the actual value, so the binding holds it as the checked-dynamic kind.
+    if (decl.initializer !== undefined && init.type.kind === "dyn" && isShadowableMethodRead(L, decl.initializer)) type = init.type;
     // A JS `let` whose checker type is one primitive kind while a later write
     // produces another (`let ms = 0; ms = str`): no static slot holds both, so
     // the binding is checked-dynamic. Writes that all agree keep the native

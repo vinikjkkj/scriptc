@@ -27986,6 +27986,22 @@ function classKeyedReadWalked(L: Lowerer, className: string): boolean {
 
 /** `x.m` read as a VALUE where `m` is a method of a class whose family takes run-time keyed writes (lower-ownshadow.ts): an own
  * property of the instance named `m` is the value, else the method's function. The receiver is read twice, so it must be plain. */
+/** Is `e` the read of a replaceable method from a plain receiver (`x.m` / `this.m`) in a JavaScript source: the read
+ * shadowAwareMethodValue answers as the actual, checked-dynamic value? A binding initialised from one holds that value, not a
+ * function. Decided from the checker and the class registry alone, so a file-scope binding can take it before its initializer
+ * lowers. */
+export function isShadowableMethodRead(L: Lowerer, e: ts.Expression): boolean {
+  while (ts.isParenthesizedExpression(e)) e = e.expression;
+  if (!ts.isPropertyAccessExpression(e) || e.questionDotToken !== undefined || !isJsSourceFile(e.getSourceFile())) return false;
+  let r: ts.Expression = e.expression;
+  while (ts.isParenthesizedExpression(r)) r = r.expression;
+  if (r.kind !== ts.SyntaxKind.ThisKeyword && !ts.isIdentifier(r)) return false;
+  const t = L.mapTypeOf(L.typeOf(e.expression));
+  if (t?.kind !== "object") return false;
+  const info = L.classes.get(t.className);
+  return info !== undefined && inOwnShadowFamily(L, info) && L.findMethodOn(info, e.name.text) !== null;
+}
+
 function shadowAwareMethodValue(L: Lowerer, expr: ts.PropertyAccessExpression, className: string, original: IrExpr): IrExpr {
   const info = L.classes.get(className);
   if (info === undefined || !inOwnShadowFamily(L, info) || original.type.kind !== "func") return original;
@@ -27993,11 +28009,29 @@ function shadowAwareMethodValue(L: Lowerer, expr: ts.PropertyAccessExpression, c
   let recvNode: ts.Expression = expr.expression;
   while (ts.isParenthesizedExpression(recvNode)) recvNode = recvNode.expression;
   if (ts.isPropertyAccessExpression(recvNode) && recvNode.name.text === "prototype") return original;
-  // `x.m` on an instance: an own property written under a run-time key may shadow the method with a value of ANY type, but the
-  // read is typed as the method's function: a shadowing number would meet a checked cast that throws where Node answers the number.
-  // Calls are exact (the dispatcher), values are not, so the read of a family method as a value is refused.
-  L.unsupported("SC1090", expr, `reading the method '${expr.name.text}' as a value from an instance whose own properties, written under run-time keys, can shadow it with a value of another type (call it directly, or read it through a keyed access)`);
-  return original;
+  // `x.m` on an instance: an own property written under a run-time key may shadow the method with a value of ANY type, so the
+  // read is the actual value, a checked-dynamic one: the instance's own property when its table holds the name, else the method
+  // boxed. What consumes it (a call, `.bind`, `typeof`, a binding) works on that value, and a non-function throws Node's own
+  // TypeError there. JavaScript sources only: a TypeScript member has a declared type at every access.
+  if (!isJsSourceFile(expr.getSourceFile())) return original;
+  const plain = recvNode.kind === ts.SyntaxKind.ThisKeyword || ts.isIdentifier(recvNode);
+  if (!plain || !canBoxFuncIntoDyn(original.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))) {
+    L.unsupported("SC1090", expr, `reading the method '${expr.name.text}' as a value from an instance whose own properties, written under run-time keys, can shadow it with a value of another type (call it directly, or read it through a keyed access)`);
+    return original;
+  }
+  const loc = locOf(expr);
+  const recv = L.lowerExpr(expr.expression);
+  if (recv.type.kind !== "object") return original;
+  const bag = (): IrExpr => ({ kind: "fieldGet", obj: recv, className: (recv.type as IrType & { kind: "object" }).className, field: CLASS_PROPS_FIELD, type: DYN, loc });
+  const key = (): IrExpr => ({ kind: "strLit", value: expr.name.text, type: STRING, loc });
+  return {
+    kind: "ternary",
+    cond: { kind: "libCall", fn: "cls.propsHas", args: [bag(), key()], type: BOOL, loc },
+    then: { kind: "libCall", fn: "cls.propsRead", args: [bag(), key()], type: DYN, loc },
+    else_: { kind: "dynFrom", value: original, type: DYN, loc },
+    type: DYN,
+    loc,
+  };
 }
 
 /** `o[k] = v` with a RUN-TIME key on an instance of a JS class that carries the run-time property table
