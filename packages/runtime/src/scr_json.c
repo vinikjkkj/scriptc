@@ -2020,6 +2020,43 @@ ScrDyn *scr_dyn_obj_proto_ref(const ScrDyn *d) {
  * class keeps it. `all_own` (a shape with an index signature) also carries
  * every other own enumerable key, which is the overflow Node would show.
  * +1, or NULL with the exception pending. */
+/* The record builder's ENGINE lane: the declared members of an engine-held object (a row the embedded engine built), read
+ * through the engine's own [[Get]] and projected into a plain object the ordinary OBJ body then validates. An absent
+ * member is not written; `all_own` (an index signature) also carries every own enumerable key. +1, or NULL with the
+ * exception pending. */
+ScrDyn *scr_dyn_rec_from_jsval(const ScrDyn *d, const char *const *keys, const unsigned *lens, size_t n, bool all_own) {
+  ScrDyn *o = scr_dyn_new_obj();
+  if (all_own) {
+    ScrDyn *ents = scr_dyn_objwalk(d, SCR_OBJWALK_ENTRIES);
+    if (ents == NULL) {
+      scr_dyn_release(o);
+      return NULL;
+    }
+    for (size_t i = 0; i < ents->v.arr.len; i++) {
+      const ScrDyn *pair = ents->v.arr.items[i];
+      const ScrDyn *pk = pair->v.arr.items[0];
+      scr_dyn_obj_set(o, pk->v.str->data, pk->v.str->len, scr_dyn_retain(pair->v.arr.items[1]));
+    }
+    scr_dyn_release(ents);
+  }
+  for (size_t i = 0; i < n; i++) {
+    if (all_own && scr_dyn_obj_get(o, keys[i], lens[i]) != NULL) continue;
+    ScrStr *k = scr_str_new(keys[i], lens[i]);
+    ScrDyn *v = scr_dyn_isl_key_get(d, k);
+    scr_str_release(k);
+    if (v == NULL) {
+      scr_dyn_release(o);
+      return NULL;
+    }
+    if (v->kind == SCR_DYN_UNDEF) {
+      scr_dyn_release(v);
+      continue;
+    }
+    scr_dyn_obj_set_lit(o, keys[i], lens[i], v); /* takes the +1 */
+  }
+  return o;
+}
+
 ScrDyn *scr_dyn_rec_wide_inst(const ScrDyn *d, const char *const *keys, const unsigned *lens, size_t n,
                               bool all_own, ScrDyn *(*kg)(ScrDyn *, ScrStr *, bool)) {
   ScrDyn *o = scr_dyn_new_obj();
