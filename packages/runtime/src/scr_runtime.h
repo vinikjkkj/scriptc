@@ -7717,6 +7717,7 @@ bool scr_dyn_isl_fence(const ScrDyn *d, const char *what);
  * node; NULL with the engine's exception bridged catchably. */
 ScrDyn *scr_dyn_isl_key_get(const ScrDyn *d, const ScrStr *k);
 /* The record builder's engine lane (scr_json.c): declared members of an engine-held object, projected. +1 or NULL pending. */
+ScrDyn *scr_dyn_pack_args(ScrDyn *const *args, size_t argc);
 ScrDyn *scr_dyn_rec_from_jsval(const ScrDyn *d, const char *const *keys, const unsigned *lens, size_t n, bool all_own);
 /* The `??`/optional-chain nullish test over a dyn value: UNDEF/NULL
  * native, JSVAL through the engine's own test (defensively — the wrap
