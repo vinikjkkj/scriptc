@@ -264,7 +264,25 @@ export class LlWalkers {
         if (i > 0) this.putc(B, "%b", "44"); // ','
         if (edgeable(f.type)) this.jbEdgeIdx(B, String(i));
         const v = this.loadField(B, "%v", shapeId, fieldIndex.get(f.name)!, f.type);
-        B.line(`call void @${this.jsonWriteHelper(f.type)}(ptr %b, ${this.valTy(f.type)} ${v}) ; [${f.name}]`);
+        // A position holding the undefined arm is an array slot, not a
+        // droppable key: JSON.stringify([1, undefined]) is `[1,null]`.
+        const utag = this.host.undefinedArmTag(f.type);
+        const present = utag >= 0 ? emitOwnPresentLl(B, shape, f.name, "%v", utag, true) : null;
+        if (present !== null) {
+          const lw = B.newLabel("jwt.w");
+          const ln = B.newLabel("jwt.n");
+          const lj = B.newLabel("jwt.j");
+          B.condBr(present, lw, ln);
+          B.startBlock(ln);
+          this.puts(B, "%b", "null");
+          B.br(lj);
+          B.startBlock(lw);
+          B.line(`call void @${this.jsonWriteHelper(f.type)}(ptr %b, ${this.valTy(f.type)} ${v}) ; [${f.name}]`);
+          B.br(lj);
+          B.startBlock(lj);
+        } else {
+          B.line(`call void @${this.jsonWriteHelper(f.type)}(ptr %b, ${this.valTy(f.type)} ${v}) ; [${f.name}]`);
+        }
       });
       this.putc(B, "%b", "93"); // ']'
       if (cyclic) this.jbLeave(B);
