@@ -13901,6 +13901,10 @@ static void scr_dyn_assign_from(ScrDyn *target, const ScrDyn *src) {
   /* CopyDataProperties lists the string keys first and the ENUMERABLE symbol keys after them. The hook is NULL in every
    * program that links no symbol unit, which is the whole cost of this tail for them: one load and one test. */
   if (scr_dyn_sym_copy_enum == NULL || target->kind != SCR_DYN_OBJ) return;
+  if (src->kind == SCR_DYN_PROXY) {
+    if (!scr_exc_pending()) scr_dyn_sym_copy_enum(target, src); /* the proxy's ownKeys / getOwnPropertyDescriptor / get traps */
+    return;
+  }
   if (src->kind == SCR_DYN_OBJINST) {
     /* a boxed class instance keeps its symbol-keyed properties in the run-time property table */
     if (!scr_exc_pending()) scr_dyn_sym_copy_enum(target, src);

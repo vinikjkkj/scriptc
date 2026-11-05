@@ -394,25 +394,33 @@ static void scr_dsym_prim_tail(char *out, size_t cap, const char *lead, const Sc
   scr_str_release(t);
 }
 
-/* A Proxy receiver: the operation falls through to the TARGET unless the handler defines the trap for it (a trap would be called with the
- * symbol as its property argument, which the trap ABI here does not carry: that fences). A revoked proxy throws V8's TypeError.
- * Returns the target to forward to, or NULL with the exception pending. */
-static ScrDyn *scr_dsym_proxy_target(ScrDyn *p, const char *trap) {
-  if (p->v.proxy.revoked) {
-    char msg[96];
-    const int n = snprintf(msg, sizeof msg, "Cannot perform '%s' on a proxy that has been revoked", trap);
-    scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)n);
-    return NULL;
-  }
-  const ScrDyn *h = p->v.proxy.handler;
-  if (h != NULL && h->kind == SCR_DYN_OBJ) {
-    const ScrDyn *t = scr_dyn_obj_get(h, trap, strlen(trap));
-    if (t != NULL && t->kind != SCR_DYN_UNDEF && t->kind != SCR_DYN_NULL) {
-      scr_dsym_fence(p, "a trapped symbol-keyed access of");
-      return NULL;
-    }
-  }
-  return p->v.proxy.target;
+#define SCR_ANY_SYM(k) ((ScrSym *)(k)->v.handle.ptr)
+static inline bool scr_any_is_sym(const ScrDyn *k) { return k->kind == SCR_DYN_HANDLE && k->v.handle.tag == SCR_DYNH_SYMBOL; }
+
+/* A Proxy receiver. The handler's trap for the operation runs with the symbol itself as its property argument (a dyn
+ * Symbol handle, the same value `typeof k === 'symbol'` sees inside the trap); a handler with no such trap lets the
+ * operation fall through to the TARGET. A revoked proxy throws V8's TypeError (scr_dyn_proxy_trap). */
+static ScrDyn *scr_dsym_px_run(ScrDyn *p, const char *name, ScrDyn *const *args, size_t n, bool *ran) {
+  bool threw;
+  ScrDyn *trap = scr_dyn_proxy_ops_ptr->trap(p, name, &threw);
+  *ran = threw || trap != NULL;
+  if (trap == NULL) return NULL; /* none (fall through) or the exception pending */
+  scr_dyn_this_push_dyn(p->v.proxy.handler);
+  ScrDyn *r = scr_dyn_call(trap, args, n, name);
+  scr_dyn_this_pop();
+  scr_dyn_release(trap);
+  return r;
+}
+
+/* The symbol as the dyn value a trap receives (+1). */
+static ScrDyn *scr_dsym_keydyn(ScrSym *k) { return scr_dyn_new_handle(k, SCR_DYNH_SYMBOL); }
+
+/* TypeError "'<trap>' on proxy: trap returned falsish for property 'Symbol(d)'". */
+static void scr_dsym_px_falsish(const char *trap, ScrSym *k) {
+  char name[192], msg[320];
+  scr_dsym_name(k, name, sizeof name);
+  const int n = snprintf(msg, sizeof msg, "'%s' on proxy: trap returned falsish for property '%s'", trap, name);
+  scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)(n < 0 ? 0 : n >= (int)sizeof msg ? (int)sizeof msg - 1 : n));
 }
 
 /* How a receiver kind answers a symbol-keyed READ.
@@ -621,8 +629,13 @@ static ScrDyn *scr_dsym_row_value(const ScrDyn *self, const ScrDynSymEnt *row) {
 
 static ScrDyn *scr_dsym_get(ScrDyn *recv, ScrSym *k, ScrDyn *self) {
   if (recv != NULL && recv->kind == SCR_DYN_PROXY) {
-    ScrDyn *t = scr_dsym_proxy_target(recv, "get");
-    return t == NULL ? NULL : scr_dsym_get(t, k, t);
+    ScrDyn *kd = scr_dsym_keydyn(k);
+    ScrDyn *args[3] = {recv->v.proxy.target, kd, recv};
+    bool ran;
+    ScrDyn *r = scr_dsym_px_run(recv, "get", args, 3, &ran);
+    scr_dyn_release(kd);
+    if (ran) return r;
+    return scr_dsym_get(recv->v.proxy.target, k, recv->v.proxy.target);
   }
   if (scr_dsym_nullish(recv)) {
     { char pre[64]; snprintf(pre, sizeof pre, "Cannot read properties of %s (reading '", scr_dsym_kind(recv)); scr_dsym_throw(pre, k, "')"); }
@@ -699,8 +712,19 @@ static void scr_dsym_read_only(ScrSym *k, const ScrDyn *self) {
 
 static void scr_dsym_set(ScrDyn *recv, ScrSym *k, ScrDyn *v, bool strict, ScrDyn *self) {
   if (recv != NULL && recv->kind == SCR_DYN_PROXY) {
-    ScrDyn *t = scr_dsym_proxy_target(recv, "set");
-    if (t != NULL) scr_dsym_set(t, k, v, strict, t);
+    ScrDyn *kd = scr_dsym_keydyn(k);
+    ScrDyn *args[4] = {recv->v.proxy.target, kd, v, recv};
+    bool ran;
+    ScrDyn *r = scr_dsym_px_run(recv, "set", args, 4, &ran);
+    scr_dyn_release(kd);
+    if (!ran) {
+      scr_dsym_set(recv->v.proxy.target, k, v, strict, recv->v.proxy.target);
+      return;
+    }
+    if (r == NULL) return;
+    const bool ok = scr_dyn_truthy(r);
+    scr_dyn_release(r);
+    if (!ok && strict) scr_dsym_px_falsish("set", k);
     return;
   }
   if (scr_dsym_nullish(recv)) {
@@ -793,8 +817,16 @@ void scr_dyn_sym_set_sloppy(ScrDyn *recv, ScrSym *k, ScrDyn *v) { scr_dsym_set(r
 
 bool scr_dyn_sym_has_own(ScrDyn *recv, ScrSym *k) {
   if (recv != NULL && recv->kind == SCR_DYN_PROXY) {
-    ScrDyn *t = scr_dsym_proxy_target(recv, "getOwnPropertyDescriptor");
-    return t != NULL && scr_dyn_sym_has_own(t, k);
+    ScrDyn *kd = scr_dsym_keydyn(k);
+    ScrDyn *args[2] = {recv->v.proxy.target, kd};
+    bool ran;
+    ScrDyn *r = scr_dsym_px_run(recv, "getOwnPropertyDescriptor", args, 2, &ran);
+    scr_dyn_release(kd);
+    if (!ran) return scr_dyn_sym_has_own(recv->v.proxy.target, k);
+    if (r == NULL) return false;
+    const bool own = r->kind != SCR_DYN_UNDEF;
+    scr_dyn_release(r);
+    return own;
   }
   if (scr_dsym_nullish(recv)) {
     static const char msg[] = "Cannot convert undefined or null to object";
@@ -824,8 +856,16 @@ bool scr_dyn_sym_has_own(ScrDyn *recv, ScrSym *k) {
 
 bool scr_dyn_sym_has(ScrDyn *recv, ScrSym *k) {
   if (recv != NULL && recv->kind == SCR_DYN_PROXY) {
-    ScrDyn *t = scr_dsym_proxy_target(recv, "has");
-    return t != NULL && scr_dyn_sym_has(t, k);
+    ScrDyn *kd = scr_dsym_keydyn(k);
+    ScrDyn *args[2] = {recv->v.proxy.target, kd};
+    bool ran;
+    ScrDyn *r = scr_dsym_px_run(recv, "has", args, 2, &ran);
+    scr_dyn_release(kd);
+    if (!ran) return scr_dyn_sym_has(recv->v.proxy.target, k);
+    if (r == NULL) return false;
+    const bool has = scr_dyn_truthy(r);
+    scr_dyn_release(r);
+    return has;
   }
   if (scr_dsym_nullish(recv) || recv->kind == SCR_DYN_STR || recv->kind == SCR_DYN_NUM || recv->kind == SCR_DYN_BOOL ||
       recv->kind == SCR_DYN_BIG || (recv->kind == SCR_DYN_HANDLE && recv->v.handle.tag == SCR_DYNH_SYMBOL)) {
@@ -858,8 +898,17 @@ bool scr_dyn_sym_has(ScrDyn *recv, ScrSym *k) {
 
 static bool scr_dsym_delete(ScrDyn *recv, ScrSym *k, bool strict, const ScrDyn *self) {
   if (recv != NULL && recv->kind == SCR_DYN_PROXY) {
-    ScrDyn *t = scr_dsym_proxy_target(recv, "deleteProperty");
-    return t != NULL && scr_dsym_delete(t, k, strict, t);
+    ScrDyn *kd = scr_dsym_keydyn(k);
+    ScrDyn *args[2] = {recv->v.proxy.target, kd};
+    bool ran;
+    ScrDyn *r = scr_dsym_px_run(recv, "deleteProperty", args, 2, &ran);
+    scr_dyn_release(kd);
+    if (!ran) return scr_dsym_delete(recv->v.proxy.target, k, strict, recv->v.proxy.target);
+    if (r == NULL) return false;
+    const bool ok = scr_dyn_truthy(r);
+    scr_dyn_release(r);
+    if (!ok && strict) scr_dsym_px_falsish("deleteProperty", k);
+    return ok;
   }
   if (scr_dsym_nullish(recv)) {
     static const char msg[] = "Cannot convert undefined or null to object";
@@ -907,11 +956,24 @@ static bool scr_dsym_delete(ScrDyn *recv, ScrSym *k, bool strict, const ScrDyn *
 
 ScrDyn *scr_dyn_sym_define(ScrDyn *recv, ScrSym *k, ScrDyn *desc) {
   if (recv != NULL && recv->kind == SCR_DYN_PROXY) {
-    ScrDyn *t = scr_dsym_proxy_target(recv, "defineProperty");
-    if (t == NULL) return NULL;
-    ScrDyn *r = scr_dyn_sym_define(t, k, desc);
+    ScrDyn *kd = scr_dsym_keydyn(k);
+    ScrDyn *args[3] = {recv->v.proxy.target, kd, desc};
+    bool ran;
+    ScrDyn *r = scr_dsym_px_run(recv, "defineProperty", args, 3, &ran);
+    scr_dyn_release(kd);
+    if (!ran) {
+      ScrDyn *d = scr_dyn_sym_define(recv->v.proxy.target, k, desc);
+      if (d == NULL) return NULL;
+      scr_dyn_release(d);
+      return scr_dyn_retain(recv);
+    }
     if (r == NULL) return NULL;
+    const bool ok = scr_dyn_truthy(r);
     scr_dyn_release(r);
+    if (!ok) {
+      scr_dsym_px_falsish("defineProperty", k);
+      return NULL;
+    }
     return scr_dyn_retain(recv);
   }
   if (scr_dsym_nullish(recv) ||
@@ -1028,8 +1090,34 @@ bool scr_dyn_sym_delete_sloppy(ScrDyn *recv, ScrSym *k) { return scr_dsym_delete
 
 static ScrArr *scr_dsym_keys(ScrDyn *recv, bool enum_only) {
   if (recv != NULL && recv->kind == SCR_DYN_PROXY) {
-    ScrDyn *t = scr_dsym_proxy_target(recv, "ownKeys");
-    return t == NULL ? NULL : scr_dsym_keys(t, enum_only);
+    ScrDyn *targs[1] = {recv->v.proxy.target};
+    bool ran;
+    ScrDyn *list = scr_dsym_px_run(recv, "ownKeys", targs, 1, &ran);
+    if (!ran) return scr_dsym_keys(recv->v.proxy.target, enum_only);
+    if (list == NULL) return NULL;
+    if (list->kind != SCR_DYN_ARR) {
+      static const char msg[] = "CreateListFromArrayLike called on non-object";
+      scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+      scr_dyn_release(list);
+      return NULL;
+    }
+    ScrArr *out = scr_arr_new_ref(&scr_sym_retain_v, &scr_sym_release_v, NULL, 4);
+    for (size_t i = 0; i < list->v.arr.len; i++) {
+      ScrDyn *kd = list->v.arr.items[i];
+      if (!scr_any_is_sym(kd)) continue; /* the string keys are the string walk's */
+      ScrSym *sk = SCR_ANY_SYM(kd);
+      if (enum_only && !scr_dsym_proto_test(1, recv, sk)) {
+        if (scr_exc_pending()) break;
+        continue;
+      }
+      scr_arr_push_ref(out, scr_sym_retain(sk));
+    }
+    scr_dyn_release(list);
+    if (scr_exc_pending()) {
+      scr_arr_release(out);
+      return NULL;
+    }
+    return out;
   }
   if (scr_dsym_nullish(recv)) {
     static const char msg[] = "Cannot convert undefined or null to object";
@@ -1074,8 +1162,30 @@ ScrArr *scr_dyn_sym_own_enum_keys(ScrDyn *recv) { return scr_dsym_keys(recv, tru
 /* Object.assign / spread: the source's ENUMERABLE symbol rows land on the target in creation order (a [[Set]] on the
  * target, so a read-only target property refuses exactly as it does for a string key). The loop re-reads the length
  * each step: a setter the copy triggers may grow the source. */
+/* An object whose own keys are only known by asking it (a proxy's ownKeys / getOwnPropertyDescriptor traps, an engine object):
+ * [[OwnPropertyKeys]], each symbol filtered by its descriptor's enumerable bit, read with [[Get]]. */
+static void scr_dsym_copy_enum_keyed(ScrDyn *target, const ScrDyn *src) {
+  /* [[OwnPropertyKeys]] through the ownKeys trap, each symbol filtered by its descriptor's enumerable bit, read with [[Get]] */
+  ScrArr *ks = scr_dsym_keys((ScrDyn *)src, true);
+  if (ks == NULL) return;
+  for (size_t i = 0, n = (size_t)scr_arr_len(ks); i < n && !scr_exc_pending(); i++) {
+    ScrSym *k = (ScrSym *)scr_arr_get_ref(ks, (double)i); /* +1 */
+    ScrDyn *v = scr_dsym_get((ScrDyn *)src, k, (ScrDyn *)src);
+    if (v != NULL) {
+      scr_dsym_set(target, k, v, true, target);
+      scr_dyn_release(v);
+    }
+    scr_sym_release(k);
+  }
+  scr_arr_release(ks);
+}
+
 static void scr_dsym_copy_enum(ScrDyn *target, const ScrDyn *src) {
   bool none;
+  if (src->kind == SCR_DYN_PROXY) {
+    scr_dsym_copy_enum_keyed(target, src);
+    return;
+  }
   ScrDyn *held = src->kind == SCR_DYN_OBJINST ? scr_dsym_inst_bag(src, false) : NULL; /* the instance's table, +1 */
   if (src->kind == SCR_DYN_OBJINST && held == NULL) return;
   ScrDynObjExt *x = scr_dsym_host(held != NULL ? held : (ScrDyn *)src, false, &none);
@@ -1113,6 +1223,22 @@ ScrDyn *scr_dyn_sym_append(ScrDyn *names, ScrDyn *recv) {
 /* Object.prototype.hasOwnProperty (op 0) and propertyIsEnumerable (op 1) over a symbol argument. */
 static bool scr_dsym_proto_test(int op, ScrDyn *recv, ScrSym *k) {
   if (op == 0) return scr_dyn_sym_has_own(recv, k);
+  if (recv != NULL && recv->kind == SCR_DYN_PROXY) {
+    ScrDyn *kd = scr_dsym_keydyn(k);
+    ScrDyn *args[2] = {recv->v.proxy.target, kd};
+    bool ran;
+    ScrDyn *r = scr_dsym_px_run(recv, "getOwnPropertyDescriptor", args, 2, &ran);
+    scr_dyn_release(kd);
+    if (!ran) return scr_dsym_proto_test(1, recv->v.proxy.target, k);
+    if (r == NULL) return false;
+    bool en = false;
+    if (r->kind == SCR_DYN_OBJ) {
+      const ScrDyn *e = scr_dyn_obj_get(r, "enumerable", 10);
+      en = e != NULL && scr_dyn_truthy(e);
+    }
+    scr_dyn_release(r);
+    return en;
+  }
   if (scr_dsym_nullish(recv)) {
     static const char msg[] = "Cannot convert undefined or null to object";
     scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
