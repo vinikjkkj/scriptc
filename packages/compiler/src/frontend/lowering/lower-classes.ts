@@ -3,6 +3,7 @@
  * synthesized derived ctors and field initializers, super calls and super
  * accessor access, upcasts, `new` expressions, and the builtin Error
  * hierarchy registration. */
+import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import { protoDataFieldNames, registerProtoData } from "./lower-protodata.js";
 import { appliesEmitterMixin, EMITTER_MIXIN_FIELD, graftCtorEmitterInit } from "./lower-emitter-mixin.js";
 import * as ts from "../ts7/adapter.js";
@@ -5941,19 +5942,32 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     L.typeParamBindings = bindings;
     L.instantiationContext = `instantiating class '${gci.baseName}' with ${typeArgsText}`;
     L.instanceTsRef = ref;
+    // The diagnostics this collection records go where they always went; the first one is also kept, so the reference that cannot
+    // be built can name WHY (a reference whose class never reports would otherwise block its users without a word).
+    const prevSink = L.diagSink;
+    const mine: ScrDiagnostic[] = [];
+    L.diagSink = mine;
+    const forward = (): void => {
+      L.diagSink = prevSink;
+      for (const d of mine) L.pushDiag(d);
+    };
     try {
       L.collectClassShapeInner(decl, undefined, { family: gci.family, name, bindings, typeArgsText, ordinal, tsRef: ref });
     } catch (e) {
       // Collection fenced under THESE bindings: the diagnostic (with the
       // instantiation context) is recorded; the type stays unmapped.
+      forward();
       if (!(e instanceof PoisonError)) throw e;
       entry.poisoned = true;
-      return reject(`its members do not compile under these arguments (see the diagnostic at the class)`);
+      const first = mine[0];
+      const where = first === undefined ? "" : `: ${first.code} ${String(first.message).split("\n", 1)[0]!.slice(0, 220)}`;
+      return reject(`its members do not compile under these arguments${where}`);
     } finally {
       L.typeParamBindings = prevBindings;
       L.instantiationContext = prevContext;
       L.instanceTsRef = prevTsRef;
     }
+    forward();
     const info = L.classes.get(name);
     if (!info) {
       entry.poisoned = true;
