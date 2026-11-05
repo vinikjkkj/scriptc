@@ -2681,6 +2681,7 @@ export class Lowerer {
       resolveTypeParamTsArms: this.typeParamTsArmsResolver,
       resolveSymbolic: this.symbolicTsResolver,
       genericClassInstance: (decl, ref) => this.genericClassInstanceType(decl, ref),
+      classRejections: this.classRejections,
       // A JavaScript PRE-CLASS CONSTRUCTOR the frontend recognized as a
       // class: `this` inside its body, the result of `new S(b)`, and every
       // binding the checker narrows to it all resolve to the FUNCTION's
@@ -16769,6 +16770,9 @@ export class Lowerer {
    * instance table. Filled by collectClassShapeInner's family mode;
    * consulted by mapType's genericClassInstance hook. */
   readonly genericClassByDecl = new Map<ts.ClassLikeDeclaration, GenericClassInfo>();
+  /** Why a reference to a generic class instance (`Cursor<any, {}>`, keyed by its spelling) has no object type. mapType has no
+   * diagnostic channel, so the reason waits here for the diagnostic that names the component the reference blocks. */
+  readonly classRejections = new Map<string, string>();
   /** Instantiations in demand order — the member-lowering worklist run()'s
    * monomorphization fixpoint drains (an instantiation's methods can
    * demand further instances of either kind). */

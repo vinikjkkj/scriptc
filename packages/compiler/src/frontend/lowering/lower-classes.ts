@@ -5872,6 +5872,11 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     const familyT: IrType | null = gci.family.genericSplitBase === true
       ? null
       : { kind: "object", className: gci.family.def.name };
+    const refText = L.checker.typeToString(ref);
+    const reject = (why: string): null => {
+      if (!L.classRejections.has(refText)) L.classRejections.set(refText, why);
+      return null;
+    };
     // The checker appends `this` (and outer type parameters) to
     // getTypeArguments — only the declaration's own count participates.
     const args = L.checker.getTypeArguments(ref as ts.TypeReference).slice(0, gci.typeParams.length);
@@ -5883,7 +5888,14 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           // An UNBOUND type parameter argument (`Box<T>` outside any
           // instantiation) stays honestly unmapped — nothing concrete is
           // being named; everything else degrades to the family.
-          return a.flags & ts.TypeFlags.TypeParameter ? null : familyT;
+          if (a.flags & ts.TypeFlags.TypeParameter) return reject(`its argument '${L.checker.typeToString(a)}' is an unbound type parameter`);
+          if (familyT === null) {
+            return reject(
+              `its argument '${L.checker.typeToString(a)}' has no static type, and the class's 'extends' clause names its own type ` +
+                `parameters, so the family type cannot stand in for the instance (name concrete arguments)`,
+            );
+          }
+          return familyT;
         }
         mapped.push(m);
       }
@@ -5929,7 +5941,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       // instantiation context) is recorded; the type stays unmapped.
       if (!(e instanceof PoisonError)) throw e;
       entry.poisoned = true;
-      return null;
+      return reject(`its members do not compile under these arguments (see the diagnostic at the class)`);
     } finally {
       L.typeParamBindings = prevBindings;
       L.instantiationContext = prevContext;
@@ -5938,7 +5950,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     const info = L.classes.get(name);
     if (!info) {
       entry.poisoned = true;
-      return null;
+      return reject("its instantiation registered no class");
     }
     entry.info = info;
     L.genericClassInstances.push(info);

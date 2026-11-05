@@ -1,0 +1,26 @@
+a-generic-class-instance-with-an-unmappable-argument-names-why.ts:11:7 - error SC2009: values of type 'Priv' cannot be compiled: the record shape is supported, but its member 'cursors' has type 'Set<Cursor<any, {}>>', which does not compile - the class instance 'Cursor<any, {}>' has no form: its argument 'any' has no static type, and the class's 'extends' clause names its own type parameters, so the family type cannot stand in for the instance (name concrete arguments)
+
+  10 | }
+  11 | const p: Priv = { cursors: new Set() };
+     |       ^
+  12 | console.log(p.cursors.size);
+
+  hint: the outer shape is supported — the named component is the blocker; restate it inside the compilable set (number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
+
+a-generic-class-instance-with-an-unmappable-argument-names-why.ts:11:17 - error SC2009: values of type 'Priv' cannot be compiled: the record shape is supported, but its member 'cursors' has type 'Set<Cursor<any, {}>>', which does not compile - the class instance 'Cursor<any, {}>' has no form: its argument 'any' has no static type, and the class's 'extends' clause names its own type parameters, so the family type cannot stand in for the instance (name concrete arguments)
+
+  10 | }
+  11 | const p: Priv = { cursors: new Set() };
+     |                 ^~~~~~~~~~~~~~~~~~~~~~
+  12 | console.log(p.cursors.size);
+
+  hint: the outer shape is supported — the named component is the blocker; restate it inside the compilable set (number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
+
+a-generic-class-instance-with-an-unmappable-argument-names-why.ts:12:13 - error SC2020: 'Set<Cursor<any, {}>>.size' is part of the standard library types but has no scriptc lowering yet
+
+  11 | const p: Priv = { cursors: new Set() };
+  12 | console.log(p.cursors.size);
+     |             ^~~~~~~~~~~~~~
+  13 | 
+
+  hint: the type checker sees the full standard library, but only the supported surface compiles (https://scriptc.dev/limitations)

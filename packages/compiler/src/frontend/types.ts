@@ -1633,6 +1633,8 @@ export interface TypeMapperCtx {
    * family never collected. Absent in checkers with no lowering attached
    * (generic instance types stay unmapped there). */
   genericClassInstance?: (decl: ts.ClassLikeDeclaration, typeRef: ts.Type) => IrType | null;
+  /** Reasons a generic class reference has no object type, keyed by the reference's spelling (see Lowerer.classRejections). */
+  classRejections?: ReadonlyMap<string, string>;
   /** MIXIN class nodes (the class inside a mixin function): one shared
    * AST node, one instantiation per call site — the node's instance type
    * resolves to the instantiation CURRENTLY collecting/lowering (`this`
@@ -10080,7 +10082,16 @@ export function describeRecordMemberBlocker(widened: ts.Type, ctx: TypeMapperCtx
     }
     if (pt === null && !ctx.dynamic && (declSpellsAny(checker.declarationsOf(p)) || declAnnotatedAny(fieldTs, checker.declarationsOf(p)))) continue;
     if (!pt || pt.kind === "void") {
-      return `the record shape is supported, but its member '${p.name}' has type '${checker.typeToString(fieldTs)}', which does not compile`;
+      const fieldText = checker.typeToString(fieldTs);
+      // A generic class reference inside the member that has no object type says why (Lowerer.classRejections): without it the
+      // blocker is a class the diagnostics never mention.
+      let because = "";
+      if (ctx.classRejections !== undefined) {
+        for (const [ref, why] of ctx.classRejections) {
+          if (fieldText.includes(ref)) { because = ` - the class instance '${ref}' has no form: ${why}`; break; }
+        }
+      }
+      return `the record shape is supported, but its member '${p.name}' has type '${fieldText}', which does not compile${because}`;
     }
   }
   // No member refuses on its own: the record refers back to itself through a
