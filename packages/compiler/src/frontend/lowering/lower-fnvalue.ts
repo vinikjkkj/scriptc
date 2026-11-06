@@ -1223,3 +1223,21 @@ export function dynReceiverCallbackValue(L: Lowerer, expr: ts.Identifier, loc: S
   if (decls.length === 0 || !decls.every((d) => L.isStdlibFile(d.getSourceFile()))) return null;
   return dynBuiltinFnValueOf(L, key, loc);
 }
+
+/** Is the slot the global `String` / `Number` / `Boolean` identifier flows into typed as the DYN signature closure (`(v: any) => string`,
+ * `(v: unknown) => number`...)? Then the value is the DYN-signature closure itself (dynBuiltinFnValueOf): equal types, no adapter,
+ * and every element a dyn caller passes converts like the direct call. False without a contextual type. */
+export function contextualDynCtorSlot(L: Lowerer, expr: ts.Identifier): boolean {
+  const key = expr.text;
+  const sig = ownRow(DYN_BUILTIN_SIGS, key);
+  if (sig === undefined || ownRow(DYN_BUILTIN_FNS, key) === undefined) return false;
+  let ctx: ts.Type | undefined;
+  try {
+    ctx = L.checker.getContextualType(expr);
+  } catch {
+    return false;
+  }
+  if (ctx === undefined) return false;
+  const mapped = L.mapTypeOf(ctx);
+  return mapped !== null && typeEquals(mapped, dynBuiltinFnType(sig));
+}
