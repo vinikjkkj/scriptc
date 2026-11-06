@@ -276,7 +276,10 @@ export function setProjectRealm(entryPath: string): void {
 export function projectDtsRuntimeSibling(path: string): string | null {
   if (path.includes("/node_modules/") || path.includes("\\node_modules\\")) return null;
   if (!path.endsWith(".d.ts")) return null;
-  if (projectRealmPkgJson === null || nearestPkgJsonPath(path) !== projectRealmPkgJson) return null;
+  // The same package realm as the entry. An entry with NO package.json above it (setProjectRealm always runs before a
+  // program loads, so null here means "none", never "unset") is its own realm: a sibling `.js` beside a declaration in
+  // a tree that no package.json claims is what Node's require loads, so it is the same realm.
+  if (nearestPkgJsonPath(path) !== projectRealmPkgJson) return null;
   const sibling = path.slice(0, -".d.ts".length) + ".js";
   return isFile(sibling) ? tsgoPath(sibling) : null;
 }
