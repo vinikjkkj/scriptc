@@ -12264,8 +12264,13 @@ export function moduleUsesBufferValue(mod: IrModule): boolean {
       for (const item of v) visit(item);
       return;
     }
-    const node = v as { kind?: unknown; fn?: unknown };
+    const node = v as { kind?: unknown; fn?: unknown; key?: { kind?: unknown; value?: unknown } };
     if (node.kind === "libCall" && (node.fn === "dyn.bufferValue" || node.fn === "buffer.fromDyn" || node.fn === "buffer.fromDynEnc")) {
+      found = true;
+      return;
+    }
+    // A `.constructor` read off an untyped value may be a Buffer's, whose answer is the class object this unit owns.
+    if (node.kind === "dynKeyGet" && node.key?.kind === "strLit" && node.key.value === "constructor") {
       found = true;
       return;
     }
