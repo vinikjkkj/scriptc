@@ -10905,7 +10905,7 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
       const from = L.shapes.get(srcIr.shapeId);
       if (!from || from.tuple) return null;
       if (from.fields.some((f) => f.name.startsWith("%"))) return null;
-      L.noteEnumOrderBake(srcIr.shapeId, null);
+      L.noteEnumOrderBake(srcIr.shapeId, null, "list");
       const orderedFields = from.declaredOrder
         ? from.declaredOrder.flatMap((n) => {
             const f = from.fields.find((x) => x.name === n);
@@ -10940,7 +10940,12 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
       const intoSlot = (v: IrExpr, lift: WidthLift | "dyn"): IrExpr =>
         lift === "dyn" ? { kind: "dynFrom", value: v, type: DYN, loc } : L.applyWidthLift(lift, v, tIv, loc);
       const body: IrStmt[] = [];
-      for (const ff of plan.fields) {
+      // One keyed write per source field, in the source's own key order: its construction-order keys, then (a source that carries a
+      // KEY LIST) the keys written after it. Rebuilt over the list once the source has one (Lowerer.listConsumers).
+      const sub: IrStmt[] = [];
+      const fnLocalsExtra: { id: string; name: string; type: IrType; mutable: boolean }[] = [];
+      const fillOne = (fname: string, tgt: IrStmt[]): void => {
+        const ff = plan.fields.find((x) => x.name === fname)!;
         const raw: IrExpr = { kind: "recordGet", obj: sRef, shapeId: plan.fromId, field: ff.name, type: ff.type, loc };
         const utag = ff.type.kind === "union" ? L.armTag(ff.type.unionId, UNDEFINED_T) : -1;
         const write: IrStmt = {
@@ -10951,8 +10956,8 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
           value: intoSlot(raw, ff.lift),
           loc,
         };
-        const at = body.length;
-        body.push(
+        const at = tgt.length;
+        tgt.push(
           utag >= 0 && ff.type.kind === "union"
             ? {
                 kind: "if",
@@ -10973,8 +10978,26 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
         // guard is what keeps `Object.assign(t, bag)` from throwing where
         // Node copies the one key the value has).
         L.noteOwnKeyGuard(plan.fromId, ff.name, sRef, loc,
-          { kind: "guardStmt", slot: { holder: body, at }, inner: write, outer: null, loc });
-      }
+          { kind: "guardStmt", slot: { holder: tgt, at }, inner: write, outer: null, loc }, name);
+      };
+      const buildFields = (): void => {
+        L.dropOwnKeyGuards(name);
+        sub.length = 0;
+        const names = plan.fields.map((x) => x.name);
+        const srcShape = L.shapes.get(plan.fromId)!;
+        if (srcShape.keyList) {
+          fillWithKeyList(L, srcShape, plan.fromId, () => sRef, names, fillOne, sub, loc, (id, nm) => {
+            if (!fnLocalsExtra.some((l) => l.id === id)) fnLocalsExtra.push({ id, name: nm, type: F64, mutable: true });
+            const built = L.liftedFns.find((f) => f.name === name);
+            if (built && !built.locals.some((l) => l.id === id)) built.locals.push({ id, name: nm, type: F64, mutable: true });
+          });
+        } else {
+          for (const nm of names) fillOne(nm, sub);
+        }
+      };
+      buildFields();
+      body.push({ kind: "block", body: sub, loc });
+      L.noteListConsumer(plan.fromId, targetIr.shapeId, buildFields);
       // The source overflow by SLOT (recordOvfSlots): key and value come
       // out of one entry, so no key is looked back up. Object.assign(x, x)
       // is the one shape here whose target CAN be the enumerated record,
@@ -11031,6 +11054,7 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
         locals: [
           { id: "t.0", name: "t", type: toT, mutable: true },
           { id: "s.0", name: "s", type: fromT, mutable: true },
+          ...fnLocalsExtra,
           ...(plan.ovfLift !== null && fromShape.indexValue
             ? [
                 { id: "sls.0", name: "sls", type: ksT, mutable: false },
