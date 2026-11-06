@@ -1696,6 +1696,21 @@ static bool isl_dynjs_is_u8(ScrJsval *cell) {
 
 static ScrBytes *isl_dynjs_exit_u8(ScrJsval *cell) { return scr_jsval_exit_bytes(cell); }
 
+/* The ScrBytesElem of each engine typed array kind, indexed by JSTypedArrayEnum. */
+static const int isl_ta_elem[] = {
+  SCR_BYTES_U8C, SCR_BYTES_I8, SCR_BYTES_U8, SCR_BYTES_I16, SCR_BYTES_U16, SCR_BYTES_I32,
+  SCR_BYTES_U32, SCR_BYTES_I64, SCR_BYTES_U64, SCR_BYTES_F16, SCR_BYTES_F32, SCR_BYTES_F64,
+};
+
+static int isl_dynjs_bin_kind(ScrJsval *cell) {
+  isl_entry();
+  int t = JS_GetTypedArrayType(cell->v);
+  if (t >= 0 && (size_t)t < sizeof isl_ta_elem / sizeof isl_ta_elem[0]) return isl_ta_elem[t];
+  if (JS_IsArrayBuffer(cell->v)) return SCR_ISL_BIN_BUFFER;
+  if (JS_IsDataView(cell->v)) return SCR_ISL_BIN_DATAVIEW;
+  return SCR_ISL_BIN_NONE;
+}
+
 static ScrDyn *isl_dynjs_iter_drain(ScrJsval *cell, bool spread, const ScrStr *spell) {
   isl_entry();
   JSValue m = JS_NewInt32(isl_ctx, spread ? 1 : 0);
@@ -1812,6 +1827,8 @@ static const ScrDynJsvalOps isl_dynjs_ops = {
   isl_dynjs_ident,
   isl_dynjs_is_u8,
   isl_dynjs_exit_u8,
+  isl_dynjs_bin_kind,
+  scr_jsval_exit_bin,
 #ifdef SCR_SYMTAB
   isl_dynjs_sym_op,
 #endif
@@ -10350,6 +10367,48 @@ ScrBytes *scr_jsval_exit_bytes(ScrJsval *v) {
   }
   ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, (double)n);
   if (n > 0) memcpy(b->data, data, n);
+  return b;
+}
+
+/* The COPY of an engine typed array's (or ArrayBuffer's) bytes as a fresh native value of the engine value's own element:
+ * the ArrayBuffer flavor for an ArrayBuffer, the view's window (byteOffset, byteLength) for a typed array. The boundary's
+ * aliasing stance, scr_jsval_exit_bytes' for every element. NULL = the engine's exception (a detached buffer) or the
+ * boundary TypeError for a value that is neither. */
+ScrBytes *scr_jsval_exit_bin(ScrJsval *v) {
+  isl_entry();
+  int k = isl_dynjs_bin_kind(v);
+  if (k == SCR_ISL_BIN_BUFFER) {
+    size_t n = 0;
+    uint8_t *data = JS_GetArrayBuffer(isl_ctx, &n, v->v);
+    if (!data && JS_HasException(isl_ctx)) {
+      isl_bridge_exception();
+      return NULL;
+    }
+    if (!data) n = 0;
+    ScrBytes *b = scr_bytes_new(SCR_BYTES_BUF, (double)n);
+    if (n > 0) memcpy(b->data, data, n);
+    return b;
+  }
+  if (k < 0) {
+    isl_exit_fail("a typed array or an ArrayBuffer", v);
+    return NULL;
+  }
+  size_t off = 0, len = 0, bpe = 1;
+  JSValue ab = JS_GetTypedArrayBuffer(isl_ctx, v->v, &off, &len, &bpe);
+  if (JS_IsException(ab)) {
+    isl_bridge_exception();
+    return NULL;
+  }
+  size_t asz = 0;
+  uint8_t *base = JS_GetArrayBuffer(isl_ctx, &asz, ab);
+  JS_FreeValue(isl_ctx, ab);
+  if (!base && JS_HasException(isl_ctx)) {
+    isl_bridge_exception();
+    return NULL;
+  }
+  if (!base || off + len > asz) len = 0;
+  ScrBytes *b = scr_bytes_new((ScrBytesElem)k, (double)(bpe > 0 ? len / bpe : 0));
+  if (len > 0) memcpy(b->data, base + off, len);
   return b;
 }
 
