@@ -13062,6 +13062,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24330-readable-and-asynciterable-from-a-function.ts": {
+   "order": [
+    "<repo>/tests/corpus/24330-readable-and-asynciterable-from-a-function.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24331-readable-and-asynciterable-from-a-class-method.ts": {
+   "order": [
+    "<repo>/tests/corpus/24331-readable-and-asynciterable-from-a-class-method.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2434-deferred-init-fields.ts": {
    "order": [
     "<repo>/tests/corpus/2434-deferred-init-fields.ts"
@@ -22943,6 +22955,12 @@
   "<repo>/tests/diagnostics/a-cast-that-spells-a-record-over-a-value-that-is-not-one.ts": {
    "order": [
     "<repo>/tests/diagnostics/a-cast-that-spells-a-record-over-a-value-that-is-not-one.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/a-class-intersected-with-an-interface-it-does-not-satisfy-stays-refused.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/a-class-intersected-with-an-interface-it-does-not-satisfy-stays-refused.ts"
    ],
    "diags": []
   },
