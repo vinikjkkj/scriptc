@@ -37,7 +37,7 @@ import * as ts from "../ts7/adapter.js";
 import type { NullProtoPatch } from "./ir-patch.js";
 import { boundCodeOf, fnValueCodeOfNode, jsFuncValueNameOf, staticFnCodeOf, type Lowerer } from "./lowerer.js";
 import { isJsSourceFile, locOf } from "../program.js";
-import { BOOL, BYTES_ELEM_NAMES, DYN, F64, canBoxFuncIntoDyn, internalSlotFields, parseOwnShadowField, IrExpr, IrStmt, IrType, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, UNDEFINED_T, VOID, shapeHasAccessorSlots, typeKey } from "../../ir/nodes.js";
+import { BOOL, BYTES_ELEM_NAMES, DYN, F64, canBoxFuncIntoDyn, canConvertToDyn, internalSlotFields, parseOwnShadowField, IrExpr, IrStmt, IrType, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, UNDEFINED_T, VOID, shapeHasAccessorSlots, typeKey } from "../../ir/nodes.js";
 import { CLASS_PROPS_FIELD, type ClassInfo } from "./lower-classes.js";
 import { pureReemittable } from "./lower-exprs.js";
 import { bindingNeverReassigned, classInstanceToString, dynRestPack } from "./lower-calls.js";
@@ -2733,7 +2733,13 @@ function lowerDeprecateCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc): I
   if (argNodes.length < 2 || argNodes.length > 3 || argNodes.some(ts.isSpreadElement)) return null;
   const fn = L.lowerExpr(argNodes[0]!);
   const ft = fn.type;
-  if (ft.kind !== "func" || ft.rest === true) return null;
+  if (ft.kind !== "func") return null;
+  // A VARIADIC function (a body reading `arguments`, or `...args`): the lifted wrapper takes the hidden trailing dyn pack and
+  // hands it to fn through Reflect.apply with the call's own receiver (Node: ReflectApply(fn, this, args)); declared parameters ahead
+  // of the pack are re-joined with it into one argument list (the pack spreads after them).
+  const hiddenRest = ft.rest === true && ft.restAbi !== "jsval" && ft.restIn !== true;
+  if (hiddenRest && !ft.params.every((t) => t.kind === "dyn" || canConvertToDyn(t, (id) => L.shapes.get(id), (id) => L.unions.get(id)))) return null;
+  if (ft.rest === true && !hiddenRest && ft.restAbi === "jsval") return null;
   const msg = L.lowerExpr(argNodes[1]!);
   if (msg.type.kind !== "string") return null;
   const code = argNodes.length === 3 ? L.lowerExpr(argNodes[2]!) : null;
@@ -2749,7 +2755,10 @@ function lowerDeprecateCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc): I
       ...(code !== null ? [{ localId: "dc.0", name: "dc", type: STRING }] : []),
       { localId: "dw.0", name: "dw", type: BOOL },
     ];
-    const params = ft.params.map((t, i) => ({ localId: `p.${i}`, name: `p${i}`, type: t }));
+    const params = [
+      ...ft.params.map((t, i) => ({ localId: `p.${i}`, name: `p${i}`, type: t })),
+      ...(hiddenRest ? [{ localId: "pk.0", name: "pk", type: DYN as IrType }] : []),
+    ];
     const ref = (id: string, t: IrType): IrExpr => ({ kind: "varRef", localId: id, type: t, loc });
     const dynOf = (e: IrExpr): IrExpr => ({ kind: "dynFrom", value: e, type: DYN, loc });
     const vector: IrExpr = {
@@ -2758,13 +2767,33 @@ function lowerDeprecateCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc): I
       type: DYN,
       loc,
     };
-    const call: IrExpr = {
-      kind: "callValue",
-      callee: ref("tf.0", ft),
-      args: params.map((p) => ref(p.localId, p.type)),
-      type: ft.ret,
-      loc,
-    };
+    const call: IrExpr = hiddenRest
+      ? L.coerceToExpected({
+          kind: "libCall",
+          fn: "dyn.reflectApply",
+          args: [
+            dynOf(ref("tf.0", ft)),
+            { kind: "libCall", fn: "dyn.this", args: [], type: DYN, loc },
+            ft.params.length === 0
+              ? ref("pk.0", DYN)
+              : {
+                  kind: "dynArrLit",
+                  elems: [...ft.params.map((t, i) => (t.kind === "dyn" ? ref(`p.${i}`, t) : dynOf(ref(`p.${i}`, t)))), ref("pk.0", DYN)],
+                  spreads: [{ at: ft.params.length, what: null }],
+                  type: DYN,
+                  loc,
+                },
+          ],
+          type: DYN,
+          loc,
+        }, ft.ret)
+      : {
+          kind: "callValue",
+          callee: ref("tf.0", ft),
+          args: params.map((p) => ref(p.localId, p.type)),
+          type: ft.ret,
+          loc,
+        };
     L.liftedFns.push({
       name,
       params,
@@ -2777,7 +2806,16 @@ function lowerDeprecateCall(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc): I
       body: [
         {
           kind: "if",
-          cond: { kind: "unary", op: "!", operand: ref("dw.0", BOOL), type: BOOL, loc },
+          // Node (measured, v24.15): the wrapper is ALWAYS made, and a call made while `process.noDeprecation === true` does nothing
+          // about warnings -- it neither warns nor counts as the wrapper's (or its code's) one warning.
+          cond: {
+            kind: "logical",
+            op: "&&",
+            left: { kind: "unary", op: "!", operand: ref("dw.0", BOOL), type: BOOL, loc },
+            right: { kind: "unary", op: "!", operand: { kind: "libCall", fn: "process.noDeprecationIsTrue", args: [], type: BOOL, loc }, type: BOOL, loc },
+            type: BOOL,
+            loc,
+          },
           then: [
             { kind: "assign", localId: "dw.0", value: boolLit(true, loc), loc },
             { kind: "exprStmt", expr: { kind: "libCall", fn: "util.deprecationWarn", args: [vector], type: VOID, loc }, loc },

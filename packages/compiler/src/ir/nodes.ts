@@ -5458,6 +5458,9 @@ export type IrLibFn =
   | "process.exitCodeSet"
   /** process.exitCode read: a +1 dyn, the stored number or undefined. */
   | "process.exitCodeGet"
+  | "process.depFlagGet"
+  | "process.depFlagSet"
+  | "process.noDeprecationIsTrue"
   | "process.cwd"
   /** getpid(2) / getuid(2): zero args → f64. `process.pid` never throws.
    * getuid/getgid answer only on a POSIX target: under a windows triple

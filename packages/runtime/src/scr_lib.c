@@ -1290,6 +1290,57 @@ void scr_process_exitcode_set(const ScrDyn *v) {
 
 void scr_process_exitcode_set_f64(double n) { (void)scr_exitcode_set_num(n); }
 
+/* process.noDeprecation / throwDeprecation / traceDeprecation: Node's plain writable slots (any value), initially undefined, or true
+ * under the `--no-deprecation` / `--throw-deprecation` / `--trace-deprecation` flags. A compiled binary has no node flags, so a flag
+ * arrives the way Node also takes it: NODE_OPTIONS. util.deprecate reads noDeprecation strictly (`=== true`); the warning dispatch
+ * reads all three by truthiness. */
+#define SCR_DEP_FLAGS 3
+static ScrDyn *scr_dep_flag_slot[SCR_DEP_FLAGS] = { NULL, NULL, NULL };
+static bool scr_dep_flag_inited = false;
+static void scr_dep_flag_teardown(void) {
+  for (int i = 0; i < SCR_DEP_FLAGS; i++) {
+    scr_dyn_release(scr_dep_flag_slot[i]);
+    scr_dep_flag_slot[i] = NULL;
+  }
+  scr_dep_flag_inited = false;
+}
+static void scr_dep_flag_init(void) {
+  if (scr_dep_flag_inited) return;
+  scr_dep_flag_inited = true;
+  static const char *const flags[SCR_DEP_FLAGS] = { "--no-deprecation", "--throw-deprecation", "--trace-deprecation" };
+  bool on[SCR_DEP_FLAGS] = { false, false, false };
+  const char *o = getenv("NODE_OPTIONS");
+  for (const char *p = o; p != NULL && *p != '\0';) {
+    while (*p == ' ') p++;
+    const char *e = p;
+    while (*e != '\0' && *e != ' ') e++;
+    for (int i = 0; i < SCR_DEP_FLAGS; i++) {
+      if ((size_t)(e - p) == strlen(flags[i]) && memcmp(p, flags[i], strlen(flags[i])) == 0) on[i] = true;
+    }
+    p = e;
+  }
+  for (int i = 0; i < SCR_DEP_FLAGS; i++) scr_dep_flag_slot[i] = on[i] ? scr_dyn_new_bool(true) : scr_dyn_retain(scr_dyn_undefined());
+  scr_atexit(scr_dep_flag_teardown);
+}
+ScrDyn *scr_process_dep_flag_get(double which) {
+  scr_dep_flag_init();
+  return scr_dyn_retain(scr_dep_flag_slot[(int)which]);
+}
+void scr_process_dep_flag_set(double which, ScrDyn *v) {
+  scr_dep_flag_init();
+  ScrDyn *old = scr_dep_flag_slot[(int)which];
+  scr_dep_flag_slot[(int)which] = scr_dyn_retain(v);
+  scr_dyn_release(old);
+}
+bool scr_process_dep_flag_truthy(int which) {
+  scr_dep_flag_init();
+  return scr_dyn_truthy(scr_dep_flag_slot[which]);
+}
+bool scr_process_no_deprecation_is_true(void) {
+  scr_dep_flag_init();
+  return scr_dep_flag_slot[0]->kind == SCR_DYN_BOOL && scr_dep_flag_slot[0]->v.b;
+}
+
 ScrDyn *scr_process_exitcode_get(void) {
   if (!scr_exitcode_has) return scr_dyn_undefined();
   return scr_dyn_new_num((double)scr_exitcode_val);

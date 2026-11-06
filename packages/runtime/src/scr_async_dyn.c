@@ -563,10 +563,37 @@ void scr_process_off_warning(ScrDyn *fn) {
 }
 
 /* Report, then the listeners. Borrowed. */
+/* process.throwDeprecation: the warning is thrown from a nextTick (Node delays it so every former warning was logged first). */
+static ScrDyn **scr_dep_throw_q = NULL;
+static size_t scr_dep_throw_head = 0, scr_dep_throw_len = 0, scr_dep_throw_cap = 0;
+static void scr_dep_throw_tick(void) {
+  ScrDyn *w = scr_dep_throw_q[scr_dep_throw_head++];
+  if (scr_dep_throw_head == scr_dep_throw_len) scr_dep_throw_head = scr_dep_throw_len = 0;
+  scr_throw_dyn(w); /* the throw owns +1 */
+}
+static void scr_dep_throw_later(ScrDyn *w) {
+  if (scr_dep_throw_len == scr_dep_throw_cap) {
+    scr_dep_throw_cap = scr_dep_throw_cap ? scr_dep_throw_cap * 2 : 4;
+    scr_dep_throw_q = realloc(scr_dep_throw_q, scr_dep_throw_cap * sizeof *scr_dep_throw_q);
+    if (!scr_dep_throw_q) abort();
+  }
+  scr_dep_throw_q[scr_dep_throw_len++] = scr_dyn_retain(w);
+  scr_next_tick_raw(scr_dep_throw_tick);
+}
+
 void scr_warning_dispatch(ScrDyn *w) {
   /* name/message live on the error encoding's prototype chain, not among
    * its own members: the chain-aware data read finds them. */
   const ScrDyn *en = scr_dyn_obj_data_get(w, "name", 4);
+  /* Node's emitWarning: a DeprecationWarning is dropped under process.noDeprecation and thrown (from a tick) under
+   * process.throwDeprecation, before anything is reported or listened to. */
+  if (en && en->kind == SCR_DYN_STR && en->v.str->len == 18 && memcmp(en->v.str->data, "DeprecationWarning", 18) == 0) {
+    if (scr_process_dep_flag_truthy(0)) return;
+    if (scr_process_dep_flag_truthy(1)) {
+      scr_dep_throw_later(w);
+      return;
+    }
+  }
   const ScrDyn *em = scr_dyn_obj_data_get(w, "message", 7);
   const ScrDyn *ec = scr_dyn_obj_data_get(w, "code", 4);
   const ScrDyn *ed = scr_dyn_obj_data_get(w, "detail", 6);
