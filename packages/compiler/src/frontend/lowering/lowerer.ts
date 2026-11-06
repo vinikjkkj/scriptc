@@ -77,6 +77,7 @@ import { applyProtoTabs, hasProtoTab, scanProtoTabs, upgradeLateMethodsOverTable
 import { OWN_SHADOW_ROOTS, applyFieldNotes, applyOwnShadows, inOwnShadowFamily } from "./lower-ownshadow.js";
 import { CLASS_BUILTIN_CTORLESS, CLASS_NO_DYN_NEW, EVAL_NO_SRC_CLASSES, GRAFTED_EMITTER_CLASSES, GRAFTED_EMITTER_CELL_CLASSES, GRAFTED_ROWS_FENCED_OPS, GRAFTED_PROPS_EXACT_OPS, EVAL_STATIC_CLASSES, dynReflectionSite, emitterStateWriteSites, graftedBoxSites, moduleBoxesEmitters } from "../../ir/nodes.js";
 import { computeTwinEdits, type TwinEdits } from "./emitter-twin.js";
+import { unbindEngineMemberReads } from "./engine-fn-unbind.js";
 import { canBoxFuncIntoDyn } from "../../ir/nodes.js";
 import { arrayTypeHasLiveView, procStreamDynMemberFence, NULL_T, strandTrap, armDiscrimLits, arrayOf, BOOL, canBoxClassIntoDyn, internalSlotFields, isRefCounted, canAdaptDynFuncTo, dynRestApplyable, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, shapeHasAccessorSlots, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_EMITTER_CLASS, RUNTIME_STREAM_CLASSES, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
 import { type DynamicImportResolution, type NpmBuiltinUse, type NpmLazyTrap } from "../npm.js";
@@ -932,6 +933,8 @@ export function lowerToIr(
     const twinReload = computeTwinEdits(emit.twinCandidates, emit.checker);
     if (twinReload !== null) result = { ...result, twinReload };
   }
+  // A function member read as a value (not called) in a module that runs engine code is the engine function itself, unbound.
+  if (result.module !== null) unbindEngineMemberReads(result.module);
   lowerProfileNote("%emit-run", performance.now() - __t1);
   lowerProfileNote("%ovf-after-discovery", __ovfAfterDiscovery.size);
   lowerProfileNote("%ovf-after-emit", overflowShapeKeys.size);
