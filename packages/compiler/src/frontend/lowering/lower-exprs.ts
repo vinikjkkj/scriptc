@@ -25922,6 +25922,20 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
         }
       }
     }
+    // A plain read of a prototype-class GETTER (denque's `length`) off `K | undefined`: the undefined arm throws Node's
+    // TypeError (lyingRead), the object arm calls the class's own accessor with the receiver as `this`.
+    if (!inOptionalChainOf(expr) && isJsSourceFile(expr.getSourceFile())) {
+      const objTarget = L.lyingTargetOf(value.type);
+      const objInfo = objTarget?.kind === "object" ? L.classes.get(objTarget.className) : undefined;
+      const getter = objInfo?.protoClass === true ? objInfo.methods.get(`get:${field}`) : undefined;
+      if (objInfo !== undefined && getter !== undefined) {
+        const lr = L.lyingRead(value, expr.expression);
+        if (lr?.type.kind === "object") {
+          L.noteEdge(`%${objInfo.def.name}.get:${field}`);
+          return { kind: "call", callee: `%${objInfo.def.name}.get:${field}`, args: [lr], type: getter.ret, loc: locOf(expr) };
+        }
+      }
+    }
     const wide = lowerUnionFieldRead(L, expr, value, field);
     if (wide) return wide;
     // The WIDE union cannot answer, but the CHECKER's picture at this site
