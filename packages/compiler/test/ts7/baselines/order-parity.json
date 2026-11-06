@@ -13242,6 +13242,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24424-a-record-built-in-two-orders-crosses-to-object-with-its-own-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/24424-a-record-built-in-two-orders-crosses-to-object-with-its-own-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24425-a-record-widened-into-an-object-slot-keeps-its-construction-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/24425-a-record-widened-into-an-object-slot-keeps-its-construction-order.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2443-union-literal-shadow-narrowing.ts": {
    "order": [
     "<repo>/tests/corpus/2443-union-literal-shadow-narrowing.ts"
