@@ -1834,6 +1834,8 @@ class LlEmitter {
     string,
     { keys: string; lens: string; keyBody: string; lenBody: string }
   >();
+  /** The engine lane's function-member flag tables, by shape id. */
+  private readonly recFnFlagTables = new Map<string, { sym: string; body: string }>();
   /** Type-directed walker functions (JSON serializers, the indent
    * rewriter, union ToString/join) — interned per typeKey/unionId, defs
    * flushed with the shape helpers. */
@@ -2890,6 +2892,8 @@ class LlEmitter {
       out.push(`@${w.lens} = internal constant ${w.lenBody} ; kind-gate wide key lengths: ${shapeId}`);
     }
     if (this.recWideTables.size > 0) out.push(``);
+    for (const [shapeId, f] of this.recFnFlagTables) out.push(`@${f.sym} = internal constant ${f.body} ; engine-lane function members: ${shapeId}`);
+    if (this.recFnFlagTables.size > 0) out.push(``);
     // The function-name table (ScrFnName). Sorted so the .ll is a
     // function of the program and not of emission order.
     // The function-text table (ScrFnText, scr_fntext.c): only when the program
@@ -4157,6 +4161,14 @@ class LlEmitter {
    * arm body shares one table. Only a kind-gate dial ON asks for one:
    * with both off the map is empty and not one global is emitted, which
    * is what the byte-identity proof rests on. */
+  recFnFlagTable(shapeId: string, flags: readonly boolean[]): string {
+    const existing = this.recFnFlagTables.get(shapeId);
+    if (existing) return `@${existing.sym}`;
+    const sym = `sc_kgf_${shapeId}`;
+    this.recFnFlagTables.set(shapeId, { sym, body: `[${flags.length} x i8] [` + flags.map((f) => `i8 ${f ? 1 : 0}`).join(", ") + `]` });
+    return `@${sym}`;
+  }
+
   recWideTable(shapeId: string, fields: readonly { name: string }[]): { keys: string; lens: string } {
     const existing = this.recWideTables.get(shapeId);
     if (existing) return { keys: `@${existing.keys}`, lens: `@${existing.lens}` };
