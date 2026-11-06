@@ -10009,20 +10009,37 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
                   loc,
                 };
         }
+        const pushStmt = push(pushed);
+        const guardAt = tgt.length;
         tgt.push(
           utag >= 0 && f.type.kind === "union"
             ? {
                 kind: "if",
                 cond: { kind: "unionIsTag", unionId: f.type.unionId, tag: utag, negated: true, value: raw, type: BOOL, loc },
-                then: [push(pushed)],
+                then: [pushStmt],
                 else_: null,
                 loc,
               }
-            : push(pushed),
+            : pushStmt,
         );
+        // A shape a crossing materialised answers its own keys from the crossing's mask: a declared member the source only
+        // INHERITED (a prototype getter, a class method read through the record) is not an own key. armOwnMasks re-spells
+        // this statement over an armed shape; an unarmed shape keeps the statement above verbatim. values/entries keep the
+        // undefined-arm test outermost (the pushed value is narrowed past it), keys has none to keep.
+        L.noteOwnKeyGuard(argIr.shapeId, f.name, rRef, loc, {
+          kind: "guardStmt",
+          slot: { holder: tgt, at: guardAt },
+          inner: pushStmt,
+          outer:
+            member !== "keys" && utag >= 0 && f.type.kind === "union"
+              ? { unionId: f.type.unionId, tag: utag, value: raw }
+              : null,
+          loc,
+        }, helper);
       };
       // A shape with a KEY LIST walks its construction-order keys and then the list (rebuilt once the shape has one).
       const buildFields = (): void => {
+        L.dropOwnKeyGuards(helper);
         fieldsSub.length = 0;
         if (shape.keyList) {
           fillWithKeyList(L, shape, argIr.shapeId, () => rRef, order, fillOne, fieldsSub, loc, (id, nm) => {
