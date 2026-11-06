@@ -13736,6 +13736,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24500-engine-built-typed-arrays-answer-instanceof-and-isview-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/24500-engine-built-typed-arrays-answer-instanceof-and-isview-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24501-an-engine-built-binary-value-reaches-the-bytes-helper-intact.ts": {
+   "order": [
+    "<repo>/tests/corpus/24501-an-engine-built-binary-value-reaches-the-bytes-helper-intact.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24502-an-engine-built-typed-array-extracts-into-its-own-element-type.ts": {
+   "order": [
+    "<repo>/tests/corpus/24502-an-engine-built-typed-array-extracts-into-its-own-element-type.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24503-every-typed-array-constructor-and-dataview-answer-instanceof-on-an-untyped-value.ts": {
+   "order": [
+    "<repo>/tests/corpus/24503-every-typed-array-constructor-and-dataview-answer-instanceof-on-an-untyped-value.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2451-private-fields.ts": {
    "order": [
     "<repo>/tests/corpus/2451-private-fields.ts"
