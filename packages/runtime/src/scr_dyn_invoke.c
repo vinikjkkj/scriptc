@@ -1860,16 +1860,23 @@ static ScrDyn *objinst_method_thunk(ScrClosure *clo, ScrDyn *const *args, size_t
   return r;
 }
 
+/* A data member's value read off the instance `obj`: the field, or -- while the field is unset (the absent marker of an
+ * enumerable-4 row, an undefined of the other codes) and the row carries the datum its class inherits -- that datum. */
+static ScrDyn *dyn_member_field_get(const ScrDynClassMember *cm, void *obj) {
+  ScrDyn *v = cm->get(obj);
+  if (cm->value != NULL && v != NULL && (cm->enumerable == 4 ? v == scr_dyn_absent() : v->kind == SCR_DYN_UNDEF)) {
+    scr_dyn_release(v);
+    return cm->value();
+  }
+  return v;
+}
+
 ScrDyn *scr_dyn_objinst_member_get(ScrDyn *d, const ScrStr *key) {
   const ScrDynClassMember *cm = scr_dyn_objinst_member(d, key->data, key->len);
   if (cm == NULL) return NULL;
   if (cm->get != NULL) {
-    ScrDyn *v = cm->get(d->v.inst.o);
     /* An unset field under a name the class inherits as prototype data reads the datum (Node's lookup reaches the prototype). */
-    if (cm->value != NULL && v != NULL && v->kind == SCR_DYN_UNDEF) {
-      scr_dyn_release(v);
-      return cm->value();
-    }
+    ScrDyn *v = dyn_member_field_get(cm, d->v.inst.o);
     /* A grafted emitter's keys before EventEmitter.call(this) ran read as the prototype's own values: _eventsCount is 0
      * (the other two are undefined, which the absent marker already reads as). */
     if (v == scr_dyn_absent() && cm->enumerable == 4 && key->len == 12 && memcmp(key->data, "_eventsCount", 12) == 0 &&
@@ -2469,7 +2476,7 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
       /* A DATA member holding a function value: `o.m()` is Get then Call,
        * and the call binds the instance (the OBJ arm's ambient-receiver
        * window, same reason). */
-      ScrDyn *fv = cm->get(recv->v.inst.o);
+      ScrDyn *fv = dyn_member_field_get(cm, recv->v.inst.o);
       if (fv == NULL) return NULL; /* the read threw */
       if (fv->kind == SCR_DYN_FUNC ||
           (fv->kind == SCR_DYN_JSVAL && scr_dyn_isl_typeof_is(fv, "function"))) {

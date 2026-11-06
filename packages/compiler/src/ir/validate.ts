@@ -1259,6 +1259,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "dyn.this": { argTypes: [], result: DYN },
   "dyn.thisSloppy": { argTypes: [], result: DYN },
   "dyn.isGlobalThis": { argTypes: [DYN], result: BOOL },
+  "dyn.isAbsent": { argTypes: [DYN], result: BOOL },
   "dyn.thisPush": { argTypes: [DYN], result: VOID },
   "dyn.thisPop": { argTypes: [], result: VOID },
   "process.getuid": { argTypes: [], result: F64 },

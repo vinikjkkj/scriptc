@@ -283,7 +283,7 @@ export interface ClassMeta {
     // fields, the dynCheck/JSON builders fill missing keys), and the
     // immortal instance costs nothing if overwritten (releases skip it).
     const undefFieldInitC = (s: StructShape): string[] =>
-      s.meta === null ? [] : s.fields.flatMap((f) => E.undefFieldInitLineC(f.name, f.type));
+      s.meta === null ? [] : s.fields.flatMap((f) => E.undefFieldInitLineC(f.name, f.type, s.meta!.def.absentInit?.includes(f.name) === true));
     // The overflow map's construction call (in the shape's newFn): value
     // handling is type-directed exactly like a user Map's.
     const overflowNewC = (s: StructShape): string => {
@@ -698,7 +698,7 @@ export interface ClassMeta {
       // Undefined-admitting fields start as JS's undefined, not NULL — see
       // undefFieldInitLineC. s.fields is the FLATTENED layout (base prefix
       // + own), so a derived allocation covers inherited fields too.
-      ...s.fields.flatMap((f) => E.undefFieldInitLineC(f.name, f.type)),
+      ...s.fields.flatMap((f) => E.undefFieldInitLineC(f.name, f.type, meta.def.absentInit?.includes(f.name) === true)),
       `  scr_obj_alloc_note();`,
       `  return o;`,
       `}`,

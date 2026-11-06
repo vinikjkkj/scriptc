@@ -6178,6 +6178,8 @@ ScrDyn *scr_dyn_undefined(void);
 /* The absent marker (see scr_json.c): an UNDEF-kind node that marks a
  * DELETED field of a class instance. Immortal. */
 ScrDyn *scr_dyn_absent(void);
+/* True for THE absent marker itself (a deleted field, or a prototype-datum field no own write has reached): by pointer. */
+bool scr_dyn_is_absent(const ScrDyn *d);
 /* ARRAY HOLES (sq5). A hole in a dyn array is the same absent node: every
  * reader sees the undefined KIND (typeof, ===, ToString, JSON null), and only
  * the own-slot surfaces (`in`, Object.keys, forEach/map/filter/reduce skips,
