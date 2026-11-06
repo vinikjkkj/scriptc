@@ -13200,6 +13200,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24418-a-shape-returned-from-two-literal-orders-prints-each-in-its-own.ts": {
+   "order": [
+    "<repo>/tests/corpus/24418-a-shape-returned-from-two-literal-orders-prints-each-in-its-own.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2442-union-literal-arm-widening.ts": {
    "order": [
     "<repo>/tests/corpus/2442-union-literal-arm-widening.ts"
