@@ -9009,6 +9009,21 @@ function implicitLiteralIndex(widened: ts.Type, ctx: TypeMapperCtx): boolean {
 /** The type of an EMPTY object literal written in authored JavaScript (`{ argument: {}, reply: {} }`'s members): in JS the bag is open, its
  * keys are whatever the program stores (`table.argument[name] = fn`), and the checker's `{}` for it names no member to dispatch to. Same
  * reading as an options bag defaulted to `{}` (the parameter rule above): a checked-dynamic object. */
+/** The literal is part of a TABLE the program builds for itself: the outermost literal of the nest it sits in is assigned or bound
+ * (`X.y = { argument: {}, reply: {} }`, `const t = { ... }`), not handed to a call. A literal passed as an argument
+ * (`dgram.createSocket({ type, signal: {} })`) is built against the parameter's declared type by the builtin or native lowering that reads
+ * it, and keeps its static record form. */
+function hasTypedSlot(d: ts.Node, _checker: ts.TypeChecker): boolean {
+  let n: ts.Node = d;
+  while (n.parent !== undefined && (ts.isPropertyAssignment(n.parent) || ts.isObjectLiteralExpression(n.parent) || ts.isParenthesizedExpression(n.parent))) n = n.parent;
+  const p = n.parent;
+  if (p === undefined) return true;
+  if (ts.isBinaryExpression(p) && p.operatorToken.kind === ts.SyntaxKind.EqualsToken && p.right === n) return false;
+  if (ts.isVariableDeclaration(p) && p.initializer === n) return false;
+  if (ts.isPropertyDeclaration(p) && p.initializer === n) return false;
+  return true;
+}
+
 function isJsEmptyObjectLiteralType(t: ts.Type, ctx: TypeMapperCtx): boolean {
   const { checker } = ctx;
   const sym = t.getSymbol();
@@ -9019,7 +9034,7 @@ function isJsEmptyObjectLiteralType(t: ts.Type, ctx: TypeMapperCtx): boolean {
   // Only as the VALUE OF A PROPERTY of another literal (`{ argument: {}, reply: {} }`): a table slot. An empty literal that is an arm of a
   // conditional or a `||` (`asArray ? new Array(n) : {}`) joins a union whose other arms decide what it is (holes of a presized array), and
   // keeps the closed empty record.
-  return decls.length > 0 && decls.every((d) => ts.isObjectLiteralExpression(d) && d.properties.length === 0 && ts.isPropertyAssignment(d.parent) && isJsSourceFile(d.getSourceFile()));
+  return decls.length > 0 && decls.every((d) => ts.isObjectLiteralExpression(d) && d.properties.length === 0 && ts.isPropertyAssignment(d.parent) && isJsSourceFile(d.getSourceFile()) && !hasTypedSlot(d, checker));
 }
 
 function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | RecordShapeParts | null {
