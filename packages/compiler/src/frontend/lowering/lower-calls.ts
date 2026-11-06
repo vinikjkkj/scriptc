@@ -623,7 +623,7 @@ function lowerProtoTabMethodCall(L: Lowerer, call: ts.CallExpression): IrExpr | 
     L.unsupported(
       "SC1090",
       call,
-      `calling '${member}' (it has no compiled implementation: ${why}; this call cannot run in a static build) DIAG decl=${modSf.fileName} twin=${(L as unknown as { declTwinSourceOf(s: ts.SourceFile): ts.SourceFile | undefined }).declTwinSourceOf(modSf)?.fileName ?? "none"} ndecls=${decls.length} kinds=${decls.map((d) => ts.SyntaxKind[d.kind]).join(",")} recv=${L.checker.typeToString(L.checker.getTypeAtLocation(access.expression))}`,
+      `calling '${member}' (it has no compiled implementation: ${why}; this call cannot run in a static build) DIAG decl=${modSf.fileName} twin=${(L as unknown as { declTwinSourceOf(s: ts.SourceFile): ts.SourceFile | undefined }).declTwinSourceOf(modSf)?.fileName ?? "none"} ndecls=${decls.length} kinds=${decls.map((d) => ts.SyntaxKind[d.kind]).join(",")} recv=${L.checker.typeToString(L.checker.getTypeAtLocation(access.expression))} ${(() => { try { const m = L.mapTypeOf(L.typeOf(access.expression)); const arms = m?.kind === "union" ? (L.unions.get(m.unionId)?.arms ?? []) : []; const o = arms.filter((a) => a.kind === "object").map((a) => { const cn = (a as { className: string }).className; const ci = L.classes.get(cn); return `${cn}:methods=${ci ? [...ci.methods.keys()].slice(0, 6).join("|") : "NOCLASS"}`; }); return `DIAG2 mapKind=${m?.kind} arms=${arms.map((a) => a.kind).join("|")} objs=${o.join(";")} js=${call.getSourceFile().fileName.endsWith(".js")} pure=${access.expression.getText()}`; } catch (e) { return `DIAG2 threw ${String(e)}`; } })()}`,
     );
   }
 
