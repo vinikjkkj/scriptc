@@ -7730,6 +7730,13 @@ ScrDyn *scr_dyn_isl_key_get(const ScrDyn *d, const ScrStr *k);
 /* The record builder's engine lane (scr_json.c): declared members of an engine-held object, projected. +1 or NULL pending. */
 ScrDyn *scr_dyn_pack_args(ScrDyn *const *args, size_t argc);
 ScrDyn *scr_dyn_rec_from_jsval(const ScrDyn *d, const char *const *keys, const unsigned *lens, size_t n, bool all_own);
+/* The same, for a shape with function-typed members: `fn[i]` marks member i, and an engine function read there comes back as the
+ * method of its receiver (a SCR_DYN_FUNC box whose call is the engine's `d[keys[i]](...)`), so the typed side adapts it to the
+ * declared signature. `fn` NULL is the plain lane. */
+ScrDyn *scr_dyn_rec_from_jsval_fn(const ScrDyn *d, const char *const *keys, const unsigned *lens, size_t n, bool all_own,
+                                  const unsigned char *fn);
+/* An engine object's method as a function value of the checked-dynamic tree (receiver bound); +1. */
+ScrDyn *scr_dyn_isl_bound_method(const ScrDyn *recv, const char *key, size_t len);
 /* Is d an engine-held function? An engine function as a function value of the checked-dynamic tree (+1): its call is the engine's. */
 bool scr_dyn_isl_is_function(const ScrDyn *d);
 ScrDyn *scr_dyn_isl_fn_box(const ScrDyn *f);
