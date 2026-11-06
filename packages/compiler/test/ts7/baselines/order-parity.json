@@ -13344,6 +13344,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24436-object-assign-into-an-index-signature-record-copies-the-key-order-of-a-listed-source.ts": {
+   "order": [
+    "<repo>/tests/corpus/24436-object-assign-into-an-index-signature-record-copies-the-key-order-of-a-listed-source.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2443-union-literal-shadow-narrowing.ts": {
    "order": [
     "<repo>/tests/corpus/2443-union-literal-shadow-narrowing.ts"
