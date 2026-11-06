@@ -13075,32 +13075,26 @@
    "diags": []
   },
   "<repo>/tests/corpus/24332-update-filter-over-an-untyped-schema-reads-and-writes.ts": {
-    "order": [
-      "<repo>/tests/corpus/24332-update-filter-over-an-untyped-schema-reads-and-writes.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/24340-static-this-names-the-declaring-class-js.js": {
-    "order": [
-      "<repo>/tests/corpus/24340-static-this-names-the-declaring-class-js.js"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/24341-static-this-names-the-declaring-class.ts": {
-    "order": [
-      "<repo>/tests/corpus/24341-static-this-names-the-declaring-class.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/diagnostics/static-this-with-a-receiver-other-than-the-declaring-class-stays-refused.ts": {
-    "order": [
-      "<repo>/tests/diagnostics/static-this-with-a-receiver-other-than-the-declaring-class-stays-refused.ts"
-    ],
-    "diags": []
+   "order": [
+    "<repo>/tests/corpus/24332-update-filter-over-an-untyped-schema-reads-and-writes.ts"
+   ],
+   "diags": []
   },
   "<repo>/tests/corpus/2434-deferred-init-fields.ts": {
    "order": [
     "<repo>/tests/corpus/2434-deferred-init-fields.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24340-static-this-names-the-declaring-class-js.js": {
+   "order": [
+    "<repo>/tests/corpus/24340-static-this-names-the-declaring-class-js.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24341-static-this-names-the-declaring-class.ts": {
+   "order": [
+    "<repo>/tests/corpus/24341-static-this-names-the-declaring-class.ts"
    ],
    "diags": []
   },
@@ -13251,6 +13245,12 @@
   "<repo>/tests/corpus/24425-a-record-widened-into-an-object-slot-keeps-its-construction-order.ts": {
    "order": [
     "<repo>/tests/corpus/24425-a-record-widened-into-an-object-slot-keeps-its-construction-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24426-a-shape-cast-through-several-builders-defines-its-order-tables-once.ts": {
+   "order": [
+    "<repo>/tests/corpus/24426-a-shape-cast-through-several-builders-defines-its-order-tables-once.ts"
    ],
    "diags": []
   },
@@ -24668,6 +24668,12 @@
   "<repo>/tests/diagnostics/static-blocks.ts": {
    "order": [
     "<repo>/tests/diagnostics/static-blocks.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/static-this-with-a-receiver-other-than-the-declaring-class-stays-refused.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/static-this-with-a-receiver-other-than-the-declaring-class-stays-refused.ts"
    ],
    "diags": []
   },
