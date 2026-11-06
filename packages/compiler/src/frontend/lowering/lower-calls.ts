@@ -623,7 +623,7 @@ function lowerProtoTabMethodCall(L: Lowerer, call: ts.CallExpression): IrExpr | 
     L.unsupported(
       "SC1090",
       call,
-      `calling '${member}' (it has no compiled implementation: ${why}; this call cannot run in a static build)`,
+      `calling '${member}' (it has no compiled implementation: ${why}; this call cannot run in a static build) DIAG decl=${modSf.fileName} twin=${(L as unknown as { declTwinSourceOf(s: ts.SourceFile): ts.SourceFile | undefined }).declTwinSourceOf(modSf)?.fileName ?? "none"} ndecls=${decls.length} kinds=${decls.map((d) => ts.SyntaxKind[d.kind]).join(",")} recv=${L.checker.typeToString(L.checker.getTypeAtLocation(access.expression))}`,
     );
   }
 
