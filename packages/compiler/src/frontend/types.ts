@@ -1770,15 +1770,37 @@ function bodyReadsArgumentsLocal(fn: { body?: ts.Node | undefined }): boolean {
  *   requires its argument — fenced at the call site).
  * Mixed dyn/concrete value channels stay unmapped (the shared result
  * record's value slot is one representation). */
+/** The generator types a program GATED into the dyn done-value representation: `G:<generator type>` for the declared
+ * type of a generator whose body returns a value under TReturn any/unknown, and `R:<yield type>` for the matching
+ * IteratorResult<Y, any>. Set once per lowering (Lowerer.run), before any type is mapped; empty means no generator in the
+ * program changes. */
+let genGateKeys: ReadonlySet<string> = new Set();
+export function setGenGateKeys(keys: ReadonlySet<string>): void {
+  genGateKeys = keys;
+}
+function genGateHit(kind: "G" | "R", typeText: string): boolean {
+  return genGateKeys.size > 0 && genGateKeys.has(`${kind}:${typeText}`);
+}
 function genChannels(
   yieldTs: ts.Type | undefined,
   retTs: ts.Type | undefined,
   nextTs: ts.Type | undefined,
   ctx: TypeMapperCtx,
+  dynRet = false,
 ): { yieldT: IrType; retT: IrType; nextT: IrType } | null {
   if (!yieldTs) return null;
   const UNITISH = ts.TypeFlags.Void | ts.TypeFlags.Undefined | ts.TypeFlags.Never;
   const ANYISH = ts.TypeFlags.Any | ts.TypeFlags.Unknown;
+  // A generator type whose TReturn is any/unknown and whose done value is observed (a body somewhere returns one): the
+  // done value has no static form, so BOTH channels are checked-dynamic and the result record's value slot is dyn
+  // (genGateKeys). Only the types the program gated take this arm; every other generator type maps as before.
+  if (dynRet && retTs !== undefined && (retTs.flags & ANYISH) !== 0) {
+    const nt = nextTs === undefined || nextTs.flags & UNITISH
+      ? UNDEFINED_T
+      : nextTs.flags & ANYISH ? DYN : mapType(nextTs, ctx);
+    if (!nt || nt.kind === "void" || nt.kind === "nullT") return null;
+    return { yieldT: DYN, retT: DYN, nextT: nt };
+  }
   let yieldT: IrType | null;
   if (yieldTs.flags & ts.TypeFlags.Never) yieldT = VOID;
   else if (yieldTs.flags & ANYISH) yieldT = DYN;
@@ -4720,7 +4742,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // value slot would need a dyn union arm, which does not exist.
   if (isStdlibInterface("Generator") || isStdlibInterface("IterableIterator")) {
     const args = checker.getTypeArguments(widened as ts.TypeReference);
-    const channels = genChannels(args[0], args[1], args[2], ctx);
+    const channels = genChannels(args[0], args[1], args[2], ctx, genGateHit("G", checker.typeToString(widened)));
     if (!channels) return null;
     // The result record must exist too (its union must be legal), or
     // `.next()` could never answer — mapped generators always resume.
@@ -4756,7 +4778,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     isStdlibInterface("AsyncIterableIterator")
   ) {
     const args = checker.getTypeArguments(widened as ts.TypeReference);
-    const channels = genChannels(args[0], args[1], args[2], ctx);
+    const channels = genChannels(args[0], args[1], args[2], ctx, genGateHit("G", checker.typeToString(widened)));
     if (!channels) return null;
     if (!genResultRecord(channels.yieldT, channels.retT, ctx.shapes, unions)) return null;
     return { kind: "asyncGenerator", ...channels };
@@ -4774,7 +4796,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       )
     ) {
       const targs = widened.getAliasTypeArguments() ?? [];
-      const channels = genChannels(targs[0], targs[1], undefined, ctx);
+      const channels = genChannels(targs[0], targs[1], undefined, ctx, targs[0] !== undefined && genGateHit("R", checker.typeToString(targs[0])));
       if (!channels) return null;
       return genResultRecord(channels.yieldT, channels.retT, ctx.shapes, unions);
     }
@@ -6717,6 +6739,8 @@ export function genResultRecord(
   }
   return {
     kind: "record",
+    // Node builds the result as `{ value, done }`: the own-key order every key-order surface (inspect, Object.keys,
+    // JSON) shows. Canonical field order is `done` first; declaredOrder is the metadata that carries the real one.
     shapeId: shapes.intern([
       { name: "done", type: BOOL },
       { name: "value", type: valueT },
@@ -6739,8 +6763,6 @@ export function isUnitOnlyTsType(t: ts.Type): boolean {
 /** The question isUnitOnlyTsType is standing in for, asked of the spelling
  * the CHECKER hands out INSIDE a generic body. `Awaited<T>` and a bare `T`
  * carry no Void FLAG however the instantiation binds them -- the checker
-    // Node builds the result as `{ value, done }`: the own-key order every key-order surface (inspect, Object.keys,
-    // JSON) shows. Canonical field order is `done` first; declaredOrder is the metadata that carries the real one.
  * keeps both symbolic while T is open -- so the flag test reads false for a
  * parameter bound at `void`, and a value position fences on a slot whose
  * only inhabitant is `undefined`. This asks the live BINDING instead, which

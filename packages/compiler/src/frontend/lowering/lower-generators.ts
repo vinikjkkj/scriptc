@@ -8,7 +8,7 @@
  * g.next()` binds and reads flow. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, CAUGHT, DYN, F64, IrExpr, IrStmt, IrType, SrcLoc, STRING, UNDEFINED_T, VOID, isUnitType, typeEquals } from "../../ir/nodes.js";
+import { BOOL, CAUGHT, DYN, F64, canDynCheckTo, IrExpr, IrStmt, IrType, SrcLoc, STRING, UNDEFINED_T, VOID, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { locOf } from "../program.js";
 import { genResultRecord, typeKey } from "../types.js";
 import { forOfVarTarget } from "./lower-stmts.js";
@@ -266,6 +266,77 @@ function extractYieldValue(
   return { kind: "call", callee: helper, args: [read], type: yt, loc };
 }
 
+/** The generator types a program must carry a DONE VALUE through. `Generator<number>` is `Generator<number, any, any>`: its
+ * done value is an `any`, which has no static form and cannot ride the typed value slot of the result record (a union of the
+ * yield arms and undefined). A generator body that `return`s a value under such a declared type needs the slot to be dyn, and
+ * so does every value that can flow with it. What can flow together is exactly the same declared generator type, so the gate
+ * is the set of declared types (`G:<type text>`) plus the `IteratorResult<Y, any>` spelling of each (`R:<Y text>`); a
+ * generator type outside the set, and any program with no such body, maps exactly as it did before.
+ *
+ * Syntactic scan, iterative (it runs before the compiler's depth guard): only files whose text says `yield` are walked,
+ * and only annotated declarations count (an unannotated generator infers a concrete TReturn). The checker resolves the
+ * annotation, so an alias of Generator<..., any> is seen through. */
+export function scanGenGate(L: Lowerer, files: readonly ts.SourceFile[]): Set<string> {
+  const keys = new Set<string>();
+  const ANYISH = ts.TypeFlags.Any | ts.TypeFlags.Unknown;
+  const NAMES = new Set(["Generator", "AsyncGenerator", "IterableIterator", "AsyncIterableIterator", "AsyncIterator"]);
+  const isFnLike = (n: ts.Node): boolean =>
+    ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) || ts.isArrowFunction(n) || ts.isMethodDeclaration(n) ||
+    ts.isGetAccessorDeclaration(n) || ts.isSetAccessorDeclaration(n) || ts.isConstructorDeclaration(n);
+  const bodyReturnsValue = (body: ts.Node): boolean => {
+    const stack: ts.Node[] = [body];
+    while (stack.length > 0) {
+      const n = stack.pop()!;
+      if (ts.isReturnStatement(n) && n.expression !== undefined) return true;
+      n.forEachChild((c) => {
+        if (!isFnLike(c) && !ts.isClassDeclaration(c) && !ts.isClassExpression(c)) stack.push(c);
+      });
+    }
+    return false;
+  };
+  for (const sf of files) {
+    const text = sf.text;
+    if (text === undefined || !text.includes("yield") || !text.includes("return")) continue;
+    const stack: ts.Node[] = [sf];
+    while (stack.length > 0) {
+      const n = stack.pop()!;
+      if (
+        (ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) || ts.isMethodDeclaration(n)) &&
+        n.asteriskToken !== undefined && n.body !== undefined && n.type !== undefined && bodyReturnsValue(n.body)
+      ) {
+        const t = L.checker.getTypeAtLocation(n.type);
+        const name = t.getSymbol()?.name;
+        if (name !== undefined && NAMES.has(name)) {
+          const args = L.checker.getTypeArguments(t as ts.TypeReference);
+          const ret = args[1];
+          if (ret !== undefined && (ret.flags & ANYISH) !== 0 && args[0] !== undefined) {
+            // The spellings of the same iterator protocol a gated generator is assignable to share its runtime handle, so they
+            // gate with it (an `IterableIterator<number>` slot holding the generator must see the same representation).
+            const text = L.checker.typeToString(t);
+            const suffix = text.slice(text.indexOf("<"));
+            const family = name === "Generator" || name === "IterableIterator"
+              ? ["Generator", "IterableIterator"]
+              : ["AsyncGenerator", "AsyncIterableIterator", "AsyncIterator"];
+            const nextText = args[2] === undefined ? "" : L.checker.typeToString(args[2]);
+            for (const nm of family) {
+              keys.add(`G:${nm}${suffix}`);
+              // The checker elides trailing type arguments equal to the lib's defaults (`IterableIterator<number>`).
+              if (nextText === "any") {
+                keys.add(`G:${nm}<${L.checker.typeToString(args[0])}>`);
+                keys.add(`G:${nm}<${L.checker.typeToString(args[0])}, any>`);
+              }
+            }
+            keys.add(`G:${text}`);
+            keys.add(`R:${L.checker.typeToString(args[0])}`);
+          }
+        }
+      }
+      n.forEachChild((c) => { stack.push(c); });
+    }
+  }
+  return keys;
+}
+
 /** A CLASS ITERABLE whose protocol method is a generator: the receiver declares (or inherits) `[Symbol.iterator]()`
  * (`async` false) or `[Symbol.asyncIterator]()` (`async` true) taking no parameters and answering a Generator /
  * AsyncGenerator, whether the method is itself a generator method or returns a generator object. The loop drives the
@@ -302,7 +373,9 @@ export function genIterableDrainCall(L: Lowerer, src: IrExpr, loc: SrcLoc, elemT
   if (genT.yieldT.kind === "void") return null;
   if (genT.nextT.kind !== "undefinedT" && genT.nextT.kind !== "dyn") return null;
   const outElem = elemT ?? genT.yieldT;
-  if (!typeEquals(outElem, genT.yieldT)) {
+  // Over a dyn yield channel (a gated generator) a typed destination takes each element through the checked unbox.
+  const unbox = genT.yieldT.kind === "dyn" && outElem.kind !== "dyn" && canDynCheckTo(outElem, (id) => L.shapes.get(id), (id) => L.unions.get(id));
+  if (!unbox && !typeEquals(outElem, genT.yieldT)) {
     if (outElem.kind !== "union" || L.armTag(outElem.unionId, genT.yieldT) < 0) return null;
   }
   const outT: IrType = { kind: "array", elem: outElem };
@@ -356,7 +429,7 @@ export function genIterableDrainCall(L: Lowerer, src: IrExpr, loc: SrcLoc, elemT
                 kind: "arrIntrinsic",
                 method: "push",
                 receiver: outRef,
-                args: [L.coerceToExpected(extracted, outElem)],
+                args: [unbox ? ({ kind: "dynCheck", value: extracted, type: outElem, loc } as IrExpr) : L.coerceToExpected(extracted, outElem)],
                 type: F64,
                 loc,
               },
@@ -375,6 +448,17 @@ export function genIterableDrainCall(L: Lowerer, src: IrExpr, loc: SrcLoc, elemT
     });
   }
   return { kind: "call", callee: name, args: [src], type: outT, loc };
+}
+
+/** The type a for-of / for-await loop variable takes and the initializer that fills it. Over a dyn yield channel (a gated
+ * generator: every value is boxed) the variable keeps the TYPE THE SOURCE GAVE IT, and the element crosses back with a
+ * checked unbox; a type the checked unbox cannot reach keeps the dyn variable, whose uses refuse as they did for any dyn. */
+function elementBinding(L: Lowerer, name: ts.Node, yieldT: IrType, extracted: IrExpr, loc: SrcLoc): { type: IrType; init: IrExpr } {
+  if (yieldT.kind !== "dyn") return { type: yieldT, init: extracted };
+  const want = L.mapTypeOf(L.typeOf(name));
+  if (want === null || want === undefined || want.kind === "dyn" || want.kind === "void") return { type: yieldT, init: extracted };
+  if (!canDynCheckTo(want, (id) => L.shapes.get(id), (id) => L.unions.get(id))) return { type: yieldT, init: extracted };
+  return { type: want, init: { kind: "dynCheck", value: extracted, type: want, loc } };
 }
 
 /** `for (const x of gen)` — the desugared drive:
@@ -454,10 +538,11 @@ export function lowerForOfGenerator(
     // `for (var x of gen)`: the mechanics stay on a hidden per-iteration
     // local; the body opens by assigning into the hoisted var binding.
     const varTarget = forOfVarTarget(L, decl);
+    const elem = varTarget ? { type: genT.yieldT, init: extracted } : elementBinding(L, decl.name, genT.yieldT, extracted, loc);
     const x = varTarget
       ? L.declareHiddenLocal("%vof", genT.yieldT)
-      : L.declareLocal(decl.name, decl.name.text, genT.yieldT, isLet);
-    const xRef: IrExpr = { kind: "varRef", localId: x.id, type: genT.yieldT, loc };
+      : L.declareLocal(decl.name, decl.name.text, elem.type, isLet);
+    const xRef: IrExpr = { kind: "varRef", localId: x.id, type: elem.type, loc };
     const head: IrStmt[] = [
       {
         kind: "varDecl",
@@ -482,7 +567,7 @@ export function lowerForOfGenerator(
         else_: null,
         loc,
       },
-      { kind: "varDecl", localId: x.id, init: extracted, loc },
+      { kind: "varDecl", localId: x.id, init: elem.init, loc },
       ...(varTarget
         ? [{ kind: "assign", localId: varTarget.id, value: L.coerceInto(decl.name, xRef, varTarget.type), loc } satisfies IrStmt]
         : []),
@@ -680,7 +765,8 @@ export function lowerForAwaitAsyncGenerator(
         `for-await over an async generator yielding '${L.fmt(genT.yieldT)}' (no per-element extraction exists)`,
       );
     }
-    const x = L.declareLocal(decl.name, decl.name.text, genT.yieldT, isLet);
+    const elem = elementBinding(L, decl.name, genT.yieldT, extracted, loc);
+    const x = L.declareLocal(decl.name, decl.name.text, elem.type, isLet);
     const head: IrStmt[] = [
       {
         kind: "varDecl",
@@ -703,7 +789,7 @@ export function lowerForAwaitAsyncGenerator(
         else_: null,
         loc,
       },
-      { kind: "varDecl", localId: x.id, init: extracted, loc },
+      { kind: "varDecl", localId: x.id, init: elem.init, loc },
     ];
     // The body lowers inside BOTH markers, tryFinally outermost: an
     // unlabeled break/continue binds to the loop marker and never sees the
