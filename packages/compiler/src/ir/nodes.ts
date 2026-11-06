@@ -2146,6 +2146,11 @@ export interface IrRecordShape {
    * Set by armOwnMasks() alongside `ownmask`, from the targets
    * recordWidthPlan's absentRequired arm recorded while lowering. */
   reqabsent?: true;
+  /** The IteratorResult record a generator resume answers (`{ value, done }`, built by the resume thunk, never by a
+   * literal): its `value` key is ALWAYS own, `undefined` included (`{ value: undefined, done: true }`), so the own-key
+   * question for `value` answers true without consulting the undefined arm. Part of the interned identity (keyOf), so a
+   * user record with the same fields keeps its own undefined-arm presence rule. */
+  genResult?: true;
   /** How Node RENDERS a value of this shape, for the shapes the frontend
    * interns from a BUILTIN whose rendering is not a plain object's. Every
    * member is part of the interned identity, on internalFieldNamesOf's
@@ -2400,6 +2405,7 @@ export function presenceMaskStores(
  * (emit-shapes, llvm/shapes) and IrRecordShape itself fit. */
 export type OwnMaskShape = {
   ownmask?: true;
+  genResult?: true;
   tuple?: true;
   declaredOrder?: string[];
   fields: { name: string }[];

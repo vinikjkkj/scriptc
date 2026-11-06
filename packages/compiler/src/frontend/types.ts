@@ -425,6 +425,7 @@ export class ShapeRegistry {
     builtin?: IrBuiltinRendering,
     keyOrder?: string[],
     view = false,
+    genResult = false,
   ): string {
     // The INTERNAL field set (the names declaredOrder omits) is part of
     // the identity — internalFieldNamesOf carries the whole argument. The
@@ -446,6 +447,7 @@ export class ShapeRegistry {
     return (
       (tuple ? "tuple!" : "") +
       (view ? "view!" : "") +
+      (genResult ? "genres!" : "") +
       ord +
       (indexValue ? `idx<${typeKey(indexValue)}>!` : "") +
       (internal.length > 0 ? `int<${[...internal].sort().join(",")}>!` : "") +
@@ -694,11 +696,11 @@ export class ShapeRegistry {
    * value type (`indexValue`) is part of the identity too: the same
    * declared fields with and without an overflow portion — or with
    * differently-typed ones — are different structs. */
-  intern(fields: { name: string; type: IrType }[], tuple = false, indexValue?: IrType, declaredOrder?: string[], builtin?: IrBuiltinRendering, keyOrder?: string[]): string {
+  intern(fields: { name: string; type: IrType }[], tuple = false, indexValue?: IrType, declaredOrder?: string[], builtin?: IrBuiltinRendering, keyOrder?: string[], genResult = false): string {
     const declaredIndexValue = indexValue;
     indexValue = this.dialIndexValue(fields, tuple, indexValue);
     const view = this.viewGranted(fields, tuple, builtin, indexValue);
-    const key = this.keyOf(fields, tuple, indexValue, declaredOrder, builtin, keyOrder, view);
+    const key = this.keyOf(fields, tuple, indexValue, declaredOrder, builtin, keyOrder, view, genResult);
     let id = this.byKey.get(key);
     if (id !== undefined && indexValue !== declaredIndexValue && !this.granted.has(id)) {
       this.recordUndo(id, () => this.granted.delete(id!));
@@ -720,6 +722,7 @@ export class ShapeRegistry {
         // ...and the builtin rendering, which IS identity (keyOf).
         ...(builtinRenderingKey(builtin) ? { builtin: builtin! } : {}),
         ...(view ? { view: true as const } : {}),
+        ...(genResult ? { genResult: true as const } : {}),
       };
       this.byKey.set(key, id);
       this.byId.set(id, shape);
@@ -6717,7 +6720,7 @@ export function genResultRecord(
     shapeId: shapes.intern([
       { name: "done", type: BOOL },
       { name: "value", type: valueT },
-    ]),
+    ], false, undefined, ["value", "done"], undefined, undefined, true),
   };
 }
 
@@ -6736,6 +6739,8 @@ export function isUnitOnlyTsType(t: ts.Type): boolean {
 /** The question isUnitOnlyTsType is standing in for, asked of the spelling
  * the CHECKER hands out INSIDE a generic body. `Awaited<T>` and a bare `T`
  * carry no Void FLAG however the instantiation binds them -- the checker
+    // Node builds the result as `{ value, done }`: the own-key order every key-order surface (inspect, Object.keys,
+    // JSON) shows. Canonical field order is `done` first; declaredOrder is the metadata that carries the real one.
  * keeps both symbolic while T is open -- so the flag test reads false for a
  * parameter bound at `void`, and a value position fences on a slot whose
  * only inhabitant is `undefined`. This asks the live BINDING instead, which
