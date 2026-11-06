@@ -1,61 +1,20 @@
-/* `yield*` DOES NOT CLOSE THE DELEGATE -- a known, deliberate divergence
- * from Node, pinned here so it cannot change by accident.
+/* `yield*` FORWARDS .return() TO THE DELEGATE -- a PARITY test against Node.
  *
- * READ THIS BEFORE "FIXING" A RED FROM THIS FILE. These tests assert what
- * scriptc DOES today, not what it SHOULD do. The divergence is documented at
- * packages/compiler/src/frontend/lowering/lower-generators.ts:666:
+ * This file used to pin the opposite: a deliberate divergence in which closing
+ * an outer generator suspended inside `yield* inner()` unwound only the outer,
+ * so the delegate's `finally` never ran (lower-generators.ts, "numbered
+ * divergence"). That divergence is closed: the forwarding loop now closes the
+ * delegate in a finally, hands a throw() to the delegate, and re-yields a
+ * value the delegate yields from its own finally (corpus 24408 and 24409 pin
+ * the throw and finally-yield arms against Node as well).
  *
- *     Consumer `.return()`/`.throw()` while suspended here unwinds the OUTER
- *     generator without forwarding to the delegate (numbered divergence).
+ * The rows are the original ones, with the expectation moved to Node's answer
+ * (the file name keeps its history; the old divergence record is in git). The
+ * control stays: without it, "the delegate's finally ran" could mean a
+ * generator finally that runs for another reason.
  *
- * Node forwards: `outer.return(v)` while suspended inside `yield* inner()`
- * calls `inner.return(v)`, which runs the delegate's `finally`. scriptc
- * unwinds only the outer generator, so the delegate's `finally` never runs.
- *
- * If this file goes red because someone implemented forwarding, THAT IS THE
- * SIGNAL AND IT IS WORKING. Record the change, move the expectation, and say
- * so in the commit. Do not quietly edit the expected value to match new
- * behaviour: a test whose expectation follows the code cannot detect a
- * change in the code.
- *
- * WHY IT EXISTS AT ALL, AND WHY NOW. The stackless-async front is going to
- * rebuild the generator lowering (see docs/stackless-generators.md). Nothing
- * in this repository asserted this behaviour -- a search for the specific
- * shape came back empty -- which meant a rewritten unwind path could change
- * the divergence's CHARACTER while every gate stayed green. The recorded
- * position on that decision is "preserve exactly" (docs/stackless-generators.md
- * S10b, decision 6, logged OPEN), and a position with no instrument behind it
- * is a claim that cannot fail. This is the instrument, written while the
- * FIBER LANE IS STILL THE ORACLE -- which is the cheapest it will ever be,
- * because after the lowering moves there is nothing left to anchor against.
- *
- * It lives in tests/harness and not in tests/corpus for one reason: the
- * corpus scores against Node, and this program is DEFINED by not matching
- * Node. A corpus fixture would be permanently red.
- *
- * MEASURED, both arms, 2026-10-06. The scriptc expectations below were
- * originally DERIVED from reading the desugar and the runtime, with the node
- * side measured. Both arms have now been run:
- *
- *     control  scriptc  1 / true                 node  1 / true
- *     subject  scriptc  1 / 2 / true / 99 / FALSE node  1 / 2 / true / 99 / TRUE
- *
- * The reading predicted every value exactly. Host: node v25.9.0, zig 0.15.2,
- * SCRIPTC_TARGET=x86_64-windows-gnu, knob absent (the fiber lane).
- *
- * And the assertions were shown able to FAIL: replacing each expected array
- * with a sentinel reddened both tests and printed the arrays above as the
- * received values. A pinning test that has never been seen to fail is not
- * evidence, and the scriptc output differing from node's on exactly one line
- * is also what proves the binary ran at all rather than the node arm being
- * compared with itself.
- *
- * WHAT IS SPECIFICALLY NOT ASSERTED. Only the `.return()` arm is pinned.
- * The `.throw()` arm of the same sentence is left alone deliberately rather
- * than forgotten: a `.throw()` into an outer generator suspended in a
- * delegate has a second observable (where the exception surfaces) that this
- * file has not measured, and guessing it would plant a wrong expectation,
- * which is worse here than planting none.
+ * It lives in tests/harness and not in tests/corpus because it builds with the
+ * LLVM backend on purpose and asserts the Node output literally, per row.
  */
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { execFile } from "node:child_process";
@@ -193,27 +152,20 @@ test("CONTROL: a direct .return() on a generator DOES run its finally", async ()
   expect(lines(await nodeOutput("control-node", CONTROL))).toEqual(["1", "true"]);
 });
 
-test("DIVERGENCE: `yield*` does not forward .return() to the delegate", async () => {
+test("`yield*` forwards .return() to the delegate, as Node does", async () => {
   const got = lines(await scriptcOutput("subject", SUBJECT));
-  /* scriptc: the outer unwinds, the delegate is dropped suspended, and its
-   * finally never runs -- lower-generators.ts:666. */
-  expect(got).toEqual(["1", "2", "true", "99", "false"]);
+  /* The outer closes, the delegate's finally runs (innerClosed true), and the
+   * return value is the consumer's. */
+  expect(got).toEqual(["1", "2", "true", "99", "true"]);
 });
 
-test("DIVERGENCE is against NODE, and differs in exactly one observable", async () => {
-  /* Pinning both sides is what makes this a divergence record rather than a
-   * snapshot: it states what Node does, what scriptc does, and that the gap
-   * is one line and not a general disagreement about generators. If the gap
-   * ever widens, this fails even when the two tests above still pass. */
+test("PARITY with NODE on every observable of the delegated close", async () => {
+  /* Pinning both sides keeps the file a comparison and not a snapshot: the
+   * expectation is Node's literal answer and scriptc must equal it line for
+   * line. */
   const mine = lines(await scriptcOutput("subject-pair", SUBJECT));
   const theirs = lines(await nodeOutput("subject-pair-node", SUBJECT));
 
   expect(theirs).toEqual(["1", "2", "true", "99", "true"]);
-  expect(mine).toEqual(["1", "2", "true", "99", "false"]);
-
-  const differing = mine
-    .map((l, i) => (l === theirs[i] ? -1 : i))
-    .filter((i) => i >= 0);
-  expect(mine.length).toBe(theirs.length);
-  expect(differing).toEqual([4]); // the delegate-closed observable, and only it
+  expect(mine).toEqual(theirs);
 });
