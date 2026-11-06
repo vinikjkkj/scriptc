@@ -8970,10 +8970,6 @@ export class Lowerer {
       if (helper) {
         return { kind: "call", callee: helper, args: [expr], type: expected, loc: expr.loc };
       }
-      // A union with no unit arm into `A | undefined` where A is one of its arms (an erased generic's array-of-union
-      // element read into a tuple position a library declares `A | undefined`): the checked extraction of A, wrapped.
-      const nw = this.unionNarrowWrapPlan(expr.type.unionId, expected.unionId);
-      if (nw !== null) return this.applyWidthLift({ how: "narrowWrap", tag: nw.tag, arm: nw.arm }, expr, expected, expr.loc);
       return expr;
     }
     if (expr.type.kind === "void") {
@@ -10189,9 +10185,7 @@ export class Lowerer {
     }
     if (dst.kind === "union") {
       if (src.kind === "union") {
-        if (this.unionRetagMappable(src.unionId, dst.unionId)) return { how: "retag" };
-        const nw = this.unionNarrowWrapPlan(src.unionId, dst.unionId);
-        return nw === null ? null : { how: "narrowWrap", tag: nw.tag, arm: nw.arm };
+        return this.unionRetagMappable(src.unionId, dst.unionId) ? { how: "retag" } : null;
       }
       // A unit-typed source can't wrap here (unionWrap requires the
       // LITERAL unit — and no lowered shape carries a bare unit field).
@@ -12525,7 +12519,7 @@ export class Lowerer {
   arrayTuplePlannable(from: IrType & { kind: "array" }, toId: string): boolean {
     const to = this.shapes.get(toId);
     if (!to?.tuple || to.fields.length === 0 || to.indexValue) return false;
-    return to.fields.every((f) => typeEquals(f.type, from.elem) || this.coercibleValue(from.elem, f.type));
+    return to.fields.every((f) => typeEquals(f.type, from.elem) || this.coercibleValue(from.elem, f.type) || this.narrowWrapPosition(from.elem, f.type) !== null);
   }
 
   arrayTupleWidthHelper(from: IrType & { kind: "array" }, toId: string, loc: SrcLoc): string | null {
@@ -12561,7 +12555,12 @@ export class Lowerer {
               // enter the field's slot (identity for a uniform tuple; the dyn
               // conversion or an arm extraction for the erased-generic case,
               // `Promise<[T, FieldPacket[]]>` read through `[unknown, unknown]`).
-              const value = typeEquals(f.type, from.elem) ? read : this.coerceToExpected(read, f.type);
+              const nw = typeEquals(f.type, from.elem) ? null : this.narrowWrapPosition(from.elem, f.type);
+              const value = typeEquals(f.type, from.elem)
+                ? read
+                : nw !== null
+                  ? this.applyWidthLift({ how: "narrowWrap", tag: nw.tag, arm: nw.arm }, read, f.type, loc)
+                  : this.coerceToExpected(read, f.type);
               if (!typeEquals(value.type, f.type)) throw new Error("lowerer bug: planned array-to-tuple position stopped coercing");
               return { name: f.name, value };
             }),
@@ -13077,7 +13076,7 @@ export class Lowerer {
     // strictly smaller types), so any currying depth lowers.
     if (dst.kind === "func" && src.kind === "func") return this.cleanFuncAdaptable(src, dst);
     if (dst.kind === "union") {
-      if (src.kind === "union") return this.unionRetagMappable(src.unionId, dst.unionId) || this.unionNarrowWrapPlan(src.unionId, dst.unionId) !== null;
+      if (src.kind === "union") return this.unionRetagMappable(src.unionId, dst.unionId);
       if (src.kind === "void") return this.armTag(dst.unionId, UNDEFINED_T) >= 0;
       if (!isUnitType(src) && this.armTag(dst.unionId, src) >= 0) return true;
       // A promise whose payload converts into the union's ONE promise arm
@@ -14631,6 +14630,14 @@ export class Lowerer {
    * unchecked unionNarrow would misread the payload where JS lets the
    * impossible value flow on). Null when the target isn't a non-unit arm
    * of the union — those uses keep their erasure/fences. */
+  /** A tuple POSITION fed from the element union of an erased array form (`Promise<[T, X[]]>` as an array of the positions' union):
+   * the union into the position's `A | undefined` where A is one of its arms. Only the array-to-tuple copy asks, so no other
+   * coercion decision (an overload, an arm match, an adapter) changes. */
+  narrowWrapPosition(elem: IrType, pos: IrType): { tag: number; arm: IrType } | null {
+    if (elem.kind !== "union" || pos.kind !== "union") return null;
+    return this.unionNarrowWrapPlan(elem.unionId, pos.unionId);
+  }
+
   /** `U` (at most an undefined unit arm) into `A | undefined` where A is one of U's arms: the arm's tag in the destination, else null. */
   unionNarrowWrapPlan(srcId: string, dstId: string): { tag: number; arm: IrType } | null {
     const src = this.unions.get(srcId);
