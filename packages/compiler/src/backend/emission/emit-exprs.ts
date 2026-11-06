@@ -14,7 +14,7 @@ function canonNum(type: { kind: string }, expr: string): string {
   return type.kind === "f64" ? `scr_num_canon(${expr})` : expr;
 }
 import { rcSitesRequested, rcSiteLabel } from "./emitter.js";
-import { ORD_MEMBER, orderRecordPlanCached, ABSENT_KEY_TRAP_CODE, arrayOf, canBoxFuncIntoDyn, BOOL, BYTES_U8, bytesOf, ownMaskKeyBit, presenceMaskStores, OWNMASK_COMPLETED, OWNMASK_VALID, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, IrExpr, IrRecordShape, IrType, irFunctionJsName, irFunctionValueCode, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals, typeKey } from "../../ir/nodes.js";
+import { moduleUsesEngineFn, ORD_MEMBER, orderRecordPlanCached, ABSENT_KEY_TRAP_CODE, arrayOf, canBoxFuncIntoDyn, BOOL, BYTES_U8, bytesOf, ownMaskKeyBit, presenceMaskStores, OWNMASK_COMPLETED, OWNMASK_VALID, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, IrExpr, IrRecordShape, IrType, irFunctionJsName, irFunctionValueCode, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals, typeKey } from "../../ir/nodes.js";
 import { unionKeyClasses, boxAccess, BYTES_NUM_KIND_C, BYTES_NUM_VAR_C, bytesElemKindC, cDecl, cFnPtrCast, cNumberLiteral, cStringLiteral, cType, DV_GET_KIND_C, DV_SET_KIND_C, elemAccess, mapKeyAccess, mapKeyKindC, mapValKindC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassNew, mangleClassRetain, mangleClassStruct, mangleField, mangleFnClosure, mangleFunction, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleVtStruct, mangleWrapper } from "../mangle.js";
 import { KEYIX_MEMBER, KEYLIST_MEMBER, OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, VIEW_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
@@ -3438,6 +3438,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
                             // rides SCR_DYN_BYTES too. One runtime
                             // predicate, shared with the LLVM lane.
                             `scr_dyn_is_u8array(${d.name})`
+                          : e.test === "view" && moduleUsesEngineFn(E.mod)
+                            ? // `ArrayBuffer.isView(u)`: the bytes kind, or a typed array / DataView the engine holds.
+                              `(${d.name}->kind == SCR_DYN_BYTES || scr_dyn_isl_is_view(${d.name}))`
+                            : e.test === "arraybuffer" && moduleUsesEngineFn(E.mod)
+                              ? // `u instanceof ArrayBuffer`: the ARRBUF kind, or an ArrayBuffer the engine holds.
+                                `(${d.name}->kind == SCR_DYN_ARRBUF || scr_dyn_isl_is_arraybuffer(${d.name}))`
                           : e.test === "map" || e.test === "set" || e.test === "date" || e.test === "regex"
                             ? // `instanceof Map` / `instanceof Set` on an
                               // unknown value: SCR_DYN_MAP is shared by
@@ -3446,7 +3452,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
                               // per word, shared with the LLVM lane.
                               `scr_dyn_is_${e.test}(${d.name})`
                             : `${d.name}->kind == ${
-                              { string: "SCR_DYN_STR", number: "SCR_DYN_NUM", boolean: "SCR_DYN_BOOL", undefined: "SCR_DYN_UNDEF", null: "SCR_DYN_NULL", bytes: "SCR_DYN_BYTES", arraybuffer: "SCR_DYN_ARRBUF", bigint: "SCR_DYN_BIG" }[e.test]
+                              { string: "SCR_DYN_STR", number: "SCR_DYN_NUM", boolean: "SCR_DYN_BOOL", undefined: "SCR_DYN_UNDEF", null: "SCR_DYN_NULL", bytes: "SCR_DYN_BYTES", view: "SCR_DYN_BYTES", arraybuffer: "SCR_DYN_ARRBUF", bigint: "SCR_DYN_BIG" }[e.test]
                             }`;
         return E.newTemp(e.type, e.negated ? `!(${test})` : test);
       }
