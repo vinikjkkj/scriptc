@@ -12959,6 +12959,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24163-computed-key-method-call-binds-this-through-a-member-chain.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24163-computed-key-method-call-binds-this-through-a-member-chain.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2414-dowhile-continue-kill.ts": {
    "order": [
     "<repo>/tests/corpus/2414-dowhile-continue-kill.ts"
