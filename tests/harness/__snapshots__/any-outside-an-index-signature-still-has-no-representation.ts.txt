@@ -1,4 +1,4 @@
-any-outside-an-index-signature-still-has-no-representation.ts:20:7 - error SC2011: values of type '{ item: any; width: string; }' have no static representation but run in the embedded dynamic engine, which this build does not include
+any-outside-an-index-signature-still-has-no-representation.ts:20:7 - error SC2011: values of type '{ item: any; width: string; }' have no static representation but run in the embedded dynamic engine, which this build does not include (the static mapping refuses: { item: any; width: string; } > item > any)
 
   19 | // an `any` MEMBER of a record: same
   20 | const rec = { item: {} as any, width: "10px" };
@@ -7,7 +7,7 @@ any-outside-an-index-signature-still-has-no-representation.ts:20:7 - error SC201
 
   hint: build with --dynamic to run these values in the embedded engine (adds ~620KB to the binary), or restate the type inside the static surface (https://scriptc.dev/limitations describes the boundary)
 
-any-outside-an-index-signature-still-has-no-representation.ts:20:13 - error SC2011: values of type '{ item: any; width: string; }' have no static representation but run in the embedded dynamic engine, which this build does not include
+any-outside-an-index-signature-still-has-no-representation.ts:20:13 - error SC2011: values of type '{ item: any; width: string; }' have no static representation but run in the embedded dynamic engine, which this build does not include (the static mapping refuses: { item: any; width: string; } > item > any)
 
   19 | // an `any` MEMBER of a record: same
   20 | const rec = { item: {} as any, width: "10px" };
@@ -16,7 +16,7 @@ any-outside-an-index-signature-still-has-no-representation.ts:20:13 - error SC20
 
   hint: build with --dynamic to run these values in the embedded engine (adds ~620KB to the binary), or restate the type inside the static surface (https://scriptc.dev/limitations describes the boundary)
 
-any-outside-an-index-signature-still-has-no-representation.ts:25:17 - error SC2011: values of type '[string, any][]' have no static representation but run in the embedded dynamic engine, which this build does not include
+any-outside-an-index-signature-still-has-no-representation.ts:25:17 - error SC2011: values of type '[string, any][]' have no static representation but run in the embedded dynamic engine, which this build does not include (the static mapping refuses: [string, any][] > [string, any] > toLocaleString > { (): string; (locales: string | string[], options?: (NumberFormatOptions & DateTimeFormatOptions) | undefined): string; })
 
   24 | // for...in, `in`, delete, spread and JSON.stringify all compile over it.
   25 | for (const e of Object.entries(admitted)) console.log(e[0], String(e[1]));
