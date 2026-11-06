@@ -10317,6 +10317,18 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
       // verbatim) and blamed on the declaration.
       if (f.resetsToUndefined) {
         const loc = locOf(f.resetsToUndefined.decl);
+        // A checked-dynamic slot (a prototype-class field typed dyn) holds the dyn undefined itself.
+        if (f.type.kind === "dyn") {
+          out.push({
+            kind: "fieldSet",
+            obj: { kind: "varRef", localId: thisLocal.id, type: thisType, loc },
+            className: info.def.name,
+            field: f.name,
+            value: dynUndefinedExpr(loc),
+            loc,
+          });
+          continue;
+        }
         const undefTag = f.type.kind === "union" ? L.armTag(f.type.unionId, UNDEFINED_T) : -1;
         // The collection admitted the redeclare only with an undefined arm
         // in the INHERITED slot's type, so the tag is there to be taken.
