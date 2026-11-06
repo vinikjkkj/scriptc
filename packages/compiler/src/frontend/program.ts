@@ -598,8 +598,10 @@ export function checkPreflight(load: LoadResult): ScrDiagnostic[] {
  *  - TS2323 ("cannot redeclare exported variable") on symbol-keyed expando
  *    assignments in CJS classes (`this[kSym] = v` under `module.exports =
  *    Class`) — 5.9.3 synthesized expando symbols, tsgo trips its
- *    redeclaration check instead (the corpus's countdown fixture). */
-const TS7_JS_RELAXED_EXTRA: ReadonlySet<number> = new Set([2309, 2323]);
+ *    redeclaration check instead (the corpus's countdown fixture).
+ *  - TS2314 ("generic type requires N type arguments") on a bare generic in JSDoc (`@returns {Array}`): in a JS file
+ *    5.9.3 reads the missing arguments as `any`, tsgo reports the omission (denque's toArray). */
+const TS7_JS_RELAXED_EXTRA: ReadonlySet<number> = new Set([2309, 2323, 2314]);
 
 function suppressedJsStrictness7(d: ts.Diagnostic): boolean {
   const file = d.fileName;
