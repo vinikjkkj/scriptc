@@ -7692,6 +7692,10 @@ typedef struct ScrDynJsvalOps {
    * bridges with the ENGINE's message. +1, or NULL with the exception
    * pending. */
   ScrDyn *(*iter_drain)(ScrJsval *cell, bool spread, const ScrStr *spell);
+  /* The engine's Uint8Array (engine Buffers are Uint8Array subclasses): the test, and the COPY of its bytes out as a fresh native
+   * u8 bytes value (the boundary's aliasing stance - scr_jsval_exit_bytes). +1, or NULL with the exception pending. */
+  bool (*is_u8)(ScrJsval *cell);
+  ScrBytes *(*exit_u8)(ScrJsval *cell);
 #ifdef SCR_SYMTAB
   /* A symbol-keyed operation on the ENGINE object (scr_symbol.c routes here, ScrDsymEngineOp): the runtime symbol `k`
    * crosses as THE engine symbol of its identity (one per identity, both directions: scr_island.c's table). +1 result, or
@@ -7739,6 +7743,9 @@ ScrDyn *scr_dyn_rec_from_jsval_fn(const ScrDyn *d, const char *const *keys, cons
 ScrDyn *scr_dyn_isl_bound_method(const ScrDyn *recv, const char *key, size_t len);
 /* Is d an engine-held function? An engine function as a function value of the checked-dynamic tree (+1): its call is the engine's. */
 bool scr_dyn_isl_is_function(const ScrDyn *d);
+/* An engine Uint8Array: the test, and the copy of its bytes as a native u8 bytes value (+1, or NULL with the exception pending). */
+bool scr_dyn_isl_is_u8(const ScrDyn *d);
+ScrBytes *scr_dyn_isl_exit_u8(const ScrDyn *d);
 ScrDyn *scr_dyn_isl_fn_box(const ScrDyn *f);
 /* The `??`/optional-chain nullish test over a dyn value: UNDEF/NULL
  * native, JSVAL through the engine's own test (defensively — the wrap
