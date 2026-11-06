@@ -920,7 +920,10 @@ function toNum(a: IrExpr, loc: SrcLoc): IrExpr {
 
 /** The keys are the global's source spelling (`String`, `JSON.stringify`). */
 const DYN_BUILTIN_FNS: Readonly<Record<string, DynBuiltinFn | undefined>> = {
-  String: { body: (a, loc) => toStr(a[0]!, loc) },
+  // The same conversion `String(u)` lowers to over a dyn operand (Node's String(): Symbols render, plain objects answer "[object Object]",
+  // an own or inherited toString / Symbol.toPrimitive runs). dyn.toStringCoerce is the WebIDL USVString conversion, which throws on a plain
+  // object, and is the right helper only for the other rows' string operands.
+  String: { body: (a, loc) => ({ kind: "toString", operand: a[0]!, type: STRING, loc }) },
   Number: { body: (a, loc) => toNum(a[0]!, loc) },
   Boolean: { body: (a, loc) => ({ kind: "dynTest", test: "truthy", value: a[0]!, type: BOOL, loc }) },
   parseInt: {
@@ -1150,15 +1153,18 @@ export function dynBuiltinHofCallback(
     if (t === undefined) return null;
     params.push(t);
   }
-  // A static OBJECT element is not boxed here: the boxed object's ToString
-  // is the runtime's object protocol, which has no Object.prototype member
-  // table, so it refuses at run time where Node prints "[object Object]".
-  // Those callbacks keep their refusal at compile time instead.
+  // A static OBJECT element is not boxed for the conversions that go through the runtime's object protocol (it has no
+  // Object.prototype member table); those callbacks keep their refusal at compile time.
+  // `String` is the exception: its body is the same `toString` operation `String(x)` lowers to, which handles a record, a
+  // class instance (its own toString), a Map and the rest by their static kind, so those parameters are NOT boxed and the
+  // callback is exactly the arrow `(x) => String(x)`.
   // A bigint element is boxable for the BigInt statics alone: their
   // conversions take a bigint (asUintN(1n, ...) is the width's TypeError),
   // and every other builtin keeps the refusal it had.
   const bigintKey = key.startsWith("BigInt.");
+  const direct = key === "String";
   for (const t of params) {
+    if (direct) continue;
     if (!boxableCallbackParam(L, t) && !(bigintKey && t.kind === "bigint")) return null;
   }
   // JSON.stringify of an undefined-capable element: the direct call refuses
@@ -1175,7 +1181,8 @@ export function dynBuiltinHofCallback(
     const ps = params.map((type, i) => ({ localId: `p${i}.0`, name: `p${i}`, type }));
     const args: IrExpr[] = ps.map((p) => {
       const v: IrExpr = { kind: "varRef", localId: p.localId, type: p.type, loc };
-      return p.type.kind === "dyn" ? v : { kind: "dynFrom", value: v, type: DYN, loc };
+      // String converts the parameter at its own static kind (see above); the others take a dyn operand.
+      return p.type.kind === "dyn" || (direct && !boxableCallbackParam(L, p.type)) ? v : { kind: "dynFrom", value: v, type: DYN, loc };
     });
     L.liftedFns.push({
       name: fnName,
@@ -1183,7 +1190,7 @@ export function dynBuiltinHofCallback(
       params: ps,
       returnType: sig.ret,
       locals: ps.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
-      body: [{ kind: "return", value: row.body(args, loc), loc }],
+      body: [{ kind: "return", value: direct ? L.ensureString(args[0]!, argNode, true) : row.body(args, loc), loc }],
       loc,
     });
   }
