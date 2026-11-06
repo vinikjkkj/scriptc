@@ -59,7 +59,22 @@ async function main(): Promise<void> {
   const transfer = WaMediaTransferClient;
   console.log(typeof transfer);
 
-  await client.group.createGroup("rig", ["5511999999999@s.whatsapp.net"]);
+  // every message kind goes through the dispatch coordinator; a group target takes the sender-key path, a direct one the Signal session
+  const jid = "5511999999999@s.whatsapp.net";
+  const gjid = "120363000000000000@g.us";
+  const sent = await client.message.send(jid, { type: "image", media: new Uint8Array([1, 2, 3]), mimetype: "image/png", caption: "c" });
+  await client.message.send(gjid, { type: "document", media: new Uint8Array([4]), mimetype: "text/plain", fileName: "a.txt" });
+  await client.message.send(gjid, { type: "audio", media: new Uint8Array([5]), mimetype: "audio/ogg" });
+  await client.message.send(jid, { type: "reaction", target: { remoteJid: jid, id: sent.id, fromMe: true }, emoji: "+" });
+  await client.message.send(jid, { type: "poll", name: "q", options: ["a", "b"] });
+  await client.message.send(gjid, { conversation: "raw proto message" });
+
+  // account, group and profile surfaces that open queries over the same connection
+  console.log((await client.privacy.getPrivacySettings()) !== undefined);
+  console.log((await client.group.queryAllGroups()).length, (await client.group.queryGroupMetadata(gjid)).participants.length);
+  console.log(await client.business.getBusinessProfile([jid]));
+  console.log((await client.bot.listBots()).length);
+  await client.group.createGroup("rig", [jid]);
   await client.connect();
   await client.disconnect();
   await mysql.destroy();

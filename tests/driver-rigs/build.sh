@@ -13,13 +13,15 @@ mkdir -p "$(dirname "$out")"
 cd "$here"
 timeout 19800 node "$cli" build "$entry" --provenance-sources "${extra[@]}" --backend "$backend" -o "$out.bin" > "$out.txt" 2>&1
 rc=$?
-# zapo-core entries: which zapo-js core sources the build reached. The lowered functions of the emitted C carry `file:line`
-# comments, and a refused build names the files of its errors, so a file counts as reached when either mentions it. The controls:
-# WaClient.ts (always reached) must read above zero, and a name no package has must read zero.
+# zapo-core entries: which zapo-js core sources the build reached. A lowered class keeps its name in the binary (error texts and
+# inspect names), so `lowered` counts the class-name strings of a successful build; `errors` counts the error lines a refused build
+# names the file in. The controls: WaClient (always reached) must read above zero in lowered, and NoSuchFileZ (no package has it)
+# must read zero in both.
 if [ "${entry}" = zapo-core.ts ]; then
-  for f in WaMessageDispatchCoordinator.ts SenderKeyManager.ts WaNoiseSession.ts WaMediaTransferClient.ts SignalIdentitySyncApi.ts WaClient.ts NoSuchFileZ.ts; do
-    n=$(cat "$out.c" "$out.ll" "$out.txt" 2>/dev/null | grep -c "/$f")
-    echo "reach $f: $n" | tee -a "$out.txt"
+  for f in WaMessageDispatchCoordinator SenderKeyManager WaNoiseSession WaMediaTransferClient SignalIdentitySyncApi WaClient NoSuchFileZ; do
+    lowered=0; [ "$rc" = 0 ] && lowered=$(strings -a "$out.bin" | grep -c "$f")
+    errs=$(grep ' - error SC' "$out.txt" | grep -c "/$f.ts:")
+    echo "reach $f: lowered=$lowered errors=$errs" | tee -a "$out.txt"
   done
 fi
 echo "rc=$rc" >> "$out.txt"
