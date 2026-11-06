@@ -13092,6 +13092,12 @@
     ],
     "diags": []
   },
+  "<repo>/tests/corpus/24342-empty-object-literal-slot-written-by-dynamic-keys-js.js": {
+    "order": [
+      "<repo>/tests/corpus/24342-empty-object-literal-slot-written-by-dynamic-keys-js.js"
+    ],
+    "diags": []
+  },
   "<repo>/tests/diagnostics/static-this-with-a-receiver-other-than-the-declaring-class-stays-refused.ts": {
     "order": [
       "<repo>/tests/diagnostics/static-this-with-a-receiver-other-than-the-declaring-class-stays-refused.ts"
