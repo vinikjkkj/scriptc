@@ -9916,9 +9916,11 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
       // statements rather than an interned helper, so the shape's order is
       // fixed here. Blocking it keeps every consumer of that order in step
       // (Lowerer.noteEnumOrderBake).
-      L.noteEnumOrderBake(argIr.shapeId, null);
+      L.noteEnumOrderBake(argIr.shapeId, null, "list");
       const order = shape.declaredOrder ?? shape.fields.map((f) => f.name);
-      for (const name of order) {
+      const fieldsSub: IrStmt[] = [];
+      const extraLocals: { id: string; name: string; type: IrType; mutable: boolean }[] = [];
+      const fillOne = (name: string, tgt: IrStmt[]): void => {
         const f = shape.fields.find((x) => x.name === name)!;
         const raw: IrExpr = { kind: "recordGet", obj: rRef, shapeId: argIr.shapeId, field: f.name, type: f.type, loc };
         const utag = f.type.kind === "union" ? L.armTag(f.type.unionId, UNDEFINED_T) : -1;
@@ -9981,7 +9983,7 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
                   loc,
                 };
         }
-        body.push(
+        tgt.push(
           utag >= 0 && f.type.kind === "union"
             ? {
                 kind: "if",
@@ -9992,7 +9994,23 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
               }
             : push(pushed),
         );
-      }
+      };
+      // A shape with a KEY LIST walks its construction-order keys and then the list (rebuilt once the shape has one).
+      const buildFields = (): void => {
+        fieldsSub.length = 0;
+        if (shape.keyList) {
+          fillWithKeyList(L, shape, argIr.shapeId, () => rRef, order, fillOne, fieldsSub, loc, (id, nm) => {
+            const built = L.liftedFns.find((fn) => fn.name === helper);
+            if (built && !built.locals.some((l) => l.id === id)) built.locals.push({ id, name: nm, type: F64, mutable: true });
+            if (!extraLocals.some((l) => l.id === id)) extraLocals.push({ id, name: nm, type: F64, mutable: true });
+          });
+        } else {
+          for (const nm of order) fillOne(nm, fieldsSub);
+        }
+      };
+      buildFields();
+      body.push({ kind: "block", body: fieldsSub, loc });
+      L.noteListConsumer(argIr.shapeId, argIr.shapeId, buildFields);
 
       // The overflow walk: a fresh SLOT snapshot in JS own-key order, each
       // key AND its value read out of the entry that slot names. The older
@@ -10069,6 +10087,7 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
           { id: "i.0", name: "i", type: F64, mutable: true },
           { id: "sl.0", name: "sl", type: F64, mutable: false },
           { id: "k.0", name: "k", type: STRING, mutable: false },
+          ...extraLocals,
         ],
         body,
         loc,
@@ -11023,7 +11042,7 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
       };
       buildFields();
       body.push({ kind: "block", body: sub, loc });
-      L.noteListConsumer(plan.fromId, effTarget.shapeId, buildFields, freshTarget !== null ? loc : undefined);
+      L.noteListConsumer(plan.fromId, effTarget.shapeId, buildFields);
       // The source overflow by SLOT (recordOvfSlots): key and value come
       // out of one entry, so no key is looked back up. Object.assign(x, x)
       // is the one shape here whose target CAN be the enumerated record,

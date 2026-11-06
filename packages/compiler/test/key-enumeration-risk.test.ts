@@ -402,10 +402,9 @@ console.log(JSON.stringify(p));
   expect(r.compiled).toBe(true);
 });
 
-test("Object.assign({}, source) used as a value compiles, and refuses a source filled by assignment", () => {
-  // The call returns its target. Onto a fresh literal the result is built as the record tsc's intersection names, which declares the
-  // sources' members and so enumerates them in declaration order: exact for a source built in that order (corpus 24437), refused for one
-  // whose keys were written after construction (the key list is not read by that shape).
+test("Object.assign({}, source) used as a value compiles, for a source built in order and one filled by assignment", () => {
+  // The call returns its target. Onto a fresh literal the result is built as the record tsc's intersection names (index signature plus the
+  // sources' members); that shape carries a key list when a source is filled by assignment, so it enumerates in write order (corpus 24437).
   const ok = lower(`
 interface A { a?: number; b?: number }
 const fa: A = { a: 1, b: 2 };
@@ -422,5 +421,6 @@ fa.a = 2;
 const t = Object.assign({} as Record<string, number | undefined>, fa);
 console.log(Object.keys(t).join(","), t.a);
 `);
-  expect(filled.diags.some((d) => d.message.includes("Object.assign({}, source) used as a value"))).toBe(true);
+  expect(filled.diags).toEqual([]);
+  expect(filled.compiled).toBe(true);
 });
