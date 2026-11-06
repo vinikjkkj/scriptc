@@ -8210,7 +8210,7 @@ function lowerUtilTypesCall(L: Lowerer, call: ts.CallExpression, bi: { module: s
     const arg = L.lowerExpr(argNode);
     const loc = locOf(call);
     if (arg.type.kind === "dyn") {
-      return { kind: "dynTest", test: "bytes", value: arg, type: BOOL, loc };
+      return { kind: "dynTest", test: "view", value: arg, type: BOOL, loc };
     }
     if (
       arg.type.kind === "bytes" &&

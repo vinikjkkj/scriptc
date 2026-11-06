@@ -2434,15 +2434,23 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           // opposite of the u8 arm below, and deliberately. A copy would
           // silently detach every view already taken over the buffer,
           // and an ArrayBuffer with no views is a value nobody wants.
+          if (moduleUsesEngineFn(E.mod)) {
+            // An ENGINE ArrayBuffer: its bytes COPY out as a fresh native ArrayBuffer (the u8 arm below states the stance).
+            d.push(`  if (scr_dyn_isl_bin(d) == SCR_ISL_BIN_BUFFER) { /* an engine ArrayBuffer: its bytes, copied */`);
+            d.push(`    ScrBytes *sc_jb = scr_dyn_isl_exit_bin(d);`);
+            if (soft) d.push(`    if (sc_jb == NULL) *ok = false; /* the exception is pending */`);
+            d.push(`    return sc_jb;`);
+            d.push(`  }`);
+          }
           if (soft) d.push(`  if (d->kind != ${bk.kind}) { *ok = false; return NULL; }`);
           d.push(`  return scr_dyn_arrbuf_unbox(d, path, ${want});`);
           break;
         }
         // An ENGINE Uint8Array (a value the embedded engine built): its bytes COPY out as a fresh native u8 value, the
         // boundary's aliasing stance (scr_jsval_exit_bytes). Only the u8 view has an engine exit.
-        if (t.elem === "u8" && moduleUsesEngineFn(E.mod)) {
-          d.push(`  if (scr_dyn_isl_is_u8(d)) { /* an engine Uint8Array: its bytes, copied */`);
-          d.push(`    ScrBytes *sc_jb = scr_dyn_isl_exit_u8(d);`);
+        if (moduleUsesEngineFn(E.mod)) {
+          d.push(t.elem === "u8" ? `  if (scr_dyn_isl_is_u8(d)) { /* an engine Uint8Array: its bytes, copied */` : `  if (scr_dyn_isl_bin(d) == SCR_BYTES_${t.elem.toUpperCase()}) { /* an engine typed array of this element: its bytes, copied */`);
+          d.push(t.elem === "u8" ? `    ScrBytes *sc_jb = scr_dyn_isl_exit_u8(d);` : `    ScrBytes *sc_jb = scr_dyn_isl_exit_bin(d);`);
           if (soft) d.push(`    if (sc_jb == NULL) *ok = false; /* the exception is pending */`);
           d.push(`    return sc_jb;`);
           d.push(`  }`);
