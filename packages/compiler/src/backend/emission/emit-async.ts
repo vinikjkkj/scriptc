@@ -5,7 +5,8 @@ import { appendLines, type CEmitter } from "./emitter.js";
 import { emitGenCoroSpawn } from "./emit-gen-coro.js";
 import { mangleAgenSettleThunk, mangleArgPack, mangleAsyncSpawn, mangleChildDataThunk, mangleChildExitThunk, mangleCloseBindThunk, mangleCloseOverrideWrap, mangleConnectSockThunk, mangleDgramMsgThunk, mangleDnsLookupThunk, mangleFsStatThunk, mangleField, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRaceThunk, mangleRawParam, mangleNetLookupAnswerThunk, mangleEmitterInvokeThunk, mangleStreamCbThunk, mangleStreamDoneFn, mangleRecordNew, mangleRecordRelease, mangleRecordStruct, mangleResolveThunk, mangleSniAnswerThunk, mangleTrampoline } from "../mangle.js";
 import { cDecl, cType, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
-import { IrFunction, IrType, canBoxFuncIntoDyn, isDynPackFunc, isRefCounted, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
+import { IrFunction, IrType, canBoxFuncIntoDyn, isDynPackFunc, isRefCounted, isUnitType, presenceMaskStores, typeEquals, typeKey } from "../../ir/nodes.js";
+import { OWNMASK_MEMBER } from "./emit-shapes.js";
 
 /** Per-async-function machinery: an argument pack, a fiber trampoline
    * (unpacks, runs the ordinary compiled body, settles the promise), and a
@@ -919,6 +920,11 @@ function agenResultTypeOf(fn: IrFunction): IrType & { kind: "record" } {
       `  bool sc_d = scr_gen_done(sc_g);`,
       `  sc_r->${mangleField("done")} = sc_d;`,
     ];
+    // The result is built whole, so both of its keys are OWN, an undefined value included (a literal elsewhere writes its own
+    // bits; this record is the generator's and has `value` and `done` always).
+    for (const st of presenceMaskStores(shape ?? { fields: [] }, [{ name: "done", own: true }, { name: "value", own: true }]) ?? []) {
+      lines.push(`  sc_r->${OWNMASK_MEMBER}[${st.byte}] = ${st.value};`);
+    }
     if (valueT.kind === "dyn") {
       // The any/unknown channel: OUT holds a dyn (or nothing — undefined).
       lines.push(
