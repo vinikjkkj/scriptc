@@ -1,0 +1,9 @@
+{
+  "packages": {
+    "twingen": {
+      "dir": "./attested-src/twingen",
+      "commit": "7777777777777777777777777777777777777777",
+      "repo": "https://github.com/example/twingen"
+    }
+  }
+}
