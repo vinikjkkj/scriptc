@@ -2167,10 +2167,9 @@ export interface IrRecordShape {
   /** With `keyList`: EVERY field is listed, not only the optional ones (the shape is the destination of a spread or rest of a
    * listed record, whose copy writes all its keys in the source's order). */
   keyListAll?: true;
-  /** The IteratorResult record a generator resume answers (`{ value, done }`, built by the resume thunk, never by a
-   * literal): its `value` key is ALWAYS own, `undefined` included (`{ value: undefined, done: true }`), so the own-key
-   * question for `value` answers true without consulting the undefined arm. Part of the interned identity (keyOf), so a
-   * user record with the same fields keeps its own undefined-arm presence rule. */
+  /** The IteratorResult record (`{ value, done }`): the resume thunk builds it WHOLE, so it writes the own-key mask with both
+   * bits set and an undefined `value` prints as `value: undefined`; a literal a program writes into the same shape
+   * establishes its own mask (a literal that omits `value` has no such key). Part of the interned identity (keyOf). */
   genResult?: true;
   /** How Node RENDERS a value of this shape, for the shapes the frontend
    * interns from a BUILTIN whose rendering is not a plain object's. Every
