@@ -698,7 +698,7 @@ static ScrBytes *scr_buffer_concat_dyn_impl(const ScrDyn *list, const ScrDyn *to
 }
 
 ScrStr *scr_error_message_dyn(const ScrDyn *v) {
-  if (v->kind == SCR_DYN_UNDEF) return NULL; /* no message argument: the constructor installs no own `message` */
+  if (v->kind == SCR_DYN_UNDEF) return SCR_ERROR_ABSENT_MESSAGE; /* no message argument: the constructor installs no own `message` */
   return scr_dyn_string_coerce_js(v);
 }
 
