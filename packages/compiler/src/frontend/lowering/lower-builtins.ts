@@ -8130,6 +8130,29 @@ let digestInputValueDispatches = 0;
     // runtime answers a dyn (the number or undefined); a typed read
     // (`number | string | undefined` under @types/node) crosses the
     // validated dyn boundary like every other dyn-to-static read.
+    // `process.nextTick` as a VALUE (`options.callback || process.nextTick`): a variadic function `(callback, ...args)` over the
+    // checked-dynamic tick scheduler, which validates the callback and calls it with the trailing arguments on the next tick.
+    if (member === "nextTick" && !L.dynamic) {
+      const name = "%builtin.process.nextTick.value";
+      const ft: IrType = { kind: "func", params: [DYN], ret: VOID, rest: true };
+      if (!L.liftedFns.some((f) => f.name === name)) {
+        L.liftedFns.push({
+          name,
+          jsName: "nextTick",
+          valueCode: 4,
+          params: [{ localId: "cb.0", name: "cb", type: DYN }, { localId: "pk.0", name: "pk", type: DYN }],
+          returnType: VOID,
+          locals: [{ id: "cb.0", name: "cb", type: DYN, mutable: false }, { id: "pk.0", name: "pk", type: DYN, mutable: false }],
+          body: [{
+            kind: "exprStmt",
+            expr: { kind: "libCall", fn: "process.nextTickDyn", args: [{ kind: "varRef", localId: "cb.0", type: DYN, loc }, { kind: "varRef", localId: "pk.0", type: DYN, loc }], type: VOID, loc },
+            loc,
+          }],
+          loc,
+        });
+      }
+      return { kind: "closure", fnName: name, captures: [], type: ft, loc };
+    }
     // process.noDeprecation / throwDeprecation / traceDeprecation: plain writable slots (any value), read back as stored.
     const depFlag = member === "noDeprecation" ? 0 : member === "throwDeprecation" ? 1 : member === "traceDeprecation" ? 2 : -1;
     if (depFlag >= 0) {

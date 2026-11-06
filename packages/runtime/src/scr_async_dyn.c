@@ -692,6 +692,31 @@ void scr_process_emit_warning(ScrDyn *args) {
   scr_dyn_release(w);
 }
 
+/* process.nextTick(callback, ...args) taken as a VALUE: the tick runs `callback` with the trailing arguments. A non-function callback
+ * is Node's validateFunction TypeError (ERR_INVALID_ARG_TYPE), thrown at the call, not on the tick. */
+static void scr_next_tick_dyn_run(ScrClosure *clo) {
+  ScrDyn *cb = (ScrDyn *)scr_box_get_ref(clo->caps[0]); /* +1 */
+  ScrDyn *pk = (ScrDyn *)scr_box_get_ref(clo->caps[1]); /* +1 */
+  size_t n = pk->kind == SCR_DYN_ARR ? pk->v.arr.len : 0;
+  ScrDyn *r = scr_dyn_call(cb, n > 0 ? pk->v.arr.items : NULL, n, "callback");
+  if (r != NULL) scr_dyn_release(r);
+  scr_dyn_release(cb);
+  scr_dyn_release(pk);
+}
+
+void scr_process_next_tick_dyn(ScrDyn *cb, ScrDyn *pk) {
+  if (cb->kind != SCR_DYN_FUNC) {
+    scr_dyn_arg_type_fail("callback", "of type function", cb);
+    return;
+  }
+  ScrClosure *clo = scr_closure_new((void *)scr_next_tick_dyn_run, 2);
+  clo->caps[0] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
+  scr_box_set_ref(clo->caps[0], scr_dyn_retain(cb));
+  clo->caps[1] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
+  scr_box_set_ref(clo->caps[1], scr_dyn_retain(pk));
+  scr_next_tick(clo);
+}
+
 /* util.deprecate's wrapper warning: the process.emitWarning argument
  * vector [message, 'DeprecationWarning', code?]. Node keeps one
  * codesWarned set for every wrapper: a wrapper given a code that an

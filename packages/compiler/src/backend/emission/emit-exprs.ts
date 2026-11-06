@@ -7533,6 +7533,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_process_dep_flag_get(${arg(0)})`);
           case "process.depFlagSet":
             return finish(`scr_process_dep_flag_set(${arg(0)}, ${arg(1)})`);
+          case "process.nextTickDyn":
+            return finish(`scr_process_next_tick_dyn(${arg(0)}, ${arg(1)})`);
           case "process.noDeprecationIsTrue":
             return finish(`scr_process_no_deprecation_is_true()`);
           case "process.exitCodeGet":

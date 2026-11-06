@@ -5476,6 +5476,7 @@ export type IrLibFn =
   | "process.depFlagGet"
   | "process.depFlagSet"
   | "process.noDeprecationIsTrue"
+  | "process.nextTickDyn"
   | "process.cwd"
   /** getpid(2) / getuid(2): zero args → f64. `process.pid` never throws.
    * getuid/getgid answer only on a POSIX target: under a windows triple
@@ -12150,7 +12151,7 @@ export function moduleUsesDynAsync(mod: IrModule): boolean {
     "process.onUnhandledRejection", "process.offUnhandledRejection",
     "process.onUncaught", "process.offUncaught",
     "process.onRejectionHandled", "process.offRejectionHandled",
-    "process.onWarning", "process.offWarning", "process.emitWarning", "util.deprecationWarn",
+    "process.onWarning", "process.offWarning", "process.emitWarning", "util.deprecationWarn", "process.nextTickDyn",
     "als.new", "als.get", "als.run", "als.exitRun", "als.enterWith", "als.disable",
     "dc.chanBindStore", "dc.chanUnbindStore", "dc.chanRunStores",
     // Blob and File are promise-returning classes (text, arrayBuffer, bytes): their values link scr_async_dyn.c.
@@ -15005,6 +15006,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // listeners SYNCHRONOUSLY, so a listener's throw lands here too (the
   // emitter.emit stance).
   "process.onWarning",
+  "process.nextTickDyn",
   "process.emitWarning",
   "util.deprecationWarn",
   // The chaining spelling of http2's setEncoding. Its void twin

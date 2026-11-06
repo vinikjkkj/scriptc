@@ -8345,6 +8345,7 @@ bool scr_immediate_has_ref(double handle);
  * teardown (they must never run yet must not leak). cb ownership moves
  * in. */
 void scr_next_tick(ScrClosure *cb);
+void scr_process_next_tick_dyn(struct ScrDyn *cb, struct ScrDyn *pk); /* nextTick(callback, ...args) as a value */
 /* A raw C-hook entry on the SAME queue: the stream unit enqueues one
  * marker per deferred stream emission, so stream ticks and user
  * nextTicks run in true FIFO order (in Node they are the same queue).
