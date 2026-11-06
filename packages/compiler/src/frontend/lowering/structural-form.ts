@@ -69,6 +69,7 @@ const SHAPE_FIELD_ROLE: Record<keyof IrRecordShape, "identity" | "later-pass" | 
   keyList: "later-pass",
   keyListAll: "later-pass",
   view: "identity",
+  genResult: "identity",
 };
 
 /** Every field of IrUnionDef, classified on the same rule. */

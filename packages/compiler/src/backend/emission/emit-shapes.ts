@@ -72,6 +72,8 @@ export function ownPresentCondC(
   dropUndefined: boolean,
   orSlot = false,
 ): string | null {
+  // The generator result's `value` key is always own (IrRecordShape.genResult); JSON still drops an undefined value.
+  if (shape.genResult === true && fieldName === "value" && !dropUndefined) return null;
   const armTest = utag >= 0 ? `${recv}->${mangleField(fieldName)}->tag != ${utag}` : null;
   // INTERNAL SLOTS take no bit — ownMaskKeyBit carries the whole argument,
   // and it is the one question the builder, this condition, the write side
