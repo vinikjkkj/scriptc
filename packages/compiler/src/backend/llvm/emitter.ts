@@ -9221,12 +9221,24 @@ class LlEmitter {
         if (!sh) throw new Error(`llvm emitter bug: recordOrd of unknown shape ${e.shapeId}`);
         const lp = B.tmp();
         B.line(`${lp} = getelementptr inbounds %${mangleRecordStruct(e.shapeId)}, ptr ${obj.name}, i64 0, i32 ${keyListSlotIndex(sh)}, i64 0 ; key list`);
+        if (e.op === "empty") {
+          const e8 = B.tmp();
+          B.line(`${e8} = load i8, ptr ${lp}`);
+          const ez = B.tmp();
+          B.line(`${ez} = icmp eq i8 ${e8}, 0`);
+          return { name: ez, type: e.type };
+        }
         if (e.op === "count") {
           const c8 = B.tmp();
           B.line(`${c8} = load i8, ptr ${lp}`);
           const cf = B.tmp();
           B.line(`${cf} = uitofp i8 ${c8} to double`);
           return { name: cf, type: e.type };
+        }
+        if (e.op === "note") {
+          this.declare(`declare void @scr_ord_note(ptr, i8)`);
+          B.line(`call void @scr_ord_note(ptr ${lp}, i8 ${e.ord})`);
+          return { name: "true", type: e.type };
         }
         if (e.op === "has") {
           this.declare(`declare zeroext i1 @scr_ord_has(ptr, i8)`);
@@ -9235,6 +9247,19 @@ class LlEmitter {
           return { name: h, type: e.type };
         }
         const ix = this.emitExpr(e.idx!);
+        if (e.op === "isAt") {
+          const jj = B.tmp();
+          B.line(`${jj} = fptoui double ${ix.name} to i64`);
+          const j1 = B.tmp();
+          B.line(`${j1} = add i64 ${jj}, 1`);
+          const jp = B.tmp();
+          B.line(`${jp} = getelementptr inbounds i8, ptr ${lp}, i64 ${j1}`);
+          const j8 = B.tmp();
+          B.line(`${j8} = load i8, ptr ${jp}`);
+          const jc = B.tmp();
+          B.line(`${jc} = icmp eq i8 ${j8}, ${e.ord}`);
+          return { name: jc, type: e.type };
+        }
         const ii = B.tmp();
         B.line(`${ii} = fptoui double ${ix.name} to i64`);
         const i1 = B.tmp();

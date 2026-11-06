@@ -3959,9 +3959,11 @@ function validateFunction(
         if (!shape?.keyList) err(`recordOrd on shape "${e.shapeId}" without a key list`, e.loc);
         else {
           expectType(e.obj, { kind: "record", shapeId: e.shapeId }, "recordOrd receiver");
-          if (e.op === "has" && (e.ord === undefined || e.type.kind !== "bool")) err("recordOrd has needs an ordinal and a bool type", e.loc);
+          if ((e.op === "has" || e.op === "note" || e.op === "isAt") && (e.ord === undefined || e.type.kind !== "bool")) err("recordOrd has/note needs an ordinal and a bool type", e.loc);
+          if (e.op === "isAt" && e.idx === undefined) err("recordOrd isAt needs an index", e.loc);
           if (e.op === "at" && (e.idx === undefined || e.type.kind !== "f64")) err("recordOrd at needs an index and a number type", e.loc);
           if (e.op === "count" && e.type.kind !== "f64") err("recordOrd count must be a number", e.loc);
+          if (e.op === "empty" && e.type.kind !== "bool") err("recordOrd empty must be a bool", e.loc);
         }
         break;
       }

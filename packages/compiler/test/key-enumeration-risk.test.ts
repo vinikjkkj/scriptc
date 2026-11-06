@@ -134,9 +134,9 @@ console.log(Object.entries(filled).map((e) => e[0]).join(";"));
   expect(r.compiled).toBe(true);
 });
 
-test("the same record WIDENED into an unknown slot still refuses: the dyn crossing does not read the key list", () => {
-  // The control for the test above: a listed shape is exact at the surfaces that read the list, and the crossing into a dyn value is
-  // not one of them yet, so it keeps the refusal it always had.
+test("the same record WIDENED into an unknown slot is exact: the dyn crossing reads the key list", () => {
+  // The record-to-dyn walker inserts the construction-order keys and then the list, so the widened value enumerates as Node does
+  // (corpus 24432 runs it against Node on both backends).
   const r = lower(`
 interface P { a?: number; b?: number }
 const filled: P = {};
@@ -145,7 +145,23 @@ filled.a = 2;
 const wide: unknown = filled;
 console.log(Object.keys(wide as object).join(";"));
 `);
-  expect(crossingRisk(r).length).toBeGreaterThan(0);
+  expect(crossingRisk(r)).toEqual([]);
+  expect(r.compiled).toBe(true);
+});
+
+test("a spread and a rest of a record filled by assignment copy its key list", () => {
+  const r = lower(`
+interface P { a?: number; b?: number; c?: number }
+const filled: P = {};
+filled.b = 1;
+filled.a = 2;
+const copy = { ...filled };
+const { c, ...rest } = filled;
+console.log(Object.keys(copy).join(","), Object.keys(rest).join(","), String(c));
+`);
+  expect(keyRisk(r)).toEqual([]);
+  expect(crossingRisk(r)).toEqual([]);
+  expect(r.compiled).toBe(true);
 });
 
 test("ONE out-of-order literal is not a divergence: the shape takes the program's order", () => {
@@ -261,9 +277,7 @@ console.log(forward(), backward());
   expect(ok.compiled).toBe(true);
 });
 
-test("TWO fills of one shape in two orders, WIDENED, is a provable disagreement and refuses", () => {
-  // The control: the dyn crossing does not read the key list yet. The refusal names BOTH orders - the one the value is filled in
-  // and the one its shape enumerates.
+test("TWO fills of one shape in two orders, WIDENED, compile: each widened value lists its keys in the order it was filled", () => {
   const r = lower(`
 type Name = "omega" | "alpha" | "zeta";
 function forward(): unknown {
@@ -278,11 +292,9 @@ function backward(): unknown {
 }
 console.log(Object.keys(forward() as object).join(","), Object.keys(backward() as object).join(","));
 `);
-  const rows = crossingRisk(r);
-  expect(rows.length).toBe(2);
-  expect(rows[0]!.hint ?? "").toContain("omega,alpha,zeta");
-  expect(rows[0]!.hint ?? "").toContain("enumerates");
-  expect(rows[1]!.hint ?? "").toContain("zeta,alpha,omega");
+  expect(crossingRisk(r)).toEqual([]);
+  expect(keyRisk(r)).toEqual([]);
+  expect(r.compiled).toBe(true);
 });
 
 test("a fill whose key sequence is a RUN-TIME fact is exact, so it compiles with no advice", () => {

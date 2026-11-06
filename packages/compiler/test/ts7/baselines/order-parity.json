@@ -13290,6 +13290,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24432-a-listed-record-widened-spread-rest-and-assigned-keeps-node-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/24432-a-listed-record-widened-spread-rest-and-assigned-keeps-node-order.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2443-union-literal-shadow-narrowing.ts": {
    "order": [
     "<repo>/tests/corpus/2443-union-literal-shadow-narrowing.ts"
@@ -24200,12 +24206,6 @@
     }
    ]
   },
-  "<repo>/tests/diagnostics/key-order-through-a-spread-a-return-and-a-filled-record.ts": {
-   "order": [
-    "<repo>/tests/diagnostics/key-order-through-a-spread-a-return-and-a-filled-record.ts"
-   ],
-   "diags": []
-  },
   "<repo>/tests/diagnostics/maps-surface.ts": {
    "order": [
     "<repo>/tests/diagnostics/maps-surface.ts"
@@ -24752,12 +24752,6 @@
   "<repo>/tests/diagnostics/tuples.ts": {
    "order": [
     "<repo>/tests/diagnostics/tuples.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/two-fills-of-one-shape-in-two-orders.ts": {
-   "order": [
-    "<repo>/tests/diagnostics/two-fills-of-one-shape-in-two-orders.ts"
    ],
    "diags": []
   },

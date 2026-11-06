@@ -40,7 +40,7 @@ import { mangleClassRelease, mangleClassRetain, mangleClassStruct, mangleFnClosu
 import { dynMemberRows, dynStaticTable, type DynMemberClass } from "../dyn-members.js";
 import { KINDGATE_WIDE_KINDS, kindgateInstanceLane, kindgateWideLane, readKindgateDials } from "../kindgate.js";
 import { BlockBuilder } from "./blocks.js";
-import { keyIxSlotIndex, arrNewCall, elemAccess, llFieldType, ownMaskSlotIndex, releaseSym, srcProtoSlotIndex, toStrSlotIndex, traceAdapter, traceArg, vAdapters, viewSlotIndex } from "./shapes.js";
+import { keyIxSlotIndex, keyListSlotIndex, arrNewCall, elemAccess, llFieldType, ownMaskSlotIndex, releaseSym, srcProtoSlotIndex, toStrSlotIndex, traceAdapter, traceArg, vAdapters, viewSlotIndex } from "./shapes.js";
 import { LlvmUnsupportedError } from "./unsupported.js";
 import type { WalkerHost } from "./walkers.js";
 
@@ -3070,12 +3070,12 @@ export class LlDyn {
         const accProps = new Set(accShape ? shape.fields.map((f) => accessorSlotProp(f.name)?.prop).filter((p): p is string => p !== undefined) : []);
         const order = accShape ? accessorKeyOrderOf(shape) : (shape.declaredOrder ?? shape.fields.map((f) => f.name));
         const internal = new Set(internalSlotFields(shape).filter((n) => accessorSlotProp(n) === null));
-        const dynFieldsFor = (order: string[]): { name: string; type: IrType }[] => [
+        const dynFieldsFor = (order: string[], withInternal = true): { name: string; type: IrType }[] => [
           ...order.map((n) => byName.get(n) ?? (accProps.has(n) ? { name: n, type: VOID } : undefined)).filter((f): f is { name: string; type: IrType } => f !== undefined),
-          ...shape.fields.filter((f) => internal.has(f.name)),
+          ...(withInternal ? shape.fields.filter((f) => internal.has(f.name)) : []),
         ];
-        const fillFor = (ord: string[]): void => {
-        const dynFields = dynFieldsFor(ord);
+        const fillFor = (ord: string[], withInternal = true): void => {
+        const dynFields = dynFieldsFor(ord, withInternal);
         for (const f of dynFields) {
           const klen = Buffer.byteLength(f.name, "utf8");
           if (accProps.has(f.name) && !byName.has(f.name)) {
@@ -3317,8 +3317,84 @@ export class LlDyn {
         };
         // One fill per key order. A shape every construction agrees on has one (its declaredOrder); a shape with several
         // (IrRecordShape.keyOrders) inserts the keys in the order the instance was built in.
+        // A shape with a KEY LIST (IrRecordShape.keyList): the keys the construction wrote, then the ones written after it in the
+        // order they were first written (the C twin is emit-walkers.ts's fillListed).
+        const fillListed = (ord: string[]): void => {
+          if (!shape.keyList) { fillFor(ord); return; }
+          host.declare(`declare zeroext i1 @scr_ord_has(ptr, i8)`);
+          const lpp = B.tmp();
+          B.line(`${lpp} = getelementptr inbounds %${struct}, ptr %v, i64 0, i32 ${keyListSlotIndex(shape)}, i64 0 ; key list`);
+          const ordOf = (n: string): number => shape.fields.findIndex((x) => x.name === n);
+          const listable = ord.filter((n) => byName.has(n) && !internal.has(n));
+          // No key written late (the usual instance): the construction-order code alone.
+          const c0 = B.tmp();
+          B.line(`${c0} = load i8, ptr ${lpp}`);
+          const c0z = B.tmp();
+          B.line(`${c0z} = icmp eq i8 ${c0}, 0`);
+          const lPlain = B.newLabel("dkl.p");
+          const lFull = B.newLabel("dkl.f");
+          const lDone = B.newLabel("dkl.d");
+          B.condBr(c0z, lPlain, lFull);
+          B.startBlock(lPlain);
+          fillFor(ord);
+          B.br(lDone);
+          B.startBlock(lFull);
+          for (const n of ord) {
+            if (!listable.includes(n)) { fillFor([n], false); continue; }
+            const inL = B.tmp();
+            B.line(`${inL} = call zeroext i1 @scr_ord_has(ptr ${lpp}, i8 ${ordOf(n)})`);
+            const lDo = B.newLabel("dkl.s");
+            const lSk = B.newLabel("dkl.k");
+            B.condBr(inL, lSk, lDo);
+            B.startBlock(lDo);
+            fillFor([n], false);
+            B.br(lSk);
+            B.startBlock(lSk);
+          }
+          const cnt8 = B.tmp();
+          B.line(`${cnt8} = load i8, ptr ${lpp}`);
+          const cnt = B.tmp();
+          B.line(`${cnt} = zext i8 ${cnt8} to i32`);
+          const liSlot = B.slot();
+          B.entryAllocas.push(`${liSlot} = alloca i32`);
+          B.line(`store i32 1, ptr ${liSlot}`);
+          const lHead = B.newLabel("dkl.h");
+          const lBody = B.newLabel("dkl.b");
+          const lEnd = B.newLabel("dkl.e");
+          B.br(lHead);
+          B.startBlock(lHead);
+          const li = B.tmp();
+          B.line(`${li} = load i32, ptr ${liSlot}`);
+          const more = B.tmp();
+          B.line(`${more} = icmp ule i32 ${li}, ${cnt}`);
+          B.condBr(more, lBody, lEnd);
+          B.startBlock(lBody);
+          const ep = B.tmp();
+          B.line(`${ep} = getelementptr inbounds i8, ptr ${lpp}, i32 ${li}`);
+          const ord8 = B.tmp();
+          B.line(`${ord8} = load i8, ptr ${ep}`);
+          const ord32 = B.tmp();
+          B.line(`${ord32} = zext i8 ${ord8} to i32`);
+          const caseLabels = listable.map((_, i) => B.newLabel(`dkl.c${i}`));
+          const lNext = B.newLabel("dkl.n");
+          B.switchTerm(ord32, lNext, listable.map((n, i) => [ordOf(n), caseLabels[i]!] as [number, string]));
+          listable.forEach((n, i) => {
+            B.startBlock(caseLabels[i]!);
+            fillFor([n], false);
+            B.br(lNext);
+          });
+          B.startBlock(lNext);
+          const li2 = B.tmp();
+          B.line(`${li2} = add i32 ${li}, 1`);
+          B.line(`store i32 ${li2}, ptr ${liSlot}`);
+          B.br(lHead);
+          B.startBlock(lEnd);
+          if (shape.fields.some((f) => internal.has(f.name))) fillFor([], true);
+          B.br(lDone);
+          B.startBlock(lDone);
+        };
         if (!shape.keyOrders) {
-          fillFor(order);
+          fillListed(order);
         } else {
           const kp = B.tmp();
           B.line(`${kp} = getelementptr inbounds %${struct}, ptr %v, i64 0, i32 ${keyIxSlotIndex(shape)} ; key order`);
@@ -3331,7 +3407,7 @@ export class LlDyn {
           B.switchTerm(k32, arms[arms.length - 1]!, arms.slice(0, -1).map((l, i) => [i, l] as [number, string]));
           shape.keyOrders.forEach((ko, i) => {
             B.startBlock(arms[i]!);
-            fillFor(ko);
+            fillListed(ko);
             B.br(join);
           });
           B.startBlock(join);

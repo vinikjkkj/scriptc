@@ -4845,6 +4845,13 @@ void scr_ord_note(uint8_t *rec, uint8_t k);
 void scr_ord_forget(uint8_t *rec, uint8_t k);
 /* Is ordinal `k` in the order record (a key written after construction)? Used by the key-list enumerations of records. */
 bool scr_ord_has(const uint8_t *rec, uint8_t k);
+/* The same question, inlined for the C backend: an instance that wrote no key late (count 0) answers without a call. */
+static inline bool scr_ord_has_i(const uint8_t *rec, uint8_t k) {
+  for (uint8_t j = 1; j <= rec[0]; j++) {
+    if (rec[j] == k) return true;
+  }
+  return false;
+}
 
 /* The handle-type tags the checked-dynamic tree can carry. The set is deliberately the
  * HANDLE kinds whose member surfaces already have complete static

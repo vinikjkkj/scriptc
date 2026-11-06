@@ -12196,6 +12196,9 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     if (!shape.tuple && shape.declaredOrder && !shape.indexValue) {
       const spelledNames: string[] = [];
       let simpleSpelling = true;
+      // The pieces are complete (every property is a plain name or the spread), whether or not the spelling is one the index follows.
+      let listParts = true;
+      let optionalNotAlone = false;
       // The literal's pieces in written order, for the key-order index (a spread of a source that has several orders takes the
       // order of the source it copies, decided at run time): plain names, and the one spread with the shape it copies.
       const orderParts: SpreadOrderPart[] = [];
@@ -12208,11 +12211,11 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       };
       for (const p of expr.properties) {
         if (ts.isSpreadAssignment(p)) {
-          if (conditionalSpreadOf(p.expression) !== null) { simpleSpelling = false; break; }
+          if (conditionalSpreadOf(p.expression) !== null) { simpleSpelling = false; listParts = false; break; }
           const st = L.mapTypeOf(L.typeOf(p.expression));
-          if (st?.kind !== "record") { simpleSpelling = false; break; }
+          if (st?.kind !== "record") { simpleSpelling = false; listParts = false; break; }
           const ss = L.shapes.get(st.shapeId);
-          if (!ss || ss.tuple || ss.indexValue || !ss.declaredOrder) { simpleSpelling = false; break; }
+          if (!ss || ss.tuple || ss.indexValue || !ss.declaredOrder) { simpleSpelling = false; listParts = false; break; }
           orderParts.push({ spread: st.shapeId, names: ss.declaredOrder });
           orderSpreads++;
           spreadNode = p.expression;
@@ -12243,14 +12246,14 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
               q === p || (!ts.isSpreadAssignment(q) && q.name !== undefined && !ts.isComputedPropertyName(q.name) && !ts.isPrivateIdentifier(q.name) && !srcNames.has(propNameText(L, q.name))));
             if (!alone) {
               simpleSpelling = false;
-              break;
+              optionalNotAlone = true;
             }
           }
           for (const n of order) contribute(n);
           continue;
         }
-        if (!ts.isPropertyAssignment(p) && !ts.isShorthandPropertyAssignment(p)) { simpleSpelling = false; break; }
-        if (!p.name || ts.isComputedPropertyName(p.name) || ts.isPrivateIdentifier(p.name)) { simpleSpelling = false; break; }
+        if (!ts.isPropertyAssignment(p) && !ts.isShorthandPropertyAssignment(p)) { simpleSpelling = false; listParts = false; break; }
+        if (!p.name || ts.isComputedPropertyName(p.name) || ts.isPrivateIdentifier(p.name)) { simpleSpelling = false; listParts = false; break; }
         orderParts.push({ name: propNameText(L, p.name) });
         contribute(propNameText(L, p.name));
       }
@@ -12267,11 +12270,12 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       L.noteLiteralOrderEvidence(type.shapeId, locOf(expr), simpleSpelling ? esOwnKeyOrder(spelledNames) : null);
       // A literal with ONE spread of a plain read: if that source's shape turns out to have several key orders, this literal's
       // order follows the source's at run time (Lowerer.spreadLiterals, decided after the whole walk).
-      if (simpleSpelling && orderSpreads === 1 && spreadNode !== null && pureOrderRead(spreadNode)) {
+      if ((simpleSpelling || (listParts && optionalNotAlone)) && orderSpreads === 1 && spreadNode !== null && pureOrderRead(spreadNode)) {
         const srcIr = L.lowerExpr(spreadNode);
         const sp = orderParts.find((x): x is Extract<SpreadOrderPart, { spread: string }> => "spread" in x)!;
         if (srcIr.type.kind === "record" && srcIr.type.shapeId === sp.spread && (srcIr.kind === "varRef" || srcIr.kind === "recordGet" || srcIr.kind === "fieldGet")) {
-          L.noteSpreadLiteral(locOf(expr), { shapeId: type.shapeId, srcShapeId: sp.spread, srcRef: srcIr, parts: orderParts, exclude: [] });
+          L.noteSpreadLiteral(locOf(expr), { shapeId: type.shapeId, srcShapeId: sp.spread, srcRef: srcIr, parts: orderParts, exclude: [], ...(simpleSpelling ? {} : { listOnly: true as const }) });
+          if (!simpleSpelling) L.noteEnumOrderBake(sp.spread, null, "list");
           spreadRegistered = true;
         }
       }
