@@ -107,6 +107,33 @@ export interface ProtoField {
   methodWrites: ts.Expression[];
 }
 
+/** The `get` / `set` functions of an accessor descriptor object literal, or null when the literal is not purely an accessor
+ * descriptor (any other key but `enumerable` / `configurable`, a non-function value, an arrow, an async or generator
+ * function, a computed name, a getter with parameters or a setter without exactly one). */
+function accessorDescriptorOf(d: ts.Expression): { get?: ts.FunctionExpression; set?: ts.FunctionExpression } | null {
+  if (!ts.isObjectLiteralExpression(d)) return null;
+  const out: { get?: ts.FunctionExpression; set?: ts.FunctionExpression } = {};
+  for (const p of d.properties) {
+    if (ts.isSpreadAssignment(p) || p.name === undefined || ts.isComputedPropertyName(p.name)) return null;
+    const key = p.name.getText();
+    if (key === "enumerable" || key === "configurable") {
+      if (!ts.isPropertyAssignment(p)) return null;
+      continue;
+    }
+    if (key !== "get" && key !== "set") return null;
+    let fn: ts.Node;
+    if (ts.isPropertyAssignment(p)) fn = p.initializer;
+    else if (ts.isMethodDeclaration(p)) fn = p;
+    else return null;
+    if (!ts.isFunctionExpression(fn) && !ts.isMethodDeclaration(fn)) return null;
+    if (fn.asteriskToken !== undefined || fn.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword)) return null;
+    if (fn.parameters.length !== (key === "get" ? 0 : 1)) return null;
+    if (out[key] !== undefined) return null;
+    out[key] = fn as unknown as ts.FunctionExpression;
+  }
+  return out.get !== undefined || out.set !== undefined ? out : null;
+}
+
 export interface ProtoMethod {
   name: string;
   /** Never an ArrowFunction. An arrow captures `this` LEXICALLY, so
@@ -494,18 +521,18 @@ export function findProtoClasses(sf: ts.SourceFile): ProtoClass[] {
         // An enumerable prototype datum would list on for-in and is not a row of the instance.
         const enumerable = ts.isObjectLiteralExpression(a2) ? a2.properties.find((p) => ts.isPropertyAssignment(p) && p.name.getText() === "enumerable") : undefined;
         const enumTrue = enumerable !== undefined && ts.isPropertyAssignment(enumerable) && enumerable.initializer.kind !== ts.SyntaxKind.FalseKeyword;
-        // A getter-only accessor `{ get: function name() { ... } }` (denque's `length`): a read of the name answers the
-        // function's result with the receiver as `this`, so it registers as the class's `get:<name>` member.
-        const getProp = ts.isObjectLiteralExpression(a2)
-          ? a2.properties.find((p): p is ts.PropertyAssignment => ts.isPropertyAssignment(p) && p.name.getText() === "get")
-          : undefined;
-        const accessorOnly = getProp !== undefined && ts.isObjectLiteralExpression(a2) &&
-          a2.properties.every((p) => ts.isPropertyAssignment(p) && ["get", "enumerable", "configurable"].includes(p.name.getText()));
-        if (ts.isStringLiteralLike(a1) && accessorOnly && getProp !== undefined && !enumTrue &&
-            ts.isFunctionExpression(getProp.initializer) && !getProp.initializer.asteriskToken &&
-            !getProp.initializer.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword) && getProp.initializer.parameters.length === 0) {
-          if (c.methods.some((m) => m.name === `get:${a1.text}`)) c.bailouts.push(`prototype accessor '${a1.text}' defined more than once`);
-          else c.methods.push({ name: `get:${a1.text}`, fn: getProp.initializer });
+        // An accessor descriptor `{ get, set, enumerable?, configurable? }` (denque's `length`): each of `get`/`set` is a
+        // function expression or a method shorthand (never an arrow, whose `this` is lexical, never async or a generator,
+        // never computed), a getter takes no parameter and a setter exactly one. A read of the name answers the getter with
+        // the receiver as `this`; a write calls the setter. They register as the class's `get:<name>` / `set:<name>`.
+        const accessor = ts.isStringLiteralLike(a1) && !enumTrue ? accessorDescriptorOf(a2) : null;
+        if (accessor !== null && ts.isStringLiteralLike(a1)) {
+          const accName = a1.text;
+          for (const [kind, fn] of [["get", accessor.get], ["set", accessor.set]] as const) {
+            if (fn === undefined) continue;
+            if (c.methods.some((m) => m.name === `${kind}:${accName}`)) c.bailouts.push(`prototype accessor '${accName}' defined more than once`);
+            else c.methods.push({ name: `${kind}:${accName}`, fn });
+          }
         } else if (!ts.isStringLiteralLike(a1) || !isData || !keys.includes("value") || enumTrue) {
           c.bailouts.push("prototype defineProperty with a non-data or unreadable descriptor @" + n.getStart());
         } else if (!literal || valueProp === undefined) {
@@ -601,12 +628,13 @@ export function findProtoClasses(sf: ts.SourceFile): ProtoClass[] {
    * `undefined` expression node, which is not available here. So it refuses, and
    * a caller that later gains that node can lift this. Zero such fields across
    * zapo's four usable classes -- it refuses nothing there. */
+  // A constructor slot under an accessor's name: Node's `this.x = v` there calls the prototype setter (or, past a getter-only
+  // accessor, writes nothing), so the name is not a slot.
   for (const c of cands) {
-    for (const f of c.fields) {
-      if (f.conditional) {
-        c.bailouts.push(
-          `field '${f.name}' is assigned only under a branch, so instances that ` +
-          "skip it have no value written to the slot");
+    for (const m of c.methods) {
+      const acc = /^(?:get|set):(.*)$/.exec(m.name);
+      if (acc !== null && c.fields.some((f) => f.name === acc[1])) {
+        c.bailouts.push(`accessor '${acc[1]}' shares its name with a constructor slot`);
       }
     }
   }
@@ -625,7 +653,8 @@ export function findProtoClasses(sf: ts.SourceFile): ProtoClass[] {
         ) {
           const name = n.left.name.getText();
           const own = c.fields.find((f) => f.name === name);
-          if (own) { own.reassignedInMethod = true; own.methodWrites.push(n.right); }
+          if (!own && c.methods.some((x) => x.name === `set:${name}`)) { /* a write through the prototype's setter, not a slot */ }
+          else if (own) { own.reassignedInMethod = true; own.methodWrites.push(n.right); }
           else if (ctorFields.has(name)) { /* unreachable, kept for clarity */ }
           else {
             c.bailouts.push(
