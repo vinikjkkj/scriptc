@@ -185,7 +185,7 @@ const INDEX_SURFACES: ReadonlySet<string> = new Set([
   "for-in",
 ]);
 /** The enumeration surfaces that read a record's key list (IrRecordShape.keyList). */
-const LIST_SURFACES: ReadonlySet<string> = new Set(["JSON.stringify", "util.format %j"]);
+const LIST_SURFACES: ReadonlySet<string> = new Set(["console.log/util.inspect", "util.format %j", "JSON.stringify", "Object.keys", "Object.values", "Object.entries", "for-in"]);
 export const ENTRY_NAME = "%main";
 
 /** One step of the copy-reshape width relation (widthLiftPlan): how a
@@ -6281,7 +6281,12 @@ export class Lowerer {
       if (!s?.declaredOrder || s.tuple || s.indexValue || s.builtin || s.fields.length > 254) continue;
       if (s.fields.some((f) => f.name.startsWith("%"))) continue;
       if (this.requiredAbsentTargets.has(id)) continue;
+      // A baked consumer the list cannot serve (a blocked bake, or a spread that follows the index) keeps its refusal.
+      const bake = this.enumOrderBakes.get(id);
+      if (bake?.blocked || bake?.indexable.has("spread")) continue;
       s.keyList = true;
+      if (bake?.indexable.has("inspect")) rebuildRecordInspect(this, id);
+      for (const refill of bake?.refills ?? []) applyEnumRefill(this, refill, "rebuild");
       if (process.env["SCRIPTC_KEYORDER_WHY"] !== undefined) console.error(`[keyorder] ${id} KEYLIST`);
     }
   }

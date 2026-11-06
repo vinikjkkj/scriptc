@@ -10,6 +10,7 @@ import { engineFunctionApply } from "./lower-engine-fn.js";
 import { applyEnumRefill, registerEnumRefill } from "./ir-patch.js";
 import type { EnumRefill } from "./ir-patch.js";
 import type { Lowerer } from "./lowerer.js";
+import { fillWithKeyList } from "./key-list-fill.js";
 import { lowerGenMethodCall } from "./lower-generators.js";
 import { lowerStreamAsyncIteratorCall } from "./lower-stream.js";
 import { protoDataCallee } from "./lower-protodata.js";
@@ -16598,15 +16599,22 @@ function refillObjKeysHelper(Lu: unknown, r: EnumRefill): void {
       r.helper);
   }
   };
+  const fillOrderL = (ord: string[], tgt: IrStmt[]): void => {
+    if (shape.keyList) fillWithKeyList(L, shape, r.shapeId, () => ref, ord, (n, into) => fillOrder([n], into), tgt, loc, (id, nm) => {
+      const fn = L.liftedFns.find((f) => f.name === r.helper);
+      if (fn && !fn.locals.some((l) => l.id === id)) fn.locals.push({ id, name: nm, type: F64, mutable: true });
+    });
+    else fillOrder(ord, tgt);
+  };
   // One fill per key order. A shape every construction agrees on has one (its declaredOrder); a shape with several
   // (IrRecordShape.keyOrders) answers from the list of the order the instance was built in.
   if (shape.keyOrders === undefined) {
-    fillOrder(order, body);
+    fillOrderL(order, body);
   } else {
     const symless = (ko: string[]): string[] => ko.filter((n) => !(n.startsWith("__@") && !n.startsWith("__@ord@")));
     const arms = shape.keyOrders.map((ko) => {
       const t: IrStmt[] = [];
-      fillOrder(symless(ko), t);
+      fillOrderL(symless(ko), t);
       return t;
     });
     let chain: IrStmt[] = arms[arms.length - 1]!;
@@ -16817,15 +16825,22 @@ function refillObjValuesHelper(Lu: unknown, r: EnumRefill): void {
     }
   }
   };
+  const fillOrderL = (ord: string[], tgt: IrStmt[]): void => {
+    if (shape.keyList) fillWithKeyList(L, shape, r.shapeId, () => ref, ord, (n, into) => fillOrder([n], into), tgt, loc, (id, nm) => {
+      const fn = L.liftedFns.find((f) => f.name === r.helper);
+      if (fn && !fn.locals.some((l) => l.id === id)) fn.locals.push({ id, name: nm, type: F64, mutable: true });
+    });
+    else fillOrder(ord, tgt);
+  };
   // One fill per key order. A shape every construction agrees on has one (its declaredOrder); a shape with several
   // (IrRecordShape.keyOrders) answers from the list of the order the instance was built in.
   if (shape.keyOrders === undefined) {
-    fillOrder(order, body);
+    fillOrderL(order, body);
   } else {
     const symless = (ko: string[]): string[] => ko.filter((n) => !(n.startsWith("__@") && !n.startsWith("__@ord@")));
     const arms = shape.keyOrders.map((ko) => {
       const t: IrStmt[] = [];
-      fillOrder(symless(ko), t);
+      fillOrderL(symless(ko), t);
       return t;
     });
     let chain: IrStmt[] = arms[arms.length - 1]!;
