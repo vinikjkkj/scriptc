@@ -13526,6 +13526,26 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24505-object-keys-of-a-class-instance-read-as-an-index-signature-record-lists-only-own-keys.ts": {
+   "order": [
+    "<repo>/tests/corpus/24505-object-keys-of-a-class-instance-read-as-an-index-signature-record-lists-only-own-keys.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24506-a-class-instance-in-an-erased-fields-tuple-position-matches-the-field-array-arm/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/24506-a-class-instance-in-an-erased-fields-tuple-position-matches-the-field-array-arm/m.js",
+    "<repo>/tests/corpus/24506-a-class-instance-in-an-erased-fields-tuple-position-matches-the-field-array-arm/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24507-a-fields-array-takes-the-strict-array-arm-before-the-catch-all-record-array-arm/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/24507-a-fields-array-takes-the-strict-array-arm-before-the-catch-all-record-array-arm/m.js",
+    "<repo>/tests/corpus/24507-a-fields-array-takes-the-strict-array-arm-before-the-catch-all-record-array-arm/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2451-private-fields.ts": {
    "order": [
     "<repo>/tests/corpus/2451-private-fields.ts"
