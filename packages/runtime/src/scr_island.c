@@ -1685,6 +1685,10 @@ static bool isl_dynjs_assign(ScrJsval *cell, const ScrDyn *src) {
 
 static ScrStr *isl_dynjs_to_json(ScrJsval *cell) { return scr_jsval_to_json(cell); }
 
+static uintptr_t isl_dynjs_ident(ScrJsval *cell) {
+  return JS_VALUE_GET_TAG(cell->v) == JS_TAG_OBJECT ? (uintptr_t)JS_VALUE_GET_PTR(cell->v) : 0;
+}
+
 static bool isl_dynjs_is_u8(ScrJsval *cell) {
   isl_entry();
   return JS_GetTypedArrayType(cell->v) == JS_TYPED_ARRAY_UINT8;
@@ -1805,6 +1809,7 @@ static const ScrDynJsvalOps isl_dynjs_ops = {
   isl_dynjs_assign,
   isl_dynjs_to_json,
   isl_dynjs_iter_drain,
+  isl_dynjs_ident,
   isl_dynjs_is_u8,
   isl_dynjs_exit_u8,
 #ifdef SCR_SYMTAB
