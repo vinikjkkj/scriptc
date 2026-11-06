@@ -397,6 +397,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // the arg is checked below, not by signature). Text answer: the program's
   // own source text, or the native form, from the closure's entry point.
   "fn.text": { argTypes: [], result: STRING },
+  // A function-typed member read as a value: one func operand, answered at its own type (checked below).
+  "fn.unbind": { argTypes: [], result: STRING },
   "url.new": { argTypes: [STRING], result: URL_T },
   "url.newRel": { argTypes: [STRING, URL_T], result: URL_T },
   "url.protocol": { argTypes: [URL_T], result: STRING },
@@ -4759,7 +4761,7 @@ function validateFunction(
           e.fn === "writable.writeStr" || e.fn === "writable.writeU" ||
           e.fn === "writable.end" ||
           e.fn === "readable.unpipe" ||
-          e.fn === "fn.text";
+          e.fn === "fn.text" || e.fn === "fn.unbind";
         if (variadic
           ? e.args.length < sig.argTypes.length
           : e.args.length !== sig.argTypes.length) {
@@ -4770,6 +4772,13 @@ function validateFunction(
           const want = sig.argTypes[i];
           if (want) expectType(a, want, `libCall ${e.fn} arg ${i}`);
         });
+        if (e.fn === "fn.unbind") {
+          const t = e.args[0]?.type;
+          if (e.args.length !== 1 || t?.kind !== "func" || e.type.kind !== "func" || typeKey(t) !== typeKey(e.type)) {
+            err(`libCall fn.unbind: expected one function value answered at its own type, got ${t?.kind}`, e.loc);
+          }
+          break;
+        }
         if (e.fn === "fn.text" && e.args[0]?.type.kind !== "func") {
           err(`libCall fn.text: expected a function value, got ${e.args[0]?.type.kind}`, e.loc);
         }

@@ -7844,6 +7844,9 @@ bool scr_dyn_isl_is_function(const ScrDyn *d);
  * target signature (`code`) is remembered and found again by the same engine value. find: +1 or NULL; remember: retains `adapter`. */
 ScrClosure *scr_dyn_fn_adapter_find(const ScrDyn *d, const void *code);
 void scr_dyn_fn_adapter_remember(const ScrDyn *d, const void *code, ScrClosure *adapter);
+/* A function-typed record member read as a VALUE: the unbound engine function for the adapter of a bound engine method, else the
+ * closure itself (borrowed in, +1 out). */
+ScrClosure *scr_fn_unbind(ScrClosure *c);
 bool scr_dyn_isl_is_u8(const ScrDyn *d);
 ScrBytes *scr_dyn_isl_exit_u8(const ScrDyn *d);
 ScrDyn *scr_dyn_isl_fn_box(const ScrDyn *f);
