@@ -13198,6 +13198,17 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
         const evalStatic = evalStaticInfoOf(L, calleeT);
         if (evalStatic) return lowerEvalClassNew(L, expr, evalStatic);
       }
+      // A JavaScript `new K(...)` whose callee type maps to a PAIRED prototype-class (a declaration-file class paired
+      // with the constructor function the program compiles): the callee value lowers as that plain function, not as a
+      // class value, so the construction is the paired class's own (the arm below the typed ones answers it).
+      if (calleeT?.kind === "classval" && isJsSourceFile(expr.getSourceFile()) && !(expr.arguments ?? []).some((a) => ts.isSpreadElement(a))) {
+        const pairedFirst = pairedProtoClassInfoFor(L, expr);
+        if (pairedFirst !== null && pairedFirst.def.name === calleeT.className) {
+          L.noteEdge(`%${pairedFirst.def.name}.constructor`);
+          const pargs = L.completeArgs(expr.arguments ?? [], pairedFirst.ctorParams, loc, expr);
+          return { kind: "new", className: pairedFirst.def.name, args: pargs, type: { kind: "object", className: pairedFirst.def.name }, loc };
+        }
+      }
       if (calleeT?.kind === "classval") {
         let info = L.classes.get(calleeT.className);
         if (!info && ts.isPropertyAccessExpression(expr.expression) && ts.isIdentifier(expr.expression.name)) {
