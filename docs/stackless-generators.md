@@ -363,6 +363,10 @@ order.
 
 ### DECISION 6, OPEN: preserve the divergence, or fix it?
 
+> **Superseded 2026-11-06 (genmeth):** the divergence was FIXED, not preserved. `yield*` now closes the delegate in a finally,
+> hands a throw() to the delegate and re-yields a delegate's finally-yield; `generator-delegation-divergence.test.ts` is a
+> parity test against Node and corpus 24408/24409 pin the throw and finally-yield arms. Read the text below as history.
+
 One decision falls out, and it is **pre-existing rather than created by this
 front**: when generators go stackless, is the `:666` divergence preserved
 exactly, or fixed while the lowering is being rebuilt?
