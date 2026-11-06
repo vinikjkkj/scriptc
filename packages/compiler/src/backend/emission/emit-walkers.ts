@@ -2364,7 +2364,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         }
         // An ENGINE Uint8Array (a value the embedded engine built): its bytes COPY out as a fresh native u8 value, the
         // boundary's aliasing stance (scr_jsval_exit_bytes). Only the u8 view has an engine exit.
-        if (t.elem === "u8") {
+        if (t.elem === "u8" && moduleUsesEngineFn(E.mod)) {
           d.push(`  if (scr_dyn_isl_is_u8(d)) { /* an engine Uint8Array: its bytes, copied */`);
           d.push(`    ScrBytes *sc_jb = scr_dyn_isl_exit_u8(d);`);
           if (soft) d.push(`    if (sc_jb == NULL) *ok = false; /* the exception is pending */`);
@@ -3231,12 +3231,14 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         }
         // An ENGINE function (a callback the embedded engine hands a typed parameter, a method of an engine-built object) is a
         // function value too: box it so its call is the engine's, then take the ordinary adapter path below.
-        d.push(`  if (scr_dyn_isl_is_function(d)) { /* an engine function */`);
-        d.push(`    ScrDyn *sc_jf = scr_dyn_isl_fn_box(d);`);
-        d.push(`    ${cType(t)} sc_jr = ${name}(sc_jf, path);`);
-        d.push(`    scr_dyn_release(sc_jf);`);
-        d.push(`    return sc_jr;`);
-        d.push(`  }`);
+        if (moduleUsesEngineFn(E.mod)) {
+          d.push(`  if (scr_dyn_isl_is_function(d)) { /* an engine function */`);
+          d.push(`    ScrDyn *sc_jf = scr_dyn_isl_fn_box(d);`);
+          d.push(`    ${cType(t)} sc_jr = ${name}(sc_jf, path);`);
+          d.push(`    scr_dyn_release(sc_jf);`);
+          d.push(`    return sc_jr;`);
+          d.push(`  }`);
+        }
         d.push(fail(`  `, "func.kind", `d->kind != SCR_DYN_FUNC`, `NULL`));
         d.push(`  if (strcmp(scr_dyn_fn_sig(d), ${sigLit}) == 0) return scr_closure_retain(d->v.fn.clo);`);
         // A TARGET with a SPELLED rest slot (`(...args: unknown[]) => R`)

@@ -1478,7 +1478,7 @@ export class LlDyn {
         }
         // An ENGINE Uint8Array (a value the embedded engine built): its bytes COPY out as a fresh native u8 value, the
         // boundary's aliasing stance. The C twin's branch.
-        if (t.elem === "u8") {
+        if (t.elem === "u8" && host.engineModule) {
           host.declare(`declare zeroext i1 @scr_dyn_isl_is_u8(ptr)`);
           host.declare(`declare ptr @scr_dyn_isl_exit_u8(ptr)`);
           const isU = B.tmp();
@@ -2652,7 +2652,7 @@ export class LlDyn {
         // targets have no adapter: exact unwrap or the path-annotated
         // TypeError (the frontend's unwrap-only cast semantics).
         const sigLit = host.cstr(key);
-        if (!soft) {
+        if (!soft && host.engineModule) {
           // An ENGINE function (a callback the embedded engine hands a typed parameter, a method of an engine-built object) is a
           // function value too: box it so its call is the engine's, then take the ordinary adapter path below.
           host.declare(`declare zeroext i1 @scr_dyn_isl_is_function(ptr)`);
