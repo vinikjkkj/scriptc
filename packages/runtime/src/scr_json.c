@@ -2062,6 +2062,25 @@ ScrDyn *scr_dyn_pack_args(ScrDyn *const *args, size_t argc) {
   return a;
 }
 
+/* An engine FUNCTION value as a function value of the checked-dynamic tree: a SCR_DYN_FUNC box whose call is the engine's `f(...)`, the
+ * arguments crossing in through the from-dyn rules and the result back out through the dyn rules. What a typed function slot is
+ * filled from when the engine hands it a callback (`next` in a typeCast). The box keeps the engine value alive; +1. */
+static ScrDyn *scr_isl_call_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  ScrDyn *f = (ScrDyn *)scr_box_get_ref(clo->caps[0]); /* +1 */
+  ScrDyn *r = scr_dyn_jsval_ops()->call(f->v.jsval.cell, args, argc);
+  scr_dyn_release(f);
+  return r; /* +1, or NULL with the engine's exception pending */
+}
+
+bool scr_dyn_isl_is_function(const ScrDyn *d) { return d->kind == SCR_DYN_JSVAL && scr_dyn_isl_typeof_is(d, "function"); }
+
+ScrDyn *scr_dyn_isl_fn_box(const ScrDyn *f) {
+  ScrClosure *clo = scr_closure_new((void *)scr_isl_call_thunk, 1);
+  clo->caps[0] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
+  scr_box_set_ref(clo->caps[0], scr_dyn_retain((ScrDyn *)f));
+  return scr_dyn_new_func(clo, scr_isl_call_thunk, 0, "()", "anonymous");
+}
+
 ScrDyn *scr_dyn_rec_from_jsval(const ScrDyn *d, const char *const *keys, const unsigned *lens, size_t n, bool all_own) {
   ScrDyn *o = scr_dyn_new_obj();
   if (all_own) {

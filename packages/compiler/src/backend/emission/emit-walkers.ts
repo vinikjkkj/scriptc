@@ -3205,6 +3205,14 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           d.push(`  return scr_closure_retain(d->v.fn.clo);`);
           break;
         }
+        // An ENGINE function (a callback the embedded engine hands a typed parameter, a method of an engine-built object) is a
+        // function value too: box it so its call is the engine's, then take the ordinary adapter path below.
+        d.push(`  if (scr_dyn_isl_is_function(d)) { /* an engine function */`);
+        d.push(`    ScrDyn *sc_jf = scr_dyn_isl_fn_box(d);`);
+        d.push(`    ${cType(t)} sc_jr = ${name}(sc_jf, path);`);
+        d.push(`    scr_dyn_release(sc_jf);`);
+        d.push(`    return sc_jr;`);
+        d.push(`  }`);
         d.push(fail(`  `, "func.kind", `d->kind != SCR_DYN_FUNC`, `NULL`));
         d.push(`  if (strcmp(scr_dyn_fn_sig(d), ${sigLit}) == 0) return scr_closure_retain(d->v.fn.clo);`);
         // A TARGET with a SPELLED rest slot (`(...args: unknown[]) => R`)

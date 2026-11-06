@@ -2618,6 +2618,26 @@ export class LlDyn {
         // targets have no adapter: exact unwrap or the path-annotated
         // TypeError (the frontend's unwrap-only cast semantics).
         const sigLit = host.cstr(key);
+        if (!soft) {
+          // An ENGINE function (a callback the embedded engine hands a typed parameter, a method of an engine-built object) is a
+          // function value too: box it so its call is the engine's, then take the ordinary adapter path below.
+          host.declare(`declare zeroext i1 @scr_dyn_isl_is_function(ptr)`);
+          host.declare(`declare ptr @scr_dyn_isl_fn_box(ptr)`);
+          host.declare(`declare void @scr_dyn_release(ptr)`);
+          const isJf = B.tmp();
+          B.line(`${isJf} = call zeroext i1 @scr_dyn_isl_is_function(ptr %d)`);
+          const lJf = B.newLabel("dcf.jf");
+          const lNJf = B.newLabel("dcf.nj");
+          B.condBr(isJf, lJf, lNJf);
+          B.startBlock(lJf);
+          const jb = B.tmp();
+          const jr = B.tmp();
+          B.line(`${jb} = call ptr @scr_dyn_isl_fn_box(ptr %d)`);
+          B.line(`${jr} = call ptr @${name}(ptr ${jb}, ptr %path)`);
+          B.line(`call void @scr_dyn_release(ptr ${jb})`);
+          B.terminate(`ret ptr ${jr}`);
+          B.startBlock(lNJf);
+        }
         requireKind(DK.FUNC, "dcf");
         host.declare(`declare i32 @strcmp(ptr, ptr)`);
         const sig = B.tmp();
