@@ -3902,6 +3902,9 @@ function validateFunction(
         } else if (e.fields.filter((f) => !f.overflow && !f.drop && f.viewSlot !== true).length !== shape.fields.length) {
           err(`recordLit does not initialize every field of shape ${shape.id}`, e.loc);
         }
+        if (e.ordIx !== undefined && e.ordIx > 0 && !shape.keyOrders) {
+          err(`recordLit names key order ${e.ordIx} of shape ${shape.id}, which has a single order`, e.loc);
+        }
         if (e.toStr) {
           // The hidden per-instance toString slot: a zero-argument
           // string-returning closure, and only on a shape that ARMED the

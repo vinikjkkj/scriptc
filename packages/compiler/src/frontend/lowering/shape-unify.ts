@@ -483,6 +483,10 @@ function mergeable(L: Lowerer, id: string): string | null {
   if (L.requiredAbsentTargets.has(id)) return "not-mergeable-completed-literal";
   if (s.indexValue !== undefined) return "not-mergeable-index-signature";
   if (s.builtin !== undefined) return "not-mergeable-builtin-rendering";
+  // A shape the order pass gave several key orders names each instance's order in a hidden byte, and its literals store it
+  // (recordLit.ordIx). Merging it into another shape would move those literals under a struct without the byte, so it keeps
+  // its own copy like the other shapes whose identity the runtime or the order pass depends on.
+  if (s.keyOrders !== undefined) return "not-mergeable-several-key-orders";
   if (internalSlotFields(s).length > 0 || s.fields.some((f) => f.name.startsWith("%"))) {
     return "not-mergeable-internal-slot";
   }

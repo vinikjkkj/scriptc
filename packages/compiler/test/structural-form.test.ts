@@ -54,14 +54,14 @@ describe("structural form", () => {
     expect(structuralForm(rec("r8"), sC, uC)).not.toBe(structuralForm(rec("r1"), sA, uA));
   });
 
-  /* RULE 3, mechanically. ownmask / reqabsent / srcproto are written by
+  /* RULE 3, mechanically. ownmask / reqabsent / srcproto / keyOrders are written by
    * armOwnMasks, which runs after the last body is down and is replayed on
    * every build. A fragment storing them would be storing a decision another
    * library's code is allowed to change, so they must not move the form. */
   it("ignores the fields a later pass writes, and notices the fields it does not", () => {
     const plain: IrRecordShape = { id: "r0", fields: [{ name: "a", type: F64 }] };
     const [sP, uP] = lookups([plain]);
-    const [sA, uA] = lookups([{ ...plain, ownmask: true, reqabsent: true, srcproto: true }]);
+    const [sA, uA] = lookups([{ ...plain, ownmask: true, reqabsent: true, srcproto: true, keyOrders: [["a"], ["a"]] }]);
     expect(structuralForm(rec("r0"), sA, uA)).toBe(structuralForm(rec("r0"), sP, uP));
 
     // CONTROL: an IDENTITY field must move it, or the assertion above only
@@ -84,7 +84,7 @@ describe("structural form", () => {
     // field landed on, so moving one is a red test rather than a quiet
     // behaviour change.
     expect([...structuralIdentityFields.shapeExcluded].sort())
-      .toEqual(["id", "ownmask", "reqabsent", "srcproto"]);
+      .toEqual(["id", "keyOrders", "ownmask", "reqabsent", "srcproto"]);
     expect([...structuralIdentityFields.shape].sort())
       .toEqual(["builtin", "declaredOrder", "fields", "indexValue", "keyOrder", "tostr", "tuple", "view"]);
     expect([...structuralIdentityFields.unionExcluded].sort()).toEqual(["id"]);

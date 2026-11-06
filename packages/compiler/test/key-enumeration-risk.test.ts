@@ -102,21 +102,32 @@ console.log(JSON.stringify(narrow));
 
 /* ── the ORDER half: one shape, several literal orders ────────────────── */
 
-test("enumerating a literal spelled in an order its shape does not carry is refused", () => {
-  // TWO literals, spelled differently. ONE alone is not a divergence any
-  // more -- reconcileKeyOrders re-picks the shape's order to the one order
-  // the program proves -- so the refusal's remaining domain is an order that
-  // is not knowable, and this is it: neither spelling can be the shape's.
+test("a shape built in two literal orders enumerates each instance in the order it was built", () => {
+  // TWO literals, spelled differently. No one declaredOrder is right for both, so the shape keeps both (IrRecordShape.keyOrders) and
+  // each instance names its own in a hidden byte: JSON.stringify reads it, and the enumeration is exact where it used to be refused.
+  // The refusal that stood here pinned "an order that is not knowable"; with the per-instance index it is knowable.
   const r = lower(`
 interface T { readonly b: number; readonly a: number; readonly c: number }
 const t: T = { c: 3, b: 1, a: 2 };
 const u: T = { b: 4, a: 5, c: 6 };
 console.log(JSON.stringify(t), String(u.a));
 `);
-  const rows = keyRisk(r);
-  expect(rows.length).toBeGreaterThan(0);
-  expect(rows[0]!.message).toContain("declared order");
-  expect(rows[0]!.hint ?? "").toContain("c,b,a");
+  expect(keyRisk(r)).toEqual([]);
+  expect(r.compiled).toBe(true);
+});
+
+test("a record filled by assignment in an order the program writes still refuses", () => {
+  // The control for the test above: the index names the order of a LITERAL's construction. A record filled key by key after an empty
+  // literal has no literal to name its order, so the write-order walk keeps the refusal it always had (the per-instance order list
+  // that would make it exact is a separate piece of work).
+  const r = lower(`
+interface P { a?: number; b?: number }
+const filled: P = {};
+filled.b = 1;
+filled.a = 2;
+console.log(Object.entries(filled).map((e) => e[0]).join(";"));
+`);
+  expect(keyRisk(r).length).toBeGreaterThan(0);
 });
 
 test("ONE out-of-order literal is not a divergence: the shape takes the program's order", () => {
@@ -136,14 +147,15 @@ console.log(Object.keys(t).join(","));
 });
 
 test("the INTERNING half: a literal in order for its own spelling that lands on another type's shape", () => {
-  // `three` is written y,z; the shape was interned first by `two` at z,y and
-  // metadata is not identity, so `three` loses its own order.
+  // `three` is written y,z; the shape was interned first by `two` at z,y and metadata is not identity, so `three` used to lose its
+  // own order. The shape now carries both orders and each instance its own, so the enumeration is exact.
   const r = lower(`
 const two = { z: 1, y: 2 };
 const three = { y: 2, z: 1 };
 console.log(Object.keys(two).join(",") + Object.keys(three).join(","));
 `);
-  expect(keyRisk(r).length).toBeGreaterThan(0);
+  expect(keyRisk(r)).toEqual([]);
+  expect(r.compiled).toBe(true);
 });
 
 /* ── the DYN half: advice, not a refusal ──────────────────────────────── */
