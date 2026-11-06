@@ -187,6 +187,13 @@ const INDEX_SURFACES: ReadonlySet<string> = new Set([
 ]);
 /** The enumeration surfaces that read a record's key list (IrRecordShape.keyList). */
 const LIST_SURFACES: ReadonlySet<string> = new Set(["console.log/util.inspect", "util.format %j", "JSON.stringify", "Object.keys", "Object.values", "Object.entries", "for-in"]);
+/** Members the RUNTIME calls on a value by protocol, with no named site in the program: string conversion, JSON, promise
+ * adoption, iteration, the stream and emitter duck types. A class held in a field of a boxed one keeps these always. */
+const DYN_PROTOCOL_MEMBERS: ReadonlySet<string> = new Set([
+  "toString", "valueOf", "toJSON", "then", "catch", "finally", "next", "return", "throw", "constructor", "inspect",
+  "emit", "on", "once", "off", "write", "end", "close", "destroy", "read", "pipe", "resume", "pause", "dispose", "asyncDispose",
+]);
+
 export const ENTRY_NAME = "%main";
 
 /** One step of the copy-reshape width relation (widthLiftPlan): how a
@@ -2503,6 +2510,14 @@ export class Lowerer {
    * (see DynPins): the classes that crossed into a dyn box, and the value
    * types written through `dyn.keySet`. */
   readonly dynBoxedNames = new Set<string>();
+  /** Member names that untyped (checked-dynamic) code in the program uses on a receiver: a method call, a read, a destructured
+   * key, an `in` / hasOwn / write with a literal key. `dynMemberAny` is set once any untyped site names a member by a computed
+   * key (or code runs in the embedded engine), after which every name counts. */
+  readonly dynMemberNames = new Set<string>();
+  dynMemberAny = false;
+  /** Classes held in a field of a dyn-boxed class (not themselves boxed): their methods are roots only by NAME. */
+  readonly fieldHeldClasses = new Set<string>();
+  private readonly fieldHeldRooted = new Set<string>();
   /** The inline listener functions registered through the TYPED emitter path whose parameters are not all
    * dyn (emitter-twin.ts): the candidates for an erased twin if a dynamic emit can reach the emitter. */
   readonly twinCandidates: ts.Expression[] = [];
@@ -5376,64 +5391,11 @@ export class Lowerer {
     this.dynBoxedNames.add(className);
     const info = this.classes.get(className);
     if (!info) return;
-    const mark = (c: ClassInfo): void => {
-      // The unit names, taken from the SAME two sources discover()
-      // registers units from — a third spelling of "the class's methods"
-      // is how the two drift.
-      for (const { mName } of this.classMethodMembers(c)) {
-        this.noteEdge(`%${c.def.name}.${mName}`);
-        // The method's interned unbound thunk: the value a dyn member read of it answers
-        // (emit-walkers' method row `value`), the same closure the static `x.m` read names,
-        // so `o[k] === x.m` holds. Built here, so the thunk exists whenever the row does.
-        const found = this.findMethodOn(c, mName);
-        if (found === null || found.sig.abstract === true) continue;
-        if (found.sig.params.some((q) => q.mode !== "required" && q.mode !== "omittable")) continue;
-        unboundMethodThunk(this, c, mName, found, { file: c.decl?.getSourceFile().fileName ?? "%dynbox", start: 0, end: 0 }, true);
-      }
-      for (const sh of c.shadowFields ?? []) this.noteEdge(`%${c.def.name}.${sh}`);
-      for (const [mName] of this.protoClassBodies.get(c.def.name) ?? []) {
-        this.noteEdge(`%${c.def.name}.${mName}`);
-      }
-      // Implicit-any methods have no `%C.m` unit: the box answers them
-      // through their default instances. Compiling them HERE is what notes
-      // the edges their bodies carry, and the marker tells the emit pass
-      // which classes to list them on (IrClassDef.dynMethods).
-      if (c.genericMethods !== undefined) {
-        this.noteEdge(`%${c.def.name}.%dynbox`);
-        dynBoxedMethodInstances(this, c);
-      }
-      // The write half of the box (dynSetFn): its own marker, because the
-      // implicit-any list above is only for classes with such methods.
-      this.noteEdge(`%${c.def.name}.%dynset`);
-      // The STATIC side (dynStaticFns): `x.constructor` and a class value
-      // passed to untyped code reach the class's statics and its constructor
-      // by name, at run time, through the emitted statics table -- no call
-      // site the discovery pass can see, so each is a reachability root.
-      this.noteEdge(`%${c.def.name}.%dynclass`);
-      // (a runtime-provided class has no constructor body to lower)
-      if (c.decl !== null && c.def.runtime !== true) this.noteEdge(`%${c.def.name}.constructor`);
-      for (const n of c.staticMethods?.keys() ?? []) this.noteEdge(`%${c.def.name}.static:${n}`);
-      for (const n of c.staticAccessors?.keys() ?? []) this.noteEdge(`%${c.def.name}.static:${n}`);
-    };
+    const mark = (c: ClassInfo): void => this.markClassForDyn(c, () => true);
     for (let a: ClassInfo | null | undefined = info; a; a = a.base) mark(a);
-    // The member table's FIELD rows hand the field's value out as a dyn value: an instance held in a field of the
-    // class (`this.q = new Q()`) crosses the same way the box itself did, so its own methods are roots too.
-    {
-      const held = new Set<string>();
-      const seenTypes = new Set<string>();
-      const fieldsOf = (c: ClassInfo): void => {
-        for (const f of c.def.fields) this.classesCrossingIntoDyn(f.type, held, seenTypes);
-      };
-      for (let a: ClassInfo | null | undefined = info; a; a = a.base) fieldsOf(a);
-      const belowFields = (c: ClassInfo): void => {
-        for (const s of c.subclasses) {
-          fieldsOf(s);
-          belowFields(s);
-        }
-      };
-      belowFields(info);
-      for (const h of held) if (!this.dynBoxedNames.has(h)) this.noteDynBoxedClass(h);
-    }
+    // The member table's FIELD rows hand the field's value out as a dyn value: an instance held in a field of the class
+    // (`this.q = new Q()`) crosses the same way, and untyped code can call its methods by NAME.
+    for (const h of this.heldClassesOf(info)) if (!this.dynBoxedNames.has(h)) this.noteFieldHeldClass(h);
     // An evaluation's box answers `new` and `instanceof` through the INSTANCE class.
     if (info.evalStaticOf !== undefined) this.noteDynBoxedClass(info.evalStaticOf.def.name);
     const below = (c: ClassInfo): void => {
@@ -5443,6 +5405,112 @@ export class Lowerer {
       }
     };
     below(info);
+  }
+
+  /** The dyn-box roots of ONE class: its methods (the ones `methodOk` admits), shadow fields, the write half, the static
+   * side and the constructor. A boxed class admits every method; a class only held in a field of a boxed one admits the
+   * names untyped code can reach. */
+  private markClassForDyn(c: ClassInfo, methodOk: (mName: string) => boolean): void {
+    // The unit names, taken from the SAME two sources discover()
+    // registers units from — a third spelling of "the class's methods"
+    // is how the two drift.
+    for (const { mName } of this.classMethodMembers(c)) {
+      if (!methodOk(mName)) continue;
+      this.noteEdge(`%${c.def.name}.${mName}`);
+      // The method's interned unbound thunk: the value a dyn member read of it answers
+      // (emit-walkers' method row `value`), the same closure the static `x.m` read names,
+      // so `o[k] === x.m` holds. Built here, so the thunk exists whenever the row does.
+      const found = this.findMethodOn(c, mName);
+      if (found === null || found.sig.abstract === true) continue;
+      if (found.sig.params.some((q) => q.mode !== "required" && q.mode !== "omittable")) continue;
+      unboundMethodThunk(this, c, mName, found, { file: c.decl?.getSourceFile().fileName ?? "%dynbox", start: 0, end: 0 }, true);
+    }
+    for (const sh of c.shadowFields ?? []) this.noteEdge(`%${c.def.name}.${sh}`);
+    for (const [mName] of this.protoClassBodies.get(c.def.name) ?? []) {
+      if (!methodOk(mName)) continue;
+      this.noteEdge(`%${c.def.name}.${mName}`);
+    }
+    // Implicit-any methods have no `%C.m` unit: the box answers them
+    // through their default instances. Compiling them HERE is what notes
+    // the edges their bodies carry, and the marker tells the emit pass
+    // which classes to list them on (IrClassDef.dynMethods).
+    if (c.genericMethods !== undefined) {
+      this.noteEdge(`%${c.def.name}.%dynbox`);
+      dynBoxedMethodInstances(this, c, methodOk);
+    }
+    // The write half of the box (dynSetFn): its own marker, because the
+    // implicit-any list above is only for classes with such methods.
+    this.noteEdge(`%${c.def.name}.%dynset`);
+    // The STATIC side (dynStaticFns): `x.constructor` and a class value
+    // passed to untyped code reach the class's statics and its constructor
+    // by name, at run time, through the emitted statics table -- no call
+    // site the discovery pass can see, so each is a reachability root.
+    this.noteEdge(`%${c.def.name}.%dynclass`);
+    // (a runtime-provided class has no constructor body to lower)
+    if (c.decl !== null && c.def.runtime !== true) this.noteEdge(`%${c.def.name}.constructor`);
+    for (const n of c.staticMethods?.keys() ?? []) this.noteEdge(`%${c.def.name}.static:${n}`);
+    for (const n of c.staticAccessors?.keys() ?? []) this.noteEdge(`%${c.def.name}.static:${n}`);
+  
+  }
+
+  /** The classes held in the fields of `info` (its chain and subclasses), as classes that cross into dyn with it. */
+  private heldClassesOf(info: ClassInfo): Set<string> {
+    const held = new Set<string>();
+    const seenTypes = new Set<string>();
+    const fieldsOf = (c: ClassInfo): void => {
+      for (const f of c.def.fields) this.classesCrossingIntoDyn(f.type, held, seenTypes);
+    };
+    for (let a: ClassInfo | null | undefined = info; a; a = a.base) fieldsOf(a);
+    const belowFields = (c: ClassInfo): void => {
+      for (const s of c.subclasses) {
+        fieldsOf(s);
+        belowFields(s);
+      }
+    };
+    belowFields(info);
+    return held;
+  }
+
+  /** Is a method of a class that is only HELD in a boxed class's field reachable? Yes when untyped code names it, when the
+   * runtime calls it by protocol (toString, then, ...), when its name is not a plain identifier (a symbol-keyed member), or
+   * once any untyped site uses a computed member key. */
+  private fieldHeldMethodOk(mName: string): boolean {
+    const base = mName.slice(mName.lastIndexOf(":") + 1);
+    return this.dynMemberAny || this.dynMemberNames.has(base) || DYN_PROTOCOL_MEMBERS.has(base) || !/^[A-Za-z_$][\w$]*$/.test(base);
+  }
+
+  /** Root a class held in a field of a boxed class by name (and its chain, subclasses and the classes it holds). */
+  noteFieldHeldClass(className: string): void {
+    if (!this.onEdge || this.dynBoxedNames.has(className)) return;
+    const info = this.classes.get(className);
+    if (!info) return;
+    this.fieldHeldClasses.add(className);
+    const ok = (c: ClassInfo) => (mName: string): boolean => {
+      if (!this.fieldHeldMethodOk(mName)) return false;
+      const key = `${c.def.name}.${mName}`;
+      if (this.fieldHeldRooted.has(key)) return false;
+      this.fieldHeldRooted.add(key);
+      return true;
+    };
+    for (let a: ClassInfo | null | undefined = info; a; a = a.base) this.markClassForDyn(a, ok(a));
+    const below = (c: ClassInfo): void => {
+      for (const s of c.subclasses) {
+        this.markClassForDyn(s, ok(s));
+        below(s);
+      }
+    };
+    below(info);
+    for (const h of this.heldClassesOf(info)) if (!this.dynBoxedNames.has(h) && !this.fieldHeldClasses.has(h)) this.noteFieldHeldClass(h);
+  }
+
+  /** Untyped code started naming members it did not name before: root the matching methods of the field-held classes. */
+  private refreshFieldHeld(): void {
+    for (const h of [...this.fieldHeldClasses]) {
+      const info = this.classes.get(h);
+      if (!info) continue;
+      this.fieldHeldClasses.delete(h);
+      this.noteFieldHeldClass(h);
+    }
   }
 
   /** The dyn-box edges one lowered body carries, fired off the produced
@@ -5464,6 +5532,14 @@ export class Lowerer {
     if (!widthPairsSettled) this.discoveredFns.push(fn);
     const found = new Set<string>();
     const seen = new Set<string>();
+    const namesBefore = this.dynMemberNames.size;
+    const anyBefore = this.dynMemberAny;
+    const noteKey = (k: unknown): void => {
+      const key = k as { kind?: string; value?: unknown } | undefined;
+      if (key !== undefined && key.kind === "strLit" && typeof key.value === "string") this.dynMemberNames.add(key.value);
+      else if (key !== undefined && key.kind === "numLit") return;
+      else this.dynMemberAny = true;
+    };
     const walk = (n: unknown): void => {
       if (n === null || typeof n !== "object") return;
       if (Array.isArray(n)) {
@@ -5471,6 +5547,32 @@ export class Lowerer {
         return;
       }
       const o = n as { kind?: unknown; value?: { type?: IrType } };
+      // The member names untyped code uses (method calls, reads, destructured keys, `in`, hasOwn, writes): the roots of a class
+      // that is only HELD in a field of a boxed class. A computed key, or code in the embedded engine, names them all.
+      if (o.kind === "dynInvoke") {
+        const inv = o as unknown as { method: string; methodKey?: unknown };
+        if (inv.methodKey !== undefined) noteKey(inv.methodKey);
+        else this.dynMemberNames.add(inv.method);
+      } else if (o.kind === "dynKeyGet") {
+        noteKey((o as unknown as { key: unknown }).key);
+      } else if (o.kind === "dynHasKey") {
+        this.dynMemberNames.add((o as unknown as { key: string }).key);
+      } else if (o.kind === "dynDestrCheck") {
+        const fp = (o as unknown as { firstProp?: string }).firstProp;
+        if (fp !== undefined) this.dynMemberNames.add(fp);
+      } else if (o.kind === "libCall") {
+        const fnName = (o as unknown as { fn: string }).fn;
+        const largs = (o as unknown as { args: unknown[] }).args;
+        if (fnName === "dyn.keySet" || fnName === "dyn.keySetSloppy" || fnName === "dyn.keyDelete" || fnName === "dyn.hasKey" || fnName === "dyn.hasOwn") {
+          noteKey(largs[1]);
+        } else if (
+          fnName.startsWith("island.") || fnName.startsWith("dyn.reflect") || fnName.startsWith("dyn.defineProp") ||
+          fnName === "dyn.expandoBind" || fnName === "dyn.assign" || fnName === "dyn.assignAll" || fnName === "dyn.cloneOwn" ||
+          fnName === "dyn.proxyNew" || fnName === "dyn.proxyRevocable" || fnName.startsWith("dyn.objCreate")
+        ) {
+          this.dynMemberAny = true;
+        }
+      }
       if (o.kind === "dynFrom" && o.value?.type !== undefined) {
         this.classesCrossingIntoDyn(o.value.type, found, seen);
         if (structViewTargetKeys.size > 0) this.noteStructViewCrossing(o.value.type, new Set());
@@ -5502,6 +5604,7 @@ export class Lowerer {
     };
     walk(fn);
     for (const c of found) this.noteDynBoxedClass(c);
+    if (this.fieldHeldClasses.size > 0 && (this.dynMemberNames.size !== namesBefore || this.dynMemberAny !== anyBefore)) this.refreshFieldHeld();
     this.noteViewArrayMutations(fn);
   }
 
