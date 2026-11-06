@@ -28,7 +28,7 @@ import { moduleUsesDestroyDyn, moduleUsesTimersPromisesValue, moduleUsesHttpDest
   moduleUsesAsym, moduleUsesRsaPubEnc, moduleUsesCipher, moduleUsesZlib, moduleUsesZlibStream, moduleUsesTextMb, type IrLibSection, type IrModule, type IrRecordShape, type IrType, type SrcLoc , moduleBoxesProcStream, procStreamLibWriteFence} from "./ir/nodes.js";
 import { serializeModule } from "./ir/serialize.js";
 import { validateModule } from "./ir/validate.js";
-import { canonicalBuiltinModule, checkPreflight, isNodeTypesPath, loadProgram, locOf, requiresOf, resolveNpmImport, type LoadResult } from "./frontend/program.js";
+import { canonicalBuiltinModule, checkPreflight, isNodeTypesPath, loadProgram, locOf, requiresOf, resolveNpmImport, type LoadResult, type PinSets } from "./frontend/program.js";
 import { npmStaticIneligibleReason, npmStaticOffenders, npmStaticPackageOfPath } from "./frontend/npm-static.js";
 import { provenanceSources } from "./frontend/provenance-registry.js";
 import { resolveBareModule } from "./frontend/resolve.js";
@@ -408,6 +408,8 @@ function packagesNamedByDiag(message: string, optedIn: ReadonlySet<string>): Set
  * static-or-refuse teaching, and the detection closes over the opted-in
  * packages' own bare edges (no island exists to serve a dep from). */
 function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" | "lib"): Frontend {
+  // The pins every load of this compile decides the same way (loadProgram opts.pinCache).
+  const pinCache = new Map<string, PinSets>();
   const statuses: NpmStaticStatus[] = [];
   const npmSites = new Map<string, SrcLoc>();
   const judged = new Set<string>();
@@ -446,7 +448,7 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
   // island with a note, never a failed gate. Explicit opt-ins degrade
   // exactly like auto's — "the user asked for these packages" buys the
   // attempt, not a broken build.
-  let load = loadProgram(entryPath, { npmStatic: requested });
+  let load = loadProgram(entryPath, { pinCache, npmStatic: requested });
   let preflight = checkPreflight(load);
   // Library mode's fixpoint: the opted-in packages' files joined the
   // program just now, and THEIR bare edges (import statements and
@@ -461,7 +463,7 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
       if (grown.length === 0) break;
       requested = [...requested, ...grown];
       load.dispose();
-      load = loadProgram(entryPath, { npmStatic: requested });
+      load = loadProgram(entryPath, { pinCache, npmStatic: requested });
       preflight = checkPreflight(load);
     }
   }
@@ -502,7 +504,7 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
       statuses.push({ package: p, status: "fallback", detail: reasons.get(p)! });
     }
     load.dispose();
-    load = loadProgram(entryPath, { npmStatic: effective });
+    load = loadProgram(entryPath, { pinCache, npmStatic: effective });
     preflight = checkPreflight(load);
   }
   // The last resort, ALL modes: an opt-in can change the PROGRAM's OWN
@@ -537,18 +539,18 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
     // import sites), then reload with the survivors; interaction effects
     // that still fail drop everything left.
     for (const p of [...effective]) {
-      const probe = loadProgram(entryPath, { npmStatic: [p] });
+      const probe = loadProgram(entryPath, { pinCache, npmStatic: [p] });
       const probeDiags = checkPreflight(probe);
       probe.dispose();
       if (probeDiags.some((d) => d.code === "SC0001")) dropWithNote(p);
     }
     load.dispose();
-    load = loadProgram(entryPath, { npmStatic: effective });
+    load = loadProgram(entryPath, { pinCache, npmStatic: effective });
     preflight = checkPreflight(load);
     if (preflight.some((d) => d.code === "SC0001") && effective.size > 0) {
       for (const p of [...effective]) dropWithNote(p);
       load.dispose();
-      load = loadProgram(entryPath, { npmStatic: effective });
+      load = loadProgram(entryPath, { pinCache, npmStatic: effective });
       preflight = checkPreflight(load);
     }
   }
@@ -580,7 +582,7 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
         else {
           let folded: (LoadResult & { dispose: () => void }) | null = null;
           try {
-            folded = loadProgram(entryPath, { npmStatic: effective, textEdits: first.pinReload, twinEdits: mapped });
+            folded = loadProgram(entryPath, { pinCache, npmStatic: effective, textEdits: first.pinReload, twinEdits: mapped });
             if (checkPreflight(folded).length > 0) why("not taken: the folded program does not check");
             else {
               const both = lowerToIr(folded.program, folded.entry, folded.moduleOrder, {
@@ -622,7 +624,7 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
       // (its first pass is final: noPinReload). The first load stays the
       // one preflight, the contract and the identity hashes read.
       pinnedLoad?.dispose();
-      pinnedLoad = loadProgram(entryPath, { npmStatic: effective, textEdits: first.pinReload });
+      pinnedLoad = loadProgram(entryPath, { pinCache, npmStatic: effective, textEdits: first.pinReload });
       checkPreflight(pinnedLoad);
       const second = lowerToIr(pinnedLoad.program, pinnedLoad.entry, pinnedLoad.moduleOrder, {
         ...opts,
@@ -718,7 +720,7 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
       if (process.env["SCRIPTC_TWIN_WHY"] !== undefined) process.stderr.write(`[twin] reload: ${[...edits.values()].reduce((n, l) => n + l.filter((e) => e.text.startsWith("/*@sctwin")).length, 0)} listener(s)\n`);
       let twinLoad: (LoadResult & { dispose: () => void }) | null = null;
       try {
-        twinLoad = loadProgram(entryPath, { npmStatic: effective, ...(done.pins !== undefined ? { textEdits: done.pins } : {}), twinEdits: edits });
+        twinLoad = loadProgram(entryPath, { pinCache, npmStatic: effective, ...(done.pins !== undefined ? { textEdits: done.pins } : {}), twinEdits: edits });
         if (checkPreflight(twinLoad).length > 0) return keepOf();
         const again = lowerToIr(twinLoad.program, twinLoad.entry, twinLoad.moduleOrder, {
           ...opts,

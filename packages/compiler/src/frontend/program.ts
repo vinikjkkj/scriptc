@@ -336,6 +336,12 @@ function loadProgram7(host: ts.Ts7Host, entryPath: string): LoadResult & { dispo
   };
 }
 
+/** What the unedited program decides to pin: the seed pins and the retype pins (the empty-collection pins ride the retype list). */
+export interface PinSets {
+  readonly seed: ReadonlyMap<string, readonly SeedPin[]>;
+  readonly retype: ReadonlyMap<string, readonly RetypePin[]>;
+}
+
 /** The pipeline surface: ONE tsgo program serves preflight AND the
  * lowering. The caller runs checkPreflight, hands program/entry/
  * moduleOrder straight to lowerToIr, and MUST dispose() when done — the
@@ -354,6 +360,10 @@ export function loadProgram(
     /** The twin reload's insertions (LowerResult.twinReload), applied after every other edit: offsets
      * are into the text the previous lowering's checker saw (emitter-twin.ts). */
     twinEdits?: ReadonlyMap<string, readonly TwinEdit[]>;
+    /** The pins one compile's loads share. The seed, retype and empty-collection pins are decided on the UNEDITED program, which every
+     * reload of the same compile (pin, twin, folded) loads again and decides the same way; with this map the first load keeps them and
+     * the later ones go straight to the load that applies them. One map per compile, never across compiles (the files may change). */
+    pinCache?: Map<string, PinSets>;
   },
 ): LoadResult & { dispose: () => void } {
   // Absolute from the start: tsgo's world is absolute-path-keyed (the CLI
@@ -501,6 +511,24 @@ export function loadProgram(
     const host = new ts.Ts7Host({ cwd: dirname(entryPath), fsShadow });
     return { host, load: loadProgram7(host, entryPath) };
   };
+  // The pins this compile already decided for this program (same entry, same npm-static set), when a reload follows anyway.
+  const cacheKey = JSON.stringify([entryPath, opts?.npmStatic === undefined ? [] : [...opts.npmStatic].sort()]);
+  const cachedPins = opts?.pinCache?.get(cacheKey);
+  if (cachedPins !== undefined && (cachedPins.seed.size > 0 || cachedPins.retype.size > 0 || textEdits !== undefined || twinEdits !== undefined)) {
+    const { host: h2, load: l2 } = open(
+      cachedPins.seed.size > 0 ? cachedPins.seed : null,
+      cachedPins.retype.size > 0 ? cachedPins.retype : null,
+      true,
+    );
+    setTsUntypedWeakAdmission(programHasTsUntypedWeakNew(l2.program));
+    return {
+      ...l2,
+      dispose: () => {
+        l2.disposeAll();
+        h2.close();
+      },
+    };
+  }
   let { host, load } = open(null);
   // THE RETYPE PIN (retype-pin.ts) is decided on the same checked program and
   // applied by the same second load as the seed pin.
@@ -530,6 +558,7 @@ export function loadProgram(
         for (const pin of list) process.stderr.write(`[seedpin] ${pin.why} at ${file}:${pin.start}\n`);
       }
     }
+    opts?.pinCache?.set(cacheKey, { seed: pins, retype: retypeKeyed });
     if (pins.size > 0 || retypeKeyed.size > 0 || textEdits !== undefined || twinEdits !== undefined) {
       load.disposeAll();
       host.close();
