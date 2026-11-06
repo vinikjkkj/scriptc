@@ -2458,7 +2458,20 @@ static bool dyn_bytes_is_buffer(const ScrBytes *b) {
  * discriminator, and it survives both boxing constructors (ref retains,
  * copy preserves). Never throws: DATAVIEW has exactly one producer, so
  * anything not stamped with it is not a DataView. */
+static ScrDyn *scr_u8_proto; /* %Uint8Array.prototype% (defined with the constructor, below) */
+
 bool scr_dyn_is_u8array(const ScrDyn *d) {
+  if (d != NULL && d->kind == SCR_DYN_OBJ && scr_u8_proto != NULL) {
+    /* An object whose [[Prototype]] chain reaches %Uint8Array.prototype% (Buffer.prototype, Object.create(Uint8Array.prototype)):
+     * an instance of Uint8Array by the chain, as OrdinaryHasInstance reads it. */
+    const ScrDyn *p = scr_dyn_ext(d)->proto;
+    for (size_t steps = 0; p != NULL && steps < SCR_PROTO_MAX_DEPTH; steps++) {
+      if (p == scr_u8_proto) return true;
+      if (p->kind != SCR_DYN_OBJ) break;
+      p = scr_dyn_ext(p)->proto;
+    }
+    return false;
+  }
   return d != NULL && d->kind == SCR_DYN_BYTES && d->v.bytes != NULL &&
          d->v.bytes->elem == SCR_BYTES_U8 && d->v.bytes->flavor != SCR_BF_DATAVIEW;
 }
