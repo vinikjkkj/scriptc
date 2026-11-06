@@ -479,6 +479,11 @@ if (LOWER_FP_ON) {
  * constructor, and a second static one would be a different object from
  * the one every engine-side typed array is linked to. */
 /** The SC_ERR kind of each builtin error class (runtime scr_runtime.h SCR_ERR_*). */
+/** The typed-array constructors (and DataView) `instanceof` tests on an untyped value, by the element the runtime tests (IrBytesElem; "dataview" for DataView). Uint8Array has its own test. */
+const TYPED_ARRAY_CTOR_ELEM: Readonly<Record<string, string>> = {
+  Int8Array: "i8", Uint8ClampedArray: "u8c", Int16Array: "i16", Uint16Array: "u16", Int32Array: "i32", Uint32Array: "u32",
+  Float16Array: "f16", Float32Array: "f32", Float64Array: "f64", BigInt64Array: "i64", BigUint64Array: "u64", DataView: "dataview",
+};
 const JS_ERROR_CLASS_KIND: Readonly<Record<string, number>> = {
   Error: 0, TypeError: 1, RangeError: 2, SyntaxError: 3, ReferenceError: 5, AggregateError: 6,
 };
@@ -22602,6 +22607,16 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
         const left = L.lowerExpr(expr.left);
         if (left.type.kind === "dyn") {
           return { kind: "dynTest", test: "arraybuffer", value: left, type: BOOL, loc };
+        }
+      }
+      // `u instanceof Int8Array | Uint16Array | ... | DataView` on an `unknown` value: the element-aware sibling of the Uint8Array test.
+      if (ts.isIdentifier(expr.right) && !L.caughtLocalOf(expr.left)) {
+        const typedElem = TYPED_ARRAY_CTOR_ELEM[expr.right.text];
+        if (typedElem !== undefined && L.isStdlibGlobal(expr.right, expr.right.text)) {
+          const left = L.lowerExpr(expr.left);
+          if (left.type.kind === "dyn") {
+            return { kind: "dynTest", test: "typedarray", className: typedElem, value: left, type: BOOL, loc };
+          }
         }
       }
       // `x instanceof RegExp` over a union with a regex arm (the
