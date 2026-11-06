@@ -43,6 +43,7 @@ import { pureReemittable } from "./lower-exprs.js";
 import { bindingNeverReassigned, classInstanceToString, dynRestPack } from "./lower-calls.js";
 import { lowerPromisifiedDiffieHellmanValue } from "./lower-builtins.js";
 import { refuseCodecValue } from "../codec-shadow.js";
+import { fillWithKeyList } from "./key-list-fill.js";
 
 /* ── IR construction shorthand ───────────────────────────────────────── */
 
@@ -932,8 +933,14 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc, rebuild = false): str
       // One entry list per key order. A shape every construction agrees on has one (its declaredOrder); a shape with several
       // (IrRecordShape.keyOrders) prints the list of the order the instance was built in.
       const keyOrdersNow = shape.keyOrders;
+      const entriesForL = (ord: string[], tgt: IrStmt[]): void => {
+        if (shape.keyList) fillWithKeyList(L, shape, t.shapeId, v, ord, (n, into) => entriesFor([n], into), tgt, loc, (id, nm) => {
+          if (!locals.some((l) => l.id === id)) locals.push({ id, name: nm, type: F64, mutable: true });
+        });
+        else entriesFor(ord, tgt);
+      };
       if (keyOrdersNow === undefined) {
-        entriesFor(order, body);
+        entriesForL(order, body);
       } else {
         const arms = keyOrdersNow.map((ko) => {
           const koSet = new Set(ko);
@@ -943,7 +950,7 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc, rebuild = false): str
             ...shape.fields.map((f) => f.name).filter((n) => isSymbolFieldName(n) && !koSet.has(n)),
           ];
           const stmts: IrStmt[] = [];
-          entriesFor(ordered, stmts);
+          entriesForL(ordered, stmts);
           return stmts;
         });
         let chain: IrStmt[] = arms[arms.length - 1]!;
