@@ -2621,7 +2621,15 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         if (e.type.kind !== "record") throw new Error("emitter bug: recordLit of non-record type");
         const rec = E.newTemp(e.type, `${mangleRecordNew(e.type.shapeId)}()`);
         // A shape with several key orders: this literal names the one it was written in (0 = declaredOrder, the zeroed default).
-        if (e.ordIx) E.line(`${rec.name}->${KEYIX_MEMBER} = ${e.ordIx}; /* key order ${e.ordIx} */`);
+        if (e.ordIxExpr) {
+          E.frames.push([]);
+          try {
+            const oi = E.emitExpr(e.ordIxExpr);
+            E.line(`${rec.name}->${KEYIX_MEMBER} = (uint8_t)${oi.name}; /* key order of the source */`);
+          } finally {
+            E.releaseFrame(E.frames.pop()!);
+          }
+        } else if (e.ordIx) E.line(`${rec.name}->${KEYIX_MEMBER} = ${e.ordIx}; /* key order ${e.ordIx} */`);
         // THE COMPLETED literal (an `as` cast over a literal missing a
         // REQUIRED member) establishes the instance's own-key mask. Byte 0
         // goes first, before any field runs: a field initializer can throw,

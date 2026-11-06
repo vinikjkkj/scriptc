@@ -101,6 +101,16 @@ function nativeModulePath(L: Lowerer, fileName: string): string {
   return L.targetPlatform === "win32" ? fileName.split("/").join("\\") : fileName;
 }
 
+/** A piece of an object literal's key order: a plain name, or the spread of a record whose shape enumerates `names`. */
+export type SpreadOrderPart = { name: string } | { spread: string; names: string[] };
+/** A spread operand that can be read twice for free: an identifier or a property chain off one. */
+function pureOrderRead(e: ts.Expression): boolean {
+  let x: ts.Expression = e;
+  while (ts.isParenthesizedExpression(x) || ts.isNonNullExpression(x)) x = x.expression;
+  if (ts.isIdentifier(x) || x.kind === ts.SyntaxKind.ThisKeyword) return true;
+  return ts.isPropertyAccessExpression(x) ? pureOrderRead(x.expression) : false;
+}
+
 export function fnOwnRoutableKey(key: string): boolean {
   return !FN_OWN_SKIPPED_KEYS.has(key);
 }
@@ -12186,6 +12196,13 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     if (!shape.tuple && shape.declaredOrder && !shape.indexValue) {
       const spelledNames: string[] = [];
       let simpleSpelling = true;
+      // The literal's pieces in written order, for the key-order index (a spread of a source that has several orders takes the
+      // order of the source it copies, decided at run time): plain names, and the one spread with the shape it copies.
+      const orderParts: SpreadOrderPart[] = [];
+      let orderSpreads = 0;
+      let spreadNode: ts.Expression | null = null;
+      const spreadSrcShapes: string[] = [];
+      let spreadRegistered = false;
       const contribute = (n: string): void => {
         if (!spelledNames.includes(n)) spelledNames.push(n);
       };
@@ -12196,6 +12213,9 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
           if (st?.kind !== "record") { simpleSpelling = false; break; }
           const ss = L.shapes.get(st.shapeId);
           if (!ss || ss.tuple || ss.indexValue || !ss.declaredOrder) { simpleSpelling = false; break; }
+          orderParts.push({ spread: st.shapeId, names: ss.declaredOrder });
+          orderSpreads++;
+          spreadNode = p.expression;
           // AN OPTIONAL SOURCE MEMBER HAS NO STATIC POSITION. Spread copies
           // the source's OWN keys, and an absent optional contributes
           // nothing at all - so the sequence this loop builds is an upper
@@ -12209,17 +12229,29 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
           // The spelling this literal reports is the spread SOURCE's order
           // read here, so re-picking that source later would make the
           // evidence stale.
-          L.noteEnumOrderBake(st.shapeId, null);
+          // Taken as an indexable bake: a literal that registers below follows its source's key-order index at run time;
+          // one that cannot register blocks the source after the loop, exactly as this call did before.
+          L.noteEnumOrderBake(st.shapeId, null, "spread");
+          spreadSrcShapes.push(st.shapeId);
           const order = ss.declaredOrder;
           if (ss.fields.some((f) => order.includes(f.name) && isUndefinedArmedUnion(f.type, (u) => L.unions.get(u)))) {
-            simpleSpelling = false;
-            break;
+            // An optional source member has no static position when something else could define the same name first or
+            // last. With no other property naming any of the source's keys, the source contributes exactly its PRESENT
+            // keys in its own order, which the key-order index reproduces (the presence mask says which are present).
+            const srcNames = new Set(ss.fields.map((f) => f.name));
+            const alone = expr.properties.every((q) =>
+              q === p || (!ts.isSpreadAssignment(q) && q.name !== undefined && !ts.isComputedPropertyName(q.name) && !ts.isPrivateIdentifier(q.name) && !srcNames.has(propNameText(L, q.name))));
+            if (!alone) {
+              simpleSpelling = false;
+              break;
+            }
           }
           for (const n of order) contribute(n);
           continue;
         }
         if (!ts.isPropertyAssignment(p) && !ts.isShorthandPropertyAssignment(p)) { simpleSpelling = false; break; }
         if (!p.name || ts.isComputedPropertyName(p.name) || ts.isPrivateIdentifier(p.name)) { simpleSpelling = false; break; }
+        orderParts.push({ name: propNameText(L, p.name) });
         contribute(propNameText(L, p.name));
       }
       // The spelling is also what starts the WRITE-ORDER tracking for a
@@ -12233,6 +12265,17 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       // program builds this shape in an order nobody can name, and it
       // BLOCKS the shape (null spelling).
       L.noteLiteralOrderEvidence(type.shapeId, locOf(expr), simpleSpelling ? esOwnKeyOrder(spelledNames) : null);
+      // A literal with ONE spread of a plain read: if that source's shape turns out to have several key orders, this literal's
+      // order follows the source's at run time (Lowerer.spreadLiterals, decided after the whole walk).
+      if (simpleSpelling && orderSpreads === 1 && spreadNode !== null && pureOrderRead(spreadNode)) {
+        const srcIr = L.lowerExpr(spreadNode);
+        const sp = orderParts.find((x): x is Extract<SpreadOrderPart, { spread: string }> => "spread" in x)!;
+        if (srcIr.type.kind === "record" && srcIr.type.shapeId === sp.spread && (srcIr.kind === "varRef" || srcIr.kind === "recordGet" || srcIr.kind === "fieldGet")) {
+          L.noteSpreadLiteral(locOf(expr), { shapeId: type.shapeId, srcShapeId: sp.spread, srcRef: srcIr, parts: orderParts, exclude: [] });
+          spreadRegistered = true;
+        }
+      }
+      if (!spreadRegistered) for (const sid of spreadSrcShapes) L.noteEnumOrderBake(sid, null);
       if (simpleSpelling && spelledNames.length >= 2) {
         const spelled = esOwnKeyOrder(spelledNames);
         const want = shape.declaredOrder.filter((n) => spelled.includes(n));

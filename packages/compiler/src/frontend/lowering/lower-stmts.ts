@@ -41,7 +41,7 @@ import { cjsExportsBagOf, cjsMemberOnlyInFunctions, ctorObjectGlobalValue, webCr
 import { detachedThisWriteFirst, hoistDetachedWriteRhs, keyedAccessOverIndexSignature, localTakesWidenedKeyedRead, narrowBridgeUnion, seqExprSafeStmt, unionFieldReadAt, unitArmsOf, cjsExportAccessorWriteStmt, cjsExportSetterWrite } from "./lower-exprs.js";
 import { abstractPropertyDeclOf, aliasTypeofNarrows, checkedJsNumber, compoundCombine, unionNumericCompoundRead, writeTypeOf, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, isMatchSliceType, lowerGroupsProjection, matchResultNamedGroupsOf, probeLower, pureReemittable, symbolFieldInfo, tonumWhy } from "./lower-exprs.js";
 import { UNSUPPORTED, checkerPanicDiag, isCheckerPanic, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
-import { isUnitOnlyBoundTsType, isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
+import { esOwnKeyOrder, isUnitOnlyBoundTsType, isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
 import { canonicalBuiltinModule, isRelativeSpecifier } from "../shared.js";
 import { probeNodeRequireRefusal } from "../npm.js";
 import { lowerAbsentGlobal, lowerAbsentLocal } from "./lower-absent.js";
@@ -3176,6 +3176,19 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
       const read: IrExpr = { kind: "recordGet", obj: srcRef(), shapeId: srcType.shapeId, field: srcField.name, type: srcField.type, loc };
       return { name: f.name, value: L.coerceInto(el, read, f.type) };
     });
+    // The packed keys come out in the SOURCE's own-key order (CopyDataProperties). That is the source shape's declared order,
+    // and its per-instance key-order index when it has several: the rest literal follows the source instance's index at run time
+    // (Lowerer.spreadLiterals), so the source's order is read here like a spread's.
+    const srcFull = L.shapes.get(srcType.shapeId);
+    const srcRead = srcRef();
+    if (srcFull?.declaredOrder && !srcFull.tuple && (srcRead.kind === "varRef" || srcRead.kind === "recordGet" || srcRead.kind === "fieldGet")) {
+      const spelled = srcFull.declaredOrder.filter((n) => restShape.fields.some((f) => f.name === n));
+      if (spelled.length === restShape.fields.length) {
+        L.noteEnumOrderBake(srcType.shapeId, null, "spread");
+        L.noteLiteralOrderEvidence(restT.shapeId, loc, esOwnKeyOrder(spelled));
+        L.noteSpreadLiteral(loc, { shapeId: restT.shapeId, srcShapeId: srcType.shapeId, srcRef: srcRead, parts: [{ spread: srcType.shapeId, names: spelled }], exclude: [] });
+      }
+    }
     return { kind: "recordLit", fields, type: restT, loc };
   }
 

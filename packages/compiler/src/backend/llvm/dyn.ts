@@ -40,7 +40,7 @@ import { mangleClassRelease, mangleClassRetain, mangleClassStruct, mangleFnClosu
 import { dynMemberRows, dynStaticTable, type DynMemberClass } from "../dyn-members.js";
 import { KINDGATE_WIDE_KINDS, kindgateInstanceLane, kindgateWideLane, readKindgateDials } from "../kindgate.js";
 import { BlockBuilder } from "./blocks.js";
-import { arrNewCall, elemAccess, llFieldType, ownMaskSlotIndex, releaseSym, srcProtoSlotIndex, toStrSlotIndex, traceAdapter, traceArg, vAdapters, viewSlotIndex } from "./shapes.js";
+import { keyIxSlotIndex, arrNewCall, elemAccess, llFieldType, ownMaskSlotIndex, releaseSym, srcProtoSlotIndex, toStrSlotIndex, traceAdapter, traceArg, vAdapters, viewSlotIndex } from "./shapes.js";
 import { LlvmUnsupportedError } from "./unsupported.js";
 import type { WalkerHost } from "./walkers.js";
 
@@ -1813,6 +1813,23 @@ export class LlDyn {
           requireKind(DK.OBJ, "dcr");
         }
         B.line(`%r0 = call ptr @${mangleRecordNew(t.shapeId)}()`);
+        // A shape with several key orders: the dynamic object's own keys say which one this instance has (emit-walkers.ts's row).
+        if (shape.keyOrders) {
+          const flat = shape.keyOrders.flatMap((o) => o);
+          const tbl = `@sc_ko_${t.shapeId}`;
+          const nm = flat.map((n) => host.cstr(n));
+          host.declare(`declare i64 @scr_dyn_keyorder_index(ptr, ptr, ptr, ptr, i64)`);
+          host.dynMapOpsGlobal(`sc_ko_${t.shapeId}_n`, `[${flat.length} x ptr] [ ${nm.map((x) => `ptr ${x}`).join(", ")} ]`);
+          host.dynMapOpsGlobal(`sc_ko_${t.shapeId}_l`, `[${flat.length} x i64] [ ${flat.map((n) => `i64 ${Buffer.byteLength(n, "utf8")}`).join(", ")} ]`);
+          host.dynMapOpsGlobal(`sc_ko_${t.shapeId}_c`, `[${shape.keyOrders.length} x i64] [ ${shape.keyOrders.map((o) => `i64 ${o.length}`).join(", ")} ]`);
+          const ki = B.tmp();
+          B.line(`${ki} = call i64 @scr_dyn_keyorder_index(ptr ${dRef ?? "%d"}, ptr ${tbl}_n, ptr ${tbl}_l, ptr ${tbl}_c, i64 ${shape.keyOrders.length})`);
+          const k8 = B.tmp();
+          B.line(`${k8} = trunc i64 ${ki} to i8`);
+          const kp = B.tmp();
+          B.line(`${kp} = getelementptr inbounds %${struct}, ptr %r0, i64 0, i32 ${keyIxSlotIndex(shape)} ; key order`);
+          B.line(`store i8 ${k8}, ptr ${kp}`);
+        }
         // VIEW GRANT: the record is a VIEW of the object it was read off - emit-walkers.ts's row. The ORIGINAL
         // value (%d), not the projection the instance lane reads the members from.
         if (shape.view === true) {
@@ -3053,10 +3070,12 @@ export class LlDyn {
         const accProps = new Set(accShape ? shape.fields.map((f) => accessorSlotProp(f.name)?.prop).filter((p): p is string => p !== undefined) : []);
         const order = accShape ? accessorKeyOrderOf(shape) : (shape.declaredOrder ?? shape.fields.map((f) => f.name));
         const internal = new Set(internalSlotFields(shape).filter((n) => accessorSlotProp(n) === null));
-        const dynFields: { name: string; type: IrType }[] = [
+        const dynFieldsFor = (order: string[]): { name: string; type: IrType }[] => [
           ...order.map((n) => byName.get(n) ?? (accProps.has(n) ? { name: n, type: VOID } : undefined)).filter((f): f is { name: string; type: IrType } => f !== undefined),
           ...shape.fields.filter((f) => internal.has(f.name)),
         ];
+        const fillFor = (ord: string[]): void => {
+        const dynFields = dynFieldsFor(ord);
         for (const f of dynFields) {
           const klen = Buffer.byteLength(f.name, "utf8");
           if (accProps.has(f.name) && !byName.has(f.name)) {
@@ -3294,6 +3313,28 @@ export class LlDyn {
             B.br(liveEnd);
             B.startBlock(liveEnd);
           }
+        }
+        };
+        // One fill per key order. A shape every construction agrees on has one (its declaredOrder); a shape with several
+        // (IrRecordShape.keyOrders) inserts the keys in the order the instance was built in.
+        if (!shape.keyOrders) {
+          fillFor(order);
+        } else {
+          const kp = B.tmp();
+          B.line(`${kp} = getelementptr inbounds %${struct}, ptr %v, i64 0, i32 ${keyIxSlotIndex(shape)} ; key order`);
+          const k8 = B.tmp();
+          B.line(`${k8} = load i8, ptr ${kp}`);
+          const k32 = B.tmp();
+          B.line(`${k32} = zext i8 ${k8} to i32`);
+          const arms = shape.keyOrders.map((_, i) => B.newLabel(`dko${i}`));
+          const join = B.newLabel("dko.j");
+          B.switchTerm(k32, arms[arms.length - 1]!, arms.slice(0, -1).map((l, i) => [i, l] as [number, string]));
+          shape.keyOrders.forEach((ko, i) => {
+            B.startBlock(arms[i]!);
+            fillFor(ko);
+            B.br(join);
+          });
+          B.startBlock(join);
         }
         if (shape.indexValue) {
           const iv = shape.indexValue;

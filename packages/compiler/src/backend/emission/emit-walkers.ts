@@ -2649,6 +2649,18 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           d.push(fail(`  `, "record.kind", `d->kind != SCR_DYN_OBJ`, `NULL`));
         }
         d.push(`  ${cDecl(t, "r")} = ${mangleRecordNew(t.shapeId)}();`);
+        // A shape with several key orders: the dynamic object's own keys say which one this instance has (a cast has no
+        // literal to name it). An object that follows none of them gets the declared order, as before.
+        if (shape.keyOrders) {
+          const tbl = `sc_ko_${t.shapeId}`;
+          const flat = shape.keyOrders.flatMap((o) => o);
+          E.walkerDefs.push(
+            `static const char *const ${tbl}_n[] = { ${flat.map((n) => cStringLiteral(Buffer.from(n, "utf8"))).join(", ")} };`,
+            `static const size_t ${tbl}_l[] = { ${flat.map((n) => Buffer.byteLength(n, "utf8")).join(", ")} };`,
+            `static const size_t ${tbl}_c[] = { ${shape.keyOrders.map((o) => o.length).join(", ")} };`,
+          );
+          d.push(`  r->${KEYIX_MEMBER} = (uint8_t)scr_dyn_keyorder_index((ScrDyn *)d, ${tbl}_n, ${tbl}_l, ${tbl}_c, ${shape.keyOrders.length});`);
+        }
         // VIEW GRANT: the record is a VIEW of the object it was read off (the declared members below are its
         // snapshot): the ORIGINAL value, not the projection the instance lane reads the members from.
         if (shape.view === true) {
@@ -3566,10 +3578,12 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           const accProps = new Set(accShape ? shape.fields.map((f) => accessorSlotProp(f.name)?.prop).filter((p): p is string => p !== undefined) : []);
           const order = accShape ? accessorKeyOrderOf(shape) : (shape.declaredOrder ?? shape.fields.map((f) => f.name));
           const internal = new Set(internalSlotFields(shape).filter((n) => accessorSlotProp(n) === null));
-          const dynFields: { name: string; type: IrType }[] = [
+          const dynFieldsFor = (order: string[]): { name: string; type: IrType }[] => [
             ...order.map((n) => byName.get(n) ?? (accProps.has(n) ? { name: n, type: VOID } : undefined)).filter((f): f is { name: string; type: IrType } => f !== undefined),
             ...shape.fields.filter((f) => internal.has(f.name)),
           ];
+          const fillFor = (ord: string[]): void => {
+          const dynFields = dynFieldsFor(ord);
           for (const f of dynFields) {
             const keyLit = cStringLiteral(Buffer.from(f.name, "utf8"));
             const keyLen = Buffer.byteLength(f.name, "utf8");
@@ -3751,6 +3765,20 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
               );
               d.push(`  }`);
             }
+          }
+          };
+          // One fill per key order. A shape every construction agrees on has one (its declaredOrder); a shape with several
+          // (IrRecordShape.keyOrders) inserts the keys in the order the instance was built in.
+          if (!shape.keyOrders) {
+            fillFor(order);
+          } else {
+            d.push(`  switch (v->${KEYIX_MEMBER}) {`);
+            shape.keyOrders.forEach((ko, i) => {
+              d.push(`  ${i === shape.keyOrders!.length - 1 ? "default" : `case ${i}`}: {`);
+              fillFor(ko);
+              d.push(`    break;`, `  }`);
+            });
+            d.push(`  }`);
           }
         }
         if (shape.indexValue) {

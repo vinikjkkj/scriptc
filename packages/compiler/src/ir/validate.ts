@@ -3905,6 +3905,11 @@ function validateFunction(
         if (e.ordIx !== undefined && e.ordIx > 0 && !shape.keyOrders) {
           err(`recordLit names key order ${e.ordIx} of shape ${shape.id}, which has a single order`, e.loc);
         }
+        if (e.ordIxExpr) {
+          checkExpr(e.ordIxExpr);
+          if (e.ordIxExpr.type.kind !== "f64") err(`recordLit ordIxExpr must be a number, got ${e.ordIxExpr.type.kind}`, e.loc);
+          if (!shape.keyOrders) err(`recordLit names a key order of shape ${shape.id}, which has a single order`, e.loc);
+        }
         if (e.toStr) {
           // The hidden per-instance toString slot: a zero-argument
           // string-returning closure, and only on a shape that ARMED the

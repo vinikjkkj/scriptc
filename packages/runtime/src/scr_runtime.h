@@ -6126,6 +6126,8 @@ size_t *scr_dyn_obj_key_order(const ScrDyn *v);
  * member nodes. null/undefined receivers throw Node's catchable
  * TypeError. */
 ScrDyn *scr_dyn_obj_keys(const ScrDyn *v);
+/* Which of a record shape's key orders the object's own keys follow (see scr_json.c). */
+size_t scr_dyn_keyorder_index(const ScrDyn *obj, const char *const *names, const size_t *lens, const size_t *counts, size_t k);
 /* for-in's own key list: scr_dyn_obj_keys, plus the EventEmitter prototype's
  * enumerable keys for an EventEmitter-rooted instance (see scr_dyn_class.c). */
 ScrDyn *scr_dyn_forin_keys(const ScrDyn *v);

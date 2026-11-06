@@ -13883,6 +13883,61 @@ ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode) {
 
 ScrDyn *scr_dyn_obj_keys(const ScrDyn *v) { return scr_dyn_objwalk(v, SCR_OBJWALK_KEYS); }
 
+/* WHICH of a record shape's known key orders a dynamic object's own keys follow (IrRecordShape.keyOrders). `names`/`lens`
+ * hold every order's names back to back (`counts[i]` of them for order i); the object's own keys, restricted to the names
+ * the shape declares, are compared with each order restricted to the names the object really has. The first order that
+ * agrees wins; an object that follows none of them answers order 0, the shape's declared one. */
+size_t scr_dyn_keyorder_index(const ScrDyn *obj, const char *const *names, const size_t *lens, const size_t *counts, size_t k) {
+  if (obj == NULL || obj->kind != SCR_DYN_OBJ || k < 2) return 0;
+  ScrDyn *keys = scr_dyn_obj_keys(obj);
+  if (keys == NULL) return 0;
+  size_t found = 0;
+  bool hit = false;
+  size_t base = 0;
+  for (size_t i = 0; i < k && !hit; i++) {
+    size_t nk = keys->v.arr.len;
+    size_t oi = 0; /* walks order i */
+    size_t ki = 0; /* walks the object's keys */
+    bool same = true;
+    for (;;) {
+      /* the next object key the order declares */
+      while (ki < nk) {
+        ScrDyn *kd = keys->v.arr.items[ki];
+        bool declared = false;
+        if (kd != NULL && kd->kind == SCR_DYN_STR) {
+          for (size_t j = 0; j < counts[i] && !declared; j++) {
+            declared = lens[base + j] == kd->v.str->len && memcmp(names[base + j], kd->v.str->data, lens[base + j]) == 0;
+          }
+        }
+        if (declared) break;
+        ki++;
+      }
+      /* the next order name the object has */
+      while (oi < counts[i]) {
+        bool has = false;
+        for (size_t q = 0; q < nk && !has; q++) {
+          ScrDyn *kd = keys->v.arr.items[q];
+          has = kd != NULL && kd->kind == SCR_DYN_STR && kd->v.str->len == lens[base + oi] &&
+                memcmp(names[base + oi], kd->v.str->data, lens[base + oi]) == 0;
+        }
+        if (has) break;
+        oi++;
+      }
+      bool kend = ki >= nk;
+      bool oend = oi >= counts[i];
+      if (kend || oend) { same = kend && oend; break; }
+      ScrDyn *kd = keys->v.arr.items[ki];
+      if (!(lens[base + oi] == kd->v.str->len && memcmp(names[base + oi], kd->v.str->data, lens[base + oi]) == 0)) { same = false; break; }
+      ki++;
+      oi++;
+    }
+    if (same) { found = i; hit = true; }
+    base += counts[i];
+  }
+  scr_dyn_release(keys);
+  return found;
+}
+
 /* The members a for-in visits: Object.keys' own enumerable keys, then the
  * inherited enumerable ones a native handle's prototype contributes (a Stats
  * box's accessors and predicates, which the install hook lists). */

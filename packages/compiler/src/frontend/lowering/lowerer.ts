@@ -173,7 +173,8 @@ import { pairedProtoInstanceType } from "./proto-class-consume.js";
 
 /** Entry function name. '%' cannot appear in a TS identifier, so a user
  * function can never collide with it (mangling is injective per prefix). */
-/** The enumeration surfaces that read a record's per-instance key-order index (IrRecordShape.keyOrders). */
+/** The enumeration surfaces that read a record's per-instance key-order index (IrRecordShape.keyOrders). A widening to
+ * dyn reads it too (the record-to-dyn walkers switch on it), so a crossing is waived the same way. */
 const INDEX_SURFACES: ReadonlySet<string> = new Set([
   "console.log/util.inspect",
   "util.format %j",
@@ -5485,6 +5486,24 @@ export class Lowerer {
    * both such, and both keep compiling because of this. And only the
    * ENUMERATION is refused: reading a narrowed record's declared fields is
    * untouched, which is what tests/corpus/2026 has always relied on. */
+  /** Object literals holding one spread of a plain read, by location: when the SOURCE's shape has several key orders the
+   * literal's order is the source instance's, so the post-lowering order pass derives the literal's orders from it. */
+  readonly spreadLiterals = new Map<string, {
+    shapeId: string;
+    srcShapeId: string;
+    srcRef: IrExpr;
+    parts: ({ name: string } | { spread: string; names: string[] })[];
+    exclude: string[];
+  }>();
+  noteSpreadLiteral(loc: SrcLoc, e: {
+    shapeId: string;
+    srcShapeId: string;
+    srcRef: IrExpr;
+    parts: ({ name: string } | { spread: string; names: string[] })[];
+    exclude: string[];
+  }): void {
+    this.spreadLiterals.set(this.keyRiskLocKey(loc), e);
+  }
   /** The "order" risks of literals whose shape now carries several key orders (IrRecordShape.keyOrders). A risk object in
    * this set is waived at the enumeration surfaces that read the index and still refuses at the ones that do not. */
   readonly indexedOrderRisks = new WeakSet<object>();
@@ -6325,12 +6344,12 @@ export class Lowerer {
 
     const rewritten: string[] = [];
     const indexed = new Map<string, Map<string, number>>();
-    const tryIndex = (shapeId: string, ev: { spellings: Set<string>; blocked: boolean; locs: Map<string, string[]> }): boolean => {
+    const tryIndex = (shapeId: string, ev: { spellings: Set<string>; blocked: boolean; locs: Map<string, string[]> }, extra: string[][] = []): boolean => {
       if (ev.blocked) { if (why) console.error(`[keyorder] ${shapeId} NO-INDEX #0`); return false; }
       const shape = this.shapes.get(shapeId);
       if (!shape?.declaredOrder || shape.tuple || shape.indexValue || shape.builtin) { if (why) console.error(`[keyorder] ${shapeId} NO-INDEX #1 ${JSON.stringify({d: shape?.declaredOrder, t: shape?.tuple, iv: shape?.indexValue !== undefined, b: shape?.builtin !== undefined, v: shape?.view})}`); return false; }
       if (shape.fields.some((f) => f.name.startsWith("%"))) { if (why) console.error(`[keyorder] ${shapeId} NO-INDEX #2`); return false; }
-      if (castShapes.has(shapeId)) { if (why) console.error(`[keyorder] ${shapeId} NO-INDEX #3`); return false; }
+      // A cast that materialises this shape names the instance's order from the dynamic object's own keys (the builders do).
       const bake = this.enumOrderBakes.get(shapeId);
       if (bake !== undefined && bake.blocked) { if (why) console.error(`[keyorder] ${shapeId} NO-INDEX #4`); return false; }
       if (presenceShapes.has(shapeId) || fillTargets.has(shapeId)) { if (why) console.error(`[keyorder] ${shapeId} NO-INDEX #5`); return false; }
@@ -6354,6 +6373,10 @@ export class Lowerer {
           ix = orders.length - 1;
         }
         at.set(lk, ix);
+      }
+      for (const full of extra) {
+        if (full.length !== declared.length) return false;
+        if (!orders.some((o) => o.join(",") === full.join(","))) orders.push(full);
       }
       if (orders.length < 2 || orders.length > 255) { if (why) console.error(`[keyorder] ${shapeId} NO-INDEX #10`); return false; }
       shape.keyOrders = orders;
@@ -6439,6 +6462,42 @@ export class Lowerer {
       if (!fillTargets.has(shapeId)) continue;
       decide(shapeId, ev);
     }
+    // A literal that spreads a source with several key orders takes the order of the source instance it copies, so its own
+    // shape gets one order per source order, and the literal names its order from the source's index at run time.
+    const spreadChains = new Map<string, number[]>();
+    for (const [lk, sl] of this.spreadLiterals) {
+      const S = this.shapes.get(sl.srcShapeId);
+      const T = this.shapes.get(sl.shapeId);
+      if (!S?.keyOrders || !T?.declaredOrder) continue;
+      const tNames = new Set(T.fields.map((f) => f.name));
+      const variants = S.keyOrders.map((so) => {
+        const spelled: string[] = [];
+        const add = (n: string): void => {
+          if (tNames.has(n) && !spelled.includes(n)) spelled.push(n);
+        };
+        for (const part of sl.parts) {
+          if ("name" in part) add(part.name);
+          else for (const n of so) add(n);
+        }
+        return esOwnKeyOrder([...spelled, ...T.declaredOrder!.filter((n) => !spelled.includes(n))]);
+      });
+      if (T.keyOrders === undefined) {
+        const ev = this.shapeOrderEvidence.get(sl.shapeId);
+        if (ev === undefined || !tryIndex(sl.shapeId, ev, variants)) continue;
+      }
+      const orders = T.keyOrders!;
+      const ixs = variants.map((v) => {
+        let ix = orders.findIndex((o) => o.join(",") === v.join(","));
+        if (ix < 0 && orders.length < 255) {
+          orders.push(v);
+          ix = orders.length - 1;
+        }
+        return ix;
+      });
+      if (ixs.some((x) => x < 0)) continue;
+      if (!indexed.has(sl.shapeId)) indexed.set(sl.shapeId, new Map());
+      spreadChains.set(lk, ixs);
+    }
     // Each literal of an indexed shape names the order it was written in.
     if (indexed.size > 0) {
       const seenLit = new Set<object>();
@@ -6452,8 +6511,27 @@ export class Lowerer {
           const loc = o["loc"] as SrcLoc | undefined;
           const at = t?.kind === "record" && t.shapeId !== undefined ? indexed.get(t.shapeId) : undefined;
           if (at !== undefined && loc) {
-            const ix = at.get(this.keyRiskLocKey(loc));
-            if (ix !== undefined && ix > 0) o["ordIx"] = ix;
+            const lk = this.keyRiskLocKey(loc);
+            const chain = spreadChains.get(lk);
+            const sl = this.spreadLiterals.get(lk);
+            if (chain !== undefined && sl !== undefined) {
+              // The index of the SOURCE instance maps to this shape's order index: a chain of tests on the source's index.
+              let e: IrExpr = { kind: "numLit", value: chain[chain.length - 1]!, type: F64, loc };
+              for (let i = chain.length - 2; i >= 0; i--) {
+                e = {
+                  kind: "ternary",
+                  cond: { kind: "recordKeyOrderIs", obj: JSON.parse(JSON.stringify(sl.srcRef)) as IrExpr, shapeId: sl.srcShapeId, ix: i, type: BOOL, loc },
+                  then: { kind: "numLit", value: chain[i]!, type: F64, loc },
+                  else_: e,
+                  type: F64,
+                  loc,
+                };
+              }
+              if (chain.some((x) => x !== 0)) o["ordIxExpr"] = e;
+            } else {
+              const ix = at.get(lk);
+              if (ix !== undefined && ix > 0) o["ordIx"] = ix;
+            }
           }
         }
         for (const v of Object.values(o)) mark(v);
@@ -6547,7 +6625,7 @@ export class Lowerer {
             (risk ? `RISK-${risk.why} ${risk.detail}` : "ok"),
         );
       }
-      if (risk && risk.why === "order" && !u.crossing && this.indexedOrderRisks.has(risk) && INDEX_SURFACES.has(u.surface)) {
+      if (risk && risk.why === "order" && this.indexedOrderRisks.has(risk) && (u.crossing || INDEX_SURFACES.has(u.surface))) {
         continue;
       }
       if (!risk) {

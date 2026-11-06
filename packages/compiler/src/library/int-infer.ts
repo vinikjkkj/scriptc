@@ -1680,6 +1680,7 @@ class FnAnalyzer {
         // slot, but it IS a real expression, and both emitters store it
         // LAST -- so it is evaluated last here too.
         if (e.toStr) this.evalExpr(e.toStr, env);
+        if (e.ordIxExpr) this.evalExpr(e.ordIxExpr, env);
         return { ...TOP };
       }
       case "recordGet": {

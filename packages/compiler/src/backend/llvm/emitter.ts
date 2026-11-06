@@ -8966,7 +8966,21 @@ class LlEmitter {
         B.line(`${rec} = call ptr @${mangleRecordNew(shapeId)}()`);
         const out = this.own({ name: rec, type: e.type });
         // A shape with several key orders: this literal names the one it was written in (0 = declaredOrder, the zeroed default).
-        if (e.ordIx) {
+        if (e.ordIxExpr) {
+          const ksh = this.recordsById.get(shapeId);
+          if (!ksh) throw new Error(`llvm emitter bug: recordLit ordIxExpr of unknown shape ${shapeId}`);
+          this.frames.push([]);
+          try {
+            const oi = this.emitExpr(e.ordIxExpr);
+            const oi8 = B.tmp();
+            B.line(`${oi8} = fptoui double ${oi.name} to i8`);
+            const kp = B.tmp();
+            B.line(`${kp} = getelementptr inbounds %${mangleRecordStruct(shapeId)}, ptr ${rec}, i64 0, i32 ${keyIxSlotIndex(ksh)} ; key order of the source`);
+            B.line(`store i8 ${oi8}, ptr ${kp}`);
+          } finally {
+            this.releaseFrame(this.frames.pop()!);
+          }
+        } else if (e.ordIx) {
           const ksh = this.recordsById.get(shapeId);
           if (!ksh) throw new Error(`llvm emitter bug: recordLit ordIx of unknown shape ${shapeId}`);
           const kp = B.tmp();
