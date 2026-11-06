@@ -12923,6 +12923,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24154-errors-boxed-in-a-loop-keep-identity-for-the-ones-still-held.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24154-errors-boxed-in-a-loop-keep-identity-for-the-ones-still-held.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2414-dowhile-continue-kill.ts": {
    "order": [
     "<repo>/tests/corpus/2414-dowhile-continue-kill.ts"
