@@ -2388,6 +2388,12 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
             const gv = jsGlobalFnValueOf(L, expr, timerGlobal, loc, sym ?? undefined);
             if (gv !== null) return gv;
           }
+          // The Buffer and Uint8Array CLASSES as values in a TypeScript source (`value.constructor === Uint8Array`, `const C: any = Buffer`):
+          // the function objects the runtime owns, so identity, `.name` and `.prototype` are Node's (a JavaScript source takes them above).
+          if (ts.isIdentifier(expr) && (timerGlobal === "Buffer" || timerGlobal === "Uint8Array")) {
+            const cv = ctorObjectGlobalValue(L, timerGlobal, loc);
+            if (cv !== null) return cv;
+          }
           L.noLowering(expr.text, expr, globalHints[expr.text], sym ?? undefined);
         }
       }
