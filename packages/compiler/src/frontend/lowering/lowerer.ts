@@ -7403,6 +7403,17 @@ export class Lowerer {
       }
     }
     const t = this.checker.getTypeAtLocation(node);
+    // In a program whose Object.entries/values elements are `never` (neverIsDynProgram), `never` means "a dyn value the checker could not
+    // type" ONLY where it is the declared type (a destructured element). A reference the checker NARROWED to never (`typeof x === "string"`
+    // over a type with no string arm) is a dead branch, and the local still holds its declared type: answer that, so the dead code
+    // lowers against the value it actually has instead of a dyn it does not.
+    if ((t.flags & ts.TypeFlags.Never) !== 0 && ts.isIdentifier(node) && this.neverIsDynProgram()) {
+      const sym = this.checker.getSymbolAtLocation(node);
+      if (sym !== undefined) {
+        const declared = this.checker.getTypeOfSymbol(sym);
+        if ((declared.flags & ts.TypeFlags.Never) === 0) return declared;
+      }
+    }
     // A call of a throw-only JS method (or a const bound to one) is typed by
     // the method's declaration file, not the `void` TypeScript infers from the
     // JS body (see declaredReturnType): the value a subclass override returns
