@@ -1257,6 +1257,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "process.depFlagGet": { argTypes: [F64], result: DYN },
   "process.depFlagSet": { argTypes: [F64, DYN], result: VOID },
   "process.noDeprecationIsTrue": { argTypes: [], result: BOOL },
+  "process.nextTickDyn": { argTypes: [DYN, DYN], result: VOID },
   "process.cwd": { argTypes: [], result: STRING },
   "process.pid": { argTypes: [], result: F64 },
   "dyn.this": { argTypes: [], result: DYN },

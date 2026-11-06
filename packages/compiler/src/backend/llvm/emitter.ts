@@ -427,6 +427,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "process.depFlagGet": "scr_process_dep_flag_get",
   "process.depFlagSet": "scr_process_dep_flag_set",
   "process.noDeprecationIsTrue": "scr_process_no_deprecation_is_true",
+  "process.nextTickDyn": "scr_process_next_tick_dyn",
   "process.envSet": "scr_env_set",
   "process.envUnset": "scr_env_unset",
   "process.envPairs": "scr_env_pairs",
