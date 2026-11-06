@@ -10874,6 +10874,39 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
     return name;
   }
 
+/** `const t = Object.assign(base, ...sources)` over a NON-fresh index-signature target: the IR type `t` is bound at, or null. Node returns
+   * its target, so the binding is the target's own record type (tsc's `Record<..> & P` result adds only members the index signature
+   * already answers) and shares the object. Decided from the declaration alone, so file-scope bindings (collectGlobals) and block
+   * bindings (lowerVarDecl) agree. */
+  export function assignAdoptType(L: Lowerer, decl: ts.VariableDeclaration): IrType | null {
+    if (!ts.isIdentifier(decl.name) || decl.initializer === undefined || (ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const) === 0) return null;
+    let init: ts.Expression = decl.initializer;
+    while (ts.isParenthesizedExpression(init)) init = init.expression;
+    if (!ts.isCallExpression(init) || init.arguments.length < 2 || init.arguments.some((a) => ts.isSpreadElement(a))) return null;
+    if (!ts.isPropertyAccessExpression(init.expression) || init.expression.name.text !== "assign" || L.stdlibGlobalMember(init.expression, "Object") !== "assign") return null;
+    let arg0: ts.Expression = init.arguments[0]!;
+    while (ts.isParenthesizedExpression(arg0) || ts.isAsExpression(arg0) || ts.isSatisfiesExpression(arg0) || ts.isNonNullExpression(arg0)) arg0 = arg0.expression;
+    if (ts.isObjectLiteralExpression(arg0)) return null;
+    const targetIr = L.mapTypeOf(L.typeOf(init.arguments[0]!));
+    const resultIr = L.mapTypeOf(L.typeOf(init));
+    if (targetIr?.kind !== "record" || resultIr?.kind !== "record" || typeEquals(targetIr, resultIr)) return null;
+    const to = L.shapes.get(targetIr.shapeId);
+    const r2 = L.shapes.get(resultIr.shapeId);
+    if (!to?.indexValue || to.tuple || !r2?.indexValue || r2.tuple || !typeEquals(r2.indexValue, to.indexValue)) return null;
+    return targetIr;
+  }
+
+/** Register a const `Object.assign(base, ...)` binding so Lowerer.typeOf answers the target's type for every reference to it. Idempotent. */
+  export function registerAssignAdopt(L: Lowerer, decl: ts.VariableDeclaration): void {
+    if (!ts.isIdentifier(decl.name) || decl.initializer === undefined) return;
+    const sym = L.checker.getSymbolAtLocation(decl.name);
+    if (sym === undefined || L.assignAdoptTypes.has(sym)) return;
+    if (assignAdoptType(L, decl) === null) return;
+    let init: ts.Expression = decl.initializer;
+    while (ts.isParenthesizedExpression(init)) init = init.expression;
+    L.assignAdoptTypes.set(sym, L.typeOf((init as ts.CallExpression).arguments[0]!));
+  }
+
 /** `Object.assign(target, ...sources)` into an INDEX-SIGNATURE record:
    * the capture helper's keyed-write walk aimed at the EXISTING target —
    * each source's declared fields write in declaration order (unset
@@ -10906,6 +10939,7 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
     // sources' members (same value slot), the literal is built as THAT shape and the merge writes into it.
     let effTarget: IrType & { kind: "record" } = targetIr;
     let freshTarget: IrExpr | null = null;
+    let adoptTarget = false;
     if (!discarded) {
       const resultIr = L.mapTypeOf(L.typeOf(call));
       if (!resultIr || !typeEquals(resultIr, targetIr)) {
@@ -10913,12 +10947,21 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
         let arg0: ts.Expression = call.arguments[0]!;
         while (ts.isParenthesizedExpression(arg0) || ts.isAsExpression(arg0) || ts.isSatisfiesExpression(arg0) || ts.isNonNullExpression(arg0)) arg0 = arg0.expression;
         const emptyLit = ts.isObjectLiteralExpression(arg0) && arg0.properties.length === 0;
-        if (
+        // A NON-fresh target initializing a const (`const t = Object.assign(base, f)`): the call's value IS `base` in Node, so the binding
+        // takes the target's own type (assignAdoptType, used by lowerVarDecl and collectGlobals) and `t` reads the same object.
+        // tsc's intersection adds only members the index signature already answers.
+        let declParent: ts.Node = call.parent;
+        while (ts.isParenthesizedExpression(declParent)) declParent = declParent.parent;
+        if (!emptyLit && ts.isVariableDeclaration(declParent) && assignAdoptType(L, declParent) !== null) {
+          adoptTarget = true;
+        } else if (
           resultIr?.kind !== "record" || !r2 || !r2.indexValue || r2.tuple || !emptyLit || !typeEquals(r2.indexValue, to.indexValue) ||
           r2.fields.some((f) => f.name.startsWith("%") || !typeEquals(f.type, r2.indexValue!) || L.wrappedUndefined(f.type, loc) === null)
         ) {
           return null;
         }
+        if (!adoptTarget) {
+        if (resultIr?.kind !== "record" || !r2) return null;
         effTarget = resultIr;
         freshTarget = {
           kind: "recordLit",
@@ -10926,6 +10969,7 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
           type: resultIr,
           loc,
         };
+        }
       }
     }
     const tIv = to.indexValue;

@@ -30,7 +30,7 @@ import { deadBranchSkippable, statementAlwaysThrowsOnRequire } from "../require-
 import { irAlwaysExits, dynAliasBindingIsDyn, isVarDeclared, jsEvolvingObjectLiteralInit, keyedReadGlobalArmedType, keyedReadGlobalIsDyn, numericIteratorSourceOf, provenanceElidedConstDecl } from "./lower-stmts.js";
 import { streamClassAliasDecl } from "./lower-stream.js";
 import { dynImportBindingDepOf } from "./lower-island.js";
-import { bufferSpeciesAliasDecl } from "./lower-containers.js";
+import { registerAssignAdopt, bufferSpeciesAliasDecl } from "./lower-containers.js";
 import { diffieHellmanFnValueDeclType, objectStaticFnValueDeclType, stdlibBufferVarAliasDecl, stdlibGlobalAliasDecl } from "./surfaces.js";
 import { builtinFnValueDeclType, timerGlobalDeclType } from "./lower-fnvalue.js";
 import { collectNamespaceStmt, nsPathPrefix, trapDeclRootOf } from "./lower-namespaces.js";
@@ -2336,6 +2336,7 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
       // declaring block's position (block-local bindings).
       const nsPrefix = nsPathPrefix(stmt, list.declarations[0]);
       for (const decl of list.declarations) {
+        registerAssignAdopt(L, decl);
         // --provenance-sources: an elided pure-annotated dead const in a
         // fetched source module registers no global (the statement
         // lowering emits nothing by the same test — see
