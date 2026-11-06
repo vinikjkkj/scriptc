@@ -25561,6 +25561,114 @@
     "<repo>/tests/fixtures/node-types/streams.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/24470-capture-evaluation-dyn-detached-and-call.js": {
+   "order": [
+    "<repo>/tests/corpus/24470-capture-evaluation-dyn-detached-and-call.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24471-capture-evaluation-typed-read-identity.js": {
+   "order": [
+    "<repo>/tests/corpus/24471-capture-evaluation-typed-read-identity.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24472-capture-evaluation-untyped-params-typed-read.js": {
+   "order": [
+    "<repo>/tests/corpus/24472-capture-evaluation-untyped-params-typed-read.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24473-capture-evaluation-untyped-params-dyn-read.js": {
+   "order": [
+    "<repo>/tests/corpus/24473-capture-evaluation-untyped-params-dyn-read.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24474-capture-evaluation-nested-this-arrow.js": {
+   "order": [
+    "<repo>/tests/corpus/24474-capture-evaluation-nested-this-arrow.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24475-capture-evaluation-async-and-generator-methods.js": {
+   "order": [
+    "<repo>/tests/corpus/24475-capture-evaluation-async-and-generator-methods.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24476-capture-evaluation-nested-evaluations-and-loops.js": {
+   "order": [
+    "<repo>/tests/corpus/24476-capture-evaluation-nested-evaluations-and-loops.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24477-capture-evaluation-late-initialized-binding.js": {
+   "order": [
+    "<repo>/tests/corpus/24477-capture-evaluation-late-initialized-binding.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24478-capture-evaluation-evaluated-class-instance.js": {
+   "order": [
+    "<repo>/tests/corpus/24478-capture-evaluation-evaluated-class-instance.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24479-capture-evaluation-evaluated-class-prototype-and-static.js": {
+   "order": [
+    "<repo>/tests/corpus/24479-capture-evaluation-evaluated-class-prototype-and-static.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24480-capture-evaluation-new-function-class.js": {
+   "order": [
+    "<repo>/tests/corpus/24480-capture-evaluation-new-function-class.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24481-capture-evaluation-typed-class-through-any.ts": {
+   "order": [
+    "<repo>/tests/corpus/24481-capture-evaluation-typed-class-through-any.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24482-capture-evaluation-call-apply-bind-reflect.js": {
+   "order": [
+    "<repo>/tests/corpus/24482-capture-evaluation-call-apply-bind-reflect.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24483-capture-evaluation-direct-calls-and-value-reads.js": {
+   "order": [
+    "<repo>/tests/corpus/24483-capture-evaluation-direct-calls-and-value-reads.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24484-capture-evaluation-many-evaluations.js": {
+   "order": [
+    "<repo>/tests/corpus/24484-capture-evaluation-many-evaluations.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24485-capture-evaluation-nested-this-arrow-dyn-read.js": {
+   "order": [
+    "<repo>/tests/corpus/24485-capture-evaluation-nested-this-arrow-dyn-read.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24486-capture-evaluation-nested-evaluations-dyn-read.js": {
+   "order": [
+    "<repo>/tests/corpus/24486-capture-evaluation-nested-evaluations-dyn-read.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24487-capture-evaluation-placements-and-suspension.js": {
+   "order": [
+    "<repo>/tests/corpus/24487-capture-evaluation-placements-and-suspension.js"
+   ],
+   "diags": []
   }
  }
 }
