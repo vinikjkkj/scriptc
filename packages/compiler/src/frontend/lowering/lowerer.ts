@@ -6261,9 +6261,11 @@ export class Lowerer {
    * both emits what it always did. */
   /** Helpers that copy one shape's keys into another in the SOURCE's order (Object.assign onto a record): the edge carries the
    * target's enumeration back to the source, and `rebuild` re-emits the copy over the source's key list once it has one. */
-  readonly listConsumers: { src: string; dst: string; rebuild: () => void }[] = [];
-  noteListConsumer(src: string, dst: string, rebuild: () => void): void {
-    this.listConsumers.push({ src, dst, rebuild });
+  readonly listConsumers: { src: string; dst: string; rebuild: () => void; refuseIfListed?: SrcLoc }[] = [];
+  /** `refuseIfListed`: the copy writes a result that declares the source's members, whose enumeration is declaration order; a source that turns
+   * out to carry a key list cannot be answered exactly there, so the site is refused (it was never lowered before this form existed). */
+  noteListConsumer(src: string, dst: string, rebuild: () => void, refuseIfListed?: SrcLoc): void {
+    this.listConsumers.push({ src, dst, rebuild, ...(refuseIfListed ? { refuseIfListed } : {}) });
   }
   markKeyLists(functions: IrFunction[]): void {
     const late = new Set<string>();
@@ -6405,7 +6407,13 @@ export class Lowerer {
       };
       for (const f of [...functions]) visit(f.body, f);
     }
-    for (const c of this.listConsumers) if (listed.has(c.src)) c.rebuild();
+    for (const c of this.listConsumers) {
+      if (listed.has(c.src)) c.rebuild();
+      if (c.refuseIfListed && listed.has(c.src)) {
+        this.pushDiag(unsupportedDiag("SC1090", c.refuseIfListed,
+          "Object.assign({}, source) used as a value over a source whose keys were written after construction (the result declares the source's members, so it enumerates them in declaration order where Node uses the write order - assign into a Record<string, T> variable and use that instead)"));
+      }
+    }
     // Baked consumers rebuild over the list, now that the shapes carry it.
     for (const id of listed) {
       const bake = this.enumOrderBakes.get(id);

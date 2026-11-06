@@ -401,3 +401,26 @@ console.log(JSON.stringify(p));
   expect(keyRisk(r)).toEqual([]);
   expect(r.compiled).toBe(true);
 });
+
+test("Object.assign({}, source) used as a value compiles, and refuses a source filled by assignment", () => {
+  // The call returns its target. Onto a fresh literal the result is built as the record tsc's intersection names, which declares the
+  // sources' members and so enumerates them in declaration order: exact for a source built in that order (corpus 24437), refused for one
+  // whose keys were written after construction (the key list is not read by that shape).
+  const ok = lower(`
+interface A { a?: number; b?: number }
+const fa: A = { a: 1, b: 2 };
+const t = Object.assign({} as Record<string, number | undefined>, fa);
+console.log(Object.keys(t).join(","), t.a);
+`);
+  expect(ok.diags).toEqual([]);
+  expect(ok.compiled).toBe(true);
+  const filled = lower(`
+interface A { a?: number; b?: number }
+const fa: A = {};
+fa.b = 1;
+fa.a = 2;
+const t = Object.assign({} as Record<string, number | undefined>, fa);
+console.log(Object.keys(t).join(","), t.a);
+`);
+  expect(filled.diags.some((d) => d.message.includes("Object.assign({}, source) used as a value"))).toBe(true);
+});

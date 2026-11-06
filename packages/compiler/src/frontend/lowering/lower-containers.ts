@@ -10882,9 +10882,32 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
     let parent: ts.Node = call.parent;
     while (ts.isParenthesizedExpression(parent) || ts.isVoidExpression(parent)) parent = parent.parent;
     const discarded = ts.isExpressionStatement(parent);
+    // The record the call's value is built as. A fresh empty literal target (`Object.assign({}, f)`, `Object.assign({} as Record<..>, f)`)
+    // has no identity anyone can observe, so when tsc's intersection result maps to an index record that also DECLARES the
+    // sources' members (same value slot), the literal is built as THAT shape and the merge writes into it.
+    let effTarget: IrType & { kind: "record" } = targetIr;
+    let freshTarget: IrExpr | null = null;
     if (!discarded) {
       const resultIr = L.mapTypeOf(L.typeOf(call));
-      if (!resultIr || !typeEquals(resultIr, targetIr)) return null;
+      if (!resultIr || !typeEquals(resultIr, targetIr)) {
+        const r2 = resultIr?.kind === "record" ? L.shapes.get(resultIr.shapeId) : undefined;
+        let arg0: ts.Expression = call.arguments[0]!;
+        while (ts.isParenthesizedExpression(arg0) || ts.isAsExpression(arg0) || ts.isSatisfiesExpression(arg0) || ts.isNonNullExpression(arg0)) arg0 = arg0.expression;
+        const emptyLit = ts.isObjectLiteralExpression(arg0) && arg0.properties.length === 0;
+        if (
+          resultIr?.kind !== "record" || !r2 || !r2.indexValue || r2.tuple || !emptyLit || !typeEquals(r2.indexValue, to.indexValue) ||
+          r2.fields.some((f) => f.name.startsWith("%") || !typeEquals(f.type, r2.indexValue!) || L.wrappedUndefined(f.type, loc) === null)
+        ) {
+          return null;
+        }
+        effTarget = resultIr;
+        freshTarget = {
+          kind: "recordLit",
+          fields: r2.fields.map((f) => ({ name: f.name, value: L.wrappedUndefined(f.type, loc)! })),
+          type: resultIr,
+          loc,
+        };
+      }
     }
     const tIv = to.indexValue;
     const slotLift = (t: IrType): WidthLift | "dyn" | null => {
@@ -10905,6 +10928,9 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
       const from = L.shapes.get(srcIr.shapeId);
       if (!from || from.tuple) return null;
       if (from.fields.some((f) => f.name.startsWith("%"))) return null;
+      // The fresh result declares the sources' members beside its signature, so its enumeration is declared members then overflow:
+      // a source with overflow keys of its own would interleave differently from JS.
+      if (freshTarget !== null && from.indexValue) return null;
       L.noteEnumOrderBake(srcIr.shapeId, null, "list");
       const orderedFields = from.declaredOrder
         ? from.declaredOrder.flatMap((n) => {
@@ -10926,12 +10952,12 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
       plans.push({ fromId: srcIr.shapeId, fields, ovfLift });
     }
     const helperFor = (plan: SourcePlan): string => {
-      const key = `assign:${targetIr.shapeId}:${plan.fromId}`;
+      const key = `assign:${effTarget.shapeId}:${plan.fromId}`;
       const existing = L.widthHelpers.get(key);
       if (existing) return existing;
       const name = `%obj.assign.${L.widthHelpers.size}`;
       L.widthHelpers.set(key, name);
-      const toT: IrType = { kind: "record", shapeId: targetIr.shapeId };
+      const toT: IrType = { kind: "record", shapeId: effTarget.shapeId };
       const fromT: IrType = { kind: "record", shapeId: plan.fromId };
       const ref = (localId: string, type: IrType): IrExpr => ({ kind: "varRef", localId, type, loc });
       const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
@@ -10951,7 +10977,7 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
         const write: IrStmt = {
           kind: "recordKeySet",
           obj: tRef,
-          shapeId: targetIr.shapeId,
+          shapeId: effTarget.shapeId,
           key: { kind: "strLit", value: ff.name, type: STRING, loc },
           value: intoSlot(raw, ff.lift),
           loc,
@@ -10997,7 +11023,7 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
       };
       buildFields();
       body.push({ kind: "block", body: sub, loc });
-      L.noteListConsumer(plan.fromId, targetIr.shapeId, buildFields);
+      L.noteListConsumer(plan.fromId, effTarget.shapeId, buildFields, freshTarget !== null ? loc : undefined);
       // The source overflow by SLOT (recordOvfSlots): key and value come
       // out of one entry, so no key is looked back up. Object.assign(x, x)
       // is the one shape here whose target CAN be the enumerated record,
@@ -11033,7 +11059,7 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
               {
                 kind: "recordKeySet",
                 obj: tRef,
-                shapeId: targetIr.shapeId,
+                shapeId: effTarget.shapeId,
                 key: ref("k.0", STRING),
                 value: intoSlot({ kind: "recordOvfSlotGet", obj: sRef, shapeId: plan.fromId, slot: ref("sl.0", F64), part: "value", type: fIv, loc }, plan.ovfLift),
                 loc,
@@ -11069,10 +11095,10 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
       });
       return name;
     };
-    let acc = L.lowerExprExpecting(call.arguments[0]!, targetIr);
+    let acc = freshTarget ?? L.lowerExprExpecting(call.arguments[0]!, targetIr);
     for (let i = 0; i < plans.length; i++) {
       const src = L.lowerExprExpecting(call.arguments[i + 1]!, { kind: "record", shapeId: plans[i]!.fromId });
-      acc = { kind: "call", callee: helperFor(plans[i]!), args: [acc, src], type: targetIr, loc };
+      acc = { kind: "call", callee: helperFor(plans[i]!), args: [acc, src], type: effTarget, loc };
     }
     return acc;
   }

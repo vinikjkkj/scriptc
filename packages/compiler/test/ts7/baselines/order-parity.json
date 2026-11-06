@@ -13350,6 +13350,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24437-object-assign-onto-a-fresh-record-literal-returns-the-merged-record.ts": {
+   "order": [
+    "<repo>/tests/corpus/24437-object-assign-onto-a-fresh-record-literal-returns-the-merged-record.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2443-union-literal-shadow-narrowing.ts": {
    "order": [
     "<repo>/tests/corpus/2443-union-literal-shadow-narrowing.ts"
