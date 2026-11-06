@@ -21,7 +21,7 @@ import type { CjsExportRecord } from "./cjs-export-record.js";
 import { isLiveAliasName } from "./cjs-live-exports.js";
 import { copyListStmts } from "./key-list-fill.js";
 import { applyEnumRefill, applyNullProto, applyOwnKey, applySlotFilled, flushPatchCensus } from "./ir-patch.js";
-import { flushMintOrder, mintPhaseControl, resetMintLog, setMintPhase } from "../types.js";
+import { flushMintOrder, mintPhaseControl, resetMintLog, setGenGateKeys, setMintPhase } from "../types.js";
 import { flushFragmentCensus } from "./fragment-census.js";
 import { fenceDynRecordCasts } from "./dyn-record-fence.js";
 import { fenceNullProtoRecordCasts } from "./null-proto-fence.js";
@@ -143,7 +143,7 @@ import { FileParts, isNestedClassDeclaration, splitFiles, collectProgram, collec
   collectJsonRequires, jsonRequireTypeOverride, jsonAwareChecker, collectDeclTwinExportBridges, moduleArtifacts, collectGlobals, declSymbolOf, defaultExportSymbolOf, lowerFileInit, lowerDefaultExport, buildMain, appendDynamicImportModules } from "./lower-modules.js";
 import { scanDefinePropStringTables, scanDefinePropSymbolSlots, scanUntypedSymbolWrites } from "./lower-classes.js";
 import { protoClassArmOn, protoClassInstanceType } from "./proto-class-consume.js";
-import { genIterableDrainCall } from "./lower-generators.js";
+import { genIterableDrainCall, scanGenGate } from "./lower-generators.js";
 import { dynBoxedMethodInstances, ClassInfo, ClassIteratorInfo, GenericClassInfo, registerBuiltinErrorClasses, registerBuiltinEmitterClass, registerBuiltinStreamClasses, builtinErrorInfoOf, builtinEmitterInfoOf, builtinStreamInfoOf, analyzeClassDecoration, classIteratorDrainCall, classIteratorNextCall, classIteratorOf, classIteratorOpenCall, classIteratorRestDrainCall, classMemberNameOf, symbolSlotAccessorName, classValueRef, collectClassShape, exactClassOfReceiver, collectClassShapeInner, ctorAbiEquals, findMethodOn, findStaticOn, findGenericMethodOn, findGenericStaticOn, genericClassInstanceType, isSubclassOf, inHierarchy, overrideBelow, staticShadowBelow, upcastTo, lowerClassMembers, lowerClassCtor, lowerClassExpression, lowerClassExpressionInfo, lowerClassMethodMember, lowerProtoMethodMember, lowerClassValueProperty, lowerConstructorName, lowerStaticMethod, isProvenStaticThis, throwingSetterFn, shadowMethodFn, fieldInitStmts, lowerStaticFieldInits, lowerStaticFieldRead, lowerDerivedCtorBody, superCallStmt, lowerSuperMethodCall, superThisRef, lowerSuperAccessorRead, lowerSuperAccessorWrite, inheritsBuiltinErrorCtor, inheritsBuiltinEmitterCtor, errorMessageArg, lowerNew, accessorCall, virtualViewFitsSlot, vtThunkFn, findStaticAccessorOn, staticAccessorWrite, staticCompoundTarget, genericOverrideBelow } from "./lower-classes.js";
 import { MixinFnShape, mixinCallClassInfoOf, mixinIntersectionInstanceType } from "./lower-mixins.js";
 import { EVAL_ENV_SYM, evalClassNodeHook } from "./lower-evalclass.js";
@@ -319,9 +319,6 @@ export interface FnCtx {
   /** Yield is legal here (generator function body): the yield/next value
    * channels the yield lowering types itself against. */
   generator?: { yieldT: IrType; nextT: IrType } | null;
-  /** A generator METHOD body whose TReturn channel is the VOID sentinel (the checker's any/unknown/void/undefined all ride it):
-   * a `return <value>` there would drop the done-value, which a `.next()` consumer observes. Refused at the statement. */
-  genMethodDoneFence?: true;
   /** VARIADIC `arguments` form (rest-marked func type with no declared
    * rest param): the synthetic trailing dyn-array param `arguments`
    * reads resolve to. Also registered under ARGUMENTS_BINDING in the
@@ -3798,6 +3795,7 @@ export class Lowerer {
     if (!this.remainder) resetMintLog();
     setMintPhase("collect");
     const parts = this.splitFiles();
+    setGenGateKeys(scanGenGate(this, parts.map((fp) => fp.sf)));
     this.collectProgram(parts);
     // Decorated classes analyze AFTER the whole collection pass: a
     // decorator's return type may name a subclass declared below the
@@ -4765,6 +4763,7 @@ export class Lowerer {
     setMintPhase("discovery");
     const __colT = performance.now();
     const parts = this.splitFiles();
+    setGenGateKeys(scanGenGate(this, parts.map((fp) => fp.sf)));
     this.collectProgram(parts);
     // Decorated classes analyze post-collection here too: the %init seeds
     // lower the decoration calls, whose edges (decorator bodies, construct
@@ -16634,13 +16633,6 @@ export class Lowerer {
       const deferredVoid = this.deferPromiseReturn(raw, expected);
       if (deferredVoid !== null) return deferredVoid.stmt;
       const e = this.asyncReturnFlatten(raw, expected, this.ctx.isAsync);
-      if (this.ctx.genMethodDoneFence === true && e.kind !== "unitLit" && e.type.kind !== "void" && !isUnitType(e.type)) {
-        this.unsupported(
-          "SC1071",
-          node,
-          "a returned value in a generator method whose TReturn channel is any/unknown (the done-value is not representable on that channel and a .next() consumer would read undefined; declare the TReturn type)",
-        );
-      }
       if (e.kind === "unitLit") return { kind: "return", value: null, loc };
       if (e.type.kind === "void") return { kind: "return", value: e, loc };
       return {
