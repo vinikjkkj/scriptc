@@ -13615,6 +13615,24 @@
     ],
     "diags": []
   },
+  "<repo>/tests/corpus/24455-a-method-read-off-an-engine-object-is-the-same-function-every-time.ts": {
+    "order": [
+      "<repo>/tests/corpus/24455-a-method-read-off-an-engine-object-is-the-same-function-every-time.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/24456-a-method-read-as-a-value-off-an-engine-object-has-no-receiver.ts": {
+    "order": [
+      "<repo>/tests/corpus/24456-a-method-read-as-a-value-off-an-engine-object-has-no-receiver.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/24457-engine-functions-keep-their-identity-while-hundreds-of-others-cross.ts": {
+    "order": [
+      "<repo>/tests/corpus/24457-engine-functions-keep-their-identity-while-hundreds-of-others-cross.ts"
+    ],
+    "diags": []
+  },
   "<repo>/tests/corpus/2446-performance-global.ts": {
    "order": [
     "<repo>/tests/corpus/2446-performance-global.ts"
