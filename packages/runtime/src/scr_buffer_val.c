@@ -1207,6 +1207,9 @@ static void scr_bv_teardown(void) {
 
 /* %Buffer% as a value. Built once; every mention of Buffer yields this box,
  * so `===` is a pointer compare, as in Node. */
+/* Linking this unit is what gives a Buffer's `.constructor` an answer (scr_dyn_bytes_constructor). */
+__attribute__((constructor)) static void scr_bv_install_ctor_hook(void) { scr_dyn_buffer_ctor_hook = scr_dyn_buffer_ctor; }
+
 ScrDyn *scr_dyn_buffer_ctor(void) {
   if (scr_bv_ctor != NULL) return scr_dyn_retain(scr_bv_ctor);
   ScrDyn *c = scr_bv_new_fn("Buffer", scr_bv_ctor_call, 2); /* +1 */
