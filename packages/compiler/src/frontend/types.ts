@@ -9016,7 +9016,10 @@ function isJsEmptyObjectLiteralType(t: ts.Type, ctx: TypeMapperCtx): boolean {
   if (checker.getPropertiesOfType(t).length > 0 || checker.getIndexInfosOfType(t).length > 0) return false;
   if (checker.getCallSignatures(t).length > 0 || checker.getConstructSignatures(t).length > 0) return false;
   const decls = checker.declarationsOf(sym);
-  return decls.length > 0 && decls.every((d) => ts.isObjectLiteralExpression(d) && d.properties.length === 0 && isJsSourceFile(d.getSourceFile()));
+  // Only as the VALUE OF A PROPERTY of another literal (`{ argument: {}, reply: {} }`): a table slot. An empty literal that is an arm of a
+  // conditional or a `||` (`asArray ? new Array(n) : {}`) joins a union whose other arms decide what it is (holes of a presized array), and
+  // keeps the closed empty record.
+  return decls.length > 0 && decls.every((d) => ts.isObjectLiteralExpression(d) && d.properties.length === 0 && ts.isPropertyAssignment(d.parent) && isJsSourceFile(d.getSourceFile()));
 }
 
 function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | RecordShapeParts | null {
