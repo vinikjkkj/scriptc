@@ -937,6 +937,9 @@ export function lowerYieldStarStatement(L: Lowerer, expr: ts.Expression): IrStmt
           init: resume("next", null),
           loc,
         },
+        // The hidden locals the loop assigns are DECLARED here, in the scope that releases them: an assigned-only local
+        // is never released, and a forwarded dyn string (the consumer's .next("SENT")) leaked with it.
+        ...(sendL ? [{ kind: "varDecl", localId: sendL.id, init: null, loc } satisfies IrStmt] : []),
         { kind: "tryCatch", tryBody: [delegLoop], catchBody: null, catchLocalId: null, finallyBody: [closeDelegate], loc },
       ],
       loc,
