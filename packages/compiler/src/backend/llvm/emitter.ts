@@ -11972,6 +11972,11 @@ class LlEmitter {
             test = orIsl(oneOf([DK.ARR]), "scr_dyn_isl_is_array");
           } else if (e.test === "function") {
             test = orIsl(oneOf([DK.FUNC]), "scr_dyn_isl_typeof_is", this.cstr("function"));
+          } else if (e.test === "typedarray") {
+            // `instanceof Int8Array | ... | DataView`: the runtime predicate, the C lane's.
+            this.declare(`declare zeroext i1 @scr_dyn_is_typed(ptr, i32)`);
+            test = B.tmp();
+            B.line(`${test} = call zeroext i1 @scr_dyn_is_typed(ptr ${d.name}, i32 ${e.className === "dataview" ? -3 : (BYTES_ELEM_NUM as Record<string, number>)[e.className!]})`);
           } else if (e.test === "view" && this.engineModule) {
             // `ArrayBuffer.isView(u)`: the DK.BYTES compare, or a typed array / DataView the engine holds.
             test = orIsl(oneOf([DK.BYTES]), "scr_dyn_isl_is_view");

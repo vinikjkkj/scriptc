@@ -8290,6 +8290,8 @@ export type IrExpr =
    * below for the kind SCR_DYN_BYTES shares with DataView. */
   /** `view` is `ArrayBuffer.isView(v)` on an unknown value: `bytes` (every typed array AND DataView rides SCR_DYN_BYTES), plus, in a
    * module that links the engine, a typed array or DataView the ENGINE built and holds by reference. */
+  /** `typedarray` is `v instanceof Int8Array | Uint8ClampedArray | Int16Array | ... | DataView` on an unknown value: `className` names the
+   * element (an IrBytesElem, or "dataview"); the answer is the runtime's scr_dyn_is_typed, native and engine-held values alike. */
   /** `u8array` is `bytes` MINUS the DataViews: SCR_DYN_BYTES carries both
    * (DataView maps to bytes<u8>), so the bare kind compare answers TRUE
    * for a boxed DataView where Node's `instanceof Uint8Array` answers
@@ -8299,7 +8301,7 @@ export type IrExpr =
   /** `member` (with "class" only): the instance's class table must have NO
    * member of that name, so a user override or own member keeps the call
    * (lowerDynEmitterReceiverCall's gate on the builtin emitter). */
-  | { kind: "dynTest"; test: "string" | "number" | "boolean" | "undefined" | "null" | "nullish" | "bytes" | "view" | "u8array" | "arraybuffer" | "object" | "array" | "truthy" | "error" | "function" | "bigint" | "map" | "set" | "date" | "regex" | "class"; className?: string; member?: string; negated?: true; value: IrExpr; type: IrType; loc: SrcLoc }
+  | { kind: "dynTest"; test: "string" | "number" | "boolean" | "undefined" | "null" | "nullish" | "bytes" | "view" | "u8array" | "typedarray" | "arraybuffer" | "object" | "array" | "truthy" | "error" | "function" | "bigint" | "map" | "set" | "date" | "regex" | "class"; className?: string; member?: string; negated?: true; value: IrExpr; type: IrType; loc: SrcLoc }
   /** Keyed read on a dyn value — `pkg.name` / `pkg["k"]` / the
    * `pkg?.scripts` chain step on a JSON.parse result. `key` is
    * string-typed (a strLit for the dot form); `type` is always dyn. An
