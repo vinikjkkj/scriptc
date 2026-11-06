@@ -25476,6 +25476,18 @@
     "<repo>/tests/corpus/24495-prototype-data-for-in-lists-inherited-names.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/24440-string-as-a-callback-converts-untyped-and-class-elements-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/24440-string-as-a-callback-converts-untyped-and-class-elements-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24441-number-and-boolean-as-callbacks-convert-untyped-elements-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/24441-number-and-boolean-as-callbacks-convert-untyped-elements-like-node.ts"
+   ],
+   "diags": []
   }
  }
 }
