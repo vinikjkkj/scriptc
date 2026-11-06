@@ -7314,6 +7314,13 @@ export class Lowerer {
   }
 
   typeOf(node: ts.Node): ts.Type {
+    // A const bound to `Object.assign(base, ...)` has the TARGET's type: Node returns its target, and tsc's intersection result only adds
+    // members the target's index signature already answers (assignAdoptType). Asked here, at the one place every consumer asks, so the
+    // binding and each read and write of it agree on one record shape.
+    if (this.assignAdoptTypes.size > 0 && ts.isIdentifier(node)) {
+      const adopted = this.assignAdoptTypes.get(this.checker.getSymbolAtLocation(node) as ts.Symbol);
+      if (adopted !== undefined) return adopted;
+    }
     if (this.activeThisType !== null && node.kind === ts.SyntaxKind.ThisKeyword && thisOwnedBy(node, this.activeThisFn)) {
       return this.activeThisType;
     }
@@ -18674,6 +18681,9 @@ export class Lowerer {
    * Computed on first ask, for accessorProducerCache's reason and with its
    * timing rule: after fileTag is populated, before shape interning. */
   private nullPayloadPromiseCache: Set<ts.Symbol> | null = null;
+
+  /** Const bindings of `Object.assign(base, ...)` over a non-fresh index record: symbol -> the target's checker type (typeOf). */
+  readonly assignAdoptTypes = new Map<ts.Symbol, ts.Type>();
 
   nullPayloadPromiseProp(sym: ts.Symbol): boolean {
     this.nullPayloadPromiseCache ??= this.scanNullPayloadPromiseProps();
