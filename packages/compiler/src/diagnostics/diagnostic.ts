@@ -841,10 +841,10 @@ export function unsupportedTypeDiag(typeText: string, loc: SrcLoc): ScrDiagnosti
  * unsupportedTypeDiag (one dynamic-family code per story: this is the
  * "values of this TYPE run in the engine" story), and "runs in" voice like
  * SC2012 — the value exists under --dynamic; the build just didn't opt in. */
-export function requiresDynamicTypeDiag(typeText: string, loc: SrcLoc): ScrDiagnostic {
+export function requiresDynamicTypeDiag(typeText: string, loc: SrcLoc, because?: string | null): ScrDiagnostic {
   return {
     code: "SC2011",
-    message: `values of type '${typeText}' have no static representation but run in the embedded dynamic engine, which this build does not include`,
+    message: `values of type '${typeText}' have no static representation but run in the embedded dynamic engine, which this build does not include${because ? ` (the static mapping refuses: ${because})` : ""}`,
     loc,
     milestone: "M4",
     hint: "build with --dynamic to run these values in the embedded engine (adds ~620KB to the binary), or restate the type inside the static surface (https://scriptc.dev/limitations describes the boundary)",

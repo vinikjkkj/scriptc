@@ -10048,6 +10048,43 @@ function hasCallablePart(t: ts.Type, checker: ts.TypeChecker): boolean {
     (t.isUnionType() && ts.constituentTypes(t).some((c) => checker.getCallSignatures(c).length > 0));
 }
 
+/** WHY a type that only the dynamic mapping accepts has no static one: the path from the type to the first part the static mapping
+ * refuses, `readonly AnyBulkWriteOperation<S>[] > { deleteOne: DeleteOneModel<S> } > deleteOne > DeleteOneModel<S> > filter > Filter<S>`.
+ * It descends the array element, the first union arm, the first intersection part and the first record member that maps to nothing
+ * statically, and stops at the first type with no part to blame (the leaf). Null when the type itself maps. Probing is safe: a
+ * diagnostic means this build already failed. */
+export function describeStaticBlockerPath(type: ts.Type, ctx: TypeMapperCtx): string | null {
+  const { checker } = ctx;
+  const steps: string[] = [];
+  const seen = new Set<ts.Type>();
+  const refuses = (t: ts.Type): boolean => mapType(t, ctx) === null;
+  let cur = type;
+  for (let depth = 0; depth < 12; depth++) {
+    if (!refuses(cur) || seen.has(cur)) return steps.length > 0 ? steps.join(" > ") : null;
+    seen.add(cur);
+    steps.push(checker.typeToString(cur));
+    let next: ts.Type | undefined;
+    if (checker.isArrayLikeType(cur) && !checker.isTupleType(cur)) {
+      const args = checker.getTypeArguments(cur as ts.TypeReference);
+      next = args.find(refuses);
+    } else if (cur.isUnionType() || cur.isIntersectionType()) {
+      next = ts.constituentTypes(cur).find(refuses);
+    } else if ((cur.flags & ts.TypeFlags.Object) !== 0 && checker.getCallSignatures(cur).length === 0) {
+      for (const p of checker.getPropertiesOfType(cur)) {
+        const pt = checker.getTypeOfSymbol(p);
+        if (refuses(pt)) {
+          steps.push(p.name);
+          next = pt;
+          break;
+        }
+      }
+    }
+    if (next === undefined) return steps.join(" > ");
+    cur = next;
+  }
+  return steps.join(" > ");
+}
+
 /** The record-member arm of the component fence: a USER record shape
  * blocked by ONE member's type. Runs AFTER badType's stdlib/npm/index-
  * signature routing, so what reaches it is a plain data shape; a null

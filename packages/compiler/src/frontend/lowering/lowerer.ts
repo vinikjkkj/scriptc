@@ -117,6 +117,7 @@ import { settleOrValueArms,
   describeComponentBlocker,
   esOwnKeyOrder,
   describeRecordMemberBlocker,
+  describeStaticBlockerPath,
   formatIrType,
   ISLAND_AMBIENT_TYPES,
   isConstAssertionTypeNode,
@@ -6729,7 +6730,7 @@ export class Lowerer {
         mapType(widened, { ...this.typeCtx, dynamic: true }) !== null
       ) {
         this.dynWhy(node, type, widened);
-        this.pushDiag(requiresDynamicTypeDiag(this.checker.typeToString(type), locOf(node)));
+        this.pushDiag(requiresDynamicTypeDiag(this.checker.typeToString(type), locOf(node), describeStaticBlockerPath(widened, this.typeCtx)));
         throw new PoisonError();
       }
       this.pushDiag(indexSignatureTypeDiag(this.checker.typeToString(type), locOf(node)));
@@ -6797,7 +6798,7 @@ export class Lowerer {
       mapType(widened, { ...this.typeCtx, dynamic: true }) !== null
     ) {
       this.dynWhy(node, type, widened);
-      this.pushDiag(requiresDynamicTypeDiag(this.checker.typeToString(type), locOf(node)));
+      this.pushDiag(requiresDynamicTypeDiag(this.checker.typeToString(type), locOf(node), describeStaticBlockerPath(widened, this.typeCtx)));
       throw new PoisonError();
     }
     // STANDARD-LIBRARY nominal provenance, decided once: interface/class
