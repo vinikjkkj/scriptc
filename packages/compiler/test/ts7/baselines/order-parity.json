@@ -13015,46 +13015,46 @@
    "diags": []
   },
   "<repo>/tests/corpus/24323-any-typed-key-holding-a-symbol-reaches-the-symbol-table.cjs": {
-    "order": [
-      "<repo>/tests/corpus/24323-any-typed-key-holding-a-symbol-reaches-the-symbol-table.cjs"
-    ],
-    "diags": []
+   "order": [
+    "<repo>/tests/corpus/24323-any-typed-key-holding-a-symbol-reaches-the-symbol-table.cjs"
+   ],
+   "diags": []
   },
   "<repo>/tests/corpus/24324-error-eventemitter-stream-subclasses-hold-symbol-properties.cjs": {
-    "order": [
-      "<repo>/tests/corpus/24324-error-eventemitter-stream-subclasses-hold-symbol-properties.cjs"
-    ],
-    "diags": []
+   "order": [
+    "<repo>/tests/corpus/24324-error-eventemitter-stream-subclasses-hold-symbol-properties.cjs"
+   ],
+   "diags": []
   },
   "<repo>/tests/corpus/24325-map-set-receivers-hold-symbol-properties.cjs": {
-    "order": [
-      "<repo>/tests/corpus/24325-map-set-receivers-hold-symbol-properties.cjs"
-    ],
-    "diags": []
+   "order": [
+    "<repo>/tests/corpus/24325-map-set-receivers-hold-symbol-properties.cjs"
+   ],
+   "diags": []
   },
   "<repo>/tests/corpus/24326-map-set-symbol-properties-free-and-collect.cjs": {
-    "order": [
-      "<repo>/tests/corpus/24326-map-set-symbol-properties-free-and-collect.cjs"
-    ],
-    "diags": []
+   "order": [
+    "<repo>/tests/corpus/24326-map-set-symbol-properties-free-and-collect.cjs"
+   ],
+   "diags": []
   },
   "<repo>/tests/corpus/24327-proxy-traps-receive-the-symbol-as-the-key.cjs": {
-    "order": [
-      "<repo>/tests/corpus/24327-proxy-traps-receive-the-symbol-as-the-key.cjs"
-    ],
-    "diags": []
+   "order": [
+    "<repo>/tests/corpus/24327-proxy-traps-receive-the-symbol-as-the-key.cjs"
+   ],
+   "diags": []
   },
   "<repo>/tests/corpus/24328-typeof-symbol-test-and-tostring-on-untyped-values.cjs": {
-    "order": [
-      "<repo>/tests/corpus/24328-typeof-symbol-test-and-tostring-on-untyped-values.cjs"
-    ],
-    "diags": []
+   "order": [
+    "<repo>/tests/corpus/24328-typeof-symbol-test-and-tostring-on-untyped-values.cjs"
+   ],
+   "diags": []
   },
   "<repo>/tests/corpus/24329-engine-symbols-cross-with-one-identity-per-symbol.js": {
-    "order": [
-      "<repo>/tests/corpus/24329-engine-symbols-cross-with-one-identity-per-symbol.js"
-    ],
-    "diags": []
+   "order": [
+    "<repo>/tests/corpus/24329-engine-symbols-cross-with-one-identity-per-symbol.js"
+   ],
+   "diags": []
   },
   "<repo>/tests/corpus/2433-as-const-command-tables.ts": {
    "order": [
@@ -13179,6 +13179,24 @@
   "<repo>/tests/corpus/2441-console-process-argv.ts": {
    "order": [
     "<repo>/tests/corpus/2441-console-process-argv.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24415-records-built-in-two-key-orders-print-and-serialize-in-their-own-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/24415-records-built-in-two-key-orders-print-and-serialize-in-their-own-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24416-records-built-in-two-key-orders-enumerate-in-their-own-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/24416-records-built-in-two-key-orders-enumerate-in-their-own-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24417-a-record-built-in-two-orders-and-width-copies-enumerate-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/24417-a-record-built-in-two-orders-and-width-copies-enumerate-like-node.ts"
    ],
    "diags": []
   },
@@ -23003,12 +23021,6 @@
   "<repo>/tests/diagnostics/a-generic-class-instance-with-an-unmappable-argument-names-why.ts": {
    "order": [
     "<repo>/tests/diagnostics/a-generic-class-instance-with-an-unmappable-argument-names-why.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/a-record-enumerated-in-an-order-or-a-key-set-it-is-not-built-with.ts": {
-   "order": [
-    "<repo>/tests/diagnostics/a-record-enumerated-in-an-order-or-a-key-set-it-is-not-built-with.ts"
    ],
    "diags": []
   },
