@@ -13098,6 +13098,12 @@
     ],
     "diags": []
   },
+  "<repo>/tests/corpus/24343-const-captured-by-a-callback-in-its-own-initializer-js.js": {
+    "order": [
+      "<repo>/tests/corpus/24343-const-captured-by-a-callback-in-its-own-initializer-js.js"
+    ],
+    "diags": []
+  },
   "<repo>/tests/diagnostics/static-this-with-a-receiver-other-than-the-declaring-class-stays-refused.ts": {
     "order": [
       "<repo>/tests/diagnostics/static-this-with-a-receiver-other-than-the-declaring-class-stays-refused.ts"
