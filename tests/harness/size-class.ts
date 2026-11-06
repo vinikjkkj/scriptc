@@ -2422,7 +2422,19 @@ export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 72_694 : null;
  * (the tip before that commit, 27860480b, also measures 133,750). NOT in this figure: pgwebcrypto's commits. The combined
  * landing tree land-b89 (23727deb8) measures 134,118 on this lane (the figure its CI reported); that record belongs to
  * whichever landing combines the two, and this tree's figure would fail it by 368. */
-export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 133_750 : null;
+/* 2026-11-06 (dbconn22 composed onto main d55cf6051 as land-b180 a832e6141): RE-RECORDED 133_750 -> 133_478 (-272). SOURCE: the CI
+ * log of run 42168887145, job "test (Windows, 3/20)" (zig 0.16.0, SCRIPTC_TARGET=x86_64-windows-gnu, SCRIPTC_CC=zigcc, --backend c):
+ * "the regex program .text SHRANK by 272 bytes: 133478 against the recorded 133750 (tolerance 256)". The tolerance is unchanged. NOT
+ * confirmed on a local Windows lane: this box's figures for the same probe have differed from CI's, so the CI log is the figure.
+ * WHAT THE BYTES WERE (INFERRED, not measured per function): the always-linked own-`toString` lookup of a function value. The stack
+ * first put a call of scr_dyn_fn_own_tostring into scr_fn_to_string (a function's ToString runs its own `toString` before its source
+ * text), which pulled the dyn call machinery into every program that renders a function -- +23,872 bytes on this class when it ran
+ * (CI, against the recorded figure) -- and 5c54e2927 then reached that lookup through a hook the first function property table
+ * installs, so a regex program carries one pointer test where it carried the lookup and its callees. The 272 are what that change left
+ * below the old record: the old 133,750 was measured before the renderer and its neighbours (scr_json.c's function-text arm) were
+ * reshaped, and the composition's figure sits that much under it. A later change that grows the class by more than the tolerance
+ * moves this record again, with its own measured cause. */
+export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 133_478 : null;
 
 /* 2026-10-21 -- THE LINK NOW COLLECTS DEAD SECTIONS, and every figure above moves.
  * The numbers in this block, and the two ceilings (STATIC_CLASS_MAX and
