@@ -13362,6 +13362,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24439-object-entries-and-values-over-an-untyped-receiver-keep-the-dyn-values.ts": {
+   "order": [
+    "<repo>/tests/corpus/24439-object-entries-and-values-over-an-untyped-receiver-keep-the-dyn-values.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2444-union-literal-reducer-spread.ts": {
    "order": [
     "<repo>/tests/corpus/2444-union-literal-reducer-spread.ts"
