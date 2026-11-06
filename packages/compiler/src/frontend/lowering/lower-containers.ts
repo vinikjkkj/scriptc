@@ -10285,7 +10285,10 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
         `Object.fromEntries over '${L.fmt(argIr)}' (the tuple's '${L.fmt(valT)}' value cannot flow into the '${L.fmt(iv)}' signature slot)`,
       );
     }
-    const receiver = L.lowerExpr(argNode);
+    // The argument can LOWER to a dyn array while its checker type is a typed one (a map over an `Object.entries(o)` of an untyped
+    // receiver is the dyn tree's own map): the helper walks a typed array, so cross the checked exit here, as every other typed consumer does.
+    const receiver0 = L.lowerExpr(argNode);
+    const receiver = receiver0.type.kind === "dyn" ? L.coerceToExpected(receiver0, argIr) : receiver0;
     const key = `obj.fromEntries:${argIr.elem.shapeId}:${resultT.shapeId}`;
     let helper = L.arrHofHelpers.get(key);
     if (!helper) {
@@ -10363,7 +10366,10 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
       kind: "record",
       shapeId: L.shapes.intern([], false, valT, []),
     };
-    const receiver = L.lowerExpr(argNode);
+    // The argument can LOWER to a dyn array while its checker type is a typed one (a map over an `Object.entries(o)` of an untyped
+    // receiver is the dyn tree's own map): the helper walks a typed array, so cross the checked exit here, as every other typed consumer does.
+    const receiver0 = L.lowerExpr(argNode);
+    const receiver = receiver0.type.kind === "dyn" ? L.coerceToExpected(receiver0, argIr) : receiver0;
     const key = `obj.fromEntries:strrows:${resultT.shapeId}`;
     let helper = L.arrHofHelpers.get(key);
     if (!helper) {
