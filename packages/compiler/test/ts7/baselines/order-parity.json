@@ -13651,6 +13651,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24460-mysql2-is-json-over-an-object-an-array-a-buffer-and-null.js": {
+    "order": [
+      "<repo>/tests/corpus/24460-mysql2-is-json-over-an-object-an-array-a-buffer-and-null.js"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/24461-the-object-and-array-classes-are-the-constructors-of-plain-objects-and-arrays.ts": {
+    "order": [
+      "<repo>/tests/corpus/24461-the-object-and-array-classes-are-the-constructors-of-plain-objects-and-arrays.ts"
+    ],
+    "diags": []
+  },
   "<repo>/tests/corpus/2447-island-boundary-slots/main.ts": {
    "order": [
     "<repo>/tests/corpus/2447-island-boundary-slots/main.ts"
