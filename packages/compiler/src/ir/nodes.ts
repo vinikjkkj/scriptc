@@ -12315,7 +12315,10 @@ export function moduleUsesDynAsync(mod: IrModule): boolean {
 /** The SCR_ENGINE link switch: a non-foldable Function-constructor site
  * lowered to the engine (lower-engine-fn.ts), i.e. a jsOp globalGet of
  * `Function`. Every other module keeps its static link line. */
+const ENGINE_FN_MEMO = new WeakMap<IrModule, boolean>();
 export function moduleUsesEngineFn(mod: IrModule): boolean {
+  const memo = ENGINE_FN_MEMO.get(mod);
+  if (memo !== undefined) return memo;
   let found = false;
   const visit = (v: unknown): void => {
     if (found || v === null || typeof v !== "object") return;
@@ -12331,6 +12334,7 @@ export function moduleUsesEngineFn(mod: IrModule): boolean {
     for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
   };
   visit(mod);
+  ENGINE_FN_MEMO.set(mod, found);
   return found;
 }
 
