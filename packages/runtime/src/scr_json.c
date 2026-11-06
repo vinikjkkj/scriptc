@@ -2312,6 +2312,45 @@ void scr_dyn_fn_adapter_remember(const ScrDyn *d, const void *code, ScrClosure *
   adapter->caps[2] = sb;
 }
 
+/* A function-typed member read as a VALUE (`const f = field.buffer`, `field.buffer === g`): the engine's function object itself, with no
+ * receiver, as Node reads it - so a call through it has `this` undefined. `c` is a closure of the record's slot (borrowed); an adapter
+ * of a bound engine method answers the adapter of the engine function it names (the same one every read), anything else answers itself.
+ * +1. A member the engine will not read back (a getter that throws, a non-function) leaves the bound adapter as it is. */
+ScrClosure *scr_fn_unbind(ScrClosure *c) {
+  if (c == NULL || c->rc == SIZE_MAX || c->ncaps < 2) return c == NULL ? NULL : scr_closure_retain(c);
+  ScrDynThunk th = scr_box_get_thunk((const ScrBox *)c->caps[1]);
+  if (th != scr_isl_bound_thunk) return scr_closure_retain(c);
+  ScrClosure *inner = (ScrClosure *)scr_box_get_ref((ScrBox *)c->caps[0]); /* +1 */
+  ScrDyn *recv = (ScrDyn *)scr_box_get_ref((ScrBox *)inner->caps[0]);
+  ScrDyn *nm = (ScrDyn *)scr_box_get_ref((ScrBox *)inner->caps[1]);
+  scr_closure_release(inner);
+  ScrDyn *fv = scr_dyn_jsval_ops()->key_get(recv->v.jsval.cell, nm->v.str);
+  scr_dyn_release(recv);
+  scr_dyn_release(nm);
+  if (fv == NULL) {
+    scr_exc_clear();
+    return scr_closure_retain(c);
+  }
+  if (!scr_dyn_isl_is_function(fv)) {
+    scr_dyn_release(fv);
+    return scr_closure_retain(c);
+  }
+  ScrDyn *box = scr_dyn_isl_fn_box(fv);
+  scr_dyn_release(fv);
+  ScrClosure *hit = scr_dyn_fn_adapter_find(box, c->fn);
+  if (hit == NULL) {
+    /* the same adapter code over the engine function's own call: the shape every emitted adapter site builds */
+    hit = scr_closure_new(c->fn, 3);
+    hit->caps[0] = scr_box_new(SCR_BOX_FUNC);
+    scr_box_set_ref(hit->caps[0], scr_closure_retain(box->v.fn.clo));
+    hit->caps[1] = scr_box_new(SCR_BOX_F64);
+    scr_box_set_thunk(hit->caps[1], box->v.fn.thunk);
+    scr_dyn_fn_adapter_remember(box, c->fn, hit);
+  }
+  scr_dyn_release(box);
+  return hit;
+}
+
 bool scr_dyn_isl_is_u8(const ScrDyn *d) { return d->kind == SCR_DYN_JSVAL && scr_dyn_jsval_ops()->is_u8(d->v.jsval.cell); }
 
 ScrBytes *scr_dyn_isl_exit_u8(const ScrDyn *d) { return scr_dyn_jsval_ops()->exit_u8(d->v.jsval.cell); }

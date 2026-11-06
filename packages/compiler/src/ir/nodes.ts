@@ -4248,6 +4248,10 @@ export type IrLibFn =
    * the closure entry's exact source text (IrFunction.srcText, emitted as
    * the ScrFnText table only when a program uses this, scr_fntext.c). +1 string. */
   | "fn.text"
+  /** A function-typed record member read as a VALUE, in a module that runs engine code (arg 0, func-typed, borrowed; +1, the
+   * same type): the adapter of a bound engine method answers the adapter of the engine function it names, with no receiver -
+   * what `const f = field.buffer` is in Node. Any other closure answers itself (scr_fn_unbind). */
+  | "fn.unbind"
   /** fs.statSync → a Stats value (may throw, like the other sync fs
    * calls); the stats.* getters are pure reads on it. */
   | "fs.statSync"
