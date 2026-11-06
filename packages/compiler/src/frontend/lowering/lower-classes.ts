@@ -19,7 +19,7 @@ import { cjsClassExprWholeExportOf, isCjsJsFile, isJsSourceFile, isModuleExports
 import { pairedProtoClassInfoFor, pairedProtoClassOfValue, protoClassArmOn, protoClassInfoFor, protoClassOfNamespaceMember, protoDataGetterFns } from "./proto-class-consume.js";
 import { PoisonError, dynFallbackType, dynUndefinedExpr, fnValueCodeOfNode, newFnCtx, own } from "./lowerer.js";
 import { isBufferSpeciesCtor, lowerFastBufferNew, bufEncoding, lowerMapCloneNew, lowerMapSeedArrayNew } from "./lower-containers.js";
-import { fnOwnCounters, fnOwnPropBox, fnOwnWhy, probeLower, pureReemittable } from "./lower-exprs.js";
+import { unboundMethodThunk, fnOwnCounters, fnOwnPropBox, fnOwnWhy, probeLower, pureReemittable } from "./lower-exprs.js";
 import { lowerDateNumArg, lowerSearchParamsNew } from "./lower-builtins.js";
 import { readFileSync } from "node:fs";
 import { requiresDynamicPackageDiag, requiresDynamicTypeDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
@@ -9472,6 +9472,19 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
       for (const g of protoDataGetterFns(info)) {
         out.push(g);
         info.def.dynMethods = [...(info.def.dynMethods ?? []), { name: g.name.slice(className.length + 2), fn: g.name }];
+      }
+    }
+    // A boxed class's method rows carry the method's VALUE (`const { m } = o` or `o.m` through the dyn side): the interned unbound
+    // thunk, which calls the detached variant, so `m()` with no receiver runs the body and throws only where it touches `this`.
+    // Without the thunk the row has no value and the read answers the box's call stub, which refuses any receiver that is not an
+    // instance before the body can run.
+    if (!info.generic && L.reachable?.has(`%${className}.%dynset`) === true) {
+      for (const { mName } of L.classMethodMembers(info)) {
+        if (poisoned.has(mName) || !(always || L.wantBody(`%${className}.${mName}`))) continue;
+        const found = L.findMethodOn(info, mName);
+        if (found === null || found.sig.abstract === true) continue;
+        if (found.sig.params.some((q) => q.mode !== "required" && q.mode !== "omittable")) continue;
+        unboundMethodThunk(L, info, mName, found, { file: info.decl?.getSourceFile().fileName ?? "%dynbox", start: 0, end: 0 }, true);
       }
     }
     // The write half of the same box (see dynSetFn): every class a dyn box
