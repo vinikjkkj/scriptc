@@ -1,0 +1,6 @@
+protodata-untyped-read-fenced-owner.js:4:1 - error SC1090: the prototype member 'call' of class 'Commander' (the program can store an own undefined to 'call', which would hide the prototype's non-undefined value) is not supported yet
+
+  3 | class Commander {}
+  4 | Commander.prototype.call = "dflt";
+    | ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  5 | function mk(o, v) { o.call = v; }
