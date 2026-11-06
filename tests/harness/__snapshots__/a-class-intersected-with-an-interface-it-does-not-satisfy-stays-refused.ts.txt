@@ -1,0 +1,17 @@
+a-class-intersected-with-an-interface-it-does-not-satisfy-stays-refused.ts:9:10 - error SC2008: values of type 'Plain & Closable' cannot be compiled: this intersection resolves to no runtime shape
+
+   8 | }
+   9 | function lacks(): Plain & Closable {
+     |          ^~~~~
+  10 |   return { n: 1, close() {} } as Plain & Closable;
+
+  hint: restate the intersection as a single interface or type literal with the combined members; mixin-produced intersections compile where the mixin chain pins one instantiation
+
+a-class-intersected-with-an-interface-it-does-not-satisfy-stays-refused.ts:12:13 - error SC2004: uses of 'lacks' inherit the blocker on its declaration
+
+  11 | }
+  12 | console.log(lacks().n);
+     |             ^~~~~
+  13 | 
+
+  hint: the declaration of 'lacks' did not compile — fix the diagnostic reported there and these sites clear with it

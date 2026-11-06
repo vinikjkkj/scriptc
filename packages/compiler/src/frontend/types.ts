@@ -3151,6 +3151,25 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         return viaMixin;
       }
     }
+    // A CLASS INSTANCE intersected with a PROTOCOL interface the class already satisfies: `Readable & AsyncIterable<T>` (mongodb's
+    // AbstractCursor.stream()), `Server & EventEmitter`-style spellings. When the one mappable constituent is assignable to every other
+    // constituent, the set of values of the intersection IS the set of values of that constituent (P <= Q makes P & Q = P), so the
+    // intersection maps to it: the value is the class instance, its protocol members are the class's own (a Readable already has
+    // [Symbol.asyncIterator]). The test is the checker's own assignability, not a name match, so a class that does not provide a member
+    // of the interface, or provides it with an incompatible type, is NOT claimed here and keeps its refusal.
+    {
+      const parts = ts.constituentTypes(widened);
+      const mappedAll = parts.map((p) => ({ p, m: (p.flags & ts.TypeFlags.Object) !== 0 ? mapType(p, ctx) : null }));
+      const objectish = mappedAll.every((x) => (x.p.flags & ts.TypeFlags.Object) !== 0 && checker.getConstructSignatures(x.p).length === 0);
+      if (objectish) {
+        // the constituent every other one is assignable FROM: it alone carries the value (the interface parts may map to a lossy
+        // shape of their own, as Iterable<T> does to an array, or to none)
+        const dom = mappedAll.find(
+          (x) => x.m !== null && x.m.kind !== "dyn" && mappedAll.every((y) => y === x || checker.isTypeAssignableTo(x.p, y.p)),
+        );
+        if (dom !== undefined) return dom.m;
+      }
+    }
     // A PRIMITIVE intersected with an object that has real members, and
     // nothing above claimed it: `number & { low: number; high: number;
     // unsigned: boolean }` -- how protobuf typings spell "a number, or the
