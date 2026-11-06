@@ -12008,46 +12008,11 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
       { kind: "libCall", fn: "dyn.forInKeys", args: [dRef()], type: DYN, loc },
       arrayOf(STRING),
     );
-    // Two conditions per visit, and the second one is an APPROXIMATION whose
-    // exact scope is argued below.
-    //
-    // (a) `dyn.hasOwn` — Node's HasProperty re-check (see the SNAPSHOT note).
-    //
-    // (b) the key's value is not the undefined dyn value. This exists because a
-    // RECORD reaching an `object`/`unknown` slot converts through `dynFrom`,
-    // whose record arm publishes every DECLARED slot — so a converted record
-    // carries a key for each of its optional fields whether the field was
-    // OMITTED or written EXPLICITLY undefined, because the record
-    // representation stores the same undefined arm for both and cannot tell
-    // them apart. Node can: `for (const k in {})` visits nothing and
-    // `for (const k in {u: undefined})` visits `u`.
-    //
-    // So the two cases are indistinguishable HERE, and the choice is which of
-    // them to be right about. This skips, i.e. it is right about the OMITTED
-    // one and wrong about the explicit one, for three reasons:
-    //
-    //  1. Omitted is overwhelmingly the common case, and it is the one that
-    //     matters: zapo's `hasAnyKey(ctx)` (message/context-info.ts:231) asks
-    //     "does this context carry anything at all" of a record whose fields
-    //     are all optional, and publishing all of them makes it answer YES
-    //     always — a silent wrong answer on every outbound message.
-    //  2. It is confined to for-in over a dyn. The alternative — teaching the
-    //     CONVERTER to drop undefined-arm slots — was implemented, measured,
-    //     and REVERTED: it is a global change to every record-to-dyn
-    //     conversion, and it broke two corpus entries that pin Node's answer
-    //     for the explicit case through other consumers (`2462-qs-stringify`
-    //     T13, whose comment says so in as many words, and
-    //     `1771-assert-dyn-deep`, where Node distinguishes {a:1,b:undefined}
-    //     from {a:1}). Both were byte-exact against Node before that change.
-    //     The approximation belongs where the ambiguity is, not everywhere.
-    //  3. For a dyn that did NOT come through a converter, the test is very
-    //     nearly free: JSON has no `undefined`, so a JSON.parse result can
-    //     never hold one, and those receivers are exactly the ones for which
-    //     `hasOwn` alone is already exact.
-    //
-    // The residual divergence — a dyn that genuinely holds an explicit
-    // undefined under a key — is recorded here rather than pinned, because
-    // pinning it would pin an answer Node disagrees with.
+    // One condition per visit: Node's HasProperty re-check (see the SNAPSHOT note). A key the walk listed is visited while the receiver
+    // still has it, whatever it holds: an own key holding `undefined` is a key (`for (const k in {u: undefined})` visits `u`), and
+    // the checked-dynamic tree keeps the two cases apart (its undefined kind is a stored value, an omitted key is not stored). A
+    // record that crossed into the tree publishes only the members it HAS (the converter's presence-gated store), so a record whose
+    // optional members were omitted lists none of them, as before.
     const guard = (kRef: IrExpr): IrExpr => ({
       kind: "logical",
       op: "||",
@@ -12055,30 +12020,7 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
       // visited as long as no member shadows it. These keys are not own properties, so the own-key
       // checks below do not apply to them.
       left: { kind: "libCall", fn: "dyn.forInCertain", args: [dRef(), kRef], type: BOOL, loc },
-      right: {
-        kind: "logical",
-        op: "&&",
-        left: { kind: "libCall", fn: "dyn.forInPlain", args: [dRef(), kRef], type: BOOL, loc },
-        // The value arm, or an own enumerable ACCESSOR key (Node visits it without running its getter; its
-        // value would be the getter's answer, which may be undefined).
-        right: {
-          kind: "logical",
-          op: "||",
-          left: { kind: "libCall", fn: "dyn.forInAccessor", args: [dRef(), kRef], type: BOOL, loc },
-          right: {
-            kind: "dynTest",
-            test: "undefined",
-            negated: true,
-            value: { kind: "dynKeyGet", key: kRef, value: dRef(), type: DYN, loc },
-            type: BOOL,
-            loc,
-          },
-          type: BOOL,
-          loc,
-        },
-        type: BOOL,
-        loc,
-      },
+      right: { kind: "libCall", fn: "dyn.forInPlain", args: [dRef(), kRef], type: BOOL, loc },
       type: BOOL,
       loc,
     });

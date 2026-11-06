@@ -25476,6 +25476,12 @@
     "<repo>/tests/corpus/24495-prototype-data-for-in-lists-inherited-names.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/24438-for-in-over-a-dynamic-receiver-lists-a-key-that-holds-undefined.ts": {
+   "order": [
+    "<repo>/tests/corpus/24438-for-in-over-a-dynamic-receiver-lists-a-key-that-holds-undefined.ts"
+   ],
+   "diags": []
   }
  }
 }
