@@ -13498,6 +13498,21 @@ class LlEmitter {
    * yielded value moves out of the OUT slot into its arm of V (retagging
    * arm-wise into a superset V); once done, a present completion value
    * wraps the same way and an empty OUT is JS's undefined. */
+  /** The own-key mask stores of a generator result built whole: `value` and `done` are both own keys, an undefined value
+   * included. Empty when the shape did not arm the mask. */
+  private genResultOwnStores(shape: IrRecordShape, shapeId: string): string[] {
+    const out: string[] = [];
+    let n = 0;
+    for (const st of presenceMaskStores(shape, [{ name: "done", own: true }, { name: "value", own: true }]) ?? []) {
+      out.push(
+        `  %own${n} = getelementptr inbounds %${mangleRecordStruct(shapeId)}, ptr %r, i64 0, i32 ${ownMaskSlotIndex(shape)}, i64 ${st.byte}`,
+        `  store i8 ${st.value}, ptr %own${n}`,
+      );
+      n++;
+    }
+    return out;
+  }
+
   private genResultThunkFor(genT: IrType & { kind: "generator" | "asyncGenerator" }, recT: IrType & { kind: "record" }): string {
     const key = `gr:${typeKey(genT)}`;
     let sym = this.resolveThunks.get(key);
@@ -13525,6 +13540,7 @@ class LlEmitter {
         `  %dz = zext i1 %d to i8`,
         `  %dp = getelementptr inbounds %${mangleRecordStruct(recT.shapeId)}, ptr %r, i64 0, i32 ${doneIdxD + 1}`,
         `  store i8 %dz, ptr %dp`,
+        ...this.genResultOwnStores(shape, recT.shapeId),
         `  %has = call zeroext i1 @scr_gen_out_has(ptr %g)`,
         `  br i1 %has, label %take, label %undefv`,
         `take:`,
@@ -13568,6 +13584,7 @@ class LlEmitter {
       `  %dz = zext i1 %d to i8`,
       `  %dp = getelementptr inbounds %${mangleRecordStruct(recT.shapeId)}, ptr %r, i64 0, i32 ${doneIdx + 1}`,
       `  store i8 %dz, ptr %dp`,
+      ...this.genResultOwnStores(shape, recT.shapeId),
       `  br i1 %d, label %doneb, label %susp`,
     ];
     const undefRef = this.unitInstanceRef(valueT.unionId, undefTag);
