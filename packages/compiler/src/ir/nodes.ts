@@ -1779,6 +1779,10 @@ export interface IrClassDef {
    * (first parameter the receiver). Only classes the program boxes into
    * dyn carry the list. */
   dynMethods?: { name: string; fn: string }[];
+  /** Prototype data a boxed class inherits (`C.prototype.name = v`) under a name that is also a field of its instances: the
+   * field row answers this module function (no parameters, the datum as a dyn value) while the instance field is unset, which
+   * is the lookup Node performs for an inherited property. */
+  dynFieldData?: { name: string; fn: string }[];
   /** The STATIC side of a class a dyn box can hold, as module functions with
    * no receiver: static methods (`name` -> the `%C.static:name` function),
    * static getters and static field reads (`get:name` -> the function that

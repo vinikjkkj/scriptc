@@ -14258,7 +14258,9 @@ bool scr_dyn_has_own(const ScrDyn *v, const ScrStr *key) {
      * be a key that table holds, and "false" would be a confident wrong
      * answer where the fence is an honest one. */
     const ScrDynClassMember *cm = scr_dyn_objinst_member(v, key->data, key->len);
-    if (cm != NULL) return cm->enumerable && !(cm->get != NULL && scr_dyn_member_hidden(cm, v->v.inst.o) && cm->enumerable == 4);
+    /* A field that does not exist until its write runs (enumerable 2/3: undefined means unset; 4: the absent marker) is not OWN
+     * while unset: a name only the prototype carries is inherited, as `"k" in x` already says. */
+    if (cm != NULL) return cm->enumerable && !(cm->get != NULL && scr_dyn_member_hidden(cm, v->v.inst.o));
     /* An emitter's own state cells (_events, _eventsCount, _maxListeners) are own properties; its
      * EventEmitter.prototype members are not. */
     if (scr_dyn_ee_ops != NULL && scr_dyn_objinst_emitter(v) != NULL && scr_dyn_ee_ops->is_state(key->data, key->len)) return true;

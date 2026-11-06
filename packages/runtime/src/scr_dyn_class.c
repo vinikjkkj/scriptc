@@ -1398,9 +1398,24 @@ static ScrDyn *dyn_forin_keys_core(const ScrDyn *v) {
   return keys;
 }
 
+/* A field row with prototype data (row->value) whose field is still unset: the name is an enumerable INHERITED property. */
+static bool dyn_cls_datum_member_unset(const ScrDyn *v, const ScrDynClassMember *m) {
+  return m->value != NULL && m->get != NULL && m->name[0] != '%' && m->enumerable >= 2 && scr_dyn_member_hidden(m, v->v.inst.o);
+}
+
 ScrDyn *scr_dyn_forin_keys(const ScrDyn *v) {
   ScrDyn *keys = dyn_forin_keys_core(v);
   if (keys == NULL || v->kind != SCR_DYN_OBJINST || keys->kind != SCR_DYN_ARR) return keys;
+  {
+    const ScrDynClass *dc = scr_dyn_objinst_class_of(v);
+    for (size_t i = 0; i < dc->nmembers; i++) {
+      const ScrDynClassMember *m = &dc->members[i];
+      if (!dyn_cls_datum_member_unset(v, m)) continue;
+      ScrDyn *k = dyn_cls_objwalk_key(m->name, m->len);
+      if (!dyn_keys_has(keys, k)) scr_dyn_arr_push(keys, k);
+      else scr_dyn_release(k);
+    }
+  }
   ScrDyn *pk = dyn_cls_objinst_proto_keys(v); /* the prototype table's enumerable keys follow the own ones */
   if (pk == NULL) return keys;
   for (size_t i = 0; i < pk->v.arr.len; i++) {
@@ -1415,6 +1430,10 @@ ScrDyn *scr_dyn_forin_keys(const ScrDyn *v) {
 /* Is `s` one of the class's prototype-table keys (an enumerable inherited property for-in visits)? */
 static bool dyn_cls_proto_key_visited(const ScrDyn *v, const char *s, size_t n) {
   if (v->kind != SCR_DYN_OBJINST) return false;
+  {
+    const ScrDynClassMember *dm = scr_dyn_objinst_member(v, s, n);
+    if (dm != NULL && dyn_cls_datum_member_unset(v, dm)) return true;
+  }
   ScrDyn *pk = dyn_cls_objinst_proto_keys(v);
   if (pk == NULL) return false;
   bool hit = false;

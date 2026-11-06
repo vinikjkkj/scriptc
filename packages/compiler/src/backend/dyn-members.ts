@@ -68,7 +68,7 @@ export type DynMemberRow =
   /** A declared FIELD: the emitter reads the struct slot and boxes it
    * through the toDyn walker the type already has. Enumerable — this is
    * what Object.keys and JSON.stringify report. */
-  | { kind: "field"; name: string; type: IrType; absentWhenUndefined: boolean; ordk: number; hidden?: true }
+  | { kind: "field"; name: string; type: IrType; absentWhenUndefined: boolean; ordk: number; hidden?: true; data?: IrFunction }
   /** A GETTER (`get:prop`): the emitter calls `fn` with the instance and
    * boxes the result. NOT enumerable, matching JS. */
   | { kind: "accessor"; name: string; fn: IrFunction; isStatic?: true; enumerable?: true }
@@ -334,7 +334,13 @@ export function dynMemberTable(
     }
     seen.add(f.name);
     const ordinal = ORDER_PLAN?.ordinalOf(cls.def.name, f.name) ?? null;
-    rows.push({ kind: "field", name: f.name, type: f.type, absentWhenUndefined: cls.def.absentFields?.includes(f.name) === true, ordk: ordinal === null ? 0 : ordinal + 1 });
+    // Prototype data under this field's name (nearest class first, like the prototype chain): what an unset field reads.
+    let data: IrFunction | undefined;
+    for (let c: DynMemberClass | null = cls; c !== null && data === undefined; c = c.base) {
+      const d = c.def.dynFieldData?.find((x) => x.name === f.name);
+      if (d !== undefined) data = fnByName.get(d.fn);
+    }
+    rows.push({ kind: "field", name: f.name, type: f.type, absentWhenUndefined: cls.def.absentFields?.includes(f.name) === true, ordk: ordinal === null ? 0 : ordinal + 1, ...(data !== undefined ? { data } : {}) });
     pushShadows(f.name);
   }
   // A grafted class's emitter keys: rows born where the order record notes them (see "eeCell").

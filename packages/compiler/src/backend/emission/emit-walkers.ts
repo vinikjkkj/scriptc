@@ -236,9 +236,22 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
           `}`,
           ``,
         );
+        // Prototype data under the field's name: the row's VALUE function is what an unset field reads (inherited lookup).
+        let dataFn = "";
+        if (row.data !== undefined) {
+          const dsym = `sc_dclv_${E.dynClassMemberFns++}`;
+          E.walkerProtos.push(`${E.link}ScrDyn *${dsym}(void); /* member inherited value ${className}.${row.name} */`);
+          defs.push(
+            `${E.link}ScrDyn *${dsym}(void) { /* member inherited value ${className}.${row.name} */`,
+            `  return ${mangleFunction(row.data.name)}();`,
+            `}`,
+            ``,
+          );
+          dataFn = `, &${dsym}`;
+        }
         entries.push(
           `  { ${cStringLiteral(Buffer.from(row.name, "utf8"))}, ${Buffer.byteLength(row.name, "utf8")}, ` +
-            `&${sym}, NULL, ${row.hidden === true ? 0 : row.absentWhenUndefined ? 2 : row.type.kind === "dyn" ? 4 : 1}, ${row.ordk} },`,
+            `&${sym}, NULL, ${row.hidden === true ? 0 : row.absentWhenUndefined ? 2 : row.type.kind === "dyn" ? 4 : 1}, ${row.ordk}${dataFn} },`,
         );
         continue;
       }

@@ -5641,7 +5641,20 @@ export class LlDyn {
           `}`,
           ``,
         );
-        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 ${row.hidden === true ? 0 : row.absentWhenUndefined ? 2 : row.type.kind === "dyn" ? 4 : 1}, i8 ${row.ordk}, ptr null }`);
+        // Prototype data under the field's name: the row's VALUE function is what an unset field reads (inherited lookup).
+        let dataRef = "null";
+        if (row.data !== undefined) {
+          const dsym = `sc_dclv_${this.classMemberFns++}`;
+          this.defs.push(
+            `define internal ptr @${dsym}() ${FN_ATTRS} { ; member inherited value ${className}.${row.name}`,
+            `  %r = call ptr @${mangleFunction(row.data.name)}()`,
+            `  ret ptr %r`,
+            `}`,
+            ``,
+          );
+          dataRef = `@${dsym}`;
+        }
+        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 ${row.hidden === true ? 0 : row.absentWhenUndefined ? 2 : row.type.kind === "dyn" ? 4 : 1}, i8 ${row.ordk}, ptr ${dataRef} }`);
         continue;
       }
 

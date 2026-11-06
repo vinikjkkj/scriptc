@@ -9230,6 +9230,25 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
     for (const name of info.shadowFields ?? []) {
       if (always || L.wantBody(`%${className}.${name}`)) out.push(shadowMethodFn(L, info, name));
     }
+    // Prototype data (`C.prototype.name = v`) under a name that is also a field of the instances: a boxed instance whose field is
+    // still unset answers the datum through its member row (the inherited lookup of a dynamic-key read).
+    if (L.reachable?.has(`%${className}.%dynbox`) === true || L.reachable?.has(`%${className}.%dynset`) === true) {
+      for (const [dname, slot] of L.protoDataSlots.get(className) ?? []) {
+        if (!info.fields.has(dname) || (slot.type.kind !== "dyn" && !canConvertToDyn(slot.type, (id) => L.shapes.get(id), (id) => L.unions.get(id)))) continue;
+        const dloc = locOf(info.decl!);
+        const ref: IrExpr = { kind: "varRef", localId: slot.global.id, type: slot.type, loc: dloc };
+        const fnName = `%${className}.%dynpd:${dname}`;
+        out.push({
+          name: fnName,
+          params: [],
+          returnType: DYN,
+          locals: [],
+          body: [{ kind: "return", value: slot.type.kind === "dyn" ? ref : { kind: "dynFrom", value: ref, type: DYN, loc: dloc }, loc: dloc }],
+          loc: dloc,
+        });
+        info.def.dynFieldData = [...(info.def.dynFieldData ?? []), { name: dname, fn: fnName }];
+      }
+    }
     // A class the program boxes into a dyn value (the discovery pass left
     // its marker) lists the default instances of its implicit-any methods.
     if (info.genericMethods !== undefined && L.reachable?.has(`%${className}.%dynbox`) === true) {

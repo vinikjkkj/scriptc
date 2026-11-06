@@ -1865,6 +1865,11 @@ ScrDyn *scr_dyn_objinst_member_get(ScrDyn *d, const ScrStr *key) {
   if (cm == NULL) return NULL;
   if (cm->get != NULL) {
     ScrDyn *v = cm->get(d->v.inst.o);
+    /* An unset field under a name the class inherits as prototype data reads the datum (Node's lookup reaches the prototype). */
+    if (cm->value != NULL && v != NULL && v->kind == SCR_DYN_UNDEF) {
+      scr_dyn_release(v);
+      return cm->value();
+    }
     /* A grafted emitter's keys before EventEmitter.call(this) ran read as the prototype's own values: _eventsCount is 0
      * (the other two are undefined, which the absent marker already reads as). */
     if (v == scr_dyn_absent() && cm->enumerable == 4 && key->len == 12 && memcmp(key->data, "_eventsCount", 12) == 0 &&
