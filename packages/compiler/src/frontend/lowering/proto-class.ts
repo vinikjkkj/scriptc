@@ -494,7 +494,19 @@ export function findProtoClasses(sf: ts.SourceFile): ProtoClass[] {
         // An enumerable prototype datum would list on for-in and is not a row of the instance.
         const enumerable = ts.isObjectLiteralExpression(a2) ? a2.properties.find((p) => ts.isPropertyAssignment(p) && p.name.getText() === "enumerable") : undefined;
         const enumTrue = enumerable !== undefined && ts.isPropertyAssignment(enumerable) && enumerable.initializer.kind !== ts.SyntaxKind.FalseKeyword;
-        if (!ts.isStringLiteralLike(a1) || !isData || !keys.includes("value") || enumTrue) {
+        // A getter-only accessor `{ get: function name() { ... } }` (denque's `length`): a read of the name answers the
+        // function's result with the receiver as `this`, so it registers as the class's `get:<name>` member.
+        const getProp = ts.isObjectLiteralExpression(a2)
+          ? a2.properties.find((p): p is ts.PropertyAssignment => ts.isPropertyAssignment(p) && p.name.getText() === "get")
+          : undefined;
+        const accessorOnly = getProp !== undefined && ts.isObjectLiteralExpression(a2) &&
+          a2.properties.every((p) => ts.isPropertyAssignment(p) && ["get", "enumerable", "configurable"].includes(p.name.getText()));
+        if (ts.isStringLiteralLike(a1) && accessorOnly && getProp !== undefined && !enumTrue &&
+            ts.isFunctionExpression(getProp.initializer) && !getProp.initializer.asteriskToken &&
+            !getProp.initializer.modifiers?.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword) && getProp.initializer.parameters.length === 0) {
+          if (c.methods.some((m) => m.name === `get:${a1.text}`)) c.bailouts.push(`prototype accessor '${a1.text}' defined more than once`);
+          else c.methods.push({ name: `get:${a1.text}`, fn: getProp.initializer });
+        } else if (!ts.isStringLiteralLike(a1) || !isData || !keys.includes("value") || enumTrue) {
           c.bailouts.push("prototype defineProperty with a non-data or unreadable descriptor @" + n.getStart());
         } else if (!literal || valueProp === undefined) {
           c.bailouts.push(`prototype data '${a1.text}' is not a literal value @` + n.getStart());
