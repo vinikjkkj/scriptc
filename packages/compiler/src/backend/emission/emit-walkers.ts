@@ -2611,7 +2611,22 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             const kt0 = shape.fields.length > 0 ? keysName : "NULL";
             const lt0 = shape.fields.length > 0 ? lensName : "NULL";
             d.push(`    if (d->kind == SCR_DYN_JSVAL) {`);
-            d.push(`      sc_proj = scr_dyn_rec_from_jsval(d, ${kt0}, ${lt0}, ${shape.fields.length}, ${jsv.allOwn ? "true" : "false"});`);
+            // A shape with function-typed members reads an engine function there as the METHOD of its receiver (bound): the
+            // member table marks which members those are. A shape without any keeps the plain read and emits no table.
+            const fnFlags = shape.fields.map((f) => typeMayHoldFunc(E, f.type));
+            if (fnFlags.some((x) => x)) {
+              const flagsName = `sc_kgf_${t.shapeId}`;
+              if (!E.recWideTables.has(`fn:${t.shapeId}`)) {
+                E.recWideTables.add(`fn:${t.shapeId}`);
+                E.walkerData(
+                  `extern const unsigned char ${flagsName}[];`,
+                  `${E.link}const unsigned char ${flagsName}[] = { ${fnFlags.map((x) => (x ? "1" : "0")).join(", ")} };`,
+                );
+              }
+              d.push(`      sc_proj = scr_dyn_rec_from_jsval_fn(d, ${kt0}, ${lt0}, ${shape.fields.length}, ${jsv.allOwn ? "true" : "false"}, ${flagsName});`);
+            } else {
+              d.push(`      sc_proj = scr_dyn_rec_from_jsval(d, ${kt0}, ${lt0}, ${shape.fields.length}, ${jsv.allOwn ? "true" : "false"});`);
+            }
             d.push(`    } else {`);
           }
           if (inst) {
