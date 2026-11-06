@@ -6309,6 +6309,8 @@ export class Lowerer {
       for (const e of flowEdges) if (needs.has(e.src) && !needs.has(e.dst) && eligible(e.dst) && this.shapes.get(e.dst)?.keyOrders === undefined) { needs.add(e.dst); ch = true; }
     }
     const matters = new Set<string>([...this.enumeratedRecords]);
+    // An index-signature target enumerates in insertion order, which is the order the copy wrote: it always matters.
+    for (const c of this.listConsumers) if (this.shapes.get(c.dst)?.indexValue) matters.add(c.dst);
     for (let ch = true; ch;) {
       ch = false;
       for (const e of flowEdges) if (matters.has(e.dst) && !matters.has(e.src)) { matters.add(e.src); ch = true; }
