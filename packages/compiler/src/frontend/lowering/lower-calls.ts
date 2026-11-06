@@ -7986,6 +7986,12 @@ function lowerUtilTypesCall(L: Lowerer, call: ts.CallExpression, bi: { module: s
     ) {
       return { kind: "boolLit", value: arg.type.elem !== "buf", type: BOOL, loc };
     }
+    // The checker's type for the operand is dyn but its lowered value is another representation that boxes into a dyn (a narrowed-to-never
+    // reference whose local still holds its declared union, a record...): ask the box. dynFrom keeps a u8 view as SCR_DYN_BYTES and a
+    // Buffer-flavored arraybuffer as SCR_DYN_ARRBUF, so the answer is the same kind test the dyn operand gets.
+    if (argT !== null && argT.kind === "dyn" && arg.type.kind !== "bytes" && L.dynConvertible(arg.type) && pureReemittable(arg)) {
+      return { kind: "dynTest", test: "bytes", value: { kind: "dynFrom", value: arg, type: DYN, loc }, type: BOOL, loc };
+    }
     // Probed as one of the two and lowered to neither — a computed
     // `bytes` operand (folding it would DROP the call, the fold
     // discipline's whole point) or a bridge out of dyn. Committed now, so
