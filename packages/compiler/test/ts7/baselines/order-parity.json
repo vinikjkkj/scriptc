@@ -13182,6 +13182,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24410-a-generator-done-value-of-type-any-is-carried-exactly.ts": {
+   "order": [
+    "<repo>/tests/corpus/24410-a-generator-done-value-of-type-any-is-carried-exactly.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24411-a-generator-return-value-under-the-default-treturn-reads-back.ts": {
+   "order": [
+    "<repo>/tests/corpus/24411-a-generator-return-value-under-the-default-treturn-reads-back.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24412-an-iterator-result-prints-value-then-done-and-keeps-an-undefined-value.ts": {
+   "order": [
+    "<repo>/tests/corpus/24412-an-iterator-result-prints-value-then-done-and-keeps-an-undefined-value.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24413-class-and-async-generator-results-print-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/24413-class-and-async-generator-results-print-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/24415-records-built-in-two-key-orders-print-and-serialize-in-their-own-order.ts": {
    "order": [
     "<repo>/tests/corpus/24415-records-built-in-two-key-orders-print-and-serialize-in-their-own-order.ts"
