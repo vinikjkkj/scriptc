@@ -2118,6 +2118,126 @@ static ScrDyn *scr_isl_call_thunk(ScrClosure *clo, ScrDyn *const *args, size_t a
   return r; /* +1, or NULL with the engine's exception pending */
 }
 
+/* ── identity of an engine function across crossings ───────────────────────────────────────────────────────────────────
+ * Node hands the SAME function object each time `field.buffer` is read, and a function stored and cast again is the same function. The
+ * typed side is filled by an adapter closure per cast, so the adapters the two engine boxes above produce are REMEMBERED, keyed by the
+ * engine object (the receiver and member name for a bound method, the function itself for a plain one) and by the adapter's code (its
+ * target signature), and found again by the same engine object.
+ *
+ * Bounded by liveness, not by count. The table does NOT own its adapters: an adapter carries a sentinel capture whose release unlinks
+ * the entry, so an entry exists exactly while its adapter does. The engine object an entry names is kept alive by the adapter itself
+ * (through its boxed function), never by the table, so there is no cycle and nothing outlives the typed value that holds it. */
+typedef struct ScrFnAdEnt {
+  struct ScrFnAdEnt *next;
+  uintptr_t ident; /* the engine object's identity word */
+  uint32_t hash;
+  ScrStr *name; /* the member name (bound method), NULL for a plain function; owned */
+  const void *code;
+  ScrClosure *clo; /* the adapter: NOT owned (the entry dies with it) */
+} ScrFnAdEnt;
+static ScrFnAdEnt **scr_fnad_tab = NULL;
+static size_t scr_fnad_cap = 0;
+static size_t scr_fnad_count = 0;
+
+static uint32_t scr_fnad_hash(uintptr_t ident, const ScrStr *name, const void *code) {
+  uint64_t h = (uint64_t)ident * 0x9E3779B97F4A7C15ull ^ (uint64_t)(uintptr_t)code * 0xC2B2AE3D27D4EB4Full;
+  if (name != NULL) {
+    for (size_t i = 0; i < name->len; i++) h = (h ^ (uint8_t)name->data[i]) * 0x100000001B3ull;
+  }
+  return (uint32_t)(h ^ (h >> 32));
+}
+
+/* The engine identity a boxed function stands for, or false when it is not one of the two engine boxes. */
+static bool scr_fnad_key(const ScrDyn *d, uintptr_t *ident, ScrStr **name) {
+  if (d->kind != SCR_DYN_FUNC) return false;
+  bool bound = d->v.fn.thunk == scr_isl_bound_thunk;
+  if (!bound && d->v.fn.thunk != scr_isl_call_thunk) return false;
+  ScrDyn *obj = (ScrDyn *)scr_box_get_ref(d->v.fn.clo->caps[0]); /* +1 */
+  *ident = scr_dyn_jsval_ops()->ident(obj->v.jsval.cell);
+  scr_dyn_release(obj);
+  *name = NULL;
+  if (bound) {
+    ScrDyn *nm = (ScrDyn *)scr_box_get_ref(d->v.fn.clo->caps[1]);
+    *name = scr_str_retain(nm->v.str);
+    scr_dyn_release(nm);
+  }
+  return *ident != 0;
+}
+
+ScrClosure *scr_dyn_fn_adapter_find(const ScrDyn *d, const void *code) {
+  uintptr_t ident;
+  ScrStr *name;
+  if (scr_fnad_count == 0 || !scr_fnad_key(d, &ident, &name)) return NULL;
+  uint32_t h = scr_fnad_hash(ident, name, code);
+  ScrClosure *hit = NULL;
+  for (ScrFnAdEnt *e = scr_fnad_tab[h & (scr_fnad_cap - 1)]; e != NULL; e = e->next) {
+    if (e->hash == h && e->ident == ident && e->code == code && (e->name == NULL) == (name == NULL) &&
+        (name == NULL || (e->name->len == name->len && memcmp(e->name->data, name->data, name->len) == 0))) {
+      hit = scr_closure_retain(e->clo);
+      break;
+    }
+  }
+  scr_str_release(name);
+  return hit;
+}
+
+/* The sentinel capture of a remembered adapter: its release is the adapter's death. */
+static void *scr_fnad_sentinel_retain(void *p) { return p; }
+static void scr_fnad_sentinel_release(void *p) {
+  ScrFnAdEnt *e = (ScrFnAdEnt *)p;
+  ScrFnAdEnt **pp = &scr_fnad_tab[e->hash & (scr_fnad_cap - 1)];
+  while (*pp != NULL && *pp != e) pp = &(*pp)->next;
+  if (*pp == e) *pp = e->next;
+  scr_fnad_count--;
+  scr_str_release(e->name);
+  free(e);
+}
+
+static void scr_fnad_grow(void) {
+  size_t ncap = scr_fnad_cap == 0 ? 64 : scr_fnad_cap * 2;
+  ScrFnAdEnt **nt = calloc(ncap, sizeof *nt);
+  if (nt == NULL) {
+    fprintf(stderr, "scriptc: out of memory\n");
+    abort();
+  }
+  for (size_t i = 0; i < scr_fnad_cap; i++) {
+    ScrFnAdEnt *e = scr_fnad_tab[i];
+    while (e != NULL) {
+      ScrFnAdEnt *nx = e->next;
+      e->next = nt[e->hash & (ncap - 1)];
+      nt[e->hash & (ncap - 1)] = e;
+      e = nx;
+    }
+  }
+  free(scr_fnad_tab);
+  scr_fnad_tab = nt;
+  scr_fnad_cap = ncap;
+}
+
+/* `adapter` was built with room for one more capture (caps[2]): the sentinel goes there. */
+void scr_dyn_fn_adapter_remember(const ScrDyn *d, const void *code, ScrClosure *adapter) {
+  uintptr_t ident;
+  ScrStr *name;
+  if (!scr_fnad_key(d, &ident, &name)) return;
+  if (scr_fnad_count >= scr_fnad_cap * 2) scr_fnad_grow();
+  ScrFnAdEnt *e = calloc(1, sizeof *e);
+  if (e == NULL) {
+    fprintf(stderr, "scriptc: out of memory\n");
+    abort();
+  }
+  e->ident = ident;
+  e->name = name; /* the +1 */
+  e->code = code;
+  e->clo = adapter;
+  e->hash = scr_fnad_hash(ident, name, code);
+  e->next = scr_fnad_tab[e->hash & (scr_fnad_cap - 1)];
+  scr_fnad_tab[e->hash & (scr_fnad_cap - 1)] = e;
+  scr_fnad_count++;
+  ScrBox *sb = scr_box_new_obj(scr_fnad_sentinel_retain, scr_fnad_sentinel_release, NULL);
+  scr_box_set_ref(sb, e); /* owns e: the box's release is the unlink */
+  adapter->caps[2] = sb;
+}
+
 bool scr_dyn_isl_is_u8(const ScrDyn *d) { return d->kind == SCR_DYN_JSVAL && scr_dyn_jsval_ops()->is_u8(d->v.jsval.cell); }
 
 ScrBytes *scr_dyn_isl_exit_u8(const ScrDyn *d) { return scr_dyn_jsval_ops()->exit_u8(d->v.jsval.cell); }
