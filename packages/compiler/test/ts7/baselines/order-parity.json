@@ -13549,6 +13549,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24439-object-entries-and-values-over-an-untyped-receiver-keep-the-dyn-values.ts": {
+   "order": [
+    "<repo>/tests/corpus/24439-object-entries-and-values-over-an-untyped-receiver-keep-the-dyn-values.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2455-private-brand-checks.ts": {
    "order": [
     "<repo>/tests/corpus/2455-private-brand-checks.ts"

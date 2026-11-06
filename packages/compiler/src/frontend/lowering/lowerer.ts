@@ -2733,6 +2733,7 @@ export class Lowerer {
       declTwinClassDecl: (d) => this.declTwinClassDecl(d),
       accessorProducerProp: (sym) => this.accessorProducerProp(sym),
       nullPayloadPromiseProp: (sym) => this.nullPayloadPromiseProp(sym),
+      neverIsDyn: () => this.neverIsDynProgram(),
       unconstrainedTpArms: (tpDecl) => this.unconstrainedTpArms(tpDecl),
     };
     // --dynamic: modules reachable only through dynamic import() joined
@@ -18684,6 +18685,40 @@ export class Lowerer {
 
   /** Const bindings of `Object.assign(base, ...)` over a non-fresh index record: symbol -> the target's checker type (typeOf). */
   readonly assignAdoptTypes = new Map<ts.Symbol, ts.Type>();
+
+  private neverIsDynMemo: boolean | null = null;
+  /** Does any lowered file call Object.entries / Object.values where the checker typed the result with a `never` element? That is the
+   * checker's answer for an `object`-typed receiver (no index signature to infer a value type from); the values really are whatever the
+   * receiver holds, so in such a program `never` maps to the dyn representation. Decided once, over the lowered files. */
+  neverIsDynProgram(): boolean {
+    if (this.neverIsDynMemo !== null) return this.neverIsDynMemo;
+    this.neverIsDynMemo = false;
+    const sawNever = (call: ts.CallExpression): boolean => {
+      const text = this.checker.typeToString(this.typeOf(call));
+      return /(^|[^A-Za-z])never\[\]|, never\]/.test(text);
+    };
+    let found = false;
+    const visit = (n: ts.Node): void => {
+      if (found) return;
+      if (
+        ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) &&
+        ts.isIdentifier(n.expression.expression) && n.expression.expression.text === "Object" &&
+        (n.expression.name.text === "entries" || n.expression.name.text === "values") && sawNever(n)
+      ) {
+        found = true;
+        return;
+      }
+      ts.forEachChild(n, visit);
+    };
+    for (const sf of this.moduleOrder) {
+      const t = sf.text;
+      if (!t.includes("Object.entries") && !t.includes("Object.values")) continue;
+      visit(sf);
+      if (found) break;
+    }
+    this.neverIsDynMemo = found;
+    return found;
+  }
 
   nullPayloadPromiseProp(sym: ts.Symbol): boolean {
     this.nullPayloadPromiseCache ??= this.scanNullPayloadPromiseProps();
