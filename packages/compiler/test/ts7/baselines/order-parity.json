@@ -13543,6 +13543,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24547-process-next-tick-taken-as-a-value.js": {
+   "order": [
+    "<repo>/tests/corpus/24547-process-next-tick-taken-as-a-value.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2455-private-brand-checks.ts": {
    "order": [
     "<repo>/tests/corpus/2455-private-brand-checks.ts"
