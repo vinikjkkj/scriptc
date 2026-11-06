@@ -145,6 +145,7 @@ import { genIterableDrainCall } from "./lower-generators.js";
 import { dynBoxedMethodInstances, ClassInfo, ClassIteratorInfo, GenericClassInfo, registerBuiltinErrorClasses, registerBuiltinEmitterClass, registerBuiltinStreamClasses, builtinErrorInfoOf, builtinEmitterInfoOf, builtinStreamInfoOf, analyzeClassDecoration, classIteratorDrainCall, classIteratorNextCall, classIteratorOf, classIteratorOpenCall, classIteratorRestDrainCall, classMemberNameOf, symbolSlotAccessorName, classValueRef, collectClassShape, exactClassOfReceiver, collectClassShapeInner, ctorAbiEquals, findMethodOn, findStaticOn, findGenericMethodOn, findGenericStaticOn, genericClassInstanceType, isSubclassOf, inHierarchy, overrideBelow, staticShadowBelow, upcastTo, lowerClassMembers, lowerClassCtor, lowerClassExpression, lowerClassExpressionInfo, lowerClassMethodMember, lowerProtoMethodMember, lowerClassValueProperty, lowerConstructorName, lowerStaticMethod, throwingSetterFn, shadowMethodFn, fieldInitStmts, lowerStaticFieldInits, lowerStaticFieldRead, lowerDerivedCtorBody, superCallStmt, lowerSuperMethodCall, superThisRef, lowerSuperAccessorRead, lowerSuperAccessorWrite, inheritsBuiltinErrorCtor, inheritsBuiltinEmitterCtor, errorMessageArg, lowerNew, accessorCall, virtualViewFitsSlot, vtThunkFn, findStaticAccessorOn, staticAccessorWrite, staticCompoundTarget, genericOverrideBelow } from "./lower-classes.js";
 import { MixinFnShape, mixinCallClassInfoOf, mixinIntersectionInstanceType } from "./lower-mixins.js";
 import { EVAL_ENV_SYM, evalClassNodeHook } from "./lower-evalclass.js";
+import { liftEnvPlanOfSym, liftEnvRead, liftEnvFieldRead, dynRowValue, evalEnvBodyRead } from "./lower-capenv.js";
 import { lowerTimersSchedulerCall } from "./lower-builtins.js";
 import { detachedThisClassOf, ParamShape, FnSig, GenericFnInfo, GenericInstance, bindingNeverReassigned, bodyReadsArguments, isThisParameter, paramShape, paramShapes, checkDefaultParamBodyType, completeArgs, wrappedUndefined, undefinedArgFor, requireExactArityValue, bodyReturnType, declaredReturnType, collectSignature, collectSignatureInner, collectGenericSignature, genericFnOf, lowerGenericCall, lowerGenericFnValue, inferTypeParamBindings, lowerGenericInstance, lowerCall, reconcileOverloadMemberDyn, lowerFfiCall, lowerTimersMemberCall, lowerPromiseMethodCall, lowerFilterNarrowCall, isTopLevelFnSymbol, lowerNestedFunctionDecl, lambdaSignature, lowerLambda, lowerFunction, validateFfiImports, implicitDefaultInstance } from "./lower-calls.js";
 import { lowerArrayMethodCall, lowerBufferStaticCall, lowerBytesMethodCall, lowerBytesNew, lowerMapMethodCall, lowerMapForEachCall, buildMapForEachFn, lowerRecordOvfCaptureHelper, ovfCapturePlannable, dynSlotCheckOk, lowerEnvToPairsHelper, lowerSetMethodCall, lowerSetForEachCall, buildSetForEachFn, lowerRegexMethodCall, lowerStringMethodCall } from "./lower-containers.js";
@@ -596,6 +597,9 @@ export interface LowerOptions {
 export interface LowererMode {
   /** Names of bodies the discovery pass reached; null lowers everything. */
   reachable?: ReadonlySet<string> | null;
+  /** The capturing lifted classes whose method values the discovery pass read (lower-capenv.ts): only those pay for an
+   * evaluation object. Null mints one for every capturing class (the discovery pass itself). */
+  capEnvWanted?: ReadonlySet<string> | null;
   /** Coverage remainder: lower ONLY bodies outside `reachable`, skip the
    * always-reachable init bodies and module building, and report deferred
    * collection diagnostics nothing flushed. */
@@ -882,6 +886,7 @@ export function lowerToIr(
   const __ovfDeniedAfterDiscovery = new Set(overflowShapeKeysDenied);
   const emit = new Lowerer(program, entry, moduleOrder, dynamic, {
     reachable,
+    capEnvWanted: discovery.capEnvRequested,
     targetPlatform,
     startupCrash,
     ffiImports,
@@ -2586,6 +2591,10 @@ export class Lowerer {
   /** Names of bodies the discovery pass reached; null lowers everything
    * (the discovery pass itself). */
   readonly reachable: ReadonlySet<string> | null;
+  /** See LowererMode.capEnvWanted. */
+  readonly capEnvWanted: ReadonlySet<string> | null;
+  /** The capturing lifted classes whose method values this pass read: the discovery pass hands them to the emit pass. */
+  readonly capEnvRequested = new Set<string>();
   /** Coverage remainder mode: the reachability gate inverts (see wantBody)
    * and no module is built. */
   readonly remainder: boolean;
@@ -2682,6 +2691,7 @@ export class Lowerer {
     CLASS_NO_DYN_NEW.clear();
     CLASS_BUILTIN_CTORLESS.clear();
     this.reachable = mode.reachable ?? null;
+    this.capEnvWanted = mode.capEnvWanted ?? null;
     this.remainder = mode.remainder ?? false;
     this.alreadyFlushed = mode.alreadyFlushed ?? new Set();
     this.targetPlatform = mode.targetPlatform ?? process.platform;
@@ -5104,7 +5114,7 @@ export class Lowerer {
       const found = this.findMethodOn(c, mName);
       if (found === null || found.sig.abstract === true) continue;
       if (found.sig.params.some((q) => q.mode !== "required" && q.mode !== "omittable")) continue;
-      unboundMethodThunk(this, c, mName, found, { file: c.decl?.getSourceFile().fileName ?? "%dynbox", start: 0, end: 0 }, true);
+      dynRowValue(this, c, mName, found, { file: c.decl?.getSourceFile().fileName ?? "%dynbox", start: 0, end: 0 });
     }
     for (const sh of c.shadowFields ?? []) this.noteEdge(`%${c.def.name}.${sh}`);
     for (const [mName] of this.protoClassBodies.get(c.def.name) ?? []) {
@@ -17643,6 +17653,12 @@ export class Lowerer {
     const loc = locOf(at);
     // A per-evaluation class's own evaluation object, read from inside one
     // of its instance members: the hidden `%cls` field of `this`.
+    const liftPlan = liftEnvPlanOfSym(sym);
+    if (liftPlan !== undefined) return liftEnvRead(this, liftPlan, at);
+    if (sym === EVAL_ENV_SYM && this.currentClass) {
+      const viaEvalEnv = evalEnvBodyRead(this, this.currentClass, null, at);
+      if (viaEvalEnv !== null) return viaEvalEnv;
+    }
     if (sym === EVAL_ENV_SYM) {
       const cls = this.currentClass;
       const th = this.resolveThis(at);
@@ -17673,6 +17689,10 @@ export class Lowerer {
    * captured it: the hidden field of `this`. Null elsewhere. */
   capturedClassFieldRead(sym: ts.Symbol, at: ts.Node): IrExpr | null {
     const cls = this.currentClass;
+    if (cls !== null && cls !== undefined) {
+      const viaEvalEnv = evalEnvBodyRead(this, cls, sym, at);
+      if (viaEvalEnv !== null) return viaEvalEnv;
+    }
     // A per-evaluation class reads its captured binding off the evaluation
     // object its instance points at: this.%cls.%capN.
     // `const K = class {…}`: K inside the body is the class itself — this.%cls in
@@ -17720,6 +17740,8 @@ export class Lowerer {
     }
     const c = cls?.captures?.find((x) => x.sym === sym);
     if (cls === null || cls === undefined || c === undefined) return null;
+    const viaEnv = liftEnvFieldRead(this, cls, c, at);
+    if (viaEnv !== null) return viaEnv;
     const th = this.resolveThis(at);
     if (!th) return null;
     if (detachedThisClassOf(th) !== undefined) this.unsupported("SC1090", at, "a captured binding read through a detached receiver");

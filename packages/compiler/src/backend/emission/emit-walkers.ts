@@ -314,7 +314,26 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
       // `o[k] === x.m` compares equal by closure identity (scr_dyn_strict_eq).
       let valueFn = "NULL";
       const thunkName = !isStatic && fn.name.startsWith("%") ? `%unbound.${fn.name.slice(1)}%direct` : null;
-      if (thunkName !== null && E.fnByName.has(thunkName)) {
+      // A method of a class that captures locals is the function of the evaluation its instance points at: the compiled
+      // `%mvdyn.<C>.<m>()` answers the dyn box of that evaluation's memoized closure (the runtime parks the instance as `this`).
+      const mvName = !isStatic && fn.name.startsWith("%") ? `%mvdyn.${fn.name.slice(1)}` : null;
+      if (mvName !== null && E.fnByName.has(mvName)) {
+        const vsym = `sc_dclv_${E.dynClassMemberFns++}`;
+        E.walkerProtos.push(`${E.link}ScrDyn *${vsym}(void); /* member value ${className}.${row.name} (evaluation) */`);
+        const mfn = E.fnByName.get(mvName)!;
+        const mbox = dynFuncBoxHelper(E, mfn.returnType as IrType & { kind: "func" });
+        defs.push(
+          `${E.link}ScrDyn *${vsym}(void) { /* member value ${className}.${row.name} (evaluation) */`,
+          `  ScrClosure *c = ${mangleFunction(mvName)}();`,
+          `  if (scr_exc_pending()) return NULL;`,
+          `  ScrDyn *r = ${mbox}(c, ${cStringLiteral(Buffer.from(row.name, "utf8"))}, NULL);`,
+          `  scr_closure_release(c);`,
+          `  return r;`,
+          `}`,
+          ``,
+        );
+        valueFn = `&${vsym}`;
+      } else if (thunkName !== null && E.fnByName.has(thunkName)) {
         const tfn = E.fnByName.get(thunkName)!;
         E.fnValues.add(thunkName);
         const box = dynFuncBoxHelper(E, { kind: "func", params: tfn.params.map((q) => q.type), ret: tfn.returnType });

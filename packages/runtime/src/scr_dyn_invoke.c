@@ -1860,6 +1860,13 @@ static ScrDyn *objinst_method_thunk(ScrClosure *clo, ScrDyn *const *args, size_t
   return r;
 }
 
+ScrDyn *scr_dyn_member_value(ScrDyn *d, const ScrDynClassMember *cm) {
+  scr_dyn_this_push_dyn(d);
+  ScrDyn *r = cm->value();
+  scr_dyn_this_pop();
+  return r;
+}
+
 ScrDyn *scr_dyn_objinst_member_get(ScrDyn *d, const ScrStr *key) {
   const ScrDynClassMember *cm = scr_dyn_objinst_member(d, key->data, key->len);
   if (cm == NULL) return NULL;
@@ -1873,7 +1880,7 @@ ScrDyn *scr_dyn_objinst_member_get(ScrDyn *d, const ScrStr *key) {
     }
     return v;
   }
-  if (cm->value != NULL) return cm->value();
+  if (cm->value != NULL) return scr_dyn_member_value(d, cm);
   const ScrDynClass *cls = scr_dyn_objinst_class_of(d);
   ScrObjinstMethodFn *w = scr_objinst_fns;
   while (w != NULL && !(w->cls == cls && w->cm == cm)) w = w->next;

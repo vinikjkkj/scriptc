@@ -364,7 +364,7 @@ export function applyProtoSlots(L: Lowerer, fnLists: IrFunction[][]): void {
       const names: string[] = [];
       if (info.methods.has(m)) names.push(`%${cls}.${m}`);
       const gm = info.genericMethods?.get(m);
-      if (gm !== undefined) for (const inst of gm.instances.values()) if (inst.detachedThis !== true) names.push(inst.name);
+      if (gm !== undefined) for (const inst of gm.instances.values()) if (inst.detachedThis !== true && inst.envThis !== true) names.push(inst.name);
       for (const nm of names) {
         let host: IrFunction[] | undefined;
         for (const list of fnLists) if (list.some((f) => f.name === nm)) host = list;

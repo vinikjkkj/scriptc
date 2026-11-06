@@ -7386,6 +7386,9 @@ ScrDyn *scr_dyn_class_value(const ScrClassObj *c);
  * invoke unit beside scr_dyn_intrinsic_method_get, which the emitted
  * read already calls. */
 ScrDyn *scr_dyn_objinst_member_get(ScrDyn *d, const ScrStr *key);
+/* A method row's VALUE read off the instance `d` (cm->value != NULL). The value function takes no argument, but a class that
+ * captures locals answers the closure of the evaluation its instance points at, so the instance is the ambient `this` for the read. */
+ScrDyn *scr_dyn_member_value(ScrDyn *d, const struct ScrDynClassMember *cm);
 /* The keyed read's tail after %props and the table both missed: an
  * Object.prototype method as a bound function, `undefined` for a class whose
  * member set is fully known, the loud ladder for an `opaque` one. +1, or

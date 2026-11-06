@@ -18,6 +18,7 @@ import { cjsClassExprWholeExportOf, isCjsJsFile, isJsSourceFile, isModuleExports
 import { pairedProtoClassInfoFor, pairedProtoClassOfValue, protoClassArmOn, protoClassInfoFor, protoClassOfNamespaceMember, protoDataGetterFns } from "./proto-class-consume.js";
 import { PoisonError, dynFallbackType, dynUndefinedExpr, fnValueCodeOfNode, newFnCtx, own } from "./lowerer.js";
 import { isBufferSpeciesCtor, lowerFastBufferNew, bufEncoding, lowerMapCloneNew, lowerMapSeedArrayNew } from "./lower-containers.js";
+import { newLiftEnvPlan, registerLiftEnvClass, declareLiftEnvParam, dynRowValue, dynGenericRowValue, LIFT_ENV_FIELD } from "./lower-capenv.js";
 import { unboundMethodThunk, fnOwnCounters, fnOwnPropBox, fnOwnWhy, probeLower, pureReemittable } from "./lower-exprs.js";
 import { lowerDateNumArg, lowerSearchParamsNew } from "./lower-builtins.js";
 import { readFileSync } from "node:fs";
@@ -224,6 +225,8 @@ export interface ClassInfo {
    * constructor takes their values as trailing parameters and `new C` sites
    * pass them; reads of the binding inside the class read the field. */
   captures?: { sym: ts.Symbol; field: string; type: IrType }[];
+  /** A lifted local class that captures locals: its per-evaluation object (lower-capenv.ts). */
+  liftEnv?: import("./lower-capenv.js").LiftEnvPlan;
   /** PER-EVALUATION class (a class expression inside a function,
    * lower-evalclass.ts): the plan naming its static-side class and the
    * bindings that class carries. */
@@ -5072,6 +5075,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       // hidden trailing constructor parameters. The bindings are never
       // written, so the stored VALUE is the binding.
       let captures: { sym: ts.Symbol; field: string; type: IrType }[] | undefined;
+      let liftPlan: import("./lower-capenv.js").LiftEnvPlan | undefined;
       const evalPlan = ts.isClassExpression(decl) ? L.evalClassPlans.get(decl) : undefined;
       if (evalPlan !== undefined) {
         // A per-evaluation class: ONE hidden field holding the evaluation object.
@@ -5090,6 +5094,15 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           fieldOrder.push({ name: field, type: mapped, initializer: undefined });
           captures!.push({ sym: cs, field, type: mapped });
         });
+      }
+      if (evalPlan === undefined && captures !== undefined && ts.isClassDeclaration(decl) &&
+        (L.capEnvWanted === null || L.capEnvWanted.has(className) || L.reachable?.has(`%${className}.%dynset`) === true)) {
+        // The evaluation object this class declaration mints (lower-capenv.ts): every instance points at it.
+        liftPlan = newLiftEnvPlan(L, decl, className, captures.slice());
+        const liftEnvT: IrType = { kind: "object", className: liftPlan.envName };
+        fields.set(LIFT_ENV_FIELD, liftEnvT);
+        fieldOrder.push({ name: LIFT_ENV_FIELD, type: liftEnvT, initializer: undefined });
+        captures.push({ sym: liftPlan.envSym, field: LIFT_ENV_FIELD, type: liftEnvT });
       }
       const deferredInitFields = new Set<string>(base?.deferredInitFields ?? []);
       const nullableFields = new Set<string>(base?.nullableFields ?? []);
@@ -5861,6 +5874,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       }
       if (base) base.subclasses.push(info);
       L.classes.set(className, info);
+      if (liftPlan !== undefined) registerLiftEnvClass(L, info, liftPlan);
       // A NAMED class binds its name (declarations in their scope, class
       // expressions inside their own bodies — tsc resolves both to this
       // symbol); a nameless default-export declaration binds its module's
@@ -9225,6 +9239,10 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
     if (info.genericMethods !== undefined && L.reachable?.has(`%${className}.%dynbox`) === true) {
       const listed = dynBoxedMethodInstances(L, info);
       if (listed.length > 0) info.def.dynMethods = listed;
+      // The rows of a class that captures locals answer the closure of the evaluation the read instance points at.
+      if (info.liftEnv !== undefined) {
+        for (const row of listed) dynGenericRowValue(L, info, row.name, row.fn, info.genericMethods!.get(row.name)!, locOf(info.decl!));
+      }
     }
     // The prototype's constant data (defineProperty on the prototype) answers a boxed
     // instance's read as its member getters, exactly where a declared accessor would.
@@ -9244,7 +9262,7 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
         const found = L.findMethodOn(info, mName);
         if (found === null || found.sig.abstract === true) continue;
         if (found.sig.params.some((q) => q.mode !== "required" && q.mode !== "omittable")) continue;
-        unboundMethodThunk(L, info, mName, found, { file: info.decl?.getSourceFile().fileName ?? "%dynbox", start: 0, end: 0 }, true);
+        dynRowValue(L, info, mName, found, { file: info.decl?.getSourceFile().fileName ?? "%dynbox", start: 0, end: 0 });
       }
     }
     // The write half of the same box (see dynSetFn): every class a dyn box
@@ -9859,8 +9877,8 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
    * method has no plain body to vary (accessors, async and generator bodies, a `this` in a nested
    * function, a member the class declaration does not carry) -- the caller then keeps the receiver
    * check up front. */
-  export function detachedMethodVariant(L: Lowerer, info: ClassInfo, mName: string): string | null {
-    const name = `%detached.${info.def.name}.${mName}`;
+  export function detachedMethodVariant(L: Lowerer, info: ClassInfo, mName: string, envMode = false): string | null {
+    const name = envMode ? `%mvd.${info.def.name}.${mName}` : `%detached.${info.def.name}.${mName}`;
     if (L.liftedFns.some((f) => f.name === name)) return name;
     // A body that reads its own method as a value (`return this.readRow`) asks for the variant
     // it is lowering: the name is already committed to by then, so answer it.
@@ -9872,7 +9890,7 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
     const state = { hit: false };
     detachedVariantsInProgress.set(name, state);
     try {
-      return detachedVariantBody(L, info, mName, name, state);
+      return detachedVariantBody(L, info, mName, name, state, envMode);
     } finally {
       detachedVariantsInProgress.delete(name);
     }
@@ -9880,7 +9898,7 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
 
   const detachedVariantsInProgress = new Map<string, { hit: boolean }>();
 
-  function detachedVariantBody(L: Lowerer, info: ClassInfo, mName: string, name: string, state: { hit: boolean }): string | null {
+  function detachedVariantBody(L: Lowerer, info: ClassInfo, mName: string, name: string, state: { hit: boolean }, envMode = false): string | null {
     // A class that captures locals of its scope (a class declared in a function, an evaluated class) keeps those bindings in hidden
     // fields of the INSTANCE. A body that reads none of them runs over a detached receiver like any other; one that reads a binding
     // needs the instance's evaluation, which a detached receiver is not -- the read is refused under the variant's diagnostic sink
@@ -9889,7 +9907,8 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
     // (lower-ownshadow applyFieldNotes), which needs a plain-local receiver; the variant's `this` is a checked expression.
     if (L.ownShadowRoots.size > 0 && info.fields.has(CLASS_PROPS_FIELD)) return null;
     const member = info.decl?.members.find((m): m is ts.MethodDeclaration =>
-      ts.isMethodDeclaration(m) && m.body !== undefined && classMemberNameOf(L, m.name) === mName,
+      ts.isMethodDeclaration(m) && m.body !== undefined && classMemberNameOf(L, m.name) === mName &&
+      ((ts.getModifiers(m) ?? []).some((x) => x.kind === ts.SyntaxKind.StaticKeyword) === (info.evalStaticOf !== undefined)),
     );
     if (member === undefined) return null;
     const nested = (n: ts.Node): boolean => {
@@ -9912,7 +9931,7 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
     let fn: IrFunction | null = null;
     let poisoned = false;
     try {
-      fn = withInstanceBindings(L, info, () => lowerMethodBodyInner(L, info, mName, member, true));
+      fn = withInstanceBindings(L, info, () => lowerMethodBodyInner(L, info, mName, member, true, envMode));
     } catch (e) {
       if (!(e instanceof PoisonError)) {
         L.diagSink = saved;
@@ -9939,12 +9958,12 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
    * MethodDeclaration does. */
   function lowerMethodBodyInner(L: Lowerer, info: ClassInfo, mName: string,
     fnLike: ts.MethodDeclaration | ts.AccessorDeclaration | ts.FunctionExpression,
-    detached = false,): IrFunction | null {
+    detached = false, envMode = false,): IrFunction | null {
     const className = info.def.name;
     const thisType: IrType = detached ? DYN : { kind: "object", className };
     const sig = info.methods.get(mName);
     if (!sig || !fnLike.body) return null;
-    if (detached && (sig.async === true || sig.gen !== undefined)) return null;
+    if (detached && !envMode && (sig.async === true || sig.gen !== undefined)) return null;
     const prevClass = L.currentClass;
     L.currentClass = info;
     // ASYNC methods: the module function is an async IrFunction — its
@@ -9971,10 +9990,17 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
     fnCtx.isAsync = isAsync || sig.ret.kind === "asyncGenerator";
     if (genCh !== null) fnCtx.generator = genCh;
     if (genCh !== null && bodyReturn.kind === "void") fnCtx.genMethodDoneFence = true;
+    // An evaluation-carrying body is lowered in isolation: it may be reached while the DECLARING function lowers, whose locals
+    // (the captured bindings themselves) a nested frame would otherwise resolve instead of reading the evaluation.
+    const outerStack = envMode ? L.fnStack : null;
+    if (envMode) L.fnStack = [];
     L.fnStack.push(fnCtx);
     try {
       const thisLocal = L.declareThis(thisType);
       if (detached) markDetachedThis(thisLocal, className);
+      // A method VALUE of a capturing class runs against the evaluation it was read from: that object rides as a trailing
+      // parameter and the captured bindings read it, not the receiver (lower-capenv.ts).
+      const envParam = envMode ? declareLiftEnvParam(L, info) : null;
       const params: IrParam[] = [{ localId: thisLocal.id, name: "this", type: thisType }];
       // `this` is declared first, so method parameter DEFAULTS may use it
       // (JS allows this in method defaults; it is param 0 here).
@@ -9988,13 +10014,14 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
         params.push({ localId: argsLocal.id, name: "%arguments", type: DYN });
         if (sig.argsBound === true) bindArgumentsParams(L, fnLike.parameters, argsLocal, declared.prologue);
       }
+      if (envParam !== null) params.push(envParam);
       const body = [...declared.prologue, ...L.lowerStmts(fnLike.body.statements)];
       // A body that can complete without `return` answers undefined (a JS
       // method `if (x) return cb(); this.n++;`): the same trailing return
       // every function declaration and lambda gets.
       appendImplicitUndefinedReturn(L, body, bodyReturn, locOf(fnLike));
       const fn: IrFunction = {
-        name: detached ? `%detached.${className}.${mName}` : `%${className}.${mName}`,
+        name: envMode ? `%${detached ? "mvd" : "mva"}.${className}.${mName}` : detached ? `%detached.${className}.${mName}` : `%${className}.${mName}`,
         params,
         returnType: bodyReturn,
         locals: L.ctx.locals,
@@ -10006,6 +10033,7 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
       return fn;
     } finally {
       L.fnStack.pop();
+      if (outerStack !== null) L.fnStack = outerStack;
       L.currentClass = prevClass;
     }
   }
@@ -14667,4 +14695,27 @@ function dynShapedParamRead(L: Lowerer, stmt: ts.Statement): boolean {
   return d !== undefined && ts.isParameter(d) && isJsSourceFile(d.getSourceFile()) &&
     d.type === undefined && d.dotDotDotToken === undefined && d.initializer !== undefined &&
     ts.isObjectLiteralExpression(d.initializer) && d.initializer.properties.length === 0;
+}
+
+/** The ATTACHED-with-evaluation body of method `mName` of a capturing class (`%mva.C.m`): the declared body with a typed `this`
+ * and the evaluation object as a trailing parameter the captured bindings read (lower-capenv.ts). Null when the class has no such
+ * plain method. Reentrant: a body that reads its own method as a value asks for the function it is lowering. */
+const attachedEnvInProgress = new Set<string>();
+export function attachedEnvMethod(L: Lowerer, info: ClassInfo, mName: string): string | null {
+  const name = `%mva.${info.def.name}.${mName}`;
+  if (L.liftedFns.some((f) => f.name === name) || attachedEnvInProgress.has(name)) return name;
+  const member = info.decl?.members.find((m): m is ts.MethodDeclaration =>
+    ts.isMethodDeclaration(m) && m.body !== undefined && classMemberNameOf(L, m.name) === mName &&
+      ((ts.getModifiers(m) ?? []).some((x) => x.kind === ts.SyntaxKind.StaticKeyword) === (info.evalStaticOf !== undefined)),
+  );
+  if (member === undefined) return null;
+  attachedEnvInProgress.add(name);
+  try {
+    const fn = withInstanceBindings(L, info, () => lowerMethodBodyInner(L, info, mName, member, false, true));
+    if (fn === null) return null;
+    L.liftedFns.push(fn);
+    return name;
+  } finally {
+    attachedEnvInProgress.delete(name);
+  }
 }

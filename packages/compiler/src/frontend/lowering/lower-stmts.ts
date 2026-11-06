@@ -50,6 +50,7 @@ import { refusalMessage } from "./lower-requirestack.js";
 import { refuseWebCryptoFlowsAt } from "./lower-webcrypto-fence.js";
 import { isStringCallAliasDecl } from "./lower-builtins.js";
 import { isProvenInertStatement } from "./lower-stream-inert.js";
+import { mintLocalClassEnv } from "./lower-capenv.js";
 
 /** `const X = /* @__PURE__ *\/ makeX()` at a module's top level: every
  * declarator initialized by a call (or `new`) carrying the bundler PURE
@@ -1355,7 +1356,7 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
 
     // A lifted local class (liftedLocalClasses): collected as a module-level
     // class, nothing to evaluate where it was written.
-    if (ts.isClassDeclaration(stmt) && L.liftedLocalClasses.has(stmt)) return [];
+    if (ts.isClassDeclaration(stmt) && L.liftedLocalClasses.has(stmt)) return mintLocalClassEnv(L, stmt);
     const entry = UNSUPPORTED_STMT[stmt.kind];
     if (entry) L.unsupported(entry.code as `SC${number}` & keyof typeof UNSUPPORTED, stmt, entry.feature);
     L.unsupported("SC1090", stmt, `syntax '${ts.SyntaxKind[stmt.kind]}'`);

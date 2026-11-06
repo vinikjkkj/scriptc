@@ -5805,7 +5805,25 @@ export class LlDyn {
       // C emitter's twin (emit-walkers dynClassMembers), so identity holds across the boundary.
       let valueRef = "null";
       const thunkName = !isStatic && fn.name.startsWith("%") ? `%unbound.${fn.name.slice(1)}%direct` : null;
-      if (thunkName !== null && host.fnByName.has(thunkName)) {
+      // A method of a class that captures locals is the function of the evaluation its instance points at: the compiled
+      // `%mvdyn.<C>.<m>()` answers the dyn box of that evaluation's memoized closure (the runtime parks the instance as `this`).
+      const mvName = !isStatic && fn.name.startsWith("%") ? `%mvdyn.${fn.name.slice(1)}` : null;
+      if (mvName !== null && host.fnByName.has(mvName)) {
+        const vsym = `sc_dclv_${this.classMemberFns++}`;
+        const mfn = host.fnByName.get(mvName)!;
+        const mbox = this.dynFuncBoxHelper(mfn.returnType as IrType & { kind: "func" });
+        host.declare(`declare void @scr_closure_release(ptr)`);
+        this.defs.push(
+          `define internal ptr @${vsym}() ${FN_ATTRS} { ; member value ${className}.${row.name} (evaluation)`,
+          `  %c = call ptr @${mangleFunction(mvName)}()`,
+          `  %r = call ptr @${mbox}(ptr %c, ptr ${nameLit}, ptr null)`,
+          `  call void @scr_closure_release(ptr %c)`,
+          `  ret ptr %r`,
+          `}`,
+          ``,
+        );
+        valueRef = `@${vsym}`;
+      } else if (thunkName !== null && host.fnByName.has(thunkName)) {
         const tfn = host.fnByName.get(thunkName)!;
         host.noteFnValue(thunkName);
         const box = this.dynFuncBoxHelper({ kind: "func", params: tfn.params.map((q) => q.type), ret: tfn.returnType });

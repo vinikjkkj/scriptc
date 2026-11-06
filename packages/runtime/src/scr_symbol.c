@@ -667,7 +667,7 @@ static ScrDyn *scr_dsym_get(ScrDyn *recv, ScrSym *k, ScrDyn *self) {
   case SCR_DSYM_INST: {
     const ScrDynClassMember *m = scr_dsym_inst_member(recv, k);
     if (m != NULL && m->get != NULL) return m->get(recv->v.inst.o);
-    if (m != NULL && m->value != NULL) return m->value();
+    if (m != NULL && m->value != NULL) return scr_dyn_member_value(recv, m);
     if (m != NULL) {
       scr_dsym_fence(recv, "reading"); /* a method row with no function value */
       return NULL;

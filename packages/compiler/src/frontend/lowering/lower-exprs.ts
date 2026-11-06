@@ -12,6 +12,7 @@ import * as ts from "../ts7/adapter.js";
 import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
 import { strictAt } from "./lower-protoescape.js";
+import { capMethodValue, capMethodValueOfEnv, capGenericValue } from "./lower-capenv.js";
 import { EVAL_STATIC_CLASSES, RUNTIME_EMITTER_CLASS, STATS_FIELD_INDEX, DATE_T, strandTrap, BIGINT, BOOL, BYTES_ELEM_SIZE, BYTES_U8, bytesValueType, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, canBoxClassIntoDyn, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrGlobal, IrJsOp, IrLocal, type IrParam, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
 import { cjsRequireBindingValueOf, dynImportBindingDeclOf } from "./lower-island.js";
@@ -14802,6 +14803,11 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
           : instanceMethodValue(L, info, p.name, p.found, loc, recvRef!);
         if (v === null) return null;
         value = { kind: "dynFrom", value: v, type: DYN, loc };
+      } else if (p.kind === "generic" && info.liftEnv !== undefined && !viaPrototype) {
+        const cg = findGenericMethodOn(L, info, p.name);
+        const v = cg !== null && cg.declarer === info ? capGenericValue(L, expr, info, cg.info, p.name, recvRef!, loc) : null;
+        if (v === null || !canBoxFuncIntoDyn(v.type as IrType & { kind: "func" }, (id) => L.shapes.get(id), (id) => L.unions.get(id))) return null;
+        value = { kind: "dynFrom", value: v, type: DYN, loc };
       } else if (p.kind === "generic") {
         const cl = unboundGenericClosures(L, expr, info, p.name, !viaPrototype);
         if (cl === null) return null;
@@ -14829,6 +14835,7 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     loc: SrcLoc,
     recv: IrExpr,
   ): IrExpr | null {
+    if (info.liftEnv !== undefined) return capMethodValue(L, info, name, found.sig, recv, loc);
     const own = unboundMethodThunk(L, info, name, found, loc, true);
     if (!L.overrideBelow(info, name)) return own;
     const subs: { cls: ClassInfo; depth: number }[] = [];
@@ -24981,6 +24988,15 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
     const viaPrototype = ts.isPropertyAccessExpression(expr.expression) && expr.expression.name.text === "prototype";
     const loc = locOf(expr);
     const name = expr.name.text;
+    // A method of a class that captures locals is the function of ONE evaluation: the closure the instance's evaluation holds.
+    if (info.liftEnv !== undefined && found.declarer === info) {
+      if (!viaPrototype) return capMethodValue(L, info, name, found.sig, L.lowerExpr(expr.expression), loc);
+      // `K.prototype.m` of a per-evaluation class is the method of the evaluation `K` itself.
+      if (info.liftEnv.evalClass === true) {
+        const kv = L.lowerExpr(((expr.expression as ts.PropertyAccessExpression).expression));
+        if (kv.type.kind === "object" && kv.type.className === info.liftEnv.envName) return capMethodValueOfEnv(L, info, name, found.sig, kv, loc);
+      }
+    }
     const own = unboundMethodThunk(L, info, name, found, loc, true);
     // A receiver that is not a plain name or `this` is evaluated once, here (`new C().m`).
     const pre: IrStmt[] = [];
@@ -25072,6 +25088,11 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
   function lowerUnboundGenericMethodValue(L: Lowerer, expr: ts.PropertyAccessExpression, info: ClassInfo): IrExpr | null {
     const viaPrototype = ts.isPropertyAccessExpression(expr.expression) && expr.expression.name.text === "prototype" &&
       ts.isIdentifier(expr.expression.expression);
+    // A method of a class that captures locals is the function of ONE evaluation (lower-capenv.ts).
+    if (!viaPrototype && info.liftEnv !== undefined) {
+      const cg = findGenericMethodOn(L, info, expr.name.text);
+      if (cg !== null && cg.declarer === info) return capGenericValue(L, expr, info, cg.info, expr.name.text, L.lowerExpr(expr.expression), locOf(expr));
+    }
     const closures = unboundGenericClosures(L, expr, info, expr.name.text, !viaPrototype);
     if (closures === null) return null;
     const loc = locOf(expr);

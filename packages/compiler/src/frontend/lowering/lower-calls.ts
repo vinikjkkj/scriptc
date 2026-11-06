@@ -37,6 +37,7 @@ import { lowerSqliteMethodCall } from "./lower-sqlite.js";
 import { lowerWrtcMethodCall } from "./lower-wrtc.js";
 import { dynSymbolKeyOf, classSymbolBag, lowerSubclassFieldRead, pureReemittable, classHasKeyHelper, classInMemberNames, droppableStatic, dynAssertionReceiver, fnOwnCounters, keyedCalleeAtUndefinedArm, spawnResStreamArg, jsonStringifySpawnStreamArg, unionArmBridge, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf, armTagsTest } from "./lower-exprs.js";
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerHttpClientFnCall } from "./lower-server.js";
+import { declareLiftEnvParam } from "./lower-capenv.js";
 import { isAnyDynContainer, lowerProxyNew, CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, definePropSlotSiteOf, errorWithCause, definePropTableSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, requireVirtualSlotFit, virtualViewFitsSlot, type ClassInfo } from "./lower-classes.js";
 import { boundEmitDispatcher, boundSubscribeDispatcher, emitterEventNames, emitterRooted, lowerEmitApplyCall, lowerEmitterMethodCall, lowerUnnamedEmitterCall } from "./lower-emitter.js";
 import { emitterCtorCallOnGraft, lowerEmitterMixinCall } from "./lower-emitter-mixin.js";
@@ -237,6 +238,9 @@ export interface GenericInstance {
    * receiver as dyn, and every `this` member access in its body throws Node's TypeError at that
    * access, after the side effects Node runs before it. */
   detachedThis?: true;
+  /** An evaluation-carrying instance of a method of a capturing lifted class: the evaluation object is a trailing parameter the
+   * captured bindings read (lower-capenv.ts). */
+  envThis?: true;
   /** Born from CONSTRAINT-erased bindings. Travels WITH the instance
    * because its body lowers later, outside the frame that built it —
    * the rest-tuple rule has to hold exactly while that body is walked. */
@@ -2516,6 +2520,10 @@ const SYMBOLIC_PAIR_BUDGET = 256;
     if (isGenerator && inst.returnType.kind === "generator") {
       fnCtx.generator = { yieldT: inst.returnType.yieldT, nextT: inst.returnType.nextT };
     }
+    // An evaluation-carrying instance lowers in isolation (see lowerMethodBodyInner): the frames of the function that is lowering
+    // while this one is reached hold the very locals the instance must read from its evaluation instead.
+    const outerStack = inst.envThis === true ? L.fnStack : null;
+    if (inst.envThis === true) L.fnStack = [];
     L.fnStack.push(fnCtx);
     try {
       // STATIC generic methods: `this`/`super` name the RECEIVER class (a
@@ -2554,10 +2562,13 @@ const SYMBOLIC_PAIR_BUDGET = 256;
         if (inst.detachedThis === true) detachedThisClasses.set(thisLocal, cls.def.name);
         params.push({ localId: thisLocal.id, name: "this", type: thisType });
       }
+      // The evaluation is declared before the parameter defaults lower (a default may read a captured binding) and rides last.
+      const envParam = inst.envThis === true && cls ? declareLiftEnvParam(L, cls) : null;
       // Default-param initializers lower per instance, with the bindings
       // threaded — a default mentioning T resolves like any body expression.
       const declared = L.declareParams(decl.parameters, inst.params);
       params.push(...declared.params);
+      if (envParam !== null) params.push(envParam);
       const body = [...declared.prologue];
       const bodyBlock = blockBodyOf(decl);
       if (bodyBlock) {
@@ -2607,6 +2618,7 @@ const SYMBOLIC_PAIR_BUDGET = 256;
       return fn;
     } finally {
       L.fnStack.pop();
+      if (outerStack !== null) L.fnStack = outerStack;
       L.currentClass = prevClass;
       L.typeParamBindings = prevBindings;
       L.typeParamTsBindings = prevTsBindings;
@@ -3240,6 +3252,17 @@ const SYMBOLIC_PAIR_BUDGET = 256;
     return ok;
   }
 
+  /** The EVALUATION-CARRYING instance of an implicit-any method of a capturing lifted class: the default instance (typed `this`,
+   * up-front receiver check by the caller) or, with `detached`, the detached one (raw `this`), both taking the class evaluation
+   * as a trailing parameter. */
+  export function implicitEnvInstance(L: Lowerer, blame: ts.Node, info: GenericFnInfo, detached: boolean): GenericInstance {
+    const decl = info.decl;
+    const shapes: ParamShape[] = decl.parameters.map((param, i) =>
+      info.implicitParams![i] ? { type: DYN, mode: "required" as const } : L.paramShape(param),
+    );
+    return internImplicitInstance(L, blame, info, shapes, new Map(), detached, true);
+  }
+
   export function implicitDetachedInstance(L: Lowerer, blame: ts.Node, info: GenericFnInfo): GenericInstance {
     const decl = info.decl;
     const shapes: ParamShape[] = decl.parameters.map((param, i) =>
@@ -3284,8 +3307,8 @@ const SYMBOLIC_PAIR_BUDGET = 256;
     info: GenericFnInfo,
     shapes: ParamShape[],
     argTypes: Map<ts.Symbol, ts.Type>,
-    detached = false,): GenericInstance {
-    const key = (detached ? "detached|" : "") + shapes.map((s) => typeKey(s.type)).join(",");
+    detached = false, env = false,): GenericInstance {
+    const key = (detached ? "detached|" : "") + (env ? "env|" : "") + shapes.map((s) => typeKey(s.type)).join(",");
     let inst = info.instances.get(key);
     if (inst) return inst;
     // The same two limits the call-keyed route applies, for the same
@@ -3329,6 +3352,7 @@ const SYMBOLIC_PAIR_BUDGET = 256;
       implicitState: "lowering",
       ...(declared === null ? { implicitInferReturn: true as const } : {}),
       ...(detached ? { detachedThis: true as const } : {}),
+      ...(env ? { envThis: true as const } : {}),
     };
     info.instances.set(key, inst);
     // EAGER lowering (nested, the lambda discipline): the call site needs

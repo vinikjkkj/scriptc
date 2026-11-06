@@ -161,7 +161,7 @@ export function applyOwnShadows(L: Lowerer, fnLists: IrFunction[][]): void {
         const names: string[] = [];
         if (c.methods.has(m)) names.push(`%${c.def.name}.${m}`);
         const gm = c.genericMethods?.get(m);
-        if (gm !== undefined) for (const inst of gm.instances.values()) if (inst.detachedThis !== true) names.push(inst.name);
+        if (gm !== undefined) for (const inst of gm.instances.values()) if (inst.detachedThis !== true && inst.envThis !== true) names.push(inst.name);
         for (const nm of names) {
           const hit = byName.get(nm);
           if (hit !== undefined && !todo.some((x) => x.fn === hit.fn)) todo.push({ fn: hit.fn, list: hit.list, cls: c, method: m });

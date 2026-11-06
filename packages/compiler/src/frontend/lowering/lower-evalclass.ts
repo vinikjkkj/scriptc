@@ -41,6 +41,7 @@ import { locOf } from "../program.js";
 import { classSourceText } from "../fn-srctext.js";
 import { evalClassSyntaxOk, evalStaticClassName } from "../eval-class-syntax.js";
 import { mixinFnShapeOf } from "./lower-mixins.js";
+import { evalLiftPlan, evalStaticLiftPlan } from "./lower-capenv.js";
 import type { ClassInfo } from "./lower-classes.js";
 
 /** The marker `captures` entry on an evaluated class: its hidden `%cls`
@@ -204,6 +205,7 @@ export function ensureEvalClass(L: Lowerer, expr: ts.ClassExpression): ClassInfo
   const info = L.classes.get(className);
   if (!info) throw new PoisonError(); // collection poisoned and reported
   info.evalClass = plan;
+  info.liftEnv = evalLiftPlan(className, staticName, caps);
   // The static side: an ordinary standalone class. Its fields are the
   // captured bindings (hidden, set by the constructor's trailing parameters)
   // then the class's static fields in declaration order; its methods are the
@@ -262,6 +264,7 @@ export function ensureEvalClass(L: Lowerer, expr: ts.ClassExpression): ClassInfo
   // evaluation, so no module global or `%C.static:m` function exists for them.
   info.staticFields = [];
   delete info.staticMethods;
+  staticInfo.liftEnv = evalStaticLiftPlan(info.liftEnv!, staticName);
   L.classes.set(staticName, staticInfo);
   EVAL_STATIC_CLASSES.add(staticName);
   // The class value's `prototype` object must be exact, or the class keeps the compile-time refusal into dyn.
