@@ -8,3 +8,10 @@ console.log(read(new A()), read(new B()), read({ call: "own" }), read({}));
 const a = new A();
 a.call = "a-own";
 console.log(read(a), read(new A()));
+// A class and its subclass both carry the name: the nearest class on the instance's chain answers.
+class Base { constructor() { this.tag = "b"; } }
+Base.prototype.label = "base-label";
+class Derived extends Base {}
+Derived.prototype.label = "derived-label";
+function show(x) { return x.label; }
+console.log(show(new Derived()), show(new Base()));
