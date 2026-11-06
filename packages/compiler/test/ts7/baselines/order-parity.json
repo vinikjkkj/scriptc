@@ -12990,6 +12990,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24414-hand-written-iterator-results-print-the-keys-they-wrote.ts": {
+   "order": [
+    "<repo>/tests/corpus/24414-hand-written-iterator-results-print-the-keys-they-wrote.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2442-union-literal-arm-widening.ts": {
    "order": [
     "<repo>/tests/corpus/2442-union-literal-arm-widening.ts"
