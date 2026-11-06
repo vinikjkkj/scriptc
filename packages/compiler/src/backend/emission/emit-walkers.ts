@@ -49,6 +49,16 @@ const INTERNAL_SLOT_WANT = cStringLiteral(Buffer.from(INTERNAL_SLOT_WANT_TEXT, "
  * inherited method reached through one is still unbound. Calling it
  * needs a second cast, which lands on a func target with no receiver in
  * hand. Named in tests/fixtures/npm/cases/4061. */
+/** The shapes whose key-order tables (sc_ko_<shape>_n/_l/_c) this emitter has already defined. */
+const KO_TABLES = new WeakMap<object, Set<string>>();
+function keyOrderTablesEmitted(E: object, shapeId: string): boolean {
+  let s = KO_TABLES.get(E);
+  if (s === undefined) KO_TABLES.set(E, (s = new Set()));
+  if (s.has(shapeId)) return true;
+  s.add(shapeId);
+  return false;
+}
+
 function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
   if (t.kind === "func") return true;
   if (t.kind === "union") {
@@ -2654,7 +2664,9 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         if (shape.keyOrders) {
           const tbl = `sc_ko_${t.shapeId}`;
           const flat = shape.keyOrders.flatMap((o) => o);
-          E.walkerDefs.push(
+          // The cast builders come in variants (hard, soft, union arm) that all name the same shape, and the tables are
+          // per SHAPE: one definition, however many builders read it.
+          if (!keyOrderTablesEmitted(E, t.shapeId)) E.walkerDefs.push(
             `static const char *const ${tbl}_n[] = { ${flat.map((n) => cStringLiteral(Buffer.from(n, "utf8"))).join(", ")} };`,
             `static const size_t ${tbl}_l[] = { ${flat.map((n) => Buffer.byteLength(n, "utf8")).join(", ")} };`,
             `static const size_t ${tbl}_c[] = { ${shape.keyOrders.map((o) => o.length).join(", ")} };`,
