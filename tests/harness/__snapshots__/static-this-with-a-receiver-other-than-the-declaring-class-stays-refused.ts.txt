@@ -1,0 +1,20 @@
+static-this-with-a-receiver-other-than-the-declaring-class-stays-refused.ts:7:5 - error SC1090: 'this' in static methods (it names the RECEIVER class — a dynamic value; reference the class by name instead) are not supported yet
+
+  6 |   static bump(): number {
+  7 |     this.count += 1;
+    |     ^~~~
+  8 |     return this.count;
+
+static-this-with-a-receiver-other-than-the-declaring-class-stays-refused.ts:17:12 - error SC1090: 'this' in static methods (it names the RECEIVER class — a dynamic value; reference the class by name instead) are not supported yet
+
+  16 |   static read(): number {
+  17 |     return this.n;
+     |            ^~~~
+  18 |   }
+
+static-this-with-a-receiver-other-than-the-declaring-class-stays-refused.ts:26:12 - error SC1090: 'this' in static methods (it names the RECEIVER class — a dynamic value; reference the class by name instead) are not supported yet
+
+  25 |   static read(): number {
+  26 |     return this.n;
+     |            ^~~~
+  27 |   }

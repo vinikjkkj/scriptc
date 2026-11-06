@@ -2603,6 +2603,15 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         return L.classValueRef(instInfo, expr);
       }
     }
+    if (expr.kind === ts.SyntaxKind.ThisKeyword && L.staticThisClass !== null) {
+      // `this` in a static method whose receiver is PROVEN to be the declaring class (staticReceiverIsDeclaringClass): the class value.
+      // Arrow functions inherit it; any other function form binds its own `this` and keeps the generic arms below.
+      let fnOwner: ts.Node | undefined = expr.parent;
+      while (fnOwner !== undefined && !(ts.isFunctionLike(fnOwner) && !ts.isArrowFunction(fnOwner)) && !ts.isClassStaticBlockDeclaration(fnOwner)) fnOwner = fnOwner.parent;
+      if (fnOwner !== undefined && (ts.isMethodDeclaration(fnOwner) || ts.isGetAccessor(fnOwner) || ts.isSetAccessor(fnOwner)) && fnOwner.parent === L.staticThisClass.decl) {
+        return L.classValueRef(L.staticThisClass, expr);
+      }
+    }
     if (expr.kind === ts.SyntaxKind.ThisKeyword) {
       // Only arrows can see an enclosing method's `this` (JS lexical-this);
       // `this` in plain nested functions is already a tsc error under

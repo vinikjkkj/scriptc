@@ -7785,12 +7785,13 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
           // SUBCLASS name (`D.x = v` creates an OWN property on D in JS —
           // different storage) and through class VALUES (the same dynamic
           // story) are named fences, never a silently-wrong global write.
-          if (!expr.left.questionDotToken && ts.isIdentifier(expr.left.expression)) {
+          if (!expr.left.questionDotToken && (ts.isIdentifier(expr.left.expression) || L.isProvenStaticThis(expr.left.expression))) {
             // The receiver must BE the class exactly (its name, or a
             // const binding holding a class expression) — a general class
             // VALUE could hold a subclass, where JS creates an own
-            // property instead of writing this storage.
-            const classInfo = L.exactClassOfReceiver(expr.left.expression);
+            // property instead of writing this storage. `this` in a static
+            // member whose receiver is proven to be the declaring class is.
+            const classInfo = ts.isIdentifier(expr.left.expression) ? L.exactClassOfReceiver(expr.left.expression) : L.staticThisClass;
             if (classInfo) {
               const found = L.findStaticOn(classInfo, expr.left.name.text);
               // `C.p = v` over a static SETTER: a call of the setter.

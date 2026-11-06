@@ -6623,6 +6623,11 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
    * exactly like the bare name does. Null for any other receiver. */
   function classReceiverSymbol(L: Lowerer, recv: ts.Expression): ts.Symbol | null {
     if (ts.isIdentifier(recv)) return L.resolveValueSymbol(recv);
+    // `this` in a static member whose receiver is proven to be its declaring class names that class.
+    if (isProvenStaticThis(L, recv)) {
+      const d = L.staticThisClass!.decl;
+      return d !== null && d.name !== undefined ? L.resolveValueSymbol(d.name) ?? null : null;
+    }
     if (
       ts.isPropertyAccessExpression(recv) &&
       !recv.questionDotToken &&
@@ -6880,8 +6885,8 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
    * fieldCompoundParts applies to instance accessors). */
   export function staticCompoundTarget(L: Lowerer, access: ts.PropertyAccessExpression):
     { type: IrType; read: IrExpr; write: (v: IrExpr) => IrStmt } | null {
-    if (access.questionDotToken !== undefined || !ts.isIdentifier(access.expression)) return null;
-    const info = exactClassOfReceiver(L, access.expression);
+    if (access.questionDotToken !== undefined || !(ts.isIdentifier(access.expression) || isProvenStaticThis(L, access.expression))) return null;
+    const info = ts.isIdentifier(access.expression) ? exactClassOfReceiver(L, access.expression) : L.staticThisClass;
     if (!info) return null;
     const name = access.name.text;
     const loc = locOf(access);
@@ -7538,6 +7543,8 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
   export function lowerStaticMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (L.chainBlocked(access)) return null;
+    // `this.m()` in a static member whose receiver is proven to be the declaring class: a call by the class name.
+    if (isProvenStaticThis(L, access.expression)) return staticCallOn(L, call, access, L.staticThisClass!, false);
     // `module.exports.describe()` in a module whose whole export IS a
     // class expression: the receiver is exactly that class (the kept
     // export assignment pins it) — the direct-name rules apply.
@@ -7697,6 +7704,15 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
    * genuinely dynamic member: the class.name libCall reads the runtime
    * class object's stored name. Null when the receiver isn't a class
    * value or the member doesn't resolve. */
+  /** `this` in a static member whose receiver is proven to be its declaring class (staticReceiverIsDeclaringClass), arrows transparent:
+   * a side-effect-free class-value receiver, as bindable as the class name. */
+  export function isProvenStaticThis(L: Lowerer, node: ts.Node): boolean {
+    if (node.kind !== ts.SyntaxKind.ThisKeyword || L.staticThisClass === null) return false;
+    let owner: ts.Node | undefined = node.parent;
+    while (owner !== undefined && !(ts.isFunctionLike(owner) && !ts.isArrowFunction(owner)) && !ts.isClassStaticBlockDeclaration(owner)) owner = owner.parent;
+    return owner !== undefined && (ts.isMethodDeclaration(owner) || ts.isGetAccessor(owner) || ts.isSetAccessor(owner)) && owner.parent === L.staticThisClass.decl;
+  }
+
   export function lowerClassValueProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
     if (L.chainBlocked(expr)) return null;
     const recvT = L.mapTypeOf(L.typeOf(expr.expression));
@@ -7717,6 +7733,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     }
     if (
       !ts.isIdentifier(expr.expression) &&
+      !isProvenStaticThis(L, expr.expression) &&
       // `module.exports.label` in a class-replaced CJS module: the
       // receiver is the exact exported class, and the read is
       // side-effect-free — as bindable as an identifier.
@@ -9970,10 +9987,86 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
    * named fences, with arrow functions transparent (they inherit the
    * method's `this`) and this-binding function forms opaque — the static-
    * block rule verbatim. */
+  /** Is `this` in static member `name` of `info` PROVEN to be the class `info` itself? In JS it is the receiver, so the proof is that no
+   * receiver but the class can reach the member:
+   *   - no class in the program extends it (a subclass inherits the static and calls it with itself as `this`), and every `extends`
+   *     in the program is a plain name whose base is known (a call such as a mixin could pass the class through);
+   *   - every `.name` access in the program on a receiver of the class's constructor type or of an untyped receiver is the callee of
+   *     a call (no detached `const f = C.name`, no `.call`/`.apply`/`.bind` that rebinds `this`);
+   *   - no element access with a computed key reaches the class's constructor type.
+   * Anything the proof cannot decide declines, and the member keeps the SC1090 fence. */
+  export function staticReceiverIsDeclaringClass(L: Lowerer, info: ClassInfo, name: string): boolean {
+    const decl = info.decl;
+    if (decl === null || !ts.isClassDeclaration(decl) || decl.name === undefined) return false;
+    const key = `${info.def.name}.${name}`;
+    const cached = L.staticThisProof?.get(key);
+    if (cached !== undefined) return cached;
+    const verdict = ((): boolean => {
+      const checker = L.checker;
+      let clsSym = checker.getSymbolAtLocation(decl.name!);
+      if (clsSym === undefined) return false;
+      if ((clsSym.flags & ts.SymbolFlags.Alias) !== 0) clsSym = checker.getAliasedSymbol(clsSym);
+      if (L.memberNameIndex === null) {
+        const access = new Map<string, ts.Node[]>();
+        const dynamicElement: ts.ElementAccessExpression[] = [];
+        const extendsClauses: ts.ExpressionWithTypeArguments[] = [];
+        for (const sf of L.program.getSourceFiles()) {
+          if (sf.isDeclarationFile) continue;
+          const stack: ts.Node[] = [sf];
+          while (stack.length > 0) {
+            const node = stack.pop()!;
+            if (ts.isPropertyAccessExpression(node)) {
+              const list = access.get(node.name.text);
+              if (list === undefined) access.set(node.name.text, [node]);
+              else list.push(node);
+            } else if (ts.isElementAccessExpression(node)) {
+              if (ts.isStringLiteralLike(node.argumentExpression)) {
+                const list = access.get(node.argumentExpression.text);
+                if (list === undefined) access.set(node.argumentExpression.text, [node]);
+                else list.push(node);
+              } else dynamicElement.push(node);
+            } else if (ts.isHeritageClause(node) && node.token === ts.SyntaxKind.ExtendsKeyword && (ts.isClassDeclaration(node.parent) || ts.isClassExpression(node.parent))) {
+              for (const t of node.types) extendsClauses.push(t);
+            }
+            node.forEachChild((c) => { stack.push(c); });
+          }
+        }
+        L.memberNameIndex = { access, dynamicElement, extendsClauses };
+      }
+      const idx = L.memberNameIndex;
+      const isThisClass = (t: ts.Type): boolean => {
+        const s = t.getSymbol();
+        return s !== undefined && (s === clsSym || (clsSym !== undefined && s.name === clsSym.name && checker.declarationsOf(s).some((d) => d === decl)));
+      };
+      for (const ext of idx.extendsClauses) {
+        const e = ext.expression;
+        if (!ts.isIdentifier(e) && !ts.isPropertyAccessExpression(e)) return false;
+        if (isThisClass(checker.getTypeAtLocation(e))) return false;
+      }
+      for (const el of idx.dynamicElement) {
+        if (isThisClass(checker.getTypeAtLocation(el.expression))) return false;
+      }
+      for (const n of idx.access.get(name) ?? []) {
+        const recv = (n as ts.PropertyAccessExpression | ts.ElementAccessExpression).expression;
+        const rt = checker.getTypeAtLocation(recv);
+        const untyped = (rt.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0;
+        if (!untyped && !isThisClass(rt)) continue; // another type's member of the same name
+        const p = n.parent;
+        const isCallee = (ts.isCallExpression(p) && p.expression === n) || (ts.isCallExpression(p) && ts.isParenthesizedExpression(p.expression) && false);
+        if (!isCallee) return false;
+      }
+      return true;
+    })();
+    (L.staticThisProof ??= new Map()).set(key, verdict);
+    return verdict;
+  }
+
   export function lowerStaticMethod(L: Lowerer, info: ClassInfo, name: string): IrFunction | null {
     const entry = info.staticMethods?.get(name) ?? info.staticAccessors?.get(name);
     if (!entry?.member.body) return null;
+    const thisIsClass = staticReceiverIsDeclaringClass(L, info, name);
     const checkThis = (n: ts.Node): void => {
+      if (thisIsClass && n.kind === ts.SyntaxKind.ThisKeyword) return;
       if (
         ts.isFunctionExpression(n) || ts.isFunctionDeclaration(n) ||
         ts.isMethodDeclaration(n) || ts.isConstructorDeclaration(n) ||
@@ -10001,6 +10094,8 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
     const fnCtx = newFnCtx(false, null, null, bodyReturn);
     fnCtx.isAsync = isAsync;
     L.fnStack.push(fnCtx);
+    const prevStaticThis = L.staticThisClass;
+    L.staticThisClass = thisIsClass ? info : null;
     try {
       entry.member.body.forEachChild(checkThis);
       const declared = L.declareParams(entry.member.parameters, entry.params);
@@ -10032,6 +10127,7 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
       if (!(e instanceof PoisonError)) throw e;
       return null;
     } finally {
+      L.staticThisClass = prevStaticThis;
       L.fnStack.pop();
     }
   }

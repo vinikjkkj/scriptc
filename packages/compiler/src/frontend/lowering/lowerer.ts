@@ -143,7 +143,7 @@ import { FileParts, isNestedClassDeclaration, splitFiles, collectProgram, collec
 import { scanDefinePropStringTables, scanDefinePropSymbolSlots, scanUntypedSymbolWrites } from "./lower-classes.js";
 import { protoClassArmOn, protoClassInstanceType } from "./proto-class-consume.js";
 import { genIterableDrainCall } from "./lower-generators.js";
-import { dynBoxedMethodInstances, ClassInfo, ClassIteratorInfo, GenericClassInfo, registerBuiltinErrorClasses, registerBuiltinEmitterClass, registerBuiltinStreamClasses, builtinErrorInfoOf, builtinEmitterInfoOf, builtinStreamInfoOf, analyzeClassDecoration, classIteratorDrainCall, classIteratorNextCall, classIteratorOf, classIteratorOpenCall, classIteratorRestDrainCall, classMemberNameOf, symbolSlotAccessorName, classValueRef, collectClassShape, exactClassOfReceiver, collectClassShapeInner, ctorAbiEquals, findMethodOn, findStaticOn, findGenericMethodOn, findGenericStaticOn, genericClassInstanceType, isSubclassOf, inHierarchy, overrideBelow, staticShadowBelow, upcastTo, lowerClassMembers, lowerClassCtor, lowerClassExpression, lowerClassExpressionInfo, lowerClassMethodMember, lowerProtoMethodMember, lowerClassValueProperty, lowerConstructorName, lowerStaticMethod, throwingSetterFn, shadowMethodFn, fieldInitStmts, lowerStaticFieldInits, lowerStaticFieldRead, lowerDerivedCtorBody, superCallStmt, lowerSuperMethodCall, superThisRef, lowerSuperAccessorRead, lowerSuperAccessorWrite, inheritsBuiltinErrorCtor, inheritsBuiltinEmitterCtor, errorMessageArg, lowerNew, accessorCall, virtualViewFitsSlot, vtThunkFn, findStaticAccessorOn, staticAccessorWrite, staticCompoundTarget, genericOverrideBelow } from "./lower-classes.js";
+import { dynBoxedMethodInstances, ClassInfo, ClassIteratorInfo, GenericClassInfo, registerBuiltinErrorClasses, registerBuiltinEmitterClass, registerBuiltinStreamClasses, builtinErrorInfoOf, builtinEmitterInfoOf, builtinStreamInfoOf, analyzeClassDecoration, classIteratorDrainCall, classIteratorNextCall, classIteratorOf, classIteratorOpenCall, classIteratorRestDrainCall, classMemberNameOf, symbolSlotAccessorName, classValueRef, collectClassShape, exactClassOfReceiver, collectClassShapeInner, ctorAbiEquals, findMethodOn, findStaticOn, findGenericMethodOn, findGenericStaticOn, genericClassInstanceType, isSubclassOf, inHierarchy, overrideBelow, staticShadowBelow, upcastTo, lowerClassMembers, lowerClassCtor, lowerClassExpression, lowerClassExpressionInfo, lowerClassMethodMember, lowerProtoMethodMember, lowerClassValueProperty, lowerConstructorName, lowerStaticMethod, isProvenStaticThis, throwingSetterFn, shadowMethodFn, fieldInitStmts, lowerStaticFieldInits, lowerStaticFieldRead, lowerDerivedCtorBody, superCallStmt, lowerSuperMethodCall, superThisRef, lowerSuperAccessorRead, lowerSuperAccessorWrite, inheritsBuiltinErrorCtor, inheritsBuiltinEmitterCtor, errorMessageArg, lowerNew, accessorCall, virtualViewFitsSlot, vtThunkFn, findStaticAccessorOn, staticAccessorWrite, staticCompoundTarget, genericOverrideBelow } from "./lower-classes.js";
 import { MixinFnShape, mixinCallClassInfoOf, mixinIntersectionInstanceType } from "./lower-mixins.js";
 import { EVAL_ENV_SYM, evalClassNodeHook } from "./lower-evalclass.js";
 import { lowerTimersSchedulerCall } from "./lower-builtins.js";
@@ -1952,6 +1952,12 @@ export class Lowerer {
    * typeParamBindings and null everywhere else. instantiatedParamType reads
    * a member's parameter type through it when the declared type refuses. */
   instanceTsRef: ts.Type | null = null;
+  /** The class whose static method body is lowering with a PROVEN receiver (staticReceiverIsDeclaringClass): `this` in it is that class's
+   * value. Null everywhere else. */
+  staticThisClass: ClassInfo | null = null;
+  /** Static-receiver proof cache and the program's `.name` occurrence index (see staticReceiverIsDeclaringClass). */
+  staticThisProof: Map<string, boolean> | null = null;
+  memberNameIndex: { access: Map<string, ts.Node[]>; dynamicElement: ts.ElementAccessExpression[]; extendsClauses: ts.ExpressionWithTypeArguments[] } | null = null;
   /** The ts-level twin of typeParamBindings, non-null while a CALL-keyed
    * instance body lowers: type-parameter symbol → the bound CHECKER type,
    * consulted where the mapped IrType has already widened away information
@@ -16817,6 +16823,10 @@ export class Lowerer {
 
   staticAccessorWrite(info: ClassInfo, access: ts.PropertyAccessExpression, rhs: ts.Expression, loc: SrcLoc, throughValue: boolean): IrExpr | null {
     return staticAccessorWrite(this, info, access, rhs, loc, throughValue);
+  }
+
+  isProvenStaticThis(node: ts.Node): boolean {
+    return isProvenStaticThis(this, node);
   }
 
   findStaticOn(info: ClassInfo | null, name: string): ReturnType<typeof findStaticOn> {
