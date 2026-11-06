@@ -102,7 +102,7 @@ function nativeModulePath(L: Lowerer, fileName: string): string {
 }
 
 /** A piece of an object literal's key order: a plain name, or the spread of a record whose shape enumerates `names`. */
-export type SpreadOrderPart = { name: string } | { spread: string; names: string[] };
+export type SpreadOrderPart = { name: string } | { spread: string; names: string[]; /** The lowered pure read of the source, kept when a literal with SEVERAL spreads registers only to copy key lists. */ ref?: IrExpr };
 /** A spread operand that can be read twice for free: an identifier or a property chain off one. */
 function pureOrderRead(e: ts.Expression): boolean {
   let x: ts.Expression = e;
@@ -12204,6 +12204,7 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       const orderParts: SpreadOrderPart[] = [];
       let orderSpreads = 0;
       let spreadNode: ts.Expression | null = null;
+      const spreadNodes: ts.Expression[] = [];
       const spreadSrcShapes: string[] = [];
       let spreadRegistered = false;
       const contribute = (n: string): void => {
@@ -12219,6 +12220,7 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
           orderParts.push({ spread: st.shapeId, names: ss.declaredOrder });
           orderSpreads++;
           spreadNode = p.expression;
+          spreadNodes.push(p.expression);
           // AN OPTIONAL SOURCE MEMBER HAS NO STATIC POSITION. Spread copies
           // the source's OWN keys, and an absent optional contributes
           // nothing at all - so the sequence this loop builds is an upper
@@ -12276,6 +12278,19 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         if (srcIr.type.kind === "record" && srcIr.type.shapeId === sp.spread && (srcIr.kind === "varRef" || srcIr.kind === "recordGet" || srcIr.kind === "fieldGet")) {
           L.noteSpreadLiteral(locOf(expr), { shapeId: type.shapeId, srcShapeId: sp.spread, srcRef: srcIr, parts: orderParts, exclude: [], ...(simpleSpelling ? {} : { listOnly: true as const }) });
           if (!simpleSpelling) L.noteEnumOrderBake(sp.spread, null, "list");
+          spreadRegistered = true;
+        }
+      }
+      // SEVERAL spreads of plain reads: no index follows them, but a source's key list can still be copied, in order.
+      if (!spreadRegistered && orderSpreads >= 2 && listParts && spreadNodes.length === orderSpreads && spreadNodes.every(pureOrderRead)) {
+        const spreadParts = orderParts.filter((x): x is Extract<SpreadOrderPart, { spread: string }> => "spread" in x);
+        const refs = spreadNodes.map((n) => L.lowerExpr(n));
+        if (refs.every((r, i) => r.type.kind === "record" && r.type.shapeId === spreadParts[i]!.spread && (r.kind === "varRef" || r.kind === "recordGet" || r.kind === "fieldGet"))) {
+          const withRefs: SpreadOrderPart[] = [];
+          let si = 0;
+          for (const part of orderParts) withRefs.push("spread" in part ? { ...part, ref: refs[si++]! } : part);
+          L.noteSpreadLiteral(locOf(expr), { shapeId: type.shapeId, srcShapeId: spreadParts[0]!.spread, srcRef: refs[0]!, parts: withRefs, exclude: [], listOnly: true });
+          for (const sid of spreadSrcShapes) L.noteEnumOrderBake(sid, null, "list");
           spreadRegistered = true;
         }
       }
@@ -13122,7 +13137,16 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
             if (conditionalSpreadOf(later.expression)) continue;
             const lt = L.mapTypeOf(L.typeOf(later.expression));
             if (lt?.kind === "record") {
-              for (const lf of L.shapes.get(lt.shapeId)?.fields ?? []) laterNames.add(lf.name);
+              for (const lf of L.shapes.get(lt.shapeId)?.fields ?? []) {
+                // An OPTIONAL member of a later spread defines its name only when the later source HAS it, so an earlier
+                // contributor's value stays when it does not: the copy is kept and merged (`present ? later : earlier`), when
+                // the target slot can hold an absent member.
+                const tf = fieldTypes.get(lf.name);
+                const laterOptional = lf.type.kind === "union" && L.armTag(lf.type.unionId, UNDEFINED_T) >= 0;
+                const targetOptional = tf !== undefined && tf.kind === "union" && L.armTag(tf.unionId, UNDEFINED_T) >= 0;
+                if (laterOptional && targetOptional) continue;
+                laterNames.add(lf.name);
+              }
             }
             continue;
           }
@@ -13262,9 +13286,46 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
               `spread of '${f.name}' over an earlier contributor whose evaluation is observable (the desugar keeps one entry per name — give '${f.name}' one contributor, or move the spread first)`,
             );
           }
+          // JS's spread overrides an earlier contributor ONLY when the source has the key (an undefined-valued one counts). An
+          // optional source member that is absent leaves the earlier value standing, so the copy is `present ? source : earlier`.
+          let keptEarlier: (typeof fields)[number] | null = null;
+          const earlier = at >= 0 ? fields[at]! : null;
+          if (
+            earlier !== null && earlier.drop !== true && earlier.overflow !== true && obj.type.kind === "record" &&
+            f.type.kind === "union" && L.armTag(f.type.unionId, UNDEFINED_T) >= 0 &&
+            typeEquals(earlier.value.type, targetType)
+          ) {
+            keptEarlier = earlier;
+            value = {
+              kind: "ternary",
+              cond: { kind: "recordKeyPresent", obj, shapeId: srcType.shapeId, field: f.name, type: BOOL, loc: locOf(prop) },
+              then: value,
+              else_: earlier.value,
+              type: targetType,
+              loc: locOf(prop),
+            };
+          }
           const slot = at >= 0 ? at : fields.length;
           if (at >= 0) fields[at] = { name: f.name, value };
           else fields.push({ name: f.name, value });
+          if (keptEarlier !== null) {
+            // The key is own when the earlier contributor wrote it or the source has it.
+            const ent = fields[slot]!;
+            if (keptEarlier.own === true || keptEarlier.expl === true) {
+              ent.own = true;
+              presenceSpreads.add(prop);
+            } else if (keptEarlier.ownIf !== undefined) {
+              ent.ownIf = {
+                kind: "logical", op: "||", left: keptEarlier.ownIf,
+                right: { kind: "recordKeyPresent", obj, shapeId: srcType.shapeId, field: f.name, type: BOOL, loc: locOf(prop) },
+                type: BOOL, loc: locOf(prop),
+              };
+              presenceSpreads.add(prop);
+            } else {
+              presenceOk = false;
+            }
+            continue;
+          }
           // Object.keys's row, in the copy: a SOURCE record materialised
           // out of a dynamic value contributes only the members that were
           // the source object's OWN keys — a prototype-carried default is

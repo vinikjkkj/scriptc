@@ -13332,6 +13332,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24434-a-spread-keeps-an-earlier-value-when-an-optional-source-member-is-absent.ts": {
+   "order": [
+    "<repo>/tests/corpus/24434-a-spread-keeps-an-earlier-value-when-an-optional-source-member-is-absent.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2443-union-literal-shadow-narrowing.ts": {
    "order": [
     "<repo>/tests/corpus/2443-union-literal-shadow-narrowing.ts"
