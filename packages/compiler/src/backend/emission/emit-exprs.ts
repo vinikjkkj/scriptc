@@ -7508,7 +7508,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "process.pid":
             return finish(`scr_process_pid()`);
           case "error.noMessage":
-            return finish(`((ScrStr *)NULL)`);
+            return finish(`SCR_ERROR_ABSENT_MESSAGE`);
           case "dyn.this":
             return finish(`scr_dyn_this_get()`);
           case "dyn.thisSloppy":
