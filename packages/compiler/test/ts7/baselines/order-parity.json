@@ -12965,6 +12965,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24164-detached-call-of-a-method-of-a-class-that-captures-function-locals.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24164-detached-call-of-a-method-of-a-class-that-captures-function-locals.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2414-dowhile-continue-kill.ts": {
    "order": [
     "<repo>/tests/corpus/2414-dowhile-continue-kill.ts"

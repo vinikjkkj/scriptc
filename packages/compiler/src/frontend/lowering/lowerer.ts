@@ -146,7 +146,7 @@ import { dynBoxedMethodInstances, ClassInfo, ClassIteratorInfo, GenericClassInfo
 import { MixinFnShape, mixinCallClassInfoOf, mixinIntersectionInstanceType } from "./lower-mixins.js";
 import { EVAL_ENV_SYM, evalClassNodeHook } from "./lower-evalclass.js";
 import { lowerTimersSchedulerCall } from "./lower-builtins.js";
-import { ParamShape, FnSig, GenericFnInfo, GenericInstance, bindingNeverReassigned, bodyReadsArguments, isThisParameter, paramShape, paramShapes, checkDefaultParamBodyType, completeArgs, wrappedUndefined, undefinedArgFor, requireExactArityValue, bodyReturnType, declaredReturnType, collectSignature, collectSignatureInner, collectGenericSignature, genericFnOf, lowerGenericCall, lowerGenericFnValue, inferTypeParamBindings, lowerGenericInstance, lowerCall, reconcileOverloadMemberDyn, lowerFfiCall, lowerTimersMemberCall, lowerPromiseMethodCall, lowerFilterNarrowCall, isTopLevelFnSymbol, lowerNestedFunctionDecl, lambdaSignature, lowerLambda, lowerFunction, validateFfiImports, implicitDefaultInstance } from "./lower-calls.js";
+import { detachedThisClassOf, ParamShape, FnSig, GenericFnInfo, GenericInstance, bindingNeverReassigned, bodyReadsArguments, isThisParameter, paramShape, paramShapes, checkDefaultParamBodyType, completeArgs, wrappedUndefined, undefinedArgFor, requireExactArityValue, bodyReturnType, declaredReturnType, collectSignature, collectSignatureInner, collectGenericSignature, genericFnOf, lowerGenericCall, lowerGenericFnValue, inferTypeParamBindings, lowerGenericInstance, lowerCall, reconcileOverloadMemberDyn, lowerFfiCall, lowerTimersMemberCall, lowerPromiseMethodCall, lowerFilterNarrowCall, isTopLevelFnSymbol, lowerNestedFunctionDecl, lambdaSignature, lowerLambda, lowerFunction, validateFfiImports, implicitDefaultInstance } from "./lower-calls.js";
 import { lowerArrayMethodCall, lowerBufferStaticCall, lowerBytesMethodCall, lowerBytesNew, lowerMapMethodCall, lowerMapForEachCall, buildMapForEachFn, lowerRecordOvfCaptureHelper, ovfCapturePlannable, dynSlotCheckOk, lowerEnvToPairsHelper, lowerSetMethodCall, lowerSetForEachCall, buildSetForEachFn, lowerRegexMethodCall, lowerStringMethodCall } from "./lower-containers.js";
 import { lowerStreamModuleCall, streamInstanceOfExpr } from "./lower-stream.js";
 import { unifyWidthShapes, type UnifyOutcome } from "./shape-unify.js";
@@ -17682,6 +17682,7 @@ export class Lowerer {
       if (selfOf?.selfAlias === sym) {
         const th0 = this.resolveThis(at);
         if (!th0) return null;
+        if (detachedThisClassOf(th0) !== undefined) this.unsupported("SC1090", at, "a captured binding read through a detached receiver");
         const loc0 = locOf(at);
         if (cls.evalStaticOf !== undefined) return { kind: "varRef", localId: th0.id, type: th0.type, loc: loc0 };
         return {
@@ -17698,6 +17699,7 @@ export class Lowerer {
     if (cls !== null && cls !== undefined && ev !== undefined) {
       const th = this.resolveThis(at);
       if (!th) return null;
+      if (detachedThisClassOf(th) !== undefined) this.unsupported("SC1090", at, "a captured binding read through a detached receiver");
       const loc = locOf(at);
       const clsField = cls.captures![0]!;
       return {
@@ -17720,6 +17722,7 @@ export class Lowerer {
     if (cls === null || cls === undefined || c === undefined) return null;
     const th = this.resolveThis(at);
     if (!th) return null;
+    if (detachedThisClassOf(th) !== undefined) this.unsupported("SC1090", at, "a captured binding read through a detached receiver");
     const loc = locOf(at);
     return {
       kind: "fieldGet",

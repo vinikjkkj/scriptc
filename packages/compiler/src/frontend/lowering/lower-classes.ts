@@ -9882,9 +9882,9 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
 
   function detachedVariantBody(L: Lowerer, info: ClassInfo, mName: string, name: string, state: { hit: boolean }): string | null {
     // A class that captures locals of its scope (a class declared in a function, an evaluated class) keeps those bindings in hidden
-    // fields of the INSTANCE: a body reading one needs the instance, which a detached receiver is not. No variant can answer such a
-    // call, so the thunk keeps the up-front receiver check (a call with the instance, `.call(inst)`, is unaffected).
-    if ((info.captures?.length ?? 0) > 0 || info.evalClass !== undefined || info.evalStaticOf !== undefined) return null;
+    // fields of the INSTANCE. A body that reads none of them runs over a detached receiver like any other; one that reads a binding
+    // needs the instance's evaluation, which a detached receiver is not -- the read is refused under the variant's diagnostic sink
+    // (lowerer.capturedClassFieldRead), so the variant is dropped and the thunk keeps the up-front receiver check.
     // A class whose instances take own properties under run-time keys records the creation order of its own fields at each store
     // (lower-ownshadow applyFieldNotes), which needs a plain-local receiver; the variant's `this` is a checked expression.
     if (L.ownShadowRoots.size > 0 && info.fields.has(CLASS_PROPS_FIELD)) return null;
