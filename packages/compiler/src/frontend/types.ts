@@ -3169,6 +3169,8 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         const nameOf = (q: ts.Symbol): string => (q as unknown as { escapedName?: string }).escapedName ?? q.name;
         const carries = (x: ts.Type, y: ts.Type): boolean => {
           const have = new Set(checker.getPropertiesOfType(x).map(nameOf));
+          // an index signature is a member too (`{ $ref: string } & Document`: the literal does not carry Document's open keys)
+          if (checker.getIndexInfosOfType(y).length > checker.getIndexInfosOfType(x).length) return false;
           return checker.getPropertiesOfType(y).every((q) => have.has(nameOf(q)));
         };
         const dom = mappedAll.find(
