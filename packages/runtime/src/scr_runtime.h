@@ -5751,6 +5751,9 @@ bool scr_dyn_instanceof_error(const ScrDyn *d);
  * Both backends call this one function so the two lanes cannot answer
  * differently. */
 bool scr_dyn_is_u8array(const ScrDyn *d);
+/* `u instanceof <TypedArray>` / `u instanceof DataView` over a checked-dynamic value: `elem` is a ScrBytesElem (the typed array
+ * of that element, native or engine-held) or SCR_ISL_BIN_DATAVIEW. Borrowed; never throws. */
+bool scr_dyn_is_typed(const ScrDyn *d, int elem);
 /* Is this dyn value the runtime's ERROR ENCODING (scr_dyn_from_error's
  * product, or any object whose [[Prototype]] chain reaches
  * %Error.prototype%)? THE test - every consumer asks through this, in the
