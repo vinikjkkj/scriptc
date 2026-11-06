@@ -69,6 +69,24 @@ function isDataRhs(e: ts.Expression): boolean {
   return !(ts.isPropertyAccessExpression(x) && ts.isPropertyAccessExpression(x.expression) && x.expression.name.text === "prototype");
 }
 
+/** `X.prototype.name` (X a plain identifier): the class identifier and the member name, else null. */
+function protoMemberSource(e: ts.Expression): { cls: ts.Identifier; name: string } | null {
+  let x: ts.Expression = e;
+  while (ts.isParenthesizedExpression(x)) x = x.expression;
+  if (!ts.isPropertyAccessExpression(x) || !ts.isIdentifier(x.name) || x.questionDotToken !== undefined) return null;
+  const p = x.expression;
+  if (!ts.isPropertyAccessExpression(p) || p.name.text !== "prototype" || !ts.isIdentifier(p.expression)) return null;
+  return { cls: p.expression, name: x.name.text };
+}
+
+/** An ALIAS write: `X.prototype.b = X.prototype.a` where `a` is prototype DATA of the same class X written earlier. The alias copies
+ * the datum's value at the assignment (a later write to `a` does not follow), exactly like any other data right-hand side. */
+function isDatumAlias(L: Lowerer, e: ts.Expression, classSymbol: ts.Symbol | undefined, dataNames: ReadonlySet<string>): boolean {
+  const src = protoMemberSource(e);
+  if (src === null || classSymbol === undefined) return false;
+  return dataNames.has(src.name) && (L.resolveValueSymbol(src.cls) ?? L.checker.getSymbolAtLocation(src.cls)) === classSymbol;
+}
+
 function undefinedRhs(e: ts.Expression): boolean {
   let x: ts.Expression = e;
   while (ts.isParenthesizedExpression(x)) x = x.expression;
@@ -154,8 +172,16 @@ export function collectProtoDataNames(L: Lowerer, sf: ts.SourceFile): void {
     const d = sym ? L.checker.valueDeclarationOf(sym) : undefined;
     return d !== undefined && ts.isClassDeclaration(d);
   };
+  const dataByClass = new Map<ts.Symbol, Set<string>>();
   for (const w of topLevelProtoWrites(sf, isClassRecv)) {
-    if (isDataRhs(w.stmt.right) && !undefinedRhs(w.stmt.right)) L.protoDataNonUndef.add(w.name);
+    const lhsRecv = ((w.stmt.left as ts.PropertyAccessExpression).expression as ts.PropertyAccessExpression).expression as ts.Identifier;
+    const csym = L.resolveValueSymbol(lhsRecv) ?? undefined;
+    const names = csym === undefined ? undefined : (dataByClass.get(csym) ?? dataByClass.set(csym, new Set()).get(csym)!);
+    const alias = names !== undefined && isDatumAlias(L, w.stmt.right, csym, names);
+    if (alias || isDataRhs(w.stmt.right)) names?.add(w.name);
+    if (alias ? L.protoDataNonUndef.has(protoMemberSource(w.stmt.right)!.name) : isDataRhs(w.stmt.right) && !undefinedRhs(w.stmt.right)) {
+      L.protoDataNonUndef.add(w.name);
+    }
   }
 }
 
@@ -171,7 +197,7 @@ export function protoDataFieldNames(
   const out: string[] = [];
   const isThisClass = (recv: ts.Expression): boolean => L.checker.getSymbolAtLocation(recv) === classSymbol;
   for (const w of topLevelProtoWrites(decl.getSourceFile(), isThisClass)) {
-    if (!isDataRhs(w.stmt.right) || isMethodRhs(w.stmt.right)) continue;
+    if ((!isDataRhs(w.stmt.right) && !isDatumAlias(L, w.stmt.right, classSymbol, new Set(out))) || isMethodRhs(w.stmt.right)) continue;
     if (!out.includes(w.name)) out.push(w.name);
   }
   return out;
@@ -197,7 +223,7 @@ export function registerProtoData(
     const name = w.name;
     // Methods and function-valued sources are the late-method machinery's.
     if (info.methods.has(name) || info.methods.has(`get:${name}`) || info.methods.has(`set:${name}`)) continue;
-    if (!isDataRhs(w.stmt.right) || L.lateMethodAssigns.has(w.stmt)) continue;
+    if ((!isDataRhs(w.stmt.right) && !isDatumAlias(L, w.stmt.right, classSymbol, new Set(writes.keys()))) || L.lateMethodAssigns.has(w.stmt)) continue;
     const list = writes.get(name) ?? [];
     list.push(w.stmt);
     writes.set(name, list);
