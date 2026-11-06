@@ -20,7 +20,7 @@ import { cjsExportRecordOf, cjsExportRecordField, cjsExportRecordRead, cjsExport
 import { lowerFetchProperty, lowerRequestInitLiteral } from "./lower-fetch.js";
 import { lowerWrtcProperty } from "./lower-wrtc.js";
 import { lowerSqliteProperty } from "./lower-sqlite.js";
-import { TIMER_GLOBAL_VALUE_NAMES, bigStaticHolderSlotFence, builtinFnValueOf, builtinNamespaceRecordOf, builtinMemberFnValueOf, builtinMemberIsFunction, jsGlobalFnValueOf, staticMemberDynFnValueOf, dynBuiltinFnPropertyOf, dynReceiverCallbackValue } from "./lower-fnvalue.js";
+import { TIMER_GLOBAL_VALUE_NAMES, bigStaticHolderSlotFence, builtinFnValueOf, builtinNamespaceRecordOf, builtinMemberFnValueOf, builtinMemberIsFunction, jsGlobalFnValueOf, staticMemberDynFnValueOf, dynBuiltinFnPropertyOf, dynReceiverCallbackValue, contextualDynCtorSlot, dynBuiltinFnValueOf } from "./lower-fnvalue.js";
 import { lowerNavigatorProperty, requireFnValueOf, requireMemberFence, valuesCountdown, voidCountdown } from "./lower-builtins.js";
 import { funcObjectPropOf } from "./lower-fnprops.js";
 import { recordKeyReadRow, recordNarrowBridgeRow } from "./keyread-census.js";
@@ -2220,6 +2220,11 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         !isJsSourceFile(expr.getSourceFile()) &&
         L.isStdlibSymbol(L.checker.getSymbolAtLocation(expr))
       ) {
+        // The slot this value flows into takes ANY value (`(v: any) => string`: a parameter, a field, a variable annotation): the DYN
+        // signature closure (lower-fnvalue.ts) is exactly that type and converts like String(x) / Number(x) / Boolean(x) over a dyn
+        // operand. The typed closure below is the parsed-token form (string in) and throws at the first non-string a dyn caller passes.
+        const ctxFn = contextualDynCtorSlot(L, expr);
+        if (ctxFn) return dynBuiltinFnValueOf(L, expr.text, loc);
         return primitiveCtorClosure(L, expr.text, loc);
       }
       // The lib fence's IDENTIFIER chokepoint: the real standard library
