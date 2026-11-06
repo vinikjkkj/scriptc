@@ -2090,6 +2090,30 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     }
   }, 300_000);
 
+  /* -- 24488: untyped methods of a class declared in a package factory. A method value read off an instance is the
+   * function of ONE evaluation (captured bindings of that evaluation, receiver of the call): `.call(other)`, `.apply`,
+   * `.bind`, identity within and across evaluations, a detached call, an arrow reading `this`.
+   * On base the detached variant of a body reading a captured binding is refused (SC1090). Byte-identical to Node. */
+  test("24488: a captured binding read through an untyped method value carries its evaluation and matches Node", async () => {
+    const entry = join(fixturesRoot, "npm-static/cases/24488-capture-evaluation-npm-static/main.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["capenv"] });
+    expect(coverage.npmStatic).toEqual([{ package: "capenv", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    for (const backend of ["c", "llvm"] as const) {
+      const binary = await buildStatic(entry, ["capenv"], backend);
+      const [nodeRes, nativeRes] = await Promise.all([
+        runBinary("node", [entry]),
+        runBinary(binary, []),
+      ]);
+      const node = nodeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
+      const native = nativeRes.stdout.toString("utf8").replace(/\r\n/g, "\n");
+      expect(node.split("\n").filter((l) => l !== "").length).toBe(7);
+      expect(native, backend).toBe(node);
+      expect(nativeRes.exitCode, backend).toBe(0);
+    }
+  }, 300_000);
+
   /* -- 11553: the mysql2 query.js doneInsert shape as an npm-static package. An
    * implicit-any method called with the null literal binds its parameter to
    * null | undefined; the body reads a field of that parameter on a path that
