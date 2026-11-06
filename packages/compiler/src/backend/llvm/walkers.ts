@@ -16,7 +16,7 @@ import type { IrRecordShape, IrType, IrUnionDef } from "../../ir/nodes.js";
 import { isRefCounted, typeKey } from "../../ir/nodes.js";
 import { mangleRecordStruct } from "../mangle.js";
 import { BlockBuilder } from "./blocks.js";
-import { emitOwnPresentLl, llFieldType, releaseSym, traceAdapter, keyIxSlotIndex, viewSlotIndex, type ShapeHost } from "./shapes.js";
+import { emitOwnPresentLl, llFieldType, releaseSym, traceAdapter, keyIxSlotIndex, keyListSlotIndex, viewSlotIndex, type ShapeHost } from "./shapes.js";
 import { LlvmUnsupportedError } from "./unsupported.js";
 
 /** What the walkers need from the emitter beyond the shape tables: union
@@ -347,7 +347,7 @@ export class LlWalkers {
         B.startBlock(lj);
         B.line(`store i1 false, ptr ${first}`);
       };
-      withOrders((fields) => {
+      const fieldsOut = (fields: typeof emitFields, listed: boolean): void => {
       for (const f of fields) {
         const utag = this.host.undefinedArmTag(f.type);
         const v = this.loadField(B, "%v", shapeId, fieldIndex.get(f.name)!, f.type);
@@ -384,6 +384,23 @@ export class LlWalkers {
             present = both;
           }
         }
+        // A shape with a key list: a key that is IN the order record is written where the record puts it, not here.
+        if (shape.keyList && !listed) {
+          const ordF = shape.fields.findIndex((x) => x.name === f.name);
+          this.host.declare(`declare zeroext i1 @scr_ord_has(ptr, i8)`);
+          const lp = B.tmp();
+          B.line(`${lp} = getelementptr inbounds %${mangleRecordStruct(shapeId)}, ptr %v, i64 0, i32 ${keyListSlotIndex(shape)}, i64 0 ; key list`);
+          const inL = B.tmp();
+          B.line(`${inL} = call zeroext i1 @scr_ord_has(ptr ${lp}, i8 ${ordF})`);
+          const notIn = B.tmp();
+          B.line(`${notIn} = xor i1 ${inL}, true`);
+          if (present === null) present = notIn;
+          else {
+            const both = B.tmp();
+            B.line(`${both} = and i1 ${present}, ${notIn}`);
+            present = both;
+          }
+        }
         if (present !== null) {
           const lw = B.newLabel("jwf.w");
           skip = B.newLabel("jwf.s");
@@ -399,7 +416,51 @@ export class LlWalkers {
           B.startBlock(skip);
         }
       }
-      });
+      };
+      withOrders((fields) => fieldsOut(fields, false));
+      // ...then the keys written after construction, in the order they were first written.
+      if (shape.keyList) {
+        const lpp = B.tmp();
+        B.line(`${lpp} = getelementptr inbounds %${mangleRecordStruct(shapeId)}, ptr %v, i64 0, i32 ${keyListSlotIndex(shape)}, i64 0 ; key list`);
+        const cnt8 = B.tmp();
+        B.line(`${cnt8} = load i8, ptr ${lpp}`);
+        const cnt = B.tmp();
+        B.line(`${cnt} = zext i8 ${cnt8} to i32`);
+        const liSlot = B.slot();
+        B.entryAllocas.push(`${liSlot} = alloca i32`);
+        B.line(`store i32 1, ptr ${liSlot}`);
+        const lHead = B.newLabel("jkl.h");
+        const lBody = B.newLabel("jkl.b");
+        const lEnd = B.newLabel("jkl.e");
+        B.br(lHead);
+        B.startBlock(lHead);
+        const li = B.tmp();
+        B.line(`${li} = load i32, ptr ${liSlot}`);
+        const more = B.tmp();
+        B.line(`${more} = icmp ule i32 ${li}, ${cnt}`);
+        B.condBr(more, lBody, lEnd);
+        B.startBlock(lBody);
+        const ep = B.tmp();
+        B.line(`${ep} = getelementptr inbounds i8, ptr ${lpp}, i32 ${li}`);
+        const ord8 = B.tmp();
+        B.line(`${ord8} = load i8, ptr ${ep}`);
+        const ord32 = B.tmp();
+        B.line(`${ord32} = zext i8 ${ord8} to i32`);
+        const caseLabels = emitFields.map((_, i) => B.newLabel(`jkl.c${i}`));
+        const lNext = B.newLabel("jkl.n");
+        B.switchTerm(ord32, lNext, emitFields.map((f, i) => [shape.fields.findIndex((x) => x.name === f.name), caseLabels[i]!] as [number, string]));
+        emitFields.forEach((f, i) => {
+          B.startBlock(caseLabels[i]!);
+          fieldsOut([f], true);
+          B.br(lNext);
+        });
+        B.startBlock(lNext);
+        const li2 = B.tmp();
+        B.line(`${li2} = add i32 ${li}, 1`);
+        B.line(`store i32 ${li2}, ptr ${liSlot}`);
+        B.br(lHead);
+        B.startBlock(lEnd);
+      }
       if (shape.indexValue) this.emitOverflowEntries(B, shape, first, edgeable(shape.indexValue));
     }
     this.putc(B, "%b", "125"); // '}'

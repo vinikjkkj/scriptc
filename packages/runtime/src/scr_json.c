@@ -4119,6 +4119,13 @@ void scr_ord_note(uint8_t *rec, uint8_t k) {
   rec[rec[0]] = k;
 }
 
+bool scr_ord_has(const uint8_t *rec, uint8_t k) {
+  for (uint8_t j = 1; j <= rec[0]; j++) {
+    if (rec[j] == k) return true;
+  }
+  return false;
+}
+
 void scr_ord_forget(uint8_t *rec, uint8_t k) {
   for (uint8_t j = 1; j <= rec[0]; j++) {
     if (rec[j] != k) continue;

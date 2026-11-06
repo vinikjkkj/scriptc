@@ -4843,6 +4843,8 @@ typedef struct ScrDynClass {
  * a later write appends it again, after every other key (Node's rule). */
 void scr_ord_note(uint8_t *rec, uint8_t k);
 void scr_ord_forget(uint8_t *rec, uint8_t k);
+/* Is ordinal `k` in the order record (a key written after construction)? Used by the key-list enumerations of records. */
+bool scr_ord_has(const uint8_t *rec, uint8_t k);
 
 /* The handle-type tags the checked-dynamic tree can carry. The set is deliberately the
  * HANDLE kinds whose member surfaces already have complete static
