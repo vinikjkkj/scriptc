@@ -210,13 +210,13 @@ function declTypeSymbol(L: Lowerer, t: ts.Type): ts.Symbol | null {
  * declared class), as its type symbol, or null. The class need not live in the
  * declaration file that holds the `export =` (umd/index.d.ts re-exports the
  * class declared in types.d.ts), and its own file has no twin of its own. */
-function exportEqualsClassSymbol(L: Lowerer, e: ts.Expression): ts.Symbol | null {
+function exportEqualsClassSymbol(L: Lowerer, e: ts.Expression, genericOk: boolean): ts.Symbol | null {
   let sym = L.checker.getSymbolAtLocation(e);
   if (sym !== undefined && (sym.flags & ts.SymbolFlags.Alias) !== 0) sym = L.checker.getAliasedSymbol(sym);
   if (sym === undefined) return null;
   const decls = L.checker.declarationsOf(sym);
   const ok = decls.length > 0 && decls.every(
-    (d) => ts.isClassDeclaration(d) && d.typeParameters === undefined && d.getSourceFile().isDeclarationFile &&
+    (d) => ts.isClassDeclaration(d) && (genericOk || d.typeParameters === undefined) && d.getSourceFile().isDeclarationFile &&
       !L.isStdlibFile(d.getSourceFile()),
   );
   if (!ok) return null;
@@ -261,8 +261,10 @@ function buildTable(L: Lowerer): Map<ts.Symbol, Witness> {
       // value, which is what the import binds (a CJS constructor function
       // carries its prototype methods; the d.ts class is its surface).
       if (ts.isExportAssignment(st) && st.isExportEquals) {
-        const xs = exportEqualsClassSymbol(L, st.expression);
         const impl = cjsModuleExportsDecl(L, T);
+        // A generic declared class (denque's `Denque<T = any>`) pairs with a function-constructor twin: the type
+        // arguments are erased on the twin's side (an ES5 constructor has none), so only a function impl admits them.
+        const xs = exportEqualsClassSymbol(L, st.expression, impl !== null && ts.isFunctionDeclaration(impl));
         if (xs !== null && impl !== null && (ts.isFunctionDeclaration(impl) || ts.isClassDeclaration(impl))) pairUp(xs, impl);
         continue;
       }
