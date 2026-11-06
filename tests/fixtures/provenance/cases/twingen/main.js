@@ -42,3 +42,17 @@ h.put("c");
 console.log(h.n, h.out.length, h.out.peek());
 console.log(h.flush().join(","), h.out.length);
 console.log(h.hold(1), h.hold(2), h.held());
+
+// Accessor forms through the nullable fields: shorthand getter, get+set pair (read and write), setter-only (write).
+h.put("z");
+console.log(h.out.first, h.out.label);
+h.out.label = "q";
+console.log(h.out.label);
+h.out.cap = 5;
+console.log(h.out.capacity());
+
+// The same accessors on a plain (non-nullable) binding.
+const r = new Ring();
+r.label = "w";
+r.cap = 4;
+console.log(r.label, r.capacity(), r.first);
