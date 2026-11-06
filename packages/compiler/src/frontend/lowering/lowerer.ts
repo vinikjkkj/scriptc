@@ -75,7 +75,7 @@ import { applyProtoSlots, dynFnAsFunc, dynFnReadable, scanProtoSlots } from "./l
 import { applyProtoTabs, scanProtoTabs } from "./lower-prototab.js";
 import { OWN_SHADOW_ROOTS, applyFieldNotes, applyOwnShadows, inOwnShadowFamily } from "./lower-ownshadow.js";
 import { CLASS_BUILTIN_CTORLESS, CLASS_NO_DYN_NEW, EVAL_NO_SRC_CLASSES, GRAFTED_EMITTER_CLASSES, GRAFTED_EMITTER_CELL_CLASSES, GRAFTED_ROWS_FENCED_OPS, GRAFTED_PROPS_EXACT_OPS, EVAL_STATIC_CLASSES, dynReflectionSite, emitterStateWriteSites, graftedBoxSites, moduleBoxesEmitters, boxesEmittersFromFacts } from "../../ir/nodes.js";
-import { computeTwinEdits, type TwinEdits } from "./emitter-twin.js";
+import { computeTwinEdits, inTwinSpan, resetTwinConsumed, twinConsumedCount, type TwinEdits } from "./emitter-twin.js";
 import { canBoxFuncIntoDyn } from "../../ir/nodes.js";
 import { arrayTypeHasLiveView, procStreamDynMemberFence, NULL_T, strandTrap, armDiscrimLits, arrayOf, BOOL, canBoxClassIntoDyn, internalSlotFields, isRefCounted, canAdaptDynFuncTo, dynRestApplyable, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, shapeHasAccessorSlots, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
 import { type DynamicImportResolution, type NpmBuiltinUse, type NpmLazyTrap } from "../npm.js";
@@ -521,6 +521,11 @@ export interface LowerResult {
   /** Set with `twinReload` and a null `module` when the twin decision was taken from the DISCOVERY pass (the emit pass did not run):
    * the same insertions the emit pass would have computed, found one lowering earlier. */
   twinEarly?: boolean;
+  /** Set with `pinReload` when the same discovery pass already knows the twin insertions (found on the unpinned text): the caller may
+   * load the pinned and twinned program once (emitter-twin.ts mapTwinEdits) instead of twice. `copied` is the source text they copy. */
+  twinFold?: { edits: TwinEdits; copied: { file: string; start: number; end: number }[] };
+  /** Set on a lowering run with LowerOptions.twinVerify: the twin program lowered the way the two reloads would have produced it. */
+  twinFoldOk?: boolean;
   /** Present iff diagnostics is empty. */
   module: IrModule | null;
   diagnostics: ScrDiagnostic[];
@@ -583,6 +588,9 @@ export interface LowerOptions {
   ffiImports?: readonly IrFfiImport[];
   /** Do not answer with a twin reload (LowerResult.twinReload): this lowering IS the reload. */
   noTwinReload?: boolean;
+  /** This lowering is of a program loaded with the pin and twin edits at once: say (LowerResult.twinFoldOk) whether it came out as the
+   * twinned lowering of the pinned program would have. `markers` is how many registrations carry a marker. */
+  twinVerify?: { markers: number };
   /** Do not answer with a pin reload (LowerResult.pinReload): this program
    * IS the pinned reload, or the caller cannot reload. */
   noPinReload?: boolean;
@@ -773,12 +781,13 @@ const structViewDeniedKeys = new Set<string>();
  * listeners were lowered by the same code there, and the gate (moduleBoxesEmitters) reads two facts the discovery walk collects
  * over the same functions. `why` names the first reason the early decision is not taken; "ok" when it is. A tie in twin-number order
  * (computeTwinEdits) is not taken: the numbers follow the order candidates are met in, which is the emit pass's. */
-function discoveryTwinEdits(d: Lowerer): { edits: TwinEdits | null; why: string; gate: boolean; cands: number } {
+function discoveryTwinEdits(d: Lowerer, copied?: { file: string; start: number; end: number }[]): { edits: TwinEdits | null; why: string; gate: boolean; cands: number } {
   const cands = d.twinCandidates.length;
   if (cands === 0) return { edits: null, why: "nocand", gate: false, cands };
   const gate = boxesEmittersFromFacts([...d.classes.values()].map((c) => c.def), d.discEmitDyn, d.discDynFromClasses);
   if (!gate) return { edits: null, why: "gate-false", gate, cands };
-  const order = { tie: false };
+  const order: { tie: boolean; copied?: { file: string; start: number; end: number }[] } = { tie: false };
+  if (copied !== undefined) order.copied = copied;
   const edits = computeTwinEdits(d.twinCandidates, d.checker, order);
   if (edits === null) return { edits: null, why: "declined", gate, cands };
   if (order.tie) return { edits: process.env["SCRIPTC_TWIN_CHECK"] !== undefined ? edits : null, why: "tie", gate, cands };
@@ -806,6 +815,7 @@ export function lowerToIr(
   unifiedPairKeys.clear();
   widthPairsSettled = false;
   viewConversionAttempted = false;
+  resetTwinConsumed();
   const targetPlatform = options.targetPlatform ?? process.platform;
   const startupCrash = options.startupCrash ?? null;
   // Modules reachable only through dynamic import() of the program's own
@@ -881,12 +891,22 @@ export function lowerToIr(
       // The caller re-loads the program with the edits and lowers THAT.
       // Nothing of this pass is kept: its discovery only answered the
       // question.
+      let twinFold: LowerResult["twinFold"];
+      if (options.noTwinReload !== true && process.env["SCRIPTC_TWIN_EARLY"] !== "0" && process.env["SCRIPTC_TWIN_FOLD"] !== "0") {
+        const copied: { file: string; start: number; end: number }[] = [];
+        const d = discoveryTwinEdits(discovery, copied);
+        if (process.env["SCRIPTC_TWIN_WHY"] !== undefined) {
+          process.stderr.write(`[twin] discovery decision before the pin reload: ${d.why} (candidates ${d.cands}, gate ${d.gate})\n`);
+        }
+        if (d.edits !== null && d.why === "ok") twinFold = { edits: d.edits, copied };
+      }
       return {
         module: null,
         diagnostics: [],
         advisories: [],
         stats: { statementsTotal: 0, statementsFailed: 0, statementsIsland: 0, functionsSkipped: 0 },
         pinReload,
+        ...(twinFold !== undefined ? { twinFold } : {}),
       };
     }
   }
@@ -947,6 +967,18 @@ export function lowerToIr(
   if (options.noTwinReload !== true && result.module !== null && emit.twinCandidates.length > 0 && moduleBoxesEmitters(result.module)) {
     const twinReload = computeTwinEdits(emit.twinCandidates, emit.checker);
     if (twinReload !== null) result = { ...result, twinReload };
+  }
+  if (options.twinVerify !== undefined) {
+    // The twin program lowered what the pinned program's own twin reload would have: every registration that carries a marker found
+    // its twin (so the insertions were all candidates here), no candidate is left that a reload would still twin, and the pinned
+    // program (its own functions, not the twin copies) boxes emitters the way the gate asks.
+    const leftoverOk = emit.twinCandidates.length === 0 || computeTwinEdits(emit.twinCandidates, emit.checker) === null;
+    const gateOk = boxesEmittersFromFacts([...discovery.classes.values()].map((c) => c.def), discovery.discEmitDyn, discovery.discDynFromClasses);
+    const consumedOk = twinConsumedCount() === options.twinVerify.markers;
+    if (process.env["SCRIPTC_TWIN_WHY"] !== undefined) {
+      process.stderr.write(`[twin] fold verification: consumed ${twinConsumedCount()}/${options.twinVerify.markers} leftover-ok ${leftoverOk} gate ${gateOk}\n`);
+    }
+    result = { ...result, twinFoldOk: result.module !== null && consumedOk && leftoverOk && gateOk };
   }
   if (earlyTwin !== null && process.env["SCRIPTC_TWIN_CHECK"] !== undefined) {
     // CHECK MODE: the emit pass decided as it always did; say whether discovery would have decided the same.
@@ -5187,6 +5219,8 @@ export class Lowerer {
     if (!widthPairsSettled) this.discoveredFns.push(fn);
     const found = new Set<string>();
     const seen = new Set<string>();
+    // Functions lowered from text a twin reload inserted are copies: they decide nothing about what the program boxes.
+    const twinCopy = fn.loc !== undefined && inTwinSpan(fn.loc.file, fn.loc.start);
     const walk = (n: unknown): void => {
       if (n === null || typeof n !== "object") return;
       if (Array.isArray(n)) {
@@ -5194,8 +5228,8 @@ export class Lowerer {
         return;
       }
       const o = n as { kind?: unknown; value?: { type?: IrType } };
-      if (o.kind === "libCall" && (o as { fn?: unknown }).fn === "emitter.emitDyn") this.discEmitDyn = true;
-      if (o.kind === "dynFrom" && o.value?.type?.kind === "object") this.discDynFromClasses.add(o.value.type.className);
+      if (!twinCopy && o.kind === "libCall" && (o as { fn?: unknown }).fn === "emitter.emitDyn") this.discEmitDyn = true;
+      if (!twinCopy && o.kind === "dynFrom" && o.value?.type?.kind === "object") this.discDynFromClasses.add(o.value.type.className);
       if (o.kind === "dynFrom" && o.value?.type !== undefined) {
         this.classesCrossingIntoDyn(o.value.type, found, seen);
         if (structViewTargetKeys.size > 0) this.noteStructViewCrossing(o.value.type, new Set());

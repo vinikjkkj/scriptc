@@ -81,6 +81,9 @@ function placement(f: ts.Node, sf: ts.SourceFile, decl: string): TwinEdit[] | nu
   }
 }
 
+/** The source ranges whose text a computeTwinEdits call copied into a twin, while it runs with `order` given. */
+let copiedSink: { file: string; start: number; end: number }[] | null = null;
+
 type Fn = ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration;
 interface Rep {
   start: number;
@@ -142,6 +145,7 @@ function erasedText(f: Fn, sf: ts.SourceFile, js: boolean, extra: readonly Rep[]
   }
   // Descending, so earlier offsets stay valid; an insertion at the same offset as a later-listed edit goes first.
   const ord = edits.map((e, i) => ({ e, i })).sort((a, b) => b.e.start - a.e.start || b.i - a.i).map((x) => x.e);
+  copiedSink?.push({ file: sf.fileName, start: base, end: f.end });
   let out = text.slice(base, f.end);
   for (const e of ord) {
     out = out.slice(0, e.start - base) + e.text + out.slice(e.end - base);
@@ -187,6 +191,19 @@ function declTwin(
  * registration's listener argument: an inline function expression, or an identifier naming a function
  * declaration / const function expression of the same file. */
 export function computeTwinEdits(
+  cands: readonly ts.Expression[],
+  checker: ts.TypeChecker,
+  order?: { tie: boolean; copied?: { file: string; start: number; end: number }[] },
+): TwinEdits | null {
+  copiedSink = order?.copied ?? null;
+  try {
+    return computeTwinEditsInner(cands, checker, order);
+  } finally {
+    copiedSink = null;
+  }
+}
+
+function computeTwinEditsInner(
   cands: readonly ts.Expression[],
   checker: ts.TypeChecker,
   order?: { tie: boolean },
@@ -320,7 +337,76 @@ export function twinBackMap(edits: readonly TwinEdit[]): (p: number) => number {
   };
 }
 
+/** A pin reload's wrapper lengths around the span it casts: `(` + ` as any)` in a TypeScript file, the JSDoc cast in a JavaScript one
+ * (program.ts applies them in exactly these spellings). */
+const PIN_WRAP = { ts: [1, 8], js: [20, 1] } as const;
+
+/** Move twin insertions found on a program onto the text a pin reload of that program serves: each insertion point shifts past the
+ * wrappers that end before it. Null when a pin edit touches a twin insertion point or overlaps text a twin copied (the twin text
+ * would then differ from the one the pinned program produces), so the caller keeps the two reloads apart. */
+export function mapTwinEdits(
+  edits: TwinEdits,
+  pins: ReadonlyMap<string, readonly { start: number; end: number; ts: boolean }[]>,
+  copied: readonly { file: string; start: number; end: number }[],
+): TwinEdits | null {
+  const norm = (f: string): string => f.split("\\").join("/");
+  const pinsOf = (file: string): readonly { start: number; end: number; ts: boolean }[] => {
+    for (const [k, v] of pins) if (norm(k) === norm(file)) return v;
+    return [];
+  };
+  for (const c of copied) {
+    for (const p of pinsOf(c.file)) if (p.start < c.end && p.end > c.start) return null;
+  }
+  const out: TwinEdits = new Map();
+  for (const [file, list] of edits) {
+    const ps = pinsOf(file);
+    const mapped: TwinEdit[] = [];
+    for (const e of list) {
+      let shift = 0;
+      for (const p of ps) {
+        if (p.start <= e.at && e.at <= p.end) return null;
+        if (p.end < e.at) shift += p.ts ? PIN_WRAP.ts[0] + PIN_WRAP.ts[1] : PIN_WRAP.js[0] + PIN_WRAP.js[1];
+      }
+      mapped.push({ at: e.at + shift, text: e.text });
+    }
+    out.set(file, mapped);
+  }
+  return out;
+}
+
+/** The registration sites (by position in the served text) whose marker the lowering found a twin for. */
+const consumedSites = new Set<string>();
+
+export function resetTwinConsumed(): void {
+  consumedSites.clear();
+}
+
+export function noteTwinConsumed(site: string): void {
+  consumedSites.add(site);
+}
+
+export function twinConsumedCount(): number {
+  return consumedSites.size;
+}
+
+/** How many markers the insertions carry, copies inside a twin's own text included: every one of them is a registration the
+ * twin program's lowering must find a twin for. */
+export function twinMarkerCount(edits: TwinEdits): number {
+  let n = 0;
+  for (const list of edits.values()) for (const e of list) n += e.text.match(MARKS_IN_TEXT)?.length ?? 0;
+  return n;
+}
+
+/** Is `pos` inside text a twin reload inserted into `file`? (Functions lowered from it are copies, not the program's own.) */
+export function inTwinSpan(file: string, pos: number): boolean {
+  const all = insertedSpans.get(file.split("\\").join("/"));
+  if (all === undefined) return false;
+  for (const x of all) if (pos >= x.s && pos < x.e) return true;
+  return false;
+}
+
 const MARK = /\/\*@sctwin (\d+)\*\//g;
+const MARKS_IN_TEXT = /\/\*@sctwin \d+\*\//g;
 
 /** The twin number the reload marked this listener argument with, or null. The marker is the last
  * comment between the previous token and the argument. */

@@ -45,7 +45,7 @@ import type { ClassInfo } from "./lower-classes.js";
 import { isJsSourceFile, locOf } from "../program.js";
 import { lowerDynObjectLiteral } from "./lower-exprs.js";
 import { EMITTER_MIXIN_FIELD_NAME, funcOf, strandTrap, arrayOf, BOOL, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, DYN, F64, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, isUnitType, STRING, SrcLoc, typeEquals, typeKey, VOID, RUNTIME_EMITTER_CLASS } from "../../ir/nodes.js";
-import { twinIdentOf, twinMarkOf } from "./emitter-twin.js";
+import { twinIdentOf, noteTwinConsumed, twinMarkOf } from "./emitter-twin.js";
 import { streamForcedTuple, streamSidesOf } from "./lower-stream.js";
 import { handlerFnTypeNodeOf } from "../types.js";
 
@@ -1932,6 +1932,7 @@ export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
       if (id !== null) {
         const tw = L.lowerExpr(id);
         if (tw.type.kind === "func") {
+          noteTwinConsumed(`${args[1]!.getSourceFile().fileName}@${args[1]!.getStart()}`);
           return {
             kind: "libCall",
             fn: "emitter.onTwin",

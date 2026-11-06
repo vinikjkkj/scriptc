@@ -34,7 +34,7 @@ import { provenanceSources } from "./frontend/provenance-registry.js";
 import { resolveBareModule } from "./frontend/resolve.js";
 import { isJsSourceFileName, isRelativeSpecifier } from "./frontend/shared.js";
 import { lowerToIr, type LowerOptions, type LowerResult } from "./frontend/lowering/lowerer.js";
-import { twinBackMap } from "./frontend/lowering/emitter-twin.js";
+import { mapTwinEdits, twinBackMap, twinMarkerCount } from "./frontend/lowering/emitter-twin.js";
 import type { CoverageInput, NpmStaticStatus } from "./coverage/report.js";
 import { loadFfiProfile, type FfiProfile } from "./ffi/profile.js";
 import { createRequire } from "node:module";
@@ -566,6 +566,56 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
           result: first,
           relower: () => lowerToIr(finalLoad.program, finalLoad.entry, finalLoad.moduleOrder, { ...opts, startupCrash: finalLoad.startupCrash ?? null, noTwinReload: true }),
         };
+      }
+      // THE FOLDED RELOAD. The same discovery pass that named the pins also knows the twin insertions (LowerResult.twinFold), found on
+      // the unpinned text; moved onto the pinned text they make ONE reload of what the two reloads would have served one after the
+      // other. The result is taken only when the twin program lowers clean AND lowers what the twin reload of the pinned program
+      // would have (LowerResult.twinFoldOk); any other outcome goes on to the two reloads exactly as before.
+      if (first.twinFold !== undefined) {
+        const why = (m: string): void => {
+          if (process.env["SCRIPTC_TWIN_WHY"] !== undefined) process.stderr.write(`[twin] fold: ${m}\n`);
+        };
+        const mapped = mapTwinEdits(first.twinFold.edits, first.pinReload, first.twinFold.copied);
+        if (mapped === null) why("not taken: a pin edit touches a twin insertion or the text a twin copies");
+        else {
+          let folded: (LoadResult & { dispose: () => void }) | null = null;
+          try {
+            folded = loadProgram(entryPath, { npmStatic: effective, textEdits: first.pinReload, twinEdits: mapped });
+            if (checkPreflight(folded).length > 0) why("not taken: the folded program does not check");
+            else {
+              const both = lowerToIr(folded.program, folded.entry, folded.moduleOrder, {
+                ...opts,
+                startupCrash: folded.startupCrash ?? null,
+                noPinReload: true,
+                noTwinReload: true,
+                twinVerify: { markers: twinMarkerCount(mapped) },
+              });
+              const bad = both.module === null ? [] : validateModule(both.module);
+              if (both.module === null || both.diagnostics.length > 0 || bad.length > 0) why("not taken: the folded program does not lower clean");
+              else if (both.twinFoldOk !== true) why("not taken: the folded lowering differs from the two reloads' (see the verification line)");
+              else {
+                why(`taken (${twinMarkerCount(mapped)} marker(s))`);
+                // The same location mapping the twin reload applies (to the pinned text), so an advisory reads the same.
+                const es = (file: string): ReturnType<typeof twinBackMap> | null => {
+                  const list = mapped.get(file) ?? mapped.get(file.split("\\").join("/"));
+                  return list === undefined ? null : twinBackMap(list);
+                };
+                for (const d of both.advisories) {
+                  const m = es(d.loc.file);
+                  if (m !== null) d.loc = { ...d.loc, start: m(d.loc.start), end: m(d.loc.end) };
+                }
+                pinnedLoad?.dispose();
+                pinnedLoad = folded;
+                folded = null;
+                return { result: both, pins: first.pinReload, relower: () => both };
+              }
+            }
+          } catch (e) {
+            why(`not taken: ${(e as Error).message}`);
+          } finally {
+            folded?.dispose();
+          }
+        }
       }
       // Class fields untyped code writes another type (DynPins): load the
       // program again with those initializers cast to `any`, and lower THAT
