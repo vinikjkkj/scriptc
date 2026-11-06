@@ -13260,6 +13260,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24427-optional-keys-written-later-and-deleted-keys-list-in-write-order-in-json.ts": {
+   "order": [
+    "<repo>/tests/corpus/24427-optional-keys-written-later-and-deleted-keys-list-in-write-order-in-json.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24428-optional-keys-written-later-list-in-write-order-through-inspect-keys-values-entries-and-for-in.ts": {
+   "order": [
+    "<repo>/tests/corpus/24428-optional-keys-written-later-list-in-write-order-through-inspect-keys-values-entries-and-for-in.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24429-spread-return-and-filled-record-enumerate-in-node-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/24429-spread-return-and-filled-record-enumerate-in-node-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24430-two-fills-of-one-shape-in-two-orders-enumerate-in-fill-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/24430-two-fills-of-one-shape-in-two-orders-enumerate-in-fill-order.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2443-union-literal-shadow-narrowing.ts": {
    "order": [
     "<repo>/tests/corpus/2443-union-literal-shadow-narrowing.ts"

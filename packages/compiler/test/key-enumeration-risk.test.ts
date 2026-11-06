@@ -52,6 +52,9 @@ function lower(source: string): Lowered {
 
 const keyRisk = (r: Lowered): ScrDiagnostic[] =>
   r.diags.filter((d) => d.message.includes("over a record this program does not build"));
+/** The crossing's twin: a record widened into an 'unknown'/'object' slot out of an order its shape does not enumerate. */
+const crossingRisk = (r: Lowered): ScrDiagnostic[] =>
+  r.diags.filter((d) => d.message.includes("widening a record into an 'unknown'/'object' slot when this program does not build it"));
 
 /* ── the SET half: a width copy ends keys JS keeps ─────────────────────── */
 
@@ -116,10 +119,10 @@ console.log(JSON.stringify(t), String(u.a));
   expect(r.compiled).toBe(true);
 });
 
-test("a record filled by assignment in an order the program writes still refuses", () => {
-  // The control for the test above: the index names the order of a LITERAL's construction. A record filled key by key after an empty
-  // literal has no literal to name its order, so the write-order walk keeps the refusal it always had (the per-instance order list
-  // that would make it exact is a separate piece of work).
+test("a record filled by assignment in an order the program writes keeps a key list and compiles", () => {
+  // The index names the order of a LITERAL's construction. A record filled key by key after an empty literal has no literal to
+  // name its order, so its shape carries a per-instance KEY LIST (IrRecordShape.keyList) in the order the keys were first written,
+  // and every enumeration surface reads it: exact, so there is nothing to refuse (corpus 24427-24429 run it against Node).
   const r = lower(`
 interface P { a?: number; b?: number }
 const filled: P = {};
@@ -127,7 +130,22 @@ filled.b = 1;
 filled.a = 2;
 console.log(Object.entries(filled).map((e) => e[0]).join(";"));
 `);
-  expect(keyRisk(r).length).toBeGreaterThan(0);
+  expect(keyRisk(r)).toEqual([]);
+  expect(r.compiled).toBe(true);
+});
+
+test("the same record WIDENED into an unknown slot still refuses: the dyn crossing does not read the key list", () => {
+  // The control for the test above: a listed shape is exact at the surfaces that read the list, and the crossing into a dyn value is
+  // not one of them yet, so it keeps the refusal it always had.
+  const r = lower(`
+interface P { a?: number; b?: number }
+const filled: P = {};
+filled.b = 1;
+filled.a = 2;
+const wide: unknown = filled;
+console.log(Object.keys(wide as object).join(";"));
+`);
+  expect(crossingRisk(r).length).toBeGreaterThan(0);
 });
 
 test("ONE out-of-order literal is not a divergence: the shape takes the program's order", () => {
@@ -222,12 +240,10 @@ console.log(Object.keys(view).join(","), JSON.stringify(view));
   expect(r.compiled).toBe(true);
 });
 
-test("TWO fills of one shape in two orders is a provable disagreement, and refuses", () => {
-  // No single declaredOrder serves both, so the re-pick stands down and the
-  // comparison the fill makes possible answers instead. The refusal names
-  // BOTH orders — the one the value is filled in and the one its shape
-  // enumerates.
-  const r = lower(`
+test("TWO fills of one shape in two orders compile: each instance lists its keys in the order it was filled", () => {
+  // No single declaredOrder serves both, and none is needed: the shape keeps a per-instance key list, so each value enumerates
+  // as it was filled (corpus 24430 runs it against Node).
+  const ok = lower(`
 type Name = "omega" | "alpha" | "zeta";
 function forward(): string {
   const view = {} as Record<Name, number | undefined>;
@@ -241,17 +257,38 @@ function backward(): string {
 }
 console.log(forward(), backward());
 `);
-  const rows = keyRisk(r);
+  expect(keyRisk(ok)).toEqual([]);
+  expect(ok.compiled).toBe(true);
+});
+
+test("TWO fills of one shape in two orders, WIDENED, is a provable disagreement and refuses", () => {
+  // The control: the dyn crossing does not read the key list yet. The refusal names BOTH orders - the one the value is filled in
+  // and the one its shape enumerates.
+  const r = lower(`
+type Name = "omega" | "alpha" | "zeta";
+function forward(): unknown {
+  const view = {} as Record<Name, number | undefined>;
+  for (const k of ["omega", "alpha", "zeta"]) view[k as Name] = 1;
+  return view;
+}
+function backward(): unknown {
+  const view = {} as Record<Name, number | undefined>;
+  for (const k of ["zeta", "alpha", "omega"]) view[k as Name] = 2;
+  return view;
+}
+console.log(Object.keys(forward() as object).join(","), Object.keys(backward() as object).join(","));
+`);
+  const rows = crossingRisk(r);
   expect(rows.length).toBe(2);
   expect(rows[0]!.hint ?? "").toContain("omega,alpha,zeta");
   expect(rows[0]!.hint ?? "").toContain("enumerates");
   expect(rows[1]!.hint ?? "").toContain("zeta,alpha,omega");
 });
 
-test("a fill whose key sequence is a RUN-TIME fact ADVISES and compiles", () => {
-  // The residue. Refusing it is what the withdrawn fence did; saying nothing
-  // is what shipped the wrong object. Possibly-wrong takes SC6002, the same
-  // stance the dynamic-source half takes one node over.
+test("a fill whose key sequence is a RUN-TIME fact is exact, so it compiles with no advice", () => {
+  // The residue used to be possibly wrong, and said so with SC6002 (refusing it is what the withdrawn fence did; saying nothing
+  // shipped the wrong object). The instance now lists its keys in the order they were written, so Object.keys here is exact and
+  // there is nothing left to advise (corpus 24430 runs a keyed fill against Node).
   const r = lower(`
 type Name = "omega" | "alpha" | "zeta";
 function fill(order: readonly string[]): string {
@@ -263,10 +300,7 @@ console.log(fill(["zeta", "omega", "alpha"]));
 `);
   expect(keyRisk(r)).toEqual([]);
   expect(r.compiled, "the advice must not stop the build").toBe(true);
-  const a = r.advisories.filter((d) => d.code === "SC6002");
-  expect(a.length).toBe(1);
-  expect(a[0]!.severity).toBe("advice");
-  expect(a[0]!.message).toContain("computed KEY");
+  expect(r.advisories.filter((d) => d.code === "SC6002")).toEqual([]);
 });
 
 test("ONE KEY has one order, so an unknowable fill of a one-key shape says nothing", () => {
