@@ -13374,6 +13374,9 @@ ScrDyn *scr_dyn_uint8array_of(void) {
  * function this tier does not hold, so it refuses by name rather than
  * answering the Uint8Array one — the two disagree about `toString`,
  * `inspect` and their own `.constructor`. */
+/* The Buffer class object, once the buffer-value unit is linked (it installs itself here): a Buffer's `.constructor`. */
+ScrDyn *(*scr_dyn_buffer_ctor_hook)(void) = NULL;
+
 ScrDyn *scr_dyn_bytes_constructor(const ScrDyn *d) {
   /* A DataView's constructor is DataView, which is no more a value in
    * this tier than Buffer is. It used to answer the Uint8Array one --
@@ -13387,6 +13390,9 @@ ScrDyn *scr_dyn_bytes_constructor(const ScrDyn *d) {
     return NULL;
   }
   if (d->buffer || d->v.bytes->flavor == SCR_BF_BUFFER) {
+    /* A Buffer's constructor is Buffer: the class object the buffer-value unit owns (`=== Buffer` true, `=== Uint8Array` false,
+     * `.name` "Buffer"). A link without that unit holds no Buffer value to answer with and keeps the named refusal. */
+    if (scr_dyn_buffer_ctor_hook != NULL) return scr_dyn_buffer_ctor_hook();
     static const char msg[] =
         "reading 'constructor' off a Buffer is not supported yet"
         " (the Buffer constructor is not a value in a static build; the Uint8Array one"

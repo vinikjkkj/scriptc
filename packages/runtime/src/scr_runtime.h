@@ -6169,6 +6169,7 @@ ScrDyn *scr_dyn_buffer_only_method(ScrDyn *recv, const char *m, ScrDyn *const *a
                                    const char *what, bool *known);
 /* %Buffer.prototype% (scr_buffer_val.c sets it; NULL until built). Borrowed. */
 extern ScrDyn *scr_dyn_buffer_proto_ptr;
+extern ScrDyn *(*scr_dyn_buffer_ctor_hook)(void); /* a Buffer's .constructor: installed by the buffer-value unit */
 /* Object.assign over dyn values (+1 target back; ToObject TypeError on a
  * nullish target). Sources copy their own enumerable keys exactly as
  * Object.keys lists them: OBJ members, ARR/STR/BYTES index keys; nullish
