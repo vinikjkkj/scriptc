@@ -6280,6 +6280,8 @@ export class Lowerer {
       const s = this.shapes.get(id);
       if (!s?.declaredOrder || s.tuple || s.indexValue || s.builtin || s.fields.length > 254) continue;
       if (s.fields.some((f) => f.name.startsWith("%"))) continue;
+      // Integer-like names enumerate first and ascending however they were written, which a write-order list cannot say yet.
+      if (s.fields.some((f) => /^(0|[1-9][0-9]*)$/.test(f.name) && Number(f.name) < 4294967295)) continue;
       if (this.requiredAbsentTargets.has(id)) continue;
       // A baked consumer the list cannot serve (a blocked bake, or a spread that follows the index) keeps its refusal.
       const bake = this.enumOrderBakes.get(id);
