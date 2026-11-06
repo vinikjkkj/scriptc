@@ -3438,6 +3438,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
                             // rides SCR_DYN_BYTES too. One runtime
                             // predicate, shared with the LLVM lane.
                             `scr_dyn_is_u8array(${d.name})`
+                          : e.test === "typedarray"
+                            ? // `instanceof Int8Array | ... | DataView`: the runtime predicate, shared with the LLVM lane.
+                              `scr_dyn_is_typed(${d.name}, ${e.className === "dataview" ? "SCR_ISL_BIN_DATAVIEW" : `SCR_BYTES_${e.className!.toUpperCase()}`})`
                           : e.test === "view" && moduleUsesEngineFn(E.mod)
                             ? // `ArrayBuffer.isView(u)`: the bytes kind, or a typed array / DataView the engine holds.
                               `(${d.name}->kind == SCR_DYN_BYTES || scr_dyn_isl_is_view(${d.name}))`
