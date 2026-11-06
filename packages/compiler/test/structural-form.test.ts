@@ -84,9 +84,9 @@ describe("structural form", () => {
     // field landed on, so moving one is a red test rather than a quiet
     // behaviour change.
     expect([...structuralIdentityFields.shapeExcluded].sort())
-      .toEqual(["id", "keyList", "keyOrders", "ownmask", "reqabsent", "srcproto"]);
+      .toEqual(["id", "keyList", "keyListAll", "keyOrders", "ownmask", "reqabsent", "srcproto"]);
     expect([...structuralIdentityFields.shape].sort())
-      .toEqual(["builtin", "declaredOrder", "fields", "indexValue", "keyOrder", "tostr", "tuple", "view"]);
+      .toEqual(["builtin", "declaredOrder", "fields", "genResult", "indexValue", "keyOrder", "tostr", "tuple", "view"]);
     expect([...structuralIdentityFields.unionExcluded].sort()).toEqual(["id"]);
   });
 
