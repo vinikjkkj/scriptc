@@ -2585,6 +2585,14 @@ bool scr_dyn_is_u8array(const ScrDyn *d) {
          d->v.bytes->elem == SCR_BYTES_U8 && d->v.bytes->flavor != SCR_BF_DATAVIEW;
 }
 
+bool scr_dyn_is_typed(const ScrDyn *d, int elem) {
+  if (d == NULL) return false;
+  if (d->kind == SCR_DYN_JSVAL) return scr_dyn_isl_bin(d) == elem;
+  if (d->kind != SCR_DYN_BYTES || d->v.bytes == NULL) return false;
+  if (elem == SCR_ISL_BIN_DATAVIEW) return d->v.bytes->flavor == SCR_BF_DATAVIEW;
+  return d->v.bytes->flavor != SCR_BF_DATAVIEW && (int)d->v.bytes->elem == elem;
+}
+
 /* The element test every SCR_DYN_BYTES match and extraction makes. The
  * kind names only "a typed view", since Uint8Array, Int8Array, the float
  * and bigint views and their clamped twin all box as SCR_DYN_BYTES; the
