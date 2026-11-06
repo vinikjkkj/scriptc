@@ -12760,6 +12760,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24160-promise-of-a-wider-record-in-a-narrower-promise-slot-keeps-identity.ts": {
+   "order": [
+    "<repo>/tests/corpus/24160-promise-of-a-wider-record-in-a-narrower-promise-slot-keeps-identity.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2414-dowhile-continue-kill.ts": {
    "order": [
     "<repo>/tests/corpus/2414-dowhile-continue-kill.ts"
