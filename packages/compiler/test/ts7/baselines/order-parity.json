@@ -25614,6 +25614,12 @@
     "<repo>/tests/corpus/24546-util-deprecate-wraps-a-function-with-declared-parameters-and-arguments.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/24547-process-next-tick-taken-as-a-value.js": {
+   "order": [
+    "<repo>/tests/corpus/24547-process-next-tick-taken-as-a-value.js"
+   ],
+   "diags": []
   }
  }
 }
