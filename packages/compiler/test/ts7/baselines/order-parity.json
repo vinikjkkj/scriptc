@@ -25434,6 +25434,30 @@
     "<repo>/tests/fixtures/node-types/streams.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/24490-prototype-data-named-call-read-through-untyped-values.js": {
+   "order": [
+    "<repo>/tests/corpus/24490-prototype-data-named-call-read-through-untyped-values.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24491-prototype-data-named-call-two-unrelated-classes.js": {
+   "order": [
+    "<repo>/tests/corpus/24491-prototype-data-named-call-two-unrelated-classes.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24492-protobuf-shaped-encode-reads-optional-call-field.js": {
+   "order": [
+    "<repo>/tests/corpus/24492-protobuf-shaped-encode-reads-optional-call-field.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/protodata-untyped-read-fenced-owner.js": {
+   "order": [
+    "<repo>/tests/diagnostics/protodata-untyped-read-fenced-owner.js"
+   ],
+   "diags": []
   }
  }
 }
