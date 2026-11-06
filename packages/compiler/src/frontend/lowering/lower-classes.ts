@@ -8718,10 +8718,10 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
  * dyn value could not run `x.m()`: the box's member table would list the
  * fields and none of the methods ("x.m is not a function"). A method whose
  * instance poisons keeps its own diagnostic and stays off the list. */
-export function dynBoxedMethodInstances(L: Lowerer, info: ClassInfo): { name: string; fn: string }[] {
+export function dynBoxedMethodInstances(L: Lowerer, info: ClassInfo, methodOk: (mName: string) => boolean = () => true): { name: string; fn: string }[] {
   const out: { name: string; fn: string }[] = [];
   for (const [mName, g] of info.genericMethods ?? []) {
-    if (g.implicitParams === undefined) continue;
+    if (g.implicitParams === undefined || !methodOk(mName)) continue;
     try {
       out.push({ name: mName, fn: implicitDefaultInstance(L, g.decl, g).name });
     } catch (e) {
