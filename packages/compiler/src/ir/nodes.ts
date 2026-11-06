@@ -6076,6 +6076,10 @@ export type IrLibFn =
    * identity. Never throws. Static builds only; under --dynamic the
    * engine owns the real one. */
   | "dyn.u8Ctor"
+  /** The `Object` and `Array` globals as VALUES: the function objects a plain object's and an array's `.constructor` answers
+   * (scr_dyn_object_ctor, scr_dyn_array_ctor), one per process, so `value.constructor === Object` is identity. Never throws. */
+  | "dyn.objectCtor"
+  | "dyn.arrayCtor"
   /** The `Promise` global as a VALUE in a JavaScript source (scr_async_dyn.c): a function object,
    * one process singleton, whose `new` runs a checked-dynamic executor. Never throws. Static
    * builds only; links the dyn async unit. */
