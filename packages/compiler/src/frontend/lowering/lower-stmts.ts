@@ -415,7 +415,11 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
       // TDZ read until the initializing assign completes — JS exactly.
       if (idx < entry.index || entry.ctx === L.ctx) return false;
       let type = L.irTypeOf(decl.name);
-      if (!TDZ_KINDS.has(type.kind) || isUnitType(type)) return false;
+      // A checked-dynamic CONST (JS infers `any` for a binding whose initializer reads the binding itself: `const p = work().then(() =>
+      // p)`): once initialized it is never NULL (the dyn undefined is the immortal instance), so the empty-box sentinel is still the dead
+      // zone. A `let x!: T` keeps the fence: a dyn slot there can legitimately hold the unassigned NULL.
+      const dynConst = type.kind === "dyn" && isConst && !assertedLet;
+      if (!(TDZ_KINDS.has(type.kind) || dynConst) || isUnitType(type)) return false;
       if (assertedLet) {
         // A slot with no representation for undefined is WIDENED to
         // `T | undefined` (bangWidens). The box stays EMPTY (NULL) until the
