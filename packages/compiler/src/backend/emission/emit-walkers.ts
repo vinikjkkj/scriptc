@@ -3354,11 +3354,18 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             canAdaptDynFuncTo(t, (id) => E.recordsById.get(id), (id) => E.unionsById.get(id))) {
           const adapter = dynFuncAdapterHelper(E, t);
           d.push(`  {`);
-          d.push(`    ScrClosure *a = scr_closure_new((void *)&${adapter}, 2);`);
+          // An engine function (or bound engine method) crossing again is the adapter it crossed as: remembered by the engine value.
+          const engineFn = moduleUsesEngineFn(E.mod);
+          if (engineFn) {
+            d.push(`    ScrClosure *sc_hit = scr_dyn_fn_adapter_find(d, (const void *)&${adapter});`);
+            d.push(`    if (sc_hit != NULL) return sc_hit;`);
+          }
+          d.push(`    ScrClosure *a = scr_closure_new((void *)&${adapter}, ${engineFn ? 3 : 2});${engineFn ? " /* caps[2]: the identity table's sentinel */" : ""}`);
           d.push(`    a->caps[0] = scr_box_new(SCR_BOX_FUNC); /* TRACED — the ring closes here */`);
           d.push(`    scr_box_set_ref(a->caps[0], scr_closure_retain(d->v.fn.clo));`);
           d.push(`    a->caps[1] = scr_box_new(SCR_BOX_F64); /* the call descriptor: owns nothing */`);
           d.push(`    scr_box_set_thunk(a->caps[1], d->v.fn.thunk);`);
+          if (engineFn) d.push(`    scr_dyn_fn_adapter_remember(d, (const void *)&${adapter}, a);`);
           d.push(`    return a;`);
           d.push(`  }`);
         } else {

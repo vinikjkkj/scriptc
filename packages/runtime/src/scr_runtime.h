@@ -7694,6 +7694,9 @@ typedef struct ScrDynJsvalOps {
   ScrDyn *(*iter_drain)(ScrJsval *cell, bool spread, const ScrStr *spell);
   /* The engine's Uint8Array (engine Buffers are Uint8Array subclasses): the test, and the COPY of its bytes out as a fresh native
    * u8 bytes value (the boundary's aliasing stance - scr_jsval_exit_bytes). +1, or NULL with the exception pending. */
+  /* The engine object's identity as a word (the address of the engine object; 0 for a non-object). Two cells name the same engine
+   * object exactly when the words are equal and non-zero. */
+  uintptr_t (*ident)(ScrJsval *cell);
   bool (*is_u8)(ScrJsval *cell);
   ScrBytes *(*exit_u8)(ScrJsval *cell);
 #ifdef SCR_SYMTAB
@@ -7744,6 +7747,10 @@ ScrDyn *scr_dyn_isl_bound_method(const ScrDyn *recv, const char *key, size_t len
 /* Is d an engine-held function? An engine function as a function value of the checked-dynamic tree (+1): its call is the engine's. */
 bool scr_dyn_isl_is_function(const ScrDyn *d);
 /* An engine Uint8Array: the test, and the copy of its bytes as a native u8 bytes value (+1, or NULL with the exception pending). */
+/* Identity of an engine function across crossings: the adapter closure built for a boxed engine function (or bound engine method) at a
+ * target signature (`code`) is remembered and found again by the same engine value. find: +1 or NULL; remember: retains `adapter`. */
+ScrClosure *scr_dyn_fn_adapter_find(const ScrDyn *d, const void *code);
+void scr_dyn_fn_adapter_remember(const ScrDyn *d, const void *code, ScrClosure *adapter);
 bool scr_dyn_isl_is_u8(const ScrDyn *d);
 ScrBytes *scr_dyn_isl_exit_u8(const ScrDyn *d);
 ScrDyn *scr_dyn_isl_fn_box(const ScrDyn *f);
