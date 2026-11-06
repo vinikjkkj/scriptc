@@ -3164,8 +3164,17 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       if (objectish) {
         // the constituent every other one is assignable FROM: it alone carries the value (the interface parts may map to a lossy
         // shape of their own, as Iterable<T> does to an array, or to none)
+        // ... and it must also CARRY every member the others name: assignability alone admits a part whose extra members are all
+        // optional (an options interface the value merely lacks), and mapping to the carrier would silently drop those members.
+        const nameOf = (q: ts.Symbol): string => (q as unknown as { escapedName?: string }).escapedName ?? q.name;
+        const carries = (x: ts.Type, y: ts.Type): boolean => {
+          const have = new Set(checker.getPropertiesOfType(x).map(nameOf));
+          return checker.getPropertiesOfType(y).every((q) => have.has(nameOf(q)));
+        };
         const dom = mappedAll.find(
-          (x) => x.m !== null && x.m.kind !== "dyn" && mappedAll.every((y) => y === x || checker.isTypeAssignableTo(x.p, y.p)),
+          (x) =>
+            x.m !== null && x.m.kind !== "dyn" &&
+            mappedAll.every((y) => y === x || (checker.isTypeAssignableTo(x.p, y.p) && carries(x.p, y.p))),
         );
         if (dom !== undefined) return dom.m;
       }
