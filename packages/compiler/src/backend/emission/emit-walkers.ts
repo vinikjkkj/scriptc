@@ -16,7 +16,7 @@ import { RUNTIME_EMITTER_CLASS as RUNTIME_EMITTER_CLASS_W } from "../../ir/nodes
 import { classvalCandidates, dynClassDisplayName, dynDescBase, dynEmitterSlot, dynRuntimeRoot, dynEnumerationFenced, dynMemberRows, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
 import { EMITTER_MIXIN_FIELD_NAME, ORD_MEMBER, orderRecordPlanCached } from "../../ir/nodes.js";
 import { KINDGATE_WIDE_KINDS, kindgateInstanceLane, kindgateWideLane } from "../kindgate.js";
-import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, VIEW_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
+import { KEYIX_MEMBER, OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, VIEW_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
 
 /** The refusal text a dyn-to-record check uses when the receiver carries
  * no INTERNAL SLOT for a field declaredOrder omits (internalSlotFields).
@@ -1116,18 +1116,25 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           !!shape.indexValue ||
           shape.ownmask === true;
         d.push(`  scr_jb_putc(b, '{');`);
-        if (!droppable) {
-          emitFields.forEach((f, i) => {
-            const label = cStringLiteral(Buffer.from(`${i > 0 ? "," : ""}"${f.name}":`, "utf8"));
-            d.push(`  scr_jb_puts(b, ${label});`);
-            if (edgeable(f.type)) d.push(`  scr_jb_edge_prop(b, ${cStringLiteral(Buffer.from(f.name, "utf8"))});`);
-            // Refcounted fields are BORROWED straight off the struct (the
-            // record itself is borrowed for the whole call).
-            d.push(`  ${E.jsonWriteHelper(f.type)}(b, v->${mangleField(f.name)});`);
-          });
-        } else {
-          d.push(`  bool first = true;`);
-          for (const f of emitFields) {
+        // One field list per key order. A shape every construction agrees on has one (its declaredOrder): the code below is
+        // then the code it always was. A shape with several (IrRecordShape.keyOrders) switches on the instance's order index
+        // and writes the fields in that order.
+        const orderedFieldLists: (typeof emitFields)[] = shape.keyOrders
+          ? shape.keyOrders.map((o) => o.filter((n) => !(n.startsWith("__@") && !n.startsWith("__@ord@"))).map((n) => byName.get(n)).filter((f) => f !== undefined))
+          : [emitFields];
+        const fieldCode = (fields: typeof emitFields, out: string[], ind: string): void => {
+          if (!droppable) {
+            fields.forEach((f, i) => {
+              const label = cStringLiteral(Buffer.from(`${i > 0 ? "," : ""}"${f.name}":`, "utf8"));
+              out.push(`${ind}scr_jb_puts(b, ${label});`);
+              if (edgeable(f.type)) out.push(`${ind}scr_jb_edge_prop(b, ${cStringLiteral(Buffer.from(f.name, "utf8"))});`);
+              // Refcounted fields are BORROWED straight off the struct (the
+              // record itself is borrowed for the whole call).
+              out.push(`${ind}${E.jsonWriteHelper(f.type)}(b, v->${mangleField(f.name)});`);
+            });
+            return;
+          }
+          for (const f of fields) {
             const label = cStringLiteral(Buffer.from(`"${f.name}":`, "utf8"));
             const utag = E.undefinedArmTag(f.type);
             // The own-key question, one spelling: an undefined-valued
@@ -1142,17 +1149,36 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
               const notMarker = `!scr_num_is_undef(v->${mangleField(f.name)})`;
               cond = cond === null ? notMarker : `(${cond}) && ${notMarker}`;
             }
-            const pad = cond !== null ? "    " : "  ";
+            const pad = cond !== null ? ind + "  " : ind;
             if (cond !== null) {
-              d.push(`  if (${cond}) { /* not an own key of the value: dropped, like Node */`);
+              out.push(`${ind}if (${cond}) { /* not an own key of the value: dropped, like Node */`);
             }
-            d.push(`${pad}if (!first) scr_jb_putc(b, ',');`);
-            d.push(`${pad}first = false;`);
-            d.push(`${pad}scr_jb_puts(b, ${label});`);
-            if (edgeable(f.type)) d.push(`${pad}scr_jb_edge_prop(b, ${cStringLiteral(Buffer.from(f.name, "utf8"))});`);
-            d.push(`${pad}${E.jsonWriteHelper(f.type)}(b, v->${mangleField(f.name)});`);
-            if (cond !== null) d.push(`  }`);
+            out.push(`${pad}if (!first) scr_jb_putc(b, ',');`);
+            out.push(`${pad}first = false;`);
+            out.push(`${pad}scr_jb_puts(b, ${label});`);
+            if (edgeable(f.type)) out.push(`${pad}scr_jb_edge_prop(b, ${cStringLiteral(Buffer.from(f.name, "utf8"))});`);
+            out.push(`${pad}${E.jsonWriteHelper(f.type)}(b, v->${mangleField(f.name)});`);
+            if (cond !== null) out.push(`${ind}}`);
           }
+        };
+        const putFields = (): void => {
+          if (!shape.keyOrders) {
+            fieldCode(emitFields, d, "  ");
+            return;
+          }
+          d.push(`  switch (v->${KEYIX_MEMBER}) {`);
+          orderedFieldLists.forEach((fl, i) => {
+            d.push(`  ${i === orderedFieldLists.length - 1 ? "default" : `case ${i}`}: {`);
+            fieldCode(fl, d, "    ");
+            d.push(`    break;`, `  }`);
+          });
+          d.push(`  }`);
+        };
+        if (!droppable) {
+          putFields();
+        } else {
+          d.push(`  bool first = true;`);
+          putFields();
           // Overflow entries follow the declared fields, themselves in JS
           // OWN-KEY order — integer-like keys ascending first, then the
           // rest in insertion order (scr_map_keys_js_order, the same

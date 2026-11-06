@@ -3944,6 +3944,17 @@ function validateFunction(
         }
         break;
       }
+      case "recordKeyOrderIs": {
+        checkExpr(e.obj);
+        const shape = records.get(e.shapeId);
+        if (!shape?.keyOrders) err(`recordKeyOrderIs on shape "${e.shapeId}" with a single key order`, e.loc);
+        else {
+          expectType(e.obj, { kind: "record", shapeId: e.shapeId }, "recordKeyOrderIs receiver");
+          if (e.ix < 0 || e.ix >= shape.keyOrders.length) err(`recordKeyOrderIs index ${e.ix} out of range`, e.loc);
+          if (e.type.kind !== "bool") err(`recordKeyOrderIs must be bool, got ${e.type.kind}`, e.loc);
+        }
+        break;
+      }
       case "recordKeyPresent": {
         checkExpr(e.obj);
         const shape = records.get(e.shapeId);

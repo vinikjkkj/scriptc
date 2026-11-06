@@ -45,6 +45,9 @@ export const SRCPROTO_MEMBER = "sc_srcproto";
 /** The hidden member of a VIEW-capable shape (IrRecordShape.view): the dyn OBJECT the record is a view of,
  * NULL when the record was built any other way. Last in the struct, so no existing member moves. */
 export const VIEW_MEMBER = "sc_view";
+/** The hidden member of a shape with several key orders (IrRecordShape.keyOrders): which one this instance was built in.
+ * Last in the struct, so no existing member moves; zero (the shape's declaredOrder) on every record built any other way. */
+export const KEYIX_MEMBER = "sc_kx";
 
 /** The C condition under which field `fieldName` of `shape` is one of the
  * receiver's OWN keys — the single question Object.keys, JSON.stringify,
@@ -192,6 +195,9 @@ export interface ClassMeta {
       /** View-capable records (IrRecordShape.view): one more trailing `ScrDyn *`, treated as one more
        * (dyn-typed) field by new/release/trace. */
       view?: true;
+      /** A record with several key orders (IrRecordShape.keyOrders): one more trailing plain byte, carried by neither the RC
+       * members nor the trace. */
+      keyOrders?: string[][];
       /** Class shapes whose hierarchy has inferred fields: the bytes of the
        * per-instance order record (ir/nodes.ts ORD_MEMBER), laid out first among
        * the fields so every class of the hierarchy shares its offset. */
@@ -232,6 +238,7 @@ export interface ClassMeta {
         ...(rec.ownmask ? { ownmask: true as const } : {}),
         ...(rec.srcproto ? { srcproto: true as const } : {}),
         ...(rec.view ? { view: true as const } : {}),
+        ...(rec.keyOrders ? { keyOrders: rec.keyOrders } : {}),
         comment: `record ${rec.id} { ${rec.fields.map((f) => f.name).join("; ")}${rec.indexValue ? "; [key: string]" : ""} }`,
         meta: null,
       })),
@@ -341,6 +348,9 @@ export interface ClassMeta {
       }
       if (s.view) {
         decl.push(`  ScrDyn *${VIEW_MEMBER}; /* the object this record is a view of (NULL = a plain struct) */`);
+      }
+      if (s.keyOrders) {
+        decl.push(`  uint8_t ${KEYIX_MEMBER}; /* hidden per-instance key-order index (into the shape's ${s.keyOrders.length} orders; 0 = declared) */`);
       }
       decl.push(`};`);
     }

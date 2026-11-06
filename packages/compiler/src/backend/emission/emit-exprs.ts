@@ -17,7 +17,7 @@ import { rcSitesRequested, rcSiteLabel } from "./emitter.js";
 import { ORD_MEMBER, orderRecordPlanCached, ABSENT_KEY_TRAP_CODE, arrayOf, canBoxFuncIntoDyn, BOOL, BYTES_U8, bytesOf, ownMaskKeyBit, presenceMaskStores, OWNMASK_COMPLETED, OWNMASK_VALID, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, IrExpr, IrRecordShape, IrType, irFunctionJsName, irFunctionValueCode, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals, typeKey } from "../../ir/nodes.js";
 import { unionKeyClasses, boxAccess, BYTES_NUM_KIND_C, BYTES_NUM_VAR_C, bytesElemKindC, cDecl, cFnPtrCast, cNumberLiteral, cStringLiteral, cType, DV_GET_KIND_C, DV_SET_KIND_C, elemAccess, mapKeyAccess, mapKeyKindC, mapValKindC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassNew, mangleClassRetain, mangleClassStruct, mangleField, mangleFnClosure, mangleFunction, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleVtStruct, mangleWrapper } from "../mangle.js";
-import { OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, VIEW_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
+import { KEYIX_MEMBER, OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, VIEW_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
 import { dynDestrCheckHelper, dynIterNHelper, dynKeyGetHelper, originMarkC, recSrcMapC, viewSyncHelper } from "./emit-walkers.js";
 import { genResultThunkFor } from "./emit-async.js";
 import { emitCoroAwait, emitCoroHop, emitCoroUnionSuspend } from "./emit-coro.js";
@@ -2527,6 +2527,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           `(!(${m}[0] & ${OWNMASK_COMPLETED}) || ((${m}[${bit.byte}] & ${bit.bit}) != 0))`,
         );
       }
+      case "recordKeyOrderIs": {
+        const obj = E.emitExpr(e.obj);
+        return E.newTemp(e.type, `(${obj.name}->${KEYIX_MEMBER} == ${e.ix})`);
+      }
       case "recordKeyPresent": {
         // The own-key question, one spelling (ownPresentCondC). On an
         // unarmed shape it is the undefined-arm tag test every own-key
@@ -2616,6 +2620,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // map in the same interleaved order — the map takes ownership.
         if (e.type.kind !== "record") throw new Error("emitter bug: recordLit of non-record type");
         const rec = E.newTemp(e.type, `${mangleRecordNew(e.type.shapeId)}()`);
+        // A shape with several key orders: this literal names the one it was written in (0 = declaredOrder, the zeroed default).
+        if (e.ordIx) E.line(`${rec.name}->${KEYIX_MEMBER} = ${e.ordIx}; /* key order ${e.ordIx} */`);
         // THE COMPLETED literal (an `as` cast over a literal missing a
         // REQUIRED member) establishes the instance's own-key mask. Byte 0
         // goes first, before any field runs: a field initializer can throw,

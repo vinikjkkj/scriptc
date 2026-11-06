@@ -16,7 +16,7 @@ import type { IrRecordShape, IrType, IrUnionDef } from "../../ir/nodes.js";
 import { isRefCounted, typeKey } from "../../ir/nodes.js";
 import { mangleRecordStruct } from "../mangle.js";
 import { BlockBuilder } from "./blocks.js";
-import { emitOwnPresentLl, llFieldType, releaseSym, traceAdapter, viewSlotIndex, type ShapeHost } from "./shapes.js";
+import { emitOwnPresentLl, llFieldType, releaseSym, traceAdapter, keyIxSlotIndex, viewSlotIndex, type ShapeHost } from "./shapes.js";
 import { LlvmUnsupportedError } from "./unsupported.js";
 
 /** What the walkers need from the emitter beyond the shape tables: union
@@ -296,12 +296,40 @@ export class LlWalkers {
       !!shape.indexValue ||
       shape.ownmask === true;
     this.putc(B, "%b", "123"); // '{'
+    // One field list per key order. A shape every construction agrees on has one (its declaredOrder), and the code is then
+    // what it always was; a shape with several (IrRecordShape.keyOrders) switches on the instance's order index.
+    const orderedFieldLists = shape.keyOrders
+      ? shape.keyOrders.map((o) => o.filter((n) => !(n.startsWith("__@") && !n.startsWith("__@ord@"))).map((n) => byName.get(n)).filter((f) => f !== undefined))
+      : [emitFields];
+    const withOrders = (emitOne: (fields: typeof emitFields) => void): void => {
+      if (!shape.keyOrders) {
+        emitOne(emitFields);
+        return;
+      }
+      const kp = B.tmp();
+      B.line(`${kp} = getelementptr inbounds %${mangleRecordStruct(shapeId)}, ptr %v, i64 0, i32 ${keyIxSlotIndex(shape)} ; key order`);
+      const k8 = B.tmp();
+      B.line(`${k8} = load i8, ptr ${kp}`);
+      const k32 = B.tmp();
+      B.line(`${k32} = zext i8 ${k8} to i32`);
+      const arms = orderedFieldLists.map((_, i) => B.newLabel(`jko${i}`));
+      const join = B.newLabel("jko.j");
+      B.switchTerm(k32, arms[arms.length - 1]!, arms.slice(0, -1).map((l, i) => [i, l] as [number, string]));
+      orderedFieldLists.forEach((fl, i) => {
+        B.startBlock(arms[i]!);
+        emitOne(fl);
+        B.br(join);
+      });
+      B.startBlock(join);
+    };
     if (!droppable) {
-      emitFields.forEach((f, i) => {
+      withOrders((fields) => {
+      fields.forEach((f, i) => {
         this.puts(B, "%b", `${i > 0 ? "," : ""}"${f.name}":`);
         if (edgeable(f.type)) this.jbEdgeProp(B, f.name);
         const v = this.loadField(B, "%v", shapeId, fieldIndex.get(f.name)!, f.type);
         B.line(`call void @${this.jsonWriteHelper(f.type)}(ptr %b, ${this.valTy(f.type)} ${v}) ; ${f.name}`);
+      });
       });
     } else {
       const first = B.slot();
@@ -319,7 +347,8 @@ export class LlWalkers {
         B.startBlock(lj);
         B.line(`store i1 false, ptr ${first}`);
       };
-      for (const f of emitFields) {
+      withOrders((fields) => {
+      for (const f of fields) {
         const utag = this.host.undefinedArmTag(f.type);
         const v = this.loadField(B, "%v", shapeId, fieldIndex.get(f.name)!, f.type);
         let skip: string | null = null;
@@ -370,6 +399,7 @@ export class LlWalkers {
           B.startBlock(skip);
         }
       }
+      });
       if (shape.indexValue) this.emitOverflowEntries(B, shape, first, edgeable(shape.indexValue));
     }
     this.putc(B, "%b", "125"); // '}'

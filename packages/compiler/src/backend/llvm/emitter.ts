@@ -157,6 +157,7 @@ import {
   retainSym,
   emitOwnPresentLl,
   ownMaskSlotIndex,
+  keyIxSlotIndex,
   srcProtoSlotIndex,
   toStrSlotIndex,
   traceAdapter,
@@ -8964,6 +8965,14 @@ class LlEmitter {
         const rec = B.tmp();
         B.line(`${rec} = call ptr @${mangleRecordNew(shapeId)}()`);
         const out = this.own({ name: rec, type: e.type });
+        // A shape with several key orders: this literal names the one it was written in (0 = declaredOrder, the zeroed default).
+        if (e.ordIx) {
+          const ksh = this.recordsById.get(shapeId);
+          if (!ksh) throw new Error(`llvm emitter bug: recordLit ordIx of unknown shape ${shapeId}`);
+          const kp = B.tmp();
+          B.line(`${kp} = getelementptr inbounds %${mangleRecordStruct(shapeId)}, ptr ${rec}, i64 0, i32 ${keyIxSlotIndex(ksh)} ; key order`);
+          B.line(`store i8 ${e.ordIx}, ptr ${kp}`);
+        }
         // THE COMPLETED literal establishes the instance's own-key mask
         // before the fields run - the C tier's row, and for its reason: a
         // field initializer can throw, and the half-built record that
@@ -9159,6 +9168,18 @@ class LlEmitter {
         B.line(`${own} = icmp ne i8 ${msk}, 0`);
         const r = B.tmp();
         B.line(`${r} = or i1 ${notCompleted}, ${own}`);
+        return { name: r, type: e.type };
+      }
+      case "recordKeyOrderIs": {
+        const obj = this.emitExpr(e.obj);
+        const sh = this.recordsById.get(e.shapeId);
+        if (!sh) throw new Error(`llvm emitter bug: recordKeyOrderIs of unknown shape ${e.shapeId}`);
+        const kp = B.tmp();
+        B.line(`${kp} = getelementptr inbounds %${mangleRecordStruct(e.shapeId)}, ptr ${obj.name}, i64 0, i32 ${keyIxSlotIndex(sh)} ; key order`);
+        const k8 = B.tmp();
+        B.line(`${k8} = load i8, ptr ${kp}`);
+        const r = B.tmp();
+        B.line(`${r} = icmp eq i8 ${k8}, ${e.ix}`);
         return { name: r, type: e.type };
       }
       case "recordKeyPresent": {

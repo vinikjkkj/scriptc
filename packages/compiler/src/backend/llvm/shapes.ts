@@ -655,6 +655,12 @@ export function viewSlotIndex(shape: IrRecordShape): number {
   return srcProtoSlotIndex(shape) + (shape.srcproto ? 1 : 0);
 }
 
+/** The KEY-ORDER INDEX byte (IrRecordShape.keyOrders): the last hidden member, after the view slot. The C twin is
+ * KEYIX_MEMBER. */
+export function keyIxSlotIndex(shape: IrRecordShape): number {
+  return viewSlotIndex(shape) + (shape.view ? 1 : 0);
+}
+
 /** THE ONE PLACE the cycle header's layout is written down on this side of
  * the compiler.
  *
@@ -726,6 +732,7 @@ export function emitRecordShapes(host: ShapeHost, mod: IrModule): { typeDefs: st
     if (shape.ownmask) fieldTys.push(`[${ownMaskBytes(shape)} x i8]`); // the hidden own-key mask
     if (shape.srcproto) fieldTys.push("ptr"); // the hidden source [[Prototype]] (ScrDyn *)
     if (shape.view) fieldTys.push("ptr"); // the hidden VIEW slot: the object this record is a view of (ScrDyn *)
+    if (shape.keyOrders) fieldTys.push("i8"); // the hidden key-order index (which of keyOrders this instance was built in)
     typeDefs.push(
       `%${struct} = type { i64${fieldTys.length ? ", " + fieldTys.join(", ") : ""} } ` +
         `; record ${shape.id} { ${shape.fields.map((f) => f.name).join("; ")}${shape.indexValue ? "; [key: string]" : ""} }`,

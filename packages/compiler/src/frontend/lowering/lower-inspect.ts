@@ -606,12 +606,12 @@ export function typeReachesItself(L: Lowerer, t: IrType): boolean {
  * `[Set]`/`[ClassName]`, and non-empty composites drive the runtime
  * frame engine (begin / entry / end). Registered in the cache BEFORE the
  * body builds, so recursive shapes call themselves by name. */
-function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
+function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc, rebuild = false): string {
   const key = `insp:${typeKey(t)}`;
   const existing = L.inspectHelpers.get(key);
-  if (existing) return existing;
-  const name = `%util.insp.${L.inspectHelpers.size}`;
-  L.inspectHelpers.set(key, name);
+  if (existing && !rebuild) return existing;
+  const name = rebuild ? existing! : `%util.insp.${L.inspectHelpers.size}`;
+  if (!rebuild) L.inspectHelpers.set(key, name);
 
   const ref = (localId: string, type: IrType): IrExpr => ({ kind: "varRef", localId, type, loc });
   const v = (): IrExpr => ref("v.0", t);
@@ -847,7 +847,7 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
       // Object.keys' declared order (SEMANTICS.md 36's stance).
       // Baked into this inspect helper's body, and the body is built once —
       // so the shape's order is fixed here (Lowerer.noteEnumOrderBake).
-      L.noteEnumOrderBake(t.shapeId, null);
+      if (!rebuild) L.noteEnumOrderBake(t.shapeId, null, "inspect");
       // SYMBOL-keyed members print after EVERY string key, in insertion
       // order ([[OwnPropertyKeys]]; Node 24 spells them `Symbol(desc): v`,
       // unbracketed). A symbol member whose description cannot be read at
@@ -863,6 +863,7 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
       const byName = new Map(shape.fields.map((f) => [f.name, f.type] as const));
       const depthLit = strNode(bdepth, loc);
       body = [depthGate(depthLit), ...begin()];
+      const entriesFor = (order: string[], target: IrStmt[]): void => {
       for (const fname of order) {
         const ft = byName.get(fname);
         if (!ft) continue;
@@ -916,7 +917,7 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
         // not have (SEMANTICS 37 against corpus 1632's explicit undefined:
         // the trade record-presence-two-surfaces.test.ts documented).
         if (ft.kind === "union" && L.armTag(ft.unionId, UNDEFINED_T) >= 0) {
-          body.push({
+          target.push({
             kind: "if",
             cond: { kind: "recordKeyPresent", obj: v(), shapeId: t.shapeId, field: fname, type: BOOL, loc },
             then: [st],
@@ -925,7 +926,37 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
           });
           continue;
         }
-        body.push(st);
+        target.push(st);
+      }
+      };
+      // One entry list per key order. A shape every construction agrees on has one (its declaredOrder); a shape with several
+      // (IrRecordShape.keyOrders) prints the list of the order the instance was built in.
+      const keyOrdersNow = shape.keyOrders;
+      if (keyOrdersNow === undefined) {
+        entriesFor(order, body);
+      } else {
+        const arms = keyOrdersNow.map((ko) => {
+          const koSet = new Set(ko);
+          const ordered = [
+            ...ko.filter((n) => !isSymbolFieldName(n)),
+            ...ko.filter((n) => isSymbolFieldName(n)),
+            ...shape.fields.map((f) => f.name).filter((n) => isSymbolFieldName(n) && !koSet.has(n)),
+          ];
+          const stmts: IrStmt[] = [];
+          entriesFor(ordered, stmts);
+          return stmts;
+        });
+        let chain: IrStmt[] = arms[arms.length - 1]!;
+        for (let i = arms.length - 2; i >= 0; i--) {
+          chain = [{
+            kind: "if",
+            cond: { kind: "recordKeyOrderIs", obj: v(), shapeId: t.shapeId, ix: i, type: BOOL, loc },
+            then: arms[i]!,
+            else_: chain,
+            loc,
+          }];
+        }
+        body.push(...chain);
       }
       for (const [fname, desc] of internalSyms) {
         const ft = byName.get(fname);
@@ -1364,6 +1395,13 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
     }
   }
 
+  if (rebuild) {
+    const fn = L.liftedFns.find((f) => f.name === name);
+    if (fn === undefined) throw new Error(`compiler bug: inspect helper ${name} to rebuild is not lifted`);
+    fn.body = body;
+    fn.locals = locals;
+    return name;
+  }
   L.liftedFns.push({
     name,
     params: [
@@ -1377,6 +1415,16 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
     loc,
   });
   return name;
+}
+
+/** Rebuild a record's inspect helper over the key orders its shape now has (IrRecordShape.keyOrders). The helper was
+ * built when the shape had one; the post-lowering order pass found the shape built in several and calls this to replace the
+ * body in place. A shape that never had an inspect helper has nothing to rebuild. */
+export function rebuildRecordInspect(L: Lowerer, shapeId: string): void {
+  const t: IrType = { kind: "record", shapeId };
+  if (!L.inspectHelpers.has(`insp:${typeKey(t)}`)) return;
+  const fn = L.liftedFns.find((f) => f.name === L.inspectHelpers.get(`insp:${typeKey(t)}`));
+  inspectHelper(L, t, fn?.loc ?? { file: "<keyorder>", start: 0, end: 0 }, true);
 }
 
 /* ── the console/format top-level value rendering ────────────────────── */

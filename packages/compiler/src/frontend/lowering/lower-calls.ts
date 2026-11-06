@@ -16552,6 +16552,7 @@ function refillObjKeysHelper(Lu: unknown, r: EnumRefill): void {
   body.push({ kind: "varDecl", localId: "out.0", init: { kind: "arrayLit", elems: [], type: resultT, loc }, loc });
   // A SYMBOL-keyed member is not a string key: Object.keys, for-in, values and entries skip it.
   const order = (shape.declaredOrder ?? shape.fields.map((f) => f.name)).filter((n) => !(n.startsWith("__@") && !n.startsWith("__@ord@")));
+  const fillOrder = (order: string[], tgt: IrStmt[]): void => {
   for (const name of order) {
     const f = shape.fields.find((x) => x.name === name)!;
     const pushStmt: IrStmt = {
@@ -16569,8 +16570,8 @@ function refillObjKeysHelper(Lu: unknown, r: EnumRefill): void {
     // Undefined-armed fields: the push is guarded by a tag test (the key
     // exists exactly when the arm is not undefined).
     const utag = f.type.kind === "union" ? L.armTag(f.type.unionId, UNDEFINED_T) : -1;
-    const at = body.length;
-    body.push(
+    const at = tgt.length;
+    tgt.push(
       utag >= 0 && f.type.kind === "union"
         ? {
             kind: "if",
@@ -16593,8 +16594,26 @@ function refillObjKeysHelper(Lu: unknown, r: EnumRefill): void {
     // the crossing's mask instead — installed after the whole walk, so an
     // unarmed shape keeps the tag test above verbatim.
     L.noteOwnKeyGuard(r.shapeId, f.name, ref, loc,
-      { kind: "guardStmt", slot: { holder: body, at }, inner: pushStmt, outer: null, loc },
+      { kind: "guardStmt", slot: { holder: tgt, at }, inner: pushStmt, outer: null, loc },
       r.helper);
+  }
+  };
+  // One fill per key order. A shape every construction agrees on has one (its declaredOrder); a shape with several
+  // (IrRecordShape.keyOrders) answers from the list of the order the instance was built in.
+  if (shape.keyOrders === undefined) {
+    fillOrder(order, body);
+  } else {
+    const symless = (ko: string[]): string[] => ko.filter((n) => !(n.startsWith("__@") && !n.startsWith("__@ord@")));
+    const arms = shape.keyOrders.map((ko) => {
+      const t: IrStmt[] = [];
+      fillOrder(symless(ko), t);
+      return t;
+    });
+    let chain: IrStmt[] = arms[arms.length - 1]!;
+    for (let i = arms.length - 2; i >= 0; i--) {
+      chain = [{ kind: "if", cond: { kind: "recordKeyOrderIs", obj: ref, shapeId: r.shapeId, ix: i, type: BOOL, loc }, then: arms[i]!, else_: chain, loc }];
+    }
+    body.push(...chain);
   }
   body.push({ kind: "return", value: outRef, loc });
 }
@@ -16627,6 +16646,7 @@ function refillObjValuesHelper(Lu: unknown, r: EnumRefill): void {
   const member = r.diag?.member ?? objMember;
   // A SYMBOL-keyed member is not a string key: Object.keys, for-in, values and entries skip it.
   const order = (shape.declaredOrder ?? shape.fields.map((f) => f.name)).filter((n) => !(n.startsWith("__@") && !n.startsWith("__@ord@")));
+  const fillOrder = (order: string[], tgt: IrStmt[]): void => {
   for (const name of order) {
     const f = shape.fields.find((x) => x.name === name)!;
     const raw: IrExpr = { kind: "recordGet", obj: ref, shapeId: r.shapeId, field: f.name, type: f.type, loc };
@@ -16708,8 +16728,8 @@ function refillObjValuesHelper(Lu: unknown, r: EnumRefill): void {
       expr: { kind: "arrIntrinsic", method: "push", receiver: outRef, args: [pushed], type: F64, loc },
       loc,
     };
-    const at = body.length;
-    body.push(
+    const at = tgt.length;
+    tgt.push(
       guardUndefTag !== null && f.type.kind === "union"
         ? {
             kind: "if",
@@ -16736,7 +16756,7 @@ function refillObjValuesHelper(Lu: unknown, r: EnumRefill): void {
     L.noteOwnKeyGuard(r.shapeId, f.name, ref, loc,
       {
         kind: "guardStmt",
-        slot: { holder: body, at },
+        slot: { holder: tgt, at },
         inner: pushStmt,
         outer:
           guardTag !== null && guardType.kind === "union"
@@ -16782,12 +16802,12 @@ function refillObjValuesHelper(Lu: unknown, r: EnumRefill): void {
           expr: { kind: "arrIntrinsic", method: "push", receiver: outRef, args: [pushedU], type: F64, loc },
           loc,
         };
-        const atU = body.length;
-        body.push({ kind: "block", body: [], loc });
+        const atU = tgt.length;
+        tgt.push({ kind: "block", body: [], loc });
         L.noteOwnKeyGuard(r.shapeId, f.name, ref, loc,
           {
             kind: "guardStmt",
-            slot: { holder: body, at: atU },
+            slot: { holder: tgt, at: atU },
             inner: pushU,
             outer: { unionId: f.type.unionId, tag: guardUndefTag, value: raw, negated: false },
             loc,
@@ -16795,6 +16815,24 @@ function refillObjValuesHelper(Lu: unknown, r: EnumRefill): void {
           r.helper);
       }
     }
+  }
+  };
+  // One fill per key order. A shape every construction agrees on has one (its declaredOrder); a shape with several
+  // (IrRecordShape.keyOrders) answers from the list of the order the instance was built in.
+  if (shape.keyOrders === undefined) {
+    fillOrder(order, body);
+  } else {
+    const symless = (ko: string[]): string[] => ko.filter((n) => !(n.startsWith("__@") && !n.startsWith("__@ord@")));
+    const arms = shape.keyOrders.map((ko) => {
+      const t: IrStmt[] = [];
+      fillOrder(symless(ko), t);
+      return t;
+    });
+    let chain: IrStmt[] = arms[arms.length - 1]!;
+    for (let i = arms.length - 2; i >= 0; i--) {
+      chain = [{ kind: "if", cond: { kind: "recordKeyOrderIs", obj: ref, shapeId: r.shapeId, ix: i, type: BOOL, loc }, then: arms[i]!, else_: chain, loc }];
+    }
+    body.push(...chain);
   }
   body.push({ kind: "return", value: outRef, loc });
 }

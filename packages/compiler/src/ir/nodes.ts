@@ -2146,6 +2146,13 @@ export interface IrRecordShape {
    * Set by armOwnMasks() alongside `ownmask`, from the targets
    * recordWidthPlan's absentRequired arm recorded while lowering. */
   reqabsent?: true;
+  /** KEY ORDER INDEX: the several own-key orders this shape's constructions spell (every literal of it that this program
+   * writes), `keyOrders[0]` being `declaredOrder`. A record is a monomorphic struct and has one declaredOrder, so a shape
+   * that two literals build in two orders enumerated in the first and printed the other wrong. When it has more than one
+   * the struct carries a hidden byte (KEYIX_MEMBER) naming the order the instance was built with, a literal stores it
+   * (recordLit.ordIx), and every enumeration surface switches on it. Absent on the shape every site agrees on: the
+   * layout, the code and the cost are exactly what they were. Set by the post-lowering order pass, not interned. */
+  keyOrders?: string[][];
   /** How Node RENDERS a value of this shape, for the shapes the frontend
    * interns from a BUILTIN whose rendering is not a plain object's. Every
    * member is part of the interned identity, on internalFieldNamesOf's
@@ -7919,7 +7926,7 @@ export type IrExpr =
    * used. Ignored when the shape did not arm; the arm is decided after the walk
    * (Lowerer.armOwnMasks). The bits are constants, stored after the last
    * field, so an unwinding half-built literal stays mask-less. */
-  | { kind: "recordLit"; fields: { name: string; value: IrExpr; overflow?: true; drop?: true; own?: true; ownIf?: IrExpr; /** The entry is the VIEW SLOT of a view-capable shape: `value` is the dyn object the new record is a view of (moved in). */ viewSlot?: true; /** A DATA member of a view-capable shape whose value is read through the view on every access: nothing is read at construction (a getter must not run), the slot stays zero. `value` is never evaluated. */ viewLazy?: true }[]; toStr?: IrExpr; ownmask?: true; presence?: true; type: IrType; loc: SrcLoc }
+  | { kind: "recordLit"; fields: { name: string; value: IrExpr; overflow?: true; drop?: true; own?: true; ownIf?: IrExpr; /** The entry is the VIEW SLOT of a view-capable shape: `value` is the dyn object the new record is a view of (moved in). */ viewSlot?: true; /** A DATA member of a view-capable shape whose value is read through the view on every access: nothing is read at construction (a getter must not run), the slot stays zero. `value` is never evaluated. */ viewLazy?: true }[]; toStr?: IrExpr; ownmask?: true; presence?: true; /** The index into the shape's `keyOrders` this literal's written key order is (set only on a shape that has several; 0 = the shape's declaredOrder and needs no store). */ ordIx?: number; type: IrType; loc: SrcLoc }
   /** Record field read `r.f` — mirrors `fieldGet`: refcounted fields come
    * out retained (+1). */
   | { kind: "recordGet"; obj: IrExpr; shapeId: string; field: string; type: IrType; loc: SrcLoc }
@@ -7945,6 +7952,9 @@ export type IrExpr =
    * the slot. A record a crossing materialised can hold a member its source
    * only INHERITED (clear bit, value in the slot), which `in` answers true
    * for and Object.keys does not. */
+  /** Was this record built in the shape's `ix`-th own-key order (IrRecordShape.keyOrders)? The per-instance index a literal
+   * stored (recordLit.ordIx); 0, the declared order, on every record built any other way. */
+  | { kind: "recordKeyOrderIs"; obj: IrExpr; shapeId: string; ix: number; type: IrType; loc: SrcLoc }
   | { kind: "recordKeyPresent"; obj: IrExpr; shapeId: string; field: string; orSlot?: true; type: IrType; loc: SrcLoc }
   /** `in`'s question about a REQUIRED field of a shape some literal
    * COMPLETED: was this slot ever written on THIS instance?

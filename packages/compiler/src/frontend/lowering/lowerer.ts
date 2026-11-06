@@ -161,7 +161,7 @@ import { lowerStaticFetchCall } from "./lower-fetch.js";
 import { lowerDgramDnsModuleCall, lowerDgramMethodCall } from "./lower-dgram.js";
 import { lowerNodeTestModuleCall, lowerTestDirectCall, lowerTestMethodCall, lowerTestCtxProperty } from "./lower-test.js";
 import { lowerAssertModuleCall, lowerAssertDirectCall } from "./lower-assert.js";
-import { lowerUtilModuleCall } from "./lower-inspect.js";
+import { lowerUtilModuleCall, rebuildRecordInspect } from "./lower-inspect.js";
 import { lowerComptime, comptimeBakeable, rejectComptimeCaptures, comptimeValueToIr } from "./lower-comptime.js";
 import { lowerDeleteValue, lowerElemValuePosition, lowerStmts, noteBlockedBindings, isBlockedBinding, lowerScopedBlock, predeclareForwardCapture, probeBindWhy, predeclareForwardFnDecl, predeclareForwardVar, rejectJumpCrossingFinally, lowerStmt, lowerVarStatement, lowerDestructuringDecl, lowerDestructuringAssignParts, lowerBindingPattern, lowerJsvalBindingPattern, checkBindingElement, bindPatternTarget, lowerVarDeclList, lowerVarDecl, lowerSwitch, lowerTry, lowerExprStatement, lowerForOf, lowerForStatement } from "./lower-stmts.js";
 import { unboundMethodThunk, recordKeyResultOk, narrowBridgeDyn, FieldTarget, bufferValueIndexOf, bufferValueOf, lowerDynObjectLiteral, lowerDynSpreadObjectLiteral, lowerExpr, maybeNarrow, lowerUnitComparison, lowerNullishCoalesce, lowerOptionalChain, finishOptionalChain, lowerCondition, ensureBool, requireTruthyUnion, eqComparableUnion, lowerIntrinsicProperty, lowerArrayLiteral, lowerObjectLiteral, lowerShorthandValue, rejectThisInObjectMethod, lowerElementAccess, lowerElementWrite, lowerRecordKeyRead, ensureString, numberConvAtDynWidth, lowerTemplate, lowerAsExpression, lowerPrefixUnary, lowerBinary, lowerCaughtTypeofTest, caughtRead, caughtLocalOf, caughtToString, lowerInstanceOf, lowerRegexLiteral, lowerFieldRead, lowerUnionProperty, fieldTarget, fieldGetExpr, fieldSetStmt, lowerFieldCompound, uniqueSymbolKeyOf, foldedStringKeyOf } from "./lower-exprs.js";
@@ -4422,12 +4422,16 @@ export class Lowerer {
    * Object.keys and JSON.stringify disagree, which is a new defect, not a
    * partial fix. Either every consumer of a shape's order moves with it or
    * the shape does not move. */
-  readonly enumOrderBakes = new Map<string, { refills: EnumRefill[]; blocked: boolean }>();
-  noteEnumOrderBake(shapeId: string, refill: EnumRefill | null): void {
+  readonly enumOrderBakes = new Map<string, { refills: EnumRefill[]; blocked: boolean; indexable: Set<string> }>();
+  /** `indexable` names a baking surface that is rebuilt over the shape's several key orders when it has them
+   * (IrRecordShape.keyOrders): it does not block the index, only a bake with neither a refill nor that promise does. */
+  noteEnumOrderBake(shapeId: string, refill: EnumRefill | null, indexable?: string): void {
     let e = this.enumOrderBakes.get(shapeId);
-    if (!e) this.enumOrderBakes.set(shapeId, (e = { refills: [], blocked: false }));
-    if (refill === null) e.blocked = true;
-    else e.refills.push(refill);
+    if (!e) this.enumOrderBakes.set(shapeId, (e = { refills: [], blocked: false, indexable: new Set() }));
+    if (refill === null) {
+      if (indexable !== undefined) e.indexable.add(indexable);
+      else e.blocked = true;
+    } else e.refills.push(refill);
   }
 
   /** Arm the hidden OWN-KEY MASK (IrRecordShape.ownmask) on every record
@@ -6307,6 +6311,43 @@ export class Lowerer {
     collectPresence();
 
     const rewritten: string[] = [];
+    const indexed = new Map<string, Map<string, number>>();
+    const tryIndex = (shapeId: string, ev: { spellings: Set<string>; blocked: boolean; locs: Map<string, string[]> }): boolean => {
+      if (ev.blocked) { if (why) console.error(`[keyorder] ${shapeId} NO-INDEX #0`); return false; }
+      const shape = this.shapes.get(shapeId);
+      if (!shape?.declaredOrder || shape.tuple || shape.indexValue || shape.builtin) { if (why) console.error(`[keyorder] ${shapeId} NO-INDEX #1 ${JSON.stringify({d: shape?.declaredOrder, t: shape?.tuple, iv: shape?.indexValue !== undefined, b: shape?.builtin !== undefined, v: shape?.view})}`); return false; }
+      if (shape.fields.some((f) => f.name.startsWith("%"))) { if (why) console.error(`[keyorder] ${shapeId} NO-INDEX #2`); return false; }
+      if (castShapes.has(shapeId)) { if (why) console.error(`[keyorder] ${shapeId} NO-INDEX #3`); return false; }
+      const bake = this.enumOrderBakes.get(shapeId);
+      if (bake !== undefined && bake.blocked) { if (why) console.error(`[keyorder] ${shapeId} NO-INDEX #4`); return false; }
+      if (presenceShapes.has(shapeId) || fillTargets.has(shapeId)) { if (why) console.error(`[keyorder] ${shapeId} NO-INDEX #5`); return false; }
+      const all = litSites.get(shapeId) ?? new Set<string>();
+      if (all.size === 0) { if (why) console.error(`[keyorder] ${shapeId} NO-INDEX #6`); return false; }
+      for (const site of all) if (!ev.locs.has(site) && !this.reshapeLitSites.has(site)) { if (why) console.error(`[keyorder] ${shapeId} NO-INDEX #7`); return false; }
+      const declared = shape.declaredOrder;
+      const orders: string[][] = [declared];
+      const at = new Map<string, number>();
+      for (const [lk, spelled] of ev.locs) {
+        if (spelled.length < 2 || !spelled.every((n) => declared.includes(n))) {
+          if (spelled.length >= 2) { if (why) console.error(`[keyorder] ${shapeId} NO-INDEX #8`); return false; }
+          at.set(lk, 0);
+          continue;
+        }
+        const full = esOwnKeyOrder([...spelled, ...declared.filter((n) => !spelled.includes(n))]);
+        if (full.length !== declared.length) { if (why) console.error(`[keyorder] ${shapeId} NO-INDEX #9`); return false; }
+        let ix = orders.findIndex((o) => o.join(",") === full.join(","));
+        if (ix < 0) {
+          orders.push(full);
+          ix = orders.length - 1;
+        }
+        at.set(lk, ix);
+      }
+      if (orders.length < 2 || orders.length > 255) { if (why) console.error(`[keyorder] ${shapeId} NO-INDEX #10`); return false; }
+      shape.keyOrders = orders;
+      indexed.set(shapeId, at);
+      if (why) console.error(`[keyorder] ${shapeId} INDEXED ${orders.map((o) => o.join(",")).join(" | ")}`);
+      return true;
+    };
     const decide = (shapeId: string, ev: { spellings: Set<string>; blocked: boolean; locs: Map<string, string[]> }): void => {
       const reject = (reason: string): void => {
         if (why) console.error(`[keyorder] ${shapeId} NO-REWRITE ${reason}`);
@@ -6318,7 +6359,9 @@ export class Lowerer {
       // reverse — a `{}` beside a fully spelled literal reads as two here
       // and may agree once the fill is counted).
       if (!filledOrders.has(shapeId) && ev.spellings.size !== 1) {
-        reject(`${ev.spellings.size} distinct literal spellings`);
+        // The literals DISAGREE: no one declaredOrder is right for all of them, so the shape keeps every order they spell and
+        // each instance names its own (IrRecordShape.keyOrders).
+        if (!tryIndex(shapeId, ev)) reject(`${ev.spellings.size} distinct literal spellings`);
         return;
       }
       const shape = this.shapes.get(shapeId);
@@ -6383,7 +6426,35 @@ export class Lowerer {
       if (!fillTargets.has(shapeId)) continue;
       decide(shapeId, ev);
     }
-    if (rewritten.length === 0) return;
+    // Each literal of an indexed shape names the order it was written in.
+    if (indexed.size > 0) {
+      const seenLit = new Set<object>();
+      const mark = (n: unknown): void => {
+        if (n === null || typeof n !== "object" || seenLit.has(n)) return;
+        seenLit.add(n);
+        if (Array.isArray(n)) { for (const x of n) mark(x); return; }
+        const o = n as Record<string, unknown>;
+        if (o["kind"] === "recordLit") {
+          const t = o["type"] as { kind?: string; shapeId?: string } | undefined;
+          const loc = o["loc"] as SrcLoc | undefined;
+          const at = t?.kind === "record" && t.shapeId !== undefined ? indexed.get(t.shapeId) : undefined;
+          if (at !== undefined && loc) {
+            const ix = at.get(this.keyRiskLocKey(loc));
+            if (ix !== undefined && ix > 0) o["ordIx"] = ix;
+          }
+        }
+        for (const v of Object.values(o)) mark(v);
+      };
+      mark(functions);
+      mark(this.globalsList);
+    }
+    // The surfaces that bake an order and promised to take the index rebuild over the shape's several orders.
+    for (const shapeId of indexed.keys()) {
+      const bake = this.enumOrderBakes.get(shapeId);
+      if (bake?.indexable.has("inspect")) rebuildRecordInspect(this, shapeId);
+      for (const refill of bake?.refills ?? []) applyEnumRefill(this, refill, "rebuild");
+    }
+    if (rewritten.length === 0 && indexed.size === 0) return;
     // The baked consumers rebuild NOW — before moduleArtifacts collects the
     // shapes a body names and before armOwnMasks installs into it.
     for (const shapeId of rewritten) {
@@ -6398,6 +6469,14 @@ export class Lowerer {
     for (const [shapeId, ev] of this.shapeOrderEvidence) {
       const shape = this.shapes.get(shapeId);
       if (!shape?.declaredOrder) continue;
+      if (indexed.has(shapeId)) {
+        // Every order this shape's literals spell is carried per instance, so none of them is a risk any more.
+        for (const locKey of ev.locs.keys()) {
+          const prev = this.keyRiskLiterals.get(locKey);
+          if (prev && prev.why === "order") this.keyRiskLiterals.delete(locKey);
+        }
+        continue;
+      }
       for (const [locKey, spelled] of ev.locs) {
         // ONLY the ORDER verdict is recomputed. A literal can carry a "set"
         // risk at the same location — a spread that ends keys the narrower

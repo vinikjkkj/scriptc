@@ -65,6 +65,7 @@ const SHAPE_FIELD_ROLE: Record<keyof IrRecordShape, "identity" | "later-pass" | 
   ownmask: "later-pass",
   reqabsent: "later-pass",
   srcproto: "later-pass",
+  keyOrders: "later-pass",
   view: "identity",
 };
 
