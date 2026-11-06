@@ -6290,8 +6290,6 @@ export class Lowerer {
       const s = this.shapes.get(id);
       if (!s?.declaredOrder || s.tuple || s.indexValue || s.builtin || s.fields.length > 254) return false;
       if (s.fields.some((f) => f.name.startsWith("%"))) return false;
-      // Integer-like names enumerate first and ascending however they were written, which a write-order list cannot say yet.
-      if (s.fields.some((f) => /^(0|[1-9][0-9]*)$/.test(f.name) && Number(f.name) < 4294967295)) return false;
       if (this.requiredAbsentTargets.has(id)) return false;
       // A baked consumer the list cannot serve keeps its refusal: a blocked bake.
       return this.enumOrderBakes.get(id)?.blocked !== true;

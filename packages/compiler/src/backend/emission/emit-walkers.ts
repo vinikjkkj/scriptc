@@ -13,6 +13,7 @@ import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vA
 import { mangleClassStruct, mangleField, mangleFunction, mangleFnClosure, mangleRecordNew, mangleRecordRelease, mangleRecordStruct } from "../mangle.js";
 import type { ClassMeta } from "./emit-shapes.js";
 import { RUNTIME_EMITTER_CLASS as RUNTIME_EMITTER_CLASS_W } from "../../ir/nodes.js";
+import { isIntegerKeyName } from "../../ir/nodes.js";
 import { classvalCandidates, dynClassDisplayName, dynDescBase, dynEmitterSlot, dynRuntimeRoot, dynEnumerationFenced, dynMemberRows, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
 import { EMITTER_MIXIN_FIELD_NAME, ORD_MEMBER, orderRecordPlanCached } from "../../ir/nodes.js";
 import { KINDGATE_WIDE_KINDS, kindgateInstanceLane, kindgateWideLane } from "../kindgate.js";
@@ -1160,7 +1161,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
               cond = cond === null ? notMarker : `(${cond}) && ${notMarker}`;
             }
             // A shape with a key list: a key that is IN the order record is written where the record puts it, not here.
-            if (shape.keyList && !listed) {
+            if (shape.keyList && !listed && !isIntegerKeyName(f.name)) {
               const skip = `!scr_ord_has_i(v->${KEYLIST_MEMBER}, ${shape.fields.findIndex((x) => x.name === f.name)})`;
               cond = cond === null ? skip : `(${cond}) && ${skip}`;
             }
@@ -1201,7 +1202,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           if (shape.keyList) {
             d.push(`  for (size_t sc_li = 1; sc_li <= v->${KEYLIST_MEMBER}[0]; sc_li++) {`);
             d.push(`    switch (v->${KEYLIST_MEMBER}[sc_li]) {`);
-            for (const f of emitFields) {
+            for (const f of emitFields.filter((x) => !isIntegerKeyName(x.name))) {
               d.push(`    case ${shape.fields.findIndex((x) => x.name === f.name)}: {`);
               fieldCode([f], d, "      ", true);
               d.push(`      break;`, `    }`);
@@ -3813,6 +3814,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             if (!shape.keyList) { fillFor(ord); return; }
             const late = (n: string): boolean => {
               const ft = byName.get(n)?.type;
+              if (isIntegerKeyName(n)) return false;
               if (ft !== undefined && shape.keyListAll === true) return !internal.has(n) && !accProps.has(n);
               return ft !== undefined && ft.kind === "union" && E.undefinedArmTag(ft) >= 0;
             };

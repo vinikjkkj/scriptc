@@ -15015,3 +15015,9 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "error.installOptions",
   "error.installRequiredCause",
 ]);
+
+/** An integer-like property name (a canonical array index): JS enumerates these first, ascending, however they were written, so a
+ * key list (IrRecordShape.keyList) never orders them. */
+export function isIntegerKeyName(n: string): boolean {
+  return /^(0|[1-9][0-9]*)$/.test(n) && Number(n) < 4294967295;
+}

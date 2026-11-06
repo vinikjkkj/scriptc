@@ -13,7 +13,7 @@
  * jsonStringify emission site runs the pending check (join still walks
  * only f64/string/bool/unit arms — the frontend's fence). */
 import type { IrRecordShape, IrType, IrUnionDef } from "../../ir/nodes.js";
-import { isRefCounted, typeKey } from "../../ir/nodes.js";
+import { isIntegerKeyName, isRefCounted, typeKey } from "../../ir/nodes.js";
 import { mangleRecordStruct } from "../mangle.js";
 import { BlockBuilder } from "./blocks.js";
 import { emitOwnPresentLl, llFieldType, releaseSym, traceAdapter, keyIxSlotIndex, keyListSlotIndex, viewSlotIndex, type ShapeHost } from "./shapes.js";
@@ -385,7 +385,7 @@ export class LlWalkers {
           }
         }
         // A shape with a key list: a key that is IN the order record is written where the record puts it, not here.
-        if (shape.keyList && !listed) {
+        if (shape.keyList && !listed && !isIntegerKeyName(f.name)) {
           const ordF = shape.fields.findIndex((x) => x.name === f.name);
           this.host.declare(`declare zeroext i1 @scr_ord_has(ptr, i8)`);
           const lp = B.tmp();
@@ -463,10 +463,11 @@ export class LlWalkers {
         B.line(`${ord8} = load i8, ptr ${ep}`);
         const ord32 = B.tmp();
         B.line(`${ord32} = zext i8 ${ord8} to i32`);
-        const caseLabels = emitFields.map((_, i) => B.newLabel(`jkl.c${i}`));
+        const listedFields = emitFields.filter((x) => !isIntegerKeyName(x.name));
+        const caseLabels = listedFields.map((_, i) => B.newLabel(`jkl.c${i}`));
         const lNext = B.newLabel("jkl.n");
-        B.switchTerm(ord32, lNext, emitFields.map((f, i) => [shape.fields.findIndex((x) => x.name === f.name), caseLabels[i]!] as [number, string]));
-        emitFields.forEach((f, i) => {
+        B.switchTerm(ord32, lNext, listedFields.map((f, i) => [shape.fields.findIndex((x) => x.name === f.name), caseLabels[i]!] as [number, string]));
+        listedFields.forEach((f, i) => {
           B.startBlock(caseLabels[i]!);
           fieldsOut([f], true);
           B.br(lNext);

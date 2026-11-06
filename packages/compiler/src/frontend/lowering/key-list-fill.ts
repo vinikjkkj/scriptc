@@ -1,4 +1,4 @@
-import { BOOL, F64, UNDEFINED_T } from "../../ir/nodes.js";
+import { BOOL, F64, UNDEFINED_T, isIntegerKeyName } from "../../ir/nodes.js";
 import type { IrExpr, IrRecordShape, IrStmt, SrcLoc } from "../../ir/nodes.js";
 import type { Lowerer } from "./lowerer.js";
 
@@ -25,7 +25,8 @@ export function fillWithKeyList(
   const ordOf = (name: string): number => shape.fields.findIndex((f) => f.name === name);
   const lateOk = (name: string): boolean => {
     const f = shape.fields[ordOf(name)];
-    if (!f) return false;
+    // Integer-like names print first and ascending whatever the list says, so they are never listed.
+    if (!f || isIntegerKeyName(name)) return false;
     if (shape.keyListAll === true) return !f.name.startsWith("%") && !f.name.startsWith("__@");
     return f.type.kind === "union" && L.armTag(f.type.unionId, UNDEFINED_T) >= 0;
   };
@@ -115,7 +116,7 @@ export function copyListStmts(
     const f = sh.fields.find((x) => x.name === n);
     return !!f && f.type.kind === "union" && L.armTag(f.type.unionId, UNDEFINED_T) >= 0;
   };
-  const sListable = (n: string): boolean => S.keyList === true && (S.keyListAll === true || optional(S, n));
+  const sListable = (n: string): boolean => S.keyList === true && !isIntegerKeyName(n) && (S.keyListAll === true || optional(S, n));
   const note = (n: string): IrStmt => ({
     kind: "exprStmt",
     expr: { kind: "recordOrd", op: "note", obj: dst(), shapeId: dstId, ord: ordD(n), type: BOOL, loc },
