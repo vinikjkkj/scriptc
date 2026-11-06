@@ -12905,6 +12905,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24155-method-of-a-field-held-instance-reached-only-by-destructuring-or-a-value-read.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24155-method-of-a-field-held-instance-reached-only-by-destructuring-or-a-value-read.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24156-method-of-a-field-held-instance-reached-by-a-computed-key.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24156-method-of-a-field-held-instance-reached-by-a-computed-key.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2414-dowhile-continue-kill.ts": {
    "order": [
     "<repo>/tests/corpus/2414-dowhile-continue-kill.ts"
