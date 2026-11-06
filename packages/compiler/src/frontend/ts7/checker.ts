@@ -852,6 +852,11 @@ export class CheckerFacade {
     return this.raw.getTypeOfSymbolAtLocation(symbol, location);
   }
 
+  /** The `number` intrinsic (the representation `never` has always mapped to in a dead read). */
+  getNumberType(): Type {
+    return this.intrinsic("number", () => this.raw.getNumberType());
+  }
+
   getUnknownType(): Type {
     this.unknownType ??= this.raw.getUnknownType();
     return this.unknownType;
