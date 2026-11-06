@@ -417,11 +417,28 @@ export class LlWalkers {
         }
       }
       };
+      let kjoin: string | null = null;
+      let lpp = "";
+      if (shape.keyList) {
+        // No key written late (the usual instance): the construction-order code alone.
+        lpp = B.tmp();
+        B.line(`${lpp} = getelementptr inbounds %${mangleRecordStruct(shapeId)}, ptr %v, i64 0, i32 ${keyListSlotIndex(shape)}, i64 0 ; key list`);
+        const k0 = B.tmp();
+        B.line(`${k0} = load i8, ptr ${lpp}`);
+        const k0z = B.tmp();
+        B.line(`${k0z} = icmp eq i8 ${k0}, 0`);
+        const lPl = B.newLabel("jkl.p");
+        const lFu = B.newLabel("jkl.f");
+        kjoin = B.newLabel("jkl.d");
+        B.condBr(k0z, lPl, lFu);
+        B.startBlock(lPl);
+        withOrders((fields) => fieldsOut(fields, true));
+        B.br(kjoin);
+        B.startBlock(lFu);
+      }
       withOrders((fields) => fieldsOut(fields, false));
       // ...then the keys written after construction, in the order they were first written.
       if (shape.keyList) {
-        const lpp = B.tmp();
-        B.line(`${lpp} = getelementptr inbounds %${mangleRecordStruct(shapeId)}, ptr %v, i64 0, i32 ${keyListSlotIndex(shape)}, i64 0 ; key list`);
         const cnt8 = B.tmp();
         B.line(`${cnt8} = load i8, ptr ${lpp}`);
         const cnt = B.tmp();
@@ -460,6 +477,8 @@ export class LlWalkers {
         B.line(`store i32 ${li2}, ptr ${liSlot}`);
         B.br(lHead);
         B.startBlock(lEnd);
+        B.br(kjoin!);
+        B.startBlock(kjoin!);
       }
       if (shape.indexValue) this.emitOverflowEntries(B, shape, first, edgeable(shape.indexValue));
     }

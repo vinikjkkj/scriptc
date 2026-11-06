@@ -2160,6 +2160,9 @@ export interface IrRecordShape {
    * delete removes it, and enumeration lists the construction-order keys that are not in the record first, then the record.
    * Absent on every other shape: layout, code and cost unchanged. Set by the post-lowering order pass, not interned. */
   keyList?: true;
+  /** With `keyList`: EVERY field is listed, not only the optional ones (the shape is the destination of a spread or rest of a
+   * listed record, whose copy writes all its keys in the source's order). */
+  keyListAll?: true;
   /** How Node RENDERS a value of this shape, for the shapes the frontend
    * interns from a BUILTIN whose rendering is not a plain object's. Every
    * member is part of the interned identity, on internalFieldNamesOf's
@@ -7964,8 +7967,9 @@ export type IrExpr =
   | { kind: "recordKeyOrderIs"; obj: IrExpr; shapeId: string; ix: number; type: IrType; loc: SrcLoc }
   /** The KEY LIST of a record (IrRecordShape.keyList): `has` (bool) = is field ordinal `ord` (the index into `fields`) among the
    * keys written after construction; `count` (f64) = how many there are; `at` (f64) = the ordinal at position `idx` (0-based, an
-   * f64 expression), in the order they were first written. */
-  | { kind: "recordOrd"; op: "has" | "count" | "at"; obj: IrExpr; shapeId: string; ord?: number; idx?: IrExpr; type: IrType; loc: SrcLoc }
+   * f64 expression), in the order they were first written; `empty` (bool) = no key was written late; `isAt` (bool) = the ordinal at position `idx` is `ord`; `note` (bool, always true) appends `ord` when absent (a spread or rest
+   * copy fills its destination's list this way). */
+  | { kind: "recordOrd"; op: "has" | "count" | "at" | "note" | "isAt" | "empty"; obj: IrExpr; shapeId: string; ord?: number; idx?: IrExpr; type: IrType; loc: SrcLoc }
   | { kind: "recordKeyPresent"; obj: IrExpr; shapeId: string; field: string; orSlot?: true; type: IrType; loc: SrcLoc }
   /** `in`'s question about a REQUIRED field of a shape some literal
    * COMPLETED: was this slot ever written on THIS instance?

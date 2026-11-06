@@ -19,6 +19,7 @@ import { isRelativeSpecifier } from "../shared.js";
 import type { RequireThrowCtx } from "../require-throws.js";
 import type { CjsExportRecord } from "./cjs-export-record.js";
 import { isLiveAliasName } from "./cjs-live-exports.js";
+import { copyListStmts } from "./key-list-fill.js";
 import { applyEnumRefill, applyNullProto, applyOwnKey, applySlotFilled, flushPatchCensus } from "./ir-patch.js";
 import { flushMintOrder, mintPhaseControl, resetMintLog, setMintPhase } from "../types.js";
 import { flushFragmentCensus } from "./fragment-census.js";
@@ -5497,6 +5498,8 @@ export class Lowerer {
     srcRef: IrExpr;
     parts: ({ name: string } | { spread: string; names: string[] })[];
     exclude: string[];
+    /** Registered only so a key list can be copied (the literal's spelling is not one the key-order index can follow). */
+    listOnly?: true;
   }>();
   noteSpreadLiteral(loc: SrcLoc, e: {
     shapeId: string;
@@ -5504,6 +5507,7 @@ export class Lowerer {
     srcRef: IrExpr;
     parts: ({ name: string } | { spread: string; names: string[] })[];
     exclude: string[];
+    listOnly?: true;
   }): void {
     this.spreadLiterals.set(this.keyRiskLocKey(loc), e);
   }
@@ -6191,6 +6195,7 @@ export class Lowerer {
     if (process.env["SCRIPTC_KEYCROSS_WHY"] !== undefined) {
       console.error(`[keycross] ${value.loc.file}@${value.loc.start} kind=${value.kind} type=${value.type.kind} probe=${this.diagSink ? "Y" : "n"}`);
     }
+    if (value.type.kind === "record") this.enumeratedRecords.add(value.type.shapeId);
     if (this.diagSink) return;
     // COMPOSITE, not top-level. `const a: object[] = [w]` lowers the array
     // as ONE value and crosses it whole - the to-dyn walker recurses into
@@ -6255,6 +6260,12 @@ export class Lowerer {
    * optional members after construction (`r.k = v`, `delete r.k`, a dynamic-key write) and some surface ENUMERATES it:
    * those are the two facts that make its key order a per-instance one. Static, over the finished IR, so a program without
    * both emits what it always did. */
+  /** Helpers that copy one shape's keys into another in the SOURCE's order (Object.assign onto a record): the edge carries the
+   * target's enumeration back to the source, and `rebuild` re-emits the copy over the source's key list once it has one. */
+  readonly listConsumers: { src: string; dst: string; rebuild: () => void }[] = [];
+  noteListConsumer(src: string, dst: string, rebuild: () => void): void {
+    this.listConsumers.push({ src, dst, rebuild });
+  }
   markKeyLists(functions: IrFunction[]): void {
     const late = new Set<string>();
     const seen = new Set<object>();
@@ -6275,21 +6286,115 @@ export class Lowerer {
     };
     walk(functions);
     walk(this.globalsList);
-    for (const id of late) {
-      if (!this.enumeratedRecords.has(id)) continue;
+    const eligible = (id: string): boolean => {
       const s = this.shapes.get(id);
-      if (!s?.declaredOrder || s.tuple || s.indexValue || s.builtin || s.fields.length > 254) continue;
-      if (s.fields.some((f) => f.name.startsWith("%"))) continue;
+      if (!s?.declaredOrder || s.tuple || s.indexValue || s.builtin || s.fields.length > 254) return false;
+      if (s.fields.some((f) => f.name.startsWith("%"))) return false;
       // Integer-like names enumerate first and ascending however they were written, which a write-order list cannot say yet.
-      if (s.fields.some((f) => /^(0|[1-9][0-9]*)$/.test(f.name) && Number(f.name) < 4294967295)) continue;
-      if (this.requiredAbsentTargets.has(id)) continue;
-      // A baked consumer the list cannot serve (a blocked bake, or a spread that follows the index) keeps its refusal.
-      const bake = this.enumOrderBakes.get(id);
-      if (bake?.blocked || bake?.indexable.has("spread")) continue;
+      if (s.fields.some((f) => /^(0|[1-9][0-9]*)$/.test(f.name) && Number(f.name) < 4294967295)) return false;
+      if (this.requiredAbsentTargets.has(id)) return false;
+      // A baked consumer the list cannot serve keeps its refusal: a blocked bake.
+      return this.enumOrderBakes.get(id)?.blocked !== true;
+    };
+    // SPREAD and REST copies (Lowerer.spreadLiterals) carry their source's list into the destination: edges source -> destination.
+    const edges: { lk: string; src: string; dst: string }[] = [];
+    for (const [lk, sl] of this.spreadLiterals) edges.push({ lk, src: sl.srcShapeId, dst: sl.shapeId });
+    const flowEdges = [...edges, ...this.listConsumers.map((c) => ({ lk: "", src: c.src, dst: c.dst }))];
+    // needs = written late, or the destination of a copy of a shape that needs; matters = enumerated, or the source of a copy
+    // whose destination matters. A shape pays for the list only when it is both.
+    const needs = new Set<string>([...late].filter(eligible));
+    for (let ch = true; ch;) {
+      ch = false;
+      for (const e of flowEdges) if (needs.has(e.src) && !needs.has(e.dst) && eligible(e.dst) && this.shapes.get(e.dst)?.keyOrders === undefined) { needs.add(e.dst); ch = true; }
+    }
+    const matters = new Set<string>([...this.enumeratedRecords]);
+    for (let ch = true; ch;) {
+      ch = false;
+      for (const e of flowEdges) if (matters.has(e.dst) && !matters.has(e.src)) { matters.add(e.src); ch = true; }
+    }
+    const listed = new Set<string>([...needs].filter((id) => matters.has(id)));
+    const patches = edges.filter((e) => listed.has(e.src) && listed.has(e.dst));
+    const dests = new Set(patches.map((e) => e.dst));
+    for (const id of listed) {
+      const s = this.shapes.get(id)!;
       s.keyList = true;
+      if (dests.has(id)) s.keyListAll = true;
+      if (process.env["SCRIPTC_KEYORDER_WHY"] !== undefined) console.error(`[keyorder] ${id} KEYLIST${dests.has(id) ? " ALL" : ""}`);
+    }
+    // The copies fill their destination's list in the order JS gives the copy: written parts in order, a spread contributing its
+    // source's keys in the source's own order.
+    if (patches.length > 0) {
+      const byLoc = new Map(patches.map((e) => [e.lk, e] as const));
+      const done = new Set<object>();
+      let uid = 0;
+      const visit = (n: unknown, fn: IrFunction | null): void => {
+        if (n === null || typeof n !== "object" || done.has(n)) return;
+        done.add(n);
+        if (Array.isArray(n)) { for (const x of n) visit(x, fn); return; }
+        const o = n as Record<string, unknown>;
+        const loc = o["loc"] as SrcLoc | undefined;
+        if (o["kind"] === "recordLit" && loc && fn !== null) {
+          const lk = this.keyRiskLocKey(loc);
+          const t = o["type"] as { kind?: string; shapeId?: string } | undefined;
+          const e = byLoc.get(lk);
+          const sl = this.spreadLiterals.get(lk);
+          if (e !== undefined && sl !== undefined && t?.kind === "record" && t.shapeId === e.dst) {
+            const lit = { ...o } as unknown as IrExpr;
+            const id = `kl.d${uid++}`;
+            const dstType = lit.type;
+            const srcType: IrType = { kind: "record", shapeId: sl.srcShapeId };
+            fn.locals.push({ id, name: id.replace(".", "_"), type: dstType, mutable: true });
+            // The list fill has loops, and a seqExpr is straight-line: it lives in a helper the literal calls.
+            const hName = `%keylist.copy.${this.liftedFns.length}`;
+            const hLocals: { id: string; name: string; type: IrType; mutable: boolean }[] = [
+              { id: "d.0", name: "d", type: dstType, mutable: false },
+              { id: "s.0", name: "s", type: srcType, mutable: false },
+            ];
+            const hBody = copyListStmts(
+              this, e.dst, () => ({ kind: "varRef", localId: "d.0", type: dstType, loc }),
+              sl.srcShapeId, { kind: "varRef", localId: "s.0", type: srcType, loc }, sl.parts, loc,
+              () => {
+                const k = `l.${hLocals.length}`;
+                hLocals.push({ id: k, name: k.replace(".", "_"), type: F64, mutable: true });
+                return k;
+              },
+            );
+            const hFn: IrFunction = {
+              name: hName,
+              params: [{ localId: "d.0", name: "d", type: dstType }, { localId: "s.0", name: "s", type: srcType }],
+              returnType: VOID,
+              locals: hLocals,
+              body: hBody,
+              loc,
+            };
+            this.liftedFns.push(hFn);
+            functions.push(hFn);
+            const stmts: IrStmt[] = [
+              { kind: "varDecl", localId: id, init: lit, loc },
+              {
+                kind: "exprStmt",
+                expr: { kind: "call", callee: hName, args: [{ kind: "varRef", localId: id, type: dstType, loc }, JSON.parse(JSON.stringify(sl.srcRef)) as IrExpr], type: VOID, loc },
+                loc,
+              },
+            ];
+            const dRef = (): IrExpr => ({ kind: "varRef", localId: id, type: dstType, loc });
+            for (const k of Object.keys(o)) delete o[k];
+            Object.assign(o, { kind: "seqExpr", stmts, result: dRef(), type: dstType, loc });
+            done.add(lit as unknown as object);
+            visit(lit as unknown as object, fn);
+            return;
+          }
+        }
+        for (const v of Object.values(o)) visit(v, fn);
+      };
+      for (const f of [...functions]) visit(f.body, f);
+    }
+    for (const c of this.listConsumers) if (listed.has(c.src)) c.rebuild();
+    // Baked consumers rebuild over the list, now that the shapes carry it.
+    for (const id of listed) {
+      const bake = this.enumOrderBakes.get(id);
       if (bake?.indexable.has("inspect")) rebuildRecordInspect(this, id);
       for (const refill of bake?.refills ?? []) applyEnumRefill(this, refill, "rebuild");
-      if (process.env["SCRIPTC_KEYORDER_WHY"] !== undefined) console.error(`[keyorder] ${id} KEYLIST`);
     }
   }
 
@@ -6400,7 +6505,7 @@ export class Lowerer {
       if (shape.fields.some((f) => f.name.startsWith("%"))) { if (why) console.error(`[keyorder] ${shapeId} NO-INDEX #2`); return false; }
       // A cast that materialises this shape names the instance's order from the dynamic object's own keys (the builders do).
       const bake = this.enumOrderBakes.get(shapeId);
-      if (bake !== undefined && bake.blocked) { if (why) console.error(`[keyorder] ${shapeId} NO-INDEX #4`); return false; }
+      if (bake !== undefined && (bake.blocked || bake.indexable.has("list"))) { if (why) console.error(`[keyorder] ${shapeId} NO-INDEX #4`); return false; }
       if (presenceShapes.has(shapeId) || fillTargets.has(shapeId)) { if (why) console.error(`[keyorder] ${shapeId} NO-INDEX #5`); return false; }
       const all = litSites.get(shapeId) ?? new Set<string>();
       if (all.size === 0) { if (why) console.error(`[keyorder] ${shapeId} NO-INDEX #6`); return false; }
@@ -6456,7 +6561,7 @@ export class Lowerer {
       }
       if (shape.fields.some((f) => f.name.startsWith("%"))) { reject("shape has internal slots"); return; }
       if (castShapes.has(shapeId)) { reject("a checked cast materialises this shape"); return; }
-      if (this.enumOrderBakes.get(shapeId)?.blocked) { reject("an order consumer baked this shape and cannot be rebuilt"); return; }
+      if (this.enumOrderBakes.get(shapeId)?.blocked || this.enumOrderBakes.get(shapeId)?.indexable.has("list")) { reject("an order consumer baked this shape and cannot be rebuilt"); return; }
       if (presenceShapes.has(shapeId)) { reject("a write-order-tracked binding names this shape"); return; }
       // The revision is LOCAL to this decision. `ev.locs` keeps the
       // literal's own spelling, because the recompute at the tail of this
@@ -6515,6 +6620,7 @@ export class Lowerer {
     // shape gets one order per source order, and the literal names its order from the source's index at run time.
     const spreadChains = new Map<string, number[]>();
     for (const [lk, sl] of this.spreadLiterals) {
+      if (sl.listOnly === true) continue;
       const S = this.shapes.get(sl.srcShapeId);
       const T = this.shapes.get(sl.shapeId);
       if (!S?.keyOrders || !T?.declaredOrder) continue;
@@ -6666,7 +6772,7 @@ export class Lowerer {
       // A tracked binding of a shape with a KEY LIST (IrRecordShape.keyList) enumerates in the order its keys were written, at
       // the surfaces that read the list; the write-order refusal does not apply to them. Another risk on the value (a width
       // copy, a dynamic source) still does.
-      if (u.ref !== null && !u.crossing && LIST_SURFACES.has(u.surface)) {
+      if (u.ref !== null && (u.crossing || LIST_SURFACES.has(u.surface))) {
         const pe = this.keyPresenceOrder.get(u.ref);
         if (pe !== undefined && this.shapes.get(pe.shapeId)?.keyList === true) {
           const other = this.keyRiskValues.get(u.ref) ?? this.resolvePendingRisk(u.ref);

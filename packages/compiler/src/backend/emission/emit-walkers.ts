@@ -1161,7 +1161,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             }
             // A shape with a key list: a key that is IN the order record is written where the record puts it, not here.
             if (shape.keyList && !listed) {
-              const skip = `!scr_ord_has(v->${KEYLIST_MEMBER}, ${shape.fields.findIndex((x) => x.name === f.name)})`;
+              const skip = `!scr_ord_has_i(v->${KEYLIST_MEMBER}, ${shape.fields.findIndex((x) => x.name === f.name)})`;
               cond = cond === null ? skip : `(${cond}) && ${skip}`;
             }
             const pad = cond !== null ? ind + "  " : ind;
@@ -1176,18 +1176,27 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             if (cond !== null) out.push(`${ind}}`);
           }
         };
-        const putFields = (): void => {
+        const putStatic = (noList: boolean): void => {
           if (!shape.keyOrders) {
-            fieldCode(emitFields, d, "  ");
+            fieldCode(emitFields, d, "  ", noList);
           } else {
             d.push(`  switch (v->${KEYIX_MEMBER}) {`);
             orderedFieldLists.forEach((fl, i) => {
               d.push(`  ${i === orderedFieldLists.length - 1 ? "default" : `case ${i}`}: {`);
-              fieldCode(fl, d, "    ");
+              fieldCode(fl, d, "    ", noList);
               d.push(`    break;`, `  }`);
             });
             d.push(`  }`);
           }
+        };
+        const putFields = (): void => {
+          // No key written late (the usual instance): the construction-order code alone.
+          if (shape.keyList) {
+            d.push(`  if (v->${KEYLIST_MEMBER}[0] == 0) {`);
+            putStatic(true);
+            d.push(`  } else {`);
+          }
+          putStatic(false);
           // ...then the keys written after construction, in the order they were first written.
           if (shape.keyList) {
             d.push(`  for (size_t sc_li = 1; sc_li <= v->${KEYLIST_MEMBER}[0]; sc_li++) {`);
@@ -1198,6 +1207,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
               d.push(`      break;`, `    }`);
             }
             d.push(`    default: break;`, `    }`, `  }`);
+            d.push(`  }`);
           }
         };
         if (!droppable) {
@@ -3606,12 +3616,12 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           const accProps = new Set(accShape ? shape.fields.map((f) => accessorSlotProp(f.name)?.prop).filter((p): p is string => p !== undefined) : []);
           const order = accShape ? accessorKeyOrderOf(shape) : (shape.declaredOrder ?? shape.fields.map((f) => f.name));
           const internal = new Set(internalSlotFields(shape).filter((n) => accessorSlotProp(n) === null));
-          const dynFieldsFor = (order: string[]): { name: string; type: IrType }[] => [
+          const dynFieldsFor = (order: string[], withInternal = true): { name: string; type: IrType }[] => [
             ...order.map((n) => byName.get(n) ?? (accProps.has(n) ? { name: n, type: VOID } : undefined)).filter((f): f is { name: string; type: IrType } => f !== undefined),
-            ...shape.fields.filter((f) => internal.has(f.name)),
+            ...(withInternal ? shape.fields.filter((f) => internal.has(f.name)) : []),
           ];
-          const fillFor = (ord: string[]): void => {
-          const dynFields = dynFieldsFor(ord);
+          const fillFor = (ord: string[], withInternal = true): void => {
+          const dynFields = dynFieldsFor(ord, withInternal);
           for (const f of dynFields) {
             const keyLit = cStringLiteral(Buffer.from(f.name, "utf8"));
             const keyLen = Buffer.byteLength(f.name, "utf8");
@@ -3797,13 +3807,57 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           };
           // One fill per key order. A shape every construction agrees on has one (its declaredOrder); a shape with several
           // (IrRecordShape.keyOrders) inserts the keys in the order the instance was built in.
+          // A shape with a KEY LIST (IrRecordShape.keyList) inserts the keys the construction wrote, then the ones written
+          // after it in the order they were first written.
+          const fillListed = (ord: string[]): void => {
+            if (!shape.keyList) { fillFor(ord); return; }
+            const late = (n: string): boolean => {
+              const ft = byName.get(n)?.type;
+              if (ft !== undefined && shape.keyListAll === true) return !internal.has(n) && !accProps.has(n);
+              return ft !== undefined && ft.kind === "union" && E.undefinedArmTag(ft) >= 0;
+            };
+            const lateNames: string[] = [];
+            for (const n of ord) {
+              const f = byName.get(n);
+              if (!f || !late(n)) continue;
+              lateNames.push(n);
+            }
+            for (const f of shape.fields) if (!ord.includes(f.name) && late(f.name) && !f.name.startsWith("__@") && !f.name.startsWith("%")) lateNames.push(f.name);
+            // No key written late (the usual instance): the construction-order code alone.
+            if (lateNames.length > 0) {
+              d.push(`  if (v->${KEYLIST_MEMBER}[0] == 0) {`);
+              fillFor(ord, true);
+              d.push(`  } else {`);
+            }
+            for (const n of ord) {
+              if (lateNames.includes(n)) {
+                d.push(`  if (!scr_ord_has_i(v->${KEYLIST_MEMBER}, ${shape.fields.findIndex((x) => x.name === n)})) {`);
+                fillFor([n], false);
+                d.push(`  }`);
+              } else fillFor([n], false);
+            }
+            if (lateNames.length > 0) {
+              d.push(`  for (size_t sc_li = 1; sc_li <= v->${KEYLIST_MEMBER}[0]; sc_li++) {`);
+              d.push(`    switch (v->${KEYLIST_MEMBER}[sc_li]) {`);
+              for (const n of lateNames) {
+                d.push(`    case ${shape.fields.findIndex((x) => x.name === n)}: {`);
+                fillFor([n], false);
+                d.push(`      break;`, `    }`);
+              }
+              d.push(`    default: break;`, `    }`, `  }`);
+            }
+            // The internal slots last, as the unlisted path does.
+            const internalOnly = shape.fields.filter((f) => internal.has(f.name));
+            if (internalOnly.length > 0) fillFor([], true);
+            if (lateNames.length > 0) d.push(`  }`);
+          };
           if (!shape.keyOrders) {
-            fillFor(order);
+            fillListed(order);
           } else {
             d.push(`  switch (v->${KEYIX_MEMBER}) {`);
             shape.keyOrders.forEach((ko, i) => {
               d.push(`  ${i === shape.keyOrders!.length - 1 ? "default" : `case ${i}`}: {`);
-              fillFor(ko);
+              fillListed(ko);
               d.push(`    break;`, `  }`);
             });
             d.push(`  }`);

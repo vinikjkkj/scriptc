@@ -2531,8 +2531,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         const obj = E.emitExpr(e.obj);
         const lst = `${obj.name}->${KEYLIST_MEMBER}`;
         if (e.op === "count") return E.newTemp(e.type, `((double)${lst}[0])`);
-        if (e.op === "has") return E.newTemp(e.type, `scr_ord_has(${lst}, ${e.ord})`);
+        if (e.op === "empty") return E.newTemp(e.type, `(${lst}[0] == 0)`);
+        if (e.op === "has") return E.newTemp(e.type, `scr_ord_has_i(${lst}, ${e.ord})`);
+        if (e.op === "note") return E.newTemp(e.type, `(scr_ord_note(${lst}, ${e.ord}), (bool)1)`);
         const ix = E.emitExpr(e.idx!);
+        if (e.op === "isAt") return E.newTemp(e.type, `(${lst}[1 + (size_t)${ix.name}] == ${e.ord})`);
         return E.newTemp(e.type, `((double)${lst}[1 + (size_t)${ix.name}])`);
       }
       case "recordKeyOrderIs": {

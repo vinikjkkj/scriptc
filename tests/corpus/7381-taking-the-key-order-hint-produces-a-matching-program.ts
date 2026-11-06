@@ -7,8 +7,7 @@
 // matching, the compiler is telling people to write a program that is still
 // wrong, which is worse than the refusal it replaced.
 //
-// The refused originals live in
-// tests/diagnostics/key-order-through-a-spread-a-return-and-a-filled-record.ts.
+// The refused originals have since become exact too (tests/corpus/24429).
 //
 // EACH CASE USES ITS OWN KEY NAMES, and that is not tidiness. The first draft
 // spelled all three over {a, b, c} and the SPREAD case refused even after the

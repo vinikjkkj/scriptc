@@ -11983,12 +11983,15 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     const tRef: IrExpr = { kind: "varRef", localId: "t.0", type: tT, loc };
     const sRef: IrExpr = { kind: "varRef", localId: "s.0", type: sT, loc };
     const body: IrStmt[] = [];
-    for (const f of sShape.fields) {
+    // One guarded copy per source field. Written as a per-field function so a source that carries a KEY LIST (IrRecordShape.keyList)
+    // copies its construction-order keys and then its list, in the order JS's Object.assign reads them.
+    const fillOne = (fname: string, tgt: IrStmt[]): void => {
+      const f = sShape.fields.find((x) => x.name === fname)!;
       const get: IrExpr = { kind: "recordGet", obj: sRef, shapeId: srcShapeId, field: f.name, type: f.type, loc };
       const set: IrStmt = { kind: "recordSet", obj: tRef, shapeId: targetShapeId, field: f.name, value: get, loc };
       const utag = f.type.kind === "union" ? L.armTag(f.type.unionId, UNDEFINED_T) : -1;
-      const at = body.length;
-      body.push(
+      const at = tgt.length;
+      tgt.push(
         utag >= 0 && f.type.kind === "union"
           ? {
               kind: "if",
@@ -12002,12 +12005,32 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       // Object.keys's row: a SOURCE shape materialised out of a dynamic
       // value copies only the members that were the source object's own
       // keys, so the target's key list is the one JS's Object.assign
-      // produces. Skipping leaves the target's slot as it was — which for
+      // produces. Skipping leaves the target's slot as it was - which for
       // a fresh `{}` target is the undefined arm, i.e. absent.
       L.noteOwnKeyGuard(srcShapeId, f.name, sRef, loc,
-        { kind: "guardStmt", slot: { holder: body, at }, inner: set, outer: null, loc });
-    }
-    body.push({ kind: "return", value: tRef, loc });
+        { kind: "guardStmt", slot: { holder: tgt, at }, inner: set, outer: null, loc }, helper);
+    };
+    const fnLocals: { id: string; name: string; type: IrType; mutable: boolean }[] = [
+      { id: "t.0", name: "t", type: tT, mutable: true },
+      { id: "s.0", name: "s", type: sT, mutable: true },
+    ];
+    const build = (): void => {
+      L.dropOwnKeyGuards(helper);
+      body.length = 0;
+      const names = sShape.fields.map((f) => f.name);
+      if (sShape.keyList) {
+        fillWithKeyList(L, sShape, srcShapeId, () => sRef, names, fillOne, body, loc, (id, nm) => {
+          if (!fnLocals.some((l) => l.id === id)) fnLocals.push({ id, name: nm, type: F64, mutable: true });
+        });
+      } else {
+        for (const n of names) fillOne(n, body);
+      }
+      body.push({ kind: "return", value: tRef, loc });
+    };
+    build();
+    // The copy order is the source's, so a source that turns out to carry a key list rebuilds this body (markKeyLists), and
+    // the target is enumerated in the order the copy wrote it.
+    L.noteListConsumer(srcShapeId, targetShapeId, build);
     L.liftedFns.push({
       name: helper,
       params: [
@@ -12015,10 +12038,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
         { localId: "s.0", name: "s", type: sT },
       ],
       returnType: tT,
-      locals: [
-        { id: "t.0", name: "t", type: tT, mutable: true },
-        { id: "s.0", name: "s", type: sT, mutable: true },
-      ],
+      locals: fnLocals,
       body,
       loc,
     });
