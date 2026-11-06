@@ -13520,6 +13520,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24504-an-engine-built-uint8array-keeps-its-constructor-after-it-crosses.ts": {
+   "order": [
+    "<repo>/tests/corpus/24504-an-engine-built-uint8array-keeps-its-constructor-after-it-crosses.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2451-private-fields.ts": {
    "order": [
     "<repo>/tests/corpus/2451-private-fields.ts"
