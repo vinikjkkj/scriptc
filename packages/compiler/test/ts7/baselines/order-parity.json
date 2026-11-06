@@ -25572,6 +25572,48 @@
     "<repo>/tests/corpus/24499-commander-shaped-generated-methods-beside-protobuf-shaped-decode.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/24540-util-deprecate-wraps-a-variadic-prototype-method.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24540-util-deprecate-wraps-a-variadic-prototype-method.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24541-util-deprecate-codes-and-wrappers.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24541-util-deprecate-codes-and-wrappers.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24542-util-deprecate-process-no-deprecation.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24542-util-deprecate-process-no-deprecation.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24543-util-deprecate-throw-deprecation.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24543-util-deprecate-throw-deprecation.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24544-util-deprecate-trace-deprecation.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24544-util-deprecate-trace-deprecation.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24545-prototype-data-alias-copies-the-value-at-assignment.js": {
+   "order": [
+    "<repo>/tests/corpus/24545-prototype-data-alias-copies-the-value-at-assignment.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24546-util-deprecate-wraps-a-function-with-declared-parameters-and-arguments.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24546-util-deprecate-wraps-a-function-with-declared-parameters-and-arguments.cjs"
+   ],
+   "diags": []
   }
  }
 }
