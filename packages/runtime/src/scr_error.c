@@ -166,16 +166,17 @@ void scr_error_release(ScrError *e) {
 void *scr_error_retain_v(void *e) { return scr_error_retain((ScrError *)e); }
 void scr_error_release_v(void *e) { scr_error_release((ScrError *)e); }
 
-/* The message of an error constructed without one: ONE immortal empty string (a fresh allocation per error is what a literal
- * "" never cost). */
-static SCR_STR_LIT(1) scr_error_empty_message = {SCR_STR_IMMORTAL, 0, 0, ""};
+/* The ABSENT message of an Error constructor call: ONE immortal empty string whose ADDRESS is the fact "no message argument"
+ * (a literal "" is a different object, so `new Error("")` is told apart). It is a valid string everywhere a string flows --
+ * retained, released, concatenated -- which a NULL would not be. scr_error_init stores it and records `own_message` false. */
+ScrStrLit0 scr_error_absent_message = {SCR_STR_IMMORTAL, 0, 0, ""};
 
 void scr_error_init(void *obj, int kind, ScrStr *message) {
   ScrError *e = (ScrError *)obj;
   const char *n = scr_error_names[kind];
   e->name = scr_str_new(n, strlen(n));
-  e->message = message ? scr_str_retain(message) : (ScrStr *)&scr_error_empty_message;
-  e->own_message = message != NULL; /* NULL = no message argument at all: Node installs no own `message` */
+  e->message = message ? scr_str_retain(message) : SCR_ERROR_ABSENT_MESSAGE;
+  e->own_message = message != NULL && message != SCR_ERROR_ABSENT_MESSAGE; /* the absent marker: Node installs no own `message` */
 }
 
 /* The Error hierarchy's trace entry point when the program's cycle fixpoint
@@ -520,8 +521,8 @@ static bool (*scr_error_props_code)(ScrError *e, ScrStr **out) = NULL;
 
 void scr_error_install_props_code(bool (*fn)(ScrError *e, ScrStr **out)) { scr_error_props_code = fn; }
 
-/* The absent message of an Error constructor call: NULL (the C emitter spells it inline; the LLVM one calls this). */
-ScrStr *scr_error_no_message(void) { return NULL; }
+/* The absent message of an Error constructor call (the C emitter spells it inline; the LLVM one calls this). */
+ScrStr *scr_error_no_message(void) { return SCR_ERROR_ABSENT_MESSAGE; }
 
 ScrStr *scr_error_code(ScrError *e) {
   /* `err.code = "X"` assigned by the program lands in the property bag and wins over a stamped code (own data property). */
