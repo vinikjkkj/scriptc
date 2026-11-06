@@ -173,6 +173,16 @@ import { pairedProtoInstanceType } from "./proto-class-consume.js";
 
 /** Entry function name. '%' cannot appear in a TS identifier, so a user
  * function can never collide with it (mangling is injective per prefix). */
+/** The enumeration surfaces that read a record's per-instance key-order index (IrRecordShape.keyOrders). */
+const INDEX_SURFACES: ReadonlySet<string> = new Set([
+  "console.log/util.inspect",
+  "util.format %j",
+  "JSON.stringify",
+  "Object.keys",
+  "Object.values",
+  "Object.entries",
+  "for-in",
+]);
 export const ENTRY_NAME = "%main";
 
 /** One step of the copy-reshape width relation (widthLiftPlan): how a
@@ -5475,6 +5485,9 @@ export class Lowerer {
    * both such, and both keep compiling because of this. And only the
    * ENUMERATION is refused: reading a narrowed record's declared fields is
    * untouched, which is what tests/corpus/2026 has always relied on. */
+  /** The "order" risks of literals whose shape now carries several key orders (IrRecordShape.keyOrders). A risk object in
+   * this set is waived at the enumeration surfaces that read the index and still refuses at the ones that do not. */
+  readonly indexedOrderRisks = new WeakSet<object>();
   readonly keyRiskLiterals = new Map<string, { why: "set" | "order" | "dyn"; detail: string }>();
   readonly keyRiskHelpers = new Map<string, { why: "set" | "order" | "dyn"; detail: string }>();
   readonly keyRiskValues = new Map<string, { why: "set" | "order" | "dyn"; detail: string }>();
@@ -6471,9 +6484,11 @@ export class Lowerer {
       if (!shape?.declaredOrder) continue;
       if (indexed.has(shapeId)) {
         // Every order this shape's literals spell is carried per instance, so none of them is a risk any more.
+        // The risk stays: a surface that does not read the index (a spread, a rest, a widening to dyn) still refuses
+        // it. Only the surfaces that DO (INDEX_SURFACES) waive it, which is what marking the object is for.
         for (const locKey of ev.locs.keys()) {
           const prev = this.keyRiskLiterals.get(locKey);
-          if (prev && prev.why === "order") this.keyRiskLiterals.delete(locKey);
+          if (prev && prev.why === "order") this.indexedOrderRisks.add(prev);
         }
         continue;
       }
@@ -6531,6 +6546,9 @@ export class Lowerer {
           `[keyrisk] ${u.loc.file}@${u.loc.start} ${u.crossing ? "CROSSING" : u.surface} ${u.ref ?? "-"} ` +
             (risk ? `RISK-${risk.why} ${risk.detail}` : "ok"),
         );
+      }
+      if (risk && risk.why === "order" && !u.crossing && this.indexedOrderRisks.has(risk) && INDEX_SURFACES.has(u.surface)) {
+        continue;
       }
       if (!risk) {
         const adv = u.ref !== null ? this.presenceFillAdvice(u.ref) : null;
