@@ -1823,6 +1823,8 @@ ScrDyn *scr_dyn_undefined(void) {
  * own-key surfaces (Object.keys, `in`, hasOwn, spread, JSON) ask the
  * pointer -- which is what lets `delete x.v` followed by Object.keys(x)
  * answer Node's list, where a plain undefined write would still list `v`. */
+bool scr_dyn_is_absent(const ScrDyn *d) { return d == scr_dyn_absent(); }
+
 ScrDyn *scr_dyn_absent(void) {
   static ScrDyn absent = { SIZE_MAX, SCR_DYN_UNDEF, { false } };
   return &absent;
@@ -8578,7 +8580,8 @@ bool scr_dyn_has_key(const ScrDyn *v, const ScrStr *key) {
     const ScrDynClassMember *hm = scr_dyn_objinst_member(v, key->data, key->len);
     /* a field `delete` removed is not a property any more */
     if (hm != NULL) {
-      if (hm->enumerable == 4 && scr_dyn_member_hidden(hm, v->v.inst.o)) {
+      /* (a field with prototype data under its name stays a member of the instance through the prototype) */
+      if (hm->enumerable == 4 && hm->value == NULL && scr_dyn_member_hidden(hm, v->v.inst.o)) {
         /* a grafted emitter's key before EventEmitter.call(this) ran: still the prototype's, so `in` is true */
         return scr_dyn_ee_ops != NULL && scr_dyn_objinst_emitter(v) != NULL && scr_dyn_ee_ops->is_state(key->data, key->len);
       }
@@ -14180,6 +14183,12 @@ ScrDyn *scr_dyn_assign_all(ScrDyn *target, const ScrDyn *sources) {
  * ENUMERABLE accessor of a dyn object. Node's for-in lists such a name without running its getter, so
  * the value test (which would run it, and skip an undefined answer) must not decide it. */
 bool scr_dyn_for_in_accessor(const ScrDyn *v, const ScrStr *key) {
+  /* A class instance's checked-dynamic field row (enumerable 4) tells an own undefined from an absent field by the absent marker,
+   * so a visible one is an own key whatever it holds -- the value test must not drop an own undefined. */
+  if (v != NULL && v->kind == SCR_DYN_OBJINST) {
+    const ScrDynClassMember *cm = scr_dyn_objinst_member(v, key->data, key->len);
+    return cm != NULL && cm->enumerable == 4 && cm->get != NULL && !scr_dyn_member_hidden(cm, v->v.inst.o);
+  }
   if (v == NULL || v->kind != SCR_DYN_OBJ) return false;
   bool is_data = true, enumerable = false;
   if (!scr_dyn_obj_hidden_attrs(v, key->data, key->len, &is_data, NULL, NULL, &enumerable)) return false;

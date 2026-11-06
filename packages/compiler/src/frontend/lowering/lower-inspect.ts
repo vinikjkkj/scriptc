@@ -1210,6 +1210,10 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc, rebuild = false): str
       // the slots where that arm can ONLY mean absence, so this is not a
       // second approximation traded for the first.
       const presentTest = (field: string, type: IrType): IrExpr | null => {
+        // Prototype data under the name: the field is present exactly when it no longer holds THE absent marker.
+        if (info.absentInitFields?.has(field) === true && type.kind === "dyn") {
+          return { kind: "unary", op: "!", operand: { kind: "libCall", fn: "dyn.isAbsent", args: [get(field, type)], type: BOOL, loc }, type: BOOL, loc };
+        }
         if (info.absentTrackedFields?.has(field) !== true) return null;
         // A CHECKED-DYNAMIC slot answers presence by its dyn KIND, which is
         // exactly how `in` has always answered it (undefinedArmedInAnswer's

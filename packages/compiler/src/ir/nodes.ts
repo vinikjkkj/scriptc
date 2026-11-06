@@ -1783,6 +1783,10 @@ export interface IrClassDef {
    * field row answers this module function (no parameters, the datum as a dyn value) while the instance field is unset, which
    * is the lookup Node performs for an inherited property. */
   dynFieldData?: { name: string; fn: string }[];
+  /** Checked-dynamic fields that start as THE absent marker (scr_dyn_absent) instead of undefined: the instance has no own
+   * property of that name until a write runs, and an own write of undefined is a real own undefined. Prototype data under the
+   * name (`C.prototype.name = v`) is what a read of an absent field answers. Flattened over the base chain. */
+  absentInit?: string[];
   /** The STATIC side of a class a dyn box can hold, as module functions with
    * no receiver: static methods (`name` -> the `%C.static:name` function),
    * static getters and static field reads (`get:name` -> the function that
@@ -5490,6 +5494,7 @@ export type IrLibFn =
   | "dyn.this"
   | "dyn.thisSloppy"
   | "dyn.isGlobalThis"
+  | "dyn.isAbsent"
   /** OPEN an ambient-receiver window: bind the dyn operand as `this` for
    * everything the current frame calls until the matching `dyn.thisPop`.
    * The operand is BORROWED at the call and retained for the window

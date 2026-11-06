@@ -259,11 +259,12 @@ function undefFieldInits(host: ClassHost, meta: LlClassMeta): string[] {
       return;
     }
     if (f.type.kind === "dyn") {
-      host.declare(`declare ptr @scr_dyn_undefined()`);
+      const absent = meta.def.absentInit?.includes(f.name) === true;
+      host.declare(absent ? `declare ptr @scr_dyn_absent()` : `declare ptr @scr_dyn_undefined()`);
       out.push(
-        `  %udv${i} = call ptr @scr_dyn_undefined()`,
+        `  %udv${i} = call ptr @${absent ? "scr_dyn_absent" : "scr_dyn_undefined"}()`,
         `  %uf${i} = getelementptr inbounds %${mangleClassStruct(meta.def.name)}, ptr %o, i64 0, i32 ${index}`,
-        `  store ptr %udv${i}, ptr %uf${i} ; ${f.name} starts undefined`,
+        `  store ptr %udv${i}, ptr %uf${i} ; ${f.name} starts ${absent ? "absent" : "undefined"}`,
       );
       return;
     }

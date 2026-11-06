@@ -8665,7 +8665,10 @@ const inliningPredicates = new Set<ts.Symbol>();
     // answers true for a prototype name before any write.
     const fieldT = info.fields.get(key);
     let presence: IrExpr | null;
-    if (info.collectedFields?.has(key) === true) {
+    if (info.absentInitFields?.has(key) === true && fieldT !== undefined && fieldT.kind === "dyn") {
+      // Prototype data under the name: own exactly when the field no longer holds THE absent marker (an own undefined is own).
+      presence = { kind: "unary", op: "!", operand: { kind: "libCall", fn: "dyn.isAbsent", args: [{ kind: "fieldGet", obj: rRef, className: recvT.className, field: key, type: fieldT, loc }], type: BOOL, loc }, type: BOOL, loc };
+    } else if (info.collectedFields?.has(key) === true) {
       presence = undefinedArmedInAnswer(L, rRef, recvT.className, key, loc);
     } else if (info.absentTrackedFields?.has(key) === true && fieldT !== undefined && fieldT.kind === "dyn") {
       presence = { kind: "dynTest", test: "undefined", negated: true, value: { kind: "fieldGet", obj: rRef, className: recvT.className, field: key, type: fieldT, loc }, type: BOOL, loc };

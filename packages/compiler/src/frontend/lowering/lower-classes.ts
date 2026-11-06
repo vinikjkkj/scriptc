@@ -258,6 +258,10 @@ export interface ClassInfo {
    *
    * Inherited entries seed from the base like `collectedFields`. */
   absentTrackedFields?: Set<string>;
+  /** Checked-dynamic fields under a prototype-data name (`C.prototype.name = v`) that start as the ABSENT marker: no own property
+   * exists until a write runs, an own write of undefined is a real own undefined, and a read of an absent field answers the
+   * prototype's datum. Inherited down the base chain. */
+  absentInitFields?: Set<string>;
   /** null for the builtin error classes (runtime-provided; no source).
    * Class EXPRESSIONS carry their ts.ClassExpression here — members,
    * accessors, and locs read identically off either form. */
@@ -5091,6 +5095,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       const collectedFields = new Set<string>(base?.collectedFields ?? []);
       const shadowFields = new Set<string>();
       const absentTrackedFields = new Set<string>(base?.absentTrackedFields ?? []);
+      const absentInitFields = new Set<string>(base?.absentInitFields ?? []);
       if (unguardedFields.length > 0) {
         const topAssigned = new Set<string>();
         // ORDER: the top-level assignment guards the field only when nothing
@@ -5643,6 +5648,16 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           // Unset means the property does not exist yet: enumeration skips it
           // while undefined, unless the program can store undefined under the name.
           const absentOk = !undefWrittenPropNames(L).has("*") && !undefWrittenPropNames(L).has(pdName);
+          // A checked-dynamic field under a prototype-data name starts as THE absent marker: no own property until a write runs,
+          // and a write of undefined is a real own undefined that hides the datum (so the name needs no program-wide fence).
+          if (fields.has(pdName) ? fields.get(pdName)!.kind === "dyn" : true) {
+            if (!fields.has(pdName)) {
+              fields.set(pdName, DYN);
+              fieldOrder.push({ name: pdName, type: DYN, initializer: undefined });
+            }
+            absentInitFields.add(pdName);
+            continue;
+          }
           if (fields.has(pdName)) {
             // A field the inference already collected (first assigned outside
             // the constructor) takes the same absence rule when it is DYN.
@@ -5762,6 +5777,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           ...(orderedNames.length > 0 ? { ordered: orderedNames } : {}),
           ...(methods.size > 0 ? { methods: [...methods.keys()] } : {}),
           ...(absentTrackedFields.size > 0 ? { absentFields: [...absentTrackedFields] } : {}),
+          ...(absentInitFields.size > 0 ? { absentInit: [...absentInitFields] } : {}),
           ...(abstractClass ? { abstract: true as const } : {}),
           ...((): { abstractMethods?: string[] } => {
             const am = [...methods.entries()].filter(([, s]) => s.abstract === true).map(([n]) => n);
@@ -5803,6 +5819,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
         ...(nullableFields.size > 0 ? { nullableFields } : {}),
         ...(collectedFields.size > 0 ? { collectedFields } : {}),
         ...(absentTrackedFields.size > 0 ? { absentTrackedFields } : {}),
+        ...(absentInitFields.size > 0 ? { absentInitFields } : {}),
         ...(shadowFields.size > 0 ? { shadowFields } : {}),
         ...(captures !== undefined ? { captures } : {}),
       };

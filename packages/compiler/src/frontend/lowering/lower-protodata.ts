@@ -224,7 +224,7 @@ export function registerProtoData(
     const undefinedOnly = list.every((w) => undefinedRhs(w.right));
     const ownUndef = ownUndefinedPossible(name);
     let fenceWhy: string | null = null;
-    if (!undefinedOnly && ownUndef) {
+    if (!undefinedOnly && ownUndef && info.absentInitFields?.has(name) !== true) {
       fenceWhy = `the program can store an own undefined to '${name}', which would hide the prototype's non-undefined value`;
     }
     if (fenceWhy !== null) {
@@ -479,7 +479,10 @@ export function protoDataFieldRead(
     obj = { kind: "varRef", localId: tmp.id, type: obj.type, loc };
   }
   const fieldRead: IrExpr = { kind: "fieldGet", obj, className: target.className, field: name, type: DYN, loc };
-  const isSet: IrExpr = { kind: "dynTest", test: "undefined", negated: true, value: fieldRead, type: BOOL, loc };
+  // An absent-init field is unset exactly while it holds THE absent marker (an own write of undefined is a real own value).
+  const isSet: IrExpr = start.absentInitFields?.has(name) === true
+    ? { kind: "unary", op: "!", operand: { kind: "libCall", fn: "dyn.isAbsent", args: [fieldRead], type: BOOL, loc }, type: BOOL, loc }
+    : { kind: "dynTest", test: "undefined", negated: true, value: fieldRead, type: BOOL, loc };
   const slotRef: IrExpr = { kind: "varRef", localId: slot.global.id, type: slot.type, loc };
   const read: IrExpr = { kind: "ternary", cond: isSet, then: fieldRead, else_: slotRef, type: DYN, loc };
   return pre.length === 0 ? read : { kind: "seqExpr", stmts: pre, result: read, type: DYN, loc };
@@ -520,6 +523,11 @@ function untypedProtoDataRead(L: Lowerer, expr: ts.PropertyAccessExpression, nam
   let fenced = false;
   for (const info of L.classes.values()) {
     const n = info.def.name;
+    // The box's keyed read answers the datum of an absent-init field itself (member row value): nothing to complete here.
+    if (info.absentInitFields?.has(name) === true && L.protoDataSlots.get(n)?.has(name) === true) {
+      fenced = true;
+      continue;
+    }
     // A fenced datum has no slot, and its write is a compile-time refusal of its own: it neither answers nor adds a refusal here.
     if (L.protoDataFenced.has(`${n}.${name}`)) {
       fenced = true;

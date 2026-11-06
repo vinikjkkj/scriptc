@@ -3024,7 +3024,10 @@ export class CEmitter {
    * in --dynamic builds, and the field's release balances it. Empty for
    * every type that cannot hold undefined (tsc's SPI guards those) and for
    * record shapes' construction paths, which write every field. */
-  undefFieldInitLineC(name: string, t: IrType): string[] {
+  undefFieldInitLineC(name: string, t: IrType, absent = false): string[] {
+    if (absent && t.kind === "dyn") {
+      return [`  o->${mangleField(name)} = scr_dyn_absent(); /* ${name} starts absent (no own property yet) */`];
+    }
     if (t.kind === "jsval") {
       return [`  o->${mangleField(name)} = scr_jsval_undefined(); /* ${name} starts undefined */`];
     }

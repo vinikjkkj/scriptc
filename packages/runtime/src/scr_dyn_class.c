@@ -750,7 +750,8 @@ static bool dyn_cls_ops_set(ScrDyn *recv, const ScrStr *key, const ScrDyn *value
        * of the key order in JS; the layout keeps declaration order, so the
        * list would come out wrong. Loud rather than reordered. */
       const ScrDynClassMember *rm = scr_dyn_objinst_member(recv, key->data, key->len);
-      if (rm != NULL && rm->enumerable == 4 && value != scr_dyn_absent() && scr_dyn_member_hidden(rm, recv->v.inst.o)) {
+      /* A field under a prototype-data name starts absent, so ITS first write is no re-adding (rm->value names the datum). */
+      if (rm != NULL && rm->enumerable == 4 && rm->value == NULL && value != scr_dyn_absent() && scr_dyn_member_hidden(rm, recv->v.inst.o)) {
         scr_dyn_objinst_fence(recv, "re-adding a deleted field");
         return true;
       }
