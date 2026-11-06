@@ -25458,6 +25458,24 @@
     "<repo>/tests/diagnostics/protodata-untyped-read-fenced-owner.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/24493-prototype-data-dynamic-key-read-on-class-instance.js": {
+   "order": [
+    "<repo>/tests/corpus/24493-prototype-data-dynamic-key-read-on-class-instance.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24494-prototype-data-own-versus-inherited-has-own.js": {
+   "order": [
+    "<repo>/tests/corpus/24494-prototype-data-own-versus-inherited-has-own.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24495-prototype-data-for-in-lists-inherited-names.js": {
+   "order": [
+    "<repo>/tests/corpus/24495-prototype-data-for-in-lists-inherited-names.js"
+   ],
+   "diags": []
   }
  }
 }
