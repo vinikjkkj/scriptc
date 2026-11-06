@@ -6072,8 +6072,8 @@ ScrStr *scr_dyn_format_j(const ScrDyn *d) {
  * suite's shape). The cache retains both sides for the process (like the
  * dc registry; released atexit before the RC audit) and the node
  * SNAPSHOTS name/message/code at first crossing — a later mutation of the
- * error is invisible through it (SEMANTICS.md). Linear scan: error
- * crossings are test/reporting paths, not hot loops. */
+ * error is invisible through it (SEMANTICS.md). The two lookups are hashed (below):
+ * a closure that returns an error crosses once per error, in a hot loop. */
 typedef struct {
   ScrError *err; /* retained (pins the address — no pointer reuse) */
   ScrDyn *dyn;   /* retained */
@@ -6083,13 +6083,116 @@ static ScrErrDynEnt *scr_errdyn_cache = NULL;
 static size_t scr_errdyn_n = 0, scr_errdyn_cap = 0;
 static bool scr_errdyn_teardown_registered = false;
 
+/* Two open-addressing indexes over the entries, one per direction (error address -> entry, dyn node address -> entry), so a
+ * crossing costs the same at the first error and the millionth. A slot holds entry index + 1 (0 = empty); the FIRST entry
+ * entered for a key wins, exactly what the scan it replaces answered. Entries are never removed before teardown. */
+static size_t *scr_errdyn_ix_err = NULL, *scr_errdyn_ix_dyn = NULL;
+static size_t scr_errdyn_ix_cap = 0; /* power of two, >= 2 * entries */
+
+static inline size_t scr_errdyn_hash(const void *p) {
+  return (size_t)(((uintptr_t)p >> 4) * (uintptr_t)0x9E3779B97F4A7C15ull);
+}
+
+/* The entry index holding `key` in `ix`, or SIZE_MAX. `byErr` picks which pointer of an entry the index is keyed by. */
+static size_t scr_errdyn_find(const size_t *ix, const void *key, bool byErr) {
+  if (scr_errdyn_ix_cap == 0) return SIZE_MAX;
+  const size_t mask = scr_errdyn_ix_cap - 1;
+  for (size_t h = (scr_errdyn_hash(key) >> 16) & mask;; h = (h + 1) & mask) {
+    const size_t s = ix[h];
+    if (s == 0) return SIZE_MAX;
+    const ScrErrDynEnt *ent = &scr_errdyn_cache[s - 1];
+    if ((byErr ? (const void *)ent->err : (const void *)ent->dyn) == key) return s - 1;
+  }
+}
+
+static void scr_errdyn_ix_insert(size_t *ix, size_t entry, bool byErr) {
+  const size_t mask = scr_errdyn_ix_cap - 1;
+  const void *key = byErr ? (const void *)scr_errdyn_cache[entry].err : (const void *)scr_errdyn_cache[entry].dyn;
+  for (size_t h = (scr_errdyn_hash(key) >> 16) & mask;; h = (h + 1) & mask) {
+    if (ix[h] == 0) {
+      ix[h] = entry + 1;
+      return;
+    }
+    const ScrErrDynEnt *ent = &scr_errdyn_cache[ix[h] - 1];
+    if ((byErr ? (const void *)ent->err : (const void *)ent->dyn) == key) return; /* an earlier entry keeps the key */
+  }
+}
+
+static void scr_errdyn_ix_grow(void) {
+  size_t cap = scr_errdyn_ix_cap ? scr_errdyn_ix_cap * 2 : 16;
+  while (cap < scr_errdyn_cap * 2) cap *= 2;
+  free(scr_errdyn_ix_err);
+  free(scr_errdyn_ix_dyn);
+  scr_errdyn_ix_err = calloc(cap, sizeof(size_t));
+  scr_errdyn_ix_dyn = calloc(cap, sizeof(size_t));
+  if (!scr_errdyn_ix_err || !scr_errdyn_ix_dyn) scr_trap("scriptc: out of memory\n");
+  scr_errdyn_ix_cap = cap;
+  for (size_t i = 0; i < scr_errdyn_n; i++) {
+    scr_errdyn_ix_insert(scr_errdyn_ix_err, i, true);
+    scr_errdyn_ix_insert(scr_errdyn_ix_dyn, i, false);
+  }
+}
+
+/* An entry is DEAD when nothing but the cache itself can reach either side: for the runtime-minted encoding the error is held
+ * by the cache alone (rc 1) and the node by the cache plus the error's own expando bag (rc 2, the error's `props` slot is the
+ * node); for a user class's box the error is held by the cache and the box (rc 2) and the box by the cache alone. No program
+ * value names either, so dropping the pair is unobservable -- the same crossing later would rebuild the same snapshot of
+ * the same (unreachable) error. Without this the cache pinned every error ever boxed, and every collection walked them. */
+static bool scr_errdyn_entry_dead(const ScrErrDynEnt *ent) {
+  /* The runtime-minted encoding: the node is an OBJ the error's own bag slot points at. */
+  if (ent->dyn->kind == SCR_DYN_OBJ) return ent->err->rc == 1 && ent->err->props == ent->dyn && ent->dyn->rc == 2;
+  /* A user class's BOX: the node is the OBJINST box over this very error. The error's holders are the table and the box
+   * (rc 2); the box's only holder is the table (rc 1). */
+  if (ent->dyn->kind == SCR_DYN_OBJINST) return ent->dyn->v.inst.o == (void *)ent->err && ent->err->rc == 2 && ent->dyn->rc == 1;
+  return false;
+}
+
+static size_t scr_errdyn_sweep_at = 4096;
+
+/* Drop the dead entries (amortized: it runs when the cache has doubled since the last sweep). The survivors are compacted and
+ * both indexes rebuilt BEFORE any release, because a release can run teardown code that re-enters the cache. */
+static void scr_errdyn_sweep(void) {
+  size_t dead = 0;
+  for (size_t i = 0; i < scr_errdyn_n; i++) {
+    if (scr_errdyn_entry_dead(&scr_errdyn_cache[i])) dead++;
+  }
+  if (dead > 0) {
+    ScrErrDynEnt *drop = malloc(dead * sizeof *drop);
+    if (!drop) scr_trap("scriptc: out of memory\n");
+    size_t keep = 0, nd = 0;
+    for (size_t i = 0; i < scr_errdyn_n; i++) {
+      if (scr_errdyn_entry_dead(&scr_errdyn_cache[i])) drop[nd++] = scr_errdyn_cache[i];
+      else scr_errdyn_cache[keep++] = scr_errdyn_cache[i];
+    }
+    scr_errdyn_n = keep;
+    memset(scr_errdyn_ix_err, 0, scr_errdyn_ix_cap * sizeof(size_t));
+    memset(scr_errdyn_ix_dyn, 0, scr_errdyn_ix_cap * sizeof(size_t));
+    for (size_t i = 0; i < scr_errdyn_n; i++) {
+      scr_errdyn_ix_insert(scr_errdyn_ix_err, i, true);
+      scr_errdyn_ix_insert(scr_errdyn_ix_dyn, i, false);
+    }
+    scr_errdyn_sweep_at = scr_errdyn_n * 2 > 4096 ? scr_errdyn_n * 2 : 4096;
+    for (size_t i = 0; i < nd; i++) {
+      scr_dyn_release(drop[i].dyn); /* the cache's reference: the error's bag still holds the node */
+      scr_error_release(drop[i].err); /* last reference: the error frees and drops its bag, which frees the node */
+    }
+    free(drop);
+  } else {
+    scr_errdyn_sweep_at = scr_errdyn_n * 2;
+  }
+}
+
 static void scr_errdyn_teardown(void) {
   for (size_t i = 0; i < scr_errdyn_n; i++) {
     scr_error_release(scr_errdyn_cache[i].err);
     scr_dyn_release(scr_errdyn_cache[i].dyn);
   }
   free(scr_errdyn_cache);
+  free(scr_errdyn_ix_err);
+  free(scr_errdyn_ix_dyn);
   scr_errdyn_cache = NULL;
+  scr_errdyn_ix_err = scr_errdyn_ix_dyn = NULL;
+  scr_errdyn_ix_cap = 0;
   scr_errdyn_n = scr_errdyn_cap = 0;
 }
 
@@ -6113,6 +6216,7 @@ static bool scr_error_props_code_impl(ScrError *e, ScrStr **out);
 
 /* Enter one (error, dyn node) pair into the identity cache. Retains both. */
 static void scr_errdyn_enter(const ScrError *e, ScrDyn *d) {
+  if (scr_errdyn_n >= scr_errdyn_sweep_at) scr_errdyn_sweep();
   if (scr_errdyn_n == scr_errdyn_cap) {
     scr_errdyn_cap = scr_errdyn_cap ? scr_errdyn_cap * 2 : 8;
     scr_errdyn_cache = realloc(scr_errdyn_cache, scr_errdyn_cap * sizeof *scr_errdyn_cache);
@@ -6124,8 +6228,11 @@ static void scr_errdyn_enter(const ScrError *e, ScrDyn *d) {
     scr_errdyn_teardown_registered = true;
     scr_atexit(scr_errdyn_teardown);
   }
+  if (scr_errdyn_ix_cap < scr_errdyn_cap * 2) scr_errdyn_ix_grow();
   scr_errdyn_cache[scr_errdyn_n].err = scr_error_retain((ScrError *)e);
   scr_errdyn_cache[scr_errdyn_n].dyn = scr_dyn_retain(d);
+  scr_errdyn_ix_insert(scr_errdyn_ix_err, scr_errdyn_n, true);
+  scr_errdyn_ix_insert(scr_errdyn_ix_dyn, scr_errdyn_n, false);
   scr_errdyn_n++;
 }
 
@@ -6194,8 +6301,9 @@ ScrDyn *scr_dyn_from_error(const ScrError *e) {
     ScrDyn *pl = scr_error_nonerr_payload(e);
     return pl != NULL ? scr_dyn_retain(pl) : scr_dyn_retain(scr_dyn_undefined());
   }
-  for (size_t i = 0; i < scr_errdyn_n; i++) {
-    if (scr_errdyn_cache[i].err == e) return scr_dyn_retain(scr_errdyn_cache[i].dyn);
+  {
+    const size_t at = scr_errdyn_find(scr_errdyn_ix_err, e, true);
+    if (at != SIZE_MAX) return scr_dyn_retain(scr_errdyn_cache[at].dyn);
   }
   /* A USER Error subclass keeps its class: the box is the instance itself
    * (SCR_DYN_OBJINST), the representation a directly boxed `new DB()` already
@@ -6395,10 +6503,8 @@ ScrError *scr_error_from_dyn(const ScrDyn *d) {
  * stays private here). Reverse lookup answers +1 or NULL; put retains
  * both sides for the process. */
 ScrError *scr_errdyn_err_of(const ScrDyn *d) {
-  for (size_t i = 0; i < scr_errdyn_n; i++) {
-    if (scr_errdyn_cache[i].dyn == d) return scr_error_retain(scr_errdyn_cache[i].err);
-  }
-  return NULL;
+  const size_t at = scr_errdyn_find(scr_errdyn_ix_dyn, d, false);
+  return at == SIZE_MAX ? NULL : scr_error_retain(scr_errdyn_cache[at].err);
 }
 
 /* ── %Error.prototype% ─────────────────────────────────────────────────
@@ -6793,22 +6899,7 @@ void scr_dyn_error_ctor_fence(void) {
   scr_throw_error_msg(SCR_ERR_ERROR, msg, sizeof msg - 1);
 }
 
-void scr_errdyn_put(ScrError *e, ScrDyn *d) {
-  if (scr_errdyn_n == scr_errdyn_cap) {
-    scr_errdyn_cap = scr_errdyn_cap ? scr_errdyn_cap * 2 : 8;
-    scr_errdyn_cache = realloc(scr_errdyn_cache, scr_errdyn_cap * sizeof *scr_errdyn_cache);
-    if (!scr_errdyn_cache) {
-      scr_trap("scriptc: out of memory\n");
-    }
-  }
-  if (!scr_errdyn_teardown_registered) {
-    scr_errdyn_teardown_registered = true;
-    scr_atexit(scr_errdyn_teardown);
-  }
-  scr_errdyn_cache[scr_errdyn_n].err = scr_error_retain(e);
-  scr_errdyn_cache[scr_errdyn_n].dyn = scr_dyn_retain(d);
-  scr_errdyn_n++;
-}
+void scr_errdyn_put(ScrError *e, ScrDyn *d) { scr_errdyn_enter(e, d); }
 
 
 /* Receiver-kind-dispatched toString() on a checked-dynamic value (the
@@ -13656,12 +13747,11 @@ bool scr_dyn_err_instanceof(const ScrDyn *d, double kind) {
    * never came from an error answers false"). An ENGINE TypeError held
    * in 'unknown' thus answers false where Node answers true: covered by
    * lane dom-jsval-long-tail (needs the engine's class instanceof). */
-  for (size_t i = 0; i < scr_errdyn_n; i++) {
-    if (scr_errdyn_cache[i].dyn == d) {
-      const ScrVt *vt = scr_errdyn_cache[i].err->vt;
-      int k = (int)kind;
-      return scr_error_vts[k].pre <= vt->pre && vt->pre <= scr_error_vts[k].post;
-    }
+  const size_t at = scr_errdyn_find(scr_errdyn_ix_dyn, d, false);
+  if (at != SIZE_MAX) {
+    const ScrVt *vt = scr_errdyn_cache[at].err->vt;
+    int k = (int)kind;
+    return scr_error_vts[k].pre <= vt->pre && vt->pre <= scr_error_vts[k].post;
   }
   return false;
 }
