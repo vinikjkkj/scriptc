@@ -1696,6 +1696,9 @@ export interface TypeMapperCtx {
    * before any producer is seen, and two values of one interface must
    * share a layout. */
   nullPayloadPromiseProp?: (sym: ts.Symbol) => boolean;
+  /** True when the program holds an Object.entries/values call whose checker result element type is `never` (the checker could not infer a
+   * value type for an `object`/dyn receiver): `never` values are then dyn values, not dead reads, and map to the dyn representation. */
+  neverIsDyn?: () => boolean;
   /** --dynamic: `any` maps to the island handle type (jsval). Off, `any`
    * stays unmapped and the requires-dynamic diagnostic fires per site. */
   dynamic: boolean;
@@ -2499,7 +2502,9 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // cheapest slot. Return positions never reach here (declaredReturnType
   // and the signature branches map never returns to VOID first), and
   // construction sites cannot exist (nothing has type never to feed them).
-  if (flags & ts.TypeFlags.Never) return F64;
+  // ...except in a program whose Object.entries/values over an untyped receiver the checker typed `[string, never][]` (T inferred as
+  // never): there the slot DOES hold the dyn values, so it is the dyn representation (Lowerer.neverIsDynProgram).
+  if (flags & ts.TypeFlags.Never) return ctx.neverIsDyn?.() === true ? DYN : F64;
   // `unknown` is a VALUE with a runtime representation (the dyn JSON dyn —
   // JSON.parse results and unknown-typed locals/params/returns).
   // `bigint` and bigint LITERAL types: one compiled kind (ScrBigInt), never
