@@ -469,7 +469,7 @@ const JS_ERROR_CLASS_KIND: Readonly<Record<string, number>> = {
   Error: 0, TypeError: 1, RangeError: 2, SyntaxError: 3, ReferenceError: 5, AggregateError: 6,
 };
 
-export function ctorObjectGlobalValue(L: Lowerer, canonical: string, loc: SrcLoc): IrExpr | null {
+export function ctorObjectGlobalValue(L: Lowerer, canonical: string, loc: SrcLoc, node?: ts.Expression): IrExpr | null {
   // The WebCrypto object is an object in Node (typeof "object"), not a
   // string token: one process singleton, shared with require('crypto').webcrypto.
   if (canonical === "crypto" && !L.dynamic) return { kind: "libCall", fn: "dyn.webCrypto", args: [], type: DYN, loc };
@@ -488,6 +488,15 @@ export function ctorObjectGlobalValue(L: Lowerer, canonical: string, loc: SrcLoc
   // The Promise constructor is a function object too (`this.Promise = thePromise || Promise`, then
   // `new this.Promise(executor)`): the singleton the runtime constructs through.
   if (canonical === "Promise" && !L.dynamic) return { kind: "libCall", fn: "dyn.promiseCtor", args: [], type: DYN, loc };
+  // The Object and Array classes: the function objects a plain object's and an array's `.constructor` answers.
+  // Only where the identifier is a VALUE (compared, stored, passed): as the receiver of a member (`Object.keys`, `Array.from`) it stays
+  // the token the static-member dispatch reads.
+  if ((canonical === "Object" || canonical === "Array") && !L.dynamic) {
+    if (node === undefined) return null;
+    const par = node.parent;
+    if (par !== undefined && (ts.isPropertyAccessExpression(par) || ts.isElementAccessExpression(par)) && par.expression === node) return null;
+    return { kind: "libCall", fn: canonical === "Object" ? "dyn.objectCtor" : "dyn.arrayCtor", args: [], type: DYN, loc };
+  }
   if (canonical !== "Uint8Array" || L.dynamic) return null;
   return { kind: "libCall", fn: "dyn.u8Ctor", args: [], type: DYN, loc };
 }
@@ -2251,7 +2260,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         if (L.isStdlibSymbol(sym) || expr.text === "globalThis") {
           if (isJsSourceFile(expr.getSourceFile())) {
             const canonical = stdlibGlobalNameOf(L, expr) ?? expr.text;
-            const obj = ctorObjectGlobalValue(L, canonical, loc);
+            const obj = ctorObjectGlobalValue(L, canonical, loc, expr);
             if (obj !== null) return obj;
             if (ts.isIdentifier(expr)) {
               const gv = jsGlobalFnValueOf(L, expr, canonical, loc);
@@ -2307,8 +2316,8 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           }
           // The Buffer and Uint8Array CLASSES as values in a TypeScript source (`value.constructor === Uint8Array`, `const C: any = Buffer`):
           // the function objects the runtime owns, so identity, `.name` and `.prototype` are Node's (a JavaScript source takes them above).
-          if (ts.isIdentifier(expr) && (timerGlobal === "Buffer" || timerGlobal === "Uint8Array")) {
-            const cv = ctorObjectGlobalValue(L, timerGlobal, loc);
+          if (ts.isIdentifier(expr) && (timerGlobal === "Buffer" || timerGlobal === "Uint8Array" || timerGlobal === "Object" || timerGlobal === "Array")) {
+            const cv = ctorObjectGlobalValue(L, timerGlobal, loc, expr);
             if (cv !== null) return cv;
           }
           L.noLowering(expr.text, expr, globalHints[expr.text], sym ?? undefined);

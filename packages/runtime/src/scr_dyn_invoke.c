@@ -1794,9 +1794,40 @@ static ScrDyn *dyn_objproto_shared_fn(const char *name) {
   return NULL;
 }
 
+/* The `Object` and `Array` classes as the ONE function value each is in Node: what a plain object's and an array's `.constructor` answers,
+ * and what the bare identifier is as a value, so `value.constructor === Object` and `[].constructor === Array` are identity. */
+ScrDyn *scr_dyn_object_ctor(void) { return dyn_objproto_shared_fn("constructor"); }
+
+static ScrDyn *dyn_array_ctor_box = NULL;
+static void dyn_array_ctor_teardown(void) {
+  scr_dyn_release(dyn_array_ctor_box);
+  dyn_array_ctor_box = NULL;
+}
+/* Array(...items): a fresh array of the arguments. Array(n), which makes holes, has no form in the checked-dynamic tree: loud. */
+static ScrDyn *dyn_array_ctor_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo;
+  if (argc == 1 && args[0]->kind == SCR_DYN_NUM) {
+    static const char msg[] = "Array(length) (an array with holes) is not supported yet";
+    scr_throw_error_msg(SCR_ERR_ERROR, msg, sizeof msg - 1);
+    return NULL;
+  }
+  ScrDyn *a = scr_dyn_new_arr();
+  for (size_t i = 0; i < argc; i++) scr_dyn_arr_push(a, scr_dyn_retain(args[i]));
+  return a;
+}
+ScrDyn *scr_dyn_array_ctor(void) {
+  if (dyn_array_ctor_box == NULL) {
+    ScrClosure *clo = scr_closure_new((void *)dyn_array_ctor_thunk, 0);
+    dyn_array_ctor_box = scr_dyn_new_func(clo, dyn_array_ctor_thunk, 1, "()", "Array");
+    scr_atexit(dyn_array_ctor_teardown);
+  }
+  return scr_dyn_retain(dyn_array_ctor_box);
+}
+
 ScrDyn *scr_dyn_intrinsic_method_get(ScrDyn *recv, const ScrStr *key) {
   /* ScrStr is NUL-terminated (scr_str_new), so ->data is a C string for
    * the same name-keyed tests the dispatch makes. */
+  if (recv->kind == SCR_DYN_ARR && key->len == 11 && memcmp(key->data, "constructor", 11) == 0) return scr_dyn_array_ctor();
   if (!dyn_kind_knows(recv, key->data)) return NULL;
   /* An OWN or INHERITED member of the same name SHADOWS the prototype's,
    * and the caller has already read it — but `o.toString = undefined`

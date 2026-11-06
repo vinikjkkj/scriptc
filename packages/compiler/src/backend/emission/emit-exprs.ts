@@ -7787,6 +7787,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // `prototype` and `===` both depend on identity). Never
             // throws.
             return finish(`scr_dyn_uint8array_ctor()`);
+          case "dyn.objectCtor":
+            return finish(`scr_dyn_object_ctor()`);
+          case "dyn.arrayCtor":
+            return finish(`scr_dyn_array_ctor()`);
           case "dyn.promiseCtor":
             // `Promise` as a value in a JavaScript source: the process singleton function
             // object (+1 per read). Never throws.
