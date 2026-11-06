@@ -25566,6 +25566,18 @@
     "<repo>/tests/corpus/24439-object-entries-and-values-over-an-untyped-receiver-keep-the-dyn-values.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/24460-object-assign-onto-an-existing-record-returns-that-record.ts": {
+   "order": [
+    "<repo>/tests/corpus/24460-object-assign-onto-an-existing-record-returns-that-record.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24461-string-number-and-boolean-flow-into-any-typed-function-slots.ts": {
+   "order": [
+    "<repo>/tests/corpus/24461-string-number-and-boolean-flow-into-any-typed-function-slots.ts"
+   ],
+   "diags": []
   }
  }
 }
