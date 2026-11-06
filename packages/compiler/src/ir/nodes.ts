@@ -12053,7 +12053,13 @@ export function moduleFuncLaneShapes(mod: IrModule): Set<string> {
       const items = Array.isArray(v) ? v : [v];
       for (const it of items) {
         const sid = it !== null && typeof it === "object" && typeof (it as { kind?: unknown }).kind === "string" ? isEligibleExpr(it) : null;
-        if (sid !== null && !allowed(o["kind"], k)) bad.add(sid);
+        // A record literal's field entry (no kind of its own) fed by the view-or-copy desugar of a same-shape copy
+        // (`isView ? view : copy`) is a hand-off too: the copy keeps the function value as it was.
+        const copyHandOff =
+          o["kind"] === undefined && k === "value" &&
+          (it as { kind?: unknown; cond?: { kind?: unknown } }).kind === "ternary" &&
+          (it as { cond?: { kind?: unknown } }).cond?.kind === "recordIsView";
+        if (sid !== null && !allowed(o["kind"], k) && !copyHandOff) bad.add(sid);
       }
       walk(v);
     }
