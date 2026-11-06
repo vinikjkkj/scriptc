@@ -10430,7 +10430,9 @@ double scr_bytes_byte_length_str(ScrStr *s, const ScrStr *enc);
 bool scr_bytes_is_encoding(const ScrStr *s);
 const char *scr_bytes_enc_canon(const ScrStr *s); /* canonical name, or NULL: the one run-time encoding normaliser (scr_bytes.c) */
 ScrStr *scr_error_no_message(void);
-ScrStr *scr_error_message_dyn(const struct ScrDyn *v); /* new Error(m) over an untyped m: NULL (no message) for undefined, else JS ToString; NULL with the exception pending too (scr_dyn_ext.c) */
+extern ScrStrLit0 scr_error_absent_message; /* the address is the fact "no message argument" (see scr_error.c) */
+#define SCR_ERROR_ABSENT_MESSAGE ((ScrStr *)&scr_error_absent_message)
+ScrStr *scr_error_message_dyn(const struct ScrDyn *v); /* new Error(m) over an untyped m: the absent-message marker (a valid immortal empty string) for undefined, else JS ToString; NULL with the exception pending (scr_dyn_ext.c) */
 double scr_buffer_byte_length_dyn(const struct ScrDyn *v, const struct ScrDyn *enc); /* Buffer.byteLength over an untyped value (scr_dyn_ext.c) */
 bool scr_buffer_is_encoding_dyn(const struct ScrDyn *v); /* Buffer.isEncoding over an untyped value (scr_dyn_ext.c) */
 
