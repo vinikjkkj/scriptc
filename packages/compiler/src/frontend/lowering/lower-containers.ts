@@ -4,6 +4,7 @@
  * method surfaces. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
+import { fillWithKeyList } from "./key-list-fill.js";
 import { canConvertToDyn, isRuntimeRootedClassName, strandTrap } from "../../ir/nodes.js";
 import { isProvenBufferRefinement } from "../buffer-refinement.js";
 import { codecGlobalName } from "../codec-shadow.js";
@@ -11350,8 +11351,13 @@ function condPresencePlan(L: Lowerer, tIv: IrType): "union" | "dyn" | (IrType & 
       // own planned lift (absent optionals skip — the unset convention);
       // no overflow exists to walk.
       if (plan.fields !== null) {
-        for (const ff of from.fields) {
-          const lift = plan.fields.get(ff.name)!;
+        // One keyed write per source field, in the source's own key order: its construction-order keys, then (a source that carries
+        // a KEY LIST) the keys written after it. Rebuilt over the list once the source has one (Lowerer.listConsumers).
+        const fixedPlan = plan.fields;
+        const sub: IrStmt[] = [];
+        const fillOne = (fname: string, tgt: IrStmt[]): void => {
+          const ff = from.fields.find((x) => x.name === fname)!;
+          const lift = fixedPlan.get(ff.name)!;
           const raw: IrExpr = { kind: "recordGet", obj: sRef, shapeId: plan.shapeId, field: ff.name, type: ff.type, loc };
           const utag = ff.type.kind === "union" ? L.armTag(ff.type.unionId, UNDEFINED_T) : -1;
           const write: IrStmt = {
@@ -11363,12 +11369,26 @@ function condPresencePlan(L: Lowerer, tIv: IrType): "union" | "dyn" | (IrType & 
             ...(ovf ? { overflowOnly: true as const } : {}),
             loc,
           };
-          body.push(
+          tgt.push(
             utag >= 0 && ff.type.kind === "union" && !declaredNames.has(ff.name)
               ? { kind: "if", cond: { kind: "unionIsTag", unionId: ff.type.unionId, tag: utag, negated: true, value: raw, type: BOOL, loc }, then: [write], else_: null, loc }
               : write,
           );
-        }
+        };
+        const buildFixed = (): void => {
+          sub.length = 0;
+          const names = from.fields.map((x) => x.name);
+          if (from.keyList) {
+            fillWithKeyList(L, from, plan.shapeId, () => sRef, names, fillOne, sub, loc, (id, nm) => {
+              if (!locals.some((l) => l.id === id)) locals.push({ id, name: nm, type: F64, mutable: true });
+            });
+          } else {
+            for (const nm of names) fillOne(nm, sub);
+          }
+        };
+        buildFixed();
+        body.push({ kind: "block", body: sub, loc });
+        L.noteListConsumer(plan.shapeId, toId, buildFixed);
         return;
       }
       const fIv = from.indexValue!;
