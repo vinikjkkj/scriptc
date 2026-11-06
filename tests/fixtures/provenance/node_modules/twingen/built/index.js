@@ -2,6 +2,8 @@
 function Ring() {
   this._items = [];
   this._head = 0;
+  this._label = "ring";
+  this._cap = 0;
 }
 Ring.prototype.push = function push(item) {
   this._items.push(item);
@@ -22,4 +24,27 @@ Object.defineProperty(Ring.prototype, "length", {
     return this.size();
   },
 });
+// Accessor forms: a method-shorthand getter, a get+set pair of function expressions, and a setter-only shorthand.
+Object.defineProperty(Ring.prototype, "first", {
+  get() {
+    return this._items[this._head];
+  },
+  configurable: true,
+});
+Object.defineProperty(Ring.prototype, "label", {
+  get: function () {
+    return this._label;
+  },
+  set: function (v) {
+    this._label = "<" + v + ">";
+  },
+});
+Object.defineProperty(Ring.prototype, "cap", {
+  set(v) {
+    this._cap = v * 2;
+  },
+});
+Ring.prototype.capacity = function capacity() {
+  return this._cap;
+};
 module.exports = Ring;
