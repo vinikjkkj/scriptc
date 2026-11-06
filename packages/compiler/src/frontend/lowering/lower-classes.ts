@@ -9881,6 +9881,10 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
   const detachedVariantsInProgress = new Map<string, { hit: boolean }>();
 
   function detachedVariantBody(L: Lowerer, info: ClassInfo, mName: string, name: string, state: { hit: boolean }): string | null {
+    // A class that captures locals of its scope (a class declared in a function, an evaluated class) keeps those bindings in hidden
+    // fields of the INSTANCE: a body reading one needs the instance, which a detached receiver is not. No variant can answer such a
+    // call, so the thunk keeps the up-front receiver check (a call with the instance, `.call(inst)`, is unaffected).
+    if ((info.captures?.length ?? 0) > 0 || info.evalClass !== undefined || info.evalStaticOf !== undefined) return null;
     const member = info.decl?.members.find((m): m is ts.MethodDeclaration =>
       ts.isMethodDeclaration(m) && m.body !== undefined && classMemberNameOf(L, m.name) === mName,
     );
