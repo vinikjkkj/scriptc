@@ -45,9 +45,10 @@
  * shape classNamer already uses for class expressions (`%cx<start>`).
  */
 import * as ts from "../ts7/adapter.js";
-import { BOOL, F64, STRING, type IrExpr, type IrFunction, type IrLocal, type IrType } from "../../ir/nodes.js";
+import { BOOL, DYN, F64, STRING, type IrExpr, type IrFunction, type IrLocal, type IrType } from "../../ir/nodes.js";
 import { isJsSourceFile, locOf } from "../program.js";
 import { pinnableSlot, type ClassInfo } from "./lower-classes.js";
+import { bodyReadsArguments } from "./lower-calls.js";
 import type { Lowerer } from "./lowerer.js";
 import type { ProtoClass, ProtoMethod } from "./proto-class.js";
 import { usableProtoClasses } from "./proto-class.js";
@@ -256,7 +257,14 @@ export function buildProtoClass(L: Lowerer, c: ProtoClass): ProtoClassBuild | nu
     // guessing the entry shape is exactly the silent-wrong-answer this path
     // refuses.
     if (fn.asteriskToken || sig.funcType.ret.kind === "generator") return false;
-    methods.set(name, { params: sig.shapes, ret: instanceRet(fn, sig.funcType.ret) });
+    // A body that reads `arguments` takes the whole list as one trailing dynRest shape and binds its declared parameters
+    // from it (the form a declared class method that reads `arguments` takes).
+    const readsArgs = !sig.shapes.some((x) => x.mode === "dynRest") && bodyReadsArguments(fn);
+    methods.set(name, {
+      params: readsArgs ? [...sig.shapes, { type: DYN, mode: "dynRest" as const }] : sig.shapes,
+      ret: instanceRet(fn, sig.funcType.ret),
+      ...(readsArgs && fn.parameters.length > 0 ? { argsBound: true as const } : {}),
+    });
     bodies.set(name, fn);
     order.push(name);
     return true;
@@ -301,7 +309,17 @@ export function buildProtoClass(L: Lowerer, c: ProtoClass): ProtoClassBuild | nu
     // INITIALIZER MUST BE undefined. A prototype-class's field assignments are
     // STATEMENTS IN THE CONSTRUCTOR BODY and lower there; giving fieldOrder
     // real initializers would initialize every field twice.
-    fieldOrder: fieldTypes.map(([name, type]) => ({ name, type, initializer: undefined })),
+    // A slot the constructor writes only under a branch: Node creates it as undefined at construction, so the constructor
+    // prologue writes the interned undefined arm first (resetsToUndefined; the slot type carries that arm, see
+    // protoSlotTypes), and the branch's own write replaces it.
+    fieldOrder: fieldTypes.map(([name, type]) => ({
+      name,
+      type,
+      initializer: undefined,
+      ...(c.fields.some((f) => f.name === name && f.conditional)
+        ? { resetsToUndefined: { decl: c.ctor as unknown as ts.PropertyDeclaration } }
+        : {}),
+    })),
     methods,
     // No ts.ClassLikeDeclaration exists. classMethodMembers returns early on
     // this, which is CORRECT -- there are no decl.members to walk -- so the
@@ -309,6 +327,13 @@ export function buildProtoClass(L: Lowerer, c: ProtoClass): ProtoClassBuild | nu
     decl: null,
     staticMethods,
     protoClass: true,
+    // A slot the constructor writes only under a branch reads undefined until a method or the branch assigns it, so an
+    // operator on it runs on the declared T and reads the unassigned state as JS does (`undefined >>>= 1` is 0): the same
+    // contract as a deferred-init field of a declared class.
+    ...(() => {
+      const deferred = new Set(c.fields.filter((f) => f.conditional && fieldTypes.some(([n, t]) => n === f.name && t.kind === "union")).map((f) => f.name));
+      return deferred.size > 0 ? { deferredInitFields: deferred } : {};
+    })(),
     ctor: c.ctor,
     ctorParams: L.lambdaSignature(c.ctor).shapes,
     base: null,
