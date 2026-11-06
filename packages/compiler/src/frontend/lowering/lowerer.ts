@@ -13812,7 +13812,7 @@ export class Lowerer {
     // `Promise<null | T>` slot, and an async callback whose contextual
     // return widened its own payload).
     if (dst.kind === "promise" && src.kind === "promise") {
-      return this.coercibleValue(src.inner, dst.inner, rw);
+      return this.coercibleValue(src.inner, dst.inner, rw || this.structViewPair(src.inner, dst.inner));
     }
     // A RECORD into a RECORD slot through the width family (coerceToExpected
     // runs widthCoerce on the value, so the adapter's own conversion is the
@@ -14225,6 +14225,23 @@ export class Lowerer {
    * Rejection passes through untouched — the helper awaits, so a rejected
    * source rethrows inside it and rejects the adapted promise with the same
    * value, which is what Node does. */
+  /** A record pair that converts as a STRUCT VIEW: every field of the target exists in the source at the identical type, and the
+   * source is an ordinary struct. The target then reads and writes the source's own struct, so the conversion keeps identity and
+   * the copy stance never applies -- which is why a Promise payload of such a pair may adapt (`(await p) === named` holds). */
+  structViewPair(src: IrType, dst: IrType): boolean {
+    if (src.kind !== "record" || dst.kind !== "record") return false;
+    const srcShape = src.shapeId;
+    const dstShape = dst.shapeId;
+    if (this.isViewShape({ kind: "record", shapeId: srcShape })) return false;
+    const plan = this.recordWidthPlan(srcShape, dstShape);
+    const to = this.shapes.get(dstShape);
+    if (plan === null || to === undefined) return false;
+    return to.fields.every((f) => {
+      const l = plan.get(f.name);
+      return l !== undefined && "src" in l && typeEquals(l.src, f.type);
+    });
+  }
+
   promiseCoerceAdapter(
     fromT: IrType & { kind: "promise" },
     toT: IrType & { kind: "promise" },
@@ -14234,11 +14251,12 @@ export class Lowerer {
     // yields the target payload — the shape contextual typing hands an async
     // callback written against `Promise<T> | T` (its own return nests one
     // level deeper). The helper then awaits twice instead of coercing.
+    const payloadRw = this.resultWidthDepth > 0 || this.structViewPair(fromT.inner, toT.inner);
     const viaSettle =
-      !this.coercibleValue(fromT.inner, toT.inner, this.resultWidthDepth > 0) &&
+      !this.coercibleValue(fromT.inner, toT.inner, payloadRw) &&
       fromT.inner.kind === "union" &&
       this.settleOrValueAwaitYields(fromT.inner, toT.inner);
-    if (!viaSettle && !this.coercibleValue(fromT.inner, toT.inner, this.resultWidthDepth > 0)) return null;
+    if (!viaSettle && !this.coercibleValue(fromT.inner, toT.inner, payloadRw)) return null;
     const key = `promiseadapt:${viaSettle ? "sv:" : ""}${typeKey(fromT)}:${typeKey(toT)}`;
     const existing = this.retagHelpers.get(key);
     if (existing) return existing;
