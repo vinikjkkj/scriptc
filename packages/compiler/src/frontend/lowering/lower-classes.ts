@@ -2177,7 +2177,16 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
         throw err;
       }
       if (sig.shapes.some((p) => p.mode === "rest")) continue;
-      info.methods.set(m, { params: sig.shapes, ret: sig.funcType.ret });
+      // A late method reading `arguments` takes the variadic form (one dynRest shape
+      // carries the whole list; declared names re-bind off it), as a declared method does.
+      const lateReadsArgs = isJsSourceFile(fn.getSourceFile()) && !sig.shapes.some((x) => x.mode === "dynRest") &&
+        bodyReadsArguments(fn as ts.FunctionExpression);
+      const lateShapes = lateReadsArgs ? [...sig.shapes, { type: DYN, mode: "dynRest" as const }] : sig.shapes;
+      info.methods.set(m, {
+        params: lateShapes,
+        ret: sig.funcType.ret,
+        ...(lateReadsArgs && (fn as ts.FunctionExpression).parameters.length > 0 ? { argsBound: true as const } : {}),
+      });
       const bodies = L.protoClassBodies.get(info.def.name) ?? new Map<string, ts.FunctionExpression>();
       bodies.set(m, fn as ts.FunctionExpression);
       L.protoClassBodies.set(info.def.name, bodies);
