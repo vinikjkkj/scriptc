@@ -64,10 +64,3 @@ class-values.ts:64:16 - error SC1090: constructing through a union of class valu
   64 | const picked = new pick();
      |                ^~~~~~~~~~
   65 | void picked;
-
-class-values.ts:70:12 - error SC1090: 'this' in static methods (it names the RECEIVER class — a dynamic value; reference the class by name instead) are not supported yet
-
-  69 |   static self(): string {
-  70 |     return this.name;
-     |            ^~~~
-  71 |   }
