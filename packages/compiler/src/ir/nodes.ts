@@ -9779,15 +9779,36 @@ export function dynCheckArmOrder(
 ): number[] {
   const out = def.arms.map((_, i) => i);
   const recPos = out.filter((i) => def.arms[i]!.kind === "record");
-  if (recPos.length < 2) return out;
-  const width = (i: number): number => {
-    const arm = def.arms[i]!;
-    return arm.kind === "record" ? (getRecord(arm.shapeId)?.fields.length ?? 0) : -1;
-  };
-  const sorted = [...recPos].sort((a, b) => width(b) - width(a) || a - b);
-  recPos.forEach((p, k) => {
-    out[p] = sorted[k]!;
+  if (recPos.length >= 2) {
+    const width = (i: number): number => {
+      const arm = def.arms[i]!;
+      return arm.kind === "record" ? (getRecord(arm.shapeId)?.fields.length ?? 0) : -1;
+    };
+    const sorted = [...recPos].sort((a, b) => width(b) - width(a) || a - b);
+    recPos.forEach((p, k) => {
+      out[p] = sorted[k]!;
+    });
+  }
+  // The same rule for ARRAYS OF RECORDS: `RowDataPacket[] | FieldPacket[]` (mysql2's execute result, erased to one union) holds the
+  // loose catch-all (a `constructor` member and an index signature, which any object satisfies) BEFORE the strict sibling, so the
+  // first full match took every fields array as the loose arm and the position that wanted the strict one then trapped. Widest
+  // first, and a record with an index signature counts as the narrowest of its width (it accepts what the others describe).
+  const arrPos = out.filter((i) => {
+    const a = def.arms[i]!;
+    return a.kind === "array" && a.elem.kind === "record";
   });
+  if (arrPos.length >= 2) {
+    const awidth = (i: number): number => {
+      const a = def.arms[i]!;
+      if (a.kind !== "array" || a.elem.kind !== "record") return -1;
+      const sh = getRecord(a.elem.shapeId);
+      return (sh?.fields.length ?? 0) - (sh?.indexValue !== undefined ? 0.5 : 0);
+    };
+    const asorted = [...arrPos].sort((a, b) => awidth(b) - awidth(a) || a - b);
+    arrPos.forEach((p, k) => {
+      out[p] = asorted[k]!;
+    });
+  }
   return out;
 }
 
