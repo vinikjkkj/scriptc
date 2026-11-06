@@ -7658,6 +7658,21 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
               loc,
             };
           }
+          // `process.noDeprecation / throwDeprecation / traceDeprecation = v` — plain slots: any value is stored as it is.
+          const depFlagName = L.stdlibGlobalMember(expr.left, "process");
+          const depFlag = depFlagName === "noDeprecation" ? 0 : depFlagName === "throwDeprecation" ? 1 : depFlagName === "traceDeprecation" ? 2 : -1;
+          if (depFlag >= 0 && !expr.left.questionDotToken) {
+            const loc = locOf(expr);
+            const boxed = L.coerceToExpected(L.lowerExpr(expr.right), DYN);
+            if (boxed.type.kind !== "dyn") {
+              L.unsupported("SC1090", expr.right, "assigning this value to a process deprecation flag");
+            }
+            return {
+              kind: "exprStmt",
+              expr: { kind: "libCall", fn: "process.depFlagSet", args: [{ kind: "numLit", value: depFlag, type: F64, loc }, boxed], type: VOID, loc },
+              loc,
+            };
+          }
           // `process.exitCode = v` — Node's validating setter over the int32
           // slot (numbers, integer-valued numeric strings, null/undefined to
           // clear; anything else throws catchably at the assignment).

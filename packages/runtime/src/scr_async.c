@@ -1067,6 +1067,9 @@ void scr_warn_report(const char *name, const char *code, const char *msg, const 
   fprintf(stderr, "%s: %s", name, msg);
   if (detail) fprintf(stderr, "\n%s", detail);
   fputc('\n', stderr);
+  /* process.traceDeprecation: Node prints `warning.stack` (the header line, then the frames) and no hint. A compiled binary
+   * keeps no call stacks, so only the header line exists here (the frames are an OPEN difference). */
+  if (strcmp(name, "DeprecationWarning") == 0 && scr_process_dep_flag_truthy(2)) return;
   /* Node's one-time trace hint, after the first report. Node names the flag
    * by the FIRST report's kind and prints it once. */
   static bool hinted = false;

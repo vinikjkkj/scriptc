@@ -3401,6 +3401,10 @@ void scr_process_exit_dyn(const ScrDyn *v);
 void scr_process_exitcode_set(const ScrDyn *v);
 void scr_process_exitcode_set_f64(double n);
 struct ScrDyn *scr_process_exitcode_get(void);
+struct ScrDyn *scr_process_dep_flag_get(double which); /* 0 noDeprecation, 1 throwDeprecation, 2 traceDeprecation */
+void scr_process_dep_flag_set(double which, struct ScrDyn *v);
+bool scr_process_dep_flag_truthy(int which);
+bool scr_process_no_deprecation_is_true(void);
 double scr_process_exitcode_effective(void);
 bool scr_process_exitcode_is_set(void);
 void scr_exitcode_at_exit(void);

@@ -7529,6 +7529,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_process_exitcode_set_f64(${arg(0)})`);
           case "process.exitCodeSet":
             return finish(`scr_process_exitcode_set(${arg(0)})`);
+          case "process.depFlagGet":
+            return finish(`scr_process_dep_flag_get(${arg(0)})`);
+          case "process.depFlagSet":
+            return finish(`scr_process_dep_flag_set(${arg(0)}, ${arg(1)})`);
+          case "process.noDeprecationIsTrue":
+            return finish(`scr_process_no_deprecation_is_true()`);
           case "process.exitCodeGet":
             return finish(`scr_process_exitcode_get()`);
           case "timers.setTimeout": {

@@ -8130,6 +8130,13 @@ let digestInputValueDispatches = 0;
     // runtime answers a dyn (the number or undefined); a typed read
     // (`number | string | undefined` under @types/node) crosses the
     // validated dyn boundary like every other dyn-to-static read.
+    // process.noDeprecation / throwDeprecation / traceDeprecation: plain writable slots (any value), read back as stored.
+    const depFlag = member === "noDeprecation" ? 0 : member === "throwDeprecation" ? 1 : member === "traceDeprecation" ? 2 : -1;
+    if (depFlag >= 0) {
+      const raw: IrExpr = { kind: "libCall", fn: "process.depFlagGet", args: [{ kind: "numLit", value: depFlag, type: F64, loc }], type: DYN, loc };
+      const want = L.mapTypeOf(L.typeOf(expr));
+      return want !== null && want.kind !== "dyn" ? L.coerceToExpected(raw, want) : raw;
+    }
     if (member === "exitCode") {
       const raw: IrExpr = { kind: "libCall", fn: "process.exitCodeGet", args: [], type: DYN, loc };
       const want = L.mapTypeOf(L.typeOf(expr));
