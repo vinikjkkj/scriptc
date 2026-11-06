@@ -164,18 +164,11 @@ console.log(p.a, q.a);
 
 /* -- and the fences that stand where the debt is not payable ---------- */
 
-test("a record whose order is NOT KNOWABLE still refuses to cross", () => {
-  // The order half is LOUD where no answer is available (SC1090 at the
-  // crossing). Nothing here may quietly stop refusing: a per-instance
-  // representation that landed halfway would take this refusal away before
-  // it could answer in its place.
-  //
-  // Two literals spelling one shape differently IS "no answer available".
-  // The one-literal case does not refuse any more and does not have to:
-  // reconcileKeyOrders gives the shape the program's own order and the
-  // crossing materialises Node's key list -- measured MATCH byte-exact on
-  // both backends through Object.keys, JSON.stringify and console.log,
-  // which is answering in its place rather than landing halfway.
+test("a record built in two literal orders crosses with each instance's own order", () => {
+  // This pinned the order half as LOUD where no answer is available (SC1090 at the crossing): two literals spelling one shape
+  // differently. The answer now exists: the shape keeps both orders (IrRecordShape.keyOrders), each instance names its own in a
+  // hidden byte, and the record-to-dyn walker inserts the keys in that order, so Object.keys, JSON.stringify and console.log over
+  // the crossed value are Node's on both backends (corpus 24423 and the rows beside it). The one-literal case never refused.
   const r = lower(`
 interface W { inner: number; middle: string; tag: boolean }
 const w: W = { tag: true, inner: 1, middle: "m" };
@@ -183,7 +176,8 @@ const v: W = { inner: 9, middle: "z", tag: false };
 const o: object = w;
 console.log(Object.keys(o).join(","), v.inner);
 `);
-  expect(r.codes).toContain("SC1090");
+  expect(r.codes).not.toContain("SC1090");
+  expect(r.module).not.toBeNull();
 });
 
 test("a WIDENING COPY BACK is not a construction, so it does not veto the re-pick", () => {
@@ -226,10 +220,11 @@ console.log(JSON.stringify(n), wide.b)
   expect(r.codes).not.toContain("SC1090");
 });
 
-test("the veto a REAL second spelling casts is untouched", () => {
-  // The tolerance above is not "ignore literals the walk did not spell".
-  // Two SOURCE literals disagreeing is still no-answer-available, and the
-  // widen-back does not make it answerable.
+test("a REAL second spelling is carried per instance, and the widen-back keeps each instance's order", () => {
+  // The tolerance above is not "ignore literals the walk did not spell". Two SOURCE literals disagreeing used to be
+  // no-answer-available, and the widen-back did not make it answerable. The shape now keeps both orders and each instance names
+  // its own in a hidden byte (IrRecordShape.keyOrders), the record-to-dyn walker inserts the keys in that order and the cast
+  // back reads it from the dynamic object, so the program compiles and prints what Node prints (corpus 24423).
   const r = lower(`
 interface A { a?: number; b?: number }
 interface B { a?: number; b?: number; c?: number }
@@ -238,7 +233,10 @@ const q: A = { a: 3, b: 4 }
 const wide: B = p as unknown as B
 console.log(JSON.stringify(p), JSON.stringify(q), wide.c)
 `);
-  expect(r.codes).toContain("SC1090");
+  expect(r.codes).not.toContain("SC1090");
+  expect(r.module).not.toBeNull();
+  const recs = r.module!.records ?? [];
+  expect(recs.some((s) => s.keyOrders !== undefined && s.keyOrders.length === 2)).toBe(true);
 });
 
 test("a width copy still refuses to cross, and for its OWN reason", () => {

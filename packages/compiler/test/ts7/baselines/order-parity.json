@@ -13206,9 +13206,39 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24419-spread-of-a-record-built-in-several-key-orders-keeps-the-source-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/24419-spread-of-a-record-built-in-several-key-orders-keeps-the-source-order.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2442-union-literal-arm-widening.ts": {
    "order": [
     "<repo>/tests/corpus/2442-union-literal-arm-widening.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24420-rest-of-a-record-built-in-several-key-orders-keeps-the-source-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/24420-rest-of-a-record-built-in-several-key-orders-keeps-the-source-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24421-widening-and-assigning-a-record-built-in-several-key-orders-keeps-its-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/24421-widening-and-assigning-a-record-built-in-several-key-orders-keeps-its-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24422-a-shape-with-several-key-orders-is-not-merged-into-a-width-relative.ts": {
+   "order": [
+    "<repo>/tests/corpus/24422-a-shape-with-several-key-orders-is-not-merged-into-a-width-relative.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24423-a-record-built-in-two-orders-survives-a-cast-through-unknown.ts": {
+   "order": [
+    "<repo>/tests/corpus/24423-a-record-built-in-two-orders-survives-a-cast-through-unknown.ts"
    ],
    "diags": []
   },
@@ -24121,12 +24151,6 @@
      "hint": "use named exports: export function f() {} / import { f } from \"./m\""
     }
    ]
-  },
-  "<repo>/tests/diagnostics/key-order-across-the-widening-boundary.ts": {
-   "order": [
-    "<repo>/tests/diagnostics/key-order-across-the-widening-boundary.ts"
-   ],
-   "diags": []
   },
   "<repo>/tests/diagnostics/key-order-through-a-spread-a-return-and-a-filled-record.ts": {
    "order": [
