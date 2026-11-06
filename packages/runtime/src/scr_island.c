@@ -1685,6 +1685,13 @@ static bool isl_dynjs_assign(ScrJsval *cell, const ScrDyn *src) {
 
 static ScrStr *isl_dynjs_to_json(ScrJsval *cell) { return scr_jsval_to_json(cell); }
 
+static bool isl_dynjs_is_u8(ScrJsval *cell) {
+  isl_entry();
+  return JS_GetTypedArrayType(cell->v) == JS_TYPED_ARRAY_UINT8;
+}
+
+static ScrBytes *isl_dynjs_exit_u8(ScrJsval *cell) { return scr_jsval_exit_bytes(cell); }
+
 static ScrDyn *isl_dynjs_iter_drain(ScrJsval *cell, bool spread, const ScrStr *spell) {
   isl_entry();
   JSValue m = JS_NewInt32(isl_ctx, spread ? 1 : 0);
@@ -1798,6 +1805,8 @@ static const ScrDynJsvalOps isl_dynjs_ops = {
   isl_dynjs_assign,
   isl_dynjs_to_json,
   isl_dynjs_iter_drain,
+  isl_dynjs_is_u8,
+  isl_dynjs_exit_u8,
 #ifdef SCR_SYMTAB
   isl_dynjs_sym_op,
 #endif

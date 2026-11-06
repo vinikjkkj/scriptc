@@ -2362,6 +2362,15 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           d.push(`  return scr_dyn_arrbuf_unbox(d, path, ${want});`);
           break;
         }
+        // An ENGINE Uint8Array (a value the embedded engine built): its bytes COPY out as a fresh native u8 value, the
+        // boundary's aliasing stance (scr_jsval_exit_bytes). Only the u8 view has an engine exit.
+        if (t.elem === "u8") {
+          d.push(`  if (scr_dyn_isl_is_u8(d)) { /* an engine Uint8Array: its bytes, copied */`);
+          d.push(`    ScrBytes *sc_jb = scr_dyn_isl_exit_u8(d);`);
+          if (soft) d.push(`    if (sc_jb == NULL) *ok = false; /* the exception is pending */`);
+          d.push(`    return sc_jb;`);
+          d.push(`  }`);
+        }
         // `u as Uint8Array` / `u as Buffer`: kind check, then the SAME
         // payload back, retained. The ARRBUF arm above states the reason
         // and this arm used to contradict it: the inbound direction has

@@ -1476,6 +1476,27 @@ export class LlDyn {
           B.terminate(`ret ptr ${r}`);
           break;
         }
+        // An ENGINE Uint8Array (a value the embedded engine built): its bytes COPY out as a fresh native u8 value, the
+        // boundary's aliasing stance. The C twin's branch.
+        if (t.elem === "u8") {
+          host.declare(`declare zeroext i1 @scr_dyn_isl_is_u8(ptr)`);
+          host.declare(`declare ptr @scr_dyn_isl_exit_u8(ptr)`);
+          const isU = B.tmp();
+          B.line(`${isU} = call zeroext i1 @scr_dyn_isl_is_u8(ptr %d)`);
+          const lU = B.newLabel("dc.ju");
+          const lNU = B.newLabel("dc.nu");
+          B.condBr(isU, lU, lNU);
+          B.startBlock(lU);
+          const ju = B.tmp();
+          B.line(`${ju} = call ptr @scr_dyn_isl_exit_u8(ptr %d)`);
+          if (soft) {
+            const nn = B.tmp();
+            B.line(`${nn} = icmp ne ptr ${ju}, null`);
+            B.line(`store i1 ${nn}, ptr %ok`);
+          }
+          B.terminate(`ret ptr ${ju}`);
+          B.startBlock(lNU);
+        }
         // `u as Uint8Array` / `u as Buffer`: kind check, then the SAME
         // payload back, retained. The C twin, verbatim, including the
         // dial: see bytesAliasOnExtract and the ARRBUF arm above.

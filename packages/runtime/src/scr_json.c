@@ -2096,6 +2096,10 @@ static ScrDyn *scr_isl_call_thunk(ScrClosure *clo, ScrDyn *const *args, size_t a
   return r; /* +1, or NULL with the engine's exception pending */
 }
 
+bool scr_dyn_isl_is_u8(const ScrDyn *d) { return d->kind == SCR_DYN_JSVAL && scr_dyn_jsval_ops()->is_u8(d->v.jsval.cell); }
+
+ScrBytes *scr_dyn_isl_exit_u8(const ScrDyn *d) { return scr_dyn_jsval_ops()->exit_u8(d->v.jsval.cell); }
+
 bool scr_dyn_isl_is_function(const ScrDyn *d) { return d->kind == SCR_DYN_JSVAL && scr_dyn_isl_typeof_is(d, "function"); }
 
 ScrDyn *scr_dyn_isl_fn_box(const ScrDyn *f) {
