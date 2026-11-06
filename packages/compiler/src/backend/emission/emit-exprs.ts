@@ -4399,6 +4399,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_dyn_sym_own_enum_keys(${arg(0)})`);
           case "fn.text":
             return finish(`scr_fn_text(${arg(0)})`);
+          case "fn.unbind":
+            return finish(`scr_fn_unbind(${arg(0)})`);
           case "sym.desc":
           case "sym.keyFor": {
             // `string | undefined` — the child.stdout pattern with a

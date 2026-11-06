@@ -982,6 +982,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "sym.dynOwnKeys": "scr_dyn_sym_own_keys",
   "sym.dynOwnEnumKeys": "scr_dyn_sym_own_enum_keys",
   "fn.text": "scr_fn_text",
+  "fn.unbind": "scr_fn_unbind",
   "error.toString": "scr_error_to_string",
   "error.stack": "scr_error_stack",
   "error.captureStack": "scr_error_capture_stack",
