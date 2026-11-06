@@ -19,7 +19,7 @@ import { isRelativeSpecifier } from "../shared.js";
 import type { RequireThrowCtx } from "../require-throws.js";
 import type { CjsExportRecord } from "./cjs-export-record.js";
 import { isLiveAliasName } from "./cjs-live-exports.js";
-import { copyListStmts } from "./key-list-fill.js";
+import { copyListStmts, type CopyPart } from "./key-list-fill.js";
 import { applyEnumRefill, applyNullProto, applyOwnKey, applySlotFilled, flushPatchCensus } from "./ir-patch.js";
 import { flushMintOrder, mintPhaseControl, resetMintLog, setGenGateKeys, setMintPhase } from "../types.js";
 import { flushFragmentCensus } from "./fragment-census.js";
@@ -5495,7 +5495,7 @@ export class Lowerer {
     shapeId: string;
     srcShapeId: string;
     srcRef: IrExpr;
-    parts: ({ name: string } | { spread: string; names: string[] })[];
+    parts: ({ name: string } | { spread: string; names: string[]; ref?: IrExpr })[];
     exclude: string[];
     /** Registered only so a key list can be copied (the literal's spelling is not one the key-order index can follow). */
     listOnly?: true;
@@ -5504,7 +5504,7 @@ export class Lowerer {
     shapeId: string;
     srcShapeId: string;
     srcRef: IrExpr;
-    parts: ({ name: string } | { spread: string; names: string[] })[];
+    parts: ({ name: string } | { spread: string; names: string[]; ref?: IrExpr })[];
     exclude: string[];
     listOnly?: true;
   }): void {
@@ -6295,7 +6295,11 @@ export class Lowerer {
     };
     // SPREAD and REST copies (Lowerer.spreadLiterals) carry their source's list into the destination: edges source -> destination.
     const edges: { lk: string; src: string; dst: string }[] = [];
-    for (const [lk, sl] of this.spreadLiterals) edges.push({ lk, src: sl.srcShapeId, dst: sl.shapeId });
+    for (const [lk, sl] of this.spreadLiterals) {
+      const srcs = new Set<string>([sl.srcShapeId]);
+      for (const part of sl.parts) if ("spread" in part) srcs.add(part.spread);
+      for (const src of srcs) edges.push({ lk, src, dst: sl.shapeId });
+    }
     const flowEdges = [...edges, ...this.listConsumers.map((c) => ({ lk: "", src: c.src, dst: c.dst }))];
     // needs = written late, or the destination of a copy of a shape that needs; matters = enumerated, or the source of a copy
     // whose destination matters. A shape pays for the list only when it is both.
@@ -6312,6 +6316,8 @@ export class Lowerer {
     const listed = new Set<string>([...needs].filter((id) => matters.has(id)));
     const patches = edges.filter((e) => listed.has(e.src) && listed.has(e.dst));
     const dests = new Set(patches.map((e) => e.dst));
+    const patchLocs = new Map<string, { lk: string; src: string; dst: string }>();
+    for (const e of patches) if (!patchLocs.has(e.lk)) patchLocs.set(e.lk, e);
     for (const id of listed) {
       const s = this.shapes.get(id)!;
       s.keyList = true;
@@ -6321,7 +6327,7 @@ export class Lowerer {
     // The copies fill their destination's list in the order JS gives the copy: written parts in order, a spread contributing its
     // source's keys in the source's own order.
     if (patches.length > 0) {
-      const byLoc = new Map(patches.map((e) => [e.lk, e] as const));
+      const byLoc = patchLocs;
       const done = new Set<object>();
       let uid = 0;
       const visit = (n: unknown, fn: IrFunction | null): void => {
@@ -6339,17 +6345,28 @@ export class Lowerer {
             const lit = { ...o } as unknown as IrExpr;
             const id = `kl.d${uid++}`;
             const dstType = lit.type;
-            const srcType: IrType = { kind: "record", shapeId: sl.srcShapeId };
             fn.locals.push({ id, name: id.replace(".", "_"), type: dstType, mutable: true });
             // The list fill has loops, and a seqExpr is straight-line: it lives in a helper the literal calls.
             const hName = `%keylist.copy.${this.liftedFns.length}`;
             const hLocals: { id: string; name: string; type: IrType; mutable: boolean }[] = [
               { id: "d.0", name: "d", type: dstType, mutable: false },
-              { id: "s.0", name: "s", type: srcType, mutable: false },
             ];
+            // One parameter per spread of the literal: its source, read once by the caller.
+            const callArgs: IrExpr[] = [{ kind: "varRef", localId: id, type: dstType, loc }];
+            const hParams: { localId: string; name: string; type: IrType }[] = [{ localId: "d.0", name: "d", type: dstType }];
+            const copyParts: CopyPart[] = [];
+            for (const part of sl.parts) {
+              if (!("spread" in part)) { copyParts.push(part); continue; }
+              const k = hParams.length;
+              const sType: IrType = { kind: "record", shapeId: part.spread };
+              hLocals.push({ id: `s.${k}`, name: `s${k}`, type: sType, mutable: false });
+              hParams.push({ localId: `s.${k}`, name: `s${k}`, type: sType });
+              callArgs.push(JSON.parse(JSON.stringify(part.ref ?? sl.srcRef)) as IrExpr);
+              copyParts.push({ spread: part.spread, names: part.names, ref: { kind: "varRef", localId: `s.${k}`, type: sType, loc } });
+            }
             const hBody = copyListStmts(
               this, e.dst, () => ({ kind: "varRef", localId: "d.0", type: dstType, loc }),
-              sl.srcShapeId, { kind: "varRef", localId: "s.0", type: srcType, loc }, sl.parts, loc,
+              copyParts, loc,
               () => {
                 const k = `l.${hLocals.length}`;
                 hLocals.push({ id: k, name: k.replace(".", "_"), type: F64, mutable: true });
@@ -6358,7 +6375,7 @@ export class Lowerer {
             );
             const hFn: IrFunction = {
               name: hName,
-              params: [{ localId: "d.0", name: "d", type: dstType }, { localId: "s.0", name: "s", type: srcType }],
+              params: hParams,
               returnType: VOID,
               locals: hLocals,
               body: hBody,
@@ -6370,7 +6387,7 @@ export class Lowerer {
               { kind: "varDecl", localId: id, init: lit, loc },
               {
                 kind: "exprStmt",
-                expr: { kind: "call", callee: hName, args: [{ kind: "varRef", localId: id, type: dstType, loc }, JSON.parse(JSON.stringify(sl.srcRef)) as IrExpr], type: VOID, loc },
+                expr: { kind: "call", callee: hName, args: callArgs, type: VOID, loc },
                 loc,
               },
             ];

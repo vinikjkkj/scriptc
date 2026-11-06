@@ -96,27 +96,23 @@ export function fillWithKeyList(
  * `parts` is the literal's written pieces (plain names and the one spread). A source that itself has a key list contributes its
  * construction-order keys (those not in its list, the present ones) and then its list; any other source its declared order.
  */
+export type CopyPart = { name: string } | { spread: string; names: string[]; ref: IrExpr };
+
 export function copyListStmts(
   L: Lowerer,
   dstId: string,
   dst: () => IrExpr,
-  srcId: string,
-  srcRef: IrExpr,
-  parts: ({ name: string } | { spread: string; names: string[] })[],
+  parts: CopyPart[],
   loc: SrcLoc,
   newLocal: () => string,
 ): IrStmt[] {
   const D = L.shapes.get(dstId)!;
-  const S = L.shapes.get(srcId)!;
-  const src = (): IrExpr => JSON.parse(JSON.stringify(srcRef)) as IrExpr;
   const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
   const ordD = (n: string): number => D.fields.findIndex((f) => f.name === n);
-  const ordS = (n: string): number => S.fields.findIndex((f) => f.name === n);
   const optional = (sh: IrRecordShape, n: string): boolean => {
     const f = sh.fields.find((x) => x.name === n);
     return !!f && f.type.kind === "union" && L.armTag(f.type.unionId, UNDEFINED_T) >= 0;
   };
-  const sListable = (n: string): boolean => S.keyList === true && !isIntegerKeyName(n) && (S.keyListAll === true || optional(S, n));
   const note = (n: string): IrStmt => ({
     kind: "exprStmt",
     expr: { kind: "recordOrd", op: "note", obj: dst(), shapeId: dstId, ord: ordD(n), type: BOOL, loc },
@@ -130,6 +126,11 @@ export function copyListStmts(
       if (ordD(part.name) >= 0) out.push(note(part.name));
       continue;
     }
+    const srcId = part.spread;
+    const S = L.shapes.get(srcId)!;
+    const src = (): IrExpr => JSON.parse(JSON.stringify(part.ref)) as IrExpr;
+    const ordS = (n: string): number => S.fields.findIndex((f) => f.name === n);
+    const sListable = (n: string): boolean => S.keyList === true && !isIntegerKeyName(n) && (S.keyListAll === true || optional(S, n));
     const names = part.names.filter((n) => ordD(n) >= 0 && ordS(n) >= 0);
     // The source's construction-order keys that are present and not in its list.
     for (const n of names) {
