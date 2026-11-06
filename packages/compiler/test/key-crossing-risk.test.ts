@@ -147,52 +147,61 @@ console.log(Object.keys(o).join(","));`);
 
 /* -- the REFUSING half: the widened surfaces, at their one cause ------- */
 
-test("a local typed 'object' is a crossing, and it refuses", () => {
+/* THE REFUSING HALF BECAME THE EXACT HALF. Each test below pinned a crossing refusal for a shape two literals spell differently
+ * (OUT_OF_ORDER). Such a shape now keeps both orders (IrRecordShape.keyOrders), each instance names its own in a hidden byte, and
+ * the record-to-dyn walker inserts the keys in that order on both backends, so the crossing has an answer. Every program below
+ * was built and run on C and LLVM and matches node byte for byte (corpus 24425 holds the same boundaries in one program). The
+ * assertions are therefore "no crossing refusal, and it compiles". What would still refuse is a crossing the index cannot
+ * name -- a record filled key by key (key-enumeration-risk.test.ts keeps that control). */
+test("a local typed 'object' crosses with the order of its instance", () => {
   const r = lower(`${OUT_OF_ORDER}
 const o: object = w;
 console.log(Object.keys(o).join(","));`);
-  const rows = crossing(r);
-  expect(rows.length).toBe(1);
-  expect(rows[0]!.code).toBe("SC1090");
-  expect(rows[0]!.hint).toContain("tag,inner,middle");
+  expect(crossing(r)).toEqual([]);
+  expect(r.compiled).toBe(true);
 });
 
-test("an ARGUMENT is a crossing, at the call", () => {
+test("an ARGUMENT crosses at the call with the order of its instance", () => {
   const r = lower(`${OUT_OF_ORDER}
 function f(o: object): string { return JSON.stringify(o); }
 console.log(f(w));`);
-  expect(crossing(r).length).toBe(1);
+  expect(crossing(r)).toEqual([]);
+  expect(r.compiled).toBe(true);
 });
 
-test("an 'unknown' slot is the same crossing wearing the other spelling", () => {
+test("an 'unknown' slot is the same crossing wearing the other spelling, and just as exact", () => {
   const r = lower(`${OUT_OF_ORDER}
 const u: unknown = w;
 console.log(typeof u);`);
-  expect(crossing(r).length).toBe(1);
+  expect(crossing(r)).toEqual([]);
+  expect(r.compiled).toBe(true);
 });
 
-test("an ARRAY of them crosses as one value, and the walker recurses", () => {
-  // The case a top-level `value.type.kind === "record"` test misses, and 28
-  // of the population's silent cells on its own.
+test("an ARRAY of them crosses as one value, and the walker recurses with each element's order", () => {
+  // The case a top-level `value.type.kind === "record"` test misses, and 28 of the population's silent cells on its own. The
+  // walker converts each element by its own instance's index, so the array is exact too.
   const r = lower(`${OUT_OF_ORDER}
 const arr: object[] = [w];
 console.log(Object.keys(arr[0]!).join(","));`);
-  expect(crossing(r).length).toBeGreaterThan(0);
+  expect(crossing(r)).toEqual([]);
+  expect(r.compiled).toBe(true);
 });
 
-test("a record FIELD typed 'object' carries it one level in", () => {
+test("a record FIELD typed 'object' crosses one level in, exactly", () => {
   const r = lower(`${OUT_OF_ORDER}
 const rec: { v: object } = { v: w };
 console.log(Object.keys(rec.v).join(","));`);
-  expect(crossing(r).length).toBeGreaterThan(0);
+  expect(crossing(r)).toEqual([]);
+  expect(r.compiled).toBe(true);
 });
 
-test("an element read out of an array whose construction the walk can NAME carries the risk", () => {
+test("an element read out of an array crosses with its instance's order", () => {
   const r = lower(`${OUT_OF_ORDER}
 const arr: Row[] = [w];
 const o: object = arr[0]!;
 console.log(Object.keys(o).join(","));`);
-  expect(crossing(r).length).toBeGreaterThan(0);
+  expect(crossing(r)).toEqual([]);
+  expect(r.compiled).toBe(true);
 });
 
 test("the SET half crosses too: a width copy ends keys JS keeps", () => {
@@ -208,15 +217,15 @@ console.log(JSON.stringify(o));`);
   expect(rows.length).toBe(0);
 });
 
-test("a SPREAD of a bare identifier inherits its source's risk", () => {
-  // `srcLowered` is deliberately null for an identifier source (the desugar
-  // re-reads it per field), which is why this spelling - the commonest one
-  // there is - inherited nothing before.
+test("a SPREAD of a bare identifier follows its source's order", () => {
+  // `srcLowered` is deliberately null for an identifier source (the desugar re-reads it per field), which is why this spelling
+  // - the commonest one there is - inherited nothing before. Its source's order is now a per-instance fact: the spread result
+  // takes the index of the instance it copies (recordLit.ordIxExpr), so the copy enumerates in Node's order and nothing is
+  // refused.
   const r = lower(`${OUT_OF_ORDER}
 console.log(JSON.stringify({ ...w }));`);
-  expect(
-    r.diags.filter((d) => d.message.includes("does not build the way its shape enumerates")).length,
-  ).toBe(1);
+  expect(r.diags.filter((d) => d.message.includes("does not build the way its shape enumerates"))).toEqual([]);
+  expect(r.compiled).toBe(true);
 });
 
 test("a spread of an IN-ORDER identifier inherits nothing", () => {
