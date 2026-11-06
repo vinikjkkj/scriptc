@@ -13206,6 +13206,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24450-a-pin-and-a-twin-reload-fold-into-one-reload.ts": {
+    "order": [
+      "<repo>/tests/corpus/24450-a-pin-and-a-twin-reload-fold-into-one-reload.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/24451-a-pin-inside-a-twinned-listener-keeps-both-reloads.ts": {
+    "order": [
+      "<repo>/tests/corpus/24451-a-pin-inside-a-twinned-listener-keeps-both-reloads.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/24452-a-twin-decided-before-the-emit-pass-numbers-its-listeners-as-before.ts": {
+    "order": [
+      "<repo>/tests/corpus/24452-a-twin-decided-before-the-emit-pass-numbers-its-listeners-as-before.ts"
+    ],
+    "diags": []
+  },
   "<repo>/tests/corpus/2446-performance-global.ts": {
    "order": [
     "<repo>/tests/corpus/2446-performance-global.ts"
