@@ -7809,6 +7809,9 @@ ScrDyn *scr_dyn_isl_key_get(const ScrDyn *d, const ScrStr *k);
 /* The record builder's engine lane (scr_json.c): declared members of an engine-held object, projected. +1 or NULL pending. */
 ScrDyn *scr_dyn_pack_args(ScrDyn *const *args, size_t argc);
 ScrDyn *scr_dyn_rec_from_jsval(const ScrDyn *d, const char *const *keys, const unsigned *lens, size_t n, bool all_own);
+/* Is d an engine-held function? An engine function as a function value of the checked-dynamic tree (+1): its call is the engine's. */
+bool scr_dyn_isl_is_function(const ScrDyn *d);
+ScrDyn *scr_dyn_isl_fn_box(const ScrDyn *f);
 /* The `??`/optional-chain nullish test over a dyn value: UNDEF/NULL
  * native, JSVAL through the engine's own test (defensively — the wrap
  * constructor scalar-normalizes engine null/undefined away), every other
