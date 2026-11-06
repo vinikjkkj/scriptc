@@ -16,7 +16,7 @@ import { RUNTIME_EMITTER_CLASS as RUNTIME_EMITTER_CLASS_W } from "../../ir/nodes
 import { classvalCandidates, dynClassDisplayName, dynDescBase, dynEmitterSlot, dynRuntimeRoot, dynEnumerationFenced, dynMemberRows, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
 import { EMITTER_MIXIN_FIELD_NAME, ORD_MEMBER, orderRecordPlanCached } from "../../ir/nodes.js";
 import { KINDGATE_WIDE_KINDS, kindgateInstanceLane, kindgateWideLane } from "../kindgate.js";
-import { KEYIX_MEMBER, OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, VIEW_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
+import { KEYIX_MEMBER, KEYLIST_MEMBER, OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, VIEW_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
 
 /** The refusal text a dyn-to-record check uses when the receiver carries
  * no INTERNAL SLOT for a field declaredOrder omits (internalSlotFields).
@@ -1132,7 +1132,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         const orderedFieldLists: (typeof emitFields)[] = shape.keyOrders
           ? shape.keyOrders.map((o) => o.filter((n) => !(n.startsWith("__@") && !n.startsWith("__@ord@"))).map((n) => byName.get(n)).filter((f) => f !== undefined))
           : [emitFields];
-        const fieldCode = (fields: typeof emitFields, out: string[], ind: string): void => {
+        const fieldCode = (fields: typeof emitFields, out: string[], ind: string, listed = false): void => {
           if (!droppable) {
             fields.forEach((f, i) => {
               const label = cStringLiteral(Buffer.from(`${i > 0 ? "," : ""}"${f.name}":`, "utf8"));
@@ -1159,6 +1159,11 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
               const notMarker = `!scr_num_is_undef(v->${mangleField(f.name)})`;
               cond = cond === null ? notMarker : `(${cond}) && ${notMarker}`;
             }
+            // A shape with a key list: a key that is IN the order record is written where the record puts it, not here.
+            if (shape.keyList && !listed) {
+              const skip = `!scr_ord_has(v->${KEYLIST_MEMBER}, ${shape.fields.findIndex((x) => x.name === f.name)})`;
+              cond = cond === null ? skip : `(${cond}) && ${skip}`;
+            }
             const pad = cond !== null ? ind + "  " : ind;
             if (cond !== null) {
               out.push(`${ind}if (${cond}) { /* not an own key of the value: dropped, like Node */`);
@@ -1174,15 +1179,26 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         const putFields = (): void => {
           if (!shape.keyOrders) {
             fieldCode(emitFields, d, "  ");
-            return;
+          } else {
+            d.push(`  switch (v->${KEYIX_MEMBER}) {`);
+            orderedFieldLists.forEach((fl, i) => {
+              d.push(`  ${i === orderedFieldLists.length - 1 ? "default" : `case ${i}`}: {`);
+              fieldCode(fl, d, "    ");
+              d.push(`    break;`, `  }`);
+            });
+            d.push(`  }`);
           }
-          d.push(`  switch (v->${KEYIX_MEMBER}) {`);
-          orderedFieldLists.forEach((fl, i) => {
-            d.push(`  ${i === orderedFieldLists.length - 1 ? "default" : `case ${i}`}: {`);
-            fieldCode(fl, d, "    ");
-            d.push(`    break;`, `  }`);
-          });
-          d.push(`  }`);
+          // ...then the keys written after construction, in the order they were first written.
+          if (shape.keyList) {
+            d.push(`  for (size_t sc_li = 1; sc_li <= v->${KEYLIST_MEMBER}[0]; sc_li++) {`);
+            d.push(`    switch (v->${KEYLIST_MEMBER}[sc_li]) {`);
+            for (const f of emitFields) {
+              d.push(`    case ${shape.fields.findIndex((x) => x.name === f.name)}: {`);
+              fieldCode([f], d, "      ", true);
+              d.push(`      break;`, `    }`);
+            }
+            d.push(`    default: break;`, `    }`, `  }`);
+          }
         };
         if (!droppable) {
           putFields();

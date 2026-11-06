@@ -48,6 +48,9 @@ export const VIEW_MEMBER = "sc_view";
 /** The hidden member of a shape with several key orders (IrRecordShape.keyOrders): which one this instance was built in.
  * Last in the struct, so no existing member moves; zero (the shape's declaredOrder) on every record built any other way. */
 export const KEYIX_MEMBER = "sc_kx";
+/** The hidden order record of a shape with a key list (IrRecordShape.keyList): [0] = how many late keys, [1..] = their field
+ * ordinals in the order they were first written (the runtime's scr_ord_note / scr_ord_forget). Last in the struct. */
+export const KEYLIST_MEMBER = "sc_ol";
 
 /** The C condition under which field `fieldName` of `shape` is one of the
  * receiver's OWN keys — the single question Object.keys, JSON.stringify,
@@ -198,6 +201,8 @@ export interface ClassMeta {
       /** A record with several key orders (IrRecordShape.keyOrders): one more trailing plain byte, carried by neither the RC
        * members nor the trace. */
       keyOrders?: string[][];
+      /** A record with a key list (IrRecordShape.keyList): one more trailing plain-byte record of 1 + fields.length bytes. */
+      keyList?: true;
       /** Class shapes whose hierarchy has inferred fields: the bytes of the
        * per-instance order record (ir/nodes.ts ORD_MEMBER), laid out first among
        * the fields so every class of the hierarchy shares its offset. */
@@ -239,6 +244,7 @@ export interface ClassMeta {
         ...(rec.srcproto ? { srcproto: true as const } : {}),
         ...(rec.view ? { view: true as const } : {}),
         ...(rec.keyOrders ? { keyOrders: rec.keyOrders } : {}),
+        ...(rec.keyList ? { keyList: true as const } : {}),
         comment: `record ${rec.id} { ${rec.fields.map((f) => f.name).join("; ")}${rec.indexValue ? "; [key: string]" : ""} }`,
         meta: null,
       })),
@@ -351,6 +357,9 @@ export interface ClassMeta {
       }
       if (s.keyOrders) {
         decl.push(`  uint8_t ${KEYIX_MEMBER}; /* hidden per-instance key-order index (into the shape's ${s.keyOrders.length} orders; 0 = declared) */`);
+      }
+      if (s.keyList) {
+        decl.push(`  uint8_t ${KEYLIST_MEMBER}[${1 + s.fields.length}]; /* hidden per-instance order record of the keys written after construction */`);
       }
       decl.push(`};`);
     }

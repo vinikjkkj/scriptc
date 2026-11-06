@@ -158,6 +158,7 @@ import {
   emitOwnPresentLl,
   ownMaskSlotIndex,
   keyIxSlotIndex,
+  keyListSlotIndex,
   srcProtoSlotIndex,
   toStrSlotIndex,
   traceAdapter,
@@ -4301,6 +4302,33 @@ class LlEmitter {
     this.declare(`declare void @${fn}(ptr, i8)`);
     this.B.line(`call void @${fn}(ptr ${rp}, i8 ${ord})`);
   }
+  /** The KEY LIST note of a write to a shape that has one (IrRecordShape.keyList): a write of an ABSENT key appends its ordinal
+   * to the hidden order record, a delete removes it. Presence is asked before the write lands (emitOwnPresentLl: the own-key
+   * mask when the instance carries one, the undefined arm otherwise). The C twin is emit-stmts.ts's recordSet row. */
+  noteKeyListWrite(objName: string, shapeId: string, field: string, forget: boolean): void {
+    const shape = this.recordsById.get(shapeId);
+    if (!shape?.keyList) return;
+    const ord = shape.fields.findIndex((x) => x.name === field);
+    if (ord < 0) return;
+    const B = this.B;
+    const rp = B.tmp();
+    B.line(`${rp} = getelementptr inbounds %${mangleRecordStruct(shapeId)}, ptr ${objName}, i64 0, i32 ${keyListSlotIndex(shape)}, i64 0 ; key list`);
+    if (forget) {
+      this.declare(`declare void @scr_ord_forget(ptr, i8)`);
+      B.line(`call void @scr_ord_forget(ptr ${rp}, i8 ${ord})`);
+      return;
+    }
+    const present = emitOwnPresentLl(B, shape, field, objName, this.undefinedArmTag(shape.fields[ord]!.type), false);
+    if (present === null) return;
+    const lNote = B.newLabel("kl.n");
+    const lJoin = B.newLabel("kl.j");
+    B.condBr(present, lJoin, lNote);
+    B.startBlock(lNote);
+    this.declare(`declare void @scr_ord_note(ptr, i8)`);
+    B.line(`call void @scr_ord_note(ptr ${rp}, i8 ${ord})`);
+    B.br(lJoin);
+    B.startBlock(lJoin);
+  }
   declare(decl: string): void {
     this.decls.add(decl);
   }
@@ -7354,6 +7382,7 @@ class LlEmitter {
         const obj = this.emitExpr(s.obj);
         const v = this.emitExpr(s.value);
         if (s.kind === "fieldSet") this.noteOrderWrite(obj.name, s.className, s.field, s.unset === true);
+        if (s.kind === "recordSet") this.noteKeyListWrite(obj.name, s.shapeId, s.field, s.unset === true);
         const { ptr, type } =
           s.kind === "fieldSet"
             ? this.classFieldPtr(obj.name, s.className, s.field)

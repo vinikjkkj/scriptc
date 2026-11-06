@@ -184,6 +184,8 @@ const INDEX_SURFACES: ReadonlySet<string> = new Set([
   "Object.entries",
   "for-in",
 ]);
+/** The enumeration surfaces that read a record's key list (IrRecordShape.keyList). */
+const LIST_SURFACES: ReadonlySet<string> = new Set(["JSON.stringify", "util.format %j"]);
 export const ENTRY_NAME = "%main";
 
 /** One step of the copy-reshape width relation (widthLiftPlan): how a
@@ -4002,6 +4004,7 @@ export class Lowerer {
     setMintPhase("tail:passes");
     mintPhaseControl(this.shapes);
     this.reconcileKeyOrders(functions);
+    this.markKeyLists(functions);
     // SHAPE UNIFICATION - width pairs the layout can afford to merge become
     // ONE shape, and the copy between them the identity (shape-unify.ts).
     // Here because this is the first point at which the edge set is COMPLETE:
@@ -6135,8 +6138,12 @@ export class Lowerer {
     return true;
   }
 
+  /** The record shapes some enumeration surface (inspect, JSON, keys, values, entries, for-in) reads, by value type. The key
+   * list (IrRecordShape.keyList) is only worth its bytes on a shape that is both written late and enumerated. */
+  readonly enumeratedRecords = new Set<string>();
   noteKeyEnumeration(value: IrExpr | null, loc: SrcLoc, surface: string): void {
     if (!value) return;
+    if (value.type.kind === "record") this.enumeratedRecords.add(value.type.shapeId);
     if (this.refuseHelperFieldEnumeration(value, loc, surface)) return;
     if (value.kind === "varRef") {
       this.keyEnumUses.push({ ref: this.keyRiskKey(value.localId), risk: null, loc, surface });
@@ -6244,6 +6251,41 @@ export class Lowerer {
    * The IR walk is the completeness check: it is what turns "the literals I
    * happened to see agree" into "these are the only constructions there
    * are". */
+  /** KEY LIST gate (IrRecordShape.keyList). A shape pays for the hidden order record only if the program WRITES one of its
+   * optional members after construction (`r.k = v`, `delete r.k`, a dynamic-key write) and some surface ENUMERATES it:
+   * those are the two facts that make its key order a per-instance one. Static, over the finished IR, so a program without
+   * both emits what it always did. */
+  markKeyLists(functions: IrFunction[]): void {
+    const late = new Set<string>();
+    const seen = new Set<object>();
+    const walk = (n: unknown): void => {
+      if (n === null || typeof n !== "object" || seen.has(n)) return;
+      seen.add(n);
+      if (Array.isArray(n)) { for (const x of n) walk(x); return; }
+      const o = n as Record<string, unknown>;
+      if (o["kind"] === "recordSet" && typeof o["shapeId"] === "string") {
+        const sh = this.shapes.get(o["shapeId"] as string);
+        const f = sh?.fields.find((x) => x.name === o["field"]);
+        const optional = f !== undefined && f.type.kind === "union" && this.armTag(f.type.unionId, UNDEFINED_T) >= 0;
+        if (o["unset"] === true || optional) late.add(o["shapeId"] as string);
+      } else if (o["kind"] === "recordKeySet" && typeof o["shapeId"] === "string") {
+        late.add(o["shapeId"] as string);
+      }
+      for (const v of Object.values(o)) walk(v);
+    };
+    walk(functions);
+    walk(this.globalsList);
+    for (const id of late) {
+      if (!this.enumeratedRecords.has(id)) continue;
+      const s = this.shapes.get(id);
+      if (!s?.declaredOrder || s.tuple || s.indexValue || s.builtin || s.fields.length > 254) continue;
+      if (s.fields.some((f) => f.name.startsWith("%"))) continue;
+      if (this.requiredAbsentTargets.has(id)) continue;
+      s.keyList = true;
+      if (process.env["SCRIPTC_KEYORDER_WHY"] !== undefined) console.error(`[keyorder] ${id} KEYLIST`);
+    }
+  }
+
   reconcileKeyOrders(functions: IrFunction[]): void {
     const why = process.env["SCRIPTC_KEYORDER_WHY"] !== undefined;
     if (this.shapeOrderEvidence.size === 0) return;
@@ -6614,6 +6656,16 @@ export class Lowerer {
   reportKeyEnumerationRisks(): void {
     const why = process.env["SCRIPTC_KEYRISK_WHY"] !== undefined;
     for (const u of this.keyEnumUses) {
+      // A tracked binding of a shape with a KEY LIST (IrRecordShape.keyList) enumerates in the order its keys were written, at
+      // the surfaces that read the list; the write-order refusal does not apply to them. Another risk on the value (a width
+      // copy, a dynamic source) still does.
+      if (u.ref !== null && !u.crossing && LIST_SURFACES.has(u.surface)) {
+        const pe = this.keyPresenceOrder.get(u.ref);
+        if (pe !== undefined && this.shapes.get(pe.shapeId)?.keyList === true) {
+          const other = this.keyRiskValues.get(u.ref) ?? this.resolvePendingRisk(u.ref);
+          if (!other || (other.why === "order" && this.indexedOrderRisks.has(other))) continue;
+        }
+      }
       const risk =
         (this.keyOrderReconciled ? null : u.risk) ??
         (u.ref !== null

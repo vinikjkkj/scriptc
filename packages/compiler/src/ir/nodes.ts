@@ -2153,6 +2153,13 @@ export interface IrRecordShape {
    * (recordLit.ordIx), and every enumeration surface switches on it. Absent on the shape every site agrees on: the
    * layout, the code and the cost are exactly what they were. Set by the post-lowering order pass, not interned. */
   keyOrders?: string[][];
+  /** KEY LIST: keys written AFTER construction (an optional member assigned later, or deleted and written again) take their
+   * place in the object by WRITE order, which no per-shape order can carry. A shape the order pass found written that way
+   * carries a hidden order record (KEYLIST_MEMBER, the class model's `sc_ord`): byte 0 counts the late keys, bytes 1.. are their
+   * field ordinals (the index into `fields`) in the order they were first written. A write of an ABSENT key appends it, a
+   * delete removes it, and enumeration lists the construction-order keys that are not in the record first, then the record.
+   * Absent on every other shape: layout, code and cost unchanged. Set by the post-lowering order pass, not interned. */
+  keyList?: true;
   /** How Node RENDERS a value of this shape, for the shapes the frontend
    * interns from a BUILTIN whose rendering is not a plain object's. Every
    * member is part of the interned identity, on internalFieldNamesOf's

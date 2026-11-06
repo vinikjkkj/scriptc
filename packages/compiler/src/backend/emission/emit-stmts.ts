@@ -7,7 +7,7 @@ import type { IrFunction, IrLocal, IrType } from "../../ir/nodes.js";
 import { mangleField, mangleGlobal, mangleLocal, mangleRawParam } from "../mangle.js";
 import { BOOL, CAUGHT, F64, IrExpr, IrStmt, ORD_MEMBER, orderRecordPlanCached, RUNTIME_ERROR_CLASSES, isRefCounted, ownMaskKeyBit } from "../../ir/nodes.js";
 import { boxAccess, cDecl, cStringLiteral, elemAccess, vAdapters } from "./emit-types.js";
-import { OVERFLOW_MEMBER, OWNMASK_MEMBER } from "./emit-shapes.js";
+import { KEYLIST_MEMBER, OVERFLOW_MEMBER, OWNMASK_MEMBER, ownPresentCondC } from "./emit-shapes.js";
 import { emitStableReceiver } from "./emit-exprs.js";
 import { writesLocal } from "../../ir/analysis.js";
 import { coroPrologue, coroDispatch, coroFinish, coroField } from "./emit-coro.js";
@@ -909,6 +909,22 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
             ? (s.field === "%code" ? "code" : s.field)
             : mangleField(s.field);
         const field = `${obj.name}->${member}`;
+        if (s.kind === "recordSet") {
+          // A shape with a key list: a write of an ABSENT key appends it to the order record, a delete removes it (the class
+          // model's scr_ord_note / scr_ord_forget). Presence is asked BEFORE the write.
+          const ksh = E.recordsById.get(s.shapeId);
+          if (ksh?.keyList) {
+            const ord = ksh.fields.findIndex((x) => x.name === s.field);
+            if (ord >= 0) {
+              if (s.unset === true) {
+                E.line(`scr_ord_forget(${obj.name}->${KEYLIST_MEMBER}, ${ord});${E.srcComment(s.loc)}`);
+              } else {
+                const cond = ownPresentCondC(ksh, s.field, obj.name, E.undefinedArmTag(ksh.fields[ord]!.type), false);
+                if (cond !== null) E.line(`if (!(${cond})) scr_ord_note(${obj.name}->${KEYLIST_MEMBER}, ${ord});${E.srcComment(s.loc)}`);
+              }
+            }
+          }
+        }
         if (s.kind === "fieldSet") {
           const ord = orderRecordPlanCached(E.mod.classes ?? []).ordinalOf(s.className, s.field);
           const fn = s.unset === true ? "scr_ord_forget" : "scr_ord_note";
