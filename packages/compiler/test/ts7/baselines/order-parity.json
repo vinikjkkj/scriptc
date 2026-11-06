@@ -12760,6 +12760,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24161-a-method-read-off-a-boxed-instance-runs-detached-and-throws-only-at-this.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24161-a-method-read-off-a-boxed-instance-runs-detached-and-throws-only-at-this.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2414-dowhile-continue-kill.ts": {
    "order": [
     "<repo>/tests/corpus/2414-dowhile-continue-kill.ts"
