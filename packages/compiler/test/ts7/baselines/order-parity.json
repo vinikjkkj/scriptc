@@ -24611,12 +24611,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/diagnostics/protodata-untyped-read-related-owners.js": {
-   "order": [
-    "<repo>/tests/diagnostics/protodata-untyped-read-related-owners.js"
-   ],
-   "diags": []
-  },
   "<repo>/tests/diagnostics/readable-from-async-generator.ts": {
    "order": [
     "<repo>/tests/diagnostics/readable-from-async-generator.ts"
@@ -25453,12 +25447,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/diagnostics/protodata-untyped-read-fenced-owner.js": {
-   "order": [
-    "<repo>/tests/diagnostics/protodata-untyped-read-fenced-owner.js"
-   ],
-   "diags": []
-  },
   "<repo>/tests/corpus/24493-prototype-data-dynamic-key-read-on-class-instance.js": {
    "order": [
     "<repo>/tests/corpus/24493-prototype-data-dynamic-key-read-on-class-instance.js"
@@ -25474,6 +25462,30 @@
   "<repo>/tests/corpus/24495-prototype-data-for-in-lists-inherited-names.js": {
    "order": [
     "<repo>/tests/corpus/24495-prototype-data-for-in-lists-inherited-names.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24496-prototype-data-own-undefined-hides-and-delete-reexposes.js": {
+   "order": [
+    "<repo>/tests/corpus/24496-prototype-data-own-undefined-hides-and-delete-reexposes.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24497-prototype-data-function-called-through-typed-and-untyped-receivers.js": {
+   "order": [
+    "<repo>/tests/corpus/24497-prototype-data-function-called-through-typed-and-untyped-receivers.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24498-for-in-visits-an-own-undefined-field-of-an-instance.js": {
+   "order": [
+    "<repo>/tests/corpus/24498-for-in-visits-an-own-undefined-field-of-an-instance.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24499-commander-shaped-generated-methods-beside-protobuf-shaped-decode.js": {
+   "order": [
+    "<repo>/tests/corpus/24499-commander-shaped-generated-methods-beside-protobuf-shaped-decode.js"
    ],
    "diags": []
   }
