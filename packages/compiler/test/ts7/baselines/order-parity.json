@@ -13633,6 +13633,18 @@
     ],
     "diags": []
   },
+  "<repo>/tests/corpus/24458-a-buffers-constructor-is-buffer-and-a-uint8arrays-is-uint8array.ts": {
+    "order": [
+      "<repo>/tests/corpus/24458-a-buffers-constructor-is-buffer-and-a-uint8arrays-is-uint8array.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/24459-a-buffer-is-not-an-object-parameter-and-buffer-prototype-chains-to-uint8array.js": {
+    "order": [
+      "<repo>/tests/corpus/24459-a-buffer-is-not-an-object-parameter-and-buffer-prototype-chains-to-uint8array.js"
+    ],
+    "diags": []
+  },
   "<repo>/tests/corpus/2446-performance-global.ts": {
    "order": [
     "<repo>/tests/corpus/2446-performance-global.ts"
