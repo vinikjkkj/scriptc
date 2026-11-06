@@ -16450,6 +16450,9 @@ export function staticAssertionOperand(L: Lowerer, node: ts.Expression, field: s
         const loc = locOf(expr);
         let key = L.lowerExpr(target.argumentExpression);
         if (key.type.kind === "f64") key = L.ensureString(key, target.argumentExpression);
+        // An untyped key (`table[name] = fn` with `name` an untyped parameter): ToPropertyKey, as the neighbouring dyn arms spell it
+        // (a symbol is routed to the symbol table by the sym.any rewrite).
+        else if (key.type.kind === "bool" || key.type.kind === "dyn") key = { kind: "toString", operand: key, type: STRING, loc: key.loc };
         if (key.type.kind !== "string") {
           L.unsupported("SC1090", target.argumentExpression, "indexing with non-string or non-number keys");
         }

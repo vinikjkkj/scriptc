@@ -9006,9 +9006,23 @@ function implicitLiteralIndex(widened: ts.Type, ctx: TypeMapperCtx): boolean {
     ctx.checker.getPropertiesOfType(widened).length === 0;
 }
 
+/** The type of an EMPTY object literal written in authored JavaScript (`{ argument: {}, reply: {} }`'s members): in JS the bag is open, its
+ * keys are whatever the program stores (`table.argument[name] = fn`), and the checker's `{}` for it names no member to dispatch to. Same
+ * reading as an options bag defaulted to `{}` (the parameter rule above): a checked-dynamic object. */
+function isJsEmptyObjectLiteralType(t: ts.Type, ctx: TypeMapperCtx): boolean {
+  const { checker } = ctx;
+  const sym = t.getSymbol();
+  if (sym === undefined || (sym.flags & ts.SymbolFlags.ObjectLiteral) === 0) return false;
+  if (checker.getPropertiesOfType(t).length > 0 || checker.getIndexInfosOfType(t).length > 0) return false;
+  if (checker.getCallSignatures(t).length > 0 || checker.getConstructSignatures(t).length > 0) return false;
+  const decls = checker.declarationsOf(sym);
+  return decls.length > 0 && decls.every((d) => ts.isObjectLiteralExpression(d) && d.properties.length === 0 && isJsSourceFile(d.getSourceFile()));
+}
+
 function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | RecordShapeParts | null {
   const { checker, shapes } = ctx;
   if (checker.getConstructSignatures(widened).length > 0) return null;
+  if (isJsEmptyObjectLiteralType(widened, ctx)) return DYN;
   if (checker.isTupleType(widened) || checker.isArrayLikeType(widened)) return null;
   // ENUM OBJECTS (`typeof e` — the enum used as a first-class value) look
   // exactly like a number-keyed hybrid (member fields + the reverse-map
