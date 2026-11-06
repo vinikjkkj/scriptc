@@ -34,6 +34,7 @@ import type { IrBytesElem, IrFunction, IrRecordShape, IrType } from "../../ir/no
 import { EMITTER_MIXIN_FIELD_NAME, RUNTIME_EMITTER_CLASS, accessorKeyOrderOf, accessorSlotProp, shapeHasAccessorSlots, VOID, arrayTypeHasLiveView, bytesAliasOnExtract, canConvertToDyn, canDynCheckTo, dynErrorClassKind, isDynErrorClass } from "../../ir/nodes.js";
 import { armDiscrimLits, dynNeverArm, dynNeverIn, canAdaptDynFuncTo, dynRestApplyable, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey } from "../../ir/nodes.js";
 import { EVAL_STATIC_CLASSES } from "../../ir/nodes.js";
+import { isIntegerKeyName } from "../../ir/nodes.js";
 import { nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit as maskKeyBit } from "../../ir/nodes.js";
 import { INTERNAL_SLOT_WANT_TEXT } from "../emission/emit-walkers.js";
 import { mangleClassRelease, mangleClassRetain, mangleClassStruct, mangleFnClosure, mangleFunction, mangleRecordNew, mangleRecordRelease, mangleRecordStruct } from "../mangle.js";
@@ -3325,7 +3326,7 @@ export class LlDyn {
           const lpp = B.tmp();
           B.line(`${lpp} = getelementptr inbounds %${struct}, ptr %v, i64 0, i32 ${keyListSlotIndex(shape)}, i64 0 ; key list`);
           const ordOf = (n: string): number => shape.fields.findIndex((x) => x.name === n);
-          const listable = ord.filter((n) => byName.has(n) && !internal.has(n));
+          const listable = ord.filter((n) => byName.has(n) && !internal.has(n) && !isIntegerKeyName(n));
           // No key written late (the usual instance): the construction-order code alone.
           const c0 = B.tmp();
           B.line(`${c0} = load i8, ptr ${lpp}`);

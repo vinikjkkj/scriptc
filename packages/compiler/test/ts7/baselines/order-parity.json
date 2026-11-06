@@ -13296,6 +13296,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24433-integer-like-keys-written-late-enumerate-ascending-before-the-others.ts": {
+   "order": [
+    "<repo>/tests/corpus/24433-integer-like-keys-written-late-enumerate-ascending-before-the-others.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2443-union-literal-shadow-narrowing.ts": {
    "order": [
     "<repo>/tests/corpus/2443-union-literal-shadow-narrowing.ts"
