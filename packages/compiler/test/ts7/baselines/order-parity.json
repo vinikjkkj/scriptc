@@ -12953,6 +12953,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24162-class-instance-and-symbol-cross-into-engine-code-in-one-program.js": {
+   "order": [
+    "<repo>/tests/corpus/24162-class-instance-and-symbol-cross-into-engine-code-in-one-program.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2414-dowhile-continue-kill.ts": {
    "order": [
     "<repo>/tests/corpus/2414-dowhile-continue-kill.ts"
