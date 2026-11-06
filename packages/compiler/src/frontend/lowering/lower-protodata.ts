@@ -330,6 +330,9 @@ export function protoDataMemberRead(L: Lowerer, expr: ts.PropertyAccessExpressio
   const untypedRecv = (recvTs.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0;
   if (untypedRecv && L.protoDataNonUndef.has(name)) {
     const exact = untypedProtoDataRead(L, expr, name, loc);
+    // Every class writing the name as prototype data is fenced (its own write statement is refused, with the reason): no
+    // program is built, and the read is the ordinary one for the receivers that are not instances of such a class.
+    if (exact === "plain") return null;
     if (exact !== null) return exact;
     L.unsupported("SC1090", expr, `reading the prototype member '${name}' through an untyped value (the box answers the instance field, not the prototype's value; give the receiver a class type)`);
   }
@@ -512,14 +515,19 @@ export function protoDataAssignStmt(L: Lowerer, expr: ts.BinaryExpression): IrSt
  * Null (the caller keeps the compile-time refusal) when the answer cannot be built exactly: a datum fenced at collection, two
  * related classes writing the same name (which slot wins depends on the instance), a slot whose type has no dyn form, or a
  * receiver that does not lower to a dyn value. */
-function untypedProtoDataRead(L: Lowerer, expr: ts.PropertyAccessExpression, name: string, loc: SrcLoc): IrExpr | null {
+function untypedProtoDataRead(L: Lowerer, expr: ts.PropertyAccessExpression, name: string, loc: SrcLoc): IrExpr | "plain" | null {
   const owners: ClassInfo[] = [];
+  let fenced = false;
   for (const info of L.classes.values()) {
     const n = info.def.name;
-    if (L.protoDataFenced.has(`${n}.${name}`)) return null;
+    // A fenced datum has no slot, and its write is a compile-time refusal of its own: it neither answers nor adds a refusal here.
+    if (L.protoDataFenced.has(`${n}.${name}`)) {
+      fenced = true;
+      continue;
+    }
     if (L.protoDataSlots.get(n)?.has(name) === true) owners.push(info);
   }
-  if (owners.length === 0) return null;
+  if (owners.length === 0) return fenced ? "plain" : null;
   const isAncestor = (a: ClassInfo, b: ClassInfo): boolean => {
     for (let c: ClassInfo | null = b; c; c = c.base) if (c === a) return true;
     return false;
