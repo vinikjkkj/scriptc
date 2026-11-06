@@ -13206,6 +13206,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24414-hand-written-iterator-results-print-the-keys-they-wrote.ts": {
+   "order": [
+    "<repo>/tests/corpus/24414-hand-written-iterator-results-print-the-keys-they-wrote.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/24415-records-built-in-two-key-orders-print-and-serialize-in-their-own-order.ts": {
    "order": [
     "<repo>/tests/corpus/24415-records-built-in-two-key-orders-print-and-serialize-in-their-own-order.ts"
