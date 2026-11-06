@@ -2158,6 +2158,30 @@ ScrDyn *scr_dyn_pack_args(ScrDyn *const *args, size_t argc) {
   return a;
 }
 
+/* An engine object's METHOD, read off it as a function value of the checked-dynamic tree: a SCR_DYN_FUNC box whose call is the
+ * engine's `recv[name](...)` - receiver bound, arguments crossing in through the from-dyn rules and the result back out through the
+ * dyn rules. The typed side then adapts it to the slot's declared signature like any boxed function. Reading `field.buffer` and
+ * calling it is the program's `field.buffer()`: the member is looked up at the call, as Node does. */
+static ScrDyn *scr_isl_bound_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  ScrDyn *recv = (ScrDyn *)scr_box_get_ref(clo->caps[0]); /* +1 */
+  ScrDyn *nm = (ScrDyn *)scr_box_get_ref(clo->caps[1]);   /* +1 */
+  ScrDyn *r = scr_dyn_jsval_ops()->invoke(recv->v.jsval.cell, nm->v.str->data, args, argc, nm->v.str->data);
+  scr_dyn_release(nm);
+  scr_dyn_release(recv);
+  return r; /* +1, or NULL with the engine's exception pending */
+}
+
+ScrDyn *scr_dyn_isl_bound_method(const ScrDyn *recv, const char *key, size_t len) {
+  ScrClosure *clo = scr_closure_new((void *)scr_isl_bound_thunk, 2);
+  clo->caps[0] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
+  scr_box_set_ref(clo->caps[0], scr_dyn_retain((ScrDyn *)recv));
+  clo->caps[1] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
+  ScrStr *ns = scr_str_new(key, len);
+  scr_box_set_ref(clo->caps[1], scr_dyn_new_str(ns));
+  scr_str_release(ns);
+  return scr_dyn_new_func(clo, scr_isl_bound_thunk, 0, "()", "bound");
+}
+
 /* An engine FUNCTION value as a function value of the checked-dynamic tree: a SCR_DYN_FUNC box whose call is the engine's `f(...)`, the
  * arguments crossing in through the from-dyn rules and the result back out through the dyn rules. What a typed function slot is
  * filled from when the engine hands it a callback (`next` in a typeCast). The box keeps the engine value alive; +1. */
@@ -2177,7 +2201,20 @@ ScrDyn *scr_dyn_isl_fn_box(const ScrDyn *f) {
   return scr_dyn_new_func(clo, scr_isl_call_thunk, 0, "()", "anonymous");
 }
 
+/* A member the declared type calls a function: an engine function there is the method of its receiver, bound. Takes the +1 of `v`. */
+static ScrDyn *scr_rec_fn_member(const ScrDyn *d, const char *key, size_t len, ScrDyn *v) {
+  if (v->kind != SCR_DYN_JSVAL || !scr_dyn_isl_typeof_is(v, "function")) return v;
+  ScrDyn *bound = scr_dyn_isl_bound_method(d, key, len);
+  scr_dyn_release(v);
+  return bound;
+}
+
 ScrDyn *scr_dyn_rec_from_jsval(const ScrDyn *d, const char *const *keys, const unsigned *lens, size_t n, bool all_own) {
+  return scr_dyn_rec_from_jsval_fn(d, keys, lens, n, all_own, NULL);
+}
+
+ScrDyn *scr_dyn_rec_from_jsval_fn(const ScrDyn *d, const char *const *keys, const unsigned *lens, size_t n, bool all_own,
+                                  const unsigned char *fn) {
   ScrDyn *o = scr_dyn_new_obj();
   if (all_own) {
     ScrDyn *ents = scr_dyn_objwalk(d, SCR_OBJWALK_ENTRIES);
@@ -2188,7 +2225,16 @@ ScrDyn *scr_dyn_rec_from_jsval(const ScrDyn *d, const char *const *keys, const u
     for (size_t i = 0; i < ents->v.arr.len; i++) {
       const ScrDyn *pair = ents->v.arr.items[i];
       const ScrDyn *pk = pair->v.arr.items[0];
-      scr_dyn_obj_set(o, pk->v.str->data, pk->v.str->len, scr_dyn_retain(pair->v.arr.items[1]));
+      ScrDyn *pv = scr_dyn_retain(pair->v.arr.items[1]);
+      if (fn != NULL) {
+        for (size_t j = 0; j < n; j++) {
+          if (fn[j] && lens[j] == pk->v.str->len && memcmp(keys[j], pk->v.str->data, lens[j]) == 0) {
+            pv = scr_rec_fn_member(d, keys[j], lens[j], pv);
+            break;
+          }
+        }
+      }
+      scr_dyn_obj_set(o, pk->v.str->data, pk->v.str->len, pv);
     }
     scr_dyn_release(ents);
   }
@@ -2205,6 +2251,7 @@ ScrDyn *scr_dyn_rec_from_jsval(const ScrDyn *d, const char *const *keys, const u
       scr_dyn_release(v);
       continue;
     }
+    if (fn != NULL && fn[i]) v = scr_rec_fn_member(d, keys[i], lens[i], v);
     scr_dyn_obj_set_lit(o, keys[i], lens[i], v); /* takes the +1 */
   }
   return o;

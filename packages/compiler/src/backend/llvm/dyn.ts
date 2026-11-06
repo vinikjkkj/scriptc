@@ -134,6 +134,9 @@ export interface DynHost extends WalkerHost {
    * lane. Only reached with a kind-gate dial ON; off, nothing asks for
    * one and no global is emitted. */
   recWideTable(shapeId: string, fields: readonly { name: string }[]): { keys: string; lens: string };
+  /** `@sc_kgf_<shapeId>`: one byte per declared member, 1 where the member's type is a function (or may hold one) - the table
+   * scr_dyn_rec_from_jsval_fn reads an engine function through as the method of its receiver. */
+  recFnFlagTable(shapeId: string, flags: readonly boolean[]): string;
   /** `@`-ref of the interned SCR_DYN_OBJINST descriptor for a class. */
   dynClassDesc(className: string): string;
   /** Interns the descriptor of every boxable Error-rooted user class. */
@@ -1793,11 +1796,21 @@ export class LlDyn {
             const lNJ = B.newLabel("dcr.wn");
             B.condBr(isJsv, lJ, lNJ);
             B.startBlock(lJ);
-            host.declare(`declare ptr @scr_dyn_rec_from_jsval(ptr, ptr, ptr, i64, i1 zeroext)`);
+            const fnFlags = shape.fields.map((f) => this.mayHoldFunc(f.type));
             const pj = B.tmp();
-            B.line(
-              `${pj} = call ptr @scr_dyn_rec_from_jsval(ptr %d, ptr ${tbl ? tbl.keys : "null"}, ptr ${tbl ? tbl.lens : "null"}, i64 ${shape.fields.length}, i1 zeroext ${jsv.allOwn ? "true" : "false"})`,
-            );
+            if (fnFlags.some((x) => x)) {
+              // Function-typed members read an engine function as the method of its receiver (scr_dyn_rec_from_jsval_fn).
+              host.declare(`declare ptr @scr_dyn_rec_from_jsval_fn(ptr, ptr, ptr, i64, i1 zeroext, ptr)`);
+              const flags = host.recFnFlagTable(t.shapeId, fnFlags);
+              B.line(
+                `${pj} = call ptr @scr_dyn_rec_from_jsval_fn(ptr %d, ptr ${tbl ? tbl.keys : "null"}, ptr ${tbl ? tbl.lens : "null"}, i64 ${shape.fields.length}, i1 zeroext ${jsv.allOwn ? "true" : "false"}, ptr ${flags})`,
+              );
+            } else {
+              host.declare(`declare ptr @scr_dyn_rec_from_jsval(ptr, ptr, ptr, i64, i1 zeroext)`);
+              B.line(
+                `${pj} = call ptr @scr_dyn_rec_from_jsval(ptr %d, ptr ${tbl ? tbl.keys : "null"}, ptr ${tbl ? tbl.lens : "null"}, i64 ${shape.fields.length}, i1 zeroext ${jsv.allOwn ? "true" : "false"})`,
+              );
+            }
             B.line(`store ptr ${pj}, ptr ${pSlot}`);
             B.br(lProj);
             B.startBlock(lNJ);
