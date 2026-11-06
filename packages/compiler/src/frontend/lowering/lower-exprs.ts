@@ -26649,6 +26649,27 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
     // to come from the body's own declared `this` local. Only ever fires when
     // the checker said nothing at all.
     if (receiverIr === null) receiverIr = protoThisType(L, access.expression);
+    // A prototype-class ACCESSOR through `K | undefined` (a field a method assigns, so a JavaScript read sees the undefined
+    // arm): the undefined arm throws Node's TypeError (lyingRead) and the object arm is the accessor target.
+    if (receiverIr?.kind === "union" && !inOptionalChainOf(access) && isJsSourceFile(access.getSourceFile())) {
+      const objArm = L.lyingTargetOf(receiverIr);
+      const objInfo = objArm?.kind === "object" ? L.classes.get(objArm.className) : undefined;
+      const nGet = objInfo?.protoClass === true ? L.findMethodOn(objInfo, `get:${access.name.text}`) : null;
+      const nSet = objInfo?.protoClass === true ? L.findMethodOn(objInfo, `set:${access.name.text}`) : null;
+      if (objInfo !== undefined && objArm?.kind === "object" && (nGet || nSet)) {
+        const lr = L.lyingRead(L.lowerExpr(access.expression), access.expression);
+        if (lr?.type.kind === "object") {
+          return {
+            container: "accessor",
+            obj: lr,
+            className: objArm.className,
+            field: access.name.text,
+            fieldType: nGet ? nGet.sig.ret : nSet!.sig.params[0]!.type,
+            ...(nSet ? { writeType: nSet.sig.params[0]!.type } : {}),
+          };
+        }
+      }
+    }
     if (receiverIr?.kind === "object") {
       const info = L.classes.get(receiverIr.className);
       if (!info) {
