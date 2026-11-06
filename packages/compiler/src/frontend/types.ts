@@ -8486,6 +8486,7 @@ function isectWhy(t: ts.UnionOrIntersectionType, ctx: TypeMapperCtx): void {
     console.error(
       `ISECTWHY ${checker.typeToString(t).slice(0, 120)}` +
       ` || provOk=${recordProvenanceOk(t, checker, ctx)}` +
+      ` || idx=${checker.getIndexInfosOfType(t).map((i) => `[${checker.typeToString(i.keyType)}]:${checker.typeToString(i.valueType)}`).join(",")}` +
       ` || dyn=${ctx.dynamic === true} spec=${ctx.speculative === true}` +
       ` || ${parts.join(" & ")}`,
     );
@@ -9072,7 +9073,12 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
     let v: IrType | null = null;
     for (const info of indexInfos) {
       if (!stringKey(info.keyType) && !(info.keyType.flags & ts.TypeFlags.Number)) return null;
-      const iv = implicit ? mapType(info.valueType, ctx) : mapIndexSignatureValue(info.valueType, ctx);
+      let iv = implicit ? mapType(info.valueType, ctx) : mapIndexSignatureValue(info.valueType, ctx);
+      // A signature whose value type is exactly `undefined`: what the checker reports for the intersection of an optional-`never`
+      // signature with another one (`{ readonly [k: string]?: never } & Record<string, number | undefined>`, mongodb's
+      // OnlyFieldsOfType over an untyped schema). The store holds no value but undefined, which the checked-dynamic slot holds
+      // exactly; a typed read narrows back through the dyn check to the `undefined` the checker states.
+      if ((info.valueType.flags & ts.TypeFlags.Undefined) !== 0) iv = DYN;
       // A jsval-valued signature absorbs the shape: `Record<string,
       // JSONValue>` (a package's own JSON alias) and `Record<string, any>`
       // are one island object — the overflow map has no handle slot, and
