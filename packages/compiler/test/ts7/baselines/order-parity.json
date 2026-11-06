@@ -13074,6 +13074,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24332-update-filter-over-an-untyped-schema-reads-and-writes.ts": {
+    "order": [
+      "<repo>/tests/corpus/24332-update-filter-over-an-untyped-schema-reads-and-writes.ts"
+    ],
+    "diags": []
+  },
   "<repo>/tests/corpus/2434-deferred-init-fields.ts": {
    "order": [
     "<repo>/tests/corpus/2434-deferred-init-fields.ts"
