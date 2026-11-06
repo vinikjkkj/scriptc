@@ -13591,6 +13591,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24453-an-engine-built-object-with-methods-reaches-a-typed-callback.ts": {
+    "order": [
+      "<repo>/tests/corpus/24453-an-engine-built-object-with-methods-reaches-a-typed-callback.ts"
+    ],
+    "diags": []
+  },
+  "<repo>/tests/corpus/24454-a-blob-column-round-trips-through-a-type-cast-callback.ts": {
+    "order": [
+      "<repo>/tests/corpus/24454-a-blob-column-round-trips-through-a-type-cast-callback.ts"
+    ],
+    "diags": []
+  },
   "<repo>/tests/corpus/2446-performance-global.ts": {
    "order": [
     "<repo>/tests/corpus/2446-performance-global.ts"
