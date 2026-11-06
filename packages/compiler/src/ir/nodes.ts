@@ -10902,8 +10902,10 @@ export function moduleUsesEmitter(mod: IrModule): boolean {
  * can reach ANY listener the module registers, so each typed listener also carries the dyn
  * function box the compiler built for it (scr_emitter_on_boxed). False keeps the registration
  * exactly as it was, byte for byte. */
-export function moduleBoxesEmitters(mod: IrModule): boolean {
-  const byName = new Map((mod.classes ?? []).map((c) => [c.name, c] as const));
+/** The emitter-rooted test of moduleBoxesEmitters over a class table: a class that is the runtime emitter or a stream, carries
+ * the emitter mixin field, or has such a base. */
+function emitterishClasses(classes: readonly IrClassDef[] | undefined): (name: string) => boolean {
+  const byName = new Map((classes ?? []).map((c) => [c.name, c] as const));
   const emitterish = new Map<string, boolean>();
   const isEmitterish = (name: string): boolean => {
     const known = emitterish.get(name);
@@ -10918,6 +10920,25 @@ export function moduleBoxesEmitters(mod: IrModule): boolean {
     emitterish.set(name, r);
     return r;
   };
+  return isEmitterish;
+}
+
+/** moduleBoxesEmitters from the two facts a walk over the functions collects: whether any of them holds an
+ * `emitter.emitDyn`, and the class names of every `dynFrom` over an object-typed value. The discovery pass collects the
+ * same facts while it lowers the reachable bodies, so the twin decision can be taken before the emit pass runs. */
+export function boxesEmittersFromFacts(
+  classes: readonly IrClassDef[] | undefined,
+  emitDyn: boolean,
+  dynFromClasses: Iterable<string>,
+): boolean {
+  if (emitDyn) return true;
+  const isEmitterish = emitterishClasses(classes);
+  for (const name of dynFromClasses) if (isEmitterish(name) && canBoxClassIntoDyn(name)) return true;
+  return false;
+}
+
+export function moduleBoxesEmitters(mod: IrModule): boolean {
+  const isEmitterish = emitterishClasses(mod.classes);
   let found = false;
   const visit = (v: unknown): void => {
     if (found || v === null || typeof v !== "object") return;

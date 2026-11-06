@@ -186,7 +186,11 @@ function declTwin(
 /** The insertions for every candidate listener, or null when none can be twinned. A candidate is the
  * registration's listener argument: an inline function expression, or an identifier naming a function
  * declaration / const function expression of the same file. */
-export function computeTwinEdits(cands: readonly ts.Expression[], checker: ts.TypeChecker): TwinEdits | null {
+export function computeTwinEdits(
+  cands: readonly ts.Expression[],
+  checker: ts.TypeChecker,
+  order?: { tie: boolean },
+): TwinEdits | null {
   const out: TwinEdits = new Map();
   const counters = new Map<string, number>();
   const seen = new Set<string>();
@@ -194,11 +198,19 @@ export function computeTwinEdits(cands: readonly ts.Expression[], checker: ts.Ty
   // Innermost first: a listener registered inside another listener's body is part of the outer twin's text, so
   // the outer copy is taken AFTER the inner insertions exist (its own registrations get twins too).
   const ordered = [...cands].sort((x, y) => (x.end - x.getStart()) - (y.end - y.getStart()));
+  // Twin numbers are spent in this order, and the order among candidates of one length in one file is the order the caller
+  // met them in. A caller whose meeting order is not the emit pass's reports a tie here and keeps the emit pass's own list.
+  const lengthSeen = new Set<string>();
   for (const f of ordered) {
     const sf = f.getSourceFile();
     const key = `${sf.fileName}@${f.getStart(sf)}`;
     if (seen.has(key)) continue;
     seen.add(key);
+    if (order !== undefined) {
+      const lk = `${sf.fileName}#${f.end - f.getStart(sf)}`;
+      if (lengthSeen.has(lk)) order.tie = true;
+      lengthSeen.add(lk);
+    }
     const js = isJsSourceFile(sf);
     let list = out.get(sf.fileName);
     const need = (): TwinEdit[] => {

@@ -558,9 +558,15 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
 
   const finalLoad = load;
   let pinnedLoad: (LoadResult & { dispose: () => void }) | null = null;
-  const lowerPinned = (opts: LowerOptions): { result: LowerResult; pins?: NonNullable<LowerResult["pinReload"]> } => {
+  const lowerPinned = (opts: LowerOptions): { result: LowerResult; pins?: NonNullable<LowerResult["pinReload"]>; relower: () => LowerResult } => {
       const first = lowerToIr(finalLoad.program, finalLoad.entry, finalLoad.moduleOrder, { ...opts, startupCrash: finalLoad.startupCrash ?? null });
-      if (first.pinReload === undefined) return { result: first };
+      if (first.pinReload === undefined) {
+        // `relower` is the complete result a twin decision taken early (LowerResult.twinEarly) stood in for.
+        return {
+          result: first,
+          relower: () => lowerToIr(finalLoad.program, finalLoad.entry, finalLoad.moduleOrder, { ...opts, startupCrash: finalLoad.startupCrash ?? null, noTwinReload: true }),
+        };
+      }
       // Class fields untyped code writes another type (DynPins): load the
       // program again with those initializers cast to `any`, and lower THAT
       // (its first pass is final: noPinReload). The first load stays the
@@ -598,7 +604,20 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
         return { ...l, start: map(l.start), end: map(l.end) };
       };
       for (const d of [...second.diagnostics, ...second.advisories]) d.loc = back(d.loc);
-      return { result: second, pins: first.pinReload };
+      return {
+        result: second,
+        pins: first.pinReload,
+        relower: () => {
+          const again = lowerToIr(pinnedLoad!.program, pinnedLoad!.entry, pinnedLoad!.moduleOrder, {
+            ...opts,
+            startupCrash: pinnedLoad!.startupCrash ?? null,
+            noPinReload: true,
+            noTwinReload: true,
+          });
+          for (const d of [...again.diagnostics, ...again.advisories]) d.loc = back(d.loc);
+          return again;
+        },
+      };
   };
 
   return {
@@ -640,13 +659,17 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
       // listeners it registers. Load the program again with the erased twins inserted and lower THAT. A
       // load or lowering that does not come out clean keeps the complete first result: the twin is an
       // improvement of what a dynamic emit hands a typed listener, never a reason to refuse a program.
-      const keep = done.result;
-      const edits = keep.twinReload!;
+      // The complete result of the program the twin was decided on: kept for a twin lowering that does not come out clean. A
+      // decision taken from the discovery pass has no such result yet (twinEarly), and lowers it only when it is needed.
+      const kept = done.result;
+      let keptComplete: LowerResult | null = kept.twinEarly === true ? null : kept;
+      const keepOf = (): LowerResult => (keptComplete ??= done.relower());
+      const edits = kept.twinReload!;
       if (process.env["SCRIPTC_TWIN_WHY"] !== undefined) process.stderr.write(`[twin] reload: ${[...edits.values()].reduce((n, l) => n + l.filter((e) => e.text.startsWith("/*@sctwin")).length, 0)} listener(s)\n`);
       let twinLoad: (LoadResult & { dispose: () => void }) | null = null;
       try {
         twinLoad = loadProgram(entryPath, { npmStatic: effective, ...(done.pins !== undefined ? { textEdits: done.pins } : {}), twinEdits: edits });
-        if (checkPreflight(twinLoad).length > 0) return keep;
+        if (checkPreflight(twinLoad).length > 0) return keepOf();
         const again = lowerToIr(twinLoad.program, twinLoad.entry, twinLoad.moduleOrder, {
           ...opts,
           startupCrash: twinLoad.startupCrash ?? null,
@@ -659,13 +682,13 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
             for (const d of again.diagnostics.slice(0, 5)) process.stderr.write(`[twin] reload refused: ${d.code} ${d.message}\n`);
             for (const v of bad.slice(0, 5)) process.stderr.write(`[twin] reload invalid: ${v.message}\n`);
           }
-          return keep;
+          return keepOf();
         }
         for (const d of again.advisories) d.loc = twinBack(d.loc);
         return again;
       } catch (e) {
         if (process.env["SCRIPTC_TWIN_WHY"] !== undefined) process.stderr.write(`[twin] reload failed: ${(e as Error).message}\n`);
-        return keep;
+        return keepOf();
       } finally {
         twinLoad?.dispose();
       }
