@@ -9885,6 +9885,9 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
     // fields of the INSTANCE: a body reading one needs the instance, which a detached receiver is not. No variant can answer such a
     // call, so the thunk keeps the up-front receiver check (a call with the instance, `.call(inst)`, is unaffected).
     if ((info.captures?.length ?? 0) > 0 || info.evalClass !== undefined || info.evalStaticOf !== undefined) return null;
+    // A class whose instances take own properties under run-time keys records the creation order of its own fields at each store
+    // (lower-ownshadow applyFieldNotes), which needs a plain-local receiver; the variant's `this` is a checked expression.
+    if (L.ownShadowRoots.size > 0 && info.fields.has(CLASS_PROPS_FIELD)) return null;
     const member = info.decl?.members.find((m): m is ts.MethodDeclaration =>
       ts.isMethodDeclaration(m) && m.body !== undefined && classMemberNameOf(L, m.name) === mName,
     );
@@ -9900,10 +9903,30 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
       return found;
     };
     if (member.body !== undefined && nested(member.body)) return null;
-    const fn = withInstanceBindings(L, info, () => lowerMethodBodyInner(L, info, mName, member, true));
-    if (fn === null) {
-      // A self-reference was already committed to this name: it cannot be left dangling.
-      if (state.hit) L.unsupported("SC1090", member.name, `the detached variant of '${mName}' cannot be built`);
+    // The variant is an OPTIONAL refinement of the thunk (it moves the receiver check to the `this` accesses), so a body that cannot
+    // be lowered over a raw receiver (an own-field store whose key order is tracked through a plain local, say) is not a diagnostic of
+    // the program: the lowering runs under a diagnostic sink, and a failure declines the variant, leaving the up-front check.
+    const saved = L.diagSink;
+    const captured: ScrDiagnostic[] = [];
+    L.diagSink = captured;
+    let fn: IrFunction | null = null;
+    let poisoned = false;
+    try {
+      fn = withInstanceBindings(L, info, () => lowerMethodBodyInner(L, info, mName, member, true));
+    } catch (e) {
+      if (!(e instanceof PoisonError)) {
+        L.diagSink = saved;
+        throw e;
+      }
+      poisoned = true;
+    }
+    L.diagSink = saved;
+    if (fn === null || poisoned || captured.length > 0) {
+      // A self-reference was already committed to this name: it cannot be left dangling, and its refusal is the program's.
+      if (state.hit) {
+        for (const d of captured) L.pushDiag(d);
+        L.unsupported("SC1090", member.name, `the detached variant of '${mName}' cannot be built`);
+      }
       return null;
     }
     L.liftedFns.push(fn);
