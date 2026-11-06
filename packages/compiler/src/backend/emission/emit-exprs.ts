@@ -17,7 +17,7 @@ import { rcSitesRequested, rcSiteLabel } from "./emitter.js";
 import { ORD_MEMBER, orderRecordPlanCached, ABSENT_KEY_TRAP_CODE, arrayOf, canBoxFuncIntoDyn, BOOL, BYTES_U8, bytesOf, ownMaskKeyBit, presenceMaskStores, OWNMASK_COMPLETED, OWNMASK_VALID, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, IrExpr, IrRecordShape, IrType, irFunctionJsName, irFunctionValueCode, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals, typeKey } from "../../ir/nodes.js";
 import { unionKeyClasses, boxAccess, BYTES_NUM_KIND_C, BYTES_NUM_VAR_C, bytesElemKindC, cDecl, cFnPtrCast, cNumberLiteral, cStringLiteral, cType, DV_GET_KIND_C, DV_SET_KIND_C, elemAccess, mapKeyAccess, mapKeyKindC, mapValKindC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassNew, mangleClassRetain, mangleClassStruct, mangleField, mangleFnClosure, mangleFunction, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleVtStruct, mangleWrapper } from "../mangle.js";
-import { KEYIX_MEMBER, OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, VIEW_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
+import { KEYIX_MEMBER, KEYLIST_MEMBER, OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, VIEW_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
 import { dynDestrCheckHelper, dynIterNHelper, dynKeyGetHelper, originMarkC, recSrcMapC, viewSyncHelper } from "./emit-walkers.js";
 import { genResultThunkFor } from "./emit-async.js";
 import { emitCoroAwait, emitCoroHop, emitCoroUnionSuspend } from "./emit-coro.js";
@@ -2526,6 +2526,14 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           e.type,
           `(!(${m}[0] & ${OWNMASK_COMPLETED}) || ((${m}[${bit.byte}] & ${bit.bit}) != 0))`,
         );
+      }
+      case "recordOrd": {
+        const obj = E.emitExpr(e.obj);
+        const lst = `${obj.name}->${KEYLIST_MEMBER}`;
+        if (e.op === "count") return E.newTemp(e.type, `((double)${lst}[0])`);
+        if (e.op === "has") return E.newTemp(e.type, `scr_ord_has(${lst}, ${e.ord})`);
+        const ix = E.emitExpr(e.idx!);
+        return E.newTemp(e.type, `((double)${lst}[1 + (size_t)${ix.name}])`);
       }
       case "recordKeyOrderIs": {
         const obj = E.emitExpr(e.obj);

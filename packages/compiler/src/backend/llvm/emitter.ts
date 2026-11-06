@@ -9213,6 +9213,38 @@ class LlEmitter {
         B.line(`${r} = or i1 ${notCompleted}, ${own}`);
         return { name: r, type: e.type };
       }
+      case "recordOrd": {
+        const obj = this.emitExpr(e.obj);
+        const sh = this.recordsById.get(e.shapeId);
+        if (!sh) throw new Error(`llvm emitter bug: recordOrd of unknown shape ${e.shapeId}`);
+        const lp = B.tmp();
+        B.line(`${lp} = getelementptr inbounds %${mangleRecordStruct(e.shapeId)}, ptr ${obj.name}, i64 0, i32 ${keyListSlotIndex(sh)}, i64 0 ; key list`);
+        if (e.op === "count") {
+          const c8 = B.tmp();
+          B.line(`${c8} = load i8, ptr ${lp}`);
+          const cf = B.tmp();
+          B.line(`${cf} = uitofp i8 ${c8} to double`);
+          return { name: cf, type: e.type };
+        }
+        if (e.op === "has") {
+          this.declare(`declare zeroext i1 @scr_ord_has(ptr, i8)`);
+          const h = B.tmp();
+          B.line(`${h} = call zeroext i1 @scr_ord_has(ptr ${lp}, i8 ${e.ord})`);
+          return { name: h, type: e.type };
+        }
+        const ix = this.emitExpr(e.idx!);
+        const ii = B.tmp();
+        B.line(`${ii} = fptoui double ${ix.name} to i64`);
+        const i1 = B.tmp();
+        B.line(`${i1} = add i64 ${ii}, 1`);
+        const ep = B.tmp();
+        B.line(`${ep} = getelementptr inbounds i8, ptr ${lp}, i64 ${i1}`);
+        const o8 = B.tmp();
+        B.line(`${o8} = load i8, ptr ${ep}`);
+        const of = B.tmp();
+        B.line(`${of} = uitofp i8 ${o8} to double`);
+        return { name: of, type: e.type };
+      }
       case "recordKeyOrderIs": {
         const obj = this.emitExpr(e.obj);
         const sh = this.recordsById.get(e.shapeId);

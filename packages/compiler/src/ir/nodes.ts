@@ -7962,6 +7962,10 @@ export type IrExpr =
   /** Was this record built in the shape's `ix`-th own-key order (IrRecordShape.keyOrders)? The per-instance index a literal
    * stored (recordLit.ordIx); 0, the declared order, on every record built any other way. */
   | { kind: "recordKeyOrderIs"; obj: IrExpr; shapeId: string; ix: number; type: IrType; loc: SrcLoc }
+  /** The KEY LIST of a record (IrRecordShape.keyList): `has` (bool) = is field ordinal `ord` (the index into `fields`) among the
+   * keys written after construction; `count` (f64) = how many there are; `at` (f64) = the ordinal at position `idx` (0-based, an
+   * f64 expression), in the order they were first written. */
+  | { kind: "recordOrd"; op: "has" | "count" | "at"; obj: IrExpr; shapeId: string; ord?: number; idx?: IrExpr; type: IrType; loc: SrcLoc }
   | { kind: "recordKeyPresent"; obj: IrExpr; shapeId: string; field: string; orSlot?: true; type: IrType; loc: SrcLoc }
   /** `in`'s question about a REQUIRED field of a shape some literal
    * COMPLETED: was this slot ever written on THIS instance?
