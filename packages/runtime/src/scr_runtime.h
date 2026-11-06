@@ -7685,6 +7685,11 @@ typedef struct ScrDynJsvalOps {
   uintptr_t (*ident)(ScrJsval *cell);
   bool (*is_u8)(ScrJsval *cell);
   ScrBytes *(*exit_u8)(ScrJsval *cell);
+  /* What binary value the ENGINE holds in the cell, as one word: the ScrBytesElem of a typed array (Uint8Array, Float32Array, ...),
+   * SCR_ISL_BIN_BUFFER for an ArrayBuffer, SCR_ISL_BIN_DATAVIEW for a DataView, SCR_ISL_BIN_NONE for anything else. */
+  int (*bin_kind)(ScrJsval *cell);
+  /* The COPY of an engine typed array's / ArrayBuffer's bytes as a fresh native value of its own element (scr_jsval_exit_bin). */
+  ScrBytes *(*exit_bin)(ScrJsval *cell);
 #ifdef SCR_SYMTAB
   /* A symbol-keyed operation on the ENGINE object (scr_symbol.c routes here, ScrDsymEngineOp): the runtime symbol `k`
    * crosses as THE engine symbol of its identity (one per identity, both directions: scr_island.c's table). +1 result, or
@@ -7741,6 +7746,16 @@ void scr_dyn_fn_adapter_remember(const ScrDyn *d, const void *code, ScrClosure *
  * closure itself (borrowed in, +1 out). */
 ScrClosure *scr_fn_unbind(ScrClosure *c);
 bool scr_dyn_isl_is_u8(const ScrDyn *d);
+/* The engine-held binary value tests: scr_dyn_isl_bin answers ScrDynJsvalOps.bin_kind (SCR_ISL_BIN_NONE for every other dyn kind). */
+#define SCR_ISL_BIN_NONE (-1)
+#define SCR_ISL_BIN_BUFFER (-2)
+#define SCR_ISL_BIN_DATAVIEW (-3)
+int scr_dyn_isl_bin(const ScrDyn *d);
+bool scr_dyn_isl_is_arraybuffer(const ScrDyn *d);
+bool scr_dyn_isl_is_view(const ScrDyn *d);
+/* An engine typed array or ArrayBuffer's bytes, COPIED out as a fresh native value of the engine value's own element (the
+ * ArrayBuffer flavor for an ArrayBuffer). +1, or NULL with the exception pending. */
+ScrBytes *scr_dyn_isl_exit_bin(const ScrDyn *d);
 ScrBytes *scr_dyn_isl_exit_u8(const ScrDyn *d);
 ScrDyn *scr_dyn_isl_fn_box(const ScrDyn *f);
 /* The `??`/optional-chain nullish test over a dyn value: UNDEF/NULL
@@ -9137,6 +9152,8 @@ ScrStr *scr_jsval_exit_str(ScrJsval *v);
 /* Uint8Array exit (engine Buffers pass — they ARE Uint8Arrays): a fresh
  * u8 COPY (+1), the boundary's aliasing stance; NULL = thrown. */
 ScrBytes *scr_jsval_exit_bytes(ScrJsval *v);
+/* The same copy for any engine typed array or ArrayBuffer (scr_dyn_isl_exit_bin). */
+ScrBytes *scr_jsval_exit_bin(ScrJsval *v);
 /* `any[]`-declared slot exit (the jsval-element-array spelling):
  * Array.isArray-gated, elements BY REFERENCE into a native array of
  * engine cells (identity crosses, the spine is a snapshot copy). +1;

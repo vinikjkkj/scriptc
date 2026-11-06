@@ -11972,6 +11972,12 @@ class LlEmitter {
             test = orIsl(oneOf([DK.ARR]), "scr_dyn_isl_is_array");
           } else if (e.test === "function") {
             test = orIsl(oneOf([DK.FUNC]), "scr_dyn_isl_typeof_is", this.cstr("function"));
+          } else if (e.test === "view" && this.engineModule) {
+            // `ArrayBuffer.isView(u)`: the DK.BYTES compare, or a typed array / DataView the engine holds.
+            test = orIsl(oneOf([DK.BYTES]), "scr_dyn_isl_is_view");
+          } else if (e.test === "arraybuffer" && this.engineModule) {
+            // `u instanceof ArrayBuffer`: the DK.ARRBUF compare, or an ArrayBuffer the engine holds.
+            test = orIsl(oneOf([DK.ARRBUF]), "scr_dyn_isl_is_arraybuffer");
           } else if (e.test === "u8array") {
             // `u instanceof Uint8Array`: the DK.BYTES compare is not the
             // answer on its own, because a boxed DataView rides the same
@@ -11999,6 +12005,7 @@ class LlEmitter {
               undefined: DK.UNDEF,
               null: DK.NULL,
               bytes: DK.BYTES,
+              view: DK.BYTES,
               // `instanceof ArrayBuffer` — the sibling kind, and the
               // reason DYN_BYTES_KINDS keeps bytes<buf> out of DK.BYTES.
               arraybuffer: DK.ARRBUF,

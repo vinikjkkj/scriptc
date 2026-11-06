@@ -1469,6 +1469,28 @@ export class LlDyn {
           // `u as ArrayBuffer`: the SAME payload back, retained. The
           // runtime does the kind check and the throw, so there is no
           // requireKind here — see the C twin.
+          if (host.engineModule) {
+            // An ENGINE ArrayBuffer: its bytes COPY out as a fresh native ArrayBuffer. The C twin's branch.
+            host.declare(`declare i32 @scr_dyn_isl_bin(ptr)`);
+            host.declare(`declare ptr @scr_dyn_isl_exit_bin(ptr)`);
+            const bk2 = B.tmp();
+            B.line(`${bk2} = call i32 @scr_dyn_isl_bin(ptr %d)`);
+            const isB = B.tmp();
+            B.line(`${isB} = icmp eq i32 ${bk2}, -2`);
+            const lB = B.newLabel("dc.jb");
+            const lNB = B.newLabel("dc.nb");
+            B.condBr(isB, lB, lNB);
+            B.startBlock(lB);
+            const jb = B.tmp();
+            B.line(`${jb} = call ptr @scr_dyn_isl_exit_bin(ptr %d)`);
+            if (soft) {
+              const nn = B.tmp();
+              B.line(`${nn} = icmp ne ptr ${jb}, null`);
+              B.line(`store i1 ${nn}, ptr %ok`);
+            }
+            B.terminate(`ret ptr ${jb}`);
+            B.startBlock(lNB);
+          }
           softPre("daa", () => kindEq(DK[bk.dk]));
           host.declare(`declare ptr @scr_dyn_arrbuf_unbox(ptr, ptr, ptr)`);
           const r = B.tmp();
@@ -1478,17 +1500,26 @@ export class LlDyn {
         }
         // An ENGINE Uint8Array (a value the embedded engine built): its bytes COPY out as a fresh native u8 value, the
         // boundary's aliasing stance. The C twin's branch.
-        if (t.elem === "u8" && host.engineModule) {
-          host.declare(`declare zeroext i1 @scr_dyn_isl_is_u8(ptr)`);
-          host.declare(`declare ptr @scr_dyn_isl_exit_u8(ptr)`);
+        if (host.engineModule) {
+          const u8 = t.elem === "u8";
+          const exitFn = u8 ? "scr_dyn_isl_exit_u8" : "scr_dyn_isl_exit_bin";
+          host.declare(`declare ptr @${exitFn}(ptr)`);
           const isU = B.tmp();
-          B.line(`${isU} = call zeroext i1 @scr_dyn_isl_is_u8(ptr %d)`);
+          if (u8) {
+            host.declare(`declare zeroext i1 @scr_dyn_isl_is_u8(ptr)`);
+            B.line(`${isU} = call zeroext i1 @scr_dyn_isl_is_u8(ptr %d)`);
+          } else {
+            host.declare(`declare i32 @scr_dyn_isl_bin(ptr)`);
+            const bk3 = B.tmp();
+            B.line(`${bk3} = call i32 @scr_dyn_isl_bin(ptr %d)`);
+            B.line(`${isU} = icmp eq i32 ${bk3}, ${BYTES_ELEM_NUM[t.elem]}`);
+          }
           const lU = B.newLabel("dc.ju");
           const lNU = B.newLabel("dc.nu");
           B.condBr(isU, lU, lNU);
           B.startBlock(lU);
           const ju = B.tmp();
-          B.line(`${ju} = call ptr @scr_dyn_isl_exit_u8(ptr %d)`);
+          B.line(`${ju} = call ptr @${exitFn}(ptr %d)`);
           if (soft) {
             const nn = B.tmp();
             B.line(`${nn} = icmp ne ptr ${ju}, null`);

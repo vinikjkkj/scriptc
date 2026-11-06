@@ -2259,6 +2259,18 @@ bool scr_dyn_isl_is_u8(const ScrDyn *d) { return d->kind == SCR_DYN_JSVAL && scr
 
 ScrBytes *scr_dyn_isl_exit_u8(const ScrDyn *d) { return scr_dyn_jsval_ops()->exit_u8(d->v.jsval.cell); }
 
+int scr_dyn_isl_bin(const ScrDyn *d) { return d->kind == SCR_DYN_JSVAL ? scr_dyn_jsval_ops()->bin_kind(d->v.jsval.cell) : SCR_ISL_BIN_NONE; }
+
+bool scr_dyn_isl_is_arraybuffer(const ScrDyn *d) { return scr_dyn_isl_bin(d) == SCR_ISL_BIN_BUFFER; }
+
+/* ArrayBuffer.isView over an engine value: a typed array or a DataView. */
+bool scr_dyn_isl_is_view(const ScrDyn *d) {
+  int k = scr_dyn_isl_bin(d);
+  return k >= 0 || k == SCR_ISL_BIN_DATAVIEW;
+}
+
+ScrBytes *scr_dyn_isl_exit_bin(const ScrDyn *d) { return scr_dyn_jsval_ops()->exit_bin(d->v.jsval.cell); }
+
 bool scr_dyn_isl_is_function(const ScrDyn *d) { return d->kind == SCR_DYN_JSVAL && scr_dyn_isl_typeof_is(d, "function"); }
 
 ScrDyn *scr_dyn_isl_fn_box(const ScrDyn *f) {
@@ -2461,6 +2473,7 @@ static bool dyn_bytes_is_buffer(const ScrBytes *b) {
 static ScrDyn *scr_u8_proto; /* %Uint8Array.prototype% (defined with the constructor, below) */
 
 bool scr_dyn_is_u8array(const ScrDyn *d) {
+  if (d != NULL && d->kind == SCR_DYN_JSVAL) return scr_dyn_isl_bin(d) == SCR_BYTES_U8; /* an engine-held Uint8Array (a Buffer is one) */
   if (d != NULL && d->kind == SCR_DYN_OBJ && scr_u8_proto != NULL) {
     /* An object whose [[Prototype]] chain reaches %Uint8Array.prototype% (Buffer.prototype, Object.create(Uint8Array.prototype)):
      * an instance of Uint8Array by the chain, as OrdinaryHasInstance reads it. */
