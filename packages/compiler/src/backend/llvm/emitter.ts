@@ -7497,6 +7497,7 @@ class LlEmitter {
             const lw = B.newLabel("rks.w");
             B.condBr(pend, join, lw);
             B.startBlock(lw);
+            this.noteKeyListWrite(obj.name, s.shapeId, f.name, false);
             const { ptr, type } = this.recordFieldPtr(obj.name, s.shapeId, f.name);
             if (isRefCounted(type)) {
               const old = B.tmp();
@@ -7531,6 +7532,7 @@ class LlEmitter {
           const ln = B.newLabel("rks.n");
           B.condBr(hit, lh, ln);
           B.startBlock(lh);
+          this.noteKeyListWrite(obj.name, s.shapeId, f.name, false);
           const { ptr, type } = this.recordFieldPtr(obj.name, s.shapeId, f.name);
           if (isRefCounted(type)) {
             const old = B.tmp();

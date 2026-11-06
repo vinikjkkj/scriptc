@@ -4780,16 +4780,25 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
       const lit = E.internLiteral(f.name);
       const member = `r->${mangleField(f.name)}`;
       d.push(`  if (scr_str_eq(k, (ScrStr *)&${lit})) { /* ${f.name} */`);
+      // A shape with a KEY LIST: a keyed write of an ABSENT key appends it (recordSet's row, asked before the slot changes).
+      const noteList = (): void => {
+        if (!shape.keyList) return;
+        const ord = shape.fields.findIndex((x) => x.name === f.name);
+        const cond = ownPresentCondC(shape, f.name, "r", E.undefinedArmTag(f.type), false);
+        if (cond !== null) d.push(`    if (!(${cond})) scr_ord_note(r->${KEYLIST_MEMBER}, ${ord});`);
+      };
       if (iv.kind === "dyn" && shape.indexValue) {
         const keyLit = cStringLiteral(Buffer.from(f.name, "utf8"));
         d.push(`    ScrDynPath p = { NULL, ${keyLit}, 0 };`);
         d.push(`    ${cDecl(f.type, "nv")} = ${E.dynCheckHelper(f.type)}(v, &p);`);
         d.push(`    scr_dyn_release(v);`);
         d.push(`    if (scr_exc_pending()) return; /* mismatched write: TypeError, field untouched */`);
+        noteList();
         d.push(`    ${isRefCounted(f.type) ? `if (${member}) ${releaseCallC(f.type, member)};` : `(void)0;`}`);
         d.push(`    ${member} = nv;`);
       } else {
         // typeEquals(f.type, iv) — the frontend fences everything else.
+        noteList();
         if (isRefCounted(f.type)) {
           d.push(`    if (${member}) ${releaseCallC(f.type, member)};`);
         }

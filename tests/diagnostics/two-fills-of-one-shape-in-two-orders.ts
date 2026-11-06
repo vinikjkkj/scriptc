@@ -15,54 +15,25 @@
 // compiler CAN name and that no single declared order can serve.
 //
 // The agreeing and re-pickable halves cannot appear in this file, because
-// they compile: tests/corpus/7796 carries them.
+// they compile: tests/corpus/7796 carries them. So does the disagreement
+// itself - two fills in two orders, enumerated in each instance's own order
+// - in tests/corpus/24430. What stays refused is the instance leaving its
+// type: the widened slot cannot carry the order the fill made.
 
-// ---- 1. TWO fills of ONE shape, in two orders. Either order alone would
-// become the shape's; together there is no order that is right for both, so
-// the re-pick stands down and each fill is measured against the order the
-// shape kept. The hint names both.
+// ---- 1. TWO fills of ONE shape in two orders, each WIDENED into an 'unknown' slot.
 type Name = "omega" | "alpha" | "zeta";
-
-function forward(): string {
+function forward(): unknown {
     const view = {} as Record<Name, number | undefined>;
     for (const k of ["omega", "alpha", "zeta"]) {
         view[k as Name] = 1;
     }
-    return Object.keys(view).join(",");
+    return view;
 }
-
-function backward(): string {
+function backward(): unknown {
     const view = {} as Record<Name, number | undefined>;
     for (const k of ["zeta", "alpha", "omega"]) {
         view[k as Name] = 2;
     }
-    return Object.keys(view).join(",");
+    return view;
 }
-
-console.log(forward(), backward());
-
-// ---- 2. The same disagreement reached through JSON.stringify rather than
-// Object.keys, and with the fill order taken from a RECORD's enumeration
-// instead of a literal array. `SOURCE` enumerates its own literal's order,
-// which is not the order the second fill uses.
-type Slot = "north" | "south";
-
-const SOURCE: Record<Slot, number> = { south: 1, north: 2 };
-
-function copied(): string {
-    const out = {} as Record<Slot, number | undefined>;
-    for (const [k, v] of Object.entries(SOURCE)) {
-        out[k as Slot] = v;
-    }
-    return JSON.stringify(out);
-}
-
-function reversed(): string {
-    const out = {} as Record<Slot, number | undefined>;
-    for (const k of ["north", "south"]) {
-        out[k as Slot] = 9;
-    }
-    return JSON.stringify(out);
-}
-
-console.log(copied(), reversed());
+console.log(Object.keys(forward() as object).join(","), Object.keys(backward() as object).join(","));
