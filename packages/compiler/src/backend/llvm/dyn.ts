@@ -2746,8 +2746,23 @@ export class LlDyn {
         host.declare(`declare void @scr_box_set_ref(ptr, ptr)`);
         host.declare(`declare void @scr_box_set_thunk_fn(ptr, ptr)`);
         host.declare(`declare ptr @scr_closure_retain_v(ptr)`);
+        // An engine function (or bound engine method) crossing again is the adapter it crossed as: remembered by the engine value.
+        if (host.engineModule) {
+          host.declare(`declare ptr @scr_dyn_fn_adapter_find(ptr, ptr)`);
+          host.declare(`declare void @scr_dyn_fn_adapter_remember(ptr, ptr, ptr)`);
+          const hitFn = B.tmp();
+          const hitNull = B.tmp();
+          B.line(`${hitFn} = call ptr @scr_dyn_fn_adapter_find(ptr %d, ptr @${adapter})`);
+          B.line(`${hitNull} = icmp eq ptr ${hitFn}, null`);
+          const lMiss = B.newLabel("dcf.am");
+          const lHit = B.newLabel("dcf.ah");
+          B.condBr(hitNull, lMiss, lHit);
+          B.startBlock(lHit);
+          B.terminate(`ret ptr ${hitFn}`);
+          B.startBlock(lMiss);
+        }
         const a = B.tmp();
-        B.line(`${a} = call ptr @scr_closure_new(ptr @${adapter}, i64 2)`);
+        B.line(`${a} = call ptr @scr_closure_new(ptr @${adapter}, i64 ${host.engineModule ? 3 : 2})`);
         const capp = B.tmp();
         // caps[0] is one WHOLE %ScrClosure past the base — never a byte
         // literal: the struct grew a field and every hardcoded 32 in this
@@ -2779,6 +2794,7 @@ export class LlDyn {
         B.line(`${thp} = getelementptr inbounds i8, ptr %d, i64 24 ; ->v.fn.thunk`);
         B.line(`${th} = load ptr, ptr ${thp}`);
         B.line(`call void @scr_box_set_thunk_fn(ptr ${tbox}, ptr ${th})`);
+        if (host.engineModule) B.line(`call void @scr_dyn_fn_adapter_remember(ptr %d, ptr @${adapter}, ptr ${a})`);
         B.terminate(`ret ptr ${a}`);
         break;
       }
