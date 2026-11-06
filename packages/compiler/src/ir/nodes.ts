@@ -12502,7 +12502,10 @@ export function moduleUsesDynAsync(mod: IrModule): boolean {
 /** The SCR_ENGINE link switch: a non-foldable Function-constructor site
  * lowered to the engine (lower-engine-fn.ts), i.e. a jsOp globalGet of
  * `Function`. Every other module keeps its static link line. */
+const ENGINE_FN_MEMO = new WeakMap<IrModule, boolean>();
 export function moduleUsesEngineFn(mod: IrModule): boolean {
+  const memo = ENGINE_FN_MEMO.get(mod);
+  if (memo !== undefined) return memo;
   let found = false;
   let sawGetPrototypeOf = false;
   let sawConstructorRead = false;
@@ -12530,7 +12533,9 @@ export function moduleUsesEngineFn(mod: IrModule): boolean {
   // `proto.constructor(...)` call, or a `constructor` read in a program that calls a dynamic function value. Taking the prototype and
   // reading or comparing `.constructor` (the common identity test) never needs the engine.
   const viaCtor = sawGetPrototypeOf && (sawConstructorCall || (sawConstructorRead && sawDynCall));
-  return found || viaCtor;
+  const result = found || viaCtor;
+  ENGINE_FN_MEMO.set(mod, result);
+  return result;
 }
 
 /** stream.destroyDyn on the IR: the dyn destroy unit (scr_stream_dyn.c). */
