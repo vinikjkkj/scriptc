@@ -6737,6 +6737,8 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
  * so this answer can never depend on whether the program happens to make
  * a dyn method call somewhere else. */
 ScrDyn *scr_dyn_intrinsic_method_get(ScrDyn *recv, const ScrStr *key);
+ScrDyn *scr_dyn_object_ctor(void); /* the `Object` class value (+1); one function object per process */
+ScrDyn *scr_dyn_array_ctor(void);  /* the `Array` class value (+1); one function object per process */
 /* `k in o` over the same set. `in` walks the prototype chain, so every
  * name the READ above answers has to be a name `in` reports — otherwise
  * the close would trade one disagreement for another. Borrows; never
