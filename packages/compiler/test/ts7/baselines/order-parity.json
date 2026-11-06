@@ -13075,32 +13075,26 @@
    "diags": []
   },
   "<repo>/tests/corpus/24332-update-filter-over-an-untyped-schema-reads-and-writes.ts": {
-    "order": [
-      "<repo>/tests/corpus/24332-update-filter-over-an-untyped-schema-reads-and-writes.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/24340-static-this-names-the-declaring-class-js.js": {
-    "order": [
-      "<repo>/tests/corpus/24340-static-this-names-the-declaring-class-js.js"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/corpus/24341-static-this-names-the-declaring-class.ts": {
-    "order": [
-      "<repo>/tests/corpus/24341-static-this-names-the-declaring-class.ts"
-    ],
-    "diags": []
-  },
-  "<repo>/tests/diagnostics/static-this-with-a-receiver-other-than-the-declaring-class-stays-refused.ts": {
-    "order": [
-      "<repo>/tests/diagnostics/static-this-with-a-receiver-other-than-the-declaring-class-stays-refused.ts"
-    ],
-    "diags": []
+   "order": [
+    "<repo>/tests/corpus/24332-update-filter-over-an-untyped-schema-reads-and-writes.ts"
+   ],
+   "diags": []
   },
   "<repo>/tests/corpus/2434-deferred-init-fields.ts": {
    "order": [
     "<repo>/tests/corpus/2434-deferred-init-fields.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24340-static-this-names-the-declaring-class-js.js": {
+   "order": [
+    "<repo>/tests/corpus/24340-static-this-names-the-declaring-class-js.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24341-static-this-names-the-declaring-class.ts": {
+   "order": [
+    "<repo>/tests/corpus/24341-static-this-names-the-declaring-class.ts"
    ],
    "diags": []
   },
@@ -13308,6 +13302,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/2443-union-literal-shadow-narrowing.ts": {
+   "order": [
+    "<repo>/tests/corpus/2443-union-literal-shadow-narrowing.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/24430-two-fills-of-one-shape-in-two-orders-enumerate-in-fill-order.ts": {
    "order": [
     "<repo>/tests/corpus/24430-two-fills-of-one-shape-in-two-orders-enumerate-in-fill-order.ts"
@@ -13356,9 +13356,9 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/2443-union-literal-shadow-narrowing.ts": {
+  "<repo>/tests/corpus/24438-for-in-over-a-dynamic-receiver-lists-a-key-that-holds-undefined.ts": {
    "order": [
-    "<repo>/tests/corpus/2443-union-literal-shadow-narrowing.ts"
+    "<repo>/tests/corpus/24438-for-in-over-a-dynamic-receiver-lists-a-key-that-holds-undefined.ts"
    ],
    "diags": []
   },
@@ -13399,6 +13399,66 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24490-prototype-data-named-call-read-through-untyped-values.js": {
+   "order": [
+    "<repo>/tests/corpus/24490-prototype-data-named-call-read-through-untyped-values.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24491-prototype-data-named-call-two-unrelated-classes.js": {
+   "order": [
+    "<repo>/tests/corpus/24491-prototype-data-named-call-two-unrelated-classes.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24492-protobuf-shaped-encode-reads-optional-call-field.js": {
+   "order": [
+    "<repo>/tests/corpus/24492-protobuf-shaped-encode-reads-optional-call-field.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24493-prototype-data-dynamic-key-read-on-class-instance.js": {
+   "order": [
+    "<repo>/tests/corpus/24493-prototype-data-dynamic-key-read-on-class-instance.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24494-prototype-data-own-versus-inherited-has-own.js": {
+   "order": [
+    "<repo>/tests/corpus/24494-prototype-data-own-versus-inherited-has-own.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24495-prototype-data-for-in-lists-inherited-names.js": {
+   "order": [
+    "<repo>/tests/corpus/24495-prototype-data-for-in-lists-inherited-names.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24496-prototype-data-own-undefined-hides-and-delete-reexposes.js": {
+   "order": [
+    "<repo>/tests/corpus/24496-prototype-data-own-undefined-hides-and-delete-reexposes.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24497-prototype-data-function-called-through-typed-and-untyped-receivers.js": {
+   "order": [
+    "<repo>/tests/corpus/24497-prototype-data-function-called-through-typed-and-untyped-receivers.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24498-for-in-visits-an-own-undefined-field-of-an-instance.js": {
+   "order": [
+    "<repo>/tests/corpus/24498-for-in-visits-an-own-undefined-field-of-an-instance.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24499-commander-shaped-generated-methods-beside-protobuf-shaped-decode.js": {
+   "order": [
+    "<repo>/tests/corpus/24499-commander-shaped-generated-methods-beside-protobuf-shaped-decode.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2450-private-instance-methods.ts": {
    "order": [
     "<repo>/tests/corpus/2450-private-instance-methods.ts"
@@ -13426,6 +13486,48 @@
   "<repo>/tests/corpus/2454-private-generator-methods.ts": {
    "order": [
     "<repo>/tests/corpus/2454-private-generator-methods.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24540-util-deprecate-wraps-a-variadic-prototype-method.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24540-util-deprecate-wraps-a-variadic-prototype-method.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24541-util-deprecate-codes-and-wrappers.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24541-util-deprecate-codes-and-wrappers.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24542-util-deprecate-process-no-deprecation.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24542-util-deprecate-process-no-deprecation.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24543-util-deprecate-throw-deprecation.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24543-util-deprecate-throw-deprecation.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24544-util-deprecate-trace-deprecation.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24544-util-deprecate-trace-deprecation.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24545-prototype-data-alias-copies-the-value-at-assignment.js": {
+   "order": [
+    "<repo>/tests/corpus/24545-prototype-data-alias-copies-the-value-at-assignment.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24546-util-deprecate-wraps-a-function-with-declared-parameters-and-arguments.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24546-util-deprecate-wraps-a-function-with-declared-parameters-and-arguments.cjs"
    ],
    "diags": []
   },
@@ -24761,6 +24863,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/static-this-with-a-receiver-other-than-the-declaring-class-stays-refused.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/static-this-with-a-receiver-other-than-the-declaring-class-stays-refused.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/stdlib-fence.ts": {
    "order": [
     "<repo>/tests/diagnostics/stdlib-fence.ts"
@@ -24872,6 +24980,90 @@
   "<repo>/tests/diagnostics/webcrypto-flow-unawaited-importkey.cjs": {
    "order": [
     "<repo>/tests/diagnostics/webcrypto-flow-unawaited-importkey.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/argv-env.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/argv-env.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/builtin-fn-value.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/builtin-fn-value.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/child-stdio.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/child-stdio.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/fenced.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/fenced.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/import-fences.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/import-fences.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC1010",
+     "message": "the 'v8' module (it observes V8 engine internals — heap statistics and snapshots, GC and CPU profiles, serialize/deserialize — and a compiled binary embeds no V8 engine to observe) is not supported yet",
+     "loc": {
+      "file": "<repo>/tests/fixtures/node-types/import-fences.ts",
+      "start": 422,
+      "end": 461
+     },
+     "milestone": "M4",
+     "hint": "relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, and module modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported"
+    }
+   ]
+  },
+  "<repo>/tests/fixtures/node-types/path-os.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/path-os.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/pgwritable-state.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/pgwritable-state.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/server-address-states.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/server-address-states.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/stream-capture.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/stream-capture.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/fixtures/node-types/streams.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/streams.ts"
    ],
    "diags": []
   },
@@ -25428,192 +25620,6 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
-  },
-  "<repo>/tests/fixtures/node-types/argv-env.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/argv-env.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/builtin-fn-value.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/builtin-fn-value.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/child-stdio.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/child-stdio.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/fenced.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/fenced.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/import-fences.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/import-fences.ts"
-   ],
-   "diags": [
-    {
-     "code": "SC1010",
-     "message": "the 'v8' module (it observes V8 engine internals — heap statistics and snapshots, GC and CPU profiles, serialize/deserialize — and a compiled binary embeds no V8 engine to observe) is not supported yet",
-     "loc": {
-      "file": "<repo>/tests/fixtures/node-types/import-fences.ts",
-      "start": 422,
-      "end": 461
-     },
-     "milestone": "M4",
-     "hint": "relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, and module modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported"
-    }
-   ]
-  },
-  "<repo>/tests/fixtures/node-types/path-os.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/path-os.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/pgwritable-state.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/pgwritable-state.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/server-address-states.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/server-address-states.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/stream-capture.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/stream-capture.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/streams.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/streams.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24490-prototype-data-named-call-read-through-untyped-values.js": {
-   "order": [
-    "<repo>/tests/corpus/24490-prototype-data-named-call-read-through-untyped-values.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24491-prototype-data-named-call-two-unrelated-classes.js": {
-   "order": [
-    "<repo>/tests/corpus/24491-prototype-data-named-call-two-unrelated-classes.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24492-protobuf-shaped-encode-reads-optional-call-field.js": {
-   "order": [
-    "<repo>/tests/corpus/24492-protobuf-shaped-encode-reads-optional-call-field.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24493-prototype-data-dynamic-key-read-on-class-instance.js": {
-   "order": [
-    "<repo>/tests/corpus/24493-prototype-data-dynamic-key-read-on-class-instance.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24494-prototype-data-own-versus-inherited-has-own.js": {
-   "order": [
-    "<repo>/tests/corpus/24494-prototype-data-own-versus-inherited-has-own.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24495-prototype-data-for-in-lists-inherited-names.js": {
-   "order": [
-    "<repo>/tests/corpus/24495-prototype-data-for-in-lists-inherited-names.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24496-prototype-data-own-undefined-hides-and-delete-reexposes.js": {
-   "order": [
-    "<repo>/tests/corpus/24496-prototype-data-own-undefined-hides-and-delete-reexposes.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24497-prototype-data-function-called-through-typed-and-untyped-receivers.js": {
-   "order": [
-    "<repo>/tests/corpus/24497-prototype-data-function-called-through-typed-and-untyped-receivers.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24498-for-in-visits-an-own-undefined-field-of-an-instance.js": {
-   "order": [
-    "<repo>/tests/corpus/24498-for-in-visits-an-own-undefined-field-of-an-instance.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24499-commander-shaped-generated-methods-beside-protobuf-shaped-decode.js": {
-   "order": [
-    "<repo>/tests/corpus/24499-commander-shaped-generated-methods-beside-protobuf-shaped-decode.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24540-util-deprecate-wraps-a-variadic-prototype-method.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24540-util-deprecate-wraps-a-variadic-prototype-method.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24541-util-deprecate-codes-and-wrappers.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24541-util-deprecate-codes-and-wrappers.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24542-util-deprecate-process-no-deprecation.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24542-util-deprecate-process-no-deprecation.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24543-util-deprecate-throw-deprecation.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24543-util-deprecate-throw-deprecation.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24544-util-deprecate-trace-deprecation.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24544-util-deprecate-trace-deprecation.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24545-prototype-data-alias-copies-the-value-at-assignment.js": {
-   "order": [
-    "<repo>/tests/corpus/24545-prototype-data-alias-copies-the-value-at-assignment.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24546-util-deprecate-wraps-a-function-with-declared-parameters-and-arguments.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24546-util-deprecate-wraps-a-function-with-declared-parameters-and-arguments.cjs"
-   ],
-   "diags": []
   }
  }
 }
