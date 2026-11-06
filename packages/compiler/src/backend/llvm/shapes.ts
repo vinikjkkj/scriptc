@@ -570,6 +570,7 @@ export function emitOwnPresentLl(
   dropUndefined: boolean,
   orSlot = false,
 ): string | null {
+  if (shape.genResult === true && fieldName === "value" && !dropUndefined) return null;
   const struct = mangleRecordStruct(shape.id);
   const fieldIdx = shape.fields.findIndex((f) => f.name === fieldName);
   const armTest = (): string => {
