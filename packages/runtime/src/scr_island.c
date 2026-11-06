@@ -10345,6 +10345,20 @@ ScrStr *scr_jsval_exit_str(ScrJsval *v) {
   return isl_js_to_str(v->v);
 }
 
+/* True when the engine value's `constructor` IS the engine's global Uint8Array: a plain Uint8Array and not a subclass of it. The
+ * native copy of such a value is stamped SCR_BF_PLAIN (its `.constructor` is Uint8Array, as in Node); a subclass instance keeps no
+ * flavor, and its `.constructor` read refuses by name rather than guess. */
+static bool isl_is_plain_u8(JSValueConst v) {
+  JSValue ctor = JS_GetPropertyStr(isl_ctx, v, "constructor");
+  JSValue g = JS_GetGlobalObject(isl_ctx);
+  JSValue u8 = JS_GetPropertyStr(isl_ctx, g, "Uint8Array");
+  bool same = !JS_IsException(ctor) && !JS_IsException(u8) && JS_IsStrictEqual(isl_ctx, ctor, u8);
+  JS_FreeValue(isl_ctx, ctor);
+  JS_FreeValue(isl_ctx, u8);
+  JS_FreeValue(isl_ctx, g);
+  return same;
+}
+
 /* Validated Uint8Array exit: the engine value must be a Uint8Array
  * (engine Buffers are Uint8Array subclasses and pass — matching the
  * static world, where Buffer IS bytes<u8>); the payload COPIES out as a
@@ -10367,6 +10381,7 @@ ScrBytes *scr_jsval_exit_bytes(ScrJsval *v) {
   }
   ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, (double)n);
   if (n > 0) memcpy(b->data, data, n);
+  if (isl_is_plain_u8(v->v)) b->flavor = SCR_BF_PLAIN;
   return b;
 }
 
@@ -10409,6 +10424,7 @@ ScrBytes *scr_jsval_exit_bin(ScrJsval *v) {
   if (!base || off + len > asz) len = 0;
   ScrBytes *b = scr_bytes_new((ScrBytesElem)k, (double)(bpe > 0 ? len / bpe : 0));
   if (len > 0) memcpy(b->data, base + off, len);
+  if ((ScrBytesElem)k == SCR_BYTES_U8 && isl_is_plain_u8(v->v)) b->flavor = SCR_BF_PLAIN;
   return b;
 }
 
