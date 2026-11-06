@@ -7269,14 +7269,21 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       L.diagSink = saved;
       return null;
     };
-    const recv = probeLower(L, access.expression);
+    let recv = probeLower(L, access.expression);
+    // A class instance reached through a COMPUTED key (`o.q[key]()` where `o.q` is a typed instance): the key names a member only at run
+    // time, so the call is a dynamic invocation on the instance's box -- the member lookup binds `this`, which the callee-as-value
+    // path (read the member, then call it with no receiver) would lose.
+    if (recv !== null && recv.type.kind === "object" && recv.type.className !== RUNTIME_EMITTER_CLASS && L.classes.get(recv.type.className)?.decl && canBoxClassIntoDyn(recv.type.className)) {
+      const boxed = L.coerceToExpected(recv, DYN);
+      if (boxed.type.kind === "dyn") recv = boxed;
+    }
     if (recv?.type.kind !== "dyn") return decline();
     const rawKey = probeLower(L, access.argumentExpression);
     if (rawKey === null) return decline();
     const key: IrExpr | null =
       rawKey.type.kind === "string"
         ? rawKey
-        : rawKey.type.kind === "f64"
+        : rawKey.type.kind === "f64" || rawKey.type.kind === "dyn"
           ? { kind: "toString", operand: rawKey, type: STRING, loc: rawKey.loc }
           : null;
     if (key === null) return decline();
