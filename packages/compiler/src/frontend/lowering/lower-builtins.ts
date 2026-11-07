@@ -7004,6 +7004,11 @@ let digestInputValueDispatches = 0;
    * its fences) keeps going. */
   export function lowerBuiltinExtraProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
     if (expr.questionDotToken && !L.chainHandled.has(expr)) return null;
+    // `Object.prototype` as a value: the one immortal object every plain object's getPrototypeOf answers, so the identity tests
+    // (`Object.getPrototypeOf(v) === Object.prototype`) hold. Members it really carries are not modelled on it.
+    if (expr.name.text === "prototype" && ts.isIdentifier(expr.expression) && L.isStdlibGlobal(expr.expression, "Object") && !L.dynamic) {
+      return { kind: "libCall", fn: "dyn.objectPrototype", args: [], type: DYN, loc: locOf(expr) };
+    }
     // decoder.encoding on a StringDecoder-typed receiver: the record's
     // canonical-name field (construction folded the aliases — exactly what
     // Node's normalized `.encoding` answers). It is a VISIBLE key, and

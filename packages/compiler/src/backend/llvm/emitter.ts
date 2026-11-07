@@ -826,6 +826,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "insp.customRegister": "scr_insp_custom_register",
   "insp.customOpts": "scr_insp_custom_opts",
   "insp.customResult": "scr_insp_custom_result",
+  "dyn.getPrototypeOf": "scr_dyn_get_prototype_of",
+  "dyn.objectPrototype": "scr_dyn_object_prototype",
   "insp.optDepth": "scr_insp_opt_depth",
   "insp.shown": "scr_insp_shown",
   "insp.rem": "scr_insp_rem",

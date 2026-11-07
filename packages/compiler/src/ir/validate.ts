@@ -1600,6 +1600,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "insp.customRegister": { argTypes: [DYN, DYN], result: VOID },
   "insp.customOpts": { argTypes: [DYN], result: DYN },
   "insp.customResult": { argTypes: [DYN, F64, F64], result: STRING },
+  "dyn.getPrototypeOf": { argTypes: [DYN], result: DYN },
+  "dyn.objectPrototype": { argTypes: [], result: DYN },
   "insp.optDepth": { argTypes: [], result: F64 },
   "insp.shown": { argTypes: [F64], result: F64 },
   "insp.rem": { argTypes: [F64], result: F64 },

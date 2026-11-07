@@ -6614,6 +6614,8 @@ export type IrLibFn =
   | "insp.customRegister"
   | "insp.customOpts"
   | "insp.customResult"
+  | "dyn.getPrototypeOf"
+  | "dyn.objectPrototype"
   | "insp.optDepth"
   | "insp.shown"
   | "insp.rem"
@@ -14723,6 +14725,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "insp.format",
   // a custom inspect result that is not a string is inspected (the dyn walk may fence)
   "insp.customResult",
+  // Object.getPrototypeOf(null | undefined) throws the TypeError
+  "dyn.getPrototypeOf",
   "dyn.defineProps",
   "dyn.defineProp",
   "dyn.captureStack",

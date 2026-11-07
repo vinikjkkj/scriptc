@@ -1993,6 +1993,80 @@ ScrDyn *scr_dyn_new_arr_ctor1(ScrDyn *v) {
 }
 
 ScrDyn *scr_dyn_new_obj(void) { return scr_dyn_alloc(SCR_DYN_OBJ); }
+
+/* INTRINSIC PROTOTYPE VALUES. `Object.prototype`, `Array.prototype`, a class's `C.prototype` and the rest are not
+ * modelled as objects with their members, but a program that asks `Object.getPrototypeOf(x) === Object.prototype` (or
+ * compares two prototypes) needs them to be VALUES with identity. Each is one immortal empty object, minted on first use:
+ * identity, `typeof`, `=== null` and the plain-object test answer as in Node; a read of a member the intrinsic really
+ * carries (`Object.prototype.hasOwnProperty`) is NOT answered by them (it reads as absent), which is why the lowering only
+ * hands them out where the program compares or passes them. */
+static ScrDyn *scr_dyn_object_prototype_mint(void);
+static ScrDyn *scr_dyn_intrinsic_slot(ScrDyn **slot) {
+  if (*slot == NULL) {
+    ScrDyn *d = scr_dyn_new_obj();
+    d->rc = SIZE_MAX;
+#ifdef SCR_RC_AUDIT
+    scr_live_dyns--;
+    scr_dyn_live_by_kind[SCR_DYN_OBJ]--;
+#endif
+    *slot = d;
+    /* Every intrinsic other than Object.prototype itself inherits from it. */
+    scr_dyn_obj_set_proto(d, scr_dyn_object_prototype_mint());
+  }
+  return *slot;
+}
+
+static ScrDyn *scr_dyn_object_prototype_mint(void) {
+  static ScrDyn *object_proto;
+  if (object_proto == NULL) {
+    ScrDyn *d = scr_dyn_new_obj_null_proto(); /* Object.prototype's own [[Prototype]] is null */
+    d->rc = SIZE_MAX;
+#ifdef SCR_RC_AUDIT
+    scr_live_dyns--;
+    scr_dyn_live_by_kind[SCR_DYN_OBJ]--;
+#endif
+    object_proto = d;
+  }
+  return object_proto;
+}
+
+ScrDyn *scr_dyn_object_prototype(void) { return scr_dyn_object_prototype_mint(); }
+
+/* Object.getPrototypeOf(d), +1. A null-prototype dictionary answers null; an object with its own [[Prototype]] (a
+ * constructor's instance, Object.create(p)) answers that object; a plain object Object.prototype; every other kind its
+ * intrinsic (one per kind, one per class for a boxed class instance). null and undefined throw Node's TypeError. */
+ScrDyn *scr_dyn_get_prototype_of(const ScrDyn *d) {
+  static ScrDyn *kind_protos[64];
+  static const ScrDynClass *class_keys[64];
+  static ScrDyn *class_protos[64];
+  static size_t class_n;
+  switch (d->kind) {
+    case SCR_DYN_NULL:
+    case SCR_DYN_UNDEF:
+      scr_throw_error(SCR_ERR_TYPE, scr_str_new("Cannot convert undefined or null to object", 42));
+      return scr_dyn_undefined();
+    case SCR_DYN_OBJ: {
+      if (scr_dyn_is_null_proto(d)) return scr_dyn_new_null();
+      ScrDyn *own = scr_dyn_obj_proto_ref(d);
+      if (own != NULL) return own;
+      return scr_dyn_object_prototype();
+    }
+    case SCR_DYN_OBJINST: {
+      const ScrDynClass *cls = scr_dyn_objinst_class_of(d);
+      for (size_t i = 0; i < class_n; i++) if (class_keys[i] == cls) return scr_dyn_retain(class_protos[i]);
+      if (class_n < 64) {
+        class_keys[class_n] = cls;
+        class_protos[class_n] = NULL;
+        ScrDyn *p = scr_dyn_intrinsic_slot(&class_protos[class_n]);
+        class_n++;
+        return p;
+      }
+      return scr_dyn_object_prototype();
+    }
+    default:
+      return scr_dyn_retain(scr_dyn_intrinsic_slot(&kind_protos[(unsigned)d->kind < 64 ? (unsigned)d->kind : 63]));
+  }
+}
 ScrDyn *scr_dyn_new_obj_null_proto(void) {
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_OBJ);
   d->null_proto = true;
