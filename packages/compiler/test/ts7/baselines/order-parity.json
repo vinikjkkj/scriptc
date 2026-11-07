@@ -26009,6 +26009,36 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
+  },
+  "<repo>/tests/corpus/24687-replacing-a-declared-prototype-method-with-a-wrapper-that-writes-through-this.js": {
+   "order": [
+    "<repo>/tests/corpus/24687-replacing-a-declared-prototype-method-with-a-wrapper-that-writes-through-this.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24688-late-method-read-above-its-assignment-takes-the-run-time-prototype-table.js": {
+   "order": [
+    "<repo>/tests/corpus/24688-late-method-read-above-its-assignment-takes-the-run-time-prototype-table.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24689-prototype-data-read-above-its-assignment-takes-the-run-time-prototype-table.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24689-prototype-data-read-above-its-assignment-takes-the-run-time-prototype-table.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24690-late-method-calls-before-and-after-its-install-statement-reach-the-current-member.js": {
+   "order": [
+    "<repo>/tests/corpus/24690-late-method-calls-before-and-after-its-install-statement-reach-the-current-member.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24691-late-method-missing-member-error-names-the-call-site-spelling.js": {
+   "order": [
+    "<repo>/tests/corpus/24691-late-method-missing-member-error-names-the-call-site-spelling.js"
+   ],
+   "diags": []
   }
  }
 }
