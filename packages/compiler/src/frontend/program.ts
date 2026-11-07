@@ -563,7 +563,7 @@ export function loadProgram(
  *
  * The twin goes BEFORE its declaration in evaluation order: its top-level
  * statements must have run before anything reads the values. */
-function declTwinOf(program: ts.Program, sf: ts.SourceFile): ts.SourceFile | undefined {
+export function declTwinOf(program: ts.Program, sf: ts.SourceFile): ts.SourceFile | undefined {
   if (!sf.fileName.endsWith(".d.ts")) return undefined;
   const stem = sf.fileName.slice(0, -".d.ts".length);
   for (const ext of [".js", ".mjs", ".cjs"]) {
@@ -3743,7 +3743,7 @@ function preflight7(load: LoadResult): {
             // each call into it refused "ships only a declaration file".
             if (provenanceSourcesActive() && isProvenanceSpecifier(spec)) {
               const dep = resolveProjectImportSf7(program, sf, spec);
-              if (dep !== null && !dep.isDeclarationFile && state.get(dep) === undefined && !dynDeps.includes(dep)) {
+              if (dep !== null && state.get(dep) === undefined && !dynDeps.includes(dep)) {
                 dynDeps.push(dep);
               }
             }
@@ -4166,6 +4166,18 @@ export function orderedImportsOf(
     out.push({ stmt, dep: isJson ? null : dep });
   }
   return out;
+}
+
+/** The implementation twin a dynamic `import("<provenance package>")` reaches when the
+ * mapped entry is a hand-written `.d.ts` with its `.js` beside it (an authored-JavaScript
+ * package such as mysql2/promise): the twin is the program module whose namespace the
+ * import() site builds, the way --npm-static's entry is. Null for every other specifier. */
+export function provenanceTwinDepSf7(program: ts.Program, sf: ts.SourceFile, spec: string): ts.SourceFile | null {
+  if (isRelativeSpecifier(spec) || spec.startsWith("node:") || spec.startsWith("#")) return null;
+  if (!isProvenanceSpecifier(spec)) return null;
+  const dep = resolveProjectImportSf7(program, sf, spec);
+  if (dep === null || !dep.isDeclarationFile) return null;
+  return declTwinOf(program, dep) ?? null;
 }
 
 /** The program source file a bare specifier reaches when it names an
