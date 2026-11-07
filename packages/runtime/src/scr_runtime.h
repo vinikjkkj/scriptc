@@ -6088,6 +6088,8 @@ extern ScrDyn *(*scr_promise_construct_hook)(const ScrDyn *args);
 extern ScrDyn *(*scr_promise_static_hook)(const char *key, size_t key_len);
 /* The constructor value a promise's prototype names (`Object.getPrototypeOf(p).constructor`): +1. */
 extern ScrDyn *(*scr_promise_ctor_provider)(void);
+void scr_dyn_resolve_into_pub(ScrPromise *p, ScrDyn *v);
+void scr_promise_make_resolvers(ScrPromise *p, ScrDyn **res, ScrDyn **rej);
 
 /* `v instanceof f` — JS's OrdinaryHasInstance over the chain `new`
  * built: is the object `f.prototype` answers anywhere in v's
