@@ -7965,10 +7965,10 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
       recvNode = expr.expression;
     } else if (
       ts.isCallExpression(expr) &&
-      ts.isPropertyAccessExpression(expr.expression) &&
+      (ts.isPropertyAccessExpression(expr.expression) || ts.isElementAccessExpression(expr.expression)) &&
       expr.expression.questionDotToken
     ) {
-      dotNode = expr.expression; // a?.m()
+      dotNode = expr.expression; // a?.m() / a?.[k]()
       recvNode = expr.expression.expression;
     } else if (
       (ts.isPropertyAccessExpression(expr) || ts.isElementAccessExpression(expr)) &&
@@ -15759,6 +15759,26 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
   }
 
   function wellKnownSymbolFieldIn(L: Lowerer, keyNode: ts.Expression, shape: IrRecordShape): string | null {
+    // A module-level UNIQUE-symbol const key (`const kDispose: unique symbol = ...`) over a record whose declared
+    // member the checker late-bound as `__@kDispose@<id>`: the slot is that member when the member's own
+    // declaration is spelled by the SAME const (one resolved symbol), so an unrelated const that merely shares
+    // the name never matches. Anything else keeps the refusal.
+    if (ts.isIdentifier(keyNode) && ts.isElementAccessExpression(keyNode.parent) && (L.typeOf(keyNode).flags & ts.TypeFlags.UniqueESSymbol) !== 0) {
+      const keySym = L.resolveValueSymbol(keyNode);
+      const recvT = L.checker.getNonNullableType(L.typeOf(keyNode.parent.expression));
+      const prefix = `__@${keySym?.name ?? keyNode.text}@`;
+      const hits = shape.fields.filter((f) => f.name.startsWith(prefix) && /@\d+$/.test(f.name));
+      if (keySym && hits.length === 1) {
+        const prop = L.checker.getPropertiesOfType(recvT).find((q) => q.name === hits[0]!.name);
+        const same = prop !== undefined && L.checker.declarationsOf(prop).some((d) => {
+          const nm = (d as ts.Node & { name?: ts.Node }).name;
+          if (nm === undefined || !ts.isComputedPropertyName(nm) || !ts.isIdentifier(nm.expression)) return false;
+          const s2 = L.resolveValueSymbol(nm.expression);
+          return s2 !== null && s2 === keySym;
+        });
+        if (same) return hits[0]!.name;
+      }
+    }
     if (!ts.isPropertyAccessExpression(keyNode) || !ts.isIdentifier(keyNode.name)) return null;
     if (stdlibGlobalNameOf(L, keyNode.expression) !== "Symbol") return null;
     const prefix = `__@${keyNode.name.text}@`;
