@@ -13920,6 +13920,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24686-increment-of-a-number-or-undefined-field-in-expression-position.js": {
+   "order": [
+    "<repo>/tests/corpus/24686-increment-of-a-number-or-undefined-field-in-expression-position.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2470-mockable-module-shape.js": {
    "order": [
     "<repo>/tests/corpus/2470-mockable-module-shape.js"
