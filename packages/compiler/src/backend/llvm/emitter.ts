@@ -7370,13 +7370,16 @@ class LlEmitter {
         const acc = elemAccess(s.arr.type.elem);
         if (acc === "ref") this.moveTemp(v);
         const argTy = acc === "f64" ? "double" : acc === "bool" ? "i1" : "ptr";
+        const fz = s.frozenGuard === undefined ? "" : s.frozenGuard === "strict" ? "_fz" : "_fzs";
         if (s.holeGrow) {
-          this.declare(`declare void @scr_arr_set_f64_hole(ptr, double, double)`);
-          B.line(`call void @scr_arr_set_f64_hole(ptr ${arr.name}, double ${idx.name}, double ${v.name})`);
+          this.declare(`declare void @scr_arr_set_f64_hole${fz}(ptr, double, double)`);
+          B.line(`call void @scr_arr_set_f64_hole${fz}(ptr ${arr.name}, double ${idx.name}, double ${v.name})`);
+          if (s.frozenGuard === "strict") this.emitPendingCheck();
           break;
         }
-        this.declare(`declare void @scr_arr_set_${acc}(ptr, double, ${argTy === "i1" ? "i1 zeroext" : argTy})`);
-        B.line(`call void @scr_arr_set_${acc}(ptr ${arr.name}, double ${idx.name}, ${argTy} ${v.name})`);
+        this.declare(`declare void @scr_arr_set_${acc}${fz}(ptr, double, ${argTy === "i1" ? "i1 zeroext" : argTy})`);
+        B.line(`call void @scr_arr_set_${acc}${fz}(ptr ${arr.name}, double ${idx.name}, ${argTy} ${v.name})`);
+        if (s.frozenGuard === "strict") this.emitPendingCheck();
         break;
       }
       case "arrayClear": {
@@ -7391,11 +7394,15 @@ class LlEmitter {
         if (absentLl === "null") {
           // The TOMBSTONE (Node's null, not a hole): marks the array so the hole-aware
           // consumers refuse it loudly.
-          this.declare(`declare void @scr_arr_tombstone(ptr, double)`);
-          B.line(`call void @scr_arr_tombstone(ptr ${arr.name}, double ${idx.name})`);
+          const tfz = s.frozenGuard === undefined ? "" : s.frozenGuard === "strict" ? "_fz" : "_fzs";
+          this.declare(`declare void @scr_arr_tombstone${tfz}(ptr, double)`);
+          B.line(`call void @scr_arr_tombstone${tfz}(ptr ${arr.name}, double ${idx.name})`);
+          if (s.frozenGuard === "strict") this.emitPendingCheck();
         } else {
-          this.declare(`declare void @scr_arr_set_ref(ptr, double, ptr)`);
-          B.line(`call void @scr_arr_set_ref(ptr ${arr.name}, double ${idx.name}, ptr ${absentLl})`);
+          const rfz = s.frozenGuard === undefined ? "" : s.frozenGuard === "strict" ? "_fz" : "_fzs";
+          this.declare(`declare void @scr_arr_set_ref${rfz}(ptr, double, ptr)`);
+          B.line(`call void @scr_arr_set_ref${rfz}(ptr ${arr.name}, double ${idx.name}, ptr ${absentLl})`);
+          if (s.frozenGuard === "strict") this.emitPendingCheck();
         }
         break;
       }
@@ -15203,6 +15210,15 @@ class LlEmitter {
         const vs = e.args.map((a) => this.emitExpr(a));
         if (acc === "ref") vs.forEach((v) => this.moveTemp(v));
         let last = "";
+        if (e.frozenGuard !== undefined && vs.length === 1) {
+          // The guarded push of a program that freezes arrays of this type (a frozen array throws in any code).
+          const argTyG = acc === "f64" ? "double" : acc === "bool" ? "i1" : "ptr";
+          this.declare(`declare double @scr_arr_push_${acc}_fz(ptr, ${argTyG === "i1" ? "i1 zeroext" : argTyG})`);
+          const gt = B.tmp();
+          B.line(`${gt} = call double @scr_arr_push_${acc}_fz(ptr ${r.name}, ${argTyG} ${vs[0]!.name})`);
+          this.emitPendingCheck();
+          return { name: gt, type: e.type };
+        }
         for (const v of vs) last = this.arrPush(r.name, acc, v.name);
         if (last !== "") return { name: last, type: e.type };
         this.declare(`declare double @scr_arr_len(ptr)`);

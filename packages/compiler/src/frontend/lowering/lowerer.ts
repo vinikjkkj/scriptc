@@ -3718,6 +3718,8 @@ export class Lowerer {
    * freezes no array, which is what keeps every other program free of the guards below. */
   frozenArrayTypes: IrType[] = [];
 
+
+
   /** Set when the program freezes a DYN array (dyn.freezeArr): the dyn write paths then tell sloppy callers from strict ones (the Sloppy variants of keySet and keyDelete). */
   dynArrayFrozen = false;
 
@@ -3786,30 +3788,9 @@ export class Lowerer {
             loc,
           };
         };
-        if (o.kind === "arraySet" && !done.has(o) && frozenType((o["arr"] as IrExpr).type)) {
-          done.add(o);
-          const stmts: IrStmt[] = [];
-          const a = local(o["arr"] as IrExpr, stmts);
-          const i = local(o["index"] as IrExpr, stmts);
-          const v = local(o["value"] as IrExpr, stmts);
-          const inner: IrStmt = { ...(o as object), arr: a(), index: i(), value: v() } as unknown as IrStmt;
-          done.add(inner);
-          replace(o, ignorable(inner, a, 9, i(), stmts));
-          seen.delete(o);
-          visit(o);
-          return;
-        }
-        if (o.kind === "arrayClear" && !done.has(o) && frozenType((o["arr"] as IrExpr).type)) {
-          done.add(o);
-          const stmts: IrStmt[] = [];
-          const a = local(o["arr"] as IrExpr, stmts);
-          const i = local(o["index"] as IrExpr, stmts);
-          const inner: IrStmt = { ...(o as object), arr: a(), index: i() } as unknown as IrStmt;
-          done.add(inner);
-          replace(o, ignorable(inner, a, 11, i(), stmts));
-          seen.delete(o);
-          visit(o);
-          return;
+        if ((o.kind === "arraySet" || o.kind === "arrayClear") && frozenType((o["arr"] as IrExpr).type)) {
+          // The store goes through the guarded entry point: the flag test rides inside the call it already makes.
+          o["frozenGuard"] = strictAtLoc(loc) ? "strict" : "sloppy";
         }
         if (o.kind === "exprStmt" && !done.has(o)) {
           const ex = o["expr"] as (IrExpr & { kind: string; method?: string; receiver?: IrExpr; args?: IrExpr[] }) | undefined;
@@ -3827,7 +3808,9 @@ export class Lowerer {
             return;
           }
         }
-        if (o.kind === "arrIntrinsic" && !done.has(o) && MUTATORS.has(o["method"] as string) && frozenType((o["receiver"] as IrExpr).type)) {
+        if (o.kind === "arrIntrinsic" && o["method"] === "push" && (o["args"] as IrExpr[]).length === 1 && frozenType((o["receiver"] as IrExpr).type)) {
+          o["frozenGuard"] = "strict";
+        } else if (o.kind === "arrIntrinsic" && !done.has(o) && MUTATORS.has(o["method"] as string) && frozenType((o["receiver"] as IrExpr).type)) {
           const method = o["method"] as string;
           done.add(o);
           const stmts: IrStmt[] = [];
