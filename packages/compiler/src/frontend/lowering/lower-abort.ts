@@ -17,11 +17,11 @@
  * that does not exist. A fence that stays a fence is not a regression;
  * shipping half of an entangled family is.
  *
- * The 'abort' listener is pinned to the ZERO-PARAMETER shape. Node hands
- * the callback an Event, and an Event has no representation here, so a
- * listener that declares the parameter fences by name rather than
- * receiving something invented. Every listener in reach writes
- * `() => ...`, which is what the lib's `(ev: Event) => void` accepts. */
+ * The 'abort' listener takes TWO closure shapes. `() => void` is called
+ * as fn(cb); `(event: Event) => void` is called as fn(cb, event) with the
+ * Event (lower-event.ts, scr_event.c) moved in. The registration picks
+ * the runtime entry (abort.on / abort.onEv) by the closure's own type, so
+ * a program that never declares the parameter never links the Event unit. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { locOf } from "../program.js";
@@ -75,16 +75,21 @@ function reasonArg(L: Lowerer, call: ts.CallExpression, loc: SrcLoc): IrExpr | n
 /** The listener ARGUMENT: a zero-parameter void closure, by identity. The
  * runtime stores the ScrClosure pointer and both the duplicate-add test
  * and removeEventListener key on it, which is exactly JS's `f === f`. */
-function listenerArg(L: Lowerer, call: ts.CallExpression, a: ts.Expression, what: string): IrExpr {
+function listenerArg(L: Lowerer, call: ts.CallExpression, a: ts.Expression, what: string): { fn: IrExpr; ev: boolean } {
   const v = L.lowerExpr(a);
-  if (v.type.kind !== "func" || v.type.params.length !== 0 || v.type.ret.kind !== "void") {
+  // Two closure ABIs: () => void (the runtime calls fn(cb)) and
+  // (event: Event) => void (fn(cb, event), the event +1 moved in). The
+  // registration picks the entry point by shape; removal keys on the
+  // closure pointer alone, so it takes either.
+  const ev = v.type.kind === "func" && v.type.params.length === 1 && v.type.params[0]!.kind === "event";
+  if (v.type.kind !== "func" || (v.type.params.length !== 0 && !ev) || v.type.ret.kind !== "void") {
     L.noLowering(
       `${what} with a '${L.fmt(v.type)}' listener`,
       a,
-      "the lowered listener shape is () => void — the Event argument has no representation",
+      "the lowered listener shapes are () => void and (event: Event) => void",
     );
   }
-  return v;
+  return { fn: v, ev };
 }
 
 /** The `{ once }` options argument. Only the literal forms lower: `once`
@@ -148,12 +153,29 @@ function requireAbortType(L: Lowerer, call: ts.CallExpression, a: ts.Expression 
   }
 }
 
+/** The receiver's handle kind. A listener function's `this` is the signal
+ * (lowerLambda binds it, see eventListenerThis) even where the checker types
+ * it `any` (a JS function listener): the bound local's own type answers. */
+function receiverKind(L: Lowerer, recv: ts.Expression): string | undefined {
+  const mapped = L.mapTypeOf(L.typeOf(recv))?.kind;
+  if (recv.kind === ts.SyntaxKind.ThisKeyword && (mapped === undefined || mapped === "dyn")) {
+    const th = L.peekThis();
+    if (th !== null && th.type.kind === "abortSignal") return "abortSignal";
+  }
+  return mapped;
+}
+
+/** `this` read inside a listener whose lowering bound it to the signal. */
+function boundThis(L: Lowerer, recv: ts.Expression): boolean {
+  return recv.kind === ts.SyntaxKind.ThisKeyword && L.peekThis()?.type.kind === "abortSignal";
+}
+
 /** Property reads on abortSignal / abortController receivers. Null for
  * every other receiver, so the property chain keeps trying. */
 export function lowerAbortProperty(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
-  const kind = L.mapTypeOf(L.typeOf(expr.expression))?.kind;
+  const kind = receiverKind(L, expr.expression);
   if (kind !== "abortSignal" && kind !== "abortController") return null;
-  if (!L.isStdlibMember(expr)) return null;
+  if (!L.isStdlibMember(expr) && !boundThis(L, expr.expression)) return null;
   const name = expr.name.text;
   const loc = locOf(expr);
   if (kind === "abortController") {
@@ -185,9 +207,9 @@ export function lowerAbortMethodCall(
   access: ts.PropertyAccessExpression,
 ): IrExpr | null {
   if (L.chainBlocked(call, access)) return null;
-  const kind = L.mapTypeOf(L.typeOf(access.expression))?.kind;
+  const kind = receiverKind(L, access.expression);
   if (kind !== "abortSignal" && kind !== "abortController") return null;
-  if (!L.isStdlibMember(access)) return null;
+  if (!L.isStdlibMember(access) && !boundThis(L, access.expression)) return null;
   const name = access.name.text;
   const loc = locOf(call);
   if (kind === "abortController") {
@@ -211,8 +233,12 @@ export function lowerAbortMethodCall(
       L.noLowering("AbortSignal.addEventListener with one argument", call, "addEventListener('abort', fn) is the shape");
     }
     const receiver = L.lowerExpr(access.expression);
-    const fn = listenerArg(L, call, call.arguments[1]!, "AbortSignal.addEventListener");
+    const { fn, ev } = listenerArg(L, call, call.arguments[1]!, "AbortSignal.addEventListener");
     const once = onceArg(L, call, loc);
+    if (ev) {
+      const resist: IrExpr = { kind: "boolLit", value: false, type: BOOL, loc };
+      return { kind: "libCall", fn: "abort.onEv", args: [receiver, fn, once, resist], type: VOID, loc };
+    }
     return { kind: "libCall", fn: "abort.on", args: [receiver, fn, once], type: VOID, loc };
   }
   if (name === "removeEventListener") {
@@ -225,7 +251,7 @@ export function lowerAbortMethodCall(
       );
     }
     const receiver = L.lowerExpr(access.expression);
-    const fn = listenerArg(L, call, call.arguments[1]!, "AbortSignal.removeEventListener");
+    const { fn } = listenerArg(L, call, call.arguments[1]!, "AbortSignal.removeEventListener");
     return { kind: "libCall", fn: "abort.off", args: [receiver, fn], type: VOID, loc };
   }
   L.noLowering(`AbortSignal.${name}`, call, SIGNAL_HINT, L.checker.getSymbolAtLocation(access.name));

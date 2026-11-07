@@ -1251,6 +1251,8 @@ export class CEmitter {
         // through the handle.
         case "abortSignal":
         case "abortController":
+        // An Event holds signals (collector header, traced edges).
+        case "event":
         // A dyn value carries a collector header of its own (scr_json.c's
         // scr_dyn_trace) and its members, [[Prototype]] link and accessor
         // table all point at further dyn values, so an `unknown`-typed
@@ -3160,6 +3162,7 @@ export class CEmitter {
       case "httpClientReq":
       case "secureCtx":
       case "abortController":
+      case "event":
       case "fsWatcher":
       case "sqliteDb":
       case "sqliteStmt":

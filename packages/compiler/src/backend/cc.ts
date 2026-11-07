@@ -44,6 +44,10 @@ const RUNTIME_UNIT_DEPS: Readonly<Record<string, readonly string[]>> = {
   // not have http), so neither may name the other — this TU names both and
   // is gated on the two together, the scr_cipher_key.c pattern.
   "scr_abort_http.c": ["scr_abort.c", "scr_http.c"],
+  // Event (scr_event.c): names scr_abort_signal_* for its target/currentTarget
+  // edges, and scr_abort.c's SCR_ABORT_EV dispatch names scr_event_*; the
+  // gate (opts.event) implies scr_abort.c.
+  "scr_event.c": ["scr_abort.c"],
   // The timers/promises value/options entry (scr_tp_value.c): it names
   // scr_abort_signal_* (scr_abort.c) and reports Node's delay warnings through
   // scr_emit_warning (scr_async_dyn.c). Its gate (tpValue) implies both.
@@ -537,6 +541,12 @@ export interface CcOptions {
    * symbols, so the emitted TU is the only caller and it names them
    * exactly when an abortSignal-typed slot exists. */
   abortSignal?: boolean;
+  /** The program has an `event`-typed slot or an evt.* libCall anywhere
+   * (moduleUsesEvent on the IR): compiles scr_event.c (which implies
+   * scr_abort.c) and defines SCR_ABORT_EV for the whole TU set, so
+   * scr_abort.c builds its Event-aware dispatch. Without it scr_abort.c
+   * compiles to the byte-identical pre-Event object. */
+  event?: boolean;
   /** The program calls timers/promises setTimeout with a value or options
    * (tp.setTimeoutV*): compiles scr_tp_value.c (implies scr_abort.c, scr_async_dyn.c). */
   tpValue?: boolean;
@@ -1860,6 +1870,8 @@ export interface LibArchiveOptions {
   cipher?: boolean;
   copying?: boolean;
   abortSignal?: boolean;
+  /** An Event value anywhere: compiles scr_event.c and defines SCR_ABORT_EV (see CcOptions.event). */
+  event?: boolean;
   /** The program calls timers/promises setTimeout with a value or options
    * (tp.setTimeoutV*): compiles scr_tp_value.c, which implies scr_abort.c and scr_async_dyn.c. */
   tpValue?: boolean;
@@ -1907,7 +1919,8 @@ export async function compileLibArchive(opts: LibArchiveOptions): Promise<void> 
     // The two-gate keyobj ↔ cipher bridge — see compileC's arm.
     ...(opts.asym && opts.cipher ? ["scr_cipher_key.c"] : []),
     ...(opts.copying ? ["scr_copying.c"] : []),
-    ...(opts.abortSignal ? ["scr_abort.c"] : []),
+    ...(opts.abortSignal || opts.event ? ["scr_abort.c"] : []),
+    ...(opts.event ? ["scr_event.c"] : []),
   ];
   assertRuntimeUnitsClosed(sources, false, "the library archive");
   const cflags = [
@@ -1915,6 +1928,7 @@ export async function compileLibArchive(opts: LibArchiveOptions): Promise<void> 
     ...driver.targetArgs,
     ...optAuditArgs(sanitize),
     ...(opts.symbol ? ["-DSCR_SYMTAB"] : []), // the runtime's symbol-property code is compiled in only for a program that links the symbol unit
+    ...(opts.event ? ["-DSCR_ABORT_EV"] : []), // scr_abort.c's Event-aware dispatch, only for a program that links scr_event.c
     "-fno-math-errno",
     "-fno-strict-aliasing", // the emitted object model type-puns — see compileC's buildArgs
     ...gcSectionsCompileArgs(),
@@ -2454,7 +2468,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
   /* The seam implies its two halves: a wrong `false` here would be an
    * undefined symbol at the very end of the build naming no gate. */
   const tpValue = opts.tpValue ?? false;
-  const abortSignal = (opts.abortSignal ?? false) || abortHttp || tpValue;
+  const abortSignal = (opts.abortSignal ?? false) || abortHttp || tpValue || (opts.event ?? false);
   const http = (opts.http ?? false) || tls || http2 || nativeFetch || netIsland || wsGlobal || abortHttp || httpBody || fetchStatic;
   const net = (opts.net ?? false) || http || tls || http2 || nativeFetch || netIsland || wsGlobal || fetchStatic;
   /* scr_url.c's gate closes over every unit that calls into it, the `net`
@@ -2546,6 +2560,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...driver.targetArgs,
     ...optAuditArgs(opts.sanitize ?? false),
     ...(opts.symbol ? ["-DSCR_SYMTAB"] : []), // see the library archive's cflags
+    ...(opts.event ? ["-DSCR_ABORT_EV"] : []), // see the library archive's cflags
     "-fno-math-errno",
     // The emitted object model is deliberately type-punned C: a hierarchy
     // upcast is a raw pointer cast, so one object's header (rc, vt) and
@@ -2677,6 +2692,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     // comments), so qs does not imply the url gate.
     ...(opts.qs ? [rt(join(rtDir, "scr_qs.c"))] : []),
     ...(abortSignal ? [rt(join(rtDir, "scr_abort.c"))] : []),
+    ...((opts.event ?? false) ? [rt(join(rtDir, "scr_event.c"))] : []),
     ...(tpValue ? [rt(join(rtDir, "scr_tp_value.c"))] : []),
     ...(tpValue ? [rt(join(rtDir, "scr_tp_interval.c"))] : []),
     ...(abortHttp ? [rt(join(rtDir, "scr_abort_http.c"))] : []),
@@ -2940,6 +2956,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...driver.targetArgs,
     ...optAuditArgs(opts.sanitize ?? false),
     ...(opts.symbol ? ["-DSCR_SYMTAB"] : []), // see the library archive's cflags
+    ...(opts.event ? ["-DSCR_ABORT_EV"] : []), // see the library archive's cflags
     "-fno-math-errno",
     "-fno-strict-aliasing", // the emitted object model type-puns — see buildArgs
     ...gcSectionsCompileArgs(),
