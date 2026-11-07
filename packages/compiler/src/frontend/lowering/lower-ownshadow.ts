@@ -420,8 +420,9 @@ export function applyFieldNotes(L: Lowerer, fnLists: IrFunction[][]): void {
   };
   const FN_FIELDS = new Set(["loc", "type"]);
   const gaps = new Set<string>();
-  const stack: unknown[] = [];
-  for (const list of [...fnLists, L.liftedFns]) for (const f of list) stack.push(f.body);
+  let tmpCount = 0;
+  for (const list of [...fnLists, L.liftedFns]) for (const f of list) {
+  const stack: unknown[] = [f.body];
   while (stack.length > 0) {
     const n = stack.pop();
     if (n === null || typeof n !== "object") continue;
@@ -434,8 +435,18 @@ export function applyFieldNotes(L: Lowerer, fnLists: IrFunction[][]): void {
           if (info === undefined || !info.fields.has(CLASS_PROPS_FIELD)) continue;
           const loc = st.loc as SrcLoc;
           if (!plain(st.obj as IrExpr)) {
-            gaps.add(`${loc.file}@${loc.start}`);
-            continue;
+            // A receiver that is an expression (a checked `this`, a call's result): evaluated ONCE into a hidden local ahead of the store
+            // (JS evaluates the receiver before the right-hand side), and the store and its notes name the local.
+            const objT = (st.obj as IrExpr).type;
+            if (objT.kind !== "object") {
+              gaps.add(`${loc.file}@${loc.start}`);
+              continue;
+            }
+            const id = `%fnote.${tmpCount++}`;
+            f.locals.push({ id, name: "%fnote", type: objT, mutable: false });
+            n.splice(i, 0, { kind: "varDecl", localId: id, init: st.obj, loc } as unknown);
+            i++;
+            st.obj = { kind: "varRef", localId: id, type: objT, loc } as IrExpr;
           }
           const cls = st.className;
           const objOf = (): IrExpr => ({ ...(st.obj as IrExpr) } as IrExpr);
@@ -452,6 +463,7 @@ export function applyFieldNotes(L: Lowerer, fnLists: IrFunction[][]): void {
     const o = n as Record<string, unknown>;
     if (Array.isArray(n)) { for (const x of n) stack.push(x); continue; }
     for (const [k, v] of Object.entries(o)) if (!FN_FIELDS.has(k)) stack.push(v);
+  }
   }
   for (const g of gaps) {
     const [file, start] = g.split("@");
