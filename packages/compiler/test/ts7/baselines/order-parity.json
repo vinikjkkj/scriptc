@@ -13883,6 +13883,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24653-store-loop-over-a-frozen-or-later-frozen-array.ts": {
+   "order": [
+    "<repo>/tests/corpus/24653-store-loop-over-a-frozen-or-later-frozen-array.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24654-store-loop-over-a-frozen-array-in-sloppy-code.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24654-store-loop-over-a-frozen-array-in-sloppy-code.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/24660-unique-symbol-const-keyed-interface-member-read-and-optional-call.ts": {
    "order": [
     "<repo>/tests/corpus/24660-unique-symbol-const-keyed-interface-member-read-and-optional-call.ts"
