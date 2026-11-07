@@ -9963,7 +9963,62 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
       return null;
     }
     if (!pureKeyExpr(L, expr)) return null;
-    return literalKeySpellingOf(L.typeOf(expr));
+    const spelled = literalKeySpellingOf(L.typeOf(expr));
+    if (spelled !== null) return spelled;
+    return constTableKeyOf(L, expr);
+  }
+
+  /** The object literal a `const` binding (or a literal member of one) is initialized with, or null. */
+  function constObjectLiteralOf(L: Lowerer, expr: ts.Expression, depth: number): ts.ObjectLiteralExpression | null {
+    if (depth > 4) return null;
+    while (ts.isParenthesizedExpression(expr) || ts.isAsExpression(expr) || ts.isNonNullExpression(expr)) expr = expr.expression;
+    if (ts.isObjectLiteralExpression(expr)) return expr;
+    if (ts.isIdentifier(expr)) {
+      const sym = L.resolveValueSymbol(expr);
+      const decl = sym ? L.checker.valueDeclarationOf(sym) : undefined;
+      if (decl === undefined || !ts.isVariableDeclaration(decl) || decl.initializer === undefined) return null;
+      if ((ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const) === 0 || !ts.isIdentifier(decl.name)) return null;
+      return constObjectLiteralOf(L, decl.initializer, depth + 1);
+    }
+    if (ts.isPropertyAccessExpression(expr)) {
+      const owner = constObjectLiteralOf(L, expr.expression, depth + 1);
+      if (owner === null) return null;
+      const member = constTableMember(owner, expr.name.text);
+      return member === null ? null : constObjectLiteralOf(L, member, depth + 1);
+    }
+    return null;
+  }
+
+  /** The initializer of the non-computed, non-duplicated property `name` of a literal, or null. */
+  function constTableMember(lit: ts.ObjectLiteralExpression, name: string): ts.Expression | null {
+    let found: ts.Expression | null = null;
+    for (const p of lit.properties) {
+      if (!ts.isPropertyAssignment(p) || ts.isComputedPropertyName(p.name)) return null; // a spread/method/computed key: not a plain table
+      const n = ts.isIdentifier(p.name) || ts.isStringLiteralLike(p.name) ? p.name.text : ts.isNumericLiteral(p.name) ? String(Number(p.name.text)) : null;
+      if (n === null) return null;
+      if (n === name) {
+        if (found !== null) return null; // duplicate key: the last write wins, not worth folding
+        found = p.initializer;
+      }
+    }
+    return found;
+  }
+
+  /** A property read of a const table of literals (`T.A`, `T.U.A` with `const T = { A: 1, U: { A: 2 } }`): the read's literal
+   * spelling, for a JavaScript source whose checker type widened the member to `number`/`string`. Null unless every link is a
+   * const binding of a plain literal and the member is one string/number literal. */
+  function constTableKeyOf(L: Lowerer, expr: ts.Expression): string | null {
+    while (ts.isParenthesizedExpression(expr) || ts.isAsExpression(expr) || ts.isNonNullExpression(expr)) expr = expr.expression;
+    if (!ts.isPropertyAccessExpression(expr)) return null;
+    const owner = constObjectLiteralOf(L, expr.expression, 0);
+    if (owner === null) return null;
+    const member = constTableMember(owner, expr.name.text);
+    if (member === null) return null;
+    let m: ts.Expression = member;
+    while (ts.isParenthesizedExpression(m)) m = m.expression;
+    if (ts.isStringLiteralLike(m)) return m.text;
+    if (ts.isNumericLiteral(m)) return String(Number(m.text));
+    return null;
   }
 
   /** The property-name spelling of a single-literal checker type: string
@@ -17040,6 +17095,7 @@ function tombstoneSource(node: ts.Expression): boolean {
  * `"" + {valueOf:()=>42, toString:()=>"TS"}` is "42" and `String(...)` of
  * the same object is "TS". */
 export function ensureStringForPlus(L: Lowerer, e: IrExpr, node: ts.Node): IrExpr {
+  if ((e.type.kind === "dyn" || e.type.kind === "string") && ts.isExpression(node) && tokenCtorFactsOf(L, node) !== null) return ensureString(L, e, node);
   if (e.type.kind === "dyn") {
     return { kind: "toString", operand: e, hint: "default", type: STRING, loc: e.loc };
   }
@@ -17095,7 +17151,6 @@ export function isImmutablePrimitiveWidth(L: Lowerer, t: IrType): boolean {
   );
 }
 
-  if ((e.type.kind === "dyn" || e.type.kind === "string") && ts.isExpression(node) && tokenCtorFactsOf(L, node) !== null) return ensureString(L, e, node);
 /** The same width question with the UNIT arms allowed.
  *
  * `isImmutablePrimitiveWidth` exists to answer one thing — "does widening
@@ -17289,6 +17344,18 @@ export function ensureString(L: Lowerer, e: IrExpr, node: ts.Node, explicitStrin
     // String(f) / `${f}` / "" + f over a function VALUE: its source text
     // (Node's ToString calls Function.prototype.toString; fn-srctext.ts).
     if (e.type.kind === "func") return { kind: "libCall", fn: "fn.text", args: [e], type: STRING, loc: e.loc };
+    {
+      const tf = (e.type.kind === "string" || e.type.kind === "dyn") && ts.isExpression(node) ? tokenCtorFactsOf(L, node) : null;
+      if (tf !== null) {
+        return {
+          kind: "seqExpr",
+          stmts: [{ kind: "exprStmt", expr: e, loc: e.loc }],
+          result: { kind: "strLit", value: `function ${tf.name}() { [native code] }`, type: STRING, loc: e.loc },
+          type: STRING,
+          loc: e.loc,
+        };
+      }
+    }
     if (e.type.kind === "string") return e;
     // A void call's value is JS's undefined: it runs for effect, then the
     // text is "undefined" (String(f()) and `${f()}` over a void function).
@@ -17343,18 +17410,6 @@ export function ensureString(L: Lowerer, e: IrExpr, node: ts.Node, explicitStrin
       const lit: IrExpr = { kind: "strLit", value: text, type: STRING, loc: e.loc };
       if (pureReemittable(e)) return lit;
       return { kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: e, loc: e.loc }], result: lit, type: STRING, loc: e.loc };
-    }
-    {
-      const tf = (e.type.kind === "string" || e.type.kind === "dyn") && ts.isExpression(node) ? tokenCtorFactsOf(L, node) : null;
-      if (tf !== null) {
-        return {
-          kind: "seqExpr",
-          stmts: [{ kind: "exprStmt", expr: e, loc: e.loc }],
-          result: { kind: "strLit", value: `function ${tf.name}() { [native code] }`, type: STRING, loc: e.loc },
-          type: STRING,
-          loc: e.loc,
-        };
-      }
     }
     if (e.type.kind === "regex") {
       // `${re}` / String(re) / "" + re: RegExp.prototype.toString, the
