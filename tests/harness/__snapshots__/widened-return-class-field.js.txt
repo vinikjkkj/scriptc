@@ -1,0 +1,17 @@
+widened-return-class-field.js:4:19 - error SC1100: a value from a call whose function can return undefined (its JSDoc return claim 'number' is contradicted by a bare return) flowing into a 'number' slot (Node carries the undefined; the slot cannot) - bind the result first (const r = f(...)) or widen the receiving declaration is not supported yet
+
+  3 | function parse(str) { if (str.length > 3) return; return 2; }
+  4 | class Field { x = parse("toolong"); y = parse("ok"); }
+    |                   ^~~~~~~~~~~~~~~~
+  5 | const f = new Field();
+
+  hint: validate with 'as <type>' first — the cast checks the dynamic value at runtime and throws on mismatch
+
+widened-return-class-field.js:4:41 - error SC1100: a value from a call whose function can return undefined (its JSDoc return claim 'number' is contradicted by a bare return) flowing into a 'number' slot (Node carries the undefined; the slot cannot) - bind the result first (const r = f(...)) or widen the receiving declaration is not supported yet
+
+  3 | function parse(str) { if (str.length > 3) return; return 2; }
+  4 | class Field { x = parse("toolong"); y = parse("ok"); }
+    |                                         ^~~~~~~~~~~
+  5 | const f = new Field();
+
+  hint: validate with 'as <type>' first — the cast checks the dynamic value at runtime and throws on mismatch

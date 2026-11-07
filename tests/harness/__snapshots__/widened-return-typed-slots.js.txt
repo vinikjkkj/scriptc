@@ -1,0 +1,53 @@
+widened-return-typed-slots.js:9:21 - error SC1100: a value from a call whose function can return undefined (its JSDoc return claim 'number' is contradicted by a bare return) flowing into a 'number' slot (Node carries the undefined; the slot cannot) - bind the result first (const r = f(...)) or widen the receiving declaration is not supported yet
+
+   8 |   constructor() {
+   9 |     this.fromCtor = parse("toolong");
+     |                     ^~~~~~~~~~~~~~~~
+  10 |   }
+
+  hint: validate with 'as <type>' first — the cast checks the dynamic value at runtime and throws on mismatch
+
+widened-return-typed-slots.js:12:19 - error SC1100: a value from a call whose function can return undefined (its JSDoc return claim 'number' is contradicted by a bare return) flowing into a 'number' slot (Node carries the undefined; the slot cannot) - bind the result first (const r = f(...)) or widen the receiving declaration is not supported yet
+
+  11 | }
+  12 | class Field { x = parse("toolong"); }
+     |                   ^~~~~~~~~~~~~~~~
+  13 | const arr = [parse("toolong")];
+
+  hint: validate with 'as <type>' first — the cast checks the dynamic value at runtime and throws on mismatch
+
+widened-return-typed-slots.js:13:14 - error SC1100: a value from a call whose function can return undefined (its JSDoc return claim 'number' is contradicted by a bare return) flowing into a 'number' slot (Node carries the undefined; the slot cannot) - bind the result first (const r = f(...)) or widen the receiving declaration is not supported yet
+
+  12 | class Field { x = parse("toolong"); }
+  13 | const arr = [parse("toolong")];
+     |              ^~~~~~~~~~~~~~~~
+  14 | const rec = { k: parse("toolong") };
+
+  hint: validate with 'as <type>' first — the cast checks the dynamic value at runtime and throws on mismatch
+
+widened-return-typed-slots.js:15:21 - error SC1100: a value from a call whose function can return undefined (its JSDoc return claim is contradicted by a bare return) returned through a 'number' return slot (Node carries the undefined; the slot cannot) - give the enclosing function a JSDoc return type that includes undefined is not supported yet
+
+  14 | const rec = { k: parse("toolong") };
+  15 | const arrow = () => parse("toolong");
+     |                     ^~~~~~~~~~~~~~~~
+  16 | takesNumber(parse("toolong"));
+
+  hint: validate with 'as <type>' first — the cast checks the dynamic value at runtime and throws on mismatch
+
+widened-return-typed-slots.js:16:13 - error SC1100: a value from a call whose function can return undefined (its JSDoc return claim 'number' is contradicted by a bare return) flowing into a 'number' slot (Node carries the undefined; the slot cannot) - bind the result first (const r = f(...)) or widen the receiving declaration is not supported yet
+
+  15 | const arrow = () => parse("toolong");
+  16 | takesNumber(parse("toolong"));
+     |             ^~~~~~~~~~~~~~~~
+  17 | const r = parse("toolong");
+
+  hint: validate with 'as <type>' first — the cast checks the dynamic value at runtime and throws on mismatch
+
+widened-return-typed-slots.js:18:13 - error SC1100: a value from a call whose function can return undefined (its JSDoc return claim 'number' is contradicted by a bare return) flowing into a 'number' slot (Node carries the undefined; the slot cannot) - bind the result first (const r = f(...)) or widen the receiving declaration is not supported yet
+
+  17 | const r = parse("toolong");
+  18 | takesNumber(r);
+     |             ^
+  19 | console.log(new Holder(), new Field(), arr, rec, arrow());
+
+  hint: validate with 'as <type>' first — the cast checks the dynamic value at runtime and throws on mismatch
