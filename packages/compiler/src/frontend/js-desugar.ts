@@ -246,7 +246,11 @@ function inlineRequireEdits(fileName: string, text: string): string | null {
           stmt.expression.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
           /^(?:module\.)?exports\b/.test(stmt.expression.left.getText(sf))
         ) {
-          ok = false;
+          // `module.exports = require('./x')(args)`: the whole export is the CALL's result (a run-time value, cjs-live-exports.ts
+          // dynReplaceOf), so the require is an ordinary inline callee and binds before the statement like any other.
+          const rhs = stmt.expression.right;
+          const callOfRequire = ts.isCallExpression(rhs) && rhs.expression === n && stmt.expression.left.getText(sf) === "module.exports";
+          if (!callOfRequire) ok = false;
         }
         if (ok && (ts.isExpressionStatement(stmt) || ts.isVariableStatement(stmt) || ts.isReturnStatement(stmt) || ts.isThrowStatement(stmt))) {
           const name = `__sc_r${counter++}`;
