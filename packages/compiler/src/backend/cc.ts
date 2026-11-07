@@ -616,6 +616,9 @@ export interface CcOptions {
    * refcount-only struct plus the PromiseConstructor singleton -- a declared
    * shape still emits its release calls and its box adapters. */
   opaque?: boolean;
+  /** The program reaches Object.getPrototypeOf / Object.prototype / Object(x) over a dyn / `Object` as a value (moduleUsesDynProto):
+   * compiles scr_dyn_proto.c, the prototype sentinels, wrapper objects and builtin function values. */
+  dynProto?: boolean;
 }
 
 /** Structured compiler-driver failure. Most callers still let this surface
@@ -2433,6 +2436,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
   const dateIntlUnit = ((opts.dateIntl ?? false) || dateDynUnit) && dateUnit;
   const dateTzUnit = ((opts.dateTz ?? false) || dateFmtUnit || dateIntlUnit) && dateUnit;
   const opaqueUnit = opts.opaque ?? false;
+  const dynProtoUnit = opts.dynProto ?? false;
   const fetchAbort = fetchStatic && (opts.abortSignal ?? false);
   const fetchDispatch = (opts.fetchDispatch ?? false) && fetchStatic;
   const abortHttp = (opts.abortHttp ?? false) || fetchAbort;
@@ -2712,6 +2716,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
         : [rt(join(rtDir, "scr_date_tz_stub.c"))]
       : []),
     ...(opaqueUnit ? [rt(join(rtDir, "scr_opaque.c"))] : []),
+    ...(dynProtoUnit ? [rt(join(rtDir, "scr_dyn_proto.c"))] : []),
     // The WebRTC data-channel handles. Ownership pairs only for now; the
     // handles are never constructed, but a program that declares the
     // shapes still emits their release calls.

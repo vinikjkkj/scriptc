@@ -6239,6 +6239,16 @@ ScrDyn *scr_dyn_object_ctor_value(void);
 extern ScrDyn *(*scr_function_ctor_hook)(ScrDyn *const *args, size_t argc);
 ScrDyn *scr_dyn_intrinsic_member(const ScrDyn *recv, const char *key, size_t key_len);
 const ScrDyn *scr_dyn_wrapper_prim(const ScrDyn *d);
+/* The gated unit scr_dyn_proto.c's seam into the dyn core (NULL when the unit is not linked). */
+typedef struct ScrDynProtoOps {
+  const ScrDyn *(*wrapper_prim)(const ScrDyn *d);
+  ScrDyn *(*intrinsic_member)(const ScrDyn *recv, const char *key, size_t key_len);
+  bool (*is_intrinsic)(const ScrDyn *d);
+  ScrDyn *(*key_get)(ScrDyn *recv, const char *key, size_t key_len);
+} ScrDynProtoOps;
+extern const ScrDynProtoOps *scr_dyn_proto_ops;
+void scr_dyn_make_immortal(ScrDyn *d);
+bool scr_dyn_key_is_index(const char *key, size_t len, double *out);
 /* The two above chosen at RUN TIME — the record->dyn walker's constructor
  * for a shape whose null-prototype-ness is a per-INSTANCE fact. */
 ScrDyn *scr_dyn_new_obj_flavor(int null_proto);
