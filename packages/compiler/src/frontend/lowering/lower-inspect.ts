@@ -2499,6 +2499,49 @@ function typeTreeHasFunc(L: Lowerer, t: IrType, visiting: Set<string>): boolean 
   }
 }
 
+/** `%util.fmtopts.<n>(o, pack)`: util.formatWithOptions over a run-time options object. Pushes `o` as the runtime's active
+ * inspect options, formats the argument pack with the runtime formatter, and pops in a finally so a conversion that throws
+ * cannot leave the options active. One helper serves every call site. */
+function formatWithOptionsHelper(L: Lowerer, loc: SrcLoc): string {
+  const key = "fmtopts";
+  const existing = L.inspectHelpers.get(key);
+  if (existing) return existing;
+  const name = `%util.fmtopts.${L.inspectHelpers.size}`;
+  L.inspectHelpers.set(key, name);
+  const libStmt = (fn: "insp.optsPush" | "insp.optsPop", args: IrExpr[]): IrStmt => ({
+    kind: "exprStmt",
+    expr: { kind: "libCall", fn, args, type: { kind: "void" }, loc },
+    loc,
+  });
+  const o: IrExpr = { kind: "varRef", localId: "o.0", type: DYN, loc };
+  const p: IrExpr = { kind: "varRef", localId: "p.0", type: DYN, loc };
+  L.liftedFns.push({
+    name,
+    params: [
+      { localId: "o.0", name: "o", type: DYN },
+      { localId: "p.0", name: "p", type: DYN },
+    ],
+    returnType: STRING,
+    locals: [
+      { id: "o.0", name: "o", type: DYN, mutable: false },
+      { id: "p.0", name: "p", type: DYN, mutable: false },
+    ],
+    body: [
+      libStmt("insp.optsPush", [o]),
+      {
+        kind: "tryCatch",
+        tryBody: [{ kind: "return", value: { kind: "libCall", fn: "insp.format", args: [p], type: STRING, loc }, loc }],
+        catchBody: null,
+        catchLocalId: null,
+        finallyBody: [libStmt("insp.optsPop", [])],
+        loc,
+      },
+    ],
+    loc,
+  });
+  return name;
+}
+
 /** util.format(...) / util.formatWithOptions({}, ...): the compile-time
  * %-substitution over a literal format string (formatWithOptionsInternal
  * ported exactly — the arg cursor, the args-exhausted guard, %c's
@@ -2513,13 +2556,23 @@ function lowerFormatCallIn(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc, wit
   const argNodes = [...expr.arguments];
   if (withOptions) {
     const opts = argNodes.shift();
-    if (!opts || !ts.isObjectLiteralExpression(opts) || opts.properties.length > 0) {
-      L.noLowering(
-        "util.formatWithOptions with a non-empty options literal",
-        opts ?? expr,
-        "only the empty literal {} (the defaults — exactly util.format) is lowered",
-      );
+    if (opts !== undefined && !(ts.isObjectLiteralExpression(opts) && opts.properties.length === 0)) {
+      // Options the compiler cannot fold to the defaults (debug's `exports.inspectOpts`, an object the DEBUG_* environment
+      // keys build at run time): the options ride as a checked-dynamic object into the runtime's option stack, the format runs
+      // over the run-time argument pack, and the options pop afterwards even when a conversion throws. The runtime applies the
+      // keys it honours (depth, breakLength, compact, maxArrayLength, maxStringLength, numericSeparator, sorted) and stops by
+      // name on the ones it cannot (colors, showHidden, getters, ...), exactly as util.inspect's options do.
+      const optsDyn = ts.isObjectLiteralExpression(opts) ? inspectOptionsDyn(L, opts, loc) : L.coerceToExpected(L.lowerExpr(opts), DYN);
+      if (argNodes.length === 0) return str("", loc);
+      return {
+        kind: "call",
+        callee: formatWithOptionsHelper(L, loc),
+        args: [optsDyn, dynRestPack(L, argNodes, expr, loc)],
+        type: STRING,
+        loc,
+      };
     }
+    if (!opts) L.noLowering("util.formatWithOptions without an options argument", expr, "the options argument is required");
   }
   if (argNodes.length === 0) return str("", loc);
   const first = argNodes[0]!;
