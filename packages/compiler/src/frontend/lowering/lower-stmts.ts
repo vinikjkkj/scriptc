@@ -5405,6 +5405,13 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     if (declSymbol && namespaceConditionalOf(L, declSymbol)) type = init.type;
     // `const f = x.m` of a replaceable method: the read is the actual value, so the binding holds it as the checked-dynamic kind.
     if (decl.initializer !== undefined && init.type.kind === "dyn" && isShadowableMethodRead(L, decl.initializer)) type = init.type;
+    // `const o = { ...x ?? {} }` whose spread source is checked-dynamic: the literal lowered to a dyn object (a copy with the source's own keys), so the
+    // binding is that object even where the checker describes a closed record: the program deletes and adds keys the record has no slot for.
+    if (decl.initializer !== undefined && init.type.kind === "dyn" && isJsSourceFile(decl.getSourceFile()) && type?.kind === "record") {
+      let li: ts.Expression = decl.initializer;
+      while (ts.isParenthesizedExpression(li)) li = li.expression;
+      if (ts.isObjectLiteralExpression(li) && li.properties.some((p) => ts.isSpreadAssignment(p))) type = init.type;
+    }
     // A JS `let` whose checker type is one primitive kind while a later write
     // produces another (`let ms = 0; ms = str`): no static slot holds both, so
     // the binding is checked-dynamic. Writes that all agree keep the native
