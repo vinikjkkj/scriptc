@@ -13286,6 +13286,11 @@ ScrDyn *scr_dyn_construct(const ScrDyn *fn, const ScrDyn *args, const ScrStr *wh
    * needs. Every other function keeps the ordinary path. */
   if (fn == scr_u8_ctor) return scr_u8_construct(args);
   if (scr_promise_ctor_box != NULL && fn == scr_promise_ctor_box) return scr_promise_construct_hook(args);
+  if (scr_dyn_proto_ops != NULL && scr_dyn_proto_ops->construct_builtin != NULL) {
+    bool wrapped = false;
+    ScrDyn *wr = scr_dyn_proto_ops->construct_builtin(fn, args, &wrapped);
+    if (wrapped) return wr;
+  }
   if (err_cls_is(fn)) {
     return err_cls_make(err_cls_kind_of_clo(fn->v.fn.clo),
                         args->kind == SCR_DYN_ARR && args->v.arr.len > 0 ? args->v.arr.items[0] : NULL);

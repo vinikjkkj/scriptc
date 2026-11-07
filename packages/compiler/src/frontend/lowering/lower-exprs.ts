@@ -479,6 +479,41 @@ const JS_ERROR_CLASS_KIND: Readonly<Record<string, number>> = {
   Error: 0, TypeError: 1, RangeError: 2, SyntaxError: 3, ReferenceError: 5, AggregateError: 6,
 };
 
+/** The constructor INTERFACES whose bare global still reads as the identity token in a JavaScript source (a string where Node holds a
+ * function): their `typeof`, `.name`, `.length` and String() are folded from the checker's declared type, so the token never answers.
+ * name and arity are the builtin's own fixed facts. */
+const TOKEN_CTOR_FACTS: Record<string, { name: string; length: number } | undefined> = Object.assign(
+  Object.create(null) as Record<string, { name: string; length: number } | undefined>,
+  {
+    MapConstructor: { name: "Map", length: 0 },
+    SetConstructor: { name: "Set", length: 0 },
+    WeakMapConstructor: { name: "WeakMap", length: 0 },
+    DateConstructor: { name: "Date", length: 7 },
+    RegExpConstructor: { name: "RegExp", length: 2 },
+    BigIntConstructor: { name: "BigInt", length: 1 },
+  },
+);
+/** The token constructor facts of an expression's checker type, when that type is the stdlib interface of one of them. */
+export function tokenCtorFactsOf(L: Lowerer, e: ts.Expression): { name: string; length: number } | null {
+  const t = L.typeOf(e);
+  if (t.isUnionType()) {
+    // A union of constructor interfaces (`[Map, Set]`'s element): the token's own text is the only thing that tells which one it
+    // is at run time, and no answer is computed from it here, so refuse rather than let the token's string answer.
+    const arms = ts.constituentTypes(t);
+    if (arms.length > 1 && arms.every((a) => { const s = a.getSymbol(); return s !== undefined && TOKEN_CTOR_FACTS[s.name] !== undefined; })) {
+      L.unsupported("SC1090", e, "a builtin constructor value of several possible constructors (Map | Set ...): its name, length and string form depend on which one it holds");
+    }
+    return null;
+  }
+  const sym = t.getSymbol();
+  if (sym === undefined) return null;
+  const facts = TOKEN_CTOR_FACTS[sym.name];
+  if (facts === undefined) return null;
+  return L.checker.declarationsOf(sym).some((d) => L.isStdlibFile(d.getSourceFile())) ? facts : null;
+}
+const BUILTIN_CTOR_INDEX: Record<string, number | undefined> = Object.assign(Object.create(null) as Record<string, number | undefined>, {
+  Object: 0, Array: 1, Function: 2, String: 3, Number: 4, Boolean: 5,
+});
 export function ctorObjectGlobalValue(L: Lowerer, canonical: string, loc: SrcLoc): IrExpr | null {
   // The WebCrypto object is an object in Node (typeof "object"), not a
   // string token: one process singleton, shared with require('crypto').webcrypto.
@@ -498,6 +533,11 @@ export function ctorObjectGlobalValue(L: Lowerer, canonical: string, loc: SrcLoc
   // The Promise constructor is a function object too (`this.Promise = thePromise || Promise`, then
   // `new this.Promise(executor)`): the singleton the runtime constructs through.
   if (canonical === "Promise" && !L.dynamic) return { kind: "libCall", fn: "dyn.promiseCtor", args: [], type: DYN, loc };
+  // Object/Array/Function/String/Number/Boolean: the runtime's builtin function boxes (typeof "function", name, call).
+  const bi = BUILTIN_CTOR_INDEX[canonical];
+  if (bi !== undefined && !L.dynamic) {
+    return { kind: "libCall", fn: "dyn.builtinCtor", args: [{ kind: "numLit", value: bi, type: F64, loc }], type: DYN, loc };
+  }
   if (canonical !== "Uint8Array" || L.dynamic) return null;
   return { kind: "libCall", fn: "dyn.u8Ctor", args: [], type: DYN, loc };
 }
@@ -1464,6 +1504,11 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       return { kind: "jsOp", op: "arrLit", args, type: JSVAL, loc };
     }
     if (ts.isTypeOfExpression(expr)) {
+      // typeof of a token-typed builtin constructor (a record field or variable holding `Map`): a function in Node.
+      if (!ts.isIdentifier(expr.expression) && tokenCtorFactsOf(L, expr.expression) !== null) {
+        const operand = L.lowerExpr(expr.expression);
+        return { kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: operand, loc }], result: { kind: "strLit", value: "function", type: STRING, loc }, type: STRING, loc };
+      }
       // A class value minted by a class expression inside a function is a
       // per-evaluation object here, but its typeof is Node's: a class.
       {
@@ -3021,6 +3066,17 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       if (whole !== null) return whole;
     }
     if (ts.isPropertyAccessExpression(expr)) {
+      // `.name` / `.length` of a token-typed builtin constructor (Map, Set, Date, ...): the builtin's own fixed facts.
+      {
+        const tf = expr.name.text === "name" || expr.name.text === "length" ? tokenCtorFactsOf(L, expr.expression) : null;
+        if (tf !== null) {
+          const recv = L.lowerExpr(expr.expression);
+          const answer: IrExpr = expr.name.text === "name"
+            ? { kind: "strLit", value: tf.name, type: STRING, loc }
+            : { kind: "numLit", value: tf.length, type: F64, loc };
+          return { kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: recv, loc }], result: answer, type: answer.type, loc };
+        }
+      }
       refuseUnloweredWebCrypto(L, expr);
       // `globalThis.crypto` as a VALUE in a TypeScript source: the WebCrypto singleton (webCryptoIdentifierValue).
       if (ts.isPropertyAccessExpression(expr) && expr.name.text === "crypto") {
@@ -3934,6 +3990,31 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       {
         const wk = wellKnownSymbolValue(L, expr, loc);
         if (wk) return wk;
+      }
+      // `.name` / `.length` of a bare builtin constructor VALUE (`m.v.name` where `m.v = String`): the constructor's own name and
+      // arity, which are fixed facts of the builtin (all six take 1). The receiver still evaluates, for its effects.
+      {
+        const tokenFacts = expr.name.text === "name" || expr.name.text === "length" ? tokenCtorFactsOf(L, expr.expression) : null;
+        if (tokenFacts !== null) {
+          const recv = L.lowerExpr(expr.expression);
+          const answer: IrExpr = expr.name.text === "name"
+            ? { kind: "strLit", value: tokenFacts.name, type: STRING, loc }
+            : { kind: "numLit", value: tokenFacts.length, type: F64, loc };
+          return { kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: recv, loc }], result: answer, type: answer.type, loc };
+        }
+        const ctorSym = L.typeOf(expr.expression).getSymbol();
+        const ctorName = ctorSym?.name;
+        if (
+          (expr.name.text === "name" || expr.name.text === "length") &&
+          ctorName !== undefined && /^(String|Number|Boolean|Function|Array|Object)Constructor$/.test(ctorName) &&
+          ctorSym !== undefined && L.checker.declarationsOf(ctorSym).some((d) => L.isStdlibFile(d.getSourceFile()))
+        ) {
+          const recv = L.lowerExpr(expr.expression);
+          const answer: IrExpr = expr.name.text === "name"
+            ? { kind: "strLit", value: ctorName.slice(0, -"Constructor".length), type: STRING, loc }
+            : { kind: "numLit", value: 1, type: F64, loc };
+          return { kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: recv, loc }], result: answer, type: answer.type, loc };
+        }
       }
       // The lib fence's PROPERTY chokepoint: a stdlib-declared member that
       // no lowering above claimed ([1,2].entries, Math.SQRT2, Promise.all,
@@ -17014,6 +17095,7 @@ export function isImmutablePrimitiveWidth(L: Lowerer, t: IrType): boolean {
   );
 }
 
+  if ((e.type.kind === "dyn" || e.type.kind === "string") && ts.isExpression(node) && tokenCtorFactsOf(L, node) !== null) return ensureString(L, e, node);
 /** The same width question with the UNIT arms allowed.
  *
  * `isImmutablePrimitiveWidth` exists to answer one thing — "does widening
@@ -17261,6 +17343,18 @@ export function ensureString(L: Lowerer, e: IrExpr, node: ts.Node, explicitStrin
       const lit: IrExpr = { kind: "strLit", value: text, type: STRING, loc: e.loc };
       if (pureReemittable(e)) return lit;
       return { kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: e, loc: e.loc }], result: lit, type: STRING, loc: e.loc };
+    }
+    {
+      const tf = (e.type.kind === "string" || e.type.kind === "dyn") && ts.isExpression(node) ? tokenCtorFactsOf(L, node) : null;
+      if (tf !== null) {
+        return {
+          kind: "seqExpr",
+          stmts: [{ kind: "exprStmt", expr: e, loc: e.loc }],
+          result: { kind: "strLit", value: `function ${tf.name}() { [native code] }`, type: STRING, loc: e.loc },
+          type: STRING,
+          loc: e.loc,
+        };
+      }
     }
     if (e.type.kind === "regex") {
       // `${re}` / String(re) / "" + re: RegExp.prototype.toString, the
@@ -19908,9 +20002,9 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
             // join, an object's own `valueOf` runs BEFORE its `toString`
             // (the opposite of String(v)) — never a checked cast:
             // `'status ' + res.statusCode` concatenates like Node.
-            const strOf = (e: IrExpr): IrExpr =>
-              e.type.kind === "dyn" ? ensureStringForPlus(L, e, expr) : e;
-            return { kind: "strConcat", left: strOf(left), right: strOf(right), type: STRING, loc };
+            const strOf = (e: IrExpr, at: ts.Node): IrExpr =>
+              e.type.kind === "dyn" ? ensureStringForPlus(L, e, at) : e;
+            return { kind: "strConcat", left: strOf(left, expr.left), right: strOf(right, expr.right), type: STRING, loc };
           }
         }
       }

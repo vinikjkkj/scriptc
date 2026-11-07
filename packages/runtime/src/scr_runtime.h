@@ -6245,6 +6245,7 @@ ScrDyn *scr_dyn_to_object(const ScrDyn *d);
 ScrDyn *scr_dyn_wrapper_new(const ScrDyn *prim);
 ScrDyn *scr_dyn_unwrap_prim(const ScrDyn *d);
 ScrDyn *scr_dyn_object_ctor_value(void);
+ScrDyn *scr_dyn_builtin_ctor_value(double which); /* Object/Array/Function/String/Number/Boolean constructor value, +1 */
 extern ScrDyn *(*scr_function_ctor_hook)(ScrDyn *const *args, size_t argc);
 ScrDyn *scr_dyn_intrinsic_member(const ScrDyn *recv, const char *key, size_t key_len);
 const ScrDyn *scr_dyn_wrapper_prim(const ScrDyn *d);
@@ -6254,6 +6255,9 @@ typedef struct ScrDynProtoOps {
   ScrDyn *(*intrinsic_member)(const ScrDyn *recv, const char *key, size_t key_len);
   bool (*is_intrinsic)(const ScrDyn *d);
   ScrDyn *(*key_get)(ScrDyn *recv, const char *key, size_t key_len);
+  /* `new String(x)` / `new Number(x)` / `new Boolean(x)` through the builtin function box: the primitive WRAPPER (the ordinary
+   * [[Construct]] would drop the primitive the thunk answers and hand back its fresh `this`). Sets *handled, +1; NULL fn tolerant. */
+  ScrDyn *(*construct_builtin)(const ScrDyn *fn, const ScrDyn *args, bool *handled);
 } ScrDynProtoOps;
 extern const ScrDynProtoOps *scr_dyn_proto_ops;
 void scr_dyn_make_immortal(ScrDyn *d);
