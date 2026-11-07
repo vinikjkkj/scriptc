@@ -38,6 +38,7 @@ import { collectExpandoMembers, expandoBindStmts } from "./lower-expando.js";
 import { collectProtoDataNames } from "./lower-protodata.js";
 import { isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
 import type { ClassInfo } from "./lower-classes.js";
+import { scanInstanceOverrides } from "./lower-instoverride.js";
 import { isAnyDynContainer, inferContainerTypeFromUses, decoratorNodesOf, genericIfaceBindingKeepsClass, guaranteedDefinitionThrow, bindingHoldsItsInitializer, castAliasedClassRefOf, constructedClassInfoOf, adoptedInstanceClassOf, inheritsBuiltinStreamCtor } from "./lower-classes.js";
 import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
 import { customInspectRegistration } from "./lower-inspect.js";
@@ -818,6 +819,7 @@ function liftableLocalClass(L: Lowerer, sf: ts.SourceFile, decl: ts.ClassDeclara
    * signatures are cheap and calls resolve against them; only BODY lowering
    * is reachability-gated. */
   export function collectProgram(L: Lowerer, parts: FileParts[]): void {
+    scanInstanceOverrides(L, parts.map((fp) => fp.sf));
     L.collecting = true;
     try {
       L.collectingClassDecls = true;

@@ -25569,6 +25569,20 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
     return { own, overrides: ovs, fnT };
   }
 
+/** The function an instance-override slot's "unset" arm runs for `method` of `declarer`: the declarer's own body (`%D.m%impl` once an
+ * assigned override wraps `%D.m`), or, where the class only OWNS the slot over an inherited method (a constructor-assigned override),
+ * the inherited declarer's. Null when no slot wraps the method (the plain `%D.m`). */
+export function slotBypassTarget(L: Lowerer, declarer: ClassInfo, method: string): { callee: string; declarer: ClassInfo } | null {
+  if (declarer.shadowOwn?.has(method) === true || declarer.shadowLate?.has(method) === true) {
+    return { callee: `%${declarer.def.name}.${method}%impl`, declarer };
+  }
+  if (declarer.shadowFields?.has(method) === true && declarer.base !== null) {
+    const up = L.findMethodOn(declarer.base, method);
+    if (up !== null) return slotBypassTarget(L, up.declarer, method) ?? { callee: `%${up.declarer.def.name}.${method}`, declarer: up.declarer };
+  }
+  return null;
+}
+
 /** The detached-function closure of class method `method` of `info` (see
    * lowerUnboundClassMethodValue); also what an object-literal method adopted
    * as a late method becomes inside its literal. */
@@ -25613,15 +25627,19 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
       const selfT: IrType = { kind: "object", className: info.def.name };
       const args: IrExpr[] = irParams.map((p) => ({ kind: "varRef" as const, localId: p.localId, type: p.type, loc }));
       const selfRef: IrExpr = { kind: "varRef", localId: "self.0", type: selfT, loc };
+      // The method's own body, never the instance-override wrapper: the value `p.m` read while no own function is set IS the
+      // prototype's method, and the override that captured it calls it back (`exec.call(pipeline)`).
+      const bypass = virtual ? null : slotBypassTarget(L, found.declarer, method);
       const call: IrExpr = virtual
         ? { kind: "virtualCall", className: info.def.name, method, args: [selfRef, ...args], type: found.sig.ret, loc }
         : {
             kind: "call",
-            callee: `%${found.declarer.def.name}.${method}`,
-            args: [L.upcastTo(selfRef, found.declarer.def.name), ...args],
+            callee: bypass !== null ? bypass.callee : `%${found.declarer.def.name}.${method}`,
+            args: [L.upcastTo(selfRef, bypass !== null ? bypass.declarer.def.name : found.declarer.def.name), ...args],
             type: found.sig.ret,
             loc,
           };
+      if (bypass !== null) L.noteEdge(bypass.callee);
       L.liftedFns.push({
         name,
         jsName: method,
@@ -25968,6 +25986,8 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
    * ordinary closure values, so bare references to them work (unlike class
    * methods, which have no bound-value form). */
   export function lowerFieldRead(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
+    const overridden = lowerInstanceOverrideRead(L, expr);
+    if (overridden !== null) return overridden;
     const target = L.fieldTarget(expr);
     if (target) return L.fieldGetExpr(target, locOf(expr), expr);
     if (L.chainBlocked(expr)) return null;
@@ -28773,6 +28793,59 @@ export function isShadowableMethodRead(L: Lowerer, e: ts.Expression): boolean {
   if (t?.kind !== "object") return false;
   const info = L.classes.get(t.className);
   return info !== undefined && inOwnShadowFamily(L, info) && L.findMethodOn(info, e.name.text) !== null;
+}
+
+/**
+ * `x.m` as a VALUE where the class of `x` carries an instance-override slot for `m` (lower-instoverride.ts, or a constructor-assigned
+ * override): JS answers the instance's own property when one was written, else the prototype's method. The slot is undefined-armed, so
+ * the read is `slot unset ? the method's value : the slot's function`, both boxed to a checked-dynamic value (what a consumer such as
+ * `.call` / a call / a binding takes). Null when no class on the chain owns such a slot.
+ */
+function lowerInstanceOverrideRead(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
+  if (expr.questionDotToken !== undefined) return null;
+  const name = expr.name.text;
+  let recvNode: ts.Expression = expr.expression;
+  while (ts.isParenthesizedExpression(recvNode)) recvNode = recvNode.expression;
+  if (ts.isPropertyAccessExpression(recvNode) && recvNode.name.text === "prototype") return null;
+  if (recvNode.kind !== ts.SyntaxKind.ThisKeyword && !ts.isIdentifier(recvNode)) {
+    // cheap pre-test: only a receiver whose class owns a slot needs more than this
+    const t0 = L.mapTypeOf(L.typeOf(recvNode));
+    if (t0?.kind !== "object") return null;
+  }
+  const receiverIr = L.mapTypeOf(L.typeOf(recvNode));
+  if (receiverIr?.kind !== "object") return null;
+  const info = L.classes.get(receiverIr.className);
+  if (info === undefined) return null;
+  let owns = false;
+  for (let c: ClassInfo | null = info; c !== null; c = c.base) if (c.shadowFields?.has(name) === true || c.shadowLate?.has(name) === true) owns = true;
+  if (!owns) return null;
+  const slotT = info.fields.get(name);
+  if (slotT === undefined || slotT.kind !== "union") return null;
+  const slotFn = (L.unions.get(slotT.unionId)?.arms ?? []).find((a) => a.kind === "func");
+  const loc = locOf(expr);
+  if (slotFn === undefined || (recvNode.kind !== ts.SyntaxKind.ThisKeyword && !ts.isIdentifier(recvNode))) {
+    L.unsupported("SC1090", expr, `reading the instance-overridable method '${name}' as a value from a receiver that is not a plain name (bind it to a name first)`);
+    return dynUndefinedExpr(loc);
+  }
+  const original = lowerUnboundClassMethodValue(L, expr);
+  if (original === null) {
+    L.unsupported("SC1090", expr, `reading the instance-overridable method '${name}' as a value (call it directly)`);
+    return dynUndefinedExpr(loc);
+  }
+  if (!canBoxFuncIntoDyn(original.type, (id) => L.shapes.get(id), (id) => L.unions.get(id)) || !canBoxFuncIntoDyn(slotFn, (id) => L.shapes.get(id), (id) => L.unions.get(id))) {
+    L.unsupported("SC1090", expr, `reading the instance-overridable method '${name}' as a value (its function type has no dynamic form)`);
+    return dynUndefinedExpr(loc);
+  }
+  const recv = L.lowerExpr(recvNode);
+  const slot = (): IrExpr => ({ kind: "fieldGet", obj: recv, className: receiverIr.className, field: name, type: slotT, loc });
+  return {
+    kind: "ternary",
+    cond: { kind: "unionIsTag", unionId: slotT.unionId, tag: L.armTag(slotT.unionId, UNDEFINED_T), negated: false, value: slot(), type: BOOL, loc },
+    then: { kind: "dynFrom", value: original, type: DYN, loc },
+    else_: { kind: "dynFrom", value: { kind: "unionNarrow", unionId: slotT.unionId, tag: L.armTag(slotT.unionId, slotFn), value: slot(), type: slotFn, loc }, type: DYN, loc },
+    type: DYN,
+    loc,
+  };
 }
 
 function shadowAwareMethodValue(L: Lowerer, expr: ts.PropertyAccessExpression, className: string, original: IrExpr): IrExpr {

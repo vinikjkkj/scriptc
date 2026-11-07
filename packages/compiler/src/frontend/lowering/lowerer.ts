@@ -72,7 +72,7 @@ import type {
 } from "../../ir/nodes.js";
 import { isDynErrorClass } from "../../ir/nodes.js";
 import { protoEscapes, strictAt } from "./lower-protoescape.js";
-import { applyLateInstalls, applyProtoSlots, dynFnAsFunc, dynFnReadable, scanProtoSlots } from "./lower-protoslots.js";
+import { applyInstanceOverrides, applyLateInstalls, applyProtoSlots, dynFnAsFunc, dynFnReadable, scanProtoSlots } from "./lower-protoslots.js";
 import { applyProtoTabs, hasProtoTab, scanProtoTabs, upgradeLateMethodsOverTables } from "./lower-prototab.js";
 import { OWN_SHADOW_ROOTS, applyFieldNotes, applyOwnShadows, inOwnShadowFamily } from "./lower-ownshadow.js";
 import { CLASS_BUILTIN_CTORLESS, CLASS_NO_DYN_NEW, EVAL_NO_SRC_CLASSES, GRAFTED_EMITTER_CLASSES, GRAFTED_EMITTER_CELL_CLASSES, GRAFTED_ROWS_FENCED_OPS, GRAFTED_PROPS_EXACT_OPS, EVAL_STATIC_CLASSES, dynReflectionSite, emitterStateWriteSites, graftedBoxSites, moduleBoxesEmitters } from "../../ir/nodes.js";
@@ -4193,6 +4193,7 @@ export class Lowerer {
     setMintPhase("tail:lifted");
     mintPhaseControl(this.shapes);
     applyProtoSlots(this, [functions, this.implicitFns]);
+    applyInstanceOverrides(this, [functions, this.implicitFns]);
     applyLateInstalls(this, [functions, this.implicitFns]);
     applyOwnShadows(this, [functions, this.implicitFns]);
     applyFieldNotes(this, [functions, this.implicitFns]);
@@ -5088,6 +5089,11 @@ export class Lowerer {
         }
         for (const name of info.shadowFields ?? []) {
           units.set(`%${cName}.${name}`, () => shadowMethodFn(this, info, name));
+          if (info.shadowOwn?.has(name) === true) {
+            for (const { mName, member } of this.classMethodMembers(info)) {
+              if (mName === name) units.set(`%${cName}.${name}%impl`, () => this.lowerClassMethodMember(info, member));
+            }
+          }
         }
       }
       for (const name of [...(info.staticMethods?.keys() ?? []), ...(info.staticAccessors?.keys() ?? [])]) {
@@ -5142,6 +5148,11 @@ export class Lowerer {
       }
       for (const name of info.shadowFields ?? []) {
         units.set(`%${cName}.${name}`, () => shadowMethodFn(this, info, name));
+        if (info.shadowOwn?.has(name) === true) {
+          for (const { mName, member } of this.classMethodMembers(info)) {
+            if (mName === name) units.set(`%${cName}.${name}%impl`, () => this.lowerClassMethodMember(info, member));
+          }
+        }
       }
     };
     // Generic instances queued by the bodies above lower here (an instance
@@ -5214,6 +5225,12 @@ export class Lowerer {
     for (const cls of this.protoSlots.keys()) {
       const info = this.classes.get(cls);
       if (info !== undefined && info.def.runtime !== true && info.evalClass === undefined) this.noteDynBoxedClass(cls);
+    }
+    // A class whose instance-override slot over a LATE method holds a function reading `this` (applyInstanceOverrides, built after every
+    // body is down) hands the instance to it as the ambient receiver: a box no body names.
+    for (const info of this.classes.values()) {
+      if (info.shadowLate === undefined || info.def.runtime === true || info.evalClass !== undefined) continue;
+      for (const name of info.shadowLate) if (info.shadowReadsThis?.has(name) === true) this.noteDynBoxedClass(info.def.name);
     }
     // ...and a class whose late method falls back to the prototype table before its install point hands the receiver to the table's function.
     for (const cls of this.protoClassBodies.keys()) {
@@ -17346,6 +17363,8 @@ export class Lowerer {
    * (`p.prototype.int64 = p.prototype.uint64`) is two module functions over
    * one source body. */
   readonly protoClassBodies = new Map<string, Map<string, ts.FunctionExpression>>();
+  /** Instance-level method overrides assigned outside the class (lower-instoverride.ts), by class declaration. */
+  readonly instanceOverrides: import("./lower-instoverride.js").InstanceOverrides = new Map();
   /** `C.prototype.m = fn` statements adopted as late methods of C (the
    * assignment lowers to nothing), and the checker type that stands in for
    * `this` while such a method's body lowers under C. */

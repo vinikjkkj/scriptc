@@ -22,7 +22,7 @@ import type { ClassInfo } from "./lower-classes.js";
 import { cjsKeyedForEachOf } from "../program.js";
 import { dynCallWithThis } from "./lower-calls.js";
 import { hasProtoTab, protoTabReadChain } from "./lower-prototab.js";
-import { BOOL, DYN, STRING, VOID, canDynCheckTo, type IrExpr, type IrFunction, type IrGlobal, type IrParam, type IrStmt, type IrType, type SrcLoc } from "../../ir/nodes.js";
+import { BOOL, DYN, F64, STRING, UNDEFINED_T, VOID, canDynCheckTo, typeEquals, type IrExpr, type IrFunction, type IrGlobal, type IrParam, type IrStmt, type IrType, type SrcLoc } from "../../ir/nodes.js";
 
 const locOf = (n: ts.Node): SrcLoc => ({ file: n.getSourceFile().fileName, start: n.getStart(), end: n.getEnd() }) as SrcLoc;
 
@@ -595,4 +595,107 @@ export function applyLateInstalls(L: Lowerer, fnLists: IrFunction[][]): void {
     }
   };
   for (const list of [...fnLists, L.liftedFns]) for (const f of list) visit(f.body);
+}
+
+
+/**
+ * Instance-level method overrides over a LATE method (`Cls.prototype.m = function`, assigned onto one instance elsewhere): the
+ * class collected the undefined-armed slot field (shadowLate); the method body is lowered by now, so `%C.m` is wrapped here. The
+ * wrapper tests the slot: unset runs the method (renamed `%C.m%impl`), set calls the own function with the declared leading
+ * arguments, under the ambient-receiver window when the function reads `this`. Runs BEFORE applyLateInstalls, whose dispatcher
+ * then wraps this wrapper like any other body. A class nothing writes over carries no slot and is untouched.
+ */
+export function applyInstanceOverrides(L: Lowerer, fnLists: IrFunction[][]): void {
+  const withSlots = [...L.classes.values()].filter((c) => c.shadowLate !== undefined && c.shadowLate.size > 0);
+  if (withSlots.length === 0) return;
+  const byName = new Map<string, { fn: IrFunction; list: IrFunction[] }>();
+  for (const list of fnLists) for (const f of list) byName.set(f.name, { fn: f, list });
+  for (const info of withSlots) {
+    for (const name of info.shadowLate!) {
+      const found = byName.get(`%${info.def.name}.${name}`);
+      if (found === undefined) continue;
+      const raw = found.fn;
+      const loc = raw.loc;
+      const className = info.def.name;
+      const params: IrParam[] = raw.params;
+      const ref = (p: IrParam): IrExpr => ({ kind: "varRef", localId: p.localId, type: p.type, loc });
+      const slotT = info.fields.get(name) as IrType & { kind: "union" };
+      const slotFn = (L.unions.get(slotT.unionId)?.arms ?? []).find((a) => a.kind === "func") as (IrType & { kind: "func" }) | undefined;
+      if (slotFn === undefined || slotFn.rest === true) {
+        L.unsupported("SC1090", info.decl!, `the instance-assigned function over '${name}' reads \`arguments\``);
+        continue;
+      }
+      const sig = info.methods.get(name);
+      const hasRest = sig?.params.some((x) => x.mode === "dynRest") === true;
+      const declared = params.length - 1 - (hasRest ? 1 : 0);
+      const implName = `${raw.name}%impl`;
+      const rt = dispatcherReturnType(raw);
+      const slotGet = (): IrExpr => ({ kind: "fieldGet", obj: ref(params[0]!), className, field: name, type: slotT, loc });
+      const packed = hasRest && sig?.argsBound === true;
+      const args: IrExpr[] = slotFn.params.map((pt, i) => {
+        // The arguments-bound form carries the WHOLE list in the pack; the declared names re-bind off it in the method's own prologue.
+        if (packed) {
+          const at: IrExpr = { kind: "libCall", fn: "dyn.arrAt", args: [ref(params[params.length - 1]!), { kind: "numLit", value: i, type: F64, loc }], type: DYN, loc };
+          return L.coerceToExpected(at, pt);
+        }
+        if (i < declared) return L.coerceToExpected(ref(params[1 + i]!), pt);
+        if (pt.kind === "dyn") return dynUndefinedExpr(loc);
+        L.unsupported("SC1090", info.decl!, `the instance-assigned function over '${name}' declares more parameters than the method`);
+        return dynUndefinedExpr(loc);
+      });
+      const viaImpl: IrExpr = { kind: "call", callee: implName, args: params.map(ref), type: rt, loc };
+      const viaSlot: IrExpr = {
+        kind: "callValue",
+        callee: { kind: "unionNarrow", unionId: slotT.unionId, tag: L.armTag(slotT.unionId, slotFn), value: slotGet(), type: slotFn, loc },
+        args,
+        type: slotFn.ret,
+        loc,
+      };
+      const finish = (e: IrExpr, ret: IrType): IrStmt[] => {
+        if (rt.kind === "void") return [{ kind: "exprStmt", expr: e, loc }, ...(ret === rt ? [] : [])];
+        return [{ kind: "return", value: typeEquals(ret, rt) ? e : L.coerceToExpected(e, rt), loc }];
+      };
+      const locals: IrFunction["locals"] = params.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false }));
+      let slotBody: IrStmt[] = finish(viaSlot, slotFn.ret);
+      if (info.shadowReadsThis?.has(name) === true) {
+        L.noteDynBoxedClass(className);
+        const recv = { id: "recv.0", name: "recv", type: DYN as IrType, mutable: false };
+        locals.push(recv);
+        const recvRef: IrExpr = { kind: "varRef", localId: recv.id, type: DYN, loc };
+        slotBody = [
+          { kind: "varDecl", localId: recv.id, init: { kind: "dynFrom", value: ref(params[0]!), type: DYN, loc }, loc },
+          { kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.thisPush", args: [recvRef], type: VOID, loc }, loc },
+          {
+            kind: "tryCatch",
+            tryBody: slotBody,
+            catchBody: null,
+            catchLocalId: null,
+            finallyBody: [{ kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.thisPop", args: [], type: VOID, loc }, loc }],
+            loc,
+          },
+        ];
+      }
+      const isUnset: IrExpr = {
+        kind: "unionIsTag",
+        unionId: slotT.unionId,
+        tag: L.armTag(slotT.unionId, UNDEFINED_T),
+        negated: false,
+        value: slotGet(),
+        type: BOOL,
+        loc,
+      };
+      const implFast: IrStmt[] = rt.kind === "void" ? [{ kind: "exprStmt", expr: viaImpl, loc }] : [{ kind: "return", value: viaImpl, loc }];
+      const wrapper: IrFunction = {
+        name: raw.name,
+        ...(raw.jsName !== undefined && { jsName: raw.jsName }),
+        params,
+        returnType: rt,
+        locals,
+        body: [{ kind: "if", cond: isUnset, then: implFast, else_: slotBody, loc }],
+        loc,
+      };
+      raw.name = implName;
+      found.list.push(wrapper);
+    }
+  }
 }
