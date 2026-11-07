@@ -3951,6 +3951,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_dyn_reflect_delete(${arg(0)}, ${arg(1)})`);
           case "dyn.reflectDefine":
             return finish(`scr_dyn_reflect_define(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "dyn.keyDeleteSloppy":
+            return finish(`scr_dyn_key_delete_sloppy(${arg(0)}, ${arg(1)})`);
           case "dyn.keyDelete":
             // `delete d[k]` on a dyn receiver: both borrowed, a bool
             // answer, and JS's own-property rule (the chain is never
@@ -4487,6 +4489,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_sp_from_pairs(${arg(0)})`);
           case "sp.fromDyn":
             return finish(`scr_sp_from_dyn(${arg(0)})`);
+          case "dyn.freezeArr":
+            return finish(`scr_dyn_arr_freeze(${arg(0)})`);
           case "arr.freeze":
             return finish(`scr_arr_freeze(${arg(0)})`);
           case "arr.isFrozen":

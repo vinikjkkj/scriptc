@@ -1895,10 +1895,12 @@ ScrArr *scr_arr_freeze(ScrArr *a);
 bool scr_arr_is_frozen(const ScrArr *a);
 /* The mutation `op` JS is about to run on the array `a`: a no-op unless `a` is FROZEN, in which case it throws the TypeError V8 throws at the FIRST write the spec algorithm would make
  * (ops: 1 push(x=item count) 2 pop 3 shift 4 unshift(x=item count) 5 reverse 6 fill(x=start, y=end) 7 copyWithin(x=target, y=start, z=end)
- * 8 splice(x=start, y=delete count, z=item count) 9 element write(x=index) 10 length write 11 element clear(x=index) -- the last three
+ * 8 splice(x=start, y=delete count, z=item count) 9 element write(x=index) 10 length write 11 element clear(x=index) 12 element delete(x=index) -- the writes from 9 on
  * are the writes a sloppy-mode caller silently ignores, so only a strict caller reaches this). Returns normally when the operation would
  * write nothing (an empty fill range, reverse of one element), so the caller may go on to run it. */
 void scr_arr_frozen_fail(ScrArr *a, double op, double x, double y, double z);
+/* The same decision over a bare length (a FROZEN dyn array's methods and writes call it; see scr_dyn_arr_freeze). */
+void scr_frozen_fail_len(size_t len, double op, double x, double y, double z);
 /* length = n, shrink half: drops elements from index n on, releasing
  * refcounted ones. Growing is the emitter's (it knows the absent value). */
 void scr_arr_truncate(ScrArr *a, double n);
@@ -6541,6 +6543,11 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value);
  * undefined/null receiver, and a loud refusal for an array-element delete
  * (a hole has no representation here) — may-throw. */
 bool scr_dyn_key_delete(ScrDyn *recv, ScrStr *key);
+bool scr_dyn_key_delete_sloppy(ScrDyn *recv, ScrStr *key);
+/* Object.freeze over a FRESH dyn ARRAY (the compiler proves the value is one): sets the frozen flag -- the `null_proto` byte, which only an OBJ reads -- and
+ * answers the same array (+1). Every dyn array write path (the methods, index and length writes, delete) consults scr_dyn_arr_is_frozen. */
+ScrDyn *scr_dyn_arr_freeze(ScrDyn *d);
+static inline bool scr_dyn_arr_is_frozen(const ScrDyn *d) { return d->kind == SCR_DYN_ARR && d->null_proto; }
 /* `key in v` with a runtime key — the dynHasKey fold per value (OBJ own
  * members, ARR length/valid indices, false elsewhere). Never throws. */
 bool scr_dyn_has_key(const ScrDyn *v, const ScrStr *key);

@@ -3580,6 +3580,8 @@ export type IrLibFn =
    * array-element delete loudly (a hole has no representation): in the
    * may-throw seed set. */
   | "dyn.keyDelete"
+  /** dyn.keyDelete from sloppy code: a delete a frozen array refuses answers false instead of throwing. */
+  | "dyn.keyDeleteSloppy"
   /** Destructuring pack over a dyn source — `const [a, b] = d`, a
    * destructured dyn callback param (args: the source and the STATIC
    * TypeError spelling, "" when the source has none — both borrowed;
@@ -4098,6 +4100,8 @@ export type IrLibFn =
   | "sp.fromDyn"
   /** Object.freeze over a typed array: sets the array's frozen bit, answers the same array (+1). */
   | "arr.freeze"
+  /** Object.freeze over a FRESH dyn array (sets the frozen flag, answers the same dyn). */
+  | "dyn.freezeArr"
   /** The frozen bit (Object.isFrozen / isSealed over a typed array, and the guard of a mutation in a program that freezes arrays). */
   | "arr.isFrozen"
   /** The TypeError a mutation of a FROZEN array throws (scr_arr_frozen_fail: op, x, y, z). MAY THROW. */
@@ -14749,6 +14753,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // delete: ToObject on a nullish receiver, and the array-element hole
   // this representation refuses rather than fakes.
   "dyn.keyDelete",
+  "dyn.keyDeleteSloppy",
   // `new f(...)` throws "is not a constructor", and the constructor BODY
   // throws whatever it throws — through the boxed thunk, catchably
   "dyn.construct",
@@ -14843,6 +14848,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "sp.fromPairs",
   "sp.fromDyn",
   "arr.frozenFail",
+  "dyn.freezeArr",
   "fs.statSync",
   "crypto.randomBytesToString",
   "crypto.randomBytes",

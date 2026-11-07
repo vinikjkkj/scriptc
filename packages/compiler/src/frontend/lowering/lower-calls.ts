@@ -13902,6 +13902,12 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       // a loop and handed to freeze is the accumulate-then-publish idiom;
       // nothing else holds the array when the freeze runs, so its frozen
       // bit is exactly as unobservable as a literal's.
+      // A const binding holding a FRESH dyn ARRAY (`const fields = guarded.map(...)`): the dyn array's own frozen flag makes the freeze exact wherever the binding
+      // is used afterwards (every dyn array write path consults the flag), and the initializer proves the runtime value is an array.
+      if (ts.isIdentifier(inner) && value.type.kind === "dyn" && freshArrayCallBinding(L, inner)) {
+        L.dynArrayFrozen = true;
+        return { kind: "libCall", fn: "dyn.freezeArr", args: [value], type: DYN, loc: locOf(call) };
+      }
       if (ts.isIdentifier(inner) && freezeFreshLocal(L, inner, call)) {
         return value;
       }
@@ -16601,6 +16607,48 @@ const FREEZE_SAFE_ARRAY_METHODS = new Set([
   "push", "pop", "shift", "unshift", "indexOf", "includes",
 ]);
 
+/** True when `recv` (an identifier / property-access chain) was proven an array by an EARLIER `if (!Array.isArray(recv)) { throw ... }` (or return)
+ * in the same function body as `decl`: the checker leaves such a receiver `any` when it is a property of an untyped parameter, yet the value
+ * is a real array, so `.map` on it is Array.prototype.map. Syntactic and conservative: the guard must sit before `decl` in an enclosing block
+ * of the same function, and the receiver must be a pure access chain. */
+function arrayGuardedBefore(recv: ts.Expression, decl: ts.Node): boolean {
+  const pure = (e: ts.Expression): boolean =>
+    ts.isIdentifier(e) || (ts.isPropertyAccessExpression(e) && pure(e.expression));
+  if (!pure(recv)) return false;
+  const text = recv.getText();
+  const exits = (s: ts.Statement): boolean => {
+    if (ts.isThrowStatement(s) || ts.isReturnStatement(s)) return true;
+    return ts.isBlock(s) && s.statements.length > 0 && exits(s.statements[s.statements.length - 1]!);
+  };
+  for (let cur: ts.Node = decl; cur.parent !== undefined && !ts.isFunctionLike(cur); cur = cur.parent) {
+    const block = cur.parent;
+    if (!ts.isBlock(block) && !ts.isSourceFile(block)) continue;
+    for (const s of block.statements) {
+      if (s === cur || s.getStart() >= cur.getStart()) break;
+      if (!ts.isIfStatement(s) || s.elseStatement !== undefined || !exits(s.thenStatement)) continue;
+      const c = s.expression;
+      if (
+        ts.isPrefixUnaryExpression(c) && c.operator === ts.SyntaxKind.ExclamationToken &&
+        ts.isCallExpression(c.operand) && c.operand.expression.getText() === "Array.isArray" &&
+        c.operand.arguments.length === 1 && c.operand.arguments[0]!.getText() === text
+      ) return true;
+    }
+  }
+  return false;
+}
+
+const FRESH_ARRAY_METHODS: ReadonlySet<string> = new Set(["map", "filter", "slice", "concat", "flat", "flatMap", "toSorted", "toReversed", "toSpliced", "with"]);
+
+/** True when the const binding `ident` is initialized by a fresh-array method call (map/filter/slice/...): its value is a fresh array. */
+function freshArrayCallBinding(L: Lowerer, ident: ts.Identifier): boolean {
+  const sym = L.resolveValueSymbol(ident);
+  const decl = sym ? L.checker.valueDeclarationOf(sym) : undefined;
+  if (!decl || !ts.isVariableDeclaration(decl) || decl.initializer === undefined || (decl.parent.flags & ts.NodeFlags.Const) === 0) return false;
+  let init: ts.Expression = decl.initializer;
+  while (ts.isParenthesizedExpression(init) || ts.isAsExpression(init) || ts.isSatisfiesExpression(init) || ts.isTypeAssertion(init)) init = init.expression;
+  return ts.isCallExpression(init) && ts.isPropertyAccessExpression(init.expression) && FRESH_ARRAY_METHODS.has(init.expression.name.text);
+}
+
 /** True for the accumulate-then-publish idiom over a FUNCTION-LOCAL
  * const:
  *
@@ -16667,7 +16715,15 @@ function freezeFreshLocal(L: Lowerer, ident: ts.Identifier, call: ts.CallExpress
   ) {
     init = init.expression;
   }
-  if (!init || !(ts.isArrayLiteralExpression(init) || ts.isObjectLiteralExpression(init))) {
+  // A FRESH-ARRAY METHOD CALL is the same allocation (`const fields = list.map(...)`, then `Object.freeze(fields)` -- ioredis HimportCoordinator):
+  // map/filter/slice/concat/flat/flatMap/toSorted/toReversed/toSpliced/with over a receiver the checker types as an array return a NEW array that
+  // nothing else holds until the binding takes it, so the argument of case (1) holds for it as it does for the literal. The callback cannot
+  // reach the binding: it runs before the initializer completes (the binding is in its TDZ).
+  const freshArrayCall =
+    init !== undefined && ts.isCallExpression(init) && ts.isPropertyAccessExpression(init.expression) &&
+    FRESH_ARRAY_METHODS.has(init.expression.name.text) &&
+    (L.checker.isArrayType(L.typeOf(init.expression.expression)) || arrayGuardedBefore(init.expression.expression, decl));
+  if (!init || !(ts.isArrayLiteralExpression(init) || ts.isObjectLiteralExpression(init) || freshArrayCall)) {
     return false;
   }
 

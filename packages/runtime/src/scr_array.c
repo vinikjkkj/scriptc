@@ -1323,7 +1323,10 @@ static size_t frozen_rel(double v, double len, bool nan_is_zero) {
 
 void scr_arr_frozen_fail(ScrArr *a, double op, double x, double y, double z) {
   if (!(a->flags & SCR_ARR_FROZEN)) return;
-  const size_t len = a->len;
+  scr_frozen_fail_len(a->len, op, x, y, z);
+}
+
+void scr_frozen_fail_len(size_t len, double op, double x, double y, double z) {
   const double dlen = (double)len;
   switch ((int)op) {
     case 1: /* push */
@@ -1383,6 +1386,9 @@ void scr_arr_frozen_fail(ScrArr *a, double op, double x, double y, double z) {
       return;
     case 11: /* element clear (a write of the absent value) */
       frozen_ro((size_t)x);
+      return;
+    case 12: /* delete of an element */
+      frozen_del((size_t)x);
       return;
     default:
       return;

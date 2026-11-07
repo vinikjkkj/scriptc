@@ -3718,13 +3718,16 @@ export class Lowerer {
    * freezes no array, which is what keeps every other program free of the guards below. */
   frozenArrayTypes: IrType[] = [];
 
+  /** Set when the program freezes a DYN array (dyn.freezeArr): the dyn write paths then tell sloppy callers from strict ones (the Sloppy variants of keySet and keyDelete). */
+  dynArrayFrozen = false;
+
   /** THE FROZEN ARRAY's write guards (pay-for-use), run once the whole program is lowered. A program that freezes an array of type T gets, in front of
    * every mutation of an array of type T, a test of the frozen bit: the always-throwing mutators (push, pop, shift, unshift, reverse, fill, copyWithin,
    * splice) call the runtime's TypeError for the first write the spec algorithm would make, and the writes a sloppy caller silently ignores (element
    * write, length write, element clear) throw in strict code and are skipped in sloppy code. Arrays of other types, and programs with no frozen array,
    * carry nothing. */
   frozenArrayRewrite(functions: IrFunction[]): void {
-    if (this.frozenArrayTypes.length === 0) return;
+    if (this.frozenArrayTypes.length === 0 && !this.dynArrayFrozen) return;
     const frozenType = (t: IrType): boolean => t.kind === "array" && this.frozenArrayTypes.some((f) => typeEquals(f, t));
     const sfByName = new Map<string, ts.SourceFile>();
     for (const sf of this.program.getSourceFiles()) sfByName.set(sf.fileName, sf);
@@ -3757,6 +3760,9 @@ export class Lowerer {
         }
         const o = node as Record<string, unknown> & { kind?: unknown; loc?: SrcLoc };
         const loc = o.loc as SrcLoc;
+        if (this.dynArrayFrozen && o.kind === "libCall" && (o["fn"] === "dyn.keySet" || o["fn"] === "dyn.keyDelete") && loc !== undefined && !strictAtLoc(loc)) {
+          o["fn"] = o["fn"] === "dyn.keySet" ? "dyn.keySetSloppy" : "dyn.keyDeleteSloppy";
+        }
         const local = (e: IrExpr, stmts: IrStmt[]): (() => IrExpr) => {
           const t = temp(e.type);
           stmts.push({ kind: "varDecl", localId: t.id, init: e, loc });
