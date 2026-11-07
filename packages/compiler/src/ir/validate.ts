@@ -415,6 +415,9 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // generic array-of slot has no named constant here).
   "sp.fromPairs": { argTypes: [null], result: SEARCH_PARAMS_T },
   "sp.fromDyn": { argTypes: [DYN], result: SEARCH_PARAMS_T },
+  "arr.freeze": { argTypes: [null], result: arrayOf(F64) },
+  "arr.isFrozen": { argTypes: [null], result: BOOL },
+  "arr.frozenFail": { argTypes: [null, F64, F64, F64, F64], result: VOID },
   "sp.with": { argTypes: [SEARCH_PARAMS_T, STRING, STRING], result: SEARCH_PARAMS_T },
   "url.searchParams": { argTypes: [URL_T], result: SEARCH_PARAMS_T },
   "url.search": { argTypes: [URL_T], result: STRING },
@@ -5799,6 +5802,11 @@ function validateFunction(
             if (e.type.kind !== "promise") err(`libCall ${e.fn} must be a promise`, e.loc);
             break;
           }
+          // arr.freeze answers the array it froze: the result is the argument's own type, whatever the element.
+          if (e.fn === "arr.freeze") {
+            if (e.args[0]?.type.kind !== "array" || !typeEquals(e.type, e.args[0].type)) err(`libCall arr.freeze must answer its array argument's type`, e.loc);
+            break;
+          }
           if (!typeEquals(e.type, sig.result)) {
             err(`libCall ${e.fn} must be ${sig.result.kind}, got ${e.type.kind}`, e.loc);
           }
@@ -5916,7 +5924,7 @@ function validateFunction(
         const streamListenerResult =
           (e.fn === "stream.onData" || e.fn === "stream.onEnd") &&
           (e.type.kind === "void" || e.type.kind === "childStream");
-        if (e.fn === "dyn.adoptPromise" || e.fn === "tp.setTimeoutV" || e.fn === "tp.setTimeoutVS" || e.fn === "tp.setTimeoutVoid" || e.fn === "tp.setTimeoutVoidS" ? e.type.kind !== "promise" : !streamListenerResult && !typeEquals(e.type, sig.result)) {
+        if (e.fn === "dyn.adoptPromise" || e.fn === "tp.setTimeoutV" || e.fn === "tp.setTimeoutVS" || e.fn === "tp.setTimeoutVoid" || e.fn === "tp.setTimeoutVoidS" ? e.type.kind !== "promise" : !streamListenerResult && !(e.fn === "arr.freeze" && e.args[0]?.type.kind === "array" && typeEquals(e.type, e.args[0].type)) && !typeEquals(e.type, sig.result)) {
           err(`libCall ${e.fn} must be ${sig.result.kind}, got ${e.type.kind}`, e.loc);
         }
         break;

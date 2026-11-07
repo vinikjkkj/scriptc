@@ -13920,6 +13920,16 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     // other reference can write). Primitives pass through per ES2015.
     // Aliased objects keep a fence: a later write through the original
     // reference would need the runtime frozen bit (strict mode throws).
+    // Object.isFrozen / Object.isSealed over a typed array answer the frozen bit (the runtime has no seal-without-freeze, so a sealed array IS a frozen one);
+    // over a primitive they answer true (ES2015).
+    if ((member === "isFrozen" || member === "isSealed") && call.arguments.length === 1 && !ts.isSpreadElement(call.arguments[0]!)) {
+      const probedArg = probeLower(L, call.arguments[0]!);
+      if (probedArg !== null && (probedArg.type.kind === "array" || probedArg.type.kind === "string" || probedArg.type.kind === "f64" || probedArg.type.kind === "bool" || probedArg.type.kind === "symbol" || isUnitType(probedArg.type))) {
+        const subject = L.lowerExpr(call.arguments[0]!);
+        if (subject.type.kind === "array") return { kind: "libCall", fn: "arr.isFrozen", args: [subject], type: BOOL, loc: locOf(call) };
+        return { kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: subject, loc: locOf(call) }], result: { kind: "boolLit", value: true, type: BOOL, loc: locOf(call) }, type: BOOL, loc: locOf(call) };
+      }
+    }
     if (member === "freeze") {
       if (call.arguments.length !== 1 || ts.isSpreadElement(call.arguments[0]!)) {
         L.noLowering(`Object.freeze with ${call.arguments.length} arguments`, call);
@@ -13947,6 +13957,12 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       const value = isLiteral && ctxIr !== null
         ? L.lowerExprExpecting(argNode, ctxIr)
         : L.lowerExpr(argNode);
+      // A TYPED ARRAY (literal or aliased) takes the real frozen bit: the program's mutations of arrays of this type are guarded
+      // (Lowerer.frozenArrayRewrite), so a write through any alias throws or is ignored exactly as Node does.
+      if (value.type.kind === "array") {
+        if (!L.frozenArrayTypes.some((t) => typeEquals(t, value.type))) L.frozenArrayTypes.push(value.type);
+        return { kind: "libCall", fn: "arr.freeze", args: [value], type: value.type, loc: locOf(call) };
+      }
       if (isLiteral) {
         return value; // fresh — freeze is identity here, honestly
       }

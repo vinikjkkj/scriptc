@@ -3714,7 +3714,158 @@ export class Lowerer {
     return collectJsonRequires(this, parts);
   }
 
-  /** Orchestrator extension (2026-10-29), not a language rule: a dyn-source
+    /** The array types some `Object.freeze` in the program freezes (typed arrays: the frozen bit lives in the array header). Empty in a program that
+   * freezes no array, which is what keeps every other program free of the guards below. */
+  frozenArrayTypes: IrType[] = [];
+
+  /** THE FROZEN ARRAY's write guards (pay-for-use), run once the whole program is lowered. A program that freezes an array of type T gets, in front of
+   * every mutation of an array of type T, a test of the frozen bit: the always-throwing mutators (push, pop, shift, unshift, reverse, fill, copyWithin,
+   * splice) call the runtime's TypeError for the first write the spec algorithm would make, and the writes a sloppy caller silently ignores (element
+   * write, length write, element clear) throw in strict code and are skipped in sloppy code. Arrays of other types, and programs with no frozen array,
+   * carry nothing. */
+  frozenArrayRewrite(functions: IrFunction[]): void {
+    if (this.frozenArrayTypes.length === 0) return;
+    const frozenType = (t: IrType): boolean => t.kind === "array" && this.frozenArrayTypes.some((f) => typeEquals(f, t));
+    const sfByName = new Map<string, ts.SourceFile>();
+    for (const sf of this.program.getSourceFiles()) sfByName.set(sf.fileName, sf);
+    const strictAtLoc = (loc: SrcLoc): boolean => {
+      const sf = sfByName.get(loc.file);
+      return sf === undefined ? true : strictAt(sf, loc.start);
+    };
+    const MUTATORS = new Set(["push", "pushAll", "pushSpread", "pop", "shift", "unshift", "reverse", "fill", "copyWithin", "splice", "setLength", "clearIndex", "compactHoles"]);
+    for (const fn of [...functions]) {
+      let n = 0;
+      const temp = (type: IrType): IrLocal => {
+        const local: IrLocal = { id: `%frz.${n}`, name: "%frz", type, mutable: false };
+        n++;
+        fn.locals.push(local);
+        return local;
+      };
+      const done = new WeakSet<object>();
+      const seen = new Set<object>();
+      const replace = (target: object, out: object): void => {
+        for (const k of Object.keys(target)) delete (target as Record<string, unknown>)[k];
+        Object.assign(target, out);
+      };
+      const num = (v: number, loc: SrcLoc): IrExpr => ({ kind: "numLit", value: v, type: F64, loc });
+      const visit = (node: unknown): void => {
+        if (node === null || typeof node !== "object" || seen.has(node)) return;
+        seen.add(node);
+        if (Array.isArray(node)) {
+          for (const x of node) visit(x);
+          return;
+        }
+        const o = node as Record<string, unknown> & { kind?: unknown; loc?: SrcLoc };
+        const loc = o.loc as SrcLoc;
+        const local = (e: IrExpr, stmts: IrStmt[]): (() => IrExpr) => {
+          const t = temp(e.type);
+          stmts.push({ kind: "varDecl", localId: t.id, init: e, loc });
+          return () => ({ kind: "varRef", localId: t.id, type: e.type, loc });
+        };
+        const fail = (arr: () => IrExpr, op: number, x: IrExpr, y: IrExpr, z: IrExpr): IrStmt => ({
+          kind: "exprStmt",
+          expr: { kind: "libCall", fn: "arr.frozenFail", args: [arr(), num(op, loc), x, y, z], type: VOID, loc },
+          loc,
+        });
+        const isFrozen = (arr: () => IrExpr): IrExpr => ({ kind: "libCall", fn: "arr.isFrozen", args: [arr()], type: BOOL, loc });
+        const ignorable = (st: IrStmt, arr: () => IrExpr, op: number, x: IrExpr, stmts: IrStmt[]): IrStmt => {
+          // Sloppy code ignores the write; strict code throws.
+          const strict = strictAtLoc(loc);
+          return {
+            kind: "block",
+            body: [
+              ...stmts,
+              { kind: "if", cond: isFrozen(arr), then: strict ? [fail(arr, op, x, num(0, loc), num(0, loc))] : [], else_: [st], loc },
+            ],
+            loc,
+          };
+        };
+        if (o.kind === "arraySet" && !done.has(o) && frozenType((o["arr"] as IrExpr).type)) {
+          done.add(o);
+          const stmts: IrStmt[] = [];
+          const a = local(o["arr"] as IrExpr, stmts);
+          const i = local(o["index"] as IrExpr, stmts);
+          const v = local(o["value"] as IrExpr, stmts);
+          const inner: IrStmt = { ...(o as object), arr: a(), index: i(), value: v() } as unknown as IrStmt;
+          done.add(inner);
+          replace(o, ignorable(inner, a, 9, i(), stmts));
+          seen.delete(o);
+          visit(o);
+          return;
+        }
+        if (o.kind === "arrayClear" && !done.has(o) && frozenType((o["arr"] as IrExpr).type)) {
+          done.add(o);
+          const stmts: IrStmt[] = [];
+          const a = local(o["arr"] as IrExpr, stmts);
+          const i = local(o["index"] as IrExpr, stmts);
+          const inner: IrStmt = { ...(o as object), arr: a(), index: i() } as unknown as IrStmt;
+          done.add(inner);
+          replace(o, ignorable(inner, a, 11, i(), stmts));
+          seen.delete(o);
+          visit(o);
+          return;
+        }
+        if (o.kind === "exprStmt" && !done.has(o)) {
+          const ex = o["expr"] as (IrExpr & { kind: string; method?: string; receiver?: IrExpr; args?: IrExpr[] }) | undefined;
+          if (ex !== undefined && ex.kind === "arrIntrinsic" && (ex.method === "setLength" || ex.method === "clearIndex" || (ex.method === "splice" && (ex as { lenWrite?: true }).lenWrite === true)) && frozenType(ex.receiver!.type)) {
+            done.add(o);
+            const stmts: IrStmt[] = [];
+            const a = local(ex.receiver!, stmts);
+            const args = ex.args!.map((x) => local(x, stmts));
+            const inner: IrStmt = { kind: "exprStmt", expr: { ...(ex as object), receiver: a(), args: args.map((r) => r()) } as unknown as IrExpr, loc };
+            done.add(inner);
+            done.add((inner as { expr: object }).expr);
+            replace(o, ignorable(inner, a, ex.method === "clearIndex" ? 11 : 10, args[0] !== undefined ? args[0]() : num(0, loc), stmts));
+            seen.delete(o);
+            visit(o);
+            return;
+          }
+        }
+        if (o.kind === "arrIntrinsic" && !done.has(o) && MUTATORS.has(o["method"] as string) && frozenType((o["receiver"] as IrExpr).type)) {
+          const method = o["method"] as string;
+          done.add(o);
+          const stmts: IrStmt[] = [];
+          const r = local(o["receiver"] as IrExpr, stmts);
+          const rawArgs = o["args"] as IrExpr[];
+          const args = rawArgs.map((x) => local(x, stmts));
+          const lenOf = (a: () => IrExpr): IrExpr => ({ kind: "arrIntrinsic", method: "length", receiver: a(), args: [], type: F64, loc });
+          const inf: IrExpr = { kind: "numLit", value: Infinity, type: F64, loc };
+          const z = num(0, loc);
+          let guard: IrStmt | null = null;
+          switch (method) {
+            case "push": guard = fail(r, 1, num(1, loc), z, z); break;
+            case "pushAll": guard = fail(r, 1, num(rawArgs.length, loc), z, z); break;
+            case "pushSpread": guard = fail(r, 1, lenOf(args[0]!), z, z); break;
+            case "pop": guard = fail(r, 2, z, z, z); break;
+            case "shift": guard = fail(r, 3, z, z, z); break;
+            case "unshift": guard = fail(r, 4, num(rawArgs.length, loc), z, z); break;
+            case "reverse": guard = fail(r, 5, z, z, z); break;
+            // The in-place sort desugar opens with compactHoles; JS writes every element back, so a frozen array of two or more throws.
+            case "compactHoles": guard = fail(r, 5, z, z, z); break;
+            case "fill": guard = fail(r, 6, args[1] !== undefined ? args[1]() : z, args[2] !== undefined ? args[2]() : inf, z); break;
+            case "copyWithin": guard = fail(r, 7, args[0]!(), args[1] !== undefined ? args[1]() : z, args[2] !== undefined ? args[2]() : inf); break;
+            case "splice": guard = fail(r, 8, args[0]!(), args[1] !== undefined ? args[1]() : inf, args[2] !== undefined ? lenOf(args[2]) : z); break;
+            default: break;
+          }
+          if (guard === null) {
+            // setLength / clearIndex outside statement position: the write is not ignorable here, so a frozen receiver throws as in strict code.
+            guard = fail(r, method === "setLength" ? 10 : 11, args[0] !== undefined ? args[0]() : z, z, z);
+          }
+          stmts.push(guard);
+          const inner = { ...(o as object), receiver: r(), args: args.map((a) => a()) } as unknown as IrExpr;
+          done.add(inner);
+          replace(o, { kind: "seqExpr", stmts, result: inner, type: (o["type"] as IrType), loc });
+          seen.delete(o);
+          visit(o);
+          return;
+        }
+        for (const v of Object.values(o)) visit(v);
+      };
+      visit(fn.body);
+    }
+  }
+
+/** Orchestrator extension (2026-10-29), not a language rule: a dyn-source
    * Array.from walks an object's iterator, and a GENERATOR held in the dynamic
    * tree is a stranded box (canBoxFuncIntoDyn is false: it cannot be called
    * through dyn). So a program that boxes a generator function or method into
@@ -4025,6 +4176,7 @@ export class Lowerer {
     // is not complete until the last body is lowered.
     this.reportRecordWidthCopies(functions);
     this.viewRewrite(functions);
+    this.frozenArrayRewrite(functions);
     this.fenceDynArrFromOnStrandedBox(functions);
 
     if (this.remainder) {

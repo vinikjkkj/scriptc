@@ -4520,6 +4520,13 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_sp_from_pairs(${arg(0)})`);
           case "sp.fromDyn":
             return finish(`scr_sp_from_dyn(${arg(0)})`);
+          case "arr.freeze":
+            return finish(`scr_arr_freeze(${arg(0)})`);
+          case "arr.isFrozen":
+            // Inline: the guard sits in front of hot stores of a program that freezes an array of this type (ScrArr::flags).
+            return finish(`((${arg(0)})->flags & SCR_ARR_FROZEN) != 0`);
+          case "arr.frozenFail":
+            return finish(`scr_arr_frozen_fail(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)}, ${arg(4)})`);
           case "sp.with":
             return finish(`scr_sp_with(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "url.searchParams":

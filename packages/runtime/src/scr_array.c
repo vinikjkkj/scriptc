@@ -464,7 +464,7 @@ ScrArr *scr_arr_new(ScrElemKind elem, size_t initial_cap) {
   a->data = NULL;
   a->vmbacked = 0;
   a->execidx = 0;
-  a->tomb = 0;
+  a->flags = 0;
   if (initial_cap > 0) scr_arr_grow(a, initial_cap);
 #ifdef SCR_RC_AUDIT
   scr_live_arrays++;
@@ -513,7 +513,7 @@ ScrArr *scr_arr_new_ref(void *(*elem_retain)(void *),
   a->data = NULL;
   a->vmbacked = 0;
   a->execidx = 0;
-  a->tomb = 0;
+  a->flags = 0;
   if (initial_cap > 0) scr_arr_grow(a, initial_cap);
 #ifdef SCR_RC_AUDIT
   scr_live_arrays++;
@@ -766,12 +766,12 @@ SCR_ARR_COLD_TRAP void scr_arr_trap_tombstone(const ScrArr *a, size_t i) {
 
 void scr_arr_tombstone(ScrArr *a, double i) {
   scr_arr_set_slot(a, i, scr_slot_from_ptr(NULL));
-  a->tomb = 1;
+  a->flags |= SCR_ARR_TOMB;
 }
 
 /* The LLVM-inlined hasIndex met a NULL ref slot: a tombstoned array refuses (the slot is null, not a hole). */
 void scr_arr_miss_check(const ScrArr *a, int64_t n) {
-  if (a->tomb) scr_arr_trap_tombstone(a, (size_t)n);
+  if (a->flags & SCR_ARR_TOMB) scr_arr_trap_tombstone(a, (size_t)n);
 }
 
 /* The out-of-line hole test for the LLVM-emitted walkers. */
@@ -1291,6 +1291,104 @@ ScrArr *scr_arr_fill_ref(ScrArr *a, void *v, double start, double end) {
  * past 2^32 — Node's exact message and exact timing (`a.length = -1` leaves
  * the array untouched). Catchable, so the emitter's pending check follows
  * the call, and the truncate/grow pair below only runs on a valid length. */
+ScrArr *scr_arr_freeze(ScrArr *a) {
+  a->flags |= SCR_ARR_FROZEN;
+  return scr_arr_retain(a);
+}
+
+bool scr_arr_is_frozen(const ScrArr *a) { return (a->flags & SCR_ARR_FROZEN) != 0; }
+
+/* V8's four frozen-array TypeErrors. */
+static void frozen_throw(const char *fmt, double idx) {
+  char buf[160];
+  int n = snprintf(buf, sizeof buf, fmt, idx);
+  scr_throw_error_msg(SCR_ERR_TYPE, buf, (size_t)n);
+}
+static void frozen_add(size_t i) { frozen_throw("Cannot add property %.0f, object is not extensible", (double)i); }
+static void frozen_ro(size_t i) { frozen_throw("Cannot assign to read only property '%.0f' of object '[object Array]'", (double)i); }
+static void frozen_del(size_t i) { frozen_throw("Cannot delete property '%.0f' of [object Array]", (double)i); }
+static void frozen_rolen(void) {
+  static const char msg[] = "Cannot assign to read only property 'length' of object '[object Array]'";
+  scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+}
+
+/* The index normalizations below are the ones the unfrozen runtime applies (scr_arr_fill_*, scr_arr_copy_within, scr_arr_splice*). */
+static size_t frozen_rel(double v, double len, bool nan_is_zero) {
+  double s = nan_is_zero ? (isnan(v) ? 0 : trunc(v)) : v;
+  if (s < 0) s += len;
+  if (!(s >= 0)) s = 0;
+  if (s > len) s = len;
+  return (size_t)s;
+}
+
+void scr_arr_frozen_fail(ScrArr *a, double op, double x, double y, double z) {
+  if (!(a->flags & SCR_ARR_FROZEN)) return;
+  const size_t len = a->len;
+  const double dlen = (double)len;
+  switch ((int)op) {
+    case 1: /* push */
+      if (x < 1) frozen_rolen(); else frozen_add(len);
+      return;
+    case 2: /* pop */
+      if (len == 0) frozen_rolen(); else frozen_del(len - 1);
+      return;
+    case 3: /* shift */
+      if (len == 0) frozen_rolen(); else if (len == 1) frozen_del(0); else frozen_ro(0);
+      return;
+    case 4: /* unshift */
+      if (x < 1) frozen_rolen(); else if (len > 0) frozen_add(len + (size_t)x - 1); else frozen_add(0);
+      return;
+    case 5: /* reverse */
+      if (len >= 2) frozen_ro(0);
+      return;
+    case 6: { /* fill */
+      size_t s = frozen_rel(x, dlen, false), e = frozen_rel(y, dlen, false);
+      if (s < e) frozen_ro(s);
+      return;
+    }
+    case 7: { /* copyWithin */
+      size_t to = frozen_rel(x, dlen, true), from = frozen_rel(y, dlen, true);
+      double e0 = isnan(z) ? 0 : trunc(z);
+      if (e0 < 0) e0 += dlen;
+      size_t fin = e0 <= 0 ? 0 : (e0 >= dlen ? len : (size_t)e0);
+      size_t count = fin > from ? fin - from : 0;
+      if (count > len - to) count = len - to;
+      if (count == 0) return;
+      if (from < to && to < from + count) frozen_ro(to + count - 1); else frozen_ro(to);
+      return;
+    }
+    case 8: { /* splice */
+      size_t from = frozen_rel(x, dlen, true);
+      double avail = dlen - (double)from;
+      double d0 = isnan(y) ? 0 : trunc(y);
+      size_t n = d0 <= 0 ? 0 : d0 >= avail ? (size_t)avail : (size_t)d0;
+      size_t m = z < 1 ? 0 : (size_t)z;
+      if (m < n) {
+        if (from < len - n) frozen_ro(from + m); else frozen_del(len - 1);
+      } else if (m > n) {
+        if (len - n > from) frozen_add(len - n + m - 1);
+        else if (from < len) frozen_ro(from); else frozen_add(from);
+      } else if (m > 0) {
+        if (from < len) frozen_ro(from); else frozen_add(from);
+      } else {
+        frozen_rolen();
+      }
+      return;
+    }
+    case 9: /* element write */
+      if (x >= 0 && x < dlen) frozen_ro((size_t)x); else frozen_add((size_t)x);
+      return;
+    case 10: /* length write */
+      frozen_rolen();
+      return;
+    case 11: /* element clear (a write of the absent value) */
+      frozen_ro((size_t)x);
+      return;
+    default:
+      return;
+  }
+}
+
 void scr_arr_length_gate(double n) {
   if (!(n >= 0) || n > 4294967295.0 || n != trunc(n)) {
     static const char msg[] = "Invalid array length";
