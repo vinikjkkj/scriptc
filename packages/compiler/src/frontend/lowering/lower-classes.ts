@@ -2186,9 +2186,13 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
       try {
         sig = L.lambdaSignature(fn as ts.MethodDeclaration);
       } catch (err) {
-        if (err instanceof PoisonError) continue;
+        if (err instanceof PoisonError) {
+          if (m === "exec" || m === "multi" || m === "execBuffer") process.stderr.write(`LMPOISON ${info.def.name}.${m} ${(err as Error).message?.slice(0, 200)} ${JSON.stringify((err as { diags?: unknown }).diags ?? null)?.slice(0, 300)}\n`);
+          continue;
+        }
         throw err;
       }
+      if (m === "exec" || m === "multi") process.stderr.write(`LMSIG ${info.def.name}.${m} shapes=${JSON.stringify(sig.shapes.map((x) => x.mode))}\n`);
       if (sig.shapes.some((p) => p.mode === "rest")) continue;
       // A late method reading `arguments` takes the variadic form (one dynRest shape
       // carries the whole list; declared names re-bind off it), as a declared method does.
