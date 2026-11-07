@@ -27,7 +27,7 @@ import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRe
 import { isShadowableMethodRead } from "./lower-exprs.js";
 import { jsLetWidened, jsWidenedCallBinding, bindingNeverReassigned, bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, islandRestSlotType, nullishGenericBindingUnitOf, hasOwnPropertyAliasDecl } from "./lower-calls.js";
 import { deadBranchSkippable, statementAlwaysThrowsOnRequire } from "../require-throws.js";
-import { irAlwaysExits, dynAliasBindingIsDyn, isVarDeclared, jsEvolvingObjectLiteralInit, keyedReadGlobalArmedType, keyedReadGlobalIsDyn, numericIteratorSourceOf, provenanceElidedConstDecl } from "./lower-stmts.js";
+import { irAlwaysExits, evolvingArrayTypedSlot, dynAliasBindingIsDyn, isVarDeclared, jsEvolvingObjectLiteralInit, keyedReadGlobalArmedType, keyedReadGlobalIsDyn, numericIteratorSourceOf, provenanceElidedConstDecl } from "./lower-stmts.js";
 import { streamClassAliasDecl } from "./lower-stream.js";
 import { dynImportBindingDepOf } from "./lower-island.js";
 import { bufferSpeciesAliasDecl } from "./lower-containers.js";
@@ -2576,14 +2576,22 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
             // storage instead of fencing per reference. Identifier
             // declarations only: a destructured array literal binds its
             // pieces, not the array.
+            // The EMPTY literal whose element type is the uninhabited never (the f64 slot) is the same evolving array (lowerVarDecl's rule for a
+            // function-local one): the program pushes and passes arrays of anything into it, and a typed slot would copy it at the first crossing
+            // into a `string[]` parameter, so a later push landed in the copy.
+            const emptyEvolving =
+              isJsSourceFile(sf) && ts.isIdentifier(decl.name) && nameNode === decl.name &&
+              decl.initializer !== undefined && ts.isArrayLiteralExpression(decl.initializer) && decl.initializer.elements.length === 0 &&
+              L.checker.isArrayType(L.typeOf(nameNode)) &&
+              ((L.checker.getTypeArguments(L.typeOf(nameNode) as ts.TypeReference)[0]?.flags ?? 0) & (ts.TypeFlags.Never | ts.TypeFlags.Any)) !== 0;
             if (
-              isJsSourceFile(sf) && !L.mapTypeOf(L.typeOf(nameNode)) &&
+              isJsSourceFile(sf) && (!L.mapTypeOf(L.typeOf(nameNode)) || emptyEvolving) &&
               ts.isIdentifier(decl.name) && nameNode === decl.name &&
               decl.initializer !== undefined && ts.isArrayLiteralExpression(decl.initializer)
             ) {
               const symbol = L.checker.getSymbolAtLocation(nameNode);
               if (symbol) {
-                const g: IrGlobal = { id: `%g.${tag}${nameNode.text}`, name: nameNode.text, type: DYN, mutable: isLet };
+                const g: IrGlobal = { id: `%g.${tag}${nameNode.text}`, name: nameNode.text, type: (emptyEvolving ? evolvingArrayTypedSlot(L, decl) : null) ?? DYN, mutable: isLet };
                 L.globalsBySymbol.set(symbol, g);
                 L.globalsList.push(g);
                 // The dyn slot's NULL is a trap, not a value — see the
