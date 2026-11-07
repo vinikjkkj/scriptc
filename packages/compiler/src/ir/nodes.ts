@@ -12149,8 +12149,13 @@ export function moduleUsesDynArrayOps(mod: IrModule): boolean {
       for (const item of v) visit(item);
       return;
     }
-    const node = v as { kind?: unknown; fn?: unknown; method?: unknown; receiver?: { type?: { kind?: unknown; elem?: { kind?: unknown } } } };
+    const node = v as { kind?: unknown; fn?: unknown; method?: unknown; args?: unknown[]; receiver?: { type?: { kind?: unknown; elem?: { kind?: unknown } } } };
     if (node.kind === "libCall" && typeof node.fn === "string" && DYN_ARRAY_LIB_FNS.has(node.fn)) {
+      found = true;
+      return;
+    }
+    // The insertion splice (`a.splice(i, n, ...items)`) of ANY element kind runs scr_arr_splice_ins, which lives in this unit.
+    if (node.kind === "arrIntrinsic" && node.method === "splice" && Array.isArray(node.args) && node.args.length === 3 && node.receiver?.type?.kind === "array") {
       found = true;
       return;
     }
