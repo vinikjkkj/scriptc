@@ -13447,6 +13447,36 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
           ? probed
           : fnOwnPropBox(L, calleeNode, loc);
       if (boxed) {
+        // `new <constructor value>(x)` building a String/Number/Boolean WRAPPER OBJECT: the checker types the result as the wrapper
+        // interface, which this compiler maps to the PRIMITIVE (a number slot cannot hold the object, and unwrapping would answer
+        // typeof "number" where Node says "object"). The result is exact where its consumer takes it dynamically (Number(w),
+        // String(w), `${w}`, w + x, typeof w); any other consumer would bind it to the primitive slot and throw at run time, so it
+        // refuses here instead.
+        {
+          const wrapperSym = L.typeOf(expr).getSymbol();
+          if (
+            wrapperSym !== undefined && (wrapperSym.name === "Number" || wrapperSym.name === "String" || wrapperSym.name === "Boolean") &&
+            L.checker.declarationsOf(wrapperSym).some((d) => L.isStdlibFile(d.getSourceFile()))
+          ) {
+            let par: ts.Node = expr.parent;
+            while (par !== undefined && ts.isParenthesizedExpression(par)) par = par.parent;
+            const dynConsumer =
+              par !== undefined && (
+                ts.isTypeOfExpression(par) || ts.isTemplateSpan(par) || ts.isExpressionStatement(par) ||
+                (ts.isBinaryExpression(par) && par.operatorToken.kind === ts.SyntaxKind.PlusToken) ||
+                (ts.isCallExpression(par) && ts.isIdentifier(par.expression) &&
+                  (par.expression.text === "Number" || par.expression.text === "String" || par.expression.text === "Boolean" || par.expression.text === "Object") &&
+                  par.arguments.includes(expr as ts.Expression))
+              );
+            if (!dynConsumer) {
+              L.unsupported(
+                "SC1090",
+                expr,
+                `a constructed ${wrapperSym.name} wrapper object bound to a slot typed '${wrapperSym.name}' (the wrapper interface maps to the primitive, which cannot hold the object; consume it directly: ${wrapperSym.name}(new …), typeof, a template, or +)`,
+              );
+            }
+          }
+        }
         const spreads: { at: number; what: string | null }[] = [];
         const argNodes = [...(bound?.boundArgs ?? []), ...(expr.arguments ?? [])];
         const args: IrExpr[] = argNodes.map((a, i) => {
