@@ -13591,6 +13591,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24555-object-call-over-an-untyped-value.js": {
+   "order": [
+    "<repo>/tests/corpus/24555-object-call-over-an-untyped-value.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2456-private-async-methods.ts": {
    "order": [
     "<repo>/tests/corpus/2456-private-async-methods.ts"
