@@ -13865,6 +13865,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24652-constant-frozen-array-mutated-through-a-type-escape.ts": {
+   "order": [
+    "<repo>/tests/corpus/24652-constant-frozen-array-mutated-through-a-type-escape.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/24660-unique-symbol-const-keyed-interface-member-read-and-optional-call.ts": {
    "order": [
     "<repo>/tests/corpus/24660-unique-symbol-const-keyed-interface-member-read-and-optional-call.ts"
