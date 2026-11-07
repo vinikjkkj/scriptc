@@ -6273,6 +6273,9 @@ ScrDyn *scr_dyn_object_prototype(void);
 ScrDyn *scr_dyn_get_prototype_of(const ScrDyn *d);
 ScrDyn *scr_dyn_to_object(const ScrDyn *d);
 ScrDyn *scr_dyn_wrapper_new(const ScrDyn *prim);
+ScrDyn *scr_dyn_prim_prototype(double which); /* String / Number / Boolean .prototype as a value (0 / 1 / 2), +1 */
+ScrDyn *scr_dyn_prim_init_ret(ScrDyn *self, const ScrDyn *x, double which); /* super(x) of `class C extends String|Number|Boolean` on `self`: +1 self, NULL if it threw */
+ScrDyn *scr_dyn_set_prototype_of(const ScrDyn *o, const ScrDyn *proto); /* Object.setPrototypeOf, +1 (o) */
 ScrDyn *scr_dyn_unwrap_prim(const ScrDyn *d);
 ScrDyn *scr_dyn_object_ctor_value(void);
 ScrDyn *scr_dyn_builtin_ctor_value(double which); /* Object/Array/Function/String/Number/Boolean constructor value, +1 */
@@ -6288,6 +6291,10 @@ typedef struct ScrDynProtoOps {
   /* `new String(x)` / `new Number(x)` / `new Boolean(x)` through the builtin function box: the primitive WRAPPER (the ordinary
    * [[Construct]] would drop the primitive the thunk answers and hand back its fresh `this`). Sets *handled, +1; NULL fn tolerant. */
   ScrDyn *(*construct_builtin)(const ScrDyn *fn, const ScrDyn *args, bool *handled);
+  /* The `prototype` of the String / Number / Boolean builtin constructor value (the intrinsic sentinel, +1), or NULL for any other function. */
+  ScrDyn *(*builtin_fn_prototype)(const ScrDyn *fn);
+  /* The intrinsic prototype (borrowed, immortal) a primitive WRAPPER object without its own [[Prototype]] link inherits from, or NULL for any other value. */
+  const ScrDyn *(*wrapper_default_proto)(const ScrDyn *v);
 } ScrDynProtoOps;
 extern const ScrDynProtoOps *scr_dyn_proto_ops;
 void scr_dyn_make_immortal(ScrDyn *d);

@@ -10786,6 +10786,10 @@ ScrDyn *scr_dyn_fn_props(ScrDyn *d) {
  * in the own-property table (see scr_runtime.h for why it carries no
  * `constructor`). One object per CLOSURE, like every other member. +1. */
 ScrDyn *scr_dyn_fn_prototype(ScrDyn *fn) {
+  if (scr_dyn_proto_ops != NULL && scr_dyn_proto_ops->builtin_fn_prototype != NULL) {
+    ScrDyn *bp = scr_dyn_proto_ops->builtin_fn_prototype(fn);
+    if (bp != NULL) return bp;
+  }
   ScrDyn *table = scr_dyn_fn_props(fn); /* +1 */
   ScrDyn *existing = scr_dyn_obj_get(table, "prototype", 9); /* borrowed */
   if (existing != NULL) {
@@ -10939,8 +10943,10 @@ bool scr_dyn_instance_of(const ScrDyn *v, ScrDyn *fn) {
    * since nothing links an array or a Buffer to one. */
   /* A Buffer's chain starts at %Buffer.prototype% (its own [[Prototype]]), then the Uint8Array chain. */
   const ScrDyn *p = NULL;
-  if (v->kind == SCR_DYN_OBJ) p = scr_dyn_ext(v)->proto;
-  else if (v->kind == SCR_DYN_BYTES && v->v.bytes->flavor == SCR_BF_BUFFER) p = scr_dyn_buffer_proto_ptr;
+  if (v->kind == SCR_DYN_OBJ) {
+    p = scr_dyn_ext(v)->proto;
+    if (p == NULL && scr_dyn_proto_ops != NULL && scr_dyn_proto_ops->wrapper_default_proto != NULL) p = scr_dyn_proto_ops->wrapper_default_proto(v);
+  } else if (v->kind == SCR_DYN_BYTES && v->v.bytes->flavor == SCR_BF_BUFFER) p = scr_dyn_buffer_proto_ptr;
   for (size_t steps = 0; p != NULL && steps < SCR_PROTO_MAX_DEPTH; steps++) {
     if (p == proto) { found = true; break; }
     if (p->kind != SCR_DYN_OBJ) break;
@@ -14369,6 +14375,15 @@ bool scr_dyn_has_own(const ScrDyn *v, const ScrStr *key) {
     /* Own presence, hidden table included: `hasOwn` differs from
      * Object.keys by ENUMERABILITY, not by which table a property is
      * filed in, and Node answers true for an own non-enumerable one. */
+    {
+      /* A String wrapper object's own properties include its indices and `length` (the String exotic object). */
+      const ScrDyn *wp = scr_dyn_wrapper_prim(v);
+      if (wp != NULL && wp->kind == SCR_DYN_STR) {
+        if (key->len == 6 && memcmp(key->data, "length", 6) == 0) return true;
+        size_t widx = 0;
+        if (dyn_canonical_index(key, &widx) && widx < scr_str_utf16_len(wp->v.str)) return true;
+      }
+    }
     return scr_dyn_obj_has_own_prop(v, key->data, key->len);
   }
   if (v->kind == SCR_DYN_ARR) {

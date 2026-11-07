@@ -6649,6 +6649,9 @@ export type IrLibFn =
   | "insp.customResult"
   | "dyn.getPrototypeOf"
   | "dyn.objectPrototype"
+  | "dyn.primPrototype"
+  | "dyn.primInit"
+  | "dyn.setPrototypeOf"
   | "dyn.toObject"
   | "dyn.unwrapPrim"
   | "dyn.objectCtor"
@@ -12881,7 +12884,7 @@ export function moduleUsesDynProto(mod: IrModule): boolean {
     const node = v as { kind?: unknown; fn?: unknown };
     if (
       node.kind === "libCall" &&
-      (node.fn === "dyn.getPrototypeOf" || node.fn === "dyn.objectPrototype" || node.fn === "dyn.toObject" ||
+      (node.fn === "dyn.getPrototypeOf" || node.fn === "dyn.objectPrototype" || node.fn === "dyn.primPrototype" || node.fn === "dyn.primInit" || node.fn === "dyn.setPrototypeOf" || node.fn === "dyn.toObject" ||
         node.fn === "dyn.unwrapPrim" || node.fn === "dyn.objectCtor" || node.fn === "dyn.builtinCtor")
     ) {
       found = true;
@@ -14940,6 +14943,9 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "dyn.getPrototypeOf",
   // Object(primitive) throws the named wrapper-object error
   "dyn.toObject",
+  // Object.setPrototypeOf: non-object proto, a cyclic link; super(x) of a String subclass: a Symbol argument
+  "dyn.setPrototypeOf",
+  "dyn.primInit",
   "dyn.defineProps",
   "dyn.defineProp",
   "dyn.captureStack",

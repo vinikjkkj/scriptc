@@ -8821,6 +8821,15 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_dyn_get_prototype_of(${arg(0)})`);
           case "dyn.objectPrototype":
             return finish(`scr_dyn_object_prototype()`);
+          case "dyn.primPrototype":
+            // String / Number / Boolean .prototype as a value (arg 0 / 1 / 2), +1.
+            return finish(`scr_dyn_prim_prototype(${arg(0)})`);
+          case "dyn.primInit":
+            // `super(x)` of a String / Number / Boolean subclass on the object `new` allocated; answers it (+1).
+            return finish(`scr_dyn_prim_init_ret(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "dyn.setPrototypeOf":
+            // Object.setPrototypeOf(o, proto): borrowed in, +1 (o) out; may throw.
+            return finish(`scr_dyn_set_prototype_of(${arg(0)}, ${arg(1)})`);
           case "dyn.toObject":
             return finish(`scr_dyn_to_object(${arg(0)})`);
           case "dyn.unwrapPrim":

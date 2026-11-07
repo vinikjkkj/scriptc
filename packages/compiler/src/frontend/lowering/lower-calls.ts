@@ -5884,6 +5884,32 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         if (expr.arguments.length !== 0) L.noLowering("__scrNumUndef with arguments", expr);
         return { kind: "libCall", fn: "num.undef", args: [], type: F64, loc };
       }
+      // The `super(x)` of `class C extends String | Number | Boolean` (the primitive-subclass rewrite): `this` becomes the wrapper
+      // object, its primitive ToString(x) / ToNumber(x) / ToBoolean(x). Reserved names; the desugar is their only author.
+      {
+        const primSuper = ["__scrSuperString", "__scrSuperNumber", "__scrSuperBoolean"].indexOf(expr.expression.text);
+        if (primSuper >= 0 && !L.dynamic) {
+          if (expr.arguments.length < 1 || expr.arguments.length > 2) L.noLowering(`${expr.expression.text} with ${expr.arguments.length} arguments`, expr);
+          const toDynArg = (e: ts.Expression): IrExpr => {
+            const v = L.lowerExpr(e);
+            const d: IrExpr | null =
+              v.type.kind === "dyn" ? v
+              : canConvertToDyn(v.type, (id) => L.shapes.get(id), (id) => L.unions.get(id)) ? L.coerceToExpected(v, DYN)
+              : null;
+            if (d === null || d.type.kind !== "dyn") L.badType(e, L.typeOf(e));
+            return d;
+          };
+          const selfD = toDynArg(expr.arguments[0]!);
+          const argD = expr.arguments.length === 2 ? toDynArg(expr.arguments[1]!) : selfD;
+          return {
+            kind: "libCall",
+            fn: "dyn.primInit",
+            args: [selfD, argD, { kind: "numLit", value: primSuper + (expr.arguments.length === 1 ? 4 : 0), type: F64, loc }],
+            type: DYN,
+            loc,
+          };
+        }
+      }
       if (
         (expr.expression.text === "parseInt" || expr.expression.text === "isNaN") &&
         L.isStdlibSymbol(L.resolveValueSymbol(expr.expression) ?? undefined)
@@ -13398,6 +13424,21 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
         : null;
       if (pd !== null && pd.type.kind === "dyn") {
         return { kind: "libCall", fn: "dyn.getPrototypeOf", args: [pd], type: DYN, loc: locOf(call) };
+      }
+    }
+    // Object.setPrototypeOf(o, proto): the [[Prototype]] link of a dynamic object (an ES5 constructor's `F.prototype`, an instance).
+    // Both operands box into the dynamic tree; the result is `o` itself.
+    if (member === "setPrototypeOf" && !reflectOwnKeys && call.arguments.length === 2 && !call.arguments.some((a) => ts.isSpreadElement(a))) {
+      const toDyn = (e: ts.Expression): IrExpr | null => {
+        const v = L.lowerExpr(e);
+        return v.type.kind === "dyn" ? v
+          : canConvertToDyn(v.type, (id) => L.shapes.get(id), (id) => L.unions.get(id)) ? L.coerceToExpected(v, DYN)
+          : null;
+      };
+      const ov = toDyn(call.arguments[0]!);
+      const pv2 = toDyn(call.arguments[1]!);
+      if (ov !== null && pv2 !== null && ov.type.kind === "dyn" && pv2.type.kind === "dyn") {
+        return { kind: "libCall", fn: "dyn.setPrototypeOf", args: [ov, pv2], type: DYN, loc: locOf(call) };
       }
     }
     // Object.is — the spec's SameValue over the static kinds. Number
