@@ -37,7 +37,8 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import type { ClassInfo } from "./lower-classes.js";
 import { isJsSourceFile, locOf } from "../program.js";
-import { BOOL, DYN, IrExpr, IrGlobal, IrStmt, IrType, UNDEFINED_T, canConvertToDyn, isUnitType, typeEquals, type SrcLoc } from "../../ir/nodes.js";
+import { hasProtoTab, protoTabReadChain } from "./lower-prototab.js";
+import { BOOL, DYN, IrExpr, IrGlobal, IrStmt, IrType, STRING, UNDEFINED_T, canConvertToDyn, isUnitType, typeEquals, type SrcLoc } from "../../ir/nodes.js";
 import { dynFallbackType } from "./lowerer.js";
 
 export interface ProtoDataSlot {
@@ -340,6 +341,11 @@ export function protoDataMemberRead(L: Lowerer, expr: ts.PropertyAccessExpressio
     const pslot = slotFrom(L, cinfo, name);
     if (pslot === null || pslot === "fence") return null;
     if (pslot.file === expr.getSourceFile() && isInitPosition(expr) && expr.getStart() < pslot.firstWriteStart) {
+      // Above the first write the member is whatever the chain inherits: a class whose chain installs run-time prototype members
+      // (ioredis Commander's command table) answers the table's value, which JS reads here.
+      if (hasProtoTab(L, cinfo)) {
+        return protoTabReadChain(L, cinfo, { kind: "strLit", value: name, type: STRING, loc }, null, loc);
+      }
       L.unsupported("SC1090", expr, `reading the prototype member '${name}' above its first assignment (JS answers undefined there, which the slot's type may not hold — move the read below the assignment)`);
     }
     const ref: IrExpr = { kind: "varRef", localId: pslot.global.id, type: pslot.type, loc };
