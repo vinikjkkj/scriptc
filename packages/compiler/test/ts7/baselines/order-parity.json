@@ -13697,9 +13697,33 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24627-is-finite-and-is-nan-over-a-union-argument.js": {
+   "order": [
+    "<repo>/tests/corpus/24627-is-finite-and-is-nan-over-a-union-argument.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24628-jsdoc-scalar-return-with-bare-return-paths.js": {
+   "order": [
+    "<repo>/tests/corpus/24628-jsdoc-scalar-return-with-bare-return-paths.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24629-number-of-a-date.js": {
+   "order": [
+    "<repo>/tests/corpus/24629-number-of-a-date.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2463-qs-escape-unescape.ts": {
    "order": [
     "<repo>/tests/corpus/2463-qs-escape-unescape.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24630-or-default-over-an-optional-scalar-operand.js": {
+   "order": [
+    "<repo>/tests/corpus/24630-or-default-over-an-optional-scalar-operand.js"
    ],
    "diags": []
   },
