@@ -13561,6 +13561,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24550-replace-with-an-untyped-function-answering-any.js": {
+   "order": [
+    "<repo>/tests/corpus/24550-replace-with-an-untyped-function-answering-any.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2455-private-brand-checks.ts": {
    "order": [
     "<repo>/tests/corpus/2455-private-brand-checks.ts"
