@@ -5784,6 +5784,12 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
             const asNum: IrExpr = { kind: "libCall", fn: "dyn.toNumber", args: [L.lowerExpr(expr.arguments[0]!)], type: F64, loc };
             return { kind: "libCall", fn: "num.isNaN", args: [asNum], type: BOOL, loc };
           }
+          // A UNION argument (a JSDoc `{String|Number}` parameter): ToNumber over the boxed value, the same step as the dyn arm.
+          if (probedArg?.type.kind === "union" && canConvertToDyn(probedArg.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))) {
+            const boxed = L.coerceToExpected(L.lowerExpr(expr.arguments[0]!), DYN);
+            const asNum: IrExpr = { kind: "libCall", fn: "dyn.toNumber", args: [boxed], type: F64, loc };
+            return { kind: "libCall", fn: "num.isNaN", args: [asNum], type: BOOL, loc };
+          }
           const x = L.lowerExprExpecting(expr.arguments[0]!, F64);
           return { kind: "libCall", fn: "num.isNaN", args: [x], type: BOOL, loc };
         }
@@ -5836,6 +5842,15 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
           (isJsSourceFile(expr.getSourceFile()) || !L.anyOrigin(expr.arguments[0]!))
         ) {
           const asNum: IrExpr = { kind: "libCall", fn: "dyn.toNumber", args: [L.lowerExpr(expr.arguments[0]!)], type: F64, loc };
+          return { kind: "libCall", fn: "number.isFinite", args: [asNum], type: BOOL, loc };
+        }
+        // A UNION argument (ms's `{String|Number} val` guard): ToNumber over the boxed value, then the finite test.
+        if (
+          name === "isFinite" && probed?.type.kind === "union" &&
+          canConvertToDyn(probed.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))
+        ) {
+          const boxed = L.coerceToExpected(L.lowerExpr(expr.arguments[0]!), DYN);
+          const asNum: IrExpr = { kind: "libCall", fn: "dyn.toNumber", args: [boxed], type: F64, loc };
           return { kind: "libCall", fn: "number.isFinite", args: [asNum], type: BOOL, loc };
         }
       }
