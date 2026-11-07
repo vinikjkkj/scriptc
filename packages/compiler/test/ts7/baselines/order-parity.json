@@ -13639,6 +13639,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24600-bare-builtin-wins-over-npm-package/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/24600-bare-builtin-wins-over-npm-package/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2461-qs-parse-options.ts": {
    "order": [
     "<repo>/tests/corpus/2461-qs-parse-options.ts"
@@ -13746,16 +13752,16 @@
    "diags": []
   },
   "<repo>/tests/corpus/24660-unique-symbol-const-keyed-interface-member-read-and-optional-call.ts": {
-    "order": [
-      "<repo>/tests/corpus/24660-unique-symbol-const-keyed-interface-member-read-and-optional-call.ts"
-    ],
-    "diags": []
+   "order": [
+    "<repo>/tests/corpus/24660-unique-symbol-const-keyed-interface-member-read-and-optional-call.ts"
+   ],
+   "diags": []
   },
   "<repo>/tests/corpus/24661-optional-element-call-with-a-literal-key.ts": {
-    "order": [
-      "<repo>/tests/corpus/24661-optional-element-call-with-a-literal-key.ts"
-    ],
-    "diags": []
+   "order": [
+    "<repo>/tests/corpus/24661-optional-element-call-with-a-literal-key.ts"
+   ],
+   "diags": []
   },
   "<repo>/tests/corpus/2470-mockable-module-shape.js": {
    "order": [
