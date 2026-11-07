@@ -28600,7 +28600,7 @@ export function isShadowableMethodRead(L: Lowerer, e: ts.Expression): boolean {
 
 function shadowAwareMethodValue(L: Lowerer, expr: ts.PropertyAccessExpression, className: string, original: IrExpr): IrExpr {
   const info = L.classes.get(className);
-  if (info === undefined || !inOwnShadowFamily(L, info) || original.type.kind !== "func") return original;
+  if (info === undefined || !inOwnShadowFamily(L, info) || (original.type.kind !== "func" && original.type.kind !== "dyn")) return original;
   // `Class.prototype.m` is the PROTOTYPE's property: an instance's own property never shadows it, so the read is the method.
   let recvNode: ts.Expression = expr.expression;
   while (ts.isParenthesizedExpression(recvNode)) recvNode = recvNode.expression;
@@ -28611,7 +28611,9 @@ function shadowAwareMethodValue(L: Lowerer, expr: ts.PropertyAccessExpression, c
   // TypeError there. JavaScript sources only: a TypeScript member has a declared type at every access.
   if (!isJsSourceFile(expr.getSourceFile())) return original;
   const plain = recvNode.kind === ts.SyntaxKind.ThisKeyword || ts.isIdentifier(recvNode);
-  if (!plain || !canBoxFuncIntoDyn(original.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))) {
+  // A read the subclasses' methods answer with different types is already a checked-dynamic chain (lowerUnboundSubclassMethodValue).
+  const alreadyDyn = original.type.kind === "dyn";
+  if (!plain || (!alreadyDyn && !canBoxFuncIntoDyn(original.type, (id) => L.shapes.get(id), (id) => L.unions.get(id)))) {
     L.unsupported("SC1090", expr, `reading the method '${expr.name.text}' as a value from an instance whose own properties, written under run-time keys, can shadow it with a value of another type (call it directly, or read it through a keyed access)`);
     return original;
   }
@@ -28624,7 +28626,7 @@ function shadowAwareMethodValue(L: Lowerer, expr: ts.PropertyAccessExpression, c
     kind: "ternary",
     cond: { kind: "libCall", fn: "cls.propsHas", args: [bag(), key()], type: BOOL, loc },
     then: { kind: "libCall", fn: "cls.propsRead", args: [bag(), key()], type: DYN, loc },
-    else_: { kind: "dynFrom", value: original, type: DYN, loc },
+    else_: alreadyDyn ? original : { kind: "dynFrom", value: original, type: DYN, loc },
     type: DYN,
     loc,
   };
