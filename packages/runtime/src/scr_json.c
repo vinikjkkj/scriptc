@@ -10666,6 +10666,11 @@ ScrDyn *scr_dyn_fn_get(const ScrDyn *d, const char *key, size_t key_len) {
   if (key_len == 6 && memcmp(key, "length", 6) == 0) {
     return scr_dyn_new_num((double)scr_dyn_fn_len(d));
   }
+  /* The Promise constructor value's statics. */
+  if (scr_promise_ctor_box != NULL && d == scr_promise_ctor_box && scr_promise_static_hook != NULL) {
+    ScrDyn *ps = scr_promise_static_hook(key, key_len);
+    if (ps != NULL) return ps;
+  }
   /* `Uint8Array.BYTES_PER_ELEMENT`. Answered off the BOX rather than out
    * of the property table because a FUNC box's table has no
    * non-enumerable half: a table entry would put the key into
@@ -13261,6 +13266,8 @@ bool scr_dyn_fn_is_ctor(const ScrDyn *fn) {
 
 ScrDyn *scr_promise_ctor_box;
 ScrDyn *(*scr_promise_construct_hook)(const ScrDyn *args);
+ScrDyn *(*scr_promise_static_hook)(const char *key, size_t key_len);
+ScrDyn *(*scr_promise_ctor_provider)(void);
 
 ScrDyn *scr_dyn_construct(const ScrDyn *fn, const ScrDyn *args, const ScrStr *what) {
   if (fn->kind == SCR_DYN_PROXY) return SCR_PX->construct(fn, args, what);
