@@ -26039,6 +26039,12 @@
     "<repo>/tests/corpus/24691-late-method-missing-member-error-names-the-call-site-spelling.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/24692-late-methods-copied-between-classes-keep-an-unbound-value-beside-a-computed-prototype-write.js": {
+   "order": [
+    "<repo>/tests/corpus/24692-late-methods-copied-between-classes-keep-an-unbound-value-beside-a-computed-prototype-write.js"
+   ],
+   "diags": []
   }
  }
 }
