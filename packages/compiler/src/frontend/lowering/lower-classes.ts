@@ -2184,11 +2184,11 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
       if (fn === null) continue;
       let sig: ReturnType<Lowerer["lambdaSignature"]>;
       try {
-        (L as unknown as { lmProbe?: string }).lmProbe = m;
+        (L as unknown as { lmProbe?: string | undefined }).lmProbe = m;
         sig = L.lambdaSignature(fn as ts.MethodDeclaration);
-        (L as unknown as { lmProbe?: string }).lmProbe = undefined;
+        (L as unknown as { lmProbe?: string | undefined }).lmProbe = undefined;
       } catch (err) {
-        (L as unknown as { lmProbe?: string }).lmProbe = undefined;
+        (L as unknown as { lmProbe?: string | undefined }).lmProbe = undefined;
         if (err instanceof PoisonError) {
           if (m === "exec" || m === "multi" || m === "execBuffer") process.stderr.write(`LMPOISON ${info.def.name}.${m} ${(err as Error).message?.slice(0, 200)} ${JSON.stringify((err as { diags?: unknown }).diags ?? null)?.slice(0, 300)}\n`);
           continue;
