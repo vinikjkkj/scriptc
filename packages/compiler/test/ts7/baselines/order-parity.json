@@ -13763,6 +13763,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24634-spread-into-untyped-fixed-parameters.js": {
+   "order": [
+    "<repo>/tests/corpus/24634-spread-into-untyped-fixed-parameters.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2464-qs-require-forms.cjs": {
    "order": [
     "<repo>/tests/corpus/2464-qs-require-forms.cjs"
