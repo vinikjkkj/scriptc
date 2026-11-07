@@ -13639,6 +13639,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24600-bare-builtin-wins-over-npm-package/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/24600-bare-builtin-wins-over-npm-package/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2461-qs-parse-options.ts": {
    "order": [
     "<repo>/tests/corpus/2461-qs-parse-options.ts"
