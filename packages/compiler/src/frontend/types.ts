@@ -5166,6 +5166,9 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         ctx.isStdlibFile(d.getSourceFile()),
     )
   ) {
+    // The Promise constructor is a function VALUE (identity, statics, construct), so it takes the checked-dynamic tree like
+    // every other function object; only Blob stays an inert handle.
+    if (psym.name === "PromiseConstructor") return DYN;
     return { kind: "opaque", name: psym.name };
   }
   if (isStdlibInterface("PromiseRejectedResult")) {
