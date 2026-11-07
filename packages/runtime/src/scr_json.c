@@ -2397,9 +2397,10 @@ ScrDyn *scr_dyn_rec_wide_inst(const ScrDyn *d, const char *const *keys, const un
       scr_dyn_release(v);
       continue;
     }
-    if (m != NULL && m->call != NULL && v->kind == SCR_DYN_FUNC) {
+    if (v->kind == SCR_DYN_FUNC && ((m != NULL && m->call != NULL) || (m == NULL && kg != NULL))) {
       /* A METHOD: the record's field is a COPY, so a call through it has to reach the
-       * INSTANCE. The member read hands back the unbound prototype function. */
+       * INSTANCE. The member read hands back the unbound prototype function. A member the class table does not list but the keyed
+       * read answered (an emitter's or a stream's `on`, `emit`, `pipe`: their API lives outside the table) is the same method. */
       ScrDyn *bound = scr_dyn_bound_method_to(v, d);
       scr_dyn_release(v);
       v = bound;
