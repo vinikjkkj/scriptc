@@ -5475,6 +5475,11 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         const conv = classInstanceToNumberIR(L, arg, loc);
         if (conv !== null) return conv;
       }
+      // Number(date) is the date's time value (Date.prototype.valueOf through ToPrimitive's number hint): the same ms
+      // `date.getTime()` reads, NaN for an invalid date (debug's `Number(new Date())`).
+      if (arg.type.kind === "date") {
+        return { kind: "libCall", fn: "date.value", args: [arg], type: F64, loc };
+      }
       L.noLowering(
         `Number of ${L.fmt(arg.type)} values`,
         argNode,
