@@ -2946,12 +2946,19 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           });
           return E.fallibleTemp(e.type, `scr_dyn_apply(${callee.name}, ${pack.name}, ${what})`);
         }
+        const self = e.thisArg === undefined ? null : E.emitExpr(e.thisArg);
         const args = e.args.map((a) => E.emitExpr(a));
         let argsExpr = "NULL";
         if (args.length > 0) {
           const arr = `sc_t${E.tempCounter++}`;
           E.line(`ScrDyn *${arr}[${args.length}] = { ${args.map((a) => a.name).join(", ")} };`);
           argsExpr = arr;
+        }
+        if (self !== null) {
+          return E.fallibleTemp(
+            e.type,
+            `scr_dyn_call_this(${self.name}, ${callee.name}, ${argsExpr}, ${args.length}, ${what})`,
+          );
         }
         return E.fallibleTemp(
           e.type,

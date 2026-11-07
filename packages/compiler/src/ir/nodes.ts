@@ -8161,8 +8161,13 @@ export type IrExpr =
    * catchably — `what` is the spread expression's source spelling, which
    * the nullish text spells), evaluated and flattened left-to-right (JS's
    * ArgumentListEvaluation). The emitters build one fresh argument array
-   * and apply through it. */
-  | { kind: "dynCall"; callee: IrExpr; calleeName: string; args: IrExpr[]; spreads?: { arg: number; what: string }[]; type: IrType; loc: SrcLoc }
+   * and apply through it.
+   *
+   * `thisArg` (a dyn value, never with `spreads`): the receiver the callee runs with. The call opens the ambient-receiver
+   * window on it for the call's extent and closes it on every exit, in ONE runtime call (scr_dyn_call_this) rather than the
+   * interned push/try/pop helper `dynCallWithThis` builds. It is the form a method taken off a record VIEW of an object calls
+   * through: the receiver is the viewed object. Callee, receiver and args are borrowed; the result is owned (+1). */
+  | { kind: "dynCall"; callee: IrExpr; calleeName: string; args: IrExpr[]; spreads?: { arg: number; what: string }[]; thisArg?: IrExpr; type: IrType; loc: SrcLoc }
   /** Prototype-method DISPATCH on a dyn receiver — `recv.m(...)` where `m`
    * is a name a dyn-representable prototype declares (Array/String/
    * Function shared names: push, slice, join, forEach, map, apply, ...),

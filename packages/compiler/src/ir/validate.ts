@@ -4234,6 +4234,11 @@ function validateFunction(
         checkExpr(e.callee);
         expectType(e.callee, DYN, "dynCall callee");
         if (e.type.kind !== "dyn") err(`dynCall must be dyn-typed, got ${e.type.kind}`, e.loc);
+        if (e.thisArg !== undefined) {
+          checkExpr(e.thisArg);
+          expectType(e.thisArg, DYN, "dynCall this");
+          if (e.spreads !== undefined) err("dynCall with a receiver cannot carry spreads", e.loc);
+        }
         for (const a of e.args) {
           checkExpr(a);
           if (a.type.kind !== "dyn") err(`dynCall argument of kind ${a.type.kind} (must be dyn)`, e.loc);
