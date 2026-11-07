@@ -13567,6 +13567,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24551-format-with-options-over-a-run-time-options-object.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24551-format-with-options-over-a-run-time-options-object.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/24552-inspect-custom-method-on-a-statically-typed-class.cjs": {
    "order": [
     "<repo>/tests/corpus/24552-inspect-custom-method-on-a-statically-typed-class.cjs"
