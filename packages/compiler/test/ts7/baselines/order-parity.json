@@ -13693,6 +13693,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24660-unique-symbol-const-keyed-interface-member-read-and-optional-call.ts": {
+    "order": [
+      "<repo>/tests/corpus/24660-unique-symbol-const-keyed-interface-member-read-and-optional-call.ts"
+    ],
+    "diags": []
+  },
   "<repo>/tests/corpus/2470-mockable-module-shape.js": {
    "order": [
     "<repo>/tests/corpus/2470-mockable-module-shape.js"
