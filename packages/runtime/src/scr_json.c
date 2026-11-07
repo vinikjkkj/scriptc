@@ -14297,6 +14297,20 @@ ScrDyn *scr_dyn_assign(ScrDyn *target, const ScrDyn *src) {
     }
     return scr_dyn_retain(target);
   }
+  {
+    /* A String wrapper object's own enumerable properties start with its indices. */
+    const ScrDyn *wp = src->kind == SCR_DYN_OBJ ? scr_dyn_wrapper_prim(src) : NULL;
+    if (wp != NULL && wp->kind == SCR_DYN_STR && target->kind == SCR_DYN_OBJ) {
+      double wn = scr_str_utf16_len(wp->v.str);
+      for (double wi = 0; wi < wn; wi += 1) {
+        char kb[32];
+        int kl = snprintf(kb, sizeof kb, "%.0f", wi);
+        ScrStr *ch = scr_str_char_at(wp->v.str, wi);
+        scr_dyn_obj_set(target, kb, (size_t)kl, scr_dyn_new_str(ch));
+        scr_str_release(ch);
+      }
+    }
+  }
   scr_dyn_assign_from(target, src);
   return scr_dyn_retain(target);
 }
