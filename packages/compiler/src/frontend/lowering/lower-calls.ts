@@ -10507,11 +10507,24 @@ export function reconcileOverloadMemberDyn(L: Lowerer, expr: ts.CallExpression, 
     promT: IrType & { kind: "promise" },
     inner: IrType,
     loc: SrcLoc,): IrExpr | null {
-    const cb = L.lowerExpr(call.arguments[0]!);
+    // An absent fulfillment handler (`then(undefined, onRejected)`, mongodb's `.then(undefined, squashError)`) is the
+    // spec's identity substitution: the settled value flows through as the result, only the rejection reaches rb.
+    let fulfilAbsent = false;
+    {
+      let a: ts.Expression = call.arguments[0]!;
+      while (ts.isParenthesizedExpression(a)) a = a.expression;
+      fulfilAbsent = a.kind === ts.SyntaxKind.NullKeyword ||
+        (ts.isIdentifier(a) && a.text === "undefined" && (L.typeOf(a).flags & ts.TypeFlags.Undefined) !== 0);
+    }
+    const cb: IrExpr = fulfilAbsent
+      ? { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc }
+      : L.lowerExpr(call.arguments[0]!);
     const rb = L.lowerExpr(call.arguments[1]!);
-    if (cb.type.kind !== "func" || rb.type.kind !== "func") return null;
-    if (cb.type.params.length > 1 || rb.type.params.length > 1) return null;
-    const cbParam = cb.type.params[0];
+    if (rb.type.kind !== "func") return null;
+    if (!fulfilAbsent && cb.type.kind !== "func") return null;
+    if (rb.type.params.length > 1) return null;
+    if (cb.type.kind === "func" && cb.type.params.length > 1) return null;
+    const cbParam = cb.type.kind === "func" ? cb.type.params[0] : undefined;
     if (cbParam !== undefined && !typeEquals(cbParam, inner)) return null;
     const rbParam = rb.type.params[0];
     if (rbParam !== undefined && rbParam.kind !== "dyn") return null;
@@ -10522,7 +10535,7 @@ export function reconcileOverloadMemberDyn(L: Lowerer, expr: ts.CallExpression, 
     const fnName = `%fn${L.lambdaCounter++}_then2`;
     const funcType: IrType & { kind: "func" } = {
       kind: "func",
-      params: [promT, cb.type, rb.type],
+      params: fulfilAbsent ? [promT, rb.type] : [promT, cb.type, rb.type],
       ret: resultT,
     };
     const fnCtx = newFnCtx(true, null, funcType, R);
@@ -10530,7 +10543,7 @@ export function reconcileOverloadMemberDyn(L: Lowerer, expr: ts.CallExpression, 
     L.fnStack.push(fnCtx);
     try {
       const pLocal = L.declareHiddenLocal("p", promT);
-      const cbLocal = L.declareHiddenLocal("cb", cb.type);
+      const cbLocal = fulfilAbsent ? null : L.declareHiddenLocal("cb", cb.type);
       const rbLocal = L.declareHiddenLocal("rb", rb.type);
       const eLocal = L.declareHiddenLocal("e", CAUGHT);
       const awaitE: IrExpr = {
@@ -10542,7 +10555,7 @@ export function reconcileOverloadMemberDyn(L: Lowerer, expr: ts.CallExpression, 
       // The settled value outlives the try (the fulfillment handler runs
       // after it), so the slot is declared outside and ASSIGNED inside.
       const vLocal =
-        cbParam !== undefined && inner.kind !== "void" ? L.declareHiddenLocal("v", inner) : null;
+        (cbParam !== undefined || fulfilAbsent) && inner.kind !== "void" ? L.declareHiddenLocal("v", inner) : null;
       // Assigned inside the try, read after it: a mutable slot, unlike the
       // single-handler desugar's const (there the handler runs in the try).
       if (vLocal) vLocal.mutable = true;
@@ -10584,20 +10597,29 @@ export function reconcileOverloadMemberDyn(L: Lowerer, expr: ts.CallExpression, 
       const body: IrStmt[] = [];
       if (vLocal) body.push({ kind: "varDecl", localId: vLocal.id, init: null, loc });
       body.push({ kind: "tryCatch", tryBody, catchBody, catchLocalId: eLocal.id, finallyBody: null, loc });
-      body.push(
-        handlerReturn(
-          cbLocal,
-          vLocal ? [{ kind: "varRef", localId: vLocal.id, type: inner, loc }] : [],
-          cb.type,
-        ),
-      );
+      if (fulfilAbsent || cbLocal === null) {
+        // Identity substitution: the settled value is the result, coerced into the call's own payload type.
+        body.push(
+          R.kind === "void" || vLocal === null
+            ? { kind: "return", value: null, loc }
+            : { kind: "return", value: L.coerceInto(call, { kind: "varRef", localId: vLocal.id, type: inner, loc }, R), loc },
+        );
+      } else {
+        body.push(
+          handlerReturn(
+            cbLocal,
+            vLocal ? [{ kind: "varRef", localId: vLocal.id, type: inner, loc }] : [],
+            cb.type as IrType & { kind: "func" },
+          ),
+        );
+      }
 
       const ctx = L.ctx;
       L.liftedFns.push({
         name: fnName,
         params: [
           { localId: pLocal.id, name: pLocal.name, type: promT },
-          { localId: cbLocal.id, name: cbLocal.name, type: cb.type },
+          ...(cbLocal !== null ? [{ localId: cbLocal.id, name: cbLocal.name, type: cb.type }] : []),
           { localId: rbLocal.id, name: rbLocal.name, type: rb.type },
         ],
         returnType: R,
@@ -10608,7 +10630,7 @@ export function reconcileOverloadMemberDyn(L: Lowerer, expr: ts.CallExpression, 
         async: true,
       });
       const closure: IrExpr = { kind: "closure", fnName, captures: ctx.captureSources, type: funcType, loc };
-      return { kind: "callValue", callee: closure, args: [receiver, cb, rb], type: resultT, loc };
+      return { kind: "callValue", callee: closure, args: fulfilAbsent ? [receiver, rb] : [receiver, cb, rb], type: resultT, loc };
     } finally {
       L.fnStack.pop();
     }
@@ -10823,13 +10845,19 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     };
     const passthrough =
       call.arguments.length === 0 ||
-      (call.arguments.length === 1 && isAbsentHandler(call.arguments[0]));
+      (call.arguments.length === 1 && isAbsentHandler(call.arguments[0])) ||
+      // then(undefined, undefined): both substitutions are the identity/thrower pair.
+      (member === "then" && call.arguments.length === 2 && isAbsentHandler(call.arguments[0]) && isAbsentHandler(call.arguments[1]));
     // `then` also takes the two-handler form. It is NOT `.then(f).catch(r)`:
     // there r would also see whatever f threw, while the spec routes only
     // the RECEIVER's rejection to it (thenTwoHandlerDesugar keeps f outside
     // the try for exactly that reason).
-    const twoHandlerThen = member === "then" && call.arguments.length === 2;
-    if (call.arguments.length !== 1 && !passthrough && !twoHandlerThen) {
+    // then(f, undefined): the rejection substitution is the thrower, i.e. exactly then(f); the second
+    // argument is an absent-handler literal, so there is nothing to evaluate and the one-handler path serves it.
+    const fulfilOnlyThen = member === "then" && call.arguments.length === 2 && !passthrough &&
+      !isAbsentHandler(call.arguments[0]) && isAbsentHandler(call.arguments[1]);
+    const twoHandlerThen = member === "then" && call.arguments.length === 2 && !fulfilOnlyThen;
+    if (call.arguments.length !== 1 && !passthrough && !twoHandlerThen && !fulfilOnlyThen) {
       L.noLowering(
         `${member} with ${call.arguments.length} arguments`,
         call,
