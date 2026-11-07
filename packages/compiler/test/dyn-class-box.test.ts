@@ -42,6 +42,7 @@ const headerPath = join(repoRoot, "packages/runtime/src/scr_runtime.h");
 const PROGRAM = `
 import { Readable } from "node:stream";
 class Lone { n: number; constructor(n: number) { this.n = n; } }
+class Svc { id: number; constructor(i: number) { this.id = i; } async load(): Promise<number> { return this.id; } }
 class Base { tag: string; constructor(t: string) { this.tag = t; } kind(): string { return "base"; } }
 class Derived extends Base { extra: number; constructor(e: number) { super("d"); this.extra = e; } kind(): string { return "derived"; } }
 function carry(v: unknown): unknown { return v; }
@@ -50,6 +51,7 @@ const der = new Derived(2);
 const base: Base = der;
 const rs = Readable.from(["x"]);
 console.log((carry(lone) as Lone).n);
+console.log((carry(new Svc(3)) as Svc).id);
 console.log((carry(base) as Derived).extra);
 console.log((carry(rs) as Readable) === rs);
 `;
@@ -196,7 +198,7 @@ function cDescriptors(c: string): Map<string, string> {
     }
     out.set(
       m[1]!,
-      `pre=${m[2]} post=${m[3]} vt=${m[4]} rc=${rcBase(m[5]!)}/${rcBase(m[6]!)} props=${m[9]} opaque=${m[10]} errorRooted=${m[11]} rtRoot=${m[16]} cyc=${m[17]} ee=${eeKind(m[18]!)} mem=${mem}`,
+      `pre=${m[2]} post=${m[3]} vt=${m[4]} rc=${rcBase(m[5]!)}/${rcBase(m[6]!)} props=${m[9]} opaque=${m[10]} errorRooted=${m[11]} rtRoot=${m[16]} cyc=${m[17]} ee=${eeKind(m[18]!)} skipped=${m[19] === "NULL" ? "-" : m[19]!.slice(1, -1)} mem=${mem}`,
     );
   }
   mustNotReadZero("cDescriptors", c, C_DESC_ANCHOR, out.size);
@@ -209,7 +211,7 @@ function llDescriptors(ll: string): Map<string, string> {
   const out = new Map<string, string>();
   // @sc_dcl_0 = internal constant %ScrDynClass { ptr @sc_cs_3, i64 5, i64 5, i8 0, ptr @r, ptr @rl, ptr @sc_dclt_0, i64 1, i8 0, i8 0, i8 0, ptr null, i64 0, i8 0, ptr null, i8 0 }
   const re =
-    /^@sc_dcl_\d+ = internal constant %ScrDynClass \{ ptr @(sc_cs_\d+), i64 (\d+), i64 (\d+), i8 ([01]), ptr @(\w+), ptr @(\w+), ptr (null|@sc_dclt_\d+), i64 (\d+), i8 ([01]), i8 ([01]), i8 ([01]), ptr (null|@sc_dclt_\d+), i64 (\d+), i8 ([01]), ptr (null|@sc_cs_\d+), i8 (\d), i8 ([01]), i64 \d+, i64 \d+, i64 (-1|0|ptrtoint [^}]*?), ptr (?:null|@sc_cs_\d+) \}/gm;
+    /^@sc_dcl_\d+ = internal constant %ScrDynClass \{ ptr @(sc_cs_\d+), i64 (\d+), i64 (\d+), i8 ([01]), ptr @(\w+), ptr @(\w+), ptr (null|@sc_dclt_\d+), i64 (\d+), i8 ([01]), i8 ([01]), i8 ([01]), ptr (null|@sc_dclt_\d+), i64 (\d+), i8 ([01]), ptr (null|@sc_cs_\d+), i8 (\d), i8 ([01]), i64 \d+, i64 \d+, i64 (-1|0|ptrtoint [^}]*?), ptr (null|@sc_cs_\d+) \}/gm;
   for (const m of ll.matchAll(re)) {
     const name = cstrs.get(m[1]!);
     if (name === undefined) throw new Error(`llvm descriptor names an undefined cstr ${m[1]}`);
@@ -222,7 +224,7 @@ function llDescriptors(ll: string): Map<string, string> {
     out.set(
       name,
       `pre=${m[2]} post=${m[3]} vt=${m[4] === "1" ? "true" : "false"} ` +
-        `rc=${rcBase(m[5]!)}/${rcBase(m[6]!)} props=${m[9] === "1" ? "true" : "false"} opaque=${m[10] === "1" ? "true" : "false"} errorRooted=${m[11] === "1" ? "true" : "false"} rtRoot=${m[16]} cyc=${m[17]} ee=${eeKind(m[18]!)} mem=${mem}`,
+        `rc=${rcBase(m[5]!)}/${rcBase(m[6]!)} props=${m[9] === "1" ? "true" : "false"} opaque=${m[10] === "1" ? "true" : "false"} errorRooted=${m[11] === "1" ? "true" : "false"} rtRoot=${m[16]} cyc=${m[17]} ee=${eeKind(m[18]!)} skipped=${m[19] === "null" ? "-" : cstrs.get(m[19]!.slice(1))} mem=${mem}`,
     );
   }
   mustNotReadZero("llDescriptors", ll, LL_DESC_ANCHOR, out.size);
@@ -270,10 +272,14 @@ describe("the class-instance dyn box's bookkeeping", () => {
     // Readable brings the stream hierarchy under it: Duplex, Transform and
     // PassThrough.
     expect([...cs.keys()].sort()).toEqual([
-      "Base", "Derived", "Duplex", "Lone", "PassThrough", "Readable", "Transform",
+      "Base", "Derived", "Duplex", "Lone", "PassThrough", "Readable", "Svc", "Transform",
     ]);
     expect([...ls.keys()].sort()).toEqual([...cs.keys()].sort());
     for (const [name, row] of cs) expect(`${name}: ${ls.get(name)}`).toBe(`${name}: ${row}`);
+    // The skipped-names list is part of the row, compared exactly: Svc skips its async method by name, a stream class names none.
+    expect(cs.get("Svc")).toContain("skipped=,load,");
+    expect(ls.get("Svc")).toContain("skipped=,load,");
+    expect(cs.get("Readable")).toContain("skipped=-");
   });
 
   test("a standalone class has no vt word and a hierarchy member does", async () => {
