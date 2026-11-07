@@ -2622,7 +2622,10 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
                   ts.isMethodDeclaration(p) && p.body !== undefined && !ts.isComputedPropertyName(p.name) &&
                   (L.typeOf(nameNode).flags & ts.TypeFlags.Any) !== 0
                 ) return true;
-                if (!ts.isPropertyAssignment(p) || ts.isComputedPropertyName(p.name)) return false;
+                // A COMPUTED key that folds to one property name at compile time (`[RESP_TYPES.SET]` over a const table of
+                // literal types, ioredis's type-mapping tables) is a written-inline key like any other.
+                if (!ts.isPropertyAssignment(p)) return false;
+                if (ts.isComputedPropertyName(p.name) && L.foldedStringKeyOf(p.name.expression) === null) return false;
                 const mt = L.mapTypeOf(L.typeOf(p.initializer));
                 // A class value does not make the literal a dyn global (it did not before class values boxed into dyn):
                 // the static record keeps its class-valued members.
