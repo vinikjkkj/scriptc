@@ -3944,7 +3944,10 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
               lying = true;
             }
             if (type.kind === "void") L.badType(member.name, L.typeOf(member.name));
-            if (type.kind === "dyn") {
+            // A checked-dynamic slot WITHOUT an initializer would read the zero-initialized global where Node answers undefined; one
+            // with an initializer is assigned when the class body evaluates, like a module global, so it is a dyn slot (ioredis'
+            // `Command._transformer = { argument: {}, reply: {} }`, whose members are string-keyed tables).
+            if (type.kind === "dyn" && member.initializer === undefined) {
               L.unsupported("SC1090", member.name, "'unknown'-typed static fields");
             }
             staticFields.push({
