@@ -44,6 +44,9 @@ export function upgradeLateMethodsOverTables(L: Lowerer): void {
     const info = L.classes.get(cls);
     if (info === undefined || info.evalClass !== undefined || info.def.runtime === true || !hasProtoTab(L, info)) continue;
     for (const m of bodies.keys()) {
+      // Plain late METHODS only: the late accessor family shares this body table under `get:x` / `set:x` keys, and a getter or setter has
+      // a fixed arity at every call site.
+      if (m.includes(":")) continue;
       const sig = info.methods.get(m);
       if (sig === undefined || sig.params.some((x) => x.mode === "dynRest")) continue;
       info.methods.set(m, { ...sig, params: [...sig.params, { type: DYN, mode: "dynRest" }] });
