@@ -6229,6 +6229,9 @@ ScrDyn *scr_dyn_new_obj(void);
 /* Object.create(null): the fresh null-prototype dictionary (see the
  * null_proto flavor flag above). */
 ScrDyn *scr_dyn_new_obj_null_proto(void);
+/* Object.prototype as a value (one immortal empty object) and Object.getPrototypeOf over a dyn (see scr_json.c). */
+ScrDyn *scr_dyn_object_prototype(void);
+ScrDyn *scr_dyn_get_prototype_of(const ScrDyn *d);
 /* The two above chosen at RUN TIME — the record->dyn walker's constructor
  * for a shape whose null-prototype-ness is a per-INSTANCE fact. */
 ScrDyn *scr_dyn_new_obj_flavor(int null_proto);

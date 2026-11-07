@@ -6608,6 +6608,8 @@ export type IrLibFn =
    * shown and rem read the entry cap of a composite. */
   | "insp.optsPush"
   | "insp.optsPop"
+  | "dyn.getPrototypeOf"
+  | "dyn.objectPrototype"
   | "insp.optDepth"
   | "insp.shown"
   | "insp.rem"
@@ -14715,6 +14717,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // util.format over a RUNTIME argument list: a %o over a dyn array/function and a
   // user toString under %s/%d/%i/%f leave a pending exception.
   "insp.format",
+  // Object.getPrototypeOf(null | undefined) throws the TypeError
+  "dyn.getPrototypeOf",
   "dyn.defineProps",
   "dyn.defineProp",
   "dyn.captureStack",

@@ -13044,6 +13044,19 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       const liveDefine = liveDefinePropOf(L, call, locOf(call));
       if (liveDefine) return liveDefine;
     }
+    // Object.getPrototypeOf(v): the prototype VALUE of any value that boxes into the checked-dynamic tree. A null-prototype
+    // dictionary answers null, an object with its own [[Prototype]] that object, a plain object Object.prototype, and each other
+    // kind its intrinsic; null and undefined throw Node's TypeError (the runtime's scr_dyn_get_prototype_of).
+    if (member === "getPrototypeOf" && !reflectOwnKeys && call.arguments.length === 1 && !ts.isSpreadElement(call.arguments[0]!)) {
+      const pv = L.lowerExpr(call.arguments[0]!);
+      const pd: IrExpr | null =
+        pv.type.kind === "dyn" ? pv
+        : canConvertToDyn(pv.type, (id) => L.shapes.get(id), (id) => L.unions.get(id)) ? L.coerceToExpected(pv, DYN)
+        : null;
+      if (pd !== null && pd.type.kind === "dyn") {
+        return { kind: "libCall", fn: "dyn.getPrototypeOf", args: [pd], type: DYN, loc: locOf(call) };
+      }
+    }
     // Object.is — the spec's SameValue over the static kinds. Number
     // pairs take the runtime SameValue (NaN equals NaN, +0 differs from
     // -0 — the two divergences from ===); every other supported pair
