@@ -13585,6 +13585,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24556-primitive-wrapper-objects-through-object-call.js": {
+   "order": [
+    "<repo>/tests/corpus/24556-primitive-wrapper-objects-through-object-call.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2455-private-brand-checks.ts": {
    "order": [
     "<repo>/tests/corpus/2455-private-brand-checks.ts"
