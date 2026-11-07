@@ -13775,6 +13775,84 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24664-class-holding-a-signal-whose-listener-captures-this-leaves-no-cycle.ts": {
+   "order": [
+    "<repo>/tests/corpus/24664-class-holding-a-signal-whose-listener-captures-this-leaves-no-cycle.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24665-new-event-members-flags-and-constants.ts": {
+   "order": [
+    "<repo>/tests/corpus/24665-new-event-members-flags-and-constants.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24666-abort-listener-receives-an-event-with-its-members.ts": {
+   "order": [
+    "<repo>/tests/corpus/24666-abort-listener-receives-an-event-with-its-members.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24667-abort-listener-this-target-and-event-identity.ts": {
+   "order": [
+    "<repo>/tests/corpus/24667-abort-listener-this-target-and-event-identity.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24668-add-abort-listener-wrapper-with-this-and-disposable.ts": {
+   "order": [
+    "<repo>/tests/corpus/24668-add-abort-listener-wrapper-with-this-and-disposable.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24669-new-event-argument-forms-init-event-and-expando-free-members.js": {
+   "order": [
+    "<repo>/tests/corpus/24669-new-event-argument-forms-init-event-and-expando-free-members.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24670-function-listener-this-in-a-javascript-source.js": {
+   "order": [
+    "<repo>/tests/corpus/24670-function-listener-this-in-a-javascript-source.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24671-event-instanceof-over-static-types.ts": {
+   "order": [
+    "<repo>/tests/corpus/24671-event-instanceof-over-static-types.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24672-event-handles-in-classes-arrays-records-and-listener-cycles.ts": {
+   "order": [
+    "<repo>/tests/corpus/24672-event-handles-in-classes-arrays-records-and-listener-cycles.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24673-abort-listener-set-semantics-with-the-event-parameter.ts": {
+   "order": [
+    "<repo>/tests/corpus/24673-abort-listener-set-semantics-with-the-event-parameter.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24674-listener-this-survives-the-dispatch-in-an-inner-arrow.ts": {
+   "order": [
+    "<repo>/tests/corpus/24674-listener-this-survives-the-dispatch-in-an-inner-arrow.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24675-event-timestamp-is-monotonic-and-bracketed-by-the-clock.ts": {
+   "order": [
+    "<repo>/tests/corpus/24675-event-timestamp-is-monotonic-and-bracketed-by-the-clock.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24676-abort-pair-and-event-handles-compare-by-identity.ts": {
+   "order": [
+    "<repo>/tests/corpus/24676-abort-pair-and-event-handles-compare-by-identity.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2470-mockable-module-shape.js": {
    "order": [
     "<repo>/tests/corpus/2470-mockable-module-shape.js"
