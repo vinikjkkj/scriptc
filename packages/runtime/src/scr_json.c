@@ -8510,6 +8510,14 @@ static ScrDyn *scr_u8_static_member(const char *key, size_t key_len);
  * prototype chain, not this arm — it answered false before the table was
  * writable too. Object.hasOwn is exact. */
 bool scr_dyn_fn_has(const ScrDyn *v, const char *key, size_t key_len) {
+  /* An accessor property is PRESENT without running its getter (`k in F` has no side effect in JS). */
+  if (v->v.fn.clo->props != NULL) {
+    ScrDyn *table = (ScrDyn *)scr_box_get_ref(v->v.fn.clo->props); /* +1 */
+    ScrDyn *found = NULL;
+    const bool acc = table != NULL && scr_dyn_obj_resolve(table, key, key_len, &found, NULL) == SCR_PROP_ACCESSOR;
+    scr_dyn_release(table);
+    if (acc) return true;
+  }
   ScrDyn *m = scr_dyn_fn_get(v, key, key_len); /* +1 or NULL */
   if (m == NULL) return false;
   scr_dyn_release(m);
@@ -8993,6 +9001,31 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
      * write nothing static could ever see. */
     if (scr_dyn_expando_set(recv->v.fn.clo, key->data, key->len, value)) return;
     ScrDyn *table = scr_dyn_fn_props(recv); /* +1 */
+    /* [[Set]] over an ACCESSOR property of the function: the setter takes the write with `this` bound to the function; a getter-only one is
+     * a strict-mode TypeError (this runtime does not do the sloppy silent ignore). */
+    {
+      ScrDyn *found = NULL;
+      if (scr_dyn_ext(table)->hidden != NULL && scr_dyn_obj_resolve(table, key->data, key->len, &found, NULL) == SCR_PROP_ACCESSOR) {
+        ScrDyn *setter = scr_hid_setter(found);
+        if (setter->kind != SCR_DYN_FUNC) {
+          scr_dyn_release(table);
+          ScrJsonBuf sb;
+          scr_jb_init(&sb);
+          scr_jb_puts(&sb, "Cannot set property ");
+          scr_jb_write(&sb, key->data, key->len);
+          scr_jb_puts(&sb, " of function which has only a getter");
+          scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&sb));
+          return;
+        }
+        ScrDyn *argv[1] = { value };
+        scr_dyn_this_push_dyn(recv);
+        ScrDyn *r = scr_dyn_call(setter, argv, 1, "setter");
+        scr_dyn_this_pop();
+        scr_dyn_release(r);
+        scr_dyn_release(table);
+        return;
+      }
+    }
     scr_dyn_obj_set(table, key->data, key->len, scr_dyn_retain(value));
     scr_dyn_release(table);
     return;
@@ -10645,6 +10678,22 @@ ScrDyn *scr_dyn_fn_get(const ScrDyn *d, const char *key, size_t key_len) {
     ScrDyn *table = (ScrDyn *)scr_box_get_ref(d->v.fn.clo->props); /* +1 */
     ScrDyn *m = table ? scr_dyn_obj_get(table, key, key_len) : NULL;
     ScrDyn *r = m ? scr_dyn_retain(m) : NULL;
+    /* An ACCESSOR property of the function (Object.defineProperty(F, k, { get, set }) lands in this table's `hidden` half): the getter runs
+     * with `this` bound to the FUNCTION, as in JS, once per read. A set-only accessor reads undefined. */
+    if (r == NULL && table != NULL) {
+      ScrDyn *found = NULL;
+      if (scr_dyn_obj_resolve(table, key, key_len, &found, NULL) == SCR_PROP_ACCESSOR) {
+        ScrDyn *getter = scr_hid_getter(found);
+        if (getter->kind != SCR_DYN_FUNC) r = scr_dyn_retain(scr_dyn_undefined());
+        else {
+          scr_dyn_this_push_dyn(d);
+          r = scr_dyn_call(getter, NULL, 0, "getter");
+          scr_dyn_this_pop();
+          scr_dyn_release(table);
+          return r; /* +1, or NULL with the getter's own exception pending */
+        }
+      }
+    }
     scr_dyn_release(table);
     if (r) return r;
   }

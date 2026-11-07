@@ -3617,8 +3617,11 @@ typedef struct { bool enumerable, writable, configurable; } DynAttrs;
 static DynAttrs dyn_effective_attrs(ScrDyn *target, const char *key, size_t key_len,
                                     ScrDyn *desc) {
   bool curEnum = false, curWrite = false, curConf = false;
-  if (target->kind == SCR_DYN_OBJ) {
-    if (scr_dyn_obj_get(target, key, key_len) != NULL) {
+  /* A function's own attributes are its closure table's. */
+  ScrDyn *fnTable = target->kind == SCR_DYN_FUNC ? scr_dyn_fn_props(target) : NULL; /* +1 */
+  ScrDyn *own = fnTable != NULL ? fnTable : target;
+  if (own->kind == SCR_DYN_OBJ) {
+    if (scr_dyn_obj_get(own, key, key_len) != NULL) {
       /* An own member: enumerable, writable and configurable, all three,
        * because that is the only data property `entries` can hold. */
       curEnum = curWrite = curConf = true;
@@ -3633,9 +3636,10 @@ static DynAttrs dyn_effective_attrs(ScrDyn *target, const char *key, size_t key_
        * would make a bare `{ get }` redefinition over an enumerable
        * accessor silently DEMOTE the key out of Object.keys, which is
        * the exact class of error this function exists to prevent. */
-      scr_dyn_obj_hidden_attrs(target, key, key_len, NULL, &curWrite, &curConf, &curEnum);
+      scr_dyn_obj_hidden_attrs(own, key, key_len, NULL, &curWrite, &curConf, &curEnum);
     }
   }
+  scr_dyn_release(fnTable);
   ScrDyn *en = scr_dyn_obj_get(desc, "enumerable", 10);
   ScrDyn *wr = scr_dyn_obj_get(desc, "writable", 8);
   ScrDyn *cf = scr_dyn_obj_get(desc, "configurable", 12);
@@ -3678,17 +3682,16 @@ static DynAttrs dyn_effective_attrs(ScrDyn *target, const char *key, size_t key_
  * dynamic object is enumerable. So a bare `{get}` over `o.k = v` is an
  * ENUMERABLE accessor in Node, and is one here.
  *
- * ONE shape stays LOUD rather than answer wrongly:
- *   FUNC target      a function's own properties live in its CLOSURE's
- *                    table, read through scr_dyn_fn_get rather than the
- *                    OBJ accessor walk; a half-wired accessor there would
- *                    answer undefined instead of running.
+ * A FUNC target installs the accessor in its CLOSURE's own-property
+ * table (itself an OBJ with the same hidden half); scr_dyn_fn_get, the
+ * function keyed write and scr_dyn_fn_has run it with `this` bound to
+ * the function.
  *
  * Returns false with a pending catchable throw. Everything borrowed. */
 static bool dyn_define_accessor_desc(ScrDyn *target, const char *key, size_t key_len,
                                      ScrDyn *desc, ScrDyn *getter, ScrDyn *setter,
                                      const char *api) {
-  if (target->kind != SCR_DYN_OBJ) {
+  if (target->kind != SCR_DYN_OBJ && target->kind != SCR_DYN_FUNC) {
     ScrJsonBuf b;
     scr_jb_init(&b);
     scr_jb_puts(&b, api);
@@ -3711,10 +3714,14 @@ static bool dyn_define_accessor_desc(ScrDyn *target, const char *key, size_t key
     scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
     return false;
   }
-  scr_dyn_obj_define_accessor(target, key, key_len,
+  /* A FUNCTION's own properties live in its closure's table, itself a dynamic object with the same hidden half: the accessor is installed
+   * there, and scr_dyn_fn_get / the function keyed write / scr_dyn_fn_has run it with `this` bound to the function. */
+  ScrDyn *holder = target->kind == SCR_DYN_FUNC ? scr_dyn_fn_props(target) : target; /* +1 for a function */
+  scr_dyn_obj_define_accessor(holder, key, key_len,
                               getter ? getter : scr_dyn_undefined(),
                               setter ? setter : scr_dyn_undefined(),
                               at.configurable, at.enumerable);
+  if (holder != target) scr_dyn_release(holder);
   return true;
 }
 
