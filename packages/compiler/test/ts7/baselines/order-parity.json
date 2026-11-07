@@ -13675,6 +13675,22 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24624-module-exports-assigned-a-call-result/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24624-module-exports-assigned-a-call-result/setup.cjs",
+    "<repo>/tests/corpus/24624-module-exports-assigned-a-call-result/dep.cjs",
+    "<repo>/tests/corpus/24624-module-exports-assigned-a-call-result/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24625-module-exports-call-result-object-and-identity/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24625-module-exports-call-result-object-and-identity/make.cjs",
+    "<repo>/tests/corpus/24625-module-exports-call-result-object-and-identity/dep.cjs",
+    "<repo>/tests/corpus/24625-module-exports-call-result-object-and-identity/main.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/24626-object-prototype-member-probes-over-every-dyn-kind.js": {
    "order": [
     "<repo>/tests/corpus/24626-object-prototype-member-probes-over-every-dyn-kind.js"
