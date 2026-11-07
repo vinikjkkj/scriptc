@@ -13798,6 +13798,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24508-an-interface-with-inherited-members-keeps-the-literal-key-order-across-a-conditional-spread.ts": {
+   "order": [
+    "<repo>/tests/corpus/24508-an-interface-with-inherited-members-keeps-the-literal-key-order-across-a-conditional-spread.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2451-private-fields.ts": {
    "order": [
     "<repo>/tests/corpus/2451-private-fields.ts"
