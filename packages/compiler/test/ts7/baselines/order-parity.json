@@ -13841,6 +13841,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24647-splice-insertion-into-a-typed-array.js": {
+   "order": [
+    "<repo>/tests/corpus/24647-splice-insertion-into-a-typed-array.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24648-frozen-array-writes-in-sloppy-code.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24648-frozen-array-writes-in-sloppy-code.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24649-frozen-array-writes-in-strict-code.js": {
+   "order": [
+    "<repo>/tests/corpus/24649-frozen-array-writes-in-strict-code.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/24660-unique-symbol-const-keyed-interface-member-read-and-optional-call.ts": {
    "order": [
     "<repo>/tests/corpus/24660-unique-symbol-const-keyed-interface-member-read-and-optional-call.ts"
