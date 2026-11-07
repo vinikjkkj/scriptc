@@ -13757,6 +13757,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24633-next-tick-with-a-spread-of-trailing-arguments.js": {
+   "order": [
+    "<repo>/tests/corpus/24633-next-tick-with-a-spread-of-trailing-arguments.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2464-qs-require-forms.cjs": {
    "order": [
     "<repo>/tests/corpus/2464-qs-require-forms.cjs"
