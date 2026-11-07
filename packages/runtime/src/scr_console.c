@@ -132,6 +132,7 @@ static void scr_rc_audit_at_exit(void) {
    * one indirection from its cause. */
   long abortsigs = scr_abortsig_live_count();
   long abortctls = scr_abortctl_live_count();
+  long events = scr_event_live_count();
   /* The handle kinds of the socket, TLS, HTTP, HTTP/2, dgram, fs-watch and
    * child-process units, plus pending timers. Their units are link-gated, so
    * the counters live in scr_object.c (always linked) and the notes are
@@ -153,7 +154,7 @@ static void scr_rc_audit_at_exit(void) {
   if (strings != 0 || arrays != 0 || maps != 0 || boxes != 0 || closures != 0 ||
       objects != 0 || unions != 0 || dyns != 0 || bytes != 0 || jsvals != 0 ||
       bigints != 0 || keyobjs != 0 || hashes != 0 || hmacs != 0 ||
-      ciphers != 0 || abortsigs != 0 || abortctls != 0 || netsocks != 0 ||
+      ciphers != 0 || abortsigs != 0 || abortctls != 0 || events != 0 || netsocks != 0 ||
       netsrvs != 0 || tlsctxs != 0 || tlssocks != 0 || httpconns != 0 ||
       httpmsgs != 0 || h2sessions != 0 || h2streams != 0 || dgrams != 0 ||
       watchers != 0 || childprocs != 0 || childstreams != 0 || timers != 0) {
@@ -164,7 +165,7 @@ static void scr_rc_audit_at_exit(void) {
             "%ld union(s), %ld dyn value(s), %ld bytes value(s), "
             "%ld island value(s), %ld bigint(s), %ld key object(s), "
             "%ld hash(es), %ld hmac(s), %ld cipher(s), %ld abort signal(s), "
-            "%ld abort controller(s), "
+            "%ld abort controller(s), %ld event(s), "
             "%ld net socket(s), %ld net server(s), %ld tls context(s), "
             "%ld tls socket(s), %ld http connection(s), %ld http message(s), "
             "%ld http2 session(s), %ld http2 stream(s), %ld dgram socket(s), "
@@ -172,7 +173,7 @@ static void scr_rc_audit_at_exit(void) {
             "%ld timer(s) live at exit\n",
             strings, arrays, maps, boxes, closures, objects, unions, dyns,
             bytes, jsvals, bigints, keyobjs, hashes, hmacs, ciphers,
-            abortsigs, abortctls, netsocks, netsrvs, tlsctxs, tlssocks,
+            abortsigs, abortctls, events, netsocks, netsrvs, tlsctxs, tlssocks,
             httpconns, httpmsgs, h2sessions, h2streams, dgrams, watchers,
             childprocs, childstreams, timers);
     /* The line above counts by TYPE, which is where a leak hunt stops:

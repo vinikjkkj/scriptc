@@ -56,6 +56,14 @@ typedef struct ScrAbortL {
   ScrAbortNativeFn native;
   void *ctx;
   bool once;
+#ifdef SCR_ABORT_EV
+  /* The listener declares the Event parameter (the closure ABI is
+   * (cb, event)), and `resist` is Node's kResistStopPropagation: it still
+   * runs after a stopImmediatePropagation. Compiled only into a program
+   * that links scr_event.c (the unit's gate defines SCR_ABORT_EV). */
+  bool ev;
+  bool resist;
+#endif
   /* Registration order, monotonic and never reused. The dispatch walks by
    * this rather than by array index, because the array is allowed to move
    * under it: a listener may add or remove listeners while the pass is
@@ -188,6 +196,10 @@ void scr_abort_signal_add(ScrAbortSignal *s, ScrClosure *cb, bool once) {
   s->ls[s->n].native = NULL;
   s->ls[s->n].ctx = NULL;
   s->ls[s->n].once = once;
+#ifdef SCR_ABORT_EV
+  s->ls[s->n].ev = false;
+  s->ls[s->n].resist = false;
+#endif
   s->ls[s->n].seq = s->next_seq++;
   s->n++;
   /* Nothing is buffered here on purpose. Storing an edge never makes an
@@ -196,6 +208,20 @@ void scr_abort_signal_add(ScrAbortSignal *s, ScrClosure *cb, bool once) {
    * release runs scr_cyc_on_release below. Buffering on add would only
    * add a root that scan() re-blackens. */
 }
+
+#ifdef SCR_ABORT_EV
+/* The Event-taking twin of scr_abort_signal_add: same identity rule, same
+ * slot in the same vector, plus the two flags. `cb` MOVES IN. */
+void scr_abort_signal_add_ev(ScrAbortSignal *s, ScrClosure *cb, bool once, bool resist) {
+  if (!cb) return;
+  size_t before = s->n;
+  scr_abort_signal_add(s, cb, once);
+  if (s->n != before) {
+    s->ls[s->n - 1].ev = true;
+    s->ls[s->n - 1].resist = resist;
+  }
+}
+#endif
 
 /* removeEventListener by CALLBACK IDENTITY. The listener is a RETAINED
  * reference and this is the release: a remove that only forgot the entry
@@ -237,6 +263,12 @@ void scr_abort_signal_add_native(ScrAbortSignal *s, ScrAbortNativeFn fn, void *c
   s->ls[s->n].native = fn;
   s->ls[s->n].ctx = ctx;
   s->ls[s->n].once = false;
+#ifdef SCR_ABORT_EV
+  /* Node's own listeners (the ClientRequest's) register with
+   * kResistStopPropagation. */
+  s->ls[s->n].ev = false;
+  s->ls[s->n].resist = true;
+#endif
   s->ls[s->n].seq = s->next_seq++;
   s->n++;
 }
@@ -326,12 +358,33 @@ static uint64_t scr_abort_seq_at_or_after(const ScrAbortSignal *s, uint64_t from
 static void scr_abort_fire(ScrAbortSignal *s) {
   ScrCaught *first = NULL;
   uint64_t cur = 0;
+#ifdef SCR_ABORT_EV
+  /* ONE Event per dispatch, built when the first Event-taking listener is
+   * reached; every later listener sees the same object, which is how a
+   * stopImmediatePropagation by one is visible to the rest. */
+  ScrEvent *ev = NULL;
+  /* Node clears the event's dispatching flag after EACH JS listener returns
+   * (a throwing one skips the clear); an Event built after that point is
+   * born cleared. */
+  bool disp_cleared = false;
+#endif
   for (;;) {
     uint64_t seq = scr_abort_seq_at_or_after(s, cur);
     if (seq == SCR_ABORT_SEQ_END) break;
     size_t idx = 0;
     while (idx < s->n && s->ls[idx].seq != seq) idx++;
     if (idx == s->n) break; /* unreachable; keeps the index honest */
+#ifdef SCR_ABORT_EV
+    if (ev != NULL && scr_event_stopped_immediate(ev) && !s->ls[idx].resist) {
+      /* After stopImmediatePropagation only the resisting listeners run
+       * (Node's kResistStopPropagation); the rest are skipped in place. */
+      uint64_t skip_next = scr_abort_seq_at_or_after(s, seq + 1);
+      if (skip_next == SCR_ABORT_SEQ_END) break;
+      cur = skip_next;
+      continue;
+    }
+    bool is_ev = s->ls[idx].ev;
+#endif
     /* A NATIVE entry has no closure to retain: its context is borrowed and
      * kept alive by the owner that registered it (which removes the entry
      * before it can die). Everything else about the walk is identical. */
@@ -351,9 +404,21 @@ static void scr_abort_fire(ScrAbortSignal *s) {
                                              : scr_abort_seq_at_or_after(s, seq + 1);
     if (nat != NULL) {
       nat(natctx);
+#ifdef SCR_ABORT_EV
+    } else if (is_ev) {
+      if (ev == NULL) ev = scr_event_new_abort(s, !disp_cleared);
+      /* the listener owns its +1 event parameter (the universal convention) */
+      ((void (*)(ScrClosure *, ScrEvent *))cb->fn)(cb, scr_event_retain(ev));
+#endif
     } else {
       ((void (*)(ScrClosure *))cb->fn)(cb);
     }
+#ifdef SCR_ABORT_EV
+    if (nat == NULL && !scr_exc_pending()) {
+      disp_cleared = true;
+      if (ev != NULL) scr_event_listener_returned(ev);
+    }
+#endif
     if (scr_exc_pending()) {
       ScrCaught *c = scr_exc_take();
       if (first == NULL) first = c;
@@ -363,6 +428,12 @@ static void scr_abort_fire(ScrAbortSignal *s) {
     if (next == SCR_ABORT_SEQ_END) break;
     cur = next;
   }
+#ifdef SCR_ABORT_EV
+  if (ev != NULL) {
+    scr_event_end_dispatch(ev);
+    scr_event_release(ev);
+  }
+#endif
   if (first != NULL) {
     scr_rethrow(first);
     scr_caught_release(first);
