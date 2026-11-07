@@ -12492,7 +12492,36 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       };
       for (const p of expr.properties) {
         if (ts.isSpreadAssignment(p)) {
-          if (conditionalSpreadOf(p.expression) !== null) { simpleSpelling = false; listParts = false; break; }
+          const condSpread = conditionalSpreadOf(p.expression);
+          if (condSpread !== null) {
+            // `...(c ? { k: v } : {})` contributes its carrier's keys only sometimes, but WHERE they sit is static: JS fixes a
+            // key's position where it is first defined, so when no other property of the literal names them (and no other
+            // spread could) the written order is this literal's order whether the spread fires or not. Anything else gives up.
+            if (condSpread !== "unsupported") {
+              const carried = condSpread.props.map((q) => propNameText(L, q.name));
+              // Every other contributor must name keys of its own: a plain name, a conditional spread's carrier, or a spread of a
+              // plain record (its declared members; an optional one is the source branch's own concern below).
+              const disjoint = expr.properties.every((q) => {
+                if (q === p) return true;
+                if (ts.isSpreadAssignment(q)) {
+                  const oc = conditionalSpreadOf(q.expression);
+                  if (oc !== null) return oc !== "unsupported" && oc.props.every((c) => !carried.includes(propNameText(L, c.name)));
+                  const qt = L.mapTypeOf(L.typeOf(q.expression));
+                  const qs = qt?.kind === "record" ? L.shapes.get(qt.shapeId) : undefined;
+                  return qs !== undefined && !qs.tuple && !qs.indexValue && qs.fields.every((f) => !carried.includes(f.name));
+                }
+                return (ts.isPropertyAssignment(q) || ts.isShorthandPropertyAssignment(q)) &&
+                  q.name !== undefined && !ts.isComputedPropertyName(q.name) && !ts.isPrivateIdentifier(q.name) &&
+                  !carried.includes(propNameText(L, q.name));
+              });
+              if (disjoint && new Set(carried).size === carried.length) {
+                for (const n of carried) contribute(n);
+                listParts = false;
+                continue;
+              }
+            }
+            simpleSpelling = false; listParts = false; break;
+          }
           const st = L.mapTypeOf(L.typeOf(p.expression));
           if (st?.kind !== "record") { simpleSpelling = false; listParts = false; break; }
           const ss = L.shapes.get(st.shapeId);
@@ -12524,8 +12553,15 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
             // last. With no other property naming any of the source's keys, the source contributes exactly its PRESENT
             // keys in its own order, which the key-order index reproduces (the presence mask says which are present).
             const srcNames = new Set(ss.fields.map((f) => f.name));
-            const alone = expr.properties.every((q) =>
-              q === p || (!ts.isSpreadAssignment(q) && q.name !== undefined && !ts.isComputedPropertyName(q.name) && !ts.isPrivateIdentifier(q.name) && !srcNames.has(propNameText(L, q.name))));
+            const alone = expr.properties.every((q) => {
+              if (q === p) return true;
+              if (ts.isSpreadAssignment(q)) {
+                // A conditional spread of a literal naming none of this source's keys cannot define one of them first or last.
+                const cq = conditionalSpreadOf(q.expression);
+                return cq !== null && cq !== "unsupported" && cq.props.every((c) => !srcNames.has(propNameText(L, c.name)));
+              }
+              return q.name !== undefined && !ts.isComputedPropertyName(q.name) && !ts.isPrivateIdentifier(q.name) && !srcNames.has(propNameText(L, q.name));
+            });
             if (!alone) {
               simpleSpelling = false;
               optionalNotAlone = true;
