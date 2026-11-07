@@ -5307,6 +5307,19 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         return { kind: "libCall", fn: "big.fromDyn", args: [arg], type: BIGINT, loc };
       }
     }
+    // `Object(x)` over a checked-dynamic value (lodash's defaults, standard-as-callback's `Object(options).spread`): null and
+    // undefined answer a fresh empty object, an object-like value answers itself, and a primitive's wrapper object (not
+    // modelled) throws a named Error at run time (scr_dyn_to_object).
+    if (
+      ts.isIdentifier(expr.expression) && expr.expression.text === "Object" && expr.arguments.length === 1 &&
+      !ts.isSpreadElement(expr.arguments[0]!) && L.isStdlibSymbol(L.resolveValueSymbol(expr.expression) ?? undefined)
+    ) {
+      const ov = probeLower(L, expr.arguments[0]!);
+      if (ov?.type.kind === "dyn") {
+        const dv = L.lowerExpr(expr.arguments[0]!);
+        return { kind: "libCall", fn: "dyn.toObject", args: [dv], type: DYN, loc };
+      }
+    }
     if (
       ts.isIdentifier(expr.expression) &&
       (expr.expression.text === "String" ||

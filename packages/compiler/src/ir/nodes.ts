@@ -6610,6 +6610,7 @@ export type IrLibFn =
   | "insp.optsPop"
   | "dyn.getPrototypeOf"
   | "dyn.objectPrototype"
+  | "dyn.toObject"
   | "insp.optDepth"
   | "insp.shown"
   | "insp.rem"
@@ -14719,6 +14720,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "insp.format",
   // Object.getPrototypeOf(null | undefined) throws the TypeError
   "dyn.getPrototypeOf",
+  // Object(primitive) throws the named wrapper-object error
+  "dyn.toObject",
   "dyn.defineProps",
   "dyn.defineProp",
   "dyn.captureStack",

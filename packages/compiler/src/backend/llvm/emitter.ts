@@ -825,6 +825,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "insp.optsPop": "scr_insp_opts_pop",
   "dyn.getPrototypeOf": "scr_dyn_get_prototype_of",
   "dyn.objectPrototype": "scr_dyn_object_prototype",
+  "dyn.toObject": "scr_dyn_to_object",
   "insp.optDepth": "scr_insp_opt_depth",
   "insp.shown": "scr_insp_shown",
   "insp.rem": "scr_insp_rem",
