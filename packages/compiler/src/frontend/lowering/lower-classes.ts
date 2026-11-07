@@ -6741,6 +6741,10 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       if (acc) return acc;
     }
     {
+      const defined = definedStaticRead(L, info, expr, loc);
+      if (defined) return defined;
+    }
+    {
       const bagged = staticBagRead(L, info, expr, loc);
       if (bagged) return bagged;
     }
@@ -6831,6 +6835,56 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     return fnName;
   }
 
+  /** The keys the program installs on a class VALUE with `Object.defineProperty(C, "k", ...)` (a string-literal key; the class named by its own
+   * identifier). Such a key is a property DESCRIPTOR of the class object -- an accessor whose getter runs with `this` bound to the class and
+   * whose setter takes `C.k = v` -- which lives in the class value's own property table, not in the table of undeclared statics. Whole-program,
+   * computed once. */
+  function definedStaticKeys(L: Lowerer, info: ClassInfo): ReadonlySet<string> {
+    const cache = ((L as unknown as { definedStaticKeyCache?: Map<ts.Node, Set<string>> }).definedStaticKeyCache ??= new Map());
+    const decl = info.decl;
+    if (decl === null || decl === undefined) return new Set();
+    let all = cache.get(decl);
+    if (all) return all;
+    all = new Set();
+    cache.set(decl, all);
+    const classSym = L.checker.getSymbolAtLocation((decl as ts.ClassDeclaration).name ?? decl);
+    if (!classSym) return all;
+    for (const sf of L.program.getSourceFiles()) {
+      if (sf.isDeclarationFile) continue;
+      const stack: ts.Node[] = [sf];
+      while (stack.length > 0) {
+        const n = stack.pop()!;
+        if (
+          ts.isCallExpression(n) && n.arguments.length === 3 && ts.isPropertyAccessExpression(n.expression) &&
+          n.expression.name.text === "defineProperty" && ts.isIdentifier(n.expression.expression) && n.expression.expression.text === "Object" &&
+          ts.isStringLiteralLike(n.arguments[1]!) &&
+          ((ts.isIdentifier(n.arguments[0]!) && (L.resolveValueSymbol(n.arguments[0]!) === classSym ||
+            (n.arguments[0]!.getText() === "exports" && isCjsJsFile(sf) && (L.typeOf(n.arguments[0]!) as ts.Type).getSymbol?.() === classSym))) ||
+            (isModuleExportsAccess(n.arguments[0]!) && isCjsJsFile(sf) && (L.typeOf(n.arguments[0]!) as ts.Type).getSymbol?.() === classSym))
+        ) {
+          all.add((n.arguments[1] as ts.StringLiteralLike).text);
+        }
+        ts.forEachChild(n, (c) => { stack.push(c); });
+      }
+    }
+    return all;
+  }
+
+  /** The class VALUE as a dyn box, the target of the by-key read/write of a descriptor-installed static. */
+  function classValueBox(info: ClassInfo, loc: SrcLoc): IrExpr {
+    return { kind: "dynFrom", value: { kind: "classRef", className: info.def.name, type: { kind: "classval", className: info.def.name }, loc }, type: DYN, loc };
+  }
+
+  /** `C.k` where `k` was installed by Object.defineProperty(C, "k", ...): the read asks the class value's own property table (its getter runs
+   * with `this` bound to the class). Optional: an absent key reads undefined. */
+  function definedStaticRead(L: Lowerer, info: ClassInfo, expr: ts.PropertyAccessExpression, loc: SrcLoc): IrExpr | null {
+    if (!definedStaticKeys(L, info).has(expr.name.text)) return null;
+    return L.maybeNarrow(
+      { kind: "dynKeyGet", key: { kind: "strLit", value: expr.name.text, type: STRING, loc }, optional: true, value: classValueBox(info, loc), type: DYN, loc },
+      expr,
+    );
+  }
+
   /** `C.k` read for an eligible class: the table's own value, undefined when
    * absent (optional dyn key read, like the file's exports bag). */
   function staticBagRead(L: Lowerer, info: ClassInfo, expr: ts.PropertyAccessExpression, loc: SrcLoc): IrExpr | null {
@@ -6864,6 +6918,17 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
 
   /** `C.k = v` statement for an eligible class: the table's keySet. */
   export function staticBagWrite(L: Lowerer, info: ClassInfo, expr: ts.BinaryExpression & { left: ts.PropertyAccessExpression }): IrStmt | null {
+    if (definedStaticKeys(L, info).has(expr.left.name.text)) {
+      // A descriptor-installed static: the write goes to the class value's own table, where the setter runs with `this` bound to the class.
+      const wloc = locOf(expr);
+      const wl = L.lowerExprExpecting(expr.right, DYN);
+      const wv = wl.type.kind === "dyn" ? wl : L.coerceInto(expr.right, wl, DYN);
+      return {
+        kind: "exprStmt",
+        expr: { kind: "libCall", fn: "dyn.keySet", args: [classValueBox(info, wloc), { kind: "strLit", value: expr.left.name.text, type: STRING, loc: wloc }, wv], type: VOID, loc: wloc },
+        loc: wloc,
+      };
+    }
     if (!staticBagEligible(info, expr.left.name.text)) return null;
     const loc = locOf(expr);
     const fnName = staticBagFn(L, info, loc);
