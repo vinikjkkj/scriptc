@@ -25834,6 +25834,18 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
+  },
+  "<repo>/tests/corpus/24343-const-captured-by-a-callback-in-its-own-initializer-js.js": {
+   "order": [
+    "<repo>/tests/corpus/24343-const-captured-by-a-callback-in-its-own-initializer-js.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24344-late-prototype-method-reading-arguments-js.js": {
+   "order": [
+    "<repo>/tests/corpus/24344-late-prototype-method-reading-arguments-js.js"
+   ],
+   "diags": []
   }
  }
 }
