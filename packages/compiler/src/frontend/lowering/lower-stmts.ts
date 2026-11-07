@@ -36,8 +36,8 @@ import { lowerHttpResPropertyAssignment, lowerServerCloseOverrideAssignment, low
 import { namespaceConditionalOf } from "./lower-nsvalue.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl, nodeRequireArgumentError, requireFnValueDeclType } from "./lower-builtins.js";
 import { lowerEnumDeclaration } from "./lower-enums.js";
-import { liveCompoundStmtOf, liveExportsOf, liveKeyOf, liveRecvBagOf, liveTableStmt, liveWriteBagOf, dynValueOf, orphanTableWriteOf, liveAccessorTargetOf, liveDefinePropOf } from "./cjs-live-exports.js";
-import { cjsExportsBagOf, cjsMemberOnlyInFunctions, ctorObjectGlobalValue, webCryptoGlobalDestructure, dynAssertionReceiver, errorExpandoReceiver, errorRefinementMember, lowerObjectAssignErrorStatement, lowerUndeclaredMemberWrite, isDynSafeReadWidth, isImmutablePrimitiveWidth, refuseUnloweredWebCryptoPattern, refuseUnloweredWebCryptoAssign, refuseWebCryptoIntrospection } from "./lower-exprs.js";
+import { dynReplaceOf, liveDynReplaceStmt, liveCompoundStmtOf, liveExportsOf, liveKeyOf, liveRecvBagOf, liveTableStmt, liveWriteBagOf, dynValueOf, orphanTableWriteOf, liveAccessorTargetOf, liveDefinePropOf } from "./cjs-live-exports.js";
+import { cjsExportsBagOf, cjsModExpOf, cjsMemberOnlyInFunctions, ctorObjectGlobalValue, webCryptoGlobalDestructure, dynAssertionReceiver, errorExpandoReceiver, errorRefinementMember, lowerObjectAssignErrorStatement, lowerUndeclaredMemberWrite, isDynSafeReadWidth, isImmutablePrimitiveWidth, refuseUnloweredWebCryptoPattern, refuseUnloweredWebCryptoAssign, refuseWebCryptoIntrospection } from "./lower-exprs.js";
 import { detachedThisWriteFirst, hoistDetachedWriteRhs, keyedAccessOverIndexSignature, localTakesWidenedKeyedRead, narrowBridgeUnion, seqExprSafeStmt, unionFieldReadAt, unitArmsOf, cjsExportAccessorWriteStmt, cjsExportSetterWrite } from "./lower-exprs.js";
 import { abstractPropertyDeclOf, aliasTypeofNarrows, checkedJsNumber, compoundCombine, unionNumericCompoundRead, writeTypeOf, fnOwnCounters, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, isMatchSliceType, lowerGroupsProjection, matchResultNamedGroupsOf, probeLower, pureReemittable, symbolFieldInfo, tonumWhy } from "./lower-exprs.js";
 import { UNSUPPORTED, checkerPanicDiag, isCheckerPanic, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
@@ -6905,14 +6905,17 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
         const msym = L.cjsModuleExportSymbol(cjs.expr.getSourceFile(), cjs.text);
         if ((msym === undefined || !L.globalsBySymbol.has(msym)) && cjsMemberOnlyInFunctions(L, msym) && L.cjsMemberExportClassSymbol(cjs.expr) === null) {
           const bagSf = cjs.expr.getSourceFile();
-          const bag = cjsExportsBagOf(L, bagSf);
+          // `module.exports.k = v` in a module whose whole export is a run-time value (dynReplaceOf) writes the REPLACEMENT, the
+          // dyn slot; `exports.k = v` writes the original object (the bag).
+          const onModExp = dynReplaceOf(bagSf) !== null && ts.isPropertyAccessExpression(cjs.expr.left) && isModuleExportsAccess(cjs.expr.left.expression);
+          const bag = onModExp ? cjsModExpOf(L, bagSf) : cjsExportsBagOf(L, bagSf);
           const lowered = ts.isNumericLiteral(cjs.value) ? L.lowerExpr(cjs.value) : L.lowerExprExpecting(cjs.value, DYN);
           const value = lowered.type.kind === "dyn" ? lowered : L.coerceInto(cjs.value, lowered, DYN);
           const bagRef = (): IrExpr => ({ kind: "varRef", localId: bag, type: DYN, loc });
           return {
             kind: "block",
             body: [
-              { kind: "assign", localId: bag, value: { kind: "libCall", fn: "cls.propsEnsure", args: [bagRef()], type: DYN, loc }, loc },
+              ...(onModExp ? [] : [{ kind: "assign" as const, localId: bag, value: { kind: "libCall" as const, fn: "cls.propsEnsure" as const, args: [bagRef()], type: DYN, loc }, loc }]),
               { kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.keySet", args: [bagRef(), { kind: "strLit", value: cjs.text, type: STRING, loc }, value], type: VOID, loc }, loc },
             ],
             loc,
@@ -6937,6 +6940,8 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
       if (!tableObj) {
         const single = lowerCjsSingleValueExport(L, cjs.expr, loc);
         if (single) return single;
+        // `module.exports = f(...)`: the whole export is the run-time value (cjs-live-exports.ts dynReplaceOf).
+        if (dynReplaceOf(cjs.expr.getSourceFile()) === cjs.expr) return liveDynReplaceStmt(L, cjs.expr.getSourceFile(), cjs.expr, loc);
         L.unsupported(
           "SC1090",
           cjs.expr,
