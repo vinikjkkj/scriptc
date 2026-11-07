@@ -541,5 +541,20 @@ static const ScrDyn *proto_wrapper_default_proto(const ScrDyn *v) {
   if (k == 0) return NULL; /* BigInt / Symbol wrappers keep the plain-object answer */
   return scr_dyn_intrinsic_slot(&kind_protos[k]);
 }
-static const ScrDynProtoOps proto_ops = { proto_wrapper_prim, proto_intrinsic_member, proto_is_intrinsic, proto_key_get, proto_construct_builtin, proto_builtin_fn_prototype, proto_wrapper_default_proto };
+static bool proto_prim_instanceof(const ScrDyn *v, double which) {
+  if (v == NULL || v->kind != SCR_DYN_OBJ) return false;
+  unsigned k = which == 0 ? SCR_DYN_STR : which == 1 ? SCR_DYN_NUM : SCR_DYN_BOOL;
+  const ScrDyn *wp = proto_wrapper_prim(v);
+  if (wp != NULL && (unsigned)wp->kind == k) return true;
+  const ScrDyn *sent = kind_protos[k];
+  if (sent == NULL) return false; /* the sentinel was never minted: no chain can reach it */
+  const ScrDyn *p = scr_dyn_ext(v)->proto;
+  for (int steps = 0; p != NULL && steps < 1024; steps++) {
+    if (p == sent) return true;
+    if (p->kind != SCR_DYN_OBJ) break;
+    p = scr_dyn_ext(p)->proto;
+  }
+  return false;
+}
+static const ScrDynProtoOps proto_ops = { proto_wrapper_prim, proto_intrinsic_member, proto_is_intrinsic, proto_key_get, proto_construct_builtin, proto_builtin_fn_prototype, proto_wrapper_default_proto, proto_prim_instanceof };
 __attribute__((constructor)) static void proto_install(void) { scr_dyn_proto_ops = &proto_ops; }

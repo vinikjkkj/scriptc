@@ -8821,6 +8821,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_dyn_get_prototype_of(${arg(0)})`);
           case "dyn.objectPrototype":
             return finish(`scr_dyn_object_prototype()`);
+          case "dyn.primInstanceOf":
+            // `v instanceof String|Number|Boolean` over a dyn (arg 1 = 0 / 1 / 2): false when no wrapper object can exist in the program.
+            return finish(`scr_dyn_prim_instanceof(${arg(0)}, ${arg(1)})`);
           case "dyn.primPrototype":
             // String / Number / Boolean .prototype as a value (arg 0 / 1 / 2), +1.
             return finish(`scr_dyn_prim_prototype(${arg(0)})`);

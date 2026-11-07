@@ -6297,6 +6297,8 @@ typedef struct ScrDynProtoOps {
   ScrDyn *(*builtin_fn_prototype)(const ScrDyn *fn);
   /* The intrinsic prototype (borrowed, immortal) a primitive WRAPPER object without its own [[Prototype]] link inherits from, or NULL for any other value. */
   const ScrDyn *(*wrapper_default_proto)(const ScrDyn *v);
+  /* `v instanceof String|Number|Boolean` (which = 0 / 1 / 2): a wrapper of that kind, or an object whose chain reaches its prototype. */
+  bool (*prim_instanceof)(const ScrDyn *v, double which);
 } ScrDynProtoOps;
 extern const ScrDynProtoOps *scr_dyn_proto_ops;
 void scr_dyn_make_immortal(ScrDyn *d);

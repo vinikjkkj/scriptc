@@ -10928,6 +10928,11 @@ static bool scr_dyn_is_object_kind(const ScrDyn *d) {
  * the gated buffer-value unit. Borrowed. */
 ScrDyn *scr_dyn_buffer_proto_ptr = NULL;
 
+bool scr_dyn_prim_instanceof(const ScrDyn *v, double which) {
+  if (scr_dyn_proto_ops == NULL || scr_dyn_proto_ops->prim_instanceof == NULL) return false; /* no wrapper object exists without the unit */
+  return scr_dyn_proto_ops->prim_instanceof(v, which);
+}
+
 bool scr_dyn_instance_of(const ScrDyn *v, ScrDyn *fn) {
   /* An engine-held right operand IS callable to the engine — answering
    * false, or claiming it is not an object, would both be wrong. The
