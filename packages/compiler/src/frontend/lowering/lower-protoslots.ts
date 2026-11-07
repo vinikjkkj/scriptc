@@ -264,8 +264,6 @@ function replacementFnOf(L: Lowerer, rhs: ts.Expression): ts.FunctionLikeDeclara
   return null;
 }
 
-const ASSIGN_FIRST = ts.SyntaxKind.FirstAssignment;
-const ASSIGN_LAST = ts.SyntaxKind.LastAssignment;
 
 /** Why a replacement function cannot be called through the slot exactly, or null. The call goes through the method's ABI (every
  * declared parameter passed, omitted ones as undefined) with the receiver as the ambient `this`, so a replacement that sees the
@@ -281,7 +279,6 @@ function replacementWhy(L: Lowerer, rhs: ts.Expression): string | null {
     const n = stack.pop()!;
     if (n !== fn.body && (ts.isFunctionExpression(n) || ts.isFunctionDeclaration(n) || ts.isClassDeclaration(n) || ts.isClassExpression(n) || ts.isMethodDeclaration(n))) continue;
     if (ts.isIdentifier(n) && n.text === "arguments" && !L.resolveValueSymbol(n)) why = "the replacement reads `arguments` (the call passes every declared parameter)";
-    const thisTarget = (t: ts.Node): boolean => (ts.isPropertyAccessExpression(t) || ts.isElementAccessExpression(t)) && t.expression.kind === ts.SyntaxKind.ThisKeyword;
     n.forEachChild((c) => {
       stack.push(c);
     });
