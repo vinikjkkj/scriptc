@@ -11,7 +11,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 . "$here/entries.sh"
 mkdir -p "$(dirname "$out")"
 cd "$here"
-PHASE_TRACE="$out.phases.txt" timeout 19800 node ${RIG_NODE_FLAGS:---max-old-space-size=5000 --trace-gc --expose-gc} --import "$here/phase-tap.mjs" "$cli" build "$entry" --provenance-sources "${extra[@]}" --backend "$backend" -o "$out.bin" > "$out.txt" 2>&1
+SCRIPTC_TWIN_WHY=1 PHASE_TRACE="$out.phases.txt" timeout 19800 node ${RIG_NODE_FLAGS:---max-old-space-size=5000 --trace-gc --expose-gc} --import "$here/phase-tap.mjs" "$cli" build "$entry" --provenance-sources "${extra[@]}" --backend "$backend" -o "$out.bin" > "$out.txt" 2>&1
 rc=$?
 # zapo-core entries: which zapo-js core sources the build reached. A lowered class keeps its name in the binary (error texts and
 # inspect names), so `lowered` counts the class-name strings of a successful build; `errors` counts the error lines a refused build
