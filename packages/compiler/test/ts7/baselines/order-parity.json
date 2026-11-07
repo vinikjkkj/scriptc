@@ -13609,6 +13609,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24558-class-array-and-function-constructor-values-through-get-prototype-of.js": {
+   "order": [
+    "<repo>/tests/corpus/24558-class-array-and-function-constructor-values-through-get-prototype-of.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24559-primitive-wrappers-with-own-properties-and-the-symbol-wrapper.js": {
+   "order": [
+    "<repo>/tests/corpus/24559-primitive-wrappers-with-own-properties-and-the-symbol-wrapper.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2456-private-async-methods.ts": {
    "order": [
     "<repo>/tests/corpus/2456-private-async-methods.ts"
