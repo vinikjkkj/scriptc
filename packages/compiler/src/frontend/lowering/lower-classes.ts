@@ -960,11 +960,37 @@ export interface GenericClassInfo {
       ts.forEachChild(sf, visit);
     }
     if (anyWrite) {
+      // POSSIBLE RECEIVERS of an untyped write: a class instance reaches an untyped parameter only when the class (or its instances) is handed
+      // around as a VALUE: constructed through a non-literal callee, passed, stored, returned. A class used only through `new C(..)`, `extends C`,
+      // `x instanceof C`, `C.member` and its own export statement is always typed where it is used, so it never meets such a write.
+      const valueEscape = new Set<ts.ClassDeclaration>();
+      const byName = new Map<string, ts.ClassDeclaration[]>();
+      for (const c of pkgClasses) if (c.name !== undefined) byName.set(c.name.text, [...(byName.get(c.name.text) ?? []), c]);
+      const escapeScan = (n: ts.Node): void => {
+        if (ts.isIdentifier(n) && byName.has(n.text)) {
+          const par = n.parent;
+          const benign =
+            par === undefined ||
+            (ts.isClassDeclaration(par) && par.name === n) ||
+            (ts.isNewExpression(par) && par.expression === n) ||
+            ts.isExpressionWithTypeArguments(par) ||
+            (ts.isBinaryExpression(par) && par.operatorToken.kind === ts.SyntaxKind.InstanceOfKeyword && par.right === n) ||
+            (ts.isPropertyAccessExpression(par) && par.expression === n) ||
+            (ts.isBinaryExpression(par) && par.operatorToken.kind === ts.SyntaxKind.EqualsToken && par.right === n &&
+              ts.isPropertyAccessExpression(par.left) && /^(module\.exports|exports)(\.\w+)?$/.test(par.left.getText()));
+          if (!benign) {
+            const sym = L.checker.getSymbolAtLocation(n);
+            for (const d of sym !== undefined ? L.checker.declarationsOf(sym) : []) if (ts.isClassDeclaration(d)) valueEscape.add(d);
+          }
+        }
+        ts.forEachChild(n, escapeScan);
+      };
+      for (const sf of L.fileTag.keys()) if (!sf.isDeclarationFile) ts.forEachChild(sf, escapeScan);
       for (const c of pkgClasses) {
         const ext = c.heritageClauses?.find((h) => h.token === ts.SyntaxKind.ExtendsKeyword)?.types[0]?.expression;
         // An EventEmitter root keeps its table like any program class (symbolTableRootOk); every other builtin base keeps its own path.
         const emitterRooted = ext !== undefined && /(^|\.)EventEmitter$/.test(ext.getText());
-        if (emitterRooted || !classHasBuiltinBase(L, c)) out.add(c);
+        if (valueEscape.has(c) && (emitterRooted || !classHasBuiltinBase(L, c))) out.add(c);
       }
     }
     return out;

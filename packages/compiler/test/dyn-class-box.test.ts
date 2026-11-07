@@ -276,9 +276,11 @@ describe("the class-instance dyn box's bookkeeping", () => {
     ]);
     expect([...ls.keys()].sort()).toEqual([...cs.keys()].sort());
     for (const [name, row] of cs) expect(`${name}: ${ls.get(name)}`).toBe(`${name}: ${row}`);
-    // The skipped-names list is part of the row, compared exactly: Svc skips its async method by name, a stream class names none.
-    expect(cs.get("Svc")).toContain("skipped=,load,");
-    expect(ls.get("Svc")).toContain("skipped=,load,");
+    // The skipped-names list is part of the row, compared exactly. It is emitted only for an opaque class that carries the run-time property
+    // table (none here: Svc is opaque through its async method but has no table), so both lanes say "-" for Svc and for the stream class.
+    expect(cs.get("Svc")).toContain("opaque=true");
+    expect(cs.get("Svc")).toContain("skipped=-");
+    expect(ls.get("Svc")).toContain("skipped=-");
     expect(cs.get("Readable")).toContain("skipped=-");
   });
 
