@@ -16,6 +16,8 @@ const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
 const fixtureDir = join(repoRoot, "tests/fixtures/provenance");
 const entry = join(fixtureDir, "cases/authoredjs-dynimport/main.ts");
+const cjsEntry = join(fixtureDir, "cases/authoredjs-dynimport-cjs/main.ts");
+const cjsManifest = join(fixtureDir, "manifest-authoredjs.json");
 const manifest = join(fixtureDir, "manifest-dynimport.json");
 const flavor = process.env["SCRIPTC_SAN"] === "1" ? "san" : "plain";
 const outDir = join(repoRoot, "node_modules/.cache/scriptc-tests/provenance-dynimport", flavor);
@@ -48,6 +50,25 @@ describe("provenance: a mapped package reached only through import()", () => {
       if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
       const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
       expect(stdout).toBe(EXPECTED);
+    });
+  }
+});
+
+/* A mapped AUTHORED-JavaScript (CommonJS) package named by import() directly: the namespace is built from its
+ * module.exports (lexer-detected names + default), through the same builder --npm-static packages use. Before:
+ * the build was clean and the site became a rejected promise at run time. */
+describe("provenance: import() of a mapped CommonJS package", () => {
+  const CJS_EXPECTED = EXPECTED + "default.protocol=5\n";
+  for (const backend of ["c", "llvm"] as const) {
+    test(`the namespace answers what Node answers on --backend ${backend}`, async () => {
+      process.env["SCRIPTC_PROVENANCE_MANIFEST"] = cjsManifest;
+      setProvenanceSources(await resolveProvenanceSources(cjsEntry));
+      mkdirSync(outDir, { recursive: true });
+      const outPath = join(outDir, process.platform === "win32" ? `cjs-${backend}.exe` : `cjs-${backend}`);
+      const result = await compile(cjsEntry, { outPath, outDir, dynamic: false, backend });
+      if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+      const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
+      expect(stdout).toBe(CJS_EXPECTED);
     });
   }
 });
