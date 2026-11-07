@@ -16,8 +16,8 @@ import { isNpmStaticPackage } from "../npm-static.js";
 import { isJsSourceFileName, isRelativeSpecifier } from "../shared.js";
 import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsKeyedForEachOf, cjsWholeExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, commaWholeExportRecordOf, dynamicImportSpecOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isRequireStatement, locOf, makeCycleAdmission, orderedImportsOf, resolveImport, resolveNpmImport } from "../program.js";
 import { cjsExportRecordOf, cjsExportRecordInit, cjsExportRecordCreate } from "./cjs-export-record.js";
-import { liveExportsOf } from "./cjs-live-exports.js";
-import { cjsExportsBagOf, isWebCryptoValueExpr, webCryptoGlobalDestructure } from "./lower-exprs.js";
+import { dynReplaceOf, liveExportsOf } from "./cjs-live-exports.js";
+import { cjsExportsBagOf, cjsModExpOf, isWebCryptoValueExpr, webCryptoGlobalDestructure } from "./lower-exprs.js";
 import { npmStaticDepSf7, resolveProjectImportSf7 } from "../program.js";
 import type { CycleEdge } from "../program.js";
 import { invalidJsonModuleDiag, npmEmbedFailedDiag, requiresDynamicImportDiag } from "../../diagnostics/diagnostic.js";
@@ -4163,12 +4163,17 @@ function activationsOf(L: Lowerer, sf: ts.SourceFile): Map<ts.Node, number> {
         if (liveExportsOf(L, sf)) cjsExportsBagOf(L, sf);
         const bagId = L.cjsExportBags.get(sf);
         if (bagId !== undefined) {
-          body.splice(header.length, 0, {
+          const bagInit: IrStmt[] = [{
             kind: "assign",
             localId: bagId,
             value: { kind: "dynObjLit", fields: [], type: DYN, loc: loc0 },
             loc: loc0,
-          });
+          }];
+          // A module whose whole export is replaced by a run-time value (dynReplaceOf): `module.exports` starts as `exports`.
+          if (dynReplaceOf(sf) !== null) {
+            bagInit.push({ kind: "assign", localId: cjsModExpOf(L, sf), value: { kind: "varRef", localId: bagId, type: DYN, loc: loc0 }, loc: loc0 });
+          }
+          body.splice(header.length, 0, ...bagInit);
         }
       }
       {

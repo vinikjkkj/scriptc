@@ -1846,7 +1846,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // An element-access base (`exports[k]`) keeps the generic element fence: this
       // identifier is not the value that fence names, so its refusal would relabel it.
       if (ts.isIdentifier(expr) && expr.text === "exports" && isCjsJsFile(expr.getSourceFile()) && liveExportsOf(L, expr.getSourceFile()) && isValueUse(expr) && L.resolveLocal(expr) === null) {
-        return liveBagRef(L, expr.getSourceFile(), loc);
+        return liveBagRef(L, expr.getSourceFile(), loc, "exports");
       }
       if (ts.isIdentifier(expr) && expr.text === "exports" && !ts.isElementAccessExpression(expr.parent) && isCjsJsFile(expr.getSourceFile()) && L.resolveLocal(expr) === null) {
         const recV = cjsExportRecordOf(L, expr.getSourceFile());
@@ -25502,6 +25502,15 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
     const id = `%g.${tag === "" ? "e." : tag.replace(/^%/, "")}%exportsbag`;
     L.cjsExportBags.set(sf, id);
     L.globalsList.push({ id, name: "%exportsbag", type: DYN, mutable: true });
+    return id;
+  }
+
+/** The `module.exports` slot of a module whose whole export is replaced by a run-time value (cjs-live-exports.ts dynReplaceOf): a dyn
+   * global that starts as the module's original export bag and is reassigned by the replacement statement. */
+  export function cjsModExpOf(L: Lowerer, sf: ts.SourceFile): string {
+    const tag = L.fileTag.get(sf) ?? "";
+    const id = `%g.${tag === "" ? "e." : tag.replace(/^%/, "")}%modexp`;
+    if (!L.globalsList.some((g) => g.id === id)) L.globalsList.push({ id, name: "%modexp", type: DYN, mutable: true });
     return id;
   }
 

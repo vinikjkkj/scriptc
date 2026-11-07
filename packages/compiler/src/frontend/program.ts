@@ -4479,6 +4479,43 @@ export function cjsExportAssignmentOf(stmt: ts.Statement):
   return null;
 }
 
+/** The `module.exports = <call result>` replacement of a module (debug's `module.exports = require('./common')(exports)`): the whole
+ * export becomes a value computed at run time, a function carrying members the compiler cannot see. The module is LIVE and holds two
+ * objects, as Node does: the ORIGINAL `exports` (the module's bag, which a function written before the replacement still names) and
+ * `module.exports`, a dyn slot that starts as the same object and is reassigned by this statement (`liveBagRef`, `which`). Gates
+ * (any miss keeps today's refusal): a CommonJS JS file whose only whole-export statement is this top-level `module.exports = f(...)`
+ * (the callee is not a bare `require("spec")`, which is the re-export alias), not chained with `exports =`. */
+const dynReplaceMemo = new WeakMap<ts.SourceFile, ts.BinaryExpression | null>();
+export function dynReplaceOf(sf: ts.SourceFile): ts.BinaryExpression | null {
+  const known = dynReplaceMemo.get(sf);
+  if (known !== undefined) return known;
+  let found: ts.BinaryExpression | null = null;
+  if (isCjsJsFile(sf)) {
+    let whole = 0;
+    for (const stmt of sf.statements) {
+      const bin = cjsWholeExportAssignmentOf(stmt);
+      if (bin === null) continue;
+      whole++;
+      let rhs: ts.Expression = bin.right;
+      while (ts.isParenthesizedExpression(rhs)) rhs = rhs.expression;
+      const isRequireAlias =
+        ts.isCallExpression(rhs) && ts.isIdentifier(rhs.expression) && rhs.expression.text === "require";
+      if (
+        whole === 1 && ts.isExpressionStatement(stmt) && stmt.expression === bin && isModuleExportsAccess(bin.left) &&
+        ts.isCallExpression(rhs) && !isRequireAlias &&
+        // A call the static export machinery resolves to a literal table (picocolors' `module.exports = createColors()`) keeps it.
+        cjsExportTargetLiteral(bin.right, sf) === null
+      ) found = bin;
+      else {
+        found = null;
+        whole = 99;
+      }
+    }
+  }
+  dynReplaceMemo.set(sf, found);
+  return found;
+}
+
 /** The per-file facts cjsExportDiscardReason needs, computed ONCE per source file: the index of the last statement that
  * replaces the export object (a `module.exports = {...}` table, or a whole-export replacement parked in a comma operand), and
  * each statement's position. The per-call scan was O(statements) per export statement, so a bundled file with thousands of
@@ -4515,6 +4552,8 @@ function exportScanOf(sf: ts.SourceFile): { lastTable: number; index: Map<ts.Sta
 export function cjsExportDiscardReason(stmt: ts.Statement): string | null {
   const sf = stmt.parent;
   if (!ts.isSourceFile(sf)) return null;
+  // A module whose whole export is a run-time value keeps `exports` as a live object of its own: its members are real writes.
+  if (dynReplaceOf(sf) !== null) return null;
   const mine = cjsExportAssignmentOf(stmt);
   if (!mine) return null;
   const stmts = sf.statements;
