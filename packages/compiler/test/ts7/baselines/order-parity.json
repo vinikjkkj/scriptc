@@ -13817,6 +13817,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24645-computed-key-write-on-a-function-with-static-members.js": {
+   "order": [
+    "<repo>/tests/corpus/24645-computed-key-write-on-a-function-with-static-members.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/24660-unique-symbol-const-keyed-interface-member-read-and-optional-call.ts": {
    "order": [
     "<repo>/tests/corpus/24660-unique-symbol-const-keyed-interface-member-read-and-optional-call.ts"
