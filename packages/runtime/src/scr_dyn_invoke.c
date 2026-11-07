@@ -2369,6 +2369,15 @@ ScrDyn *scr_dyn_invoke_pack(ScrDyn *recv, ScrDyn *pack, const ScrStr *method, co
 }
 
 ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, size_t argc, const char *what) {
+  {
+    /* A primitive wrapper object (Object("s")): its prototype methods bind the primitive, and valueOf answers it. A member the
+     * program stored on the wrapper itself keeps winning (the own lookup runs first below), so only an absent name delegates. */
+    const ScrDyn *wp = scr_dyn_wrapper_prim(recv);
+    if (wp != NULL && scr_dyn_obj_get(recv, method, strlen(method)) == NULL) {
+      if (strcmp(method, "valueOf") == 0) return scr_dyn_retain((ScrDyn *)wp);
+      return scr_dyn_invoke((ScrDyn *)wp, method, args, argc, what);
+    }
+  }
   if (recv->kind == SCR_DYN_PROXY) {
     ScrStr *k = scr_str_new(method, strlen(method));
     ScrDyn *r = scr_dyn_proxy_invoke(recv, k, args, argc, what);

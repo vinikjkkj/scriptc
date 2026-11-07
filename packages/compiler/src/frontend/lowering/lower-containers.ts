@@ -11832,7 +11832,9 @@ function dynRecvThrows(dRef: IrExpr, mRef: IrExpr, fullRef: IrExpr, loc: SrcLoc)
     const name = "%dyn.recvstr";
     L.arrHofHelpers.set(key, name);
     const ref = (localId: string, type: IrType): IrExpr => ({ kind: "varRef", localId, type, loc });
-    const d = ref("d.0", DYN);
+    const d0 = ref("d.0", DYN);
+    // A String wrapper object (Object("s")) binds its primitive as `this`: unwrap before the string test.
+    const d: IrExpr = { kind: "libCall", fn: "dyn.unwrapPrim", args: [d0], type: DYN, loc };
     const body: IrStmt[] = [
       {
         kind: "if",
@@ -11841,7 +11843,7 @@ function dynRecvThrows(dRef: IrExpr, mRef: IrExpr, fullRef: IrExpr, loc: SrcLoc)
         else_: null,
         loc,
       },
-      ...dynRecvThrows(d, ref("m.0", STRING), ref("full.0", STRING), loc),
+      ...dynRecvThrows(d0, ref("m.0", STRING), ref("full.0", STRING), loc),
     ];
     L.liftedFns.push({
       name,

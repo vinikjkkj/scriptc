@@ -1510,6 +1510,19 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       return out;
     }
     case SCR_DYN_OBJ: {
+      /* A primitive wrapper object prints as `[String: 'ab']`, `[Number: 5]`, `[Boolean: false]`, `[BigInt: 1n]`. */
+      {
+        const ScrDyn *wp = scr_dyn_wrapper_prim(d);
+        if (wp != NULL) {
+          ScrStr *inner = scr_insp_dyn((ScrDyn *)wp, recurse, depth);
+          InspBuf wb = {0};
+          ib_cstr(&wb, wp->kind == SCR_DYN_STR ? "[String: " : wp->kind == SCR_DYN_NUM ? "[Number: " : wp->kind == SCR_DYN_BOOL ? "[Boolean: " : "[BigInt: ");
+          ib_str(&wb, inner);
+          ib_char(&wb, ']');
+          scr_str_release(inner);
+          return ib_take(&wb);
+        }
+      }
       /* Node's circular check comes first, before the empty and depth answers:
        * a member that is an ancestor on the stack (a self-issued certificate's
        * issuerCertificate) renders [Circular *N], and the ancestor gets <ref *N>. */
