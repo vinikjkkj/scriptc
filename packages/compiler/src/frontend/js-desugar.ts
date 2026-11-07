@@ -1436,6 +1436,9 @@ function chainedPropertyAssignEdits(fileName: string, text: string): string | nu
           if (!ts.isPropertyAccessExpression(inner.left) || !isPlainPropertyPath(inner.left)) continue;
           if (!isPlainPropertyPath(outer.left)) continue;
           const path = inner.left.getText(sf);
+          // `exports = module.exports = X` is the whole-export replacement spelling the export recognizers read as ONE statement (program.ts
+          // exportsRebindInnerOf); splitting it would hide it from them. The prefilter above is an optimization, so the answer must not depend on it.
+          if (path === "module.exports" && ts.isIdentifier(outer.left) && outer.left.text === "exports") continue;
           edits.push({
             start: st.getStart(sf),
             end: st.getEnd(),
