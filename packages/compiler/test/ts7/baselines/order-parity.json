@@ -13727,6 +13727,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24631-widened-return-call-bound-to-const-let-var.js": {
+   "order": [
+    "<repo>/tests/corpus/24631-widened-return-call-bound-to-const-let-var.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24632-widened-return-passthrough-and-untyped-arguments.js": {
+   "order": [
+    "<repo>/tests/corpus/24632-widened-return-passthrough-and-untyped-arguments.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2464-qs-require-forms.cjs": {
    "order": [
     "<repo>/tests/corpus/2464-qs-require-forms.cjs"
@@ -25146,6 +25158,18 @@
   "<repo>/tests/diagnostics/webcrypto-flow-unawaited-importkey.cjs": {
    "order": [
     "<repo>/tests/diagnostics/webcrypto-flow-unawaited-importkey.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/widened-return-class-field.js": {
+   "order": [
+    "<repo>/tests/diagnostics/widened-return-class-field.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/widened-return-typed-slots.js": {
+   "order": [
+    "<repo>/tests/diagnostics/widened-return-typed-slots.js"
    ],
    "diags": []
   },
