@@ -4748,7 +4748,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     // the chain lowering's re-entrant dispatch from looping.
     if (
       (expr.questionDotToken && !L.chainHandled.has(expr)) ||
-      (ts.isPropertyAccessExpression(expr.expression) &&
+      ((ts.isPropertyAccessExpression(expr.expression) || ts.isElementAccessExpression(expr.expression)) &&
         expr.expression.questionDotToken &&
         !L.chainHandled.has(expr.expression))
     ) {
