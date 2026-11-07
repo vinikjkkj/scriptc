@@ -11248,6 +11248,7 @@ void *scr_abort_signal_retain_v(void *p);
 void scr_abort_signal_release_v(void *p);
 void scr_abort_signal_trace_v(void *p, ScrTraceVisit visit, void *ctx);
 bool scr_abort_signal_aborted(const ScrAbortSignal *s);
+void scr_abort_signal_throw_if_aborted(const ScrAbortSignal *s); /* throws signal.reason when aborted */
 ScrDyn *scr_abort_signal_reason(const ScrAbortSignal *s); /* +1 */
 /* cb MOVES IN. A repeat of the same callback pointer is NOT a second
  * listener (EventTarget keys on (type, callback, capture)) and releases

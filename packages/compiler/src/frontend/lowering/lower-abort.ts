@@ -28,7 +28,7 @@ import { locOf } from "../program.js";
 import { ABORTCONTROLLER_T, ABORTSIGNAL_T, BOOL, DYN, IrExpr, SrcLoc, VOID } from "../../ir/nodes.js";
 
 const SIGNAL_HINT =
-  "aborted, reason, addEventListener('abort', fn, { once }) and " +
+  "aborted, reason, throwIfAborted(), addEventListener('abort', fn, { once }) and " +
   "removeEventListener('abort', fn) are the supported AbortSignal members";
 const CONTROLLER_HINT = "signal and abort(reason?) are the supported AbortController members";
 
@@ -226,6 +226,13 @@ export function lowerAbortMethodCall(
         : { kind: "libCall", fn: "abort.abortReason", args: [receiver, reason], type: VOID, loc };
     }
     L.noLowering(`AbortController.${name}`, call, CONTROLLER_HINT, L.checker.getSymbolAtLocation(access.name));
+  }
+  if (name === "throwIfAborted") {
+    if (call.arguments.length !== 0) {
+      L.noLowering("AbortSignal.throwIfAborted with arguments", call, "throwIfAborted() takes none");
+    }
+    const receiver = L.lowerExpr(access.expression);
+    return { kind: "libCall", fn: "abort.throwIfAborted", args: [receiver], type: VOID, loc };
   }
   if (name === "addEventListener") {
     requireAbortType(L, call, call.arguments[0], "AbortSignal.addEventListener");

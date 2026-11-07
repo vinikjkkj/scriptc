@@ -480,6 +480,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // null leaves it unchecked, exactly like fs.watchCb's callback.
   "abort.on": { argTypes: [ABORTSIGNAL_T, null, BOOL], result: VOID },
   "abort.off": { argTypes: [ABORTSIGNAL_T, null], result: VOID },
+  "abort.throwIfAborted": { argTypes: [ABORTSIGNAL_T], result: VOID },
   // The Event surface (scr_event.c). onEv's listener slot is the program's
   // own (event: Event) => void closure type (null leaves it unchecked,
   // like abort.on); its last argument is Node's kResistStopPropagation.
