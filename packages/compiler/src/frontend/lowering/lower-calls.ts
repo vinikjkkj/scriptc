@@ -3755,7 +3755,11 @@ export function islandPrimitiveExit(L: Lowerer, call: ts.CallExpression, result:
     // thunk has a real chance — an argument node lowered twice would push a
     // dead lifted function for a lambda.
     const cbT = cbLowered.type;
+    // A SPREAD among the trailing arguments (`process.nextTick(cb, ...results[i])`): the arity is a run-time fact, so only the dyn thunk
+    // (a dynCall whose spread operands flatten at fire time) can carry it.
+    const spreadAt = argNodes.map((a, i) => (ts.isSpreadElement(a) ? i : -1)).filter((i) => i >= 0);
     if (
+      spreadAt.length === 0 &&
       cbT.kind === "func" && cbT.rest !== true &&
       cbT.params.length <= argNodes.length &&
       !cbT.params.some((p) => p.kind === "dyn" || isUnitType(p))
@@ -3783,10 +3787,10 @@ export function islandPrimitiveExit(L: Lowerer, call: ts.CallExpression, result:
         "the callback must be a boxable function (or wrap it: () => cb(...))",
       );
     }
-    const args = argNodes.map((a) => L.lowerExprExpecting(a, DYN));
+    const args = argNodes.map((a) => L.lowerExprExpecting(ts.isSpreadElement(a) ? a.expression : a, DYN));
     const n = args.length;
     const toT: IrType = { kind: "func", params: [], ret: VOID };
-    const key = `timer.argsthunk:${n}`;
+    const key = `timer.argsthunk:${n}:${spreadAt.join(",")}`;
     const existing = L.arrHofHelpers.get(key);
     const name = existing ?? `%timer.argsthunk.${L.arrHofHelpers.size}`;
     if (!existing) {
@@ -3808,6 +3812,7 @@ export function islandPrimitiveExit(L: Lowerer, call: ts.CallExpression, result:
               callee: { kind: "varRef", localId: "f.0", type: DYN, loc },
               calleeName: "callback",
               args: args.map((_, i) => ({ kind: "varRef", localId: `a${i}.0`, type: DYN, loc }) as IrExpr),
+              ...(spreadAt.length > 0 ? { spreads: spreadAt.map((i) => ({ arg: i, what: argNodes[i]!.getText() })) } : {}),
               type: DYN,
               loc,
             },
