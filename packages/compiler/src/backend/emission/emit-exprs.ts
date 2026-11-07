@@ -8727,6 +8727,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_dyn_to_object(${arg(0)})`);
           case "dyn.unwrapPrim":
             return finish(`scr_dyn_unwrap_prim(${arg(0)})`);
+          case "dyn.objectCtor":
+            return finish(`scr_dyn_object_ctor_value()`);
           case "insp.optDepth":
             return finish(`scr_insp_opt_depth()`);
           case "insp.shown":

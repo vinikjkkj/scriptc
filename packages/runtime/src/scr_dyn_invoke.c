@@ -2369,6 +2369,17 @@ ScrDyn *scr_dyn_invoke_pack(ScrDyn *recv, ScrDyn *pack, const ScrStr *method, co
 }
 
 ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, size_t argc, const char *what) {
+  if (recv->kind == SCR_DYN_OBJ && recv->rc == SIZE_MAX) {
+    /* An intrinsic prototype value (Object.getPrototypeOf(x)): its builtin members are native function values that bind it. */
+    ScrDyn *bi = scr_dyn_intrinsic_member(recv, method, strlen(method));
+    if (bi != NULL) {
+      scr_dyn_this_push_dyn(recv);
+      ScrDyn *r = scr_dyn_call(bi, args, argc, what);
+      scr_dyn_this_pop();
+      scr_dyn_release(bi);
+      return r;
+    }
+  }
   {
     /* A primitive wrapper object (Object("s")): its prototype methods bind the primitive, and valueOf answers it. A member the
      * program stored on the wrapper itself keeps winning (the own lookup runs first below), so only an absent name delegates. */

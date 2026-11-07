@@ -6235,6 +6235,8 @@ ScrDyn *scr_dyn_get_prototype_of(const ScrDyn *d);
 ScrDyn *scr_dyn_to_object(const ScrDyn *d);
 ScrDyn *scr_dyn_wrapper_new(const ScrDyn *prim);
 ScrDyn *scr_dyn_unwrap_prim(const ScrDyn *d);
+ScrDyn *scr_dyn_object_ctor_value(void);
+ScrDyn *scr_dyn_intrinsic_member(const ScrDyn *recv, const char *key, size_t key_len);
 const ScrDyn *scr_dyn_wrapper_prim(const ScrDyn *d);
 /* The two above chosen at RUN TIME — the record->dyn walker's constructor
  * for a shape whose null-prototype-ness is a per-INSTANCE fact. */

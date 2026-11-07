@@ -6612,6 +6612,7 @@ export type IrLibFn =
   | "dyn.objectPrototype"
   | "dyn.toObject"
   | "dyn.unwrapPrim"
+  | "dyn.objectCtor"
   | "insp.optDepth"
   | "insp.shown"
   | "insp.rem"

@@ -1819,6 +1819,18 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       L.unsupported("SC1090", expr, "typeof expressions on statically-typed values");
     }
     if (ts.isIdentifier(expr)) {
+      // The global `Object` as an operand of an equality test (`proto.constructor === Object`): the constructor function value
+      // every plain object's prototype names (one native function box, so the comparison is identity).
+      if (
+        expr.text === "Object" && !L.dynamic && ts.isBinaryExpression(expr.parent) &&
+        (expr.parent.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken ||
+          expr.parent.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsEqualsToken ||
+          expr.parent.operatorToken.kind === ts.SyntaxKind.EqualsEqualsToken ||
+          expr.parent.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsToken) &&
+        L.isStdlibGlobal(expr, "Object")
+      ) {
+        return { kind: "libCall", fn: "dyn.objectCtor", args: [], type: DYN, loc };
+      }
       // A NAMED import of a TS `export =` module read by a CJS-run importer:
       // every reference is the exported value's member (lower-expando.ts).
       const namedRead = exportEqualsNamedMemberRead(L, expr);
