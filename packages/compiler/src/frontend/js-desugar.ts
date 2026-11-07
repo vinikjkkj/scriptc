@@ -1410,6 +1410,17 @@ function chainedPropertyAssignEdits(fileName: string, text: string): string | nu
           const flags = st.declarationList.flags;
           const kw = flags & ts.NodeFlags.Const ? "const" : flags & ts.NodeFlags.Let ? "let" : "var";
           const path = inner.left.getText(sf);
+          // `var f = module.exports = function f() {...}` (cluster-key-slot): re-reading `module.exports` would need the module
+          // object as a value, so the NAMED function binds first and the export takes the binding. Only a named function
+          // expression: it keeps its own name either way, where an anonymous one would be named by the binding.
+          if (path === "module.exports" && ts.isFunctionExpression(inner.right) && inner.right.name !== undefined) {
+            edits.push({
+              start: st.getStart(sf),
+              end: st.getEnd(),
+              text: `${kw} ${d.name.text} = ${inner.right.getText(sf)}; ${path} = ${d.name.text};`,
+            });
+            continue;
+          }
           edits.push({
             start: st.getStart(sf),
             end: st.getEnd(),
