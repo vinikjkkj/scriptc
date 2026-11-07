@@ -26451,7 +26451,13 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
       }
     }
     if (joinArms.length === 0) return null;
+    // Answers that are checked-dynamic ('unknown') on some arms and the unit-only `null | undefined` union on the others
+    // (ioredis' `{ address, port: undefined } | { address, port: unknown }`): the join IS dyn, and each arm's answer boxes
+    // into it, undefined and null included.
+    const unitOnly = (t: IrType): boolean => t.kind === "union" && L.unions.get(t.unionId)?.arms.every((x) => isUnitType(x)) === true;
+    const dynJoin = recordAnswers.some((t) => t.kind === "dyn") && recordAnswers.every((t) => t.kind === "dyn" || unitOnly(t));
     if (
+      !dynJoin &&
       joinArms.length > 1 &&
       joinArms.some((a) => a.kind === "map" || a.kind === "dyn" || a.kind === "jsval" || a.kind === "generator" || a.kind === "caught")
     ) {
@@ -26459,15 +26465,15 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
     }
     joinArms.sort((a, b) => (typeKey(a) < typeKey(b) ? -1 : 1));
     const join: IrType =
-      joinArms.length === 1 ? joinArms[0]! : { kind: "union", unionId: L.unions.intern(joinArms) };
+      dynJoin ? DYN : joinArms.length === 1 ? joinArms[0]! : { kind: "union", unionId: L.unions.intern(joinArms) };
     // A single-arm join is unionDisc's job and it already declined (a unit
     // field, a void field); nothing here improves on that. With a unit arm
     // the single answer is the whole join, so that case is kept.
-    if (join.kind !== "union" && unitArms === 0) return null;
+    if (join.kind !== "union" && unitArms === 0 && !dynJoin) return null;
     const loc = locOf(expr);
     // Plan every conversion BEFORE interning, so a later arm that cannot
     // convert never leaves a half-built helper behind.
-    const plans = recordAnswers.map((t) => (typeEquals(t, join) ? { how: "copy" as const } : L.widthLiftPlan(t, join)));
+    const plans = recordAnswers.map((t) => (typeEquals(t, join) || dynJoin ? { how: "copy" as const } : L.widthLiftPlan(t, join)));
     if (plans.some((pl) => pl === null)) return null;
     const key = `ufield:${fromId}:${field}:${typeKey(join)}`;
     let name = L.widthHelpers.get(key);
@@ -26502,7 +26508,7 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
                   type: recordAnswers[r]!,
                   loc,
                 };
-          answer = L.applyWidthLift(plans[r]!, read, join, loc);
+          answer = dynJoin && read.type.kind !== "dyn" ? L.coerceToExpected(read, DYN) : L.applyWidthLift(plans[r]!, read, join, loc);
         }
         body.push({
           kind: "if",
