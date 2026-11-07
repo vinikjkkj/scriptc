@@ -5797,6 +5797,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       // Instance-level overrides assigned OUTSIDE the class (`x.m = function`, lower-instoverride.ts): the same slot a
       // constructor-assigned override takes, so every call through the class family tests it first.
       const shadowLate = new Set<string>();
+      const lazySlots = new Set<string>(base?.def.lazyCycle ?? []);
       for (const name of ownOverInheritedSlot) {
         // an own method over an inherited slot tests that slot first (the body's prologue, applyInstanceOverrides)
         shadowLate.add(name);
@@ -5821,6 +5822,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           collectedFields.add(name);
           absentTrackedFields.add(name);
           shadowLate.add(name);
+          lazySlots.add(name);
         } else {
           // Only inherited from a base: the constructor-assigned slot's route (a synthesized `%C.m` picks the slot, else the base's body).
           const shBase = base ? L.findMethodOn(base, name) : null;
@@ -5880,6 +5882,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           ...(methods.size > 0 ? { methods: [...methods.keys()] } : {}),
           ...(absentTrackedFields.size > 0 ? { absentFields: [...absentTrackedFields] } : {}),
           ...(absentInitFields.size > 0 ? { absentInit: [...absentInitFields] } : {}),
+          ...(lazySlots.size > 0 ? { lazyCycle: [...lazySlots] } : {}),
           ...(abstractClass ? { abstract: true as const } : {}),
           ...((): { abstractMethods?: string[] } => {
             const am = [...methods.entries()].filter(([, s]) => s.abstract === true).map(([n]) => n);

@@ -1801,6 +1801,10 @@ export interface IrClassDef {
    * property of that name until a write runs, and an own write of undefined is a real own undefined. Prototype data under the
    * name (`C.prototype.name = v`) is what a read of an absent field answers. Flattened over the base chain. */
   absentInit?: string[];
+  /** Instance-override slot fields (inherited ones included): undefined-armed function unions the only cycle-capable edges of the
+   * class. A class whose every traced field is listed here buffers a release as a possible cycle root only while one of those
+   * slots holds a function (an instance with an empty slot cannot be on a cycle through it). */
+  lazyCycle?: string[];
   /** The STATIC side of a class a dyn box can hold, as module functions with
    * no receiver: static methods (`name` -> the `%C.static:name` function),
    * static getters and static field reads (`get:name` -> the function that
