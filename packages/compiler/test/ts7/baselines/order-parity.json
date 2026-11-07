@@ -13792,6 +13792,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24509-an-emitter-method-called-through-a-record-view-of-a-class-instance-keeps-its-receiver.ts": {
+   "order": [
+    "<repo>/tests/corpus/24509-an-emitter-method-called-through-a-record-view-of-a-class-instance-keeps-its-receiver.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2451-private-fields.ts": {
    "order": [
     "<repo>/tests/corpus/2451-private-fields.ts"
