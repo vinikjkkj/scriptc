@@ -2011,9 +2011,29 @@ ScrDyn *scr_dyn_objinst_miss(ScrDyn *d, const ScrStr *key) {
     }
     return scr_dyn_error_member_get(d, key);
   }
-  if (scr_dyn_objinst_class_of(d)->opaque) {
-    scr_dyn_objinst_fence(d, "a property read");
-    return NULL;
+  {
+    const ScrDynClass *oc = scr_dyn_objinst_class_of(d);
+    /* An opaque class that names what it skipped (oc->skipped) is only unsure about THOSE names: any other absent key reads undefined. */
+    bool named_skip = false;
+    if (oc->opaque && oc->skipped != NULL) {
+      size_t kl = key->len;
+      char *probe = malloc(kl + 3);
+      if (probe != NULL) {
+        probe[0] = ',';
+        memcpy(probe + 1, key->data, kl);
+        probe[kl + 1] = ',';
+        probe[kl + 2] = 0;
+        named_skip = strstr(oc->skipped, probe) != NULL;
+        free(probe);
+      } else {
+        named_skip = true;
+      }
+      if (!named_skip) return scr_dyn_retain(scr_dyn_undefined());
+    }
+    if (oc->opaque) {
+      scr_dyn_objinst_fence(d, "a property read");
+      return NULL;
+    }
   }
   return scr_dyn_retain(scr_dyn_undefined());
 }

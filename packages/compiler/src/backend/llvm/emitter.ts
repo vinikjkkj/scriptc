@@ -2803,7 +2803,7 @@ class LlEmitter {
       // always-linked dyn core a descriptor whose `members` read runs off
       // the end of the object — measured, as an access violation on the
       // first boxed method call.
-      `%ScrDynClass = type { ptr, i64, i64, i8, ptr, ptr, ptr, i64, i8, i8, i8, ptr, i64, i8, ptr, i8, i8, i64, i64, i64 }`,
+      `%ScrDynClass = type { ptr, i64, i64, i8, ptr, ptr, ptr, i64, i8, i8, i8, ptr, i64, i8, ptr, i8, i8, i64, i64, i64, ptr }`,
       // One row of a class's instance MEMBER TABLE
       // { name, len, get, call, enumerable } (ScrDynClassMember in
       // scr_runtime.h) — what `x.get()` and `x.v` read through once the
@@ -4177,7 +4177,7 @@ class LlEmitter {
       (id: string) => this.recordsById.get(id),
       (id: string) => this.unionsById.get(id),
     ).opaque;
-    const { opaque, errorRooted } = dynMemberTable(
+    const { opaque, errorRooted, skipped } = dynMemberTable(
       meta,
       this.fnByName,
       (id: string) => this.recordsById.get(id),
@@ -4198,7 +4198,7 @@ class LlEmitter {
       `ptr ${statics === null ? "null" : `@${statics.sym}`}, i64 ${statics === null ? 0 : statics.count}, i8 ${staticsOpaque ? 1 : 0}, ` +
       `ptr ${dynDescBase(this.classMeta, meta) === null ? "null" : this.cstr(dynClassDisplayName(dynDescBase(this.classMeta, meta)!.def))}, i8 ${dynRuntimeRoot(meta)}, ` +
       `i8 ${this.tracedShapes.has(`object:${className}`) ? 1 : 0}, ` +
-      `i64 ${this.ordNordOf(className)}, i64 ${this.ordOffsetOf(className)}, i64 ${this.eeOffsetOf(className)} }`;
+      `i64 ${this.ordNordOf(className)}, i64 ${this.ordOffsetOf(className)}, i64 ${this.eeOffsetOf(className)}, ptr ${skipped === null ? "null" : this.cstr(skipped)} }`;
     this.dynClassDescSyms.set(className, { sym, body });
     // Subclass descriptors join the registry (see the C twin): a base-typed
     // box can hold a derived instance whose own member table must resolve.
