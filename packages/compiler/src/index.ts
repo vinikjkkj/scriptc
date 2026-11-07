@@ -558,14 +558,36 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
 
   const finalLoad = load;
   let pinnedLoad: (LoadResult & { dispose: () => void }) | null = null;
+  // What the frontend answers about the FIRST load (entry text, exports, source texts). A reload (pin, twin) frees that load before
+  // the next program loads, so the answers are taken first and memoised: the peak holds one program, not up to three.
+  const firstAnswers: { entryText?: string; entryExports?: ReturnType<typeof entryFunctionExports>; sourceTexts?: Map<string, string> } = {};
+  const answerEntryText = (): string => (firstAnswers.entryText ??= finalLoad.entry.text);
+  const answerEntryExports = (): ReturnType<typeof entryFunctionExports> => (firstAnswers.entryExports ??= entryFunctionExports(finalLoad.entry));
+  const answerSourceTexts = (): Map<string, string> =>
+    (firstAnswers.sourceTexts ??= new Map<string, string>(
+      [finalLoad.entry, ...finalLoad.moduleOrder, ...finalLoad.program.getSourceFiles().filter((sf) => !sf.isDeclarationFile)].map(
+        (sf) => [sf.fileName, sf.text],
+      ),
+    ));
+  let finalFreed = false;
+  const freeFinalLoad = (): void => {
+    if (finalFreed) return;
+    answerEntryText();
+    answerEntryExports();
+    answerSourceTexts();
+    finalFreed = true;
+    finalLoad.dispose();
+  };
   const lowerPinned = (opts: LowerOptions): { result: LowerResult; pins?: NonNullable<LowerResult["pinReload"]> } => {
       const first = lowerToIr(finalLoad.program, finalLoad.entry, finalLoad.moduleOrder, { ...opts, startupCrash: finalLoad.startupCrash ?? null });
       if (first.pinReload === undefined) return { result: first };
+      if (process.env["SCRIPTC_TWIN_WHY"] !== undefined) process.stderr.write("[pin] reload\n");
       // Class fields untyped code writes another type (DynPins): load the
       // program again with those initializers cast to `any`, and lower THAT
       // (its first pass is final: noPinReload). The first load stays the
       // one preflight, the contract and the identity hashes read.
       pinnedLoad?.dispose();
+      freeFinalLoad();
       pinnedLoad = loadProgram(entryPath, { npmStatic: effective, textEdits: first.pinReload });
       checkPreflight(pinnedLoad);
       const second = lowerToIr(pinnedLoad.program, pinnedLoad.entry, pinnedLoad.moduleOrder, {
@@ -603,8 +625,8 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
 
   return {
     preflight,
-    entryText: () => finalLoad.entry.text,
-    entryExports: () => entryFunctionExports(finalLoad.entry),
+    entryText: answerEntryText,
+    entryExports: answerEntryExports,
     // The contract scans the PROGRAM's source files, not the runtime
     // module order: a type-only module (nothing but exported types) has no
     // runtime edge and never joins moduleOrder, yet its declarations are
@@ -627,12 +649,7 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
     // are in moduleOrder like any program module, so their bytes join the
     // library identity hashes (source_hash/build_id) — compiled code is
     // identity, whatever directory it came from.
-    sourceTexts: () =>
-      new Map<string, string>(
-        [finalLoad.entry, ...finalLoad.moduleOrder, ...finalLoad.program.getSourceFiles().filter((sf) => !sf.isDeclarationFile)].map(
-          (sf) => [sf.fileName, sf.text],
-        ),
-      ),
+    sourceTexts: answerSourceTexts,
     lower: (opts) => {
       const done = lowerPinned(opts);
       if (done.result.twinReload === undefined) return done.result;
@@ -645,6 +662,10 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
       if (process.env["SCRIPTC_TWIN_WHY"] !== undefined) process.stderr.write(`[twin] reload: ${[...edits.values()].reduce((n, l) => n + l.filter((e) => e.text.startsWith("/*@sctwin")).length, 0)} listener(s)\n`);
       let twinLoad: (LoadResult & { dispose: () => void }) | null = null;
       try {
+        // the first and the pinned programs are not read again: free them before the third loads
+        pinnedLoad?.dispose();
+        pinnedLoad = null;
+        freeFinalLoad();
         twinLoad = loadProgram(entryPath, { npmStatic: effective, ...(done.pins !== undefined ? { textEdits: done.pins } : {}), twinEdits: edits });
         if (checkPreflight(twinLoad).length > 0) return keep;
         const again = lowerToIr(twinLoad.program, twinLoad.entry, twinLoad.moduleOrder, {
@@ -680,7 +701,11 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
     npmImportSites: npmSites,
     dispose: () => {
       pinnedLoad?.dispose();
-      finalLoad.dispose();
+      pinnedLoad = null;
+      if (!finalFreed) {
+        finalFreed = true;
+        finalLoad.dispose();
+      }
     },
   };
 }
