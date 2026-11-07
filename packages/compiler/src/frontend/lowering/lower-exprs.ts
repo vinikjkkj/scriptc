@@ -25329,7 +25329,9 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
       return lowerUnboundSubclassMethodValue(L, expr, info);
     }
     if (found.sig.abstract === true) return null;
-    if (found.sig.params.some((p) => (p.mode !== "required" && p.mode !== "omittable"))) return null;
+    // A variadic (`arguments`-reading) method is a value too: its thunk is the rest-marked function whose pack rides the call.
+    const variadicOnly = found.sig.params.some((p) => p.mode === "dynRest") && found.sig.params.every((p) => p.mode === "required" || p.mode === "omittable" || p.mode === "dynRest");
+    if (found.sig.params.some((p) => (p.mode !== "required" && p.mode !== "omittable")) && !(variadicOnly && !L.overrideBelow(info, expr.name.text))) return null;
     // `C.prototype.m` is C's own function, never an override below it.
     const viaPrototype = ts.isPropertyAccessExpression(expr.expression) && expr.expression.name.text === "prototype";
     const loc = locOf(expr);
@@ -25583,12 +25585,15 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
     const name = `%unbound.${info.def.name}.${method}${virtual ? "" : "%direct"}`;
     const params = found.sig.params.map((p) => p.type);
     const irParams: IrParam[] = params.map((t, i) => ({ localId: `p.${i}`, name: `p${i}`, type: t }));
-    const fnT = funcOf(params, found.sig.ret);
+    const hasPack = found.sig.params.some((p) => p.mode === "dynRest");
+    const fnT: IrType = hasPack
+      ? { ...(funcOf(found.sig.params.filter((p) => p.mode !== "dynRest").map((p) => p.type), found.sig.ret) as IrType & { kind: "func" }), rest: true }
+      : funcOf(params, found.sig.ret);
     if (virtual) L.noteVirtualEdge(info, method);
     else L.noteEdge(`%${found.declarer.def.name}.${method}`);
     // A direct (non-virtual) thunk calls the declarer's DETACHED variant with the raw receiver, so
     // the receiver is checked at each `this` access. Null when no variant exists: keep the up-front check.
-    const variant = virtual ? null : detachedMethodVariant(L, found.declarer, method);
+    const variant = virtual || hasPack ? null : detachedMethodVariant(L, found.declarer, method);
     if (variant !== null && !L.liftedFns.some((f) => f.name === name)) {
       const raw: IrExpr = { kind: "libCall", fn: "dyn.this", args: [], type: DYN, loc };
       const args: IrExpr[] = irParams.map((p) => ({ kind: "varRef" as const, localId: p.localId, type: p.type, loc }));
