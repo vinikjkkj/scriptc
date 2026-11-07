@@ -732,6 +732,11 @@ import { lowerProvenRuntimeRequire } from "./lower-require-dead.js";
       table: CRYPTO_CONSTANTS,
       hint: "the table bakes Node v24's crypto.constants members as literals — this name is not one of them",
     },
+    // Node v24.15.0 on 64-bit: buffer.constants (the runtime's own `constants` object holds the same two numbers).
+    buffer: {
+      table: { MAX_LENGTH: 9007199254740991, MAX_STRING_LENGTH: 536870888 },
+      hint: "the table bakes Node v24's buffer.constants members as literals — this name is not one of them",
+    },
   };
 
 /** The module whose baked-constants OBJECT `node` denotes, or null — any
