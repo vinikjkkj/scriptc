@@ -13811,6 +13811,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24641-freeze-of-a-fresh-array-method-result.js": {
+   "order": [
+    "<repo>/tests/corpus/24641-freeze-of-a-fresh-array-method-result.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/24642-accessor-descriptors-on-function-and-class-values.js": {
    "order": [
     "<repo>/tests/corpus/24642-accessor-descriptors-on-function-and-class-values.js"
@@ -13856,6 +13862,18 @@
   "<repo>/tests/corpus/24649-frozen-array-writes-in-strict-code.js": {
    "order": [
     "<repo>/tests/corpus/24649-frozen-array-writes-in-strict-code.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24650-frozen-dyn-array-writes-in-sloppy-code.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24650-frozen-dyn-array-writes-in-sloppy-code.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24651-frozen-dyn-array-writes-in-strict-code.js": {
+   "order": [
+    "<repo>/tests/corpus/24651-frozen-dyn-array-writes-in-strict-code.js"
    ],
    "diags": []
   },
