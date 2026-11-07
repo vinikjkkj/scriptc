@@ -167,7 +167,7 @@ import { lowerComptime, comptimeBakeable, rejectComptimeCaptures, comptimeValueT
 import { lowerDeleteValue, lowerElemValuePosition, lowerStmts, noteBlockedBindings, isBlockedBinding, lowerScopedBlock, predeclareForwardCapture, probeBindWhy, predeclareForwardFnDecl, predeclareForwardVar, rejectJumpCrossingFinally, lowerStmt, lowerVarStatement, lowerDestructuringDecl, lowerDestructuringAssignParts, lowerBindingPattern, lowerJsvalBindingPattern, checkBindingElement, bindPatternTarget, lowerVarDeclList, lowerVarDecl, lowerSwitch, lowerTry, lowerExprStatement, lowerForOf, lowerForStatement } from "./lower-stmts.js";
 import { unboundMethodThunk, recordKeyResultOk, narrowBridgeDyn, FieldTarget, bufferValueIndexOf, bufferValueOf, lowerDynObjectLiteral, lowerDynSpreadObjectLiteral, lowerExpr, maybeNarrow, lowerUnitComparison, lowerNullishCoalesce, lowerOptionalChain, finishOptionalChain, lowerCondition, ensureBool, requireTruthyUnion, eqComparableUnion, lowerIntrinsicProperty, lowerArrayLiteral, lowerObjectLiteral, lowerShorthandValue, rejectThisInObjectMethod, lowerElementAccess, lowerElementWrite, lowerRecordKeyRead, ensureString, numberConvAtDynWidth, lowerTemplate, lowerAsExpression, lowerPrefixUnary, lowerBinary, lowerCaughtTypeofTest, caughtRead, caughtLocalOf, caughtToString, lowerInstanceOf, lowerRegexLiteral, lowerFieldRead, lowerUnionProperty, fieldTarget, fieldGetExpr, fieldSetStmt, lowerFieldCompound, uniqueSymbolKeyOf, foldedStringKeyOf } from "./lower-exprs.js";
 import { assertExpandoAccounting, expandoCounters, type ExpandoBind, type ExpandoMember } from "./lower-expando.js";
-import { lowerRecordFieldCall, lowerObjectMethodCall, classHasOwnValueOf, classToStringDispatch, throwOnlyValueType } from "./lower-calls.js";
+import { isWidenedValueNode, lowerRecordFieldCall, lowerObjectMethodCall, classHasOwnValueOf, classToStringDispatch, throwOnlyValueType } from "./lower-calls.js";
 import { fenceCrossBlockNsRef, nsPathPrefix } from "./lower-namespaces.js";
 import { dtsWitnessClassOf } from "./lower-twin-witness.js";
 import { pairedProtoInstanceType } from "./proto-class-consume.js";
@@ -15988,6 +15988,20 @@ export class Lowerer {
    * lowering goes through here (via lowerExprExpecting) or calls this
    * directly when the expression was already lowered. */
   coerceInto(node: ts.Node, expr: IrExpr, expected: IrType): IrExpr {
+    // A call whose function's JSDoc scalar return claim the body contradicts (jsWidenedReturnDecl) yields the scalar OR undefined. A
+    // binding or return it flows into is retyped to hold that; a checker-typed scalar slot (a typed parameter, a field) cannot, and
+    // would throw at run time where Node carries the undefined, so that flow is refused here instead.
+    if (
+      (expected.kind === "f64" || expected.kind === "string" || expected.kind === "bool") &&
+      (expr.type.kind === "union" || expr.type.kind === "dyn") && isWidenedValueNode(this, node)
+    ) {
+      this.unsupported(
+        "SC1100",
+        node,
+        `a value from a call whose function can return undefined (its JSDoc return claim '${this.fmt(expected)}' is contradicted by a bare return) flowing into a '${this.fmt(expected)}' slot ` +
+          `(Node carries the undefined; the slot cannot) - bind the result first (const r = f(...)) or widen the receiving declaration`,
+      );
+    }
     let e = this.coerceToExpected(expr, expected);
     // An 'any' value PROVABLY null/undefined (the unit literal itself, or
     // a read of a binding nothing ever assigns a non-unit value) flowing
@@ -16666,6 +16680,16 @@ export class Lowerer {
         ],
         loc,
       };
+    }
+    // A value from a function whose JSDoc scalar claim the body contradicts (jsWidenedReturnDecl) returned through a checker-typed scalar
+    // return slot (an arrow bound to a `() => number`): the slot cannot carry Node's undefined, so the flow is refused, not trapped.
+    if ((expected.kind === "f64" || expected.kind === "string" || expected.kind === "bool") && isWidenedValueNode(this, node)) {
+      this.unsupported(
+        "SC1100",
+        node,
+        `a value from a call whose function can return undefined (its JSDoc return claim is contradicted by a bare return) returned through a '${this.fmt(expected)}' return slot ` +
+          `(Node carries the undefined; the slot cannot) - give the enclosing function a JSDoc return type that includes undefined`,
+      );
     }
     this.deferredReturn = null;
     const value = this.lowerReturnValue(node);

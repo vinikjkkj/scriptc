@@ -1415,7 +1415,73 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
     return throwOnlyJsMethodReturn(decl) === DYN ? L.checker.getUnknownType() : null;
   }
 
-/** Whether a function body holds a bare `return;` of its own (nested functions are their own bodies). */
+/** A JS function declaration whose scalar return claim (JSDoc `@return {Number}`) the body contradicts: it ends some path with a bare
+   * `return;`, or it passes through the result of another such function (`return parse(v)`). Its result is the scalar OR undefined. */
+  const widenedMemo = new Map<ts.Node, boolean>();
+  export function jsWidenedReturnDecl(L: Lowerer, decl: ts.SignatureDeclaration): boolean {
+    const known = widenedMemo.get(decl);
+    if (known !== undefined) return known;
+    widenedMemo.set(decl, false); // a recursive cycle reads false, then settles
+    const body = (decl as ts.FunctionLikeDeclaration).body;
+    let r = false;
+    // Function DECLARATIONS only: a lambda bound to a checker-typed slot keeps its checker return (and a widened value returned through it is refused).
+    if (ts.isFunctionDeclaration(decl) && isJsSourceFile(decl.getSourceFile()) && body !== undefined && ts.isBlock(body) && decl.asteriskToken === undefined) {
+      const sig = L.checker.getSignatureFromDeclaration(decl);
+      const rt = sig ? L.mapTypeOf(L.checker.getReturnTypeOfSignature(sig)) : null;
+      if (rt !== null && (rt.kind === "f64" || rt.kind === "string" || rt.kind === "bool")) {
+        r = hasBareReturn(body) || bodyReturnsWidenedCall(L, body);
+      }
+    }
+    widenedMemo.set(decl, r);
+    return r;
+  }
+
+  function bodyReturnsWidenedCall(L: Lowerer, body: ts.Node): boolean {
+    let found = false;
+    const walk = (n: ts.Node): void => {
+      if (found) return;
+      if (ts.isReturnStatement(n)) {
+        if (n.expression !== undefined && isWidenedValueNode(L, n.expression)) found = true;
+        return;
+      }
+      if (ts.isFunctionLike(n) || ts.isClassDeclaration(n) || ts.isClassExpression(n)) return;
+      ts.forEachChild(n, walk);
+    };
+    ts.forEachChild(body, walk);
+    return found;
+  }
+
+  /** `f(...)` (parens and casts stripped) where `f` names a JS function declaration with a widened return (jsWidenedReturnDecl). */
+  export function isWidenedCallNode(L: Lowerer, node: ts.Node): boolean {
+    let n: ts.Node = node;
+    while (ts.isParenthesizedExpression(n) || ts.isNonNullExpression(n) || ts.isAsExpression(n)) n = (n as ts.ParenthesizedExpression).expression;
+    if (!ts.isCallExpression(n) || !ts.isIdentifier(n.expression)) return false;
+    const sym = L.resolveValueSymbol(n.expression);
+    const d = sym ? L.checker.valueDeclarationOf(sym) : undefined;
+    return d !== undefined && ts.isFunctionDeclaration(d) && jsWidenedReturnDecl(L, d);
+  }
+
+/** A widened call, or a read of a binding that holds one (jsWidenedCallBinding): the value is the scalar OR undefined. */
+  export function isWidenedValueNode(L: Lowerer, node: ts.Node): boolean {
+    let n: ts.Node = node;
+    while (ts.isParenthesizedExpression(n) || ts.isNonNullExpression(n) || ts.isAsExpression(n)) n = (n as ts.ParenthesizedExpression).expression;
+    if (isWidenedCallNode(L, n)) return true;
+    if (!ts.isIdentifier(n)) return false;
+    const sym = L.resolveValueSymbol(n);
+    const d = sym ? L.checker.valueDeclarationOf(sym) : undefined;
+    return d !== undefined && ts.isVariableDeclaration(d) && jsWidenedCallBinding(L, d);
+  }
+
+    /** A JS binding (`const r = f()`, `let r = f()`, `var r = f()`) whose initializer is such a call and whose checker type is a scalar: the
+   * checker types it by the JSDoc claim, but the value may be undefined, so the slot is checked-dynamic (the widened-let rule). */
+  export function jsWidenedCallBinding(L: Lowerer, decl: ts.VariableDeclaration): boolean {
+    if (!ts.isIdentifier(decl.name) || decl.initializer === undefined || !isJsSourceFile(decl.getSourceFile())) return false;
+    const kind = L.mapTypeOf(L.typeOf(decl.name))?.kind;
+    if (kind !== "f64" && kind !== "string" && kind !== "bool") return false;
+    return isWidenedCallNode(L, decl.initializer);
+  }
+
+  /** Whether a function body holds a bare `return;` of its own (nested functions are their own bodies). */
   function hasBareReturn(body: ts.Node): boolean {
     let found = false;
     const walk = (n: ts.Node): void => {
@@ -1521,8 +1587,7 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
     // file every return type node is a JSDoc claim, never a TypeScript annotation.)
     if (
       returnType !== null && (returnType.kind === "f64" || returnType.kind === "string" || returnType.kind === "bool") &&
-      isJsSourceFile(decl.getSourceFile()) && (decl as ts.FunctionLikeDeclaration).body !== undefined &&
-      hasBareReturn((decl as ts.FunctionLikeDeclaration).body!)
+      jsWidenedReturnDecl(L, decl)
     ) {
       returnType = L.withUndefinedArm(returnType);
     }
@@ -10167,6 +10232,14 @@ export function reconcileOverloadMemberDyn(L: Lowerer, expr: ts.CallExpression, 
             body = value.kind === "unitLit" ? [] : [{ kind: "exprStmt", expr: value, loc: locOf(node.body!) }];
           }
         } else {
+          if ((bodyReturn.kind === "f64" || bodyReturn.kind === "string" || bodyReturn.kind === "bool") && isWidenedValueNode(L, bodyExpr)) {
+            L.unsupported(
+              "SC1100",
+              bodyExpr,
+              `a value from a call whose function can return undefined (its JSDoc return claim is contradicted by a bare return) returned through a '${L.fmt(bodyReturn)}' return slot ` +
+                `(Node carries the undefined; the slot cannot) - give the enclosing function a JSDoc return type that includes undefined`,
+            );
+          }
           let value = L.lowerExpr(bodyExpr);
           // The RETURN destination for recordKeyReadAtUndefinedArm. A concise
           // arrow body IS a return completion, so it takes the same rung the
@@ -14560,7 +14633,35 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverr
    * the string against number and throw. The dyn value is the truth; its
    * member and operator reads go through the dyn paths. */
   export function jsLetReadStaysDyn(L: Lowerer, node: ts.Node): boolean {
-    return widenedJsLetOf(L, node);
+    return widenedJsLetOf(L, node) || widenedCallBindingRead(L, node) || callOfWidenedLetReturner(L, node);
+  }
+
+/** A read of a binding that holds a widened call's result (jsWidenedCallBinding): the dyn value itself, as for a widened let. */
+  function widenedCallBindingRead(L: Lowerer, node: ts.Node): boolean {
+    let n: ts.Node = node;
+    while (ts.isParenthesizedExpression(n)) n = n.expression;
+    if (!ts.isIdentifier(n)) return false;
+    const sym = L.resolveValueSymbol(n);
+    const d = sym ? L.checker.valueDeclarationOf(sym) : undefined;
+    return d !== undefined && ts.isVariableDeclaration(d) && jsWidenedCallBinding(L, d);
+  }
+
+    /** `f(...)` where `f` is a JS function declaration, or a const bound to a function/arrow expression, that RETURNS a widened binding
+   * (returnsWidenedJsLet): its result is the checked-dynamic value itself, so the checker's declared scalar is no proof of its kind. */
+  function callOfWidenedLetReturner(L: Lowerer, node: ts.Node): boolean {
+    let n: ts.Node = node;
+    while (ts.isParenthesizedExpression(n)) n = n.expression;
+    if (!ts.isCallExpression(n) || !ts.isIdentifier(n.expression)) return false;
+    const sym = L.resolveValueSymbol(n.expression);
+    const d = sym ? L.checker.valueDeclarationOf(sym) : undefined;
+    if (d === undefined) return false;
+    if (ts.isFunctionDeclaration(d)) return returnsWidenedJsLet(L, d);
+    if (ts.isVariableDeclaration(d) && d.initializer !== undefined) {
+      let init: ts.Node = d.initializer;
+      while (ts.isParenthesizedExpression(init)) init = init.expression;
+      if (ts.isArrowFunction(init) || ts.isFunctionExpression(init)) return returnsWidenedJsLet(L, init);
+    }
+    return false;
   }
 
   /** An unannotated JS function that RETURNS a widened let (`return ms`):
