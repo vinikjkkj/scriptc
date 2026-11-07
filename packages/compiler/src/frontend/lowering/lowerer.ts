@@ -2494,6 +2494,8 @@ export class Lowerer {
    * a reference to a lowerable body reports its name here — recorded even
    * when the enclosing statement later poisons. */
   onEdge: ((name: string) => void) | null = null;
+  /** The unit whose lowering is firing edges right now (the reference tracer's "from"). */
+  traceCur = "%init";
   /** Discovery-only record of the untyped writes into class instances
    * (see DynPins): the classes that crossed into a dyn box, and the value
    * types written through `dyn.keySet`. */
@@ -4829,6 +4831,9 @@ export class Lowerer {
     this.onEdge = (name: string): void => {
       if (reachable.has(name)) return;
       reachable.add(name);
+      // DIAGNOSTIC-ONLY reference tracer (branch restmain3-trace / main-trace, never landed): the first reference to each unit, with
+      // the unit whose lowering fired it, on stderr so the driver log carries it.
+      console.error(`TRACE edge ${name} <- ${this.traceCur}`);
       if (units.has(name)) queue.push(name);
       // The VTABLE THUNK of a widened override rides its implementation's
       // edge: `%C.m%vt` exists exactly when `%C.m` does, so a vtable entry
@@ -4915,6 +4920,7 @@ export class Lowerer {
 
     parts.forEach((fp) => {
       const __dfT = performance.now();
+      this.traceCur = "%init:" + fp.sf.fileName;
       this.noteDynBoxEdges(this.lowerFileInit(fp.sf, fp.topStmts, this.initNameOf.get(fp.sf)!));
       drainInstances();
       lowerProfileNote("D:" + fp.sf.fileName, performance.now() - __dfT);
@@ -4966,7 +4972,10 @@ export class Lowerer {
       // the emit pass re-records the diagnostic and skips the member.
       const __qT = performance.now();
       try {
-        const __fn = units.get(queue.shift()!)!();
+        const __qn = queue.shift()!;
+        this.traceCur = __qn;
+        const __fn = units.get(__qn)!();
+        if (__fn?.loc !== undefined) console.error(`TRACE unit ${__qn} ${__fn.loc.file}:${__fn.loc.start}-${__fn.loc.end}`);
         lowerProfileNote("Q:" + (__fn?.loc?.file ?? "%unknown"), performance.now() - __qT);
         this.noteDynBoxEdges(__fn);
       } catch (e) {
