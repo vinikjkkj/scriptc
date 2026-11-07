@@ -105,7 +105,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
     const members = dynClassMembers(E, className, meta);
     const statics = dynClassMembers(E, className, meta, true);
     const staticsOpaque = dynStaticTable(meta, E.fnByName, (id: string) => E.recordsById.get(id), (id: string) => E.unionsById.get(id)).opaque;
-    const { opaque, errorRooted } = dynMemberTable(meta, E.fnByName, (id: string) => E.recordsById.get(id), (id: string) => E.unionsById.get(id));
+    const { opaque, errorRooted, skipped } = dynMemberTable(meta, E.fnByName, (id: string) => E.recordsById.get(id), (id: string) => E.unionsById.get(id));
     // A static const with internal linkage, beside the walker prototypes:
     // emitStructDefs has already declared the `_v` thunks by then, and the
     // converters that take its address are emitted after.
@@ -119,7 +119,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
         `${statics === null ? "NULL, 0" : `${statics.sym}, ${statics.count}`}, ${staticsOpaque ? "true" : "false"}, ` +
         `${dynDescBase(E.classMeta, meta) === null ? "NULL" : cStringLiteral(Buffer.from(dynClassDisplayName(dynDescBase(E.classMeta, meta)!.def), "utf8"))}, ` +
         `${dynRuntimeRoot(meta)}, ${E.tracedShapes.has(`object:${className}`) ? 1 : 0}, ` +
-        `${dynOrdNord(E, meta)}, ${dynOrdOffsetC(E, meta)}, ${dynEeOffsetC(meta, className)} }; ` +
+        `${dynOrdNord(E, meta)}, ${dynOrdOffsetC(E, meta)}, ${dynEeOffsetC(meta, className)}, ${skipped === null ? "NULL" : cStringLiteral(Buffer.from(skipped, "utf8"))} }; ` +
         `/* dyn box: class ${className} */`,
     );
     // A base-typed box can hold a DERIVED instance, and the registry resolves

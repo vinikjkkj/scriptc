@@ -4846,6 +4846,10 @@ typedef struct ScrDynClass {
    * the (positive) offset of the pointer in the hidden `__scrEmitter` slot for a class grafted by applyMixin(Y, EventEmitter),
    * -1 for a class that is no emitter. APPENDED, like every trailing member. */
   long long ee_off;
+  /* The names of the members the instance table SKIPPED (no dyn form for their type, async or generator methods), as ",a,b," (",", when
+   * none), or NULL when the opaque reason is not a list of names (a runtime builtin root). With a list, an `opaque` class's keyed miss on a name
+   * outside it is the same `undefined` a closed class answers; without one the loud ladder stays. APPENDED, like every trailing member. */
+  const char *skipped;
 } ScrDynClass;
 
 /* The order record of an instance whose class has inferred fields: `k` is the

@@ -202,9 +202,12 @@ export function dynMemberTable(
   fnByName: ReadonlyMap<string, IrFunction>,
   getRecord: (id: string) => IrRecordShape | undefined,
   getUnion: (id: string) => IrUnionDef | undefined,
-): { rows: DynMemberRow[]; opaque: boolean; errorRooted: boolean } {
+): { rows: DynMemberRow[]; opaque: boolean; errorRooted: boolean; skipped: string | null } {
   let opaque = false;
   let errorRooted = false;
+  // The names the table skipped; null once an opaque reason names none (a runtime builtin root).
+  const skippedNames: string[] = [];
+  let skipUnnamed = false;
   // The cells the runtime's ScrError base lays out ahead of a user Error
   // subclass's own fields (name, message, code, stack, the expando bag).
   const prefix = new Set<string>();
@@ -255,6 +258,7 @@ export function dynMemberTable(
     // the prefix Node lists (_events, _eventsCount, _maxListeners) is not something rows can state.
     if (RUNTIME_STREAM_CLASSES.has(c.def.name)) {
       opaque = true;
+      skipUnnamed = true;
       continue;
     }
     // The emitter hierarchy is NOT opaque: the EventEmitter.prototype members are answered by the
@@ -262,7 +266,7 @@ export function dynMemberTable(
     // their fence by name (scr_dyn_objinst_miss), and any other name an emitter instance does not
     // have reads `undefined`, as in Node.
     if (c.def.name === RUNTIME_EMITTER_CLASS) continue;
-    if (c.def.runtime === true) return { rows: [], opaque: true, errorRooted: false };
+    if (c.def.runtime === true) return { rows: [], opaque: true, errorRooted: false, skipped: null };
   }
   const rows: DynMemberRow[] = [];
   const seen = new Set<string>();
@@ -330,6 +334,7 @@ export function dynMemberTable(
     // answer the fence exists to refuse.
     if (!canConvertToDyn(f.type, getRecord, getUnion)) {
       opaque = true;
+      skippedNames.push(f.name);
       continue;
     }
     seen.add(f.name);
@@ -402,6 +407,7 @@ export function dynMemberTable(
     const fn = implOf(raw);
     if (fn === null) {
       opaque = true;
+      skippedNames.push(name);
       continue;
     }
     // An async or generator method answers a ScrPromise/ScrGen, which is
@@ -409,6 +415,7 @@ export function dynMemberTable(
     // is exactly the silent wrong answer this table exists to remove.
     if (fn.async === true || fn.generator !== undefined) {
       opaque = true;
+      skippedNames.push(name);
       continue;
     }
     // No receiver parameter: not an instance method (a static rides its
@@ -416,6 +423,7 @@ export function dynMemberTable(
     // rather than assumed — the emitter GEPs through this).
     if (fn.params.length === 0 || fn.params[0]!.type.kind !== "object") {
       opaque = true;
+      skippedNames.push(name);
       continue;
     }
     // Every parameter beyond the receiver must be reachable OUT of a dyn
@@ -423,18 +431,20 @@ export function dynMemberTable(
     const rest = fn.params.slice(1);
     if (rest.some((p) => p.type.kind !== "dyn" && !canDynCheckTo(p.type, getRecord, getUnion))) {
       opaque = true;
+      skippedNames.push(name);
       continue;
     }
     const ret = fn.returnType;
     if (ret.kind !== "void" && ret.kind !== "dyn" && !canConvertToDyn(ret, getRecord, getUnion)) {
       opaque = true;
+      skippedNames.push(name);
       continue;
     }
     seen.add(name);
     rows.push(accessor ? { kind: "accessor", name, fn } : { kind: "method", name, fn });
   }
 
-  return { rows, opaque, errorRooted };
+  return { rows, opaque, errorRooted, skipped: opaque && !skipUnnamed && !skippedNames.some((n) => n.includes(",")) ? `,${skippedNames.join(",")},` : null };
 }
 
 /** The rows of the STATIC side of a class (the table behind its class value:
