@@ -414,6 +414,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // The pairs argument is string[][] — checked structurally below (the
   // generic array-of slot has no named constant here).
   "sp.fromPairs": { argTypes: [null], result: SEARCH_PARAMS_T },
+  "sp.fromDyn": { argTypes: [DYN], result: SEARCH_PARAMS_T },
   "sp.with": { argTypes: [SEARCH_PARAMS_T, STRING, STRING], result: SEARCH_PARAMS_T },
   "url.searchParams": { argTypes: [URL_T], result: SEARCH_PARAMS_T },
   "url.search": { argTypes: [URL_T], result: STRING },

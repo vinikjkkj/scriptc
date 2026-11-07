@@ -4281,7 +4281,8 @@ typedef struct ScrSearchParams ScrSearchParams;
 ScrSearchParams *scr_sp_new(void);              /* +1 empty list */
 ScrSearchParams *scr_sp_parse(ScrStr *init);    /* +1; strips ONE leading '?' */
 ScrSearchParams *scr_sp_copy(ScrSearchParams *src); /* +1 snapshot */
-ScrSearchParams *scr_sp_from_pairs(ScrArr *pairs);  /* +1, or throws (string[][] rows) */
+ScrSearchParams *scr_sp_from_pairs(ScrArr *pairs);
+ScrSearchParams *scr_sp_from_dyn(const ScrDyn *d);   /* +1 from a checked-dynamic init, or NULL with the exception pending */  /* +1, or throws (string[][] rows) */
 /* The record-literal init desugar: append (name, value), answer sp +1. */
 ScrSearchParams *scr_sp_with(ScrSearchParams *sp, ScrStr *name, ScrStr *value);
 ScrSearchParams *scr_sp_retain(ScrSearchParams *sp);

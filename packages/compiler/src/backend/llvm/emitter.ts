@@ -897,6 +897,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "sp.parse": "scr_sp_parse",
   "sp.copy": "scr_sp_copy",
   "sp.fromPairs": "scr_sp_from_pairs",
+  "sp.fromDyn": "scr_sp_from_dyn",
   "sp.with": "scr_sp_with",
   "sp.getAll": "scr_sp_get_all",
   "sp.append": "scr_sp_append",

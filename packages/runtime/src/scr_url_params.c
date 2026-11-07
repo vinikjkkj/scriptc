@@ -364,6 +364,81 @@ ScrSearchParams *scr_sp_from_pairs(ScrArr *pairs) {
   return sp;
 }
 
+/* `new URLSearchParams(x)` for a CHECKED-DYNAMIC x (an untyped JS value): WebIDL's union conversion by run-time kind. undefined is the empty
+ * list; a string, number, boolean or bigint is ToString'd (null and undefined are the empty list) and parsed; an array is a sequence of [name, value] pairs (a row that is not a
+ * two-element iterable is Node's ERR_INVALID_TUPLE); a plain object is its own enumerable string-keyed entries (the record form); a function has
+ * none. Any other kind (a class instance, bytes) has no modelled conversion and throws a TypeError naming it. +1, or NULL with the exception pending. */
+ScrSearchParams *scr_sp_from_dyn(const ScrDyn *d) {
+  static const char tuple_msg[] = "Each query pair must be an iterable [name, value] tuple";
+  const ScrDyn *rows = NULL;
+  ScrDyn *own = NULL;
+  switch (d->kind) {
+    case SCR_DYN_UNDEF:
+    case SCR_DYN_NULL: /* Node: null is the empty list, not the text "null" */
+    case SCR_DYN_FUNC:
+      return sp_alloc();
+    case SCR_DYN_STR:
+    case SCR_DYN_NUM:
+    case SCR_DYN_BOOL:
+    case SCR_DYN_BIG: {
+      ScrStr *s = scr_dyn_string_coerce(d);
+      if (s == NULL) return NULL;
+      ScrSearchParams *sp = scr_sp_parse(s);
+      scr_str_release(s);
+      return sp;
+    }
+    case SCR_DYN_ARR:
+      rows = d;
+      break;
+    case SCR_DYN_OBJ:
+      own = scr_dyn_obj_entries(d);
+      if (own == NULL) return NULL;
+      rows = own;
+      break;
+    default: {
+      static const char un[] = "URLSearchParams from this kind of value is not supported yet";
+      scr_throw_error_msg(SCR_ERR_ERROR, un, sizeof un - 1);
+      return NULL;
+    }
+  }
+  ScrSearchParams *sp = sp_alloc();
+  size_t n = (size_t)scr_dyn_arr_len(rows);
+  for (size_t i = 0; i < n; i++) {
+    ScrDyn *row = scr_dyn_arr_at(rows, (double)i); /* +1 */
+    ScrDyn *pack = NULL;
+    if (row->kind == SCR_DYN_ARR) {
+      pack = scr_dyn_retain(row);
+    } else if (row->kind == SCR_DYN_STR) {
+      pack = scr_dyn_iter_pack(row, NULL);
+      if (pack == NULL) scr_exc_clear();
+    }
+    scr_dyn_release(row);
+    if (pack == NULL || scr_dyn_arr_len(pack) != 2) {
+      scr_dyn_release(pack);
+      scr_dyn_release(own);
+      scr_sp_release(sp);
+      scr_throw_error_msg_code(SCR_ERR_TYPE, tuple_msg, sizeof tuple_msg - 1, "ERR_INVALID_TUPLE");
+      return NULL;
+    }
+    ScrDyn *k = scr_dyn_arr_at(pack, 0);
+    ScrDyn *v = scr_dyn_arr_at(pack, 1);
+    scr_dyn_release(pack);
+    ScrStr *ks = scr_dyn_string_coerce(k);
+    ScrStr *vs = ks != NULL ? scr_dyn_string_coerce(v) : NULL;
+    scr_dyn_release(k);
+    scr_dyn_release(v);
+    if (ks == NULL || vs == NULL) {
+      if (ks != NULL) scr_str_release(ks);
+      scr_dyn_release(own);
+      scr_sp_release(sp);
+      return NULL;
+    }
+    sp_push(sp, ks, vs); /* the +1 coercions move in */
+  }
+  scr_dyn_release(own);
+  return sp;
+}
+
 /* The record-literal init desugar: append one pair, answer the SAME list
  * +1 (`new URLSearchParams({a: "1", b: "2"})` folds to a with-chain). */
 ScrSearchParams *scr_sp_with(ScrSearchParams *sp, ScrStr *name, ScrStr *value) {
