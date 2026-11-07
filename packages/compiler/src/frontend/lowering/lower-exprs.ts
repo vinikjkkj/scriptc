@@ -12288,9 +12288,11 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
                   const qs = qt?.kind === "record" ? L.shapes.get(qt.shapeId) : undefined;
                   return qs !== undefined && !qs.tuple && !qs.indexValue && qs.fields.every((f) => !carried.includes(f.name));
                 }
+                // A plain property BEFORE the spread that names a carried key fixes that key's position first, and the spread only
+                // overwrites its value; one AFTER it is refused by the desugar ("'x' after a conditional spread of the same name").
                 return (ts.isPropertyAssignment(q) || ts.isShorthandPropertyAssignment(q)) &&
                   q.name !== undefined && !ts.isComputedPropertyName(q.name) && !ts.isPrivateIdentifier(q.name) &&
-                  !carried.includes(propNameText(L, q.name));
+                  (!carried.includes(propNameText(L, q.name)) || expr.properties.indexOf(q) < expr.properties.indexOf(p));
               });
               if (disjoint && new Set(carried).size === carried.length) {
                 for (const n of carried) contribute(n);
