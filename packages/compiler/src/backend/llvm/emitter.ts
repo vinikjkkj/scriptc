@@ -855,6 +855,34 @@ const LIB_FN_SYMS: Record<string, string> = {
   "abort.aborted": "scr_abort_signal_aborted",
   "abort.reason": "scr_abort_signal_reason",
   "abort.off": "scr_abort_signal_off",
+  // The Event surface (scr_event.c); abort.onEv MOVES its closure
+  // (LIB_FN_MOVE_ARGS) and the abort-dispatch bridge is scr_abort.c's.
+  "abort.onEv": "scr_abort_signal_add_ev",
+  "evt.new": "scr_event_new",
+  "evt.newMissing": "scr_event_new_missing",
+  "evt.newDyn": "scr_event_new_dyn",
+  "evt.type": "scr_event_type",
+  "evt.defaultPrevented": "scr_event_default_prevented",
+  "evt.cancelable": "scr_event_cancelable",
+  "evt.bubbles": "scr_event_bubbles",
+  "evt.composed": "scr_event_composed",
+  "evt.isTrusted": "scr_event_is_trusted",
+  "evt.timeStamp": "scr_event_timestamp",
+  "evt.eventPhase": "scr_event_phase",
+  "evt.cancelBubble": "scr_event_cancel_bubble",
+  "evt.returnValue": "scr_event_return_value",
+  "evt.target": "scr_event_target",
+  "evt.currentTarget": "scr_event_current_target",
+  "evt.hasTarget": "scr_event_has_target",
+  "evt.hasCurrentTarget": "scr_event_has_current_target",
+  "evt.composedPath": "scr_event_composed_path",
+  "evt.preventDefault": "scr_event_prevent_default",
+  "evt.stopPropagation": "scr_event_stop_propagation",
+  "evt.stopImmediate": "scr_event_stop_immediate",
+  "evt.setCancelBubble": "scr_event_set_cancel_bubble",
+  "evt.setReturnValue": "scr_event_set_return_value",
+  "evt.init": "scr_event_init",
+  "evt.missingType": "scr_event_missing_type",
   // The static fetch surface (scr_fetch_static.c) — the C twin's rows.
   // The four call entry points share one runtime symbol; the NULL
   // sentinels for an absent body/signal are supplied by the arity fixup
@@ -1605,6 +1633,8 @@ const LIB_FN_TAIL: Record<string, readonly { readonly decl: string; readonly arg
  * under SCRIPTC_RC_AUDIT, which is why the seat is a table and not a
  * per-call habit. Index is into the IR's argument list. */
 const LIB_FN_MOVE_ARGS: Record<string, readonly number[]> = {
+  // scr_abort_signal_add_ev: the listener closure moves into the signal's vector (abort.on's twin).
+  "abort.onEv": [1],
   "net.sockConnectCb": [3],
   // node:test: the body closure moves into the runtime (scr_test.c: "closures MOVE").
   "test.register": [3],

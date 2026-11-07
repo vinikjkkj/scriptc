@@ -24,7 +24,7 @@ import {
 import { validateSidecar } from "./library/sidecar-validate.js";
 import { entryFunctionExports, type EntryExportInfo } from "./frontend/lib-exports.js";
 import { entryContractFacts, type ContractFacts } from "./frontend/lib-contract.js";
-import { moduleUsesDestroyDyn, moduleUsesTimersPromisesValue, moduleUsesHttpDestroyDyn, moduleUsesBufferValue, moduleUsesBytesOwn, moduleUsesDynArrayOps, moduleLibAsyncSurface, moduleLibNondeterministicSurface, moduleEmbedsNetIsland, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesAssert, moduleUsesChildStream, moduleUsesCopying, moduleUsesDc, moduleUsesDgram, moduleUsesDynAsync, moduleUsesWebCrypto, moduleUsesDynExt, moduleUsesDynInvoke, moduleUsesEmitter, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFileHandle, moduleUsesFsWatch, moduleUsesAbortHttp, moduleUsesHttpBody, moduleUsesHttpPipe, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesInspect, moduleUsesEngineFn, moduleUsesNet, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesQs, moduleUsesRegex, moduleUsesSearchParams, moduleUsesSqlite, moduleUsesSqliteValue, moduleUsesStream, moduleUsesUrl, moduleUsesSymbol, moduleUsesFnText, moduleUsesWeakMap, moduleUsesTls, moduleUsesTlsCa, moduleUsesWsGlobal, moduleUsesWsDispatch, moduleUsesWrtc, moduleUsesDate, moduleUsesOpaque, moduleUsesDynProto, moduleUsesPromiseStatics, moduleUsesBigInt, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, moduleBoxesEmitters, moduleUsesDateFmt, moduleUsesDateTz, moduleUsesDateIntl, moduleIcuUse, type IcuUse,
+import { moduleUsesDestroyDyn, moduleUsesTimersPromisesValue, moduleUsesHttpDestroyDyn, moduleUsesBufferValue, moduleUsesBytesOwn, moduleUsesDynArrayOps, moduleLibAsyncSurface, moduleLibNondeterministicSurface, moduleEmbedsNetIsland, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesEvent, moduleUsesAssert, moduleUsesChildStream, moduleUsesCopying, moduleUsesDc, moduleUsesDgram, moduleUsesDynAsync, moduleUsesWebCrypto, moduleUsesDynExt, moduleUsesDynInvoke, moduleUsesEmitter, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFileHandle, moduleUsesFsWatch, moduleUsesAbortHttp, moduleUsesHttpBody, moduleUsesHttpPipe, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesInspect, moduleUsesEngineFn, moduleUsesNet, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesQs, moduleUsesRegex, moduleUsesSearchParams, moduleUsesSqlite, moduleUsesSqliteValue, moduleUsesStream, moduleUsesUrl, moduleUsesSymbol, moduleUsesFnText, moduleUsesWeakMap, moduleUsesTls, moduleUsesTlsCa, moduleUsesWsGlobal, moduleUsesWsDispatch, moduleUsesWrtc, moduleUsesDate, moduleUsesOpaque, moduleUsesDynProto, moduleUsesPromiseStatics, moduleUsesBigInt, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, moduleBoxesEmitters, moduleUsesDateFmt, moduleUsesDateTz, moduleUsesDateIntl, moduleIcuUse, type IcuUse,
   moduleUsesAsym, moduleUsesRsaPubEnc, moduleUsesCipher, moduleUsesZlib, moduleUsesZlibStream, moduleUsesTextMb, type IrLibSection, type IrModule, type IrRecordShape, type IrType, type SrcLoc , moduleBoxesProcStream, procStreamLibWriteFence} from "./ir/nodes.js";
 import { serializeModule } from "./ir/serialize.js";
 import { validateModule } from "./ir/validate.js";
@@ -1001,6 +1001,7 @@ function programNativeFeatures(
     // anywhere on the IR. The unit was unconditional until the value
     // surface made its size matter -- see cc.ts's CcOptions comment.
     abortSignal: moduleUsesAbortSignal(mod),
+    event: moduleUsesEvent(mod),
     tpValue: moduleUsesTimersPromisesValue(mod),
     // The link switch for scr_fetch_static.c and the whole
     // net/http/tls/url/zlib stack under it: a static-fetch value
@@ -2205,6 +2206,7 @@ export async function compileLibrary(opts: CompileLibraryOptions): Promise<Compi
     zlib: moduleUsesZlib(mod),
     copying: moduleUsesCopying(mod),
     abortSignal: moduleUsesAbortSignal(mod),
+    event: moduleUsesEvent(mod),
     tpValue: moduleUsesTimersPromisesValue(mod),
     procDyn: moduleBoxesProcStream(mod),
   });

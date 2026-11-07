@@ -14,6 +14,7 @@ import type { Lowerer, WidthLift } from "./lowerer.js";
 import { strictAt } from "./lower-protoescape.js";
 import { EVAL_STATIC_CLASSES, RUNTIME_EMITTER_CLASS, STATS_FIELD_INDEX, DATE_T, strandTrap, BIGINT, BOOL, BYTES_ELEM_SIZE, BYTES_U8, bytesValueType, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, canBoxClassIntoDyn, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrGlobal, IrJsOp, IrLocal, type IrParam, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
+import { lowerEventProperty } from "./lower-event.js";
 import { cjsRequireBindingValueOf, dynImportBindingDeclOf } from "./lower-island.js";
 import { liveExportsOf, liveBagRef, liveDepOfBinding, isValueUse, liveNamedTwinOf, liveRecvBagOf, liveKeyOf, liveIdentityRefOf, dynValueOf } from "./cjs-live-exports.js";
 import { cjsExportRecordOf, cjsExportRecordField, cjsExportRecordRead, cjsExportRecordReadDyn, cjsExportRecordRef, isBareExportsAccess } from "./cjs-export-record.js";
@@ -3665,6 +3666,8 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         // function's receiver filter drops handle kinds before its member
         // switch is ever reached.
         lowerAbortProperty(L, expr) ??
+        // ev.type/.target/... on an Event handle, and Event.NONE & co.
+        lowerEventProperty(L, expr) ??
         // response.ok/.status/.headers and the Headers view's members.
         // Its own entry for the same reason the abort row above is: a
         // handle receiver never reaches lowerIntrinsicProperty's switch.
@@ -17208,6 +17211,18 @@ export function ensureString(L: Lowerer, e: IrExpr, node: ts.Node, explicitStrin
     // (Node's ToString calls Function.prototype.toString; fn-srctext.ts).
     if (e.type.kind === "func") return { kind: "libCall", fn: "fn.text", args: [e], type: STRING, loc: e.loc };
     if (e.type.kind === "string") return e;
+    // The abort pair and Event inherit Object.prototype.toString with a
+    // Symbol.toStringTag of their class name: String(x) is "[object Event]".
+    if (e.type.kind === "event" || e.type.kind === "abortSignal" || e.type.kind === "abortController") {
+      const tag = e.type.kind === "event" ? "Event" : e.type.kind === "abortSignal" ? "AbortSignal" : "AbortController";
+      return {
+        kind: "seqExpr",
+        stmts: [{ kind: "exprStmt", expr: e, loc: e.loc }],
+        result: { kind: "strLit", value: `[object ${tag}]`, type: STRING, loc: e.loc },
+        type: STRING,
+        loc: e.loc,
+      };
+    }
     // A void call's value is JS's undefined: it runs for effect, then the
     // text is "undefined" (String(f()) and `${f()}` over a void function).
     if (e.type.kind === "void") {
@@ -20238,6 +20253,12 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
             // Typed arrays / Buffers ARE objects to ===: pointer identity
             // (buf === buf.swap16() — the in-place mutators return this).
             idLeft.type.kind === "bytes" ||
+            // The abort pair and Event are objects too: one handle per
+            // signal/controller/event, so `ev.target === signal` and
+            // `this === signal` are one pointer compare.
+            idLeft.type.kind === "abortSignal" ||
+            idLeft.type.kind === "abortController" ||
+            idLeft.type.kind === "event" ||
             idLeft.type.kind === "promise") &&
           typeEquals(idLeft.type, idRight.type)
         ) {
@@ -20911,7 +20932,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       // value, so answering "object" for it is exact and never a guess.
       case "date": case "weakmap": case "http2Session": case "http2Stream":
       case "dgramSocket": case "testCtx": case "sqliteDb": case "sqliteStmt":
-      case "abortSignal": case "abortController": case "response":
+      case "abortSignal": case "abortController": case "event": case "response":
       case "headers": case "requestInit": case "request":
       case "rtcPeerConnection": case "rtcDataChannel": case "keyobj":
       case "hash": case "hmac": case "cipher": case "decipher":
@@ -22344,6 +22365,32 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
         if (left.type.kind === "dyn") {
           return { kind: "dynTest", test: "regex", value: left, type: BOOL, loc };
         }
+      }
+      // `x instanceof Event` (Node's global Event, lower-event.ts). An event
+      // handle is the only value of the `event` kind and it can never cross
+      // into a checked-dynamic value (SC1101 at the crossing), so the answer
+      // is decided by the operand's static type: an event folds true, a union
+      // tests the event arm's tag, and every other type (a dyn value
+      // included) is constantly false. The operand always evaluates.
+      if (
+        ts.isIdentifier(expr.right) &&
+        L.isStdlibGlobal(expr.right, "Event") &&
+        !L.caughtLocalOf(expr.left)
+      ) {
+        const left = L.lowerExpr(expr.left);
+        if (left.type.kind === "union") {
+          const def = L.unions.get(left.type.unionId);
+          const tags = def ? def.arms.flatMap((a, i) => (a.kind === "event" ? [i] : [])) : [];
+          if (tags.length >= 1) return armTagsTest(L, left, tags, loc);
+        }
+        const answer = left.type.kind === "event";
+        return {
+          kind: "seqExpr",
+          stmts: [{ kind: "exprStmt", expr: left, loc }],
+          result: { kind: "boolLit", value: answer, type: BOOL, loc },
+          type: BOOL,
+          loc,
+        };
       }
       // `x instanceof Array` — Array.isArray under another spelling for every value
       // this runtime holds (no cross-realm arrays): an untyped operand tests the

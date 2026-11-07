@@ -1,7 +1,7 @@
-function-type-with-a-this-parameter-names-its-real-blocker.ts:3:13 - error SC2009: values of type '(this: AbortSignal, event: Event) => void' cannot be compiled: the function shape is supported, but its parameter 'event' has type 'Event', which does not compile
+function-type-with-a-this-parameter-names-its-real-blocker.ts:3:13 - error SC2009: values of type '(this: AbortSignal, event: MessageEvent<unknown>) => void' cannot be compiled: the function shape is supported, but its parameter 'event' has type 'MessageEvent<unknown>', which does not compile
 
-  2 | // does not compile (the DOM Event), not an 'arguments'-reading signature.
-  3 | function on(listener: (this: AbortSignal, event: Event) => void): void {
+  2 | // does not compile (the DOM MessageEvent — Event itself compiles now), not an 'arguments'-reading signature.
+  3 | function on(listener: (this: AbortSignal, event: MessageEvent) => void): void {
     |             ^~~~~~~~
   4 |   void listener;
 

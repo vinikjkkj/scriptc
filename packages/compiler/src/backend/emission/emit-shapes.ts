@@ -892,6 +892,9 @@ export interface ClassMeta {
         return "scr_abort_signal_trace_v";
       case "abortController":
         return "scr_abort_controller_trace_v";
+      // An Event's target/currentTarget are signals: traced unconditionally.
+      case "event":
+        return "scr_event_trace_v";
       // A Response holds the parked body-consumer promise a `.text()`
       // before the body ended installs, and a promise reaches arbitrary
       // values — so the edge is traced, unconditionally. A Headers view

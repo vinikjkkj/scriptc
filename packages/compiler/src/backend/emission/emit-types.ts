@@ -114,6 +114,8 @@ export function cType(t: IrType): string {
       return "ScrRtcDataChannel *";
     case "abortController":
       return "ScrAbortController *";
+    case "event":
+      return "ScrEvent *";
     case "fsWatcher":
       return "ScrWatcher *";
     case "sqliteDb":
@@ -258,6 +260,8 @@ export function retainCallC(type: IrType, expr: string): string {
       return `scr_rtc_data_channel_retain(${expr})`;
     case "abortController":
       return `scr_abort_controller_retain(${expr})`;
+    case "event":
+      return `scr_event_retain(${expr})`;
     case "fsWatcher":
       return `scr_watcher_retain(${expr})`;
     case "sqliteDb":
@@ -377,6 +381,8 @@ export function releaseCallC(type: IrType, expr: string): string {
       return `scr_rtc_data_channel_release(${expr})`;
     case "abortController":
       return `scr_abort_controller_release(${expr})`;
+    case "event":
+      return `scr_event_release(${expr})`;
     case "fsWatcher":
       return `scr_watcher_release(${expr})`;
     case "sqliteDb":
@@ -467,6 +473,7 @@ export function boxKindC(t: IrType): string {
     case "childStream":
     case "abortSignal":
     case "abortController":
+    case "event":
     case "response":
     case "headers":
     case "requestInit":
@@ -630,6 +637,8 @@ export function rcAdapters(t: IrType): RcAdapters | null {
       return rt("scr_rtc_data_channel_retain_v", "scr_rtc_data_channel_release_v");
     case "abortController":
       return rt("scr_abort_controller_retain_v", "scr_abort_controller_release_v");
+    case "event":
+      return rt("scr_event_retain_v", "scr_event_release_v");
     case "fsWatcher":
       return rt("scr_watcher_retain_v", "scr_watcher_release_v");
     case "sqliteDb":
@@ -801,6 +810,7 @@ export function elemKindC(elem: IrType): string {
     // construct through scr_arr_new_ref with a real trace.
     case "abortSignal":
     case "abortController":
+    case "event":
     // A Response array traces (the response's parked body promise is a
     // real edge); a Headers array does not, and elemTraceC decides which
     // — the element CLASS is SCR_ELEM_REF for both.
