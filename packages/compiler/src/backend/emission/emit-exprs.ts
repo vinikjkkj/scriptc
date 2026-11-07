@@ -8729,6 +8729,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_dyn_get_prototype_of(${arg(0)})`);
           case "dyn.objectPrototype":
             return finish(`scr_dyn_object_prototype()`);
+          case "dyn.toObject":
+            return finish(`scr_dyn_to_object(${arg(0)})`);
           case "insp.optDepth":
             return finish(`scr_insp_opt_depth()`);
           case "insp.shown":

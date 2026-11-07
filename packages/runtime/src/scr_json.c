@@ -2032,6 +2032,25 @@ static ScrDyn *scr_dyn_object_prototype_mint(void) {
 
 ScrDyn *scr_dyn_object_prototype(void) { return scr_dyn_object_prototype_mint(); }
 
+/* Object(d), +1 (ToObject over one argument): null and undefined answer a fresh empty object, an object-like value answers
+ * itself (identity), and a primitive would answer its wrapper object, which this runtime does not model: that case throws a
+ * named Error instead of answering a different value. */
+ScrDyn *scr_dyn_to_object(const ScrDyn *d) {
+  switch (d->kind) {
+    case SCR_DYN_NULL:
+    case SCR_DYN_UNDEF:
+      return scr_dyn_new_obj();
+    case SCR_DYN_BOOL:
+    case SCR_DYN_NUM:
+    case SCR_DYN_STR:
+    case SCR_DYN_BIG:
+      scr_throw_error(SCR_ERR_ERROR, scr_str_new("Object() of a primitive value (wrapper objects) is not supported yet", 66));
+      return scr_dyn_undefined();
+    default:
+      return scr_dyn_retain((ScrDyn *)d);
+  }
+}
+
 /* Object.getPrototypeOf(d), +1. A null-prototype dictionary answers null; an object with its own [[Prototype]] (a
  * constructor's instance, Object.create(p)) answers that object; a plain object Object.prototype; every other kind its
  * intrinsic (one per kind, one per class for a boxed class instance). null and undefined throw Node's TypeError. */
