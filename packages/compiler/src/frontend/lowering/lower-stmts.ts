@@ -681,7 +681,50 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
     if (!decl || decl.initializer === undefined) return false;
     let init: ts.Expression = decl.initializer;
     while (ts.isParenthesizedExpression(init)) init = init.expression;
-    return ts.isObjectLiteralExpression(init) && init.properties.length === 0;
+    if (!ts.isObjectLiteralExpression(init)) return false;
+    return init.properties.length === 0 || emptyArrayMemberRewritten(decl, init);
+  }
+
+  /** `const prev = { subscribe: [], … }` whose empty-array member receives NON-NUMERIC stores elsewhere in the file (`prev.subscribe = x()`,
+   * `prev.subscribe.push("a")`): tsc types the literal's `[]` as never[] (the compiler's number[] slot), yet the program keeps arrays of
+   * anything there, so the value is the evolving object the checked-dynamic tree holds (ioredis ClusterSubscriber's previousChannels). Syntactic
+   * and conservative: a numeric-literal-only store keeps the typed record. */
+  function emptyArrayMemberRewritten(decl: ts.VariableDeclaration, init: ts.ObjectLiteralExpression): boolean {
+    if (!ts.isIdentifier(decl.name) || !isJsSourceFile(decl.getSourceFile())) return false;
+    const names = new Set<string>();
+    for (const p of init.properties) {
+      if (!ts.isPropertyAssignment(p) || !(ts.isIdentifier(p.name) || ts.isStringLiteral(p.name))) continue;
+      let v: ts.Expression = p.initializer;
+      while (ts.isParenthesizedExpression(v)) v = v.expression;
+      if (ts.isArrayLiteralExpression(v) && v.elements.length === 0) names.add(p.name.text);
+    }
+    if (names.size === 0) return false;
+    const binding = decl.name.text;
+    const numeric = (e: ts.Expression): boolean => {
+      while (ts.isParenthesizedExpression(e)) e = e.expression;
+      return ts.isNumericLiteral(e) || (ts.isPrefixUnaryExpression(e) && ts.isNumericLiteral(e.operand));
+    };
+    const isMember = (e: ts.Expression): string | null => {
+      if (ts.isPropertyAccessExpression(e) && ts.isIdentifier(e.expression) && e.expression.text === binding && names.has(e.name.text)) return e.name.text;
+      if (ts.isElementAccessExpression(e) && ts.isIdentifier(e.expression) && e.expression.text === binding && ts.isStringLiteral(e.argumentExpression) && names.has(e.argumentExpression.text)) return e.argumentExpression.text;
+      return null;
+    };
+    let found = false;
+    const visit = (n: ts.Node): void => {
+      if (found) return;
+      if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken && isMember(n.left) !== null) {
+        // `prev.a = []` re-empties it; a numeric literal array keeps the slot
+        if (!(ts.isArrayLiteralExpression(n.right) && n.right.elements.every((el) => numeric(el)))) found = true;
+      } else if (
+        ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression) && isMember(n.expression.expression) !== null &&
+        ["push", "unshift", "splice", "fill"].includes(n.expression.name.text) && n.arguments.some((a) => !numeric(a))
+      ) {
+        found = true;
+      }
+      if (!found) ts.forEachChild(n, visit);
+    };
+    visit(decl.getSourceFile());
+    return found;
   }
 
 /** The arms of a receiver typed as a UNION OF SEVERAL MAPS (or several SETS):
@@ -5259,7 +5302,7 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     // `{ 0: string }` — protobufjs's enum-table factory), the record it
     // answers describes the binding's FUTURE, not the empty object the
     // declaration actually creates. See jsEvolvingObjectLiteralInit.
-    if (isLet && type?.kind === "record" && isJsSourceFile(decl.getSourceFile())) {
+    if ((isLet || (decl.initializer !== undefined && jsEvolvingObjectLiteralInit(decl))) && type?.kind === "record" && isJsSourceFile(decl.getSourceFile())) {
       const shape = L.shapes.get(type.shapeId);
       if (
         shape && !shape.indexValue && !shape.tuple &&
