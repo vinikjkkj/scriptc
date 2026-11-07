@@ -19476,7 +19476,12 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           const rest = def ? def.arms.filter((a) => !isUnitType(a)) : [];
           const funcArmDefault =
             rest[0]?.kind === "func" && (target === null || target.kind === "func");
-          if (rest.length === 1 && ((target !== null && typeEquals(target, rest[0]!)) || funcArmDefault)) {
+          // No expected type (an operand of `-`, an argument): the checker's own type of the `||` expression is the same answer.
+          const resultT = target ?? L.mapTypeOf(L.typeOf(expr));
+          // An evolving JS `let` (`let prevTime;` assigned numbers later) types the whole expression `any`: no checker result to
+          // equal, and the left's one scalar arm is the only answer the truthy side can produce (the default must coerce into it).
+          const scalarArmDefault = resultT === null && (rest[0]?.kind === "f64" || rest[0]?.kind === "string" || rest[0]?.kind === "bool");
+          if (rest.length === 1 && ((resultT !== null && typeEquals(resultT, rest[0]!)) || funcArmDefault || scalarArmDefault)) {
             L.requireTruthyUnion(left.type.unionId, expr);
             const dflt = L.lowerExprExpecting(expr.right, rest[0]!);
             return { kind: "orDefault", left, right: dflt, type: rest[0]!, loc };
