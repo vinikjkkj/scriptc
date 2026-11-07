@@ -11788,7 +11788,9 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
         // A JavaScript namespace member no class answers (a constructor whose own body
         // returns a value) keeps JS's [[Construct]] semantics: it falls through to the
         // runtime construction arms below. TypeScript keeps the refusal.
-        if (!isJsSourceFile(expr.getSourceFile())) {
+        // A member whose VALUE is only known at run time (the import() namespace of a mapped package holds pg's `Pool`, a class minted per
+        // evaluation by a factory) probes to the checked-dynamic kind: that is the construct-through-the-value arm below, not a refusal.
+        if (!isJsSourceFile(expr.getSourceFile()) && probeLower(L, expr.expression)?.type.kind !== "dyn") {
           L.unsupported(
             "SC1090",
             expr,
@@ -13407,7 +13409,10 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
     // The SPREAD form (`new C(...args)`, the pass-through factory) builds the same pack
     // with the spreads flattened at run time (dynArrLit's `spreads`, as dynInvokeWithSpread).
     if (
-      (isJsSourceFile(expr.getSourceFile()) || (L.typeOf(expr.expression).flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0)
+      (isJsSourceFile(expr.getSourceFile()) || (L.typeOf(expr.expression).flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0 ||
+        // A TypeScript caller constructing a member of an import() namespace (a run-time class value): nothing above claimed it, and the
+        // generic refusal below is all that is left, so the checked-dynamic callee constructs through the value.
+        (ts.isPropertyAccessExpression(expr.expression) && probeLower(L, expr.expression)?.type.kind === "dyn"))
     ) {
       // Two spellings reach the same runtime value. A receiver that
       // probes to DYN already IS the box (a module binding holding an
