@@ -14100,6 +14100,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24705-string-subclass-inspect-and-containers.js": {
+   "order": [
+    "<repo>/tests/corpus/24705-string-subclass-inspect-and-containers.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2471-record-keyed-write-hasown.js": {
    "order": [
     "<repo>/tests/corpus/2471-record-keyed-write-hasown.js"
