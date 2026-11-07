@@ -34,6 +34,23 @@ export function protoKeyedWriteShape(e: ts.Node): { recv: ts.Expression; key: ts
   return { recv: p.expression, key: l.argumentExpression };
 }
 
+/** A late method (`C.prototype.m = function ...`) of a class whose chain has a run-time prototype table takes the variadic form (its declared
+ * parameters stay in the ABI, the surplus arrives as the trailing pack): until its install statement runs a call reaches the table's
+ * member, which must see the call's FULL argument list, and a typed call site would drop the surplus before the dispatcher could forward
+ * it. Decided HERE, after the table scan, and only for those classes: a variadic method has no unbound method value (`this.next =
+ * this.m`), which every other late method must keep (mysql2's `Execute.prototype.row = Query.prototype.row`). */
+export function upgradeLateMethodsOverTables(L: Lowerer): void {
+  for (const [cls, bodies] of L.protoClassBodies) {
+    const info = L.classes.get(cls);
+    if (info === undefined || info.evalClass !== undefined || info.def.runtime === true || !hasProtoTab(L, info)) continue;
+    for (const m of bodies.keys()) {
+      const sig = info.methods.get(m);
+      if (sig === undefined || sig.params.some((x) => x.mode === "dynRest")) continue;
+      info.methods.set(m, { ...sig, params: [...sig.params, { type: DYN, mode: "dynRest" }] });
+    }
+  }
+}
+
 /** The table global of class `cls`, or null when no statement of the program writes computed members of it. */
 export function protoTabOf(L: Lowerer, cls: string): IrGlobal | null {
   return L.protoTabs.get(cls) ?? null;

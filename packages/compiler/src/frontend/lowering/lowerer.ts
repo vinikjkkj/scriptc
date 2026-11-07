@@ -73,7 +73,7 @@ import type {
 import { isDynErrorClass } from "../../ir/nodes.js";
 import { protoEscapes, strictAt } from "./lower-protoescape.js";
 import { applyLateInstalls, applyProtoSlots, dynFnAsFunc, dynFnReadable, scanProtoSlots } from "./lower-protoslots.js";
-import { applyProtoTabs, hasProtoTab, scanProtoTabs } from "./lower-prototab.js";
+import { applyProtoTabs, hasProtoTab, scanProtoTabs, upgradeLateMethodsOverTables } from "./lower-prototab.js";
 import { OWN_SHADOW_ROOTS, applyFieldNotes, applyOwnShadows, inOwnShadowFamily } from "./lower-ownshadow.js";
 import { CLASS_BUILTIN_CTORLESS, CLASS_NO_DYN_NEW, EVAL_NO_SRC_CLASSES, GRAFTED_EMITTER_CLASSES, GRAFTED_EMITTER_CELL_CLASSES, GRAFTED_ROWS_FENCED_OPS, GRAFTED_PROPS_EXACT_OPS, EVAL_STATIC_CLASSES, dynReflectionSite, emitterStateWriteSites, graftedBoxSites, moduleBoxesEmitters } from "../../ir/nodes.js";
 import { computeTwinEdits, type TwinEdits } from "./emitter-twin.js";
@@ -3805,6 +3805,7 @@ export class Lowerer {
     this.prepareModuleInits(parts);
     scanProtoSlots(this, parts.map((fp) => fp.sf));
     scanProtoTabs(this, parts.map((fp) => fp.sf));
+    upgradeLateMethodsOverTables(this);
     lowerProfileNote(this.remainder ? "%remainder-collect" : "%emit-collect", performance.now() - __colT);
 
     const functions: IrFunction[] = [];
@@ -4776,6 +4777,7 @@ export class Lowerer {
     // must be marked dyn-boxed BEFORE the reachable set is fixed (the dispatcher itself is only built by the emit pass).
     scanProtoSlots(this, parts.map((fp) => fp.sf));
     scanProtoTabs(this, parts.map((fp) => fp.sf));
+    upgradeLateMethodsOverTables(this);
     lowerProfileNote("%discovery-collect", performance.now() - __colT);
 
     // Every lowerable body, by emitted-function name. The names double as
