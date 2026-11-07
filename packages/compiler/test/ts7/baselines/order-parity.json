@@ -13651,6 +13651,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24620-promise-constructor-as-a-value.js": {
+   "order": [
+    "<repo>/tests/corpus/24620-promise-constructor-as-a-value.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24621-promise-statics-through-the-constructor-value.js": {
+   "order": [
+    "<repo>/tests/corpus/24621-promise-statics-through-the-constructor-value.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24622-promise-constructor-value-through-typed-slots.ts": {
+   "order": [
+    "<repo>/tests/corpus/24622-promise-constructor-value-through-typed-slots.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/24626-object-prototype-member-probes-over-every-dyn-kind.js": {
    "order": [
     "<repo>/tests/corpus/24626-object-prototype-member-probes-over-every-dyn-kind.js"
