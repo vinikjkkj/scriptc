@@ -13098,6 +13098,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24343-const-captured-by-a-callback-in-its-own-initializer-js.js": {
+   "order": [
+    "<repo>/tests/corpus/24343-const-captured-by-a-callback-in-its-own-initializer-js.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24344-late-prototype-method-reading-arguments-js.js": {
+   "order": [
+    "<repo>/tests/corpus/24344-late-prototype-method-reading-arguments-js.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2435-loose-same-kind-equality.ts": {
    "order": [
     "<repo>/tests/corpus/2435-loose-same-kind-equality.ts"
@@ -13850,6 +13862,30 @@
   "<repo>/tests/corpus/24676-abort-pair-and-event-handles-compare-by-identity.ts": {
    "order": [
     "<repo>/tests/corpus/24676-abort-pair-and-event-handles-compare-by-identity.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24677-then-with-an-absent-fulfilment-or-rejection-handler-substitutes-identity-and-thrower.ts": {
+   "order": [
+    "<repo>/tests/corpus/24677-then-with-an-absent-fulfilment-or-rejection-handler-substitutes-identity-and-thrower.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24678-abort-signal-throw-if-aborted-throws-the-reason-itself.ts": {
+   "order": [
+    "<repo>/tests/corpus/24678-abort-signal-throw-if-aborted-throws-the-reason-itself.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24679-throw-if-aborted-through-an-optional-receiver-and-a-class-field.ts": {
+   "order": [
+    "<repo>/tests/corpus/24679-throw-if-aborted-through-an-optional-receiver-and-a-class-field.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24680-throw-if-aborted-in-a-javascript-source.js": {
+   "order": [
+    "<repo>/tests/corpus/24680-throw-if-aborted-in-a-javascript-source.js"
    ],
    "diags": []
   },
@@ -25912,30 +25948,6 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
-  },
-  "<repo>/tests/corpus/24677-then-with-an-absent-fulfilment-or-rejection-handler-substitutes-identity-and-thrower.ts": {
-   "order": [
-    "<repo>/tests/corpus/24677-then-with-an-absent-fulfilment-or-rejection-handler-substitutes-identity-and-thrower.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24678-abort-signal-throw-if-aborted-throws-the-reason-itself.ts": {
-   "order": [
-    "<repo>/tests/corpus/24678-abort-signal-throw-if-aborted-throws-the-reason-itself.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24679-throw-if-aborted-through-an-optional-receiver-and-a-class-field.ts": {
-   "order": [
-    "<repo>/tests/corpus/24679-throw-if-aborted-through-an-optional-receiver-and-a-class-field.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24680-throw-if-aborted-in-a-javascript-source.js": {
-   "order": [
-    "<repo>/tests/corpus/24680-throw-if-aborted-in-a-javascript-source.js"
-   ],
-   "diags": []
   }
  }
 }
