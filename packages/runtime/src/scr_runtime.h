@@ -6273,7 +6273,10 @@ ScrDyn *scr_dyn_object_prototype(void);
 ScrDyn *scr_dyn_get_prototype_of(const ScrDyn *d);
 ScrDyn *scr_dyn_to_object(const ScrDyn *d);
 ScrDyn *scr_dyn_wrapper_new(const ScrDyn *prim);
+extern uint32_t scr_wrap_epoch;
+bool scr_dyn_wrapper_proto_member(const ScrDyn *d, const char *name, size_t n);
 bool scr_dyn_wrapper_user_member(const ScrDyn *d, const char *name, size_t n); /* an own / pre-sentinel prototype member */
+bool scr_dyn_prim_instanceof(const ScrDyn *v, double which); /* the dyn.primInstanceOf libCall; false when the wrapper unit is not linked */
 ScrDyn *scr_dyn_prim_prototype(double which); /* String / Number / Boolean .prototype as a value (0 / 1 / 2), +1 */
 ScrDyn *scr_dyn_prim_init_ret(ScrDyn *self, const ScrDyn *x, double which); /* super(x) of `class C extends String|Number|Boolean` on `self`: +1 self, NULL if it threw */
 ScrDyn *scr_dyn_set_prototype_of(const ScrDyn *o, const ScrDyn *proto); /* Object.setPrototypeOf, +1 (o) */

@@ -12872,6 +12872,28 @@ export function moduleUsesPromiseStatics(mod: IrModule): boolean {
   return ctor || (proto && moduleUsesDynAsync(mod));
 }
 
+/** The program can hold a primitive-wrapper SUBCLASS instance or relink a prototype (dyn.primInit from a `class C extends String` rewrite,
+ * or Object.setPrototypeOf): the runtime then compiles in the epoch bookkeeping of its wrapper cache (-DSCR_WRAP_WATCH). Every other program
+ * keeps the dyn-key insertion path exactly as before. A wrong `false` is a stale cache, so this matches the two libCalls exactly. */
+export function moduleUsesWrapWatch(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown };
+    if (node.kind === "libCall" && (node.fn === "dyn.primInit" || node.fn === "dyn.setPrototypeOf")) {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
 /** The program reaches the intrinsic-prototype / wrapper-object / builtin-function machinery (scr_dyn_proto.c): Object.getPrototypeOf,
  * Object.prototype as a value, Object(x) over a dyn, the wrapper unwrap and `Object` as a value. A LINK GATE, not a fence -- a wrong
  * `false` is a loud unresolved-symbol link error, never a wrong answer. Without it the dyn core carries none of that code. */

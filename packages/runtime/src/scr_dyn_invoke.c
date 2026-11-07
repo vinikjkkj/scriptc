@@ -2400,7 +2400,7 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
     /* A primitive wrapper object (Object("s")): its prototype methods bind the primitive, and valueOf answers it. A member the
      * program stored on the wrapper itself keeps winning (the own lookup runs first below), so only an absent name delegates. */
     const ScrDyn *wp = scr_dyn_wrapper_prim(recv);
-    if (wp != NULL && scr_dyn_obj_get(recv, method, strlen(method)) == NULL && !scr_dyn_wrapper_user_member(recv, method, strlen(method))) {
+    if (wp != NULL && scr_dyn_obj_get(recv, method, strlen(method)) == NULL && (scr_dyn_ext(recv)->proto == NULL || !scr_dyn_wrapper_proto_member(recv, method, strlen(method)))) {
       if (wp->kind == SCR_DYN_STR && strcmp(method, "valueOf") != 0 && scr_dyn_wrapper_user_member(recv, "toString", 8)) {
         /* String.prototype methods run ToString(this): a subclass's own toString is honoured. */
         ScrStr *ts = scr_dyn_string_coerce(recv);

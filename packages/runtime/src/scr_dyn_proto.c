@@ -50,6 +50,9 @@ ScrDyn *scr_dyn_object_prototype(void) { return scr_dyn_object_prototype_mint();
  * the indices of a String wrapper, method calls (they bind the primitive), util.inspect and JSON.stringify unwrap it at their
  * own sites. */
 ScrDyn *scr_dyn_wrapper_new(const ScrDyn *prim) {
+#ifdef SCR_WRAP_WATCH
+  scr_wrap_epoch++; /* a recycled address must not inherit another wrapper's cached answer */
+#endif
   ScrDyn *w = scr_dyn_new_obj();
   scr_dyn_obj_set_slot(w, "%prim", 5, scr_dyn_retain((ScrDyn *)prim));
   const char *cn = prim->kind == SCR_DYN_STR ? "String" : prim->kind == SCR_DYN_NUM ? "Number" : prim->kind == SCR_DYN_BOOL ? "Boolean" : scr_dyn_is_symbol(prim) ? "Symbol" : "BigInt";
