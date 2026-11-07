@@ -13912,6 +13912,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24601-interface-constructor-member-is-inherited-not-an-own-key.ts": {
+   "order": [
+    "<repo>/tests/corpus/24601-interface-constructor-member-is-inherited-not-an-own-key.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2461-qs-parse-options.ts": {
    "order": [
     "<repo>/tests/corpus/2461-qs-parse-options.ts"
