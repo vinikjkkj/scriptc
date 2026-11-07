@@ -13561,21 +13561,27 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/2455-private-brand-checks.ts": {
+   "order": [
+    "<repo>/tests/corpus/2455-private-brand-checks.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/24550-replace-with-an-untyped-function-answering-any.js": {
    "order": [
     "<repo>/tests/corpus/24550-replace-with-an-untyped-function-answering-any.js"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/24553-empty-object-property-written-through-a-run-time-key.js": {
+  "<repo>/tests/corpus/24552-inspect-custom-method-on-a-statically-typed-class.cjs": {
    "order": [
-    "<repo>/tests/corpus/24553-empty-object-property-written-through-a-run-time-key.js"
+    "<repo>/tests/corpus/24552-inspect-custom-method-on-a-statically-typed-class.cjs"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/2455-private-brand-checks.ts": {
+  "<repo>/tests/corpus/24553-empty-object-property-written-through-a-run-time-key.js": {
    "order": [
-    "<repo>/tests/corpus/2455-private-brand-checks.ts"
+    "<repo>/tests/corpus/24553-empty-object-property-written-through-a-run-time-key.js"
    ],
    "diags": []
   },
