@@ -17116,6 +17116,9 @@ export class Lowerer {
   /** The class and method name an adopted function-like (an object-literal
    * method, typically) became a late method of. */
   readonly lateMethodOwner = new Map<ts.Node, { info: ClassInfo; mName: string }>();
+  /** Function expressions assigned as LATE methods (`C.prototype.m = function ...`): their declared parameters may re-bind off the dyn
+   * argument pack whatever type the checker gave them (a contextual type from a declaration file is not an annotation the author wrote). */
+  readonly lateMethodFns = new Set<ts.Node>();
   /** An accessor family's loop variable bound to the literal one unrolled
    * body is lowered for (keyed `<Class>.<method name>`), and the bindings
    * active while such a body lowers. */
