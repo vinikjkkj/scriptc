@@ -518,6 +518,20 @@ export function tokenCtorFactsOf(L: Lowerer, e: ts.Expression): { name: string; 
 const BUILTIN_CTOR_INDEX: Record<string, number | undefined> = Object.assign(Object.create(null) as Record<string, number | undefined>, {
   Object: 0, Array: 1, Function: 2, String: 3, Number: 4, Boolean: 5,
 });
+const primSubclassMemo = new WeakMap<object, boolean>();
+/** Does any source file of the program carry the primitive-subclass rewrite's reserved call (`__scrSuperString(` and its Number /
+ * Boolean siblings, authored only by js-desugar.ts)? Decided once per program from the files' text. */
+function programHasPrimSubclass(L: Lowerer): boolean {
+  let r = primSubclassMemo.get(L.program);
+  if (r === undefined) {
+    r = false;
+    for (const sf of L.program.getSourceFiles()) {
+      if (!sf.isDeclarationFile && sf.text.includes("__scrSuper")) { r = true; break; }
+    }
+    primSubclassMemo.set(L.program, r);
+  }
+  return r;
+}
 export function ctorObjectGlobalValue(L: Lowerer, canonical: string, loc: SrcLoc, receiverUse = false): IrExpr | null {
   // The WebCrypto object is an object in Node (typeof "object"), not a
   // string token: one process singleton, shared with require('crypto').webcrypto.
@@ -3667,6 +3681,17 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       {
         const ep = L.lowerErrorPrototypeProperty(expr);
         if (ep) return ep;
+        // `String.prototype` / `Number.prototype` / `Boolean.prototype` as a value: the immortal sentinel Object.getPrototypeOf of a
+        // string / number / boolean answers, so a chain that reaches it is the one `instanceof String` and String(v) recognise.
+        // Returned WITHOUT maybeNarrow, like Error.prototype above: tsc types the read `String`, and a string dynCheck would
+        // turn the sentinel into a primitive with no identity.
+        if (!L.dynamic && !expr.questionDotToken) {
+          for (const [primIdx, primName] of ["String", "Number", "Boolean"].entries()) {
+            if (L.stdlibGlobalMember(expr, primName) === "prototype") {
+              return { kind: "libCall", fn: "dyn.primPrototype", args: [{ kind: "numLit", value: primIdx, type: F64, loc: locOf(expr) }], type: DYN, loc: locOf(expr) };
+            }
+          }
+        }
         // `Error.stackTraceLimit` — the process-wide frame cap slot.
         if (!L.dynamic && !expr.questionDotToken && L.stdlibGlobalMember(expr, "Error") === "stackTraceLimit") {
           return { kind: "libCall", fn: "error.stackLimitGet", args: [], type: F64, loc: locOf(expr) };
@@ -23057,6 +23082,18 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
           left.kind === "varRef" ||
           (left.kind === "unionNarrow" && left.value.kind === "varRef") ||
           narrowBridgeArm(left)?.kind === "varRef";
+        // A program that holds primitive-wrapper SUBCLASS instances (`class V extends String`, js-desugar.ts) asks the run time for a
+        // dyn operand: the wrapper's chain reaches the intrinsic prototype. Every other program keeps the constant (no wrapper object
+        // of these constructors exists in it).
+        if (left.type.kind === "dyn" && programHasPrimSubclass(L)) {
+          return {
+            kind: "libCall",
+            fn: "dyn.instanceOf",
+            args: [left, { kind: "libCall", fn: "dyn.builtinCtor", args: [{ kind: "numLit", value: BUILTIN_CTOR_INDEX[wrapper]!, type: F64, loc }], type: DYN, loc }],
+            type: BOOL,
+            loc,
+          };
+        }
         if (pureRead) return { kind: "boolLit", value: false, type: BOOL, loc };
         L.unsupported(
           "SC1090",

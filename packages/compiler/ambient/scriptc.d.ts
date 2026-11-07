@@ -88,3 +88,10 @@ declare function comptime<T>(compute: () => T): T;
  * the engine embed end-to-end in tests; user-facing constructs will lower
  * to the island through their own paths, not through this. */
 declare function __island_eval(code: string): string;
+
+/* The `super(x)` of `class C extends String | Number | Boolean` after js-desugar.ts rewrote the class into its constructor-function
+ * form: makes the object `new C(..)` allocated (`self`) the primitive wrapper holding ToString(x) / ToNumber(x) / ToBoolean(x) (no x:
+ * "", 0, false). Reserved names the lowering answers by name (lower-calls.ts); the desugar is their only author. */
+declare function __scrSuperString(self: any, value?: any): any;
+declare function __scrSuperNumber(self: any, value?: any): any;
+declare function __scrSuperBoolean(self: any, value?: any): any;

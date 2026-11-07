@@ -1518,7 +1518,17 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
                               ? scr_insp_dyn((ScrDyn *)wp, recurse, depth)
                               : scr_dyn_symbol_descriptive(wp); /* a Symbol wrapper prints [Symbol: Symbol(desc)] */
           InspBuf wb = {0};
-          ib_cstr(&wb, wp->kind == SCR_DYN_STR ? "[String: " : wp->kind == SCR_DYN_NUM ? "[Number: " : wp->kind == SCR_DYN_BOOL ? "[Boolean: " : wp->kind == SCR_DYN_BIG ? "[BigInt: " : "[Symbol: ");
+          const char *pname = wp->kind == SCR_DYN_STR ? "String" : wp->kind == SCR_DYN_NUM ? "Number" : wp->kind == SCR_DYN_BOOL ? "Boolean" : wp->kind == SCR_DYN_BIG ? "BigInt" : "Symbol";
+          ib_char(&wb, '[');
+          ib_cstr(&wb, pname);
+          /* A subclass wrapper (`class V extends String`) names its constructor: `[String (V): 'ab']`. */
+          const char *cn = scr_dyn_ext(d)->cname;
+          if (cn != NULL && strcmp(cn, pname) != 0) {
+            ib_cstr(&wb, " (");
+            ib_cstr(&wb, cn);
+            ib_char(&wb, ')');
+          }
+          ib_cstr(&wb, ": ");
           ib_str(&wb, inner);
           ib_char(&wb, ']');
           scr_str_release(inner);

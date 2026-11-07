@@ -332,6 +332,11 @@ ScrStr *scr_dyn_object_to_string(const ScrDyn *d) {
       }
      }
     }
+    {
+      /* A primitive wrapper object (Object("s"), a `class C extends String` instance) answers its primitive's class. */
+      const ScrDyn *wp = scr_dyn_wrapper_prim(d);
+      if (wp != NULL) tag = wp->kind == SCR_DYN_STR ? "String" : wp->kind == SCR_DYN_NUM ? "Number" : wp->kind == SCR_DYN_BOOL ? "Boolean" : wp->kind == SCR_DYN_BIG ? "BigInt" : "Symbol";
+    }
     break;
   default: break;
   }

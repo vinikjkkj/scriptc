@@ -57,6 +57,114 @@ ScrDyn *scr_dyn_wrapper_new(const ScrDyn *prim) {
   return w;
 }
 
+static const ScrDyn *proto_wrapper_default_proto(const ScrDyn *v);
+static ScrDyn *kind_protos[64]; /* tentative: defined with its readers below */
+static bool proto_objectish(const ScrDyn *d) {
+  switch (d->kind) {
+    case SCR_DYN_NULL: case SCR_DYN_UNDEF: case SCR_DYN_BOOL: case SCR_DYN_NUM: case SCR_DYN_STR: case SCR_DYN_BIG: return false;
+    default: return !scr_dyn_is_symbol(d);
+  }
+}
+
+/* `String.prototype` / `Number.prototype` / `Boolean.prototype` as VALUES (which = 0 / 1 / 2), +1: the same immortal sentinel
+ * Object.getPrototypeOf("s") answers, so a chain that reaches it is recognised by `instanceof String` and String(v). */
+ScrDyn *scr_dyn_prim_prototype(double which) {
+  unsigned k = which == 0 ? SCR_DYN_STR : which == 1 ? SCR_DYN_NUM : SCR_DYN_BOOL;
+  return scr_dyn_retain(scr_dyn_intrinsic_slot(&kind_protos[k]));
+}
+
+/* The `super(x)` of `class C extends String | Number | Boolean`, run on the object `new C(..)` allocated: `self` becomes the
+ * wrapper object (its internal slot `%prim` holds ToString(x) / ToNumber(x) / ToBoolean(x), `new String()` an empty string,
+ * `new Number()` 0, `new Boolean()` false). `which` is 0 / 1 / 2 as above, plus 4 when the call had no argument. A Symbol
+ * argument throws the TypeError `new String(Symbol())` throws. Never touches the object's own keys, prototype link or name. */
+static bool prim_init(ScrDyn *self, const ScrDyn *x, double which) {
+  if (self == NULL || self->kind != SCR_DYN_OBJ) return true;
+  int w = (int)which;
+  bool none = (w & 4) != 0;
+  w &= 3;
+  ScrDyn *prim;
+  if (w == 0) {
+    if (none) {
+      ScrStr *e = scr_str_new("", 0);
+      prim = scr_dyn_new_str(e);
+      scr_str_release(e);
+    } else {
+      if (scr_dyn_is_symbol(x)) {
+        scr_throw_error(SCR_ERR_TYPE, scr_str_new("Cannot convert a Symbol value to a string", 41));
+        return false;
+      }
+      ScrStr *t = scr_dyn_string_coerce(x);
+      if (t == NULL) return false; /* a user toString threw: exception pending */
+      prim = scr_dyn_new_str(t);
+      scr_str_release(t);
+    }
+  } else if (w == 1) {
+    if (none) prim = scr_dyn_new_num(0);
+    else {
+      double n = scr_dyn_to_number(x);
+      prim = scr_dyn_new_num(n);
+    }
+  } else {
+    prim = scr_dyn_new_bool(none ? false : scr_dyn_truthy(x));
+  }
+  scr_dyn_obj_set_slot(self, "%prim", 5, prim);
+  return true;
+}
+
+/* The libCall form: answers `self` (+1), or NULL with the exception pending. */
+ScrDyn *scr_dyn_prim_init_ret(ScrDyn *self, const ScrDyn *x, double which) {
+  if (!prim_init(self, x, which)) return NULL;
+  return scr_dyn_retain(self);
+}
+
+/* Object.setPrototypeOf(o, proto), +1 (o itself). A primitive `o` answers itself unchanged (no link can be written); `proto` must
+ * be an object or null (Node's TypeError otherwise); a link that would close a cycle throws "Cyclic __proto__ value". Only an OBJ
+ * can hold the link (scr_dyn_obj_set_proto): any other object kind throws the loud "not supported yet" error, as Object.create
+ * over such a prototype does. */
+ScrDyn *scr_dyn_set_prototype_of(const ScrDyn *o, const ScrDyn *proto) {
+  if (o->kind == SCR_DYN_NULL || o->kind == SCR_DYN_UNDEF) {
+    scr_throw_error(SCR_ERR_TYPE, scr_str_new("Object.setPrototypeOf called on null or undefined", 49));
+    return NULL;
+  }
+  if (proto->kind != SCR_DYN_NULL && !proto_objectish(proto)) {
+    ScrStr *shown = scr_dyn_string_coerce(proto);
+    ScrJsonBuf b;
+    scr_jb_init(&b);
+    scr_jb_puts(&b, "Object prototype may only be an Object or null: ");
+    if (shown != NULL) scr_jb_write(&b, shown->data, shown->len);
+    scr_str_release(shown);
+    scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
+    return NULL;
+  }
+  if (!proto_objectish(o)) return scr_dyn_retain((ScrDyn *)o); /* a primitive: unchanged */
+  if (o->kind != SCR_DYN_OBJ || (proto->kind != SCR_DYN_NULL && proto->kind != SCR_DYN_OBJ)) {
+    scr_throw_error(SCR_ERR_ERROR, scr_str_new("Object.setPrototypeOf over this kind of object is not supported yet (the [[Prototype]] link holds a plain object here)", 117));
+    return NULL;
+  }
+  if (proto->kind == SCR_DYN_OBJ) {
+    ScrDyn *cur = scr_dyn_obj_proto_ref(proto);
+    bool cyc = proto == o;
+    for (int guard = 0; !cyc && guard < 1024 && cur != NULL; guard++) {
+      if (cur == o) cyc = true;
+      ScrDyn *next = scr_dyn_obj_proto_ref(cur);
+      scr_dyn_release(cur);
+      cur = next;
+    }
+    if (cur != NULL) scr_dyn_release(cur);
+    if (cyc) {
+      scr_throw_error(SCR_ERR_TYPE, scr_str_new("Cyclic __proto__ value", 22));
+      return NULL;
+    }
+  }
+  if (proto->kind == SCR_DYN_NULL) {
+    scr_dyn_obj_set_proto((ScrDyn *)o, NULL);
+    ((ScrDyn *)o)->null_proto = true;
+  } else {
+    scr_dyn_obj_set_proto((ScrDyn *)o, (ScrDyn *)proto);
+  }
+  return scr_dyn_retain((ScrDyn *)o);
+}
+
 /* The wrapped primitive (borrowed), or NULL when `d` is not a wrapper object. */
 static const ScrDyn *proto_wrapper_prim(const ScrDyn *d) {
   if (d == NULL || d->kind != SCR_DYN_OBJ) return NULL;
@@ -330,6 +438,10 @@ ScrDyn *scr_dyn_get_prototype_of(const ScrDyn *d) {
       if (scr_dyn_is_null_proto(d)) return scr_dyn_new_null();
       ScrDyn *own = scr_dyn_obj_proto_ref(d);
       if (own != NULL) return own;
+      {
+        const ScrDyn *wd = proto_wrapper_default_proto(d); /* Object("s"): String.prototype */
+        if (wd != NULL) return scr_dyn_retain((ScrDyn *)wd);
+      }
       return scr_dyn_object_prototype();
     }
     case SCR_DYN_OBJINST: {
@@ -399,5 +511,21 @@ static ScrDyn *proto_construct_builtin(const ScrDyn *fn, const ScrDyn *args, boo
   }
   return NULL;
 }
-static const ScrDynProtoOps proto_ops = { proto_wrapper_prim, proto_intrinsic_member, proto_is_intrinsic, proto_key_get, proto_construct_builtin };
+/* `String.prototype` / `Number.prototype` / `Boolean.prototype` read off the builtin constructor VALUE: the sentinel, so
+ * `v instanceof String` over a wrapper whose chain reaches it is true. */
+static ScrDyn *proto_builtin_fn_prototype(const ScrDyn *fn) {
+  if (fn == NULL || fn->kind != SCR_DYN_FUNC) return NULL;
+  if (fn == scr_builtin_fns[SCR_BI_STRING]) return scr_dyn_prim_prototype(0);
+  if (fn == scr_builtin_fns[SCR_BI_NUMBER]) return scr_dyn_prim_prototype(1);
+  if (fn == scr_builtin_fns[SCR_BI_BOOLEAN]) return scr_dyn_prim_prototype(2);
+  return NULL;
+}
+static const ScrDyn *proto_wrapper_default_proto(const ScrDyn *v) {
+  const ScrDyn *wp = proto_wrapper_prim(v);
+  if (wp == NULL || scr_dyn_ext(v)->proto != NULL) return NULL;
+  unsigned k = wp->kind == SCR_DYN_STR || wp->kind == SCR_DYN_NUM || wp->kind == SCR_DYN_BOOL ? (unsigned)wp->kind : 0;
+  if (k == 0) return NULL; /* BigInt / Symbol wrappers keep the plain-object answer */
+  return scr_dyn_intrinsic_slot(&kind_protos[k]);
+}
+static const ScrDynProtoOps proto_ops = { proto_wrapper_prim, proto_intrinsic_member, proto_is_intrinsic, proto_key_get, proto_construct_builtin, proto_builtin_fn_prototype, proto_wrapper_default_proto };
 __attribute__((constructor)) static void proto_install(void) { scr_dyn_proto_ops = &proto_ops; }
