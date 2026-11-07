@@ -2041,7 +2041,7 @@ ScrDyn *scr_dyn_object_prototype(void) { return scr_dyn_object_prototype_mint();
 ScrDyn *scr_dyn_wrapper_new(const ScrDyn *prim) {
   ScrDyn *w = scr_dyn_new_obj();
   scr_dyn_obj_set_slot(w, "%prim", 5, scr_dyn_retain((ScrDyn *)prim));
-  const char *cn = prim->kind == SCR_DYN_STR ? "String" : prim->kind == SCR_DYN_NUM ? "Number" : prim->kind == SCR_DYN_BOOL ? "Boolean" : "BigInt";
+  const char *cn = prim->kind == SCR_DYN_STR ? "String" : prim->kind == SCR_DYN_NUM ? "Number" : prim->kind == SCR_DYN_BOOL ? "Boolean" : scr_dyn_is_symbol(prim) ? "Symbol" : "BigInt";
   scr_dyn_obj_set_ctor_name(w, cn);
   return w;
 }
@@ -2071,6 +2071,7 @@ ScrDyn *scr_dyn_to_object(const ScrDyn *d) {
     case SCR_DYN_BIG:
       return scr_dyn_wrapper_new(d);
     default:
+      if (scr_dyn_is_symbol(d)) return scr_dyn_wrapper_new(d); /* Object(sym): a Symbol wrapper */
       return scr_dyn_retain((ScrDyn *)d);
   }
 }
@@ -2088,6 +2089,11 @@ static size_t class_n;
  * constructor, hasOwnProperty, isPrototypeOf, propertyIsEnumerable, toString, valueOf, toLocaleString, and the `constructor`
  * of the Array, Function, String, Number and Boolean prototypes. Every function binds its receiver the way a method does
  * (scr_dyn_this_get), so `proto.hasOwnProperty.call(o, k)` and `Object.prototype.toString.call(x)` work. */
+static bool scr_dyn_is_intrinsic_proto(const ScrDyn *d);
+static const ScrDynClass *scr_dyn_class_of_sentinel(const ScrDyn *d) {
+  for (size_t i = 0; i < class_n; i++) if (class_protos[i] == d) return class_keys[i];
+  return NULL;
+}
 static bool scr_dyn_is_intrinsic_proto(const ScrDyn *d) {
   if (d == NULL || d->kind != SCR_DYN_OBJ || d->rc != SIZE_MAX) return false;
   if (d == scr_dyn_object_prototype()) return true;
@@ -2209,19 +2215,22 @@ static ScrDyn *scr_builtin_boolean_ctor(ScrClosure *clo, ScrDyn *const *args, si
   (void)clo;
   return scr_dyn_new_bool(argc > 0 && scr_dyn_truthy(args[0]));
 }
+/* Array(...) / new Array(...): no argument is [], one argument is a LENGTH when it is a number (RangeError for an invalid one) and
+ * the single element otherwise, several arguments are the elements. */
 static ScrDyn *scr_builtin_array_ctor(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
   (void)clo;
-  if (argc == 1 && args[0]->kind == SCR_DYN_NUM) {
-    scr_throw_error(SCR_ERR_ERROR, scr_str_new("Array(length) through the constructor value is not supported yet", 63));
-    return NULL;
-  }
+  if (argc == 1) return scr_dyn_new_arr_ctor1(args[0]);
   ScrDyn *a = scr_dyn_new_arr();
   for (size_t i = 0; i < argc; i++) scr_dyn_arr_push(a, scr_dyn_retain(args[i]));
   return a;
 }
+/* Function(...) / new Function(...): the sanctioned text path. The embedded engine (linked only into programs that can reach it)
+ * registers the constructor here; without it the call names the missing engine instead of answering something else. */
+ScrDyn *(*scr_function_ctor_hook)(ScrDyn *const *args, size_t argc) = NULL;
 static ScrDyn *scr_builtin_function_ctor(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
-  (void)clo; (void)args; (void)argc;
-  scr_throw_error(SCR_ERR_ERROR, scr_str_new("the Function constructor value is not supported yet", 51));
+  (void)clo;
+  if (scr_function_ctor_hook != NULL) return scr_function_ctor_hook(args, argc);
+  scr_throw_error(SCR_ERR_ERROR, scr_str_new("the Function constructor value needs the embedded engine, which this build does not include", 91));
   return NULL;
 }
 
@@ -2276,6 +2285,9 @@ ScrDyn *scr_dyn_intrinsic_member(const ScrDyn *recv, const char *key, size_t key
     if (recv == kind_protos[SCR_DYN_STR]) return scr_builtin_fn(SCR_BI_STRING);
     if (recv == kind_protos[SCR_DYN_NUM]) return scr_builtin_fn(SCR_BI_NUMBER);
     if (recv == kind_protos[SCR_DYN_BOOL]) return scr_builtin_fn(SCR_BI_BOOLEAN);
+    /* A class's prototype names the class value (`Object.getPrototypeOf(inst).constructor === inst.constructor`). */
+    const ScrDynClass *kc = scr_dyn_class_of_sentinel(recv);
+    if (kc != NULL && scr_dyn_class_ops != NULL && scr_dyn_class_ops->class_value_of != NULL) return scr_dyn_class_ops->class_value_of(kc);
   }
 #undef SCR_BI_IS
   return NULL;
@@ -7338,6 +7350,10 @@ ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc) {
  * all, so Node throws "<spelling> is not a function" where every other
  * OBJ answers "[object Object]". `what` carries the source spelling. */
 ScrStr *scr_dyn_to_string_method(const ScrDyn *d, const ScrStr *enc, const ScrStr *what) {
+  {
+    const ScrDyn *wsym = scr_dyn_wrapper_prim(d);
+    if (wsym != NULL && scr_dyn_is_symbol(wsym)) return scr_dyn_symbol_descriptive(wsym); /* Symbol.prototype.toString.call(wrapper) */
+  }
   if (d->kind == SCR_DYN_OBJ && d->rc == SIZE_MAX && scr_dyn_is_intrinsic_proto(d)) return scr_dyn_to_string(d, enc); /* an intrinsic prototype carries toString */
   if (d->kind == SCR_DYN_OBJ && d->null_proto) {
     ScrJsonBuf b;
@@ -7968,6 +7984,13 @@ ScrDyn *scr_dyn_obj_key_get(ScrDyn *recv, const char *key, size_t key_len) {
   {
     /* A String wrapper's own `length` and index properties (the primitive's, read through the wrapper). */
     const ScrDyn *wp = scr_dyn_wrapper_prim(recv);
+    if (wp != NULL && wp->kind == SCR_DYN_HANDLE) {
+      /* A Symbol wrapper reads the symbol's own surface (`description`). */
+      ScrStr *hk = scr_str_new(key, key_len);
+      ScrDyn *hr = scr_dyn_handle_key_get(wp, hk);
+      scr_str_release(hk);
+      return hr != NULL ? hr : scr_dyn_retain(scr_dyn_undefined());
+    }
     if (wp != NULL && wp->kind == SCR_DYN_STR) {
       if (key_len == 6 && memcmp(key, "length", 6) == 0) return scr_dyn_new_num(scr_str_utf16_len(wp->v.str));
       double idx = 0;
@@ -14021,7 +14044,7 @@ ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode) {
           scr_dyn_release(cv);
         }
       }
-      return out;
+      /* ...then the wrapper's own enumerable properties (`Object("ab").x = 1`) fall through to the ordinary walk below. */
     }
   }
   if (v->kind == SCR_DYN_FUNC && scr_dyn_class_ops != NULL) {

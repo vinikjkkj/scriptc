@@ -1444,13 +1444,19 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       {
         const ScrDyn *wp = scr_dyn_wrapper_prim(d);
         if (wp != NULL) {
-          ScrStr *inner = scr_insp_dyn((ScrDyn *)wp, recurse, depth);
+          ScrStr *inner = wp->kind == SCR_DYN_STR || wp->kind == SCR_DYN_NUM || wp->kind == SCR_DYN_BOOL || wp->kind == SCR_DYN_BIG
+                              ? scr_insp_dyn((ScrDyn *)wp, recurse, depth)
+                              : scr_dyn_symbol_descriptive(wp); /* a Symbol wrapper prints [Symbol: Symbol(desc)] */
           InspBuf wb = {0};
-          ib_cstr(&wb, wp->kind == SCR_DYN_STR ? "[String: " : wp->kind == SCR_DYN_NUM ? "[Number: " : wp->kind == SCR_DYN_BOOL ? "[Boolean: " : "[BigInt: ");
+          ib_cstr(&wb, wp->kind == SCR_DYN_STR ? "[String: " : wp->kind == SCR_DYN_NUM ? "[Number: " : wp->kind == SCR_DYN_BOOL ? "[Boolean: " : wp->kind == SCR_DYN_BIG ? "[BigInt: " : "[Symbol: ");
           ib_str(&wb, inner);
           ib_char(&wb, ']');
           scr_str_release(inner);
-          return ib_take(&wb);
+          ScrStr *base = ib_take(&wb);
+          if (d->v.obj.len == 0) return base; /* no own enumerable property: just the wrapper */
+          ScrStr *with = insp_with_base(base, (ScrDyn *)d, recurse, depth); /* `[String: 'ab'] { x: 1 }` */
+          scr_str_release(base);
+          return with;
         }
       }
       /* Node's circular check comes first, before the empty and depth answers:

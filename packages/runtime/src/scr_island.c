@@ -10435,3 +10435,34 @@ void scr_island_timers_teardown(void) {}
 #endif /* !SCR_DYNAMIC */
 
 #endif /* SCR_DYNAMIC || SCR_ENGINE */
+
+/* Function(...) / new Function(...) reached through the constructor VALUE (`Object.getPrototypeOf(f).constructor("return 1")`): the engine's
+ * own Function constructor builds the function exactly as the compiled `new Function(...)` sites do (lower-engine-fn.ts). Registered with
+ * the dyn runtime at load, so a program that links this unit answers the call and one that does not names the missing engine. */
+static ScrDyn *isl_function_ctor(ScrDyn *const *args, size_t argc) {
+  ScrJsval **argv = (ScrJsval **)malloc((argc > 0 ? argc : 1) * sizeof *argv);
+  size_t made_n = 0;
+  for (size_t i = 0; i < argc; i++) {
+    ScrStr *t = scr_dyn_string_coerce(args[i]);
+    if (scr_exc_pending()) {
+      scr_str_release(t);
+      for (size_t j = 0; j < made_n; j++) scr_jsval_release(argv[j]);
+      free(argv);
+      return NULL;
+    }
+    argv[made_n++] = scr_jsval_from_str(t);
+    scr_str_release(t);
+  }
+  ScrStr *fname = scr_str_new("Function", 8);
+  ScrJsval *fn = scr_jsval_global_get(fname);
+  scr_str_release(fname);
+  ScrJsval *made = scr_jsval_construct(fn, (int)argc, argv);
+  scr_jsval_release(fn);
+  for (size_t j = 0; j < made_n; j++) scr_jsval_release(argv[j]);
+  free(argv);
+  if (made == NULL) return NULL;
+  ScrDyn *box = scr_jsval_fn_box(made);
+  scr_jsval_release(made);
+  return box;
+}
+__attribute__((constructor)) static void isl_register_function_ctor(void) { scr_function_ctor_hook = isl_function_ctor; }
