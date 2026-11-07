@@ -7720,6 +7720,9 @@ export const DYN_DISPATCH_METHODS = new Set<string>([
   // null-prototype dictionary inherits nothing, which is why the claim
   // is a runtime DISPATCH and not a fold.
   "hasOwnProperty",
+  // The two other Object.prototype methods every dyn kind inherits; the intrinsic prototype values (Object.getPrototypeOf) carry
+  // them as native function values, and a plain object answers through the runtime object-prototype table.
+  "isPrototypeOf", "propertyIsEnumerable",
   // Object.prototype.toLocaleString -- Invoke(this, "toString") on a string, boolean or object, the Date
   // handle's real formatter (locale and options included), and the loud ladder on a number or an array.
   "toLocaleString",
