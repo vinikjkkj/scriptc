@@ -8420,6 +8420,11 @@ bool scr_dyn_key_delete(ScrDyn *recv, ScrStr *key) {
       if (key->data[i] < '0' || key->data[i] > '9') is_index = 0;
       else idx = idx * 10 + (size_t)(key->data[i] - '0');
     }
+    /* A FROZEN array refuses the delete: sloppy code answers false, strict code throws V8's TypeError. */
+    if (scr_dyn_arr_is_frozen(recv) && is_index && idx < recv->v.arr.len) {
+      if (!scr_dyn_sloppy_write()) scr_frozen_fail_len(recv->v.arr.len, 12, (double)idx, 0, 0);
+      return false;
+    }
     if (is_index && idx < recv->v.arr.len) {
       /* `delete a[i]` leaves a HOLE: the slot becomes the absent node. */
       ScrDyn *old = recv->v.arr.items[idx];
@@ -8679,12 +8684,29 @@ void scr_dyn_static_copy_refuse(const char *what) {
   scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
 }
 
+ScrDyn *scr_dyn_arr_freeze(ScrDyn *d) {
+  if (d->kind != SCR_DYN_ARR) {
+    static const char msg[] = "Object.freeze reached a dynamic value that is not an array (the compiler proves the operand of a dynamic freeze is a fresh array)";
+    scr_throw_error_msg(SCR_ERR_ERROR, msg, sizeof msg - 1);
+    return NULL;
+  }
+  d->null_proto = true; /* the ARR kind's frozen flag */
+  return scr_dyn_retain(d);
+}
+
 static int scr_dyn_sloppy_site = 0;
 bool scr_dyn_sloppy_write(void) { return scr_dyn_sloppy_site > 0; }
 void scr_dyn_key_set_sloppy(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
   scr_dyn_sloppy_site++;
   scr_dyn_key_set(recv, key, value);
   scr_dyn_sloppy_site--;
+}
+
+bool scr_dyn_key_delete_sloppy(ScrDyn *recv, ScrStr *key) {
+  scr_dyn_sloppy_site++;
+  bool r = scr_dyn_key_delete(recv, key);
+  scr_dyn_sloppy_site--;
+  return r;
 }
 
 void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
@@ -8860,6 +8882,27 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
     return;
   }
   if (recv->kind == SCR_DYN_ARR) {
+    /* A FROZEN array: sloppy code ignores every write, strict code throws V8's TypeError for the first thing the write would do. */
+    if (scr_dyn_arr_is_frozen(recv)) {
+      if (scr_dyn_sloppy_write()) return;
+      size_t fidx = 0;
+      int f_index = key->len > 0 && key->len < 16 && !(key->len > 1 && key->data[0] == '0');
+      for (size_t i = 0; f_index && i < key->len; i++) {
+        if (key->data[i] < '0' || key->data[i] > '9') f_index = 0;
+        else fidx = fidx * 10 + (size_t)(key->data[i] - '0');
+      }
+      if (f_index) scr_frozen_fail_len(recv->v.arr.len, 9, (double)fidx, 0, 0);
+      else if (key->len == 6 && memcmp(key->data, "length", 6) == 0) scr_frozen_fail_len(recv->v.arr.len, 10, 0, 0, 0);
+      else {
+        ScrJsonBuf fb;
+        scr_jb_init(&fb);
+        scr_jb_puts(&fb, "Cannot add property ");
+        for (size_t i = 0; i < key->len; i++) scr_jb_putc(&fb, key->data[i]);
+        scr_jb_puts(&fb, ", object is not extensible");
+        scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&fb));
+      }
+      return;
+    }
     /* An INDEX write on a dyn array (`args[i] = v` — the variadic-rest
      * rebuild): a canonical numeric key sets/extends the element, holes
      * padding with undefined exactly like JS length growth. Non-index
