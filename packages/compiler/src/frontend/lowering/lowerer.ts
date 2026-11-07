@@ -824,7 +824,7 @@ export function lowerToIr(
   }
   const ffiImports = options.ffiImports ?? [];
   OWN_SHADOW_ROOTS.clear(); // the families of THIS program: the discovery pass fills it, the emit pass reads it
-  const validation = new Lowerer(program, entry, moduleOrder, dynamic, {
+  let validation: Lowerer | null = new Lowerer(program, entry, moduleOrder, dynamic, {
     targetPlatform,
     ffiImports,
   });
@@ -840,7 +840,7 @@ export function lowerToIr(
   // FFI-free builds reuse the validation lowerer (validation is an
   // immediate no-op there), retaining the historical two-pass
   // construction cost.
-  let discovery = ffiImports.length === 0
+  let discovery: Lowerer | null = ffiImports.length === 0
     ? validation
     : new Lowerer(program, entry, moduleOrder, dynamic, {
         targetPlatform,
@@ -882,6 +882,10 @@ export function lowerToIr(
       };
     }
   }
+  // The discovery pass answered what it was built for (the reachable set, the pin edits): its lowerer, type tables and lowered units
+  // are not read again, and the emit pass builds a second full set beside them. Dropped here so the emit pass does not hold both.
+  discovery = null;
+  validation = null;
   const __ovfAfterDiscovery = new Set(overflowShapeKeys);
   const __ovfDeniedAfterDiscovery = new Set(overflowShapeKeysDenied);
   const emit = new Lowerer(program, entry, moduleOrder, dynamic, {
