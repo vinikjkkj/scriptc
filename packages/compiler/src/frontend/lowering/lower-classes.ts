@@ -3,6 +3,7 @@
  * synthesized derived ctors and field initializers, super calls and super
  * accessor access, upcasts, `new` expressions, and the builtin Error
  * hierarchy registration. */
+import { isProvenanceSourceFile } from "../provenance-registry.js";
 import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import { protoDataFieldNames, registerProtoData } from "./lower-protodata.js";
 import { appliesEmitterMixin, EMITTER_MIXIN_FIELD, graftCtorEmitterInit } from "./lower-emitter-mixin.js";
@@ -919,6 +920,9 @@ export interface GenericClassInfo {
 
   export function scanDefinePropStringTables(L: Lowerer): Set<ts.ClassLikeDeclaration> {
     const out = new Set<ts.ClassLikeDeclaration>();
+    let anyWrite = false;
+    const pkgClasses: ts.ClassDeclaration[] = [];
+    const packageJsFile = (f: string): boolean => isProvenanceSourceFile(f) || f.includes("/node_modules/");
     const visit = (n: ts.Node): void => {
       if (ts.isCallExpression(n)) {
         const decl = definePropTableSiteOf(L, n);
@@ -930,6 +934,17 @@ export interface GenericClassInfo {
       // there). The class needs the table whether or not its package is
       // opted into the implicit-any lane: a provenance-verified package
       // (pg-pool's PendingItem) is no less JavaScript than a --npm-static one.
+      // The same write through an UNTYPED receiver (pg-pool's `client._poolUseCount = ...`, `client` a parameter): the checker names no class, so
+      // any package class could be the instance. Recorded here, resolved below for the classes of installed packages only.
+      if (
+        ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        ts.isPropertyAccessExpression(n.left) && n.left.questionDotToken === undefined && !ts.isPrivateIdentifier(n.left.name) &&
+        isJsSourceFile(n.left.getSourceFile()) && packageJsFile(n.left.getSourceFile().fileName) &&
+        (L.typeOf(n.left.expression).flags & ts.TypeFlags.Any) !== 0 && n.left.expression.kind !== ts.SyntaxKind.ThisKeyword
+      ) {
+        anyWrite = true;
+      }
+      if (ts.isClassDeclaration(n) && isJsSourceFile(n.getSourceFile()) && packageJsFile(n.getSourceFile().fileName)) pkgClasses.push(n);
       if (
         ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
         ts.isPropertyAccessExpression(n.left) && n.left.questionDotToken === undefined &&
@@ -943,6 +958,14 @@ export interface GenericClassInfo {
     for (const sf of L.fileTag.keys()) {
       if (sf.isDeclarationFile) continue;
       ts.forEachChild(sf, visit);
+    }
+    if (anyWrite) {
+      for (const c of pkgClasses) {
+        const ext = c.heritageClauses?.find((h) => h.token === ts.SyntaxKind.ExtendsKeyword)?.types[0]?.expression;
+        // An EventEmitter root keeps its table like any program class (symbolTableRootOk); every other builtin base keeps its own path.
+        const emitterRooted = ext !== undefined && /(^|\.)EventEmitter$/.test(ext.getText());
+        if (emitterRooted || !classHasBuiltinBase(L, c)) out.add(c);
+      }
     }
     return out;
   }
