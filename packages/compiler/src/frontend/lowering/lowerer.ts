@@ -3894,7 +3894,86 @@ export class Lowerer {
         for (const v of Object.values(o)) visit(v);
       };
       visit(fn.body);
+      this.hoistFrozenGuards(fn.body);
     }
+  }
+
+  /** THE HOIST. A guarded store pays a flag load and a branch per iteration. In a loop whose body provably cannot freeze anything -- every node in it is on
+   * a short list of pure kinds (locals, arithmetic, array reads and stores, length, push): no call of any kind, so no callee that could reach a freeze --
+   * and whose guarded arrays are plain variables the loop never assigns, the flag cannot change while the loop runs. The loop is then emitted twice
+   * behind ONE test of the flags before it: `if (frozen(a) || ...) { the loop with its per-store refusing paths } else { the loop with plain stores }`.
+   * Outermost loops first; a loop that does not qualify is searched for inner ones. */
+  private hoistFrozenGuards(body: unknown): void {
+    const PURE = new Set([
+      "exprStmt", "assign", "varDecl", "if", "block", "for", "while", "doWhile", "break", "continue",
+      "varRef", "numLit", "boolLit", "strLit", "bin", "unary", "logical", "ternary", "arrayGet", "arraySet", "arrayClear", "arrIntrinsic",
+    ]);
+    const PURE_INTRINSICS = new Set(["length", "push", "hasIndex", "hasSlot"]);
+    const isLoop = (n: { kind?: unknown }): boolean => n.kind === "for" || n.kind === "while" || n.kind === "doWhile";
+    const seen = new Set<object>();
+    const tryHoist = (loop: Record<string, unknown> & { kind: string; loc: SrcLoc }): boolean => {
+      let ok = true;
+      let guarded = 0;
+      const recv = new Map<string, IrType>();
+      const assigned = new Set<string>();
+      const walk = (n: unknown, key: string): void => {
+        if (!ok || n === null || typeof n !== "object") return;
+        if (Array.isArray(n)) {
+          for (const x of n) walk(x, key);
+          return;
+        }
+        if (key === "type" || key === "loc") return; // IR types and source locations are data, not code
+        const o = n as Record<string, unknown> & { kind?: unknown };
+        if (typeof o.kind === "string") {
+          if (!PURE.has(o.kind)) { ok = false; return; }
+          if (o.kind === "arrIntrinsic" && !PURE_INTRINSICS.has(o["method"] as string)) { ok = false; return; }
+          if (o.kind === "assign" || o.kind === "varDecl") assigned.add(o["localId"] as string);
+          if (o["frozenGuard"] !== undefined) {
+            const r = (o["arr"] ?? o["receiver"]) as { kind?: string; localId?: string; type?: IrType } | undefined;
+            if (r?.kind !== "varRef" || r.localId === undefined || r.type === undefined) { ok = false; return; }
+            recv.set(r.localId, r.type);
+            guarded++;
+          }
+        }
+        for (const [k, v] of Object.entries(o)) walk(v, k);
+      };
+      walk(loop, "");
+      if (!ok || guarded === 0) return false;
+      for (const id of recv.keys()) if (assigned.has(id)) return false;
+      const strip = (n: unknown): void => {
+        if (n === null || typeof n !== "object") return;
+        if (Array.isArray(n)) { for (const x of n) strip(x); return; }
+        const o = n as Record<string, unknown>;
+        delete o["frozenGuard"];
+        for (const v of Object.values(o)) strip(v);
+      };
+      const plain = structuredClone(loop) as Record<string, unknown>;
+      strip(plain);
+      const original = { ...loop };
+      const loc = loop.loc;
+      let cond: IrExpr | null = null;
+      for (const [id, t] of recv) {
+        const test: IrExpr = { kind: "libCall", fn: "arr.isFrozen", args: [{ kind: "varRef", localId: id, type: t, loc }], type: BOOL, loc };
+        cond = cond === null ? test : { kind: "logical", op: "||", left: cond, right: test, type: BOOL, loc };
+      }
+      for (const k of Object.keys(loop)) delete (loop as Record<string, unknown>)[k];
+      Object.assign(loop, { kind: "if", cond, then: [original], else_: [plain], loc });
+      seen.add(original);
+      seen.add(plain);
+      return true;
+    };
+    const visit = (node: unknown): void => {
+      if (node === null || typeof node !== "object" || seen.has(node)) return;
+      seen.add(node);
+      if (Array.isArray(node)) {
+        for (const x of node) visit(x);
+        return;
+      }
+      const o = node as Record<string, unknown> & { kind?: unknown };
+      if (isLoop(o) && tryHoist(o as Record<string, unknown> & { kind: string; loc: SrcLoc })) return;
+      for (const [k, v] of Object.entries(o)) if (k !== "type" && k !== "loc") visit(v);
+    };
+    visit(body);
   }
 
 /** Orchestrator extension (2026-10-29), not a language rule: a dyn-source
