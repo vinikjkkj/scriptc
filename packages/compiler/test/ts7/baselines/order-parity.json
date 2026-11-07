@@ -13651,6 +13651,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24626-object-prototype-member-probes-over-every-dyn-kind.js": {
+   "order": [
+    "<repo>/tests/corpus/24626-object-prototype-member-probes-over-every-dyn-kind.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2463-qs-escape-unescape.ts": {
    "order": [
     "<repo>/tests/corpus/2463-qs-escape-unescape.ts"
