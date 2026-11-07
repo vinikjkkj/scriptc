@@ -1436,14 +1436,26 @@ static double scr_uptime_now_ms(void) {
   if (!QueryPerformanceCounter(&now)) return (double)GetTickCount64();
   return (double)now.QuadPart * scr_qpc_ms_per_tick;
 }
-/* Anchored at LOAD, like the non-Windows build (the process start Node's timeOrigin means): a lazy anchor made the
- * FIRST performance.now()/Event.timeStamp read exactly 0, where Node's is always positive (it counts from process
- * start, tens of ms before user code runs). The lazy checks in scr_process_uptime/scr_perf_now stay as the fallback
- * for a compiler without constructor support. */
-#if defined(__GNUC__) || defined(__clang__)
-__attribute__((constructor))
-#endif
-static void scr_uptime_anchor_init(void) { scr_uptime_t0_ms = scr_uptime_now_ms(); }
+/* The origin is Node's: the process's own START. The anchor stays LAZY (a constructor would reference this clock code from every
+ * program, and hello-world's .text, which gc-sections keeps free of it, would grow by the QueryPerformanceCounter probe), but it is
+ * SEEDED from the process creation time (GetProcessTimes), so the first performance.now()/Event.timeStamp read is already the time
+ * elapsed since the process started - positive, as Node's always is - instead of exactly 0 at the first call. */
+static void scr_uptime_anchor_init(void) {
+  const double now = scr_uptime_now_ms();
+  FILETIME created, exited, kernel, user, sysnow;
+  double since_start = 0.0;
+  if (GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user)) {
+    GetSystemTimeAsFileTime(&sysnow);
+    ULARGE_INTEGER c, n;
+    c.LowPart = created.dwLowDateTime;
+    c.HighPart = created.dwHighDateTime;
+    n.LowPart = sysnow.dwLowDateTime;
+    n.HighPart = sysnow.dwHighDateTime;
+    if (n.QuadPart > c.QuadPart) since_start = (double)(n.QuadPart - c.QuadPart) / 10000.0; /* 100 ns units -> ms */
+  }
+  scr_uptime_t0_ms = now - since_start;
+  if (scr_uptime_t0_ms == 0) scr_uptime_t0_ms = -1e-9; /* 0 means "not anchored yet"; a hair of negative origin keeps it set */
+}
 #else
 #include <sys/resource.h>
 #include <sys/time.h>
