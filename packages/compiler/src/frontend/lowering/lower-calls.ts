@@ -7116,6 +7116,16 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
  * the dyn array and validated-extracts the survivors into the element type
  * the checker committed the result to. Null when the receiver isn't a dyn
  * value or the method isn't claimable (the method-call fence stays). */
+  /** `Object.prototype.<m>` written as a member read, `Object` the stdlib global. */
+  function isObjectPrototypeMemberRead(L: Lowerer, e: ts.Expression): boolean {
+    let x: ts.Expression = e;
+    while (ts.isParenthesizedExpression(x) || ts.isNonNullExpression(x)) x = x.expression;
+    if (!ts.isPropertyAccessExpression(x)) return false;
+    const proto = x.expression;
+    return ts.isPropertyAccessExpression(proto) && proto.name.text === "prototype" &&
+      ts.isIdentifier(proto.expression) && L.isStdlibGlobal(proto.expression, "Object");
+  }
+
   export function lowerDynReceiverMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (L.chainBlocked(call, access)) return null;
@@ -7137,6 +7147,10 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       // evolving `let h = {}` object flowing back out of a JS helper —
       // tsc types the return by the evolved shape, the binding lowered
       // dyn): probe the lowering and claim exactly the dyn results.
+      // `Object.prototype.hasOwnProperty.call(o, k)` and its siblings: `Object.prototype` is a dyn VALUE now, so the member
+      // read probes dyn too, but the call is the stdlib idiom the dedicated recognizers below fold; claiming it here would
+      // lower it as a generic invoke through the prototype object.
+      if (isObjectPrototypeMemberRead(L, access.expression)) return null;
       const probed = probeLower(L, access.expression);
       if (probed?.type.kind !== "dyn") return null;
       recv = probed;
