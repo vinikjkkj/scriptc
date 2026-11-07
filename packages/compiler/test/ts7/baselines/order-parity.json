@@ -13954,6 +13954,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24720-record-view-dyn-method-field-keeps-receiver.ts": {
+   "order": [
+    "<repo>/tests/corpus/24720-record-view-dyn-method-field-keeps-receiver.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24721-record-view-dyn-method-field-subclass-callbacks.ts": {
+   "order": [
+    "<repo>/tests/corpus/24721-record-view-dyn-method-field-subclass-callbacks.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2473-option-table-widths.js": {
    "order": [
     "<repo>/tests/corpus/2473-option-table-widths.js"
