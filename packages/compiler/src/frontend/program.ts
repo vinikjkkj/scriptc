@@ -54,7 +54,7 @@ import { clearResolveCaches, isNodeModulesPath, nearestPackageTypeOf, nearestPkg
 import { probeNodeImportRefusal, probeNodeRequireRefusal } from "./npm.js";
 import { deadTopLevelStatements, type RequireThrowCtx } from "./require-throws.js";
 import { isNpmStaticPackage, npmStaticActive, npmStaticFsShadow, npmStaticPackageOfPath, npmStaticPackages, npmStaticRewroteExports, reportNpmStaticOffender, setNpmStaticPackages } from "./npm-static.js";
-import { isProvenanceSourceFile, isProvenanceSpecifier, provenancePaths } from "./provenance-registry.js";
+import { isProvenanceSourceFile, isProvenanceSpecifier, provenanceActive as provenanceSourcesActive, provenancePaths } from "./provenance-registry.js";
 import { provenanceAliasRewrite, readSourceForRewrite } from "./provenance-rewrite.js";
 import { setServedSourceText } from "../source-text.js";
 import { jsDesugar } from "./js-desugar.js";
@@ -3706,7 +3706,7 @@ function preflight7(load: LoadResult): {
   // order here — same edges map, same cycle admission — spliced BEFORE
   // the entry (which stays last). Nothing calls the appended modules'
   // %init at startup; the import() site's lowering runs the guarded init.
-  if (npmStaticActive()) {
+  if (npmStaticActive() || provenanceSourcesActive()) {
     const checker = program.getTypeChecker();
     const dynDeps: ts.SourceFile[] = [];
     for (const sf of userFiles) {
@@ -3727,6 +3727,17 @@ function preflight7(load: LoadResult): {
             if (npm !== null && isNpmStaticPackage(npm.packageName)) {
               const dep = npmStaticProgramDep(program, npm.packageName, npm.typesFile);
               if (dep !== null && state.get(dep) === undefined && !dynDeps.includes(dep)) {
+                dynDeps.push(dep);
+              }
+            }
+            // --provenance-sources: a registered specifier reached ONLY through
+            // import() (zapo's `await import('@zapo-js/store-mysql')`) has no static
+            // edge either, so its subgraph (and every declaration twin it names:
+            // mysql2/promise.d.ts -> promise.js) never entered the module order and
+            // each call into it refused "ships only a declaration file".
+            if (provenanceSourcesActive() && isProvenanceSpecifier(spec)) {
+              const dep = resolveProjectImportSf7(program, sf, spec);
+              if (dep !== null && !dep.isDeclarationFile && state.get(dep) === undefined && !dynDeps.includes(dep)) {
                 dynDeps.push(dep);
               }
             }
