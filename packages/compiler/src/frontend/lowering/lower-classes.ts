@@ -3753,6 +3753,18 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
         }
         if (t.typeArguments) L.unsupported("SC1090", t, "extending generic classes");
         base = named;
+        // `export declare class VerbatimString extends String` in a .d.ts: the type-only twin of a compiled constructor (the JS
+        // `class extends String` is rewritten to its wrapper-constructor form, prim-subclass-desugar.ts). A declaration file has no
+        // layout to give the wrapper, and mapType already keeps ambient classes off the nominal path, so the twin stays UNREGISTERED
+        // (like the body-less mixin classes above) rather than refused; a derived ambient class follows it.
+        if (
+          !base && decl.getSourceFile().isDeclarationFile && ts.isClassDeclaration(decl) &&
+          (L.isStdlibGlobal(t.expression, "String") || L.isStdlibGlobal(t.expression, "Number") || L.isStdlibGlobal(t.expression, "Boolean"))
+        ) {
+          const primSym = declSymbolOf(L, decl);
+          if (primSym) L.ambientBodylessMixinClasses.add(primSym);
+          return;
+        }
         if (!base) {
           L.unsupported(
             "SC1090",
