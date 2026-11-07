@@ -2514,6 +2514,20 @@ static double insp_format_number(ScrDyn *d) {
  * formatWithOptionsInternal ported over the checked-dynamic argument array,
  * with the conversions the static lowering (lower-inspect.ts) gives the same
  * specifiers. Borrows arr; +1 result, or NULL with a pending exception. */
+/* Node's formatWithOptionsInternal inspects a %s object with `{ ...inspectOptions, depth: 0, colors: false, compact: 3 }`:
+ * every active option applies (breakLength, maxArrayLength, ...) except that the layout is compact 3. The compact setting
+ * is overridden for the call and restored. (The rest arguments and %O use inspectOptions as they are.) */
+static ScrStr *insp_format_c3(ScrDyn *d, double depth, bool conv_s) {
+  const InspCompact saved_kind = g_opts.compact_kind;
+  const double saved_compact = g_opts.compact;
+  g_opts.compact_kind = INSP_COMPACT_NUM;
+  g_opts.compact = 3.0;
+  ScrStr *r = conv_s ? scr_insp_fmt_s(d, depth) : scr_insp_dyn_s(d, depth);
+  g_opts.compact_kind = saved_kind;
+  g_opts.compact = saved_compact;
+  return r;
+}
+
 ScrStr *scr_insp_format(ScrDyn *arr) {
   const double n = scr_dyn_arr_len(arr);
   if (n == 0) return scr_str_new("", 0);
@@ -2540,7 +2554,7 @@ ScrStr *scr_insp_format(ScrDyn *arr) {
           case 's': {
             a += 1;
             ScrDyn *v = scr_dyn_arr_at(arr, a);
-            temp = scr_insp_fmt_s(v, 0);
+            temp = insp_format_c3(v, 0, true);
             scr_dyn_release(v);
             break;
           }
@@ -2563,7 +2577,7 @@ ScrStr *scr_insp_format(ScrDyn *arr) {
           case 'O': {
             a += 1;
             ScrDyn *v = scr_dyn_arr_at(arr, a);
-            temp = scr_insp_dyn(v, 0, 2);
+            temp = scr_insp_dyn(v, 0, g_opts.depth); /* inspect(arg, inspectOptions): the active depth, default 2 */
             scr_dyn_release(v);
             break;
           }
@@ -2640,7 +2654,7 @@ ScrStr *scr_insp_format(ScrDyn *arr) {
   while (!failed && a < n) {
     ScrDyn *v = scr_dyn_arr_at(arr, a);
     if (join) ib_char(&out, ' ');
-    ScrStr *s = scr_insp_dyn_s(v, 2);
+    ScrStr *s = scr_insp_dyn_s(v, g_opts.depth); /* inspect(value, inspectOptions): every active option, default depth 2 */
     scr_dyn_release(v);
     if (scr_exc_pending()) {
       scr_str_release(s);
