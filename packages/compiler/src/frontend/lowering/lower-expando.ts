@@ -306,9 +306,26 @@ export function collectExpandoMembers(L: Lowerer, sf: ts.SourceFile): void {
       ts.forEachChild(n, (c) => { scan.push(c); });
     }
   }
+  // A function written through a COMPUTED key (`createDebug[key] = env[key]`) can have any member overwritten by name at run time, so none of its
+  // members can be a lifted static slot (a read of the slot would go stale): such a function keeps every own property in its closure table.
+  const dynamicKeyFns = new Set<ts.Symbol>();
+  {
+    const scan: ts.Node[] = [sf];
+    while (scan.length > 0) {
+      const n = scan.pop()!;
+      if (
+        ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isElementAccessExpression(n.left) &&
+        !ts.isStringLiteralLike(n.left.argumentExpression) && !ts.isNumericLiteral(n.left.argumentExpression)
+      ) {
+        const fnSym = expandoFnSymbolOf(L, n.left.expression);
+        if (fnSym !== null) dynamicKeyFns.add(fnSym);
+      }
+      ts.forEachChild(n, (c) => { scan.push(c); });
+    }
+  }
   const process = (node: ts.Node): void => {
     const w = expandoWriteOf(L, node);
-    if (w && typeof w.key === "string" && definedKeys.get(w.fnSym)?.has(w.key)) {
+    if (w && (dynamicKeyFns.has(w.fnSym) || (typeof w.key === "string" && definedKeys.get(w.fnSym)?.has(w.key)))) {
       // descriptor-owned key: no lifted member
     } else if (w) {
       let members = L.expandoMembers.get(w.fnSym);
