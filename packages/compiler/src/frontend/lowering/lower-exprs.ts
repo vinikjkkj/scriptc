@@ -4,7 +4,6 @@
  * comparisons, nullish coalescing and optional chains, conditions and
  * ToBoolean/ToString coercion helpers, and field/element reads and writes
  * (FieldTarget). */
-import { programHasPrimSubclass } from "./prim-subclass-gate.js";
 import { readFileSync } from "node:fs";
 import { evalStaticInfoOf, lowerEvalClassInstanceOf } from "./lower-evalclass.js";
 import { protoDataFieldRead, protoDataHasKey, protoDataMemberRead } from "./lower-protodata.js";
@@ -23069,14 +23068,14 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
           left.kind === "varRef" ||
           (left.kind === "unionNarrow" && left.value.kind === "varRef") ||
           narrowBridgeArm(left)?.kind === "varRef";
-        // A program that holds primitive-wrapper SUBCLASS instances (`class V extends String`, js-desugar.ts) asks the run time for a
-        // dyn operand: the wrapper's chain reaches the intrinsic prototype. Every other program keeps the constant (no wrapper object
-        // of these constructors exists in it).
-        if (left.type.kind === "dyn" && programHasPrimSubclass(L)) {
+        // A dyn operand may hold a primitive-wrapper object (`Object("s")`, a `class C extends String` instance): ask the run time,
+        // which answers false (no call into the wrapper unit) in a program where no wrapper can exist. Typed operands keep the
+        // constant: no static kind other than dyn can be a wrapper.
+        if (left.type.kind === "dyn") {
           return {
             kind: "libCall",
-            fn: "dyn.instanceOf",
-            args: [left, { kind: "libCall", fn: "dyn.builtinCtor", args: [{ kind: "numLit", value: BUILTIN_CTOR_INDEX[wrapper]!, type: F64, loc }], type: DYN, loc }],
+            fn: "dyn.primInstanceOf",
+            args: [left, { kind: "numLit", value: ["String", "Number", "Boolean"].indexOf(wrapper), type: F64, loc }],
             type: BOOL,
             loc,
           };

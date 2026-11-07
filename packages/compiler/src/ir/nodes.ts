@@ -6650,6 +6650,7 @@ export type IrLibFn =
   | "dyn.getPrototypeOf"
   | "dyn.objectPrototype"
   | "dyn.primPrototype"
+  | "dyn.primInstanceOf"
   | "dyn.primInit"
   | "dyn.unwrapPrimStr"
   | "dyn.setPrototypeOf"
