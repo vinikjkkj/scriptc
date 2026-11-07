@@ -13585,6 +13585,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24554-object-get-prototype-of-and-the-plain-object-test.js": {
+   "order": [
+    "<repo>/tests/corpus/24554-object-get-prototype-of-and-the-plain-object-test.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2456-private-async-methods.ts": {
    "order": [
     "<repo>/tests/corpus/2456-private-async-methods.ts"
