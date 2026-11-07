@@ -78,6 +78,8 @@ const RUNTIME_UNIT_DEPS: Readonly<Record<string, readonly string[]>> = {
   // empty off its own platform, so naming all three is platform-neutral.
   "scr_dgram.c": ["scr_loop_kqueue.c", "scr_loop_epoll.c", "scr_loop_wsapoll.c"],
   "scr_dyn_invoke.c": ["scr_async_dyn.c"],
+  // The Promise statics ride the dyn promise unit (new_promise, adopt, then, the resolving functions).
+  "scr_promise_static.c": ["scr_async_dyn.c"],
   "scr_array_dyn.c": ["scr_json.c", "scr_string.c", "scr_number.c", "scr_bytes.c", "scr_cycle.c"],
   "scr_events_emitter.c": ["scr_dyn_handle.c"],
   "scr_http.c": ["scr_dyn_handle.c", "scr_net.c", "scr_url.c"],
@@ -619,6 +621,9 @@ export interface CcOptions {
   /** The program reaches Object.getPrototypeOf / Object.prototype / Object(x) over a dyn / `Object` as a value (moduleUsesDynProto):
    * compiles scr_dyn_proto.c, the prototype sentinels, wrapper objects and builtin function values. */
   dynProto?: boolean;
+  /** The program can read the Promise constructor value's statics (moduleUsesPromiseStatics): compiles scr_promise_static.c beside
+   * the dyn promise unit. */
+  promiseStatics?: boolean;
 }
 
 /** Structured compiler-driver failure. Most callers still let this surface
@@ -2624,6 +2629,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...(opts.bytesOwn ? [rt(join(rtDir, "scr_bytes_own.c"))] : []),
     ...(opts.dc ? [rt(join(rtDir, "scr_dc.c"))] : []),
     ...(opts.dynAsync || opts.dynInvoke || opts.dc || tpValue ? [rt(join(rtDir, "scr_async_dyn.c"))] : []),
+    ...((opts.dynAsync || opts.dynInvoke || opts.dc || tpValue) && (opts.promiseStatics ?? false) ? [rt(join(rtDir, "scr_promise_static.c"))] : []),
     ...(opts.webCrypto ? [rt(join(rtDir, "scr_webcrypto.c"))] : []),
     // The zlib UNIT (scr_zlib.c) gates on zlib.* IR use; the LINK (system
     // libz on hosts, the vendored per-target objects on cross builds)

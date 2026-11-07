@@ -12700,6 +12700,30 @@ export function moduleUsesOpaque(mod: IrModule): boolean {
   return found;
 }
 
+/** The program can hold the Promise constructor VALUE and so read its statics (scr_promise_static.c): the dyn.promiseCtor libCall, or a
+ * getPrototypeOf over a program that boxes promises (a promise's prototype names the constructor). A LINK GATE for the unit that
+ * installs the statics hook; it rides the dyn promise unit, so it is only ever selected with it. */
+export function moduleUsesPromiseStatics(mod: IrModule): boolean {
+  let ctor = false;
+  let proto = false;
+  const visit = (v: unknown): void => {
+    if (ctor || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown };
+    if (node.kind === "libCall" && node.fn === "dyn.promiseCtor") {
+      ctor = true;
+      return;
+    }
+    if (node.kind === "libCall" && node.fn === "dyn.getPrototypeOf") proto = true;
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return ctor || (proto && moduleUsesDynAsync(mod));
+}
+
 /** The program reaches the intrinsic-prototype / wrapper-object / builtin-function machinery (scr_dyn_proto.c): Object.getPrototypeOf,
  * Object.prototype as a value, Object(x) over a dyn, the wrapper unwrap and `Object` as a value. A LINK GATE, not a fence -- a wrong
  * `false` is a loud unresolved-symbol link error, never a wrong answer. Without it the dyn core carries none of that code. */
