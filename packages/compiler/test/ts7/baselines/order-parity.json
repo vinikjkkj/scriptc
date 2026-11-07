@@ -13699,6 +13699,12 @@
     ],
     "diags": []
   },
+  "<repo>/tests/corpus/24661-optional-element-call-with-a-literal-key.ts": {
+    "order": [
+      "<repo>/tests/corpus/24661-optional-element-call-with-a-literal-key.ts"
+    ],
+    "diags": []
+  },
   "<repo>/tests/corpus/2470-mockable-module-shape.js": {
    "order": [
     "<repo>/tests/corpus/2470-mockable-module-shape.js"
