@@ -1,0 +1,12 @@
+{
+  "name": "pgshape",
+  "version": "1.0.0",
+  "main": "lib/index.js",
+  "exports": {
+    ".": {
+      "import": "./esm/index.mjs",
+      "require": "./lib/index.js",
+      "default": "./lib/index.js"
+    }
+  }
+}
