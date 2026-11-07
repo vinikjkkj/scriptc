@@ -7332,7 +7332,10 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
     if (fnT.rest === true) {
       fence("a function replacement value with a rest parameter (declare the capture groups it reads)");
     }
-    if (fnT.ret.kind !== "string") {
+    // Node applies ToString to whatever a replacer answers (an untyped one answers `any`; a typed one may answer a number,
+    // undefined, a boolean), so the adapter below does too.
+    const stringify = replacerResultToString(L, fnT.ret, at);
+    if (stringify === null) {
       fence(
         `a function replacement value returning '${L.fmt(fnT.ret)}' (Node applies ToString to the result — declare the replacer '=> string')`,
       );
@@ -7377,15 +7380,38 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
     // helper never caps (and never needs the flags): `once` is always false.
     const once = false;
     const helper = strReplaceFnHelper(L, arity, once, loc);
-    const replFn = dynAt.some(Boolean) ? adaptStringReplacer(L, fnIr, dynAt, loc) : fnIr;
+    const replFn = dynAt.some(Boolean) || fnT.ret.kind !== "string" ? adaptStringReplacer(L, fnIr, dynAt, loc, stringify!) : fnIr;
     return { kind: "call", callee: helper, args: [receiver, re, replFn], type: STRING, loc };
+  }
+
+/** ToString of what a replacement function answers, as the string the replace drain splices in, or null when no
+ * conversion exists. A string passes; a checked-dynamic answer takes String(); a number or boolean takes its own
+ * spelling; an undefined answer (a function with no value to return) is the text "undefined" after the call ran; any
+ * other answer that boxes into dyn (a number-or-boolean union, null) takes String() over its box. */
+  function replacerResultToString(L: Lowerer, ret: IrType, at: ts.Node): ((call: IrExpr, loc: SrcLoc) => IrExpr) | null {
+    if (ret.kind === "string") return (c) => c;
+    if (ret.kind === "dyn") return (c, loc) => ({ kind: "toString", operand: c, type: STRING, loc });
+    if (ret.kind === "f64" || ret.kind === "bool") return (c) => L.ensureString(c, at);
+    if (ret.kind === "void") {
+      return (c, loc) => ({
+        kind: "seqExpr",
+        stmts: [{ kind: "exprStmt", expr: c, loc }],
+        result: { kind: "strLit", value: "undefined", type: STRING, loc },
+        type: STRING,
+        loc,
+      });
+    }
+    if (canConvertToDyn(ret, (id) => L.shapes.get(id), (id) => L.unions.get(id))) {
+      return (c, loc) => ({ kind: "toString", operand: { kind: "dynFrom", value: c, type: DYN, loc }, type: STRING, loc });
+    }
+    return null;
   }
 
 /** A string-signature closure over an untyped replacer: the replace drain calls it
    * with the match and its groups as strings; each parameter the replacer declares as
    * checked-dynamic receives its string boxed (dynFrom), which is the value Node
    * passes. Interned per replacer type and dyn mask. */
-  function adaptStringReplacer(L: Lowerer, fn: IrExpr, dynAt: boolean[], loc: SrcLoc): IrExpr {
+  function adaptStringReplacer(L: Lowerer, fn: IrExpr, dynAt: boolean[], loc: SrcLoc, stringify: (call: IrExpr, loc: SrcLoc) => IrExpr): IrExpr {
     const ft = fn.type as Extract<IrType, { kind: "func" }>;
     const params: IrParam[] = ft.params.map((_, i) => ({ localId: `p.${i}`, name: `p${i}`, type: STRING }));
     const key = `strReplAdapt:${typeKey(ft)}:${dynAt.map((d) => (d ? 1 : 0)).join("")}`;
@@ -7408,13 +7434,13 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
       L.liftedFns.push({
         name,
         params,
-        returnType: ft.ret,
+        returnType: STRING,
         captures: capParams,
         locals: [
           ...capParams.map((c) => ({ id: c.localId, name: c.name, type: c.type, mutable: false, boxed: true as const })),
           ...params.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
         ],
-        body: [{ kind: "return", value: call, loc }],
+        body: [{ kind: "return", value: stringify(call, loc), loc }],
         loc,
       });
     }
@@ -7423,7 +7449,7 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
     ctx.localCounters.set("%bind", n + 1);
     const id = `%bind.${n}`;
     ctx.locals.push({ id, name: "%bind", type: fn.type, mutable: false, boxed: true });
-    const outT = funcOf(params.map(() => STRING), ft.ret);
+    const outT = funcOf(params.map(() => STRING), STRING);
     return {
       kind: "seqExpr",
       stmts: [{ kind: "varDecl", localId: id, init: fn, loc }],
