@@ -315,7 +315,8 @@ export function collectExpandoMembers(L: Lowerer, sf: ts.SourceFile): void {
       const n = scan.pop()!;
       if (
         ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isElementAccessExpression(n.left) &&
-        !ts.isStringLiteralLike(n.left.argumentExpression) && !ts.isNumericLiteral(n.left.argumentExpression)
+        // A key the member machinery can NAME (a literal, a folded const, a symbol) is a member of its own; only a key known at run time can land on any member.
+        memberKeyOf(L, n.left) === null
       ) {
         const fnSym = expandoFnSymbolOf(L, n.left.expression);
         if (fnSym !== null) dynamicKeyFns.add(fnSym);
