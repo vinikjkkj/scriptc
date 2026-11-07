@@ -6611,6 +6611,7 @@ export type IrLibFn =
   | "dyn.getPrototypeOf"
   | "dyn.objectPrototype"
   | "dyn.toObject"
+  | "dyn.unwrapPrim"
   | "insp.optDepth"
   | "insp.shown"
   | "insp.rem"

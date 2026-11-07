@@ -2032,9 +2032,34 @@ static ScrDyn *scr_dyn_object_prototype_mint(void) {
 
 ScrDyn *scr_dyn_object_prototype(void) { return scr_dyn_object_prototype_mint(); }
 
+/* PRIMITIVE WRAPPER OBJECTS (`Object("s")`, `Object(5)`, `Object(false)`, `Object(1n)`): an ordinary dynamic object whose
+ * constructor name is String / Number / Boolean / BigInt and whose primitive lives in the internal-slot table under `%prim`
+ * (nothing else reads that table, so it is never enumerated or forged). typeof, truthiness (always true, `new Boolean(false)`
+ * included) and identity (a fresh wrapper per call, `w === w`) are the plain object's; ToPrimitive, [[Get]] of `length` and
+ * the indices of a String wrapper, method calls (they bind the primitive), util.inspect and JSON.stringify unwrap it at their
+ * own sites. */
+ScrDyn *scr_dyn_wrapper_new(const ScrDyn *prim) {
+  ScrDyn *w = scr_dyn_new_obj();
+  scr_dyn_obj_set_slot(w, "%prim", 5, scr_dyn_retain((ScrDyn *)prim));
+  const char *cn = prim->kind == SCR_DYN_STR ? "String" : prim->kind == SCR_DYN_NUM ? "Number" : prim->kind == SCR_DYN_BOOL ? "Boolean" : "BigInt";
+  scr_dyn_obj_set_ctor_name(w, cn);
+  return w;
+}
+
+/* The wrapped primitive (borrowed), or NULL when `d` is not a wrapper object. */
+const ScrDyn *scr_dyn_wrapper_prim(const ScrDyn *d) {
+  if (d == NULL || d->kind != SCR_DYN_OBJ) return NULL;
+  return scr_dyn_obj_slot_get(d, "%prim", 5);
+}
+
+/* The primitive a wrapper object holds, or `d` itself for anything else (+1): the receiver a primitive method call binds. */
+ScrDyn *scr_dyn_unwrap_prim(const ScrDyn *d) {
+  const ScrDyn *wp = scr_dyn_wrapper_prim(d);
+  return scr_dyn_retain((ScrDyn *)(wp != NULL ? wp : d));
+}
+
 /* Object(d), +1 (ToObject over one argument): null and undefined answer a fresh empty object, an object-like value answers
- * itself (identity), and a primitive would answer its wrapper object, which this runtime does not model: that case throws a
- * named Error instead of answering a different value. */
+ * itself (identity), and a primitive answers a fresh wrapper object. */
 ScrDyn *scr_dyn_to_object(const ScrDyn *d) {
   switch (d->kind) {
     case SCR_DYN_NULL:
@@ -2044,8 +2069,7 @@ ScrDyn *scr_dyn_to_object(const ScrDyn *d) {
     case SCR_DYN_NUM:
     case SCR_DYN_STR:
     case SCR_DYN_BIG:
-      scr_throw_error(SCR_ERR_ERROR, scr_str_new("Object() of a primitive value (wrapper objects) is not supported yet", 66));
-      return scr_dyn_undefined();
+      return scr_dyn_wrapper_new(d);
     default:
       return scr_dyn_retain((ScrDyn *)d);
   }
@@ -5815,6 +5839,10 @@ static bool scr_dyn_json_write_raw(ScrJsonBuf *b, const ScrDyn *d) {
     return true;
   }
   case SCR_DYN_OBJ: {
+    {
+      const ScrDyn *wp = scr_dyn_wrapper_prim(d); /* JSON.stringify(Object("s")) is the primitive's text */
+      if (wp != NULL) return scr_dyn_json_write_raw(b, wp);
+    }
     /* enter/leave bracket, as the instance writer does: a member may reach
      * this object again (a self-issued certificate's issuerCertificate), and
      * an unguarded walk is an infinite recursion. Guarded, a cycle is V8's
@@ -6934,6 +6962,10 @@ ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc) {
   case SCR_DYN_BOOL:
     return d->v.b ? scr_str_new("true", 4) : scr_str_new("false", 5);
   case SCR_DYN_OBJ: {
+    {
+      const ScrDyn *wp = scr_dyn_wrapper_prim(d); /* String(Object(x)) is the primitive's string */
+      if (wp != NULL) return scr_dyn_to_string(wp, enc);
+    }
     /* An OWN or INHERITED `toString` shadows Object.prototype's — the
      * whole point of writing `K.prototype.toString = fn`. Only a
      * callable one counts, and only a PRIMITIVE answer (a toString
@@ -7350,6 +7382,8 @@ ScrDyn *scr_dyn_to_primitive(const ScrDyn *d, int hint) {
   /* Only SCR_DYN_OBJ carries a member table a user valueOf/toString can
    * live in; every other reference kind takes the built-in table below. */
   if (d->kind == SCR_DYN_OBJ) {
+    const ScrDyn *wrapped = scr_dyn_wrapper_prim(d);
+    if (wrapped != NULL) return scr_dyn_retain((ScrDyn *)wrapped); /* a primitive wrapper's valueOf/toString answer the primitive */
     ScrDyn *r;
     if (hint == SCR_TOPRIM_STRING) {
       r = scr_toprim_try(d, "toString", 8);
@@ -7726,6 +7760,20 @@ static ScrPropKind scr_dyn_obj_resolve(const ScrDyn *d, const char *key, size_t 
  * reimplementing the walk, so neither can answer a property the other
  * cannot — the split estado-protochain.md §2e found the hard way. */
 ScrDyn *scr_dyn_obj_key_get(ScrDyn *recv, const char *key, size_t key_len) {
+  {
+    /* A String wrapper's own `length` and index properties (the primitive's, read through the wrapper). */
+    const ScrDyn *wp = scr_dyn_wrapper_prim(recv);
+    if (wp != NULL && wp->kind == SCR_DYN_STR) {
+      if (key_len == 6 && memcmp(key, "length", 6) == 0) return scr_dyn_new_num(scr_str_utf16_len(wp->v.str));
+      double idx = 0;
+      if (scr_dyn_key_is_index(key, key_len, &idx) && idx < scr_str_utf16_len(wp->v.str)) {
+        ScrStr *ch = scr_str_char_at(wp->v.str, idx);
+        ScrDyn *r = scr_dyn_new_str(ch);
+        scr_str_release(ch);
+        return r;
+      }
+    }
+  }
   if (scr_dyn_obj_is_strdec(recv) && (strcmp(key, "lastNeed") == 0 || strcmp(key, "lastTotal") == 0 ||
                                       strcmp(key, "lastChar") == 0))
     return scr_strdec_obj_last(recv, key);
@@ -9316,6 +9364,13 @@ static void scr_jb_put_dyn_raw(ScrJsonBuf *b, const ScrDyn *d) {
     return;
   }
   case SCR_DYN_OBJ: {
+    {
+      const ScrDyn *wp = scr_dyn_wrapper_prim(d);
+      if (wp != NULL) {
+        scr_jb_put_dyn_raw(b, wp);
+        return;
+      }
+    }
     scr_jb_putc(b, '{');
     bool first = true;
     /* JS own-key order, not the entry table's insertion order: an enum
@@ -13745,6 +13800,25 @@ ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode) {
     return scr_dyn_jsval_ops()->obj_walk(v->v.jsval.cell, (int)mode);
   }
   ScrDyn *out = scr_dyn_new_arr();
+  {
+    /* A String wrapper object's enumerable own properties are its indices (Object.keys(Object("ab")) is ["0", "1"]). */
+    const ScrDyn *wp = scr_dyn_wrapper_prim(v);
+    if (wp != NULL) {
+      if (wp->kind == SCR_DYN_STR) {
+        double wn = scr_str_utf16_len(wp->v.str);
+        for (double wi = 0; wi < wn; wi += 1) {
+          char kb[32];
+          int kl = snprintf(kb, sizeof kb, "%.0f", wi);
+          ScrStr *ch = scr_str_char_at(wp->v.str, wi);
+          ScrDyn *cv = scr_dyn_new_str(ch);
+          scr_str_release(ch);
+          scr_dyn_objwalk_push(out, mode, kb, (size_t)kl, cv);
+          scr_dyn_release(cv);
+        }
+      }
+      return out;
+    }
+  }
   if (v->kind == SCR_DYN_FUNC && scr_dyn_class_ops != NULL) {
     /* A CLASS VALUE's own enumerable keys are its static fields. */
     int cw = scr_dyn_class_ops->class_walk(v, mode, out);
