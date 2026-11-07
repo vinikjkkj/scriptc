@@ -294,6 +294,7 @@ static ScrDyn *proto_intrinsic_member(const ScrDyn *recv, const char *key, size_
     if (recv == kind_protos[SCR_DYN_STR]) return scr_builtin_fn(SCR_BI_STRING);
     if (recv == kind_protos[SCR_DYN_NUM]) return scr_builtin_fn(SCR_BI_NUMBER);
     if (recv == kind_protos[SCR_DYN_BOOL]) return scr_builtin_fn(SCR_BI_BOOLEAN);
+    if (recv == kind_protos[SCR_DYN_PROMISE] && scr_promise_ctor_provider != NULL) return scr_promise_ctor_provider();
     /* A class's prototype names the class value (`Object.getPrototypeOf(inst).constructor === inst.constructor`). */
     const ScrDynClass *kc = scr_dyn_class_of_sentinel(recv);
     if (kc != NULL && scr_dyn_class_ops != NULL && scr_dyn_class_ops->class_value_of != NULL) return scr_dyn_class_ops->class_value_of(kc);

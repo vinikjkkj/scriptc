@@ -6083,6 +6083,11 @@ ScrDyn *scr_dyn_construct(const ScrDyn *fn, const ScrDyn *args, const ScrStr *wh
 ScrDyn *scr_dyn_promise_ctor(void);
 extern ScrDyn *scr_promise_ctor_box;
 extern ScrDyn *(*scr_promise_construct_hook)(const ScrDyn *args);
+/* The Promise constructor value's statics (resolve, all, ...) as native function values, by name: +1, or NULL for a name it
+ * does not carry. Installed by scr_async_dyn.c, which links only into programs that hold promises. */
+extern ScrDyn *(*scr_promise_static_hook)(const char *key, size_t key_len);
+/* The constructor value a promise's prototype names (`Object.getPrototypeOf(p).constructor`): +1. */
+extern ScrDyn *(*scr_promise_ctor_provider)(void);
 
 /* `v instanceof f` — JS's OrdinaryHasInstance over the chain `new`
  * built: is the object `f.prototype` answers anywhere in v's
