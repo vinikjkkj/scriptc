@@ -25951,6 +25951,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/fixtures/npm/cases/24510-an-own-function-assigned-over-a-class-method-runs-in-its-place/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/24510-an-own-function-assigned-over-a-class-method-runs-in-its-place/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/fixtures/npm/cases/2465-getter-table/main.ts": {
    "order": [
     "<repo>/tests/fixtures/npm/cases/2465-getter-table/main.ts"

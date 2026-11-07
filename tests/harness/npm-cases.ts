@@ -59,6 +59,8 @@ export function npmCases(fixturesRoot: string): NpmCase[] {
       // dyn prototype-method READ is pinned in npm-static.test.ts, and the
       // flagless build fails with `SC2013: importing 'protoread' requires
       // the embedded dynamic engine` plus one SC2013 per call site.
+      // 24510 joins them: an own function assigned over a class method of an --npm-static package, pinned in npm-static.test.ts (the
+      // flagless build fails with `SC2013: importing 'ownshadowcmd' requires the embedded dynamic engine`).
       // npmstatic-dynimport-cjs joins them for the same reason under a
       // name instead of a number: it is the `import()`-of-a-CJS-package
       // namespace case, driven with `--npm-static gtdefine` in
@@ -70,7 +72,7 @@ export function npmCases(fixturesRoot: string): NpmCase[] {
       // for — so the case has been RED on main since it landed.
       .filter(
         (entry) =>
-          !/\/(?:(?:246[5-9]|255[67]|403[12]|406[1-4]|411[1-4]|4142|415[1-4]|4242)-[^/]+|npmstatic-dynimport-cjs)\/main\.ts$/.test(
+          !/\/(?:(?:246[5-9]|255[67]|403[12]|406[1-4]|411[1-4]|4142|415[1-4]|4242|24510)-[^/]+|npmstatic-dynimport-cjs)\/main\.ts$/.test(
             entry,
           ),
       )

@@ -1385,6 +1385,28 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     expect(nativeRes.exitCode).toBe(0);
   }, 180_000);
 
+  /* -- 24510: an own function assigned over a class method ----------------
+   * mysql2's execute-failure shape (lib/base/connection.js): a failed prepare does `executeCommand.start = function () { return null; }`
+   * and the command runner reads `this.start`. The write landed in the instance's run-time property table and the read took the class
+   * method, so the replaced `start` never ran and the connection closed. A literal-key write over a method of the class now registers
+   * the family (lower-ownshadow.ts), so the runner's `this.start` is the own property exactly when the table holds it. */
+  test("24510: an own function assigned over a class method runs in its place", async () => {
+    const entry = join(fixturesRoot, "npm/cases/24510-an-own-function-assigned-over-a-class-method-runs-in-its-place/main.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["ownshadowcmd"] });
+    expect(coverage.npmStatic).toEqual([{ package: "ownshadowcmd", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    const binary = await buildStatic(entry, ["ownshadowcmd"]);
+    const [nodeRes, nativeRes] = await Promise.all([
+      runBinary("node", [entry]),
+      runBinary(binary, []),
+    ]);
+    expect(nodeRes.stdout.toString("utf8")).toBe("override ran\nExecute.start ran\nQuery.start ran\n");
+    expect(nativeRes.stdout.toString("utf8")).toBe(nodeRes.stdout.toString("utf8"));
+    expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
+    expect(nativeRes.exitCode).toBe(0);
+  }, 180_000);
+
   /* -- 4242: the dyn prototype-method READ, gridded -----------------------
    *
    * BYTE-IDENTICAL to Node v25.9.0, 38 rows, on both backends. On base
