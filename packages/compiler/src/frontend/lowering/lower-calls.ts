@@ -13435,7 +13435,57 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
           : canConvertToDyn(v.type, (id) => L.shapes.get(id), (id) => L.unions.get(id)) ? L.coerceToExpected(v, DYN)
           : null;
       };
-      const ov = toDyn(call.arguments[0]!);
+      // The link lives on a plain dynamic OBJECT only. Every receiver whose run-time kind cannot be shown to be a plain object (or a
+      // primitive, which is returned unchanged) is refused here, exactly as on main: a dyn of unknown kind could be an array, a
+      // function, a Map, a Buffer or a handle, whose prototype link nothing holds, so the call would throw at run time. What is
+      // shown: a `F.prototype` read off a function value, an Object.create / Object(x) result, a JS object literal, a primitive,
+      // null / undefined (the TypeError is Node's own).
+      const recvLowered = L.lowerExpr(call.arguments[0]!);
+      const rk = recvLowered.type.kind;
+      const isPrototypeRead = (e: IrExpr): boolean => {
+        if (e.kind !== "dynKeyGet" || e.key.kind !== "strLit" || e.key.value !== "prototype") return false;
+        const v = e.value;
+        return v.kind === "dynFrom" && v.value.type.kind === "func";
+      };
+      const plainObjectLibCalls = new Set(["dyn.objCreateProto", "dyn.objCreateDescs", "dyn.objCreateNullDescs", "dyn.toObject", "dyn.objectPrototype", "dyn.primPrototype"]);
+      // A `const` binding initialised by an object literal, an Object.create(...) call or `new F()` of a function declaration holds a
+      // plain dynamic object for its whole life (const: never rebound), whatever static type the checker gave the binding.
+      const constHoldsPlainObject = (e: ts.Expression, depth = 0): boolean => {
+        while (ts.isParenthesizedExpression(e)) e = e.expression;
+        if (!ts.isIdentifier(e) || depth > 2) return false;
+        const sym = L.checker.getSymbolAtLocation(e);
+        const decls = sym ? L.checker.declarationsOf(sym) : [];
+        const decl = decls.length === 1 ? decls[0]! : undefined;
+        if (decl === undefined || !ts.isVariableDeclaration(decl) || decl.initializer === undefined) return false;
+        if ((ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const) === 0) return false;
+        let init: ts.Expression = decl.initializer;
+        while (ts.isParenthesizedExpression(init)) init = init.expression;
+        if (ts.isObjectLiteralExpression(init)) return true;
+        if (ts.isIdentifier(init)) return constHoldsPlainObject(init, depth + 1);
+        if (ts.isCallExpression(init) && ts.isPropertyAccessExpression(init.expression) && init.expression.name.text === "create" &&
+            ts.isIdentifier(init.expression.expression) && L.isStdlibGlobal(init.expression.expression, "Object")) return true;
+        if (ts.isNewExpression(init) && ts.isIdentifier(init.expression)) {
+          const csym = L.checker.getSymbolAtLocation(init.expression);
+          const cdecls = csym ? L.checker.declarationsOf(csym) : [];
+          const ctor = cdecls.length === 1 ? cdecls[0]! : undefined;
+          return ctor !== undefined && ts.isFunctionDeclaration(ctor) && isJsSourceFile(ctor.getSourceFile());
+        }
+        return false;
+      };
+      const shownObject =
+        constHoldsPlainObject(call.arguments[0]!) ||
+        rk === "f64" || rk === "string" || rk === "bool" || rk === "nullT" || rk === "undefinedT" ||
+        (rk === "record" && isJsSourceFile(call.getSourceFile())) ||
+        (recvLowered.kind === "libCall" && plainObjectLibCalls.has(recvLowered.fn)) ||
+        isPrototypeRead(recvLowered);
+      if (!shownObject) {
+        L.unsupported(
+          "SC1090",
+          call.arguments[0]!,
+          `Object.setPrototypeOf over a receiver (${rk} ${recvLowered.kind}) that is not shown to be a plain object (the [[Prototype]] link is held by plain dynamic objects only; an array, function, Map, Buffer, handle or class instance would have nowhere to keep it. Pass a 'F.prototype', an Object.create result or an object literal)`,
+        );
+      }
+      const ov: IrExpr | null = recvLowered.type.kind === "dyn" ? recvLowered : L.coerceToExpected(recvLowered, DYN);
       const pv2 = toDyn(call.arguments[1]!);
       if (ov !== null && pv2 !== null && ov.type.kind === "dyn" && pv2.type.kind === "dyn") {
         return { kind: "libCall", fn: "dyn.setPrototypeOf", args: [ov, pv2], type: DYN, loc: locOf(call) };
