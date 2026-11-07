@@ -25846,6 +25846,43 @@
     "<repo>/tests/corpus/24344-late-prototype-method-reading-arguments-js.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/24681-builtin-constructors-read-as-values-answer-as-functions.js": {
+   "order": [
+    "<repo>/tests/corpus/24681-builtin-constructors-read-as-values-answer-as-functions.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24682-builtin-constructor-values-call-and-construct-as-the-builtin.js": {
+   "order": [
+    "<repo>/tests/corpus/24682-builtin-constructor-values-call-and-construct-as-the-builtin.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24683-computed-keys-folded-from-const-tables-of-literals.js": {
+   "order": [
+    "<repo>/tests/corpus/24683-computed-keys-folded-from-const-tables-of-literals.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24684-computed-keys-from-a-required-literal-table/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24684-computed-keys-from-a-required-literal-table/decoder.cjs",
+    "<repo>/tests/corpus/24684-computed-keys-from-a-required-literal-table/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24685-builtin-constructor-globals-used-only-as-receivers-keep-their-statics.js": {
+   "order": [
+    "<repo>/tests/corpus/24685-builtin-constructor-globals-used-only-as-receivers-keep-their-statics.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/constructed-wrapper-object-bound-to-a-wrapper-typed-slot.js": {
+   "order": [
+    "<repo>/tests/diagnostics/constructed-wrapper-object-bound-to-a-wrapper-typed-slot.js"
+   ],
+   "diags": []
   }
  }
 }
