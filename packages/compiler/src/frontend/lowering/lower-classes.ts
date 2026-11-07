@@ -150,6 +150,21 @@ export interface MethodSig {
   argsBound?: true;
 }
 
+/** True when a function expression's own body names `this` (arrow bodies see the enclosing `this`, so an arrow never does;
+ * nested non-arrow functions and classes have their own). */
+export function functionBodyNamesThis(fn: ts.FunctionExpression | ts.ArrowFunction): boolean {
+  if (ts.isArrowFunction(fn)) return false;
+  let found = false;
+  const visit = (n: ts.Node): void => {
+    if (found) return;
+    if (n.kind === ts.SyntaxKind.ThisKeyword) { found = true; return; }
+    if (ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) || ts.isClassDeclaration(n) || ts.isClassExpression(n) || ts.isMethodDeclaration(n) || n.kind === ts.SyntaxKind.GetAccessor || n.kind === ts.SyntaxKind.SetAccessor) return;
+    ts.forEachChild(n, visit);
+  };
+  if (fn.body !== undefined) ts.forEachChild(fn.body, visit);
+  return found;
+}
+
 export interface ClassInfo {
   /** applyMixin(this, EventEmitter) graft (lower-emitter-mixin.ts): the hidden emitter slot holds the emitter. */
   emitterMixin?: true;
@@ -221,6 +236,10 @@ export interface ClassInfo {
    * assigns over a prototype method of the same name (not inherited: the
    * class that assigns declares it). The slot is in `fields`, undefined-armed. */
   shadowFields?: Set<string>;
+  /** The subset of shadowFields whose assigned function may read `this` (a function expression whose body names `this`
+   * outside any nested non-arrow function, or any value the scan cannot see into): a call through the slot opens the
+   * ambient-receiver window with the instance, which is JS's `obj.m()` receiver for an own property function. */
+  shadowReadsThis?: Set<string>;
   /** The enclosing locals a lifted local class reads, as hidden fields: the
    * constructor takes their values as trailing parameters and `new C` sites
    * pass them; reads of the binding inside the class read the field. */
@@ -5108,6 +5127,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       for (const name of placeholderFields) deferredInitFields.add(name);
       const collectedFields = new Set<string>(base?.collectedFields ?? []);
       const shadowFields = new Set<string>();
+      const shadowReadsThis = new Set<string>();
       const absentTrackedFields = new Set<string>(base?.absentTrackedFields ?? []);
       const absentInitFields = new Set<string>(base?.absentInitFields ?? []);
       if (unguardedFields.length > 0) {
@@ -5329,6 +5349,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
                 collectedFields.add(name);
                 absentTrackedFields.add(name);
                 shadowFields.add(name);
+                if (shRhs === undefined || !(ts.isArrowFunction(shRhs) || ts.isFunctionExpression(shRhs)) || functionBodyNamesThis(shRhs)) shadowReadsThis.add(name);
                 continue;
               }
               const sym = L.checker.getSymbolAtLocation(assign);
@@ -5835,6 +5856,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
         ...(absentTrackedFields.size > 0 ? { absentTrackedFields } : {}),
         ...(absentInitFields.size > 0 ? { absentInitFields } : {}),
         ...(shadowFields.size > 0 ? { shadowFields } : {}),
+        ...(shadowReadsThis.size > 0 ? { shadowReadsThis } : {}),
         ...(captures !== undefined ? { captures } : {}),
       };
       // GENERIC members get their declaring-class backlink now that the
@@ -10307,12 +10329,34 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
       loc,
     };
     const finish = (e: IrExpr): IrStmt => (sig.ret.kind === "void" ? { kind: "exprStmt", expr: e, loc } : { kind: "return", value: e, loc });
+    // An own function that reads `this` runs with the instance as its receiver: the ambient-receiver window is opened for the
+    // call and closed in a finally (the callee can throw), exactly like `%dyncallthis`. Slots whose function never reads
+    // `this` keep the bare call.
+    const nParams = locals.length;
+    let viaFieldBody: IrStmt[] = [finish(viaField)];
+    if (info.shadowReadsThis?.has(name) === true) {
+      L.noteDynBoxedClass(className);
+      const recvLocal: IrLocal = { id: "recv.0", name: "recv", type: DYN, mutable: false };
+      locals.push(recvLocal);
+      viaFieldBody = [
+        { kind: "varDecl", localId: recvLocal.id, init: { kind: "dynFrom", value: ref(locals[0]!), type: DYN, loc }, loc },
+        { kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.thisPush", args: [ref(recvLocal)], type: VOID, loc }, loc },
+        {
+          kind: "tryCatch",
+          tryBody: [finish(viaField)],
+          catchBody: null,
+          catchLocalId: null,
+          finallyBody: [{ kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.thisPop", args: [], type: VOID, loc }, loc }],
+          loc,
+        },
+      ];
+    }
     return {
       name: `%${className}.${name}`,
-      params: locals.map((l) => ({ localId: l.id, name: l.name, type: l.type })),
+      params: locals.slice(0, nParams).map((l) => ({ localId: l.id, name: l.name, type: l.type })),
       returnType: sig.ret,
       locals,
-      body: [{ kind: "if", cond: isUnset, then: [finish(viaMethod)], else_: [finish(viaField)], loc }],
+      body: [{ kind: "if", cond: isUnset, then: [finish(viaMethod)], else_: viaFieldBody, loc }],
       loc,
     };
   }
@@ -14851,7 +14895,8 @@ function isClassPrototypeOf(L: Lowerer, e: ts.Expression): boolean {
   const d = sym ? L.checker.valueDeclarationOf(sym) : undefined;
   return d !== undefined && ts.isClassDeclaration(d);
 }
-/** True when `stmt` is `this.x = p` and `p` is an authored-JS parameter
+
+/** True when `stmt` is `this.x = p` and `p` is an authored-JS parameter
  * defaulted to an empty object literal (`p = {}`), the parameter the param
  * rule types checked-dynamic (lower-calls paramShape). Its checker type is
  * the empty `{}`, which has no members, so a field inferred from it would
