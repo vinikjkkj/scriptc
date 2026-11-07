@@ -26207,6 +26207,18 @@
     "<repo>/tests/corpus/24699-buffer-constants-read-as-numbers.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/24700-instance-override-that-captures-its-own-instance-is-collected.js": {
+   "order": [
+    "<repo>/tests/corpus/24700-instance-override-that-captures-its-own-instance-is-collected.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24701-instance-assigned-function-over-a-generic-method-of-a-command-class-keeps-prototype-copies.js": {
+   "order": [
+    "<repo>/tests/corpus/24701-instance-assigned-function-over-a-generic-method-of-a-command-class-keeps-prototype-copies.js"
+   ],
+   "diags": []
   }
  }
 }
