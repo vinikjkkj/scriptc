@@ -25965,9 +25965,27 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
     ) {
       const ctorT = L.mapTypeOf(L.typeOf(expr.expression.expression));
       const cinfo = ctorT?.kind === "classval" ? (L.classes.get(ctorT.className) ?? null) : null;
+      // A LATE method (`C.prototype.m = function ...`, registered as a method of C) read ABOVE its own assignment at the top level is
+      // not C's method yet: JS answers what the chain installed at run time before (the prototype table), so the read takes the
+      // table's value, never the replacement it is about to be (`const multi = Pipeline.prototype.multi; Pipeline.prototype.multi =
+      // function () { return multi.apply(this, arguments) }`).
+      const lateAbove = ((): boolean => {
+        if (cinfo === null) return false;
+        const body = L.protoClassBodies.get(cinfo.def.name)?.get(expr.name.text);
+        if (body === undefined || body.getSourceFile() !== expr.getSourceFile()) return false;
+        for (let p: ts.Node | undefined = expr.parent; p !== undefined; p = p.parent) {
+          if (ts.isFunctionLike(p)) return false;
+          if (ts.isSourceFile(p)) break;
+        }
+        for (let a: ts.Node | undefined = body.parent; a !== undefined; a = a.parent) {
+          if (ts.isBinaryExpression(a) && a.operatorToken.kind === ts.SyntaxKind.EqualsToken) return expr.getStart() < a.getStart();
+          if (ts.isStatement(a)) break;
+        }
+        return false;
+      })();
       if (
         cinfo !== null && !cinfo.builtinError && hasProtoTab(L, cinfo) &&
-        L.findMethodOn(cinfo, expr.name.text) === null && !cinfo.fields.has(expr.name.text) &&
+        (lateAbove || L.findMethodOn(cinfo, expr.name.text) === null) && !cinfo.fields.has(expr.name.text) &&
         findGenericMethodOn(L, cinfo, expr.name.text) === null &&
         L.findMethodOn(cinfo, `get:${expr.name.text}`) === null &&
         !cinfo.staticFields.some((s) => s.name === expr.name.text)
