@@ -514,7 +514,7 @@ export function tokenCtorFactsOf(L: Lowerer, e: ts.Expression): { name: string; 
 const BUILTIN_CTOR_INDEX: Record<string, number | undefined> = Object.assign(Object.create(null) as Record<string, number | undefined>, {
   Object: 0, Array: 1, Function: 2, String: 3, Number: 4, Boolean: 5,
 });
-export function ctorObjectGlobalValue(L: Lowerer, canonical: string, loc: SrcLoc): IrExpr | null {
+export function ctorObjectGlobalValue(L: Lowerer, canonical: string, loc: SrcLoc, receiverUse = false): IrExpr | null {
   // The WebCrypto object is an object in Node (typeof "object"), not a
   // string token: one process singleton, shared with require('crypto').webcrypto.
   if (canonical === "crypto" && !L.dynamic) return { kind: "libCall", fn: "dyn.webCrypto", args: [], type: DYN, loc };
@@ -534,8 +534,10 @@ export function ctorObjectGlobalValue(L: Lowerer, canonical: string, loc: SrcLoc
   // `new this.Promise(executor)`): the singleton the runtime constructs through.
   if (canonical === "Promise" && !L.dynamic) return { kind: "libCall", fn: "dyn.promiseCtor", args: [], type: DYN, loc };
   // Object/Array/Function/String/Number/Boolean: the runtime's builtin function boxes (typeof "function", name, call).
+  // Not where the identifier is only the RECEIVER of a member access (`Object.create`, `Array.isArray`, `String.fromCharCode`): those
+  // read the global's statics by name through their own lowerings and never hold the constructor as a value.
   const bi = BUILTIN_CTOR_INDEX[canonical];
-  if (bi !== undefined && !L.dynamic) {
+  if (bi !== undefined && !L.dynamic && !receiverUse) {
     return { kind: "libCall", fn: "dyn.builtinCtor", args: [{ kind: "numLit", value: bi, type: F64, loc }], type: DYN, loc };
   }
   if (canonical !== "Uint8Array" || L.dynamic) return null;
@@ -2318,7 +2320,11 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         if (L.isStdlibSymbol(sym) || expr.text === "globalThis") {
           if (isJsSourceFile(expr.getSourceFile())) {
             const canonical = stdlibGlobalNameOf(L, expr) ?? expr.text;
-            const obj = ctorObjectGlobalValue(L, canonical, loc);
+            const obj = ctorObjectGlobalValue(
+              L, canonical, loc,
+              (ts.isPropertyAccessExpression(expr.parent) || ts.isElementAccessExpression(expr.parent)) &&
+                (expr.parent as ts.PropertyAccessExpression | ts.ElementAccessExpression).expression === expr,
+            );
             if (obj !== null) return obj;
             if (ts.isIdentifier(expr)) {
               const gv = jsGlobalFnValueOf(L, expr, canonical, loc);
