@@ -28634,6 +28634,10 @@ function shadowAwareMethodValue(L: Lowerer, expr: ts.PropertyAccessExpression, c
  * Null (the caller keeps its fence) when the class carries no run-time property table. */
 function lowerLiteralMethodShadowWrite(L: Lowerer, expr: ts.BinaryExpression, left: ts.PropertyAccessExpression, name: string, info: ClassInfo): IrStmt | null {
   if (info.hasPropsTable !== true || info.def.runtime === true) return null;
+  // `Class.prototype.m = fn` writes the PROTOTYPE's property: no instance's own property shadows anything (mysql2's debug monkey-patch).
+  let recvNode: ts.Expression = left.expression;
+  while (ts.isParenthesizedExpression(recvNode)) recvNode = recvNode.expression;
+  if (ts.isPropertyAccessExpression(recvNode) && recvNode.name.text === "prototype") return null;
   registerOwnShadowFamily(info);
   const why = ownShadowWhy(L, info);
   if (why !== null) L.unsupported("SC1090", left, `writing an own property over the method '${name}' (it shadows the method of the class, and ${why})`);
