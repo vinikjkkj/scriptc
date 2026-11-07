@@ -1781,6 +1781,9 @@ function fillsEveryIteration(region: ts.Node, name: string, counter: string, tes
   return found && !spoiled;
 }
 
+/** A text pre-test for dynamicKeyTableMembers: a `.name[` whose index is not a plain literal. Most files have none, so the walk is skipped. */
+const TABLE_MEMBER_WRITE_PREFILTER = /\.[A-Za-z_$][\w$]*\s*\[(?!\s*["'`\d])/;
+
 /** The member names `m` for which the file writes through a RUN-TIME key on `<expr>.m[key]` (`this._transformer.reply[name] =
  * func`, `registry.handlers[type]++`, `delete table.entries[id]`): the property `m` is used as a string-keyed table. The
  * receiver is not resolved (this runs before the checker), so the name alone decides; the sites below that use the set only
@@ -1926,7 +1929,7 @@ function openRecordEdits(fileName: string, text: string): string | null {
     }
   };
   dispatchTables();
-  const tableMembers = dynamicKeyTableMembers(sf);
+  const tableMembers = TABLE_MEMBER_WRITE_PREFILTER.test(text) ? dynamicKeyTableMembers(sf) : new Set<string>();
   const isEmptyLit = (e: ts.Expression): e is ts.ObjectLiteralExpression => {
     while (ts.isParenthesizedExpression(e)) e = e.expression;
     return ts.isObjectLiteralExpression(e) && e.properties.length === 0;
