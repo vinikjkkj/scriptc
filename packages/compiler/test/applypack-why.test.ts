@@ -14,11 +14,11 @@
  *
  *   CLOSED-BY=dyn-apply-pack            boxed and routed to scr_dyn_invoke;
  *   NOT-CLOSED=receiver-parameter-not-dyn:[kinds]   the armed half;
- *   NOT-CLOSED=receiver-did-not-lower               no function value;
+ *   NOT-CLOSED=receiver-not-a-func:dyn              a builtin function VALUE (a dyn), no compiled func;
  *   (and receiver-not-a-func / receiver-has-an-island-rest-abi /
- *    receiver-does-not-box / operands-do-not-reach-dyn, which no reduction
- *    in this file produces — they are named here so a reader knows the
- *    population is six, not three.)
+ *    receiver-does-not-box / operands-do-not-reach-dyn / receiver-did-not-lower,
+ *    which no reduction in this file produces — they are named here so a
+ *    reader knows the population is six, not three.)
  *
  * The STATIC spellings must produce NO row at all: an array-literal `apply`
  * and a `call` both compute a static argument list and never reach the arm.
@@ -72,10 +72,9 @@ function applypackRows(source: string, on: boolean): string[] {
  *   packTyped   the SAME call with a JSDoc `number` parameter. Node passes
  *               `undefined` for a short pack and the body makes NaN; the
  *               boxed thunk dynCHECKS and throws. Kept out, by name.
- *   packStdlib  a STDLIB member (`Object.prototype.toString`), which has no
- *               compiled function value: the speculative lowering leaves a
- *               diagnostic behind, so the arm declines and the fence below
- *               keeps its own message.
+ *   packStdlib  a STDLIB member (`Object.prototype.toString`), which is a
+ *               builtin function value (a dyn), not a compiled func: the arm
+ *               declines and the fence below keeps its own message.
  *   litApply    the ARRAY-LITERAL spelling — a static list, so the direct
  *               call above the arm claims it and NO row is produced.
  *   plainCall   `.call(...)` — always a static list, same silence. */
@@ -117,11 +116,12 @@ test("the instrument names the VERDICT at every runtime-length apply, and nothin
   expect(typed[0], why).toMatch(/receiver-parameter-not-dyn:\[[a-z0-9,]+\]/);
   expect(typed[0], why).not.toContain("[dyn]");
 
-  /* A STDLIB member has no compiled function value, and the speculative
-   * lowering leaves a diagnostic behind rather than a `func`. The arm must
-   * decline there and DISCARD what it captured — the fence below is still
-   * the answer and it names the working spelling. */
-  const stdlib = distinct.filter((l) => l.includes("NOT-CLOSED=receiver-did-not-lower"));
+  /* A STDLIB member (`Object.prototype.toString`) has no compiled function
+   * value: it lowers to the runtime's builtin function VALUE, a dyn, not a
+   * `func`. The arm must decline there (receiver-not-a-func:dyn) and DISCARD
+   * what it captured — the fence is still the answer and it names the working
+   * spelling. */
+  const stdlib = distinct.filter((l) => l.includes("NOT-CLOSED=receiver-not-a-func:dyn"));
   expect(stdlib.length, why).toBe(1);
   expect(stdlib[0], why).toContain("Object.prototype.toString.apply(null, pack(1))");
 
