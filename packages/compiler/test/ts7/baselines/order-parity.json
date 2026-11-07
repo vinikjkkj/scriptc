@@ -13811,6 +13811,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24642-accessor-descriptors-on-function-and-class-values.js": {
+   "order": [
+    "<repo>/tests/corpus/24642-accessor-descriptors-on-function-and-class-values.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24643-accessor-descriptor-on-a-commonjs-whole-export-class.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24643-accessor-descriptor-on-a-commonjs-whole-export-class.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/24660-unique-symbol-const-keyed-interface-member-read-and-optional-call.ts": {
    "order": [
     "<repo>/tests/corpus/24660-unique-symbol-const-keyed-interface-member-read-and-optional-call.ts"
