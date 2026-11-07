@@ -13591,6 +13591,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24557-intrinsic-prototype-members-and-the-object-constructor-value.js": {
+   "order": [
+    "<repo>/tests/corpus/24557-intrinsic-prototype-members-and-the-object-constructor-value.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2455-private-brand-checks.ts": {
    "order": [
     "<repo>/tests/corpus/2455-private-brand-checks.ts"
