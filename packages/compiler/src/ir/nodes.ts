@@ -6651,6 +6651,7 @@ export type IrLibFn =
   | "dyn.objectPrototype"
   | "dyn.primPrototype"
   | "dyn.primInit"
+  | "dyn.unwrapPrimStr"
   | "dyn.setPrototypeOf"
   | "dyn.toObject"
   | "dyn.unwrapPrim"
@@ -12884,7 +12885,7 @@ export function moduleUsesDynProto(mod: IrModule): boolean {
     const node = v as { kind?: unknown; fn?: unknown };
     if (
       node.kind === "libCall" &&
-      (node.fn === "dyn.getPrototypeOf" || node.fn === "dyn.objectPrototype" || node.fn === "dyn.primPrototype" || node.fn === "dyn.primInit" || node.fn === "dyn.setPrototypeOf" || node.fn === "dyn.toObject" ||
+      (node.fn === "dyn.getPrototypeOf" || node.fn === "dyn.objectPrototype" || node.fn === "dyn.primPrototype" || node.fn === "dyn.primInit" || node.fn === "dyn.unwrapPrimStr" || node.fn === "dyn.setPrototypeOf" || node.fn === "dyn.toObject" ||
         node.fn === "dyn.unwrapPrim" || node.fn === "dyn.objectCtor" || node.fn === "dyn.builtinCtor")
     ) {
       found = true;
@@ -14946,6 +14947,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // Object.setPrototypeOf: non-object proto, a cyclic link; super(x) of a String subclass: a Symbol argument
   "dyn.setPrototypeOf",
   "dyn.primInit",
+  "dyn.unwrapPrimStr",
   "dyn.defineProps",
   "dyn.defineProp",
   "dyn.captureStack",

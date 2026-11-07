@@ -1642,6 +1642,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "dyn.objectPrototype": { argTypes: [], result: DYN },
   "dyn.primPrototype": { argTypes: [F64], result: DYN },
   "dyn.primInit": { argTypes: [DYN, DYN, F64], result: DYN },
+  "dyn.unwrapPrimStr": { argTypes: [DYN], result: DYN },
   "dyn.setPrototypeOf": { argTypes: [DYN, DYN], result: DYN },
   "dyn.toObject": { argTypes: [DYN], result: DYN },
   "dyn.unwrapPrim": { argTypes: [DYN], result: DYN },

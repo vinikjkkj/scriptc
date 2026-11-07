@@ -1495,6 +1495,19 @@ void scr_dyn_proto_ctor_fence(void) {
   scr_throw_error_msg(SCR_ERR_ERROR, msg, sizeof msg - 1);
 }
 
+/* Does a wrapper object (or anything with an OBJ chain) carry `name` as its own member or on a prototype BEFORE the intrinsic
+ * sentinels (the immortal String / Number / Boolean prototypes, whose builtin members are the primitive's)? */
+bool scr_dyn_wrapper_user_member(const ScrDyn *d, const char *name, size_t n) {
+  if (d->kind != SCR_DYN_OBJ) return false;
+  if (scr_dyn_obj_own_data(d, name, n) != NULL) return true;
+  const ScrDyn *p = scr_dyn_ext(d)->proto;
+  for (int steps = 0; p != NULL && p->kind == SCR_DYN_OBJ && p->rc != SIZE_MAX && steps < 1024; steps++) {
+    if (scr_dyn_obj_own_data(p, name, n) != NULL) return true;
+    p = scr_dyn_ext(p)->proto;
+  }
+  return false;
+}
+
 void scr_dyn_obj_set_proto(ScrDyn *obj, ScrDyn *proto) {
   if (obj->kind != SCR_DYN_OBJ) return;
   ScrDyn *prev = scr_dyn_ext(obj)->proto;
@@ -1612,6 +1625,14 @@ static bool dyn_bytes_is_dataview(const ScrDyn *d) {
  * the generic "Spread syntax requires ...iterable[Symbol.iterator] to be
  * a function". Borrows src. */
 void scr_dyn_arr_push_spread(ScrDyn *arr, const ScrDyn *src, const char *what) {
+  {
+    /* A String wrapper object spreads its primitive's code points. */
+    const ScrDyn *wp = scr_dyn_wrapper_prim(src);
+    if (wp != NULL && wp->kind == SCR_DYN_STR) {
+      scr_dyn_arr_push_spread(arr, wp, what);
+      return;
+    }
+  }
   if (src->kind == SCR_DYN_ARR) {
     SCR_VIEW_FRESH(src);
     for (size_t i = 0; i < src->v.arr.len; i++) {
@@ -1685,6 +1706,8 @@ void scr_dyn_arr_push_spread(ScrDyn *arr, const ScrDyn *src, const char *what) {
  * undefined no kind prefix, null V8's "object null"). Borrows both; +1 or
  * NULL with the TypeError pending. */
 ScrDyn *scr_dyn_iter_pack(const ScrDyn *src, const ScrStr *msg) {
+  const ScrDyn *iter_wp = scr_dyn_wrapper_prim(src);
+  if (iter_wp != NULL && iter_wp->kind == SCR_DYN_STR) src = iter_wp;
   if ((src->kind == SCR_DYN_ARR || src->kind == SCR_DYN_BYTES || src->kind == SCR_DYN_STR ||
        scr_dyn_is_iterable_dynmap(src)) &&
       !dyn_bytes_is_dataview(src)) {
@@ -6867,6 +6890,22 @@ ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc) {
   case SCR_DYN_OBJ: {
     {
       const ScrDyn *wp = scr_dyn_wrapper_prim(d); /* String(Object(x)) is the primitive's string */
+      if (wp != NULL && wp->kind == SCR_DYN_STR && scr_dyn_wrapper_user_member(d, "toString", 8)) {
+        /* `class C extends String { toString() {..} }`: ToString runs the subclass's own toString. */
+        ScrDyn *um = scr_dyn_obj_own_data(d, "toString", 8);
+        for (const ScrDyn *pp = scr_dyn_ext(d)->proto; um == NULL && pp != NULL && pp->kind == SCR_DYN_OBJ && pp->rc != SIZE_MAX; pp = scr_dyn_ext(pp)->proto) {
+          um = scr_dyn_obj_own_data(pp, "toString", 8);
+        }
+        if (um != NULL && um->kind == SCR_DYN_FUNC) {
+          scr_dyn_this_push_dyn(d);
+          ScrDyn *r = scr_dyn_call(um, NULL, 0, "toString");
+          scr_dyn_this_pop();
+          if (r == NULL) return scr_str_new("", 0); /* threw: pending */
+          ScrStr *rs = scr_dyn_string_coerce(r);
+          scr_dyn_release(r);
+          return rs;
+        }
+      }
       if (wp != NULL) return scr_dyn_to_string(wp, enc);
     }
     if (d->rc == SIZE_MAX && scr_dyn_is_intrinsic_proto(d)) return scr_str_new("[object Object]", 15); /* Object.prototype.toString over an intrinsic prototype */
@@ -7390,6 +7429,12 @@ ScrStr *scr_dyn_to_primitive_string(const ScrDyn *d) {
     return ps;
   }
   if (d->kind != SCR_DYN_OBJ) return scr_dyn_string_coerce(d);
+  {
+    /* A primitive wrapper with no valueOf of its own before the intrinsic prototype: String.prototype.valueOf answers the
+     * primitive, so a subclass's toString is NOT consulted by `+` (`l + ""` is the raw text). */
+    const ScrDyn *wp = scr_dyn_wrapper_prim(d);
+    if (wp != NULL && !scr_dyn_wrapper_user_member(d, "valueOf", 7)) return scr_dyn_string_coerce(wp);
+  }
   ScrDyn *m = scr_dyn_obj_own_data(d, "valueOf", 7); /* borrowed */
   if (!m) m = scr_dyn_proto_get(d, "valueOf", 7);
   if (m != NULL && m->kind == SCR_DYN_FUNC) {
@@ -14281,6 +14326,10 @@ void scr_dyn_pack_push_spread(ScrDyn *pack, const ScrDyn *src, const ScrStr *wha
  * Symbol(Symbol.iterator))". The compiler picks the variant by the
  * spread's syntactic position. MAY THROW (pending). Borrows src. */
 void scr_dyn_pack_push_spread_iter(ScrDyn *pack, const ScrDyn *src) {
+  {
+    const ScrDyn *wp = scr_dyn_wrapper_prim(src); /* a String wrapper iterates its primitive */
+    if (wp != NULL && wp->kind == SCR_DYN_STR) src = wp;
+  }
   if ((src->kind == SCR_DYN_ARR || src->kind == SCR_DYN_BYTES ||
        src->kind == SCR_DYN_STR || scr_dyn_is_iterable_dynmap(src)) && !dyn_bytes_is_dataview(src)) {
     scr_dyn_arr_push_spread(pack, src, ""); /* iterable kinds never throw */

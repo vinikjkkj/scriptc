@@ -177,6 +177,20 @@ ScrDyn *scr_dyn_unwrap_prim(const ScrDyn *d) {
   return scr_dyn_retain((ScrDyn *)(wp != NULL ? wp : d));
 }
 
+/* The receiver of a String.prototype method over a dyn (+1, NULL with the exception pending): a wrapper's primitive, or, for a
+ * String wrapper whose class defines its own toString, the string that toString answers (ToString(this)). */
+ScrDyn *scr_dyn_unwrap_prim_str(const ScrDyn *d) {
+  const ScrDyn *wp = scr_dyn_wrapper_prim(d);
+  if (wp != NULL && wp->kind == SCR_DYN_STR && scr_dyn_wrapper_user_member(d, "toString", 8)) {
+    ScrStr *s = scr_dyn_string_coerce(d);
+    if (s == NULL) return NULL;
+    ScrDyn *r = scr_dyn_new_str(s);
+    scr_str_release(s);
+    return r;
+  }
+  return scr_dyn_retain((ScrDyn *)(wp != NULL ? wp : d));
+}
+
 /* Object(d), +1 (ToObject over one argument): null and undefined answer a fresh empty object, an object-like value answers
  * itself (identity), and a primitive answers a fresh wrapper object. */
 ScrDyn *scr_dyn_to_object(const ScrDyn *d) {
