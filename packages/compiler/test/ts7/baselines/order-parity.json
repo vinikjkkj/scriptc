@@ -13573,6 +13573,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24554-object-get-prototype-of-and-the-plain-object-test.js": {
+   "order": [
+    "<repo>/tests/corpus/24554-object-get-prototype-of-and-the-plain-object-test.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2455-private-brand-checks.ts": {
    "order": [
     "<repo>/tests/corpus/2455-private-brand-checks.ts"
