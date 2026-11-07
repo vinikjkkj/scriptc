@@ -13603,6 +13603,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24557-intrinsic-prototype-members-and-the-object-constructor-value.js": {
+   "order": [
+    "<repo>/tests/corpus/24557-intrinsic-prototype-members-and-the-object-constructor-value.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2456-private-async-methods.ts": {
    "order": [
     "<repo>/tests/corpus/2456-private-async-methods.ts"
