@@ -18,7 +18,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "./nodes.js";
-import { settleOrValuePromiseTag, arrayOf, BOOL, bytesValueType, canBoxClassIntoDyn, BYTES_U8, bytesOf, internalSlotFields, ownMaskBit, canDynCheckTo, canConvertToDyn, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, CHILDSTREAM_T, DGRAMSOCK_T, DV_BIG_SET_METHODS, DYN, DYN_HANDLE_KINDS, DATE_T, F64, ABORTCONTROLLER_T, ABORTSIGNAL_T, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, HEADERS_T, REQUESTINIT_T, RESPONSE_T, islandPromisePayloadTag, isJsonSafeType, isRefCounted, isDynErrorClass, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedWeakKey, isSupportedWeakValue, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, SPAWNRES_T, RTCPEERCONNECTION_T, RTCDATACHANNEL_T, SQLITEDB_T, SQLITESTMT_T, STATS_T, streamDuplexWidensToWritable, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, URL_T, VOID, wsGlobalPlan } from "./nodes.js";
+import { settleOrValuePromiseTag, arrayOf, BOOL, bytesValueType, canBoxClassIntoDyn, BYTES_U8, bytesOf, internalSlotFields, ownMaskBit, canDynCheckTo, canConvertToDyn, canExitIslandToType, canMarshalIntoIsland, canMarshalTypedFuncIntoIsland, CHILD_T, CHILDSTREAM_T, DGRAMSOCK_T, DV_BIG_SET_METHODS, DYN, DYN_HANDLE_KINDS, DATE_T, F64, ABORTCONTROLLER_T, ABORTSIGNAL_T, EVENT_T, FILEHANDLE_T, FSWATCHER_T, HTTP2SESSION_T, HTTP2STREAM_T, HTTPCLIENTREQ_T, HTTPREQ_T, HTTPRES_T, HEADERS_T, REQUESTINIT_T, RESPONSE_T, islandPromisePayloadTag, isJsonSafeType, isRefCounted, isDynErrorClass, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedWeakKey, isSupportedWeakValue, isSupportedSetElem, isUnitType, jsOpResultKind, JSVAL, NETSERVER_T, NETSOCKET_T, PROCSTREAM_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, SECURECTX_T, SPAWNRES_T, RTCPEERCONNECTION_T, RTCDATACHANNEL_T, SQLITEDB_T, SQLITESTMT_T, STATS_T, streamDuplexWidensToWritable, STRING, SYMBOL_T, TESTCTX_T, typeEquals, typeKey, URL_T, VOID, wsGlobalPlan } from "./nodes.js";
 
 /** Per-method signature for strIntrinsic: `argTypes` lists every argument
  * position (optional ones included); `minArgs` is how many may be omitted
@@ -480,6 +480,35 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // null leaves it unchecked, exactly like fs.watchCb's callback.
   "abort.on": { argTypes: [ABORTSIGNAL_T, null, BOOL], result: VOID },
   "abort.off": { argTypes: [ABORTSIGNAL_T, null], result: VOID },
+  // The Event surface (scr_event.c). onEv's listener slot is the program's
+  // own (event: Event) => void closure type (null leaves it unchecked,
+  // like abort.on); its last argument is Node's kResistStopPropagation.
+  "abort.onEv": { argTypes: [ABORTSIGNAL_T, null, BOOL, BOOL], result: VOID },
+  "evt.new": { argTypes: [STRING, BOOL, BOOL, BOOL], result: EVENT_T },
+  "evt.newMissing": { argTypes: [], result: EVENT_T },
+  "evt.newDyn": { argTypes: [STRING, DYN], result: EVENT_T },
+  "evt.type": { argTypes: [EVENT_T], result: STRING },
+  "evt.defaultPrevented": { argTypes: [EVENT_T], result: BOOL },
+  "evt.cancelable": { argTypes: [EVENT_T], result: BOOL },
+  "evt.bubbles": { argTypes: [EVENT_T], result: BOOL },
+  "evt.composed": { argTypes: [EVENT_T], result: BOOL },
+  "evt.isTrusted": { argTypes: [EVENT_T], result: BOOL },
+  "evt.timeStamp": { argTypes: [EVENT_T], result: F64 },
+  "evt.eventPhase": { argTypes: [EVENT_T], result: F64 },
+  "evt.cancelBubble": { argTypes: [EVENT_T], result: BOOL },
+  "evt.returnValue": { argTypes: [EVENT_T], result: BOOL },
+  "evt.target": { argTypes: [EVENT_T], result: ABORTSIGNAL_T },
+  "evt.currentTarget": { argTypes: [EVENT_T], result: ABORTSIGNAL_T },
+  "evt.hasTarget": { argTypes: [EVENT_T], result: BOOL },
+  "evt.hasCurrentTarget": { argTypes: [EVENT_T], result: BOOL },
+  "evt.composedPath": { argTypes: [EVENT_T], result: arrayOf(ABORTSIGNAL_T) },
+  "evt.preventDefault": { argTypes: [EVENT_T], result: VOID },
+  "evt.stopPropagation": { argTypes: [EVENT_T], result: VOID },
+  "evt.stopImmediate": { argTypes: [EVENT_T], result: VOID },
+  "evt.setCancelBubble": { argTypes: [EVENT_T, BOOL], result: VOID },
+  "evt.setReturnValue": { argTypes: [EVENT_T, BOOL], result: VOID },
+  "evt.init": { argTypes: [EVENT_T, STRING, BOOL, BOOL], result: VOID },
+  "evt.missingType": { argTypes: [], result: VOID },
   // The static fetch surface. `headers` is a flat [name, value, ...]
   // string array in every arm, built by one of the two builders below, so
   // the call itself never has to know which shape the program wrote.
@@ -2437,6 +2466,10 @@ function validateFunction(
             e.left.type.kind === "symbol" ||
             e.left.type.kind === "bytes" ||
             e.left.type.kind === "promise" ||
+            // The abort pair and Event: one handle per signal/controller/event.
+            e.left.type.kind === "abortSignal" ||
+            e.left.type.kind === "abortController" ||
+            e.left.type.kind === "event" ||
             // Runtime handles are objects to === (one handle per socket/
             // request — pointer identity is JS's object equality).
             DYN_HANDLE_KINDS.has(e.left.type.kind))

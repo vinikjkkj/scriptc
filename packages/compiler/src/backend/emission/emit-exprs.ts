@@ -72,6 +72,35 @@ function armNoteC(E: CEmitter, unionId: string, arm: IrType, tag?: number): stri
  * refused outright: a capture box is a shared binding whose contents can
  * be replaced through any other capture, and the box read is itself a +1.
  * A TDZ global is refused because the read has to run its guard. */
+/** The Event libCalls (scr_event.c): fn -> runtime entry, arguments in IR order. */
+const EVT_C_SYMS: Record<string, string> = {
+  "evt.new": "scr_event_new",
+  "evt.newMissing": "scr_event_new_missing",
+  "evt.newDyn": "scr_event_new_dyn",
+  "evt.type": "scr_event_type",
+  "evt.defaultPrevented": "scr_event_default_prevented",
+  "evt.cancelable": "scr_event_cancelable",
+  "evt.bubbles": "scr_event_bubbles",
+  "evt.composed": "scr_event_composed",
+  "evt.isTrusted": "scr_event_is_trusted",
+  "evt.timeStamp": "scr_event_timestamp",
+  "evt.eventPhase": "scr_event_phase",
+  "evt.cancelBubble": "scr_event_cancel_bubble",
+  "evt.returnValue": "scr_event_return_value",
+  "evt.target": "scr_event_target",
+  "evt.currentTarget": "scr_event_current_target",
+  "evt.hasTarget": "scr_event_has_target",
+  "evt.hasCurrentTarget": "scr_event_has_current_target",
+  "evt.composedPath": "scr_event_composed_path",
+  "evt.preventDefault": "scr_event_prevent_default",
+  "evt.stopPropagation": "scr_event_stop_propagation",
+  "evt.stopImmediate": "scr_event_stop_immediate",
+  "evt.setCancelBubble": "scr_event_set_cancel_bubble",
+  "evt.setReturnValue": "scr_event_set_return_value",
+  "evt.init": "scr_event_init",
+  "evt.missingType": "scr_event_missing_type",
+};
+
 export function emitStableReceiver(E: CEmitter, receiver: IrExpr, following: IrExpr[]): Temp {
   if (
     receiver.kind === "varRef" &&
@@ -3747,6 +3776,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           return { name: "", type: e.type };
         };
         const fn = e.fn;
+        // The Event surface (scr_event.c): every row is a plain call over
+        // borrowed arguments; may-throw ones ride finish()'s pending check.
+        const evtSym = EVT_C_SYMS[fn];
+        if (evtSym !== undefined) return finish(`${evtSym}(${args.map((a) => a.name).join(", ")})`);
         switch (fn) {
           case "island.eval":
             // --dynamic builds only (the frontend fences the intrinsic, so
@@ -4668,6 +4701,14 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           // identity and releases the vector's OWN reference.
           case "abort.off":
             return finish(`scr_abort_signal_off(${arg(0)}, ${arg(1)})`);
+          // The Event-taking listener: the closure MOVES in like abort.on's
+          // (its ABI is (closure, event)); the fourth argument is Node's
+          // kResistStopPropagation.
+          case "abort.onEv": {
+            const cb = args[1]!;
+            E.moveTemp(cb);
+            return finish(`scr_abort_signal_add_ev(${arg(0)}, ${cb.name}, ${arg(2)}, ${arg(3)})`);
+          }
           // ── the static fetch surface (scr_fetch_static.c) ──────────
           // The call never throws: an unparsable URL, a bad scheme and an
           // already-aborted signal all answer an already-REJECTED
@@ -9048,6 +9089,33 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             }
             return finish(`scr_object_ctor_name(${arg(0)})`);
           }
+          // Answered by EVT_C_SYMS above the switch; never reaches here.
+          case "evt.new":
+          case "evt.newMissing":
+          case "evt.newDyn":
+          case "evt.type":
+          case "evt.defaultPrevented":
+          case "evt.cancelable":
+          case "evt.bubbles":
+          case "evt.composed":
+          case "evt.isTrusted":
+          case "evt.timeStamp":
+          case "evt.eventPhase":
+          case "evt.cancelBubble":
+          case "evt.returnValue":
+          case "evt.target":
+          case "evt.currentTarget":
+          case "evt.hasTarget":
+          case "evt.hasCurrentTarget":
+          case "evt.composedPath":
+          case "evt.preventDefault":
+          case "evt.stopPropagation":
+          case "evt.stopImmediate":
+          case "evt.setCancelBubble":
+          case "evt.setReturnValue":
+          case "evt.init":
+          case "evt.missingType":
+            throw new Error(`emitter bug: ${fn} missing from EVT_C_SYMS`);
           default: {
             const _exhaustive: never = fn;
             void _exhaustive;

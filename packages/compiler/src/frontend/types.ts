@@ -2,7 +2,7 @@ import { appendFileSync } from "node:fs";
 import * as ts from "./ts7/adapter.js";
 import { evalStaticClassName } from "./eval-class-syntax.js";
 import type { IrBuiltinRendering, IrRecordShape, IrType, IrUnionDef } from "../ir/nodes.js";
-import { BYTES_ELEM_NAMES, ABORTCONTROLLER_T, ABORTSIGNAL_T, BIGINT, HEADERS_T, REQUEST_T, REQUESTINIT_T, RESPONSE_T, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isRefCounted, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, isSupportedWeakValue, isUnitType, JSVAL, mapOf, weakMapOf, weakRideMapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
+import { BYTES_ELEM_NAMES, ABORTCONTROLLER_T, ABORTSIGNAL_T, EVENT_T, BIGINT, HEADERS_T, REQUEST_T, REQUESTINIT_T, RESPONSE_T, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isRefCounted, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, isSupportedWeakValue, isUnitType, JSVAL, mapOf, weakMapOf, weakRideMapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
 
 import { isJsSourceFile } from "./program.js";
 import { dynBuiltinFnType, dynBuiltinSigOfType } from "./dyn-builtin-sigs.js";
@@ -1271,6 +1271,8 @@ function formatIrTypeInner(t: IrType, shapes: ShapeRegistry, unions: UnionRegist
       return "AbortSignal";
     case "abortController":
       return "AbortController";
+    case "event":
+      return "Event";
     case "response":
       return "Response";
     case "headers":
@@ -3716,6 +3718,38 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
     )
   ) {
     return ABORTCONTROLLER_T;
+  }
+  // Event: Node's global Event (scr_event.c). The value an 'abort' listener
+  // receives and what `new Event(type)` builds. Provenance, not names — a
+  // user's own `class Event` maps as a class like any other. Static lane
+  // only, like AbortController.
+  if (
+    !ctx.dynamic &&
+    psym?.name === "Event" &&
+    checker.declarationsOf(psym).some(
+      (d) =>
+        (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)) &&
+        ctx.isStdlibFile(d.getSourceFile()),
+    )
+  ) {
+    return EVENT_T;
+  }
+  // EventTarget: the only EventTarget with a native representation is the
+  // AbortSignal, so the stdlib EventTarget type (Event.target /
+  // Event.currentTarget, and a parameter typed by it) is that handle. A
+  // value of any other EventTarget (a WebSocket, a MessagePort) meeting a
+  // slot typed this way fails the exact-type check at the crossing rather
+  // than mis-converting.
+  if (
+    !ctx.dynamic &&
+    psym?.name === "EventTarget" &&
+    checker.declarationsOf(psym).some(
+      (d) =>
+        (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)) &&
+        ctx.isStdlibFile(d.getSourceFile()),
+    )
+  ) {
+    return ABORTSIGNAL_T;
   }
   // Response and Headers leave the island group for the same reason
   // AbortSignal did, and now with a value surface behind them: a STATIC

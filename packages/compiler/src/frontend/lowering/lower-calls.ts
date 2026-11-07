@@ -15,8 +15,9 @@ import { lowerGenMethodCall } from "./lower-generators.js";
 import { lowerStreamAsyncIteratorCall } from "./lower-stream.js";
 import { protoDataCallee } from "./lower-protodata.js";
 import { lowerAbortMethodCall } from "./lower-abort.js";
+import { lowerEventMethodCall } from "./lower-event.js";
 import { lowerFetchMethodCall } from "./lower-fetch.js";
-import { BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, F64, canAdaptDynFuncTo, IrExpr, IrFunction, IrLibFn, IrLocal, IrParam, IrStmt, IrType, JSVAL, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxClassIntoDyn, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, dynCopyIsObservable, dynCopyHasLiveView, canMarshalTypedFuncIntoIsland, funcOf, isUnitType, RUNTIME_EMITTER_CLASS, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
+import { ABORTSIGNAL_T, EVENT_T, BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, F64, canAdaptDynFuncTo, IrExpr, IrFunction, IrLibFn, IrLocal, IrParam, IrStmt, IrType, JSVAL, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxClassIntoDyn, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, dynCopyIsObservable, dynCopyHasLiveView, canMarshalTypedFuncIntoIsland, funcOf, isUnitType, RUNTIME_EMITTER_CLASS, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import type { IrFfiImport } from "../../ir/nodes.js";
 import { isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
 import { siblingDtsMethodReturnKind } from "../npm.js";
@@ -6247,6 +6248,8 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         // methods. Position among the handle paths is arbitrary — the
         // receiver kind discriminates.
         lowerAbortMethodCall(L, expr, expr.expression) ??
+        // ev.preventDefault() / stopImmediatePropagation() / composedPath() / initEvent().
+        lowerEventMethodCall(L, expr, expr.expression) ??
         // response.text()/json()/arrayBuffer()/bytes() and headers.get/has.
         lowerFetchMethodCall(L, expr, expr.expression) ??
         L.lowerUrlMethodCall(expr, expr.expression) ??
@@ -10057,9 +10060,50 @@ export function reconcileOverloadMemberDyn(L: Lowerer, expr: ts.CallExpression, 
     }
   }
 
+/** Does this non-arrow function EXPRESSION read `this` (outside nested
+ * non-arrow functions and classes, which rebind it) while sitting in a slot
+ * typed `(this: AbortSignal, event: Event) => void`? Then the closure takes
+ * the Event (declared or synthetic) and binds `this` to its currentTarget.
+ * Null for everything else, which keeps the existing SC1080 story. */
+  function eventListenerThis(L: Lowerer, node: ts.Node, funcType: IrType & { kind: "func" }): true | null {
+    if (!ts.isFunctionExpression(node) || node.body === undefined) return null;
+    if (funcType.params.length > 1 || (funcType.params.length === 1 && funcType.params[0]!.kind !== "event")) return null;
+    // ITERATIVE (explicit stack): this runs before the compiler's depth guard,
+    // and a function body can be nested thousands of levels deep.
+    let readsThis: ts.Node | null = null;
+    const stack: ts.Node[] = [node.body];
+    while (stack.length > 0 && readsThis === null) {
+      const n = stack.pop()!;
+      if (n.kind === ts.SyntaxKind.ThisKeyword) { readsThis = n; break; }
+      if ((ts.isFunctionExpression(n) || ts.isFunctionDeclaration(n) || ts.isMethodDeclaration(n) || ts.isGetAccessor(n) ||
+           ts.isSetAccessor(n) || ts.isClassDeclaration(n) || ts.isClassExpression(n)) && n !== node) continue;
+      ts.forEachChild(n, (c) => { stack.push(c); });
+    }
+    if (readsThis === null) return null;
+    const thisKind = L.mapTypeOf(L.typeOf(readsThis))?.kind;
+    if (thisKind !== "abortSignal" && thisKind !== "dyn" && thisKind !== undefined) return null;
+    // The slot is an Event listener when its own type says so, or when the
+    // function is the listener argument of addEventListener('abort', fn) on
+    // a signal (whose lib parameter type is a union of listener forms).
+    const ctx = L.checker.getContextualType(node);
+    const slot = ctx === undefined ? null : L.mapTypeOf(ctx);
+    if (slot !== null && slot !== undefined && slot.kind === "func" && slot.params.length === 1 && slot.params[0]!.kind === "event") return true;
+    const call = node.parent;
+    if (call !== undefined && ts.isCallExpression(call) && call.arguments[1] === node &&
+        ts.isPropertyAccessExpression(call.expression) && call.expression.name.text === "addEventListener" &&
+        L.mapTypeOf(L.typeOf(call.expression.expression))?.kind === "abortSignal") return true;
+    return null;
+  }
+
   function lowerLambdaInner(L: Lowerer, node: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration | ts.MethodDeclaration | ts.GetAccessorDeclaration | ts.SetAccessorDeclaration,): IrExpr {
     const loc = locOf(node);
-    const { shapes, funcType, argumentsBound } = L.lambdaSignature(node);
+    const lamSig = L.lambdaSignature(node);
+    const { shapes, argumentsBound } = lamSig;
+    let funcType = lamSig.funcType;
+    // An abort listener's `this` is the signal (Node calls a function
+    // listener with this === currentTarget): see eventListenerThis.
+    const evThis = eventListenerThis(L, node, funcType);
+    if (evThis !== null && funcType.params.length === 0) funcType = { ...funcType, params: [EVENT_T] };
     // A lambda IS a value: the exact-arity rule applies at birth. The
     // contextual (target) type decides — `(x?: number) => void` may flow
     // into a slot annotated `(x: number | undefined) => void` (same ABI
@@ -10132,6 +10176,28 @@ export function reconcileOverloadMemberDyn(L: Lowerer, expr: ts.CallExpression, 
       // shapes, so nothing here is a parameter — the whole list re-binds off
       // the synthetic array below.
       const { params, prologue } = L.declareParams(argumentsBound ? [] : node.parameters, shapes);
+      // The listener's `this`, snapshotted at entry from the event's
+      // currentTarget (Node: the receiver at call time, so a later
+      // read after the dispatch ended still names the signal). The event
+      // is the declared first parameter, or a synthetic one when the
+      // function declares none (mongodb's `function () { this.reason }`).
+      if (evThis !== null) {
+        let evId: string;
+        if (params.length === 0) {
+          const synth = L.declareHiddenLocal("%ev", EVENT_T);
+          params.push({ localId: synth.id, name: "%ev", type: EVENT_T });
+          evId = synth.id;
+        } else {
+          evId = params[0]!.localId;
+        }
+        const thisLocal = L.declareThis(ABORTSIGNAL_T);
+        prologue.push({
+          kind: "varDecl",
+          localId: thisLocal.id,
+          init: { kind: "libCall", fn: "evt.target", args: [{ kind: "varRef", localId: evId, type: EVENT_T, loc }], type: ABORTSIGNAL_T, loc },
+          loc,
+        });
+      }
       // The VARIADIC `arguments` form (rest-marked with no declared rest
       // param): a synthetic trailing dyn-array param carries the call's
       // arguments; `arguments` reads resolve to it (identifier lowering).

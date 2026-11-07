@@ -11,6 +11,7 @@ import type { Lowerer } from "./lowerer.js";
 import { ctorFieldFillProven } from "./ctor-fill-proof.js";
 import { EMITTER_CELL_NAMES, GRAFTED_EMITTER_CELL_CLASSES, GRAFTED_EMITTER_CLASSES, BOOL, canBoxClassIntoDyn, canBoxFuncIntoDyn, canDynCheckTo, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DATE_T, DYN, F64, bytesOf, canConvertToDyn, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, NULL_T, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, weakMapOf, isUnitType, mapOf, setOf, typeEquals } from "../../ir/nodes.js";
 import { lowerAbortControllerNew } from "./lower-abort.js";
+import { lowerEventNew } from "./lower-event.js";
 import { engineFunctionCtor } from "./lower-engine-fn.js";
 import { implicitDefaultInstance, implicitDetachedInstance, detachedThisClassOf, markDetachedThis, MAX_GENERIC_INSTANCES, inStrictCode, bindingNeverReassigned, genericCallInstance, implicitAnyParamSymbolsOf, implicitCallInstance, implicitInstanceLike, implicitMonoFile, omittedArgFor, type GenericFnInfo, type GenericInstance, type ParamShape, appendImplicitUndefinedReturn, bindArgumentsParams, bodyReadsArguments } from "./lower-calls.js";
 import { admitWeakTableIr, genResultRecord, isGenericCallableMemberType, runtimeStreamClassOf, typeKey } from "../types.js";
@@ -12010,6 +12011,10 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
       // below, which is where this used to report SC2020.
       if (symbol && symbol.name === "AbortController" && L.isStdlibSymbol(symbol)) {
         return lowerAbortControllerNew(L, expr, loc);
+      }
+      // new Event(type, init?) — Node's global Event (lower-event.ts).
+      if (symbol && symbol.name === "Event" && L.isStdlibSymbol(symbol)) {
+        return lowerEventNew(L, expr, loc);
       }
       // `new URL(...)` through the node:url binding (`const { URL } =
       // require('url')`, `import { URL } from 'node:url'`, `new url.URL`):

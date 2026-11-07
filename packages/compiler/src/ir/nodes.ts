@@ -273,6 +273,14 @@ export type IrType =
    * objects in Node, and making controller.signal answer the controller
    * would be a silently wrong object rather than a refusal. */
   | { kind: "abortController" }
+  /** Node's global `Event` — the value an 'abort' listener receives, and
+   * what `new Event(type, init?)` builds (scr_event.c, link-gated by
+   * moduleUsesEvent). A refcounted handle with a collector header: its
+   * target/currentTarget are signals, and a listener may park the event
+   * in a closure the signal owns, so both edges are traced. `target` and
+   * `currentTarget` answer the AbortSignal (the only EventTarget with a
+   * native representation) or null. */
+  | { kind: "event" }
   /** A fetch Response — the handle scr_fetch_static.c mints when the
    * response HEAD arrives (not when the body ends: that is where Node
    * settles fetch's promise too). Refcounted and CYCLE-CAPABLE, through
@@ -560,7 +568,7 @@ export const REF_TRUTHY_KINDS: ReadonlySet<string> = new Set([
   "array", "map", "set", "regex", "url", "searchParams", "stats", "spawnRes", "child",
   "fileHandle",
   "netServer", "netSocket", "http2Session", "http2Stream", "dgramSocket", "testCtx", "httpReq", "httpRes", "httpClientReq",
-  "secureCtx", "abortSignal", "abortController", "fsWatcher", "childStream", "procStream", "bytes", "func", "object", "record", "promise",
+  "secureCtx", "abortSignal", "abortController", "event", "fsWatcher", "childStream", "procStream", "bytes", "func", "object", "record", "promise",
   // A Database and a Statement are JS objects: always truthy.
   "sqliteDb", "sqliteStmt",
   // A Response and a Headers view are JS objects: always truthy.
@@ -653,6 +661,7 @@ export const HTTPCLIENTREQ_T: IrType = { kind: "httpClientReq" };
 export const SECURECTX_T: IrType = { kind: "secureCtx" };
 export const ABORTSIGNAL_T: IrType = { kind: "abortSignal" };
 export const ABORTCONTROLLER_T: IrType = { kind: "abortController" };
+export const EVENT_T: IrType = { kind: "event" };
 export const RESPONSE_T: IrType = { kind: "response" };
 export const HEADERS_T: IrType = { kind: "headers" };
 export const REQUESTINIT_T: IrType = { kind: "requestInit" };
@@ -1284,6 +1293,8 @@ export function typeKey(t: IrType): string {
       return "abortSignal";
     case "abortController":
       return "abortController";
+    case "event":
+      return "event";
     case "response":
       return "response";
     case "headers":
@@ -1451,6 +1462,9 @@ export function isRefCounted(t: IrType): boolean {
     // through it.
     t.kind === "abortSignal" ||
     t.kind === "abortController" ||
+    // An Event holds the signal it is dispatched at (collector header,
+    // traced edges): the same cycle story as the abort pair.
+    t.kind === "event" ||
     // A fetch Response and its Headers view. The Response carries the
     // collector header (its parked body-consumer promise is a real edge
     // back into the graph, and traceAdapterC answers a trace for it); the
@@ -7158,6 +7172,37 @@ export type IrLibFn =
   | "abort.reason"
   | "abort.on"
   | "abort.off"
+  /** The Event value surface (scr_event.c). `new` takes the type string and
+   * the three init booleans; the getters borrow the receiver; the listener
+   * form `abort.onEv` MOVES a closure whose ABI is (closure, event) in,
+   * with the third argument = once and the fourth = Node's
+   * kResistStopPropagation (events.addAbortListener sets it). */
+  | "evt.new"
+  | "evt.newMissing"
+  | "evt.newDyn"
+  | "evt.type"
+  | "evt.defaultPrevented"
+  | "evt.cancelable"
+  | "evt.bubbles"
+  | "evt.composed"
+  | "evt.isTrusted"
+  | "evt.timeStamp"
+  | "evt.eventPhase"
+  | "evt.cancelBubble"
+  | "evt.returnValue"
+  | "evt.target"
+  | "evt.currentTarget"
+  | "evt.hasTarget"
+  | "evt.hasCurrentTarget"
+  | "evt.composedPath"
+  | "evt.preventDefault"
+  | "evt.stopPropagation"
+  | "evt.stopImmediate"
+  | "evt.setCancelBubble"
+  | "evt.setReturnValue"
+  | "evt.init"
+  | "evt.missingType"
+  | "abort.onEv"
   /** The static fetch surface (scr_fetch_static.c). Four call entry
    * points rather than sentinel arguments, the abort.abort /
    * abort.abortReason precedent: an omitted body is not an empty one (a
@@ -9053,6 +9098,8 @@ function isJsonSafeAt(
     // AbortController (one internal signal slot) is the same answer.
     case "abortSignal":
     case "abortController":
+    // An Event stringifies to {} (every member is a prototype accessor).
+    case "event":
     // A Response's own enumerable properties are none (status/ok/headers
     // are accessors on the prototype), so Node stringifies it to {} — no
     // honest JSON surface. A Headers view is the same answer.
@@ -10610,6 +10657,37 @@ export function moduleUsesAbortSignal(mod: IrModule): boolean {
     if (k === "libCall") {
       const fn = (v as { fn?: unknown }).fn;
       if (fn === "tp.setTimeoutV" || fn === "tp.setTimeoutVS" || fn === "tp.setTimeoutVoid" || fn === "tp.setTimeoutVoidS") {
+        found = true;
+        return;
+      }
+    }
+    for (const x of Object.values(v as Record<string, unknown>)) visit(x);
+  };
+  visit(mod);
+  return found;
+}
+
+/** True when the module contains an `event`-typed slot or an evt.* /
+ * abort.onEv libCall anywhere -- the LINK gate for scr_event.c and the
+ * -DSCR_ABORT_EV variant of scr_abort.c (cc.ts). Same generic JSON walk as
+ * moduleUsesAbortSignal: `kind` discriminants live only on IR objects, so
+ * user string VALUES can never false-positive. */
+export function moduleUsesEvent(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const k = (v as { kind?: unknown }).kind;
+    if (k === "event") {
+      found = true;
+      return;
+    }
+    if (k === "libCall") {
+      const fn = (v as { fn?: unknown }).fn;
+      if (typeof fn === "string" && (fn.startsWith("evt.") || fn === "abort.onEv")) {
         found = true;
         return;
       }
@@ -14174,6 +14252,7 @@ const LIB_MODE_REFUSED_KINDS: ReadonlyMap<string, string> = new Map([
   ["secureCtx", "the node:tls surface"],
   ["abortSignal", "the AbortSignal surface"],
   ["abortController", "the AbortSignal surface"],
+  ["event", "the Event surface"],
   ["response", "the fetch surface"],
   ["headers", "the fetch surface"],
   ["requestInit", "the fetch surface"],
@@ -14656,6 +14735,12 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "str.atob",
   "str.btoa",
   "str.b64Missing",
+  // `new Event()` with no type, the zero-argument initEvent(), and `new
+  // Event(t, nonObject)` throw Node's TypeErrors (ERR_MISSING_ARGS /
+  // ERR_INVALID_ARG_TYPE).
+  "evt.newMissing",
+  "evt.newDyn",
+  "evt.missingType",
   // queueMicrotask's checked-dynamic form throws ERR_INVALID_ARG_TYPE
   // synchronously on a non-function argument (the closure form never
   // throws — the callback's own throw surfaces at drain, uncaught).

@@ -116,10 +116,17 @@ export function computeTraced(mod: IrModule): { shapes: Set<string>; unions: Set
     switch (t.kind) {
       case "func":
       case "promise":
+      // The abort pair and Event carry a collector header of their own: a
+      // listener closure stored on a signal can capture the record or class
+      // instance holding that signal (emitter.ts's row has the story). This
+      // copy was missing them, so a class holding a signal whose listener
+      // captured `this` was graded acyclic here and leaked on the LLVM tier
+      // (the C tier traced it).
+      case "abortSignal":
+      case "abortController":
+      case "event":
       // A dyn value is a collector node with its own header — emitter.ts's
-      // row has the story. (This copy is also still missing that file's
-      // abortSignal/abortController rows; that divergence is pre-existing
-      // and out of this change's scope.)
+      // row has the story.
       case "dyn":
         return true;
       case "object":
@@ -319,6 +326,9 @@ export function traceAdapter(host: ShapeHost, t: IrType): string | null {
     case "abortController":
       host.declare(`declare void @scr_abort_controller_trace_v(ptr, ptr, ptr)`);
       return "@scr_abort_controller_trace_v";
+    case "event":
+      host.declare(`declare void @scr_event_trace_v(ptr, ptr, ptr)`);
+      return "@scr_event_trace_v";
     // The C twin's row: the Response's parked body-consumer promise.
     case "response":
       host.declare(`declare void @scr_response_trace_v(ptr, ptr, ptr)`);

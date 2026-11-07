@@ -32,6 +32,7 @@ import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
 import type { ClassInfo, ClassIteratorInfo } from "./lower-classes.js";
 import { bindingHoldsItsInitializer, genericIfaceBindingKeepsClass, isProvenPrefixTruncation, staticBagWrite, superReturnStmt, lowerSuperFlagStatement } from "./lower-classes.js";
 import { lowerStreamUnderscoreAssign, streamClassAliasDecl, streamSidesOf } from "./lower-stream.js";
+import { lowerEventPropertyAssignment } from "./lower-event.js";
 import { lowerHttpResPropertyAssignment, lowerServerCloseOverrideAssignment, lowerServerTimeoutPropertyAssignment } from "./lower-server.js";
 import { namespaceConditionalOf } from "./lower-nsvalue.js";
 import { builtinMemberRequireDecl, builtinNamespaceDestructureModuleOf, createRequireBindingDecl, createRequireCalleeFileOf, createRequireNamespaceDecl, nodeRequireArgumentError, requireFnValueDeclType } from "./lower-builtins.js";
@@ -7776,6 +7777,11 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
           {
             const resProp = lowerHttpResPropertyAssignment(L, expr.left, expr.right, locOf(expr));
             if (resProp) return resProp;
+          }
+          {
+            // ev.cancelBubble = b / ev.returnValue = b (lower-event.ts)
+            const evProp = lowerEventPropertyAssignment(L, expr.left, expr.right, locOf(expr));
+            if (evProp) return { kind: "exprStmt", expr: evProp, loc: locOf(expr) };
           }
           {
             const srvTimeout = lowerServerTimeoutPropertyAssignment(L, expr.left, expr.right, locOf(expr));
