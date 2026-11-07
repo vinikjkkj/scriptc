@@ -1,0 +1,6 @@
+constructed-wrapper-object-bound-to-a-wrapper-typed-slot.js:4:11 - error SC1090: a constructed Number wrapper object bound to a slot typed 'Number' (the wrapper interface maps to the primitive, which cannot hold the object; consume it directly: Number(new …), typeof, a template, or +) is not supported yet
+
+  3 | const m = { n: Number };
+  4 | const w = new m.n(3);
+    |           ^~~~~~~~~~
+  5 | console.log(typeof w);
