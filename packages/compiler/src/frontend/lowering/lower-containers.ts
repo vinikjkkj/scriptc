@@ -9896,6 +9896,7 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
     let helper = L.arrHofHelpers.get(key);
     if (!helper) {
       helper = `%obj.${member}.${L.arrHofHelpers.size}`;
+      const owner: string = helper;
       const ref = (localId: string, type: IrType): IrExpr => ({ kind: "varRef", localId, type, loc });
       const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
       const outRef = ref("out.0", resultT);
@@ -10009,11 +10010,11 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
               ? { unionId: f.type.unionId, tag: utag, value: raw }
               : null,
           loc,
-        }, helper);
+        }, owner);
       };
       // A shape with a KEY LIST walks its construction-order keys and then the list (rebuilt once the shape has one).
       const buildFields = (): void => {
-        L.dropOwnKeyGuards(helper);
+        L.dropOwnKeyGuards(owner);
         fieldsSub.length = 0;
         if (shape.keyList) {
           fillWithKeyList(L, shape, argIr.shapeId, () => rRef, order, fillOne, fieldsSub, loc, (id, nm) => {
