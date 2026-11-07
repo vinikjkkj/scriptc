@@ -26015,7 +26015,14 @@ export function slotBypassTarget(L: Lowerer, declarer: ClassInfo, method: string
     const recvT = L.mapTypeOf(L.typeOf(left.expression));
     if (recvT?.kind !== "object") return null;
     const info = L.classes.get(recvT.className) ?? null;
-    if (info === null || info.builtinError || L.findMethodOn(info, name) !== null || info.fields.has(name)) return null;
+    if (info === null || info.builtinError || info.fields.has(name)) return null;
+    if (L.findMethodOn(info, name) !== null || findGenericMethodOn(L, info, name) !== null) {
+      // `x.m = fn` where `m` is a METHOD of the receiver's class chain: Node stores an own property that shadows the method for `x.m(...)`
+      // and for every `this.m` read inside the class's own code (mysql2 swaps a command's `start` for one that does nothing). The
+      // run-time keyed write's machinery answers it exactly (lower-ownshadow.ts): the family dispatches through the table, so only a
+      // program that spells such a write pays for it.
+      return lowerLiteralMethodShadowWrite(L, expr, left, name, info);
+    }
     if (L.findMethodOn(info, `get:${name}`) !== null || L.findMethodOn(info, `set:${name}`) !== null) return null;
     const decls: { cls: ClassInfo; depth: number; type: IrType }[] = [];
     const walk = (c: ClassInfo, depth: number): void => {
@@ -29075,6 +29082,25 @@ function shadowAwareMethodValue(L: Lowerer, expr: ts.PropertyAccessExpression, c
     type: DYN,
     loc,
   };
+}
+
+/** `x.m = fn` with a LITERAL key that names a method of the receiver's class: the write of lowerInstanceKeyedWrite with a spelled key.
+ * Null (the caller keeps its fence) when the class carries no run-time property table. */
+function lowerLiteralMethodShadowWrite(L: Lowerer, expr: ts.BinaryExpression, left: ts.PropertyAccessExpression, name: string, info: ClassInfo): IrStmt | null {
+  if (info.hasPropsTable !== true || info.def.runtime === true) return null;
+  registerOwnShadowFamily(info);
+  const why = ownShadowWhy(L, info);
+  if (why !== null) L.unsupported("SC1090", left, `writing an own property over the method '${name}' (it shadows the method of the class, and ${why})`);
+  const loc = locOf(expr);
+  const obj = L.lowerExpr(left.expression);
+  if (obj.type.kind !== "object") return null;
+  const key: IrExpr = { kind: "strLit", value: name, type: STRING, loc: locOf(left.name) };
+  const value = L.coerceToExpected(L.lowerExpr(expr.right), DYN);
+  if (value.type.kind !== "dyn") {
+    L.unsupported("SC1101", expr.right, `storing '${L.fmt(value.type)}' values in an instance's run-time property table (the value cannot convert into the checked-dynamic tree)`);
+  }
+  const recvDyn: IrExpr = internalBox(L, { kind: "dynFrom", value: obj, type: DYN, loc: locOf(left.expression) });
+  return { kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.keySet", args: [recvDyn, key, value], type: VOID, loc }, loc };
 }
 
 /** `o[k] = v` with a RUN-TIME key on an instance of a JS class that carries the run-time property table
