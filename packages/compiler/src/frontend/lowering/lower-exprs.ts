@@ -16889,8 +16889,12 @@ export function staticAssertionOperand(L: Lowerer, node: ts.Expression, field: s
     // type (static `any` — mapTypeOf answers null without --dynamic)
     // probes the receiver's own lowered world: a dyn value takes the same
     // write, anything else falls through to the fences.
-    if (receiverIr?.kind === "dyn" || receiverIr === null) {
-      const obj = receiverIr !== null ? L.lowerExpr(target.expression) : probeLower(L, target.expression);
+    // A FUNCTION-valued receiver in a JavaScript source (`createDebug[key] = env[key]` over a function declaration): the write lands in the closure's own
+    // property table through the per-use box, the same table its by-name writes, reads and calls use (the function's expando members are not lifted then;
+    // see lower-expando's dynamic-key stand-down), so no static read can go stale.
+    const fnBox = receiverIr?.kind === "func" ? fnOwnPropBox(L, target.expression, locOf(target.expression)) : null;
+    if (receiverIr?.kind === "dyn" || receiverIr === null || fnBox !== null) {
+      const obj = fnBox ?? (receiverIr !== null ? L.lowerExpr(target.expression) : probeLower(L, target.expression));
       if (obj !== null && obj.type.kind === "dyn") {
         const loc = locOf(expr);
         const litKey = keyLiteralWithFolds(L, target.argumentExpression);
