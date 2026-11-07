@@ -2865,28 +2865,8 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
       else scr_dyn_view_sync(recv);
     }
     size_t len = recv->v.arr.len;
-    /* A FROZEN array: an in-place method throws V8's TypeError for the first write the spec algorithm makes (a no-op case, an empty fill range say, falls
-     * through and changes nothing). */
-    if (scr_dyn_arr_is_frozen(recv)) {
-      int fop = 0;
-      double fx = 0, fy = 0, fz = 0;
-      const double inf = (double)INFINITY;
-      #define FRZ_NUM(i, dflt) ((i) < argc && args[(i)]->kind != SCR_DYN_UNDEF ? scr_dyn_to_number(args[(i)]) : (dflt))
-      if (dyn_name_is(method, "push")) { fop = 1; fx = (double)argc; }
-      else if (dyn_name_is(method, "pop")) fop = 2;
-      else if (dyn_name_is(method, "shift")) fop = 3;
-      else if (dyn_name_is(method, "unshift")) { fop = 4; fx = (double)argc; }
-      else if (dyn_name_is(method, "reverse") || dyn_name_is(method, "sort")) fop = 5;
-      else if (dyn_name_is(method, "fill")) { fop = 6; fx = FRZ_NUM(1, 0); fy = FRZ_NUM(2, inf); }
-      else if (dyn_name_is(method, "copyWithin")) { fop = 7; fx = FRZ_NUM(0, 0); fy = FRZ_NUM(1, 0); fz = FRZ_NUM(2, inf); }
-      else if (dyn_name_is(method, "splice")) { fop = 8; fx = FRZ_NUM(0, 0); fy = argc < 2 ? inf : FRZ_NUM(1, 0); fz = argc > 2 ? (double)(argc - 2) : 0; }
-      #undef FRZ_NUM
-      if (fop != 0) {
-        if (scr_exc_pending()) return NULL;
-        scr_frozen_fail_len(len, fop, fx, fy, fz);
-        if (scr_exc_pending()) return NULL;
-      }
-    }
+    /* A FROZEN array (scr_array_frozen.c): an in-place method throws V8's TypeError for the first write the spec algorithm makes. */
+    if (scr_dyn_arr_is_frozen(recv) && !scr_dyn_frozen_ops->invoke(recv, method, args, argc)) return NULL;
     /* An IN-PLACE array method on a copy the static→dyn boundary made of
      * a value the caller still names. When the copy is a live view the
      * method runs on the copy and its result is committed to the origin

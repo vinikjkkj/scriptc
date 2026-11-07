@@ -6567,6 +6567,15 @@ bool scr_dyn_key_delete_sloppy(ScrDyn *recv, ScrStr *key);
  * answers the same array (+1). Every dyn array write path (the methods, index and length writes, delete) consults scr_dyn_arr_is_frozen. */
 ScrDyn *scr_dyn_arr_freeze(ScrDyn *d);
 static inline bool scr_dyn_arr_is_frozen(const ScrDyn *d) { return d->kind == SCR_DYN_ARR && d->null_proto; }
+/* The frozen dyn array's guards, in scr_array_frozen.c (installed only when that unit links; the flag can only be set by it). `set`: a keyed write the array
+ * refuses (sloppy: ignored, strict: throws); `del`: a delete it refuses (answers whether it was refused); `invoke`: an in-place method (false = exception pending). */
+typedef struct ScrDynFrozenOps {
+  void (*set)(ScrDyn *recv, ScrStr *key);
+  bool (*del)(ScrDyn *recv, ScrStr *key);
+  bool (*invoke)(ScrDyn *recv, const char *method, ScrDyn **args, size_t argc);
+} ScrDynFrozenOps;
+extern const ScrDynFrozenOps *scr_dyn_frozen_ops;
+void scr_arr_drop_value(const ScrArr *a, void *v);
 /* `key in v` with a runtime key — the dynHasKey fold per value (OBJ own
  * members, ARR length/valid indices, false elsewhere). Never throws. */
 bool scr_dyn_has_key(const ScrDyn *v, const ScrStr *key);

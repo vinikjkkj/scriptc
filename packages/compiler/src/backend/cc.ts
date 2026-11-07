@@ -85,6 +85,7 @@ const RUNTIME_UNIT_DEPS: Readonly<Record<string, readonly string[]>> = {
   // The Promise statics ride the dyn promise unit (new_promise, adopt, then, the resolving functions).
   "scr_promise_static.c": ["scr_async_dyn.c"],
   "scr_array_dyn.c": ["scr_json.c", "scr_string.c", "scr_number.c", "scr_bytes.c", "scr_cycle.c"],
+  "scr_array_frozen.c": ["scr_array.c", "scr_json.c", "scr_string.c"],
   "scr_events_emitter.c": ["scr_dyn_handle.c"],
   "scr_http.c": ["scr_dyn_handle.c", "scr_net.c", "scr_url.c"],
   // The pipe-into-a-ClientRequest adapter: a Writable over a request, so
@@ -357,6 +358,8 @@ export interface CcOptions {
   dynExt?: boolean;
   /** The program uses dyn-element array operations (pop/shift/join/splice/sort, the spread and apply forms): compiles scr_array_dyn.c. */
   dynArr?: boolean;
+  /** The program freezes an array or guards the writes of one (moduleUsesFrozenArrays): compiles scr_array_frozen.c. */
+  frozenArr?: boolean;
   /** The program holds a buffer module value (dyn.bufferValue): compiles scr_buffer_val.c. */
   bufferVal?: boolean;
   /** The program can write a named own property onto a bytes value (moduleUsesBytesOwn): compiles scr_bytes_own.c. */
@@ -1806,7 +1809,7 @@ async function buildTlsArchiveLocked(
  * above already holds itself to ("no currently-linking binary changes by a
  * byte"). Only programs that shed the unit change, and they change by
  * -16,384. */
-function coreRuntimeSources(url: boolean, coro: boolean, dynArr: boolean): string[] {
+function coreRuntimeSources(url: boolean, coro: boolean, dynArr: boolean, frozenArr = false): string[] {
   const out: string[] = [];
   for (const f of RUNTIME_SOURCES) {
     // The stackless lane's unit, gated on the same predicate the EMITTER
@@ -1820,6 +1823,7 @@ function coreRuntimeSources(url: boolean, coro: boolean, dynArr: boolean): strin
     // The dyn-element array operations link only when the program uses them (dynArr,
     // from the IR): the unit needs the dyn tier, and the arrays it serves are the rare case.
     if (f === "scr_array.c" && dynArr) out.push("scr_array_dyn.c");
+    if (f === "scr_array.c" && frozenArr) out.push("scr_array_frozen.c");
     if (url && f === "scr_path.c") out.push("scr_url.c");
   }
   return out;
@@ -1831,6 +1835,7 @@ const LIB_RUNTIME_SOURCES = [
   ),
   // The archive holds the dyn-element unit too: an archive member is pulled only when referenced.
   "scr_array_dyn.c",
+  "scr_array_frozen.c",
   "scr_library.c",
 ];
 
@@ -2401,6 +2406,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
   const dynamic = opts.dynamic ?? false;
   const coro = opts.coro ?? false;
   const dynArr = opts.dynArr ?? false;
+  const frozenArr = opts.frozenArr ?? false;
   const regex = opts.regex ?? false;
   // fetch's implementation switch: the default is the NATIVE bridge
   // (scr_fetch.c over scr_net + scr_tls + scr_http's client parser +
@@ -2585,8 +2591,8 @@ export async function compileC(opts: CcOptions): Promise<void> {
     // encodes is "defined exactly when scr_coro.c is in this link", and taking
     // it off the list itself means the two cannot disagree even if the gate
     // moves later. Two sources for one fact is what made the four faces.
-    ...(coreRuntimeSources(url, coro, dynArr).includes("scr_coro.c") ? ["-DSCR_CORO_LANE"] : []),
-    ...coreRuntimeSources(url, coro, dynArr).map((f) => rt(join(rtDir, f))),
+    ...(coreRuntimeSources(url, coro, dynArr, frozenArr).includes("scr_coro.c") ? ["-DSCR_CORO_LANE"] : []),
+    ...coreRuntimeSources(url, coro, dynArr, frozenArr).map((f) => rt(join(rtDir, f))),
     ...(opts.copying ? [rt(join(rtDir, "scr_copying.c"))] : []),
     // win32 targets compile the libc-shim TU (stpcpy, arc4random_buf,
     // gmtime_r, strcasestr — the _WIN32 block in scr_runtime.h declares

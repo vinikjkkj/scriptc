@@ -84,6 +84,7 @@ const RULES: ReadonlyMap<string, Rule> = new Map([
   ["scr_elem_release", { cls: "releases", why: "the one spelling of the element release; an absent slot owns nothing" }],
   ["scr_arr_release", { cls: "releases", why: "teardown walks every slot through scr_elem_release" }],
   ["scr_arr_truncate", { cls: "releases", why: "`a.length = n` drops the tail through scr_elem_release" }],
+  ["scr_arr_drop_value", { cls: "releases", why: "the release of ONE element value an owning guarded store (scr_array_frozen.c) was handed and could not store; a NULL value owns nothing" }],
   ["scr_arr_set_slot", { cls: "releases", why: "unlink-then-release of the slot a write displaces — including a tombstone written twice" }],
   ["scr_arr_trace_v", { cls: "releases", why: "the cycle collector's trace: an absent slot is not an edge, so it is skipped rather than visited with NULL" }],
 

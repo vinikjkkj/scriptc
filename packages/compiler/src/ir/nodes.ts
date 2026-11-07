@@ -2867,7 +2867,7 @@ export type IrStmt =
    * scriptc's dense arrays have nothing to answer. The frontend only
    * builds this for a REFCOUNTED, non-union, non-dyn element type; every
    * other shape still meets the stranded-unit trap. */
-  | { kind: "arrayClear"; arr: IrExpr; index: IrExpr; frozenGuard?: "strict" | "sloppy"; loc: SrcLoc }
+  | { kind: "arrayClear"; arr: IrExpr; index: IrExpr; loc: SrcLoc; frozenGuard?: "strict" | "sloppy" }
   /** Typed-array element write `b[i] = v` — arraySet's sibling for bytes
    * receivers: statement-only, receiver and index like bytesIntrinsic
    * `get` (any invalid index TRAPS — JS would ignore the write, a
@@ -12155,6 +12155,30 @@ export function moduleUsesBufferValue(mod: IrModule): boolean {
 const DYN_ARRAY_METHODS: ReadonlySet<string> = new Set(["pop", "shift", "join", "splice", "sort", "toSorted"]);
 /** The library calls whose lowering is scr_array_dyn.c (LLVM emitter table and the C emitter). */
 const DYN_ARRAY_LIB_FNS: ReadonlySet<string> = new Set(["array.sortDyn", "array.toSortedDyn", "array.fromDynIter", "array.toF64Dyn"]);
+
+/** The library calls that live in scr_array_frozen.c. */
+const FROZEN_ARRAY_LIB_FNS: ReadonlySet<string> = new Set(["arr.freeze", "arr.frozenFail", "dyn.freezeArr"]);
+
+/** True when the module freezes an array or guards the writes of one (a frozenGuard marker, a freeze libCall): the link switch for scr_array_frozen.c, so a
+ * program that freezes no array carries none of it. */
+export function moduleUsesFrozenArrays(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown; frozenGuard?: unknown };
+    if (node.frozenGuard !== undefined || (node.kind === "libCall" && typeof node.fn === "string" && FROZEN_ARRAY_LIB_FNS.has(node.fn))) {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
 
 /** True when the module holds an operation whose dyn-element form is scr_array_dyn.c (the link switch). */
 export function moduleUsesDynArrayOps(mod: IrModule): boolean {
