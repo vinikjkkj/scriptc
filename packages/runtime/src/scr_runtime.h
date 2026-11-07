@@ -7985,6 +7985,11 @@ long scr_abortsig_live_count(void);
 void scr_abortctl_alloc_note(void);
 void scr_abortctl_free_note(void);
 long scr_abortctl_live_count(void);
+/* Event (scr_event.c, link-gated): counted here for the same reason as the
+ * abort pair -- the audit reads every counter unconditionally. */
+void scr_event_alloc_note(void);
+void scr_event_free_note(void);
+long scr_event_live_count(void);
 /* The socket, TLS, HTTP, HTTP/2, dgram, fs-watch and child-process handle
  * kinds. Same contract as the block above: the counters live in scr_object.c
  * (always linked), because their units are link-gated and the audit reads
@@ -8040,6 +8045,8 @@ long scr_childstream_live_count(void);
 #define scr_abortsig_free_note() ((void)0)
 #define scr_abortctl_alloc_note() ((void)0)
 #define scr_abortctl_free_note() ((void)0)
+#define scr_event_alloc_note() ((void)0)
+#define scr_event_free_note() ((void)0)
 #define scr_netsock_alloc_note() ((void)0)
 #define scr_netsock_free_note() ((void)0)
 #define scr_netsrv_alloc_note() ((void)0)
@@ -11282,6 +11289,49 @@ void scr_abort_controller_release_v(void *p);
 void scr_abort_controller_trace_v(void *p, ScrTraceVisit visit, void *ctx);
 ScrAbortSignal *scr_abort_controller_signal(ScrAbortController *c); /* +1, stable identity */
 void scr_abort_controller_abort(ScrAbortController *c, ScrDyn *reason);
+/* Event (scr_event.c — LINK-GATED on moduleUsesEvent; the same gate defines
+ * SCR_ABORT_EV for scr_abort.c, whose dispatch builds the abort Event).
+ * Handle with a collector header: target/currentTarget are signals and a
+ * listener can park the event in a closure the signal owns. Listener ABI
+ * of an Event-taking closure: (closure, ScrEvent *) with the event +1
+ * moved in. Members are Node v24.15's (see scr_event.c's header). */
+typedef struct ScrEvent ScrEvent;
+ScrEvent *scr_event_new(ScrStr *type, bool bubbles, bool cancelable, bool composed); /* type borrowed, +1 */
+ScrEvent *scr_event_new_missing(void);                     /* throws ERR_MISSING_ARGS, NULL */
+ScrEvent *scr_event_new_dyn(ScrStr *type, const ScrDyn *opts); /* both borrowed; may throw ERR_INVALID_ARG_TYPE, NULL */
+ScrEvent *scr_event_new_abort(ScrAbortSignal *sig, bool dispatching); /* sig borrowed, +1 */
+ScrEvent *scr_event_retain(ScrEvent *e);
+void scr_event_release(ScrEvent *e);
+void *scr_event_retain_v(void *p);
+void scr_event_release_v(void *p);
+void scr_event_trace_v(void *p, ScrTraceVisit visit, void *ctx);
+void scr_event_end_dispatch(ScrEvent *e);
+void scr_event_listener_returned(ScrEvent *e);
+bool scr_event_stopped_immediate(const ScrEvent *e);
+ScrStr *scr_event_type(const ScrEvent *e); /* +1 */
+bool scr_event_default_prevented(const ScrEvent *e);
+bool scr_event_cancelable(const ScrEvent *e);
+bool scr_event_bubbles(const ScrEvent *e);
+bool scr_event_composed(const ScrEvent *e);
+bool scr_event_is_trusted(const ScrEvent *e);
+double scr_event_timestamp(const ScrEvent *e);
+double scr_event_phase(const ScrEvent *e);
+bool scr_event_cancel_bubble(const ScrEvent *e);
+bool scr_event_return_value(const ScrEvent *e);
+ScrAbortSignal *scr_event_target(const ScrEvent *e);         /* +1, NULL when unset */
+ScrAbortSignal *scr_event_current_target(const ScrEvent *e); /* +1, NULL when unset */
+bool scr_event_has_target(const ScrEvent *e);
+bool scr_event_has_current_target(const ScrEvent *e);
+ScrArr *scr_event_composed_path(const ScrEvent *e);          /* +1 */
+void scr_event_prevent_default(ScrEvent *e);
+void scr_event_stop_propagation(ScrEvent *e);
+void scr_event_stop_immediate(ScrEvent *e);
+void scr_event_set_cancel_bubble(ScrEvent *e, bool v);
+void scr_event_set_return_value(ScrEvent *e, bool v);
+void scr_event_init(ScrEvent *e, ScrStr *type, bool bubbles, bool cancelable);
+void scr_event_missing_type(void);
+/* An Event-taking 'abort' listener (cb MOVES IN; resist = kResistStopPropagation). */
+void scr_abort_signal_add_ev(ScrAbortSignal *s, ScrClosure *cb, bool once, bool resist);
 ScrSecureCtx *scr_secure_ctx_retain(ScrSecureCtx *c);
 void scr_secure_ctx_release(ScrSecureCtx *c);
 void *scr_secure_ctx_retain_v(void *p);
