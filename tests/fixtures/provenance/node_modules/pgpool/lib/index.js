@@ -7,6 +7,8 @@ class Client extends EventEmitter {
     this.config = config
     this.connected = false
   }
+  // An async method has no dyn form: the class's member table is opaque, but it NAMES what it skipped.
+  async ping() { return true }
   connect(cb) {
     this.connected = true
     cb(undefined)
