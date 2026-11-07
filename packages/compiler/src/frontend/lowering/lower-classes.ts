@@ -2138,17 +2138,6 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
    * layout — which is what duck-typed sharing of a method between
    * unrelated classes means. A name C already declares is not replaced
    * (the statement keeps its refusal). */
-  /** Does any file of the program write `X.prototype[k] = v` (lower-prototab.ts's statement)? Syntactic, cached per lowerer. */
-  const protoWritesCache = new WeakMap<Lowerer, boolean>();
-  function programHasComputedProtoWrites(L: Lowerer): boolean {
-    let v = protoWritesCache.get(L);
-    if (v === undefined) {
-      v = L.moduleOrder.some((sf) => !sf.isDeclarationFile && /\.prototype\s*\[[^\]]+\]\s*=[^=]/.test(sf.text));
-      protoWritesCache.set(L, v);
-    }
-    return v;
-  }
-
   function registerLateMethods(L: Lowerer, info: ClassInfo, decl: ts.ClassDeclaration, classSymbol: ts.Symbol): void {
     const sf = decl.getSourceFile();
     if (!isJsSourceFile(sf)) return;
@@ -2191,18 +2180,13 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
       if (sig.shapes.some((p) => p.mode === "rest")) continue;
       // A late method reading `arguments` takes the variadic form (one dynRest shape
       // carries the whole list; declared names re-bind off it), as a declared method does.
-      // In a program that installs run-time prototype members (a computed write on some prototype) the method also takes it when
-      // it does NOT read `arguments`: until its install statement runs a call reaches the prototype table's member, which must see
-      // the call's FULL argument list, and a typed call site would drop the surplus before the dispatcher could forward it.
       const lateReadsArgs = isJsSourceFile(fn.getSourceFile()) && !sig.shapes.some((x) => x.mode === "dynRest") &&
-        (bodyReadsArguments(fn as ts.FunctionExpression) || programHasComputedProtoWrites(L));
+        bodyReadsArguments(fn as ts.FunctionExpression);
       const lateShapes = lateReadsArgs ? [...sig.shapes, { type: DYN, mode: "dynRest" as const }] : sig.shapes;
       info.methods.set(m, {
         params: lateShapes,
         ret: sig.funcType.ret,
-        // Declared names re-bind off the pack ONLY for a body that reads `arguments`; a method forced variadic just for its surplus
-        // keeps its declared parameters in the ABI and takes the surplus as the trailing pack.
-        ...(lateReadsArgs && (fn as ts.FunctionExpression).parameters.length > 0 && bodyReadsArguments(fn as ts.FunctionExpression) ? { argsBound: true as const } : {}),
+        ...(lateReadsArgs && (fn as ts.FunctionExpression).parameters.length > 0 ? { argsBound: true as const } : {}),
       });
       const bodies = L.protoClassBodies.get(info.def.name) ?? new Map<string, ts.FunctionExpression>();
       bodies.set(m, fn as ts.FunctionExpression);
