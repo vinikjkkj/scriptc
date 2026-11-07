@@ -55,6 +55,9 @@ import { inOwnShadowFamily, internalBox, ownShadowWhy, registerOwnShadowFamily }
 import { refuseWebCryptoFlowsAt } from "./lower-webcrypto-fence.js";
 import { codecOfType, refuseCodecValue } from "../codec-shadow.js";
 
+const OBJECT_PROTO_READ_NAMES: ReadonlySet<string> = new Set(["constructor", "__proto__", "hasOwnProperty", "isPrototypeOf", "propertyIsEnumerable", "toString", "toLocaleString", "valueOf"]);
+function isObjectPrototypeName(n: string): boolean { return OBJECT_PROTO_READ_NAMES.has(n); }
+
 /** SCRIPTC_DTSTWIN_WHY probe: how many reads have taken the declaration-
  * module fence instead of the silent erasure stance. Read in the SAME run
  * as the result. */
@@ -4255,6 +4258,27 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // that was about to refuse can change: the read is the Electron probe
       // in the first executable statement of every Emscripten module glue,
       // and it refused where Node answers.
+      // `"x" in o && o.x`: the `in` test narrowed `o` to `T & Record<"x", unknown>`, so the checker holds a source-less `x` the closed record
+      // lacks. A VIEW of a wider object (the view grant) owns that key at run time, so the read asks the OBJECT; any other record answers
+      // undefined (the key is absent, which is what the same `in` test folded to).
+      if (
+        recvLowered.type.kind === "record" && isJsSourceFile(expr.getSourceFile()) && !isObjectPrototypeName(expr.name.text) &&
+        (L.typeOf(expr.expression).flags & ts.TypeFlags.Intersection) !== 0 &&
+        L.shapes.get(recvLowered.type.shapeId)?.fields.some((f) => f.name === expr.name.text) !== true &&
+        (L.checker.getPropertyOfType(L.typeOf(expr.expression), expr.name.text)?.declarations?.length ?? 1) === 0
+      ) {
+        const keyLoc = locOf(expr);
+        return L.maybeNarrow(
+          L.viewSplit(
+            recvLowered,
+            DYN,
+            (obj) => ({ kind: "dynKeyGet", key: { kind: "strLit", value: expr.name.text, type: STRING, loc: keyLoc }, value: obj, type: DYN, loc: keyLoc }),
+            (recv) => ({ kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: recv, loc: keyLoc }], result: dynUndefinedExpr(keyLoc), type: DYN, loc: keyLoc }),
+            keyLoc,
+          ),
+          expr,
+        );
+      }
       {
         const absentRecord = absentRecordMemberValue(L, expr, recvLowered);
         if (absentRecord !== null) return L.maybeNarrow(absentRecord, expr);
