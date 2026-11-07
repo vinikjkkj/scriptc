@@ -13823,6 +13823,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24646-comment-before-a-whole-export-rebind.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24646-comment-before-a-whole-export-rebind.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/24660-unique-symbol-const-keyed-interface-member-read-and-optional-call.ts": {
    "order": [
     "<repo>/tests/corpus/24660-unique-symbol-const-keyed-interface-member-read-and-optional-call.ts"
