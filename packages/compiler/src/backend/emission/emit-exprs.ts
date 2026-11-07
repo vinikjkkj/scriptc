@@ -1298,7 +1298,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             }
             const last = vs[vs.length - 1];
             // The guarded push of a program that freezes arrays of this type (a frozen array throws in any code).
-            if (last && e.frozenGuard !== undefined) return E.fallibleTemp(e.type, `scr_arr_push_${acc}_fz(${r.name}, ${last.name})`);
+            if (last && e.frozenGuard !== undefined) {
+              const gp = E.newTemp(e.type, `scr_arr_push_${acc}_fz(${r.name}, ${last.name})`);
+              E.emitUnwindIf(`${gp.name} < 0`); // -1: the array is frozen and refused the push (exception pending)
+              return gp;
+            }
             return last
               ? E.newTemp(e.type, `scr_arr_push_${acc}(${r.name}, ${last.name})`)
               : E.newTemp(e.type, `scr_arr_len(${r.name})`);

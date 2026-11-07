@@ -839,9 +839,10 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
         // A program that freezes arrays of this type stores through the guarded entry point (`_fz` strict / `_fzs` sloppy): the flag test rides
         // inside the call the store already makes.
         const fz = s.frozenGuard === undefined ? "" : s.frozenGuard === "strict" ? "_fz" : "_fzs";
-        if (s.holeGrow) E.line(`scr_arr_set_f64_hole${fz}(${arr.name}, ${idx.name}, ${v.name});${E.srcComment(s.loc)}`);
-        else E.line(`scr_arr_set_${acc}${fz}(${arr.name}, ${idx.name}, ${v.name});${E.srcComment(s.loc)}`);
-        if (s.frozenGuard === "strict") E.emitPendingCheck();
+        const setCall = s.holeGrow ? `scr_arr_set_f64_hole${fz}(${arr.name}, ${idx.name}, ${v.name})` : `scr_arr_set_${acc}${fz}(${arr.name}, ${idx.name}, ${v.name})`;
+        // The strict entry point answers whether the array refused the write: unwind on that branch only.
+        if (s.frozenGuard === "strict") E.emitUnwindIf(setCall);
+        else E.line(`${setCall};${E.srcComment(s.loc)}`);
         break;
       }
       case "arrayClear": {
@@ -857,12 +858,9 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
         // so the hole-aware consumers refuse it loudly instead of reading a hole.
         const absentC = E.absentElemC(s.arr.type.elem);
         const cfz = s.frozenGuard === undefined ? "" : s.frozenGuard === "strict" ? "_fz" : "_fzs";
-        E.line(
-          absentC === "NULL"
-            ? `scr_arr_tombstone${cfz}(${arr.name}, ${idx.name});${E.srcComment(s.loc)}`
-            : `scr_arr_set_ref${cfz}(${arr.name}, ${idx.name}, ${absentC});${E.srcComment(s.loc)}`,
-        );
-        if (s.frozenGuard === "strict") E.emitPendingCheck();
+        const clearCall = absentC === "NULL" ? `scr_arr_tombstone${cfz}(${arr.name}, ${idx.name})` : `scr_arr_set_ref${cfz}(${arr.name}, ${idx.name}, ${absentC})`;
+        if (s.frozenGuard === "strict") E.emitUnwindIf(clearCall);
+        else E.line(`${clearCall};${E.srcComment(s.loc)}`);
         break;
       }
       case "bytesSet": {

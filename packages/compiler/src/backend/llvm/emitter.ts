@@ -5549,12 +5549,16 @@ class LlEmitter {
    * (per the may-throw analysis), test the pending flag and unwind. The
    * call's result temp must join its frame BEFORE this runs so the unwind
    * releases the dummy (NULL for refcounted kinds) harmlessly. */
-  private emitPendingCheck(): void {
+  private emitPendingCheck(answered?: string): void {
     const B = this.B;
     if (B.isTerminated()) return;
-    this.declare(`declare zeroext i1 @scr_exc_pending()`);
-    const p = B.tmp();
-    B.line(`${p} = call zeroext i1 @scr_exc_pending()`);
+    // `answered`: an i1 the preceding call already returned (true = it threw) -- the guarded frozen-array entry points -- so no flag reload per call.
+    let p = answered;
+    if (p === undefined) {
+      this.declare(`declare zeroext i1 @scr_exc_pending()`);
+      p = B.tmp();
+      B.line(`${p} = call zeroext i1 @scr_exc_pending()`);
+    }
     const lu = B.newLabel("exc.u");
     const lk = B.newLabel("exc.k");
     B.condBr(p, lu, lk);
@@ -7371,15 +7375,26 @@ class LlEmitter {
         if (acc === "ref") this.moveTemp(v);
         const argTy = acc === "f64" ? "double" : acc === "bool" ? "i1" : "ptr";
         const fz = s.frozenGuard === undefined ? "" : s.frozenGuard === "strict" ? "_fz" : "_fzs";
+        const strictSet = s.frozenGuard === "strict";
         if (s.holeGrow) {
-          this.declare(`declare void @scr_arr_set_f64_hole${fz}(ptr, double, double)`);
-          B.line(`call void @scr_arr_set_f64_hole${fz}(ptr ${arr.name}, double ${idx.name}, double ${v.name})`);
-          if (s.frozenGuard === "strict") this.emitPendingCheck();
+          this.declare(`declare ${strictSet ? "zeroext i1" : "void"} @scr_arr_set_f64_hole${fz}(ptr, double, double)`);
+          if (strictSet) {
+            const rf = B.tmp();
+            B.line(`${rf} = call zeroext i1 @scr_arr_set_f64_hole${fz}(ptr ${arr.name}, double ${idx.name}, double ${v.name})`);
+            this.emitPendingCheck(rf);
+          } else {
+            B.line(`call void @scr_arr_set_f64_hole${fz}(ptr ${arr.name}, double ${idx.name}, double ${v.name})`);
+          }
           break;
         }
-        this.declare(`declare void @scr_arr_set_${acc}${fz}(ptr, double, ${argTy === "i1" ? "i1 zeroext" : argTy})`);
-        B.line(`call void @scr_arr_set_${acc}${fz}(ptr ${arr.name}, double ${idx.name}, ${argTy} ${v.name})`);
-        if (s.frozenGuard === "strict") this.emitPendingCheck();
+        this.declare(`declare ${strictSet ? "zeroext i1" : "void"} @scr_arr_set_${acc}${fz}(ptr, double, ${argTy === "i1" ? "i1 zeroext" : argTy})`);
+        if (strictSet) {
+          const rf = B.tmp();
+          B.line(`${rf} = call zeroext i1 @scr_arr_set_${acc}${fz}(ptr ${arr.name}, double ${idx.name}, ${argTy} ${v.name})`);
+          this.emitPendingCheck(rf);
+        } else {
+          B.line(`call void @scr_arr_set_${acc}${fz}(ptr ${arr.name}, double ${idx.name}, ${argTy} ${v.name})`);
+        }
         break;
       }
       case "arrayClear": {
@@ -7395,14 +7410,26 @@ class LlEmitter {
           // The TOMBSTONE (Node's null, not a hole): marks the array so the hole-aware
           // consumers refuse it loudly.
           const tfz = s.frozenGuard === undefined ? "" : s.frozenGuard === "strict" ? "_fz" : "_fzs";
-          this.declare(`declare void @scr_arr_tombstone${tfz}(ptr, double)`);
-          B.line(`call void @scr_arr_tombstone${tfz}(ptr ${arr.name}, double ${idx.name})`);
-          if (s.frozenGuard === "strict") this.emitPendingCheck();
+          const strictT = s.frozenGuard === "strict";
+          this.declare(`declare ${strictT ? "zeroext i1" : "void"} @scr_arr_tombstone${tfz}(ptr, double)`);
+          if (strictT) {
+            const rf = B.tmp();
+            B.line(`${rf} = call zeroext i1 @scr_arr_tombstone${tfz}(ptr ${arr.name}, double ${idx.name})`);
+            this.emitPendingCheck(rf);
+          } else {
+            B.line(`call void @scr_arr_tombstone${tfz}(ptr ${arr.name}, double ${idx.name})`);
+          }
         } else {
           const rfz = s.frozenGuard === undefined ? "" : s.frozenGuard === "strict" ? "_fz" : "_fzs";
-          this.declare(`declare void @scr_arr_set_ref${rfz}(ptr, double, ptr)`);
-          B.line(`call void @scr_arr_set_ref${rfz}(ptr ${arr.name}, double ${idx.name}, ptr ${absentLl})`);
-          if (s.frozenGuard === "strict") this.emitPendingCheck();
+          const strictR = s.frozenGuard === "strict";
+          this.declare(`declare ${strictR ? "zeroext i1" : "void"} @scr_arr_set_ref${rfz}(ptr, double, ptr)`);
+          if (strictR) {
+            const rf = B.tmp();
+            B.line(`${rf} = call zeroext i1 @scr_arr_set_ref${rfz}(ptr ${arr.name}, double ${idx.name}, ptr ${absentLl})`);
+            this.emitPendingCheck(rf);
+          } else {
+            B.line(`call void @scr_arr_set_ref${rfz}(ptr ${arr.name}, double ${idx.name}, ptr ${absentLl})`);
+          }
         }
         break;
       }
@@ -15216,7 +15243,9 @@ class LlEmitter {
           this.declare(`declare double @scr_arr_push_${acc}_fz(ptr, ${argTyG === "i1" ? "i1 zeroext" : argTyG})`);
           const gt = B.tmp();
           B.line(`${gt} = call double @scr_arr_push_${acc}_fz(ptr ${r.name}, ${argTyG} ${vs[0]!.name})`);
-          this.emitPendingCheck();
+          const gneg = B.tmp();
+          B.line(`${gneg} = fcmp olt double ${gt}, 0.0`); // -1: the array is frozen and refused the push (exception pending)
+          this.emitPendingCheck(gneg);
           return { name: gt, type: e.type };
         }
         for (const v of vs) last = this.arrPush(r.name, acc, v.name);

@@ -2875,6 +2875,15 @@ export class CEmitter {
     this.line(`}`);
   }
 
+  /** The unwind branch of a call that ANSWERS whether it threw (the guarded frozen-array entry points): no per-call reload of the exception flag. */
+  emitUnwindIf(cond: string): void {
+    this.line(`if (${cond}) {`);
+    this.indent++;
+    this.emitUnwind();
+    this.indent--;
+    this.line(`}`);
+  }
+
   internLiteral(text: string): string {
     let sym = this.literals.get(text);
     if (!sym) {

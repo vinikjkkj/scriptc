@@ -1294,39 +1294,44 @@ ScrArr *scr_arr_fill_ref(ScrArr *a, void *v, double start, double end) {
 /* ── the GUARDED stores and pushes ─────────────────────────────────────
  * A program that freezes an array it keeps a mutable reference to gets these in place of the plain entry points, for the arrays of the frozen type
  * (Lowerer.frozenArrayRewrite). The flag test rides inside the call the store already makes, so the hot path pays one byte test and no extra
- * reference count traffic. `_fz` is strict code (a frozen array throws V8's TypeError), `_fzs` sloppy code (the write is ignored). A value an
- * owning entry point would have moved into the array is released here when the array refuses it. */
-void scr_arr_set_f64_fz(ScrArr *a, double i, double v) {
-  if (a->flags & SCR_ARR_FROZEN) { scr_arr_frozen_fail(a, 9, i, 0, 0); return; }
+ * reference count traffic. `_fz` is strict code (a frozen array throws V8's TypeError), `_fzs` sloppy code (the write is ignored). The strict entry
+ * points answer whether the array REFUSED the write (true; push answers -1 instead of the new length), so the caller unwinds only on that branch and
+ * never reloads the exception flag per store. A value an owning entry point would have moved into the array is released here when the array refuses it. */
+bool scr_arr_set_f64_fz(ScrArr *a, double i, double v) {
+  if (a->flags & SCR_ARR_FROZEN) { scr_arr_frozen_fail(a, 9, i, 0, 0); return true; }
   scr_arr_set_f64(a, i, v);
+  return false;
 }
 void scr_arr_set_f64_fzs(ScrArr *a, double i, double v) {
   if (a->flags & SCR_ARR_FROZEN) return;
   scr_arr_set_f64(a, i, v);
 }
-void scr_arr_set_f64_hole_fz(ScrArr *a, double i, double v) {
-  if (a->flags & SCR_ARR_FROZEN) { scr_arr_frozen_fail(a, 9, i, 0, 0); return; }
+bool scr_arr_set_f64_hole_fz(ScrArr *a, double i, double v) {
+  if (a->flags & SCR_ARR_FROZEN) { scr_arr_frozen_fail(a, 9, i, 0, 0); return true; }
   scr_arr_set_f64_hole(a, i, v);
+  return false;
 }
 void scr_arr_set_f64_hole_fzs(ScrArr *a, double i, double v) {
   if (a->flags & SCR_ARR_FROZEN) return;
   scr_arr_set_f64_hole(a, i, v);
 }
-void scr_arr_set_bool_fz(ScrArr *a, double i, bool v) {
-  if (a->flags & SCR_ARR_FROZEN) { scr_arr_frozen_fail(a, 9, i, 0, 0); return; }
+bool scr_arr_set_bool_fz(ScrArr *a, double i, bool v) {
+  if (a->flags & SCR_ARR_FROZEN) { scr_arr_frozen_fail(a, 9, i, 0, 0); return true; }
   scr_arr_set_bool(a, i, v);
+  return false;
 }
 void scr_arr_set_bool_fzs(ScrArr *a, double i, bool v) {
   if (a->flags & SCR_ARR_FROZEN) return;
   scr_arr_set_bool(a, i, v);
 }
-void scr_arr_set_ref_fz(ScrArr *a, double i, void *v) {
+bool scr_arr_set_ref_fz(ScrArr *a, double i, void *v) {
   if (a->flags & SCR_ARR_FROZEN) {
     if (v != NULL) scr_elem_release(a, scr_slot_from_ptr(v));
     scr_arr_frozen_fail(a, 9, i, 0, 0);
-    return;
+    return true;
   }
   scr_arr_set_ref(a, i, v);
+  return false;
 }
 void scr_arr_set_ref_fzs(ScrArr *a, double i, void *v) {
   if (a->flags & SCR_ARR_FROZEN) {
@@ -1335,27 +1340,28 @@ void scr_arr_set_ref_fzs(ScrArr *a, double i, void *v) {
   }
   scr_arr_set_ref(a, i, v);
 }
-void scr_arr_tombstone_fz(ScrArr *a, double i) {
-  if (a->flags & SCR_ARR_FROZEN) { scr_arr_frozen_fail(a, 11, i, 0, 0); return; }
+bool scr_arr_tombstone_fz(ScrArr *a, double i) {
+  if (a->flags & SCR_ARR_FROZEN) { scr_arr_frozen_fail(a, 11, i, 0, 0); return true; }
   scr_arr_tombstone(a, i);
+  return false;
 }
 void scr_arr_tombstone_fzs(ScrArr *a, double i) {
   if (a->flags & SCR_ARR_FROZEN) return;
   scr_arr_tombstone(a, i);
 }
 double scr_arr_push_f64_fz(ScrArr *a, double v) {
-  if (a->flags & SCR_ARR_FROZEN) { scr_arr_frozen_fail(a, 1, 1, 0, 0); return 0; }
+  if (a->flags & SCR_ARR_FROZEN) { scr_arr_frozen_fail(a, 1, 1, 0, 0); return -1; }
   return scr_arr_push_f64(a, v);
 }
 double scr_arr_push_bool_fz(ScrArr *a, bool v) {
-  if (a->flags & SCR_ARR_FROZEN) { scr_arr_frozen_fail(a, 1, 1, 0, 0); return 0; }
+  if (a->flags & SCR_ARR_FROZEN) { scr_arr_frozen_fail(a, 1, 1, 0, 0); return -1; }
   return scr_arr_push_bool(a, v);
 }
 double scr_arr_push_ref_fz(ScrArr *a, void *v) {
   if (a->flags & SCR_ARR_FROZEN) {
     if (v != NULL) scr_elem_release(a, scr_slot_from_ptr(v));
     scr_arr_frozen_fail(a, 1, 1, 0, 0);
-    return 0;
+    return -1;
   }
   return scr_arr_push_ref(a, v);
 }

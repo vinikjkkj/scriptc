@@ -1900,19 +1900,19 @@ bool scr_arr_is_frozen(const ScrArr *a);
  * write nothing (an empty fill range, reverse of one element), so the caller may go on to run it. */
 void scr_arr_frozen_fail(ScrArr *a, double op, double x, double y, double z);
 /* The guarded stores/pushes of a program that freezes an array of the receiver's type: `_fz` strict (throws on a frozen array), `_fzs` sloppy (ignores
- * the write). Same signatures and ownership as the plain entry points. */
-void scr_arr_set_f64_fz(ScrArr *a, double i, double v);
+ * the write). Same arguments and ownership as the plain entry points; the strict ones answer true when they refused (push: -1), exception pending. */
+bool scr_arr_set_f64_fz(ScrArr *a, double i, double v);
 void scr_arr_set_f64_fzs(ScrArr *a, double i, double v);
 double scr_arr_push_f64_fz(ScrArr *a, double v);
-void scr_arr_set_bool_fz(ScrArr *a, double i, bool v);
+bool scr_arr_set_bool_fz(ScrArr *a, double i, bool v);
 void scr_arr_set_bool_fzs(ScrArr *a, double i, bool v);
 double scr_arr_push_bool_fz(ScrArr *a, bool v);
-void scr_arr_set_ref_fz(ScrArr *a, double i, void * v);
+bool scr_arr_set_ref_fz(ScrArr *a, double i, void * v);
 void scr_arr_set_ref_fzs(ScrArr *a, double i, void * v);
 double scr_arr_push_ref_fz(ScrArr *a, void * v);
-void scr_arr_set_f64_hole_fz(ScrArr *a, double i, double v);
+bool scr_arr_set_f64_hole_fz(ScrArr *a, double i, double v);
 void scr_arr_set_f64_hole_fzs(ScrArr *a, double i, double v);
-void scr_arr_tombstone_fz(ScrArr *a, double i);
+bool scr_arr_tombstone_fz(ScrArr *a, double i);
 void scr_arr_tombstone_fzs(ScrArr *a, double i);
 /* The same decision over a bare length (a FROZEN dyn array's methods and writes call it; see scr_dyn_arr_freeze). */
 void scr_frozen_fail_len(size_t len, double op, double x, double y, double z);
