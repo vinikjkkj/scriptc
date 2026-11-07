@@ -10543,12 +10543,25 @@ class LlEmitter {
         return out;
       }
       case "fieldGet": {
-        const obj = this.emitExpr(e.obj);
+        // A tag test over a plain local receiver reads through the borrowed local (no +1 copy of the receiver, no release).
+        let obj: { name: string; type: IrType };
+        const bo = e.tagTest && e.obj.kind === "varRef" ? this.binding(e.obj.localId) : null;
+        if (bo !== null && bo.kind !== "boxed" && bo.kind !== "global") {
+          const t0 = B.tmp();
+          B.line(`${t0} = load ${this.llType(bo.type)}, ptr ${bo.slot}`);
+          obj = { name: t0, type: e.obj.type };
+        } else obj = this.emitExpr(e.obj);
         const { ptr, type } = this.classFieldPtr(obj.name, e.className, e.field);
         const v = this.loadField(ptr, type);
         if (e.nullTest) {
           const t = B.tmp();
           B.line(`${t} = icmp eq ptr ${v}, null`);
+          return { name: t, type: e.type };
+        }
+        if (e.tagTest) {
+          const tag = this.unionTag(v);
+          const t = B.tmp();
+          B.line(`${t} = icmp ${e.tagTest.negated ? "ne" : "eq"} i32 ${tag}, ${e.tagTest.tag}`);
           return { name: t, type: e.type };
         }
         if (isRefCounted(e.type)) return this.own({ name: this.retainValue(v, e.type), type: e.type });

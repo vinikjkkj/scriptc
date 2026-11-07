@@ -25573,7 +25573,7 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
  * assigned override wraps `%D.m`), or, where the class only OWNS the slot over an inherited method (a constructor-assigned override),
  * the inherited declarer's. Null when no slot wraps the method (the plain `%D.m`). */
 export function slotBypassTarget(L: Lowerer, declarer: ClassInfo, method: string): { callee: string; declarer: ClassInfo } | null {
-  if (declarer.shadowOwn?.has(method) === true || declarer.shadowLate?.has(method) === true) {
+  if (declarer.shadowLate?.has(method) === true) {
     return { callee: `%${declarer.def.name}.${method}%impl`, declarer };
   }
   if (declarer.shadowFields?.has(method) === true && declarer.base !== null) {
@@ -25639,7 +25639,7 @@ export function slotBypassTarget(L: Lowerer, declarer: ClassInfo, method: string
             type: found.sig.ret,
             loc,
           };
-      if (bypass !== null) L.noteEdge(bypass.callee);
+      if (bypass !== null) L.noteEdge(bypass.callee.replace(/%impl$/, ""));
       L.liftedFns.push({
         name,
         jsName: method,

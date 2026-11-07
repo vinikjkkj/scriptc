@@ -7974,7 +7974,10 @@ export type IrExpr =
       /** BOOL-typed: the slot holds NULL (a pointer-backed field no
        * assignment has reached: `cache!: Map<..>` before its init). Reads the
        * slot without retaining it. */
-      nullTest?: true; loc: SrcLoc }
+      nullTest?: true;
+      /** BOOL-typed, over a UNION-typed field: the slot's union box carries (or, negated, does not carry) arm `tag`. A pure tag
+       * compare on the borrowed box: the slot is read without retaining it. */
+      tagTest?: { tag: number; negated?: true }; loc: SrcLoc }
   /** Record literal `{ a: 1, b: "x" }`. `type` is the record type; `fields`
    * are in SOURCE order (JS evaluates property values in source order) and
    * cover the shape's fields exactly once each (validated — a source literal

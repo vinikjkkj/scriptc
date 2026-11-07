@@ -3658,7 +3658,12 @@ function validateFunction(
         else if (!field) err(`class ${e.className} has no field "${e.field}"`, e.loc);
         else {
           expectType(e.obj, { kind: "object", className: e.className }, "fieldGet receiver");
-          if (e.nullTest) {
+          if (e.tagTest) {
+            if (e.type.kind !== "bool") err(`fieldGet tagTest must be bool, got ${e.type.kind}`, e.loc);
+            const ud = field.type.kind === "union" ? unions.get(field.type.unionId) : undefined;
+            if (!ud) err(`fieldGet tagTest on non-union field ${e.className}.${e.field}`, e.loc);
+            else if (!Number.isInteger(e.tagTest.tag) || !ud.arms[e.tagTest.tag]) err(`fieldGet tagTest tag ${e.tagTest.tag} out of range for ${e.className}.${e.field}`, e.loc);
+          } else if (e.nullTest) {
             if (e.type.kind !== "bool") err(`fieldGet nullTest must be bool, got ${e.type.kind}`, e.loc);
             if (!isRefCounted(field.type)) err(`fieldGet nullTest on non-pointer field ${e.className}.${e.field}`, e.loc);
           } else if (!typeEquals(e.type, field.type)) {
