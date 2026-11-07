@@ -13823,6 +13823,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24644-early-break-inside-a-union-typed-switch.js": {
+   "order": [
+    "<repo>/tests/corpus/24644-early-break-inside-a-union-typed-switch.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/24660-unique-symbol-const-keyed-interface-member-read-and-optional-call.ts": {
    "order": [
     "<repo>/tests/corpus/24660-unique-symbol-const-keyed-interface-member-read-and-optional-call.ts"
