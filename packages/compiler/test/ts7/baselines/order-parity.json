@@ -13597,6 +13597,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24556-primitive-wrapper-objects-through-object-call.js": {
+   "order": [
+    "<repo>/tests/corpus/24556-primitive-wrapper-objects-through-object-call.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2456-private-async-methods.ts": {
    "order": [
     "<repo>/tests/corpus/2456-private-async-methods.ts"
