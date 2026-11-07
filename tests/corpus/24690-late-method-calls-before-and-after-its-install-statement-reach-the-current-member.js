@@ -13,9 +13,8 @@ const s = new Sub();
 console.log(p.multi(), p.multi("a", 2), s.exec("z"), p.get("k"));
 function attempt(f) { try { return f(); } catch (e) { return e.constructor.name + ": " + e.message; } }
 console.log(attempt(() => p.pipeline("x")));
-// a member neither the table nor an install provides yet: Node throws a TypeError (its message names the call-site spelling, which a
-// dispatcher cannot know, so only the error class is pinned here)
-console.log(attempt(() => p.onlyLate(1)).split(":")[0]);
+// a member neither the table nor an install provides yet: Node throws a TypeError whose message names the call site's own spelling
+console.log(attempt(() => p.onlyLate(1)));
 const multi = Pipeline.prototype.multi;
 Pipeline.prototype.multi = function () { this.n += 1; return multi.apply(this, arguments) + "!" + this.n; };
 const exec = Pipeline.prototype.exec;

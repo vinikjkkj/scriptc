@@ -17,12 +17,12 @@
  * A function the slot holds is called through the checked-dynamic contract (arguments boxed to dyn, the result checked
  * back to the declared type), exactly as any untyped function value is. */
 import * as ts from "../ts7/adapter.js";
-import { ENTRY_NAME, PoisonError, dynUndefinedExpr, newFnCtx, type Lowerer } from "./lowerer.js";
+import { ENTRY_NAME, PoisonError, dynUndefinedExpr, newFnCtx, nodeThrowExpr, type Lowerer } from "./lowerer.js";
 import type { ClassInfo } from "./lower-classes.js";
 import { cjsKeyedForEachOf } from "../program.js";
 import { dynCallWithThis } from "./lower-calls.js";
 import { hasProtoTab, protoTabReadChain } from "./lower-prototab.js";
-import { BOOL, DYN, STRING, canDynCheckTo, type IrExpr, type IrFunction, type IrGlobal, type IrParam, type IrStmt, type IrType, type SrcLoc } from "../../ir/nodes.js";
+import { BOOL, DYN, STRING, VOID, canDynCheckTo, type IrExpr, type IrFunction, type IrGlobal, type IrParam, type IrStmt, type IrType, type SrcLoc } from "../../ir/nodes.js";
 
 const locOf = (n: ts.Node): SrcLoc => ({ file: n.getSourceFile().fileName, start: n.getStart(), end: n.getEnd() }) as SrcLoc;
 
@@ -461,13 +461,39 @@ export function lateInstallStmt(L: Lowerer, expr: ts.Expression): IrStmt | null 
   return null;
 }
 
+/** The callee spelling V8 prints in "<callee> is not a function" for a call whose callee is a plain identifier / `this` / property or
+ * element chain over names and literals (`p.onlyLate`, `this.x.m`, `a[k]`): the source text up to the argument list, whitespace dropped.
+ * Null for any other callee (a call result, a template, an optional chain, ...: V8 renders those as "(intermediate value)...", which
+ * this does not reproduce). */
+function calleeSpelling(L: Lowerer, loc: SrcLoc): string | null {
+  const sf = L.program.getSourceFile(loc.file);
+  if (sf === undefined) return null;
+  // A parenthesised plain receiver (`(p).m()`) prints as `p.m`.
+  const text = sf.text.slice(loc.start, loc.end).replace(/^\(\s*(this|[A-Za-z_$][\w$]*)\s*\)/, "$1");
+  let depth = 0;
+  let cut = -1;
+  for (let k = 0; k < text.length; k++) {
+    const ch = text[k]!;
+    if (ch === "[") depth++;
+    else if (ch === "]") depth--;
+    else if (ch === "(" && depth === 0) { cut = k; break; }
+  }
+  if (cut <= 0) return null;
+  // V8 renders a string-literal key that is an identifier as a dotted member (`p["m"]()` -> "p.m is not a function").
+  const callee = text.slice(0, cut).replace(/\s+/g, "").replace(/\[(["'])([A-Za-z_$][\w$]*)\1\]/g, ".$2");
+  return /^(?:this|[A-Za-z_$][\w$]*)(?:\.[A-Za-z_$][\w$]*|\[(?:[A-Za-z_$][\w$]*|\d+)\])*$/.test(callee) ? callee : null;
+}
+
 /** Wraps each late method with an install flag in a dispatcher: flag set -> the method's own body (`%C.m%late`); flag clear -> the
- * prototype table's CURRENT `m` applied to the receiver and the call's arguments (Reflect.apply semantics: a missing member throws
- * Node's "is not a function"). Runs with the other post-lowering splits, before the lifted functions are appended. */
+ * prototype table's CURRENT `m` applied to the receiver and the call's arguments (Reflect.apply semantics). A call site whose callee
+ * spelling is exact (calleeSpelling) calls its own thin stub of the dispatcher that throws Node's `<spelling> is not a function`
+ * TypeError when the table has no such member, so the message is the call site's, at no cost on the hit path. Runs with the other
+ * post-lowering splits, before the lifted functions are appended. */
 export function applyLateInstalls(L: Lowerer, fnLists: IrFunction[][]): void {
   if (L.lateInstalls.size === 0) return;
   const byName = new Map<string, { fn: IrFunction; list: IrFunction[] }>();
   for (const list of fnLists) for (const f of list) byName.set(f.name, { fn: f, list });
+  const stubbers = new Map<string, (spelling: string, stubName: string) => IrFunction>();
   for (const { flag, info, method } of L.lateInstalls.values()) {
     const found = byName.get(`%${info.def.name}.${method}`);
     if (found === undefined) continue;
@@ -475,6 +501,7 @@ export function applyLateInstalls(L: Lowerer, fnLists: IrFunction[][]): void {
     try {
       const loc = raw.loc;
       const rawName = `${raw.name}%late`;
+      const dispatchName = raw.name;
       const params: IrParam[] = raw.params;
       const ref = (p: IrParam): IrExpr => ({ kind: "varRef", localId: p.localId, type: p.type, loc });
       const sig = info.methods.get(method);
@@ -495,31 +522,45 @@ export function applyLateInstalls(L: Lowerer, fnLists: IrFunction[][]): void {
         }
         list = { kind: "dynArrLit", elems, ...(spreads.length > 0 ? { spreads } : {}), type: DYN, loc };
       }
-      const tableFn = protoTabReadChain(L, info, { kind: "strLit", value: method, type: STRING, loc }, null, loc);
-      const viaTable: IrExpr = {
-        kind: "libCall", fn: "dyn.reflectApply",
-        args: [tableFn, L.coerceToExpected(ref(params[0]!), DYN), list],
-        type: DYN, loc,
-      };
+      const recvDyn = L.coerceToExpected(ref(params[0]!), DYN);
       const rt = dispatcherReturnType(raw);
-      const slow: IrStmt[] =
-        rt.kind === "void"
-          ? [{ kind: "exprStmt", expr: viaTable, loc }, { kind: "return", value: null, loc }]
-          : [{ kind: "return", value: dispatcherResult(L, viaTable, rt), loc }];
       const direct: IrExpr = { kind: "call", callee: rawName, args: params.map(ref), type: rt, loc };
       const fast: IrStmt = rt.kind === "void" ? { kind: "exprStmt", expr: direct, loc } : { kind: "return", value: direct, loc };
-      const dispatcher: IrFunction = {
-        name: raw.name,
+      const slowOf = (fnv: IrExpr): IrStmt[] => {
+        const via: IrExpr = { kind: "libCall", fn: "dyn.reflectApply", args: [fnv, recvDyn, list], type: DYN, loc };
+        return rt.kind === "void"
+          ? [{ kind: "exprStmt", expr: via, loc }, { kind: "return", value: null, loc }]
+          : [{ kind: "return", value: dispatcherResult(L, via, rt), loc }];
+      };
+      const tableFn = (): IrExpr => protoTabReadChain(L, info, { kind: "strLit", value: method, type: STRING, loc }, null, loc);
+      const flagIf: IrStmt = { kind: "if", cond: { kind: "varRef", localId: flag.id, type: BOOL, loc }, then: [fast], else_: null, loc };
+      const mk = (name: string, body: IrStmt[], extra: IrFunction["locals"] = []): IrFunction => ({
+        name,
         ...(raw.jsName !== undefined && { jsName: raw.jsName }),
         params,
         returnType: rt,
-        locals: params.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
-        body: [
-          { kind: "if", cond: { kind: "varRef", localId: flag.id, type: BOOL, loc }, then: [fast], else_: null, loc },
-          ...slow,
-        ],
+        locals: [...params.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })), ...extra],
+        body,
         loc,
-      };
+      });
+      const dispatcher = mk(dispatchName, [flagIf, ...slowOf(tableFn())]);
+      // A call-site stub: same body, but a table with no such member throws the call site's own TypeError.
+      stubbers.set(dispatchName, (spelling: string, stubName: string): IrFunction => {
+        const tf = { id: "%tf.0", name: "%tf", type: DYN as IrType, mutable: false };
+        const tfRef: IrExpr = { kind: "varRef", localId: tf.id, type: DYN, loc };
+        return mk(stubName, [
+          flagIf,
+          { kind: "varDecl", localId: tf.id, init: tableFn(), loc },
+          {
+            kind: "if",
+            cond: { kind: "dynTest", test: "function", negated: true, value: tfRef, type: BOOL, loc },
+            then: [{ kind: "exprStmt", expr: nodeThrowExpr(1, "", `${spelling} is not a function`, VOID, loc), loc }],
+            else_: null,
+            loc,
+          },
+          ...slowOf(tfRef),
+        ], [tf]);
+      });
       raw.name = rawName;
       found.list.push(dispatcher);
     } catch (e) {
@@ -527,4 +568,34 @@ export function applyLateInstalls(L: Lowerer, fnLists: IrFunction[][]): void {
       if (!(e instanceof PoisonError)) throw e;
     }
   }
+  // Point each call whose callee spelling is exact at its own stub.
+  const made = new Map<string, IrFunction>();
+  const visit = (root: unknown): void => {
+    const stack: unknown[] = [root];
+    while (stack.length > 0) {
+      const n = stack.pop();
+      if (n === null || typeof n !== "object") continue;
+      if (Array.isArray(n)) {
+        for (const x of n) stack.push(x);
+        continue;
+      }
+      const o = n as Record<string, unknown>;
+      if (o["kind"] === "call" && typeof o["callee"] === "string" && stubbers.has(o["callee"]) && o["loc"] !== undefined) {
+        const spelling = calleeSpelling(L, o["loc"] as SrcLoc);
+        if (spelling !== null) {
+          const key = `${o["callee"]}\u0000${spelling}`;
+          let stub = made.get(key);
+          if (stub === undefined) {
+            stub = stubbers.get(o["callee"])!(spelling, `${o["callee"]}%at${made.size}`);
+            made.set(key, stub);
+            const host = byName.get(o["callee"]);
+            (host?.list ?? fnLists[0]!).push(stub);
+          }
+          o["callee"] = stub.name;
+        }
+      }
+      for (const [k, v] of Object.entries(o)) if (!FN_FIELDS.has(k)) stack.push(v);
+    }
+  };
+  for (const list of [...fnLists, L.liftedFns]) for (const f of list) visit(f.body);
 }
