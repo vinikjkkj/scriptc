@@ -3,7 +3,7 @@
  * flow (if/while/for/for-of/do, switch, try/catch, jumps with the
  * finally-crossing fence), and blocked-binding poisoning. */
 import { protoDataAssignStmt } from "./lower-protodata.js";
-import { classOfValueNode, protoSlotOf, protoSlotWriteStmt } from "./lower-protoslots.js";
+import { classOfValueNode, lateInstallStmt, protoSlotOf, protoSlotWriteStmt } from "./lower-protoslots.js";
 import { protoTabWriteStmt } from "./lower-prototab.js";
 import { strictAt } from "./lower-protoescape.js";
 import { isShadowableMethodRead, lowerUnboundClassMethodValue, dynSymbolKeyOf, classSymbolBag } from "./lower-exprs.js";
@@ -7228,7 +7228,13 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
   export function lowerExprStatement(L: Lowerer, expr: ts.Expression): IrStmt {
     // `C.prototype.m = fn` adopted as a late method of C: a definition, not
     // a runtime write (registerLateMethods).
-    if (L.lateMethodAssigns.has(expr)) return { kind: "block", body: [], loc: locOf(expr) };
+    if (L.lateMethodAssigns.has(expr)) {
+      // A late method of a class whose chain has a run-time prototype table: the statement marks it installed (until it runs, a call
+      // reaches the table's member, as JS does).
+      const li = lateInstallStmt(L, expr);
+      if (li !== null) return li;
+      return { kind: "block", body: [], loc: locOf(expr) };
+    }
     // `C.prototype.m = f` of a method the program replaces at run time (lower-protoslots.ts): the slot's store.
     { const ps = protoSlotWriteStmt(L, expr); if (ps !== null) return ps; }
     // `C.prototype[k] = v` with a run-time key (lower-prototab.ts): the prototype table's store.

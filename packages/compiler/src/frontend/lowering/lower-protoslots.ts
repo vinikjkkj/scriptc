@@ -21,7 +21,8 @@ import { ENTRY_NAME, PoisonError, dynUndefinedExpr, newFnCtx, type Lowerer } fro
 import type { ClassInfo } from "./lower-classes.js";
 import { cjsKeyedForEachOf } from "../program.js";
 import { dynCallWithThis } from "./lower-calls.js";
-import { BOOL, DYN, canDynCheckTo, type IrExpr, type IrFunction, type IrGlobal, type IrParam, type IrStmt, type IrType, type SrcLoc } from "../../ir/nodes.js";
+import { hasProtoTab, protoTabReadChain } from "./lower-prototab.js";
+import { BOOL, DYN, STRING, canDynCheckTo, type IrExpr, type IrFunction, type IrGlobal, type IrParam, type IrStmt, type IrType, type SrcLoc } from "../../ir/nodes.js";
 
 const locOf = (n: ts.Node): SrcLoc => ({ file: n.getSourceFile().fileName, start: n.getStart(), end: n.getEnd() }) as SrcLoc;
 
@@ -431,3 +432,99 @@ export function applyProtoSlots(L: Lowerer, fnLists: IrFunction[][]): void {
   }
 }
 
+/** `C.prototype.m = function ...` adopted as a LATE method of a class whose chain installs run-time prototype members: the statement is
+ * the INSTALL point. Until it runs, JS calls whatever the chain provides (the prototype table's `m`), and a late method compiled as a
+ * plain method would run its body at once (reading bindings the program has not initialized yet). The statement sets this flag;
+ * applyLateInstalls wraps the method in a dispatcher on it. Null (the empty statement) for every other late method. */
+export function lateInstallStmt(L: Lowerer, expr: ts.Expression): IrStmt | null {
+  for (const [cls, bodies] of L.protoClassBodies) {
+    for (const [method, body] of bodies) {
+      let inside = false;
+      for (let a: ts.Node | undefined = body.parent; a !== undefined; a = a.parent) {
+        if (a === expr) { inside = true; break; }
+        if (ts.isStatement(a)) break;
+      }
+      if (!inside) continue;
+      const info = L.classes.get(cls);
+      if (info === undefined || info.evalClass !== undefined || info.def.runtime === true || !hasProtoTab(L, info)) return null;
+      const key = `${cls}.${method}`;
+      let rec = L.lateInstalls.get(key);
+      if (rec === undefined) {
+        const flag: IrGlobal = { id: `%g.li.${cls}.${method}`, name: `${info.def.jsName ?? cls}.prototype.${method} installed`, type: BOOL, mutable: true };
+        L.globalsList.push(flag);
+        rec = { flag, info, method };
+        L.lateInstalls.set(key, rec);
+      }
+      return { kind: "assign", localId: rec.flag.id, value: { kind: "boolLit", value: true, type: BOOL, loc: locOf(expr) }, loc: locOf(expr) };
+    }
+  }
+  return null;
+}
+
+/** Wraps each late method with an install flag in a dispatcher: flag set -> the method's own body (`%C.m%late`); flag clear -> the
+ * prototype table's CURRENT `m` applied to the receiver and the call's arguments (Reflect.apply semantics: a missing member throws
+ * Node's "is not a function"). Runs with the other post-lowering splits, before the lifted functions are appended. */
+export function applyLateInstalls(L: Lowerer, fnLists: IrFunction[][]): void {
+  if (L.lateInstalls.size === 0) return;
+  const byName = new Map<string, { fn: IrFunction; list: IrFunction[] }>();
+  for (const list of fnLists) for (const f of list) byName.set(f.name, { fn: f, list });
+  for (const { flag, info, method } of L.lateInstalls.values()) {
+    const found = byName.get(`%${info.def.name}.${method}`);
+    if (found === undefined) continue;
+    const raw = found.fn;
+    try {
+      const loc = raw.loc;
+      const rawName = `${raw.name}%late`;
+      const params: IrParam[] = raw.params;
+      const ref = (p: IrParam): IrExpr => ({ kind: "varRef", localId: p.localId, type: p.type, loc });
+      const sig = info.methods.get(method);
+      const hasRest = sig?.params.some((x) => x.mode === "dynRest") === true;
+      const declared = params.length - 1 - (hasRest ? 1 : 0);
+      const restParam = hasRest ? params[params.length - 1]! : null;
+      const boxed = params.slice(1, 1 + Math.max(0, declared)).map((p) => L.coerceToExpected(ref(p), DYN));
+      let list: IrExpr;
+      if (restParam !== null && sig?.argsBound === true) {
+        // the variadic form that re-binds the declared names off the pack: the pack is the whole list
+        list = ref(restParam);
+      } else {
+        const elems: IrExpr[] = [...boxed];
+        const spreads: { at: number; what: string | null }[] = [];
+        if (restParam !== null) {
+          spreads.push({ at: elems.length, what: null });
+          elems.push(ref(restParam));
+        }
+        list = { kind: "dynArrLit", elems, ...(spreads.length > 0 ? { spreads } : {}), type: DYN, loc };
+      }
+      const tableFn = protoTabReadChain(L, info, { kind: "strLit", value: method, type: STRING, loc }, null, loc);
+      const viaTable: IrExpr = {
+        kind: "libCall", fn: "dyn.reflectApply",
+        args: [tableFn, L.coerceToExpected(ref(params[0]!), DYN), list],
+        type: DYN, loc,
+      };
+      const rt = dispatcherReturnType(raw);
+      const slow: IrStmt[] =
+        rt.kind === "void"
+          ? [{ kind: "exprStmt", expr: viaTable, loc }, { kind: "return", value: null, loc }]
+          : [{ kind: "return", value: dispatcherResult(L, viaTable, rt), loc }];
+      const direct: IrExpr = { kind: "call", callee: rawName, args: params.map(ref), type: rt, loc };
+      const fast: IrStmt = rt.kind === "void" ? { kind: "exprStmt", expr: direct, loc } : { kind: "return", value: direct, loc };
+      const dispatcher: IrFunction = {
+        name: raw.name,
+        ...(raw.jsName !== undefined && { jsName: raw.jsName }),
+        params,
+        returnType: rt,
+        locals: params.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false })),
+        body: [
+          { kind: "if", cond: { kind: "varRef", localId: flag.id, type: BOOL, loc }, then: [fast], else_: null, loc },
+          ...slow,
+        ],
+        loc,
+      };
+      raw.name = rawName;
+      found.list.push(dispatcher);
+    } catch (e) {
+      // The receiver or a parameter cannot cross into dyn: the diagnostic is recorded and the method keeps its direct body.
+      if (!(e instanceof PoisonError)) throw e;
+    }
+  }
+}
