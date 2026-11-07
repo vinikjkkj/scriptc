@@ -1407,6 +1407,27 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     expect(nativeRes.exitCode).toBe(0);
   }, 180_000);
 
+  /* -- 24511: the own function over a method the subclasses declare with DIFFERENT signatures ----------------
+   * mysql2's Command.execute reads `this.start`, which Query, Execute, ClientHandshake... each declare differently, so the read is a
+   * checked-dynamic chain, not one function type. The own-shadow wrapper only wrapped function-typed reads, so the replaced `start`
+   * of 24510's shape never ran in the real package (probe: every failed execute closed the connection). */
+  test("24511: an own function over a method of heterogeneous subclasses runs in its place", async () => {
+    const entry = join(fixturesRoot, "npm/cases/24511-an-own-function-over-a-method-that-subclasses-declare-with-different-signatures/main.ts");
+    const { coverage } = analyze(entry, { npmStatic: ["ownshadowhet"] });
+    expect(coverage.npmStatic).toEqual([{ package: "ownshadowhet", status: "static" }]);
+    expect(coverage.preflightFailed).toBe(false);
+    expect(coverage.diagnostics).toHaveLength(0);
+    const binary = await buildStatic(entry, ["ownshadowhet"]);
+    const [nodeRes, nativeRes] = await Promise.all([
+      runBinary("node", [entry]),
+      runBinary(binary, []),
+    ]);
+    expect(nodeRes.stdout.toString("utf8")).toContain("override ran");
+    expect(nativeRes.stdout.toString("utf8")).toBe(nodeRes.stdout.toString("utf8"));
+    expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
+    expect(nativeRes.exitCode).toBe(0);
+  }, 180_000);
+
   /* -- 4242: the dyn prototype-method READ, gridded -----------------------
    *
    * BYTE-IDENTICAL to Node v25.9.0, 38 rows, on both backends. On base
