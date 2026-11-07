@@ -72,8 +72,8 @@ import type {
 } from "../../ir/nodes.js";
 import { isDynErrorClass } from "../../ir/nodes.js";
 import { protoEscapes, strictAt } from "./lower-protoescape.js";
-import { applyProtoSlots, dynFnAsFunc, dynFnReadable, scanProtoSlots } from "./lower-protoslots.js";
-import { applyProtoTabs, scanProtoTabs } from "./lower-prototab.js";
+import { applyLateInstalls, applyProtoSlots, dynFnAsFunc, dynFnReadable, scanProtoSlots } from "./lower-protoslots.js";
+import { applyProtoTabs, hasProtoTab, scanProtoTabs } from "./lower-prototab.js";
 import { OWN_SHADOW_ROOTS, applyFieldNotes, applyOwnShadows, inOwnShadowFamily } from "./lower-ownshadow.js";
 import { CLASS_BUILTIN_CTORLESS, CLASS_NO_DYN_NEW, EVAL_NO_SRC_CLASSES, GRAFTED_EMITTER_CLASSES, GRAFTED_EMITTER_CELL_CLASSES, GRAFTED_ROWS_FENCED_OPS, GRAFTED_PROPS_EXACT_OPS, EVAL_STATIC_CLASSES, dynReflectionSite, emitterStateWriteSites, graftedBoxSites, moduleBoxesEmitters } from "../../ir/nodes.js";
 import { computeTwinEdits, type TwinEdits } from "./emitter-twin.js";
@@ -4192,6 +4192,7 @@ export class Lowerer {
     setMintPhase("tail:lifted");
     mintPhaseControl(this.shapes);
     applyProtoSlots(this, [functions, this.implicitFns]);
+    applyLateInstalls(this, [functions, this.implicitFns]);
     applyOwnShadows(this, [functions, this.implicitFns]);
     applyFieldNotes(this, [functions, this.implicitFns]);
     applyProtoTabs(this, [functions, this.implicitFns]);
@@ -5211,6 +5212,11 @@ export class Lowerer {
     for (const cls of this.protoSlots.keys()) {
       const info = this.classes.get(cls);
       if (info !== undefined && info.def.runtime !== true && info.evalClass === undefined) this.noteDynBoxedClass(cls);
+    }
+    // ...and a class whose late method falls back to the prototype table before its install point hands the receiver to the table's function.
+    for (const cls of this.protoClassBodies.keys()) {
+      const info = this.classes.get(cls);
+      if (info !== undefined && info.def.runtime !== true && info.evalClass === undefined && hasProtoTab(this, info)) this.noteDynBoxedClass(cls);
     }
     // The functions a body produces BESIDE itself (lifted closures, implicit-
     // any instances lowered nested) carry dyn boxes of their own; scanning
@@ -17346,6 +17352,9 @@ export class Lowerer {
   readonly protoSlots = new Map<string, Map<string, IrGlobal>>();
   /** Computed run-time prototype members (lower-prototab.ts): class name -> the module global holding its prototype table. */
   readonly protoTabs = new Map<string, IrGlobal>();
+  /** Late methods (`C.prototype.m = function ...`) of a class whose chain has a run-time prototype table: the install flag the assignment
+   * statement sets, so a call BEFORE it runs reaches the table's member (lower-protoslots.ts, lateInstallStmt). Keyed `${class}.${method}`. */
+  readonly lateInstalls = new Map<string, { flag: IrGlobal; info: ClassInfo; method: string }>();
   /** Root classes whose family takes run-time keyed writes on its instances (lower-ownshadow.ts). */
   readonly ownShadowRoots = OWN_SHADOW_ROOTS;
   /** The IR call nodes `super.m(...)` lowered to: the own-shadow pass points them at the undispatched body. */
