@@ -13787,6 +13787,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24638-url-search-params-from-a-dynamic-init.js": {
+   "order": [
+    "<repo>/tests/corpus/24638-url-search-params-from-a-dynamic-init.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2464-qs-require-forms.cjs": {
    "order": [
     "<repo>/tests/corpus/2464-qs-require-forms.cjs"
