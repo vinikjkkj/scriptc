@@ -11766,6 +11766,7 @@ class LlEmitter {
           this.emitPendingCheck();
           return out;
         }
+        const self = e.thisArg === undefined ? null : this.emitExpr(e.thisArg);
         const args = e.args.map((a) => this.emitExpr(a));
         let argsPtr = "null";
         if (args.length > 0) {
@@ -11778,9 +11779,14 @@ class LlEmitter {
           });
           argsPtr = arr;
         }
-        this.declare(`declare ptr @scr_dyn_call(ptr, ptr, i64, ptr)`);
         const t = B.tmp();
-        B.line(`${t} = call ptr @scr_dyn_call(ptr ${callee.name}, ptr ${argsPtr}, i64 ${args.length}, ptr ${this.cstr(e.calleeName)})`);
+        if (self !== null) {
+          this.declare(`declare ptr @scr_dyn_call_this(ptr, ptr, ptr, i64, ptr)`);
+          B.line(`${t} = call ptr @scr_dyn_call_this(ptr ${self.name}, ptr ${callee.name}, ptr ${argsPtr}, i64 ${args.length}, ptr ${this.cstr(e.calleeName)})`);
+        } else {
+          this.declare(`declare ptr @scr_dyn_call(ptr, ptr, i64, ptr)`);
+          B.line(`${t} = call ptr @scr_dyn_call(ptr ${callee.name}, ptr ${argsPtr}, i64 ${args.length}, ptr ${this.cstr(e.calleeName)})`);
+        }
         const out = this.own({ name: t, type: e.type });
         this.emitPendingCheck();
         return out;

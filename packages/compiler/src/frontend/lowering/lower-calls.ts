@@ -7004,7 +7004,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         const recv = L.lowerExpr(expr.expression.expression);
         if (recv.type.kind === "dyn") return dynCallWithThis(L, recv, callee, args, calleeName, loc);
         // a record of a granted shape: `this` is the object it is a view of (a plain struct has no object to name)
-        if (L.isViewShape(recv.type)) return dynCallWithThis(L, viewThisOf(recv, recv.type.shapeId, loc), callee, args, calleeName, loc);
+        if (L.isViewShape(recv.type)) return { kind: "dynCall", callee, calleeName, args, thisArg: viewThisOf(recv, recv.type.shapeId, loc), type: DYN, loc };
         // an instance of a class carrying the run-time property table (lowerInstanceKeyedRead): the box is the receiver
         if (recv.type.kind === "object" && isJsSourceFile(expr.getSourceFile()) && L.classes.get(recv.type.className)?.hasPropsTable === true) {
           return dynCallWithThis(L, internalBox(L, { kind: "dynFrom", value: recv, type: DYN, loc } as IrExpr), callee, args, calleeName, loc);
@@ -14721,14 +14721,15 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverr
       const args = call.arguments.map((a) => L.lowerExprExpecting(a, DYN));
       // `rec.f(...)` calls with `this` = the receiver. A record of a granted shape may be a VIEW of an object (a package class
       // instance a store hands to a `{ query: PoolClient['query'] }` parameter): the member the dyn read answers is the method's
-      // unbound thunk, which reads its receiver off the ambient window, so the call opens the window on the viewed object.
+      // unbound thunk, which reads its receiver off the ambient window, so the call opens the window on the viewed object
+      // (dynCall's thisArg: one runtime call, no helper frame).
       if (target !== null && target.container === "record" && L.isViewShape(target.obj.type)) {
         const loc = locOf(call);
         const recT = target.obj.type;
         const tmp = L.declareHiddenLocal("%vcRecv", recT);
         const ref = (): IrExpr => ({ kind: "varRef", localId: tmp.id, type: recT, loc });
         const read = L.fieldGetExpr({ ...target, obj: ref() }, locOf(access), access);
-        const callE = dynCallWithThis(L, viewThisOf(ref(), recT.shapeId, loc), read, args, v8CallSite(access), loc);
+        const callE: IrExpr = { kind: "dynCall", callee: read, calleeName: v8CallSite(access), args, thisArg: viewThisOf(ref(), recT.shapeId, loc), type: DYN, loc };
         return { kind: "seqExpr", stmts: [{ kind: "varDecl", localId: tmp.id, init: target.obj, loc }], result: callE, type: DYN, loc };
       }
       return { kind: "dynCall", callee, calleeName: v8CallSite(access), args, type: DYN, loc: locOf(call) };

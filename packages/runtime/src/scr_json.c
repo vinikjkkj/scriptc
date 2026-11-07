@@ -3211,6 +3211,16 @@ ScrDyn *scr_dyn_call(const ScrDyn *d, ScrDyn *const *args, size_t argc, const ch
   return d->v.fn.thunk(d->v.fn.clo, args, argc);
 }
 
+/* scr_dyn_call with `self` as the ambient receiver for the call: `rec.f(...)` where rec is a record VIEW of an object calls
+ * the object's member with the object as `this`. One push, one call, one pop (the window closes on a pending exception too:
+ * a throw is a flag the caller checks, never an unwind past this frame). */
+ScrDyn *scr_dyn_call_this(const ScrDyn *self, const ScrDyn *d, ScrDyn *const *args, size_t argc, const char *what) {
+  scr_dyn_this_push_dyn(self);
+  ScrDyn *r = scr_dyn_call(d, args, argc, what);
+  scr_dyn_this_pop();
+  return r;
+}
+
 /* scr_dyn_call over a dyn ARRAY's elements — the spread-application form
  * (`f(...args)` after the emitted argument array is built). Borrows both;
  * result owned (+1), or NULL with the exception pending. */

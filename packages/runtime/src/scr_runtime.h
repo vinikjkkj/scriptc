@@ -7076,6 +7076,9 @@ bool scr_dyn_proxy_is_function(const ScrDyn *p);
  * this = the proxy); with no get trap the call runs on the target. */
 ScrDyn *scr_dyn_proxy_invoke(ScrDyn *p, const ScrStr *key, ScrDyn *const *args, size_t argc, const char *what);
 ScrDyn *scr_dyn_call(const ScrDyn *d, ScrDyn *const *args, size_t argc, const char *what);
+/* scr_dyn_call with `self` as the ambient receiver (`this`) for the call's extent: push, call, pop, so the window closes
+ * on every exit (an exception is a pending flag, never an unwind). All borrowed; result owned (+1) or NULL pending. */
+ScrDyn *scr_dyn_call_this(const ScrDyn *self, const ScrDyn *d, ScrDyn *const *args, size_t argc, const char *what);
 /* scr_dyn_call over a dyn ARRAY's elements (the spread-application form —
  * `f(...args)` after the emitted argument array is built): argv IS the
  * array's items. Borrows both; result owned (+1), or NULL pending. */
