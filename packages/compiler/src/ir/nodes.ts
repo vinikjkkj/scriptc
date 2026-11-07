@@ -6608,6 +6608,12 @@ export type IrLibFn =
    * shown and rem read the entry cap of a composite. */
   | "insp.optsPush"
   | "insp.optsPop"
+  /** customOpts(stylize): the options object a [util.inspect.custom] method receives, built from the active set with the
+   * given dyn function as its `stylize`. customResult(ret, recurse, depth): what the inspect of an instance answers for a
+   * custom method's return value: a string takes the current indentation on its newlines, anything else is inspected. */
+  | "insp.customRegister"
+  | "insp.customOpts"
+  | "insp.customResult"
   | "insp.optDepth"
   | "insp.shown"
   | "insp.rem"
@@ -14715,6 +14721,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // util.format over a RUNTIME argument list: a %o over a dyn array/function and a
   // user toString under %s/%d/%i/%f leave a pending exception.
   "insp.format",
+  // a custom inspect result that is not a string is inspected (the dyn walk may fence)
+  "insp.customResult",
   "dyn.defineProps",
   "dyn.defineProp",
   "dyn.captureStack",
