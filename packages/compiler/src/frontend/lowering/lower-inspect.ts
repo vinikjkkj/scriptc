@@ -37,7 +37,7 @@ import * as ts from "../ts7/adapter.js";
 import type { NullProtoPatch } from "./ir-patch.js";
 import { boundCodeOf, fnValueCodeOfNode, jsFuncValueNameOf, staticFnCodeOf, type Lowerer } from "./lowerer.js";
 import { isJsSourceFile, locOf } from "../program.js";
-import { BOOL, BYTES_ELEM_NAMES, DYN, F64, canBoxFuncIntoDyn, canConvertToDyn, internalSlotFields, parseOwnShadowField, IrExpr, IrStmt, IrType, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, UNDEFINED_T, VOID, shapeHasAccessorSlots, typeKey } from "../../ir/nodes.js";
+import { BOOL, BYTES_ELEM_NAMES, DYN, F64, canBoxFuncIntoDyn, canConvertToDyn, internalSlotFields, parseOwnShadowField, IrExpr, IrStmt, IrType, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, UNDEFINED_T, VOID, shapeHasAccessorSlots, typeEquals, typeKey } from "../../ir/nodes.js";
 import { CLASS_PROPS_FIELD, type ClassInfo } from "./lower-classes.js";
 import { pureReemittable } from "./lower-exprs.js";
 import { bindingNeverReassigned, classInstanceToString, dynRestPack } from "./lower-calls.js";
@@ -460,6 +460,86 @@ function jsHierarchyHasInferredFields(L: Lowerer, className: string): boolean {
   return false;
 }
 
+/** The class member Node's inspect looks up first: `value[Symbol.for("nodejs.util.inspect.custom")]`, however the class spelled
+ * the key (inline, or through a module const bound to that Symbol.for). */
+const CUSTOM_INSPECT_METHOD = "sym.for:nodejs.util.inspect.custom";
+
+/** Whether some class of the program declares `[util.inspect.custom]`: only then does the entry module's init register the two
+ * function values every such method receives. */
+function programHasCustomInspect(L: Lowerer): boolean {
+  for (const info of L.classes.values()) if (L.findMethodOn(info, CUSTOM_INSPECT_METHOD) !== null) return true;
+  return false;
+}
+
+/** The entry init statement that hands the runtime the two function values a `[util.inspect.custom](depth, options, inspect)`
+ * method receives: `options.stylize` (Node's stylizeNoColor, the identity: colors are off) and `inspect` (util.inspect over a
+ * run-time options object). The runtime's instance walk calls the method through the class member table, builds the options
+ * object from the active set, and applies the method's answer as formatValue does (a string takes the current indentation, any
+ * other value is inspected in its place). Null when no class declares the method. */
+export function customInspectRegistration(L: Lowerer, loc: SrcLoc): IrStmt | null {
+  if (!programHasCustomInspect(L)) return null;
+  const key = "inspcustom:fns";
+  let names = L.inspectHelpers.get(key);
+  if (names === undefined) {
+    const stylizeName = `%util.inspcustom.stylize.${L.inspectHelpers.size}`;
+    const inspectName = `%util.inspcustom.inspect.${L.inspectHelpers.size}`;
+    names = `${stylizeName}|${inspectName}`;
+    L.inspectHelpers.set(key, names);
+    L.liftedFns.push({
+      name: stylizeName,
+      params: [{ localId: "s.0", name: "s", type: DYN }, { localId: "t.0", name: "t", type: DYN }],
+      returnType: DYN,
+      locals: [{ id: "s.0", name: "s", type: DYN, mutable: false }, { id: "t.0", name: "t", type: DYN, mutable: false }],
+      body: [{ kind: "return", value: { kind: "varRef", localId: "s.0", type: DYN, loc }, loc }],
+      loc,
+    });
+    const iv: IrExpr = { kind: "varRef", localId: "v.0", type: DYN, loc };
+    const io: IrExpr = { kind: "varRef", localId: "o.0", type: DYN, loc };
+    const optLib = (fn: "insp.optsPush" | "insp.optsPop", args: IrExpr[]): IrStmt => ({
+      kind: "exprStmt",
+      expr: { kind: "libCall", fn, args, type: VOID, loc },
+      loc,
+    });
+    L.liftedFns.push({
+      name: inspectName,
+      params: [{ localId: "v.0", name: "v", type: DYN }, { localId: "o.0", name: "o", type: DYN }],
+      returnType: STRING,
+      locals: [{ id: "v.0", name: "v", type: DYN, mutable: false }, { id: "o.0", name: "o", type: DYN, mutable: false }],
+      body: [
+        optLib("insp.optsPush", [io]),
+        {
+          kind: "tryCatch",
+          tryBody: [{ kind: "return", value: { kind: "libCall", fn: "insp.dynS", args: [iv, optDepth(loc)], type: STRING, loc }, loc }],
+          catchBody: null,
+          catchLocalId: null,
+          finallyBody: [optLib("insp.optsPop", [])],
+          loc,
+        },
+      ],
+      loc,
+    });
+  }
+  const [stylizeName, inspectName] = names.split("|") as [string, string];
+  const fnBox = (fnName: string, ret: IrType, jsName: string): IrExpr => ({
+    kind: "dynFrom",
+    value: { kind: "closure", fnName, captures: [], type: { kind: "func", params: [DYN, DYN], ret }, loc },
+    type: DYN,
+    fnName: jsName,
+    loc,
+  });
+  return {
+    kind: "exprStmt",
+    expr: {
+      kind: "libCall",
+      fn: "insp.customRegister",
+      args: [fnBox(stylizeName, DYN, "stylizeNoColor"), fnBox(inspectName, STRING, "inspect")],
+      type: VOID,
+      loc,
+    },
+    loc,
+  };
+}
+
 function inspectExpr(
   L: Lowerer,
   t: IrType,
@@ -468,6 +548,14 @@ function inspectExpr(
   depth: IrExpr,
   loc: SrcLoc,
 ): IrExpr {
+  // An instance of a class that declares [util.inspect.custom] prints through that method, which the runtime's instance walk
+  // calls (customInspectRegistration): so the instance takes the dyn walk.
+  if (t.kind === "object") {
+    const ci = L.classes.get(t.className);
+    if (ci !== undefined && L.findMethodOn(ci, CUSTOM_INSPECT_METHOD) !== null && canConvertToDyn(t, (id) => L.shapes.get(id), (id) => L.unions.get(id))) {
+      return { kind: "libCall", fn: "insp.dyn", args: [{ kind: "dynFrom", value, type: DYN, loc }, recurse, depth], type: STRING, loc };
+    }
+  }
   if (t.kind === "object" && jsHierarchyHasInferredFields(L, t.className)) {
     return { kind: "libCall", fn: "insp.dyn", args: [{ kind: "dynFrom", value, type: DYN, loc }, recurse, depth], type: STRING, loc };
   }

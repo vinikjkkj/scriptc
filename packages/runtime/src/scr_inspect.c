@@ -65,6 +65,8 @@ typedef struct {
 static const InspOpts INSP_DEFAULT_OPTS = {2.0, 80.0, INSP_COMPACT_NUM, 3.0, 100.0, 10000.0, false, false};
 static InspOpts g_opts = {2.0, 80.0, INSP_COMPACT_NUM, 3.0, 100.0, 10000.0, false, false};
 static InspOpts *g_opts_stack;
+static size_t g_indent; /* ctx.indentationLvl (tentative: defined with the frame stack below) */
+static size_t *g_indent_stack; /* the indentation each pushed option set interrupted: a nested top-level inspect starts at 0 */
 static size_t g_opts_n;
 static size_t g_opts_cap;
 /* keys appended to the array frame about to end (sorted only among themselves) */
@@ -145,13 +147,22 @@ void scr_insp_opts_push(const ScrDyn *o) {
     if ((v = scr_dyn_obj_own_data(o, "showProxy", 9)) != NULL && scr_dyn_truthy(v)) insp_unsupported("showProxy");
     if ((v = scr_dyn_obj_own_data(o, "getters", 7)) != NULL && scr_dyn_truthy(v)) insp_unsupported("getters");
     if ((v = scr_dyn_obj_own_data(o, "customInspect", 13)) != NULL && !scr_dyn_truthy(v)) insp_unsupported("customInspect: false");
-    if (scr_dyn_obj_own_data(o, "stylize", 7) != NULL) insp_unsupported("stylize");
+    /* A forwarded `options` (inspect(x, options) inside a custom method) carries the stylize this runtime handed out: the
+     * identity, colors being off. Any other stylize function would have to be called per token and stops by name. */
+    if ((v = scr_dyn_obj_own_data(o, "stylize", 7)) != NULL) {
+      const char *sn = v->kind == SCR_DYN_FUNC ? scr_dyn_fn_name(v) : NULL;
+      if (sn == NULL || strcmp(sn, "stylizeNoColor") != 0) insp_unsupported("stylize");
+    }
   }
   if (g_opts_n == g_opts_cap) {
     g_opts_cap = g_opts_cap ? g_opts_cap * 2 : 8;
     g_opts_stack = realloc(g_opts_stack, g_opts_cap * sizeof(InspOpts));
     if (!g_opts_stack) insp_oom();
+    g_indent_stack = realloc(g_indent_stack, g_opts_cap * sizeof(size_t));
+    if (!g_indent_stack) insp_oom();
   }
+  g_indent_stack[g_opts_n] = g_indent;
+  g_indent = 0;
   g_opts_stack[g_opts_n++] = g_opts;
   g_opts = n;
 }
@@ -162,10 +173,54 @@ void scr_insp_opts_pop(void) {
     return;
   }
   g_opts = g_opts_stack[--g_opts_n];
+  g_indent = g_indent_stack[g_opts_n];
+}
+
+/* The options object a [util.inspect.custom] method receives (Node's getUserOptions over the active context): the keys in
+ * Node's order, `stylize` being the caller's function (identity, colors are off). +1. */
+/* The two function values every [util.inspect.custom] method receives, registered by the entry module's init
+ * (customInspectRegistration): options.stylize and inspect. Held for the life of the program. */
+static ScrDyn *g_custom_stylize;
+static ScrDyn *g_custom_inspect;
+void scr_insp_custom_register(ScrDyn *stylize, ScrDyn *inspect) {
+  if (g_custom_stylize == NULL) {
+    g_custom_stylize = scr_dyn_retain(stylize);
+    g_custom_inspect = scr_dyn_retain(inspect);
+  }
+}
+
+/* The registered pair lives for the program; the exit audit releases it so it is not counted as a leak. */
+void scr_insp_custom_release(void) {
+  if (g_custom_stylize != NULL) scr_dyn_release(g_custom_stylize);
+  if (g_custom_inspect != NULL) scr_dyn_release(g_custom_inspect);
+  g_custom_stylize = NULL;
+  g_custom_inspect = NULL;
+}
+
+ScrDyn *scr_insp_custom_opts(ScrDyn *stylize) {
+  ScrDyn *o = scr_dyn_new_obj();
+#define INSP_SETK(k, v) scr_dyn_obj_set(o, k, sizeof(k) - 1, (v))
+  INSP_SETK("stylize", scr_dyn_retain(stylize));
+  INSP_SETK("showHidden", scr_dyn_new_bool(false));
+  INSP_SETK("depth", scr_dyn_new_num(g_opts.depth));
+  INSP_SETK("colors", scr_dyn_new_bool(false));
+  INSP_SETK("customInspect", scr_dyn_new_bool(true));
+  INSP_SETK("showProxy", scr_dyn_new_bool(false));
+  INSP_SETK("maxArrayLength", scr_dyn_new_num(g_opts.max_array));
+  INSP_SETK("maxStringLength", scr_dyn_new_num(g_opts.max_string));
+  INSP_SETK("breakLength", scr_dyn_new_num(g_opts.break_length));
+  INSP_SETK("compact", g_opts.compact_kind == INSP_COMPACT_NUM ? scr_dyn_new_num(g_opts.compact)
+                                                                : scr_dyn_new_bool(g_opts.compact_kind == INSP_COMPACT_TRUE));
+  INSP_SETK("sorted", scr_dyn_new_bool(g_opts.sorted));
+  INSP_SETK("getters", scr_dyn_new_bool(false));
+  INSP_SETK("numericSeparator", scr_dyn_new_bool(g_opts.numeric_sep));
+#undef INSP_SETK
+  return o;
 }
 
 /* The active depth budget (the frontend's depth argument for the traversal). */
 double scr_insp_opt_depth(void) { return g_opts.depth; }
+
 
 
 /* Node's maxLength for a composite of n entries: min(max(0, maxArrayLength), n). */
@@ -219,6 +274,21 @@ static ScrStr *ib_take(InspBuf *b) {
   ScrStr *out = scr_str_new(b->data ? b->data : "", b->len);
   free(b->data);
   return out;
+}
+
+/* What the inspect of an instance answers for the value its [util.inspect.custom] method returned (formatValue's custom
+ * branch): a string passes with every newline followed by the current indentation, anything else is inspected as a value at
+ * the same position. Borrows r; +1, or the empty dummy with a pending exception. */
+ScrStr *scr_insp_custom_result(ScrDyn *r, double recurse, double depth) {
+  if (r->kind != SCR_DYN_STR) return scr_insp_dyn(r, recurse, depth);
+  const ScrStr *t = r->v.str;
+  if (g_indent == 0) return scr_str_retain(r->v.str);
+  InspBuf b = {0};
+  for (size_t i = 0; i < t->len; i++) {
+    ib_char(&b, t->data[i]);
+    if (t->data[i] == '\n') ib_spaces(&b, g_indent);
+  }
+  return ib_take(&b);
 }
 
 /* util.format %o (scr_insp_dyn_h): function values also list their hidden keys. */
@@ -442,7 +512,6 @@ typedef struct {
 static InspFrame *g_frames;
 static size_t g_nframes;
 static size_t g_frames_cap;
-static size_t g_indent;       /* ctx.indentationLvl */
 static double g_cur_depth;    /* ctx.currentDepth (last-entered composite) */
 
 static InspFrame *insp_top(void) { return &g_frames[g_nframes - 1]; }
@@ -1928,6 +1997,30 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
        * accessor lives on the PROTOTYPE, where Node does not look for own
        * properties -- and running one at a print would be a side effect
        * the program did not ask for, which is the OBJ arm's stance too. */
+      /* formatValue's first step for an object: `value[inspect.custom]`, a function other than util.inspect itself, is called
+       * with the receiver as `this`, the depth budget left (ctx.depth - recurse), the options of the active context and
+       * inspect, BEFORE the circular and depth answers. A throw propagates; an answer that is the receiver itself falls
+       * through to the ordinary formatting. */
+      {
+        const ScrDynClassMember *cust = scr_dyn_objinst_member(d, "sym.for:nodejs.util.inspect.custom", 34);
+        if (cust != NULL && cust->call != NULL && g_custom_inspect != NULL) {
+          ScrDyn *cargs[3];
+          cargs[0] = scr_dyn_new_num(depth - recurse);
+          cargs[1] = scr_insp_custom_opts(g_custom_stylize);
+          cargs[2] = scr_dyn_retain(g_custom_inspect);
+          ScrDyn *cr = cust->call(d->v.inst.o, cargs, 3, "inspect");
+          scr_dyn_release(cargs[0]);
+          scr_dyn_release(cargs[1]);
+          scr_dyn_release(cargs[2]);
+          if (cr == NULL) return scr_str_new("", 0); /* the method threw: the pending throw wins */
+          if (!(cr->kind == SCR_DYN_OBJINST && cr->v.inst.o == d->v.inst.o)) {
+            ScrStr *cs = scr_insp_custom_result(cr, recurse, depth);
+            scr_dyn_release(cr);
+            return cs;
+          }
+          scr_dyn_release(cr);
+        }
+      }
       const char *icn = scr_dyn_objinst_cls(d);
       /* The class that applyMixin(Y, EventEmitter) grafted onto (rt_root 7) has had its own `constructor` overwritten by
        * EventEmitter's, and util.inspect skips a constructor the instance is not an instance of: it names the first
