@@ -17,7 +17,8 @@
  * answers, and a replacement's answer adopts into it. */
 import { PoisonError, newFnCtx, type Lowerer } from "./lowerer.js";
 import type { ClassInfo } from "./lower-classes.js";
-import { CLASS_PROPS_FIELD } from "./lower-classes.js";
+import { CLASS_PROPS_FIELD, findGenericMethodOn } from "./lower-classes.js";
+import * as ts from "../ts7/adapter.js";
 import { isJsSourceFile } from "../program.js";
 import { dynCallWithThis } from "./lower-calls.js";
 import { dispatcherResult, dispatcherReturnType, protoSlotSlottable } from "./lower-protoslots.js";
@@ -33,6 +34,57 @@ export function ownShadowRootOf(info: ClassInfo): ClassInfo {
   let c = info;
   while (c.base !== null && c.base !== undefined && c.base.builtinEmitter !== true && c.base.builtinError !== true && c.base.def.runtime !== true) c = c.base;
   return c;
+}
+
+/** The families a LITERAL-key write over a method shadows, registered BEFORE any body lowers: `x.m = fn` where `m` is a method of the
+ * class of `x` (mysql2's `executeCommand.start = function () {}`). The lowering of the write registers the family too, but a read of the
+ * class's methods (a detached `Class.prototype.m`, a field note) lowered earlier would have been decided without it, and the discovery
+ * and emit passes would disagree about which units exist. Scans the program's JavaScript files once; a program with no such write does
+ * no more than that walk. Iterative. */
+export function prescanLiteralMethodShadows(L: Lowerer, sfs: readonly ts.SourceFile[]): void {
+  const names = new Set<string>();
+  for (const info of L.classes.values()) {
+    for (const k of info.methods.keys()) if (!k.includes(":") && !k.startsWith("%")) names.add(k);
+    for (const k of info.genericMethods?.keys() ?? []) if (!k.includes(":") && !k.startsWith("%")) names.add(k);
+  }
+  if (names.size === 0) return;
+  for (const sf of sfs) {
+    if (sf.isDeclarationFile || !isJsSourceFile(sf)) continue;
+    const stack: ts.Node[] = [sf];
+    while (stack.length > 0) {
+      const n = stack.pop()!;
+      if (
+        ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isPropertyAccessExpression(n.left) &&
+        n.left.questionDotToken === undefined && names.has(n.left.name.text)
+      ) {
+        let recv: ts.Expression = n.left.expression;
+        while (ts.isParenthesizedExpression(recv)) recv = recv.expression;
+        if (!(ts.isPropertyAccessExpression(recv) && recv.name.text === "prototype")) {
+          const t = L.mapTypeOf(L.typeOf(n.left.expression));
+          const info = t?.kind === "object" ? L.classes.get(t.className) : undefined;
+          if (info !== undefined && info.hasPropsTable === true && info.def.runtime !== true && !info.builtinError &&
+              methodDeclaredInFamilyBelow(L, info, n.left.name.text)) {
+            registerOwnShadowFamily(info);
+          }
+        }
+      }
+      n.forEachChild((c) => {
+        stack.push(c);
+      });
+    }
+  }
+}
+
+/** Does a SUBCLASS of `info` (or `info` itself) declare a method `name`? `command.start = fn` through the base class `Command`, whose
+ * subclasses declare `start`, shadows the method those subclasses answer to `this.start`. */
+export function methodDeclaredInFamilyBelow(L: Lowerer, info: ClassInfo, name: string): boolean {
+  const stack: ClassInfo[] = [info];
+  while (stack.length > 0) {
+    const c = stack.pop()!;
+    if (L.findMethodOn(c, name) !== null || findGenericMethodOn(L, c, name) !== null) return true;
+    for (const s of c.subclasses) stack.push(s);
+  }
+  return false;
 }
 
 /** Registers the family of `info` (a keyed write on one of its instances is being lowered). */
