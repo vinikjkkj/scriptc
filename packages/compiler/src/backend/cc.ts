@@ -395,6 +395,9 @@ export interface CcOptions {
    * registry initializes lazily), so it cross-compiles everywhere.
    * Symbol-free binaries keep their exact link line. */
   symbol?: boolean;
+  /** The program can hold a primitive-wrapper subclass instance or relink a prototype (moduleUsesWrapWatch): compiles the wrapper
+   * cache's epoch bookkeeping in (-DSCR_WRAP_WATCH). Other programs keep the dyn insertion path unchanged. */
+  wrapWatch?: boolean;
   /** The program converts a function value to its source text (moduleUsesFnText
    * on the IR): compiles scr_fntext.c into the binary. Other programs keep
    * their exact link line. */
@@ -1858,6 +1861,9 @@ export interface LibArchiveOptions {
   assert?: boolean;
   inspect?: boolean;
   symbol?: boolean;
+  /** The program can hold a primitive-wrapper subclass instance or relink a prototype (moduleUsesWrapWatch): compiles the wrapper
+   * cache's epoch bookkeeping in (-DSCR_WRAP_WATCH). Other programs keep the dyn insertion path unchanged. */
+  wrapWatch?: boolean;
   /** The program converts a function value to its source text (moduleUsesFnText
    * on the IR): compiles scr_fntext.c into the binary. Other programs keep
    * their exact link line. */
@@ -1932,6 +1938,7 @@ export async function compileLibArchive(opts: LibArchiveOptions): Promise<void> 
     "-std=c11",
     ...driver.targetArgs,
     ...optAuditArgs(sanitize),
+    ...(opts.wrapWatch ? ["-DSCR_WRAP_WATCH"] : []),
     ...(opts.symbol ? ["-DSCR_SYMTAB"] : []), // the runtime's symbol-property code is compiled in only for a program that links the symbol unit
     ...(opts.event ? ["-DSCR_ABORT_EV"] : []), // scr_abort.c's Event-aware dispatch, only for a program that links scr_event.c
     "-fno-math-errno",
@@ -2565,6 +2572,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...(engineOnly ? ["-DSCR_ENGINE"] : []),
     ...driver.targetArgs,
     ...optAuditArgs(opts.sanitize ?? false),
+    ...(opts.wrapWatch ? ["-DSCR_WRAP_WATCH"] : []),
     ...(opts.symbol ? ["-DSCR_SYMTAB"] : []), // see the library archive's cflags
     ...(opts.event ? ["-DSCR_ABORT_EV"] : []), // see the library archive's cflags
     "-fno-math-errno",
@@ -2961,6 +2969,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     "-std=c11",
     ...driver.targetArgs,
     ...optAuditArgs(opts.sanitize ?? false),
+    ...(opts.wrapWatch ? ["-DSCR_WRAP_WATCH"] : []),
     ...(opts.symbol ? ["-DSCR_SYMTAB"] : []), // see the library archive's cflags
     ...(opts.event ? ["-DSCR_ABORT_EV"] : []), // see the library archive's cflags
     "-fno-math-errno",

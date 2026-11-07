@@ -1495,11 +1495,10 @@ void scr_dyn_proto_ctor_fence(void) {
   scr_throw_error_msg(SCR_ERR_ERROR, msg, sizeof msg - 1);
 }
 
-/* Does a wrapper object (or anything with an OBJ chain) carry `name` as its own member or on a prototype BEFORE the intrinsic
- * sentinels (the immortal String / Number / Boolean prototypes, whose builtin members are the primitive's)? */
-bool scr_dyn_wrapper_user_member(const ScrDyn *d, const char *name, size_t n) {
+/* Does the [[Prototype]] chain of `d`, BEFORE the intrinsic sentinels (the immortal String / Number / Boolean prototypes, whose
+ * builtin members are the primitive's), carry `name`? (The object's own members are not asked.) */
+bool scr_dyn_wrapper_proto_member(const ScrDyn *d, const char *name, size_t n) {
   if (d->kind != SCR_DYN_OBJ) return false;
-  if (scr_dyn_obj_own_data(d, name, n) != NULL) return true;
   const ScrDyn *p = scr_dyn_ext(d)->proto;
   for (int steps = 0; p != NULL && p->kind == SCR_DYN_OBJ && p->rc != SIZE_MAX && steps < 1024; steps++) {
     if (scr_dyn_obj_own_data(p, name, n) != NULL) return true;
@@ -1508,8 +1507,45 @@ bool scr_dyn_wrapper_user_member(const ScrDyn *d, const char *name, size_t n) {
   return false;
 }
 
+/* toString (bit 0) / valueOf (bit 1) defined by the object or its pre-sentinel chain. A plain wrapper with no members at all answers
+ * 0 after two loads; one instance is cached against scr_wrap_epoch, which every link install and every toString / valueOf key
+ * appearance or removal bumps, so a hot loop over one subclass instance pays one compare per call. */
+static unsigned scr_wrap_ts_flags(const ScrDyn *d) {
+  const ScrDynObjExt *x = scr_dyn_ext(d);
+  if (x->proto == NULL && d->v.obj.len == 0 && x->hidden == NULL) return 0;
+#ifdef SCR_WRAP_WATCH
+  static const ScrDyn *c_inst;
+  static uint32_t c_epoch;
+  static unsigned c_flags;
+#endif
+#ifdef SCR_WRAP_WATCH
+  if (d == c_inst && scr_wrap_epoch == c_epoch) return c_flags;
+#endif
+  unsigned f = 0;
+  if (scr_dyn_obj_own_data(d, "toString", 8) != NULL || scr_dyn_wrapper_proto_member(d, "toString", 8)) f |= 1;
+  if (scr_dyn_obj_own_data(d, "valueOf", 7) != NULL || scr_dyn_wrapper_proto_member(d, "valueOf", 7)) f |= 2;
+#ifdef SCR_WRAP_WATCH
+  c_inst = d;
+  c_epoch = scr_wrap_epoch;
+  c_flags = f;
+#endif
+  return f;
+}
+
+/* Does a wrapper object carry `name` as its own member or on a prototype before the sentinels? */
+bool scr_dyn_wrapper_user_member(const ScrDyn *d, const char *name, size_t n) {
+  if (d->kind != SCR_DYN_OBJ) return false;
+  if (n == 8 && memcmp(name, "toString", 8) == 0) return (scr_wrap_ts_flags(d) & 1) != 0;
+  if (n == 7 && memcmp(name, "valueOf", 7) == 0) return (scr_wrap_ts_flags(d) & 2) != 0;
+  if (scr_dyn_obj_own_data(d, name, n) != NULL) return true;
+  return scr_dyn_wrapper_proto_member(d, name, n);
+}
+
 void scr_dyn_obj_set_proto(ScrDyn *obj, ScrDyn *proto) {
   if (obj->kind != SCR_DYN_OBJ) return;
+#ifdef SCR_WRAP_WATCH
+  scr_wrap_epoch++;
+#endif
   ScrDyn *prev = scr_dyn_ext(obj)->proto;
   /* A NULL proto on an object that has no ext is the common case and must
    * not allocate one to store NULL into. */
@@ -1752,6 +1788,9 @@ ScrDyn *scr_dyn_arr_at(const ScrDyn *d, double i) {
 /* Takes ownership of key (malloc'd) and value. Duplicate keys: the LATER
  * value wins (like JS JSON.parse) — the old value is released and the new
  * key buffer freed (the surviving entry keeps its original, equal key). */
+/* Bumped whenever a prototype link is installed or a member named toString / valueOf appears or goes (the wrapper-subclass cache's clock). */
+uint32_t scr_wrap_epoch = 1;
+
 static void scr_dyn_obj_put_k(ScrDyn *obj, char *key, size_t key_len, ScrDyn *value,
                               uint32_t key_static) {
 #ifdef SCR_DYNCEN_ON
@@ -1820,6 +1859,12 @@ static void scr_dyn_obj_put_k(ScrDyn *obj, char *key, size_t key_len, ScrDyn *va
   e->key_static = key_static;
   e->value_borrowed = 0;
   e->value = value;
+#ifdef SCR_WRAP_WATCH
+  /* A NEW member named toString / valueOf can change what a primitive-wrapper subclass answers (scr_dyn_wrapper_user_member's cache).
+   * Compiled in only for a program that holds such a subclass or relinks a prototype (moduleUsesWrapWatch). */
+  if ((size_t)(key_len - 7) <= 1 && (key[0] == 't' || key[0] == 'v') &&
+      ((key_len == 8 && memcmp(key, "toString", 8) == 0) || (key_len == 7 && memcmp(key, "valueOf", 7) == 0))) scr_wrap_epoch++;
+#endif
 }
 
 /* The copying put, unchanged for every caller that had one. */
@@ -8045,6 +8090,9 @@ static void scr_dyn_obj_unset(ScrDyn *obj, const char *key, size_t key_len) {
       memmove(&obj->v.obj.entries[i], &obj->v.obj.entries[i + 1],
               (obj->v.obj.len - i - 1) * sizeof *obj->v.obj.entries);
       obj->v.obj.len--;
+#ifdef SCR_WRAP_WATCH
+      scr_wrap_epoch++;
+#endif
       if (old_owned) scr_dyn_release(old);
       return;
     }
