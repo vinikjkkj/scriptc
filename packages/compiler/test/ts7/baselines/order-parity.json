@@ -13775,6 +13775,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24636-empty-array-members-that-receive-non-numeric-stores.js": {
+   "order": [
+    "<repo>/tests/corpus/24636-empty-array-members-that-receive-non-numeric-stores.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2464-qs-require-forms.cjs": {
    "order": [
     "<repo>/tests/corpus/2464-qs-require-forms.cjs"
