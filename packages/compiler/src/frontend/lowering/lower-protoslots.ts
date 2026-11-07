@@ -433,6 +433,22 @@ export function applyProtoSlots(L: Lowerer, fnLists: IrFunction[][]): void {
  * the INSTALL point. Until it runs, JS calls whatever the chain provides (the prototype table's `m`), and a late method compiled as a
  * plain method would run its body at once (reading bindings the program has not initialized yet). The statement sets this flag;
  * applyLateInstalls wraps the method in a dispatcher on it. Null (the empty statement) for every other late method. */
+/** The install mark of late method `method` of `info`: set when the installing statement runs. Null when the class has no run-time prototype table (a
+ * late method of such a class needs no mark: no call can reach a table member before the install). */
+export function lateInstallMark(L: Lowerer, info: ClassInfo, method: string, loc: SrcLoc): IrStmt | null {
+  if (info.evalClass !== undefined || info.def.runtime === true || !hasProtoTab(L, info)) return null;
+  const cls = info.def.name;
+  const key = `${cls}.${method}`;
+  let rec = L.lateInstalls.get(key);
+  if (rec === undefined) {
+    const flag: IrGlobal = { id: `%g.li.${cls}.${method}`, name: `${info.def.jsName ?? cls}.prototype.${method} installed`, type: BOOL, mutable: true };
+    L.globalsList.push(flag);
+    rec = { flag, info, method };
+    L.lateInstalls.set(key, rec);
+  }
+  return { kind: "assign", localId: rec.flag.id, value: { kind: "boolLit", value: true, type: BOOL, loc }, loc };
+}
+
 export function lateInstallStmt(L: Lowerer, expr: ts.Expression): IrStmt | null {
   for (const [cls, bodies] of L.protoClassBodies) {
     for (const [method, body] of bodies) {
