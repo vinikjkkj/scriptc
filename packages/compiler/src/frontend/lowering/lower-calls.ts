@@ -6691,14 +6691,17 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       (!expr.expression.questionDotToken || L.chainHandled.has(expr.expression)) &&
       !expr.questionDotToken &&
       !expr.arguments.some((a) => ts.isSpreadElement(a)) &&
-      ts.isIdentifier(expr.expression.argumentExpression)
+      (ts.isIdentifier(expr.expression.argumentExpression) || ts.isPropertyAccessExpression(expr.expression.argumentExpression))
     ) {
-      const symKey = L.uniqueSymbolKeyOf(expr.expression.argumentExpression);
-      const recvIr = symKey ? L.mapTypeOf(L.typeOf(expr.expression.expression)) : null;
+      const keyArg = expr.expression.argumentExpression;
+      const symKey = ts.isIdentifier(keyArg) ? L.uniqueSymbolKeyOf(keyArg) : null;
+      // a well-known key (`x[Symbol.dispose]()`): the class's member slot of that name (collected as `sym:<name>`)
+      const wkKey = ts.isPropertyAccessExpression(keyArg) ? L.stdlibGlobalMember(keyArg, "Symbol") : null;
+      const recvIr = symKey || wkKey ? L.mapTypeOf(L.typeOf(expr.expression.expression)) : null;
       const recvInfo = recvIr?.kind === "object" ? (L.classes.get(recvIr.className) ?? null) : null;
-      const slot = symKey ? `sym.uniq:${symKey.fieldName}` : "";
+      const slot = symKey ? `sym.uniq:${symKey.fieldName}` : wkKey !== null ? `sym:${wkKey}` : "";
       const fnd = recvInfo ? L.findMethodOn(recvInfo, slot) : null;
-      if (symKey && recvInfo && fnd && !(fnd.sig.abstract === true)) {
+      if ((symKey || wkKey !== null) && recvInfo && fnd && !(fnd.sig.abstract === true)) {
         if (L.overrideBelow(recvInfo, slot)) L.noteVirtualEdge(recvInfo, slot);
         else L.noteEdge(`%${fnd.declarer.def.name}.${slot}`);
         const recvExpr = L.lowerExpr(expr.expression.expression);
