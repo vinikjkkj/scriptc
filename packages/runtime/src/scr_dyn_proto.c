@@ -219,7 +219,10 @@ static ScrDyn *scr_builtin_string_ctor(ScrClosure *clo, ScrDyn *const *args, siz
 }
 static ScrDyn *scr_builtin_number_ctor(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
   (void)clo;
-  return scr_dyn_new_num(argc == 0 ? 0.0 : scr_dyn_to_number(args[0]));
+  if (argc == 0) return scr_dyn_new_num(0.0);
+  /* Number(new Number(3)) is 3: a primitive WRAPPER converts through the primitive it holds (ToPrimitive's valueOf). */
+  const ScrDyn *wp = scr_dyn_wrapper_prim(args[0]);
+  return scr_dyn_new_num(scr_dyn_to_number(wp != NULL ? wp : args[0]));
 }
 static ScrDyn *scr_builtin_boolean_ctor(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
   (void)clo;
@@ -276,6 +279,20 @@ static ScrDyn *scr_builtin_fn(int which) {
 
 /* `Object` as a value (the constructor function every plain object's prototype names). +1. */
 ScrDyn *scr_dyn_object_ctor_value(void) { return scr_builtin_fn(SCR_BI_OBJECT); }
+
+/* A bare builtin constructor read as a VALUE (`{ 1: String, 2: Array }`, `x = Number`): the same immortal function box the
+ * intrinsic prototypes' `constructor` answers, so identity, typeof "function", `.name` and calling it as the builtin all agree with
+ * Node. `which` is 0 Object, 1 Array, 2 Function, 3 String, 4 Number, 5 Boolean (lower-exprs ctorObjectGlobalValue's table). +1. */
+ScrDyn *scr_dyn_builtin_ctor_value(double which) {
+  switch ((int)which) {
+    case 0: return scr_builtin_fn(SCR_BI_OBJECT);
+    case 1: return scr_builtin_fn(SCR_BI_ARRAY);
+    case 2: return scr_builtin_fn(SCR_BI_FUNCTION);
+    case 3: return scr_builtin_fn(SCR_BI_STRING);
+    case 4: return scr_builtin_fn(SCR_BI_NUMBER);
+    default: return scr_builtin_fn(SCR_BI_BOOLEAN);
+  }
+}
 
 /* A member the intrinsic prototype `recv` carries by name, +1, or NULL when `recv` is not an intrinsic prototype or has no such member. */
 static ScrDyn *proto_intrinsic_member(const ScrDyn *recv, const char *key, size_t key_len) {
@@ -364,5 +381,23 @@ static ScrDyn *proto_key_get(ScrDyn *recv, const char *key, size_t key_len) {
   return NULL;
 }
 
-static const ScrDynProtoOps proto_ops = { proto_wrapper_prim, proto_intrinsic_member, proto_is_intrinsic, proto_key_get };
+static ScrDyn *proto_construct_builtin(const ScrDyn *fn, const ScrDyn *args, bool *handled) {
+  *handled = false;
+  static const int WRAPPED[3] = { SCR_BI_STRING, SCR_BI_NUMBER, SCR_BI_BOOLEAN };
+  for (int i = 0; i < 3; i++) {
+    if (scr_builtin_fns[WRAPPED[i]] != fn) continue;
+    *handled = true;
+    ScrDyn *const *items = args != NULL && args->kind == SCR_DYN_ARR ? args->v.arr.items : NULL;
+    size_t n = args != NULL && args->kind == SCR_DYN_ARR ? args->v.arr.len : 0;
+    ScrDyn *prim = WRAPPED[i] == SCR_BI_STRING ? scr_builtin_string_ctor(NULL, items, n)
+                 : WRAPPED[i] == SCR_BI_NUMBER ? scr_builtin_number_ctor(NULL, items, n)
+                                               : scr_builtin_boolean_ctor(NULL, items, n);
+    if (prim == NULL) return NULL; /* pending */
+    ScrDyn *w = scr_dyn_wrapper_new(prim);
+    scr_dyn_release(prim);
+    return w;
+  }
+  return NULL;
+}
+static const ScrDynProtoOps proto_ops = { proto_wrapper_prim, proto_intrinsic_member, proto_is_intrinsic, proto_key_get, proto_construct_builtin };
 __attribute__((constructor)) static void proto_install(void) { scr_dyn_proto_ops = &proto_ops; }

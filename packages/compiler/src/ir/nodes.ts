@@ -6634,6 +6634,8 @@ export type IrLibFn =
   | "dyn.toObject"
   | "dyn.unwrapPrim"
   | "dyn.objectCtor"
+  /** A bare String/Number/Boolean/Array/Function/Object constructor read as a value: the runtime's builtin function box (arg = table index). */
+  | "dyn.builtinCtor"
   | "insp.optDepth"
   | "insp.shown"
   | "insp.rem"
@@ -12826,7 +12828,7 @@ export function moduleUsesDynProto(mod: IrModule): boolean {
     if (
       node.kind === "libCall" &&
       (node.fn === "dyn.getPrototypeOf" || node.fn === "dyn.objectPrototype" || node.fn === "dyn.toObject" ||
-        node.fn === "dyn.unwrapPrim" || node.fn === "dyn.objectCtor")
+        node.fn === "dyn.unwrapPrim" || node.fn === "dyn.objectCtor" || node.fn === "dyn.builtinCtor")
     ) {
       found = true;
       return;
