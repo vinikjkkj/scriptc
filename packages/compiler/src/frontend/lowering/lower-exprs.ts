@@ -51,7 +51,7 @@ import { lowerProvenKeyArrayRead } from "./lower-keydomain.js";
 import { emitterRooted } from "./lower-emitter.js";
 import { CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, registrySymbolKeyOf, type ClassInfo } from "./lower-classes.js";
 import { hasProtoTab, keyAsString, protoTabHasOr, protoTabReadChain } from "./lower-prototab.js";
-import { inOwnShadowFamily, internalBox, ownShadowWhy, registerOwnShadowFamily } from "./lower-ownshadow.js";
+import { inOwnShadowFamily, internalBox, methodDeclaredInFamilyBelow, ownShadowWhy, registerOwnShadowFamily } from "./lower-ownshadow.js";
 import { refuseWebCryptoFlowsAt } from "./lower-webcrypto-fence.js";
 import { codecOfType, refuseCodecValue } from "../codec-shadow.js";
 
@@ -26016,8 +26016,8 @@ export function slotBypassTarget(L: Lowerer, declarer: ClassInfo, method: string
     if (recvT?.kind !== "object") return null;
     const info = L.classes.get(recvT.className) ?? null;
     if (info === null || info.builtinError || info.fields.has(name)) return null;
-    if (L.findMethodOn(info, name) !== null || findGenericMethodOn(L, info, name) !== null) {
-      // `x.m = fn` where `m` is a METHOD of the receiver's class chain: Node stores an own property that shadows the method for `x.m(...)`
+    if (methodDeclaredInFamilyBelow(L, info, name)) {
+      // `x.m = fn` where `m` is a METHOD of the receiver's class chain, or of a subclass of it (the base runner's `this.m` reads the subclass's): Node stores an own property that shadows the method for `x.m(...)`
       // and for every `this.m` read inside the class's own code (mysql2 swaps a command's `start` for one that does nothing). The
       // run-time keyed write's machinery answers it exactly (lower-ownshadow.ts): the family dispatches through the table, so only a
       // program that spells such a write pays for it.
