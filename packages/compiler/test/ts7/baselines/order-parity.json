@@ -26051,6 +26051,12 @@
     "<repo>/tests/corpus/24693-late-accessor-families-on-a-class-with-a-run-time-prototype-table-keep-their-arity.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/24694-late-method-with-a-typed-parameter-and-arguments-rebinds-off-the-pack.js": {
+   "order": [
+    "<repo>/tests/corpus/24694-late-method-with-a-typed-parameter-and-arguments-rebinds-off-the-pack.js"
+   ],
+   "diags": []
   }
  }
 }
