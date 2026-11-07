@@ -2170,6 +2170,7 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
       }
       if (L.checker.getSymbolAtLocation(lhs.expression.expression) !== classSymbol) continue;
       const m = lhs.name.text;
+      if (m === "exec" || m === "multi" || m === "execBuffer") process.stderr.write(`LMPROBE ${info.def.name}.${m} methods=${info.methods.has(m)} abstract=${info.methods.get(m)?.abstract} fields=${info.fields.has(m)} src=${lateMethodSourceOf(L, e.right) !== null} file=${sf.fileName.slice(-30)}\n`);
       if (info.methods.has(m) || info.fields.has(m)) continue;
       const fn = lateMethodSourceOf(L, e.right);
       // `C.prototype.m = D.prototype.n` where D never defines n: the value is

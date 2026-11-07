@@ -319,6 +319,7 @@ export function protoSlotWriteStmt(L: Lowerer, expr: ts.Expression): IrStmt | nu
     if (e instanceof PoisonError) throw e;
   }
   const info = protoRecvClass(L, w.recv);
+  if (w.name === "exec" || w.name === "multi") process.stderr.write(`PSPROBE ${w.name} info=${info?.def.name ?? "null"} slot=${info === null ? "-" : protoSlotOf(L, info.def.name, w.name) !== null} slottable=${info === null ? "-" : slottable(info, w.name)}\n`);
   if (info === null) return null;
   const g = protoSlotOf(L, info.def.name, w.name);
   const e = expr as ts.BinaryExpression;
