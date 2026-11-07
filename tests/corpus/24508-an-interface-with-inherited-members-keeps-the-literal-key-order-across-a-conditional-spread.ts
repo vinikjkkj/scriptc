@@ -41,3 +41,21 @@ for (const group of [false, true]) {
   console.log(JSON.stringify(Object.keys(e)), JSON.stringify(Object.keys(e.key)));
   console.log(JSON.stringify(e));
 }
+
+// A carried key an EARLIER property already wrote keeps that position (the spread only overwrites the value), whether the spread fires or not;
+// a carried key nothing else names sits at the spread's own position when it fires.
+interface Pair { a: number; b: number; x?: number }
+function overlapBefore(c: boolean): Pair {
+  return { x: 3, a: 1, ...(c ? { x: 10 } : {}), b: 2 };
+}
+function carriedLeading(c: boolean): Pair {
+  return { ...(c ? { x: 10 } : {}), a: 1, b: 2 };
+}
+function carriedMiddle(c: boolean): Pair {
+  return { a: 1, ...(c ? { x: 10 } : {}), b: 2 };
+}
+for (const c of [true, false]) {
+  for (const r of [overlapBefore(c), carriedLeading(c), carriedMiddle(c)]) {
+    console.log(c, JSON.stringify(Object.keys(r)), JSON.stringify(r), r);
+  }
+}
