@@ -25578,6 +25578,18 @@
     "<repo>/tests/corpus/24461-string-number-and-boolean-flow-into-any-typed-function-slots.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/24462-array-buffer-is-view-in-a-dead-narrowed-branch-of-a-program-with-object-entries.ts": {
+   "order": [
+    "<repo>/tests/corpus/24462-array-buffer-is-view-in-a-dead-narrowed-branch-of-a-program-with-object-entries.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24463-object-from-entries-over-an-untyped-entries-map.ts": {
+   "order": [
+    "<repo>/tests/corpus/24463-object-from-entries-over-an-untyped-entries-map.ts"
+   ],
+   "diags": []
   }
  }
 }
