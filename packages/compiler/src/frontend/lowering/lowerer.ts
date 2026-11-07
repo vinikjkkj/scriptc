@@ -5089,11 +5089,6 @@ export class Lowerer {
         }
         for (const name of info.shadowFields ?? []) {
           units.set(`%${cName}.${name}`, () => shadowMethodFn(this, info, name));
-          if (info.shadowOwn?.has(name) === true) {
-            for (const { mName, member } of this.classMethodMembers(info)) {
-              if (mName === name) units.set(`%${cName}.${name}%impl`, () => this.lowerClassMethodMember(info, member));
-            }
-          }
         }
       }
       for (const name of [...(info.staticMethods?.keys() ?? []), ...(info.staticAccessors?.keys() ?? [])]) {
@@ -5148,11 +5143,6 @@ export class Lowerer {
       }
       for (const name of info.shadowFields ?? []) {
         units.set(`%${cName}.${name}`, () => shadowMethodFn(this, info, name));
-        if (info.shadowOwn?.has(name) === true) {
-          for (const { mName, member } of this.classMethodMembers(info)) {
-            if (mName === name) units.set(`%${cName}.${name}%impl`, () => this.lowerClassMethodMember(info, member));
-          }
-        }
       }
     };
     // Generic instances queued by the bodies above lower here (an instance

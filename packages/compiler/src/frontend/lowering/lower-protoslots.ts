@@ -599,17 +599,33 @@ export function applyLateInstalls(L: Lowerer, fnLists: IrFunction[][]): void {
 
 
 /**
- * Instance-level method overrides over a LATE method (`Cls.prototype.m = function`, assigned onto one instance elsewhere): the
- * class collected the undefined-armed slot field (shadowLate); the method body is lowered by now, so `%C.m` is wrapped here. The
- * wrapper tests the slot: unset runs the method (renamed `%C.m%impl`), set calls the own function with the declared leading
- * arguments, under the ambient-receiver window when the function reads `this`. Runs BEFORE applyLateInstalls, whose dispatcher
- * then wraps this wrapper like any other body. A class nothing writes over carries no slot and is untouched.
+ * Instance-level method overrides over a method the class declares itself (a class-body method or a late `Cls.prototype.m = function`,
+ * with the function assigned onto one instance elsewhere): the class collected the undefined-armed slot field (shadowLate); by now the
+ * body is lowered, and its PROLOGUE tests the slot: set, the own function runs with the declared arguments (under the ambient-receiver
+ * window when it reads `this`) and its answer is the method's. The test is one borrowed tag compare of the slot (fieldGet tagTest): the
+ * unset path pays no call and no reference traffic. The method's value read while no own function is set (`const exec = p.exec`) calls
+ * the body WITHOUT the test (`%C.m%impl`, a copy made only when something calls it), so an override can call the captured original
+ * back. Runs BEFORE applyLateInstalls, whose dispatcher then wraps this body like any other. A class nothing writes over is untouched.
  */
 export function applyInstanceOverrides(L: Lowerer, fnLists: IrFunction[][]): void {
   const withSlots = [...L.classes.values()].filter((c) => c.shadowLate !== undefined && c.shadowLate.size > 0);
   if (withSlots.length === 0) return;
   const byName = new Map<string, { fn: IrFunction; list: IrFunction[] }>();
   for (const list of fnLists) for (const f of list) byName.set(f.name, { fn: f, list });
+  const called = new Set<string>();
+  const stack: unknown[] = [];
+  for (const list of [...fnLists, L.liftedFns]) for (const f of list) stack.push(f.body);
+  while (stack.length > 0) {
+    const n = stack.pop();
+    if (n === null || typeof n !== "object") continue;
+    if (Array.isArray(n)) {
+      for (const x of n) stack.push(x);
+      continue;
+    }
+    const o = n as Record<string, unknown>;
+    if (o["kind"] === "call" && typeof o["callee"] === "string" && (o["callee"] as string).endsWith("%impl")) called.add(o["callee"] as string);
+    for (const [k, v] of Object.entries(o)) if (!FN_FIELDS.has(k)) stack.push(v);
+  }
   for (const info of withSlots) {
     for (const name of info.shadowLate!) {
       const found = byName.get(`%${info.def.name}.${name}`);
@@ -617,6 +633,10 @@ export function applyInstanceOverrides(L: Lowerer, fnLists: IrFunction[][]): voi
       const raw = found.fn;
       const loc = raw.loc;
       const className = info.def.name;
+      if (raw.async === true || raw.generator !== undefined) {
+        L.unsupported("SC1090", info.decl!, `an instance-assigned function over the ${raw.async === true ? "async" : "generator"} method '${name}'`);
+        continue;
+      }
       const params: IrParam[] = raw.params;
       const ref = (p: IrParam): IrExpr => ({ kind: "varRef", localId: p.localId, type: p.type, loc });
       const slotT = info.fields.get(name) as IrType & { kind: "union" };
@@ -629,7 +649,13 @@ export function applyInstanceOverrides(L: Lowerer, fnLists: IrFunction[][]): voi
       const hasRest = sig?.params.some((x) => x.mode === "dynRest") === true;
       const declared = params.length - 1 - (hasRest ? 1 : 0);
       const implName = `${raw.name}%impl`;
-      const rt = dispatcherReturnType(raw);
+      const rt = raw.returnType;
+      // the copy WITHOUT the prologue, before the prologue goes in
+      if (called.has(implName)) {
+        const clone = structuredClone(raw);
+        clone.name = implName;
+        found.list.push(clone);
+      }
       const slotGet = (): IrExpr => ({ kind: "fieldGet", obj: ref(params[0]!), className, field: name, type: slotT, loc });
       const packed = hasRest && sig?.argsBound === true;
       const args: IrExpr[] = slotFn.params.map((pt, i) => {
@@ -643,7 +669,6 @@ export function applyInstanceOverrides(L: Lowerer, fnLists: IrFunction[][]): voi
         L.unsupported("SC1090", info.decl!, `the instance-assigned function over '${name}' declares more parameters than the method`);
         return dynUndefinedExpr(loc);
       });
-      const viaImpl: IrExpr = { kind: "call", callee: implName, args: params.map(ref), type: rt, loc };
       const viaSlot: IrExpr = {
         kind: "callValue",
         callee: { kind: "unionNarrow", unionId: slotT.unionId, tag: L.armTag(slotT.unionId, slotFn), value: slotGet(), type: slotFn, loc },
@@ -651,16 +676,19 @@ export function applyInstanceOverrides(L: Lowerer, fnLists: IrFunction[][]): voi
         type: slotFn.ret,
         loc,
       };
-      const finish = (e: IrExpr, ret: IrType): IrStmt[] => {
-        if (rt.kind === "void") return [{ kind: "exprStmt", expr: e, loc }, ...(ret === rt ? [] : [])];
-        return [{ kind: "return", value: typeEquals(ret, rt) ? e : L.coerceToExpected(e, rt), loc }];
+      const finish = (): IrStmt[] => {
+        if (rt.kind === "void") return [{ kind: "exprStmt", expr: viaSlot, loc }, { kind: "return", value: null, loc }];
+        if (slotFn.ret.kind === "void") {
+          L.unsupported("SC1090", info.decl!, `the instance-assigned function over '${name}' returns nothing where the method returns a value`);
+          return [];
+        }
+        return [{ kind: "return", value: typeEquals(slotFn.ret, rt) ? viaSlot : L.coerceToExpected(viaSlot, rt), loc }];
       };
-      const locals: IrFunction["locals"] = params.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false }));
-      let slotBody: IrStmt[] = finish(viaSlot, slotFn.ret);
+      let slotBody: IrStmt[] = finish();
       if (info.shadowReadsThis?.has(name) === true) {
         L.noteDynBoxedClass(className);
         const recv = { id: "recv.0", name: "recv", type: DYN as IrType, mutable: false };
-        locals.push(recv);
+        raw.locals.push(recv);
         const recvRef: IrExpr = { kind: "varRef", localId: recv.id, type: DYN, loc };
         slotBody = [
           { kind: "varDecl", localId: recv.id, init: { kind: "dynFrom", value: ref(params[0]!), type: DYN, loc }, loc },
@@ -675,27 +703,16 @@ export function applyInstanceOverrides(L: Lowerer, fnLists: IrFunction[][]): voi
           },
         ];
       }
-      const isUnset: IrExpr = {
-        kind: "unionIsTag",
-        unionId: slotT.unionId,
-        tag: L.armTag(slotT.unionId, UNDEFINED_T),
-        negated: false,
-        value: slotGet(),
+      const isSet: IrExpr = {
+        kind: "fieldGet",
+        obj: ref(params[0]!),
+        className,
+        field: name,
         type: BOOL,
+        tagTest: { tag: L.armTag(slotT.unionId, UNDEFINED_T), negated: true },
         loc,
       };
-      const implFast: IrStmt[] = rt.kind === "void" ? [{ kind: "exprStmt", expr: viaImpl, loc }] : [{ kind: "return", value: viaImpl, loc }];
-      const wrapper: IrFunction = {
-        name: raw.name,
-        ...(raw.jsName !== undefined && { jsName: raw.jsName }),
-        params,
-        returnType: rt,
-        locals,
-        body: [{ kind: "if", cond: isUnset, then: implFast, else_: slotBody, loc }],
-        loc,
-      };
-      raw.name = implName;
-      found.list.push(wrapper);
+      raw.body.unshift({ kind: "if", cond: isSet, then: slotBody, else_: null, loc });
     }
   }
 }

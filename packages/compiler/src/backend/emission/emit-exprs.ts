@@ -2512,7 +2512,13 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
       }
       case "fieldGet":
       case "recordGet": {
-        const obj = E.emitExpr(e.obj);
+        // A tag test over a plain local receiver (an instance-override slot's prologue test) reads through the borrowed local: the
+        // answer is one compare, so the +1 copy of the receiver and its release are skipped.
+        const borrowedLocal = e.kind === "fieldGet" && e.tagTest && e.obj.kind === "varRef"
+          ? E.currentLocals.get(e.obj.localId) : undefined;
+        const obj = borrowedLocal !== undefined && !borrowedLocal.boxed
+          ? { name: mangleLocal((e.obj as IrExpr & { kind: "varRef" }).localId), type: e.obj.type }
+          : E.emitExpr(e.obj);
         // Runtime error classes use ScrError's own member names.
         const member =
           e.kind === "fieldGet" && RUNTIME_ERROR_CLASSES.has(e.className)
@@ -2552,6 +2558,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           }
         }
         if (e.kind === "fieldGet" && e.nullTest) return E.newTemp(e.type, `(${field} == NULL)`);
+        if (e.kind === "fieldGet" && e.tagTest) return E.newTemp(e.type, `(${field}->tag ${e.tagTest.negated ? "!=" : "=="} ${e.tagTest.tag})`);
         return E.newTemp(e.type, isRefCounted(e.type) ? retainCallC(e.type, field) : field);
       }
       case "recordSlotFilled": {

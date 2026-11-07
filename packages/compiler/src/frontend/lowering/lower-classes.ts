@@ -167,7 +167,7 @@ export function functionBodyNamesThis(fn: ts.FunctionExpression | ts.ArrowFuncti
 
 /** True when some class in `base`'s chain owns the instance-override slot `name`. */
 function inheritedShadowSlot(base: ClassInfo, name: string): boolean {
-  for (let c: ClassInfo | null = base; c !== null; c = c.base) if (c.shadowFields?.has(name) === true) return true;
+  for (let c: ClassInfo | null = base; c !== null; c = c.base) if ((c.shadowFields?.has(name) === true || c.shadowLate?.has(name) === true)) return true;
   return false;
 }
 function inheritedShadowReadsThis(base: ClassInfo, name: string): boolean {
@@ -250,8 +250,6 @@ export interface ClassInfo {
    * outside any nested non-arrow function, or any value the scan cannot see into): a call through the slot opens the
    * ambient-receiver window with the instance, which is JS's `obj.m()` receiver for an own property function. */
   shadowReadsThis?: Set<string>;
-  /** The subset of shadowFields whose method the class DECLARES ITSELF (an instance-assigned function over its own method, lower-instoverride.ts): the method's body is the unit `%C.m%impl` and `%C.m` is the slot-testing wrapper. */
-  shadowOwn?: Set<string>;
   /** Instance-override slots over a LATE method of this class (the method body registers after collection): the slot is a field here; lowerer's post-lowering applyInstanceOverrides wraps `%C.m`. */
   shadowLate?: Set<string>;
   /** The enclosing locals a lifted local class reads, as hidden fields: the
@@ -4833,7 +4831,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
             ft.ret = DYN;
           }
           if (fields.has(mName)) {
-            if (base !== null && inheritedShadowSlot(base, mName) && shapes.every((sp) => sp.mode === "required")) ownOverInheritedSlot.add(mName);
+            if (base !== null && inheritedShadowSlot(base, mName)) ownOverInheritedSlot.add(mName);
             else L.unsupported("SC1090", member.name, "methods shadowing inherited fields");
           }
           if (findGenericMethodOn(L, base, mName)) {
@@ -5798,55 +5796,54 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       }
       // Instance-level overrides assigned OUTSIDE the class (`x.m = function`, lower-instoverride.ts): the same slot a
       // constructor-assigned override takes, so every call through the class family tests it first.
-      const shadowOwn = new Set<string>();
       const shadowLate = new Set<string>();
       for (const name of ownOverInheritedSlot) {
-        shadowOwn.add(name);
-        shadowFields.add(name);
+        // an own method over an inherited slot tests that slot first (the body's prologue, applyInstanceOverrides)
+        shadowLate.add(name);
         if (base!.shadowReadsThis !== undefined && inheritedShadowReadsThis(base!, name)) shadowReadsThis.add(name);
       }
       for (const [name, rec] of L.instanceOverrides.get(decl) ?? []) {
         if (fields.has(name) || shadowFields.has(name)) continue;
         const at = rec.fns[0]!;
-        if (rec.late === true) {
-          const lt = L.checker.getTypeAtLocation(at);
-          const lMapped = L.mapTypeOf(lt) ?? dynFallbackType(L, at, lt);
-          const lArmed = lMapped !== null && lMapped.kind === "func" ? L.withUndefinedArmOf(lMapped) : null;
-          if (lArmed === null) L.unsupported("SC1090", at, "an instance-assigned function whose type has no function form");
-          fields.set(name, lArmed!);
-          fieldOrder.push({ name, type: lArmed!, initializer: undefined });
-          collectedFields.add(name);
-          absentTrackedFields.add(name);
-          shadowLate.add(name);
-          if (rec.fns.some((f) => !(ts.isArrowFunction(f) || ts.isFunctionExpression(f)) || functionBodyNamesThis(f))) shadowReadsThis.add(name);
-          continue;
-        }
         const own = methods.get(name);
-        const shBase = own !== undefined ? null : base ? L.findMethodOn(base, name) : null;
-        const sig = own ?? shBase?.sig;
         const shT = L.checker.getTypeAtLocation(at);
         const shMapped = L.mapTypeOf(shT) ?? dynFallbackType(L, at, shT);
         const shArmed = shMapped !== null && shMapped.kind === "func" ? L.withUndefinedArmOf(shMapped) : null;
-        if (
-          shArmed === null || methods.has(`get:${name}`) || methods.has(`set:${name}`) || sig === undefined ||
-          sig.abstract === true || sig.async === true || sig.params.some((p) => p.mode !== "required")
-        ) {
-          L.unsupported("SC1090", at, "an instance-assigned function over a method (only over a method with fixed parameters)");
+        if (shArmed === null) L.unsupported("SC1090", at, "an instance-assigned function whose type has no function form");
+        if (rec.late === true || own !== undefined) {
+          // The class declares the method itself (a class-body method, or a late `C.prototype.m = function`): the slot is a field here
+          // and the method's own body tests it first (applyInstanceOverrides, once every body is lowered).
+          if (own !== undefined && (own.abstract === true || own.async === true || own.gen !== undefined || methods.has(`get:${name}`) || methods.has(`set:${name}`))) {
+            L.unsupported("SC1090", at, "an instance-assigned function over an abstract, async, generator or accessor method");
+          }
+          fields.set(name, shArmed!);
+          fieldOrder.push({ name, type: shArmed!, initializer: undefined });
+          collectedFields.add(name);
+          absentTrackedFields.add(name);
+          shadowLate.add(name);
+        } else {
+          // Only inherited from a base: the constructor-assigned slot's route (a synthesized `%C.m` picks the slot, else the base's body).
+          const shBase = base ? L.findMethodOn(base, name) : null;
+          if (
+            shBase === null || methods.has(`get:${name}`) || methods.has(`set:${name}`) || shBase.sig.abstract === true ||
+            shBase.sig.async === true || shBase.sig.params.some((p) => p.mode !== "required")
+          ) {
+            L.unsupported("SC1090", at, "an instance-assigned function over a method (only over a method with fixed parameters when it is inherited)");
+          }
+          const shFn = shMapped!;
+          if (
+            shFn.kind !== "func" || shFn.params.length !== shBase!.sig.params.length ||
+            !shFn.params.every((pt, i) => typeEquals(pt, shBase!.sig.params[i]!.type))
+          ) {
+            L.unsupported("SC1090", at, `an instance-assigned function with other parameters than the inherited method '${name}'`);
+          }
+          methods.set(name, { params: shBase!.sig.params, ret: shBase!.sig.ret });
+          fields.set(name, shArmed!);
+          fieldOrder.push({ name, type: shArmed!, initializer: undefined });
+          collectedFields.add(name);
+          absentTrackedFields.add(name);
+          shadowFields.add(name);
         }
-        const shFn = shMapped!;
-        if (
-          shFn.kind !== "func" || shFn.params.length !== sig.params.length ||
-          !shFn.params.every((pt, i) => typeEquals(pt, sig.params[i]!.type))
-        ) {
-          L.unsupported("SC1090", at, `an instance-assigned function with other parameters than the method '${name}'`);
-        }
-        if (own === undefined) methods.set(name, { params: sig.params, ret: sig.ret });
-        else shadowOwn.add(name);
-        fields.set(name, shArmed);
-        fieldOrder.push({ name, type: shArmed, initializer: undefined });
-        collectedFields.add(name);
-        absentTrackedFields.add(name);
-        shadowFields.add(name);
         if (rec.fns.some((f) => !(ts.isArrowFunction(f) || ts.isFunctionExpression(f)) || functionBodyNamesThis(f))) shadowReadsThis.add(name);
       }
       const keyOrder = classKeyOrderNames(decl, base, fieldOrder);
@@ -5927,7 +5924,6 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
         ...(absentInitFields.size > 0 ? { absentInitFields } : {}),
         ...(shadowFields.size > 0 ? { shadowFields } : {}),
         ...(shadowReadsThis.size > 0 ? { shadowReadsThis } : {}),
-        ...(shadowOwn.size > 0 ? { shadowOwn } : {}),
         ...(shadowLate.size > 0 ? { shadowLate } : {}),
         ...(captures !== undefined ? { captures } : {}),
       };
@@ -9384,7 +9380,7 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
     // (an IR validation failure, SC9001).
     const poisoned = new Set<string>();
     for (const { mName, member } of L.classMethodMembers(info)) {
-      if (!always && !L.wantBody(info.shadowOwn?.has(mName) === true ? `%${className}.${mName}%impl` : `%${className}.${mName}`)) continue;
+      if (!always && !L.wantBody(`%${className}.${mName}`)) continue;
       try {
         const fn = L.lowerClassMethodMember(info, member);
         if (fn) out.push(fn);
@@ -10172,7 +10168,7 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
       // every function declaration and lambda gets.
       appendImplicitUndefinedReturn(L, body, bodyReturn, locOf(fnLike));
       const fn: IrFunction = {
-        name: detached ? `%detached.${className}.${mName}` : info.shadowOwn?.has(mName) === true ? `%${className}.${mName}%impl` : `%${className}.${mName}`,
+        name: detached ? `%detached.${className}.${mName}` : `%${className}.${mName}`,
         params,
         returnType: bodyReturn,
         locals: L.ctx.locals,
@@ -10361,15 +10357,15 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
     sig.params.forEach((p, i) => locals.push({ id: `a${i}.0`, name: `a${i}`, type: p.type, mutable: false }));
     const ref = (l: IrLocal): IrExpr => ({ kind: "varRef", localId: l.id, type: l.type, loc });
     const argRefs = locals.slice(1).map(ref);
-    const ownImpl = info.shadowOwn?.has(name) === true;
-    const inherited = ownImpl ? null : L.findMethodOn(info.base!, name)!;
-    const declarer = ownImpl ? className : inherited!.declarer.def.name;
-    const calleeName = ownImpl ? `%${className}.${name}%impl` : `%${declarer}.${name}`;
+    const base = info.base!;
+    const inherited = L.findMethodOn(base, name)!;
+    const declarer = inherited.declarer.def.name;
+    const calleeName = `%${declarer}.${name}`;
     L.noteEdge(calleeName);
     const viaMethod: IrExpr = {
       kind: "call",
       callee: calleeName,
-      args: [ownImpl ? ref(locals[0]!) : L.upcastTo(ref(locals[0]!), declarer), ...argRefs],
+      args: [L.upcastTo(ref(locals[0]!), declarer), ...argRefs],
       type: sig.ret,
       loc,
     };
