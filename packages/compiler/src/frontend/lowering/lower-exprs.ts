@@ -10619,6 +10619,17 @@ function dynObjLitRun(
   return acc ?? { kind: "dynObjLit", fields: [], type: DYN, loc };
 }
 
+/** `chain ?? {}` / `chain || {}` (parens stripped) over a pure member chain: the optional-options spread idiom, whose source is the chain's
+   * value or a fresh empty object. */
+  function nullishDefaultedChain(e: ts.Expression): boolean {
+    while (ts.isParenthesizedExpression(e)) e = e.expression;
+    if (!ts.isBinaryExpression(e)) return false;
+    if (e.operatorToken.kind !== ts.SyntaxKind.QuestionQuestionToken && e.operatorToken.kind !== ts.SyntaxKind.BarBarToken) return false;
+    let r: ts.Expression = e.right;
+    while (ts.isParenthesizedExpression(r)) r = r.expression;
+    return ts.isObjectLiteralExpression(r) && r.properties.length === 0 && pureMemberChain(e.left);
+  }
+
   export function lowerDynObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression): IrExpr {
     // A literal with a SPREAD on this road (the JS declaration fallback, a
     // dyn descriptor map, a dyn argument) folds through dyn.assign, exactly as
@@ -11667,7 +11678,7 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       expr.properties.some(
         (p) =>
           ts.isSpreadAssignment(p) && conditionalSpreadOf(p.expression) === null &&
-          pureMemberChain(p.expression) && probeLower(L, p.expression)?.type.kind === "dyn",
+          (pureMemberChain(p.expression) || nullishDefaultedChain(p.expression)) && probeLower(L, p.expression)?.type.kind === "dyn",
       )
     ) {
       return lowerDynSpreadObjectLiteral(L, expr);
