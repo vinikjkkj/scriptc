@@ -407,6 +407,14 @@ function packagesNamedByDiag(message: string, optedIn: ReadonlySet<string>): Set
  * status the shared loops record becomes compileLibrary's SC4020
  * static-or-refuse teaching, and the detection closes over the opted-in
  * packages' own bare edges (no island exists to serve a dep from). */
+/** SCRIPTC_TWIN_WHY with --expose-gc: the live heap (after a forced collection) at a point of the reload sequence, on stderr. */
+function reloadHeapNote(label: string): void {
+  const gc = (globalThis as { gc?: () => void }).gc;
+  if (process.env["SCRIPTC_TWIN_WHY"] === undefined || gc === undefined) return;
+  gc();
+  process.stderr.write(`[heap] ${label}: live=${Math.round(process.memoryUsage().heapUsed / 1048576)}MB\n`);
+}
+
 function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" | "lib"): Frontend {
   const statuses: NpmStaticStatus[] = [];
   const npmSites = new Map<string, SrcLoc>();
@@ -579,7 +587,9 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
     finalLoad.dispose();
   };
   const lowerPinned = (opts: LowerOptions): { result: LowerResult; pins?: NonNullable<LowerResult["pinReload"]> } => {
+      reloadHeapNote("before the first lowering");
       const first = lowerToIr(finalLoad.program, finalLoad.entry, finalLoad.moduleOrder, { ...opts, startupCrash: finalLoad.startupCrash ?? null });
+      reloadHeapNote("after the first lowering");
       if (first.pinReload === undefined) return { result: first };
       if (process.env["SCRIPTC_TWIN_WHY"] !== undefined) process.stderr.write("[pin] reload\n");
       // Class fields untyped code writes another type (DynPins): load the
@@ -598,6 +608,7 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
       // The second lowering's locations are offsets into the EDITED text; a
       // diagnostic renders its source line off the file as the author wrote
       // it, so they map back (the edits only insert).
+      reloadHeapNote("after the pinned lowering");
       const edits = first.pinReload;
       const back = (l: SrcLoc): SrcLoc => {
         const es = edits.get(l.file) ?? edits.get(l.file.split("\\").join("/"));
@@ -666,6 +677,7 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
         pinnedLoad?.dispose();
         pinnedLoad = null;
         freeFinalLoad();
+        reloadHeapNote("before the twin load, programs freed");
         twinLoad = loadProgram(entryPath, { npmStatic: effective, ...(done.pins !== undefined ? { textEdits: done.pins } : {}), twinEdits: edits });
         if (checkPreflight(twinLoad).length > 0) return keep;
         const again = lowerToIr(twinLoad.program, twinLoad.entry, twinLoad.moduleOrder, {
@@ -682,6 +694,7 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
           }
           return keep;
         }
+        reloadHeapNote("after the twin lowering");
         for (const d of again.advisories) d.loc = twinBack(d.loc);
         return again;
       } catch (e) {
