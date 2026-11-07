@@ -12838,6 +12838,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/2414-dowhile-continue-kill.ts": {
+   "order": [
+    "<repo>/tests/corpus/2414-dowhile-continue-kill.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/24140-class-instance-crosses-into-engine-code.cjs": {
    "order": [
     "<repo>/tests/corpus/24140-class-instance-crosses-into-engine-code.cjs"
@@ -12898,6 +12904,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/2415-dowhile-break-trailing-test.ts": {
+   "order": [
+    "<repo>/tests/corpus/2415-dowhile-break-trailing-test.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/24150-error-properties-assigned-by-javascript-read-through-errno-exception/main.ts": {
    "order": [
     "<repo>/tests/corpus/24150-error-properties-assigned-by-javascript-read-through-errno-exception/lib.d.ts",
@@ -12941,6 +12953,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/2416-spread-ternary-positions.ts": {
+   "order": [
+    "<repo>/tests/corpus/2416-spread-ternary-positions.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/24160-promise-of-a-wider-record-in-a-narrower-promise-slot-keeps-identity.ts": {
    "order": [
     "<repo>/tests/corpus/24160-promise-of-a-wider-record-in-a-narrower-promise-slot-keeps-identity.ts"
@@ -12962,24 +12980,6 @@
   "<repo>/tests/corpus/24163-computed-key-method-call-binds-this-through-a-member-chain.cjs": {
    "order": [
     "<repo>/tests/corpus/24163-computed-key-method-call-binds-this-through-a-member-chain.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/2414-dowhile-continue-kill.ts": {
-   "order": [
-    "<repo>/tests/corpus/2414-dowhile-continue-kill.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/2415-dowhile-break-trailing-test.ts": {
-   "order": [
-    "<repo>/tests/corpus/2415-dowhile-break-trailing-test.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/2416-spread-ternary-positions.ts": {
-   "order": [
-    "<repo>/tests/corpus/2416-spread-ternary-positions.ts"
    ],
    "diags": []
   },
@@ -13604,46 +13604,46 @@
    "diags": []
   },
   "<repo>/tests/corpus/24453-an-engine-built-object-with-methods-reaches-a-typed-callback.ts": {
-    "order": [
-      "<repo>/tests/corpus/24453-an-engine-built-object-with-methods-reaches-a-typed-callback.ts"
-    ],
-    "diags": []
+   "order": [
+    "<repo>/tests/corpus/24453-an-engine-built-object-with-methods-reaches-a-typed-callback.ts"
+   ],
+   "diags": []
   },
   "<repo>/tests/corpus/24454-a-blob-column-round-trips-through-a-type-cast-callback.ts": {
-    "order": [
-      "<repo>/tests/corpus/24454-a-blob-column-round-trips-through-a-type-cast-callback.ts"
-    ],
-    "diags": []
+   "order": [
+    "<repo>/tests/corpus/24454-a-blob-column-round-trips-through-a-type-cast-callback.ts"
+   ],
+   "diags": []
   },
   "<repo>/tests/corpus/24455-a-method-read-off-an-engine-object-is-the-same-function-every-time.ts": {
-    "order": [
-      "<repo>/tests/corpus/24455-a-method-read-off-an-engine-object-is-the-same-function-every-time.ts"
-    ],
-    "diags": []
+   "order": [
+    "<repo>/tests/corpus/24455-a-method-read-off-an-engine-object-is-the-same-function-every-time.ts"
+   ],
+   "diags": []
   },
   "<repo>/tests/corpus/24456-a-method-read-as-a-value-off-an-engine-object-has-no-receiver.ts": {
-    "order": [
-      "<repo>/tests/corpus/24456-a-method-read-as-a-value-off-an-engine-object-has-no-receiver.ts"
-    ],
-    "diags": []
+   "order": [
+    "<repo>/tests/corpus/24456-a-method-read-as-a-value-off-an-engine-object-has-no-receiver.ts"
+   ],
+   "diags": []
   },
   "<repo>/tests/corpus/24457-engine-functions-keep-their-identity-while-hundreds-of-others-cross.ts": {
-    "order": [
-      "<repo>/tests/corpus/24457-engine-functions-keep-their-identity-while-hundreds-of-others-cross.ts"
-    ],
-    "diags": []
+   "order": [
+    "<repo>/tests/corpus/24457-engine-functions-keep-their-identity-while-hundreds-of-others-cross.ts"
+   ],
+   "diags": []
   },
   "<repo>/tests/corpus/24458-a-buffers-constructor-is-buffer-and-a-uint8arrays-is-uint8array.ts": {
-    "order": [
-      "<repo>/tests/corpus/24458-a-buffers-constructor-is-buffer-and-a-uint8arrays-is-uint8array.ts"
-    ],
-    "diags": []
+   "order": [
+    "<repo>/tests/corpus/24458-a-buffers-constructor-is-buffer-and-a-uint8arrays-is-uint8array.ts"
+   ],
+   "diags": []
   },
   "<repo>/tests/corpus/24459-a-buffer-is-not-an-object-parameter-and-buffer-prototype-chains-to-uint8array.js": {
-    "order": [
-      "<repo>/tests/corpus/24459-a-buffer-is-not-an-object-parameter-and-buffer-prototype-chains-to-uint8array.js"
-    ],
-    "diags": []
+   "order": [
+    "<repo>/tests/corpus/24459-a-buffer-is-not-an-object-parameter-and-buffer-prototype-chains-to-uint8array.js"
+   ],
+   "diags": []
   },
   "<repo>/tests/corpus/2446-performance-global.ts": {
    "order": [
@@ -13652,16 +13652,16 @@
    "diags": []
   },
   "<repo>/tests/corpus/24460-mysql2-is-json-over-an-object-an-array-a-buffer-and-null.js": {
-    "order": [
-      "<repo>/tests/corpus/24460-mysql2-is-json-over-an-object-an-array-a-buffer-and-null.js"
-    ],
-    "diags": []
+   "order": [
+    "<repo>/tests/corpus/24460-mysql2-is-json-over-an-object-an-array-a-buffer-and-null.js"
+   ],
+   "diags": []
   },
   "<repo>/tests/corpus/24461-the-object-and-array-classes-are-the-constructors-of-plain-objects-and-arrays.ts": {
-    "order": [
-      "<repo>/tests/corpus/24461-the-object-and-array-classes-are-the-constructors-of-plain-objects-and-arrays.ts"
-    ],
-    "diags": []
+   "order": [
+    "<repo>/tests/corpus/24461-the-object-and-array-classes-are-the-constructors-of-plain-objects-and-arrays.ts"
+   ],
+   "diags": []
   },
   "<repo>/tests/corpus/2447-island-boundary-slots/main.ts": {
    "order": [
@@ -13975,6 +13975,12 @@
   "<repo>/tests/corpus/24600-bare-builtin-wins-over-npm-package/main.ts": {
    "order": [
     "<repo>/tests/corpus/24600-bare-builtin-wins-over-npm-package/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24601-interface-constructor-member-is-inherited-not-an-own-key.ts": {
+   "order": [
+    "<repo>/tests/corpus/24601-interface-constructor-member-is-inherited-not-an-own-key.ts"
    ],
    "diags": []
   },
@@ -14385,9 +14391,123 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24687-replacing-a-declared-prototype-method-with-a-wrapper-that-writes-through-this.js": {
+   "order": [
+    "<repo>/tests/corpus/24687-replacing-a-declared-prototype-method-with-a-wrapper-that-writes-through-this.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24688-late-method-read-above-its-assignment-takes-the-run-time-prototype-table.js": {
+   "order": [
+    "<repo>/tests/corpus/24688-late-method-read-above-its-assignment-takes-the-run-time-prototype-table.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24689-prototype-data-read-above-its-assignment-takes-the-run-time-prototype-table.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24689-prototype-data-read-above-its-assignment-takes-the-run-time-prototype-table.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24690-late-method-calls-before-and-after-its-install-statement-reach-the-current-member.js": {
+   "order": [
+    "<repo>/tests/corpus/24690-late-method-calls-before-and-after-its-install-statement-reach-the-current-member.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24691-late-method-missing-member-error-names-the-call-site-spelling.js": {
+   "order": [
+    "<repo>/tests/corpus/24691-late-method-missing-member-error-names-the-call-site-spelling.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24692-late-methods-copied-between-classes-keep-an-unbound-value-beside-a-computed-prototype-write.js": {
+   "order": [
+    "<repo>/tests/corpus/24692-late-methods-copied-between-classes-keep-an-unbound-value-beside-a-computed-prototype-write.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24693-late-accessor-families-on-a-class-with-a-run-time-prototype-table-keep-their-arity.js": {
+   "order": [
+    "<repo>/tests/corpus/24693-late-accessor-families-on-a-class-with-a-run-time-prototype-table-keep-their-arity.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24694-late-method-with-a-typed-parameter-and-arguments-rebinds-off-the-pack.js": {
+   "order": [
+    "<repo>/tests/corpus/24694-late-method-with-a-typed-parameter-and-arguments-rebinds-off-the-pack.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24695-constructor-assigned-method-override-runs-with-the-instance-as-this.js": {
+   "order": [
+    "<repo>/tests/corpus/24695-constructor-assigned-method-override-runs-with-the-instance-as-this.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24696-variadic-late-method-read-as-a-value-and-called-with-call.js": {
+   "order": [
+    "<repo>/tests/corpus/24696-variadic-late-method-read-as-a-value-and-called-with-call.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24697-instance-assigned-function-over-a-method-runs-ahead-of-the-prototype-method.js": {
+   "order": [
+    "<repo>/tests/corpus/24697-instance-assigned-function-over-a-method-runs-ahead-of-the-prototype-method.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24698-instance-assigned-function-over-a-late-method-with-arguments-and-a-captured-original.js": {
+   "order": [
+    "<repo>/tests/corpus/24698-instance-assigned-function-over-a-late-method-with-arguments-and-a-captured-original.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24699-buffer-constants-read-as-numbers.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24699-buffer-constants-read-as-numbers.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2470-mockable-module-shape.js": {
    "order": [
     "<repo>/tests/corpus/2470-mockable-module-shape.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24700-instance-override-that-captures-its-own-instance-is-collected.js": {
+   "order": [
+    "<repo>/tests/corpus/24700-instance-override-that-captures-its-own-instance-is-collected.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24701-instance-assigned-function-over-a-generic-method-of-a-command-class-keeps-prototype-copies.js": {
+   "order": [
+    "<repo>/tests/corpus/24701-instance-assigned-function-over-a-generic-method-of-a-command-class-keeps-prototype-copies.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2471-record-keyed-write-hasown.js": {
+   "order": [
+    "<repo>/tests/corpus/2471-record-keyed-write-hasown.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2472-string-regexp-union.ts": {
+   "order": [
+    "<repo>/tests/corpus/2472-string-regexp-union.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2473-option-table-widths.js": {
+   "order": [
+    "<repo>/tests/corpus/2473-option-table-widths.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2474-island-literal-forms.ts": {
+   "order": [
+    "<repo>/tests/corpus/2474-island-literal-forms.ts"
    ],
    "diags": []
   },
@@ -14436,30 +14556,6 @@
   "<repo>/tests/corpus/24747-set-prototype-of-over-plain-assigned-prototypes.js": {
    "order": [
     "<repo>/tests/corpus/24747-set-prototype-of-over-plain-assigned-prototypes.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/2471-record-keyed-write-hasown.js": {
-   "order": [
-    "<repo>/tests/corpus/2471-record-keyed-write-hasown.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/2472-string-regexp-union.ts": {
-   "order": [
-    "<repo>/tests/corpus/2472-string-regexp-union.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/2473-option-table-widths.js": {
-   "order": [
-    "<repo>/tests/corpus/2473-option-table-widths.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/2474-island-literal-forms.ts": {
-   "order": [
-    "<repo>/tests/corpus/2474-island-literal-forms.ts"
    ],
    "diags": []
   },
@@ -26516,96 +26612,6 @@
      "hint": "set \"strictNullChecks\": true (or \"strict\": true) in the project tsconfig"
     }
    ]
-  },
-  "<repo>/tests/corpus/24687-replacing-a-declared-prototype-method-with-a-wrapper-that-writes-through-this.js": {
-   "order": [
-    "<repo>/tests/corpus/24687-replacing-a-declared-prototype-method-with-a-wrapper-that-writes-through-this.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24688-late-method-read-above-its-assignment-takes-the-run-time-prototype-table.js": {
-   "order": [
-    "<repo>/tests/corpus/24688-late-method-read-above-its-assignment-takes-the-run-time-prototype-table.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24689-prototype-data-read-above-its-assignment-takes-the-run-time-prototype-table.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24689-prototype-data-read-above-its-assignment-takes-the-run-time-prototype-table.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24690-late-method-calls-before-and-after-its-install-statement-reach-the-current-member.js": {
-   "order": [
-    "<repo>/tests/corpus/24690-late-method-calls-before-and-after-its-install-statement-reach-the-current-member.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24691-late-method-missing-member-error-names-the-call-site-spelling.js": {
-   "order": [
-    "<repo>/tests/corpus/24691-late-method-missing-member-error-names-the-call-site-spelling.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24692-late-methods-copied-between-classes-keep-an-unbound-value-beside-a-computed-prototype-write.js": {
-   "order": [
-    "<repo>/tests/corpus/24692-late-methods-copied-between-classes-keep-an-unbound-value-beside-a-computed-prototype-write.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24693-late-accessor-families-on-a-class-with-a-run-time-prototype-table-keep-their-arity.js": {
-   "order": [
-    "<repo>/tests/corpus/24693-late-accessor-families-on-a-class-with-a-run-time-prototype-table-keep-their-arity.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24694-late-method-with-a-typed-parameter-and-arguments-rebinds-off-the-pack.js": {
-   "order": [
-    "<repo>/tests/corpus/24694-late-method-with-a-typed-parameter-and-arguments-rebinds-off-the-pack.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24695-constructor-assigned-method-override-runs-with-the-instance-as-this.js": {
-   "order": [
-    "<repo>/tests/corpus/24695-constructor-assigned-method-override-runs-with-the-instance-as-this.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24696-variadic-late-method-read-as-a-value-and-called-with-call.js": {
-   "order": [
-    "<repo>/tests/corpus/24696-variadic-late-method-read-as-a-value-and-called-with-call.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24697-instance-assigned-function-over-a-method-runs-ahead-of-the-prototype-method.js": {
-   "order": [
-    "<repo>/tests/corpus/24697-instance-assigned-function-over-a-method-runs-ahead-of-the-prototype-method.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24698-instance-assigned-function-over-a-late-method-with-arguments-and-a-captured-original.js": {
-   "order": [
-    "<repo>/tests/corpus/24698-instance-assigned-function-over-a-late-method-with-arguments-and-a-captured-original.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24699-buffer-constants-read-as-numbers.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24699-buffer-constants-read-as-numbers.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24700-instance-override-that-captures-its-own-instance-is-collected.js": {
-   "order": [
-    "<repo>/tests/corpus/24700-instance-override-that-captures-its-own-instance-is-collected.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24701-instance-assigned-function-over-a-generic-method-of-a-command-class-keeps-prototype-copies.js": {
-   "order": [
-    "<repo>/tests/corpus/24701-instance-assigned-function-over-a-generic-method-of-a-command-class-keeps-prototype-copies.js"
-   ],
-   "diags": []
   }
  }
 }
