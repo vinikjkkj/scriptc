@@ -1605,6 +1605,8 @@ typedef enum {
   SCR_ELEM_REF,
 } ScrElemKind;
 
+#define SCR_ARR_TOMB 1u
+#define SCR_ARR_FROZEN 2u
 typedef struct ScrArr {
   size_t rc; /* SIZE_MAX = immortal (unused for arrays; kept per convention) */
   size_t len;
@@ -1639,7 +1641,8 @@ typedef struct ScrArr {
    * hole-aware consumers (in, forEach, keys, inspect ...) must not read it as one: they
    * refuse loudly on such an array instead of answering "hole". Rides the padding after
    * execidx, so sizeof(ScrArr) is unchanged. */
-  uint8_t tomb;
+  uint8_t flags; /* SCR_ARR_TOMB | SCR_ARR_FROZEN: the tombstone bit above, and the Object.freeze bit (read ONLY by the guards the compiler inserts in programs that
+                  * freeze an array of this type -- the hot stores carry no check). Same byte as the old `tomb`, so sizeof(ScrArr) is unchanged. */
   /* SCR_ELEM_REF only; NULL for every other element kind. elem_trace is
    * non-NULL exactly when the element type carries a cycle header: such
    * arrays are CYCLE-CAPABLE (an element can point back at the array that
@@ -1855,7 +1858,7 @@ static inline bool scr_arr_has_index_ref(const ScrArr *a, double i) {
   if (i >= 0.0 && i < 9007199254740992.0) {
     int64_t n = (int64_t)i;
     ok = (double)n == i && (uint64_t)n < (uint64_t)a->len && a->data[n] != 0;
-    if (!ok && a->tomb && (double)n == i && (uint64_t)n < (uint64_t)a->len) scr_arr_trap_tombstone(a, (size_t)n);
+    if (!ok && (a->flags & SCR_ARR_TOMB) && (double)n == i && (uint64_t)n < (uint64_t)a->len) scr_arr_trap_tombstone(a, (size_t)n);
   }
 #if defined(__GNUC__) || defined(__clang__)
   return __builtin_expect(ok, 1);
@@ -1887,6 +1890,15 @@ void scr_arr_set_ref(ScrArr *a, double i, void *v);
  * RangeError("Invalid array length") for a negative, fractional, NaN or
  * >= 2^32 length, before anything moves. */
 void scr_arr_length_gate(double n);
+/* Object.freeze over a typed array: sets the frozen bit and answers the receiver (+1). Borrows a. */
+ScrArr *scr_arr_freeze(ScrArr *a);
+bool scr_arr_is_frozen(const ScrArr *a);
+/* The mutation `op` JS is about to run on the array `a`: a no-op unless `a` is FROZEN, in which case it throws the TypeError V8 throws at the FIRST write the spec algorithm would make
+ * (ops: 1 push(x=item count) 2 pop 3 shift 4 unshift(x=item count) 5 reverse 6 fill(x=start, y=end) 7 copyWithin(x=target, y=start, z=end)
+ * 8 splice(x=start, y=delete count, z=item count) 9 element write(x=index) 10 length write 11 element clear(x=index) -- the last three
+ * are the writes a sloppy-mode caller silently ignores, so only a strict caller reaches this). Returns normally when the operation would
+ * write nothing (an empty fill range, reverse of one element), so the caller may go on to run it. */
+void scr_arr_frozen_fail(ScrArr *a, double op, double x, double y, double z);
 /* length = n, shrink half: drops elements from index n on, releasing
  * refcounted ones. Growing is the emitter's (it knows the absent value). */
 void scr_arr_truncate(ScrArr *a, double n);
@@ -9247,7 +9259,7 @@ static inline bool scr_arr_slot_is_hole(const ScrArr *a, size_t i) {
   uint64_t s = a->data[i];
   if (a->elem == SCR_ELEM_F64) return s == SCR_NUM_HOLE_BITS;
   if (a->elem == SCR_ELEM_BOOL) return false;
-  if (s == 0 && a->tomb) scr_arr_trap_tombstone(a, i); /* a cleared slot is null, not a hole */
+  if (s == 0 && (a->flags & SCR_ARR_TOMB)) scr_arr_trap_tombstone(a, i); /* a cleared slot is null, not a hole */
   return s == 0;
 }
 /* The tombstone write: the slot becomes NULL and the array is marked (see ScrArr::tomb). */
@@ -9290,7 +9302,7 @@ static inline bool scr_arr_has_slot_ref(const ScrArr *a, double i) {
   size_t n = (size_t)(int64_t)i; /* one cvttsd2si: the counter is a small non-negative integer */
   if (n >= a->len) return false;
   if (a->data[n] != 0) return true;
-  if (a->tomb) scr_arr_trap_tombstone(a, n);
+  if (a->flags & SCR_ARR_TOMB) scr_arr_trap_tombstone(a, n);
   return false;
 }
 static inline bool scr_arr_has_slot_bool(const ScrArr *a, double i) { return (size_t)(int64_t)i < a->len; }

@@ -4096,6 +4096,12 @@ export type IrLibFn =
   | "sp.fromPairs"
   /** URLSearchParams from a checked-dynamic init (an untyped JS value): the run-time kind picks the WHATWG form. MAY THROW. */
   | "sp.fromDyn"
+  /** Object.freeze over a typed array: sets the array's frozen bit, answers the same array (+1). */
+  | "arr.freeze"
+  /** The frozen bit (Object.isFrozen / isSealed over a typed array, and the guard of a mutation in a program that freezes arrays). */
+  | "arr.isFrozen"
+  /** The TypeError a mutation of a FROZEN array throws (scr_arr_frozen_fail: op, x, y, z). MAY THROW. */
+  | "arr.frozenFail"
   | "sp.with"
   | "url.searchParams"
   | "url.search"
@@ -7586,6 +7592,8 @@ export type IrExpr =
       receiver: IrExpr;
       args: IrExpr[];
       type: IrType;
+      /** Set on the removal splice `a.length = 0` lowers to: a length WRITE (a frozen array refuses it like one), not a call of splice. */
+      lenWrite?: true;
       loc: SrcLoc;
     }
   /** Typed-array / Buffer construction — `new Uint8Array(x)`,
@@ -14834,6 +14842,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // never throws.
   "sp.fromPairs",
   "sp.fromDyn",
+  "arr.frozenFail",
   "fs.statSync",
   "crypto.randomBytesToString",
   "crypto.randomBytes",

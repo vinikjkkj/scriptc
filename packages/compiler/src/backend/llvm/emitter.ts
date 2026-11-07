@@ -898,6 +898,9 @@ const LIB_FN_SYMS: Record<string, string> = {
   "sp.copy": "scr_sp_copy",
   "sp.fromPairs": "scr_sp_from_pairs",
   "sp.fromDyn": "scr_sp_from_dyn",
+  "arr.freeze": "scr_arr_freeze",
+  "arr.isFrozen": "scr_arr_is_frozen",
+  "arr.frozenFail": "scr_arr_frozen_fail",
   "sp.with": "scr_sp_with",
   "sp.getAll": "scr_sp_get_all",
   "sp.append": "scr_sp_append",
@@ -19967,6 +19970,19 @@ class LlEmitter {
         `${t} = call ptr @scr_tp_set_timeout_v(double ${targs[0]!.name}, i32 ${kind}, double ${num}, ptr ${val}, ptr ${retainOp}, ptr ${releaseOp}, ptr ${traceOp}, ptr ${sigOp}, i1 zeroext ${refedArg.name})`,
       );
       return this.own({ name: t, type: e.type });
+    }
+    if (e.fn === "arr.isFrozen") {
+      // Inline byte test of ScrArr::flags (offset 31: the padding after the i32 element kind), bit SCR_ARR_FROZEN = 2.
+      const av = this.emitExpr(e.args[0]!);
+      const fp = B.tmp();
+      const fv = B.tmp();
+      const fm = B.tmp();
+      const fr = B.tmp();
+      B.line(`${fp} = getelementptr inbounds i8, ptr ${av.name}, i64 31`);
+      B.line(`${fv} = load i8, ptr ${fp}`);
+      B.line(`${fm} = and i8 ${fv}, 2`);
+      B.line(`${fr} = icmp ne i8 ${fm}, 0`);
+      return { name: fr, type: e.type };
     }
     const sym = LIB_FN_SYMS[e.fn];
     if (sym === undefined) throw new LlvmUnsupportedError(`libCall:${e.fn}`, e.loc);

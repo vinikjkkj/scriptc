@@ -7728,7 +7728,7 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
                 const zero: IrExpr = { kind: "numLit", value: 0, type: F64, loc };
                 return {
                   kind: "exprStmt",
-                  expr: { kind: "arrIntrinsic", method: "splice", receiver, args: [zero], type: receiver.type, loc },
+                  expr: { kind: "arrIntrinsic", method: "splice", receiver, args: [zero], type: receiver.type, lenWrite: true, loc },
                   loc,
                 };
               }
