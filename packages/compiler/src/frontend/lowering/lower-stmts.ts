@@ -685,6 +685,54 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
     return init.properties.length === 0 || emptyArrayMemberRewritten(decl, init);
   }
 
+  /** A JS `const log = []` the program only pushes into and hands, whole, to parameters declared `T[]` (`/** @param {string[]} log *\/`): the value
+   * crosses into those parameters BY REFERENCE in JS, so a checked-dynamic array (a different representation from the typed one) would be copied
+   * at the first crossing and every later push would land in the copy. Where every use is a member access, an index, or such an argument, and all the
+   * argument slots agree on ONE mappable element type that every push fits, the binding takes that typed array instead. Null (the caller keeps the
+   * checked-dynamic story) when any use is something else, the slots disagree, or a push does not fit. */
+  export function evolvingArrayTypedSlot(L: Lowerer, decl: ts.VariableDeclaration): IrType | null {
+    if (!ts.isIdentifier(decl.name)) return null;
+    const symbol = L.checker.getSymbolAtLocation(decl.name);
+    if (!symbol) return null;
+    let scope: ts.Node = decl.parent;
+    while (scope.parent !== undefined && !ts.isFunctionLike(scope) && !ts.isSourceFile(scope)) scope = scope.parent;
+    let slot: ts.Type | undefined;
+    const pushes: ts.Expression[] = [];
+    let ok = true;
+    const visit = (n: ts.Node): void => {
+      if (!ok) return;
+      if (ts.isIdentifier(n) && n !== decl.name && n.text === decl.name.getText() && L.checker.getSymbolAtLocation(n) === symbol) {
+        const parent = n.parent;
+        if (ts.isPropertyAccessExpression(parent) && parent.expression === n) {
+          const call = parent.parent;
+          if (parent.name.text === "push" && ts.isCallExpression(call) && call.expression === parent) {
+            for (const a of call.arguments) {
+              if (ts.isSpreadElement(a)) { ok = false; return; }
+              pushes.push(a);
+            }
+          }
+        } else if (ts.isElementAccessExpression(parent) && parent.expression === n) {
+          // an index read/write rides the typed array
+        } else if (ts.isCallExpression(parent) && parent.arguments.includes(n as ts.Expression) && parent.expression !== n) {
+          const ctx = L.checker.getContextualType(n);
+          if (!ctx || !L.checker.isArrayType(ctx)) { ok = false; return; }
+          if (slot === undefined) slot = ctx;
+          else if (L.checker.typeToString(slot) !== L.checker.typeToString(ctx)) { ok = false; return; }
+        } else { ok = false; return; }
+        return;
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(scope);
+    if (!ok || slot === undefined) return null;
+    const mapped = L.mapTypeOf(slot);
+    if (mapped === null || mapped.kind !== "array") return null;
+    const elem = L.checker.getTypeArguments(slot as ts.TypeReference)[0];
+    if (elem === undefined) return null;
+    for (const a of pushes) if (!L.checker.isTypeAssignableTo(L.typeOf(a), elem)) return null;
+    return mapped;
+  }
+
   /** `const prev = { subscribe: [], … }` whose empty-array member receives NON-NUMERIC stores elsewhere in the file (`prev.subscribe = x()`,
    * `prev.subscribe.push("a")`): tsc types the literal's `[]` as never[] (the compiler's number[] slot), yet the program keeps arrays of
    * anything there, so the value is the evolving object the checked-dynamic tree holds (ioredis ClusterSubscriber's previousChannels). Syntactic
@@ -5320,14 +5368,14 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     // checked-dynamic instead (the `let x = {}` stance, and lower-modules'
     // file-scope evolving-array rule): pushes ride the dyn array, typed
     // exits dynCheck.
-    if ((type === null || type.kind === "array") && isJsSourceFile(decl.getSourceFile())) {
+    if ((type === null || type.kind === "array" || type.kind === "dyn") && isJsSourceFile(decl.getSourceFile())) {
       let initExpr: ts.Expression = decl.initializer;
       while (ts.isParenthesizedExpression(initExpr)) initExpr = initExpr.expression;
       if (ts.isArrayLiteralExpression(initExpr) && initExpr.elements.length === 0) {
         const t = L.typeOf(decl.name);
         if (L.checker.isArrayType(t)) {
           const elem = L.checker.getTypeArguments(t as ts.TypeReference)[0];
-          if (elem !== undefined && (elem.flags & (ts.TypeFlags.Never | ts.TypeFlags.Any)) !== 0) type = DYN;
+          if (elem !== undefined && (elem.flags & (ts.TypeFlags.Never | ts.TypeFlags.Any)) !== 0) type = evolvingArrayTypedSlot(L, decl) ?? (type?.kind === "dyn" ? type : DYN);
         }
       }
     }
