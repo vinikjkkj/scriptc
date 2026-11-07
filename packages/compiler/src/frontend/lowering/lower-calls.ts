@@ -1415,7 +1415,23 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
     return throwOnlyJsMethodReturn(decl) === DYN ? L.checker.getUnknownType() : null;
   }
 
-  /** A declaration's checker-derived IR return type. The unmappable-type
+/** Whether a function body holds a bare `return;` of its own (nested functions are their own bodies). */
+  function hasBareReturn(body: ts.Node): boolean {
+    let found = false;
+    const walk = (n: ts.Node): void => {
+      if (found) return;
+      if (ts.isReturnStatement(n)) {
+        if (n.expression === undefined) found = true;
+        return;
+      }
+      if (ts.isFunctionLike(n) || ts.isClassDeclaration(n) || ts.isClassExpression(n)) return;
+      ts.forEachChild(n, walk);
+    };
+    ts.forEachChild(body, walk);
+    return found;
+  }
+
+    /** A declaration's checker-derived IR return type. The unmappable-type
    * diagnostic points at `blame` (the name for top-level declarations, the
    * whole node for lambda-likes — preserving each caller's historical loc). */
   export function declaredReturnType(L: Lowerer, decl: ts.SignatureDeclaration, blame: ts.Node): IrType {
@@ -1500,6 +1516,16 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
       return DYN;
     }
     let returnType = L.mapTypeOf(retTsType);
+    // A JS function whose JSDoc claims a scalar return (`@return {Number}`) but whose body ends some paths with a bare `return;`
+    // (ms's parse): JS hands the caller undefined there, so the claim is the scalar OR undefined and the representation widens. (In a JS
+    // file every return type node is a JSDoc claim, never a TypeScript annotation.)
+    if (
+      returnType !== null && (returnType.kind === "f64" || returnType.kind === "string" || returnType.kind === "bool") &&
+      isJsSourceFile(decl.getSourceFile()) && (decl as ts.FunctionLikeDeclaration).body !== undefined &&
+      hasBareReturn((decl as ts.FunctionLikeDeclaration).body!)
+    ) {
+      returnType = L.withUndefinedArm(returnType);
+    }
     if (!returnType) {
       // The instance's own checker view of the return (see instantiatedReturnType):
       // the declared return names a conditional over the class's type parameter.
