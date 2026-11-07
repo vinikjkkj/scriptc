@@ -839,10 +839,23 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
         // A program that freezes arrays of this type stores through the guarded entry point (`_fz` strict / `_fzs` sloppy): the flag test rides
         // inside the call the store already makes.
         const fz = s.frozenGuard === undefined ? "" : s.frozenGuard === "strict" ? "_fz" : "_fzs";
-        const setCall = s.holeGrow ? `scr_arr_set_f64_hole${fz}(${arr.name}, ${idx.name}, ${v.name})` : `scr_arr_set_${acc}${fz}(${arr.name}, ${idx.name}, ${v.name})`;
-        // The strict entry point answers whether the array refused the write: unwind on that branch only.
-        if (s.frozenGuard === "strict") E.emitUnwindIf(setCall);
-        else E.line(`${setCall};${E.srcComment(s.loc)}`);
+        const setName = s.holeGrow ? "scr_arr_set_f64_hole" : `scr_arr_set_${acc}`;
+        if (s.frozenGuard === undefined) {
+          E.line(`${setName}(${arr.name}, ${idx.name}, ${v.name});${E.srcComment(s.loc)}`);
+        } else {
+          // Inline flag test, the refusing entry point on the cold branch, the plain store (no call overhead beyond the unguarded program's) on the hot one.
+          E.line(`if (__builtin_expect(((${arr.name})->flags & SCR_ARR_FROZEN) != 0, 0)) {`);
+          E.indent++;
+          // The strict entry point answers true (it refused, exception pending): unwind; the sloppy one ignores the write.
+          if (s.frozenGuard === "strict") E.emitUnwindIf(`${setName}${fz}(${arr.name}, ${idx.name}, ${v.name})`);
+          else E.line(`${setName}${fz}(${arr.name}, ${idx.name}, ${v.name});`);
+          E.indent--;
+          E.line(`} else {`);
+          E.indent++;
+          E.line(`${setName}(${arr.name}, ${idx.name}, ${v.name});${E.srcComment(s.loc)}`);
+          E.indent--;
+          E.line(`}`);
+        }
         break;
       }
       case "arrayClear": {
@@ -858,9 +871,21 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
         // so the hole-aware consumers refuse it loudly instead of reading a hole.
         const absentC = E.absentElemC(s.arr.type.elem);
         const cfz = s.frozenGuard === undefined ? "" : s.frozenGuard === "strict" ? "_fz" : "_fzs";
-        const clearCall = absentC === "NULL" ? `scr_arr_tombstone${cfz}(${arr.name}, ${idx.name})` : `scr_arr_set_ref${cfz}(${arr.name}, ${idx.name}, ${absentC})`;
-        if (s.frozenGuard === "strict") E.emitUnwindIf(clearCall);
-        else E.line(`${clearCall};${E.srcComment(s.loc)}`);
+        const clearOf = (suffix: string): string => (absentC === "NULL" ? `scr_arr_tombstone${suffix}(${arr.name}, ${idx.name})` : `scr_arr_set_ref${suffix}(${arr.name}, ${idx.name}, ${absentC})`);
+        if (s.frozenGuard === undefined) {
+          E.line(`${clearOf("")};${E.srcComment(s.loc)}`);
+        } else {
+          E.line(`if (__builtin_expect(((${arr.name})->flags & SCR_ARR_FROZEN) != 0, 0)) {`);
+          E.indent++;
+          if (s.frozenGuard === "strict") E.emitUnwindIf(clearOf(cfz));
+          else E.line(`${clearOf(cfz)};`);
+          E.indent--;
+          E.line(`} else {`);
+          E.indent++;
+          E.line(`${clearOf("")};${E.srcComment(s.loc)}`);
+          E.indent--;
+          E.line(`}`);
+        }
         break;
       }
       case "bytesSet": {
