@@ -1,0 +1,17 @@
+function-type-with-a-this-parameter-names-its-real-blocker.ts:3:13 - error SC2009: values of type '(this: AbortSignal, event: Event) => void' cannot be compiled: the function shape is supported, but its parameter 'event' has type 'Event', which does not compile
+
+  2 | // does not compile (the DOM Event), not an 'arguments'-reading signature.
+  3 | function on(listener: (this: AbortSignal, event: Event) => void): void {
+    |             ^~~~~~~~
+  4 |   void listener;
+
+  hint: the outer shape is supported — the named component is the blocker; restate it inside the compilable set (number, string, boolean, arrays, Maps, Sets, RegExp, functions, classes, records, unions of those, and 'unknown')
+
+function-type-with-a-this-parameter-names-its-real-blocker.ts:6:1 - error SC2004: uses of 'on' inherit the blocker on its declaration
+
+  5 | }
+  6 | on(function () {});
+    | ^~
+  7 | 
+
+  hint: the declaration of 'on' did not compile — fix the diagnostic reported there and these sites clear with it

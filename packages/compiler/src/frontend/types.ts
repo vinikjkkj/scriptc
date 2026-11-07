@@ -10026,7 +10026,7 @@ export function describeComponentBlocker(widened: ts.Type, ctx: TypeMapperCtx): 
     if (
       sigDecl !== undefined &&
       ts.isFunctionLike(sigDecl) &&
-      (sigDecl.parameters.length !== sig.getParameters().length ||
+      (sigDecl.parameters.filter((dp) => !(ts.isIdentifier(dp.name) && dp.name.text === "this")).length !== sig.getParameters().length ||
         bodyReadsArgumentsLocal(sigDecl as { body?: ts.Node }))
     ) {
       return `the function shape is supported, but its signature is variadic ('arguments'-reading), and a compiled signature is fixed-arity`;
