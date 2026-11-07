@@ -26,7 +26,7 @@ import { lowerWrtcWrite } from "./lower-wrtc.js";
 import { isProvenanceSourceFile } from "../provenance-registry.js";
 import { ambientUndefVarRootOf, lowerImportEquals, nsUndefRead, nsWritableTarget, trapDeclRootOf } from "./lower-namespaces.js";
 import { expandoWritableTarget, lowerExpandoAssignStmt } from "./lower-expando.js";
-import { registerAssignAdopt, bufferSpeciesAliasDecl, ForOfIterProjection, lowerForOfArrayIter, lowerForOfMap, lowerForOfUnionContainer, lowerForOfSearchParams, lowerForOfSet, objectIterOverIndexShape, strCharsCall } from "./lower-containers.js";
+import { registerEvolvedArray, registerAssignAdopt, bufferSpeciesAliasDecl, ForOfIterProjection, lowerForOfArrayIter, lowerForOfMap, lowerForOfUnionContainer, lowerForOfSearchParams, lowerForOfSet, objectIterOverIndexShape, strCharsCall } from "./lower-containers.js";
 import { jsLetWidened, bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, islandRestFunctionLiteral, nullishExprUnitOf, nullishGenericBindingUnitOf, recordKeysArrayCall, hasOwnPropertyAliasDecl } from "./lower-calls.js";
 import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
 import type { ClassInfo, ClassIteratorInfo } from "./lower-classes.js";
@@ -4691,6 +4691,7 @@ function evolvedLetType(L: Lowerer, decl: ts.VariableDeclaration, isLet: boolean
 
 export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: boolean): IrStmt | null {
     registerAssignAdopt(L, decl);
+    registerEvolvedArray(L, decl);
     if (webCryptoGlobalDestructure(L, decl)) return null;
     refuseWebCryptoFlowsAt(L, decl);
     // A helper unrolled into accessors of a class (registerHelperAccessors): its body is never a value.

@@ -7318,6 +7318,15 @@ export class Lowerer {
     // A const bound to `Object.assign(base, ...)` has the TARGET's type: Node returns its target, and tsc's intersection result only adds
     // members the target's index signature already answers (assignAdoptType). Asked here, at the one place every consumer asks, so the
     // binding and each read and write of it agree on one record shape.
+    if (this.evolvedArrayTypes.size > 0) {
+      const declName = ts.isIdentifier(node) && ts.isVariableDeclaration(node.parent) && node.parent.name === node ? node
+        : ts.isArrayLiteralExpression(node) && ts.isVariableDeclaration(node.parent) && node.parent.initializer === node && ts.isIdentifier(node.parent.name) ? node.parent.name
+        : null;
+      if (declName !== null) {
+        const evolved = this.evolvedArrayTypes.get(this.checker.getSymbolAtLocation(declName) as ts.Symbol);
+        if (evolved !== undefined) return evolved;
+      }
+    }
     if (this.assignAdoptTypes.size > 0 && ts.isIdentifier(node)) {
       const adopted = this.assignAdoptTypes.get(this.checker.getSymbolAtLocation(node) as ts.Symbol);
       if (adopted !== undefined) return adopted;
@@ -18694,6 +18703,8 @@ export class Lowerer {
 
   /** Const bindings of `Object.assign(base, ...)` over a non-fresh index record: symbol -> the target's checker type (typeOf). */
   readonly assignAdoptTypes = new Map<ts.Symbol, ts.Type>();
+  /** Evolving-array declarations (`const buffer = []`) whose declaration name takes the evolved type of a reference (registerEvolvedArray). */
+  readonly evolvedArrayTypes = new Map<ts.Symbol, ts.Type>();
 
   private neverIsDynMemo: boolean | null = null;
   /** Does any lowered file call Object.entries / Object.values where the checker typed the result with a `never` element? That is the

@@ -10902,6 +10902,40 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
     return targetIr;
   }
 
+/** Register an unannotated `const buffer = []` / `let buffer = []` (an EVOLVING array: the checker types the declaration `never[]` and each
+   * later reference by what was pushed) in a program whose `never` elements are dyn (Lowerer.neverIsDynProgram). The declaration then takes the
+   * evolved type of its first reference, so it keeps the element representation it always had (a numeric `[]` filled with numbers was an f64
+   * array only because `never` mapped to f64) instead of becoming an array of dyn. Iterative scan of the declaring scope. Idempotent. */
+  export function registerEvolvedArray(L: Lowerer, decl: ts.VariableDeclaration): void {
+    if (!ts.isIdentifier(decl.name) || decl.type !== undefined || decl.initializer === undefined) return;
+    if (!ts.isArrayLiteralExpression(decl.initializer) || decl.initializer.elements.length !== 0) return;
+    if (!ts.isVariableDeclarationList(decl.parent)) return;
+    const sym = L.checker.getSymbolAtLocation(decl.name);
+    if (sym === undefined || L.evolvedArrayTypes.has(sym)) return;
+    const declT = L.checker.getTypeAtLocation(decl.name);
+    if (!L.checker.isArrayType(declT)) return;
+    const elemT = L.checker.getTypeArguments(declT as ts.TypeReference)[0];
+    if (elemT === undefined || (elemT.flags & (ts.TypeFlags.Never | ts.TypeFlags.Any)) === 0) return;
+    if (!L.neverIsDynProgram()) return;
+    const scope = decl.parent.parent.parent;
+    if (scope === undefined) return;
+    const stack: ts.Node[] = [scope];
+    while (stack.length > 0) {
+      const n = stack.pop()!;
+      if (ts.isIdentifier(n) && n !== decl.name && n.text === decl.name.text && L.checker.getSymbolAtLocation(n) === sym) {
+        const t = L.checker.getTypeAtLocation(n);
+        const te = L.checker.isArrayType(t) ? L.checker.getTypeArguments(t as ts.TypeReference)[0] : undefined;
+        if (te !== undefined && (te.flags & (ts.TypeFlags.Never | ts.TypeFlags.Any)) === 0) {
+          L.evolvedArrayTypes.set(sym, t);
+          return;
+        }
+      }
+      const kids: ts.Node[] = [];
+      ts.forEachChild(n, (c) => { kids.push(c); });
+      for (let i = kids.length - 1; i >= 0; i--) stack.push(kids[i]!);
+    }
+  }
+
 /** Register a const `Object.assign(base, ...)` binding so Lowerer.typeOf answers the target's type for every reference to it. Idempotent. */
   export function registerAssignAdopt(L: Lowerer, decl: ts.VariableDeclaration): void {
     if (!ts.isIdentifier(decl.name) || decl.initializer === undefined) return;
