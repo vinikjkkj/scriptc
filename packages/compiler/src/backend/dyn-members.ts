@@ -444,7 +444,7 @@ export function dynMemberTable(
     rows.push(accessor ? { kind: "accessor", name, fn } : { kind: "method", name, fn });
   }
 
-  return { rows, opaque, errorRooted, skipped: opaque && !skipUnnamed && !skippedNames.some((n) => n.includes(",")) ? `,${skippedNames.join(",")},` : null };
+  return { rows, opaque, errorRooted, skipped: opaque && cls.def.fields.some((f) => f.name === CLASS_PROPS_FIELD) && !skipUnnamed && !skippedNames.some((n) => n.includes(",")) ? `,${skippedNames.join(",")},` : null };
 }
 
 /** The rows of the STATIC side of a class (the table behind its class value:
