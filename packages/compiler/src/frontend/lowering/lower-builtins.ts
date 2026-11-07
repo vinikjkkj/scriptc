@@ -6483,6 +6483,10 @@ let digestInputValueDispatches = 0;
     if (init.type.kind === "array" && init.type.elem.kind === "array" && init.type.elem.elem.kind === "string") {
       return { kind: "libCall", fn: "sp.fromPairs", args: [init], type: SEARCH_PARAMS_T, loc };
     }
+    // A checked-dynamic init (an untyped JS value, `rawUrl.slice(i)` over an untyped parameter): the run-time kind picks the form.
+    if (init.type.kind === "dyn" && isJsSourceFile(expr.getSourceFile())) {
+      return { kind: "libCall", fn: "sp.fromDyn", args: [init], type: SEARCH_PARAMS_T, loc };
+    }
     if (init.type.kind === "array" && init.type.elem.kind === "record") {
       L.unsupported(
         "SC1090",

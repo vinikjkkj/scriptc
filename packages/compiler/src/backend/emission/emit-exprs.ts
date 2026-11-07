@@ -4518,6 +4518,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_sp_copy(${arg(0)})`);
           case "sp.fromPairs":
             return finish(`scr_sp_from_pairs(${arg(0)})`);
+          case "sp.fromDyn":
+            return finish(`scr_sp_from_dyn(${arg(0)})`);
           case "sp.with":
             return finish(`scr_sp_with(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "url.searchParams":

@@ -4108,6 +4108,8 @@ export type IrLibFn =
   | "sp.parse"
   | "sp.copy"
   | "sp.fromPairs"
+  /** URLSearchParams from a checked-dynamic init (an untyped JS value): the run-time kind picks the WHATWG form. MAY THROW. */
+  | "sp.fromDyn"
   | "sp.with"
   | "url.searchParams"
   | "url.search"
@@ -14916,6 +14918,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // on a row that is not a [name, value] pair. The rest of the sp family
   // never throws.
   "sp.fromPairs",
+  "sp.fromDyn",
   "fs.statSync",
   "crypto.randomBytesToString",
   "crypto.randomBytes",
