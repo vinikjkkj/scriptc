@@ -13567,6 +13567,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24553-empty-object-property-written-through-a-run-time-key.js": {
+   "order": [
+    "<repo>/tests/corpus/24553-empty-object-property-written-through-a-run-time-key.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2455-private-brand-checks.ts": {
    "order": [
     "<repo>/tests/corpus/2455-private-brand-checks.ts"
