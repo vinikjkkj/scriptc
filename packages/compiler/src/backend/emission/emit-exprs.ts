@@ -3758,6 +3758,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         } else if (e.fn === "sym.isSym" && borrowedDynLocal(E, e.args[0]!)) {
           // The kind test only looks: a plain local is read where it lives, with no retain / release pair around it.
           args.push({ name: mangleLocal((e.args[0] as { localId: string }).localId), type: e.args[0]!.type });
+        } else if (e.fn === "arr.isFrozenNullSafe") {
+          // A loop-entry test: only a plain local or an initialised global is read (borrowed -- a retain of a NULL array would crash), anything else is not read at all.
+          const a0 = e.args[0]!;
+          const lc0 = a0.kind === "varRef" ? E.currentLocals.get(a0.localId) : undefined;
+          const gl0 = a0.kind === "varRef" && !lc0 ? E.globalsById.get(a0.localId) : undefined;
+          args.push(a0.kind === "varRef" && ((lc0 && !lc0.boxed) || (gl0 && !gl0.tdz)) ? emitStableReceiver(E, a0, []) : { name: "NULL", type: a0.type });
         } else {
           for (const a of e.args) args.push(E.emitExpr(a));
         }
@@ -4541,6 +4547,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_dyn_arr_freeze(${arg(0)})`);
           case "arr.freeze":
             return finish(`scr_arr_freeze(${arg(0)})`);
+          case "arr.isFrozenNullSafe": {
+            // The loop-entry test reads a variable the loop itself may never touch: only a plain local or an initialised global is read (borrowed, no retain, which
+            // a NULL would crash); any other receiver answers true, i.e. keeps the loop's per-store tests.
+            if (arg(0) === "NULL") return finish("1");
+            return finish(`((${arg(0)}) != NULL && (((${arg(0)})->flags & SCR_ARR_FROZEN) != 0))`);
+          }
           case "arr.isFrozen":
             // Inline: the guard sits in front of hot stores of a program that freezes an array of this type (ScrArr::flags).
             return finish(`((${arg(0)})->flags & SCR_ARR_FROZEN) != 0`);

@@ -419,6 +419,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "arr.freeze": { argTypes: [null], result: arrayOf(F64) },
   "dyn.freezeArr": { argTypes: [DYN], result: DYN },
   "arr.isFrozen": { argTypes: [null], result: BOOL },
+  "arr.isFrozenNullSafe": { argTypes: [null], result: BOOL },
   "arr.frozenFail": { argTypes: [null, F64, F64, F64, F64], result: VOID },
   "sp.with": { argTypes: [SEARCH_PARAMS_T, STRING, STRING], result: SEARCH_PARAMS_T },
   "url.searchParams": { argTypes: [URL_T], result: SEARCH_PARAMS_T },

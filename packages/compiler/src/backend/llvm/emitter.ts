@@ -20110,6 +20110,41 @@ class LlEmitter {
       );
       return this.own({ name: t, type: e.type });
     }
+    if (e.fn === "arr.isFrozenNullSafe") {
+      // Null-safe form of the inline byte test below: a NULL array answers false without being read. Only a plain (unboxed, uncaptured, initialised) variable is read,
+      // and borrowed (a retain of NULL would crash); any other receiver answers true, i.e. keeps the loop's per-store tests.
+      const a0 = e.args[0]!;
+      const b0 = a0.kind === "varRef" && !this.captureIds.has(a0.localId) ? this.binding(a0.localId) : null;
+      if (a0.kind !== "varRef" || b0 === null || b0.kind === "boxed" || (b0.kind === "global" && this.tdzGlobals.has(a0.localId))) {
+        return { name: "true", type: e.type };
+      }
+      const nv = this.emitStableReceiver(a0, []);
+      const lChk = B.newLabel("fzn.chk");
+      const lJoin = B.newLabel("fzn.j");
+      const lPre = B.newLabel("fzn.pre");
+      B.br(lPre);
+      B.startBlock(lPre);
+      const isNull = B.tmp();
+      B.line(`${isNull} = icmp eq ptr ${nv.name}, null`);
+      B.condBr(isNull, lJoin, lChk);
+      B.startBlock(lChk);
+      const np = B.tmp();
+      const nb = B.tmp();
+      const nm = B.tmp();
+      const nr = B.tmp();
+      B.line(`${np} = getelementptr inbounds i8, ptr ${nv.name}, i64 31`);
+      B.line(`${nb} = load i8, ptr ${np}`);
+      B.line(`${nm} = and i8 ${nb}, 2`);
+      B.line(`${nr} = icmp ne i8 ${nm}, 0`);
+      const lChkEnd = B.newLabel("fzn.e");
+      B.br(lChkEnd);
+      B.startBlock(lChkEnd);
+      B.br(lJoin);
+      B.startBlock(lJoin);
+      const res = B.tmp();
+      B.line(`${res} = phi i1 [ false, %${lPre} ], [ ${nr}, %${lChkEnd} ]`);
+      return { name: res, type: e.type };
+    }
     if (e.fn === "arr.isFrozen") {
       // Inline byte test of ScrArr::flags (offset 31: the padding after the i32 element kind), bit SCR_ARR_FROZEN = 2.
       const av = this.emitExpr(e.args[0]!);

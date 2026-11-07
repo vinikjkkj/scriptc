@@ -3894,7 +3894,7 @@ export class Lowerer {
         for (const v of Object.values(o)) visit(v);
       };
       visit(fn.body);
-      this.hoistFrozenGuards(fn.body);
+      this.hoistFrozenGuards(fn.body, fn.locals);
     }
   }
 
@@ -3903,7 +3903,7 @@ export class Lowerer {
    * and whose guarded arrays are plain variables the loop never assigns, the flag cannot change while the loop runs. The loop is then emitted twice
    * behind ONE test of the flags before it: `if (frozen(a) || ...) { the loop with its per-store refusing paths } else { the loop with plain stores }`.
    * Outermost loops first; a loop that does not qualify is searched for inner ones. */
-  private hoistFrozenGuards(body: unknown): void {
+  private hoistFrozenGuards(body: unknown, locals: readonly IrLocal[]): void {
     const PURE = new Set([
       "exprStmt", "assign", "varDecl", "if", "block", "for", "while", "doWhile", "break", "continue",
       "varRef", "numLit", "boolLit", "strLit", "bin", "unary", "logical", "ternary", "arrayGet", "arraySet", "arrayClear", "arrIntrinsic",
@@ -3931,6 +3931,8 @@ export class Lowerer {
           if (o["frozenGuard"] !== undefined) {
             const r = (o["arr"] ?? o["receiver"]) as { kind?: string; localId?: string; type?: IrType } | undefined;
             if (r?.kind !== "varRef" || r.localId === undefined || r.type === undefined) { ok = false; return; }
+            // The test reads the variable at loop ENTRY, where the loop itself might never have: a captured (boxed) variable is read through a cell that may not exist yet.
+            if (locals.find((l) => l.id === r.localId)?.boxed === true) { ok = false; return; }
             recv.set(r.localId, r.type);
             guarded++;
           }
@@ -3953,7 +3955,7 @@ export class Lowerer {
       const loc = loop.loc;
       let cond: IrExpr | null = null;
       for (const [id, t] of recv) {
-        const test: IrExpr = { kind: "libCall", fn: "arr.isFrozen", args: [{ kind: "varRef", localId: id, type: t, loc }], type: BOOL, loc };
+        const test: IrExpr = { kind: "libCall", fn: "arr.isFrozenNullSafe", args: [{ kind: "varRef", localId: id, type: t, loc }], type: BOOL, loc };
         cond = cond === null ? test : { kind: "logical", op: "||", left: cond, right: test, type: BOOL, loc };
       }
       for (const k of Object.keys(loop)) delete (loop as Record<string, unknown>)[k];

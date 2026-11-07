@@ -4118,6 +4118,8 @@ export type IrLibFn =
   | "dyn.freezeArr"
   /** The frozen bit (Object.isFrozen / isSealed over a typed array, and the guard of a mutation in a program that freezes arrays). */
   | "arr.isFrozen"
+  /** arr.isFrozen over an array reference that may still be NULL (a hoisted loop-entry test: the loop may never touch the array): NULL answers false. */
+  | "arr.isFrozenNullSafe"
   /** The TypeError a mutation of a FROZEN array throws (scr_arr_frozen_fail: op, x, y, z). MAY THROW. */
   | "arr.frozenFail"
   | "sp.with"
