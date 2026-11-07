@@ -12248,21 +12248,27 @@ export function moduleUsesDynAsync(mod: IrModule): boolean {
  * `Function`. Every other module keeps its static link line. */
 export function moduleUsesEngineFn(mod: IrModule): boolean {
   let found = false;
+  let sawGetPrototypeOf = false;
+  let sawConstructorRead = false;
   const visit = (v: unknown): void => {
     if (found || v === null || typeof v !== "object") return;
     if (Array.isArray(v)) {
       for (const item of v) visit(item);
       return;
     }
-    const node = v as { kind?: unknown; op?: unknown; name?: unknown };
+    const node = v as { kind?: unknown; op?: unknown; name?: unknown; fn?: unknown; key?: { kind?: unknown; value?: unknown } };
     if (node.kind === "jsOp" && node.op === "globalGet" && node.name === "Function") {
       found = true;
       return;
     }
+    if (node.kind === "libCall" && node.fn === "dyn.getPrototypeOf") sawGetPrototypeOf = true;
+    if (node.kind === "dynKeyGet" && node.key?.kind === "strLit" && node.key.value === "constructor") sawConstructorRead = true;
     for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
   };
   visit(mod);
-  return found;
+  // The Function constructor VALUE (`Object.getPrototypeOf(f).constructor`) is reachable when the program takes a prototype and
+  // reads a `constructor` off a dynamic value: only then does the engine link in for it.
+  return found || (sawGetPrototypeOf && sawConstructorRead);
 }
 
 /** stream.destroyDyn on the IR: the dyn destroy unit (scr_stream_dyn.c). */

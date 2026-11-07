@@ -1300,6 +1300,7 @@ static const ScrDynClassOps dyn_cls_ops_impl = {
   dyn_cls_objinst_snapshot,
   dyn_cls_objinst_extra_get,
   dyn_cls_objinst_proto_keys,
+  dyn_cls_impl_box,
 };
 
 void scr_dyn_class_install(void) { scr_dyn_class_ops = &dyn_cls_ops_impl; }
