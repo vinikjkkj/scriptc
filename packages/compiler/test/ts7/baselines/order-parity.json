@@ -13549,6 +13549,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24548-cjs-var-module-exports-named-function.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24548-cjs-var-module-exports-named-function.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2455-private-brand-checks.ts": {
    "order": [
     "<repo>/tests/corpus/2455-private-brand-checks.ts"
