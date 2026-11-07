@@ -2513,6 +2513,13 @@ function resolveNpmImport7(
   if (isRelativeSpecifier(specifier) || specifier.startsWith("node:")) {
     return null;
   }
+  // A bare builtin name is the BUILTIN, never an installed package of the same
+  // name: Node serves the builtin for every bare spelling except the prefix-only
+  // ones (canonicalBuiltinModule answers null for those, so they still resolve
+  // as packages). `import { Buffer } from "buffer"` with the npm polyfill
+  // `buffer` installed (a transitive dep of better-sqlite3's install chain)
+  // used to resolve to the polyfill and report SC2013.
+  if (canonicalBuiltinModule(specifier) !== null) return null;
   // --provenance-sources: a registered specifier is NOT an npm import —
   // its attested source compiles as program modules (resolveProjectImport
   // answers the entry), so no island embed and no .d.ts type surface.
