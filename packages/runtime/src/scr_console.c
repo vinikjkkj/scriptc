@@ -71,7 +71,7 @@ extern long scr_jsval_live_count(void); /* scr_island.c */
 #endif
 
 static void scr_rc_audit_at_exit(void) {
-  scr_insp_custom_release();
+  if (scr_audit_release_hook != NULL) scr_audit_release_hook();
   /* COROUTINES, reported and NOT exempted. The noun is the whole claim: this
    * counts FRAMES, never the values inside them -- the runtime is handed a
    * frame's size, never its owned-slot count, so a value total cannot be

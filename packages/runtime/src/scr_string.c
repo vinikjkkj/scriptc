@@ -5,6 +5,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* See scr_runtime.h: the exit audit's extension point, null unless a translation unit registered a release. */
+void (*scr_audit_release_hook)(void) = NULL;
+
 /* Live heap-string count for the RC audit lane (-DSCR_RC_AUDIT): the test
  * harness builds with it to prove the emitted retain/release discipline
  * leaks nothing and frees nothing twice (double-free shows up as ASan

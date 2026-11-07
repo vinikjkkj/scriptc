@@ -183,6 +183,7 @@ void scr_insp_opts_pop(void) {
 static ScrDyn *g_custom_stylize;
 static ScrDyn *g_custom_inspect;
 void scr_insp_custom_register(ScrDyn *stylize, ScrDyn *inspect) {
+  scr_audit_release_hook = scr_insp_custom_release;
   if (g_custom_stylize == NULL) {
     g_custom_stylize = scr_dyn_retain(stylize);
     g_custom_inspect = scr_dyn_retain(inspect);

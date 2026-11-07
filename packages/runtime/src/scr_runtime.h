@@ -10529,6 +10529,10 @@ void scr_insp_begin(double recurse);
 void scr_insp_opts_push(const ScrDyn *o);
 void scr_insp_custom_register(ScrDyn *stylize, ScrDyn *inspect);
 void scr_insp_custom_release(void);
+/* The exit audit's extension point: the inspect translation unit registers its release here when (and only when) it is linked
+ * in; scr_console.c calls it through the pointer so a program without inspect never references the inspect TU. Defined in
+ * scr_string.c, which every program links. */
+extern void (*scr_audit_release_hook)(void);
 ScrDyn *scr_insp_custom_opts(ScrDyn *stylize);
 ScrStr *scr_insp_custom_result(ScrDyn *r, double recurse, double depth);
 void scr_insp_opts_pop(void);
