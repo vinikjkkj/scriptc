@@ -763,7 +763,26 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
       leading && leading.length > 0 ? [...leading.map((ir) => ({ ir })), ...argNodes] : argNodes;
     const restAt = shapes.findIndex((s) => s.mode === "rest" || s.mode === "dynRest" || s.mode === "islandRest");
     const positional = restAt >= 0 ? shapes.slice(0, restAt) : [...shapes];
+    // A spread LAST among the arguments and landing on checked-dynamic (untyped JS) parameters only: the flattened array is read element by element,
+    // a missing element is undefined (JS), and surplus elements are dropped. The spread operand is re-read per parameter, so it must be pure
+    // (an identifier): `new Redis(...args)`, `f(...args)` over an untyped signature.
+    const spreadIdx = sources.findIndex((s) => !isIr(s) && ts.isSpreadElement(s));
+    const spreadNode = spreadIdx >= 0 ? (sources[spreadIdx] as ts.SpreadElement) : null;
+    const spreadFills =
+      spreadNode !== null && spreadIdx === sources.length - 1 && spreadIdx < positional.length &&
+      ts.isIdentifier(spreadNode.expression) &&
+      positional.slice(spreadIdx).every((s) => s.type.kind === "dyn" && s.mode !== "omittable" && s.mode !== "rest");
+    const flattened = (): IrExpr => ({
+      kind: "dynArrLit",
+      elems: [L.lowerExprExpecting(spreadNode!.expression, DYN)],
+      spreads: [{ at: 0, what: spreadNode!.expression.getText() }],
+      type: DYN,
+      loc,
+    });
     const out: IrExpr[] = positional.map((shape, i) => {
+      if (spreadFills && i >= spreadIdx) {
+        return { kind: "libCall", fn: "dyn.arrAt", args: [flattened(), { kind: "numLit", value: i - spreadIdx, type: F64, loc }], type: DYN, loc };
+      }
       const src = sources[i];
       if (isIr(src)) return L.coerceInto(blame, src.ir, shape.type);
       const arg = src;
