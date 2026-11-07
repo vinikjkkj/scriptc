@@ -1268,6 +1268,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
               E.line(`scr_arr_push_${acc}(${r.name}, ${vs[i]!.name});`);
             }
             const last = vs[vs.length - 1];
+            // The guarded push of a program that freezes arrays of this type (a frozen array throws in any code).
+            if (last && e.frozenGuard !== undefined) return E.fallibleTemp(e.type, `scr_arr_push_${acc}_fz(${r.name}, ${last.name})`);
             return last
               ? E.newTemp(e.type, `scr_arr_push_${acc}(${r.name}, ${last.name})`)
               : E.newTemp(e.type, `scr_arr_len(${r.name})`);

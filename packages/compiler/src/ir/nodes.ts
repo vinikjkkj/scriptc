@@ -2835,7 +2835,7 @@ export type IrStmt =
    * scriptc traps instead, see SEMANTICS.md). Ownership of a refcounted
    * value MOVES into the array; the replaced element is released. */
   /** holeGrow (number elements, STEP 2a): a write past the end of a flagged array fills the gap with holes. */
-  | { kind: "arraySet"; arr: IrExpr; index: IrExpr; value: IrExpr; holeGrow?: true; loc: SrcLoc }
+  | { kind: "arraySet"; arr: IrExpr; index: IrExpr; value: IrExpr; holeGrow?: true; /** Set in a program that freezes arrays of this type: the store goes through the guarded entry point (frozen -> throw in strict code, ignore in sloppy). */ frozenGuard?: "strict" | "sloppy"; loc: SrcLoc }
   /** The TOMBSTONE write `a[i] = null as unknown as T` — arraySet with the
    * element type's ABSENT value, the one arrayNewLen fills with (the
    * interned undefined arm for unions carrying one, NULL for every other
@@ -2853,7 +2853,7 @@ export type IrStmt =
    * scriptc's dense arrays have nothing to answer. The frontend only
    * builds this for a REFCOUNTED, non-union, non-dyn element type; every
    * other shape still meets the stranded-unit trap. */
-  | { kind: "arrayClear"; arr: IrExpr; index: IrExpr; loc: SrcLoc }
+  | { kind: "arrayClear"; arr: IrExpr; index: IrExpr; frozenGuard?: "strict" | "sloppy"; loc: SrcLoc }
   /** Typed-array element write `b[i] = v` — arraySet's sibling for bytes
    * receivers: statement-only, receiver and index like bytesIntrinsic
    * `get` (any invalid index TRAPS — JS would ignore the write, a
@@ -7598,6 +7598,8 @@ export type IrExpr =
       type: IrType;
       /** Set on the removal splice `a.length = 0` lowers to: a length WRITE (a frozen array refuses it like one), not a call of splice. */
       lenWrite?: true;
+      /** Set on a single-value `push` in a program that freezes arrays of the receiver's type: the guarded push (a frozen array throws in any code). */
+      frozenGuard?: "strict";
       loc: SrcLoc;
     }
   /** Typed-array / Buffer construction — `new Uint8Array(x)`,

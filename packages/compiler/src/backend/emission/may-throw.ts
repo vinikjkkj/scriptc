@@ -374,10 +374,17 @@ export function computeMayThrow(mod: IrModule): { fns: Set<string>; indirect: bo
           // other than NFC/NFD/NFKC/NFKD (scr_str_normalize, exception cell).
           if (rec["method"] === "normalize") f.throws = true;
           break;
+        case "arraySet":
+        case "arrayClear":
+          // A strict-guarded store throws V8's TypeError when the array is frozen (ScrArr flag, program-wide gated).
+          if (rec["frozenGuard"] === "strict") f.throws = true;
+          break;
         case "arrIntrinsic":
           if (MAY_THROW_ARR_METHODS.has(rec["method"] as IrArrIntrinsicMethod)) {
             f.throws = true;
           }
+          // The guarded push (a frozen array throws V8's TypeError).
+          if (rec["frozenGuard"] !== undefined) f.throws = true;
           // join over dyn elements ToStrings each element with the object
           // protocol: a user toString that throws propagates.
           if (rec["method"] === "join" && (rec["receiver"] as { type?: { kind?: string; elem?: { kind?: string } } })?.type?.elem?.kind === "dyn") {
