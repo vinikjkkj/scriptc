@@ -376,6 +376,34 @@ export function emitClassShapes(
       .map((f, i) => ({ ...f, index: fieldIndex(i) }))
       .filter((f) => isRefCounted(f.type));
     const sizeOf = `ptrtoint (ptr getelementptr (%${struct}, ptr null, i32 1) to i64)`;
+    // A class whose ONLY cycle-capable fields are instance-override slots (IrClassDef.lazyCycle) buffers a release as a possible cycle root
+    // only while some slot holds a function: the gate is one tag compare per slot, in front of the collector call.
+    const lazyGate = ((): { lines: string[]; cond: string } | null => {
+      const lazy = cls.lazyCycle;
+      if (!traced || lazy === undefined || lazy.length === 0) return null;
+      const tracedIdx = cls.fields.map((f, i) => ({ ...f, index: fieldIndex(i) })).filter((f) => traceAdapter(host, f.type) !== null);
+      if (tracedIdx.length === 0 || tracedIdx.some((f) => !lazy.includes(f.name))) return null;
+      const lines: string[] = [];
+      let acc = "";
+      for (let k = 0; k < tracedIdx.length; k++) {
+        const f = tracedIdx[k]!;
+        const tag = host.undefinedArmTag(f.type);
+        if (tag < 0) return null;
+        lines.push(
+          `  %lg${k}p = getelementptr inbounds %${struct}, ptr %o, i64 0, i32 ${f.index}`,
+          `  %lg${k}u = load ptr, ptr %lg${k}p`,
+          `  %lg${k}tp = getelementptr inbounds %ScrUnion, ptr %lg${k}u, i64 0, i32 1`,
+          `  %lg${k}t = load i32, ptr %lg${k}tp`,
+          `  %lg${k}c = icmp ne i32 %lg${k}t, ${tag}`,
+        );
+        if (acc === "") acc = `%lg${k}c`;
+        else {
+          lines.push(`  %lg${k}o = or i1 ${acc}, %lg${k}c`);
+          acc = `%lg${k}o`;
+        }
+      }
+      return { lines, cond: acc };
+    })();
     // An embedded prefix slot (the emitter registry at 2, the stream
     // state at 4) handed to one of the runtime's prefix helpers —
     // teardown/trace/collector.
@@ -484,6 +512,7 @@ export function emitClassShapes(
         host.declare(`declare void @scr_cyc_on_release(ptr)`);
         reld.push(
           `root:`,
+          ...(lazyGate !== null ? [...lazyGate.lines, `  br i1 ${lazyGate.cond}, label %arm, label %done`, `arm:`] : []),
           `  call void @scr_cyc_on_release(ptr %o) ; possible cycle root; may collect`,
           `  br label %done`,
         );
@@ -513,6 +542,7 @@ export function emitClassShapes(
         host.declare(`declare void @scr_cyc_on_release(ptr)`);
         rel.push(
           `root:`,
+          ...(lazyGate !== null ? [...lazyGate.lines, `  br i1 ${lazyGate.cond}, label %arm, label %done`, `arm:`] : []),
           `  call void @scr_cyc_on_release(ptr %o) ; possible cycle root; may collect`,
           `  br label %done`,
         );

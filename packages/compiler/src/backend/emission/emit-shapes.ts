@@ -442,6 +442,7 @@ export interface ClassMeta {
       }
       // Cycle-capable shape: cycle-headered allocation, root-buffer hooks
       // on release, and the trace/teardown complement pair.
+      const lazyGate = lazyCycleGateC(E, s.meta?.def, s.fields);
       const tracedFields = rcMembers(s).filter((m) => E.traceAdapterC(m.type) !== null);
       const untracedRefFields = rcMembers(s).filter(
         (m) => isRefCounted(m.type) && E.traceAdapterC(m.type) === null,
@@ -467,7 +468,7 @@ export interface ClassMeta {
       out.push(
         `    scr_obj_free_note();`,
         `    scr_cyc_free(o);`,
-        `  } else {`,
+        `  } else${lazyGate === null ? "" : ` if (${lazyGate})`} {`,
         `    scr_cyc_on_release(o); /* possible cycle root; may collect */`,
         `  }`,
         `}`,
@@ -631,7 +632,24 @@ export interface ClassMeta {
     }
   }
 
-/** RC helpers of one hierarchy class. Retain is layout-generic (rc sits
+/** The C condition under which a release that left rc > 0 may be a cycle root, for a class whose ONLY cycle-capable fields are
+   * instance-override slots (IrClassDef.lazyCycle): some slot holds a function. Null when the class buffers every release (the
+   * ordinary case: another traced field, or no such slots). */
+  export function lazyCycleGateC(E: CEmitter, def: IrClassDef | undefined, fields: readonly { name: string; type: IrType }[]): string | null {
+    const lazy = def?.lazyCycle;
+    if (lazy === undefined || lazy.length === 0) return null;
+    const traced = fields.filter((f) => isRefCounted(f.type) && E.traceAdapterC(f.type) !== null);
+    if (traced.length === 0 || traced.some((f) => !lazy.includes(f.name))) return null;
+    const terms: string[] = [];
+    for (const f of traced) {
+      const t = E.undefinedArmTag(f.type);
+      if (t < 0) return null;
+      terms.push(`o->${mangleField(f.name)}->tag != ${t}`);
+    }
+    return terms.join(" || ");
+  }
+
+  /** RC helpers of one hierarchy class. Retain is layout-generic (rc sits
    * at offset 0 in every subclass); the PUBLIC release dispatches through
    * the object's vtable so a base-typed release tears down the derived
    * object; the DIRECT release (the vtable entry) does the class's own
@@ -689,7 +707,7 @@ export interface ClassMeta {
       `    scr_obj_free_note();`,
       s.traced ? `    scr_cyc_free(o);` : `    free(o);`,
       ...(s.traced
-        ? [`  } else {`, `    scr_cyc_on_release(o); /* possible cycle root; may collect */`, `  }`]
+        ? [`  } else${lazyCycleGateC(E, meta.def, s.fields) === null ? "" : ` if (${lazyCycleGateC(E, meta.def, s.fields)})`} {`, `    scr_cyc_on_release(o); /* possible cycle root; may collect */`, `  }`]
         : [`  }`]),
       `}`,
       `${E.link}${s.struct} *${s.newFn}(void) {`,
