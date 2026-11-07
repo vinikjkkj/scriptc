@@ -3,8 +3,8 @@
  * flow (if/while/for/for-of/do, switch, try/catch, jumps with the
  * finally-crossing fence), and blocked-binding poisoning. */
 import { protoDataAssignStmt } from "./lower-protodata.js";
-import { classOfValueNode, lateInstallStmt, protoSlotOf, protoSlotWriteStmt } from "./lower-protoslots.js";
-import { protoTabWriteStmt } from "./lower-prototab.js";
+import { classOfValueNode, lateInstallMark, lateInstallStmt, protoSlotOf, protoSlotWriteStmt } from "./lower-protoslots.js";
+import { protoTabReadChain, protoTabWriteStmt } from "./lower-prototab.js";
 import { strictAt } from "./lower-protoescape.js";
 import { isShadowableMethodRead, lowerUnboundClassMethodValue, dynSymbolKeyOf, classSymbolBag } from "./lower-exprs.js";
 import * as ts from "../ts7/adapter.js";
@@ -30,7 +30,7 @@ import { bufferSpeciesAliasDecl, ForOfIterProjection, lowerForOfArrayIter, lower
 import { jsLetWidened, jsWidenedCallBinding, bindingContextualGenericFnNodeOf, bindingGenericFnAliasInfoOf, bindingGenericFnInfoOf, bindingGenericFnNodeOf, deadUnmappableBinding, implicitLocalFnInfoOf, implicitLocalFnNodeOf, islandRestFunctionLiteral, nullishExprUnitOf, nullishGenericBindingUnitOf, recordKeysArrayCall, hasOwnPropertyAliasDecl } from "./lower-calls.js";
 import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
 import type { ClassInfo, ClassIteratorInfo } from "./lower-classes.js";
-import { bindingHoldsItsInitializer, genericIfaceBindingKeepsClass, isProvenPrefixTruncation, staticBagWrite, superReturnStmt, lowerSuperFlagStatement } from "./lower-classes.js";
+import { prototypeInstallerSteps, bindingHoldsItsInitializer, genericIfaceBindingKeepsClass, isProvenPrefixTruncation, staticBagWrite, superReturnStmt, lowerSuperFlagStatement } from "./lower-classes.js";
 import { lowerStreamUnderscoreAssign, streamClassAliasDecl, streamSidesOf } from "./lower-stream.js";
 import { lowerEventPropertyAssignment } from "./lower-event.js";
 import { lowerHttpResPropertyAssignment, lowerServerCloseOverrideAssignment, lowerServerTimeoutPropertyAssignment } from "./lower-server.js";
@@ -7338,9 +7338,50 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
       arr.elements.every((x) => ts.isStringLiteral(x) && declared(x.text));
   }
 
+/** `f(C.prototype)` whose callee body is nothing but `P.m = function` installs and captures of P's members (registerLateMethods registered the installs
+ * as late methods of C): the call IS those steps, in order: an install sets the late method's mark, a capture stores the prototype's current member
+ * (the class chain's table, as JS reads it at that moment) in the class's own global. Nothing at all for a class without a prototype table. */
+function prototypeInstallerCallStmt(L: Lowerer, expr: ts.Expression): IrStmt | null {
+  if (!ts.isCallExpression(expr) || expr.arguments.length !== 1) return null;
+  const arg = expr.arguments[0]!;
+  if (!ts.isPropertyAccessExpression(arg) || arg.name.text !== "prototype" || !ts.isIdentifier(arg.expression)) return null;
+  let sym = L.checker.getSymbolAtLocation(arg.expression);
+  if (sym !== undefined && (sym.flags & ts.SymbolFlags.Alias) !== 0) sym = L.checker.getAliasedSymbol(sym);
+  if (sym === undefined) return null;
+  const info = L.classBySymbol.get(sym);
+  if (info === undefined) return null;
+  const steps = prototypeInstallerSteps(L, expr, sym);
+  if (steps === null || steps.length === 0) return null;
+  const bodies = L.protoClassBodies.get(info.def.name);
+  if (bodies === undefined) return null;
+  for (const st of steps) if (st.kind === "install" && !bodies.has(st.lhs.name.text)) return null;
+  const loc = locOf(expr);
+  const firstInstall = steps.find((x) => x.kind === "install");
+  const capsKey = `${info.def.name}.${firstInstall !== undefined && firstInstall.kind === "install" ? firstInstall.lhs.name.text : ""}`;
+  const out: IrStmt[] = [];
+  for (const st of steps) {
+    if (st.kind === "install") {
+      const mark = lateInstallMark(L, info, st.lhs.name.text, loc);
+      if (mark !== null) out.push(mark);
+      continue;
+    }
+    const cap = (L.installerCaps.get(capsKey) ?? []).find((c) => c.sym === st.sym);
+    if (cap === undefined) return null;
+    out.push({
+      kind: "assign",
+      localId: cap.global.id,
+      value: protoTabReadChain(L, info, { kind: "strLit", value: st.name, type: STRING, loc }, null, loc),
+      loc,
+    });
+  }
+  return { kind: "block", body: out, loc };
+}
+
+  
   export function lowerExprStatement(L: Lowerer, expr: ts.Expression): IrStmt {
     // `C.prototype.m = fn` adopted as a late method of C: a definition, not
     // a runtime write (registerLateMethods).
+    { const ic = prototypeInstallerCallStmt(L, expr); if (ic !== null) return ic; }
     if (L.lateMethodAssigns.has(expr)) {
       // A late method of a class whose chain has a run-time prototype table: the statement marks it installed (until it runs, a call
       // reaches the table's member, as JS does).

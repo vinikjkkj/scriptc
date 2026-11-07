@@ -1091,6 +1091,12 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       const v = s !== undefined ? L.constIdents.get(s) : undefined;
       if (v !== undefined) return { kind: "strLit", value: v, type: STRING, loc };
     }
+    // A binding of an installer function read by the late method it installs (`multi` of `const { multi } = redis`): the class's own global.
+    if (L.activeInstallerCaps.size > 0 && ts.isIdentifier(expr)) {
+      const s = L.checker.getSymbolAtLocation(expr);
+      const g = s !== undefined ? L.activeInstallerCaps.get(s) : undefined;
+      if (g !== undefined) return { kind: "varRef", localId: g.id, type: DYN, loc };
+    }
 
     // An optional chain's guarded receiver: already evaluated by the
     // enclosing optChain — read the bind temp instead of re-lowering.
