@@ -9,7 +9,7 @@ import { appliesEmitterMixin, EMITTER_MIXIN_FIELD, graftCtorEmitterInit } from "
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { ctorFieldFillProven } from "./ctor-fill-proof.js";
-import { EMITTER_CELL_NAMES, GRAFTED_EMITTER_CELL_CLASSES, GRAFTED_EMITTER_CLASSES, BOOL, canBoxClassIntoDyn, canBoxFuncIntoDyn, canDynCheckTo, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DATE_T, DYN, F64, bytesOf, canConvertToDyn, IrClassDef, IrExpr, IrFunction, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, NULL_T, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, weakMapOf, isUnitType, mapOf, setOf, typeEquals } from "../../ir/nodes.js";
+import { EMITTER_CELL_NAMES, GRAFTED_EMITTER_CELL_CLASSES, GRAFTED_EMITTER_CLASSES, BOOL, canBoxClassIntoDyn, canBoxFuncIntoDyn, canDynCheckTo, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DATE_T, DYN, F64, bytesOf, canConvertToDyn, IrClassDef, IrExpr, IrFunction, IrGlobal, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, NULL_T, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, weakMapOf, isUnitType, mapOf, setOf, typeEquals } from "../../ir/nodes.js";
 import { lowerAbortControllerNew } from "./lower-abort.js";
 import { lowerEventNew } from "./lower-event.js";
 import { engineFunctionCtor } from "./lower-engine-fn.js";
@@ -2158,6 +2158,76 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
     }
   }
 
+/** One step of an installer function body, in source order: a late-method install `P.m = function`, or a capture of the prototype's current member
+ * (`const { m } = P` / `const x = P.m`), which the late bodies of the same class read. */
+export type InstallerStep =
+  | { kind: "install"; e: ts.BinaryExpression; lhs: ts.PropertyAccessExpression }
+  | { kind: "capture"; sym: ts.Symbol; name: string };
+
+/** `f(C.prototype)` where `f` is a program function (a declaration, reached directly or through `(0, ns.f)`) whose body is nothing but late-method
+ * installs `P.m = <function>` on its first parameter P and captures of P's members: the body's steps, in order. Null when the statement is not that
+ * shape, when the argument names another class, or when the parameter is used in any other way (the body then needs the receiver itself, which a
+ * prototype has no value form for). */
+export function prototypeInstallerSteps(L: Lowerer, e: ts.Expression, classSymbol: ts.Symbol): InstallerStep[] | null {
+  if (!ts.isCallExpression(e) || e.arguments.length !== 1) return null;
+  const arg = e.arguments[0]!;
+  if (!ts.isPropertyAccessExpression(arg) || arg.name.text !== "prototype" || !ts.isIdentifier(arg.expression)) return null;
+  let argSym = L.checker.getSymbolAtLocation(arg.expression);
+  if (argSym !== undefined && (argSym.flags & ts.SymbolFlags.Alias) !== 0) argSym = L.checker.getAliasedSymbol(argSym);
+  if (argSym !== classSymbol && L.checker.getSymbolAtLocation(arg.expression) !== classSymbol) return null;
+  let callee: ts.Expression = e.expression;
+  while (ts.isParenthesizedExpression(callee)) callee = callee.expression;
+  if (ts.isBinaryExpression(callee) && callee.operatorToken.kind === ts.SyntaxKind.CommaToken) callee = callee.right;
+  while (ts.isParenthesizedExpression(callee)) callee = callee.expression;
+  const nameNode = ts.isPropertyAccessExpression(callee) ? callee : ts.isIdentifier(callee) ? callee : null;
+  if (nameNode === null) return null;
+  let sym = L.checker.getSymbolAtLocation(ts.isPropertyAccessExpression(nameNode) ? nameNode.name : nameNode);
+  if (sym !== undefined && (sym.flags & ts.SymbolFlags.Alias) !== 0) sym = L.checker.getAliasedSymbol(sym);
+  if (sym === undefined) return null;
+  const fnDecl = L.checker.declarationsOf(sym).find((d) => ts.isFunctionDeclaration(d) && d.body !== undefined) as ts.FunctionDeclaration | undefined;
+  if (fnDecl === undefined || fnDecl.body === undefined || fnDecl.parameters.length !== 1 || !ts.isIdentifier(fnDecl.parameters[0]!.name)) return null;
+  const pname = (fnDecl.parameters[0]!.name as ts.Identifier).text;
+  const isParam = (x: ts.Expression): boolean => ts.isIdentifier(x) && x.text === pname;
+  const out: InstallerStep[] = [];
+  for (const st of fnDecl.body.statements) {
+    if (ts.isExpressionStatement(st) && ts.isBinaryExpression(st.expression) && st.expression.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      const l = st.expression.left;
+      const r = st.expression.right;
+      if (ts.isPropertyAccessExpression(l) && isParam(l.expression) && ts.isIdentifier(l.name) && (ts.isFunctionExpression(r) || ts.isArrowFunction(r))) {
+        out.push({ kind: "install", e: st.expression, lhs: l });
+        continue;
+      }
+      return null;
+    }
+    if (ts.isVariableStatement(st) && (st.declarationList.flags & ts.NodeFlags.Const) !== 0) {
+      for (const d of st.declarationList.declarations) {
+        const init = d.initializer;
+        if (init === undefined) return null;
+        if (ts.isObjectBindingPattern(d.name) && isParam(init)) {
+          for (const el of d.name.elements) {
+            if (el.dotDotDotToken !== undefined || el.propertyName !== undefined || el.initializer !== undefined || el.name === undefined || !ts.isIdentifier(el.name)) return null;
+            const bs = L.checker.getSymbolAtLocation(el.name);
+            if (bs === undefined) return null;
+            out.push({ kind: "capture", sym: bs, name: el.name.text });
+          }
+          continue;
+        }
+        if (ts.isIdentifier(d.name) && ts.isPropertyAccessExpression(init) && isParam(init.expression)) {
+          const bs = L.checker.getSymbolAtLocation(d.name);
+          if (bs === undefined) return null;
+          out.push({ kind: "capture", sym: bs, name: init.name.text });
+          continue;
+        }
+        return null;
+      }
+      continue;
+    }
+    // any other statement needs the receiver or a per-instance local: not this shape
+    return null;
+  }
+  return out;
+}
+
 /** `C.prototype.m = <function-like>` at the top level of the file declaring
    * class C: a LATE METHOD. The function becomes `C`'s method `m` exactly as
    * if declared in the body (same module function `%C.m`, the
@@ -2176,9 +2246,25 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
     registerAccessorFamilies(L, info, decl, classSymbol);
     registerHelperAccessors(L, info, decl, classSymbol);
     registerComputedPrototypeInstalls(L, info, decl, classSymbol);
+    // The writes this class's prototype takes: `C.prototype.m = fn` statements of the file, and the `P.m = fn` statements of a program function
+    // the file calls with `C.prototype` as its first argument (`addTransactionSupport(Redis.prototype)`): the body then installs on the class.
+    const writes: { e: ts.BinaryExpression; lhs: ts.PropertyAccessExpression; viaCall: boolean }[] = [];
     for (const stmt of sf.statements) {
       if (!ts.isExpressionStatement(stmt)) continue;
       const e = stmt.expression;
+      const steps = prototypeInstallerSteps(L, e, classSymbol);
+      if (steps !== null) {
+        for (const st of steps) if (st.kind === "install") writes.push({ e: st.e, lhs: st.lhs, viaCall: true });
+        // the captures the bodies of this class read: one module global per (class, name), set when the call runs
+        const capsOf: { sym: ts.Symbol; global: IrGlobal }[] = [];
+        for (const st of steps) {
+          if (st.kind !== "capture") continue;
+          const g: IrGlobal = { id: `%g.pc.${info.def.name}.${st.name}`, name: `${st.name} (installer capture)`, type: DYN, mutable: true };
+          if (!L.globalsList.some((x) => x.id === g.id)) L.globalsList.push(g);
+          capsOf.push({ sym: st.sym, global: g });
+        }
+        for (const st of steps) if (st.kind === "install") L.installerCaps.set(`${info.def.name}.${st.lhs.name.text}`, capsOf);
+      }
       if (!ts.isBinaryExpression(e) || e.operatorToken.kind !== ts.SyntaxKind.EqualsToken) continue;
       const lhs = e.left;
       if (
@@ -2189,6 +2275,9 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
         continue;
       }
       if (L.checker.getSymbolAtLocation(lhs.expression.expression) !== classSymbol) continue;
+      writes.push({ e, lhs, viaCall: false });
+    }
+    for (const { e, lhs } of writes) {
       const m = lhs.name.text;
       if (info.methods.has(m) || (info.fields.has(m) && info.shadowLate?.has(m) !== true)) continue;
       const fn = lateMethodSourceOf(L, e.right);
@@ -10051,9 +10140,12 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
     if (konst !== undefined) L.constIdents.set(konst.sym, konst.value);
     const helperConsts = L.helperConsts.get(`${info.def.name}.${mName}`) ?? [];
     for (const k of helperConsts) L.constIdents.set(k.sym, k.value);
+    const caps = L.installerCaps.get(`${info.def.name}.${mName}`) ?? [];
+    for (const c of caps) L.activeInstallerCaps.set(c.sym, c.global);
     try {
       return withInstanceBindings(L, info, () => lowerMethodBodyInner(L, info, mName, fn));
     } finally {
+      for (const c of caps) L.activeInstallerCaps.delete(c.sym);
       L.activeThisType = prevThis;
       L.activeThisFn = prevThisFn;
       if (konst !== undefined) L.constIdents.delete(konst.sym);
