@@ -16471,7 +16471,14 @@ export class Lowerer {
       ) {
         const arg = x.arguments[0]!;
         if (ts.isObjectLiteralExpression(arg) || ts.isArrayLiteralExpression(arg)) {
-          return this.coerceInto(node, this.lowerExprExpecting(arg, expected), expected);
+          const built = this.coerceInto(node, this.lowerExprExpecting(arg, expected), expected);
+          // A constant array freeze sets the real frozen flag too (see the call lowering's arr.freeze arm); the type is guarded only in a program that escapes readonly.
+          if (ts.isArrayLiteralExpression(arg) && built.type.kind === "array") {
+            const bt = built.type;
+            if (!this.constFrozenArrayTypes.some((t) => typeEquals(t, bt))) this.constFrozenArrayTypes.push(bt);
+            return { kind: "libCall", fn: "arr.freeze", args: [built], type: bt, loc: built.loc };
+          }
+          return built;
         }
       }
     }
