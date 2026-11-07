@@ -12700,6 +12700,32 @@ export function moduleUsesOpaque(mod: IrModule): boolean {
   return found;
 }
 
+/** The program reaches the intrinsic-prototype / wrapper-object / builtin-function machinery (scr_dyn_proto.c): Object.getPrototypeOf,
+ * Object.prototype as a value, Object(x) over a dyn, the wrapper unwrap and `Object` as a value. A LINK GATE, not a fence -- a wrong
+ * `false` is a loud unresolved-symbol link error, never a wrong answer. Without it the dyn core carries none of that code. */
+export function moduleUsesDynProto(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown };
+    if (
+      node.kind === "libCall" &&
+      (node.fn === "dyn.getPrototypeOf" || node.fn === "dyn.objectPrototype" || node.fn === "dyn.toObject" ||
+        node.fn === "dyn.unwrapPrim" || node.fn === "dyn.objectCtor")
+    ) {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
 /** The program formats a Date as text (scr_date_fmt.c plus the generated ICU
  * zone-name table, ~35 KB): a date.toString/date.format libCall, or a Date
  * crossing the checked-dynamic boundary (whose handle serves the formatters at
