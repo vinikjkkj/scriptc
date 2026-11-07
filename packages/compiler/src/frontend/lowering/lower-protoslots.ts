@@ -268,7 +268,7 @@ const ASSIGN_LAST = ts.SyntaxKind.LastAssignment;
 
 /** Why a replacement function cannot be called through the slot exactly, or null. The call goes through the method's ABI (every
  * declared parameter passed, omitted ones as undefined) with the receiver as the ambient `this`, so a replacement that sees the
- * argument count (rest, `arguments`) or writes through `this` (a property write on a dynamic receiver) is refused here, at
+ * argument count (rest, `arguments`) is refused here, at
  * compile time, rather than diverging or throwing at run time. */
 function replacementWhy(L: Lowerer, rhs: ts.Expression): string | null {
   const fn = replacementFnOf(L, rhs);
@@ -281,8 +281,6 @@ function replacementWhy(L: Lowerer, rhs: ts.Expression): string | null {
     if (n !== fn.body && (ts.isFunctionExpression(n) || ts.isFunctionDeclaration(n) || ts.isClassDeclaration(n) || ts.isClassExpression(n) || ts.isMethodDeclaration(n))) continue;
     if (ts.isIdentifier(n) && n.text === "arguments" && !L.resolveValueSymbol(n)) why = "the replacement reads `arguments` (the call passes every declared parameter)";
     const thisTarget = (t: ts.Node): boolean => (ts.isPropertyAccessExpression(t) || ts.isElementAccessExpression(t)) && t.expression.kind === ts.SyntaxKind.ThisKeyword;
-    if (ts.isBinaryExpression(n) && n.operatorToken.kind >= ASSIGN_FIRST && n.operatorToken.kind <= ASSIGN_LAST && thisTarget(n.left)) why = "the replacement writes a property through `this` (a property write on a dynamic receiver has no lowering yet)";
-    if ((ts.isPrefixUnaryExpression(n) || ts.isPostfixUnaryExpression(n)) && (n.operator === ts.SyntaxKind.PlusPlusToken || n.operator === ts.SyntaxKind.MinusMinusToken) && thisTarget(n.operand)) why = "the replacement updates a property through `this` (a property write on a dynamic receiver has no lowering yet)";
     n.forEachChild((c) => {
       stack.push(c);
     });

@@ -5036,6 +5036,9 @@ export class Lowerer {
     for (const info of this.classes.values()) analyzeClassDecoration(this, info);
     this.prepareModuleInits(parts);
     // the prototype-table scan lowers statements the same way in both passes (the emit pass runs it after its collection)
+    // The run-time-replaced prototype methods are registered in discovery too: the classes whose replacement receives a dyn-boxed `this`
+    // must be marked dyn-boxed BEFORE the reachable set is fixed (the dispatcher itself is only built by the emit pass).
+    scanProtoSlots(this, parts.map((fp) => fp.sf));
     scanProtoTabs(this, parts.map((fp) => fp.sf));
     lowerProfileNote("%discovery-collect", performance.now() - __colT);
 
@@ -5201,6 +5204,13 @@ export class Lowerer {
           break;
         }
       }
+    }
+    // A class with a RUN-TIME-REPLACED prototype method (`C.prototype.m = f`, lower-protoslots): its slot dispatcher hands the receiver to
+    // the replacement as a checked-dynamic `this`, a box no body names (the dispatcher is built after every body is down), so the class
+    // is dyn-boxed here: its box rows, the `%dynSet` write half included, exist for a replacement that writes through `this`.
+    for (const cls of this.protoSlots.keys()) {
+      const info = this.classes.get(cls);
+      if (info !== undefined && info.def.runtime !== true && info.evalClass === undefined) this.noteDynBoxedClass(cls);
     }
     // The functions a body produces BESIDE itself (lifted closures, implicit-
     // any instances lowered nested) carry dyn boxes of their own; scanning
