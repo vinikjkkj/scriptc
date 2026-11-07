@@ -18,6 +18,8 @@ const fixtureDir = join(repoRoot, "tests/fixtures/provenance");
 const entry = join(fixtureDir, "cases/authoredjs-dynimport/main.ts");
 const cjsEntry = join(fixtureDir, "cases/authoredjs-dynimport-cjs/main.ts");
 const cjsManifest = join(fixtureDir, "manifest-authoredjs.json");
+const pgEntry = join(fixtureDir, "cases/pgshape/main.ts");
+const pgManifest = join(fixtureDir, "manifest-pgshape.json");
 const manifest = join(fixtureDir, "manifest-dynimport.json");
 const flavor = process.env["SCRIPTC_SAN"] === "1" ? "san" : "plain";
 const outDir = join(repoRoot, "node_modules/.cache/scriptc-tests/provenance-dynimport", flavor);
@@ -69,6 +71,26 @@ describe("provenance: import() of a mapped CommonJS package", () => {
       if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
       const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
       expect(stdout).toBe(CJS_EXPECTED);
+    });
+  }
+});
+
+/* pg's shape (PG row 24633 equivalent): a mapped package whose export object holds `Pool`, a class minted per evaluation by a factory
+ * (`class BoundPool extends Pool` closing over the Client), constructed by a TypeScript caller through the import() namespace member.
+ * Node resolves import("pgshape") to its ESM wrapper. Before: SC1090 "constructing 'Pool' (a namespace member with no class lowering)". */
+describe("provenance: new through an import() namespace member holding a per-evaluation class", () => {
+  const PG_EXPECTED =
+    "h1:5432 max=3 client=pg-client | h2:undefined max=10 client=pg-client\n" + "true true true BoundPool function\n" + "false\n" + "true false\n";
+  for (const backend of ["c", "llvm"] as const) {
+    test(`the constructed pools behave as in Node on --backend ${backend}`, async () => {
+      process.env["SCRIPTC_PROVENANCE_MANIFEST"] = pgManifest;
+      setProvenanceSources(await resolveProvenanceSources(pgEntry));
+      mkdirSync(outDir, { recursive: true });
+      const outPath = join(outDir, process.platform === "win32" ? `pg-${backend}.exe` : `pg-${backend}`);
+      const result = await compile(pgEntry, { outPath, outDir, dynamic: false, backend });
+      if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+      const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
+      expect(stdout).toBe(PG_EXPECTED);
     });
   }
 });

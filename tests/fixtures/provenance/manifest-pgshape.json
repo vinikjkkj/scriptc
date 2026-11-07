@@ -1,0 +1,9 @@
+{
+  "packages": {
+    "pgshape": {
+      "dir": "./attested-src/pgshape",
+      "commit": "8888888888888888888888888888888888888888",
+      "repo": "https://github.com/example/pgshape"
+    }
+  }
+}
