@@ -12613,6 +12613,17 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
   function lowerDefinePropDyn(L: Lowerer, call: ts.CallExpression): IrExpr | null {
     if (call.arguments.length !== 3 || call.arguments.some((a) => ts.isSpreadElement(a))) return null;
     let target = probeLower(L, call.arguments[0]!);
+    // `exports` / `module.exports` of a CommonJS module whose whole export IS a class (`exports = module.exports = Redis`): the object has no
+    // value form of its own (SC1090 as a value), but the checker types it `typeof Redis` -- the class value itself, which is the receiver.
+    if (target === null && isCjsJsFile(call.getSourceFile())) {
+      const a0 = call.arguments[0]!;
+      if ((ts.isIdentifier(a0) && a0.text === "exports") || isModuleExportsAccess(a0)) {
+        const mt = L.mapTypeOf(L.typeOf(a0));
+        if (mt?.kind === "classval") {
+          target = { kind: "classRef", className: mt.className, type: mt, loc: locOf(a0) };
+        }
+      }
+    }
     // A class instance that carries the run-time property table, with a SYMBOL key: the symbol table on its bag.
     if (target?.type.kind === "object" && L.mapTypeOf(L.typeOf(call.arguments[1]!))?.kind === "symbol") {
       const cs = classSymbolBag(L, call.arguments[0]!, call.arguments[1]!);
@@ -12634,6 +12645,11 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       target && target.type.kind === "func" &&
       canBoxFuncIntoDyn(target.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))
     ) {
+      target = { kind: "dynFrom", value: target, type: DYN, loc: locOf(call.arguments[0]!) };
+    }
+    // A CLASS VALUE target (`Object.defineProperty(Redis, "Promise", { get, set })` over a class): the class value boxes into the dyn FUNC the
+    // runtime keeps ONE closure property table for, so the accessor lands where reads, writes and `in` of that class look.
+    if (target?.type.kind === "classval") {
       target = { kind: "dynFrom", value: target, type: DYN, loc: locOf(call.arguments[0]!) };
     }
     if (target?.type.kind !== "dyn") return null;
