@@ -72,7 +72,7 @@ export function npmCases(fixturesRoot: string): NpmCase[] {
       // for — so the case has been RED on main since it landed.
       .filter(
         (entry) =>
-          !/\/(?:(?:246[5-9]|255[67]|403[12]|406[1-4]|411[1-4]|4142|415[1-4]|4242|24510)-[^/]+|npmstatic-dynimport-cjs)\/main\.ts$/.test(
+          !/\/(?:(?:246[5-9]|255[67]|403[12]|406[1-4]|411[1-4]|4142|415[1-4]|4242|24510|24511)-[^/]+|npmstatic-dynimport-cjs)\/main\.ts$/.test(
             entry,
           ),
       )

@@ -25430,6 +25430,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/fixtures/npm/cases/24511-an-own-function-over-a-method-that-subclasses-declare-with-different-signatures/main.ts": {
+   "order": [
+    "<repo>/tests/fixtures/npm/cases/24511-an-own-function-over-a-method-that-subclasses-declare-with-different-signatures/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/fixtures/npm/cases/2465-getter-table/main.ts": {
    "order": [
     "<repo>/tests/fixtures/npm/cases/2465-getter-table/main.ts"
