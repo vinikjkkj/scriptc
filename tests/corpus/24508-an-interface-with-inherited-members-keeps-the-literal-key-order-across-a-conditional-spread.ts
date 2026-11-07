@@ -1,21 +1,43 @@
-// zapo buildIncomingMessageKey: a literal typed as an interface that EXTENDS another, ending in a conditional spread, enumerates in the order it was written, not own-members-first.
+// zapo buildIncomingMessageKey: a literal typed as an interface that EXTENDS another, with a conditional spread, enumerates in the order it
+// was written (JS's first-appearance order), whether the spread fires or not, wherever it sits, and through a nested key object.
 interface MessageKey { remoteJid: string; id: string; fromMe: boolean; participant?: string }
 interface IncomingKey extends MessageKey {
   readonly isGroup: boolean;
   readonly senderDevice: number;
+  readonly senderUsername?: string;
 }
-function buildKey(id: string, device: number, group: boolean): IncomingKey {
-  return {
-    remoteJid: "r@s",
-    id,
-    fromMe: false,
-    isGroup: group,
-    senderDevice: device,
-    ...(group ? { participant: "p@s" } : {}),
-  };
+interface StanzaEvent {
+  readonly stanza: string;
+  readonly key: IncomingKey;
+  readonly note?: string;
 }
-const k = buildKey("x1", 1, false);
-console.log(JSON.stringify(Object.keys(k)));
-console.log(JSON.stringify(k));
-const g = buildKey("x2", 2, true);
-console.log(JSON.stringify(Object.keys(g)));
+function identity(n: number): { senderUsername?: string } {
+  return n > 0 ? { senderUsername: "u" } : {};
+}
+// the spread last
+function keyLast(id: string, device: number, group: boolean): IncomingKey {
+  return { remoteJid: "r@s", id, fromMe: false, isGroup: group, senderDevice: device, ...(group ? { participant: "p@s" } : {}) };
+}
+// the spread first
+function keyFirst(id: string, device: number, group: boolean): IncomingKey {
+  return { ...(group ? { participant: "p@s" } : {}), remoteJid: "r@s", id, fromMe: false, isGroup: group, senderDevice: device };
+}
+// the spread in the middle, next to a spread of an optional record (zapo's shape)
+function keyMiddle(id: string, device: number, group: boolean): IncomingKey {
+  const keyIdentity = identity(device);
+  return { remoteJid: "r@s", id, fromMe: false, isGroup: group, ...keyIdentity, senderDevice: device, ...(group ? { participant: "p@s" } : {}) };
+}
+function event(key: IncomingKey): StanzaEvent {
+  return { stanza: "text", key, ...(key.isGroup ? { note: "group" } : {}) };
+}
+for (const group of [false, true]) {
+  const a = keyLast("a" + group, 0, group);
+  const b = keyFirst("b" + group, 0, group);
+  const c = keyMiddle("c" + group, 1, group);
+  console.log(JSON.stringify(Object.keys(a)), JSON.stringify(Object.keys(b)), JSON.stringify(Object.keys(c)));
+  console.log(JSON.stringify(a), JSON.stringify(c));
+  console.log(a, b);
+  const e = event(c);
+  console.log(JSON.stringify(Object.keys(e)), JSON.stringify(Object.keys(e.key)));
+  console.log(JSON.stringify(e));
+}
