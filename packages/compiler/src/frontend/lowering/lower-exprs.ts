@@ -27921,6 +27921,37 @@ export function compoundCombine(
     const combine = (v: IrExpr): IrExpr => ({ kind: "bin", op, left: v, right: rhs, type: F64, loc });
     return { natural: combine(read), toSlot: same, numericRead: { read, combine } };
   }
+  // A slot that is `number` plus the unit arms (`number | undefined`: a JS class field assigned in a method, read by `++this.n`):
+  // ToNumber of the slot is its number arm, NaN for undefined and 0 for null, and the result stores back into the number arm.
+  if (slot.kind === "union" && rhs.type.kind === "f64") {
+    const def = L.unions.get(slot.unionId);
+    const f64Tag = def === undefined ? -1 : def.arms.findIndex((a) => a.kind === "f64");
+    if (def !== undefined && f64Tag >= 0 && def.arms.every((a) => a.kind === "f64" || a.kind === "undefinedT" || a.kind === "nullT")) {
+      const tmp = L.declareHiddenLocal("%numSlot", slot);
+      const tref = (): IrExpr => ({ kind: "varRef", localId: tmp.id, type: slot, loc });
+      let num: IrExpr = { kind: "unionNarrow", unionId: slot.unionId, tag: f64Tag, value: tref(), type: F64, loc };
+      const unitAnswer = (a: IrType): IrExpr => ({ kind: "numLit", value: a.kind === "nullT" ? 0 : Number.NaN, type: F64, loc });
+      // Every non-number arm answers its constant; test them one by one in front of the narrow.
+      def.arms.forEach((a, i) => {
+        if (i === f64Tag) return;
+        num = {
+          kind: "ternary",
+          cond: { kind: "unionIsTag", unionId: slot.unionId, tag: i, negated: false, value: tref(), type: BOOL, loc },
+          then: unitAnswer(a),
+          else_: num,
+          type: F64,
+          loc,
+        };
+      });
+      const readNum: IrExpr = { kind: "seqExpr", stmts: [{ kind: "varDecl", localId: tmp.id, init: read, loc }], result: num, type: F64, loc };
+      const combine = (v: IrExpr): IrExpr => ({ kind: "bin", op, left: v, right: rhs, type: F64, loc });
+      return {
+        natural: combine(readNum),
+        toSlot: (v) => ({ kind: "unionWrap", unionId: slot.unionId, tag: f64Tag, value: v, type: slot, loc }),
+        numericRead: { read: readNum, combine },
+      };
+    }
+  }
   // JS any-origin operands: run the operator's OWN conversion and compute
   // natively (the binary-operator stance) — the dyn slot takes the result
   // back through the usual dyn conversion.
