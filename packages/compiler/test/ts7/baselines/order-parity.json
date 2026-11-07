@@ -26183,6 +26183,30 @@
     "<repo>/tests/corpus/24695-constructor-assigned-method-override-runs-with-the-instance-as-this.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/24696-variadic-late-method-read-as-a-value-and-called-with-call.js": {
+   "order": [
+    "<repo>/tests/corpus/24696-variadic-late-method-read-as-a-value-and-called-with-call.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24697-instance-assigned-function-over-a-method-runs-ahead-of-the-prototype-method.js": {
+   "order": [
+    "<repo>/tests/corpus/24697-instance-assigned-function-over-a-method-runs-ahead-of-the-prototype-method.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24698-instance-assigned-function-over-a-late-method-with-arguments-and-a-captured-original.js": {
+   "order": [
+    "<repo>/tests/corpus/24698-instance-assigned-function-over-a-late-method-with-arguments-and-a-captured-original.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24699-buffer-constants-read-as-numbers.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24699-buffer-constants-read-as-numbers.cjs"
+   ],
+   "diags": []
   }
  }
 }
