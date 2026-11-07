@@ -13669,6 +13669,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24623-promise-statics-on-a-custom-constructor-receiver.js": {
+   "order": [
+    "<repo>/tests/corpus/24623-promise-statics-on-a-custom-constructor-receiver.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/24626-object-prototype-member-probes-over-every-dyn-kind.js": {
    "order": [
     "<repo>/tests/corpus/24626-object-prototype-member-probes-over-every-dyn-kind.js"
