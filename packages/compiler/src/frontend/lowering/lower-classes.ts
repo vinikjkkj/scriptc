@@ -2161,6 +2161,7 @@ function constStringReturnOf(body: ts.Block): ts.Expression | null {
       const m = lhs.name.text;
       if (info.methods.has(m) || info.fields.has(m)) continue;
       const fn = lateMethodSourceOf(L, e.right);
+      if (fn !== null) L.lateMethodFns.add(fn);
       // `C.prototype.m = D.prototype.n` where D never defines n: the value is
       // undefined, the property exists with that value and nothing can call
       // it -- the statement has no observable effect worth a slot (mysql2's

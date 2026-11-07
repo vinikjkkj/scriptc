@@ -9957,8 +9957,13 @@ export function reconcileOverloadMemberDyn(L: Lowerer, expr: ts.CallExpression, 
       if (isThisParameter(p)) return false;
       if (!ts.isIdentifier(p.name)) return false;
       if (p.dotDotDotToken || p.questionToken || p.initializer) return false;
-      const t = L.typeOf(p.name);
-      if ((t.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) === 0) return false;
+      // A LATE method's parameter types are the declaration file's contextual types (ioredis' `Pipeline.prototype.exec = function (callback)`
+      // is typed `Callback<...>` by the .d.ts): the re-bound local is checked-dynamic either way, and a typed use of it takes the usual
+      // checked cast, so the type does not decide whether the form is exact.
+      if (!L.lateMethodFns.has(fn)) {
+        const t = L.typeOf(p.name);
+        if ((t.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) === 0) return false;
+      }
     }
     if (inStrictCode(fn)) return true;
     // `arguments.length` is the one reading the sloppy aliasing cannot reach: a
