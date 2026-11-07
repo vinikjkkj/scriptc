@@ -13567,6 +13567,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24552-inspect-custom-method-on-a-statically-typed-class.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24552-inspect-custom-method-on-a-statically-typed-class.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2455-private-brand-checks.ts": {
    "order": [
     "<repo>/tests/corpus/2455-private-brand-checks.ts"
