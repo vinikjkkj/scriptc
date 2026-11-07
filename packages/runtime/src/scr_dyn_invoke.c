@@ -2384,19 +2384,6 @@ ScrDyn *scr_dyn_invoke_pack(ScrDyn *recv, ScrDyn *pack, const ScrStr *method, co
   return scr_dyn_invoke(recv, method->data, (ScrDyn *const *)pack->v.arr.items, pack->v.arr.len, what->data);
 }
 
-/* A wrapper object whose [[Prototype]] chain carries a member of its own before the intrinsic String/Number/Boolean sentinel (the
- * methods of `class C extends String`, installed on C.prototype): that member wins over the primitive's, as in Node. The walk
- * stops at an immortal sentinel (the intrinsic prototypes' builtin members are the primitive's, which the delegation answers). */
-static bool wrapper_proto_has_member(const ScrDyn *recv, const char *method) {
-  size_t n = strlen(method);
-  const ScrDyn *p = recv->kind == SCR_DYN_OBJ ? scr_dyn_ext(recv)->proto : NULL;
-  for (int steps = 0; p != NULL && p->kind == SCR_DYN_OBJ && p->rc != SIZE_MAX && steps < 1024; steps++) {
-    if (scr_dyn_obj_own_data(p, method, n) != NULL || scr_dyn_obj_get(p, method, n) != NULL) return true;
-    p = scr_dyn_ext(p)->proto;
-  }
-  return false;
-}
-
 ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, size_t argc, const char *what) {
   if (recv->kind == SCR_DYN_OBJ && recv->rc == SIZE_MAX) {
     /* An intrinsic prototype value (Object.getPrototypeOf(x)): its builtin members are native function values that bind it. */
@@ -2413,7 +2400,17 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
     /* A primitive wrapper object (Object("s")): its prototype methods bind the primitive, and valueOf answers it. A member the
      * program stored on the wrapper itself keeps winning (the own lookup runs first below), so only an absent name delegates. */
     const ScrDyn *wp = scr_dyn_wrapper_prim(recv);
-    if (wp != NULL && scr_dyn_obj_get(recv, method, strlen(method)) == NULL && !wrapper_proto_has_member(recv, method)) {
+    if (wp != NULL && scr_dyn_obj_get(recv, method, strlen(method)) == NULL && !scr_dyn_wrapper_user_member(recv, method, strlen(method))) {
+      if (wp->kind == SCR_DYN_STR && strcmp(method, "valueOf") != 0 && scr_dyn_wrapper_user_member(recv, "toString", 8)) {
+        /* String.prototype methods run ToString(this): a subclass's own toString is honoured. */
+        ScrStr *ts = scr_dyn_string_coerce(recv);
+        if (ts == NULL) return NULL;
+        ScrDyn *tv = scr_dyn_new_str(ts);
+        scr_str_release(ts);
+        ScrDyn *tr = scr_dyn_invoke(tv, method, args, argc, what);
+        scr_dyn_release(tv);
+        return tr;
+      }
       if (strcmp(method, "valueOf") == 0) return scr_dyn_retain((ScrDyn *)wp);
       return scr_dyn_invoke((ScrDyn *)wp, method, args, argc, what);
     }
@@ -5402,6 +5399,11 @@ static void scr_af_drain_iterator(ScrDyn *src, const char *key, size_t kl, ScrDy
 }
 
 ScrDyn *scr_dyn_arr_from(const ScrDyn *src) {
+  {
+    /* A String wrapper object iterates its primitive's code points (`[...Object("ab")]`, a `class C extends String` instance). */
+    const ScrDyn *wp = scr_dyn_wrapper_prim(src);
+    if (wp != NULL && wp->kind == SCR_DYN_STR) return scr_dyn_arr_from(wp);
+  }
   ScrDyn *out = scr_dyn_new_arr();
   if (src->kind == SCR_DYN_ARR) {
     SCR_VIEW_FRESH(src);

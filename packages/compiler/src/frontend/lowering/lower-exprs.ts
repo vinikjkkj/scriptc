@@ -4,6 +4,7 @@
  * comparisons, nullish coalescing and optional chains, conditions and
  * ToBoolean/ToString coercion helpers, and field/element reads and writes
  * (FieldTarget). */
+import { programHasPrimSubclass } from "./prim-subclass-gate.js";
 import { readFileSync } from "node:fs";
 import { evalStaticInfoOf, lowerEvalClassInstanceOf } from "./lower-evalclass.js";
 import { protoDataFieldRead, protoDataHasKey, protoDataMemberRead } from "./lower-protodata.js";
@@ -518,20 +519,6 @@ export function tokenCtorFactsOf(L: Lowerer, e: ts.Expression): { name: string; 
 const BUILTIN_CTOR_INDEX: Record<string, number | undefined> = Object.assign(Object.create(null) as Record<string, number | undefined>, {
   Object: 0, Array: 1, Function: 2, String: 3, Number: 4, Boolean: 5,
 });
-const primSubclassMemo = new WeakMap<object, boolean>();
-/** Does any source file of the program carry the primitive-subclass rewrite's reserved call (`__scrSuperString(` and its Number /
- * Boolean siblings, authored only by js-desugar.ts)? Decided once per program from the files' text. */
-function programHasPrimSubclass(L: Lowerer): boolean {
-  let r = primSubclassMemo.get(L.program);
-  if (r === undefined) {
-    r = false;
-    for (const sf of L.program.getSourceFiles()) {
-      if (!sf.isDeclarationFile && sf.text.includes("__scrSuper")) { r = true; break; }
-    }
-    primSubclassMemo.set(L.program, r);
-  }
-  return r;
-}
 export function ctorObjectGlobalValue(L: Lowerer, canonical: string, loc: SrcLoc, receiverUse = false): IrExpr | null {
   // The WebCrypto object is an object in Node (typeof "object"), not a
   // string token: one process singleton, shared with require('crypto').webcrypto.

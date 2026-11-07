@@ -2,6 +2,7 @@
  * map/filter/forEach with their synthesized helper functions), Map/Set
  * methods with Node-exact forEach desugaring, and the string and regex
  * method surfaces. */
+import { programHasPrimSubclass } from "./prim-subclass-gate.js";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { fillWithKeyList } from "./key-list-fill.js";
@@ -11834,8 +11835,14 @@ function dynRecvThrows(dRef: IrExpr, mRef: IrExpr, fullRef: IrExpr, loc: SrcLoc)
     const ref = (localId: string, type: IrType): IrExpr => ({ kind: "varRef", localId, type, loc });
     const d0 = ref("d.0", DYN);
     // A String wrapper object (Object("s")) binds its primitive as `this`: unwrap before the string test.
-    const d: IrExpr = { kind: "libCall", fn: "dyn.unwrapPrim", args: [d0], type: DYN, loc };
+    // A program with primitive-wrapper subclasses binds the receiver ONCE through ToString(this) (a subclass's own toString runs,
+    // and may throw); every other program keeps the plain unwrap.
+    const sub = programHasPrimSubclass(L);
+    const d: IrExpr = sub
+      ? ref("u.0", DYN)
+      : { kind: "libCall", fn: "dyn.unwrapPrim", args: [d0], type: DYN, loc };
     const body: IrStmt[] = [
+      ...(sub ? [{ kind: "varDecl", localId: "u.0", init: { kind: "libCall", fn: "dyn.unwrapPrimStr", args: [d0], type: DYN, loc }, loc } as IrStmt] : []),
       {
         kind: "if",
         cond: { kind: "dynTest", test: "string", value: d, type: BOOL, loc },
@@ -11857,6 +11864,7 @@ function dynRecvThrows(dRef: IrExpr, mRef: IrExpr, fullRef: IrExpr, loc: SrcLoc)
         { id: "d.0", name: "d", type: DYN, mutable: false },
         { id: "m.0", name: "m", type: STRING, mutable: false },
         { id: "full.0", name: "full", type: STRING, mutable: false },
+        ...(sub ? [{ id: "u.0", name: "u", type: DYN, mutable: false }] : []),
       ],
       body,
       loc,

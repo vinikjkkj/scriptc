@@ -8827,6 +8827,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "dyn.primInit":
             // `super(x)` of a String / Number / Boolean subclass on the object `new` allocated; answers it (+1).
             return finish(`scr_dyn_prim_init_ret(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "dyn.unwrapPrimStr":
+            // String-method receiver over a dyn that holds a subclass wrapper (+1; may throw).
+            return finish(`scr_dyn_unwrap_prim_str(${arg(0)})`);
           case "dyn.setPrototypeOf":
             // Object.setPrototypeOf(o, proto): borrowed in, +1 (o) out; may throw.
             return finish(`scr_dyn_set_prototype_of(${arg(0)}, ${arg(1)})`);

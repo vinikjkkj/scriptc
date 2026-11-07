@@ -34,6 +34,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { cjsLexerVisibleNames } from "./cjs-lexer.js";
 import { functionCtorEdits } from "./fn-ctor-desugar.js";
+import { primSubclassEdits } from "./prim-subclass-desugar.js";
 
 const NESTED_REQUIRE_PREFILTER = /=\s*require\s*\(/;
 
@@ -2473,6 +2474,10 @@ export function jsDesugar(fileName: string, text: string): string | null {
   {
     const shadow = methodShadowEdits(fileName, text);
     if (shadow !== null) return jsDesugar(fileName, shadow) ?? shadow;
+  }
+  {
+    const primSub = primSubclassEdits(fileName, text);
+    if (primSub !== null) return jsDesugar(fileName, primSub) ?? primSub;
   }
   {
     const nullProto = nullProtoLiteralEdits(fileName, text);
