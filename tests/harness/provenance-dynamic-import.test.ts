@@ -18,6 +18,8 @@ const fixtureDir = join(repoRoot, "tests/fixtures/provenance");
 const entry = join(fixtureDir, "cases/authoredjs-dynimport/main.ts");
 const cjsEntry = join(fixtureDir, "cases/authoredjs-dynimport-cjs/main.ts");
 const cjsManifest = join(fixtureDir, "manifest-authoredjs.json");
+const poolEntry = join(fixtureDir, "cases/pgpool/main.ts");
+const poolManifest = join(fixtureDir, "manifest-pgpool.json");
 const pgEntry = join(fixtureDir, "cases/pgshape/main.ts");
 const pgManifest = join(fixtureDir, "manifest-pgshape.json");
 const manifest = join(fixtureDir, "manifest-dynimport.json");
@@ -91,6 +93,23 @@ describe("provenance: new through an import() namespace member holding a per-eva
       if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
       const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
       expect(stdout).toBe(PG_EXPECTED);
+    });
+  }
+});
+
+/* pg-pool's `client._poolUseCount = ...` through an untyped parameter: members a package class never declares, written on a boxed instance.
+ * Before: "Uncaught Error: a property write on a dynamic Client is not supported yet" at run time. */
+describe("provenance: undeclared members written on a package class through an untyped receiver", () => {
+  for (const backend of ["c", "llvm"] as const) {
+    test(`the instance keeps the written members as in Node on --backend ${backend}`, async () => {
+      process.env["SCRIPTC_PROVENANCE_MANIFEST"] = poolManifest;
+      setProvenanceSources(await resolveProvenanceSources(poolEntry));
+      mkdirSync(outDir, { recursive: true });
+      const outPath = join(outDir, process.platform === "win32" ? `pool-${backend}.exe` : `pool-${backend}`);
+      const result = await compile(poolEntry, { outPath, outDir, dynamic: false, backend });
+      if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+      const { stdout } = await execFileAsync(outPath, [], { encoding: "utf8" });
+      expect(stdout).toBe("undefined true\n1 2 2\n");
     });
   }
 });

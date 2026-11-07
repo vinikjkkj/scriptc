@@ -1,0 +1,9 @@
+{
+  "packages": {
+    "pgpool": {
+      "dir": "./attested-src/pgpool",
+      "commit": "9999999999999999999999999999999999999999",
+      "repo": "https://github.com/example/pgpool"
+    }
+  }
+}
