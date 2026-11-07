@@ -1,0 +1,14 @@
+{
+  "packages": {
+    "pgbind": {
+      "dir": "./attested-src/pgbind",
+      "commit": "6666666666666666666666666666666666666666",
+      "repo": "https://github.com/example/pgbind"
+    },
+    "pgstore": {
+      "dir": "./attested-src/pgstore",
+      "commit": "5555555555555555555555555555555555555555",
+      "repo": "https://github.com/example/pgstore"
+    }
+  }
+}
