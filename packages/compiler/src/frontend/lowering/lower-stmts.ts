@@ -9803,6 +9803,35 @@ function oldExportObjectUnreadBefore(stmt: ts.ExpressionStatement): boolean {
         return;
       }
     }
+    // A CHECKED-DYNAMIC receiver (an untyped JS parameter: the swap `[a[i], a[j]] = [a[j], a[i]]`): the receiver and key evaluate into temps at
+    // the pattern position, then the keyed dyn write stores the element's value (numbers canonicalize through the string key, as `a[k] = v`).
+    if ((ts.isElementAccessExpression(t) || ts.isPropertyAccessExpression(t)) && !t.questionDotToken && !(ts.isPropertyAccessExpression(t) && ts.isPrivateIdentifier(t.name))) {
+      const probed = probeLower(L, t.expression);
+      if (probed?.type.kind === "dyn") {
+        const recv = L.declareHiddenLocal("%dtRecv", DYN);
+        out.push({ kind: "varDecl", localId: recv.id, init: L.lowerExpr(t.expression), loc });
+        let key: IrExpr;
+        if (ts.isPropertyAccessExpression(t)) {
+          key = { kind: "strLit", value: t.name.text, type: STRING, loc };
+        } else {
+          let k = L.lowerExpr(t.argumentExpression);
+          if (k.type.kind === "f64") k = L.ensureString(k, t.argumentExpression);
+          else if (k.type.kind === "dyn" || k.type.kind === "bool") k = { kind: "toString", operand: k, type: STRING, loc: k.loc };
+          if (k.type.kind !== "string") L.unsupported("SC1090", t.argumentExpression, "indexing with non-string or non-number keys");
+          key = k;
+        }
+        const kTmp = L.declareHiddenLocal("%dtKey", STRING);
+        out.push({ kind: "varDecl", localId: kTmp.id, init: key, loc });
+        const value = L.coerceToExpected(valueOf(DYN), DYN);
+        if (value.type.kind !== "dyn") L.unsupported("SC1101", blame, `storing '${L.fmt(value.type)}' values through a destructuring target on an untyped receiver`);
+        out.push({
+          kind: "exprStmt",
+          expr: { kind: "libCall", fn: "dyn.keySet", args: [{ kind: "varRef", localId: recv.id, type: DYN, loc }, { kind: "varRef", localId: kTmp.id, type: STRING, loc }, value], type: VOID, loc },
+          loc,
+        });
+        return;
+      }
+    }
     if (ts.isElementAccessExpression(t) && !t.questionDotToken) {
       const recvT = L.mapTypeOf(L.typeOf(t.expression));
       if (recvT?.kind === "array") {
