@@ -17400,6 +17400,11 @@ export class Lowerer {
   /** Function expressions assigned as LATE methods (`C.prototype.m = function ...`): their declared parameters may re-bind off the dyn
    * argument pack whatever type the checker gave them (a contextual type from a declaration file is not an annotation the author wrote). */
   readonly lateMethodFns = new Set<ts.Node>();
+  /** Installer-function captures (`const { multi } = redis` in `addTransactionSupport(redis)`): per late method `Class.method`, the symbols its body reads
+   * and the per-class module global each is promoted to (lower-classes prototypeInstallerWrites). */
+  readonly installerCaps = new Map<string, { sym: ts.Symbol; global: IrGlobal }[]>();
+  /** The captures of the late body being lowered: symbol -> global. */
+  readonly activeInstallerCaps = new Map<ts.Symbol, IrGlobal>();
   /** An accessor family's loop variable bound to the literal one unrolled
    * body is lowered for (keyed `<Class>.<method name>`), and the bindings
    * active while such a body lowers. */
