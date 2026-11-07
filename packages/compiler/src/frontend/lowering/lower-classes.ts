@@ -8,6 +8,7 @@ import { protoDataFieldNames, registerProtoData } from "./lower-protodata.js";
 import { appliesEmitterMixin, EMITTER_MIXIN_FIELD, graftCtorEmitterInit } from "./lower-emitter-mixin.js";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
+import { inOwnShadowFamily } from "./lower-ownshadow.js";
 import { ctorFieldFillProven } from "./ctor-fill-proof.js";
 import { EMITTER_CELL_NAMES, GRAFTED_EMITTER_CELL_CLASSES, GRAFTED_EMITTER_CLASSES, BOOL, canBoxClassIntoDyn, canBoxFuncIntoDyn, canDynCheckTo, CLASS_PROPS_FIELD as IR_CLASS_PROPS_FIELD, DATE_T, DYN, F64, bytesOf, canConvertToDyn, IrClassDef, IrExpr, IrFunction, IrGlobal, IrLocal, IrParam, IrStmt, IrType, JSVAL, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, SrcLoc, NULL_T, UNDEFINED_T, URL_T, VOID, arrayOf, isRefCounted, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, weakMapOf, isUnitType, mapOf, setOf, typeEquals } from "../../ir/nodes.js";
 import { lowerAbortControllerNew } from "./lower-abort.js";
@@ -10240,7 +10241,7 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
     if ((info.captures?.length ?? 0) > 0 || info.evalClass !== undefined || info.evalStaticOf !== undefined) return null;
     // A class whose instances take own properties under run-time keys records the creation order of its own fields at each store
     // (lower-ownshadow applyFieldNotes), which needs a plain-local receiver; the variant's `this` is a checked expression.
-    if (L.ownShadowRoots.size > 0 && info.fields.has(CLASS_PROPS_FIELD)) return null;
+    if (inOwnShadowFamily(L, info) && info.fields.has(CLASS_PROPS_FIELD)) return null;
     const member = info.decl?.members.find((m): m is ts.MethodDeclaration =>
       ts.isMethodDeclaration(m) && m.body !== undefined && classMemberNameOf(L, m.name) === mName,
     );
