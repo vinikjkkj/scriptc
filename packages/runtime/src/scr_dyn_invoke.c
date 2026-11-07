@@ -851,6 +851,24 @@ static ScrDyn *dyn_object_proto_method(ScrDyn *recv, const char *method,
     }
     return scr_dyn_new_bool(r);
   }
+  /* Object.prototype.propertyIsEnumerable over every OTHER kind (ToObject of the receiver): an own, enumerable key. An array's
+   * and a string's indices are; `length` is not; a function's name, length and prototype are not; a number or boolean owns
+   * nothing; a Symbol key names nothing here. */
+  if (dyn_name_is(method, "propertyIsEnumerable")) {
+    bool r = false;
+    if (!(argc >= 1 && scr_dyn_is_symbol(args[0]))) {
+      ScrStr *k = argc >= 1 ? scr_dyn_string_coerce(args[0]) : scr_str_new("undefined", 9);
+      if (scr_exc_pending()) { scr_str_release(k); return NULL; }
+      r = scr_dyn_has_own(recv, k);
+      if (scr_exc_pending()) { scr_str_release(k); return NULL; }
+      if (r && k->len == 6 && memcmp(k->data, "length", 6) == 0 && (recv->kind == SCR_DYN_ARR || recv->kind == SCR_DYN_STR)) r = false;
+      if (r && recv->kind == SCR_DYN_FUNC &&
+          ((k->len == 4 && memcmp(k->data, "name", 4) == 0) || (k->len == 6 && memcmp(k->data, "length", 6) == 0) ||
+           (k->len == 9 && memcmp(k->data, "prototype", 9) == 0))) r = false;
+      scr_str_release(k);
+    }
+    return scr_dyn_new_bool(r);
+  }
   dyn_throw_not_fn(what);
   return NULL;
 }
@@ -1234,13 +1252,11 @@ static bool dyn_name_in(const char *m, const char *const *names) {
   return false;
 }
 
-/* Object.prototype's methods this runtime ANSWERS (dyn_object_proto_method).
- * isPrototypeOf / propertyIsEnumerable / toLocaleString are Node's and are
- * NOT here: the call answers them with is-not-a-function, so a read that
- * claimed `function` would create a fresh disagreement in the other
- * direction. They are priced, not guessed at. */
+/* Object.prototype's methods this runtime ANSWERS (dyn_object_proto_method), for every kind: a read that claims `function` and
+ * the call agree. toLocaleString is Node's and is not here: the call answers it per kind, so a read that claimed `function` would
+ * disagree with the arms that fence it. */
 static bool dyn_objproto_knows(const char *m) {
-  static const char *const names[] = { "hasOwnProperty", "valueOf", "toLocaleString", "isPrototypeOf", NULL };
+  static const char *const names[] = { "hasOwnProperty", "valueOf", "toLocaleString", "isPrototypeOf", "propertyIsEnumerable", NULL };
   return dyn_name_in(m, names);
 }
 
