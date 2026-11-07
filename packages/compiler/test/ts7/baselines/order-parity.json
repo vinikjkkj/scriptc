@@ -13573,6 +13573,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24600-bare-builtin-wins-over-npm-package/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/24600-bare-builtin-wins-over-npm-package/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2455-private-brand-checks.ts": {
    "order": [
     "<repo>/tests/corpus/2455-private-brand-checks.ts"
