@@ -13769,6 +13769,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24635-destructuring-assignment-into-untyped-elements.js": {
+   "order": [
+    "<repo>/tests/corpus/24635-destructuring-assignment-into-untyped-elements.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2464-qs-require-forms.cjs": {
    "order": [
     "<repo>/tests/corpus/2464-qs-require-forms.cjs"
