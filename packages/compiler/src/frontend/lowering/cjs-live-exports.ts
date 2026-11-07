@@ -29,11 +29,12 @@
  * guard, and errors.test.ts compiles a 7000-level nested expression. */
 import * as ts from "../ts7/adapter.js";
 import { BOOL, DYN, F64, STRING, VOID, type IrExpr, type IrStmt, type SrcLoc } from "../../ir/nodes.js";
-import { cjsExportAssignmentOf, cjsWholeExportAssignmentOf, isCjsJsFile, isModuleExportsAccess, requireSpecOf, resolveImport } from "../program.js";
+import { dynReplaceOf, cjsExportAssignmentOf, cjsWholeExportAssignmentOf, isCjsJsFile, isModuleExportsAccess, requireSpecOf, resolveImport } from "../program.js";
 import { isRelativeSpecifier } from "../shared.js";
 import type { Lowerer } from "./lowerer.js";
-import { compoundCombine, cjsExportsBagOf } from "./lower-exprs.js";
+import { compoundCombine, cjsExportsBagOf, cjsModExpOf } from "./lower-exprs.js";
 
+export { dynReplaceOf };
 const liveMemo = new WeakMap<ts.SourceFile, boolean>();
 
 /** True when `n` (an `exports` identifier or a `module.exports` access) is read as a VALUE: not the
@@ -241,6 +242,7 @@ function outsideEscapesOf(L: Lowerer): Set<ts.SourceFile> {
 
 function computeLive(L: Lowerer, sf: ts.SourceFile): boolean {
   if (!isCjsJsFile(sf)) return false;
+  if (dynReplaceOf(sf) !== null) return true;
   const shape = tableShapeOf(sf);
   if (shape === "other") return false;
   if (outsideEscapesOf(L).has(sf)) return true;
@@ -290,8 +292,9 @@ export function liveExportsOf(L: Lowerer, sf: ts.SourceFile): boolean {
  * (a require binding, possibly a function-local `require` that never ran the module's init) runs the module's
  * init first: the bag is created there (lower-modules.ts), so the reference must see it created. The module's
  * own references (`loc.file` is the module) read its bag directly, since the module is initializing. */
-export function liveBagRef(L: Lowerer, sf: ts.SourceFile, loc: SrcLoc): IrExpr {
-  const bag: IrExpr = { kind: "varRef", localId: cjsExportsBagOf(L, sf), type: DYN, loc };
+export function liveBagRef(L: Lowerer, sf: ts.SourceFile, loc: SrcLoc, which: "exports" | "module" = "module"): IrExpr {
+  const id = which === "module" && dynReplaceOf(sf) !== null ? cjsModExpOf(L, sf) : cjsExportsBagOf(L, sf);
+  const bag: IrExpr = { kind: "varRef", localId: id, type: DYN, loc };
   const init = L.initNameOf.get(sf);
   if (loc.file === sf.fileName || init === undefined || L.asyncInitFiles.has(sf)) return bag;
   L.noteEdge(init);
@@ -473,7 +476,7 @@ export function liveRecvBagOf(L: Lowerer, node: ts.Expression, loc: SrcLoc): IrE
     if (node.text === "exports") {
       const sf = node.getSourceFile();
       return isCjsJsFile(sf) && liveExportsOf(L, sf) && unshadowed(L, node) && L.resolveLocal(node) === null
-        ? liveBagRef(L, sf, loc) : null;
+        ? liveBagRef(L, sf, loc, "exports") : null;
     }
     return liveWriteBagOf(L, node, loc);
   }
@@ -583,7 +586,7 @@ export function liveIdentityRefOf(L: Lowerer, e: ts.Expression, loc: SrcLoc): Ir
   while (ts.isParenthesizedExpression(x)) x = x.expression;
   const dep = liveDepOfBinding(L, x);
   if (dep !== null) return liveBagRef(L, dep, loc);
-  if (isLiveExportValue(L, x)) return liveBagRef(L, x.getSourceFile(), loc);
+  if (isLiveExportValue(L, x)) return liveBagRef(L, x.getSourceFile(), loc, ts.isIdentifier(x) && x.text === "exports" ? "exports" : "module");
   if (ts.isIdentifier(x)) {
     const sym = L.checker.getSymbolAtLocation(x);
     const decl = sym ? L.checker.declarationsOf(sym).find(ts.isVariableDeclaration) : undefined;
@@ -598,4 +601,9 @@ export function liveIdentityRefOf(L: Lowerer, e: ts.Expression, loc: SrcLoc): Ir
     }
   }
   return null;
+}
+
+/** The replacement statement of a dynReplaceOf module: `module.exports` (the dyn slot) takes the call's value. */
+export function liveDynReplaceStmt(L: Lowerer, sf: ts.SourceFile, bin: ts.BinaryExpression, loc: SrcLoc): IrStmt {
+  return { kind: "assign", localId: cjsModExpOf(L, sf), value: dynValueOf(L, bin.right), loc };
 }
