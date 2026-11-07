@@ -12268,6 +12268,7 @@ export function moduleUsesEngineFn(mod: IrModule): boolean {
   // `proto.constructor(...)` call, or a `constructor` read in a program that calls a dynamic function value. Taking the prototype and
   // reading or comparing `.constructor` (the common identity test) never needs the engine.
   const viaCtor = sawGetPrototypeOf && (sawConstructorCall || (sawConstructorRead && sawDynCall));
+  process.stderr.write(`ENGINEGATE old=${found} wide=${found || (sawGetPrototypeOf && sawConstructorRead)} narrow=${found || viaCtor} getProto=${sawGetPrototypeOf} ctorRead=${sawConstructorRead} ctorCall=${sawConstructorCall} dynCall=${sawDynCall}\n`);
   return found || viaCtor;
 }
 
