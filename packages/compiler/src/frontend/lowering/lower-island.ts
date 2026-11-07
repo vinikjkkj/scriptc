@@ -7,7 +7,7 @@ import type { Lowerer } from "./lowerer.js";
 import { BOOL, DYN, F64, IrExpr, IrStmt, IrType, JSVAL, MAX_ISLAND_CALLBACK_ARITY, STRING, VOID, arrayOf, canBoxFuncIntoDyn, canMarshalTypedFuncIntoIsland, funcOf, islandPromisePayloadTag, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ISLAND_SURFACE, IslandFnEntry, STATIC_MATH_CONSTS, STATIC_MATH_FNS, boundaryIntoIslandMsg } from "./surfaces.js";
 import { requiresDynamicApiDiag, requiresDynamicPackageDiag } from "../../diagnostics/diagnostic.js";
-import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, cjsHiddenAccessorExport, cjsInsertionOrderOf, dynamicImportSpecOf, isCjsJsFile, locOf, npmPackageNameOf, npmStaticDepSf7, requireSpecOf, resolveImport } from "../program.js";
+import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, cjsHiddenAccessorExport, cjsInsertionOrderOf, dynamicImportSpecOf, isCjsJsFile, locOf, npmPackageNameOf, npmStaticDepSf7, provenanceTwinDepSf7, requireSpecOf, resolveImport } from "../program.js";
 import { runtimePackageOfTypesPackage } from "../shared.js";
 import { isRelativeSpecifier } from "../shared.js";
 import { dynamicImportModuleTargetOf, dynamicImportProgramTargetOf, staticDynImportBindingShape } from "./lower-modules.js";
@@ -664,7 +664,7 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
           loc,
         };
       }
-      const dep = npmStaticDepSf7(L.program, call.getSourceFile(), spec);
+      const dep = npmStaticDepSf7(L.program, call.getSourceFile(), spec) ?? provenanceTwinDepSf7(L.program, call.getSourceFile(), spec);
       const builder = dep !== null ? staticDynNsBuilderOf(L, dep, loc) : null;
       if (process.env["SCRIPTC_DYNNS_TRACE"]) {
         console.error(
