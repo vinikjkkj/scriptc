@@ -4330,6 +4330,8 @@ ScrSym *scr_sym_new_tagged(ScrStr *desc, ScrStr *site); /* as scr_sym_new, remem
 ScrSym *scr_sym_new_anon_tagged(ScrStr *site);
 const ScrStr *scr_sym_site(const ScrSym *s); /* the creation site, or NULL when untagged */
 ScrSym *scr_sym_for(ScrStr *key);  /* borrows key; +1 on the interned per-key symbol */
+ScrSym *scr_sym_wellknown(ScrStr *name);  /* borrows name ("dispose", "iterator", ...); the immortal well-known symbol Symbol.<name>, +1 */
+const char *scr_sym_wellknown_of(const ScrSym *s);  /* the well-known name of s, or NULL */
 ScrSym *scr_sym_retain(ScrSym *s);
 void scr_sym_release(ScrSym *s);
 void *scr_sym_retain_v(void *p);

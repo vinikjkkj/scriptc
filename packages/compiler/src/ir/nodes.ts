@@ -4159,6 +4159,7 @@ export type IrLibFn =
   | "sym.newTagged"
   | "sym.newAnonTagged"
   | "sym.for"
+  | "sym.wellKnown"
   | "sym.keyFor"
   | "sym.desc"
   | "sym.toString"

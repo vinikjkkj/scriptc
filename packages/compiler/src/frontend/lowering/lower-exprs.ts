@@ -3928,6 +3928,13 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         const ctor = lowerInstanceConstructorRead(L, expr);
         if (ctor) return ctor;
       }
+      // A WELL-KNOWN SYMBOL as a value (`Symbol.dispose`, `Symbol.asyncDispose`, `Symbol.iterator`, ...): the runtime's immortal symbol
+      // of that name, described "Symbol.<name>" like Node's, equal to itself on every read and paired with the engine's own across the
+      // boundary. Only where no key position claims it (`x[Symbol.iterator]` and `{ [Symbol.iterator]: v }` keep their keyed lowerings).
+      {
+        const wk = wellKnownSymbolValue(L, expr, loc);
+        if (wk) return wk;
+      }
       // The lib fence's PROPERTY chokepoint: a stdlib-declared member that
       // no lowering above claimed ([1,2].entries, Math.SQRT2, Promise.all,
       // re.exec as a value, ...) reports SC2020 here.
@@ -7954,6 +7961,21 @@ function nullishArmBridge(L: Lowerer, left: IrExpr): IrExpr | null {
     // A DECLARED field always answers; only the signature can miss.
     return key === null || L.checker.getPropertyOfType(recvT, key) === undefined;
   }
+
+const WELL_KNOWN_SYMBOL_VALUES: ReadonlySet<string> = new Set([
+  "asyncIterator", "hasInstance", "isConcatSpreadable", "iterator", "match", "matchAll", "replace", "search", "species", "split",
+  "toPrimitive", "toStringTag", "unscopables", "dispose", "asyncDispose",
+]);
+
+function wellKnownSymbolValue(L: Lowerer, expr: ts.Expression, loc: SrcLoc): IrExpr | null {
+  if (!ts.isPropertyAccessExpression(expr) || expr.questionDotToken !== undefined) return null;
+  const name = L.stdlibGlobalMember(expr, "Symbol");
+  if (name === null || !WELL_KNOWN_SYMBOL_VALUES.has(name)) return null;
+  const par = expr.parent;
+  if (par !== undefined && ts.isElementAccessExpression(par) && par.argumentExpression === expr) return null;
+  if (par !== undefined && ts.isComputedPropertyName(par)) return null;
+  return { kind: "libCall", fn: "sym.wellKnown", args: [{ kind: "strLit", value: name, type: STRING, loc }], type: SYMBOL_T, loc };
+}
 
 export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.PropertyAccessExpression | ts.ElementAccessExpression,): IrExpr {
     const loc = locOf(expr);

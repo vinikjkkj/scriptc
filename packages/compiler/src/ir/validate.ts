@@ -362,6 +362,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "sym.newTagged": { argTypes: [STRING, STRING], result: SYMBOL_T },
   "sym.newAnonTagged": { argTypes: [STRING], result: SYMBOL_T },
   "sym.for": { argTypes: [STRING], result: SYMBOL_T },
+  "sym.wellKnown": { argTypes: [STRING], result: SYMBOL_T },
   // Result is the interned `string | undefined` union — the libCall case
   // checks the arms (the spawnRes.error pattern).
   "sym.keyFor": { argTypes: [SYMBOL_T], result: VOID },

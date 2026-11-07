@@ -970,6 +970,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "sym.newTagged": "scr_sym_new_tagged",
   "sym.newAnonTagged": "scr_sym_new_anon_tagged",
   "sym.for": "scr_sym_for",
+  "sym.wellKnown": "scr_sym_wellknown",
   "sym.toString": "scr_sym_to_string",
   "sym.dynGet": "scr_dyn_sym_get",
   "sym.dynSet": "scr_dyn_sym_set",

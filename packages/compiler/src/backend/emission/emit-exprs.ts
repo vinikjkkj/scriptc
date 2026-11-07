@@ -4369,6 +4369,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_sym_new_anon_tagged(${arg(0)})`);
           case "sym.newAnon":
             return finish(`scr_sym_new(NULL)`);
+          case "sym.wellKnown":
+            return finish(`scr_sym_wellknown(${arg(0)})`);
           case "sym.for":
             return finish(`scr_sym_for(${arg(0)})`);
           case "sym.toString":

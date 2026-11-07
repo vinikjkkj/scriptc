@@ -97,6 +97,43 @@ ScrSym *scr_sym_for(ScrStr *key) {
   return s;
 }
 
+/* ── the well-known symbols (Symbol.iterator, Symbol.dispose, ...) ───────
+ * One immortal symbol per name, described "Symbol.<name>" exactly as Node spells it, and never in the Symbol.for registry
+ * (Symbol.keyFor answers undefined). The engine bridge pairs each with the engine's own Symbol.<name>. */
+#define SCR_WK_DESC(text) {SCR_STR_IMMORTAL, sizeof("Symbol." text) - 1, sizeof("Symbol." text) - 1, "Symbol." text}
+typedef SCR_STR_LIT(24) ScrWkDesc;
+static const ScrWkDesc scr_wk_descs[] = {
+    SCR_WK_DESC("asyncIterator"), SCR_WK_DESC("hasInstance"), SCR_WK_DESC("isConcatSpreadable"), SCR_WK_DESC("iterator"),
+    SCR_WK_DESC("match"),         SCR_WK_DESC("matchAll"),    SCR_WK_DESC("replace"),            SCR_WK_DESC("search"),
+    SCR_WK_DESC("species"),       SCR_WK_DESC("split"),       SCR_WK_DESC("toPrimitive"),        SCR_WK_DESC("toStringTag"),
+    SCR_WK_DESC("unscopables"),   SCR_WK_DESC("dispose"),     SCR_WK_DESC("asyncDispose"),
+};
+static const char *const scr_wk_names[] = {"asyncIterator", "hasInstance", "isConcatSpreadable", "iterator", "match", "matchAll", "replace", "search", "species", "split", "toPrimitive", "toStringTag", "unscopables", "dispose", "asyncDispose"};
+#define SCR_WK_N (sizeof scr_wk_names / sizeof scr_wk_names[0])
+static ScrSym *g_wk_syms[SCR_WK_N];
+
+ScrSym *scr_sym_wellknown(ScrStr *name) {
+  for (size_t i = 0; i < SCR_WK_N; i++) {
+    const size_t l = strlen(scr_wk_names[i]);
+    if (name->len != l || memcmp(name->data, scr_wk_names[i], l) != 0) continue;
+    if (!g_wk_syms[i]) {
+      /* the description is an immortal static literal and the symbol itself is immortal: neither is a live heap object at exit */
+      ScrSym *s = scr_sym_new((ScrStr *)&scr_wk_descs[i]);
+      s->rc = SIZE_MAX; /* immortal: retain and release are no-ops */
+      g_wk_syms[i] = s;
+    }
+    return g_wk_syms[i];
+  }
+  scr_trap("scriptc: unknown well-known symbol\n");
+  return NULL;
+}
+
+const char *scr_sym_wellknown_of(const ScrSym *s) {
+  for (size_t i = 0; i < SCR_WK_N; i++)
+    if (g_wk_syms[i] == s) return scr_wk_names[i];
+  return NULL;
+}
+
 ScrStr *scr_sym_desc(ScrSym *s) { return s->desc ? scr_str_retain(s->desc) : NULL; }
 
 ScrStr *scr_sym_key_for(ScrSym *s) { return s->reg_key ? scr_str_retain(s->reg_key) : NULL; }

@@ -1093,8 +1093,12 @@ static JSValue isl_sym_to_js(ScrSym *s) {
   JS_FreeValue(isl_ctx, global);
   if (JS_IsException(ctor)) return ctor;
   JSValue out;
-  ScrStr *key = scr_sym_key_for(s); /* +1 or NULL */
-  if (key != NULL) {
+  const char *wkname = scr_sym_wellknown_of(s);
+  ScrStr *key = wkname != NULL ? NULL : scr_sym_key_for(s); /* +1 or NULL */
+  if (wkname != NULL) {
+    /* a well-known symbol is the engine's own Symbol.<name> */
+    out = JS_GetPropertyStr(isl_ctx, ctor, wkname);
+  } else if (key != NULL) {
     JSValue forfn = JS_GetPropertyStr(isl_ctx, ctor, "for");
     JSValue arg = JS_NewStringLen(isl_ctx, key->data, key->len);
     out = JS_Call(isl_ctx, forfn, ctor, 1, &arg);
@@ -1131,6 +1135,34 @@ static ScrSym *isl_sym_from_js(JSValue v) {
   JSValue global = JS_GetGlobalObject(isl_ctx);
   JSValue ctor = JS_GetPropertyStr(isl_ctx, global, "Symbol");
   JS_FreeValue(isl_ctx, global);
+  {
+    /* an engine well-known symbol (Symbol.iterator, Symbol.dispose, ...) is the runtime's well-known of that name */
+    JSValue dv0 = JS_GetPropertyStr(isl_ctx, v, "description");
+    if (JS_IsString(dv0)) {
+      ScrStr *ds0 = isl_js_to_str(dv0);
+      if (ds0->len > 7 && memcmp(ds0->data, "Symbol.", 7) == 0) {
+        char nm[48];
+        size_t nl0 = ds0->len - 7 < sizeof nm - 1 ? ds0->len - 7 : sizeof nm - 1;
+        memcpy(nm, ds0->data + 7, nl0);
+        nm[nl0] = '\0';
+        JSValue same = JS_GetPropertyStr(isl_ctx, ctor, nm);
+        const bool is_wk = JS_IsSymbol(same) && JS_VALUE_GET_PTR(same) == JS_VALUE_GET_PTR(v);
+        JS_FreeValue(isl_ctx, same);
+        if (is_wk) {
+          ScrStr *nmstr = scr_str_new(nm, nl0);
+          ScrSym *wk = scr_sym_wellknown(nmstr);
+          scr_str_release(nmstr);
+          scr_str_release(ds0);
+          JS_FreeValue(isl_ctx, dv0);
+          JS_FreeValue(isl_ctx, ctor);
+          isl_sym_record(wk, v);
+          return scr_sym_retain(wk);
+        }
+      }
+      scr_str_release(ds0);
+    }
+    JS_FreeValue(isl_ctx, dv0);
+  }
   JSValue keyfn = JS_GetPropertyStr(isl_ctx, ctor, "keyFor");
   JSValue kv = JS_Call(isl_ctx, keyfn, ctor, 1, &v);
   JS_FreeValue(isl_ctx, keyfn);
