@@ -1191,6 +1191,20 @@ function domExceptionRooted(L: Lowerer, className: string): boolean {
  * skipping it would drop a binding the rest of the function can read; both
  * keep the branch lowered. Nested function bodies are not entered (their
  * own `var`s belong to them). */
+/** True when `node` (an IR statement tree) contains `break <label>` for one of `labels`. Labels are unique per construct, so the structural walk needs no
+ * scoping: a nested function's own jumps carry other names. */
+function irBreaksToLabel(node: unknown, labels: readonly string[]): boolean {
+  if (node === null || typeof node !== "object") return false;
+  if (Array.isArray(node)) return node.some((n) => irBreaksToLabel(n, labels));
+  const o = node as { kind?: unknown; label?: unknown };
+  if (o.kind === "break" && typeof o.label === "string" && labels.includes(o.label)) return true;
+  for (const [key, v] of Object.entries(o)) {
+    if (key === "loc") continue;
+    if (v !== null && typeof v === "object" && irBreaksToLabel(v, labels)) return true;
+  }
+  return false;
+}
+
 /** True when control cannot fall out of the end of this lowered statement:
  * a return or throw, a block ending in one, or an `if` whose live arm does
  * (a constant test picks the arm; otherwise both arms must). Conservative:
@@ -1203,6 +1217,8 @@ export function irAlwaysExits(s: IrStmt | readonly IrStmt[]): boolean {
     case "throw":
       return true;
     case "block":
+      // A LABELED block a `break label` leaves from the middle completes normally even when its last statement returns.
+      if (st.labels !== undefined && irBreaksToLabel(st.body, st.labels)) return false;
       return irAlwaysExits(st.body);
     case "if":
       if (st.cond.kind === "boolLit") {
@@ -1360,6 +1376,12 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
         return { kind: kw, label, loc: locOf(stmt) };
       }
       L.rejectJumpCrossingFinally(kw, stmt);
+      // An early `break` of a union-typed switch (lowerUnionSwitch's labeled chain): the innermost breakable construct is that switch.
+      if (kw === "break") {
+        const inner = [...L.ctx.ctl].reverse().find((c) => c.kind === "loop" || c.kind === "switch");
+        const lbl = inner?.kind === "switch" ? inner.labels?.[0] : undefined;
+        if (lbl !== undefined && lbl.startsWith("usw_")) return { kind: "break", label: lbl, loc: locOf(stmt) };
+      }
       // tsc rejects break outside loops/switches and continue outside loops,
       // so the context is always valid here (the validator re-checks).
       return { kind: kw, loc: locOf(stmt) };
@@ -6193,16 +6215,9 @@ function unionCaseLiteralTest(L: Lowerer, disc: IrExpr, test: IrExpr, loc: SrcLo
     // rebind it to an enclosing loop. Walk each clause's statements without
     // descending into nested breakable constructs or functions (their
     // breaks are their own).
-    {
-      const stray = unionSwitchStrayBreak(clauses);
-      if (stray) {
-        L.unsupported(
-          "SC1090",
-          stray,
-          "early 'break' inside a union-typed switch (only a trailing break exits the desugared chain — restructure with if/else)",
-        );
-      }
-    }
+    // An EARLY break (an `if (...) { break; }` inside a case body) exits the switch from the middle of a clause: the chain is wrapped in a
+    // labeled block, and those breaks (the unlabeled ones whose innermost breakable is this switch) jump to its end.
+    const exitLabel = unionSwitchStrayBreak(clauses) !== null ? `usw_${stmt.pos}` : null;
     // The whole case-body sequence is ONE lexical scope, like the real
     // switch lowering.
     L.scopes.push(new Map());
@@ -6286,7 +6301,7 @@ function unionCaseLiteralTest(L: Lowerer, disc: IrExpr, test: IrExpr, loc: SrcLo
             "effectful case tests that share a body with 'default' in a union-typed switch (the shared body is the chain's final else, so the test would never run — bind the test value to a const first)",
           );
         }
-        const body = lowerClauseBodyWithoutExitBreak(L, clause.statements);
+        const body = L.inCtl("switch", () => lowerClauseBodyWithoutExitBreak(L, clause.statements), exitLabel !== null ? [exitLabel] : undefined);
         groups.push({ tests: pendingTests, body, isDefault });
         pendingTests = [];
         pendingImpure = null;
@@ -6307,7 +6322,7 @@ function unionCaseLiteralTest(L: Lowerer, disc: IrExpr, test: IrExpr, loc: SrcLo
         }
         chain = [{ kind: "if", cond, then: g.body, else_: chain.length > 0 ? chain : null, loc }];
       }
-      return { kind: "block", body: chain, loc };
+      return exitLabel !== null ? { kind: "block", body: chain, labels: [exitLabel], loc } : { kind: "block", body: chain, loc };
     } finally {
       L.scopes.pop();
     }
