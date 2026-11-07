@@ -14070,6 +14070,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24700-string-subclass-decoder-shape.js": {
+   "order": [
+    "<repo>/tests/corpus/24700-string-subclass-decoder-shape.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24701-string-subclass-exactness-matrix.js": {
+   "order": [
+    "<repo>/tests/corpus/24701-string-subclass-exactness-matrix.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24702-string-number-boolean-subclass-overrides.js": {
+   "order": [
+    "<repo>/tests/corpus/24702-string-number-boolean-subclass-overrides.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24703-set-prototype-of-and-primitive-prototypes.js": {
+   "order": [
+    "<repo>/tests/corpus/24703-set-prototype-of-and-primitive-prototypes.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24704-string-subclass-rc-churn.js": {
+   "order": [
+    "<repo>/tests/corpus/24704-string-subclass-rc-churn.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2471-record-keyed-write-hasown.js": {
    "order": [
     "<repo>/tests/corpus/2471-record-keyed-write-hasown.js"
