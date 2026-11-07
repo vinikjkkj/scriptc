@@ -2313,8 +2313,8 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           // singleton. Every MEMBER of it still refuses at its own fence.
           if (expr.text === "Promise" && stdlibGlobalNameOf(L, expr) === "Promise") {
             const mapped = L.mapTypeOf(L.typeOf(expr));
-            if (mapped?.kind === "opaque" && mapped.name === "PromiseConstructor") {
-              return { kind: "libCall", fn: "opaque.promiseCtor", args: [], type: mapped, loc };
+            if (mapped?.kind === "dyn") {
+              return { kind: "libCall", fn: "dyn.promiseCtor", args: [], type: DYN, loc };
             }
           }
           // The timer globals as VALUES (setTimeout, setInterval, setImmediate,
@@ -21405,6 +21405,8 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
       [expr.right, expr.left],
     ] as const) {
       if (!ts.isTypeOfExpression(a)) continue;
+      // The Promise constructor value maps dyn, but `typeof Promise` is the stdlib global's folded answer, not a runtime test.
+      if (ts.isIdentifier(a.expression) && stdlibGlobalNameOf(L, a.expression) === "Promise") continue;
       const declared = L.mapTypeOf(L.typeOf(a.expression));
       let value: IrExpr;
       if (declared?.kind === "dyn") {
@@ -25779,6 +25781,8 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
       const propSym = L.checker.getPropertyOfType(L.typeOf(expr.expression), expr.name.text);
       if (
         receiverIr?.kind !== "object" && propSym &&
+        // The Promise constructor VALUE carries its statics (resolve, all, ...) as native members the dyn read answers.
+        !(receiverIr?.kind === "dyn" && L.typeOf(expr.expression).getSymbol()?.name === "PromiseConstructor") &&
         isGenericCallableMemberType(L.checker.getTypeOfSymbol(propSym), L.checker) &&
         // CLASS members keep the class-path fences (a poisoned class's own
         // diagnostics, the bound-method fence above).
