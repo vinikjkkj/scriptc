@@ -11,7 +11,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 . "$here/entries.sh"
 mkdir -p "$(dirname "$out")"
 cd "$here"
-timeout 19800 node ${RIG_NODE_FLAGS:---max-old-space-size=5000 --trace-gc} "$cli" build "$entry" --provenance-sources "${extra[@]}" --backend "$backend" -o "$out.bin" > "$out.txt" 2>&1
+PHASE_TRACE="$out.phases.txt" timeout 19800 node ${RIG_NODE_FLAGS:---max-old-space-size=5000 --trace-gc --expose-gc} --import "$here/phase-tap.mjs" "$cli" build "$entry" --provenance-sources "${extra[@]}" --backend "$backend" -o "$out.bin" > "$out.txt" 2>&1
 rc=$?
 # zapo-core entries: which zapo-js core sources the build reached. A lowered class keeps its name in the binary (error texts and
 # inspect names), so `lowered` counts the class-name strings of a successful build; `errors` counts the error lines a refused build
@@ -24,6 +24,7 @@ if [ "${entry}" = zapo-core.ts ]; then
     echo "reach $f: lowered=$lowered errors=$errs" | tee -a "$out.txt"
   done
 fi
+[ -f "$out.phases.txt" ] && { echo "--- phases ---"; cat "$out.phases.txt"; } >> "$out.txt"
 echo "rc=$rc" >> "$out.txt"
 # keep the binary of a successful build (uploaded as its own artifact); drop a partial one
 [ "$rc" = 0 ] || rm -f "$out.bin"
