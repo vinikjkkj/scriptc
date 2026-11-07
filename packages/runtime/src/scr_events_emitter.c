@@ -1307,7 +1307,7 @@ static ScrDyn *ee_method_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc
     r = ee_call(recv, em, EE_OP_NAMES[w->op], strlen(EE_OP_NAMES[w->op]), args, argc, "method");
   } else {
     scr_throw_error_named(scr_str_new("TypeError", 9),
-                          scr_str_new("Cannot read properties of undefined (reading '_events')", 56));
+                          scr_str_new("Cannot read properties of undefined (reading '_events')", 55));
   }
   scr_dyn_release(recv);
   return r;
