@@ -12250,25 +12250,31 @@ export function moduleUsesEngineFn(mod: IrModule): boolean {
   let found = false;
   let sawGetPrototypeOf = false;
   let sawConstructorRead = false;
+  let sawConstructorCall = false;
+  let sawDynCall = false;
   const visit = (v: unknown): void => {
     if (found || v === null || typeof v !== "object") return;
     if (Array.isArray(v)) {
       for (const item of v) visit(item);
       return;
     }
-    const node = v as { kind?: unknown; op?: unknown; name?: unknown; fn?: unknown; key?: { kind?: unknown; value?: unknown } };
+    const node = v as { kind?: unknown; op?: unknown; name?: unknown; fn?: unknown; method?: unknown; key?: { kind?: unknown; value?: unknown } };
     if (node.kind === "jsOp" && node.op === "globalGet" && node.name === "Function") {
       found = true;
       return;
     }
     if (node.kind === "libCall" && node.fn === "dyn.getPrototypeOf") sawGetPrototypeOf = true;
     if (node.kind === "dynKeyGet" && node.key?.kind === "strLit" && node.key.value === "constructor") sawConstructorRead = true;
+    if (node.kind === "dynInvoke" && node.method === "constructor") sawConstructorCall = true;
+    if (node.kind === "dynCall") sawDynCall = true;
     for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
   };
   visit(mod);
-  // The Function constructor VALUE (`Object.getPrototypeOf(f).constructor`) is reachable when the program takes a prototype and
-  // reads a `constructor` off a dynamic value: only then does the engine link in for it.
-  return found || (sawGetPrototypeOf && sawConstructorRead);
+  // The Function constructor VALUE (`Object.getPrototypeOf(f).constructor`) can only run text when the program CALLS it: a
+  // `proto.constructor(...)` call, or a `constructor` read in a program that calls a dynamic function value. Taking the prototype and
+  // reading or comparing `.constructor` (the common identity test) never needs the engine.
+  const viaCtor = sawGetPrototypeOf && (sawConstructorCall || (sawConstructorRead && sawDynCall));
+  return found || viaCtor;
 }
 
 /** stream.destroyDyn on the IR: the dyn destroy unit (scr_stream_dyn.c). */
