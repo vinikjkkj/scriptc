@@ -1,0 +1,16 @@
+const e = new Event('x', { cancelable: true, bubbles: true, composed: true });
+console.log(e.type, e.cancelable, e.bubbles, e.composed, e.eventPhase, e.defaultPrevented, e.isTrusted, e.cancelBubble, e.returnValue);
+console.log(e.target === null, e.currentTarget === null, e.srcElement === null, e.composedPath().length);
+e.preventDefault();
+console.log(e.defaultPrevented, e.returnValue);
+const e2 = new Event('y');
+e2.preventDefault();
+console.log(e2.defaultPrevented, e2.returnValue, e2.cancelable, e2.bubbles);
+e2.stopPropagation();
+console.log(e2.cancelBubble);
+e2.cancelBubble = true;
+const e3 = new Event('z', { cancelable: true });
+e3.returnValue = false;
+console.log(e3.defaultPrevented);
+console.log(Event.NONE, Event.CAPTURING_PHASE, Event.AT_TARGET, Event.BUBBLING_PHASE);
+console.log(typeof e.timeStamp, e.timeStamp > 0 && e.timeStamp < 1e6);
