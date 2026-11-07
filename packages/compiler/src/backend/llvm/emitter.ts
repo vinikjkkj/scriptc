@@ -855,6 +855,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "abort.aborted": "scr_abort_signal_aborted",
   "abort.reason": "scr_abort_signal_reason",
   "abort.off": "scr_abort_signal_off",
+  "abort.throwIfAborted": "scr_abort_signal_throw_if_aborted",
   // The Event surface (scr_event.c); abort.onEv MOVES its closure
   // (LIB_FN_MOVE_ARGS) and the abort-dispatch bridge is scr_abort.c's.
   "abort.onEv": "scr_abort_signal_add_ev",

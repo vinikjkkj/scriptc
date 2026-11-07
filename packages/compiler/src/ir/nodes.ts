@@ -7172,6 +7172,8 @@ export type IrLibFn =
   | "abort.reason"
   | "abort.on"
   | "abort.off"
+  /** signal.throwIfAborted(): throws the signal's own reason when aborted (may-throw). */
+  | "abort.throwIfAborted"
   /** The Event value surface (scr_event.c). `new` takes the type string and
    * the three init booleans; the getters borrow the receiver; the listener
    * form `abort.onEv` MOVES a closure whose ABI is (closure, event) in,
@@ -14738,6 +14740,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   // `new Event()` with no type, the zero-argument initEvent(), and `new
   // Event(t, nonObject)` throw Node's TypeErrors (ERR_MISSING_ARGS /
   // ERR_INVALID_ARG_TYPE).
+  "abort.throwIfAborted",
   "evt.newMissing",
   "evt.newDyn",
   "evt.missingType",

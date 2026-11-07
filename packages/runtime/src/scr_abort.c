@@ -162,6 +162,13 @@ ScrDyn *scr_abort_signal_reason(const ScrAbortSignal *s) {
   return scr_dyn_retain(s->reason ? s->reason : scr_dyn_undefined());
 }
 
+/* `signal.throwIfAborted()`: throws signal.reason ITSELF (identity kept: the thrown value is the very object the
+ * abort stored, an Error with its code, a DOMException, or any other value) when the signal is aborted, and does
+ * nothing otherwise. scr_throw_dyn takes ownership, so the reason is retained for it. */
+void scr_abort_signal_throw_if_aborted(const ScrAbortSignal *s) {
+  if (s->aborted) scr_throw_dyn(scr_dyn_retain(s->reason));
+}
+
 /* ── listeners ──────────────────────────────────────────────────────── */
 
 /* EventTarget's listener set is keyed on (type, callback, capture), so a

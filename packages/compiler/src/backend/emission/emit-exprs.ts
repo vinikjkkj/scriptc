@@ -4686,6 +4686,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_abort_controller_abort(${arg(0)}, ${arg(1)})`);
           case "abort.aborted":
             return finish(`scr_abort_signal_aborted(${arg(0)})`);
+          case "abort.throwIfAborted":
+            return finish(`scr_abort_signal_throw_if_aborted(${arg(0)})`);
           case "abort.reason":
             return finish(`scr_abort_signal_reason(${arg(0)})`);
           // The listener closure MOVES into the signal's vector (the
