@@ -1,5 +1,6 @@
 // The REFUSED side of reading `freezeFreshLocal`'s initializer THROUGH the
-// casts.
+// casts, over RECORDS (an array freeze sets a real frozen flag now, so every
+// array freeze compiles; a record has no such flag yet, and keeps this fence).
 //
 // The admitted side is corpus
 // 7793-a-fresh-local-behind-a-cast-is-still-fresh.ts: `const acc = [] as
@@ -23,12 +24,15 @@
 // after the freeze would have to observe the frozen bit. This is the case
 // the whole gate exists for, and reading through the cast must not reach
 // past the literal test into it.
-const shared: string[] = [];
-shared.push("a");
-const aliased = shared as string[];
-console.log(Object.freeze(aliased).join("|"));
-shared.push("b");
-console.log(aliased.join("|"));
+interface Box {
+    items: string[];
+}
+const shared: Box = { items: [] };
+shared.items.push("a");
+const aliased = shared as Box;
+console.log(Object.freeze(aliased).items.join("|"));
+shared.items.push("b");
+console.log(aliased.items.join("|"));
 
 // ── 2. A REFERENCE FROM A NESTED FUNCTION ────────────────────────────────
 //
@@ -37,31 +41,31 @@ console.log(aliased.join("|"));
 // binding, its run time cannot be bounded, and the write it performs
 // happens after the freeze. Unwrapping must not be mistaken for a
 // shortcut past the reference walk.
-function withEscape(): readonly string[] {
-    const acc = [] as string[];
-    acc.push("a");
+function withEscape(): Readonly<Box> {
+    const acc = { items: [] } as Box;
+    acc.items.push("a");
     const later = (): void => {
-        acc.push("b");
+        acc.items.push("b");
     };
     const frozen = Object.freeze(acc);
     later();
     return frozen;
 }
-console.log(withEscape().join("|"));
+console.log(withEscape().items.join("|"));
 
 // ── 3. A FREEZE INSIDE A LOOP THE DECLARATION SITS OUTSIDE OF ────────────
 //
 // Same literal-behind-a-cast initializer, admitted by the unwrap, refused
 // by the clause that follows: the loop runs the earlier mutations again
 // after the value was frozen.
-function earlyPublish(rows: readonly string[]): readonly string[] {
-    const acc = [] as string[];
+function earlyPublish(rows: readonly string[]): Readonly<Box> {
+    const acc = { items: [] } as Box;
     for (const r of rows) {
-        acc.push(r);
+        acc.items.push(r);
         if (r === "z") {
             return Object.freeze(acc);
         }
     }
     return Object.freeze(acc);
 }
-console.log(earlyPublish(["a", "z", "b"]).join("|"));
+console.log(earlyPublish(["a", "z", "b"]).items.join("|"));
