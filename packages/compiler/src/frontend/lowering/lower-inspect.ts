@@ -37,7 +37,7 @@ import * as ts from "../ts7/adapter.js";
 import type { NullProtoPatch } from "./ir-patch.js";
 import { boundCodeOf, fnValueCodeOfNode, jsFuncValueNameOf, staticFnCodeOf, type Lowerer } from "./lowerer.js";
 import { isJsSourceFile, locOf } from "../program.js";
-import { BOOL, BYTES_ELEM_NAMES, DYN, F64, canBoxFuncIntoDyn, canConvertToDyn, internalSlotFields, parseOwnShadowField, IrExpr, IrStmt, IrType, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, UNDEFINED_T, VOID, shapeHasAccessorSlots, typeEquals, typeKey } from "../../ir/nodes.js";
+import { BOOL, BYTES_ELEM_NAMES, DYN, F64, canBoxFuncIntoDyn, canConvertToDyn, internalSlotFields, parseOwnShadowField, IrExpr, IrStmt, IrType, RUNTIME_ERROR_CLASSES, STRING, SrcLoc, UNDEFINED_T, VOID, shapeHasAccessorSlots, typeKey } from "../../ir/nodes.js";
 import { CLASS_PROPS_FIELD, type ClassInfo } from "./lower-classes.js";
 import { pureReemittable } from "./lower-exprs.js";
 import { bindingNeverReassigned, classInstanceToString, dynRestPack } from "./lower-calls.js";
