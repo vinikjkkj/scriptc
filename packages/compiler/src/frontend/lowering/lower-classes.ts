@@ -5807,6 +5807,9 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
         if (fields.has(name) || shadowFields.has(name)) continue;
         const at = rec.fns[0]!;
         const own = methods.get(name);
+        // A GENERIC method (implicit-any parameters: monomorphized per call site, no single `%C.m`), or a name no method of the class chain
+        // carries, is the write lowering's own business (the run-time property table of a class that carries one): leave it exactly there.
+        if (own === undefined && rec.late !== true && (genericMethods.has(name) || findGenericMethodOn(L, base, name) !== null || (base === null || L.findMethodOn(base, name) === null))) continue;
         const shT = L.checker.getTypeAtLocation(at);
         const shMapped = L.mapTypeOf(shT) ?? dynFallbackType(L, at, shT);
         const shArmed = shMapped !== null && shMapped.kind === "func" ? L.withUndefinedArmOf(shMapped) : null;

@@ -628,6 +628,7 @@ export function applyInstanceOverrides(L: Lowerer, fnLists: IrFunction[][]): voi
   }
   for (const info of withSlots) {
     for (const name of info.shadowLate!) {
+     try {
       const found = byName.get(`%${info.def.name}.${name}`);
       if (found === undefined) continue;
       const raw = found.fn;
@@ -676,6 +677,12 @@ export function applyInstanceOverrides(L: Lowerer, fnLists: IrFunction[][]): voi
         type: slotFn.ret,
         loc,
       };
+      // The own function's answer must convert into the method's declared result (`null` where the method returns a string cannot).
+      const retOk = typeEquals(slotFn.ret, rt) || rt.kind === "void" || rt.kind === "dyn" || (slotFn.ret.kind === "dyn" && canDynCheckTo(rt, (id) => L.shapes.get(id), (id) => L.unions.get(id)));
+      if (!retOk) {
+        L.unsupported("SC1090", info.decl!, `the instance-assigned function over '${name}' answers '${L.fmt(slotFn.ret)}' where the method answers '${L.fmt(rt)}'`);
+        continue;
+      }
       const finish = (): IrStmt[] => {
         if (rt.kind === "void") return [{ kind: "exprStmt", expr: viaSlot, loc }, { kind: "return", value: null, loc }];
         if (slotFn.ret.kind === "void") {
@@ -713,6 +720,10 @@ export function applyInstanceOverrides(L: Lowerer, fnLists: IrFunction[][]): voi
         loc,
       };
       raw.body.unshift({ kind: "if", cond: isSet, then: slotBody, else_: null, loc });
+     } catch (e) {
+      // the diagnostic is recorded; the method keeps its plain body
+      if (!(e instanceof PoisonError)) throw e;
+     }
     }
   }
 }
