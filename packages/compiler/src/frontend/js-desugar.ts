@@ -1781,6 +1781,32 @@ function fillsEveryIteration(region: ts.Node, name: string, counter: string, tes
   return found && !spoiled;
 }
 
+/** The member names `m` for which the file writes through a RUN-TIME key on `<expr>.m[key]` (`this._transformer.reply[name] =
+ * func`, `registry.handlers[type]++`, `delete table.entries[id]`): the property `m` is used as a string-keyed table. The
+ * receiver is not resolved (this runs before the checker), so the name alone decides; the sites below that use the set only
+ * touch an EMPTY object literal bound to that very name. */
+function dynamicKeyTableMembers(sf: ts.SourceFile): Set<string> {
+  const names = new Set<string>();
+  const memberOf = (e: ts.Expression): string | null => {
+    while (ts.isParenthesizedExpression(e)) e = e.expression;
+    if (!ts.isElementAccessExpression(e) || !ts.isPropertyAccessExpression(e.expression) || !ts.isIdentifier(e.expression.name)) return null;
+    const k = e.argumentExpression;
+    if (ts.isStringLiteral(k) || ts.isNoSubstitutionTemplateLiteral(k) || ts.isNumericLiteral(k)) return null;
+    return e.expression.name.text;
+  };
+  const walk = (n: ts.Node): void => {
+    let m: string | null = null;
+    if (ts.isBinaryExpression(n) && ASSIGN_OPS.has(n.operatorToken.kind)) m = memberOf(n.left);
+    else if ((ts.isPrefixUnaryExpression(n) || ts.isPostfixUnaryExpression(n)) &&
+      (n.operator === ts.SyntaxKind.PlusPlusToken || n.operator === ts.SyntaxKind.MinusMinusToken)) m = memberOf(n.operand);
+    else if (ts.isDeleteExpression(n)) m = memberOf(n.expression);
+    if (m !== null) names.add(m);
+    ts.forEachChild(n, walk);
+  };
+  walk(sf);
+  return names;
+}
+
 function openRecordEdits(fileName: string, text: string): string | null {
   if (!text.includes("{}") && !/=\s*\{/.test(text)) return null;
   if (!OPEN_RECORD_PREFILTER.test(text) && !/\bcaptureStackTrace\s*\(/.test(text) && !/[\w$]\[[^\]\n"'`0-9][^\]\n"'`]*\]/.test(text)) return null;
@@ -1900,8 +1926,46 @@ function openRecordEdits(fileName: string, text: string): string | null {
     }
   };
   dispatchTables();
+  const tableMembers = dynamicKeyTableMembers(sf);
+  const isEmptyLit = (e: ts.Expression): e is ts.ObjectLiteralExpression => {
+    while (ts.isParenthesizedExpression(e)) e = e.expression;
+    return ts.isObjectLiteralExpression(e) && e.properties.length === 0;
+  };
   const visit = (n: ts.Node): void => {
     if (ts.isClassDeclaration(n) || ts.isClassExpression(n)) castClassFields(n);
+    // A property bound to an EMPTY object literal and written through a run-time key somewhere in the file is a string-keyed
+    // table (ioredis' `Command._transformer = { argument: {}, reply: {} }` filled by `this._transformer.reply[name] = func`):
+    // a one-shape record cannot take a key it never named, so the empty literal is the checked-dynamic object. The member
+    // name decides (`X.m = {}`, or `{ m: {} }`), only an empty literal is touched, and the binding rules above keep covering
+    // plain variables.
+    if (tableMembers.size > 0) {
+      if (
+        ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isExpressionStatement(n.parent) &&
+        ts.isPropertyAccessExpression(n.left) && ts.isIdentifier(n.left.name) && tableMembers.has(n.left.name.text) &&
+        n.left.expression.kind !== ts.SyntaxKind.ThisKeyword && isEmptyLit(n.right) && !inTypedFn(n)
+      ) {
+        let lit: ts.Expression = n.right;
+        while (ts.isParenthesizedExpression(lit)) lit = lit.expression;
+        cast(lit);
+      }
+      // `C.t = {}` after the class reaches this pass already rewritten to `static t = {}` (staticExpandoEdits).
+      if (
+        ts.isPropertyDeclaration(n) && ts.isIdentifier(n.name) && tableMembers.has(n.name.text) && n.initializer !== undefined &&
+        isEmptyLit(n.initializer) && ts.getCombinedModifierFlags(n) & ts.ModifierFlags.Static && !inTypedFn(n)
+      ) {
+        let lit: ts.Expression = n.initializer;
+        while (ts.isParenthesizedExpression(lit)) lit = lit.expression;
+        cast(lit);
+      }
+      if (
+        ts.isPropertyAssignment(n) && ts.isIdentifier(n.name) && tableMembers.has(n.name.text) && isEmptyLit(n.initializer) &&
+        ts.isObjectLiteralExpression(n.parent) && !inTypedFn(n)
+      ) {
+        let lit: ts.Expression = n.initializer;
+        while (ts.isParenthesizedExpression(lit)) lit = lit.expression;
+        cast(lit);
+      }
+    }
     if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer !== undefined) {
       let init: ts.Expression = n.initializer;
       while (ts.isParenthesizedExpression(init)) init = init.expression;
