@@ -13866,7 +13866,11 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       // A TYPED ARRAY (literal or aliased) takes the real frozen bit: the program's mutations of arrays of this type are guarded
       // (Lowerer.frozenArrayRewrite), so a write through any alias throws or is ignored exactly as Node does.
       if (value.type.kind === "array") {
-        if (!L.frozenArrayTypes.some((t) => typeEquals(t, value.type))) L.frozenArrayTypes.push(value.type);
+        // A CONSTANT freeze (the array literal or a fresh array call sits in the freeze call itself) leaves no mutable reference: only a type escape
+        // (readonlyArrayEscapeRisk) could mutate it, so such types are guarded only in a program that has one. Freezing a NAME keeps its original alias.
+        const constant = ts.isArrayLiteralExpression(inner) || (ts.isCallExpression(inner) && ts.isPropertyAccessExpression(inner.expression) && FRESH_ARRAY_METHODS.has(inner.expression.name.text));
+        const bucket = constant ? L.constFrozenArrayTypes : L.frozenArrayTypes;
+        if (!bucket.some((t) => typeEquals(t, value.type))) bucket.push(value.type);
         return { kind: "libCall", fn: "arr.freeze", args: [value], type: value.type, loc: locOf(call) };
       }
       if (isLiteral) {

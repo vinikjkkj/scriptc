@@ -3718,6 +3718,48 @@ export class Lowerer {
    * freezes no array, which is what keeps every other program free of the guards below. */
   frozenArrayTypes: IrType[] = [];
 
+  /** The array types frozen ONLY as constants (`Object.freeze([...])`, a fresh array call): the frozen array is reachable only through its
+   * readonly-typed result, so a mutating alias can exist only through a type escape (readonlyArrayEscapeRisk). Such types are guarded only when the
+   * program has one. */
+  constFrozenArrayTypes: IrType[] = [];
+
+  private readonlyEscapeCache: boolean | undefined;
+
+  /** Does any source in the program turn a readonly array into something mutable without a freeze alias: an assertion whose operand is a readonly
+   * array and whose target is not (including any / unknown), `Array.isArray` over a value that may be one (it narrows a readonly array to any[]), or
+   * a JSDoc cast in a JavaScript file (conservative: its operand type is not read). When none does, the only mutable references to a constant-frozen
+   * array are the ones that never existed. */
+  readonlyArrayEscapeRisk(): boolean {
+    if (this.readonlyEscapeCache !== undefined) return this.readonlyEscapeCache;
+    const isReadonlyArr = (n: ts.Node): boolean => {
+      const s = this.checker.typeToString(this.checker.getTypeAtLocation(n));
+      return s.includes("readonly ") || s.includes("ReadonlyArray<");
+    };
+    let risk = false;
+    for (const sf of this.program.getSourceFiles()) {
+      if (risk) break;
+      if (sf.isDeclarationFile) continue;
+      if (/\.(?:c|m)?jsx?$/.test(sf.fileName) && /@type\s*\{[^}]*\}\s*\*\/\s*\(/.test(sf.text)) {
+        risk = true;
+        break;
+      }
+      const stack: ts.Node[] = [sf];
+      while (stack.length > 0 && !risk) {
+        const n = stack.pop()!;
+        if (ts.isAsExpression(n) || ts.isTypeAssertion(n)) {
+          if (isReadonlyArr(n.expression) && !isReadonlyArr(n)) risk = true;
+        } else if (
+          ts.isCallExpression(n) && n.arguments.length === 1 && ts.isPropertyAccessExpression(n.expression) &&
+          n.expression.name.text === "isArray" && ts.isIdentifier(n.expression.expression) && n.expression.expression.text === "Array"
+        ) {
+          if (isReadonlyArr(n.arguments[0]!)) risk = true;
+        }
+        ts.forEachChild(n, (c) => { stack.push(c); });
+      }
+    }
+    this.readonlyEscapeCache = risk;
+    return risk;
+  }
 
 
   /** Set when the program freezes a DYN array (dyn.freezeArr): the dyn write paths then tell sloppy callers from strict ones (the Sloppy variants of keySet and keyDelete). */
@@ -3729,8 +3771,9 @@ export class Lowerer {
    * write, length write, element clear) throw in strict code and are skipped in sloppy code. Arrays of other types, and programs with no frozen array,
    * carry nothing. */
   frozenArrayRewrite(functions: IrFunction[]): void {
-    if (this.frozenArrayTypes.length === 0 && !this.dynArrayFrozen) return;
-    const frozenType = (t: IrType): boolean => t.kind === "array" && this.frozenArrayTypes.some((f) => typeEquals(f, t));
+    if (this.frozenArrayTypes.length === 0 && this.constFrozenArrayTypes.length === 0 && !this.dynArrayFrozen) return;
+    const guarded: IrType[] = [...this.frozenArrayTypes, ...(this.constFrozenArrayTypes.length > 0 && this.readonlyArrayEscapeRisk() ? this.constFrozenArrayTypes : [])];
+    const frozenType = (t: IrType): boolean => t.kind === "array" && guarded.some((f) => typeEquals(f, t));
     const sfByName = new Map<string, ts.SourceFile>();
     for (const sf of this.program.getSourceFiles()) sfByName.set(sf.fileName, sf);
     const strictAtLoc = (loc: SrcLoc): boolean => {
