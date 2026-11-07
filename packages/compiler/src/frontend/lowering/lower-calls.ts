@@ -6605,7 +6605,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     // shape was ever consulted.
     if (
       ts.isElementAccessExpression(expr.expression) &&
-      !expr.expression.questionDotToken &&
+      (!expr.expression.questionDotToken || L.chainHandled.has(expr.expression)) &&
       !expr.questionDotToken
     ) {
       const si = lowerStreamAsyncIteratorCall(L, expr, expr.expression);
@@ -6626,7 +6626,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     // callee-as-value path could fence on the member read.
     if (
       ts.isElementAccessExpression(expr.expression) &&
-      !expr.expression.questionDotToken &&
+      (!expr.expression.questionDotToken || L.chainHandled.has(expr.expression)) &&
       !expr.questionDotToken &&
       ts.isStringLiteralLike(expr.expression.argumentExpression)
     ) {
@@ -6675,7 +6675,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     // dispatches exactly like the named method call would.
     if (
       ts.isElementAccessExpression(expr.expression) &&
-      !expr.expression.questionDotToken &&
+      (!expr.expression.questionDotToken || L.chainHandled.has(expr.expression)) &&
       !expr.questionDotToken &&
       !expr.arguments.some((a) => ts.isSpreadElement(a)) &&
       ts.isIdentifier(expr.expression.argumentExpression)
@@ -6709,9 +6709,22 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         };
       }
     }
+    // `recv["name"](args)` / `recv?.["name"](args)` over a static class instance whose class declares `name` as a METHOD:
+    // the element spelling of the dot call -- the same direct dispatch with the receiver as `this` (the callee read below
+    // would hand back the method as an unbound value, losing `this`).
     if (
       ts.isElementAccessExpression(expr.expression) &&
-      !expr.expression.questionDotToken &&
+      (!expr.expression.questionDotToken || L.chainHandled.has(expr.expression)) &&
+      !expr.questionDotToken &&
+      !expr.arguments.some((a) => ts.isSpreadElement(a)) &&
+      ts.isStringLiteralLike(expr.expression.argumentExpression)
+    ) {
+      const literalKeyed = lowerLiteralKeyedClassMethodCall(L, expr, expr.expression);
+      if (literalKeyed !== null) return literalKeyed;
+    }
+    if (
+      ts.isElementAccessExpression(expr.expression) &&
+      (!expr.expression.questionDotToken || L.chainHandled.has(expr.expression)) &&
       !expr.questionDotToken &&
       !expr.arguments.some((a) => ts.isSpreadElement(a))
     ) {
@@ -7038,6 +7051,43 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
    * the runtime call, so a nullish receiver's "Cannot read properties of
    * undefined (reading 'k')" now fires after the arguments evaluate rather
    * than before. Unchanged in message and in kind. */
+  /** `recv["name"](args)` where `recv` is a static class instance and `name` a plain declared method: the dot call's
+   * direct dispatch (lowerObjectMethodCall's tail), keyed by the literal. Null for every other shape (generic or abstract
+   * methods, builtin roots, runtime-keyed classes), which keep their existing lowering. */
+  function lowerLiteralKeyedClassMethodCall(L: Lowerer, call: ts.CallExpression, access: ts.ElementAccessExpression): IrExpr | null {
+    if (L.chainBlocked(call, access)) return null;
+    const key = (access.argumentExpression as ts.StringLiteralLike).text;
+    const receiverIr = L.exprOverrides.get(access.expression)?.type ?? L.mapTypeOf(L.typeOf(access.expression));
+    if (receiverIr?.kind !== "object") return null;
+    const info = L.classes.get(receiverIr.className);
+    if (!info || info.builtinError || info.def.runtime === true) return null;
+    const found = L.findMethodOn(info, key);
+    if (!found || found.declarer.builtinError || found.sig.abstract === true) return null;
+    if (findGenericMethodOn(L, info, key) !== null) return null;
+    if (L.overrideBelow(info, key)) requireVirtualSlotFit(L, info, key, call);
+    if (L.overrideBelow(info, key)) L.noteVirtualEdge(info, key);
+    else L.noteEdge(`%${found.declarer.def.name}.${key}`);
+    const receiver = L.lowerExpr(access.expression);
+    const args = L.completeArgs(call.arguments, found.sig.params, locOf(call), call);
+    if (L.overrideBelow(info, key)) {
+      return reconcileOverloadReturn(L, call, {
+        kind: "virtualCall",
+        className: info.def.name,
+        method: key,
+        args: [L.upcastTo(receiver, info.def.name), ...args],
+        type: found.sig.ret,
+        loc: locOf(call),
+      });
+    }
+    return reconcileOverloadReturn(L, call, {
+      kind: "call",
+      callee: `%${found.declarer.def.name}.${key}`,
+      args: [L.upcastTo(receiver, found.declarer.def.name), ...args],
+      type: found.sig.ret,
+      loc: locOf(call),
+    });
+  }
+
   function lowerDynKeyedMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.ElementAccessExpression,): IrExpr | null {
     if (L.chainBlocked(call, access)) return null;

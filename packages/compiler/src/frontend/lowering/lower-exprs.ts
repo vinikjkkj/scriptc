@@ -14744,7 +14744,7 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
    * implicit-any methods a subclass overrides, and the Object.prototype members
    * listed in OBJECT_PROTOTYPE_MEMBERS that a key can name but have no exact value. */
   function lowerClassComputedKeyRead(L: Lowerer, expr: ts.ElementAccessExpression): IrExpr | null {
-    if (expr.questionDotToken !== undefined) return null;
+    if (expr.questionDotToken !== undefined && !L.chainHandled.has(expr)) return null;
     const loc = locOf(expr);
     const receiverIr = neverTaintedJsType(L, expr.expression, L.typeOf(expr.expression)) ? null : L.mapTypeOf(L.typeOf(expr.expression));
     let info: ClassInfo | null = null;
@@ -15345,7 +15345,7 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
         return L.maybeNarrow({ kind: "dynKeyGet", key, value: recvDyn, type: DYN, loc: locOf(expr) }, expr);
       }
     }
-    if (receiverIr?.kind === "object" && expr.questionDotToken === undefined) {
+    if (receiverIr?.kind === "object" && (expr.questionDotToken === undefined || L.chainHandled.has(expr))) {
       const keyed = lowerInstanceKeyedRead(L, expr, receiverIr.className);
       if (keyed !== null) return keyed;
     }
