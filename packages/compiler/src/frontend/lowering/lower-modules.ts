@@ -40,6 +40,7 @@ import { isUnitOnlyTsType, unitOnlyUnion } from "../types.js";
 import type { ClassInfo } from "./lower-classes.js";
 import { isAnyDynContainer, inferContainerTypeFromUses, decoratorNodesOf, genericIfaceBindingKeepsClass, guaranteedDefinitionThrow, bindingHoldsItsInitializer, castAliasedClassRefOf, constructedClassInfoOf, adoptedInstanceClassOf, inheritsBuiltinStreamCtor } from "./lower-classes.js";
 import { isMixinFnBinding, mixinResultBindingClassOf } from "./lower-mixins.js";
+import { customInspectRegistration } from "./lower-inspect.js";
 
 /** One file's declarations, split for collection and init-body lowering. */
 export interface FileParts {
@@ -3920,6 +3921,11 @@ function activationsOf(L: Lowerer, sf: ts.SourceFile): Map<ts.Node, number> {
       // The baked JSON documents every module may read (jsonDocGlobal and the destructured require): assigned before the first
       // dependency's init runs, whatever order the graph evaluates in (an ES-module entry calls its imports from this header).
       header.push(...(L.jsonEntryInitActions.get(sf) ?? []));
+      // The function values a [util.inspect.custom] method receives, registered before any module code can print an instance.
+      if (sf === L.entry) {
+        const customReg = customInspectRegistration(L, loc0);
+        if (customReg !== null) header.push(customReg);
+      }
       for (const { stmt, dep } of orderedImportsOf(L.program, sf)) {
         const npm = L.npmInitActions.get(sf)?.get(stmt);
         if (npm !== undefined && npm.length > 0) {

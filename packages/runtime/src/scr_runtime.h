@@ -10527,6 +10527,10 @@ void scr_insp_begin(double recurse);
  * previous one; opts_pop restores it. opt_depth / opt_max_array read the
  * active depth and maxArrayLength (Infinity when unbounded). Borrowed input. */
 void scr_insp_opts_push(const ScrDyn *o);
+void scr_insp_custom_register(ScrDyn *stylize, ScrDyn *inspect);
+void scr_insp_custom_release(void);
+ScrDyn *scr_insp_custom_opts(ScrDyn *stylize);
+ScrStr *scr_insp_custom_result(ScrDyn *r, double recurse, double depth);
 void scr_insp_opts_pop(void);
 double scr_insp_opt_depth(void);
 /* shown(n): entries a composite of n emits; rem(n): n - maxLength (tail when > 0). */
