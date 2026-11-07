@@ -9777,6 +9777,22 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
       if (pt === null && !ctx.dynamic && (declSpellsAny(checker.declarationsOf(p)) || declAnnotatedAny(fieldTs, checker.declarationsOf(p)))) {
         pt = DYN;
       }
+      // An INTERFACE / type-literal member named `constructor` declares what every plain object inherits from
+      // Object.prototype (mysql2's `RowDataPacket { constructor: { name: 'RowDataPacket' } }`): the member is not own
+      // data, so a check-and-extract that demanded it as an own key rejected every real row ("expected array | ... at
+      // $[0], got array"), while Node never looks. The slot is the checked-dynamic one: the builder reads it through the
+      // member walk (the inherited function when no own key exists) and the matcher accepts any value. A class's own
+      // `constructor` is a method declaration, not a property signature, and is untouched.
+      if (
+        pt !== null &&
+        pt.kind === "record" &&
+        p.name === "constructor" &&
+        !ctx.dynamic &&
+        checker.declarationsOf(p).length > 0 &&
+        checker.declarationsOf(p).every((d) => ts.isPropertySignature(d))
+      ) {
+        pt = DYN;
+      }
       // dyn FIELDS map now (`{ v: unknown }`, `[string, unknown]` tuples):
       // the slot carries a dyn value exactly like an `unknown`-valued
       // overflow entry — same RC adapters, same dynFrom conversion on the
