@@ -1,0 +1,14 @@
+{
+  "packages": {
+    "authoredjs": {
+      "dir": "./attested-src/authoredjs",
+      "commit": "2222222222222222222222222222222222222222",
+      "repo": "https://github.com/example/authoredjs"
+    },
+    "dynhost": {
+      "dir": "./attested-src/dynhost",
+      "commit": "5555555555555555555555555555555555555555",
+      "repo": "https://github.com/example/dynhost"
+    }
+  }
+}
