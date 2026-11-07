@@ -26177,6 +26177,12 @@
     "<repo>/tests/corpus/24694-late-method-with-a-typed-parameter-and-arguments-rebinds-off-the-pack.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/24695-constructor-assigned-method-override-runs-with-the-instance-as-this.js": {
+   "order": [
+    "<repo>/tests/corpus/24695-constructor-assigned-method-override-runs-with-the-instance-as-this.js"
+   ],
+   "diags": []
   }
  }
 }
