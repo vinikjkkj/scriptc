@@ -284,9 +284,33 @@ export function collectExpandoMembers(L: Lowerer, sf: ts.SourceFile): void {
   // 7000-level nesting fixtures) must reach their own named fences, not
   // blow the collection pass's stack.
   const queue: ts.Node[] = [];
+  // A key the program installs with Object.defineProperty(F, "key", ...) is a property DESCRIPTOR of the function (an accessor, say), not a
+  // lifted slot: `F.key = v` must reach the descriptor's setter, and a read its getter, so the by-name lifting stands down for that key.
+  const definedKeys = new Map<ts.Symbol, Set<string>>();
+  {
+    const scan: ts.Node[] = [sf];
+    while (scan.length > 0) {
+      const n = scan.pop()!;
+      if (
+        ts.isCallExpression(n) && n.arguments.length >= 2 && ts.isPropertyAccessExpression(n.expression) &&
+        n.expression.name.text === "defineProperty" && ts.isIdentifier(n.expression.expression) && n.expression.expression.text === "Object" &&
+        ts.isStringLiteralLike(n.arguments[1]!)
+      ) {
+        const fnSym = expandoFnSymbolOf(L, n.arguments[0]!);
+        if (fnSym !== null) {
+          let keys = definedKeys.get(fnSym);
+          if (!keys) definedKeys.set(fnSym, (keys = new Set()));
+          keys.add((n.arguments[1] as ts.StringLiteralLike).text);
+        }
+      }
+      ts.forEachChild(n, (c) => { scan.push(c); });
+    }
+  }
   const process = (node: ts.Node): void => {
     const w = expandoWriteOf(L, node);
-    if (w) {
+    if (w && typeof w.key === "string" && definedKeys.get(w.fnSym)?.has(w.key)) {
+      // descriptor-owned key: no lifted member
+    } else if (w) {
       let members = L.expandoMembers.get(w.fnSym);
       if (!members) {
         members = new Map();
