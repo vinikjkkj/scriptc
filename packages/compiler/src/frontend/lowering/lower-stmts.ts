@@ -2428,7 +2428,8 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
             el,
             `destructuring '${propName}' off a union-typed source (every arm must be a record ` +
               `answering '${propName}', exactly as a '.${propName}' read on the same value must — ` +
-              `narrow to a single arm first)`,
+              `narrow to a single arm first)` +
+              ` DIAG arms=${(L.unions.get(srcType.unionId)?.arms ?? []).map((arm) => arm.kind === "record" ? `record{${(L.shapes.get(arm.shapeId)?.fields ?? []).map((f) => `${f.name}:${L.fmt(f.type)}`).join(",")}${L.shapes.get(arm.shapeId)?.indexValue ? ",[idx]" : ""}}` : L.fmt(arm)).join(" | ")}`,
           );
         }
         reads.push({ el, value: read });
