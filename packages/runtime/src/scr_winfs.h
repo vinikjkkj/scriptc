@@ -204,10 +204,52 @@ static inline FILE *scr_u_fopen(const char *path, const char *mode) {
 #define scr_sys_open scr_u_open
 #define scr_sys_fopen scr_u_fopen
 
+/* ── stat, access, chmod ──────────────────────────────────────────────────── */
+/* The CRT's stat family answers `struct stat` as `struct _stat64i32` (64-bit time, 32-bit size), so the wide twin fills the same bytes. lstat degrades to
+ * stat here exactly as it did (the CRT has no symlink view). */
+static inline int scr_u_stat(const char *path, struct stat *st) {
+  wchar_t *wp = scr_u_wide(path);
+  if (wp == NULL) return -1;
+  const int r = _wstat64i32(wp, (struct _stat64i32 *)st);
+  const int e = errno;
+  free(wp);
+  errno = e;
+  return r;
+}
+
+static inline int scr_u_access(const char *path, int mode) {
+  wchar_t *wp = scr_u_wide(path);
+  if (wp == NULL) return -1;
+  const int r = _waccess(wp, mode);
+  const int e = errno;
+  free(wp);
+  errno = e;
+  return r;
+}
+
+static inline int scr_u_chmod(const char *path, int mode) {
+  wchar_t *wp = scr_u_wide(path);
+  if (wp == NULL) return -1;
+  const int r = _wchmod(wp, mode);
+  const int e = errno;
+  free(wp);
+  errno = e;
+  return r;
+}
+
+#define scr_sys_stat scr_u_stat
+#define scr_sys_lstat scr_u_stat
+#define scr_sys_access scr_u_access
+#define scr_sys_chmod scr_u_chmod
+
 #else /* !_WIN32: the plain POSIX names */
 
 #define scr_sys_open open
 #define scr_sys_fopen fopen
+#define scr_sys_stat stat
+#define scr_sys_lstat lstat
+#define scr_sys_access access
+#define scr_sys_chmod chmod
 
 #endif /* _WIN32 */
 #endif /* SCR_WINFS_H */
