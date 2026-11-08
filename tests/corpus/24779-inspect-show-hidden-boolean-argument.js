@@ -1,0 +1,12 @@
+import util from "node:util";
+const v = { a: [1, 2], f: { g: 1 } };
+console.log(util.inspect(v, true));
+console.log(util.inspect(v, false));
+const flag = process.argv.length > 99;
+console.log(util.inspect(v, flag));
+console.log(util.inspect(v, { showHidden: flag }));
+console.log(util.inspect(v, { showHidden: !flag, depth: 0 }));
+console.log(util.inspect([1], { showHidden: true }));
+console.log(util.inspect([1], { showHidden: false }));
+console.log(util.inspect([1], { showHidden: 1 }));
+console.log(util.inspect(5, { showHidden: true }), util.inspect("s", { showHidden: true }));
