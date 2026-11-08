@@ -11,7 +11,20 @@ import { promisify } from "node:util";
 import { icuDataSource } from "./icu-data.js";
 import type { IcuUse } from "../ir/nodes.js";
 
-const execFileAsync = promisify(execFile);
+const execFileRaw = promisify(execFile);
+/* Under SCRIPTC_PHASE_LOG every child process of a build reports its wall time and the arguments that name its work (stderr). */
+const execFileAsync: typeof execFileRaw = ((file: string, args?: readonly string[], opts?: object) => {
+  const trace = process.env["SCRIPTC_PHASE_LOG"];
+  if (trace === undefined || trace === "") return (execFileRaw as (...a: unknown[]) => unknown)(file, args, opts);
+  const t0 = performance.now();
+  const what = [file, ...(args ?? [])].filter((x) => /^-c$|\.(c|o|ll|exe)$|^cc$|^c\+\+$|^version$|^--version$|^-o$|^-target$/.test(String(x)) || String(x).length < 12).slice(0, 14).join(" ");
+  const done = (): void => {
+    process.stderr.write(`[exec-trace] pid=${process.pid} ms=${Math.round(performance.now() - t0)} ${what}\n`);
+  };
+  const p = (execFileRaw as (...a: unknown[]) => Promise<unknown>)(file, args, opts);
+  p.then(done, done);
+  return p;
+}) as typeof execFileRaw;
 
 const RUNTIME_SOURCES = ["scr_number.c", "scr_string.c", "scr_array.c", "scr_bytes.c", "scr_bytes_io.c", "scr_map.c", "scr_closure.c", "scr_object.c", "scr_union.c", "scr_exception.c", "scr_error.c", "scr_console.c", "scr_lib.c", "scr_path.c", "scr_json.c", "scr_async.c", "scr_coro.c", "scr_child.c", "scr_cycle.c", "scr_random_fill.c", "scr_stack_margin.c"];
 
