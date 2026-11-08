@@ -816,6 +816,8 @@ typedef struct {
   size_t len;
 } ScrCfEntry;
 
+/* Two entries tie only when their rendered text is byte-identical (the compare covers the whole text, then the length), so any order among ties
+ * prints the same bytes: qsort needs no stability here (mingw's is not stable). */
 static int scr_assert_cf_entry_cmp(const void *pa, const void *pb) {
   const ScrCfEntry *a = pa, *b = pb;
   size_t n = a->len < b->len ? a->len : b->len;
