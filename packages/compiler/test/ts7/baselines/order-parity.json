@@ -14160,6 +14160,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24800-dns-resolve-srv-against-a-local-responder.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24800-dns-resolve-srv-against-a-local-responder.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24801-dns-members-held-as-values.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24801-dns-members-held-as-values.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24802-dns-resolve-srv-typed-callback.ts": {
+   "order": [
+    "<repo>/tests/corpus/24802-dns-resolve-srv-typed-callback.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24803-dns-resolver-instances-and-failures.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24803-dns-resolver-instances-and-failures.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2481-mutual-recursive-records.ts": {
    "order": [
     "<repo>/tests/corpus/2481-mutual-recursive-records.ts"
