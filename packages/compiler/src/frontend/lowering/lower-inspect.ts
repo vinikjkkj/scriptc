@@ -1699,7 +1699,7 @@ export function lowerConsoleInspectArg(
 /** The parsed options literal: the resolved depth (numeric; Infinity for
  * `null`), with every non-default knob fenced by name. */
 /** Node's option keys this runtime does not render yet (OPEN, ci-classes iofmtopts). */
-const INSPECT_OPEN_KEYS = new Set(["showHidden", "showProxy", "getters", "customInspect", "stylize"]);
+const INSPECT_OPEN_KEYS = new Set(["showHidden", "stylize"]);
 
 /** Literal truthiness of a compile-time constant option value, or null when
  * the value is only known at run time. */
@@ -1723,10 +1723,8 @@ function refuseOpenInspectOption(L: Lowerer, prop: ts.Node, key: string, value: 
   const open = (what: string): never =>
     L.noLowering(`util.inspect with the '${what}' option`, prop, "this option is OPEN (ci-classes iofmtopts): the rendering for it is not lowered yet");
   if (key === "stylize") open("stylize");
-  if (key === "customInspect" && literalTruthy(value) === false) open("customInspect: false");
-  if (["showHidden", "showProxy", "getters"].includes(key) && literalTruthy(value) === true) open(`${key}: true`);
-  if (INSPECT_OPEN_KEYS.has(key) && key !== "customInspect" && literalTruthy(value) === null) open(`${key} (a run-time value)`);
-  if (key === "customInspect" && literalTruthy(value) === null) open(`${key} (a run-time value)`);
+  if (key === "showHidden" && literalTruthy(value) === true) open(`${key}: true`);
+  if (INSPECT_OPEN_KEYS.has(key) && literalTruthy(value) === null) open(`${key} (a run-time value)`);
   if (key === "sorted" && literalTruthy(value) === true && value.kind !== ts.SyntaxKind.TrueKeyword) open("sorted with a comparator");
   if (key === "sorted" && (ts.isArrowFunction(value) || ts.isFunctionExpression(value))) open("sorted with a comparator");
 }
@@ -1859,6 +1857,8 @@ function inspectOptionsDyn(L: Lowerer, node: ts.Expression, loc: SrcLoc): IrExpr
 function optionNeedsDynRender(key: string, value: ts.Expression): boolean {
   if (key === "colors") return literalTruthy(value) !== false;
   if (key === "compact") return !(ts.isNumericLiteral(value) || literalTruthy(value) === false);
+  if (key === "showProxy" || key === "getters") return literalTruthy(value) !== false;
+  if (key === "customInspect") return literalTruthy(value) !== true;
   return false;
 }
 
