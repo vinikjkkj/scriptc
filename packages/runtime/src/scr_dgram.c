@@ -1345,33 +1345,10 @@ static ScrDyn *scr_dns_query_error(const char *syscall, const char *code, const 
   return d;
 }
 
-/* The result slot of a failed query. Node calls back with no records (undefined); a callback the compiler typed from its declaration
- * (`addresses: SrvRecord[]`, not optional) cannot hold undefined, so it gets the EMPTY array instead, the stance the typed dns.lookup and
- * fs callbacks already take for a slot their declared type forbids undefined in. A callback taking a checked-dynamic value, or one whose slot
- * is not an array, gets undefined. The slot's type is read off the box's signature ("func(<p0>,<p1>)=>..."). */
-static ScrDyn *scr_dns_failed_result(const ScrDyn *cb) {
-  const char *sig = scr_dyn_fn_sig(cb);
-  if (strncmp(sig, "func(", 5) != 0) return scr_dyn_undefined();
-  const char *p = sig + 5;
-  int depth = 0, idx = 0;
-  const char *second = NULL;
-  for (; *p != '\0'; p++) {
-    if (*p == '<' || *p == '(') depth++;
-    else if ((*p == '>' && p[-1] != '=') || *p == ')') {
-      if (depth == 0) break;
-      depth--;
-    } else if (*p == ',' && depth == 0) {
-      if (++idx == 1) second = p + 1;
-    }
-  }
-  if (second != NULL && strncmp(second, "array<", 6) == 0) return scr_dyn_new_arr();
-  return scr_dyn_undefined();
-}
-
 static void scr_dns_finish(ScrDnsQuery *q, ScrDyn *err /* +1 or NULL */, ScrDyn *result /* +1 or NULL */) {
   ScrDyn *cb = scr_dyn_retain(q->cb);
   scr_dns_free_query(q);
-  ScrDyn *args[2] = {err != NULL ? err : scr_dyn_new_null(), result != NULL ? result : scr_dns_failed_result(cb)};
+  ScrDyn *args[2] = {err != NULL ? err : scr_dyn_new_null(), result != NULL ? result : scr_dyn_undefined()};
   ScrDyn *r = scr_dyn_call(cb, args, 2, "the dns callback");
   scr_dyn_release(r);
   scr_dyn_release(args[0]);
