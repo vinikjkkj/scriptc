@@ -1407,8 +1407,43 @@ static bool dyn_cls_datum_member_unset(const ScrDyn *v, const ScrDynClassMember 
   return m->value != NULL && m->get != NULL && m->name[0] != '%' && m->enumerable >= 2 && scr_dyn_member_hidden(m, v->v.inst.o);
 }
 
+/* The enumerable keys a plain object inherits along its [[Prototype]] chain, appended after its own: per level in Object.keys order (array
+ * indices ascending, then strings in insertion order), nearer levels first, and a key any nearer level has as an OWN property of any kind
+ * (a non-enumerable or accessor one included) shadows the farther one, exactly as the spec's EnumerateObjectProperties does. An object with
+ * no prototype link costs one load. */
+__attribute__((noinline)) static void dyn_forin_append_inherited(const ScrDyn *v, ScrDyn *keys) {
+  const ScrDyn *p = scr_dyn_ext(v)->proto;
+  for (int depth = 0; p != NULL && p->kind == SCR_DYN_OBJ && depth < 256; depth++, p = scr_dyn_ext(p)->proto) {
+    ScrDyn *pk = scr_dyn_obj_keys(p);
+    if (pk == NULL) continue;
+    if (pk->kind == SCR_DYN_ARR) {
+      for (size_t i = 0; i < pk->v.arr.len; i++) {
+        ScrDyn *k = pk->v.arr.items[i];
+        const ScrStr *ks = scr_dyn_str_value(k);
+        bool shadowed = false;
+        for (const ScrDyn *q = v; q != p && !shadowed; q = scr_dyn_ext(q)->proto) shadowed = scr_dyn_has_own(q, ks);
+        if (shadowed || dyn_keys_has(keys, k)) continue;
+        scr_dyn_arr_push(keys, scr_dyn_retain(k));
+      }
+    }
+    scr_dyn_release(pk);
+  }
+}
+
+/* Is `key` an enumerable property `v` inherits (for-in's per-visit presence test for a key the walk took from the prototype chain)? */
+static bool dyn_forin_inherited_has(const ScrDyn *v, const ScrStr *key) {
+  for (const ScrDyn *p = scr_dyn_ext(v)->proto; p != NULL && p->kind == SCR_DYN_OBJ; p = scr_dyn_ext(p)->proto) {
+    if (scr_dyn_obj_get(p, key->data, key->len) != NULL) return true; /* an own enumerable entry: the nearest level that has the key decides */
+    if (scr_dyn_has_own(p, key)) return false; /* shadowed by a non-enumerable own property */
+  }
+  return false;
+}
+
 ScrDyn *scr_dyn_forin_keys(const ScrDyn *v) {
   ScrDyn *keys = dyn_forin_keys_core(v);
+  if (__builtin_expect(v->kind == SCR_DYN_OBJ && v->v.obj.ext != NULL && v->v.obj.ext->proto != NULL, 0) && keys != NULL && keys->kind == SCR_DYN_ARR) {
+    dyn_forin_append_inherited(v, keys);
+  }
   if (keys == NULL || v->kind != SCR_DYN_OBJINST || keys->kind != SCR_DYN_ARR) return keys;
   {
     const ScrDynClass *dc = scr_dyn_objinst_class_of(v);
@@ -1495,5 +1530,6 @@ bool scr_dyn_forin_certain(const ScrDyn *v, const ScrStr *key) {
  * Object.hasOwn gives). EventEmitter-rooted instances answer through scr_dyn_forin_certain. */
 bool scr_dyn_forin_plain(const ScrDyn *v, const ScrStr *key) {
   if (ee_keys_instance(v) || props_instance(v)) return false;
-  return scr_dyn_has_own(v, key) || dyn_cls_proto_key_visited(v, key->data, key->len);
+  if (scr_dyn_has_own(v, key) || dyn_cls_proto_key_visited(v, key->data, key->len)) return true;
+  return v->kind == SCR_DYN_OBJ && scr_dyn_ext(v)->proto != NULL && dyn_forin_inherited_has(v, key);
 }
