@@ -4427,6 +4427,15 @@ const char *scr_dyn_objinst_cls(const ScrDyn *d) {
  * interval, and for a NULL box or descriptor; never throws. */
 void *scr_dyn_objinst_ptr_of(const ScrDyn *d, const ScrDynClass *cls) {
   if (d == NULL || cls == NULL) return NULL;
+  /* The class test FUSED into one body (it was ptr_of -> objinst_is -> objinst_pre, three calls and three kind tests per read, about
+   * 39 Ir on every keyed read of a class instance). The answer is unchanged: the instance's position is its vtable's `pre` for a
+   * hierarchy class and its descriptor's `pre` for a standalone one (scr_dyn_objinst_pre), tested against this interval. A FUNC box
+   * (a per-evaluation class value) keeps the evaluation's own path. */
+  if (d->kind == SCR_DYN_OBJINST) {
+    const ScrDynClass *own = d->v.inst.cls;
+    const size_t p = own->vt ? ((const ScrError *)d->v.inst.o)->vt->pre : own->pre;
+    return (cls->pre <= p && p <= cls->post) ? d->v.inst.o : NULL;
+  }
   return scr_dyn_objinst_is(d, cls->pre, cls->post) ? d->v.inst.o : NULL;
 }
 
