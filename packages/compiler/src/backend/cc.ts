@@ -1157,6 +1157,12 @@ function gcSectionsLinkArgs(driver: CcDriver): string[] {
   return [];
 }
 
+/** SCRIPTC_STRICT_LINK=1 at BUILD time: see strictProbe in compileC. Unset/empty/0 keeps the historical build exactly. */
+function strictLinkRequested(): boolean {
+  const v = process.env.SCRIPTC_STRICT_LINK;
+  return v !== undefined && v !== "" && v !== "0";
+}
+
 function optAuditArgs(sanitize: boolean): string[] {
   // Appended last and only when asked, so an untraced build's argv is
   // the historical one, element for element.
@@ -2946,6 +2952,40 @@ export async function compileC(opts: CcOptions): Promise<void> {
         `${ccName} failed compiling ${opts.cPath}.\n` +
           `${guidance}\n\n${stderr}`,
       );
+    }
+    await strictProbe(args);
+  };
+
+  /* SCRIPTC_STRICT_LINK=1 (the test harness's plain Linux differential lane): after the real link succeeds, link the SAME inputs once more
+   * to a discarded file with the section collector off and undefined symbols refused. A --gc-sections link drops an unreachable section
+   * BEFORE it reports what the section references, so a runtime unit naming a symbol its link set lacks links cleanly on Linux and fails on
+   * lld-link (Windows only: ior7gopd's scr_dyn_gopd.c naming scr_dyn_sym_get_own_desc). The product stays the collected binary, so the output,
+   * its size and the compiled-program cache are unchanged; the probe runs only where the link runs (a cache hit keyed on identical inputs
+   * has already passed it). Unset/empty/0: no probe. */
+  const strictProbe = async (args: string[]): Promise<void> => {
+    if (!strictLinkRequested() || targetPlatform(driver) !== "linux") return;
+    const oi = args.lastIndexOf("-o");
+    if (oi < 0 || args[oi + 1] !== opts.outPath) return; // a compile step, not the final link
+    const probeOut = `${opts.outPath}.strictprobe`;
+    const probe: string[] = [];
+    for (let i = 0; i < args.length; i++) {
+      const a = args[i]!;
+      if (a === "-Wl,--gc-sections") probe.push("-Wl,--no-gc-sections", "-Wl,--no-undefined");
+      else if (i === oi + 1) probe.push(probeOut);
+      else probe.push(a);
+    }
+    try {
+      await execFileAsync(driver.argv[0] ?? "clang", [...driver.argv.slice(1), ...probe]);
+    } catch (err) {
+      const stderr = (err as { stderr?: string }).stderr ?? String(err);
+      throw new CcCompileError(
+        ccName,
+        stderr,
+        `${ccName} failed the strict link probe (SCRIPTC_STRICT_LINK: no section collection, no undefined symbols) of ${opts.cPath}.\n` +
+          `A runtime unit names a symbol this program's link set does not carry: lld-link on Windows refuses it, and the --gc-sections Linux link hid it.\n\n${stderr}`,
+      );
+    } finally {
+      await rm(probeOut, { force: true }).catch(() => undefined);
     }
   };
 
