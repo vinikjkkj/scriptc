@@ -272,6 +272,7 @@ static ScrDyn *scr_fs_mkdtemp_result(ScrStr *made, const ScrDyn *opts) {
   if (!isbuf && (canon[0] == 0 || strcmp(canon, "utf8") == 0)) return scr_dyn_new_str(made);
   ScrStr *u8 = scr_str_new("utf8", 4);
   ScrBytes *b = scr_bytes_from_str(made, u8);
+  if (isbuf) b = scr_bytes_stamp_buffer(b); /* a name handed back as a Buffer is a Buffer (isBuffer asks the flavor stamp) */
   scr_str_release(u8);
   ScrDyn *d = scr_fs_bytes_result(b, isbuf ? "" : canon);
   scr_bytes_release(b);
