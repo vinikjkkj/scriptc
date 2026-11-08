@@ -466,6 +466,9 @@ function lowerDnsSrvCallback(L: Lowerer, node: ts.Expression): IrExpr {
   }
 }
 
+/** The members the runtime's dns.Resolver answers (scr_dgram.c's resolver object). */
+const DNS_RESOLVER_MEMBERS: ReadonlySet<string> = new Set(["resolveSrv", "getServers", "setServers", "cancel", "setLocalAddress"]);
+
 /** True iff `t` is the stdlib `Resolver` class of node:dns (not dns/promises' class of the same name). */
 function isDnsResolverType(L: Lowerer, t: ts.Type): boolean {
   const sym = t.getSymbol();
@@ -479,12 +482,21 @@ function isDnsResolverType(L: Lowerer, t: ts.Type): boolean {
   return false;
 }
 
-/** Method calls on a node:dns Resolver receiver: resolveSrv takes the typed-callback lowering (records are undefined on a failure, as in
- * Node); the other members ride the same dynamic invoke. Null for every other receiver. */
+/** Method calls on a node:dns Resolver receiver. The runtime's resolver object answers resolveSrv, getServers, setServers, cancel and
+ * setLocalAddress; every other member the real typings declare (resolve4, reverse, ...) is refused here by name, at compile time, never a
+ * runtime "is not a function". resolveSrv takes the typed-callback lowering (records are undefined on a failure, as in Node). Null for
+ * every other receiver. */
 export function lowerDnsResolverMethodCall(L: Lowerer, call: ts.CallExpression, access: ts.PropertyAccessExpression): IrExpr | null {
   if (L.dynamic) return null;
   if (!isDnsResolverType(L, L.typeOf(access.expression))) return null;
   const name = access.name.text;
+  if (!DNS_RESOLVER_MEMBERS.has(name)) {
+    L.noLowering(
+      `Resolver#${name}`,
+      call,
+      "dns.Resolver answers resolveSrv, getServers, setServers, cancel and setLocalAddress",
+    );
+  }
   if (call.arguments.some(ts.isSpreadElement)) return null;
   const recv = L.lowerExpr(access.expression);
   if (recv.type.kind !== "dyn") return null;
