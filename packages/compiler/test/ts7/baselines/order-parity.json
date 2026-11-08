@@ -26673,6 +26673,27 @@
     "<repo>/tests/fixtures/node-types/streams.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/24705-single-value-commonjs-export-calls-its-expando-member-functions/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24705-single-value-commonjs-export-calls-its-expando-member-functions/ck.cjs",
+    "<repo>/tests/corpus/24705-single-value-commonjs-export-calls-its-expando-member-functions/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24820-single-value-commonjs-export-function-expression-expando-member/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24820-single-value-commonjs-export-function-expression-expando-member/ck.cjs",
+    "<repo>/tests/corpus/24820-single-value-commonjs-export-function-expression-expando-member/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24821-single-value-commonjs-export-expando-members-read-as-values-and-called/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24821-single-value-commonjs-export-expando-members-read-as-values-and-called/ck.cjs",
+    "<repo>/tests/corpus/24821-single-value-commonjs-export-expando-members-read-as-values-and-called/main.cjs"
+   ],
+   "diags": []
   }
  }
 }
