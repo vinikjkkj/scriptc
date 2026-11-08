@@ -1,0 +1,8 @@
+util-inspect-options-typed-record-still-refused.ts:5:33 - error SC2020: 'util.inspect with a non-literal options argument' is part of the standard library types but has no scriptc lowering yet
+
+  4 | function show(opts: { depth: number; colors: boolean }): string {
+  5 |   return util.inspect({ a: 1 }, opts);
+    |                                 ^~~~
+  6 | }
+
+  hint: the options must be an object literal, a non-exported const bound to one that is used only as a util.inspect options argument, or a value of type any/unknown

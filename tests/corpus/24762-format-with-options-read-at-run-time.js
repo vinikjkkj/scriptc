@@ -1,0 +1,10 @@
+import util from "node:util";
+const on = JSON.parse('{"colors":true}');
+const off = JSON.parse('{"depth":0,"breakLength":20}');
+const rec = { a: 1, b: [1, 2, { c: "x" }], d: null };
+console.log(util.formatWithOptions(on, "%s|%d|%i|%j|%O|%%|%c|rest", "str", 42.5, "7.9", { j: 1 }, rec, "css", "tail", 3, null));
+console.log(util.formatWithOptions(off, "%O and %s", rec, rec), util.formatWithOptions(off, rec, "plain", 5));
+console.log(util.formatWithOptions(on), util.formatWithOptions(on, "only"), util.formatWithOptions(on, 1, 2), util.formatWithOptions(on, "%s"));
+console.log(util.formatWithOptions(JSON.parse('{"compact":false,"colors":false}'), "%O", { q: [1, 2] }));
+const args = ["%s=%d", "k", 9, undefined, { z: true }];
+console.log(util.formatWithOptions(on, ...args));
