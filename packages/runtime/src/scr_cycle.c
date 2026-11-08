@@ -1975,6 +1975,35 @@ static size_t scr_cyc_threshold(void) {
   return cached;
 }
 
+/* ── pacing denominator: live nodes PLUS the boxes that are no longer nodes ──
+ * `true`, `false` and `null` cross into the dyn tree as shared immortal boxes (scr_dyn_new_bool), so a container's boolean slot is
+ * an EDGE with no live node behind it. A pass still walks that edge, so the cost model below (a pass costs the graph reachable
+ * from its candidates) has not moved, but scr_cyc_live shrank by one per boolean and the interval live/PACE with it: a bool-heavy
+ * parsed tree then collected ~3x as often over the same edges (measured +32% Ir, all of it in scr_collect_cycles).
+ *
+ * The denominator is therefore live + phantom, where phantom is estimated from what the passes themselves see: a sampled mark phase
+ * counts the gray nodes it visits and the immortal bool/null slots it steps over (through the hook the first such box installs), and the running ratio
+ * scales the live count (phantom ~ live * seen / gray). Absent any such slot the ratio is 0 and the interval is EXACTLY the
+ * historic live/PACE, so programs that never box a boolean keep their old pacing bit for bit. Only a slot the hook recognizes counts (a
+ * typed container's boolean is not a box and never was a node, and undefined or an interned string never was either), so nothing
+ * but the removed boxes is credited. */
+bool (*scr_cyc_phantom_is)(const void *child) = NULL; /* installed by scr_json.c's first bool/null box (see there) */
+static size_t scr_cyc_phantom_seen = 0; /* immortal bool/null slots stepped over during this pass's mark phase */
+static bool scr_cyc_phantom_on = false; /* a sampled pass: count */
+static size_t scr_gray_pass = 0, scr_gray_total = 0, scr_ph_total = 0, scr_pass_no = 0;
+
+/* The estimate is folded INTO scr_cyc_live (the pacing denominator) once per pass, so the release path's pacing test reads the same
+ * counter it always did and pays nothing for any of this; scr_ph_applied is what the last pass added, taken back out before the
+ * next. The alloc/free paths only ever add and subtract 1 around it. */
+static size_t scr_ph_applied = 0;
+static void scr_cyc_phantom_apply(void) {
+  size_t real = scr_cyc_live - scr_ph_applied;
+  size_t ph = 0;
+  if (scr_ph_total != 0 && scr_gray_total != 0) ph = (size_t)((double)real * (double)scr_ph_total / (double)scr_gray_total);
+  scr_cyc_live = real + ph;
+  scr_ph_applied = ph;
+}
+
 /* ── pacing ───────────────────────────────────────────────────────────
  * The threshold counts BUFFERED CANDIDATES, but a pass costs O(the graph
  * reachable from them), not O(the buffer): markGray visits every node
@@ -2196,8 +2225,7 @@ static void scr_wl_push(void *obj) {
   scr_wl[scr_wl_n++] = obj;
 }
 
-static void scr_mg_visit(void *child, void *ctx) {
-  (void)ctx;
+static inline void scr_mg_visit_body(void *child) {
   if (SCR_CYC_SKIP(child)) return;
   SCR_RC(child) -= 1; /* trial-delete this internal edge */
   ScrCycHdr *h = scr_cyc_hdr(child);
@@ -2205,12 +2233,32 @@ static void scr_mg_visit(void *child, void *ctx) {
   h->color = SCR_CYC_GRAY;
   scr_wl_push(child);
 }
+static void scr_mg_visit(void *child, void *ctx) {
+  (void)ctx;
+  scr_mg_visit_body(child);
+}
+/* The sampled pass's visitor: the same trial deletion, plus a count of the slots that hold a shared immortal bool/null. */
+static void scr_mg_visit_count(void *child, void *ctx) {
+  if (child != NULL && SCR_RC(child) == SIZE_MAX && scr_cyc_phantom_is != NULL && scr_cyc_phantom_is(child)) scr_cyc_phantom_seen++;
+  (void)ctx;
+  scr_mg_visit_body(child);
+}
 static void scr_mark_gray(void *obj) {
   ScrCycHdr *h = scr_cyc_hdr(obj);
   size_t floor = scr_wl_n;
   if (h->color == SCR_CYC_GRAY) return;
   h->color = SCR_CYC_GRAY;
   scr_wl_push(obj);
+  if (scr_cyc_phantom_on) { /* a SAMPLED pass: also count the gray nodes, the denominator of the phantom ratio */
+    size_t grayed = 0;
+    while (scr_wl_n > floor) {
+      void *o = scr_wl[--scr_wl_n];
+      grayed++;
+      scr_cyc_trace_of(scr_cyc_hdr(o))(o, scr_mg_visit_count, NULL);
+    }
+    scr_gray_pass += grayed;
+    return;
+  }
   while (scr_wl_n > floor) {
     void *o = scr_wl[--scr_wl_n];
     scr_cyc_trace_of(scr_cyc_hdr(o))(o, scr_mg_visit, NULL);
@@ -2306,6 +2354,16 @@ void scr_collect_cycles(void) {
    * candidate's walk is already covered by that candidate's subgraph. */
   SCR_CS_PHASE_BEGIN();
   size_t out = 0;
+  scr_gray_pass = 0;
+  scr_cyc_phantom_seen = 0;
+  /* Counting costs a compare per traced slot and a counter per gray node, so only some passes pay it: the first two (the ratio
+   * exists from the start) and every 32nd after (it follows a program whose mix changes). A program that never boxed a
+   * boolean or a null (the hook is still NULL) pays nothing. */
+  scr_cyc_phantom_on = false;
+  if (scr_cyc_phantom_is != NULL) {
+    scr_cyc_phantom_on = scr_pass_no < 2 || (scr_pass_no & 31) == 0;
+    scr_pass_no++;
+  }
   for (size_t i = 0; i < scr_nroots; i++) {
     void *obj = scr_roots[i];
     ScrCycHdr *h = scr_cyc_hdr(obj);
@@ -2318,6 +2376,13 @@ void scr_collect_cycles(void) {
     }
   }
   scr_nroots = out;
+  scr_cyc_phantom_on = false;
+  scr_gray_total += scr_gray_pass;
+  scr_ph_total += scr_cyc_phantom_seen;
+  if (scr_gray_total > ((size_t)1 << 40)) { /* keep the ratio, bound the counters */
+    scr_gray_total >>= 1;
+    scr_ph_total >>= 1;
+  }
   SCR_CS_PHASE_END(mark);
   SCR_CS_ADD(roots, scr_nroots);
 
@@ -2345,6 +2410,7 @@ void scr_collect_cycles(void) {
   }
   SCR_CS_PHASE_END(free);
   scr_nwhite = 0;
+  scr_cyc_phantom_apply();
 
   SCR_CS_PASS_END();
   /* The end of a sweep is the one point in the process where the arena's
