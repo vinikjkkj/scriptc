@@ -3357,6 +3357,18 @@ ScrStats *scr_fs_lstat(ScrStr *path) {
   return scr_stats_of(&st, path->data, 0);
 }
 
+/* Node lists a directory SORTED: libuv's scandir passes alphasort (strcoll in the C locale Node runs in, so plain byte order) to
+ * scandir(3) — measured on v24.15.0 under LC_ALL=C, C.UTF-8 and en_US.UTF-8, where `Beta.txt` still comes before `alpha.txt` and `10.txt`
+ * before `9.txt`. The readdir(3) order the OS answers (hash order on ext4) is never what a program sees. */
+static int scr_fs_name_cmp(const void *a, const void *b) {
+  const ScrStr *x = *(const ScrStr *const *)a, *y = *(const ScrStr *const *)b;
+  return strcmp(x->data, y->data);
+}
+
+static void scr_fs_sort_names(ScrArr *arr) {
+  if (arr->len > 1) qsort(arr->data, arr->len, sizeof(ScrStr *), scr_fs_name_cmp);
+}
+
 ScrArr *scr_fs_readdir(ScrStr *path) {
   DIR *d = opendir(path->data);
   if (!d) {
@@ -3370,7 +3382,8 @@ ScrArr *scr_fs_readdir(ScrStr *path) {
     scr_arr_push_ref(arr, scr_str_new(ent->d_name, strlen(ent->d_name)));
   }
   closedir(d);
-  return arr; /* OS order, exactly like Node (unsorted) */
+  scr_fs_sort_names(arr);
+  return arr;
 }
 
 /* ── the withFileTypes scandir snapshot ──────────────────────────────
@@ -3400,6 +3413,12 @@ static unsigned char scr_dirent_kind_of_mode(mode_t m) {
   if (S_ISCHR(m)) return 6;
   if (S_ISBLK(m)) return 7;
   return 0;
+}
+
+static const ScrScandir *scr_fs_scandir_sorting = NULL;
+static int scr_fs_scandir_idx_cmp(const void *a, const void *b) {
+  const ScrScandir *s = scr_fs_scandir_sorting;
+  return strcmp(s->names[*(const size_t *)a]->data, s->names[*(const size_t *)b]->data);
 }
 
 ScrScandir *scr_fs_scandir(ScrStr *path) {
@@ -3466,6 +3485,26 @@ ScrScandir *scr_fs_scandir(ScrStr *path) {
     s->len++;
   }
   closedir(d);
+  /* the same sorted order as scr_fs_readdir: sort an index permutation, then reorder names and kinds */
+  if (s->len > 1) {
+    size_t *idx = malloc(s->len * sizeof *idx);
+    ScrStr **nn = malloc(s->len * sizeof *nn);
+    unsigned char *kk = malloc(s->len);
+    if (!idx || !nn || !kk) scr_trap("scriptc: out of memory\n");
+    for (size_t i = 0; i < s->len; i++) idx[i] = i;
+    scr_fs_scandir_sorting = s;
+    qsort(idx, s->len, sizeof *idx, scr_fs_scandir_idx_cmp);
+    scr_fs_scandir_sorting = NULL;
+    for (size_t i = 0; i < s->len; i++) {
+      nn[i] = s->names[idx[i]];
+      kk[i] = s->kinds[idx[i]];
+    }
+    memcpy(s->names, nn, s->len * sizeof *nn);
+    memcpy(s->kinds, kk, s->len);
+    free(idx);
+    free(nn);
+    free(kk);
+  }
   return s;
 }
 
