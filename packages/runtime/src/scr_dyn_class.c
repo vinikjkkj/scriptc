@@ -1441,10 +1441,11 @@ static bool dyn_forin_inherited_has(const ScrDyn *v, const ScrStr *key) {
 
 ScrDyn *scr_dyn_forin_keys(const ScrDyn *v) {
   ScrDyn *keys = dyn_forin_keys_core(v);
-  if (__builtin_expect(v->kind == SCR_DYN_OBJ && v->v.obj.ext != NULL && v->v.obj.ext->proto != NULL, 0) && keys != NULL && keys->kind == SCR_DYN_ARR) {
-    dyn_forin_append_inherited(v, keys);
+  if (keys == NULL || keys->kind != SCR_DYN_ARR) return keys;
+  if (v->kind != SCR_DYN_OBJINST) {
+    if (__builtin_expect(v->kind == SCR_DYN_OBJ && v->v.obj.ext != NULL && v->v.obj.ext->proto != NULL, 0)) dyn_forin_append_inherited(v, keys);
+    return keys;
   }
-  if (keys == NULL || v->kind != SCR_DYN_OBJINST || keys->kind != SCR_DYN_ARR) return keys;
   {
     const ScrDynClass *dc = scr_dyn_objinst_class_of(v);
     for (size_t i = 0; i < dc->nmembers; i++) {
@@ -1489,10 +1490,12 @@ static bool dyn_cls_proto_key_visited(const ScrDyn *v, const char *s, size_t n) 
  * Node visits them even when undefined), a visible member, or an inherited EventEmitter.prototype
  * key that no member shadows. */
 bool scr_dyn_forin_certain(const ScrDyn *v, const ScrStr *key) {
-  /* A native handle's inherited member (no own shadow): visited without a value check. */
-  if (v->kind == SCR_DYN_HANDLE && key != NULL && scr_handle_inherited_has_hook != NULL &&
-      scr_handle_inherited_has_hook(v, key->data, key->len)) {
-    return true;
+  /* Only a handle or a class instance can be "certain": every other receiver (a plain object above all) leaves at once, the per-visit cost of
+   * the common own-keys loop. */
+  if (v->kind != SCR_DYN_OBJINST) {
+    /* A native handle's inherited member (no own shadow): visited without a value check. */
+    return v->kind == SCR_DYN_HANDLE && key != NULL && scr_handle_inherited_has_hook != NULL &&
+           scr_handle_inherited_has_hook(v, key->data, key->len);
   }
   if (key == NULL || !(ee_keys_instance(v) || props_instance(v))) return false;
   const char *s = key->data;
@@ -1528,8 +1531,14 @@ bool scr_dyn_forin_certain(const ScrDyn *v, const ScrStr *key) {
 
 /* for-in's own-key test for every receiver that is NOT EventEmitter-rooted (the same answer
  * Object.hasOwn gives). EventEmitter-rooted instances answer through scr_dyn_forin_certain. */
+/* The visit test of a key that is NOT an own property of a non-instance receiver: an inherited enumerable key of a plain object. Out of line
+ * so the own-keys loop's per-visit path stays what it was. */
+__attribute__((noinline)) static bool dyn_forin_plain_inherited(const ScrDyn *v, const ScrStr *key) {
+  return v->kind == SCR_DYN_OBJ && v->v.obj.ext != NULL && v->v.obj.ext->proto != NULL && dyn_forin_inherited_has(v, key);
+}
+
 bool scr_dyn_forin_plain(const ScrDyn *v, const ScrStr *key) {
   if (ee_keys_instance(v) || props_instance(v)) return false;
   if (scr_dyn_has_own(v, key) || dyn_cls_proto_key_visited(v, key->data, key->len)) return true;
-  return v->kind == SCR_DYN_OBJ && scr_dyn_ext(v)->proto != NULL && dyn_forin_inherited_has(v, key);
+  return dyn_forin_plain_inherited(v, key);
 }
