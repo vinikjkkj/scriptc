@@ -11589,7 +11589,7 @@ function condPresencePlan(L: Lowerer, tIv: IrType): "union" | "dyn" | (IrType & 
    * source must be a string or a `string | undefined` union whose value arm
    * is a string. Null when the shape carries a non-string field/value slot
    * (the caller fences). */
-  export function lowerEnvToPairsHelper(L: Lowerer, shapeId: string, loc: SrcLoc): string | null {
+  export function lowerEnvToPairsHelper(L: Lowerer, shapeId: string, loc: SrcLoc, keepUndefined = false): string | null {
     const shape = L.shapes.get(shapeId);
     if (!shape || shape.tuple) return null;
     // A string | undefined value flows as its string arm; a bare string
@@ -11635,7 +11635,7 @@ function condPresencePlan(L: Lowerer, tIv: IrType): "union" | "dyn" | (IrType & 
       if (!slotOk(f.type)) return null;
     }
     if (shape.indexValue && !slotOk(shape.indexValue)) return null;
-    const key = `env.pairs:${shapeId}`;
+    const key = `env.pairs${keepUndefined ? ".u" : ""}:${shapeId}`;
     const existing = L.widthHelpers.get(key);
     if (existing) return existing;
     const name = `%env.pairs.${L.widthHelpers.size}`;
@@ -11674,8 +11674,11 @@ function condPresencePlan(L: Lowerer, tIv: IrType): "union" | "dyn" | (IrType & 
       if (st !== null) {
         const write = push(k, asStr(raw, t));
         const utag = t.kind === "union" ? L.armTag(t.unionId, UNDEFINED_T) : -1;
+        // child_process env: an undefined value crosses as the "\0u" marker (scr_child.c's SCR_ENV_IS_UNDEF), because Node's win32 key filter runs
+        // before undefined values are dropped
+        const undefWrite: IrStmt[] | null = keepUndefined ? [push(k, { kind: "strLit", value: "\0u", type: STRING, loc } as IrExpr)] : null;
         return utag >= 0 && t.kind === "union"
-          ? { kind: "if", cond: { kind: "unionIsTag", unionId: t.unionId, tag: utag, negated: true, value: raw, type: BOOL, loc }, then: [write], else_: null, loc }
+          ? { kind: "if", cond: { kind: "unionIsTag", unionId: t.unionId, tag: utag, negated: true, value: raw, type: BOOL, loc }, then: [write], else_: undefWrite, loc }
           : write;
       }
       if (t.kind !== "union") throw new Error("lowerer bug: header slot outside the pairs matrix");

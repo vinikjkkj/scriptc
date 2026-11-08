@@ -4356,7 +4356,7 @@ function fsWriteOptionsSignalFree(L: Lowerer, fn: string, expr: ts.CallExpressio
         "pass a string-keyed object (spread process.env or build a Record<string, string>)",
       );
     }
-    const helper = L.envToPairsHelper(v.type.shapeId, locOf(node));
+    const helper = L.envToPairsHelper(v.type.shapeId, locOf(node), true);
     if (helper === null) {
       L.noLowering(
         `an env option of '${L.fmt(v.type)}' values`,

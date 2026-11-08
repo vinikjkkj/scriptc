@@ -11,3 +11,9 @@ const out = execFileSync("node", ["-e", probe], {
   env: { PATH: process.env.PATH, Foo: "1", bar: "0", FOO: "2", foo: "3", "straße": "4", STRASSE: "5" },
 });
 console.log(out.trim());
+
+// The filter runs BEFORE undefined values are dropped: on Windows the first key of the "FOO" class ('FOO') survives even though its value is undefined,
+// the later undefined-skipping pass then drops it, and the variable vanishes although 'Foo' held a value. POSIX keeps Foo.
+const withUndefined: { [k: string]: string | undefined } = { PATH: process.env.PATH, Foo: "7", FOO: undefined, other: "x" };
+const out2 = execFileSync("node", ["-e", 'console.log(process.env.Foo, process.env.FOO, process.env.other)'], { encoding: "utf8", env: withUndefined });
+console.log(out2.trim());

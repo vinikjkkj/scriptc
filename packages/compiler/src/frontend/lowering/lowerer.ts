@@ -20653,8 +20653,8 @@ export class Lowerer {
     return recordToEnvPairs(this, node);
   }
 
-  envToPairsHelper(shapeId: string, loc: SrcLoc): string | null {
-    return lowerEnvToPairsHelper(this, shapeId, loc);
+  envToPairsHelper(shapeId: string, loc: SrcLoc, keepUndefined = false): string | null {
+    return lowerEnvToPairsHelper(this, shapeId, loc, keepUndefined);
   }
 
   lowerJsonMethodCall(call: ts.CallExpression,

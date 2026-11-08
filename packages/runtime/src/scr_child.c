@@ -19,6 +19,11 @@
  */
 #include "scr_runtime.h"
 
+/* An env value of `undefined` crosses in the [k, v, ...] pairs as the two-byte string "\0u": a real value cannot hold a NUL (Node throws
+ * ERR_INVALID_ARG_VALUE for one), so it is unambiguous. Node's win32 key filter runs BEFORE undefined values are dropped (the first key of
+ * each toUpperCase class survives even when its value is undefined, and the variable then vanishes), so the consumers need to see them. */
+#define SCR_ENV_IS_UNDEF(v) ((v)->len == 2 && (v)->data[0] == '\0' && (v)->data[1] == 'u')
+
 #ifdef _WIN32
 /* ── Windows arm: real children via CreateProcessW ────────────────────
  * The POSIX arm below is untouched; this arm reimplements the exported
@@ -479,7 +484,8 @@ static WCHAR *scr_child_env_block(ScrArr *pairs) {
   size_t nreq = sizeof scr_env_required / sizeof scr_env_required[0];
   WCHAR **items = malloc((n + nreq) * sizeof(WCHAR *));
   WCHAR **keys = malloc((n ? n : 1) * sizeof(WCHAR *));
-  if (!items || !keys) scr_child_oom();
+  bool *undef = calloc(n ? n : 1, sizeof *undef);
+  if (!items || !keys || !undef) scr_child_oom();
   size_t count = 0;
   for (size_t i = 0; i < n; i++) {
     ScrStr *k = (ScrStr *)scr_arr_get_ref(pairs, (double)(2 * i));
@@ -493,6 +499,7 @@ static WCHAR *scr_child_env_block(ScrArr *pairs) {
     kv[kl] = L'=';
     wmemcpy(kv + kl + 1, vw, vl + 1);
     keys[count] = kw;
+    undef[count] = SCR_ENV_IS_UNDEF(v);
     items[count++] = kv;
     free(vw);
     scr_str_release(k);
@@ -506,7 +513,7 @@ static WCHAR *scr_child_env_block(ScrArr *pairs) {
     size_t kept = 0;
     for (size_t i = 0; i < count; i++) {
       free(keys[i]);
-      if (drop[i]) {
+      if (drop[i] || undef[i]) { /* the filter ran over every key; only now do undefined values vanish */
         free(items[i]);
         continue;
       }
@@ -515,6 +522,7 @@ static WCHAR *scr_child_env_block(ScrArr *pairs) {
     count = kept;
     free(drop);
     free(keys);
+    free(undef);
   }
   for (size_t r = 0; r < nreq; r++) {
     bool present = false;
@@ -2660,19 +2668,25 @@ static char **scr_exec_envp(ScrArr *pairs) {
   size_t n = (size_t)scr_arr_len(pairs) / 2;
   char **envp = malloc((n + 1) * sizeof(char *));
   if (!envp) scr_child_oom();
+  size_t w = 0;
   for (size_t i = 0; i < n; i++) {
     ScrStr *k = (ScrStr *)scr_arr_get_ref(pairs, (double)(2 * i));
     ScrStr *v = (ScrStr *)scr_arr_get_ref(pairs, (double)(2 * i + 1));
+    if (SCR_ENV_IS_UNDEF(v)) { /* Node drops an undefined env value */
+      scr_str_release(k);
+      scr_str_release(v);
+      continue;
+    }
     char *kv = malloc(k->len + 1 + v->len + 1);
     if (!kv) scr_child_oom();
     memcpy(kv, k->data, k->len);
     kv[k->len] = '=';
     memcpy(kv + k->len + 1, v->data, v->len + 1);
-    envp[i] = kv;
+    envp[w++] = kv;
     scr_str_release(k);
     scr_str_release(v);
   }
-  envp[n] = NULL;
+  envp[w] = NULL;
   return envp;
 }
 
