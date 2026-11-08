@@ -38,7 +38,7 @@ import type { Lowerer } from "./lowerer.js";
 import type { ClassInfo } from "./lower-classes.js";
 import { isJsSourceFile, locOf } from "../program.js";
 import { hasProtoTab, protoTabReadChain } from "./lower-prototab.js";
-import { BOOL, DYN, IrExpr, IrGlobal, IrStmt, IrType, STRING, UNDEFINED_T, canConvertToDyn, isUnitType, typeEquals, type SrcLoc } from "../../ir/nodes.js";
+import { BOOL, DYN, IrExpr, IrFunction, IrGlobal, IrStmt, IrType, STRING, UNDEFINED_T, arrayOf, canConvertToDyn, isUnitType, typeEquals, type SrcLoc } from "../../ir/nodes.js";
 import { dynFallbackType } from "./lowerer.js";
 
 export interface ProtoDataSlot {
@@ -616,4 +616,55 @@ function untypedProtoDataRead(L: Lowerer, expr: ts.PropertyAccessExpression, nam
     type: DYN,
     loc,
   };
+}
+
+/** The prototype data names a class's instances inherit, in the order Node's for-in visits them: the class's own prototype object first, then each
+ * base's, and per level the array-index names ascending before the rest in the order the program first writes them. */
+function datumKeysOf(L: Lowerer, info: ClassInfo): string[] {
+  const out: string[] = [];
+  for (let c: ClassInfo | null | undefined = info; c; c = c.base) {
+    const slots = L.protoDataSlots.get(c.def.name);
+    if (slots === undefined) continue;
+    const entries = [...slots.entries()].sort((a, b) => a[1].firstWriteStart - b[1].firstWriteStart);
+    const isIndex = (n: string): boolean => /^(0|[1-9][0-9]*)$/.test(n) && Number(n) < 4294967295;
+    const level = [
+      ...entries.filter(([n]) => isIndex(n)).sort((a, b) => Number(a[0]) - Number(b[0])),
+      ...entries.filter(([n]) => !isIndex(n)),
+    ].map(([n]) => n);
+    for (const n of level) if (!out.includes(n)) out.push(n);
+  }
+  return out;
+}
+
+/** One `%dynDatumKeys` row per class whose chain carries prototype data: the names nearest level first (scr_dyn_class.c's for-in walk lists the
+ * unset ones in this order; without the row it falls back to the flattened member order, base level first). */
+export function applyDatumKeyRows(L: Lowerer, fnLists: IrFunction[][]): void {
+  if (L.protoDataSlots.size === 0) return;
+  for (const info of L.classes.values()) {
+    if (info.generic || info.builtinError) continue;
+    const names = datumKeysOf(L, info);
+    if (names.length === 0) continue;
+    if ((info.def.dynMethods ?? []).some((d) => d.name === "%dynDatumKeys")) continue;
+    const loc = info.decl !== null ? locOf(info.decl) : info.def.loc;
+    const thisT: IrType = { kind: "object", className: info.def.name };
+    const fn: IrFunction = {
+      name: `%${info.def.name}.%dynDatumKeys`,
+      params: [{ localId: "this.0", name: "this", type: thisT }],
+      returnType: DYN,
+      locals: [{ id: "this.0", name: "this", type: thisT, mutable: false }],
+      body: [{
+        kind: "return",
+        value: {
+          kind: "dynFrom",
+          value: { kind: "arrayLit", elems: names.map((n): IrExpr => ({ kind: "strLit", value: n, type: STRING, loc })), type: arrayOf(STRING), loc },
+          type: DYN,
+          loc,
+        },
+        loc,
+      }],
+      loc,
+    };
+    fnLists[0]!.push(fn);
+    info.def.dynMethods = [...(info.def.dynMethods ?? []), { name: "%dynDatumKeys", fn: fn.name }];
+  }
 }

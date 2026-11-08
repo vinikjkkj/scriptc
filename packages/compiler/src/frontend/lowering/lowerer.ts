@@ -76,6 +76,7 @@ import { fenceInspGetters, newInspGettersScan, noteInspGettersNode } from "./ins
 import { applyInstanceOverrides, applyLateInstalls, applyProtoSlots, dynFnAsFunc, dynFnReadable, scanProtoSlots } from "./lower-protoslots.js";
 import { applyProtoTabs, hasProtoTab, scanProtoTabs, upgradeLateMethodsOverTables } from "./lower-prototab.js";
 import { graftOnlyHelperRanges } from "./lower-emitter-mixin.js";
+import { applyDatumKeyRows } from "./lower-protodata.js";
 import { OWN_SHADOW_ROOTS, applyFieldNotes, applyOwnShadows, inOwnShadowFamily, prescanLiteralMethodShadows } from "./lower-ownshadow.js";
 import { CLASS_BUILTIN_CTORLESS, CLASS_NO_DYN_NEW, EVAL_NO_SRC_CLASSES, GRAFTED_EMITTER_CLASSES, GRAFTED_EMITTER_CELL_CLASSES, GRAFTED_ROWS_FENCED_OPS, GRAFTED_PROPS_EXACT_OPS, EVAL_STATIC_CLASSES, dynReflectionSite, emitterStateWriteSites, graftedBoxSites, moduleBoxesEmitters } from "../../ir/nodes.js";
 import { computeTwinEdits, type TwinEdits } from "./emitter-twin.js";
@@ -4252,6 +4253,7 @@ export class Lowerer {
     applyOwnShadows(this, [functions, this.implicitFns]);
     applyFieldNotes(this, [functions, this.implicitFns]);
     applyProtoTabs(this, [functions, this.implicitFns]);
+    applyDatumKeyRows(this, [functions, this.implicitFns]);
     functions.push(...this.liftedFns);
     functions.push(...this.implicitFns);
     // GRAFTED-EMITTER FENCE (graftedDynFence). A class grafted by applyMixin(Y, EventEmitter) crosses into a dyn slot

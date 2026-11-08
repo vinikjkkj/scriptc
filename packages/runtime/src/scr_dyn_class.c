@@ -1448,13 +1448,29 @@ ScrDyn *scr_dyn_forin_keys(const ScrDyn *v) {
   }
   {
     const ScrDynClass *dc = scr_dyn_objinst_class_of(v);
-    for (size_t i = 0; i < dc->nmembers; i++) {
-      const ScrDynClassMember *m = &dc->members[i];
-      if (!dyn_cls_datum_member_unset(v, m)) continue;
-      ScrDyn *k = dyn_cls_objwalk_key(m->name, m->len);
-      if (!dyn_keys_has(keys, k)) scr_dyn_arr_push(keys, k);
-      else scr_dyn_release(k);
+    /* The prototype data names, nearest class level first (the compiler's %dynDatumKeys row: the flattened member table below lists the base
+     * level first, which is not Node's order). A class without the row keeps the member order. */
+    const ScrDynClassMember *dr = scr_dyn_objinst_member(v, "%dynDatumKeys", 13);
+    ScrDyn *order = dr != NULL && dr->call != NULL ? dr->call(v->v.inst.o, NULL, 0, "a prototype lookup") : NULL;
+    if (order != NULL && order->kind == SCR_DYN_ARR) {
+      for (size_t i = 0; i < order->v.arr.len; i++) {
+        const ScrStr *nm = scr_dyn_str_value(order->v.arr.items[i]);
+        const ScrDynClassMember *m = scr_dyn_objinst_member(v, nm->data, nm->len);
+        if (m == NULL || !dyn_cls_datum_member_unset(v, m)) continue;
+        ScrDyn *k = dyn_cls_objwalk_key(m->name, m->len);
+        if (!dyn_keys_has(keys, k)) scr_dyn_arr_push(keys, k);
+        else scr_dyn_release(k);
+      }
+    } else {
+      for (size_t i = 0; i < dc->nmembers; i++) {
+        const ScrDynClassMember *m = &dc->members[i];
+        if (!dyn_cls_datum_member_unset(v, m)) continue;
+        ScrDyn *k = dyn_cls_objwalk_key(m->name, m->len);
+        if (!dyn_keys_has(keys, k)) scr_dyn_arr_push(keys, k);
+        else scr_dyn_release(k);
+      }
     }
+    if (order != NULL) scr_dyn_release(order);
   }
   ScrDyn *pk = dyn_cls_objinst_proto_keys(v); /* the prototype table's enumerable keys follow the own ones */
   if (pk == NULL) return keys;

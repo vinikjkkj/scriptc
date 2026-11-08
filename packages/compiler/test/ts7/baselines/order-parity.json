@@ -14781,6 +14781,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24848-forin-class-prototype-data-order-across-levels.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24848-forin-class-prototype-data-order-across-levels.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2485-inspect-circular-refs.ts": {
    "order": [
     "<repo>/tests/corpus/2485-inspect-circular-refs.ts"
