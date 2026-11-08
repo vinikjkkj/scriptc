@@ -1233,6 +1233,30 @@ function fsWriteOptionsSignalFree(L: Lowerer, fn: string, expr: ts.CallExpressio
             }
           }
         }
+        // Node calls back with the error ALONE on a failure, so a value slot (index 1 and up: the data, folder, descriptor or byte
+        // count) an annotation declares as Buffer, string or number is `undefined` there. Its IR parameter is the union with undefined while
+        // the checker keeps the declared type, the lying-read shape (lyingRead): a member use on it answers Node's TypeError naming the
+        // property, and the failure path delivers Node's value instead of a run-time conversion failure that never runs the callback.
+        node.parameters.forEach((p, idx) => {
+          if (idx < 1 || !ts.isIdentifier(p.name) || !p.type || p.initializer || p.questionToken || p.dotDotDotToken) return;
+          if (L.paramIrOverrides.has(p) || L.chainNarrowedType.has(p.name)) return;
+          const declared = L.mapTypeOf(L.typeOf(p.name));
+          if (declared === null || (declared.kind !== "string" && declared.kind !== "f64" && !(declared.kind === "bytes" && declared.elem === "u8"))) return;
+          L.paramIrOverrides.set(p, dnsAnswerUnion(L, [declared, UNDEFINED_T]));
+          forcedParams.push(p);
+          // Every read of the parameter takes the lying-read path (statsRecvNodes is that opt-in set, the fs.Stats receivers' first):
+          // a member use answers Node's TypeError naming the property, typeof / console.log / comparisons see the undefined arm.
+          const psym = L.resolveValueSymbol(p.name);
+          if (psym !== null && node.body !== undefined) {
+            ts.walkPreorder(node.body, (n) => {
+              if (ts.isIdentifier(n) && n.text === (p.name as ts.Identifier).text && L.resolveValueSymbol(n) === psym) {
+                L.statsRecvNodes.add(n);
+                lyingReads.push(n);
+              }
+              return undefined;
+            });
+          }
+        });
         for (const p of node.parameters) {
           if (!ts.isIdentifier(p.name) || p.type || p.initializer || p.dotDotDotToken) continue;
           if (L.chainNarrowedType.has(p.name) || L.paramIrOverrides.has(p)) continue;

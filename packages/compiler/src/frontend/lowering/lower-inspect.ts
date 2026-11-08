@@ -1649,6 +1649,33 @@ export function lowerConsoleInspectArg(
     }
     return str(t.kind === "undefinedT" ? "undefined" : "null", loc);
   }
+  if (t.kind === "union") {
+    // A Buffer slot that may hold Node's undefined (an fs callback's data on a failure: the IR parameter is Buffer | undefined while the
+    // checker says Buffer): the unit arms print their word and the bytes arm prints as a Buffer, the form the checker type names.
+    const arms = L.unions.get(t.unionId)?.arms ?? [];
+    const real = arms.filter((a) => a.kind !== "undefinedT" && a.kind !== "nullT");
+    const tn = L.checker.typeToString(L.checker.getBaseTypeOfLiteralType(L.typeOf(node)));
+    const bufferName = tn === "Buffer" || tn === "NonSharedBuffer" || tn.startsWith("Buffer<") || tn.startsWith("NonSharedBuffer<");
+    if (real.length === 1 && real[0]!.kind === "bytes" && real[0]!.elem === "u8" && real.length < arms.length && bufferName) {
+      const tmp = pureReemittable(value) ? null : L.declareHiddenLocal("%fmtB", t);
+      const src: IrExpr = tmp ? { kind: "varRef", localId: tmp.id, type: t, loc } : value;
+      let result: IrExpr = str("undefined", loc);
+      for (let tag = arms.length - 1; tag >= 0; tag--) {
+        const arm = arms[tag]!;
+        const text: IrExpr =
+          arm.kind === "bytes"
+            ? { kind: "libCall", fn: "insp.buffer", args: [{ kind: "unionNarrow", unionId: t.unionId, tag, value: src, type: arm, loc }], type: STRING, loc }
+            : str(arm.kind === "nullT" ? "null" : "undefined", loc);
+        result =
+          tag === arms.length - 1
+            ? text
+            : { kind: "ternary", cond: { kind: "unionIsTag", unionId: t.unionId, tag, negated: false, value: src, type: BOOL, loc }, then: text, else_: result, type: STRING, loc };
+      }
+      return tmp
+        ? { kind: "seqExpr", stmts: [{ kind: "varDecl", localId: tmp.id, init: value, loc }], result, type: STRING, loc }
+        : result;
+    }
+  }
   if (t.kind === "bytes") {
     // One runtime representation serves Buffer AND Uint8Array; their
     // renderings differ, so the argument's checker type picks — and only

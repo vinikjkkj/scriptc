@@ -338,7 +338,7 @@ function isUnionOfKinds(L: Lowerer, t: IrType, kinds: string[]): boolean {
  * (scriptc-overrides.d.ts: ScriptcDnsAddress, ScriptcDnsFamily) — the
  * union the reads of the forced parameters see, so `typeof`, `=== undefined`
  * and the argument coercions meet the union, not the checker's string. */
-function dnsAnswerTsType(L: Lowerer, alias: string): ts.Type {
+export function dnsAnswerTsType(L: Lowerer, alias: string): ts.Type {
   const sf = L.loweringProgram.getSourceFile(overridesDtsPath());
   const decl = sf?.statements.find(
     (st): st is ts.TypeAliasDeclaration => ts.isTypeAliasDeclaration(st) && st.name.text === alias,
