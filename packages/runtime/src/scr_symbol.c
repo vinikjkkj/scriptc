@@ -911,6 +911,72 @@ bool scr_dyn_sym_has_own(ScrDyn *recv, ScrSym *k) {
   return false;
 }
 
+/* Object.getOwnPropertyDescriptor(recv, symbol): the row's attributes as a descriptor object, undefined when the receiver has no own property
+ * under the symbol. The own-property sets are scr_dyn_sym_has_own's. */
+static ScrDyn *scr_dsym_flag(bool b) { return scr_dyn_new_bool(b); }
+static ScrDyn *scr_dsym_desc_of_row(const ScrDynSymEnt *row) {
+  const bool e = (row->flags & SCR_SYMP_ENUM) != 0, c = (row->flags & SCR_SYMP_CONFIG) != 0;
+  ScrDyn *o = scr_dyn_new_obj();
+  if (row->flags & SCR_SYMP_ACC) {
+    scr_dyn_obj_set(o, "get", 3, scr_dyn_retain(row->val->v.arr.items[0]));
+    scr_dyn_obj_set(o, "set", 3, scr_dyn_retain(row->val->v.arr.items[1]));
+  } else {
+    scr_dyn_obj_set(o, "value", 5, scr_dyn_retain(row->val));
+    scr_dyn_obj_set(o, "writable", 8, scr_dsym_flag((row->flags & SCR_SYMP_WRITE) != 0));
+  }
+  scr_dyn_obj_set(o, "enumerable", 10, scr_dsym_flag(e));
+  scr_dyn_obj_set(o, "configurable", 12, scr_dsym_flag(c));
+  return o;
+}
+
+ScrDyn *scr_dyn_sym_get_own_desc(ScrDyn *recv, ScrSym *k) {
+  if (recv != NULL && recv->kind == SCR_DYN_JSVAL) return scr_dyn_jsval_ops()->get_own_desc(recv->v.jsval.cell, scr_dsym_keydyn(k));
+  if (recv != NULL && recv->kind == SCR_DYN_PROXY) {
+    ScrDyn *kd = scr_dsym_keydyn(k);
+    ScrDyn *args[2] = {recv->v.proxy.target, kd};
+    bool ran;
+    ScrDyn *r = scr_dsym_px_run(recv, "getOwnPropertyDescriptor", args, 2, &ran);
+    scr_dyn_release(kd);
+    if (!ran) return scr_dyn_sym_get_own_desc(recv->v.proxy.target, k);
+    return r;
+  }
+  if (scr_dsym_nullish(recv)) {
+    static const char msg[] = "Cannot convert undefined or null to object";
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+    return NULL;
+  }
+  switch (scr_dsym_class(recv)) {
+  case SCR_DSYM_STORE: {
+    const ScrDynSymEnt *row = scr_dsym_own(recv, k);
+    return row != NULL ? scr_dsym_desc_of_row(row) : scr_dyn_retain(scr_dyn_undefined());
+  }
+  case SCR_DSYM_INST: {
+    /* a FIELD keyed by the symbol is an own data property; a method or accessor lives on the prototype */
+    const ScrDynClassMember *m = scr_dsym_inst_member(recv, k);
+    if (m != NULL && m->len > 7 && memcmp(m->name, "Symbol(", 7) == 0 && m->get != NULL) {
+      ScrDyn *val = m->get(recv->v.inst.o);
+      ScrDyn *o = scr_dyn_new_obj();
+      scr_dyn_obj_set(o, "value", 5, val);
+      scr_dyn_obj_set(o, "writable", 8, scr_dsym_flag(true));
+      scr_dyn_obj_set(o, "enumerable", 10, scr_dsym_flag(m->enumerable != 0));
+      scr_dyn_obj_set(o, "configurable", 12, scr_dsym_flag(true));
+      return o;
+    }
+    ScrDyn *bag = scr_dsym_inst_bag(recv, false);
+    const ScrDynSymEnt *row = bag != NULL ? scr_dsym_own(bag, k) : NULL;
+    ScrDyn *d = row != NULL ? scr_dsym_desc_of_row(row) : scr_dyn_retain(scr_dyn_undefined());
+    scr_dyn_release(bag);
+    return d;
+  }
+  case SCR_DSYM_FENCE:
+    scr_dsym_fence(recv, "describing");
+    return NULL;
+  case SCR_DSYM_ABSENT:
+    break;
+  }
+  return scr_dyn_retain(scr_dyn_undefined());
+}
+
 bool scr_dyn_sym_has(ScrDyn *recv, ScrSym *k) {
   if (recv != NULL && recv->kind == SCR_DYN_JSVAL) return scr_dsym_engine_bool(recv, SCR_JSV_SYM_HAS, k);
   if (recv != NULL && recv->kind == SCR_DYN_PROXY) {

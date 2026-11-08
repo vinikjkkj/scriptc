@@ -4465,6 +4465,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_dyn_any_delete(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "sym.anyHas":
             return finish(`scr_dyn_any_has(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "sym.anyGetOwnDesc":
+            return finish(`scr_dyn_any_get_own_desc(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "sym.dynGetOwnDesc":
+            return finish(`scr_dyn_sym_get_own_desc(${arg(0)}, ${arg(1)})`);
           case "sym.anyHasOwn":
             return finish(`scr_dyn_any_has_own(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "sym.anyDefine":
@@ -7958,6 +7962,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // `constructor` to the list the keys walk produced. Void,
             // both borrowed, never throws.
             return finish(`scr_dyn_own_names_ctor(${arg(0)}, ${arg(1)})`);
+          case "dyn.getOwnPropDesc":
+            // Object.getOwnPropertyDescriptor over a dyn receiver: both borrowed, the descriptor object or undefined +1; throws on nullish.
+            return finish(`scr_dyn_get_own_desc(${arg(0)}, ${arg(1)})`);
           case "dyn.hasOwn":
             // Object.hasOwn over a dyn receiver (throws on nullish, like
             // Node's ToObject).
