@@ -108,6 +108,8 @@ const RUNTIME_UNIT_DEPS: Readonly<Record<string, readonly string[]>> = {
   // wrapper (scr_stream_dyn.c, which links the stream and inspect units).
   "scr_http_dyn.c": ["scr_http.c", "scr_net.c", "scr_stream_dyn.c"],
   "scr_symbol.c": ["scr_assert.c"],
+  // Object.getOwnPropertyDescriptor over an untyped key calls both the string-key answer and the symbol-key answer.
+  "scr_dyn_gopd_any.c": ["scr_dyn_gopd.c", "scr_symbol.c"],
   // safeIntegers() answers a real BigInt and binds one back, so the
   // SQLite gate owes the linker the bigint unit — scr_big_parse,
   // scr_big_eq, scr_big_low_u64, scr_big_release, scr_dyn_from_big.
@@ -639,6 +641,8 @@ export interface CcOptions {
   dynProto?: boolean;
   /** The program lowers Object.getOwnPropertyDescriptor over a dyn receiver (moduleUsesDynGopd): compiles scr_dyn_gopd.c. */
   dynGopd?: boolean;
+  /** The program lowers Object.getOwnPropertyDescriptor over an untyped key (moduleUsesDynGopdAny): compiles scr_dyn_gopd_any.c beside the string and symbol units. */
+  dynGopdAny?: boolean;
   /** The program can read the Promise constructor value's statics (moduleUsesPromiseStatics): compiles scr_promise_static.c beside
    * the dyn promise unit. */
   promiseStatics?: boolean;
@@ -2472,6 +2476,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
   const opaqueUnit = opts.opaque ?? false;
   const dynProtoUnit = opts.dynProto ?? false;
   const dynGopdUnit = opts.dynGopd ?? false;
+  const dynGopdAnyUnit = opts.dynGopdAny ?? false;
   const fetchAbort = fetchStatic && (opts.abortSignal ?? false);
   const fetchDispatch = (opts.fetchDispatch ?? false) && fetchStatic;
   const abortHttp = (opts.abortHttp ?? false) || fetchAbort;
@@ -2759,6 +2764,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...(opaqueUnit ? [rt(join(rtDir, "scr_opaque.c"))] : []),
     ...(dynProtoUnit ? [rt(join(rtDir, "scr_dyn_proto.c"))] : []),
     ...(dynGopdUnit ? [rt(join(rtDir, "scr_dyn_gopd.c"))] : []),
+    ...(dynGopdAnyUnit ? [rt(join(rtDir, "scr_dyn_gopd_any.c"))] : []),
     // The WebRTC data-channel handles. Ownership pairs only for now; the
     // handles are never constructed, but a program that declares the
     // shapes still emits their release calls.
