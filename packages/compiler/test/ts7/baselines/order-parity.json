@@ -14070,51 +14070,51 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/24720-string-subclass-decoder-shape.js": {
+  "<repo>/tests/corpus/24740-string-subclass-decoder-shape.js": {
    "order": [
-    "<repo>/tests/corpus/24720-string-subclass-decoder-shape.js"
+    "<repo>/tests/corpus/24740-string-subclass-decoder-shape.js"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/24721-string-subclass-exactness-matrix.js": {
+  "<repo>/tests/corpus/24741-string-subclass-exactness-matrix.js": {
    "order": [
-    "<repo>/tests/corpus/24721-string-subclass-exactness-matrix.js"
+    "<repo>/tests/corpus/24741-string-subclass-exactness-matrix.js"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/24722-string-number-boolean-subclass-overrides.js": {
+  "<repo>/tests/corpus/24742-string-number-boolean-subclass-overrides.js": {
    "order": [
-    "<repo>/tests/corpus/24722-string-number-boolean-subclass-overrides.js"
+    "<repo>/tests/corpus/24742-string-number-boolean-subclass-overrides.js"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/24723-set-prototype-of-and-primitive-prototypes.js": {
+  "<repo>/tests/corpus/24743-set-prototype-of-and-primitive-prototypes.js": {
    "order": [
-    "<repo>/tests/corpus/24723-set-prototype-of-and-primitive-prototypes.js"
+    "<repo>/tests/corpus/24743-set-prototype-of-and-primitive-prototypes.js"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/24724-string-subclass-rc-churn.js": {
+  "<repo>/tests/corpus/24744-string-subclass-rc-churn.js": {
    "order": [
-    "<repo>/tests/corpus/24724-string-subclass-rc-churn.js"
+    "<repo>/tests/corpus/24744-string-subclass-rc-churn.js"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/24725-string-subclass-inspect-and-containers.js": {
+  "<repo>/tests/corpus/24745-string-subclass-inspect-and-containers.js": {
    "order": [
-    "<repo>/tests/corpus/24725-string-subclass-inspect-and-containers.js"
+    "<repo>/tests/corpus/24745-string-subclass-inspect-and-containers.js"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/24726-wrapper-instanceof-string-number-boolean.js": {
+  "<repo>/tests/corpus/24746-wrapper-instanceof-string-number-boolean.js": {
    "order": [
-    "<repo>/tests/corpus/24726-wrapper-instanceof-string-number-boolean.js"
+    "<repo>/tests/corpus/24746-wrapper-instanceof-string-number-boolean.js"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/24727-set-prototype-of-over-plain-assigned-prototypes.js": {
+  "<repo>/tests/corpus/24747-set-prototype-of-over-plain-assigned-prototypes.js": {
    "order": [
-    "<repo>/tests/corpus/24727-set-prototype-of-over-plain-assigned-prototypes.js"
+    "<repo>/tests/corpus/24747-set-prototype-of-over-plain-assigned-prototypes.js"
    ],
    "diags": []
   },
