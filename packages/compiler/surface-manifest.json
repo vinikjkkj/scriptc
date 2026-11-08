@@ -1020,6 +1020,13 @@
       "status": "static"
     },
     {
+      "id": "node-builtin.fs.readdir",
+      "kind": "node-builtin",
+      "name": "fs.readdir",
+      "status": "static",
+      "note": "the callback form: names, Buffers, Dirents, recursive; the listing is the filesystem's"
+    },
+    {
       "id": "node-builtin.fs.readdirSync",
       "kind": "node-builtin",
       "name": "fs.readdirSync",
