@@ -1864,6 +1864,23 @@ static ScrStr *insp_with_base(ScrStr *base, ScrDyn *obj, double recurse, double 
  * (a function, or anything else for an absent half). Under ctx.getters a getter that qualifies RUNS and its answer prints:
  * `[Getter: 5]`, `[Getter: null]`, `[Getter] { a: 1 }` for an object; a throw prints `<Inspection threw (...)>`. Otherwise the bare
  * label. `vrecurse` is the recursion depth the property's value would format at. Appends to `eb` (after the key's ": "). */
+/* A caught exception as a dyn value (scr_caught_to_dyn's stances; that one lives in the gated async unit, which a program printing
+ * through this renderer need not link). Borrows the box, +1. */
+static ScrDyn *insp_caught_dyn(const ScrCaught *c) {
+  switch (c->kind) {
+    case SCR_EXC_F64: return scr_dyn_new_num(c->f64);
+    case SCR_EXC_BOOL: return scr_dyn_new_bool(c->b);
+    case SCR_EXC_STR: return scr_dyn_new_str((ScrStr *)c->payload);
+    case SCR_EXC_REF:
+      if (c->retain_fn == scr_dyn_retain_v) return scr_dyn_retain((ScrDyn *)c->payload);
+      return scr_dyn_new_obj();
+    case SCR_EXC_OBJ:
+      if (scr_error_is(c->payload)) return scr_dyn_from_error((const ScrError *)c->payload);
+      return scr_dyn_new_obj();
+    default: return scr_dyn_new_obj();
+  }
+}
+
 static void insp_acc_into(InspBuf *eb, ScrDyn *recv, const ScrDyn *getter, const ScrDyn *setter, double vrecurse, double depth) {
   const bool g = getter != NULL && getter->kind == SCR_DYN_FUNC;
   const bool st = setter != NULL && setter->kind == SCR_DYN_FUNC;
@@ -1886,7 +1903,7 @@ static void insp_acc_into(InspBuf *eb, ScrDyn *recv, const ScrDyn *getter, const
   if (tmp == NULL) {
     /* the getter threw: `<Inspection threw (<the thrown value>)>` */
     ScrCaught *c = scr_exc_take();
-    ScrDyn *err = scr_caught_to_dyn(c);
+    ScrDyn *err = insp_caught_dyn(c);
     scr_caught_release(c);
     ScrStr *es = scr_insp_dyn(err, vrecurse, depth);
     scr_dyn_release(err);
