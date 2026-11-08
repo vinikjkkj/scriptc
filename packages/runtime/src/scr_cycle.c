@@ -1975,6 +1975,30 @@ static size_t scr_cyc_threshold(void) {
   return cached;
 }
 
+/* ── pacing denominator: live nodes PLUS the boxed booleans and nulls that are no longer nodes ──
+ * `true`, `false` and `null` cross into the dyn tree as shared immortal boxes (scr_dyn_new_bool), so a container's boolean slot is
+ * an EDGE with no live node behind it. A pass still walks that edge, so the cost model below (a pass costs the graph reachable
+ * from its candidates) has not moved, but scr_cyc_live shrank by one per boolean and the interval live/PACE with it: a bool-heavy
+ * parsed tree then collected ~3x as often over the same edges (measured +32% Ir, all of it in scr_collect_cycles).
+ *
+ * The denominator is therefore live + phantom, where phantom is estimated from the candidates themselves: each paced pass first asks the hook below to look at (a bounded, strided number of) the buffered roots and report how many slots hold a shared
+ * immortal bool/null and how many hold or are a real node, and the running ratio scales the live count. The hook is installed by
+ * the first bool/null box (scr_json.c), so a program that never boxes one never samples and scr_cycle.c needs no link edge to
+ * the dyn tree. Nothing of the pass itself changed: the sample is a separate walk before it, so the ordinary pass is the code it
+ * always was. The estimate is folded INTO scr_cyc_live once per pass, so the release path's pacing test reads the same counter it
+ * always did. Only slots the hook recognizes count (not undefined, interned strings, or a typed container's boolean). */
+void (*scr_cyc_sample_roots)(void *const *roots, size_t n, size_t stride, size_t *phantom, size_t *nodes) = NULL;
+static size_t scr_gray_total = 0, scr_ph_total = 0, scr_ph_applied = 0;
+static void scr_cyc_paced_collect(void);
+
+static void scr_cyc_phantom_apply(void) {
+  size_t real = scr_cyc_live - scr_ph_applied;
+  size_t ph = 0;
+  if (scr_ph_total != 0 && scr_gray_total != 0) ph = (size_t)((double)real * (double)scr_ph_total / (double)scr_gray_total);
+  scr_cyc_live = real + ph;
+  scr_ph_applied = ph;
+}
+
 /* ── pacing ───────────────────────────────────────────────────────────
  * The threshold counts BUFFERED CANDIDATES, but a pass costs O(the graph
  * reachable from them), not O(the buffer): markGray visits every node
@@ -2085,7 +2109,7 @@ void scr_collect_cycles_idle(void) {
     size_t want = scr_cyc_live / pace;
     if (scr_nroots < (want > 1 ? want : 1)) return;
   }
-  scr_collect_cycles();
+  scr_cyc_paced_collect();
 }
 
 void scr_cyc_on_dead(void *obj) {
@@ -2118,7 +2142,7 @@ void scr_cyc_on_release(void *obj) {
   size_t paced = scr_cyc_live / SCR_CYC_PACE;
   size_t base = scr_cyc_threshold();
   if (!scr_collecting && scr_nroots >= (paced > base ? paced : base)) {
-    scr_collect_cycles();
+    scr_cyc_paced_collect();
   }
 }
 
@@ -2354,4 +2378,27 @@ void scr_collect_cycles(void) {
   SCR_CYC_PR_SWEEP();
   SCR_PC_PASS();
   scr_collecting = false;
+}
+
+/* The pacing hooks around a collection that is paced (scr_cyc_on_release, scr_collect_cycles_idle): once the hook exists, sample the
+ * candidates first (a bounded, evenly strided look at them), run the unchanged collection, then fold the estimate into the pacing
+ * denominator. Before the hook exists (no boolean or null was ever boxed) this is one load and a branch per PACED pass, and the
+ * exit pass and every program that never boxes one are the code they always were. */
+static void scr_cyc_paced_collect(void) {
+  if (scr_cyc_sample_roots == NULL) {
+    scr_collect_cycles();
+    return;
+  }
+  if (!scr_collecting && scr_nroots != 0) {
+    size_t ph = 0, nodes = 0, n = scr_nroots, stride = n / 256 + 1;
+    scr_cyc_sample_roots(scr_roots, n, stride, &ph, &nodes);
+    scr_ph_total += ph;
+    scr_gray_total += nodes;
+    if (scr_gray_total > ((size_t)1 << 40)) { /* keep the ratio, bound the counters */
+      scr_gray_total >>= 1;
+      scr_ph_total >>= 1;
+    }
+  }
+  scr_collect_cycles();
+  scr_cyc_phantom_apply();
 }
