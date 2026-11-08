@@ -36,7 +36,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, test } from "vitest";
+import { beforeAll, describe, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
 
 const DECLIB_DTS = `export interface PoolOptionsLike {
@@ -91,6 +91,26 @@ console.log(q.host, q.port, describe(q));
 `;
 
 describe("a bare `any` record member (declared in a .d.ts or program-authored)", () => {
+  /* The first compile in a shard with a cold object cache (a branch that changed a runtime source misses every cached runtime object, and
+   * the CI cache restore falls back to another run's entries) builds the whole runtime, which on the Windows lane alone takes longer than
+   * the 120 s each test below is allowed for ITS OWN work: compiling an already-built runtime plus running two tiny binaries. Two
+   * failures in a row at 155 s and 151 s were that build, not the test. This hook pays the cold build once, under a bound that covers a
+   * full cold runtime build on the slowest lane, so the per-test budget keeps meaning "this program's own work" and still catches a
+   * real hang or a real compile-time regression. The program is the dyn-tier shape the tests compile, so the same runtime objects are
+   * the ones warmed. */
+  beforeAll(async () => {
+    const dir = mkdtempSync(join(tmpdir(), "scr-anymember-warm-"));
+    const src = join(dir, "main.ts");
+    writeFileSync(src, poolSrc("interface PoolOptionsLike {\n  host: string;\n  port: number;\n  debug: any;\n}\n"));
+    const result = await compile(src, {
+      outPath: join(dir, `prog${process.platform === "win32" ? ".exe" : ""}`),
+      outDir: dir,
+    });
+    if (!result.ok) {
+      throw new Error(`warm-up compile failed:\n` + result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+    }
+  }, 600_000);
+
   test("admits a native (no --dynamic) record, and the typeof-narrowed function member is directly callable", async () => {
     const dir = mkdtempSync(join(tmpdir(), "scr-anymember-dts-"));
     // The .d.ts carries ONLY the type -- exactly PoolOptions' own shape:
