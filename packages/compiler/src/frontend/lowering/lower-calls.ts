@@ -13017,6 +13017,33 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
    * Known residual gap: a prototype reached without the name (e.g.
    * Object.getPrototypeOf(new K())) is not walked here. */
   const classProtoNamesCache = new WeakMap<ts.ClassDeclaration, string[] | null>();
+  /** `Object.getOwnPropertyDescriptor(o, k)` over a value the checked-dynamic tree can hold (scr_dyn_gopd.c): the receiver crosses into dyn (a dyn
+   * receiver as it is), the key stringifies (ToPropertyKey) and a symbol key takes the symbol table's own answer. Null when the receiver has no dyn
+   * form (the call keeps its fence). */
+  function lowerGetOwnDescOverDyn(L: Lowerer, call: ts.CallExpression): IrExpr | null {
+    const recvNode = call.arguments[0];
+    const keyNode = call.arguments[1];
+    if (recvNode === undefined || keyNode === undefined || call.arguments.length !== 2) return null;
+    if (ts.isSpreadElement(recvNode) || ts.isSpreadElement(keyNode)) return null;
+    const probed = probeLower(L, recvNode);
+    if (probed === null) return null;
+    if (probed.type.kind !== "dyn" && !L.dynConvertible(probed.type)) return null;
+    const loc = locOf(call);
+    const receiver = probed.type.kind === "dyn" ? L.lowerExpr(recvNode) : L.lowerExprExpecting(recvNode, DYN);
+    if (receiver.type.kind !== "dyn") return null;
+    if (L.mapTypeOf(L.typeOf(keyNode))?.kind === "symbol") {
+      const sk = dynSymbolKeyOf(L, keyNode);
+      if (sk === null) return null;
+      return { kind: "libCall", fn: "sym.dynGetOwnDesc", args: [receiver, sk], type: DYN, loc };
+    }
+    let key = L.lowerExpr(keyNode);
+    if (key.type.kind === "f64" || key.type.kind === "bool" || key.type.kind === "dyn") {
+      key = { kind: "toString", operand: key, type: STRING, loc: locOf(keyNode) };
+    }
+    if (key.type.kind !== "string") return null;
+    return { kind: "libCall", fn: "dyn.getOwnPropDesc", args: [receiver, key], type: DYN, loc };
+  }
+
   /** Layer 1 descriptor: `Object.getOwnPropertyDescriptor(K.prototype, "m")`
    * for a JS-source program class K whose `m` is a plain (non-accessor,
    * non-static, non-constructor) method. The descriptor is Node's data
@@ -13448,6 +13475,8 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     if (member === "getOwnPropertyDescriptor") {
       const desc = protoMethodDescriptorOf(L, call);
       if (desc !== null) return desc;
+      const viaDyn = lowerGetOwnDescOverDyn(L, call);
+      if (viaDyn !== null) return viaDyn;
     }
     // Layer 1 static fold: Object.getOwnPropertyNames(K.prototype) for a
     // program class K is its own-name list, a constant (see classPrototypeOwnNamesOf).

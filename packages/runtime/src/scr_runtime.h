@@ -7217,6 +7217,10 @@ void scr_dyn_any_set_sloppy(ScrDyn *recv, ScrDyn *key, ScrStr *keystr, ScrDyn *v
 bool scr_dyn_any_delete(ScrDyn *recv, ScrDyn *key, ScrStr *keystr);
 bool scr_dyn_any_has(ScrDyn *recv, ScrDyn *key, ScrStr *keystr);
 bool scr_dyn_any_has_own(ScrDyn *recv, ScrDyn *key, ScrStr *keystr);
+/* Object.getOwnPropertyDescriptor over a dyn receiver (scr_dyn_gopd.c; the symbol arm in scr_symbol.c): the descriptor object or undefined, +1; NULL with a pending throw. */
+ScrDyn *scr_dyn_get_own_desc(ScrDyn *recv, ScrStr *key);
+ScrDyn *scr_dyn_sym_get_own_desc(ScrDyn *recv, ScrSym *k);
+ScrDyn *scr_dyn_any_get_own_desc(ScrDyn *recv, ScrDyn *key, ScrStr *keystr);
 ScrDyn *scr_dyn_any_define(ScrDyn *recv, ScrDyn *key, ScrStr *keystr, ScrDyn *desc); /* the table on `recv` holds an accessor row */
 void scr_dyn_sym_set(ScrDyn *recv, ScrSym *k, ScrDyn *v);
 bool scr_dyn_sym_has(ScrDyn *recv, ScrSym *k);     /* `k in recv`: own, then the chain */
@@ -7802,6 +7806,9 @@ typedef struct ScrDynJsvalOps {
   int (*bin_kind)(ScrJsval *cell);
   /* The COPY of an engine typed array's / ArrayBuffer's bytes as a fresh native value of its own element (scr_jsval_exit_bin). */
   ScrBytes *(*exit_bin)(ScrJsval *cell);
+  /* Object.getOwnPropertyDescriptor(cell, key) in the ENGINE (key: a dyn string, or a symbol handle): the engine's descriptor object wrapped (+1),
+   * or undefined; NULL with the engine's exception pending. */
+  ScrDyn *(*get_own_desc)(ScrJsval *cell, const ScrDyn *key);
 #ifdef SCR_SYMTAB
   /* A symbol-keyed operation on the ENGINE object (scr_symbol.c routes here, ScrDsymEngineOp): the runtime symbol `k`
    * crosses as THE engine symbol of its identity (one per identity, both directions: scr_island.c's table). +1 result, or

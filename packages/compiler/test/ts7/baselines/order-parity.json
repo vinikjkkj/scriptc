@@ -26673,6 +26673,12 @@
     "<repo>/tests/fixtures/node-types/streams.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/24706-object-getownpropertydescriptor-over-every-dyn-kind.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24706-object-getownpropertydescriptor-over-every-dyn-kind.cjs"
+   ],
+   "diags": []
   }
  }
 }
