@@ -139,6 +139,25 @@ export function emitBorrowedLocal(E: CEmitter, operand: IrExpr, following: IrExp
   return E.emitExpr(operand);
 }
 
+/** Like emitBorrowedLocal, for an operation that is PURE: it reads the value and runs no user code at all (kind and truthiness tests,
+ * strict equality), so a dyn FIELD of a plain local receiver can be borrowed too. A field is reassignable by any code that holds the
+ * object, which is why a consumer that may run a getter or a method never gets this; a pure consumer finishes before anything else
+ * can run, so the field cannot be overwritten under it and the retain/release pair around the read disappears. */
+export function emitBorrowedPure(E: CEmitter, operand: IrExpr, following: IrExpr[]): Temp {
+  if (
+    operand.kind === "fieldGet" &&
+    !operand.nullTest &&
+    !operand.tagTest &&
+    operand.type.kind === "dyn" &&
+    !RUNTIME_ERROR_CLASSES.has(operand.className) &&
+    following.length === 0
+  ) {
+    const obj = emitBorrowedLocal(E, operand.obj, []);
+    return E.newBorrowedTemp(operand.type, `${obj.name}->${mangleField(operand.field)}`);
+  }
+  return emitBorrowedLocal(E, operand, following);
+}
+
 /** A read of an initialised plain (unboxed, non-TDZ) dyn local of the current function: the operation that looks at it can borrow
  * the variable itself instead of a retained copy. */
 function borrowedDynLocal(E: CEmitter, a: IrExpr): boolean {
@@ -3406,8 +3425,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // dyn vs scalar strict equality: kind test + payload compare.
         // Operands emit in SOURCE order (JS evaluation order); the dyn
         // side is found by type. Both borrowed, no allocation.
-        const l = emitBorrowedLocal(E, e.left, [e.right]);
-        const r = emitBorrowedLocal(E, e.right, []);
+        const l = emitBorrowedPure(E, e.left, [e.right]);
+        const r = emitBorrowedPure(E, e.right, []);
         const [d, s, st] = e.left.type.kind === "dyn" ? [l, r, e.right.type] : [r, l, e.left.type];
         // sameValue (Object.is): the number arm is SameValue (NaN equals
         // NaN, +0 differs from -0); every other arm is === already.
@@ -3441,7 +3460,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // answer through the scr_dyn_isl_* helpers (false on every other
         // kind, so the calls stay unconditional); narrowing never changes
         // representation (SEMANTICS.md).
-        const d = emitBorrowedLocal(E, e.value, []);
+        const d = emitBorrowedPure(E, e.value, []);
         // `u instanceof C` for a program class C on an unknown value: the
         // boxed instance's OWN preorder position against C's interval (the
         // same test the typed instanceof compiles to); false for every

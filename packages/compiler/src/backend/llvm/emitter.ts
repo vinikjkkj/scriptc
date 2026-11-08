@@ -6212,6 +6212,24 @@ class LlEmitter {
     return this.emitExpr(operand);
   }
 
+  /** emit-exprs.ts's emitBorrowedPure: for an operation that is PURE (runs no user code at all), a dyn FIELD of a plain local receiver is
+   * borrowed too: loaded out of the object with no retain and no frame entry. */
+  private emitBorrowedPure(operand: IrExpr, following: IrExpr[]): LlValue {
+    if (
+      operand.kind === "fieldGet" &&
+      !operand.nullTest &&
+      !operand.tagTest &&
+      operand.type.kind === "dyn" &&
+      !RUNTIME_ERROR_CLASSES.has(operand.className) &&
+      following.length === 0
+    ) {
+      const obj = this.emitBorrowedLocal(operand.obj, []);
+      const { ptr, type } = this.classFieldPtr(obj.name, operand.className, operand.field);
+      return { name: this.loadField(ptr, type), type: operand.type };
+    }
+    return this.emitBorrowedLocal(operand, following);
+  }
+
   /** Loads a boxed binding's box pointer out of its slot. */
   private loadBox(slot: string): string {
     const b = this.B.tmp();
@@ -12136,8 +12154,8 @@ class LlEmitter {
         // dyn vs scalar strict equality: kind test + payload compare.
         // Operands emit in SOURCE order; the dyn side is found by type.
         // Both borrowed, no allocation.
-        const l = this.emitBorrowedLocal(e.left, [e.right]);
-        const r = this.emitBorrowedLocal(e.right, []);
+        const l = this.emitBorrowedPure(e.left, [e.right]);
+        const r = this.emitBorrowedPure(e.right, []);
         const [d, s, st] = e.left.type.kind === "dyn" ? [l, r, e.right.type] : [r, l, e.left.type];
         let test: string;
         if (st.kind === "dyn") {
@@ -12202,7 +12220,7 @@ class LlEmitter {
       case "dynTest": {
         // A pure kind compare on the dyn node — borrowed; only the truthy
         // form also reads a scalar payload (the runtime's ToBoolean).
-        const d = this.emitBorrowedLocal(e.value, []);
+        const d = this.emitBorrowedPure(e.value, []);
         let test: string;
         if (e.test === "class") {
           // `u instanceof C` over an unknown value: the boxed instance's own
