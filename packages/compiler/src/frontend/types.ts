@@ -3570,6 +3570,22 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   ) {
     return DYN; /* a HANDLE box (scr_dc.c): identity survives every dyn crossing */
   }
+  // dns.Resolver: the runtime's own resolver object (scr_dgram.c), held as a
+  // checked-dynamic value like a diagnostics_channel Channel; `new` goes
+  // through dyn.construct and the member calls through the Resolver method
+  // lowering (lower-dgram.ts), which fences every member the object does not
+  // answer. dns/promises' class of the same name is a different module.
+  if (
+    psym?.name === "Resolver" &&
+    checker.declarationsOf(psym).some(
+      (d) =>
+        (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)) &&
+        ctx.isStdlibFile(d.getSourceFile()) &&
+        isDeclaredInAmbientModule(d, "dns"),
+    )
+  ) {
+    return DYN;
+  }
   // string_decoder.StringDecoder: the decoder value is a two-field record
   // — the CANONICAL encoding name (construction normalizes aliases; the
   // `.encoding` property reads it) and the f64 packing the pending

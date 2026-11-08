@@ -1,0 +1,8 @@
+dns-resolver-unanswered-member/main.ts:6:1 - error SC2020: 'Resolver#resolve4' is part of the standard library types but has no scriptc lowering yet
+
+  5 | r.setServers(["127.0.0.1:1"]);
+  6 | r.resolve4("example.com", (err, addresses) => {
+    | ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  7 |   console.log(err, addresses);
+
+  hint: dns.Resolver answers resolveSrv, getServers, setServers, cancel and setLocalAddress
