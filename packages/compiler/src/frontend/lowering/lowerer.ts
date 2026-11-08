@@ -21,7 +21,7 @@ import type { CjsExportRecord } from "./cjs-export-record.js";
 import { isLiveAliasName } from "./cjs-live-exports.js";
 import { copyListStmts, type CopyPart } from "./key-list-fill.js";
 import { applyEnumRefill, applyNullProto, applyOwnKey, applySlotFilled, flushPatchCensus } from "./ir-patch.js";
-import { classFedInterfacesNoted, clearClassFedInterfaces, flushMintOrder, mintPhaseControl, noteClassFedInterface, resetClassFedInterfacesGrew, resetMintLog, setGenGateKeys, setMintPhase, undefSlotWiden, CLASS_FED_INTERFACES } from "../types.js";
+import { CLASS_FED_MIXED, classFedInterfacesNoted, clearClassFedInterfaces, flushMintOrder, mintPhaseControl, noteClassFedInterface, resetClassFedInterfacesGrew, resetMintLog, setGenGateKeys, setMintPhase, undefSlotWiden, CLASS_FED_INTERFACES } from "../types.js";
 import { flushFragmentCensus } from "./fragment-census.js";
 import { fenceDynRecordCasts } from "./dyn-record-fence.js";
 import { fenceNullProtoRecordCasts } from "./null-proto-fence.js";
@@ -868,7 +868,7 @@ export function lowerToIr(
   // stops growing (bounded), so the emit pass interns every shape it will need as a view. Programs with no such conversion
   // never enter the loop.
   for (let round = 0; round < 3 && (viewConversionNoted || classFedInterfacesNoted()); round++) {
-    const grantSig = (): string => [...viewShapeKeys].sort().join("\n") + "|" + [...structViewDeniedKeys].sort().join("\n") + "|" + [...CLASS_FED_INTERFACES].sort().join("\n");
+    const grantSig = (): string => [...viewShapeKeys].sort().join("\n") + "|" + [...structViewDeniedKeys].sort().join("\n") + "|" + [...CLASS_FED_INTERFACES].map(([k, v]) => `${k}=${v}`).sort().join("\n");
     const before = grantSig();
     discovery = new Lowerer(program, entry, moduleOrder, dynamic, {
       targetPlatform,
@@ -8451,7 +8451,11 @@ export class Lowerer {
     // A class instance reaching a slot of an INTERFACE's record shape: the interface's values must be the objects themselves, so record the
     // interface; discovery runs again and every pass after it maps that interface to the boxed object (types.ts mapRecordTypeInner).
     if (actual.kind === "object" && expected.kind === "record") {
-      for (const key of this.shapes.interfaceKeys.get(expected.shapeId) ?? []) noteClassFedInterface(key);
+      for (const key of this.shapes.interfaceKeys.get(expected.shapeId) ?? []) noteClassFedInterface(key, actual.className);
+    }
+    // ... and a plain record reaching the object type such an interface mapped to: a second kind of source, so the interface keeps boxed objects.
+    if (actual.kind === "record" && expected.kind === "object") {
+      for (const key of this.shapes.objectInterfaceKeys.get(expected.className) ?? []) noteClassFedInterface(key, CLASS_FED_MIXED);
     }
     // dyn mismatches first. A dyn ('unknown') value flowing into a typed
     // slot needs a CHECKED cast — the hint points at `as <type>`; tsc

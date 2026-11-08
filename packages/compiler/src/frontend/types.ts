@@ -340,6 +340,9 @@ export class ShapeRegistry {
   /** The interface declarations (interfaceKeyOf) whose type interned as each shape id: what the lowering consults to learn WHICH interface a record
    * slot came from when a class instance reaches it. A shape shared by structurally equal interfaces lists them all. */
   readonly interfaceKeys = new Map<string, Set<string>>();
+  /** Interface declarations (interfaceKeyOf) that mapped to a class's own object type, by class name: what the lowering consults when a plain record
+   * reaches such a slot (the interface then has two kinds of source and maps to the boxed object instead). */
+  readonly objectInterfaceKeys = new Map<string, Set<string>>();
   /** ts.Types currently being mapped — a BACK-REFERENCE to one of these is
    * the recursive knot (`interface TreeNode { children: TreeNode[] }`):
    * mapType answers a NAMED RECURSIVE SHAPE (recursiveRef) whose fields
@@ -9194,13 +9197,17 @@ function jsFileAssignsProperty(sf: ts.SourceFile, name: string): boolean {
 
 /** Interfaces (by declaration) that a class instance has flowed into during THIS compilation's discovery passes. They map to the boxed object
  * (mapRecordTypeInner). Filled by the lowering (requireExactShape), per compilation. */
-export const CLASS_FED_INTERFACES = new Set<string>();
+export const CLASS_FED_INTERFACES = new Map<string, string>();
+/** The class name that stands for "more than one source": a second class, or a plain record, reached the interface. */
+export const CLASS_FED_MIXED = "*";
 /** Set when CLASS_FED_INTERFACES grew since discovery last ran, so the lowering runs discovery again before emitting. */
 let classFedInterfacesGrew = false;
 export function classFedInterfacesNoted(): boolean { return classFedInterfacesGrew; }
 export function clearClassFedInterfaces(): void { CLASS_FED_INTERFACES.clear(); classFedInterfacesGrew = false; }
-export function noteClassFedInterface(key: string): void {
-  if (!CLASS_FED_INTERFACES.has(key)) { CLASS_FED_INTERFACES.add(key); classFedInterfacesGrew = true; }
+export function noteClassFedInterface(key: string, className: string): void {
+  const had = CLASS_FED_INTERFACES.get(key);
+  if (had === undefined) { CLASS_FED_INTERFACES.set(key, className); classFedInterfacesGrew = true; }
+  else if (had !== className && had !== CLASS_FED_MIXED) { CLASS_FED_INTERFACES.set(key, CLASS_FED_MIXED); classFedInterfacesGrew = true; }
 }
 export function resetClassFedInterfacesGrew(): void { classFedInterfacesGrew = false; }
 
@@ -9225,7 +9232,15 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
   // An interface a CLASS INSTANCE has flowed into (discovered by the lowering, which records the interface when a class instance reaches a slot of its
   // record shape: classFedInterfaces): its values are the objects themselves, boxed, whatever the interface's size, so identity and the class's
   // methods are kept and a plain literal flowing into the same slot becomes a dynamic object. Every other interface stays a record.
-  if (widenedSym !== undefined && (widenedSym.flags & ts.SymbolFlags.Interface) !== 0 && CLASS_FED_INTERFACES.has(interfaceKeyOf(widenedSym, ctx))) return DYN;
+  if (widenedSym !== undefined && (widenedSym.flags & ts.SymbolFlags.Interface) !== 0 && CLASS_FED_INTERFACES.has(interfaceKeyOf(widenedSym, ctx))) {
+    const key = interfaceKeyOf(widenedSym, ctx);
+    const only = CLASS_FED_INTERFACES.get(key)!;
+    // Exactly one class has flowed in and nothing else: the interface's values ARE that class's instances, so they keep the class's own object type
+    // and every call binds to the class's method (or its prototype table) with no lookup by name. A second source makes the values boxed objects.
+    if (only === CLASS_FED_MIXED) return DYN;
+    ctx.shapes.objectInterfaceKeys.set(only, new Set([...(ctx.shapes.objectInterfaceKeys.get(only) ?? []), key]));
+    return { kind: "object", className: only };
+  }
   {
     const viaSymbolicAlias = mapSymbolicMappedAlias(widened, ctx);
     if (viaSymbolicAlias !== undefined) return viaSymbolicAlias;
