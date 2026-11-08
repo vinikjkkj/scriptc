@@ -1727,22 +1727,8 @@ function refuseOpenInspectOption(L: Lowerer, prop: ts.Node, key: string, value: 
   if (["showHidden", "showProxy", "getters"].includes(key) && literalTruthy(value) === true) open(`${key}: true`);
   if (INSPECT_OPEN_KEYS.has(key) && key !== "customInspect" && literalTruthy(value) === null) open(`${key} (a run-time value)`);
   if (key === "customInspect" && literalTruthy(value) === null) open(`${key} (a run-time value)`);
-  if (key === "compact" && literalTruthy(value) === null && valueMayBeTrue(L, value)) open("compact: true (a run-time value)");
-  if (key === "compact" && value.kind === ts.SyntaxKind.TrueKeyword) open("compact: true");
   if (key === "sorted" && literalTruthy(value) === true && value.kind !== ts.SyntaxKind.TrueKeyword) open("sorted with a comparator");
   if (key === "sorted" && (ts.isArrowFunction(value) || ts.isFunctionExpression(value))) open("sorted with a comparator");
-}
-
-/** The constituents of a union type (the type itself otherwise). */
-function typeParts(t: ts.Type): readonly ts.Type[] {
-  return t.isUnionType() ? (t as unknown as { getTypes(): ts.Type[] }).getTypes() : [t];
-}
-
-/** Whether a value's static type admits the boolean `true`. */
-function valueMayBeTrue(L: Lowerer, node: ts.Expression): boolean {
-  const t = L.typeOf(node);
-  const parts = typeParts(t);
-  return parts.some((x) => (x.flags & ts.TypeFlags.Any) !== 0 || ((x.flags & ts.TypeFlags.BooleanLiteral) !== 0 && (x as { intrinsicName?: string }).intrinsicName === "true"));
 }
 
 /** util.inspect's options argument is admitted only in two forms, both of which the
@@ -1868,10 +1854,18 @@ function inspectOptionsDyn(L: Lowerer, node: ts.Expression, loc: SrcLoc): IrExpr
   return nonLiteralOptions(L, node, "the options must be an object literal, a non-exported const bound to one that is used only as a util.inspect options argument, or a value of type any/unknown");
 }
 
+/** One literal option key: does the typed renderer lack what it asks for? colors (unless literally off) and compact (unless a numeric literal
+ * or literally off) are rendered by the run-time dyn renderer only. */
+function optionNeedsDynRender(key: string, value: ts.Expression): boolean {
+  if (key === "colors") return literalTruthy(value) !== false;
+  if (key === "compact") return !(ts.isNumericLiteral(value) || literalTruthy(value) === false);
+  return false;
+}
+
 /** Are the options only known at run time, or do they ask for colors? Then the value is boxed into the dynamic tree and rendered by the
  * runtime's dyn renderer, the one place that knows how to colorize every leaf (a typed value is rendered by IR text that cannot). */
 function optionsNeedDynRender(L: Lowerer, node: ts.Expression): boolean {
-  if (ts.isObjectLiteralExpression(node)) return node.properties.some((p) => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === "colors" && literalTruthy(p.initializer) !== false);
+  if (ts.isObjectLiteralExpression(node)) return node.properties.some((p) => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && optionNeedsDynRender(p.name.text, p.initializer));
   if (ts.isIdentifier(node)) {
     const init = admittedConstOptions(L, node);
     if (init !== null) return optionsNeedDynRender(L, init);
