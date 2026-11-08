@@ -26273,6 +26273,18 @@
     "<repo>/tests/corpus/24701-instance-assigned-function-over-a-generic-method-of-a-command-class-keeps-prototype-copies.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/24702-installer-function-handed-a-prototype-installs-late-methods-and-captures-the-inherited-member.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24702-installer-function-handed-a-prototype-installs-late-methods-and-captures-the-inherited-member.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24703-installer-function-installs-take-effect-at-the-call-per-class.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24703-installer-function-installs-take-effect-at-the-call-per-class.cjs"
+   ],
+   "diags": []
   }
  }
 }
