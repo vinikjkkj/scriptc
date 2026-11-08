@@ -72,6 +72,7 @@ import type {
 } from "../../ir/nodes.js";
 import { isDynErrorClass } from "../../ir/nodes.js";
 import { protoEscapes, strictAt } from "./lower-protoescape.js";
+import { fenceInspGetters, newInspGettersScan, noteInspGettersNode } from "./inspect-getters-fence.js";
 import { applyInstanceOverrides, applyLateInstalls, applyProtoSlots, dynFnAsFunc, dynFnReadable, scanProtoSlots } from "./lower-protoslots.js";
 import { applyProtoTabs, hasProtoTab, scanProtoTabs, upgradeLateMethodsOverTables } from "./lower-prototab.js";
 import { OWN_SHADOW_ROOTS, applyFieldNotes, applyOwnShadows, inOwnShadowFamily, prescanLiteralMethodShadows } from "./lower-ownshadow.js";
@@ -4480,6 +4481,7 @@ export class Lowerer {
     if (this.diags.length === 0) {
       let evalCrossing: SrcLoc | null = null;
       let classValues = false;
+      const inspScan = newInspGettersScan();
       const scan: unknown[] = [functions];
       while (scan.length > 0) {
         const n = scan.pop();
@@ -4494,8 +4496,11 @@ export class Lowerer {
           if (evalCrossing === null) evalCrossing = o.loc ?? null;
         }
         if (o.kind === "dynFrom" && o.value?.type?.kind === "classval") classValues = true;
+        noteInspGettersNode(o as Parameters<typeof noteInspGettersNode>[0], inspScan);
         for (const v of Object.values(n as Record<string, unknown>)) scan.push(v);
       }
+      // util.inspect's `getters` over a class value that reaches untyped code: refused when the accessors cannot be run exactly (inspect-getters-fence.ts)
+      fenceInspGetters(inspScan, functions, artifacts.classes, (d) => this.pushDiag(d as ScrDiagnostic));
       if (evalCrossing !== null) {
         for (const esc of protoEscapes(functions)) {
           this.pushDiag({
