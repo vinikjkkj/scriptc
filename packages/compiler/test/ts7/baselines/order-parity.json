@@ -14829,6 +14829,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24882-borrowed-dyn-local-reads-keep-their-referents-alive.js": {
+   "order": [
+    "<repo>/tests/corpus/24882-borrowed-dyn-local-reads-keep-their-referents-alive.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2490-find-miss-null-compare.ts": {
    "order": [
     "<repo>/tests/corpus/2490-find-miss-null-compare.ts"
