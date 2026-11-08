@@ -26238,6 +26238,13 @@
     "<repo>/tests/corpus/24704-installer-function-reached-through-a-commonjs-export-alias/main.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/24705-single-value-commonjs-export-calls-its-expando-member-functions/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24705-single-value-commonjs-export-calls-its-expando-member-functions/ck.cjs",
+    "<repo>/tests/corpus/24705-single-value-commonjs-export-calls-its-expando-member-functions/main.cjs"
+   ],
+   "diags": []
   }
  }
 }
