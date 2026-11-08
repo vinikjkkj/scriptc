@@ -1813,12 +1813,18 @@ static ScrDyn *dyn_objproto_shared_fn(const char *name) {
 ScrDyn *scr_dyn_intrinsic_method_get(ScrDyn *recv, const ScrStr *key) {
   /* ScrStr is NUL-terminated (scr_str_new), so ->data is a C string for
    * the same name-keyed tests the dispatch makes. */
+  /* An array's `.constructor` is the Array function value: the one `Array` as a value is (scr_dyn_builtin_ctor_value). */
+  if (recv->kind == SCR_DYN_ARR && key->len == 11 && memcmp(key->data, "constructor", 11) == 0) return scr_dyn_builtin_ctor_value(1);
   if (!dyn_kind_knows(recv, key->data)) return NULL;
   /* An OWN or INHERITED member of the same name SHADOWS the prototype's,
    * and the caller has already read it — but `o.toString = undefined`
    * stores a member whose VALUE is undefined, which the caller cannot
    * tell from a miss. `in` can. */
   if (recv->kind == SCR_DYN_OBJ && scr_dyn_obj_key_present(recv, key->data, key->len)) return NULL;
+  /* A plain object's `.constructor` is the Object function value, the same one the bare `Object` is as a value, so
+   * `value.constructor === Object` (mysql2's isJSON) is identity. */
+  if (recv->kind == SCR_DYN_OBJ && key->len == 11 && memcmp(key->data, "constructor", 11) == 0 && dyn_plain_obj_knows(recv, key->data))
+    return scr_dyn_object_ctor_value();
   if (dyn_plain_obj_knows(recv, key->data)) return dyn_objproto_shared_fn(key->data);
   /* `hasOwnProperty` is the ONE Object.prototype function whatever kind of value it is read off (an object, a
    * prototype-linked instance, an array, a string...): UNBOUND, so `names.filter(o.hasOwnProperty, thisArg)`
