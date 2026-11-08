@@ -145,8 +145,11 @@ export function unifyWidthShapes(L: Lowerer, functions: IrFunction[]): UnifyOutc
 
   // Shapes some node reads or writes by a COMPUTED key, a view or an order record: their field slots are read at the slot's
   // own type there, which a retyped slot cannot honor, so a retyped edge never touches them. Computed once, on first need.
-  let keyedSet: Set<string> | null = null;
-  const keyedShapes = (): Set<string> => (keyedSet ??= collectKeyedShapes(functions, L));
+  // Field names a retyped edge was admitted for: the only disagreement tryMerge may then resolve to a dyn slot.
+  const dynFieldNames = new Set<string>();
+  let scan: { keyed: Set<string>; written: Map<string, Set<string>> } | null = null;
+  const keyedShapes = (): Set<string> => (scan ??= collectKeyedShapes(functions, L)).keyed;
+  const writtenFields = (): Map<string, Set<string>> => (scan ??= collectKeyedShapes(functions, L)).written;
 
   for (const [key, helper] of L.widthHelpers) {
     if (!key.startsWith("rec:")) continue;
@@ -193,6 +196,15 @@ export function unifyWidthShapes(L: Lowerer, functions: IrFunction[]): UnifyOutc
           ok = decline("dynslot-keyed-or-view-use");
           break;
         }
+        // The alias is only observable where the slot is WRITTEN (through either name) or the two records are compared by
+        // identity; a never-written slot copies exactly, and the copy is cheaper than a boxed slot, so it stays a copy.
+        const wr = writtenFields();
+        const identity = L.identityEdges.some((x) => (x.from === from && x.to === to) || (x.from === to && x.to === from));
+        if (!identity && wr.get(from)?.has(armField) !== true && wr.get(to)?.has(armField) !== true) {
+          ok = decline("dynslot-never-written");
+          break;
+        }
+        dynFieldNames.add(armField);
         continue;
       }
       if (arm.lift.how !== "copy" && arm.lift.how !== "width") {
@@ -271,7 +283,7 @@ export function unifyWidthShapes(L: Lowerer, functions: IrFunction[]): UnifyOutc
         // A checked-dynamic slot against a narrow type the edge scan accepted (dynSlotWhy): the merged slot is the dyn one.
         if (canon(had.type) !== canon(f.type) && (had.type.kind === "dyn" || f.type.kind === "dyn")) {
           const narrow = had.type.kind === "dyn" ? f.type : had.type;
-          if (narrow.kind !== "dyn" && dynSlotWhy(L, narrow) === null) {
+          if (narrow.kind !== "dyn" && dynFieldNames.has(f.name) && dynSlotWhy(L, narrow) === null) {
             if (had.type.kind !== "dyn") byName.set(f.name, f);
             continue;
           }
@@ -829,13 +841,14 @@ function dynSlotWhy(L: Lowerer, t: IrType): string | null {
 }
 
 /** Shape ids some node reads or writes through a COMPUTED key, an order record, a view, or a null-proto marker. */
-function collectKeyedShapes(functions: IrFunction[], L: Lowerer): Set<string> {
+function collectKeyedShapes(functions: IrFunction[], L: Lowerer): { keyed: Set<string>; written: Map<string, Set<string>> } {
   const kinds = new Set([
     "recordKeyGet", "recordKeySet", "recordKeyDelete", "recordOrd", "recordProtoHasKey", "recordOvfKeys", "recordOvfHas",
     "recordOvfSlots", "recordOvfSlotGet", "recordView", "recordIsView", "recordViewSync", "recordHasSrc", "recordSrcGet",
     "recordSrcSet", "recordSrcView", "recordNullProto", "recordKeyOrderIs",
   ]);
   const out = new Set<string>();
+  const written = new Map<string, Set<string>>();
   const seen = new Set<object>();
   const walk = (n: unknown): void => {
     if (n === null || typeof n !== "object" || seen.has(n)) return;
@@ -845,6 +858,11 @@ function collectKeyedShapes(functions: IrFunction[], L: Lowerer): Set<string> {
       return;
     }
     const o = n as Record<string, unknown>;
+    if (o["kind"] === "recordSet" && typeof o["shapeId"] === "string" && typeof o["field"] === "string") {
+      const s = written.get(o["shapeId"] as string) ?? new Set<string>();
+      s.add(o["field"] as string);
+      written.set(o["shapeId"] as string, s);
+    }
     if (typeof o["kind"] === "string" && kinds.has(o["kind"] as string)) {
       for (const k of ["shapeId", "srcShapeId"]) if (typeof o[k] === "string") out.add(o[k] as string);
     }
@@ -852,5 +870,5 @@ function collectKeyedShapes(functions: IrFunction[], L: Lowerer): Set<string> {
   };
   walk(functions);
   walk(L.globalsList);
-  return out;
+  return { keyed: out, written };
 }
