@@ -1684,10 +1684,16 @@ static size_t insp_slot_count(const ScrDyn *d) {
  * frame scr_insp_begin opened. Insertion order, which is the converter's
  * field order and therefore Node's. */
 #ifdef SCR_SYMTAB
+static void insp_acc_into(InspBuf *eb, ScrDyn *recv, const ScrDyn *getter, const ScrDyn *setter, double vrecurse, double depth);
 static void insp_emit_symtab(const ScrDynSymTab *t, double recurse, double depth);
+/* The receiver a symbol-keyed getter runs with under getters: true (the object whose table is being listed). */
+static ScrDyn *g_sym_recv;
 static void insp_emit_syms(const ScrDyn *d, double recurse, double depth) {
   if (d == NULL) return;
+  ScrDyn *saved = g_sym_recv;
+  g_sym_recv = (ScrDyn *)d;
   insp_emit_symtab(scr_dyn_ext(d)->syms, recurse, depth);
+  g_sym_recv = saved;
 }
 
 /* `Symbol(desc): value` for one row; an accessor renders [Getter]/[Setter] and runs nothing. +1. */
@@ -1698,7 +1704,9 @@ static ScrStr *insp_sym_row_text(const ScrDynSymEnt *row, double recurse, double
   if (row->flags & SCR_SYMP_ACC) {
     const bool g = row->val->v.arr.items[0]->kind == SCR_DYN_FUNC, st = row->val->v.arr.items[1]->kind == SCR_DYN_FUNC;
     ib_cstr(&eb, ": ");
-    ib_sty_cstr(&eb, g && st ? "[Getter/Setter]" : g ? "[Getter]" : "[Setter]", INSP_STY_SPECIAL);
+    (void)g;
+    (void)st;
+    insp_acc_into(&eb, g_sym_recv, row->val->v.arr.items[0], row->val->v.arr.items[1], recurse + 1, depth);
   } else {
     ScrStr *val = scr_insp_dyn(row->val, recurse + 1, depth);
     insp_kv(&eb, val);
@@ -1768,6 +1776,78 @@ static ScrStr *insp_with_base(ScrStr *base, ScrDyn *obj, double recurse, double 
   scr_str_release(b0);
   scr_str_release(b1);
   return out;
+}
+
+/* formatProperty's accessor arm. `recv` is the property's receiver (Node's `original`), getter/setter the descriptor's halves
+ * (a function, or anything else for an absent half). Under ctx.getters a getter that qualifies RUNS and its answer prints:
+ * `[Getter: 5]`, `[Getter: null]`, `[Getter] { a: 1 }` for an object; a throw prints `<Inspection threw (...)>`. Otherwise the bare
+ * label. `vrecurse` is the recursion depth the property's value would format at. Appends to `eb` (after the key's ": "). */
+static void insp_acc_into(InspBuf *eb, ScrDyn *recv, const ScrDyn *getter, const ScrDyn *setter, double vrecurse, double depth) {
+  const bool g = getter != NULL && getter->kind == SCR_DYN_FUNC;
+  const bool st = setter != NULL && setter->kind == SCR_DYN_FUNC;
+  if (!g) {
+    if (st) ib_sty_cstr(eb, "[Setter]", INSP_STY_SPECIAL);
+    else ib_sty_cstr(eb, "undefined", INSP_STY_UNDEFINED);
+    return;
+  }
+  const char *label = st ? "Getter/Setter" : "Getter";
+  const bool run = g_opts.getters == 1 || (g_opts.getters == 2 && !st) || (g_opts.getters == 3 && st);
+  if (!run) {
+    ib_sty_cstr(eb, st ? "[Getter/Setter]" : "[Getter]", INSP_STY_SPECIAL);
+    return;
+  }
+  char head[32];
+  g_indent += 2;
+  scr_dyn_this_push_dyn(recv != NULL ? recv : scr_dyn_undefined());
+  ScrDyn *tmp = scr_dyn_call(getter, NULL, 0, "getter");
+  scr_dyn_this_pop();
+  if (tmp == NULL) {
+    /* the getter threw: `<Inspection threw (<the thrown value>)>` */
+    ScrCaught *c = scr_exc_take();
+    ScrDyn *err = scr_caught_to_dyn(c);
+    scr_caught_release(c);
+    ScrStr *es = scr_insp_dyn(err, vrecurse, depth);
+    scr_dyn_release(err);
+    snprintf(head, sizeof head, "[%s:", label);
+    ib_sty_cstr(eb, head, INSP_STY_SPECIAL);
+    ib_cstr(eb, " <Inspection threw (");
+    ib_str(eb, es);
+    ib_cstr(eb, ")>");
+    ib_sty_cstr(eb, "]", INSP_STY_SPECIAL);
+    scr_str_release(es);
+  } else if (tmp->kind == SCR_DYN_NULL) {
+    snprintf(head, sizeof head, "[%s:", label);
+    ib_sty_cstr(eb, head, INSP_STY_SPECIAL);
+    ib_char(eb, ' ');
+    ib_sty_cstr(eb, "null", INSP_STY_NULL);
+    ib_sty_cstr(eb, "]", INSP_STY_SPECIAL);
+  } else if (tmp->kind == SCR_DYN_FUNC) {
+    /* typeof 'function' is not 'object', so Node hands it to formatPrimitive, whose SymbolPrototypeToString throws inside the same
+     * try: the answer is the Inspection-threw form of that TypeError (stackless, as every error this renderer prints). */
+    snprintf(head, sizeof head, "[%s:", label);
+    ib_sty_cstr(eb, head, INSP_STY_SPECIAL);
+    ib_cstr(eb, " <Inspection threw ([TypeError: Symbol.prototype.toString requires that 'this' be a Symbol])>");
+    ib_sty_cstr(eb, "]", INSP_STY_SPECIAL);
+  } else {
+    const bool prim = tmp->kind == SCR_DYN_UNDEF || tmp->kind == SCR_DYN_BOOL || tmp->kind == SCR_DYN_NUM || tmp->kind == SCR_DYN_STR ||
+                      tmp->kind == SCR_DYN_BIG || scr_dyn_is_symbol(tmp);
+    ScrStr *vs = scr_insp_dyn(tmp, vrecurse, depth);
+    if (prim) {
+      snprintf(head, sizeof head, "[%s:", label);
+      ib_sty_cstr(eb, head, INSP_STY_SPECIAL);
+      ib_char(eb, ' ');
+      ib_str(eb, vs);
+      ib_sty_cstr(eb, "]", INSP_STY_SPECIAL);
+    } else {
+      snprintf(head, sizeof head, "[%s]", label);
+      ib_sty_cstr(eb, head, INSP_STY_SPECIAL);
+      ib_char(eb, ' ');
+      ib_str(eb, vs);
+    }
+    scr_str_release(vs);
+  }
+  scr_dyn_release(tmp);
+  g_indent -= 2;
 }
 
 /* The full inspect over a dyn tree — the one runtime type whose SHAPE
@@ -2044,11 +2124,9 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
               !scr_dyn_truthy(q->v.arr.items[4])) {
             continue;
           }
-          bool g = q->v.arr.items[1]->kind == SCR_DYN_FUNC;
-          bool s = q->v.arr.items[2]->kind == SCR_DYN_FUNC;
           insp_key_into(&eb, ent->key, ent->key_len);
           ib_cstr(&eb, ": ");
-          ib_sty_cstr(&eb, g && s ? "[Getter/Setter]" : g ? "[Getter]" : "[Setter]", INSP_STY_SPECIAL);
+          insp_acc_into(&eb, d, q->v.arr.items[1], q->v.arr.items[2], recurse + 1, depth);
           ScrStr *aentry = ib_take(&eb);
           scr_insp_entry(aentry, false);
           scr_str_release(aentry);
