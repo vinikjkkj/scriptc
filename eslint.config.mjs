@@ -30,6 +30,8 @@ const TS5_ISLANDS = [
   "packages/compiler/src/frontend/js-desugar.ts",
   // Function-constructor staging, called from js-desugar.ts: text in, text out.
   "packages/compiler/src/frontend/fn-ctor-desugar.ts",
+  // Primitive-wrapper subclass rewrite (`class C extends String`), called from js-desugar.ts: text in, text out, same shape.
+  "packages/compiler/src/frontend/prim-subclass-desugar.ts",
 ];
 
 const ts5Fence = {
