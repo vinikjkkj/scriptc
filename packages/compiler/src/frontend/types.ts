@@ -9180,6 +9180,9 @@ function jsFileAssignsProperty(sf: ts.SourceFile, name: string): boolean {
   return names.has(name);
 }
 
+/** The number of method members from which an interface of methods only maps to the boxed object (see mapRecordTypeInner). */
+const LARGE_METHOD_INTERFACE_MIN = 48;
+
 function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | RecordShapeParts | null {
   const { checker, shapes } = ctx;
   if (checker.getConstructSignatures(widened).length > 0) return null;
@@ -9192,6 +9195,20 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
   // names the construct.
   const widenedSym = widened.getSymbol();
   if (widenedSym !== undefined && (widenedSym.flags & ts.SymbolFlags.Enum) !== 0) return null;
+  // A METHOD-ONLY interface of dozens of members (ioredis' ChainableCommander: ~500 command methods an implementation class installs on its
+  // prototype): a monomorphic struct of that many closure slots cannot be built from the class instance that implements it (SC2002, a class is not a
+  // record) and would cost one closure per member on every conversion if it could. The value is the object itself, boxed, and its methods
+  // resolve through the object by name like any member of an `unknown` value. Declared outside the stdlib, so only a package's or a program's
+  // own interfaces; the member count keeps every ordinary options/shape interface a record.
+  if (!ctx.dynamic) {
+    const props = checker.getPropertiesOfType(widened);
+    if (props.length >= LARGE_METHOD_INTERFACE_MIN) {
+      let methods = 0;
+      for (const p of props) if ((p.flags & ts.SymbolFlags.Method) !== 0) methods++;
+      const stdlib = checker.declarationsOf(props[0]!).some((d) => ctx.isStdlibFile(d.getSourceFile()));
+      if (methods >= LARGE_METHOD_INTERFACE_MIN && methods * 4 >= props.length * 3 && !stdlib) return DYN;
+    }
+  }
   {
     const viaSymbolicAlias = mapSymbolicMappedAlias(widened, ctx);
     if (viaSymbolicAlias !== undefined) return viaSymbolicAlias;
