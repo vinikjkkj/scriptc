@@ -1175,6 +1175,44 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
     return table;
   }
 
+/** A CommonJS `export =` module whose `module.exports = <value>` is NOT a table (`module.exports = Errors` over a variable the module
+   * computed, a conditional require, a call): Node's lexer finds a name set from the file's own text, and when it finds NONE (no
+   * `exports.x =` / `module.exports.x =` / defineProperty name, no re-export) the namespace is `default` and the `module.exports` alias
+   * over ONE value, the module.exports value itself, and the require() value is that same value. Null when the lexer sees any name or
+   * re-export (a partial name set is worse than no answer: the caller refuses) or the value has no checked-dynamic form here. */
+  function cjsSingleValueNsOf(
+    L: Lowerer,
+    dep: ts.SourceFile,
+    loc: IrExpr["loc"],
+  ): { prelude: IrStmt[]; fields: { key: IrExpr; value: IrExpr }[] } | null {
+    const lexed = cjsLexedExportsOf(dep.text, dep.fileName);
+    if (lexed.exports.size > 0 || lexed.reexports.length > 0) return null;
+    // The value is the whole-export root's own storage (lower-modules.ts registers it keyed by the `module.exports = <root>` statement:
+    // the value the root held at that statement, which is what Node's module.exports holds). A live module reads its export object.
+    const liveSf = liveTwinOf(L, dep);
+    let value: IrExpr | null = liveSf !== null ? liveBagRef(L, liveSf, loc) : null;
+    if (value === null) {
+      let stmtExpr: ts.BinaryExpression | null = null;
+      for (const stmt of dep.statements) {
+        const cjs = cjsExportAssignmentOf(stmt);
+        if (cjs?.kind === "table" && cjsExportDiscardReason(stmt) === null) stmtExpr = cjs.expr;
+      }
+      const g = stmtExpr === null ? undefined : L.globalsByDeclNode.get(stmtExpr);
+      if (g === undefined || g.type.kind !== "dyn") return null;
+      value = { kind: "varRef", localId: g.id, type: g.type, loc };
+    }
+    const slot = L.declareHiddenLocal("%dynnsexports", DYN);
+    const ref: IrExpr = { kind: "varRef", localId: slot.id, type: DYN, loc };
+    const key = (k: string): IrExpr => ({ kind: "strLit", value: k, type: STRING, loc });
+    return {
+      prelude: [{ kind: "varDecl", localId: slot.id, init: value, loc }],
+      fields: [
+        { key: key("default"), value: ref },
+        { key: key("module.exports"), value: ref },
+      ],
+    };
+  }
+
 /** The namespace fields for a CommonJS `export =` dependency, and the
    * prelude that computes each value ONCE.
    *
@@ -1242,6 +1280,8 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
     // The declaration twin of a package resolves to its compiled module (cjs-live-exports.ts liveTwinOf).
     const liveSf = liveTwinOf(L, dep);
     if (table === null) {
+      const single = cjsSingleValueNsOf(L, dep, loc);
+      if (single !== null) return single;
       L.unsupported("SC1090", dep, `${what} whose \`module.exports\` is not a static export table`, why);
     }
     const prelude: IrStmt[] = [];
