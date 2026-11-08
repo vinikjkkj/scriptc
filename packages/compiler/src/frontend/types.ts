@@ -9133,6 +9133,37 @@ function implicitLiteralIndex(widened: ts.Type, ctx: TypeMapperCtx): boolean {
     ctx.checker.getPropertiesOfType(widened).length === 0;
 }
 
+/** The names `x.name = <value>` assigns in a JavaScript file with a value that is NOT an empty object literal, memoized per file. An empty literal that is
+ * the value of a property (`{ e: {} }`, the placeholder idiom) is the top type only when the file really assigns that property something else
+ * (`exports.errorObj.e = err`): that write is what the empty record could not hold. An options literal that merely CONTAINS `{}`
+ * (`createSocket({ type: 'udp4', signal: {} })`) keeps its static shape. Over-approximate by name within one file, never across files. */
+const jsPropertyWrites = new WeakMap<ts.SourceFile, ReadonlySet<string>>();
+function jsFileAssignsProperty(sf: ts.SourceFile, name: string): boolean {
+  let names = jsPropertyWrites.get(sf);
+  if (names === undefined) {
+    const found = new Set<string>();
+    const stack: ts.Node[] = [sf];
+    while (stack.length > 0) {
+      const n = stack.pop()!;
+      if (
+        ts.isBinaryExpression(n) &&
+        n.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+        ts.isPropertyAccessExpression(n.left) &&
+        ts.isIdentifier(n.left.name) &&
+        !(ts.isObjectLiteralExpression(n.right) && n.right.properties.length === 0)
+      ) {
+        found.add(n.left.name.text);
+      }
+      n.forEachChild((c) => {
+        stack.push(c);
+      });
+    }
+    names = found;
+    jsPropertyWrites.set(sf, names);
+  }
+  return names.has(name);
+}
+
 function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | RecordShapeParts | null {
   const { checker, shapes } = ctx;
   if (checker.getConstructSignatures(widened).length > 0) return null;
@@ -9400,7 +9431,10 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
       indexValue === undefined &&
       checker.getCallSignatures(widened).length === 0 &&
       checker.getConstructSignatures(widened).length === 0 &&
-      !(anonSym !== undefined && checker.declarationsOf(anonSym).some((d) => ts.isObjectLiteralExpression(d)))
+      // ...and the empty literal that is the VALUE OF A PROPERTY of another literal in authored JavaScript (`{ e: {} }`, the
+      // placeholder idiom: the property is assigned the real value later) is the same top type: the slot is assigned things
+      // the empty record cannot hold (standard-as-callback's `errorObj.e = <Error>` stored an empty record and lost the Error).
+      !(anonSym !== undefined && checker.declarationsOf(anonSym).some((d) => ts.isObjectLiteralExpression(d) && !(ts.isPropertyAssignment(d.parent) && ts.isObjectLiteralExpression(d.parent.parent) && isJsSourceFile(d.getSourceFile()) && ts.isIdentifier(d.parent.name) && jsFileAssignsProperty(d.getSourceFile(), d.parent.name.text))))
     ) {
       return DYN;
     }
