@@ -9303,13 +9303,17 @@ export function dynStaticFns(L: Lowerer, info: ClassInfo): { fns: IrFunction[]; 
   const ref = (l: IrLocal): IrExpr => ({ kind: "varRef", localId: l.id, type: l.type, loc });
   const ret = (v: boolean): IrStmt => ({ kind: "return", value: { kind: "boolLit", value: v, type: BOOL, loc }, loc });
 
-  for (const m of info.staticMethods?.keys() ?? []) {
+  // methods and getters in SOURCE order (util.inspect's showHidden lists a class value's own keys in definition order)
+  const staticMembers: { name: string; fn: string; pos: number }[] = [];
+  for (const [m, v] of info.staticMethods ?? []) {
     if (m.startsWith("#")) continue;
-    list.push({ name: m, fn: `%${className}.static:${m}` });
+    staticMembers.push({ name: m, fn: `%${className}.static:${m}`, pos: v.member.pos });
   }
-  for (const key of info.staticAccessors?.keys() ?? []) {
-    if (key.startsWith("get:") && !key.startsWith("get:#")) list.push({ name: key, fn: `%${className}.static:${key}` });
+  for (const [key, v] of info.staticAccessors ?? []) {
+    if (key.startsWith("get:") && !key.startsWith("get:#")) staticMembers.push({ name: key, fn: `%${className}.static:${key}`, pos: v.member.pos });
   }
+  staticMembers.sort((x, y) => x.pos - y.pos);
+  for (const sm of staticMembers) list.push({ name: sm.name, fn: sm.fn });
   const fieldNames: string[] = [];
   for (const f of info.staticFields) {
     if (f.name.startsWith("#") || f.lying === true || f.viaPrototype === true) continue;

@@ -5809,7 +5809,22 @@ export class LlDyn {
           `}`,
           ``,
         );
-        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 3, i8 ${row.ordk}, i8 0, ptr null }`);
+        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 3, i8 ${row.ordk}, i16 0, ptr null }`);
+        continue;
+      }
+      if (row.kind === "setOnly") {
+        // The C twin's rule (emit-walkers.ts): a setter with no getter reads undefined.
+        const B = new BlockBuilder();
+        const u = this.undef(B);
+        const r = this.retainDyn(B, u);
+        B.terminate(`ret ptr ${r}`);
+        this.defs.push(
+          `define internal ptr @${sym}(ptr %o) ${FN_ATTRS} { ; member get ${className}.${row.name} (setter only)`,
+          B.render(),
+          `}`,
+          ``,
+        );
+        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 0, i8 0, i16 ${row.accl}, ptr null }`);
         continue;
       }
       if (row.kind === "eeCell") {
@@ -5837,7 +5852,7 @@ export class LlDyn {
           `}`,
           ``,
         );
-        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 4, i8 ${row.ordk}, i8 0, ptr null }`);
+        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 4, i8 ${row.ordk}, i16 0, ptr null }`);
         continue;
       }
       if (row.kind === "field") {
@@ -5895,7 +5910,7 @@ export class LlDyn {
           );
           dataRef = `@${dsym}`;
         }
-        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 ${row.hidden === true ? 0 : row.absentWhenUndefined ? 2 : row.type.kind === "dyn" ? 4 : 1}, i8 ${row.ordk}, i8 0, ptr ${dataRef} }`);
+        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 ${row.hidden === true ? 0 : row.absentWhenUndefined ? 2 : row.type.kind === "dyn" ? 4 : 1}, i8 ${row.ordk}, i16 0, ptr ${dataRef} }`);
         continue;
       }
 
@@ -5939,7 +5954,7 @@ export class LlDyn {
           `}`,
           ``,
         );
-        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 ${row.enumerable === true ? 1 : 0}, i8 0, i8 ${row.accl ?? 0}, ptr null }`);
+        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 ${row.enumerable === true ? 1 : 0}, i8 0, i16 ${row.accl ?? 0}, ptr null }`);
         continue;
       }
 
@@ -6051,7 +6066,7 @@ export class LlDyn {
         );
         valueRef = `@${vsym}`;
       }
-      entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr null, ptr @${sym}, i8 0, i8 0, i8 0, ptr ${valueRef} }`);
+      entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr null, ptr @${sym}, i8 0, i8 0, i16 ${row.accl ?? 0}, ptr ${valueRef} }`);
     }
 
     const sym = `sc_dclt_${this.classMemberTbls++}`;

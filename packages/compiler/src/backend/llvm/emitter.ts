@@ -2817,7 +2817,7 @@ class LlEmitter {
       // scr_runtime.h) — what `x.get()` and `x.v` read through once the
       // instance is in a dyn slot. The trailing `bool` is an i8 with 7
       // bytes of tail padding, the descriptor above's own rule.
-      `%ScrDynClassMember = type { ptr, i64, ptr, ptr, i8, i8, i8, ptr }`,
+      `%ScrDynClassMember = type { ptr, i64, ptr, ptr, i8, i8, i16, ptr }`,
       // One row of the function-name table { fn, name } — the closure
       // entry point and the JS name of the value it backs (ScrFnName in
       // scr_runtime.h). main() installs the array; walker-built boxes

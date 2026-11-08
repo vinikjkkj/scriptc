@@ -76,7 +76,7 @@ export type DynMemberRow =
    * parameter types and calls it with the instance as the receiver. NOT
    * enumerable — a class method is non-enumerable in JS, which is why
    * `Object.keys(new Box(7))` is ["v"] and not ["v","get"]. */
-  | { kind: "method"; name: string; fn: IrFunction; isStatic?: true }
+  | { kind: "method"; name: string; fn: IrFunction; isStatic?: true; accl?: number }
   /** An OWN property that shadows the method `name` with the method `target`
    * of the same class (ir/nodes.ts OwnShadow): enumerable and present while the
    * private boolean `flag` is set, its value the function `target`. The row
@@ -85,6 +85,8 @@ export type DynMemberRow =
    * these rows (enumerable 3) when it looks a member up and answers the
    * method, whose body forwards to `target` while the flag is set. */
   | { kind: "shadow"; name: string; target: string; flag: string; flagType: IrType; ordk: number }
+  /** A SETTER with no getter beside it: a read answers undefined (JS), and util.inspect's showHidden lists it as `[Setter]`. NOT enumerable. */
+  | { kind: "setOnly"; name: string; accl: number }
   /** One of the three own keys `EventEmitter.call(this)` creates on a grafted instance (_events, _eventsCount,
    * _maxListeners): enumerable, the value the emitter registry's (the runtime answers it, never a struct slot), born
    * where the instance's order record notes the key (ordk), absent before. `cell` indexes EMITTER_CELL_NAMES. */
@@ -389,7 +391,18 @@ export function dynMemberTable(
     // The WRITE path is not this table's: `x.v = 1` through a box is its
     // own question with its own fence, and half-answering it here would
     // make a setter run for a read.
-    if (raw.startsWith("set:")) continue;
+    if (raw.startsWith("set:")) {
+      const sname = raw.slice(4);
+      if (!seen.has(sname) && !names.includes(`get:${sname}`) && !raw.startsWith("set:#")) {
+        let level = 0;
+        for (let c: DynMemberClass | null = cls; c !== null; c = c.base, level++) {
+          if ((c.def.methods?.includes(raw) ?? false) || (c.def.dynMethods?.some((d) => d.name === raw) ?? false)) break;
+        }
+        seen.add(sname);
+        rows.push({ kind: "setOnly", name: sname, accl: 1 | 2 | 16 | (Math.min(level, 3) << 2) });
+      }
+      continue;
+    }
     // A #private method is no property of the instance (its name is not a
     // string key any program can read), so it can neither be a row nor make
     // the table incomplete.
@@ -441,7 +454,15 @@ export function dynMemberTable(
       }
       accl = 1 | (names.includes(`set:${name}`) ? 2 : 0) | (Math.min(level, 3) << 2);
     }
-    rows.push(accessor ? { kind: "accessor", name, fn, accl } : { kind: "method", name, fn });
+    if (!accessor) {
+      // a method: its chain level and declared parameter count (the receiver is not one), for showHidden's rendering of a class value
+      let level = 0;
+      for (let c: DynMemberClass | null = cls; c !== null; c = c.base, level++) {
+        if ((c.def.methods?.includes(raw) ?? false) || (c.def.dynMethods?.some((d) => d.name === raw) ?? false)) break;
+      }
+      accl = (Math.min(level, 3) << 2) | (Math.min(Math.max(fn.params.length - 1, 0), 254) + 1) << 8;
+    }
+    rows.push(accessor ? { kind: "accessor", name, fn, accl } : { kind: "method", name, fn, accl });
   }
 
   return { rows, opaque, errorRooted };
@@ -501,12 +522,16 @@ export function dynStaticTable(
         opaque = true;
         continue;
       }
+      let slevel = 0;
+      for (let cc: DynMemberClass | null = cls; cc !== null && cc !== c; cc = cc.base) slevel++;
+      slevel = Math.min(slevel, 3);
+      const sSetter = !isField && accessor && (c.def.dynStatics ?? []).some((e) => e.name === `set:${name}`);
       rows.push(
         accessor
           // An INHERITED static field is the base class object's own property,
           // not this one's: it reads through, and no own-key surface lists it.
-          ? { kind: "accessor", name, fn, isStatic: true, ...(isField && c === cls ? { enumerable: true as const } : {}) }
-          : { kind: "method", name, fn, isStatic: true },
+          ? { kind: "accessor", name, fn, isStatic: true, accl: isField ? slevel << 2 : 1 | (sSetter ? 2 : 0) | (slevel << 2), ...(isField && c === cls ? { enumerable: true as const } : {}) }
+          : { kind: "method", name, fn, isStatic: true, accl: (slevel << 2) | (Math.min(fn.params.length, 254) + 1) << 8 },
       );
     }
   }

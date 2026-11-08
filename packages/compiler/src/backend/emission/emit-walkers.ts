@@ -204,6 +204,22 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
         );
         continue;
       }
+      if (row.kind === "setOnly") {
+        // A setter with no getter: the read is undefined; the accessor flags tell util.inspect's showHidden what it is.
+        E.walkerProtos.push(`${E.link}ScrDyn *${sym}(void *o); /* member get ${className}.${row.name} (setter only) */`);
+        defs.push(
+          `${E.link}ScrDyn *${sym}(void *o) { /* member get ${className}.${row.name} (setter only) */`,
+          `  (void)o;`,
+          `  return scr_dyn_retain(scr_dyn_undefined());`,
+          `}`,
+          ``,
+        );
+        entries.push(
+          `  { ${cStringLiteral(Buffer.from(row.name, "utf8"))}, ${Buffer.byteLength(row.name, "utf8")}, ` +
+            `&${sym}, NULL, 0, 0, ${row.accl} },`,
+        );
+        continue;
+      }
       if (row.kind === "eeCell") {
         // One of the emitter's own keys on a grafted instance: the registry's value (the runtime reads it from the
         // hidden emitter slot), absent until the order record notes the key (EventEmitter.call(this) ran).
@@ -354,7 +370,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
       }
       entries.push(
         `  { ${cStringLiteral(Buffer.from(row.name, "utf8"))}, ${Buffer.byteLength(row.name, "utf8")}, ` +
-          `NULL, &${sym}, false, 0, 0, ${valueFn} },`,
+          `NULL, &${sym}, false, 0, ${row.accl ?? 0}, ${valueFn} },`,
       );
     }
 
