@@ -1647,6 +1647,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "insp.customOpts": { argTypes: [DYN], result: DYN },
   "insp.customResult": { argTypes: [DYN, F64, F64], result: STRING },
   "dyn.getPrototypeOf": { argTypes: [DYN], result: DYN },
+  "insp.styles": { argTypes: [], result: DYN },
+  "insp.colorTable": { argTypes: [], result: DYN },
   "dyn.objectPrototype": { argTypes: [], result: DYN },
   "dyn.primPrototype": { argTypes: [F64], result: DYN },
   "dyn.primInstanceOf": { argTypes: [DYN, F64], result: BOOL },

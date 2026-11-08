@@ -8842,6 +8842,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_insp_custom_opts(${arg(0)})`);
           case "insp.customResult":
             return finish(`scr_insp_custom_result(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "insp.styles":
+            // util.inspect.styles: the live table the colored renderer reads (+1).
+            return finish(`scr_insp_styles_table()`);
+          case "insp.colorTable":
+            return finish(`scr_insp_colors_table()`);
           case "dyn.getPrototypeOf":
             return finish(`scr_dyn_get_prototype_of(${arg(0)})`);
           case "dyn.objectPrototype":
