@@ -75,6 +75,7 @@ import { protoEscapes, strictAt } from "./lower-protoescape.js";
 import { fenceInspGetters, newInspGettersScan, noteInspGettersNode } from "./inspect-getters-fence.js";
 import { applyInstanceOverrides, applyLateInstalls, applyProtoSlots, dynFnAsFunc, dynFnReadable, scanProtoSlots } from "./lower-protoslots.js";
 import { applyProtoTabs, hasProtoTab, scanProtoTabs, upgradeLateMethodsOverTables } from "./lower-prototab.js";
+import { graftOnlyHelperRanges } from "./lower-emitter-mixin.js";
 import { OWN_SHADOW_ROOTS, applyFieldNotes, applyOwnShadows, inOwnShadowFamily, prescanLiteralMethodShadows } from "./lower-ownshadow.js";
 import { CLASS_BUILTIN_CTORLESS, CLASS_NO_DYN_NEW, EVAL_NO_SRC_CLASSES, GRAFTED_EMITTER_CLASSES, GRAFTED_EMITTER_CELL_CLASSES, GRAFTED_ROWS_FENCED_OPS, GRAFTED_PROPS_EXACT_OPS, EVAL_STATIC_CLASSES, dynReflectionSite, emitterStateWriteSites, graftedBoxSites, moduleBoxesEmitters } from "../../ir/nodes.js";
 import { computeTwinEdits, type TwinEdits } from "./emitter-twin.js";
@@ -4526,6 +4527,7 @@ export class Lowerer {
       fenceInspGetters(inspScan, functions, artifacts.classes, (d) => this.pushDiag(d as ScrDiagnostic));
       if (evalCrossing !== null) {
         for (const esc of protoEscapes(functions)) {
+          if (graftOnlyHelperRanges(this).some((r) => r.file === esc.loc.file && esc.loc.start >= r.start && esc.loc.end <= r.end)) continue;
           this.pushDiag({
             code: "SC1101",
             message:

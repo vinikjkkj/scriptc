@@ -267,3 +267,123 @@ export function emitterCtorCallOnGraft(L: Lowerer, call: ts.CallExpression): IrE
     loc,
   };
 }
+
+/* ── the helper body is not a write the program can reach ────────────────────────────────────────────────────────────
+ * protoescape's fence (lower-protoescape.ts) refuses a write into a `prototype` object read from a dynamic value, in a program that crosses
+ * an evaluated class into untyped code. The copy loop of a recognised applyMixin helper IS such a write, but its every call site in the
+ * program is a recognised graft statement lowered to nothing, so the loop can never run. That is only a proof when nothing else reaches
+ * the helper, so this walks the whole program: every call that resolves to it must be a graft statement, it may be named only by its
+ * declaration and by an `exports.<name> = helper` alias, and every `require` binding of its module may be used only as `<binding>.<name>`
+ * where <name> is such an alias. Anything else (the helper passed as a value, a computed member of the module object, a call that is
+ * not a graft) leaves the write standing for the fence to refuse. */
+const graftOnlyMemo = new WeakMap<Lowerer, { file: string; start: number; end: number }[]>();
+
+function helperDisplayName(h: ts.Node): string | null {
+  if (ts.isFunctionDeclaration(h) && h.name) return h.name.text;
+  const p = h.parent;
+  if (p !== undefined && ts.isVariableDeclaration(p) && ts.isIdentifier(p.name)) return p.name.text;
+  return null;
+}
+
+function helperOnlyGrafted(L: Lowerer, h: ts.Node, files: readonly ts.SourceFile[]): boolean {
+  const name = helperDisplayName(h);
+  if (name === null) return false;
+  const hFile = h.getSourceFile();
+  // the export names an `exports.<n> = helper` alias gives it
+  const exportNames = new Set<string>();
+  for (const st of hFile.statements) {
+    if (!ts.isExpressionStatement(st) || !ts.isBinaryExpression(st.expression) || st.expression.operatorToken.kind !== ts.SyntaxKind.EqualsToken) continue;
+    const l = st.expression.left, r = st.expression.right;
+    if (ts.isIdentifier(r) && r.text === name && ts.isPropertyAccessExpression(l) && ts.isIdentifier(l.expression) &&
+        (l.expression.text === "exports" || l.expression.text === "module")) {
+      exportNames.add(l.name.text);
+    }
+  }
+  const resolvesToHelper = (n: ts.Node): boolean => helperFunctionOf(L, symbolOfName(L, n)) === h;
+  let ok = true;
+  for (const sf of files) {
+    if (!ok) break;
+    if (sf.isDeclarationFile) continue;
+    const text = sf.text;
+    const mentions = text.includes(name) || [...exportNames].some((e) => text.includes(e));
+    if (!mentions) continue;
+    const moduleBindings = new Set<ts.Symbol>();
+    ts.walkPreorder(sf, (n) => {
+      if (!ok) return "stop";
+      // a require binding of the helper's module
+      if (ts.isVariableDeclaration(n) && ts.isIdentifier(n.name) && n.initializer !== undefined && ts.isCallExpression(n.initializer) &&
+          ts.isIdentifier(n.initializer.expression) && n.initializer.expression.text === "require") {
+        const sym = L.checker.getSymbolAtLocation(n.name);
+        const tsym = sym ? L.checker.getTypeOfSymbolAtLocation(sym, n.name).getSymbol() : undefined;
+        const decl = tsym ? L.checker.declarationsOf(tsym)[0] : undefined;
+        if (sym !== undefined && decl !== undefined && decl.getSourceFile() === hFile) moduleBindings.add(sym);
+      }
+      if (ts.isCallExpression(n)) {
+        const callee = unwrapCallee(n.expression);
+        const cn = ts.isPropertyAccessExpression(callee) ? callee.name : ts.isIdentifier(callee) ? callee : null;
+        if (cn !== null && (cn.text === name || exportNames.has(cn.text)) && resolvesToHelper(cn)) {
+          const stmt = n.parent;
+          const asStatement = stmt !== undefined && ts.isExpressionStatement(stmt) && stmt.parent !== undefined && ts.isSourceFile(stmt.parent) && stmt.expression === n;
+          if (!asStatement || emitterMixinCallTarget(L, n) === null) ok = false;
+        }
+      }
+      return undefined;
+    });
+    if (!ok) break;
+    // names and member reads of the helper outside call position, and uses of a module binding other than `<binding>.<exportName>`
+    ts.walkPreorder(sf, (n) => {
+      if (!ok) return "stop";
+      if (ts.isIdentifier(n)) {
+        const par = n.parent;
+        if (par === undefined) return undefined;
+        if (n.text === name && resolvesToHelper(n)) {
+          const isDecl = (ts.isFunctionDeclaration(par) && par.name === n) || (ts.isVariableDeclaration(par) && par.name === n);
+          const isAlias = ts.isBinaryExpression(par) && par.right === n && ts.isPropertyAccessExpression(par.left) &&
+            ts.isIdentifier(par.left.expression) && (par.left.expression.text === "exports" || par.left.expression.text === "module");
+          const isCallee = ts.isCallExpression(par) && unwrapCallee(par.expression) === n;
+          const isMemberCallee = ts.isPropertyAccessExpression(par) && par.name === n;
+          if (!isDecl && !isAlias && !isCallee && !isMemberCallee) ok = false;
+        }
+        if (moduleBindings.size > 0) {
+          const sym = L.checker.getSymbolAtLocation(n);
+          if (sym !== undefined && moduleBindings.has(sym)) {
+            const declName = ts.isVariableDeclaration(par) && par.name === n;
+            const member = ts.isPropertyAccessExpression(par) && par.expression === n && exportNames.has(par.name.text);
+            if (!declName && !member) ok = false;
+          }
+        }
+      }
+      if (ts.isPropertyAccessExpression(n) && exportNames.has(n.name.text) && resolvesToHelper(n.name)) {
+        let c: ts.Node = n;
+        let p = c.parent;
+        while (p !== undefined && (ts.isParenthesizedExpression(p) || (ts.isBinaryExpression(p) && p.operatorToken.kind === ts.SyntaxKind.CommaToken && p.right === c))) {
+          c = p;
+          p = c.parent;
+        }
+        const aliasLeft = p !== undefined && ts.isBinaryExpression(p) && p.left === c && p.operatorToken.kind === ts.SyntaxKind.EqualsToken;
+        if (!(p !== undefined && ts.isCallExpression(p) && p.expression === c) && !aliasLeft) ok = false;
+      }
+      return undefined;
+    });
+  }
+  return ok;
+}
+
+/** The source ranges of the recognised applyMixin helpers that nothing but a graft statement reaches: a write inside one never runs. */
+export function graftOnlyHelperRanges(L: Lowerer): { file: string; start: number; end: number }[] {
+  const memo = graftOnlyMemo.get(L);
+  if (memo !== undefined) return memo;
+  const out: { file: string; start: number; end: number }[] = [];
+  const files = L.program.getSourceFiles();
+  for (const sf of files) {
+    if (sf.isDeclarationFile || !sf.text.includes("getOwnPropertyNames")) continue;
+    ts.walkPreorder(sf, (n) => {
+      if ((ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n) || ts.isArrowFunction(n)) && isApplyMixinBody(n) && helperOnlyGrafted(L, n, files)) {
+        out.push({ file: sf.fileName, start: n.getStart(), end: n.end });
+      }
+      return undefined;
+    });
+  }
+  graftOnlyMemo.set(L, out);
+  return out;
+}
