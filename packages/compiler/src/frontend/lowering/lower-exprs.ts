@@ -13308,7 +13308,7 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
           L.unsupported(
             "SC1090",
             prop,
-            `object spread of '${srcType ? L.fmt(srcType) : L.checker.typeToString(L.typeOf(srcNode))}' sources (only known record shapes spread — ${NARROW_FIRST})`,
+            `object spread of '${srcType ? L.fmt(srcType) : L.checker.typeToString(L.typeOf(srcNode))}' sources (only known record shapes spread — ${NARROW_FIRST}) [diag: checker=${L.checker.typeToString(L.typeOf(srcNode)).slice(0, 160)} lowered=${srcLowered ? srcLowered.type.kind : 'none'} chain=${pureMemberChain(prop.expression) || nullishDefaultedChain(prop.expression)} js=${isJsSourceFile(expr.getSourceFile())}]`,
           );
         }
         if (srcLowered && !pureReemittable(srcLowered)) {
