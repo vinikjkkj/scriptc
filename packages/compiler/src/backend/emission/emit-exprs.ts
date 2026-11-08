@@ -5699,6 +5699,19 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             E.line(`scr_fs_stat_cb(${arg(0)}, ${cb.name}, &${adapter});${E.srcComment(e.loc)}`);
             return { name: "", type: e.type };
           }
+          case "dns.resolveSrvFnValue":
+            E.usesTimers = true; // a pending query holds the loop open
+            return finish(`scr_dns_resolve_srv_dyn_value()`);
+          case "dns.setServersFnValue":
+            return finish(`scr_dns_set_servers_dyn_value()`);
+          case "dns.getServersFnValue":
+            return finish(`scr_dns_get_servers_dyn_value()`);
+          case "dns.resolverCtorFnValue":
+            E.usesTimers = true; // a pending query holds the loop open
+            return finish(`scr_dns_resolver_ctor_dyn_value()`);
+          case "dns.lookupFnValue":
+            E.usesTimers = true; // a pending lookup holds the loop open
+            return finish(`scr_dns_lookup_dyn_value()`);
           case "dns.lookup": {
             // getaddrinfo runs NOW; the callback (moved in) fires at the
             // next loop turn through its per-shape adapter.

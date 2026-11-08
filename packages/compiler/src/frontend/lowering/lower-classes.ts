@@ -25,6 +25,7 @@ import { lowerDateNumArg, lowerSearchParamsNew } from "./lower-builtins.js";
 import { readFileSync } from "node:fs";
 import { requiresDynamicPackageDiag, requiresDynamicTypeDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { lowerSqliteNew } from "./lower-sqlite.js";
+import { lowerDnsResolverNew } from "./lower-dgram.js";
 import { lowerWrtcNew } from "./lower-wrtc.js";
 import { lowerAbsentRequireNew } from "./lower-require-absent.js";
 import { STREAM_API_MEMBERS, STREAM_PROP_MEMBERS, UNDERSCORE_METHODS, lowerStreamNew, lowerStreamSuperCall, streamCtorShape } from "./lower-stream.js";
@@ -12065,6 +12066,8 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
       if (rtc !== null) return rtc;
       const sqlite = lowerSqliteNew(L, expr);
       if (sqlite !== null) return sqlite;
+      const dnsResolver = lowerDnsResolverNew(L, expr, loc);
+      if (dnsResolver !== null) return dnsResolver;
     }
     // `new X(...)` where X is a member Node's own resolution of the required
     // module does not define (`const { X } = require('pkg')` with the pkg's

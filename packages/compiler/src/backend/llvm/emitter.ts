@@ -1543,6 +1543,11 @@ const LIB_FN_SYMS: Record<string, string> = {
   "timers.queueMicrotaskDyn": "scr_queue_microtask_dyn",
   "timers.setImmediateFnValue": "scr_set_immediate_dyn_value",
   "timers.setTimeoutFnValue": "scr_set_timeout_dyn_value",
+  "dns.resolveSrvFnValue": "scr_dns_resolve_srv_dyn_value",
+  "dns.setServersFnValue": "scr_dns_set_servers_dyn_value",
+  "dns.getServersFnValue": "scr_dns_get_servers_dyn_value",
+  "dns.lookupFnValue": "scr_dns_lookup_dyn_value",
+  "dns.resolverCtorFnValue": "scr_dns_resolver_ctor_dyn_value",
   "timers.setIntervalFnValue": "scr_set_interval_dyn_value",
   "dyn.structuredCloneFnValue": "scr_structured_clone_dyn_value",
   "timers.immediatePromise": "scr_immediate_promise",
@@ -1728,7 +1733,7 @@ const STREAM_CANONICAL_CBS: Record<string, ("r" | "w" | "f" | "d" | "t" | "l")[]
  * the stream/emitter slice of emit-exprs.ts's markings, applied before
  * dispatch so generic and special shapes share one table. */
 const USES_TIMERS_LIB_FNS = new Set<string>([
-  "dns.lookup",
+  "dns.lookup", "dns.resolveSrvFnValue", "dns.lookupFnValue", "dns.resolverCtorFnValue",
   "test.register", "test.registerEmpty", "test.suite", "test.hook",
   "fs.statCb",
   "net.sockConnect", "net.sockConnectCb",

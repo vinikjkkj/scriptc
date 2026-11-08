@@ -754,6 +754,11 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "dgram.onClose": { argTypes: [DGRAMSOCK_T, { kind: "func", params: [], ret: VOID }, BOOL], result: VOID },
   "dgram.onConnect": { argTypes: [DGRAMSOCK_T, { kind: "func", params: [], ret: VOID }, BOOL], result: VOID },
   "dns.lookup": { argTypes: [STRING, F64, null], result: VOID },
+  "dns.resolveSrvFnValue": { argTypes: [], result: DYN },
+  "dns.setServersFnValue": { argTypes: [], result: DYN },
+  "dns.getServersFnValue": { argTypes: [], result: DYN },
+  "dns.lookupFnValue": { argTypes: [], result: DYN },
+  "dns.resolverCtorFnValue": { argTypes: [], result: DYN },
   "fs.statCb": { argTypes: [STRING, null], result: VOID },
   // node:test (scr_test.c). Bodies are program-dependent closures (0 or
   // 1 testCtx param, void or Promise<void> result — the spoke pinned the
