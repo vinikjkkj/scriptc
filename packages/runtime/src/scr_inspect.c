@@ -80,8 +80,10 @@ static InspOpts g_opts = {2.0, 80.0, INSP_COMPACT_NUM, 3.0, 100.0, 10000.0, fals
 #endif
 #ifdef SCR_INSP_COLORS
 #define INSP_COMPACT_ON (g_opts.compact_kind == INSP_COMPACT_TRUE)
+#define INSP_SH (g_opts.show_hidden)
 #else
 #define INSP_COMPACT_ON 0
+#define INSP_SH 0
 #endif
 #ifdef SCR_INSP_COLORS
 static ScrDyn *g_native_stylize;
@@ -1718,7 +1720,7 @@ void scr_cls_props_inspect(const ScrDyn *tbl, double recurse, double depth, bool
 #ifdef SCR_SYMTAB /* the symbol-property code below is compiled in only for a program that links scr_symbol.c */
 static size_t insp_sym_count_t(const ScrDynSymTab *t) {
   size_t n = 0;
-  for (uint32_t i = 0; t != NULL && i < t->len; i++) n += (t->e[i].flags & SCR_SYMP_ENUM) != 0;
+  for (uint32_t i = 0; t != NULL && i < t->len; i++) n += INSP_SH || (t->e[i].flags & SCR_SYMP_ENUM) != 0; /* showHidden lists every own symbol */
   return n;
 }
 static size_t insp_sym_count(const ScrDyn *d) { return d == NULL ? 0 : insp_sym_count_t(scr_dyn_ext(d)->syms); }
@@ -1782,7 +1784,13 @@ static void insp_emit_syms(const ScrDyn *d, double recurse, double depth) {
 static ScrStr *insp_sym_row_text(const ScrDynSymEnt *row, double recurse, double depth) {
   ScrStr *kn = scr_dyn_sym_key_str(row->key);
   InspBuf eb = {0};
+  /* formatProperty: a non-enumerable key is bracketed (`[Symbol(k)]`); the symbol text is in the `symbol` style */
+  const bool hk = !(row->flags & SCR_SYMP_ENUM);
+  if (hk) ib_char(&eb, '[');
+  if (INSP_COLORS_ON) ib_cstr(&eb, insp_open(INSP_STY_SYMBOL));
   ib_bytes(&eb, kn->data, kn->len);
+  if (INSP_COLORS_ON) ib_cstr(&eb, insp_close(INSP_STY_SYMBOL));
+  if (hk) ib_char(&eb, ']');
   if (row->flags & SCR_SYMP_ACC) {
     const bool g = row->val->v.arr.items[0]->kind == SCR_DYN_FUNC, st = row->val->v.arr.items[1]->kind == SCR_DYN_FUNC;
     ib_cstr(&eb, ": ");
@@ -1800,7 +1808,7 @@ static ScrStr *insp_sym_row_text(const ScrDynSymEnt *row, double recurse, double
 
 static void insp_emit_symtab(const ScrDynSymTab *t, double recurse, double depth) {
   for (uint32_t i = 0; t != NULL && i < t->len; i++) {
-    if (!(t->e[i].flags & SCR_SYMP_ENUM)) continue;
+    if (!INSP_SH && !(t->e[i].flags & SCR_SYMP_ENUM)) continue;
     ScrStr *entry = insp_sym_row_text(&t->e[i], recurse, depth);
     scr_insp_entry(entry, false);
     scr_str_release(entry);
@@ -1837,10 +1845,27 @@ static void insp_emit_slots(const ScrDyn *d, double recurse, double depth) {
  * reduceToSingleString measures the base when it decides between one line and one entry per line, so the
  * entries go through the same frame and join as every other object, with the base as its prefix. The
  * entries are a plain object's: no class name, no accessors (a Date's expandos are data written by `=`). */
-static ScrStr *insp_with_base(ScrStr *base, ScrDyn *obj, double recurse, double depth) {
+#ifdef SCR_INSP_COLORS
+static void insp_emit_obj_keys(ScrDyn *d, double recurse, double depth, bool skip_fn);
+#endif
+static ScrStr *insp_with_base(ScrStr *base, ScrDyn *obj, double recurse, double depth, double wrap_len) {
   insp_begin_obj(recurse + 1);
-  size_t *ord = scr_dyn_obj_key_order(obj);
-  for (size_t i = 0; i < obj->v.obj.len; i++) {
+#ifdef SCR_INSP_COLORS
+  if (wrap_len >= 0 && INSP_SH) {
+    /* a String wrapper's own non-enumerable `length`, first among its keys */
+    InspBuf lb = {0};
+    ib_cstr(&lb, "[length]");
+    ScrStr *lv = insp_sty(scr_insp_f64(wrap_len), INSP_STY_NUMBER);
+    insp_kv(&lb, lv);
+    scr_str_release(lv);
+    ScrStr *le = ib_take(&lb);
+    scr_insp_entry(le, false);
+    scr_str_release(le);
+  }
+  if (INSP_SH) insp_emit_obj_keys(obj, recurse, depth, false);
+#endif
+  size_t *ord = INSP_SH ? NULL : scr_dyn_obj_key_order(obj);
+  for (size_t i = 0; !INSP_SH && i < obj->v.obj.len; i++) {
     ScrDynEntry *ent = &obj->v.obj.entries[ord ? ord[i] : i];
     InspBuf eb = {0};
     ScrStr *val = scr_insp_dyn(ent->value, recurse + 1, depth);
@@ -1949,6 +1974,126 @@ static void insp_acc_into(InspBuf *eb, ScrDyn *recv, const ScrDyn *getter, const
   g_indent -= 2;
 }
 
+#ifdef SCR_INSP_COLORS
+/* ── showHidden: a dyn object's own string keys in JS creation order ─────────
+ * util.inspect lists getOwnPropertyNames under showHidden: integer keys ascending, then every other key in creation order,
+ * the non-enumerable ones among the members. The member table holds the enumerable keys (and the accessor slots) in creation
+ * order; the hidden table holds the non-enumerable ones with the member count they were created after (the descriptor's seventh
+ * element, kept right across deletes by scr_dyn_obj_unset). */
+/* the function object's built-in own names (listed by the function arm itself) */
+static bool insp_fn_builtin_key(const char *k, size_t n) {
+  return (n == 4 && memcmp(k, "name", 4) == 0) || (n == 6 && memcmp(k, "length", 6) == 0) || (n == 9 && memcmp(k, "prototype", 9) == 0);
+}
+
+typedef struct {
+  const ScrDynEntry *ent; /* the member entry, or NULL for a hidden-only property */
+  const ScrDynEntry *hent; /* the hidden-table row, or NULL for a plain member */
+  double rank;
+  bool is_idx;
+  double idx;
+  size_t seq; /* position before the sort: qsort is not stable on every libc (mingw's is not), and hidden-only keys created after the same member count tie on rank */
+} InspHK;
+
+static int insp_hk_cmp(const void *a, const void *b) {
+  const InspHK *x = (const InspHK *)a, *y = (const InspHK *)b;
+  if (x->is_idx != y->is_idx) return x->is_idx ? -1 : 1;
+  const double dx = x->is_idx ? x->idx : x->rank, dy = y->is_idx ? y->idx : y->rank;
+  if (dx != dy) return dx < dy ? -1 : 1;
+  return x->seq < y->seq ? -1 : x->seq > y->seq ? 1 : 0;
+}
+
+/* The listed own string keys of `d` (+ the heap array in *out, NULL when there are none). */
+static size_t insp_obj_keys(const ScrDyn *d, InspHK **out, bool skip_fn) {
+  const ScrDyn *h = scr_dyn_ext(d)->hidden;
+  const size_t cap = d->v.obj.len + (h != NULL ? h->v.obj.len : 0);
+  *out = cap ? malloc(cap * sizeof(InspHK)) : NULL;
+  if (cap && *out == NULL) insp_oom();
+  size_t n = 0;
+  for (size_t i = 0; i < d->v.obj.len; i++) {
+    const ScrDynEntry *e = &d->v.obj.entries[i];
+    InspHK k = {e, NULL, (double)i, false, 0};
+    if (e->value == scr_dyn_acc_slot()) {
+      const ScrDynEntry *he = NULL;
+      for (size_t j = 0; h != NULL && j < h->v.obj.len; j++) {
+        if (h->v.obj.entries[j].key_len == e->key_len && memcmp(h->v.obj.entries[j].key, e->key, e->key_len) == 0) {
+          he = &h->v.obj.entries[j];
+          break;
+        }
+      }
+      if (he == NULL || he->value->kind != SCR_DYN_ARR || he->value->v.arr.len < 5) continue;
+      k.hent = he;
+    }
+    if (e->key_len > 0 && e->key[0] == '%') continue;
+    if (skip_fn && insp_fn_builtin_key(e->key, e->key_len)) continue;
+    k.is_idx = scr_dyn_obj_key_is_index(e->key, e->key_len);
+    if (k.is_idx) k.idx = strtod(e->key, NULL);
+    k.seq = n;
+    (*out)[n++] = k;
+  }
+  for (size_t j = 0; h != NULL && j < h->v.obj.len; j++) {
+    const ScrDynEntry *he = &h->v.obj.entries[j];
+    if (he->value->kind != SCR_DYN_ARR || he->value->v.arr.len < 5) continue;
+    if (he->key_len > 0 && he->key[0] == '%') continue;
+    if (he->key_len > 2 && he->key[0] == '_' && he->key[1] == '_' && he->key[2] == '@') continue; /* a record's symbol-keyed member: not a string key */
+    if (scr_dyn_obj_entry_is_slot(d, he->key, he->key_len)) continue; /* listed through its slot above */
+    if (skip_fn && insp_fn_builtin_key(he->key, he->key_len)) continue;
+    InspHK k = {NULL, he, (double)d->v.obj.len, false, 0};
+    if (he->value->v.arr.len >= 7 && he->value->v.arr.items[6]->kind == SCR_DYN_NUM) k.rank = he->value->v.arr.items[6]->v.num - 0.5;
+    else if (he->value->v.arr.len >= 6 && scr_dyn_truthy(he->value->v.arr.items[5])) k.rank = -1;
+    k.is_idx = scr_dyn_obj_key_is_index(he->key, he->key_len);
+    if (k.is_idx) k.idx = strtod(he->key, NULL);
+    k.seq = n;
+    (*out)[n++] = k;
+  }
+  if (n > 1) qsort(*out, n, sizeof(InspHK), insp_hk_cmp);
+  return n;
+}
+
+/* One `[key]: value` / `key: value` entry per listed own string key of `d`, in JS order, into the frame scr_insp_begin opened. */
+static void insp_emit_obj_keys(ScrDyn *d, double recurse, double depth, bool skip_fn) {
+  InspHK *ks = NULL;
+  const size_t n = insp_obj_keys(d, &ks, skip_fn);
+  for (size_t i = 0; i < n; i++) {
+    const InspHK *k = &ks[i];
+    const char *key = k->ent != NULL ? k->ent->key : k->hent->key;
+    const size_t klen = k->ent != NULL ? k->ent->key_len : k->hent->key_len;
+    const ScrDyn *desc = k->hent != NULL ? k->hent->value : NULL;
+    const bool en = desc == NULL || scr_dyn_truthy(desc->v.arr.items[4]);
+    InspBuf eb = {0};
+    if (!en) ib_char(&eb, '[');
+    insp_key_into(&eb, key, klen);
+    if (!en) ib_char(&eb, ']');
+    if (desc != NULL && !scr_dyn_truthy(desc->v.arr.items[0])) {
+      ib_cstr(&eb, ": ");
+      insp_acc_into(&eb, d, desc->v.arr.items[1], desc->v.arr.items[2], recurse + 1, depth);
+    } else {
+      const ScrDyn *v = desc != NULL ? desc->v.arr.items[1] : k->ent->value;
+      ScrStr *val = scr_insp_dyn((ScrDyn *)v, recurse + 1, depth);
+      insp_kv(&eb, val);
+      scr_str_release(val);
+    }
+    ScrStr *entry = ib_take(&eb);
+    scr_insp_entry(entry, false);
+    scr_str_release(entry);
+  }
+  free(ks);
+}
+#endif
+
+#ifdef SCR_INSP_COLORS
+/* showHidden over a value whose hidden surface this runtime cannot read: a named, catchable stop (OPEN), never a rendering that leaves
+ * keys out. The class model (ScrDynClass) carries no own-versus-inherited method table and no accessor/setter flags: the prototype
+ * keys formatRaw adds (its protoProps) cannot be listed from it. */
+static ScrStr *insp_sh_fence(const char *what) {
+  InspBuf out = {0};
+  ib_cstr(&out, "util.inspect with showHidden over ");
+  ib_cstr(&out, what);
+  ib_cstr(&out, " is not supported yet");
+  scr_throw_error(SCR_ERR_ERROR, ib_take(&out));
+  return scr_str_new("", 0);
+}
+#endif
+
 /* The full inspect over a dyn tree — the one runtime type whose SHAPE
  * lives in the value, so the traversal lives here instead of a
  * synthesized helper. Same engine, same defaults. dyn-boxed bytes render
@@ -1980,7 +2125,8 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       const ScrDyn *eel = scr_dyn_obj_slot_get(d, "%eeList", 7);
       const size_t nx = (xs != NULL ? xs->v.obj.len : 0) + (eel != NULL ? 1 : 0);
       const size_t nsy = insp_sym_count(d); /* enumerable symbol-keyed properties print last (scr_symbol.c) */
-      if (d->v.arr.len == 0 && nx + nsy == 0) return scr_str_new("[]", 2);
+      const size_t nlen = INSP_SH ? 1 : 0;  /* showHidden: the non-enumerable own `length` is the first named key */
+      if (d->v.arr.len == 0 && nx + nsy + nlen == 0) return scr_str_new("[]", 2);
       if (recurse > depth) return insp_sty_lit("[Array]", INSP_STY_SPECIAL);
       scr_insp_begin(recurse + 1);
       size_t shown = insp_shown(d->v.arr.len);
@@ -2015,6 +2161,21 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         scr_str_release(m);
       }
       shown = ne;
+      /* Node's grid order reads `typeof value[i]` at each ENTRY position, named keys included (value[i] past the elements is undefined). */
+      size_t ep = ne + (more ? 1 : 0);
+#ifdef SCR_INSP_COLORS
+      if (INSP_SH) {
+        InspBuf lb = {0};
+        ib_cstr(&lb, "[length]");
+        ScrStr *lv = insp_sty(scr_insp_f64((double)alen), INSP_STY_NUMBER);
+        insp_kv(&lb, lv);
+        scr_str_release(lv);
+        ScrStr *le = ib_take(&lb);
+        scr_insp_entry(le, ep < alen && d->v.arr.items[ep]->kind == SCR_DYN_NUM);
+        ep++;
+        scr_str_release(le);
+      }
+#endif
       for (size_t i = 0; i < nx; i++) {
         if (eel != NULL && i == nx - 1) {
           ScrStr *val = scr_insp_dyn((ScrDyn *)eel, recurse + 1, depth);
@@ -2023,7 +2184,8 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
           ib_bytes(&eb, val->data, val->len);
           scr_str_release(val);
           ScrStr *entry = ib_take(&eb);
-          scr_insp_entry(entry, false);
+          scr_insp_entry(entry, INSP_SH && ep < alen && d->v.arr.items[ep]->kind == SCR_DYN_NUM);
+          ep++;
           scr_str_release(entry);
           continue;
         }
@@ -2035,7 +2197,8 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         ib_bytes(&eb, val->data, val->len);
         scr_str_release(val);
         ScrStr *entry = ib_take(&eb);
-        scr_insp_entry(entry, false);
+        scr_insp_entry(entry, INSP_SH && ep < alen && d->v.arr.items[ep]->kind == SCR_DYN_NUM);
+        ep++;
         scr_str_release(entry);
       }
       insp_emit_syms(d, recurse, depth);
@@ -2045,8 +2208,8 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       /* Node drops the LAST entry from the grid whenever the entry list
        * outgrew maxArrayLength (100), which with named properties appended
        * is no longer the "more items" line. */
-      g_sort_tail = nx + nsy;
-      ScrStr *out = scr_insp_end(base, b0, b1, recurse + 1, true, insp_over_cap(shown + (more ? 1 : 0) + nx + nsy));
+      g_sort_tail = nx + nsy + nlen;
+      ScrStr *out = scr_insp_end(base, b0, b1, recurse + 1, true, insp_over_cap(shown + (more ? 1 : 0) + nx + nsy + nlen));
       scr_str_release(base);
       scr_str_release(b0);
       scr_str_release(b1);
@@ -2086,8 +2249,8 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
 #else
           (void)wrap_colors;
 #endif
-          if (d->v.obj.len == 0) return insp_sty(base, wp->kind == SCR_DYN_STR ? INSP_STY_STRING : wp->kind == SCR_DYN_NUM ? INSP_STY_NUMBER : wp->kind == SCR_DYN_BOOL ? INSP_STY_BOOLEAN : wp->kind == SCR_DYN_BIG ? INSP_STY_BIGINT : INSP_STY_SYMBOL); /* no own enumerable property: just the wrapper */
-          ScrStr *with = insp_with_base(base, (ScrDyn *)d, recurse, depth); /* `[String: 'ab'] { x: 1 }` */
+          if (d->v.obj.len == 0 && !(INSP_SH && wp->kind == SCR_DYN_STR)) return insp_sty(base, wp->kind == SCR_DYN_STR ? INSP_STY_STRING : wp->kind == SCR_DYN_NUM ? INSP_STY_NUMBER : wp->kind == SCR_DYN_BOOL ? INSP_STY_BOOLEAN : wp->kind == SCR_DYN_BIG ? INSP_STY_BIGINT : INSP_STY_SYMBOL); /* no own enumerable property: just the wrapper */
+          ScrStr *with = insp_with_base(base, (ScrDyn *)d, recurse, depth, wp->kind == SCR_DYN_STR ? scr_str_utf16_len(wp->v.str) : -1.0); /* `[String: 'ab'] { x: 1 }` */
           scr_str_release(base);
           return with;
         }
@@ -2175,7 +2338,15 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         if (hooked != NULL) return hooked;
       }
       const size_t nsym = insp_slot_count(d);
-      if (d->v.obj.len == 0 && nsym == 0) {
+      size_t nown = d->v.obj.len;
+#ifdef SCR_INSP_COLORS
+      if (INSP_SH) {
+        InspHK *hk_tmp = NULL;
+        nown = insp_obj_keys(d, &hk_tmp, false);
+        free(hk_tmp);
+      }
+#endif
+      if (nown == 0 && nsym == 0) {
         if (cn != NULL && cn[0]) {
           InspBuf nb = {0};
           ib_cstr(&nb, cn);
@@ -2204,6 +2375,11 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
        * entry table raw and disagree with Object.keys inside one process
        * (`{ z: 1, '10': 3, '2': 4 }` where Node prints
        * `{ '2': 4, '10': 3, z: 1 }`). Shared projection, one definition. */
+#ifdef SCR_INSP_COLORS
+      if (INSP_SH) {
+        insp_emit_obj_keys(d, recurse, depth, false);
+      } else {
+#endif
       size_t *ord = scr_dyn_obj_key_order(d);
       for (size_t i = 0; i < d->v.obj.len; i++) {
         ScrDynEntry *ent = &d->v.obj.entries[ord ? ord[i] : i];
@@ -2240,6 +2416,9 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         scr_str_release(entry);
       }
       free(ord);
+#ifdef SCR_INSP_COLORS
+      }
+#endif
       insp_emit_slots(d, recurse, depth);
       /* Node keeps the constructor-name prefix INSIDE braces[0] (`F {`, `[Object: null prototype] {`), and the
        * single-line test counts it with its separating space: `start = output.length + indentationLvl +
@@ -2276,6 +2455,9 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
        * layout: `[class A] { k: 5 }`). Static methods and getters are
        * non-enumerable and never listed. */
       const ScrDyn *einner = scr_dyn_class_eval_inner(d);
+#ifdef SCR_INSP_COLORS
+      if (INSP_SH && (einner != NULL || scr_dyn_class_of_value(d) != NULL)) return insp_sh_fence("a class value (its prototype's methods and accessors)");
+#endif
       if (einner != NULL) {
         /* A per-evaluation class value: the same line, its own ENUMERABLE static fields
          * (the evaluation's member rows) in braces. */
@@ -2445,7 +2627,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         ib_char(&out, ' ');
         ib_cstr(&out, fn_kind_names[finh]);
       }
-      if (!scr_insp_show_hidden) {
+      if (!scr_insp_show_hidden && !INSP_SH) {
         /* The function's own ENUMERABLE properties follow its base in braces, as an object's do
          * (`[Function: g] { listener: [Function: f] }`): the closure's property table minus the built-ins
          * (name, length, prototype are non-enumerable in Node). */
@@ -2491,11 +2673,10 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         scr_str_release(fb1);
         return fout;
       }
-      /* showHidden (%o): Node lists the function's own non-enumerable keys
-       * after its base, one per line when they do not fit:
-       * [length], [name], [prototype] (for a function that has one, whose
-       * constructor points back at it: the <ref *1> circle), then the
-       * [Symbol(Symbol.toStringTag)] of an async or generator kind. */
+      /* showHidden (also %o): Node lists the function's own non-enumerable keys after its base:
+       * [length], [name], [prototype] (for a function that has one: an object whose [constructor] points back at the function, the
+       * <ref *1> circle), the properties a program added, its own symbols, then the [Symbol(Symbol.toStringTag)] an async or generator
+       * kind inherits (formatRaw's protoProps). Built through the ordinary frames, so every layout option applies to it. */
       ScrStr *hbase = ib_take(&out);
       /* Past the depth limit Node answers with the bare constructor name
        * (`[Function]`, `[AsyncFunction]`), not the keys. */
@@ -2507,38 +2688,93 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         ib_char(&db, ']');
         return insp_sty(ib_take(&db), INSP_STY_SPECIAL);
       }
-      const bool hproto = (fcode & SCR_FNK_NOPROTO) == 0;
-      scr_insp_begin(recurse + 1);
       {
-        char lenbuf[48];
-        snprintf(lenbuf, sizeof lenbuf, "[length]: %u", (unsigned)scr_dyn_fn_len(d));
-        ScrStr *e = scr_str_new(lenbuf, strlen(lenbuf));
+        double cid0 = scr_insp_circ_check(d->v.fn.clo);
+        if (cid0 > 0) {
+          scr_str_release(hbase);
+          return scr_insp_circular(cid0);
+        }
+      }
+      const bool hproto = (fcode & SCR_FNK_NOPROTO) == 0;
+      insp_begin_obj(recurse + 1);
+      scr_insp_seen_push(d->v.fn.clo);
+      {
+        InspBuf eb = {0};
+        ib_cstr(&eb, "[length]");
+        ScrStr *lv = insp_sty(scr_insp_f64((double)scr_dyn_fn_len(d)), INSP_STY_NUMBER);
+        insp_kv(&eb, lv);
+        scr_str_release(lv);
+        ScrStr *e = ib_take(&eb);
         scr_insp_entry(e, true);
         scr_str_release(e);
       }
       {
         InspBuf eb = {0};
         const char *nm = name ? name : "";
-        const char q = strchr(nm, '\'') != NULL && strchr(nm, '"') == NULL ? '"' : '\'';
-        ib_cstr(&eb, "[name]: ");
-        ib_char(&eb, q);
-        ib_cstr(&eb, nm);
-        ib_char(&eb, q);
+        ib_cstr(&eb, "[name]");
+        ScrStr *ns = scr_str_new(nm, strlen(nm));
+        ScrStr *nv = scr_insp_str(ns);
+        scr_str_release(ns);
+        insp_kv(&eb, nv);
+        scr_str_release(nv);
         ScrStr *e = ib_take(&eb);
         scr_insp_entry(e, false);
         scr_str_release(e);
       }
       if (hproto) {
-        static const char proto_entry[] = "[prototype]: { [constructor]: [Circular *1] }";
-        ScrStr *e = scr_str_new(proto_entry, sizeof proto_entry - 1);
+        ScrStr *pv;
+        if (recurse + 1 > depth) {
+          pv = insp_sty_lit("[Object]", INSP_STY_SPECIAL);
+        } else {
+          insp_begin_obj(recurse + 2);
+          InspBuf cb = {0};
+          ib_cstr(&cb, "[constructor]");
+          ScrStr *cv = scr_insp_circular(scr_insp_circ_check(d->v.fn.clo));
+          insp_kv(&cb, cv);
+          scr_str_release(cv);
+          ScrStr *ce = ib_take(&cb);
+          scr_insp_entry(ce, false);
+          scr_str_release(ce);
+          ScrStr *pb = scr_str_new("", 0);
+          ScrStr *pb0 = scr_str_new("{", 1);
+          ScrStr *pb1 = scr_str_new("}", 1);
+          pv = scr_insp_end(pb, pb0, pb1, recurse + 2, false, false);
+          scr_str_release(pb);
+          scr_str_release(pb0);
+          scr_str_release(pb1);
+        }
+        InspBuf eb = {0};
+        ib_cstr(&eb, "[prototype]");
+        insp_kv(&eb, pv);
+        scr_str_release(pv);
+        ScrStr *e = ib_take(&eb);
         scr_insp_entry(e, false);
         scr_str_release(e);
       }
+#ifdef SCR_INSP_COLORS
+      if (INSP_SH) {
+        /* the properties a program added to the function object follow its built-in names, then its own symbols */
+        ScrDyn *htable = d->v.fn.clo->props != NULL ? (ScrDyn *)scr_box_get_ref(d->v.fn.clo->props) : NULL; /* +1 */
+        if (htable != NULL && htable->kind == SCR_DYN_OBJ) {
+          insp_emit_obj_keys(htable, recurse, depth, true);
+          insp_emit_syms(htable, recurse, depth);
+        }
+        scr_dyn_release(htable);
+      }
+#endif
       if (ftag != 0) {
+        /* a protoProps entry: with colors the whole entry is dimmed, its symbol key in the `symbol` style */
         InspBuf eb = {0};
-        ib_cstr(&eb, "[Symbol(Symbol.toStringTag)]: '");
-        ib_cstr(&eb, fn_kind_names[ftag]);
-        ib_char(&eb, '\'');
+        if (INSP_COLORS_ON) ib_cstr(&eb, "\x1b[2m");
+        ib_char(&eb, '[');
+        ib_sty_cstr(&eb, "Symbol(Symbol.toStringTag)", INSP_STY_SYMBOL);
+        ib_char(&eb, ']');
+        ScrStr *tv = scr_str_new(fn_kind_names[ftag], strlen(fn_kind_names[ftag]));
+        ScrStr *tq = scr_insp_str(tv);
+        scr_str_release(tv);
+        insp_kv(&eb, tq);
+        scr_str_release(tq);
+        if (INSP_COLORS_ON) ib_cstr(&eb, "\x1b[22m");
         ScrStr *e = ib_take(&eb);
         scr_insp_entry(e, false);
         scr_str_release(e);
@@ -2549,12 +2785,9 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       scr_str_release(hbase);
       scr_str_release(hb0);
       scr_str_release(hb1);
-      if (!hproto) return hout;
-      InspBuf rb = {0};
-      ib_cstr(&rb, "<ref *1> ");
-      ib_str(&rb, hout);
+      ScrStr *hwrapped = scr_insp_ref_wrap(d->v.fn.clo, hout); /* <ref *1> when the prototype's constructor circled back */
       scr_str_release(hout);
-      return ib_take(&rb);
+      return hwrapped;
     }
     case SCR_DYN_OBJINST: {
       /* Node prints `Thing { a: 1 }` -- the instance's own ENUMERABLE
@@ -2597,6 +2830,16 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
           scr_dyn_release(cr);
         }
       }
+#ifdef SCR_INSP_COLORS
+      if (INSP_SH) {
+        /* The prototype's accessors print as `[g]: [Getter]` under showHidden; the member table cannot tell an accessor from a hidden field. */
+        const size_t inm0 = scr_dyn_objinst_member_count(d);
+        for (size_t mi = 0; mi < inm0; mi++) {
+          const ScrDynClassMember *mm = scr_dyn_objinst_member_at(d, mi);
+          if (mm->get != NULL && mm->call == NULL && mm->enumerable == 0 && mm->name[0] != '%') return insp_sh_fence("a class instance whose class has accessor-like members");
+        }
+      }
+#endif
       const char *icn = scr_dyn_objinst_cls(d);
       /* The class that applyMixin(Y, EventEmitter) grafted onto (rt_root 7) has had its own `constructor` overwritten by
        * EventEmitter's, and util.inspect skips a constructor the instance is not an instance of: it names the first
@@ -2892,12 +3135,36 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         ScrDyn *own = ops->own_props != NULL ? ops->own_props(d->v.handle.ptr) : NULL;
         ScrStr *iso = ib_take(&out);
         if (own == NULL || own->kind != SCR_DYN_OBJ) return insp_sty(iso, INSP_STY_DATE);
-        ScrStr *with = insp_with_base(iso, own, recurse, depth);
+        ScrStr *with = insp_with_base(iso, own, recurse, depth, -1.0);
         scr_str_release(iso);
         return with;
       }
       if (d->v.handle.tag == SCR_DYNH_REGEX) {
         /* A RegExp (immutable pattern + flags) renders as RegExp.prototype.toString, whole value in the `regexp` style. */
+#ifdef SCR_INSP_COLORS
+        if (INSP_SH) {
+          /* showHidden: every regex has the non-enumerable own `lastIndex`, so the text becomes the BASE (unstyled, as formatRaw leaves it)
+           * of `/re/g { [lastIndex]: 0 }`; past the depth limit the plain styled text answers. */
+          ScrStr *rtext = scr_insp_regex((ScrRegex *)d->v.handle.ptr);
+          if (recurse > depth) return insp_sty(rtext, INSP_STY_REGEXP);
+          insp_begin_obj(recurse + 1);
+          InspBuf lb = {0};
+          ib_cstr(&lb, "[lastIndex]");
+          ScrStr *lv = insp_sty(scr_insp_f64(((ScrRegex *)d->v.handle.ptr)->last_index), INSP_STY_NUMBER);
+          insp_kv(&lb, lv);
+          scr_str_release(lv);
+          ScrStr *le = ib_take(&lb);
+          scr_insp_entry(le, false);
+          scr_str_release(le);
+          ScrStr *rb0 = scr_str_new("{", 1);
+          ScrStr *rb1 = scr_str_new("}", 1);
+          ScrStr *rout = scr_insp_end(rtext, rb0, rb1, recurse + 1, false, false);
+          scr_str_release(rtext);
+          scr_str_release(rb0);
+          scr_str_release(rb1);
+          return rout;
+        }
+#endif
         return insp_sty(scr_insp_regex((ScrRegex *)d->v.handle.ptr), INSP_STY_REGEXP);
       }
       if (d->v.handle.tag == SCR_DYNH_TEXTCODEC) {
@@ -2919,7 +3186,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
           scr_str_release(base);
           base = scr_str_new("TextDecoder", 11);
         }
-        ScrStr *with = insp_with_base(base, obj, recurse, depth);
+        ScrStr *with = insp_with_base(base, obj, recurse, depth, -1.0);
         scr_str_release(base);
         scr_dyn_release(obj);
         return with;
@@ -2930,7 +3197,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         const ScrDynHandleOps *ops = scr_dyn_handle_ops_of(d);
         ScrDyn *own = ops->own_props != NULL ? ops->own_props(d->v.handle.ptr) : NULL;
         ScrStr *base = scr_str_new("Stats", 5);
-        ScrStr *with = own != NULL && own->kind == SCR_DYN_OBJ ? insp_with_base(base, own, recurse, depth) : NULL;
+        ScrStr *with = own != NULL && own->kind == SCR_DYN_OBJ ? insp_with_base(base, own, recurse, depth, -1.0) : NULL;
         scr_str_release(base);
         if (with != NULL) return with;
       }
@@ -3055,7 +3322,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       const ScrDynSymTab *ust = NULL;
 #endif
       const size_t unsym = insp_sym_count_t(ust);
-      if (b->len == 0 && unsym == 0) {
+      if (b->len == 0 && unsym == 0 && !INSP_SH) {
         InspBuf out = {0};
         ib_bytes(&out, prefix, (size_t)pn);
         ib_char(&out, ']');
@@ -3075,12 +3342,45 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         scr_insp_entry(m, true);
         scr_str_release(m);
       }
+#ifdef SCR_INSP_COLORS
+      if (INSP_SH) {
+        /* formatRaw's extraKeys for a typed array under showHidden: the five non-own accessors, `buffer` last as a bare
+         * `ArrayBuffer { [byteLength]: N }` (the underlying buffer's size, not the view's). */
+        const size_t boff = b->backing != NULL ? (size_t)(b->data - b->backing->data) : 0;
+        const size_t btot = b->backing != NULL ? b->backing->len : b->len;
+        const double xv[4] = {1.0, (double)b->len, (double)b->len, (double)boff};
+        static const char *const xn[4] = {"[BYTES_PER_ELEMENT]", "[length]", "[byteLength]", "[byteOffset]"};
+        /* Node's grid order reads `typeof value[i]` at each entry position: the typed array's own elements are numbers */
+        size_t xp = shown + (more ? 1 : 0);
+        for (int xi = 0; xi < 4; xi++) {
+          InspBuf xb = {0};
+          ib_sty_cstr(&xb, xn[xi], INSP_STY_STRING); /* formatExtraProperties styles the bracketed name as a string */
+          ScrStr *xs = insp_sty(scr_insp_f64(xv[xi]), INSP_STY_NUMBER);
+          insp_kv(&xb, xs);
+          scr_str_release(xs);
+          ScrStr *xe = ib_take(&xb);
+          scr_insp_entry(xe, xp < b->len);
+          xp++;
+          scr_str_release(xe);
+        }
+        InspBuf bb = {0};
+        ib_sty_cstr(&bb, "[buffer]", INSP_STY_STRING);
+        ib_cstr(&bb, ": ArrayBuffer { [byteLength]: ");
+        ScrStr *bl = insp_sty(scr_insp_f64((double)btot), INSP_STY_NUMBER);
+        ib_str(&bb, bl);
+        scr_str_release(bl);
+        ib_cstr(&bb, " }");
+        ScrStr *be = ib_take(&bb);
+        scr_insp_entry(be, xp < b->len);
+        scr_str_release(be);
+      }
+#endif
       insp_emit_symtab(ust, recurse, depth);
       ScrStr *base = scr_str_new("", 0);
       ScrStr *b0 = scr_str_new(prefix, (size_t)pn);
       ScrStr *b1 = scr_str_new("]", 1);
       g_sort_tail = unsym;
-      ScrStr *out = scr_insp_end(base, b0, b1, recurse + 1, true, more);
+      ScrStr *out = scr_insp_end(base, b0, b1, recurse + 1, true, INSP_SH ? insp_over_cap(shown + (more ? 1 : 0) + 5 + unsym) : more);
       scr_str_release(base);
       scr_str_release(b0);
       scr_str_release(b1);
@@ -3108,7 +3408,16 @@ ScrStr *scr_insp_dyn_s(ScrDyn *d, double depth) {
 ScrStr *scr_insp_dyn_h(ScrDyn *d, double depth) {
   const bool saved = scr_insp_show_hidden;
   scr_insp_show_hidden = true;
+#ifdef SCR_INSP_COLORS
+  const InspOpts saved_o = g_opts;
+  g_opts.show_hidden = true;
+  g_opts.show_proxy = true;
+  g_opts.depth = depth;
+#endif
   ScrStr *r = d->kind == SCR_DYN_STR ? scr_str_retain(d->v.str) : scr_insp_dyn(d, 0, depth);
+#ifdef SCR_INSP_COLORS
+  g_opts = saved_o;
+#endif
   scr_insp_show_hidden = saved;
   return r;
 }
@@ -3306,6 +3615,17 @@ ScrStr *scr_insp_format(ScrDyn *arr) {
           case 'o': {
             a += 1;
             ScrDyn *v = scr_dyn_arr_at(arr, a);
+#ifdef SCR_INSP_COLORS
+            {
+              /* formatWithOptionsInternal: inspect(arg, { ...inspectOptions, showHidden: true, showProxy: true, depth: 4 }) */
+              const InspOpts saved_o = g_opts;
+              g_opts.show_hidden = true;
+              g_opts.show_proxy = true;
+              g_opts.depth = 4.0;
+              temp = scr_insp_dyn(v, 0, 4);
+              g_opts = saved_o;
+            }
+#else
             if (insp_has_hidden(v, 0)) {
               static const char msg[] = "util.format %o of a dynamic array or function is not supported yet";
               scr_throw_error(SCR_ERR_ERROR, scr_str_new(msg, sizeof msg - 1));
@@ -3313,6 +3633,7 @@ ScrStr *scr_insp_format(ScrDyn *arr) {
             } else {
               temp = scr_insp_dyn(v, 0, 4);
             }
+#endif
             scr_dyn_release(v);
             break;
           }
