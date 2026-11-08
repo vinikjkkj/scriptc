@@ -2210,7 +2210,7 @@ ScrStr *scr_fs_realpath(ScrStr *path) {
     scr_fs_throw(errno ? errno : ENOENT, "lstat", path);
     return NULL;
   }
-  if (GetFileAttributesA(buf) == INVALID_FILE_ATTRIBUTES) {
+  if (scr_u_getattrs(buf) == INVALID_FILE_ATTRIBUTES) {
     scr_fs_throw(ENOENT, "lstat", path);
     return NULL;
   }
