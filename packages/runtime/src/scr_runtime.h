@@ -4878,6 +4878,10 @@ typedef struct ScrDynClass {
    * the (positive) offset of the pointer in the hidden `__scrEmitter` slot for a class grafted by applyMixin(Y, EventEmitter),
    * -1 for a class that is no emitter. APPENDED, like every trailing member. */
   long long ee_off;
+  /* The byte offset, from the instance pointer, of the instance's RUN-TIME property table pointer (the CLASS_PROPS_FIELD slot), or -1 for a
+   * class whose instances carry none. A subclass of a table-carrying class has the same offset (the base chain's fields are an identical
+   * prefix). APPENDED, like every trailing member; scr_dyn_objinst_props_table reads it. */
+  long long props_off;
 #ifdef SCR_INSP_COLORS
   /* util.inspect showHidden over a class VALUE: the nearest runtime-provided class in the chain (JavaScript name: "Error", "TypeError",
    * "EventEmitter", "Readable", ...), NULL when the chain holds none; `rt_layer` is the number of user classes between this class and it
@@ -4889,6 +4893,11 @@ typedef struct ScrDynClass {
   unsigned char own_complete;
 #endif
 } ScrDynClass;
+
+/* The instance's run-time property table (the value stored in its CLASS_PROPS_FIELD slot: NULL while nothing was defined), or NULL
+ * for an instance whose class carries none. One class-position load and one table load, whatever the number of table-carrying classes
+ * in the program; scr_cls_props_get accepts the NULL. */
+const ScrDyn *scr_dyn_objinst_props_table(const ScrDyn *d);
 
 /* The order record of an instance whose class has inferred fields: `k` is the
  * field's ordinal (0..254). A WRITE of a field not yet written appends it;

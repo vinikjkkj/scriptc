@@ -73,7 +73,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { dynKeyGetUsesLitTwin, errorOwnFlagFor, moduleFuncLaneShapes, moduleUsesEngineFn, moduleUsesTextMb, moduleUsesDc, moduleUsesTls, ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, presenceMaskStores, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesFnText, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesInstanceRecordLane, moduleInstanceLaneNeedsKg, moduleUsesDynClass, moduleUsesEmitter, moduleBoxesEmitters, canBoxFuncIntoDyn, isDynPackFunc, moduleUsesBigInt, moduleUsesRegexExecDyn, moduleUsesBytesOwn, moduleUsesAsym, moduleUsesDynAsync, moduleBoxesProcStream, moduleUsesNodeTest, irFunctionValueCode, fnNameTableRows } from "../../ir/nodes.js";
+import { dynKeyGetUsesLitTwin, propsTableRoot, errorOwnFlagFor, moduleFuncLaneShapes, moduleUsesEngineFn, moduleUsesTextMb, moduleUsesDc, moduleUsesTls, ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, presenceMaskStores, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesFnText, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesInstanceRecordLane, moduleInstanceLaneNeedsKg, moduleUsesDynClass, moduleUsesEmitter, moduleBoxesEmitters, canBoxFuncIntoDyn, isDynPackFunc, moduleUsesBigInt, moduleUsesRegexExecDyn, moduleUsesBytesOwn, moduleUsesAsym, moduleUsesDynAsync, moduleBoxesProcStream, moduleUsesNodeTest, irFunctionValueCode, fnNameTableRows } from "../../ir/nodes.js";
 import { setDynOrderPlan, setDynInspExt } from "../dyn-members.js";
 import { orderRecordPlanCached, moduleUsesInspColors } from "../../ir/nodes.js";
 import { classvalCandidates, dynClassDisplayName, dynDescBase, dynEmitterSlot, dynRuntimeBaseInfo, dynRuntimeRoot, dynEnumerationFenced, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
@@ -239,7 +239,7 @@ export interface LlvmEmitStats {
 
 /** The descriptor's literal type in a program that can ask util.inspect for showHidden (ScrDynClass under SCR_INSP_COLORS): %ScrDynClass plus the
  * runtime base name, its prototype layer and the own-table-complete flag. */
-const DYN_CLASS_EXT_TYPE = `{ ptr, i64, i64, i8, ptr, ptr, ptr, i64, i8, i8, i8, ptr, i64, i8, ptr, i8, i8, i64, i64, i64, ptr, i8, i8 }`;
+const DYN_CLASS_EXT_TYPE = `{ ptr, i64, i64, i8, ptr, ptr, ptr, i64, i8, i8, i8, ptr, i64, i8, ptr, i8, i8, i64, i64, i64, i64, ptr, i8, i8 }`;
 
 export function emitLlvmModule(mod: IrModule, stats?: LlvmEmitStats): string {
   resetSrcSiteCache();
@@ -2821,7 +2821,7 @@ class LlEmitter {
       // always-linked dyn core a descriptor whose `members` read runs off
       // the end of the object — measured, as an access violation on the
       // first boxed method call.
-      `%ScrDynClass = type { ptr, i64, i64, i8, ptr, ptr, ptr, i64, i8, i8, i8, ptr, i64, i8, ptr, i8, i8, i64, i64, i64 }`,
+      `%ScrDynClass = type { ptr, i64, i64, i8, ptr, ptr, ptr, i64, i8, i8, i8, ptr, i64, i8, ptr, i8, i8, i64, i64, i64, i64 }`,
       // One row of a class's instance MEMBER TABLE
       // { name, len, get, call, enumerable } (ScrDynClassMember in
       // scr_runtime.h) — what `x.get()` and `x.v` read through once the
@@ -4225,7 +4225,7 @@ class LlEmitter {
       `ptr ${statics === null ? "null" : `@${statics.sym}`}, i64 ${statics === null ? 0 : statics.count}, i8 ${staticsOpaque ? 1 : 0}, ` +
       `ptr ${dynDescBase(this.classMeta, meta) === null ? "null" : this.cstr(dynClassDisplayName(dynDescBase(this.classMeta, meta)!.def))}, i8 ${dynRuntimeRoot(meta)}, ` +
       `i8 ${this.tracedShapes.has(`object:${className}`) ? 1 : 0}, ` +
-      `i64 ${this.ordNordOf(className)}, i64 ${this.ordOffsetOf(className)}, i64 ${this.eeOffsetOf(className)}${rtTail} }`;
+      `i64 ${this.ordNordOf(className)}, i64 ${this.ordOffsetOf(className)}, i64 ${this.eeOffsetOf(className)}, i64 ${this.propsOffsetOf(className)}${rtTail} }`;
     this.dynClassDescSyms.set(className, { sym, body });
     // Subclass descriptors join the registry (see the C twin): a base-typed
     // box can hold a derived instance whose own member table must resolve.
@@ -4306,14 +4306,8 @@ class LlEmitter {
   classPropsTables(): { desc: string; struct: string; index: number }[] {
     const out: { desc: string; struct: string; index: number }[] = [];
     for (const [cname, meta] of this.classMeta) {
-      if (!meta.def.fields.some((f) => f.name === CLASS_PROPS_FIELD)) continue;
-      // A class whose BASE already carries the field needs no arm: the
-      // field is the base's, at the base's index, and the base's arm
-      // covers this class's whole interval. lower-classes.ts adds %props
-      // only when the base chain has none, so the field is never
-      // duplicated and "the base's index" is the only index there is.
-      if (meta.base?.def.fields.some((f) => f.name === CLASS_PROPS_FIELD)) continue;
-      if (!canBoxClassIntoDyn(cname)) continue;
+      // The classes that DEFINE a table (propsTableRoot, ir/nodes.ts): a class below one is covered by its descriptor's offset.
+      if (propsTableRoot(meta)?.def.name !== cname) continue;
       out.push({
         desc: this.dynClassDesc(cname),
         struct: mangleClassStruct(cname),
@@ -4385,6 +4379,13 @@ class LlEmitter {
     if (kind === null) return "-1";
     if (kind === "prefix") return "0";
     return `ptrtoint (ptr getelementptr inbounds (%${classStructSym(className)}, ptr null, i32 0, i32 ${this.classFieldGep(className, kind.field)}) to i64)`;
+  }
+  /** The byte offset of the instance's run-time property table pointer, or -1 (the C twin: dynPropsOffsetC): taken from the class
+   * propsTableRoot names (ir/nodes.ts), the one decision both emitters share. */
+  propsOffsetOf(className: string): string {
+    const root = propsTableRoot(this.classMetaOf(className));
+    if (root === null) return "-1";
+    return `ptrtoint (ptr getelementptr inbounds (%${classStructSym(root.def.name)}, ptr null, i32 0, i32 ${this.classFieldGep(root.def.name, CLASS_PROPS_FIELD)}) to i64)`;
   }
   ordOffsetOf(className: string): string {
     const plan = orderRecordPlanCached(this.mod.classes ?? []);

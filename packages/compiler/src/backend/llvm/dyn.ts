@@ -4553,33 +4553,22 @@ export class LlDyn {
       B.startBlock(lCi);
       const tables = host.classPropsTables();
       if (tables.length > 0) {
-        host.declare(`declare ptr @scr_dyn_objinst_ptr_of(ptr, ptr)`);
+        // ONE runtime call finds the instance's run-time property table (the C emitter's arm, same entry point), whatever the number of
+        // table-carrying classes; a class with none answers null, which scr_cls_props_get takes as "no such key".
+        host.declare(`declare ptr @scr_dyn_objinst_props_table(ptr)`);
         host.declare(`declare ptr @scr_cls_props_get(ptr, ptr)`);
         host.declare(`declare zeroext i1 @scr_exc_pending()`);
-      }
-      for (const t of tables) {
-        const o = B.tmp();
-        B.line(`${o} = call ptr @scr_dyn_objinst_ptr_of(ptr %d, ptr ${t.desc})`);
-        const isMine = B.tmp();
-        B.line(`${isMine} = icmp ne ptr ${o}, null`);
-        const lMine = B.newLabel("kg.cp");
-        const lSkip = B.newLabel("kg.cs");
-        B.condBr(isMine, lMine, lSkip);
-        B.startBlock(lMine);
-        const tp = B.tmp();
         const tbl = B.tmp();
-        B.line(`${tp} = getelementptr inbounds %${t.struct}, ptr ${o}, i64 0, i32 ${t.index} ; %props`);
-        B.line(`${tbl} = load ptr, ptr ${tp}`);
+        B.line(`${tbl} = call ptr @scr_dyn_objinst_props_table(ptr %d)`);
         const pv = B.tmp();
         B.line(`${pv} = call ptr @scr_cls_props_get(ptr ${tbl}, ptr %k)`);
-        // NULL is "no such key" AND "the getter threw", and only the
-        // pending exception tells them apart. Reading the miss as a throw
-        // swallows a real one into the fence's message; reading the throw
-        // as a miss REPLACES it with the fence — louder, and wrong.
+        // NULL is "no such key" AND "the getter threw", and only the pending exception tells them apart. Reading the miss as a throw
+        // swallows a real one into the fence's message; reading the throw as a miss REPLACES it with the fence -- louder, and wrong.
         const hit = B.tmp();
         B.line(`${hit} = icmp ne ptr ${pv}, null`);
         const lHit = B.newLabel("kg.ch");
         const lMaybe = B.newLabel("kg.cm");
+        const lSkip = B.newLabel("kg.cs");
         B.condBr(hit, lHit, lMaybe);
         B.startBlock(lHit);
         B.terminate(`ret ptr ${pv}`);

@@ -4465,6 +4465,50 @@ const ScrDynClass *const *scr_dyn_class_registry(size_t *n) {
   return scr_cls_reg;
 }
 
+/* props_off by class position: tab[p] is the props offset of the class a position p names (-1: none), built once from the registry. A
+ * preorder numbering nests, so a table-carrying class's offset is written over its whole interval; the instance's own position then
+ * reads the answer of the class it IS, whatever static type its box was made from. */
+static int32_t *scr_props_tab;
+static size_t scr_props_tab_n;
+static bool scr_props_tab_built;
+
+static void scr_props_tab_build(void) {
+  scr_props_tab_built = true;
+  size_t top = 0;
+  for (size_t i = 0; i < scr_cls_reg_n; i++) {
+    if (scr_cls_reg[i]->props_off >= 0 && scr_cls_reg[i]->post + 1 > top) top = scr_cls_reg[i]->post + 1;
+  }
+  if (top == 0) return;
+  int32_t *tab = (int32_t *)malloc(top * sizeof *tab);
+  if (tab == NULL) {
+    fputs("scriptc: out of memory\n", stderr);
+    abort();
+  }
+  for (size_t i = 0; i < top; i++) tab[i] = -1;
+  /* A subclass of a table-carrying class carries the same offset (an identical field prefix), so the intervals can be written in any order. */
+  for (size_t i = 0; i < scr_cls_reg_n; i++) {
+    const ScrDynClass *c = scr_cls_reg[i];
+    if (c->props_off < 0) continue;
+    for (size_t q = c->pre; q <= c->post; q++) tab[q] = (int32_t)c->props_off;
+  }
+  scr_props_tab = tab;
+  scr_props_tab_n = top;
+}
+
+const ScrDyn *scr_dyn_objinst_props_table(const ScrDyn *d) {
+  const ScrDynClass *own = d->v.inst.cls;
+  long long off;
+  if (!own->vt) {
+    off = own->props_off;
+  } else {
+    if (!scr_props_tab_built) scr_props_tab_build();
+    const size_t p = ((const ScrError *)d->v.inst.o)->vt->pre;
+    off = p < scr_props_tab_n ? scr_props_tab[p] : -1;
+  }
+  if (off < 0) return NULL;
+  return *(const ScrDyn *const *)((const char *)d->v.inst.o + off);
+}
+
 const ScrDynClass *scr_dyn_objinst_class_of(const ScrDyn *d) {
   const ScrDynClass *own = d->v.inst.cls;
   /* A STANDALONE class needs no scan, and this is not an optimization

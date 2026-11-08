@@ -11984,6 +11984,25 @@ function moduleHasBoxableClass(mod: IrModule): boolean {
   return r;
 }
 
+/** The shape both emitters' class metadata share for the property-table question. */
+export interface PropsTableMeta {
+  readonly def: { readonly name: string; readonly fields: readonly { readonly name: string }[] };
+  readonly base?: PropsTableMeta | null;
+}
+
+/** The class that DEFINES the run-time property table an instance of `meta` carries, or null when the instance has none the keyed read
+ * can reach. The table's pointer is the CLASS_PROPS_FIELD slot of the nearest ancestor-or-self whose base lacks the field (a subclass's
+ * layout opens with its base chain's fields as an identical prefix, so the offset is the same in every class below it). A root that
+ * cannot box into a dyn (the runtime's own Error, whose `%props` cell is its expando bag and which has no struct of its own to take an
+ * offset from) never carried a table the read consults, so its subclasses answer null: both emitters decide "no table" through this one
+ * function, for the descriptor's offset and for whether the keyed read asks at all. */
+export function propsTableRoot(meta: PropsTableMeta): PropsTableMeta | null {
+  if (!meta.def.fields.some((f) => f.name === CLASS_PROPS_FIELD)) return null;
+  let root: PropsTableMeta = meta;
+  while (root.base?.def.fields.some((f) => f.name === CLASS_PROPS_FIELD)) root = root.base;
+  return canBoxClassIntoDyn(root.def.name) ? root : null;
+}
+
 /** Does this keyed read of a dyn value take the LITERAL-KEY twin of the read helper (sc_dyn_key_get_lit, answered for a class instance
  * from the member memo)? Only a key that is an emitted string literal (an immortal interned static, so its address names its bytes
  * forever), in a module that has a class to box, and not `length`: the receiver of `.length` is an array or a string, which the twin

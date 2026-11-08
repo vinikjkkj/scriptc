@@ -8,7 +8,7 @@
 import type { CEmitter } from "./emitter.js";
 import { rcSitesRequested } from "./emitter.js";
 import { moduleFuncLaneShapes, moduleUsesEngineFn, accessorKeyOrderOf, accessorSlotProp, shapeHasAccessorSlots, VOID, arrayTypeHasLiveView, bytesAliasOnExtract, canConvertToDyn, canDynCheckTo, moduleUsesDynView, moduleInstanceLaneNeedsKg, moduleUsesInstanceRecordLane } from "../../ir/nodes.js";
-import { CLASS_PROPS_FIELD, EVAL_STATIC_CLASSES, moduleUsesInspColors, dynNeverArm, dynNeverIn, armDiscrimLits, dynErrorClassKind, isDynErrorClass, canAdaptDynFuncTo, dynRestApplyable, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, UNION_ARM_JS_OBJECT_KINDS, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
+import { CLASS_PROPS_FIELD, propsTableRoot, EVAL_STATIC_CLASSES, moduleUsesInspColors, dynNeverArm, dynNeverIn, armDiscrimLits, dynErrorClassKind, isDynErrorClass, canAdaptDynFuncTo, dynRestApplyable, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, UNION_ARM_JS_OBJECT_KINDS, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleAsyncSpawn, mangleClassStruct, mangleField, mangleFunction, mangleFnClosure, mangleRecordNew, mangleRecordRelease, mangleRecordStruct } from "../mangle.js";
 import type { ClassMeta } from "./emit-shapes.js";
@@ -123,7 +123,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
         `${statics === null ? "NULL, 0" : `${statics.sym}, ${statics.count}`}, ${staticsOpaque ? "true" : "false"}, ` +
         `${dynDescBase(E.classMeta, meta) === null ? "NULL" : cStringLiteral(Buffer.from(dynClassDisplayName(dynDescBase(E.classMeta, meta)!.def), "utf8"))}, ` +
         `${dynRuntimeRoot(meta)}, ${E.tracedShapes.has(`object:${className}`) ? 1 : 0}, ` +
-        `${dynOrdNord(E, meta)}, ${dynOrdOffsetC(E, meta)}, ${dynEeOffsetC(meta, className)}${rtTail} }; ` +
+        `${dynOrdNord(E, meta)}, ${dynOrdOffsetC(E, meta)}, ${dynEeOffsetC(meta, className)}, ${dynPropsOffsetC(E, meta)}${rtTail} }; ` +
         `/* dyn box: class ${className} */`,
     );
     // A base-typed box can hold a DERIVED instance, and the registry resolves
@@ -167,6 +167,13 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
     if (slot === null) return "-1";
     if (slot === "prefix") return "0";
     return `offsetof(${mangleClassStruct(className)}, ${mangleField(slot.field)})`;
+  }
+  /** The byte offset of the instance's run-time property table pointer (CLASS_PROPS_FIELD), or -1 for a class with none: taken from the
+   * class propsTableRoot names (ir/nodes.ts: the one decision both emitters share). */
+  function dynPropsOffsetC(E: CEmitter, meta: ClassMeta): string {
+    const root = propsTableRoot(meta);
+    if (root === null) return "-1";
+    return `offsetof(${mangleClassStruct(root.def.name)}, ${mangleField(CLASS_PROPS_FIELD)})`;
   }
   function dynOrdNord(E: CEmitter, meta: ClassMeta): string {
     return String(orderRecordPlanCached(E.mod.classes ?? []).namesOf(meta.def.name).length);
@@ -1861,6 +1868,19 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     return name;
   }
 
+  /** Does any boxable class of the program carry the run-time property table (CLASS_PROPS_FIELD)? Interns each such class's descriptor
+   * (and, through it, its subclasses'): the runtime finds an instance's table through the registry, so a table-carrying class must be
+   * in it even if nothing else ever boxed it as itself. */
+  function propsClasses(E: CEmitter): boolean {
+    let any = false;
+    for (const [cname, meta] of E.classMeta) {
+      if (propsTableRoot(meta)?.def.name !== cname) continue;
+      E.dynClassDesc(cname);
+      any = true;
+    }
+    return any;
+  }
+
   /** The OBJINST arm of the emitted keyed read, as C lines: the %props tables, then the member table read through `memberFn`, then the
    * miss. One body for the general helper (memberFn = scr_dyn_objinst_member_get, any key) and the literal-key helper
    * (scr_dyn_objinst_member_get_lit), so the two cannot answer a member differently. */
@@ -1882,60 +1902,16 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     d.push(`     * that did not, so scr_cls_props_get shipped end to end with no`);
     d.push(`     * caller while \`c[k]\` refused a property the program had just`);
     d.push(`     * defined on c. */`);
-    for (const [cname, meta] of E.classMeta) {
-      // Which classes get an arm, and what the box must prove first.
-      //
-      // A box's `cls` is the descriptor of the STATIC type the value was
-      // boxed FROM, so a Derived instance in a Base-typed slot boxes as
-      // Base. Trusting THAT descriptor to name the struct is unsound --
-      // and refusing every hierarchy class because of it, which is what
-      // this loop used to do, refuses zapo's own WaClientImpl, the only
-      // class in its 3M-line TU that carries a table at all. Neither is
-      // necessary, because the descriptor is not the only thing the box
-      // carries: a hierarchy instance carries its VTABLE, and
-      // scr_dyn_objinst_pre reads the class's own preorder position out
-      // of it -- which is exactly how `instanceof` narrows a base-typed
-      // box to the derived class. scr_dyn_objinst_ptr_of tests that
-      // RUN-TIME position against this descriptor's interval, so the
-      // answer depends on what the object IS and never on the declared
-      // type of a slot it passed through. That last clause is the whole
-      // reason the static-descriptor test was not shippable.
-      //
-      // The INTERVAL and not equality because a subclass's layout opens
-      // with its base chain's fields as an IDENTICAL prefix (that is what
-      // makes an upcast a reinterpret), so this class's %props sits at
-      // this index in every class below it too.
-      //
-      // WHAT THE INTERVAL DOES NOT BUY TODAY: the frontend refuses a table
-      // on a class that HAS A SUBCLASS (SC2020 -- the closed member set its
-      // collision check reads would not be exact), so every table-carrying
-      // class is a LEAF and its interval is a single point. The interval is
-      // still what belongs here rather than `==`: it is the predicate
-      // instanceof already uses, it needs no second runtime entry point,
-      // and it is what stays correct if that leaf rule is ever relaxed.
-      // tests/harness/class-runtime-property-table.test.ts pins the
-      // refusal, so the day it lifts is a day this arm is already right.
-      if (!meta.def.fields.some((f) => f.name === CLASS_PROPS_FIELD)) continue;
-      // A class whose BASE already carries the field needs no arm: the
-      // field is the base's, at the base's index, and the base's arm
-      // covers this class's whole interval. lower-classes.ts adds %props
-      // only when the base chain has none, so the field is never
-      // duplicated and "the base's index" is the only index there is.
-      if (meta.base?.def.fields.some((f) => f.name === CLASS_PROPS_FIELD)) continue;
-      if (!canBoxClassIntoDyn(cname)) continue;
-      const desc = E.dynClassDesc(cname);
-      const struct = mangleClassStruct(cname);
-      const fld = mangleField(CLASS_PROPS_FIELD);
-      d.push(`    { void *po = scr_dyn_objinst_ptr_of(d, &${desc}); /* ${cname}'s %props table */`);
-      d.push(`    if (po != NULL) {`);
-      d.push(`      ScrDyn *pv = scr_cls_props_get(((${struct} *)po)->${fld}, k);`);
-      // NULL means two different things — "no such key" and "the getter
-      // threw" — and only the pending exception tells them apart. Reading
-      // the miss as a throw would swallow a real one into the fence's
-      // message; reading the throw as a miss would REPLACE it with the
-      // fence, which is the louder-but-wrong answer.
-      d.push(`      if (pv != NULL || scr_exc_pending()) return pv;`);
-      d.push(`    } }`);
+    // The instance's run-time property table, in ONE runtime call (scr_dyn_objinst_props_table reads the class position the box already
+    // carries and the offset its descriptor names), however many classes of the program carry such a table; a class with none answers
+    // NULL, which scr_cls_props_get takes as "no such key". The arm is emitted only when some class carries the table, as before.
+    // Which classes carry one, and why a base's offset serves the classes below it, is dynPropsOffsetC's.
+    if (propsClasses(E)) {
+      d.push(`    { ScrDyn *pv = scr_cls_props_get(scr_dyn_objinst_props_table(d), k); /* the %props table */`);
+      // NULL means two different things -- "no such key" and "the getter threw" -- and only the pending exception tells them apart.
+      // Reading the miss as a throw would swallow a real one into the fence's message; reading the throw as a miss would REPLACE it
+      // with the fence, which is the louder-but-wrong answer.
+      d.push(`      if (pv != NULL || scr_exc_pending()) return pv; }`);
     }
     // The class's own MEMBER TABLE, ahead of the fence: a declared field
     // reads its slot and a METHOD reads as a bound function box, minted

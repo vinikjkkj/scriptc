@@ -178,6 +178,12 @@ function eeKind(raw: string): string {
   return raw === "-1" ? "none" : raw === "0" ? "prefix" : "slot";
 }
 
+/** ScrDynClass.props_off, as a lane-neutral word: -1 no run-time property table, anything else the table pointer's slot
+ * (offsetof on the C lane, a ptrtoint GEP on LLVM). */
+function propsKind(raw: string): string {
+  return raw === "-1" ? "none" : "slot";
+}
+
 function cDescriptors(c: string): Map<string, string> {
   const out = new Map<string, string>();
   const tbls = cMemberTables(c);
@@ -186,7 +192,7 @@ function cDescriptors(c: string): Map<string, string> {
   // class is optional here rather than assumed.
   // const ScrDynClass sc_dcl_0 = { "Lone", 5, 5, false, &r, &rl, sc_dclt_0, 1, false, false, false, NULL, 0, false, NULL, 0 }; /* dyn box: class Lone */
   const re =
-    /(?:static )?const ScrDynClass sc_dcl_\d+ = \{ "([^"]*)", (\d+), (\d+), (true|false), &(\w+), &(\w+), (NULL|\w+), (\d+), (true|false), (true|false), (true|false), (NULL|\w+), (\d+), (true|false), (NULL|"[^"]*"), (\d), (\d), \d+, \d+, (-1|0|offsetof\(\w+, \w+\)) \};/g;
+    /(?:static )?const ScrDynClass sc_dcl_\d+ = \{ "([^"]*)", (\d+), (\d+), (true|false), &(\w+), &(\w+), (NULL|\w+), (\d+), (true|false), (true|false), (true|false), (NULL|\w+), (\d+), (true|false), (NULL|"[^"]*"), (\d), (\d), \d+, \d+, (-1|0|offsetof\(\w+, \w+\)), (-1|offsetof\(\w+, \w+\)) \};/g;
   for (const m of c.matchAll(re)) {
     const mem = m[7] === "NULL" ? "[]" : (tbls.get(m[7]!) ?? `<missing table ${m[7]}>`);
     const declared = Number(m[8]);
@@ -196,7 +202,7 @@ function cDescriptors(c: string): Map<string, string> {
     }
     out.set(
       m[1]!,
-      `pre=${m[2]} post=${m[3]} vt=${m[4]} rc=${rcBase(m[5]!)}/${rcBase(m[6]!)} props=${m[9]} opaque=${m[10]} errorRooted=${m[11]} rtRoot=${m[16]} cyc=${m[17]} ee=${eeKind(m[18]!)} mem=${mem}`,
+      `pre=${m[2]} post=${m[3]} vt=${m[4]} rc=${rcBase(m[5]!)}/${rcBase(m[6]!)} props=${m[9]} opaque=${m[10]} errorRooted=${m[11]} rtRoot=${m[16]} cyc=${m[17]} ee=${eeKind(m[18]!)} propsOff=${propsKind(m[19]!)} mem=${mem}`,
     );
   }
   mustNotReadZero("cDescriptors", c, C_DESC_ANCHOR, out.size);
@@ -209,7 +215,7 @@ function llDescriptors(ll: string): Map<string, string> {
   const out = new Map<string, string>();
   // @sc_dcl_0 = internal constant %ScrDynClass { ptr @sc_cs_3, i64 5, i64 5, i8 0, ptr @r, ptr @rl, ptr @sc_dclt_0, i64 1, i8 0, i8 0, i8 0, ptr null, i64 0, i8 0, ptr null, i8 0 }
   const re =
-    /^@sc_dcl_\d+ = internal constant %ScrDynClass \{ ptr @(sc_cs_\d+), i64 (\d+), i64 (\d+), i8 ([01]), ptr @(\w+), ptr @(\w+), ptr (null|@sc_dclt_\d+), i64 (\d+), i8 ([01]), i8 ([01]), i8 ([01]), ptr (null|@sc_dclt_\d+), i64 (\d+), i8 ([01]), ptr (null|@sc_cs_\d+), i8 (\d), i8 ([01]), i64 \d+, i64 \d+, i64 (-1|0|ptrtoint [^}]*?) \}/gm;
+    /^@sc_dcl_\d+ = internal constant %ScrDynClass \{ ptr @(sc_cs_\d+), i64 (\d+), i64 (\d+), i8 ([01]), ptr @(\w+), ptr @(\w+), ptr (null|@sc_dclt_\d+), i64 (\d+), i8 ([01]), i8 ([01]), i8 ([01]), ptr (null|@sc_dclt_\d+), i64 (\d+), i8 ([01]), ptr (null|@sc_cs_\d+), i8 (\d), i8 ([01]), i64 \d+, i64 \d+, i64 (-1|0|ptrtoint [^}]*?), i64 (-1|ptrtoint [^}]*?) \}/gm;
   for (const m of ll.matchAll(re)) {
     const name = cstrs.get(m[1]!);
     if (name === undefined) throw new Error(`llvm descriptor names an undefined cstr ${m[1]}`);
@@ -222,7 +228,7 @@ function llDescriptors(ll: string): Map<string, string> {
     out.set(
       name,
       `pre=${m[2]} post=${m[3]} vt=${m[4] === "1" ? "true" : "false"} ` +
-        `rc=${rcBase(m[5]!)}/${rcBase(m[6]!)} props=${m[9] === "1" ? "true" : "false"} opaque=${m[10] === "1" ? "true" : "false"} errorRooted=${m[11] === "1" ? "true" : "false"} rtRoot=${m[16]} cyc=${m[17]} ee=${eeKind(m[18]!)} mem=${mem}`,
+        `rc=${rcBase(m[5]!)}/${rcBase(m[6]!)} props=${m[9] === "1" ? "true" : "false"} opaque=${m[10] === "1" ? "true" : "false"} errorRooted=${m[11] === "1" ? "true" : "false"} rtRoot=${m[16]} cyc=${m[17]} ee=${eeKind(m[18]!)} propsOff=${propsKind(m[19]!)} mem=${mem}`,
     );
   }
   mustNotReadZero("llDescriptors", ll, LL_DESC_ANCHOR, out.size);
