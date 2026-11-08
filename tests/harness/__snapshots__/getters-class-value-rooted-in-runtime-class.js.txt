@@ -1,0 +1,6 @@
+getters-class-value-rooted-in-runtime-class.js:5:25 - error SC1101: converting the class value 'Bus' to 'unknown' in a program that asks util.inspect / util.format for showHidden and getters (the `getters` option runs a class value's prototype accessors against the prototype object): its chain roots in the runtime class EventEmitter, whose accessors Node runs against a prototype and reports with the stack of Node's own files
+
+  4 | class Bus extends EventEmitter { constructor() { super(); } }
+  5 | show(JSON.parse("0") || Bus);
+    |                         ^~~
+  6 | 

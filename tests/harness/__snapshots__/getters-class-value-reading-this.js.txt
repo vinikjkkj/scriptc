@@ -1,0 +1,6 @@
+getters-class-value-reading-this.js:4:25 - error SC1101: converting the class value 'Counter' to 'unknown' in a program that asks util.inspect / util.format for showHidden and getters (the `getters` option runs a class value's prototype accessors against the prototype object): its accessor 'doubled' reads `this`, which is the prototype object (holding none of the instance's fields) when Node runs it
+
+  3 | class Counter { n = 21; get doubled() { return this.n * 2; } }
+  4 | show(JSON.parse("0") || Counter);
+    |                         ^~~~~~~
+  5 | 
