@@ -1725,8 +1725,6 @@ function refuseOpenInspectOption(L: Lowerer, prop: ts.Node, key: string, value: 
   if (key === "stylize") open("stylize");
   if (key === "showHidden" && literalTruthy(value) === true) open(`${key}: true`);
   if (INSPECT_OPEN_KEYS.has(key) && literalTruthy(value) === null) open(`${key} (a run-time value)`);
-  if (key === "sorted" && literalTruthy(value) === true && value.kind !== ts.SyntaxKind.TrueKeyword) open("sorted with a comparator");
-  if (key === "sorted" && (ts.isArrowFunction(value) || ts.isFunctionExpression(value))) open("sorted with a comparator");
 }
 
 /** util.inspect's options argument is admitted only in two forms, both of which the
@@ -1816,9 +1814,6 @@ function checkLiteralOptions(L: Lowerer, node: ts.ObjectLiteralExpression): { ke
   if (entries === null) nonLiteralOptions(L, node, "spread, method and accessor entries are not lowered in options objects");
   for (const e of entries) {
     refuseOpenInspectOption(L, e.prop, e.key, e.value);
-    if ((L.typeOf(e.value).flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0) {
-      nonLiteralOptions(L, e.value, `the '${e.key}' option value has type any/unknown`);
-    }
   }
   return entries;
 }
@@ -1854,7 +1849,10 @@ function inspectOptionsDyn(L: Lowerer, node: ts.Expression, loc: SrcLoc): IrExpr
 
 /** One literal option key: does the typed renderer lack what it asks for? colors (unless literally off) and compact (unless a numeric literal
  * or literally off) are rendered by the run-time dyn renderer only. */
-function optionNeedsDynRender(key: string, value: ts.Expression): boolean {
+function optionNeedsDynRender(L: Lowerer, key: string, value: ts.Expression): boolean {
+  // A value known only at run time (any/unknown) can be any of the knobs below: the run-time reader answers it.
+  if ((L.typeOf(value).flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0) return true;
+  if (key === "sorted") return literalTruthy(value) !== false && value.kind !== ts.SyntaxKind.TrueKeyword;
   if (key === "colors") return literalTruthy(value) !== false;
   if (key === "compact") return !(ts.isNumericLiteral(value) || literalTruthy(value) === false);
   if (key === "showProxy" || key === "getters") return literalTruthy(value) !== false;
@@ -1865,7 +1863,7 @@ function optionNeedsDynRender(key: string, value: ts.Expression): boolean {
 /** Are the options only known at run time, or do they ask for colors? Then the value is boxed into the dynamic tree and rendered by the
  * runtime's dyn renderer, the one place that knows how to colorize every leaf (a typed value is rendered by IR text that cannot). */
 function optionsNeedDynRender(L: Lowerer, node: ts.Expression): boolean {
-  if (ts.isObjectLiteralExpression(node)) return node.properties.some((p) => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && optionNeedsDynRender(p.name.text, p.initializer));
+  if (ts.isObjectLiteralExpression(node)) return node.properties.some((p) => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && optionNeedsDynRender(L, p.name.text, p.initializer));
   if (ts.isIdentifier(node)) {
     const init = admittedConstOptions(L, node);
     if (init !== null) return optionsNeedDynRender(L, init);
