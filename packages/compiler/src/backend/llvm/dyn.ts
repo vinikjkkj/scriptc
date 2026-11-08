@@ -5809,7 +5809,7 @@ export class LlDyn {
           `}`,
           ``,
         );
-        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 3, i8 ${row.ordk}, ptr null }`);
+        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 3, i8 ${row.ordk}, i8 0, ptr null }`);
         continue;
       }
       if (row.kind === "eeCell") {
@@ -5837,7 +5837,7 @@ export class LlDyn {
           `}`,
           ``,
         );
-        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 4, i8 ${row.ordk}, ptr null }`);
+        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 4, i8 ${row.ordk}, i8 0, ptr null }`);
         continue;
       }
       if (row.kind === "field") {
@@ -5895,7 +5895,7 @@ export class LlDyn {
           );
           dataRef = `@${dsym}`;
         }
-        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 ${row.hidden === true ? 0 : row.absentWhenUndefined ? 2 : row.type.kind === "dyn" ? 4 : 1}, i8 ${row.ordk}, ptr ${dataRef} }`);
+        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 ${row.hidden === true ? 0 : row.absentWhenUndefined ? 2 : row.type.kind === "dyn" ? 4 : 1}, i8 ${row.ordk}, i8 0, ptr ${dataRef} }`);
         continue;
       }
 
@@ -5939,7 +5939,7 @@ export class LlDyn {
           `}`,
           ``,
         );
-        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 ${row.enumerable === true ? 1 : 0}, i8 0, ptr null }`);
+        entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr @${sym}, ptr null, i8 ${row.enumerable === true ? 1 : 0}, i8 0, i8 ${row.accl ?? 0}, ptr null }`);
         continue;
       }
 
@@ -6051,7 +6051,7 @@ export class LlDyn {
         );
         valueRef = `@${vsym}`;
       }
-      entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr null, ptr @${sym}, i8 0, i8 0, ptr ${valueRef} }`);
+      entries.push(`  { ptr ${nameLit}, i64 ${nameLen}, ptr null, ptr @${sym}, i8 0, i8 0, i8 0, ptr ${valueRef} }`);
     }
 
     const sym = `sc_dclt_${this.classMemberTbls++}`;
