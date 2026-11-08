@@ -172,8 +172,8 @@ void scr_insp_opts_push(const ScrDyn *o) {
     if ((v = scr_dyn_obj_own_data(o, "numericSeparator", 16)) != NULL) n.numeric_sep = scr_dyn_truthy(v);
     if ((v = scr_dyn_obj_own_data(o, "sorted", 6)) != NULL) {
       if (scr_dyn_truthy(v)) {
-        if (v->kind != SCR_DYN_BOOL) insp_unsupported("sorted with a comparator");
         n.sorted = true;
+        if (!(v->kind == SCR_DYN_BOOL && v->v.b)) n.sorted_fn = v; /* a comparator (or a value the sort will refuse) */
       }
     }
     if ((v = scr_dyn_obj_own_data(o, "showHidden", 10)) != NULL && scr_dyn_truthy(v)) n.show_hidden = true;
@@ -1076,20 +1076,95 @@ static int insp_cmp16(const ScrStr *a, const ScrStr *b) {
   }
 }
 
-/* Bottom-up merge sort: stable, like Node's sort. */
-static void insp_sort_items(ScrStr **v, size_t n) {
+/* One comparator call: the user's `sorted` function over two entries, answered as ToNumber would read it (a non-number answer that is
+ * NaN counts as 0). A throw sets `*failed` and leaves the exception pending. */
+static int insp_cmp_user(const ScrDyn *fn, const ScrStr *x, const ScrStr *y, bool *failed) {
+  ScrDyn *args[2];
+  args[0] = scr_dyn_new_str((ScrStr *)x);
+  args[1] = scr_dyn_new_str((ScrStr *)y);
+  ScrDyn *r = scr_dyn_call(fn, args, 2, "comparefn");
+  scr_dyn_release(args[0]);
+  scr_dyn_release(args[1]);
+  if (r == NULL) {
+    *failed = true;
+    return 0;
+  }
+  const double v = r->kind == SCR_DYN_NUM ? r->v.num : scr_dyn_to_number(r);
+  scr_dyn_release(r);
+  return v < 0 ? -1 : v > 0 ? 1 : 0;
+}
+
+/* V8's Array.prototype.sort for fewer than 64 entries (its minrun is the whole list): CountAndMakeRun, then BinaryInsertionSort. A comparator that
+ * disagrees with itself (a boolean `a > b`) orders entries by exactly the comparisons V8 makes. Returns false when the comparator threw. */
+static bool insp_sort_v8_small(ScrStr **v, size_t n, const ScrDyn *cmp) {
+  bool failed = false;
+  /* CountAndMakeRun(0, n) */
+  size_t run = 1;
+  if (n > 1) {
+    run = 2;
+    int order = insp_cmp_user(cmp, v[1], v[0], &failed);
+    if (failed) return false;
+    const bool desc = order < 0;
+    ScrStr *prev = v[1];
+    for (size_t i = 2; i < n; i++) {
+      ScrStr *cur = v[i];
+      order = insp_cmp_user(cmp, cur, prev, &failed);
+      if (failed) return false;
+      if (desc ? order >= 0 : order < 0) break;
+      prev = cur;
+      run++;
+    }
+    if (desc) {
+      for (size_t i = 0, j = run - 1; i < j; i++, j--) {
+        ScrStr *t = v[i];
+        v[i] = v[j];
+        v[j] = t;
+      }
+    }
+  }
+  /* BinaryInsertionSort(0, run, n) */
+  for (size_t start = run == 0 ? 1 : run; start < n; start++) {
+    size_t left = 0, right = start;
+    ScrStr *pivot = v[start];
+    while (left < right) {
+      const size_t mid = left + ((right - left) >> 1);
+      const int order = insp_cmp_user(cmp, pivot, v[mid], &failed);
+      if (failed) return false;
+      if (order < 0) right = mid;
+      else left = mid + 1;
+    }
+    for (size_t q = start; q > left; q--) v[q] = v[q - 1];
+    v[left] = pivot;
+  }
+  return true;
+}
+
+/* Bottom-up merge sort: stable, like Node's sort. `cmp` is ctx.sorted when it is a function (NULL: the default UTF-16 order). A comparator
+ * that throws stops the sort with the exception pending, the entries in their current order. */
+static void insp_sort_items(ScrStr **v, size_t n, const ScrDyn *cmp) {
   if (n < 2) return;
+  if (cmp != NULL && n < 64) {
+    insp_sort_v8_small(v, n, cmp);
+    return;
+  }
   ScrStr **tmp = malloc(n * sizeof(ScrStr *));
   if (!tmp) insp_oom();
-  for (size_t w = 1; w < n; w *= 2) {
+  bool failed = false;
+  for (size_t w = 1; w < n && !failed; w *= 2) {
     for (size_t lo = 0; lo < n; lo += 2 * w) {
       size_t mid = lo + w < n ? lo + w : n;
       size_t hi = lo + 2 * w < n ? lo + 2 * w : n;
       size_t i = lo, j = mid, k = lo;
-      while (i < mid && j < hi) tmp[k++] = insp_cmp16(v[j], v[i]) < 0 ? v[j++] : v[i++];
+      if (cmp != NULL) {
+        while (i < mid && j < hi && !failed) tmp[k++] = insp_cmp_user(cmp, v[i], v[j], &failed) <= 0 ? v[i++] : v[j++];
+        if (failed) break;
+      } else {
+        while (i < mid && j < hi) tmp[k++] = insp_cmp16(v[j], v[i]) < 0 ? v[j++] : v[i++];
+      }
       while (i < mid) tmp[k++] = v[i++];
       while (j < hi) tmp[k++] = v[j++];
     }
+    if (failed) break;
     memcpy(v, tmp, n * sizeof(ScrStr *));
   }
   free(tmp);
@@ -1111,7 +1186,14 @@ ScrStr *scr_insp_end(ScrStr *base, ScrStr *b0, ScrStr *b1, double recurse, bool 
    * only its trailing named keys (formatRaw's keys.length tail). */
   if (g_opts.sorted) {
     size_t from = array_extras ? f->len - (g_sort_tail < f->len ? g_sort_tail : f->len) : 0;
-    if (f->len - from > 1) insp_sort_items(f->items + from, f->len - from);
+    const ScrDyn *scmp = g_opts.sorted_fn;
+    if (scmp != NULL && scmp->kind != SCR_DYN_FUNC) {
+      /* ArrayPrototypeSort rejects a comparator that is not callable before it looks at the length; formatRaw reaches it for an
+       * object frame, and for an array only when named keys follow the elements. */
+      if (!array_extras || g_sort_tail > 1) scr_dyn_comparefn_throw(scmp);
+    } else if (f->len - from > 1) {
+      insp_sort_items(f->items + from, f->len - from, scmp);
+    }
   }
   g_sort_tail = 0;
   size_t entries = f->len;
