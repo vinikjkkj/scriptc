@@ -34,6 +34,7 @@ import {
   GRAFTED_EMITTER_CELL_CLASSES,
   RUNTIME_EMITTER_CLASS,
   RUNTIME_ERROR_CLASSES,
+  accessorIgnoresThis,
   RUNTIME_STREAM_CLASSES,
   typeEquals,
   type IrClassDef,
@@ -52,6 +53,13 @@ import {
  * registered by each backend before it emits a module: the member rows read it
  * for their ordinals (ordk). Null outside a module emission. */
 let ORDER_PLAN: OrdPlan | null = null;
+/** The program can ask util.inspect for showHidden/getters at run time (moduleUsesInspColors): accessor rows then carry the "ignores its receiver" bit
+ * (accl bit 5), which the renderer needs to run a prototype accessor against no instance. Every other program emits its rows exactly as before. */
+let INSP_EXT = false;
+export function setDynInspExt(on: boolean): void {
+  INSP_EXT = on;
+}
+
 export function setDynOrderPlan(plan: OrdPlan | null): void {
   ORDER_PLAN = plan;
 }
@@ -199,13 +207,30 @@ export function dynRuntimeRoot(cls: DynMemberClass): number {
   return emitter ? 1 : 0;
 }
 
+/** The nearest RUNTIME-PROVIDED class in this class's chain (Error and its kinds, EventEmitter, the stream classes), for util.inspect's showHidden over
+ * a class value: `name` is the class's JavaScript name, `layer` the number of user classes between this one and it (the prototype layer it
+ * occupies in Node's three-layer protoProps walk). Null for a class whose chain holds no runtime class. */
+export function dynRuntimeBaseInfo(cls: DynMemberClass): { name: string; layer: number } | null {
+  let layer = -1;
+  for (let c: DynMemberClass | null = cls; c !== null; c = c.base) {
+    const e = RUNTIME_ERROR_CLASSES.get(c.def.name);
+    if (e !== undefined) return { name: e.lib, layer };
+    const s = RUNTIME_STREAM_CLASSES.get(c.def.name);
+    if (s !== undefined) return { name: s.lib, layer };
+    if (c.def.name === RUNTIME_EMITTER_CLASS) return { name: "EventEmitter", layer };
+    layer++;
+  }
+  return null;
+}
+
 export function dynMemberTable(
   cls: DynMemberClass,
   fnByName: ReadonlyMap<string, IrFunction>,
   getRecord: (id: string) => IrRecordShape | undefined,
   getUnion: (id: string) => IrUnionDef | undefined,
-): { rows: DynMemberRow[]; opaque: boolean; errorRooted: boolean } {
+): { rows: DynMemberRow[]; opaque: boolean; errorRooted: boolean; opaqueOwn: boolean } {
   let opaque = false;
+  let streamOpaque = false;
   let errorRooted = false;
   // The cells the runtime's ScrError base lays out ahead of a user Error
   // subclass's own fields (name, message, code, stack, the expando bag).
@@ -256,7 +281,7 @@ export function dynMemberTable(
     // on/emit/... are the runtime's) and the descriptor is not enumerable (dynEnumerationFenced):
     // the prefix Node lists (_events, _eventsCount, _maxListeners) is not something rows can state.
     if (RUNTIME_STREAM_CLASSES.has(c.def.name)) {
-      opaque = true;
+      streamOpaque = true;
       continue;
     }
     // The emitter hierarchy is NOT opaque: the EventEmitter.prototype members are answered by the
@@ -264,7 +289,7 @@ export function dynMemberTable(
     // their fence by name (scr_dyn_objinst_miss), and any other name an emitter instance does not
     // have reads `undefined`, as in Node.
     if (c.def.name === RUNTIME_EMITTER_CLASS) continue;
-    if (c.def.runtime === true) return { rows: [], opaque: true, errorRooted: false };
+    if (c.def.runtime === true) return { rows: [], opaque: true, errorRooted: false, opaqueOwn: true };
   }
   const rows: DynMemberRow[] = [];
   const seen = new Set<string>();
@@ -452,7 +477,7 @@ export function dynMemberTable(
       for (let c: DynMemberClass | null = cls; c !== null; c = c.base, level++) {
         if ((c.def.methods?.includes(raw) ?? false) || (c.def.dynMethods?.some((d) => d.name === raw) ?? false)) break;
       }
-      accl = 1 | (names.includes(`set:${name}`) ? 2 : 0) | (Math.min(level, 3) << 2);
+      accl = 1 | (names.includes(`set:${name}`) ? 2 : 0) | (Math.min(level, 3) << 2) | (INSP_EXT && accessorIgnoresThis(fn) ? 32 : 0);
     }
     if (!accessor) {
       // a method: its chain level and declared parameter count (the receiver is not one), for showHidden's rendering of a class value
@@ -468,7 +493,7 @@ export function dynMemberTable(
     rows.push(accessor ? { kind: "accessor", name, fn, accl } : { kind: "method", name, fn, accl });
   }
 
-  return { rows, opaque, errorRooted };
+  return { rows, opaque: opaque || streamOpaque, errorRooted, opaqueOwn: opaque };
 }
 
 /** The rows of the STATIC side of a class (the table behind its class value:

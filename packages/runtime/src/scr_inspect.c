@@ -2343,7 +2343,7 @@ static void insp_emit_proto_acc(ScrDyn *d, double recurse, double depth) {
     } else {
       g_indent += 2;
       ScrDyn *tmp = m->get(d->v.inst.o); /* the getter runs with the instance as `this` */
-      insp_acc_value(&eb, label, tmp, recurse + 1, depth);
+      insp_acc_value(&eb, label, tmp, recurse + 1, depth + 1);
       g_indent -= 2;
     }
     if (INSP_COLORS_ON) ib_cstr(&eb, "\x1b[22m");
@@ -2415,53 +2415,374 @@ static void insp_sh_acc_label(InspBuf *eb, unsigned short accl) {
   else ib_sty_cstr(eb, (accl & 2u) ? "[Getter/Setter]" : "[Getter]", INSP_STY_SPECIAL);
 }
 
-/* The keys a class value that extends the runtime's EventEmitter inherits as protoProps (Node 24's EventEmitter, dimmed under colors): on the
- * prototype object (`proto` true) the data properties EventEmitter.prototype carries, on the class value its own static data and accessors.
- * `acc_only` lists nothing else; the values are constants of that runtime class. */
-static void insp_sh_ee_props(bool proto) {
-  static const struct { const char *key; int kind; const char *val; bool hidden; } pr[] = {
-    {"_events", 0, "undefined", false}, {"_eventsCount", 1, "0", false}, {"_maxListeners", 0, "undefined", false}, {"Symbol(kCapture)", 2, "false", true}};
-  static const struct { const char *key; int kind; const char *val; bool hidden; } st[] = {
-    {"usingDomains", 3, "false", false}, {"captureRejectionSymbol", 4, "Symbol(nodejs.rejection)", false}, {"captureRejections", 5, "[Getter/Setter]", false},
-    {"EventEmitterAsyncResource", 5, "[Getter]", false}, {"errorMonitor", 4, "Symbol(events.errorMonitor)", false}, {"defaultMaxListeners", 5, "[Getter/Setter]", false},
-    {"kMaxEventTargetListeners", 4, "Symbol(events.maxEventTargetListeners)", true}, {"kMaxEventTargetListenersWarned", 4, "Symbol(events.maxEventTargetListenersWarned)", true}};
-  const size_t n = proto ? sizeof pr / sizeof pr[0] : sizeof st / sizeof st[0];
-  for (size_t i = 0; i < n; i++) {
-    const char *key = proto ? pr[i].key : st[i].key;
-    const int kind = proto ? pr[i].kind : st[i].kind;
-    const char *val = proto ? pr[i].val : st[i].val;
-    const bool hid = proto ? pr[i].hidden : st[i].hidden;
-    InspBuf eb = {0};
-    if (INSP_COLORS_ON) ib_cstr(&eb, "\x1b[2m");
-    if (hid) ib_char(&eb, '[');
-    if (kind == 2 && key[0] == 'S') {
-      ib_sty_cstr(&eb, key, INSP_STY_SYMBOL);
-    } else {
-      insp_key_into(&eb, key, strlen(key));
-    }
-    if (hid) ib_char(&eb, ']');
-    ib_cstr(&eb, ": ");
-    ib_sty_cstr(&eb, val, kind == 0 ? INSP_STY_UNDEFINED : (kind == 1 ? INSP_STY_NUMBER : (kind == 2 || kind == 3) ? INSP_STY_BOOLEAN : kind == 4 ? INSP_STY_SYMBOL : INSP_STY_SPECIAL));
-    if (INSP_COLORS_ON) ib_cstr(&eb, "\x1b[22m");
-    ScrStr *e = ib_take(&eb);
-    scr_insp_entry(e, false);
-    scr_str_release(e);
+/* What a class value that extends a runtime-provided class inherits, as formatRaw's protoProps list it (addPrototypeProperties): the non-function own
+ * keys of up to three prototype layers above the object being printed (its own methods and accessors excluded, a key already seen on a layer below it
+ * skipped), for the class value's `prototype` and for the class value itself (its own constructor chain). Measured on $NODE_CI (v24.15.0) with
+ * lab/gen_rt2.mjs: EventEmitter, Stream (a layer of the stream chain only), Readable, Writable, Duplex, Transform, PassThrough. One entry is one such
+ * key: `flags` bit 0 = printed in brackets (non-enumerable, or a symbol), bit 1 = a symbol key; `kind` 0 undefined, 1 number, 2 boolean, 3 null,
+ * 4 symbol value, 5 accessor with a getter, 6 with a getter and a setter; `val` the value's text. The Error kinds have no prototype keys (Error.prototype
+ * is a builtin, the walk stops there) and one static, `stackTraceLimit`, the process-wide slot. */
+typedef struct { const char *key; unsigned char flags; unsigned char kind; const char *val; } InspRtEnt;
+typedef struct { const InspRtEnt *e; size_t n; } InspRtLayer;
+typedef struct { const char *name; const InspRtLayer *proto; size_t nproto; const InspRtLayer *stat; size_t nstat; } InspRtClass;
+
+static const InspRtEnt insp_rt_EventEmitter_proto0[] = {
+  {"_events", 0, 0, "undefined"},
+  {"_eventsCount", 0, 1, "0"},
+  {"_maxListeners", 0, 0, "undefined"},
+  {"Symbol(kCapture)", 3, 2, "false"},
+};
+static const InspRtLayer insp_rt_EventEmitter_proto[] = { {insp_rt_EventEmitter_proto0, 4} };
+static const InspRtEnt insp_rt_EventEmitter_stat0[] = {
+  {"usingDomains", 0, 2, "false"},
+  {"captureRejectionSymbol", 0, 4, "Symbol(nodejs.rejection)"},
+  {"captureRejections", 0, 6, ""},
+  {"EventEmitterAsyncResource", 0, 5, ""},
+  {"errorMonitor", 0, 4, "Symbol(events.errorMonitor)"},
+  {"defaultMaxListeners", 0, 6, ""},
+  {"kMaxEventTargetListeners", 1, 4, "Symbol(events.maxEventTargetListeners)"},
+  {"kMaxEventTargetListenersWarned", 1, 4, "Symbol(events.maxEventTargetListenersWarned)"},
+};
+static const InspRtLayer insp_rt_EventEmitter_stat[] = { {insp_rt_EventEmitter_stat0, 8} };
+static const InspRtEnt insp_rt_Readable_proto0[] = {
+  {"readable", 1, 6, ""},
+  {"readableDidRead", 1, 5, ""},
+  {"readableAborted", 1, 5, ""},
+  {"readableHighWaterMark", 1, 5, ""},
+  {"readableBuffer", 1, 5, ""},
+  {"readableFlowing", 1, 6, ""},
+  {"readableLength", 1, 5, ""},
+  {"readableObjectMode", 1, 5, ""},
+  {"readableEncoding", 1, 5, ""},
+  {"errored", 1, 5, ""},
+  {"closed", 1, 5, ""},
+  {"destroyed", 1, 6, ""},
+  {"readableEnded", 1, 5, ""},
+};
+static const InspRtEnt insp_rt_Readable_proto2[] = {
+  {"_events", 0, 0, "undefined"},
+  {"_eventsCount", 0, 1, "0"},
+  {"_maxListeners", 0, 0, "undefined"},
+  {"Symbol(kCapture)", 3, 2, "false"},
+};
+static const InspRtLayer insp_rt_Readable_proto[] = { {insp_rt_Readable_proto0, 13}, {NULL, 0}, {insp_rt_Readable_proto2, 4} };
+static const InspRtEnt insp_rt_Readable_stat1[] = {
+  {"promises", 0, 5, ""},
+};
+static const InspRtEnt insp_rt_Readable_stat2[] = {
+  {"usingDomains", 0, 2, "false"},
+  {"captureRejectionSymbol", 0, 4, "Symbol(nodejs.rejection)"},
+  {"captureRejections", 0, 6, ""},
+  {"EventEmitterAsyncResource", 0, 5, ""},
+  {"errorMonitor", 0, 4, "Symbol(events.errorMonitor)"},
+  {"defaultMaxListeners", 0, 6, ""},
+  {"kMaxEventTargetListeners", 1, 4, "Symbol(events.maxEventTargetListeners)"},
+  {"kMaxEventTargetListenersWarned", 1, 4, "Symbol(events.maxEventTargetListenersWarned)"},
+};
+static const InspRtLayer insp_rt_Readable_stat[] = { {NULL, 0}, {insp_rt_Readable_stat1, 1}, {insp_rt_Readable_stat2, 8} };
+static const InspRtEnt insp_rt_Writable_proto0[] = {
+  {"_writev", 0, 3, "null"},
+  {"closed", 1, 5, ""},
+  {"destroyed", 1, 6, ""},
+  {"writable", 1, 6, ""},
+  {"writableFinished", 1, 5, ""},
+  {"writableObjectMode", 1, 5, ""},
+  {"writableBuffer", 1, 5, ""},
+  {"writableEnded", 1, 5, ""},
+  {"writableNeedDrain", 1, 5, ""},
+  {"writableHighWaterMark", 1, 5, ""},
+  {"writableCorked", 1, 5, ""},
+  {"writableLength", 1, 5, ""},
+  {"errored", 1, 5, ""},
+  {"writableAborted", 1, 5, ""},
+};
+static const InspRtEnt insp_rt_Writable_proto2[] = {
+  {"_events", 0, 0, "undefined"},
+  {"_eventsCount", 0, 1, "0"},
+  {"_maxListeners", 0, 0, "undefined"},
+  {"Symbol(kCapture)", 3, 2, "false"},
+};
+static const InspRtLayer insp_rt_Writable_proto[] = { {insp_rt_Writable_proto0, 14}, {NULL, 0}, {insp_rt_Writable_proto2, 4} };
+static const InspRtEnt insp_rt_Writable_stat1[] = {
+  {"promises", 0, 5, ""},
+};
+static const InspRtEnt insp_rt_Writable_stat2[] = {
+  {"usingDomains", 0, 2, "false"},
+  {"captureRejectionSymbol", 0, 4, "Symbol(nodejs.rejection)"},
+  {"captureRejections", 0, 6, ""},
+  {"EventEmitterAsyncResource", 0, 5, ""},
+  {"errorMonitor", 0, 4, "Symbol(events.errorMonitor)"},
+  {"defaultMaxListeners", 0, 6, ""},
+  {"kMaxEventTargetListeners", 1, 4, "Symbol(events.maxEventTargetListeners)"},
+  {"kMaxEventTargetListenersWarned", 1, 4, "Symbol(events.maxEventTargetListenersWarned)"},
+};
+static const InspRtLayer insp_rt_Writable_stat[] = { {NULL, 0}, {insp_rt_Writable_stat1, 1}, {insp_rt_Writable_stat2, 8} };
+static const InspRtEnt insp_rt_Duplex_proto0[] = {
+  {"_writev", 0, 3, "null"},
+  {"writable", 1, 6, ""},
+  {"writableHighWaterMark", 1, 5, ""},
+  {"writableObjectMode", 1, 5, ""},
+  {"writableBuffer", 1, 5, ""},
+  {"writableLength", 1, 5, ""},
+  {"writableFinished", 1, 5, ""},
+  {"writableCorked", 1, 5, ""},
+  {"writableEnded", 1, 5, ""},
+  {"writableNeedDrain", 1, 5, ""},
+  {"destroyed", 1, 6, ""},
+};
+static const InspRtEnt insp_rt_Duplex_proto1[] = {
+  {"readable", 1, 6, ""},
+  {"readableDidRead", 1, 5, ""},
+  {"readableAborted", 1, 5, ""},
+  {"readableHighWaterMark", 1, 5, ""},
+  {"readableBuffer", 1, 5, ""},
+  {"readableFlowing", 1, 6, ""},
+  {"readableLength", 1, 5, ""},
+  {"readableObjectMode", 1, 5, ""},
+  {"readableEncoding", 1, 5, ""},
+  {"errored", 1, 5, ""},
+  {"closed", 1, 5, ""},
+  {"readableEnded", 1, 5, ""},
+};
+static const InspRtEnt insp_rt_Duplex_proto3[] = {
+  {"_events", 0, 0, "undefined"},
+  {"_eventsCount", 0, 1, "0"},
+  {"_maxListeners", 0, 0, "undefined"},
+  {"Symbol(kCapture)", 3, 2, "false"},
+};
+static const InspRtLayer insp_rt_Duplex_proto[] = { {insp_rt_Duplex_proto0, 11}, {insp_rt_Duplex_proto1, 12}, {NULL, 0}, {insp_rt_Duplex_proto3, 4} };
+static const InspRtEnt insp_rt_Duplex_stat2[] = {
+  {"promises", 0, 5, ""},
+};
+static const InspRtEnt insp_rt_Duplex_stat3[] = {
+  {"usingDomains", 0, 2, "false"},
+  {"captureRejectionSymbol", 0, 4, "Symbol(nodejs.rejection)"},
+  {"captureRejections", 0, 6, ""},
+  {"EventEmitterAsyncResource", 0, 5, ""},
+  {"errorMonitor", 0, 4, "Symbol(events.errorMonitor)"},
+  {"defaultMaxListeners", 0, 6, ""},
+  {"kMaxEventTargetListeners", 1, 4, "Symbol(events.maxEventTargetListeners)"},
+  {"kMaxEventTargetListenersWarned", 1, 4, "Symbol(events.maxEventTargetListenersWarned)"},
+};
+static const InspRtLayer insp_rt_Duplex_stat[] = { {NULL, 0}, {NULL, 0}, {insp_rt_Duplex_stat2, 1}, {insp_rt_Duplex_stat3, 8} };
+static const InspRtEnt insp_rt_Transform_proto1[] = {
+  {"_writev", 0, 3, "null"},
+  {"writable", 1, 6, ""},
+  {"writableHighWaterMark", 1, 5, ""},
+  {"writableObjectMode", 1, 5, ""},
+  {"writableBuffer", 1, 5, ""},
+  {"writableLength", 1, 5, ""},
+  {"writableFinished", 1, 5, ""},
+  {"writableCorked", 1, 5, ""},
+  {"writableEnded", 1, 5, ""},
+  {"writableNeedDrain", 1, 5, ""},
+  {"destroyed", 1, 6, ""},
+};
+static const InspRtEnt insp_rt_Transform_proto2[] = {
+  {"readable", 1, 6, ""},
+  {"readableDidRead", 1, 5, ""},
+  {"readableAborted", 1, 5, ""},
+  {"readableHighWaterMark", 1, 5, ""},
+  {"readableBuffer", 1, 5, ""},
+  {"readableFlowing", 1, 6, ""},
+  {"readableLength", 1, 5, ""},
+  {"readableObjectMode", 1, 5, ""},
+  {"readableEncoding", 1, 5, ""},
+  {"errored", 1, 5, ""},
+  {"closed", 1, 5, ""},
+  {"readableEnded", 1, 5, ""},
+};
+static const InspRtEnt insp_rt_Transform_proto4[] = {
+  {"_events", 0, 0, "undefined"},
+  {"_eventsCount", 0, 1, "0"},
+  {"_maxListeners", 0, 0, "undefined"},
+  {"Symbol(kCapture)", 3, 2, "false"},
+};
+static const InspRtLayer insp_rt_Transform_proto[] = { {NULL, 0}, {insp_rt_Transform_proto1, 11}, {insp_rt_Transform_proto2, 12}, {NULL, 0}, {insp_rt_Transform_proto4, 4} };
+static const InspRtEnt insp_rt_Transform_stat3[] = {
+  {"promises", 0, 5, ""},
+};
+static const InspRtEnt insp_rt_Transform_stat4[] = {
+  {"usingDomains", 0, 2, "false"},
+  {"captureRejectionSymbol", 0, 4, "Symbol(nodejs.rejection)"},
+  {"captureRejections", 0, 6, ""},
+  {"EventEmitterAsyncResource", 0, 5, ""},
+  {"errorMonitor", 0, 4, "Symbol(events.errorMonitor)"},
+  {"defaultMaxListeners", 0, 6, ""},
+  {"kMaxEventTargetListeners", 1, 4, "Symbol(events.maxEventTargetListeners)"},
+  {"kMaxEventTargetListenersWarned", 1, 4, "Symbol(events.maxEventTargetListenersWarned)"},
+};
+static const InspRtLayer insp_rt_Transform_stat[] = { {NULL, 0}, {NULL, 0}, {NULL, 0}, {insp_rt_Transform_stat3, 1}, {insp_rt_Transform_stat4, 8} };
+static const InspRtEnt insp_rt_PassThrough_proto2[] = {
+  {"_writev", 0, 3, "null"},
+  {"writable", 1, 6, ""},
+  {"writableHighWaterMark", 1, 5, ""},
+  {"writableObjectMode", 1, 5, ""},
+  {"writableBuffer", 1, 5, ""},
+  {"writableLength", 1, 5, ""},
+  {"writableFinished", 1, 5, ""},
+  {"writableCorked", 1, 5, ""},
+  {"writableEnded", 1, 5, ""},
+  {"writableNeedDrain", 1, 5, ""},
+  {"destroyed", 1, 6, ""},
+};
+static const InspRtEnt insp_rt_PassThrough_proto3[] = {
+  {"readable", 1, 6, ""},
+  {"readableDidRead", 1, 5, ""},
+  {"readableAborted", 1, 5, ""},
+  {"readableHighWaterMark", 1, 5, ""},
+  {"readableBuffer", 1, 5, ""},
+  {"readableFlowing", 1, 6, ""},
+  {"readableLength", 1, 5, ""},
+  {"readableObjectMode", 1, 5, ""},
+  {"readableEncoding", 1, 5, ""},
+  {"errored", 1, 5, ""},
+  {"closed", 1, 5, ""},
+  {"readableEnded", 1, 5, ""},
+};
+static const InspRtEnt insp_rt_PassThrough_proto5[] = {
+  {"_events", 0, 0, "undefined"},
+  {"_eventsCount", 0, 1, "0"},
+  {"_maxListeners", 0, 0, "undefined"},
+  {"Symbol(kCapture)", 3, 2, "false"},
+};
+static const InspRtLayer insp_rt_PassThrough_proto[] = { {NULL, 0}, {NULL, 0}, {insp_rt_PassThrough_proto2, 11}, {insp_rt_PassThrough_proto3, 12}, {NULL, 0}, {insp_rt_PassThrough_proto5, 4} };
+static const InspRtEnt insp_rt_PassThrough_stat4[] = {
+  {"promises", 0, 5, ""},
+};
+static const InspRtEnt insp_rt_PassThrough_stat5[] = {
+  {"usingDomains", 0, 2, "false"},
+  {"captureRejectionSymbol", 0, 4, "Symbol(nodejs.rejection)"},
+  {"captureRejections", 0, 6, ""},
+  {"EventEmitterAsyncResource", 0, 5, ""},
+  {"errorMonitor", 0, 4, "Symbol(events.errorMonitor)"},
+  {"defaultMaxListeners", 0, 6, ""},
+  {"kMaxEventTargetListeners", 1, 4, "Symbol(events.maxEventTargetListeners)"},
+  {"kMaxEventTargetListenersWarned", 1, 4, "Symbol(events.maxEventTargetListenersWarned)"},
+};
+static const InspRtLayer insp_rt_PassThrough_stat[] = { {NULL, 0}, {NULL, 0}, {NULL, 0}, {NULL, 0}, {insp_rt_PassThrough_stat4, 1}, {insp_rt_PassThrough_stat5, 8} };
+static const InspRtClass insp_rt_classes[] = {
+  {"EventEmitter", insp_rt_EventEmitter_proto, 1, insp_rt_EventEmitter_stat, 1},
+  {"Readable", insp_rt_Readable_proto, 3, insp_rt_Readable_stat, 3},
+  {"Writable", insp_rt_Writable_proto, 3, insp_rt_Writable_stat, 3},
+  {"Duplex", insp_rt_Duplex_proto, 4, insp_rt_Duplex_stat, 4},
+  {"Transform", insp_rt_Transform_proto, 5, insp_rt_Transform_stat, 5},
+  {"PassThrough", insp_rt_PassThrough_proto, 6, insp_rt_PassThrough_stat, 6},
+};
+
+
+static const InspRtClass *insp_rt_find(const char *name) {
+  for (size_t i = 0; i < sizeof insp_rt_classes / sizeof insp_rt_classes[0]; i++) {
+    if (strcmp(insp_rt_classes[i].name, name) == 0) return &insp_rt_classes[i];
   }
+  return NULL;
+}
+
+static bool insp_rt_is_error(const char *name) {
+  const size_t n = strlen(name);
+  return n >= 5 && strcmp(name + (n - 5), "Error") == 0;
+}
+
+/* Does some entry the walk would list over `layers` (starting at prototype layer `base`) hold an accessor the getters option would RUN? Node would call
+ * it with a prototype as receiver and print the stack of the error it throws (frames of its own internals): not reproducible, so the compiler refuses
+ * such a program (lowerer.ts, the getters fence); this is the run-time twin that keeps a refusal-free path from printing a wrong line. */
+static bool insp_rt_runs_getter(const InspRtLayer *layers, size_t nl, unsigned base) {
+  if (g_opts.getters == 0) return false;
+  for (size_t j = 0; j < nl && base + j < 3; j++) {
+    for (size_t i = 0; i < layers[j].n; i++) {
+      const unsigned k = layers[j].e[i].kind;
+      if ((k == 5 && g_opts.getters != 3) || (k == 6 && g_opts.getters != 2)) return true;
+    }
+  }
+  return false;
+}
+
+/* One inherited key, dimmed under colors: `[readable]: [Getter/Setter]`, `_events: undefined`, `[Symbol(kCapture)]: false`. */
+static void insp_sh_rt_entry(const char *key, unsigned flags, unsigned kind, const char *val, double num) {
+  InspBuf eb = {0};
+  if (INSP_COLORS_ON) ib_cstr(&eb, "\x1b[2m");
+  if (flags & 2u) {
+    ib_char(&eb, '[');
+    ib_sty_cstr(&eb, key, INSP_STY_SYMBOL);
+    ib_char(&eb, ']');
+  } else if (flags & 1u) {
+    ib_char(&eb, '[');
+    insp_key_into(&eb, key, strlen(key));
+    ib_char(&eb, ']');
+  } else {
+    insp_key_into(&eb, key, strlen(key));
+  }
+  ib_cstr(&eb, ": ");
+  if (kind == 7) {
+    ScrStr *nv = insp_sty(scr_insp_f64(num), INSP_STY_NUMBER);
+    ib_str(&eb, nv);
+    scr_str_release(nv);
+  } else {
+    ib_sty_cstr(&eb, kind == 6 ? "[Getter/Setter]" : kind == 5 ? "[Getter]" : val,
+                kind == 0 ? INSP_STY_UNDEFINED : kind == 1 ? INSP_STY_NUMBER : kind == 2 ? INSP_STY_BOOLEAN : kind == 3 ? INSP_STY_NULL : kind == 4 ? INSP_STY_SYMBOL : INSP_STY_SPECIAL);
+  }
+  if (INSP_COLORS_ON) ib_cstr(&eb, "\x1b[22m");
+  ScrStr *e = ib_take(&eb);
+  scr_insp_entry(e, false);
+  scr_str_release(e);
+}
+
+/* The inherited keys of the layers of `layers` that fall within Node's three, skipping a string key `own` (the program's members of that name) already has. */
+static void insp_sh_rt_layers(const InspRtLayer *layers, size_t nl, unsigned base, const ScrDynClassMember *own, size_t nown) {
+  for (size_t j = 0; j < nl && base + j < 3; j++) {
+    for (size_t i = 0; i < layers[j].n; i++) {
+      const InspRtEnt *e = &layers[j].e[i];
+      if (!(e->flags & 2u)) {
+        const size_t kl = strlen(e->key);
+        bool shadowed = false;
+        for (size_t m = 0; m < nown && !shadowed; m++) shadowed = own[m].name[0] != '%' && own[m].len == kl && memcmp(own[m].name, e->key, kl) == 0;
+        if (shadowed) continue;
+      }
+      insp_sh_rt_entry(e->key, e->flags, e->kind, e->val, 0);
+    }
+  }
+}
+
+/* The Error kinds' one inherited static: Error.stackTraceLimit, on the layer of Error itself (a kind below Error occupies the layer before it). */
+static bool insp_rt_err_stl_visible(const char *name, unsigned base) { return base + (strcmp(name, "Error") == 0 ? 0u : 1u) < 3; }
+
+/* A prototype accessor of a class value, as `[g]: [Getter]`, or run when the getters option asks (never a setter-only row): the getter's value
+ * through insp_acc_value. Only reached for a body that ignores its receiver (checked up front), so it runs against none. */
+static void insp_sh_proto_acc(InspBuf *eb, const ScrDynClassMember *m, double vrecurse, double depth) {
+  const bool st = (m->accl & 2u) != 0;
+  const bool run = (m->accl & 16u) == 0 && (g_opts.getters == 1 || (g_opts.getters == 2 && !st) || (g_opts.getters == 3 && st));
+  if (!run) {
+    insp_sh_acc_label(eb, m->accl);
+    return;
+  }
+  g_indent += 2;
+  ScrDyn *tmp = m->get(NULL);
+  insp_acc_value(eb, st ? "Getter/Setter" : "Getter", tmp, vrecurse, depth);
+  g_indent -= 2;
 }
 
 /* showHidden over a compiled class VALUE, as formatRaw prints it: `[length]`, `[name]`, `[prototype]` (an object holding `[constructor]` and the
  * class's own methods and accessors, named after the base class when there is one, then the base classes' accessors as protoProps), the static
  * methods and getters, then the enumerable static fields. */
-static ScrStr *insp_sh_class_value(ScrDyn *d, const ScrDynClass *vc, double recurse, double depth) {
-  const bool ee_base = vc->rt_root == 1 && vc->base != NULL && strcmp(vc->base, "EventEmitter") == 0; /* the one runtime base whose inherited keys are fixed */
-  if (vc->opaque || vc->staticsOpaque || (vc->rt_root != 0 && vc->rt_root != 4 && !ee_base)) return insp_sh_fence("a class value whose member table is incomplete or roots in a runtime class");
-  if (ee_base && g_opts.getters != 0) return insp_sh_fence("an EventEmitter subclass value under the getters option");
+static ScrStr *insp_sh_class_value_in(ScrDyn *d, const ScrDynClass *vc, const ScrDynClass *icls, const ScrDynClassMember *srows, size_t nsrows, bool sopaque, const ScrDynClassMember *brows, size_t nbrows, void *srecv, double recurse, double depth) {
+  /* the nearest runtime-provided class of the chain, when it has one: its inherited keys come from the measured tables above */
+  const char *rt_name = icls->rt_name;
+  const bool rt_err = rt_name != NULL && insp_rt_is_error(rt_name);
+  const InspRtClass *rtc = rt_name != NULL && !rt_err ? insp_rt_find(rt_name) : NULL;
+  const unsigned rt_layer = icls->rt_layer;
+  if (rt_name != NULL ? (!icls->own_complete || (!rt_err && rtc == NULL)) : (icls->opaque || (icls->rt_root != 0 && icls->rt_root != 4))) {
+    return insp_sh_fence(rt_name == NULL && icls->rt_root != 0 && icls->rt_root != 4 ? "a class value grafted with the emitter API" : "a class value whose member table is incomplete");
+  }
+  if (sopaque) return insp_sh_fence("a class value whose static table is incomplete");
+  if (rtc != NULL && (insp_rt_runs_getter(rtc->proto, rtc->nproto, rt_layer) || insp_rt_runs_getter(rtc->stat, rtc->nstat, rt_layer))) {
+    return insp_sh_fence("a class value of a runtime class's subclass under the getters option");
+  }
   InspBuf bb = {0};
   ib_cstr(&bb, "[class ");
   ib_cstr(&bb, vc->name[0] != '\0' ? vc->name : "(anonymous)");
-  if (vc->base != NULL) {
+  if (icls->base != NULL) {
     ib_cstr(&bb, " extends ");
-    ib_cstr(&bb, vc->base);
+    ib_cstr(&bb, icls->base);
   }
   ib_char(&bb, ']');
   ScrStr *base = ib_take(&bb);
@@ -2476,12 +2797,17 @@ static ScrStr *insp_sh_class_value(ScrDyn *d, const ScrDynClass *vc, double recu
       return scr_insp_circular(cid0);
     }
   }
-  /* a getters option would run a prototype accessor against the prototype object: not a compiled instance */
+  /* a getters option runs a prototype accessor against the prototype object, which holds none of the instance's fields. The compiler marks the
+   * accessors whose body never reads its receiver (accl bit 5): those run exactly, against no instance. One that reads it has no exact answer
+   * here (the compiler refuses such a program at build time, see lowerer.ts); this is the run-time twin, raised before any frame opens. */
   if (g_opts.getters != 0) {
-    for (size_t i = 0; i < vc->nmembers; i++) {
-      if ((vc->members[i].accl & 1u) && vc->members[i].name[0] != '%') {
+    for (size_t i = 0; i < icls->nmembers; i++) {
+      const ScrDynClassMember *am = &icls->members[i];
+      if (!(am->accl & 1u) || am->name[0] == '%' || (am->accl & 16u) != 0 || (am->accl & 32u) != 0) continue;
+      const bool ast = (am->accl & 2u) != 0;
+      if (g_opts.getters == 1 || (g_opts.getters == 2 && !ast) || (g_opts.getters == 3 && ast)) {
         scr_str_release(base);
-        return insp_sh_fence("a class value with prototype accessors under the getters option");
+        return insp_sh_fence("a class value whose prototype accessor reads this under the getters option");
       }
     }
   }
@@ -2492,10 +2818,10 @@ static ScrStr *insp_sh_class_value(ScrDyn *d, const ScrDynClass *vc, double recu
     ib_hname(&eb, "length");
     /* the constructor's arity: the class's synthesized `%dynLen` static row */
     double ctor_len = -1;
-    for (size_t i = 0; i < vc->nstatics; i++) {
-      const ScrDynClassMember *lm = &vc->statics[i];
+    for (size_t i = 0; i < nsrows; i++) {
+      const ScrDynClassMember *lm = &srows[i];
       if (lm->len == 7 && memcmp(lm->name, "%dynLen", 7) == 0 && lm->call != NULL) {
-        ScrDyn *lr = lm->call(NULL, NULL, 0, "length");
+        ScrDyn *lr = lm->call(srecv, NULL, 0, "length");
         if (lr != NULL) {
           if (lr->kind == SCR_DYN_NUM) ctor_len = lr->v.num;
           scr_dyn_release(lr);
@@ -2539,10 +2865,10 @@ static ScrStr *insp_sh_class_value(ScrDyn *d, const ScrDynClass *vc, double recu
   {
     ScrStr *pv;
     if (recurse + 1 > depth) {
-      if (vc->base != NULL) {
+      if (icls->base != NULL) {
         InspBuf pb = {0};
         ib_char(&pb, '[');
-        ib_cstr(&pb, vc->base);
+        ib_cstr(&pb, icls->base);
         ib_char(&pb, ']');
         pv = insp_sty(ib_take(&pb), INSP_STY_SPECIAL);
       } else {
@@ -2560,8 +2886,8 @@ static ScrStr *insp_sh_class_value(ScrDyn *d, const ScrDynClass *vc, double recu
         scr_insp_entry(ce, false);
         scr_str_release(ce);
       }
-      for (size_t i = 0; i < vc->nmembers; i++) {
-        const ScrDynClassMember *m = &vc->members[i];
+      for (size_t i = 0; i < icls->nmembers; i++) {
+        const ScrDynClassMember *m = &icls->members[i];
         if (m->name[0] == '%' || ((m->accl >> 2) & 3u) != 0) continue;
         InspBuf eb = {0};
         if (m->call != NULL) {
@@ -2576,7 +2902,7 @@ static ScrStr *insp_sh_class_value(ScrDyn *d, const ScrDynClass *vc, double recu
           insp_key_into(&eb, m->name, m->len);
           ib_char(&eb, ']');
           ib_cstr(&eb, ": ");
-          insp_sh_acc_label(&eb, m->accl);
+          insp_sh_proto_acc(&eb, m, recurse + 2, depth);
         } else {
           continue;
         }
@@ -2585,8 +2911,8 @@ static ScrStr *insp_sh_class_value(ScrDyn *d, const ScrDynClass *vc, double recu
         scr_str_release(e);
       }
       /* protoProps: the base classes' accessors (up to three prototypes from the first base) */
-      for (size_t i = 0; i < vc->nmembers; i++) {
-        const ScrDynClassMember *m = &vc->members[i];
+      for (size_t i = 0; i < icls->nmembers; i++) {
+        const ScrDynClassMember *m = &icls->members[i];
         const unsigned lvl = (m->accl >> 2) & 3u;
         if (!(m->accl & 1u) || m->name[0] == '%' || lvl == 0) continue;
         InspBuf eb = {0};
@@ -2595,16 +2921,26 @@ static ScrStr *insp_sh_class_value(ScrDyn *d, const ScrDynClass *vc, double recu
         insp_key_into(&eb, m->name, m->len);
         ib_char(&eb, ']');
         ib_cstr(&eb, ": ");
-        insp_sh_acc_label(&eb, m->accl);
+        insp_sh_proto_acc(&eb, m, recurse + 1, depth);
         if (INSP_COLORS_ON) ib_cstr(&eb, "\x1b[22m");
         ScrStr *e = ib_take(&eb);
         scr_insp_entry(e, false);
         scr_str_release(e);
       }
-      if (ee_base) insp_sh_ee_props(true);
+      if (rtc != NULL) insp_sh_rt_layers(rtc->proto, rtc->nproto, rt_layer, icls->members, icls->nmembers);
       InspBuf p0 = {0};
-      if (vc->base != NULL) {
-        ib_cstr(&p0, vc->base);
+      if (rt_err && icls->base != NULL) {
+        /* an error-like prototype prints in brackets, the nearest class's name first when it is not the runtime kind itself */
+        ib_char(&p0, '[');
+        ib_cstr(&p0, icls->base);
+        if (strcmp(icls->base, rt_name) != 0) {
+          ib_cstr(&p0, " [");
+          ib_cstr(&p0, rt_name);
+          ib_char(&p0, ']');
+        }
+        ib_cstr(&p0, "] ");
+      } else if (icls->base != NULL) {
+        ib_cstr(&p0, icls->base);
         ib_char(&p0, ' ');
       }
       ib_char(&p0, '{');
@@ -2626,15 +2962,15 @@ static ScrStr *insp_sh_class_value(ScrDyn *d, const ScrDynClass *vc, double recu
   }
   /* statics: methods and getters in definition order, then the enumerable fields (a class's static fields initialize after its methods) */
   for (int pass = 0; pass < 2; pass++) {
-    for (size_t i = 0; i < vc->nstatics; i++) {
-      const ScrDynClassMember *m = &vc->statics[i];
+    for (size_t i = 0; i < nsrows; i++) {
+      const ScrDynClassMember *m = &srows[i];
       if (m->name[0] == '%' || ((m->accl >> 2) & 3u) != 0) continue;
       const bool is_field = m->call == NULL && !(m->accl & 1u) && m->enumerable != 0;
       if ((pass == 0) == is_field) continue;
       InspBuf eb = {0};
       if (is_field) {
         insp_key_into(&eb, m->name, m->len);
-        ScrDyn *mv = m->get(NULL); /* +1, or NULL with a throw pending */
+        ScrDyn *mv = m->get(srecv); /* +1, or NULL with a throw pending */
         if (mv == NULL) continue;
         ScrStr *val = scr_insp_dyn(mv, recurse + 1, depth);
         scr_dyn_release(mv);
@@ -2656,8 +2992,8 @@ static ScrStr *insp_sh_class_value(ScrDyn *d, const ScrDynClass *vc, double recu
         const bool run = g_opts.getters == 1 || (g_opts.getters == 2 && !st) || (g_opts.getters == 3 && st);
         if (run) {
           g_indent += 2;
-          ScrDyn *tmp = m->get(NULL);
-          insp_acc_value(&eb, st ? "Getter/Setter" : "Getter", tmp, recurse + 2, depth);
+          ScrDyn *tmp = m->get(srecv);
+          insp_acc_value(&eb, st ? "Getter/Setter" : "Getter", tmp, recurse + 1, depth);
           g_indent -= 2;
         } else {
           insp_sh_acc_label(&eb, m->accl);
@@ -2671,10 +3007,19 @@ static ScrStr *insp_sh_class_value(ScrDyn *d, const ScrDynClass *vc, double recu
     }
   }
   /* protoProps of a derived class value: the base classes' static fields and accessors (a function value is skipped), up to three levels, dimmed under colors */
-  for (size_t i = 0; i < vc->nstatics; i++) {
-    const ScrDynClassMember *m = &vc->statics[i];
-    const unsigned lvl = (m->accl >> 2) & 3u;
-    if (m->name[0] == '%' || lvl == 0 || m->call != NULL) continue;
+  for (int src = 0; src < 2; src++) {
+  const ScrDynClassMember *prow = src == 0 ? srows : brows;
+  void *precv = src == 0 ? srecv : NULL;
+  for (size_t i = 0, pn = src == 0 ? nsrows : nbrows; i < pn; i++) {
+    const ScrDynClassMember *m = &prow[i];
+    /* the evaluation's own rows carry no inherited level; its declared base class's table (levels counted from that base) sits one layer further up */
+    const unsigned lvl = ((m->accl >> 2) & 3u) + (unsigned)src;
+    if (m->name[0] == '%' || lvl == 0 || lvl > 3 || m->call != NULL) continue;
+    if (src == 1) {
+      bool shadowed = false;
+      for (size_t j = 0; j < nsrows && !shadowed; j++) shadowed = srows[j].len == m->len && memcmp(srows[j].name, m->name, m->len) == 0;
+      if (shadowed) continue;
+    }
     InspBuf eb = {0};
     if (INSP_COLORS_ON) ib_cstr(&eb, "\x1b[2m");
     if (m->accl & 1u) {
@@ -2686,15 +3031,15 @@ static ScrStr *insp_sh_class_value(ScrDyn *d, const ScrDynClass *vc, double recu
       const bool run = g_opts.getters == 1 || (g_opts.getters == 2 && !st) || (g_opts.getters == 3 && st);
       if (run) {
         g_indent += 2;
-        ScrDyn *tmp = m->get(NULL);
-        insp_acc_value(&eb, st ? "Getter/Setter" : "Getter", tmp, recurse + 2, depth);
+        ScrDyn *tmp = m->get(precv);
+        insp_acc_value(&eb, st ? "Getter/Setter" : "Getter", tmp, recurse + 1, depth + 1);
         g_indent -= 2;
       } else {
         insp_sh_acc_label(&eb, m->accl);
       }
     } else {
       insp_key_into(&eb, m->name, m->len);
-      ScrDyn *mv = m->get(NULL);
+      ScrDyn *mv = m->get(precv);
       if (mv == NULL) {
         free(eb.data);
         continue;
@@ -2709,7 +3054,13 @@ static ScrStr *insp_sh_class_value(ScrDyn *d, const ScrDynClass *vc, double recu
     scr_insp_entry(e, false);
     scr_str_release(e);
   }
-  if (ee_base) insp_sh_ee_props(false);
+  }
+  if (rtc != NULL) insp_sh_rt_layers(rtc->stat, rtc->nstat, rt_layer, srows, nsrows);
+  if (rt_err && insp_rt_err_stl_visible(rt_name, rt_layer)) {
+    bool shadowed = false;
+    for (size_t m = 0; m < nsrows && !shadowed; m++) shadowed = srows[m].name[0] != '%' && srows[m].len == 15 && memcmp(srows[m].name, "stackTraceLimit", 15) == 0;
+    if (!shadowed) insp_sh_rt_entry("stackTraceLimit", 0, 7, NULL, scr_error_stack_limit_get());
+  }
   ScrStr *hb0 = scr_str_new("{", 1);
   ScrStr *hb1 = scr_str_new("}", 1);
   ScrStr *hout = scr_insp_end(base, hb0, hb1, recurse + 1, false, false);
@@ -2719,6 +3070,34 @@ static ScrStr *insp_sh_class_value(ScrDyn *d, const ScrDynClass *vc, double recu
   ScrStr *hw = scr_insp_ref_wrap(d->v.fn.clo, hout);
   scr_str_release(hout);
   return hw;
+}
+
+/* showHidden over a class VALUE: a declared class (its own descriptor carries both member tables, statics without a receiver) or a per-evaluation
+ * class expression (the box holds the evaluation, the STATIC side: its member rows are the statics and run with the evaluation as receiver; the
+ * instance side is reached through the evaluation's `%dynInst` row, the never-constructed instance the prototype object is built from). */
+static ScrStr *insp_sh_class_value(ScrDyn *d, const ScrDynClass *vc, const ScrDyn *einner, double recurse, double depth) {
+  if (einner == NULL) return insp_sh_class_value_in(d, vc, vc, vc->statics, vc->nstatics, vc->staticsOpaque, NULL, 0, NULL, recurse, depth);
+  const ScrDynClass *ecls = scr_dyn_objinst_class_of(einner);
+  const ScrDynClassMember *im = scr_dyn_objinst_member(einner, "%dynInst", 8);
+  ScrDyn *ib = im != NULL && im->call != NULL ? im->call(einner->v.inst.o, NULL, 0, "prototype") : NULL;
+  if (ib == NULL || ib->kind != SCR_DYN_OBJINST) {
+    scr_dyn_release(ib);
+    return insp_sh_fence("a per-evaluation class value whose instance side is not reachable");
+  }
+  /* the declared base class's statics (an evaluation's own rows hold only its own members) */
+  const ScrDynClassMember *bm = scr_dyn_objinst_member(einner, "%dynBase", 8);
+  ScrDyn *bv = bm != NULL && bm->call != NULL ? bm->call(einner->v.inst.o, NULL, 0, "prototype") : NULL;
+  const ScrDynClass *bc = bv != NULL && bv->kind == SCR_DYN_FUNC ? scr_dyn_class_of_value(bv) : NULL;
+  if (bc != NULL && bc->staticsOpaque) {
+    scr_dyn_release(bv);
+    scr_dyn_release(ib);
+    return insp_sh_fence("a per-evaluation class value whose base class has an incomplete static table");
+  }
+  ScrStr *r = insp_sh_class_value_in(d, ecls, scr_dyn_objinst_class_of(ib), ecls->members, ecls->nmembers, ecls->opaque, bc != NULL ? bc->statics : NULL,
+                                     bc != NULL ? bc->nstatics : 0, einner->v.inst.o, recurse, depth);
+  scr_dyn_release(bv);
+  scr_dyn_release(ib);
+  return r;
 }
 #endif
 
@@ -3095,8 +3474,8 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
        * non-enumerable and never listed. */
       const ScrDyn *einner = scr_dyn_class_eval_inner(d);
 #ifdef SCR_INSP_COLORS
-      if (INSP_SH && einner != NULL) return insp_sh_fence("a per-evaluation class value");
-      if (INSP_SH && scr_dyn_class_of_value(d) != NULL) return insp_sh_class_value(d, scr_dyn_class_of_value(d), recurse, depth);
+      if (INSP_SH && einner != NULL) return insp_sh_class_value(d, NULL, einner, recurse, depth);
+      if (INSP_SH && scr_dyn_class_of_value(d) != NULL) return insp_sh_class_value(d, scr_dyn_class_of_value(d), NULL, recurse, depth);
 #endif
       if (einner != NULL) {
         /* A per-evaluation class value: the same line, its own ENUMERABLE static fields
