@@ -314,7 +314,7 @@ export function lowerDgramDnsModuleCall(L: Lowerer, expr: ts.CallExpression,
  * the callback's parameter IR types, forced over the checker's spelling
  * (string / number), which the runtime's shape would otherwise contradict.
  * The arm list is sorted, the interning contract of the union registry. */
-function dnsAnswerUnion(L: Lowerer, arms: IrType[]): IrType {
+export function dnsAnswerUnion(L: Lowerer, arms: IrType[]): IrType {
   const sorted = [...arms].sort((a, b) => (typeKey(a) < typeKey(b) ? -1 : 1));
   return { kind: "union", unionId: L.unions.intern(sorted) };
 }

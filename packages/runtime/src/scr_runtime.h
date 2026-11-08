@@ -10550,6 +10550,9 @@ ScrDyn *scr_fs_write_cb(const ScrDyn *fd, const ScrDyn *buffer, const ScrDyn *a2
 ScrDyn *scr_fs_chmod_cb(const ScrDyn *path, const ScrDyn *mode, const ScrDyn *cb);
 ScrDyn *scr_fs_mkdtemp_cb(const ScrDyn *prefix, const ScrDyn *opts, const ScrDyn *cb);
 ScrDyn *scr_fs_mkdtemp_sync_opts(const ScrDyn *prefix, const ScrDyn *opts);
+/* fs.readdir / fs.readdirSync over the option forms (scr_dyn_ext.c): +1 dyn listing or NULL with the exception pending. */
+ScrDyn *scr_fs_readdir_dyn(const ScrDyn *path, const ScrDyn *opts);
+ScrDyn *scr_fs_readdir_cb(const ScrDyn *path, const ScrDyn *opts, const ScrDyn *cb);
 ScrDyn *scr_fs_read_cb(const ScrDyn *fd, const ScrDyn *buffer, const ScrDyn *a2, const ScrDyn *a3,
                        const ScrDyn *a4, const ScrDyn *a5, double argc);
 ScrDyn *scr_fs_lchmod_cb(const ScrDyn *path, const ScrDyn *mode, const ScrDyn *cb);

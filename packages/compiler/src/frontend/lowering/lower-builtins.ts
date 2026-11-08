@@ -47,6 +47,7 @@ import { deferredCallThunk, timerStyleCallback } from "./lower-calls.js";
 import { dynBuiltinFnValueOf } from "./lower-fnvalue.js";
 import { registerHttpClientFnBinding } from "./lower-server.js";
 import { lowerDateLocaleFormat } from "./lower-numfmt.js";
+import { dnsAnswerUnion } from "./lower-dgram.js";
 import { STATS_TYPE_INDEX, KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, CHILD_T, CHILDSTREAM_T, DYN, F64, FSWATCHER_T, PROCSTREAM_T, IrExpr, IrFunction, IrLibFn, IrLocal, IrStmt, IrType, JSVAL, NULL_T, SEARCH_PARAMS_T, SPAWNRES_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, DATE_T, canBoxFuncIntoDyn, canConvertToDyn, funcOf, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
 import { FN_CTOR_EXPORT_GLOBALS, jsonModuleOfRequire } from "./lower-modules.js";
 import { requireDepValueOf } from "./lower-island.js";
@@ -1189,12 +1190,13 @@ function fsWriteOptionsSignalFree(L: Lowerer, fn: string, expr: ts.CallExpressio
       (bi.member === "readFile" || bi.member === "exists" || bi.member === "mkdtemp" || bi.member === "read" ||
         bi.member === "writeFile" || bi.member === "appendFile" || bi.member === "mkdir" ||
         bi.member === "unlink" || bi.member === "rename" || bi.member === "open" || bi.member === "close" ||
-        bi.member === "write" || bi.member === "chmod");
+        bi.member === "write" || bi.member === "chmod" || bi.member === "readdir");
     if (!isJsSourceFile(expr.getSourceFile()) && !tsCallbackForm) return null;
     const args = expr.arguments;
     if (args.some(ts.isSpreadElement)) return null;
     // Every ladder argument crosses as a dyn value; an argument that
     // cannot leaves the historical fence in place.
+    const listsCallback = bi.module === "fs" && bi.member === "readdir";
     const dynArg = (node: ts.Expression | undefined): IrExpr | null => {
       if (!node) return dynUndefinedExpr(loc);
       // A callback literal's unannotated parameters carry what the runtime
@@ -1202,10 +1204,38 @@ function fsWriteOptionsSignalFree(L: Lowerer, fn: string, expr: ts.CallExpressio
       // overload the checker picked says: they bind as checked-dynamic
       // values, narrowed by the program's own tests.
       const unknownParams: ts.Node[] = [];
+      const forcedParams: ts.ParameterDeclaration[] = [];
+      const lyingReads: ts.Node[] = [];
       if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
+        // readdir's listing slot (index 1) is `undefined` on a failure (Node calls back with the error alone) and an ARRAY otherwise: names,
+        // Buffers or Dirent rows, annotated or contextually typed. Its IR parameter is the array | undefined union while the checker keeps the
+        // declared array type, the lying-read shape (lyingRead): a guarded read and every typed array use work, and an unguarded member use is
+        // Node's "Cannot read properties of undefined" TypeError. Every read of the parameter takes that path (statsRecvNodes is its opt-in set).
+        if (listsCallback) {
+          const p = node.parameters[1];
+          if (p !== undefined && ts.isIdentifier(p.name) && !p.initializer && !p.questionToken && !p.dotDotDotToken &&
+              !L.paramIrOverrides.has(p) && !L.chainNarrowedType.has(p.name)) {
+            const declared = L.mapTypeOf(L.typeOf(p.name));
+            if (declared?.kind === "array" &&
+                (declared.elem.kind === "string" || declared.elem.kind === "record" || (declared.elem.kind === "bytes" && declared.elem.elem === "u8"))) {
+              L.paramIrOverrides.set(p, dnsAnswerUnion(L, [declared, UNDEFINED_T]));
+              forcedParams.push(p);
+              const psym = L.resolveValueSymbol(p.name);
+              if (psym !== null && node.body !== undefined) {
+                ts.walkPreorder(node.body, (n) => {
+                  if (ts.isIdentifier(n) && n.text === (p.name as ts.Identifier).text && L.resolveValueSymbol(n) === psym) {
+                    L.statsRecvNodes.add(n);
+                    lyingReads.push(n);
+                  }
+                  return undefined;
+                });
+              }
+            }
+          }
+        }
         for (const p of node.parameters) {
           if (!ts.isIdentifier(p.name) || p.type || p.initializer || p.dotDotDotToken) continue;
-          if (L.chainNarrowedType.has(p.name)) continue;
+          if (L.chainNarrowedType.has(p.name) || L.paramIrOverrides.has(p)) continue;
           L.chainNarrowedType.set(p.name, L.checker.getUnknownType());
           unknownParams.push(p.name);
           // ...and every read of it in the body (a read carries its own
@@ -1256,6 +1286,8 @@ function fsWriteOptionsSignalFree(L: Lowerer, fn: string, expr: ts.CallExpressio
         raw = L.lowerExpr(node);
       } finally {
         for (const n of unknownParams) L.chainNarrowedType.delete(n);
+        for (const p of forcedParams) L.paramIrOverrides.delete(p);
+        for (const n of lyingReads) L.statsRecvNodes.delete(n);
       }
       if (raw.type.kind === "dyn") return raw;
       if (raw.kind === "unitLit" || L.dynConvertible(raw.type)) {
@@ -1351,6 +1383,12 @@ function fsWriteOptionsSignalFree(L: Lowerer, fn: string, expr: ts.CallExpressio
         if (args.length > 2) return null;
         const a = dynArgs([args[0], args[1]]);
         return a && chk("fs.mkdtempSyncOpts", a, DYN);
+      }
+      case "readdir": {
+        // readdir(path[, options], callback): the runtime ladder lists (scr_fs_readdir_cb); the listing slot is typed per its declaration
+        if (args.length < 2 || args.length > 3) return null;
+        const a = dynArgs([args[0], args[1], args[2]]);
+        return a && chk("fs.readdirCb", a, DYN);
       }
       case "readFile": {
         // readFile(path[, options], callback)
@@ -8576,6 +8614,27 @@ let digestInputValueDispatches = 0;
    * reshaping Dirent) fences honestly. */
   export function lowerFsReaddirTypesCall(L: Lowerer, call: ts.CallExpression, loc: SrcLoc): IrExpr {
     const optsNode = call.arguments[1]!;
+    // Every options form but the plain typed Dirent one rides the checked-dynamic ladder (encoding, recursive, a non-literal or string options
+    // value): the runtime validates in lib/fs.js's order and lists, and the result meets the checker's type through a checked coercion.
+    const typedForm =
+      ts.isObjectLiteralExpression(optsNode) &&
+      optsNode.properties.length > 0 &&
+      optsNode.properties.every((p) => {
+        const m = optionMember(p);
+        if (!m) return false;
+        const t = L.typeOf(m.value);
+        if (m.name === "withFileTypes") return (t.flags & ts.TypeFlags.BooleanLiteral) !== 0 && L.checker.typeToString(t) === "true";
+        if (m.name === "encoding") return t.isStringLiteralType() && (t.value === "utf8" || t.value === "utf-8");
+        return false;
+      }) &&
+      optsNode.properties.some((p) => optionMember(p)?.name === "withFileTypes");
+    if (!typedForm && !call.arguments.some(ts.isSpreadElement)) {
+      const path = L.lowerExprExpecting(call.arguments[0]!, DYN);
+      const opts = L.lowerExprExpecting(optsNode, DYN);
+      const listing: IrExpr = { kind: "libCall", fn: "fs.readdirDyn", args: [path, opts], type: DYN, loc };
+      const want = L.irTypeOf(call);
+      return want.kind === "dyn" ? listing : L.coerceToExpected(listing, want);
+    }
     if (!ts.isObjectLiteralExpression(optsNode)) {
       L.noLowering(
         "readdirSync with a non-literal options argument",

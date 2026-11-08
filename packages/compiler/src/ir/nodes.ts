@@ -5390,6 +5390,10 @@ export type IrLibFn =
   | "fs.writeCb"
   | "fs.chmodCb"
   | "fs.mkdtempCb"
+  /** `fs.readdir(path, options?, cb)`, callback boxed dyn: the runtime ladder validates in lib/fs.js order and calls back (err, names | Buffers | Dirents) one loop turn later. */
+  | "fs.readdirCb"
+  /** `fs.readdirSync(path, options)` over the checked-dynamic option forms (encoding, recursive, withFileTypes): the same ladder and listing, synchronous. */
+  | "fs.readdirDyn"
   | "fs.mkdtempSyncOpts"
   | "fs.readCb"
   | "fs.lchmodCb"
@@ -12259,6 +12263,7 @@ export function moduleUsesDynInvoke(mod: IrModule): boolean {
 const DYN_EXT_LIB_FNS: ReadonlySet<string> = new Set([
   "fs.readFileCb", "fs.writeFileCb", "fs.appendFileCb", "fs.mkdirCb", "fs.unlinkCb", "fs.renameCb",
   "fs.mkdtempCb", "fs.mkdtempSyncOpts", "fs.readCb", "fs.lchmodCb", "fs.lchmodSyncChk", "fsp.lchmodChk", "fs.openCb", "fs.closeCb", "fs.writeCb", "fs.chmodCb",
+  "fs.readdirCb", "fs.readdirDyn",
   "buffer.concatDyn", "buffer.concatDynLen", "buffer.byteLenDyn", "buffer.isEncodingDyn", "error.msgDyn", "dyn.isBuffer", "dyn.looseEq", "error.ext",
   "dyn.bufferValue",
 ]);
@@ -14406,6 +14411,8 @@ const LIB_MODE_REFUSED_PREFIXES: readonly [string, string][] = [
   ["fs.renameCb", "the async fs callback surface (fs.rename)"],
   ["fs.statCb", "the async fs callback surface (fs.stat)"],
   ["fs.mkdtempCb", "the async fs callback surface (fs.mkdtemp)"],
+  ["fs.readdirCb", "the async fs callback surface (fs.readdir)"],
+  ["fs.readdirDyn", "fs.readdirSync over the checked-dynamic option forms"],
   ["fs.readCb", "the async fs callback surface (fs.read)"],
   ["fs.lchmodCb", "the async fs callback surface (fs.lchmod)"],
   ["fs.openCb", "the async fs callback surface (fs.open)"],
@@ -15252,6 +15259,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "fs.unlinkCb",
   "fs.renameCb",
   "fs.mkdtempCb",
+  "fs.readdirCb",
+  "fs.readdirDyn",
   "fs.mkdtempSyncOpts",
   "fs.readCb",
   "fs.lchmodCb",

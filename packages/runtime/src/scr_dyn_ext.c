@@ -330,6 +330,318 @@ ScrDyn *scr_fs_mkdtemp_sync_opts(const ScrDyn *prefix, const ScrDyn *opts) {
   return out;
 }
 
+/* ── fs.readdir / fs.readdirSync over the checked-dynamic option forms ───────────────────────────────────────────────
+ * lib/fs.js's ladder (v24.15.0): the callback check, getOptions (type and encoding), the path contract, then `options.recursive` must be a
+ * boolean when present; `withFileTypes` is read by truthiness. The listing is libuv's scandir (sorted by byte order, scr_fs_scandir), with the
+ * entry names in the requested encoding; withFileTypes rows are Dirent objects (name, parentPath and the type under the symbol slot Node prints
+ * as `Symbol(type)`, the methods on one shared prototype). `recursive` is lib/fs.js's readdirSyncRecursive: a queue walked breadth first, each
+ * directory's own listing sorted; the names form lists paths relative to the base and follows a symlink to a directory (it asks stat), the
+ * Dirent form lists parentPath/name rows and follows only entries that are directories themselves; a Buffer name has no path.join, which
+ * throws Node's TypeError at the first row of a non-empty directory. */
+typedef struct {
+  bool wft, rec;
+} ScrRdOpt;
+
+static ScrDyn *scr_fs_dirent_proto_box = NULL;
+
+static ScrDyn *scr_fs_dirent_is(int kind) {
+  ScrDyn *self = scr_dyn_this_get();
+  double t = -1;
+  if (self != NULL && self->kind == SCR_DYN_OBJ) {
+    const ScrDyn *sl = scr_dyn_obj_slot_get(self, "type", 4);
+    if (sl != NULL && sl->kind == SCR_DYN_NUM) t = sl->v.num;
+  }
+  scr_dyn_release(self);
+  return scr_dyn_new_bool(t == (double)kind);
+}
+#define SCR_FS_DIRENT_IS(fname, kindno)                                                            \
+  static ScrDyn *scr_fs_dirent_##fname(ScrClosure *clo, ScrDyn *const *args, size_t argc) {       \
+    (void)clo; (void)args; (void)argc;                                                             \
+    return scr_fs_dirent_is(kindno);                                                               \
+  }                                                                                                \
+  static ScrClosure scr_fs_dirent_##fname##_clo = {SIZE_MAX, (void *)scr_fs_dirent_##fname, 0, NULL, NULL};
+SCR_FS_DIRENT_IS(isFile, 1)
+SCR_FS_DIRENT_IS(isDirectory, 2)
+SCR_FS_DIRENT_IS(isSymbolicLink, 3)
+SCR_FS_DIRENT_IS(isFIFO, 4)
+SCR_FS_DIRENT_IS(isSocket, 5)
+SCR_FS_DIRENT_IS(isCharacterDevice, 6)
+SCR_FS_DIRENT_IS(isBlockDevice, 7)
+
+static void scr_fs_dirent_teardown(void) {
+  scr_dyn_release(scr_fs_dirent_proto_box);
+  scr_fs_dirent_proto_box = NULL;
+}
+
+static ScrDyn *scr_fs_dirent_proto(void) {
+  if (scr_fs_dirent_proto_box == NULL) {
+    ScrDyn *proto = scr_dyn_new_obj();
+#define SCR_FS_DIRENT_METHOD(nm)                                                                                  \
+  scr_dyn_obj_set_present(proto, #nm, strlen(#nm), scr_dyn_new_func(&scr_fs_dirent_##nm##_clo, scr_fs_dirent_##nm, 0, "()", #nm));
+    SCR_FS_DIRENT_METHOD(isFile)
+    SCR_FS_DIRENT_METHOD(isDirectory)
+    SCR_FS_DIRENT_METHOD(isBlockDevice)
+    SCR_FS_DIRENT_METHOD(isCharacterDevice)
+    SCR_FS_DIRENT_METHOD(isSymbolicLink)
+    SCR_FS_DIRENT_METHOD(isFIFO)
+    SCR_FS_DIRENT_METHOD(isSocket)
+#undef SCR_FS_DIRENT_METHOD
+    scr_fs_dirent_proto_box = proto;
+    atexit(scr_fs_dirent_teardown);
+  }
+  return scr_fs_dirent_proto_box;
+}
+
+/* A Dirent: `name` (+1, moved), the parent path as given, the libuv entry kind under the type slot. */
+static ScrDyn *scr_fs_dirent_new(ScrDyn *name, const ScrStr *parent, unsigned kind) {
+  ScrDyn *d = scr_dyn_new_obj();
+  scr_dyn_obj_set(d, "name", 4, name);
+  ScrStr *pp = scr_str_new(parent->data, parent->len);
+  ScrDyn *ppd = scr_dyn_new_str(pp);
+  scr_str_release(pp);
+  scr_dyn_obj_set(d, "parentPath", 10, ppd);
+  scr_dyn_obj_set_slot(d, "type", 4, scr_dyn_new_num((double)kind));
+  scr_dyn_obj_set_ctor_name(d, "Dirent");
+  scr_dyn_obj_set_proto(d, scr_fs_dirent_proto());
+  return d;
+}
+
+/* path.join(a, b) for two strings: the join, then path.normalize's rules ('.' and empty segments drop, '..' pops a named segment, a leading
+ * '/' stays, an empty result is '.'). +1 string. */
+static ScrStr *scr_fs_rd_join(const ScrStr *a, const char *b, size_t blen) {
+  size_t cap = a->len + blen + 3;
+  char *tmp = malloc(cap), *out = malloc(cap);
+  if (!tmp || !out) scr_trap("scriptc: out of memory\n");
+  size_t n = 0;
+  if (a->len > 0) {
+    memcpy(tmp, a->data, a->len);
+    n = a->len;
+    tmp[n++] = '/';
+  }
+  memcpy(tmp + n, b, blen);
+  n += blen;
+  tmp[n] = 0;
+  bool abs = tmp[0] == '/';
+  size_t o = 0;
+  const char *p = tmp;
+  size_t depth = 0; /* named segments written, so '..' knows what it may pop */
+  while (*p) {
+    while (*p == '/') p++;
+    const char *e = p;
+    while (*e && *e != '/') e++;
+    size_t sl = (size_t)(e - p);
+    if (sl == 0) break;
+    if (sl == 1 && p[0] == '.') {
+      /* drop */
+    } else if (sl == 2 && p[0] == '.' && p[1] == '.') {
+      if (depth > 0) {
+        while (o > 0 && out[o - 1] != '/') o--;
+        if (o > 0) o--; /* the separator */
+        depth--;
+      } else if (!abs) {
+        if (o > 0) out[o++] = '/';
+        memcpy(out + o, "..", 2);
+        o += 2;
+      }
+    } else {
+      if (o > 0 || abs) out[o++] = '/';
+      memcpy(out + o, p, sl);
+      o += sl;
+      depth++;
+    }
+    p = e;
+  }
+  if (o == 0) {
+    if (abs) out[o++] = '/';
+    else out[o++] = '.';
+  }
+  ScrStr *r = scr_str_new(out, o);
+  free(tmp);
+  free(out);
+  return r;
+}
+
+static bool scr_fs_rd_opts(const ScrDyn *opts, ScrRdOpt *o) {
+  o->wft = false;
+  o->rec = false;
+  if (opts->kind != SCR_DYN_OBJ) return true;
+  const ScrDyn *r = scr_dyn_obj_get((ScrDyn *)opts, "recursive", 9);
+  if (r != NULL && r->kind != SCR_DYN_UNDEF && r->kind != SCR_DYN_NULL) {
+    if (r->kind != SCR_DYN_BOOL) {
+      scr_dyn_prop_type_fail("options.recursive", "of type boolean", r);
+      return false;
+    }
+    o->rec = r->v.b;
+  }
+  const ScrDyn *w = scr_dyn_obj_get((ScrDyn *)opts, "withFileTypes", 13);
+  o->wft = w != NULL && scr_dyn_truthy(w);
+  return true;
+}
+
+/* Throws what path.join throws for a Buffer segment (lib/fs.js hands it one). */
+static void scr_fs_rd_buffer_join_throw(void) {
+  static const char msg[] = "The \"path\" argument must be of type string. Received an instance of Buffer";
+  scr_throw_error_msg_code(SCR_ERR_TYPE, msg, sizeof msg - 1, "ERR_INVALID_ARG_TYPE");
+}
+
+typedef struct {
+  ScrStr *full; /* the directory as lib/fs.js names it (the argument, then joined paths) */
+  char *rel;    /* its path below the base, for the names form */
+} ScrRdQueued;
+
+/* The listing of `base`; +1 dyn array, or NULL with Node's error pending. *join_throw is set when the pending error is the Buffer join's
+ * TypeError, which an asynchronous caller leaves uncaught (it is thrown from the completion callback in Node). */
+static ScrDyn *scr_fs_rd_list(ScrStr *base, const ScrDyn *opts, const ScrRdOpt *o, bool *join_throw) {
+  bool isbuf;
+  (void)scr_fs_opt_encoding(opts, &isbuf);
+  ScrDyn *out = scr_dyn_new_arr();
+  size_t qn = 0, qcap = 8;
+  ScrRdQueued *q = malloc(qcap * sizeof *q);
+  if (!q) scr_trap("scriptc: out of memory\n");
+  q[qn].full = scr_str_retain(base);
+  q[qn].rel = strdup("");
+  qn++;
+  ScrDyn *fail = NULL;
+  for (size_t qi = 0; qi < qn && !fail; qi++) {
+    ScrScandir *sc = scr_fs_scandir(q[qi].full);
+    if (sc == NULL) {
+      fail = out; /* a marker: the error is pending */
+      break;
+    }
+    size_t cnt = scr_fs_scandir_count(sc);
+    for (size_t i = 0; i < cnt && !fail; i++) {
+      ScrStr *name = scr_fs_scandir_name(sc, i);
+      unsigned kind = (unsigned)scr_fs_scandir_type(sc, i);
+      ScrDyn *enc = scr_fs_mkdtemp_result(name, opts); /* the name in the requested encoding */
+      if (o->wft) {
+        ScrDyn *row = scr_fs_dirent_new(enc, q[qi].full, kind);
+        scr_dyn_arr_push(out, row);
+        if (o->rec && kind == 2) {
+          if (isbuf) {
+            scr_fs_rd_buffer_join_throw();
+            if (join_throw) *join_throw = true;
+            fail = out;
+          } else {
+            ScrStr *child = scr_fs_rd_join(q[qi].full, name->data, name->len);
+            if (qn == qcap) {
+              qcap *= 2;
+              q = realloc(q, qcap * sizeof *q);
+              if (!q) scr_trap("scriptc: out of memory\n");
+            }
+            q[qn].full = child;
+            q[qn].rel = strdup("");
+            qn++;
+          }
+        }
+      } else if (!o->rec) {
+        scr_dyn_arr_push(out, enc);
+      } else if (isbuf) {
+        scr_dyn_release(enc);
+        scr_fs_rd_buffer_join_throw();
+        if (join_throw) *join_throw = true;
+        fail = out;
+      } else {
+        /* the name lib/fs.js joins is the ENCODED one (hex, base64, ...): the path it stats and lists is that string's */
+        const ScrStr *es = enc->v.str;
+        ScrStr *child = scr_fs_rd_join(q[qi].full, es->data, es->len);
+        size_t rl = strlen(q[qi].rel);
+        char *rel = malloc(rl + es->len + 2);
+        if (!rel) scr_trap("scriptc: out of memory\n");
+        if (rl > 0) {
+          memcpy(rel, q[qi].rel, rl);
+          rel[rl++] = '/';
+        }
+        memcpy(rel + rl, es->data, es->len);
+        rel[rl + es->len] = 0;
+        ScrStr *relstr = scr_str_new(rel, strlen(rel));
+        ScrDyn *relv = scr_dyn_new_str(relstr);
+        scr_str_release(relstr);
+        scr_dyn_arr_push(out, relv);
+        struct stat st;
+        if (stat(child->data, &st) == 0 && S_ISDIR(st.st_mode)) {
+          if (qn == qcap) {
+            qcap *= 2;
+            q = realloc(q, qcap * sizeof *q);
+            if (!q) scr_trap("scriptc: out of memory\n");
+          }
+          q[qn].full = child;
+          q[qn].rel = rel;
+          qn++;
+        } else {
+          scr_str_release(child);
+          free(rel);
+        }
+        scr_dyn_release(enc);
+      }
+      scr_str_release(name);
+    }
+    scr_fs_scandir_free(sc);
+    if (!o->rec) break;
+  }
+  for (size_t i = 0; i < qn; i++) {
+    scr_str_release(q[i].full);
+    free(q[i].rel);
+  }
+  free(q);
+  if (fail) {
+    scr_dyn_release(out);
+    return NULL;
+  }
+  return out;
+}
+
+ScrDyn *scr_fs_readdir_dyn(const ScrDyn *path, const ScrDyn *opts) {
+  const ScrDyn *eff = (scr_fs_dyn_absent(opts) || opts->kind == SCR_DYN_FUNC) ? scr_dyn_undefined() : opts;
+  if (!scr_fs_get_options(eff)) return NULL;
+  if (!scr_fs_path_chk(path, "path")) return NULL;
+  ScrRdOpt o;
+  if (!scr_fs_rd_opts(eff, &o)) return NULL;
+  ScrStr *p = scr_fs_path_str(path);
+  ScrDyn *r = scr_fs_rd_list(p, eff, &o, NULL);
+  scr_str_release(p);
+  return r;
+}
+
+#ifndef SCR_LIB
+static void scr_fs_readdir_fire(ScrClosure *self) {
+  ScrDyn *path = scr_box_get_ref(self->caps[0]);
+  ScrDyn *opts = scr_box_get_ref(self->caps[1]);
+  ScrDyn *cb = scr_box_get_ref(self->caps[2]);
+  ScrRdOpt o;
+  (void)scr_fs_rd_opts(opts, &o);
+  ScrStr *p = scr_fs_path_str(path);
+  bool join_throw = false;
+  ScrDyn *out = scr_fs_rd_list(p, opts, &o, &join_throw);
+  scr_str_release(p);
+  if (!join_throw) { /* a Buffer-join TypeError is thrown from the completion callback in Node: left uncaught */
+    scr_fs_cb_finish(cb, &out, out != NULL ? 1 : 0, "the fs.readdir callback");
+  }
+  if (out != NULL) scr_dyn_release(out);
+  scr_dyn_release(path);
+  scr_dyn_release(opts);
+  scr_dyn_release(cb);
+}
+#endif
+
+/* fs.readdir(path, options?, cb): the callback is `options` when that is a function. */
+ScrDyn *scr_fs_readdir_cb(const ScrDyn *path, const ScrDyn *opts, const ScrDyn *cb) {
+  const ScrDyn *callback = opts->kind == SCR_DYN_FUNC ? opts : cb;
+  if (!scr_fs_cb_chk(callback, "cb")) return NULL;
+  const ScrDyn *eff = (scr_fs_dyn_absent(opts) || opts->kind == SCR_DYN_FUNC) ? scr_dyn_undefined() : opts;
+  if (!scr_fs_get_options(eff)) return NULL;
+  if (!scr_fs_path_chk(path, "path")) return NULL;
+  ScrRdOpt o;
+  if (!scr_fs_rd_opts(eff, &o)) return NULL;
+#ifdef SCR_LIB
+  scr_trap("scriptc: internal error: fs.readdir callback reached in a library build — please report this");
+  return NULL;
+#else
+  const ScrDyn *vals[3] = {path, eff, callback};
+  scr_set_timeout(scr_fs_cb_closure(scr_fs_readdir_fire, 3, vals), 0);
+  return scr_dyn_retain(scr_dyn_undefined());
+#endif
+}
+
 /* fs.read — lib/fs.js's ladder over (fd, buffer, offsetOrOptions, length,
  * position, callback), argc being the count the caller wrote. */
 static bool scr_fs_read_validate_integer(const ScrDyn *v, const char *name, double min, const char *range) {
