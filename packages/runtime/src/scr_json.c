@@ -3183,6 +3183,12 @@ ScrStr *scr_fn_to_string(const ScrDyn *d) {
  * into the closure's declared parameter types lives THERE (the thunk is
  * compiled per signature). Args borrowed; result owned (+1) or NULL with
  * the exception pending. */
+/* The builtin constructor function values (scr_dyn_proto.c, linked only by a program that reads Object/Array as values or a prototype):
+ * that unit registers itself here, and the unit that answers a plain object's or an array's `.constructor` (scr_dyn_invoke.c, itself
+ * link-gated) reads it. The variable lives HERE, in the unit every dynamic program links, so the provider links with or without the
+ * reader; NULL leaves the previous answer in a program that never links the provider. */
+ScrDyn *(*scr_builtin_ctor_provider)(double which) = NULL;
+
 ScrDyn *scr_dyn_call(const ScrDyn *d, ScrDyn *const *args, size_t argc, const char *what) {
   if (d->kind == SCR_DYN_JSVAL) {
     /* An ENGINE callee: the call routes through scr_jsval_call with the

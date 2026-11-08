@@ -1810,11 +1810,6 @@ static ScrDyn *dyn_objproto_shared_fn(const char *name) {
   return NULL;
 }
 
-/* The builtin constructor function values (scr_dyn_proto.c, linked only by a program that reads Object/Array as values or a prototype):
- * that unit registers itself here, so this always-linked unit answers a plain object's or an array's `.constructor` with the same function
- * value the bare `Object` / `Array` is, and with its previous answer in a program that never links the other unit. */
-ScrDyn *(*scr_builtin_ctor_provider)(double which) = NULL;
-
 ScrDyn *scr_dyn_intrinsic_method_get(ScrDyn *recv, const ScrStr *key) {
   /* ScrStr is NUL-terminated (scr_str_new), so ->data is a C string for
    * the same name-keyed tests the dispatch makes. */
