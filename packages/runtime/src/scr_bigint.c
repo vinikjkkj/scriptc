@@ -1186,6 +1186,8 @@ double scr_bytes_index_of_big(const ScrBytes *b, const ScrBigInt *v, double from
   return -1.0;
 }
 
+/* The bigint sort comparators tie only on equal 8-byte values, which are indistinguishable, so qsort needs no stability here (mingw's is not
+ * stable): the sorted bytes are the same whatever order ties come out in. */
 static int scr_big_cmp_i64(const void *pa, const void *pb) {
   int64_t a, b;
   memcpy(&a, pa, 8);
