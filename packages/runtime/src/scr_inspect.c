@@ -3043,10 +3043,10 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       }
 #ifdef SCR_INSP_COLORS
       if (INSP_SH) {
-        /* The prototype keys (formatRaw's protoProps) come from the member table's accessor rows; a class whose table is incomplete, or that
+        /* The prototype keys (formatRaw's protoProps) come from the member table's accessor rows; a class that
          * roots in a runtime class (EventEmitter and its own prototype keys), has a prototype this runtime cannot list. */
         const ScrDynClass *sc = scr_dyn_objinst_class_of(d);
-        if (sc->opaque || sc->rt_root != 0) return insp_sh_fence("a class instance whose class has an incomplete member table or roots in a runtime class");
+        if (sc->rt_root != 0 && sc->rt_root != 4) return insp_sh_fence("a class instance whose class roots in a runtime class");
       }
 #endif
       const char *icn = scr_dyn_objinst_cls(d);
