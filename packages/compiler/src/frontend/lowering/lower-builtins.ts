@@ -47,6 +47,7 @@ import { deferredCallThunk, timerStyleCallback } from "./lower-calls.js";
 import { dynBuiltinFnValueOf } from "./lower-fnvalue.js";
 import { registerHttpClientFnBinding } from "./lower-server.js";
 import { lowerDateLocaleFormat } from "./lower-numfmt.js";
+import { dnsAnswerUnion } from "./lower-dgram.js";
 import { STATS_TYPE_INDEX, KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, CHILD_T, CHILDSTREAM_T, DYN, F64, FSWATCHER_T, PROCSTREAM_T, IrExpr, IrFunction, IrLibFn, IrLocal, IrStmt, IrType, JSVAL, NULL_T, SEARCH_PARAMS_T, SPAWNRES_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, DATE_T, canBoxFuncIntoDyn, canConvertToDyn, funcOf, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
 import { FN_CTOR_EXPORT_GLOBALS, jsonModuleOfRequire } from "./lower-modules.js";
 import { requireDepValueOf } from "./lower-island.js";
@@ -1202,7 +1203,33 @@ function fsWriteOptionsSignalFree(L: Lowerer, fn: string, expr: ts.CallExpressio
       // overload the checker picked says: they bind as checked-dynamic
       // values, narrowed by the program's own tests.
       const unknownParams: ts.Node[] = [];
+      const forcedParams: ts.ParameterDeclaration[] = [];
+      const lyingReads: ts.Node[] = [];
       if (ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
+        // Node calls back with the error ALONE on a failure, so a value slot (index 1 and up: the data, folder, descriptor or byte
+        // count) an annotation declares as Buffer, string or number is `undefined` there. Its IR parameter is the union with undefined while
+        // the checker keeps the declared type, the lying-read shape (lyingRead): a member use on it answers Node's TypeError naming the
+        // property, and the failure path delivers Node's value instead of a run-time conversion failure that never runs the callback.
+        node.parameters.forEach((p, idx) => {
+          if (idx < 1 || !ts.isIdentifier(p.name) || !p.type || p.initializer || p.questionToken || p.dotDotDotToken) return;
+          if (L.paramIrOverrides.has(p) || L.chainNarrowedType.has(p.name)) return;
+          const declared = L.mapTypeOf(L.typeOf(p.name));
+          if (declared === null || (declared.kind !== "string" && declared.kind !== "f64" && !(declared.kind === "bytes" && declared.elem === "u8"))) return;
+          L.paramIrOverrides.set(p, dnsAnswerUnion(L, [declared, UNDEFINED_T]));
+          forcedParams.push(p);
+          // Every read of the parameter takes the lying-read path (statsRecvNodes is that opt-in set, the fs.Stats receivers' first):
+          // a member use answers Node's TypeError naming the property, typeof / console.log / comparisons see the undefined arm.
+          const psym = L.resolveValueSymbol(p.name);
+          if (psym !== null && node.body !== undefined) {
+            ts.walkPreorder(node.body, (n) => {
+              if (ts.isIdentifier(n) && n.text === (p.name as ts.Identifier).text && L.resolveValueSymbol(n) === psym) {
+                L.statsRecvNodes.add(n);
+                lyingReads.push(n);
+              }
+              return undefined;
+            });
+          }
+        });
         for (const p of node.parameters) {
           if (!ts.isIdentifier(p.name) || p.type || p.initializer || p.dotDotDotToken) continue;
           if (L.chainNarrowedType.has(p.name)) continue;
@@ -1228,6 +1255,8 @@ function fsWriteOptionsSignalFree(L: Lowerer, fn: string, expr: ts.CallExpressio
         raw = L.lowerExpr(node);
       } finally {
         for (const n of unknownParams) L.chainNarrowedType.delete(n);
+        for (const p of forcedParams) L.paramIrOverrides.delete(p);
+        for (const n of lyingReads) L.statsRecvNodes.delete(n);
       }
       if (raw.type.kind === "dyn") return raw;
       if (raw.kind === "unitLit" || L.dynConvertible(raw.type)) {

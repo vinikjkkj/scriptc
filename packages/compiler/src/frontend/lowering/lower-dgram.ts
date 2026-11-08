@@ -314,7 +314,7 @@ export function lowerDgramDnsModuleCall(L: Lowerer, expr: ts.CallExpression,
  * the callback's parameter IR types, forced over the checker's spelling
  * (string / number), which the runtime's shape would otherwise contradict.
  * The arm list is sorted, the interning contract of the union registry. */
-function dnsAnswerUnion(L: Lowerer, arms: IrType[]): IrType {
+export function dnsAnswerUnion(L: Lowerer, arms: IrType[]): IrType {
   const sorted = [...arms].sort((a, b) => (typeKey(a) < typeKey(b) ? -1 : 1));
   return { kind: "union", unionId: L.unions.intern(sorted) };
 }
@@ -337,7 +337,7 @@ function isUnionOfKinds(L: Lowerer, t: IrType, kinds: string[]): boolean {
  * (scriptc-overrides.d.ts: ScriptcDnsAddress, ScriptcDnsFamily) — the
  * union the reads of the forced parameters see, so `typeof`, `=== undefined`
  * and the argument coercions meet the union, not the checker's string. */
-function dnsAnswerTsType(L: Lowerer, alias: string): ts.Type {
+export function dnsAnswerTsType(L: Lowerer, alias: string): ts.Type {
   const sf = L.loweringProgram.getSourceFile(overridesDtsPath());
   const decl = sf?.statements.find(
     (st): st is ts.TypeAliasDeclaration => ts.isTypeAliasDeclaration(st) && st.name.text === alias,
