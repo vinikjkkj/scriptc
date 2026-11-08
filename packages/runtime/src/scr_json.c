@@ -3111,16 +3111,6 @@ ScrDyn *scr_dyn_call(const ScrDyn *d, ScrDyn *const *args, size_t argc, const ch
   return d->v.fn.thunk(d->v.fn.clo, args, argc);
 }
 
-/* scr_dyn_call with `self` as the ambient receiver for the call: `rec.f(...)` where rec is a record VIEW of an object calls
- * the object's member with the object as `this`. One push, one call, one pop (the window closes on a pending exception too:
- * a throw is a flag the caller checks, never an unwind past this frame). */
-ScrDyn *scr_dyn_call_this(const ScrDyn *self, const ScrDyn *d, ScrDyn *const *args, size_t argc, const char *what) {
-  scr_dyn_this_push_dyn(self);
-  ScrDyn *r = scr_dyn_call(d, args, argc, what);
-  scr_dyn_this_pop();
-  return r;
-}
-
 /* scr_dyn_call over a dyn ARRAY's elements — the spread-application form
  * (`f(...args)` after the emitted argument array is built). Borrows both;
  * result owned (+1), or NULL with the exception pending. */
@@ -5301,6 +5291,7 @@ ScrDyn *scr_dyn_handle_key_get(const ScrDyn *d, const ScrStr *k) {
 typedef struct {
   void *ptr;            /* handle entry (borrowed); NULL when dv or undefined */
   ScrDynHandleTag tag;
+  int bd;               /* ptr is a BORROWED dyn (scr_dyn_call_this): no retain, no release */
   ScrDyn *dv;           /* dyn entry (+1); NULL for handle/undefined entries */
 } ScrDynThisEnt;
 
@@ -5324,6 +5315,7 @@ void scr_dyn_this_push(void *h, ScrDynHandleTag tag) {
   ScrDynThisEnt *e = scr_dyn_this_grow();
   e->ptr = h;
   e->tag = tag;
+  e->bd = 0;
   e->dv = NULL;
 }
 
@@ -5331,6 +5323,7 @@ void scr_dyn_this_push_dyn(const ScrDyn *v) {
   ScrDynThisEnt *e = scr_dyn_this_grow();
   e->ptr = NULL;
   e->tag = 0;
+  e->bd = 0;
   e->dv = scr_dyn_retain((ScrDyn *)v);
 }
 
@@ -5342,10 +5335,26 @@ void scr_dyn_this_pop(void) {
   if (e->dv) scr_dyn_release(e->dv);
 }
 
+/* scr_dyn_call with `self` as the ambient receiver for the call: `rec.f(...)` where rec is a record VIEW of an object calls
+ * the object's member with the object as `this`. One push, one call, one pop (the window closes on a pending exception too:
+ * a throw is a flag the caller checks, never an unwind past this frame). */
+ScrDyn *scr_dyn_call_this(const ScrDyn *self, const ScrDyn *d, ScrDyn *const *args, size_t argc, const char *what) {
+  /* BORROWED window: the caller holds `self` across this call, so the stack takes no reference (no retain/release pair). */
+  ScrDynThisEnt *e = scr_dyn_this_grow();
+  e->ptr = (void *)self;
+  e->tag = 0;
+  e->bd = 1;
+  e->dv = NULL;
+  ScrDyn *r = scr_dyn_call(d, args, argc, what);
+  scr_dyn_this_pop();
+  return r;
+}
+
 ScrDyn *scr_dyn_this_get(void) {
   if (scr_dyn_this_n > 0) {
     ScrDynThisEnt *e = &scr_dyn_this_stack[scr_dyn_this_n - 1];
     if (e->dv) return scr_dyn_retain(e->dv);
+    if (e->bd) return scr_dyn_retain((ScrDyn *)e->ptr);
     /* An uninstalled tag never binds: a unit that fires without its dyn
      * half (no boxes can exist there) keeps the undefined answer. */
     if (e->ptr && scr_dynh_ops[e->tag]) return scr_dyn_new_handle(e->ptr, e->tag);

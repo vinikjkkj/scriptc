@@ -14252,11 +14252,32 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverr
       if (target !== null && target.container === "record" && L.isViewShape(target.obj.type)) {
         const loc = locOf(call);
         const recT = target.obj.type;
-        const tmp = L.declareHiddenLocal("%vcRecv", recT);
-        const ref = (): IrExpr => ({ kind: "varRef", localId: tmp.id, type: recT, loc });
-        const read = L.fieldGetExpr({ ...target, obj: ref() }, locOf(access), access);
-        const callE: IrExpr = { kind: "dynCall", callee: read, calleeName: v8CallSite(access), args, thisArg: viewThisOf(ref(), recT.shapeId, loc), type: DYN, loc };
-        return { kind: "seqExpr", stmts: [{ kind: "varDecl", localId: tmp.id, init: target.obj, loc }], result: callE, type: DYN, loc };
+        // a plain read of a variable is its own stable reference; anything else is bound once
+        const stmts: IrStmt[] = [];
+        let ref: () => IrExpr;
+        if (target.obj.kind === "varRef") {
+          const o = target.obj;
+          ref = () => ({ ...o });
+        } else {
+          const tmp = L.declareHiddenLocal("%vcRecv", recT);
+          stmts.push({ kind: "varDecl", localId: tmp.id, init: target.obj, loc });
+          ref = () => ({ kind: "varRef", localId: tmp.id, type: recT, loc });
+        }
+        // the viewed object is read ONCE: it is the receiver and the thing the member is read off
+        const selfLocal = L.declareHiddenLocal("%vcSelf", DYN);
+        const selfRef = (): IrExpr => ({ kind: "varRef", localId: selfLocal.id, type: DYN, loc });
+        stmts.push({ kind: "varDecl", localId: selfLocal.id, init: viewThisOf(ref(), recT.shapeId, loc), loc });
+        const plain = L.fieldGetExpr({ ...target, obj: ref() }, locOf(access), access);
+        const read: IrExpr = {
+          kind: "ternary",
+          cond: { kind: "recordIsView", obj: ref(), shapeId: recT.shapeId, type: BOOL, loc },
+          then: { kind: "dynKeyGet", key: { kind: "strLit", value: target.field, type: STRING, loc }, value: selfRef(), type: DYN, loc },
+          else_: plain,
+          type: DYN,
+          loc,
+        };
+        const callE: IrExpr = { kind: "dynCall", callee: read, calleeName: v8CallSite(access), args, thisArg: selfRef(), type: DYN, loc };
+        return { kind: "seqExpr", stmts, result: callE, type: DYN, loc };
       }
       return { kind: "dynCall", callee, calleeName: v8CallSite(access), args, type: DYN, loc: locOf(call) };
     }
