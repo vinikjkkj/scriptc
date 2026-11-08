@@ -84,7 +84,7 @@
  */
 import { appendFileSync } from "node:fs";
 import type { IrExpr, IrFunction, IrRecordShape, IrType, SrcLoc } from "../../ir/nodes.js";
-import { internalSlotFields, typeKey, UNDEFINED_T } from "../../ir/nodes.js";
+import { canConvertToDyn, canDynCheckTo, DYN, internalSlotFields, typeKey, UNDEFINED_T } from "../../ir/nodes.js";
 import type { Lowerer } from "./lowerer.js";
 import { dynUndefinedExpr } from "./lowerer.js";
 import { viewShapeKey } from "../types.js";
@@ -143,6 +143,11 @@ export function unifyWidthShapes(L: Lowerer, functions: IrFunction[]): UnifyOutc
   const dropNames = new Map<string, Set<string>>();
   collectDropNames(functions, L, dropNames);
 
+  // Shapes some node reads or writes by a COMPUTED key, a view or an order record: their field slots are read at the slot's
+  // own type there, which a retyped slot cannot honor, so a retyped edge never touches them. Computed once, on first need.
+  let keyedSet: Set<string> | null = null;
+  const keyedShapes = (): Set<string> => (keyedSet ??= collectKeyedShapes(functions, L));
+
   for (const [key, helper] of L.widthHelpers) {
     if (!key.startsWith("rec:")) continue;
     helpers++;
@@ -163,11 +168,32 @@ export function unifyWidthShapes(L: Lowerer, functions: IrFunction[]): UnifyOutc
       continue;
     }
     let ok = true;
-    for (const arm of plan.values()) {
+    const fs = L.shapes.get(from);
+    const ts_ = L.shapes.get(to);
+    for (const [armField, arm] of plan) {
       if ("absent" in arm || "absentDyn" in arm) continue;
       if ("keyRead" in arm) {
         ok = decline("arm-keyread");
         break;
+      }
+      if (arm.lift.how === "dynIn" || arm.lift.how === "dynOut") {
+        // RETYPED field, one side a checked-dynamic slot: the two shapes can still be ONE struct if the slot stays dyn and
+        // the narrow side's accesses carry the cast/box (dynSlotWhy decides what may). dynIn: source field T, target dyn.
+        // dynOut: source dyn, target field T.
+        const narrowT = arm.lift.how === "dynOut" ? ts_?.fields.find((f) => f.name === armField)?.type : arm.src;
+        const wideT = arm.lift.how === "dynOut" ? arm.src : ts_?.fields.find((f) => f.name === armField)?.type;
+        const why2 = narrowT === undefined || wideT === undefined || wideT.kind !== "dyn" ? "arm-dynslot-types" : dynSlotWhy(L, narrowT);
+        if (why2 !== null) {
+          ok = decline(why2);
+          note(`${from}->${to} ${why2}`);
+          break;
+        }
+        const keyed = keyedShapes();
+        if (keyed.has(from) || keyed.has(to) || fs?.view === true || ts_?.view === true) {
+          ok = decline("dynslot-keyed-or-view-use");
+          break;
+        }
+        continue;
       }
       if (arm.lift.how !== "copy" && arm.lift.how !== "width") {
         ok = decline(`arm-${arm.lift.how}`);
@@ -175,8 +201,6 @@ export function unifyWidthShapes(L: Lowerer, functions: IrFunction[]): UnifyOutc
       }
     }
     if (!ok) continue;
-    const fs = L.shapes.get(from);
-    const ts_ = L.shapes.get(to);
     edges.push({ from, to, helper, fromKey: fs === undefined ? "" : viewShapeKey(fs.fields, fs.indexValue), toKey: ts_ === undefined ? "" : viewShapeKey(ts_.fields, ts_.indexValue) });
   }
 
@@ -243,6 +267,14 @@ export function unifyWidthShapes(L: Lowerer, functions: IrFunction[]): UnifyOutc
         if (had === undefined) {
           byName.set(f.name, f);
           continue;
+        }
+        // A checked-dynamic slot against a narrow type the edge scan accepted (dynSlotWhy): the merged slot is the dyn one.
+        if (canon(had.type) !== canon(f.type) && (had.type.kind === "dyn" || f.type.kind === "dyn")) {
+          const narrow = had.type.kind === "dyn" ? f.type : had.type;
+          if (narrow.kind !== "dyn" && dynSlotWhy(L, narrow) === null) {
+            if (had.type.kind !== "dyn") byName.set(f.name, f);
+            continue;
+          }
         }
         if (canon(had.type) !== canon(f.type)) return `conflict-field-type ${f.name}: ${canon(had.type)} vs ${canon(f.type)}`;
         if (subst(had.type) !== subst(f.type)) return `conflict-type-spelling ${f.name}: ${subst(had.type)} vs ${subst(f.type)}`;
@@ -396,6 +428,23 @@ export function unifyWidthShapes(L: Lowerer, functions: IrFunction[]): UnifyOutc
   // widest shape's layout is the one that does not move and the narrow ones
   // point at it. Ties go to the lowest-numbered id, for determinism.
   const remap = new Map<string, string>();
+  // The narrow side's accesses of a retyped slot: shape id (BEFORE the remap) -> field -> the type that side declared. Read off
+  // the shapes now, before the canonical shape's field list is replaced by the merged one.
+  const adapt = new Map<string, Map<string, IrType>>();
+  for (const [root, ms] of members) {
+    if (ms.size < 2) continue;
+    const m = merged.get(root)!;
+    for (const id of ms) {
+      for (const f of shapeOf(id).fields) {
+        const mf = m.fields.find((x) => x.name === f.name);
+        if (mf !== undefined && mf.type.kind === "dyn" && f.type.kind !== "dyn") {
+          const per = adapt.get(id) ?? new Map<string, IrType>();
+          per.set(f.name, f.type);
+          adapt.set(id, per);
+        }
+      }
+    }
+  }
   for (const [root, ms] of members) {
     if (ms.size < 2) continue;
     const m = merged.get(root)!;
@@ -434,7 +483,8 @@ export function unifyWidthShapes(L: Lowerer, functions: IrFunction[]): UnifyOutc
     }
   }
 
-  substitute(L, functions, remap, elided);
+  L.unifyRemap = remap;
+  substitute(L, functions, remap, elided, adapt);
 
   // SC6004 speaks at the sites that still copy, and only those.
   {
@@ -651,7 +701,7 @@ function collectDropNames(functions: IrFunction[], L: Lowerer, out: Map<string, 
  * argument. Types inside the shape and union tables move too — a merged
  * shape reached only as another shape's FIELD type is otherwise left naming
  * an id the module no longer declares. */
-function substitute(L: Lowerer, functions: IrFunction[], remap: Map<string, string>, elided: Set<string>): void {
+function substitute(L: Lowerer, functions: IrFunction[], remap: Map<string, string>, elided: Set<string>, adapt: Map<string, Map<string, IrType>>): void {
   const seen = new Set<object>();
   /** Returns the node that should stand in this slot — itself, except where
    * an elided helper's call collapses to its argument. */
@@ -684,6 +734,17 @@ function substitute(L: Lowerer, functions: IrFunction[], remap: Map<string, stri
         }
       }
     }
+    // A retyped slot: the narrow side's access names the shape it had BEFORE the id moves, and carries the type it declared.
+    const origShape = typeof o["shapeId"] === "string" ? (o["shapeId"] as string) : undefined;
+    const narrowOf = (field: unknown): IrType | undefined =>
+      origShape !== undefined && typeof field === "string" ? adapt.get(origShape)?.get(field) : undefined;
+    const litShape = o["kind"] === "recordLit" ? ((o["type"] as { shapeId?: string } | undefined)?.shapeId) : undefined;
+    if (litShape !== undefined && adapt.has(litShape)) {
+      for (const f of o["fields"] as { name: string; value: IrExpr; overflow?: true; drop?: true }[]) {
+        const nt = adapt.get(litShape)!.get(f.name);
+        if (nt !== undefined && f.overflow !== true && f.drop !== true) f.value = L.coerceToExpected(walk(f.value) as IrExpr, DYN);
+      }
+    }
     for (const key of Object.keys(o)) {
       if (key === "loc") continue;
       const v = o[key];
@@ -693,6 +754,19 @@ function substitute(L: Lowerer, functions: IrFunction[], remap: Map<string, stri
         continue;
       }
       o[key] = walk(v);
+    }
+    // The retyped slot is a dyn now: a typed read casts what the slot holds, a typed write boxes what it stores. In place, so a
+    // node reached through two parents is rewritten once for both.
+    if (o["kind"] === "recordGet" && narrowOf(o["field"]) !== undefined) {
+      const nt = narrowOf(o["field"])!;
+      const inner = { ...o, type: DYN } as IrExpr;
+      const cast = L.coerceToExpected(inner, nt);
+      for (const k of Object.keys(o)) delete o[k];
+      Object.assign(o, cast);
+      return o;
+    }
+    if (o["kind"] === "recordSet" && narrowOf(o["field"]) !== undefined) {
+      o["value"] = L.coerceToExpected(o["value"] as IrExpr, DYN);
     }
     // A view of a record whose two shapes became one is the record itself.
     if (o["kind"] === "recordSrcView" && o["srcShapeId"] === o["shapeId"]) return o["src"];
@@ -738,4 +812,45 @@ function substitute(L: Lowerer, functions: IrFunction[], remap: Map<string, stri
     drop(functions);
     drop(L.liftedFns);
   }
+}
+
+
+/** May a field of type `t` ride a checked-dynamic slot? The narrow side reads it back through the validated extraction
+ * (dynCheck) and writes it through the box, so the type needs both, and only the kinds whose box keeps IDENTITY qualify: a
+ * class instance is the same object, a scalar is a value. Records, arrays and unions would come back as a rebuilt copy, which
+ * is the defect this arm closes, so they keep the copy and the SC6004 advice. */
+function dynSlotWhy(L: Lowerer, t: IrType): string | null {
+  if (t.kind !== "object" && t.kind !== "string" && t.kind !== "f64" && t.kind !== "bool") return `dynslot-kind-${t.kind}`;
+  const getR = (id: string): IrRecordShape | undefined => L.shapes.get(id);
+  const getU = (id: string) => L.unions.get(id);
+  if (!canConvertToDyn(t, getR, getU)) return "dynslot-no-box";
+  if (!canDynCheckTo(t, getR, getU)) return "dynslot-no-check";
+  return null;
+}
+
+/** Shape ids some node reads or writes through a COMPUTED key, an order record, a view, or a null-proto marker. */
+function collectKeyedShapes(functions: IrFunction[], L: Lowerer): Set<string> {
+  const kinds = new Set([
+    "recordKeyGet", "recordKeySet", "recordKeyDelete", "recordOrd", "recordProtoHasKey", "recordOvfKeys", "recordOvfHas",
+    "recordOvfSlots", "recordOvfSlotGet", "recordView", "recordIsView", "recordViewSync", "recordHasSrc", "recordSrcGet",
+    "recordSrcSet", "recordSrcView", "recordNullProto", "recordKeyOrderIs",
+  ]);
+  const out = new Set<string>();
+  const seen = new Set<object>();
+  const walk = (n: unknown): void => {
+    if (n === null || typeof n !== "object" || seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) {
+      for (const x of n) walk(x);
+      return;
+    }
+    const o = n as Record<string, unknown>;
+    if (typeof o["kind"] === "string" && kinds.has(o["kind"] as string)) {
+      for (const k of ["shapeId", "srcShapeId"]) if (typeof o[k] === "string") out.add(o[k] as string);
+    }
+    for (const v of Object.values(o)) walk(v);
+  };
+  walk(functions);
+  walk(L.globalsList);
+  return out;
 }
