@@ -3477,7 +3477,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         const lb = liveRecvBagOf(L, expr.expression, locOf(expr));
         if (lb !== null) return { kind: "dynKeyGet", key: { kind: "strLit", value: expr.name.text, type: STRING, loc: locOf(expr) }, optional: true, value: lb, type: DYN, loc: locOf(expr) };
       }
-      if (!expr.questionDotToken && ((L.cjsLocalModuleBindingOf(expr.expression) && jsonRequireTypeOverride(L, expr.expression) === null) || L.cjsWholeClassRequireDepOf(expr.expression) !== null)) {
+      if (!expr.questionDotToken && ((L.cjsLocalModuleBindingOf(expr.expression) && jsonRequireTypeOverride(L, expr.expression) === null) || L.cjsWholeClassRequireDepOf(expr.expression) !== null || L.cjsSingleValueMemberOf(expr.expression, expr.name.text))) {
         // A binding whose dep is a class-expression WHOLE export
         // (`module.exports = class {…}`): the member surface is the
         // CLASS's — `C.name` folds to NamedEvaluation's answer and own
