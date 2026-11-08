@@ -248,7 +248,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
             `}`,
             ``,
           );
-          dataFn = `, &${dsym}`;
+          dataFn = `, 0, &${dsym}`;
         }
         entries.push(
           `  { ${cStringLiteral(Buffer.from(row.name, "utf8"))}, ${Buffer.byteLength(row.name, "utf8")}, ` +
@@ -280,7 +280,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
         defs.push(...d);
         entries.push(
           `  { ${cStringLiteral(Buffer.from(row.name, "utf8"))}, ${Buffer.byteLength(row.name, "utf8")}, ` +
-            `&${sym}, NULL, ${row.enumerable === true ? "1" : "false"} },`,
+            `&${sym}, NULL, ${row.enumerable === true ? "1" : "false"}, 0, ${row.accl ?? 0} },`,
         );
         continue;
       }
@@ -354,7 +354,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
       }
       entries.push(
         `  { ${cStringLiteral(Buffer.from(row.name, "utf8"))}, ${Buffer.byteLength(row.name, "utf8")}, ` +
-          `NULL, &${sym}, false, 0, ${valueFn} },`,
+          `NULL, &${sym}, false, 0, 0, ${valueFn} },`,
       );
     }
 
