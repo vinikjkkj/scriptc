@@ -13966,6 +13966,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24724-set-no-delay-before-connect-applies-at-dial.ts": {
+   "order": [
+    "<repo>/tests/corpus/24724-set-no-delay-before-connect-applies-at-dial.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2473-option-table-widths.js": {
    "order": [
     "<repo>/tests/corpus/2473-option-table-widths.js"
