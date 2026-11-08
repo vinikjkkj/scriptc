@@ -14763,6 +14763,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24845-forin-visits-inherited-enumerable-keys.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24845-forin-visits-inherited-enumerable-keys.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24846-forin-inherited-key-order-deletion-and-dedup.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24846-forin-inherited-key-order-deletion-and-dedup.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24847-forin-class-prototype-assignment.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24847-forin-class-prototype-assignment.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2485-inspect-circular-refs.ts": {
    "order": [
     "<repo>/tests/corpus/2485-inspect-circular-refs.ts"
