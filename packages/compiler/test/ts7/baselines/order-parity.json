@@ -14720,6 +14720,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24830-fs-callback-value-slot-is-undefined-on-failure.ts": {
+   "order": [
+    "<repo>/tests/corpus/24830-fs-callback-value-slot-is-undefined-on-failure.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2484-json-stringify-circular.ts": {
    "order": [
     "<repo>/tests/corpus/2484-json-stringify-circular.ts"
