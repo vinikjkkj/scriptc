@@ -6189,6 +6189,29 @@ class LlEmitter {
     return this.emitExpr(receiver);
   }
 
+  /** A BORROWED read of a plain local for an operation that never keeps a reference to it past the operation: the pointer is loaded out
+   * of the binding's slot with no retain and no frame entry. emit-exprs.ts's emitBorrowedLocal is the twin, and the soundness argument
+   * is the same: a NON-BOXED, non-captured local is nameable from this function alone, so no call and no getter can reassign it, and
+   * the writes spelled inside the expression are what isStableReceiverOperand rules out in `following`. Globals are refused (any callee
+   * can reassign one), as are boxed bindings. Everything else is the owned path. */
+  private emitBorrowedLocal(operand: IrExpr, following: IrExpr[]): LlValue {
+    if (
+      operand.kind === "varRef" &&
+      !operand.nullTest &&
+      isRefCounted(operand.type) &&
+      !this.captureIds.has(operand.localId) &&
+      following.every((f) => isStableReceiverOperand(f, operand.localId))
+    ) {
+      const b = this.binding(operand.localId);
+      if (b.kind !== "boxed" && b.kind !== "global") {
+        const t = this.B.tmp();
+        this.B.line(`${t} = load ${this.llType(b.type)}, ptr ${b.slot}`);
+        return { name: t, type: operand.type };
+      }
+    }
+    return this.emitExpr(operand);
+  }
+
   /** Loads a boxed binding's box pointer out of its slot. */
   private loadBox(slot: string): string {
     const b = this.B.tmp();
@@ -9319,7 +9342,7 @@ class LlEmitter {
         return out;
       }
       case "recordGet": {
-        const obj = this.emitExpr(e.obj);
+        const obj = this.emitBorrowedLocal(e.obj, []);
         // THE REQUIRED-ABSENT READ (IrRecordShape.reqabsent) - emit-exprs's
         // twin, same two scopes: only a shape a width completion targeted,
         // and only a field with no undefined arm of its own.
@@ -10604,13 +10627,8 @@ class LlEmitter {
       }
       case "fieldGet": {
         // A tag test over a plain local receiver reads through the borrowed local (no +1 copy of the receiver, no release).
-        let obj: { name: string; type: IrType };
-        const bo = e.tagTest && e.obj.kind === "varRef" ? this.binding(e.obj.localId) : null;
-        if (bo !== null && bo.kind !== "boxed" && bo.kind !== "global") {
-          const t0 = B.tmp();
-          B.line(`${t0} = load ${this.llType(bo.type)}, ptr ${bo.slot}`);
-          obj = { name: t0, type: e.obj.type };
-        } else obj = this.emitExpr(e.obj);
+        // EVERY field read over a plain local receiver borrows it (emit-exprs.ts's twin).
+        const obj: { name: string; type: IrType } = this.emitBorrowedLocal(e.obj, []);
         const { ptr, type } = this.classFieldPtr(obj.name, e.className, e.field);
         const v = this.loadField(ptr, type);
         if (e.nullTest) {
@@ -11816,7 +11834,7 @@ class LlEmitter {
         // Prototype-method dispatch on a dyn receiver: everything is
         // BORROWED by scr_dyn_invoke; the result is owned and may ride a
         // pending exception.
-        const recv = this.emitExpr(e.recv);
+        const recv = this.emitBorrowedLocal(e.recv, [...(e.methodKey !== undefined ? [e.methodKey] : []), ...e.args]);
         // The ELEMENT spelling evaluates its key between the receiver and
         // the arguments, which is JS's order for `o[k](a)`.
         const keyv = e.methodKey === undefined ? null : this.emitExpr(e.methodKey);
@@ -11962,7 +11980,7 @@ class LlEmitter {
         // non-optional form throws JS's TypeError on an undefined/null
         // receiver, and HANDLE receivers can throw the loud unmodeled-
         // property ladder on EITHER form; the result is owned (+1).
-        const d = this.emitExpr(e.value);
+        const d = this.emitBorrowedLocal(e.value, [e.key]);
         const k = this.emitExpr(e.key);
         const helper = this.dyn.dynKeyGetHelper();
         const t = B.tmp();
@@ -12118,8 +12136,8 @@ class LlEmitter {
         // dyn vs scalar strict equality: kind test + payload compare.
         // Operands emit in SOURCE order; the dyn side is found by type.
         // Both borrowed, no allocation.
-        const l = this.emitExpr(e.left);
-        const r = this.emitExpr(e.right);
+        const l = this.emitBorrowedLocal(e.left, [e.right]);
+        const r = this.emitBorrowedLocal(e.right, []);
         const [d, s, st] = e.left.type.kind === "dyn" ? [l, r, e.right.type] : [r, l, e.left.type];
         let test: string;
         if (st.kind === "dyn") {
@@ -12184,7 +12202,7 @@ class LlEmitter {
       case "dynTest": {
         // A pure kind compare on the dyn node — borrowed; only the truthy
         // form also reads a scalar payload (the runtime's ToBoolean).
-        const d = this.emitExpr(e.value);
+        const d = this.emitBorrowedLocal(e.value, []);
         let test: string;
         if (e.test === "class") {
           // `u instanceof C` over an unknown value: the boxed instance's own

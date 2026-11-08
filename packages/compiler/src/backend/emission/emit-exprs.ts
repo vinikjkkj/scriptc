@@ -118,6 +118,27 @@ export function emitStableReceiver(E: CEmitter, receiver: IrExpr, following: IrE
   return E.emitExpr(receiver);
 }
 
+/** A BORROWED read of a plain local for an operation that never keeps a reference to it past the operation: the value is read
+ * straight out of the binding (no retain, no frame entry, so no release). The binding owns the value for the whole expression, which is
+ * only true while nothing can overwrite it: a NON-BOXED local is nameable from this function alone (a capture would have boxed it), so
+ * no call and no getter can reassign it, and the writes spelled inside the expression are what `isStableReceiverOperand` rules out in
+ * `following` (the operands evaluated after this one). Globals are refused: any callee can reassign a global. Everything else falls back
+ * to the owned temp, so the conservative answer is the old code. */
+export function emitBorrowedLocal(E: CEmitter, operand: IrExpr, following: IrExpr[]): Temp {
+  if (
+    operand.kind === "varRef" &&
+    !operand.nullTest &&
+    isRefCounted(operand.type) &&
+    following.every((f) => isStableReceiverOperand(f, operand.localId))
+  ) {
+    const local = E.currentLocals.get(operand.localId);
+    if (local !== undefined && !local.boxed && !local.tdz && !E.globalsById.has(operand.localId)) {
+      return E.newBorrowedTemp(operand.type, mangleLocal(operand.localId));
+    }
+  }
+  return E.emitExpr(operand);
+}
+
 /** A read of an initialised plain (unboxed, non-TDZ) dyn local of the current function: the operation that looks at it can borrow
  * the variable itself instead of a retained copy. */
 function borrowedDynLocal(E: CEmitter, a: IrExpr): boolean {
@@ -2514,11 +2535,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
       case "recordGet": {
         // A tag test over a plain local receiver (an instance-override slot's prologue test) reads through the borrowed local: the
         // answer is one compare, so the +1 copy of the receiver and its release are skipped.
-        const borrowedLocal = e.kind === "fieldGet" && e.tagTest && e.obj.kind === "varRef"
-          ? E.currentLocals.get(e.obj.localId) : undefined;
-        const obj = borrowedLocal !== undefined && !borrowedLocal.boxed
-          ? { name: mangleLocal((e.obj as IrExpr & { kind: "varRef" }).localId), type: e.obj.type }
-          : E.emitExpr(e.obj);
+        // EVERY field read over a plain local receiver borrows it: the read completes before anything else runs, so the receiver
+        // cannot be released under it, and the retain/release pair around `this` (or any local instance) disappears.
+        const obj = emitBorrowedLocal(E, e.obj, []);
         // Runtime error classes use ScrError's own member names.
         const member =
           e.kind === "fieldGet" && RUNTIME_ERROR_CLASSES.has(e.className)
@@ -3013,7 +3032,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // Prototype-method dispatch on a dyn receiver: everything is
         // BORROWED by scr_dyn_invoke (temps release with the frame); the
         // result is owned and may ride a pending exception.
-        const recv = E.emitExpr(e.recv);
+        const recv = emitBorrowedLocal(E, e.recv, [...(e.methodKey !== undefined ? [e.methodKey] : []), ...e.args]);
         // The ELEMENT spelling evaluates its key between the receiver and
         // the arguments, which is JS's order for `o[k](a)`.
         const keyv = e.methodKey === undefined ? null : E.emitExpr(e.methodKey);
@@ -3332,7 +3351,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // receiver, and HANDLE receivers can throw the loud unmodeled-
         // property ladder on EITHER form, so both ride a fallible temp;
         // the result is owned (+1).
-        const d = E.emitExpr(e.value);
+        const d = emitBorrowedLocal(E, e.value, [e.key]);
         const k = E.emitExpr(e.key);
         const helper = dynKeyGetHelper(E);
         const call = `${helper}(${d.name}, ${k.name}, ${e.optional ? "true" : "false"})`;
@@ -3387,8 +3406,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // dyn vs scalar strict equality: kind test + payload compare.
         // Operands emit in SOURCE order (JS evaluation order); the dyn
         // side is found by type. Both borrowed, no allocation.
-        const l = E.emitExpr(e.left);
-        const r = E.emitExpr(e.right);
+        const l = emitBorrowedLocal(E, e.left, [e.right]);
+        const r = emitBorrowedLocal(E, e.right, []);
         const [d, s, st] = e.left.type.kind === "dyn" ? [l, r, e.right.type] : [r, l, e.left.type];
         // sameValue (Object.is): the number arm is SameValue (NaN equals
         // NaN, +0 differs from -0); every other arm is === already.
@@ -3422,7 +3441,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // answer through the scr_dyn_isl_* helpers (false on every other
         // kind, so the calls stay unconditional); narrowing never changes
         // representation (SEMANTICS.md).
-        const d = E.emitExpr(e.value);
+        const d = emitBorrowedLocal(E, e.value, []);
         // `u instanceof C` for a program class C on an unknown value: the
         // boxed instance's OWN preorder position against C's interval (the
         // same test the typed instanceof compiles to); false for every
