@@ -8545,6 +8545,14 @@ static void scr_dyn_obj_unset(ScrDyn *obj, const char *key, size_t key_len) {
       memmove(&obj->v.obj.entries[i], &obj->v.obj.entries[i + 1],
               (obj->v.obj.len - i - 1) * sizeof *obj->v.obj.entries);
       obj->v.obj.len--;
+      /* every hidden property that stood after the removed member now follows one entry fewer (see scr_dyn_obj_put_hidden's position) */
+      if (scr_dyn_ext(obj)->hidden != NULL) {
+        ScrDyn *hid = scr_dyn_ext_w(obj)->hidden;
+        for (size_t hi = 0; hi < hid->v.obj.len; hi++) {
+          ScrDyn *hq = hid->v.obj.entries[hi].value;
+          if (hq != NULL && hq->kind == SCR_DYN_ARR && hq->v.arr.len >= 7 && hq->v.arr.items[6]->kind == SCR_DYN_NUM && hq->v.arr.items[6]->v.num > (double)i) hq->v.arr.items[6]->v.num -= 1;
+        }
+      }
 #ifdef SCR_WRAP_WATCH
       scr_wrap_epoch++;
 #endif
@@ -8589,7 +8597,19 @@ static void scr_dyn_obj_put_hidden(ScrDyn *recv, const char *key, size_t key_len
    * member, and a define CONVERTS a property rather than layering one
    * over the other, so that one goes. */
   bool slot_held = scr_dyn_obj_entry_is_slot(recv, key, key_len);
-  if (!slot_held) scr_dyn_obj_unset(recv, key, key_len);
+  /* The member-table position the property stands at (the count of entries before it): a converted member keeps the place it had, a new
+   * property is created at the end. util.inspect's showHidden reads it to interleave the non-enumerable keys with the members in JS's
+   * creation order. */
+  double hpos = (double)recv->v.obj.len;
+  if (!slot_held) {
+    for (size_t pi = 0; pi < recv->v.obj.len; pi++) {
+      if (recv->v.obj.entries[pi].key_len == key_len && memcmp(recv->v.obj.entries[pi].key, key, key_len) == 0) {
+        hpos = (double)pi;
+        break;
+      }
+    }
+    scr_dyn_obj_unset(recv, key, key_len);
+  }
   {
     /* Is this property in the LEAD (see scr_hid_lead)? A redefinition keeps the position it had. A new one is in the lead
      * when no member-table entry exists (not even a slot) and the hidden property created last was in it too. */
@@ -8610,6 +8630,9 @@ static void scr_dyn_obj_put_hidden(ScrDyn *recv, const char *key, size_t key_len
       }
     }
     scr_dyn_arr_push(ent, scr_dyn_new_bool(lead));
+    /* a redefinition of a hidden property keeps the position it had */
+    if (old != NULL && old->kind == SCR_DYN_ARR && old->v.arr.len >= 7 && old->v.arr.items[6]->kind == SCR_DYN_NUM) hpos = old->v.arr.items[6]->v.num;
+    scr_dyn_arr_push(ent, scr_dyn_new_num(hpos));
   }
   scr_dyn_obj_set(scr_dyn_ext(recv)->hidden, key, key_len, ent); /* ownership moves in */
   /* …and CLAIM a position for a property that is enumerable and has none
