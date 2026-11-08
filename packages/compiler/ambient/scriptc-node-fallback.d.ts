@@ -3552,6 +3552,7 @@ declare module "dns" {
     getServers(): string[];
     setServers(servers: readonly string[]): void;
     cancel(): void;
+    setLocalAddress(ipv4: string, ipv6?: string): void;
   }
 }
 declare module "node:dns" {

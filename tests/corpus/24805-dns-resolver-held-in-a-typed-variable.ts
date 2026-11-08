@@ -10,6 +10,7 @@ probe.bind(0, "127.0.0.1", () => {
   probe.close(() => {
     const annotated: dns.Resolver = new dns.Resolver({ timeout: 100, tries: 1 });
     annotated.setServers(["127.0.0.1:" + closedPort]);
+    annotated.setLocalAddress("127.0.0.1", "::1");
     const servers: string[] = annotated.getServers();
     console.log(servers.length, servers[0] === "127.0.0.1:" + closedPort);
     const held = new Holder();
