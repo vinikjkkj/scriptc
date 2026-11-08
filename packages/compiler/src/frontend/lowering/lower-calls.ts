@@ -37,6 +37,7 @@ import { bufEncoding, dynStringReceiver, lowerArrayFromCall, lowerBytesStaticFro
 import { lowerDateLocaleFormat, lowerNumberLocaleFormat } from "./lower-numfmt.js";
 import { lowerBareRequireCall, lowerChildStreamMethodCall, lowerCreateRequireCall, lowerDateMethodCall, lowerDiffieHellmanCallbackCall, lowerRandomBytesCallbackCall, lowerDirentMethodCall, lowerPerfHooksCall, lowerProcStreamMethodCall, lowerErrorCaptureStackTraceCall, lowerReflectApplyCall, lowerReflectConstructCall, lowerStringFromCharCodeApply, lowerWatcherMethodCall } from "./lower-builtins.js";
 import { lowerSqliteMethodCall } from "./lower-sqlite.js";
+import { lowerDnsResolverMethodCall } from "./lower-dgram.js";
 import { lowerWrtcMethodCall } from "./lower-wrtc.js";
 import { dynSymbolKeyOf, classSymbolBag, lowerSubclassFieldRead, pureReemittable, classHasKeyHelper, classInMemberNames, droppableStatic, dynAssertionReceiver, fnOwnCounters, keyedCalleeAtUndefinedArm, spawnResStreamArg, jsonStringifySpawnStreamArg, unionArmBridge, fnOwnPropBox, fnOwnRoutableKey, fnOwnWhy, lowerPromiseAllTupleCall, lowerPromiseRejectCall, narrowBridgeDyn, probeLower, recordArmStringable, templateRawTextOf, armTagsTest } from "./lower-exprs.js";
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerHttpClientFnCall } from "./lower-server.js";
@@ -6460,6 +6461,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         L.lowerDcTracingChannelMethodCall(expr, expr.expression) ??
         L.lowerServerMethodCall(expr, expr.expression) ??
         L.lowerDgramMethodCall(expr, expr.expression) ??
+        lowerDnsResolverMethodCall(L, expr, expr.expression) ??
         // RTCPeerConnection / RTCDataChannel receivers.
         lowerWrtcMethodCall(L, expr, expr.expression) ??
         // node:test — skip/todo/only twins on named import bindings, the
