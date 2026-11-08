@@ -132,7 +132,7 @@ function cMemberTables(c: string): Map<string, string> {
     // or yes unless the value is still undefined) for a declared field.
     // The trailing ordinal and value slots (ScrDynClassMember's last fields) are read past, not
     // compared: a row with a method value names it, and that is checked by the runtime tests.
-    const ent = /\{ "([^"]*)", \d+, (NULL|&\w+), (NULL|&\w+), (true|false|[012])(?:, \d+)?(?:, (?:NULL|&\w+))? \}/g;
+    const ent = /\{ "([^"]*)", \d+, (NULL|&\w+), (NULL|&\w+), (true|false|[012])(?:, \d+)?(?:, \d+)?(?:, (?:NULL|&\w+))? \}/g;
     for (const e of m[2]!.matchAll(ent)) {
       rows.push({ name: e[1]!, get: e[2] !== "NULL", enumerable: e[4] !== "false" && e[4] !== "0" });
     }
@@ -149,7 +149,7 @@ function llMemberTables(ll: string, cstrs: Map<string, string>): Map<string, str
   for (const m of ll.matchAll(re)) {
     const rows: { name: string; get: boolean; enumerable: boolean }[] = [];
     const ent =
-      /%ScrDynClassMember \{ ptr @(sc_cs_\d+), i64 \d+, ptr (null|@[\w.]+), ptr (null|@[\w.]+), i8 ([012]), i8 \d+, ptr (?:null|@[\w.]+) \}/g;
+      /%ScrDynClassMember \{ ptr @(sc_cs_\d+), i64 \d+, ptr (null|@[\w.]+), ptr (null|@[\w.]+), i8 ([012]), i8 \d+, (?:i16 \d+, )?ptr (?:null|@[\w.]+) \}/g;
     for (const e of m[2]!.matchAll(ent)) {
       const nm = cstrs.get(e[1]!);
       if (nm === undefined) throw new Error(`llvm member row names an undefined cstr ${e[1]}`);

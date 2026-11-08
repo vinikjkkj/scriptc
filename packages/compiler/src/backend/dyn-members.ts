@@ -71,7 +71,7 @@ export type DynMemberRow =
   | { kind: "field"; name: string; type: IrType; absentWhenUndefined: boolean; ordk: number; hidden?: true; data?: IrFunction }
   /** A GETTER (`get:prop`): the emitter calls `fn` with the instance and
    * boxes the result. NOT enumerable, matching JS. */
-  | { kind: "accessor"; name: string; fn: IrFunction; isStatic?: true; enumerable?: true }
+  | { kind: "accessor"; name: string; fn: IrFunction; isStatic?: true; enumerable?: true; accl?: number }
   /** A METHOD: the emitter checks the dyn arguments into `fn`'s declared
    * parameter types and calls it with the instance as the receiver. NOT
    * enumerable — a class method is non-enumerable in JS, which is why
@@ -431,7 +431,17 @@ export function dynMemberTable(
       continue;
     }
     seen.add(name);
-    rows.push(accessor ? { kind: "accessor", name, fn } : { kind: "method", name, fn });
+    let accl = 0;
+    if (accessor) {
+      // the chain level of the declaring class and whether a setter is declared beside the getter (util.inspect's showHidden prints the
+      // prototype's accessors, three prototype levels up, as [Getter] / [Getter/Setter])
+      let level = 0;
+      for (let c: DynMemberClass | null = cls; c !== null; c = c.base, level++) {
+        if ((c.def.methods?.includes(raw) ?? false) || (c.def.dynMethods?.some((d) => d.name === raw) ?? false)) break;
+      }
+      accl = 1 | (names.includes(`set:${name}`) ? 2 : 0) | (Math.min(level, 3) << 2);
+    }
+    rows.push(accessor ? { kind: "accessor", name, fn, accl } : { kind: "method", name, fn });
   }
 
   return { rows, opaque, errorRooted };
