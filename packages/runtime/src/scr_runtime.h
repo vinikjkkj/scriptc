@@ -4968,10 +4968,11 @@ typedef struct ScrDynClassMember {
    * wrote it: the instance's order record (ScrDynClass.ord) holds these
    * ordinals in write order. Appended, like every trailing member. */
   unsigned char ordk;
-  /* An INSTANCE ACCESSOR row (`get x()`): bit 0 set; bit 1 = the class also declares a setter; bits 2-3 = how many classes up the chain the
-   * declaring class is (0 the instance's own class, capped at 3). util.inspect's showHidden lists the prototype's accessors from it.
-   * Placed in the padding after `ordk`: the row stays 48 bytes. */
-  unsigned char accl;
+  /* What util.inspect's showHidden needs to list a class's prototype and class value: bit 0 = an ACCESSOR row (`get x()`), bit 1 = the class
+   * also declares a setter, bits 2-3 = how many classes up the chain the declaring class is (0 the class itself, capped at 3), bit 4 = a
+   * setter with no getter (reads undefined), bits 8-15 = a method's declared parameter count + 1 (0 = unknown). Sits in the padding after
+   * `ordk`: the row stays 48 bytes. */
+  unsigned short accl;
   /* A METHOD's value (`o.m` read through the dyn side): the box over the interned unbound
    * thunk the static read names, +1, or NULL for a data member / a method with no thunk (the
    * box minted per read, which no identity test can equal). Emitted per method row. */
@@ -5103,7 +5104,8 @@ unsigned scr_fn_code_of(const void *fn);
 #define SCR_FNK_NOPROTO 4u
 #define SCR_FNK_INH_SHIFT 3u
 #define SCR_FNK_SHIFT 24
-#define SCR_FNK_CODE_MASK 0x1fu
+#define SCR_FNK_SLOPPY 32u /* an ordinary function written in sloppy mode: it has own `arguments` and `caller` (null) */
+#define SCR_FNK_CODE_MASK 0x3fu
 
 /* Function.prototype.toString of a function VALUE (scr_fntext.c, linked only
  * when a program converts a function to a string: moduleUsesFnText). The

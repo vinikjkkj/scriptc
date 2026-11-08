@@ -1479,7 +1479,13 @@ export function fnValueCodeOfNode(n: ts.Node): number {
   const mods = (n as { modifiers?: ts.NodeArray<ts.ModifierLike> }).modifiers;
   const isAsync = mods !== undefined && mods.some((m) => m.kind === ts.SyntaxKind.AsyncKeyword);
   const noProto = ts.isArrowFunction(n) || (ts.isMethodDeclaration(n) && !gen) || (isAsync && !gen);
-  return (isAsync ? 1 : 0) | (gen ? 2 : 0) | (noProto ? 4 : 0);
+  // an ordinary function written in sloppy mode (a CommonJS file with no "use strict" in force) owns `arguments` and `caller`
+  let sloppy = 0;
+  if ((ts.isFunctionDeclaration(n) || ts.isFunctionExpression(n)) && !isAsync && !gen && n.body !== undefined) {
+    const sf = n.getSourceFile();
+    if (!strictAt(sf, n.body.getStart(sf) + 1)) sloppy = 32;
+  }
+  return (isAsync ? 1 : 0) | (gen ? 2 : 0) | (noProto ? 4 : 0) | sloppy;
 }
 
 /** The kind code of a `.bind(...)` value whose target a declaration proves
