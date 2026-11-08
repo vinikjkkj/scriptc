@@ -1217,6 +1217,34 @@ function fsWriteOptionsSignalFree(L: Lowerer, fn: string, expr: ts.CallExpressio
                   !L.chainNarrowedType.has(n)) {
                 L.chainNarrowedType.set(n, L.checker.getUnknownType());
                 unknownParams.push(n);
+                // A Buffer-typed call off the dyn value (`data.subarray(1, 3)`, `data.slice(2)`) is typed Buffer by the checker while its
+                // receiver lowers dyn, so it lowers dyn too: the typed-array intrinsics a chained `.toString()`, `[0]` or `.length` would
+                // pick are handed a dyn receiver (an internal error). Every link of such a chain is bound dyn as well, the way the
+                // identifier is; chains that end in a string or number keep the checker's type, which a checked coercion meets.
+                let cur: ts.Node = n;
+                const links: ts.Node[] = [];
+                for (;;) {
+                  const par: ts.Node | undefined = cur.parent;
+                  if (par === undefined) break;
+                  if (ts.isParenthesizedExpression(par) || ts.isNonNullExpression(par) ||
+                      ((ts.isPropertyAccessExpression(par) || ts.isElementAccessExpression(par)) && par.expression === cur)) {
+                    links.push(par);
+                    cur = par;
+                    continue;
+                  }
+                  if (ts.isCallExpression(par) && par.expression === cur && L.mapTypeOf(L.typeOf(par))?.kind === "bytes") {
+                    links.push(par);
+                    for (const l of links) {
+                      if (L.chainNarrowedType.has(l)) continue;
+                      L.chainNarrowedType.set(l, L.checker.getUnknownType());
+                      unknownParams.push(l);
+                    }
+                    links.length = 0;
+                    cur = par;
+                    continue;
+                  }
+                  break;
+                }
               }
               return undefined;
             });
