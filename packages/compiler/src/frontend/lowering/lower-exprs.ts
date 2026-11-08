@@ -11644,6 +11644,28 @@ function lowerPairedArmUnionSpread(
   };
 }
 
+/** A pure member chain rooted at `this` (`this.options.redisOptions`, optionally defaulted with `?? {}` / `|| {}`): pure and re-lowering to
+ * the same value like an identifier chain. The checked-dynamic spread route asks its question of it too: a field the class holds
+ * checked-dynamically can carry a checker record type from a declaration (ioredis's `ClusterOptions`), and the record desugar would
+ * copy only the declared fields and refuse the `delete` after it. */
+function thisRootedChain(e: ts.Expression): boolean {
+  let x: ts.Expression = e;
+  while (ts.isParenthesizedExpression(x)) x = x.expression;
+  if (ts.isBinaryExpression(x) && (x.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken || x.operatorToken.kind === ts.SyntaxKind.BarBarToken)) {
+    let r: ts.Expression = x.right;
+    while (ts.isParenthesizedExpression(r)) r = r.expression;
+    if (!(ts.isObjectLiteralExpression(r) && r.properties.length === 0)) return false;
+    x = x.left;
+  }
+  for (;;) {
+    if (ts.isParenthesizedExpression(x)) { x = x.expression; continue; }
+    if (ts.isPropertyAccessExpression(x) && x.questionDotToken === undefined) { x = x.expression; continue; }
+    if (ts.isElementAccessExpression(x) && x.questionDotToken === undefined && ts.isStringLiteralLike(x.argumentExpression)) { x = x.expression; continue; }
+    break;
+  }
+  return x.kind === ts.SyntaxKind.ThisKeyword;
+}
+
 /** A read whose value is the same on a second lowering and whose evaluation
  * is nothing: an identifier, or a chain of non-optional member reads at
  * compile-time keys over one. That is the whole population the dyn-spread
@@ -11719,7 +11741,8 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       expr.properties.some(
         (p) =>
           ts.isSpreadAssignment(p) && conditionalSpreadOf(p.expression) === null &&
-          (pureMemberChain(p.expression) || nullishDefaultedChain(p.expression)) && probeLower(L, p.expression)?.type.kind === "dyn",
+          (pureMemberChain(p.expression) || nullishDefaultedChain(p.expression) || thisRootedChain(p.expression)) &&
+          probeLower(L, p.expression)?.type.kind === "dyn",
       )
     ) {
       return lowerDynSpreadObjectLiteral(L, expr);
