@@ -1699,7 +1699,7 @@ export function lowerConsoleInspectArg(
 /** The parsed options literal: the resolved depth (numeric; Infinity for
  * `null`), with every non-default knob fenced by name. */
 /** Node's option keys this runtime does not render yet (OPEN, ci-classes iofmtopts). */
-const INSPECT_OPEN_KEYS = new Set(["colors", "showHidden", "showProxy", "getters", "customInspect", "stylize"]);
+const INSPECT_OPEN_KEYS = new Set(["showHidden", "showProxy", "getters", "customInspect", "stylize"]);
 
 /** Literal truthiness of a compile-time constant option value, or null when
  * the value is only known at run time. */
@@ -1724,7 +1724,7 @@ function refuseOpenInspectOption(L: Lowerer, prop: ts.Node, key: string, value: 
     L.noLowering(`util.inspect with the '${what}' option`, prop, "this option is OPEN (ci-classes iofmtopts): the rendering for it is not lowered yet");
   if (key === "stylize") open("stylize");
   if (key === "customInspect" && literalTruthy(value) === false) open("customInspect: false");
-  if (["colors", "showHidden", "showProxy", "getters"].includes(key) && literalTruthy(value) === true) open(`${key}: true`);
+  if (["showHidden", "showProxy", "getters"].includes(key) && literalTruthy(value) === true) open(`${key}: true`);
   if (INSPECT_OPEN_KEYS.has(key) && key !== "customInspect" && literalTruthy(value) === null) open(`${key} (a run-time value)`);
   if (key === "customInspect" && literalTruthy(value) === null) open(`${key} (a run-time value)`);
   if (key === "compact" && literalTruthy(value) === null && valueMayBeTrue(L, value)) open("compact: true (a run-time value)");
@@ -1860,7 +1860,23 @@ function inspectOptionsDyn(L: Lowerer, node: ts.Expression, loc: SrcLoc): IrExpr
       return v.type.kind === "dyn" ? v : { kind: "dynFrom", value: v, type: DYN, loc };
     }
   }
-  return nonLiteralOptions(L, node, "the options must be an object literal, or a non-exported const bound to one that is used only as a util.inspect options argument");
+  // A value that is dynamic at run time (an `any` / `unknown` binding, a property read off one): the options object itself, read by the
+  // runtime's own options reader (scr_insp_opts_push) exactly as Node reads it. A statically typed record or class instance still
+  // refuses: its static shape could drop keys Node reads.
+  const lowered = L.lowerExpr(node);
+  if (lowered.type.kind === "dyn") return lowered;
+  return nonLiteralOptions(L, node, "the options must be an object literal, a non-exported const bound to one that is used only as a util.inspect options argument, or a value of type any/unknown");
+}
+
+/** Are the options only known at run time, or do they ask for colors? Then the value is boxed into the dynamic tree and rendered by the
+ * runtime's dyn renderer, the one place that knows how to colorize every leaf (a typed value is rendered by IR text that cannot). */
+function optionsNeedDynRender(L: Lowerer, node: ts.Expression): boolean {
+  if (ts.isObjectLiteralExpression(node)) return node.properties.some((p) => ts.isPropertyAssignment(p) && ts.isIdentifier(p.name) && p.name.text === "colors" && literalTruthy(p.initializer) !== false);
+  if (ts.isIdentifier(node)) {
+    const init = admittedConstOptions(L, node);
+    if (init !== null) return optionsNeedDynRender(L, init);
+  }
+  return true;
 }
 
 /** util.inspect(value, options) with options: the interned helper
@@ -1912,6 +1928,16 @@ function inspectWithOptionsHelper(L: Lowerer, t: IrType, loc: SrcLoc): string {
 /** util.inspect(value, options) with options: the value and the options are
  * evaluated in JS argument order (value first) as the helper's arguments. */
 function lowerInspectWithOptions(L: Lowerer, value: IrExpr, optsNode: ts.Expression, loc: SrcLoc): IrExpr {
+  if (optionsNeedDynRender(L, optsNode)) {
+    const dv: IrExpr = value.type.kind === "dyn" ? value : { kind: "dynFrom", value, type: DYN, loc };
+    return {
+      kind: "call",
+      callee: inspectWithOptionsHelper(L, DYN, loc),
+      args: [dv, inspectOptionsDyn(L, optsNode, loc)],
+      type: STRING,
+      loc,
+    };
+  }
   return {
     kind: "call",
     callee: inspectWithOptionsHelper(L, value.type, loc),
@@ -2499,6 +2525,49 @@ function typeTreeHasFunc(L: Lowerer, t: IrType, visiting: Set<string>): boolean 
   }
 }
 
+/** `%util.fmtopts(o, args)`: pushes `o` as the runtime's active inspect options, formats the packed argument list with the runtime formatter,
+ * and pops in a finally (a throwing render must not leave the options active). One helper for the program. */
+function formatWithOptionsHelper(L: Lowerer, loc: SrcLoc): string {
+  const key = "fmtopts";
+  const existing = L.inspectHelpers.get(key);
+  if (existing) return existing;
+  const name = `%util.fmtopts.${L.inspectHelpers.size}`;
+  L.inspectHelpers.set(key, name);
+  const libStmt = (fn: "insp.optsPush" | "insp.optsPop", args: IrExpr[]): IrStmt => ({
+    kind: "exprStmt",
+    expr: { kind: "libCall", fn, args, type: { kind: "void" }, loc },
+    loc,
+  });
+  const o: IrExpr = { kind: "varRef", localId: "o.0", type: DYN, loc };
+  const a: IrExpr = { kind: "varRef", localId: "a.0", type: DYN, loc };
+  const body: IrStmt[] = [
+    libStmt("insp.optsPush", [o]),
+    {
+      kind: "tryCatch",
+      tryBody: [{ kind: "return", value: { kind: "libCall", fn: "insp.format", args: [a], type: STRING, loc }, loc }],
+      catchBody: null,
+      catchLocalId: null,
+      finallyBody: [libStmt("insp.optsPop", [])],
+      loc,
+    },
+  ];
+  L.liftedFns.push({
+    name,
+    params: [
+      { localId: "o.0", name: "o", type: DYN },
+      { localId: "a.0", name: "a", type: DYN },
+    ],
+    returnType: STRING,
+    locals: [
+      { id: "o.0", name: "o", type: DYN, mutable: false },
+      { id: "a.0", name: "a", type: DYN, mutable: false },
+    ],
+    body,
+    loc,
+  });
+  return name;
+}
+
 /** util.format(...) / util.formatWithOptions({}, ...): the compile-time
  * %-substitution over a literal format string (formatWithOptionsInternal
  * ported exactly — the arg cursor, the args-exhausted guard, %c's
@@ -2513,12 +2582,14 @@ function lowerFormatCallIn(L: Lowerer, expr: ts.CallExpression, loc: SrcLoc, wit
   const argNodes = [...expr.arguments];
   if (withOptions) {
     const opts = argNodes.shift();
-    if (!opts || !ts.isObjectLiteralExpression(opts) || opts.properties.length > 0) {
-      L.noLowering(
-        "util.formatWithOptions with a non-empty options literal",
-        opts ?? expr,
-        "only the empty literal {} (the defaults — exactly util.format) is lowered",
-      );
+    if (!opts) L.noLowering("util.formatWithOptions without an options argument", expr);
+    if (!ts.isObjectLiteralExpression(opts) || opts.properties.length > 0) {
+      // Options that are not the empty literal: the runtime's formatter (scr_insp_format, formatWithOptionsInternal over dyn values)
+      // runs under the options the runtime reader installs, so every option the dyn renderer honours applies exactly as in Node.
+      if (argNodes.length === 0) return str("", loc);
+      const optsDyn = inspectOptionsDyn(L, opts, loc);
+      const pack = dynRestPack(L, argNodes, expr, loc);
+      return { kind: "call", callee: formatWithOptionsHelper(L, loc), args: [optsDyn, pack], type: STRING, loc };
     }
   }
   if (argNodes.length === 0) return str("", loc);
