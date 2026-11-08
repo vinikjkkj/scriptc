@@ -265,3 +265,10 @@ ScrDyn *scr_dyn_get_own_desc(ScrDyn *v, ScrStr *key) {
       return gopd_undefined();
   }
 }
+
+/* The untyped-key arm (a key that may be a symbol handle). It lives here, the one unit a program links for sym.anyGetOwnDesc (which implies the
+ * symbol unit is linked too), so the symbol unit never names this one. */
+ScrDyn *scr_dyn_any_get_own_desc(ScrDyn *recv, ScrDyn *key, ScrStr *keystr) {
+  const bool is_sym = key->kind == SCR_DYN_HANDLE && key->v.handle.tag == SCR_DYNH_SYMBOL && key->v.handle.ptr != NULL;
+  return is_sym ? scr_dyn_sym_get_own_desc(recv, (ScrSym *)key->v.handle.ptr) : scr_dyn_get_own_desc(recv, keystr);
+}
