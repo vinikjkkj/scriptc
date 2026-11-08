@@ -1019,6 +1019,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "sym.anyDelete": "scr_dyn_any_delete",
   "sym.anyHas": "scr_dyn_any_has",
   "sym.anyHasOwn": "scr_dyn_any_has_own",
+  "sym.anyGetOwnDesc": "scr_dyn_any_get_own_desc",
+  "sym.dynGetOwnDesc": "scr_dyn_sym_get_own_desc",
   "sym.anyDefine": "scr_dyn_any_define",
   "sym.isSym": "scr_dyn_is_symbol",
   "sym.dynTag": "scr_dyn_sym_tag",
@@ -1487,6 +1489,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   // (catchable SyntaxError) — all may-throw generics over the checked-dynamic tree.
   "dyn.objKeys": "scr_dyn_obj_keys",
   "dyn.hasOwn": "scr_dyn_has_own",
+  "dyn.getOwnPropDesc": "scr_dyn_get_own_desc",
   "dyn.forInAccessor": "scr_dyn_for_in_accessor",
   "dyn.forInKeys": "scr_dyn_forin_keys",
   "dyn.forInCertain": "scr_dyn_forin_certain",

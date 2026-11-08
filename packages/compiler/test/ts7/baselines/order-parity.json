@@ -26273,6 +26273,12 @@
     "<repo>/tests/corpus/24701-instance-assigned-function-over-a-generic-method-of-a-command-class-keeps-prototype-copies.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/24706-object-getownpropertydescriptor-over-every-dyn-kind.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24706-object-getownpropertydescriptor-over-every-dyn-kind.cjs"
+   ],
+   "diags": []
   }
  }
 }
