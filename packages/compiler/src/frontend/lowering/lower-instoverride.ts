@@ -27,7 +27,16 @@ function classDeclOfType(L: Lowerer, e: ts.Expression): ts.ClassLikeDeclaration 
   const sym = L.checker.getTypeAtLocation(e).getSymbol();
   if (!sym) return null;
   for (const d of L.checker.declarationsOf(sym)) {
-    if (ts.isClassDeclaration(d) || ts.isClassExpression(d)) return d;
+    if (!(ts.isClassDeclaration(d) || ts.isClassExpression(d))) continue;
+    // A package's types resolve the class to its declaration file (`Pipeline.d.ts`); the class the program collects is the same-named class of the
+    // `.js` twin, which is the declaration every class table is keyed by.
+    if (d.getSourceFile().isDeclarationFile && d.name !== undefined) {
+      const twinName = d.getSourceFile().fileName.replace(/\.d\.(c|m)?ts$/, ".$1js");
+      const twin = twinName === d.getSourceFile().fileName ? undefined : L.program.getSourceFile(twinName);
+      const impl = twin?.statements.find((x) => ts.isClassDeclaration(x) && x.name?.text === d.name!.text);
+      if (impl !== undefined) return impl as ts.ClassLikeDeclaration;
+    }
+    return d;
   }
   return null;
 }
@@ -98,8 +107,10 @@ export function scanInstanceOverrides(L: Lowerer, files: readonly ts.SourceFile[
         const cls = classDeclOfType(L, n.left.expression);
         const name = n.left.name.text;
         const isMethod = namesMethod(L, n.left);
-        if (cls !== null && !isMethod && late === null) late = lateMethodNames(L, files);
-        const isLate = cls !== null && !isMethod && late!.get(cls)?.has(name) === true;
+        // A `C.prototype.m = function` declaration is a LATE method (registered after the shape is collected) whether or not the checker resolved
+        // the member at this receiver (a package's types declare it on a base interface): the class's own late names decide.
+        if (cls !== null && late === null) late = lateMethodNames(L, files);
+        const isLate = cls !== null && late!.get(cls)?.has(name) === true;
         if (cls !== null && (isMethod || isLate)) {
           let per = L.instanceOverrides.get(cls);
           if (per === undefined) L.instanceOverrides.set(cls, (per = new Map()));
