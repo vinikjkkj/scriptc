@@ -5,6 +5,7 @@
  * core links without the lib/async runtimes (the runtime unit tests link
  * exact source lists). */
 #include "scr_runtime.h"
+#include "scr_winfs.h" /* scr_sys_open / scr_sys_fopen: UTF-8 paths over the wide APIs on Windows */
 
 #include <errno.h>
 #include <math.h>
@@ -28,7 +29,7 @@ void scr_bytes_io_oom(void) {
 /* ── fs (the Buffer forms of scr_lib.c's utf8 pair) ────────────────────── */
 
 ScrBytes *scr_fs_read_file_bytes(ScrStr *path) {
-  FILE *f = fopen(path->data, "rb");
+  FILE *f = scr_sys_fopen(path->data, "rb");
   if (!f) {
     scr_fs_throw(errno, "open", path);
     return NULL;
@@ -138,7 +139,7 @@ ScrDyn *scr_fs_read_file_sync_dyn(ScrStr *path, const ScrDyn *enc) {
 }
 
 void scr_fs_write_file_bytes(ScrStr *path, const ScrBytes *data) {
-  FILE *f = fopen(path->data, "wb");
+  FILE *f = scr_sys_fopen(path->data, "wb");
   if (!f) {
     scr_fs_throw(errno, "open", path);
     return;

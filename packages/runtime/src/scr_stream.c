@@ -46,6 +46,7 @@
  * C-side pipe hookup), and Transform completing writes without read-side
  * backpressure. */
 #include "scr_runtime.h"
+#include "scr_winfs.h" /* scr_sys_open / scr_sys_fopen: UTF-8 paths over the wide APIs on Windows */
 
 #include <errno.h>
 #include <fcntl.h>
@@ -4222,7 +4223,7 @@ static void scr_fs_stream_imm_open(ScrClosure *c) {
                     fb->mode >= 0 && fb->mode <= 4294967295.0);
   if (!mode_bad && !fb->flags_bad) {
     do {
-      fd = open(fb->path->data, fb->oflags | O_BINARY, (int)fb->mode);
+      fd = scr_sys_open(fb->path->data, fb->oflags | O_BINARY, (int)fb->mode);
     } while (fd < 0 && errno == EINTR);
   }
   if (fd >= 0 && fb->has_start) {

@@ -15,6 +15,7 @@
  *   scr_fs_exists never throws, like Node's existsSync.
  */
 #include "scr_runtime.h"
+#include "scr_winfs.h" /* Windows: UTF-8 paths over the wide APIs; elsewhere the plain POSIX names (scr_sys_open, scr_sys_fopen, ...) */
 
 #include <ctype.h>
 #ifndef _WIN32
@@ -87,7 +88,6 @@
 #include <iphlpapi.h> /* GetAdaptersAddresses (os.networkInterfaces) */
 #include <windows.h>
 #include <lmcons.h>  /* UNLEN for GetUserNameA */
-#include "scr_winfs.h" /* UTF-8 paths over the wide APIs: directory enumeration, and (below) open/stat/mkdir/... */
 
 
 /* CRT stat has no symlink view — lstat degrades to stat (divergence: a
@@ -2168,7 +2168,7 @@ void scr_fs_throw(int e, const char *op, const ScrStr *path) {
 /* ── fs operations ───────────────────────────────────────────────────── */
 
 ScrStr *scr_fs_read_file(ScrStr *path) {
-  FILE *f = fopen(path->data, "rb");
+  FILE *f = scr_sys_fopen(path->data, "rb");
   if (!f) {
     scr_fs_throw(errno, "open", path);
     return NULL;
@@ -2292,7 +2292,7 @@ ScrStr *scr_fs_realpath_native(ScrStr *path) {
 }
 
 static void scr_fs_write_common(ScrStr *path, ScrStr *data, const char *mode) {
-  FILE *f = fopen(path->data, mode);
+  FILE *f = scr_sys_fopen(path->data, mode);
   if (!f) {
     scr_fs_throw(errno, "open", path);
     return;
@@ -2317,7 +2317,7 @@ void scr_fs_write_file(ScrStr *path, ScrStr *data) {
 void scr_fs_write_file_mode(ScrStr *path, ScrStr *data, double mode) {
   /* O_BINARY: zero on POSIX; on Windows it keeps the CRT from translating
    * \n in these byte-exact writes (fopen's "wb" path already does). */
-  int fd = open(path->data, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, (mode_t)mode);
+  int fd = scr_sys_open(path->data, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, (mode_t)mode);
   if (fd < 0) {
     scr_fs_throw(errno, "open", path);
     return;
@@ -2419,7 +2419,7 @@ double scr_fs_open(ScrStr *path, ScrStr *flags) {
     scr_throw_error_msg_code(SCR_ERR_TYPE, msg, (size_t)len, "ERR_INVALID_ARG_VALUE");
     return 0;
   }
-  int fd = open(path->data, of | O_BINARY, 0666);
+  int fd = scr_sys_open(path->data, of | O_BINARY, 0666);
   if (fd < 0) {
     scr_fs_throw(errno, "open", path);
     return 0;
@@ -2543,7 +2543,7 @@ static void scr_fs_throw2(int e, const char *op, const ScrStr *src, const ScrStr
  * creation, like any open(2)). Every failure throws catchably with the
  * two-path message and the syscall name Node reports ("copyfile"). */
 void scr_fs_copyfile(ScrStr *src, ScrStr *dest) {
-  int in = open(src->data, O_RDONLY | O_BINARY);
+  int in = scr_sys_open(src->data, O_RDONLY | O_BINARY);
   if (in < 0) {
     scr_fs_throw2(errno, "copyfile", src, dest);
     return;
@@ -2555,7 +2555,7 @@ void scr_fs_copyfile(ScrStr *src, ScrStr *dest) {
     scr_fs_throw2(e, "copyfile", src, dest);
     return;
   }
-  int out = open(dest->data, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, st.st_mode & 07777);
+  int out = scr_sys_open(dest->data, O_WRONLY | O_CREAT | O_TRUNC | O_BINARY, st.st_mode & 07777);
   if (out < 0) {
     int e = errno;
     close(in);
