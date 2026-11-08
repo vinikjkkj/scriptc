@@ -13043,7 +13043,38 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       key = { kind: "toString", operand: key, type: STRING, loc: locOf(keyNode) };
     }
     if (key.type.kind !== "string") return null;
-    return { kind: "libCall", fn: "dyn.getOwnPropDesc", args: [receiver, key], type: DYN, loc };
+    const desc: IrExpr = { kind: "libCall", fn: "dyn.getOwnPropDesc", args: [receiver, key], type: DYN, loc };
+    // A BINDING of the result (a declaration, an assignment, a return) takes the checker's `PropertyDescriptor | undefined`: the descriptor
+    // object converts into that record through its own CHECKED builder (the accessor halves adapt to the record's function fields), not through the
+    // union arm matcher, whose function leaves match by exact signature only and would refuse a user getter. Any other context keeps the dyn value.
+    const parent = call.parent;
+    const binds = (ts.isVariableDeclaration(parent) && parent.initializer === call) ||
+      (ts.isBinaryExpression(parent) && parent.operatorToken.kind === ts.SyntaxKind.EqualsToken && parent.right === call) ||
+      ts.isReturnStatement(parent);
+    const expected = binds ? L.mapTypeOf(L.typeOf(call)) : null;
+    if (expected !== null && expected !== undefined && expected.kind === "union") {
+      const arms = L.unions.get(expected.unionId)?.arms ?? [];
+      const rec = arms.find((a) => a.kind === "record");
+      if (rec !== undefined && arms.length === 2 && arms.some((a) => isUnitType(a))) {
+        const tmp = L.declareHiddenLocal("%gopd", DYN);
+        const ref = (): IrExpr => ({ kind: "varRef", localId: tmp.id, type: DYN, loc });
+        return {
+          kind: "seqExpr",
+          stmts: [{ kind: "varDecl", localId: tmp.id, init: desc, loc }],
+          result: {
+            kind: "ternary",
+            cond: { kind: "dynTest", test: "undefined", value: ref(), type: BOOL, loc },
+            then: L.coerceToExpected({ kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc }, expected),
+            else_: L.coerceToExpected({ kind: "dynCheck", value: ref(), type: rec, loc }, expected),
+            type: expected,
+            loc,
+          },
+          type: expected,
+          loc,
+        };
+      }
+    }
+    return desc;
   }
 
   /** Layer 1 descriptor: `Object.getOwnPropertyDescriptor(K.prototype, "m")`
