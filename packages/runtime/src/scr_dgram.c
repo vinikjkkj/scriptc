@@ -924,6 +924,28 @@ ScrError *scr_dns_error_new(ScrStr *msg /*borrowed*/) {
  * hint flags, and `all` (every address in getaddrinfo's order, delivered through the adapter as "F:address" lines, family -1). */
 static int scr_dns_lookup_flags = 0;
 static bool scr_dns_lookup_all = false;
+/* `order` / `verbatim` of the same call: how the getaddrinfo answers are ordered before the first is taken (or `all` is built). Node 24's default
+ * is verbatim (the resolver's own order); ipv4first and ipv6first are a STABLE partition by family (`verbatim: false` is ipv4first). */
+#define SCR_DNS_ORDER_VERBATIM 0
+#define SCR_DNS_ORDER_IPV4FIRST 1
+#define SCR_DNS_ORDER_IPV6FIRST 2
+static int scr_dns_lookup_order = SCR_DNS_ORDER_VERBATIM;
+
+/* The family of one getaddrinfo answer in the order the lookup uses: 4, 6, or 0 for anything the lookup skips. */
+static int scr_dns_ai_family(const struct addrinfo *a) { return a->ai_family == AF_INET6 ? 6 : a->ai_family == AF_INET ? 4 : 0; }
+
+/* The answers of `res` that survive the lookup (families 4 and 6), stably partitioned by `order`, into `out` (capacity = their count). */
+static size_t scr_dns_order_answers(struct addrinfo *res, int order, struct addrinfo **out) {
+  size_t n = 0;
+  int first = order == SCR_DNS_ORDER_IPV6FIRST ? 6 : 4;
+  if (order == SCR_DNS_ORDER_VERBATIM) {
+    for (struct addrinfo *a = res; a != NULL; a = a->ai_next) if (scr_dns_ai_family(a) != 0) out[n++] = a;
+    return n;
+  }
+  for (struct addrinfo *a = res; a != NULL; a = a->ai_next) if (scr_dns_ai_family(a) == first) out[n++] = a;
+  for (struct addrinfo *a = res; a != NULL; a = a->ai_next) if (scr_dns_ai_family(a) != 0 && scr_dns_ai_family(a) != first) out[n++] = a;
+  return n;
+}
 
 void scr_dns_lookup(ScrStr *hostname, double family, ScrClosure *cb, ScrDnsLookupFn fn) {
 #ifdef _WIN32
@@ -984,25 +1006,34 @@ void scr_dns_lookup(ScrStr *hostname, double family, ScrClosure *cb, ScrDnsLooku
     hints.ai_flags = scr_dns_lookup_flags;
     struct addrinfo *res = NULL;
     int rc = getaddrinfo(hostname->data, NULL, &hints, &res);
+    size_t nans = 0;
+    struct addrinfo **ans = NULL;
+    if (rc == 0 && res) {
+      for (struct addrinfo *a = res; a != NULL; a = a->ai_next) nans++;
+      ans = (struct addrinfo **)malloc((nans + 1) * sizeof *ans);
+      if (!ans) scr_dgram_oom();
+      nans = scr_dns_order_answers(res, scr_dns_lookup_order, ans);
+    }
     if (rc == 0 && res && scr_dns_lookup_all) {
       char lines[2048];
       size_t lo = 0;
-      for (struct addrinfo *a = res; a != NULL && lo + 80 < sizeof lines; a = a->ai_next) {
+      for (size_t i = 0; i < nans && lo + 80 < sizeof lines; i++) {
+        const struct addrinfo *a = ans[i];
         char ip[64];
         if (a->ai_family == AF_INET6) inet_ntop(AF_INET6, &((struct sockaddr_in6 *)a->ai_addr)->sin6_addr, ip, sizeof ip);
-        else if (a->ai_family == AF_INET) inet_ntop(AF_INET, &((struct sockaddr_in *)a->ai_addr)->sin_addr, ip, sizeof ip);
-        else continue;
+        else inet_ntop(AF_INET, &((struct sockaddr_in *)a->ai_addr)->sin_addr, ip, sizeof ip);
         lo += (size_t)snprintf(lines + lo, sizeof lines - lo, "%s%c:%s", lo ? "\n" : "", a->ai_family == AF_INET6 ? '6' : '4', ip);
       }
       p->family = -1;
       p->addr = scr_str_new(lines, lo);
     } else if (rc == 0 && res) {
+      const struct addrinfo *a = nans > 0 ? ans[0] : res;
       char ip[64] = "0.0.0.0";
-      if (res->ai_family == AF_INET6) {
-        inet_ntop(AF_INET6, &((struct sockaddr_in6 *)res->ai_addr)->sin6_addr, ip, sizeof ip);
+      if (a->ai_family == AF_INET6) {
+        inet_ntop(AF_INET6, &((struct sockaddr_in6 *)a->ai_addr)->sin6_addr, ip, sizeof ip);
         p->family = 6;
       } else {
-        inet_ntop(AF_INET, &((struct sockaddr_in *)res->ai_addr)->sin_addr, ip, sizeof ip);
+        inet_ntop(AF_INET, &((struct sockaddr_in *)a->ai_addr)->sin_addr, ip, sizeof ip);
         p->family = 4;
       }
       p->addr = scr_str_new(ip, strlen(ip));
@@ -1024,6 +1055,7 @@ void scr_dns_lookup(ScrStr *hostname, double family, ScrClosure *cb, ScrDnsLooku
       p->errmsg = scr_str_new(msg, strlen(msg));
       p->addr = NULL; /* Node passes undefined here */
     }
+    free(ans);
     if (res) freeaddrinfo(res);
   }
   /* Queue order: literals (nextTick) before resolver answers, FIFO within
@@ -2179,6 +2211,7 @@ static ScrDyn *scr_dns_lookup_thunk(ScrClosure *clo, ScrDyn *const *args, size_t
   double family = 0;
   int flags = 0;
   bool all = false;
+  int order = SCR_DNS_ORDER_VERBATIM;
   if (opt != NULL && opt->kind == SCR_DYN_NUM) {
     family = opt->v.num;
   } else if (opt != NULL && opt->kind == SCR_DYN_OBJ) {
@@ -2189,6 +2222,31 @@ static ScrDyn *scr_dns_lookup_thunk(ScrClosure *clo, ScrDyn *const *args, size_t
     if (h != NULL && h->kind == SCR_DYN_NUM) flags = (int)h->v.num;
     ScrDyn *a = scr_dyn_obj_get(opt, "all", 3);
     if (a != NULL && a->kind == SCR_DYN_BOOL) all = a->v.b;
+    /* lib/dns.js: `order` must be one of the three (null/undefined are absent), `verbatim` a boolean whenever present; `order` wins when
+     * both are given, `verbatim: false` is ipv4first and `verbatim: true` verbatim. */
+    ScrDyn *o = scr_dyn_obj_get(opt, "order", 5);
+    bool has_order = o != NULL && o->kind != SCR_DYN_UNDEF && o->kind != SCR_DYN_NULL;
+    if (has_order) {
+      const char *os = o->kind == SCR_DYN_STR ? o->v.str->data : NULL;
+      if (os != NULL && strcmp(os, "verbatim") == 0) order = SCR_DNS_ORDER_VERBATIM;
+      else if (os != NULL && strcmp(os, "ipv4first") == 0) order = SCR_DNS_ORDER_IPV4FIRST;
+      else if (os != NULL && strcmp(os, "ipv6first") == 0) order = SCR_DNS_ORDER_IPV6FIRST;
+      else {
+        char rbuf[256], msg[400];
+        int n = snprintf(msg, sizeof msg, "The property 'options.order' must be one of: 'verbatim', 'ipv4first', 'ipv6first'. Received %s",
+                         scr_dyn_inspect_lite(o, rbuf, sizeof rbuf));
+        scr_throw_error_msg_code(SCR_ERR_TYPE, msg, (size_t)n, "ERR_INVALID_ARG_VALUE");
+        return NULL;
+      }
+    }
+    ScrDyn *vb = scr_dyn_obj_get(opt, "verbatim", 8);
+    if (vb != NULL && vb->kind != SCR_DYN_UNDEF && vb->kind != SCR_DYN_NULL) {
+      if (vb->kind != SCR_DYN_BOOL) {
+        scr_dyn_prop_type_fail("options.verbatim", "of type boolean", vb);
+        return NULL;
+      }
+      if (!has_order) order = vb->v.b ? SCR_DNS_ORDER_VERBATIM : SCR_DNS_ORDER_IPV4FIRST;
+    }
   }
   if (family != 0 && family != 4 && family != 6) {
     char msg[120];
@@ -2210,9 +2268,11 @@ static ScrDyn *scr_dns_lookup_thunk(ScrClosure *clo, ScrDyn *const *args, size_t
   scr_box_set_ref(c->caps[0], scr_dyn_retain(cb));
   scr_dns_lookup_flags = flags;
   scr_dns_lookup_all = all;
+  scr_dns_lookup_order = order;
   scr_dns_lookup(hs, family, c, scr_dns_dyn_lookup_fn);
   scr_dns_lookup_flags = 0;
   scr_dns_lookup_all = false;
+  scr_dns_lookup_order = SCR_DNS_ORDER_VERBATIM;
   scr_str_release(hs);
   return scr_dyn_undefined();
 }
