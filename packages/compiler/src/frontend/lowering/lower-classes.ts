@@ -3412,6 +3412,31 @@ export function collectClassShape(L: Lowerer, decl: ts.ClassDeclaration): void {
     return false;
   }
 
+/** JS `fn.length` of a function-like's parameters: those before the first default or rest (a `this` parameter is type space). */
+function paramLength(params: readonly ts.ParameterDeclaration[]): number {
+  let n = 0;
+  for (const p of params) {
+    if (ts.isIdentifier(p.name) && p.name.text === "this") continue;
+    if (p.dotDotDotToken !== undefined || p.initializer !== undefined) break;
+    n++;
+  }
+  return n;
+}
+
+/** `memberLengths` of a class: each instance method and accessor by its `methods` spelling (`m`, `get:x`, `set:x`). */
+function memberLengthsOf(decl: ts.ClassLikeDeclaration): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const m of decl.members) {
+    if ((ts.getCombinedModifierFlags(m as ts.Declaration) & ts.ModifierFlags.Static) !== 0) continue;
+    if (m.name === undefined || !(ts.isIdentifier(m.name) || ts.isStringLiteral(m.name))) continue;
+    const nm = m.name.text;
+    if (ts.isMethodDeclaration(m)) out[nm] = paramLength(m.parameters);
+    else if (ts.isGetAccessorDeclaration(m)) out[`get:${nm}`] = paramLength(m.parameters);
+    else if (ts.isSetAccessorDeclaration(m)) out[`set:${nm}`] = paramLength(m.parameters);
+  }
+  return out;
+}
+
 export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration, jsNameOverride?: string,
     inst?: { family: ClassInfo; name: string; bindings: Map<ts.Symbol, IrType>; typeArgsText: string; ordinal: number; tsRef?: ts.Type },
     /** MIXIN instantiation mode (lower-mixins.ts): the class inside a
@@ -6012,7 +6037,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
           ],
           ...(keyOrder !== undefined ? { keyOrder } : {}),
           ...(orderedNames.length > 0 ? { ordered: orderedNames } : {}),
-          ...(methods.size > 0 ? { methods: [...methods.keys()] } : {}),
+          ...(methods.size > 0 ? { methods: [...methods.keys()], memberLengths: memberLengthsOf(decl) } : {}),
           ...(absentTrackedFields.size > 0 ? { absentFields: [...absentTrackedFields] } : {}),
           ...(absentInitFields.size > 0 ? { absentInit: [...absentInitFields] } : {}),
           ...(lazySlots.size > 0 ? { lazyCycle: [...lazySlots] } : {}),
@@ -6142,7 +6167,10 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
         // class's method table after the IR definition captured its list, so
         // the definition is refreshed: a subclass overriding one of them
         // dispatches through a vtable slot the base's definition must name.
-        if (info.methods.size > 0) info.def.methods = [...info.methods.keys()];
+        if (info.methods.size > 0) {
+          info.def.methods = [...info.methods.keys()];
+          info.def.memberLengths = memberLengthsOf(decl);
+        }
         registerProtoData(L, info, decl, classSymbol, (n) => undefWrittenPropNames(L).has("*") || undefWrittenPropNames(L).has(n));
       }
     }
@@ -9299,21 +9327,21 @@ export function dynStaticFns(L: Lowerer, info: ClassInfo): { fns: IrFunction[]; 
   const getRec = (id: string) => L.shapes.get(id);
   const getUni = (id: string) => L.unions.get(id);
   const fns: IrFunction[] = [];
-  const list: { name: string; fn: string }[] = [];
+  const list: { name: string; fn: string; len?: number }[] = [];
   const ref = (l: IrLocal): IrExpr => ({ kind: "varRef", localId: l.id, type: l.type, loc });
   const ret = (v: boolean): IrStmt => ({ kind: "return", value: { kind: "boolLit", value: v, type: BOOL, loc }, loc });
 
   // methods and getters in SOURCE order (util.inspect's showHidden lists a class value's own keys in definition order)
-  const staticMembers: { name: string; fn: string; pos: number }[] = [];
+  const staticMembers: { name: string; fn: string; pos: number; len?: number }[] = [];
   for (const [m, v] of info.staticMethods ?? []) {
     if (m.startsWith("#")) continue;
-    staticMembers.push({ name: m, fn: `%${className}.static:${m}`, pos: v.member.pos });
+    staticMembers.push({ name: m, fn: `%${className}.static:${m}`, pos: v.member.pos, len: paramLength(v.member.parameters) });
   }
   for (const [key, v] of info.staticAccessors ?? []) {
     if (key.startsWith("get:") && !key.startsWith("get:#")) staticMembers.push({ name: key, fn: `%${className}.static:${key}`, pos: v.member.pos });
   }
   staticMembers.sort((x, y) => x.pos - y.pos);
-  for (const sm of staticMembers) list.push({ name: sm.name, fn: sm.fn });
+  for (const sm of staticMembers) list.push({ name: sm.name, fn: sm.fn, ...(sm.len !== undefined ? { len: sm.len } : {}) });
   const fieldNames: string[] = [];
   for (const f of info.staticFields) {
     if (f.name.startsWith("#") || f.lying === true || f.viaPrototype === true) continue;

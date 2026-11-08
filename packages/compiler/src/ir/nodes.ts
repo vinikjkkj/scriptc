@@ -1801,6 +1801,8 @@ export interface IrClassDef {
    * `get:<prop>` / `set:<prop>` entries — names no user identifier can
    * spell — and behave as ordinary methods here. */
   methods?: string[];
+  /** JS `fn.length` of each own method/accessor in `methods` (`m`, `get:x`, `set:x`): the parameters before the first default or rest. */
+  memberLengths?: Record<string, number>;
   /** IMPLICIT-ANY methods of this class (untyped JS parameters): they own no
    * vtable slot and no `%<class>.<method>` function, because each call site
    * monomorphizes them. A class whose instances box into a dyn value still
@@ -1828,7 +1830,7 @@ export interface IrClassDef {
    * needs, `%dynStaticSet(key, value): boolean` and `%dynNew(args): dyn`.
    * OWN statics only (a subclass's table is flattened over its chain at
    * emission, derived first). Only classes some dyn box can hold carry it. */
-  dynStatics?: { name: string; fn: string }[];
+  dynStatics?: { name: string; fn: string; len?: number }[];
   /** On the STATIC-SIDE class of a per-evaluation class (`%E.%static`): the
    * name of the instance class `%E` it is the evaluation of. A dyn box of an
    * evaluation is a class VALUE (a function object), not an instance box, and
