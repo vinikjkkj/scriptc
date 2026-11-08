@@ -9337,7 +9337,10 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
       indexValue === undefined &&
       checker.getCallSignatures(widened).length === 0 &&
       checker.getConstructSignatures(widened).length === 0 &&
-      !(anonSym !== undefined && checker.declarationsOf(anonSym).some((d) => ts.isObjectLiteralExpression(d)))
+      // ...and the empty literal that is the VALUE OF A PROPERTY of another literal in authored JavaScript (`{ e: {} }`, the
+      // placeholder idiom: the property is assigned the real value later) is the same top type: the slot is assigned things
+      // the empty record cannot hold (standard-as-callback's `errorObj.e = <Error>` stored an empty record and lost the Error).
+      !(anonSym !== undefined && checker.declarationsOf(anonSym).some((d) => ts.isObjectLiteralExpression(d) && !(ts.isPropertyAssignment(d.parent) && ts.isObjectLiteralExpression(d.parent.parent) && isJsSourceFile(d.getSourceFile()))))
     ) {
       return DYN;
     }
