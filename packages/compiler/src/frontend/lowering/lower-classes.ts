@@ -2184,7 +2184,28 @@ export function prototypeInstallerSteps(L: Lowerer, e: ts.Expression, classSymbo
   let sym = L.checker.getSymbolAtLocation(ts.isPropertyAccessExpression(nameNode) ? nameNode.name : nameNode);
   if (sym !== undefined && (sym.flags & ts.SymbolFlags.Alias) !== 0) sym = L.checker.getAliasedSymbol(sym);
   if (sym === undefined) return null;
-  const fnDecl = L.checker.declarationsOf(sym).find((d) => ts.isFunctionDeclaration(d) && d.body !== undefined) as ts.FunctionDeclaration | undefined;
+  // The declaration the symbol names: a function declaration, or (a CommonJS export) `exports.f = f` whose right side names one.
+  const fnDeclOf = (sy: ts.Symbol, depth: number): ts.FunctionDeclaration | undefined => {
+    for (const d of L.checker.declarationsOf(sy)) {
+      if (ts.isFunctionDeclaration(d) && d.body !== undefined) return d;
+      // A package ships `x.js` with a `x.d.ts` twin, and the importer's property resolves to the declaration file's body-less function: the
+      // implementation is the same-named top-level function of the twin source.
+      if (ts.isFunctionDeclaration(d) && d.name !== undefined && d.getSourceFile().isDeclarationFile) {
+        const twinName = d.getSourceFile().fileName.replace(/\.d\.(c|m)?ts$/, ".$1js");
+        const twin = twinName === d.getSourceFile().fileName ? undefined : L.program.getSourceFile(twinName);
+        const impl = twin?.statements.find((x) => ts.isFunctionDeclaration(x) && x.name?.text === d.name!.text && x.body !== undefined) as ts.FunctionDeclaration | undefined;
+        if (impl !== undefined) return impl;
+      }
+      if (depth < 3 && ts.isBinaryExpression(d) && d.operatorToken.kind === ts.SyntaxKind.EqualsToken && ts.isIdentifier(d.right)) {
+        let rs = L.checker.getSymbolAtLocation(d.right);
+        if (rs !== undefined && (rs.flags & ts.SymbolFlags.Alias) !== 0) rs = L.checker.getAliasedSymbol(rs);
+        const r = rs === undefined ? undefined : fnDeclOf(rs, depth + 1);
+        if (r !== undefined) return r;
+      }
+    }
+    return undefined;
+  };
+  const fnDecl = fnDeclOf(sym, 0);
   if (fnDecl === undefined || fnDecl.body === undefined || fnDecl.parameters.length !== 1 || !ts.isIdentifier(fnDecl.parameters[0]!.name)) return null;
   const pname = (fnDecl.parameters[0]!.name as ts.Identifier).text;
   const isParam = (x: ts.Expression): boolean => ts.isIdentifier(x) && x.text === pname;
