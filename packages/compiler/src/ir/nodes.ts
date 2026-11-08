@@ -4228,6 +4228,8 @@ export type IrLibFn =
   | "sym.anyDelete"
   | "sym.anyHas"
   | "sym.anyHasOwn"
+  | "sym.anyGetOwnDesc"
+  | "sym.dynGetOwnDesc"
   | "sym.anyDefine"
   | "sym.dynGetSelf"
   | "sym.dynGetOpt"
@@ -6030,6 +6032,8 @@ export type IrLibFn =
    * ("Cannot convert undefined or null to object"). */
   | "dyn.objKeys"
   | "dyn.hasOwn"
+  /** Object.getOwnPropertyDescriptor over a dyn receiver (scr_dyn_gopd.c): the own property's descriptor object or undefined; throws on nullish. */
+  | "dyn.getOwnPropDesc"
   /** The for-in visit guard's accessor arm: an own enumerable accessor key of a dyn object (no getter runs). */
   | "dyn.forInAccessor"
   /** for-in's key list over a dyn object: Object.keys, plus an EventEmitter-rooted instance's inherited enumerable keys. */
@@ -11257,7 +11261,7 @@ export function dynReflectionSite(functions: readonly IrFunction[], fenced: (op:
   let fresh: ((e: unknown, fnIdx: number) => boolean) | null = null;
   let curIdx = 0;
   const REFLECT_FNS = new Set([
-    "dyn.assign", "dyn.assignAll", "dyn.hasOwn", "dyn.forInKeys", "dyn.forInCertain", "dyn.forInPlain", "dyn.forInAccessor",
+    "dyn.assign", "dyn.assignAll", "dyn.hasOwn", "dyn.getOwnPropDesc", "dyn.forInKeys", "dyn.forInCertain", "dyn.forInPlain", "dyn.forInAccessor",
     "dyn.objKeys", "dyn.objValues", "dyn.objEntries", "dyn.structuredClone", "dyn.cloneOwn", "dyn.ownNamesCtor",
     "dyn.ownNamesFence", "dyn.objCreateProto", "dyn.objCreateDescs",
   ]);
@@ -13038,6 +13042,27 @@ export function moduleUsesWrapWatch(mod: IrModule): boolean {
     }
     const node = v as { kind?: unknown; fn?: unknown };
     if (node.kind === "libCall" && (node.fn === "dyn.primInit" || node.fn === "dyn.setPrototypeOf")) {
+      found = true;
+      return;
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
+/** The program lowers Object.getOwnPropertyDescriptor over a dyn receiver (dyn.getOwnPropDesc): compiles scr_dyn_gopd.c. A LINK GATE, not a fence:
+ * a wrong `false` is a loud unresolved-symbol link error, never a wrong answer. */
+export function moduleUsesDynGopd(mod: IrModule): boolean {
+  let found = false;
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown };
+    if (node.kind === "libCall" && (node.fn === "dyn.getOwnPropDesc" || node.fn === "sym.anyGetOwnDesc")) {
       found = true;
       return;
     }
@@ -15008,6 +15033,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "dyn.objKeys",
   "dyn.forInKeys",
   "dyn.hasOwn",
+  "dyn.getOwnPropDesc",
   "dyn.assign",
   // variadic Object.assign: spread flattening throws V8's spread-call
   // TypeErrors; the final copy throws ToObject on a nullish target
@@ -15031,6 +15057,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "sym.anyDelete",
   "sym.anyHas",
   "sym.anyHasOwn",
+  "sym.anyGetOwnDesc",
+  "sym.dynGetOwnDesc",
   "sym.anyDefine",
   "sym.dynGetSelf",
   "sym.dynGetOpt",

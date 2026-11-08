@@ -26727,6 +26727,12 @@
     "<repo>/tests/corpus/24704-installer-function-reached-through-a-commonjs-export-alias/main.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/24706-object-getownpropertydescriptor-over-every-dyn-kind.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24706-object-getownpropertydescriptor-over-every-dyn-kind.cjs"
+   ],
+   "diags": []
   }
  }
 }
