@@ -26886,6 +26886,36 @@
     "<repo>/tests/diagnostics/util-inspect-options-typed-record-still-refused.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/24787-inspect-show-hidden-eval-class-values.js": {
+   "order": [
+    "<repo>/tests/corpus/24787-inspect-show-hidden-eval-class-values.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24788-inspect-show-hidden-runtime-rooted-class-values.js": {
+   "order": [
+    "<repo>/tests/corpus/24788-inspect-show-hidden-runtime-rooted-class-values.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24789-inspect-show-hidden-getters-class-values.js": {
+   "order": [
+    "<repo>/tests/corpus/24789-inspect-show-hidden-getters-class-values.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/getters-class-value-reading-this.js": {
+   "order": [
+    "<repo>/tests/diagnostics/getters-class-value-reading-this.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/getters-class-value-rooted-in-runtime-class.js": {
+   "order": [
+    "<repo>/tests/diagnostics/getters-class-value-rooted-in-runtime-class.js"
+   ],
+   "diags": []
   }
  }
 }
