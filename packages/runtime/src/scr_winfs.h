@@ -326,6 +326,15 @@ static inline char *scr_u_fullpath(char *buf, const char *path, size_t size) {
   return buf;
 }
 
+/* GetFileAttributesW over a UTF-8 path; INVALID_FILE_ATTRIBUTES when it does not exist or cannot be converted. */
+static inline DWORD scr_u_getattrs(const char *path) {
+  wchar_t *wp = scr_u_wide(path);
+  if (wp == NULL) return INVALID_FILE_ATTRIBUTES;
+  const DWORD a = GetFileAttributesW(wp);
+  free(wp);
+  return a;
+}
+
 #define scr_sys_rmdir scr_u_rmdir
 #define scr_sys_unlink scr_u_unlink
 #define scr_sys_rename scr_u_rename
