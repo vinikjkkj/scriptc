@@ -14571,6 +14571,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24780-retyped-record-slot-write-visible-through-both-shapes.ts": {
+   "order": [
+    "<repo>/tests/corpus/24780-retyped-record-slot-write-visible-through-both-shapes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24781-union-record-arm-identity-against-a-retyped-shape.ts": {
+   "order": [
+    "<repo>/tests/corpus/24781-union-record-arm-identity-against-a-retyped-shape.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24782-retyped-scalar-and-class-slots-share-one-record.ts": {
+   "order": [
+    "<repo>/tests/corpus/24782-retyped-scalar-and-class-slots-share-one-record.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2480-recursive-record-tree.ts": {
    "order": [
     "<repo>/tests/corpus/2480-recursive-record-tree.ts"
