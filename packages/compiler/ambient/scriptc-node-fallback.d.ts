@@ -1112,6 +1112,12 @@ declare module "node:fs" {
      * fences by name at the call site; undocumented keys drop like Node. */
     options: { withFileTypes: true; recursive?: boolean; [option: string]: unknown },
   ): Dirent[];
+  export function readdir(path: string | Buffer, callback: (err: NodeJS.ErrnoException | null, files: string[]) => void): void;
+  export function readdir(
+    path: string | Buffer,
+    options: { withFileTypes: true; recursive?: boolean; [option: string]: unknown },
+    callback: (err: NodeJS.ErrnoException | null, files: Dirent[]) => void,
+  ): void;
   export function accessSync(path: string, mode?: number): void;
   export function mkdtempSync(prefix: string): string;
   export const constants: {

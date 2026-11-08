@@ -7158,6 +7158,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "fs.mkdtempCb":
             E.usesTimers = true;
             return finish(`scr_fs_mkdtemp_cb(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "fs.readdirCb":
+            E.usesTimers = true;
+            return finish(`scr_fs_readdir_cb(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "fs.readdirDyn":
+            return finish(`scr_fs_readdir_dyn(${arg(0)}, ${arg(1)})`);
           case "fs.mkdtempSyncOpts":
             return finish(`scr_fs_mkdtemp_sync_opts(${arg(0)}, ${arg(1)})`);
           case "fs.readCb":

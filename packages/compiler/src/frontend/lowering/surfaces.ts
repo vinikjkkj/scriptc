@@ -973,6 +973,7 @@ export const BUILTIN_MODULE_FN_ALIASES: Record<string, Record<string, readonly I
     mkdir: ["fs.mkdirCb"],
     unlink: ["fs.unlinkCb"],
     rename: ["fs.renameCb"],
+    readdir: ["fs.readdirCb"],
     open: ["fs.openCb"],
     close: ["fs.closeCb"],
     write: ["fs.writeCb"],
@@ -987,7 +988,7 @@ export const BUILTIN_MODULE_FN_ALIASES: Record<string, Record<string, readonly I
     // The { recursive, force } and maxRetries/retryDelay option lowerings.
     rmSync: ["fs.rmOptsSync", "fs.rmRetrySync"],
     // The { withFileTypes: true } Dirent form.
-    readdirSync: ["fs.readdirTypesSync"],
+    readdirSync: ["fs.readdirTypesSync", "fs.readdirDyn"],
     // lchmodSync is chmod's no-follow spelling, JS-ladder only (TypeScript
     // callers fence per site); the ladder runs the REAL lchmod on APPLE,
     // so the chmod fence witnesses it — fencing one spelling fences the
@@ -1370,6 +1371,7 @@ export const AMBIENT_SURFACE_FNS: readonly AmbientSurfaceRow[] = [
   { id: "node-builtin.fs.appendFile", kind: "node-builtin", name: "fs.appendFile", fns: ["fs.appendFileCb"], note: "the callback form; the options must be provably signal-free (four-argument form)" },
   { id: "node-builtin.fs.mkdir", kind: "node-builtin", name: "fs.mkdir", fns: ["fs.mkdirCb"], note: "the callback form: plain, mode, and { recursive } (first created path)" },
   { id: "node-builtin.fs.unlink", kind: "node-builtin", name: "fs.unlink", fns: ["fs.unlinkCb"], note: "the callback form" },
+  { id: "node-builtin.fs.readdir", kind: "node-builtin", name: "fs.readdir", fns: ["fs.readdirCb"], note: "the callback form: names, Buffers, Dirents, recursive; the listing is the filesystem's" },
   { id: "node-builtin.fs.rename", kind: "node-builtin", name: "fs.rename", fns: ["fs.renameCb"], note: "the callback form" },
   { id: "node-builtin.fs.open", kind: "node-builtin", name: "fs.open", fns: ["fs.openCb"], note: "the callback form: path, flags and mode as Node reads them (the argument count picks the callback)" },
   { id: "node-builtin.fs.close", kind: "node-builtin", name: "fs.close", fns: ["fs.closeCb"], note: "the callback form; without a callback an error is thrown on the loop turn, as Node's default callback does" },

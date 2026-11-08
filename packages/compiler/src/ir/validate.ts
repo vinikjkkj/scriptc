@@ -1220,6 +1220,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "fs.unlinkCb": { argTypes: [DYN, DYN], result: DYN },
   "fs.renameCb": { argTypes: [DYN, DYN, DYN], result: DYN },
   "fs.mkdtempCb": { argTypes: [DYN, DYN, DYN], result: DYN },
+  "fs.readdirCb": { argTypes: [DYN, DYN, DYN], result: DYN },
+  "fs.readdirDyn": { argTypes: [DYN, DYN], result: DYN },
   "fs.mkdtempSyncOpts": { argTypes: [DYN, DYN], result: DYN },
   "fs.readCb": { argTypes: [DYN, DYN, DYN, DYN, DYN, DYN, F64], result: DYN },
   "fs.lchmodCb": { argTypes: [DYN, DYN, DYN], result: DYN },
