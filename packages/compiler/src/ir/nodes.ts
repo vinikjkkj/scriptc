@@ -11970,6 +11970,30 @@ export function moduleUsesDynClass(mod: IrModule): boolean {
   return found;
 }
 
+const boxableClassMemo = new WeakMap<IrModule, boolean>();
+
+/** Does the module declare a class an untyped slot can hold as a boxed instance? Without one a keyed read never meets a class instance. */
+function moduleHasBoxableClass(mod: IrModule): boolean {
+  let r = boxableClassMemo.get(mod);
+  if (r === undefined) {
+    r = (mod.classes ?? []).some(
+      (c) => c.name !== RUNTIME_EMITTER_CLASS && !RUNTIME_STREAM_CLASSES.has(c.name) && canBoxClassIntoDyn(c.name),
+    );
+    boxableClassMemo.set(mod, r);
+  }
+  return r;
+}
+
+/** Does this keyed read of a dyn value take the LITERAL-KEY twin of the read helper (sc_dyn_key_get_lit, answered for a class instance
+ * from the member memo)? Only a key that is an emitted string literal (an immortal interned static, so its address names its bytes
+ * forever), in a module that has a class to box, and not `length`: the receiver of `.length` is an array or a string, which the twin
+ * answers exactly as the general helper does. Both emitters ask this one function, so the lanes cannot split. */
+export function dynKeyGetUsesLitTwin(mod: IrModule, key: IrExpr): boolean {
+  if (key.kind !== "strLit" || key.type.kind !== "string") return false;
+  if (key.value === "length") return false;
+  return moduleHasBoxableClass(mod);
+}
+
 /** The record builder's INSTANCE lane (backend/kindgate.ts kindgateInstanceLane) is emitted
  * only for a module that can hold both halves of it: a class that boxes into the dyn
  * tree by reference (an instance receiver can exist) and a `dynCheck` (a checked cast

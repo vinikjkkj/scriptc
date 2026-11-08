@@ -1932,9 +1932,14 @@ static ScrDyn *dyn_member_field_get(const ScrDynClassMember *cm, void *obj) {
   return v;
 }
 
-ScrDyn *scr_dyn_objinst_member_get(ScrDyn *d, const ScrStr *key) {
-  const ScrDynClassMember *cm = scr_dyn_objinst_member(d, key->data, key->len);
-  if (cm == NULL) return NULL;
+/* What a keyed read of a class instance answers once the member row `cm` (never NULL) is found: the field, the datum it inherits, or
+ * the bound method. Shared by the two entries below, which differ only in how they find the row. */
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((always_inline)) static inline
+#else
+static
+#endif
+ScrDyn *objinst_member_row_get(ScrDyn *d, const ScrStr *key, const ScrDynClassMember *cm) {
   if (cm->get != NULL) {
     /* An unset field under a name the class inherits as prototype data reads the datum (Node's lookup reaches the prototype). */
     ScrDyn *v = dyn_member_field_get(cm, d->v.inst.o);
@@ -1966,6 +1971,18 @@ ScrDyn *scr_dyn_objinst_member_get(ScrDyn *d, const ScrStr *key) {
   /* The name is the method's own: cm->name is a static literal of the emitted
    * table, which the box never frees. */
   return scr_dyn_new_func(&w->clo, objinst_method_thunk, 0, "()", cm->name);
+}
+
+ScrDyn *scr_dyn_objinst_member_get(ScrDyn *d, const ScrStr *key) {
+  const ScrDynClassMember *cm = scr_dyn_objinst_member(d, key->data, key->len);
+  if (cm == NULL) return NULL;
+  return objinst_member_row_get(d, key, cm);
+}
+
+/* The row half of a keyed read, out of line, for the literal-key entry in the gated unit scr_dyn_oim.c (which finds the row its own
+ * way). `cm` is never NULL. */
+ScrDyn *scr_dyn_objinst_row_get(ScrDyn *d, const ScrStr *key, const ScrDynClassMember *cm) {
+  return objinst_member_row_get(d, key, cm);
 }
 
 /* The tail of a boxed class instance's keyed READ, after %props and the

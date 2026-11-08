@@ -7524,6 +7524,11 @@ ScrDyn *scr_dyn_class_value(const ScrClassObj *c);
  * invoke unit beside scr_dyn_intrinsic_method_get, which the emitted
  * read already calls. */
 ScrDyn *scr_dyn_objinst_member_get(ScrDyn *d, const ScrStr *key);
+/* The same read for an emitted string-literal key (an immortal interned static): the entry of sc_dyn_key_get_lit. Its own gated unit
+ * (scr_dyn_oim.c), linked only by a program whose emitted code names it. */
+ScrDyn *scr_dyn_objinst_member_get_lit(ScrDyn *d, const ScrStr *key);
+/* What a keyed read answers once the member row `cm` (never NULL) is known: the field, the inherited datum, or the bound method. */
+ScrDyn *scr_dyn_objinst_row_get(ScrDyn *d, const ScrStr *key, const ScrDynClassMember *cm);
 /* The keyed read's tail after %props and the table both missed: an
  * Object.prototype method as a bound function, `undefined` for a class whose
  * member set is fully known, the loud ladder for an `opaque` one. +1, or

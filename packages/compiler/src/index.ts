@@ -843,7 +843,9 @@ function icuFeatureFlags(use: IcuUse): Record<string, boolean> {
 }
 
 /** The members of scr_dyn_invoke.c that emitted walkers and thunks call directly. */
-const DYN_DISPATCH_REF = /\bscr_dyn_(?:objinst_member_get|objinst_miss|intrinsic_method_get|proxy_get)\b/;
+/** The literal-key class-instance read (scr_dyn_oim.c): its own unit, linked only by a program whose emitted code names it. */
+const DYN_LIT_REF = /\bscr_dyn_objinst_member_get_lit\b/;
+const DYN_DISPATCH_REF = /\bscr_dyn_(?:objinst_member_get(?:_lit)?|objinst_miss|intrinsic_method_get|proxy_get)\b/;
 
 function programNativeFeatures(
   mod: IrModule,
@@ -1415,10 +1417,13 @@ async function compileTracked(
   // that reads a class box's members calls into scr_dyn_invoke.c whatever
   // the IR-level predicates said.
   let emittedReadsObjinstMembers = false;
+  let emittedReadsLitKey = false;
   if (opts.backend !== "c") {
     try {
       const llPath = join(opts.outDir, `${stem}.ll`);
-      emittedReadsObjinstMembers = await emitLlvmFile(lowered.module!, llStats, llPath);
+      const llRead = await emitLlvmFile(lowered.module!, llStats, llPath);
+      emittedReadsObjinstMembers = llRead.members;
+      emittedReadsLitKey = llRead.lit;
       cPath = llPath;
       backend = "llvm";
     } catch (err) {
@@ -1443,6 +1448,7 @@ async function compileTracked(
     programHeader = written.programHeader;
     programUnits = written.programUnits;
     emittedReadsObjinstMembers = written.readsObjinstMembers;
+    emittedReadsLitKey = written.readsLitKey;
   }
   // A previous build of the same program may have been split when this one
   // is not (an edit that shrank it, or a threshold change). Its parts would
@@ -1457,6 +1463,7 @@ async function compileTracked(
 
   const features = programNativeFeatures(lowered.module!, backend, llStats.coroLowered);
   if (emittedReadsObjinstMembers) features.dynInvoke = true;
+  if (emittedReadsLitKey) features.dynOim = true;
   let irPath: string | undefined;
   if (opts.emitIr) {
     irPath = join(opts.outDir, `${stem}.ir.json`);
@@ -1518,10 +1525,10 @@ async function compileTracked(
 
 /** The LLVM unit, written; the emitted text is local to this call so it does not outlive the write in the caller's frame. Answers
  * whether the text reads class-box members (the dyn dispatch unit must then link). */
-async function emitLlvmFile(mod: IrModule, llStats: LlvmEmitStats, llPath: string): Promise<boolean> {
+async function emitLlvmFile(mod: IrModule, llStats: LlvmEmitStats, llPath: string): Promise<{ members: boolean; lit: boolean }> {
   const ll = tapped("emit.llvm", () => emitLlvmModule(mod, llStats));
   await writeFile(llPath, ll);
-  return DYN_DISPATCH_REF.test(ll);
+  return { members: DYN_DISPATCH_REF.test(ll), lit: DYN_LIT_REF.test(ll) };
 }
 
 /** The C units (and the header a split program shares), written; the emitted text stays local to this call. */
@@ -1532,10 +1539,11 @@ async function emitCFiles(
   cPath: string,
   outDir: string,
   stem: string,
-): Promise<{ programUnits: string[]; programHeader: string | undefined; readsObjinstMembers: boolean }> {
+): Promise<{ programUnits: string[]; programHeader: string | undefined; readsObjinstMembers: boolean; readsLitKey: boolean }> {
   const program = tapped("emit.c", () => emitModuleProgram(mod, entryText, headerName));
   await writeFile(cPath, program.units[0]!);
   const readsObjinstMembers = program.units.some((u) => DYN_DISPATCH_REF.test(u)) || (program.header !== null && DYN_DISPATCH_REF.test(program.header));
+  const readsLitKey = program.units.some((u) => DYN_LIT_REF.test(u)) || (program.header !== null && DYN_LIT_REF.test(program.header));
   let programHeader: string | undefined;
   let programUnits: string[] = [];
   if (program.header !== null) {
@@ -1544,7 +1552,7 @@ async function emitCFiles(
     programUnits = program.units.slice(1).map((_, i) => join(outDir, `${stem}.part${i + 1}.c`));
     await Promise.all(programUnits.map((p, i) => writeFile(p, program.units[i + 1]!)));
   }
-  return { programUnits, programHeader, readsObjinstMembers };
+  return { programUnits, programHeader, readsObjinstMembers, readsLitKey };
 }
 
 /** Read a verification subject off disk. `roles` maps an artifact's role name

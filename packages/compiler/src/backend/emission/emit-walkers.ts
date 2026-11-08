@@ -1861,17 +1861,123 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     return name;
   }
 
-  export function dynKeyGetHelper(E: CEmitter): string {
-    const memoKey = "%dynKeyGet";
+  /** The OBJINST arm of the emitted keyed read, as C lines: the %props tables, then the member table read through `memberFn`, then the
+   * miss. One body for the general helper (memberFn = scr_dyn_objinst_member_get, any key) and the literal-key helper
+   * (scr_dyn_objinst_member_get_lit), so the two cannot answer a member differently. */
+  function objinstArmC(E: CEmitter, memberFn: string): string[] {
+    const d: string[] = [];
+    d.push(`  if (d->kind == SCR_DYN_OBJINST) {`);
+    d.push(`    /* A class instance's DECLARED members are struct fields the`);
+    d.push(`     * box has no table for. Falling through to the undefined tail`);
+    d.push(`     * would be a SILENT wrong answer for a property Node reads`);
+    d.push(`     * fine, so those stay the loud ladder, named by class.`);
+    d.push(`     *`);
+    d.push(`     * What the box CAN answer is the run-time-keyed properties`);
+    d.push(`     * Object.defineProperty put in the instance's %props table,`);
+    d.push(`     * and it must: that table is the receiver row of`);
+    d.push(`     * defineProperty, its keys are exactly the ones that name no`);
+    d.push(`     * declared member (cls.propsDefine refuses the collision), and`);
+    d.push(`     * every other surface over it — \`in\`, util.inspect's frame,`);
+    d.push(`     * the enumerable count — already reads it. [[Get]] was the one`);
+    d.push(`     * that did not, so scr_cls_props_get shipped end to end with no`);
+    d.push(`     * caller while \`c[k]\` refused a property the program had just`);
+    d.push(`     * defined on c. */`);
+    for (const [cname, meta] of E.classMeta) {
+      // Which classes get an arm, and what the box must prove first.
+      //
+      // A box's `cls` is the descriptor of the STATIC type the value was
+      // boxed FROM, so a Derived instance in a Base-typed slot boxes as
+      // Base. Trusting THAT descriptor to name the struct is unsound --
+      // and refusing every hierarchy class because of it, which is what
+      // this loop used to do, refuses zapo's own WaClientImpl, the only
+      // class in its 3M-line TU that carries a table at all. Neither is
+      // necessary, because the descriptor is not the only thing the box
+      // carries: a hierarchy instance carries its VTABLE, and
+      // scr_dyn_objinst_pre reads the class's own preorder position out
+      // of it -- which is exactly how `instanceof` narrows a base-typed
+      // box to the derived class. scr_dyn_objinst_ptr_of tests that
+      // RUN-TIME position against this descriptor's interval, so the
+      // answer depends on what the object IS and never on the declared
+      // type of a slot it passed through. That last clause is the whole
+      // reason the static-descriptor test was not shippable.
+      //
+      // The INTERVAL and not equality because a subclass's layout opens
+      // with its base chain's fields as an IDENTICAL prefix (that is what
+      // makes an upcast a reinterpret), so this class's %props sits at
+      // this index in every class below it too.
+      //
+      // WHAT THE INTERVAL DOES NOT BUY TODAY: the frontend refuses a table
+      // on a class that HAS A SUBCLASS (SC2020 -- the closed member set its
+      // collision check reads would not be exact), so every table-carrying
+      // class is a LEAF and its interval is a single point. The interval is
+      // still what belongs here rather than `==`: it is the predicate
+      // instanceof already uses, it needs no second runtime entry point,
+      // and it is what stays correct if that leaf rule is ever relaxed.
+      // tests/harness/class-runtime-property-table.test.ts pins the
+      // refusal, so the day it lifts is a day this arm is already right.
+      if (!meta.def.fields.some((f) => f.name === CLASS_PROPS_FIELD)) continue;
+      // A class whose BASE already carries the field needs no arm: the
+      // field is the base's, at the base's index, and the base's arm
+      // covers this class's whole interval. lower-classes.ts adds %props
+      // only when the base chain has none, so the field is never
+      // duplicated and "the base's index" is the only index there is.
+      if (meta.base?.def.fields.some((f) => f.name === CLASS_PROPS_FIELD)) continue;
+      if (!canBoxClassIntoDyn(cname)) continue;
+      const desc = E.dynClassDesc(cname);
+      const struct = mangleClassStruct(cname);
+      const fld = mangleField(CLASS_PROPS_FIELD);
+      d.push(`    { void *po = scr_dyn_objinst_ptr_of(d, &${desc}); /* ${cname}'s %props table */`);
+      d.push(`    if (po != NULL) {`);
+      d.push(`      ScrDyn *pv = scr_cls_props_get(((${struct} *)po)->${fld}, k);`);
+      // NULL means two different things — "no such key" and "the getter
+      // threw" — and only the pending exception tells them apart. Reading
+      // the miss as a throw would swallow a real one into the fence's
+      // message; reading the throw as a miss would REPLACE it with the
+      // fence, which is the louder-but-wrong answer.
+      d.push(`      if (pv != NULL || scr_exc_pending()) return pv;`);
+      d.push(`    } }`);
+    }
+    // The class's own MEMBER TABLE, ahead of the fence: a declared field
+    // reads its slot and a METHOD reads as a bound function box, minted
+    // over the very dispatch `x.get()` takes. The two spellings are one
+    // answer from one body -- the rule the intrinsic-method read below
+    // keeps for the modeled prototypes.
+    //
+    // AFTER %props and BEFORE the fence. %props first because a run-time
+    // defineProperty write is an OWN property and shadows nothing the
+    // table can hold (cls.propsDefine refuses a collision with a declared
+    // member, so the two key sets are disjoint and the order is a
+    // statement of intent rather than a tie-break). The fence last
+    // because it is now the answer for a class with NO table only -- the
+    // shape that behaves exactly as it did.
+    d.push(`    { ScrDyn *cm = ${memberFn}(d, k);`);
+    d.push(`      if (cm != NULL || scr_exc_pending()) return cm; }`);
+    d.push(`    /* The miss: an Object.prototype method, \`undefined\` for a class`);
+    d.push(`     * whose member set is fully known, the loud ladder otherwise`);
+    d.push(`     * (scr_dyn_objinst_miss). */`);
+    d.push(`    return scr_dyn_objinst_miss(d, k);`);
+    d.push(`  }`);
+    return d;
+  }
+
+  /** The keyed read helper. `lit` selects the LITERAL-KEY twin, `sc_dyn_key_get_lit`: the same body with the class-instance member read
+   * going through scr_dyn_objinst_member_get_lit (the emitters call it for a key that is an emitted string literal, an immortal
+   * interned static). A twin and not a wrapper so that no kind of receiver pays an extra test or call for the split; a program with only
+   * one kind of read keeps one copy (the unused static is not emitted by the C compiler). */
+  export function dynKeyGetHelper(E: CEmitter, lit = false): string {
+    const memoKey = lit ? "%dynKeyGetLit" : "%dynKeyGet";
     const existing = E.dynBuilders.get(memoKey);
     if (existing) return existing;
-    const name = "sc_dyn_key_get";
+    const name = lit ? "sc_dyn_key_get_lit" : "sc_dyn_key_get";
     E.dynBuilders.set(memoKey, name);
     const sig = `${E.link}ScrDyn *${name}(ScrDyn *d, ScrStr *k, bool opt)`;
     E.walkerProtos.push(`${sig}; /* d[k] on dyn */`);
     // The view read is the cold side of every array read: say so where the call is compiled (the header's prototype stays attribute-free for the ABI scan).
     if (moduleUsesDynView(E.mod)) E.walkerProtos.push(`#if defined(__GNUC__) || defined(__clang__)\n__attribute__((cold)) ScrDyn *scr_dyn_view_key_get(ScrDyn *d, ScrStr *k);\n#endif`);
     const d: string[] = [`${sig} { /* d[k] on dyn */`];
+    // The literal twin tests the class-instance arm FIRST: every arm answers one kind (the arms are disjoint), so the order is free, and
+    // moving the arm to the front costs the other kinds nothing (their count of tests is unchanged: this one just stops being the tenth).
+    if (lit) d.push(...objinstArmC(E, "scr_dyn_objinst_member_get_lit"));
     d.push(`  if (d->kind == SCR_DYN_UNDEF || d->kind == SCR_DYN_NULL) {`);
     d.push(`    if (opt) return scr_dyn_retain(scr_dyn_undefined());`);
     d.push(`    const char *base = d->kind == SCR_DYN_UNDEF`);
@@ -1962,97 +2068,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     d.push(`    scr_dyn_big_fence(d, "a property read");`);
     d.push(`    return NULL;`);
     d.push(`  }`);
-    d.push(`  if (d->kind == SCR_DYN_OBJINST) {`);
-    d.push(`    /* A class instance's DECLARED members are struct fields the`);
-    d.push(`     * box has no table for. Falling through to the undefined tail`);
-    d.push(`     * would be a SILENT wrong answer for a property Node reads`);
-    d.push(`     * fine, so those stay the loud ladder, named by class.`);
-    d.push(`     *`);
-    d.push(`     * What the box CAN answer is the run-time-keyed properties`);
-    d.push(`     * Object.defineProperty put in the instance's %props table,`);
-    d.push(`     * and it must: that table is the receiver row of`);
-    d.push(`     * defineProperty, its keys are exactly the ones that name no`);
-    d.push(`     * declared member (cls.propsDefine refuses the collision), and`);
-    d.push(`     * every other surface over it — \`in\`, util.inspect's frame,`);
-    d.push(`     * the enumerable count — already reads it. [[Get]] was the one`);
-    d.push(`     * that did not, so scr_cls_props_get shipped end to end with no`);
-    d.push(`     * caller while \`c[k]\` refused a property the program had just`);
-    d.push(`     * defined on c. */`);
-    for (const [cname, meta] of E.classMeta) {
-      // Which classes get an arm, and what the box must prove first.
-      //
-      // A box's `cls` is the descriptor of the STATIC type the value was
-      // boxed FROM, so a Derived instance in a Base-typed slot boxes as
-      // Base. Trusting THAT descriptor to name the struct is unsound --
-      // and refusing every hierarchy class because of it, which is what
-      // this loop used to do, refuses zapo's own WaClientImpl, the only
-      // class in its 3M-line TU that carries a table at all. Neither is
-      // necessary, because the descriptor is not the only thing the box
-      // carries: a hierarchy instance carries its VTABLE, and
-      // scr_dyn_objinst_pre reads the class's own preorder position out
-      // of it -- which is exactly how `instanceof` narrows a base-typed
-      // box to the derived class. scr_dyn_objinst_ptr_of tests that
-      // RUN-TIME position against this descriptor's interval, so the
-      // answer depends on what the object IS and never on the declared
-      // type of a slot it passed through. That last clause is the whole
-      // reason the static-descriptor test was not shippable.
-      //
-      // The INTERVAL and not equality because a subclass's layout opens
-      // with its base chain's fields as an IDENTICAL prefix (that is what
-      // makes an upcast a reinterpret), so this class's %props sits at
-      // this index in every class below it too.
-      //
-      // WHAT THE INTERVAL DOES NOT BUY TODAY: the frontend refuses a table
-      // on a class that HAS A SUBCLASS (SC2020 -- the closed member set its
-      // collision check reads would not be exact), so every table-carrying
-      // class is a LEAF and its interval is a single point. The interval is
-      // still what belongs here rather than `==`: it is the predicate
-      // instanceof already uses, it needs no second runtime entry point,
-      // and it is what stays correct if that leaf rule is ever relaxed.
-      // tests/harness/class-runtime-property-table.test.ts pins the
-      // refusal, so the day it lifts is a day this arm is already right.
-      if (!meta.def.fields.some((f) => f.name === CLASS_PROPS_FIELD)) continue;
-      // A class whose BASE already carries the field needs no arm: the
-      // field is the base's, at the base's index, and the base's arm
-      // covers this class's whole interval. lower-classes.ts adds %props
-      // only when the base chain has none, so the field is never
-      // duplicated and "the base's index" is the only index there is.
-      if (meta.base?.def.fields.some((f) => f.name === CLASS_PROPS_FIELD)) continue;
-      if (!canBoxClassIntoDyn(cname)) continue;
-      const desc = E.dynClassDesc(cname);
-      const struct = mangleClassStruct(cname);
-      const fld = mangleField(CLASS_PROPS_FIELD);
-      d.push(`    { void *po = scr_dyn_objinst_ptr_of(d, &${desc}); /* ${cname}'s %props table */`);
-      d.push(`    if (po != NULL) {`);
-      d.push(`      ScrDyn *pv = scr_cls_props_get(((${struct} *)po)->${fld}, k);`);
-      // NULL means two different things — "no such key" and "the getter
-      // threw" — and only the pending exception tells them apart. Reading
-      // the miss as a throw would swallow a real one into the fence's
-      // message; reading the throw as a miss would REPLACE it with the
-      // fence, which is the louder-but-wrong answer.
-      d.push(`      if (pv != NULL || scr_exc_pending()) return pv;`);
-      d.push(`    } }`);
-    }
-    // The class's own MEMBER TABLE, ahead of the fence: a declared field
-    // reads its slot and a METHOD reads as a bound function box, minted
-    // over the very dispatch `x.get()` takes. The two spellings are one
-    // answer from one body -- the rule the intrinsic-method read below
-    // keeps for the modeled prototypes.
-    //
-    // AFTER %props and BEFORE the fence. %props first because a run-time
-    // defineProperty write is an OWN property and shadows nothing the
-    // table can hold (cls.propsDefine refuses a collision with a declared
-    // member, so the two key sets are disjoint and the order is a
-    // statement of intent rather than a tie-break). The fence last
-    // because it is now the answer for a class with NO table only -- the
-    // shape that behaves exactly as it did.
-    d.push(`    { ScrDyn *cm = scr_dyn_objinst_member_get(d, k);`);
-    d.push(`      if (cm != NULL || scr_exc_pending()) return cm; }`);
-    d.push(`    /* The miss: an Object.prototype method, \`undefined\` for a class`);
-    d.push(`     * whose member set is fully known, the loud ladder otherwise`);
-    d.push(`     * (scr_dyn_objinst_miss). */`);
-    d.push(`    return scr_dyn_objinst_miss(d, k);`);
-    d.push(`  }`);
+    if (!lit) d.push(...objinstArmC(E, "scr_dyn_objinst_member_get"));
     d.push(`  if (d->kind == SCR_DYN_MAP) {`);
     d.push(`    /* A Map's entries are internal slots and its size/get/has/add`);
     d.push(`     * live on a prototype the box carries no table for. The`);

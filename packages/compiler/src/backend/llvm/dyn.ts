@@ -4527,13 +4527,122 @@ export class LlDyn {
 
   /* ── the keyed read (dynKeyGetHelper, ported) ──────────────────────── */
 
+  /** The OBJINST arm of the keyed read in IR: the %props tables, the member table read through `memberFn`, then the miss. One body for
+   * the general helper (scr_dyn_objinst_member_get, any key) and the literal-key helper (scr_dyn_objinst_member_get_lit); the C
+   * emitter's objinstArmC is its twin. Falls through (a fresh block) when the receiver is not a class instance. */
+  private objinstArmLL(B: BlockBuilder, kd: string, memberFn: string): void {
+    const host = this.host;
+    // OBJINST: a class instance's DECLARED members are struct fields the
+    // box has no table for. Falling through to the undefined tail would be
+    // a SILENT wrong answer for a property Node reads fine, so those stay
+    // the loud ladder — the C emitter's arm, same runtime entry point.
+    //
+    // The run-time-keyed properties Object.defineProperty put in the
+    // instance's %props table DO answer, and must: `in`, util.inspect's
+    // frame and the enumerable count all read that table already, and
+    // [[Get]] was the one surface that did not — which is why
+    // scr_cls_props_get shipped end to end with no caller. The gates and
+    // their reasons are emit-walkers.ts's, spelled once in
+    // host.classPropsTables().
+    {
+      const isCi = B.tmp();
+      B.line(`${isCi} = icmp eq i32 ${kd}, ${DK.OBJINST}`);
+      const lCi = B.newLabel("kg.ci");
+      const lNext = B.newLabel("kg.n");
+      B.condBr(isCi, lCi, lNext);
+      B.startBlock(lCi);
+      const tables = host.classPropsTables();
+      if (tables.length > 0) {
+        host.declare(`declare ptr @scr_dyn_objinst_ptr_of(ptr, ptr)`);
+        host.declare(`declare ptr @scr_cls_props_get(ptr, ptr)`);
+        host.declare(`declare zeroext i1 @scr_exc_pending()`);
+      }
+      for (const t of tables) {
+        const o = B.tmp();
+        B.line(`${o} = call ptr @scr_dyn_objinst_ptr_of(ptr %d, ptr ${t.desc})`);
+        const isMine = B.tmp();
+        B.line(`${isMine} = icmp ne ptr ${o}, null`);
+        const lMine = B.newLabel("kg.cp");
+        const lSkip = B.newLabel("kg.cs");
+        B.condBr(isMine, lMine, lSkip);
+        B.startBlock(lMine);
+        const tp = B.tmp();
+        const tbl = B.tmp();
+        B.line(`${tp} = getelementptr inbounds %${t.struct}, ptr ${o}, i64 0, i32 ${t.index} ; %props`);
+        B.line(`${tbl} = load ptr, ptr ${tp}`);
+        const pv = B.tmp();
+        B.line(`${pv} = call ptr @scr_cls_props_get(ptr ${tbl}, ptr %k)`);
+        // NULL is "no such key" AND "the getter threw", and only the
+        // pending exception tells them apart. Reading the miss as a throw
+        // swallows a real one into the fence's message; reading the throw
+        // as a miss REPLACES it with the fence — louder, and wrong.
+        const hit = B.tmp();
+        B.line(`${hit} = icmp ne ptr ${pv}, null`);
+        const lHit = B.newLabel("kg.ch");
+        const lMaybe = B.newLabel("kg.cm");
+        B.condBr(hit, lHit, lMaybe);
+        B.startBlock(lHit);
+        B.terminate(`ret ptr ${pv}`);
+        B.startBlock(lMaybe);
+        const pe = B.tmp();
+        B.line(`${pe} = call zeroext i1 @scr_exc_pending()`);
+        const lThrew = B.newLabel("kg.ce");
+        B.condBr(pe, lThrew, lSkip);
+        B.startBlock(lThrew);
+        B.terminate(`ret ptr null`);
+        B.startBlock(lSkip);
+      }
+      // The class's own MEMBER TABLE, ahead of the fence: a declared field
+      // reads its slot and a METHOD reads as a bound function box, minted
+      // over the very dispatch `x.get()` takes. The C lane's arm, and the
+      // same position in the ladder -- after %props (a run-time
+      // defineProperty write is an OWN property, and cls.propsDefine
+      // refuses a collision with a declared member, so the two key sets are
+      // disjoint), before the fence (which is now the answer for a class
+      // with NO table only -- the shape that behaves exactly as it did).
+      {
+        host.declare(`declare ptr @${memberFn}(ptr, ptr)`);
+        host.declare(`declare zeroext i1 @scr_exc_pending()`);
+        const cm = B.tmp();
+        B.line(`${cm} = call ptr @${memberFn}(ptr %d, ptr %k)`);
+        const hit = B.tmp();
+        B.line(`${hit} = icmp ne ptr ${cm}, null`);
+        const lHit = B.newLabel("kg.mh");
+        const lMiss = B.newLabel("kg.mm");
+        B.condBr(hit, lHit, lMiss);
+        B.startBlock(lHit);
+        B.terminate(`ret ptr ${cm}`);
+        B.startBlock(lMiss);
+        // NULL is a miss AND a throw, and only the pending exception tells
+        // them apart -- the %props arm's rule above, for its reason.
+        const pe = B.tmp();
+        B.line(`${pe} = call zeroext i1 @scr_exc_pending()`);
+        const lThrew = B.newLabel("kg.me");
+        const lGo = B.newLabel("kg.mg");
+        B.condBr(pe, lThrew, lGo);
+        B.startBlock(lThrew);
+        B.terminate(`ret ptr null`);
+        B.startBlock(lGo);
+      }
+      // The miss (scr_dyn_objinst_miss): an Object.prototype method,
+      // undefined for a class whose member set is fully known, the loud
+      // ladder for an opaque one. The C lane's arm.
+      host.declare(`declare ptr @scr_dyn_objinst_miss(ptr, ptr)`);
+      const missv = B.tmp();
+      B.line(`${missv} = call ptr @scr_dyn_objinst_miss(ptr %d, ptr %k)`);
+      B.terminate(`ret ptr ${missv}`);
+      B.startBlock(lNext);
+    }
+  }
+
   /** `sc_dyn_key_get(ptr d, ptr k, i1 opt) -> ptr` — d[k] on a dyn value.
-   * Result +1; throws on non-optional nullish receivers. */
-  dynKeyGetHelper(): string {
-    const memoKey = "%dynKeyGet";
+   * Result +1; throws on non-optional nullish receivers. `lit` is the literal-key twin sc_dyn_key_get_lit (the C emitter's twin
+   * too): the same body with the class-instance member read through scr_dyn_objinst_member_get_lit. */
+  dynKeyGetHelper(lit = false): string {
+    const memoKey = lit ? "%dynKeyGetLit" : "%dynKeyGet";
     const existing = this.dynBuilders.get(memoKey);
     if (existing) return existing;
-    const name = "sc_dyn_key_get";
+    const name = lit ? "sc_dyn_key_get_lit" : "sc_dyn_key_get";
     this.dynBuilders.set(memoKey, name);
     const host = this.host;
     const B = new BlockBuilder();
@@ -4544,6 +4653,8 @@ export class LlDyn {
       const r = this.retainDyn(B, u);
       B.terminate(`ret ptr ${r}`);
     };
+    // The literal twin tests the class-instance arm FIRST: the arms answer one kind each, so the order is free, and the other kinds lose
+    // nothing (the test moves, it is not added).
     /* The MISS answer, everywhere the walk for a kind has come up empty:
      * ask the dispatch unit whether the receiver's PROTOTYPE has this
      * name before settling for undefined. Object.prototype's methods and
@@ -4567,6 +4678,7 @@ export class LlDyn {
       B.startBlock(lU);
       retainUndef();
     };
+    if (lit) this.objinstArmLL(B, kd, "scr_dyn_objinst_member_get_lit");
     // undefined/null receivers: opt answers undefined; otherwise throw
     // Node's TypeError with the key spliced in.
     {
@@ -4712,107 +4824,7 @@ export class LlDyn {
       B.terminate(`ret ptr null`);
       B.startBlock(lNext);
     }
-    // OBJINST: a class instance's DECLARED members are struct fields the
-    // box has no table for. Falling through to the undefined tail would be
-    // a SILENT wrong answer for a property Node reads fine, so those stay
-    // the loud ladder — the C emitter's arm, same runtime entry point.
-    //
-    // The run-time-keyed properties Object.defineProperty put in the
-    // instance's %props table DO answer, and must: `in`, util.inspect's
-    // frame and the enumerable count all read that table already, and
-    // [[Get]] was the one surface that did not — which is why
-    // scr_cls_props_get shipped end to end with no caller. The gates and
-    // their reasons are emit-walkers.ts's, spelled once in
-    // host.classPropsTables().
-    {
-      const isCi = B.tmp();
-      B.line(`${isCi} = icmp eq i32 ${kd}, ${DK.OBJINST}`);
-      const lCi = B.newLabel("kg.ci");
-      const lNext = B.newLabel("kg.n");
-      B.condBr(isCi, lCi, lNext);
-      B.startBlock(lCi);
-      const tables = host.classPropsTables();
-      if (tables.length > 0) {
-        host.declare(`declare ptr @scr_dyn_objinst_ptr_of(ptr, ptr)`);
-        host.declare(`declare ptr @scr_cls_props_get(ptr, ptr)`);
-        host.declare(`declare zeroext i1 @scr_exc_pending()`);
-      }
-      for (const t of tables) {
-        const o = B.tmp();
-        B.line(`${o} = call ptr @scr_dyn_objinst_ptr_of(ptr %d, ptr ${t.desc})`);
-        const isMine = B.tmp();
-        B.line(`${isMine} = icmp ne ptr ${o}, null`);
-        const lMine = B.newLabel("kg.cp");
-        const lSkip = B.newLabel("kg.cs");
-        B.condBr(isMine, lMine, lSkip);
-        B.startBlock(lMine);
-        const tp = B.tmp();
-        const tbl = B.tmp();
-        B.line(`${tp} = getelementptr inbounds %${t.struct}, ptr ${o}, i64 0, i32 ${t.index} ; %props`);
-        B.line(`${tbl} = load ptr, ptr ${tp}`);
-        const pv = B.tmp();
-        B.line(`${pv} = call ptr @scr_cls_props_get(ptr ${tbl}, ptr %k)`);
-        // NULL is "no such key" AND "the getter threw", and only the
-        // pending exception tells them apart. Reading the miss as a throw
-        // swallows a real one into the fence's message; reading the throw
-        // as a miss REPLACES it with the fence — louder, and wrong.
-        const hit = B.tmp();
-        B.line(`${hit} = icmp ne ptr ${pv}, null`);
-        const lHit = B.newLabel("kg.ch");
-        const lMaybe = B.newLabel("kg.cm");
-        B.condBr(hit, lHit, lMaybe);
-        B.startBlock(lHit);
-        B.terminate(`ret ptr ${pv}`);
-        B.startBlock(lMaybe);
-        const pe = B.tmp();
-        B.line(`${pe} = call zeroext i1 @scr_exc_pending()`);
-        const lThrew = B.newLabel("kg.ce");
-        B.condBr(pe, lThrew, lSkip);
-        B.startBlock(lThrew);
-        B.terminate(`ret ptr null`);
-        B.startBlock(lSkip);
-      }
-      // The class's own MEMBER TABLE, ahead of the fence: a declared field
-      // reads its slot and a METHOD reads as a bound function box, minted
-      // over the very dispatch `x.get()` takes. The C lane's arm, and the
-      // same position in the ladder -- after %props (a run-time
-      // defineProperty write is an OWN property, and cls.propsDefine
-      // refuses a collision with a declared member, so the two key sets are
-      // disjoint), before the fence (which is now the answer for a class
-      // with NO table only -- the shape that behaves exactly as it did).
-      {
-        host.declare(`declare ptr @scr_dyn_objinst_member_get(ptr, ptr)`);
-        host.declare(`declare zeroext i1 @scr_exc_pending()`);
-        const cm = B.tmp();
-        B.line(`${cm} = call ptr @scr_dyn_objinst_member_get(ptr %d, ptr %k)`);
-        const hit = B.tmp();
-        B.line(`${hit} = icmp ne ptr ${cm}, null`);
-        const lHit = B.newLabel("kg.mh");
-        const lMiss = B.newLabel("kg.mm");
-        B.condBr(hit, lHit, lMiss);
-        B.startBlock(lHit);
-        B.terminate(`ret ptr ${cm}`);
-        B.startBlock(lMiss);
-        // NULL is a miss AND a throw, and only the pending exception tells
-        // them apart -- the %props arm's rule above, for its reason.
-        const pe = B.tmp();
-        B.line(`${pe} = call zeroext i1 @scr_exc_pending()`);
-        const lThrew = B.newLabel("kg.me");
-        const lGo = B.newLabel("kg.mg");
-        B.condBr(pe, lThrew, lGo);
-        B.startBlock(lThrew);
-        B.terminate(`ret ptr null`);
-        B.startBlock(lGo);
-      }
-      // The miss (scr_dyn_objinst_miss): an Object.prototype method,
-      // undefined for a class whose member set is fully known, the loud
-      // ladder for an opaque one. The C lane's arm.
-      host.declare(`declare ptr @scr_dyn_objinst_miss(ptr, ptr)`);
-      const missv = B.tmp();
-      B.line(`${missv} = call ptr @scr_dyn_objinst_miss(ptr %d, ptr %k)`);
-      B.terminate(`ret ptr ${missv}`);
-      B.startBlock(lNext);
-    }
+    if (!lit) this.objinstArmLL(B, kd, "scr_dyn_objinst_member_get");
     // MAP: a Map's entries are internal slots and its size/get/has/add
     // live on a prototype the box carries no table for. The undefined tail
     // would answer undefined for every one of them — the OBJINST arm's

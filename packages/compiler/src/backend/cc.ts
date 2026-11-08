@@ -48,6 +48,8 @@ const RUNTIME_UNIT_DEPS: Readonly<Record<string, readonly string[]>> = {
   // edges, and scr_abort.c's SCR_ABORT_EV dispatch names scr_event_*; the
   // gate (opts.event) implies scr_abort.c.
   "scr_event.c": ["scr_abort.c"],
+  // The literal-key class-instance read (scr_dyn_oim.c) finishes through the dispatch unit's row read.
+  "scr_dyn_oim.c": ["scr_dyn_invoke.c"],
   // The timers/promises value/options entry (scr_tp_value.c): it names
   // scr_abort_signal_* (scr_abort.c) and reports Node's delay warnings through
   // scr_emit_warning (scr_async_dyn.c). Its gate (tpValue) implies both.
@@ -354,6 +356,8 @@ export interface CcOptions {
    * compiles scr_dyn_invoke.c — the assert gating precedent, so
    * dispatch-free binaries keep their exact size class. */
   dynInvoke?: boolean;
+  /** The emitted code names scr_dyn_objinst_member_get_lit (index.ts reads the emitted text): compiles scr_dyn_oim.c. */
+  dynOim?: boolean;
   /** The program declares a class a dyn box can hold (moduleUsesDynClass): compiles scr_dyn_class.c. */
   dynClass?: boolean;
   /** The program holds a libCall of the checked-dynamic extensions unit (index.ts
@@ -2674,6 +2678,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...(opts.dynInvoke || opts.dynAsync || opts.dc || tpValue || engineAny ? [rt(join(rtDir, "scr_dyn_invoke.c"))] : []),
     ...(opts.dynClass ? [rt(join(rtDir, "scr_dyn_class.c"))] : []),
     ...(opts.dynExt ? [rt(join(rtDir, "scr_dyn_ext.c"))] : []),
+    ...(opts.dynOim ? [rt(join(rtDir, "scr_dyn_oim.c"))] : []),
     ...(opts.bufferVal ? [rt(join(rtDir, "scr_buffer_val.c"))] : []),
     ...(opts.bytesOwn ? [rt(join(rtDir, "scr_bytes_own.c"))] : []),
     ...(opts.dc ? [rt(join(rtDir, "scr_dc.c"))] : []),
