@@ -1,0 +1,9 @@
+{
+  "packages": {
+    "sacb": {
+      "dir": "./attested-src/sacb",
+      "commit": "4444444444444444444444444444444444444444",
+      "repo": "https://github.com/example/sacb"
+    }
+  }
+}
