@@ -62,12 +62,14 @@ typedef struct {
   bool numeric_sep;    /* ctx.numericSeparator (truthy) */
   bool sorted;         /* ctx.sorted === true */
   bool colors;         /* ctx.colors (truthy): leaves print inside util.inspect.styles' ANSI codes */
+#ifdef SCR_INSP_COLORS /* the extension's options: linked in only for a program that may pass them */
   bool show_proxy;     /* ctx.showProxy (truthy): a Proxy prints `Proxy [ target, handler ]` */
   bool show_hidden;    /* ctx.showHidden (truthy): non-enumerable own properties print as `[key]: value` */
   unsigned char getters; /* ctx.getters: 0 off, 1 true, 2 'get' (getter only), 3 'set' (getter with a setter) */
   bool no_custom;      /* ctx.customInspect falsy: [util.inspect.custom] methods are not called */
   const ScrDyn *sorted_fn;  /* ctx.sorted a function: the comparator (borrowed from the options object, alive for the call) */
   const ScrDyn *stylize_fn; /* ctx.stylize a user function (borrowed) */
+#endif
 } InspOpts;
 static const InspOpts INSP_DEFAULT_OPTS = {2.0, 80.0, INSP_COMPACT_NUM, 3.0, 100.0, 10000.0, false, false, false};
 static InspOpts g_opts = {2.0, 80.0, INSP_COMPACT_NUM, 3.0, 100.0, 10000.0, false, false, false};
@@ -148,7 +150,11 @@ void scr_insp_opts_push(const ScrDyn *o) {
   InspOpts n = INSP_DEFAULT_OPTS;
   const ScrDyn *v;
   if (o != NULL && o->kind == SCR_DYN_BOOL) {
+#ifdef SCR_INSP_COLORS
     if (o->v.b) n.show_hidden = true;
+#else
+    if (o->v.b) insp_unsupported("showHidden");
+#endif
   } else if (o != NULL && o->kind == SCR_DYN_OBJ) {
     if ((v = scr_dyn_obj_own_data(o, "depth", 5)) != NULL) {
       double x = v->kind == SCR_DYN_NULL || v->kind == SCR_DYN_UNDEF ? NAN : insp_opt_num(v, "depth");
@@ -174,11 +180,20 @@ void scr_insp_opts_push(const ScrDyn *o) {
     if ((v = scr_dyn_obj_own_data(o, "numericSeparator", 16)) != NULL) n.numeric_sep = scr_dyn_truthy(v);
     if ((v = scr_dyn_obj_own_data(o, "sorted", 6)) != NULL) {
       if (scr_dyn_truthy(v)) {
+#ifdef SCR_INSP_COLORS
         n.sorted = true;
         if (!(v->kind == SCR_DYN_BOOL && v->v.b)) n.sorted_fn = v; /* a comparator (or a value the sort will refuse) */
+#else
+        if (v->kind != SCR_DYN_BOOL) insp_unsupported("sorted with a comparator");
+        n.sorted = true;
+#endif
       }
     }
+#ifdef SCR_INSP_COLORS
     if ((v = scr_dyn_obj_own_data(o, "showHidden", 10)) != NULL && scr_dyn_truthy(v)) n.show_hidden = true;
+#else
+    if ((v = scr_dyn_obj_own_data(o, "showHidden", 10)) != NULL && scr_dyn_truthy(v)) insp_unsupported("showHidden");
+#endif
     if ((v = scr_dyn_obj_own_data(o, "colors", 6)) != NULL && scr_dyn_truthy(v)) {
 #ifdef SCR_INSP_COLORS
       n.colors = true;
@@ -186,6 +201,7 @@ void scr_insp_opts_push(const ScrDyn *o) {
       insp_unsupported("colors");
 #endif
     }
+#ifdef SCR_INSP_COLORS
     if ((v = scr_dyn_obj_own_data(o, "showProxy", 9)) != NULL && scr_dyn_truthy(v)) n.show_proxy = true;
     if ((v = scr_dyn_obj_own_data(o, "getters", 7)) != NULL) {
       /* formatProperty: true shows every getter's value, 'get' the getter-only ones, 'set' the ones that also have a setter;
@@ -195,6 +211,11 @@ void scr_insp_opts_push(const ScrDyn *o) {
       else if (v->kind == SCR_DYN_STR && v->v.str->len == 3 && memcmp(v->v.str->data, "set", 3) == 0) n.getters = 3;
     }
     if ((v = scr_dyn_obj_own_data(o, "customInspect", 13)) != NULL && !scr_dyn_truthy(v)) n.no_custom = true;
+#else
+    if ((v = scr_dyn_obj_own_data(o, "showProxy", 9)) != NULL && scr_dyn_truthy(v)) insp_unsupported("showProxy");
+    if ((v = scr_dyn_obj_own_data(o, "getters", 7)) != NULL && scr_dyn_truthy(v)) insp_unsupported("getters");
+    if ((v = scr_dyn_obj_own_data(o, "customInspect", 13)) != NULL && !scr_dyn_truthy(v)) insp_unsupported("customInspect: false");
+#endif
     /* A forwarded `options` (inspect(x, options) inside a custom method) carries the stylize this runtime handed out: the
      * identity, colors being off. Any other stylize function would have to be called per token and stops by name. */
     if ((v = scr_dyn_obj_own_data(o, "stylize", 7)) != NULL) {
@@ -1078,6 +1099,7 @@ static int insp_cmp16(const ScrStr *a, const ScrStr *b) {
   }
 }
 
+#ifdef SCR_INSP_COLORS
 /* One comparator call: the user's `sorted` function over two entries, answered as ToNumber would read it (a non-number answer that is
  * NaN counts as 0). A throw sets `*failed` and leaves the exception pending. */
 static int insp_cmp_user(const ScrDyn *fn, const ScrStr *x, const ScrStr *y, bool *failed) {
@@ -1172,6 +1194,28 @@ static void insp_sort_items(ScrStr **v, size_t n, const ScrDyn *cmp) {
   free(tmp);
 }
 
+#else
+/* Bottom-up merge sort: stable, like Node's sort. */
+static void insp_sort_items(ScrStr **v, size_t n) {
+  if (n < 2) return;
+  ScrStr **tmp = malloc(n * sizeof(ScrStr *));
+  if (!tmp) insp_oom();
+  for (size_t w = 1; w < n; w *= 2) {
+    for (size_t lo = 0; lo < n; lo += 2 * w) {
+      size_t mid = lo + w < n ? lo + w : n;
+      size_t hi = lo + 2 * w < n ? lo + 2 * w : n;
+      size_t i = lo, j = mid, k = lo;
+      while (i < mid && j < hi) tmp[k++] = insp_cmp16(v[j], v[i]) < 0 ? v[j++] : v[i++];
+      while (i < mid) tmp[k++] = v[i++];
+      while (j < hi) tmp[k++] = v[j++];
+    }
+    memcpy(v, tmp, n * sizeof(ScrStr *));
+  }
+  free(tmp);
+}
+
+#endif
+
 /* reduceToSingleString for the default options (compact: 3). Pops the
  * frame. base/b0/b1 are borrowed; +1 result. `recurse` is the frame's
  * recurseTimes (the children's depth); array_extras marks kArrayExtrasType
@@ -1186,6 +1230,7 @@ ScrStr *scr_insp_end(ScrStr *base, ScrStr *b0, ScrStr *b1, double recurse, bool 
 #endif
   /* ctx.sorted: an object frame sorts all its entries; an array frame sorts
    * only its trailing named keys (formatRaw's keys.length tail). */
+#ifdef SCR_INSP_COLORS
   if (g_opts.sorted) {
     size_t from = array_extras ? f->len - (g_sort_tail < f->len ? g_sort_tail : f->len) : 0;
     const ScrDyn *scmp = g_opts.sorted_fn;
@@ -1197,6 +1242,12 @@ ScrStr *scr_insp_end(ScrStr *base, ScrStr *b0, ScrStr *b1, double recurse, bool 
       insp_sort_items(f->items + from, f->len - from, scmp);
     }
   }
+#else
+  if (g_opts.sorted) {
+    size_t from = array_extras ? f->len - (g_sort_tail < f->len ? g_sort_tail : f->len) : 0;
+    if (f->len - from > 1) insp_sort_items(f->items + from, f->len - from);
+  }
+#endif
   g_sort_tail = 0;
   size_t entries = f->len;
   if (insp_groups() && array_extras && entries > 6) insp_group(f, trailing_more);
@@ -1674,6 +1725,7 @@ void scr_cls_props_inspect(const ScrDyn *tbl, double recurse, double depth, bool
     if (scr_dyn_obj_key_is_index(ent->key, ent->key_len) != index_keys) continue;
     if (q->kind != SCR_DYN_ARR || q->v.arr.len < 5) continue;
     if (!scr_dyn_truthy(q->v.arr.items[4])) continue; /* non-enumerable */
+#ifdef SCR_INSP_COLORS
     InspBuf eb = {0};
     insp_key_into(&eb, ent->key, ent->key_len);
     if (scr_dyn_truthy(q->v.arr.items[0])) { /* data: the value renders */
@@ -1686,6 +1738,20 @@ void scr_cls_props_inspect(const ScrDyn *tbl, double recurse, double depth, bool
       bool s = q->v.arr.items[2]->kind == SCR_DYN_FUNC;
       ib_sty_cstr(&eb, g && s ? "[Getter/Setter]" : g ? "[Getter]" : "[Setter]", INSP_STY_SPECIAL);
     }
+#else
+    InspBuf eb = {0};
+    insp_key_into(&eb, ent->key, ent->key_len);
+    ib_cstr(&eb, ": ");
+    if (scr_dyn_truthy(q->v.arr.items[0])) { /* data: the value renders */
+      ScrStr *val = scr_insp_dyn(q->v.arr.items[1], recurse + 1, depth);
+      ib_bytes(&eb, val->data, val->len);
+      scr_str_release(val);
+    } else {
+      bool g = q->v.arr.items[1]->kind == SCR_DYN_FUNC;
+      bool s = q->v.arr.items[2]->kind == SCR_DYN_FUNC;
+      ib_sty_cstr(&eb, g && s ? "[Getter/Setter]" : g ? "[Getter]" : "[Setter]", INSP_STY_SPECIAL);
+    }
+#endif
     ScrStr *entry = ib_take(&eb);
     scr_insp_entry(entry, false);
     scr_str_release(entry);
@@ -1768,22 +1834,29 @@ static size_t insp_slot_count(const ScrDyn *d) {
  * frame scr_insp_begin opened. Insertion order, which is the converter's
  * field order and therefore Node's. */
 #ifdef SCR_SYMTAB
+#ifdef SCR_INSP_COLORS
 static void insp_acc_into(InspBuf *eb, ScrDyn *recv, const ScrDyn *getter, const ScrDyn *setter, double vrecurse, double depth);
-static void insp_emit_symtab(const ScrDynSymTab *t, double recurse, double depth);
 /* The receiver a symbol-keyed getter runs with under getters: true (the object whose table is being listed). */
 static ScrDyn *g_sym_recv;
+#endif
+static void insp_emit_symtab(const ScrDynSymTab *t, double recurse, double depth);
 static void insp_emit_syms(const ScrDyn *d, double recurse, double depth) {
   if (d == NULL) return;
+#ifdef SCR_INSP_COLORS
   ScrDyn *saved = g_sym_recv;
   g_sym_recv = (ScrDyn *)d;
   insp_emit_symtab(scr_dyn_ext(d)->syms, recurse, depth);
   g_sym_recv = saved;
+#else
+  insp_emit_symtab(scr_dyn_ext(d)->syms, recurse, depth);
+#endif
 }
 
 /* `Symbol(desc): value` for one row; an accessor renders [Getter]/[Setter] and runs nothing. +1. */
 static ScrStr *insp_sym_row_text(const ScrDynSymEnt *row, double recurse, double depth) {
   ScrStr *kn = scr_dyn_sym_key_str(row->key);
   InspBuf eb = {0};
+#ifdef SCR_INSP_COLORS
   /* formatProperty: a non-enumerable key is bracketed (`[Symbol(k)]`); the symbol text is in the `symbol` style */
   const bool hk = !(row->flags & SCR_SYMP_ENUM);
   if (hk) ib_char(&eb, '[');
@@ -1802,6 +1875,18 @@ static ScrStr *insp_sym_row_text(const ScrDynSymEnt *row, double recurse, double
     insp_kv(&eb, val);
     scr_str_release(val);
   }
+#else
+  ib_bytes(&eb, kn->data, kn->len);
+  ib_cstr(&eb, ": ");
+  if (row->flags & SCR_SYMP_ACC) {
+    const bool g = row->val->v.arr.items[0]->kind == SCR_DYN_FUNC, st = row->val->v.arr.items[1]->kind == SCR_DYN_FUNC;
+    ib_sty_cstr(&eb, g && st ? "[Getter/Setter]" : g ? "[Getter]" : "[Setter]", INSP_STY_SPECIAL);
+  } else {
+    ScrStr *val = scr_insp_dyn(row->val, recurse + 1, depth);
+    ib_bytes(&eb, val->data, val->len);
+    scr_str_release(val);
+  }
+#endif
   scr_str_release(kn);
   return ib_take(&eb);
 }
@@ -1889,6 +1974,7 @@ static ScrStr *insp_with_base(ScrStr *base, ScrDyn *obj, double recurse, double 
  * (a function, or anything else for an absent half). Under ctx.getters a getter that qualifies RUNS and its answer prints:
  * `[Getter: 5]`, `[Getter: null]`, `[Getter] { a: 1 }` for an object; a throw prints `<Inspection threw (...)>`. Otherwise the bare
  * label. `vrecurse` is the recursion depth the property's value would format at. Appends to `eb` (after the key's ": "). */
+#ifdef SCR_INSP_COLORS
 /* A caught exception as a dyn value (scr_caught_to_dyn's stances; that one lives in the gated async unit, which a program printing
  * through this renderer need not link). Borrows the box, +1. */
 static ScrDyn *insp_caught_dyn(const ScrCaught *c) {
@@ -1973,6 +2059,8 @@ static void insp_acc_into(InspBuf *eb, ScrDyn *recv, const ScrDyn *getter, const
   scr_dyn_release(tmp);
   g_indent -= 2;
 }
+
+#endif
 
 #ifdef SCR_INSP_COLORS
 /* ── showHidden: a dyn object's own string keys in JS creation order ─────────
@@ -2395,9 +2483,17 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
               !scr_dyn_truthy(q->v.arr.items[4])) {
             continue;
           }
+#ifdef SCR_INSP_COLORS
           insp_key_into(&eb, ent->key, ent->key_len);
           ib_cstr(&eb, ": ");
           insp_acc_into(&eb, d, q->v.arr.items[1], q->v.arr.items[2], recurse + 1, depth);
+#else
+          bool g = q->v.arr.items[1]->kind == SCR_DYN_FUNC;
+          bool s = q->v.arr.items[2]->kind == SCR_DYN_FUNC;
+          insp_key_into(&eb, ent->key, ent->key_len);
+          ib_cstr(&eb, ": ");
+          ib_sty_cstr(&eb, g && s ? "[Getter/Setter]" : g ? "[Getter]" : "[Setter]", INSP_STY_SPECIAL);
+#endif
           ScrStr *aentry = ib_take(&eb);
           scr_insp_entry(aentry, false);
           scr_str_release(aentry);
@@ -2669,6 +2765,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         scr_str_release(fb1);
         return fout;
       }
+#ifdef SCR_INSP_COLORS
       /* showHidden (also %o): Node lists the function's own non-enumerable keys after its base:
        * [length], [name], [prototype] (for a function that has one: an object whose [constructor] points back at the function, the
        * <ref *1> circle), the properties a program added, its own symbols, then the [Symbol(Symbol.toStringTag)] an async or generator
@@ -2785,6 +2882,73 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       scr_str_release(hout);
       return hwrapped;
     }
+#else
+      /* showHidden (%o): Node lists the function's own non-enumerable keys
+       * after its base, one per line when they do not fit:
+       * [length], [name], [prototype] (for a function that has one, whose
+       * constructor points back at it: the <ref *1> circle), then the
+       * [Symbol(Symbol.toStringTag)] of an async or generator kind. */
+      ScrStr *hbase = ib_take(&out);
+      /* Past the depth limit Node answers with the bare constructor name
+       * (`[Function]`, `[AsyncFunction]`), not the keys. */
+      if (recurse > depth) {
+        scr_str_release(hbase);
+        InspBuf db = {0};
+        ib_char(&db, '[');
+        ib_cstr(&db, finh != 0 ? fn_kind_names[finh] : kname);
+        ib_char(&db, ']');
+        return insp_sty(ib_take(&db), INSP_STY_SPECIAL);
+      }
+      const bool hproto = (fcode & SCR_FNK_NOPROTO) == 0;
+      scr_insp_begin(recurse + 1);
+      {
+        char lenbuf[48];
+        snprintf(lenbuf, sizeof lenbuf, "[length]: %u", (unsigned)scr_dyn_fn_len(d));
+        ScrStr *e = scr_str_new(lenbuf, strlen(lenbuf));
+        scr_insp_entry(e, true);
+        scr_str_release(e);
+      }
+      {
+        InspBuf eb = {0};
+        const char *nm = name ? name : "";
+        const char q = strchr(nm, '\'') != NULL && strchr(nm, '"') == NULL ? '"' : '\'';
+        ib_cstr(&eb, "[name]: ");
+        ib_char(&eb, q);
+        ib_cstr(&eb, nm);
+        ib_char(&eb, q);
+        ScrStr *e = ib_take(&eb);
+        scr_insp_entry(e, false);
+        scr_str_release(e);
+      }
+      if (hproto) {
+        static const char proto_entry[] = "[prototype]: { [constructor]: [Circular *1] }";
+        ScrStr *e = scr_str_new(proto_entry, sizeof proto_entry - 1);
+        scr_insp_entry(e, false);
+        scr_str_release(e);
+      }
+      if (ftag != 0) {
+        InspBuf eb = {0};
+        ib_cstr(&eb, "[Symbol(Symbol.toStringTag)]: '");
+        ib_cstr(&eb, fn_kind_names[ftag]);
+        ib_char(&eb, '\'');
+        ScrStr *e = ib_take(&eb);
+        scr_insp_entry(e, false);
+        scr_str_release(e);
+      }
+      ScrStr *hb0 = scr_str_new("{", 1);
+      ScrStr *hb1 = scr_str_new("}", 1);
+      ScrStr *hout = scr_insp_end(hbase, hb0, hb1, recurse + 1, false, false);
+      scr_str_release(hbase);
+      scr_str_release(hb0);
+      scr_str_release(hb1);
+      if (!hproto) return hout;
+      InspBuf rb = {0};
+      ib_cstr(&rb, "<ref *1> ");
+      ib_str(&rb, hout);
+      scr_str_release(hout);
+      return ib_take(&rb);
+    }
+#endif
     case SCR_DYN_OBJINST: {
       /* Node prints `Thing { a: 1 }` -- the instance's own ENUMERABLE
        * properties, which the member table now enumerates. It used to
@@ -2808,7 +2972,11 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
        * through to the ordinary formatting. */
       {
         const ScrDynClassMember *cust = scr_dyn_objinst_member(d, "sym.for:nodejs.util.inspect.custom", 34);
+        #ifdef SCR_INSP_COLORS
         if (cust != NULL && cust->call != NULL && g_custom_inspect != NULL && !g_opts.no_custom) {
+#else
+        if (cust != NULL && cust->call != NULL && g_custom_inspect != NULL) {
+#endif
           ScrDyn *cargs[3];
           cargs[0] = scr_dyn_new_num(depth - recurse);
           cargs[1] = scr_insp_custom_opts(g_custom_stylize);
