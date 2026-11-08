@@ -460,7 +460,10 @@ export function dynMemberTable(
       for (let c: DynMemberClass | null = cls; c !== null; c = c.base, level++) {
         if ((c.def.methods?.includes(raw) ?? false) || (c.def.dynMethods?.some((d) => d.name === raw) ?? false)) break;
       }
-      accl = (Math.min(level, 3) << 2) | (Math.min(Math.max(fn.params.length - 1, 0), 254) + 1) << 8;
+      let dc: DynMemberClass | null = cls;
+      for (let k = 0; k < level && dc !== null; k++) dc = dc.base;
+      const jsLen = dc?.def.memberLengths?.[raw] ?? Math.max(fn.params.length - 1, 0);
+      accl = (Math.min(level, 3) << 2) | (Math.min(jsLen, 254) + 1) << 8;
     }
     rows.push(accessor ? { kind: "accessor", name, fn, accl } : { kind: "method", name, fn, accl });
   }
@@ -531,7 +534,7 @@ export function dynStaticTable(
           // An INHERITED static field is the base class object's own property,
           // not this one's: it reads through, and no own-key surface lists it.
           ? { kind: "accessor", name, fn, isStatic: true, accl: isField ? slevel << 2 : 1 | (sSetter ? 2 : 0) | (slevel << 2), ...(isField && c === cls ? { enumerable: true as const } : {}) }
-          : { kind: "method", name, fn, isStatic: true, accl: (slevel << 2) | (Math.min(fn.params.length, 254) + 1) << 8 },
+          : { kind: "method", name, fn, isStatic: true, accl: (slevel << 2) | (Math.min(entry.len ?? fn.params.length, 254) + 1) << 8 },
       );
     }
   }
