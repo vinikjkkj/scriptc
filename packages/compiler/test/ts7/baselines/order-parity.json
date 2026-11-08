@@ -14607,6 +14607,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24840-fs-readfile-unannotated-callback-buffer-chains.ts": {
+   "order": [
+    "<repo>/tests/corpus/24840-fs-readfile-unannotated-callback-buffer-chains.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24841-fs-read-failure-delivers-zero-and-the-buffer.ts": {
+   "order": [
+    "<repo>/tests/corpus/24841-fs-read-failure-delivers-zero-and-the-buffer.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2485-inspect-circular-refs.ts": {
    "order": [
     "<repo>/tests/corpus/2485-inspect-circular-refs.ts"
