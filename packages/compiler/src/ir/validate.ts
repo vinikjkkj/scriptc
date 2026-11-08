@@ -625,6 +625,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   // The wider sync fs slice (unlink/chmod/chown/copyfile and the
   // mode-carrying write/mkdir forms).
   "fs.unlinkSync": { argTypes: [STRING], result: VOID },
+  "fs.renameSync": { argTypes: [STRING, STRING], result: VOID },
   "fs.chmodSync": { argTypes: [STRING, F64], result: VOID },
   "fs.chownSync": { argTypes: [STRING, F64, F64], result: VOID },
   "fs.copyFileSync": { argTypes: [STRING, STRING], result: VOID },
@@ -1277,6 +1278,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "fsp.mkdirRecursive": { argTypes: [STRING], result: { kind: "promise", inner: VOID } },
   "fsp.mkdirRecursiveMode": { argTypes: [STRING, F64], result: { kind: "promise", inner: VOID } },
   "fsp.unlink": { argTypes: [STRING], result: { kind: "promise", inner: VOID } },
+  "fsp.rename": { argTypes: [STRING, STRING], result: { kind: "promise", inner: VOID } },
   "fsp.chmod": { argTypes: [STRING, F64], result: { kind: "promise", inner: VOID } },
   "fsp.readdir": { argTypes: [STRING], result: { kind: "promise", inner: arrayOf(STRING) } },
   "fsp.rm": { argTypes: [STRING], result: { kind: "promise", inner: VOID } },

@@ -663,6 +663,7 @@ export const BUILTIN_MODULE_FNS: Record<string, Record<string, BuiltinModuleFn |
     // in lowerBuiltinModuleCall — string `defaults` can't spell a number.
     accessSync: { fn: "fs.accessSync", params: [STRING, F64], result: VOID },
     unlinkSync: { fn: "fs.unlinkSync", params: [STRING], result: VOID },
+    renameSync: { fn: "fs.renameSync", params: [STRING, STRING], result: VOID },
     chmodSync: { fn: "fs.chmodSync", params: [STRING, F64], result: VOID },
     chownSync: { fn: "fs.chownSync", params: [STRING, F64, F64], result: VOID },
     // The 2-argument form only: Node's mode flags (COPYFILE_EXCL, ...)
@@ -723,6 +724,7 @@ export const BUILTIN_MODULE_FNS: Record<string, Record<string, BuiltinModuleFn |
       result: { kind: "promise", inner: FILEHANDLE_T }, defaults: ["r"],
     },
     unlink: { fn: "fsp.unlink", params: [STRING], result: { kind: "promise", inner: VOID } },
+    rename: { fn: "fsp.rename", params: [STRING, STRING], result: { kind: "promise", inner: VOID } },
     chmod: { fn: "fsp.chmod", params: [STRING, F64], result: { kind: "promise", inner: VOID } },
   },
   // The bare module's POSIX-target binding; a win32 target rebinds it to
@@ -1092,11 +1094,11 @@ export const BUILTIN_MEMBER_FN_VALUES: Record<string, ReadonlySet<string> | unde
   fs: new Set([
     "appendFileSync", "chownSync", "closeSync", "copyFileSync", "existsSync",
     "lstatSync", "openSync", "readSync", "realpathSync", "rmdirSync",
-    "statSync", "unlinkSync",
+    "renameSync", "statSync", "unlinkSync",
   ]),
   // fs/promises: readFile (encoding special case + alias), mkdir (options
   // arm) and open (`defaults`) are absent for those reasons.
-  "fs/promises": new Set(["chmod", "readdir", "rm", "stat", "unlink", "writeFile"]),
+  "fs/promises": new Set(["chmod", "readdir", "rename", "rm", "stat", "unlink", "writeFile"]),
   // The six fixed-arity path members, on all three tables. Each is one
   // libCall over strings; the platform binding (bare `path` IS win32 on a
   // win32 target) is the ROW's job and the value form inherits it, so the

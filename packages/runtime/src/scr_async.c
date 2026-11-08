@@ -3794,6 +3794,11 @@ ScrPromise *scr_fsp_unlink(ScrStr *path) {
   return scr_promise_settled_void();
 }
 
+ScrPromise *scr_fsp_rename(ScrStr *oldpath, ScrStr *newpath) {
+  scr_fs_rename(oldpath, newpath);
+  return scr_promise_settled_void();
+}
+
 ScrPromise *scr_fsp_chmod(ScrStr *path, double mode) {
   scr_fs_chmod(path, mode);
   return scr_promise_settled_void();

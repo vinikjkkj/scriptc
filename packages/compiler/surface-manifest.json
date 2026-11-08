@@ -984,6 +984,12 @@
       "status": "static"
     },
     {
+      "id": "node-builtin.fs.promises.rename",
+      "kind": "node-builtin",
+      "name": "fs/promises.rename",
+      "status": "static"
+    },
+    {
       "id": "node-builtin.fs.promises.rm",
       "kind": "node-builtin",
       "name": "fs/promises.rm",
@@ -1044,6 +1050,12 @@
       "name": "fs.rename",
       "status": "static",
       "note": "the callback form"
+    },
+    {
+      "id": "node-builtin.fs.renameSync",
+      "kind": "node-builtin",
+      "name": "fs.renameSync",
+      "status": "static"
     },
     {
       "id": "node-builtin.fs.rmSync",
