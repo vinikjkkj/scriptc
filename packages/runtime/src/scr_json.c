@@ -3044,7 +3044,7 @@ ScrDyn *scr_dyn_new_func_src(ScrClosure *clo, ScrDynThunk thunk, uint32_t arity,
   /* The kind code (SCR_FNK_*) rides in the top of the arity word. A
    * compiled closure's code comes from the program's own name table; a box
    * the runtime builds itself (a bound function) passes its code in `arity`. */
-  d->v.fn.arity = (arity & 0xffffffu) | ((uint32_t)(clo != NULL ? scr_fn_code_of(clo->fn) : 0u) << SCR_FNK_SHIFT) | (arity & 0x1f000000u);
+  d->v.fn.arity = (arity & 0xffffffu) | ((uint32_t)(clo != NULL ? scr_fn_code_of(clo->fn) : 0u) << SCR_FNK_SHIFT) | (arity & 0x3f000000u);
   return d;
 }
 
