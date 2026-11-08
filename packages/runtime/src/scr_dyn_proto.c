@@ -419,6 +419,8 @@ ScrDyn *scr_dyn_builtin_ctor_value(double which) {
   }
 }
 
+__attribute__((constructor)) static void scr_dyn_proto_install_ctor_provider(void) { scr_builtin_ctor_provider = scr_dyn_builtin_ctor_value; }
+
 /* A member the intrinsic prototype `recv` carries by name, +1, or NULL when `recv` is not an intrinsic prototype or has no such member. */
 static ScrDyn *proto_intrinsic_member(const ScrDyn *recv, const char *key, size_t key_len) {
   if (!proto_is_intrinsic(recv)) return NULL;

@@ -6298,6 +6298,7 @@ ScrDyn *scr_dyn_set_prototype_of(const ScrDyn *o, const ScrDyn *proto); /* Objec
 ScrDyn *scr_dyn_unwrap_prim(const ScrDyn *d);
 ScrDyn *scr_dyn_unwrap_prim_str(const ScrDyn *d); /* String-method receiver: honours a subclass's toString; NULL when it threw */
 ScrDyn *scr_dyn_object_ctor_value(void);
+extern ScrDyn *(*scr_builtin_ctor_provider)(double which); /* set by scr_dyn_proto.c; NULL when that unit is not linked */
 ScrDyn *scr_dyn_builtin_ctor_value(double which); /* Object/Array/Function/String/Number/Boolean constructor value, +1 */
 extern ScrDyn *(*scr_function_ctor_hook)(ScrDyn *const *args, size_t argc);
 ScrDyn *scr_dyn_intrinsic_member(const ScrDyn *recv, const char *key, size_t key_len);
