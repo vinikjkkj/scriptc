@@ -1992,25 +1992,9 @@ static ScrDyn *insp_caught_dyn(const ScrCaught *c) {
   }
 }
 
-static void insp_acc_into(InspBuf *eb, ScrDyn *recv, const ScrDyn *getter, const ScrDyn *setter, double vrecurse, double depth) {
-  const bool g = getter != NULL && getter->kind == SCR_DYN_FUNC;
-  const bool st = setter != NULL && setter->kind == SCR_DYN_FUNC;
-  if (!g) {
-    if (st) ib_sty_cstr(eb, "[Setter]", INSP_STY_SPECIAL);
-    else ib_sty_cstr(eb, "undefined", INSP_STY_UNDEFINED);
-    return;
-  }
-  const char *label = st ? "Getter/Setter" : "Getter";
-  const bool run = g_opts.getters == 1 || (g_opts.getters == 2 && !st) || (g_opts.getters == 3 && st);
-  if (!run) {
-    ib_sty_cstr(eb, st ? "[Getter/Setter]" : "[Getter]", INSP_STY_SPECIAL);
-    return;
-  }
+/* The text a getter's answer takes under getters: `tmp` is the getter's result (+1, consumed) or NULL with the throw pending. */
+static void insp_acc_value(InspBuf *eb, const char *label, ScrDyn *tmp, double vrecurse, double depth) {
   char head[32];
-  g_indent += 2;
-  scr_dyn_this_push_dyn(recv != NULL ? recv : scr_dyn_undefined());
-  ScrDyn *tmp = scr_dyn_call(getter, NULL, 0, "getter");
-  scr_dyn_this_pop();
   if (tmp == NULL) {
     /* the getter threw: `<Inspection threw (<the thrown value>)>` */
     ScrCaught *c = scr_exc_take();
@@ -2057,6 +2041,27 @@ static void insp_acc_into(InspBuf *eb, ScrDyn *recv, const ScrDyn *getter, const
     scr_str_release(vs);
   }
   scr_dyn_release(tmp);
+}
+
+static void insp_acc_into(InspBuf *eb, ScrDyn *recv, const ScrDyn *getter, const ScrDyn *setter, double vrecurse, double depth) {
+  const bool g = getter != NULL && getter->kind == SCR_DYN_FUNC;
+  const bool st = setter != NULL && setter->kind == SCR_DYN_FUNC;
+  if (!g) {
+    if (st) ib_sty_cstr(eb, "[Setter]", INSP_STY_SPECIAL);
+    else ib_sty_cstr(eb, "undefined", INSP_STY_UNDEFINED);
+    return;
+  }
+  const char *label = st ? "Getter/Setter" : "Getter";
+  const bool run = g_opts.getters == 1 || (g_opts.getters == 2 && !st) || (g_opts.getters == 3 && st);
+  if (!run) {
+    ib_sty_cstr(eb, st ? "[Getter/Setter]" : "[Getter]", INSP_STY_SPECIAL);
+    return;
+  }
+  g_indent += 2;
+  scr_dyn_this_push_dyn(recv != NULL ? recv : scr_dyn_undefined());
+  ScrDyn *tmp = scr_dyn_call(getter, NULL, 0, "getter");
+  scr_dyn_this_pop();
+  insp_acc_value(eb, label, tmp, vrecurse, depth);
   g_indent -= 2;
 }
 
@@ -2169,6 +2174,48 @@ static void insp_emit_obj_keys(ScrDyn *d, double recurse, double depth, bool ski
 #endif
 
 #ifdef SCR_INSP_COLORS
+/* formatRaw's protoProps under showHidden, for a compiled class instance: the accessors the instance's class (and up to two classes above it)
+ * declares print after the own keys as `[g]: [Getter]` (dimmed under colors); methods do not (a function value is skipped). The member table
+ * says which rows are accessors, whether a setter sits beside the getter, and how many classes up the declaring class is (ScrDynClassMember.accl). */
+static size_t insp_proto_acc_count(const ScrDyn *d) {
+  const size_t n = scr_dyn_objinst_member_count(d);
+  size_t k = 0;
+  for (size_t i = 0; i < n; i++) {
+    const ScrDynClassMember *m = scr_dyn_objinst_member_at(d, i);
+    if ((m->accl & 1u) && ((m->accl >> 2) & 3u) < 3u && m->name[0] != '%') k++;
+  }
+  return k;
+}
+
+static void insp_emit_proto_acc(ScrDyn *d, double recurse, double depth) {
+  const size_t n = scr_dyn_objinst_member_count(d);
+  for (size_t i = 0; i < n; i++) {
+    const ScrDynClassMember *m = scr_dyn_objinst_member_at(d, i);
+    if (!(m->accl & 1u) || ((m->accl >> 2) & 3u) >= 3u || m->name[0] == '%') continue;
+    const bool st = (m->accl & 2u) != 0;
+    const char *label = st ? "Getter/Setter" : "Getter";
+    InspBuf eb = {0};
+    if (INSP_COLORS_ON) ib_cstr(&eb, "\x1b[2m");
+    ib_char(&eb, '[');
+    insp_key_into(&eb, m->name, m->len);
+    ib_char(&eb, ']');
+    ib_cstr(&eb, ": ");
+    const bool run = g_opts.getters == 1 || (g_opts.getters == 2 && !st) || (g_opts.getters == 3 && st);
+    if (!run) {
+      ib_sty_cstr(&eb, st ? "[Getter/Setter]" : "[Getter]", INSP_STY_SPECIAL);
+    } else {
+      g_indent += 2;
+      ScrDyn *tmp = m->get(d->v.inst.o); /* the getter runs with the instance as `this` */
+      insp_acc_value(&eb, label, tmp, recurse + 1, depth);
+      g_indent -= 2;
+    }
+    if (INSP_COLORS_ON) ib_cstr(&eb, "\x1b[22m");
+    ScrStr *entry = ib_take(&eb);
+    scr_insp_entry(entry, false);
+    scr_str_release(entry);
+  }
+}
+
 /* showHidden over a value whose hidden surface this runtime cannot read: a named, catchable stop (OPEN), never a rendering that leaves
  * keys out. The class model (ScrDynClass) carries no own-versus-inherited method table and no accessor/setter flags: the prototype
  * keys formatRaw adds (its protoProps) cannot be listed from it. */
@@ -3000,12 +3047,10 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       }
 #ifdef SCR_INSP_COLORS
       if (INSP_SH) {
-        /* The prototype's accessors print as `[g]: [Getter]` under showHidden; the member table cannot tell an accessor from a hidden field. */
-        const size_t inm0 = scr_dyn_objinst_member_count(d);
-        for (size_t mi = 0; mi < inm0; mi++) {
-          const ScrDynClassMember *mm = scr_dyn_objinst_member_at(d, mi);
-          if (mm->get != NULL && mm->call == NULL && mm->enumerable == 0 && mm->name[0] != '%') return insp_sh_fence("a class instance whose class has accessor-like members");
-        }
+        /* The prototype keys (formatRaw's protoProps) come from the member table's accessor rows; a class whose table is incomplete, or that
+         * roots in a runtime class (EventEmitter and its own prototype keys), has a prototype this runtime cannot list. */
+        const ScrDynClass *sc = scr_dyn_objinst_class_of(d);
+        if (sc->opaque || sc->rt_root != 0) return insp_sh_fence("a class instance whose class has an incomplete member table or roots in a runtime class");
       }
 #endif
       const char *icn = scr_dyn_objinst_cls(d);
@@ -3050,6 +3095,9 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       /* the instance's symbol-keyed own properties live in its run-time property table (scr_symbol.c) */
       ScrDyn *isbag = insp_inst_sym_bag(d);
       ishown += insp_sym_count(isbag);
+#ifdef SCR_INSP_COLORS
+      if (INSP_SH && recurse <= depth) ishown += insp_proto_acc_count(d); /* protoProps exist only while the depth budget lasts */
+#endif
       if (ishown == 0) {
         scr_dyn_release(isbag);
         if (isnap != NULL) scr_dyn_release(isnap);
@@ -3129,6 +3177,9 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         }
       }
       if (!ithrew && isbag != NULL) insp_emit_syms(isbag, recurse, depth);
+#ifdef SCR_INSP_COLORS
+      if (!ithrew && INSP_SH) insp_emit_proto_acc(d, recurse, depth);
+#endif
       scr_dyn_release(isbag);
       /* The constructor name belongs to braces[0] (Node's `P {`), the empty base keeps reduceToSingleString's budget and compact: true's layout exact. */
       ScrStr *ibase = scr_str_new("", 0);
