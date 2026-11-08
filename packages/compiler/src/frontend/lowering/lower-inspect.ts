@@ -1698,9 +1698,6 @@ export function lowerConsoleInspectArg(
 
 /** The parsed options literal: the resolved depth (numeric; Infinity for
  * `null`), with every non-default knob fenced by name. */
-/** Node's option keys this runtime does not render yet (OPEN, ci-classes iofmtopts). */
-const INSPECT_OPEN_KEYS = new Set(["stylize"]);
-
 /** Literal truthiness of a compile-time constant option value, or null when
  * the value is only known at run time. */
 function literalTruthy(node: ts.Expression): boolean | null {
@@ -1714,17 +1711,6 @@ function literalTruthy(node: ts.Expression): boolean | null {
   return null;
 }
 
-
-/** util.inspect options this runtime does not render yet (OPEN, ci-classes
- * iofmtopts). A literal value that shows the option non-default is a named
- * build refusal; a value known only at run time is checked by the runtime
- * options reader, which stops the program with the same name. */
-function refuseOpenInspectOption(L: Lowerer, prop: ts.Node, key: string, value: ts.Expression): void {
-  const open = (what: string): never =>
-    L.noLowering(`util.inspect with the '${what}' option`, prop, "this option is OPEN (ci-classes iofmtopts): the rendering for it is not lowered yet");
-  if (key === "stylize") open("stylize");
-  if (INSPECT_OPEN_KEYS.has(key) && literalTruthy(value) === null) open(`${key} (a run-time value)`);
-}
 
 /** util.inspect's options argument is admitted only in two forms, both of which the
  * runtime sees exactly as written: (1) an object literal (no spread, method or accessor),
@@ -1811,9 +1797,6 @@ function admittedConstOptions(L: Lowerer, id: ts.Identifier): ts.ObjectLiteralEx
 function checkLiteralOptions(L: Lowerer, node: ts.ObjectLiteralExpression): { key: string; value: ts.Expression; prop: ts.Node }[] {
   const entries = literalOptionEntries(node);
   if (entries === null) nonLiteralOptions(L, node, "spread, method and accessor entries are not lowered in options objects");
-  for (const e of entries) {
-    refuseOpenInspectOption(L, e.prop, e.key, e.value);
-  }
   return entries;
 }
 
@@ -1853,6 +1836,7 @@ function inspectOptionsDyn(L: Lowerer, node: ts.Expression, loc: SrcLoc): IrExpr
 function optionNeedsDynRender(L: Lowerer, key: string, value: ts.Expression): boolean {
   // A value known only at run time (any/unknown) can be any of the knobs below: the run-time reader answers it.
   if ((L.typeOf(value).flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0) return true;
+  if (key === "stylize") return true;
   if (key === "sorted") return literalTruthy(value) !== false && value.kind !== ts.SyntaxKind.TrueKeyword;
   if (key === "colors") return literalTruthy(value) !== false;
   if (key === "compact") return !(ts.isNumericLiteral(value) || literalTruthy(value) === false);
