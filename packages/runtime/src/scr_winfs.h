@@ -283,7 +283,35 @@ static inline int scr_u_chdir(const char *path) {
   return r;
 }
 
-/* The CRT's rename (not MoveFileEx): a destination that exists is still EEXIST, as the narrow call answered. */
+/* libuv's uv_translate_sys_error for the codes a rename (MoveFileExW) answers, as the errno the runtime's fs errors are keyed by. */
+static inline int scr_u_errno_of_win(DWORD e) {
+  switch (e) {
+    case ERROR_ACCESS_DENIED:
+    case ERROR_PRIVILEGE_NOT_HELD:
+    case ERROR_WRITE_PROTECT: return EPERM;
+    case ERROR_ALREADY_EXISTS:
+    case ERROR_FILE_EXISTS: return EEXIST;
+    case ERROR_FILE_NOT_FOUND:
+    case ERROR_PATH_NOT_FOUND:
+    case ERROR_INVALID_DRIVE:
+    case ERROR_BAD_PATHNAME:
+    case ERROR_INVALID_NAME: return ENOENT;
+    case ERROR_DIR_NOT_EMPTY: return ENOTEMPTY;
+    case ERROR_NOT_SAME_DEVICE: return EXDEV;
+    case ERROR_SHARING_VIOLATION:
+    case ERROR_LOCK_VIOLATION:
+    case ERROR_BUSY: return EBUSY;
+    case ERROR_DIRECTORY: return ENOTDIR;
+    case ERROR_INVALID_PARAMETER: return EINVAL;
+    case ERROR_NOT_ENOUGH_MEMORY:
+    case ERROR_OUTOFMEMORY: return ENOMEM;
+    default: return EIO;
+  }
+}
+
+/* rename over MoveFileExW with MOVEFILE_REPLACE_EXISTING, exactly libuv's fs__rename: an existing destination FILE is replaced (the CRT's rename
+ * refuses it with EEXIST), a directory onto an existing file fails access-denied (EPERM, Node's answer on Windows), and a move across volumes is not
+ * copied (EXDEV, as rename(2) answers). */
 static inline int scr_u_rename(const char *from, const char *to) {
   wchar_t *wf = scr_u_wide(from);
   wchar_t *wt = wf != NULL ? scr_u_wide(to) : NULL;
@@ -291,12 +319,13 @@ static inline int scr_u_rename(const char *from, const char *to) {
     free(wf);
     return -1;
   }
-  const int r = _wrename(wf, wt);
-  const int e = errno;
+  const BOOL ok = MoveFileExW(wf, wt, MOVEFILE_REPLACE_EXISTING);
+  const DWORD err = ok ? 0 : GetLastError();
   free(wf);
   free(wt);
-  errno = e;
-  return r;
+  if (ok) return 0;
+  errno = scr_u_errno_of_win(err);
+  return -1;
 }
 
 /* getcwd(buf, size): the working directory as UTF-8; NULL with ERANGE when it does not fit. */
