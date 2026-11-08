@@ -14184,6 +14184,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24804-dns-resolve-srv-failure-passes-undefined.ts": {
+   "order": [
+    "<repo>/tests/corpus/24804-dns-resolve-srv-failure-passes-undefined.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24805-dns-resolver-held-in-a-typed-variable.ts": {
+   "order": [
+    "<repo>/tests/corpus/24805-dns-resolver-held-in-a-typed-variable.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24806-dns-resolver-set-local-address.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24806-dns-resolver-set-local-address.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24807-dns-lookup-order-and-verbatim.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24807-dns-lookup-order-and-verbatim.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2481-mutual-recursive-records.ts": {
    "order": [
     "<repo>/tests/corpus/2481-mutual-recursive-records.ts"
@@ -24237,6 +24261,12 @@
   "<repo>/tests/diagnostics/destructuring-fences.ts": {
    "order": [
     "<repo>/tests/diagnostics/destructuring-fences.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/dns-resolver-unanswered-member/main.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/dns-resolver-unanswered-member/main.ts"
    ],
    "diags": []
   },
