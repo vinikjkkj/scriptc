@@ -3518,6 +3518,35 @@ declare module "dns" {
     options: { family: number; [option: string]: unknown },
     callback: (err: NodeJS.ErrnoException | null, address: string, family: number) => void,
   ): void;
+  /* The resolver slice (scr_dgram.c): a c-ares-shaped NON-BLOCKING DNS client on the dgram poller. resolveSrv answers SRV records in
+   * the reply's order; setServers / getServers read and replace the default resolver's nameservers (`ip`, `ip:port`, `[ipv6]:port`). */
+  export interface SrvRecord {
+    name: string;
+    port: number;
+    priority: number;
+    weight: number;
+  }
+  export function resolveSrv(
+    hostname: string,
+    callback: (err: NodeJS.ErrnoException | null, addresses: SrvRecord[]) => void,
+  ): void;
+  export function setServers(servers: readonly string[]): void;
+  export function getServers(): string[];
+  export interface ResolverOptions {
+    timeout?: number | undefined;
+    tries?: number | undefined;
+    maxTimeout?: number | undefined;
+  }
+  export class Resolver {
+    constructor(options?: ResolverOptions);
+    resolveSrv(
+      hostname: string,
+      callback: (err: NodeJS.ErrnoException | null, addresses: SrvRecord[]) => void,
+    ): void;
+    getServers(): string[];
+    setServers(servers: readonly string[]): void;
+    cancel(): void;
+  }
 }
 declare module "node:dns" {
   export * from "dns";

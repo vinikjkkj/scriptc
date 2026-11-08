@@ -11,7 +11,7 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { isJsSourceFile, locOf } from "../program.js";
 import { BOOL, canBoxFuncIntoDyn, DGRAMSOCK_T, DYN, F64, funcOf, IrExpr, IrLibFn, IrType, NULL_T, SrcLoc, STATS_T, STRING, typeKey, UNDEFINED_T, VOID } from "../../ir/nodes.js";
-import { DNS_LOOKUP_DOCUMENTED_OPTIONS, fenceOrDropOptionKey } from "./surfaces.js";
+import { DNS_LOOKUP_DOCUMENTED_OPTIONS, DNS_NATIVE_FN_VALUES, fenceOrDropOptionKey } from "./surfaces.js";
 import { overridesDtsPath } from "../shared.js";
 
 const DGRAM_SURFACE_HINT =
@@ -21,7 +21,7 @@ const DGRAM_SURFACE_HINT =
 /** The lowered value members of the dgram/dns modules — the surfaces.ts
  * tables' spoke-side twins (call shapes are all special-cased here). */
 export const DGRAM_MODULE_FNS: ReadonlySet<string> = new Set(["createSocket"]);
-export const DNS_MODULE_FNS: ReadonlySet<string> = new Set(["lookup"]);
+export const DNS_MODULE_FNS: ReadonlySet<string> = new Set(["lookup", "resolveSrv", "setServers", "getServers"]);
 
 /** VOID-result socket calls are usable as statements and as concise arrow
  * bodies; anything consuming the result (Node returns `this` where this
@@ -407,12 +407,35 @@ function lowerDnsCallback(L: Lowerer, node: ts.Expression): IrExpr {
   }
 }
 
+/** `new dns.Resolver(options?)` (also through a named binding, `new Resolver()`): constructed through the runtime's own constructible class
+ * value, with the arguments as checked-dynamic values. Null for every other `new`. */
+export function lowerDnsResolverNew(L: Lowerer, expr: ts.NewExpression, loc: SrcLoc): IrExpr | null {
+  if (L.dynamic) return null;
+  const callee = expr.expression;
+  const bi = ts.isPropertyAccessExpression(callee) ? L.builtinMemberOf(callee) : ts.isIdentifier(callee) ? L.builtinImportOf(callee) : null;
+  if (!bi || bi.module !== "dns" || bi.member !== "Resolver") return null;
+  const args = expr.arguments ?? [];
+  if (args.some((a) => ts.isSpreadElement(a))) return null;
+  const pack: IrExpr = { kind: "dynArrLit", elems: args.map((a) => L.lowerExprExpecting(a, DYN)), type: DYN, loc };
+  const ctor: IrExpr = { kind: "libCall", fn: "dns.resolverCtorFnValue", args: [], type: DYN, loc };
+  return { kind: "libCall", fn: "dyn.construct", args: [ctor, pack, { kind: "strLit", value: "dns.Resolver", type: STRING, loc }], type: DYN, loc };
+}
+
 /** dns.lookup(hostname, { family: 4 }, (err, address[, family]) => ...) —
  * the ONE lowered dns member. getaddrinfo runs at call time; the callback
  * defers to the next loop turn (SEMANTICS.md documents the split). */
 function lowerDnsModuleCall(L: Lowerer, expr: ts.CallExpression,
   bi: { module: string; member: string },
   loc: SrcLoc,): IrExpr {
+  const native = bi.member === "lookup" || bi.member === "Resolver" ? undefined : DNS_NATIVE_FN_VALUES[bi.member]; // lookup keeps its typed call lowering below; Resolver is only constructed
+  if (native !== undefined) {
+    // resolveSrv / setServers / getServers: the call goes through the runtime's own function box, the value the member reads as anywhere
+    // else, with every argument as a checked-dynamic value (a callback arrow boxes as a dyn function).
+    const dynArgs = expr.arguments.map((a) => L.lowerExprExpecting(a, DYN));
+    const call: IrExpr = { kind: "dynCall", callee: { kind: "libCall", fn: native, args: [], type: DYN, loc }, calleeName: `dns.${bi.member}`, args: dynArgs, type: DYN, loc };
+    const want = L.irTypeOf(expr);
+    return want.kind === "void" || want.kind === "dyn" ? call : L.coerceToExpected(call, want);
+  }
   if (bi.member !== "lookup") {
     L.noLowering(
       `dns.${bi.member}`,

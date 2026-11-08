@@ -1533,6 +1533,17 @@ export function builtinModuleFnOf(L: Lowerer, module: string, member: string): B
  * answer Object.prototype's. Membership only says the row is a faithful
  * description of the call -- lower-fnvalue.ts's gate still has to agree
  * with the checker before anything is minted. */
+/** The node:dns members that are the runtime's own dyn function boxes (scr_dgram.c's non-blocking resolver): `dns.resolveSrv`,
+ * `dns.setServers` and `dns.getServers`, as values AND as calls through the same box, so one native resolver serves every spelling. */
+export const DNS_NATIVE_FN_VALUES: Readonly<Record<string, "dns.resolveSrvFnValue" | "dns.setServersFnValue" | "dns.getServersFnValue" | "dns.lookupFnValue" | "dns.resolverCtorFnValue" | undefined>> =
+  Object.assign(Object.create(null) as Record<string, undefined>, {
+    resolveSrv: "dns.resolveSrvFnValue" as const,
+    setServers: "dns.setServersFnValue" as const,
+    getServers: "dns.getServersFnValue" as const,
+    lookup: "dns.lookupFnValue" as const,
+    Resolver: "dns.resolverCtorFnValue" as const,
+  });
+
 export function builtinMemberFnValueAllowed(module: string, member: string): boolean {
   const set = ownEntry(BUILTIN_MEMBER_FN_VALUES, module);
   return set !== undefined && set.has(member);
