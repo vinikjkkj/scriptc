@@ -352,7 +352,14 @@ static void scr_fs_read_fire(ScrClosure *self) {
     scr_fs_cb_finish(cb, vals, 2, "the fs.read callback");
     scr_dyn_release(vals[0]);
   } else {
-    scr_fs_cb_finish(cb, vals, 0, "the fs.read callback");
+    /* lib/fs.js's wrapper: callback(err, bytesRead || 0, buffer), so a failed read still hands the callback the zero and the buffer */
+    ScrDyn *err = scr_fs_take_error_dyn();
+    ScrDyn *zero = scr_dyn_new_num(0);
+    ScrDyn *args[3] = {err, zero, buf};
+    ScrDyn *r = scr_dyn_call(cb, args, 3, "the fs.read callback");
+    if (r != NULL) scr_dyn_release(r);
+    scr_dyn_release(err);
+    scr_dyn_release(zero);
   }
   scr_dyn_release(fd);
   scr_dyn_release(buf);
