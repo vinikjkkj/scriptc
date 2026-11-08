@@ -14756,6 +14756,13 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24824-applymixin-helper-beside-an-evaluated-class/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24824-applymixin-helper-beside-an-evaluated-class/utils/applyMixin.cjs",
+    "<repo>/tests/corpus/24824-applymixin-helper-beside-an-evaluated-class/main.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2485-inspect-circular-refs.ts": {
    "order": [
     "<repo>/tests/corpus/2485-inspect-circular-refs.ts"
