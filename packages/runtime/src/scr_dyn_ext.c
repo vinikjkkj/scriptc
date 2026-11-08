@@ -559,7 +559,7 @@ static ScrDyn *scr_fs_rd_list(ScrStr *base, const ScrDyn *opts, const ScrRdOpt *
         scr_str_release(relstr);
         scr_dyn_arr_push(out, relv);
         struct stat st;
-        if (stat(child->data, &st) == 0 && S_ISDIR(st.st_mode)) {
+        if (scr_sys_stat(child->data, &st) == 0 && S_ISDIR(st.st_mode)) {
           if (qn == qcap) {
             qcap *= 2;
             q = realloc(q, qcap * sizeof *q);

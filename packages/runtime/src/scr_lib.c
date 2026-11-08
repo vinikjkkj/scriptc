@@ -2344,7 +2344,7 @@ void scr_fs_append_file(ScrStr *path, ScrStr *data) {
 bool scr_fs_exists(ScrStr *path) {
   /* Like Node's existsSync: any failure (missing, EACCES on a parent, ...)
    * is simply false — never a throw. */
-  return access(path->data, F_OK) == 0;
+  return scr_sys_access(path->data, F_OK) == 0;
 }
 
 void scr_fs_mkdir(ScrStr *path) {
@@ -2363,7 +2363,7 @@ void scr_fs_unlink(ScrStr *path) {
 }
 
 void scr_fs_chmod(ScrStr *path, double mode) {
-  if (chmod(path->data, (mode_t)mode) != 0) scr_fs_throw(errno, "chmod", path);
+  if (scr_sys_chmod(path->data, (mode_t)mode) != 0) scr_fs_throw(errno, "chmod", path);
 }
 
 void scr_fs_chown(ScrStr *path, double uid, double gid) {
@@ -2606,7 +2606,7 @@ void scr_fs_rm(ScrStr *path) {
    * surface doesn't declare — the message wording diverges from Node's
    * ERR_FS_EISDIR, see SEMANTICS.md), then unlink. */
   struct stat st;
-  if (lstat(path->data, &st) != 0) {
+  if (scr_sys_lstat(path->data, &st) != 0) {
     scr_fs_throw(errno, "lstat", path);
     return;
   }
@@ -2659,7 +2659,7 @@ static void scr_mkdir_rec(char *path, size_t len, mode_t mode) {
   int e = errno;
   struct stat st;
   if (e == EEXIST) {
-    if (stat(path, &st) == 0 && S_ISDIR(st.st_mode)) return;
+    if (scr_sys_stat(path, &st) == 0 && S_ISDIR(st.st_mode)) return;
   } else if (e == ENOENT) {
     /* Parent: trim trailing separators, the last component, then the
      * separator run before it (keep "/" itself). */
@@ -2675,7 +2675,7 @@ static void scr_mkdir_rec(char *path, size_t len, mode_t mode) {
        * FILE; the CRT answers ENOENT for that too. Node on Windows still
        * reports ENOTDIR with the full requested path — recover the
        * distinction from the parent's stat before recursing. */
-      if (stat(path, &st) == 0 && !S_ISDIR(st.st_mode)) {
+      if (scr_sys_stat(path, &st) == 0 && !S_ISDIR(st.st_mode)) {
         path[i] = saved;
         ScrStr *full = scr_str_new(path, len);
         scr_fs_throw(ENOTDIR, "mkdir", full);
@@ -2691,7 +2691,7 @@ static void scr_mkdir_rec(char *path, size_t len, mode_t mode) {
         return;
       }
       e = errno;
-      if (e == EEXIST && stat(path, &st) == 0 && S_ISDIR(st.st_mode)) return;
+      if (e == EEXIST && scr_sys_stat(path, &st) == 0 && S_ISDIR(st.st_mode)) return;
     }
   }
   ScrStr *p = scr_str_new(path, len);
@@ -2785,7 +2785,7 @@ static int scr_rm_unlink_e(const char *path, bool force) {
 #ifdef _WIN32
   int first = errno;
   if (!force || (first != EPERM && first != EACCES)) return first;
-  if (chmod(path, 0666) != 0) return first;
+  if (scr_sys_chmod(path, 0666) != 0) return first;
   if (unlink(path) == 0) return 0;
   return first;
 #else
@@ -2798,7 +2798,7 @@ static int scr_rm_unlink_e(const char *path, bool force) {
  * records) the first failure, with the failing path and syscall name. */
 static void scr_rm_tree_e(const char *path, size_t len, bool force, ScrRmFail *f) {
   struct stat st;
-  if (lstat(path, &st) != 0) {
+  if (scr_sys_lstat(path, &st) != 0) {
     scr_rm_fail_set(f, errno, "lstat", path, len);
     return;
   }
@@ -2839,7 +2839,7 @@ static void scr_rm_tree_e(const char *path, size_t len, bool force, ScrRmFail *f
  * tree walk — failures recorded in `f`, never thrown. */
 static void scr_fs_rm_attempt(ScrStr *path, bool recursive, bool force, ScrRmFail *f) {
   struct stat st;
-  if (lstat(path->data, &st) != 0) {
+  if (scr_sys_lstat(path->data, &st) != 0) {
     if (force && errno == ENOENT) return; /* Node: force swallows ENOENT */
     scr_rm_fail_set(f, errno, "lstat", path->data, path->len);
     return;
@@ -2947,7 +2947,7 @@ void scr_fs_access(ScrStr *path, double mode) {
    * Windows treats X_OK as F_OK, so mask it down to the R/W bits. */
   m &= 6;
 #endif
-  if (access(path->data, m) != 0) scr_fs_throw(errno, "access", path);
+  if (scr_sys_access(path->data, m) != 0) scr_fs_throw(errno, "access", path);
 }
 
 /* read(2) loop to EOF from the CURRENT position — Node's
@@ -3342,7 +3342,7 @@ static ScrStats *scr_stats_of(const struct stat *st, const char *path, int follo
 
 ScrStats *scr_fs_stat(ScrStr *path) {
   struct stat st;
-  if (stat(path->data, &st) != 0) { /* follows symlinks, like Node's statSync */
+  if (scr_sys_stat(path->data, &st) != 0) { /* follows symlinks, like Node's statSync */
     scr_fs_throw(errno, "stat", path);
     return NULL;
   }
@@ -3354,7 +3354,7 @@ ScrStats *scr_fs_stat(ScrStr *path) {
  * delivers the pair; nothing is thrown. */
 ScrStats *scr_fs_stat_try(const ScrStr *path, ScrError **err) {
   struct stat st;
-  if (stat(path->data, &st) != 0) {
+  if (scr_sys_stat(path->data, &st) != 0) {
     *err = scr_fs_error_build(errno, "stat", path);
     return NULL;
   }
@@ -3364,7 +3364,7 @@ ScrStats *scr_fs_stat_try(const ScrStr *path, ScrError **err) {
 
 ScrStats *scr_fs_lstat(ScrStr *path) {
   struct stat st;
-  if (lstat(path->data, &st) != 0) { /* no follow; Node reports lstat */
+  if (scr_sys_lstat(path->data, &st) != 0) { /* no follow; Node reports lstat */
     scr_fs_throw(errno, "lstat", path);
     return NULL;
   }
@@ -3478,7 +3478,7 @@ ScrScandir *scr_fs_scandir(ScrStr *path) {
         char buf[4096];
         int w = snprintf(buf, sizeof buf, "%s/%s", path->data, ent->d_name);
         struct stat st;
-        kind = (w > 0 && (size_t)w < sizeof buf && lstat(buf, &st) == 0)
+        kind = (w > 0 && (size_t)w < sizeof buf && scr_sys_lstat(buf, &st) == 0)
                    ? scr_dirent_kind_of_mode(st.st_mode)
                    : 0;
         break;
@@ -3490,7 +3490,7 @@ ScrScandir *scr_fs_scandir(ScrStr *path) {
       char buf[4096];
       int w = snprintf(buf, sizeof buf, "%s/%s", path->data, ent->d_name);
       struct stat st;
-      kind = (w > 0 && (size_t)w < sizeof buf && lstat(buf, &st) == 0)
+      kind = (w > 0 && (size_t)w < sizeof buf && scr_sys_lstat(buf, &st) == 0)
                  ? scr_dirent_kind_of_mode(st.st_mode)
                  : 0;
     }
