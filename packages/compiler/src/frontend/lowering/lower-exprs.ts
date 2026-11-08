@@ -26,7 +26,7 @@ import { lowerNavigatorProperty, requireFnValueOf, requireMemberFence, valuesCou
 import { funcObjectPropOf } from "./lower-fnprops.js";
 import { recordKeyReadRow, recordNarrowBridgeRow } from "./keyread-census.js";
 import { cjsClassExprWholeExportOf, cjsExportsGetterDefineOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
-import { absentGlobalMemberValue, absentProcessMemberValue, absentRecordMemberValue, ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, objectStaticFnValueOf, stdlibExistenceTestOf, stringMethodFnValueOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf, stdlibHandleObjectTypeOf, stdlibHandleTypeOfAnswersObject, stdlibHandleDeclaresMember } from "./surfaces.js";
+import { DNS_NATIVE_FN_VALUES, absentGlobalMemberValue, absentProcessMemberValue, absentRecordMemberValue, ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, objectStaticFnValueOf, stdlibExistenceTestOf, stringMethodFnValueOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf, stdlibHandleObjectTypeOf, stdlibHandleTypeOfAnswersObject, stdlibHandleDeclaresMember } from "./surfaces.js";
 import { UNSUPPORTED, assertionDropsMembersDiag, assertionOverflowsMembersDiag, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { PoisonError, dynUndefinedExpr, jsFuncValueNameOf, jsFuncValueSourceOf, neverTaintedJsType, nodeThrowExpr, own } from "./lowerer.js";
 import { pairedProtoClassOfValue, protoDataNameAnywhere, protoDataNamesOf, protoDataReadOf, protoThisType } from "./proto-class-consume.js";
@@ -2119,6 +2119,10 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
             // refused here, at the reference, instead of being a string that
             // fails at the call. Only the non-callable members (classes,
             // namespaces, constants) keep the identity token.
+            // node:dns's native members (the runtime's own function boxes): the same value in every spelling.
+            if (bi.module === "dns" && DNS_NATIVE_FN_VALUES[bi.member] !== undefined) {
+              return { kind: "libCall", fn: DNS_NATIVE_FN_VALUES[bi.member]!, args: [], type: DYN, loc };
+            }
             if (builtinMemberIsFunction(L, expr)) {
               const mv = builtinMemberFnValueOf(L, expr, bi, expr.text, loc);
               if (mv) return mv;

@@ -4529,6 +4529,16 @@ export type IrLibFn =
   | "dgram.onClose"
   | "dgram.onConnect"
   | "dns.lookup"
+  /** `dns.resolveSrv` / `dns.setServers` / `dns.getServers` as VALUES (scr_dgram.c): the runtime's own dyn function boxes, one immortal
+   * closure each, so every spelling of the member is the same function and a call through the stored value runs the same native
+   * resolver (a c-ares-shaped, non-blocking DNS client on the dgram poller). Never throw; calling the box may. */
+  | "dns.resolveSrvFnValue"
+  | "dns.setServersFnValue"
+  | "dns.getServersFnValue"
+  /** `dns.lookup` as a VALUE: the same getaddrinfo entry the call form uses, behind the runtime's function box. */
+  | "dns.lookupFnValue"
+  /** `dns.Resolver`, the constructible class value (scr_dgram.c): `new` goes through dyn.construct over it. */
+  | "dns.resolverCtorFnValue"
   /** fs.stat(path, cb) (scr_async.c): the stat runs at the call; the typed
    * callback (err: Error | null, stats: Stats) fires on the next loop turn
    * through the emitted per-shape adapter. */

@@ -88,7 +88,7 @@ import {
   NULL_T,
   isUnitType,
 } from "../../ir/nodes.js";
-import { type BuiltinModuleFn, builtinMemberFnValueAllowed, builtinModuleFnOf, stdlibGlobalNameOf } from "./surfaces.js";
+import { DNS_NATIVE_FN_VALUES, type BuiltinModuleFn, builtinMemberFnValueAllowed, builtinModuleFnOf, stdlibGlobalNameOf } from "./surfaces.js";
 import { optionalTimerHandleClear } from "./lower-calls.js";
 import { DYN_BUILTIN_SIGS, dynBuiltinFnType } from "../dyn-builtin-sigs.js";
 import { isJsSourceFile } from "../program.js";
@@ -601,6 +601,11 @@ export function builtinMemberFnValueOf(
   text: string,
   loc: SrcLoc,
 ): IrExpr | null {
+  // node:dns's native members: the runtime's own immortal dyn function box (one resolver for every spelling).
+  if (bi.module === "dns") {
+    const native = DNS_NATIVE_FN_VALUES[bi.member];
+    if (native !== undefined) return { kind: "libCall", fn: native, args: [], type: DYN, loc };
+  }
   const got = builtinMemberFnValueType(L, node, bi);
   if (got === null) return null;
   memberNarrowedSlotFence(L, node, text, got.want);
