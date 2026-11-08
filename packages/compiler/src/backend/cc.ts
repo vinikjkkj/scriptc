@@ -2198,6 +2198,13 @@ async function ensureRuntimeObjects(
   const objOf = (src: string): string => join(objDir, `${basename(src, ".c")}.o`);
   const present = await Promise.all(sources.map((s) => fileExists(objOf(s))));
   const missing = sources.filter((_, i) => !present[i]);
+  const objTraceT0 = performance.now();
+  const objTrace = (what: string): void => {
+    if (process.env["SCRIPTC_PHASE_LOG"] !== undefined && process.env["SCRIPTC_PHASE_LOG"] !== "") {
+      process.stderr.write(`[obj-trace] pid=${process.pid} set=${setKey} root=${root} sources=${sources.length} missing=${missing.length} ${what} ms=${Math.round(performance.now() - objTraceT0)}\n`);
+    }
+  };
+  objTrace("checked");
   // An object HIT bumps its mtime, exactly as a binary hit does. Without this
   // the LRU sweep read "oldest" as "coldest" and evicted the hottest objects
   // in the tree first — they are written once and then only ever read, so
@@ -2241,6 +2248,7 @@ async function ensureRuntimeObjects(
     } finally {
       await rm(tmpDir, { recursive: true, force: true });
     }
+    objTrace("built");
   }
   return new Map(sources.map((s) => [s, objOf(s)]));
 }
@@ -3168,9 +3176,11 @@ export async function compileC(opts: CcOptions): Promise<void> {
       // substitution entirely and compile the historical way — slower, and
       // right, which is the trade this whole file is about.
       if (!(await objectsStillPresent(objects))) objects = null;
+      if (objects === null && process.env["SCRIPTC_PHASE_LOG"]) process.stderr.write(`[obj-trace] pid=${process.pid} FALLBACK: objects vanished, compiling every runtime source\n`);
     }
-  } catch {
+  } catch (err) {
     objects = null; // cache trouble is never a build failure
+    if (process.env["SCRIPTC_PHASE_LOG"]) process.stderr.write(`[obj-trace] pid=${process.pid} FALLBACK after error: ${String((err as Error)?.message ?? err).slice(0, 400)}\n`);
   }
   // A program of several translation units (a split program, or one carrying the ICU table) compiles them as parallel
   // jobs, one `-c` per unit with the option set every unit sees, and links the objects in the order the single command
