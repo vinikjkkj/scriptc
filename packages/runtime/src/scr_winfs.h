@@ -13,6 +13,7 @@
 #ifdef _WIN32
 
 #include <direct.h>
+#include <stdarg.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <io.h>
@@ -21,6 +22,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <wchar.h>
+#include <winsock2.h> /* before windows.h, as every TU that uses sockets includes them */
 #include <windows.h>
 
 /* UTF-8 (WTF-8) to a malloc'd, NUL-terminated UTF-16 string; NULL on out of memory (errno ENOMEM). An ill-formed byte becomes U+FFFD. */
@@ -166,6 +168,46 @@ static inline int scr_u_closedir(ScrUDir *d) {
   free(d);
   return 0;
 }
+
+/* ── open and fopen ───────────────────────────────────────────────────────── */
+static inline int scr_u_open(const char *path, int oflag, ...) {
+  int pmode = 0; /* open(2)'s optional third argument, read only when the call creates */
+  if ((oflag & _O_CREAT) != 0) {
+    va_list ap;
+    va_start(ap, oflag);
+    pmode = va_arg(ap, int);
+    va_end(ap);
+  }
+  wchar_t *wp = scr_u_wide(path);
+  if (wp == NULL) return -1;
+  const int fd = _wopen(wp, oflag, pmode);
+  const int e = errno;
+  free(wp);
+  errno = e;
+  return fd;
+}
+
+static inline FILE *scr_u_fopen(const char *path, const char *mode) {
+  wchar_t *wp = scr_u_wide(path);
+  wchar_t wm[16];
+  size_t i = 0;
+  for (; mode[i] != '\0' && i + 1 < sizeof wm / sizeof wm[0]; i++) wm[i] = (wchar_t)(unsigned char)mode[i];
+  wm[i] = 0;
+  if (wp == NULL) return NULL;
+  FILE *f = _wfopen(wp, wm);
+  const int e = errno;
+  free(wp);
+  errno = e;
+  return f;
+}
+
+#define scr_sys_open scr_u_open
+#define scr_sys_fopen scr_u_fopen
+
+#else /* !_WIN32: the plain POSIX names */
+
+#define scr_sys_open open
+#define scr_sys_fopen fopen
 
 #endif /* _WIN32 */
 #endif /* SCR_WINFS_H */

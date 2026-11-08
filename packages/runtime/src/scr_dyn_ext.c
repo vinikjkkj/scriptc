@@ -10,6 +10,7 @@
  *   - the errno/syscall/path/dest reads of an error. */
 
 #include "scr_runtime.h"
+#include "scr_winfs.h" /* scr_sys_open / scr_sys_fopen: UTF-8 paths over the wide APIs on Windows */
 
 #include <errno.h>
 #include <fcntl.h>
@@ -1281,7 +1282,7 @@ static void scr_fs_write_run(const ScrDyn *path, const ScrBytes *data, int bits,
   int fd;
   if (owned) {
     ps = scr_fs_path_str(path);
-    fd = open(ps->data, bits | O_BINARY, mode);
+    fd = scr_sys_open(ps->data, bits | O_BINARY, mode);
     if (fd < 0) {
       scr_fs_throw(errno, "open", ps);
       scr_str_release(ps);
@@ -1805,7 +1806,7 @@ static void scr_fs_open_fire(ScrClosure *self) {
   ScrDyn *mode = scr_box_get_ref(self->caps[2]);
   ScrDyn *cb = scr_box_get_ref(self->caps[3]);
   ScrStr *p = scr_fs_path_str(path);
-  int fd = open(p->data, (int)flags->v.num | O_BINARY, (mode_t)mode->v.num);
+  int fd = scr_sys_open(p->data, (int)flags->v.num | O_BINARY, (mode_t)mode->v.num);
   if (fd < 0) {
     scr_fs_throw(errno, "open", p);
     scr_fs_cb_finish(cb, NULL, 0, "the fs.open callback");
