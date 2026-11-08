@@ -3703,6 +3703,14 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
             }
           }
         }
+        // `util.inspect.styles` / `util.inspect.colors`: the live tables the colored renderer reads (scr_inspect.c), as dynamic objects
+        // the program may read or mutate. Returned without maybeNarrow like the prototype objects above.
+        if (!L.dynamic && !expr.questionDotToken && (expr.name.text === "styles" || expr.name.text === "colors")) {
+          const ubi = ts.isPropertyAccessExpression(expr.expression) ? L.builtinMemberOf(expr.expression) : null;
+          if (ubi !== null && ubi.module === "util" && ubi.member === "inspect") {
+            return { kind: "libCall", fn: expr.name.text === "styles" ? "insp.styles" : "insp.colorTable", args: [], type: DYN, loc: locOf(expr) };
+          }
+        }
         // `Error.stackTraceLimit` — the process-wide frame cap slot.
         if (!L.dynamic && !expr.questionDotToken && L.stdlibGlobalMember(expr, "Error") === "stackTraceLimit") {
           return { kind: "libCall", fn: "error.stackLimitGet", args: [], type: F64, loc: locOf(expr) };

@@ -6671,6 +6671,8 @@ export type IrLibFn =
   | "insp.customOpts"
   | "insp.customResult"
   | "dyn.getPrototypeOf"
+  | "insp.styles"
+  | "insp.colorTable"
   | "dyn.objectPrototype"
   | "dyn.primPrototype"
   | "dyn.primInstanceOf"
@@ -13064,6 +13066,11 @@ export function moduleUsesInspColors(mod: IrModule): boolean {
       return;
     }
     const node = v as { kind?: unknown; fn?: unknown; callee?: unknown; args?: unknown; name?: unknown };
+    // util.inspect.styles / .colors read as live tables.
+    if (node.kind === "libCall" && (node.fn === "insp.styles" || node.fn === "insp.colorTable")) {
+      found = true;
+      return;
+    }
     // The `inspect` function value a [util.inspect.custom] method receives forwards the caller's options at run time.
     if (typeof node.name === "string" && node.name.startsWith("%util.inspcustom.inspect.")) {
       found = true;

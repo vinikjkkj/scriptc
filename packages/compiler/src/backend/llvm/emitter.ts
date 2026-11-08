@@ -827,6 +827,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "insp.customOpts": "scr_insp_custom_opts",
   "insp.customResult": "scr_insp_custom_result",
   "dyn.getPrototypeOf": "scr_dyn_get_prototype_of",
+  "insp.styles": "scr_insp_styles_table",
+  "insp.colorTable": "scr_insp_colors_table",
   "dyn.objectPrototype": "scr_dyn_object_prototype",
   "dyn.primPrototype": "scr_dyn_prim_prototype",
   "dyn.primInstanceOf": "scr_dyn_prim_instanceof",
