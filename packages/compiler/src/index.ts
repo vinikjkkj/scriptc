@@ -1417,9 +1417,9 @@ async function compileTracked(
   const llStats: LlvmEmitStats = { coroLowered: 0 };
   if (opts.backend !== "c") {
     try {
-      const ll = tapped("emit.llvm", () => emitLlvmModule(lowered.module!, llStats));
-      cPath = join(opts.outDir, `${stem}.ll`);
-      await writeFile(cPath, ll);
+      const llPath = join(opts.outDir, `${stem}.ll`);
+      await emitLlvmFile(lowered.module!, llStats, llPath);
+      cPath = llPath;
       backend = "llvm";
     } catch (err) {
       if (!(err instanceof LlvmUnsupportedError)) throw err;
@@ -1439,14 +1439,9 @@ async function compileTracked(
   let programHeader: string | undefined;
   const headerName = `${stem}.scrh`;
   if (backend === "c") {
-    const program = tapped("emit.c", () => emitModuleProgram(lowered.module!, entryText, headerName));
-    await writeFile(cPath, program.units[0]!);
-    if (program.header !== null) {
-      programHeader = join(opts.outDir, headerName);
-      await writeFile(programHeader, program.header);
-      programUnits = program.units.slice(1).map((_, i) => join(opts.outDir, `${stem}.part${i + 1}.c`));
-      await Promise.all(programUnits.map((p, i) => writeFile(p, program.units[i + 1]!)));
-    }
+    const written = await emitCFiles(lowered.module!, entryText, headerName, cPath, opts.outDir, stem);
+    programHeader = written.programHeader;
+    programUnits = written.programUnits;
   }
   // A previous build of the same program may have been split when this one
   // is not (an edit that shrank it, or a threshold change). Its parts would
@@ -1513,7 +1508,38 @@ async function compileTracked(
       frontend: inputs.snapshot(),
     });
   }
+  // Everything the native stage needs is in `plan` (paths, features, advisories). The lowered IR and the lowerings behind it would
+  // otherwise stay alive in this frame through the whole clang run and the link.
+  lowered = undefined as never;
   return linkProgram(entryPath, opts, ffi, plan, sourceTexts);
+}
+
+/** The LLVM unit, written; the emitted text is local to this call so it does not outlive the write in the caller's frame. */
+async function emitLlvmFile(mod: IrModule, llStats: LlvmEmitStats, llPath: string): Promise<void> {
+  const ll = tapped("emit.llvm", () => emitLlvmModule(mod, llStats));
+  await writeFile(llPath, ll);
+}
+
+/** The C units (and the header a split program shares), written; the emitted text stays local to this call. */
+async function emitCFiles(
+  mod: IrModule,
+  entryText: string,
+  headerName: string,
+  cPath: string,
+  outDir: string,
+  stem: string,
+): Promise<{ programUnits: string[]; programHeader: string | undefined }> {
+  const program = tapped("emit.c", () => emitModuleProgram(mod, entryText, headerName));
+  await writeFile(cPath, program.units[0]!);
+  let programHeader: string | undefined;
+  let programUnits: string[] = [];
+  if (program.header !== null) {
+    programHeader = join(outDir, headerName);
+    await writeFile(programHeader, program.header);
+    programUnits = program.units.slice(1).map((_, i) => join(outDir, `${stem}.part${i + 1}.c`));
+    await Promise.all(programUnits.map((p, i) => writeFile(p, program.units[i + 1]!)));
+  }
+  return { programUnits, programHeader };
 }
 
 /** Read a verification subject off disk. `roles` maps an artifact's role name
