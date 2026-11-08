@@ -1437,7 +1437,9 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
 
 /** A JS function declaration whose scalar return claim (JSDoc `@return {Number}`) the body contradicts: it ends some path with a bare
    * `return;`, or it passes through the result of another such function (`return parse(v)`). Its result is the scalar OR undefined. */
-  const widenedMemo = new Map<ts.Node, boolean>();
+  // Weakly keyed: a strong module-level map would keep every declaration of every program this process loaded (and the whole syntax
+  // tree and checker handles behind each) alive after its load is disposed.
+  const widenedMemo = new WeakMap<ts.Node, boolean>();
   export function jsWidenedReturnDecl(L: Lowerer, decl: ts.SignatureDeclaration): boolean {
     const known = widenedMemo.get(decl);
     if (known !== undefined) return known;
