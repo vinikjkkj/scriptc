@@ -940,6 +940,14 @@ ScrDyn *scr_fs_lchmod_sync_chk(const ScrDyn *path, const ScrDyn *mode) {
   return scr_dyn_retain(scr_dyn_undefined());
 }
 
+/* fs/promises.readdir(path, options): the sync ladder (scr_fs_readdir_dyn) behind a settled promise of the dyn listing. A validation or listing
+ * failure leaves its exception pending, which the call site turns into a rejection; the promise returned then is a placeholder it discards. */
+ScrPromise *scr_fsp_readdir_dyn(const ScrDyn *path, const ScrDyn *opts) {
+  ScrDyn *r = scr_fs_readdir_dyn(path, opts);
+  if (r == NULL) r = scr_dyn_retain(scr_dyn_undefined());
+  return scr_promise_settled_ref(r, &scr_dyn_retain_v, &scr_dyn_release_v, NULL);
+}
+
 ScrPromise *scr_fsp_lchmod_chk(const ScrDyn *path, const ScrDyn *mode) {
 #ifndef __APPLE__
   (void)path;

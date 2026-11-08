@@ -592,6 +592,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "net.connectDyn": "scr_net_connect_dyn",
   "fs.lchmodSyncChk": "scr_fs_lchmod_sync_chk",
   "fsp.lchmodChk": "scr_fsp_lchmod_chk",
+  "fsp.readdirDyn": "scr_fsp_readdir_dyn",
   "fs.readFileSyncBuf": "scr_fs_read_file_bytes",
   "fs.readFileSyncBytes": "scr_fs_read_file_bytes",
   "fs.writeFileSyncBytes": "scr_fs_write_file_bytes",

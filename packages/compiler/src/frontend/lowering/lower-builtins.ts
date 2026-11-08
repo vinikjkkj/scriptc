@@ -1191,7 +1191,8 @@ function fsWriteOptionsSignalFree(L: Lowerer, fn: string, expr: ts.CallExpressio
         bi.member === "writeFile" || bi.member === "appendFile" || bi.member === "mkdir" ||
         bi.member === "unlink" || bi.member === "rename" || bi.member === "open" || bi.member === "close" ||
         bi.member === "write" || bi.member === "chmod" || bi.member === "readdir");
-    if (!isJsSourceFile(expr.getSourceFile()) && !tsCallbackForm) return null;
+    const tsPromisesReaddir = bi.module === "fs/promises" && bi.member === "readdir";
+    if (!isJsSourceFile(expr.getSourceFile()) && !tsCallbackForm && !tsPromisesReaddir) return null;
     const args = expr.arguments;
     if (args.some(ts.isSpreadElement)) return null;
     // Every ladder argument crosses as a dyn value; an argument that
@@ -1331,6 +1332,15 @@ function fsWriteOptionsSignalFree(L: Lowerer, fn: string, expr: ts.CallExpressio
     const chk = (fn: IrLibFn, chkArgs: IrExpr[], type: IrType): IrExpr =>
       ({ kind: "libCall", fn, args: chkArgs, type, loc });
     if (bi.module === "fs/promises") {
+      if (bi.member === "readdir" && args.length === 2) {
+        // readdir(path, options): the sync ladder lists (scr_fs_readdir_dyn) behind a promise of the dyn listing, which meets the checker's
+        // Promise<string[] | Dirent[] | Buffer[]> through the checked promise coercion, as the readdirSync option forms do
+        const a = dynArgs([args[0], args[1]]);
+        if (a === null) return null;
+        const listing = chk("fsp.readdirDyn", a, { kind: "promise", inner: DYN });
+        const want = L.irTypeOf(expr);
+        return want.kind === "dyn" || (want.kind === "promise" && want.inner.kind === "dyn") ? listing : L.coerceToExpected(listing, want);
+      }
       if (bi.member !== "lchmod" || args.length !== 2) return null;
       const a = dynArgs([args[0], args[1]]);
       return a && chk("fsp.lchmodChk", a, { kind: "promise", inner: VOID });

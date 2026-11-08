@@ -1283,6 +1283,11 @@ declare module "fs/promises" {
   export function writeFile(path: string, data: string): Promise<void>;
   export function mkdir(path: string, options?: { recursive?: boolean; mode?: number }): Promise<void>;
   export function readdir(path: string): Promise<string[]>;
+  /* The option forms: the checked-dynamic ladder behind a settled promise (scr_fsp_readdir_dyn), the same listing readdirSync and the callback form give
+   * for each shape. withFileTypes answers Dirent rows, encoding "buffer" answers Buffers, anything else the names. */
+  export function readdir(path: string, options: { withFileTypes: true; recursive?: boolean; [option: string]: unknown }): Promise<import("node:fs").Dirent[]>;
+  export function readdir(path: string, options: { encoding: "buffer"; withFileTypes?: false; recursive?: boolean; [option: string]: unknown }): Promise<Buffer[]>;
+  export function readdir(path: string, options: { encoding?: "utf8" | "utf-8" | null; withFileTypes?: false; recursive?: boolean; [option: string]: unknown }): Promise<string[]>;
   export function rm(path: string): Promise<void>;
   export function stat(path: string): Promise<import("node:fs").Stats>;
   export function unlink(path: string): Promise<void>;
