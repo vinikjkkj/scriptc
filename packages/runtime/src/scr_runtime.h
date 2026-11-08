@@ -10589,6 +10589,7 @@ void scr_fs_opendir_chk(const ScrDyn *path, const ScrDyn *opts, const ScrStr *fe
 void scr_fs_watch_file_chk(const ScrDyn *path, const ScrDyn *listener, const ScrStr *fence);
 ScrDyn *scr_fs_lchmod_sync_chk(const ScrDyn *path, const ScrDyn *mode);
 ScrPromise *scr_fsp_lchmod_chk(const ScrDyn *path, const ScrDyn *mode);
+ScrPromise *scr_fsp_readdir_dyn(const ScrDyn *path, const ScrDyn *opts); /* fs/promises.readdir(path, options): a settled promise of the dyn listing */
 void scr_fs_stream_opts_chk(const ScrDyn *path, const ScrDyn *opts, const ScrStr *fence);
 /* The checked-dynamic max-listeners ladders (scr_events_emitter.c). */
 ScrEmitter *scr_emitter_set_max_chk(ScrEmitter *em, const ScrDyn *n);

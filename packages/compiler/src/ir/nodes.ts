@@ -5413,6 +5413,8 @@ export type IrLibFn =
   | "fs.lchmodCb"
   | "fs.lchmodSyncChk"
   | "fsp.lchmodChk"
+  /** fs/promises.readdir(path, options): the checked-dynamic option ladder (scr_fs_readdir_dyn) behind a settled promise of the dyn listing. */
+  | "fsp.readdirDyn"
   /** The compiler-resolved ERR_INVALID_ARG_TYPE throw with a RUNTIME-
    * rendered Received tail: args [argname, "of type ..." clause, the
    * offending dyn value]. ALWAYS THROWS; polymorphic result (the
@@ -12326,7 +12328,7 @@ export function moduleUsesDynInvoke(mod: IrModule): boolean {
 const DYN_EXT_LIB_FNS: ReadonlySet<string> = new Set([
   "fs.readFileCb", "fs.writeFileCb", "fs.appendFileCb", "fs.mkdirCb", "fs.unlinkCb", "fs.renameCb",
   "fs.mkdtempCb", "fs.mkdtempSyncOpts", "fs.readCb", "fs.lchmodCb", "fs.lchmodSyncChk", "fsp.lchmodChk", "fs.openCb", "fs.closeCb", "fs.writeCb", "fs.chmodCb",
-  "fs.readdirCb", "fs.readdirDyn",
+  "fs.readdirCb", "fs.readdirDyn", "fsp.readdirDyn",
   "buffer.concatDyn", "buffer.concatDynLen", "buffer.byteLenDyn", "buffer.isEncodingDyn", "error.msgDyn", "dyn.isBuffer", "dyn.looseEq", "error.ext",
   "dyn.bufferValue",
 ]);
@@ -14601,6 +14603,7 @@ const LIB_MODE_REFUSED_PREFIXES: readonly [string, string][] = [
   ["fs.mkdtempCb", "the async fs callback surface (fs.mkdtemp)"],
   ["fs.readdirCb", "the async fs callback surface (fs.readdir)"],
   ["fs.readdirDyn", "fs.readdirSync over the checked-dynamic option forms"],
+  ["fsp.readdirDyn", "fs/promises.readdir over the checked-dynamic option forms"],
   ["fs.readCb", "the async fs callback surface (fs.read)"],
   ["fs.lchmodCb", "the async fs callback surface (fs.lchmod)"],
   ["fs.openCb", "the async fs callback surface (fs.open)"],
@@ -15461,6 +15464,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "fs.chmodCb",
   "fs.lchmodSyncChk",
   "fsp.lchmodChk",
+  "fsp.readdirDyn",
   "net.connect",
   "net.connectCb",
   "net.connectAttempt",

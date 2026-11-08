@@ -1237,6 +1237,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "fs.chmodCb": { argTypes: [DYN, DYN, DYN], result: DYN },
   "fs.lchmodSyncChk": { argTypes: [DYN, DYN], result: DYN },
   "fsp.lchmodChk": { argTypes: [DYN, DYN], result: { kind: "promise", inner: VOID } },
+  "fsp.readdirDyn": { argTypes: [DYN, DYN], result: { kind: "promise", inner: DYN } },
   "error.argTypeThrow": { argTypes: [STRING, STRING, DYN], result: VOID },
   "error.propTypeThrow": { argTypes: [STRING, STRING, DYN], result: VOID },
   "emitter.setMaxChk": { argTypes: [null, DYN], result: VOID },

@@ -7242,6 +7242,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_fs_lchmod_sync_chk(${arg(0)}, ${arg(1)})`);
           case "fsp.lchmodChk":
             return finish(`scr_fsp_lchmod_chk(${arg(0)}, ${arg(1)})`);
+          case "fsp.readdirDyn":
+            return finish(`scr_fsp_readdir_dyn(${arg(0)}, ${arg(1)})`);
           case "error.argTypeThrow":
             // Always throws with the runtime-rendered Received tail (the
             // error.nodeThrow dummy pattern). Borrows all three.
