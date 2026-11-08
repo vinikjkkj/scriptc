@@ -1699,7 +1699,7 @@ export function lowerConsoleInspectArg(
 /** The parsed options literal: the resolved depth (numeric; Infinity for
  * `null`), with every non-default knob fenced by name. */
 /** Node's option keys this runtime does not render yet (OPEN, ci-classes iofmtopts). */
-const INSPECT_OPEN_KEYS = new Set(["showHidden", "stylize"]);
+const INSPECT_OPEN_KEYS = new Set(["stylize"]);
 
 /** Literal truthiness of a compile-time constant option value, or null when
  * the value is only known at run time. */
@@ -1723,7 +1723,6 @@ function refuseOpenInspectOption(L: Lowerer, prop: ts.Node, key: string, value: 
   const open = (what: string): never =>
     L.noLowering(`util.inspect with the '${what}' option`, prop, "this option is OPEN (ci-classes iofmtopts): the rendering for it is not lowered yet");
   if (key === "stylize") open("stylize");
-  if (key === "showHidden" && literalTruthy(value) === true) open(`${key}: true`);
   if (INSPECT_OPEN_KEYS.has(key) && literalTruthy(value) === null) open(`${key} (a run-time value)`);
 }
 
@@ -1844,6 +1843,8 @@ function inspectOptionsDyn(L: Lowerer, node: ts.Expression, loc: SrcLoc): IrExpr
   // refuses: its static shape could drop keys Node reads.
   const lowered = L.lowerExpr(node);
   if (lowered.type.kind === "dyn") return lowered;
+  // inspect(value, showHidden): a boolean second argument is the legacy spelling of { showHidden } (the runtime reader takes it as such).
+  if (lowered.type.kind === "bool") return { kind: "dynFrom", value: lowered, type: DYN, loc };
   return nonLiteralOptions(L, node, "the options must be an object literal, a non-exported const bound to one that is used only as a util.inspect options argument, or a value of type any/unknown");
 }
 
@@ -1855,7 +1856,7 @@ function optionNeedsDynRender(L: Lowerer, key: string, value: ts.Expression): bo
   if (key === "sorted") return literalTruthy(value) !== false && value.kind !== ts.SyntaxKind.TrueKeyword;
   if (key === "colors") return literalTruthy(value) !== false;
   if (key === "compact") return !(ts.isNumericLiteral(value) || literalTruthy(value) === false);
-  if (key === "showProxy" || key === "getters") return literalTruthy(value) !== false;
+  if (key === "showProxy" || key === "getters" || key === "showHidden") return literalTruthy(value) !== false;
   if (key === "customInspect") return literalTruthy(value) !== true;
   return false;
 }
@@ -2444,8 +2445,8 @@ function formatSArg(L: Lowerer, node: ts.Expression, depth: number, loc: SrcLoc,
 }
 
 /** %O (depth 2) / %o (showHidden, depth 4) — inspect with the spec's
- * option deltas; %o fences over arrays (showHidden adds their hidden
- * [length] entry, which has no lowering). */
+ * option deltas; %o over an array or a nested function boxes the value and
+ * renders it with showHidden at run time. */
 function formatOArg(L: Lowerer, node: ts.Expression, depth: number, loc: SrcLoc, hoist?: ArgHoist): IrExpr {
   const lowered = L.lowerExpr(node);
   const value = hoist ? hoist.take(node, lowered) : lowered;
@@ -2455,13 +2456,6 @@ function formatOArg(L: Lowerer, node: ts.Expression, depth: number, loc: SrcLoc,
   const walk = { recursive: false };
   const reason = inspectSupport(L, value.type, new Set(), walk);
   if (reason !== null) L.noLowering(`util.format %${depth === 4 ? "o" : "O"} of '${L.fmt(value.type)}' values`, node, reason);
-  if (depth === 4 && typeTreeHasArray(L, value.type, new Set())) {
-    L.noLowering(
-      "util.format %o over arrays",
-      node,
-      "%o renders with showHidden (arrays gain a hidden [length] entry) — use %O for the default rendering",
-    );
-  }
   if (value.type.kind === "func") {
     // A function VALUE: %O is the default inspect; %o adds the showHidden keys
     // (length, name, prototype) through the box, which knows the kind.
@@ -2470,15 +2464,11 @@ function formatOArg(L: Lowerer, node: ts.Expression, depth: number, loc: SrcLoc,
       ? { kind: "libCall", fn: "insp.dynH", args: [box, num(4, loc)], type: STRING, loc }
       : { kind: "libCall", fn: "insp.dyn", args: [box, num(0, loc), num(2, loc)], type: STRING, loc };
   }
-  if (depth === 4 && value.type.kind !== "dyn" && typeTreeHasFunc(L, value.type, new Set())) {
-    // A function nested in a record or union would need the showHidden
-    // keys inside a static walk, which has no lowering: refuse, not print
-    // the default rendering under %o.
-    L.noLowering(
-      "util.format %o over function values nested in records or unions",
-      node,
-      "a nested function's showHidden keys (length, name, prototype) have no static lowering yet: pass the function alone, or use %O",
-    );
+  if (depth === 4 && value.type.kind !== "dyn" && (typeTreeHasFunc(L, value.type, new Set()) || typeTreeHasArray(L, value.type, new Set()))) {
+    // An array (its own hidden `length`) or a function nested in a record or union: showHidden keys that the static walk cannot print are
+    // printed by the run-time renderer, over the value boxed into the dynamic tree.
+    const box: IrExpr = { kind: "dynFrom", value, type: DYN, loc };
+    return { kind: "libCall", fn: "insp.dynH", args: [box, num(4, loc)], type: STRING, loc };
   }
   if (depth === 4 && value.type.kind === "dyn") {
     return { kind: "libCall", fn: "insp.dynH", args: [value, num(4, loc)], type: STRING, loc };

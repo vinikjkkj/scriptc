@@ -13070,6 +13070,11 @@ export function moduleUsesInspColors(mod: IrModule): boolean {
       return;
     }
     const node = v as { kind?: unknown; fn?: unknown; callee?: unknown; args?: unknown; name?: unknown };
+    // A "%o" in a string literal: util.format / console.log with it inspect with showHidden, which the extension renders.
+    if (node.kind === "strLit" && typeof (node as { value?: unknown }).value === "string" && ((node as { value: string }).value).includes("%o")) {
+      found = true;
+      return;
+    }
     // util.inspect.styles / .colors read as live tables.
     if (node.kind === "libCall" && (node.fn === "insp.styles" || node.fn === "insp.colorTable")) {
       found = true;
