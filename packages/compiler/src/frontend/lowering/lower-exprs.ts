@@ -20397,10 +20397,19 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
           // comparison that cannot be answered by identity is not answered
           // at all: it falls through to the narrow-first fence below.
           const plainT = left.type.kind === "union" ? right.type : left.type;
+          // A RECORD against a union whose one record arm is ANOTHER shape (`ret === errorObj`, ret: void | { e: Error },
+          // errorObj: { e: {} }): the comparison is identity only if shape unification makes the two shapes ONE struct. The
+          // plain side converts into the arm (a width flow, the edge unification looks at) and the verdict is taken after the
+          // pass: when the shapes did not merge the conversion would be a copy and `===` would answer false where Node answers
+          // true, so that case is refused loudly there (checkIdentityEdges), never emitted.
+          const bridgeArm = !bothUnion && plainT.kind === "record" ? singleRecordArm(L, ut) : null;
+          const bridges = bridgeArm !== null && plainT.kind === "record" && bridgeArm.shapeId !== plainT.shapeId;
           const plainSideWraps =
             bothUnion ||
             L.armTag(ut.unionId, plainT) >= 0 ||
-            L.promiseArmFor(plainT, ut) !== null;
+            L.promiseArmFor(plainT, ut) !== null ||
+            bridges;
+          if (bridges) L.identityEdges.push({ from: (plainT as IrType & { kind: "record" }).shapeId, to: bridgeArm!.shapeId, node: expr });
           if ((sameUnion || !bothUnion) && plainSideWraps && L.eqComparableUnion(ut.unionId)) {
             // §8.4's unboxed form when the plain side is a scalar LITERAL;
             // the allocating one below is what SCRIPTC_CASEEQ_OFF=1 keeps.
@@ -29114,4 +29123,13 @@ function forInKeyValueStaysRead(L: Lowerer, expr: ts.ElementAccessExpression): b
     return true;
   }
   return valueOk(expr);
+}
+
+
+/** The union's ONLY record arm, or null (no record arm, or several). */
+function singleRecordArm(L: Lowerer, ut: IrType & { kind: "union" }): (IrType & { kind: "record" }) | null {
+  const def = L.unions.get(ut.unionId);
+  if (def === undefined) return null;
+  const recs = def.arms.filter((a): a is IrType & { kind: "record" } => a.kind === "record");
+  return recs.length === 1 ? recs[0]! : null;
 }

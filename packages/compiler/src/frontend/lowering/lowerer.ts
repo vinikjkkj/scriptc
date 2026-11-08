@@ -4289,6 +4289,7 @@ export class Lowerer {
     this.cdctMemo.clear();
     this.cdctMemoRetired = true;
     this.unifyOutcome = unifyWidthShapes(this, functions);
+    this.checkIdentityEdges();
     this.armKeyRiskFnReturns(functions);
     this.reportKeyEnumerationRisks();
     // SC6004 rides the same timing, and for a weaker reason: an advisory
@@ -9836,6 +9837,23 @@ export class Lowerer {
       /* keep what was recorded */
     }
     this.discoveredFns.length = 0;
+  }
+
+  /** Comparisons that are identity only if shape unification merges two shapes (lower-exprs, a record against a union's record
+   * arm), and what unification did with every shape id (empty when it merged nothing). */
+  readonly identityEdges: { from: string; to: string; node: ts.Node }[] = [];
+  unifyRemap = new Map<string, string>();
+
+  /** The verdict on those comparisons, taken once unification has run: two shapes that are not one struct would make `===` a
+   * comparison of a copy, so the refusal the narrow-first fence always gave is raised here instead of emitting a false. */
+  checkIdentityEdges(): void {
+    for (const e of this.identityEdges) {
+      const a = this.unifyRemap.get(e.from) ?? e.from;
+      const b = this.unifyRemap.get(e.to) ?? e.to;
+      if (a === b) continue;
+      this.pushDiag(unsupportedDiag("SC1090", locOf(e.node), "comparisons of union-typed values (narrow first: check a discriminant field, or compare with '!== undefined'/'!== null' for unit arms)"));
+    }
+    this.identityEdges.length = 0;
   }
 
   /** Shape unification closed the pair (shape-unify.ts): it is one shape now, so no view is ever made for it. */
