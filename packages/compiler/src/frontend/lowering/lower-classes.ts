@@ -2169,20 +2169,28 @@ export type InstallerStep =
  * shape, when the argument names another class, or when the parameter is used in any other way (the body then needs the receiver itself, which a
  * prototype has no value form for). */
 export function prototypeInstallerSteps(L: Lowerer, e: ts.Expression, classSymbol: ts.Symbol): InstallerStep[] | null {
+  const r = prototypeInstallerStepsInner(L, e, classSymbol);
+  if (ts.isCallExpression(e) && e.getText().includes("addTransactionSupport")) {
+    console.error(`PROBE2 installer call ${e.getText()} at ${e.getSourceFile().fileName} -> ${r === null ? "NULL" : r.map((x) => x.kind + ":" + (x.kind === "install" ? x.lhs.name.text : x.name)).join(",")}`);
+  }
+  return r;
+}
+function prototypeInstallerStepsInner(L: Lowerer, e: ts.Expression, classSymbol: ts.Symbol): InstallerStep[] | null {
   if (!ts.isCallExpression(e) || e.arguments.length !== 1) return null;
   const arg = e.arguments[0]!;
   if (!ts.isPropertyAccessExpression(arg) || arg.name.text !== "prototype" || !ts.isIdentifier(arg.expression)) return null;
   let argSym = L.checker.getSymbolAtLocation(arg.expression);
   if (argSym !== undefined && (argSym.flags & ts.SymbolFlags.Alias) !== 0) argSym = L.checker.getAliasedSymbol(argSym);
-  if (argSym !== classSymbol && L.checker.getSymbolAtLocation(arg.expression) !== classSymbol) return null;
+  if (argSym !== classSymbol && L.checker.getSymbolAtLocation(arg.expression) !== classSymbol) { console.error(`PROBE2 reason: arg class symbol differs`); return null; }
   let callee: ts.Expression = e.expression;
   while (ts.isParenthesizedExpression(callee)) callee = callee.expression;
   if (ts.isBinaryExpression(callee) && callee.operatorToken.kind === ts.SyntaxKind.CommaToken) callee = callee.right;
   while (ts.isParenthesizedExpression(callee)) callee = callee.expression;
   const nameNode = ts.isPropertyAccessExpression(callee) ? callee : ts.isIdentifier(callee) ? callee : null;
-  if (nameNode === null) return null;
+  if (nameNode === null) { console.error(`PROBE2 reason: callee shape ${callee.kind}`); return null; }
   let sym = L.checker.getSymbolAtLocation(ts.isPropertyAccessExpression(nameNode) ? nameNode.name : nameNode);
   if (sym !== undefined && (sym.flags & ts.SymbolFlags.Alias) !== 0) sym = L.checker.getAliasedSymbol(sym);
+  console.error(`PROBE2 callee symbol decls: ${sym === undefined ? "none" : L.checker.declarationsOf(sym).map((d) => d.kind + "@" + d.getSourceFile().fileName).join("|")}`);
   if (sym === undefined) return null;
   // The declaration the symbol names: a function declaration, or (a CommonJS export) `exports.f = f` whose right side names one.
   const fnDeclOf = (sy: ts.Symbol, depth: number): ts.FunctionDeclaration | undefined => {
@@ -2206,6 +2214,7 @@ export function prototypeInstallerSteps(L: Lowerer, e: ts.Expression, classSymbo
     return undefined;
   };
   const fnDecl = fnDeclOf(sym, 0);
+  console.error(`PROBE2 fnDecl=${fnDecl === undefined ? "undefined" : fnDecl.getSourceFile().fileName + " params=" + fnDecl.parameters.length + " stmts=" + (fnDecl.body?.statements.length ?? -1)}`);
   if (fnDecl === undefined || fnDecl.body === undefined || fnDecl.parameters.length !== 1 || !ts.isIdentifier(fnDecl.parameters[0]!.name)) return null;
   const pname = (fnDecl.parameters[0]!.name as ts.Identifier).text;
   const isParam = (x: ts.Expression): boolean => ts.isIdentifier(x) && x.text === pname;

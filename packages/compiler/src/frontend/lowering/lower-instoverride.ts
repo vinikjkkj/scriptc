@@ -98,8 +98,14 @@ export function scanInstanceOverrides(L: Lowerer, files: readonly ts.SourceFile[
         const cls = classDeclOfType(L, n.left.expression);
         const name = n.left.name.text;
         const isMethod = namesMethod(L, n.left);
-        if (cls !== null && !isMethod && late === null) late = lateMethodNames(L, files);
-        const isLate = cls !== null && !isMethod && late!.get(cls)?.has(name) === true;
+        if (name === "exec" || name === "multi" || name === "pipeline") {
+          const sy = L.checker.getSymbolAtLocation(n.left);
+          console.error(`PROBE2 write ${n.left.getText()} at ${n.getSourceFile().fileName}:${n.getSourceFile().text.slice(0, n.getStart()).split("\n").length} clsDecl=${cls === null ? "null" : (cls as ts.ClassLikeDeclaration).name?.text + "@" + cls.getSourceFile().fileName} namesMethod=${isMethod} sym=${sy === undefined ? "none" : "kinds:" + L.checker.declarationsOf(sy).map((d) => d.kind + "@" + d.getSourceFile().fileName).join("|")}`);
+        }
+        // A `C.prototype.m = function` declaration is a LATE method (registered after the shape is collected) whether or not the checker resolved
+        // the member at this receiver: the class's own late names decide.
+        if (cls !== null) late ??= lateMethodNames(L, files);
+        const isLate = cls !== null && late!.get(cls)?.has(name) === true;
         if (cls !== null && (isMethod || isLate)) {
           let per = L.instanceOverrides.get(cls);
           if (per === undefined) L.instanceOverrides.set(cls, (per = new Map()));
