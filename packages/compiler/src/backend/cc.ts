@@ -1126,6 +1126,18 @@ function keepPdbRequested(): boolean {
   return v !== undefined && v !== "" && v !== "0";
 }
 
+/** SCRIPTC_STRICT_LINK=1 at BUILD time (the test harness's plain Linux differential lane): the Linux link keeps every section and refuses an
+ * undefined symbol, instead of collecting first. A GNU-ld/lld link with --gc-sections drops an unreachable section BEFORE it reports what the
+ * section references, so a runtime unit that names a symbol its link set does not carry links cleanly on Linux and fails on lld-link
+ * ("undefined symbol", Windows only: ior7gopd's scr_dyn_gopd.c naming scr_dyn_sym_get_own_desc). This replaces the collector on the same one
+ * link (no extra link, no extra run); the program is the same code with the dead sections kept, so its output is unchanged. Never set in a
+ * lane that measures size (the size-class tests). Unset/empty/0 keeps the historical command line, and it lands in the build-cache key
+ * through the argv. */
+function strictLinkRequested(): boolean {
+  const v = process.env.SCRIPTC_STRICT_LINK;
+  return v !== undefined && v !== "" && v !== "0";
+}
+
 /** The link-side spelling, per TARGET platform:
  *   linux   -Wl,--gc-sections  (GNU ld and lld; zig cc passes it to lld)
  *   darwin  -Wl,-dead_strip    (ld64)
@@ -1147,7 +1159,7 @@ function keepPdbRequested(): boolean {
  * COFF COMDATs that /OPT:REF can drop; the driver passes no -g. */
 function gcSectionsLinkArgs(driver: CcDriver): string[] {
   const platform = targetPlatform(driver);
-  if (platform === "linux") return ["-Wl,--gc-sections"];
+  if (platform === "linux") return strictLinkRequested() ? ["-Wl,--no-gc-sections", "-Wl,--no-undefined"] : ["-Wl,--gc-sections"];
   if (platform === "darwin") return ["-Wl,-dead_strip"];
   if (platform === "win32" && driver.argv[0] === "zig" && !keepPdbRequested()) {
     return ["-Wl,--gc-sections", "-Wl,--strip-all"];

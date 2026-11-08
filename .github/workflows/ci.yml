@@ -421,6 +421,10 @@ jobs:
       # job. `!cancelled()` still honors a cancelled run.
       - name: Tests (case-sharded, slice ${{ matrix.shard }}/20)
         if: ${{ !cancelled() && inputs.vitest_filter == '' }}
+        env:
+          # Strict link on the plain lane (cc.ts strictLinkRequested): every corpus link keeps all sections and refuses an undefined symbol, so a
+          # reference the Linux --gc-sections link hides fails here exactly as lld-link fails on Windows. Same single link, no extra run.
+          SCRIPTC_STRICT_LINK: ${{ matrix.flavor == 'plain' && '1' || '' }}
         run: >-
           ulimit -c 0 &&
           pnpm test
