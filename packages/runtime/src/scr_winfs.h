@@ -242,6 +242,97 @@ static inline int scr_u_chmod(const char *path, int mode) {
 #define scr_sys_access scr_u_access
 #define scr_sys_chmod scr_u_chmod
 
+/* ── mkdir, rmdir, unlink, rename, chdir, getcwd, fullpath ────────────────── */
+static inline int scr_u_mkdir(const char *path) {
+  wchar_t *wp = scr_u_wide(path);
+  if (wp == NULL) return -1;
+  const int r = _wmkdir(wp);
+  const int e = errno;
+  free(wp);
+  errno = e;
+  return r;
+}
+
+static inline int scr_u_rmdir(const char *path) {
+  wchar_t *wp = scr_u_wide(path);
+  if (wp == NULL) return -1;
+  const int r = _wrmdir(wp);
+  const int e = errno;
+  free(wp);
+  errno = e;
+  return r;
+}
+
+static inline int scr_u_unlink(const char *path) {
+  wchar_t *wp = scr_u_wide(path);
+  if (wp == NULL) return -1;
+  const int r = _wunlink(wp);
+  const int e = errno;
+  free(wp);
+  errno = e;
+  return r;
+}
+
+static inline int scr_u_chdir(const char *path) {
+  wchar_t *wp = scr_u_wide(path);
+  if (wp == NULL) return -1;
+  const int r = _wchdir(wp);
+  const int e = errno;
+  free(wp);
+  errno = e;
+  return r;
+}
+
+/* The CRT's rename (not MoveFileEx): a destination that exists is still EEXIST, as the narrow call answered. */
+static inline int scr_u_rename(const char *from, const char *to) {
+  wchar_t *wf = scr_u_wide(from);
+  wchar_t *wt = wf != NULL ? scr_u_wide(to) : NULL;
+  if (wf == NULL || wt == NULL) {
+    free(wf);
+    return -1;
+  }
+  const int r = _wrename(wf, wt);
+  const int e = errno;
+  free(wf);
+  free(wt);
+  errno = e;
+  return r;
+}
+
+/* getcwd(buf, size): the working directory as UTF-8; NULL with ERANGE when it does not fit. */
+static inline char *scr_u_getcwd(char *buf, size_t size) {
+  wchar_t w[32768];
+  if (_wgetcwd(w, (int)(sizeof w / sizeof w[0])) == NULL) return NULL;
+  if (scr_u_narrow(w, buf, size) == (size_t)-1) {
+    errno = ERANGE;
+    return NULL;
+  }
+  return buf;
+}
+
+/* _fullpath(buf, path, size) over _wfullpath: the absolute path as UTF-8, NULL when it does not fit or cannot be formed. */
+static inline char *scr_u_fullpath(char *buf, const char *path, size_t size) {
+  wchar_t *wp = scr_u_wide(path);
+  if (wp == NULL) return NULL;
+  wchar_t *full = _wfullpath(NULL, wp, 0);
+  free(wp);
+  if (full == NULL) return NULL;
+  const size_t n = scr_u_narrow(full, buf, size);
+  free(full);
+  if (n == (size_t)-1) {
+    errno = ERANGE;
+    return NULL;
+  }
+  return buf;
+}
+
+#define scr_sys_rmdir scr_u_rmdir
+#define scr_sys_unlink scr_u_unlink
+#define scr_sys_rename scr_u_rename
+#define scr_sys_chdir scr_u_chdir
+#define scr_sys_getcwd scr_u_getcwd
+#define scr_sys_fullpath scr_u_fullpath
+
 #else /* !_WIN32: the plain POSIX names */
 
 #define scr_sys_open open
@@ -250,6 +341,11 @@ static inline int scr_u_chmod(const char *path, int mode) {
 #define scr_sys_lstat lstat
 #define scr_sys_access access
 #define scr_sys_chmod chmod
+#define scr_sys_rmdir rmdir
+#define scr_sys_unlink unlink
+#define scr_sys_rename rename
+#define scr_sys_chdir chdir
+#define scr_sys_getcwd getcwd
 
 #endif /* _WIN32 */
 #endif /* SCR_WINFS_H */

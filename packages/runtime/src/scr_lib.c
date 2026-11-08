@@ -97,7 +97,7 @@
 #define lstat stat
 
 /* Windows has no directory mode bits; the CRT mkdir takes one argument. */
-#define scr_sys_mkdir(p, m) ((void)(m), mkdir(p))
+#define scr_sys_mkdir(p, m) ((void)(m), scr_u_mkdir(p))
 
 /* Directory enumeration: the wide FindFirstFileW walk (scr_winfs.h), OS order, names in UTF-8. */
 #define SCR_DIR ScrUDir
@@ -321,7 +321,7 @@ ScrStr *scr_process_exec_path(void) {
     }
     char resolved[PATH_MAX];
 #ifdef _WIN32
-    const char *use = _fullpath(resolved, raw, sizeof resolved) != NULL ? resolved : raw;
+    const char *use = scr_sys_fullpath(resolved, raw, sizeof resolved) != NULL ? resolved : raw;
 #else
     const char *use = realpath(raw, resolved) != NULL ? resolved : raw;
 #endif
@@ -699,7 +699,7 @@ bool scr_process_kill_named(double pid, const ScrStr *signal) {
 
 ScrStr *scr_process_cwd(void) {
   char buf[4096];
-  if (!getcwd(buf, sizeof buf)) {
+  if (!scr_sys_getcwd(buf, sizeof buf)) {
     scr_trap("scriptc: process.cwd() failed\n");
   }
   return scr_str_new(buf, strlen(buf));
@@ -1870,11 +1870,7 @@ double scr_process_umask(double mask) {
 }
 
 void scr_process_chdir(ScrStr *dir) {
-#ifdef _WIN32
-  if (_chdir(dir->data) != 0) scr_fs_throw(errno, "chdir", dir);
-#else
-  if (chdir(dir->data) != 0) scr_fs_throw(errno, "chdir", dir);
-#endif
+  if (scr_sys_chdir(dir->data) != 0) scr_fs_throw(errno, "chdir", dir);
 }
 
 /* net's process-wide happy-eyeballs attempt budget (Node's
@@ -2117,7 +2113,7 @@ const char *scr_errno_text(int e) {
  * Node reports the path as given — the passthrough arm. */
 #ifdef _WIN32
 const char *scr_fs_err_path(const ScrStr *path, char buf[PATH_MAX]) {
-  return _fullpath(buf, path->data, PATH_MAX) != NULL ? buf : path->data;
+  return scr_sys_fullpath(buf, path->data, PATH_MAX) != NULL ? buf : path->data;
 }
 #else
 const char *scr_fs_err_path(const ScrStr *path, char buf[PATH_MAX]) {
@@ -2210,7 +2206,7 @@ ScrStr *scr_fs_realpath(ScrStr *path) {
    * the honest Windows approximation); a missing path throws Node's
    * lstat-spelled ENOENT like the POSIX arm. */
   char buf[PATH_MAX];
-  if (_fullpath(buf, path->data, sizeof buf) == NULL) {
+  if (scr_sys_fullpath(buf, path->data, sizeof buf) == NULL) {
     scr_fs_throw(errno ? errno : ENOENT, "lstat", path);
     return NULL;
   }
@@ -2359,7 +2355,7 @@ void scr_fs_mkdir_mode(ScrStr *path, double mode) {
 }
 
 void scr_fs_unlink(ScrStr *path) {
-  if (unlink(path->data) != 0) scr_fs_throw(errno, "unlink", path);
+  if (scr_sys_unlink(path->data) != 0) scr_fs_throw(errno, "unlink", path);
 }
 
 void scr_fs_chmod(ScrStr *path, double mode) {
@@ -2595,7 +2591,7 @@ void scr_fs_copyfile(ScrStr *src, ScrStr *dest) {
 /* renameSync(old, new): rename(2), Node's two-path error shape ("ENOENT:
  * no such file or directory, rename 'a' -> 'b'"). */
 void scr_fs_rename(ScrStr *oldpath, ScrStr *newpath) {
-  if (rename(oldpath->data, newpath->data) != 0) {
+  if (scr_sys_rename(oldpath->data, newpath->data) != 0) {
     scr_fs_throw2(errno, "rename", oldpath, newpath);
   }
 }
@@ -2614,11 +2610,11 @@ void scr_fs_rm(ScrStr *path) {
     scr_fs_throw(EISDIR, "rm", path);
     return;
   }
-  if (unlink(path->data) != 0) scr_fs_throw(errno, "unlink", path);
+  if (scr_sys_unlink(path->data) != 0) scr_fs_throw(errno, "unlink", path);
 }
 
 void scr_fs_rmdir(ScrStr *path) {
-  if (rmdir(path->data) != 0) scr_fs_throw(errno, "rmdir", path);
+  if (scr_sys_rmdir(path->data) != 0) scr_fs_throw(errno, "rmdir", path);
 }
 
 /* ── fs option forms ─────────────────────────────────────────────────
@@ -2781,12 +2777,12 @@ static void scr_rm_fail_set(ScrRmFail *f, int err, const char *op, const char *p
  *
  * Returns 0, or the errno to report. */
 static int scr_rm_unlink_e(const char *path, bool force) {
-  if (unlink(path) == 0) return 0;
+  if (scr_sys_unlink(path) == 0) return 0;
 #ifdef _WIN32
   int first = errno;
   if (!force || (first != EPERM && first != EACCES)) return first;
   if (scr_sys_chmod(path, 0666) != 0) return first;
-  if (unlink(path) == 0) return 0;
+  if (scr_sys_unlink(path) == 0) return 0;
   return first;
 #else
   (void)force;
@@ -2831,7 +2827,7 @@ static void scr_rm_tree_e(const char *path, size_t len, bool force, ScrRmFail *f
     }
   }
   scr_sys_closedir(d);
-  if (rmdir(path) != 0) scr_rm_fail_set(f, errno, "rmdir", path, len);
+  if (scr_sys_rmdir(path) != 0) scr_rm_fail_set(f, errno, "rmdir", path, len);
 }
 
 /* One rm attempt (the shared core of both option forms): lstat dispatch,
@@ -2910,7 +2906,7 @@ static char *scr_win_mkdtemp(char *tmpl) {
     unsigned char r[6];
     arc4random_buf(r, sizeof r);
     for (size_t i = 0; i < 6; i++) tmpl[len - 6 + i] = cs[r[i] % 36];
-    if (mkdir(tmpl) == 0) return tmpl;
+    if (scr_sys_mkdir(tmpl, 0700) == 0) return tmpl;
     if (errno != EEXIST) break;
   }
   memcpy(tmpl + len - 6, "XXXXXX", 6); /* the error message shows the template */

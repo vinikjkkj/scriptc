@@ -18,6 +18,7 @@
  * site), so the C ABI stays fixed-arity.
  */
 #include "scr_runtime.h"
+#include "scr_winfs.h" /* scr_sys_getcwd: the working directory as UTF-8 over the wide API on Windows */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -228,7 +229,7 @@ ScrStr *scr_path_join(ScrArr *parts) {
 
 static void scr_path_cwd(PathBuf *out) {
   char buf[4096];
-  if (!getcwd(buf, sizeof buf)) {
+  if (!scr_sys_getcwd(buf, sizeof buf)) {
     scr_trap("scriptc: path.resolve: getcwd failed\n");
   }
   pb_append(out, buf, strlen(buf));
@@ -254,7 +255,7 @@ static void scr_path_cwd(PathBuf *out) {
 static void scr_path_posix_cwd(PathBuf *out) {
 #ifdef _WIN32
   char buf[4096];
-  if (!getcwd(buf, sizeof buf)) {
+  if (!scr_sys_getcwd(buf, sizeof buf)) {
     scr_trap("scriptc: path.resolve: getcwd failed\n");
   }
   size_t n = strlen(buf);
