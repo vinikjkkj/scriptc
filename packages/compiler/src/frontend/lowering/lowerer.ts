@@ -3190,6 +3190,28 @@ export class Lowerer {
     return false;
   }
 
+  /** The identifier a single-value CommonJS export's expando member names: for `module.exports = f; module.exports.g = g;` read through a
+   * `require` binding, the right side `g` of the member write (a function declaration of the exporter, which its call then resolves like any
+   * program function). Null when the member is not written as a plain identifier. */
+  cjsSingleValueMemberTarget(recv: ts.Expression, name: string): ts.Identifier | null {
+    const dep = this.cjsBindingRequireDepOf(recv);
+    if (dep === null || !isCjsJsFile(dep)) return null;
+    let replaced = false;
+    for (const stmt of dep.statements) {
+      if (!replaced) {
+        if (cjsWholeExportAssignmentOf(stmt) !== null) replaced = true;
+        continue;
+      }
+      if (!ts.isExpressionStatement(stmt) || !ts.isBinaryExpression(stmt.expression)) continue;
+      if (stmt.expression.operatorToken.kind !== ts.SyntaxKind.EqualsToken) continue;
+      const l = stmt.expression.left;
+      if (ts.isPropertyAccessExpression(l) && ts.isIdentifier(l.name) && l.name.text === name && isModuleExportsAccess(l.expression)) {
+        return ts.isIdentifier(stmt.expression.right) ? stmt.expression.right : null;
+      }
+    }
+    return null;
+  }
+
   /** True when `recv` is a `require` binding of a JavaScript module whose export table does NOT declare
    * `name`: the export object was assembled at run time, so the member is a read of that object, and a
    * same-named local of the exporter is not the export. */
