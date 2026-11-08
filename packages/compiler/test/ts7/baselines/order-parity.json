@@ -14793,6 +14793,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24850-timers-fire-in-expiry-order-whatever-the-pause-between-the-calls.js": {
+   "order": [
+    "<repo>/tests/corpus/24850-timers-fire-in-expiry-order-whatever-the-pause-between-the-calls.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24851-a-timer-registered-first-expires-first-after-a-long-pause.js": {
+   "order": [
+    "<repo>/tests/corpus/24851-a-timer-registered-first-expires-first-after-a-long-pause.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2485-inspect-circular-refs.ts": {
    "order": [
     "<repo>/tests/corpus/2485-inspect-circular-refs.ts"
