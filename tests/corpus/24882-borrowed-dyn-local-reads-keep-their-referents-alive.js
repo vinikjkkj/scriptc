@@ -91,3 +91,24 @@ function locals(mode) {
   return [k1, a.k, n1, b.length, e1, c.v, t1, m1, s, p1, mode].join("|");
 }
 console.log(locals("x"));
+
+// A dyn FIELD read by a PURE test (truthiness, kind, ===) is borrowed straight out of the object. A field read by anything that can
+// run user code is NOT: the getter below replaces the very field the keyed read started from, in the middle of the read.
+class Hold {
+  constructor() {
+    this.d = JSON.parse('{"x":1,"z":0}');
+    this.n = JSON.parse("null");
+    this.s = JSON.parse('"txt"');
+    this.k = JSON.parse("0");
+  }
+  tests() {
+    return [this.d ? 1 : 0, this.n ? 1 : 0, this.s ? 1 : 0, this.k ? 1 : 0, typeof this.d, typeof this.n, this.n === null, this.s === "txt", this.k === 0, this.d === this.d, this.d instanceof Hold].join(",");
+  }
+  read() {
+    return this.d["acc"];
+  }
+}
+const hold = new Hold();
+console.log(hold.tests());
+Object.defineProperty(hold.d, "acc", { get() { hold.d = JSON.parse('{"x":2}'); return "got"; } });
+console.log(hold.read(), hold.d.x);
