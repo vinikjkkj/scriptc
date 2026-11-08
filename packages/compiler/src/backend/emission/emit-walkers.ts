@@ -8,13 +8,13 @@
 import type { CEmitter } from "./emitter.js";
 import { rcSitesRequested } from "./emitter.js";
 import { moduleFuncLaneShapes, moduleUsesEngineFn, accessorKeyOrderOf, accessorSlotProp, shapeHasAccessorSlots, VOID, arrayTypeHasLiveView, bytesAliasOnExtract, canConvertToDyn, canDynCheckTo, moduleUsesDynView, moduleInstanceLaneNeedsKg, moduleUsesInstanceRecordLane } from "../../ir/nodes.js";
-import { CLASS_PROPS_FIELD, EVAL_STATIC_CLASSES, dynNeverArm, dynNeverIn, armDiscrimLits, dynErrorClassKind, isDynErrorClass, canAdaptDynFuncTo, dynRestApplyable, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, UNION_ARM_JS_OBJECT_KINDS, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
+import { CLASS_PROPS_FIELD, EVAL_STATIC_CLASSES, moduleUsesInspColors, dynNeverArm, dynNeverIn, armDiscrimLits, dynErrorClassKind, isDynErrorClass, canAdaptDynFuncTo, dynRestApplyable, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, UNION_ARM_JS_OBJECT_KINDS, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassStruct, mangleField, mangleFunction, mangleFnClosure, mangleRecordNew, mangleRecordRelease, mangleRecordStruct } from "../mangle.js";
 import type { ClassMeta } from "./emit-shapes.js";
 import { RUNTIME_EMITTER_CLASS as RUNTIME_EMITTER_CLASS_W } from "../../ir/nodes.js";
 import { isIntegerKeyName } from "../../ir/nodes.js";
-import { classvalCandidates, dynClassDisplayName, dynDescBase, dynEmitterSlot, dynRuntimeRoot, dynEnumerationFenced, dynMemberRows, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
+import { classvalCandidates, dynClassDisplayName, dynDescBase, dynEmitterSlot, dynRuntimeBaseInfo, dynRuntimeRoot, dynEnumerationFenced, dynMemberRows, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
 import { EMITTER_MIXIN_FIELD_NAME, ORD_MEMBER, orderRecordPlanCached } from "../../ir/nodes.js";
 import { KINDGATE_WIDE_KINDS, kindgateInstanceLane, kindgateWideLane, kindgateFuncLane, soleRecordArmWithFuncMember, kindgateJsvalLane } from "../kindgate.js";
 import { KEYIX_MEMBER, KEYLIST_MEMBER, OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, VIEW_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
@@ -105,7 +105,11 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
     const members = dynClassMembers(E, className, meta);
     const statics = dynClassMembers(E, className, meta, true);
     const staticsOpaque = dynStaticTable(meta, E.fnByName, (id: string) => E.recordsById.get(id), (id: string) => E.unionsById.get(id)).opaque;
-    const { opaque, errorRooted } = dynMemberTable(meta, E.fnByName, (id: string) => E.recordsById.get(id), (id: string) => E.unionsById.get(id));
+    const { opaque, errorRooted, opaqueOwn } = dynMemberTable(meta, E.fnByName, (id: string) => E.recordsById.get(id), (id: string) => E.unionsById.get(id));
+    // util.inspect's showHidden over a class value whose chain roots in a runtime class: the trailing fields exist only in a program that can ask
+    // for it (-DSCR_INSP_COLORS), so every other program emits the descriptor exactly as before.
+    const rtBase = moduleUsesInspColors(E.mod) ? dynRuntimeBaseInfo(meta) : null;
+    const rtTail = rtBase === null ? "" : `, ${cStringLiteral(Buffer.from(rtBase.name, "utf8"))}, ${rtBase.layer}, ${opaqueOwn ? 0 : 1}`;
     // A static const with internal linkage, beside the walker prototypes:
     // emitStructDefs has already declared the `_v` thunks by then, and the
     // converters that take its address are emitted after.
@@ -119,7 +123,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
         `${statics === null ? "NULL, 0" : `${statics.sym}, ${statics.count}`}, ${staticsOpaque ? "true" : "false"}, ` +
         `${dynDescBase(E.classMeta, meta) === null ? "NULL" : cStringLiteral(Buffer.from(dynClassDisplayName(dynDescBase(E.classMeta, meta)!.def), "utf8"))}, ` +
         `${dynRuntimeRoot(meta)}, ${E.tracedShapes.has(`object:${className}`) ? 1 : 0}, ` +
-        `${dynOrdNord(E, meta)}, ${dynOrdOffsetC(E, meta)}, ${dynEeOffsetC(meta, className)} }; ` +
+        `${dynOrdNord(E, meta)}, ${dynOrdOffsetC(E, meta)}, ${dynEeOffsetC(meta, className)}${rtTail} }; ` +
         `/* dyn box: class ${className} */`,
     );
     // A base-typed box can hold a DERIVED instance, and the registry resolves

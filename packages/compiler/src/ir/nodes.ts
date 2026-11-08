@@ -13133,7 +13133,16 @@ export function accessorIgnoresThis(fn: IrFunction): boolean {
   return true;
 }
 
+const inspColorsMemo = new WeakMap<IrModule, boolean>();
 export function moduleUsesInspColors(mod: IrModule): boolean {
+  const memo = inspColorsMemo.get(mod);
+  if (memo !== undefined) return memo;
+  const r = moduleUsesInspColorsWalk(mod);
+  inspColorsMemo.set(mod, r);
+  return r;
+}
+
+function moduleUsesInspColorsWalk(mod: IrModule): boolean {
   let found = false;
   const plainLiteral = (a: unknown): boolean => {
     const o = a as { kind?: string; fields?: { key?: { kind?: string; value?: string } }[] } | undefined;

@@ -4878,6 +4878,16 @@ typedef struct ScrDynClass {
    * the (positive) offset of the pointer in the hidden `__scrEmitter` slot for a class grafted by applyMixin(Y, EventEmitter),
    * -1 for a class that is no emitter. APPENDED, like every trailing member. */
   long long ee_off;
+#ifdef SCR_INSP_COLORS
+  /* util.inspect showHidden over a class VALUE: the nearest runtime-provided class in the chain (JavaScript name: "Error", "TypeError",
+   * "EventEmitter", "Readable", ...), NULL when the chain holds none; `rt_layer` is the number of user classes between this class and it
+   * (the prototype layer it occupies in Node's three-layer protoProps walk); `own_complete` 1 when the member table names every member the
+   * program declares (`opaque` alone is then only the runtime base's: a stream root marks the table opaque for its own members). APPENDED,
+   * and present only in a program built with -DSCR_INSP_COLORS, whose emitters spell the same trailing fields. */
+  const char *rt_name;
+  unsigned char rt_layer;
+  unsigned char own_complete;
+#endif
 } ScrDynClass;
 
 /* The order record of an instance whose class has inferred fields: `k` is the

@@ -74,9 +74,9 @@ import type {
   SrcLoc,
 } from "../../ir/nodes.js";
 import { errorOwnFlagFor, moduleFuncLaneShapes, moduleUsesEngineFn, moduleUsesTextMb, moduleUsesDc, moduleUsesTls, ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, presenceMaskStores, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesFnText, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesInstanceRecordLane, moduleInstanceLaneNeedsKg, moduleUsesDynClass, moduleUsesEmitter, moduleBoxesEmitters, canBoxFuncIntoDyn, isDynPackFunc, moduleUsesBigInt, moduleUsesRegexExecDyn, moduleUsesBytesOwn, moduleUsesAsym, moduleUsesDynAsync, moduleBoxesProcStream, moduleUsesNodeTest, irFunctionValueCode, fnNameTableRows } from "../../ir/nodes.js";
-import { setDynOrderPlan } from "../dyn-members.js";
-import { orderRecordPlanCached } from "../../ir/nodes.js";
-import { classvalCandidates, dynClassDisplayName, dynDescBase, dynEmitterSlot, dynRuntimeRoot, dynEnumerationFenced, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
+import { setDynOrderPlan, setDynInspExt } from "../dyn-members.js";
+import { orderRecordPlanCached, moduleUsesInspColors } from "../../ir/nodes.js";
+import { classvalCandidates, dynClassDisplayName, dynDescBase, dynEmitterSlot, dynRuntimeBaseInfo, dynRuntimeRoot, dynEnumerationFenced, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals, stackCheckPolicy, stackCheckTargetHasFloor, stackMarginBytes, stackMarginSymbol } from "../emission/emit-stmts.js";
 // The stackless lane's admission, read from the ONE place that owns it.
@@ -237,9 +237,14 @@ export interface LlvmEmitStats {
   coroLowered: number;
 }
 
+/** The descriptor's literal type in a program that can ask util.inspect for showHidden (ScrDynClass under SCR_INSP_COLORS): %ScrDynClass plus the
+ * runtime base name, its prototype layer and the own-table-complete flag. */
+const DYN_CLASS_EXT_TYPE = `{ ptr, i64, i64, i8, ptr, ptr, ptr, i64, i8, i8, i8, ptr, i64, i8, ptr, i8, i8, i64, i64, i64, ptr, i8, i8 }`;
+
 export function emitLlvmModule(mod: IrModule, stats?: LlvmEmitStats): string {
   resetSrcSiteCache();
   setDynOrderPlan(orderRecordPlanCached(mod.classes ?? []));
+  setDynInspExt(moduleUsesInspColors(mod));
   const e = new LlEmitter(mod);
   const out = e.emit();
   if (stats !== undefined) stats.coroLowered = e.coroLoweredCount();
@@ -4185,7 +4190,7 @@ class LlEmitter {
       (id: string) => this.recordsById.get(id),
       (id: string) => this.unionsById.get(id),
     ).opaque;
-    const { opaque, errorRooted } = dynMemberTable(
+    const { opaque, errorRooted, opaqueOwn } = dynMemberTable(
       meta,
       this.fnByName,
       (id: string) => this.recordsById.get(id),
@@ -4198,15 +4203,24 @@ class LlEmitter {
     // never defined, and llc names the token rather than the cause.
     const rc = vAdapters(this, { kind: "object", className });
     const display = dynClassDisplayName(meta.def);
+    // The showHidden trailing fields (runtime base name, its prototype layer, own table complete) exist only in a program that can ask for it
+    // (-DSCR_INSP_COLORS): the descriptor is then spelled with the extended literal type, every other program emits it as before.
+    const inspExt = moduleUsesInspColors(this.mod);
+    const rtBase = inspExt ? dynRuntimeBaseInfo(meta) : null;
+    const rtTail = !inspExt
+      ? ""
+      : rtBase === null
+        ? `, ptr null, i8 0, i8 0`
+        : `, ptr ${this.cstr(rtBase.name)}, i8 ${rtBase.layer}, i8 ${opaqueOwn ? 0 : 1}`;
     const body =
-      `%ScrDynClass { ptr ${this.cstr(display)}, i64 ${meta.pre}, i64 ${meta.post}, ` +
+      `${inspExt ? DYN_CLASS_EXT_TYPE : "%ScrDynClass"} { ptr ${this.cstr(display)}, i64 ${meta.pre}, i64 ${meta.post}, ` +
       `i8 ${meta.hierarchy ? 1 : 0}, ptr ${rc.retain}, ptr ${rc.release}, ` +
       `ptr ${members === null ? "null" : `@${members.sym}`}, i64 ${members === null ? 0 : members.count}, ` +
       `i8 ${meta.def.fields.some((f) => f.name === CLASS_PROPS_FIELD) || dynEnumerationFenced(meta) ? 1 : 0}, i8 ${opaque ? 1 : 0}, i8 ${errorRooted ? 1 : 0}, ` +
       `ptr ${statics === null ? "null" : `@${statics.sym}`}, i64 ${statics === null ? 0 : statics.count}, i8 ${staticsOpaque ? 1 : 0}, ` +
       `ptr ${dynDescBase(this.classMeta, meta) === null ? "null" : this.cstr(dynClassDisplayName(dynDescBase(this.classMeta, meta)!.def))}, i8 ${dynRuntimeRoot(meta)}, ` +
       `i8 ${this.tracedShapes.has(`object:${className}`) ? 1 : 0}, ` +
-      `i64 ${this.ordNordOf(className)}, i64 ${this.ordOffsetOf(className)}, i64 ${this.eeOffsetOf(className)} }`;
+      `i64 ${this.ordNordOf(className)}, i64 ${this.ordOffsetOf(className)}, i64 ${this.eeOffsetOf(className)}${rtTail} }`;
     this.dynClassDescSyms.set(className, { sym, body });
     // Subclass descriptors join the registry (see the C twin): a base-typed
     // box can hold a derived instance whose own member table must resolve.

@@ -35,8 +35,8 @@ import type {
 } from "../../ir/nodes.js";
 import { DYN, funcOf, moduleBoxesEmitters, moduleUsesEmitter, moduleUsesTextMb, moduleUsesDc, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesDynAsync, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesRegexExecDyn, moduleUsesSymbol, moduleUsesFnText, moduleUsesTls, moduleUsesBigInt, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, moduleUsesBytesOwn, moduleUsesAsym , moduleBoxesProcStream} from "../../ir/nodes.js";
 import { readKindgateDials } from "../kindgate.js";
-import { setDynOrderPlan } from "../dyn-members.js";
-import { orderRecordPlanCached, isRuntimeRootedClassName, moduleUsesObjectWeakKeys, fnNameTableRows } from "../../ir/nodes.js";
+import { setDynOrderPlan, setDynInspExt } from "../dyn-members.js";
+import { orderRecordPlanCached, isRuntimeRootedClassName, moduleUsesObjectWeakKeys, fnNameTableRows, moduleUsesInspColors } from "../../ir/nodes.js";
 import {
   mangleAsyncSpawn,
   mangleGenSpawn,
@@ -140,6 +140,7 @@ export function rcSiteLabel(loc: { file: string; start: number } | undefined, na
 }
 
 export function emitModule(mod: IrModule, sourceText?: string): string {
+  setDynInspExt(moduleUsesInspColors(mod));
   resetSrcSiteCache();
   return new CEmitter(mod, sourceText).emit();
 }
@@ -153,6 +154,7 @@ export function emitModuleProgram(
   headerName: string,
 ): EmittedProgram {
   setDynOrderPlan(orderRecordPlanCached(mod.classes ?? []));
+  setDynInspExt(moduleUsesInspColors(mod));
   resetSrcSiteCache();
   const E = new CEmitter(mod, sourceText);
   E.headerName = headerName;
