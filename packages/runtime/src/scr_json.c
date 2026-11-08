@@ -2023,8 +2023,17 @@ __attribute__((noinline, cold)) void scr_dyn_phantom_update(void) {
   scr_ph_applied = ph;
 }
 
+/* The estimator is reached through this pointer, installed by the first dyn container a program makes (an array, an object, a parsed
+ * tree): only a program that has containers can have slots holding shared boxes, and a program that merely hands out a bool (the
+ * regex program's test() results) then links none of the estimator. EXTERNAL on purpose: a static pointer with one store is
+ * devirtualized by the compiler into a direct call, which would keep the estimator linked wherever the handout paths are. */
+void (*scr_ph_hook)(void) = NULL;
+static __attribute__((noinline, cold)) void scr_dyn_phantom_install(void) { scr_ph_hook = scr_dyn_phantom_update; }
+static inline void scr_ph_arm(void) {
+  if (scr_ph_hook == NULL) scr_dyn_phantom_install();
+}
 static inline void scr_dyn_phantom_note(void) {
-  if (++scr_ph_tick == 0) scr_dyn_phantom_update();
+  if (scr_ph_hook != NULL && ++scr_ph_tick == 0) scr_ph_hook();
 }
 
 ScrDyn *scr_dyn_new_null(void) {
@@ -2071,7 +2080,10 @@ ScrDyn *scr_dyn_new_str(ScrStr *s) {
   return d;
 }
 
-ScrDyn *scr_dyn_new_arr(void) { return scr_dyn_alloc(SCR_DYN_ARR); }
+ScrDyn *scr_dyn_new_arr(void) {
+  scr_ph_arm();
+  return scr_dyn_alloc(SCR_DYN_ARR);
+}
 
 /* `new Array(n)` in the checked-dynamic tier — the spec's ArrayCreate. `n`
  * must be a valid array LENGTH (a non-negative integer below 2^32); NaN, a
@@ -2091,6 +2103,7 @@ ScrDyn *scr_dyn_new_arr_len(double n) {
     scr_throw_error_msg(SCR_ERR_RANGE, msg, sizeof msg - 1);
     return NULL;
   }
+  scr_ph_arm();
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_ARR);
   size_t len = (size_t)n;
   /* One reservation instead of len doubling pushes: the length is known. */
@@ -2122,12 +2135,16 @@ ScrDyn *scr_dyn_new_arr_len(double n) {
  * RangeError pending. */
 ScrDyn *scr_dyn_new_arr_ctor1(ScrDyn *v) {
   if (v != NULL && v->kind == SCR_DYN_NUM) return scr_dyn_new_arr_len(v->v.num);
+  scr_ph_arm();
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_ARR);
   scr_dyn_arr_push(d, scr_dyn_retain(v != NULL ? v : scr_dyn_undefined()));
   return d;
 }
 
-ScrDyn *scr_dyn_new_obj(void) { return scr_dyn_alloc(SCR_DYN_OBJ); }
+ScrDyn *scr_dyn_new_obj(void) {
+  scr_ph_arm();
+  return scr_dyn_alloc(SCR_DYN_OBJ);
+}
 
 /* The prototype / wrapper / builtin-function machinery is the gated unit scr_dyn_proto.c; its constructor fills this in. NULL means
  * the program has no wrapper object and no prototype sentinel, so every forwarder answers "none". */
@@ -2149,6 +2166,7 @@ ScrDyn *scr_dyn_intrinsic_member(const ScrDyn *recv, const char *key, size_t key
 static bool scr_dyn_is_intrinsic_proto(const ScrDyn *d) { return scr_dyn_proto_ops != NULL && scr_dyn_proto_ops->is_intrinsic(d); }
 
 ScrDyn *scr_dyn_new_obj_null_proto(void) {
+  scr_ph_arm();
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_OBJ);
   d->null_proto = true;
   return d;
@@ -10768,6 +10786,7 @@ static ScrDyn *scr_json_value_inner(ScrJsonP *p) {
 
 ScrDyn *scr_json_parse(ScrStr *text) {
   ScrJsonP p = { text->data, text->len, 0, 0 };
+  scr_ph_arm();
   scr_json_ws(&p);
   if (p.pos >= p.len) {
     scr_json_throw("Unexpected end of JSON input");
