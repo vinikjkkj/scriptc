@@ -14487,6 +14487,25 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24702-installer-function-handed-a-prototype-installs-late-methods-and-captures-the-inherited-member.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24702-installer-function-handed-a-prototype-installs-late-methods-and-captures-the-inherited-member.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24703-installer-function-installs-take-effect-at-the-call-per-class.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24703-installer-function-installs-take-effect-at-the-call-per-class.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24704-installer-function-reached-through-a-commonjs-export-alias/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24704-installer-function-reached-through-a-commonjs-export-alias/tx.cjs",
+    "<repo>/tests/corpus/24704-installer-function-reached-through-a-commonjs-export-alias/main.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2471-record-keyed-write-hasown.js": {
    "order": [
     "<repo>/tests/corpus/2471-record-keyed-write-hasown.js"
@@ -14571,6 +14590,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24780-retyped-record-slot-write-visible-through-both-shapes.ts": {
+   "order": [
+    "<repo>/tests/corpus/24780-retyped-record-slot-write-visible-through-both-shapes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24781-union-record-arm-identity-against-a-retyped-shape.ts": {
+   "order": [
+    "<repo>/tests/corpus/24781-union-record-arm-identity-against-a-retyped-shape.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24782-retyped-scalar-and-class-slots-share-one-record.ts": {
+   "order": [
+    "<repo>/tests/corpus/24782-retyped-scalar-and-class-slots-share-one-record.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/24790-spread-of-a-defaulted-this-chain-then-delete.cjs": {
    "order": [
     "<repo>/tests/corpus/24790-spread-of-a-defaulted-this-chain-then-delete.cjs"
@@ -14622,6 +14659,12 @@
   "<repo>/tests/corpus/2487-recursive-deep-equal.ts": {
    "order": [
     "<repo>/tests/corpus/2487-recursive-deep-equal.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24870-an-options-literal-holding-an-empty-literal-keeps-its-static-shape.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24870-an-options-literal-holding-an-empty-literal-keeps-its-static-shape.cjs"
    ],
    "diags": []
   },
@@ -25969,90 +26012,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/fixtures/node-types/argv-env.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/argv-env.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/builtin-fn-value.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/builtin-fn-value.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/child-stdio.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/child-stdio.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/fenced.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/fenced.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/import-fences.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/import-fences.ts"
-   ],
-   "diags": [
-    {
-     "code": "SC1010",
-     "message": "the 'v8' module (it observes V8 engine internals — heap statistics and snapshots, GC and CPU profiles, serialize/deserialize — and a compiled binary embeds no V8 engine to observe) is not supported yet",
-     "loc": {
-      "file": "<repo>/tests/fixtures/node-types/import-fences.ts",
-      "start": 422,
-      "end": 461
-     },
-     "milestone": "M4",
-     "hint": "relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, and module modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported"
-    }
-   ]
-  },
-  "<repo>/tests/fixtures/node-types/path-os.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/path-os.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/pgwritable-state.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/pgwritable-state.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/server-address-states.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/server-address-states.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/stream-capture.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/stream-capture.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/fixtures/node-types/streams.ts": {
-   "order": [
-    "<repo>/tests/fixtures/node-types/streams.ts"
-   ],
-   "diags": []
-  },
   "<repo>/tests/fixtures/npm/cases/24510-an-own-function-assigned-over-a-class-method-runs-in-its-place/main.ts": {
    "order": [
     "<repo>/tests/fixtures/npm/cases/24510-an-own-function-assigned-over-a-class-method-runs-in-its-place/main.ts"
@@ -26619,130 +26578,87 @@
     }
    ]
   },
-  "<repo>/tests/corpus/24687-replacing-a-declared-prototype-method-with-a-wrapper-that-writes-through-this.js": {
+  "<repo>/tests/fixtures/node-types/argv-env.ts": {
    "order": [
-    "<repo>/tests/corpus/24687-replacing-a-declared-prototype-method-with-a-wrapper-that-writes-through-this.js"
+    "<repo>/tests/fixtures/node-types/argv-env.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/24688-late-method-read-above-its-assignment-takes-the-run-time-prototype-table.js": {
+  "<repo>/tests/fixtures/node-types/builtin-fn-value.ts": {
    "order": [
-    "<repo>/tests/corpus/24688-late-method-read-above-its-assignment-takes-the-run-time-prototype-table.js"
+    "<repo>/tests/fixtures/node-types/builtin-fn-value.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/24689-prototype-data-read-above-its-assignment-takes-the-run-time-prototype-table.cjs": {
+  "<repo>/tests/fixtures/node-types/child-stdio.ts": {
    "order": [
-    "<repo>/tests/corpus/24689-prototype-data-read-above-its-assignment-takes-the-run-time-prototype-table.cjs"
+    "<repo>/tests/fixtures/node-types/child-stdio.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/24690-late-method-calls-before-and-after-its-install-statement-reach-the-current-member.js": {
+  "<repo>/tests/fixtures/node-types/fenced.ts": {
    "order": [
-    "<repo>/tests/corpus/24690-late-method-calls-before-and-after-its-install-statement-reach-the-current-member.js"
+    "<repo>/tests/fixtures/node-types/fenced.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/24691-late-method-missing-member-error-names-the-call-site-spelling.js": {
+  "<repo>/tests/fixtures/node-types/import-fences.ts": {
    "order": [
-    "<repo>/tests/corpus/24691-late-method-missing-member-error-names-the-call-site-spelling.js"
+    "<repo>/tests/fixtures/node-types/import-fences.ts"
+   ],
+   "diags": [
+    {
+     "code": "SC1010",
+     "message": "the 'v8' module (it observes V8 engine internals — heap statistics and snapshots, GC and CPU profiles, serialize/deserialize — and a compiled binary embeds no V8 engine to observe) is not supported yet",
+     "loc": {
+      "file": "<repo>/tests/fixtures/node-types/import-fences.ts",
+      "start": 422,
+      "end": 461
+     },
+     "milestone": "M4",
+     "hint": "relative imports (./file, ../dir/file), package.json-mediated project imports (#alias via the imports field, self-name references via exports), installed npm packages (their code runs under --dynamic), and the built-in fs, fs/promises, path, os, url, crypto, zlib, child_process, net, http, tls, https, http2, dgram, dns, util, util/types, string_decoder, querystring, readline, events, stream, stream/promises, stream/consumers, buffer, assert, assert/strict, worker_threads, cluster, tty, async_hooks, timers, timers/promises, diagnostics_channel, perf_hooks, and module modules (bare or node:-prefixed) and node:test (node:-prefixed only, like in Node) are supported"
+    }
+   ]
+  },
+  "<repo>/tests/fixtures/node-types/path-os.ts": {
+   "order": [
+    "<repo>/tests/fixtures/node-types/path-os.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/24692-late-methods-copied-between-classes-keep-an-unbound-value-beside-a-computed-prototype-write.js": {
+  "<repo>/tests/fixtures/node-types/pgwritable-state.ts": {
    "order": [
-    "<repo>/tests/corpus/24692-late-methods-copied-between-classes-keep-an-unbound-value-beside-a-computed-prototype-write.js"
+    "<repo>/tests/fixtures/node-types/pgwritable-state.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/24693-late-accessor-families-on-a-class-with-a-run-time-prototype-table-keep-their-arity.js": {
+  "<repo>/tests/fixtures/node-types/server-address-states.ts": {
    "order": [
-    "<repo>/tests/corpus/24693-late-accessor-families-on-a-class-with-a-run-time-prototype-table-keep-their-arity.js"
+    "<repo>/tests/fixtures/node-types/server-address-states.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/24694-late-method-with-a-typed-parameter-and-arguments-rebinds-off-the-pack.js": {
+  "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts": {
    "order": [
-    "<repo>/tests/corpus/24694-late-method-with-a-typed-parameter-and-arguments-rebinds-off-the-pack.js"
+    "<repo>/tests/fixtures/node-types/stdlib-surfaces-fenced.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/24695-constructor-assigned-method-override-runs-with-the-instance-as-this.js": {
+  "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts": {
    "order": [
-    "<repo>/tests/corpus/24695-constructor-assigned-method-override-runs-with-the-instance-as-this.js"
+    "<repo>/tests/fixtures/node-types/stdlib-surfaces.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/24696-variadic-late-method-read-as-a-value-and-called-with-call.js": {
+  "<repo>/tests/fixtures/node-types/stream-capture.ts": {
    "order": [
-    "<repo>/tests/corpus/24696-variadic-late-method-read-as-a-value-and-called-with-call.js"
+    "<repo>/tests/fixtures/node-types/stream-capture.ts"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/24697-instance-assigned-function-over-a-method-runs-ahead-of-the-prototype-method.js": {
+  "<repo>/tests/fixtures/node-types/streams.ts": {
    "order": [
-    "<repo>/tests/corpus/24697-instance-assigned-function-over-a-method-runs-ahead-of-the-prototype-method.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24698-instance-assigned-function-over-a-late-method-with-arguments-and-a-captured-original.js": {
-   "order": [
-    "<repo>/tests/corpus/24698-instance-assigned-function-over-a-late-method-with-arguments-and-a-captured-original.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24699-buffer-constants-read-as-numbers.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24699-buffer-constants-read-as-numbers.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24700-instance-override-that-captures-its-own-instance-is-collected.js": {
-   "order": [
-    "<repo>/tests/corpus/24700-instance-override-that-captures-its-own-instance-is-collected.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24701-instance-assigned-function-over-a-generic-method-of-a-command-class-keeps-prototype-copies.js": {
-   "order": [
-    "<repo>/tests/corpus/24701-instance-assigned-function-over-a-generic-method-of-a-command-class-keeps-prototype-copies.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24702-installer-function-handed-a-prototype-installs-late-methods-and-captures-the-inherited-member.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24702-installer-function-handed-a-prototype-installs-late-methods-and-captures-the-inherited-member.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24703-installer-function-installs-take-effect-at-the-call-per-class.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24703-installer-function-installs-take-effect-at-the-call-per-class.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24704-installer-function-reached-through-a-commonjs-export-alias/main.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24704-installer-function-reached-through-a-commonjs-export-alias/tx.cjs",
-    "<repo>/tests/corpus/24704-installer-function-reached-through-a-commonjs-export-alias/main.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24780-retyped-record-slot-write-visible-through-both-shapes.ts": {
-   "order": [
-    "<repo>/tests/corpus/24780-retyped-record-slot-write-visible-through-both-shapes.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24781-union-record-arm-identity-against-a-retyped-shape.ts": {
-   "order": [
-    "<repo>/tests/corpus/24781-union-record-arm-identity-against-a-retyped-shape.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24782-retyped-scalar-and-class-slots-share-one-record.ts": {
-   "order": [
-    "<repo>/tests/corpus/24782-retyped-scalar-and-class-slots-share-one-record.ts"
+    "<repo>/tests/fixtures/node-types/streams.ts"
    ],
    "diags": []
   }
