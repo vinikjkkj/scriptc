@@ -43,7 +43,7 @@ function answerFor(msg, truncated) {
   return Buffer.concat([header, msg.subarray(12, qend), body]);
 }
 function show(label, err, recs) {
-  console.log(label, err ? err.code + " " + err.message : "ok", err ? "" : JSON.stringify(recs.map((r) => [r.name, r.port, r.priority, r.weight])));
+  console.log(label, err ? err.code + " " + err.message : "ok", typeof recs, recs === undefined ? "" : JSON.stringify(recs.map((r) => [r.name, r.port, r.priority, r.weight])));
 }
 // 1: a UDP server that truncates and a TCP server on the same port that answers in full
 const udp = dgram.createSocket("udp4");

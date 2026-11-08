@@ -111,6 +111,13 @@ declare namespace NodeJS {
 type ScriptcDnsAddress = string | null | undefined;
 type ScriptcDnsFamily = number | undefined;
 
+/* node:dns resolveSrv's records parameter: the SrvRecord array on success,
+ * undefined on a failure (Node passes no records there). The declared
+ * callbacks keep @types/node's SrvRecord[]; these two aliases are the
+ * array arm and the union the reads see (lower-dgram.ts lowerDnsSrvCallback). */
+type ScriptcDnsSrvArray = import("node:dns").SrvRecord[];
+type ScriptcDnsSrvRead = import("node:dns").SrvRecord[] | undefined;
+
 /* fs.stat's stats callback parameter as the reads see it (lower-dgram.ts
  * lowerStatCallbackArg): the Stats arm. The IR parameter is Stats | undefined
  * (undefined on a failure), and a member use on it answers Node's TypeError. */
