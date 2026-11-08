@@ -12488,6 +12488,11 @@ void scr_dns_set_warn_hook(ScrDnsWarnHookFn fn);
 /* The dns.lookup failure Error: message borrowed, code read from it. +1. */
 ScrError *scr_dns_error_new(ScrStr *msg /*borrowed*/);
 void scr_dgram_install(void);
+ScrDyn *scr_dns_resolve_srv_dyn_value(void); /* dns.resolveSrv as a value (+1): the runtime's one immortal function box */
+ScrDyn *scr_dns_set_servers_dyn_value(void);
+ScrDyn *scr_dns_get_servers_dyn_value(void);
+ScrDyn *scr_dns_lookup_dyn_value(void); /* dns.lookup as a value (+1) */
+ScrDyn *scr_dns_resolver_ctor_dyn_value(void); /* dns.Resolver, the constructible class value (+1) */
 #ifdef SCR_RC_AUDIT
 long scr_dgram_live_count(void);
 #endif

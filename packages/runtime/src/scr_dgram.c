@@ -66,6 +66,7 @@
 #include <fcntl.h>
 #include <math.h>
 #include <stdio.h>
+#include <time.h>
 #include <stdlib.h>
 #include <string.h>
 #ifndef _MSC_VER
@@ -919,6 +920,11 @@ ScrError *scr_dns_error_new(ScrStr *msg /*borrowed*/) {
  * — so it queues AHEAD of every resolver answer of the same turn. A name
  * resolves through getaddrinfo with Node's hints (socktype STREAM, no
  * flags) and the FIRST answer in getaddrinfo's order (verbatim). */
+/* The dyn dns.lookup value's extra options, read by the one resolver below at the call that sets them (and cleared after): getaddrinfo's
+ * hint flags, and `all` (every address in getaddrinfo's order, delivered through the adapter as "F:address" lines, family -1). */
+static int scr_dns_lookup_flags = 0;
+static bool scr_dns_lookup_all = false;
+
 void scr_dns_lookup(ScrStr *hostname, double family, ScrClosure *cb, ScrDnsLookupFn fn) {
 #ifdef _WIN32
   /* getaddrinfo needs winsock started (WSANOTINITIALISED otherwise); the
@@ -940,6 +946,10 @@ void scr_dns_lookup(ScrStr *hostname, double family, ScrClosure *cb, ScrDnsLooku
     p->family = family == 6 ? 6 : 4;
     p->literal = true;
     p->addr = NULL;
+    if (scr_dns_lookup_all) {
+      p->family = -1;
+      p->addr = scr_str_new("", 0);
+    }
     if (!scr_dns_empty_warned) {
       scr_dns_empty_warned = true;
       p->warn_empty = true;
@@ -948,18 +958,45 @@ void scr_dns_lookup(ScrStr *hostname, double family, ScrClosure *cb, ScrDnsLooku
     p->family = 4;
     p->literal = true;
     p->addr = scr_str_new(hostname->data, strlen(hostname->data));
+    if (scr_dns_lookup_all) {
+      char line[96];
+      int ln = snprintf(line, sizeof line, "4:%s", hostname->data);
+      scr_str_release(p->addr);
+      p->addr = scr_str_new(line, (size_t)ln);
+      p->family = -1;
+    }
   } else if (inet_pton(AF_INET6, hostname->data, lit) == 1) {
     p->family = 6;
     p->literal = true;
     p->addr = scr_str_new(hostname->data, strlen(hostname->data));
+    if (scr_dns_lookup_all) {
+      char line[96];
+      int ln = snprintf(line, sizeof line, "6:%s", hostname->data);
+      scr_str_release(p->addr);
+      p->addr = scr_str_new(line, (size_t)ln);
+      p->family = -1;
+    }
   } else {
     struct addrinfo hints;
     memset(&hints, 0, sizeof hints);
     hints.ai_family = family == 6 ? AF_INET6 : family == 4 ? AF_INET : AF_UNSPEC;
     hints.ai_socktype = SOCK_STREAM;
+    hints.ai_flags = scr_dns_lookup_flags;
     struct addrinfo *res = NULL;
     int rc = getaddrinfo(hostname->data, NULL, &hints, &res);
-    if (rc == 0 && res) {
+    if (rc == 0 && res && scr_dns_lookup_all) {
+      char lines[2048];
+      size_t lo = 0;
+      for (struct addrinfo *a = res; a != NULL && lo + 80 < sizeof lines; a = a->ai_next) {
+        char ip[64];
+        if (a->ai_family == AF_INET6) inet_ntop(AF_INET6, &((struct sockaddr_in6 *)a->ai_addr)->sin6_addr, ip, sizeof ip);
+        else if (a->ai_family == AF_INET) inet_ntop(AF_INET, &((struct sockaddr_in *)a->ai_addr)->sin_addr, ip, sizeof ip);
+        else continue;
+        lo += (size_t)snprintf(lines + lo, sizeof lines - lo, "%s%c:%s", lo ? "\n" : "", a->ai_family == AF_INET6 ? '6' : '4', ip);
+      }
+      p->family = -1;
+      p->addr = scr_str_new(lines, lo);
+    } else if (rc == 0 && res) {
       char ip[64] = "0.0.0.0";
       if (res->ai_family == AF_INET6) {
         inet_ntop(AF_INET6, &((struct sockaddr_in6 *)res->ai_addr)->sin6_addr, ip, sizeof ip);
@@ -1007,6 +1044,1096 @@ void scr_dns_thunk0(ScrClosure *cb, ScrStr *errmsg, ScrStr *addr, double family)
 }
 
 /* ── the sweep: deferred emits ───────────────────────────────────────── */
+
+/* ── node:dns resolver — a c-ares-shaped, NON-BLOCKING DNS client ───────────
+ *
+ * dns.resolveSrv / Resolver#resolveSrv, dns.setServers / getServers: the query is a DNS datagram sent over a UDP socket
+ * registered on THIS unit's poller (the dgram sockets' own readiness), answered or timed out through the same dispatch pass. Nothing
+ * blocks the loop: a pending query holds it like an in-flight request, and the callback runs on the main stack at a dispatch turn.
+ *
+ *   - nameservers: /etc/resolv.conf on POSIX, GetNetworkParams (iphlpapi, loaded at run time so the link line does not change) on
+ *     Windows, 127.0.0.1 when neither names one; dns.setServers / Resolver#setServers override them (Node's `ip`, `ip:port`,
+ *     `[ipv6]:port` spellings; getServers prints the port only when it is not 53).
+ *   - the query: header (random id, RD), one question, answered when id and the echoed question match; a reply from another
+ *     address, or one whose id/question differ, is ignored (c-ares' rule).
+ *   - retries: each attempt goes to the next server in turn; the wait doubles per full round of the servers (timeout, then
+ *     2x, ...; `timeout` -1 is c-ares' default 5000 ms, `tries` defaults to 4); a reply with TC set retries the SAME server over TCP.
+ *   - errors, Node's: ENODATA (NOERROR with no answer), ENOTFOUND (NXDOMAIN), ESERVFAIL, EREFUSED, EFORMERR, ENOTIMP,
+ *     ECONNREFUSED (every attempt refused), ETIMEOUT; message "querySrv CODE host", `syscall` "querySrv", `hostname`.
+ *
+ * Divergence: c-ares jitters its retransmission times; ours are the plain doubling. No other resolve* record type exists here yet. */
+/* A dyn string over a fresh heap string (scr_dyn_new_str retains its argument: the creation reference is dropped here). */
+static ScrDyn *scr_dns_dyn_str(const char *bytes, size_t len) {
+  ScrStr *t = scr_str_new(bytes, len);
+  ScrDyn *d = scr_dyn_new_str(t);
+  scr_str_release(t);
+  return d;
+}
+
+#define SCR_DNS_MAX_SERVERS 16
+#define SCR_DNS_QMAGIC 0x53444e51u /* "QNDS": tags a query among the poller's udata pointers */
+#define SCR_DNS_TYPE_SRV 33
+
+typedef struct {
+  int family; /* AF_INET or AF_INET6 */
+  unsigned char addr[16];
+  unsigned short port;
+} ScrDnsServer;
+
+typedef struct ScrResolver {
+  ScrDnsServer srv[SCR_DNS_MAX_SERVERS];
+  size_t nsrv;
+  bool inited; /* srv[] holds the system's (or an override) list */
+  double timeout_ms; /* <= 0: the default */
+  int tries;
+  double max_timeout_ms; /* <= 0: none */
+  ScrDyn *fn_srv; /* +1, the resolver-bound function boxes (Node binds resolveSrv/getServers to ONE resolver) */
+  ScrDyn *fn_get;
+  struct ScrResolver *next_alloc; /* every heap resolver, freed at exit */
+} ScrResolver;
+
+static ScrResolver scr_dns_boot_resolver = {.tries = 4};
+/* Node's DEFAULT resolver: dns.setServers REPLACES it with a fresh one, and resolveSrv/getServers captured before the swap stay bound to
+ * the old resolver (and its servers); a member read after the swap is bound to the new one. */
+static ScrResolver *scr_dns_cur = &scr_dns_boot_resolver;
+static ScrResolver *scr_dns_allocated = NULL;
+
+/* One Node-spelled server string into a slot. False for anything isIP rejects. */
+static bool scr_dns_parse_server(const char *s, ScrDnsServer *out) {
+  char host[96];
+  unsigned long port = 53;
+  size_t n = strlen(s);
+  if (n == 0 || n >= sizeof host) return false;
+  if (s[0] == '[') {
+    const char *rb = strchr(s, ']');
+    if (!rb) return false;
+    size_t hl = (size_t)(rb - s - 1);
+    memcpy(host, s + 1, hl);
+    host[hl] = '\0';
+    if (rb[1] == ':') {
+      char *end;
+      port = strtoul(rb + 2, &end, 10);
+      if (*end != '\0' || rb[2] == '\0') return false;
+    } else if (rb[1] != '\0') {
+      return false;
+    }
+  } else {
+    memcpy(host, s, n + 1);
+    const char *c1 = strchr(host, ':');
+    if (c1 != NULL && strchr(c1 + 1, ':') == NULL) { /* exactly one colon: ip:port */
+      char *end;
+      port = strtoul(c1 + 1, &end, 10);
+      if (*end != '\0' || c1[1] == '\0') return false;
+      host[c1 - host] = '\0';
+    }
+  }
+  if (port > 65535) return false;
+  memset(out, 0, sizeof *out);
+  out->port = (unsigned short)port;
+  if (inet_pton(AF_INET, host, out->addr) == 1) {
+    out->family = AF_INET;
+    return true;
+  }
+  if (inet_pton(AF_INET6, host, out->addr) == 1) {
+    out->family = AF_INET6;
+    return true;
+  }
+  return false;
+}
+
+static void scr_dns_server_text(const ScrDnsServer *s, char *buf, size_t cap) {
+  char ip[64];
+  inet_ntop(s->family, s->addr, ip, sizeof ip);
+  if (s->port == 53) snprintf(buf, cap, "%s", ip);
+  else if (s->family == AF_INET6) snprintf(buf, cap, "[%s]:%u", ip, (unsigned)s->port);
+  else snprintf(buf, cap, "%s:%u", ip, (unsigned)s->port);
+}
+
+static void scr_dns_add_server(ScrResolver *r, const char *ip) {
+  if (r->nsrv >= SCR_DNS_MAX_SERVERS) return;
+  char clean[96];
+  size_t k = 0;
+  for (; ip[k] != '\0' && ip[k] != '%' && k + 1 < sizeof clean; k++) clean[k] = ip[k];
+  clean[k] = '\0';
+  ScrDnsServer sv;
+  if (scr_dns_parse_server(clean, &sv)) r->srv[r->nsrv++] = sv;
+}
+
+#ifdef _WIN32
+#include <iptypes.h>
+typedef DWORD(WINAPI *ScrGetNetworkParamsFn)(PFIXED_INFO, PULONG);
+static void scr_dns_load_system_servers(ScrResolver *r) {
+  HMODULE lib = LoadLibraryA("iphlpapi.dll");
+  if (lib == NULL) return;
+  ScrGetNetworkParamsFn fn = (ScrGetNetworkParamsFn)(void *)GetProcAddress(lib, "GetNetworkParams");
+  if (fn != NULL) {
+    ULONG len = 0;
+    (void)fn(NULL, &len);
+    if (len > 0) {
+      PFIXED_INFO fi = (PFIXED_INFO)malloc(len);
+      if (fi != NULL) {
+        if (fn(fi, &len) == NO_ERROR) {
+          for (PIP_ADDR_STRING a = &fi->DnsServerList; a != NULL; a = a->Next) {
+            if (a->IpAddress.String[0] != '\0') scr_dns_add_server(r, a->IpAddress.String);
+          }
+        }
+        free(fi);
+      }
+    }
+  }
+  FreeLibrary(lib);
+}
+#else
+static void scr_dns_load_system_servers(ScrResolver *r) {
+  FILE *f = fopen("/etc/resolv.conf", "r");
+  if (f == NULL) return;
+  char line[512];
+  while (fgets(line, sizeof line, f) != NULL) {
+    char *p = line;
+    while (*p == ' ' || *p == '\t') p++;
+    if (strncmp(p, "nameserver", 10) != 0 || (p[10] != ' ' && p[10] != '\t')) continue;
+    p += 10;
+    while (*p == ' ' || *p == '\t') p++;
+    char *e = p;
+    while (*e != '\0' && *e != ' ' && *e != '\t' && *e != '\r' && *e != '\n') e++;
+    *e = '\0';
+    if (*p != '\0') scr_dns_add_server(r, p);
+  }
+  fclose(f);
+}
+#endif
+
+static void scr_dns_ensure_servers(ScrResolver *r) {
+  if (r->inited) return;
+  r->inited = true;
+  r->nsrv = 0;
+  scr_dns_load_system_servers(r);
+  if (r->nsrv == 0) scr_dns_add_server(r, "127.0.0.1");
+}
+
+/* ── a query in flight ─────────────────────────────────────────── */
+typedef struct ScrDnsQuery ScrDnsQuery;
+struct ScrDnsQuery {
+  unsigned magic;
+  ScrDnsQuery *next;
+  ScrResolver *res;
+  ScrDyn *cb; /* +1, the user's callback */
+  char *name; /* the hostname as given (for the error) */
+  unsigned qtype;
+  unsigned char q[600]; /* the query message */
+  size_t qlen;
+  unsigned short id;
+  int attempt; /* sends so far */
+  int fd;      /* -1 between attempts */
+  bool tcp;
+  bool connecting;
+  size_t sent;                   /* tcp: bytes of the length-prefixed query written */
+  unsigned char tbuf[2 + 65535]; /* tcp: the reply as it arrives (length prefix first) */
+  size_t tgot;
+  int last_errno; /* ECONNREFUSED tracking: the last attempt's failure */
+  bool all_refused;
+  const char *deferred_code; /* settle at the next dispatch turn with this error code (cancel(), an unencodable name) */
+  ScrDnsServer cur;
+};
+
+static ScrDnsQuery *scr_dns_queries = NULL;
+
+static bool scr_dns_is_query(void *udata) {
+  for (ScrDnsQuery *q = scr_dns_queries; q; q = q->next) {
+    if ((void *)q == udata) return true;
+  }
+  return false;
+}
+
+static void scr_dns_unlink(ScrDnsQuery *q) {
+  for (ScrDnsQuery **l = &scr_dns_queries; *l; l = &(*l)->next) {
+    if (*l == q) {
+      *l = q->next;
+      return;
+    }
+  }
+}
+
+static void scr_dns_close_sock(ScrDnsQuery *q) {
+  if (q->fd >= 0) {
+    scr_dgram_close_fd_raw(q->fd);
+    q->fd = -1;
+  }
+  q->tcp = false;
+  q->connecting = false;
+  if (scr_dgram_poller != NULL) scrp_timer_cancel(scr_dgram_poller, q);
+}
+
+static void scr_dns_free_query(ScrDnsQuery *q) {
+  scr_dns_close_sock(q);
+  scr_dns_unlink(q);
+  scr_dyn_release(q->cb);
+  free(q->name);
+  free(q);
+}
+
+/* The domain name, wire form, into out. Labels over 63 bytes or a name over 253 are refused (false). */
+static bool scr_dns_encode_name(const char *name, unsigned char *out, size_t cap, size_t *len) {
+  size_t o = 0;
+  size_t n = strlen(name);
+  if (n > 0 && name[n - 1] == '.') n--; /* a trailing dot is the root */
+  if (n > 253) return false;
+  size_t i = 0;
+  while (i < n) {
+    size_t j = i;
+    while (j < n && name[j] != '.') j++;
+    size_t ll = j - i;
+    if (ll == 0 || ll > 63 || o + 1 + ll + 1 > cap) return false;
+    out[o++] = (unsigned char)ll;
+    memcpy(out + o, name + i, ll);
+    o += ll;
+    i = j + 1;
+  }
+  if (o + 1 > cap) return false;
+  out[o++] = 0;
+  *len = o;
+  return true;
+}
+
+/* A (possibly compressed) name at msg[pos] into dotted text; returns the offset after it in the record, or 0 on a malformed one. */
+static size_t scr_dns_decode_name(const unsigned char *msg, size_t msglen, size_t pos, char *out, size_t cap) {
+  size_t o = 0, after = 0;
+  int jumps = 0;
+  bool jumped = false;
+  for (;;) {
+    if (pos >= msglen) return 0;
+    unsigned c = msg[pos];
+    if (c == 0) {
+      if (!jumped) after = pos + 1;
+      break;
+    }
+    if ((c & 0xC0) == 0xC0) {
+      if (pos + 1 >= msglen) return 0;
+      size_t ptr = ((c & 0x3F) << 8) | msg[pos + 1];
+      if (!jumped) after = pos + 2;
+      jumped = true;
+      if (++jumps > 32 || ptr >= msglen) return 0;
+      pos = ptr;
+      continue;
+    }
+    if ((c & 0xC0) != 0) return 0;
+    if (pos + 1 + c > msglen) return 0;
+    if (o != 0 && o + 1 < cap) out[o++] = '.';
+    for (unsigned k = 0; k < c; k++) {
+      if (o + 1 < cap) out[o++] = (char)msg[pos + 1 + k];
+    }
+    pos += 1 + c;
+  }
+  if (cap > 0) out[o < cap ? o : cap - 1] = '\0';
+  return after;
+}
+
+static unsigned scr_dns_u16(const unsigned char *p) { return ((unsigned)p[0] << 8) | p[1]; }
+
+/* The Error a failed query delivers: message "querySrv CODE host", code, errno undefined, syscall, hostname. */
+static ScrDyn *scr_dns_query_error(const char *syscall, const char *code, const char *host) {
+  char msg[400];
+  int n = snprintf(msg, sizeof msg, "%s %s %s", syscall, code, host);
+  ScrStr *m = scr_str_new(msg, (size_t)n);
+  ScrError *e = scr_error_new(SCR_ERR_ERROR, m);
+  scr_str_release(m);
+  scr_error_set_code(e, code);
+  scr_error_set_ext_dns(e, 0, syscall, host);
+  ScrDyn *d = scr_dyn_from_error(e);
+  scr_error_release(e);
+  scr_dyn_obj_set(d, "errno", 5, scr_dyn_undefined()); /* c-ares errors carry no libuv errno: the own key reads undefined */
+  return d;
+}
+
+/* The result slot of a failed query. Node calls back with no records (undefined); a callback the compiler typed from its declaration
+ * (`addresses: SrvRecord[]`, not optional) cannot hold undefined, so it gets the EMPTY array instead, the stance the typed dns.lookup and
+ * fs callbacks already take for a slot their declared type forbids undefined in. A callback taking a checked-dynamic value, or one whose slot
+ * is not an array, gets undefined. The slot's type is read off the box's signature ("func(<p0>,<p1>)=>..."). */
+static ScrDyn *scr_dns_failed_result(const ScrDyn *cb) {
+  const char *sig = scr_dyn_fn_sig(cb);
+  if (strncmp(sig, "func(", 5) != 0) return scr_dyn_undefined();
+  const char *p = sig + 5;
+  int depth = 0, idx = 0;
+  const char *second = NULL;
+  for (; *p != '\0'; p++) {
+    if (*p == '<' || *p == '(') depth++;
+    else if ((*p == '>' && p[-1] != '=') || *p == ')') {
+      if (depth == 0) break;
+      depth--;
+    } else if (*p == ',' && depth == 0) {
+      if (++idx == 1) second = p + 1;
+    }
+  }
+  if (second != NULL && strncmp(second, "array<", 6) == 0) return scr_dyn_new_arr();
+  return scr_dyn_undefined();
+}
+
+static void scr_dns_finish(ScrDnsQuery *q, ScrDyn *err /* +1 or NULL */, ScrDyn *result /* +1 or NULL */) {
+  ScrDyn *cb = scr_dyn_retain(q->cb);
+  scr_dns_free_query(q);
+  ScrDyn *args[2] = {err != NULL ? err : scr_dyn_new_null(), result != NULL ? result : scr_dns_failed_result(cb)};
+  ScrDyn *r = scr_dyn_call(cb, args, 2, "the dns callback");
+  scr_dyn_release(r);
+  scr_dyn_release(args[0]);
+  scr_dyn_release(args[1]);
+  scr_dyn_release(cb);
+}
+
+static void scr_dns_try_send(ScrDnsQuery *q);
+
+/* Parse a reply into either a result array (SRV records) or an error code. */
+static ScrDyn *scr_dns_parse_srv(const unsigned char *m, size_t len, const char **errcode) {
+  *errcode = NULL;
+  if (len < 12) {
+    *errcode = "EBADRESP";
+    return NULL;
+  }
+  unsigned flags = scr_dns_u16(m + 2);
+  unsigned rcode = flags & 0xF;
+  unsigned qd = scr_dns_u16(m + 4), an = scr_dns_u16(m + 6);
+  if (rcode == 1) { *errcode = "EFORMERR"; return NULL; }
+  if (rcode == 2) { *errcode = "ESERVFAIL"; return NULL; }
+  if (rcode == 3) { *errcode = "ENOTFOUND"; return NULL; }
+  if (rcode == 4) { *errcode = "ENOTIMP"; return NULL; }
+  if (rcode == 5) { *errcode = "EREFUSED"; return NULL; }
+  if (rcode != 0) { *errcode = "EBADRESP"; return NULL; }
+  size_t pos = 12;
+  char nm[260];
+  for (unsigned i = 0; i < qd; i++) {
+    size_t a = scr_dns_decode_name(m, len, pos, nm, sizeof nm);
+    if (a == 0 || a + 4 > len) { *errcode = "EBADRESP"; return NULL; }
+    pos = a + 4;
+  }
+  ScrDyn *arr = scr_dyn_new_arr();
+  for (unsigned i = 0; i < an; i++) {
+    size_t a = scr_dns_decode_name(m, len, pos, nm, sizeof nm);
+    if (a == 0 || a + 10 > len) { scr_dyn_release(arr); *errcode = "EBADRESP"; return NULL; }
+    unsigned type = scr_dns_u16(m + a), rdlen = scr_dns_u16(m + a + 8);
+    size_t rd = a + 10;
+    if (rd + rdlen > len) { scr_dyn_release(arr); *errcode = "EBADRESP"; return NULL; }
+    if (type == SCR_DNS_TYPE_SRV && rdlen >= 7) {
+      char target[260];
+      if (scr_dns_decode_name(m, len, rd + 6, target, sizeof target) == 0) { scr_dyn_release(arr); *errcode = "EBADRESP"; return NULL; }
+      ScrDyn *o = scr_dyn_new_obj();
+      scr_dyn_obj_set(o, "name", 4, scr_dns_dyn_str(target, strlen(target)));
+      scr_dyn_obj_set(o, "port", 4, scr_dyn_new_num((double)scr_dns_u16(m + rd + 4)));
+      scr_dyn_obj_set(o, "priority", 8, scr_dyn_new_num((double)scr_dns_u16(m + rd)));
+      scr_dyn_obj_set(o, "weight", 6, scr_dyn_new_num((double)scr_dns_u16(m + rd + 2)));
+      scr_dyn_obj_set(o, "type", 4, scr_dns_dyn_str("SRV", 3));
+      scr_dyn_arr_push(arr, o);
+    }
+    pos = rd + rdlen;
+  }
+  if (arr->v.arr.len == 0) {
+    scr_dyn_release(arr);
+    *errcode = "ENODATA";
+    return NULL;
+  }
+  return arr;
+}
+
+/* A complete reply is in hand: ours (id + question echo) settles the query; anything else is ignored. Returns true when settled. */
+static bool scr_dns_handle_reply(ScrDnsQuery *q, const unsigned char *m, size_t len) {
+  if (len < 12 || scr_dns_u16(m) != q->id) return false;
+  if ((m[2] & 0x80) == 0) return false; /* not a response */
+  if (scr_dns_u16(m + 4) != 1) return false;
+  /* the question must be ours: the encoded name and the type/class */
+  size_t qnl = q->qlen - 12 - 4;
+  if (len < 12 + qnl + 4 || memcmp(m + 12, q->q + 12, qnl) != 0) return false;
+  if (scr_dns_u16(m + 12 + qnl) != q->qtype) return false;
+  const char *code = NULL;
+  ScrDyn *res = scr_dns_parse_srv(m, len, &code);
+  if (res != NULL) {
+    scr_dns_finish(q, NULL, res);
+  } else {
+    scr_dns_finish(q, scr_dns_query_error("querySrv", code != NULL ? code : "EBADRESP", q->name), NULL);
+  }
+  return true;
+}
+
+static void scr_dns_sockaddr(const ScrDnsServer *s, struct sockaddr_storage *ss, socklen_t *sl) {
+  memset(ss, 0, sizeof *ss);
+  if (s->family == AF_INET6) {
+    struct sockaddr_in6 *a = (struct sockaddr_in6 *)ss;
+    a->sin6_family = AF_INET6;
+    a->sin6_port = htons(s->port);
+    memcpy(&a->sin6_addr, s->addr, 16);
+    *sl = sizeof *a;
+  } else {
+    struct sockaddr_in *a = (struct sockaddr_in *)ss;
+    a->sin_family = AF_INET;
+    a->sin_port = htons(s->port);
+    memcpy(&a->sin_addr, s->addr, 4);
+    *sl = sizeof *a;
+  }
+}
+
+/* Move to the next attempt (or settle the query when the tries are spent). `refused`: the last attempt was ECONNREFUSED. */
+static void scr_dns_next_attempt(ScrDnsQuery *q, bool refused) {
+  scr_dns_close_sock(q);
+  if (!refused) q->all_refused = false;
+  scr_dns_try_send(q);
+}
+
+/* Send attempt number q->attempt: server (attempt % nsrv), round (attempt / nsrv). */
+static void scr_dns_try_send(ScrDnsQuery *q) {
+  ScrResolver *r = q->res;
+  size_t ns = r->nsrv;
+  int tries = r->tries > 0 ? r->tries : 4;
+  if (ns == 0 || q->attempt >= tries * (int)ns) {
+    scr_dns_finish(q, scr_dns_query_error("querySrv", q->all_refused && q->attempt > 0 ? "ECONNREFUSED" : "ETIMEOUT", q->name), NULL);
+    return;
+  }
+  size_t idx = (size_t)q->attempt % ns;
+  int round = q->attempt / (int)ns;
+  q->attempt++;
+  q->cur = r->srv[idx];
+  if (!scr_dgram_poller_init()) {
+    scr_dns_finish(q, scr_dns_query_error("querySrv", "ECONNREFUSED", q->name), NULL);
+    return;
+  }
+  int fd = socket(q->cur.family, SOCK_DGRAM, 0);
+  if (fd < 0) {
+    q->all_refused = false;
+    scr_dns_try_send(q);
+    return;
+  }
+  scr_dgram_nonblock(fd);
+  struct sockaddr_storage ss;
+  socklen_t sl;
+  scr_dns_sockaddr(&q->cur, &ss, &sl);
+  /* connected: the kernel filters foreign senders and reports a refused port as ECONNREFUSED on the next recv */
+  if (connect(fd, (struct sockaddr *)&ss, sl) != 0 || sendto(fd, (const char *)q->q, q->qlen, 0, NULL, 0) < 0) {
+    scr_dgram_close_fd_raw(fd);
+    q->all_refused = false;
+    scr_dns_try_send(q);
+    return;
+  }
+  q->fd = fd;
+  q->tcp = false;
+  (void)scrp_watch_read(scr_dgram_poller, fd, q, true);
+  double base = r->timeout_ms > 0 ? r->timeout_ms : 5000.0;
+  double ms = base;
+  for (int i = 0; i < round; i++) ms *= 2;
+  if (r->max_timeout_ms > 0 && ms > r->max_timeout_ms) ms = r->max_timeout_ms;
+  (void)scrp_timer_arm(scr_dgram_poller, q, ms, q);
+}
+
+/* TC=1: the same server again over TCP (length-prefixed). */
+static void scr_dns_start_tcp(ScrDnsQuery *q) {
+  scr_dns_close_sock(q);
+  int fd = socket(q->cur.family, SOCK_STREAM, 0);
+  if (fd < 0) {
+    scr_dns_next_attempt(q, false);
+    return;
+  }
+  scr_dgram_nonblock(fd);
+  struct sockaddr_storage ss;
+  socklen_t sl;
+  scr_dns_sockaddr(&q->cur, &ss, &sl);
+  int rc = connect(fd, (struct sockaddr *)&ss, sl);
+  bool inprogress = false;
+  if (rc != 0) {
+    inprogress = errno == EINPROGRESS || errno == EWOULDBLOCK || errno == EAGAIN
+#ifdef _WIN32
+                 || errno == EALREADY
+#endif
+        ;
+    if (!inprogress) {
+      scr_dgram_close_fd_raw(fd);
+      scr_dns_next_attempt(q, false);
+      return;
+    }
+  }
+  q->fd = fd;
+  q->tcp = true;
+  q->connecting = inprogress;
+  q->sent = 0;
+  q->tgot = 0;
+  (void)scrp_watch_write(scr_dgram_poller, fd, q, true);
+  (void)scrp_watch_read(scr_dgram_poller, fd, q, true);
+  double base = q->res->timeout_ms > 0 ? q->res->timeout_ms : 5000.0;
+  (void)scrp_timer_arm(scr_dgram_poller, q, base, q);
+}
+
+static void scr_dns_tcp_io(ScrDnsQuery *q, unsigned events) {
+  if ((events & SCRP_WRITABLE) != 0 || q->connecting) {
+    if (q->connecting) {
+      int err = 0;
+      socklen_t el = sizeof err;
+#ifdef _WIN32
+      getsockopt((SOCKET)q->fd, SOL_SOCKET, SO_ERROR, (char *)&err, &el);
+#else
+      getsockopt(q->fd, SOL_SOCKET, SO_ERROR, &err, &el);
+#endif
+      if (err != 0) {
+        scr_dns_next_attempt(q, err == ECONNREFUSED);
+        return;
+      }
+      q->connecting = false;
+    }
+    unsigned char out[2 + 600];
+    out[0] = (unsigned char)(q->qlen >> 8);
+    out[1] = (unsigned char)(q->qlen & 0xFF);
+    memcpy(out + 2, q->q, q->qlen);
+    size_t total = 2 + q->qlen;
+    while (q->sent < total) {
+      long w = (long)sendto(q->fd, (const char *)out + q->sent, total - q->sent, 0, NULL, 0);
+      if (w < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) break;
+        scr_dns_next_attempt(q, false);
+        return;
+      }
+      q->sent += (size_t)w;
+    }
+    if (q->sent >= total && scr_dgram_poller != NULL) (void)scrp_watch_write(scr_dgram_poller, q->fd, q, false);
+  }
+  if ((events & SCRP_READABLE) != 0 && !q->connecting) {
+    for (;;) {
+      long g = (long)recvfrom(q->fd, (char *)q->tbuf + q->tgot, sizeof q->tbuf - q->tgot, 0, NULL, NULL);
+      if (g < 0) {
+        if (errno == EAGAIN || errno == EWOULDBLOCK) break;
+        scr_dns_next_attempt(q, false);
+        return;
+      }
+      if (g == 0) { /* closed before the whole reply */
+        scr_dns_next_attempt(q, false);
+        return;
+      }
+      q->tgot += (size_t)g;
+      if (q->tgot >= 2) {
+        size_t want = scr_dns_u16(q->tbuf);
+        if (q->tgot >= 2 + want) {
+          if (!scr_dns_handle_reply(q, q->tbuf + 2, want)) scr_dns_next_attempt(q, false);
+          return;
+        }
+      }
+    }
+  }
+}
+
+/* One poller event for a query: a datagram, TCP progress, or the attempt's timer. */
+static void scr_dns_on_event(ScrDnsQuery *q, unsigned events) {
+  if ((events & SCRP_TIMER) != 0 && (events & (SCRP_READABLE | SCRP_WRITABLE)) == 0) {
+    if (q->deferred_code != NULL) {
+      scr_dns_finish(q, scr_dns_query_error("querySrv", q->deferred_code, q->name), NULL);
+      return;
+    }
+    scr_dns_next_attempt(q, false); /* the attempt timed out */
+    return;
+  }
+  if (q->tcp) {
+    scr_dns_tcp_io(q, events);
+    return;
+  }
+  if ((events & SCRP_READABLE) == 0) return;
+  unsigned char buf[4096];
+  long g = (long)recvfrom(q->fd, (char *)buf, sizeof buf, 0, NULL, NULL);
+  if (g < 0) {
+    if (errno == EAGAIN || errno == EWOULDBLOCK) return;
+    /* ECONNREFUSED (an ICMP port-unreachable): try the next server at once */
+    scr_dns_next_attempt(q, errno == ECONNREFUSED);
+    if (errno != ECONNREFUSED) q->all_refused = false;
+    return;
+  }
+  if (g >= 12 && (buf[2] & 0x02) != 0 && scr_dns_u16(buf) == q->id) { /* TC: retry over TCP, same server */
+    scr_dns_start_tcp(q);
+    return;
+  }
+  (void)scr_dns_handle_reply(q, buf, (size_t)g); /* a foreign or mismatched reply is ignored; the timer still runs */
+}
+
+static bool scr_dns_random_id(unsigned short *out) {
+  static unsigned s = 0;
+  if (s == 0) s = (unsigned)(time(NULL) * 2654435761u) ^ (unsigned)(size_t)&s ^ 0x9e3779b9u;
+  s ^= s << 13;
+  s ^= s >> 17;
+  s ^= s << 5;
+  *out = (unsigned short)(s & 0xFFFF);
+  return true;
+}
+
+/* Start an SRV query for `name`; `cb` (a function box, borrowed) gets (err, records). */
+static void scr_dns_query_srv(ScrResolver *r, const char *name, ScrDyn *cb) {
+  scr_dns_ensure_servers(r);
+  ScrDnsQuery *q = calloc(1, sizeof *q);
+  if (!q) scr_dgram_oom();
+  q->magic = SCR_DNS_QMAGIC;
+  q->res = r;
+  q->cb = scr_dyn_retain(cb);
+  q->name = strdup(name);
+  q->qtype = SCR_DNS_TYPE_SRV;
+  q->fd = -1;
+  q->all_refused = true;
+  (void)scr_dns_random_id(&q->id);
+  q->q[0] = (unsigned char)(q->id >> 8);
+  q->q[1] = (unsigned char)(q->id & 0xFF);
+  q->q[2] = 0x01; /* RD */
+  q->q[5] = 1;    /* QDCOUNT */
+  size_t nl = 0;
+  if (!scr_dns_encode_name(name, q->q + 12, sizeof q->q - 12 - 4, &nl)) {
+    q->qlen = 0;
+  } else {
+    q->qlen = 12 + nl + 4;
+    q->q[12 + nl] = (unsigned char)(q->qtype >> 8);
+    q->q[12 + nl + 1] = (unsigned char)(q->qtype & 0xFF);
+    q->q[12 + nl + 3] = 1; /* IN */
+  }
+  q->next = scr_dns_queries;
+  scr_dns_queries = q;
+  if (q->qlen == 0) {
+    /* an unencodable name is answered from the next dispatch pass, ENOTFOUND-shaped like a name no server knows */
+    if (!scr_dgram_poller_init()) {
+      scr_dns_finish(q, scr_dns_query_error("querySrv", "EBADNAME", name), NULL);
+      return;
+    }
+    q->deferred_code = "EBADNAME";
+    (void)scrp_timer_arm(scr_dgram_poller, q, 0, q); /* the next dispatch turn settles it with the error */
+    return;
+  }
+  scr_dns_try_send(q);
+}
+
+/* Node's "Received ..." tail for an ERR_INVALID_ARG_TYPE message. */
+static void scr_dns_received(const ScrDyn *v, char *out, size_t cap) {
+  if (v == NULL || v->kind == SCR_DYN_UNDEF) snprintf(out, cap, "undefined");
+  else if (v->kind == SCR_DYN_NULL) snprintf(out, cap, "null");
+  else if (v->kind == SCR_DYN_NUM) {
+    char num[32];
+    size_t n = scr_f64_to_str(v->v.num, num);
+    snprintf(out, cap, "type number (%.*s)", (int)n, num);
+  } else if (v->kind == SCR_DYN_BOOL) snprintf(out, cap, "type boolean (%s)", v->v.b ? "true" : "false");
+  else if (v->kind == SCR_DYN_STR)
+    snprintf(out, cap, "type string ('%.*s')", (int)(v->v.str->len < 28 ? v->v.str->len : 28), v->v.str->data);
+  else if (v->kind == SCR_DYN_ARR) snprintf(out, cap, "an instance of Array");
+  else if (v->kind == SCR_DYN_FUNC) snprintf(out, cap, "function");
+  else snprintf(out, cap, "an instance of Object");
+}
+
+static void scr_dns_throw_arg(const char *argname, const char *want, const ScrDyn *got) {
+  char recv[96], msg[256];
+  scr_dns_received(got, recv, sizeof recv);
+  int n = snprintf(msg, sizeof msg, "The \"%s\" argument must be %s. Received %s", argname, want, recv);
+  scr_throw_error_msg_code(SCR_ERR_TYPE, msg, (size_t)n, "ERR_INVALID_ARG_TYPE");
+}
+
+/* The loop's dispatch: route one poller event whose udata is a query. */
+static bool scr_dns_route(void *udata, unsigned events) {
+  if (!scr_dns_is_query(udata)) return false;
+  scr_dns_on_event((ScrDnsQuery *)udata, events);
+  return true;
+}
+
+static void scr_dns_cleanup_atexit(void) {
+  while (scr_dns_queries) {
+    ScrDnsQuery *q = scr_dns_queries;
+    scr_dns_free_query(q);
+  }
+  scr_dyn_release(scr_dns_boot_resolver.fn_srv);
+  scr_dyn_release(scr_dns_boot_resolver.fn_get);
+  scr_dns_boot_resolver.fn_srv = scr_dns_boot_resolver.fn_get = NULL;
+  while (scr_dns_allocated) {
+    ScrResolver *r = scr_dns_allocated;
+    scr_dns_allocated = r->next_alloc;
+    scr_dyn_release(r->fn_srv);
+    scr_dyn_release(r->fn_get);
+    free(r);
+  }
+}
+
+/* ── the dyn function values ─────────────────────────────────────────── */
+static void *scr_dns_res_retain(void *p) { return p; }
+static void scr_dns_res_release(void *p) { (void)p; }
+
+static ScrDyn *scr_dns_resolve_srv_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  ScrDyn *name = argc > 0 ? args[0] : NULL;
+  if (name == NULL || name->kind != SCR_DYN_STR) {
+    scr_dns_throw_arg("name", "of type string", name);
+    return NULL;
+  }
+  ScrDyn *cb = argc > 1 ? args[1] : NULL;
+  if (cb == NULL || cb->kind != SCR_DYN_FUNC) {
+    scr_dns_throw_arg("callback", "of type function", cb);
+    return NULL;
+  }
+  ScrResolver *res = (ScrResolver *)scr_box_get_ref(clo->caps[0]);
+  scr_dns_query_srv(res, name->v.str->data, cb);
+  return scr_dyn_undefined();
+}
+
+/* Node's setServers validation, shared by the module function and Resolver#setServers: an Array of strings, each a valid ip[:port]. */
+static bool scr_dns_parse_server_list(ScrDyn *list, ScrDnsServer *tmp, size_t *count) {
+  if (list == NULL || list->kind != SCR_DYN_ARR) {
+    scr_dns_throw_arg("servers", "an instance of Array", list);
+    return false;
+  }
+  size_t n = 0;
+  for (size_t i = 0; i < list->v.arr.len && n < SCR_DNS_MAX_SERVERS; i++) {
+    ScrDyn *it = list->v.arr.items[i];
+    if (it->kind != SCR_DYN_STR) {
+      char nm[40];
+      snprintf(nm, sizeof nm, "servers[%zu]", i);
+      scr_dns_throw_arg(nm, "of type string", it);
+      return false;
+    }
+    if (!scr_dns_parse_server(it->v.str->data, &tmp[n])) {
+      char msg[200];
+      int ml = snprintf(msg, sizeof msg, "Invalid IP address: %s", it->v.str->data);
+      scr_throw_error_msg_code(SCR_ERR_TYPE, msg, (size_t)ml, "ERR_INVALID_IP_ADDRESS");
+      return false;
+    }
+    n++;
+  }
+  *count = n;
+  return true;
+}
+
+static ScrDyn *scr_dns_set_servers_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo;
+  ScrDnsServer tmp[SCR_DNS_MAX_SERVERS];
+  size_t n = 0;
+  if (!scr_dns_parse_server_list(argc > 0 ? args[0] : NULL, tmp, &n)) return NULL;
+  ScrResolver *nr = (ScrResolver *)calloc(1, sizeof *nr);
+  if (!nr) scr_dgram_oom();
+  nr->tries = scr_dns_cur->tries;
+  nr->timeout_ms = scr_dns_cur->timeout_ms;
+  nr->max_timeout_ms = scr_dns_cur->max_timeout_ms;
+  memcpy(nr->srv, tmp, n * sizeof tmp[0]);
+  nr->nsrv = n;
+  nr->inited = true;
+  nr->next_alloc = scr_dns_allocated;
+  scr_dns_allocated = nr;
+  scr_dns_cur = nr; /* the DEFAULT resolver is replaced; functions bound to the old one keep it */
+  return scr_dyn_undefined();
+}
+
+static ScrDyn *scr_dns_get_servers_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)args; (void)argc;
+  ScrResolver *res = (ScrResolver *)scr_box_get_ref(clo->caps[0]);
+  scr_dns_ensure_servers(res);
+  ScrDyn *arr = scr_dyn_new_arr();
+  for (size_t i = 0; i < res->nsrv; i++) {
+    char buf[96];
+    scr_dns_server_text(&res->srv[i], buf, sizeof buf);
+    scr_dyn_arr_push(arr, scr_dns_dyn_str(buf, strlen(buf)));
+  }
+  return arr;
+}
+
+static ScrClosure scr_dns_set_servers_clo = {SIZE_MAX, (void *)scr_dns_set_servers_thunk, 0, NULL, NULL};
+
+/* A function box bound to one resolver: its closure carries the resolver pointer. */
+static ScrDyn *scr_dns_bound_fn(ScrResolver *r, ScrDynThunk thunk, uint32_t arity, const char *sig, const char *name) {
+  ScrClosure *c = scr_closure_new((void *)thunk, 1);
+  c->caps[0] = scr_box_new_obj(scr_dns_res_retain, scr_dns_res_release, NULL);
+  scr_box_set_ref(c->caps[0], r);
+  return scr_dyn_new_func(c, thunk, arity, sig, name);
+}
+
+ScrDyn *scr_dns_resolve_srv_dyn_value(void) {
+  scr_dgram_install();
+  ScrResolver *r = scr_dns_cur;
+  if (r->fn_srv == NULL) r->fn_srv = scr_dns_bound_fn(r, scr_dns_resolve_srv_thunk, 2, "(name,callback)", "bound querySrv");
+  return scr_dyn_retain(r->fn_srv);
+}
+ScrDyn *scr_dns_set_servers_dyn_value(void) {
+  return scr_dyn_new_func(&scr_dns_set_servers_clo, scr_dns_set_servers_thunk, 1, "(servers)", "setServers");
+}
+ScrDyn *scr_dns_get_servers_dyn_value(void) {
+  ScrResolver *r = scr_dns_cur;
+  if (r->fn_get == NULL) r->fn_get = scr_dns_bound_fn(r, scr_dns_get_servers_thunk, 0, "()", "bound getServers");
+  return scr_dyn_retain(r->fn_get);
+}
+
+
+/* ── new dns.Resolver(options) ───────────────────────────────────────────────────────────────────────────────────────
+ * A constructible native function whose instances carry one resolver (`_handle`, Node's one own key) and whose prototype holds the methods:
+ * resolveSrv / getServers / setServers / cancel. setServers here edits THIS resolver; the module-level dns.setServers replaces the default
+ * one (above). Options: timeout (>= -1), tries (>= 1), maxTimeout (>= -1), validated with Node's messages. */
+static ScrDyn *scr_dns_resolver_ctor_box = NULL;
+
+static bool scr_dns_int_option(ScrDyn *opts, const char *key, double min, double *out, bool *present) {
+  *present = false;
+  ScrDyn *v = scr_dyn_obj_get(opts, key, strlen(key));
+  if (v == NULL || v->kind == SCR_DYN_UNDEF) return true;
+  char nm[48];
+  snprintf(nm, sizeof nm, "options.%s", key);
+  char msg[200];
+  if (v->kind != SCR_DYN_NUM) {
+    char recv[96];
+    scr_dns_received(v, recv, sizeof recv);
+    int n = snprintf(msg, sizeof msg, "The \"%s\" property must be of type number. Received %s", nm, recv);
+    scr_throw_error_msg_code(SCR_ERR_TYPE, msg, (size_t)n, "ERR_INVALID_ARG_TYPE");
+    return false;
+  }
+  double d = v->v.num;
+  if (d != (double)(long long)d) {
+    int n = snprintf(msg, sizeof msg, "The value of \"%s\" is out of range. It must be an integer. Received %g", nm, d);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)n, "ERR_OUT_OF_RANGE");
+    return false;
+  }
+  if (d < min || d > 2147483647.0) {
+    int n = snprintf(msg, sizeof msg, "The value of \"%s\" is out of range. It must be >= %g && <= 2147483647. Received %g", nm, min, d);
+    scr_throw_error_msg_code(SCR_ERR_RANGE, msg, (size_t)n, "ERR_OUT_OF_RANGE");
+    return false;
+  }
+  *out = d;
+  *present = true;
+  return true;
+}
+
+static ScrResolver *scr_dns_resolver_this(void) {
+  ScrDyn *self = scr_dyn_this_get();
+  ScrResolver *r = NULL;
+  if (self != NULL && self->kind == SCR_DYN_OBJ) {
+    ScrDyn *h = scr_dyn_obj_get(self, "_handle", 7);
+    if (h != NULL && h->kind == SCR_DYN_NUM) r = (ScrResolver *)(uintptr_t)(unsigned long long)h->v.num;
+  }
+  scr_dyn_release(self);
+  if (r == NULL) {
+    static const char msg[] = "Illegal invocation";
+    scr_throw_error_msg_code(SCR_ERR_TYPE, msg, sizeof msg - 1, "ERR_INVALID_THIS");
+  }
+  return r;
+}
+
+static ScrDyn *scr_dns_resolver_ctor_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo;
+  ScrDyn *self = scr_dyn_this_get();
+  ScrDyn *opts = argc > 0 ? args[0] : NULL;
+  if (opts != NULL && opts->kind != SCR_DYN_UNDEF && opts->kind != SCR_DYN_OBJ) {
+    scr_dyn_release(self);
+    scr_dns_throw_arg("options", "of type object", opts);
+    return NULL;
+  }
+  ScrResolver *r = (ScrResolver *)calloc(1, sizeof *r);
+  if (!r) scr_dgram_oom();
+  r->tries = 4;
+  if (opts != NULL && opts->kind == SCR_DYN_OBJ) {
+    double d;
+    bool has;
+    if (!scr_dns_int_option(opts, "timeout", -1, &d, &has)) { free(r); scr_dyn_release(self); return NULL; }
+    if (has) r->timeout_ms = d;
+    if (!scr_dns_int_option(opts, "tries", 1, &d, &has)) { free(r); scr_dyn_release(self); return NULL; }
+    if (has) r->tries = (int)d;
+    if (!scr_dns_int_option(opts, "maxTimeout", -1, &d, &has)) { free(r); scr_dyn_release(self); return NULL; }
+    if (has) r->max_timeout_ms = d;
+  }
+  r->next_alloc = scr_dns_allocated;
+  scr_dns_allocated = r;
+  if (self != NULL && self->kind == SCR_DYN_OBJ) scr_dyn_obj_set(self, "_handle", 7, scr_dyn_new_num((double)(unsigned long long)(uintptr_t)r));
+  scr_dyn_release(self);
+  return scr_dyn_undefined();
+}
+
+static ScrDyn *scr_dns_resolver_resolve_srv(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo;
+  ScrResolver *r = scr_dns_resolver_this();
+  if (r == NULL) return NULL;
+  ScrDyn *name = argc > 0 ? args[0] : NULL;
+  if (name == NULL || name->kind != SCR_DYN_STR) {
+    scr_dns_throw_arg("name", "of type string", name);
+    return NULL;
+  }
+  ScrDyn *cb = argc > 1 ? args[1] : NULL;
+  if (cb == NULL || cb->kind != SCR_DYN_FUNC) {
+    scr_dns_throw_arg("callback", "of type function", cb);
+    return NULL;
+  }
+  scr_dns_query_srv(r, name->v.str->data, cb);
+  return scr_dyn_undefined();
+}
+
+static ScrDyn *scr_dns_resolver_get_servers(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo; (void)args; (void)argc;
+  ScrResolver *r = scr_dns_resolver_this();
+  if (r == NULL) return NULL;
+  scr_dns_ensure_servers(r);
+  ScrDyn *arr = scr_dyn_new_arr();
+  for (size_t i = 0; i < r->nsrv; i++) {
+    char buf[96];
+    scr_dns_server_text(&r->srv[i], buf, sizeof buf);
+    scr_dyn_arr_push(arr, scr_dns_dyn_str(buf, strlen(buf)));
+  }
+  return arr;
+}
+
+static ScrDyn *scr_dns_resolver_set_servers(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo;
+  ScrResolver *r = scr_dns_resolver_this();
+  if (r == NULL) return NULL;
+  ScrDnsServer tmp[SCR_DNS_MAX_SERVERS];
+  size_t n = 0;
+  if (!scr_dns_parse_server_list(argc > 0 ? args[0] : NULL, tmp, &n)) return NULL;
+  memcpy(r->srv, tmp, n * sizeof tmp[0]);
+  r->nsrv = n;
+  r->inited = true;
+  return scr_dyn_undefined();
+}
+
+/* cancel(): every query of this resolver settles with ECANCELLED at the next dispatch turn (Node's callbacks never run inside the call). */
+static ScrDyn *scr_dns_resolver_cancel(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo; (void)args; (void)argc;
+  ScrResolver *r = scr_dns_resolver_this();
+  if (r == NULL) return NULL;
+  /* the registry is newest-first: arm the oldest query's timer first so the callbacks run in the order the queries were made */
+  size_t cnt = 0;
+  for (ScrDnsQuery *q = scr_dns_queries; q; q = q->next) cnt++;
+  ScrDnsQuery **all = (ScrDnsQuery **)malloc((cnt + 1) * sizeof *all);
+  if (!all) scr_dgram_oom();
+  size_t k = 0;
+  for (ScrDnsQuery *q = scr_dns_queries; q; q = q->next) all[k++] = q;
+  for (size_t i = cnt; i > 0; i--) {
+    ScrDnsQuery *q = all[i - 1];
+    if (q->res != r || q->deferred_code != NULL) continue;
+    scr_dns_close_sock(q); /* drops the socket, its watches and the attempt timer */
+    q->deferred_code = "ECANCELLED";
+    (void)scrp_timer_arm(scr_dgram_poller, q, 0, q);
+  }
+  free(all);
+  return scr_dyn_undefined();
+}
+
+static ScrDyn *scr_dns_resolver_unsupported(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo; (void)args; (void)argc;
+  static const char msg[] = "dns.Resolver#setLocalAddress is not supported yet";
+  scr_throw_error(SCR_ERR_ERROR, scr_str_new(msg, sizeof msg - 1));
+  return NULL;
+}
+
+static ScrClosure scr_dns_resolver_srv_clo = {SIZE_MAX, (void *)scr_dns_resolver_resolve_srv, 0, NULL, NULL};
+static ScrClosure scr_dns_resolver_get_clo = {SIZE_MAX, (void *)scr_dns_resolver_get_servers, 0, NULL, NULL};
+static ScrClosure scr_dns_resolver_set_clo = {SIZE_MAX, (void *)scr_dns_resolver_set_servers, 0, NULL, NULL};
+static ScrClosure scr_dns_resolver_cancel_clo = {SIZE_MAX, (void *)scr_dns_resolver_cancel, 0, NULL, NULL};
+static ScrClosure scr_dns_resolver_local_clo = {SIZE_MAX, (void *)scr_dns_resolver_unsupported, 0, NULL, NULL};
+
+static void scr_dns_resolver_teardown(void) {
+  scr_dyn_release(scr_dns_resolver_ctor_box);
+  scr_dns_resolver_ctor_box = NULL;
+}
+
+ScrDyn *scr_dns_resolver_ctor_dyn_value(void) {
+  scr_dgram_install();
+  if (scr_dns_resolver_ctor_box == NULL) {
+    /* a HEAP closure: the function's minted prototype is owned by its closure (an immortal one would keep it past the exit audit) */
+    ScrClosure *ctor_clo = scr_closure_new((void *)scr_dns_resolver_ctor_thunk, 0);
+    ScrDyn *f = scr_dyn_new_func_src(ctor_clo, scr_dns_resolver_ctor_thunk, 1, "(options)", "Resolver",
+                                     "class Resolver extends ResolverBase {}");
+    ScrDyn *proto = scr_dyn_fn_prototype(f); /* +1 */
+    scr_dyn_obj_set_present(proto, "resolveSrv", 10,
+                            scr_dyn_new_func(&scr_dns_resolver_srv_clo, scr_dns_resolver_resolve_srv, 2, "(name,callback)", "querySrv"));
+    scr_dyn_obj_set_present(proto, "getServers", 10,
+                            scr_dyn_new_func(&scr_dns_resolver_get_clo, scr_dns_resolver_get_servers, 0, "()", "getServers"));
+    scr_dyn_obj_set_present(proto, "setServers", 10,
+                            scr_dyn_new_func(&scr_dns_resolver_set_clo, scr_dns_resolver_set_servers, 1, "(servers)", "setServers"));
+    scr_dyn_obj_set_present(proto, "cancel", 6,
+                            scr_dyn_new_func(&scr_dns_resolver_cancel_clo, scr_dns_resolver_cancel, 0, "()", "cancel"));
+    scr_dyn_obj_set_present(proto, "setLocalAddress", 15,
+                            scr_dyn_new_func(&scr_dns_resolver_local_clo, scr_dns_resolver_unsupported, 2, "(ipv4,ipv6)", "setLocalAddress"));
+    scr_dyn_release(proto);
+    scr_dns_resolver_ctor_box = f;
+    atexit(scr_dns_resolver_teardown);
+  }
+  return scr_dyn_retain(scr_dns_resolver_ctor_box);
+}
+
+/* ── dns.lookup as a value: the existing getaddrinfo entry, behind the runtime's function box ──────────────────────────────── */
+static void scr_dns_dyn_lookup_fn(ScrClosure *clo, ScrStr *errmsg, ScrStr *addr, double family) {
+  ScrDyn *cb = (ScrDyn *)scr_box_get_ref(clo->caps[0]); /* +1 */
+  ScrDyn *args[3];
+  size_t argc = 1;
+  if (errmsg != NULL) {
+    ScrError *e = scr_dns_error_new(errmsg);
+    args[0] = scr_dyn_from_error(e);
+    scr_error_release(e);
+  } else {
+    args[0] = scr_dyn_new_null();
+  }
+  if (family < 0) { /* `all`: "F:address" lines */
+    ScrDyn *arr = scr_dyn_new_arr();
+    if (addr != NULL) {
+      const char *p = addr->data;
+      while (*p != '\0') {
+        const char *nl = strchr(p, '\n');
+        size_t ll = nl != NULL ? (size_t)(nl - p) : strlen(p);
+        if (ll > 2) {
+          ScrDyn *o = scr_dyn_new_obj();
+          scr_dyn_obj_set(o, "address", 7, scr_dns_dyn_str(p + 2, ll - 2));
+          scr_dyn_obj_set(o, "family", 6, scr_dyn_new_num(p[0] == '6' ? 6 : 4));
+          scr_dyn_arr_push(arr, o);
+        }
+        p += ll + (nl != NULL ? 1 : 0);
+      }
+    }
+    args[1] = arr;
+    argc = errmsg != NULL ? 1 : 2;
+  } else if (errmsg != NULL) {
+    argc = 1;
+  } else {
+    args[1] = addr != NULL ? scr_dyn_new_str(addr) : scr_dyn_new_null();
+    args[2] = scr_dyn_new_num(family);
+    argc = 3;
+  }
+  ScrDyn *r = scr_dyn_call(cb, args, argc, "the dns.lookup callback");
+  scr_dyn_release(r);
+  for (size_t i = 0; i < argc; i++) scr_dyn_release(args[i]);
+  scr_dyn_release(cb);
+}
+
+static ScrDyn *scr_dns_lookup_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo;
+  ScrDyn *host = argc > 0 ? args[0] : NULL;
+  ScrDyn *opt = argc > 1 ? args[1] : NULL;
+  ScrDyn *cb = argc > 2 ? args[2] : NULL;
+  if (opt != NULL && opt->kind == SCR_DYN_FUNC) { /* lookup(hostname, callback) */
+    cb = opt;
+    opt = NULL;
+  }
+  double family = 0;
+  int flags = 0;
+  bool all = false;
+  if (opt != NULL && opt->kind == SCR_DYN_NUM) {
+    family = opt->v.num;
+  } else if (opt != NULL && opt->kind == SCR_DYN_OBJ) {
+    ScrDyn *f = scr_dyn_obj_get(opt, "family", 6);
+    if (f != NULL && f->kind == SCR_DYN_NUM) family = f->v.num;
+    else if (f != NULL && f->kind == SCR_DYN_STR) family = strcmp(f->v.str->data, "IPv6") == 0 ? 6 : strcmp(f->v.str->data, "IPv4") == 0 ? 4 : 0;
+    ScrDyn *h = scr_dyn_obj_get(opt, "hints", 5);
+    if (h != NULL && h->kind == SCR_DYN_NUM) flags = (int)h->v.num;
+    ScrDyn *a = scr_dyn_obj_get(opt, "all", 3);
+    if (a != NULL && a->kind == SCR_DYN_BOOL) all = a->v.b;
+  }
+  if (family != 0 && family != 4 && family != 6) {
+    char msg[120];
+    int n = snprintf(msg, sizeof msg, "The property 'options.family' must be one of: 0, 4, 6. Received %g", family);
+    scr_throw_error_msg_code(SCR_ERR_TYPE, msg, (size_t)n, "ERR_INVALID_ARG_VALUE");
+    return NULL;
+  }
+  if (host != NULL && host->kind != SCR_DYN_STR && !(host->kind == SCR_DYN_UNDEF || host->kind == SCR_DYN_NULL)) {
+    scr_dns_throw_arg("hostname", "of type string", host);
+    return NULL;
+  }
+  if (cb == NULL || cb->kind != SCR_DYN_FUNC) {
+    scr_dns_throw_arg("callback", "of type function", cb);
+    return NULL;
+  }
+  ScrStr *hs = host != NULL && host->kind == SCR_DYN_STR ? scr_str_retain(host->v.str) : scr_str_new("", 0);
+  ScrClosure *c = scr_closure_new((void *)scr_dns_dyn_lookup_fn, 1);
+  c->caps[0] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
+  scr_box_set_ref(c->caps[0], scr_dyn_retain(cb));
+  scr_dns_lookup_flags = flags;
+  scr_dns_lookup_all = all;
+  scr_dns_lookup(hs, family, c, scr_dns_dyn_lookup_fn);
+  scr_dns_lookup_flags = 0;
+  scr_dns_lookup_all = false;
+  scr_str_release(hs);
+  return scr_dyn_undefined();
+}
+static ScrClosure scr_dns_lookup_clo = {SIZE_MAX, (void *)scr_dns_lookup_thunk, 0, NULL, NULL};
+ScrDyn *scr_dns_lookup_dyn_value(void) {
+  scr_dgram_install();
+  return scr_dyn_new_func(&scr_dns_lookup_clo, scr_dns_lookup_thunk, 3, "(hostname,options,callback)", "lookup");
+}
 
 static bool scr_dgram_flags_pending(void) {
   if (scr_dns_pending) return true;
@@ -1102,7 +2229,7 @@ static void scr_dgram_sweep(void) {
 /* ── the loop hooks (scr_async.c) ────────────────────────────────────── */
 
 static bool scr_dgram_pending(void) {
-  if (scr_dns_pending) return true;
+  if (scr_dns_pending || scr_dns_queries) return true;
   for (ScrDgramSocket *s = scr_dgram_socks; s; s = s->next) {
     /* Undelivered emits hold the loop even on an unref'd socket (they
      * are due NOW); otherwise an open registered socket holds it unless
@@ -1121,7 +2248,7 @@ static int scr_dgram_pollfd(void) {
 }
 
 static void scr_dgram_dispatch(void) {
-  if (!scr_dgram_socks && !scr_dns_pending) return;
+  if (!scr_dgram_socks && !scr_dns_pending && !scr_dns_queries) return;
   for (;;) {
     scr_dgram_sweep();
     if (scr_exc_pending()) return;
@@ -1134,6 +2261,10 @@ static void scr_dgram_dispatch(void) {
       if (i > 0) {
         scr_loop_drain_callback();
         if (scr_loop_stopping()) return;
+      }
+      if (scr_dns_route(evs[i].udata, evs[i].events)) {
+        if (scr_exc_pending()) return;
+        continue;
       }
       ScrDgramSocket *s = (ScrDgramSocket *)evs[i].udata;
       if (!s || s->fd < 0) continue; /* closed earlier in this batch */
@@ -1153,6 +2284,7 @@ static void scr_dgram_dispatch(void) {
  * program legitimately leaves live at exit release their listeners and
  * registry references so the RC audit sees a clean heap. */
 static void scr_dgram_cleanup_atexit(void) {
+  scr_dns_cleanup_atexit();
   while (scr_dgram_socks) {
     ScrDgramSocket *s = scr_dgram_socks;
     scr_dgram_ls_drop(&s->msg_ls);
