@@ -13110,6 +13110,29 @@ export function moduleUsesDynGopdAny(mod: IrModule): boolean {
  * rest of Node's options beyond the layout numbers. A literal naming any of them gates the extension in. */
 const INSP_EXT_KEYS: ReadonlySet<string> = new Set(["colors", "compact", "showHidden", "showProxy", "getters", "customInspect", "sorted", "stylize"]);
 
+/** True when an accessor's compiled body never touches its receiver: no read of the `this` parameter, no capture of it by a closure, no `super`. Run
+ * with any receiver (the renderer passes none) it computes what Node computes with the prototype object as `this`. A body that reads a captured
+ * binding of a per-evaluation class reads it through `this`, so it is NOT receiver-free here. */
+export function accessorIgnoresThis(fn: IrFunction): boolean {
+  const self = fn.params[0]?.localId;
+  if (self === undefined) return true;
+  const stack: unknown[] = [fn.body];
+  while (stack.length > 0) {
+    const n = stack.pop();
+    if (n === null || typeof n !== "object") continue;
+    if (Array.isArray(n)) {
+      for (const x of n) stack.push(x);
+      continue;
+    }
+    const o = n as { kind?: unknown; localId?: unknown; captures?: unknown };
+    if (o.localId === self) return false;
+    if (typeof o.kind === "string" && (o.kind.includes("super") || o.kind.includes("Super") || o.kind === "this")) return false;
+    if (Array.isArray(o.captures) && o.captures.includes(self)) return false;
+    for (const v of Object.values(n as Record<string, unknown>)) if (v !== null && typeof v === "object") stack.push(v);
+  }
+  return true;
+}
+
 export function moduleUsesInspColors(mod: IrModule): boolean {
   let found = false;
   const plainLiteral = (a: unknown): boolean => {
