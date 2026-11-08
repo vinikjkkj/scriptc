@@ -1968,12 +1968,72 @@ ScrDyn *scr_dyn_fn_code_set(ScrDyn *d, unsigned code) {
   return d;
 }
 
-ScrDyn *scr_dyn_new_null(void) { return scr_dyn_alloc(SCR_DYN_NULL); }
+/* null, true and false are IMMORTAL singletons, like `undefined` above: rc == SIZE_MAX skips every retain/release and the free lists
+ * never see them, so a boolean or a null crossing into the dyn tree costs no allocation and no live box. Nothing writes a bool's or
+ * a null's payload after construction (the JSON parser below returns these same nodes), and their identity is never observable. */
+static ScrDyn scr_dyn_null_singleton = { SIZE_MAX, SCR_DYN_NULL, .v = { .b = false } };
+static ScrDyn scr_dyn_true_singleton = { SIZE_MAX, SCR_DYN_BOOL, .v = { .b = true } };
+static ScrDyn scr_dyn_false_singleton = { SIZE_MAX, SCR_DYN_BOOL, .v = { .b = false } };
+
+/* The collector's pacing estimate (scr_cycle.c) asks, over a bounded sample of its buffered roots, how many slots hold one of these
+ * shared boxes (a slot that used to be a live node) and how many are real nodes. The hook is installed by the first constructor call
+ * below, so a program that never boxes a boolean or a null never installs it, and scr_cycle.c needs no link edge to this file. */
+extern void (*scr_cyc_sample_roots)(void *const *roots, size_t n, size_t stride, size_t *phantom, size_t *nodes);
+/* One container's first 16 slots, and (depth 2) the first 16 slots of each container among them. Counts the shared bool/null slots in
+ * `ph` and the nodes (the container and its real children) in `nd`. The cap keeps a 20000-slot array from swamping the ratio and
+ * bounds a sample at 256 roots x (16 + 16 x 16) slots. */
+static void scr_dyn_sample_slots(const ScrDyn *d, int depth, size_t *ph, size_t *nd) {
+  const ScrDyn *const *items = NULL;
+  size_t len = 0;
+  if (d->kind == SCR_DYN_ARR) {
+    items = (const ScrDyn *const *)d->v.arr.items;
+    len = d->v.arr.len;
+  } else if (d->kind != SCR_DYN_OBJ) {
+    return; /* only containers carry slots; a scalar box would dilute the ratio with a node and no slot */
+  }
+  (*nd)++;
+  if (len > 16) len = 16;
+  if (d->kind == SCR_DYN_OBJ && d->v.obj.len < 16) len = d->v.obj.len; else if (d->kind == SCR_DYN_OBJ) len = 16;
+  for (size_t i = 0; i < len; i++) {
+    const ScrDyn *c;
+    if (d->kind == SCR_DYN_OBJ) {
+      if (d->v.obj.entries[i].value_borrowed) continue;
+      c = d->v.obj.entries[i].value;
+    } else {
+      c = items[i];
+    }
+    if (c == NULL) continue;
+    if (c->rc == SIZE_MAX) {
+      if (c->kind == SCR_DYN_BOOL || c->kind == SCR_DYN_NULL) (*ph)++;
+    } else if (depth > 1 && (c->kind == SCR_DYN_ARR || c->kind == SCR_DYN_OBJ)) {
+      scr_dyn_sample_slots(c, depth - 1, ph, nd);
+    } else {
+      (*nd)++;
+    }
+  }
+}
+static void scr_dyn_sample_roots(void *const *roots, size_t n, size_t stride, size_t *phantom, size_t *nodes) {
+  size_t ph = 0, nd = 0;
+  for (size_t r = 0; r < n; r += stride) {
+    const ScrDyn *d = (const ScrDyn *)roots[r];
+    if (scr_cyc_trace_of(scr_cyc_hdr(d)) != scr_dyn_trace) continue; /* not a dyn node */
+    scr_dyn_sample_slots(d, 2, &ph, &nd);
+  }
+  *phantom = ph;
+  *nodes = nd;
+}
+static inline void scr_dyn_phantom_install(void) {
+  if (scr_cyc_sample_roots == NULL) scr_cyc_sample_roots = scr_dyn_sample_roots;
+}
+
+ScrDyn *scr_dyn_new_null(void) {
+  scr_dyn_phantom_install();
+  return &scr_dyn_null_singleton;
+}
 
 ScrDyn *scr_dyn_new_bool(bool b) {
-  ScrDyn *d = scr_dyn_alloc(SCR_DYN_BOOL);
-  d->v.b = b;
-  return d;
+  scr_dyn_phantom_install();
+  return b ? &scr_dyn_true_singleton : &scr_dyn_false_singleton;
 }
 
 ScrDyn *scr_dyn_new_num(double n) {
@@ -10690,19 +10750,15 @@ static ScrDyn *scr_json_value_inner(ScrJsonP *p) {
   }
   if (c == 't') {
     if (!scr_json_lit(p, "true", 4)) return NULL;
-    ScrDyn *d = scr_dyn_alloc(SCR_DYN_BOOL);
-    d->v.b = true;
-    return d;
+    return scr_dyn_new_bool(true);
   }
   if (c == 'f') {
     if (!scr_json_lit(p, "false", 5)) return NULL;
-    ScrDyn *d = scr_dyn_alloc(SCR_DYN_BOOL);
-    d->v.b = false;
-    return d;
+    return scr_dyn_new_bool(false);
   }
   if (c == 'n') {
     if (!scr_json_lit(p, "null", 4)) return NULL;
-    return scr_dyn_alloc(SCR_DYN_NULL);
+    return scr_dyn_new_null();
   }
   if (c == '-' || (c >= '0' && c <= '9')) return scr_json_number(p);
   scr_json_unexpected(p, p->pos);
