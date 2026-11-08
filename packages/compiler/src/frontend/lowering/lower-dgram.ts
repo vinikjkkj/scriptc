@@ -13,6 +13,7 @@ import { isJsSourceFile, locOf } from "../program.js";
 import { BOOL, canBoxFuncIntoDyn, DGRAMSOCK_T, DYN, F64, funcOf, IrExpr, IrLibFn, IrType, NULL_T, SrcLoc, STATS_T, STRING, typeKey, UNDEFINED_T, VOID } from "../../ir/nodes.js";
 import { DNS_LOOKUP_DOCUMENTED_OPTIONS, DNS_NATIVE_FN_VALUES, fenceOrDropOptionKey } from "./surfaces.js";
 import { overridesDtsPath } from "../shared.js";
+import { v8CallSite } from "./lower-calls.js";
 
 const DGRAM_SURFACE_HINT =
   "bind, connect, send, address, close, unref/ref, and on/once of " +
@@ -407,6 +408,93 @@ function lowerDnsCallback(L: Lowerer, node: ts.Expression): IrExpr {
   }
 }
 
+/** A resolveSrv callback (the direct call and Resolver#resolveSrv): boxed as a checked-dynamic function value. Node passes `undefined` as the
+ * records on a failure, so an inline literal's records parameter is typed (IR and reads alike) as SrvRecord[] | undefined, the mechanism
+ * lowerDnsCallback uses (paramIrOverrides + the overrides file's alias); an annotation of the declared SrvRecord[] is accepted (that is how a
+ * TypeScript source spells it) and the union replaces it. A named function value binds the checker's SrvRecord[], which contradicts the
+ * delivered undefined, so it is refused by name unless its records parameter already admits undefined. */
+function lowerDnsSrvCallback(L: Lowerer, node: ts.Expression): IrExpr {
+  let fn: ts.Expression = node;
+  while (ts.isParenthesizedExpression(fn)) fn = fn.expression;
+  if (!ts.isArrowFunction(fn) && !ts.isFunctionExpression(fn)) {
+    const boxed = L.lowerExprExpecting(node, DYN);
+    const inner = boxed.kind === "dynFrom" ? boxed.value : boxed;
+    if (inner.type.kind === "func" && inner.type.params.length >= 2) {
+      const t = inner.type.params[1]!;
+      const def = t.kind === "union" ? L.unions.get(t.unionId) : undefined;
+      if (t.kind !== "dyn" && !(def !== undefined && def.arms.some((a) => a.kind === "undefinedT"))) {
+        L.unsupported(
+          "SC1090",
+          node,
+          "resolveSrv callbacks that are not inline function literals (the records argument is undefined on a failure, so the callback must be written in place or take the records as SrvRecord[] | undefined)",
+        );
+      }
+    }
+    return boxed;
+  }
+  const p = fn.parameters[1];
+  const arrT = L.mapTypeOf(dnsAnswerTsType(L, "ScriptcDnsSrvArray"));
+  if (p === undefined || arrT === null || arrT.kind !== "array") return L.lowerExprExpecting(node, DYN);
+  if (!ts.isIdentifier(p.name) || p.initializer !== undefined || p.questionToken !== undefined || p.dotDotDotToken !== undefined) {
+    L.unsupported(
+      "SC1090",
+      p,
+      "a resolveSrv callback's records parameter with a default, optional, or rest form (write it as a plain identifier so its per-path type is the delivered one)",
+    );
+  }
+  const readT = dnsAnswerTsType(L, "ScriptcDnsSrvRead");
+  L.paramIrOverrides.set(p, dnsAnswerUnion(L, [arrT, UNDEFINED_T]));
+  const reads: ts.Node[] = [];
+  const bind = (n: ts.Node): void => {
+    if (L.chainNarrowedType.has(n)) return;
+    L.chainNarrowedType.set(n, readT);
+    reads.push(n);
+  };
+  bind(p.name);
+  const psym = L.resolveValueSymbol(p.name);
+  if (psym !== null && fn.body !== undefined) {
+    ts.walkPreorder(fn.body, (n) => {
+      if (ts.isIdentifier(n) && n.text === (p.name as ts.Identifier).text && L.resolveValueSymbol(n) === psym) bind(n);
+      return undefined;
+    });
+  }
+  try {
+    return L.lowerExprExpecting(node, DYN);
+  } finally {
+    L.paramIrOverrides.delete(p);
+    for (const n of reads) L.chainNarrowedType.delete(n);
+  }
+}
+
+/** True iff `t` is the stdlib `Resolver` class of node:dns (not dns/promises' class of the same name). */
+function isDnsResolverType(L: Lowerer, t: ts.Type): boolean {
+  const sym = t.getSymbol();
+  if (sym === undefined || sym.name !== "Resolver") return false;
+  for (const d of L.checker.declarationsOf(sym)) {
+    if (!L.isStdlibFile(d.getSourceFile())) continue;
+    for (let n: ts.Node | undefined = d.parent; n !== undefined; n = n.parent) {
+      if (ts.isModuleDeclaration(n) && ts.isStringLiteral(n.name)) return n.name.text === "dns" || n.name.text === "node:dns";
+    }
+  }
+  return false;
+}
+
+/** Method calls on a node:dns Resolver receiver: resolveSrv takes the typed-callback lowering (records are undefined on a failure, as in
+ * Node); the other members ride the same dynamic invoke. Null for every other receiver. */
+export function lowerDnsResolverMethodCall(L: Lowerer, call: ts.CallExpression, access: ts.PropertyAccessExpression): IrExpr | null {
+  if (L.dynamic) return null;
+  if (!isDnsResolverType(L, L.typeOf(access.expression))) return null;
+  const name = access.name.text;
+  if (call.arguments.some(ts.isSpreadElement)) return null;
+  const recv = L.lowerExpr(access.expression);
+  if (recv.type.kind !== "dyn") return null;
+  const loc = locOf(call);
+  const args = call.arguments.map((a, i) => (name === "resolveSrv" && i === 1 ? lowerDnsSrvCallback(L, a) : L.lowerExprExpecting(a, DYN)));
+  const inv: IrExpr = { kind: "dynInvoke", recv, method: name, calleeName: v8CallSite(access), args, type: DYN, loc };
+  const want = L.irTypeOf(call);
+  return want.kind === "void" || want.kind === "dyn" ? inv : L.coerceToExpected(inv, want);
+}
+
 /** `new dns.Resolver(options?)` (also through a named binding, `new Resolver()`): constructed through the runtime's own constructible class
  * value, with the arguments as checked-dynamic values. Null for every other `new`. */
 export function lowerDnsResolverNew(L: Lowerer, expr: ts.NewExpression, loc: SrcLoc): IrExpr | null {
@@ -431,7 +519,7 @@ function lowerDnsModuleCall(L: Lowerer, expr: ts.CallExpression,
   if (native !== undefined) {
     // resolveSrv / setServers / getServers: the call goes through the runtime's own function box, the value the member reads as anywhere
     // else, with every argument as a checked-dynamic value (a callback arrow boxes as a dyn function).
-    const dynArgs = expr.arguments.map((a) => L.lowerExprExpecting(a, DYN));
+    const dynArgs = expr.arguments.map((a, i) => (bi.member === "resolveSrv" && i === 1 ? lowerDnsSrvCallback(L, a) : L.lowerExprExpecting(a, DYN)));
     const call: IrExpr = { kind: "dynCall", callee: { kind: "libCall", fn: native, args: [], type: DYN, loc }, calleeName: `dns.${bi.member}`, args: dynArgs, type: DYN, loc };
     const want = L.irTypeOf(expr);
     return want.kind === "void" || want.kind === "dyn" ? call : L.coerceToExpected(call, want);

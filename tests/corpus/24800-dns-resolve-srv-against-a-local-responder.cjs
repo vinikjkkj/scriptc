@@ -62,9 +62,8 @@ function show(label, err, recs) {
   const e = err
     ? { name: err.name, message: err.message, code: err.code, errno: err.errno, syscall: err.syscall, hostname: err.hostname, keys: Object.keys(err).join(",") }
     : null;
-  // on a failure Node passes no records; a callback typed from its declaration (`addresses: SrvRecord[]`) receives an empty array there,
-  // so the row reads the records only on success
-  console.log(label, JSON.stringify(e), err ? "" : JSON.stringify(recs), err ? "" : Object.keys(recs[0]).join(","));
+  // on a failure Node passes no records at all: undefined, not an empty array
+  console.log(label, JSON.stringify(e), JSON.stringify(recs), typeof recs, err ? "" : Object.keys(recs[0]).join(","));
 }
 server.bind(0, "127.0.0.1", () => {
   const port = server.address().port;
