@@ -391,6 +391,7 @@ enum {
   ISL_H_OWNSYMS,
   ISL_H_ISENUM,
 #endif
+  ISL_H_GOPD,
   ISL_H_COUNT,
 };
 
@@ -468,6 +469,8 @@ static const char isl_prelude[] =
     "(o,e)=>{const s=Object.getOwnPropertySymbols(o);return e?s.filter(k=>Object.prototype.propertyIsEnumerable.call(o,k)):s},"
     "(o,k)=>Object.prototype.propertyIsEnumerable.call(o,k)"
 #endif
+    /* ISL_H_GOPD: Object.getOwnPropertyDescriptor over a wrapped receiver, the engine's own answer */
+    ",(o,k)=>Object.getOwnPropertyDescriptor(o,k)"
     "]";
 
 static void isl_free_boot(void);
@@ -1700,6 +1703,32 @@ static int isl_dynjs_has_own(ScrJsval *cell, const ScrStr *k) {
   return b > 0 ? 1 : 0;
 }
 
+static ScrDyn *isl_dynjs_get_own_desc(ScrJsval *cell, const ScrDyn *keyd) {
+  isl_entry();
+  JSValue key;
+#ifdef SCR_SYMTAB
+  if (keyd->kind == SCR_DYN_HANDLE && keyd->v.handle.tag == SCR_DYNH_SYMBOL) key = isl_sym_to_js((ScrSym *)keyd->v.handle.ptr);
+  else
+#endif
+  {
+    ScrStr *ks = scr_dyn_string_coerce(keyd);
+    key = JS_NewStringLen(isl_ctx, ks->data, ks->len);
+    scr_str_release(ks);
+  }
+  if (JS_IsException(key)) {
+    isl_bridge_exception();
+    return NULL;
+  }
+  JSValue argv[2] = {cell->v, key};
+  JSValue r = JS_Call(isl_ctx, isl_helpers[ISL_H_GOPD], JS_UNDEFINED, 2, argv);
+  JS_FreeValue(isl_ctx, key);
+  if (JS_IsException(r)) {
+    isl_bridge_exception();
+    return NULL;
+  }
+  return isl_dyn_from_value(r);
+}
+
 static bool isl_dynjs_assign(ScrJsval *cell, const ScrDyn *src) {
   ScrJsval *sj = scr_jsval_from_dyn(src);
   if (!sj) return false;
@@ -1861,6 +1890,7 @@ static const ScrDynJsvalOps isl_dynjs_ops = {
   isl_dynjs_exit_u8,
   isl_dynjs_bin_kind,
   scr_jsval_exit_bin,
+  isl_dynjs_get_own_desc,
 #ifdef SCR_SYMTAB
   isl_dynjs_sym_op,
 #endif

@@ -26694,6 +26694,12 @@
     "<repo>/tests/corpus/24821-single-value-commonjs-export-expando-members-read-as-values-and-called/main.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/24706-object-getownpropertydescriptor-over-every-dyn-kind.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24706-object-getownpropertydescriptor-over-every-dyn-kind.cjs"
+   ],
+   "diags": []
   }
  }
 }

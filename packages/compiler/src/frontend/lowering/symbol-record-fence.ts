@@ -134,6 +134,7 @@ const ANY_KEY_OPS: Record<string, { to: string; extra: number }> = {
   "dyn.keyDelete": { to: "sym.anyDelete", extra: 0 },
   "dyn.hasKey": { to: "sym.anyHas", extra: 0 },
   "dyn.hasOwn": { to: "sym.anyHasOwn", extra: 0 },
+  "dyn.getOwnPropDesc": { to: "sym.anyGetOwnDesc", extra: 0 },
   "dyn.defineProp": { to: "sym.anyDefine", extra: 1 },
 };
 
