@@ -14,7 +14,8 @@ import { dynamicImportModuleTargetOf, dynamicImportProgramTargetOf, staticDynImp
 import { pureReemittable } from "./lower-exprs.js";
 import { isEsModuleStamp } from "./lower-stmts.js";
 import { liveBagRef, liveTwinOf } from "./cjs-live-exports.js";
-import { cjsLexedExportsOf } from "../cjs-lexer.js";
+import { cjsLexedExportsOf, cjsLexerVisibleNames } from "../cjs-lexer.js";
+import * as nodePath from "node:path";
 import { moduleNsStarExports } from "./lower-namespaces.js";
 import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } from "./lowerer.js";
 
@@ -1175,18 +1176,36 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
     return table;
   }
 
+/** The module symbol of a source file (its exports are the names Node's namespace carries). */
+  function modSymbolOf(L: Lowerer, dep: ts.SourceFile): ts.Symbol | undefined {
+    return L.checker.getSymbolAtLocation(dep);
+  }
+
 /** A CommonJS `export =` module whose `module.exports = <value>` is NOT a table (`module.exports = Errors` over a variable the module
-   * computed, a conditional require, a call): Node's lexer finds a name set from the file's own text, and when it finds NONE (no
-   * `exports.x =` / `module.exports.x =` / defineProperty name, no re-export) the namespace is `default` and the `module.exports` alias
-   * over ONE value, the module.exports value itself, and the require() value is that same value. Null when the lexer sees any name or
-   * re-export (a partial name set is worse than no answer: the caller refuses) or the value has no checked-dynamic form here. */
+   * computed, `module.exports = require("./Redis").default`, a call): the namespace is `default` and the `module.exports` alias over ONE value,
+   * the module.exports value itself, plus Node's lexer-visible names (the lexer's own names and, recursively, those of every re-export target
+   * that is a CommonJS program file); each name resolves like a static `import { n }` of the package, and the require() value is the whole-export
+   * value. Null when the whole-export value has no checked-dynamic form here. */
   function cjsSingleValueNsOf(
     L: Lowerer,
     dep: ts.SourceFile,
     loc: IrExpr["loc"],
   ): { prelude: IrStmt[]; fields: { key: IrExpr; value: IrExpr }[] } | null {
-    const lexed = cjsLexedExportsOf(dep.text, dep.fileName);
-    if (lexed.exports.size > 0 || lexed.reexports.length > 0) return null;
+    // The name set is Node's: the lexer's own names plus, recursively, those of every re-export target that is itself a CommonJS program file
+    // (`exports = module.exports = require("./Redis").default` is a re-export of ./Redis to the lexer). Names beside a whole-export value (ioredis: getters
+    // for `default`/`Redis` and a plain `exports.helper =`) are read off that value at namespace time, as Node reads them off module.exports once the
+    // module has run.
+    const resolveCjsDep = (from: ts.SourceFile, spec: string): ts.SourceFile | null => {
+      if (!spec.startsWith(".")) return null;
+      const base = nodePath.resolve(nodePath.dirname(from.fileName), spec);
+      for (const cand of [base, `${base}.js`, `${base}.cjs`, nodePath.join(base, "index.js")]) {
+        const sf = L.program.getSourceFile(cand);
+        if (sf !== undefined && isCjsJsFile(sf)) return sf;
+      }
+      return null;
+    };
+    const visibleNames = cjsLexerVisibleNames(dep, (d) => d.text, resolveCjsDep);
+    const lexed = { exports: visibleNames, reexports: [] as string[] };
     // The value is the whole-export root's own storage (lower-modules.ts registers it keyed by the `module.exports = <root>` statement:
     // the value the root held at that statement, which is what Node's module.exports holds). A live module reads its export object.
     const liveSf = liveTwinOf(L, dep);
@@ -1198,8 +1217,19 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
         if (cjs?.kind === "table" && cjsExportDiscardReason(stmt) === null) stmtExpr = cjs.expr;
       }
       const g = stmtExpr === null ? undefined : L.globalsByDeclNode.get(stmtExpr);
-      if (g === undefined || g.type.kind !== "dyn") return null;
-      value = { kind: "varRef", localId: g.id, type: g.type, loc };
+      if (g !== undefined && g.type.kind === "dyn") {
+        value = { kind: "varRef", localId: g.id, type: g.type, loc };
+      } else if (g === undefined && stmtExpr !== null) {
+        // `module.exports = require("./Redis").default` (ioredis' index.js): the root is a member of another module's exports, not a variable that
+        // needs storage, so the value is what that member resolves to, the same symbol a static `import Redis from` of this package binds.
+        let rhs: ts.Expression = stmtExpr.right;
+        while (ts.isParenthesizedExpression(rhs)) rhs = rhs.expression;
+        const nameNode = ts.isPropertyAccessExpression(rhs) ? rhs.name : ts.isIdentifier(rhs) ? rhs : null;
+        const sym = nameNode === null ? undefined : L.checker.getSymbolAtLocation(nameNode);
+        if (sym === undefined) return null;
+        value = exportDynValue(L, "module.exports", L.cjsExportValueSymbol(sym) ?? sym, loc);
+      }
+      if (value === null) return null;
     }
     const slot = L.declareHiddenLocal("%dynnsexports", DYN);
     const ref: IrExpr = { kind: "varRef", localId: slot.id, type: DYN, loc };
@@ -1209,6 +1239,18 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
       fields: [
         { key: key("default"), value: ref },
         { key: key("module.exports"), value: ref },
+        ...[...lexed.exports]
+          .filter((n) => n !== "default" && n !== "module.exports")
+          .sort()
+          .map((n) => {
+            // Each name resolves like a static `import { n }` of the package: through the module's export symbol (a getter spelled with
+            // defineProperty on the rebound `exports` binds the same value the getter returns), never a property read off the boxed value, which
+            // does not carry the module's `exports` additions.
+            const exp = modSymbolOf(L, dep)?.getExports().get(n as ts.__String);
+            let v: IrExpr | null = null;
+            if (exp !== undefined) v = exportDynValue(L, n, L.cjsExportValueSymbol(exp) ?? exp, loc);
+            return { key: key(n), value: v ?? ({ kind: "dynKeyGet" as const, key: key(n), optional: true, value: ref, type: DYN, loc } as IrExpr) };
+          }),
       ],
     };
   }
@@ -1757,7 +1799,19 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
     }
     if (L.genericFnsBySymbol.has(resolved)) return trap("a generic function");
     const flags = resolved.flags;
-    if (flags & ts.SymbolFlags.Class) return trap("a class");
+    if (flags & ts.SymbolFlags.Class) {
+      // A class the program compiled crosses as its class VALUE (a classval box), the same box `new Cls` and `x instanceof Cls` read through; only a
+      // class with no compiled declaration has nothing to box.
+      // A class declared in a declaration file crosses as its compiled TWIN's class, the one the binary holds and the checker's types name.
+      const classDecl = L.checker.declarationsOf(resolved).find(ts.isClassDeclaration);
+      const twinDecl = classDecl !== undefined ? L.declTwinClassDecl(classDecl) : null;
+      const twinSym = twinDecl?.name !== undefined ? L.checker.getSymbolAtLocation(twinDecl.name) : undefined;
+      const info = L.classBySymbol.get(twinSym ?? resolved);
+      if (info !== undefined) {
+        return { kind: "dynFrom", value: { kind: "classRef", className: info.def.name, type: { kind: "classval", className: info.def.name }, loc }, type: DYN, loc };
+      }
+      return trap("a class");
+    }
     if (flags & ts.SymbolFlags.Enum) return trap("an enum object");
     if (flags & ts.SymbolFlags.ValueModule || flags & ts.SymbolFlags.NamespaceModule) {
       return trap("a namespace object");
