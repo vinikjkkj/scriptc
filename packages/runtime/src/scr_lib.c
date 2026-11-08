@@ -3357,9 +3357,13 @@ ScrStats *scr_fs_lstat(ScrStr *path) {
   return scr_stats_of(&st, path->data, 0);
 }
 
-/* Node lists a directory SORTED: libuv's scandir passes alphasort (strcoll in the C locale Node runs in, so plain byte order) to
+/* POSIX only: libuv's unix scandir sorts, its Windows fs__scandir does not (it appends in NtQueryDirectoryFile order, which NTFS answers in the
+ * volume's case-insensitive upcase-table order), so the Windows lane keeps the enumeration order and never re-sorts.
+ *
+ * Node lists a directory SORTED on POSIX: libuv's scandir passes alphasort (strcoll in the C locale Node runs in, so plain byte order) to
  * scandir(3) — measured on v24.15.0 under LC_ALL=C, C.UTF-8 and en_US.UTF-8, where `Beta.txt` still comes before `alpha.txt` and `10.txt`
  * before `9.txt`. The readdir(3) order the OS answers (hash order on ext4) is never what a program sees. */
+#ifndef _WIN32
 static int scr_fs_name_cmp(const void *a, const void *b) {
   const ScrStr *x = *(const ScrStr *const *)a, *y = *(const ScrStr *const *)b;
   return strcmp(x->data, y->data);
@@ -3368,6 +3372,9 @@ static int scr_fs_name_cmp(const void *a, const void *b) {
 static void scr_fs_sort_names(ScrArr *arr) {
   if (arr->len > 1) qsort(arr->data, arr->len, sizeof(ScrStr *), scr_fs_name_cmp);
 }
+#else
+static void scr_fs_sort_names(ScrArr *arr) { (void)arr; }
+#endif
 
 ScrArr *scr_fs_readdir(ScrStr *path) {
   DIR *d = opendir(path->data);
@@ -3415,11 +3422,13 @@ static unsigned char scr_dirent_kind_of_mode(mode_t m) {
   return 0;
 }
 
+#ifndef _WIN32
 static const ScrScandir *scr_fs_scandir_sorting = NULL;
 static int scr_fs_scandir_idx_cmp(const void *a, const void *b) {
   const ScrScandir *s = scr_fs_scandir_sorting;
   return strcmp(s->names[*(const size_t *)a]->data, s->names[*(const size_t *)b]->data);
 }
+#endif
 
 ScrScandir *scr_fs_scandir(ScrStr *path) {
   DIR *d = opendir(path->data);
@@ -3485,6 +3494,7 @@ ScrScandir *scr_fs_scandir(ScrStr *path) {
     s->len++;
   }
   closedir(d);
+#ifndef _WIN32
   /* the same sorted order as scr_fs_readdir: sort an index permutation, then reorder names and kinds */
   if (s->len > 1) {
     size_t *idx = malloc(s->len * sizeof *idx);
@@ -3505,6 +3515,7 @@ ScrScandir *scr_fs_scandir(ScrStr *path) {
     free(nn);
     free(kk);
   }
+#endif
   return s;
 }
 
