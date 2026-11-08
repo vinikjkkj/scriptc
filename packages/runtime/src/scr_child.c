@@ -250,8 +250,13 @@ static int scr_env_keycmp(const WCHAR *a, int na, const WCHAR *b) {
   return CompareStringOrdinal(a, na, b, nb, TRUE) - CSTR_EQUAL;
 }
 
+/* A TOTAL order, so the sort needs no stability (mingw's qsort is not stable, glibc's keeps tie order): keys that differ only in case tie on the
+ * ordinal case-insensitive compare, and then order by UTF-16 code unit, which is exactly the order JS's default Array#sort gives the keys in
+ * lib/child_process.js's win32 branch ('FOO' before 'Foo' before 'foo'). */
 static int scr_env_qsortcmp(const void *a, const void *b) {
-  return scr_env_keycmp(*(WCHAR *const *)a, -1, *(WCHAR *const *)b);
+  const WCHAR *x = *(WCHAR *const *)a, *y = *(WCHAR *const *)b;
+  int c = scr_env_keycmp(x, -1, y);
+  return c != 0 ? c : wcscmp(x, y);
 }
 
 /* libuv's required vars: winsock fails to initialize without SYSTEMROOT,
@@ -305,6 +310,19 @@ static WCHAR *scr_child_env_block(ScrArr *pairs) {
     items[count++] = kv;
   }
   qsort(items, count, sizeof(WCHAR *), scr_env_qsortcmp);
+  /* lib/child_process.js (win32): "On Windows env keys are case insensitive. Filter out duplicates, keeping only the first one" of the
+   * code-unit-sorted keys. The sort above is that order, so the first of each run of keys equal ignoring case is the one that survives. */
+  {
+    size_t kept = 0;
+    for (size_t i = 0; i < count; i++) {
+      if (kept > 0 && scr_env_keycmp(items[kept - 1], -1, items[i]) == 0) {
+        free(items[i]);
+        continue;
+      }
+      items[kept++] = items[i];
+    }
+    count = kept;
+  }
   size_t total = 1; /* the block's extra terminator */
   for (size_t i = 0; i < count; i++) total += wcslen(items[i]) + 1;
   WCHAR *block = malloc(total * sizeof(WCHAR));
