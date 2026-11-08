@@ -3748,6 +3748,7 @@ ScrNetSocket *scr_net_sock_resume(ScrNetSocket *s) {
  * Answers the socket (+1) — Node's chaining. */
 ScrNetSocket *scr_net_sock_set_nodelay(ScrNetSocket *s, bool enable) {
   s->nodelay_pref = enable;
+  s->nodelay_set = true; /* asked before the dial (pg's Connection.connect does): the dial must apply it */
   if (s->fd >= 0) {
     int v = enable ? 1 : 0;
     setsockopt(s->fd, IPPROTO_TCP, TCP_NODELAY, &v, sizeof v);
