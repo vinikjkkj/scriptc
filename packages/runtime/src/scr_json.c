@@ -2004,7 +2004,7 @@ static void scr_dyn_sample_slots(const ScrDyn *d, int depth, size_t *ph, size_t 
     }
     if (c == NULL) continue;
     if (c->rc == SIZE_MAX) {
-      if (c->kind == SCR_DYN_BOOL || c->kind == SCR_DYN_NULL) (*ph)++;
+      if (c->kind == SCR_DYN_BOOL || c->kind == SCR_DYN_NULL || c->kind == SCR_DYN_NUM) (*ph)++;
     } else if (depth > 1 && (c->kind == SCR_DYN_ARR || c->kind == SCR_DYN_OBJ)) {
       scr_dyn_sample_slots(c, depth - 1, ph, nd);
     } else {
@@ -2036,7 +2036,24 @@ ScrDyn *scr_dyn_new_bool(bool b) {
   return b ? &scr_dyn_true_singleton : &scr_dyn_false_singleton;
 }
 
+/* The integers 0..255 are IMMORTAL boxes too (rc == SIZE_MAX, like true/false/null above): a dyn number that is a small non-negative
+ * integer costs no allocation and no live box. Only exactly those values qualify: -0 (distinguishable through 1/x and Object.is),
+ * NaN, fractions, negatives and anything >= 256 take the allocating path. Nothing writes a NUM box's payload after construction
+ * (the JSON parser below builds its number through this function), so sharing is unobservable. */
+#define SCR_SMALL1(i) { SIZE_MAX, SCR_DYN_NUM, .v = { .num = (double)(i) } }
+#define SCR_SMALL4(i) SCR_SMALL1(i), SCR_SMALL1((i) + 1), SCR_SMALL1((i) + 2), SCR_SMALL1((i) + 3)
+#define SCR_SMALL16(i) SCR_SMALL4(i), SCR_SMALL4((i) + 4), SCR_SMALL4((i) + 8), SCR_SMALL4((i) + 12)
+#define SCR_SMALL64(i) SCR_SMALL16(i), SCR_SMALL16((i) + 16), SCR_SMALL16((i) + 32), SCR_SMALL16((i) + 48)
+static ScrDyn scr_dyn_small_ints[256] = { SCR_SMALL64(0), SCR_SMALL64(64), SCR_SMALL64(128), SCR_SMALL64(192) };
+
 ScrDyn *scr_dyn_new_num(double n) {
+  if (n >= 0 && n < 256) {
+    unsigned i = (unsigned)n;
+    if ((double)i == n && (i != 0 || !signbit(n))) {
+      scr_dyn_phantom_install();
+      return &scr_dyn_small_ints[i];
+    }
+  }
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_NUM);
   d->v.num = n;
   return d;
@@ -10552,19 +10569,24 @@ static ScrDyn *scr_json_number(ScrJsonP *p) {
     }
     exp10 += eneg ? -ev : ev;
   }
-  ScrDyn *d = scr_dyn_alloc(SCR_DYN_NUM);
   if (precise && exp10 >= -22 && exp10 <= 22) {
     double v = (double)mant; /* exact: mant < 10^15 < 2^53 */
     if (exp10 > 0) v *= scr_json_pow10[exp10];
     else if (exp10 < 0) v /= scr_json_pow10[-exp10];
-    d->v.num = neg ? -v : v;
+    double r = neg ? -v : v;
+    if (r >= 0 && r < 256) return scr_dyn_new_num(r); /* a small integer is a shared box (or a fraction/-0, which allocates there) */
+    ScrDyn *d = scr_dyn_alloc(SCR_DYN_NUM);
+    d->v.num = r;
     return d;
   }
   /* The validated span re-parses with strtod (correctly rounded, and the
    * grammar above is a strict subset of what strtod accepts). The ScrStr
    * data is NUL-terminated, and strtod stops at the first non-number char,
    * so parsing from `start` reads exactly the validated token. */
-  d->v.num = strtod(p->s + start, NULL);
+  double r = strtod(p->s + start, NULL);
+  if (r >= 0 && r < 256) return scr_dyn_new_num(r);
+  ScrDyn *d = scr_dyn_alloc(SCR_DYN_NUM);
+  d->v.num = r;
   return d;
 }
 
