@@ -1968,6 +1968,12 @@ ScrDyn *scr_dyn_fn_code_set(ScrDyn *d, unsigned code) {
   return d;
 }
 
+/* null, true and false are IMMORTAL singletons, like `undefined` above: rc == SIZE_MAX skips every retain/release and the free lists
+ * never see them, so a boolean or a null crossing into the dyn tree costs no allocation and no live box. Nothing writes a bool's or
+ * a null's payload after construction (the JSON parser below returns these same nodes), and their identity is never observable. */
+static ScrDyn scr_dyn_null_singleton = { SIZE_MAX, SCR_DYN_NULL, .v = { .b = false } };
+static ScrDyn scr_dyn_bool_singletons[2] = { { SIZE_MAX, SCR_DYN_BOOL, .v = { .b = false } }, { SIZE_MAX, SCR_DYN_BOOL, .v = { .b = true } } }; /* indexed by the bool */
+
 /* PACING ESTIMATE. The cycle collector paces its passes by scr_cyc_live/8 (scr_cycle.c, scr_cyc_on_release). The shared immortal
  * boxes are slots with no live node behind them, so a container full of them shrank that count while a pass still walks every one of
  * those slots: a bool-heavy parsed tree collected ~3x as often over the same edges (measured +32% Ir, all of it in
@@ -2021,12 +2027,14 @@ static inline void scr_dyn_phantom_note(void) {
   if (++scr_ph_tick == 0) scr_dyn_phantom_update();
 }
 
-ScrDyn *scr_dyn_new_null(void) { return scr_dyn_alloc(SCR_DYN_NULL); }
+ScrDyn *scr_dyn_new_null(void) {
+  scr_dyn_phantom_note();
+  return &scr_dyn_null_singleton;
+}
 
 ScrDyn *scr_dyn_new_bool(bool b) {
-  ScrDyn *d = scr_dyn_alloc(SCR_DYN_BOOL);
-  d->v.b = b;
-  return d;
+  scr_dyn_phantom_note();
+  return &scr_dyn_bool_singletons[b];
 }
 
 ScrDyn *scr_dyn_new_num(double n) {
@@ -10743,19 +10751,15 @@ static ScrDyn *scr_json_value_inner(ScrJsonP *p) {
   }
   if (c == 't') {
     if (!scr_json_lit(p, "true", 4)) return NULL;
-    ScrDyn *d = scr_dyn_alloc(SCR_DYN_BOOL);
-    d->v.b = true;
-    return d;
+    return scr_dyn_new_bool(true);
   }
   if (c == 'f') {
     if (!scr_json_lit(p, "false", 5)) return NULL;
-    ScrDyn *d = scr_dyn_alloc(SCR_DYN_BOOL);
-    d->v.b = false;
-    return d;
+    return scr_dyn_new_bool(false);
   }
   if (c == 'n') {
     if (!scr_json_lit(p, "null", 4)) return NULL;
-    return scr_dyn_alloc(SCR_DYN_NULL);
+    return scr_dyn_new_null();
   }
   if (c == '-' || (c >= '0' && c <= '9')) return scr_json_number(p);
   scr_json_unexpected(p, p->pos);
