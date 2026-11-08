@@ -1968,6 +1968,81 @@ ScrDyn *scr_dyn_fn_code_set(ScrDyn *d, unsigned code) {
   return d;
 }
 
+/* PACING ESTIMATE. The cycle collector paces its passes by scr_cyc_live/8 (scr_cycle.c, scr_cyc_on_release). The shared immortal
+ * boxes above and below are slots with no live node behind them, so a container full of them shrank that count while a pass still
+ * walks every one of those slots: a bool-heavy parsed tree collected ~3x as often over the same edges (measured +32% Ir, all of it
+ * in scr_collect_cycles). So the denominator is live + phantom, estimated here: every SCR_PH_TICK handouts of a shared box, a
+ * bounded strided sample of the collector's buffered candidates counts the shared bool/null/number slots against the real nodes
+ * (two container levels deep), and the running ratio scales the real live count, folded INTO scr_cyc_live (an offset the alloc and
+ * free paths only add and subtract 1 around). This lives HERE, not in scr_cycle.c, so that a program that never hands out a shared
+ * box links none of it: the always-linked collector grew by 416 bytes of .text when it carried this, which tipped the Windows
+ * static hello-world over a 4096-byte size class (island.test.ts, regex.test.ts). */
+extern size_t scr_cyc_live;
+extern void **scr_roots;
+extern size_t scr_nroots;
+#define SCR_PH_TICK 1024u
+static size_t scr_ph_total = 0, scr_nd_total = 0, scr_ph_applied = 0;
+static unsigned scr_ph_tick = 0;
+
+/* One container's first 16 slots, and (depth 2) the first 16 slots of each container among them. Counts the shared slots in `ph` and
+ * the nodes (the container and its real children) in `nd`. The cap keeps a 20000-slot array from swamping the ratio and bounds a
+ * sample at 256 roots x (16 + 16 x 16) slots. */
+static void scr_dyn_sample_slots(const ScrDyn *d, int depth, size_t *ph, size_t *nd) {
+  size_t len;
+  if (d->kind == SCR_DYN_ARR) len = d->v.arr.len;
+  else if (d->kind == SCR_DYN_OBJ) len = d->v.obj.len;
+  else return; /* only containers carry slots; a scalar box would dilute the ratio with a node and no slot */
+  (*nd)++;
+  if (len > 16) len = 16;
+  for (size_t i = 0; i < len; i++) {
+    const ScrDyn *c;
+    if (d->kind == SCR_DYN_OBJ) {
+      if (d->v.obj.entries[i].value_borrowed) continue;
+      c = d->v.obj.entries[i].value;
+    } else {
+      c = d->v.arr.items[i];
+    }
+    if (c == NULL) continue;
+    if (c->rc == SIZE_MAX) {
+      if (c->kind == SCR_DYN_BOOL || c->kind == SCR_DYN_NULL || c->kind == SCR_DYN_NUM) (*ph)++;
+    } else if (depth > 1 && (c->kind == SCR_DYN_ARR || c->kind == SCR_DYN_OBJ)) {
+      scr_dyn_sample_slots(c, depth - 1, ph, nd);
+    } else {
+      (*nd)++;
+    }
+  }
+}
+
+void scr_dyn_phantom_update(void) {
+  size_t n = scr_nroots;
+  if (n != 0) {
+    size_t stride = n / 256 + 1, ph = 0, nd = 0;
+    for (size_t r = 0; r < n; r += stride) {
+      const ScrDyn *d = (const ScrDyn *)scr_roots[r];
+      if (scr_cyc_trace_of(scr_cyc_hdr(d)) != scr_dyn_trace) continue; /* not a dyn node */
+      scr_dyn_sample_slots(d, 2, &ph, &nd);
+    }
+    scr_ph_total += ph;
+    scr_nd_total += nd;
+    if (scr_nd_total > ((size_t)1 << 40)) { /* keep the ratio, bound the counters */
+      scr_nd_total >>= 1;
+      scr_ph_total >>= 1;
+    }
+  }
+  if (scr_ph_total == 0 || scr_nd_total == 0) return;
+  size_t real = scr_cyc_live - scr_ph_applied;
+  size_t ph = (size_t)((double)real * (double)scr_ph_total / (double)scr_nd_total);
+  scr_cyc_live = real + ph;
+  scr_ph_applied = ph;
+}
+
+static inline void scr_dyn_phantom_note(void) {
+  if (++scr_ph_tick >= SCR_PH_TICK) {
+    scr_ph_tick = 0;
+    scr_dyn_phantom_update();
+  }
+}
+
 ScrDyn *scr_dyn_new_null(void) { return scr_dyn_alloc(SCR_DYN_NULL); }
 
 ScrDyn *scr_dyn_new_bool(bool b) {

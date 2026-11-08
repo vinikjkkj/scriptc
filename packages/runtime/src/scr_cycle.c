@@ -55,7 +55,7 @@ static void scr_cyc_oom(void) {
 /* Cycle-headered objects currently allocated — the pacing denominator, see
  * the "pacing" note under the candidate-root buffer. Declared here because
  * the two functions that move it are the allocator and the free below. */
-static size_t scr_cyc_live = 0;
+size_t scr_cyc_live = 0; /* external: scr_json.c folds its pacing estimate into it (see scr_dyn_phantom_update) */
 
 /* Cycle-headered objects are the OTHER hot allocation site a compiled
  * program has (scr_string.c is the first): a per-function cycle profile
@@ -1961,8 +1961,9 @@ void scr_cyc_free(void *obj) {
 
 /* ── the candidate-root buffer ────────────────────────────────────────── */
 
-static void **scr_roots = NULL;
-static size_t scr_nroots = 0, scr_roots_cap = 0;
+void **scr_roots = NULL; /* external: scr_json.c's pacing sample reads the buffered candidates */
+size_t scr_nroots = 0;
+static size_t scr_roots_cap = 0;
 static bool scr_collecting = false;
 
 static size_t scr_cyc_threshold(void) {
