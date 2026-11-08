@@ -95,7 +95,7 @@ export default defineConfig({
     ...(workers !== undefined && workers !== ""
       ? { maxWorkers: Number(workers), minWorkers: 1 }
       : {}),
-    globalSetup: ["./tests/harness/suite-lock.mjs"],
+    globalSetup: ["./tests/harness/suite-lock.mjs", "./tests/harness/zig-warm.ts"],
     sequence: { sequencer: CorpusFirstSequencer },
     // scratch-hooks is ALWAYS on: it is the in-run half of the scratch
     // bound (globalSetup's sweep can only reclaim between runs), and a
