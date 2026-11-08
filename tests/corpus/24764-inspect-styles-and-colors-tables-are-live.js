@@ -1,0 +1,17 @@
+import util from "node:util";
+const on = JSON.parse('{"colors":true}');
+const v = { n: 1, s: "str", b: true, z: null, u: undefined, big: 7n, sym: Symbol("q"), d: new Date(0), r: /x+/g, arr: [1, "a"], f() {} };
+console.log(util.inspect(v, on));
+console.log(util.inspect.styles.number, util.inspect.styles.special, util.inspect.colors.red, util.inspect.colors.bold, util.inspect.colors.bgBlue);
+util.inspect.styles.number = "magenta";
+util.inspect.styles.string = "cyan";
+console.log(util.inspect(v, on));
+util.inspect.colors.sunset = [38, 39];
+util.inspect.styles.date = "sunset";
+util.inspect.styles.boolean = "no-such-color";
+delete util.inspect.styles.null;
+console.log(util.inspect(v, on));
+util.inspect.styles.regexp = "underline";
+util.inspect.colors.underline = [4, 24];
+console.log(util.inspect({ r: /y/, n: 2 }, on), util.inspect("plain", JSON.parse('{"colors":false}')));
+console.log(util.formatWithOptions(on, "%O %s", { n: 5, s: "t" }, "s"));
