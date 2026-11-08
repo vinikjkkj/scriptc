@@ -1,0 +1,21 @@
+import util from "node:util";
+const T = JSON.parse('{"compact":true}');
+const T2 = JSON.parse('{"compact":true,"breakLength":30}');
+const v = { n: 1, s: "str", arr: [1, 2, 3], nested: { deep: { deeper: { x: 1 } } }, "odd-key": "q", f: [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30] };
+console.log(util.inspect(v, T));
+console.log(util.inspect(v, T2));
+console.log(util.inspect([1, "a", null, undefined, false, , 5n], T));
+console.log(util.inspect(Array.from({ length: 30 }, (_, i) => i * 3), T));
+console.log(util.inspect(new Map([["a", 1], ["b", 2]]), T2));
+console.log(util.inspect(new Set([1, 2, { a: "x".repeat(40) }]), T2));
+console.log(util.inspect("multi\nline text that is long enough to wrap around the break length of eighty chars, yes", T));
+console.log(util.inspect({ k: "multi\nline text that is long enough to wrap around the break length of eighty chars, yes" }, T));
+const c = { name: "loop", inner: { more: [1, 2] } }; c.self = c; c.inner.back = c;
+console.log(util.inspect(c, T));
+console.log(util.inspect(c, T2));
+console.log(util.inspect({ a: { b: { c: { d: 1 } } } }, T));
+console.log(util.inspect({ a: { b: { c: { d: 1 } } } }, JSON.parse('{"compact":true,"depth":0}')));
+class P { constructor() { this.a = 1; this.b = { z: "y".repeat(50), w: "v".repeat(50) }; } }
+console.log(util.inspect(new P(), T));
+console.log(util.inspect({ longlonglonglonglonglonglong: "a".repeat(40), another: "b".repeat(30), deeper: { x: "c".repeat(60) } }, T));
+console.log(util.formatWithOptions(T, "%O|%s", { a: [1, { b: 2 }] }, { c: 1 }));
