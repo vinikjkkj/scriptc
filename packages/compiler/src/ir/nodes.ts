@@ -13053,11 +13053,15 @@ export function moduleUsesWrapWatch(mod: IrModule): boolean {
  * object literal) or an inline literal that names `colors`. Only then does the runtime compile its stylize paths in (-DSCR_INSP_COLORS);
  * every other program keeps the renderer exactly as it was. A wrong `false` would print uncolored text where Node colors, so the
  * test is conservative: every insp.optsPush whose argument is not a literal without a `colors` key counts. */
+/** util.inspect option keys whose rendering the run-time linked-in extension (-DSCR_INSP_COLORS) carries: colors, compact (true), and the
+ * rest of Node's options beyond the layout numbers. A literal naming any of them gates the extension in. */
+const INSP_EXT_KEYS: ReadonlySet<string> = new Set(["colors", "compact", "showHidden", "showProxy", "getters", "customInspect", "sorted", "stylize"]);
+
 export function moduleUsesInspColors(mod: IrModule): boolean {
   let found = false;
   const plainLiteral = (a: unknown): boolean => {
     const o = a as { kind?: string; fields?: { key?: { kind?: string; value?: string } }[] } | undefined;
-    return o !== undefined && o.kind === "dynObjLit" && !(o.fields ?? []).some((f) => f.key?.kind === "strLit" && f.key.value === "colors");
+    return o !== undefined && o.kind === "dynObjLit" && !(o.fields ?? []).some((f) => f.key?.kind === "strLit" && typeof f.key.value === "string" && INSP_EXT_KEYS.has(f.key.value));
   };
   const visit = (v: unknown): void => {
     if (found || v === null || typeof v !== "object") return;
