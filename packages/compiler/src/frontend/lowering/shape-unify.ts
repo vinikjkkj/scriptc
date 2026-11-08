@@ -151,14 +151,23 @@ export function unifyWidthShapes(L: Lowerer, functions: IrFunction[]): UnifyOutc
   const keyedShapes = (): Set<string> => (scan ??= collectKeyedShapes(functions, L)).keyed;
   const writtenFields = (): Map<string, Set<string>> => (scan ??= collectKeyedShapes(functions, L)).written;
 
+  // The width helpers the program interned, plus the pairs it COMPARES by identity (a record against a union's record arm of
+  // another shape) that no helper covers: those have no copy to elide, but the same plan decides whether the shapes can be one.
+  const pairs: { key: string; helper: string; from: string; to: string }[] = [];
   for (const [key, helper] of L.widthHelpers) {
     if (!key.startsWith("rec:")) continue;
-    helpers++;
     const parts = key.split(":");
     if (parts.length !== 3) continue;
-    const from = parts[1]!;
-    const to = parts[2]!;
-    if (from === to) continue;
+    pairs.push({ key, helper, from: parts[1]!, to: parts[2]! });
+  }
+  for (const x of L.identityEdges) {
+    if (x.from === x.to) continue;
+    if (L.widthHelpers.has(`rec:${x.from}:${x.to}`) || L.widthHelpers.has(`rec:${x.to}:${x.from}`)) continue;
+    if (pairs.some((p) => p.helper === "" && p.from === x.from && p.to === x.to)) continue;
+    pairs.push({ key: `rec:${x.from}:${x.to}`, helper: "", from: x.from, to: x.to });
+  }
+  for (const { helper, from, to } of pairs) {
+    helpers++;
     const why = mergeable(L, from) ?? mergeable(L, to);
     if (why !== null) {
       decline(why);
@@ -192,7 +201,7 @@ export function unifyWidthShapes(L: Lowerer, functions: IrFunction[]): UnifyOutc
           break;
         }
         const keyed = keyedShapes();
-        if (keyed.has(from) || keyed.has(to) || fs?.view === true || ts_?.view === true) {
+        if (keyed.has(from) || keyed.has(to)) {
           ok = decline("dynslot-keyed-or-view-use");
           break;
         }
@@ -844,7 +853,7 @@ function dynSlotWhy(L: Lowerer, t: IrType): string | null {
 function collectKeyedShapes(functions: IrFunction[], L: Lowerer): { keyed: Set<string>; written: Map<string, Set<string>> } {
   const kinds = new Set([
     "recordKeyGet", "recordKeySet", "recordKeyDelete", "recordOrd", "recordProtoHasKey", "recordOvfKeys", "recordOvfHas",
-    "recordOvfSlots", "recordOvfSlotGet", "recordView", "recordIsView", "recordViewSync", "recordHasSrc", "recordSrcGet",
+    "recordOvfSlots", "recordOvfSlotGet", "recordHasSrc", "recordSrcGet",
     "recordSrcSet", "recordSrcView", "recordNullProto", "recordKeyOrderIs",
   ]);
   const out = new Set<string>();
