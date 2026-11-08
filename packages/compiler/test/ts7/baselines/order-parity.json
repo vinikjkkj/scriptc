@@ -14698,6 +14698,22 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24822-cjs-single-value-export-require-and-namespace/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24822-cjs-single-value-export-require-and-namespace/errs/lib/modern.cjs",
+    "<repo>/tests/corpus/24822-cjs-single-value-export-require-and-namespace/errs/index.cjs",
+    "<repo>/tests/corpus/24822-cjs-single-value-export-require-and-namespace/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24823-cjs-single-value-export-es-namespace-import/main.mjs": {
+   "order": [
+    "<repo>/tests/corpus/24823-cjs-single-value-export-es-namespace-import/errs/lib/modern.cjs",
+    "<repo>/tests/corpus/24823-cjs-single-value-export-es-namespace-import/errs/index.cjs",
+    "<repo>/tests/corpus/24823-cjs-single-value-export-es-namespace-import/main.mjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2483-recursive-record-cycles.ts": {
    "order": [
     "<repo>/tests/corpus/2483-recursive-record-cycles.ts"
