@@ -2908,7 +2908,7 @@ export class Lowerer {
     // ends of the export key one symbol identity, like 5.9.3's.
     if (!symbol && ident.parent && ts.isPropertyAccessExpression(ident.parent) && ident.parent.name === ident) {
       const recv = ident.parent.expression;
-      if (ts.isIdentifier(recv) && (this.cjsLocalModuleBindingOf(recv) || this.cjsWholeClassRequireDepOf(recv) !== null)) {
+      if (ts.isIdentifier(recv) && (this.cjsLocalModuleBindingOf(recv) || this.cjsWholeClassRequireDepOf(recv) !== null || this.cjsSingleValueMemberOf(recv, ident.text))) {
         const recvSym = this.checker.getSymbolAtLocation(recv);
         const recvDecls = recvSym ? this.checker.declarationsOf(recvSym) : [];
         const recvDecl = recvDecls.find(ts.isImportClause) ?? recvDecls[0];
