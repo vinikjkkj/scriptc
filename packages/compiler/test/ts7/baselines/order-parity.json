@@ -26285,6 +26285,13 @@
     "<repo>/tests/corpus/24703-installer-function-installs-take-effect-at-the-call-per-class.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/24704-installer-function-reached-through-a-commonjs-export-alias/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24704-installer-function-reached-through-a-commonjs-export-alias/tx.cjs",
+    "<repo>/tests/corpus/24704-installer-function-reached-through-a-commonjs-export-alias/main.cjs"
+   ],
+   "diags": []
   }
  }
 }
