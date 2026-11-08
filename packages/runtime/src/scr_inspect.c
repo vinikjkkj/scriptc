@@ -72,6 +72,17 @@ static InspOpts g_opts = {2.0, 80.0, INSP_COMPACT_NUM, 3.0, 100.0, 10000.0, fals
 #else
 #define INSP_COLORS_ON 0
 #endif
+#ifdef SCR_INSP_COLORS
+static ScrDyn *g_native_stylize;
+#endif
+/* Node's %s / %d / %i conversions run with stylizeNoColor: the span between these two macros renders uncolored. */
+#ifdef SCR_INSP_COLORS
+#define INSP_NOCOLOR_BEGIN const bool insp_nc_saved_ = g_opts.colors; g_opts.colors = false
+#define INSP_NOCOLOR_END g_opts.colors = insp_nc_saved_
+#else
+#define INSP_NOCOLOR_BEGIN ((void)0)
+#define INSP_NOCOLOR_END ((void)0)
+#endif
 static InspOpts *g_opts_stack;
 static size_t g_indent; /* ctx.indentationLvl (tentative: defined with the frame stack below) */
 static size_t *g_indent_stack; /* the indentation each pushed option set interrupted: a nested top-level inspect starts at 0 */
@@ -165,6 +176,9 @@ void scr_insp_opts_push(const ScrDyn *o) {
      * identity, colors being off. Any other stylize function would have to be called per token and stops by name. */
     if ((v = scr_dyn_obj_own_data(o, "stylize", 7)) != NULL) {
       const char *sn = v->kind == SCR_DYN_FUNC ? scr_dyn_fn_name(v) : NULL;
+#ifdef SCR_INSP_COLORS
+      if (v == g_native_stylize) sn = "stylizeNoColor"; /* the stylize this runtime handed out under colors: the options' own colors key already says so */
+#endif
       if (sn == NULL || strcmp(sn, "stylizeNoColor") != 0) insp_unsupported("stylize");
     }
   }
@@ -212,13 +226,20 @@ void scr_insp_custom_release(void) {
   g_custom_inspect = NULL;
 }
 
+#ifdef SCR_INSP_COLORS
+static ScrDyn *insp_native_stylize(void);
+#endif
+
 ScrDyn *scr_insp_custom_opts(ScrDyn *stylize) {
+#ifdef SCR_INSP_COLORS
+  if (g_opts.colors) stylize = insp_native_stylize();
+#endif
   ScrDyn *o = scr_dyn_new_obj();
 #define INSP_SETK(k, v) scr_dyn_obj_set(o, k, sizeof(k) - 1, (v))
   INSP_SETK("stylize", scr_dyn_retain(stylize));
   INSP_SETK("showHidden", scr_dyn_new_bool(false));
   INSP_SETK("depth", scr_dyn_new_num(g_opts.depth));
-  INSP_SETK("colors", scr_dyn_new_bool(false));
+  INSP_SETK("colors", scr_dyn_new_bool(INSP_COLORS_ON));
   INSP_SETK("customInspect", scr_dyn_new_bool(true));
   INSP_SETK("showProxy", scr_dyn_new_bool(false));
   INSP_SETK("maxArrayLength", scr_dyn_new_num(g_opts.max_array));
@@ -297,23 +318,138 @@ typedef enum { INSP_STY_SPECIAL, INSP_STY_NUMBER, INSP_STY_BIGINT, INSP_STY_BOOL
 __attribute__((unused)) static const char *const INSP_STY_OPEN[] = {"\x1b[36m", "\x1b[33m", "\x1b[33m", "\x1b[33m", "\x1b[90m", "\x1b[1m", "\x1b[32m", "\x1b[32m", "\x1b[35m", "\x1b[31m", "\x1b[4m"};
 __attribute__((unused)) static const char *const INSP_STY_CLOSE[] = {"\x1b[39m", "\x1b[39m", "\x1b[39m", "\x1b[39m", "\x1b[39m", "\x1b[22m", "\x1b[39m", "\x1b[39m", "\x1b[39m", "\x1b[39m", "\x1b[24m"};
 
+#ifdef SCR_INSP_COLORS
+/* util.inspect.styles / util.inspect.colors as LIVE tables: created only when the program reads them (libCall insp.styles /
+ * insp.colorTable), after which every stylize reads them as Node's stylizeWithColor does. Without them the constant tables above apply. */
+static ScrDyn *g_tbl_styles;
+static ScrDyn *g_tbl_colors;
+static const char *const INSP_STYLE_NAMES[] = {"special", "number", "bigint", "boolean", "undefined", "null", "string", "symbol", "date", "regexp", "module"};
+static const char *const INSP_STYLE_DEFAULT_COLOR[] = {"cyan", "yellow", "yellow", "yellow", "grey", "bold", "green", "green", "magenta", "red", "underline"};
+static const struct { const char *name; int open, close; } INSP_COLOR_ROWS[] = {
+  {"reset", 0, 0}, {"bold", 1, 22}, {"dim", 2, 22}, {"italic", 3, 23}, {"underline", 4, 24}, {"blink", 5, 25}, {"inverse", 7, 27}, {"hidden", 8, 28},
+  {"strikethrough", 9, 29}, {"doubleunderline", 21, 24}, {"black", 30, 39}, {"red", 31, 39}, {"green", 32, 39}, {"yellow", 33, 39}, {"blue", 34, 39},
+  {"magenta", 35, 39}, {"cyan", 36, 39}, {"white", 37, 39}, {"bgBlack", 40, 49}, {"bgRed", 41, 49}, {"bgGreen", 42, 49}, {"bgYellow", 43, 49},
+  {"bgBlue", 44, 49}, {"bgMagenta", 45, 49}, {"bgCyan", 46, 49}, {"bgWhite", 47, 49}, {"framed", 51, 54}, {"overlined", 53, 55}, {"gray", 90, 39},
+  {"redBright", 91, 39}, {"greenBright", 92, 39}, {"yellowBright", 93, 39}, {"blueBright", 94, 39}, {"magentaBright", 95, 39}, {"cyanBright", 96, 39},
+  {"whiteBright", 97, 39}, {"bgGray", 100, 49}, {"bgRedBright", 101, 49}, {"bgGreenBright", 102, 49}, {"bgYellowBright", 103, 49},
+  {"bgBlueBright", 104, 49}, {"bgMagentaBright", 105, 49}, {"bgCyanBright", 106, 49}, {"bgWhiteBright", 107, 49},
+  /* the aliases Node defines as getters, here as plain rows (a read by name answers the same pair) */
+  {"grey", 90, 39}, {"blackBright", 90, 39}, {"bgGrey", 100, 49}, {"bgBlackBright", 100, 49}, {"faint", 2, 22}, {"crossedout", 9, 29},
+  {"strikeThrough", 9, 29}, {"crossedOut", 9, 29}, {"conceal", 8, 28}, {"swapColors", 7, 27}, {"swapcolors", 7, 27}, {"doubleUnderline", 21, 24},
+};
+static void insp_tables_release(void) {
+  if (g_tbl_styles != NULL) scr_dyn_release(g_tbl_styles);
+  if (g_tbl_colors != NULL) scr_dyn_release(g_tbl_colors);
+  g_tbl_styles = g_tbl_colors = NULL;
+}
+static void insp_tables_make(void) {
+  if (g_tbl_styles != NULL) return;
+  g_tbl_styles = scr_dyn_new_obj_null_proto();
+  for (size_t i = 0; i < sizeof INSP_STYLE_NAMES / sizeof INSP_STYLE_NAMES[0]; i++) {
+    ScrStr *v = scr_str_new(INSP_STYLE_DEFAULT_COLOR[i], strlen(INSP_STYLE_DEFAULT_COLOR[i]));
+    scr_dyn_obj_set(g_tbl_styles, INSP_STYLE_NAMES[i], strlen(INSP_STYLE_NAMES[i]), scr_dyn_new_str(v));
+    scr_str_release(v);
+  }
+  g_tbl_colors = scr_dyn_new_obj_null_proto();
+  for (size_t i = 0; i < sizeof INSP_COLOR_ROWS / sizeof INSP_COLOR_ROWS[0]; i++) {
+    ScrDyn *pair = scr_dyn_new_arr();
+    scr_dyn_arr_push(pair, scr_dyn_new_num(INSP_COLOR_ROWS[i].open));
+    scr_dyn_arr_push(pair, scr_dyn_new_num(INSP_COLOR_ROWS[i].close));
+    scr_dyn_obj_set(g_tbl_colors, INSP_COLOR_ROWS[i].name, strlen(INSP_COLOR_ROWS[i].name), pair);
+  }
+  scr_atexit(insp_tables_release);
+}
+ScrDyn *scr_insp_styles_table(void) {
+  insp_tables_make();
+  return scr_dyn_retain(g_tbl_styles);
+}
+ScrDyn *scr_insp_colors_table(void) {
+  insp_tables_make();
+  return scr_dyn_retain(g_tbl_colors);
+}
+/* stylizeWithColor's lookup: styles[style] -> colors[that name] -> [open, close]; any miss means the text is returned as it is. */
+static const char *insp_live_code(InspStyle st, int which) {
+  static char buf[2][48];
+  buf[which][0] = '\0';
+  const ScrDyn *sv = scr_dyn_obj_own_data(g_tbl_styles, INSP_STYLE_NAMES[st], strlen(INSP_STYLE_NAMES[st]));
+  if (sv == NULL || sv->kind != SCR_DYN_STR) return buf[which];
+  const ScrDyn *cv = scr_dyn_obj_own_data(g_tbl_colors, sv->v.str->data, sv->v.str->len);
+  if (cv == NULL || cv->kind != SCR_DYN_ARR || cv->v.arr.len < 2) return buf[which];
+  ScrStr *code = scr_dyn_string_coerce(cv->v.arr.items[which]);
+  if (code == NULL) return buf[which];
+  size_t n = code->len < 40 ? code->len : 40;
+  buf[which][0] = 0x1b;
+  buf[which][1] = '[';
+  memcpy(buf[which] + 2, code->data, n);
+  buf[which][2 + n] = 'm';
+  buf[which][3 + n] = '\0';
+  scr_str_release(code);
+  return buf[which];
+}
+static inline const char *insp_open(InspStyle st) { return g_tbl_styles != NULL ? insp_live_code(st, 0) : INSP_STY_OPEN[st]; }
+static inline const char *insp_close(InspStyle st) { return g_tbl_styles != NULL ? insp_live_code(st, 1) : INSP_STY_CLOSE[st]; }
+#else
+#define insp_open(st) INSP_STY_OPEN[st]
+#define insp_close(st) INSP_STY_CLOSE[st]
+#endif
+
 /* ctx.stylize(text, style): the text between the style's two codes when colors are on, the text itself otherwise. Consumes `s`, +1. */
 __attribute__((unused)) static ScrStr *insp_sty_on(ScrStr *s, InspStyle st) {
   InspBuf b = {0};
-  ib_cstr(&b, INSP_STY_OPEN[st]);
+  ib_cstr(&b, insp_open(st));
   ib_bytes(&b, s->data, s->len);
-  ib_cstr(&b, INSP_STY_CLOSE[st]);
+  ib_cstr(&b, insp_close(st));
   scr_str_release(s);
   return ib_take(&b);
 }
 #define insp_sty(s_, st_) (__builtin_expect(INSP_COLORS_ON, 0) ? insp_sty_on((s_), (st_)) : (s_))
 __attribute__((unused)) static void ib_sty_cstr(InspBuf *b, const char *text, InspStyle st) {
-  if (INSP_COLORS_ON) ib_cstr(b, INSP_STY_OPEN[st]);
+  if (INSP_COLORS_ON) ib_cstr(b, insp_open(st));
   ib_cstr(b, text);
-  if (INSP_COLORS_ON) ib_cstr(b, INSP_STY_CLOSE[st]);
+  if (INSP_COLORS_ON) ib_cstr(b, insp_close(st));
 }
 /* A string literal as a leaf: the length is a compile-time constant, and colors off costs the one test. */
 #define insp_sty_lit(text, st) insp_sty(scr_str_new(text, sizeof(text) - 1), st)
+
+#ifdef SCR_INSP_COLORS
+/* ctx.stylize when colors are on (stylizeWithColor over the default util.inspect.styles / colors): handed to [util.inspect.custom]
+ * methods in `options.stylize`. A native function value, cached for the life of the program. */
+static void insp_native_stylize_release(void) {
+  if (g_native_stylize != NULL) {
+    scr_dyn_release(g_native_stylize);
+    g_native_stylize = NULL;
+  }
+}
+static ScrDyn *insp_native_stylize_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo;
+  ScrDyn *str = argc > 0 ? args[0] : scr_dyn_undefined();
+  ScrStr *text = scr_dyn_string_coerce(str);
+  if (text == NULL) return NULL;
+  static const char *const names[] = {"special", "number", "bigint", "boolean", "undefined", "null", "string", "symbol", "date", "regexp", "module"};
+  if (argc > 1 && args[1]->kind == SCR_DYN_STR) {
+    const ScrStr *t = args[1]->v.str;
+    for (size_t i = 0; i < sizeof names / sizeof names[0]; i++) {
+      if (strlen(names[i]) == t->len && memcmp(names[i], t->data, t->len) == 0) {
+        ScrStr *st = insp_sty_on(text, (InspStyle)i);
+        ScrDyn *r = scr_dyn_new_str(st);
+        scr_str_release(st);
+        return r;
+      }
+    }
+  }
+  ScrDyn *r = scr_dyn_new_str(text);
+  scr_str_release(text);
+  return r;
+}
+static ScrDyn *insp_native_stylize(void) {
+  if (g_native_stylize == NULL) {
+    g_native_stylize = scr_dyn_new_func(scr_closure_new((void *)insp_native_stylize_thunk, 0), insp_native_stylize_thunk, 2, "()", "stylize");
+    scr_atexit(insp_native_stylize_release);
+  }
+  return g_native_stylize;
+}
+#endif
+
 
 /* removeColors: the visible bytes of `s` (the SGR sequences `ESC [ <digits> m` dropped), written into a fresh buffer. */
 __attribute__((unused)) static size_t insp_strip_colors(const char *data, size_t len, char *out) {
@@ -1057,17 +1193,17 @@ ScrStr *scr_insp_str(ScrStr *s) {
           ib_cstr(&out, " +\n");
           ib_spaces(&out, g_indent + 2);
         }
-        if (INSP_COLORS_ON) ib_cstr(&out, INSP_STY_OPEN[INSP_STY_STRING]);
+        if (INSP_COLORS_ON) ib_cstr(&out, insp_open(INSP_STY_STRING));
         insp_quote_into(&out, v + chunk_start, end - chunk_start);
-        if (INSP_COLORS_ON) ib_cstr(&out, INSP_STY_CLOSE[INSP_STY_STRING]);
+        if (INSP_COLORS_ON) ib_cstr(&out, insp_close(INSP_STY_STRING));
         chunk_start = end;
         first = false;
       }
     }
   } else {
-    if (INSP_COLORS_ON) ib_cstr(&out, INSP_STY_OPEN[INSP_STY_STRING]);
+    if (INSP_COLORS_ON) ib_cstr(&out, insp_open(INSP_STY_STRING));
     insp_quote_into(&out, v, vlen);
-    if (INSP_COLORS_ON) ib_cstr(&out, INSP_STY_CLOSE[INSP_STY_STRING]);
+    if (INSP_COLORS_ON) ib_cstr(&out, insp_close(INSP_STY_STRING));
   }
   if (trailer[0]) ib_cstr(&out, trailer);
   free(val.data);
@@ -1266,9 +1402,9 @@ ScrStr *scr_insp_error(ScrError *e, double recurse, double depth) {
  * (/^[a-zA-Z_][a-zA-Z_0-9]*$/, '__proto__' excepted), quoted otherwise. */
 static void insp_key_into(InspBuf *b, const char *key, size_t len) {
   if (len == 9 && memcmp(key, "__proto__", 9) == 0) {
-    if (INSP_COLORS_ON) ib_cstr(b, INSP_STY_OPEN[INSP_STY_STRING]);
+    if (INSP_COLORS_ON) ib_cstr(b, insp_open(INSP_STY_STRING));
     ib_cstr(b, "['__proto__']");
-    if (INSP_COLORS_ON) ib_cstr(b, INSP_STY_CLOSE[INSP_STY_STRING]);
+    if (INSP_COLORS_ON) ib_cstr(b, insp_close(INSP_STY_STRING));
     return;
   }
   bool bare = len > 0;
@@ -1281,9 +1417,9 @@ static void insp_key_into(InspBuf *b, const char *key, size_t len) {
   if (bare) {
     ib_bytes(b, key, len);
   } else {
-    if (INSP_COLORS_ON) ib_cstr(b, INSP_STY_OPEN[INSP_STY_STRING]);
+    if (INSP_COLORS_ON) ib_cstr(b, insp_open(INSP_STY_STRING));
     insp_quote_into(b, key, len);
-    if (INSP_COLORS_ON) ib_cstr(b, INSP_STY_CLOSE[INSP_STY_STRING]);
+    if (INSP_COLORS_ON) ib_cstr(b, insp_close(INSP_STY_STRING));
   }
 }
 
@@ -1512,19 +1648,6 @@ static ScrStr *insp_with_base(ScrStr *base, ScrDyn *obj, double recurse, double 
 ScrStr *(*scr_insp_hook)(ScrDyn *d, const char *cn, double recurse, double depth) = NULL;
 
 ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
-  if (__builtin_expect(INSP_COLORS_ON, 0)) {
-    /* colors are lowered for the leaves, arrays and plain objects; every other kind renders through code that does not stylize
-     * yet and stops by name rather than print uncolored text (OPEN: ci-classes inspopt1). */
-    switch (d->kind) {
-      case SCR_DYN_NULL: case SCR_DYN_UNDEF: case SCR_DYN_BOOL: case SCR_DYN_NUM: case SCR_DYN_STR: case SCR_DYN_ARR: case SCR_DYN_OBJ: case SCR_DYN_BIG:
-        break;
-      default: {
-        char what[96];
-        snprintf(what, sizeof what, "colors over %s values", scr_dyn_kind_name(d));
-        insp_unsupported(what);
-      }
-    }
-  }
   switch (d->kind) {
     case SCR_DYN_NULL:
       return insp_sty_lit("null", INSP_STY_NULL);
@@ -1626,7 +1749,11 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       {
         const ScrDyn *wp = scr_dyn_wrapper_prim(d);
         if (wp != NULL) {
-          if (INSP_COLORS_ON) insp_unsupported("colors over primitive wrapper objects");
+          /* Node renders the wrapped primitive with stylizeNoColor and colors the whole `[String: 'x']` by the type when the wrapper has no own keys. */
+          const bool wrap_colors = INSP_COLORS_ON;
+#ifdef SCR_INSP_COLORS
+          g_opts.colors = false;
+#endif
           ScrStr *inner = wp->kind == SCR_DYN_STR || wp->kind == SCR_DYN_NUM || wp->kind == SCR_DYN_BOOL || wp->kind == SCR_DYN_BIG
                               ? scr_insp_dyn((ScrDyn *)wp, recurse, depth)
                               : scr_dyn_symbol_descriptive(wp); /* a Symbol wrapper prints [Symbol: Symbol(desc)] */
@@ -1646,7 +1773,12 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
           ib_char(&wb, ']');
           scr_str_release(inner);
           ScrStr *base = ib_take(&wb);
-          if (d->v.obj.len == 0) return base; /* no own enumerable property: just the wrapper */
+#ifdef SCR_INSP_COLORS
+          g_opts.colors = wrap_colors;
+#else
+          (void)wrap_colors;
+#endif
+          if (d->v.obj.len == 0) return insp_sty(base, wp->kind == SCR_DYN_STR ? INSP_STY_STRING : wp->kind == SCR_DYN_NUM ? INSP_STY_NUMBER : wp->kind == SCR_DYN_BOOL ? INSP_STY_BOOLEAN : wp->kind == SCR_DYN_BIG ? INSP_STY_BIGINT : INSP_STY_SYMBOL); /* no own enumerable property: just the wrapper */
           ScrStr *with = insp_with_base(base, (ScrDyn *)d, recurse, depth); /* `[String: 'ab'] { x: 1 }` */
           scr_str_release(base);
           return with;
@@ -1676,7 +1808,6 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
        * that came from a runtime ScrError renders THAT instance and
        * nothing is rebuilt on the common path. */
       if (scr_dyn_is_error_encoding(d)) {
-        if (INSP_COLORS_ON) insp_unsupported("colors over Error values");
         ScrError *e = scr_error_from_dyn(d); /* +1, identity-cached */
         ScrStr *s = scr_insp_error(e, recurse, depth);
         scr_error_release(e);
@@ -1733,10 +1864,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
        * reads WebCrypto. */
       if (scr_insp_hook != NULL) {
         ScrStr *hooked = scr_insp_hook(d, cn, recurse, depth);
-        if (hooked != NULL) {
-          if (INSP_COLORS_ON) insp_unsupported("colors over a custom inspect method");
-          return hooked;
-        }
+        if (hooked != NULL) return hooked;
       }
       const size_t nsym = insp_slot_count(d);
       if (d->v.obj.len == 0 && nsym == 0) {
@@ -1880,12 +2008,12 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         ScrDyn *esyms = insp_fn_sym_table(d);
         if (eshown == 0 && eextra == NULL && insp_sym_count(esyms) == 0) {
           scr_dyn_release(esyms);
-          return ib_take(&out);
+          return insp_sty(ib_take(&out), INSP_STY_SPECIAL);
         }
         if (recurse > depth) {
           scr_dyn_release(eextra);
           scr_dyn_release(esyms);
-          return ib_take(&out);
+          return insp_sty(ib_take(&out), INSP_STY_SPECIAL);
         }
         ScrStr *ebase = ib_take(&out);
         scr_insp_begin(recurse + 1);
@@ -1951,10 +2079,10 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         for (size_t i = 0; i < vcls->nstatics; i++) if (vcls->statics[i].enumerable) vshown++;
         ScrDyn *vsyms = insp_fn_sym_table(d);
         vshown += insp_sym_count(vsyms);
-        if (vshown == 0) return ib_take(&out);
+        if (vshown == 0) return insp_sty(ib_take(&out), INSP_STY_SPECIAL);
         if (recurse > depth) {
           scr_dyn_release(vsyms);
-          return ib_take(&out); /* [class A] is already the depth form */
+          return insp_sty(ib_take(&out), INSP_STY_SPECIAL); /* [class A] is already the depth form */
         }
         ScrStr *vbase = ib_take(&out);
         scr_insp_begin(recurse + 1);
@@ -2032,7 +2160,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         nown += insp_sym_count(table);
         if (nown == 0 || recurse > depth) {
           scr_dyn_release(table);
-          return ib_take(&out);
+          return insp_sty(ib_take(&out), INSP_STY_SPECIAL);
         }
         ScrStr *fbase = ib_take(&out);
         scr_insp_begin(recurse + 1);
@@ -2076,7 +2204,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         ib_char(&db, '[');
         ib_cstr(&db, finh != 0 ? fn_kind_names[finh] : kname);
         ib_char(&db, ']');
-        return ib_take(&db);
+        return insp_sty(ib_take(&db), INSP_STY_SPECIAL);
       }
       const bool hproto = (fcode & SCR_FNK_NOPROTO) == 0;
       scr_insp_begin(recurse + 1);
@@ -2225,7 +2353,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         ib_char(&nb, '[');
         ib_cstr(&nb, icn[0] != '\0' ? icn : "Object");
         ib_char(&nb, ']');
-        return ib_take(&nb);
+        return insp_sty(ib_take(&nb), INSP_STY_SPECIAL);
       }
       scr_insp_begin(recurse + 1);
       scr_insp_seen_push(d->v.inst.o);
@@ -2273,6 +2401,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
          * keys are born. */
         const ScrDynClassMember *cm = scr_dyn_objinst_member(d, "_eventsCount", 12);
         if (cm != NULL && !scr_dyn_member_hidden(cm, d->v.inst.o)) {
+          if (INSP_COLORS_ON) insp_unsupported("colors over a grafted EventEmitter instance");
           ScrStr *e1 = scr_str_new("Symbol(shapeMode): false", 24);
           scr_insp_entry(e1, false);
           scr_str_release(e1);
@@ -2319,7 +2448,9 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
           /* Node cannot enumerate a weak collection: `WeakMap { <items unknown> }`. */
           InspBuf wb = {0};
           ib_cstr(&wb, cls);
-          ib_cstr(&wb, " { <items unknown> }");
+          ib_cstr(&wb, " { ");
+          ib_sty_cstr(&wb, "<items unknown>", INSP_STY_SPECIAL);
+          ib_cstr(&wb, " }");
           return ib_take(&wb);
         }
         size_t n = (size_t)scr_map_size(dm);
@@ -2339,7 +2470,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
           ib_char(&hb, '[');
           ib_cstr(&hb, cls);
           ib_char(&hb, ']');
-          return ib_take(&hb);
+          return insp_sty(ib_take(&hb), INSP_STY_SPECIAL);
         }
         scr_insp_begin(recurse + 1);
         size_t shown = 0;
@@ -2403,7 +2534,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
     case SCR_DYN_HANDLE: {
       /* A Symbol is a primitive: util.inspect prints its descriptive string,
        * `Symbol(desc)`, bare (no quotes, unlike a string). */
-      if (scr_dyn_is_symbol(d)) return scr_dyn_symbol_descriptive(d);
+      if (scr_dyn_is_symbol(d)) return insp_sty(scr_dyn_symbol_descriptive(d), INSP_STY_SYMBOL);
       if (d->v.handle.tag == SCR_DYNH_DATE) {
         /* A Date renders as its ISO form (Invalid Date when NaN). Asked
          * through the handle's toJSON so this unit names no Date entry
@@ -2418,10 +2549,14 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         /* Own expandos follow the text as one more object, `2000-01-01T00:00:00.000Z { usec: 7 }`. */
         ScrDyn *own = ops->own_props != NULL ? ops->own_props(d->v.handle.ptr) : NULL;
         ScrStr *iso = ib_take(&out);
-        if (own == NULL || own->kind != SCR_DYN_OBJ) return iso;
+        if (own == NULL || own->kind != SCR_DYN_OBJ) return insp_sty(iso, INSP_STY_DATE);
         ScrStr *with = insp_with_base(iso, own, recurse, depth);
         scr_str_release(iso);
         return with;
+      }
+      if (d->v.handle.tag == SCR_DYNH_REGEX) {
+        /* A RegExp (immutable pattern + flags) renders as RegExp.prototype.toString, whole value in the `regexp` style. */
+        return insp_sty(scr_insp_regex((ScrRegex *)d->v.handle.ptr), INSP_STY_REGEXP);
       }
       if (d->v.handle.tag == SCR_DYNH_TEXTCODEC) {
         /* Node's TextDecoder / TextEncoder [util.inspect.custom]: the decoder
@@ -2513,7 +2648,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
        * The byte cap is maxArrayLength (100), not INSPECT_MAX_BYTES (50
        * — the Buffer custom inspector's), measured against v25.9.0. */
       ScrBytes *b = d->v.bytes;
-      if (recurse > depth) return scr_str_new("[ArrayBuffer]", 13);
+      if (recurse > depth) return insp_sty_lit("[ArrayBuffer]", INSP_STY_SPECIAL);
       scr_insp_begin(recurse + 1);
       {
         InspBuf hex = {0};
@@ -2584,11 +2719,11 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         ib_char(&out, ']');
         return ib_take(&out);
       }
-      if (recurse > depth) return scr_str_new("[Uint8Array]", 12);
+      if (recurse > depth) return insp_sty_lit("[Uint8Array]", INSP_STY_SPECIAL);
       scr_insp_begin(recurse + 1);
       size_t shown = insp_shown(b->len);
       for (size_t i = 0; i < shown; i++) {
-        ScrStr *s = scr_insp_f64((double)((const unsigned char *)b->data)[i]);
+        ScrStr *s = insp_sty(scr_insp_f64((double)((const unsigned char *)b->data)[i]), INSP_STY_NUMBER);
         scr_insp_entry(s, true);
         scr_str_release(s);
       }
@@ -2794,7 +2929,9 @@ ScrStr *scr_insp_format(ScrDyn *arr) {
           case 's': {
             a += 1;
             ScrDyn *v = scr_dyn_arr_at(arr, a);
+            INSP_NOCOLOR_BEGIN;
             temp = insp_format_c3(v, 0, true);
+            INSP_NOCOLOR_END;
             scr_dyn_release(v);
             break;
           }
@@ -2808,8 +2945,11 @@ ScrStr *scr_insp_format(ScrDyn *arr) {
           case 'd': {
             a += 1;
             ScrDyn *v = scr_dyn_arr_at(arr, a);
-            if (v->kind == SCR_DYN_BIG) temp = scr_insp_dyn(v, 0, 0);
-            else if (v->kind == SCR_DYN_NUM) temp = scr_insp_f64(v->v.num);
+            if (v->kind == SCR_DYN_BIG) {
+              INSP_NOCOLOR_BEGIN;
+              temp = scr_insp_dyn(v, 0, 0);
+              INSP_NOCOLOR_END;
+            } else if (v->kind == SCR_DYN_NUM) temp = scr_insp_f64(v->v.num);
             else temp = scr_insp_f64(insp_format_number(v));
             scr_dyn_release(v);
             break;
@@ -2838,7 +2978,9 @@ ScrStr *scr_insp_format(ScrDyn *arr) {
             a += 1;
             ScrDyn *v = scr_dyn_arr_at(arr, a);
             if (v->kind == SCR_DYN_BIG) {
+              INSP_NOCOLOR_BEGIN;
               temp = scr_insp_dyn(v, 0, 0);
+              INSP_NOCOLOR_END;
             } else {
               ScrStr *t = scr_dyn_to_string(v, NULL);
               temp = scr_insp_f64(scr_parse_int(t, 0));

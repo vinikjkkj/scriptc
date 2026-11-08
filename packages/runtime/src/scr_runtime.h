@@ -10697,6 +10697,8 @@ void scr_insp_begin(double recurse);
  * previous one; opts_pop restores it. opt_depth / opt_max_array read the
  * active depth and maxArrayLength (Infinity when unbounded). Borrowed input. */
 void scr_insp_opts_push(const ScrDyn *o);
+ScrDyn *scr_insp_styles_table(void); /* util.inspect.styles (a live table, +1); needs -DSCR_INSP_COLORS */
+ScrDyn *scr_insp_colors_table(void); /* util.inspect.colors (+1) */
 void scr_insp_custom_register(ScrDyn *stylize, ScrDyn *inspect);
 void scr_insp_custom_release(void);
 /* The exit audit's extension point: the inspect translation unit registers its release here when (and only when) it is linked
