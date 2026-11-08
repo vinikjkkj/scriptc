@@ -400,6 +400,8 @@ export interface CcOptions {
   /** The program can hold a primitive-wrapper subclass instance or relink a prototype (moduleUsesWrapWatch): compiles the wrapper
    * cache's epoch bookkeeping in (-DSCR_WRAP_WATCH). Other programs keep the dyn insertion path unchanged. */
   wrapWatch?: boolean;
+  /** The program may ask util.inspect / util.format for colors (moduleUsesInspColors): compiles the stylize paths in (-DSCR_INSP_COLORS). */
+  inspColors?: boolean;
   /** The program converts a function value to its source text (moduleUsesFnText
    * on the IR): compiles scr_fntext.c into the binary. Other programs keep
    * their exact link line. */
@@ -1866,6 +1868,8 @@ export interface LibArchiveOptions {
   /** The program can hold a primitive-wrapper subclass instance or relink a prototype (moduleUsesWrapWatch): compiles the wrapper
    * cache's epoch bookkeeping in (-DSCR_WRAP_WATCH). Other programs keep the dyn insertion path unchanged. */
   wrapWatch?: boolean;
+  /** The program may ask util.inspect / util.format for colors (moduleUsesInspColors): compiles the stylize paths in (-DSCR_INSP_COLORS). */
+  inspColors?: boolean;
   /** The program converts a function value to its source text (moduleUsesFnText
    * on the IR): compiles scr_fntext.c into the binary. Other programs keep
    * their exact link line. */
@@ -1941,6 +1945,7 @@ export async function compileLibArchive(opts: LibArchiveOptions): Promise<void> 
     ...driver.targetArgs,
     ...optAuditArgs(sanitize),
     ...(opts.wrapWatch ? ["-DSCR_WRAP_WATCH"] : []),
+    ...(opts.inspColors ? ["-DSCR_INSP_COLORS"] : []),
     ...(opts.symbol ? ["-DSCR_SYMTAB"] : []), // the runtime's symbol-property code is compiled in only for a program that links the symbol unit
     ...(opts.event ? ["-DSCR_ABORT_EV"] : []), // scr_abort.c's Event-aware dispatch, only for a program that links scr_event.c
     "-fno-math-errno",
@@ -2579,6 +2584,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...(opts.wrapWatch ? ["-DSCR_WRAP_WATCH"] : []),
     // The wrapper-object / prototype-link code of the always-linked dyn core compiles in only for a program that links scr_dyn_proto.c.
     ...(opts.dynProto ? ["-DSCR_DYN_PROTO"] : []),
+    ...(opts.inspColors ? ["-DSCR_INSP_COLORS"] : []),
     ...(opts.symbol ? ["-DSCR_SYMTAB"] : []), // see the library archive's cflags
     ...(opts.event ? ["-DSCR_ABORT_EV"] : []), // see the library archive's cflags
     "-fno-math-errno",
@@ -2978,6 +2984,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...(opts.wrapWatch ? ["-DSCR_WRAP_WATCH"] : []),
     // The wrapper-object / prototype-link code of the always-linked dyn core compiles in only for a program that links scr_dyn_proto.c.
     ...(opts.dynProto ? ["-DSCR_DYN_PROTO"] : []),
+    ...(opts.inspColors ? ["-DSCR_INSP_COLORS"] : []),
     ...(opts.symbol ? ["-DSCR_SYMTAB"] : []), // see the library archive's cflags
     ...(opts.event ? ["-DSCR_ABORT_EV"] : []), // see the library archive's cflags
     "-fno-math-errno",

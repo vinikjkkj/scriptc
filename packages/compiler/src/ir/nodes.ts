@@ -13047,6 +13047,43 @@ export function moduleUsesWrapWatch(mod: IrModule): boolean {
   return found;
 }
 
+/** The program may ask util.inspect / util.format for colors: an options object that is only known at run time (anything but an inline
+ * object literal) or an inline literal that names `colors`. Only then does the runtime compile its stylize paths in (-DSCR_INSP_COLORS);
+ * every other program keeps the renderer exactly as it was. A wrong `false` would print uncolored text where Node colors, so the
+ * test is conservative: every insp.optsPush whose argument is not a literal without a `colors` key counts. */
+export function moduleUsesInspColors(mod: IrModule): boolean {
+  let found = false;
+  const plainLiteral = (a: unknown): boolean => {
+    const o = a as { kind?: string; fields?: { key?: { kind?: string; value?: string } }[] } | undefined;
+    return o !== undefined && o.kind === "dynObjLit" && !(o.fields ?? []).some((f) => f.key?.kind === "strLit" && f.key.value === "colors");
+  };
+  const visit = (v: unknown): void => {
+    if (found || v === null || typeof v !== "object") return;
+    if (Array.isArray(v)) {
+      for (const item of v) visit(item);
+      return;
+    }
+    const node = v as { kind?: unknown; fn?: unknown; callee?: unknown; args?: unknown; name?: unknown };
+    // The `inspect` function value a [util.inspect.custom] method receives forwards the caller's options at run time.
+    if (typeof node.name === "string" && node.name.startsWith("%util.inspcustom.inspect.")) {
+      found = true;
+      return;
+    }
+    if (node.kind === "call" && typeof node.callee === "string" && Array.isArray(node.args)) {
+      const opts = node.callee.startsWith("%util.inspopts.") ? node.args[1] : node.callee.startsWith("%util.fmtopts.") ? node.args[0] : undefined;
+      if (node.callee.startsWith("%util.inspopts.") || node.callee.startsWith("%util.fmtopts.")) {
+        if (!plainLiteral(opts)) {
+          found = true;
+          return;
+        }
+      }
+    }
+    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+  };
+  visit(mod);
+  return found;
+}
+
 /** The program reaches the intrinsic-prototype / wrapper-object / builtin-function machinery (scr_dyn_proto.c): Object.getPrototypeOf,
  * Object.prototype as a value, Object(x) over a dyn, the wrapper unwrap and `Object` as a value. A LINK GATE, not a fence -- a wrong
  * `false` is a loud unresolved-symbol link error, never a wrong answer. Without it the dyn core carries none of that code. */
