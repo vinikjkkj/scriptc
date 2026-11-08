@@ -6335,9 +6335,11 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       if (!ts.isIdentifier(nameId)) {
         L.unsupported("SC1090", nameId, "private-named module members");
       }
-      const generic = L.genericFnOf(nameId);
+      // An expando member of a single-value export (`module.exports = f; module.exports.g = g`) is the exporter's function `g`.
+        const memberTarget = L.cjsSingleValueMemberTarget(expr.expression.expression, nameId.text) ?? nameId;
+        const generic = L.genericFnOf(memberTarget);
       if (generic) return L.lowerGenericCall(expr, generic);
-      const sig = L.fnSigOf(nameId);
+      const sig = L.fnSigOf(memberTarget);
       if (sig) {
         L.noteEdge(sig.name);
         const args = L.completeArgs(expr.arguments, sig.params, loc, expr);
