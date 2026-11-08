@@ -1087,6 +1087,10 @@ typedef struct ScrResolver {
   double timeout_ms; /* <= 0: the default */
   int tries;
   double max_timeout_ms; /* <= 0: none */
+  bool local4_set; /* setLocalAddress: the source address the UDP and TCP sockets bind to before connect(), per family of the server (all-zero: any) */
+  bool local6_set;
+  unsigned char local4[4];
+  unsigned char local6[16];
   ScrDyn *fn_srv; /* +1, the resolver-bound function boxes (Node binds resolveSrv/getServers to ONE resolver) */
   ScrDyn *fn_get;
   struct ScrResolver *next_alloc; /* every heap resolver, freed at exit */
@@ -1445,6 +1449,27 @@ static void scr_dns_sockaddr(const ScrDnsServer *s, struct sockaddr_storage *ss,
   }
 }
 
+/* Bind a fresh socket to the resolver's local address for the server's family (c-ares binds before connect when one is set). */
+static bool scr_dns_bind_local(const ScrResolver *r, int fd, int family) {
+  struct sockaddr_storage ss;
+  socklen_t sl;
+  memset(&ss, 0, sizeof ss);
+  if (family == AF_INET6) {
+    if (!r->local6_set) return true;
+    struct sockaddr_in6 *a = (struct sockaddr_in6 *)&ss;
+    a->sin6_family = AF_INET6;
+    memcpy(&a->sin6_addr, r->local6, 16);
+    sl = sizeof *a;
+  } else {
+    if (!r->local4_set) return true;
+    struct sockaddr_in *a = (struct sockaddr_in *)&ss;
+    a->sin_family = AF_INET;
+    memcpy(&a->sin_addr, r->local4, 4);
+    sl = sizeof *a;
+  }
+  return bind(fd, (struct sockaddr *)&ss, sl) == 0;
+}
+
 /* Move to the next attempt (or settle the query when the tries are spent). `refused`: the last attempt was ECONNREFUSED. */
 static void scr_dns_next_attempt(ScrDnsQuery *q, bool refused) {
   scr_dns_close_sock(q);
@@ -1476,6 +1501,11 @@ static void scr_dns_try_send(ScrDnsQuery *q) {
     return;
   }
   scr_dgram_nonblock(fd);
+  if (!scr_dns_bind_local(r, fd, q->cur.family)) { /* c-ares: an unbindable local address is a refused connection */
+    scr_dgram_close_fd_raw(fd);
+    scr_dns_try_send(q);
+    return;
+  }
   struct sockaddr_storage ss;
   socklen_t sl;
   scr_dns_sockaddr(&q->cur, &ss, &sl);
@@ -1505,6 +1535,11 @@ static void scr_dns_start_tcp(ScrDnsQuery *q) {
     return;
   }
   scr_dgram_nonblock(fd);
+  if (!scr_dns_bind_local(q->res, fd, q->cur.family)) {
+    scr_dgram_close_fd_raw(fd);
+    scr_dns_next_attempt(q, true);
+    return;
+  }
   struct sockaddr_storage ss;
   socklen_t sl;
   scr_dns_sockaddr(&q->cur, &ss, &sl);
@@ -1971,18 +2006,93 @@ static ScrDyn *scr_dns_resolver_cancel(ScrClosure *clo, ScrDyn *const *args, siz
   return scr_dyn_undefined();
 }
 
-static ScrDyn *scr_dns_resolver_unsupported(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
-  (void)clo; (void)args; (void)argc;
-  static const char msg[] = "dns.Resolver#setLocalAddress is not supported yet";
-  scr_throw_error(SCR_ERR_ERROR, scr_str_new(msg, sizeof msg - 1));
-  return NULL;
+/* uv_inet_pton as Node's SetLocalAddress reads an address: dotted IPv4, else IPv6 with libuv's `%zone` suffix dropped. */
+static int scr_dns_pton_local(const char *s, unsigned char out[16]) {
+  if (inet_pton(AF_INET, s, out) == 1) return AF_INET;
+  char tmp[64];
+  const char *z = strchr(s, '%');
+  if (z != NULL) {
+    size_t n = (size_t)(z - s);
+    if (n >= sizeof tmp) return 0;
+    memcpy(tmp, s, n);
+    tmp[n] = '\0';
+    s = tmp;
+  }
+  if (inet_pton(AF_INET6, s, out) == 1) return AF_INET6;
+  return 0;
+}
+
+static void scr_dns_throw_value(const char *msg) {
+  scr_throw_error_msg_code(SCR_ERR_TYPE, msg, strlen(msg), "ERR_INVALID_ARG_VALUE");
+}
+
+/* setLocalAddress(ipv4[, ipv6]): Node's validation (JS strings, then the binding's address checks, in its order: the first address is applied
+ * before the second is read) and c-ares' effect (every later UDP and TCP socket of this resolver binds the family's address before connect). */
+static ScrDyn *scr_dns_resolver_set_local(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo;
+  ScrResolver *r = scr_dns_resolver_this();
+  if (r == NULL) return NULL;
+  ScrDyn *a0 = argc > 0 ? args[0] : NULL;
+  if (a0 == NULL || a0->kind != SCR_DYN_STR) {
+    scr_dns_throw_arg("ipv4", "of type string", a0);
+    return NULL;
+  }
+  ScrDyn *a1 = argc > 1 && args[1] != NULL && args[1]->kind != SCR_DYN_UNDEF ? args[1] : NULL;
+  if (a1 != NULL && a1->kind != SCR_DYN_STR) {
+    scr_dns_throw_arg("ipv6", "of type string", a1);
+    return NULL;
+  }
+  unsigned char b0[16], b1[16];
+  int f0 = scr_dns_pton_local(a0->v.str->data, b0);
+  if (f0 == 0) {
+    scr_dns_throw_value("Invalid IP address.");
+    return NULL;
+  }
+  if (f0 == AF_INET) {
+    memcpy(r->local4, b0, 4);
+    r->local4_set = (b0[0] | b0[1] | b0[2] | b0[3]) != 0;
+  } else {
+    memcpy(r->local6, b0, 16);
+    unsigned char any = 0;
+    for (int i = 0; i < 16; i++) any |= b0[i];
+    r->local6_set = any != 0;
+  }
+  if (a1 == NULL) { /* no second address: the other family goes back to any */
+    if (f0 == AF_INET) {
+      memset(r->local6, 0, 16);
+      r->local6_set = false;
+    } else {
+      memset(r->local4, 0, 4);
+      r->local4_set = false;
+    }
+    return scr_dyn_undefined();
+  }
+  int f1 = scr_dns_pton_local(a1->v.str->data, b1);
+  if (f1 == 0) {
+    scr_dns_throw_value("Invalid IP address.");
+    return NULL;
+  }
+  if (f1 == f0) {
+    scr_dns_throw_value(f1 == AF_INET ? "Cannot specify two IPv4 addresses." : "Cannot specify two IPv6 addresses.");
+    return NULL;
+  }
+  if (f1 == AF_INET) {
+    memcpy(r->local4, b1, 4);
+    r->local4_set = (b1[0] | b1[1] | b1[2] | b1[3]) != 0;
+  } else {
+    memcpy(r->local6, b1, 16);
+    unsigned char any = 0;
+    for (int i = 0; i < 16; i++) any |= b1[i];
+    r->local6_set = any != 0;
+  }
+  return scr_dyn_undefined();
 }
 
 static ScrClosure scr_dns_resolver_srv_clo = {SIZE_MAX, (void *)scr_dns_resolver_resolve_srv, 0, NULL, NULL};
 static ScrClosure scr_dns_resolver_get_clo = {SIZE_MAX, (void *)scr_dns_resolver_get_servers, 0, NULL, NULL};
 static ScrClosure scr_dns_resolver_set_clo = {SIZE_MAX, (void *)scr_dns_resolver_set_servers, 0, NULL, NULL};
 static ScrClosure scr_dns_resolver_cancel_clo = {SIZE_MAX, (void *)scr_dns_resolver_cancel, 0, NULL, NULL};
-static ScrClosure scr_dns_resolver_local_clo = {SIZE_MAX, (void *)scr_dns_resolver_unsupported, 0, NULL, NULL};
+static ScrClosure scr_dns_resolver_local_clo = {SIZE_MAX, (void *)scr_dns_resolver_set_local, 0, NULL, NULL};
 
 static void scr_dns_resolver_teardown(void) {
   scr_dyn_release(scr_dns_resolver_ctor_box);
@@ -2006,7 +2116,7 @@ ScrDyn *scr_dns_resolver_ctor_dyn_value(void) {
     scr_dyn_obj_set_present(proto, "cancel", 6,
                             scr_dyn_new_func(&scr_dns_resolver_cancel_clo, scr_dns_resolver_cancel, 0, "()", "cancel"));
     scr_dyn_obj_set_present(proto, "setLocalAddress", 15,
-                            scr_dyn_new_func(&scr_dns_resolver_local_clo, scr_dns_resolver_unsupported, 2, "(ipv4,ipv6)", "setLocalAddress"));
+                            scr_dyn_new_func(&scr_dns_resolver_local_clo, scr_dns_resolver_set_local, 2, "(ipv4,ipv6)", "setLocalAddress"));
     scr_dyn_release(proto);
     scr_dns_resolver_ctor_box = f;
     atexit(scr_dns_resolver_teardown);
