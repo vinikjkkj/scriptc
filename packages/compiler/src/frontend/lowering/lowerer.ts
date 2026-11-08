@@ -21,7 +21,7 @@ import type { CjsExportRecord } from "./cjs-export-record.js";
 import { isLiveAliasName } from "./cjs-live-exports.js";
 import { copyListStmts, type CopyPart } from "./key-list-fill.js";
 import { applyEnumRefill, applyNullProto, applyOwnKey, applySlotFilled, flushPatchCensus } from "./ir-patch.js";
-import { flushMintOrder, mintPhaseControl, resetMintLog, setGenGateKeys, setMintPhase, undefSlotWiden } from "../types.js";
+import { classFedInterfacesNoted, clearClassFedInterfaces, flushMintOrder, mintPhaseControl, noteClassFedInterface, resetClassFedInterfacesGrew, resetMintLog, setGenGateKeys, setMintPhase, undefSlotWiden, CLASS_FED_INTERFACES } from "../types.js";
 import { flushFragmentCensus } from "./fragment-census.js";
 import { fenceDynRecordCasts } from "./dyn-record-fence.js";
 import { fenceNullProtoRecordCasts } from "./null-proto-fence.js";
@@ -836,6 +836,7 @@ export function lowerToIr(
   }
   const ffiImports = options.ffiImports ?? [];
   OWN_SHADOW_ROOTS.clear(); // the families of THIS program: the discovery pass fills it, the emit pass reads it
+  clearClassFedInterfaces(); // the interfaces class instances flow into: discovery fills it, every later pass maps them to the boxed object
   let validation: Lowerer | null = new Lowerer(program, entry, moduleOrder, dynamic, {
     targetPlatform,
     ffiImports,
@@ -866,8 +867,8 @@ export function lowerToIr(
   // such a record lowers differently once the source is one. Discovery runs again, from a fresh lowerer, until the grant set
   // stops growing (bounded), so the emit pass interns every shape it will need as a view. Programs with no such conversion
   // never enter the loop.
-  for (let round = 0; round < 3 && viewConversionNoted; round++) {
-    const grantSig = (): string => [...viewShapeKeys].sort().join("\n") + "|" + [...structViewDeniedKeys].sort().join("\n");
+  for (let round = 0; round < 3 && (viewConversionNoted || classFedInterfacesNoted()); round++) {
+    const grantSig = (): string => [...viewShapeKeys].sort().join("\n") + "|" + [...structViewDeniedKeys].sort().join("\n") + "|" + [...CLASS_FED_INTERFACES].sort().join("\n");
     const before = grantSig();
     discovery = new Lowerer(program, entry, moduleOrder, dynamic, {
       targetPlatform,
@@ -877,6 +878,7 @@ export function lowerToIr(
     reachable = discovery.discover(options.libRoots);
     discovery.settleViewDenials();
     if (grantSig() === before) break;
+    resetClassFedInterfacesGrew();
   }
   lowerProfileNote("%discovery", performance.now() - __t0);
   if (options.noPinReload !== true) {
@@ -8446,6 +8448,11 @@ export class Lowerer {
    * validator ICEs on them as the usual backstop. */
   requireExactShape(node: ts.Node, actual: IrType, expected: IrType): void {
     if (typeEquals(actual, expected)) return;
+    // A class instance reaching a slot of an INTERFACE's record shape: the interface's values must be the objects themselves, so record the
+    // interface; discovery runs again and every pass after it maps that interface to the boxed object (types.ts mapRecordTypeInner).
+    if (actual.kind === "object" && expected.kind === "record") {
+      for (const key of this.shapes.interfaceKeys.get(expected.shapeId) ?? []) noteClassFedInterface(key);
+    }
     // dyn mismatches first. A dyn ('unknown') value flowing into a typed
     // slot needs a CHECKED cast — the hint points at `as <type>`; tsc
     // usually rejects this before we do, so the fence is mostly defensive.

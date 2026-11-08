@@ -337,6 +337,9 @@ export class ShapeRegistry {
   private readonly granted = new Set<string>();
   /** All interned shapes in first-seen (`r0`, `r1`, ...) order. */
   readonly shapes: IrRecordShape[] = [];
+  /** The interface declarations (interfaceKeyOf) whose type interned as each shape id: what the lowering consults to learn WHICH interface a record
+   * slot came from when a class instance reaches it. A shape shared by structurally equal interfaces lists them all. */
+  readonly interfaceKeys = new Map<string, Set<string>>();
   /** ts.Types currently being mapped — a BACK-REFERENCE to one of these is
    * the recursive knot (`interface TreeNode { children: TreeNode[] }`):
    * mapType answers a NAMED RECURSIVE SHAPE (recursiveRef) whose fields
@@ -8514,6 +8517,7 @@ function mapRecordType(widened: ts.Type, ctx: TypeMapperCtx): IrType | null {
   const sensitivityAtEntry = contextResolutions;
   try {
     const inner = mapRecordTypeInner(widened, ctx);
+    const widenedSym0 = widened.getSymbol();
     const foldedInto = shapes.structFold.get(widened);
     if (foldedInto !== undefined) {
       shapes.structFold.delete(widened);
@@ -8559,13 +8563,21 @@ function mapRecordType(widened: ts.Type, ctx: TypeMapperCtx): IrType | null {
         shapes.finalizeRecursive(widened, inner.fields, inner.indexValue, inner.declaredOrder, inner.keyOrder);
         return null;
       }
-      return {
-        kind: "record",
-        shapeId: shapes.finalizeRecursive(widened, inner.fields, inner.indexValue, inner.declaredOrder, inner.keyOrder),
-      };
+      const recId = shapes.finalizeRecursive(widened, inner.fields, inner.indexValue, inner.declaredOrder, inner.keyOrder);
+      if (widenedSym0 !== undefined && (widenedSym0.flags & ts.SymbolFlags.Interface) !== 0) {
+        const keys = shapes.interfaceKeys.get(recId) ?? new Set<string>();
+        keys.add(interfaceKeyOf(widenedSym0, ctx));
+        shapes.interfaceKeys.set(recId, keys);
+      }
+      return { kind: "record", shapeId: recId };
     }
     {
       const id = shapes.intern(inner.fields, false, inner.indexValue, inner.declaredOrder, undefined, inner.keyOrder);
+      if (widenedSym0 !== undefined && (widenedSym0.flags & ts.SymbolFlags.Interface) !== 0) {
+        const keys = shapes.interfaceKeys.get(id) ?? new Set<string>();
+        keys.add(interfaceKeyOf(widenedSym0, ctx));
+        shapes.interfaceKeys.set(id, keys);
+      }
       if (process.env["SCRIPTC_ORDER_WHY"] !== undefined) {
         const f = inner.fields.find((x) => x.name === "indexParts");
         if (f) {
@@ -9180,8 +9192,23 @@ function jsFileAssignsProperty(sf: ts.SourceFile, name: string): boolean {
   return names.has(name);
 }
 
-/** The number of method members from which an interface of methods only maps to the boxed object (see mapRecordTypeInner). */
-const LARGE_METHOD_INTERFACE_MIN = 48;
+/** Interfaces (by declaration) that a class instance has flowed into during THIS compilation's discovery passes. They map to the boxed object
+ * (mapRecordTypeInner). Filled by the lowering (requireExactShape), per compilation. */
+export const CLASS_FED_INTERFACES = new Set<string>();
+/** Set when CLASS_FED_INTERFACES grew since discovery last ran, so the lowering runs discovery again before emitting. */
+let classFedInterfacesGrew = false;
+export function classFedInterfacesNoted(): boolean { return classFedInterfacesGrew; }
+export function clearClassFedInterfaces(): void { CLASS_FED_INTERFACES.clear(); classFedInterfacesGrew = false; }
+export function noteClassFedInterface(key: string): void {
+  if (!CLASS_FED_INTERFACES.has(key)) { CLASS_FED_INTERFACES.add(key); classFedInterfacesGrew = true; }
+}
+export function resetClassFedInterfacesGrew(): void { classFedInterfacesGrew = false; }
+
+/** The identity of an interface DECLARATION (every instantiation of a generic interface shares it): the first declaration's file and position. */
+function interfaceKeyOf(sym: ts.Symbol, ctx: TypeMapperCtx): string {
+  const d = ctx.checker.declarationsOf(sym).find((x) => ts.isInterfaceDeclaration(x));
+  return d === undefined ? `${sym.name}` : `${d.getSourceFile().fileName}@${d.pos}`;
+}
 
 function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | RecordShapeParts | null {
   const { checker, shapes } = ctx;
@@ -9195,20 +9222,10 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
   // names the construct.
   const widenedSym = widened.getSymbol();
   if (widenedSym !== undefined && (widenedSym.flags & ts.SymbolFlags.Enum) !== 0) return null;
-  // A METHOD-ONLY interface of dozens of members (ioredis' ChainableCommander: ~500 command methods an implementation class installs on its
-  // prototype): a monomorphic struct of that many closure slots cannot be built from the class instance that implements it (SC2002, a class is not a
-  // record) and would cost one closure per member on every conversion if it could. The value is the object itself, boxed, and its methods
-  // resolve through the object by name like any member of an `unknown` value. Declared outside the stdlib, so only a package's or a program's
-  // own interfaces; the member count keeps every ordinary options/shape interface a record.
-  if (!ctx.dynamic) {
-    const props = checker.getPropertiesOfType(widened);
-    if (props.length >= LARGE_METHOD_INTERFACE_MIN) {
-      let methods = 0;
-      for (const p of props) if ((p.flags & ts.SymbolFlags.Method) !== 0) methods++;
-      const stdlib = checker.declarationsOf(props[0]!).some((d) => ctx.isStdlibFile(d.getSourceFile()));
-      if (methods >= LARGE_METHOD_INTERFACE_MIN && methods * 4 >= props.length * 3 && !stdlib) return DYN;
-    }
-  }
+  // An interface a CLASS INSTANCE has flowed into (discovered by the lowering, which records the interface when a class instance reaches a slot of its
+  // record shape: classFedInterfaces): its values are the objects themselves, boxed, whatever the interface's size, so identity and the class's
+  // methods are kept and a plain literal flowing into the same slot becomes a dynamic object. Every other interface stays a record.
+  if (widenedSym !== undefined && (widenedSym.flags & ts.SymbolFlags.Interface) !== 0 && CLASS_FED_INTERFACES.has(interfaceKeyOf(widenedSym, ctx))) return DYN;
   {
     const viaSymbolicAlias = mapSymbolicMappedAlias(widened, ctx);
     if (viaSymbolicAlias !== undefined) return viaSymbolicAlias;
