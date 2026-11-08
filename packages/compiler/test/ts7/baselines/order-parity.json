@@ -26298,6 +26298,12 @@
     "<repo>/tests/corpus/24706-object-getownpropertydescriptor-over-every-dyn-kind.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/24707-getownpropertydescriptor-result-bound-to-a-typed-local-with-accessor-halves.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24707-getownpropertydescriptor-result-bound-to-a-typed-local-with-accessor-halves.cjs"
+   ],
+   "diags": []
   }
  }
 }
