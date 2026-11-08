@@ -209,7 +209,7 @@ static int scr_dgram_w32_close(int fd) {
  * WSAECONNRESET) via SIO_UDP_CONNRESET — libuv does exactly this for
  * every Node UDP socket, so leaving it on would diverge from the
  * Windows oracle. */
-static void scr_dgram_nonblock(int fd) {
+static void scr_dgram_nonblock_ex(int fd, int keep_connreset) {
 #ifdef _WIN32
   u_long one = 1;
   ioctlsocket((SOCKET)fd, FIONBIO, &one);
@@ -219,12 +219,16 @@ static void scr_dgram_nonblock(int fd) {
 #endif
   BOOL off = FALSE;
   DWORD bytes = 0;
-  WSAIoctl((SOCKET)fd, SIO_UDP_CONNRESET, &off, sizeof off, NULL, 0, &bytes, NULL, NULL);
+  /* c-ares (Node's resolver) never turns the relay off: a refused DNS server is how the winsock oracle reports ECONNREFUSED for a query */
+  if (!keep_connreset) WSAIoctl((SOCKET)fd, SIO_UDP_CONNRESET, &off, sizeof off, NULL, 0, &bytes, NULL, NULL);
 #else
+  (void)keep_connreset;
   fcntl(fd, F_SETFL, O_NONBLOCK);
   fcntl(fd, F_SETFD, FD_CLOEXEC);
 #endif
 }
+
+static void scr_dgram_nonblock(int fd) { scr_dgram_nonblock_ex(fd, 0); }
 
 /* Node's error-code names for the socket errors this slice can meet. */
 static const char *scr_dgram_errname(int err) {
@@ -1532,7 +1536,7 @@ static void scr_dns_try_send(ScrDnsQuery *q) {
     scr_dns_try_send(q);
     return;
   }
-  scr_dgram_nonblock(fd);
+  scr_dgram_nonblock_ex(fd, 1);
   if (!scr_dns_bind_local(r, fd, q->cur.family)) { /* c-ares: an unbindable local address is a refused connection */
     scr_dgram_close_fd_raw(fd);
     scr_dns_try_send(q);
@@ -1675,9 +1679,14 @@ static void scr_dns_on_event(ScrDnsQuery *q, unsigned events) {
   long g = (long)recvfrom(q->fd, (char *)buf, sizeof buf, 0, NULL, NULL);
   if (g < 0) {
     if (errno == EAGAIN || errno == EWOULDBLOCK) return;
-    /* ECONNREFUSED (an ICMP port-unreachable): try the next server at once */
-    scr_dns_next_attempt(q, errno == ECONNREFUSED);
-    if (errno != ECONNREFUSED) q->all_refused = false;
+    /* ECONNREFUSED (an ICMP port-unreachable): try the next server at once. winsock relays the same ICMP as WSAECONNRESET on a connected UDP
+     * socket (the relay is left on for this socket, see scr_dgram_nonblock_ex), which c-ares also reads as a refused connection. */
+    int refused = errno == ECONNREFUSED;
+#ifdef _WIN32
+    refused = refused || errno == ECONNRESET;
+#endif
+    scr_dns_next_attempt(q, refused);
+    if (!refused) q->all_refused = false;
     return;
   }
   if (g >= 12 && (buf[2] & 0x02) != 0 && scr_dns_u16(buf) == q->id) { /* TC: retry over TCP, same server */
