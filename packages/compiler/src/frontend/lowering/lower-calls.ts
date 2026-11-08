@@ -2,6 +2,7 @@
  * argument completion (optional/default/rest, explicit-undefined ≡ omission),
  * function/lambda lowering and signature collection, and monomorphizing
  * generic instantiation (bounded by MAX_GENERIC_INSTANCES). */
+import { programAssignsNonPlainPrototype } from "./prim-subclass-gate.js";
 import { stringFromCharCodeCallAliasOf, timerDelayArg } from "./lower-builtins.js";
 import { lowerAbsentRequireCall } from "./lower-require-absent.js";
 import * as ts from "../ts7/adapter.js";
@@ -13477,12 +13478,12 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
         rk === "f64" || rk === "string" || rk === "bool" || rk === "nullT" || rk === "undefinedT" ||
         (rk === "record" && isJsSourceFile(call.getSourceFile())) ||
         (recvLowered.kind === "libCall" && plainObjectLibCalls.has(recvLowered.fn)) ||
-        isPrototypeRead(recvLowered);
+        (isPrototypeRead(recvLowered) && !programAssignsNonPlainPrototype(L));
       if (!shownObject) {
         L.unsupported(
           "SC1090",
           call.arguments[0]!,
-          `Object.setPrototypeOf over a receiver (${rk} ${recvLowered.kind}) that is not shown to be a plain object (the [[Prototype]] link is held by plain dynamic objects only; an array, function, Map, Buffer, handle or class instance would have nowhere to keep it. Pass a 'F.prototype', an Object.create result or an object literal)`,
+          `Object.setPrototypeOf over a receiver that is not shown to be a plain object (the [[Prototype]] link is held by plain dynamic objects only; an array, function, Map, Buffer, handle or class instance would have nowhere to keep it. Pass a 'F.prototype' that the program only ever assigns plain objects, an Object.create result or an object literal)`,
         );
       }
       const ov: IrExpr | null = recvLowered.type.kind === "dyn" ? recvLowered : L.coerceToExpected(recvLowered, DYN);

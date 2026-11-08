@@ -14112,6 +14112,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24707-set-prototype-of-over-plain-assigned-prototypes.js": {
+   "order": [
+    "<repo>/tests/corpus/24707-set-prototype-of-over-plain-assigned-prototypes.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2471-record-keyed-write-hasown.js": {
    "order": [
     "<repo>/tests/corpus/2471-record-keyed-write-hasown.js"
@@ -25375,6 +25381,12 @@
   "<repo>/tests/diagnostics/self-returning-function.ts": {
    "order": [
     "<repo>/tests/diagnostics/self-returning-function.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/set-prototype-of-over-a-prototype-assigned-an-array.js": {
+   "order": [
+    "<repo>/tests/diagnostics/set-prototype-of-over-a-prototype-assigned-an-array.js"
    ],
    "diags": []
   },

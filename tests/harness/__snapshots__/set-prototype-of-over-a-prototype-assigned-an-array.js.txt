@@ -1,0 +1,6 @@
+set-prototype-of-over-a-prototype-assigned-an-array.js:4:23 - error SC1090: Object.setPrototypeOf over a receiver that is not shown to be a plain object (the [[Prototype]] link is held by plain dynamic objects only; an array, function, Map, Buffer, handle or class instance would have nowhere to keep it. Pass a 'F.prototype' that the program only ever assigns plain objects, an Object.create result or an object literal) is not supported yet
+
+  3 | F.prototype = [];
+  4 | Object.setPrototypeOf(F.prototype, { m() { return 1; } });
+    |                       ^~~~~~~~~~~
+  5 | console.log(typeof F.prototype);
