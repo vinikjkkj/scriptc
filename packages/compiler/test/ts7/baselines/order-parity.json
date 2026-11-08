@@ -14656,6 +14656,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24842-fs-readdir-lists-names-sorted.ts": {
+   "order": [
+    "<repo>/tests/corpus/24842-fs-readdir-lists-names-sorted.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24843-fs-readdir-callback-lists.ts": {
+   "order": [
+    "<repo>/tests/corpus/24843-fs-readdir-callback-lists.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2485-inspect-circular-refs.ts": {
    "order": [
     "<repo>/tests/corpus/2485-inspect-circular-refs.ts"
