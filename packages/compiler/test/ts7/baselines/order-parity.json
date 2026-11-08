@@ -14763,6 +14763,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24844-spawn-env-keys-equal-ignoring-case.ts": {
+   "order": [
+    "<repo>/tests/corpus/24844-spawn-env-keys-equal-ignoring-case.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/24845-forin-visits-inherited-enumerable-keys.cjs": {
    "order": [
     "<repo>/tests/corpus/24845-forin-visits-inherited-enumerable-keys.cjs"
