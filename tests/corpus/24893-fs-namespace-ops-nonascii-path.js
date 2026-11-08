@@ -1,4 +1,4 @@
-// mkdir (plain and recursive), mkdtemp with a non-ASCII prefix, copyFile, unlink, rmdir, rm -r, process.chdir/process.cwd and path.resolve over non-ASCII
+// mkdir (plain and recursive), mkdtemp with a non-ASCII prefix, rename, unlink, rmdir, rm -r, process.chdir/process.cwd and path.resolve over non-ASCII
 // names (accents, CJK, an astral emoji): Node converts each UTF-8 path to UTF-16 for the wide Windows calls, whatever the ANSI code page is.
 import fs from "node:fs";
 import os from "node:os";
@@ -10,10 +10,10 @@ const deep = path.join(base, "ünï", "日本", "😀");
 fs.mkdirSync(deep, { recursive: true });
 console.log(fs.existsSync(deep), fs.readdirSync(path.join(base, "ünï")).join(","));
 fs.mkdirSync(path.join(base, "café"));
-fs.writeFileSync(path.join(base, "café", "日本語.txt"), "a");
+fs.writeFileSync(path.join(base, "café", "a.txt"), "a");
+fs.renameSync(path.join(base, "café", "a.txt"), path.join(base, "café", "日本語.txt"));
 console.log(fs.readdirSync(path.join(base, "café")).join(","), fs.readFileSync(path.join(base, "café", "日本語.txt"), "utf8"));
-fs.mkdirSync(path.join(base, "naïve"));
-fs.copyFileSync(path.join(base, "café", "日本語.txt"), path.join(base, "naïve", "日本語.txt"));
+fs.renameSync(path.join(base, "café"), path.join(base, "naïve"));
 console.log(fs.existsSync(path.join(base, "café")), fs.existsSync(path.join(base, "naïve", "日本語.txt")));
 fs.unlinkSync(path.join(base, "naïve", "日本語.txt"));
 fs.rmdirSync(path.join(base, "naïve"));

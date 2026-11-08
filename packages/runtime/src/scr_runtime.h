@@ -3644,6 +3644,7 @@ ScrPromise *scr_fsp_mkdir_mode(ScrStr *path, double mode);
 ScrPromise *scr_fsp_mkdir_recursive(ScrStr *path);
 ScrPromise *scr_fsp_mkdir_recursive_mode(ScrStr *path, double mode);
 ScrPromise *scr_fsp_unlink(ScrStr *path);
+ScrPromise *scr_fsp_rename(ScrStr *oldpath, ScrStr *newpath);
 ScrPromise *scr_fsp_chmod(ScrStr *path, double mode);
 ScrPromise *scr_fsp_readdir(ScrStr *path);
 ScrPromise *scr_fsp_rm(ScrStr *path);

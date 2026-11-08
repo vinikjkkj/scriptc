@@ -5494,6 +5494,7 @@ export type IrLibFn =
   | "fsp.mkdirRecursive"
   | "fsp.mkdirRecursiveMode"
   | "fsp.unlink"
+  | "fsp.rename"
   | "fsp.chmod"
   | "fsp.readdir"
   | "fsp.rm"
@@ -7181,6 +7182,7 @@ export type IrLibFn =
    * explicit mode (the recursive walk passes it to every directory it
    * creates, like Node's). */
   | "fs.unlinkSync"
+  | "fs.renameSync"
   | "fs.chmodSync"
   | "fs.chownSync"
   | "fs.copyFileSync"
@@ -15550,6 +15552,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "insp.jsval",
   // The wider sync fs slice: same catchable errno throws as the rest.
   "fs.unlinkSync",
+  "fs.renameSync",
   "fs.chmodSync",
   "fs.chownSync",
   "fs.copyFileSync",

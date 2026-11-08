@@ -7525,6 +7525,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_fsp_mkdir_recursive_mode(${arg(0)}, ${arg(1)})`);
           case "fsp.unlink":
             return finish(`scr_fsp_unlink(${arg(0)})`);
+          case "fsp.rename":
+            return finish(`scr_fsp_rename(${arg(0)}, ${arg(1)})`);
           case "fsp.chmod":
             return finish(`scr_fsp_chmod(${arg(0)}, ${arg(1)})`);
           case "fsp.readdir":
@@ -9150,6 +9152,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           // Node's errno message shapes, `.code` stamped like the rest.
           case "fs.unlinkSync":
             return finish(`scr_fs_unlink(${arg(0)})`);
+          case "fs.renameSync":
+            return finish(`scr_fs_rename(${arg(0)}, ${arg(1)})`);
           case "fs.chmodSync":
             return finish(`scr_fs_chmod(${arg(0)}, ${arg(1)})`);
           case "fs.chownSync":
