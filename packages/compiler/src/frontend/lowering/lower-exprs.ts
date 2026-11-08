@@ -2393,6 +2393,14 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
             const cv = ctorObjectGlobalValue(L, timerGlobal, loc);
             if (cv !== null) return cv;
           }
+          // `Object` and `Array` as VALUES (compared with a `.constructor`, stored, passed): the builtin function values a plain object's and
+          // an array's `.constructor` answer. As the receiver of a member (`Object.keys`) the identifier never reaches this point.
+          if (ts.isIdentifier(expr) && (timerGlobal === "Object" || timerGlobal === "Array")) {
+            const asReceiver = (ts.isPropertyAccessExpression(expr.parent) || ts.isElementAccessExpression(expr.parent)) &&
+              (expr.parent as ts.PropertyAccessExpression | ts.ElementAccessExpression).expression === expr;
+            const cv = ctorObjectGlobalValue(L, timerGlobal, loc, asReceiver);
+            if (cv !== null) return cv;
+          }
           L.noLowering(expr.text, expr, globalHints[expr.text], sym ?? undefined);
         }
       }
