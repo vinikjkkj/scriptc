@@ -4061,14 +4061,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         }
       }
       const bool vplain = b->elem == SCR_BYTES_U8;
-      if (b->elem == SCR_BYTES_I64 || b->elem == SCR_BYTES_U64) {
-        InspBuf out = {0};
-        ib_cstr(&out, "util.inspect of a dynamic ");
-        ib_cstr(&out, vname);
-        ib_cstr(&out, " is not supported yet");
-        scr_throw_error(SCR_ERR_ERROR, ib_take(&out));
-        return scr_str_new("", 0);
-      }
+      const bool vbig = b->elem == SCR_BYTES_I64 || b->elem == SCR_BYTES_U64;
       char prefix[64];
       int pn = snprintf(prefix, sizeof prefix, "%s(%zu) [", vname, b->len);
 #ifdef SCR_SYMTAB
@@ -4093,7 +4086,28 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       scr_insp_begin(recurse + 1);
       size_t shown = insp_shown(b->len);
       for (size_t i = 0; i < shown; i++) {
-        ScrStr *s = insp_sty(scr_insp_f64(vplain ? (double)((const unsigned char *)b->data)[i] : scr_bytes_get(b, (double)i)), INSP_STY_NUMBER);
+        ScrStr *s;
+        if (vbig) {
+          /* a BigInt64Array / BigUint64Array element: the 8 bytes read as a signed or unsigned integer, then `123n` (formatBigInt, with numericSeparator) */
+          char dg[40];
+          int dn;
+          if (b->elem == SCR_BYTES_I64) {
+            int64_t iv;
+            memcpy(&iv, b->data + i * 8, 8);
+            dn = snprintf(dg, sizeof dg, "%lld", (long long)iv);
+          } else {
+            uint64_t uv;
+            memcpy(&uv, b->data + i * 8, 8);
+            dn = snprintf(dg, sizeof dg, "%llu", (unsigned long long)uv);
+          }
+          InspBuf nb = {0};
+          if (g_opts.numeric_sep) insp_add_sep(&nb, dg, (size_t)dn);
+          else ib_bytes(&nb, dg, (size_t)dn);
+          ib_char(&nb, 'n');
+          s = insp_sty(ib_take(&nb), INSP_STY_BIGINT);
+        } else {
+          s = insp_sty(scr_insp_f64(vplain ? (double)((const unsigned char *)b->data)[i] : scr_bytes_get(b, (double)i)), INSP_STY_NUMBER);
+        }
         scr_insp_entry(s, true);
         scr_str_release(s);
       }
