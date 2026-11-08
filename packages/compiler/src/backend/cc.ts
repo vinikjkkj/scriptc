@@ -2573,6 +2573,8 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...driver.targetArgs,
     ...optAuditArgs(opts.sanitize ?? false),
     ...(opts.wrapWatch ? ["-DSCR_WRAP_WATCH"] : []),
+    // The wrapper-object / prototype-link code of the always-linked dyn core compiles in only for a program that links scr_dyn_proto.c.
+    ...(opts.dynProto ? ["-DSCR_DYN_PROTO"] : []),
     ...(opts.symbol ? ["-DSCR_SYMTAB"] : []), // see the library archive's cflags
     ...(opts.event ? ["-DSCR_ABORT_EV"] : []), // see the library archive's cflags
     "-fno-math-errno",
@@ -2970,6 +2972,8 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...driver.targetArgs,
     ...optAuditArgs(opts.sanitize ?? false),
     ...(opts.wrapWatch ? ["-DSCR_WRAP_WATCH"] : []),
+    // The wrapper-object / prototype-link code of the always-linked dyn core compiles in only for a program that links scr_dyn_proto.c.
+    ...(opts.dynProto ? ["-DSCR_DYN_PROTO"] : []),
     ...(opts.symbol ? ["-DSCR_SYMTAB"] : []), // see the library archive's cflags
     ...(opts.event ? ["-DSCR_ABORT_EV"] : []), // see the library archive's cflags
     "-fno-math-errno",
