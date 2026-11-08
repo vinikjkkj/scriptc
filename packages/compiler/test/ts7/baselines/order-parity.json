@@ -14577,6 +14577,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24764-inspect-styles-and-colors-tables-are-live.js": {
+   "order": [
+    "<repo>/tests/corpus/24764-inspect-styles-and-colors-tables-are-live.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24765-inspect-colors-over-every-rendered-kind.js": {
+   "order": [
+    "<repo>/tests/corpus/24765-inspect-colors-over-every-rendered-kind.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2480-recursive-record-tree.ts": {
    "order": [
     "<repo>/tests/corpus/2480-recursive-record-tree.ts"
