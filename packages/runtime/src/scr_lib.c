@@ -17,8 +17,8 @@
 #include "scr_runtime.h"
 
 #include <ctype.h>
-#ifndef _MSC_VER
-#include <dirent.h> /* MSVC: declared by scr_runtime.h, defined in scr_win.c */
+#ifndef _WIN32
+#include <dirent.h> /* POSIX: Windows enumerates through scr_winfs.h (FindFirstFileW) */
 #endif
 #include <errno.h>
 #include <fcntl.h>
@@ -87,6 +87,7 @@
 #include <iphlpapi.h> /* GetAdaptersAddresses (os.networkInterfaces) */
 #include <windows.h>
 #include <lmcons.h>  /* UNLEN for GetUserNameA */
+#include "scr_winfs.h" /* UTF-8 paths over the wide APIs: directory enumeration, and (below) open/stat/mkdir/... */
 
 
 /* CRT stat has no symlink view — lstat degrades to stat (divergence: a
@@ -97,6 +98,13 @@
 
 /* Windows has no directory mode bits; the CRT mkdir takes one argument. */
 #define scr_sys_mkdir(p, m) ((void)(m), mkdir(p))
+
+/* Directory enumeration: the wide FindFirstFileW walk (scr_winfs.h), OS order, names in UTF-8. */
+#define SCR_DIR ScrUDir
+#define SCR_DIRENT struct scr_u_dirent
+#define scr_sys_opendir scr_u_opendir
+#define scr_sys_readdir scr_u_readdir
+#define scr_sys_closedir scr_u_closedir
 
 /* openSync's "rs"/"sa" flags: no O_SYNC on the CRT — degrade to non-sync
  * opens (Node on Windows maps O_SYNC to FILE_FLAG_WRITE_THROUGH; the
@@ -127,6 +135,12 @@
 #endif
 
 #define scr_sys_mkdir(p, m) mkdir((p), (m))
+
+#define SCR_DIR DIR
+#define SCR_DIRENT struct dirent
+#define scr_sys_opendir opendir
+#define scr_sys_readdir readdir
+#define scr_sys_closedir closedir
 
 extern char **environ; /* env snapshot (scr_env_pairs) */
 
@@ -2793,13 +2807,13 @@ static void scr_rm_tree_e(const char *path, size_t len, bool force, ScrRmFail *f
     if (e != 0) scr_rm_fail_set(f, e, "unlink", path, len);
     return;
   }
-  DIR *d = opendir(path);
+  SCR_DIR *d = scr_sys_opendir(path);
   if (!d) {
     scr_rm_fail_set(f, errno, "scandir", path, len);
     return;
   }
-  const struct dirent *ent;
-  while ((ent = readdir(d)) != NULL) {
+  const SCR_DIRENT *ent;
+  while ((ent = scr_sys_readdir(d)) != NULL) {
     if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
     size_t namelen = strlen(ent->d_name);
     char *child = malloc(len + 1 + namelen + 1);
@@ -2812,11 +2826,11 @@ static void scr_rm_tree_e(const char *path, size_t len, bool force, ScrRmFail *f
     scr_rm_tree_e(child, len + 1 + namelen, force, f);
     free(child);
     if (f->err != 0) {
-      closedir(d);
+      scr_sys_closedir(d);
       return;
     }
   }
-  closedir(d);
+  scr_sys_closedir(d);
   if (rmdir(path) != 0) scr_rm_fail_set(f, errno, "rmdir", path, len);
 }
 
@@ -3377,18 +3391,18 @@ static void scr_fs_sort_names(ScrArr *arr) { (void)arr; }
 #endif
 
 ScrArr *scr_fs_readdir(ScrStr *path) {
-  DIR *d = opendir(path->data);
+  SCR_DIR *d = scr_sys_opendir(path->data);
   if (!d) {
     scr_fs_throw(errno, "scandir", path); /* Node reports scandir */
     return NULL;
   }
   ScrArr *arr = scr_arr_new(SCR_ELEM_STR, 8);
-  const struct dirent *ent;
-  while ((ent = readdir(d)) != NULL) {
+  const SCR_DIRENT *ent;
+  while ((ent = scr_sys_readdir(d)) != NULL) {
     if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
     scr_arr_push_ref(arr, scr_str_new(ent->d_name, strlen(ent->d_name)));
   }
-  closedir(d);
+  scr_sys_closedir(d);
   scr_fs_sort_names(arr);
   return arr;
 }
@@ -3431,7 +3445,7 @@ static int scr_fs_scandir_idx_cmp(const void *a, const void *b) {
 #endif
 
 ScrScandir *scr_fs_scandir(ScrStr *path) {
-  DIR *d = opendir(path->data);
+  SCR_DIR *d = scr_sys_opendir(path->data);
   if (!d) {
     scr_fs_throw(errno, "scandir", path); /* Node reports scandir */
     return NULL;
@@ -3447,8 +3461,8 @@ ScrScandir *scr_fs_scandir(ScrStr *path) {
   if (!s->names || !s->kinds) {
     scr_trap("scriptc: out of memory\n");
   }
-  const struct dirent *ent;
-  while ((ent = readdir(d)) != NULL) {
+  const SCR_DIRENT *ent;
+  while ((ent = scr_sys_readdir(d)) != NULL) {
     if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0) continue;
     unsigned char kind;
 #ifdef DT_REG
@@ -3493,7 +3507,7 @@ ScrScandir *scr_fs_scandir(ScrStr *path) {
     s->kinds[s->len] = kind;
     s->len++;
   }
-  closedir(d);
+  scr_sys_closedir(d);
 #ifndef _WIN32
   /* the same sorted order as scr_fs_readdir: sort an index permutation, then reorder names and kinds */
   if (s->len > 1) {
