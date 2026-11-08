@@ -26691,6 +26691,156 @@
     "<repo>/tests/fixtures/node-types/streams.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/24760-inspect-options-read-at-run-time.js": {
+   "order": [
+    "<repo>/tests/corpus/24760-inspect-options-read-at-run-time.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24761-inspect-colors-leaves-arrays-and-objects.js": {
+   "order": [
+    "<repo>/tests/corpus/24761-inspect-colors-leaves-arrays-and-objects.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24762-format-with-options-read-at-run-time.js": {
+   "order": [
+    "<repo>/tests/corpus/24762-format-with-options-read-at-run-time.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24763-debug-package-inspect-options-shape.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24763-debug-package-inspect-options-shape.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24767-inspect-compact-true-layout.js": {
+   "order": [
+    "<repo>/tests/corpus/24767-inspect-compact-true-layout.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24768-inspect-compact-true-over-every-kind.js": {
+   "order": [
+    "<repo>/tests/corpus/24768-inspect-compact-true-over-every-kind.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24769-inspect-compact-true-literal-and-typed.js": {
+   "order": [
+    "<repo>/tests/corpus/24769-inspect-compact-true-literal-and-typed.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24770-inspect-show-proxy.js": {
+   "order": [
+    "<repo>/tests/corpus/24770-inspect-show-proxy.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24771-inspect-custom-inspect-false.js": {
+   "order": [
+    "<repo>/tests/corpus/24771-inspect-custom-inspect-false.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24772-inspect-getters-true-get-set.js": {
+   "order": [
+    "<repo>/tests/corpus/24772-inspect-getters-true-get-set.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24773-inspect-sorted-comparator.js": {
+   "order": [
+    "<repo>/tests/corpus/24773-inspect-sorted-comparator.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24774-inspect-new-option-literals-typed-values.js": {
+   "order": [
+    "<repo>/tests/corpus/24774-inspect-new-option-literals-typed-values.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24775-inspect-show-hidden-arrays-objects-regex.js": {
+   "order": [
+    "<repo>/tests/corpus/24775-inspect-show-hidden-arrays-objects-regex.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24776-inspect-show-hidden-functions.js": {
+   "order": [
+    "<repo>/tests/corpus/24776-inspect-show-hidden-functions.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24777-inspect-show-hidden-instances-typed-symbols-getters.js": {
+   "order": [
+    "<repo>/tests/corpus/24777-inspect-show-hidden-instances-typed-symbols-getters.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24778-format-o-over-typed-and-dyn-values.js": {
+   "order": [
+    "<repo>/tests/corpus/24778-format-o-over-typed-and-dyn-values.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24779-inspect-show-hidden-boolean-argument.js": {
+   "order": [
+    "<repo>/tests/corpus/24779-inspect-show-hidden-boolean-argument.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24780-inspect-show-hidden-class-accessors.js": {
+   "order": [
+    "<repo>/tests/corpus/24780-inspect-show-hidden-class-accessors.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24781-inspect-stylize-function-option.js": {
+   "order": [
+    "<repo>/tests/corpus/24781-inspect-stylize-function-option.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24782-inspect-show-hidden-class-values-and-setter-only.js": {
+   "order": [
+    "<repo>/tests/corpus/24782-inspect-show-hidden-class-values-and-setter-only.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24783-inspect-show-hidden-eventemitter-class-weak-typed-arrays.js": {
+   "order": [
+    "<repo>/tests/corpus/24783-inspect-show-hidden-eventemitter-class-weak-typed-arrays.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24784-inspect-show-hidden-errors.js": {
+   "order": [
+    "<repo>/tests/corpus/24784-inspect-show-hidden-errors.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24785-inspect-show-hidden-sloppy-functions.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24785-inspect-show-hidden-sloppy-functions.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24786-inspect-show-hidden-member-lengths-and-bigint-views.js": {
+   "order": [
+    "<repo>/tests/corpus/24786-inspect-show-hidden-member-lengths-and-bigint-views.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/util-inspect-options-typed-record-still-refused.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/util-inspect-options-typed-record-still-refused.ts"
+   ],
+   "diags": []
   }
  }
 }
