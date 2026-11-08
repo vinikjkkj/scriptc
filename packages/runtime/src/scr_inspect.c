@@ -2401,11 +2401,19 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
          * keys are born. */
         const ScrDynClassMember *cm = scr_dyn_objinst_member(d, "_eventsCount", 12);
         if (cm != NULL && !scr_dyn_member_hidden(cm, d->v.inst.o)) {
-          if (INSP_COLORS_ON) insp_unsupported("colors over a grafted EventEmitter instance");
-          ScrStr *e1 = scr_str_new("Symbol(shapeMode): false", 24);
+          /* Node prints the two own enumerable symbol keys as `Symbol(shapeMode): false`: the symbol text in the `symbol` style, the value as a boolean. */
+          InspBuf e1b = {0};
+          ib_sty_cstr(&e1b, "Symbol(shapeMode)", INSP_STY_SYMBOL);
+          ib_cstr(&e1b, ": ");
+          ib_sty_cstr(&e1b, "false", INSP_STY_BOOLEAN);
+          ScrStr *e1 = ib_take(&e1b);
           scr_insp_entry(e1, false);
           scr_str_release(e1);
-          ScrStr *e2 = scr_str_new("Symbol(kCapture): false", 23);
+          InspBuf e2b = {0};
+          ib_sty_cstr(&e2b, "Symbol(kCapture)", INSP_STY_SYMBOL);
+          ib_cstr(&e2b, ": ");
+          ib_sty_cstr(&e2b, "false", INSP_STY_BOOLEAN);
+          ScrStr *e2 = ib_take(&e2b);
           scr_insp_entry(e2, false);
           scr_str_release(e2);
         }
