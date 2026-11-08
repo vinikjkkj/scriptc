@@ -1968,13 +1968,16 @@ ScrDyn *scr_dyn_fn_code_set(ScrDyn *d, unsigned code) {
   return d;
 }
 
-ScrDyn *scr_dyn_new_null(void) { return scr_dyn_alloc(SCR_DYN_NULL); }
+/* null, true and false are IMMORTAL singletons, like `undefined` above: rc == SIZE_MAX skips every retain/release and the free lists
+ * never see them, so a boolean or a null crossing into the dyn tree costs no allocation and no live box. Nothing writes a bool's or
+ * a null's payload after construction (the JSON parser below returns these same nodes), and their identity is never observable. */
+static ScrDyn scr_dyn_null_singleton = { SIZE_MAX, SCR_DYN_NULL, .v = { .b = false } };
+static ScrDyn scr_dyn_true_singleton = { SIZE_MAX, SCR_DYN_BOOL, .v = { .b = true } };
+static ScrDyn scr_dyn_false_singleton = { SIZE_MAX, SCR_DYN_BOOL, .v = { .b = false } };
 
-ScrDyn *scr_dyn_new_bool(bool b) {
-  ScrDyn *d = scr_dyn_alloc(SCR_DYN_BOOL);
-  d->v.b = b;
-  return d;
-}
+ScrDyn *scr_dyn_new_null(void) { return &scr_dyn_null_singleton; }
+
+ScrDyn *scr_dyn_new_bool(bool b) { return b ? &scr_dyn_true_singleton : &scr_dyn_false_singleton; }
 
 ScrDyn *scr_dyn_new_num(double n) {
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_NUM);
@@ -10690,19 +10693,15 @@ static ScrDyn *scr_json_value_inner(ScrJsonP *p) {
   }
   if (c == 't') {
     if (!scr_json_lit(p, "true", 4)) return NULL;
-    ScrDyn *d = scr_dyn_alloc(SCR_DYN_BOOL);
-    d->v.b = true;
-    return d;
+    return scr_dyn_new_bool(true);
   }
   if (c == 'f') {
     if (!scr_json_lit(p, "false", 5)) return NULL;
-    ScrDyn *d = scr_dyn_alloc(SCR_DYN_BOOL);
-    d->v.b = false;
-    return d;
+    return scr_dyn_new_bool(false);
   }
   if (c == 'n') {
     if (!scr_json_lit(p, "null", 4)) return NULL;
-    return scr_dyn_alloc(SCR_DYN_NULL);
+    return scr_dyn_new_null();
   }
   if (c == '-' || (c >= '0' && c <= '9')) return scr_json_number(p);
   scr_json_unexpected(p, p->pos);
