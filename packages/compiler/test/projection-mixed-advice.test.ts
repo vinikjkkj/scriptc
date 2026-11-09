@@ -69,9 +69,11 @@ function lower(source: string): Lowered {
 const only6003 = (r: Lowered): readonly ScrDiagnostic[] =>
   r.advisories.filter((a) => a.code === "SC6003");
 
+// The projections below keep the COPY because the interface widens the class's field (`number | undefined`): a class view serves a member only at the
+// IDENTICAL type, so those pairs stay copies and stay advised. The identical-type spelling is a view since the static object view (the last test).
 test("a mixed projection whose method writes the copied field is named, by field", () => {
   const r = lower(`
-interface View { n: number; bump(): void }
+interface View { n: number | undefined; bump(): void }
 class C { n = 0; bump(): void { this.n++; } }
 function through(v: View): string { v.bump(); return String(v.n); }
 console.log(through(new C()));
@@ -90,9 +92,9 @@ console.log(through(new C()));
 test("a compound assignment and an increment both count as a write", () => {
   for (const body of ["this.n += 1;", "this.n++;", "++this.n;", "this.n -= 2;"]) {
     const r = lower(`
-interface View { n: number; bump(): void }
+interface View { n: number | undefined; bump(): void }
 class C { n = 0; bump(): void { ${body} } }
-function through(v: View): number { v.bump(); return v.n; }
+function through(v: View): number | undefined { v.bump(); return v.n; }
 console.log(through(new C()));
 `);
     expect(only6003(r).length, `for ${body}`).toBe(1);
@@ -101,9 +103,9 @@ console.log(through(new C()));
 
 test("an arrow-function FIELD that writes counts: it is reachable exactly like a method", () => {
   const r = lower(`
-interface View { n: number; go(): void }
+interface View { n: number | undefined; go(): void }
 class C { n = 0; go = (): void => { this.n += 1; }; }
-function through(v: View): number { v.go(); return v.n; }
+function through(v: View): number | undefined { v.go(); return v.n; }
 console.log(through(new C()));
 `);
   expect(only6003(r).length).toBe(1);
@@ -112,10 +114,10 @@ console.log(through(new C()));
 
 test("a base class's method counts: the projected closures call into the whole instance", () => {
   const r = lower(`
-interface View { n: number; go(): void }
+interface View { n: number | undefined; go(): void }
 class Base { n = 0; protected raise(): void { this.n = 9; } }
 class Derived extends Base { go(): void { this.raise(); } }
-function through(v: View): number { v.go(); return v.n; }
+function through(v: View): number | undefined { v.go(); return v.n; }
 console.log(through(new Derived()));
 `);
   expect(only6003(r).length).toBe(1);
@@ -198,4 +200,16 @@ console.log(h.v.n);
     expect(a.loc.file).not.toBe("<width>");
     expect(a.loc.end).toBeGreaterThan(a.loc.start);
   }
+});
+
+test("the IDENTICAL-type spelling is a class view: the read aliases the object, so nothing is copied and nothing is advised", () => {
+  // Node prints 1 here and so does the compiled program (corpus 25060 pins it on both backends).
+  const r = lower(`
+interface View { n: number; bump(): void }
+class C { n = 0; bump(): void { this.n++; } }
+function through(v: View): string { v.bump(); return String(v.n); }
+console.log(through(new C()));
+`);
+  expect(r.compiled).toBe(true);
+  expect(only6003(r)).toEqual([]);
 });

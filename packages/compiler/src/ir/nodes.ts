@@ -8197,7 +8197,7 @@ export type IrExpr =
   | { kind: "recordHasSrc"; obj: IrExpr; shapeId: string; type: IrType; loc: SrcLoc }
   | { kind: "recordSrcGet"; obj: IrExpr; shapeId: string; field: string; own?: true; type: IrType; loc: SrcLoc }
   | { kind: "recordSrcSet"; obj: IrExpr; shapeId: string; field: string; value: IrExpr; unset?: true; type: IrType; loc: SrcLoc }
-  | { kind: "recordSrcView"; src: IrExpr; srcShapeId: string; shapeId: string; type: IrType; loc: SrcLoc }
+  | { kind: "recordSrcView"; src: IrExpr; srcShapeId: string; shapeId: string; /** The hidden toString slot fill (a `() => string` closure over the source), as recordLit's: present only on a class view whose class has a callable toString. */ toStr?: IrExpr; type: IrType; loc: SrcLoc }
   /** Does `obj`'s SOURCE [[Prototype]] chain carry `key`? — the `in`
    * operator's last question, after the declared names and the overflow
    * map have both answered no. False for any record that did not come out
