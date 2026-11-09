@@ -9620,7 +9620,18 @@ class LlEmitter {
         if (!vshape) throw new Error(`llvm emitter bug: recordSrcView into unknown shape ${e.shapeId}`);
         const rec = B.tmp();
         B.line(`${rec} = call ptr @${this.dyn.recSrcMap(e.srcShapeId, e.shapeId)}_view(ptr ${src.name})`);
-        return this.own({ name: rec, type: e.type });
+        const viewOut = this.own({ name: rec, type: e.type });
+        if (e.toStr) {
+          this.frames.push([]);
+          try {
+            const v = this.emitExpr(e.toStr);
+            this.moveTemp(v);
+            B.line(`store ptr ${v.name}, ptr ${this.recordToStrPtr(rec, e.shapeId)}`);
+          } finally {
+            this.releaseFrame(this.frames.pop()!);
+          }
+        }
+        return viewOut;
       }
       case "recordNullProto": {
         // The null-prototype question, one spelling (nullProtoRule). An

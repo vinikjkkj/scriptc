@@ -10282,8 +10282,11 @@ export class Lowerer {
     const fromT: IrType = { kind: "object", className };
     const o: IrExpr = { kind: "varRef", localId: "o.0", type: fromT, loc };
     const rRef = (): IrExpr => ({ kind: "varRef", localId: "r.0", type: toT, loc });
+    // The hidden toString slot, for the reason the copy builders carry it: the class's own toString must survive the projection.
+    const toStr = this.toStringSlotClosure(className, loc, "o.0");
+    if (toStr) this.markToStrSlot(toT.shapeId);
     const body: IrStmt[] = [
-      { kind: "varDecl", localId: "r.0", init: { kind: "recordSrcView", src: o, srcShapeId: `%class:${className}`, shapeId: toT.shapeId, type: toT, loc }, loc },
+      { kind: "varDecl", localId: "r.0", init: { kind: "recordSrcView", src: o, srcShapeId: `%class:${className}`, shapeId: toT.shapeId, ...(toStr ? { toStr } : {}), type: toT, loc }, loc },
     ];
     for (const f of to.fields) {
       const l = plan.get(f.name)!;
@@ -12514,7 +12517,7 @@ export class Lowerer {
         if (o.kind === "recordGet" && this.classViewOnly(o["shapeId"] as string)) {
           // A record only a class instance (or nothing) is a view of: a method is the record's own slot (a view stores its bound closure there), a
           // data member is the instance struct's slot when the view slot holds a source and the record's own otherwise, in one test.
-          if (!this.viewFieldHoldsFunc(o["type"] as IrType)) o["kind"] = "recordSrcGet", o["own"] = true;
+          if (!this.viewFieldHoldsFunc(o["type"] as IrType)) { o["kind"] = "recordSrcGet"; o["own"] = true; }
         } else if (o.kind === "recordGet" && viewShapes.has(o["shapeId"] as string) && (o["type"] as IrType).kind === "union" && this.projectableFunc(o["type"] as IrType)?.optional != null && this.projectableRecord({ kind: "record", shapeId: o["shapeId"] as string })) {
           this.viewRewriteOptionalMethod(o as unknown as Extract<IrExpr, { kind: "recordGet" }>, temp, (t) => {
             const l = temp(t);

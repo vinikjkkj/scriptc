@@ -2700,7 +2700,19 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // A record of the target shape whose view slot is a box of the source struct and the pair's map. The source is borrowed
         // here (the box retains it).
         const src = E.emitExpr(e.src);
-        return E.newTemp(e.type, `${recSrcMapC(E, e.srcShapeId, e.shapeId)}_view((void *)${src.name})`);
+        const view = E.newTemp(e.type, `${recSrcMapC(E, e.srcShapeId, e.shapeId)}_view((void *)${src.name})`);
+        // The hidden toString slot, as recordLit fills it: the class's own toString survives the projection.
+        if (e.toStr) {
+          E.frames.push([]);
+          try {
+            const v = E.emitExpr(e.toStr);
+            E.moveTemp(v);
+            E.line(`${view.name}->${TOSTR_MEMBER} = ${v.name};`);
+          } finally {
+            E.releaseFrame(E.frames.pop()!);
+          }
+        }
+        return view;
       }
       case "recordNullProto": {
         // The null-prototype question, one spelling (nullProtoCondC). An
