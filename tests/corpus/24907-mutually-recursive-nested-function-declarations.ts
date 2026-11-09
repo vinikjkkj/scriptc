@@ -20,3 +20,19 @@ const s = setup("p:");
 console.log(s.first("xy"), s.second("x"), s.third(5));
 const t = setup("q:");
 console.log(t.first("abcde"), t.second("a"), t.third(3));
+
+// The first reference to a declaration may be a statement ABOVE it (the debug package installs createDebug.extend = extend before either function is declared),
+// so the hoisted declaration is lowered from that statement and itself reaches forward to its sibling.
+function install(prefix: string): { first?: (n: string) => string; second?: (n: string) => string } {
+  const api: { first?: (n: string) => string; second?: (n: string) => string } = {};
+  api.first = first;
+  api.second = second;
+  function first(n: string): string {
+    return prefix + second(n);
+  }
+  function second(n: string): string {
+    return n.length > 4 ? n : first(n + "a");
+  }
+  return api;
+}
+console.log(install("r:").first!("xy"), install("s:").second!("abcde"));

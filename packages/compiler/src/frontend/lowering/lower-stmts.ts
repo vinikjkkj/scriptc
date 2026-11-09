@@ -542,18 +542,17 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
       const frameIdx = entry.ctx.scopes.indexOf(entry.frame);
       if (depth < 0 || frameIdx < 0) return false;
       L.hoistedFnDecls.add(decl);
-      // The declaration being lowered right now (the one whose body reached forward to this one) has its local declared but its varDecl is
+      // A declaration being lowered right now (one whose body reached forward to this one) has its local declared but its varDecl is
       // pushed only after the body: a closure of the forward declaration that captures it (mutual recursion) would capture a box that does not
       // exist yet. Give that local its box at scope entry, the declaration then assigns into it.
-      const inFlight = entry.stmts[entry.index];
-      if (inFlight !== undefined && ts.isFunctionDeclaration(inFlight)) {
-        const pending = L.fnDeclInFlight.get(inFlight);
-        if (pending !== undefined && !L.fnDeclPredeclared.has(pending.id)) {
-          pending.boxed = true;
-          pending.tdz = true;
-          L.fnDeclPredeclared.add(pending.id);
-          entry.out.push({ kind: "varDecl", localId: pending.id, init: null, loc: locOf(inFlight) });
-        }
+      // That declaration may itself be a forward-hoisted one (reached from an earlier statement), so every in-flight declaration of this list
+      // counts, not only the statement at the loop's index.
+      for (const [inFlight, pending] of L.fnDeclInFlight) {
+        if (!entry.stmts.includes(inFlight) || L.fnDeclPredeclared.has(pending.id)) continue;
+        pending.boxed = true;
+        pending.tdz = true;
+        L.fnDeclPredeclared.add(pending.id);
+        entry.out.push({ kind: "varDecl", localId: pending.id, init: null, loc: locOf(inFlight) });
       }
       const fnTail = L.fnStack.splice(depth + 1);
       const scopeTail = entry.ctx.scopes.splice(frameIdx + 1);
