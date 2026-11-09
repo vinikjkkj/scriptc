@@ -6265,7 +6265,7 @@ static bool scr_dyn_json_write_raw(ScrJsonBuf *b, const ScrDyn *d) {
   case SCR_DYN_UNDEF:
   case SCR_DYN_FUNC:
     return false;
-  case SCR_DYN_NULL: scr_jb_puts(b, "null"); return true;
+  case SCR_DYN_NULL: scr_jb_puts(b, "nul"); return true;
   case SCR_DYN_BOOL: scr_jb_puts(b, d->v.b ? "true" : "false"); return true;
   case SCR_DYN_NUM: scr_jb_put_f64(b, d->v.num); return true;
   case SCR_DYN_STR: scr_jb_put_json_str(b, d->v.str); return true;
