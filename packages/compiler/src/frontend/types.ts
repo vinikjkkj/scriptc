@@ -9232,7 +9232,7 @@ function interfaceKeyOf(sym: ts.Symbol, ctx: TypeMapperCtx): string {
 }
 
 
-/** True for an interface a package's declaration file spells whole (methods and data members alike), where some method has a rest parameter or several signatures. */
+/** True for an interface an installed package's (node_modules) declaration file spells whole (methods and data members alike), where some method has a rest parameter or several signatures. */
 function restMethodOnlyInterface(widened: ts.Type, ctx: TypeMapperCtx): boolean {
   const props = ctx.checker.getPropertiesOfType(widened);
   if (props.length === 0) return false;
@@ -9245,7 +9245,7 @@ function restMethodOnlyInterface(widened: ts.Type, ctx: TypeMapperCtx): boolean 
     if (decls.length === 0) return false;
     // Type-only declarations (the stdlib, @types packages, *-types packages such as undici-types) describe values the runtime builds itself: never remapped.
     if (decls.some((d) => ctx.isStdlibFile(d.getSourceFile()) || /[\\/](@types|[^\\/]*-types)[\\/]/.test(d.getSourceFile().fileName))) return false;
-    if (!decls.every((d) => d.getSourceFile().isDeclarationFile)) declOnly = false;
+    if (!decls.every((d) => d.getSourceFile().isDeclarationFile && /[\\/]node_modules[\\/]/.test(d.getSourceFile().fileName))) declOnly = false;
     const sigs = ctx.checker.getCallSignatures(ctx.checker.getTypeOfSymbol(p));
     if (sigs.length > 1) hard = true;
     for (const sg of sigs) {
