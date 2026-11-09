@@ -15251,6 +15251,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24923-a-project-declaration-file-under-a-lookalike-directory-keeps-its-record/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/24923-a-project-declaration-file-under-a-lookalike-directory-keeps-its-record/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2493-switch-unit-cases.ts": {
    "order": [
     "<repo>/tests/corpus/2493-switch-unit-cases.ts"
