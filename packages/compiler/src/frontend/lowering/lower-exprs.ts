@@ -4236,11 +4236,16 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       //
       // Placed ONE LINE before the last-resort fence, so no read that
       // lowers today changes: this can only turn a fence into an answer.
-      // An ACCESSOR-satisfied name declines — a getter has no data slot
-      // and a raw fieldGet would read past the dispatch (the exact-shape
-      // stance ctorWitnessProjection already draws for the same pair).
+      // An ACCESSOR-satisfied name is the accessor CALL, not a data read: a getter has no data slot and a raw fieldGet would read past the
+      // dispatch, so the getter case below answers first (virtual over the instance's own class, once per read).
       if (recvLowered.type.kind === "object") {
         const adoptedInfo = L.classes.get(recvLowered.type.className);
+        // A GETTER the adopted class declares: the read is the accessor call (virtual over the instance's own class, once per read, side
+        // effects and all), exactly what `k.g` lowers to on the class type itself.
+        const adoptedGet = adoptedInfo === undefined ? null : L.findMethodOn(adoptedInfo, `get:${expr.name.text}`);
+        if (adoptedGet !== null && adoptedGet !== undefined) {
+          return L.maybeNarrow(L.accessorCall(recvLowered.type.className, `get:${expr.name.text}`, recvLowered, [], adoptedGet.sig.ret, loc), expr);
+        }
         const adoptedFieldT = adoptedInfo?.fields.get(expr.name.text);
         if (
           adoptedInfo !== undefined &&
