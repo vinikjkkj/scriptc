@@ -7,7 +7,7 @@ import { BYTES_ELEM_NAMES, ABORTCONTROLLER_T, ABORTSIGNAL_T, EVENT_T, BIGINT, HE
 import { isJsSourceFile } from "./program.js";
 import { JSDOC_PARAM_PLANS, JSDOC_WIDENED_RETURNS } from "./jsdoc-param-plan.js";
 import { dynBuiltinFnType, dynBuiltinSigOfType } from "./dyn-builtin-sigs.js";
-import { isSqliteTypesPath } from "./shared.js";
+import { isSqliteTypesPath, workspacePackageOfPath } from "./shared.js";
 import { isProvenanceSourceFile } from "./provenance-registry.js";
 import { bytesRefinementProven, type StdlibBufferTypes } from "./buffer-refinement.js";
 import { ambientCodecName } from "./codec-shadow.js";
@@ -9232,7 +9232,16 @@ function interfaceKeyOf(sym: ts.Symbol, ctx: TypeMapperCtx): string {
 }
 
 
-/** True for an interface an installed package's (node_modules) declaration file spells whole (methods and data members alike), where some method has a rest parameter or several signatures. */
+/** True for a declaration file that belongs to a resolved package, by what the compiler already records: a registered provenance package tree, a file
+ * under a `node_modules` path segment, or a registered workspace-linked package (the same notion as Lowerer.isNpmFile). A project's own declaration file is
+ * none of these whatever its directory is called. */
+function isPackageDeclarationFile(sf: ts.SourceFile): boolean {
+  if (!sf.isDeclarationFile) return false;
+  const name = sf.fileName.split("\\").join("/");
+  return isProvenanceSourceFile(name) || name.includes("/node_modules/") || workspacePackageOfPath(name) !== null;
+}
+
+/** True for an interface an installed package's declaration file spells whole (methods and data members alike), where some method has a rest parameter or several signatures. */
 function restMethodOnlyInterface(widened: ts.Type, ctx: TypeMapperCtx): boolean {
   const props = ctx.checker.getPropertiesOfType(widened);
   if (props.length === 0) return false;
@@ -9245,7 +9254,7 @@ function restMethodOnlyInterface(widened: ts.Type, ctx: TypeMapperCtx): boolean 
     if (decls.length === 0) return false;
     // Type-only declarations (the stdlib, @types packages, *-types packages such as undici-types) describe values the runtime builds itself: never remapped.
     if (decls.some((d) => ctx.isStdlibFile(d.getSourceFile()) || /[\\/](@types|[^\\/]*-types)[\\/]/.test(d.getSourceFile().fileName))) return false;
-    if (!decls.every((d) => d.getSourceFile().isDeclarationFile && /[\\/]node_modules[\\/]/.test(d.getSourceFile().fileName))) declOnly = false;
+    if (!decls.every((d) => isPackageDeclarationFile(d.getSourceFile()))) declOnly = false;
     const sigs = ctx.checker.getCallSignatures(ctx.checker.getTypeOfSymbol(p));
     if (sigs.length > 1) hard = true;
     for (const sg of sigs) {
