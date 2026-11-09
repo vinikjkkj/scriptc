@@ -14853,6 +14853,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24908-exports-handed-to-the-function-that-replaces-them.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24908-exports-handed-to-the-function-that-replaces-them.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2485-inspect-circular-refs.ts": {
    "order": [
     "<repo>/tests/corpus/2485-inspect-circular-refs.ts"
