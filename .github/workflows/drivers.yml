@@ -12,7 +12,7 @@ on:
         description: Branch or commit whose compiler is measured
         required: true
       drivers:
-        description: Drivers to build (space or comma separated subset of mysql2 pg ioredis mongodb, plus the connect and roundtrip entries mysql2-connect pg-connect mysql2-roundtrip pg-roundtrip mysql2-pool, each also with a -llvm suffix; mysql2-execunion needs no server for the LLVM backend)
+        description: Drivers to build (space or comma separated subset of mysql2 pg ioredis mongodb, plus the connect and roundtrip entries mysql2-connect pg-connect mysql2-roundtrip pg-roundtrip mysql2-pool ioredis-roundtrip, each also with a -llvm suffix; mysql2-execunion needs no server for the LLVM backend)
         required: false
         default: mysql2 pg ioredis mongodb
       run:
@@ -47,7 +47,7 @@ jobs:
           for d in ${DRIVERS//,/ }; do
             case "$d" in
               mysql2|pg|ioredis|mongodb) out+=("\"$d\"") ;;
-              mysql2-connect|pg-connect|mysql2-roundtrip|pg-roundtrip|mysql2-pool|mysql2-execunion|mysql2-execunion-llvm|mysql2-connect-llvm|pg-connect-llvm|mysql2-roundtrip-llvm|pg-roundtrip-llvm|mysql2-pool-llvm) out+=("\"$d\""); runs+=("\"$d\"") ;;
+              mysql2-connect|pg-connect|mysql2-roundtrip|pg-roundtrip|mysql2-pool|ioredis-roundtrip|ioredis-roundtrip-llvm|mysql2-execunion|mysql2-execunion-llvm|mysql2-connect-llvm|pg-connect-llvm|mysql2-roundtrip-llvm|pg-roundtrip-llvm|mysql2-pool-llvm) out+=("\"$d\""); runs+=("\"$d\"") ;;
               *) echo "unknown driver: $d"; exit 1 ;;
             esac
           done
@@ -121,7 +121,7 @@ jobs:
           retention-days: 14
 
   # The built binary of a connect or roundtrip entry, run beside Node on the same entry. MySQL 8 and Postgres 16 are service
-  # containers of this job (127.0.0.1:3306 / :5432, password p); the connect entries need no server (a closed port).
+  # containers of this job (127.0.0.1:3306 / :5432, password p; redis on :6379); the connect entries need no server (a closed port).
   run:
     name: run ${{ matrix.driver }}
     needs: [plan, build]
@@ -133,6 +133,15 @@ jobs:
       matrix:
         driver: ${{ fromJSON(needs.plan.outputs.runmatrix) }}
     services:
+      redis:
+        image: redis:8
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
       mysql:
         image: mysql:8
         env:
