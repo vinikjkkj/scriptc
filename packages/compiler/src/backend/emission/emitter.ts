@@ -20,6 +20,7 @@
  * The generated C is a debugging surface: locals keep their TS names inside
  * the mangled form and every statement carries a `source line` comment.
  */
+import { canonPlanOf } from "../../ir/num-canon.js";
 import type {
   IrGlobal,
   IrRecordShape,
@@ -472,6 +473,18 @@ export class CEmitter {
   /** The function being emitted. The coroutine await site needs its locals
    * list to know what to spill. */
   currentFn: IrFunction | null = null;
+  /** Does this arithmetic node skip scr_num_canon (ir/num-canon.ts proves no operand can carry a marker and the result is consumed where NaN bits are unobservable)? */
+  canonElided(n: object): boolean {
+    return this.currentFn !== null && canonPlanOf(this.currentFn).elided.has(n);
+  }
+  /** Is this f64 typed-array element read canonicalised at the load (it feeds a marker-free local)? */
+  canonLoad(n: object): boolean {
+    return this.currentFn !== null && canonPlanOf(this.currentFn).canonLoads.has(n);
+  }
+  /** Must this typed-array element write canonicalise its value (the value may hold a non-canonical NaN)? */
+  canonStore(n: object): boolean {
+    return this.currentFn !== null && canonPlanOf(this.currentFn).canonStores.has(n);
+  }
   /** The PLAN cursor: how far through `currentCoro.points` the walk has got.
    * It is reset to the start of a `finally` body's point range before each
    * re-emission of that body, because every copy walks the SAME IR nodes and

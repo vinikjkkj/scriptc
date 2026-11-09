@@ -60,6 +60,7 @@
  * invoke adapters receive a va_list — the C-companion-TU decision) and
  * the island surface (jsval/jsExit — the engine bridge).
  */
+import { canonPlanOf, type CanonPlan } from "../../ir/num-canon.js";
 import type {
   IrExpr,
   IrFfiImport,
@@ -7613,7 +7614,14 @@ class LlEmitter {
           break;
         }
         this.declare(`declare void @scr_bytes_set_fast(ptr, double, double)`);
-        B.line(`call void @scr_bytes_set_fast(ptr ${arr.name}, double ${idx.name}, double ${v.name})`);
+        {
+          let sv = v.name;
+          if (this.canonPlan()?.canonStores.has(s) === true) {
+            sv = B.tmp();
+            this.canonInto(sv, v.name);
+          }
+          B.line(`call void @scr_bytes_set_fast(ptr ${arr.name}, double ${idx.name}, double ${sv})`);
+        }
         break;
       }
       case "ordNote": {
@@ -8523,6 +8531,14 @@ class LlEmitter {
    * trunc/modulo wrap and answers 0 for NaN and both infinities. */
   /* scr_num_canon in IR (scr_runtime.h): dst = v, with a NaN replaced by the
    * canonical NaN. */
+  /** The ir/num-canon.ts plan of the function being emitted (the same one the C lane reads). */
+  private canonPlan(): CanonPlan | null {
+    const fn = this.fnByName.get(this.currentFnName);
+    return fn === undefined ? null : canonPlanOf(fn);
+  }
+  private canonElided(n: object): boolean {
+    return this.canonPlan()?.elided.has(n) === true;
+  }
   private canonInto(dst: string, v: string): void {
     const isNan = this.B.tmp();
     this.B.line(`${isNan} = fcmp uno double ${v}, ${v}`);
@@ -8713,9 +8729,12 @@ class LlEmitter {
             if (e.op === "===") B.line(`${t} = or i1 ${eqAll}, false`);
             else B.line(`${t} = xor i1 ${eqAll}, true`);
           } else if (arith[e.op] !== undefined) {
-            const raw = B.tmp();
-            B.line(`${raw} = ${arith[e.op]} double ${l.name}, ${r.name}`);
-            this.canonInto(t, raw);
+            if (this.canonElided(e)) B.line(`${t} = ${arith[e.op]} double ${l.name}, ${r.name}`);
+            else {
+              const raw = B.tmp();
+              B.line(`${raw} = ${arith[e.op]} double ${l.name}, ${r.name}`);
+              this.canonInto(t, raw);
+            }
           }
           else B.line(`${t} = fcmp ${cmp[e.op]} double ${l.name}, ${r.name}`);
         } else if (bit[e.op] !== undefined) {
@@ -8736,9 +8755,12 @@ class LlEmitter {
           const fn = libm[e.op];
           if (fn === undefined) throw new LlvmUnsupportedError(`bin:${e.op}`, e.loc);
           this.declare(`declare double @${fn}(double, double)`);
-          const raw = B.tmp();
-          B.line(`${raw} = call double @${fn}(double ${l.name}, double ${r.name})`);
-          this.canonInto(t, raw);
+          if (this.canonElided(e)) B.line(`${t} = call double @${fn}(double ${l.name}, double ${r.name})`);
+          else {
+            const raw = B.tmp();
+            B.line(`${raw} = call double @${fn}(double ${l.name}, double ${r.name})`);
+            this.canonInto(t, raw);
+          }
         }
         return { name: t, type: e.type };
       }
@@ -8746,9 +8768,12 @@ class LlEmitter {
         const v = this.emitExpr(e.operand);
         const t = B.tmp();
         if (e.op === "-") {
-          const raw = B.tmp();
-          B.line(`${raw} = fneg double ${v.name}`);
-          this.canonInto(t, raw);
+          if (this.canonElided(e)) B.line(`${t} = fneg double ${v.name}`);
+          else {
+            const raw = B.tmp();
+            B.line(`${raw} = fneg double ${v.name}`);
+            this.canonInto(t, raw);
+          }
         }
         else if (e.op === "!") B.line(`${t} = xor i1 ${v.name}, true`);
         else {
@@ -16454,7 +16479,16 @@ class LlEmitter {
         if (e.type.kind === "bigint") {
           return call("scr_bytes_get_big", "ptr (ptr, double)", `ptr ${r.name}, double ${args[0]!.name}`, true, false);
         }
-        return call("scr_bytes_get_fast", "double (ptr, double)", `ptr ${r.name}, double ${args[0]!.name}`, false, false);
+        {
+          const got = call("scr_bytes_get_fast", "double (ptr, double)", `ptr ${r.name}, double ${args[0]!.name}`, false, false);
+          // An f64 element read straight into a marker-free local is canonicalised here (ir/num-canon.ts).
+          if (this.canonPlan()?.canonLoads.has(e) === true) {
+            const c = B.tmp();
+            this.canonInto(c, got.name);
+            return { ...got, name: c };
+          }
+          return got;
+        }
       case "fillBig": {
         // The bigint view's fill: the value is borrowed; the receiver is +1.
         const n = e.args.length - 1;
@@ -17233,7 +17267,7 @@ class LlEmitter {
     const out = this.emitLibCallRaw(e);
     // libm propagates a marker operand's NaN payload: every Math.* number result is
     // canonicalised, whichever lowering this lane picked (scr_runtime.h).
-    if (e.type.kind === "f64" && e.fn.startsWith("math.")) {
+    if (e.type.kind === "f64" && e.fn.startsWith("math.") && !this.canonElided(e)) {
       const c = this.B.tmp();
       this.canonInto(c, out.name);
       return { ...out, name: c };
@@ -20406,7 +20440,7 @@ class LlEmitter {
     B.line(`${t0} = call ${retTy} @${sym}(${argList})`);
     // libm propagates a marker operand's NaN payload: canonicalise Math.* results.
     let t = t0;
-    if (e.type.kind === "f64" && e.fn.startsWith("math.")) {
+    if (e.type.kind === "f64" && e.fn.startsWith("math.") && !this.canonElided(e)) {
       t = B.tmp();
       this.canonInto(t, t0);
     }
