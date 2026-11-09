@@ -6089,9 +6089,14 @@ static ScrDyn *scr_net_dynh_sock_get(void *h, const char *key, size_t key_len) {
     return arr;
   }
   if (strcmp(key, "writableHighWaterMark") == 0 || strcmp(key, "readableHighWaterMark") == 0) {
-    /* Node's default stream highWaterMark (64 KiB since v22) — a constant here (backpressure
-     * is not modeled; SEMANTICS.md) */
+    /* The default stream highWaterMark of a Socket, a constant here (backpressure is not modeled; SEMANTICS.md). MEASURED on the
+     * CI oracle, Node v24.15.0: 65536 on Linux and 16384 on Windows (CI 42628729371, row 25010: every stage line of the Windows
+     * lane reads 16384 on both marks). */
+#ifdef _WIN32
+    return scr_dyn_new_num(16384);
+#else
     return scr_dyn_new_num(65536);
+#endif
   }
   if (scr_net_dynh_tls != NULL) {
     ScrDyn *out = NULL;
