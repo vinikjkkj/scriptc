@@ -14847,6 +14847,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24907-mutually-recursive-nested-function-declarations.ts": {
+   "order": [
+    "<repo>/tests/corpus/24907-mutually-recursive-nested-function-declarations.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2485-inspect-circular-refs.ts": {
    "order": [
     "<repo>/tests/corpus/2485-inspect-circular-refs.ts"
