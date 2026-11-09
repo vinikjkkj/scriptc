@@ -18,12 +18,12 @@ function take(...args: unknown[]): void {
 const mp = new Map<string, number>([["a", 1]]);
 take(...mp);
 
-// A generator object: its protocol is the engine's, and a no-engine build
-// has no drain for it at the dyn boundary.
+// A generator object drains first, like a class iterable (a spread of it
+// into a dynamic rest parameter runs: corpus 25030).
 function* gen(): Generator<string> {
   yield "g";
 }
-take(...gen());
+// (the spread above drains now: corpus 25030 runs it)
 
 // A PROMISE converts to dyn perfectly well (SCR_DYN_PROMISE) and is not
 // iterable at all — the widest of the reference boxes canConvertToDyn

@@ -23,3 +23,6 @@ gen.next();
 console.log([...gen].join(","), [...gen].length);
 class Box { *[Symbol.iterator](): Generator<number> { yield 4; yield 5; } }
 console.log(Array.from(new Box()).join(","));
+function take(...args: unknown[]): void { console.log(args.length, args.join("|")); }
+take(...g(2));
+take(1, ...h());
