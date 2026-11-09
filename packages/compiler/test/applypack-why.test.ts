@@ -69,9 +69,15 @@ function applypackRows(source: string, on: boolean): string[] {
  *
  *   packOpen    an untyped parameter — the func type is all-dyn, so the box
  *               and the dyn dispatch are the answer. CLOSED.
- *   packTyped   the SAME call with a JSDoc `number` parameter. Node passes
- *               `undefined` for a short pack and the body makes NaN; the
- *               boxed thunk dynCHECKS and throws. Kept out, by name.
+ *   packTyped   the SAME call with a JSDoc `number` parameter. JSDoc is not
+ *               enforced by Node, and `typed.apply` USES the function as a value
+ *               (a function that escapes, jsdoc-param-plan.ts), so its parameter
+ *               is the checked-dynamic slot and the short pack passes `undefined`
+ *               exactly as Node does. CLOSED, like the untyped one.
+ *   packDefault a parameter that is typed by its DEFAULT (`a = 0`), which no
+ *               JSDoc plan governs: Node passes `undefined` for a short pack,
+ *               the default fills it, and the boxed thunk would dynCHECK a
+ *               non-dyn slot. Kept out, by name.
  *   packStdlib  a STDLIB member (`Object.prototype.toString`), which is a
  *               builtin function value (a dyn), not a compiled func: the arm
  *               declines and the fence below keeps its own message.
@@ -83,12 +89,14 @@ function pack(n) { var t = new Array(n); for (var i = 0; i < n; i++) t[i] = i; r
 function open(a) { return a }
 /** @param {number} a */
 function typed(a) { return a * 1 }
+function typedDefault(a = 0) { return a * 1 }
 open.apply(null, pack(1));
 typed.apply(null, pack(1));
+typedDefault.apply(null, pack(1));
 Object.prototype.toString.apply(null, pack(1));
 open.apply(null, [7]);
 open.call(null, 7);
-console.log(typeof open, typeof typed);
+console.log(typeof open, typeof typed, typeof typedDefault);
 `;
 
 test("the instrument names the VERDICT at every runtime-length apply, and nothing at the static ones", () => {
@@ -98,12 +106,15 @@ test("the instrument names the VERDICT at every runtime-length apply, and nothin
   const distinct = [...new Set(rows)].sort();
   const why = `rows:\n${distinct.join("\n")}`;
 
-  // THREE sites reach the arm — the two static spellings do not.
-  expect(distinct.length, why).toBe(3);
+  // FOUR sites reach the arm — the two static spellings do not.
+  expect(distinct.length, why).toBe(4);
 
   const closed = distinct.filter((l) => l.includes(" CLOSED-BY=dyn-apply-pack"));
-  expect(closed.length, why).toBe(1);
-  expect(closed[0], why).toContain("open.apply(null, pack(1))");
+  expect(closed.length, why).toBe(2);
+  expect(closed.some((l) => l.includes("open.apply(null, pack(1))")), why).toBe(true);
+  /* The JSDoc receiver is CLOSED since the JSDoc plan: `.apply` makes it escape, so its parameter is dyn. (Before, the claim was trusted and
+   * this row was the NOT-CLOSED one; the divergence it guarded, a short pack throwing where Node makes NaN, is gone with the claim.) */
+  expect(closed.some((l) => l.includes("typed.apply(null, pack(1))")), why).toBe(true);
 
   /* THE ARMED HALF. The typed receiver must be refused, and the reason must
    * NAME the parameter kinds — `f64` here — rather than any of the other
@@ -112,7 +123,7 @@ test("the instrument names the VERDICT at every runtime-length apply, and nothin
    * Node divergence into a path that refuses today. */
   const typed = distinct.filter((l) => l.includes("NOT-CLOSED=receiver-parameter-not-dyn"));
   expect(typed.length, why).toBe(1);
-  expect(typed[0], why).toContain("typed.apply(null, pack(1))");
+  expect(typed[0], why).toContain("typedDefault.apply(null, pack(1))");
   expect(typed[0], why).toMatch(/receiver-parameter-not-dyn:\[[a-z0-9,]+\]/);
   expect(typed[0], why).not.toContain("[dyn]");
 
