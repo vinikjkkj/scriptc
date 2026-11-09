@@ -147,7 +147,7 @@ import { FileParts, isNestedClassDeclaration, splitFiles, collectProgram, collec
   collectJsonRequires, jsonRequireTypeOverride, jsonAwareChecker, collectDeclTwinExportBridges, moduleArtifacts, collectGlobals, declSymbolOf, defaultExportSymbolOf, lowerFileInit, lowerDefaultExport, buildMain, appendDynamicImportModules } from "./lower-modules.js";
 import { scanDefinePropStringTables, scanDefinePropSymbolSlots, scanUntypedSymbolWrites } from "./lower-classes.js";
 import { protoClassArmOn, protoClassInstanceType } from "./proto-class-consume.js";
-import { genIterableDrainCall, scanGenGate } from "./lower-generators.js";
+import { genIterableDrainCall, genValueDrainCall, scanGenGate } from "./lower-generators.js";
 import { dynBoxedMethodInstances, ClassInfo, ClassIteratorInfo, GenericClassInfo, registerBuiltinErrorClasses, registerBuiltinEmitterClass, registerBuiltinStreamClasses, builtinErrorInfoOf, builtinEmitterInfoOf, builtinStreamInfoOf, analyzeClassDecoration, classIteratorDrainCall, classIteratorNextCall, classIteratorOf, classIteratorOpenCall, classIteratorRestDrainCall, classMemberNameOf, symbolSlotAccessorName, classValueRef, collectClassShape, exactClassOfReceiver, collectClassShapeInner, ctorAbiEquals, findMethodOn, findStaticOn, findGenericMethodOn, findGenericStaticOn, genericClassInstanceType, isSubclassOf, inHierarchy, overrideBelow, staticShadowBelow, upcastTo, lowerClassMembers, lowerClassCtor, lowerClassExpression, lowerClassExpressionInfo, lowerClassMethodMember, lowerProtoMethodMember, lowerClassValueProperty, lowerConstructorName, lowerStaticMethod, isProvenStaticThis, throwingSetterFn, shadowMethodFn, fieldInitStmts, lowerStaticFieldInits, lowerStaticFieldRead, lowerDerivedCtorBody, superCallStmt, lowerSuperMethodCall, superThisRef, lowerSuperAccessorRead, lowerSuperAccessorWrite, inheritsBuiltinErrorCtor, inheritsBuiltinEmitterCtor, errorMessageArg, lowerNew, accessorCall, virtualViewFitsSlot, vtThunkFn, findStaticAccessorOn, staticAccessorWrite, staticCompoundTarget, genericOverrideBelow } from "./lower-classes.js";
 import { MixinFnShape, mixinCallClassInfoOf, mixinIntersectionInstanceType } from "./lower-mixins.js";
 import { EVAL_ENV_SYM, evalClassNodeHook } from "./lower-evalclass.js";
@@ -20176,7 +20176,7 @@ export class Lowerer {
   }
 
   classIteratorDrainCall(src: IrExpr, loc: SrcLoc, elemT?: IrType): IrExpr | null {
-    return classIteratorDrainCall(this, src, loc, elemT) ?? genIterableDrainCall(this, src, loc, elemT);
+    return classIteratorDrainCall(this, src, loc, elemT) ?? genIterableDrainCall(this, src, loc, elemT) ?? genValueDrainCall(this, src, loc, elemT);
   }
 
   classIteratorRestDrainCall(cit: ClassIteratorInfo, itVal: IrExpr, loc: SrcLoc): IrExpr {

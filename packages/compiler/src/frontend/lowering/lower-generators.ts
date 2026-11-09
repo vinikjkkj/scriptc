@@ -369,7 +369,27 @@ export function genIterableOpenCall(L: Lowerer, gi: GenIterableInfo, recv: IrExp
 export function genIterableDrainCall(L: Lowerer, src: IrExpr, loc: SrcLoc, elemT?: IrType): IrExpr | null {
   const gi = genIterableOf(L, src.type, false);
   if (!gi) return null;
-  const genT = gi.genT as GenType;
+  const recvT: IrType = { kind: "object", className: gi.className };
+  return drainOver(L, gi.genT as GenType, recvT, `gen:${gi.className}`, (r) => genIterableOpenCall(L, gi, r, false, loc), src, loc, elemT);
+}
+
+/** `[...g()]` / `f(...g())` over a synchronous Generator VALUE: the same eager drain, stepping the generator itself to
+ * completion into a fresh element array. Null when the value is not a generator or the element does not coerce. */
+export function genValueDrainCall(L: Lowerer, src: IrExpr, loc: SrcLoc, elemT?: IrType): IrExpr | null {
+  if (src.type.kind !== "generator") return null;
+  return drainOver(L, src.type, src.type, `genval:${typeKey(src.type)}`, (r) => r, src, loc, elemT);
+}
+
+function drainOver(
+  L: Lowerer,
+  genT: GenType,
+  recvT: IrType,
+  keyPrefix: string,
+  open: (recv: IrExpr) => IrExpr,
+  src: IrExpr,
+  loc: SrcLoc,
+  elemT: IrType | undefined,
+): IrExpr | null {
   if (genT.yieldT.kind === "void") return null;
   if (genT.nextT.kind !== "undefinedT" && genT.nextT.kind !== "dyn") return null;
   const outElem = elemT ?? genT.yieldT;
@@ -381,10 +401,9 @@ export function genIterableDrainCall(L: Lowerer, src: IrExpr, loc: SrcLoc, elemT
   const outT: IrType = { kind: "array", elem: outElem };
   const recT = resultRecordOf(L, genT);
   const valueT = L.shapes.get(recT.shapeId)!.fields.find((f) => f.name === "value")!.type;
-  const key = `gen:${gi.className}:${typeKey(outElem)}`;
+  const key = `${keyPrefix}:${typeKey(outElem)}`;
   let name = L.iterDrainHelpers.get(key);
   if (!name) {
-    const recvT: IrType = { kind: "object", className: gi.className };
     const gRef: IrExpr = { kind: "varRef", localId: "g.0", type: genT, loc };
     const outRef: IrExpr = { kind: "varRef", localId: "out.0", type: outT, loc };
     const resRef: IrExpr = { kind: "varRef", localId: "res.0", type: recT, loc };
@@ -408,7 +427,7 @@ export function genIterableDrainCall(L: Lowerer, src: IrExpr, loc: SrcLoc, elemT
         {
           kind: "varDecl",
           localId: "g.0",
-          init: genIterableOpenCall(L, gi, { kind: "varRef", localId: "r.0", type: recvT, loc }, false, loc),
+          init: open({ kind: "varRef", localId: "r.0", type: recvT, loc }),
           loc,
         },
         {
