@@ -27493,6 +27493,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/2718-dynamic-import-evaluation-order/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/2718-dynamic-import-evaluation-order/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/24972-a-dynamic-constructor-called-with-constant-text-is-staged-natively.cjs": {
    "order": [
     "<repo>/tests/corpus/24972-a-dynamic-constructor-called-with-constant-text-is-staged-natively.cjs"
