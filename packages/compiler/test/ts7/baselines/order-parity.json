@@ -27268,6 +27268,12 @@
     "<repo>/tests/corpus/24897-fs-buffer-encoded-names-are-buffers.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25030-generator-spread-into-array-literal-rest-push-and-array-from.ts": {
+   "order": [
+    "<repo>/tests/corpus/25030-generator-spread-into-array-literal-rest-push-and-array-from.ts"
+   ],
+   "diags": []
   }
  }
 }
