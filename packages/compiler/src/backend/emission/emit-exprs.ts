@@ -3994,6 +3994,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // Both borrowed, result +1 (the undefined dyn when absent); an ACCESSOR
             // runs its getter (may-throw seed).
             return finish(`scr_cls_props_read(${arg(0)}, ${arg(1)})`);
+          case "ee.member":
+            // The name borrowed, the interned function +1 (the undefined dyn for a name the emitter does not have).
+            return finish(`scr_ee_member_value(${arg(0)})`);
           case "cls.propsSet":
             // All three borrowed, no result; throws catchably for a read-only or
             // getter-only entry (may-throw seed).

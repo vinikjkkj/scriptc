@@ -254,10 +254,11 @@ export function applyProtoTabs(L: Lowerer, fnLists: IrFunction[][]): void {
 
 /** The end of an undeclared-name read chain: `has(own table, k) ? read : has(proto table, k) ? read : undefined`. `bag` is
  * the instance's own run-time property table (a pure read, evaluated more than once) or null; `key` must be pure too. */
-export function protoTabReadChain(L: Lowerer, info: ClassInfo, key: IrExpr, bag: IrExpr | null, loc: IrExpr["loc"]): IrExpr {
+export function protoTabReadChain(L: Lowerer, info: ClassInfo, key: IrExpr, bag: IrExpr | null, loc: IrExpr["loc"], tail: IrExpr | null = null): IrExpr {
   const has = (t: IrExpr): IrExpr => ({ kind: "libCall", fn: "cls.propsHas", args: [t, key], type: BOOL, loc });
   const read = (t: IrExpr): IrExpr => ({ kind: "libCall", fn: "cls.propsRead", args: [t, key], type: DYN, loc });
-  let chain: IrExpr = dynUndefinedExpr(loc);
+  // The chain ends where no table holds the name: undefined, unless the caller knows a member that lives elsewhere (`tail`).
+  let chain: IrExpr = tail ?? dynUndefinedExpr(loc);
   const tabs = protoTabChain(L, info);
   for (let i = tabs.length - 1; i >= 0; i--) {
     const t = (): IrExpr => ({ kind: "varRef", localId: tabs[i]!.id, type: DYN, loc });

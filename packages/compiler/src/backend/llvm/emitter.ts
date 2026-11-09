@@ -1136,6 +1136,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "cls.propsNote": "scr_cls_props_note",
   "cls.propsKeys": "scr_cls_props_keys",
   "cls.propsRead": "scr_cls_props_read",
+  "ee.member": "scr_ee_member_value",
   "dyn.typeof": "scr_dyn_typeof",
   "dyn.toString": "scr_dyn_to_string_method",
   "dyn.toStringRange": "scr_dyn_to_string_range",

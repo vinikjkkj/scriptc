@@ -3771,6 +3771,10 @@ export type IrLibFn =
    * answer, or the undefined dyn when the key is absent (unlike `cls.propsGet`,
    * whose NULL means absent). +1, never NULL. In the may-throw seed set. */
   | "cls.propsRead"
+  /** The function value a READ of an EventEmitter.prototype member answers (`emit`, `on`, ...), from its NAME alone (arg: the name, borrowed; result:
+   * the interned function, +1; undefined for a name that is not the emitter's). The receiver is not an argument: the function reads the ambient `this`
+   * when called. Never throws. */
+  | "ee.member"
   /** Bare `typeof v` on a dyn value AS A STRING (arg: the dyn value,
    * borrowed; result: an owned string) — the dyn kind's JS answer:
    * undefined→"undefined", null/object/array/bytes→"object" (JS's oldest

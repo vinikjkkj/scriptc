@@ -4340,6 +4340,11 @@ ScrDyn *scr_cls_props_get(const ScrDyn *tbl, const ScrStr *key) {
 }
 
 /* `x.k` over the instance property table as a plain READ: +1, never NULL. */
+ScrDyn *scr_ee_member_value(const ScrStr *name) {
+  if (scr_dyn_ee_ops != NULL && scr_dyn_ee_ops->knows(name->data, name->len)) return scr_dyn_ee_ops->value(name->data, name->len);
+  return scr_dyn_retain(scr_dyn_undefined());
+}
+
 ScrDyn *scr_cls_props_read(const ScrDyn *tbl, const ScrStr *key) {
   ScrDyn *v = scr_cls_props_get(tbl, key);
   if (v != NULL) return v;
