@@ -904,7 +904,7 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
           E.line(`scr_bytes_set_big(${arr.name}, ${idx.name}, ${v.name});${E.srcComment(s.loc)}`);
           break;
         }
-        E.line(`scr_bytes_set_inl(${arr.name}, ${idx.name}, ${v.name});${E.srcComment(s.loc)}`);
+        E.line(`scr_bytes_set_inl(${arr.name}, ${idx.name}, ${E.canonStore(s) ? `scr_num_canon(${v.name})` : v.name});${E.srcComment(s.loc)}`);
         break;
       }
       case "ordNote": {
