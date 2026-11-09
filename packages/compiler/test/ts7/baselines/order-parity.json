@@ -14894,6 +14894,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24914-sibling-declarations-whose-names-collide-across-functions.js": {
+   "order": [
+    "<repo>/tests/corpus/24914-sibling-declarations-whose-names-collide-across-functions.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2485-inspect-circular-refs.ts": {
    "order": [
     "<repo>/tests/corpus/2485-inspect-circular-refs.ts"
