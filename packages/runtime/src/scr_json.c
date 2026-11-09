@@ -12947,18 +12947,20 @@ static ScrDyn *tbm_copy_within(ScrDyn *recv, ScrDyn *const *args, size_t argc, c
  * *known is false when the name is none of these; the caller then falls
  * through to scr_dyn_bytes_method. +1 on success; NULL with an exception
  * pending on a throw. */
+/* The first byte decides almost every compare of a name against this chain (a Buffer method call walks all of it). */
+static inline bool scr_bo_is(const char *m, const char *n) { return m[0] == n[0] && strcmp(m, n) == 0; }
 static const char *scr_bo_slice_enc(const char *m) {
   static const char *const names[7] = {"asciiSlice", "base64Slice", "base64urlSlice", "latin1Slice",
                                        "hexSlice", "ucs2Slice", "utf8Slice"};
   static const char *const encs[7] = {"ascii", "base64", "base64url", "latin1", "hex", "ucs2", "utf8"};
-  for (size_t i = 0; i < 7; i++) if (strcmp(m, names[i]) == 0) return encs[i];
+  for (size_t i = 0; i < 7; i++) if (scr_bo_is(m, names[i])) return encs[i];
   return NULL;
 }
 static const char *scr_bo_write_enc(const char *m) {
   static const char *const names[7] = {"asciiWrite", "base64Write", "base64urlWrite", "latin1Write",
                                        "hexWrite", "ucs2Write", "utf8Write"};
   static const char *const encs[7] = {"ascii", "base64", "base64url", "latin1", "hex", "ucs2", "utf8"};
-  for (size_t i = 0; i < 7; i++) if (strcmp(m, names[i]) == 0) return encs[i];
+  for (size_t i = 0; i < 7; i++) if (scr_bo_is(m, names[i])) return encs[i];
   return NULL;
 }
 static bool scr_bo_num_arg(ScrDyn *const *args, size_t argc, size_t i, double dflt, double *out, const char *what) {
@@ -12992,7 +12994,7 @@ ScrDyn *scr_dyn_buffer_only_method(ScrDyn *recv, const char *m, ScrDyn *const *a
     return r;
   }
   enc = scr_bo_write_enc(m);
-  if (enc != NULL || strcmp(m, "write") == 0) {
+  if (enc != NULL || scr_bo_is(m, "write")) {
     /* xWrite(string, offset, length) / write(string, offset, length, encoding) and write(string, encoding). */
     if (argc < 1 || args[0]->kind != SCR_DYN_STR) {
       scr_throw_error_msg(SCR_ERR_TYPE, "argument must be a string", sizeof("argument must be a string") - 1);
@@ -13026,7 +13028,7 @@ ScrDyn *scr_dyn_buffer_only_method(ScrDyn *recv, const char *m, ScrDyn *const *a
     if (scr_exc_pending()) return NULL;
     return scr_dyn_new_num(w);
   }
-  if (strcmp(m, "equals") == 0) {
+  if (scr_bo_is(m, "equals")) {
     /* The checked other-argument (Node's ERR_INVALID_ARG_TYPE "otherBuffer") and the plain comparison. */
     ScrStr *onm = scr_str_new("otherBuffer", 11);
     ScrBytes *o = scr_bytes_arg_chk(argc >= 1 ? args[0] : scr_dyn_undefined(), onm);
@@ -13036,7 +13038,7 @@ ScrDyn *scr_dyn_buffer_only_method(ScrDyn *recv, const char *m, ScrDyn *const *a
     scr_bytes_release(o);
     return scr_dyn_new_bool(eq);
   }
-  if (strcmp(m, "compare") == 0) {
+  if (scr_bo_is(m, "compare")) {
     /* compare(target, targetStart, targetEnd, sourceStart, sourceEnd): the target is checked; the four
      * offsets default as Node's do; the comparison core is scr_bytes_compare with nargs 4. */
     ScrStr *tnm = scr_str_new("target", 6);
@@ -13052,7 +13054,7 @@ ScrDyn *scr_dyn_buffer_only_method(ScrDyn *recv, const char *m, ScrDyn *const *a
     if (scr_exc_pending()) return NULL;
     return scr_dyn_new_num(r);
   }
-  if (strcmp(m, "copy") == 0) {
+  if (scr_bo_is(m, "copy")) {
     if (argc < 1) {
       scr_throw_error_msg(SCR_ERR_TYPE, "argument must be a Buffer", sizeof("argument must be a Buffer") - 1);
       return NULL;
@@ -13070,15 +13072,15 @@ ScrDyn *scr_dyn_buffer_only_method(ScrDyn *recv, const char *m, ScrDyn *const *a
     if (scr_exc_pending()) return NULL;
     return scr_dyn_new_num(n);
   }
-  if (strcmp(m, "swap16") == 0 || strcmp(m, "swap32") == 0 || strcmp(m, "swap64") == 0) {
+  if (scr_bo_is(m, "swap16") || scr_bo_is(m, "swap32") || scr_bo_is(m, "swap64")) {
     double width = m[4] == '1' ? 2 : m[4] == '3' ? 4 : 8;
     ScrBytes *sw = scr_bytes_swap((ScrBytes *)b, width); /* +1 on the same payload */
     if (sw == NULL) return NULL; /* exception pending */
     scr_bytes_release(sw);
     return scr_dyn_retain(recv); /* Node answers this */
   }
-  if (strcmp(m, "readBigInt64LE") == 0 || strcmp(m, "readBigInt64BE") == 0 || strcmp(m, "readBigUInt64LE") == 0 ||
-      strcmp(m, "readBigUInt64BE") == 0 || strcmp(m, "readBigUint64LE") == 0 || strcmp(m, "readBigUint64BE") == 0) {
+  if (scr_bo_is(m, "readBigInt64LE") || scr_bo_is(m, "readBigInt64BE") || scr_bo_is(m, "readBigUInt64LE") ||
+      scr_bo_is(m, "readBigUInt64BE") || scr_bo_is(m, "readBigUint64LE") || scr_bo_is(m, "readBigUint64BE")) {
     /* readBigXX64Y(offset = 0): eight bytes, the bigint they spell (the dyn-route hook, scr_bigint.c). */
     bool le = m[strlen(m) - 2] == 'L';
     bool sgn = m[7] == 'I';
@@ -13139,7 +13141,7 @@ ScrDyn *scr_dyn_buffer_only_method(ScrDyn *recv, const char *m, ScrDyn *const *a
     for (size_t i = 0; i < 8; i++) ((ScrBytes *)b)->data[(size_t)off + (le ? i : 7 - i)] = (uint8_t)(u >> (8 * i));
     return scr_dyn_new_num(off + 8);
   }
-  if (strcmp(m, "toJSON") == 0) {
+  if (scr_bo_is(m, "toJSON")) {
     /* { type: 'Buffer', data: [ ...bytes ] } */
     ScrDyn *o = scr_dyn_new_obj();
     ScrStr *tys = scr_str_new("Buffer", 6);
@@ -13150,7 +13152,7 @@ ScrDyn *scr_dyn_buffer_only_method(ScrDyn *recv, const char *m, ScrDyn *const *a
     scr_dyn_obj_set(o, "data", 4, arr);
     return o;
   }
-  if (strcmp(m, "inspect") == 0) {
+  if (scr_bo_is(m, "inspect")) {
     /* <Buffer xx xx ... N more bytes>: the first 50 bytes in hex (INSPECT_MAX_BYTES), Node's text. */
     ScrJsonBuf jb;
     scr_jb_init(&jb);
@@ -13173,7 +13175,7 @@ ScrDyn *scr_dyn_buffer_only_method(ScrDyn *recv, const char *m, ScrDyn *const *a
     scr_str_release(inspected);
     return insp;
   }
-  if (strcmp(m, "slice") == 0) {
+  if (scr_bo_is(m, "slice")) {
     /* Buffer.prototype.slice IS subarray (a view). */
     bool tk = false;
     ScrDyn *r = scr_dyn_bytes_method(recv, "subarray", args, argc, what, &tk);

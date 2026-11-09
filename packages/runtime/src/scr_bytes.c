@@ -2089,8 +2089,9 @@ bool scr_bytes_rw_check_pub(const ScrBytes *b, double offset, size_t width) { re
  * exactly Node — and writes zeros downstream. */
 static bool scr_bytes_check_int(const ScrBytes *b, double value, double offset,
                                 size_t width, bool sign) {
-  double max = sign ? exp2((double)(8 * width - 1)) - 1 : exp2((double)(8 * width)) - 1;
-  double min = sign ? -exp2((double)(8 * width - 1)) : 0;
+  /* width <= 6 here, so 2 ** (8 * width) is exact in a uint64_t and in a double: the same bounds exp2 gave, without the libm call. */
+  double max = sign ? (double)(((uint64_t)1 << (8 * width - 1)) - 1) : (double)(((uint64_t)1 << (8 * width)) - 1);
+  double min = sign ? -(double)((uint64_t)1 << (8 * width - 1)) : 0;
   if (value > max || value < min) {
     char recv[48];
     scr_num_received(value, recv);
@@ -2188,9 +2189,8 @@ double scr_bytes_write_num(ScrBytes *b, double value, double offset, ScrBytesNum
   } else {
     bool sign = kind == SCR_BN_I8 || kind == SCR_BN_I16 || kind == SCR_BN_I32;
     if (!scr_bytes_check_int(b, value, offset, width, sign)) return 0;
-    double t = trunc(value);
-    if (t != t) t = 0; /* NaN passed the range gate: zeros, like Node */
-    u = (uint64_t)(int64_t)t; /* two's complement of the truncation */
+    /* The range gate passed, so |value| < 2 ** 33 (or NaN): the integer cast truncates exactly like trunc() */
+    u = value != value ? 0 : (uint64_t)(int64_t)value; /* NaN passed the range gate: zeros, like Node; two's complement of the truncation */
   }
   uint8_t *p = b->data + (size_t)offset;
   for (size_t i = 0; i < width; i++) {
