@@ -2293,7 +2293,7 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
     // dyn, and that is what the predicate keeps refusing.
     if (
       srcType.kind === "dyn" &&
-      (isJsSourceFile(pattern.getSourceFile()) || dynObjectPatternBindsOnlyDyn(L, pattern))
+      (isJsSourceFile(pattern.getSourceFile()) || dynObjectPatternBindsOnlyDyn(L, pattern) || patternDestructuresImportNamespace(pattern))
     ) {
       for (const el of pattern.elements) {
         if (el.name === undefined) continue;
@@ -2333,6 +2333,13 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
             type: DYN,
             loc,
           };
+        }
+        // `const { Redis } = await import("ioredis")`: the source is a MODULE NAMESPACE, whose member types the checker states, so a binding of
+        // another type than dyn takes the member through the same checked extraction every dyn-to-typed read takes: it binds exactly what
+        // `const ns = await import(..); const { Redis } = ns` binds, and a member of the wrong kind fails the check at run time like any cast.
+        if (ts.isIdentifier(el.name) && patternDestructuresImportNamespace(pattern)) {
+          const bindT = patternBindingType(L, el.name);
+          if (bindT !== null && bindT.kind !== "dyn") value = L.coerceInto(el, value, bindT);
         }
         L.bindPatternTarget(el.name, value, isLet, out);
       }
@@ -2747,6 +2754,18 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
    * JavaScript files never consult this: there every binding is `any`, so
    * the answer is uniformly dyn and the branch has served them since it
    * was written. */
+  /** The pattern is the left side of `const { a, b } = await import("pkg")` (or the un-awaited promise's result): its source is a module namespace. */
+  function patternDestructuresImportNamespace(pattern: ts.ObjectBindingPattern): boolean {
+    const decl = pattern.parent;
+    if (decl === undefined || !ts.isVariableDeclaration(decl) || decl.initializer === undefined) return false;
+    let init: ts.Expression = decl.initializer;
+    while (ts.isParenthesizedExpression(init)) init = init.expression;
+    if (!ts.isAwaitExpression(init)) return false;
+    let inner: ts.Expression = init.expression;
+    while (ts.isParenthesizedExpression(inner)) inner = inner.expression;
+    return ts.isCallExpression(inner) && inner.expression.kind === ts.SyntaxKind.ImportKeyword;
+  }
+
   function dynObjectPatternBindsOnlyDyn(L: Lowerer, pattern: ts.ObjectBindingPattern): boolean {
     for (const el of pattern.elements) {
       if (el.name === undefined) continue;
