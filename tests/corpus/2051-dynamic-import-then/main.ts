@@ -1,4 +1,3 @@
-// @dynamic
 // The stored-promise spellings of dynamic import(): a top-level `var`
 // holding the import promise (a module global carrying the island
 // promise), .then handlers receiving the namespace HANDLE (the handler's
