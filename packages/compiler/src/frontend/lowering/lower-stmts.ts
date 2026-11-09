@@ -11,7 +11,7 @@ import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { lowerCastViewOverrideWrite } from "./lower-instoverride.js";
 import { isEmitterMixinStatement } from "./lower-emitter-mixin.js";
-import { timersPromisesIntervalCallOf, lowerForAwaitTimersInterval, lowerForAwaitAsyncGenerator, lowerForOfGenerator, lowerYieldStarStatement, genIterableOf, genIterableOpenCall } from "./lower-generators.js";
+import { timersPromisesIntervalCallOf, lowerForAwaitTimersInterval, lowerForAwaitAsyncGenerator, lowerForOfGenerator, lowerYieldStarStatement, hasEscapingLabeledJump, genIterableOf, genIterableOpenCall } from "./lower-generators.js";
 import { RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, BIGINT, BOOL, isRefCounted, BYTES_U8, bytesValueType, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrLocal, type IrRecordShape, IrStmt, IrType, JSVAL, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import { PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, neverTaintedJsType, nodeThrowExpr, stmtUsesIsland, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { dtsTwinOwnedConst, wholeExportRootRebindable } from "./lower-modules.js";
@@ -11410,12 +11410,12 @@ function prototypeInstallerCallStmt(L: Lowerer, expr: ts.Expression): IrStmt | n
         : calleeName !== null
           ? `${calleeName} is not a function or its return value is not iterable`
           : "";
-    const pack = L.declareHiddenLocal("%dofpack", DYN);
+    const pack = L.declareHiddenLocal("%dofit", DYN);
     const idx = L.declareHiddenLocal("%dofi", F64);
     idx.mutable = true;
     const packRef = (): IrExpr => ({ kind: "varRef", localId: pack.id, type: DYN, loc });
     const iRef = (): IrExpr => ({ kind: "varRef", localId: idx.id, type: F64, loc });
-    const elemInit = (): IrExpr => ({ kind: "libCall", fn: "dyn.arrAt", args: [packRef(), iRef()], type: DYN, loc });
+    const elemInit = (): IrExpr => ({ kind: "libCall", fn: "dyn.iterVal", args: [packRef(), iRef()], type: DYN, loc });
     L.scopes.push(new Map());
     try {
       const binds: IrStmt[] = [];
@@ -11485,7 +11485,38 @@ function prototypeInstallerCallStmt(L: Lowerer, expr: ts.Expression): IrStmt | n
           L.unsupported("SC1031", decl.name);
         }
       }
-      const body = L.inCtl("loop", () => L.lowerScopedBlock(stmt.statement), labels);
+      // The iterator protocol (scr_dyn_iter_*): the eager kinds answer a packed array the loop indexes, anything else a lazy iterator state.
+      // IteratorClose runs on EVERY abrupt completion (break, return, throw) through a try/finally around the loop, the generator
+      // for-of's shape; an escaping LABELED jump cannot cross a finally, so such a body closes after the loop only (that one spelling skips
+      // the close on the jump, the generator for-of's documented divergence).
+      const wrap = !hasEscapingLabeledJump(stmt.statement);
+      const body = wrap
+        ? L.inCtl("tryFinally", () => L.inCtl("loop", () => L.lowerScopedBlock(stmt.statement), labels))
+        : L.inCtl("loop", () => L.lowerScopedBlock(stmt.statement), labels);
+      const close: IrStmt = { kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.iterClose", args: [packRef()], type: BOOL, loc }, loc };
+      const loop: IrStmt = {
+        kind: "while",
+        cond: { kind: "boolLit", value: true, type: BOOL, loc },
+        body: [
+          {
+            kind: "if",
+            cond: { kind: "unary", op: "!", operand: { kind: "libCall", fn: "dyn.iterStep", args: [packRef(), iRef()], type: BOOL, loc }, type: BOOL, loc },
+            then: [{ kind: "break", loc }],
+            else_: null,
+            loc,
+          },
+          ...binds,
+          {
+            kind: "assign",
+            localId: idx.id,
+            value: { kind: "bin", op: "+", left: iRef(), right: { kind: "numLit", value: 1, type: F64, loc }, type: F64, loc },
+            loc,
+          },
+          ...body,
+        ],
+        ...(labels && { labels }),
+        loc,
+      };
       return {
         kind: "block",
         body: [
@@ -11494,34 +11525,16 @@ function prototypeInstallerCallStmt(L: Lowerer, expr: ts.Expression): IrStmt | n
             localId: pack.id,
             init: {
               kind: "libCall",
-              fn: "dyn.iterPack",
+              fn: "dyn.iterOpen",
               args: [iterable, { kind: "strLit", value: spell, type: STRING, loc }],
               type: DYN,
               loc,
             },
             loc,
           },
-          {
-            kind: "for",
-            init: { kind: "varDecl", localId: idx.id, init: { kind: "numLit", value: 0, type: F64, loc }, loc },
-            cond: {
-              kind: "bin",
-              op: "<",
-              left: iRef(),
-              right: { kind: "libCall", fn: "dyn.arrLen", args: [packRef()], type: F64, loc },
-              type: BOOL,
-              loc,
-            },
-            update: {
-              kind: "assign",
-              localId: idx.id,
-              value: { kind: "bin", op: "+", left: iRef(), right: { kind: "numLit", value: 1, type: F64, loc }, type: F64, loc },
-              loc,
-            },
-            body: [...binds, ...body],
-            ...(labels && { labels }),
-            loc,
-          },
+          { kind: "varDecl", localId: idx.id, init: { kind: "numLit", value: 0, type: F64, loc }, loc },
+          wrap ? { kind: "tryCatch", tryBody: [loop], catchBody: null, catchLocalId: null, finallyBody: [close], loc } : loop,
+          ...(wrap ? [] : [close]),
         ],
         loc,
       };

@@ -4094,6 +4094,15 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // The for-of pack's element at index (+1; never throws — the
             // undefined singleton past the end).
             return finish(`scr_dyn_arr_at(${arg(0)}, ${arg(1)})`);
+          case "dyn.iterOpen":
+            // for-of over a dyn value: the packed array or a lazy iterator state (+1; may throw).
+            return finish(`scr_dyn_iter_open(${arg(0)}, ${arg(1)})`);
+          case "dyn.iterStep":
+            return finish(`scr_dyn_iter_step(${arg(0)}, ${arg(1)})`);
+          case "dyn.iterVal":
+            return finish(`scr_dyn_iter_val(${arg(0)}, ${arg(1)})`);
+          case "dyn.iterClose":
+            return finish(`scr_dyn_iter_close_b(${arg(0)})`);
           case "dyn.adoptPromise":
             // Promise.resolve(v) for a checked-dynamic entry (+1; borrows v; never throws).
             return finish(`scr_dyn_adopt_promise(${arg(0)})`);

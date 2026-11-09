@@ -674,7 +674,7 @@ export function lowerForOfGenerator(
  * the generator to have a `finally`) for a certain build failure.
  *
  * Function boundaries stop the walk: neither labels nor jumps cross one. */
-function hasEscapingLabeledJump(body: ts.Statement): boolean {
+export function hasEscapingLabeledJump(body: ts.Statement): boolean {
   let found = false;
   const walk = (n: ts.Node, bound: readonly string[]): void => {
     if (found) return;
