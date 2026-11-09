@@ -2031,11 +2031,11 @@ ScrDyn *scr_dyn_objinst_miss(ScrDyn *d, const ScrStr *key) {
    * wrong answer. The loud ladder stays for exactly this name. */
   if (key->len == 11 && memcmp(key->data, "constructor", 11) == 0 && scr_dyn_objinst_class_of(d)->ee_off > 0) {
     /* A class grafted by applyMixin(Y, EventEmitter) has had EventEmitter.prototype's own `constructor`
-     * copied over its own, so `x.constructor` is EventEmitter there, not Y (rt_root 7: the class that applied the
+     * copied over its own, so `x.constructor` is EventEmitter there, not Y (rt_root 7, or 8 with a property table: the class that applied the
      * graft). A subclass of it (rt_root 5) keeps its own `constructor` property and falls to the generic answer
      * below. Any other grafted shape keeps the loud ladder: answering Y would be a silent wrong answer. */
     const unsigned char rtg = scr_dyn_objinst_class_of(d)->rt_root;
-    if (rtg == 7) {
+    if (rtg == 7 || rtg == 8) { /* 8: the same class WITH a run-time property table (ioredis' Redis) */
       const ScrDynClass *ee = scr_dyn_runtime_emitter_class();
       if (ee != NULL) return scr_dyn_class_box(ee);
     }
