@@ -14859,6 +14859,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24909-a-documented-string-return-that-yields-undefined.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24909-a-documented-string-return-that-yields-undefined.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2485-inspect-circular-refs.ts": {
    "order": [
     "<repo>/tests/corpus/2485-inspect-circular-refs.ts"
