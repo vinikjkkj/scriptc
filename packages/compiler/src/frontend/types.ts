@@ -11,7 +11,7 @@ import { isSqliteTypesPath } from "./shared.js";
 import { isProvenanceSourceFile } from "./provenance-registry.js";
 import { bytesRefinementProven, type StdlibBufferTypes } from "./buffer-refinement.js";
 import { ambientCodecName } from "./codec-shadow.js";
-import { accessorSlotProp, armDiscrimLits, armLitsConflict, builtinRenderingKey, internalFieldNamesOf, mergeArmLitSets, wsGlobalPlan } from "../ir/nodes.js";
+import { dynRestApplyable, accessorSlotProp, armDiscrimLits, armLitsConflict, builtinRenderingKey, internalFieldNamesOf, mergeArmLitSets, wsGlobalPlan } from "../ir/nodes.js";
 // typeKey moved to ir/nodes.ts (the backend needs it too, for per-type
 // helper interning); re-exported here so frontend call sites keep their
 // import path.
@@ -9231,6 +9231,31 @@ function interfaceKeyOf(sym: ts.Symbol, ctx: TypeMapperCtx): string {
   return d === undefined ? `${sym.name}` : `${d.getSourceFile().fileName}@${d.pos}`;
 }
 
+
+/** True for an interface whose every member is a method and some method has a rest parameter or several signatures. */
+function restMethodOnlyInterface(widened: ts.Type, ctx: TypeMapperCtx): boolean {
+  const props = ctx.checker.getPropertiesOfType(widened);
+  if (props.length === 0) return false;
+  // A method-only interface qualifies wherever it is declared; one that also holds data members (ioredis' ChainableCommander: `length`) only when a
+  // package's declaration file spells every member -- a user-declared mixed record keeps its typed data fields (the member-level slot covers its rest member).
+  let methodOnly = true;
+  let declOnly = true;
+  let hard = false;
+  for (const p of props) {
+    const decls = ctx.checker.declarationsOf(p);
+    if (decls.length === 0) return false;
+    if (decls.some((d) => ctx.isStdlibFile(d.getSourceFile()))) return false;
+    if (!decls.every((d) => d.kind === ts.SyntaxKind.MethodSignature)) methodOnly = false;
+    if (!decls.every((d) => d.getSourceFile().isDeclarationFile)) declOnly = false;
+    const sigs = ctx.checker.getCallSignatures(ctx.checker.getTypeOfSymbol(p));
+    if (sigs.length > 1) hard = true;
+    for (const sg of sigs) {
+      const d = ctx.checker.signatureDeclaration(sg);
+      if (d !== undefined && ts.isFunctionLike(d) && d.parameters.some((x) => x.dotDotDotToken !== undefined)) hard = true;
+    }
+  }
+  return hard && (methodOnly || declOnly);
+}
 function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | RecordShapeParts | null {
   const { checker, shapes } = ctx;
   if (checker.getConstructSignatures(widened).length > 0) return null;
@@ -9255,6 +9280,11 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
     ctx.shapes.objectInterfaceKeys.set(only, new Set([...(ctx.shapes.objectInterfaceKeys.get(only) ?? []), key]));
     return { kind: "object", className: only };
   }
+  // A METHOD-ONLY interface whose methods take rest parameters or are overloaded (ioredis' ChainableCommander, user-declared command surfaces): the value
+  // is an OBJECT whose methods read their own instance (`this`, the instance-assigned `exec` of a MULTI pipeline), which a projected record copy cannot
+  // carry -- a method called off the copy runs with no receiver. It stays a dynamic object and members are called by name through the value (the
+  // member-level DYN slot below covers the same signatures inside records that also hold data fields).
+  if (widenedSym !== undefined && (widenedSym.flags & ts.SymbolFlags.Interface) !== 0 && !ctx.dynamic && restMethodOnlyInterface(widened, ctx)) return DYN;
   {
     const viaSymbolicAlias = mapSymbolicMappedAlias(widened, ctx);
     if (viaSymbolicAlias !== undefined) return viaSymbolicAlias;
@@ -9940,6 +9970,10 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
       if (pt.kind === "promise" && ctx.nullPayloadPromiseProp?.(p) === true) {
         pt = { kind: "promise", inner: VOID };
       }
+      // MEMBER-LEVEL rule: a function member whose signature no record projection can adapt (a rest parameter behind fixed ones) is stored as a DYN
+      // function slot. A checked cast of such a member compares representations and would fail at run time ("expected function, got function"); a dyn slot
+      // holds the function value as is and is called through the dynamic call path.
+      if (!ctx.dynamic && pt.kind === "func" && pt.restIn === true && !dynRestApplyable(pt)) pt = DYN;
       fields.push({ name: p.name, type: pt });
     }
     // getPropertiesOfType yields DECLARATION order (interface/alias/literal

@@ -552,6 +552,36 @@ function lowerForwardedRequireMemberCall(L: Lowerer, call: ts.CallExpression): I
   return want === null || want.kind === "dyn" ? callE : L.coerceToExpected(callE, want);
 }
 
+/** `v.m(args)` where `m` is named only by a declaration file (a package's interface) and `v` lowers to a checked-dynamic value: the boxed object an interface of
+ * many methods maps to, whose members are whatever the value really holds (a class instance's methods, its prototype table). The call is the dynamic member
+ * call, and its answer converts to the declared result. Null for any other receiver, which keeps the refusal that follows. */
+function lowerDeclOnlyDynReceiverCall(L: Lowerer, call: ts.CallExpression): IrExpr | null {
+  const access = call.expression;
+  if (!ts.isPropertyAccessExpression(access) || access.questionDotToken !== undefined || call.questionDotToken !== undefined) return null;
+  if (L.dynamic) return null;
+  const methodSym = L.checker.getSymbolAtLocation(access.name);
+  const decls = methodSym ? L.checker.declarationsOf(methodSym) : [];
+  if (decls.length === 0 || !decls.every((d) => d.getSourceFile().isDeclarationFile && !L.isStdlibFile(d.getSourceFile()))) return null;
+  const recvT = L.mapTypeOf(L.typeOf(access.expression));
+  if (recvT?.kind !== "dyn" && recvT?.kind !== "record" && recvT?.kind !== "object") return null;
+  let recv = L.lowerExpr(access.expression);
+  // An interface a checked cast built a VIEW of (a record of methods over a dynamic object): the members are the object's, so the call is the object's.
+  if (recv.type.kind === "record" && L.shapes.get(recv.type.shapeId)?.view === true) {
+    const rid = recv.type.shapeId;
+    const tmp = L.declareHiddenLocal("%viewRecv", recv.type);
+    const viewOf: IrExpr = { kind: "recordView", obj: { kind: "varRef", localId: tmp.id, type: recv.type, loc: locOf(call) }, shapeId: rid, type: DYN, loc: locOf(call) };
+    recv = { kind: "seqExpr", stmts: [{ kind: "varDecl", localId: tmp.id, init: recv, loc: locOf(call) }], result: viewOf, type: DYN, loc: locOf(call) };
+  }
+  // A compiled class instance the declaration types as an interface: the member is whatever the instance has (its methods, its prototype table), so the
+  // call goes through the instance boxed, the way a dynamic receiver's would.
+  if (recv.type.kind === "object") recv = internalBox(L, { kind: "dynFrom", value: recv, type: DYN, loc: locOf(call) });
+  if (recv.type.kind !== "dyn") return null;
+  const callE = dynInvokeWithSpread(L, call, recv, access);
+  const want = L.mapTypeOf(L.typeOf(call));
+  if (want === null || want.kind === "dyn") return callE;
+  return (want.kind === "promise" ? L.adoptDynIntoTypedPromise(callE, want) : null) ?? L.coerceToExpected(callE, want);
+}
+
 function lowerCastReceiverMethodCall(L: Lowerer, call: ts.CallExpression): IrExpr | null {
   const access = call.expression;
   if (!ts.isPropertyAccessExpression(access) || access.questionDotToken !== undefined || call.questionDotToken !== undefined) return null;
@@ -6678,6 +6708,12 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         const viaTab = lowerProtoTabMethodCall(L, expr);
         if (viaTab !== null) return viaTab;
       }
+      {
+        // A method only a declaration names, on a receiver that is a checked-dynamic value (an interface of many methods maps to the boxed object
+        // its values are, ioredis' ChainableCommander): the call runs the member the value really has.
+        const viaDecl = lowerDeclOnlyDynReceiverCall(L, expr);
+        if (viaDecl !== null) return viaDecl;
+      }
       refuseUncompilableExternMethod(L, expr, expr.expression);
       // The lib fence's METHOD-CALL chokepoint: a stdlib-declared member
       // that every lowering above declined — an unlowered member
@@ -7093,7 +7129,19 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
           return dynCallWithThis(L, internalBox(L, { kind: "dynFrom", value: recv, type: DYN, loc } as IrExpr), callee, args, calleeName, loc);
         }
       }
-      return { kind: "dynCall", callee, calleeName, args, type: DYN, loc };
+      // A member the record stores as a DYN function slot (a rest parameter behind fixed ones): the call answers dyn, and the declared result type is
+      // restored through the checked path (a typed Promise flow adopts the dyn value), so typed users of the member keep working.
+      const slotCall: IrExpr = { kind: "dynCall", callee, calleeName, args, type: DYN, loc };
+      if (ts.isPropertyAccessExpression(expr.expression)) {
+        const recvT = L.mapTypeOf(L.typeOf(expr.expression.expression));
+        if (recvT?.kind === "record") {
+          const want = L.mapTypeOf(L.typeOf(expr));
+          if (want !== null && want.kind !== "dyn" && want.kind !== "void") {
+            return (want.kind === "promise" ? L.adoptDynIntoTypedPromise(slotCall, want) : null) ?? L.coerceToExpected(slotCall, want);
+          }
+        }
+      }
+      return slotCall;
     }
     if (callee.type.kind !== "func") {
       L.badType(expr.expression, L.typeOf(expr.expression));
