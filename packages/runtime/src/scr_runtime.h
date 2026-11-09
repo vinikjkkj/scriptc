@@ -6600,6 +6600,10 @@ void scr_dyn_obj_set_present_lit(ScrDyn *obj, const char *key, size_t key_len, S
 /* `scr_dyn_key_set` at a SLOPPY-mode site: assigning to a class's non-writable `prototype` is ignored silently (Node's sloppy answer); every other write is the strict one. */
 void scr_dyn_key_set_sloppy(ScrDyn *recv, ScrStr *key, ScrDyn *value);
 void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value);
+/* d[i] on a dyn value with a NUMBER index. A plain array answers an in-range integer index straight from its slots; every other receiver
+ * and every other index takes `slow`, the emitted keyed read, with the index spelled as its canonical string, so the answer is the one
+ * `d[String(i)]` always gave. Borrows d; the result is +1 like the keyed read. */
+ScrDyn *scr_dyn_idx_get(ScrDyn *d, double i, bool opt, ScrDyn *(*slow)(ScrDyn *, ScrStr *, bool));
 /* `delete recv[key]` — JS's [[Delete]], own-property only, and an ANSWER:
  * true when nothing of that name is own or when it was removed. Both
  * borrowed. Throws: V8's strict-mode "Cannot delete property" for a

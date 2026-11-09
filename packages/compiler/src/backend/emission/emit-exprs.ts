@@ -3370,6 +3370,13 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // receiver, and HANDLE receivers can throw the loud unmodeled-
         // property ladder on EITHER form, so both ride a fallible temp;
         // the result is owned (+1).
+        // A NUMBER index that is not a literal (a literal keeps the one constant key) (`d[i]`, the key lowered as String(i)) reads through scr_dyn_idx_get: an array answers an in-range integer from its slots
+        // and any other receiver gets the canonical string key and the general read, so no program pays an allocation per array element read.
+        if (e.key.kind === "toString" && e.key.operand.type.kind === "f64" && e.key.operand.kind !== "numLit") {
+          const di = emitBorrowedLocal(E, e.value, [e.key.operand]);
+          const iv = E.emitExpr(e.key.operand);
+          return E.fallibleTemp(e.type, `scr_dyn_idx_get(${di.name}, ${iv.name}, ${e.optional ? "true" : "false"}, ${dynKeyGetHelper(E)})`);
+        }
         const d = emitBorrowedLocal(E, e.value, [e.key]);
         const k = emitBorrowedLocal(E, e.key, []);
         // A key that is an emitted string literal (an immortal interned static) takes the literal-key entry; a computed key keeps the general one.
