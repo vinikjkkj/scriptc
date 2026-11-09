@@ -13,7 +13,7 @@ import { isRelativeSpecifier } from "../shared.js";
 import { dynamicImportModuleTargetOf, dynamicImportProgramTargetOf, staticDynImportBindingShape } from "./lower-modules.js";
 import { pureReemittable } from "./lower-exprs.js";
 import { isEsModuleStamp } from "./lower-stmts.js";
-import { dynReplaceOf, liveBagRef, liveTwinOf } from "./cjs-live-exports.js";
+import { liveBagRef, liveTwinOf } from "./cjs-live-exports.js";
 import { cjsLexedExportsOf, cjsLexerVisibleNames } from "../cjs-lexer.js";
 import * as nodePath from "node:path";
 import { moduleNsStarExports } from "./lower-namespaces.js";
