@@ -15006,6 +15006,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24919-json-stringify-accepts-a-tuple-array-with-error-and-unknown-members.ts": {
+   "order": [
+    "<repo>/tests/corpus/24919-json-stringify-accepts-a-tuple-array-with-error-and-unknown-members.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2485-inspect-circular-refs.ts": {
    "order": [
     "<repo>/tests/corpus/2485-inspect-circular-refs.ts"
@@ -15236,6 +15242,12 @@
   "<repo>/tests/corpus/2492-loose-null-compare-unions.ts": {
    "order": [
     "<repo>/tests/corpus/2492-loose-null-compare-unions.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24922-a-user-declared-interface-with-a-rest-method-keeps-its-record.ts": {
+   "order": [
+    "<repo>/tests/corpus/24922-a-user-declared-interface-with-a-rest-method-keeps-its-record.ts"
    ],
    "diags": []
   },
