@@ -27359,6 +27359,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25061-class-view-survives-a-call-that-keeps-or-mutates-the-record/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/25061-class-view-survives-a-call-that-keeps-or-mutates-the-record/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/25050-record-projection-keeps-the-source-as-receiver/main.ts": {
    "order": [
     "<repo>/tests/corpus/25050-record-projection-keeps-the-source-as-receiver/lib.cjs",
