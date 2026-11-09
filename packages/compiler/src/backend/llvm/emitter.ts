@@ -122,7 +122,7 @@ import {
   type CoroViolations,
   PromotedTempInPhiError,
 } from "./blocks.js";
-import { isStableReceiverOperand, writesLocal } from "../../ir/analysis.js";
+import { BORROWING_DYN_LIBCALLS, isStableReceiverOperand, writesLocal } from "../../ir/analysis.js";
 import { SCR_BYTES_LEN_OFFSET } from "./runtime-layout.js";
 import {
   buildClassGraph,
@@ -11795,7 +11795,7 @@ class LlEmitter {
         // converted them); everything is BORROWED by scr_dyn_call — the
         // boxed thunk builds its own typed copies. The callee's source
         // spelling rides along for Node's "<name> is not a function".
-        const callee = this.emitExpr(e.callee);
+        const callee = this.emitBorrowedLocal(e.callee, e.args);
         if (e.spreads !== undefined && e.spreads.length > 0) {
           // The RUNTIME-ARITY form (`f(...args)`): one fresh dyn array
           // collects the arguments left-to-right — plain args move in
@@ -11829,7 +11829,7 @@ class LlEmitter {
           this.emitPendingCheck();
           return out;
         }
-        const args = e.args.map((a) => this.emitExpr(a));
+        const args = e.args.map((a, i) => this.emitBorrowedLocal(a, e.args.slice(i + 1)));
         let argsPtr = "null";
         if (args.length > 0) {
           const arr = B.slot();
@@ -11868,7 +11868,7 @@ class LlEmitter {
           }
           this.emitPendingCheck();
         }
-        const args = e.args.map((a) => this.emitExpr(a));
+        const args = e.args.map((a, i) => this.emitBorrowedLocal(a, e.args.slice(i + 1)));
         let argsPtr = "null";
         if (args.length > 0) {
           const arr = B.slot();
@@ -11999,7 +11999,7 @@ class LlEmitter {
         // receiver, and HANDLE receivers can throw the loud unmodeled-
         // property ladder on EITHER form; the result is owned (+1).
         const d = this.emitBorrowedLocal(e.value, [e.key]);
-        const k = this.emitExpr(e.key);
+        const k = this.emitBorrowedLocal(e.key, []);
         const helper = this.dyn.dynKeyGetHelper();
         const t = B.tmp();
         B.line(`${t} = call ptr @${helper}(ptr ${d.name}, ptr ${k.name}, i1 ${e.optional ? "true" : "false"})`);
@@ -20300,6 +20300,9 @@ class LlEmitter {
       const t = B.tmp();
       B.line(`${t} = load ptr, ptr ${b.slot}`);
       args = [{ name: t, type: e.args[0]!.type }];
+    } else if (BORROWING_DYN_LIBCALLS.has(e.fn)) {
+      // The runtime only borrows these operands: a plain local is loaded where it lives (see emitBorrowedLocal).
+      args = e.args.map((a, i) => this.emitBorrowedLocal(a, e.args.slice(i + 1)));
     } else {
       args = e.args.map((a) => this.emitExpr(a));
     }

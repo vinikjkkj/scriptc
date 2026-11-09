@@ -72,6 +72,23 @@ export function isStableReceiverOperand(e: IrExpr, receiverLocalId: string): boo
   }
 }
 
+/** The dyn operator library calls whose arguments the runtime only BORROWS (it never keeps or frees one): the JS operator conversions
+ * (scr_json.c: "args borrowed, +1 on the dyn result"). Their operands may be read straight out of a plain local (emitBorrowedLocal) because
+ * the binding keeps the value alive for the whole call even when ToPrimitive runs user code (valueOf, toString): a non-boxed local
+ * cannot be reassigned by that code. */
+export const BORROWING_DYN_LIBCALLS: ReadonlySet<string> = new Set([
+  "dyn.toNumber",
+  "dyn.numberOf",
+  "dyn.add",
+  "dyn.lt",
+  "dyn.le",
+  "dyn.gt",
+  "dyn.ge",
+  "dyn.looseEqNum",
+  "dyn.looseEq",
+  "dyn.objKeys",
+]);
+
 /** True when evaluating `e` cannot WRITE the binding `localId`.
  *
  * The precondition for MOVING a non-boxed local's own reference into an

@@ -21,7 +21,7 @@ import { KEYIX_MEMBER, KEYLIST_MEMBER, OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO
 import { dynDestrCheckHelper, dynIterNHelper, dynKeyGetHelper, originMarkC, recSrcMapC, viewSyncHelper } from "./emit-walkers.js";
 import { genResultThunkFor } from "./emit-async.js";
 import { emitCoroAwait, emitCoroHop, emitCoroUnionSuspend } from "./emit-coro.js";
-import { isStableReceiverOperand } from "../../ir/analysis.js";
+import { BORROWING_DYN_LIBCALLS, isStableReceiverOperand } from "../../ir/analysis.js";
 import { wsGlobalCtorFor } from "./emit-ws.js";
 
 
@@ -3009,7 +3009,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // boxed thunk builds its own typed copies — so the temps release
         // with the frame as usual. The callee's source spelling rides
         // along for Node's "<name> is not a function" TypeError.
-        const callee = E.emitExpr(e.callee);
+        const callee = emitBorrowedLocal(E, e.callee, e.args);
         const what = cStringLiteral(Buffer.from(e.calleeName, "utf8"));
         if (e.spreads !== undefined && e.spreads.length > 0) {
           // The RUNTIME-ARITY form (`f(...args)`): one fresh dyn array
@@ -3035,7 +3035,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           });
           return E.fallibleTemp(e.type, `scr_dyn_apply(${callee.name}, ${pack.name}, ${what})`);
         }
-        const args = e.args.map((a) => E.emitExpr(a));
+        const args = e.args.map((a, i) => emitBorrowedLocal(E, a, e.args.slice(i + 1)));
         let argsExpr = "NULL";
         if (args.length > 0) {
           const arr = `sc_t${E.tempCounter++}`;
@@ -3064,7 +3064,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           else E.line(`scr_dyn_invoke_guard(${recv.name}, ${method});`);
           E.emitPendingCheck();
         }
-        const args = e.args.map((a) => E.emitExpr(a));
+        const args = e.args.map((a, i) => emitBorrowedLocal(E, a, e.args.slice(i + 1)));
         let argsExpr = "NULL";
         if (args.length > 0) {
           const arr = `sc_t${E.tempCounter++}`;
@@ -3371,7 +3371,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // property ladder on EITHER form, so both ride a fallible temp;
         // the result is owned (+1).
         const d = emitBorrowedLocal(E, e.value, [e.key]);
-        const k = E.emitExpr(e.key);
+        const k = emitBorrowedLocal(E, e.key, []);
         const helper = dynKeyGetHelper(E);
         const call = `${helper}(${d.name}, ${k.name}, ${e.optional ? "true" : "false"})`;
         return E.fallibleTemp(e.type, call);
@@ -3818,6 +3818,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           const lc0 = a0.kind === "varRef" ? E.currentLocals.get(a0.localId) : undefined;
           const gl0 = a0.kind === "varRef" && !lc0 ? E.globalsById.get(a0.localId) : undefined;
           args.push(a0.kind === "varRef" && ((lc0 && !lc0.boxed) || (gl0 && !gl0.tdz)) ? emitStableReceiver(E, a0, []) : { name: "NULL", type: a0.type });
+        } else if (BORROWING_DYN_LIBCALLS.has(e.fn)) {
+          // The runtime only borrows these operands: a plain local is read where it lives (see emitBorrowedLocal).
+          e.args.forEach((a, i) => args.push(emitBorrowedLocal(E, a, e.args.slice(i + 1))));
         } else {
           for (const a of e.args) args.push(E.emitExpr(a));
         }
