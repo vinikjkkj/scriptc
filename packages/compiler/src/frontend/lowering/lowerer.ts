@@ -12,6 +12,7 @@
  * - Lexical scoping is resolved here: locals get function-unique ids
  *   ("x.0", "x.1" for shadowing); the IR is scope-flat.
  */
+import { promoCensus } from "../../ir/promo-census.js";
 import { stdlibBufferTypes } from "../buffer-refinement.js";
 import { appendFileSync, readFileSync } from "node:fs";
 import { basename } from "node:path";
@@ -916,6 +917,7 @@ export function lowerToIr(
   const __t1 = performance.now();
   emit.dynRecordFenceAtRun = true;
   let result = emit.run();
+  if (result.module !== null && process.env["SCRIPTC_PROMO_CENSUS"]) promoCensus(result.module, process.env["SCRIPTC_PROMO_CENSUS"]);
   // A module that boxes process.stdout/stderr into the dynamic tree may not
   // reach a stream member the handle ladder has no lowering for: that would
   // be a run-time throw where the program had no defined answer. Refused here.
