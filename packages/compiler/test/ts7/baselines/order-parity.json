@@ -14506,6 +14506,25 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24705-single-value-commonjs-export-calls-its-expando-member-functions/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24705-single-value-commonjs-export-calls-its-expando-member-functions/ck.cjs",
+    "<repo>/tests/corpus/24705-single-value-commonjs-export-calls-its-expando-member-functions/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24706-object-getownpropertydescriptor-over-every-dyn-kind.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24706-object-getownpropertydescriptor-over-every-dyn-kind.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24707-getownpropertydescriptor-result-bound-to-a-typed-local-with-accessor-halves.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24707-getownpropertydescriptor-result-bound-to-a-typed-local-with-accessor-halves.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2471-record-keyed-write-hasown.js": {
    "order": [
     "<repo>/tests/corpus/2471-record-keyed-write-hasown.js"
@@ -14590,27 +14609,27 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/24780-retyped-record-slot-write-visible-through-both-shapes.ts": {
+  "<repo>/tests/corpus/24760-inspect-options-read-at-run-time.js": {
    "order": [
-    "<repo>/tests/corpus/24780-retyped-record-slot-write-visible-through-both-shapes.ts"
+    "<repo>/tests/corpus/24760-inspect-options-read-at-run-time.js"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/24781-union-record-arm-identity-against-a-retyped-shape.ts": {
+  "<repo>/tests/corpus/24761-inspect-colors-leaves-arrays-and-objects.js": {
    "order": [
-    "<repo>/tests/corpus/24781-union-record-arm-identity-against-a-retyped-shape.ts"
+    "<repo>/tests/corpus/24761-inspect-colors-leaves-arrays-and-objects.js"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/24782-retyped-scalar-and-class-slots-share-one-record.ts": {
+  "<repo>/tests/corpus/24762-format-with-options-read-at-run-time.js": {
    "order": [
-    "<repo>/tests/corpus/24782-retyped-scalar-and-class-slots-share-one-record.ts"
+    "<repo>/tests/corpus/24762-format-with-options-read-at-run-time.js"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/24790-spread-of-a-defaulted-this-chain-then-delete.cjs": {
+  "<repo>/tests/corpus/24763-debug-package-inspect-options-shape.cjs": {
    "order": [
-    "<repo>/tests/corpus/24790-spread-of-a-defaulted-this-chain-then-delete.cjs"
+    "<repo>/tests/corpus/24763-debug-package-inspect-options-shape.cjs"
    ],
    "diags": []
   },
@@ -14629,6 +14648,168 @@
   "<repo>/tests/corpus/24766-inspect-colors-over-a-grafted-event-emitter.js": {
    "order": [
     "<repo>/tests/corpus/24766-inspect-colors-over-a-grafted-event-emitter.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24767-inspect-compact-true-layout.js": {
+   "order": [
+    "<repo>/tests/corpus/24767-inspect-compact-true-layout.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24768-inspect-compact-true-over-every-kind.js": {
+   "order": [
+    "<repo>/tests/corpus/24768-inspect-compact-true-over-every-kind.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24769-inspect-compact-true-literal-and-typed.js": {
+   "order": [
+    "<repo>/tests/corpus/24769-inspect-compact-true-literal-and-typed.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24770-inspect-show-proxy.js": {
+   "order": [
+    "<repo>/tests/corpus/24770-inspect-show-proxy.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24771-inspect-custom-inspect-false.js": {
+   "order": [
+    "<repo>/tests/corpus/24771-inspect-custom-inspect-false.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24772-inspect-getters-true-get-set.js": {
+   "order": [
+    "<repo>/tests/corpus/24772-inspect-getters-true-get-set.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24773-inspect-sorted-comparator.js": {
+   "order": [
+    "<repo>/tests/corpus/24773-inspect-sorted-comparator.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24774-inspect-new-option-literals-typed-values.js": {
+   "order": [
+    "<repo>/tests/corpus/24774-inspect-new-option-literals-typed-values.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24775-inspect-show-hidden-arrays-objects-regex.js": {
+   "order": [
+    "<repo>/tests/corpus/24775-inspect-show-hidden-arrays-objects-regex.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24776-inspect-show-hidden-functions.js": {
+   "order": [
+    "<repo>/tests/corpus/24776-inspect-show-hidden-functions.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24777-inspect-show-hidden-instances-typed-symbols-getters.js": {
+   "order": [
+    "<repo>/tests/corpus/24777-inspect-show-hidden-instances-typed-symbols-getters.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24778-format-o-over-typed-and-dyn-values.js": {
+   "order": [
+    "<repo>/tests/corpus/24778-format-o-over-typed-and-dyn-values.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24779-inspect-show-hidden-boolean-argument.js": {
+   "order": [
+    "<repo>/tests/corpus/24779-inspect-show-hidden-boolean-argument.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24780-inspect-show-hidden-class-accessors.js": {
+   "order": [
+    "<repo>/tests/corpus/24780-inspect-show-hidden-class-accessors.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24780-retyped-record-slot-write-visible-through-both-shapes.ts": {
+   "order": [
+    "<repo>/tests/corpus/24780-retyped-record-slot-write-visible-through-both-shapes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24781-inspect-stylize-function-option.js": {
+   "order": [
+    "<repo>/tests/corpus/24781-inspect-stylize-function-option.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24781-union-record-arm-identity-against-a-retyped-shape.ts": {
+   "order": [
+    "<repo>/tests/corpus/24781-union-record-arm-identity-against-a-retyped-shape.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24782-inspect-show-hidden-class-values-and-setter-only.js": {
+   "order": [
+    "<repo>/tests/corpus/24782-inspect-show-hidden-class-values-and-setter-only.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24782-retyped-scalar-and-class-slots-share-one-record.ts": {
+   "order": [
+    "<repo>/tests/corpus/24782-retyped-scalar-and-class-slots-share-one-record.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24783-inspect-show-hidden-eventemitter-class-weak-typed-arrays.js": {
+   "order": [
+    "<repo>/tests/corpus/24783-inspect-show-hidden-eventemitter-class-weak-typed-arrays.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24784-inspect-show-hidden-errors.js": {
+   "order": [
+    "<repo>/tests/corpus/24784-inspect-show-hidden-errors.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24785-inspect-show-hidden-sloppy-functions.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24785-inspect-show-hidden-sloppy-functions.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24786-inspect-show-hidden-member-lengths-and-bigint-views.js": {
+   "order": [
+    "<repo>/tests/corpus/24786-inspect-show-hidden-member-lengths-and-bigint-views.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24787-inspect-show-hidden-eval-class-values.js": {
+   "order": [
+    "<repo>/tests/corpus/24787-inspect-show-hidden-eval-class-values.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24788-inspect-show-hidden-runtime-rooted-class-values.js": {
+   "order": [
+    "<repo>/tests/corpus/24788-inspect-show-hidden-runtime-rooted-class-values.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24789-inspect-show-hidden-getters-class-values.js": {
+   "order": [
+    "<repo>/tests/corpus/24789-inspect-show-hidden-getters-class-values.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24790-spread-of-a-defaulted-this-chain-then-delete.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24790-spread-of-a-defaulted-this-chain-then-delete.cjs"
    ],
    "diags": []
   },
@@ -14698,6 +14879,20 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24820-single-value-commonjs-export-function-expression-expando-member/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24820-single-value-commonjs-export-function-expression-expando-member/ck.cjs",
+    "<repo>/tests/corpus/24820-single-value-commonjs-export-function-expression-expando-member/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24821-single-value-commonjs-export-expando-members-read-as-values-and-called/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24821-single-value-commonjs-export-expando-members-read-as-values-and-called/ck.cjs",
+    "<repo>/tests/corpus/24821-single-value-commonjs-export-expando-members-read-as-values-and-called/main.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/24822-cjs-single-value-export-require-and-namespace/main.cjs": {
    "order": [
     "<repo>/tests/corpus/24822-cjs-single-value-export-require-and-namespace/errs/lib/modern.cjs",
@@ -14711,6 +14906,13 @@
     "<repo>/tests/corpus/24823-cjs-single-value-export-es-namespace-import/errs/lib/modern.cjs",
     "<repo>/tests/corpus/24823-cjs-single-value-export-es-namespace-import/errs/index.cjs",
     "<repo>/tests/corpus/24823-cjs-single-value-export-es-namespace-import/main.mjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24824-applymixin-helper-beside-an-evaluated-class/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24824-applymixin-helper-beside-an-evaluated-class/utils/applyMixin.cjs",
+    "<repo>/tests/corpus/24824-applymixin-helper-beside-an-evaluated-class/main.cjs"
    ],
    "diags": []
   },
@@ -14756,13 +14958,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/24824-applymixin-helper-beside-an-evaluated-class/main.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24824-applymixin-helper-beside-an-evaluated-class/utils/applyMixin.cjs",
-    "<repo>/tests/corpus/24824-applymixin-helper-beside-an-evaluated-class/main.cjs"
-   ],
-   "diags": []
-  },
   "<repo>/tests/corpus/24844-spawn-env-keys-equal-ignoring-case.ts": {
    "order": [
     "<repo>/tests/corpus/24844-spawn-env-keys-equal-ignoring-case.ts"
@@ -14793,6 +14988,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/2485-inspect-circular-refs.ts": {
+   "order": [
+    "<repo>/tests/corpus/2485-inspect-circular-refs.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/24850-timers-fire-in-expiry-order-whatever-the-pause-between-the-calls.js": {
    "order": [
     "<repo>/tests/corpus/24850-timers-fire-in-expiry-order-whatever-the-pause-between-the-calls.js"
@@ -14805,116 +15006,33 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/24902-array-flat-depths-over-typed-nested-arrays.ts": {
-   "order": [
-    "<repo>/tests/corpus/24902-array-flat-depths-over-typed-nested-arrays.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24903-process-hrtime-bigint-is-a-monotonic-nanosecond-clock.ts": {
-   "order": [
-    "<repo>/tests/corpus/24903-process-hrtime-bigint-is-a-monotonic-nanosecond-clock.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24904-a-method-called-through-an-assertion-over-unknown.ts": {
-   "order": [
-    "<repo>/tests/corpus/24904-a-method-called-through-an-assertion-over-unknown.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24905-an-untyped-key-writes-a-record-entry-by-its-text.ts": {
-   "order": [
-    "<repo>/tests/corpus/24905-an-untyped-key-writes-a-record-entry-by-its-text.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24906-a-method-wrapped-on-one-instance-through-an-unknown-view.ts": {
-   "order": [
-    "<repo>/tests/corpus/24906-a-method-wrapped-on-one-instance-through-an-unknown-view.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24900-a-class-instance-handed-out-as-an-interface-keeps-its-identity.ts": {
-   "order": [
-    "<repo>/tests/corpus/24900-a-class-instance-handed-out-as-an-interface-keeps-its-identity.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24901-an-interface-fed-by-a-class-instance-and-by-a-literal.ts": {
-   "order": [
-    "<repo>/tests/corpus/24901-an-interface-fed-by-a-class-instance-and-by-a-literal.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24907-mutually-recursive-nested-function-declarations.ts": {
-   "order": [
-    "<repo>/tests/corpus/24907-mutually-recursive-nested-function-declarations.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24908-exports-handed-to-the-function-that-replaces-them.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24908-exports-handed-to-the-function-that-replaces-them.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24909-a-documented-string-return-that-yields-undefined.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24909-a-documented-string-return-that-yields-undefined.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24910-jsdoc-scalar-parameters-follow-the-flow.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24910-jsdoc-scalar-parameters-follow-the-flow.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24911-process-env-stores-the-string-form-of-an-unproven-value.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24911-process-env-stores-the-string-form-of-an-unproven-value.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24912-a-member-read-through-a-module-that-forwards-its-export/main.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24912-a-member-read-through-a-module-that-forwards-its-export/common.cjs",
-    "<repo>/tests/corpus/24912-a-member-read-through-a-module-that-forwards-its-export/node.cjs",
-    "<repo>/tests/corpus/24912-a-member-read-through-a-module-that-forwards-its-export/index.cjs",
-    "<repo>/tests/corpus/24912-a-member-read-through-a-module-that-forwards-its-export/main.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24913-exports-read-inside-a-function-of-a-module-that-replaces-them/main.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24913-exports-read-inside-a-function-of-a-module-that-replaces-them/common.cjs",
-    "<repo>/tests/corpus/24913-exports-read-inside-a-function-of-a-module-that-replaces-them/node.cjs",
-    "<repo>/tests/corpus/24913-exports-read-inside-a-function-of-a-module-that-replaces-them/main.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24914-sibling-declarations-whose-names-collide-across-functions.js": {
-   "order": [
-    "<repo>/tests/corpus/24914-sibling-declarations-whose-names-collide-across-functions.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24915-a-function-adapted-to-a-documented-type-keeps-its-own-properties.js": {
-   "order": [
-    "<repo>/tests/corpus/24915-a-function-adapted-to-a-documented-type-keeps-its-own-properties.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/2485-inspect-circular-refs.ts": {
-   "order": [
-    "<repo>/tests/corpus/2485-inspect-circular-refs.ts"
-   ],
-   "diags": []
-  },
   "<repo>/tests/corpus/2486-recursive-record-boundaries.ts": {
    "order": [
     "<repo>/tests/corpus/2486-recursive-record-boundaries.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24860-class-instance-keyed-reads-through-an-untyped-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/24860-class-instance-keyed-reads-through-an-untyped-slot.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24861-run-time-property-table-is-found-through-several-table-classes-and-a-hierarchy.ts": {
+   "order": [
+    "<repo>/tests/corpus/24861-run-time-property-table-is-found-through-several-table-classes-and-a-hierarchy.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24862-run-time-property-table-slot-of-an-error-subclass-and-a-deeper-error-rooted-class.ts": {
+   "order": [
+    "<repo>/tests/corpus/24862-run-time-property-table-slot-of-an-error-subclass-and-a-deeper-error-rooted-class.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24863-error-subclass-expando-reads-do-not-go-through-the-property-table-offset.ts": {
+   "order": [
+    "<repo>/tests/corpus/24863-error-subclass-expando-reads-do-not-go-through-the-property-table-offset.ts"
    ],
    "diags": []
   },
@@ -14972,9 +15090,110 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24900-a-class-instance-handed-out-as-an-interface-keeps-its-identity.ts": {
+   "order": [
+    "<repo>/tests/corpus/24900-a-class-instance-handed-out-as-an-interface-keeps-its-identity.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24901-an-interface-fed-by-a-class-instance-and-by-a-literal.ts": {
+   "order": [
+    "<repo>/tests/corpus/24901-an-interface-fed-by-a-class-instance-and-by-a-literal.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24902-array-flat-depths-over-typed-nested-arrays.ts": {
+   "order": [
+    "<repo>/tests/corpus/24902-array-flat-depths-over-typed-nested-arrays.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24903-process-hrtime-bigint-is-a-monotonic-nanosecond-clock.ts": {
+   "order": [
+    "<repo>/tests/corpus/24903-process-hrtime-bigint-is-a-monotonic-nanosecond-clock.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24904-a-method-called-through-an-assertion-over-unknown.ts": {
+   "order": [
+    "<repo>/tests/corpus/24904-a-method-called-through-an-assertion-over-unknown.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24905-an-untyped-key-writes-a-record-entry-by-its-text.ts": {
+   "order": [
+    "<repo>/tests/corpus/24905-an-untyped-key-writes-a-record-entry-by-its-text.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24906-a-method-wrapped-on-one-instance-through-an-unknown-view.ts": {
+   "order": [
+    "<repo>/tests/corpus/24906-a-method-wrapped-on-one-instance-through-an-unknown-view.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24907-mutually-recursive-nested-function-declarations.ts": {
+   "order": [
+    "<repo>/tests/corpus/24907-mutually-recursive-nested-function-declarations.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24908-exports-handed-to-the-function-that-replaces-them.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24908-exports-handed-to-the-function-that-replaces-them.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24909-a-documented-string-return-that-yields-undefined.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24909-a-documented-string-return-that-yields-undefined.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2491-strict-unit-compare-no-arm.ts": {
    "order": [
     "<repo>/tests/corpus/2491-strict-unit-compare-no-arm.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24910-jsdoc-scalar-parameters-follow-the-flow.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24910-jsdoc-scalar-parameters-follow-the-flow.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24911-process-env-stores-the-string-form-of-an-unproven-value.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24911-process-env-stores-the-string-form-of-an-unproven-value.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24912-a-member-read-through-a-module-that-forwards-its-export/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24912-a-member-read-through-a-module-that-forwards-its-export/common.cjs",
+    "<repo>/tests/corpus/24912-a-member-read-through-a-module-that-forwards-its-export/node.cjs",
+    "<repo>/tests/corpus/24912-a-member-read-through-a-module-that-forwards-its-export/index.cjs",
+    "<repo>/tests/corpus/24912-a-member-read-through-a-module-that-forwards-its-export/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24913-exports-read-inside-a-function-of-a-module-that-replaces-them/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24913-exports-read-inside-a-function-of-a-module-that-replaces-them/common.cjs",
+    "<repo>/tests/corpus/24913-exports-read-inside-a-function-of-a-module-that-replaces-them/node.cjs",
+    "<repo>/tests/corpus/24913-exports-read-inside-a-function-of-a-module-that-replaces-them/main.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24914-sibling-declarations-whose-names-collide-across-functions.js": {
+   "order": [
+    "<repo>/tests/corpus/24914-sibling-declarations-whose-names-collide-across-functions.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24915-a-function-adapted-to-a-documented-type-keeps-its-own-properties.js": {
+   "order": [
+    "<repo>/tests/corpus/24915-a-function-adapted-to-a-documented-type-keeps-its-own-properties.js"
    ],
    "diags": []
   },
@@ -25253,6 +25472,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/getters-class-value-reading-this.js": {
+   "order": [
+    "<repo>/tests/diagnostics/getters-class-value-reading-this.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/getters-class-value-rooted-in-runtime-class.js": {
+   "order": [
+    "<repo>/tests/diagnostics/getters-class-value-rooted-in-runtime-class.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/grafted-emitter-dyn-constructor-read-refused.cjs": {
    "order": [
     "<repo>/tests/diagnostics/grafted-emitter-dyn-constructor-read-refused.cjs"
@@ -26250,6 +26481,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/util-inspect-options-typed-record-still-refused.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/util-inspect-options-typed-record-still-refused.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/utility-types.ts": {
    "order": [
     "<repo>/tests/diagnostics/utility-types.ts"
@@ -26957,219 +27194,6 @@
   "<repo>/tests/fixtures/node-types/streams.ts": {
    "order": [
     "<repo>/tests/fixtures/node-types/streams.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24705-single-value-commonjs-export-calls-its-expando-member-functions/main.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24705-single-value-commonjs-export-calls-its-expando-member-functions/ck.cjs",
-    "<repo>/tests/corpus/24705-single-value-commonjs-export-calls-its-expando-member-functions/main.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24820-single-value-commonjs-export-function-expression-expando-member/main.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24820-single-value-commonjs-export-function-expression-expando-member/ck.cjs",
-    "<repo>/tests/corpus/24820-single-value-commonjs-export-function-expression-expando-member/main.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24821-single-value-commonjs-export-expando-members-read-as-values-and-called/main.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24821-single-value-commonjs-export-expando-members-read-as-values-and-called/ck.cjs",
-    "<repo>/tests/corpus/24821-single-value-commonjs-export-expando-members-read-as-values-and-called/main.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24706-object-getownpropertydescriptor-over-every-dyn-kind.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24706-object-getownpropertydescriptor-over-every-dyn-kind.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24707-getownpropertydescriptor-result-bound-to-a-typed-local-with-accessor-halves.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24707-getownpropertydescriptor-result-bound-to-a-typed-local-with-accessor-halves.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24760-inspect-options-read-at-run-time.js": {
-   "order": [
-    "<repo>/tests/corpus/24760-inspect-options-read-at-run-time.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24761-inspect-colors-leaves-arrays-and-objects.js": {
-   "order": [
-    "<repo>/tests/corpus/24761-inspect-colors-leaves-arrays-and-objects.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24762-format-with-options-read-at-run-time.js": {
-   "order": [
-    "<repo>/tests/corpus/24762-format-with-options-read-at-run-time.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24763-debug-package-inspect-options-shape.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24763-debug-package-inspect-options-shape.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24767-inspect-compact-true-layout.js": {
-   "order": [
-    "<repo>/tests/corpus/24767-inspect-compact-true-layout.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24768-inspect-compact-true-over-every-kind.js": {
-   "order": [
-    "<repo>/tests/corpus/24768-inspect-compact-true-over-every-kind.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24769-inspect-compact-true-literal-and-typed.js": {
-   "order": [
-    "<repo>/tests/corpus/24769-inspect-compact-true-literal-and-typed.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24770-inspect-show-proxy.js": {
-   "order": [
-    "<repo>/tests/corpus/24770-inspect-show-proxy.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24771-inspect-custom-inspect-false.js": {
-   "order": [
-    "<repo>/tests/corpus/24771-inspect-custom-inspect-false.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24772-inspect-getters-true-get-set.js": {
-   "order": [
-    "<repo>/tests/corpus/24772-inspect-getters-true-get-set.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24773-inspect-sorted-comparator.js": {
-   "order": [
-    "<repo>/tests/corpus/24773-inspect-sorted-comparator.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24774-inspect-new-option-literals-typed-values.js": {
-   "order": [
-    "<repo>/tests/corpus/24774-inspect-new-option-literals-typed-values.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24775-inspect-show-hidden-arrays-objects-regex.js": {
-   "order": [
-    "<repo>/tests/corpus/24775-inspect-show-hidden-arrays-objects-regex.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24776-inspect-show-hidden-functions.js": {
-   "order": [
-    "<repo>/tests/corpus/24776-inspect-show-hidden-functions.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24777-inspect-show-hidden-instances-typed-symbols-getters.js": {
-   "order": [
-    "<repo>/tests/corpus/24777-inspect-show-hidden-instances-typed-symbols-getters.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24778-format-o-over-typed-and-dyn-values.js": {
-   "order": [
-    "<repo>/tests/corpus/24778-format-o-over-typed-and-dyn-values.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24779-inspect-show-hidden-boolean-argument.js": {
-   "order": [
-    "<repo>/tests/corpus/24779-inspect-show-hidden-boolean-argument.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24780-inspect-show-hidden-class-accessors.js": {
-   "order": [
-    "<repo>/tests/corpus/24780-inspect-show-hidden-class-accessors.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24781-inspect-stylize-function-option.js": {
-   "order": [
-    "<repo>/tests/corpus/24781-inspect-stylize-function-option.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24782-inspect-show-hidden-class-values-and-setter-only.js": {
-   "order": [
-    "<repo>/tests/corpus/24782-inspect-show-hidden-class-values-and-setter-only.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24783-inspect-show-hidden-eventemitter-class-weak-typed-arrays.js": {
-   "order": [
-    "<repo>/tests/corpus/24783-inspect-show-hidden-eventemitter-class-weak-typed-arrays.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24784-inspect-show-hidden-errors.js": {
-   "order": [
-    "<repo>/tests/corpus/24784-inspect-show-hidden-errors.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24785-inspect-show-hidden-sloppy-functions.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24785-inspect-show-hidden-sloppy-functions.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24786-inspect-show-hidden-member-lengths-and-bigint-views.js": {
-   "order": [
-    "<repo>/tests/corpus/24786-inspect-show-hidden-member-lengths-and-bigint-views.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/util-inspect-options-typed-record-still-refused.ts": {
-   "order": [
-    "<repo>/tests/diagnostics/util-inspect-options-typed-record-still-refused.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24787-inspect-show-hidden-eval-class-values.js": {
-   "order": [
-    "<repo>/tests/corpus/24787-inspect-show-hidden-eval-class-values.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24788-inspect-show-hidden-runtime-rooted-class-values.js": {
-   "order": [
-    "<repo>/tests/corpus/24788-inspect-show-hidden-runtime-rooted-class-values.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24789-inspect-show-hidden-getters-class-values.js": {
-   "order": [
-    "<repo>/tests/corpus/24789-inspect-show-hidden-getters-class-values.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/getters-class-value-reading-this.js": {
-   "order": [
-    "<repo>/tests/diagnostics/getters-class-value-reading-this.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/getters-class-value-rooted-in-runtime-class.js": {
-   "order": [
-    "<repo>/tests/diagnostics/getters-class-value-rooted-in-runtime-class.js"
    ],
    "diags": []
   }
