@@ -20,7 +20,7 @@ import { cjsClassExprWholeExportOf, isCjsJsFile, isJsSourceFile, isModuleExports
 import { pairedProtoClassInfoFor, pairedProtoClassOfValue, protoClassArmOn, protoClassInfoFor, protoClassOfNamespaceMember, protoDataGetterFns } from "./proto-class-consume.js";
 import { PoisonError, dynFallbackType, dynUndefinedExpr, fnValueCodeOfNode, newFnCtx, own } from "./lowerer.js";
 import { isBufferSpeciesCtor, lowerFastBufferNew, bufEncoding, lowerMapCloneNew, lowerMapSeedArrayNew } from "./lower-containers.js";
-import { unboundMethodThunk, fnOwnCounters, fnOwnPropBox, fnOwnWhy, probeLower, pureReemittable } from "./lower-exprs.js";
+import { unboundGenericClosures, unboundMethodThunk, fnOwnCounters, fnOwnPropBox, fnOwnWhy, probeLower, pureReemittable } from "./lower-exprs.js";
 import { lowerDateNumArg, lowerSearchParamsNew } from "./lower-builtins.js";
 import { readFileSync } from "node:fs";
 import { requiresDynamicPackageDiag, requiresDynamicTypeDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
@@ -9603,6 +9603,36 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
           loc: dloc,
         });
         info.def.dynFieldData = [...(info.def.dynFieldData ?? []), { name: dname, fn: fnName }];
+      }
+      // A LATE method (`C.prototype.m = function () {}`) some instance may override through an own property takes a slot field: while the slot is
+      // unset the instance's `m` is the method, so a boxed instance's read or call of it answers the method's value, not the unset slot.
+      for (const lname of info.shadowLate ?? []) {
+        if (!info.fields.has(lname) || (info.def.dynFieldData ?? []).some((x) => x.name === lname)) continue;
+        const found = L.findMethodOn(info, lname);
+        const lloc = locOf(info.decl!);
+        let thunk: IrExpr;
+        if (found !== null) {
+          // A method that reads `arguments` (its parameter is the variadic dyn pack) is a value too: unboundMethodThunk's own admission.
+          const variadicOnly = found.sig.params.some((q) => q.mode === "dynRest") && found.sig.params.every((q) => q.mode === "required" || q.mode === "omittable" || q.mode === "dynRest");
+          if (found.sig.abstract === true || (found.sig.params.some((q) => q.mode !== "required" && q.mode !== "omittable") && !(variadicOnly && !L.overrideBelow(info, lname)))) continue;
+          thunk = unboundMethodThunk(L, info, lname, found, lloc, true);
+        } else {
+          // An implicit-any late method (ioredis' `Pipeline.prototype.exec = function (callback)`): its default instance's closure.
+          const generic = unboundGenericClosures(L, info.decl!, info, lname, false);
+          if (generic === null) continue;
+          thunk = generic.own;
+        }
+        if (thunk.type.kind !== "func" || !canBoxFuncIntoDyn(thunk.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))) continue;
+        const lfn = `%${className}.%dynpd:${lname}`;
+        out.push({
+          name: lfn,
+          params: [],
+          returnType: DYN,
+          locals: [],
+          body: [{ kind: "return", value: { kind: "dynFrom", value: thunk, type: DYN, loc: lloc }, loc: lloc }],
+          loc: lloc,
+        });
+        info.def.dynFieldData = [...(info.def.dynFieldData ?? []), { name: lname, fn: lfn }];
       }
     }
     // A class the program boxes into a dyn value (the discovery pass left
