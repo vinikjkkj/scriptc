@@ -14835,6 +14835,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24883-borrowed-local-operands-of-dyn-operators-calls-and-keys.js": {
+   "order": [
+    "<repo>/tests/corpus/24883-borrowed-local-operands-of-dyn-operators-calls-and-keys.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2490-find-miss-null-compare.ts": {
    "order": [
     "<repo>/tests/corpus/2490-find-miss-null-compare.ts"
