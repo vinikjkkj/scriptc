@@ -10445,6 +10445,17 @@ void scr_dyn_check_fail(const ScrDynPath *path, const char *want, const ScrDyn *
   scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
 }
 
+bool scr_dyn_fn_is_sig(const ScrDyn *d, const ScrStr *sig) {
+  return d != NULL && d->kind == SCR_DYN_FUNC && strlen(scr_dyn_fn_sig(d)) == sig->len && memcmp(scr_dyn_fn_sig(d), sig->data, sig->len) == 0;
+}
+
+void scr_dyn_require_fn(const ScrDyn *member, const ScrStr *name, bool absent_ok) {
+  if (absent_ok && (member == NULL || member->kind == SCR_DYN_UNDEF)) return;
+  if (member != NULL && (member->kind == SCR_DYN_FUNC || scr_dyn_isl_typeof_is(member, "function"))) return;
+  ScrDynPath p = {NULL, name->data, 0};
+  scr_dyn_check_fail(&p, "function", member);
+}
+
 /* ── parser ────────────────────────────────────────────────────────────── */
 
 #define SCR_JSON_MAX_DEPTH 1000

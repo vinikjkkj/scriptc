@@ -73,7 +73,7 @@ import type {
 import { isDynBytes, isDynErrorClass } from "../../ir/nodes.js";
 import { protoEscapes, strictAt } from "./lower-protoescape.js";
 import { fenceInspGetters, newInspGettersScan, noteInspGettersNode } from "./inspect-getters-fence.js";
-import { applyInstanceOverrides, applyLateInstalls, applyProtoSlots, dynFnAsFunc, dynFnReadable, fnReturnsProjection, scanProtoSlots } from "./lower-protoslots.js";
+import { applyInstanceOverrides, applyLateInstalls, applyProtoSlots, dynFnAsFunc, dynFnCheckedAsFunc, dynFnReadable, fnReturnsProjection, scanProtoSlots } from "./lower-protoslots.js";
 import { applyProtoTabs, hasProtoTab, scanProtoTabs, upgradeLateMethodsOverTables } from "./lower-prototab.js";
 import { graftOnlyHelperRanges } from "./lower-emitter-mixin.js";
 import { applyDatumKeyRows } from "./lower-protodata.js";
@@ -9283,7 +9283,7 @@ export class Lowerer {
    * (data members live through the hidden slot, read and written on the object) whose method members are closures
    * that call the object by name (so the object stays `this`). A shape that is not view-capable in this build is a
    * named refusal, never a copy. */
-  dynRecordProjection(value: IrExpr, rec: IrType & { kind: "record" }, loc: SrcLoc): IrExpr {
+  dynRecordProjection(value: IrExpr, rec: IrType & { kind: "record" }, loc: SrcLoc, absentOk = true): IrExpr {
     const sh = this.shapes.get(rec.shapeId)!;
     if (this.onEdge !== undefined) this.noteViewCast(rec, this.viewCastSeen);
     else if (sh.view !== true) {
@@ -9298,9 +9298,15 @@ export class Lowerer {
     t.boxed = true;
     const tRef = (): IrExpr => ({ kind: "varRef", localId: t.id, type: DYN, loc });
     const fields: { name: string; value: IrExpr; viewSlot?: true; viewLazy?: true }[] = [];
+    // The checked cast validated every REQUIRED method at the boundary (a path-annotated TypeError); the view keeps that contract.
+    const checks: IrStmt[] = [];
     for (const f of sh.fields) {
       const slot = this.dynMethodSlot(t.id, f.name, f.type, loc);
       if (slot !== null) {
+        if (this.projectableFunc(f.type)?.optional === null) {
+          const member: IrExpr = { kind: "dynKeyGet", key: { kind: "strLit", value: f.name, type: STRING, loc }, value: tRef(), type: DYN, loc };
+          checks.push({ kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.requireFn", args: [member, { kind: "strLit", value: f.name, type: STRING, loc }, { kind: "boolLit", value: absentOk, type: BOOL, loc }], type: VOID, loc }, loc });
+        }
         fields.push({ name: f.name, value: slot });
       } else {
         // A DATA member is read through the view at every access (the type checks there): reading it here too would run
@@ -9309,10 +9315,12 @@ export class Lowerer {
       }
     }
     fields.push({ name: "%view", value: tRef(), viewSlot: true });
+    this.markToStrSlot(rec.shapeId);
     return {
       kind: "seqExpr",
-      stmts: [{ kind: "varDecl", localId: t.id, init: value, loc }],
-      result: { kind: "recordLit", fields, type: rec, loc },
+      stmts: [{ kind: "varDecl", localId: t.id, init: value, loc }, ...checks],
+      // the hidden toString slot the copying builder carried: `String(record)` still reaches the object's own toString
+      result: { kind: "recordLit", fields, toStr: { kind: "libCall", fn: "dyn.tostrClosure", args: [tRef()], type: funcOf([], STRING), loc }, type: rec, loc },
       type: rec,
       loc,
     };
@@ -9606,7 +9614,7 @@ export class Lowerer {
     // A checked-dynamic function value into a function slot that answers a Promise: the checked cast has no adapter for it, so the
     // slot gets a closure over the value (parameters box into dyn, the answer adopts into the declared promise).
     if (expr.type.kind === "dyn" && expected.kind === "func" && (expected.ret.kind === "promise" || fnReturnsProjection(this, expected)) && dynFnReadable(this, expected)) {
-      return dynFnAsFunc(this, expr, expected, expr.loc);
+      return dynFnCheckedAsFunc(this, expr, expected, expr.loc);
     }
     if (expr.type.kind === "dyn" && expected.kind !== "dyn") {
       if (canDynCheckTo(expected, (id) => this.shapes.get(id), (id) => this.unions.get(id))) {

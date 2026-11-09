@@ -7145,6 +7145,10 @@ typedef struct ScrDynPath {
  * prints as "Uncaught TypeError: ..." and exits 1). This is
  * scriptc-specific behavior — JS `as` never checks (SEMANTICS.md). */
 void scr_dyn_check_fail(const ScrDynPath *path, const char *want, const ScrDyn *got);
+/* A record VIEW's method member: throws the checked cast's TypeError ("expected function at $.<name>, got <kind>") unless `member` is callable (an undefined member passes when `absent_ok`: a binding whose member is assigned after it is initialised). */
+/* True when `d` is a function boxed at exactly the interned signature `sig`. */
+bool scr_dyn_fn_is_sig(const ScrDyn *d, const ScrStr *sig);
+void scr_dyn_require_fn(const ScrDyn *member, const ScrStr *name, bool absent_ok);
 
 /* dynCheck extraction for an ArrayBuffer target (`u as ArrayBuffer`): an
  * ARRBUF box answers the RETAINED payload (+1 — the same buffer, never a

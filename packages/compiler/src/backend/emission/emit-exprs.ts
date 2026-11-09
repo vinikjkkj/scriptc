@@ -7611,6 +7611,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_dyn_this_get()`);
           case "dyn.thisSloppy":
             return finish(`scr_dyn_this_get_sloppy()`);
+          case "dyn.fnIsSig":
+            return finish(`scr_dyn_fn_is_sig(${arg(0)}, ${arg(1)})`);
+          case "dyn.requireFn":
+            return finish(`scr_dyn_require_fn(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "dyn.tostrClosure":
+            return finish(`scr_dyn_tostr_closure(${arg(0)})`);
           case "dyn.isAbsent":
             return finish(`scr_dyn_is_absent(${arg(0)})`);
           case "dyn.isGlobalThis":

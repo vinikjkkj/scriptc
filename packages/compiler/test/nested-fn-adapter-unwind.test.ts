@@ -38,21 +38,35 @@ import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { compile } from "../src/index.js";
 
-/* POSITIVE: the func sits one level down, inside a record — the shape the
- * top-level-only guard missed. Also exercises it under a union arm and an
- * array element, so a fix that walked records alone would still fail here. */
+/* POSITIVE: the func sits one level down, inside a record (an array of them, so the record takes the checked cast and its adapter: a record
+ * of METHODS is read as a view of the object since the method receiver work, and its closures are the VIEW program below). Also exercises it
+ * under an array element, so a fix that walked records alone would still fail here. */
 const NESTED = [
+  `interface Codec { find: ((k: string) => string)[]; readonly count: number }`,
+  `const liar: any = { find: [function (k: string) { return k === "hit" ? "FOUND" : null }], count: 7 };`,
+  `const c: Codec = liar;`,
+  `console.log("1 " + c.find[0]!("hit"));`,
+  `const miss = c.find[0]!("miss");`,
+  `console.log("2 " + typeof miss + " " + String(c.count));`,
+  ``,
+  `interface Boxed { pick: ((i: number) => string)[]; readonly n: number }`,
+  `const boxed: any = { pick: [function (i: number) { return "p" + String(i) }], n: 1 };`,
+  `const b: Boxed = boxed;`,
+  `console.log("3 " + b.pick[0]!(0) + " " + String(b.n));`,
+  `export {};`,
+  ``,
+].join("\n");
+
+/* The METHOD spelling of the same shape: a record of methods read off a dynamic value is a view whose method closures convert the result at
+ * the call (a path-annotated TypeError). The unwind must follow those calls too. Node-backed: the program prints `1 FOUND` then the main
+ * build's own `Uncaught TypeError: expected string at $, got null` (identical on main before the view; the checked-dynamic contract). */
+const VIEWED = [
   `interface Codec { find(k: string): string; readonly count: number }`,
   `const liar: any = { find(k: string) { return k === "hit" ? "FOUND" : null }, count: 7 };`,
   `const c: Codec = liar;`,
   `console.log("1 " + c.find("hit"));`,
   `const miss = c.find("miss");`,
   `console.log("2 " + typeof miss + " " + String(c.count));`,
-  ``,
-  `interface Boxed { pick(i: number): string; readonly n: number }`,
-  `const boxed: any = { pick(i: number) { return "p" + String(i) }, n: 1 };`,
-  `const b: Boxed = boxed;`,
-  `console.log("3 " + b.pick(0) + " " + String(b.n));`,
   `export {};`,
   ``,
 ].join("\n");
@@ -95,11 +109,12 @@ async function emit(tag: string, program: string): Promise<string> {
   return await readFile(res.cPath, "utf8");
 }
 
-let cached: Promise<{ nested: string; plain: string }> | undefined;
-function both(): Promise<{ nested: string; plain: string }> {
+let cached: Promise<{ nested: string; plain: string; viewed: string }> | undefined;
+function both(): Promise<{ nested: string; plain: string; viewed: string }> {
   return (cached ??= (async () => ({
     nested: await emit("nested", NESTED),
     plain: await emit("plain", PLAIN),
+    viewed: await emit("viewed", VIEWED),
   }))());
 }
 
@@ -132,6 +147,13 @@ describe("a dyn-checked function member below the top level arms the unwind", ()
     const { nested } = await both();
     const bare = callSites(nested).filter((s) => !s.checked);
     expect(bare.map((s) => s.line)).toEqual([]);
+  });
+
+  test("every call through a record VIEW's method closure tests the pending exception", async () => {
+    const { viewed } = await both();
+    const sites = callSites(viewed);
+    expect(sites.length).toBeGreaterThanOrEqual(2);
+    expect(sites.filter((s) => !s.checked).map((s) => s.line)).toEqual([]);
   });
 
   test("the control's calls stay bare — the instrument can see a difference", async () => {

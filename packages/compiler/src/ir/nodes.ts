@@ -5590,6 +5590,12 @@ export type IrLibFn =
   | "dyn.thisSloppy"
   | "dyn.isGlobalThis"
   | "dyn.isAbsent"
+  /** The checked method boundary of a record VIEW over a dynamic object: (member value, member name, absent-ok flag). A member that is not callable throws the checked cast's path-annotated TypeError (`expected function at $.name, got <kind>`). */
+  | "dyn.requireFn"
+  /** (dyn, signature key): true when the value is a function boxed at EXACTLY that interned signature (the checked cast's exact-unwrap test). */
+  | "dyn.fnIsSig"
+  /** The hidden toString slot fill of a record VIEW over a dynamic object (scr_dyn_tostr_closure): a `() => string` closure over the object, or NULL when it has no callable toString. */
+  | "dyn.tostrClosure"
   /** OPEN an ambient-receiver window: bind the dyn operand as `this` for
    * everything the current frame calls until the matching `dyn.thisPop`.
    * The operand is BORROWED at the call and retained for the window
@@ -15318,6 +15324,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "dyn.iterPack",
   "dyn.iterOpen",
   "dyn.iterClose",
+  "dyn.requireFn",
   "dyn.toString",
   // the range twin throws the same nullish/null-prototype TypeErrors,
   // plus the number receiver's radix RangeError

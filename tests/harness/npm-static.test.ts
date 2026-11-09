@@ -1137,10 +1137,11 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     // -- MECHANISM 1: RECEIVER BINDING, via the ambient window.
     // The member resolves...
     expect(rows.get("m1ReadDot")).toBe("function");
-    // ...the call runs, and only `this` is wrong...
-    expect(rows.get("m1CallDot")).toBe("undefined");
-    // ...and it is wrong by LEAKING THE CALLER, which is the signature.
-    expect(rows.get("m1CallDotFromMethod")).toBe("obj tag=OUTER");
+    // CLOSED by the record-receiver work (a dynamic value read through a record of methods is a view that calls the object by name, so the
+    // object stays `this`): both rows were "undefined" and "obj tag=OUTER" (the leaked caller) and now answer what Node answers.
+    expect(rows.get("m1CallDot")).toBe("obj tag=L");
+    expect(rows.get("m1CallDotFromMethod")).toBe("obj tag=L");
+    expect(/m1CallDot\s+= obj tag=L/.test(node)).toBe(true);
     expect(node.includes("m1CallDotFromMethod = obj tag=L")).toBe(true);
 
     // -- MECHANISM 2: MEMBER RESOLUTION, closed in two halves. 4151
@@ -1177,20 +1178,15 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
       expect(`${call}:${(rows.get(call) ?? "").includes("is not a function")}`).toBe(`${call}:false`);
     }
 
-    // STILL DIVERGENT, and now the ONLY divergence left in this case:
-    // the three m1 rows, which are 4113's receiver BINDING and a
-    // different mechanism (the decisive m1CallDotFromMethod row above
-    // says so). Ten of 25 lines differed from Node on base; three do
-    // now, and all three are m1.
+    // NO divergence is left in this case: the two m1 rows (4113's receiver binding) closed with the record-receiver work, a record of methods
+    // read off a dynamic value being a view that calls the object by name. Every row now answers what Node answers.
     const nodeRows = new Map(
       node.split("\n").filter((l) => l.includes(" = "))
         .map((l) => [l.slice(0, l.indexOf(" = ")).trim(), l.slice(l.indexOf(" = ") + 3)] as const),
     );
     const differing = [...rows.keys()].filter((k) => rows.get(k) !== nodeRows.get(k));
-    expect(differing.sort()).toEqual(["m1CallDot", "m1CallDotFromMethod"]);
-
-    // The remaining divergence is asserted, not merely described.
-    expect(native).not.toBe(node);
+    expect(differing).toEqual([]);
+    expect(native).toBe(node);
     expect(nativeRes.exitCode).toBe(0);
   }, 180_000);
 

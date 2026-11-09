@@ -22,7 +22,7 @@ import type { ClassInfo } from "./lower-classes.js";
 import { cjsKeyedForEachOf } from "../program.js";
 import { dynCallWithThis } from "./lower-calls.js";
 import { hasProtoTab, protoTabReadChain } from "./lower-prototab.js";
-import { BOOL, DYN, F64, STRING, UNDEFINED_T, VOID, canConvertToDyn, canDynCheckTo, typeEquals, type IrExpr, type IrFunction, type IrGlobal, type IrParam, type IrStmt, type IrType, type SrcLoc } from "../../ir/nodes.js";
+import { BOOL, DYN, F64, STRING, UNDEFINED_T, VOID, canConvertToDyn, canDynCheckTo, typeEquals, typeKey, type IrExpr, type IrFunction, type IrGlobal, type IrParam, type IrStmt, type IrType, type SrcLoc } from "../../ir/nodes.js";
 
 const locOf = (n: ts.Node): SrcLoc => ({ file: n.getSourceFile().fileName, start: n.getStart(), end: n.getEnd() }) as SrcLoc;
 
@@ -195,6 +195,28 @@ export function dynFnAsFunc(L: Lowerer, value: IrExpr, fnT: IrType, loc: SrcLoc)
   } finally {
     L.fnStack.pop();
   }
+}
+
+/** A checked-dynamic function value cast to `fnT` (the `u as F` / typed-slot conversion). A function boxed at exactly `fnT`'s signature comes back
+ * as itself (the checked cast's identity unwrap: `u as F === f`); any other callable is read through dynFnAsFunc's closure. */
+export function dynFnCheckedAsFunc(L: Lowerer, value: IrExpr, fnT: IrType, loc: SrcLoc): IrExpr {
+  if (L.fnStack.length === 0 || fnT.kind !== "func" || !fnReturnsProjection(L, fnT)) return dynFnAsFunc(L, value, fnT, loc);
+  const held = L.declareHiddenLocal("%dynfncast", DYN);
+  const heldRef = (): IrExpr => ({ kind: "varRef", localId: held.id, type: DYN, loc });
+  return {
+    kind: "seqExpr",
+    stmts: [{ kind: "varDecl", localId: held.id, init: value, loc }],
+    result: {
+      kind: "ternary",
+      cond: { kind: "libCall", fn: "dyn.fnIsSig", args: [heldRef(), { kind: "strLit", value: typeKey(fnT), type: STRING, loc }], type: BOOL, loc },
+      then: { kind: "dynCheck", value: heldRef(), type: fnT, loc },
+      else_: dynFnAsFunc(L, heldRef(), fnT, loc),
+      type: fnT,
+      loc,
+    },
+    type: fnT,
+    loc,
+  };
 }
 
 function dynFnAsFuncIn(L: Lowerer, value: IrExpr, fnT: IrType, loc: SrcLoc): IrExpr {
