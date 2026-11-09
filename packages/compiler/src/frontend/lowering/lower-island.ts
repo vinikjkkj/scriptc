@@ -7,6 +7,7 @@ import type { Lowerer } from "./lowerer.js";
 import { BOOL, DYN, F64, IrExpr, IrStmt, IrType, JSVAL, MAX_ISLAND_CALLBACK_ARITY, STRING, VOID, arrayOf, canBoxFuncIntoDyn, canMarshalTypedFuncIntoIsland, funcOf, islandPromisePayloadTag, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ISLAND_SURFACE, IslandFnEntry, STATIC_MATH_CONSTS, STATIC_MATH_FNS, boundaryIntoIslandMsg } from "./surfaces.js";
 import { requiresDynamicApiDiag, requiresDynamicPackageDiag } from "../../diagnostics/diagnostic.js";
+import { orderedImportsOf } from "../program.js";
 import { canonicalBuiltinModule, isModuleExportsAccess, cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, cjsHiddenAccessorExport, cjsInsertionOrderOf, dynamicImportSpecOf, isCjsJsFile, locOf, npmPackageNameOf, npmStaticDepSf7, provenanceTwinDepSf7, requireSpecOf, resolveImport } from "../program.js";
 import { runtimePackageOfTypesPackage } from "../shared.js";
 import { isRelativeSpecifier } from "../shared.js";
@@ -296,6 +297,9 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
     if (arg === undefined) return null;
     const spec = dynamicImportSpecOf(L.checker, arg);
     if (spec === null) return null;
+    // A FOLDED constant specifier types the import() as `any` (the checker pins no module), so the binding has no namespace symbol to alias:
+    // the ordered namespace builder serves it as a checked-dynamic value.
+    if (!ts.isStringLiteralLike(arg)) return null;
     if (ts.isIdentifier(decl.name)) {
       // A plain binding is the `import * as ns` equivalence.
     } else if (ts.isObjectBindingPattern(decl.name)) {
@@ -768,6 +772,13 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
                   what: `${named}, which is not part of the compiled module graph`,
                   how: `import it statically so the build compiles it`,
                 };
+        // The NATIVE answer: an async builder (park, init, interned checked-dynamic namespace) called at the site.
+        if (own !== null && !isCjsJsFile(own) && !own.fileName.endsWith(".cts")) {
+          const ordered = staticDynNsBuilderOf(L, own, loc, false, true);
+          if (ordered !== null) {
+            return { kind: "call", callee: ordered, args: [], type: { kind: "promise", inner: DYN }, loc };
+          }
+        }
         L.pushDiag({
           code: "SC2012",
           message: `'import()' of ${why.what} runs in the embedded dynamic engine, which this build does not include`,
@@ -1109,6 +1120,47 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
    * a build is one tier). Null when the module never joined the compiled
    * graph, or when its init is async (top-level await in a package — the
    * island path's business). */
+/** Is the module-scope binding `sym` written anywhere that can run AFTER its module finished evaluating: inside any function, method,
+ * accessor, constructor or class static block, or through a destructuring/for-in/of target the scan cannot place? (Top-level writes only
+ * run during the module's own evaluation; an imported binding is read-only, so the declaring file is the only place a write can live.) */
+function writtenAfterEvaluation(L: Lowerer, sym: ts.Symbol, sf: ts.SourceFile): boolean {
+  let later = false;
+  const inFunction = (n: ts.Node): boolean => {
+    for (let p: ts.Node | undefined = n.parent; p !== undefined && !ts.isSourceFile(p); p = p.parent) {
+      if (ts.isFunctionDeclaration(p) || ts.isFunctionExpression(p) || ts.isArrowFunction(p) || ts.isMethodDeclaration(p) ||
+          ts.isGetAccessorDeclaration(p) || ts.isSetAccessorDeclaration(p) || ts.isConstructorDeclaration(p) || ts.isClassStaticBlockDeclaration(p)) return true;
+    }
+    return false;
+  };
+  const isWrite = (id: ts.Identifier): boolean => {
+    const p = id.parent;
+    if (ts.isBinaryExpression(p) && p.left === id) {
+      const k = p.operatorToken.kind;
+      return k >= ts.SyntaxKind.FirstAssignment && k <= ts.SyntaxKind.LastAssignment;
+    }
+    if ((ts.isPrefixUnaryExpression(p) || ts.isPostfixUnaryExpression(p)) && (p.operator === ts.SyntaxKind.PlusPlusToken || p.operator === ts.SyntaxKind.MinusMinusToken)) return true;
+    // a destructuring assignment / for-in / for-of target: any identifier reached through an array/object literal or a loop head
+    for (let q: ts.Node = id; q.parent !== undefined && !ts.isSourceFile(q.parent); q = q.parent) {
+      const par = q.parent;
+      if (ts.isArrayLiteralExpression(par) || ts.isObjectLiteralExpression(par) || ts.isPropertyAssignment(par) || ts.isShorthandPropertyAssignment(par) || ts.isSpreadElement(par) || ts.isSpreadAssignment(par)) {
+        const top = par;
+        const host = top.parent;
+        if (host !== undefined && ((ts.isBinaryExpression(host) && host.left === top && host.operatorToken.kind === ts.SyntaxKind.EqualsToken) || ((ts.isForInStatement(host) || ts.isForOfStatement(host)) && host.initializer === top))) return true;
+        continue;
+      }
+      break;
+    }
+    const par2 = id.parent;
+    return (ts.isForInStatement(par2) || ts.isForOfStatement(par2)) && par2.initializer === id;
+  };
+  ts.walkPreorder(sf, (n: ts.Node) => {
+    if (later || !ts.isIdentifier(n)) return;
+    if (L.checker.getSymbolAtLocation(n) !== sym) return;
+    if (isWrite(n) && inFunction(n)) later = true;
+  });
+  return later;
+}
+
 /** A MUTABLE export has no snapshot, so the namespace VALUE refuses.
    *
    * Node's namespace property is a LIVE view of the exporter's binding —
@@ -1126,7 +1178,7 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
    * is the silent wrong answer this refusal exists to prevent. A `let`
    * nobody reassigns is refused too — a refusal where a value was
    * possible, never a value where a refusal was owed. */
-  function refuseNsSnapshotIfLive(L: Lowerer, dep: ts.SourceFile): void {
+  function refuseNsSnapshotIfLive(L: Lowerer, dep: ts.SourceFile, ordered = false): void {
     const modSym = L.checker.getSymbolAtLocation(dep);
     const seen: [string, ts.Symbol][] = [];
     modSym?.getExports().forEach((sym: ts.Symbol, key: ts.__String) => {
@@ -1138,12 +1190,17 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
     for (const [exportName, sym] of seen) {
       let live = sym;
       if (live.flags & ts.SymbolFlags.Alias) live = L.checker.getAliasedSymbol(live);
-      const mutable = L.checker.declarationsOf(live).some(
+      const mutableDecl = L.checker.declarationsOf(live).find(
         (d) =>
           ts.isVariableDeclaration(d) &&
           ts.isVariableDeclarationList(d.parent) &&
           (d.parent.flags & ts.NodeFlags.Const) === 0,
       );
+      const mutable = mutableDecl !== undefined;
+      // An ORDERED namespace (import() of a program module) is built once the module's evaluation has finished. A `let` whose every write is
+      // top-level code of its own module (never inside a function, which can run later) has its final value by then, so the snapshot IS the
+      // live view. The entry is still running when a self-import resolves, so its `let`s stay refused.
+      if (ordered && mutable && dep !== L.entry && !writtenAfterEvaluation(L, live, mutableDecl.getSourceFile())) continue;
       if (mutable) {
         L.unsupported(
           "SC1013",
@@ -1640,31 +1697,121 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
     };
   }
 
-  function staticDynNsBuilderOf(L: Lowerer, dep: ts.SourceFile, loc: IrExpr["loc"], forRequire = false): string | null {
-    const builders = forRequire ? L.dynExportsBuilders : L.dynNsBuilders;
+  /** Is `dep` loaded before the program's first import() runs: the entry, or reachable from it through static imports and re-exports? */
+  function staticallyLoadedModule(L: Lowerer, dep: ts.SourceFile): boolean {
+    const seen = new Set<ts.SourceFile>();
+    const stack: ts.SourceFile[] = [L.entry];
+    while (stack.length > 0) {
+      const sf = stack.pop()!;
+      if (seen.has(sf)) continue;
+      seen.add(sf);
+      if (sf === dep) return true;
+      for (const e of orderedImportsOf(L.program, sf)) if (e.dep !== null) stack.push(e.dep);
+    }
+    return false;
+  }
+
+  /** The depth of a module's static import graph: 0 for a module with no runtime imports, else 1 + the deepest dependency (an import Node
+   * resolves outside the program counts as a leaf). Cycles stop at the module being visited. */
+  function staticImportDepth(L: Lowerer, dep: ts.SourceFile): number {
+    const memo = new Map<ts.SourceFile, number>();
+    const visiting = new Set<ts.SourceFile>();
+    const walk = (sf: ts.SourceFile): number => {
+      const hit = memo.get(sf);
+      if (hit !== undefined) return hit;
+      if (visiting.has(sf)) return 0;
+      visiting.add(sf);
+      let best = 0;
+      for (const e of orderedImportsOf(L.program, sf)) best = Math.max(best, 1 + (e.dep === null ? 0 : walk(e.dep)));
+      visiting.delete(sf);
+      memo.set(sf, best);
+      return best;
+    };
+    return walk(dep);
+  }
+
+  function staticDynNsBuilderOf(L: Lowerer, dep: ts.SourceFile, loc: IrExpr["loc"], forRequire = false, ordered = false): string | null {
+    const builders = ordered ? L.dynImportBuilders : forRequire ? L.dynExportsBuilders : L.dynNsBuilders;
     const cached = builders.get(dep);
     if (cached !== undefined) return cached;
     const initName = L.initNameOf.get(dep);
     if (initName === undefined) return null;
-    if (L.asyncInitFiles.has(dep)) return null;
+    // ORDERED (an import() of one of the program's own modules): the builder is an ASYNC function that parks one microtask first (Node
+    // evaluates a module first reached through import() after the importer's synchronous code), then runs the module's init (awaiting it when
+    // the module graph has top-level await) and answers the interned namespace.
+    const isAsync = ordered && L.asyncInitFiles.has(dep);
+    if (L.asyncInitFiles.has(dep) && !ordered) return null;
     // BEFORE the name is registered: a refusal raised after
     // `dynNsBuilders.set` leaves the call site naming a function that the
     // aborted body never pushed — measured, SC9001 "call to undeclared
     // function '%dynnsd.<tag>'", an ICE where a diagnostic belonged.
-    refuseNsSnapshotIfLive(L, dep);
+    refuseNsSnapshotIfLive(L, dep, ordered);
     const rawTag = L.fileTag.get(dep) ?? "";
-    const name = `${forRequire ? "%dynexpd." : "%dynnsd."}${rawTag === "" ? "e." : rawTag.replace(/^%/, "")}`;
+    const name = `${ordered ? "%dynimp." : forRequire ? "%dynexpd." : "%dynnsd."}${rawTag === "" ? "e." : rawTag.replace(/^%/, "")}`;
     builders.set(dep, name);
     const fnCtx = newFnCtx(true, null, null, DYN);
+    if (ordered) fnCtx.isAsync = true;
     L.fnStack.push(fnCtx);
     try {
       const body: IrStmt[] = [];
-      L.noteEdge(initName);
-      body.push({
-        kind: "exprStmt",
-        expr: { kind: "call", callee: initName, args: [], type: VOID, loc },
-        loc,
-      });
+      // SCRIPTC_DYNIMP_MUTANT=eager evaluates at the call site (no park): the control row 2710 must fail under it.
+      const eager = process.env["SCRIPTC_DYNIMP_MUTANT"] === "eager";
+      const park = (n: number): IrStmt[] =>
+        Array.from({ length: eager ? 0 : n }, () => ({
+          kind: "exprStmt" as const,
+          expr: {
+            kind: "awaitExpr" as const,
+            value: { kind: "intrinsic" as const, name: "promise.resolve" as const, args: [], type: { kind: "promise" as const, inner: VOID }, loc },
+            type: VOID,
+            loc,
+          },
+          loc,
+        }));
+      // The import()'s settle time is Node's own loader depth, measured on v24 and v25 with a chain of `Promise.resolve().then` jobs: a module
+      // already loaded (statically reachable from the entry, or imported before) settles its promise 8 jobs after the call; one Node has to
+      // load and evaluate runs its body after 5 + 2 x (depth of its static import graph) jobs (a module with no imports: 5) and settles 6 jobs
+      // after that. The builder parks that many microtasks around the evaluation so a program that interleaves its own promise work sees Node's
+      // order. Deeper detail (a graph's TOP-LEVEL AWAIT, builtin imports) is not modeled beyond the same formula.
+      const initStmts: IrStmt[] = [];
+      // The entry module is running or has run (a synchronous entry has no run-once guard), so a self-import must not run its init again;
+      // an ASYNC entry has the evaluation-promise cache, which the import awaits (Node: a top-level `await import(self)` never settles).
+      if (!ordered || dep !== L.entry || isAsync) {
+        L.noteEdge(initName);
+        const initCall: IrExpr = { kind: "call", callee: initName, args: [], type: isAsync ? { kind: "promise", inner: VOID } : VOID, loc };
+        const cyclePromiseId = ordered && isAsync ? L.asyncCyclePromiseOf.get(dep) : undefined;
+        if (cyclePromiseId !== undefined) {
+          // Node roots a cycle's evaluation at the first module actually imported at run time: start the requested member, discard its
+          // promise and await the SCC's shared root before exposing the namespace.
+          initStmts.push({ kind: "exprStmt", expr: initCall, loc });
+          initStmts.push({
+            kind: "exprStmt",
+            expr: { kind: "awaitExpr", value: { kind: "varRef", localId: cyclePromiseId, type: { kind: "promise", inner: VOID }, loc }, type: VOID, loc },
+            loc,
+          });
+        } else {
+          initStmts.push({ kind: "exprStmt", expr: isAsync ? { kind: "awaitExpr", value: initCall, type: VOID, loc } : initCall, loc });
+        }
+      }
+      if (!ordered) {
+        body.push(...initStmts);
+      } else if (staticallyLoadedModule(L, dep)) {
+        body.push(...park(7), ...initStmts);
+      } else {
+        const seenGid = `%g.${rawTag === "" ? "e." : rawTag.replace(/^%/, "")}%dynimpseen`;
+        L.globalsList.push({ id: seenGid, name: "%dynimpseen", type: BOOL, mutable: true });
+        body.push({
+          kind: "if",
+          cond: { kind: "varRef", localId: seenGid, type: BOOL, loc },
+          then: park(7),
+          else_: [
+            ...park(5 + 2 * staticImportDepth(L, dep)),
+            ...initStmts,
+            { kind: "assign", localId: seenGid, value: { kind: "boolLit", value: true, type: BOOL, loc }, loc },
+            ...park(5),
+          ],
+          loc,
+        });
+      }
       // A CommonJS `export =` module holds ONE entry in getExports(), so
       // the ESM walk would build a namespace of `default` alone — see
       // cjsExportTableNsOf, which reads the name set off the module's
@@ -1763,6 +1910,7 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
         returnType: DYN,
         locals: ctx.locals,
         body,
+        ...(ordered ? { async: true as const } : {}),
         loc,
       });
     } finally {

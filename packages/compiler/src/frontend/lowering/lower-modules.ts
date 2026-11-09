@@ -715,7 +715,9 @@ function liftableLocalClass(L: Lowerer, sf: ts.SourceFile, decl: ts.ClassDeclara
         node.arguments[0] !== undefined
       ) {
         const spec = dynamicImportSpecOf(checker, node.arguments[0]);
-        const served = dynamic || staticDynImportBindingShape(node);
+        // Every site is served now: the binding shapes by alias plumbing, every other position by the ordered namespace builder (lower-island.ts).
+        const served = true;
+        void dynamic;
         const dep = spec !== null && served ? dynamicImportModuleTargetOf(program, sf, spec) : null;
         if (process.env["SCRIPTC_DYNORDER_TRACE"]) {
           console.error(`[dynorder] sf=${sf.fileName} spec=${spec} served=${served} dep=${dep?.fileName ?? "null"}`);
