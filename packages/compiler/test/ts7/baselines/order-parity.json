@@ -27268,6 +27268,24 @@
     "<repo>/tests/corpus/24897-fs-buffer-encoded-names-are-buffers.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25040-dyn-for-of-custom-iterable-through-any.js": {
+   "order": [
+    "<repo>/tests/corpus/25040-dyn-for-of-custom-iterable-through-any.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25041-dyn-for-of-lazy-close-order-and-errors.js": {
+   "order": [
+    "<repo>/tests/corpus/25041-dyn-for-of-lazy-close-order-and-errors.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25042-dyn-for-of-class-iterables-and-iterators.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25042-dyn-for-of-class-iterables-and-iterators.cjs"
+   ],
+   "diags": []
   }
  }
 }
