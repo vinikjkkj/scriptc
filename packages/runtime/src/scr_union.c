@@ -76,8 +76,12 @@ void scr_union_release(ScrUnion *u) {
     scr_live_unions--;
 #endif
     scr_cyc_free(u);
-  } else {
-    scr_cyc_on_release(u); /* possible cycle root; may collect — u is done */
+  } else if (u->arm_trace) {
+    /* A possible cycle root only when its arm carries a cycle header: arm_trace is NULL for f64, bool, string and bytes arms (and
+     * for every scalar union), so scr_union_trace visits nothing from such a box and it cannot be a member of a cycle. The field is
+     * fixed when the box is built (a union never changes arm), so no store can invalidate this. MEASURED on the zapobench mysql arm:
+     * 9.4 M of the 11.4 M union releases and 1.9 M of the 2.3 M new buffer entries were such boxes. */
+    scr_cyc_on_release(u); /* may collect — u is done */
   }
 }
 
