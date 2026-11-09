@@ -14871,6 +14871,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24911-process-env-stores-the-string-form-of-an-unproven-value.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24911-process-env-stores-the-string-form-of-an-unproven-value.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2485-inspect-circular-refs.ts": {
    "order": [
     "<repo>/tests/corpus/2485-inspect-circular-refs.ts"
