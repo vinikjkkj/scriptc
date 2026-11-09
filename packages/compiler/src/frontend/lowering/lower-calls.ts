@@ -1497,12 +1497,19 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
     return r;
   }
 
+  /** A returned expression whose own checker type admits `undefined` (`process.env.DEBUG` is `string | undefined`) while the function's JSDoc claims a
+   * scalar: the claim is documentation in a JS file, the value really may be undefined, so the return widens the way a bare `return;` does. */
+  function returnedValueMayBeUndefined(L: Lowerer, e: ts.Expression): boolean {
+    const t = L.typeOf(e);
+    return t.isUnionType() && ts.constituentTypes(t).some((p) => (p.flags & ts.TypeFlags.Undefined) !== 0);
+  }
+
   function bodyReturnsWidenedCall(L: Lowerer, body: ts.Node): boolean {
     let found = false;
     const walk = (n: ts.Node): void => {
       if (found) return;
       if (ts.isReturnStatement(n)) {
-        if (n.expression !== undefined && isWidenedValueNode(L, n.expression)) found = true;
+        if (n.expression !== undefined && (isWidenedValueNode(L, n.expression) || returnedValueMayBeUndefined(L, n.expression))) found = true;
         return;
       }
       if (ts.isFunctionLike(n) || ts.isClassDeclaration(n) || ts.isClassExpression(n)) return;
