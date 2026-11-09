@@ -1,4 +1,3 @@
-// @dynamic
 // A JS `(...args)` rest parameter under --dynamic binds the ENGINE's own
 // arguments array — one island value, not a static array — so the
 // function LITERAL's signature is `(any) => any` while tsc's inference

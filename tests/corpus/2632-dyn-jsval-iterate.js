@@ -1,4 +1,3 @@
-// @dynamic
 // for-of and destructuring over island values held in 'unknown' (lane
 // dom-jsval-long-tail): the checked-dynamic for-of packs the source once
 // through the spread walk, and the JSVAL arm drains the ENGINE's own

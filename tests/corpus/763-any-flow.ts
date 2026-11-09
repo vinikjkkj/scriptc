@@ -1,4 +1,3 @@
-// @dynamic
 // `any` values flow through static functions, logical operators keep JS
 // value semantics through the island, compound assignment works, and a
 // churn loop pressures the RC/engine boundary (the SAN lane's real test).

@@ -1,4 +1,3 @@
-// @dynamic
 // The sibling of 4681, one module boundary away — and the case the first
 // spelling of the name table got WRONG.
 //

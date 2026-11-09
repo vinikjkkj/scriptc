@@ -1,4 +1,3 @@
-// @dynamic
 // Tagged templates whose tags touch the dynamic tier: `any[]`-rest tags
 // (the corpus's dominant shape — the strings array and every value cross
 // the checked-dynamic boundary per call), `any`-typed parameters, and a

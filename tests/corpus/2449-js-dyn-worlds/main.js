@@ -1,4 +1,3 @@
-// @dynamic
 // The two dynamic worlds in one JS graph, no ICEs anywhere: `this` in
 // plain functions is the checked-dynamic AMBIENT receiver (dyn keyed
 // reads, never an engine op over a dyn value); rest-args arrays dispatch

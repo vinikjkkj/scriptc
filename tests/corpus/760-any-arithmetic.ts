@@ -1,4 +1,3 @@
-// @dynamic
 // Arithmetic and coercion on `any` values execute in the embedded engine
 // with JS-exact semantics; templates stringify via the engine's String().
 const n: any = 41;

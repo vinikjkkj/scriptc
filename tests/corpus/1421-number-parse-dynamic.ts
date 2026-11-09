@@ -1,4 +1,3 @@
-// @dynamic
 // Number.parseFloat / Number.parseInt ARE the global parsers (the spec
 // aliases them) — the same island lowering, byte-compared against Node.
 console.log(Number.parseFloat("3.14"), Number.parseFloat("2e3"), Number.parseFloat("  -7.5abc"));
