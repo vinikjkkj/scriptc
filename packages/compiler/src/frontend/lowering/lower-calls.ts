@@ -530,7 +530,6 @@ function lowerProtoTabMethodCall(L: Lowerer, call: ts.CallExpression): IrExpr | 
   const methodSym = L.checker.getSymbolAtLocation(access.name);
   const decls = methodSym ? L.checker.declarationsOf(methodSym) : [];
   if (decls.length === 0 || !decls.every((d) => d.getSourceFile().isDeclarationFile && !L.isStdlibFile(d.getSourceFile()))) return null;
-  if (call.arguments.some((a) => ts.isSpreadElement(a))) return null;
   const recvT = L.mapTypeOf(L.typeOf(access.expression));
   if (recvT?.kind !== "object") return null;
   const info = L.classes.get(recvT.className);
@@ -545,12 +544,19 @@ function lowerProtoTabMethodCall(L: Lowerer, call: ts.CallExpression): IrExpr | 
   const recvRef: IrExpr = { kind: "varRef", localId: recvTmp.id, type: recv.type, loc };
   const boxed: IrExpr = internalBox(L, { kind: "dynFrom", value: recvRef, type: DYN, loc });
   const fn = protoTabReadChain(L, info, { kind: "strLit", value: name, type: STRING, loc }, null, loc);
-  const args: IrExpr[] = call.arguments.map((a) => {
-    const v = L.coerceToExpected(L.lowerExpr(a), DYN);
+  // A spread argument (`redis.del(...keys)`) packs through the call's own spread list: each spread source flattens in place, in source order,
+  // exactly as the dynamic call of a spread does, and V8's not-iterable error names the spelling.
+  const spreads: { arg: number; what: string }[] = [];
+  const args: IrExpr[] = [];
+  for (const a of call.arguments) {
+    const spread = ts.isSpreadElement(a);
+    const node = spread ? a.expression : a;
+    const v = L.coerceToExpected(L.lowerExpr(node), DYN);
     if (v.type.kind !== "dyn") L.unsupported("SC1100", a, `passing '${L.fmt(v.type)}' values to a prototype-installed method (the value cannot convert into the checked-dynamic tree)`);
-    return v;
-  });
-  const callE = dynCallWithThis(L, boxed, { kind: "varRef", localId: fnTmp.id, type: DYN, loc }, args, access.getText(), loc);
+    if (spread) spreads.push({ arg: args.length, what: node.getText() });
+    args.push(v);
+  }
+  const callE = dynCallWithThis(L, boxed, { kind: "varRef", localId: fnTmp.id, type: DYN, loc }, args, access.getText(), loc, spreads);
   const want = L.mapTypeOf(L.typeOf(call));
   let result: IrExpr = callE;
   if (want !== null && want.kind !== "dyn") {
@@ -16818,9 +16824,10 @@ function lowerProtoDataCall(L: Lowerer, call: ts.CallExpression, recvExpr: ts.Ex
  * (push, call, pop in a `finally` — the callee can throw and the unwind is an
  * early return, so a bare push/pop would leak a stack entry onto every later
  * `this` read; bindThisClosure's reasoning). One helper per arity. */
-export function dynCallWithThis(L: Lowerer, recv: IrExpr, callee: IrExpr, args: IrExpr[], calleeName: string, loc: SrcLoc): IrExpr {
+export function dynCallWithThis(L: Lowerer, recv: IrExpr, callee: IrExpr, args: IrExpr[], calleeName: string, loc: SrcLoc, spreads: { arg: number; what: string }[] = []): IrExpr {
   const n = args.length;
-  const name = `%dyncallthis.${n}`;
+  // The helper is keyed by the argument count AND which positions spread (the spelling rides in the helper, one per distinct shape).
+  const name = spreads.length === 0 ? `%dyncallthis.${n}` : `%dyncallthis.${n}.s${spreads.map((x) => x.arg).join("_")}`;
   if (!L.liftedFns.some((f) => f.name === name)) {
     const params: IrParam[] = [
       { localId: "r.0", name: "r", type: DYN },
@@ -16833,6 +16840,7 @@ export function dynCallWithThis(L: Lowerer, recv: IrExpr, callee: IrExpr, args: 
       callee: ref("f.0"),
       calleeName,
       args: args.map((_, i) => ref(`a.${i}`)),
+      ...(spreads.length > 0 ? { spreads } : {}),
       type: DYN,
       loc,
     };
