@@ -7513,6 +7513,10 @@ ScrDyn *scr_ee_cell_get(ScrDyn *self, ScrEmitter *em, const uint8_t *rec, uint32
  * caller does with it (Object.prototype, the fence, Node's
  * is-not-a-function) differs per caller. */
 const ScrDynClassMember *scr_dyn_objinst_member(const ScrDyn *d, const char *k, size_t klen);
+/* The two halves of that lookup: the pure scan of a class table (a function of the table and the key bytes alone) and the per-instance
+ * question that follows it (an own property shadowing a method row). scr_dyn_objinst_member is the scan then the question. */
+const ScrDynClassMember *scr_dyn_objinst_row_scan(const ScrDynClass *c, const char *k, size_t klen);
+const ScrDynClassMember *scr_dyn_objinst_row_visible(const ScrDyn *d, const ScrDynClassMember *m, const char *k, size_t klen);
 /* Does the instance's class carry a member table at all? The gate every
  * new arm is behind: with no table nothing changes, so the whole feature
  * is additive by construction. */
