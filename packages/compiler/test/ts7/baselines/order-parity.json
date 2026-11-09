@@ -27364,6 +27364,12 @@
     "<repo>/tests/corpus/25061-class-view-survives-a-call-that-keeps-or-mutates-the-record/main.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25062-class-constructor-writes-after-it-leaks-this-to-a-projection/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/25062-class-constructor-writes-after-it-leaks-this-to-a-projection/main.ts"
+   ],
+   "diags": []
   }
  }
 }
