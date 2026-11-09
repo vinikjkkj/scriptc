@@ -14906,6 +14906,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24916-a-socket-read-through-a-dynamic-value-answers-connecting-pending-and-timeout.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24916-a-socket-read-through-a-dynamic-value-answers-connecting-pending-and-timeout.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24917-a-listener-prepended-on-a-dynamic-socket-fires-first.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24917-a-listener-prepended-on-a-dynamic-socket-fires-first.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2485-inspect-circular-refs.ts": {
    "order": [
     "<repo>/tests/corpus/2485-inspect-circular-refs.ts"
