@@ -23,6 +23,7 @@ const spreadEntry = join(fixtureDir, "cases/expclass-spreadcall/main.ts");
 const castEntry = join(fixtureDir, "cases/expclass-castcall/main.ts");
 const mgetEntry = join(fixtureDir, "cases/expclass-mgetbuffer/main.ts");
 const evalEntry = join(fixtureDir, "cases/expclass-evalbuffer/main.ts");
+const chainEntry = join(fixtureDir, "cases/expchain-typed/main.ts");
 const destructureEntry = join(fixtureDir, "cases/expclass-dyndestructure/main.ts");
 const flavor = process.env["SCRIPTC_SAN"] === "1" ? "san" : "plain";
 const outDir = join(repoRoot, "node_modules/.cache/scriptc-tests/provenance-expclass", flavor);
@@ -33,6 +34,7 @@ const STATIC_EXPECTED = COMMON + "v:y\n";
 const CAST_EXPECTED = "3 2 v:k 6\n";
 const MGET_EXPECTED = "3 true true 99,33 3\n";
 const EVAL_EXPECTED = "field:h1,field:i2 val:LUA 1\n";
+const CHAIN_EXPECTED = '4\n' + '[[null,"set:a+1"],[null,"get:a"],[null,"hset:h+f+v"],[null,"del:a+b"]]\n' + '[[null,"incr:n"],[null,"get:n"]]\n' + "4 get:k 1\n";
 const SPREAD_EXPECTED = "3 2 5\n" + "sadd:set:a+b+c,sadd:set2:x\n";
 const DESTRUCTURE_EXPECTED = "v:k 3 true\n";
 const PIPE_EXPECTED = "cmd3:a,cmd7:b,v:c,cmd69:d 1 true\n" + "0 cmd0:z\n";
@@ -82,6 +84,9 @@ describe("provenance: a mapped CommonJS package whose module.exports is a class"
     });
     test(`a script command answering buffers through an assertion over unknown matches Node on --backend ${backend}`, async () => {
       expect(await run(evalEntry, backend, "eval")).toBe(EVAL_EXPECTED);
+    });
+    test(`typed commands on a pipeline a prototype-assigned method returns, and the stringified result, match Node on --backend ${backend}`, async () => {
+      expect(await run(chainEntry, backend, "chain")).toBe(CHAIN_EXPECTED);
     });
     test(`destructuring the import() namespace directly matches Node on --backend ${backend}`, async () => {
       expect(await run(destructureEntry, backend, "destructure")).toBe(DESTRUCTURE_EXPECTED);
