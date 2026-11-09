@@ -1,4 +1,3 @@
-// @dynamic
 // The half of the string representation the STATIC lane never touches.
 //
 // 6300 drives every static string surface and, on the LLVM backend, emits

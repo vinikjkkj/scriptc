@@ -1,4 +1,3 @@
-// @dynamic
 // Object/array literals in `any` slots build natively in the island;
 // property reads/writes, computed keys, and method calls go through the
 // engine (this-binding and coercions JS-exact).

@@ -1,4 +1,3 @@
-// @dynamic
 // `console.log({ aliased: helper })` — node answers `[Function: helper]`, and
 // every walker-built box answered `[Function (anonymous)]` before this file
 // existed. The box a RECORD-to-dyn walker builds sees a bare `ScrClosure *`

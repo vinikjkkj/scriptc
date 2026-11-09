@@ -1,4 +1,3 @@
-// @dynamic
 // An unannotated array grown by push in a loop has an 'any' element type,
 // which the island lane maps to jsval. join must still render every element
 // JS-exactly (strings, empty array, undefined arms printing empty).
