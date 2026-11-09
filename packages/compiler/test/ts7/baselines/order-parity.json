@@ -14835,6 +14835,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24900-a-class-instance-handed-out-as-an-interface-keeps-its-identity.ts": {
+   "order": [
+    "<repo>/tests/corpus/24900-a-class-instance-handed-out-as-an-interface-keeps-its-identity.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24901-an-interface-fed-by-a-class-instance-and-by-a-literal.ts": {
+   "order": [
+    "<repo>/tests/corpus/24901-an-interface-fed-by-a-class-instance-and-by-a-literal.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2485-inspect-circular-refs.ts": {
    "order": [
     "<repo>/tests/corpus/2485-inspect-circular-refs.ts"
