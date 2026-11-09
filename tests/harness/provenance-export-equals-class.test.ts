@@ -19,12 +19,14 @@ const manifest = join(fixtureDir, "manifest-expclass.json");
 const dynEntry = join(fixtureDir, "cases/expclass-dynimport/main.ts");
 const staticEntry = join(fixtureDir, "cases/expclass-static/main.ts");
 const pipeEntry = join(fixtureDir, "cases/expclass-pipeline/main.ts");
+const destructureEntry = join(fixtureDir, "cases/expclass-dyndestructure/main.ts");
 const flavor = process.env["SCRIPTC_SAN"] === "1" ? "san" : "plain";
 const outDir = join(repoRoot, "node_modules/.cache/scriptc-tests/provenance-expclass", flavor);
 // Recorded from Node (v24.15.0) running the two programs against tests/fixtures/provenance/node_modules/expclass.
 const COMMON = "v:k PONG 1 h\n" + "true true true function 2\n";
 const DYN_EXPECTED = COMMON + "v:y Redis,__esModule,default,helper,module.exports\n";
 const STATIC_EXPECTED = COMMON + "v:y\n";
+const DESTRUCTURE_EXPECTED = "v:k 3 true\n";
 const PIPE_EXPECTED = "cmd3:a,cmd7:b,v:c,cmd69:d 1 true\n" + "0 cmd0:z\n";
 const PRIOR = process.env["SCRIPTC_PROVENANCE_MANIFEST"];
 
@@ -60,6 +62,9 @@ describe("provenance: a mapped CommonJS package whose module.exports is a class"
     });
     test(`the static-import binary matches Node on --backend ${backend}`, async () => {
       expect(await run(staticEntry, backend, "static")).toBe(STATIC_EXPECTED);
+    });
+    test(`destructuring the import() namespace directly matches Node on --backend ${backend}`, async () => {
+      expect(await run(destructureEntry, backend, "destructure")).toBe(DESTRUCTURE_EXPECTED);
     });
     test(`a class instance handed out as an interface of dozens of methods matches Node on --backend ${backend}`, async () => {
       expect(await run(pipeEntry, backend, "pipe")).toBe(PIPE_EXPECTED);
