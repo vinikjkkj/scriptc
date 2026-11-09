@@ -15263,6 +15263,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24924-a-parenthesized-cast-method-keeps-its-receiver-when-called.ts": {
+   "order": [
+    "<repo>/tests/corpus/24924-a-parenthesized-cast-method-keeps-its-receiver-when-called.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24925-a-cast-method-called-on-a-dynamic-class-instance-binds-this.ts": {
+   "order": [
+    "<repo>/tests/corpus/24925-a-cast-method-called-on-a-dynamic-class-instance-binds-this.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/24928-a-class-method-with-a-rest-parameter-called-through-a-dynamic-receiver-packs-its-arguments.ts": {
    "order": [
     "<repo>/tests/corpus/24928-a-class-method-with-a-rest-parameter-called-through-a-dynamic-receiver-packs-its-arguments.ts"
