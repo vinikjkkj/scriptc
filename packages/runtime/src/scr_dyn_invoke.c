@@ -1437,6 +1437,18 @@ refuse:
   return NULL;
 }
 
+/* A call whose method name the compiler saw as a Buffer numeric accessor literal (the emitted call site names scr_dyn_invoke_bufnum for
+ * exactly the names in dyn_bufnum_rows): a Buffer receiver with no own properties goes straight to the accessor, skipping the walk of the
+ * other receiver kinds that scr_dyn_invoke makes before its BYTES arm reaches the same dyn_buf_num_call. Everything else (a receiver that
+ * is not a Buffer, a Buffer carrying an own method of that name, a DataView) takes scr_dyn_invoke itself, so those answer as they always did. */
+ScrDyn *scr_dyn_invoke_bufnum(ScrDyn *recv, const char *method, ScrDyn *const *args, size_t argc, const char *what) {
+  if (recv->kind == SCR_DYN_BYTES && recv->v.bytes->own == NULL && recv->v.bytes->flavor != SCR_BF_DATAVIEW && dyn_is_buffer_recv(recv)) {
+    const DynBufNum *row = dyn_bufnum_find(method);
+    if (row != NULL) return dyn_buf_num_call(recv, row, args, argc, what);
+  }
+  return scr_dyn_invoke(recv, method, args, argc, what);
+}
+
 static bool dyn_kind_knows(const ScrDyn *recv, const char *m) {
   switch (recv->kind) {
     case SCR_DYN_STR: {

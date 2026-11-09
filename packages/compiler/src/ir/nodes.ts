@@ -12021,6 +12021,22 @@ export function propsTableRoot(meta: PropsTableMeta): PropsTableMeta | null {
   return canBoxClassIntoDyn(root.def.name) ? root : null;
 }
 
+/** The Buffer numeric accessor method names (read/write Int8..Double, LE/BE, the variable-width ones): a `dynInvoke` of one of these on a
+ * dyn receiver calls scr_dyn_invoke_bufnum, which goes straight to the accessor for a Buffer receiver. MUST equal the rows of
+ * dyn_bufnum_rows in scr_dyn_invoke.c (a test pins the two together): a name here the runtime table lacks would find no row and fall back
+ * to the general invoke, so a stale entry is slow, never wrong; a table row missing here is merely not fast. */
+export const BUFFER_NUM_ACCESSOR_METHODS: ReadonlySet<string> = new Set([
+  "readUInt8", "readUint8", "readInt8", "readUInt16LE", "readUint16LE", "readUInt16BE",
+  "readUint16BE", "readInt16LE", "readInt16BE", "readUInt32LE", "readUint32LE", "readUInt32BE",
+  "readUint32BE", "readInt32LE", "readInt32BE", "readFloatLE", "readFloatBE", "readDoubleLE",
+  "readDoubleBE", "writeUInt8", "writeUint8", "writeInt8", "writeUInt16LE", "writeUint16LE",
+  "writeUInt16BE", "writeUint16BE", "writeInt16LE", "writeInt16BE", "writeUInt32LE", "writeUint32LE",
+  "writeUInt32BE", "writeUint32BE", "writeInt32LE", "writeInt32BE", "writeFloatLE", "writeFloatBE",
+  "writeDoubleLE", "writeDoubleBE", "readUIntLE", "readUintLE", "readUIntBE", "readUintBE",
+  "readIntLE", "readIntBE", "writeUIntLE", "writeUintLE", "writeUIntBE", "writeUintBE",
+  "writeIntLE", "writeIntBE",
+]);
+
 /** Does this keyed read of a dyn value take the LITERAL-KEY twin of the read helper (sc_dyn_key_get_lit, answered for a class instance
  * from the member memo)? Only a key that is an emitted string literal (an immortal interned static, so its address names its bytes
  * forever), in a module that has a class to box, and not `length`: the receiver of `.length` is an array or a string, which the twin

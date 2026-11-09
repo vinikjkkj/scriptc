@@ -6846,6 +6846,8 @@ bool scr_dyn_same_value(const ScrDyn *a, const ScrDyn *b);
  * function"; OBJ receivers call the own member. recv/args borrowed,
  * result owned (+1). MAY THROW (NULL with the exception pending). */
 ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, size_t argc, const char *what);
+/* scr_dyn_invoke for a method name that is a Buffer numeric accessor literal (see scr_dyn_invoke.c). */
+ScrDyn *scr_dyn_invoke_bufnum(ScrDyn *recv, const char *method, ScrDyn *const *args, size_t argc, const char *what);
 /* The READ's half of that dispatch — the emitted sc_dyn_key_get's tail,
  * and its OBJ arm's miss.
  *
