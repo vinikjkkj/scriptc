@@ -1032,10 +1032,51 @@ void scr_dyn_release(ScrDyn *d) {
   scr_cyc_free(d);
 }
 
+/* Are the `n` bytes at `a` and `b` equal? The object lookups below scan an object's entries linearly and compare every entry whose
+ * length matches; a key is almost always short, and a call into the C library's memcmp for 3 to 12 bytes costs several times what the
+ * comparison does (22.7 M such calls in a 200-message messaging run). Up to 16 bytes this answers with two (possibly overlapping)
+ * loads of the key's own length, never reading outside [0, n). -DSCR_OBJ_NOFAST restores memcmp (the A/B control). */
+static inline bool scr_dyn_bytes_eq(const char *a, const char *b, size_t n) {
+#ifdef SCR_OBJ_NOFAST
+  return memcmp(a, b, n) == 0;
+#else
+  if (n >= 8) {
+    if (n > 16) return memcmp(a, b, n) == 0;
+    uint64_t a0, b0, a1, b1;
+    memcpy(&a0, a, 8);
+    memcpy(&b0, b, 8);
+    memcpy(&a1, a + n - 8, 8);
+    memcpy(&b1, b + n - 8, 8);
+#ifdef SCR_OBJ_PLANT_BUG
+    if (SCR_OBJ_PLANT_BUG == 1) return a0 == b0; /* the planted defect: bytes past the first eight are never compared */
+#endif
+    return ((a0 ^ b0) | (a1 ^ b1)) == 0;
+  }
+  if (n >= 4) {
+    uint32_t a0, b0, a1, b1;
+    memcpy(&a0, a, 4);
+    memcpy(&b0, b, 4);
+    memcpy(&a1, a + n - 4, 4);
+    memcpy(&b1, b + n - 4, 4);
+#ifdef SCR_OBJ_PLANT_BUG
+    if (SCR_OBJ_PLANT_BUG == 2) return a0 == b0; /* the planted defect: the last bytes of a 4-7 byte key are never compared */
+#endif
+    return ((a0 ^ b0) | (a1 ^ b1)) == 0;
+  }
+  if (n == 0) return true;
+  /* 1 to 3 bytes: the first, the middle and the last cover every byte. */
+#ifdef SCR_OBJ_PLANT_BUG
+  if (SCR_OBJ_PLANT_BUG == 3) return a[0] == b[0]; /* the planted defect: only the first byte of a 1-3 byte key is compared */
+#endif
+  return a[0] == b[0] && a[n >> 1] == b[n >> 1] && a[n - 1] == b[n - 1];
+#endif
+}
+#define SCR_DYN_KEY_EQ(ent, kp, len) ((ent)->key_len == (len) && scr_dyn_bytes_eq((ent)->key, (kp), (len)))
+
 ScrDyn *scr_dyn_obj_get(const ScrDyn *d, const char *key, size_t key_len) {
   for (size_t i = 0; i < d->v.obj.len; i++) {
     const ScrDynEntry *e = &d->v.obj.entries[i];
-    if (e->key_len == key_len && memcmp(e->key, key, key_len) == 0) {
+    if (SCR_DYN_KEY_EQ(e, key, key_len)) {
       /* An accessor SLOT is not a member. It sits in this table to hold
        * the property's CREATION POSITION and carries no value at all, so
        * the one honest answer here is the same NULL a missing key gets —
@@ -2067,7 +2108,7 @@ static void scr_dyn_obj_put_k(ScrDyn *obj, char *key, size_t key_len, ScrDyn *va
 #endif
   for (size_t i = 0; i < obj->v.obj.len; i++) {
     ScrDynEntry *e = &obj->v.obj.entries[i];
-    if (e->key_len == key_len && memcmp(e->key, key, key_len) == 0) {
+    if (SCR_DYN_KEY_EQ(e, key, key_len)) {
       /* UNLINK BEFORE RELEASE (scr_cycle.c's second global invariant): the
        * slot must already hold the new value when the old one's release
        * runs, because that release can trigger a collection and the walk
@@ -5881,7 +5922,7 @@ void scr_dyn_obj_set_borrowed(ScrDyn *obj, const char *key, size_t key_len, ScrD
   value->rc--; /* ... and the member does not keep it: give that reference back */
   for (size_t i = obj->v.obj.len; i-- > 0;) {
     ScrDynEntry *e = &obj->v.obj.entries[i];
-    if (e->value == value && e->key_len == key_len && memcmp(e->key, key, key_len) == 0) {
+    if (e->value == value && SCR_DYN_KEY_EQ(e, key, key_len)) {
       e->value_borrowed = 1;
       return;
     }
@@ -8437,7 +8478,7 @@ bool scr_dyn_obj_entry_is_slot(const ScrDyn *d, const char *key, size_t key_len)
   if (d == NULL || d->kind != SCR_DYN_OBJ) return false;
   for (size_t i = 0; i < d->v.obj.len; i++) {
     const ScrDynEntry *e = &d->v.obj.entries[i];
-    if (e->key_len == key_len && memcmp(e->key, key, key_len) == 0) {
+    if (SCR_DYN_KEY_EQ(e, key, key_len)) {
       return e->value == scr_dyn_acc_slot();
     }
   }
@@ -8946,7 +8987,7 @@ void scr_dyn_own_names_fence(const ScrDyn *d) {
 static void scr_dyn_obj_unset(ScrDyn *obj, const char *key, size_t key_len) {
   for (size_t i = 0; i < obj->v.obj.len; i++) {
     ScrDynEntry *e = &obj->v.obj.entries[i];
-    if (e->key_len == key_len && memcmp(e->key, key, key_len) == 0) {
+    if (SCR_DYN_KEY_EQ(e, key, key_len)) {
       /* unlink before release: the entry must be out of the table before
        * the value's release can trigger a collection */
       ScrDyn *old = e->value;
@@ -9013,7 +9054,7 @@ static void scr_dyn_obj_put_hidden(ScrDyn *recv, const char *key, size_t key_len
   double hpos = (double)recv->v.obj.len;
   if (!slot_held) {
     for (size_t pi = 0; pi < recv->v.obj.len; pi++) {
-      if (recv->v.obj.entries[pi].key_len == key_len && memcmp(recv->v.obj.entries[pi].key, key, key_len) == 0) {
+      if (SCR_DYN_KEY_EQ(&recv->v.obj.entries[pi], key, key_len)) {
         hpos = (double)pi;
         break;
       }
