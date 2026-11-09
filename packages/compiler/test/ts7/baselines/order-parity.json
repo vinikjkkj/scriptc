@@ -27370,6 +27370,12 @@
     "<repo>/tests/corpus/25062-class-constructor-writes-after-it-leaks-this-to-a-projection/main.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25063-class-view-keeps-the-class-tostring/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/25063-class-view-keeps-the-class-tostring/main.ts"
+   ],
+   "diags": []
   }
  }
 }
