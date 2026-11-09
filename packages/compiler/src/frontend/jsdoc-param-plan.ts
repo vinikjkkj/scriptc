@@ -78,7 +78,6 @@ export function computeJsDocParamPlans(program: ts.Program, checker: ts.TypeChec
       });
     }
   }
-  widenReturns(program, checker, byName);
   for (const decl of decls) {
     const sym = checker.getSymbolAtLocation(decl.name!);
     if (sym === undefined) continue;
@@ -115,6 +114,7 @@ export function computeJsDocParamPlans(program: ts.Program, checker: ts.TypeChec
       if (plan !== "keep") JSDOC_PARAM_PLANS.set(p, plan);
     });
   }
+  widenReturns(program, checker, byName);
 }
 
 function scalarClaim(t: ts.Type): boolean {
@@ -160,6 +160,8 @@ function widenReturns(program: ts.Program, checker: ts.TypeChecker, byName: Map<
     if (ts.isIdentifier(n)) {
       const sym = checker.getSymbolAtLocation(n);
       const d = sym === undefined ? undefined : checker.valueDeclarationOf(sym);
+      // A parameter whose claim the program does not prove (JSDOC_PARAM_PLANS) is the checked-dynamic value: returned as is, it may be undefined.
+      if (d !== undefined && ts.isParameter(d) && JSDOC_PARAM_PLANS.has(d)) return true;
       if (d !== undefined && ts.isVariableDeclaration(d) && d.initializer !== undefined && scalarClaim(checker.getTypeAtLocation(d.name))) {
         const init = unwrap(d.initializer);
         if (ts.isCallExpression(init)) {

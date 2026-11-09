@@ -16771,7 +16771,9 @@ export function staticAssertionOperand(L: Lowerer, node: ts.Expression, field: s
       if (key.type.kind !== "string") {
         L.unsupported("SC1090", target.argumentExpression, "indexing process.env with non-string keys");
       }
-      const value = L.lowerExpr(expr.right);
+      let value = L.lowerExpr(expr.right);
+      // process.env stores String(value): a checked-dynamic value is converted by the runtime.
+      if (value.type.kind === "dyn") value = { kind: "toString", operand: value, type: STRING, loc: locOf(expr.right) };
       if (value.type.kind !== "string") {
         L.unsupported(
           "SC1090",

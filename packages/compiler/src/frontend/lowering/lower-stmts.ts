@@ -7947,7 +7947,9 @@ function prototypeInstallerCallStmt(L: Lowerer, expr: ts.Expression): IrStmt | n
           if (L.isProcessEnv(expr.left.expression) && !expr.left.questionDotToken) {
             const loc = locOf(expr);
             const key: IrExpr = { kind: "strLit", value: expr.left.name.text, type: STRING, loc: locOf(expr.left.name) };
-            const value = L.lowerExpr(expr.right);
+            let value = L.lowerExpr(expr.right);
+            // process.env stores String(value): a checked-dynamic value (a parameter nothing proves is a string) is converted by the runtime.
+            if (value.type.kind === "dyn") value = { kind: "toString", operand: value, type: STRING, loc: locOf(expr.right) };
             if (value.type.kind !== "string") {
               L.unsupported(
                 "SC1090",

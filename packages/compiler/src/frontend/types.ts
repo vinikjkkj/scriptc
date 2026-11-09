@@ -5475,11 +5475,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       // flow, and so does every function VALUE built from it (a slot the function is stored in spells the same parameter types).
       if (pt !== null && decl !== undefined && ts.isParameter(decl)) {
         const plan = JSDOC_PARAM_PLANS.get(decl);
-        if (plan === "dyn") {
-          pt = DYN;
-        } else if (plan === "undef" && pt.kind !== "dyn" && pt.kind !== "jsval") {
-          pt = withUndefinedArm(pt, ctx.unions) ?? pt;
-        }
+        if (plan !== undefined) pt = DYN;
       }
       // Belt and braces for non-strict type worlds: an optional param's
       // ABI slot is always the undefined-armed union (strictNullChecks

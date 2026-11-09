@@ -471,15 +471,11 @@ export interface GenericInstance {
     }
     const type = L.irTypeOf(param.name);
     // A JSDoc scalar claim the program's flow does not prove (jsdoc-param-plan.ts): the representation of the flow, never a throw where Node runs.
-    {
-      const plan = JSDOC_PARAM_PLANS.get(param);
-      if (plan === "undef") {
-        const armed = L.withUndefinedArm(type);
-        // A function that escapes as a value cannot be omittable (its value type spells every parameter): a required union slot.
-        if (armed) return param.parent !== undefined && JSDOC_ESCAPING_FNS.has(param.parent) ? { type: armed, mode: "required" } : { type: armed, mode: "omittable", bodyType: armed };
-      } else if (plan === "dyn") {
-        return { type: DYN, mode: "required" };
-      }
+    // The slot is the checked-dynamic one for both plans: undefined is an inhabitant of it, a value of another kind is too, and reads of the parameter stay
+    // dyn (widenedJsDocParamRead), so a use that needs the scalar checks it THERE, where Node would also fail, and a pass-through never throws.
+    if (JSDOC_PARAM_PLANS.has(param)) {
+      // A function that escapes as a value cannot be omittable (its value type spells every parameter): a required slot.
+      return param.parent !== undefined && JSDOC_ESCAPING_FNS.has(param.parent) ? { type: DYN, mode: "required" } : { type: DYN, mode: "omittable", bodyType: DYN };
     }
     if (param.questionToken && !L.bareUndefinedArmedUnion(type) && type.kind !== "dyn" && type.kind !== "jsval") {
       // `x?: unknown` where unknown came from an annotation: undefined is
@@ -15145,7 +15141,17 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverr
    * the string against number and throw. The dyn value is the truth; its
    * member and operator reads go through the dyn paths. */
   export function jsLetReadStaysDyn(L: Lowerer, node: ts.Node): boolean {
-    return widenedJsLetOf(L, node) || widenedCallBindingRead(L, node) || callOfWidenedLetReturner(L, node);
+    return widenedJsLetOf(L, node) || widenedCallBindingRead(L, node) || callOfWidenedLetReturner(L, node) || widenedJsDocParamRead(L, node);
+  }
+
+/** A read of a parameter whose JSDoc scalar claim the program does not prove (jsdoc-param-plan.ts): the checked-dynamic value itself, as for a widened let. */
+  function widenedJsDocParamRead(L: Lowerer, node: ts.Node): boolean {
+    let n: ts.Node = node;
+    while (ts.isParenthesizedExpression(n)) n = n.expression;
+    if (!ts.isIdentifier(n)) return false;
+    const sym = L.resolveValueSymbol(n);
+    const d = sym ? L.checker.valueDeclarationOf(sym) : undefined;
+    return d !== undefined && ts.isParameter(d) && JSDOC_PARAM_PLANS.has(d);
   }
 
 /** A read of a binding that holds a widened call's result (jsWidenedCallBinding): the dyn value itself, as for a widened let. */
