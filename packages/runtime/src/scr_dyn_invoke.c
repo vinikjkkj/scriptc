@@ -878,12 +878,14 @@ static ScrDyn *dyn_object_proto_method(ScrDyn *recv, const char *method,
 /* Names each prototype declares BEYOND what's implemented here — these
  * fence loudly instead of mis-answering "is not a function". */
 static bool dyn_str_proto_unimpl(const char *m) {
-  static const char *names[] = { "split", "replace", "replaceAll", "match",
-    "matchAll", "search", "localeCompare", "normalize", "codePointAt",
-    "toLocaleLowerCase", "toLocaleUpperCase", "isWellFormed", "toWellFormed",
+  /* One packed byte table, not an array of pointers: a pointer table is a startup relocation per entry (the gated compare below stopped
+   * the compiler from unrolling it into immediates). */
+  static const char names[] = "split\0replace\0replaceAll\0match\0"
+    "matchAll\0search\0localeCompare\0normalize\0codePointAt\0"
+    "toLocaleLowerCase\0toLocaleUpperCase\0isWellFormed\0toWellFormed\0"
     /* Behind libregexp -- see the note in the STR arm. */
-    "toUpperCase", "toLowerCase", NULL };
-  for (size_t i = 0; names[i]; i++) if (dyn_name_is(m, names[i])) return true;
+    "toUpperCase\0toLowerCase";
+  for (const char *n = names; n < names + sizeof names; n += strlen(n) + 1) if (dyn_name_is(m, n)) return true;
   return false;
 }
 
@@ -2957,7 +2959,9 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
       scr_dyn_static_copy_refuse(n > 0 ? named : "an in-place array method");
       return NULL;
     }
-    if (dyn_name_is(method, "push")) {
+    /* push is the hot array method and the first test: an ungated strcmp keeps the compiler from turning the gated chain below into a
+     * first-byte switch that every push pays before reaching its own comparison (MEASURED +12 Ir per push). */
+    if (strcmp(method, "push") == 0) {
       for (size_t i = 0; i < argc; i++) scr_dyn_arr_push(recv, scr_dyn_retain(args[i]));
       return scr_dyn_new_num((double)recv->v.arr.len);
     }
