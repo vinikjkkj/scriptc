@@ -25702,7 +25702,7 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
   /** The detached closures of implicit-any method `method` of `info` (see
    * lowerUnboundGenericMethodValue): the declarer's own, and with `withOverrides` one per
    * override strictly below it, shallowest first. Null when a body or override declines. */
-  function unboundGenericClosures(L: Lowerer, blame: ts.Node, info: ClassInfo, method: string, withOverrides: boolean): GenericClosures | null {
+  export function unboundGenericClosures(L: Lowerer, blame: ts.Node, info: ClassInfo, method: string, withOverrides: boolean): GenericClosures | null {
     const gfound = findGenericMethodOn(L, info, method);
     if (gfound === null || gfound.info.implicitParams === undefined) return null;
     const loc = locOf(blame);
