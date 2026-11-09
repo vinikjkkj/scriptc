@@ -62,6 +62,11 @@ udp.bind(0, "127.0.0.1", () => {
       }
     });
   });
+  // The TCP server reuses the UDP socket's port; if the host refuses it, report the code (the port number differs between processes).
+  tcp.on("error", (e) => {
+    console.log("tcp listen failed", e.code);
+    process.exit(0);
+  });
   tcp.listen(port, "127.0.0.1", () => {
     const r1 = new dns.Resolver({ timeout: 500, tries: 2 });
     r1.setServers(["127.0.0.1:" + port]);
