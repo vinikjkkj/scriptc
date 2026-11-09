@@ -3294,6 +3294,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             d.push(`    scr_box_set_ref(ad->caps[0], scr_closure_retain(d->v.fn.clo));`);
             d.push(`    ad->caps[1] = scr_box_new(SCR_BOX_F64); /* the call descriptor: owns nothing */`);
             d.push(`    scr_box_set_thunk(ad->caps[1], d->v.fn.thunk);`);
+            d.push(`    scr_dyn_fn_share_props(ad, d); /* the adapter is the same function to JS: one own-property table */`);
             d.push(
               `    return scr_union_new_ref(${i}, ad, &${rc.retain}, &${rc.release}, ${E.traceArgC(arm)});`,
             );
@@ -3395,6 +3396,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           d.push(`    scr_box_set_ref(a->caps[0], scr_closure_retain(d->v.fn.clo));`);
           d.push(`    a->caps[1] = scr_box_new(SCR_BOX_F64); /* the call descriptor: owns nothing */`);
           d.push(`    scr_box_set_thunk(a->caps[1], d->v.fn.thunk);`);
+          d.push(`    scr_dyn_fn_share_props(a, d); /* the adapter is the same function to JS: one own-property table */`);
           if (engineFn) d.push(`    scr_dyn_fn_adapter_remember(d, (const void *)&${adapter}, a);`);
           d.push(`    return a;`);
           d.push(`  }`);

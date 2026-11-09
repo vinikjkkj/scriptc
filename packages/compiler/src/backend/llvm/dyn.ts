@@ -2678,6 +2678,8 @@ export class LlDyn {
           B.line(`${thp} = getelementptr inbounds i8, ptr %d, i64 24 ; ->v.fn.thunk`);
           B.line(`${th} = load ptr, ptr ${thp}`);
           B.line(`call void @scr_box_set_thunk_fn(ptr ${tbox}, ptr ${th})`);
+          host.declare(`declare void @scr_dyn_fn_share_props(ptr, ptr)`);
+          B.line(`call void @scr_dyn_fn_share_props(ptr ${ad}, ptr %d) ; the adapter is the same function to JS: one own-property table`);
           const rc = vAdapters(host, arm);
           const u = B.tmp();
           B.line(
@@ -2825,6 +2827,8 @@ export class LlDyn {
         B.line(`${thp} = getelementptr inbounds i8, ptr %d, i64 24 ; ->v.fn.thunk`);
         B.line(`${th} = load ptr, ptr ${thp}`);
         B.line(`call void @scr_box_set_thunk_fn(ptr ${tbox}, ptr ${th})`);
+        host.declare(`declare void @scr_dyn_fn_share_props(ptr, ptr)`);
+        B.line(`call void @scr_dyn_fn_share_props(ptr ${a}, ptr %d) ; the adapter is the same function to JS: one own-property table`);
         if (host.engineModule) B.line(`call void @scr_dyn_fn_adapter_remember(ptr %d, ptr @${adapter}, ptr ${a})`);
         B.terminate(`ret ptr ${a}`);
         break;

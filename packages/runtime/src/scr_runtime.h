@@ -6895,6 +6895,9 @@ ScrDyn *scr_dyn_fn_get(const ScrDyn *d, const char *key, size_t key_len);
  * see the same properties. That is also why the emitted per-USE box is
  * correct and no declaration-site interning is needed. */
 ScrDyn *scr_dyn_fn_props(ScrDyn *d);
+/* A closure that ADAPTS the function value `fn` (a typed-slot wrapper over a boxed function) answers the same own properties: it takes `fn`'s table,
+ * allocated now if the function has none yet, so a write through either is seen through both. */
+void scr_dyn_fn_share_props(ScrClosure *adapter, const ScrDyn *fn);
 /* ── a compiled function's LIFTED members, reachable from any box ─────
  *
  * `function F(){}; F.alloc = fn` at module scope does NOT store into the

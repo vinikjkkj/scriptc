@@ -11415,6 +11415,13 @@ ScrDyn *scr_dyn_fn_get(const ScrDyn *d, const char *key, size_t key_len) {
  * scr_runtime.h). It hangs off the CLOSURE, so every box of one function
  * value shares it — which is what makes a per-USE box correct: JS has one
  * function object per closure, not one per boundary crossing. +1. */
+void scr_dyn_fn_share_props(ScrClosure *adapter, const ScrDyn *fn) {
+  if (fn->kind != SCR_DYN_FUNC || adapter == NULL || adapter->props != NULL) return;
+  ScrDyn *t = scr_dyn_fn_props((ScrDyn *)fn); /* +1: allocates the table on first use */
+  scr_dyn_release(t);
+  adapter->props = scr_box_retain(fn->v.fn.clo->props);
+}
+
 ScrDyn *scr_dyn_fn_props(ScrDyn *d) {
   if (!d->v.fn.clo->props) {
     scr_fn_own_tostring_hook = &scr_dyn_fn_own_tostring;
