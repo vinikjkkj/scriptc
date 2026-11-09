@@ -10240,8 +10240,10 @@ export class Lowerer {
     const key = `cview:${className}:${toT.shapeId}`;
     const existing = this.widthHelpers.get(key);
     if (existing) return existing;
+    const liftedStart = this.liftedFns.length;
     const name = `%obj.cview.${this.widthHelpers.size}`;
     this.widthHelpers.set(key, name);
+    this.classViewHelpers.set(name, { className, toId: toT.shapeId });
     const to = this.shapes.get(toT.shapeId)!;
     const fromT: IrType = { kind: "object", className };
     const o: IrExpr = { kind: "varRef", localId: "o.0", type: fromT, loc };
@@ -10267,6 +10269,7 @@ export class Lowerer {
       body,
       loc,
     });
+    this.classViewHelperFns.set(name, this.liftedFns.slice(liftedStart).map((f) => f.name));
     return name;
   }
 
@@ -12181,16 +12184,259 @@ export class Lowerer {
    * accessor answering at each read), on a struct it is the access it always was. A view's struct
    * slots are a SNAPSHOT taken at the cast: the walkers that read slots directly (the JSON writer,
    * the to-dyn converter) consult `%view` first, so they never print the snapshot of a live view. */
+  /** class view helper name -> its pair, for downgradeClassViews. */
+  readonly classViewHelpers = new Map<string, { className: string; toId: string }>();
+  /** Class-view target shapes whose every view was downgraded to a copy (downgradeClassViews). */
+  readonly classViewDead = new Set<string>();
+  /** helper name -> the lifted functions its creation added (the helper and its bound-method closures). */
+  readonly classViewHelperFns = new Map<string, string[]>();
+
+  /** A class -> record view is worth its cost only where a copy could be told apart from the instance. The conversion lowers every gated pair to the
+   * view (classViewHelperFor); once the whole program is lowered, this pass proves single projection SITES unobservable and gives them the copy:
+   *   - the projection is an argument of a direct call to a known function, and every other argument of that call is a literal or a local read, so
+   *     nothing runs between the projection and the call;
+   *   - the callee's parameter never escapes: each use is a field read, a method call through a field read, or the argument of another such call
+   *     (so the record is not stored, returned, captured, compared, aliased, written or widened), and the record dies when the call returns;
+   *   - nothing the call can run writes a mirrored member: the code reachable from the callee (calls, closures, and every method of the class and
+   *     its subclasses, which the record's method members run) writes none of the mirrored data names, writes no field of an unknown name, and
+   *     calls no function value it cannot name.
+   * Constructors are ordinary functions here: one the call reaches (a `new` inside it) counts, and a constructor that leaked `this` earlier
+   * only matters if code reachable from the call runs what it registered, which the unnamed-call rule already refuses. */
+  downgradeClassViews(functions: IrFunction[]): void {
+    if (this.classViewHelpers.size === 0) return;
+    const byName = new Map<string, IrFunction>();
+    for (const f of functions) byName.set(f.name, f);
+    type Eff = { writes: Set<string>; writeAny: boolean; unknownCall: boolean; callees: Set<string>; methodShapes: Set<string> };
+    const effOf = new Map<string, Eff>();
+    const effects = (fn: IrFunction): Eff => {
+      const hit = effOf.get(fn.name);
+      if (hit !== undefined) return hit;
+      const e: Eff = { writes: new Set(), writeAny: false, unknownCall: false, callees: new Set(), methodShapes: new Set() };
+      effOf.set(fn.name, e);
+      const seen = new Set<object>();
+      const walk = (n: unknown, parent: { kind?: unknown } | null): void => {
+        if (n === null || typeof n !== "object" || seen.has(n)) return;
+        seen.add(n);
+        if (Array.isArray(n)) {
+          for (const x of n) walk(x, parent);
+          return;
+        }
+        const o = n as { kind?: unknown; field?: unknown; own?: unknown; callee?: unknown; fn?: unknown; args?: IrExpr[]; fnName?: unknown };
+        if (o.kind === "fieldSet" || o.kind === "fieldIncDec" || (o.kind === "recordSet" && o.own !== true)) {
+          if (typeof o.field === "string") e.writes.add(o.field);
+          else e.writeAny = true;
+        } else if (o.kind === "recordKeySet" || o.kind === "recordKeyDelete" || o.kind === "arraySet") {
+          if (o.kind !== "arraySet") e.writeAny = true;
+        } else if (o.kind === "call" && typeof o.callee === "string") {
+          e.callees.add(o.callee);
+        } else if (o.kind === "closure" && typeof o.fnName === "string") {
+          e.callees.add(o.fnName);
+        } else if (o.kind === "callValue") {
+          // a call through a function value: only a method read straight off the record is nameable, and those run class methods the walk adds
+          const c = (o as unknown as { callee: { kind?: string; shapeId?: string } }).callee;
+          if (c.kind !== "recordGet" || typeof c.shapeId !== "string") e.unknownCall = true;
+          else e.methodShapes.add(c.shapeId);
+        } else if (o.kind === "libCall" && typeof o.fn === "string") {
+          const wf = o.fn;
+          if (wf === "dyn.keySet" || wf === "dyn.keySetSloppy" || wf === "dyn.keyDelete" || wf === "dyn.keyDeleteSloppy") {
+            const k = o.args?.[1] as { kind?: string; value?: unknown } | undefined;
+            if (k !== undefined && k.kind === "strLit" && typeof k.value === "string") e.writes.add(k.value);
+            else e.writeAny = true;
+          } else if (wf.startsWith("island.") || wf.startsWith("dyn.reflect") || wf.startsWith("dyn.defineProp") || wf === "dyn.expandoBind" || wf === "dyn.assign" || wf === "dyn.assignAll" || wf.startsWith("dyn.objCreate") || wf.startsWith("sym.") || wf.startsWith("dyn.invoke") || wf === "dyn.construct") {
+            e.writeAny = true;
+          }
+        } else if (o.kind === "dynInvoke" || o.kind === "dynCall" || o.kind === "dynConstruct") {
+          e.unknownCall = true;
+        }
+        for (const v of Object.values(n as Record<string, unknown>)) walk(v, o);
+      };
+      walk(fn.body, null);
+      return e;
+    };
+    // Does parameter `pid` of `fn` stay a read-only, non-escaping view of its argument?
+    const paramMemo = new Map<string, boolean>();
+    const paramSafe = (fn: IrFunction, pid: string): boolean => {
+      const key = `${fn.name}#${pid}`;
+      const memo = paramMemo.get(key);
+      if (memo !== undefined) return memo;
+      paramMemo.set(key, false); // a recursive use is refused
+      let ok = true;
+      const seen = new Set<object>();
+      const walk = (n: unknown, parent: unknown, grand: unknown): void => {
+        if (!ok || n === null || typeof n !== "object" || seen.has(n)) return;
+        seen.add(n);
+        if (Array.isArray(n)) {
+          for (const x of n) walk(x, parent, grand);
+          return;
+        }
+        const o = n as { kind?: unknown; localId?: unknown; callee?: unknown; args?: unknown[]; obj?: unknown; field?: unknown };
+        if (o.kind === "varRef" && o.localId === pid) {
+          const p = parent as { kind?: unknown; obj?: unknown; callee?: unknown; args?: unknown[] } | null;
+          if (p === null) { ok = false; return; }
+          if (p.kind === "recordGet" && p.obj === n) {
+            const g = grand as { kind?: unknown; callee?: unknown; args?: unknown[] } | null;
+            const fieldIsFunc = (p as unknown as { type?: IrType }).type?.kind === "func";
+            if (fieldIsFunc && !(g !== null && g.kind === "callValue" && g.callee === parent)) ok = false;
+            return;
+          }
+          if (p.kind === "call" && typeof p.callee === "string" && Array.isArray(p.args)) {
+            const idx = p.args.indexOf(n);
+            const callee = byName.get(p.callee);
+            if (idx < 0 || callee === undefined || callee.params[idx] === undefined || !paramSafe(callee, callee.params[idx]!.localId)) ok = false;
+            return;
+          }
+          ok = false;
+          return;
+        }
+        for (const v of Object.values(n as Record<string, unknown>)) walk(v, o, parent);
+      };
+      walk(fn.body, null, null);
+      paramMemo.set(key, ok);
+      return ok;
+    };
+    const classNamesBelow = (className: string): string[] => {
+      const out: string[] = [];
+      const visit = (c: ClassInfo): void => {
+        out.push(c.def.name);
+        for (const s of c.subclasses) visit(s);
+      };
+      const info = this.classes.get(className);
+      if (info !== undefined) visit(info);
+      return out;
+    };
+    const simpleArg = (a: { kind?: string }): boolean => a.kind === "varRef" || a.kind === "numLit" || a.kind === "strLit" || a.kind === "boolLit" || a.kind === "unitLit";
+    const downgraded = new Map<string, string>();
+    const copyHelperFor = (className: string, toId: string, loc: SrcLoc): string | null => {
+      const key = `${className}->${toId}`;
+      if (downgraded.has(key)) return downgraded.get(key)!;
+      // the copy main made: the constructor-witness projection first (widthCoerce's order), the width helper without the view otherwise
+      const h = this.ctorWitnessProjection(className, { kind: "record", shapeId: toId }, loc) ?? this.objRecordWidthHelper(className, toId, loc, false);
+      if (h !== null) downgraded.set(key, h);
+      return h;
+    };
+    const liftedBefore = this.liftedFns.length;
+    const sites: { inner: { callee: string; loc: SrcLoc }; outer: { callee: string; args: { kind?: string }[] }; at: number }[] = [];
+    const seen = new Set<object>();
+    const find = (n: unknown): void => {
+      if (n === null || typeof n !== "object" || seen.has(n)) return;
+      seen.add(n);
+      if (Array.isArray(n)) {
+        for (const x of n) find(x);
+        return;
+      }
+      const o = n as { kind?: unknown; callee?: unknown; args?: { kind?: string; callee?: unknown; loc?: SrcLoc }[] };
+      if (o.kind === "call" && typeof o.callee === "string" && Array.isArray(o.args) && !this.classViewHelpers.has(o.callee)) {
+        o.args.forEach((a, i) => {
+          if (a !== null && typeof a === "object" && a.kind === "call" && typeof a.callee === "string" && this.classViewHelpers.has(a.callee)) {
+            sites.push({ inner: a as unknown as { callee: string; loc: SrcLoc }, outer: o as unknown as { callee: string; args: { kind?: string }[] }, at: i });
+          }
+        });
+      }
+      for (const v of Object.values(n as Record<string, unknown>)) find(v);
+    };
+    for (const f of functions) find(f.body);
+    for (const s of sites) {
+      const pair = this.classViewHelpers.get(s.inner.callee)!;
+      const callee = byName.get(s.outer.callee);
+      if (process.env["SCRIPTC_CLASS_VIEW_MUTANT"] === "alwaysdowngrade") {
+        const mc = copyHelperFor(pair.className, pair.toId, s.inner.loc);
+        if (mc !== null) s.inner.callee = mc;
+        continue;
+      }
+      const why = process.env["SCRIPTC_CLASS_VIEW_WHY"] !== undefined;
+      if (callee === undefined || callee.params[s.at] === undefined) { if (why) console.error(`[cview] ${s.outer.callee}: callee not in IR`); continue; }
+      if (!s.outer.args.every((a, i) => i === s.at || simpleArg(a))) { if (why) console.error(`[cview] ${s.outer.callee}: another argument is not simple`); continue; }
+      if (!paramSafe(callee, callee.params[s.at]!.localId)) { if (why) console.error(`[cview] ${s.outer.callee}: parameter escapes or is written`); continue; }
+      const to = this.shapes.get(pair.toId);
+      if (to === undefined) continue;
+      const mirrored = to.fields.filter((f) => f.type.kind !== "func").map((f) => f.name);
+      // everything the call can run
+      const reach = new Set<string>();
+      const queue: string[] = [callee.name];
+      // the methods any class viewed as this shape runs through the record's method members (a constructor runs only if something calls `new`)
+      const prefixes: string[] = [];
+      for (const hp of this.classViewHelpers.values()) if (hp.toId === pair.toId) for (const c of classNamesBelow(hp.className)) prefixes.push(`%${c}.`);
+      const memberNames = new Set(to.fields.filter((f) => f.type.kind === "func").map((f) => f.name));
+      for (const f of functions) {
+        const pre = prefixes.find((p) => f.name.startsWith(p));
+        if (pre === undefined) continue;
+        const m = f.name.slice(pre.length).replace(/%vt$/, "");
+        if (memberNames.has(m)) queue.push(f.name);
+      }
+      let safe = true;
+      while (safe && queue.length > 0) {
+        const nm = queue.pop()!;
+        if (reach.has(nm)) continue;
+        reach.add(nm);
+        const fn = byName.get(nm);
+        if (fn === undefined) continue; // a runtime entry the IR does not define
+        const e = effects(fn);
+        if (e.writeAny || e.unknownCall || mirrored.some((m) => e.writes.has(m)) || [...e.methodShapes].some((sid) => sid !== pair.toId)) {
+          safe = false;
+          if (process.env["SCRIPTC_CLASS_VIEW_WHY"] !== undefined) console.error(`[cview]   ${nm}: writeAny=${String(e.writeAny)} unknownCall=${String(e.unknownCall)} writes=[${[...e.writes].join(",")}] shapes=[${[...e.methodShapes].join(",")}]`);
+          break;
+        }
+        for (const c of e.callees) if (!reach.has(c)) queue.push(c);
+      }
+      if (!safe) { if (process.env["SCRIPTC_CLASS_VIEW_WHY"] !== undefined) console.error(`[cview] ${s.outer.callee}: a reachable function writes a mirrored member or calls an unnamed function`); continue; }
+      const copy = copyHelperFor(pair.className, pair.toId, s.inner.loc);
+      if (copy === null) continue;
+      s.inner.callee = copy;
+    }
+    functions.push(...this.liftedFns.slice(liftedBefore));
+    // A shape none of whose class views survived the downgrade needs no view reads at all: its records are plain.
+    const stillViewed = new Set<string>();
+    const seen2 = new Set<object>();
+    const scan = (n: unknown, inHelper: boolean): void => {
+      if (n === null || typeof n !== "object" || seen2.has(n)) return;
+      seen2.add(n);
+      if (Array.isArray(n)) {
+        for (const x of n) scan(x, inHelper);
+        return;
+      }
+      const o = n as { kind?: unknown; callee?: unknown };
+      if (o.kind === "call" && typeof o.callee === "string" && this.classViewHelpers.has(o.callee)) stillViewed.add(this.classViewHelpers.get(o.callee)!.toId);
+      for (const v of Object.values(n as Record<string, unknown>)) scan(v, inHelper);
+    };
+    for (const f of functions) if (!this.classViewHelpers.has(f.name)) scan(f.body, false);
+    for (const id of this.classViewShapes) if (!stillViewed.has(id)) this.classViewDead.add(id);
+    // A helper no call reaches any more is dead code: drop it with its closures, which would otherwise keep the viewed methods from inlining.
+    const liveHelpers = new Set<string>();
+    for (const f of functions) {
+      if (this.classViewHelpers.has(f.name)) continue;
+      const seen3 = new Set<object>();
+      const sc3 = (n: unknown): void => {
+        if (n === null || typeof n !== "object" || seen3.has(n)) return;
+        seen3.add(n);
+        if (Array.isArray(n)) { for (const x of n) sc3(x); return; }
+        const o = n as { kind?: unknown; callee?: unknown };
+        if (o.kind === "call" && typeof o.callee === "string" && this.classViewHelpers.has(o.callee)) liveHelpers.add(o.callee);
+        for (const v of Object.values(n as Record<string, unknown>)) sc3(v);
+      };
+      sc3(f.body);
+    }
+    const dropNames = new Set<string>();
+    for (const [h, names] of this.classViewHelperFns) if (!liveHelpers.has(h)) for (const nm of names) dropNames.add(nm);
+    if (dropNames.size > 0) {
+      for (let i = functions.length - 1; i >= 0; i--) if (dropNames.has(functions[i]!.name)) functions.splice(i, 1);
+    }
+  }
+
   /** A shape every view of which is class-sourced: no record-to-record struct view and no dynamic-object view reaches it. */
   classViewOnly(shapeId: string): boolean {
-    if (!this.classViewShapes.has(shapeId) || this.recordViewShapes.has(shapeId)) return false;
+    if (!this.classViewShapes.has(shapeId) || this.recordViewShapes.has(shapeId) || this.classViewDead.has(shapeId)) return false;
     const sh = this.shapes.get(shapeId);
     return sh !== undefined && !objectViewKeys.has(viewShapeKey(sh.fields, sh.indexValue));
   }
 
   viewRewrite(functions: IrFunction[]): void {
+    this.downgradeClassViews(functions);
     const viewShapes = new Set<string>();
     for (const sh of this.shapes.shapes) if (sh.view === true) viewShapes.add(sh.id);
+    for (const id of this.classViewDead) {
+      const sh = this.shapes.get(id);
+      if (sh !== undefined && !this.recordViewShapes.has(id) && !objectViewKeys.has(viewShapeKey(sh.fields, sh.indexValue))) viewShapes.delete(id);
+    }
     if (viewShapes.size === 0) return;
     const liftedBefore = this.liftedFns.length;
     for (const fn of [...functions]) {
@@ -13679,10 +13925,10 @@ export class Lowerer {
     }
   }
 
-  objRecordWidthHelper(className: string, toId: string, loc: SrcLoc): string | null {
+  objRecordWidthHelper(className: string, toId: string, loc: SrcLoc, allowView = true): string | null {
     const to = this.shapes.get(toId);
     if (!to) return null;
-    const classView = this.classViewHelperFor(className, { kind: "record", shapeId: toId }, loc);
+    const classView = allowView ? this.classViewHelperFor(className, { kind: "record", shapeId: toId }, loc) : null;
     if (classView !== null) return classView;
     const viewed = this.classViewHelper(className, toId, loc);
     if (viewed !== null) return viewed;
