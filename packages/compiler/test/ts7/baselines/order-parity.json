@@ -27353,6 +27353,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25070-class-getter-read-through-an-interface-typed-binding/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/25070-class-getter-read-through-an-interface-typed-binding/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/25060-class-instance-read-through-a-record-of-methods-is-the-same-object/main.ts": {
    "order": [
     "<repo>/tests/corpus/25060-class-instance-read-through-a-record-of-methods-is-the-same-object/main.ts"
