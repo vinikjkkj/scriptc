@@ -14865,6 +14865,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24910-jsdoc-scalar-parameters-follow-the-flow.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24910-jsdoc-scalar-parameters-follow-the-flow.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2485-inspect-circular-refs.ts": {
    "order": [
     "<repo>/tests/corpus/2485-inspect-circular-refs.ts"
