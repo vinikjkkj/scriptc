@@ -14886,6 +14886,14 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24913-exports-read-inside-a-function-of-a-module-that-replaces-them/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24913-exports-read-inside-a-function-of-a-module-that-replaces-them/common.cjs",
+    "<repo>/tests/corpus/24913-exports-read-inside-a-function-of-a-module-that-replaces-them/node.cjs",
+    "<repo>/tests/corpus/24913-exports-read-inside-a-function-of-a-module-that-replaces-them/main.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2485-inspect-circular-refs.ts": {
    "order": [
     "<repo>/tests/corpus/2485-inspect-circular-refs.ts"
