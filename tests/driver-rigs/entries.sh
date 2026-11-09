@@ -13,6 +13,7 @@ case "${driver%-llvm}" in
   mysql2-roundtrip) entry=mysql-roundtrip.ts;  extra=(--npm-static mysql2) ;;
   pg-roundtrip)     entry=pg-roundtrip.ts;     extra=() ;;
   mysql2-pool)      entry=mysql-pool.ts;       extra=(--npm-static mysql2) ;;
+  ioredis-roundtrip) entry=redis-roundtrip.ts; extra=() ;;
   mysql2-execunion) entry=mysql-execunion.ts;  extra=(--npm-static mysql2) ;;
   *) echo "unknown driver: $driver" >&2; exit 2 ;;
 esac
