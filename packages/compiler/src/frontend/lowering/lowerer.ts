@@ -2590,6 +2590,11 @@ export class Lowerer {
    * in the same function, JS's function hoisting): the statement loop skips
    * the source statement when it arrives. */
   readonly hoistedFnDecls = new Set<ts.FunctionDeclaration>();
+  /** Nested function declarations whose body is lowering: declaration -> its local (declared, its varDecl not yet emitted). A declaration a
+   * sibling reaches forward from inside that body (mutual recursion) captures this local's box, which must exist by then. */
+  readonly fnDeclInFlight = new Map<ts.FunctionDeclaration, IrLocal>();
+  /** The locals of those declarations that took a scope-entry box (predeclareForwardFnDecl): the declaration then assigns into it. */
+  readonly fnDeclPredeclared = new Set<string>();
   /** Comma expressions whose LEFT operand the statement loop already emitted
    * as its own statement (the granularity rule's sequence-assignment split —
    * `x = (a, b, v);` lowered as `a; b; x = v;` so each effect owns its poison
