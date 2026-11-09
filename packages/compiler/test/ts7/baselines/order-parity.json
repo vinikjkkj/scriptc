@@ -27220,6 +27220,54 @@
     "<repo>/tests/fixtures/node-types/streams.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/24890-fs-readdir-nonascii-names.js": {
+   "order": [
+    "<repo>/tests/corpus/24890-fs-readdir-nonascii-names.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24891-fs-open-nonascii-path.js": {
+   "order": [
+    "<repo>/tests/corpus/24891-fs-open-nonascii-path.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24892-fs-stat-nonascii-path.js": {
+   "order": [
+    "<repo>/tests/corpus/24892-fs-stat-nonascii-path.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24893-fs-namespace-ops-nonascii-path.js": {
+   "order": [
+    "<repo>/tests/corpus/24893-fs-namespace-ops-nonascii-path.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24894-fs-realpath-nonascii-path.js": {
+   "order": [
+    "<repo>/tests/corpus/24894-fs-realpath-nonascii-path.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24895-fs-rename-replaces-and-errors.js": {
+   "order": [
+    "<repo>/tests/corpus/24895-fs-rename-replaces-and-errors.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24896-fs-promises-readdir-options.js": {
+   "order": [
+    "<repo>/tests/corpus/24896-fs-promises-readdir-options.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24897-fs-buffer-encoded-names-are-buffers.js": {
+   "order": [
+    "<repo>/tests/corpus/24897-fs-buffer-encoded-names-are-buffers.js"
+   ],
+   "diags": []
   }
  }
 }
