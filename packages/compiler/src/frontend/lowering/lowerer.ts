@@ -153,6 +153,7 @@ import { MixinFnShape, mixinCallClassInfoOf, mixinIntersectionInstanceType } fro
 import { EVAL_ENV_SYM, evalClassNodeHook } from "./lower-evalclass.js";
 import { lowerTimersSchedulerCall } from "./lower-builtins.js";
 import { ParamShape, FnSig, GenericFnInfo, GenericInstance, bindingNeverReassigned, bodyReadsArguments, isThisParameter, paramShape, paramShapes, checkDefaultParamBodyType, completeArgs, wrappedUndefined, undefinedArgFor, requireExactArityValue, bodyReturnType, declaredReturnType, collectSignature, collectSignatureInner, collectGenericSignature, genericFnOf, lowerGenericCall, lowerGenericFnValue, inferTypeParamBindings, lowerGenericInstance, lowerCall, reconcileOverloadMemberDyn, lowerFfiCall, lowerTimersMemberCall, lowerPromiseMethodCall, lowerFilterNarrowCall, isTopLevelFnSymbol, lowerNestedFunctionDecl, lambdaSignature, lowerLambda, lowerFunction, validateFfiImports, implicitDefaultInstance } from "./lower-calls.js";
+import { computeJsDocParamPlans } from "../jsdoc-param-plan.js";
 import { lowerArrayMethodCall, lowerBufferStaticCall, lowerBytesMethodCall, lowerBytesNew, lowerMapMethodCall, lowerMapForEachCall, buildMapForEachFn, lowerRecordOvfCaptureHelper, ovfCapturePlannable, dynSlotCheckOk, lowerEnvToPairsHelper, lowerSetMethodCall, lowerSetForEachCall, buildSetForEachFn, lowerRegexMethodCall, lowerStringMethodCall } from "./lower-containers.js";
 import { lowerStreamModuleCall, streamInstanceOfExpr } from "./lower-stream.js";
 import { unifyWidthShapes, type UnifyOutcome } from "./shape-unify.js";
@@ -837,6 +838,7 @@ export function lowerToIr(
   const ffiImports = options.ffiImports ?? [];
   OWN_SHADOW_ROOTS.clear(); // the families of THIS program: the discovery pass fills it, the emit pass reads it
   clearClassFedInterfaces(); // the interfaces class instances flow into: discovery fills it, every later pass maps them to the boxed object
+  computeJsDocParamPlans(program, program.getTypeChecker()); // the JSDoc scalar claims the whole program proves, before any type is mapped
   let validation: Lowerer | null = new Lowerer(program, entry, moduleOrder, dynamic, {
     targetPlatform,
     ffiImports,

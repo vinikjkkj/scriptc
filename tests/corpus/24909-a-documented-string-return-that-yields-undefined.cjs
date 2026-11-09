@@ -16,3 +16,5 @@ process.env.SCRIPTC_SET_VAR_24909 = "on";
 const missing = load();
 console.log(typeof missing, missing === undefined, load() || "fallback");
 console.log(typeof loadSet(), loadSet(), `${loadSet()}`.length);
+const holder = { load, loadSet };
+console.log(typeof holder.load(), holder.loadSet());

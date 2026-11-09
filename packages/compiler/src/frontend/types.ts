@@ -5,6 +5,7 @@ import type { IrBuiltinRendering, IrRecordShape, IrType, IrUnionDef } from "../i
 import { BYTES_ELEM_NAMES, ABORTCONTROLLER_T, ABORTSIGNAL_T, EVENT_T, BIGINT, HEADERS_T, REQUEST_T, REQUESTINIT_T, RESPONSE_T, arrayOf, BOOL, bytesOf, canConvertToDyn, CHILD_T, DYN, F64, funcOf, isRefCounted, isSupportedIndexValue, isSupportedMapKey, isSupportedMapValue, isSupportedSetElem, isSupportedWeakKey, isSupportedWeakValue, isUnitType, JSVAL, mapOf, weakMapOf, weakRideMapOf, NULL_T, PROCSTREAM_T, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, setOf, STRING, SYMBOL_T, typeEquals, typeKey, UNDEFINED_T, VOID } from "../ir/nodes.js";
 
 import { isJsSourceFile } from "./program.js";
+import { JSDOC_PARAM_PLANS, JSDOC_WIDENED_RETURNS } from "./jsdoc-param-plan.js";
 import { dynBuiltinFnType, dynBuiltinSigOfType } from "./dyn-builtin-sigs.js";
 import { isSqliteTypesPath } from "./shared.js";
 import { isProvenanceSourceFile } from "./provenance-registry.js";
@@ -5470,6 +5471,16 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
           decl.initializer.properties.length === 0 && isJsSourceFile(decl.getSourceFile())) {
         pt = DYN;
       }
+      // A JSDoc scalar claim the program's flow does not prove (jsdoc-param-plan.ts): the function's own parameter takes the representation of the
+      // flow, and so does every function VALUE built from it (a slot the function is stored in spells the same parameter types).
+      if (pt !== null && decl !== undefined && ts.isParameter(decl)) {
+        const plan = JSDOC_PARAM_PLANS.get(decl);
+        if (plan === "dyn") {
+          pt = DYN;
+        } else if (plan === "undef" && pt.kind !== "dyn" && pt.kind !== "jsval") {
+          pt = withUndefinedArm(pt, ctx.unions) ?? pt;
+        }
+      }
       // Belt and braces for non-strict type worlds: an optional param's
       // ABI slot is always the undefined-armed union (strictNullChecks
       // already spells it that way; arm it here if the world didn't).
@@ -5557,7 +5568,14 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       mapTrace(`FNRET ${checker.typeToString(type).slice(0, 46)} -> ${checker.typeToString(retT).slice(0, 60)}`);
       return null;
     }
-    return sawRestIn ? { kind: "func" as const, params, ret, restIn: true as const } : funcOf(params, ret);
+    // A JS function whose JSDoc scalar return the body contradicts (jsdoc-param-plan.ts): every function VALUE built from it answers the scalar OR undefined too.
+    const widenedRetDecl = checker.signatureDeclaration(sig);
+    const retOut =
+      widenedRetDecl !== undefined && ts.isFunctionDeclaration(widenedRetDecl) && JSDOC_WIDENED_RETURNS.has(widenedRetDecl) &&
+      (ret.kind === "f64" || ret.kind === "string" || ret.kind === "bool")
+        ? (withUndefinedArm(ret, ctx.unions) ?? ret)
+        : ret;
+    return sawRestIn ? { kind: "func" as const, params, ret: retOut, restIn: true as const } : funcOf(params, retOut);
   };
   if (callSigs.length === 1) return mapOneSig(callSigs[0]!, ctx);
   // AN OVERLOAD SET as a member of a body-less .d.ts class instance

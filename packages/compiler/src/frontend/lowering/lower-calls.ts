@@ -11,6 +11,7 @@ import { engineFunctionApply } from "./lower-engine-fn.js";
 import { applyEnumRefill, registerEnumRefill } from "./ir-patch.js";
 import type { EnumRefill } from "./ir-patch.js";
 import type { Lowerer } from "./lowerer.js";
+import { JSDOC_ESCAPING_FNS, JSDOC_PARAM_PLANS, JSDOC_WIDENED_RETURNS } from "../jsdoc-param-plan.js";
 import { castViewInner } from "./lower-instoverride.js";
 import { fillWithKeyList } from "./key-list-fill.js";
 import { lowerGenMethodCall } from "./lower-generators.js";
@@ -469,6 +470,17 @@ export interface GenericInstance {
       return { type: DYN, mode: param.questionToken ? "omittable" : "required" };
     }
     const type = L.irTypeOf(param.name);
+    // A JSDoc scalar claim the program's flow does not prove (jsdoc-param-plan.ts): the representation of the flow, never a throw where Node runs.
+    {
+      const plan = JSDOC_PARAM_PLANS.get(param);
+      if (plan === "undef") {
+        const armed = L.withUndefinedArm(type);
+        // A function that escapes as a value cannot be omittable (its value type spells every parameter): a required union slot.
+        if (armed) return param.parent !== undefined && JSDOC_ESCAPING_FNS.has(param.parent) ? { type: armed, mode: "required" } : { type: armed, mode: "omittable", bodyType: armed };
+      } else if (plan === "dyn") {
+        return { type: DYN, mode: "required" };
+      }
+    }
     if (param.questionToken && !L.bareUndefinedArmedUnion(type) && type.kind !== "dyn" && type.kind !== "jsval") {
       // `x?: unknown` where unknown came from an annotation: undefined is
       // absorbed into the hole type, so no undefined ARM exists — but a
@@ -481,6 +493,7 @@ export interface GenericInstance {
     }
     return { type, mode: param.questionToken ? "omittable" : "required" };
   }
+
 
 /** ParamShapes for a whole parameter list. */
 /** A `this` PARAMETER declaration (`function f(this: void, x: {}) ...`)
@@ -1480,6 +1493,7 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
   // tree and checker handles behind each) alive after its load is disposed.
   const widenedMemo = new WeakMap<ts.Node, boolean>();
   export function jsWidenedReturnDecl(L: Lowerer, decl: ts.SignatureDeclaration): boolean {
+    if (JSDOC_WIDENED_RETURNS.has(decl)) return true; // the whole-program fixpoint (jsdoc-param-plan.ts) is the rule; the walk below is its fallback
     const known = widenedMemo.get(decl);
     if (known !== undefined) return known;
     widenedMemo.set(decl, false); // a recursive cycle reads false, then settles
