@@ -479,12 +479,12 @@ function lowerOptionalDefaultArg(
       unshift: [0, Number.MAX_SAFE_INTEGER], reverse: [0, 0], copyWithin: [2, 3],
       map: [1, 1], filter: [1, 1], forEach: [1, 1], find: [1, 1], findIndex: [1, 1], some: [1, 1],
       findLast: [1, 1], findLastIndex: [1, 1],
-      every: [1, 1], flatMap: [1, 1], reduce: [1, 2], reduceRight: [1, 2],
+      every: [1, 1], flatMap: [1, 1], flat: [0, 1], reduce: [1, 2], reduceRight: [1, 2],
     }[
       name as
         | "push" | "pop" | "concat" | "indexOf" | "includes" | "join" | "slice" | "shift" | "splice" | "at" | "map" | "filter" | "fill"
         | "unshift" | "reverse" | "copyWithin"
-        | "forEach" | "find" | "findIndex" | "findLast" | "findLastIndex" | "some" | "every" | "flatMap" | "reduce" | "reduceRight"
+        | "forEach" | "find" | "findIndex" | "findLast" | "findLastIndex" | "some" | "every" | "flatMap" | "flat" | "reduce" | "reduceRight"
     ];
     // The callback-taking methods accept Array.prototype's second argument,
     // the callback's `this`. It is registered against the callback node and
@@ -859,6 +859,7 @@ function lowerOptionalDefaultArg(
     }
     if (name === "at") return lowerArrayAtCall(L, call, access, elem);
     if (name === "flatMap") return lowerArrayFlatMapCall(L, call, access, elem);
+    if (name === "flat") return lowerArrayFlatCall(L, call, access, elem);
     // reduce / reduceRight
     return lowerArrayReduceCall(L, call, access, name as "reduce" | "reduceRight", elem);
   }
@@ -2445,6 +2446,119 @@ function lowerOptionalDefaultArg(
         { id: "i.0", name: "i", type: F64, mutable: true },
       ],
       body,
+      loc,
+    });
+    return name;
+  }
+
+/** `a.flat(depth)` over a TYPED nested array: the nesting depth is part of the element type, so `depth` (0, 1, 2, ..., Infinity, omitted = 1) is a
+   * compile-time number and the call is that many applications of the one-level flatten helper (depth 0 is a shallow copy). A depth the program computes
+   * at run time, or an element type with a union at a level the depth reaches (whether a value flattens would be a per-element decision), is fenced. */
+  export function lowerArrayFlatCall(L: Lowerer, call: ts.CallExpression,
+    access: ts.PropertyAccessExpression,
+    elem: IrType,): IrExpr {
+    const loc = locOf(call);
+    let depth = 1;
+    const argNode = call.arguments[0];
+    if (argNode !== undefined) {
+      let a: ts.Expression = argNode;
+      while (ts.isParenthesizedExpression(a)) a = a.expression;
+      if (ts.isNumericLiteral(a)) depth = Number(a.text);
+      else if (ts.isIdentifier(a) && a.text === "Infinity") depth = Infinity;
+      else if (ts.isPropertyAccessExpression(a) && a.name.text === "POSITIVE_INFINITY") depth = Infinity;
+      else L.unsupported("SC1090", argNode, "'.flat' with a depth the program computes at run time (the result type is fixed by the depth, so it must be a literal number or Infinity)");
+    }
+    if (!(depth >= 0)) L.unsupported("SC1090", call, "'.flat' with a negative or NaN depth");
+    const receiver = L.lowerExpr(access.expression);
+    let cur: IrExpr = receiver;
+    let curT: IrType = arrayOf(elem);
+    if (depth === 0) {
+      return { kind: "call", callee: flatHelper(L, curT, false, loc), args: [cur], type: curT, loc };
+    }
+    for (let d = 0; d < depth; d++) {
+      const innerT = (curT as IrType & { kind: "array" }).elem;
+      if (innerT.kind === "union" && L.unions.get(innerT.unionId)?.arms.some((arm) => arm.kind === "array")) {
+        L.unsupported("SC1090", call, "'.flat' over elements that are a union with an array arm (whether one value flattens would be a per-element decision)");
+      }
+      if (innerT.kind !== "array") break; // deeper than the type nests: Infinity (or an over-deep literal) stops here, as flat does
+      cur = { kind: "call", callee: flatHelper(L, curT, true, loc), args: [cur], type: innerT, loc };
+      curT = innerT;
+    }
+    return cur;
+  }
+
+/** One level of flatten (`flat`) or a shallow copy (`flat(0)`) of an array of arrays:
+   *
+   *   out = []; n = a.length;
+   *   for (i = 0; i < n; i++) { r = a[i]; m = r.length; for (j = 0; j < m; j++) out.push(r[j]); }
+   *   return out;
+   */
+  function flatHelper(L: Lowerer, arrT: IrType, flatten: boolean, loc: SrcLoc): string {
+    const key = `flat:${flatten ? 1 : 0}:${typeKey(arrT)}`;
+    const existing = L.arrHofHelpers.get(key);
+    if (existing) return existing;
+    const name = `%arr.flat.${L.arrHofHelpers.size}`;
+    L.arrHofHelpers.set(key, name);
+    const aT = arrT as IrType & { kind: "array" };
+    const elem = aT.elem;
+    const outT: IrType = flatten ? (elem as IrType & { kind: "array" }) : aT;
+    const ref = (localId: string, type: IrType): IrExpr => ({ kind: "varRef", localId, type, loc });
+    const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
+    const pushStmt = (value: IrExpr): IrStmt => ({
+      kind: "exprStmt",
+      expr: { kind: "arrIntrinsic", method: "push", receiver: ref("out.0", outT), args: [value], type: F64, loc },
+      loc,
+    });
+    // A HOLE is skipped (flat visits only the slots a sparse array has), at both levels: the read of an absent slot would trap.
+    const present = (arr: IrExpr, index: IrExpr): IrExpr => ({ kind: "arrIntrinsic", method: "hasSlot", receiver: arr, args: [index], type: BOOL, loc });
+    const push = (value: IrExpr, arr: IrExpr, index: IrExpr): IrStmt => ({ kind: "if", cond: present(arr, index), then: [pushStmt(value)], else_: null, loc });
+    const innerElem = flatten ? (elem as IrType & { kind: "array" }).elem : elem;
+    const outerBody: IrStmt[] = flatten
+      ? [
+          {
+            kind: "if",
+            cond: present(ref("a.0", aT), ref("i.0", F64)),
+            then: [
+              { kind: "varDecl", localId: "r.0", init: getElemExpr(aT, elem, loc), loc },
+              { kind: "varDecl", localId: "m.0", init: { kind: "arrIntrinsic", method: "length", receiver: ref("r.0", elem), args: [], type: F64, loc }, loc },
+              {
+                kind: "for",
+                init: { kind: "varDecl", localId: "j.0", init: num(0), loc },
+                cond: { kind: "bin", op: "<", left: ref("j.0", F64), right: ref("m.0", F64), type: BOOL, loc },
+                update: { kind: "assign", localId: "j.0", value: { kind: "bin", op: "+", left: ref("j.0", F64), right: num(1), type: F64, loc }, loc },
+                body: [push({ kind: "arrayGet", arr: ref("r.0", elem), index: ref("j.0", F64), type: innerElem, loc }, ref("r.0", elem), ref("j.0", F64))],
+                loc,
+              },
+            ],
+            else_: null,
+            loc,
+          },
+        ]
+      : [push(getElemExpr(aT, elem, loc), ref("a.0", aT), ref("i.0", F64))];
+    const locals: IrLocal[] = [
+      { id: "a.0", name: "a", type: aT, mutable: true },
+      { id: "n.0", name: "n", type: F64, mutable: false },
+      { id: "i.0", name: "i", type: F64, mutable: true },
+      { id: "out.0", name: "out", type: outT, mutable: false },
+      ...(flatten
+        ? [
+            { id: "r.0", name: "r", type: elem, mutable: false },
+            { id: "m.0", name: "m", type: F64, mutable: false },
+            { id: "j.0", name: "j", type: F64, mutable: true },
+          ]
+        : []),
+    ];
+    L.liftedFns.push({
+      name,
+      params: [{ localId: "a.0", name: "a", type: aT }],
+      returnType: outT,
+      locals,
+      body: [
+        { kind: "varDecl", localId: "out.0", init: { kind: "arrayLit", elems: [], type: outT, loc }, loc },
+        readLenStmt(aT, loc),
+        countedForLoop(loc, outerBody),
+        { kind: "return", value: ref("out.0", outT), loc },
+      ],
       loc,
     });
     return name;
