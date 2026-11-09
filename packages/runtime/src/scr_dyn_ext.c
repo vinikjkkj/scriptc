@@ -408,6 +408,20 @@ static ScrDyn *scr_fs_dirent_new(ScrDyn *name, const ScrStr *parent, unsigned ki
   return d;
 }
 
+#ifdef _WIN32
+/* Node on Windows joins a recursive listing with path.win32.join: the separator is a backslash, a slash in the base is normalised to it, and a drive
+ * or UNC root is kept as written. The runtime's own path.win32 does the join. +1 string. */
+static ScrStr *scr_fs_rd_join(const ScrStr *a, const char *b, size_t blen) {
+  ScrArr *parts = scr_arr_new(SCR_ELEM_STR, 2);
+  scr_arr_push_ref(parts, scr_str_new(a->data, a->len));
+  scr_arr_push_ref(parts, scr_str_new(b, blen));
+  ScrStr *r = scr_path_win32_join(parts);
+  scr_arr_release(parts);
+  return r;
+}
+#define SCR_RD_SEP '\\'
+#else
+#define SCR_RD_SEP '/'
 /* path.join(a, b) for two strings: the join, then path.normalize's rules ('.' and empty segments drop, '..' pops a named segment, a leading
  * '/' stays, an empty result is '.'). +1 string. */
 static ScrStr *scr_fs_rd_join(const ScrStr *a, const char *b, size_t blen) {
@@ -462,6 +476,7 @@ static ScrStr *scr_fs_rd_join(const ScrStr *a, const char *b, size_t blen) {
   free(out);
   return r;
 }
+#endif
 
 static bool scr_fs_rd_opts(const ScrDyn *opts, ScrRdOpt *o) {
   o->wft = false;
@@ -551,7 +566,7 @@ static ScrDyn *scr_fs_rd_list(ScrStr *base, const ScrDyn *opts, const ScrRdOpt *
         if (!rel) scr_trap("scriptc: out of memory\n");
         if (rl > 0) {
           memcpy(rel, q[qi].rel, rl);
-          rel[rl++] = '/';
+          rel[rl++] = SCR_RD_SEP;
         }
         memcpy(rel + rl, es->data, es->len);
         rel[rl + es->len] = 0;
