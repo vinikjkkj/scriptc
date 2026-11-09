@@ -15114,6 +15114,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24898-buffer-numeric-accessors-dyn-direct-families-bad-offsets.js": {
+   "order": [
+    "<repo>/tests/corpus/24898-buffer-numeric-accessors-dyn-direct-families-bad-offsets.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2490-find-miss-null-compare.ts": {
    "order": [
     "<repo>/tests/corpus/2490-find-miss-null-compare.ts"

@@ -1409,7 +1409,7 @@ static ScrDyn *dyn_buf_num_call(ScrDyn *recv, const DynBufNum *row, ScrDyn *cons
   double r;
   if (row->var) {
     if (row->write) {
-      double v = dyn_bufnum_arg(args, argc, 0, 0, &bad);
+      double v = dyn_bufnum_arg(args, argc, 0, (double)NAN, &bad); /* the VALUE of a write has no default: absent/undefined is ToNumber(undefined) = NaN (zero for an integer write, the NaN pattern for a float write) */
       double off = dyn_bufnum_arg(args, argc, 1, 0, &bad);
       double bl = dyn_bufnum_arg(args, argc, 2, 0, &bad);
       if (bad) goto refuse;
@@ -1421,7 +1421,7 @@ static ScrDyn *dyn_buf_num_call(ScrDyn *recv, const DynBufNum *row, ScrDyn *cons
       r = scr_bytes_read_var(b, off, bl, row->sign, row->le);
     }
   } else if (row->write) {
-    double v = dyn_bufnum_arg(args, argc, 0, 0, &bad);
+    double v = dyn_bufnum_arg(args, argc, 0, (double)NAN, &bad); /* the VALUE of a write has no default: absent/undefined is ToNumber(undefined) = NaN (zero for an integer write, the NaN pattern for a float write) */
     double off = dyn_bufnum_arg(args, argc, 1, 0, &bad);
     if (bad) goto refuse;
     r = scr_bytes_write_num(b, v, off, row->kind, row->le);
