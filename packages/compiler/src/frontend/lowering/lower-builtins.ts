@@ -5145,6 +5145,11 @@ function fsWriteOptionsSignalFree(L: Lowerer, fn: string, expr: ts.CallExpressio
       if (dynElemChain(value.type)) {
         value = { kind: "dynFrom", value, type: DYN, loc };
       }
+      // A value of any other type the checked-dynamic tree can carry (a tuple of `Error | null` and `unknown`, ioredis' pipeline result) crosses as a
+      // dyn tree and the dyn serializer walks it, as for an `any[]`: Node's own walk is over values, not types.
+      if (!L.jsonStringifiable(value.type) && value.type.kind !== "dyn" && !L.bareUndefinedArmedUnion(value.type) && L.dynConvertible(value.type)) {
+        value = { kind: "dynFrom", value, type: DYN, loc };
+      }
       if (!L.jsonStringifiable(value.type) && value.type.kind !== "dyn") {
         // Bare undefined-armed unions get their own wording: Node's
         // stringify of bare undefined is not a string at all — per-type
