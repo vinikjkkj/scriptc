@@ -15102,6 +15102,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24886-dyn-relational-operators-number-pairs-nan-negzero-mixed.js": {
+   "order": [
+    "<repo>/tests/corpus/24886-dyn-relational-operators-number-pairs-nan-negzero-mixed.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2490-find-miss-null-compare.ts": {
    "order": [
     "<repo>/tests/corpus/2490-find-miss-null-compare.ts"
