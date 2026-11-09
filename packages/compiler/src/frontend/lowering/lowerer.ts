@@ -804,6 +804,11 @@ const objectViewKeys = new Set<string>();
 const classViewWrites = new Set<string>();
 let classViewWriteAny = false;
 const classViewDeclined = new Set<string>();
+/** `Class->shapeKey` pairs discovery probed (lowered through the view helper without the grant) and the subset whose probe found a use the per-site proof
+ * (downgradeClassViews) cannot cover: only those pairs take the view grant, so a program whose projections are all provably unobservable pays nothing
+ * per record. Both persist across discovery's reruns. */
+const classViewProbed = new Set<string>();
+const classViewNeeded = new Set<string>();
 
 export function lowerToIr(
   program: ts.Program,
@@ -828,6 +833,8 @@ export function lowerToIr(
   classViewWrites.clear();
   classViewWriteAny = false;
   classViewDeclined.clear();
+  classViewProbed.clear();
+  classViewNeeded.clear();
   unifiedPairKeys.clear();
   widthPairsSettled = false;
   viewConversionAttempted = false;
@@ -885,12 +892,13 @@ export function lowerToIr(
   const __t0 = performance.now();
   let reachable = discovery.discover(options.libRoots);
   discovery.settleViewDenials();
+  discovery.analyzeClassViews();
   // A record-to-record conversion lowered through the view grant makes its shapes views, and a later statement that spreads
   // such a record lowers differently once the source is one. Discovery runs again, from a fresh lowerer, until the grant set
   // stops growing (bounded), so the emit pass interns every shape it will need as a view. Programs with no such conversion
   // never enter the loop.
   for (let round = 0; round < 3 && (viewConversionNoted || classFedInterfacesNoted()); round++) {
-    const grantSig = (): string => [...viewShapeKeys].sort().join("\n") + "|" + [...structViewDeniedKeys].sort().join("\n") + "|" + [...CLASS_FED_INTERFACES].map(([k, v]) => `${k}=${v}`).sort().join("\n");
+    const grantSig = (): string => [...viewShapeKeys].sort().join("\n") + "|" + [...structViewDeniedKeys].sort().join("\n") + "|" + [...classViewNeeded].sort().join("\n") + "|" + [...CLASS_FED_INTERFACES].map(([k, v]) => `${k}=${v}`).sort().join("\n");
     const before = grantSig();
     discovery = new Lowerer(program, entry, moduleOrder, dynamic, {
       targetPlatform,
@@ -899,6 +907,7 @@ export function lowerToIr(
     });
     reachable = discovery.discover(options.libRoots);
     discovery.settleViewDenials();
+    discovery.analyzeClassViews();
     if (grantSig() === before) break;
     resetClassFedInterfacesGrew();
   }
@@ -5601,6 +5610,7 @@ export class Lowerer {
    * still has to answer for it. Costs one traversal per discovered body. */
   noteDynBoxEdges(fn: IrFunction | null | undefined): void {
     if (!this.onEdge || !fn) return;
+    this.classIr.push(fn);
     if (!widthPairsSettled) this.discoveredFns.push(fn);
     const found = new Set<string>();
     const seen = new Set<string>();
@@ -10185,6 +10195,26 @@ export class Lowerer {
     return helper === null ? null : { kind: "call", callee: helper, args: [expr], type: expected, loc: expr.loc };
   }
 
+  /** Pairs this lowerer is probing (see classViewHelperFor). */
+  private readonly classProbeNow = new Set<string>();
+  /** Every body discovery lowered, for analyzeClassViews. */
+  private readonly classIr: IrFunction[] = [];
+
+  /** Discovery's verdict on the class views its probes lowered: a pair the per-site proof cannot clear (or any use outside a direct call argument) needs
+   * the view grant; the rest keep the copy and no record of their shape carries a view slot. Reruns discovery when the needed set grows. */
+  analyzeClassViews(): void {
+    if (this.classProbeNow.size === 0) return;
+    const fns = [...this.classIr, ...this.liftedFns, ...this.implicitFns];
+    const unsafe = this.downgradeClassViews(fns, true);
+    if (process.env["SCRIPTC_CLASS_VIEW_WHY"] !== undefined) console.error(`[cview] probed=[${[...this.classProbeNow].join(" ")}] unsafe=[${[...unsafe].join(" ")}] fns=${fns.length}`);
+    for (const k of this.classProbeNow) {
+      if (!classViewNeeded.has(k) && ((unsafe.has(k) && process.env["SCRIPTC_CLASS_VIEW_MUTANT"] !== "noneneeded") || process.env["SCRIPTC_CLASS_VIEW_MUTANT"] === "allneeded")) {
+        classViewNeeded.add(k);
+        viewConversionNoted = true;
+      }
+    }
+  }
+
   /** The view helper for a class -> record pair, or null when the pair keeps the copy (see classViewConversion). Registers the grant. */
   classViewHelperFor(className: string, expected: IrType & { kind: "record" }, loc: SrcLoc): string | null {
     if (process.env["SCRIPTC_CLASS_VIEW"] === "0") return null;
@@ -10216,6 +10246,18 @@ export class Lowerer {
     const key = viewShapeKey(to.fields, to.indexValue);
     if (structViewDeniedKeys.has(key)) return null;
     const noteKey = `${className}->${key}`;
+    if (this.onEdge !== null && !classViewNeeded.has(noteKey)) {
+      // PROBE: the view helper is lowered (so the sites can be judged) but not granted; downgradeClassViews' proof, run over what discovery lowered
+      // (analyzeClassViews), decides whether the pair needs the view at all. A pair no one has probed reruns discovery once.
+      if (classViewProbed.has(noteKey) && !this.classProbeNow.has(noteKey)) return null;
+      if (!classViewProbed.has(noteKey)) {
+        classViewProbed.add(noteKey);
+        viewConversionNoted = true;
+      }
+      this.classProbeNow.add(noteKey);
+      return this.classSrcViewHelper(className, expected, plan, loc);
+    }
+    if (this.onEdge === null && !classViewNeeded.has(noteKey)) return null;
     if (this.onEdge !== null) {
       viewConversionNoted = true;
       classViewNoted.add(noteKey);
@@ -10244,7 +10286,7 @@ export class Lowerer {
     const liftedStart = this.liftedFns.length;
     const name = `%obj.cview.${this.widthHelpers.size}`;
     this.widthHelpers.set(key, name);
-    this.classViewHelpers.set(name, { className, toId: toT.shapeId });
+    this.classViewHelpers.set(name, { className, toId: toT.shapeId, noteKey: `${className}->${viewShapeKey(this.shapes.get(toT.shapeId)!.fields, this.shapes.get(toT.shapeId)!.indexValue)}` });
     const to = this.shapes.get(toT.shapeId)!;
     const fromT: IrType = { kind: "object", className };
     const o: IrExpr = { kind: "varRef", localId: "o.0", type: fromT, loc };
@@ -12186,7 +12228,7 @@ export class Lowerer {
    * slots are a SNAPSHOT taken at the cast: the walkers that read slots directly (the JSON writer,
    * the to-dyn converter) consult `%view` first, so they never print the snapshot of a live view. */
   /** class view helper name -> its pair, for downgradeClassViews. */
-  readonly classViewHelpers = new Map<string, { className: string; toId: string }>();
+  readonly classViewHelpers = new Map<string, { className: string; toId: string; noteKey: string }>();
   /** Class-view target shapes whose every view was downgraded to a copy (downgradeClassViews). */
   readonly classViewDead = new Set<string>();
   /** helper name -> the lifted functions its creation added (the helper and its bound-method closures). */
@@ -12203,8 +12245,9 @@ export class Lowerer {
    *     calls no function value it cannot name.
    * Constructors are ordinary functions here: one the call reaches (a `new` inside it) counts, and a constructor that leaked `this` earlier
    * only matters if code reachable from the call runs what it registered, which the unnamed-call rule already refuses. */
-  downgradeClassViews(functions: IrFunction[]): void {
-    if (this.classViewHelpers.size === 0) return;
+  downgradeClassViews(functions: IrFunction[], probe = false): Set<string> {
+    const unsafe = new Set<string>();
+    if (this.classViewHelpers.size === 0) return new Set<string>();
     const byName = new Map<string, IrFunction>();
     for (const f of functions) byName.set(f.name, f);
     type Eff = { writes: Set<string>; writeAny: boolean; unknownCall: boolean; callees: Set<string>; methodShapes: Set<string> };
@@ -12338,18 +12381,19 @@ export class Lowerer {
     for (const f of functions) find(f.body);
     for (const s of sites) {
       const pair = this.classViewHelpers.get(s.inner.callee)!;
+      const bad = (): void => { if (probe) unsafe.add(pair.noteKey); };
       const callee = byName.get(s.outer.callee);
-      if (process.env["SCRIPTC_CLASS_VIEW_MUTANT"] === "alwaysdowngrade") {
+      if (!probe && process.env["SCRIPTC_CLASS_VIEW_MUTANT"] === "alwaysdowngrade") {
         const mc = copyHelperFor(pair.className, pair.toId, s.inner.loc);
         if (mc !== null) s.inner.callee = mc;
         continue;
       }
       const why = process.env["SCRIPTC_CLASS_VIEW_WHY"] !== undefined;
-      if (callee === undefined || callee.params[s.at] === undefined) { if (why) console.error(`[cview] ${s.outer.callee}: callee not in IR`); continue; }
-      if (!s.outer.args.every((a, i) => i === s.at || simpleArg(a))) { if (why) console.error(`[cview] ${s.outer.callee}: another argument is not simple`); continue; }
-      if (!paramSafe(callee, callee.params[s.at]!.localId)) { if (why) console.error(`[cview] ${s.outer.callee}: parameter escapes or is written`); continue; }
+      if (callee === undefined || callee.params[s.at] === undefined) { if (why) console.error(`[cview] ${s.outer.callee}: callee not in IR`); bad(); continue; }
+      if (!s.outer.args.every((a, i) => i === s.at || simpleArg(a))) { if (why) console.error(`[cview] ${s.outer.callee}: another argument is not simple`); bad(); continue; }
+      if (!paramSafe(callee, callee.params[s.at]!.localId)) { if (why) console.error(`[cview] ${s.outer.callee}: parameter escapes or is written`); bad(); continue; }
       const to = this.shapes.get(pair.toId);
-      if (to === undefined) continue;
+      if (to === undefined) { bad(); continue; }
       const mirrored = to.fields.filter((f) => f.type.kind !== "func").map((f) => f.name);
       // everything the call can run
       const reach = new Set<string>();
@@ -12379,10 +12423,26 @@ export class Lowerer {
         }
         for (const c of e.callees) if (!reach.has(c)) queue.push(c);
       }
-      if (!safe) { if (process.env["SCRIPTC_CLASS_VIEW_WHY"] !== undefined) console.error(`[cview] ${s.outer.callee}: a reachable function writes a mirrored member or calls an unnamed function`); continue; }
+      if (!safe) { if (process.env["SCRIPTC_CLASS_VIEW_WHY"] !== undefined) console.error(`[cview] ${s.outer.callee}: a reachable function writes a mirrored member or calls an unnamed function`); bad(); continue; }
+      if (probe) continue;
       const copy = copyHelperFor(pair.className, pair.toId, s.inner.loc);
       if (copy === null) continue;
       s.inner.callee = copy;
+    }
+    if (probe) {
+      // a projection that is not the argument of a direct call (a binding, a store, a return) is a use the proof does not cover
+      const argNodes = new Set<object>(sites.map((s) => s.inner as unknown as object));
+      const seenP = new Set<object>();
+      const strays = (n: unknown): void => {
+        if (n === null || typeof n !== "object" || seenP.has(n)) return;
+        seenP.add(n);
+        if (Array.isArray(n)) { for (const x of n) strays(x); return; }
+        const o = n as { kind?: unknown; callee?: unknown };
+        if (o.kind === "call" && typeof o.callee === "string" && this.classViewHelpers.has(o.callee) && !argNodes.has(n)) unsafe.add(this.classViewHelpers.get(o.callee)!.noteKey);
+        for (const v of Object.values(n as Record<string, unknown>)) strays(v);
+      };
+      for (const f of functions) if (!this.classViewHelpers.has(f.name)) strays(f.body);
+      return unsafe;
     }
     functions.push(...this.liftedFns.slice(liftedBefore));
     // A shape none of whose class views survived the downgrade needs no view reads at all: its records are plain.
@@ -12421,6 +12481,7 @@ export class Lowerer {
     if (dropNames.size > 0) {
       for (let i = functions.length - 1; i >= 0; i--) if (dropNames.has(functions[i]!.name)) functions.splice(i, 1);
     }
+    return unsafe;
   }
 
   /** A shape every view of which is class-sourced: no record-to-record struct view and no dynamic-object view reaches it. */
