@@ -27480,6 +27480,12 @@
     "<repo>/tests/corpus/24930-dyn-object-keys-of-every-short-length-differing-in-one-byte.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/2718-dynamic-import-evaluation-order/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/2718-dynamic-import-evaluation-order/main.ts"
+   ],
+   "diags": []
   }
  }
 }
