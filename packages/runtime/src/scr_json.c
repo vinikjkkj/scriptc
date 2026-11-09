@@ -4833,9 +4833,11 @@ bool scr_dyn_objinst_emitter_api(const ScrDyn *d, size_t pre, size_t post, const
   return scr_dyn_objinst_member(d, member, mlen) == NULL;
 }
 
-const ScrDynClassMember *scr_dyn_objinst_member(const ScrDyn *d, const char *k, size_t klen) {
-  if (d == NULL || d->kind != SCR_DYN_OBJINST) return NULL;
-  const ScrDynClass *c = scr_dyn_objinst_class_of(d);
+/* The PURE half of a member lookup: the first row of `c`'s table that names `k` and is not an own-shadow row (enumerable 3), or NULL.
+ * A function of (class table, key bytes) alone, and the class tables are emitted `const` data that no runtime code writes, so its
+ * answer for a fixed (class, key) can never change. The per-INSTANCE half (an own property shadowing a method) is
+ * scr_dyn_objinst_row_visible, evaluated on every read. */
+const ScrDynClassMember *scr_dyn_objinst_row_scan(const ScrDynClass *c, const char *k, size_t klen) {
   /* nmembers and not a NULL `members`: a class with an empty table is a
    * class with no members, and reading through a NULL pointer to prove
    * it would be the same bug the SCR_DYN_KIND_COUNT note above records. */
@@ -4844,17 +4846,24 @@ const ScrDynClassMember *scr_dyn_objinst_member(const ScrDyn *d, const char *k, 
      * it is listed by the enumerating walks, and a read or call by name
      * belongs to the method row that follows it. */
     if (c->members[i].enumerable == 3) continue;
-    if (c->members[i].len == klen && memcmp(c->members[i].name, k, klen) == 0) {
-      /* A METHOD row of a class carrying the run-time property table is on the PROTOTYPE: an own property of the same
-       * name (`this[k] = v` with k naming the method) shadows it, and the name then belongs to the table. */
-      if (c->members[i].call != NULL && c->members[i].get == NULL && klen > 0 && k[0] != '%' && scr_dyn_class_ops != NULL &&
-          scr_dyn_class_ops->objinst_own_shadows != NULL && scr_dyn_class_ops->objinst_own_shadows(d, k, klen)) {
-        return NULL;
-      }
-      return &c->members[i];
-    }
+    if (c->members[i].len == klen && memcmp(c->members[i].name, k, klen) == 0) return &c->members[i];
   }
   return NULL;
+}
+
+/* The per-instance half: a METHOD row of a class carrying the run-time property table is on the PROTOTYPE, so an own property of the
+ * same name (`this[k] = v` with k naming the method) shadows it, and the name then belongs to the table. */
+const ScrDynClassMember *scr_dyn_objinst_row_visible(const ScrDyn *d, const ScrDynClassMember *m, const char *k, size_t klen) {
+  if (m != NULL && m->call != NULL && m->get == NULL && klen > 0 && k[0] != '%' && scr_dyn_class_ops != NULL &&
+      scr_dyn_class_ops->objinst_own_shadows != NULL && scr_dyn_class_ops->objinst_own_shadows(d, k, klen)) {
+    return NULL;
+  }
+  return m;
+}
+
+const ScrDynClassMember *scr_dyn_objinst_member(const ScrDyn *d, const char *k, size_t klen) {
+  if (d == NULL || d->kind != SCR_DYN_OBJINST) return NULL;
+  return scr_dyn_objinst_row_visible(d, scr_dyn_objinst_row_scan(scr_dyn_objinst_class_of(d), k, klen), k, klen);
 }
 
 size_t scr_dyn_objinst_member_count(const ScrDyn *d) {
