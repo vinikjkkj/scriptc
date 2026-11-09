@@ -25511,8 +25511,9 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
    * dynCallWithThis (the dyn-field call arm). Null when the member's
    * parameters are not all required (a detached call cannot say which
    * were omitted) or the receiver is not a plain class instance. */
-  export function lowerUnboundClassMethodValue(L: Lowerer, expr: ts.PropertyAccessExpression, infoOverride?: ClassInfo): IrExpr | null {
-    if (!isJsSourceFile(expr.getSourceFile())) return null;
+  export function lowerUnboundClassMethodValue(L: Lowerer, expr: ts.PropertyAccessExpression, infoOverride?: ClassInfo, anySource = false, recvOverride?: ts.Expression): IrExpr | null {
+    const recvNode = recvOverride ?? expr.expression;
+    if (!anySource && !isJsSourceFile(expr.getSourceFile())) return null;
     if (expr.questionDotToken !== undefined) return null;
     // `super.m` keeps its own refusal (lower-classes: bound method references through 'super').
     if (expr.expression.kind === ts.SyntaxKind.SuperKeyword) return null;
@@ -25521,7 +25522,7 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
     if (infoOverride !== undefined) {
       info = infoOverride;
     } else {
-      const recvT = L.mapTypeOf(L.typeOf(expr.expression));
+      const recvT = L.mapTypeOf(L.typeOf(recvNode));
       if (recvT?.kind !== "object") return null;
       info = L.classes.get(recvT.className) ?? null;
     }
@@ -25547,8 +25548,8 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
     // A receiver that is not a plain name or `this` is evaluated once, here (`new C().m`).
     const pre: IrStmt[] = [];
     let recv: IrExpr | null = null;
-    if (!viaPrototype && !isPlainMethodReceiver(expr.expression)) {
-      const lowered = L.lowerExpr(expr.expression);
+    if (!viaPrototype && !isPlainMethodReceiver(recvNode)) {
+      const lowered = L.lowerExpr(recvNode);
       const h = L.declareHiddenLocal("mref.recv", lowered.type);
       pre.push({ kind: "varDecl", localId: h.id, init: lowered, loc });
       recv = { kind: "varRef", localId: h.id, type: lowered.type, loc };
@@ -25571,7 +25572,7 @@ function subclassMethodReadConfined(L: Lowerer, expr: ts.PropertyAccessExpressio
     walk(info, 1);
     subs.sort((a, b) => a.depth - b.depth);
     let chain: IrExpr = own;
-    const tested = recv ?? L.lowerExpr(expr.expression);
+    const tested = recv ?? L.lowerExpr(recvNode);
     for (const { cls } of subs) {
       const f = L.findMethodOn(cls, name);
       if (f === null || f.declarer === found.declarer || f.sig.abstract === true) continue;
@@ -29064,10 +29065,10 @@ export function isShadowableMethodRead(L: Lowerer, e: ts.Expression): boolean {
  * the read is `slot unset ? the method's value : the slot's function`, both boxed to a checked-dynamic value (what a consumer such as
  * `.call` / a call / a binding takes). Null when no class on the chain owns such a slot.
  */
-function lowerInstanceOverrideRead(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
+export function lowerInstanceOverrideRead(L: Lowerer, expr: ts.PropertyAccessExpression, anySource = false, recvOverride?: ts.Expression): IrExpr | null {
   if (expr.questionDotToken !== undefined) return null;
   const name = expr.name.text;
-  let recvNode: ts.Expression = expr.expression;
+  let recvNode: ts.Expression = recvOverride ?? expr.expression;
   while (ts.isParenthesizedExpression(recvNode)) recvNode = recvNode.expression;
   if (ts.isPropertyAccessExpression(recvNode) && recvNode.name.text === "prototype") return null;
   if (recvNode.kind !== ts.SyntaxKind.ThisKeyword && !ts.isIdentifier(recvNode)) {
@@ -29090,7 +29091,7 @@ function lowerInstanceOverrideRead(L: Lowerer, expr: ts.PropertyAccessExpression
     L.unsupported("SC1090", expr, `reading the instance-overridable method '${name}' as a value from a receiver that is not a plain name (bind it to a name first)`);
     return dynUndefinedExpr(loc);
   }
-  const original = lowerUnboundClassMethodValue(L, expr);
+  const original = lowerUnboundClassMethodValue(L, expr, undefined, anySource, recvNode);
   if (original === null) {
     L.unsupported("SC1090", expr, `reading the instance-overridable method '${name}' as a value (call it directly)`);
     return dynUndefinedExpr(loc);

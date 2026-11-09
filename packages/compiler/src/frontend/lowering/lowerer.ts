@@ -13295,8 +13295,9 @@ export class Lowerer {
    * lowered receiver; the value is a seqExpr of that declaration and the
    * closure over it. Null when the member is not a plain (non-generic)
    * bindable class method, or its signature has no plain-closure form. */
-  boundMethodValue(access: ts.PropertyAccessExpression, loc: SrcLoc): IrExpr | null {
-    const recvIr = this.mapTypeOf(this.typeOf(access.expression));
+  boundMethodValue(access: ts.PropertyAccessExpression, loc: SrcLoc, recvOverride?: ts.Expression): IrExpr | null {
+    const recvExpr = recvOverride ?? access.expression;
+    const recvIr = this.mapTypeOf(this.typeOf(recvExpr));
     if (recvIr?.kind !== "object") return null;
     const info = this.classes.get(recvIr.className);
     if (!info) return null;
@@ -13310,7 +13311,7 @@ export class Lowerer {
       const inst = implicitDefaultInstance(this, access, generic.info);
       if (inst.params.some((p) => p.mode === "dynRest" || p.mode === "rest")) return null;
       const gT = funcOf(inst.params.map((p) => p.type), inst.returnType) as IrType & { kind: "func" };
-      const grecv = this.lowerExpr(access.expression);
+      const grecv = this.lowerExpr(recvExpr);
       if (grecv.type.kind !== "object") return null;
       const gctx = this.ctx;
       const gcount = gctx.localCounters.get("%bmrecv") ?? 0;
@@ -13332,7 +13333,7 @@ export class Lowerer {
     const fnT = funcOf(meth.sig.params.map((p) => p.type), meth.sig.ret);
     const proj = this.boundMethodPlan(info, access.name.text, fnT, meth.declarer.def.name, meth.sig);
     if (!proj) return null;
-    const recv = this.lowerExpr(access.expression);
+    const recv = this.lowerExpr(recvExpr);
     if (recv.type.kind !== "object") return null;
     const ctx = this.ctx;
     const count = ctx.localCounters.get("%bmrecv") ?? 0;

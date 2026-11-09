@@ -9,6 +9,7 @@ import { strictAt } from "./lower-protoescape.js";
 import { isShadowableMethodRead, lowerUnboundClassMethodValue, dynSymbolKeyOf, classSymbolBag } from "./lower-exprs.js";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
+import { lowerCastViewOverrideWrite } from "./lower-instoverride.js";
 import { isEmitterMixinStatement } from "./lower-emitter-mixin.js";
 import { timersPromisesIntervalCallOf, lowerForAwaitTimersInterval, lowerForAwaitAsyncGenerator, lowerForOfGenerator, lowerYieldStarStatement, genIterableOf, genIterableOpenCall } from "./lower-generators.js";
 import { RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, BIGINT, BOOL, isRefCounted, BYTES_U8, bytesValueType, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrLocal, type IrRecordShape, IrStmt, IrType, JSVAL, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
@@ -8567,6 +8568,8 @@ function prototypeInstallerCallStmt(L: Lowerer, expr: ts.Expression): IrStmt | n
           return { kind: "block", body: parts.stmts, loc: locOf(expr) };
         }
         if (!ts.isIdentifier(expr.left)) {
+          const viewWrite = lowerCastViewOverrideWrite(L, expr, locOf(expr));
+          if (viewWrite !== null) return viewWrite;
           L.unsupported("SC1090", expr.left, "assignment to non-variables");
         }
         const target = L.resolveWritable(expr.left);

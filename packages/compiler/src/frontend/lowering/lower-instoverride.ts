@@ -23,6 +23,24 @@ export interface InstanceOverride {
 /** Class declaration -> overridden method name -> writes. Filled by scanInstanceOverrides. */
 export type InstanceOverrides = Map<ts.Node, Map<string, InstanceOverride>>;
 
+/** `(x as unknown as { m: F })` over a plain-named class instance `x`: the program asserts a view of the instance through `unknown` (zapo wraps its
+ * ioredis client's sendCommand this way). The view is the instance itself, so a member written or read through it is the instance's own. Returns `x`
+ * when `e` is such a view of a class object, else null. */
+export function castViewInner(L: Lowerer, e: ts.Expression): ts.Expression | null {
+  let n: ts.Expression = e;
+  let throughUnknown = false;
+  for (;;) {
+    if (ts.isParenthesizedExpression(n) || ts.isNonNullExpression(n)) n = n.expression;
+    else if (ts.isAsExpression(n)) {
+      if (n.type.kind === ts.SyntaxKind.UnknownKeyword) throughUnknown = true;
+      n = n.expression;
+    } else break;
+  }
+  if (!throughUnknown || n === e) return null;
+  if (n.kind !== ts.SyntaxKind.ThisKeyword && !ts.isIdentifier(n)) return null;
+  return L.mapTypeOf(L.typeOf(n))?.kind === "object" ? n : null;
+}
+
 function classDeclOfType(L: Lowerer, e: ts.Expression): ts.ClassLikeDeclaration | null {
   const sym = L.checker.getTypeAtLocation(e).getSymbol();
   if (!sym) return null;
@@ -55,6 +73,13 @@ function namesMethod(L: Lowerer, left: ts.PropertyAccessExpression): boolean {
     ) return true;
   }
   return false;
+}
+
+/** The member `name` of the (class) type of `recv` resolves to a method declaration. */
+function namesMethodOfType(L: Lowerer, recv: ts.Expression, name: string): boolean {
+  const sym = L.checker.getPropertyOfType(L.typeOf(recv), name);
+  if (!sym) return false;
+  return L.checker.declarationsOf(sym).some((d) => ts.isMethodDeclaration(d) || d.kind === ts.SyntaxKind.MethodSignature);
 }
 
 /** Class declaration -> names written as `Cls.prototype.name = <function>` (late methods of a JS class). */
@@ -104,9 +129,10 @@ export function scanInstanceOverrides(L: Lowerer, files: readonly ts.SourceFile[
         !(ts.isPropertyAccessExpression(n.left.expression) && n.left.expression.name.text === "prototype") &&
         (ts.isFunctionExpression(n.right) || ts.isArrowFunction(n.right))
       ) {
-        const cls = classDeclOfType(L, n.left.expression);
+        const viewRecv = castViewInner(L, n.left.expression);
+        const cls = classDeclOfType(L, viewRecv ?? n.left.expression);
         const name = n.left.name.text;
-        const isMethod = namesMethod(L, n.left);
+        const isMethod = viewRecv !== null ? namesMethodOfType(L, viewRecv, name) : namesMethod(L, n.left);
         // A `C.prototype.m = function` declaration is a LATE method (registered after the shape is collected) whether or not the checker resolved
         // the member at this receiver (a package's types declare it on a base interface): the class's own late names decide.
         if (cls !== null && late === null) late = lateMethodNames(L, files);
@@ -124,4 +150,25 @@ export function scanInstanceOverrides(L: Lowerer, files: readonly ts.SourceFile[
       });
     }
   }
+}
+
+/** `(x as unknown as { m: F }).m = fn` over a class instance whose family carries the override slot of `m` (scanInstanceOverrides takes the same
+ * view): the write is the instance's own property, exactly as `x.m = fn` writes it. Null when the write is not this shape. */
+export function lowerCastViewOverrideWrite(L: Lowerer, expr: ts.BinaryExpression, loc: import("../../ir/nodes.js").SrcLoc): import("../../ir/nodes.js").IrStmt | null {
+  const left = expr.left;
+  if (!ts.isPropertyAccessExpression(left) || left.questionDotToken !== undefined) return null;
+  const inner = castViewInner(L, left.expression);
+  if (inner === null) return null;
+  const recvT = L.mapTypeOf(L.typeOf(inner));
+  if (recvT?.kind !== "object") return null;
+  const info = L.classes.get(recvT.className);
+  if (info === undefined) return null;
+  const name = left.name.text;
+  let owns = false;
+  for (let c: typeof info | null = info; c !== null; c = c.base) if (c.shadowFields?.has(name) === true || c.shadowLate?.has(name) === true) owns = true;
+  const slotT = info.fields.get(name);
+  if (!owns || slotT === undefined) return null;
+  const obj = L.lowerExpr(inner);
+  const value = L.coerceInto(expr.right, L.lowerExpr(expr.right), slotT);
+  return { kind: "fieldSet", obj, className: recvT.className, field: name, value, loc };
 }

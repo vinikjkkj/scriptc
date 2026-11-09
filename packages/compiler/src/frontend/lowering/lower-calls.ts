@@ -11,6 +11,7 @@ import { engineFunctionApply } from "./lower-engine-fn.js";
 import { applyEnumRefill, registerEnumRefill } from "./ir-patch.js";
 import type { EnumRefill } from "./ir-patch.js";
 import type { Lowerer } from "./lowerer.js";
+import { castViewInner } from "./lower-instoverride.js";
 import { fillWithKeyList } from "./key-list-fill.js";
 import { lowerGenMethodCall } from "./lower-generators.js";
 import { lowerStreamAsyncIteratorCall } from "./lower-stream.js";
@@ -27,7 +28,7 @@ import { PoisonError, dynFallbackType, dynUndefinedExpr, fnValueCodeOfNode, impo
 import { pairedProtoClassOfValue, protoThisType } from "./proto-class-consume.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
 import { hasProtoTab, protoTabReadChain } from "./lower-prototab.js";
-import { checkedArmBridge, lowerWebCryptoGetRandomValues, refuseUnloweredSubtleCall, refuseUnloweredWebCrypto, refuseWebCryptoDestructuredArgs, refuseWebCryptoOwnKeys, sameValueDynOperand, unboundMethodThunk, undefinedArmedInAnswer, lowerWebCryptoMemberCall } from "./lower-exprs.js";
+import { checkedArmBridge, lowerInstanceOverrideRead, lowerWebCryptoGetRandomValues, refuseUnloweredSubtleCall, refuseUnloweredWebCrypto, refuseWebCryptoDestructuredArgs, refuseWebCryptoOwnKeys, sameValueDynOperand, unboundMethodThunk, undefinedArmedInAnswer, lowerWebCryptoMemberCall } from "./lower-exprs.js";
 import { NARROW_FIRST, builtinFenceHintOf, builtinModuleFnOf, dynOwnNamesHelper } from "./surfaces.js";
 import { OBJECT_PROTOTYPE_METHODS } from "./lowerer.js";
 import { ffiBindingDiag, ffiSignatureDiag, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
@@ -16093,7 +16094,9 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverr
         // binding), so the closure's `this` is what .bind requests.
         if (call.arguments.length >= 1 && ts.isPropertyAccessExpression(access.expression)) {
           const methodAccess = access.expression;
-          const recvNode = methodAccess.expression;
+          // A view of a class instance through `unknown` (`(c as unknown as {m: F}).m.bind(c)`) binds the instance's own member.
+          const viewed = castViewInner(L, methodAccess.expression);
+          const recvNode = viewed ?? methodAccess.expression;
           const bindArg = call.arguments[0]!;
           const sameReceiver =
             (recvNode.kind === ts.SyntaxKind.ThisKeyword && bindArg.kind === ts.SyntaxKind.ThisKeyword) ||
@@ -16101,7 +16104,17 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverr
               ts.isIdentifier(bindArg) &&
               L.resolveValueSymbol(recvNode) === L.resolveValueSymbol(bindArg));
           if (sameReceiver) {
-            const bound = L.boundMethodValue(methodAccess, locOf(call));
+            // A method some write overrides on an instance (lower-instoverride): JS binds the VALUE the read answers at this moment, the instance's own
+            // function when one was written, else the prototype's method. The bound closure of the class method would dispatch through the slot at CALL
+            // time, so a wrapper that binds the original and is then stored as the override would call itself. Bind the read's own value instead.
+            const overridden = lowerInstanceOverrideRead(L, methodAccess, true, viewed ?? undefined);
+            if (overridden !== null) {
+              const ops: IrExpr[] = call.arguments.map((a) => L.lowerExprExpecting(a, DYN));
+              const rebound: IrExpr = { kind: "dynInvoke", recv: overridden, method: "bind", calleeName: "bind", args: ops, type: DYN, loc: locOf(call) };
+              const resultT = L.mapTypeOf(L.typeOf(call));
+              return resultT === null || resultT.kind === "dyn" ? rebound : L.coerceToExpected(rebound, resultT);
+            }
+            const bound = L.boundMethodValue(methodAccess, locOf(call), viewed ?? undefined);
             // `this.m.bind(this, a, b)`: the bound method with leading arguments
             // fixed is a partial application of the receiver-bound closure (the
             // receiver is already inside it, so the wrapper drops its own).
