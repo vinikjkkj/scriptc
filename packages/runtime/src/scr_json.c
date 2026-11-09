@@ -11417,6 +11417,9 @@ ScrDyn *scr_dyn_fn_get(const ScrDyn *d, const char *key, size_t key_len) {
  * function object per closure, not one per boundary crossing. +1. */
 void scr_dyn_fn_share_props(ScrClosure *adapter, const ScrDyn *fn) {
   if (fn->kind != SCR_DYN_FUNC || adapter == NULL || adapter->props != NULL) return;
+  /* An IMMORTAL closure (a function declared once at file scope, rc == SIZE_MAX) is never freed, so a table allocated onto it here would never be
+   * released: it keeps the table it already has and otherwise stays without one (nothing wrote a property on it that an adapter could lose). */
+  if (fn->v.fn.clo->props == NULL && *(const size_t *)fn->v.fn.clo == SIZE_MAX) return;
   ScrDyn *t = scr_dyn_fn_props((ScrDyn *)fn); /* +1: allocates the table on first use */
   scr_dyn_release(t);
   adapter->props = scr_box_retain(fn->v.fn.clo->props);
