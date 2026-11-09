@@ -7,7 +7,7 @@
 import { readFileSync } from "node:fs";
 import { evalStaticInfoOf, lowerEvalClassInstanceOf } from "./lower-evalclass.js";
 import { protoDataFieldRead, protoDataHasKey, protoDataMemberRead } from "./lower-protodata.js";
-import { dynFnAsFunc, dynFnCheckedAsFunc, dynFnReadable, fnReturnsProjection, protoSlotOf, slotReadOr } from "./lower-protoslots.js";
+import { dynFnCheckedAsFunc, dynFnReadable, fnReturnsProjection, protoSlotOf, slotReadOr } from "./lower-protoslots.js";
 import * as ts from "../ts7/adapter.js";
 import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";

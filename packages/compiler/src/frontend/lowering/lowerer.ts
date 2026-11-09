@@ -73,7 +73,7 @@ import type {
 import { isDynBytes, isDynErrorClass } from "../../ir/nodes.js";
 import { protoEscapes, strictAt } from "./lower-protoescape.js";
 import { fenceInspGetters, newInspGettersScan, noteInspGettersNode } from "./inspect-getters-fence.js";
-import { applyInstanceOverrides, applyLateInstalls, applyProtoSlots, dynFnAsFunc, dynFnCheckedAsFunc, dynFnReadable, fnReturnsProjection, scanProtoSlots } from "./lower-protoslots.js";
+import { applyInstanceOverrides, applyLateInstalls, applyProtoSlots, dynFnCheckedAsFunc, dynFnReadable, fnReturnsProjection, scanProtoSlots } from "./lower-protoslots.js";
 import { applyProtoTabs, hasProtoTab, scanProtoTabs, upgradeLateMethodsOverTables } from "./lower-prototab.js";
 import { graftOnlyHelperRanges } from "./lower-emitter-mixin.js";
 import { applyDatumKeyRows } from "./lower-protodata.js";
