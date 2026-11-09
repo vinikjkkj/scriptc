@@ -14847,6 +14847,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24884-union-boxes-with-and-without-a-traced-arm-in-cycles.ts": {
+   "order": [
+    "<repo>/tests/corpus/24884-union-boxes-with-and-without-a-traced-arm-in-cycles.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2490-find-miss-null-compare.ts": {
    "order": [
     "<repo>/tests/corpus/2490-find-miss-null-compare.ts"
