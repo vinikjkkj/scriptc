@@ -6378,6 +6378,15 @@ bool scr_recsrc_is(const ScrDyn *slot);
 const ScrRecSrc *scr_recsrc_of(const ScrDyn *slot); /* NULL when the slot is not a struct view */
 ScrDyn *scr_rec_view_cross(ScrDyn *slot);
 void *scr_recsrc_slot(const ScrDyn *slot, size_t idx); /* the field slot in the source struct */
+void *scr_recsrc_slot_or(const ScrDyn *slot, size_t idx, void *own); /* the same, or `own` when the source holds no such field (offset < 0) */
+/* The hot form, for a record whose view slot is NULL (not a view: `own`) or a struct view over a source (a class-sourced view of a shape no
+ * dynamic-object view reaches): the source slot, or `own` when the source holds no such field (offset < 0). The caller knows the slot is
+ * one of those two; nothing is checked. */
+static inline void *scr_recsrc_slot_or_i(const ScrDyn *slot, size_t idx, void *own) {
+  if (slot == NULL) return own;
+  const ScrRecSrc *r = (const ScrRecSrc *)slot->v.handle.ptr;
+  return r->map->off[idx] < 0 ? own : (char *)r->src + r->map->off[idx];
+}
 void scr_recsrc_own(const ScrDyn *slot, size_t idx);  /* a write made it an own key of the source */
 void scr_recsrc_unown(const ScrDyn *slot, size_t idx); /* `delete` removed it */
 /* One view per (source struct, pair): converting the same source to the same shape twice answers the SAME record, so `===`, Map and
