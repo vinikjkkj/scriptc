@@ -7,7 +7,7 @@
 import { readFileSync } from "node:fs";
 import { evalStaticInfoOf, lowerEvalClassInstanceOf } from "./lower-evalclass.js";
 import { protoDataFieldRead, protoDataHasKey, protoDataMemberRead } from "./lower-protodata.js";
-import { protoSlotOf, slotReadOr } from "./lower-protoslots.js";
+import { dynFnAsFunc, dynFnReadable, fnReturnsProjection, protoSlotOf, slotReadOr } from "./lower-protoslots.js";
 import * as ts from "../ts7/adapter.js";
 import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
@@ -18314,6 +18314,11 @@ export function lowerTemplate(L: Lowerer, expr: ts.TemplateExpression): IrExpr {
       // throws the path-annotated TypeError (trust-but-verify — the
       // emitters skip the adapter branch for these targets).
       if (target.kind === "func") {
+        // A function answering a record of methods: a closure over the value converts the result itself (a view whose methods call the
+        // object by name), where the checked cast's adapter would copy the record and strand each method's receiver.
+        if (inner.type.kind === "dyn" && fnReturnsProjection(L, target) && dynFnReadable(L, target)) {
+          return dynFnAsFunc(L, inner, target, locOf(expr));
+        }
         return { kind: "dynCheck", value: inner, type: target, loc: locOf(expr) };
       }
       // Runtime HANDLE targets (`u as IncomingMessage` — a boxed handle
@@ -18337,6 +18342,12 @@ export function lowerTemplate(L: Lowerer, expr: ts.TemplateExpression): IrExpr {
         ) {
           return inner;
         }
+      }
+      // A record whose members include METHODS (a function-typed member a dynamic object may implement reading `this`): the
+      // record is a VIEW of the object whose methods call it by name, so the object stays the receiver and a write through
+      // the record is the object's write. A copying builder would hand each method a detached function value.
+      if (target.kind === "record" && inner.type.kind === "dyn" && L.projectableRecord(target)) {
+        return L.dynRecordProjection(inner, target, locOf(expr));
       }
       // A composite that is not JSON-safe only because a CHECKABLE
       // non-JSON leaf sits inside it (a Uint8Array field). The walker

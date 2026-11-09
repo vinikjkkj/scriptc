@@ -73,7 +73,7 @@ import type {
 import { isDynBytes, isDynErrorClass } from "../../ir/nodes.js";
 import { protoEscapes, strictAt } from "./lower-protoescape.js";
 import { fenceInspGetters, newInspGettersScan, noteInspGettersNode } from "./inspect-getters-fence.js";
-import { applyInstanceOverrides, applyLateInstalls, applyProtoSlots, dynFnAsFunc, dynFnReadable, scanProtoSlots } from "./lower-protoslots.js";
+import { applyInstanceOverrides, applyLateInstalls, applyProtoSlots, dynFnAsFunc, dynFnReadable, fnReturnsProjection, scanProtoSlots } from "./lower-protoslots.js";
 import { applyProtoTabs, hasProtoTab, scanProtoTabs, upgradeLateMethodsOverTables } from "./lower-prototab.js";
 import { graftOnlyHelperRanges } from "./lower-emitter-mixin.js";
 import { applyDatumKeyRows } from "./lower-protodata.js";
@@ -9211,7 +9211,8 @@ export class Lowerer {
         return false;
       }
     }
-    return funcs > 0 && unadaptable > 0;
+    void unadaptable;
+    return funcs > 0;
   }
 
   /** The closure that calls method `name` of the dynamic object held in boxed local `selfId`, with typed arguments
@@ -9604,7 +9605,7 @@ export class Lowerer {
     }
     // A checked-dynamic function value into a function slot that answers a Promise: the checked cast has no adapter for it, so the
     // slot gets a closure over the value (parameters box into dyn, the answer adopts into the declared promise).
-    if (expr.type.kind === "dyn" && expected.kind === "func" && expected.ret.kind === "promise" && dynFnReadable(this, expected)) {
+    if (expr.type.kind === "dyn" && expected.kind === "func" && (expected.ret.kind === "promise" || fnReturnsProjection(this, expected)) && dynFnReadable(this, expected)) {
       return dynFnAsFunc(this, expr, expected, expr.loc);
     }
     if (expr.type.kind === "dyn" && expected.kind !== "dyn") {
@@ -14657,7 +14658,12 @@ export class Lowerer {
     const impl = `${name}.impl`;
     const params: IrParam[] = toT.params.map((t, i) => ({ localId: `a.${i}`, name: `a${i}`, type: t }));
     const strandThrow = (why: string): IrStmt => strandTrap(why, loc);
+    // The adapter body is its own function: a conversion that mints a hidden local (a record projection over a dynamic result) declares
+    // it in THIS context, and the lifted function below carries it.
+    const adaptCtx = newFnCtx(true, null, toT, toT.ret);
+    this.fnStack.push(adaptCtx);
     let body: IrStmt[];
+    try {
     if (strandParams) {
       body = [
         strandThrow(
@@ -14809,6 +14815,9 @@ export class Lowerer {
         body = [{ kind: "return", value: result, loc }];
       }
     }
+    } finally {
+      this.fnStack.pop();
+    }
     this.liftedFns.push({
       name: impl,
       params,
@@ -14817,6 +14826,7 @@ export class Lowerer {
       locals: [
         { id: "f.0", name: "f", type: fromT, mutable: false, boxed: true },
         ...toT.params.map((t, i) => ({ id: `a.${i}`, name: `a${i}`, type: t, mutable: false })),
+        ...adaptCtx.locals,
       ],
       body,
       loc,

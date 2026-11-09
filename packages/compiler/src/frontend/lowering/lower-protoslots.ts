@@ -170,8 +170,14 @@ export function scanProtoSlots(L: Lowerer, files: readonly ts.SourceFile[]): voi
  * adapter for; a function whose result is a PROMISE has none, but dynFnAsFunc builds the closure for it. */
 export function dynFnReadable(L: Lowerer, fnT: IrType): boolean {
   if (fnT.kind !== "func") return false;
-  if (fnT.ret.kind !== "promise") return canDynCheckTo(fnT, (id) => L.shapes.get(id), (id) => L.unions.get(id));
+  if (fnT.ret.kind !== "promise" && !fnReturnsProjection(L, fnT)) return canDynCheckTo(fnT, (id) => L.shapes.get(id), (id) => L.unions.get(id));
   return fnT.rest !== true && fnT.params.every((p) => p.kind === "dyn" || L.dynConvertible(p));
+}
+
+/** Does `fnT` answer a record of METHODS (a view over the dynamic result, see Lowerer.projectableRecord)? Its closure then converts the
+ * result itself: the checked cast's adapter would build a copying record whose methods lost their receiver. */
+export function fnReturnsProjection(L: Lowerer, fnT: IrType): boolean {
+  return fnT.kind === "func" && fnT.ret.kind === "record" && L.projectableRecord(fnT.ret);
 }
 
 /** A checked-dynamic function value `value`, as a function of type `fnT`. The checked cast when the result is not a promise (the
@@ -182,7 +188,7 @@ export function dynFnReadable(L: Lowerer, fnT: IrType): boolean {
 export function dynFnAsFunc(L: Lowerer, value: IrExpr, fnT: IrType, loc: SrcLoc): IrExpr {
   // The class-boxing discovery (noteDynBoxedClass) builds method thunks with no function being lowered; the hidden local the
   // closure holds needs a context to land in, and nothing of it outlives the discovery's discarded expression.
-  if (L.fnStack.length > 0 || fnT.kind !== "func" || fnT.ret.kind !== "promise") return dynFnAsFuncIn(L, value, fnT, loc);
+  if (L.fnStack.length > 0 || fnT.kind !== "func" || (fnT.ret.kind !== "promise" && !fnReturnsProjection(L, fnT))) return dynFnAsFuncIn(L, value, fnT, loc);
   L.fnStack.push(newFnCtx(true, null, fnT, fnT.ret));
   try {
     return dynFnAsFuncIn(L, value, fnT, loc);
@@ -192,7 +198,7 @@ export function dynFnAsFunc(L: Lowerer, value: IrExpr, fnT: IrType, loc: SrcLoc)
 }
 
 function dynFnAsFuncIn(L: Lowerer, value: IrExpr, fnT: IrType, loc: SrcLoc): IrExpr {
-  if (fnT.kind !== "func" || fnT.ret.kind !== "promise" || !dynFnReadable(L, fnT)) return L.coerceToExpected(value, fnT);
+  if (fnT.kind !== "func" || (fnT.ret.kind !== "promise" && !fnReturnsProjection(L, fnT)) || !dynFnReadable(L, fnT)) return L.coerceToExpected(value, fnT);
   const held = L.declareHiddenLocal("%dynfn", DYN);
   held.boxed = true;
   const implName = `%dynfn.${L.liftedFns.length}`;
