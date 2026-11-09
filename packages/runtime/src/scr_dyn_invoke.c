@@ -356,7 +356,9 @@ static bool dyn_cb_check(ScrDyn *const *args, size_t argc) {
   return scr_dyn_cb_check(argc > 0 ? args[0] : scr_dyn_undefined());
 }
 
-static bool dyn_name_is(const char *m, const char *n) { return strcmp(m, n) == 0; }
+/* The first byte decides almost every comparison: a method dispatch walks a chain of these against ONE name, and all but the match differ
+ * at the first byte or never reach it. MEASURED on the zapobench mysql arm: 126 M strcmp calls, most of them from these chains. */
+static inline bool dyn_name_is(const char *m, const char *n) { return m[0] == n[0] && strcmp(m, n) == 0; }
 
 /* ── CreateListFromArrayLike (ECMA-262 7.3.18) ───────────────────
  *
@@ -1348,9 +1350,40 @@ static const DynBufNum dyn_bufnum_rows[] = {
   { "writeIntBE", true, true, 0, false, true },
 };
 
+/* The row of a Buffer numeric accessor by name, through a 128-slot open-addressed table of row numbers built on first use (the runtime is
+ * single-threaded): a read or write call used to scan up to 50 rows with a strcmp each, the hot case (writeUInt8) after 20 misses. */
+#define DYN_BUFNUM_ROWS (sizeof dyn_bufnum_rows / sizeof dyn_bufnum_rows[0])
+static uint8_t dyn_bufnum_slot[128]; /* row index + 1, 0 = empty */
+static bool dyn_bufnum_slot_ready = false;
+
+static unsigned dyn_bufnum_hash(const char *m) {
+  unsigned h = 5381;
+  for (; *m; m++) h = h * 33u + (unsigned char)*m;
+  return h;
+}
+
+/* A direct-mapped guess table keyed by the name pointer's bits: a call site passes the same literal every time, so the row found last time
+ * is guessed first. The guess is only ever a candidate: it is accepted after a strcmp against its own name, so a stale entry (another name
+ * at a reused address, or a collision between two sites) costs one failed strcmp and falls through to the hash lookup. */
+static const DynBufNum *dyn_bufnum_guess[16];
+
 static const DynBufNum *dyn_bufnum_find(const char *m) {
-  for (size_t i = 0; i < sizeof dyn_bufnum_rows / sizeof dyn_bufnum_rows[0]; i++) {
-    if (strcmp(dyn_bufnum_rows[i].name, m) == 0) return &dyn_bufnum_rows[i];
+  const DynBufNum **gslot = &dyn_bufnum_guess[((uintptr_t)m >> 3) & 15u];
+  if (*gslot != NULL && m[0] == (*gslot)->name[0] && strcmp((*gslot)->name, m) == 0) return *gslot;
+  if (!dyn_bufnum_slot_ready) {
+    for (size_t i = 0; i < DYN_BUFNUM_ROWS; i++) {
+      unsigned h = dyn_bufnum_hash(dyn_bufnum_rows[i].name) & 127u;
+      while (dyn_bufnum_slot[h] != 0) h = (h + 1u) & 127u;
+      dyn_bufnum_slot[h] = (uint8_t)(i + 1);
+    }
+    dyn_bufnum_slot_ready = true;
+  }
+  for (unsigned h = dyn_bufnum_hash(m) & 127u; dyn_bufnum_slot[h] != 0; h = (h + 1u) & 127u) {
+    const DynBufNum *row = &dyn_bufnum_rows[dyn_bufnum_slot[h] - 1u];
+    if (strcmp(row->name, m) == 0) {
+      *gslot = row;
+      return row;
+    }
   }
   return NULL;
 }
