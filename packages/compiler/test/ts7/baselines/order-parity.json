@@ -27353,6 +27353,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25060-class-instance-read-through-a-record-of-methods-is-the-same-object/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/25060-class-instance-read-through-a-record-of-methods-is-the-same-object/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/25050-record-projection-keeps-the-source-as-receiver/main.ts": {
    "order": [
     "<repo>/tests/corpus/25050-record-projection-keeps-the-source-as-receiver/lib.cjs",
