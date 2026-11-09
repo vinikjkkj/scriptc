@@ -16,6 +16,8 @@ console.log(fs.readdirSync(dir).length, fs.readdirSync(dir).includes("😀.txt")
 const rows = fs.readdirSync(dir, { withFileTypes: true });
 console.log(show(rows.map((e) => e.name + (e.isDirectory() ? "/" : ""))));
 console.log(show(fs.readdirSync(dir, { recursive: true })));
+// a recursive Dirent row names its parent with the platform separator (path.join: a backslash on Windows), the base spelled as given
+console.log(fs.readdirSync(dir, { recursive: true, withFileTypes: true }).map((e) => e.parentPath.split(dir).join("<dir>") + "|" + e.name).sort().join(" "));
 fs.readdir(dir, (err, names) => {
   console.log(err, show(names));
   fs.readdir(dir, { withFileTypes: true }, (err2, drows) => {
