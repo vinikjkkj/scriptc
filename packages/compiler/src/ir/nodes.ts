@@ -3635,6 +3635,14 @@ export type IrLibFn =
    * throws. */
   | "dyn.arrLen"
   | "dyn.arrAt"
+  /** LAZY for-of over a dyn value (scr_dyn_iter_open & co; the protocol contract is at scr_dyn_iter_proto in scr_runtime.h).
+   * iterOpen(value, spelling) answers the packed array for the eager kinds or a hidden iterator-state object; iterStep(it, i) answers
+   * whether element i exists (it runs next() on a state); iterVal(it, i) is that element (+1, never throws); iterClose(it) is
+   * IteratorClose (return()) and answers true. iterOpen, iterStep and iterClose are in the may-throw seed set. */
+  | "dyn.iterOpen"
+  | "dyn.iterStep"
+  | "dyn.iterVal"
+  | "dyn.iterClose"
   /** The checked-dynamic value as a promise, for the all combinators' entries
    * (args: value dyn; result promise<dyn>, +1): a boxed promise is the promise
    * itself, any other value a promise fulfilled with it — Promise.resolve(v).
@@ -15290,6 +15298,9 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "dyn.ownNamesFence",
   // the destructuring pack throws V8's TypeError on non-iterable dyn kinds
   "dyn.iterPack",
+  "dyn.iterOpen",
+  "dyn.iterStep",
+  "dyn.iterClose",
   "dyn.toString",
   // the range twin throws the same nullish/null-prototype TypeErrors,
   // plus the number receiver's radix RangeError
