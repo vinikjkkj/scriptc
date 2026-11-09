@@ -9244,7 +9244,8 @@ function restMethodOnlyInterface(widened: ts.Type, ctx: TypeMapperCtx): boolean 
   for (const p of props) {
     const decls = ctx.checker.declarationsOf(p);
     if (decls.length === 0) return false;
-    if (decls.some((d) => ctx.isStdlibFile(d.getSourceFile()))) return false;
+    // Type-only declarations (the stdlib, @types packages, *-types packages such as undici-types) describe values the runtime builds itself: never remapped.
+    if (decls.some((d) => ctx.isStdlibFile(d.getSourceFile()) || /[\\/](@types|[^\\/]*-types)[\\/]/.test(d.getSourceFile().fileName))) return false;
     if (!decls.every((d) => d.kind === ts.SyntaxKind.MethodSignature)) methodOnly = false;
     if (!decls.every((d) => d.getSourceFile().isDeclarationFile)) declOnly = false;
     const sigs = ctx.checker.getCallSignatures(ctx.checker.getTypeOfSymbol(p));
