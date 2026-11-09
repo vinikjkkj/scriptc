@@ -14811,6 +14811,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24903-process-hrtime-bigint-is-a-monotonic-nanosecond-clock.ts": {
+   "order": [
+    "<repo>/tests/corpus/24903-process-hrtime-bigint-is-a-monotonic-nanosecond-clock.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2485-inspect-circular-refs.ts": {
    "order": [
     "<repo>/tests/corpus/2485-inspect-circular-refs.ts"
