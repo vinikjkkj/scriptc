@@ -14900,6 +14900,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24915-a-function-adapted-to-a-documented-type-keeps-its-own-properties.js": {
+   "order": [
+    "<repo>/tests/corpus/24915-a-function-adapted-to-a-documented-type-keeps-its-own-properties.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2485-inspect-circular-refs.ts": {
    "order": [
     "<repo>/tests/corpus/2485-inspect-circular-refs.ts"
