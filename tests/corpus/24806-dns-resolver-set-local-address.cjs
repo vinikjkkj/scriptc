@@ -96,6 +96,12 @@ udp.bind(0, "127.0.0.1", () => {
       }
     });
   });
+  // The TCP server reuses the UDP socket's port number; a Windows runner whose excluded port range holds it answers EACCES, and an unhandled error would
+  // print that number, which differs between the two processes. The code is the observable.
+  tcp.on("error", (e) => {
+    console.log("tcp listen failed", e.code);
+    process.exit(0);
+  });
   tcp.listen(port, "127.0.0.1", () => {
     const out = (label) => (err, recs) => console.log(label, err ? err.code : "ok", recs === undefined ? "undefined" : recs.length);
     // 1: a bound source over UDP
