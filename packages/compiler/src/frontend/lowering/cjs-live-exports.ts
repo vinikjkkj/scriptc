@@ -33,6 +33,7 @@ import { dynReplaceOf, cjsExportAssignmentOf, cjsWholeExportAssignmentOf, isCjsJ
 import { isRelativeSpecifier } from "../shared.js";
 import type { Lowerer } from "./lowerer.js";
 import { compoundCombine, cjsExportsBagOf, cjsModExpOf } from "./lower-exprs.js";
+import { cjsExportRecordOf } from "./cjs-export-record.js";
 
 export { dynReplaceOf };
 const liveMemo = new WeakMap<ts.SourceFile, boolean>();
@@ -475,6 +476,10 @@ export function liveRecvBagOf(L: Lowerer, node: ts.Expression, loc: SrcLoc): IrE
   if (ts.isIdentifier(node)) {
     if (node.text === "exports") {
       const sf = node.getSourceFile();
+      // A module that attaches members to `exports` and then replaces its export with a run-time value keeps those members in the export RECORD
+      // (every bare `exports.k` write is a record write), so a read of `exports.k` anywhere in the module, a function body included, is the
+      // record's. The bag a live module otherwise reads holds nothing of them.
+      if (isCjsJsFile(sf) && dynReplaceOf(sf) !== null && unshadowed(L, node) && L.resolveLocal(node) === null && cjsExportRecordOf(L, sf) !== null) return null;
       return isCjsJsFile(sf) && liveExportsOf(L, sf) && unshadowed(L, node) && L.resolveLocal(node) === null
         ? liveBagRef(L, sf, loc, "exports") : null;
     }
