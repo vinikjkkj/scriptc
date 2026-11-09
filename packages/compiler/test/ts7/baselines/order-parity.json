@@ -15126,6 +15126,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24899-f64-kernel-nan-marker-canon-through-typed-array-locals.ts": {
+   "order": [
+    "<repo>/tests/corpus/24899-f64-kernel-nan-marker-canon-through-typed-array-locals.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2490-find-miss-null-compare.ts": {
    "order": [
     "<repo>/tests/corpus/2490-find-miss-null-compare.ts"
