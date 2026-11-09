@@ -14877,6 +14877,15 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24912-a-member-read-through-a-module-that-forwards-its-export/main.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24912-a-member-read-through-a-module-that-forwards-its-export/common.cjs",
+    "<repo>/tests/corpus/24912-a-member-read-through-a-module-that-forwards-its-export/node.cjs",
+    "<repo>/tests/corpus/24912-a-member-read-through-a-module-that-forwards-its-export/index.cjs",
+    "<repo>/tests/corpus/24912-a-member-read-through-a-module-that-forwards-its-export/main.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2485-inspect-circular-refs.ts": {
    "order": [
     "<repo>/tests/corpus/2485-inspect-circular-refs.ts"
