@@ -48,7 +48,7 @@ import { dynBuiltinFnValueOf } from "./lower-fnvalue.js";
 import { registerHttpClientFnBinding } from "./lower-server.js";
 import { lowerDateLocaleFormat } from "./lower-numfmt.js";
 import { dnsAnswerUnion } from "./lower-dgram.js";
-import { STATS_TYPE_INDEX, KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, CHILD_T, CHILDSTREAM_T, DYN, F64, FSWATCHER_T, PROCSTREAM_T, IrExpr, IrFunction, IrLibFn, IrLocal, IrStmt, IrType, JSVAL, NULL_T, SEARCH_PARAMS_T, SPAWNRES_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, DATE_T, canBoxFuncIntoDyn, canConvertToDyn, funcOf, isUnitType, typeEquals, typeKey, BIGINT } from "../../ir/nodes.js";
+import { isDynErrorClass, STATS_TYPE_INDEX, KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, CHILD_T, CHILDSTREAM_T, DYN, F64, FSWATCHER_T, PROCSTREAM_T, IrExpr, IrFunction, IrLibFn, IrLocal, IrStmt, IrType, JSVAL, NULL_T, SEARCH_PARAMS_T, SPAWNRES_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, DATE_T, canBoxFuncIntoDyn, canConvertToDyn, funcOf, isUnitType, typeEquals, typeKey, BIGINT } from "../../ir/nodes.js";
 import { FN_CTOR_EXPORT_GLOBALS, jsonModuleOfRequire } from "./lower-modules.js";
 import { requireDepValueOf } from "./lower-island.js";
 import { lowerProvenRuntimeRequire } from "./lower-require-dead.js";
@@ -5157,7 +5157,28 @@ function fsWriteOptionsSignalFree(L: Lowerer, fn: string, expr: ts.CallExpressio
       }
       // A value of any other type the checked-dynamic tree can carry (a tuple of `Error | null` and `unknown`, ioredis' pipeline result) crosses as a
       // dyn tree and the dyn serializer walks it, as for an `any[]`: Node's own walk is over values, not types.
-      if (!L.jsonStringifiable(value.type) && value.type.kind !== "dyn" && !L.bareUndefinedArmedUnion(value.type) && L.dynConvertible(value.type)) {
+      const viaDynOk = (t: IrType, seen: Set<string>): boolean => {
+        switch (t.kind) {
+          case "dyn": case "f64": case "string": case "bool": case "nullT": return true;
+          case "object": return isDynErrorClass(t.className);
+          case "array": return viaDynOk(t.elem, seen);
+          case "record": {
+            const shape = L.shapes.get(t.shapeId);
+            if (shape === undefined) return false;
+            if (seen.has(t.shapeId)) return true;
+            seen.add(t.shapeId);
+            return shape.fields.every((f) => viaDynOk(f.type, seen)) && (shape.indexValue === undefined || viaDynOk(shape.indexValue, seen));
+          }
+          case "union": {
+            const def = L.unions.get(t.unionId);
+            return def !== undefined && def.arms.every((a) => viaDynOk(a, seen));
+          }
+          default: return false;
+        }
+      };
+      // Only trees built from numbers, strings, booleans, null, arrays, tuples, records, Error instances and unknown take this path; Maps, Sets, closures and
+      // class instances keep their refusal (their dyn walk is not proven to answer what Node does).
+      if (!L.jsonStringifiable(value.type) && value.type.kind !== "dyn" && !L.bareUndefinedArmedUnion(value.type) && L.dynConvertible(value.type) && viaDynOk(value.type, new Set())) {
         value = { kind: "dynFrom", value, type: DYN, loc };
       }
       if (!L.jsonStringifiable(value.type) && value.type.kind !== "dyn") {
