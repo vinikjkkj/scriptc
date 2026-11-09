@@ -27371,6 +27371,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25063-class-view-keeps-the-class-tostring/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/25063-class-view-keeps-the-class-tostring/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/25050-record-projection-keeps-the-source-as-receiver/main.ts": {
    "order": [
     "<repo>/tests/corpus/25050-record-projection-keeps-the-source-as-receiver/lib.cjs",
