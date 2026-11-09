@@ -9231,6 +9231,30 @@ function interfaceKeyOf(sym: ts.Symbol, ctx: TypeMapperCtx): string {
   return d === undefined ? `${sym.name}` : `${d.getSourceFile().fileName}@${d.pos}`;
 }
 
+
+/** True for an interface a package's declaration file spells whole (methods and data members alike), where some method has a rest parameter or several signatures. */
+function restMethodOnlyInterface(widened: ts.Type, ctx: TypeMapperCtx): boolean {
+  const props = ctx.checker.getPropertiesOfType(widened);
+  if (props.length === 0) return false;
+  // User-declared interfaces keep their record (a program's own rest member is covered by the member-level slot): remapping them changed which branches of
+  // zapo's transport are live (WaProxyDispatcher), so only package declaration files qualify.
+  let declOnly = true;
+  let hard = false;
+  for (const p of props) {
+    const decls = ctx.checker.declarationsOf(p);
+    if (decls.length === 0) return false;
+    // Type-only declarations (the stdlib, @types packages, *-types packages such as undici-types) describe values the runtime builds itself: never remapped.
+    if (decls.some((d) => ctx.isStdlibFile(d.getSourceFile()) || /[\\/](@types|[^\\/]*-types)[\\/]/.test(d.getSourceFile().fileName))) return false;
+    if (!decls.every((d) => d.getSourceFile().isDeclarationFile)) declOnly = false;
+    const sigs = ctx.checker.getCallSignatures(ctx.checker.getTypeOfSymbol(p));
+    if (sigs.length > 1) hard = true;
+    for (const sg of sigs) {
+      const d = ctx.checker.signatureDeclaration(sg);
+      if (d !== undefined && ts.isFunctionLike(d) && d.parameters.some((x) => x.dotDotDotToken !== undefined)) hard = true;
+    }
+  }
+  return hard && declOnly;
+}
 function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | RecordShapeParts | null {
   const { checker, shapes } = ctx;
   if (checker.getConstructSignatures(widened).length > 0) return null;
@@ -9255,6 +9279,11 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
     ctx.shapes.objectInterfaceKeys.set(only, new Set([...(ctx.shapes.objectInterfaceKeys.get(only) ?? []), key]));
     return { kind: "object", className: only };
   }
+  // A package-declared interface whose methods take rest parameters or are overloaded (ioredis' ChainableCommander): the value
+  // is an OBJECT whose methods read their own instance (`this`, the instance-assigned `exec` of a MULTI pipeline), which a projected record copy cannot
+  // carry -- a method called off the copy runs with no receiver. It stays a dynamic object and members are called by name through the value (the
+  // member-level DYN slot below covers the same signatures inside records that also hold data fields).
+  if (widenedSym !== undefined && (widenedSym.flags & ts.SymbolFlags.Interface) !== 0 && !ctx.dynamic && restMethodOnlyInterface(widened, ctx)) return DYN;
   {
     const viaSymbolicAlias = mapSymbolicMappedAlias(widened, ctx);
     if (viaSymbolicAlias !== undefined) return viaSymbolicAlias;
