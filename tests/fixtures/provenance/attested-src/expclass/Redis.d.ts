@@ -83,4 +83,10 @@ declare class Redis {
     del(...keys: string[]): number;
     mget(...keys: string[]): number;
 }
+// ioredis declares its commands on an interface the class merges with, each one OVERLOADED (callback form, promise form).
+interface Commands {
+    mgetBuffer(...args: [...keys: string[], callback: (err: Error | null, res?: (Buffer | null)[]) => void]): void;
+    mgetBuffer(...keys: string[]): Promise<(Buffer | null)[]>;
+}
+interface Redis extends Commands {}
 export default Redis;

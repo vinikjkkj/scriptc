@@ -44,6 +44,13 @@ COMMANDS.forEach((name) => {
         return keys.length;
     };
 });
+// A Buffer-typed twin of mget, installed the same way: it answers a promise of buffers and nulls (ioredis' mgetBuffer).
+["mgetBuffer"].forEach((name) => {
+    Redis.prototype[name] = function (...keys) {
+        this.calls += keys.length;
+        return Promise.resolve(keys.map((k) => (k === "none" ? null : Buffer.from(k + "!"))));
+    };
+});
 ["sadd"].forEach((name) => {
     Pipeline.prototype[name] = function (key, ...members) {
         this.queue.push([name, key + ":" + members.join("+")]);

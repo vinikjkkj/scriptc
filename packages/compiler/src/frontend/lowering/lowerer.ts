@@ -70,7 +70,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { isDynErrorClass } from "../../ir/nodes.js";
+import { isDynBytes, isDynErrorClass } from "../../ir/nodes.js";
 import { protoEscapes, strictAt } from "./lower-protoescape.js";
 import { fenceInspGetters, newInspGettersScan, noteInspGettersNode } from "./inspect-getters-fence.js";
 import { applyInstanceOverrides, applyLateInstalls, applyProtoSlots, dynFnAsFunc, dynFnReadable, scanProtoSlots } from "./lower-protoslots.js";
@@ -9325,6 +9325,10 @@ export class Lowerer {
       case "bool":
       case "string":
         return true;
+      // A bytes<u8> leaf (a Buffer or Uint8Array) is the checked cast's own exact answer: the payload is copied out, the way every
+      // dyn-to-bytes edge reads it.
+      case "bytes":
+        return isDynBytes(t);
       case "array":
         return this.dynPayloadTotal(t.elem, depth + 1);
       case "record": {

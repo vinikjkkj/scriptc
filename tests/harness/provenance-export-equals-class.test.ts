@@ -21,6 +21,7 @@ const staticEntry = join(fixtureDir, "cases/expclass-static/main.ts");
 const pipeEntry = join(fixtureDir, "cases/expclass-pipeline/main.ts");
 const spreadEntry = join(fixtureDir, "cases/expclass-spreadcall/main.ts");
 const castEntry = join(fixtureDir, "cases/expclass-castcall/main.ts");
+const mgetEntry = join(fixtureDir, "cases/expclass-mgetbuffer/main.ts");
 const destructureEntry = join(fixtureDir, "cases/expclass-dyndestructure/main.ts");
 const flavor = process.env["SCRIPTC_SAN"] === "1" ? "san" : "plain";
 const outDir = join(repoRoot, "node_modules/.cache/scriptc-tests/provenance-expclass", flavor);
@@ -29,6 +30,7 @@ const COMMON = "v:k PONG 1 h\n" + "true true true function 2\n";
 const DYN_EXPECTED = COMMON + "v:y Redis,__esModule,default,helper,module.exports\n";
 const STATIC_EXPECTED = COMMON + "v:y\n";
 const CAST_EXPECTED = "3 2 v:k 6\n";
+const MGET_EXPECTED = "3 true true 99,33 3\n";
 const SPREAD_EXPECTED = "3 2 5\n" + "sadd:set:a+b+c,sadd:set2:x\n";
 const DESTRUCTURE_EXPECTED = "v:k 3 true\n";
 const PIPE_EXPECTED = "cmd3:a,cmd7:b,v:c,cmd69:d 1 true\n" + "0 cmd0:z\n";
@@ -72,6 +74,9 @@ describe("provenance: a mapped CommonJS package whose module.exports is a class"
     });
     test(`a member called through an as-unknown cast of a package instance matches Node on --backend ${backend}`, async () => {
       expect(await run(castEntry, backend, "cast")).toBe(CAST_EXPECTED);
+    });
+    test(`a package command answering a promise of buffers and nulls matches Node on --backend ${backend}`, async () => {
+      expect(await run(mgetEntry, backend, "mget")).toBe(MGET_EXPECTED);
     });
     test(`destructuring the import() namespace directly matches Node on --backend ${backend}`, async () => {
       expect(await run(destructureEntry, backend, "destructure")).toBe(DESTRUCTURE_EXPECTED);
