@@ -14823,6 +14823,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24905-an-untyped-key-writes-a-record-entry-by-its-text.ts": {
+   "order": [
+    "<repo>/tests/corpus/24905-an-untyped-key-writes-a-record-entry-by-its-text.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2485-inspect-circular-refs.ts": {
    "order": [
     "<repo>/tests/corpus/2485-inspect-circular-refs.ts"
