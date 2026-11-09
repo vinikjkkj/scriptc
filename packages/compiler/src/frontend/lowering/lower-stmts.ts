@@ -548,10 +548,10 @@ export function provenanceElidedConstDecl(L: Lowerer, decl: ts.VariableDeclarati
       // That declaration may itself be a forward-hoisted one (reached from an earlier statement), so every in-flight declaration of this list
       // counts, not only the statement at the loop's index.
       for (const [inFlight, pending] of L.fnDeclInFlight) {
-        if (!entry.stmts.includes(inFlight) || L.fnDeclPredeclared.has(pending.id)) continue;
+        if (!entry.stmts.includes(inFlight) || L.fnDeclPredeclared.has(pending)) continue;
         pending.boxed = true;
         pending.tdz = true;
-        L.fnDeclPredeclared.add(pending.id);
+        L.fnDeclPredeclared.add(pending);
         entry.out.push({ kind: "varDecl", localId: pending.id, init: null, loc: locOf(inFlight) });
       }
       const fnTail = L.fnStack.splice(depth + 1);

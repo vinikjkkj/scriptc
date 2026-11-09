@@ -2596,7 +2596,7 @@ export class Lowerer {
    * sibling reaches forward from inside that body (mutual recursion) captures this local's box, which must exist by then. */
   readonly fnDeclInFlight = new Map<ts.FunctionDeclaration, IrLocal>();
   /** The locals of those declarations that took a scope-entry box (predeclareForwardFnDecl): the declaration then assigns into it. */
-  readonly fnDeclPredeclared = new Set<string>();
+  readonly fnDeclPredeclared = new Set<IrLocal>();
   /** Comma expressions whose LEFT operand the statement loop already emitted
    * as its own statement (the granularity rule's sequence-assignment split —
    * `x = (a, b, v);` lowered as `a; b; x = v;` so each effect owns its poison

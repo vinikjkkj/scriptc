@@ -9555,7 +9555,7 @@ export function reconcileOverloadMemberDyn(L: Lowerer, expr: ts.CallExpression, 
       L.fnDeclInFlight.delete(stmt);
     }
     // A sibling lowered ahead of this declaration (mutual recursion) already captured this local's box: fill that box.
-    if (L.fnDeclPredeclared.delete(local.id)) return { kind: "assign", localId: local.id, value: init, loc: locOf(stmt) };
+    if (L.fnDeclPredeclared.delete(local)) return { kind: "assign", localId: local.id, value: init, loc: locOf(stmt) };
     return { kind: "varDecl", localId: local.id, init, loc: locOf(stmt) };
   }
 
