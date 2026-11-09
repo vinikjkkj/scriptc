@@ -789,6 +789,13 @@ const unifiedPairKeys = new Set<string>();
 let widthPairsSettled = false;
 let viewConversionAttempted = false;
 const structViewDeniedKeys = new Set<string>();
+/** `Class->viewShapeKey` pairs the DISCOVERY pass converted through a class-sourced struct view (classViewConversion). The emit pass must
+ * find the target shape granted for exactly these: SCRIPTC_CLASS_VIEW_ASSERT=1 turns a pair that was noted but reached the emit pass
+ * ungranted (a silent fall back to the field copy) into an internal error, and one the emit pass converts without discovery's note too. */
+const classViewNoted = new Set<string>();
+/** viewShapeKey of every record shape a CHECKED CAST or dynamic hand-off granted a view (noteViewCast): those records may carry a dynamic-object view in
+ * their view slot. A class-sourced view target outside this set (and outside recordViewShapes) is read with the one-test fast path. */
+const objectViewKeys = new Set<string>();
 
 export function lowerToIr(
   program: ts.Program,
@@ -808,6 +815,8 @@ export function lowerToIr(
   viewConversionNoted = false;
   structViewTargetKeys.clear();
   structViewDeniedKeys.clear();
+  classViewNoted.clear();
+  objectViewKeys.clear();
   unifiedPairKeys.clear();
   widthPairsSettled = false;
   viewConversionAttempted = false;
@@ -5781,6 +5790,7 @@ export class Lowerer {
         if (sh.indexValue !== undefined) this.noteViewCast(sh.indexValue, seen);
         if (!this.viewCapableShape(sh)) return;
         viewShapeKeys.add(viewShapeKey(sh.fields, sh.indexValue));
+        objectViewKeys.add(viewShapeKey(sh.fields, sh.indexValue));
         return;
       }
       default:
@@ -10021,6 +10031,9 @@ export class Lowerer {
    * width-coercible. */
   /** Shapes that are the TARGET of a struct view in the program being emitted: their field reads and writes get the extra arm. */
   readonly structViewShapes = new Set<string>();
+  /** Shapes that are the target of a class-sourced struct view (classViewConversion) and of a record-sourced one (viewConversion). */
+  readonly classViewShapes = new Set<string>();
+  readonly recordViewShapes = new Set<string>();
 
   /** Every body discovery lowered, kept only until shape unification has been asked which width pairs it closes. */
   private readonly discoveredFns: IrFunction[] = [];
@@ -10099,6 +10112,7 @@ export class Lowerer {
         viewShapeKeys.add(viewShapeKey(to.fields, to.indexValue));
       } else if (!this.isViewShape(expected)) return null;
       this.structViewShapes.add(expected.shapeId);
+      this.recordViewShapes.add(expected.shapeId);
       return { kind: "recordSrcView", src: expr, srcShapeId: (expr.type as IrType & { kind: "record" }).shapeId, shapeId: expected.shapeId, type: expected, loc: expr.loc };
     }
     // The grant is decided by the DISCOVERY pass, before shapes are interned. The emit pass converts through views only where
@@ -10117,6 +10131,97 @@ export class Lowerer {
     const loc = expr.loc;
     const boxed: IrExpr = { kind: "dynFrom", value: expr, type: DYN, loc };
     return { kind: "dynCheck", value: boxed, type: expected, loc };
+  }
+
+  /** A CLASS INSTANCE read through a record naming METHODS, as the same object (SEMANTICS #305's copy was the defect): the record is a
+   * struct view whose data fields read and write the instance's own struct slots at their typed offsets and whose methods are bound
+   * closures stored in the view's own slots (so a call is a direct typed call with the instance as receiver). Null when the pair keeps
+   * the copy: a record with no method member (a data-only projection stays a copy: a view's per-access test would cost every reader of
+   * the shape), a field that is not the class's own at the identical type, a shape that cannot be a view, a denied target, or a class
+   * the dyn box cannot carry. The grant follows viewConversion's discovery/emit protocol. */
+  classViewConversion(expr: IrExpr, expected: IrType & { kind: "record" }): IrExpr | null {
+    if (expr.type.kind !== "object") return null;
+    const helper = this.classViewHelperFor(expr.type.className, expected, expr.loc);
+    return helper === null ? null : { kind: "call", callee: helper, args: [expr], type: expected, loc: expr.loc };
+  }
+
+  /** The view helper for a class -> record pair, or null when the pair keeps the copy (see classViewConversion). Registers the grant. */
+  classViewHelperFor(className: string, expected: IrType & { kind: "record" }, loc: SrcLoc): string | null {
+    if (process.env["SCRIPTC_CLASS_VIEW"] === "0") return null;
+    const info = this.classes.get(className);
+    const to = this.shapes.get(expected.shapeId);
+    if (info === undefined || to === undefined) return null;
+    if (to.indexValue !== undefined || to.tuple === true || !this.viewCapableShape(to)) return null;
+    if (!canBoxClassIntoDyn(className)) return null;
+    for (let c: ClassInfo | null = info; c; c = c.base) {
+      if (c.def.name === RUNTIME_EMITTER_CLASS || RUNTIME_STREAM_CLASSES.has(c.def.name)) return null;
+    }
+    const plan = this.objToRecordPlan(className, expected.shapeId);
+    if (plan === null) return null;
+    let methods = 0;
+    for (const f of to.fields) {
+      const l = plan.get(f.name);
+      if (l === undefined) return null;
+      if ("method" in l) methods++;
+      else if (!("src" in l) || !typeEquals(l.src, f.type)) return null;
+    }
+    if (methods === 0) return null;
+    const key = viewShapeKey(to.fields, to.indexValue);
+    if (structViewDeniedKeys.has(key)) return null;
+    const noteKey = `${className}->${key}`;
+    if (this.onEdge !== null) {
+      viewConversionNoted = true;
+      classViewNoted.add(noteKey);
+      structViewTargetKeys.add(key);
+      // SCRIPTC_CLASS_VIEW_MUTANT=skipgrant omits the grant on purpose: the control that proves the assert below fires.
+      if (process.env["SCRIPTC_CLASS_VIEW_MUTANT"] !== "skipgrant") viewShapeKeys.add(key);
+    } else if (!this.isViewShape(expected)) {
+      if (process.env["SCRIPTC_CLASS_VIEW_ASSERT"] !== undefined) {
+        throw new Error(`lowerer bug: class view ${noteKey} reached the emit pass with the target shape ungranted (noted in discovery: ${String(classViewNoted.has(noteKey))})`);
+      }
+      return null;
+    } else if (process.env["SCRIPTC_CLASS_VIEW_ASSERT"] !== undefined && !classViewNoted.has(noteKey)) {
+      throw new Error(`lowerer bug: class view ${noteKey} first appeared in the emit pass`);
+    }
+    this.structViewShapes.add(expected.shapeId);
+    this.classViewShapes.add(expected.shapeId);
+    return this.classSrcViewHelper(className, expected, plan, loc);
+  }
+
+  /** The interned `%obj.cview.<n>(o)`: the one view of instance `o` in the target shape, its method slots filled with closures bound to
+   * the instance (raw stores into the view's own slots: a struct view holds no source slot for a method). */
+  private classSrcViewHelper(className: string, toT: IrType & { kind: "record" }, plan: Map<string, ObjFieldProj>, loc: SrcLoc): string {
+    const key = `cview:${className}:${toT.shapeId}`;
+    const existing = this.widthHelpers.get(key);
+    if (existing) return existing;
+    const name = `%obj.cview.${this.widthHelpers.size}`;
+    this.widthHelpers.set(key, name);
+    const to = this.shapes.get(toT.shapeId)!;
+    const fromT: IrType = { kind: "object", className };
+    const o: IrExpr = { kind: "varRef", localId: "o.0", type: fromT, loc };
+    const rRef = (): IrExpr => ({ kind: "varRef", localId: "r.0", type: toT, loc });
+    const body: IrStmt[] = [
+      { kind: "varDecl", localId: "r.0", init: { kind: "recordSrcView", src: o, srcShapeId: `%class:${className}`, shapeId: toT.shapeId, type: toT, loc }, loc },
+    ];
+    for (const f of to.fields) {
+      const l = plan.get(f.name)!;
+      if ("method" in l) {
+        body.push({ kind: "recordSet", obj: rRef(), shapeId: toT.shapeId, field: f.name, value: this.boundMethodClosure(className, l.method, loc), own: true, loc });
+      }
+    }
+    body.push({ kind: "return", value: rRef(), loc });
+    this.liftedFns.push({
+      name,
+      params: [{ localId: "o.0", name: "o", type: fromT }],
+      returnType: toT,
+      locals: [
+        { id: "o.0", name: "o", type: fromT, mutable: true, boxed: true },
+        { id: "r.0", name: "r", type: toT, mutable: false },
+      ],
+      body,
+      loc,
+    });
+    return name;
   }
 
   widthCoerce(expr: IrExpr, expected: IrType): IrExpr | null {
@@ -10148,6 +10253,8 @@ export class Lowerer {
     // only to the classes it can actually witness. Where it declines, the
     // caller's own refusal stands exactly as before.
     if (expected.kind === "record" && expr.type.kind === "object") {
+      const viewedClass = this.classViewConversion(expr, expected);
+      if (viewedClass !== null) return viewedClass;
       const proj = this.ctorWitnessProjection(expr.type.className, expected, expr.loc);
       if (proj !== null) {
         // SCRIPTC_PROJ_USE: one line per COERCION SITE (a helper is interned
@@ -12028,6 +12135,13 @@ export class Lowerer {
    * accessor answering at each read), on a struct it is the access it always was. A view's struct
    * slots are a SNAPSHOT taken at the cast: the walkers that read slots directly (the JSON writer,
    * the to-dyn converter) consult `%view` first, so they never print the snapshot of a live view. */
+  /** A shape every view of which is class-sourced: no record-to-record struct view and no dynamic-object view reaches it. */
+  classViewOnly(shapeId: string): boolean {
+    if (!this.classViewShapes.has(shapeId) || this.recordViewShapes.has(shapeId)) return false;
+    const sh = this.shapes.get(shapeId);
+    return sh !== undefined && !objectViewKeys.has(viewShapeKey(sh.fields, sh.indexValue));
+  }
+
   viewRewrite(functions: IrFunction[]): void {
     const viewShapes = new Set<string>();
     for (const sh of this.shapes.shapes) if (sh.view === true) viewShapes.add(sh.id);
@@ -12052,7 +12166,11 @@ export class Lowerer {
         }
         for (const v of Object.values(node as Record<string, unknown>)) visit(v);
         const o = node as Record<string, unknown> & { kind?: unknown };
-        if (o.kind === "recordGet" && viewShapes.has(o["shapeId"] as string) && (o["type"] as IrType).kind === "union" && this.projectableFunc(o["type"] as IrType)?.optional != null && this.projectableRecord({ kind: "record", shapeId: o["shapeId"] as string })) {
+        if (o.kind === "recordGet" && this.classViewOnly(o["shapeId"] as string)) {
+          // A record only a class instance (or nothing) is a view of: a method is the record's own slot (a view stores its bound closure there), a
+          // data member is the instance struct's slot when the view slot holds a source and the record's own otherwise, in one test.
+          if (!this.viewFieldHoldsFunc(o["type"] as IrType)) o["kind"] = "recordSrcGet", o["own"] = true;
+        } else if (o.kind === "recordGet" && viewShapes.has(o["shapeId"] as string) && (o["type"] as IrType).kind === "union" && this.projectableFunc(o["type"] as IrType)?.optional != null && this.projectableRecord({ kind: "record", shapeId: o["shapeId"] as string })) {
           this.viewRewriteOptionalMethod(o as unknown as Extract<IrExpr, { kind: "recordGet" }>, temp, (t) => {
             const l = temp(t);
             l.boxed = true;
@@ -12064,7 +12182,7 @@ export class Lowerer {
           // A function member keeps its snapshot read on a view of an object (the cast bound it to the object), but a struct view
           // has no snapshot: the source's own slot is the value.
           this.viewRewriteSrcOnlyGet(o as unknown as Extract<IrExpr, { kind: "recordGet" }>, temp, isSimple);
-        } else if (o.kind === "recordSet" && viewShapes.has(o["shapeId"] as string)) {
+        } else if (o.kind === "recordSet" && o["own"] !== true && viewShapes.has(o["shapeId"] as string)) {
           this.viewRewriteSet(o as unknown as Extract<IrStmt, { kind: "recordSet" }>, temp, isSimple);
         } else if (o.kind === "bin" && (o["op"] === "===" || o["op"] === "!==")) {
           const b = o as unknown as Extract<IrExpr, { kind: "bin" }>;
@@ -13518,6 +13636,8 @@ export class Lowerer {
   objRecordWidthHelper(className: string, toId: string, loc: SrcLoc): string | null {
     const to = this.shapes.get(toId);
     if (!to) return null;
+    const classView = this.classViewHelperFor(className, { kind: "record", shapeId: toId }, loc);
+    if (classView !== null) return classView;
     const viewed = this.classViewHelper(className, toId, loc);
     if (viewed !== null) return viewed;
     const plan = this.objToRecordPlan(className, toId);
@@ -14631,8 +14751,13 @@ export class Lowerer {
     // this is the same conversion one call deeper. Probed here rather than
     // widened into coercibleValue: that predicate answers for every
     // coercion site, and a class is NOT a record anywhere else.
+    // A class instance a record of METHODS reads as the same object (classViewConversion) converts in the adapter body through the
+    // ordinary coercion, which builds that view; the constructor-witness copy is the fallback only.
+    const classRetView =
+      toT.ret.kind === "record" && fromT.ret.kind === "object" &&
+      this.classViewConversion({ kind: "varRef", localId: "f.0", type: fromT.ret, loc }, toT.ret) !== null;
     const classRetProj =
-      toT.ret.kind === "record" && fromT.ret.kind === "object"
+      toT.ret.kind === "record" && fromT.ret.kind === "object" && !classRetView
         ? this.ctorWitnessProjection(fromT.ret.className, toT.ret, loc)
         : null;
     // The RESULT's two conversions coercibleValue never learned, both of
@@ -14645,7 +14770,7 @@ export class Lowerer {
         toT.ret.kind === "object" &&
         fromT.ret.className !== toT.ret.className &&
         this.isSubclassOf(fromT.ret.className, toT.ret.className));
-    if (toT.ret.kind !== "void" && !this.coercibleValue(fromT.ret, toT.ret, true) && classRetProj === null && !resultBridges) {
+    if (toT.ret.kind !== "void" && !this.coercibleValue(fromT.ret, toT.ret, true) && classRetProj === null && !classRetView && !resultBridges) {
       if (fromT.ret.kind !== "void") {
         // A RESULT that cannot convert — the strandParams stance, result
         // side (the production/development function-choice ternary: the
