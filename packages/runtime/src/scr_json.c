@@ -2030,12 +2030,15 @@ ScrDyn *scr_dyn_iter_open(const ScrDyn *src, const ScrStr *msg) {
 }
 
 bool scr_dyn_iter_step(const ScrDyn *it, double i) {
-  if (it->kind == SCR_DYN_ARR) return i >= 0 && i < (double)it->v.arr.len;
+  if (it->kind == SCR_DYN_ARR) return i < (double)it->v.arr.len; /* i is the loop's own counter, never negative */
   return dyn_iter_proto_step((ScrDyn *)it);
 }
 
 ScrDyn *scr_dyn_iter_val(const ScrDyn *it, double i) {
-  if (it->kind == SCR_DYN_ARR) return scr_dyn_arr_at(it, i);
+  if (it->kind == SCR_DYN_ARR) {
+    if (i >= (double)it->v.arr.len) return scr_dyn_retain(scr_dyn_undefined());
+    return scr_dyn_retain(scr_dyn_elem_val(it->v.arr.items[(size_t)i]));
+  }
   return dyn_iter_proto_value((ScrDyn *)it);
 }
 
