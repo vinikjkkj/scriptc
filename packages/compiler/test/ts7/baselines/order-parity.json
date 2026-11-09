@@ -14954,6 +14954,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24885-buffer-numeric-accessors-dispatch-by-name-megamorphic.js": {
+   "order": [
+    "<repo>/tests/corpus/24885-buffer-numeric-accessors-dispatch-by-name-megamorphic.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2490-find-miss-null-compare.ts": {
    "order": [
     "<repo>/tests/corpus/2490-find-miss-null-compare.ts"
