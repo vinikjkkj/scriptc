@@ -14805,6 +14805,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24902-array-flat-depths-over-typed-nested-arrays.ts": {
+   "order": [
+    "<repo>/tests/corpus/24902-array-flat-depths-over-typed-nested-arrays.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2485-inspect-circular-refs.ts": {
    "order": [
     "<repo>/tests/corpus/2485-inspect-circular-refs.ts"
