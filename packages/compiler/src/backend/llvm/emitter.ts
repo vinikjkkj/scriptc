@@ -12000,6 +12000,17 @@ class LlEmitter {
         // non-optional form throws JS's TypeError on an undefined/null
         // receiver, and HANDLE receivers can throw the loud unmodeled-
         // property ladder on EITHER form; the result is owned (+1).
+        // A NUMBER index that is not a literal (a literal keeps the one constant key) (`d[i]`, the key lowered as String(i)): the same scr_dyn_idx_get the C lane calls, the emitted keyed read riding as its slow path.
+        if (e.key.kind === "toString" && e.key.operand.type.kind === "f64" && e.key.operand.kind !== "numLit") {
+          const di = this.emitBorrowedLocal(e.value, [e.key.operand]);
+          const iv = this.emitExpr(e.key.operand);
+          this.declare(`declare ptr @scr_dyn_idx_get(ptr, double, i1, ptr)`);
+          const ti = B.tmp();
+          B.line(`${ti} = call ptr @scr_dyn_idx_get(ptr ${di.name}, double ${iv.name}, i1 ${e.optional ? "true" : "false"}, ptr @${this.dyn.dynKeyGetHelper()})`);
+          const oi = this.own({ name: ti, type: e.type });
+          this.emitPendingCheck();
+          return oi;
+        }
         const d = this.emitBorrowedLocal(e.value, [e.key]);
         const k = this.emitBorrowedLocal(e.key, []);
         // A key that is an emitted string literal (an immortal interned static) takes the literal-key entry; a computed key keeps the general one.

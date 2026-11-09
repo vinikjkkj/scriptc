@@ -9400,6 +9400,27 @@ bool scr_dyn_key_delete_sloppy(ScrDyn *recv, ScrStr *key) {
   return r;
 }
 
+ScrDyn *scr_dyn_idx_get(ScrDyn *d, double i, bool opt, ScrDyn *(*slow)(ScrDyn *, ScrStr *, bool)) {
+  if (d->kind == SCR_DYN_ARR && !d->static_copy && i >= 0.0 && i < (double)d->v.arr.len) {
+    size_t idx = (size_t)i;
+    if ((double)idx == i) return scr_dyn_retain(d->v.arr.items[idx]);
+  }
+  /* A string answers its one-code-unit character, the same box the keyed read builds for a canonical index. */
+  if (d->kind == SCR_DYN_STR && i >= 0.0 && i < scr_str_utf16_len(d->v.str)) {
+    size_t idx = (size_t)i;
+    if ((double)idx == i) {
+      ScrStr *c = scr_str_char_at(d->v.str, i);
+      ScrDyn *r = scr_dyn_new_str(c);
+      scr_str_release(c);
+      return r;
+    }
+  }
+  ScrStr *k = scr_f64_to_scrstr(i);
+  ScrDyn *r = slow(d, k, opt);
+  scr_str_release(k);
+  return r;
+}
+
 void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
 #ifdef SCR_DYNCEN_ON
   scr_dyncen_note_korigin(SCR_DYNCEN_KO_KEYSET);
