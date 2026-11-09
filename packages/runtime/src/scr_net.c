@@ -5207,9 +5207,11 @@ static ScrNetLs *scr_net_sock_ls_named(ScrNetSocket *s, const ScrDyn *name) {
 static ScrDyn *scr_net_dynh_sock_invoke(void *h, ScrDyn *self, const char *method,
                                         ScrDyn *const *args, size_t argc, const char *what) {
   ScrNetSocket *s = (ScrNetSocket *)h;
-  bool reg = false, once = false;
+  bool reg = false, once = false, prepend = false;
   if (strcmp(method, "on") == 0 || strcmp(method, "addListener") == 0) reg = true;
   else if (strcmp(method, "once") == 0) { reg = true; once = true; }
+  else if (strcmp(method, "prependListener") == 0) { reg = true; prepend = true; }
+  else if (strcmp(method, "prependOnceListener") == 0) { reg = true; once = true; prepend = true; }
   if (reg) {
     const ScrDyn *name = argc > 0 ? args[0] : scr_dyn_undefined();
     const ScrDyn *cb = argc > 1 ? args[1] : scr_dyn_undefined();
@@ -5248,6 +5250,15 @@ static ScrDyn *scr_net_dynh_sock_invoke(void *h, ScrDyn *self, const char *metho
       scr_jb_puts(&b, "' on a dynamic Socket is not supported yet");
       scr_throw_error(SCR_ERR_ERROR, scr_jb_finish(&b));
       return NULL;
+    }
+    if (prepend) {
+      /* prependListener / prependOnceListener: the registration just made is the LAST entry of its list; it fires first. */
+      ScrNetLs *pl = scr_net_sock_ls_named(s, name);
+      if (pl != NULL && pl->n > 1) {
+        ScrNetL last = pl->ls[pl->n - 1];
+        memmove(pl->ls + 1, pl->ls, (pl->n - 1) * sizeof *pl->ls);
+        pl->ls[0] = last;
+      }
     }
     return scr_dyn_retain(self);
   }
@@ -5448,6 +5459,11 @@ static ScrDyn *scr_net_dynh_sock_get(void *h, const char *key, size_t key_len) {
   }
   if (strcmp(key, "bytesWritten") == 0) return scr_dyn_new_num(scr_net_sock_bytes_written(s));
   if (strcmp(key, "readable") == 0) return scr_dyn_new_bool(scr_net_sock_readable(s));
+  /* socket.connecting: true while the dial is in flight (Node's own flag). socket.pending: no handle yet, or connecting. socket.timeout: the idle
+   * timeout in ms once set, undefined otherwise. */
+  if (strcmp(key, "connecting") == 0) return scr_dyn_new_bool(s->connecting);
+  if (strcmp(key, "pending") == 0) return scr_dyn_new_bool(s->fd < 0 || s->connecting);
+  if (strcmp(key, "timeout") == 0) return s->timeout_ms > 0 ? scr_dyn_new_num(s->timeout_ms) : NULL;
   if (strcmp(key, "writableHighWaterMark") == 0 || strcmp(key, "readableHighWaterMark") == 0) {
     /* Node's default stream highWaterMark — a constant here (backpressure
      * is not modeled; SEMANTICS.md) */
@@ -5459,8 +5475,8 @@ static ScrDyn *scr_net_dynh_sock_get(void *h, const char *key, size_t key_len) {
   }
   {
     static const char *const known[] = { "remotePort", "remoteFamily", "localAddress",
-      "localPort", "localFamily", "bytesRead", "connecting", "pending",
-      "readyState", "bufferSize", "timeout", "closed", "errored", NULL };
+      "localPort", "localFamily", "bytesRead",
+      "readyState", "bufferSize", "closed", "errored", NULL };
     for (size_t i = 0; known[i]; i++) {
       if (strcmp(key, known[i]) == 0) {
         scr_net_dynh_unsupported(key, NULL);
