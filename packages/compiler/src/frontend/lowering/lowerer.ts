@@ -5612,14 +5612,15 @@ export class Lowerer {
       else if (key !== undefined && key.kind === "numLit") return;
       else this.dynMemberAny = true;
     };
-    const inCtor = fn.name.endsWith(".constructor");
+    // SCRIPTC_CLASS_VIEW_MUTANT=ctorwritesharmless restores the census this once had (a constructor's writes were not writes): the control row 25061 must fail under it.
+    const ctorHarmless = process.env["SCRIPTC_CLASS_VIEW_MUTANT"] === "ctorwritesharmless" && fn.name.endsWith(".constructor");
     const noteClassWrite = (name: string): void => {
-      if (classViewWrites.has(name)) return;
+      if (ctorHarmless || classViewWrites.has(name)) return;
       classViewWrites.add(name);
       if (classViewDeclined.has(name)) viewConversionNoted = true;
     };
     const noteClassWriteAny = (): void => {
-      if (classViewWriteAny) return;
+      if (ctorHarmless || classViewWriteAny) return;
       classViewWriteAny = true;
       if (classViewDeclined.size > 0) viewConversionNoted = true;
     };
@@ -5630,7 +5631,7 @@ export class Lowerer {
         return;
       }
       const o = n as { kind?: unknown; value?: { type?: IrType } };
-      if (!inCtor) {
+      {
         const w = o as unknown as { field?: unknown; own?: unknown; fn?: unknown; args?: IrExpr[] };
         if (o.kind === "fieldSet" || o.kind === "fieldIncDec" || (o.kind === "recordSet" && w.own !== true)) {
           if (typeof w.field === "string") noteClassWrite(w.field);
