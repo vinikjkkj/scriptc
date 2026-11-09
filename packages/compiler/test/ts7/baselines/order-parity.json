@@ -14817,6 +14817,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24904-a-method-called-through-an-assertion-over-unknown.ts": {
+   "order": [
+    "<repo>/tests/corpus/24904-a-method-called-through-an-assertion-over-unknown.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2485-inspect-circular-refs.ts": {
    "order": [
     "<repo>/tests/corpus/2485-inspect-circular-refs.ts"
