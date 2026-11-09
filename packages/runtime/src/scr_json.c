@@ -5894,16 +5894,26 @@ static int scr_dyn_big_rel(const ScrDyn *x, const ScrDyn *y) {
   return r == 2 ? 2 : -r;
 }
 
-static bool scr_dyn_rel(const ScrDyn *pa_in, const ScrDyn *pb_in, int op) {
+static __attribute__((noinline)) bool scr_dyn_rel(const ScrDyn *pa_in, const ScrDyn *pb_in, int op) {
   int c;
   /* Both sides ToPrimitive with the NUMBER hint, as 7.2.13 step 1 says.
    * A bigint is still not scr_dyn_is_prim, so it keeps its refusal. */
-  ScrDyn *a = scr_dyn_to_primitive(pa_in, SCR_TOPRIM_NUMBER);
-  if (!a) return false;
-  ScrDyn *b = scr_dyn_to_primitive(pb_in, SCR_TOPRIM_NUMBER);
-  if (!b) {
-    scr_dyn_release(a);
-    return false;
+  /* A primitive or bigint operand IS its own ToPrimitive (scr_dyn_to_primitive answers a retained alias of it), so it is borrowed as is:
+   * the retain and the matching release at the end are skipped, which is most of what a string or mixed compare paid. */
+  const ScrDyn *a = pa_in, *b = pb_in;
+  bool a_own = false, b_own = false;
+  if (pa_in == NULL || !(scr_dyn_is_prim(pa_in) || pa_in->kind == SCR_DYN_BIG)) {
+    a = scr_dyn_to_primitive(pa_in, SCR_TOPRIM_NUMBER);
+    if (!a) return false;
+    a_own = true;
+  }
+  if (pb_in == NULL || !(scr_dyn_is_prim(pb_in) || pb_in->kind == SCR_DYN_BIG)) {
+    b = scr_dyn_to_primitive(pb_in, SCR_TOPRIM_NUMBER);
+    if (!b) {
+      if (a_own) scr_dyn_release((ScrDyn *)a);
+      return false;
+    }
+    b_own = true;
   }
   bool scr_rel_out = false;
   bool a_big = a->kind == SCR_DYN_BIG, b_big = b->kind == SCR_DYN_BIG;
@@ -5934,17 +5944,25 @@ static bool scr_dyn_rel(const ScrDyn *pa_in, const ScrDyn *pb_in, int op) {
   default: scr_rel_out = c >= 0; break; /* >= */
   }
 scr_rel_done:
-  scr_dyn_release(a);
-  scr_dyn_release(b);
+  if (a_own) scr_dyn_release((ScrDyn *)a);
+  if (b_own) scr_dyn_release((ScrDyn *)b);
   return scr_rel_out;
 }
 
 /* One entry point per operator, so the emitted call needs no synthesized
  * constant argument and both backends map it by name alone. */
-bool scr_dyn_lt(const ScrDyn *a, const ScrDyn *b) { return scr_dyn_rel(a, b, 0); }
-bool scr_dyn_le(const ScrDyn *a, const ScrDyn *b) { return scr_dyn_rel(a, b, 1); }
-bool scr_dyn_gt(const ScrDyn *a, const ScrDyn *b) { return scr_dyn_rel(a, b, 2); }
-bool scr_dyn_ge(const ScrDyn *a, const ScrDyn *b) { return scr_dyn_rel(a, b, 3); }
+/* Number against number is the hot case (MEASURED on the mysql arm: 4.37 M compares at 216 Ir each through ToPrimitive and two retains and
+ * releases). IsLessThan on two numbers is the IEEE comparison itself: a NaN on either side makes every one of the four answer false, and
+ * +0 and -0 compare equal, exactly C's `<`, `<=`, `>`, `>=` on doubles. Every other pair takes the general path above. */
+#define SCR_DYN_REL_ENTRY(name, op, cop) \
+  bool name(const ScrDyn *a, const ScrDyn *b) { \
+    if (a != NULL && b != NULL && a->kind == SCR_DYN_NUM && b->kind == SCR_DYN_NUM) return a->v.num cop b->v.num; \
+    return scr_dyn_rel(a, b, op); \
+  }
+SCR_DYN_REL_ENTRY(scr_dyn_lt, 0, <)
+SCR_DYN_REL_ENTRY(scr_dyn_le, 1, <=)
+SCR_DYN_REL_ENTRY(scr_dyn_gt, 2, >)
+SCR_DYN_REL_ENTRY(scr_dyn_ge, 3, >=)
 
 /* THE typeof table for the native dyn kinds — one list, no allocation.
  * `typeof v` and `typeof v === "object"` are the same question asked two
