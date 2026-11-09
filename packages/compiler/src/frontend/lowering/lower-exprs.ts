@@ -16947,7 +16947,7 @@ export function staticAssertionOperand(L: Lowerer, node: ts.Expression, field: s
       if (obj.type.kind === "dyn") {
         const loc = locOf(expr);
         let key = L.lowerExpr(target.argumentExpression);
-        if (key.type.kind === "f64") key = L.ensureString(key, target.argumentExpression);
+        if (key.type.kind === "f64" || key.type.kind === "dyn") key = L.ensureString(key, target.argumentExpression);
         if (key.type.kind !== "string") {
           L.unsupported("SC1090", target.argumentExpression, "indexing with non-string or non-number keys");
         }
@@ -17163,8 +17163,9 @@ export function staticAssertionOperand(L: Lowerer, node: ts.Expression, field: s
             ? ({ kind: "strLit", value: litKey, type: STRING, loc: locOf(target.argumentExpression) } satisfies IrExpr)
             : L.lowerExpr(target.argumentExpression);
         // Runtime NUMBER keys canonicalize through the JS-exact formatter
-        // (o[n] = v writes o[String(n)] — the number-keyed-signature path).
-        if (key.type.kind === "f64") key = L.ensureString(key, target.argumentExpression);
+        // (o[n] = v writes o[String(n)] — the number-keyed-signature path). An `unknown`/`any` key is ToPropertyKey'd the same way, as
+        // the READ of this record does (a Buffer element's toString() answers `any` when the program's Buffer type is not the compiled one).
+        if (key.type.kind === "f64" || key.type.kind === "dyn") key = L.ensureString(key, target.argumentExpression);
         if (key.type.kind !== "string") {
           L.unsupported("SC1090", target.argumentExpression, "indexing records with non-string or non-number keys");
         }

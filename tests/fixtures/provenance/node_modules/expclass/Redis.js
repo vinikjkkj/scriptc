@@ -51,6 +51,13 @@ COMMANDS.forEach((name) => {
         return Promise.resolve(keys.map((k) => (k === "none" ? null : Buffer.from(k + "!"))));
     };
 });
+// A script command answering a flat promise of key/value buffers (ioredis' evalBuffer), installed on the prototype.
+["evalBuffer"].forEach((name) => {
+    Redis.prototype[name] = function (script, numKeys, ...rest) {
+        this.calls++;
+        return Promise.resolve(numKeys === 0 ? [] : rest.slice(0, numKeys).flatMap((k) => [Buffer.from("field:" + k), Buffer.from("val:" + script)]));
+    };
+});
 ["sadd"].forEach((name) => {
     Pipeline.prototype[name] = function (key, ...members) {
         this.queue.push([name, key + ":" + members.join("+")]);
