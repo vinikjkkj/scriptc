@@ -25,7 +25,7 @@ import { TIMER_GLOBAL_VALUE_NAMES, bigStaticHolderSlotFence, builtinFnValueOf, b
 import { lowerNavigatorProperty, requireFnValueOf, requireMemberFence, valuesCountdown, voidCountdown } from "./lower-builtins.js";
 import { funcObjectPropOf } from "./lower-fnprops.js";
 import { recordKeyReadRow, recordNarrowBridgeRow } from "./keyread-census.js";
-import { cjsClassExprWholeExportOf, cjsExportsGetterDefineOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
+import { cjsClassExprWholeExportOf, dynReplaceOf, cjsExportsGetterDefineOf, cjsExportAssignmentOf, cjsExportDiscardReason, isCjsExportTableLiteral, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isNodeEsmFile, locOf } from "../program.js";
 import { DNS_NATIVE_FN_VALUES, absentGlobalMemberValue, absentProcessMemberValue, absentRecordMemberValue, ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, objectStaticFnValueOf, stdlibExistenceTestOf, stringMethodFnValueOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf, stdlibHandleObjectTypeOf, stdlibHandleTypeOfAnswersObject, stdlibHandleDeclaresMember } from "./surfaces.js";
 import { UNSUPPORTED, assertionDropsMembersDiag, assertionOverflowsMembersDiag, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { PoisonError, dynUndefinedExpr, jsFuncValueNameOf, jsFuncValueSourceOf, neverTaintedJsType, nodeThrowExpr, own } from "./lowerer.js";
@@ -1907,7 +1907,12 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // {q: 3}); exports.q` printed undefined where Node prints 3). Refuse instead.
       // An element-access base (`exports[k]`) keeps the generic element fence: this
       // identifier is not the value that fence names, so its refusal would relabel it.
+      // A file whose members are attached to the old export object AND whose export is then replaced by a run-time value (debug's
+      // `module.exports = require('./common')(exports)`) keeps those members in the export RECORD (every bare `exports.f` write is a record
+      // write), so the `exports` value that crosses into the callee is the record: the module's live bag would hand over an empty object.
       if (ts.isIdentifier(expr) && expr.text === "exports" && isCjsJsFile(expr.getSourceFile()) && liveExportsOf(L, expr.getSourceFile()) && isValueUse(expr) && L.resolveLocal(expr) === null) {
+        const recLive = dynReplaceOf(expr.getSourceFile()) !== null ? cjsExportRecordOf(L, expr.getSourceFile()) : null;
+        if (recLive !== null) return cjsExportRecordRef(recLive, loc);
         return liveBagRef(L, expr.getSourceFile(), loc, "exports");
       }
       if (ts.isIdentifier(expr) && expr.text === "exports" && !ts.isElementAccessExpression(expr.parent) && isCjsJsFile(expr.getSourceFile()) && L.resolveLocal(expr) === null) {

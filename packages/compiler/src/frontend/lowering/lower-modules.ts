@@ -4150,7 +4150,8 @@ function activationsOf(L: Lowerer, sf: ts.SourceFile): Map<ts.Node, number> {
           // The old export object's record is created after the statement that
           // makes its last first write (cjs-export-record.ts).
           const recC = cjsExportRecordOf(L, sf);
-          if (recC !== null && recC.createAfter === si) body.push(...cjsExportRecordCreate(recC, locOf(stmt)));
+          // createAfter indexes the file's own statement list; `stmts` has the hoisted declarations taken out, so `si` is not that index.
+          if (recC !== null && recC.createAfter === sf.statements.indexOf(stmt)) body.push(...cjsExportRecordCreate(recC, locOf(stmt)));
         }
         const bindTo = stmt.getEnd() + 1;
         body.push(...expandoBindStmts(L, sf, bindFrom, bindTo));
