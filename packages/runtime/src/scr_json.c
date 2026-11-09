@@ -16209,6 +16209,10 @@ void *scr_recsrc_slot(const ScrDyn *slot, size_t idx) {
   const ScrRecSrc *r = scr_recsrc_of(slot);
   return (char *)r->src + r->map->off[idx];
 }
+/* A field the SOURCE struct does not hold (a class METHOD of a class-sourced view: the map's offset is negative) lives in the view record's own slot, which the caller names. */
+void *scr_recsrc_slot_or(const ScrDyn *slot, size_t idx, void *own) {
+  return scr_recsrc_slot_or_i(slot, idx, own);
+}
 void scr_recsrc_unown(const ScrDyn *slot, size_t idx) {
   const ScrRecSrc *r = scr_recsrc_of(slot);
   if (r->map->own_off >= 0 && r->map->own_bit[idx]) ((unsigned char *)r->src + r->map->own_off)[r->map->own_byte[idx]] &= (unsigned char)~r->map->own_bit[idx];

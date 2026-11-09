@@ -39,6 +39,7 @@ import { nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID
 import { INTERNAL_SLOT_WANT_TEXT } from "../emission/emit-walkers.js";
 import { mangleAsyncSpawn, mangleClassRelease, mangleClassRetain, mangleClassStruct, mangleFnClosure, mangleFunction, mangleRecordNew, mangleRecordRelease, mangleRecordStruct } from "../mangle.js";
 import { dynMemberRows, dynStaticTable, type DynMemberClass } from "../dyn-members.js";
+import { classFieldIndex, type LlClassMeta } from "./classes.js";
 import { KINDGATE_WIDE_KINDS, kindgateJsvalLane, soleRecordArmWithFuncMember, kindgateFuncLane, kindgateInstanceLane, kindgateWideLane, readKindgateDials } from "../kindgate.js";
 import { BlockBuilder } from "./blocks.js";
 import { keyIxSlotIndex, keyListSlotIndex, arrNewCall, elemAccess, llFieldType, ownMaskSlotIndex, releaseSym, srcProtoSlotIndex, toStrSlotIndex, traceAdapter, traceArg, vAdapters, viewSlotIndex } from "./shapes.js";
@@ -1103,24 +1104,31 @@ export class LlDyn {
     const name = `sc_rsm_${this.recSrcMapNames.size}`;
     this.recSrcMapNames.set(key, name);
     const host = this.host;
-    const from = host.recordsById.get(srcShapeId);
+    // A CLASS source ("%class:<Name>", emit-walkers.ts recSrcMapC's twin): the instance struct's data fields, -1 for a method slot.
+    const classSrc = srcShapeId.startsWith("%class:") ? srcShapeId.slice(7) : undefined;
+    const classMeta = classSrc !== undefined ? host.classMetaFor(classSrc) : undefined;
+    const from = classSrc === undefined ? host.recordsById.get(srcShapeId) : undefined;
     const to = host.recordsById.get(shapeId);
-    if (!from || !to) throw new Error(`llvm emitter bug: struct view over unknown shapes ${key}`);
-    const st = mangleRecordStruct(srcShapeId);
-    const srcT: IrType = { kind: "record", shapeId: srcShapeId };
+    if ((classSrc === undefined && !from) || (classSrc !== undefined && classMeta === undefined) || !to) throw new Error(`llvm emitter bug: struct view over unknown shapes ${key}`);
+    const st = classSrc !== undefined ? mangleClassStruct(classSrc) : mangleRecordStruct(srcShapeId);
+    const srcT: IrType = classSrc !== undefined ? { kind: "object", className: classSrc } : { kind: "record", shapeId: srcShapeId };
     const { retain, release } = vAdapters(host, srcT);
     const boxable = canConvertToDyn(srcT, (id) => host.recordsById.get(id), (id) => host.unionsById.get(id));
     const conv = boxable ? this.toDynHelper(srcT) : "";
     host.declare(`declare ptr @scr_dyn_origin_mark(ptr, ptr, ptr, ptr, ptr)`);
     const offOf = (idx: number): string => `i64 ptrtoint (ptr getelementptr inbounds (%${st}, ptr null, i64 0, i32 ${idx}) to i64)`;
     const offs = to.fields.map((f) => {
-      const i = from.fields.findIndex((x) => x.name === f.name);
+      if (classMeta !== undefined) {
+        if (!classMeta.def.fields.some((x) => x.name === f.name)) return "i64 -1";
+        return offOf(classFieldIndex(classMeta as unknown as LlClassMeta, f.name).index);
+      }
+      const i = from!.fields.findIndex((x) => x.name === f.name);
       if (i < 0) throw new Error(`llvm emitter bug: struct view field ${f.name} missing from ${srcShapeId}`);
       return offOf(i + 1);
     });
-    const bits = to.fields.map((f) => maskKeyBit(from, f.name));
+    const bits = to.fields.map((f) => (from === undefined ? null : maskKeyBit(from, f.name)));
     const n = to.fields.length;
-    const ownOff = from.ownmask === true ? offOf(ownMaskSlotIndex(from)) : "i64 -1";
+    const ownOff = from !== undefined && from.ownmask === true ? offOf(ownMaskSlotIndex(from)) : "i64 -1";
     this.defs.push(
       `@${name}_off = internal constant [${Math.max(n, 1)} x i64] [${n === 0 ? "i64 0" : offs.map((o) => o).join(", ")}]`,
       `@${name}_ob = internal constant [${Math.max(n, 1)} x i8] [${n === 0 ? "i8 0" : bits.map((x) => `i8 ${x ? x.byte : 0}`).join(", ")}]`,

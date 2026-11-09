@@ -4130,6 +4130,23 @@ function validateFunction(
       case "recordSrcView": {
         checkExpr(e.src);
         const to = records.get(e.shapeId);
+        // A CLASS source is spelled "%class:<Name>": its data fields are the instance struct's, its methods have no source slot.
+        if (e.srcShapeId.startsWith("%class:")) {
+          const cls = classes.get(e.srcShapeId.slice(7));
+          if (!to || !cls) err(`recordSrcView over an undeclared class source "${e.srcShapeId}" -> "${e.shapeId}"`, e.loc);
+          else {
+            expectType(e.src, { kind: "object", className: cls.name }, "recordSrcView class source");
+            if (to.view !== true) err(`recordSrcView into shape ${e.shapeId}, which carries no view member`, e.loc);
+            for (const f of to.fields) {
+              const cf = cls.fields.find((x) => x.name === f.name);
+              if (cf !== undefined) {
+                if (typeKey(cf.type) !== typeKey(f.type)) err(`recordSrcView: class field ${f.name} changes type`, e.loc);
+              } else if (f.type.kind !== "func") err(`recordSrcView: ${cls.name} has no field ${f.name} and the member is not a method slot`, e.loc);
+            }
+            expectType(e, { kind: "record", shapeId: e.shapeId }, "recordSrcView result");
+          }
+          break;
+        }
         const from = records.get(e.srcShapeId);
         if (!to || !from) err(`recordSrcView over an undeclared shape "${e.srcShapeId}" -> "${e.shapeId}"`, e.loc);
         else {

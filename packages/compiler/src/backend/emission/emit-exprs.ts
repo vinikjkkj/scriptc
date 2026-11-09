@@ -2676,9 +2676,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         const idx = shape ? shape.fields.findIndex((x) => x.name === e.field) : -1;
         if (!shape || idx < 0) throw new Error(`emitter bug: ${e.kind} of unknown field ${e.shapeId}.${e.field}`);
         const ft = shape.fields[idx]!.type;
-        const h = `sc_t${E.tempCounter++}`;
-        E.line(`const ScrRecSrc *${h} = scr_recsrc_of(${obj.name}->${VIEW_MEMBER});`);
-        const slot = `(*(${cType(ft)}*)((char *)${h}->src + ${h}->map->off[${idx}]))`;
+        // A field the source struct does not hold (a class method of a class-sourced view, offset < 0) is the record's own slot.
+        const slot = `(*(${cType(ft)}*)scr_recsrc_slot_or_i(${obj.name}->${VIEW_MEMBER}, ${idx}, (void *)&${obj.name}->${mangleField(e.field)}))`;
         if (e.kind === "recordSrcGet") return E.newTemp(e.type, isRefCounted(ft) ? retainCallC(ft, slot) : slot);
         const v = E.emitExpr(e.value);
         if (isRefCounted(v.type)) {

@@ -9584,9 +9584,12 @@ class LlEmitter {
         B.line(`${vp} = getelementptr inbounds %${mangleRecordStruct(e.shapeId)}, ptr ${obj.name}, i64 0, i32 ${viewSlotIndex(vshape)} ; <view>`);
         const vslot = B.tmp();
         B.line(`${vslot} = load ptr, ptr ${vp}`);
-        this.declare(`declare ptr @scr_recsrc_slot(ptr, i64)`);
+        // A field the source struct does not hold (a class method of a class-sourced view, offset < 0) is the record's own slot.
+        this.declare(`declare ptr @scr_recsrc_slot_or(ptr, i64, ptr)`);
+        const ownp = B.tmp();
+        B.line(`${ownp} = getelementptr inbounds %${mangleRecordStruct(e.shapeId)}, ptr ${obj.name}, i64 0, i32 ${idx + 1} ; own slot of ${e.field}`);
         const ptr = B.tmp();
-        B.line(`${ptr} = call ptr @scr_recsrc_slot(ptr ${vslot}, i64 ${idx})`);
+        B.line(`${ptr} = call ptr @scr_recsrc_slot_or(ptr ${vslot}, i64 ${idx}, ptr ${ownp})`);
         if (e.kind === "recordSrcGet") {
           const v = this.loadField(ptr, ft);
           if (isRefCounted(e.type)) return this.own({ name: this.retainValue(v, e.type), type: e.type });

@@ -2917,7 +2917,7 @@ export type IrStmt =
    * `delete r.f` of an optional member: the slot takes the undefined arm AND
    * the field's own-key bit CLEARS (a plain write sets it - [[Set]] creates
    * an own property, `r.f = undefined` included). */
-  | { kind: "recordSet"; obj: IrExpr; shapeId: string; field: string; value: IrExpr; unset?: true; loc: SrcLoc }
+  | { kind: "recordSet"; obj: IrExpr; shapeId: string; field: string; value: IrExpr; unset?: true; own?: true; loc: SrcLoc }
   /** Dynamic-keyed record write `r[k] = v` — index-signature shapes only.
    * `value` has the index signature's value type (dyn included). Declared
    * keys write THROUGH to the struct slot: a dyn value validates against
@@ -8189,7 +8189,7 @@ export type IrExpr =
    * exactly as a recordSet of the source would make it. recordSrcView builds a record of `shapeId` (a view-granted shape) that views
    * `src`, a record of `srcShapeId`; every field of the target exists in the source at the identical type. */
   | { kind: "recordHasSrc"; obj: IrExpr; shapeId: string; type: IrType; loc: SrcLoc }
-  | { kind: "recordSrcGet"; obj: IrExpr; shapeId: string; field: string; type: IrType; loc: SrcLoc }
+  | { kind: "recordSrcGet"; obj: IrExpr; shapeId: string; field: string; own?: true; type: IrType; loc: SrcLoc }
   | { kind: "recordSrcSet"; obj: IrExpr; shapeId: string; field: string; value: IrExpr; unset?: true; type: IrType; loc: SrcLoc }
   | { kind: "recordSrcView"; src: IrExpr; srcShapeId: string; shapeId: string; type: IrType; loc: SrcLoc }
   /** Does `obj`'s SOURCE [[Prototype]] chain carry `key`? — the `in`

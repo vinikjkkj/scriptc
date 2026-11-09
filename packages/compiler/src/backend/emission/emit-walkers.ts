@@ -4273,14 +4273,18 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     if (memo !== undefined) return memo;
     const name = `sc_rsm_${E.recSrcMaps.size}`;
     E.recSrcMaps.set(key, name);
-    const from = E.recordsById.get(srcShapeId);
+    // A CLASS source ("%class:<Name>"): the instance struct's data fields at their own offsets, a method slot (a target field the
+    // class holds no field for) at -1, no own-key mask.
+    const classSrc = srcShapeId.startsWith("%class:") ? (E.mod.classes ?? []).find((c) => c.name === srcShapeId.slice(7)) : undefined;
+    if (srcShapeId.startsWith("%class:") && classSrc === undefined) throw new Error(`emitter bug: struct view over unknown class ${srcShapeId}`);
+    const from = classSrc === undefined ? E.recordsById.get(srcShapeId) : undefined;
     const to = E.recordsById.get(shapeId);
-    if (!from || !to) throw new Error(`emitter bug: struct view over unknown shapes ${key}`);
-    const st = mangleRecordStruct(srcShapeId);
-    const srcT: IrType = { kind: "record", shapeId: srcShapeId };
+    if ((classSrc === undefined && !from) || !to) throw new Error(`emitter bug: struct view over unknown shapes ${key}`);
+    const st = classSrc !== undefined ? mangleClassStruct(classSrc.name) : mangleRecordStruct(srcShapeId);
+    const srcT: IrType = classSrc !== undefined ? { kind: "object", className: classSrc.name } : { kind: "record", shapeId: srcShapeId };
     const { retain, release } = vAdapters(srcT);
     const tk = cStringLiteral(Buffer.from(typeKey(srcT), "utf8"));
-    const bits = to.fields.map((f) => ownMaskKeyBit(from, f.name));
+    const bits = to.fields.map((f) => (from === undefined ? null : ownMaskKeyBit(from, f.name)));
     // A source that cannot become a dynamic value (a member that is a platform object) has no copy to hand out: the map carries
     // no converters and the runtime refuses the surface that asks for one.
     const boxable = canConvertToDyn(srcT, (id) => E.recordsById.get(id), (id) => E.unionsById.get(id));
@@ -4289,14 +4293,14 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
       `static const ScrRecSrcMap ${name};`,
     );
     E.walkerDefs.push(
-      `static const long long ${name}_off[] = { ${to.fields.map((f) => `(long long)offsetof(${st}, ${mangleField(f.name)})`).join(", ") || "0"} };`,
+      `static const long long ${name}_off[] = { ${to.fields.map((f) => (classSrc !== undefined && !classSrc.fields.some((x) => x.name === f.name) ? "-1" : `(long long)offsetof(${st}, ${mangleField(f.name)})`)).join(", ") || "0"} };`,
       `static const unsigned char ${name}_ob[] = { ${bits.map((x) => (x ? x.byte : 0)).join(", ") || "0"} };`,
       `static const unsigned char ${name}_obit[] = { ${bits.map((x) => (x ? x.bit : 0)).join(", ") || "0"} };`,
       ...(boxable ? [
         `static ScrDyn *${name}_snap(void *p) { return ${toDynExprC(E, srcT, `(${st} *)p`)}; }`,
         `static ScrDyn *${name}_cross(void *p) { return ${originMarkC(E, srcT, toDynExprC(E, srcT, `(${st} *)p`), "p", tk, retain, release)}; }`,
       ] : []),
-      `static const ScrRecSrcMap ${name} = { ${to.fields.length}, ${name}_off, ${from.ownmask === true ? `(long long)offsetof(${st}, ${OWNMASK_MEMBER})` : "-1"}, ${name}_ob, ${name}_obit, ${retain}, ${release}, ${boxable ? `${name}_snap, ${name}_cross` : "NULL, NULL"} };`,
+      `static const ScrRecSrcMap ${name} = { ${to.fields.length}, ${name}_off, ${from !== undefined && from.ownmask === true ? `(long long)offsetof(${st}, ${OWNMASK_MEMBER})` : "-1"}, ${name}_ob, ${name}_obit, ${retain}, ${release}, ${boxable ? `${name}_snap, ${name}_cross` : "NULL, NULL"} };`,
       `static ${mangleRecordStruct(shapeId)} *${name}_view(void *p) { /* the one view of this source in this shape */`,
       `  ${mangleRecordStruct(shapeId)} *r = (${mangleRecordStruct(shapeId)} *)scr_recsrc_find(p, &${name});`,
       `  if (r != NULL) return ${vAdapters({ kind: "record", shapeId }).retain}((void *)r);`,
