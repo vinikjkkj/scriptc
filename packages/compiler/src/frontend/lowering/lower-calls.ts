@@ -519,6 +519,36 @@ export interface GenericInstance {
     }
   }
 
+/** `(x as unknown as { m: (...args: unknown[]) => R }).m(args)` over a class instance or a dynamic value: the program asserts, through `unknown`, that x has a
+ * callable member m (zapo's redis stores reach ioredis' mset/evalBuffer this way), so the call is the call of m on the object x, by name, exactly as the
+ * assertion-free `x.m(args)` would run it. The receiver boxes to the dynamic object (identity kept), the arguments pack with their spreads in source order,
+ * and the answer converts to the call's checked type (a Promise result adopts the dynamic promise). Null for any other receiver shape. */
+function lowerCastReceiverMethodCall(L: Lowerer, call: ts.CallExpression): IrExpr | null {
+  const access = call.expression;
+  if (!ts.isPropertyAccessExpression(access) || access.questionDotToken !== undefined || call.questionDotToken !== undefined) return null;
+  if (L.dynamic) return null;
+  let rn: ts.Expression = access.expression;
+  let throughUnknown = false;
+  for (;;) {
+    if (ts.isParenthesizedExpression(rn) || ts.isNonNullExpression(rn)) rn = rn.expression;
+    else if (ts.isAsExpression(rn)) {
+      if (rn.type.kind === ts.SyntaxKind.UnknownKeyword) throughUnknown = true;
+      rn = rn.expression;
+    } else break;
+  }
+  if (!throughUnknown) return null;
+  const innerT = L.mapTypeOf(L.typeOf(rn));
+  if (innerT?.kind !== "object" && innerT?.kind !== "dyn") return null;
+  const loc = locOf(call);
+  const recvRaw = L.lowerExpr(rn);
+  if (recvRaw.type.kind !== "object" && recvRaw.type.kind !== "dyn") return null;
+  const recv: IrExpr = recvRaw.type.kind === "dyn" ? recvRaw : internalBox(L, { kind: "dynFrom", value: recvRaw, type: DYN, loc });
+  const callE = dynInvokeWithSpread(L, call, recv, access);
+  const want = L.mapTypeOf(L.typeOf(call));
+  if (want === null || want.kind === "dyn") return callE;
+  return (want.kind === "promise" ? L.adoptDynIntoTypedPromise(callE, want) : null) ?? L.coerceToExpected(callE, want);
+}
+
 /** `recv.m(args)` where `m` is named only by a declaration file while the receiver's compiled class chain owns a run-time
  * prototype table (lower-prototab.ts): the member is whatever the program's computed prototype writes stored under that name.
  * The call reads the table (the receiver's class chain, nearest first) and runs the stored function with the receiver as
@@ -6786,6 +6816,10 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       if (ts.isPropertyAccessExpression(expr.expression) && L.chainHandled.has(expr.expression)) {
         const served = lowerDynReceiverMethodCall(L, expr, expr.expression);
         if (served) return served;
+      }
+      {
+        const viaCast = lowerCastReceiverMethodCall(L, expr);
+        if (viaCast !== null) return viaCast;
       }
       L.unsupported("SC1090", expr, `method calls like '${expr.expression.getText()}'`);
     }
