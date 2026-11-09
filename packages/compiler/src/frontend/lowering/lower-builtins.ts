@@ -48,7 +48,7 @@ import { dynBuiltinFnValueOf } from "./lower-fnvalue.js";
 import { registerHttpClientFnBinding } from "./lower-server.js";
 import { lowerDateLocaleFormat } from "./lower-numfmt.js";
 import { dnsAnswerUnion } from "./lower-dgram.js";
-import { STATS_TYPE_INDEX, KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, CHILD_T, CHILDSTREAM_T, DYN, F64, FSWATCHER_T, PROCSTREAM_T, IrExpr, IrFunction, IrLibFn, IrLocal, IrStmt, IrType, JSVAL, NULL_T, SEARCH_PARAMS_T, SPAWNRES_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, DATE_T, canBoxFuncIntoDyn, canConvertToDyn, funcOf, isUnitType, typeEquals, typeKey } from "../../ir/nodes.js";
+import { STATS_TYPE_INDEX, KEYOBJ, HASH_T, HMAC_T, CIPHER_T, DECIPHER_T, BOOL, BYTES_U8, CAUGHT, CHILD_T, CHILDSTREAM_T, DYN, F64, FSWATCHER_T, PROCSTREAM_T, IrExpr, IrFunction, IrLibFn, IrLocal, IrStmt, IrType, JSVAL, NULL_T, SEARCH_PARAMS_T, SPAWNRES_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, DATE_T, canBoxFuncIntoDyn, canConvertToDyn, funcOf, isUnitType, typeEquals, typeKey, BIGINT } from "../../ir/nodes.js";
 import { FN_CTOR_EXPORT_GLOBALS, jsonModuleOfRequire } from "./lower-modules.js";
 import { requireDepValueOf } from "./lower-island.js";
 import { lowerProvenRuntimeRequire } from "./lower-require-dead.js";
@@ -9146,6 +9146,23 @@ let digestInputValueDispatches = 0;
     // because the RECEIVER here is `process.memoryUsage` — the record
     // form's function object — and stdlibGlobalMember only recognises a
     // direct member of `process`.
+    // process.hrtime.bigint(): the nanoseconds of the same monotonic clock process.hrtime() reads (an arbitrary origin, as Node's), as a bigint.
+    if (
+      access.name.text === "bigint" &&
+      ts.isPropertyAccessExpression(access.expression) &&
+      L.stdlibGlobalMember(access.expression, "process") === "hrtime"
+    ) {
+      if (call.arguments.length !== 0) {
+        L.noLowering(`process.hrtime.bigint with ${call.arguments.length} arguments`, call);
+      }
+      const loc = locOf(call);
+      const ns: IrExpr = {
+        kind: "libCall", fn: "math.floor",
+        args: [{ kind: "bin", op: "*", left: { kind: "libCall", fn: "perf.now", args: [], type: F64, loc }, right: { kind: "numLit", value: 1e6, type: F64, loc }, type: F64, loc }],
+        type: F64, loc,
+      };
+      return { kind: "libCall", fn: "big.fromF64", args: [ns], type: BIGINT, loc };
+    }
     if (
       access.name.text === "rss" &&
       ts.isPropertyAccessExpression(access.expression) &&

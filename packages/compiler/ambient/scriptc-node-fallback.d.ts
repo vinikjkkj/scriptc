@@ -206,8 +206,8 @@ declare var process: {
   nextTick(callback: (...args: any[]) => void, ...args: any[]): void;
   /* The process introspection statics — Node's shapes and units. */
   uptime(): number;
-  /* The monotonic [seconds, nanoseconds] clock; the diff and bigint forms are not served. */
-  hrtime(): [number, number];
+  /* The monotonic [seconds, nanoseconds] clock; the diff form is not served; .bigint() answers the same clock in nanoseconds. */
+  hrtime: { (): [number, number]; bigint(): bigint };
   /* Whether `process` has the member: the environment probes ask this. */
   getBuiltinModule(id: string): any;
   cpuUsage(previousValue?: NodeJS.CpuUsage): NodeJS.CpuUsage;
