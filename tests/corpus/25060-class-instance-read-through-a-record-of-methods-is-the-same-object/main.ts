@@ -54,3 +54,18 @@ console.log(rs3.map((x) => x.exec()).join(","), rs3[1]!.n);
 const plain: R = { n: 1, name: "lit", exec() { return 11; }, getName() { return "lit!"; } };
 const mixed: R[] = [plain, r, rs];
 console.log(mixed.map((x) => x.getName()).join("|"), mixed.map((x) => x.n).join(","));
+
+// A method that mutates the instance: the record's data member must follow it.
+interface Counter { n: number; label: string; inc(): void; }
+class Tick {
+  n = 0;
+  label = "t";
+  inc(): void { this.n++; this.label = this.label + "+"; }
+}
+const tick = new Tick();
+const rc: Counter = tick;
+rc.inc();
+rc.inc();
+console.log(rc.n, tick.n, rc.label, tick.label);
+tick.inc();
+console.log(rc.n, rc.label);

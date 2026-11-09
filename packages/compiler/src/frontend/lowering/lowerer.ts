@@ -796,6 +796,14 @@ const classViewNoted = new Set<string>();
 /** viewShapeKey of every record shape a CHECKED CAST or dynamic hand-off granted a view (noteViewCast): those records may carry a dynamic-object view in
  * their view slot. A class-sourced view target outside this set (and outside recordViewShapes) is read with the one-test fast path. */
 const objectViewKeys = new Set<string>();
+/** Field names some function OTHER than a constructor writes (a typed field or record write, a keyed dynamic write with that literal key) and the flag for a write whose
+ * name is not known (a computed key, assign, defineProperty, reflect, the embedded engine). Discovery's census fills them (noteDynBoxEdges) and they persist across
+ * its reruns, so the emit pass decides on the complete set. A class -> record view (classViewHelperFor) is only worth its per-access cost when the program can
+ * observe that the record is not a copy: when some mirrored data field is written after construction. Names a pair declined for lack of a writer are in
+ * classViewDeclined: a writer found later reruns discovery. */
+const classViewWrites = new Set<string>();
+let classViewWriteAny = false;
+const classViewDeclined = new Set<string>();
 
 export function lowerToIr(
   program: ts.Program,
@@ -817,6 +825,9 @@ export function lowerToIr(
   structViewDeniedKeys.clear();
   classViewNoted.clear();
   objectViewKeys.clear();
+  classViewWrites.clear();
+  classViewWriteAny = false;
+  classViewDeclined.clear();
   unifiedPairKeys.clear();
   widthPairsSettled = false;
   viewConversionAttempted = false;
@@ -5601,6 +5612,17 @@ export class Lowerer {
       else if (key !== undefined && key.kind === "numLit") return;
       else this.dynMemberAny = true;
     };
+    const inCtor = fn.name.endsWith(".constructor");
+    const noteClassWrite = (name: string): void => {
+      if (classViewWrites.has(name)) return;
+      classViewWrites.add(name);
+      if (classViewDeclined.has(name)) viewConversionNoted = true;
+    };
+    const noteClassWriteAny = (): void => {
+      if (classViewWriteAny) return;
+      classViewWriteAny = true;
+      if (classViewDeclined.size > 0) viewConversionNoted = true;
+    };
     const walk = (n: unknown): void => {
       if (n === null || typeof n !== "object") return;
       if (Array.isArray(n)) {
@@ -5608,6 +5630,23 @@ export class Lowerer {
         return;
       }
       const o = n as { kind?: unknown; value?: { type?: IrType } };
+      if (!inCtor) {
+        const w = o as unknown as { field?: unknown; own?: unknown; fn?: unknown; args?: IrExpr[] };
+        if (o.kind === "fieldSet" || o.kind === "fieldIncDec" || (o.kind === "recordSet" && w.own !== true)) {
+          if (typeof w.field === "string") noteClassWrite(w.field);
+        } else if (o.kind === "recordKeySet") {
+          noteClassWriteAny();
+        } else if (o.kind === "libCall" && typeof w.fn === "string") {
+          const wf = w.fn;
+          if (wf === "dyn.keySet" || wf === "dyn.keySetSloppy" || wf === "dyn.keyDelete" || wf === "dyn.keyDeleteSloppy") {
+            const k = w.args?.[1] as { kind?: string; value?: unknown } | undefined;
+            if (k !== undefined && k.kind === "strLit" && typeof k.value === "string") noteClassWrite(k.value);
+            else noteClassWriteAny();
+          } else if (wf.startsWith("island.") || wf.startsWith("dyn.reflect") || wf.startsWith("dyn.defineProp") || wf === "dyn.expandoBind" || wf === "dyn.assign" || wf === "dyn.assignAll" || wf.startsWith("dyn.objCreate") || wf.startsWith("sym.")) {
+            noteClassWriteAny();
+          }
+        }
+      }
       // The member names untyped code uses (method calls, reads, destructured keys, `in`, hasOwn, writes): the roots of a class
       // that is only HELD in a field of a boxed class. A computed key, or code in the embedded engine, names them all.
       if (o.kind === "dynInvoke") {
@@ -10166,6 +10205,13 @@ export class Lowerer {
       else if (!("src" in l) || !typeEquals(l.src, f.type)) return null;
     }
     if (methods === 0) return null;
+    // The copy is observationally identical until some mirrored data member is written after construction: then, and only then, the
+    // record must be the instance.
+    const dataNames = to.fields.filter((f) => { const l = plan.get(f.name); return l !== undefined && "src" in l; }).map((f) => f.name);
+    if (!classViewWriteAny && !dataNames.some((n) => classViewWrites.has(n))) {
+      if (this.onEdge !== null) for (const n of dataNames) classViewDeclined.add(n);
+      return null;
+    }
     const key = viewShapeKey(to.fields, to.indexValue);
     if (structViewDeniedKeys.has(key)) return null;
     const noteKey = `${className}->${key}`;
