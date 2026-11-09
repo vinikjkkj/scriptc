@@ -442,10 +442,10 @@ export function dynMemberTable(
       opaque = true;
       continue;
     }
-    // An async or generator method answers a ScrPromise/ScrGen, which is
-    // not a dyn value. Skipped rather than mis-boxed: claiming otherwise
-    // is exactly the silent wrong answer this table exists to remove.
-    if (fn.async === true || fn.generator !== undefined) {
+    // A generator method answers a ScrGen, which is not a dyn value. Skipped rather than mis-boxed: claiming otherwise
+    // is exactly the silent wrong answer this table exists to remove. An async method answers a ScrPromise, which boxes
+    // by reference (SCR_DYN_PROMISE) like any promise the converters cross, so it is a row.
+    if (fn.generator !== undefined) {
       opaque = true;
       continue;
     }

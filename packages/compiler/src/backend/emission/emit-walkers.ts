@@ -10,7 +10,7 @@ import { rcSitesRequested } from "./emitter.js";
 import { moduleFuncLaneShapes, moduleUsesEngineFn, accessorKeyOrderOf, accessorSlotProp, shapeHasAccessorSlots, VOID, arrayTypeHasLiveView, bytesAliasOnExtract, canConvertToDyn, canDynCheckTo, moduleUsesDynView, moduleInstanceLaneNeedsKg, moduleUsesInstanceRecordLane } from "../../ir/nodes.js";
 import { CLASS_PROPS_FIELD, EVAL_STATIC_CLASSES, moduleUsesInspColors, dynNeverArm, dynNeverIn, armDiscrimLits, dynErrorClassKind, isDynErrorClass, canAdaptDynFuncTo, dynRestApplyable, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, UNION_ARM_JS_OBJECT_KINDS, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
-import { mangleClassStruct, mangleField, mangleFunction, mangleFnClosure, mangleRecordNew, mangleRecordRelease, mangleRecordStruct } from "../mangle.js";
+import { mangleAsyncSpawn, mangleClassStruct, mangleField, mangleFunction, mangleFnClosure, mangleRecordNew, mangleRecordRelease, mangleRecordStruct } from "../mangle.js";
 import type { ClassMeta } from "./emit-shapes.js";
 import { RUNTIME_EMITTER_CLASS as RUNTIME_EMITTER_CLASS_W } from "../../ir/nodes.js";
 import { isIntegerKeyName } from "../../ir/nodes.js";
@@ -285,8 +285,10 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
       // its `this` parameter exactly as a constructor does, and the box
       // still holds its own reference afterwards.
       const recv = recvT === null ? "" : retainCallC(recvT, `((${recvT.className === RUNTIME_EMITTER_CLASS_W ? "ScrEmitter" : mangleClassStruct(recvT.className)} *)o)`);
-      const callee = mangleFunction(fn.name);
-      const ret = fn.returnType;
+      // An async method is entered through its spawn wrapper, which answers the promise the body settles (the return type the
+      // body declares is the promise's payload); the promise boxes by reference like any promise crossing into dyn.
+      const callee = fn.async === true ? mangleAsyncSpawn(fn.name) : mangleFunction(fn.name);
+      const ret: IrType = fn.async === true ? { kind: "promise", inner: fn.returnType } : fn.returnType;
       const d: string[] = [];
       if (row.kind === "accessor") {
         E.walkerProtos.push(`${E.link}ScrDyn *${sym}(void *o); /* member get ${className}.${row.name} (accessor) */`);

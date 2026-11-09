@@ -37,7 +37,7 @@ import { EVAL_STATIC_CLASSES } from "../../ir/nodes.js";
 import { isIntegerKeyName } from "../../ir/nodes.js";
 import { nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit as maskKeyBit } from "../../ir/nodes.js";
 import { INTERNAL_SLOT_WANT_TEXT } from "../emission/emit-walkers.js";
-import { mangleClassRelease, mangleClassRetain, mangleClassStruct, mangleFnClosure, mangleFunction, mangleRecordNew, mangleRecordRelease, mangleRecordStruct } from "../mangle.js";
+import { mangleAsyncSpawn, mangleClassRelease, mangleClassRetain, mangleClassStruct, mangleFnClosure, mangleFunction, mangleRecordNew, mangleRecordRelease, mangleRecordStruct } from "../mangle.js";
 import { dynMemberRows, dynStaticTable, type DynMemberClass } from "../dyn-members.js";
 import { KINDGATE_WIDE_KINDS, kindgateJsvalLane, soleRecordArmWithFuncMember, kindgateFuncLane, kindgateInstanceLane, kindgateWideLane, readKindgateDials } from "../kindgate.js";
 import { BlockBuilder } from "./blocks.js";
@@ -5919,8 +5919,9 @@ export class LlDyn {
       // `o` and the function takes only the checked arguments).
       const isStatic = row.isStatic === true;
       const recvT = isStatic ? null : (fn.params[0]!.type as IrType & { kind: "object" });
-      const callee = `@${mangleFunction(fn.name)}`;
-      const ret = fn.returnType;
+      // An async method is entered through its spawn wrapper (the C twin's rule): it answers the promise the body settles.
+      const callee = `@${fn.async === true ? mangleAsyncSpawn(fn.name) : mangleFunction(fn.name)}`;
+      const ret: IrType = fn.async === true ? { kind: "promise", inner: fn.returnType } : fn.returnType;
       const retTy = ret.kind === "void" ? "void" : this.valTy(ret);
       const B = new BlockBuilder();
       // The receiver is RETAINED into the call: a compiled method consumes
