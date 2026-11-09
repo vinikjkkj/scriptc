@@ -48,7 +48,7 @@ import { lowerYield } from "./lower-generators.js";
 import { errorRootedType, lowerStreamProperty, lowerStreamStateProperty, streamInstanceOfExpr, streamSidesOf } from "./lower-stream.js";
 import { lowerWebSocketGlobal } from "./lower-ws.js";
 import { lowerProvenKeyArrayRead } from "./lower-keydomain.js";
-import { emitterRooted } from "./lower-emitter.js";
+import { emitterRooted, emitterRootedOrGrafted } from "./lower-emitter.js";
 import { CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, registrySymbolKeyOf, type ClassInfo } from "./lower-classes.js";
 import { hasProtoTab, keyAsString, protoTabHasOr, protoTabReadChain } from "./lower-prototab.js";
 import { inOwnShadowFamily, internalBox, methodDeclaredInFamilyBelow, ownShadowWhy, registerOwnShadowFamily } from "./lower-ownshadow.js";
@@ -26220,10 +26220,15 @@ export function slotBypassTarget(L: Lowerer, declarer: ClassInfo, method: string
     decls.sort((a, b) => b.depth - a.depth);
     // The chain ends at the instance's own run-time property table when the
     // class carries one (a member written from outside), `undefined` otherwise.
+    // An EventEmitter member of a class that applyMixin(Y, EventEmitter) grafts the API onto (this.emit.bind(this, ...), ioredis' setStatus) is
+    // not in any prototype table: the copy was recognised, not run. It is the runtime emitter's member, whose function value the name alone answers.
+    const eeTail: IrExpr | null = EMITTER_API_MEMBERS.has(name) && emitterRootedOrGrafted(L, info)
+      ? { kind: "libCall", fn: "ee.member", args: [{ kind: "strLit", value: name, type: STRING, loc }], type: DYN, loc }
+      : null;
     let chain: IrExpr = hasTab
       ? protoTabReadChain(
           L, info, { kind: "strLit", value: name, type: STRING, loc },
-          hasBag ? { kind: "fieldGet", obj: recv, className: recv.type.className, field: CLASS_PROPS_FIELD, type: DYN, loc } : null, loc,
+          hasBag ? { kind: "fieldGet", obj: recv, className: recv.type.className, field: CLASS_PROPS_FIELD, type: DYN, loc } : null, loc, eeTail,
         )
       : hasBag
       ? {
