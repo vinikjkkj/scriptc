@@ -62,3 +62,4 @@ hooks.forEach((h) => h());
 console.log(rl.n, rl.exec(), leaky.n);
 function readLeaky(x: L): number { hooks.forEach((h) => h()); return x.n; }
 console.log(readLeaky(new Leaky()));
+

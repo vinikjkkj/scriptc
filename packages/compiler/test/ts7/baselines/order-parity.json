@@ -27365,6 +27365,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25062-class-constructor-writes-after-it-leaks-this-to-a-projection/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/25062-class-constructor-writes-after-it-leaks-this-to-a-projection/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/25050-record-projection-keeps-the-source-as-receiver/main.ts": {
    "order": [
     "<repo>/tests/corpus/25050-record-projection-keeps-the-source-as-receiver/lib.cjs",
