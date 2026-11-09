@@ -15108,6 +15108,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24887-dyn-number-index-reads-arrays-strings-objects-views.ts": {
+   "order": [
+    "<repo>/tests/corpus/24887-dyn-number-index-reads-arrays-strings-objects-views.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2490-find-miss-null-compare.ts": {
    "order": [
     "<repo>/tests/corpus/2490-find-miss-null-compare.ts"
