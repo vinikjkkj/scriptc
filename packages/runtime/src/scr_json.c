@@ -1653,6 +1653,224 @@ static bool dyn_bytes_is_dataview(const ScrDyn *d) {
          d->v.bytes->flavor == SCR_BF_DATAVIEW;
 }
 
+#define SCR_ITER_KEY "__@iterator@"
+#define SCR_ITER_KEY_LEN 12
+
+/* The kinds the iterator PROTOCOL is consulted for: a plain object and a boxed class instance. Everything else with no eager arm
+ * keeps its not-iterable answer. */
+static bool dyn_iter_proto_kind(const ScrDyn *d) { return d->kind == SCR_DYN_OBJ || d->kind == SCR_DYN_OBJINST; }
+
+static bool dyn_iter_is_object(const ScrDyn *d) {
+  switch (d->kind) {
+    case SCR_DYN_NULL: case SCR_DYN_BOOL: case SCR_DYN_NUM: case SCR_DYN_STR: case SCR_DYN_UNDEF: case SCR_DYN_BIG: return false;
+    default: return true;
+  }
+}
+
+/* The own member name the checker gave a Symbol.iterator method of an object (a malloc'd copy), searching the prototype chain, or NULL. */
+static char *dyn_iter_obj_key(const ScrDyn *d, size_t *out_len) {
+  for (const ScrDyn *o = d; o != NULL && o->kind == SCR_DYN_OBJ;) {
+    for (int pass = 0; pass < 2; pass++) {
+      const ScrDyn *tab = o;
+      if (pass == 1) {
+        tab = scr_dyn_ext(o)->hidden;
+        if (tab == NULL || tab->kind != SCR_DYN_OBJ) break;
+      }
+      for (uint32_t i = 0; i < tab->v.obj.len; i++) {
+        const ScrDynEntry *e = &tab->v.obj.entries[i];
+        if (e->key_len >= SCR_ITER_KEY_LEN && memcmp(e->key, SCR_ITER_KEY, SCR_ITER_KEY_LEN) == 0) {
+          char *out = (char *)malloc(e->key_len + 1);
+          if (out == NULL) return NULL;
+          memcpy(out, e->key, e->key_len);
+          out[e->key_len] = '\0';
+          *out_len = e->key_len;
+          return out;
+        }
+      }
+    }
+    o = scr_dyn_ext(o)->proto;
+  }
+  return NULL;
+}
+
+static const ScrDynClassMember *dyn_iter_inst_member(const ScrDyn *d, const char *name) {
+  const ScrDynClassMember *m = scr_dyn_objinst_member(d, name, strlen(name));
+  return m != NULL && m->call != NULL ? m : NULL;
+}
+
+/* d[name] for the two protocol kinds: +1 (undefined when absent), NULL with an exception pending. */
+static ScrDyn *dyn_iter_prop(ScrDyn *d, const char *name) {
+  const size_t n = strlen(name);
+  if (d->kind == SCR_DYN_OBJ) return scr_dyn_obj_key_get(d, name, n);
+  if (d->kind == SCR_DYN_OBJINST) {
+    const ScrDynClassMember *m = scr_dyn_objinst_member(d, name, n);
+    if (m != NULL && m->get != NULL) return m->get(d->v.inst.o);
+  }
+  return scr_dyn_retain(scr_dyn_undefined());
+}
+
+/* iter.<name>() with `this` the iterator. fn: the member's function value when the caller read it already (a plain object's next). *found
+ * false when there is nothing callable by that name. +1 result, or NULL (exception pending, or !found). */
+static ScrDyn *dyn_iter_call(ScrDyn *iter, ScrDyn *fn, const char *name, bool *found) {
+  *found = true;
+  if (iter->kind == SCR_DYN_OBJINST) {
+    const ScrDynClassMember *m = dyn_iter_inst_member(iter, name);
+    if (m != NULL) return m->call(iter->v.inst.o, NULL, 0, name);
+  }
+  if (fn != NULL && fn->kind == SCR_DYN_FUNC) {
+    scr_dyn_this_push_dyn(iter);
+    ScrDyn *r = scr_dyn_call(fn, NULL, 0, name);
+    scr_dyn_this_pop();
+    return r;
+  }
+  *found = false;
+  return NULL;
+}
+
+static void dyn_iter_throw_fmt(const char *fmt, const ScrDyn *d) {
+  ScrStr *s = d != NULL ? scr_dyn_to_string(d, NULL) : NULL;
+  char msg[256];
+  int n = snprintf(msg, sizeof msg, fmt, s != NULL ? (const char *)s->data : "undefined");
+  scr_str_release(s);
+  scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)(n < 0 ? 0 : n >= (int)sizeof msg ? (int)sizeof msg - 1 : n));
+}
+
+static void dyn_iter_state_set(ScrDyn *st, const char *key, ScrDyn *v) { scr_dyn_obj_set(st, key, strlen(key), v); }
+
+static bool dyn_iter_state_done(const ScrDyn *st) {
+  const ScrDyn *d = scr_dyn_obj_get(st, "dn", 2);
+  return d == NULL || d->kind != SCR_DYN_BOOL || d->v.b;
+}
+
+/* GetIterator: +1 state, or NULL with *no_method set (no [Symbol.iterator] function) or an exception pending. */
+static ScrDyn *dyn_iter_proto_open(ScrDyn *src, bool *no_method) {
+  ScrDyn *iter = NULL;
+  if (src->kind == SCR_DYN_OBJINST) {
+    const ScrDynClassMember *m = dyn_iter_inst_member(src, "sym:iterator");
+    if (m == NULL) {
+      *no_method = true;
+      return NULL;
+    }
+    iter = m->call(src->v.inst.o, NULL, 0, "[Symbol.iterator]");
+  } else {
+    size_t kl = 0;
+    char *key = dyn_iter_obj_key(src, &kl);
+    if (key == NULL) {
+      *no_method = true;
+      return NULL;
+    }
+    ScrDyn *m = scr_dyn_obj_key_get(src, key, kl);
+    free(key);
+    if (m == NULL) return NULL;
+    if (m->kind != SCR_DYN_FUNC) {
+      scr_dyn_release(m);
+      *no_method = true;
+      return NULL;
+    }
+    scr_dyn_this_push_dyn(src);
+    iter = scr_dyn_call(m, NULL, 0, "[Symbol.iterator]");
+    scr_dyn_this_pop();
+    scr_dyn_release(m);
+  }
+  if (iter == NULL) return NULL;
+  if (!dyn_iter_is_object(iter)) {
+    scr_dyn_release(iter);
+    static const char msg[] = "Result of the Symbol.iterator method is not an object";
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+    return NULL;
+  }
+  ScrDyn *nx = dyn_iter_prop(iter, "next");
+  if (nx == NULL) {
+    scr_dyn_release(iter);
+    return NULL;
+  }
+  ScrDyn *st = scr_dyn_new_obj();
+  dyn_iter_state_set(st, "it", iter);
+  dyn_iter_state_set(st, "nx", nx);
+  dyn_iter_state_set(st, "dn", scr_dyn_new_bool(false));
+  dyn_iter_state_set(st, "vl", scr_dyn_retain(scr_dyn_undefined()));
+  return st;
+}
+
+/* next(), done, value: true with the element stored, false when finished or a step threw (the state is then done). */
+static bool dyn_iter_proto_step(ScrDyn *st) {
+  if (dyn_iter_state_done(st)) return false;
+  ScrDyn *iter = (ScrDyn *)scr_dyn_obj_get(st, "it", 2);
+  ScrDyn *nx = (ScrDyn *)scr_dyn_obj_get(st, "nx", 2);
+  bool found = false;
+  ScrDyn *res = dyn_iter_call(iter, nx, "next", &found);
+  if (res == NULL && !found && !scr_exc_pending()) dyn_iter_throw_fmt("%s is not a function", nx);
+  if (res != NULL && !dyn_iter_is_object(res)) {
+    dyn_iter_throw_fmt("Iterator result %s is not an object", res);
+    scr_dyn_release(res);
+    res = NULL;
+  }
+  ScrDyn *done = res != NULL ? dyn_iter_prop(res, "done") : NULL;
+  const bool finished = done == NULL || scr_dyn_truthy(done);
+  if (done != NULL) scr_dyn_release(done);
+  if (finished) {
+    if (res != NULL) scr_dyn_release(res);
+    dyn_iter_state_set(st, "dn", scr_dyn_new_bool(true));
+    return false;
+  }
+  ScrDyn *val = dyn_iter_prop(res, "value");
+  scr_dyn_release(res);
+  if (val == NULL) {
+    dyn_iter_state_set(st, "dn", scr_dyn_new_bool(true));
+    return false;
+  }
+  dyn_iter_state_set(st, "vl", val);
+  return true;
+}
+
+static ScrDyn *dyn_iter_proto_value(ScrDyn *st) {
+  const ScrDyn *v = scr_dyn_obj_get(st, "vl", 2);
+  return v != NULL ? scr_dyn_retain((ScrDyn *)v) : scr_dyn_retain(scr_dyn_undefined());
+}
+
+/* IteratorClose: return() unless the state finished. While the loop body's exception is pending, return()'s own outcome is dropped. */
+static void dyn_iter_proto_close(ScrDyn *st) {
+  if (dyn_iter_state_done(st)) return;
+  dyn_iter_state_set(st, "dn", scr_dyn_new_bool(true));
+  ScrDyn *iter = (ScrDyn *)scr_dyn_obj_get(st, "it", 2);
+  ScrCaught *saved = scr_exc_pending() ? scr_exc_take() : NULL;
+  ScrDyn *fn = dyn_iter_prop(iter, "return");
+  ScrDyn *res = NULL;
+  /* a class instance's methods are table rows, not values: the row's presence is the function */
+  const bool inst_return = iter->kind == SCR_DYN_OBJINST && dyn_iter_inst_member(iter, "return") != NULL;
+  if (inst_return || (fn != NULL && fn->kind != SCR_DYN_UNDEF && fn->kind != SCR_DYN_NULL)) {
+    bool found = false;
+    res = dyn_iter_call(iter, fn, "return", &found);
+    if (res == NULL && !found && !scr_exc_pending()) {
+      static const char msg[] = "return is not a function";
+      scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+    }
+  }
+  if (fn != NULL) scr_dyn_release(fn);
+  if (saved != NULL) {
+    if (res != NULL) scr_dyn_release(res);
+    if (scr_exc_pending()) scr_exc_clear();
+    scr_rethrow(saved);
+    scr_caught_release(saved);
+    return;
+  }
+  if (res != NULL) {
+    if (!dyn_iter_is_object(res)) dyn_iter_throw_fmt("Iterator result %s is not an object", res);
+    scr_dyn_release(res);
+  }
+}
+
+/* Drains `src` through [Symbol.iterator] into `arr`: 0 = no protocol (nothing happened), 1 = drained, -1 = an exception is pending. */
+static int dyn_iter_drain_proto(ScrDyn *arr, const ScrDyn *src) {
+  if (!dyn_iter_proto_kind(src)) return 0;
+  bool no_method = false;
+  ScrDyn *st = dyn_iter_proto_open((ScrDyn *)src, &no_method);
+  if (st == NULL) return no_method ? 0 : -1;
+  while (dyn_iter_proto_step(st)) scr_dyn_arr_push(arr, dyn_iter_proto_value(st));
+  scr_dyn_release(st);
+  return scr_exc_pending() ? -1 : 1;
+}
+
 /* Spread completion for a runtime-arity argument list (`f(...xs)` in the
  * checked-dynamic tier): JS's spread over the checked-dynamic tree's iterable kinds —
  * arrays element-by-element (retained), strings by code POINT (the string
@@ -1730,6 +1948,7 @@ void scr_dyn_arr_push_spread(ScrDyn *arr, const ScrDyn *src, const char *what) {
     scr_dyn_release(pack);
     return;
   }
+  if (dyn_iter_drain_proto(arr, src) != 0) return; /* drained, or the iteration threw (pending) */
   static const char msg[] = "Spread syntax requires ...iterable[Symbol.iterator] to be a function";
   scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
 }
@@ -1745,7 +1964,7 @@ void scr_dyn_arr_push_spread(ScrDyn *arr, const ScrDyn *src, const char *what) {
  * Symbol(Symbol.iterator))"; objects and functions carry no value text,
  * undefined no kind prefix, null V8's "object null"). Borrows both; +1 or
  * NULL with the TypeError pending. */
-ScrDyn *scr_dyn_iter_pack(const ScrDyn *src, const ScrStr *msg) {
+static ScrDyn *dyn_iter_pack_ex(const ScrDyn *src, const ScrStr *msg, bool allow_proto) {
 #ifdef SCR_DYN_PROTO
   const ScrDyn *iter_wp = scr_dyn_wrapper_prim(src);
   if (iter_wp != NULL && iter_wp->kind == SCR_DYN_STR) src = iter_wp;
@@ -1766,6 +1985,13 @@ ScrDyn *scr_dyn_iter_pack(const ScrDyn *src, const ScrStr *msg) {
   if (src->kind == SCR_DYN_JSVAL) {
     return scr_dyn_jsval_ops()->iter_drain(src->v.jsval.cell, false, msg);
   }
+  if (allow_proto && dyn_iter_proto_kind(src)) {
+    ScrDyn *out = scr_dyn_new_arr();
+    int r = dyn_iter_drain_proto(out, src);
+    if (r == 1) return out;
+    scr_dyn_release(out);
+    if (r < 0) return NULL;
+  }
   if (msg != NULL && msg->len > 0) {
     scr_throw_error(SCR_ERR_TYPE, scr_str_new(msg->data, msg->len));
     return NULL;
@@ -1778,6 +2004,8 @@ ScrDyn *scr_dyn_iter_pack(const ScrDyn *src, const ScrStr *msg) {
   return NULL;
 }
 
+ScrDyn *scr_dyn_iter_pack(const ScrDyn *src, const ScrStr *msg) { return dyn_iter_pack_ex(src, msg, true); }
+
 /* The for-of-over-dyn pack accessors: the emitted index loop drives them
  * over a scr_dyn_iter_pack result (ARR by construction — the defensive
  * arms cover nothing reachable from that lowering). Never throw. */
@@ -1789,6 +2017,35 @@ ScrDyn *scr_dyn_arr_at(const ScrDyn *d, double i) {
     return scr_dyn_retain(scr_dyn_undefined());
   }
   return scr_dyn_retain(scr_dyn_elem_val(d->v.arr.items[(size_t)i]));
+}
+
+ScrDyn *scr_dyn_iter_open(const ScrDyn *src, const ScrStr *msg) {
+  if (dyn_iter_proto_kind(src)) {
+    bool no_method = false;
+    ScrDyn *st = dyn_iter_proto_open((ScrDyn *)src, &no_method);
+    if (st != NULL) return st;
+    if (!no_method) return NULL; /* the exception is pending */
+  }
+  return dyn_iter_pack_ex(src, msg, false);
+}
+
+bool scr_dyn_iter_step(const ScrDyn *it, double i) {
+  if (it->kind == SCR_DYN_ARR) return i >= 0 && i < (double)it->v.arr.len;
+  return dyn_iter_proto_step((ScrDyn *)it);
+}
+
+ScrDyn *scr_dyn_iter_val(const ScrDyn *it, double i) {
+  if (it->kind == SCR_DYN_ARR) return scr_dyn_arr_at(it, i);
+  return dyn_iter_proto_value((ScrDyn *)it);
+}
+
+void scr_dyn_iter_close(const ScrDyn *it) {
+  if (it->kind != SCR_DYN_ARR) dyn_iter_proto_close((ScrDyn *)it);
+}
+
+bool scr_dyn_iter_close_b(const ScrDyn *it) {
+  scr_dyn_iter_close(it);
+  return true;
 }
 
 /* Takes ownership of key (malloc'd) and value. Duplicate keys: the LATER
@@ -15119,6 +15376,7 @@ void scr_dyn_pack_push_spread_iter(ScrDyn *pack, const ScrDyn *src) {
     scr_dyn_release(drained);
     return;
   }
+  if (dyn_iter_drain_proto(pack, src) != 0) return; /* drained through [Symbol.iterator], or it threw (pending) */
   ScrJsonBuf b;
   scr_jb_init(&b);
   scr_dyn_iter_kind_word(&b, src);

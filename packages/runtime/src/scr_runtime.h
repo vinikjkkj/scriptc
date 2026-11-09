@@ -6555,6 +6555,23 @@ ScrDyn *scr_dyn_arr_from(const ScrDyn *src);
  * compile-time source spelling), else the runtime kind wording. Borrows
  * both; NULL with the exception pending on the throw. */
 ScrDyn *scr_dyn_iter_pack(const ScrDyn *src, const ScrStr *msg);
+/* LAZY iteration over a dyn value (for-of): GetIterator by [Symbol.iterator], step with next(), IteratorClose with return().
+ * The iterable kinds with a provably equivalent eager walk (arrays, strings, bytes, Map/Set boxes, engine values) keep it:
+ * scr_dyn_iter_open answers their packed ARRAY (the same scr_dyn_iter_pack result, errors included) and the loop indexes it. Every
+ * other object kind answers a hidden STATE object that holds the iterator, its next, the done flag and the current value; the loop
+ * recognizes it by kind (OBJ, where a packed result is always ARR). open throws V8's not-iterable TypeError exactly as pack does.
+ * step(it, i) answers whether element i exists (for a state: runs next(), reads done, then value); a throw from next/done/value marks
+ * the state done, so close never calls return() on an iterator that failed. val(it, i) is the element (+1). close(it) is
+ * IteratorClose: no-op for a packed array or a finished state, else return() runs; while an exception is pending (the loop body threw)
+ * a failure of return() is dropped and the original exception stands, otherwise a failure propagates and a non-object result throws.
+ * Borrow everything; open/step/close may throw.  The protocol lives in scr_json.c; an object with no [Symbol.iterator] is "not iterable". The checker spells a well-known-symbol member of an object literal
+ * `__@iterator@<id>` and a class's member table spells it `sym:iterator`; those are the two places the protocol looks. */
+ScrDyn *scr_dyn_iter_open(const ScrDyn *src, const ScrStr *msg);
+bool scr_dyn_iter_step(const ScrDyn *it, double i);
+ScrDyn *scr_dyn_iter_val(const ScrDyn *it, double i);
+void scr_dyn_iter_close(const ScrDyn *it);
+bool scr_dyn_iter_close_b(const ScrDyn *it); /* the same, answering true (the IR's libCall form) */
+bool scr_dyn_iter_close_b(const ScrDyn *it); /* the same, answering true (the IR's libCall form) */
 /* any[] helpers over dyn values (scr_array.c): iterable spread and the apply-argument copy. */
 /* An any[] (dyn elements) from a dyn iterable: a spread into an any[] literal. NULL with the exception pending. */
 ScrArr *scr_arr_from_dyn_iter(const ScrDyn *src, const ScrStr *msg);
