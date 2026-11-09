@@ -14918,6 +14918,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24918-a-late-method-with-an-instance-override-slot-answers-through-a-dynamic-receiver.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24918-a-late-method-with-an-instance-override-slot-answers-through-a-dynamic-receiver.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2485-inspect-circular-refs.ts": {
    "order": [
     "<repo>/tests/corpus/2485-inspect-circular-refs.ts"
