@@ -27227,6 +27227,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25010-dyn-socket-property-surface-by-lifecycle-stage.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25010-dyn-socket-property-surface-by-lifecycle-stage.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25011-dyn-socket-address-cork-read-listeners-and-emitter-methods.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25011-dyn-socket-address-cork-read-listeners-and-emitter-methods.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25012-dyn-socket-destroy-with-error-and-reset.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25012-dyn-socket-destroy-with-error-and-reset.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25013-dyn-socket-lifecycle-events-ready-pause-resume-pipe-and-meta.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25013-dyn-socket-lifecycle-events-ready-pause-resume-pipe-and-meta.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25014-dyn-socket-bytes-read-and-paused-readable-length.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25014-dyn-socket-bytes-read-and-paused-readable-length.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/24890-fs-readdir-nonascii-names.js": {
    "order": [
     "<repo>/tests/corpus/24890-fs-readdir-nonascii-names.js"
