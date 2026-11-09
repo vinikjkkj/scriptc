@@ -27352,6 +27352,12 @@
     "<repo>/tests/corpus/25042-dyn-for-of-class-iterables-and-iterators.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25060-class-instance-read-through-a-record-of-methods-is-the-same-object/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/25060-class-instance-read-through-a-record-of-methods-is-the-same-object/main.ts"
+   ],
+   "diags": []
   }
  }
 }
