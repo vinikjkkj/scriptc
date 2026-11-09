@@ -1,7 +1,7 @@
 // JSON.stringify of a value whose type is not statically JSON-safe ([Error | null, unknown][] | null, what a pipeline's exec resolves) goes through the
 // dynamic path and answers what Node answers; it was refused with SC1090.
 async function results(ok: boolean): Promise<[Error | null, unknown][] | null> {
-  return ok ? [[null, 1], [null, "x"], [null, { f: "v" }]] : null;
+  return ok ? [[null, 1], [null, "x"], [null, { f: "v" }], [new Error("boom"), undefined]] : null;
 }
 async function main(): Promise<void> {
   const a = await results(true);
