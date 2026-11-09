@@ -715,7 +715,7 @@ export function dynSpreadSource(L: Lowerer, blame: ts.Node, src: IrExpr, where: 
   const loc = src.loc;
   if (src.type.kind === "set") {
     src = { kind: "setIntrinsic", method: "toArray", receiver: src, args: [], type: arrayOf(src.type.elem), loc };
-  } else if (src.type.kind === "object") {
+  } else if (src.type.kind === "object" || src.type.kind === "generator") {
     const drained = L.classIteratorDrainCall(src, loc);
     if (drained) src = drained;
   } else if (src.type.kind === "bytes" && src.type.elem !== "u8" && src.type.elem !== "buf") {
@@ -948,7 +948,7 @@ function spreadWalkableAsDyn(L: Lowerer, t: IrType): boolean {
           }
           // A CLASS ITERABLE spread (`foo(...new SymbolIterator)`) drains
           // through its protocol into a fresh array (classIteratorDrainCall).
-          if (src.type.kind === "object") {
+          if (src.type.kind === "object" || src.type.kind === "generator") {
             const drained = L.classIteratorDrainCall(src, locOf(a), restType.elem);
             if (drained) src = drained;
           }

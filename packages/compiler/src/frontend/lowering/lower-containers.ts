@@ -529,6 +529,10 @@ function lowerOptionalDefaultArg(
         if (src.type.kind === "set" && typeEquals(src.type.elem, elem)) {
           src = { kind: "setIntrinsic", method: "toArray", receiver: src, args: [], type: arrayOf(src.type.elem), loc };
         }
+        if (src.type.kind === "generator") {
+          const drained = L.classIteratorDrainCall(src, loc, elem);
+          if (drained) src = drained;
+        }
         if (!typeEquals(src.type, receiverIr)) {
           L.unsupported(
             "SC1090",
@@ -3954,6 +3958,11 @@ function lowerOptionalDefaultArg(
     if (args.length === 1 && !ts.isObjectLiteralExpression(args[0]!)) {
       const src = L.lowerExpr(args[0]!);
       if (src.type.kind === "string") return strCharsCall(L, src, loc);
+      // `Array.from(gen())` / `Array.from(classIterable)`: the iterator drains into a fresh element array (the spread's drain).
+      if (src.type.kind === "generator" || src.type.kind === "object") {
+        const drained = L.classIteratorDrainCall(src, loc);
+        if (drained) return drained;
+      }
       // `Array.from(view)` over a numeric typed array or a Buffer is the element
       // list (Node reads length and indices), the same toArray the bytes view
       // exposes. DataView and ArrayBufferView share the u8 IR type but have no
@@ -4050,6 +4059,7 @@ function lowerOptionalDefaultArg(
       let base: IrExpr | null = null;
       if (src.type.kind === "string") base = strCharsCall(L, src, loc);
       else if (src.type.kind === "array") base = src; // map reads fresh and builds fresh
+      else if (src.type.kind === "generator" || src.type.kind === "object") base = L.classIteratorDrainCall(src, loc);
       else if (src.type.kind === "set") {
         base = { kind: "setIntrinsic", method: "toArray", receiver: src, args: [], type: arrayOf(src.type.elem), loc };
       } else if (

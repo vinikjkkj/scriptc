@@ -9787,7 +9787,7 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
         // own protocol into a fresh element array (classIteratorDrainCall
         // — an infinite iterator loops forever, exactly Node), and the
         // spread machinery copies like any array source.
-        if (src.type.kind === "object") {
+        if (src.type.kind === "object" || src.type.kind === "generator") {
           const drained = L.classIteratorDrainCall(src, locOf(el), type.elem);
           if (drained) src = drained;
         }
