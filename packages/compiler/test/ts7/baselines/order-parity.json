@@ -27468,6 +27468,12 @@
     "<repo>/tests/corpus/24961-the-function-constructor-reached-through-a-prototype-still-runs-its-text.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/24930-dyn-object-keys-of-every-short-length-differing-in-one-byte.ts": {
+   "order": [
+    "<repo>/tests/corpus/24930-dyn-object-keys-of-every-short-length-differing-in-one-byte.ts"
+   ],
+   "diags": []
   }
  }
 }
