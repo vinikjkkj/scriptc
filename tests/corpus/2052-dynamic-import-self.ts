@@ -1,4 +1,3 @@
-// @dynamic
 // Self-import: import() of the ENTRY module answers the entry's own
 // exports (no re-evaluation — the module is already running); the
 // namespace resolves after the entry's synchronous body, like Node.

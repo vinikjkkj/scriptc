@@ -1,4 +1,3 @@
-// @dynamic
 // `import()` with a NAMED-CONSTANT specifier — the optional-dependency
 // idiom (`const WS_OPTIONAL_MODULE = 'ws'; await import(WS_OPTIONAL_MODULE)`).
 // The argument is not a string literal, but its checker type is a string
