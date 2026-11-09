@@ -10,8 +10,8 @@ import type { CEmitter, Temp } from "./emitter.js";
  * propagate an operand's NaN payload, and the NaN-marked undefined (scr_runtime.h)
  * must not survive an operation Node answers with a plain NaN. Other types pass
  * through unchanged. */
-function canonNum(type: { kind: string }, expr: string): string {
-  return type.kind === "f64" ? `scr_num_canon(${expr})` : expr;
+function canonNum(type: { kind: string }, expr: string, elide = false): string {
+  return type.kind === "f64" && !elide ? `scr_num_canon(${expr})` : expr;
 }
 import { rcSitesRequested, rcSiteLabel } from "./emitter.js";
 import { BUFFER_NUM_ACCESSOR_METHODS, dynKeyGetUsesLitTwin, moduleUsesEngineFn, ORD_MEMBER, orderRecordPlanCached, ABSENT_KEY_TRAP_CODE, arrayOf, canBoxFuncIntoDyn, BOOL, BYTES_U8, bytesOf, ownMaskKeyBit, presenceMaskStores, OWNMASK_COMPLETED, OWNMASK_VALID, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, IrExpr, IrRecordShape, IrType, irFunctionJsName, irFunctionValueCode, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals, typeKey } from "../../ir/nodes.js";
@@ -266,13 +266,13 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         const r = E.emitExpr(e.right);
         switch (e.op) {
           case "%":
-            return E.newTemp(e.type, canonNum(e.type, `fmod(${l.name}, ${r.name})`));
+            return E.newTemp(e.type, canonNum(e.type, `fmod(${l.name}, ${r.name})`, E.canonElided(e)));
           // `**` IS Math.pow — one spec operation (Number::exponentiate),
           // so one runtime entry. C pow() is NOT it: pow(1, NaN) and
           // pow(-1, ±Infinity) answer 1.0 where JS answers NaN, and this
           // lane answered the C values until scr_math_pow landed.
           case "**":
-            return E.newTemp(e.type, canonNum(e.type, `scr_math_pow(${l.name}, ${r.name})`));
+            return E.newTemp(e.type, canonNum(e.type, `scr_math_pow(${l.name}, ${r.name})`, E.canonElided(e)));
           // Two number operands: the NaN-marked undefined equals itself
           // (scr_num_same, scr_runtime.h); every other NaN is unequal, as in Node.
           case "===":
@@ -302,13 +302,13 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case ">>>":
             return E.newTemp(e.type, `scr_bit_ushr_inl(${l.name}, ${r.name})`);
           default:
-            return E.newTemp(e.type, canonNum(e.type, `${l.name} ${e.op} ${r.name}`));
+            return E.newTemp(e.type, canonNum(e.type, `${l.name} ${e.op} ${r.name}`, E.canonElided(e)));
         }
       }
       case "unary": {
         const v = E.emitExpr(e.operand);
         if (e.op === "~") return E.newTemp(e.type, `scr_bit_not_inl(${v.name})`);
-        return E.newTemp(e.type, canonNum(e.type, `${e.op}${v.name}`));
+        return E.newTemp(e.type, canonNum(e.type, `${e.op}${v.name}`, E.canonElided(e)));
       }
       case "incDec": {
         // Expression-position ++/--: read, write ±1, yield old (postfix)
@@ -1650,6 +1650,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // `bytes[i]` on this lane.
             // A bigint view's element is a fresh +1 bigint (scr_bigint.c).
             if (e.type.kind === "bigint") return E.newTemp(e.type, `scr_bytes_get_big(${r.name}, ${args[0]!.name})`);
+            // An f64 element read straight into a marker-free local is canonicalised here, so the local's arithmetic need not be (ir/num-canon.ts).
+            if (E.canonLoad(e)) return E.newTemp(e.type, `scr_num_canon(scr_bytes_get_inl(${r.name}, ${args[0]!.name}))`);
             return E.newTemp(e.type, `scr_bytes_get_inl(${r.name}, ${args[0]!.name})`);
           case "fillBig": {
             // A bigint view's fill: the value is BORROWED; the receiver
@@ -3838,7 +3840,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // second fiber-only primitive reached an admitted coroutine body.
         const finish = <S extends string>(call: Fenced<S>): Temp => {
           // Math.* propagates a marker operand's NaN payload (libm does); canonicalise.
-          const c = e.fn.startsWith("math.") ? canonNum(e.type, call as unknown as string) : (call as unknown as string);
+          const c = e.fn.startsWith("math.") ? canonNum(e.type, call as unknown as string, E.canonElided(e)) : (call as unknown as string);
           if (e.type.kind === "void") {
             E.line(`${c};${E.srcComment(e.loc)}`);
             if (MAY_THROW_LIB_FNS.has(e.fn)) E.emitPendingCheck();
