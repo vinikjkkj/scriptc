@@ -1637,15 +1637,17 @@ static ScrDyn *dyn_bind_func(ScrDyn *fn, ScrDyn *const *args, size_t argc) {
   ScrDyn *nameDyn = scr_dyn_new_str(ns); /* retains */
   scr_str_release(ns);
 
+  /* The boxes are TRACED: a bound function stored on the very object it is bound to (an instance wrapping one of its methods) is a cycle
+   * through these captures, and an untraced box hides it from the collector. */
   ScrClosure *clo = scr_closure_new((void *)dyn_bound_fn_thunk, 3 + nb);
-  clo->caps[0] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
+  clo->caps[0] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, scr_dyn_trace_v);
   scr_box_set_ref(clo->caps[0], scr_dyn_retain(fn));
-  clo->caps[1] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
+  clo->caps[1] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, scr_dyn_trace_v);
   scr_box_set_ref(clo->caps[1], scr_dyn_retain(argc >= 1 ? args[0] : scr_dyn_undefined()));
-  clo->caps[2] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
+  clo->caps[2] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, scr_dyn_trace_v);
   scr_box_set_ref(clo->caps[2], nameDyn); /* takes the +1 */
   for (size_t i = 0; i < nb; i++) {
-    clo->caps[3 + i] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
+    clo->caps[3 + i] = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, scr_dyn_trace_v);
     scr_box_set_ref(clo->caps[3 + i], scr_dyn_retain(args[1 + i]));
   }
   uint32_t target_len = scr_dyn_fn_len(fn);
