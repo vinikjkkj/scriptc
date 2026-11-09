@@ -582,6 +582,37 @@ function lowerDeclOnlyDynReceiverCall(L: Lowerer, call: ts.CallExpression): IrEx
   return (want.kind === "promise" ? L.adoptDynIntoTypedPromise(callE, want) : null) ?? L.coerceToExpected(callE, want);
 }
 
+/** `(recv.m as F)(args)`, `(recv.m)(args)`, `(recv.m!)(args)`: a parenthesized member access keeps its reference in JavaScript, so this is a METHOD call with
+ * `this` = recv (zapo's redis stores call `(pipeline.hset as (...args: unknown[]) => unknown)(key, ...)`, and ioredis' generated command reads this.options). The
+ * member is read and run on the receiver by name, as a dynamic receiver's own method call is. Null when the callee is a plain member access (the ordinary
+ * lowering), the receiver is not a dynamic value or a class instance, or the call is optional. */
+function lowerWrappedMemberCall(L: Lowerer, call: ts.CallExpression): IrExpr | null {
+  if (L.dynamic || call.questionDotToken !== undefined) return null;
+  let node: ts.Expression = call.expression;
+  let wrapped = false;
+  for (;;) {
+    if (ts.isParenthesizedExpression(node) || ts.isNonNullExpression(node) || ts.isAsExpression(node) || ts.isSatisfiesExpression(node)) {
+      node = node.expression;
+      wrapped = true;
+    } else break;
+  }
+  if (!wrapped || !ts.isPropertyAccessExpression(node) || node.questionDotToken !== undefined || !ts.isIdentifier(node.name)) return null;
+  if (call.arguments.some((a) => ts.isSpreadElement(a))) return null;
+  const rn = node.expression;
+  const rt = L.mapTypeOf(L.typeOf(rn));
+  const anyLike = (L.typeOf(rn).flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0;
+  if (!anyLike && (rt === null || (rt.kind !== "dyn" && rt.kind !== "object"))) return null;
+  if (rt !== null && rt.kind === "object" && !L.classes.has(rt.className)) return null;
+  const loc = locOf(call);
+  let recv = L.lowerExpr(rn);
+  if (recv.type.kind === "object") recv = internalBox(L, { kind: "dynFrom", value: recv, type: DYN, loc });
+  if (recv.type.kind !== "dyn") return null;
+  const callE = dynInvokeWithSpread(L, call, recv, node);
+  const want = L.mapTypeOf(L.typeOf(call));
+  if (want === null || want.kind === "dyn") return callE;
+  return (want.kind === "promise" ? L.adoptDynIntoTypedPromise(callE, want) : null) ?? L.coerceToExpected(callE, want);
+}
+
 function lowerCastReceiverMethodCall(L: Lowerer, call: ts.CallExpression): IrExpr | null {
   const access = call.expression;
   if (!ts.isPropertyAccessExpression(access) || access.questionDotToken !== undefined || call.questionDotToken !== undefined) return null;
@@ -4683,6 +4714,10 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     {
       const viaForward = lowerForwardedRequireMemberCall(L, expr);
       if (viaForward !== null) return viaForward;
+    }
+    {
+      const viaWrapped = lowerWrappedMemberCall(L, expr);
+      if (viaWrapped !== null) return viaWrapped;
     }
     // `(0, mod_1.fn)(args)` on a builtin module namespace: the same lowering as
     // `mod_1.fn(args)`. The receiver is dropped on purpose (module functions are
