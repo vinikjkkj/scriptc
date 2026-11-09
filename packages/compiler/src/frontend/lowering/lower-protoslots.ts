@@ -22,7 +22,7 @@ import type { ClassInfo } from "./lower-classes.js";
 import { cjsKeyedForEachOf } from "../program.js";
 import { dynCallWithThis } from "./lower-calls.js";
 import { hasProtoTab, protoTabReadChain } from "./lower-prototab.js";
-import { BOOL, DYN, F64, STRING, UNDEFINED_T, VOID, canDynCheckTo, typeEquals, type IrExpr, type IrFunction, type IrGlobal, type IrParam, type IrStmt, type IrType, type SrcLoc } from "../../ir/nodes.js";
+import { BOOL, DYN, F64, STRING, UNDEFINED_T, VOID, canConvertToDyn, canDynCheckTo, typeEquals, type IrExpr, type IrFunction, type IrGlobal, type IrParam, type IrStmt, type IrType, type SrcLoc } from "../../ir/nodes.js";
 
 const locOf = (n: ts.Node): SrcLoc => ({ file: n.getSourceFile().fileName, start: n.getStart(), end: n.getEnd() }) as SrcLoc;
 
@@ -694,7 +694,10 @@ export function applyInstanceOverrides(L: Lowerer, fnLists: IrFunction[][]): voi
         loc,
       };
       // The own function's answer must convert into the method's declared result (`null` where the method returns a string cannot).
-      const retOk = typeEquals(slotFn.ret, rt) || rt.kind === "void" || rt.kind === "dyn" || (slotFn.ret.kind === "dyn" && canDynCheckTo(rt, (id) => L.shapes.get(id), (id) => L.unions.get(id)));
+      // A promise of a convertible payload fills a promise of dyn: the method's `Promise<unknown>` (a .js twin's inferred result) against a declared payload.
+      const promiseIntoDyn = slotFn.ret.kind === "promise" && rt.kind === "promise" && rt.inner.kind === "dyn" &&
+        canConvertToDyn(slotFn.ret.inner, (id) => L.shapes.get(id), (id) => L.unions.get(id));
+      const retOk = promiseIntoDyn || typeEquals(slotFn.ret, rt) || rt.kind === "void" || rt.kind === "dyn" || (slotFn.ret.kind === "dyn" && canDynCheckTo(rt, (id) => L.shapes.get(id), (id) => L.unions.get(id)));
       if (!retOk) {
         L.unsupported("SC1090", info.decl!, `the instance-assigned function over '${name}' answers '${L.fmt(slotFn.ret)}' where the method answers '${L.fmt(rt)}'`);
         continue;
