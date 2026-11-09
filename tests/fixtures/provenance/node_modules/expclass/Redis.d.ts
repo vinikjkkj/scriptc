@@ -1,6 +1,7 @@
 export interface Chain {
     get(key: string): Chain;
     exec(): string[];
+    sadd(key: string, ...members: string[]): Chain;
     cmd0(key: string): Chain;
     cmd1(key: string): Chain;
     cmd2(key: string): Chain;
@@ -79,5 +80,7 @@ declare class Redis {
     get(key: string): string;
     ping(): string;
     pipeline(): Chain;
+    del(...keys: string[]): number;
+    mget(...keys: string[]): number;
 }
 export default Redis;

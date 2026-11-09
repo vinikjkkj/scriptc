@@ -37,4 +37,17 @@ COMMANDS.forEach((name) => {
         return this;
     };
 });
+// VARIADIC commands installed on the prototype by a loop (ioredis' del/mget/sadd take any number of keys or members).
+["del", "mget"].forEach((name) => {
+    Redis.prototype[name] = function (...keys) {
+        this.calls += keys.length;
+        return keys.length;
+    };
+});
+["sadd"].forEach((name) => {
+    Pipeline.prototype[name] = function (key, ...members) {
+        this.queue.push([name, key + ":" + members.join("+")]);
+        return this;
+    };
+});
 exports.default = Redis;
