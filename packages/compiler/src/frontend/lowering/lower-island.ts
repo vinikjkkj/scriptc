@@ -7,13 +7,13 @@ import type { Lowerer } from "./lowerer.js";
 import { BOOL, DYN, F64, IrExpr, IrStmt, IrType, JSVAL, MAX_ISLAND_CALLBACK_ARITY, STRING, VOID, arrayOf, canBoxFuncIntoDyn, canMarshalTypedFuncIntoIsland, funcOf, islandPromisePayloadTag, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ISLAND_SURFACE, IslandFnEntry, STATIC_MATH_CONSTS, STATIC_MATH_FNS, boundaryIntoIslandMsg } from "./surfaces.js";
 import { requiresDynamicApiDiag, requiresDynamicPackageDiag } from "../../diagnostics/diagnostic.js";
-import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, cjsHiddenAccessorExport, cjsInsertionOrderOf, dynamicImportSpecOf, isCjsJsFile, locOf, npmPackageNameOf, npmStaticDepSf7, provenanceTwinDepSf7, requireSpecOf, resolveImport } from "../program.js";
+import { canonicalBuiltinModule, isModuleExportsAccess, cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, cjsHiddenAccessorExport, cjsInsertionOrderOf, dynamicImportSpecOf, isCjsJsFile, locOf, npmPackageNameOf, npmStaticDepSf7, provenanceTwinDepSf7, requireSpecOf, resolveImport } from "../program.js";
 import { runtimePackageOfTypesPackage } from "../shared.js";
 import { isRelativeSpecifier } from "../shared.js";
 import { dynamicImportModuleTargetOf, dynamicImportProgramTargetOf, staticDynImportBindingShape } from "./lower-modules.js";
 import { pureReemittable } from "./lower-exprs.js";
 import { isEsModuleStamp } from "./lower-stmts.js";
-import { liveBagRef, liveTwinOf } from "./cjs-live-exports.js";
+import { dynReplaceOf, liveBagRef, liveTwinOf } from "./cjs-live-exports.js";
 import { cjsLexedExportsOf, cjsLexerVisibleNames } from "../cjs-lexer.js";
 import * as nodePath from "node:path";
 import { moduleNsStarExports } from "./lower-namespaces.js";
@@ -1577,7 +1577,48 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
    * module's init first, so the value is produced where the require is
    * evaluated, and only then. Null when the dep has no builder (async init,
    * no init name), which keeps the caller's fence. */
+  /** The program module a CommonJS file forwards ALL of its export to: every write of `module.exports` in it (top level or nested in a branch) is
+   * `module.exports = require("<relative>")` of the same compiled CommonJS module. Null for any other shape (a branch picking different targets
+   * is decided at run time, which no single module value answers). */
+  export function cjsRequireAliasTargetOf(L: Lowerer, dep: ts.SourceFile): ts.SourceFile | null {
+    if (!isCjsJsFile(dep)) return null;
+    let target: ts.SourceFile | null = null;
+    let bad = false;
+    const stack: ts.Node[] = [dep];
+    while (stack.length > 0 && !bad) {
+      const n = stack.pop()!;
+      if (ts.isBinaryExpression(n) && n.operatorToken.kind === ts.SyntaxKind.EqualsToken && isModuleExportsAccess(n.left)) {
+        let rhs: ts.Expression = n.right;
+        while (ts.isParenthesizedExpression(rhs)) rhs = rhs.expression;
+        const spec = requireSpecOf(rhs);
+        const to = spec !== null && isRelativeSpecifier(spec) ? resolveImport(L.program, dep, spec) : undefined;
+        if (to === undefined || to === null || !isCjsJsFile(to) || (target !== null && target !== to)) bad = true;
+        else target = to;
+      }
+      ts.forEachChild(n, (c) => {
+        stack.push(c);
+      });
+    }
+    return bad ? null : target;
+  }
+
   export function requireDepValueOf(L: Lowerer, dep: ts.SourceFile, loc: IrExpr["loc"]): IrExpr | null {
+    // A module whose whole export is another program module's (`module.exports = require("./node.js")`, every write of it): the value `require`
+    // answers is that module's value, once this module's own init ran.
+    const aliased = cjsRequireAliasTargetOf(L, dep);
+    if (aliased !== null) {
+      const initName = L.initNameOf.get(dep);
+      const inner = requireDepValueOf(L, aliased, loc);
+      if (initName === undefined || L.asyncInitFiles.has(dep) || inner === null) return null;
+      L.noteEdge(initName);
+      return {
+        kind: "seqExpr",
+        stmts: [{ kind: "exprStmt", expr: { kind: "call", callee: initName, args: [], type: VOID, loc }, loc }],
+        result: inner,
+        type: DYN,
+        loc,
+      };
+    }
     const builder = staticDynNsBuilderOf(L, dep, loc, true);
     if (builder === null) return null;
     // A CommonJS module WITHOUT `export =` has no `default` key in its

@@ -30,6 +30,7 @@ import { pairedProtoClassOfValue, protoThisType } from "./proto-class-consume.js
 import { enforceLibBoundary } from "./lib-boundary.js";
 import { hasProtoTab, protoTabReadChain } from "./lower-prototab.js";
 import { checkedArmBridge, lowerInstanceOverrideRead, lowerWebCryptoGetRandomValues, refuseUnloweredSubtleCall, refuseUnloweredWebCrypto, refuseWebCryptoDestructuredArgs, refuseWebCryptoOwnKeys, sameValueDynOperand, unboundMethodThunk, undefinedArmedInAnswer, lowerWebCryptoMemberCall } from "./lower-exprs.js";
+import { cjsRequireAliasTargetOf, requireDepValueOf } from "./lower-island.js";
 import { NARROW_FIRST, builtinFenceHintOf, builtinModuleFnOf, dynOwnNamesHelper } from "./surfaces.js";
 import { OBJECT_PROTOTYPE_METHODS } from "./lowerer.js";
 import { ffiBindingDiag, ffiSignatureDiag, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
@@ -533,6 +534,24 @@ export interface GenericInstance {
  * callable member m (zapo's redis stores reach ioredis' mset/evalBuffer this way), so the call is the call of m on the object x, by name, exactly as the
  * assertion-free `x.m(args)` would run it. The receiver boxes to the dynamic object (identity kept), the arguments pack with their spreads in source order,
  * and the answer converts to the call's checked type (a Promise result adopts the dynamic promise). Null for any other receiver shape. */
+/** `m.name(args)` where `m = require(spec)` names a module that forwards its whole export to another program module (`module.exports = require("./node.js")`)
+ * and `name` has no value of its own anywhere in the program: the call is a member call on the forwarded value, as Node runs it. */
+function lowerForwardedRequireMemberCall(L: Lowerer, call: ts.CallExpression): IrExpr | null {
+  let callee: ts.Expression = call.expression;
+  while (ts.isParenthesizedExpression(callee)) callee = callee.expression;
+  if (!ts.isPropertyAccessExpression(callee) || callee.questionDotToken !== undefined || call.questionDotToken !== undefined) return null;
+  if (L.dynamic || !ts.isIdentifier(callee.expression) || !isJsSourceFile(call.getSourceFile())) return null;
+  const msym = L.checker.getSymbolAtLocation(callee.name);
+  if (msym !== undefined && (L.globalsBySymbol.has(msym) || L.classBySymbol.has(msym) || L.fnSigsBySymbol.has(msym))) return null;
+  const dep = L.cjsBindingRequireDepOf(callee.expression);
+  if (dep === null || cjsRequireAliasTargetOf(L, dep) === null) return null;
+  const recv = requireDepValueOf(L, dep, locOf(call));
+  if (recv === null) return null;
+  const callE = dynInvokeWithSpread(L, call, recv, callee);
+  const want = L.mapTypeOf(L.typeOf(call));
+  return want === null || want.kind === "dyn" ? callE : L.coerceToExpected(callE, want);
+}
+
 function lowerCastReceiverMethodCall(L: Lowerer, call: ts.CallExpression): IrExpr | null {
   const access = call.expression;
   if (!ts.isPropertyAccessExpression(access) || access.questionDotToken !== undefined || call.questionDotToken !== undefined) return null;
@@ -4631,6 +4650,10 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     // A codec reaching a string sink (String, JSON, Object.prototype.toString, toString/join): refuse.
     refuseCodecCoercionCall(L, expr);
     const loc = locOf(expr);
+    {
+      const viaForward = lowerForwardedRequireMemberCall(L, expr);
+      if (viaForward !== null) return viaForward;
+    }
     // `(0, mod_1.fn)(args)` on a builtin module namespace: the same lowering as
     // `mod_1.fn(args)`. The receiver is dropped on purpose (module functions are
     // plain functions in Node). An Object.prototype method reached this way is

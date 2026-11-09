@@ -15,7 +15,7 @@ import { strictAt } from "./lower-protoescape.js";
 import { EVAL_STATIC_CLASSES, RUNTIME_EMITTER_CLASS, STATS_FIELD_INDEX, DATE_T, strandTrap, BIGINT, BOOL, BYTES_ELEM_SIZE, BYTES_U8, bytesValueType, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, canBoxClassIntoDyn, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrGlobal, IrJsOp, IrLocal, type IrParam, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
 import { lowerEventProperty } from "./lower-event.js";
-import { cjsRequireBindingValueOf, dynImportBindingDeclOf } from "./lower-island.js";
+import { cjsRequireAliasTargetOf, cjsRequireBindingValueOf, dynImportBindingDeclOf, requireDepValueOf } from "./lower-island.js";
 import { liveExportsOf, liveBagRef, liveDepOfBinding, isValueUse, liveNamedTwinOf, liveRecvBagOf, liveKeyOf, liveIdentityRefOf, dynValueOf } from "./cjs-live-exports.js";
 import { cjsExportRecordOf, cjsExportRecordField, cjsExportRecordRead, cjsExportRecordReadDyn, cjsExportRecordRef, isBareExportsAccess } from "./cjs-export-record.js";
 import { lowerFetchProperty, lowerRequestInitLiteral } from "./lower-fetch.js";
@@ -3528,6 +3528,16 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           // undefined. tsc's `__importDefault` helper reads exactly this member of every module it wraps.
           if (expr.name.text === "__esModule" && isJsSourceFile(expr.getSourceFile()) && ts.isIdentifier(expr.name) && L.resolveValueSymbol(expr.name) === null) {
             return dynUndefinedExpr(loc);
+          }
+          // A name with no value of its own anywhere in the program (no global, class or function registered for it) is not a delegation target:
+          // delegating would resolve it as a free identifier (an undefined-global ReferenceError where Node reads a property of the exported
+          // value, the `default` that debug's createDebug function carries). It is a member read of the binding's value.
+          if (!valueForm && ts.isIdentifier(expr.expression) && isJsSourceFile(expr.getSourceFile())) {
+            const dep = L.cjsBindingRequireDepOf(expr.expression);
+            const recvV = dep !== null && cjsRequireAliasTargetOf(L, dep) !== null ? requireDepValueOf(L, dep, loc) : null;
+            if (recvV !== null) {
+              return { kind: "dynKeyGet", key: { kind: "strLit", value: expr.name.text, type: STRING, loc }, optional: true, value: recvV, type: DYN, loc };
+            }
           }
           return lowerExpr(L, expr.name);
         }
