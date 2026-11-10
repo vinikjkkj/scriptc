@@ -12655,36 +12655,110 @@ export function moduleUsesDynAsync(mod: IrModule): boolean {
  * lowered to the engine (lower-engine-fn.ts), i.e. a jsOp globalGet of
  * `Function`. Every other module keeps its static link line. */
 const ENGINE_FN_MEMO = new WeakMap<IrModule, boolean>();
+
+/** A link in the chain from an IR node up to the module: the parent node and the field of it the child hangs off. */
+interface IrUp { node: Record<string, unknown>; field: string; index: number; up: IrUp | null }
+
+const CTOR_BENIGN_KEYS = new Set(["name", "length", "prototype", "displayName"]);
+const CTOR_BENIGN_METHODS = new Set(["toString", "hasOwnProperty", "isPrototypeOf", "propertyIsEnumerable", "valueOf", "toLocaleString"]);
+
+/** Where does a value that might be the Function constructor GO? `Object.getPrototypeOf(f).constructor` of a function yields the Function
+ * constructor value, and CALLING it with text is the one thing here that needs the embedded engine (an `eval`-class use, which is allowed and
+ * link-gated). Everything else a program does with the value (read its name, test its type, compare it with `instanceof`, hand it to a
+ * function as the `this` of a call) never runs text. This walks up from a carrier expression (the `.constructor` read, or a read of a
+ * local that holds one) through the wrappers that pass the value on, and answers "benign" for those consumers, "taint L" for a store into
+ * a local (whose reads are carriers in turn), and "escapes" for any other use (a call argument, a return, a field, a callee, a capture):
+ * escaping is the conservative answer, so the engine links for it. */
+function ctorCarrierUse(at: IrUp | null, child: Record<string, unknown>): "benign" | "escapes" | { taint: string } {
+  let cur = child;
+  for (let up = at; up !== null; up = up.up) {
+    const p = up.node;
+    const k = p["kind"];
+    if (k === "logical" || k === "nullish" || k === "dynFrom" || k === "unionWrap") { cur = p; continue; }
+    if (k === "ternary") {
+      if (up.field === "cond") return "benign"; // the value only decides a branch
+      cur = p;
+      continue;
+    }
+    if (k === "varDecl" && up.field === "init") return { taint: String(p["localId"]) };
+    if ((k === "assign" || k === "assignExpr") && up.field === "value") return { taint: String(p["localId"]) };
+    if (k === "exprStmt") return "benign";
+    if (k === "dynTest" || k === "dynScalarEq") return "benign"; // a type test, an identity comparison
+    if (k === "libCall" && (p["fn"] === "dyn.instanceOf" || p["fn"] === "dyn.typeof")) return "benign";
+    if (k === "dynKeyGet" && up.field === "value") {
+      const key = p["key"] as { kind?: unknown; value?: unknown } | undefined;
+      return key?.kind === "strLit" && typeof key.value === "string" && CTOR_BENIGN_KEYS.has(key.value) ? "benign" : "escapes";
+    }
+    if (k === "dynInvoke") {
+      if (up.field === "recv") return typeof p["method"] === "string" && CTOR_BENIGN_METHODS.has(p["method"]) ? "benign" : "escapes";
+      // `f.call(value)` / `f.apply(value, ...)`: the value is only the `this` of f, which is not the Function constructor itself (a tainted
+      // or call/apply-read receiver is its own escape: it is judged where it is read).
+      if (up.field === "args" && up.index === 0 && (p["method"] === "call" || p["method"] === "apply")) {
+        const recv = p["recv"] as { kind?: unknown; key?: { value?: unknown } } | undefined;
+        const viaCallRead = recv?.kind === "dynKeyGet" && (recv.key?.value === "call" || recv.key?.value === "apply" || recv.key?.value === "bind");
+        return viaCallRead ? "escapes" : "benign";
+      }
+      return "escapes";
+    }
+    return "escapes";
+  }
+  return "escapes";
+}
+
 export function moduleUsesEngineFn(mod: IrModule): boolean {
   const memo = ENGINE_FN_MEMO.get(mod);
   if (memo !== undefined) return memo;
   let found = false;
   let sawGetPrototypeOf = false;
-  let sawConstructorRead = false;
   let sawConstructorCall = false;
-  let sawDynCall = false;
-  const visit = (v: unknown): void => {
+  const ctorReads: { node: Record<string, unknown>; up: IrUp | null }[] = [];
+  const localReads: { id: string; node: Record<string, unknown>; up: IrUp | null }[] = [];
+  const captured = new Set<string>();
+  const visit = (v: unknown, up: IrUp | null): void => {
     if (found || v === null || typeof v !== "object") return;
     if (Array.isArray(v)) {
-      for (const item of v) visit(item);
+      for (let i = 0; i < v.length; i++) {
+        const item = v[i];
+        if (item !== null && typeof item === "object" && !Array.isArray(item) && up !== null) {
+          visit(item, { node: up.node, field: up.field, index: i, up: up.up });
+        } else visit(item, up);
+      }
       return;
     }
-    const node = v as { kind?: unknown; op?: unknown; name?: unknown; fn?: unknown; method?: unknown; key?: { kind?: unknown; value?: unknown } };
+    const node = v as Record<string, unknown> & { kind?: unknown; op?: unknown; name?: unknown; fn?: unknown; method?: unknown; key?: { kind?: unknown; value?: unknown } };
     if (node.kind === "jsOp" && node.op === "globalGet" && node.name === "Function") {
       found = true;
       return;
     }
     if (node.kind === "libCall" && node.fn === "dyn.getPrototypeOf") sawGetPrototypeOf = true;
-    if (node.kind === "dynKeyGet" && node.key?.kind === "strLit" && node.key.value === "constructor") sawConstructorRead = true;
+    if (node.kind === "dynKeyGet" && node.key?.kind === "strLit" && node.key.value === "constructor") ctorReads.push({ node, up });
     if (node.kind === "dynInvoke" && node.method === "constructor") sawConstructorCall = true;
-    if (node.kind === "dynCall") sawDynCall = true;
-    for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
+    if (node.kind === "varRef" && typeof node.localId === "string") localReads.push({ id: node.localId, node, up });
+    if (node.kind === "closure" && Array.isArray(node.captures)) for (const c of node.captures) if (typeof c === "string") captured.add(c);
+    for (const key of Object.keys(node)) {
+      if (key === "loc" || key === "type") continue;
+      visit(node[key], { node, field: key, index: -1, up });
+    }
   };
-  visit(mod);
+  visit(mod, null);
   // The Function constructor VALUE (`Object.getPrototypeOf(f).constructor`) can only run text when the program CALLS it: a
-  // `proto.constructor(...)` call, or a `constructor` read in a program that calls a dynamic function value. Taking the prototype and
-  // reading or comparing `.constructor` (the common identity test) never needs the engine.
-  const viaCtor = sawGetPrototypeOf && (sawConstructorCall || (sawConstructorRead && sawDynCall));
+  // `proto.constructor(...)` call, or a `constructor` read whose value can reach a call (it escapes the benign consumers above, directly or
+  // through the locals it is stored in). Taking the prototype and reading, testing or comparing `.constructor` never needs the engine.
+  let escapes = false;
+  const tainted = new Set<string>();
+  const judge = (use: "benign" | "escapes" | { taint: string }): void => {
+    if (use === "escapes") escapes = true;
+    else if (use !== "benign") tainted.add(use.taint);
+  };
+  for (const r of ctorReads) judge(ctorCarrierUse(r.up, r.node));
+  for (let changed = true; changed && !escapes;) {
+    changed = false;
+    const before = tainted.size;
+    for (const r of localReads) if (tainted.has(r.id)) judge(ctorCarrierUse(r.up, r.node));
+    if (tainted.size !== before) changed = true;
+  }
+  for (const id of tainted) if (captured.has(id)) escapes = true;
+  const viaCtor = sawGetPrototypeOf && (sawConstructorCall || escapes);
   const result = found || viaCtor;
   ENGINE_FN_MEMO.set(mod, result);
   return result;
