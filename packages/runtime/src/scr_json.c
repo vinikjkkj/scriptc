@@ -857,22 +857,9 @@ static void scr_dyn_gcfree(void *o) {
   scr_cyc_free(d);
 }
 
-void scr_dyn_release(ScrDyn *d) {
-  if (!d || d->rc == SIZE_MAX) return; /* NULL: an uninitialized `let` local */
-  if (--d->rc != 0) {
-    /* Candidate-root buffering is restricted to the three kinds that OWN a
-     * traced child. A scalar, string, bytes, handle, promise, jsval,
-     * bigint or boxed-instance dyn points at nothing the collector walks,
-     * so it can never be a MEMBER of a cycle — only reachable from one,
-     * which the visit filter handles without it ever being a root.
-     * Buffering them would cost a full graph walk per 256 releases of the
-     * hottest allocation in the runtime and could never find anything. */
-    if (d->kind == SCR_DYN_ARR || d->kind == SCR_DYN_OBJ ||
-        d->kind == SCR_DYN_FUNC) {
-      scr_cyc_on_release(d); /* may collect — d is done being touched */
-    }
-    return;
-  }
+/* The teardown of a dyn whose count just reached zero. Out of line and cold so scr_dyn_release below is a leaf the compiler need not give
+ * a register-saving prologue: a decrement that does not free (about 4 releases in 5 on the mysql arm) is a handful of instructions. */
+static __attribute__((noinline)) void scr_dyn_release_final(ScrDyn *d) {
   scr_cyc_on_dead(d); /* drop any candidate-buffer entry before teardown */
   /* THE WEAK-KEY DEATH HOOK, AND THE ROUTE scr_cyc_free CANNOT SEE.
    *
@@ -1031,6 +1018,27 @@ void scr_dyn_release(ScrDyn *d) {
   else if (d->kind == SCR_DYN_OBJ) free(d->v.obj.entries);
   scr_cyc_free(d);
 }
+/* noinline: the body is small enough that the compiler would copy it into every release site of this unit; one shared leaf keeps the
+ * runtime (and every Windows size anchor) where it was. */
+__attribute__((noinline)) void scr_dyn_release(ScrDyn *d) {
+  if (!d || d->rc == SIZE_MAX) return; /* NULL: an uninitialized `let` local */
+  if (--d->rc != 0) {
+    /* Candidate-root buffering is restricted to the three kinds that OWN a
+     * traced child. A scalar, string, bytes, handle, promise, jsval,
+     * bigint or boxed-instance dyn points at nothing the collector walks,
+     * so it can never be a MEMBER of a cycle - only reachable from one,
+     * which the visit filter handles without it ever being a root.
+     * Buffering them would cost a full graph walk per 256 releases of the
+     * hottest allocation in the runtime and could never find anything. */
+    if (d->kind == SCR_DYN_ARR || d->kind == SCR_DYN_OBJ ||
+        d->kind == SCR_DYN_FUNC) {
+      scr_cyc_on_release(d); /* may collect - d is done being touched */
+    }
+    return;
+  }
+  scr_dyn_release_final(d);
+}
+
 
 ScrDyn *scr_dyn_obj_get(const ScrDyn *d, const char *key, size_t key_len) {
   for (size_t i = 0; i < d->v.obj.len; i++) {
