@@ -1700,12 +1700,49 @@ double scr_math_random(void);
  * Number::exponentiate). NOT C pow(): pow(1, NaN) and pow(-1, ±Infinity)
  * are 1.0 in C where JS answers NaN. */
 double scr_math_pow(double x, double y);
+/* Math.pow(x, 0.5) with the exponent a compile-time literal (the exact root for a non-negative base). */
+double scr_math_pow_half(double x);
+/* Math.pow(x, y) for another finite literal exponent: the platform pow, with none of scr_math_pow's tests. */
+double scr_math_pow_lit(double x, double y);
+/* Math.pow(x, 2) with the exponent a compile-time literal: the exact product, as V8 answers. */
+static inline double scr_math_sq(double x) { return x * x; }
 /* Math.clz32 — leading zeros of ToUint32(x); 32 for zero. */
 double scr_math_clz32(double x);
 /* Math.imul — ToInt32(ToUint32(a) * ToUint32(b)), the 32-bit product. */
 double scr_math_imul(double a, double b);
 /* Math.fround — the nearest binary32 value (ties to even), as a double. */
 double scr_math_fround(double x);
+/* The Math members that Node answers with V8's own fdlibm port (src/base/ieee754.cc), and that the platform libm answers differently in the
+ * last bits (scr_fdlibm.c, a unit linked only by a program whose emitted code names one of them). Each is the routine V8 runs, so the bits
+ * a compiled program prints are the bits Node prints. sqrt, sign, abs, floor, ceil, trunc, round, fround, clz32 and imul need no such
+ * routine (IEEE-exact or integer arithmetic); pow stays scr_math_pow (the platform pow plus V8's two exact special cases). */
+double scr_fd_sin(double x);
+double scr_fd_cos(double x);
+double scr_fd_tan(double x);
+double scr_fd_asin(double x);
+double scr_fd_acos(double x);
+double scr_fd_atan(double x);
+double scr_fd_atan2(double y, double x);
+double scr_fd_exp(double x);
+double scr_fd_expm1(double x);
+double scr_fd_log(double x);
+double scr_fd_log1p(double x);
+double scr_fd_log2(double x);
+double scr_fd_log10(double x);
+double scr_fd_sinh(double x);
+double scr_fd_cosh(double x);
+double scr_fd_tanh(double x);
+double scr_fd_asinh(double x);
+double scr_fd_acosh(double x);
+double scr_fd_atanh(double x);
+double scr_fd_cbrt(double x);
+/* Math.hypot over n values (V8's algorithm: Infinity beats NaN, the largest magnitude scales the rest, Kahan-compensated sum). */
+double scr_fd_hypot(const double *v, size_t n);
+double scr_fd_hypot2(double a, double b);
+/* Math.sign: +-0 and NaN answer themselves. */
+static inline double scr_math_sign(double x) { return x > 0.0 ? 1.0 : x < 0.0 ? -1.0 : x; }
+/* Math.hypot(...xs) over an f64-element array. */
+double scr_math_hypot_arr(ScrArr *a);
 
 /* ── the integer-domain fast arms ───────────────────────────────────────
  *
