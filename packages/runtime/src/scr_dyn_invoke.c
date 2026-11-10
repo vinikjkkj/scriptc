@@ -1817,7 +1817,7 @@ static ScrDyn *dyn_objproto_fn_thunk(ScrClosure *clo, ScrDyn *const *args, size_
       case SCR_DYN_STR: tag = "String"; break;
       case SCR_DYN_ARR: tag = "Array"; break;
       case SCR_DYN_FUNC: tag = "Function"; break;
-      case SCR_DYN_OBJ: if (recv->null_proto || dyn_plain_obj(recv)) tag = "Object"; break;
+      case SCR_DYN_OBJ: if (recv->module_ns) tag = "Module"; else if (recv->null_proto || dyn_plain_obj(recv)) tag = "Object"; break;
       default: break;
     }
     if (tag != NULL) {
@@ -4123,6 +4123,22 @@ ScrDyn *scr_dyn_define_prop(ScrDyn *target, ScrStr *key, ScrDyn *desc) {
     scr_throw_error_msg(SCR_ERR_TYPE, "Object.defineProperty called on non-object",
                         strlen("Object.defineProperty called on non-object"));
     return NULL;
+  }
+  if (target->kind == SCR_DYN_OBJ && target->module_ns) {
+    /* A module namespace's [[DefineOwnProperty]] only accepts a descriptor that changes nothing; every other (and every NEW key) throws. */
+    bool present = false;
+    for (size_t i = 0; i < target->v.obj.len; i++) {
+      const ScrDynEntry *ent = &target->v.obj.entries[i];
+      if (ent->key_len == key->len && memcmp(ent->key, key->data, key->len) == 0) { present = true; break; }
+    }
+    if (!present) {
+      ScrJsonBuf jb;
+      scr_jb_init(&jb);
+      scr_jb_puts(&jb, "Cannot redefine property: ");
+      for (size_t i = 0; i < key->len; i++) scr_jb_putc(&jb, key->data[i]);
+      scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&jb));
+      return NULL;
+    }
   }
   if (!dyn_define_one(target, key->data, key->len, desc, "Object.defineProperty")) return NULL;
   return scr_dyn_retain(target);

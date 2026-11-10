@@ -7630,6 +7630,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_dyn_require_fn(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "dyn.tostrClosure":
             return finish(`scr_dyn_tostr_closure(${arg(0)})`);
+          case "dyn.moduleNsFinish":
+            return finish(`scr_dyn_module_ns_finish(${arg(0)})`);
+          case "dyn.integrity":
+            return finish(`scr_dyn_integrity(${arg(0)}, ${arg(1)})`);
           case "dyn.isAbsent":
             return finish(`scr_dyn_is_absent(${arg(0)})`);
           case "dyn.isGlobalThis":

@@ -41,6 +41,7 @@ import type { Lowerer } from "./lowerer.js";
 import { boundIdentifiersOf } from "./lowerer.js";
 import type { FileParts } from "./lower-modules.js";
 import { cjsHiddenAccessorExport, cjsInsertionOrderOf, isCjsJsFile, isNodeEsmFile, locOf, requireSpecOf, resolveImport } from "../program.js";
+import { nsObjectValueOf } from "./lower-island.js";
 import { nearestPackageTypeOf, nearestPkgJsonPath } from "../resolve.js";
 import { F64, IrExpr, IrStmt, IrType, STRING } from "../../ir/nodes.js";
 import { normalize as nativePath } from "node:path";
@@ -1329,6 +1330,13 @@ export function lowerNsIdentifierValue(L: Lowerer, ident: ts.Identifier): IrExpr
   // object itself has no runtime representation — Node's frozen,
   // alphabetically-keyed namespace object is not materialized. Named
   // residual of the SC1013 lowering.
+  {
+    const nsDep = moduleNsSourceFileOf(L, ident);
+    // The namespace OBJECT: the module's interned checked-dynamic namespace (one per module, so identity with an import() result holds).
+    const memberRead = ts.isPropertyAccessExpression(ident.parent) && ident.parent.expression === ident; // `ns.x` resolves statically; only a VALUE use needs the object
+    const nsVal = nsDep === null || memberRead ? null : nsObjectValueOf(L, nsDep, locOf(ident));
+    if (nsVal !== null) return nsVal;
+  }
   if (moduleNsSourceFileOf(L, ident) !== null) {
     L.unsupported(
       "SC1013",

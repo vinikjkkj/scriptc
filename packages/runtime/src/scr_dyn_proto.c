@@ -307,6 +307,7 @@ static ScrDyn *scr_builtin_to_string(ScrClosure *clo, ScrDyn *const *args, size_
     case SCR_DYN_BIG: tag = "BigInt"; break;
     case SCR_DYN_ARR: tag = "Array"; break;
     case SCR_DYN_FUNC: tag = "Function"; break;
+    case SCR_DYN_OBJ: if (k->module_ns) tag = "Module"; break;
     default: break;
   }
   char buf[40];

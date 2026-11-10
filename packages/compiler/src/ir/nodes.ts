@@ -5600,6 +5600,10 @@ export type IrLibFn =
   | "dyn.fnIsSig"
   /** The hidden toString slot fill of a record VIEW over a dynamic object (scr_dyn_tostr_closure): a `() => string` closure over the object, or NULL when it has no callable toString. */
   | "dyn.tostrClosure"
+  /** A finished module namespace over a built dyn object: null prototype, namespace marking (Module tag, [[Set]]/[[Delete]] TypeErrors). */
+  | "dyn.moduleNsFinish"
+  /** Object.isFrozen (0) / isSealed (1) / isExtensible (2) over a checked-dynamic value: (value, which) -> boolean. */
+  | "dyn.integrity"
   /** OPEN an ambient-receiver window: bind the dyn operand as `this` for
    * everything the current frame calls until the matching `dyn.thisPop`.
    * The operand is BORROWED at the call and retained for the window
