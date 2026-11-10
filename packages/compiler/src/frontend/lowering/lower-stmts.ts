@@ -15,7 +15,7 @@ import { timersPromisesIntervalCallOf, lowerForAwaitTimersInterval, lowerForAwai
 import { RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, BIGINT, BOOL, isRefCounted, BYTES_U8, bytesValueType, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrLocal, type IrRecordShape, IrStmt, IrType, JSVAL, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import { PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, neverTaintedJsType, nodeThrowExpr, stmtUsesIsland, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { dtsTwinOwnedConst, wholeExportRootRebindable } from "./lower-modules.js";
-import { dynImportBindingDeclOf, dynImportBindingStmts } from "./lower-island.js";
+import { dynImportBindingDeclOf, dynImportBindingStmts, lowerMathDestructure } from "./lower-island.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
 import { recordKeyReadRow } from "./keyread-census.js";
 import { type CjsKeyedForEach, cjsKeyedForEachOf, cjsExportsGetterDefineOf, cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, commaWholeExportRecordOf, isCjsJsFile, resolveImport, isCjsWholeExportAssign, isJsSourceFile, isModuleExportsAccess, locOf, requireSpecOf, topLevelJsStatementOf } from "../program.js";
@@ -1791,6 +1791,10 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
     // lowers: the whole-global spelling would answer the global's own
     // token (a string), and the pattern would meet the string fences
     // below blaming the token's carrier type instead of the global.
+    {
+      const mathBound = lowerMathDestructure(L, decl, isLet);
+      if (mathBound !== null) return mathBound;
+    }
     {
       const tokenBound = stdlibGlobalTokenDestructure(L, decl, isLet);
       if (tokenBound !== null) return tokenBound;
