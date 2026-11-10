@@ -14,6 +14,7 @@ await load("alpha.json", true);
 await load("beta.json", true);
 await load("alpha.json", false);
 await load("m1.cjs", false);
-await load("m2.ts", false);
+const m2: any = await import(`./mods/${"m2.ts"}`);
+console.log("loaded m2", m2.id);
 await load("m1.cjs", true);
 await load("nope.json", true);

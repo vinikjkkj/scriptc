@@ -16604,6 +16604,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/dynamic-import-ts-json-attribute/main.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/dynamic-import-ts-json-attribute/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2719-freeze-builder-binding.ts": {
    "order": [
     "<repo>/tests/corpus/2719-freeze-builder-binding.ts"
