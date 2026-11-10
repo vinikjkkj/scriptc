@@ -98,3 +98,14 @@ for (let i = 0; i < 200; i++) {
   total += a8.len();
 }
 console.log("len", total, a8.len());
+
+// 9. mixed widths appended one by one, the cached UTF-16 length read after every append and the characters read back at the end
+const a9 = accumulator();
+const widths = ["a", "é", "€", "\u{1F600}", "z"];
+let lens = "";
+for (let i = 0; i < 40; i++) {
+  a9.add(widths[i % widths.length]!);
+  lens += a9.len() + ",";
+}
+console.log("mixed", lens);
+console.log("mixed2", a9.len(), a9.code(0), a9.code(1), a9.code(2), a9.code(3), a9.code(4), a9.code(5), a9.code(39));

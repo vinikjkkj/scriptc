@@ -68,6 +68,7 @@ static void scr_oom(void) {
 typedef struct {
   const ScrStr *s; /* NULL = empty slot */
   size_t u16len;   /* SCR_U16_UNKNOWN until computed */
+  size_t ub;       /* the byte length u16len was computed for: an in-place append grows the string past it, and scr_sidx extends u16len by the new tail */
   size_t cu, cb;   /* cursor: byte offset cb starts the char at unit cu */
 } ScrSidx;
 static ScrSidx scr_sidx_tab[SCR_SIDX_N];
@@ -79,9 +80,41 @@ static void scr_sidx_purge(const ScrStr *s) {
   }
 }
 
+/* UTF-16 units of a byte range of valid UTF-8 (the tail an in-place append added): every byte that is not a continuation byte starts one code point, and a
+ * 4-byte lead adds the second unit of its surrogate pair. A scalar loop, kept out of line and un-vectorised on purpose: it runs once per `.length` after a
+ * run of appends and counts only the new bytes, and the compiler's unrolled form is a kilobyte nobody needs (the Windows regex program's .text is pinned to
+ * a few hundred bytes). It is not scr_utf16_units: that one is larger than the whole append path. */
+#if defined(__GNUC__)
+__attribute__((noinline))
+#endif
+static size_t scr_u16_appended(const char *d, size_t n) {
+  size_t u = 0;
+#if defined(__clang__)
+#pragma clang loop vectorize(disable) interleave(disable) unroll(disable)
+#elif defined(__GNUC__) && __GNUC__ >= 14
+#pragma GCC novector
+#pragma GCC unroll 1
+#endif
+  for (size_t i = 0; i < n; i++) {
+    unsigned char c = (unsigned char)d[i];
+    u += (size_t)((c & 0xC0) != 0x80) + (size_t)((c & 0xF8) == 0xF0);
+  }
+  return u;
+}
+
+
 static ScrSidx *scr_sidx(const ScrStr *s) {
   for (int i = 0; i < SCR_SIDX_N; i++) {
-    if (scr_sidx_tab[i].s == s) return &scr_sidx_tab[i];
+    if (scr_sidx_tab[i].s == s) {
+      ScrSidx *h = &scr_sidx_tab[i];
+      /* The string grew in place since the length was cached (scr_str_concat appends to a uniquely-owned string): both halves are valid UTF-8, so no code
+       * point spans the join and the units of the new tail simply add. Never shrinks: a mutation other than append does not exist. */
+      if (h->u16len != SCR_U16_UNKNOWN && h->ub != s->len) {
+        h->u16len += scr_u16_appended(s->data + h->ub, s->len - h->ub);
+        h->ub = s->len;
+      }
+      return h;
+    }
   }
   ScrSidx *e = &scr_sidx_tab[scr_sidx_clock++ % SCR_SIDX_N];
   e->s = s;
@@ -1298,10 +1331,8 @@ ScrStr *scr_str_concat(ScrStr *a, ScrStr *b) {
     memcpy(a->data + a->len, b->data, b->len);
     a->len = (uint32_t)newlen;
     a->data[newlen] = '\0';
-    /* A cached UTF-16 length for a is stale now; its cursor still valid. */
-    for (int i = 0; i < SCR_SIDX_N; i++) {
-      if (scr_sidx_tab[i].s == a) scr_sidx_tab[i].u16len = SCR_U16_UNKNOWN;
-    }
+    /* The cached UTF-16 length of a (if any) is NOT touched: scr_sidx extends it by the appended tail on the next read, so an append costs nothing
+     * extra here and a `.length` after it counts only the new bytes. */
     a->rc = 2; /* +1 for the returned reference, beside the caller's borrow */
     return a;
   }
@@ -1591,7 +1622,10 @@ static size_t scr_utf16_units(const ScrStr *s) {
  * u16len == byte len is exactly "all ASCII" — the walkers below use that
  * to answer conversions in O(1) without a cursor. */
 static size_t scr_sidx_len(const ScrStr *s, ScrSidx *e) {
-  if (e->u16len == SCR_U16_UNKNOWN) e->u16len = scr_utf16_units(s);
+  if (e->u16len == SCR_U16_UNKNOWN) {
+    e->u16len = scr_utf16_units(s);
+    e->ub = s->len;
+  }
   return e->u16len;
 }
 
