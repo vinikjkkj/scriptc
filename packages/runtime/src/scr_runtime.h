@@ -6514,6 +6514,9 @@ void scr_dyn_origin_forget(ScrDyn *d);
  * refusals name the namespace instead of the boundary copy. Answers d
  * unchanged (+0). */
 ScrDyn *scr_dyn_mark_module_ns(ScrDyn *d);
+/* A finished module namespace: null prototype, then scr_dyn_mark_module_ns; answers d retained (+1). */
+ScrDyn *scr_dyn_module_ns_finish(ScrDyn *d);
+bool scr_dyn_integrity(const ScrDyn *d, double which);
 /* Throws the shared refusal for a mutation attempted through a marked
  * boundary copy. `what` names the operation ("assigning a property",
  * "deleting a property", "'push'") and leads the message. */
