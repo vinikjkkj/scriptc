@@ -627,12 +627,13 @@ function liftableLocalClass(L: Lowerer, sf: ts.SourceFile, decl: ts.ClassDeclara
     program: ts.Program,
     sf: ts.SourceFile,
     spec: string,
+    allowCjs = false,
   ): ts.SourceFile | null {
     if (!isRelativeSpecifier(spec) && !spec.startsWith("/")) return null;
     const dep = resolveImport(program, sf, spec);
     if (!dep || dep.isDeclarationFile) return null;
     if (dep.fileName.endsWith(".json") || dep.fileName.endsWith(".cts")) return null;
-    if (isCjsJsFile(dep)) return null;
+    if (isCjsJsFile(dep) && !allowCjs) return null;
     return dep;
   }
 
@@ -731,7 +732,7 @@ function liftableLocalClass(L: Lowerer, sf: ts.SourceFile, decl: ts.ClassDeclara
             }
           }
         }
-        const dep = spec !== null && served ? dynamicImportModuleTargetOf(program, sf, spec) : null;
+        const dep = spec !== null && served ? (dynamicImportModuleTargetOf(program, sf, spec) ?? (dynamic ? null : dynamicImportProgramTargetOf(program, sf, spec, true))) : null;
         if (process.env["SCRIPTC_DYNORDER_TRACE"]) {
           console.error(`[dynorder] sf=${sf.fileName} spec=${spec} served=${served} dep=${dep?.fileName ?? "null"}`);
         }

@@ -250,7 +250,7 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
         if (ts.isSourceFile(d) && !d.isDeclarationFile) return d;
       }
     }
-    return dynamicImportProgramTargetOf(L.program, call.getSourceFile(), spec);
+    return dynamicImportProgramTargetOf(L.program, call.getSourceFile(), spec, !L.dynamic);
   }
 
 /** `const p = await import("node:path")` / `import("fs")`: a const IDENTIFIER bound to the awaited import() of a supported Node builtin. The binding is
@@ -293,6 +293,18 @@ export function builtinImportBindingStmts(L: Lowerer, decl: ts.VariableDeclarati
     expr: { kind: "awaitExpr", value: { kind: "intrinsic", name: "promise.resolve", args: [], type: { kind: "promise", inner: VOID }, loc }, type: VOID, loc },
     loc,
   }));
+}
+
+/** `import("./m.ts", { with: { type: "json" } })`: Node 24 (type stripping) does not reject it, it evaluates the module a SECOND time into a separate
+ * instance with its own state, and which instance a later plain import() answers depends on the order of the calls (measured on v24.15.0). A second
+ * evaluation of a module's storage has no representation in a compiled program (module state is one set of globals), so the build refuses. */
+function refuseTsJsonAttribute(L: Lowerer, call: ts.CallExpression): never {
+  return L.unsupported(
+    "SC1090",
+    call,
+    "dynamic import() of a TypeScript module with a json import attribute (Node evaluates the module a second time into a separate instance, which a compiled program's single set of module globals cannot hold)",
+    "drop the attribute for a TypeScript module, or import a .json file",
+  );
 }
 
 /** The import attribute of an `import(spec, { with: { type: "json" } })` call: "json", or null when there is no second argument. Anything else
@@ -638,6 +650,7 @@ function namespaceBindingUsedAsValue(L: Lowerer, decl: ts.VariableDeclaration): 
     if (!L.dynamic && spec !== null && !spec.endsWith(".json") && call.arguments.length === 2 && (spec.startsWith("./") || spec.startsWith("../") || spec.startsWith("/"))) {
       const absMod = nodePath.resolve(nodePath.dirname(call.getSourceFile().fileName), spec);
       if (existsSync(absMod) && importAttributeOf(L, call) === "json") {
+        if (/\.m?ts$/.test(absMod)) refuseTsJsonAttribute(L, call);
         return {
           kind: "call",
           callee: importRejectFnOf(L, loc, true),
@@ -2055,6 +2068,7 @@ function namespaceBindingUsedAsValue(L: Lowerer, decl: ts.VariableDeclaration): 
         "give the specifier a static relative prefix and/or suffix, such as `import(`./plugins/${name}.js`)` or `import('./locales/' + lang)`, so every file the pattern can name joins the compiled graph; or import the modules statically",
       );
     }
+    if (attr === "json" && contextImportFiles(call.getSourceFile().fileName, pattern).some((f) => /\.m?ts$/.test(f))) refuseTsJsonAttribute(L, call);
     const specIr = L.lowerExprExpecting(arg, STRING);
     if (specIr.type.kind !== "string") return null;
     const importer = call.getSourceFile().fileName;
@@ -2084,6 +2098,7 @@ function namespaceBindingUsedAsValue(L: Lowerer, decl: ts.VariableDeclaration): 
         const seen = new Set<string>();
         for (const sf of [...L.initNameOf.keys()]) {
           if (sf.isDeclarationFile || sf.fileName.endsWith(".cts") || sf.fileName.endsWith(".json") || seen.has(sf.fileName)) continue;
+          if (attr === "json" && /\.m?ts$/.test(sf.fileName)) continue;
           seen.add(sf.fileName);
           const builder = staticDynNsBuilderOf(L, sf, loc, false, true);
           if (builder === null) continue;
