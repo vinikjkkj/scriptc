@@ -7,7 +7,7 @@ import type { Lowerer } from "./lowerer.js";
 import { STATS_T, BOOL, DYN, F64, IrExpr, IrStmt, IrType, JSVAL, MAX_ISLAND_CALLBACK_ARITY, STRING, VOID, arrayOf, canBoxFuncIntoDyn, canMarshalTypedFuncIntoIsland, funcOf, islandPromisePayloadTag, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ISLAND_SURFACE, IslandFnEntry, STATIC_MATH_CONSTS, STATIC_MATH_FNS, boundaryIntoIslandMsg } from "./surfaces.js";
 import { requiresDynamicApiDiag, requiresDynamicPackageDiag } from "../../diagnostics/diagnostic.js";
-import { orderedImportsOf } from "../program.js";
+import { contextImportPattern, orderedImportsOf } from "../program.js";
 import { canonicalBuiltinModule, isModuleExportsAccess, cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, cjsHiddenAccessorExport, cjsInsertionOrderOf, dynamicImportSpecOf, isCjsJsFile, locOf, npmPackageNameOf, npmStaticDepSf7, provenanceTwinDepSf7, requireSpecOf, resolveImport } from "../program.js";
 import { runtimePackageOfTypesPackage } from "../shared.js";
 import { isRelativeSpecifier } from "../shared.js";
@@ -251,6 +251,48 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
     }
     return dynamicImportProgramTargetOf(L.program, call.getSourceFile(), spec);
   }
+
+/** `const p = await import("node:path")` / `import("fs")`: a const IDENTIFIER bound to the awaited import() of a supported Node builtin. The binding is
+ * alias plumbing exactly like `import * as p from "node:path"` (member calls and reads route through the builtin tables); returns the canonical
+ * builtin module name, or null. */
+export function builtinImportAwaitSpecOf(decl: ts.VariableDeclaration): string | null {
+  if (!ts.isIdentifier(decl.name) || decl.initializer === undefined) return null;
+  const list = decl.parent;
+  if (!ts.isVariableDeclarationList(list) || (list.flags & ts.NodeFlags.Const) === 0) return null;
+  let init: ts.Expression = decl.initializer;
+  while (ts.isParenthesizedExpression(init)) init = init.expression;
+  if (!ts.isAwaitExpression(init)) return null;
+  let call: ts.Expression = init.expression;
+  while (ts.isParenthesizedExpression(call)) call = call.expression;
+  if (!ts.isCallExpression(call) || call.expression.kind !== ts.SyntaxKind.ImportKeyword || call.arguments.length !== 1) return null;
+  const arg = call.arguments[0]!;
+  if (!ts.isStringLiteralLike(arg)) return null;
+  return canonicalBuiltinModule(arg.text);
+}
+
+/** The statements of a builtin import binding: nothing to load, only Node's job count before the `await` resumes (measured: 11 jobs for a builtin
+ * the program has not loaded, 8 once a static import of it has). */
+export function builtinImportBindingStmts(L: Lowerer, decl: ts.VariableDeclaration, loc: IrExpr["loc"]): IrStmt[] {
+  const mod = builtinImportAwaitSpecOf(decl);
+  let loaded = false;
+  for (const sf of L.program.getSourceFiles()) {
+    if (loaded) break;
+    if (sf.isDeclarationFile) continue;
+    for (const st of sf.statements) {
+      if ((ts.isImportDeclaration(st) || ts.isImportEqualsDeclaration(st))) {
+        const s = ts.isImportDeclaration(st) ? (ts.isStringLiteral(st.moduleSpecifier) ? st.moduleSpecifier.text : null)
+          : ts.isExternalModuleReference(st.moduleReference) && ts.isStringLiteral(st.moduleReference.expression) ? st.moduleReference.expression.text : null;
+        if (s !== null && canonicalBuiltinModule(s) === mod) { loaded = true; break; }
+      }
+    }
+  }
+  const n = loaded ? 8 : 11;
+  return Array.from({ length: n }, (): IrStmt => ({
+    kind: "exprStmt",
+    expr: { kind: "awaitExpr", value: { kind: "intrinsic", name: "promise.resolve", args: [], type: { kind: "promise", inner: VOID }, loc }, type: VOID, loc },
+    loc,
+  }));
+}
 
 /** Does `decl` (a `const ns = await import(...)` identifier binding) have a use that needs the namespace OBJECT: anything but `ns.member` and
  * `Object.keys(ns)`, or an export of the binding (its uses are then outside this file)? */
@@ -1840,6 +1882,15 @@ function namespaceBindingUsedAsValue(L: Lowerer, decl: ts.VariableDeclaration): 
    * ERR_UNSUPPORTED_DIR_IMPORT for a directory; a file that exists but is not part of the compiled graph rejects with a named Error. */
   function lowerComputedImport(L: Lowerer, call: ts.CallExpression, arg: ts.Expression): IrExpr | null {
     const loc = locOf(call);
+    const pattern = contextImportPattern(arg);
+    if (pattern === null) {
+      L.unsupported(
+        "SC1090",
+        call,
+        "dynamic import() of a specifier with no static part (the module graph is a build-time artifact: a specifier the compiler cannot bound names no file to compile)",
+        "give the specifier a static relative prefix and/or suffix, such as `import(`./plugins/${name}.js`)` or `import('./locales/' + lang)`, so every file the pattern can name joins the compiled graph; or import the modules statically",
+      );
+    }
     const specIr = L.lowerExprExpecting(arg, STRING);
     if (specIr.type.kind !== "string") return null;
     const importer = call.getSourceFile().fileName;
@@ -1858,12 +1909,15 @@ function namespaceBindingUsedAsValue(L: Lowerer, decl: ts.VariableDeclaration): 
         const abs = L.declareHiddenLocal("%impabs", STRING);
         const absRef = (): IrExpr => ({ kind: "varRef", localId: abs.id, type: STRING, loc });
         const concat = (...parts: IrExpr[]): IrExpr => parts.reduce((l, r) => ({ kind: "strConcat", left: l, right: r, type: STRING, loc }));
-        const reject = (code: string, message: IrExpr): IrStmt[] => {
+        const reject = (code: string, message: IrExpr, withUrl = false): IrStmt[] => {
           const err = L.declareHiddenLocal("%imperr", { kind: "object", className: "%Error" });
           const errRef: IrExpr = { kind: "varRef", localId: err.id, type: err.type, loc };
           return [
             { kind: "varDecl", localId: err.id, init: { kind: "libCall", fn: "error.new", args: [message], type: err.type, loc }, loc },
             { kind: "exprStmt", expr: { kind: "libCall", fn: "error.propSet", args: [errRef, str("code"), { kind: "dynFrom", value: str(code), type: DYN, loc }], type: VOID, loc }, loc },
+            ...(withUrl
+              ? [{ kind: "exprStmt" as const, expr: { kind: "libCall" as const, fn: "error.propSet" as const, args: [errRef, str("url"), { kind: "dynFrom" as const, value: concat(str("file://"), absRef()), type: DYN, loc }], type: VOID, loc }, loc }]
+              : []),
             { kind: "return", value: { kind: "intrinsic", name: "promise.reject", args: [errRef], type: promiseT, loc }, loc },
           ];
         };
@@ -1900,7 +1954,7 @@ function namespaceBindingUsedAsValue(L: Lowerer, decl: ts.VariableDeclaration): 
           {
             kind: "if",
             cond: { kind: "unary", op: "!", operand: exists, type: BOOL, loc } as unknown as IrExpr,
-            then: reject("ERR_MODULE_NOT_FOUND", concat(str("Cannot find module '"), absRef(), str(`' imported from ${importer}`))),
+            then: reject("ERR_MODULE_NOT_FOUND", concat(str("Cannot find module '"), absRef(), str(`' imported from ${importer}`)), true),
             else_: [],
             loc,
           },
@@ -1908,11 +1962,11 @@ function namespaceBindingUsedAsValue(L: Lowerer, decl: ts.VariableDeclaration): 
         body.push({
           kind: "if",
           cond: { kind: "libCall", fn: "stats.isDirectory", args: [{ kind: "libCall", fn: "fs.statSync", args: [absRef()], type: STATS_T, loc }], type: BOOL, loc },
-          then: reject("ERR_UNSUPPORTED_DIR_IMPORT", concat(str("Directory import '"), absRef(), str(`' is not supported resolving ES modules imported from ${importer}`))),
+          then: reject("ERR_UNSUPPORTED_DIR_IMPORT", concat(str("Directory import '"), absRef(), str(`' is not supported resolving ES modules imported from ${importer}`)), true),
           else_: [],
           loc,
         });
-        body.push(...reject("ERR_MODULE_NOT_FOUND", concat(str("Cannot find module '"), absRef(), str(`' imported from ${importer} (the file exists but is not part of the compiled module graph)`))));
+        body.push(...reject("ERR_MODULE_NOT_FOUND", concat(str("Cannot find module '"), absRef(), str(`' imported from ${importer} (the file exists but was not part of the build)`)), true));
         L.liftedFns.push({
           name: fname,
           params: [{ localId: "spec.0", name: "spec", type: STRING }],

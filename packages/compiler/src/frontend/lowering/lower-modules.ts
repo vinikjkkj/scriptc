@@ -14,7 +14,7 @@ import { dirname as dirnamePath, resolve as resolvePath } from "node:path";
 import { NpmGraphBuilder, packageNameOfPath, probeNodeImportRefusal, probeNodeRequireRefusal } from "../npm.js";
 import { isNpmStaticPackage } from "../npm-static.js";
 import { isJsSourceFileName, isRelativeSpecifier } from "../shared.js";
-import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsKeyedForEachOf, cjsWholeExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, commaWholeExportRecordOf, dynamicImportSpecOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isRequireStatement, locOf, makeCycleAdmission, orderedImportsOf, resolveImport, resolveNpmImport } from "../program.js";
+import { canonicalBuiltinModule, cjsExportAssignmentOf, cjsKeyedForEachOf, cjsWholeExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, commaWholeExportRecordOf, contextImportFiles, contextImportPattern, dynamicImportSpecOf, isCjsJsFile, isJsSourceFile, isModuleExportsAccess, isRequireStatement, locOf, makeCycleAdmission, orderedImportsOf, resolveImport, resolveNpmImport } from "../program.js";
 import { cjsExportRecordOf, cjsExportRecordInit, cjsExportRecordCreate } from "./cjs-export-record.js";
 import { dynReplaceOf, liveExportsOf } from "./cjs-live-exports.js";
 import { cjsExportsBagOf, cjsModExpOf, isWebCryptoValueExpr, webCryptoGlobalDestructure } from "./lower-exprs.js";
@@ -29,7 +29,7 @@ import { jsLetWidened, jsWidenedCallBinding, bindingNeverReassigned, bindingCont
 import { deadBranchSkippable, statementAlwaysThrowsOnRequire } from "../require-throws.js";
 import { irAlwaysExits, evolvingArrayTypedSlot, dynAliasBindingIsDyn, isVarDeclared, jsEvolvingObjectLiteralInit, keyedReadGlobalArmedType, keyedReadGlobalIsDyn, numericIteratorSourceOf, provenanceElidedConstDecl } from "./lower-stmts.js";
 import { streamClassAliasDecl } from "./lower-stream.js";
-import { dynImportBindingDepOf } from "./lower-island.js";
+import { builtinImportAwaitSpecOf, dynImportBindingDepOf } from "./lower-island.js";
 import { bufferSpeciesAliasDecl } from "./lower-containers.js";
 import { diffieHellmanFnValueDeclType, objectStaticFnValueDeclType, stdlibBufferVarAliasDecl, stdlibGlobalAliasDecl } from "./surfaces.js";
 import { builtinFnValueDeclType, timerGlobalDeclType } from "./lower-fnvalue.js";
@@ -718,6 +718,19 @@ function liftableLocalClass(L: Lowerer, sf: ts.SourceFile, decl: ts.ClassDeclara
         // Every site is served now: the binding shapes by alias plumbing, every other position by the ordered namespace builder (lower-island.ts).
         const served = true;
         void dynamic;
+        if (spec === null && node.arguments.length === 1) {
+          // A CONTEXT import: every file its pattern can name is a module of the graph, evaluated lazily by the site's lookup.
+          const pat = contextImportPattern(node.arguments[0]!);
+          if (pat !== null) {
+            for (const f of contextImportFiles(sf.fileName, pat)) {
+              const target = program.getSourceFile(f);
+              if (target !== undefined && !seen.has(target)) {
+                seen.add(target);
+                out.push(target);
+              }
+            }
+          }
+        }
         const dep = spec !== null && served ? dynamicImportModuleTargetOf(program, sf, spec) : null;
         if (process.env["SCRIPTC_DYNORDER_TRACE"]) {
           console.error(`[dynorder] sf=${sf.fileName} spec=${spec} served=${served} dep=${dep?.fileName ?? "null"}`);
@@ -2556,6 +2569,8 @@ export function collectGlobals(L: Lowerer, sf: ts.SourceFile, topStmts: ts.State
         // exporter's own symbols, so no global storage (the statement
         // lowering skips it by the same test, dynImportBindingDeclOf).
         if (isConst && dynImportBindingDepOf(L, decl) !== null) continue;
+        // `const p = await import("node:path")` at file scope: a builtin namespace alias, no global storage (the statement lowering skips it by the same test).
+        if (isConst && builtinImportAwaitSpecOf(decl) !== null) continue;
         // `const Writable = stream.Writable` at file scope: a stream
         // class through the namespace binding — alias plumbing, no
         // global storage (the statement lowering skips it by the same
