@@ -15275,6 +15275,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24929-a-cast-method-call-through-an-interface-typed-receiver-keeps-its-receiver.ts": {
+   "order": [
+    "<repo>/tests/corpus/24929-a-cast-method-call-through-an-interface-typed-receiver-keeps-its-receiver.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/24928-a-class-method-with-a-rest-parameter-called-through-a-dynamic-receiver-packs-its-arguments.ts": {
    "order": [
     "<repo>/tests/corpus/24928-a-class-method-with-a-rest-parameter-called-through-a-dynamic-receiver-packs-its-arguments.ts"
