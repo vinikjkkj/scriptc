@@ -27396,6 +27396,18 @@
     "<repo>/tests/corpus/25051-function-value-cast-through-unknown-answers-a-record-view/main.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/24960-prototype-constructor-reads-that-never-call-do-not-link-the-engine.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24960-prototype-constructor-reads-that-never-call-do-not-link-the-engine.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24961-the-function-constructor-reached-through-a-prototype-still-runs-its-text.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24961-the-function-constructor-reached-through-a-prototype-still-runs-its-text.cjs"
+   ],
+   "diags": []
   }
  }
 }
