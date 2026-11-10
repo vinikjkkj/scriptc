@@ -1,8 +1,5 @@
-/* The dynamic import() positions a STATIC build does NOT serve, each with
- * its own reason named. The tier serves exactly two spellings — `const ns
- * = await import("./m.ts")` and `const { a } = await import("./m.ts")` —
- * and every message below names the one that works for its case (corpus
- * 7330/7331 compile and run those). */
+/* Every import() position a static build used to refuse with its own reason (a stored promise, a `let`, the namespace used as a value, identity,
+ * a top-level-await module, the entry importing itself, a binding read from a hoisted function) now builds natively and answers what Node answers. */
 async function unbound(): Promise<void> {
   // Not awaited AT the declaration: the promise is a value, and the tier
   // materializes no namespace object for it to settle to.
