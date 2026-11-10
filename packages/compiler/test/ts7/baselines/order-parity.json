@@ -15257,6 +15257,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24928-a-class-method-with-a-rest-parameter-called-through-a-dynamic-receiver-packs-its-arguments.ts": {
+   "order": [
+    "<repo>/tests/corpus/24928-a-class-method-with-a-rest-parameter-called-through-a-dynamic-receiver-packs-its-arguments.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/24927-a-captured-string-accumulator-appends-in-place-and-keeps-js-semantics.ts": {
    "order": [
     "<repo>/tests/corpus/24927-a-captured-string-accumulator-appends-in-place-and-keeps-js-semantics.ts"
