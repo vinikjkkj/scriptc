@@ -51,6 +51,7 @@
 #ifdef __GLIBC__
 #include <malloc.h> /* malloc_trim, the posix arm of the idle-seam trim */
 #endif
+#include <sys/mman.h>
 #include <ucontext.h>
 #include <unistd.h>
 #endif
@@ -72,6 +73,8 @@ void __sanitizer_finish_switch_fiber(void *fake_stack_save, const void **bottom_
  * generateText — zod parses inside promise chains) nests dozens of engine
  * frames; the memory is malloc'd and committed lazily, so idle fibers pay
  * address space, not RSS. */
+/* The guard below a POSIX fiber stack: one page (the page size is 4 KiB on every supported POSIX target; a larger page only makes it larger). */
+#define SCR_FIBER_GUARD ((size_t)4096)
 #ifdef SCR_ASAN_FIBERS
 #define SCR_FIBER_STACK (8 * 1024 * 1024)
 #else
@@ -1635,7 +1638,7 @@ static void scr_switch(ScrCtx *from, ScrCtx *to, ScrFiber *to_fiber) {
   SwitchToFiber(*to);
 #elif defined(SCR_ASAN_FIBERS)
   void **save = from_fiber ? &from_fiber->fake_stack : &scr_main_fake_stack;
-  const void *bottom = to_fiber ? to_fiber->st->mem : NULL;
+  const void *bottom = to_fiber ? to_fiber->st->mem + SCR_FIBER_GUARD : NULL;
   size_t size = to_fiber ? SCR_FIBER_STACK : 0;
   __sanitizer_start_switch_fiber(save, bottom, size);
   swapcontext(from, to);
@@ -2492,7 +2495,7 @@ static void scr_stack_free(ScrStack *s) {
     DeleteFiber(s->ctx);
   }
 #else
-  free(s->mem);
+  munmap(s->mem, SCR_FIBER_GUARD + SCR_FIBER_STACK);
 #endif
   free(s);
 }
@@ -2531,10 +2534,13 @@ static ScrStack *scr_stack_acquire(void) {
 #endif
   if (s->ctx == NULL) scr_oom();
 #else
-  s->mem = malloc(SCR_FIBER_STACK);
-  if (!s->mem) scr_oom();
+  /* One PROT_NONE guard page below the usable stack (stacks grow down): an overflow faults here instead of running silently into whatever
+   * malloc placed next to the block, and the mapping returns to the kernel whole on release. Pages are committed lazily by first touch. */
+  s->mem = mmap(NULL, SCR_FIBER_GUARD + SCR_FIBER_STACK, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  if (s->mem == MAP_FAILED) scr_oom();
+  if (mprotect(s->mem, SCR_FIBER_GUARD, PROT_NONE) != 0) scr_oom();
   getcontext(&s->ctx);
-  s->ctx.uc_stack.ss_sp = s->mem;
+  s->ctx.uc_stack.ss_sp = s->mem + SCR_FIBER_GUARD;
   s->ctx.uc_stack.ss_size = SCR_FIBER_STACK;
   s->ctx.uc_link = NULL;
   makecontext(&s->ctx, scr_trampoline, 0);
