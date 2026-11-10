@@ -41,7 +41,8 @@
  *    that path (no snapshot pins it). */
 
 import { builtinModules } from "node:module";
-import { dirname, resolve } from "node:path";
+import { readdirSync } from "node:fs";
+import { dirname, relative, resolve } from "node:path";
 import * as ts from "./ts7/adapter.js";
 import type { ScrDiagnostic } from "../diagnostics/diagnostic.js";
 import {
@@ -241,6 +242,97 @@ export interface LoadResult {
   projectWorld: () => ts.Program;
 }
 
+
+/** The CONTEXT of a dynamic `import(expr)` whose specifier does not fold: the literal text the expression is certain to start with (`prefix`) and
+ * end with (`suffix`), read off a template (`` `./locales/${x}.js` ``) or a `+` chain (`'./plugins/' + name`). Null when the expression has no
+ * static part at all, or the prefix is not a relative/absolute path. */
+export function contextImportPattern(arg: ts.Expression): { prefix: string; suffix: string } | null {
+  let e: ts.Expression = arg;
+  while (ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isNonNullExpression(e) || ts.isSatisfiesExpression(e)) e = e.expression;
+  let parts: { lit: string | null }[] = [];
+  const flatten = (x: ts.Expression): void => {
+    let y = x;
+    while (ts.isParenthesizedExpression(y)) y = y.expression;
+    if (ts.isBinaryExpression(y) && y.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+      flatten(y.left);
+      flatten(y.right);
+    } else if (ts.isStringLiteralLike(y)) parts.push({ lit: y.text });
+    else if (ts.isTemplateExpression(y)) {
+      parts.push({ lit: y.head.text });
+      for (const s of y.templateSpans) {
+        parts.push({ lit: null });
+        parts.push({ lit: s.literal.text });
+      }
+    } else parts.push({ lit: null });
+  };
+  flatten(e);
+  if (!parts.some((x) => x.lit === null)) return null; // fully literal: the fold path owns it
+  let prefix = "";
+  for (const x of parts) {
+    if (x.lit === null) break;
+    prefix += x.lit;
+  }
+  let suffix = "";
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const x = parts[i]!;
+    if (x.lit === null) break;
+    suffix = x.lit + suffix;
+  }
+  parts = [];
+  if (!prefix.startsWith("./") && !prefix.startsWith("../") && !prefix.startsWith("/")) return null;
+  return { prefix, suffix };
+}
+
+/** The ESM source files a context import can name: every file under the prefix's directory (recursively, node_modules and dot-directories
+ * skipped) whose importer-relative path starts with the prefix and ends with the suffix. */
+export function contextImportFiles(importerFile: string, pattern: { prefix: string; suffix: string }): string[] {
+  const importerDir = dirname(importerFile);
+  const slash = pattern.prefix.lastIndexOf("/");
+  const baseDir = resolve(importerDir, pattern.prefix.slice(0, slash + 1));
+  const out: string[] = [];
+  const walk = (dir: string, depth: number): void => {
+    if (depth > 8) return;
+    let names: string[];
+    try {
+      names = readdirSync(dir, { withFileTypes: true }).map((d) => (d.isDirectory() ? d.name + "/" : d.name));
+    } catch {
+      return;
+    }
+    for (const n of names.sort()) {
+      if (n.endsWith("/")) {
+        if (n === "node_modules/" || n.startsWith(".")) continue;
+        walk(resolve(dir, n), depth + 1);
+        continue;
+      }
+      if (!/\.(ts|mts|js|mjs)$/.test(n) || n.endsWith(".d.ts") || n.endsWith(".d.mts")) continue;
+      const file = resolve(dir, n);
+      if (file === importerFile) continue;
+      let rel = relative(importerDir, file).split("\\").join("/");
+      if (!rel.startsWith(".")) rel = "./" + rel;
+      if (rel.length >= pattern.prefix.length + pattern.suffix.length && rel.startsWith(pattern.prefix) && rel.endsWith(pattern.suffix)) out.push(file);
+    }
+  };
+  walk(baseDir, 0);
+  return out;
+}
+
+/** Every context-import file the program's sources name that the program does not yet contain. */
+function contextImportRoots(program: ts.Program): string[] {
+  const have = new Set(program.getSourceFiles().map((s) => s.fileName));
+  const add = new Set<string>();
+  for (const sf of program.getSourceFiles()) {
+    if (sf.isDeclarationFile || sf.fileName.includes("/node_modules/") || !sf.text.includes("import(")) continue;
+    ts.walkPreorder(sf, (n) => {
+      if (ts.isCallExpression(n) && n.expression.kind === ts.SyntaxKind.ImportKeyword && n.arguments.length === 1) {
+        const pat = contextImportPattern(n.arguments[0]!);
+        if (pat !== null) for (const f of contextImportFiles(sf.fileName, pat)) if (!have.has(f)) add.add(f);
+      }
+      return undefined;
+    });
+  }
+  return [...add];
+}
+
 /** See LoadResult.startupCrash: Node's exact error message, the IR error
  * class that carries it (a RUNTIME_ERROR_CLASSES name — %Error for the
  * resolver's ERR_MODULE_NOT_FOUND family, %TypeError for invalid-specifier
@@ -302,8 +394,17 @@ function loadProgram7(host: ts.Ts7Host, entryPath: string): LoadResult & { dispo
     }
     if (npm !== null && isJsSourceFileName(npm.typesFile)) npmStaticRoots.push(npm.typesFile);
   }
-  const baseRoots = [...coreRoots, overridesDtsPath(), ...provenanceDeclSiblings(), ...provenanceRequireRoots(), ...npmStaticRoots];
+  const baseRoots: string[] = [...coreRoots, overridesDtsPath(), ...provenanceDeclSiblings(), ...provenanceRequireRoots(), ...npmStaticRoots];
   let program = ts.createProgram(baseRoots, options, host);
+  // CONTEXT imports (`import(`./locales/${x}.js`)`, `import('./plugins/' + name)`): the files the pattern can name join the program as extra
+  // roots, so each is a module of the compiled graph (to a fixpoint: an added file may hold its own context imports).
+  for (let round = 0; round < 3; round++) {
+    const ctx = contextImportRoots(program);
+    if (ctx.length === 0) break;
+    if (process.env["SCRIPTC_CTXIMPORT_WHY"] !== undefined) console.error(`[ctximport] round ${round}: +${ctx.length} file(s): ${ctx.join(" ")}`);
+    baseRoots.push(...ctx);
+    program = ts.createProgram(baseRoots, options, host);
+  }
   /* The two-phase ORACLE for the prescan`s spec-twin selection (see
    * provenanceSpecTwinsInProgram). Off by default -- the scan already put the
    * reached twins in baseRoots -- and reachable so a new driver`s selection can
