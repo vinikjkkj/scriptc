@@ -16532,6 +16532,40 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/2731-dynamic-import-ticks-tla/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/2731-dynamic-import-ticks-tla/state.ts",
+    "<repo>/tests/corpus/2731-dynamic-import-ticks-tla/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2732-dynamic-import-computed-specifier/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/2732-dynamic-import-computed-specifier/lazy.ts",
+    "<repo>/tests/corpus/2732-dynamic-import-computed-specifier/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2733-module-namespace-object-semantics/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/2733-module-namespace-object-semantics/lib1.ts",
+    "<repo>/tests/corpus/2733-module-namespace-object-semantics/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2734-module-namespace-identity-and-values/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/2734-module-namespace-identity-and-values/lib1.ts",
+    "<repo>/tests/corpus/2734-module-namespace-identity-and-values/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2735-dynamic-import-former-static-refusals/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/2735-dynamic-import-former-static-refusals/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2719-freeze-builder-binding.ts": {
    "order": [
     "<repo>/tests/corpus/2719-freeze-builder-binding.ts"
@@ -25330,12 +25364,6 @@
   "<repo>/tests/diagnostics/dyn-rest-spread-sources.ts": {
    "order": [
     "<repo>/tests/diagnostics/dyn-rest-spread-sources.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/dynamic-import-static-positions/main.ts": {
-   "order": [
-    "<repo>/tests/diagnostics/dynamic-import-static-positions/main.ts"
    ],
    "diags": []
   },
