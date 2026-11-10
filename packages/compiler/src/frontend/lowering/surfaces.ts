@@ -545,6 +545,29 @@ export const STATIC_MATH_FNS: Record<string, { fn: IrLibFn; arity: number } | un
   // the spec names; clz32 is the ToUint32 count.
   pow: { fn: "math.pow", arity: 2 },
   log: { fn: "math.log", arity: 1 },
+  // The members V8 answers with its fdlibm port (scr_fdlibm.c), sqrt (IEEE-exact) and sign: native in every build, no engine.
+  sqrt: { fn: "math.sqrt", arity: 1 },
+  sign: { fn: "math.sign", arity: 1 },
+  sin: { fn: "math.sin", arity: 1 },
+  cos: { fn: "math.cos", arity: 1 },
+  tan: { fn: "math.tan", arity: 1 },
+  asin: { fn: "math.asin", arity: 1 },
+  acos: { fn: "math.acos", arity: 1 },
+  atan: { fn: "math.atan", arity: 1 },
+  atan2: { fn: "math.atan2", arity: 2 },
+  exp: { fn: "math.exp", arity: 1 },
+  expm1: { fn: "math.expm1", arity: 1 },
+  log1p: { fn: "math.log1p", arity: 1 },
+  log2: { fn: "math.log2", arity: 1 },
+  log10: { fn: "math.log10", arity: 1 },
+  sinh: { fn: "math.sinh", arity: 1 },
+  cosh: { fn: "math.cosh", arity: 1 },
+  tanh: { fn: "math.tanh", arity: 1 },
+  asinh: { fn: "math.asinh", arity: 1 },
+  acosh: { fn: "math.acosh", arity: 1 },
+  atanh: { fn: "math.atanh", arity: 1 },
+  cbrt: { fn: "math.cbrt", arity: 1 },
+  hypot: { fn: "math.hypot", arity: 2 },
   clz32: { fn: "math.clz32", arity: 1 },
   // imul joined for the same reason clz32 did: it is a pure 32-bit
   // integer operation with no edge C disagrees about once the two
@@ -2409,8 +2432,8 @@ export function stdlibBufferVarAliasDecl(L: Lowerer, nameNode: ts.Node, init: ts
    * registers in stdlibGlobalAliases (every receiver check resolves
    * through it — see stdlibGlobalNameOf) and the declaration emits
    * nothing. Only the globals with lowered member surfaces alias this
-   * way; aliasing, say, `Math` would change nothing (its members lower
-   * by receiver too). Returns true when recognized. */
+   * way. `Math` joined (`const m = Math; m.sqrt(x)`): its members lower by receiver, so the alias binding is plumbing like the rest.
+   * Returns true when recognized. */
   export function stdlibGlobalAliasDecl(L: Lowerer, nameNode: ts.Node, init: ts.Expression | undefined): boolean {
     if (!init || !ts.isIdentifier(nameNode)) return false;
     // `const process = require('node:process')`: Node's process MODULE is
@@ -2431,7 +2454,7 @@ export function stdlibBufferVarAliasDecl(L: Lowerer, nameNode: ts.Node, init: ts
     // globals (setTimeout) taken as values are a different story — the
     // ordinary value paths (and their fences) apply. The Buffer class is
     // aliased by stdlibBufferVarAliasDecl instead (it must also be never-assigned).
-    if (name !== "process" && name !== "console" && name !== "globalThis" && name !== "performance") return false;
+    if (name !== "process" && name !== "console" && name !== "globalThis" && name !== "performance" && name !== "Math") return false;
     const symbol = L.checker.getSymbolAtLocation(nameNode);
     if (!symbol) return false;
     L.stdlibGlobalAliases.set(symbol, name);
