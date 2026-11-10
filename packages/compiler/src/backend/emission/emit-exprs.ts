@@ -4391,10 +4391,68 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           // C disagrees. Math.log — C log() IS the JS operation at every
           // edge (log(±0) = -Infinity, log(negative) = NaN). Math.clz32 —
           // the ToUint32 count (scr_lib.c). Borrow nothing; no throw.
-          case "math.pow":
+          case "math.pow": {
+            // A finite literal exponent (and a base that is not also a literal, which a C compiler could fold with its own libm) needs none
+            // of the wrapper's tests: 2 and 0.5 are V8's exact answers, any other finite exponent is the platform pow.
+            const ey = e.args[1]!;
+            if (ey.kind === "numLit" && Number.isFinite(ey.value) && e.args[0]!.kind !== "numLit") {
+              if (ey.value === 2) return finish(`scr_math_sq(${arg(0)})`);
+              if (ey.value === 0.5) return finish(`scr_math_pow_half(${arg(0)})`);
+              return finish(`scr_math_pow_lit(${arg(0)}, ${arg(1)})`);
+            }
             return finish(`scr_math_pow(${arg(0)}, ${arg(1)})`);
+          }
+          // Math.log and the members below are the fdlibm routines V8 runs (scr_fdlibm.c): C log() and the platform libm answer
+          // differently in the last bits for most of them, so none of those stand in. sqrt is the IEEE-exact instruction; sign is a compare.
           case "math.log":
-            return finish(`log(${arg(0)})`);
+            return finish(`scr_fd_log(${arg(0)})`);
+          case "math.sqrt":
+            return finish(`sqrt(${arg(0)})`);
+          case "math.sign":
+            return finish(`scr_math_sign(${arg(0)})`);
+          case "math.hypot":
+            return finish(`scr_fd_hypot2(${arg(0)}, ${arg(1)})`);
+          case "math.hypotArr":
+            return finish(`scr_math_hypot_arr(${arg(0)})`);
+          case "math.sin":
+            return finish(`scr_fd_sin(${arg(0)})`);
+          case "math.cos":
+            return finish(`scr_fd_cos(${arg(0)})`);
+          case "math.tan":
+            return finish(`scr_fd_tan(${arg(0)})`);
+          case "math.asin":
+            return finish(`scr_fd_asin(${arg(0)})`);
+          case "math.acos":
+            return finish(`scr_fd_acos(${arg(0)})`);
+          case "math.atan":
+            return finish(`scr_fd_atan(${arg(0)})`);
+          case "math.exp":
+            return finish(`scr_fd_exp(${arg(0)})`);
+          case "math.expm1":
+            return finish(`scr_fd_expm1(${arg(0)})`);
+          case "math.log1p":
+            return finish(`scr_fd_log1p(${arg(0)})`);
+          case "math.log2":
+            return finish(`scr_fd_log2(${arg(0)})`);
+          case "math.log10":
+            return finish(`scr_fd_log10(${arg(0)})`);
+          case "math.sinh":
+            return finish(`scr_fd_sinh(${arg(0)})`);
+          case "math.cosh":
+            return finish(`scr_fd_cosh(${arg(0)})`);
+          case "math.tanh":
+            return finish(`scr_fd_tanh(${arg(0)})`);
+          case "math.asinh":
+            return finish(`scr_fd_asinh(${arg(0)})`);
+          case "math.acosh":
+            return finish(`scr_fd_acosh(${arg(0)})`);
+          case "math.atanh":
+            return finish(`scr_fd_atanh(${arg(0)})`);
+          case "math.cbrt":
+            return finish(`scr_fd_cbrt(${arg(0)})`);
+          case "math.atan2":
+            return finish(`scr_fd_atan2(${arg(0)}, ${arg(1)})`);
+
           case "math.clz32":
             return finish(`scr_math_clz32(${arg(0)})`);
           // Math.imul — the ToUint32 product as an int32 (scr_lib.c).

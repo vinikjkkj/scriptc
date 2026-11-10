@@ -3954,6 +3954,33 @@ export type IrLibFn =
    * names (log(±0) is -Infinity, log(x<0) and log(NaN) are NaN, log(1) is
    * +0, log(+Infinity) is +Infinity). Never throws. */
   | "math.log"
+  /** The Math members Node answers with V8's own fdlibm port, and that no platform libm answers with the same last bits (scr_fdlibm.c, a unit linked
+   * only by a program that names one): `sin cos tan asin acos atan atan2 exp expm1 log1p log2 log10 sinh cosh tanh asinh acosh atanh cbrt`, and
+   * `Math.log` above. `math.sqrt` is IEEE-exact (the sqrt instruction) and `math.sign` is a compare; `math.hypot` is the two-argument form (the
+   * other arities lower through `math.hypotArr`). None throws. */
+  | "math.sqrt"
+  | "math.sign"
+  | "math.sin"
+  | "math.cos"
+  | "math.tan"
+  | "math.asin"
+  | "math.acos"
+  | "math.atan"
+  | "math.atan2"
+  | "math.exp"
+  | "math.expm1"
+  | "math.log1p"
+  | "math.log2"
+  | "math.log10"
+  | "math.sinh"
+  | "math.cosh"
+  | "math.tanh"
+  | "math.asinh"
+  | "math.acosh"
+  | "math.atanh"
+  | "math.cbrt"
+  | "math.hypot"
+  | "math.hypotArr"
   /** `Math.clz32(x)` — leading zeros of ToUint32(x), 32 for zero
    * (scr_lib.c: the ToUint32 wrap the bitwise six already use, then the
    * count). Never throws. */

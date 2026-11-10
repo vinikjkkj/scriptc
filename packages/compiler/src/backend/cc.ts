@@ -358,6 +358,8 @@ export interface CcOptions {
   dynInvoke?: boolean;
   /** The emitted code names scr_dyn_objinst_member_get_lit (index.ts reads the emitted text): compiles scr_dyn_oim.c. */
   dynOim?: boolean;
+  /** The emitted code names an fdlibm routine (Math.sin, exp, log, ...; index.ts reads the emitted text): compiles scr_fdlibm.c. */
+  fdlibm?: boolean;
   /** The program declares a class a dyn box can hold (moduleUsesDynClass): compiles scr_dyn_class.c. */
   dynClass?: boolean;
   /** The program holds a libCall of the checked-dynamic extensions unit (index.ts
@@ -2679,6 +2681,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...(opts.dynClass ? [rt(join(rtDir, "scr_dyn_class.c"))] : []),
     ...(opts.dynExt ? [rt(join(rtDir, "scr_dyn_ext.c"))] : []),
     ...(opts.dynOim ? [rt(join(rtDir, "scr_dyn_oim.c"))] : []),
+    ...(opts.fdlibm ? [rt(join(rtDir, "scr_fdlibm.c"))] : []),
     ...(opts.bufferVal ? [rt(join(rtDir, "scr_buffer_val.c"))] : []),
     ...(opts.bytesOwn ? [rt(join(rtDir, "scr_bytes_own.c"))] : []),
     ...(opts.dc ? [rt(join(rtDir, "scr_dc.c"))] : []),

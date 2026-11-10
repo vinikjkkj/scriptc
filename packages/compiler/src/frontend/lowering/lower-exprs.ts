@@ -15,7 +15,7 @@ import { strictAt } from "./lower-protoescape.js";
 import { EVAL_STATIC_CLASSES, RUNTIME_EMITTER_CLASS, STATS_FIELD_INDEX, DATE_T, strandTrap, BIGINT, BOOL, BYTES_ELEM_SIZE, BYTES_U8, bytesValueType, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, canBoxClassIntoDyn, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrGlobal, IrJsOp, IrLocal, type IrParam, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
 import { lowerEventProperty } from "./lower-event.js";
-import { cjsRequireAliasTargetOf, cjsRequireBindingValueOf, dynImportBindingDeclOf, requireDepValueOf } from "./lower-island.js";
+import { cjsRequireAliasTargetOf, cjsRequireBindingValueOf, dynImportBindingDeclOf, lowerMathElementRead, requireDepValueOf } from "./lower-island.js";
 import { liveExportsOf, liveBagRef, liveDepOfBinding, isValueUse, liveNamedTwinOf, liveRecvBagOf, liveKeyOf, liveIdentityRefOf, dynValueOf } from "./cjs-live-exports.js";
 import { cjsExportRecordOf, cjsExportRecordField, cjsExportRecordRead, cjsExportRecordReadDyn, cjsExportRecordRef, isBareExportsAccess } from "./cjs-export-record.js";
 import { lowerFetchProperty, lowerRequestInitLiteral } from "./lower-fetch.js";
@@ -6578,10 +6578,19 @@ const SPAWNOUT_OFF = process.env["SCRIPTC_SPAWNOUT_OFF"] === "1";
  * identifier/this/dot chain — returns null and the RUNG DECLINES, keeping
  * today's abort. A refusal replaced by a WRONG MESSAGE would be the worse
  * half of the trade this whole family exists to avoid. */
-function v8CalleeText(node: ts.Expression): string | null {
+export function v8CalleeText(node: ts.Expression): string | null {
+  return v8Render(node);
+}
+
+/** V8's CallPrinter spelling of an expression, as it prints a callee, for the shapes whose spelling is measured (see the rules above and
+ * below); null for any other shape. TypeScript-only syntax (`as`, `!`, `<T>x`, `satisfies`) and parentheses are erased before V8 sees the
+ * program, so they are not in the spelling. Measured against Node v24.15.0: a computed key prints inside brackets by the same rules
+ * (`T[a[1]]`, `T[f(...)]`, `T[(k + "")]`, `T[(typeof k)]`), a number key stays bracketed, a string key is the dot form, a call prints its
+ * callee and `(...)`, a binary, comparison or logical operation prints parenthesised with single spaces around the operator. */
+function v8Render(node: ts.Expression): string | null {
   let e: ts.Expression = node;
   for (;;) {
-    if (ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isNonNullExpression(e) || ts.isTypeAssertion(e)) {
+    if (ts.isParenthesizedExpression(e) || ts.isAsExpression(e) || ts.isNonNullExpression(e) || ts.isTypeAssertion(e) || ts.isSatisfiesExpression(e)) {
       e = e.expression;
       continue;
     }
@@ -6589,30 +6598,52 @@ function v8CalleeText(node: ts.Expression): string | null {
   }
   if (ts.isIdentifier(e)) return e.text;
   if (e.kind === ts.SyntaxKind.ThisKeyword) return "this";
+  if (e.kind === ts.SyntaxKind.TrueKeyword) return "true";
+  if (e.kind === ts.SyntaxKind.FalseKeyword) return "false";
+  if (e.kind === ts.SyntaxKind.NullKeyword) return "null";
+  if (ts.isNumericLiteral(e)) return String(Number(e.text.replace(/_/g, "")));
+  if (ts.isStringLiteralLike(e)) return JSON.stringify(e.text);
   if (ts.isPropertyAccessExpression(e)) {
     if (e.questionDotToken !== undefined || !ts.isIdentifier(e.name)) return null;
-    const r = v8CalleeText(e.expression);
+    const r = v8Render(e.expression);
     return r === null ? null : `${r}.${e.name.text}`;
   }
   if (ts.isElementAccessExpression(e)) {
     if (e.questionDotToken !== undefined) return null;
-    const r = v8CalleeText(e.expression);
+    const r = v8Render(e.expression);
     if (r === null) return null;
     let a: ts.Expression = e.argumentExpression;
-    for (;;) {
-      if (ts.isParenthesizedExpression(a) || ts.isAsExpression(a) || ts.isNonNullExpression(a) || ts.isTypeAssertion(a)) {
-        a = a.expression;
-        continue;
-      }
-      break;
-    }
-    if (ts.isIdentifier(a)) return `${r}[${a.text}]`;
-    if (ts.isStringLiteral(a)) return `${r}.${a.text}`;
-    if (ts.isNumericLiteral(a)) return `${r}[${a.text}]`;
-    return null;
+    while (ts.isParenthesizedExpression(a) || ts.isAsExpression(a) || ts.isNonNullExpression(a) || ts.isTypeAssertion(a) || ts.isSatisfiesExpression(a)) a = a.expression;
+    // A string-literal key is the dot form, whatever its text ("a-b" prints as T.a-b).
+    if (ts.isStringLiteralLike(a)) return `${r}.${a.text}`;
+    const k = v8Render(a);
+    return k === null ? null : `${r}[${k}]`;
+  }
+  if (ts.isCallExpression(e)) {
+    if (e.questionDotToken !== undefined) return null;
+    const c = v8Render(e.expression);
+    return c === null ? null : `${c}(...)`;
+  }
+  if (ts.isBinaryExpression(e)) {
+    const op = e.operatorToken.getText();
+    if (!V8_PRINTED_BINARY_OPS.has(op)) return null;
+    const l = v8Render(e.left);
+    const r = v8Render(e.right);
+    return l === null || r === null ? null : `(${l} ${op} ${r})`;
+  }
+  if (ts.isPrefixUnaryExpression(e)) {
+    const op = e.operator === ts.SyntaxKind.MinusToken ? "-" : e.operator === ts.SyntaxKind.PlusToken ? "+" : e.operator === ts.SyntaxKind.ExclamationToken ? "!" : e.operator === ts.SyntaxKind.TildeToken ? "~" : null;
+    if (op === null) return null;
+    const x = v8Render(e.operand);
+    return x === null ? null : `(${op}${x})`;
+  }
+  if (ts.isTypeOfExpression(e)) {
+    const x = v8Render(e.expression);
+    return x === null ? null : `(typeof ${x})`;
   }
   return null;
 }
+const V8_PRINTED_BINARY_OPS = new Set(["+", "-", "*", "/", "%", "**", "<", ">", "<=", ">=", "==", "!=", "===", "!==", "&&", "||", "??", "&", "|", "^", "<<", ">>", ">>>"]);
 
 /** THE CALL-CALLEE DESTINATION for `recordKeyReadAtUndefinedArm`.
  *
@@ -15323,6 +15354,10 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
    * string-key element access (`a["length"]`) and string indexing (`s[0]`
    * typechecks against the lib's index signature; use .charAt) stay out. */
   export function lowerElementAccess(L: Lowerer, expr: ts.ElementAccessExpression): IrExpr {
+    {
+      const mathRead = lowerMathElementRead(L, expr);
+      if (mathRead !== null) return mathRead;
+    }
     // `module.exports[k]` / `d[k]` over a LIVE export object (cjs-live-exports.ts): the bag's dynamic read.
     if (!expr.questionDotToken) {
       const lb = liveRecvBagOf(L, expr.expression, locOf(expr));

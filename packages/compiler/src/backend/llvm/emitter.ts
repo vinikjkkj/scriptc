@@ -317,6 +317,28 @@ const LIB_FN_SYMS: Record<string, string> = {
   // NaN/±Infinity guards are exactly where C disagrees — and clz32 is the
   // ToUint32 count. (Math.log takes the llvm.log.f64 intrinsic below.)
   "math.pow": "scr_math_pow",
+  // The fdlibm routines V8 runs (scr_fdlibm.c); the platform libm answers differently in the last bits.
+  "math.sin": "scr_fd_sin",
+  "math.cos": "scr_fd_cos",
+  "math.tan": "scr_fd_tan",
+  "math.asin": "scr_fd_asin",
+  "math.acos": "scr_fd_acos",
+  "math.atan": "scr_fd_atan",
+  "math.atan2": "scr_fd_atan2",
+  "math.exp": "scr_fd_exp",
+  "math.expm1": "scr_fd_expm1",
+  "math.log1p": "scr_fd_log1p",
+  "math.log2": "scr_fd_log2",
+  "math.log10": "scr_fd_log10",
+  "math.sinh": "scr_fd_sinh",
+  "math.cosh": "scr_fd_cosh",
+  "math.tanh": "scr_fd_tanh",
+  "math.asinh": "scr_fd_asinh",
+  "math.acosh": "scr_fd_acosh",
+  "math.atanh": "scr_fd_atanh",
+  "math.cbrt": "scr_fd_cbrt",
+  "math.hypot": "scr_fd_hypot2",
+  "math.hypotArr": "scr_math_hypot_arr",
   "math.clz32": "scr_math_clz32",
   "math.imul": "scr_math_imul",
   "math.fround": "scr_math_fround",
@@ -20107,12 +20129,45 @@ class LlEmitter {
       return { name: t, type: e.type };
     }
     if (e.fn === "math.log") {
-      // C log() IS the JS operation at every edge the spec names, and
-      // llvm.log.f64 is that same libm call — no wrapper needed.
+      // V8's fdlibm log (scr_fdlibm.c), not llvm.log.f64: the platform libm answers differently in the last bits for 0.36% of inputs.
       const v = this.emitExpr(e.args[0]!);
-      this.declare(`declare double @llvm.log.f64(double)`);
+      this.declare(`declare double @scr_fd_log(double)`);
       const t = B.tmp();
-      B.line(`${t} = call double @llvm.log.f64(double ${v.name})`);
+      B.line(`${t} = call double @scr_fd_log(double ${v.name})`);
+      return { name: t, type: e.type };
+    }
+    if (e.fn === "math.pow" && e.args[1]!.kind === "numLit" && Number.isFinite(e.args[1]!.value) && e.args[0]!.kind !== "numLit") {
+      // A finite literal exponent: 2 and 0.5 are V8's exact answers and every other one is the platform pow, none of it through the wrapper's tests.
+      const y = e.args[1]!.value;
+      const x = this.emitExpr(e.args[0]!);
+      const t = B.tmp();
+      if (y === 2) {
+        B.line(`${t} = fmul double ${x.name}, ${x.name}`);
+      } else if (y === 0.5) {
+        this.declare(`declare double @scr_math_pow_half(double)`);
+        B.line(`${t} = call double @scr_math_pow_half(double ${x.name})`);
+      } else {
+        this.declare(`declare double @scr_math_pow_lit(double, double)`);
+        B.line(`${t} = call double @scr_math_pow_lit(double ${x.name}, double ${f64Lit(y)})`);
+      }
+      return { name: t, type: e.type };
+    }
+    if (e.fn === "math.sqrt") {
+      // IEEE-exact: the intrinsic is one sqrt instruction.
+      const v = this.emitExpr(e.args[0]!);
+      this.declare(`declare double @llvm.sqrt.f64(double)`);
+      const t = B.tmp();
+      B.line(`${t} = call double @llvm.sqrt.f64(double ${v.name})`);
+      return { name: t, type: e.type };
+    }
+    if (e.fn === "math.sign") {
+      // +1 above zero, -1 below, and zero or NaN answer themselves (the sign of zero survives).
+      const v = this.emitExpr(e.args[0]!);
+      const gt = B.tmp(); const lt = B.tmp(); const a = B.tmp(); const t = B.tmp();
+      B.line(`${gt} = fcmp ogt double ${v.name}, ${f64Lit(0)}`);
+      B.line(`${lt} = fcmp olt double ${v.name}, ${f64Lit(0)}`);
+      B.line(`${a} = select i1 ${lt}, double ${f64Lit(-1)}, double ${v.name}`);
+      B.line(`${t} = select i1 ${gt}, double ${f64Lit(1)}, double ${a}`);
       return { name: t, type: e.type };
     }
     if (e.fn === "math.abs") {

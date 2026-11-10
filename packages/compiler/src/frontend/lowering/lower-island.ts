@@ -4,7 +4,9 @@
  * package boundary fences for node_modules-declared symbols. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { BOOL, DYN, F64, IrExpr, IrStmt, IrType, JSVAL, MAX_ISLAND_CALLBACK_ARITY, STRING, VOID, arrayOf, canBoxFuncIntoDyn, canMarshalTypedFuncIntoIsland, funcOf, islandPromisePayloadTag, isUnitType, typeEquals } from "../../ir/nodes.js";
+import { nodeThrowExpr } from "./lowerer.js";
+import { v8CalleeText } from "./lower-exprs.js";
+import { BOOL, DYN, F64, IrExpr, IrStmt, IrType, JSVAL, SrcLoc, MAX_ISLAND_CALLBACK_ARITY, STRING, VOID, arrayOf, canBoxFuncIntoDyn, canMarshalTypedFuncIntoIsland, funcOf, islandPromisePayloadTag, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ISLAND_SURFACE, IslandFnEntry, STATIC_MATH_CONSTS, STATIC_MATH_FNS, boundaryIntoIslandMsg } from "./surfaces.js";
 import { requiresDynamicApiDiag, requiresDynamicPackageDiag } from "../../diagnostics/diagnostic.js";
 import { canonicalBuiltinModule, isModuleExportsAccess, cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, cjsHiddenAccessorExport, cjsInsertionOrderOf, dynamicImportSpecOf, isCjsJsFile, locOf, npmPackageNameOf, npmStaticDepSf7, provenanceTwinDepSf7, requireSpecOf, resolveImport } from "../program.js";
@@ -2003,6 +2005,15 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
         }
         return acc;
       }
+      // Math.hypot is variadic in JS. Two arguments take the binary entry below; zero answers +0, and any other count builds the
+      // argument array (left to right, as JS evaluates them) for the runtime's n-ary form: V8's algorithm scales by the largest
+      // magnitude and sums with compensation, which no nesting of binary hypots reproduces.
+      if (name === "hypot" && call.arguments.length !== 2) {
+        if (call.arguments.length === 0) return { kind: "numLit", value: 0, type: F64, loc };
+        const elems = call.arguments.map((a) => L.lowerExprExpecting(a, F64));
+        const arr: IrExpr = { kind: "arrayLit", elems, type: arrayOf(F64), loc };
+        return { kind: "libCall", fn: "math.hypotArr", args: [arr], type: F64, loc };
+      }
       if (call.arguments.length === staticMath.arity) {
         // Math.fround over an untyped (dyn) argument is ToNumber, spelled the
         // way unary plus spells it (dyn.toNumber): fround accepts any value,
@@ -2017,6 +2028,19 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
           return L.coerceInto(a, raw, F64);
         });
         return { kind: "libCall", fn: staticMath.fn, args, type: F64, loc };
+      }
+      // Any other count (JavaScript allows it, the checker only objects in TypeScript files): a missing argument is undefined, which every
+      // member reads as NaN, and an extra one is evaluated and ignored. The arguments evaluate left to right into hidden locals first.
+      {
+        const stmts: IrStmt[] = [];
+        const refs: IrExpr[] = [];
+        for (const a of call.arguments) {
+          const al = L.declareHiddenLocal("%mathArg", F64);
+          stmts.push({ kind: "varDecl", localId: al.id, init: L.lowerExprExpecting(a, F64), loc });
+          refs.push({ kind: "varRef", localId: al.id, type: F64, loc });
+        }
+        const result = mathCallFor(name, refs, loc);
+        if (result !== null) return { kind: "seqExpr", stmts, result, type: F64, loc };
       }
     }
     // `Math.max(...xs)` / `Math.min(...xs)` over a number[]: a STATIC
@@ -2167,6 +2191,47 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
    * STATIC builds only — under --dynamic the island owns the value
    * position, exactly as the Number lift does. Memoized per program, per
    * member. Null for everything else. */
+  /** The lifted-closure VALUE of a Math member with a static lowering, for a use whose checker type is `tsType` (a property read, or a binding
+   * destructured off `Math`). Null when the member has none or the declared type does not map to the lifted signature. */
+  export function mathMemberValue(L: Lowerer, member: string, tsType: ts.Type, loc: SrcLoc): IrExpr | null {
+    const entry = own(STATIC_MATH_FNS, member);
+    if (entry === undefined) return null;
+    // Math.hypot is declared `(...values: number[]) => number`: a REST-slot signature, whose ABI is one number[] holding the call's arguments
+    // (call sites pack them). The lifted function hands that array to the n-ary runtime form; every other member is fixed-arity f64.
+    const variadic = member === "hypot";
+    const params: IrType[] = [];
+    if (variadic) params.push(arrayOf(F64));
+    else for (let i = 0; i < entry.arity; i++) params.push(F64);
+    const fnT: IrType = variadic ? ({ ...funcOf(params, F64), restIn: true } as IrType) : funcOf(params, F64);
+    const ft = L.mapTypeOf(tsType);
+    if (ft === null || ft === undefined || !typeEquals(ft, fnT)) return null;
+    const name = `%math.${member}.value`;
+    if (!L.liftedFns.some((f) => f.name === name)) {
+      const ids = params.map((_, i) => `v.${i}`);
+      L.liftedFns.push({
+        name,
+        params: ids.map((id, i) => ({ localId: id, name: `v${i}`, type: params[i]! })),
+        returnType: F64,
+        locals: ids.map((id, i) => ({ id, name: `v${i}`, type: params[i]!, mutable: false })),
+        body: [
+          {
+            kind: "return",
+            value: {
+              kind: "libCall",
+              fn: variadic ? "math.hypotArr" : entry.fn,
+              args: ids.map((id, i) => ({ kind: "varRef", localId: id, type: params[i]!, loc }) as IrExpr),
+              type: F64,
+              loc,
+            },
+            loc,
+          },
+        ],
+        loc,
+      });
+    }
+    return { kind: "closure", fnName: name, captures: [], type: fnT, loc };
+  }
+
   function mathStaticFnValueOf(
     L: Lowerer,
     expr: ts.PropertyAccessExpression,
@@ -2178,39 +2243,136 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
     // n-ary min/max fold it handles, which must keep their own paths.
     const parent = expr.parent;
     if (parent && ts.isCallExpression(parent) && parent.expression === expr) return null;
-    const entry = own(STATIC_MATH_FNS, member);
-    if (entry === undefined) return null;
-    const params: IrType[] = [];
-    for (let i = 0; i < entry.arity; i++) params.push(F64);
-    const fnT = funcOf(params, F64);
-    const ft = L.mapTypeOf(L.typeOf(expr));
-    if (ft === null || ft === undefined || !typeEquals(ft, fnT)) return null;
-    const loc = locOf(expr);
-    const name = `%math.${member}.value`;
-    if (!L.liftedFns.some((f) => f.name === name)) {
-      const ids = params.map((_, i) => `v.${i}`);
-      L.liftedFns.push({
-        name,
-        params: ids.map((id, i) => ({ localId: id, name: `v${i}`, type: F64 })),
-        returnType: F64,
-        locals: ids.map((id, i) => ({ id, name: `v${i}`, type: F64, mutable: false })),
-        body: [
-          {
-            kind: "return",
-            value: {
-              kind: "libCall",
-              fn: entry.fn,
-              args: ids.map((id) => ({ kind: "varRef", localId: id, type: F64, loc }) as IrExpr),
-              type: F64,
-              loc,
-            },
-            loc,
-          },
-        ],
-        loc,
-      });
+    return mathMemberValue(L, member, L.typeOf(expr), locOf(expr));
+  }
+
+  /** `const { sin, cos: c, PI } = Math` in a TypeScript file: each element is a Math member taken as a VALUE, which binds exactly what the
+   * property read `Math.<member>` is: a constant folds to its literal and a method is its lifted closure. Elements the member tables do
+   * not cover, defaults, rest and nested patterns refuse by name (nothing compiles to a silently different binding). Null when the
+   * declaration is not an object pattern over the Math global. */
+  export function lowerMathDestructure(L: Lowerer, decl: ts.VariableDeclaration, isLet: boolean): IrStmt[] | null {
+    if (decl.initializer === undefined || !ts.isObjectBindingPattern(decl.name)) return null;
+    if (!L.isStdlibGlobal(decl.initializer, "Math")) return null;
+    const out: IrStmt[] = [];
+    for (const el of decl.name.elements) {
+      const loc = locOf(el);
+      if (el.name === undefined) continue;
+      if (el.dotDotDotToken) L.unsupported("SC1031", el, "rest bindings over Math (the member set is not statically enumerable)");
+      if (el.initializer !== undefined) L.unsupported("SC1031", el, "binding defaults over Math");
+      if (!ts.isIdentifier(el.name)) L.unsupported("SC1031", el, "nested patterns over Math");
+      const nm = el.name as ts.Identifier;
+      const prop = el.propertyName ?? nm;
+      if (!ts.isIdentifier(prop) && !ts.isStringLiteralLike(prop)) L.unsupported("SC1031", el, "computed keys over Math");
+      const member = (prop as ts.Identifier | ts.StringLiteralLike).text;
+      const constant = own(STATIC_MATH_CONSTS, member);
+      let value: IrExpr | null = null;
+      if (constant !== undefined) value = { kind: "numLit", value: constant, type: F64, loc };
+      else value = mathMemberValue(L, member, L.typeOf(nm), loc);
+      if (value === null) {
+        L.unsupported("SC1090", el, `Math.${member} as a value (it is not a Math member with a native lowering)`);
+      }
+      const symbol = L.checker.getSymbolAtLocation(nm);
+      const g = symbol ? L.globalsBySymbol.get(symbol) : undefined;
+      if (g !== undefined) {
+        out.push({ kind: "assign", localId: g.id, value: L.coerceInto(nm, value!, g.type), loc });
+      } else {
+        const local = L.declareLocal(nm, nm.text, value!.type, isLet);
+        out.push({ kind: "varDecl", localId: local.id, init: value!, loc });
+      }
     }
-    return { kind: "closure", fnName: name, captures: [], type: fnT, loc };
+    return out;
+  }
+
+  /** The IR of `Math.<name>(args)` for already-lowered number arguments (hidden-local references or literals), with JS's arity rules: a missing
+   * argument is undefined, which every member reads as NaN, an extra one is ignored, hypot/min/max are variadic. Null for a name that is not a
+   * Math method with a native lowering. */
+  function mathCallFor(name: string, a: IrExpr[], loc: SrcLoc): IrExpr | null {
+    const entry = own(STATIC_MATH_FNS, name);
+    if (entry === undefined) return null;
+    const nan: IrExpr = { kind: "numLit", value: NaN, type: F64, loc };
+    if (name === "max" || name === "min") {
+      if (a.length === 0) return { kind: "numLit", value: name === "max" ? -Infinity : Infinity, type: F64, loc };
+      let acc = a[0]!;
+      for (let i = 1; i < a.length; i++) acc = { kind: "libCall", fn: entry.fn, args: [acc, a[i]!], type: F64, loc };
+      return acc;
+    }
+    if (name === "hypot" && a.length !== 2) {
+      if (a.length === 0) return { kind: "numLit", value: 0, type: F64, loc };
+      return { kind: "libCall", fn: "math.hypotArr", args: [{ kind: "arrayLit", elems: a, type: arrayOf(F64), loc }], type: F64, loc };
+    }
+    const args: IrExpr[] = [];
+    for (let i = 0; i < entry.arity; i++) args.push(i < a.length ? a[i]! : nan);
+    return { kind: "libCall", fn: entry.fn, args, type: F64, loc };
+  }
+
+  /** `Math[key](args)`: the member chosen by a string KEY. A literal key is `Math.<key>(args)` itself; a computed key picks among the Math
+   * methods by comparing the key with each name (the arguments evaluate once, after the key, as JS orders them), and a key naming no
+   * method (a constant, or nothing) throws Node's catchable "<callee> is not a function" TypeError after the arguments. Null when the
+   * callee is not an element access over the Math global with a string-typed key, or an argument is a spread. */
+  export function lowerMathElementCall(L: Lowerer, expr: ts.CallExpression): IrExpr | null {
+    let callee: ts.Expression = expr.expression;
+    while (ts.isParenthesizedExpression(callee)) callee = callee.expression;
+    if (!ts.isElementAccessExpression(callee) || callee.questionDotToken !== undefined || expr.questionDotToken !== undefined) return null;
+    if (!L.isStdlibGlobal(callee.expression, "Math")) return null;
+    if (expr.arguments.some((x) => ts.isSpreadElement(x))) return null;
+    const loc = locOf(expr);
+    // Node prints V8's own spelling of the callee (v8CalleeText); a spelling it cannot reproduce declines (the fence stays) rather than risk a wrong message.
+    const text = v8CalleeText(callee);
+    if (text === null) return null;
+    const keyNode = callee.argumentExpression;
+    const keyT = L.mapTypeOf(L.typeOf(keyNode));
+    const literal = ts.isStringLiteralLike(keyNode) ? keyNode.text : null;
+    // A string key picks a member; a number or boolean key (ToPropertyKey: "0", "1.5", "true", ...) names no Math method, so the call throws after the
+    // key and the arguments have been evaluated.
+    const nonStringKey = literal === null && keyT !== null && keyT !== undefined && (keyT.kind === "f64" || keyT.kind === "bool");
+    if (literal === null && !nonStringKey && (keyT === null || keyT === undefined || keyT.kind !== "string")) return null;
+    const notFn = (): IrExpr => nodeThrowExpr(1, "", `${text} is not a function`, F64, loc);
+    const stmts: IrStmt[] = [];
+    // The key first, then the arguments, each into a hidden local so the chain below reads values, not re-evaluations.
+    let keyRef: IrExpr | null = null;
+    if (nonStringKey) {
+      const kl = L.declareHiddenLocal("%mathKey", keyT!);
+      stmts.push({ kind: "varDecl", localId: kl.id, init: L.lowerExpr(keyNode), loc });
+    } else if (literal === null) {
+      const kl = L.declareHiddenLocal("%mathKey", STRING);
+      stmts.push({ kind: "varDecl", localId: kl.id, init: L.lowerExprExpecting(keyNode, STRING), loc });
+      keyRef = { kind: "varRef", localId: kl.id, type: STRING, loc };
+    }
+    const refs: IrExpr[] = [];
+    for (const arg of expr.arguments) {
+      const al = L.declareHiddenLocal("%mathArg", F64);
+      stmts.push({ kind: "varDecl", localId: al.id, init: L.lowerExprExpecting(arg, F64), loc });
+      refs.push({ kind: "varRef", localId: al.id, type: F64, loc });
+    }
+    let result: IrExpr;
+    if (literal !== null) {
+      result = mathCallFor(literal, refs, loc) ?? notFn();
+    } else if (nonStringKey) {
+      result = notFn();
+    } else {
+      result = notFn();
+      const names = Object.keys(STATIC_MATH_FNS).reverse();
+      for (const nm of names) {
+        const call = mathCallFor(nm, refs, loc);
+        if (call === null) continue;
+        const cond: IrExpr = { kind: "strEq", negated: false, left: keyRef!, right: { kind: "strLit", value: nm, type: STRING, loc }, type: BOOL, loc };
+        result = { kind: "ternary", cond, then: call, else_: result, type: F64, loc };
+      }
+    }
+    return { kind: "seqExpr", stmts, result, type: F64, loc };
+  }
+
+  /** `Math["PI"]` / `Math["sqrt"]` read with a literal key: the property read itself. Null otherwise. */
+  export function lowerMathElementRead(L: Lowerer, expr: ts.ElementAccessExpression): IrExpr | null {
+    if (expr.questionDotToken !== undefined || !ts.isStringLiteralLike(expr.argumentExpression)) return null;
+    if (!L.isStdlibGlobal(expr.expression, "Math")) return null;
+    const parent = expr.parent;
+    if (parent && ts.isCallExpression(parent) && parent.expression === expr) return null;
+    const member = expr.argumentExpression.text;
+    const constant = own(STATIC_MATH_CONSTS, member);
+    const loc = locOf(expr);
+    if (constant !== undefined) return { kind: "numLit", value: constant, type: F64, loc };
+    return mathMemberValue(L, member, L.typeOf(expr), loc);
   }
 
 /** The npm package a type is declared by ("commander", "@scope/pkg"),
