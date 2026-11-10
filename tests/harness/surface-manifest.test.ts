@@ -113,6 +113,9 @@ const PROBES: Probe[] = [
   { id: "stdlib.array.push", source: "const xs: number[] = [1];\nxs.push(2);\nconsole.log(xs.length);\n" },
   { id: "stdlib.math.floor", source: "console.log(Math.floor(1.5));\n" },
   { id: "stdlib.math.pow", source: "console.log(Math.pow(2, 10));\n" },
+  // The fdlibm family and sqrt graduated from the engine to native lowerings (scr_fdlibm.c): their samples are static now.
+  { id: "stdlib.math.sqrt", source: "console.log(Math.sqrt(2));\n" },
+  { id: "stdlib.math.cbrt", source: "console.log(Math.cbrt(27));\n" },
   { id: "stdlib.math.PI", source: "console.log(Math.PI);\n" },
   { id: "stdlib.map.has", source: 'const m = new Map<string, number>();\nm.set("a", 1);\nconsole.log(m.has("a"));\n' },
   { id: "stdlib.date.now", source: "console.log(Date.now() > 0);\n" },
@@ -136,8 +139,6 @@ const PROBES: Probe[] = [
   },
   // status dynamic-only — refused with the entry's code statically,
   // analyzed clean under --dynamic
-  { id: "stdlib.math.sqrt", source: "console.log(Math.sqrt(2));\n" },
-  { id: "stdlib.math.cbrt", source: "console.log(Math.cbrt(27));\n" },
   { id: "stdlib.number.toPrecision", source: "const p = 19.99;\nconsole.log(p.toPrecision(4));\n" },
   { id: "stdlib.string.at", source: 'console.log("abc".at(1));\n' },
   { id: "diagnostic.sc2011", source: "const y: any = 1;\nconst { x } = y;\nconsole.log(0);\n" },
@@ -178,7 +179,8 @@ describe("surface manifest sampling harness", () => {
       byStatus.set(entry!.status, (byStatus.get(entry!.status) ?? 0) + 1);
     }
     expect(byStatus.get("static") ?? 0).toBeGreaterThanOrEqual(5);
-    expect(byStatus.get("dynamic-only") ?? 0).toBeGreaterThanOrEqual(4);
+    // Three: the dynamic-only class is being driven to empty (Math graduated), and each remaining sample is a defect queued to graduate.
+    expect(byStatus.get("dynamic-only") ?? 0).toBeGreaterThanOrEqual(3);
     expect(byStatus.get("unsupported") ?? 0).toBeGreaterThanOrEqual(4);
   });
 
