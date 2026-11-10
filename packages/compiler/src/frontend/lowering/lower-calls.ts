@@ -629,10 +629,26 @@ function lowerWrappedMemberCall(L: Lowerer, call: ts.CallExpression): IrExpr | n
   const rn = node.expression;
   const rt = L.mapTypeOf(L.typeOf(rn));
   const anyLike = (L.typeOf(rn).flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0;
-  if (!anyLike && (rt === null || (rt.kind !== "dyn" && rt.kind !== "object"))) return null;
+  if (!anyLike && (rt === null || (rt.kind !== "dyn" && rt.kind !== "object" && rt.kind !== "record"))) return null;
   if (rt !== null && rt.kind === "object" && !L.classes.has(rt.className)) return null;
   const loc = locOf(call);
   let recv = L.lowerExpr(rn);
+  // An INTERFACE-typed receiver that holds a compiled class instance (`const a: Adder = new Queue()`) or a view of a dynamic object (a checked cast's
+  // record of methods): the member is whatever the object has, run with the object as `this`. A plain record (an object literal) has real function
+  // fields and keeps the typed path.
+  if (recv.type.kind === "record") {
+    // The shape is shared by every record of the interface, views and literals alike, so WHICH one this value is is a run-time answer
+    // (recordIsView): a view calls through the object it views, any other record through itself boxed.
+    if (L.shapes.get(recv.type.shapeId)?.view !== true || !L.dynConvertible(recv.type)) return null;
+    const rid = recv.type.shapeId;
+    const recT = recv.type;
+    const tmp = L.declareHiddenLocal("%viewRecv", recT);
+    const ref = (): IrExpr => ({ kind: "varRef", localId: tmp.id, type: recT, loc });
+    const viewOf: IrExpr = { kind: "recordView", obj: ref(), shapeId: rid, type: DYN, loc };
+    const selfOf: IrExpr = internalBox(L, { kind: "dynFrom", value: ref(), type: DYN, loc });
+    const choice: IrExpr = { kind: "ternary", cond: { kind: "recordIsView", obj: ref(), shapeId: rid, type: BOOL, loc }, then: viewOf, else_: selfOf, type: DYN, loc };
+    recv = { kind: "seqExpr", stmts: [{ kind: "varDecl", localId: tmp.id, init: recv, loc }], result: choice, type: DYN, loc };
+  }
   if (recv.type.kind === "object") recv = internalBox(L, { kind: "dynFrom", value: recv, type: DYN, loc });
   if (recv.type.kind !== "dyn") return null;
   const callE = dynInvokeWithSpread(L, call, recv, node);
