@@ -27462,6 +27462,30 @@
     "<repo>/tests/corpus/24961-the-function-constructor-reached-through-a-prototype-still-runs-its-text.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/24940-math-members-are-native-and-print-the-bits-node-prints.ts": {
+   "order": [
+    "<repo>/tests/corpus/24940-math-members-are-native-and-print-the-bits-node-prints.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24941-math-members-as-values-aliases-and-destructured-bindings.ts": {
+   "order": [
+    "<repo>/tests/corpus/24941-math-members-as-values-aliases-and-destructured-bindings.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24942-math-members-called-through-a-string-key.ts": {
+   "order": [
+    "<repo>/tests/corpus/24942-math-members-called-through-a-string-key.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24943-math-members-with-missing-and-extra-arguments.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24943-math-members-with-missing-and-extra-arguments.cjs"
+   ],
+   "diags": []
   }
  }
 }
