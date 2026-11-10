@@ -220,6 +220,19 @@ void scr_box_set_ref(ScrBox *b, void *v) {
   scr_box_release_payload(b, old);
 }
 
+/* The accumulator move for a CAPTURED string (`result += x` where `result` lives in a box). `acc` is the +1 the caller read from the box BEFORE it evaluated
+ * the operand (JS reads the left side first). If the box still holds exactly that string, the box's own reference is given up -- the slot becomes empty,
+ * the caller stores the concat result next -- so `acc` is the sole owner (rc == 1) and scr_str_concat appends in place. If the operand's code reassigned the
+ * variable meanwhile the box is left alone and `acc` keeps whatever count it has: a shared string is copied, never mutated. Returns acc. */
+ScrStr *scr_box_str_unshare(ScrBox *b, ScrStr *acc) {
+  if (scr_box_ptr(b) == (void *)acc) {
+    void *none = NULL;
+    memcpy(&b->slot, &none, sizeof none);
+    scr_str_release(acc);
+  }
+  return acc;
+}
+
 /* ── closures ─────────────────────────────────────────────────────────── */
 
 static void scr_closure_trace(void *o, ScrTraceVisit visit, void *ctx) {

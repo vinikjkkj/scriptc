@@ -4619,6 +4619,7 @@ class LlEmitter {
     s: Extract<IrStmt, { kind: "assign" }>,
     b: { kind: "global" | "local" | "boxed"; slot: string; type: IrType; local?: IrLocal },
   ): boolean {
+    if (b.kind === "boxed" && b.local?.tdz !== true && b.type.kind === "string") return this.emitBoxedStrAccum(s, b);
     if (b.kind !== "local" || b.local?.tdz === true) return false;
     // A string-specific rewrite, so a string-specific test: what it
     // rewrites into is scr_str_concat BY NAME, not a type-directed adapter.
@@ -4636,6 +4637,25 @@ class LlEmitter {
     const t = B.tmp();
     B.line(`${t} = call ptr @scr_str_concat(ptr ${acc}, ptr ${r.name})`);
     B.line(`store ptr ${t}, ptr ${b.slot}`);
+    return true;
+  }
+
+  /** `s += x` over a CAPTURED (boxed) string local: the C lane's emitBoxedStrAccum, statement for statement -- the accumulator is read first (JS order), the
+   * operand runs, and `scr_box_str_unshare` gives up the box's own reference only if the box still holds that string, so concat appends in place at rc == 1. */
+  private emitBoxedStrAccum(s: Extract<IrStmt, { kind: "assign" }>, b: { kind: "global" | "local" | "boxed"; slot: string; type: IrType; local?: IrLocal }): boolean {
+    const v = s.value;
+    if (v.kind !== "strConcat" || v.type.kind !== "string") return false;
+    if (v.left.kind !== "varRef" || v.left.localId !== s.localId) return false;
+    const B = this.B;
+    const acc = this.emitExpr(v.left);
+    const r = this.emitExpr(v.right);
+    this.declare(`declare ptr @scr_box_str_unshare(ptr, ptr)`);
+    this.declare(`declare ptr @scr_str_concat(ptr, ptr)`);
+    const box = this.loadBox(b.slot);
+    B.line(`call ptr @scr_box_str_unshare(ptr ${box}, ptr ${acc.name}) ; += accumulator: the box's own reference moves into the concat`);
+    const t = B.tmp();
+    B.line(`${t} = call ptr @scr_str_concat(ptr ${acc.name}, ptr ${r.name})`);
+    this.boxSet(this.loadBox(b.slot), b.type, t);
     return true;
   }
 

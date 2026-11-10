@@ -2480,6 +2480,7 @@ void *scr_box_get_ref(ScrBox *b); /* returns +1 */
 void scr_box_set_f64(ScrBox *b, double v);
 void scr_box_set_bool(ScrBox *b, bool v);
 void scr_box_set_ref(ScrBox *b, void *v); /* releases old, owns new */
+ScrStr *scr_box_str_unshare(ScrBox *b, ScrStr *acc); /* captured `s += x`: give up the box's own ref when it still holds acc */
 
 typedef struct ScrClosure {
   size_t rc; /* SIZE_MAX = immortal (interned top-level function value) */

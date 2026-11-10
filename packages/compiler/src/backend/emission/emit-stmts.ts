@@ -1660,6 +1660,28 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
     return t.name;
   }
 
+/** `s += x` over a CAPTURED (boxed) string local: the same append-in-place the non-boxed arm gets, with JS's evaluation order kept exactly.
+ *
+ * The accumulator is READ FIRST (the +1 `scr_box_get_ref` answers), then the operand runs -- it may call user code (a dyn operand's toString/valueOf)
+ * that reassigns the variable through another closure, and the old value is the one JS concatenates. Only then, with the operand's value in hand,
+ * `scr_box_str_unshare` gives up the box's own reference IF the box still holds that very string: the accumulator is then the sole owner (rc == 1) and
+ * `scr_str_concat` appends in place instead of copying, which is what makes a captured accumulator O(n) instead of O(n^2) in bytes. A box that
+ * changed meanwhile is left alone; a string anyone else holds (rc > 1) is copied, never mutated. The slot is empty only between the unshare and the
+ * store, a window holding nothing but the concat call, which traps instead of unwinding. */
+function emitBoxedStrAccum(E: CEmitter, s: Extract<IrStmt, { kind: "assign" }>, local: IrLocal): boolean {
+  const v = s.value;
+  if (v.kind !== "strConcat" || v.type.kind !== "string") return false;
+  if (v.left.kind !== "varRef" || v.left.localId !== s.localId) return false;
+  const target = mangleLocal(s.localId);
+  const acc = E.newTemp(local.type, `(ScrStr *)scr_box_get_ref(${target})`);
+  const r = E.emitExpr(v.right);
+  E.line(`scr_box_str_unshare(${target}, ${acc.name}); /* += accumulator: the box's own reference moves into the concat */`);
+  const res = E.newTemp(v.type, `scr_str_concat(${acc.name}, ${r.name})`);
+  E.moveTemp(res);
+  E.line(`scr_box_set_ref(${target}, ${res.name});${E.srcComment(s.loc)}`);
+  return true;
+}
+
 /** `s += x` (and its spelled-out twin `s = s + x`) over a NON-BOXED string
  * local: the accumulator's OWN reference moves into the concat instead of a
  * second one being retained beside it.
@@ -1715,6 +1737,7 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
  * right-nested spelling `s += a + b` IS covered, and so is the two-piece
  * template literal, which lowers to one strConcat over the binding. */
 function emitStrAccum(E: CEmitter, s: Extract<IrStmt, { kind: "assign" }>, local: IrLocal): boolean {
+  if (local.boxed && !local.tdz && local.type.kind === "string") return emitBoxedStrAccum(E, s, local);
   if (local.boxed || local.tdz) return false;
   // A string-specific rewrite, so a string-specific test: what it rewrites
   // into is scr_str_concat BY NAME, not a type-directed adapter.
