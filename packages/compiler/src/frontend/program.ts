@@ -41,7 +41,7 @@
  *    that path (no snapshot pins it). */
 
 import { builtinModules } from "node:module";
-import { readdirSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import * as ts from "./ts7/adapter.js";
 import type { ScrDiagnostic } from "../diagnostics/diagnostic.js";
@@ -326,6 +326,12 @@ function contextImportRoots(program: ts.Program): string[] {
       if (ts.isCallExpression(n) && n.expression.kind === ts.SyntaxKind.ImportKeyword && n.arguments.length === 1) {
         const pat = contextImportPattern(n.arguments[0]!);
         if (pat !== null) for (const f of contextImportFiles(sf.fileName, pat)) if (!f.endsWith(".json") && !have.has(f)) add.add(f);
+        // A LITERAL relative specifier naming a script file the program does not hold (tsgo does not chase a dynamic import of a .cjs): a root too.
+        const a0 = n.arguments[0]!;
+        if (ts.isStringLiteralLike(a0) && (a0.text.startsWith("./") || a0.text.startsWith("../")) && /\.(cjs|mjs|js)$/.test(a0.text)) {
+          const f = resolve(dirname(sf.fileName), a0.text);
+          if (!have.has(f) && existsSync(f)) add.add(f);
+        }
       }
       return undefined;
     });
