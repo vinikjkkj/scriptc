@@ -2331,6 +2331,10 @@ export class Lowerer {
   readonly dynNsBuilders = new Map<ts.SourceFile, string>();
   /** The ORDERED import() builders of the program's own modules (`%dynimp.<tag>`: park one microtask, run the module's init, answer the namespace). */
   readonly dynImportBuilders = new Map<ts.SourceFile, string>();
+  /** The interned namespace-object functions (`%dynnsobj.<tag>`). */
+  readonly dynNsObjFns = new Map<ts.SourceFile, string>();
+  /** Per-importer functions resolving a runtime import() specifier (`%dynimpc.<n>`). */
+  readonly dynImportComputed = new Map<string, string>();
   /** The require() value builders (module.exports order), apart from the import() namespace builders. */
   readonly dynExportsBuilders = new Map<ts.SourceFile, string>();
   /** Per CommonJS module: the dyn global holding the members `module.exports`

@@ -1158,6 +1158,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "dyn.requireFn": "scr_dyn_require_fn",
   "dyn.fnIsSig": "scr_dyn_fn_is_sig",
   "dyn.tostrClosure": "scr_dyn_tostr_closure",
+  "dyn.moduleNsFinish": "scr_dyn_module_ns_finish",
+  "dyn.integrity": "scr_dyn_integrity",
   "dyn.thisPush": "scr_dyn_this_push_dyn",
   "dyn.thisPop": "scr_dyn_this_pop",
   "insp.dyn": "scr_insp_dyn",

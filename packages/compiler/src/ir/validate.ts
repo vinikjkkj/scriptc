@@ -1325,6 +1325,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "dyn.fnIsSig": { argTypes: [DYN, STRING], result: BOOL },
   "dyn.requireFn": { argTypes: [DYN, STRING, BOOL], result: VOID },
   "dyn.tostrClosure": { argTypes: [DYN], result: { kind: "func", params: [], ret: STRING } },
+  "dyn.moduleNsFinish": { argTypes: [DYN], result: DYN },
+  "dyn.integrity": { argTypes: [DYN, F64], result: BOOL },
   "dyn.thisPush": { argTypes: [DYN], result: VOID },
   "dyn.thisPop": { argTypes: [], result: VOID },
   "process.getuid": { argTypes: [], result: F64 },

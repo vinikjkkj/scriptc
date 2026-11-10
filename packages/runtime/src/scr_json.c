@@ -3306,6 +3306,41 @@ ScrDyn *scr_dyn_mark_module_ns(ScrDyn *d) {
   return d;
 }
 
+ScrDyn *scr_dyn_module_ns_finish(ScrDyn *d) {
+  /* A module namespace has a null prototype (Object.getPrototypeOf answers null, `"toString" in ns` is false). */
+  if (d != NULL && d->kind == SCR_DYN_OBJ) d->null_proto = true;
+  return scr_dyn_retain(scr_dyn_mark_module_ns(d)); /* +1 */
+}
+
+/* Object.isFrozen (which 0) / Object.isSealed (1) / Object.isExtensible (2) over a checked-dynamic value. A primitive is frozen, sealed and
+ * not extensible (ES2015); a module namespace is sealed (every key non-configurable) but not frozen (its data keys stay writable) and not
+ * extensible; a frozen dyn array answers all three as frozen; every other dynamic object or array is an ordinary extensible one. */
+bool scr_dyn_integrity(const ScrDyn *d, double which) {
+  bool frozen = false, sealed = false, ext = true;
+  switch (d == NULL ? SCR_DYN_UNDEF : d->kind) {
+  case SCR_DYN_OBJ:
+    if (d->module_ns) { sealed = true; ext = false; }
+    break;
+  case SCR_DYN_ARR:
+    if (d->null_proto) { frozen = sealed = true; ext = false; }
+    break;
+  case SCR_DYN_FUNC:
+  case SCR_DYN_MAP:
+  case SCR_DYN_PROMISE:
+  case SCR_DYN_BYTES:
+  case SCR_DYN_ARRBUF:
+  case SCR_DYN_HANDLE:
+  case SCR_DYN_OBJINST:
+  case SCR_DYN_PROXY:
+  case SCR_DYN_JSVAL:
+    break;
+  default: /* null, undefined, boolean, number, string, bigint */
+    frozen = sealed = true; ext = false;
+    break;
+  }
+  return which == 0.0 ? frozen : which == 1.0 ? sealed : ext;
+}
+
 ScrDyn *scr_dyn_new_buffer_copy(const ScrBytes *b) {
   ScrDyn *d = scr_dyn_new_bytes_copy(b);
   d->buffer = true;

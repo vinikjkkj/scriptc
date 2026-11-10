@@ -14355,9 +14355,15 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     // reference would need the runtime frozen bit (strict mode throws).
     // Object.isFrozen / Object.isSealed over a typed array answer the frozen bit (the runtime has no seal-without-freeze, so a sealed array IS a frozen one);
     // over a primitive they answer true (ES2015).
-    if ((member === "isFrozen" || member === "isSealed") && call.arguments.length === 1 && !ts.isSpreadElement(call.arguments[0]!)) {
+    if ((member === "isFrozen" || member === "isSealed" || member === "isExtensible") && call.arguments.length === 1 && !ts.isSpreadElement(call.arguments[0]!)) {
       const probedArg = probeLower(L, call.arguments[0]!);
-      if (probedArg !== null && (probedArg.type.kind === "array" || probedArg.type.kind === "string" || probedArg.type.kind === "f64" || probedArg.type.kind === "bool" || probedArg.type.kind === "symbol" || isUnitType(probedArg.type))) {
+      // A checked-dynamic value answers by its kind (a module namespace is sealed, not frozen, not extensible; a primitive is frozen and sealed).
+      if (probedArg !== null && probedArg.type.kind === "dyn") {
+        const subject = L.lowerExpr(call.arguments[0]!);
+        const which = member === "isFrozen" ? 0 : member === "isSealed" ? 1 : 2;
+        return { kind: "libCall", fn: "dyn.integrity", args: [subject, { kind: "numLit", value: which, type: F64, loc: locOf(call) }], type: BOOL, loc: locOf(call) };
+      }
+      if (member !== "isExtensible" && probedArg !== null && (probedArg.type.kind === "array" || probedArg.type.kind === "string" || probedArg.type.kind === "f64" || probedArg.type.kind === "bool" || probedArg.type.kind === "symbol" || isUnitType(probedArg.type))) {
         const subject = L.lowerExpr(call.arguments[0]!);
         if (subject.type.kind === "array") return { kind: "libCall", fn: "arr.isFrozen", args: [subject], type: BOOL, loc: locOf(call) };
         return { kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: subject, loc: locOf(call) }], result: { kind: "boolLit", value: true, type: BOOL, loc: locOf(call) }, type: BOOL, loc: locOf(call) };

@@ -1440,8 +1440,10 @@ ScrDyn *scr_dyn_sym_tag(ScrDyn *recv) {
   case SCR_DYN_BOOL:
   case SCR_DYN_BIG:
   case SCR_DYN_ARR:
-  case SCR_DYN_OBJ:
   case SCR_DYN_FUNC:
+    break;
+  case SCR_DYN_OBJ:
+    if (recv->module_ns) tag = "Module";
     break;
   default:
     scr_dsym_fence(recv, "reading Symbol.toStringTag of");

@@ -305,6 +305,7 @@ ScrStr *scr_dyn_object_to_string(const ScrDyn *d) {
     break;
   case SCR_DYN_OBJ:
     if (scr_dyn_is_error_encoding(d)) { tag = "Error"; break; }
+    if (d->module_ns) { tag = "Module"; break; } /* a module namespace's own Symbol.toStringTag */
     for (int pass = 0; pass < 2; pass++) {
      /* pass 1 reads the HIDDEN table: a symbol-keyed member of a converted record is non-enumerable
       * (scr_dyn_obj_set_symkey), so the tag lives there as a [value, ...] descriptor. */
