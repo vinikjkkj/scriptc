@@ -470,6 +470,7 @@ export interface GenericInstance {
     ) {
       return { type: DYN, mode: param.questionToken ? "omittable" : "required" };
     }
+    if (paramOfDisagreeingUnion(L, param)) return { type: DYN, mode: param.questionToken ? "omittable" : "required" };
     const type = L.irTypeOf(param.name);
     // A JSDoc scalar claim the program's flow does not prove (jsdoc-param-plan.ts): the representation of the flow, never a throw where Node runs.
     // The slot is the checked-dynamic one for both plans: undefined is an inhabitant of it, a value of another kind is too, and reads of the parameter stay
@@ -491,6 +492,25 @@ export interface GenericInstance {
     return { type, mode: param.questionToken ? "omittable" : "required" };
   }
 
+
+/** An UNANNOTATED parameter of a function expression whose contextual type is a UNION of function types that disagree at this position
+ * (`CallbackFunction<T> = ((err: null, val: T) => void) | ((err: Error) => void)`, standard-as-callback's nodeback): the checker types the parameter from
+ * one arm (`err: null`, and `never` after `if (err)`), yet the callee may call through any arm and pass an Error. The slot AND every read of it are
+ * the checked-dynamic value, as for an implicit-any parameter, so no arm's claim can throw "expected null | undefined, got object" at run time. */
+export function paramOfDisagreeingUnion(L: Lowerer, param: ts.ParameterDeclaration): boolean {
+  if (param.type !== undefined || !ts.isIdentifier(param.name) || !(ts.isFunctionExpression(param.parent) || ts.isArrowFunction(param.parent))) return false;
+  const ctxT = L.checker.getContextualType(param.parent);
+  if (ctxT === undefined || !ctxT.isUnionType()) return false;
+  const sigs = ts.constituentTypes(ctxT).flatMap((t) => L.checker.getCallSignatures(t));
+  const idx = param.parent.parameters.indexOf(param);
+  if (sigs.length < 2 || idx < 0) return false;
+  const seen = new Set<string>();
+  for (const sg of sigs) {
+    const ps = sg.getParameters();
+    seen.add(idx < ps.length ? L.checker.typeToString(L.checker.getTypeOfSymbol(ps[idx]!)) : "<absent>");
+  }
+  return seen.size > 1;
+}
 
 /** ParamShapes for a whole parameter list. */
 /** A `this` PARAMETER declaration (`function f(this: void, x: {}) ...`)
@@ -15235,7 +15255,7 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverr
    * the string against number and throw. The dyn value is the truth; its
    * member and operator reads go through the dyn paths. */
   export function jsLetReadStaysDyn(L: Lowerer, node: ts.Node): boolean {
-    return widenedJsLetOf(L, node) || widenedCallBindingRead(L, node) || callOfWidenedLetReturner(L, node) || widenedJsDocParamRead(L, node);
+    return widenedJsLetOf(L, node) || widenedCallBindingRead(L, node) || callOfWidenedLetReturner(L, node) || widenedJsDocParamRead(L, node) || widenedUnionParamRead(L, node);
   }
 
 /** A read of a parameter whose JSDoc scalar claim the program does not prove (jsdoc-param-plan.ts): the checked-dynamic value itself, as for a widened let. */
@@ -15246,6 +15266,16 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverr
     const sym = L.resolveValueSymbol(n);
     const d = sym ? L.checker.valueDeclarationOf(sym) : undefined;
     return d !== undefined && ts.isParameter(d) && JSDOC_PARAM_PLANS.has(d);
+  }
+
+/** A read of a parameter that paramOfDisagreeingUnion made checked-dynamic. */
+  function widenedUnionParamRead(L: Lowerer, node: ts.Node): boolean {
+    let n: ts.Node = node;
+    while (ts.isParenthesizedExpression(n)) n = n.expression;
+    if (!ts.isIdentifier(n)) return false;
+    const sym = L.resolveValueSymbol(n);
+    const d = sym ? L.checker.valueDeclarationOf(sym) : undefined;
+    return d !== undefined && ts.isParameter(d) && paramOfDisagreeingUnion(L, d);
   }
 
 /** A read of a binding that holds a widened call's result (jsWidenedCallBinding): the dyn value itself, as for a widened let. */
