@@ -1,0 +1,8 @@
+dynamic-import-ts-json-attribute/main.ts:4:17 - error SC1090: dynamic import() of a TypeScript module with a json import attribute (Node evaluates the module a second time into a separate instance, which a compiled program's single set of module globals cannot hold) is not supported yet
+
+  3 | export {};
+  4 | const m = await import("./mod.ts", { with: { type: "json" } });
+    |                 ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  5 | console.log(m);
+
+  hint: drop the attribute for a TypeScript module, or import a .json file
