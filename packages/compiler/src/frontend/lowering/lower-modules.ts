@@ -724,7 +724,7 @@ function liftableLocalClass(L: Lowerer, sf: ts.SourceFile, decl: ts.ClassDeclara
           if (pat !== null) {
             for (const f of contextImportFiles(sf.fileName, pat)) {
               const target = program.getSourceFile(f);
-              if (target !== undefined && !seen.has(target)) {
+              if (target !== undefined && !f.endsWith(".json") && !seen.has(target)) {
                 seen.add(target);
                 out.push(target);
               }
