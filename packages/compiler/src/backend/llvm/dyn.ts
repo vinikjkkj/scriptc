@@ -5992,6 +5992,44 @@ export class LlDyn {
           argNames.push(packed);
           return;
         }
+        if (fn.restParam === true && i === rest.length - 1) {
+          // A declared REST parameter: every argument from its position on, packed into the one array it binds (the C twin's row).
+          host.declare(`declare ptr @scr_dyn_pack_args(ptr, i64)`);
+          const more = B.tmp();
+          const from = B.tmp();
+          const n = B.tmp();
+          const base = B.tmp();
+          const packedRest = B.tmp();
+          B.line(`${more} = icmp ugt i64 %argc, ${i}`);
+          B.line(`${from} = select i1 ${more}, i64 ${i}, i64 0`);
+          B.line(`${n} = sub i64 %argc, ${i}`);
+          const cnt = B.tmp();
+          B.line(`${cnt} = select i1 ${more}, i64 ${n}, i64 0`);
+          B.line(`${base} = getelementptr inbounds ptr, ptr %args, i64 ${from}`);
+          B.line(`${packedRest} = call ptr @scr_dyn_pack_args(ptr ${base}, i64 ${cnt})`);
+          if (p.type.kind === "dyn") {
+            argNames.push(packedRest);
+            return;
+          }
+          const rpathSlot = B.slot();
+          B.entryAllocas.push(`${rpathSlot} = alloca %ScrDynPath`);
+          const rp0 = B.tmp();
+          const rp1 = B.tmp();
+          const rp2 = B.tmp();
+          B.line(`${rp0} = getelementptr inbounds %ScrDynPath, ptr ${rpathSlot}, i64 0, i32 0`);
+          B.line(`store ptr null, ptr ${rp0}`);
+          B.line(`${rp1} = getelementptr inbounds %ScrDynPath, ptr ${rpathSlot}, i64 0, i32 1`);
+          B.line(`store ptr null, ptr ${rp1}`);
+          B.line(`${rp2} = getelementptr inbounds %ScrDynPath, ptr ${rpathSlot}, i64 0, i32 2`);
+          B.line(`store i64 ${i}, ptr ${rp2}`);
+          const ra = B.tmp();
+          B.line(`${ra} = call ${this.valTy(p.type)} @${this.dynCheckHelper(p.type)}(ptr ${packedRest}, ptr ${rpathSlot})`);
+          host.declare(`declare void @scr_dyn_release(ptr)`);
+          B.line(`call void @scr_dyn_release(ptr ${packedRest})`);
+          this.pendingBail(B, "dclm", () => undoAll(i), "ptr null");
+          argNames.push(ra);
+          return;
+        }
         const adSlot = B.slot();
         B.entryAllocas.push(`${adSlot} = alloca ptr`);
         const has = B.tmp();

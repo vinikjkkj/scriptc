@@ -2682,6 +2682,10 @@ export interface IrUnionDef {
 }
 
 export interface IrFunction {
+  /** The LAST parameter is a declared REST slot (`m(a, ...args: unknown[])`): a call through the dyn side (a boxed receiver's member row, scr_dyn_invoke)
+   * hands the function its arguments one by one, so the member row packs every argument from this parameter's position on into one array for it. A
+   * statically typed call packs at the call site and never reads this. */
+  restParam?: true;
   /** The exact Function.prototype.toString text of the function VALUE this
    * body backs (fn-srctext.ts; set by frontend/lowering/fn-srctext-attach.ts
    * only for closure targets of a program that uses `fn.text`). Absent for

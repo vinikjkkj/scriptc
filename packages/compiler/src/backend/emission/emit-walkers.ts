@@ -331,6 +331,21 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
         if (rest.length === 1 && p.name === "%arguments" && p.type.kind === "dyn") {
           // A method that reads `arguments` takes the whole argument list as one dyn array.
           d.push(`    a${i} = scr_dyn_pack_args(args, argc);`);
+        } else if (fn.restParam === true && i === rest.length - 1) {
+          // A declared REST parameter: every argument from its position on, packed into the one array it binds (an unpacked row handed it the single
+          // argument at its index and the body failed on 'args.map is not a function').
+          d.push(`    ScrDyn *pk = scr_dyn_pack_args(argc > ${i} ? args + ${i} : args, argc > ${i} ? argc - ${i} : 0);`);
+          if (p.type.kind === "dyn") {
+            d.push(`    a${i} = pk;`);
+          } else {
+            d.push(`    ScrDynPath pp = { NULL, NULL, ${i} };`);
+            d.push(`    a${i} = ${E.dynCheckHelper(p.type)}(pk, &pp);`);
+            d.push(`    scr_dyn_release(pk);`);
+            const undo = rest
+              .slice(0, i)
+              .flatMap((q, j) => (isRefCounted(q.type) ? [`${releaseCallC(q.type, `a${j}`)};`] : []));
+            d.push(`    if (scr_exc_pending()) { ${undo.join(" ")}${undo.length > 0 ? " " : ""}return NULL; }`);
+          }
         } else if (p.type.kind === "dyn") {
           d.push(`    a${i} = scr_dyn_retain((ScrDyn *)ad);`);
         } else {

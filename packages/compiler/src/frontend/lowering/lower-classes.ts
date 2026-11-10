@@ -10420,6 +10420,7 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
       };
       if (isAsync || (genCh !== null && sig.ret.kind === "asyncGenerator")) fn.async = true;
       if (genCh !== null) fn.generator = genCh;
+      if (declaredNodes.length > 0 && sig.params[declaredNodes.length - 1]?.mode === "rest") fn.restParam = true;
       return fn;
     } finally {
       L.fnStack.pop();
@@ -10557,6 +10558,7 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
         loc: locOf(entry.member),
       };
       if (isAsync) fn.async = true;
+      if (entry.member.parameters.length > 0 && entry.params[entry.member.parameters.length - 1]?.mode === "rest") fn.restParam = true;
       // A static METHOD's value is a function named by its key (JS:
       // `static sm(){}` is "sm"); a static ACCESSOR keeps no jsName
       // (its `get:`/`set:` IR name declines in irFunctionJsName).
