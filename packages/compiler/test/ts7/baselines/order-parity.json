@@ -16578,6 +16578,25 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/2736-dynamic-import-context-module/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/2736-dynamic-import-context-module/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2737-dynamic-import-builtin-namespace/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/2737-dynamic-import-builtin-namespace/state.ts",
+    "<repo>/tests/corpus/2737-dynamic-import-builtin-namespace/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/dynamic-import-unconstrained.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/dynamic-import-unconstrained.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2719-freeze-builder-binding.ts": {
    "order": [
     "<repo>/tests/corpus/2719-freeze-builder-binding.ts"
