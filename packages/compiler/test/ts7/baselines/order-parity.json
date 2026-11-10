@@ -15257,6 +15257,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24927-a-captured-string-accumulator-appends-in-place-and-keeps-js-semantics.ts": {
+   "order": [
+    "<repo>/tests/corpus/24927-a-captured-string-accumulator-appends-in-place-and-keeps-js-semantics.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2493-switch-unit-cases.ts": {
    "order": [
     "<repo>/tests/corpus/2493-switch-unit-cases.ts"
