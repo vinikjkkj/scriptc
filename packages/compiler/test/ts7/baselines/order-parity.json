@@ -15132,6 +15132,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24900-dyn-release-shared-boxes-scalars-strings-containers-churn.js": {
+   "order": [
+    "<repo>/tests/corpus/24900-dyn-release-shared-boxes-scalars-strings-containers-churn.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2490-find-miss-null-compare.ts": {
    "order": [
     "<repo>/tests/corpus/2490-find-miss-null-compare.ts"
