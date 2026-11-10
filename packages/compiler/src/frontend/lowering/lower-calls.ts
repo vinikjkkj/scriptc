@@ -31,6 +31,7 @@ import { enforceLibBoundary } from "./lib-boundary.js";
 import { hasProtoTab, protoTabReadChain } from "./lower-prototab.js";
 import { checkedArmBridge, lowerInstanceOverrideRead, lowerWebCryptoGetRandomValues, refuseUnloweredSubtleCall, refuseUnloweredWebCrypto, refuseWebCryptoDestructuredArgs, refuseWebCryptoOwnKeys, sameValueDynOperand, unboundMethodThunk, undefinedArmedInAnswer, lowerWebCryptoMemberCall } from "./lower-exprs.js";
 import { cjsRequireAliasTargetOf, requireDepValueOf } from "./lower-island.js";
+import { lowerMathElementCall } from "./lower-island.js";
 import { NARROW_FIRST, builtinFenceHintOf, builtinModuleFnOf, dynOwnNamesHelper } from "./surfaces.js";
 import { OBJECT_PROTOTYPE_METHODS } from "./lowerer.js";
 import { ffiBindingDiag, ffiSignatureDiag, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
@@ -4755,6 +4756,10 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     // A codec reaching a string sink (String, JSON, Object.prototype.toString, toString/join): refuse.
     refuseCodecCoercionCall(L, expr);
     const loc = locOf(expr);
+    {
+      const viaMathKey = lowerMathElementCall(L, expr);
+      if (viaMathKey !== null) return viaMathKey;
+    }
     {
       const viaForward = lowerForwardedRequireMemberCall(L, expr);
       if (viaForward !== null) return viaForward;
