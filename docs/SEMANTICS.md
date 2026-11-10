@@ -547,9 +547,10 @@ them to the graph; a specifier with no static part is a compile-time refusal.
     after the program started              does not cover, rejects ERR_MODULE_NOT_FOUND
                                            with a note that it was not part of the build
     reads a JSON file when imported        embeds the text the build read
-    a .ts module imported with a json      rejects ERR_IMPORT_ATTRIBUTE_TYPE_INCOMPATIBLE
-    attribute loads it again (type         as a .js or .mjs module does in Node 24
-    stripping quirk, measured on 24.15.0)
+    a .ts module imported with a json      compile-time refusal (SC1090): the second
+    attribute is evaluated a second time  evaluation needs a second set of module globals
+    into a separate instance (type         (a .js, .mjs or .cjs module rejects
+    stripping quirk, v24.15.0)             ERR_IMPORT_ATTRIBUTE_TYPE_INCOMPATIBLE as in Node)
 
     tests/corpus/2736-dynamic-import-context-module
     tests/corpus/2740-dynamic-import-context-cjs-json

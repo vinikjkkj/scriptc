@@ -15,4 +15,8 @@ const again: any = await import("./c1.cjs");
 console.log("same namespace", again === c1);
 const c3: any = await import("./c3.cjs");
 console.log(Object.keys(c3).join(), typeof c3.default);
+// A class exported from CommonJS is a real constructible value: new, methods, statics, accessors, instanceof, identity with module.exports.
+const K = c3.default;
+const k = new K(5);
+console.log(k.get(), k.twice(), new K().get(), K.make(7).twice(), K.kind, K.name, k instanceof K, K === c3["module.exports"], K.make(1) instanceof K);
 await t("c1.cjs");
