@@ -7,7 +7,7 @@ import type { Lowerer } from "./lowerer.js";
 import { STATS_T, BOOL, DYN, F64, IrExpr, IrStmt, IrType, JSVAL, MAX_ISLAND_CALLBACK_ARITY, STRING, VOID, arrayOf, canBoxFuncIntoDyn, canMarshalTypedFuncIntoIsland, funcOf, islandPromisePayloadTag, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ISLAND_SURFACE, IslandFnEntry, STATIC_MATH_CONSTS, STATIC_MATH_FNS, boundaryIntoIslandMsg } from "./surfaces.js";
 import { requiresDynamicApiDiag, requiresDynamicPackageDiag } from "../../diagnostics/diagnostic.js";
-import { contextImportPattern, orderedImportsOf } from "../program.js";
+import { contextImportFiles, contextImportPattern, orderedImportsOf } from "../program.js";
 import { canonicalBuiltinModule, isModuleExportsAccess, cjsExportAssignmentOf, cjsExportDiscardReason, cjsExportTargetLiteral, cjsHiddenAccessorExport, cjsInsertionOrderOf, dynamicImportSpecOf, isCjsJsFile, locOf, npmPackageNameOf, npmStaticDepSf7, provenanceTwinDepSf7, requireSpecOf, resolveImport } from "../program.js";
 import { runtimePackageOfTypesPackage } from "../shared.js";
 import { isRelativeSpecifier } from "../shared.js";
@@ -17,6 +17,7 @@ import { isEsModuleStamp } from "./lower-stmts.js";
 import { liveBagRef, liveTwinOf } from "./cjs-live-exports.js";
 import { cjsLexedExportsOf, cjsLexerVisibleNames } from "../cjs-lexer.js";
 import * as nodePath from "node:path";
+import { existsSync, readFileSync } from "node:fs";
 import { moduleNsStarExports } from "./lower-namespaces.js";
 import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } from "./lowerer.js";
 
@@ -292,6 +293,21 @@ export function builtinImportBindingStmts(L: Lowerer, decl: ts.VariableDeclarati
     expr: { kind: "awaitExpr", value: { kind: "intrinsic", name: "promise.resolve", args: [], type: { kind: "promise", inner: VOID }, loc }, type: VOID, loc },
     loc,
   }));
+}
+
+/** The import attribute of an `import(spec, { with: { type: "json" } })` call: "json", or null when there is no second argument. Anything else
+ * (another attribute or type, a non-literal options object) is a compile-time refusal. */
+function importAttributeOf(L: Lowerer, call: ts.CallExpression): "json" | null {
+  const opts = call.arguments[1];
+  if (opts === undefined) return null;
+  if (ts.isObjectLiteralExpression(opts) && opts.properties.length === 1) {
+    const w = opts.properties[0]!;
+    if (ts.isPropertyAssignment(w) && ts.isIdentifier(w.name) && w.name.text === "with" && ts.isObjectLiteralExpression(w.initializer) && w.initializer.properties.length === 1) {
+      const ty = w.initializer.properties[0]!;
+      if (ts.isPropertyAssignment(ty) && (ts.isIdentifier(ty.name) || ts.isStringLiteral(ty.name)) && ty.name.text === "type" && ts.isStringLiteralLike(ty.initializer) && ty.initializer.text === "json") return "json";
+    }
+  }
+  L.unsupported("SC1090", call, "dynamic import() with import attributes other than the literal `{ with: { type: \"json\" } }`");
 }
 
 /** Does `decl` (a `const ns = await import(...)` identifier binding) have a use that needs the namespace OBJECT: anything but `ns.member` and
@@ -616,6 +632,45 @@ function namespaceBindingUsedAsValue(L: Lowerer, decl: ts.VariableDeclaration): 
     // module (dynamicImportSpecOf — the named-constant idiom); genuinely
     // computed specifiers keep the fence.
     const spec = arg === undefined ? null : dynamicImportSpecOf(L.checker, arg);
+    // A JSON file (the specifier ends in .json and names a file next to the importer): `with { type: "json" }` resolves `{ default: <parsed> }`, no
+    // attribute rejects with ERR_IMPORT_ATTRIBUTE_MISSING, as Node does.
+    // The json attribute on a module that is not JSON: Node rejects ERR_IMPORT_ATTRIBUTE_TYPE_INCOMPATIBLE.
+    if (!L.dynamic && spec !== null && !spec.endsWith(".json") && call.arguments.length === 2 && (spec.startsWith("./") || spec.startsWith("../") || spec.startsWith("/"))) {
+      const absMod = nodePath.resolve(nodePath.dirname(call.getSourceFile().fileName), spec);
+      if (existsSync(absMod) && importAttributeOf(L, call) === "json") {
+        return {
+          kind: "call",
+          callee: importRejectFnOf(L, loc, true),
+          args: [
+            { kind: "strLit", value: "ERR_IMPORT_ATTRIBUTE_TYPE_INCOMPATIBLE", type: STRING, loc },
+            { kind: "strLit", value: `Module "file://${absMod}" is not of type "json"`, type: STRING, loc },
+            { kind: "strLit", value: "", type: STRING, loc },
+          ],
+          type: { kind: "promise", inner: DYN },
+          loc,
+        };
+      }
+    }
+    if (!L.dynamic && spec !== null && spec.endsWith(".json") && (spec.startsWith("./") || spec.startsWith("../") || spec.startsWith("/")) && call.arguments.length <= 2) {
+      const absJson = nodePath.resolve(nodePath.dirname(call.getSourceFile().fileName), spec);
+      if (existsSync(absJson)) {
+        const attr = importAttributeOf(L, call);
+        const promiseT: IrType = { kind: "promise", inner: DYN };
+        if (attr === "json") return { kind: "call", callee: jsonImportFnOf(L, absJson, loc), args: [], type: promiseT, loc };
+        const rej = importRejectFnOf(L, loc, true);
+        return {
+          kind: "call",
+          callee: rej,
+          args: [
+            { kind: "strLit", value: "ERR_IMPORT_ATTRIBUTE_MISSING", type: STRING, loc },
+            { kind: "strLit", value: `Module "file://${absJson}" needs an import attribute of "type: json"`, type: STRING, loc },
+            { kind: "strLit", value: "", type: STRING, loc },
+          ],
+          type: promiseT,
+          loc,
+        };
+      }
+    }
     // STATIC tier, --npm-static: `import()` of an opted-in package is a
     // PROGRAM-MODULE load — no engine anywhere. The guarded %init runs AT
     // the site (a numbered-divergence-style snapshot: Node evaluates on
@@ -851,7 +906,7 @@ function namespaceBindingUsedAsValue(L: Lowerer, decl: ts.VariableDeclaration): 
                   how: `import it statically so the build compiles it`,
                 };
         // The NATIVE answer: an async builder (park, init, interned checked-dynamic namespace) called at the site.
-        if (own !== null && !isCjsJsFile(own) && !own.fileName.endsWith(".cts")) {
+        if (own !== null && !own.fileName.endsWith(".cts")) {
           const ordered = staticDynNsBuilderOf(L, own, loc, false, true);
           if (ordered !== null) {
             return { kind: "call", callee: ordered, args: [], type: { kind: "promise", inner: DYN }, loc };
@@ -867,8 +922,8 @@ function namespaceBindingUsedAsValue(L: Lowerer, decl: ts.VariableDeclaration): 
         throw new PoisonError();
       }
     }
-    if (!L.dynamic && arg !== undefined && spec === null && call.arguments.length === 1) {
-      const computed = lowerComputedImport(L, call, arg);
+    if (!L.dynamic && arg !== undefined && spec === null && call.arguments.length >= 1 && call.arguments.length <= 2) {
+      const computed = lowerComputedImport(L, call, arg, importAttributeOf(L, call));
       if (computed !== null) return computed;
     }
     L.requireDynamicApi("'import()'", call);
@@ -1811,7 +1866,7 @@ function namespaceBindingUsedAsValue(L: Lowerer, decl: ts.VariableDeclaration): 
   function nsObjectFnOf(L: Lowerer, dep: ts.SourceFile, loc: IrExpr["loc"]): string | null {
     const cached = L.dynNsObjFns.get(dep);
     if (cached !== undefined) return cached;
-    if (L.initNameOf.get(dep) === undefined || isCjsJsFile(dep) || dep.fileName.endsWith(".cts")) return null;
+    if (L.initNameOf.get(dep) === undefined || dep.fileName.endsWith(".cts")) return null;
     const rawTag = L.fileTag.get(dep) ?? "";
     const tagOut = rawTag === "" ? "e." : rawTag.replace(/^%/, "");
     const name = `%dynnsobj.${tagOut}`;
@@ -1823,8 +1878,24 @@ function namespaceBindingUsedAsValue(L: Lowerer, decl: ts.VariableDeclaration): 
     const fnCtx = newFnCtx(true, null, null, DYN);
     L.fnStack.push(fnCtx);
     try {
-      const fields = esmNsFieldsOf(L, dep, loc, false);
-      const liveNames = new Map<string, ts.Symbol>(liveExportsOf(L, dep));
+      // A CommonJS module's namespace: `default` and `module.exports` are its module.exports, plus Node's cjs-module-lexer names.
+      const cjs = isCjsJsFile(dep) ? cjsExportTableNsOf(L, dep, loc) : null;
+      const cjsPrelude: IrStmt[] = cjs?.prelude ?? [];
+      let fields = cjs?.fields ?? esmNsFieldsOf(L, dep, loc, false);
+      if (cjs !== null) {
+        // Node's names are the cjs-module-lexer's alone (`module.exports = { x: 1 }` yields none): `default` and `module.exports` hold the whole object.
+        const lexedNames = new Set(cjsLexedExportsOf(dep.text, dep.fileName).exports);
+        fields = fields.filter((f) => f.key.kind === "strLit" && (f.key.value === "default" || f.key.value === "module.exports" || lexedNames.has(f.key.value)));
+      }
+      if (cjs === null && isCjsJsFile(dep)) {
+        // No `export =` table (exports.a = ...): Node's namespace adds `default` and `module.exports`, both the exports object, to the lexer's names.
+        const exportsObj = L.declareHiddenLocal("%dynnsexports", DYN);
+        cjsPrelude.push({ kind: "varDecl", localId: exportsObj.id, init: { kind: "dynObjLit", fields: fields.map((f) => ({ key: f.key, value: f.value })), staticCopy: true, type: DYN, loc }, loc });
+        const ref = (): IrExpr => ({ kind: "varRef", localId: exportsObj.id, type: DYN, loc });
+        fields = [...fields, { key: { kind: "strLit", value: "default", type: STRING, loc } as IrExpr, value: ref() }, { key: { kind: "strLit", value: "module.exports", type: STRING, loc } as IrExpr, value: ref() }]
+          .sort((a, b) => { const x = a.key.kind === "strLit" ? a.key.value : ""; const y = b.key.kind === "strLit" ? b.key.value : ""; return x < y ? -1 : x > y ? 1 : 0; });
+      }
+      const liveNames = new Map<string, ts.Symbol>(cjs !== null ? [] : liveExportsOf(L, dep));
       const recv = (): IrExpr => ({ kind: "varRef", localId: nsGid, type: DYN, loc });
       // The keys are placed one by one in sorted order (an accessor redefined over a data key would move it last).
       const placed: IrStmt[] = fields.flatMap((fld): IrStmt[] => {
@@ -1853,6 +1924,7 @@ function namespaceBindingUsedAsValue(L: Lowerer, decl: ts.VariableDeclaration): 
           cond: { kind: "varRef", localId: builtGid, type: BOOL, loc },
           then: [],
           else_: [
+            ...cjsPrelude,
             { kind: "assign", localId: nsGid, value: { kind: "dynObjLit", fields: [], type: DYN, loc }, loc },
             ...placed,
             { kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.moduleNsFinish", args: [recv()], type: DYN, loc }, loc },
@@ -1875,12 +1947,104 @@ function namespaceBindingUsedAsValue(L: Lowerer, decl: ts.VariableDeclaration): 
     return fn === null ? null : { kind: "call", callee: fn, args: [], type: DYN, loc };
   }
 
+  /** `%dynimprej`: the rejection of an import() — an async function that waits Node's 4 jobs, then throws an Error carrying `code` (and `url` when not empty). */
+  function importRejectFnOf(L: Lowerer, loc: IrExpr["loc"], typeError = false): string {
+    const name = typeError ? "%dynimprejT" : "%dynimprej";
+    if (L.dynImportComputed.has(name)) return name;
+    L.dynImportComputed.set(name, name);
+    const fnCtx = newFnCtx(true, null, null, DYN);
+    fnCtx.isAsync = true;
+    L.fnStack.push(fnCtx);
+    try {
+      const str = (value: string): IrExpr => ({ kind: "strLit", value, type: STRING, loc });
+      const errT: IrType = { kind: "object", className: typeError ? "%TypeError" : "%Error" };
+      const err = L.declareHiddenLocal("%imperr", errT);
+      const errRef: IrExpr = { kind: "varRef", localId: err.id, type: errT, loc };
+      const ref = (id: string): IrExpr => ({ kind: "varRef", localId: id, type: STRING, loc });
+      const body: IrStmt[] = [
+        ...importParks(4, loc),
+        { kind: "varDecl", localId: err.id, init: { kind: "libCall", fn: "error.new", args: [ref("msg.0")], type: errT, loc }, loc },
+        { kind: "exprStmt", expr: { kind: "libCall", fn: "error.propSet", args: [L.upcastTo(errRef, "%Error"), str("code"), { kind: "dynFrom", value: ref("code.0"), type: DYN, loc }], type: VOID, loc }, loc },
+        {
+          kind: "if",
+          cond: { kind: "strEq", negated: true, left: ref("url.0"), right: str(""), type: BOOL, loc },
+          then: [{ kind: "exprStmt", expr: { kind: "libCall", fn: "error.propSet", args: [L.upcastTo(errRef, "%Error"), str("url"), { kind: "dynFrom", value: ref("url.0"), type: DYN, loc }], type: VOID, loc }, loc }],
+          else_: [],
+          loc,
+        },
+        { kind: "throw", value: errRef, loc },
+      ];
+      L.liftedFns.push({
+        name,
+        params: [{ localId: "code.0", name: "code", type: STRING }, { localId: "msg.0", name: "msg", type: STRING }, { localId: "url.0", name: "url", type: STRING }],
+        returnType: DYN,
+        locals: [...L.ctx.locals, { id: "code.0", name: "code", type: STRING, mutable: false }, { id: "msg.0", name: "msg", type: STRING, mutable: false }, { id: "url.0", name: "url", type: STRING, mutable: false }],
+        body,
+        async: true as const,
+        loc,
+      });
+    } finally {
+      L.fnStack.pop();
+    }
+    return name;
+  }
+
+  function importParks(n: number, loc: IrExpr["loc"]): IrStmt[] {
+    return Array.from({ length: n }, (): IrStmt => ({
+      kind: "exprStmt",
+      expr: { kind: "awaitExpr", value: { kind: "intrinsic", name: "promise.resolve", args: [], type: { kind: "promise", inner: VOID }, loc }, type: VOID, loc },
+      loc,
+    }));
+  }
+
+  /** `%dynjson.<n>`: the async import of one JSON file under `with { type: "json" }`: Node's 5 + 5 jobs, then the interned namespace `{ default: <parsed> }`
+   * (the document is parsed from the text the build read, once). */
+  function jsonImportFnOf(L: Lowerer, absFile: string, loc: IrExpr["loc"]): string {
+    const key = `%json:${absFile}`;
+    const cached = L.dynImportComputed.get(key);
+    if (cached !== undefined) return cached;
+    const name = `%dynjson.${L.dynImportComputed.size}`;
+    L.dynImportComputed.set(key, name);
+    const nsGid = `%g.dynjson${L.dynImportComputed.size}%obj`;
+    L.globalsList.push({ id: nsGid, name: "%dynjsonobj", type: DYN, mutable: true });
+    const builtGid = `${nsGid}built`;
+    L.globalsList.push({ id: builtGid, name: "%dynjsonbuilt", type: BOOL, mutable: true });
+    const fnCtx = newFnCtx(true, null, null, DYN);
+    fnCtx.isAsync = true;
+    L.fnStack.push(fnCtx);
+    try {
+      const text = readFileSync(absFile, "utf8");
+      const recv = (): IrExpr => ({ kind: "varRef", localId: nsGid, type: DYN, loc });
+      const body: IrStmt[] = [
+        ...importParks(5, loc),
+        {
+          kind: "if",
+          cond: { kind: "unary", op: "!", operand: { kind: "varRef", localId: builtGid, type: BOOL, loc }, type: BOOL, loc },
+          then: [
+            { kind: "assign", localId: builtGid, value: { kind: "boolLit", value: true, type: BOOL, loc }, loc },
+            { kind: "assign", localId: nsGid, value: { kind: "dynObjLit", fields: [], type: DYN, loc }, loc },
+            { kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.keySet", args: [recv(), { kind: "strLit", value: "default", type: STRING, loc }, { kind: "libCall", fn: "json.parse", args: [{ kind: "strLit", value: text, type: STRING, loc }], type: DYN, loc }], type: VOID, loc }, loc },
+            { kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.moduleNsFinish", args: [recv()], type: DYN, loc }, loc },
+          ],
+          else_: [],
+          loc,
+        },
+        ...importParks(5, loc),
+        { kind: "return", value: recv(), loc },
+      ];
+      L.liftedFns.push({ name, params: [], returnType: DYN, locals: L.ctx.locals, body, async: true as const, loc });
+    } finally {
+      L.fnStack.pop();
+    }
+    return name;
+  }
+
   /** `import(expr)` whose specifier does not fold: a lifted function that resolves the runtime string against the importer's directory
    * (path.resolve, as Node's ESM resolver does for a relative or absolute specifier) and compares it with the absolute path of every ESM
    * program module that has a namespace builder, calling that module's ordered builder on a hit. A miss rejects with Node's own errors:
    * ERR_MODULE_NOT_FOUND ("Cannot find module '<abs>' imported from <importer>", or "Cannot find package '<spec>'" for a bare specifier),
    * ERR_UNSUPPORTED_DIR_IMPORT for a directory; a file that exists but is not part of the compiled graph rejects with a named Error. */
-  function lowerComputedImport(L: Lowerer, call: ts.CallExpression, arg: ts.Expression): IrExpr | null {
+  function lowerComputedImport(L: Lowerer, call: ts.CallExpression, arg: ts.Expression, attr: "json" | null): IrExpr | null {
     const loc = locOf(call);
     const pattern = contextImportPattern(arg);
     if (pattern === null) {
@@ -1895,7 +2059,7 @@ function namespaceBindingUsedAsValue(L: Lowerer, decl: ts.VariableDeclaration): 
     if (specIr.type.kind !== "string") return null;
     const importer = call.getSourceFile().fileName;
     const dir = importer.slice(0, Math.max(importer.lastIndexOf("/"), importer.lastIndexOf("\\")));
-    const key = `${importer}`;
+    const key = `${importer}\u0000${pattern.prefix}\u0000${pattern.suffix}\u0000${attr ?? ""}`;
     let fname = L.dynImportComputed.get(key);
     if (fname === undefined) {
       fname = `%dynimpc.${L.dynImportComputed.size}`;
@@ -1909,31 +2073,38 @@ function namespaceBindingUsedAsValue(L: Lowerer, decl: ts.VariableDeclaration): 
         const abs = L.declareHiddenLocal("%impabs", STRING);
         const absRef = (): IrExpr => ({ kind: "varRef", localId: abs.id, type: STRING, loc });
         const concat = (...parts: IrExpr[]): IrExpr => parts.reduce((l, r) => ({ kind: "strConcat", left: l, right: r, type: STRING, loc }));
-        const reject = (code: string, message: IrExpr, withUrl = false): IrStmt[] => {
-          const err = L.declareHiddenLocal("%imperr", { kind: "object", className: "%Error" });
-          const errRef: IrExpr = { kind: "varRef", localId: err.id, type: err.type, loc };
-          return [
-            { kind: "varDecl", localId: err.id, init: { kind: "libCall", fn: "error.new", args: [message], type: err.type, loc }, loc },
-            { kind: "exprStmt", expr: { kind: "libCall", fn: "error.propSet", args: [errRef, str("code"), { kind: "dynFrom", value: str(code), type: DYN, loc }], type: VOID, loc }, loc },
-            ...(withUrl
-              ? [{ kind: "exprStmt" as const, expr: { kind: "libCall" as const, fn: "error.propSet" as const, args: [errRef, str("url"), { kind: "dynFrom" as const, value: concat(str("file://"), absRef()), type: DYN, loc }], type: VOID, loc }, loc }]
-              : []),
-            { kind: "return", value: { kind: "intrinsic", name: "promise.reject", args: [errRef], type: promiseT, loc }, loc },
-          ];
-        };
+        const rejFn = importRejectFnOf(L, loc);
+        const rejFnT = importRejectFnOf(L, loc, true);
+        const reject = (code: string, message: IrExpr, withUrl = false): IrStmt[] => [
+          { kind: "return", value: { kind: "call", callee: code.startsWith("ERR_IMPORT_ATTRIBUTE") ? rejFnT : rejFn, args: [str(code), message, withUrl ? concat(str("file://"), absRef()) : str("")], type: promiseT, loc }, loc },
+        ];
         const body: IrStmt[] = [
           { kind: "varDecl", localId: abs.id, init: { kind: "libCall", fn: "path.resolve", args: [{ kind: "arrayLit", elems: [str(dir), spec], type: arrayOf(STRING), loc }], type: STRING, loc }, loc },
         ];
         const seen = new Set<string>();
         for (const sf of [...L.initNameOf.keys()]) {
-          if (sf.isDeclarationFile || isCjsJsFile(sf) || sf.fileName.endsWith(".cts") || sf.fileName.endsWith(".json") || seen.has(sf.fileName)) continue;
+          if (sf.isDeclarationFile || sf.fileName.endsWith(".cts") || sf.fileName.endsWith(".json") || seen.has(sf.fileName)) continue;
           seen.add(sf.fileName);
           const builder = staticDynNsBuilderOf(L, sf, loc, false, true);
           if (builder === null) continue;
           body.push({
             kind: "if",
             cond: { kind: "strEq", negated: false, left: absRef(), right: str(sf.fileName), type: BOOL, loc },
-            then: [{ kind: "return", value: { kind: "call", callee: builder, args: [], type: promiseT, loc }, loc }],
+            then: attr === "json"
+              ? reject("ERR_IMPORT_ATTRIBUTE_TYPE_INCOMPATIBLE", concat(str('Module "file://'), absRef(), str('" is not of type "json"')))
+              : [{ kind: "return", value: { kind: "call", callee: builder, args: [], type: promiseT, loc }, loc }],
+            else_: [],
+            loc,
+          });
+        }
+        for (const jf of contextImportFiles(importer, pattern)) {
+          if (!jf.endsWith(".json")) continue;
+          body.push({
+            kind: "if",
+            cond: { kind: "strEq", negated: false, left: absRef(), right: str(jf), type: BOOL, loc },
+            then: attr === "json"
+              ? [{ kind: "return", value: { kind: "call", callee: jsonImportFnOf(L, jf, loc), args: [], type: promiseT, loc }, loc }]
+              : reject("ERR_IMPORT_ATTRIBUTE_MISSING", concat(str('Module "file://'), absRef(), str('" needs an import attribute of "type: json"'))),
             else_: [],
             loc,
           });

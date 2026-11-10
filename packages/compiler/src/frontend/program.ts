@@ -304,7 +304,7 @@ export function contextImportFiles(importerFile: string, pattern: { prefix: stri
         walk(resolve(dir, n), depth + 1);
         continue;
       }
-      if (!/\.(ts|mts|js|mjs)$/.test(n) || n.endsWith(".d.ts") || n.endsWith(".d.mts")) continue;
+      if (!/\.(ts|mts|js|mjs|cjs|json)$/.test(n) || n.endsWith(".d.ts") || n.endsWith(".d.mts")) continue;
       const file = resolve(dir, n);
       if (file === importerFile) continue;
       let rel = relative(importerDir, file).split("\\").join("/");
@@ -325,7 +325,7 @@ function contextImportRoots(program: ts.Program): string[] {
     ts.walkPreorder(sf, (n) => {
       if (ts.isCallExpression(n) && n.expression.kind === ts.SyntaxKind.ImportKeyword && n.arguments.length === 1) {
         const pat = contextImportPattern(n.arguments[0]!);
-        if (pat !== null) for (const f of contextImportFiles(sf.fileName, pat)) if (!have.has(f)) add.add(f);
+        if (pat !== null) for (const f of contextImportFiles(sf.fileName, pat)) if (!f.endsWith(".json") && !have.has(f)) add.add(f);
       }
       return undefined;
     });
