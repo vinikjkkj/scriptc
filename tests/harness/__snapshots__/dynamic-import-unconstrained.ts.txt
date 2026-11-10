@@ -1,0 +1,8 @@
+dynamic-import-unconstrained.ts:4:10 - error SC1090: dynamic import() of a specifier with no static part (the module graph is a build-time artifact: a specifier the compiler cannot bound names no file to compile) is not supported yet
+
+  3 | async function load(name: string): Promise<unknown> {
+  4 |   return import(name);
+    |          ^~~~~~~~~~~~
+  5 | }
+
+  hint: give the specifier a static relative prefix and/or suffix, such as `import(`./plugins/${name}.js`)` or `import('./locales/' + lang)`, so every file the pattern can name joins the compiled graph; or import the modules statically
