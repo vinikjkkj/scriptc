@@ -159,7 +159,7 @@ import { lowerStreamModuleCall, streamInstanceOfExpr } from "./lower-stream.js";
 import { unifyWidthShapes, type UnifyOutcome } from "./shape-unify.js";
 import { lowerEmitOverrideSpec, synthEeRegFns, type EmitSpecCtx, type EmitSpecRequest } from "./lower-emitter.js";
 import { builtinImportOf, createRequireBindingDecl, createRequireNamespaceDecl, createRequireSpecOf, stripTypeCasts, lowerBuiltinModuleCall, lowerFsToUnixTimestampCall, lowerFsLadderCall, lowerZlibDynCall, lowerChildArgsArg, lowerSpawnSyncCall, lowerSpawnCall, lowerExecSyncCall, recordToEnvPairs, lowerJsonMethodCall, fencedBuiltinImportOf, lowerCryptoComposedCall, lowerUrlMethodCall, lowerSearchParamsMethodCall, lowerStatsMethodCall, lowerFileHandleMethodCall, lowerChildMethodCall, lowerAtomicsCall, lowerBuiltinExtraProperty, promisifiedExecFileDecl, lowerPromisifiedSettledCall, type PromisifiedTarget, lowerExecFileAsyncCall, execFileAsyncHelper, lowerStringDecoderMethodCall, strdecHelper, lowerReadlineMethodCall, lowerDcChannelMethodCall, lowerDcChannelProperty, lowerAlsMethodCall, lowerDcTracingChannelMethodCall, lowerDcTracingChannelProperty, lowerJsonProperty, lowerErrorCodeProperty, lowerErrorPrototypeProperty, lowerUint8ArrayPrototypeProperty, lowerUint8ArrayStaticProperty, lowerProcessProperty, processVersionsMember, isProcessEnv, envValueType, lowerProcessEnvGet, lowerProcessMethodCall, lowerProcessOptionalMethodCall, lowerTimeoutMethodCall, envSnapshotHelper, isConsoleLog, consoleCallMember, lowerNumberStaticCall, lowerNumberStaticProperty, lowerDateCall, lowerTextCodecCall, lowerCryptoModuleCall, lowerFsConstantsProperty, lowerBuiltinConstantsProperty, builtinConstantBindingOf, builtinConstantsDestructureDecl, lowerProcessStreamProperty, lowerProcStreamStateProperty, lowerStringStaticCall, lowerStringLastIndexOfCall, lowerPromiseStaticCall, lowerStringReplaceStrCall } from "./lower-builtins.js";
-import { isIslandExpr, islandRegexpOf, jsvalIn, requireDynamicApi, islandGlobalFnOf, lowerDynamicImportCall, lowerFetchCall, lowerIslandMethodCall, lowerMathProperty, npmPackageOf, npmMemberFence, npmPackageOfSymbol } from "./lower-island.js";
+import { builtinImportAwaitSpecOf, isIslandExpr, islandRegexpOf, jsvalIn, requireDynamicApi, islandGlobalFnOf, lowerDynamicImportCall, lowerFetchCall, lowerIslandMethodCall, lowerMathProperty, npmPackageOf, npmMemberFence, npmPackageOfSymbol } from "./lower-island.js";
 import { lowerHttpHeadersElement, lowerNetModuleCall, lowerServerMethodCall, lowerServerProperty, lowerTlsRootCertificates } from "./lower-server.js";
 import { lowerNamespaceConditionalCall, namespaceOverrideOf } from "./lower-nsvalue.js";
 import { builtinMemberFnValueOf } from "./lower-fnvalue.js";
@@ -20917,6 +20917,8 @@ export class Lowerer {
       if (ts.isVariableDeclaration(decl) && ts.isIdentifier(decl.name) && decl.initializer) {
         const spec = requireSpecOf(decl.initializer);
         if (spec !== null) return canonicalBuiltinModule(spec);
+        const awaited = builtinImportAwaitSpecOf(decl);
+        if (awaited !== null) return awaited;
         const init = stripTypeCasts(decl.initializer);
         if (ts.isCallExpression(init)) {
           const cr = createRequireSpecOf(this, init);
