@@ -16585,6 +16585,25 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/2738-dynamic-import-cjs/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/2738-dynamic-import-cjs/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2739-dynamic-import-json/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/2739-dynamic-import-json/state.ts",
+    "<repo>/tests/corpus/2739-dynamic-import-json/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2740-dynamic-import-context-cjs-json/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/2740-dynamic-import-context-cjs-json/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2719-freeze-builder-binding.ts": {
    "order": [
     "<repo>/tests/corpus/2719-freeze-builder-binding.ts"

@@ -533,6 +533,27 @@ this project introduced deliberately and chose to record here rather than
 claim a number. Each entry says which it is, because a reader who cannot tell
 them apart will read a decision we made as a fact we discovered.
 
+### `import()` of a file created after the build (ahead-of-time limit)
+
+A native binary compiles the modules that existed at build time. `import()` of a
+specifier with a static prefix or suffix (a template or `+` chain) globs the
+matching `.ts`, `.mts`, `.js`, `.mjs`, `.cjs` and `.json` files then and adds
+them to the graph; a specifier with no static part is a compile-time refusal.
+
+    Node                                   scriptc
+    -------------------------------------  --------------------------------------------
+    loads any file that exists when the    loads every file that existed at build time;
+    import() runs, including one created   a file created afterwards, or one the glob
+    after the program started              does not cover, rejects ERR_MODULE_NOT_FOUND
+                                           with a note that it was not part of the build
+    reads a JSON file when imported        embeds the text the build read
+    a .ts module imported with a json      rejects ERR_IMPORT_ATTRIBUTE_TYPE_INCOMPATIBLE
+    attribute loads it again (type         as a .js or .mjs module does in Node 24
+    stripping quirk, measured on 24.15.0)
+
+    tests/corpus/2736-dynamic-import-context-module
+    tests/corpus/2740-dynamic-import-context-cjs-json
+
 ### A keyed record read with no undefined to answer THROWS, catchably (SC9003)
 
 `r[k]` on a record shape with no index signature, where the checker proved `k`
