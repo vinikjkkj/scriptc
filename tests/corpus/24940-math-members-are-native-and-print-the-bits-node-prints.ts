@@ -115,6 +115,7 @@ function reportPowGrid(): void {
   for (let i = 0; i < bases.length; i++) {
     for (let j = 0; j < exps.length; j++) {
       const r = Math.pow(bases[i]!, exps[j]!)
+      console.log('P ' + i + ' ' + j + ' ' + String(bases[i]) + ' ' + String(exps[j]) + ' ' + (Object.is(r, -0) ? '-0' : String(r)))
       if (r !== r) nan++
       h = fnv(h, Object.is(r, -0) ? '-0' : String(r))
     }
