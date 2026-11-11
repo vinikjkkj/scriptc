@@ -98,6 +98,9 @@ struct ScrTestCtx {
   struct ScrTestCtx **children; /* owned refs */
   size_t nchildren, ccap;
   ScrTestHooks hooks[4]; /* suites and root only */
+  bool running;          /* a run of this node is in flight (started, not yet reported) */
+  size_t sub_running;    /* t.test subtests started by this test's body and not yet finished */
+  struct ScrRunNode *waiter; /* the test run parked until sub_running reaches 0 */
 };
 
 static ScrTestCtx *scr_test_root = NULL;
@@ -268,68 +271,48 @@ static void scr_test_report_result(ScrTestCtx *t) {
 
 /* ── running ─────────────────────────────────────────────────────────── */
 
-/* Call one stored closure by its lowering-pinned shape; async shapes are
- * awaited (the runner is a fiber). `ctx` is passed +1 when the body takes
- * the TestContext. Returns with the fiber's exception cell holding any
- * failure. */
-static void scr_test_call(ScrClosure *cb, int flags, ScrTestCtx *ctx) {
-  bool takes_ctx = (flags & SCR_TEST_F_CTX) != 0;
-  if (flags & SCR_TEST_F_ASYNC) {
-    ScrPromise *p =
-        takes_ctx
-            ? ((ScrPromise * (*)(ScrClosure *, ScrTestCtx *)) cb->fn)(cb, scr_testctx_retain(ctx))
-            : ((ScrPromise * (*)(ScrClosure *)) cb->fn)(cb);
-    if (!scr_exc_pending() && p) scr_await_void(p);
-    scr_promise_release(p);
-  } else if (takes_ctx) {
-    ((void (*)(ScrClosure *, ScrTestCtx *))cb->fn)(cb, scr_testctx_retain(ctx));
-  } else {
-    ((void (*)(ScrClosure *))cb->fn)(cb);
-  }
-}
+/* The runner is a CONTINUATION-PASSING STATE MACHINE, not a fiber: one RunNode per node being run, advanced by rn_advance until it PARKS on
+ * a promise (an async hook or body, through scr_promise_wait_raw) or on its running subtests, or COMPLETES and calls its `done` continuation.
+ * Sync bodies and hooks are called directly and an exception they throw is read from the active cell right after, exactly as before; an
+ * async one is awaited by waiting on its promise, and its rejection is re-thrown into the cell (scr_promise_settled_take) when the
+ * continuation runs, so the decision points below read `scr_exc_pending()` at the same places the blocking runner did. */
+typedef struct {
+  ScrClosure *cb;
+  int flags;
+} ScrTestHookRef;
 
-/* Run `which` hooks up (beforeEach: outermost suite first) or down
- * (afterEach: innermost first) the ancestor chain. A hook throw fails the
- * test with the hook's error (Node cancels harder — SEMANTICS.md). */
-static void scr_test_run_hooks_of(ScrTestCtx *owner, int which) {
-  for (size_t i = 0; i < owner->hooks[which].n && !scr_exc_pending(); i++) {
-    scr_test_call(owner->hooks[which].v[i].cb, owner->hooks[which].v[i].flags, NULL);
-  }
-}
+enum {
+  RN_T_BEFORE_EACH = 0, RN_T_HOOKS1, RN_T_BODY, RN_T_BODYRES, RN_T_SUBS, RN_T_CHILDREN,
+  RN_T_AFTER_EACH, RN_T_HOOKS2, RN_T_FIN,
+  RN_S_BEFORE, RN_S_HOOKS1, RN_S_CHECK1, RN_S_AFTER, RN_S_HOOKS2, RN_S_FIN,
+  RN_R_FINISH, RN_CHILD_LOOP
+};
 
-static void scr_test_run_each_hooks(ScrTestCtx *t, int which, bool outermost_first) {
-  ScrTestCtx *chain[64];
-  int n = 0;
-  for (ScrTestCtx *p = t->parent; p && n < 64; p = p->parent) chain[n++] = p;
-  if (outermost_first) {
-    for (int i = n - 1; i >= 0; i--) scr_test_run_hooks_of(chain[i], which);
-  } else {
-    for (int i = 0; i < n; i++) scr_test_run_hooks_of(chain[i], which);
-  }
-}
+typedef struct ScrRunNode {
+  ScrTestCtx *t; /* retained */
+  void (*done)(void *);
+  void *done_arg;
+  int kind; /* 0 test, 1 suite, 2 root */
+  int phase;
+  int after_children;
+  double start;
+  ScrTestHookRef *hl;
+  size_t hn, hi;
+  size_t ci;
+  bool only;
+  ScrTestCtx *prev_parent;
+  bool failed;
+  ScrPromise *awaiting;
+  bool busy, child_fin;
+} ScrRunNode;
+
+static void rn_advance(ScrRunNode *r);
 
 static bool scr_test_any_only(ScrTestCtx *parent) {
   for (size_t i = 0; i < parent->nchildren; i++) {
     if (parent->children[i]->flags & SCR_TEST_F_ONLY) return true;
   }
   return false;
-}
-
-static void scr_test_run_node(ScrTestCtx *t);
-
-static void scr_test_run_children(ScrTestCtx *t) {
-  /* `only: true` among the siblings: run only the marked ones — the
-   * others are dropped entirely (Node reports nothing for them). */
-  bool only = scr_test_any_only(t);
-  for (size_t i = 0; i < t->nchildren; i++) {
-    ScrTestCtx *c = t->children[i];
-    if (only && !(c->flags & SCR_TEST_F_ONLY)) {
-      continue; /* filtered: never run, never reported, never counted */
-    }
-    /* Subtests t.test already ran INLINE at their call site. */
-    if (c->state != SCR_TS_PENDING) continue;
-    scr_test_run_node(c);
-  }
 }
 
 static bool scr_test_subtree_failed(const ScrTestCtx *t) {
@@ -340,77 +323,314 @@ static bool scr_test_subtree_failed(const ScrTestCtx *t) {
   return false;
 }
 
-static void scr_test_run_node(ScrTestCtx *t) {
-  double start = scr_now_ms();
-  if (t->mode == SCR_TEST_SKIP) {
-    t->dur_ms = scr_now_ms() - start;
-    t->state = SCR_TS_SKIPPED;
-    scr_test_report_result(t);
-    return;
-  }
-  if (t->is_suite) {
-    /* The body already ran at registration (children collected). A hook
-     * throw fails the SUITE with that error — before-failures skip the
-     * children (Node cancels them; SEMANTICS.md numbers the difference). */
-    scr_test_run_hooks_of(t, SCR_HOOK_BEFORE);
-    if (scr_exc_pending()) {
-      t->err = scr_exc_take();
-    } else {
-      scr_test_run_children(t);
-      scr_test_run_hooks_of(t, SCR_HOOK_AFTER);
-      if (scr_exc_pending()) t->err = scr_exc_take();
+/* The microtask continuation of a parked async hook or body: take the settlement (a rejection is left pending in the cell) and go on. */
+static void rn_wakeup(void *ap) {
+  ScrRunNode *r = (ScrRunNode *)ap;
+  ScrPromise *p = r->awaiting;
+  r->awaiting = NULL;
+  (void)scr_promise_settled_take(p);
+  scr_promise_release(p);
+  rn_advance(r);
+}
+
+/* Call one stored closure by its lowering-pinned shape. True when it PARKED on an async result (the caller returns; rn_wakeup resumes). `ctx`
+ * is passed +1 when the body takes the TestContext. A sync call leaves any failure in the active cell. */
+static bool rn_call(ScrRunNode *r, ScrClosure *cb, int flags, ScrTestCtx *ctx) {
+  bool takes_ctx = (flags & SCR_TEST_F_CTX) != 0;
+  if (flags & SCR_TEST_F_ASYNC) {
+    ScrPromise *p =
+        takes_ctx
+            ? ((ScrPromise * (*)(ScrClosure *, ScrTestCtx *)) cb->fn)(cb, scr_testctx_retain(ctx))
+            : ((ScrPromise * (*)(ScrClosure *)) cb->fn)(cb);
+    if (!scr_exc_pending() && p) {
+      r->awaiting = p;
+      scr_promise_wait_raw(p, rn_wakeup, r);
+      return true;
     }
-    t->dur_ms = scr_now_ms() - start;
-    if (t->err) scr_test_suite_hook_failed = true;
-    t->state = t->err            ? SCR_TS_FAIL
-               : scr_test_subtree_failed(t) ? SCR_TS_CHILDFAIL
-                                            : SCR_TS_PASS;
-    scr_test_report_result(t);
-    return;
-  }
-  /* A test: beforeEach chain, the body, subtests it queued (t.test runs
-   * them inline; bare nested test() calls queued unrun run now), the
-   * afterEach chain. */
-  ScrTestCtx *prev_parent = scr_test_reg_parent;
-  scr_test_reg_parent = t;
-  scr_test_run_each_hooks(t, SCR_HOOK_BEFORE_EACH, true);
-  bool failed = false;
-  if (scr_exc_pending()) {
-    t->err = scr_exc_take();
-    failed = true;
-  } else if (t->cb) {
-    scr_test_call(t->cb, t->flags, t);
-    if (scr_exc_pending()) {
-      t->err = scr_exc_take();
-      failed = true;
-    }
-  }
-  /* Children a passing body registered without running (bare test() in
-   * the body): run them now, before the parent completes — Node holds
-   * the parent open for its pending subtests. */
-  if (!failed) scr_test_run_children(t);
-  scr_test_run_each_hooks(t, SCR_HOOK_AFTER_EACH, false);
-  if (scr_exc_pending()) {
-    if (!failed && !t->err) {
-      t->err = scr_exc_take();
-      failed = true;
-    } else {
-      scr_exc_clear();
-    }
-  }
-  scr_test_reg_parent = prev_parent;
-  t->dur_ms = scr_now_ms() - start;
-  if (t->mode == SCR_TEST_SKIP) {
-    /* t.skip() marked it mid-body. */
-    t->state = SCR_TS_SKIPPED;
-  } else if (t->mode == SCR_TEST_TODO) {
-    t->state = failed ? SCR_TS_TODO_FAIL : SCR_TS_TODO_PASS;
-  } else if (failed) {
-    t->state = SCR_TS_FAIL;
+    scr_promise_release(p);
+  } else if (takes_ctx) {
+    ((void (*)(ScrClosure *, ScrTestCtx *))cb->fn)(cb, scr_testctx_retain(ctx));
   } else {
-    t->state = scr_test_subtree_failed(t) ? SCR_TS_CHILDFAIL : SCR_TS_PASS;
+    ((void (*)(ScrClosure *))cb->fn)(cb);
   }
-  scr_test_report_result(t);
+  return false;
+}
+
+static void rn_hooks_free(ScrRunNode *r) {
+  free(r->hl);
+  r->hl = NULL;
+  r->hn = r->hi = 0;
+}
+
+static void rn_hooks_add(ScrRunNode *r, ScrTestCtx *owner, int which) {
+  ScrTestHooks *h = &owner->hooks[which];
+  if (h->n == 0) return;
+  r->hl = realloc(r->hl, (r->hn + h->n) * sizeof *r->hl);
+  if (!r->hl) scr_test_oom();
+  for (size_t i = 0; i < h->n; i++) {
+    r->hl[r->hn].cb = h->v[i].cb;
+    r->hl[r->hn].flags = h->v[i].flags;
+    r->hn++;
+  }
+}
+
+/* The hook list of beforeEach (outermost suite first) or afterEach (innermost first) over the ancestor chain. */
+static void rn_hooks_each(ScrRunNode *r, int which, bool outermost_first) {
+  rn_hooks_free(r);
+  ScrTestCtx *chain[64];
+  int n = 0;
+  for (ScrTestCtx *p = r->t->parent; p && n < 64; p = p->parent) chain[n++] = p;
+  if (outermost_first) {
+    for (int i = n - 1; i >= 0; i--) rn_hooks_add(r, chain[i], which);
+  } else {
+    for (int i = 0; i < n; i++) rn_hooks_add(r, chain[i], which);
+  }
+}
+
+/* Runs the pending hook list until one parks (true) or the list ends or a hook failed (false). */
+static bool rn_run_hooks(ScrRunNode *r) {
+  while (r->hi < r->hn && !scr_exc_pending()) {
+    ScrTestHookRef h = r->hl[r->hi++];
+    if (rn_call(r, h.cb, h.flags, NULL)) return true;
+  }
+  return false;
+}
+
+static void rn_finish(ScrRunNode *r) {
+  void (*done)(void *) = r->done;
+  void *arg = r->done_arg;
+  rn_hooks_free(r);
+  scr_testctx_release(r->t);
+  free(r);
+  if (done) done(arg);
+}
+
+static void rn_start(ScrTestCtx *t, int kind, void (*done)(void *), void *done_arg);
+
+/* A child finished: continue its parent. If the child completed synchronously inside the parent's own advance, the parent's loop continues. */
+static void rn_child_done(void *ap) {
+  ScrRunNode *r = (ScrRunNode *)ap;
+  if (r->busy) {
+    r->child_fin = true;
+    return;
+  }
+  rn_advance(r);
+}
+
+static void rn_advance(ScrRunNode *r) {
+  ScrTestCtx *t = r->t;
+  r->busy = true;
+  for (;;) {
+    switch (r->phase) {
+    /* ── a test: beforeEach chain, the body, the subtests it started, the children it queued, the afterEach chain ── */
+    case RN_T_BEFORE_EACH:
+      r->prev_parent = scr_test_reg_parent;
+      scr_test_reg_parent = t;
+      rn_hooks_each(r, SCR_HOOK_BEFORE_EACH, true);
+      r->phase = RN_T_HOOKS1;
+      break;
+    case RN_T_HOOKS1:
+      if (rn_run_hooks(r)) { /* parked on an async hook: the phase stays, so the rest of the list runs on resume */
+        r->busy = false;
+        return;
+      }
+      r->phase = RN_T_BODY;
+      break;
+    case RN_T_BODY:
+      r->failed = false;
+      if (scr_exc_pending()) {
+        t->err = scr_exc_take();
+        r->failed = true;
+        r->phase = RN_T_SUBS;
+      } else if (t->cb) {
+        r->phase = RN_T_BODYRES;
+        if (rn_call(r, t->cb, t->flags, t)) {
+          r->busy = false;
+          return;
+        }
+      } else {
+        r->phase = RN_T_SUBS;
+      }
+      break;
+    case RN_T_BODYRES:
+      if (scr_exc_pending()) {
+        t->err = scr_exc_take();
+        r->failed = true;
+      }
+      r->phase = RN_T_SUBS;
+      break;
+    case RN_T_SUBS:
+      /* Subtests the body started with t.test and did not await are still running: the parent stays open for them (Node's contract). */
+      if (t->sub_running > 0) {
+        t->waiter = r;
+        r->phase = RN_T_CHILDREN;
+        r->busy = false;
+        return;
+      }
+      r->phase = RN_T_CHILDREN;
+      break;
+    case RN_T_CHILDREN:
+      /* Children a passing body registered without running (bare test() in the body): run them now, before the parent completes. */
+      if (!r->failed) {
+        r->ci = 0;
+        r->only = scr_test_any_only(t);
+        r->after_children = RN_T_AFTER_EACH;
+        r->phase = RN_CHILD_LOOP;
+      } else {
+        r->phase = RN_T_AFTER_EACH;
+      }
+      break;
+    case RN_T_AFTER_EACH:
+      rn_hooks_each(r, SCR_HOOK_AFTER_EACH, false);
+      r->phase = RN_T_HOOKS2;
+      break;
+    case RN_T_HOOKS2:
+      if (rn_run_hooks(r)) {
+        r->busy = false;
+        return;
+      }
+      r->phase = RN_T_FIN;
+      break;
+    case RN_T_FIN: {
+      if (scr_exc_pending()) {
+        if (!r->failed && !t->err) {
+          t->err = scr_exc_take();
+          r->failed = true;
+        } else {
+          scr_exc_clear();
+        }
+      }
+      scr_test_reg_parent = r->prev_parent;
+      t->dur_ms = scr_now_ms() - r->start;
+      if (t->mode == SCR_TEST_SKIP) {
+        t->state = SCR_TS_SKIPPED; /* t.skip() marked it mid-body */
+      } else if (t->mode == SCR_TEST_TODO) {
+        t->state = r->failed ? SCR_TS_TODO_FAIL : SCR_TS_TODO_PASS;
+      } else if (r->failed) {
+        t->state = SCR_TS_FAIL;
+      } else {
+        t->state = scr_test_subtree_failed(t) ? SCR_TS_CHILDFAIL : SCR_TS_PASS;
+      }
+      t->running = false;
+      scr_test_report_result(t);
+      r->busy = false;
+      rn_finish(r);
+      return;
+    }
+    /* ── a suite: before hooks, children, after hooks ── */
+    case RN_S_BEFORE:
+      rn_hooks_free(r);
+      rn_hooks_add(r, t, SCR_HOOK_BEFORE);
+      r->phase = RN_S_HOOKS1;
+      break;
+    case RN_S_HOOKS1:
+      if (rn_run_hooks(r)) {
+        r->busy = false;
+        return;
+      }
+      r->phase = RN_S_CHECK1;
+      break;
+    case RN_S_CHECK1:
+      if (scr_exc_pending()) {
+        t->err = scr_exc_take();
+        r->phase = RN_S_FIN;
+      } else {
+        r->ci = 0;
+        r->only = scr_test_any_only(t);
+        r->after_children = RN_S_AFTER;
+        r->phase = RN_CHILD_LOOP;
+      }
+      break;
+    case RN_S_AFTER:
+      rn_hooks_free(r);
+      rn_hooks_add(r, t, SCR_HOOK_AFTER);
+      r->phase = RN_S_HOOKS2;
+      break;
+    case RN_S_HOOKS2:
+      if (rn_run_hooks(r)) {
+        r->busy = false;
+        return;
+      }
+      r->phase = RN_S_FIN;
+      break;
+    case RN_S_FIN:
+      if (scr_exc_pending()) t->err = scr_exc_take();
+      t->dur_ms = scr_now_ms() - r->start;
+      if (t->err) scr_test_suite_hook_failed = true;
+      t->state = t->err ? SCR_TS_FAIL : scr_test_subtree_failed(t) ? SCR_TS_CHILDFAIL : SCR_TS_PASS;
+      t->running = false;
+      scr_test_report_result(t);
+      r->busy = false;
+      rn_finish(r);
+      return;
+    /* ── the root: the children, then the summary ── */
+    case RN_R_FINISH:
+      r->busy = false;
+      rn_finish(r);
+      return;
+    /* ── the shared child loop: each eligible child runs to completion before the next starts ── */
+    case RN_CHILD_LOOP: {
+      bool started = false;
+      while (r->ci < t->nchildren) {
+        ScrTestCtx *c = t->children[r->ci++];
+        /* `only: true` among the siblings: the others are dropped entirely. Subtests t.test already started are not run again. */
+        if (r->only && !(c->flags & SCR_TEST_F_ONLY)) continue;
+        if (c->state != SCR_TS_PENDING || c->running) continue;
+        r->child_fin = false;
+        rn_start(c, 0, rn_child_done, r);
+        if (r->child_fin) {
+          r->child_fin = false;
+          continue; /* it completed synchronously */
+        }
+        started = true;
+        break;
+      }
+      if (started) {
+        r->busy = false;
+        return; /* parked on the child; rn_child_done advances */
+      }
+      r->phase = r->after_children;
+      break;
+    }
+    default:
+      r->busy = false;
+      return;
+    }
+  }
+}
+
+/* Starts one node. `kind` 2 is the root (children only). Completion calls done(done_arg), possibly before this returns. */
+static void rn_start(ScrTestCtx *t, int kind, void (*done)(void *), void *done_arg) {
+  ScrRunNode *r = calloc(1, sizeof *r);
+  if (!r) scr_test_oom();
+  r->t = scr_testctx_retain(t);
+  r->done = done;
+  r->done_arg = done_arg;
+  r->start = scr_now_ms();
+  t->running = true;
+  if (kind == 2) {
+    r->kind = 2;
+    r->ci = 0;
+    r->only = scr_test_any_only(t);
+    r->after_children = RN_R_FINISH;
+    r->phase = RN_CHILD_LOOP;
+  } else if (t->mode == SCR_TEST_SKIP) {
+    t->dur_ms = scr_now_ms() - r->start;
+    t->state = SCR_TS_SKIPPED;
+    t->running = false;
+    scr_test_report_result(t);
+    rn_finish(r);
+    return;
+  } else if (t->is_suite) {
+    /* The body already ran at registration (children collected). A hook throw fails the SUITE with that error: before-failures skip the
+     * children (Node cancels them; SEMANTICS.md numbers the difference). */
+    r->kind = 1;
+    r->phase = RN_S_BEFORE;
+  } else {
+    r->kind = 0;
+    r->phase = RN_T_BEFORE_EACH;
+  }
+  rn_advance(r);
 }
 
 /* ── the summary + failing-tests section ─────────────────────────────── */
@@ -557,14 +777,10 @@ static void scr_test_print_failures(ScrTestCtx *t, bool *any) {
 
 /* ── the runner fiber ────────────────────────────────────────────────── */
 
-static void scr_test_runner_entry(ScrFiber *self, void *argpack) {
-  (void)self;
-  (void)argpack;
-  /* Park until main returns and the loop drains microtasks — Node starts
-   * the first test only after the file's synchronous body completes. */
-  scr_await_hop();
+/* The summary after the root's children finished: the same text the runner fiber printed at its end. */
+static void scr_test_runner_done(void *arg) {
+  (void)arg;
   ScrTestCtx *root = scr_test_root;
-  scr_test_run_children(root);
   scr_test_run_done = true;
   scr_test_count(root);
   scr_test_info_line("tests", (double)scr_test_ct_tests);
@@ -577,19 +793,24 @@ static void scr_test_runner_entry(ScrFiber *self, void *argpack) {
   scr_test_info_line("duration_ms", round((scr_now_ms() - scr_test_t0) * 1e6) / 1e6);
   bool any = false;
   scr_test_print_failures(root, &any);
-  /* The tree is done reporting: release it (test bodies may still hold
-   * their TestContext refs — the boxes stay alive through those). */
+  /* The tree is done reporting: release it (test bodies may still hold their TestContext refs: the boxes stay alive through those). */
   scr_test_reg_parent = NULL;
   scr_test_root = NULL;
   scr_testctx_release(root);
+}
+
+/* The runner's first turn: one microtask after the first registration, so it runs only after main returns and the loop drains microtasks
+ * (Node starts the first test after the file's synchronous body completes). */
+static void scr_test_runner_start(void *arg) {
+  (void)arg;
+  rn_start(scr_test_root, 2, scr_test_runner_done, NULL);
 }
 
 static void scr_test_ensure_runner(void) {
   if (scr_test_runner_spawned) return;
   scr_test_runner_spawned = true;
   scr_test_t0 = scr_now_ms();
-  ScrPromise *p = scr_async_spawn(scr_test_runner_entry, NULL);
-  scr_promise_release(p);
+  scr_queue_microtask_raw(&scr_test_runner_start, NULL, NULL);
 }
 
 /* ── the registration surface (libCall targets) ──────────────────────── */
@@ -648,13 +869,41 @@ void scr_test_hook(double which, ScrClosure *cb /*moves*/, double flags) {
  * the runner fiber at their call site (Node's awaited-subtest ordering) —
  * runs it immediately. Returns the settled promise `await t.test(...)`
  * consumes. */
+typedef struct {
+  ScrTestCtx *parent; /* retained */
+  ScrPromise *p;      /* the promise handed to the caller, fulfilled when the subtest finishes (owned) */
+} ScrTestSubDone;
+
+static void scr_test_sub_done(void *ap) {
+  ScrTestSubDone *d = (ScrTestSubDone *)ap;
+  ScrTestCtx *t = d->parent;
+  scr_promise_fulfill_void(d->p);
+  scr_promise_release(d->p);
+  free(d);
+  if (t->sub_running > 0) t->sub_running--;
+  if (t->sub_running == 0 && t->waiter) {
+    ScrRunNode *w = t->waiter;
+    t->waiter = NULL;
+    scr_testctx_release(t);
+    rn_advance(w);
+    return;
+  }
+  scr_testctx_release(t);
+}
+
 ScrPromise *scr_test_sub(ScrTestCtx *t, ScrStr *name /*borrowed*/, double mode,
                           ScrStr *msg /*borrowed*/, ScrClosure *cb /*moves, may be NULL*/,
                           double flags, ScrStr *at /*borrowed*/) {
   ScrTestCtx *sub = scr_test_node_new(name, (int)mode, msg, cb, (int)flags, at, false);
   scr_test_child_add(t, sub);
-  scr_test_run_node(sub);
-  return scr_promise_settled_void();
+  ScrPromise *p = scr_promise_new();
+  ScrTestSubDone *d = malloc(sizeof *d);
+  if (!d) scr_test_oom();
+  d->parent = scr_testctx_retain(t);
+  d->p = scr_promise_retain(p);
+  t->sub_running++;
+  rn_start(sub, 0, scr_test_sub_done, d); /* runs inline to its first suspension, like the call site always did */
+  return p;
 }
 
 void scr_test_ctx_skip(ScrTestCtx *t, ScrStr *msg /*borrowed*/) {
