@@ -173,8 +173,8 @@ export function stackCheckElidable(fn: IrFunction): boolean {
  * separate from the safety ASSERTION in emitFunction: edit this and the
  * assertion refuses any coverage that breaks propagation.
  *
- * Only functions the may-throw analysis ALREADY marks as throwing get the
- * prologue. Their call sites already carry `if (scr_exc_pending())`, so the
+ * Only functions the may-throw analysis ALREADY marks as throwing AND that can sit on a recursion cycle
+ * (computeMayThrow's `stackCheck`: cycle members and functions containing an indirect call) get the prologue. Their call sites already carry `if (scr_exc_pending())`, so the
  * RangeError propagates by the runtime's ordinary contract and no call site
  * anywhere pays anything new.
  *
@@ -188,13 +188,16 @@ export function stackCheckElidable(fn: IrFunction): boolean {
  * functions (pure arithmetic). That case keeps today's behaviour -- it
  * crashes -- and is never a silent wrong answer, which is the property that
  * made partial coverage the better trade. */
-export function stackCheckPolicy(mayThrow: Set<string>, fn: IrFunction): boolean {
+export function stackCheckPolicy(mayThrow: Set<string>, stackCheck: Set<string>, fn: IrFunction): boolean {
   if (stackCheckElidable(fn)) return false;
-  return mayThrow.has(fn.name);
+  return mayThrow.has(fn.name) && stackCheck.has(fn.name);
 }
 
 
-/** Does the TARGET have a stack floor the prologue can actually READ?
+/** Does the TARGET have a stack floor the prologue can actually READ? (Windows x86-64: the TEB; Linux x86-64: the
+ * runtime's `scr_stack_limit_v`, kept pointed at the running stack by the scheduler -- both lanes read the same one.
+ * The history below describes the state before the Linux floor existed and is kept for the reasoning.)
+ *
  *
  * This is the same question scr_runtime.h asks in the preprocessor, and it
  * has to stay the same question:
@@ -254,8 +257,22 @@ export function stackCheckTargetHasFloor(env: NodeJS.ProcessEnv = process.env): 
     platform = process.platform;
     arch = process.arch;
   }
-  if (platform !== "win32") return false;
+  if (platform !== "win32" && platform !== "linux") return false;
   return arch === "x64" || arch === "x86_64" || arch === "amd64";
+}
+
+/** HOW the floor is read on this target: the Windows TEB's DeallocationStack, or (Linux x86-64) the
+ * `scr_stack_floor_v` global the scheduler keeps pointed at the running stack (scr_stack_margin.c,
+ * scr_switch). Mirrors the preprocessor split in scr_runtime.h. */
+export function stackCheckFloorKind(env: NodeJS.ProcessEnv = process.env): "teb" | "global" | null {
+  if (!stackCheckTargetHasFloor(env)) return null;
+  let platform: string;
+  try {
+    platform = targetPlatform(resolveCc(env));
+  } catch {
+    platform = process.platform;
+  }
+  return platform === "win32" ? "teb" : "global";
 }
 
 
@@ -434,7 +451,7 @@ export function emitFunction(E: CEmitter, fn: IrFunction): void {
     // its refcounted params -- so the bail-out unwind RELEASES them. Emitting
     // it before that point leaks every refcounted param on the throw path,
     // which the RC audit would catch; found by porting this to the LLVM lane.
-    const wantStackCheck = stackCheckPolicy(E.mayThrow, fn);
+    const wantStackCheck = stackCheckPolicy(E.mayThrow, E.stackCheck, fn);
     // THE SAFETY INVARIANT, asserted rather than commented. A prologue that
     // throws into a function whose CALL SITES carry no pending check does not
     // crash -- it is worse: the error return is read as a value. Measured on

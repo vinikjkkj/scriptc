@@ -80,11 +80,15 @@ function typeMintsFnAdapter(t: IrType | undefined, mod: IrModule, seen: Set<stri
  * not exceptions, so most intrinsics never contribute. The module evaluator's
  * internal await and throwing library calls are the exceptions: both can
  * surface a catchable rejection/error and seed the fixpoint like a `throw`. */
-export function computeMayThrow(mod: IrModule): { fns: Set<string>; indirect: boolean } {
+export function computeMayThrow(mod: IrModule): { fns: Set<string>; indirect: boolean; stackCheck: Set<string> } {
   interface Facts {
     throws: boolean;
     callees: string[];
     callsValue: boolean;
+    /** Calls to async/generator functions and closures created here: edges for the recursion analysis only. */
+    extraEdges: string[];
+    /** Contains a call whose callee is not statically known (callValue, dynCall, dynInvoke). */
+    indirectCall: boolean;
   }
   const facts = new Map<string, Facts>();
   const closureTargets = new Set<string>();
@@ -114,7 +118,7 @@ export function computeMayThrow(mod: IrModule): { fns: Set<string>; indirect: bo
   }
   const tdzGlobalIds = (mod.globals ?? []).filter((g) => g.tdz).map((g) => g.id);
   for (const fn of mod.functions) {
-    const f: Facts = { throws: false, callees: [], callsValue: false };
+    const f: Facts = { throws: false, callees: [], callsValue: false, extraEdges: [], indirectCall: false };
     // TDZ locals (forward-captured consts): every read tests the box and
     // throws the catchable ReferenceError while it is empty.
     const tdzIds = new Set(fn.locals.filter((l) => l.tdz).map((l) => l.id));
@@ -175,6 +179,7 @@ export function computeMayThrow(mod: IrModule): { fns: Set<string>; indirect: bo
         // Prototype dispatch throws the same family (not-a-function,
         // cannot-read, the loud unimplemented fence, callback throws).
         case "dynInvoke":
+          f.indirectCall = true;
           // Calling a dyn value throws catchably: the not-a-function
           // TypeError, the boxed thunk's per-argument checks, and
           // whatever the boxed closure itself throws all surface here.
@@ -432,6 +437,7 @@ export function computeMayThrow(mod: IrModule): { fns: Set<string>; indirect: bo
           // throw becomes a promise rejection (visible only at await).
           const callee = rec["callee"] as string;
           if (!asyncFns.has(callee) && !genFns.has(callee)) f.callees.push(callee);
+          else f.extraEdges.push(callee);
           break;
         }
         case "new":
@@ -468,9 +474,11 @@ export function computeMayThrow(mod: IrModule): { fns: Set<string>; indirect: bo
         }
         case "callValue":
           f.callsValue = true;
+          f.indirectCall = true;
           break;
         case "closure":
           closureTargets.add(rec["fnName"] as string);
+          f.extraEdges.push(rec["fnName"] as string);
           break;
       }
       for (const key of Object.keys(rec)) {
@@ -479,6 +487,76 @@ export function computeMayThrow(mod: IrModule): { fns: Set<string>; indirect: bo
     };
     visit(fn.body);
     facts.set(fn.name, f);
+  }
+
+  // THE STACK-DEPTH SEED. A recursion cycle made of functions that cannot otherwise throw is
+  // invisible to the analysis above, so its members would carry no stack-depth prologue and
+  // deep recursion would crash where Node throws a catchable RangeError. Every member of a
+  // cycle in the DIRECT call graph (including a function calling itself) is therefore seeded as
+  // throwing: the prologue (stackCheckPolicy) then lands in the cycle and the callers' pending
+  // checks propagate the RangeError. A cycle through an INDIRECT call needs a function that
+  // contains an indirect call (callValue, dynCall, dynInvoke), so those functions are seeded too;
+  // calls to async/generator functions and closure creations count as edges.
+  // Straight-line code that is on no cycle pays nothing here.
+  const stackCheck = new Set<string>();
+  {
+    const names = [...facts.keys()];
+    const index = new Map<string, number>();
+    const low = new Map<string, number>();
+    const onStack = new Set<string>();
+    const stack: string[] = [];
+    let counter = 0;
+    const recursive = new Set<string>();
+    const strong = (root: string): void => {
+      // Iterative Tarjan: call graphs of real programs are deeper than the JS stack allows.
+      const work: Array<{ v: string; i: number }> = [{ v: root, i: 0 }];
+      index.set(root, counter);
+      low.set(root, counter++);
+      stack.push(root);
+      onStack.add(root);
+      while (work.length > 0) {
+        const top = work[work.length - 1]!;
+        const fa = facts.get(top.v)!;
+        const callees = fa.extraEdges.length === 0 ? fa.callees : fa.callees.concat(fa.extraEdges);
+        if (top.i < callees.length) {
+          const w = callees[top.i++]!;
+          if (!facts.has(w)) continue;
+          if (w === top.v) recursive.add(w);
+          if (!index.has(w)) {
+            index.set(w, counter);
+            low.set(w, counter++);
+            stack.push(w);
+            onStack.add(w);
+            work.push({ v: w, i: 0 });
+          } else if (onStack.has(w)) {
+            low.set(top.v, Math.min(low.get(top.v)!, index.get(w)!));
+          }
+        } else {
+          work.pop();
+          if (work.length > 0) {
+            const parent = work[work.length - 1]!.v;
+            low.set(parent, Math.min(low.get(parent)!, low.get(top.v)!));
+          }
+          if (low.get(top.v) === index.get(top.v)) {
+            const comp: string[] = [];
+            for (;;) {
+              const w = stack.pop()!;
+              onStack.delete(w);
+              comp.push(w);
+              if (w === top.v) break;
+            }
+            if (comp.length > 1) for (const w of comp) recursive.add(w);
+          }
+        }
+      }
+    };
+    for (const n of names) if (!index.has(n)) strong(n);
+    // Where the prologue goes: the cycle members, and every function containing a call whose callee the
+    // graph cannot see (a cycle through one needs at least one such function). Anything else sits on no
+    // cycle, so entering it from a checked caller is bounded by its own frame.
+    for (const n of recursive) stackCheck.add(n);
+    for (const [n, f] of facts) if (f.indirectCall) stackCheck.add(n);
+    for (const n of stackCheck) facts.get(n)!.throws = true;
   }
 
   const may = new Set<string>();
@@ -502,5 +580,5 @@ export function computeMayThrow(mod: IrModule): { fns: Set<string>; indirect: bo
       changed = true;
     }
   }
-  return { fns: may, indirect };
+  return { fns: may, indirect, stackCheck };
 }

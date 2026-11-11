@@ -29,6 +29,47 @@
  * the header's own #define is unconditional and overrides it.
  *
  * Never read -- only the NAME carries information. */
+#define _GNU_SOURCE 1
 #include "scr_runtime.h"
 
 const char SCR_STACK_MARGIN_SYM[1] = { 0 };
+
+#if defined(__linux__) && defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+/* The Linux stack floor the prologue test reads (SCR_STACK_LOW, scr_runtime.h).
+ *
+ * `scr_stack_limit_v` is the lowest address a frame may reach on the RUNNING stack: its floor plus SCR_STACK_MARGIN, precomputed so the prologue is one compare; the
+ * scheduler rewrites it on every context switch (scr_switch, scr_async.c) so
+ * it always belongs to the stack the code is executing on -- the same
+ * property Win32 gives the TEB read for free. It is 0 until the main stack is
+ * measured, and a 0 limit never compares low: no check rather than a check
+ * against a guess.
+ *
+ * The main stack's floor is its own measured extent: pthread_getattr_np
+ * reports the lowest address the kernel will grow the main stack to (the
+ * RLIMIT_STACK reservation), so the floor is that address and not an
+ * assumed size. An unlimited rlimit is capped at 1 GiB below the entry sp
+ * rather than trusted as address-space-sized. Measured at startup by a
+ * constructor, so it holds before the first emitted prologue runs and under
+ * both backends, with nothing for either emitter to remember. */
+#include <pthread.h>
+#include <stdint.h>
+
+uintptr_t scr_stack_limit_v = 0;
+uintptr_t scr_stack_main_limit_v = 0;
+
+__attribute__((constructor)) static void scr_stack_floor_init(void) {
+  pthread_attr_t at;
+  void *addr = NULL;
+  size_t size = 0;
+  if (pthread_getattr_np(pthread_self(), &at) != 0) return;
+  if (pthread_attr_getstack(&at, &addr, &size) == 0 && addr != NULL) {
+    uintptr_t lo = (uintptr_t)addr;
+    uintptr_t hi = lo + size;
+    const uintptr_t cap = (uintptr_t)1 << 30;
+    if (size > cap) lo = hi - cap;
+    scr_stack_main_limit_v = lo + SCR_STACK_MARGIN;
+    scr_stack_limit_v = lo + SCR_STACK_MARGIN;
+  }
+  pthread_attr_destroy(&at);
+}
+#endif

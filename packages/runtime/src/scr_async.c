@@ -1621,11 +1621,21 @@ static void *scr_win_self(void) {
 }
 #endif
 
+#if defined(__linux__) && defined(__x86_64__)
+extern uintptr_t scr_stack_limit_v;
+extern uintptr_t scr_stack_main_limit_v;
+#endif
+
 static void scr_switch(ScrCtx *from, ScrCtx *to, ScrFiber *to_fiber) {
 #ifdef SCR_ASAN_FIBERS
   ScrFiber *from_fiber = scr_current;
 #endif
   scr_current = to_fiber;
+#if defined(__linux__) && defined(__x86_64__)
+  /* The stack-depth guard's floor follows the stack being entered (see
+   * scr_stack_margin.c); a fiber's stack is [mem, mem + SCR_FIBER_STACK). */
+  scr_stack_limit_v = to_fiber ? (uintptr_t)to_fiber->st->mem + SCR_STACK_MARGIN : scr_stack_main_limit_v;
+#endif
   scr_exc_swap_cell(to_fiber ? &to_fiber->exc : NULL);
   scr_als_active = to_fiber ? &to_fiber->als : &scr_als_main_slot;
 #ifdef _WIN32

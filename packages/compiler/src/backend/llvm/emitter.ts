@@ -79,7 +79,7 @@ import { setDynOrderPlan, setDynInspExt } from "../dyn-members.js";
 import { orderRecordPlanCached, moduleUsesInspColors } from "../../ir/nodes.js";
 import { classvalCandidates, dynClassDisplayName, dynDescBase, dynEmitterSlot, dynRuntimeBaseInfo, dynRuntimeRoot, dynEnumerationFenced, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
 import { computeMayThrow } from "../emission/may-throw.js";
-import { seqScopedLocals, stackCheckPolicy, stackCheckTargetHasFloor, stackMarginBytes, stackMarginSymbol } from "../emission/emit-stmts.js";
+import { seqScopedLocals, stackCheckFloorKind, stackCheckPolicy, stackMarginBytes, stackMarginSymbol } from "../emission/emit-stmts.js";
 // The stackless lane's admission, read from the ONE place that owns it.
 // Importing coroPlans rather than re-deriving the predicate is the point:
 // index.ts gates the scr_coro.c LINK on this exact call, so a second
@@ -1964,6 +1964,7 @@ class LlEmitter {
    * checks are emitted only after calls that can actually raise. */
   private readonly mayThrow: Set<string>;
   private readonly indirectMayThrow: boolean;
+  private readonly stackCheck: Set<string>;
   /** Method names with at least one may-throw implementation — the
    * virtualCall pending check's key (CEmitter.mayThrowMethods). */
   private readonly mayThrowMethods = new Set<string>();
@@ -2277,6 +2278,7 @@ class LlEmitter {
     const mt = computeMayThrow(mod);
     this.mayThrow = mt.fns;
     this.indirectMayThrow = mt.indirect;
+    this.stackCheck = mt.stackCheck;
     for (const cls of mod.classes ?? []) {
       for (const m of cls.methods ?? []) {
         if (this.mayThrow.has(`%${cls.name}.${m}`)) this.mayThrowMethods.add(m);
@@ -7102,7 +7104,7 @@ class LlEmitter {
     //
     // Emitted here, after the function scope owns its refcounted params, so
     // the bail-out unwind releases them.
-    if (stackCheckPolicy(this.mayThrow, fn)) {
+    if (stackCheckPolicy(this.mayThrow, this.stackCheck, fn)) {
       if (!this.mayThrow.has(fn.name)) {
         throw new Error(
           `llvm emitter bug: stack-depth prologue requested for '${fn.name}', which is NOT in the ` +
@@ -7121,7 +7123,8 @@ class LlEmitter {
       //
       // Ungated, the load below ran on Linux too and killed 70% of
       // host-native LLVM binaries. See stackCheckTargetHasFloor().
-      if (stackCheckTargetHasFloor()) {
+      const floorKind = stackCheckFloorKind();
+      if (floorKind !== null) {
         const flr = B.tmp();
         const sp0 = B.tmp();
         const spi = B.tmp();
@@ -7134,12 +7137,23 @@ class LlEmitter {
         // life of the stack and swapped by Win32 on every fiber switch. NOT
         // StackLimit (GS:0x10), which the OS moves down WITH the stack and
         // which therefore never compares low. WINDOWS x86-64 ONLY.
-        B.line(`${flr} = load i64, ptr addrspace(256) inttoptr (i64 5240 to ptr addrspace(256)) ; TEB DeallocationStack`);
+        if (floorKind === "teb") {
+          B.line(`${flr} = load i64, ptr addrspace(256) inttoptr (i64 5240 to ptr addrspace(256)) ; TEB DeallocationStack`);
+        } else {
+          // Linux x86-64: the floor is the runtime's global, rewritten by the scheduler on every fiber switch.
+          this.declare(`@scr_stack_limit_v = external global i64`);
+          B.line(`${flr} = load i64, ptr @scr_stack_limit_v ; running stack's floor + SCR_STACK_MARGIN`);
+        }
         this.declare(`declare ptr @llvm.stacksave.p0()`);
         B.line(`${sp0} = call ptr @llvm.stacksave.p0()`);
         B.line(`${spi} = ptrtoint ptr ${sp0} to i64`);
-        B.line(`${lim} = sub i64 ${spi}, ${stackMarginBytes()} ; SCR_STACK_MARGIN, read from scr_runtime.h`);
-        B.line(`${low} = icmp ult i64 ${lim}, ${flr}`);
+        if (floorKind === "teb") {
+          B.line(`${lim} = sub i64 ${spi}, ${stackMarginBytes()} ; SCR_STACK_MARGIN, read from scr_runtime.h`);
+          B.line(`${low} = icmp ult i64 ${lim}, ${flr}`);
+        } else {
+          // The global already holds floor + SCR_STACK_MARGIN (scr_stack_margin.c, scr_switch): one compare.
+          B.line(`${low} = icmp ult i64 ${spi}, ${flr}`);
+        }
         const llo = B.newLabel("stk.lo");
         const lok = B.newLabel("stk.ok");
         B.condBr(low, llo, lok);

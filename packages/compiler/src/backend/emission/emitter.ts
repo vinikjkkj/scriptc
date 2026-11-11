@@ -1018,6 +1018,7 @@ export class CEmitter {
    * are emitted only after calls that can actually raise. */
   readonly mayThrow: Set<string>;
   readonly indirectMayThrow: boolean;
+  readonly stackCheck: Set<string>;
   /** Enclosing try contexts, innermost last — the compile-time analogue of
    * the jump-target stack for UNWINDING: a pending check (or `throw`) inside
    * a try releases frames/scopes down to the recorded depths and jumps to
@@ -1073,6 +1074,7 @@ export class CEmitter {
     const mt = computeMayThrow(mod);
     this.mayThrow = mt.fns;
     this.indirectMayThrow = mt.indirect;
+    this.stackCheck = mt.stackCheck;
     for (const g of mod.globals ?? []) this.globalsById.set(g.id, g);
     for (const u of mod.unions ?? []) this.unionsById.set(u.id, u);
     for (const r of mod.records ?? []) this.recordsById.set(r.id, r);

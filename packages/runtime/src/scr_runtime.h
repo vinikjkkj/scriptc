@@ -1286,6 +1286,19 @@ static inline unsigned long long scr_stack_sp(void) {
  * and the program still died 0xC00000FD with the check in place.) */
 #define SCR_STACK_LOW()                                                        \
   (scr_stack_sp() - (unsigned long long)SCR_STACK_MARGIN < scr_stack_floor())
+#elif defined(__linux__) && defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+/* Linux x86-64: the floor is a global the scheduler keeps pointed at the
+ * RUNNING stack (scr_stack_margin.c measures the main stack at startup;
+ * scr_switch rewrites it on every fiber switch), because Linux has no TEB to
+ * read. A global load, a compare and a never-taken forward branch, like the
+ * Windows sequence. The global holds floor + SCR_STACK_MARGIN, so the test is one compare; 0 (not measured) never compares low. */
+extern uintptr_t scr_stack_limit_v;
+static inline unsigned long long scr_stack_sp(void) {
+  unsigned long long s;
+  __asm__ volatile("movq %%rsp, %0" : "=r"(s));
+  return s;
+}
+#define SCR_STACK_LOW() (scr_stack_sp() < (unsigned long long)scr_stack_limit_v)
 #else
 /* Every other target keeps the historic behaviour until its floor has been
  * MEASURED: no check rather than a check that cannot fire. */
