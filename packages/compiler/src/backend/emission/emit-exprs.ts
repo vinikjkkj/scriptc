@@ -3693,9 +3693,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // The thrown-dyn representation (REF + dyn adapters): catch
             // bindings and the unhandled dispatch see the dyn value
             // itself — identity preserved.
-            E.line(
-              `scr_throw_ref(${reason.name}, &${rc.retain}, &${rc.release}, NULL);${E.srcComment(e.loc)}`,
-            );
+            // scr_throw_dyn, not scr_throw_ref: it unwraps a dyn that holds a string, number or boolean into
+            // the cell's scalar arms (String(e), typeof and the unhandled printer then see the value, not
+            // "[object Object]"), exactly what a statically thrown value or a rethrow does.
+            E.line(`scr_throw_dyn(${reason.name});${E.srcComment(e.loc)}`);
           } else {
             E.line(
               `scr_throw_obj(${reason.name}, &${rc.retain}, &${rc.release}, ${E.traceArgC(t)});${E.srcComment(e.loc)}`,

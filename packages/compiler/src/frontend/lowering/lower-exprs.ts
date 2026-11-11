@@ -28044,11 +28044,12 @@ export function slotBypassTarget(L: Lowerer, declarer: ClassInfo, method: string
   }
 
 /** `Promise.reject(reason)` on THE Promise global: a pre-rejected
-   * promise. The reason is pinned to the Error hierarchy (the executor
-   * reject parameter's contract — rejection payloads share the
-   * thrown-Error representation, so catch-side instanceof and the
-   * uncaught printer keep working) and moves into the rejection slot
-   * exactly as an executor's reject() would store it; the result enters
+   * promise. An Error instance rides the thrown-Error representation (so
+   * catch-side instanceof and the uncaught printer keep working); any other
+   * value (string, number, boolean, null, undefined, a plain object) is a
+   * dyn reason, the representation an executor's reject(reason: unknown)
+   * stores. Either moves into the rejection slot exactly as an executor's
+   * reject() would store it; the result enters
    * the unhandled ledger until something observes it, JS-exact. The
    * checker types the call Promise<never>, so the CONTEXT names the
    * result type (a declared return type, an annotated initializer, an
@@ -28074,7 +28075,13 @@ export function slotBypassTarget(L: Lowerer, declarer: ClassInfo, method: string
     // value IS the rejection payload (the thrown-dyn representation, so
     // identity survives to catch/unhandledRejection observers), and the
     // result is promise<dyn> when no context names a concrete one.
-    const reason = L.lowerExpr(reasonNode);
+    let reason = L.lowerExpr(reasonNode);
+    // Any other reason that is not an Error instance (a string, number, boolean, null, a plain object): Node
+    // accepts every value, so it rides as a checked-dynamic payload, the same representation an executor's
+    // reject(reason: unknown) stores, and the result takes the context's promise type or promise<void>.
+    if (reason.type.kind !== "dyn" && !errorRootedObjectOf(L, L.typeOf(reasonNode))) {
+      reason = { kind: "dynFrom", value: reason, type: DYN, loc: reason.loc };
+    }
     if (reason.type.kind === "dyn") {
       // The result only ever REJECTS, so the inner type is unobservable:
       // adopt the context's promise type when one names it, else the
@@ -28096,14 +28103,6 @@ export function slotBypassTarget(L: Lowerer, declarer: ClassInfo, method: string
         call,
         "the checker types the call Promise<never> — a declared return type or an " +
           "annotation (const p: Promise<T> = Promise.reject(...)) names the result",
-      );
-    }
-    if (!errorRootedObjectOf(L, L.typeOf(reasonNode))) {
-      L.unsupported(
-        "SC1090",
-        reasonNode,
-        `Promise.reject reasons of type '${L.checker.typeToString(L.typeOf(reasonNode))}' ` +
-          "(rejection payloads share the thrown-Error representation: pass an Error instance)",
       );
     }
     if (reason.type.kind !== "object") L.badType(reasonNode, L.typeOf(reasonNode));

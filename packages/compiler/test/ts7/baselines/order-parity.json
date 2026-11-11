@@ -27528,6 +27528,36 @@
     "<repo>/tests/corpus/25127-a-synchronous-throw-of-null-is-uncaught-and-exits-1.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25121-promise-reject-takes-any-value-and-the-reason-arrives-as-it-is.ts": {
+   "order": [
+    "<repo>/tests/corpus/25121-promise-reject-takes-any-value-and-the-reason-arrives-as-it-is.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25123-an-unhandled-string-rejection-exits-1-after-the-output.ts": {
+   "order": [
+    "<repo>/tests/corpus/25123-an-unhandled-string-rejection-exits-1-after-the-output.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25124-an-unhandled-number-rejection-from-an-async-throw-exits-1.ts": {
+   "order": [
+    "<repo>/tests/corpus/25124-an-unhandled-number-rejection-from-an-async-throw-exits-1.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25125-an-unhandled-null-rejection-exits-1.ts": {
+   "order": [
+    "<repo>/tests/corpus/25125-an-unhandled-null-rejection-exits-1.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25126-an-unhandled-object-rejection-exits-1.ts": {
+   "order": [
+    "<repo>/tests/corpus/25126-an-unhandled-object-rejection-exits-1.ts"
+   ],
+   "diags": []
   }
  }
 }
