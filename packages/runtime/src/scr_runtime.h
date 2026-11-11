@@ -8366,6 +8366,9 @@ ScrDyn *scr_dyn_promise_then(ScrPromise *src, ScrDyn *onf, ScrDyn *onr, ScrDyn *
  * after the settlement (or one turn from now when it already has), and take a settlement's result. */
 void scr_promise_wait_raw(ScrPromise *p, void (*fn)(void *), void *arg);
 bool scr_promise_settled_take(ScrPromise *p);
+double scr_promise_value_f64(const ScrPromise *p);
+bool scr_promise_value_bool(const ScrPromise *p);
+void *scr_promise_value_ref(const ScrPromise *p);
 /* ── AsyncLocalStorage (node:async_hooks — scr_async.c) ───────────────
  * Stores are process-lived f64 handles; the CONTEXT is an immutable
  * refcounted snapshot of (store → dyn value) entries riding the fiber

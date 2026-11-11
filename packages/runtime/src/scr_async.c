@@ -4248,6 +4248,12 @@ bool scr_promise_settled_take(ScrPromise *p) {
   return true;
 }
 
+/* The settled payload of a FULFILLED promise, as the awaits read it (+1 for a reference), for a reaction running as a continuation
+ * (scr_promise_wait_raw) after scr_promise_settled_take answered true. */
+double scr_promise_value_f64(const ScrPromise *p) { return p->f64; }
+bool scr_promise_value_bool(const ScrPromise *p) { return p->b; }
+void *scr_promise_value_ref(const ScrPromise *p) { return p->payload ? p->retain_fn(p->payload) : NULL; }
+
 #ifdef SCR_CORO_LANE
 /* GATED ON THE LINK, not on a knob. cc.ts defines SCR_CORO_LANE exactly when
  * scr_coro.c is in this link -- derived from the source list itself, so the
