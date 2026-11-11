@@ -10501,7 +10501,20 @@ function prototypeInstallerCallStmt(L: Lowerer, expr: ts.Expression): IrStmt | n
             if (!ok) break;
             // The destructuring pattern names the type the checker gives each binding (a union of function types, for one, is ONE
             // function type with a union result there, not a union of closures): the column takes it when it is known.
-            const known = arms.length > 1 ? (columnTypes?.[j] ?? null) : null;
+            let known = arms.length > 1 ? (columnTypes?.[j] ?? null) : null;
+            // No pattern to ask (a plain loop variable): function arms with the same parameters are the ONE function type the checker calls
+            // them as, whose result is the union of the arms' results.
+            if (known === null && arms.length > 1 && arms.every((a) => a.kind === "func")) {
+              const fns = arms as (IrType & { kind: "func" })[];
+              const first = fns[0]!;
+              if (fns.every((f) => f.params.length === first.params.length && f.params.every((pt, k) => typeEquals(pt, first.params[k]!)))) {
+                const rets: IrType[] = [];
+                for (const f of fns) if (!rets.some((r) => typeEquals(r, f.ret))) rets.push(f.ret);
+                if (rets.every((r) => r.kind !== "union" && r.kind !== "void" && r.kind !== "dyn")) {
+                  known = { kind: "func", params: first.params, ret: rets.length === 1 ? rets[0]! : { kind: "union", unionId: L.unions.intern(rets) } };
+                }
+              }
+            }
             cols.push({ name: String(j), type: known ?? (arms.length === 1 ? arms[0]! : { kind: "union", unionId: L.unions.intern(arms) }) });
           }
           if (ok) {

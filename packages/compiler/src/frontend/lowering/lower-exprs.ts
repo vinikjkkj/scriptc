@@ -15385,6 +15385,22 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     if (!expr.questionDotToken && stdlibGlobalNameOf(L, expr.expression) === "globalThis") {
       return { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc: locOf(expr) };
     }
+    // A positional read of a loop variable that is a union of tuples for the checker (`for (const t of [["a", 1], ["b", "x"]] as const) t[0]`): the
+    // snapshot the for-of built widened the element tuples to ONE tuple shape, so the binding LOWERS to that tuple and the read is positional on
+    // it, exactly the position union the checker gives the access.
+    // The checker's type of the occurrence can also be ONE arm of that union (an `if (t[2])` narrowed it by a discriminant position), whose tuple
+    // shape is not the widened binding's: the shapes differ either way, and the lowered value's shape is the one that has the slots.
+    if (!expr.questionDotToken && ts.isIdentifier(expr.expression)) {
+      const tsT = L.typeOf(expr.expression);
+      const mapped = L.mapTypeOf(tsT);
+      if ((tsT.flags & ts.TypeFlags.Union) !== 0 || mapped?.kind === "record") {
+        const probed = probeLower(L, expr.expression);
+        if (probed?.type.kind === "record" && (mapped?.kind !== "record" || mapped.shapeId !== probed.type.shapeId)) {
+          const widened = L.shapes.get(probed.type.shapeId);
+          if (widened?.tuple === true) return tupleElementRead(L, expr, probed, probed.type.shapeId, widened);
+        }
+      }
+    }
     // `req.headers["x-name"]` — the computed twin of `req.headers.host`
     // (the server spoke owns both; the envGet precedent).
     {
@@ -26376,6 +26392,14 @@ export function slotBypassTarget(L: Lowerer, declarer: ClassInfo, method: string
    * ordinary closure values, so bare references to them work (unlike class
    * methods, which have no bound-value form). */
   export function lowerFieldRead(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
+    // `t.length` of a loop variable that is a union of tuples for the checker: the for-of snapshot widened the element tuples to one tuple shape, so
+    // the binding lowers to that tuple and its length is the arity constant (every element tuple has the same arity by construction).
+    if (expr.name.text === "length" && !expr.questionDotToken && ts.isIdentifier(expr.expression) && ((L.typeOf(expr.expression).flags & ts.TypeFlags.Union) !== 0 || L.mapTypeOf(L.typeOf(expr.expression))?.kind === "record")) {
+      const probed = probeLower(L, expr.expression);
+      if (probed?.type.kind === "record" && L.shapes.get(probed.type.shapeId)?.tuple === true) {
+        return { kind: "numLit", value: L.shapes.get(probed.type.shapeId)!.fields.length, type: F64, loc: locOf(expr) };
+      }
+    }
     const overridden = lowerInstanceOverrideRead(L, expr);
     if (overridden !== null) return overridden;
     const target = L.fieldTarget(expr);

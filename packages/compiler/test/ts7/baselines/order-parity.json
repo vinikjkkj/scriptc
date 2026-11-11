@@ -27642,6 +27642,12 @@
     "<repo>/tests/corpus/25140-instanceof-array-and-instanceof-object.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25141-positional-reads-on-the-loop-variable-of-a-mixed-tuple-loop.ts": {
+   "order": [
+    "<repo>/tests/corpus/25141-positional-reads-on-the-loop-variable-of-a-mixed-tuple-loop.ts"
+   ],
+   "diags": []
   }
  }
 }
