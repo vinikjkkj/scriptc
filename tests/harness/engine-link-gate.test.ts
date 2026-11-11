@@ -52,3 +52,17 @@ describe.each(["c", "llvm"] as const)("the engine link gate (%s)", (backend) => 
     expect(out).toBe("7 42\n11\n5\n42\n");
   }, 900_000);
 });
+
+describe.each(["c", "llvm"] as const)("the engine link gate for a constructor read that is a call receiver (%s)", (backend) => {
+  test("static methods called on a constructor read carry no engine, and call/apply/bind/constructor/valueOf on the Function constructor still do", async () => {
+    const plain = await build("recv-plain", backend, rowOf("24970-"));
+    const withEngine = await build("recv-engine", backend, rowOf("24971-"));
+    if (process.platform !== "win32") {
+      expect(hasEngineSymbol(plain.bin), "the static-call row linked the engine").toBe(false);
+      expect(hasEngineSymbol(withEngine.bin), "the call/bind row did not link the engine (the gate is over-narrowed)").toBe(true);
+    }
+    // The two rows are different programs, so no size gap is asserted here; a Windows PE has no symbol table to read, so only the answers are checked there.
+    expect(execFileSync(withEngine.bin, [], { encoding: "utf8" })).toBe("1\n42\n3\n4\n5\n");
+    expect(execFileSync(plain.bin, [], { encoding: "utf8" })).toBe(execFileSync(process.execPath, [join(corpus, rowOf("24970-"))], { encoding: "utf8" }));
+  }, 900_000);
+});
