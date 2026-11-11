@@ -27558,6 +27558,12 @@
     "<repo>/tests/corpus/25126-an-unhandled-object-rejection-exits-1.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25122-plus-with-a-string-on-an-unknown-converts-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25122-plus-with-a-string-on-an-unknown-converts-like-node.ts"
+   ],
+   "diags": []
   }
  }
 }

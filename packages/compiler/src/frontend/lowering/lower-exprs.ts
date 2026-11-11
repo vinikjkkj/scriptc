@@ -20145,8 +20145,16 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       // a user valueOf/toString the dyn model holds no prototype chain
       // for, so answering there would be the silent wrong value this
       // whole tier exists to avoid (see dyn.toNumber in nodes.ts).
+      // `+` with a statically STRING side is the one operator form tsc accepts on a genuine `unknown` (a catch binding, an
+      // `unknown` parameter): `e + ""` is ToPrimitive with the default hint and then concatenation, which is exactly the
+      // string-context arm below (ensureStringForPlus over the dyn side), so it takes this path too.
+      const plusWithStringSide =
+        op === ts.SyntaxKind.PlusToken &&
+        (left.type.kind === "dyn" || right.type.kind === "dyn") &&
+        (left.type.kind === "string" || right.type.kind === "string");
       if (
         isJsSourceFile(expr.getSourceFile()) ||
+        plusWithStringSide ||
         (left.type.kind === "dyn" && L.dynOperandOrigin(expr.left)) ||
         (right.type.kind === "dyn" && L.dynOperandOrigin(expr.right))
       ) {
