@@ -3,6 +3,7 @@
  * methods with Node-exact forEach desugaring, and the string and regex
  * method surfaces. */
 import { programHasPrimSubclass } from "./prim-subclass-gate.js";
+import { tupleSnapshotArray } from "./lower-stmts.js";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { fillWithKeyList } from "./key-list-fill.js";
@@ -126,11 +127,32 @@ function lowerOptionalDefaultArg(
     return ts.isPropertyAccessExpression(e) && e.questionDotToken === undefined && isPureReceiverPath(e.expression);
   }
 
+  /** The array methods that only READ the receiver, so a snapshot of a tuple's positions answers them exactly. */
+  const TUPLE_READ_METHODS = new Set(["map", "filter", "forEach", "some", "every", "find", "findIndex", "findLast", "findLastIndex", "reduce", "reduceRight", "join", "includes", "indexOf", "lastIndexOf", "slice", "flatMap", "at"]);
+
   export function lowerArrayMethodCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (L.chainBlocked(access, call)) return null;
     const name = access.name.text;
     if (!ARRAY_METHODS.has(name) && name !== "sort" && name !== "shift" && name !== "splice") return null;
+    // A read-only array method on a TUPLE whose positions differ (`settled.map(...)` over Promise.allSettled([a, b, c]) of different result
+    // types): the tuple is a record, so no array table applies. Its positions snapshot into an array (the union of the position types, which
+    // is the element type the checker gives the callback) and the call lowers against that.
+    if (TUPLE_READ_METHODS.has(name) && !L.exprOverrides.has(access.expression)) {
+      const tupleMap = L.mapTypeOf(L.typeOf(access.expression));
+      if (tupleMap?.kind === "record" && L.shapes.get(tupleMap.shapeId)?.tuple === true) {
+        const tuple = L.lowerExpr(access.expression);
+        const snap = tupleSnapshotArray(L, tuple, access.expression);
+        if (snap !== null) {
+          L.exprOverrides.set(access.expression, snap);
+          try {
+            return lowerArrayMethodCall(L, call, access);
+          } finally {
+            L.exprOverrides.delete(access.expression);
+          }
+        }
+      }
+    }
     // A NULLABLE array receiver (`any[] | null`, `T[] | undefined`, a field
     // that is null until assigned): Node throws a TypeError exactly when the
     // value IS the nil at run time, and otherwise runs the method on the array.

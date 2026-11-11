@@ -27600,6 +27600,12 @@
     "<repo>/tests/corpus/25133-string-of-a-thrown-hierarchy-class-instance-runs-its-conversion.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25134-array-methods-on-a-tuple-of-mixed-positions.ts": {
+   "order": [
+    "<repo>/tests/corpus/25134-array-methods-on-a-tuple-of-mixed-positions.ts"
+   ],
+   "diags": []
   }
  }
 }
