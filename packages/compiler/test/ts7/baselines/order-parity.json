@@ -27612,6 +27612,12 @@
     "<repo>/tests/corpus/25097-forty-thousand-async-generator-fibers-alive-at-once.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25103-short-string-of-unknown-results-held-after-a-large-stringify-keep-exact-contents.ts": {
+   "order": [
+    "<repo>/tests/corpus/25103-short-string-of-unknown-results-held-after-a-large-stringify-keep-exact-contents.ts"
+   ],
+   "diags": []
   }
  }
 }
