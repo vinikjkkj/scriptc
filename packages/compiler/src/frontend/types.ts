@@ -2848,8 +2848,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
       elem.kind === "sqliteDb" ||
       elem.kind === "sqliteStmt" ||
       elem.kind === "childStream" ||
-      elem.kind === "procStream" ||
-      elem.kind === "generator"
+      elem.kind === "procStream"
     ) {
       return null; // ScrArr has no closure/map/regex/url element kinds yet
     }
