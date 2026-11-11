@@ -6095,7 +6095,8 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
         for (const part of ts.constituentTypes(widened)) {
           if (part.flags & ts.TypeFlags.Never || intersectionUninhabited(part)) continue;
           const awaited = checker.getAwaitedType(part);
-          if (awaited !== undefined && (awaited.flags & ts.TypeFlags.Undefined) !== 0) {
+          if (awaited !== undefined && (awaited.flags & (ts.TypeFlags.Undefined | ts.TypeFlags.Void)) !== 0) {
+            // A `void` payload settles to undefined (an await of Promise<void> yields it), so it joins the payload union as the undefined arm.
             payloadByKey.set(typeKey(UNDEFINED_T), UNDEFINED_T);
             continue;
           }

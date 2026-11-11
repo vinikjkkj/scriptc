@@ -27648,6 +27648,12 @@
     "<repo>/tests/corpus/25141-positional-reads-on-the-loop-variable-of-a-mixed-tuple-loop.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25142-union-of-promise-void-and-promise-of-a-value.ts": {
+   "order": [
+    "<repo>/tests/corpus/25142-union-of-promise-void-and-promise-of-a-value.ts"
+   ],
+   "diags": []
   }
  }
 }
