@@ -4236,16 +4236,18 @@ void scr_promise_wait_raw(ScrPromise *p, void (*fn)(void *), void *arg) {
   scr_promise_park_envelope(p, fn, arg, NULL);
 }
 
-/* The part of scr_await_settled after the wait: mark the settlement observed
- * and, for a rejection, copy the reason into the ACTIVE exception cell. True
- * for a fulfillment. The promise must already be settled. */
-bool scr_promise_settled_take(ScrPromise *p) {
+/* The part of scr_await_settled after the wait, fused with the "is it settled yet" test so the caller pays ONE call
+ * for both: -1 while the promise is still pending (nothing consumed: the caller waits again, which is the
+ * `while (pending) park` of the fiber this replaced), otherwise the settlement is marked observed and a rejection's
+ * reason is copied into the ACTIVE exception cell: 0 for a rejection, 1 for a fulfillment. */
+int scr_promise_settled_try_take(ScrPromise *p) {
+  if (p->state == SCR_PROM_PENDING) return -1;
   scr_prom_observe(p);
   if (p->state == SCR_PROM_REJECTED) {
     scr_promise_rethrow(p);
-    return false;
+    return 0;
   }
-  return true;
+  return 1;
 }
 
 #ifdef SCR_CORO_LANE
