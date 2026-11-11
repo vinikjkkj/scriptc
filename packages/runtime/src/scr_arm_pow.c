@@ -775,7 +775,16 @@ double scr_arm_pow(double x, double y)
 
 int scr_arm_pow_available(void) {
 #if defined(__clang__) && (defined(__x86_64__) || defined(__i386__))
-  return __builtin_cpu_supports("fma");
+  /* Direct cpuid/xgetbv: __builtin_cpu_supports needs compiler-rt's __cpu_model, which zig's x86_64-windows-gnu link does not provide. */
+  unsigned a, b, c, d;
+  __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(0), "c"(0));
+  if (a < 1) return 0;
+  __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(1), "c"(0));
+  /* FMA (ecx 12), OSXSAVE (27), AVX (28), and the OS saving XMM+YMM state (xcr0 bits 1,2). */
+  if ((c & ((1u << 12) | (1u << 27) | (1u << 28))) != ((1u << 12) | (1u << 27) | (1u << 28))) return 0;
+  unsigned xlo, xhi;
+  __asm__ volatile("xgetbv" : "=a"(xlo), "=d"(xhi) : "c"(0));
+  return (xlo & 6u) == 6u;
 #else
   return 0;
 #endif
