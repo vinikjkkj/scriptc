@@ -9580,7 +9580,22 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     // the literal's own inferred type is the real tuple.
     if (!mapped || mapped.kind === "union" || mapped.kind === "dyn") {
       const ctxUnion = mapped?.kind === "union" ? mapped : null;
+      const dynSlot = mapped?.kind === "dyn";
       mapped = L.mapTypeOf(L.typeOf(expr));
+      // An `unknown[]` slot (it maps to DYN wholesale) over a literal of MIXED element kinds (arrays beside objects, class instances,
+      // scalars): the literal's own type is an array of a union, which no static home holds for every mix (a refusal for some, a run-time
+      // "not representable in the target union" for others). The slot is dynamic, so the literal builds as a dyn array, each element
+      // converting through the dyn boundary on its own.
+      if (dynSlot && ctxType !== undefined && L.checker.isArrayType(ctxType) && !ts.isSpreadElement(expr.elements[0] ?? expr)) {
+        // "Mixed" is judged by the ELEMENTS' own widened types, not the literal's inferred element type: tsc reduces `number[] | K` to `K` when
+        // K is structurally a supertype (a class with only toString), and the static element type then refuses the other elements.
+        const kinds = new Set(
+          expr.elements.map((el) =>
+            ts.isSpreadElement(el) || ts.isOmittedExpression(el) ? "?" : L.checker.typeToString(L.checker.getBaseTypeOfLiteralType(L.typeOf(el))),
+          ),
+        );
+        if (kinds.size > 1 && !kinds.has("?")) mapped = DYN;
+      }
       // The never-tainted own type carries no element information here
       // either (the JS story above) — only a contextual union's single
       // array arm below may still supply a static home.

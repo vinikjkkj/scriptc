@@ -27588,6 +27588,12 @@
     "<repo>/tests/corpus/25131-instanceof-on-a-caught-standalone-class-instance.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25132-unknown-array-literal-of-mixed-element-kinds.ts": {
+   "order": [
+    "<repo>/tests/corpus/25132-unknown-array-literal-of-mixed-element-kinds.ts"
+   ],
+   "diags": []
   }
  }
 }
