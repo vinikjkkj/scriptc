@@ -22293,6 +22293,13 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
       if (info && L.inHierarchy(info)) {
         return { kind: "caughtNarrow", value: ref, type: narrowed, loc };
       }
+      // A standalone class instance (thrown as a dyn value): the checked extraction out of the dyn conversion, proven by the
+      // `instanceof` the checker narrowed on.
+      if (info && isProgramClassInfo(L, info) && !info.generic) {
+        L.noteDynBoxedClass(narrowed.className);
+        const asDyn: IrExpr = { kind: "caughtToDyn", value: ref, type: DYN, loc };
+        return { kind: "dynCheck", value: asDyn, type: narrowed, narrowBridge: true, loc };
+      }
     }
     // An UN-narrowed use — the occurrence still types `unknown` — converts
     // to a dyn value (`options.onError?.(error)` — the caught snapshot
@@ -23380,6 +23387,13 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
     const caughtLocal = L.caughtLocalOf(expr.left);
     if (caughtLocal) {
       if (!L.inHierarchy(target)) {
+        // A STANDALONE class has no vtable word, so a thrown instance rides the dyn representation (the throw lowering boxes it by
+        // reference): the test converts the snapshot to its dyn value and asks the dyn class test, which answers by the instance's class.
+        if (isProgramClassInfo(L, target) && !target.generic) {
+          L.noteDynBoxedClass(target.def.name);
+          const asDyn: IrExpr = { kind: "caughtToDyn", value: { kind: "varRef", localId: caughtLocal.id, type: CAUGHT, loc }, type: DYN, loc };
+          return { kind: "dynTest", test: "class", className: target.def.name, value: asDyn, type: BOOL, loc };
+        }
         L.unsupported(
           "SC1090",
           expr,
