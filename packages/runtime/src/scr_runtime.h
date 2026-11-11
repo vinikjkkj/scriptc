@@ -1700,6 +1700,9 @@ double scr_math_random(void);
  * Number::exponentiate). NOT C pow(): pow(1, NaN) and pow(-1, ±Infinity)
  * are 1.0 in C where JS answers NaN. */
 double scr_math_pow(double x, double y);
+/* The vendored ARM optimized-routines pow (scr_arm_pow.c, Windows builds only) and whether this CPU can run it (needs fma). */
+double scr_arm_pow(double x, double y);
+int scr_arm_pow_available(void);
 /* Math.pow(x, 0.5) with the exponent a compile-time literal (the exact root for a non-negative base). */
 double scr_math_pow_half(double x);
 /* Math.pow(x, y) for another finite literal exponent: the platform pow, with none of scr_math_pow's tests. */

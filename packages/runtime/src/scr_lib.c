@@ -3598,21 +3598,16 @@ double scr_math_round(double x) {
   return (r == 0.0 && x < 0.0) ? -0.0 : r;
 }
 
-/* The platform pow, the one Node calls. V8 answers Math.pow with std::pow (flag use_std_math_pow, default on), and Node for Windows is linked
- * against the Universal CRT, whose pow differs from mingw-w64's own libm pow on a few percent of arguments (row 24940's grid: 2305 NaN-equal,
- * hash differs). So the Windows arm asks ucrtbase.dll for its pow once and calls that; every other platform calls pow(). */
+/* The platform pow, the one Node calls. V8's Math.pow rounds like the ARM optimized-routines pow glibc uses on a modern x86-64, on every
+ * platform; the Windows C runtime's pow differs in the last bit for a few samples in a thousand (row 24940: pow(-396976.1611328125, -2) is
+ * 6.345577383695e-12 in Node and 6.345577383694999e-12 from the Windows pow, and ucrtbase's pow gave the same answer as mingw's). So the Windows
+ * arm calls the vendored routine (scr_arm_pow.c, bit-for-bit glibc's on 20 million samples) when the CPU can run it, and the C runtime otherwise;
+ * every other platform calls pow(), which is that algorithm already. */
 #ifdef _WIN32
-typedef double (__cdecl *scr_ucrt_pow_fn)(double, double);
-static scr_ucrt_pow_fn scr_ucrt_pow_ptr;
 static double scr_platform_pow(double x, double y) {
-  scr_ucrt_pow_fn fn = scr_ucrt_pow_ptr;
-  if (__builtin_expect(fn == NULL, 0)) {
-    HMODULE m = LoadLibraryA("ucrtbase.dll");
-    fn = m != NULL ? (scr_ucrt_pow_fn)(void *)GetProcAddress(m, "pow") : NULL;
-    if (fn == NULL) fn = (pow);
-    scr_ucrt_pow_ptr = fn;
-  }
-  return fn(x, y);
+  static int arm = -1;
+  if (__builtin_expect(arm < 0, 0)) arm = scr_arm_pow_available();
+  return arm ? scr_arm_pow(x, y) : pow(x, y);
 }
 #else
 #define scr_platform_pow(x, y) pow((x), (y))
