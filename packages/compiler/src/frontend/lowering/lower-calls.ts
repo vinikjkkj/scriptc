@@ -504,6 +504,14 @@ export function paramOfDisagreeingUnion(L: Lowerer, param: ts.ParameterDeclarati
   const sigs = ts.constituentTypes(ctxT).flatMap((t) => L.checker.getCallSignatures(t));
   const idx = param.parent.parameters.indexOf(param);
   if (sigs.length < 2 || idx < 0) return false;
+  // Listener unions the standard library and @types declare (process.on's overloads, http's 'connect') have their own lowerings that read the typed
+  // parameters: only a union a package's or the program's own declaration spells takes the dynamic slot.
+  for (const sg of sigs) {
+    const sd = L.checker.signatureDeclaration(sg);
+    if (sd === undefined) continue;
+    const sf = sd.getSourceFile();
+    if (L.isStdlibFile(sf) || /[\\/]@types[\\/]/.test(sf.fileName)) return false;
+  }
   const seen = new Set<string>();
   for (const sg of sigs) {
     const ps = sg.getParameters();
