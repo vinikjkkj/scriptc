@@ -7866,20 +7866,8 @@ ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc) {
     if (d->v.bytes->flavor == SCR_BF_DATAVIEW) return scr_str_new("[object DataView]", 17);
     if (d->buffer) return scr_bytes_to_str(d->v.bytes, enc);
     /* Uint8Array.prototype.toString is Array's: elements joined */
-    if (d->v.bytes->elem == SCR_BYTES_U8 || d->v.bytes->elem == SCR_BYTES_U8C) return scr_str_u8_join(d->v.bytes->data, d->v.bytes->len, ",", 1);
-    {
-      ScrStr *out = scr_str_new("", 0);
-      for (size_t i = 0; i < d->v.bytes->len; i++) {
-        char n[16];
-        int w = snprintf(n, sizeof n, i > 0 ? ",%u" : "%u", (unsigned)d->v.bytes->data[i]);
-        ScrStr *piece = scr_str_new(n, (size_t)w);
-        ScrStr *joined = scr_str_concat(out, piece);
-        scr_str_release(out);
-        scr_str_release(piece);
-        out = joined;
-      }
-      return out;
-    }
+    /* The old loop read data[0..len) as unsigned bytes whatever the element kind; this is the same bytes, written once at the exact size. */
+    return scr_str_u8_join(d->v.bytes->data, d->v.bytes->len, ",", 1);
   case SCR_DYN_STR:
     return scr_str_retain(d->v.str);
   case SCR_DYN_NUM:

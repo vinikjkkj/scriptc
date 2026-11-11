@@ -1156,6 +1156,12 @@ ScrStr *scr_str_new(const char *bytes, size_t len) {
  * concatenation carries geometric slack and keeps the old and the new block alive across every regrow. */
 ScrStr *scr_str_u8_join(const uint8_t *d, size_t n, const char *sep, size_t seplen) {
   size_t len = n > 0 ? (n - 1) * seplen : 0;
+#if defined(__clang__)
+#pragma clang loop vectorize(disable) interleave(disable) unroll(disable)
+#elif defined(__GNUC__) && __GNUC__ >= 14
+#pragma GCC novector
+#pragma GCC unroll 1
+#endif
   for (size_t i = 0; i < n; i++) len += 1u + (size_t)(d[i] >= 10) + (size_t)(d[i] >= 100);
   ScrStr *s = scr_str_alloc(len, len);
   char *p = s->data;
