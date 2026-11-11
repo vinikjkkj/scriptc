@@ -27407,6 +27407,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25080-promise-all-tuple-result-survives-a-collection-while-its-claims-settle.ts": {
+   "order": [
+    "<repo>/tests/corpus/25080-promise-all-tuple-result-survives-a-collection-while-its-claims-settle.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/25060-class-instance-read-through-a-record-of-methods-is-the-same-object/main.ts": {
    "order": [
     "<repo>/tests/corpus/25060-class-instance-read-through-a-record-of-methods-is-the-same-object/main.ts"
