@@ -11970,6 +11970,14 @@ export function moduleUsesAssert(mod: IrModule): boolean {
  * class-instance writes, deletes, class values and Error-rooted members) and
  * its emitted main installs it. A program with no class never reaches any of
  * it, so the always-linked scr_json.c carries none of that code. */
+/** Does the module declare a class a dyn box can hold that has an ASYNC method? Its dyn member wrapper boxes the method's Promise through
+ * scr_dyn_new_promise_adapting (scr_async_dyn.c), a unit nothing else on the IR may have asked for. */
+export function moduleBoxesAsyncClassMethod(mod: IrModule): boolean {
+  const boxable = (mod.classes ?? []).filter((c) => c.name !== RUNTIME_EMITTER_CLASS && !RUNTIME_STREAM_CLASSES.has(c.name) && canBoxClassIntoDyn(c.name)).map((c) => `%${c.name}.`);
+  if (boxable.length === 0) return false;
+  return mod.functions.some((f) => f.async === true && boxable.some((p) => f.name.startsWith(p)));
+}
+
 export function moduleUsesDynClass(mod: IrModule): boolean {
   if ((mod.classes ?? []).some(
     (c) => c.name !== RUNTIME_EMITTER_CLASS && !RUNTIME_STREAM_CLASSES.has(c.name) && canBoxClassIntoDyn(c.name),
