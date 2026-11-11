@@ -1520,7 +1520,10 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
             // caller on the stack after its first resume, so it FULFILLS its
             // promise instead of returning. Guarded on the lane, so the
             // knob-absent emission keeps `return sc_pret;` byte-for-byte.
-            for (const l of coroFinish(
+            // THROUGH finishLines, like every other completion path: a generator frame completes through its handle, and this one called
+            // coroFinish directly, which fulfils base->promise -- NULL on a sync generator (a segfault on any `return <ref>` through a finally)
+            // and the handle itself on an async one.
+            for (const l of finishLines(
               E,
               retT,
               retT.kind === "void" ? null : "sc_pret",
