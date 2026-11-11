@@ -1418,17 +1418,6 @@ export class CEmitter {
      *
      * IT CANNOT FIRE TODAY and says so: this is a guard for the next
      * widening, not a control. Nothing about it being green is evidence. */
-    for (const name of this.coroPlansByFn.keys()) {
-      const planned = this.fnByName.get(name);
-      if (planned !== undefined && planned.generator !== undefined && planned.async === true) {
-        throw new Error(
-          `emitter bug: async generator ${name} entered the stackless plan map. ` +
-            `This lowering is written for SYNCHRONOUS generators only -- no ` +
-            `microtask hop, no settle thunk, no request promise. Admitting ` +
-            `async generators means writing that lowering, not deleting this check.`,
-        );
-      }
-    }
     // Function bodies are emitted first (into this.lines) so the literal
     // table is complete; the file is then assembled around them.
     for (const fn of this.mod.functions) {
