@@ -10226,19 +10226,29 @@ export class Lowerer {
     for (let c: ClassInfo | null = info; c; c = c.base) {
       if (c.def.name === RUNTIME_EMITTER_CLASS || RUNTIME_STREAM_CLASSES.has(c.def.name)) return null;
     }
-    const plan = this.objToRecordPlan(className, expected.shapeId);
-    if (plan === null) return null;
+    if (to.fields.some((f) => f.name.startsWith("%"))) return null;
+    for (let c: ClassInfo | null = info; c; c = c.base) {
+      if (c.builtinEmitter || c.builtinStream !== undefined || (c.def.runtime && c.builtinError !== true)) return null;
+    }
+    // Every member maps: a data field of the class at the IDENTICAL type is read in place; every other member lives in the view's own slot, as
+    // a bound method (plain or optional), or the undefined arm for an optional member the class does not have. A getter, a generic method or
+    // a signature the slot cannot mirror declines the pair.
     let methods = 0;
+    const dataNames: string[] = [];
     for (const f of to.fields) {
-      const l = plan.get(f.name);
-      if (l === undefined) return null;
-      if ("method" in l) methods++;
-      else if (!("src" in l) || !typeEquals(l.src, f.type)) return null;
+      const ft = info.fields.get(f.name);
+      if (ft !== undefined && !findMethodOn(this, info, f.name)) {
+        if (!typeEquals(ft, f.type)) return null;
+        dataNames.push(f.name);
+        continue;
+      }
+      const slot = this.classViewOwnSlot(className, f, loc);
+      if (slot === null) return null;
+      if (slot.kind === "method") methods++;
     }
     if (methods === 0) return null;
     // The copy is observationally identical until some mirrored data member is written after construction: then, and only then, the
     // record must be the instance.
-    const dataNames = to.fields.filter((f) => { const l = plan.get(f.name); return l !== undefined && "src" in l; }).map((f) => f.name);
     if (!classViewWriteAny && !dataNames.some((n) => classViewWrites.has(n))) {
       if (this.onEdge !== null) for (const n of dataNames) classViewDeclined.add(n);
       return null;
@@ -10255,7 +10265,7 @@ export class Lowerer {
         viewConversionNoted = true;
       }
       this.classProbeNow.add(noteKey);
-      return this.classSrcViewHelper(className, expected, plan, loc);
+      return this.classSrcViewHelper(className, expected, loc);
     }
     if (this.onEdge === null && !classViewNeeded.has(noteKey)) return null;
     if (this.onEdge !== null) {
@@ -10274,12 +10284,37 @@ export class Lowerer {
     }
     this.structViewShapes.add(expected.shapeId);
     this.classViewShapes.add(expected.shapeId);
-    return this.classSrcViewHelper(className, expected, plan, loc);
+    return this.classSrcViewHelper(className, expected, loc);
+  }
+
+  /** How a class view fills the OWN slot of target member `f` (a member the class holds no data field for): a method bound to the instance (the slot's
+   * type may be the function itself or its optional union), or the undefined arm of an optional member the class does not have. Null when the
+   * view cannot serve the member (a getter, a generic method, a signature the slot cannot mirror, a required member nothing provides). */
+  classViewOwnSlot(className: string, f: { name: string; type: IrType }, loc: SrcLoc): { kind: "method" | "absent"; value: IrExpr } | null {
+    const info = this.classes.get(className);
+    if (info === undefined) return null;
+    const unionArms = f.type.kind === "union" ? (this.unions.get(f.type.unionId)?.arms ?? []) : [];
+    const funcArm = f.type.kind === "func" ? f.type : (unionArms.find((a) => a.kind === "func") as (IrType & { kind: "func" }) | undefined);
+    const meth = findMethodOn(this, info, f.name);
+    if (meth !== null && meth !== undefined && !findGenericMethodOn(this, info, f.name)) {
+      if (funcArm === undefined) return null;
+      const bm = this.boundMethodPlan(info, f.name, funcArm, meth.declarer.def.name, meth.sig);
+      if (!bm) return null;
+      const closure = this.boundMethodClosure(className, bm.method, loc);
+      if (f.type.kind === "func") return { kind: "method", value: closure };
+      const tag = unionArms.findIndex((a) => a === funcArm);
+      return { kind: "method", value: { kind: "unionWrap", unionId: (f.type as { unionId: string }).unionId, tag, value: closure, type: f.type, loc } };
+    }
+    if (findMethodOn(this, info, `get:${f.name}`) || findGenericMethodOn(this, info, f.name)) return null;
+    if (f.type.kind !== "union") return null;
+    const utag = unionArms.findIndex((a) => a.kind === "undefinedT");
+    if (utag < 0) return null;
+    return { kind: "absent", value: { kind: "unionWrap", unionId: f.type.unionId, tag: utag, value: { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc }, type: f.type, loc } };
   }
 
   /** The interned `%obj.cview.<n>(o)`: the one view of instance `o` in the target shape, its method slots filled with closures bound to
    * the instance (raw stores into the view's own slots: a struct view holds no source slot for a method). */
-  private classSrcViewHelper(className: string, toT: IrType & { kind: "record" }, plan: Map<string, ObjFieldProj>, loc: SrcLoc): string {
+  private classSrcViewHelper(className: string, toT: IrType & { kind: "record" }, loc: SrcLoc): string {
     const key = `cview:${className}:${toT.shapeId}`;
     const existing = this.widthHelpers.get(key);
     if (existing) return existing;
@@ -10297,11 +10332,12 @@ export class Lowerer {
     const body: IrStmt[] = [
       { kind: "varDecl", localId: "r.0", init: { kind: "recordSrcView", src: o, srcShapeId: `%class:${className}`, shapeId: toT.shapeId, ...(toStr ? { toStr } : {}), type: toT, loc }, loc },
     ];
+    const info = this.classes.get(className)!;
     for (const f of to.fields) {
-      const l = plan.get(f.name)!;
-      if ("method" in l) {
-        body.push({ kind: "recordSet", obj: rRef(), shapeId: toT.shapeId, field: f.name, value: this.boundMethodClosure(className, l.method, loc), own: true, loc });
-      }
+      if (info.fields.has(f.name) && !findMethodOn(this, info, f.name)) continue;
+      const slot = this.classViewOwnSlot(className, f, loc);
+      if (slot === null) throw new Error(`lowerer bug: class view ${className} cannot fill member ${f.name}`);
+      body.push({ kind: "recordSet", obj: rRef(), shapeId: toT.shapeId, field: f.name, value: slot.value, own: true, loc });
     }
     body.push({ kind: "return", value: rRef(), loc });
     this.liftedFns.push({

@@ -4144,7 +4144,7 @@ function validateFunction(
               const cf = cls.fields.find((x) => x.name === f.name);
               if (cf !== undefined) {
                 if (typeKey(cf.type) !== typeKey(f.type)) err(`recordSrcView: class field ${f.name} changes type`, e.loc);
-              } else if (f.type.kind !== "func") err(`recordSrcView: ${cls.name} has no field ${f.name} and the member is not a method slot`, e.loc);
+              } else if (f.type.kind !== "func" && !(f.type.kind === "union" && (unions.get(f.type.unionId)?.arms ?? []).some((a) => a.kind === "func" || a.kind === "undefinedT"))) err(`recordSrcView: ${cls.name} has no field ${f.name} and the member is not a method slot (a function, or an optional member)`, e.loc);
             }
             expectType(e, { kind: "record", shapeId: e.shapeId }, "recordSrcView result");
           }
