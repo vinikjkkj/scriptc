@@ -5892,6 +5892,23 @@ static void scr_gen_coro_frame_free(ScrCoroBase *base) {
 }
 #endif /* SCR_CORO_LANE */
 
+#ifdef SCR_CORO_LANE
+/* A frame abandoned at a yield is deliberately never freed (see scr_gen_release), so nothing points at it any more. It is recorded in a
+ * registry the process keeps, which makes it REACHABLE: a leak checker then reports a frame the runtime chose to keep as kept, not as lost. */
+static ScrCoroBase **scr_abandoned_frames;
+static size_t scr_abandoned_frames_n, scr_abandoned_frames_cap;
+static void scr_gen_frame_abandoned(ScrCoroBase *base) {
+  if (scr_abandoned_frames_n == scr_abandoned_frames_cap) {
+    size_t ncap = scr_abandoned_frames_cap ? scr_abandoned_frames_cap * 2 : 16;
+    ScrCoroBase **nf = (ScrCoroBase **)realloc(scr_abandoned_frames, ncap * sizeof *nf);
+    if (nf == NULL) return;
+    scr_abandoned_frames = nf;
+    scr_abandoned_frames_cap = ncap;
+  }
+  scr_abandoned_frames[scr_abandoned_frames_n++] = base;
+}
+#endif
+
 void scr_gen_release(ScrGen *g) {
   if (!g || --g->rc != 0) return;
   /* g->pending is NOT released here, and that is an INVARIANT rather than
@@ -5937,7 +5954,10 @@ void scr_gen_release(ScrGen *g) {
        * all, so this arm abandoned in silence while the sentence above
        * said it was measured. Fixed at the allocation, not here, because
        * the gap was a missing +1, not a missing -1. */
-      else if ((g->frame->flags & SCR_CORO_AGEN) != 0u) g->frame->promise = NULL; /* a parked body must not answer a freed handle */
+      else {
+        if ((g->frame->flags & SCR_CORO_AGEN) != 0u) g->frame->promise = NULL; /* a parked body must not answer a freed handle */
+        scr_gen_frame_abandoned(g->frame);
+      }
       g->frame = NULL;
     }
   } else
@@ -6615,17 +6635,27 @@ ScrGen *scr_gen_of_coro(ScrCoroBase *base, void (*drop)(void *)) {
  * the generated code then simply returns. The flag is set HERE and not by
  * the emitted body because a forgotten one does not crash -- it reports a
  * yield as a completion and silently truncates the sequence. */
+/* A generator frame suspended at a yield is PARKED for the RC audit, like a fiber that is never resumed: a consumer that drops the generator
+ * (or a loop that ends) leaves it, and every value it owns, by design (JS collects it). The step un-parks it on the next resume. */
+#ifdef SCR_RC_AUDIT
+#define SCR_GEN_NOTE_YIELD() scr_note_coro_park()
+#else
+#define SCR_GEN_NOTE_YIELD() ((void)0)
+#endif
 void scr_gen_coro_yield_f64(ScrGen *g, double v) {
   scr_gen_slot_f64(&g->out, v);
   g->frame->flags |= SCR_CORO_YIELDED;
+  SCR_GEN_NOTE_YIELD();
 }
 void scr_gen_coro_yield_bool(ScrGen *g, bool v) {
   scr_gen_slot_bool(&g->out, v);
   g->frame->flags |= SCR_CORO_YIELDED;
+  SCR_GEN_NOTE_YIELD();
 }
 void scr_gen_coro_yield_ref(ScrGen *g, void *v, void (*release)(void *)) {
   scr_gen_slot_ref(&g->out, v, release);
   g->frame->flags |= SCR_CORO_YIELDED;
+  SCR_GEN_NOTE_YIELD();
 }
 
 void scr_gen_coro_finish_void(ScrGen *g) { g->frame->flags |= SCR_CORO_DONE; }
@@ -6686,6 +6716,9 @@ static void scr_gen_coro_step(ScrGen *g, ScrGenInject inject, bool async) {
   ScrCoroBase *base = g->frame;
   ScrCoroTaskState st;
   scr_gen_retain(g);
+#ifdef SCR_RC_AUDIT
+  if (g->state == SCR_GEN_SUSPENDED) scr_note_coro_unpark(); /* it was parked at a yield */
+#endif
   g->state = SCR_GEN_RUNNING;
   scr_coro_state_in(base, &st);
   /* THE SENTINEL GOES IN ONLY OVER AN EMPTY CELL, which is what all three
@@ -6811,6 +6844,7 @@ static void scr_agen_coro_yield_settle(ScrGen *g) {
     }
   }
   g->frame->flags |= SCR_CORO_YIELDED;
+  SCR_GEN_NOTE_YIELD();
 }
 void scr_agen_coro_yield_f64(ScrGen *g, double v) {
   scr_gen_slot_f64(&g->out, v);
