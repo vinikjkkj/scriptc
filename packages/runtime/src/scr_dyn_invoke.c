@@ -4124,8 +4124,10 @@ ScrDyn *scr_dyn_define_prop(ScrDyn *target, ScrStr *key, ScrDyn *desc) {
                         strlen("Object.defineProperty called on non-object"));
     return NULL;
   }
-  if (target->kind == SCR_DYN_OBJ && target->module_ns) {
-    /* A module namespace's [[DefineOwnProperty]] only accepts a descriptor that changes nothing; every other (and every NEW key) throws. */
+  if (target->kind == SCR_DYN_OBJ && target->module_ns && target->null_proto) {
+    /* A module namespace's [[DefineOwnProperty]] only accepts a descriptor that changes nothing; every other (and every NEW key) throws.
+     * `null_proto` is what scr_dyn_module_ns_finish sets and a mapped CommonJS package's exports bag (flagged module_ns by its static copy, and
+     * given its `__esModule` stamp by defineProperty after it is built) does not have: that bag is an ordinary exports object, not a namespace. */
     bool present = false;
     for (size_t i = 0; i < target->v.obj.len; i++) {
       const ScrDynEntry *ent = &target->v.obj.entries[i];
