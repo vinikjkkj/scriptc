@@ -2457,8 +2457,33 @@ export function stdlibBufferVarAliasDecl(L: Lowerer, nameNode: ts.Node, init: ts
     if (name !== "process" && name !== "console" && name !== "globalThis" && name !== "performance" && name !== "Math") return false;
     const symbol = L.checker.getSymbolAtLocation(nameNode);
     if (!symbol) return false;
+    // `Math` is also a first-class value (`m1 === m2`, `typeof m`, passed around), which erased plumbing cannot supply: alias it only when
+    // every use of the binding is a member read, a member call or a destructuring source, and keep the ordinary value path otherwise.
+    if (name === "Math" && !mathAliasOnlyReceiver(L, nameNode as ts.Identifier, symbol)) return false;
     L.stdlibGlobalAliases.set(symbol, name);
     return true;
+  }
+
+  /** True iff every reference to the `Math` alias binding `nameNode` is the object of a property or element access, or the initializer of an
+   * object destructuring declaration; false for an exported binding (other files read it) or any other use. */
+  function mathAliasOnlyReceiver(L: Lowerer, nameNode: ts.Identifier, symbol: ts.Symbol): boolean {
+    const decl = nameNode.parent;
+    if (ts.isVariableDeclaration(decl) && ts.isVariableDeclarationList(decl.parent) && ts.isVariableStatement(decl.parent.parent) &&
+      decl.parent.parent.modifiers?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword)) return false;
+    let ok = true;
+    const visit = (n: ts.Node): void => {
+      if (!ok) return;
+      if (ts.isIdentifier(n) && n !== nameNode && n.text === nameNode.text && L.checker.getSymbolAtLocation(n) === symbol) {
+        const p = n.parent;
+        const receiver = (ts.isPropertyAccessExpression(p) || ts.isElementAccessExpression(p)) && p.expression === n;
+        const source = ts.isVariableDeclaration(p) && p.initializer === n && ts.isObjectBindingPattern(p.name);
+        if (!receiver && !source) ok = false;
+        return;
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(nameNode.getSourceFile());
+    return ok;
   }
 
 /** True iff the symbol is declared ONLY by the adopted @types/node
