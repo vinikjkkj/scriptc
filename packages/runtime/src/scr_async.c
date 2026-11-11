@@ -4451,6 +4451,24 @@ void scr_promise_wait_raw(ScrPromise *p, void (*fn)(void *), void *arg) {
   scr_promise_park_envelope(p, fn, arg, NULL);
 }
 
+/* The part of scr_await_settled after the wait: mark the settlement observed
+ * and, for a rejection, copy the reason into the ACTIVE exception cell. True
+ * for a fulfillment. The promise must already be settled. */
+bool scr_promise_settled_take(ScrPromise *p) {
+  scr_prom_observe(p);
+  if (p->state == SCR_PROM_REJECTED) {
+    scr_promise_rethrow(p);
+    return false;
+  }
+  return true;
+}
+
+/* The settled payload of a FULFILLED promise, as the awaits read it (+1 for a reference), for a reaction running as a continuation
+ * (scr_promise_wait_raw) after scr_promise_settled_take answered true. */
+double scr_promise_value_f64(const ScrPromise *p) { return p->f64; }
+bool scr_promise_value_bool(const ScrPromise *p) { return p->b; }
+void *scr_promise_value_ref(const ScrPromise *p) { return p->payload ? p->retain_fn(p->payload) : NULL; }
+
 /* The part of scr_await_settled after the wait, fused with the "is it settled yet" test so the caller pays ONE call
  * for both: -1 while the promise is still pending (nothing consumed: the caller waits again, which is the
  * `while (pending) park` of the fiber this replaced), otherwise the settlement is marked observed and a rejection's
