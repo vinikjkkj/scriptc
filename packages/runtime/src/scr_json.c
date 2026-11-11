@@ -11820,6 +11820,12 @@ ScrDyn *scr_dyn_fn_get(const ScrDyn *d, const char *key, size_t key_len) {
     ScrDyn *st = scr_u8_static_member(key, key_len); /* +1, or NULL */
     if (st != NULL) return st;
   }
+  /* `f.constructor` of a plain function value is the Function constructor (and so is the builtin Function value's own: Function.constructor
+   * === Function), reached through Function.prototype in JS. The provider is set by the prototype unit, which is linked whenever a program
+   * can name such a value. */
+  if (key_len == 11 && memcmp(key, "constructor", 11) == 0 && scr_builtin_ctor_provider != NULL) {
+    return scr_builtin_ctor_provider(2.0);
+  }
   /* `F.prototype` on a function that never assigned one: JS has ALREADY
    * created that object (a function declaration owns a writable
    * `prototype` own property from the moment it exists), so answering
