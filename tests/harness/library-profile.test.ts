@@ -349,7 +349,7 @@ describe("library profile fences", () => {
           fences: [
             { id: "stdlib.math.random", teaching: "randomness is an effect", remediation: "ask the host" },
             { prefix: "node-builtin.fs.", teaching: "files are effects" },
-            { id: "stdlib.math.sin", teaching: "trig is host math", remediation: "request it as an effect" },
+            { id: "diagnostic.sc2012", teaching: "engine-run library surface is host-side", remediation: "request it as an effect" },
           ],
         },
       }),
@@ -369,9 +369,9 @@ describe("library profile fences", () => {
     expect(fsIds).toContain("node-builtin.fs.promises.readFile");
     // A fenced dynamic-only surface carries its own refusal code and no
     // detector: the teaching rides the refusal that already fires.
-    const sin = r.profile.fences[2]!.surfaces[0]!;
-    expect(sin.code).toBe("SC2012");
-    expect(sin.detector).toBeUndefined();
+    const fenced = r.profile.fences[2]!.surfaces[0]!;
+    expect(fenced.code).toBe("SC2012");
+    expect(fenced.detector).toBeUndefined();
   });
 
   test("a fence remediation feeds the trap-remediation lookup through covered codes", () => {
@@ -381,7 +381,7 @@ describe("library profile fences", () => {
         determinism: {
           remediations: { SC2012: "the explicit map key wins" },
           fences: [
-            { id: "stdlib.math.sin", remediation: "request it as an effect" },
+            { id: "diagnostic.sc2012", remediation: "request it as an effect" },
             { id: "node-builtin.crypto.createHash", remediation: "digests come from the host" },
           ],
         },
