@@ -175,12 +175,13 @@ const WRAPPERS: ReadonlyArray<{ name: string; take: string; finish: string; conv
   { name: "wnf", take: "f64", finish: "f64", converted: true }, // await FIRST
   { name: "wnr", take: "f64", finish: "ref", converted: true }, // refcounted sibling
   { name: "wnm", take: "f64", finish: "f64", converted: true }, // sibling AFTER
-  // A NEGATIVE entry, and the one that arms the cross-lane scan. An awaited
-  // DYNAMIC keyed call is a fiber-only await with no stackless counterpart,
-  // so the function stays on the fiber lane. Un-register "async.awaitDyn"
-  // from suspends.ts and this flips: the ledger names wdk, and the
-  // fiber-only scan names `sc_cr_wdk: scr_await_dyn_value`.
-  { name: "wdk", take: "ref", finish: "f64", converted: false },
+  // FORMERLY THE NEGATIVE ENTRY that armed the cross-lane scan: an awaited DYNAMIC keyed call was a fiber-only await (async.awaitDyn ->
+  // scr_await_dyn_value) with no stackless counterpart, so the function stayed on the fiber lane. It converts now, DELIBERATELY: the lowering
+  // wraps the dyn operand in dyn.adoptPromise (Promise.resolve) and awaits THAT, an ordinary suspension, and the stackless take reads the payload
+  // dyn-aware (scr_coro_take_dyn). The row it guards (`dynkey`) is unchanged and compared against the fiber lane's answer, so the conversion cannot
+  // change a value; the take column is `dyn` because that is the arm this lane emits. The fiber-only scan (assertion below) still guards the
+  // other direction: a fiber-only call inside an admitted body.
+  { name: "wdk", take: "dyn", finish: "f64", converted: true },
   // TERNARY ARMS. The specific defect here is not "no value came back" but
   // THE WRONG ARM with a plausible value: a ternary that resumes into the
   // opposite branch returns the right type, the right width, and the wrong
@@ -547,7 +548,7 @@ async function wnm(n: number): Promise<number> { return j2n(await pf(n), n1(8) *
 // was registered nowhere, so liveness admitted the function and the emitter
 // wrote a fiber await into a body with no fiber. Not a diagnostic -- 0xC0000409
 // STATUS_STACK_BUFFER_OVERRUN, after however much output had already flushed.
-// It must stay OFF the lane, and the ledger entry below says so.
+// It used to stay OFF the lane; it converts now (see the ledger entry), and this row still compares its value against the fiber lane.
 async function wdk(n: number): Promise<string> {
   const src = { f: pf };
   const u: unknown = src;
@@ -1043,9 +1044,8 @@ function emittedCoroutines(artifact: string, lane: Lane): ReadonlySet<string> {
   return new Set([...artifact.matchAll(open)].map((m) => m[1]!));
 }
 
-/* THE LLVM LANE'S FLOOR -- the wrappers its emitter lowers today: ALL 79 the
- * ledger carries as converted, out of 80 entries (`wdk` is the one the ledger
- * records as not converted, and it is absent from both artifacts).
+/* THE LLVM LANE'S FLOOR -- the wrappers its emitter lowers today: ALL 80 the
+ * ledger carries as converted, out of 80 entries (`wdk` joined them when the dyn await became an ordinary await).
  *
  * SO THE FLOOR IS NO LONGER A FRACTION, which is the whole meaning of the
  * number now. The sentence here used to read "40 of the 80 planned, 32 of
@@ -1091,6 +1091,9 @@ const LLVM_FLOOR: ReadonlySet<string> = new Set([
   "wtc", "wdr", "wca", "wbf", "wbb", "wbs", "wcs",
   "wgn", "wgf", "wgb", "wgs", "wgr", "wgx",
   "wlc", "wlb",
+  // `wdk`, the awaited dynamic keyed call: it joined the floor when dyn awaits became ordinary awaits over Promise.resolve(v)
+  // (lower-exprs.ts awaitDynOf), measured on BOTH lanes; its value row `dynkey` is compared against the fiber lane's answer.
+  "wdk",
   // THE forOf SHAPES. Their cursor AND their iterable now live in the frame:
   // both are loop state re-entered through the back edge, which no append-time
   // scan can see, so the lowering DEMANDS they be carried instead of waiting to
@@ -1274,7 +1277,7 @@ const NOT_LOWERED_BY_REASON: ReadonlyArray<readonly [string, readonly string[]]>
  * This table was written as LLVM_FLOOR_NON_WRAPPERS when only that lane had a
  * closed set. Giving the C lane one meant deciding whether it needed a table
  * of its own, and the artifacts answered: at this base the two knob-ON arms of
- * this program emit THE SAME 89 coroutines, name for name -- 79 converted
+ * this program emit THE SAME 90 coroutines, name for name -- 80 converted
  * wrappers and exactly these 10. Re-derived here, not carried: both sets come
  * out of `emittedCoroutines` above, and `pf pb ps pa pd pv prej pmaybe pu main`
  * is their difference against the ledger on EITHER lane. The reason the two
@@ -1442,7 +1445,7 @@ type Lane = "c" | "llvm";
  *
  * THE GAP IS ZERO AT THIS BASE, and the sentence that stood here said "the
  * LLVM emitter lowers a strict subset", which is no longer a fact about the
- * tree: NOT_LOWERED_BY_REASON is empty, so LLVM_FLOOR holds all 79 converted
+ * tree: NOT_LOWERED_BY_REASON is empty, so LLVM_FLOOR holds all 80 converted
  * wrappers and the two lanes' expectations are the SAME SET. The two
  * expressions are kept apart anyway -- they are different claims that happen
  * to agree, and collapsing them would delete the only place a divergence
