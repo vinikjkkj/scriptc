@@ -26337,13 +26337,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/diagnostics/ns-import-object/main.ts": {
-   "order": [
-    "<repo>/tests/diagnostics/ns-import-object/lib.ts",
-    "<repo>/tests/diagnostics/ns-import-object/main.ts"
-   ],
-   "diags": []
-  },
   "<repo>/tests/diagnostics/nullish-retag-fences.ts": {
    "order": [
     "<repo>/tests/diagnostics/nullish-retag-fences.ts"
@@ -27556,6 +27549,13 @@
   "<repo>/tests/corpus/2718-dynamic-import-evaluation-order/main.ts": {
    "order": [
     "<repo>/tests/corpus/2718-dynamic-import-evaluation-order/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25096-static-namespace-import-stored-in-a-binding-and-passed-to-a-function/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/25096-static-namespace-import-stored-in-a-binding-and-passed-to-a-function/lib.ts",
+    "<repo>/tests/corpus/25096-static-namespace-import-stored-in-a-binding-and-passed-to-a-function/main.ts"
    ],
    "diags": []
   }

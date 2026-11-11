@@ -7,8 +7,9 @@
  * complete for every module in the compiled graph, so the key set folds to
  * a literal at build time. Its OBJECT is exotic: a null prototype, the
  * "Module" toStringTag, one instance per module, and a [[Set]] that always
- * fails. A checked-dynamic object is none of those, so the object keeps
- * its SC1013 fence and the fence names what is missing.
+ * fails. That object is now modelled (corpus rows 2733-2735), so it is a
+ * first-class value and the rows below pin Node's bytes for it; what the
+ * build still cannot model keeps its refusal.
  *
  * WHY EVERY STAR CASE IS HERE. `moduleSymbol.getExports()` answers a
  * module's OWN export table: declarations, named re-exports and
@@ -280,29 +281,47 @@ describe("a dynamic-import namespace carries its export-star names too", () => {
 
 /* ------------------------------------------------------------- boundaries */
 
-describe("the OBJECT still refuses, and the refusal says what is missing", () => {
-  test("the bare namespace as a value keeps SC1013, and names the residue", async () => {
-    const r = await refusal(workDir, "bare", {
-      "m.ts": `export const konst = 1;\n`,
-      "main.ts": `import * as ns from "./m.ts";\nconst grabbed: unknown = ns;\nconsole.log(grabbed);\n`,
-    });
-    expect(r.codes).toContain("SC1013");
-    // The refusal must point at the half that DOES compile...
-    expect(r.text).toContain("Object.keys(ns)");
-    // ...and name the half that does not, rather than saying only "not yet".
-    expect(r.text).toContain("null prototype");
-  }, 300_000);
+/** Compiles one fixture on both backends and answers true when every cell is Node's bytes. */
+async function matchesNode(root: string, name: string, files: Record<string, string>): Promise<void> {
+  const dir = stage(root, name, files);
+  const nodeSide = await run(process.execPath, [join(dir, "main.ts")], dir);
+  expect(nodeSide.exitCode, `Node refused ${name}:\n${nodeSide.stderr}`).toBe(0);
+  expect(nodeSide.stdout.length, "a comparison against an empty oracle proves nothing").toBeGreaterThan(0);
+  for (const backend of ["c", "llvm"] as const) {
+    const exe = join(dir, exeName(`${name}-${backend}`));
+    const built = await compile(join(dir, "main.ts"), { outPath: exe, outDir: dir, backend });
+    expect(
+      built.ok,
+      `${name}/${backend} refused:\n${(built.diagnostics ?? []).map((d) => `${d.code} ${d.message}`).join("\n")}`,
+    ).toBe(true);
+    compareCells(backend, nodeSide, await run(exe, [], dir));
+  }
+}
 
-  test("Object.values and Object.entries stay fenced — they read every export's VALUE", async () => {
-    for (const member of ["values", "entries"]) {
-      const r = await refusal(workDir, `obj-${member}`, {
-        "m.ts": `export const konst = 1;\n`,
-        "main.ts": `import * as ns from "./m.ts";\nconsole.log(Object.${member}(ns).length);\n`,
-      });
-      expect(r.codes, `Object.${member} must still refuse`).toContain("SC1013");
-    }
+/* The namespace OBJECT used to keep an SC1013 fence here (a null prototype, the "Module" toStringTag, one instance per module and an always-failing
+ * [[Set]] had no representation). Those are now modelled (corpus rows 2733-2735), so the two rows that pinned the fence pin Node's bytes instead:
+ * the bare namespace as a value prints `[Module: null prototype] { konst: 1 }`, keeps its identity and its "[object Module]" tag, and
+ * Object.values/Object.entries read every export's value. The boundary rows after them still refuse what the build cannot model. */
+describe("the OBJECT is a first-class value, and answers Node's bytes", () => {
+  test("the bare namespace as a value: inspect form, identity and tag", async () => {
+    await matchesNode(workDir, "bare", {
+      "m.ts": `export const konst = 1;\n`,
+      "main.ts":
+        `import * as ns from "./m.ts";\nconst grabbed: unknown = ns;\nconsole.log(grabbed);\n` +
+        `console.log(grabbed === ns, Object.prototype.toString.call(grabbed));\n`,
+    });
   }, 600_000);
 
+  test("Object.values and Object.entries read every export's VALUE", async () => {
+    await matchesNode(workDir, "obj-values", {
+      "m.ts": `export const konst = 1;\n`,
+      "main.ts": `import * as ns from "./m.ts";\nconsole.log(Object.values(ns).length, Object.values(ns), Object.entries(ns));\n`,
+    });
+  }, 600_000);
+
+});
+
+describe("the boundaries that still refuse, and say what is missing", () => {
   test("an export that resolves into a module the build did not compile refuses the WHOLE call", async () => {
     // `export * from "node:path"` is a re-export from a builtin: the names
     // would come from a .d.ts, which is a claim about a module this program
