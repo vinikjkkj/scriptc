@@ -27492,6 +27492,18 @@
     "<repo>/tests/corpus/24930-dyn-object-keys-of-every-short-length-differing-in-one-byte.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/24972-a-dynamic-constructor-called-with-constant-text-is-staged-natively.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24972-a-dynamic-constructor-called-with-constant-text-is-staged-natively.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24973-a-dynamic-constructor-called-with-runtime-text-still-runs-it.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24973-a-dynamic-constructor-called-with-runtime-text-still-runs-it.cjs"
+   ],
+   "diags": []
   }
  }
 }

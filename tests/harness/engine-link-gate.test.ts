@@ -66,3 +66,18 @@ describe.each(["c", "llvm"] as const)("the engine link gate for a constructor re
     expect(execFileSync(plain.bin, [], { encoding: "utf8" })).toBe(execFileSync(process.execPath, [join(corpus, rowOf("24970-"))], { encoding: "utf8" }));
   }, 900_000);
 });
+
+describe.each(["c", "llvm"] as const)("the engine link gate for a dynamic constructor called with text (%s)", (backend) => {
+  test("constant text is staged natively (no engine); runtime text still links the engine and answers like Node", async () => {
+    const staged = await build("staged", backend, rowOf("24972-"));
+    const runtime = await build("runtime-text", backend, rowOf("24973-"));
+    if (process.platform !== "win32") {
+      expect(hasEngineSymbol(staged.bin), "the constant-text row linked the engine").toBe(false);
+      expect(hasEngineSymbol(runtime.bin), "the runtime-text row did not link the engine (the gate is over-narrowed)").toBe(true);
+    }
+    for (const [row, bin] of [["24972-", staged.bin], ["24973-", runtime.bin]] as const) {
+      const want = execFileSync(process.execPath, [join(corpus, rowOf(row))], { encoding: "utf8" });
+      expect(execFileSync(bin, [], { encoding: "utf8" })).toBe(want);
+    }
+  }, 900_000);
+});
