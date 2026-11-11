@@ -5871,6 +5871,7 @@ void scr_gen_release(ScrGen *g) {
        * all, so this arm abandoned in silence while the sentence above
        * said it was measured. Fixed at the allocation, not here, because
        * the gap was a missing +1, not a missing -1. */
+      else if ((g->frame->flags & SCR_CORO_AGEN) != 0u) g->frame->promise = NULL; /* a parked body must not answer a freed handle */
       g->frame = NULL;
     }
   } else
@@ -6115,6 +6116,50 @@ ScrGen *scr_agen_new(void (*entry)(ScrFiber *, void *), void *argpack,
   return g;
 }
 
+#ifdef SCR_CORO_LANE
+static void scr_agen_coro_step(ScrGen *g, int inject);
+#endif
+
+/* An UNSTARTED async generator that will never run (return()/throw() before the first next()): its backing is torn down and the packed
+ * arguments drop, for a fiber-backed handle (the argpack) and a frame-backed one (the frame IS the pack). */
+static void scr_agen_drop_unstarted(ScrGen *g) {
+#ifdef SCR_CORO_LANE
+  if (g->backing == SCR_GEN_BACKED_FRAME) {
+    if (g->drop_args != NULL) g->drop_args(g->frame);
+    scr_gen_coro_frame_free(g->frame);
+    g->frame = NULL;
+    g->state = SCR_GEN_DONE;
+    return;
+  }
+#endif
+  if (g->drop_args != NULL) g->drop_args(g->fiber->argpack);
+  else free(g->fiber->argpack);
+  scr_fiber_destroy(g->fiber);
+  g->fiber = NULL;
+  scr_fibers_live--;
+  g->state = SCR_GEN_DONE;
+}
+
+static void scr_agen_switch_in(ScrGen *g);
+
+/* The consumer->body hop for an async generator, whichever backing it has. `inject`: 0 = a plain next(), 1 = return() (the GENRET sentinel
+ * goes in the body's cell), 2 = throw() (the payload pending in the CALLER's cell moves into the body's). A frame-backed body takes the
+ * sentinel and the payload inside the INV-5 window (scr_gen_coro_step), a fiber's cell is written here. */
+static void scr_agen_enter(ScrGen *g, int inject) {
+#ifdef SCR_CORO_LANE
+  if (g->backing == SCR_GEN_BACKED_FRAME) {
+    scr_agen_coro_step(g, inject);
+    return;
+  }
+#endif
+  if (inject == 1) {
+    if (g->fiber->exc.kind == SCR_EXC_NONE) g->fiber->exc.kind = SCR_EXC_GENRET;
+  } else if (inject == 2) {
+    scr_exc_cell_move(&g->fiber->exc, scr_exc_current_cell());
+  }
+  scr_agen_switch_in(g);
+}
+
 /* The consumer->fiber hop for an async generator. Unlike the synchronous
  * scr_gen_switch_in this never moves an exception into the resumer: an
  * async generator reports failure through its promise, never by throwing
@@ -6130,9 +6175,14 @@ static void scr_agen_switch_in(ScrGen *g) {
 #endif
   f->return_to = &here;
   ScrFiber *me = scr_current;
+  /* The CALLER's cell and ALS slot, saved and restored exactly: a stackless consumer frame has installed its own, which is neither `me`'s nor
+   * main's, and the switch back would otherwise leave main's active. */
+  ScrExcCell *cell_saved = scr_exc_current_cell();
+  ScrAlsCtx **als_saved = scr_als_active;
   scr_switch(&here, &f->st->ctx, f);
   scr_current = me;
-  scr_exc_swap_cell(me != NULL ? &me->exc : NULL);
+  scr_exc_swap_cell(cell_saved);
+  scr_als_active = als_saved;
   if (f->done) {
     /* Completed synchronously inside this resume; scr_fiber_finish already
      * settled the promise. */
@@ -6229,7 +6279,7 @@ void scr_agen_next_native(ScrGen *g, ScrAgenSink sink, void *ctx) {
     scr_agen_sink_schedule(g);
     return;
   }
-  scr_agen_switch_in(g);
+  scr_agen_enter(g, 0);
 }
 
 void scr_agen_return_native(ScrGen *g, ScrAgenSink sink, void *ctx) {
@@ -6242,18 +6292,12 @@ void scr_agen_return_native(ScrGen *g, ScrAgenSink sink, void *ctx) {
   case SCR_GEN_UNSTARTED:
     /* The body never runs; the packed arguments drop through the emitted
      * helper, exactly as in scr_agen_return. */
-    if (g->drop_args != NULL) g->drop_args(g->fiber->argpack);
-    else free(g->fiber->argpack);
-    scr_fiber_destroy(g->fiber);
-    g->fiber = NULL;
-    scr_fibers_live--;
-    g->state = SCR_GEN_DONE;
+    scr_agen_drop_unstarted(g);
     scr_gen_ret_to_out(g);
     scr_agen_sink_schedule(g);
     return;
   default:
-    if (g->fiber->exc.kind == SCR_EXC_NONE) g->fiber->exc.kind = SCR_EXC_GENRET;
-    scr_agen_switch_in(g);
+    scr_agen_enter(g, 1);
     return;
   }
 }
@@ -6264,20 +6308,12 @@ void scr_agen_throw_native(ScrGen *g, ScrAgenSink sink, void *ctx) {
   if (g->state == SCR_GEN_DONE || g->state == SCR_GEN_UNSTARTED) {
     /* The body never sees it and the REQUEST fails with the payload —
      * exactly what scr_agen_throw does, minus the promise. */
-    if (g->state == SCR_GEN_UNSTARTED) {
-      if (g->drop_args != NULL) g->drop_args(g->fiber->argpack);
-      else free(g->fiber->argpack);
-      scr_fiber_destroy(g->fiber);
-      g->fiber = NULL;
-      scr_fibers_live--;
-      g->state = SCR_GEN_DONE;
-    }
+    if (g->state == SCR_GEN_UNSTARTED) scr_agen_drop_unstarted(g);
     scr_exc_cell_move(&g->fail, mine);
     scr_agen_sink_schedule(g);
     return;
   }
-  scr_exc_cell_move(&g->fiber->exc, mine);
-  scr_agen_switch_in(g);
+  scr_agen_enter(g, 2);
 }
 
 void scr_agen_sink_detach(ScrGen *g) {
@@ -6291,7 +6327,7 @@ void scr_gen_out_drop(ScrGen *g) { scr_gen_slot_reset(&g->out); }
 ScrPromise *scr_agen_next(ScrGen *g) {
   if (g->state == SCR_GEN_DONE) return scr_agen_settled_done(g);
   ScrPromise *p = scr_agen_arm(g);
-  scr_agen_switch_in(g);
+  scr_agen_enter(g, 0);
   return p;
 }
 
@@ -6301,21 +6337,15 @@ ScrPromise *scr_agen_return(ScrGen *g) {
     scr_gen_ret_to_out(g);
     return scr_agen_settled_done(g);
   case SCR_GEN_UNSTARTED: {
-    /* The body never runs: tear the fiber down cleanly (drop the packed
+    /* The body never runs: tear the backing down cleanly (drop the packed
      * arguments) and complete with the parked value. */
-    if (g->drop_args != NULL) g->drop_args(g->fiber->argpack);
-    else free(g->fiber->argpack);
-    scr_fiber_destroy(g->fiber);
-    g->fiber = NULL;
-    scr_fibers_live--;
-    g->state = SCR_GEN_DONE;
+    scr_agen_drop_unstarted(g);
     scr_gen_ret_to_out(g);
     return scr_agen_settled_done(g);
   }
   default: {
     ScrPromise *p = scr_agen_arm(g);
-    if (g->fiber->exc.kind == SCR_EXC_NONE) g->fiber->exc.kind = SCR_EXC_GENRET;
-    scr_agen_switch_in(g);
+    scr_agen_enter(g, 1);
     return p;
   }
   }
@@ -6329,14 +6359,7 @@ ScrPromise *scr_agen_throw(ScrGen *g) {
     /* The body never sees it; the generator becomes done and the REQUEST
      * rejects with the payload (an async generator never throws at the
      * call site — Node answers a rejected promise). */
-    if (g->state == SCR_GEN_UNSTARTED) {
-      if (g->drop_args != NULL) g->drop_args(g->fiber->argpack);
-      else free(g->fiber->argpack);
-      scr_fiber_destroy(g->fiber);
-      g->fiber = NULL;
-      scr_fibers_live--;
-      g->state = SCR_GEN_DONE;
-    }
+    if (g->state == SCR_GEN_UNSTARTED) scr_agen_drop_unstarted(g);
     ScrPromise *p = scr_promise_new();
     scr_promise_reject_from_cell(p, mine);
     scr_promise_settle_wake(p);
@@ -6344,18 +6367,7 @@ ScrPromise *scr_agen_throw(ScrGen *g) {
   }
   default: {
     ScrPromise *p = scr_agen_arm(g);
-    ScrExcCell *dst = &g->fiber->exc;
-    dst->kind = mine->kind;
-    dst->f64 = mine->f64;
-    dst->b = mine->b;
-    dst->payload = mine->payload;
-    dst->retain_fn = mine->retain_fn;
-    dst->release_fn = mine->release_fn;
-    dst->trace_fn = mine->trace_fn;
-    mine->kind = SCR_EXC_NONE;
-    mine->payload = NULL;
-    mine->trace_fn = NULL;
-    scr_agen_switch_in(g);
+    scr_agen_enter(g, 2);
     return p;
   }
   }
@@ -6370,7 +6382,8 @@ ScrPromise *scr_agen_throw(ScrGen *g) {
  * waiter rather than racing one. */
 static void scr_agen_yield_settle(void) {
   ScrGen *g = scr_gen_self();
-  scr_await_hop();
+  /* The hop is no longer taken here: the lowering emits it as an explicit `async.hop` before the yield (lower-generators.ts), so the
+   * fiber lane and the stackless lane both take it as an ordinary suspension. */
   if (g->sink != NULL) {
     /* A NATIVE consumer: the value stays in OUT and the envelope hands it
      * over on the NEXT microtask turn, on the main stack. Calling the sink
@@ -6421,11 +6434,14 @@ static void scr_gen_switch_in(ScrGen *g) {
 #endif
   f->return_to = &here;
   ScrFiber *me = scr_current;
+  ScrExcCell *cell_saved = scr_exc_current_cell(); /* see scr_agen_switch_in: a frame consumer's own cell and ALS slot */
+  ScrAlsCtx **als_saved = scr_als_active;
   scr_switch(&here, &f->st->ctx, f);
   /* Back on the consumer: restore identity + the consumer's cell (the
    * yield/finish switch targeted NULL — main's cell). */
   scr_current = me;
-  scr_exc_swap_cell(me != NULL ? &me->exc : NULL);
+  scr_exc_swap_cell(cell_saved);
+  scr_als_active = als_saved;
   if (f->done) {
     g->state = SCR_GEN_DONE;
     if (f->exc.kind != SCR_EXC_NONE) {
@@ -6600,7 +6616,7 @@ typedef enum { SCR_GEN_INJECT_NONE = 0, SCR_GEN_INJECT_RET, SCR_GEN_INJECT_THROW
  * is the ready-queue entry, settles a promise on fall-out and releases the
  * suspension's reference, and this path has no promise and no suspension
  * reference. What the two share is INV-5, and they share it as code. */
-static void scr_gen_coro_step(ScrGen *g, ScrGenInject inject) {
+static void scr_gen_coro_step(ScrGen *g, ScrGenInject inject, bool async) {
   ScrCoroBase *base = g->frame;
   ScrCoroTaskState st;
   scr_gen_retain(g);
@@ -6667,6 +6683,14 @@ static void scr_gen_coro_step(ScrGen *g, ScrGenInject inject) {
   base->flags |= SCR_CORO_RUNNING;
   base->resume(base);
   base->flags &= ~(uint32_t)SCR_CORO_RUNNING;
+  if (async) {
+    /* An async body has FOUR outcomes (yielded, parked on an await, done, threw) and answers through the request promise or the sink, never by
+     * throwing at the consumer: scr_agen_coro_resumed reads them. The state window is still installed, which the exception arm needs. */
+    scr_agen_coro_resumed(base);
+    scr_coro_state_out(&st);
+    scr_gen_release(g);
+    return;
+  }
   /* THREE OUTCOMES, read from the stored flags and never inferred:
    *   YIELDED -- a value is in OUT, the generator stays suspended;
    *   DONE    -- the body completed, OUT holds the return value;
@@ -6688,6 +6712,83 @@ static void scr_gen_coro_step(ScrGen *g, ScrGenInject inject) {
   }
   scr_gen_release(g);
 }
+
+/* ── ASYNC GENERATORS ON A FRAME ──────────────────────────────────────────
+ * The handle is the same ScrGen (backing FRAME) with `settle` set; the frame carries SCR_CORO_AGEN and keeps the handle in the `promise` slot it
+ * does not otherwise use (not owned). Four things the synchronous protocol lacks, each answered here:
+ *   1. the settle thunk rides the handle (scr_agen_coro_of);
+ *   2. every consumer entry point reaches the body through scr_agen_enter -> scr_agen_coro_step (no fiber to switch to);
+ *   3. a resume answers FOUR outcomes, not three: yielded, parked on an await, done, threw (scr_agen_coro_resumed). A body that parks between
+ *      yields returns with neither flag set, which the synchronous step would read as "completed";
+ *   4. the yield arm settles the in-flight request (or schedules the native sink) before it suspends. The operand-await hop JS takes before that
+ *      is an explicit async.hop the lowering emits ahead of the yield, so it is an ordinary suspension point here. */
+ScrGen *scr_agen_coro_of(ScrCoroBase *base, void (*drop)(void *), void (*settle)(ScrGen *, ScrPromise *)) {
+  ScrGen *g = scr_gen_of_coro(base, drop);
+  g->settle = settle;
+  base->flags |= SCR_CORO_AGEN;
+  base->promise = (ScrPromise *)(void *)g; /* the handle, not a promise; never released as one */
+  return g;
+}
+
+static void scr_agen_coro_yield_settle(ScrGen *g) {
+  if (g->sink != NULL) {
+    /* A native consumer: the value stays in OUT and the sink gets it on the next microtask turn, on the loop's stack. */
+    scr_agen_sink_schedule(g);
+  } else {
+    ScrPromise *p = g->pending;
+    g->pending = NULL;
+    if (p != NULL) {
+      g->settle(g, p); /* { value: OUT, done: false } -- the state is not DONE */
+      scr_promise_release(p);
+    } else {
+      scr_gen_slot_reset(&g->out);
+    }
+  }
+  g->frame->flags |= SCR_CORO_YIELDED;
+}
+void scr_agen_coro_yield_f64(ScrGen *g, double v) {
+  scr_gen_slot_f64(&g->out, v);
+  scr_agen_coro_yield_settle(g);
+}
+void scr_agen_coro_yield_bool(ScrGen *g, bool v) {
+  scr_gen_slot_bool(&g->out, v);
+  scr_agen_coro_yield_settle(g);
+}
+void scr_agen_coro_yield_ref(ScrGen *g, void *v, void (*release)(void *)) {
+  scr_gen_slot_ref(&g->out, v, release);
+  scr_agen_coro_yield_settle(g);
+}
+
+/* Reads the outcome of one run of an async generator's frame, inside the INV-5 window. Reached from the consumer's step and from the loop's
+ * resume of a frame that was parked on an await or a hop. */
+void scr_agen_coro_resumed(ScrCoroBase *base) {
+  ScrGen *g = (ScrGen *)(void *)base->promise;
+  uint32_t fl = base->flags;
+  if (g == NULL) {
+    /* The handle was dropped while the body was parked: nobody is waiting for an answer. A finished body drops what it holds. */
+    if ((fl & SCR_CORO_DONE) != 0u && scr_exc_pending()) scr_exc_clear();
+    base->flags &= ~(uint32_t)SCR_CORO_YIELDED;
+    return;
+  }
+  if ((fl & SCR_CORO_YIELDED) != 0u) {
+    base->flags &= ~(uint32_t)SCR_CORO_YIELDED;
+    g->state = SCR_GEN_SUSPENDED;
+  } else if ((fl & SCR_CORO_DONE) != 0u) {
+    ScrExcCell *cell = scr_exc_current_cell();
+    g->state = SCR_GEN_DONE;
+    scr_agen_finish_gen(g, cell);
+    if (cell->kind != SCR_EXC_NONE) scr_exc_cell_drop(cell); /* no request was waiting for it */
+  } else if ((fl & SCR_CORO_SUSPENDED) != 0u) {
+    g->state = SCR_GEN_SUSPENDED; /* parked on an await or the yield's hop: the loop resumes it */
+  } else {
+    fputs("scriptc: internal error: an async generator resume returned without yielding, suspending, finishing, or throwing\n", stderr);
+    abort();
+  }
+}
+
+static void scr_agen_coro_step(ScrGen *g, int inject) {
+  scr_gen_coro_step(g, (ScrGenInject)inject, true);
+}
 #endif /* SCR_CORO_LANE */
 
 void scr_gen_resume(ScrGen *g) {
@@ -6704,7 +6805,7 @@ void scr_gen_resume(ScrGen *g) {
   default:
 #ifdef SCR_CORO_LANE
     if (g->backing == SCR_GEN_BACKED_FRAME) {
-      scr_gen_coro_step(g, SCR_GEN_INJECT_NONE);
+      scr_gen_coro_step(g, SCR_GEN_INJECT_NONE, false);
     } else
 #endif
     {
@@ -6752,7 +6853,7 @@ void scr_gen_resume_return(ScrGen *g) {
       /* The sentinel goes in INSIDE the INV-5 window, not here: a fat
        * frame installs its own cell, so writing it now would land it in
        * the CONSUMER's and the body would never see it. */
-      scr_gen_coro_step(g, SCR_GEN_INJECT_RET);
+      scr_gen_coro_step(g, SCR_GEN_INJECT_RET, false);
       return;
     }
 #endif
@@ -6801,7 +6902,7 @@ void scr_gen_resume_throw(ScrGen *g) {
       /* The payload is already pending in the ACTIVE cell, where a lean
        * frame's body reads it; a fat frame's own cell is installed by
        * state_in, so the step moves it across inside the window. */
-      scr_gen_coro_step(g, SCR_GEN_INJECT_THROW);
+      scr_gen_coro_step(g, SCR_GEN_INJECT_THROW, false);
       return;
     }
 #endif
