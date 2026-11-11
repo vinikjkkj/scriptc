@@ -393,12 +393,15 @@ describe("the boundary this feature stops at", () => {
   test(
     "a builtin METHOD taken off its object still refuses — the `this` question",
     async () => {
-      const mathMax = await refusalCodes(
-        workDir,
-        "no-math-max",
-        "const m = Math.max\nconsole.log(m(1, 2))\n",
-      );
-      expect(mathMax.length, "Math.max as a value must not compile").toBeGreaterThan(0);
+      // Math.max is NOT a `this` question: no Math method reads its receiver, so Node runs `const m = Math.max; m(1, 2)` and answers 2.
+      // It was a refusal here until every Math member became a first-class value; it now compiles and is compared with Node.
+      const mathDir = stage(workDir, "math-max-value", "const m = Math.max\nconst n = Math.min\nconsole.log(m(1, 2), m(), n(3, 1, 2), n(), m(NaN, 1))\n");
+      const mathBuilt = await compile(join(mathDir, "main.ts"), { outPath: join(mathDir, exeName("program")), outDir: mathDir, backend: "c" });
+      expect(mathBuilt.ok, (mathBuilt.diagnostics ?? []).map((d) => `${d.code}: ${d.message}`).join("\n")).toBe(true);
+      const mathNode = await run(process.execPath, ["--experimental-strip-types", "main.ts"], mathDir);
+      const mathNative = await run(join(mathDir, exeName("program")), [], mathDir);
+      expect(mathNode.stdout).toBe("2 -Infinity 1 Infinity NaN\n");
+      expect(mathNative.stdout).toBe(mathNode.stdout);
       const consoleLog = await refusalCodes(
         workDir,
         "no-console-log",
