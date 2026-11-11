@@ -56,6 +56,12 @@ function runLane(cmd: string, args: string[]): Promise<ProgramRun> {
     }, 60_000);
     child.stdout.on("data", (c: Buffer) => out.push(c));
     child.stderr.on("data", (c: Buffer) => (errText += c.toString("utf8")));
+    // A spawn failure (no `node` on PATH) is an 'error' event, not a close: without this the promise never settled and the case "timed out"
+    // after 60 s instead of failing at once with the real cause.
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      reject(new Error(`node:test lane failed to start (${cmd}): ${String(err)}`));
+    });
     child.on("close", (code, signal) => {
       clearTimeout(timer);
       if (signal) {
@@ -138,7 +144,7 @@ describe(`node:test differential (${cases.length} programs x ${backends.length} 
   test.for(lanes)("%s", async ([, c, backend]) => {
     const binary = await build(c.entry, backend);
     const [nodeRes, nativeRes] = await Promise.all([
-      runLane("node", [c.entry]),
+      runLane(process.execPath, [c.entry]),
       runLane(binary, []),
     ]);
     expect(normalize(nativeRes.stdout)).toBe(normalize(nodeRes.stdout));
