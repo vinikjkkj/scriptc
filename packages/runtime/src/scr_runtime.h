@@ -2599,13 +2599,15 @@ void scr_closure_release(ScrClosure *c); /* releases the boxes; NULL-tolerant */
 typedef struct ScrUnion {
   size_t rc; /* SIZE_MAX = immortal (unused for unions; kept per convention) */
   uint32_t tag;
-  /* Ref arms only: the payload's RC entry points. NULL for scalar arms.
-   * arm_trace is non-NULL exactly when the arm type carries a cycle header
-   * (like ScrBox.obj_trace: the union's trace then visits the payload). */
-  void *(*arm_retain)(void *);
+  /* 1 for a SCALAR arm (f64, bool): such a box is allocated with only the fields above `arm_release` (24 bytes), so nothing may read
+   * arm_release / arm_trace of a box with `scalar` set. 0 for ref arms and for the emitted immortal unit instances (whole struct). */
+  uint32_t scalar;
+  uint64_t slot; /* double/bool/pointer via memcpy and casts */
+  /* Ref arms only: the payload's release entry point and, when the arm type carries a cycle header, its trace (non-NULL exactly then,
+   * like ScrBox.obj_trace: the union's trace then visits the payload). The retain entry point the constructor still takes is not stored:
+   * a union box is retained as a box and no code ever retained the payload through it. */
   void (*arm_release)(void *);
   ScrTraceFn arm_trace;
-  uint64_t slot; /* double/bool/pointer via memcpy and casts */
 } ScrUnion;
 
 ScrUnion *scr_union_new_f64(uint32_t tag, double v);  /* returns +1 */
