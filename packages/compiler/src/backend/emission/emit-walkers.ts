@@ -1001,6 +1001,8 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
       `  case SCR_EXC_F64: return scr_dyn_new_num(c->f64);`,
       `  case SCR_EXC_BOOL: return scr_dyn_new_bool(c->b);`,
       `  case SCR_EXC_STR: return scr_dyn_new_str((ScrStr *)c->payload); /* _new_str retains */`,
+      `  case SCR_EXC_NULL: return scr_dyn_new_null();`,
+      `  case SCR_EXC_UNDEF: return scr_dyn_retain(scr_dyn_undefined());`,
       `  case SCR_EXC_OBJ:`,
       `    if (scr_error_is(c->payload)) {`,
       `      /* The identity-cached crossing (scr_json.c): the SAME error`,

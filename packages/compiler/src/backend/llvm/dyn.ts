@@ -4318,10 +4318,27 @@ export class LlDyn {
     const lStr = B.newLabel("cd.s");
     const lObj = B.newLabel("cd.o");
     const lDef = B.newLabel("cd.d");
-    // SCR_EXC_F64=1, BOOL=2, STR=3, REF=4 (default), OBJ=5.
+    const lNull = B.newLabel("cd.n");
+    const lUndef = B.newLabel("cd.u");
+    // SCR_EXC_F64=1, BOOL=2, STR=3, REF=4 (default), OBJ=5, NULL=7, UNDEF=8.
     B.terminate(
-      `switch i32 ${kd}, label %${lDef} [ i32 1, label %${lF64} i32 2, label %${lBool} i32 3, label %${lStr} i32 5, label %${lObj} ]`,
+      `switch i32 ${kd}, label %${lDef} [ i32 1, label %${lF64} i32 2, label %${lBool} i32 3, label %${lStr} i32 5, label %${lObj} i32 7, label %${lNull} i32 8, label %${lUndef} ]`,
     );
+    B.startBlock(lNull);
+    host.declare(`declare ptr @scr_dyn_new_null()`);
+    {
+      const r = B.tmp();
+      B.line(`${r} = call ptr @scr_dyn_new_null()`);
+      B.terminate(`ret ptr ${r}`);
+    }
+    B.startBlock(lUndef);
+    host.declare(`declare ptr @scr_dyn_undefined()`);
+    {
+      // THE immortal undefined dyn: its +1 is a runtime no-op, like the C walker's retain of it.
+      const r = B.tmp();
+      B.line(`${r} = call ptr @scr_dyn_undefined()`);
+      B.terminate(`ret ptr ${r}`);
+    }
     B.startBlock(lF64);
     host.declare(`declare ptr @scr_dyn_new_num(double)`);
     {

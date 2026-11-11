@@ -27516,6 +27516,18 @@
     "<repo>/tests/corpus/25097-forty-thousand-async-generator-fibers-alive-at-once.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25120-throw-null-undefined-and-zero-reach-the-catch-as-they-are.ts": {
+   "order": [
+    "<repo>/tests/corpus/25120-throw-null-undefined-and-zero-reach-the-catch-as-they-are.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25127-a-synchronous-throw-of-null-is-uncaught-and-exits-1.ts": {
+   "order": [
+    "<repo>/tests/corpus/25127-a-synchronous-throw-of-null-is-uncaught-and-exits-1.ts"
+   ],
+   "diags": []
   }
  }
 }

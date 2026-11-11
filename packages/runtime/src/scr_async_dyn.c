@@ -760,6 +760,8 @@ ScrDyn *scr_caught_to_dyn(const ScrCaught *c) {
   case SCR_EXC_F64: return scr_dyn_new_num(c->f64);
   case SCR_EXC_BOOL: return scr_dyn_new_bool(c->b);
   case SCR_EXC_STR: return scr_dyn_new_str((ScrStr *)c->payload);
+  case SCR_EXC_NULL: return scr_dyn_new_null();
+  case SCR_EXC_UNDEF: return scr_dyn_retain(scr_dyn_undefined());
   case SCR_EXC_REF:
     if (c->retain_fn == scr_dyn_retain_v) return scr_dyn_retain((ScrDyn *)c->payload);
     return scr_dyn_new_obj();
@@ -810,6 +812,8 @@ ScrDyn *scr_promise_reason_dyn(const ScrPromise *p) {
     scr_str_release(v);
     return d;
   }
+  case SCR_EXC_NULL: return scr_dyn_new_null();
+  case SCR_EXC_UNDEF: return scr_dyn_retain(scr_dyn_undefined());
   case SCR_EXC_REF: {
     void *v = scr_promise_payload_ref((ScrPromise *)p);
     if (v == NULL) return scr_dyn_new_obj();

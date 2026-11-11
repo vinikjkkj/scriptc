@@ -631,6 +631,17 @@ void scr_throw_dyn(ScrDyn *v) {
     scr_throw_bool(b);
     return;
   }
+  /* null and undefined are thrown values too: they keep their own arms, so String(e), typeof and the printers see them. */
+  if (d->kind == SCR_DYN_NULL) {
+    scr_dyn_release(v);
+    scr_throw_null();
+    return;
+  }
+  if (d->kind == SCR_DYN_UNDEF) {
+    scr_dyn_release(v);
+    scr_throw_undef();
+    return;
+  }
   /* A class instance of a HIERARCHY class (an Error subclass, a user class
    * with a base) keeps its identity in the OBJ arm, so catch-side instanceof
    * answers exactly as for a statically thrown instance. */

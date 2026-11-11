@@ -128,6 +128,8 @@ void scr_rethrow(const ScrCaught *c) {
   case SCR_EXC_F64: scr_throw_f64(c->f64); break;
   case SCR_EXC_BOOL: scr_throw_bool(c->b); break;
   case SCR_EXC_STR: scr_throw_str(scr_str_retain((ScrStr *)c->payload)); break;
+  case SCR_EXC_NULL: scr_throw_null(); break;
+  case SCR_EXC_UNDEF: scr_throw_undef(); break;
   case SCR_EXC_REF:
     scr_throw_ref(c->retain_fn(c->payload), c->retain_fn, c->release_fn, c->trace_fn);
     break;
@@ -158,6 +160,8 @@ ScrStr *scr_caught_to_string(const ScrCaught *c) {
   case SCR_EXC_F64: return scr_f64_to_scrstr(c->f64);
   case SCR_EXC_BOOL: return scr_bool_to_scrstr(c->b);
   case SCR_EXC_STR: return scr_str_retain((ScrStr *)c->payload);
+  case SCR_EXC_NULL: return scr_str_new("null", 4);
+  case SCR_EXC_UNDEF: return scr_str_new("undefined", 9);
   case SCR_EXC_OBJ:
     /* Error instances stringify by Error.prototype.toString — "name",
      * "name: message", or "Error" for the empty halves. This IS Node's
@@ -235,6 +239,14 @@ void scr_library_check_exc(void) {
     n += take;
     break;
   }
+  case SCR_EXC_NULL:
+    memcpy(buf + n, "null", 4);
+    n += 4;
+    break;
+  case SCR_EXC_UNDEF:
+    memcpy(buf + n, "undefined", 9);
+    n += 9;
+    break;
   case SCR_EXC_OBJ:
     if (scr_error_is(scr_exc_payload)) {
       ScrStr *s = scr_error_to_string((ScrError *)scr_exc_payload);
@@ -280,6 +292,16 @@ void scr_throw_bool(bool v) {
   scr_exc_reset();
   scr_exc_kind = SCR_EXC_BOOL;
   scr_exc_bool = v;
+}
+
+void scr_throw_null(void) {
+  scr_exc_reset();
+  scr_exc_kind = SCR_EXC_NULL;
+}
+
+void scr_throw_undef(void) {
+  scr_exc_reset();
+  scr_exc_kind = SCR_EXC_UNDEF;
 }
 
 void scr_throw_str(ScrStr *v) {
@@ -376,6 +398,8 @@ void scr_exc_print_uncaught(void) {
     fwrite(s->data, 1, s->len, stderr);
     break;
   }
+  case SCR_EXC_NULL: fputs("null", stderr); break;
+  case SCR_EXC_UNDEF: fputs("undefined", stderr); break;
   case SCR_EXC_OBJ:
     /* Error instances (builtin or user subclass) render like Node's first
      * line: "name: message" (toString rules for the empty halves). Node

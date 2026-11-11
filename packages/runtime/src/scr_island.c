@@ -2495,6 +2495,12 @@ static JSValue isl_pending_to_value(JSContext *ctx) {
     v = JS_NewStringLen(ctx, s->data, s->len);
     break;
   }
+  case SCR_EXC_NULL:
+    v = JS_NULL;
+    break;
+  case SCR_EXC_UNDEF:
+    v = JS_UNDEFINED;
+    break;
   case SCR_EXC_OBJ:
     if (scr_error_is(cell->payload)) {
       /* A scriptc Error crossing in: a real engine Error with the same

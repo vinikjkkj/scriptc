@@ -3623,6 +3623,8 @@ static void scr_promise_rethrow(ScrPromise *p) {
   case SCR_EXC_F64: scr_throw_f64(p->f64); break;
   case SCR_EXC_BOOL: scr_throw_bool(p->b); break;
   case SCR_EXC_STR: scr_throw_str(scr_str_retain((ScrStr *)p->payload)); break;
+  case SCR_EXC_NULL: scr_throw_null(); break;
+  case SCR_EXC_UNDEF: scr_throw_undef(); break;
   case SCR_EXC_REF: scr_throw_ref(p->retain_fn(p->payload), p->retain_fn, p->release_fn, p->trace_fn); break;
   case SCR_EXC_OBJ: scr_throw_obj(p->retain_fn(p->payload), p->retain_fn, p->release_fn, p->trace_fn); break;
   case SCR_EXC_NONE:
@@ -5465,6 +5467,8 @@ bool scr_report_unhandled_rejections(void) {
         }
         case SCR_EXC_BOOL: fputs(p->b ? "true" : "false", stderr); break;
         case SCR_EXC_STR: fputs(((ScrStr *)p->payload)->data, stderr); break;
+        case SCR_EXC_NULL: fputs("null", stderr); break;
+        case SCR_EXC_UNDEF: fputs("undefined", stderr); break;
         case SCR_EXC_OBJ:
           /* Error rejections render "name: message", like the uncaught path. */
           if (scr_error_is(p->payload)) {

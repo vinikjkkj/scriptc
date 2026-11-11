@@ -1424,6 +1424,11 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
       // rejected via the type fence.
       const value = L.lowerExpr(stmt.expression);
       if (value.type.kind === "void") L.badType(stmt.expression, L.typeOf(stmt.expression));
+      // `throw null` / `throw undefined`: JS throws any value. A bare unit literal has no runtime value of its own, so it
+      // rides the dyn unit values (dynFrom accepts it), and scr_throw_dyn gives it the cell's null/undefined arm.
+      if (value.kind === "unitLit") {
+        return { kind: "throw", value: { kind: "dynFrom", value, type: DYN, loc: value.loc }, loc: locOf(stmt) };
+      }
       // A dyn throw rides the REF cell arm (scr_throw_ref over the checked-dynamic tree
       // node — identity preserved through catch bindings, caughtToDyn
       // passes it back by reference). The JS-lane traced-call shape:

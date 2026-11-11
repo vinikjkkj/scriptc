@@ -3212,6 +3212,10 @@ typedef enum {
    * Carries NO payload (the value rides the generator's ret slot), so
    * scr_exc_clear/reset need no arm. Never escapes a generator fiber. */
   SCR_EXC_GENRET,
+  /* A thrown or rejected `null` / `undefined` (JS throws any value): no payload, no slot, kind only. Appended after
+   * the sentinel so every earlier kind keeps its numeric value (the LLVM lane spells SCR_EXC_F64/BOOL/STR as literals). */
+  SCR_EXC_NULL,
+  SCR_EXC_UNDEF,
 } ScrExcKind;
 
 /* One cell per fiber (JS has one exception in flight per execution
@@ -3242,6 +3246,8 @@ extern ScrExcCell *scr_exc_cur_cell;
 
 void scr_throw_f64(double v);
 void scr_throw_bool(bool v);
+void scr_throw_null(void);  /* `throw null` */
+void scr_throw_undef(void); /* `throw undefined` */
 void scr_throw_str(ScrStr *v); /* takes ownership */
 /* Takes ownership of v; retain/release must be non-NULL (the compiler
  * passes the payload type's `_v` adapters, like scr_union_new_ref); trace
