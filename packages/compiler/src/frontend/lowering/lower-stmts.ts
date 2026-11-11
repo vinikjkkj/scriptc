@@ -3974,7 +3974,23 @@ function lowerReturnOf(
   // of slipping an empty return past the validator.
   let value: IrExpr | null = null;
   if (retExpr) {
-    return L.lowerReturnStmt(retExpr, locOf(stmt));
+    const ret = L.lowerReturnStmt(retExpr, locOf(stmt));
+    // JS: `return e;` in an ASYNC GENERATOR awaits `e` (one microtask turn) before the completion settles the request and before any finally runs.
+    // An async function's `return e;` does not, and a bare `return;` does not either. An explicit hop, like the yield's, so every lane takes it.
+    if (L.ctx.generator !== undefined && L.ctx.isAsync === true && ret.kind === "return" && ret.value !== null && ret.value.type.kind !== "void") {
+      const loc = locOf(stmt);
+      const tmp = L.declareHiddenLocal("%aretv", ret.value.type);
+      return {
+        kind: "block",
+        body: [
+          { kind: "varDecl", localId: tmp.id, init: ret.value, loc },
+          { kind: "exprStmt", expr: { kind: "libCall", fn: "async.hop", args: [], type: VOID, loc }, loc },
+          { kind: "return", value: { kind: "varRef", localId: tmp.id, type: ret.value.type, loc }, loc },
+        ],
+        loc,
+      };
+    }
+    return ret;
   } else if (L.ctx.returnType.kind === "union") {
     value = L.wrappedUndefined(L.ctx.returnType, locOf(stmt));
     if (value === null) {
