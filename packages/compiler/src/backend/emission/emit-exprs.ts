@@ -9611,6 +9611,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           call = `scr_agen_return(${g.name})`;
         } else {
           if (e.arg === null) throw new Error("emitter bug: agenResume throw with no payload");
+          if (e.arg.type.kind === "caught") {
+            // A caught snapshot forwarded by yield*: re-raise it into the caller's cell (the rethrow statement's call), then resume.
+            if (e.arg.kind !== "varRef") throw new Error("emitter bug: agenResume throw of a non-binding caught value");
+            E.line(`scr_rethrow(${mangleLocal(e.arg.localId)});${E.srcComment(e.loc)}`);
+            return E.newTemp(e.type, `scr_agen_throw(${g.name})`);
+          }
           const a = E.emitExpr(e.arg);
           const t = e.arg.type;
           if (isRefCounted(t)) E.moveTemp(a); // the cell takes ownership
