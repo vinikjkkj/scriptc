@@ -2277,6 +2277,8 @@ export function lowerStreamAsyncIteratorCall(
           else_: null,
           loc,
         },
+        // The yield's operand await: one explicit hop before the request settles (see lower-generators.ts).
+        { kind: "exprStmt", expr: { kind: "libCall", fn: "async.hop", args: [], type: VOID, loc }, loc },
         {
           kind: "exprStmt",
           expr: { kind: "yieldExpr", value: cRef, async: true, type: agenT.nextT, loc },

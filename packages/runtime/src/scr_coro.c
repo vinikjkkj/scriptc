@@ -56,7 +56,7 @@ ScrCoroBase *scr_coro_retain(ScrCoroBase *base) {
 
 void scr_coro_release(ScrCoroBase *base) {
   if (base == NULL || --base->rc != 0) return;
-  if (base->promise != NULL) scr_promise_release(base->promise);
+  if (base->promise != NULL && (base->flags & SCR_CORO_AGEN) == 0u) scr_promise_release(base->promise);
   scr_als_ctx_release(base->als);
 #ifdef SCR_RC_AUDIT
   scr_note_coro_free();
@@ -281,8 +281,19 @@ void scr_coro_resume_entry(void *base_as_void) {
 #endif
   base->flags &= ~(uint32_t)SCR_CORO_SUSPENDED;
   base->flags |= SCR_CORO_RUNNING;
+  /* An async generator frame answers a handle, not a promise: hold the handle across the run (the body may drop the last consumer
+   * reference) and read the four outcomes afterwards. */
+  ScrGen *agen = (base->flags & SCR_CORO_AGEN) != 0u ? (ScrGen *)(void *)base->promise : NULL;
+  if (agen != NULL) scr_gen_retain(agen);
   base->resume(base);
   base->flags &= ~(uint32_t)SCR_CORO_RUNNING;
+  if ((base->flags & SCR_CORO_AGEN) != 0u) {
+    scr_agen_coro_resumed(base);
+    scr_coro_state_out(&st);
+    scr_gen_release(agen);
+    scr_coro_release(base);
+    return;
+  }
 
   /* The body returned without parking and without finishing: an exception
    * escaped it. The fiber path turns this into a REJECTION inside
