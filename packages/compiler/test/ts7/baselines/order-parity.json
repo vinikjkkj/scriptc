@@ -27493,6 +27493,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24972-a-dynamic-constructor-called-with-constant-text-is-staged-natively.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24972-a-dynamic-constructor-called-with-constant-text-is-staged-natively.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24973-a-dynamic-constructor-called-with-runtime-text-still-runs-it.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24973-a-dynamic-constructor-called-with-runtime-text-still-runs-it.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/25090-async-generator-fiber-runs-a-recursion-thousands-of-frames-deep.ts": {
    "order": [
     "<repo>/tests/corpus/25090-async-generator-fiber-runs-a-recursion-thousands-of-frames-deep.ts"
