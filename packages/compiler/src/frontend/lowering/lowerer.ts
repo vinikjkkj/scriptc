@@ -12518,6 +12518,28 @@ export class Lowerer {
     const dropNames = new Set<string>();
     for (const [h, names] of this.classViewHelperFns) if (!liveHelpers.has(h)) for (const nm of names) dropNames.add(nm);
     if (dropNames.size > 0) {
+      // A bound-method closure is INTERNED per (receiver, method): the helper that first asked for it lists it among its own functions, and a
+      // second helper shares it. A name any surviving function still references (a closure or a call, transitively) must stay.
+      const refsOf = (f: IrFunction, into: Set<string>): void => {
+        const seenR = new Set<object>();
+        const walkR = (n: unknown): void => {
+          if (n === null || typeof n !== "object" || seenR.has(n)) return;
+          seenR.add(n);
+          if (Array.isArray(n)) { for (const x of n) walkR(x); return; }
+          const o = n as { kind?: unknown; callee?: unknown; fnName?: unknown };
+          if (o.kind === "call" && typeof o.callee === "string") into.add(o.callee);
+          if (o.kind === "closure" && typeof o.fnName === "string") into.add(o.fnName);
+          for (const v of Object.values(n as Record<string, unknown>)) walkR(v);
+        };
+        walkR(f.body);
+      };
+      for (;;) {
+        const refs = new Set<string>();
+        for (const f of functions) if (!dropNames.has(f.name)) refsOf(f, refs);
+        let kept = false;
+        for (const nm of [...dropNames]) if (refs.has(nm)) { dropNames.delete(nm); kept = true; }
+        if (!kept) break;
+      }
       for (let i = functions.length - 1; i >= 0; i--) if (dropNames.has(functions[i]!.name)) functions.splice(i, 1);
     }
     return unsafe;
