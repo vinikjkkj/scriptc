@@ -27643,6 +27643,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25091-async-generator-yield-await-interleaving-with-microtasks.ts": {
+   "order": [
+    "<repo>/tests/corpus/25091-async-generator-yield-await-interleaving-with-microtasks.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25092-async-generator-return-throw-finally-and-early-exit.ts": {
+   "order": [
+    "<repo>/tests/corpus/25092-async-generator-return-throw-finally-and-early-exit.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25093-async-generator-deep-synchronous-recursion-after-an-await.ts": {
+   "order": [
+    "<repo>/tests/corpus/25093-async-generator-deep-synchronous-recursion-after-an-await.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25094-two-thousand-async-generators-suspended-at-once.ts": {
+   "order": [
+    "<repo>/tests/corpus/25094-two-thousand-async-generators-suspended-at-once.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/25150-method-reading-its-own-prototype-method-and-a-base-class-property-off-a-detached-receiver.js": {
    "order": [
     "<repo>/tests/corpus/25150-method-reading-its-own-prototype-method-and-a-base-class-property-off-a-detached-receiver.js"
