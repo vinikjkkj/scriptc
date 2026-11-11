@@ -891,6 +891,10 @@ export function lowerForAwaitAsyncGenerator(
     L.scopes.pop();
   }
 }
+/** Hops a SYNC generator delegate's step costs inside an async generator (CreateAsyncFromSyncIterator: the value's own await, then the outer
+ * await of the wrapper's promise). Calibrated against Node by corpus row 25095's tick interleave. */
+const SYNC_DELEGATE_STEP_HOPS = 2;
+
 /** Statement-position `yield* e;` — the forwarding loop:
  *
  *   { const %dele = <e>; let %dr = %dele.next();
@@ -906,18 +910,14 @@ export function lowerYieldStarStatement(L: Lowerer, expr: ts.Expression): IrStmt
   if (!ts.isYieldExpression(expr) || expr.asteriskToken === undefined) return null;
   const gen = L.ctx.generator;
   if (!gen) L.unsupported("SC1071", expr);
-  // Delegation from an ASYNC generator has no lowering: the forwarding
-  // loop below drives the delegate through the SYNCHRONOUS genResume
-  // protocol, and an async delegate answers promises. Refusing here keeps
-  // the boundary loud rather than compiling a loop that reads a promise
-  // as an IteratorResult.
-  if (L.ctx.isAsync === true) {
-    L.unsupported("SC1071", expr, "'yield*' inside an async generator (delegation has no async lowering)");
-  }
+  // Delegation from an ASYNC generator: the forwarding loop below awaits each step of an ASYNC delegate (agenResume answers a promise) and
+  // drives a SYNC generator delegate through genResume, as Node's CreateAsyncFromSyncIterator does; the re-yield is the async yield without the
+  // operand-await hop `yield v` takes (the spec's yield* calls AsyncGeneratorYield directly).
+  const outerAsync = L.ctx.isAsync === true;
   if (!expr.expression) L.unsupported("SC1071", expr, "'yield*' with no operand");
   const loc = locOf(expr);
   const delegate = L.lowerExpr(expr.expression);
-  if (delegate.type.kind !== "generator") {
+  if (delegate.type.kind !== "generator" && !(outerAsync && delegate.type.kind === "asyncGenerator")) {
     L.unsupported(
       "SC1071",
       expr,
@@ -925,6 +925,11 @@ export function lowerYieldStarStatement(L: Lowerer, expr: ts.Expression): IrStmt
     );
   }
   const dT = delegate.type;
+  const asyncDelegate = dT.kind === "asyncGenerator";
+  if (dT.nextT.kind !== "undefinedT" && dT.nextT.kind !== "dyn") {
+    // The delegate's first next() carries no value, and a typed next channel has no spelling for "undefined" there.
+    L.unsupported("SC1071", expr, `'yield*' into a delegate with a '${L.fmt(dT.nextT)}' next channel (the first next() has no value to send; use an undefined or unknown next channel)`);
+  }
   if (dT.nextT.kind !== "undefinedT" && dT.nextT.kind !== "dyn" && !typeEquals(dT.nextT, gen.nextT)) {
     L.unsupported(
       "SC1071",
@@ -960,6 +965,23 @@ export function lowerYieldStarStatement(L: Lowerer, expr: ts.Expression): IrStmt
     // sentinel that only finally blocks see, so the delegate's close sits in a finally.
     // The delegate is always a generator object here, and a generator has throw(), so the spec's "no throw method:
     // close it and raise a TypeError" branch cannot be reached.
+    // One step of the delegate: an ASYNC delegate answers a promise that is awaited in place; a sync generator delegate inside an async one is
+    // stepped synchronously and its step takes the ticks CreateAsyncFromSyncIterator charges (SYNC_DELEGATE_STEP_HOPS).
+    const hopStmt = (): IrExpr => ({ kind: "libCall", fn: "async.hop", args: [], type: VOID, loc }); // a FRESH node per use: a node is a point's identity
+    const resumeOf = (mode: "next" | "return" | "throw", arg: IrExpr | null): IrExpr => {
+      if (asyncDelegate) {
+        const p: IrExpr = { kind: "agenResume", mode, gen: dRef(), arg, type: { kind: "promise", inner: recT }, loc };
+        return { kind: "awaitExpr", value: p, type: recT, loc };
+      }
+      const step: IrExpr = { kind: "genResume", mode, gen: dRef(), arg, type: recT, loc };
+      if (!outerAsync) return step;
+      let acc: IrExpr = step;
+      for (let i = 0; i < SYNC_DELEGATE_STEP_HOPS; i++) {
+        const t = L.declareHiddenLocal("%dstep", recT);
+        acc = { kind: "seqExpr", stmts: [{ kind: "varDecl", localId: t.id, init: acc, loc }, { kind: "exprStmt", expr: hopStmt(), loc }], result: { kind: "varRef", localId: t.id, type: recT, loc }, type: recT, loc };
+      }
+      return acc;
+    };
     const sendT: IrType = gen.nextT.kind === "undefinedT" ? VOID : gen.nextT;
     const needSend = dT.nextT.kind !== "undefinedT" && sendT.kind !== "void";
     const sendL = needSend ? L.declareHiddenLocal("%dsend", sendT) : null;
@@ -984,6 +1006,7 @@ export function lowerYieldStarStatement(L: Lowerer, expr: ts.Expression): IrStmt
         value: typeEquals(dT.yieldT, gen.yieldT) && typeEquals(innerV.type, gen.yieldT)
           ? innerV
           : L.coerceInto(expr.expression!, innerV, gen.yieldT),
+        ...(outerAsync ? { async: true as const } : {}),
         type: sendT,
         loc,
       };
@@ -996,7 +1019,7 @@ export function lowerYieldStarStatement(L: Lowerer, expr: ts.Expression): IrStmt
       const ref: IrExpr = { kind: "varRef", localId: sendL.id, type: sendT, loc };
       return dT.nextT.kind === "dyn" && sendT.kind !== "dyn" ? { kind: "dynFrom", value: ref, type: DYN, loc } : ref;
     };
-    const resume = (mode: "next" | "return", arg: IrExpr | null): IrExpr => ({ kind: "genResume", mode, gen: dRef(), arg, type: recT, loc });
+    const resume = (mode: "next" | "return", arg: IrExpr | null): IrExpr => resumeOf(mode, arg);
     const delegLoop: IrStmt = {
       kind: "while",
       cond: { kind: "unary", op: "!", operand: doneOf(rRef), type: BOOL, loc },
@@ -1009,7 +1032,7 @@ export function lowerYieldStarStatement(L: Lowerer, expr: ts.Expression): IrStmt
             {
               kind: "assign",
               localId: r.id,
-              value: { kind: "genResume", mode: "throw", gen: dRef(), arg: { kind: "varRef", localId: caught.id, type: CAUGHT, loc }, type: recT, loc },
+              value: resumeOf("throw", { kind: "varRef", localId: caught.id, type: CAUGHT, loc }),
               loc,
             },
             { kind: "assign", localId: threw.id, value: { kind: "boolLit", value: true, type: BOOL, loc }, loc },
