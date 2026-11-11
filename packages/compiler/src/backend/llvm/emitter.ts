@@ -5292,6 +5292,7 @@ class LlEmitter {
     loc: SrcLoc,
     pr: LlValue,
     resultType: IrType,
+    dynAdopt = false,
   ): LlValue {
     const B = this.B;
     const layout = this.currentCoroLayout!;
@@ -5356,6 +5357,12 @@ class LlEmitter {
       this.declare(`declare zeroext i1 @scr_coro_take_bool(ptr, ptr)`);
       const t = B.tmp();
       B.line(`${t} = call zeroext i1 @scr_coro_take_bool(ptr %sc_b, ptr ${aw})`);
+      out = this.own({ name: t, type: resultType });
+    } else if (dynAdopt && resultType.kind === "dyn") {
+      // A dyn await over Promise.resolve(v): the payload is read dyn-aware (it may be a number, a string or a reference, not only a dyn).
+      this.declare(`declare ptr @scr_coro_take_dyn(ptr, ptr)`);
+      const t = B.tmp();
+      B.line(`${t} = call ptr @scr_coro_take_dyn(ptr %sc_b, ptr ${aw})`);
       out = this.own({ name: t, type: resultType });
     } else {
       this.declare(`declare ptr @scr_coro_take_ref(ptr, ptr)`);
@@ -11466,6 +11473,7 @@ class LlEmitter {
             e.loc,
             pr0,
             e.type,
+            e.value.kind === "libCall" && e.value.fn === "dyn.adoptPromise",
           );
           this.emitPendingCheck();
           return out0;
