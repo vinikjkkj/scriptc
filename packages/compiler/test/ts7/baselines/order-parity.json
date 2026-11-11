@@ -27510,6 +27510,12 @@
     "<repo>/tests/corpus/25090-async-generator-fiber-runs-a-recursion-thousands-of-frames-deep.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25097-forty-thousand-async-generator-fibers-alive-at-once.ts": {
+   "order": [
+    "<repo>/tests/corpus/25097-forty-thousand-async-generator-fibers-alive-at-once.ts"
+   ],
+   "diags": []
   }
  }
 }
