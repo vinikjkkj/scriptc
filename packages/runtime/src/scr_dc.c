@@ -550,13 +550,19 @@ typedef struct {
   ScrPromise *src, *dst; /* owned */
   double h;
   ScrDyn *ctx; /* owned */
+  ScrAlsCtx *als; /* the AsyncLocalStorage context the reaction runs in: the one entered at registration (owned) */
 } DcTracePromisePack;
 
-static void dc_tp_entry(ScrFiber *self, void *ap) {
-  (void)self;
+/* The reaction, run as a microtask continuation (scr_promise_wait_raw) instead of on a fiber of its own: it installs the registration's ALS
+ * context for its turn, takes the settlement (a rejection leaves its exception pending, as the await it replaces did), and publishes. */
+static void dc_tp_step(void *ap) {
   DcTracePromisePack *a = (DcTracePromisePack *)ap;
+  ScrAlsCtx *slot = a->als;
+  ScrAlsCtx **prev_als = scr_als_active;
+  scr_als_active = &slot;
   ScrDcTracing *tc = dc_tc_of(a->h);
-  ScrDyn *v = scr_await_dyn(a->src);
+  bool ok = scr_promise_settled_take(a->src);
+  ScrDyn *v = ok ? scr_dyn_from_settled(a->src) : NULL;
   if (scr_exc_pending()) {
     ScrCaught *c = scr_exc_take();
     if (a->ctx->kind == SCR_DYN_OBJ) scr_dyn_obj_set(a->ctx, "error", 5, scr_caught_to_dyn(c));
@@ -583,6 +589,8 @@ static void dc_tp_entry(ScrFiber *self, void *ap) {
   scr_dyn_release(a->ctx);
   scr_promise_release(a->src);
   scr_promise_release(a->dst);
+  scr_als_active = prev_als;
+  scr_als_ctx_release(a->als);
   free(a);
 }
 
@@ -645,8 +653,8 @@ ScrPromise *scr_dc_tc_trace_promise(double h, ScrDyn *fn, ScrDyn *ctx, ScrDyn *t
         a->h = h;
         a->ctx = scr_dyn_retain(ctx);
         out = scr_promise_retain(a->dst);
-        ScrPromise *waiter = scr_async_spawn(dc_tp_entry, a);
-        scr_promise_release(waiter); /* the entry never rejects; nobody awaits it */
+        a->als = scr_als_ctx_retain(*scr_als_active);
+        scr_promise_wait_raw(a->src, dc_tp_step, a); /* the step never rejects; nobody awaits it */
         dc_tc_publish(tc, DC_TC_END, ctx); /* finally */
         if (scr_exc_pending()) {
           scr_promise_release(out);

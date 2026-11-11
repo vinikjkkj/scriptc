@@ -8367,6 +8367,10 @@ ScrDyn *scr_dyn_promise_then(ScrPromise *src, ScrDyn *onf, ScrDyn *onr, ScrDyn *
 /* Stackless reactions (scr_async.c): run fn(arg) on the main stack once `p` has settled, one microtask turn
  * after the settlement (or one turn from now when it already has), and take a settlement's result. */
 void scr_promise_wait_raw(ScrPromise *p, void (*fn)(void *), void *arg);
+bool scr_promise_settled_take(ScrPromise *p);
+double scr_promise_value_f64(const ScrPromise *p);
+bool scr_promise_value_bool(const ScrPromise *p);
+void *scr_promise_value_ref(const ScrPromise *p);
 int scr_promise_settled_try_take(ScrPromise *p); /* -1 pending, 0 rejected (reason rethrown), 1 fulfilled */
 /* ── AsyncLocalStorage (node:async_hooks — scr_async.c) ───────────────
  * Stores are process-lived f64 handles; the CONTEXT is an immutable

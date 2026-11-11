@@ -2739,6 +2739,7 @@ typedef struct IslPromWrap {
   ScrPromise *p; /* the wrapped scriptc promise, +1 (moved in) */
   JSValue resolve, reject;
   int payload; /* SCR_ISLP_* */
+  ScrAlsCtx *als; /* the AsyncLocalStorage context captured at wrap time, installed for the reaction's turn (owned) */
 } IslPromWrap;
 
 static IslPromWrap *isl_prom_wraps = NULL;
@@ -2755,6 +2756,7 @@ static void isl_prom_wrap_free(IslPromWrap *w) {
   JS_FreeValue(isl_ctx, w->resolve);
   JS_FreeValue(isl_ctx, w->reject);
   scr_promise_release(w->p);
+  scr_als_ctx_release(w->als);
   free(w);
 }
 
@@ -2765,21 +2767,27 @@ static void isl_prom_wrap_free(IslPromWrap *w) {
  * the engine's overflow check to this fiber's stack (the stray/restore
  * dance in isl_entry/isl_hostfn_invoke keeps the host stack's anchor
  * intact around it). */
-static void isl_prom_wrap_entry(ScrFiber *self, void *arg) {
-  (void)self;
+static void isl_prom_wrap_step(void *arg) {
   IslPromWrap *w = (IslPromWrap *)arg;
+  ScrAlsCtx *als_slot = w->als;
+  ScrAlsCtx **prev_als = scr_als_active;
+  scr_als_active = &als_slot;
   double f = 0;
   bool b = false;
   ScrStr *s = NULL;
   ScrJsval *j = NULL;
   ScrArr *ja = NULL;
-  switch (w->payload) {
-  case SCR_ISLP_F64: f = scr_await_f64(w->p); break;
-  case SCR_ISLP_BOOL: b = scr_await_bool(w->p); break;
-  case SCR_ISLP_STR: s = scr_await_str(w->p); break;
-  case SCR_ISLP_JSVAL: j = (ScrJsval *)scr_await_ref(w->p); break;
-  case SCR_ISLP_JSVAL_ARR: ja = (ScrArr *)scr_await_ref(w->p); break;
-  default: scr_await_void(w->p); break;
+  /* The settlement as a continuation reads it (a rejection leaves its reason pending in the cell, exactly what the awaits it replaces did). */
+  bool fulfilled = scr_promise_settled_take(w->p);
+  if (fulfilled) {
+    switch (w->payload) {
+    case SCR_ISLP_F64: f = scr_promise_value_f64(w->p); break;
+    case SCR_ISLP_BOOL: b = scr_promise_value_bool(w->p); break;
+    case SCR_ISLP_STR: s = (ScrStr *)scr_promise_value_ref(w->p); break;
+    case SCR_ISLP_JSVAL: j = (ScrJsval *)scr_promise_value_ref(w->p); break;
+    case SCR_ISLP_JSVAL_ARR: ja = (ScrArr *)scr_promise_value_ref(w->p); break;
+    default: break;
+    }
   }
   bool rejected = scr_exc_pending();
   isl_entry();
@@ -2821,6 +2829,7 @@ static void isl_prom_wrap_entry(ScrFiber *self, void *arg) {
   } else {
     JS_FreeValue(isl_ctx, r);
   }
+  scr_als_active = prev_als;
   isl_prom_wrap_free(w);
 }
 
@@ -2849,10 +2858,10 @@ ScrJsval *scr_jsval_from_promise(ScrPromise *p, int payload) {
   w->resolve = funcs[0];
   w->reject = funcs[1];
   w->payload = payload;
+  w->als = scr_als_ctx_retain(*scr_als_active);
   w->next = isl_prom_wraps;
   isl_prom_wraps = w;
-  ScrPromise *waiter = scr_async_spawn(isl_prom_wrap_entry, w);
-  scr_promise_release(waiter); /* the waiter never rejects; nobody awaits it */
+  scr_promise_wait_raw(p, isl_prom_wrap_step, w); /* the reaction never rejects; nobody awaits it */
   return isl_cell_new(prom);
 }
 
