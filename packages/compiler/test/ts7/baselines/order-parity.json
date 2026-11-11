@@ -27642,6 +27642,24 @@
     "<repo>/tests/corpus/25094-two-thousand-async-generators-suspended-at-once.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25095-yield-star-in-async-generators-over-async-and-sync-delegates.ts": {
+   "order": [
+    "<repo>/tests/corpus/25095-yield-star-in-async-generators-over-async-and-sync-delegates.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25098-arrays-of-sync-and-async-generators.ts": {
+   "order": [
+    "<repo>/tests/corpus/25098-arrays-of-sync-and-async-generators.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25099-return-in-an-async-generator-awaits-its-operand.ts": {
+   "order": [
+    "<repo>/tests/corpus/25099-return-in-an-async-generator-awaits-its-operand.ts"
+   ],
+   "diags": []
   }
  }
 }
