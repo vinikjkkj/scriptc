@@ -363,7 +363,8 @@ type AssertNever<T extends never> = T;
  *     A number from another lane is a different population, not a smaller one.]
  *
  *   yieldExpr -- a generator. emitAsyncScaffolding does not own one.
- *   genResume / agenResume -- the CONSUMER side, refused on the C lane too. */
+ *   genResume / agenResume -- the CONSUMER side: not suspension points at all (ir/suspends.ts), so a function that drives a generator lowers
+ *     like any other and calls the runtime entry points, which save and restore the caller's exception cell and ALS slot. */
 export const LLVM_LOWERABLE_POINT_KIND_LIST = [
   "awaitExpr",
   // Spelled through libCallPointKind so the `libCall:` prefix has one author.
@@ -377,8 +378,6 @@ export const LLVM_LOWERABLE_POINT_KIND_LIST = [
 
 export const LLVM_UNLOWERABLE_POINT_KIND_LIST = [
   "yieldExpr",
-  "genResume",
-  "agenResume",
 ] as const satisfies readonly SuspensionPointKind[];
 
 type _Lowerable = (typeof LLVM_LOWERABLE_POINT_KIND_LIST)[number];
