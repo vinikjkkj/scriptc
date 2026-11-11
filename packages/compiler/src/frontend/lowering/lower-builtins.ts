@@ -33,7 +33,7 @@ import {
   fenceOrDropOptionKey,
   isChildSurfaceMember,
 } from "./surfaces.js";
-import { conditionalSpreadOf, lowerDynObjectLiteral, narrowBridgeDyn, probeLower, voidAllResultIsAValue } from "./lower-exprs.js";
+import { awaitDynOf, conditionalSpreadOf, lowerDynObjectLiteral, narrowBridgeDyn, probeLower, voidAllResultIsAValue } from "./lower-exprs.js";
 import { bufEncoding, decoderCtorSpec } from "./lower-containers.js";
 import { HTTP2_CONSTANTS } from "./http2-constants.js";
 import { unitOnlyUnion } from "../types.js";
@@ -11585,7 +11585,7 @@ function inertAliasExpr(L: Lowerer, e: ts.Expression): boolean {
           const vLocal = L.declareHiddenLocal("v", DYN);
           tryBody.push({
             kind: "varDecl", localId: vLocal.id,
-            init: { kind: "libCall", fn: "async.awaitDyn", args: [pRef], type: DYN, loc },
+            init: awaitDynOf(pRef, loc),
             loc,
           });
           okValue = { kind: "varRef", localId: vLocal.id, type: DYN, loc };

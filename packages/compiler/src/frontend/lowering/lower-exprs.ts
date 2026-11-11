@@ -2990,15 +2990,12 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
         // and answers itself. Thenable adoption stays unmodeled
         // (SEMANTICS.md).
         if (value.type.kind === "dyn") {
-          return { kind: "libCall", fn: "async.awaitDyn", args: [value], type: DYN, loc };
+          return awaitDynOf(value, loc);
         }
         // A static record with a `then` member IS a thenable (Node adopts it):
         // its value crosses to the dyn tree and awaits through the same adoption.
         if (staticThenable(L, value.type)) {
-          return {
-            kind: "libCall", fn: "async.awaitDyn",
-            args: [{ kind: "dynFrom", value, type: DYN, loc }], type: DYN, loc,
-          };
+          return awaitDynOf({ kind: "dynFrom", value, type: DYN, loc }, loc);
         }
         // A jsval whose CHECKER type is a promise is a package-returned
         // promise: the value lives in the engine. Bridge it — a static
@@ -7348,6 +7345,14 @@ export function lowerStrIndexEqTest(L: Lowerer, expr: ts.BinaryExpression): IrEx
     return { kind: "ternary", cond: inRange, then: cmp, else_: { kind: "boolLit", value: neq, type: BOOL, loc: loc2 }, type: BOOL, loc: loc2 };
   }
   return null;
+}
+
+/** `await v` for a CHECKED-DYNAMIC operand: Promise.resolve(v) (a dyn promise adopts, a thenable's then runs in its own job, a plain value is
+ * an already-settled promise) and an ORDINARY await of that promise, so the suspension is the ordinary one every lane lowers and takes the same
+ * turns the runtime's fiber-only awaitDyn did. */
+export function awaitDynOf(v: IrExpr, loc: SrcLoc): IrExpr {
+  const pT: IrType = { kind: "promise", inner: DYN };
+  return { kind: "awaitExpr", value: { kind: "libCall", fn: "dyn.adoptPromise", args: [v], type: pT, loc }, type: DYN, loc };
 }
 
 export function pureReemittable(e: IrExpr): boolean {

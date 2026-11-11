@@ -383,6 +383,7 @@ export function emitCoroAwait(
   index: number,
   promiseTemp: Temp,
   resultType: IrType,
+  dynAdopt = false,
 ): string {
   // THE OPERAND PROMISE MOVES INTO THE FRAME, and that is not a nicety.
   // `promiseTemp` is a C local in the resume function. The park RETURNS to
@@ -413,6 +414,13 @@ export function emitCoroAwait(
   E.line(`${coroLabel(index)}:;`);
   for (const t of owned) E.line(`${t.name} = sc_f->sc_tmp_${t.name};`);
   for (const line of coroReload(E, fn, plan)) E.line(line);
+  // A dyn await over Promise.resolve(v) (dyn.adoptPromise) reads its payload dyn-aware: the adopted promise may carry a number, a string or a
+  // reference, not only a dyn reference (scr_await_dyn does the same on the fiber lane).
+  if (dynAdopt && resultType.kind === "dyn") {
+    const td = E.newTemp(resultType, `scr_coro_take_dyn(sc_b, sc_f->sc_awaited)`);
+    E.line(`scr_promise_release(sc_f->sc_awaited); sc_f->sc_awaited = NULL;`);
+    return td.name;
+  }
   const take0 =
     resultType.kind === "void"
       ? null
