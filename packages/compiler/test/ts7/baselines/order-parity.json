@@ -16526,6 +16526,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/2752-class-views-share-a-bound-method/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/2752-class-views-share-a-bound-method/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2719-freeze-builder-binding.ts": {
    "order": [
     "<repo>/tests/corpus/2719-freeze-builder-binding.ts"
