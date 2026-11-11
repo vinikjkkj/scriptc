@@ -27437,6 +27437,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25110-then-catch-finally-on-a-dyn-promise-run-as-microtasks-in-order-with-the-registration-context.ts": {
+   "order": [
+    "<repo>/tests/corpus/25110-then-catch-finally-on-a-dyn-promise-run-as-microtasks-in-order-with-the-registration-context.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/25060-class-instance-read-through-a-record-of-methods-is-the-same-object/main.ts": {
    "order": [
     "<repo>/tests/corpus/25060-class-instance-read-through-a-record-of-methods-is-the-same-object/main.ts"
