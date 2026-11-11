@@ -52,6 +52,9 @@
 #include <malloc.h> /* malloc_trim, the posix arm of the idle-seam trim */
 #endif
 #include <sys/mman.h>
+#ifndef MAP_NORESERVE
+#define MAP_NORESERVE 0
+#endif
 #include <ucontext.h>
 #include <unistd.h>
 #endif
@@ -78,7 +81,9 @@ void __sanitizer_finish_switch_fiber(void *fake_stack_save, const void **bottom_
 #ifdef SCR_ASAN_FIBERS
 #define SCR_FIBER_STACK (8 * 1024 * 1024)
 #else
-#define SCR_FIBER_STACK (256 * 1024)
+/* 1 MiB of address space per fiber (was 256 KiB). It is RESERVED, not committed: the mapping below is MAP_NORESERVE and the kernel hands
+ * out a page only on first touch, so RSS counts touched pages, and 1 MiB gets deep async recursion nearer Node's ~10k frames. */
+#define SCR_FIBER_STACK (1024 * 1024)
 #endif
 
 /* The INITIAL COMMITTED size of a win32 fiber stack, which is a different
@@ -2536,7 +2541,7 @@ static ScrStack *scr_stack_acquire(void) {
 #else
   /* One PROT_NONE guard page below the usable stack (stacks grow down): an overflow faults here instead of running silently into whatever
    * malloc placed next to the block, and the mapping returns to the kernel whole on release. Pages are committed lazily by first touch. */
-  s->mem = mmap(NULL, SCR_FIBER_GUARD + SCR_FIBER_STACK, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  s->mem = mmap(NULL, SCR_FIBER_GUARD + SCR_FIBER_STACK, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
   if (s->mem == MAP_FAILED) scr_oom();
   if (mprotect(s->mem, SCR_FIBER_GUARD, PROT_NONE) != 0) scr_oom();
   getcontext(&s->ctx);
