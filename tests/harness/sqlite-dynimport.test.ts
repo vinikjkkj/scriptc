@@ -497,7 +497,10 @@ describe("the boundary: a specifier that should not route must refuse by name", 
           "  console.log(typeof ns);\n}\nvoid main();\n",
       );
       expect(r.ok, `a computed specifier must not compile:\n${r.diags}`).toBe(false);
-      expect(r.diags).toMatch(/SC2012/);
+      // SC1090, not SC2012: import() of a specifier with no static part names no file the build could compile, and says so with a hint at the
+      // two shapes that do (a static prefix/suffix, or a static import). Node resolves it at run time; an AOT build has no graph to resolve it in,
+      // so the refusal stays by design (docs: the module graph is a build-time artifact) -- only its code changed when import() became native.
+      expect(r.diags).toMatch(/SC1090/);
     },
     900_000,
   );
