@@ -6180,8 +6180,11 @@ function validateFunction(
         } else {
           if (e.arg === null) {
             err("agenResume throw with no payload", e.loc);
-          } else if (e.arg.type.kind === "void" || e.arg.type.kind === "dyn" || e.arg.type.kind === "caught") {
+          } else if (e.arg.type.kind === "void" || e.arg.type.kind === "dyn") {
             err(`agenResume throw of a ${e.arg.type.kind} value`, e.loc);
+          } else if (e.arg.type.kind === "caught" && e.arg.kind !== "varRef") {
+            // A caught snapshot forwarded by yield*: only a catch binding can be re-raised into the caller's cell.
+            err("agenResume throw of a caught value that is not a binding", e.loc);
           }
         }
         // The result is a PROMISE over the same IteratorResult record the
