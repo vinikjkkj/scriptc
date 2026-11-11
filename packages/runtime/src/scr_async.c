@@ -1739,35 +1739,48 @@ static void scr_promise_claim_run(ScrPromise *dst, ScrPromise *src, ScrClosure *
 static void scr_promise_settle_wake(ScrPromise *p) {
   size_t nw = p->nwaiters, w = 0;
   p->nwaiters = 0;
-  for (size_t i = 0; i < p->ncbs; i++) {
-    for (; w < nw && w < p->cbs[i].wpos; w++) scr_ready_push(p->waiters[w]);
+  /* Detach the callback list BEFORE running it. Each entry's dst/via/conv
+   * references are dropped as it is processed, and a release inside the loop
+   * (or inside the adapter a claim runs) can start a cycle collection; the
+   * trace visits p->cbs[0..ncbs), so a still-attached list would show the
+   * collector edges already released (counts it does not hold) and it would
+   * free a payload another holder still counts. The detached list is held by
+   * this frame only (untraced = external counts = conservative), and p ends
+   * with no callbacks exactly as before. */
+  struct ScrPromiseCbWaiter *cbs = p->cbs;
+  size_t ncbs = p->ncbs;
+  p->cbs = NULL;
+  p->ncbs = 0;
+  p->cbs_cap = 0;
+  for (size_t i = 0; i < ncbs; i++) {
+    for (; w < nw && w < cbs[i].wpos; w++) scr_ready_push(p->waiters[w]);
     /* A callback parked here for a claim consumes the CLAIM (already settled: its
      * own callback sits earlier on this list), everything else consumes p. */
-    ScrPromise *s = p->cbs[i].via ? p->cbs[i].via : p;
-    if (p->cbs[i].all) {
-      scr_promise_all_settle(p->cbs[i].all, p->cbs[i].dst, p->cbs[i].all_idx, s);
-      scr_promise_all_state_release(p->cbs[i].all);
+    ScrPromise *s = cbs[i].via ? cbs[i].via : p;
+    if (cbs[i].all) {
+      scr_promise_all_settle(cbs[i].all, cbs[i].dst, cbs[i].all_idx, s);
+      scr_promise_all_state_release(cbs[i].all);
     } else if (s->state == SCR_PROM_FULFILLED) {
-      if (p->cbs[i].conv) {
-        scr_promise_claim_run(p->cbs[i].dst, s, p->cbs[i].conv);
-        scr_closure_release(p->cbs[i].conv);
+      if (cbs[i].conv) {
+        scr_promise_claim_run(cbs[i].dst, s, cbs[i].conv);
+        scr_closure_release(cbs[i].conv);
       } else {
-        p->cbs[i].adapt(p->cbs[i].dst, s);
+        cbs[i].adapt(cbs[i].dst, s);
       }
     } else {
-      scr_promise_settle_from(p->cbs[i].dst, s);
-      if (p->cbs[i].conv) scr_closure_release(p->cbs[i].conv);
+      scr_promise_settle_from(cbs[i].dst, s);
+      if (cbs[i].conv) scr_closure_release(cbs[i].conv);
     }
-    if (p->cbs[i].via) scr_promise_release(p->cbs[i].via);
-    if (p->cbs[i].conv && p->cbs[i].dst->alias) {
+    if (cbs[i].via) scr_promise_release(cbs[i].via);
+    if (cbs[i].conv && cbs[i].dst->alias) {
       /* The claim is settled now: it stops sharing this list. */
-      scr_promise_release(p->cbs[i].dst->alias);
-      p->cbs[i].dst->alias = NULL;
+      scr_promise_release(cbs[i].dst->alias);
+      cbs[i].dst->alias = NULL;
     }
-    scr_promise_release(p->cbs[i].dst);
+    scr_promise_release(cbs[i].dst);
   }
   for (; w < nw; w++) scr_ready_push(p->waiters[w]);
-  p->ncbs = 0;
+  free(cbs);
   if (p->state == SCR_PROM_REJECTED) scr_track_rejection(p);
 }
 
