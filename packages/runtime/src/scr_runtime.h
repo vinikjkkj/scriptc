@@ -8353,6 +8353,7 @@ void scr_promise_rethrow_top_level(ScrPromise *p);
  * payload as a dyn value (+1; void fulfillments answer the undefined
  * value), or NULL with the rejection re-thrown into the awaiter. */
 ScrDyn *scr_await_dyn(ScrPromise *p);
+ScrDyn *scr_dyn_from_settled(ScrPromise *p); /* +1; the promise must be settled and fulfilled */
 /* `await v` over a checked-dynamic VALUE: dyn promises adopt, everything
  * else takes JS's one-hop non-thenable await and answers itself (+1). */
 ScrDyn *scr_await_dyn_value(ScrDyn *v);
@@ -8363,6 +8364,10 @@ ScrDyn *scr_await_dyn_value(ScrDyn *v);
  * settles a fresh result promise, answered BOXED (+1). Microtask-exact
  * ordering rides the fiber machinery. */
 ScrDyn *scr_dyn_promise_then(ScrPromise *src, ScrDyn *onf, ScrDyn *onr, ScrDyn *onfin);
+/* Stackless reactions (scr_async.c): run fn(arg) on the main stack once `p` has settled, one microtask turn
+ * after the settlement (or one turn from now when it already has), and take a settlement's result. */
+void scr_promise_wait_raw(ScrPromise *p, void (*fn)(void *), void *arg);
+bool scr_promise_settled_take(ScrPromise *p);
 /* ── AsyncLocalStorage (node:async_hooks — scr_async.c) ───────────────
  * Stores are process-lived f64 handles; the CONTEXT is an immutable
  * refcounted snapshot of (store → dyn value) entries riding the fiber
