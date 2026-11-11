@@ -187,9 +187,12 @@ function agenResultTypeOf(fn: IrFunction): IrType & { kind: "record" } {
       // PROPERTY instead means a member that could not previously exist
       // falls through to the scaffolding written for it, and whoever opens
       // that gate gets a visible gap rather than a silent wrong lowering.
-      const genPlan = !fn.async ? E.coroPlansByFn.get(fn.name) : undefined;
+      const genPlan = E.coroPlansByFn.get(fn.name);
       if (genPlan !== undefined) {
-        emitGenCoroSpawn(E, out, fn, genPlan);
+        // An async generator's frame handle carries its settle thunk (prototype repeated here: it is defined with the interned walkers).
+        const settle = fn.async === true ? agenSettleThunkFor(E, agenTypeOf(fn), agenResultTypeOf(fn)) : undefined;
+        if (settle !== undefined) out.push(`${E.link}void ${settle}(ScrGen *sc_g, ScrPromise *sc_p);`);
+        emitGenCoroSpawn(E, out, fn, genPlan, settle);
         continue;
       }
       const isAsyncGen = fn.async === true;
