@@ -10462,7 +10462,7 @@ function prototypeInstallerCallStmt(L: Lowerer, expr: ts.Expression): IrStmt | n
   /** A TUPLE value as an array (a fresh snapshot of its positions): homogeneous tuples at their one position type, heterogeneous ones at the
    * union of the positions' arms (each read wraps arm-wise), and a tuple of equal-arity tuples whose positions differ at ONE widened tuple shape.
    * A receiver that cannot be re-emitted per position is bound to a hidden local first. Null when no element type represents the positions. */
-  export function tupleSnapshotArray(L: Lowerer, tuple: IrExpr, node: ts.Expression): IrExpr | null {
+  export function tupleSnapshotArray(L: Lowerer, tuple: IrExpr, node: ts.Expression, columnTypes?: (IrType | null)[]): IrExpr | null {
     if (tuple.type.kind !== "record" || !L.shapes.get(tuple.type.shapeId)?.tuple) return null;
       const shape = L.shapes.get(tuple.type.shapeId)!;
       const byIndex = [...shape.fields].sort((a, b) => Number(a.name) - Number(b.name));
@@ -10495,11 +10495,14 @@ function prototypeInstallerCallStmt(L: Lowerer, expr: ts.Expression): IrStmt | n
               } else if (f.type.kind === "array") {
                 ft = f.type.elem;
               }
-              if (ft === undefined || !["f64", "string", "bool", "record", "array"].includes(ft.kind)) { ok = false; break; }
+              if (ft === undefined || !["f64", "string", "bool", "record", "array", "func", "object", "promise"].includes(ft.kind)) { ok = false; break; }
               if (!arms.some((x) => typeEquals(x, ft!))) arms.push(ft);
             }
             if (!ok) break;
-            cols.push({ name: String(j), type: arms.length === 1 ? arms[0]! : { kind: "union", unionId: L.unions.intern(arms) } });
+            // The destructuring pattern names the type the checker gives each binding (a union of function types, for one, is ONE
+            // function type with a union result there, not a union of closures): the column takes it when it is known.
+            const known = arms.length > 1 ? (columnTypes?.[j] ?? null) : null;
+            cols.push({ name: String(j), type: known ?? (arms.length === 1 ? arms[0]! : { kind: "union", unionId: L.unions.intern(arms) }) });
           }
           if (ok) {
             uniformPositions = cols;
@@ -10861,7 +10864,13 @@ function prototypeInstallerCallStmt(L: Lowerer, expr: ts.Expression): IrStmt | n
         // position of a mutable tuple would observe its old value here —
         // readonly (as-const) tuples, the shape that actually occurs,
         // cannot be written at all.
-        const snap = tupleSnapshotArray(L, iterable, stmt.expression);
+        let patternTypes: (IrType | null)[] | undefined;
+        if (ts.isVariableDeclarationList(stmt.initializer) && stmt.initializer.declarations.length === 1 && ts.isArrayBindingPattern(stmt.initializer.declarations[0]!.name)) {
+          patternTypes = stmt.initializer.declarations[0]!.name.elements.map((el) =>
+            ts.isBindingElement(el) && el.dotDotDotToken === undefined ? L.mapTypeOf(L.checker.getTypeAtLocation(el)) : null,
+          );
+        }
+        const snap = tupleSnapshotArray(L, iterable, stmt.expression, patternTypes);
         if (snap !== null) iterable = snap;
         else {
           L.noLowering("for-of over tuples", stmt.expression,

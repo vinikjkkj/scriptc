@@ -27606,6 +27606,12 @@
     "<repo>/tests/corpus/25134-array-methods-on-a-tuple-of-mixed-positions.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25135-for-of-over-pairs-of-a-name-and-functions-with-different-results.ts": {
+   "order": [
+    "<repo>/tests/corpus/25135-for-of-over-pairs-of-a-name-and-functions-with-different-results.ts"
+   ],
+   "diags": []
   }
  }
 }
