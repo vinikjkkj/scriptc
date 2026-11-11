@@ -27684,6 +27684,30 @@
     "<repo>/tests/corpus/25173-heap-built-empty-strings-never-stay-in-the-shared-empty-boxes.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25091-async-generator-yield-await-interleaving-with-microtasks.ts": {
+   "order": [
+    "<repo>/tests/corpus/25091-async-generator-yield-await-interleaving-with-microtasks.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25092-async-generator-return-throw-finally-and-early-exit.ts": {
+   "order": [
+    "<repo>/tests/corpus/25092-async-generator-return-throw-finally-and-early-exit.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25093-async-generator-deep-synchronous-recursion-after-an-await.ts": {
+   "order": [
+    "<repo>/tests/corpus/25093-async-generator-deep-synchronous-recursion-after-an-await.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25094-two-thousand-async-generators-suspended-at-once.ts": {
+   "order": [
+    "<repo>/tests/corpus/25094-two-thousand-async-generators-suspended-at-once.ts"
+   ],
+   "diags": []
   }
  }
 }
