@@ -18,6 +18,9 @@
  *   downgrades to a note in that case.
  */
 #define _XOPEN_SOURCE 700
+#ifndef _DEFAULT_SOURCE
+#define _DEFAULT_SOURCE 1 /* madvise and MADV_* under glibc, which _XOPEN_SOURCE alone hides */
+#endif
 #include "scr_runtime.h"
 #include "scr_coro.h"
 
@@ -657,6 +660,11 @@ typedef struct ScrStack {
   void *res_base;
   size_t res_size;
 } ScrStack;
+/* POSIX only (res_base/res_size belong to the Windows poison arm and are unused here, so reusing one keeps this struct, and the malloc size class
+ * every fresh stack pays for, exactly as it was): res_size != 0 marks a stack carved from a shared region (scr_ug_take), returned to it rather
+ * than unmapped, and with no guard page under it. */
+#define SCR_STACK_SHARED(s) ((s)->res_size != 0)
+#define SCR_STACK_GUARD(s) (SCR_STACK_SHARED(s) ? (size_t)0 : SCR_FIBER_GUARD)
 
 /* -- THE POISONING ARM: make a reclaimed stack FAULT instead of go quiet --
  *
@@ -1643,7 +1651,7 @@ static void scr_switch(ScrCtx *from, ScrCtx *to, ScrFiber *to_fiber) {
   SwitchToFiber(*to);
 #elif defined(SCR_ASAN_FIBERS)
   void **save = from_fiber ? &from_fiber->fake_stack : &scr_main_fake_stack;
-  const void *bottom = to_fiber ? to_fiber->st->mem + SCR_FIBER_GUARD : NULL;
+  const void *bottom = to_fiber ? to_fiber->st->mem + SCR_STACK_GUARD(to_fiber->st) : NULL;
   size_t size = to_fiber ? SCR_FIBER_STACK : 0;
   __sanitizer_start_switch_fiber(save, bottom, size);
   swapcontext(from, to);
@@ -2475,6 +2483,72 @@ static size_t scr_stack_reserve(void) {
   return cached;
 }
 
+#ifndef _WIN32
+/* ── POSIX fiber stack mappings: guarded while affordable, shared-region otherwise ─────────────────────────────────────────────────── */
+/* Guarded stacks still affordable: one is spent per guarded stack made and given back when it is unmapped. -1 until first use. A guarded stack
+ * costs TWO kernel mappings, and the kernel allows vm.max_map_count of them per process (65530 by default), so the budget is an eighth of that
+ * limit (read once; 65530 when the file cannot be read): the guards take at most a quarter of the mappings and the heap, thread stacks and the
+ * loader keep the rest. */
+static long scr_guard_left = -1;
+
+static __attribute__((noinline)) void scr_guard_budget_init(void) {
+  size_t limit = 65530;
+  int fd = open("/proc/sys/vm/max_map_count", O_RDONLY);
+  if (fd >= 0) {
+    char buf[32];
+    ssize_t n = read(fd, buf, sizeof buf - 1);
+    close(fd);
+    unsigned long v = 0;
+    for (ssize_t i = 0; i < n && buf[i] >= '0' && buf[i] <= '9'; i++) v = v * 10 + (unsigned long)(buf[i] - '0');
+    if (v >= 1024) limit = (size_t)v;
+  }
+  size_t cap = limit / 8;
+  const char *env = getenv("SCR_FIBER_GUARD_CAP"); /* test knob: force the shared-region path on a box whose limit is huge */
+  if (env != NULL && *env >= '0' && *env <= '9') cap = (size_t)strtoul(env, NULL, 10);
+  scr_guard_left = (long)cap;
+}
+
+#define SCR_UG_REGION_STACKS 64
+static char *scr_ug_bump;       /* next unused stack of the newest region */
+static size_t scr_ug_left;      /* stacks left in it */
+static char **scr_ug_free;      /* returned stacks, reused before a new region is mapped */
+static size_t scr_ug_free_n, scr_ug_free_cap;
+
+/* One stack of SCR_FIBER_STACK bytes with no guard under it, from the free list or the newest region (a new region is one mapping of
+ * SCR_UG_REGION_STACKS stacks, adjacent anonymous mappings merge so the count stays small, and none of it is touched until used). */
+static __attribute__((noinline)) char *scr_ug_take(void) {
+  if (scr_ug_free_n != 0) return scr_ug_free[--scr_ug_free_n];
+  if (scr_ug_left == 0) {
+    char *r = mmap(NULL, (size_t)SCR_UG_REGION_STACKS * SCR_FIBER_STACK, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+    if (r == (char *)MAP_FAILED) scr_oom();
+#ifdef MADV_NOHUGEPAGE
+    /* A huge page would commit 2 MiB for the first touch of a stack that needs one 4 KiB page: 3.9 GB of RSS for 2000 fibers MEASURED. */
+    madvise(r, (size_t)SCR_UG_REGION_STACKS * SCR_FIBER_STACK, MADV_NOHUGEPAGE);
+#endif
+    scr_ug_bump = r;
+    scr_ug_left = SCR_UG_REGION_STACKS;
+  }
+  char *m = scr_ug_bump;
+  scr_ug_bump += SCR_FIBER_STACK;
+  scr_ug_left--;
+  return m;
+}
+
+/* Gives a shared stack back: its pages return to the kernel (so RSS counts only live stacks) and the address is reused. If the list cannot grow
+ * the address is leaked; it is address space only. */
+static __attribute__((noinline)) void scr_ug_give(char *m) {
+  madvise(m, SCR_FIBER_STACK, MADV_DONTNEED);
+  if (scr_ug_free_n == scr_ug_free_cap) {
+    size_t ncap = scr_ug_free_cap ? scr_ug_free_cap * 2 : 256;
+    char **nf = (char **)realloc(scr_ug_free, ncap * sizeof *nf);
+    if (nf == NULL) return;
+    scr_ug_free = nf;
+    scr_ug_free_cap = ncap;
+  }
+  scr_ug_free[scr_ug_free_n++] = m;
+}
+#endif
+
 static void scr_stack_free(ScrStack *s) {
   SCR_FST_FREED_ONE();
 #ifdef _WIN32
@@ -2500,7 +2574,12 @@ static void scr_stack_free(ScrStack *s) {
     DeleteFiber(s->ctx);
   }
 #else
-  munmap(s->mem, SCR_FIBER_GUARD + SCR_FIBER_STACK);
+  if (SCR_STACK_SHARED(s)) {
+    scr_ug_give(s->mem);
+  } else {
+    munmap(s->mem, SCR_FIBER_GUARD + SCR_FIBER_STACK);
+    scr_guard_left++;
+  }
 #endif
   free(s);
 }
@@ -2540,12 +2619,29 @@ static ScrStack *scr_stack_acquire(void) {
   if (s->ctx == NULL) scr_oom();
 #else
   /* One PROT_NONE guard page below the usable stack (stacks grow down): an overflow faults here instead of running silently into whatever
-   * malloc placed next to the block, and the mapping returns to the kernel whole on release. Pages are committed lazily by first touch. */
-  s->mem = mmap(NULL, SCR_FIBER_GUARD + SCR_FIBER_STACK, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
-  if (s->mem == MAP_FAILED) scr_oom();
-  if (mprotect(s->mem, SCR_FIBER_GUARD, PROT_NONE) != 0) scr_oom();
+   * malloc placed next to the block, and the mapping returns to the kernel whole on release. Pages are committed lazily by first touch.
+   * A guarded stack costs TWO kernel mappings (the guard and the stack never merge), and the kernel allows vm.max_map_count of them per
+   * process (65530 by default), so only the first scr_guard_left (an eighth of the limit) live stacks get one. Past that, and whenever a mapping fails, the stack is
+   * carved from a shared region (scr_ug_take): no guard, one mapping per 64 stacks, and no limit that Node does not also lack. */
+  s->mem = NULL;
+  if (__builtin_expect(scr_guard_left < 0, 0)) scr_guard_budget_init();
+  if (scr_guard_left > 0) {
+    char *m = mmap(NULL, SCR_FIBER_GUARD + SCR_FIBER_STACK, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+    if (m != (char *)MAP_FAILED) {
+      if (mprotect(m, SCR_FIBER_GUARD, PROT_NONE) == 0) {
+        s->mem = m;
+        scr_guard_left--;
+      } else {
+        munmap(m, SCR_FIBER_GUARD + SCR_FIBER_STACK);
+      }
+    }
+  }
+  if (s->mem == NULL) {
+    s->mem = scr_ug_take();
+    s->res_size = 1;
+  }
   getcontext(&s->ctx);
-  s->ctx.uc_stack.ss_sp = s->mem + SCR_FIBER_GUARD;
+  s->ctx.uc_stack.ss_sp = s->mem + SCR_STACK_GUARD(s);
   s->ctx.uc_stack.ss_size = SCR_FIBER_STACK;
   s->ctx.uc_link = NULL;
   makecontext(&s->ctx, scr_trampoline, 0);
