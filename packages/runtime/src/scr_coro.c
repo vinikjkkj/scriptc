@@ -262,8 +262,33 @@ void scr_coro_state_out(ScrCoroTaskState *st) {
   scr_als_active = st->prev_als;
 }
 
+/* The ready-queue entry of an ASYNC GENERATOR's frame, kept out of line so scr_coro_resume_entry below is what it was for every ordinary frame:
+ * the frame answers a handle, not a promise, so the handle is held across the run (the body may drop the last consumer reference) and the four
+ * outcomes (yielded, parked, done, threw) are read afterwards. */
+static __attribute__((noinline)) void scr_coro_resume_agen(ScrCoroBase *base) {
+  ScrCoroTaskState st;
+  scr_coro_state_in(base, &st);
+#ifdef SCR_RC_AUDIT
+  if ((base->flags & SCR_CORO_SUSPENDED) != 0u) scr_note_coro_unpark();
+#endif
+  base->flags &= ~(uint32_t)SCR_CORO_SUSPENDED;
+  base->flags |= SCR_CORO_RUNNING;
+  ScrGen *agen = (ScrGen *)(void *)base->promise;
+  if (agen != NULL) scr_gen_retain(agen);
+  base->resume(base);
+  base->flags &= ~(uint32_t)SCR_CORO_RUNNING;
+  scr_agen_coro_resumed(base);
+  scr_coro_state_out(&st);
+  scr_gen_release(agen);
+  scr_coro_release(base);
+}
+
 void scr_coro_resume_entry(void *base_as_void) {
   ScrCoroBase *base = (ScrCoroBase *)base_as_void;
+  if (__builtin_expect((base->flags & SCR_CORO_AGEN) != 0u, 0)) {
+    scr_coro_resume_agen(base);
+    return;
+  }
 
   /* INV-5, in. A fiber got both of these from scr_switch; a state machine
    * runs on whatever stack the loop is on, so the per-task state has to be
@@ -281,19 +306,8 @@ void scr_coro_resume_entry(void *base_as_void) {
 #endif
   base->flags &= ~(uint32_t)SCR_CORO_SUSPENDED;
   base->flags |= SCR_CORO_RUNNING;
-  /* An async generator frame answers a handle, not a promise: hold the handle across the run (the body may drop the last consumer
-   * reference) and read the four outcomes afterwards. */
-  ScrGen *agen = (base->flags & SCR_CORO_AGEN) != 0u ? (ScrGen *)(void *)base->promise : NULL;
-  if (agen != NULL) scr_gen_retain(agen);
   base->resume(base);
   base->flags &= ~(uint32_t)SCR_CORO_RUNNING;
-  if ((base->flags & SCR_CORO_AGEN) != 0u) {
-    scr_agen_coro_resumed(base);
-    scr_coro_state_out(&st);
-    scr_gen_release(agen);
-    scr_coro_release(base);
-    return;
-  }
 
   /* The body returned without parking and without finishing: an exception
    * escaped it. The fiber path turns this into a REJECTION inside
