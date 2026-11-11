@@ -4175,6 +4175,79 @@ void scr_queue_microtask_raw(void (*fn)(void *), void *arg,
   scr_ready_push(f);
 }
 
+/* -- Stackless reactions on a promise (always linked) ---------------------
+ * scr_dyn_promise_then (scr_async_dyn.c) used to spawn a FIBER per .then /
+ * .catch / .finally registration just to wait for the source and run the
+ * callback; a pipelined ioredis command registers two of them, so a burst of
+ * commands held thousands of parked fibers (a stack each). The reaction needs
+ * no stack of its own: it is a continuation that runs from the ready queue on
+ * the main stack, exactly like a queueMicrotask envelope.
+ *
+ * scr_promise_wait_raw is scr_await_settled's two arms for a continuation
+ * instead of a fiber, with the same push accounting (one scr_ready_push per
+ * wait):
+ *   settled operand: one microtask hop now (two under SCR_TICK_POISON, like
+ *                    the fiber arm);
+ *   pending operand: the envelope joins the promise's waiter list and the
+ *                    settle's existing push wakes it once.
+ * `fn(arg)` runs on the main stack when the turn comes; it owns `arg`. */
+static void scr_promise_park_envelope(ScrPromise *p, void (*fn)(void *), void *arg,
+                                      void (*arg_release)(void *)) {
+  ScrFiber *f = calloc(1, sizeof *f);
+  if (!f) scr_oom();
+  f->micro_raw = fn;
+  f->micro_arg = arg;
+  f->micro_arg_release = arg_release;
+  p = scr_prom_reg_target(p);
+  if (p->nwaiters == p->waiters_cap) {
+    p->waiters_cap = p->waiters_cap ? p->waiters_cap * 2 : 4;
+    p->waiters = realloc(p->waiters, p->waiters_cap * sizeof *p->waiters);
+    if (!p->waiters) scr_oom();
+  }
+  p->waiters[p->nwaiters++] = f;
+}
+
+typedef struct {
+  void (*fn)(void *);
+  void *arg;
+} ScrWaitHop2;
+
+static void scr_wait_hop2_run(void *hp) {
+  ScrWaitHop2 *h = (ScrWaitHop2 *)hp;
+  void (*fn)(void *) = h->fn;
+  void *arg = h->arg;
+  free(h);
+  scr_queue_microtask_raw(fn, arg, NULL);
+}
+
+void scr_promise_wait_raw(ScrPromise *p, void (*fn)(void *), void *arg) {
+  if (p->state != SCR_PROM_PENDING) {
+    if (scr_tick_poison()) {
+      ScrWaitHop2 *h = malloc(sizeof *h);
+      if (!h) scr_oom();
+      h->fn = fn;
+      h->arg = arg;
+      scr_queue_microtask_raw(scr_wait_hop2_run, h, NULL);
+    } else {
+      scr_queue_microtask_raw(fn, arg, NULL);
+    }
+    return;
+  }
+  scr_promise_park_envelope(p, fn, arg, NULL);
+}
+
+/* The part of scr_await_settled after the wait: mark the settlement observed
+ * and, for a rejection, copy the reason into the ACTIVE exception cell. True
+ * for a fulfillment. The promise must already be settled. */
+bool scr_promise_settled_take(ScrPromise *p) {
+  scr_prom_observe(p);
+  if (p->state == SCR_PROM_REJECTED) {
+    scr_promise_rethrow(p);
+    return false;
+  }
+  return true;
+}
+
 #ifdef SCR_CORO_LANE
 /* GATED ON THE LINK, not on a knob. cc.ts defines SCR_CORO_LANE exactly when
  * scr_coro.c is in this link -- derived from the source list itself, so the
@@ -4243,20 +4316,7 @@ bool scr_coro_promise_rejected(const ScrPromise *p) {
 bool scr_coro_promise_park(ScrPromise *p, void (*fn)(void *), void *arg,
                            void (*arg_release)(void *)) {
   if (p->state != SCR_PROM_PENDING) return false;
-  ScrFiber *f = calloc(1, sizeof *f);
-  if (!f) scr_oom();
-  /* st/gen/promise stay NULL: this is an envelope, not a fiber, and
-   * scr_resume_fiber's micro_raw arm frees it before calling out. */
-  f->micro_raw = fn;
-  f->micro_arg = arg;
-  f->micro_arg_release = arg_release;
-  p = scr_prom_reg_target(p);
-  if (p->nwaiters == p->waiters_cap) {
-    p->waiters_cap = p->waiters_cap ? p->waiters_cap * 2 : 4;
-    p->waiters = realloc(p->waiters, p->waiters_cap * sizeof *p->waiters);
-    if (!p->waiters) scr_oom();
-  }
-  p->waiters[p->nwaiters++] = f;
+  scr_promise_park_envelope(p, fn, arg, arg_release);
   return true;
 }
 
