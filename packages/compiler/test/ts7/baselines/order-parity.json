@@ -27480,6 +27480,12 @@
     "<repo>/tests/corpus/24930-dyn-object-keys-of-every-short-length-differing-in-one-byte.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25090-async-generator-fiber-runs-a-recursion-thousands-of-frames-deep.ts": {
+   "order": [
+    "<repo>/tests/corpus/25090-async-generator-fiber-runs-a-recursion-thousands-of-frames-deep.ts"
+   ],
+   "diags": []
   }
  }
 }
