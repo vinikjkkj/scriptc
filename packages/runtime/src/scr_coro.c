@@ -56,7 +56,7 @@ ScrCoroBase *scr_coro_retain(ScrCoroBase *base) {
 
 void scr_coro_release(ScrCoroBase *base) {
   if (base == NULL || --base->rc != 0) return;
-  if (base->promise != NULL && (base->flags & SCR_CORO_AGEN) == 0u) scr_promise_release(base->promise);
+  if (base->promise != NULL) scr_promise_release(base->promise);
   scr_als_ctx_release(base->als);
 #ifdef SCR_RC_AUDIT
   scr_note_coro_free();
@@ -262,10 +262,22 @@ void scr_coro_state_out(ScrCoroTaskState *st) {
   scr_als_active = st->prev_als;
 }
 
-/* The ready-queue entry of an ASYNC GENERATOR's frame, kept out of line so scr_coro_resume_entry below is what it was for every ordinary frame:
- * the frame answers a handle, not a promise, so the handle is held across the run (the body may drop the last consumer reference) and the four
+/* The ready-queue entry of an ASYNC GENERATOR's frame. It is a separate entry, selected by the PARK the emitter calls (scr_agen_coro_park /
+ * scr_agen_coro_hop below), so scr_coro_resume_entry and scr_coro_release carry no async-generator test at all and an ordinary frame pays
+ * exactly what it did. The frame answers a handle, not a promise, so the handle is held across the run (the body may drop the last consumer reference) and the four
  * outcomes (yielded, parked, done, threw) are read afterwards. */
-static __attribute__((noinline)) void scr_coro_resume_agen(ScrCoroBase *base) {
+static void scr_coro_release_agen(ScrCoroBase *base) {
+  /* scr_coro_release without the promise: an async generator frame's `promise` slot holds its handle, which this frame does not own. */
+  if (--base->rc != 0) return;
+  scr_als_ctx_release(base->als);
+#ifdef SCR_RC_AUDIT
+  scr_note_coro_free();
+#endif
+  free(base);
+}
+
+static void scr_coro_resume_agen(void *base_as_void) {
+  ScrCoroBase *base = (ScrCoroBase *)base_as_void;
   ScrCoroTaskState st;
   scr_coro_state_in(base, &st);
 #ifdef SCR_RC_AUDIT
@@ -280,15 +292,38 @@ static __attribute__((noinline)) void scr_coro_resume_agen(ScrCoroBase *base) {
   scr_agen_coro_resumed(base);
   scr_coro_state_out(&st);
   scr_gen_release(agen);
-  scr_coro_release(base);
+  scr_coro_release_agen(base);
+}
+
+static void scr_coro_poison_hop_agen(void *base_as_void) {
+  scr_queue_microtask_raw(&scr_coro_resume_agen, base_as_void, NULL);
+}
+
+/* scr_coro_park / scr_coro_hop for an async generator frame: the same two arms and the same one-push accounting, resuming through
+ * scr_coro_resume_agen. */
+ScrCoroParkKind scr_agen_coro_park(ScrCoroBase *base, ScrPromise *p) {
+  base->flags |= SCR_CORO_SUSPENDED;
+#ifdef SCR_RC_AUDIT
+  scr_note_coro_park();
+#endif
+  scr_coro_retain(base);
+  if (scr_coro_promise_park(p, &scr_coro_resume_agen, base, NULL)) return SCR_CORO_PARK_PENDING;
+  if (scr_coro_tick_poison()) scr_queue_microtask_raw(&scr_coro_poison_hop_agen, base, NULL);
+  else scr_queue_microtask_raw(&scr_coro_resume_agen, base, NULL);
+  return SCR_CORO_PARK_HOP;
+}
+
+void scr_agen_coro_hop(ScrCoroBase *base) {
+  base->flags |= SCR_CORO_SUSPENDED;
+#ifdef SCR_RC_AUDIT
+  scr_note_coro_park();
+#endif
+  scr_coro_retain(base);
+  scr_queue_microtask_raw(&scr_coro_resume_agen, base, NULL);
 }
 
 void scr_coro_resume_entry(void *base_as_void) {
   ScrCoroBase *base = (ScrCoroBase *)base_as_void;
-  if (__builtin_expect((base->flags & SCR_CORO_AGEN) != 0u, 0)) {
-    scr_coro_resume_agen(base);
-    return;
-  }
 
   /* INV-5, in. A fiber got both of these from scr_switch; a state machine
    * runs on whatever stack the loop is on, so the per-task state has to be

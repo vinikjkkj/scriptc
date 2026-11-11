@@ -53,6 +53,15 @@ import { poisonFinishArm, poisonSpillOrder, poisonTakeArm } from "./coro-poison.
 /** The frame's field name for a local. The naming lives in mangle.ts beside
  * every other mangler, and WHY it has to use mangleLocal's sanitiser rather
  * than a weaker one of its own is recorded there. */
+/** An ASYNC GENERATOR's frame parks and hops through its own entries (scr_agen_coro_park / scr_agen_coro_hop): they queue the generator's
+ * resume, which reads the handle's four outcomes, so the ordinary resume entry and release carry no generator test. Chosen here, at emission. */
+export function coroParkFn(fn: IrFunction): string {
+  return fn.generator !== undefined && fn.async === true ? "scr_agen_coro_park" : "scr_coro_park";
+}
+export function coroHopFn(fn: IrFunction): string {
+  return fn.generator !== undefined && fn.async === true ? "scr_agen_coro_hop" : "scr_coro_hop";
+}
+
 export function coroField(localId: string): string {
   return mangleCoroField(localId);
 }
@@ -399,7 +408,7 @@ export function emitCoroAwait(
   for (const line of coroSpill(E, fn, plan)) E.line(line);
   E.line(`sc_f->sc_awaited = ${promiseTemp.name};`);
   E.line(`sc_b->state = ${index + 1};`);
-  E.line(`scr_coro_park(sc_b, sc_f->sc_awaited);`);
+  E.line(`${coroParkFn(fn)}(sc_b, sc_f->sc_awaited);`);
   E.line(`return; /* to the scheduler — one ready_push charged */`);
   E.line(`${coroLabel(index)}:;`);
   for (const t of owned) E.line(`${t.name} = sc_f->sc_tmp_${t.name};`);
@@ -483,7 +492,7 @@ export function emitCoroUnionSuspend(
   spill();
   E.line(`sc_f->sc_awaited = ${peek}; /* BORROWED from the union, never released here */`);
   E.line(`sc_b->state = ${index + 1};`);
-  E.line(`scr_coro_park(sc_b, sc_f->sc_awaited);`);
+  E.line(`${coroParkFn(fn)}(sc_b, sc_f->sc_awaited);`);
   E.line(`return; /* to the scheduler -- one ready_push charged */`);
   E.indent--;
   E.line(`} else {`);
@@ -491,7 +500,7 @@ export function emitCoroUnionSuspend(
   spill();
   E.line(`sc_f->sc_awaited = NULL; /* the discriminator the resume reads */`);
   E.line(`sc_b->state = ${index + 1};`);
-  E.line(`scr_coro_hop(sc_b);`);
+  E.line(`${coroHopFn(fn)}(sc_b);`);
   E.line(`return; /* to the scheduler -- one ready_push charged */`);
   E.indent--;
   E.line(`}`);
@@ -524,7 +533,7 @@ export function emitCoroHop(E: CEmitter, fn: IrFunction, plan: StacklessPlan, in
   for (const t of owned) E.line(`sc_f->sc_tmp_${t.name} = ${t.name};`);
   for (const line of coroSpill(E, fn, plan)) E.line(line);
   E.line(`sc_b->state = ${index + 1};`);
-  E.line(`scr_coro_hop(sc_b);`);
+  E.line(`${coroHopFn(fn)}(sc_b);`);
   E.line(`return; /* to the scheduler -- one ready_push charged */`);
   E.line(`${coroLabel(index)}:;`);
   for (const t of owned) E.line(`${t.name} = sc_f->sc_tmp_${t.name};`);
