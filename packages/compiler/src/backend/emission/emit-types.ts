@@ -825,6 +825,10 @@ export function elemKindC(elem: IrType): string {
     // struct is a refcount and nothing else), so elemTraceC answers null
     // and the element CLASS is plain REF.
     case "date":
+    // Generator handles (sync and async): the ordinary refcounted ref with the scr_gen_retain_v/release_v adapters and no trace -- a handle holds
+    // its frame or fiber, never the array that holds the handle. `gens[i].next()` reads the element back through the same slot.
+    case "generator":
+    case "asyncGenerator":
     // A Blob[] or PromiseConstructor[] holds no edge either: REF, no trace.
     case "opaque":
     // Connection.incomingChannels in zapo is RTCDataChannel[]; the peer
@@ -856,8 +860,6 @@ export function elemKindC(elem: IrType): string {
     case "childStream":
     case "procStream":
     case "caught":
-    case "generator":
-    case "asyncGenerator":
     // WeakMap has no ScrArr element representation: mapTypeInner never
     // produces one, so `WeakMap[]` is refused in the frontend and this
     // arm is unreachable by construction, exactly like the others here.
