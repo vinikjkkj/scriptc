@@ -83,10 +83,11 @@
  * interned identity, and merging would move it).
  */
 import { appendFileSync } from "node:fs";
-import type { IrExpr, IrFunction, IrRecordShape, IrType, SrcLoc } from "../../ir/nodes.js";
+import type { IrExpr, IrFunction, IrRecordShape, IrStmt, IrType, SrcLoc } from "../../ir/nodes.js";
 import { canConvertToDyn, canDynCheckTo, DYN, internalSlotFields, typeKey, UNDEFINED_T } from "../../ir/nodes.js";
 import type { Lowerer } from "./lowerer.js";
 import { dynUndefinedExpr } from "./lowerer.js";
+import { findMethodOn } from "./lower-classes.js";
 import { viewShapeKey } from "../types.js";
 
 /** The cap, in FIELDS a member may gain. Decided on measurement: it takes
@@ -723,6 +724,30 @@ function collectDropNames(functions: IrFunction[], L: Lowerer, out: Map<string, 
  * shape reached only as another shape's FIELD type is otherwise left naming
  * an id the module no longer declares. */
 function substitute(L: Lowerer, functions: IrFunction[], remap: Map<string, string>, elided: Set<string>, adapt: Map<string, Map<string, IrType>>): void {
+  // A CLASS VIEW helper (`%obj.cview.<n>`) was built for the shape as it stood: when unification grew that shape (an optional member another literal
+  // carried), the view's own slot for each gained member the class holds no data field for is filled the way the helper fills its others (the bound
+  // method, or the undefined arm), before the ids move.
+  for (const fn of [...functions, ...L.liftedFns]) {
+    const h = L.classViewHelpers.get(fn.name);
+    if (h === undefined) continue;
+    const newId = remap.get(h.toId);
+    if (newId === undefined || newId === h.toId) continue;
+    const oldShape = L.shapes.get(h.toId);
+    const target = L.shapes.get(newId);
+    const info = L.classes.get(h.className);
+    const first = fn.body[0];
+    if (oldShape === undefined || target === undefined || info === undefined || first === undefined || first.kind !== "varDecl") continue;
+    const have = new Set(oldShape.fields.map((f) => f.name));
+    const extra: IrStmt[] = [];
+    for (const f of target.fields) {
+      if (have.has(f.name)) continue;
+      if (info.fields.has(f.name) && !findMethodOn(L, info, f.name)) continue; // a data field of the class: read in place
+      const slot = L.classViewOwnSlot(h.className, f, first.loc);
+      if (slot === null) throw new Error(`lowerer bug: class view ${h.className} cannot fill member ${f.name} of the unified shape`);
+      extra.push({ kind: "recordSet", obj: { kind: "varRef", localId: first.localId, type: { kind: "record", shapeId: h.toId }, loc: first.loc }, shapeId: h.toId, field: f.name, value: slot.value, own: true, loc: first.loc });
+    }
+    if (extra.length > 0) fn.body.splice(1, 0, ...extra);
+  }
   const seen = new Set<object>();
   /** Returns the node that should stand in this slot — itself, except where
    * an elided helper's call collapses to its argument. */
