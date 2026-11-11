@@ -461,6 +461,8 @@ ScrGen *scr_agen_coro_of(ScrCoroBase *base, void (*drop)(void *), void (*settle)
 void scr_agen_coro_yield_f64(ScrGen *g, double v);
 void scr_agen_coro_yield_bool(ScrGen *g, bool v);
 void scr_agen_coro_yield_ref(ScrGen *g, void *v, void (*release)(void *));
+ScrCoroParkKind scr_agen_coro_park(ScrCoroBase *base, ScrPromise *p);
+void scr_agen_coro_hop(ScrCoroBase *base);
 /** Reads the outcome of one run of an async generator frame (yielded / parked / done / threw), inside the INV-5 window. */
 void scr_agen_coro_resumed(ScrCoroBase *base);
 
