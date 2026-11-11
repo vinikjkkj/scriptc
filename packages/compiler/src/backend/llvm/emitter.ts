@@ -3717,22 +3717,27 @@ class LlEmitter {
     void plan;
     const frame = mangleCoroFrame(fn.name);
     const out: string[] = [layout.typeBody];
+    const isGen = fn.generator !== undefined;
     this.declare(`declare ptr @scr_coro_alloc(i64, ptr, i1 zeroext)`);
     this.declare(`declare ptr @scr_coro_spawn(ptr)`);
     const lifted = fn.captures !== undefined;
+    if (isGen) appendAll(out, this.emitCoroGenDrop(fn, layout));
     const params = [
       ...(lifted ? ["ptr %a_env"] : []),
       ...fn.params.map((p) => `${this.llType(p.type)} %a_${mangleLocal(p.localId)}`),
     ];
     const sp: string[] = [
-      `define internal ptr @${mangleAsyncSpawn(fn.name)}(${params.join(", ")}) ${FN_ATTRS} { ; stackless spawn ${fn.name}`,
+      `define internal ptr @${isGen ? mangleGenSpawn(fn.name) : mangleAsyncSpawn(fn.name)}(${params.join(", ")}) ${FN_ATTRS} { ; stackless spawn ${fn.name}`,
       `entry:`,
       // The frame pointer IS the base pointer: ScrCoroBase (or ScrCoroExc,
       // which embeds it first) is member 0, so &f->base == f and every
       // scr_coro_* call takes the same value. scr_coro.h states the property
       // for the C cast; it is the same property.
-      `  %f = call ptr @scr_coro_alloc(i64 ${coroFrameSizeOf(fn.name)}, ptr @${mangleCoroResume(fn.name)}, i1 zeroext ${layout.fat ? "true" : "false"})`,
+      isGen
+        ? `  %f = call ptr @scr_gen_coro_alloc(i64 ${coroFrameSizeOf(fn.name)}, ptr @${mangleCoroResume(fn.name)}, i1 zeroext ${layout.fat ? "true" : "false"})`
+        : `  %f = call ptr @scr_coro_alloc(i64 ${coroFrameSizeOf(fn.name)}, ptr @${mangleCoroResume(fn.name)}, i1 zeroext ${layout.fat ? "true" : "false"})`,
     ];
+    if (isGen) this.declare(`declare ptr @scr_gen_coro_alloc(i64, ptr, i1 zeroext)`);
     if (lifted) {
       // The frame holds +1 on the closure; every completion path drops it,
       // exactly as the fiber trampoline releases it after the body.
@@ -3771,6 +3776,30 @@ class LlEmitter {
         `  store ${fld.llType} %a_${mangleLocal(p.localId)}, ptr %p_${fld.index}`,
       );
     }
+    if (isGen) {
+      // The handle: nothing has run, the body starts at the first .next() (sync) / next request (async). The frame IS the argument pack, so the
+      // never-started teardown (the drop function) takes the frame.
+      if (fn.async === true) {
+        const settle = this.agenSettleThunkFor(
+          { kind: "asyncGenerator", yieldT: fn.generator!.yieldT, retT: fn.returnType, nextT: fn.generator!.nextT },
+          { kind: "record", shapeId: fn.generator!.resultShapeId! },
+        );
+        this.declare(`declare ptr @scr_agen_coro_of(ptr, ptr, ptr)`);
+        sp.push(`  %gh = call ptr @scr_agen_coro_of(ptr %f, ptr @${mangleGenDrop(fn.name)}, ptr @${settle})`);
+      } else {
+        this.declare(`declare ptr @scr_gen_of_coro(ptr, ptr)`);
+        sp.push(`  %gh = call ptr @scr_gen_of_coro(ptr %f, ptr @${mangleGenDrop(fn.name)})`);
+      }
+      sp.push(
+        `  %pgen = getelementptr inbounds %${frame}, ptr %f, i64 0, i32 ${layout.genIndex}`,
+        `  store ptr %gh, ptr %pgen`,
+        `  ret ptr %gh`,
+        `}`,
+        ``,
+      );
+      appendAll(out, sp);
+      return out;
+    }
     sp.push(
       `  %pr = call ptr @scr_coro_spawn(ptr %f)`,
       `  ret ptr %pr`,
@@ -3779,6 +3808,41 @@ class LlEmitter {
     );
     appendAll(out, sp);
     return out;
+  }
+
+  /** The never-started teardown of a frame-backed generator: the frame IS the argument pack, so this drops the +1 each parameter (and the closure
+   * environment) arrived with, WITHOUT freeing the frame (the handle frees it). Mirrors emit-gen-coro.ts's emitted drop. */
+  private emitCoroGenDrop(fn: IrFunction, layout: { fields: Map<string, { index: number; llType: string }> }): string[] {
+    const frame = mangleCoroFrame(fn.name);
+    const dr: string[] = [`define internal void @${mangleGenDrop(fn.name)}(ptr %fp) ${FN_ATTRS} {`, `entry:`];
+    if (fn.captures !== undefined) {
+      this.declare(`declare void @scr_closure_release(ptr)`);
+      dr.push(
+        `  %denvp = getelementptr inbounds %${frame}, ptr %fp, i64 0, i32 1`,
+        `  %denv = load ptr, ptr %denvp`,
+        `  call void @scr_closure_release(ptr %denv)`,
+      );
+    }
+    for (const p of fn.params) {
+      const fld = layout.fields.get(p.localId);
+      if (fld === undefined) continue;
+      const local = this.currentLocalOf(fn, p.localId);
+      const boxed = local?.boxed === true;
+      if (!boxed && !isRefCounted(p.type)) continue;
+      const m = mangleLocal(p.localId);
+      dr.push(
+        `  %dp_${m} = getelementptr inbounds %${frame}, ptr %fp, i64 0, i32 ${fld.index}`,
+        `  %dv_${m} = load ptr, ptr %dp_${m}`,
+      );
+      if (boxed) {
+        this.declare(`declare void @scr_box_release(ptr)`);
+        dr.push(`  call void @scr_box_release(ptr %dv_${m})`);
+      } else {
+        dr.push(`  call void ${releaseSym(this, p.type)}(ptr %dv_${m})`);
+      }
+    }
+    dr.push(`  ret void`, `}`, ``);
+    return dr;
   }
 
   /** `fn.locals` lookup that does not disturb `currentLocals` — the
@@ -3989,6 +4053,13 @@ class LlEmitter {
     const out: string[] = [];
     for (const fn of this.mod.functions) {
       if (fn.generator === undefined) continue;
+      // A generator that took the stackless lowering gets a FRAME type, a frame-backed spawn and a drop; it must not also get the argument pack and
+      // fiber trampoline, whose body call names a function emitFunction no longer emits for it.
+      const coroGen = this.coroLoweredByFn.get(fn.name);
+      if (coroGen !== undefined) {
+        appendAll(out, this.emitCoroScaffolding(fn, coroGen));
+        continue;
+      }
       const isAsyncGen = fn.async === true;
       const pack = mangleArgPack(fn.name);
       const lifted = fn.captures !== undefined;
@@ -5249,9 +5320,11 @@ class LlEmitter {
     // here. The C lowering calls it as a statement and discards the value; the
     // declare must still spell the return type correctly or the call ABI is
     // wrong on the callee side.
-    this.declare(`declare i32 @scr_coro_park(ptr, ptr)`);
+    // An async generator's frame parks through its own entry (see scr_coro.c); spelled with both literals so the ABI scanner can read them.
+    const parkSym = fn.generator !== undefined && fn.async === true ? "scr_agen_coro_park" : "scr_coro_park";
+    this.declare(`declare i32 @${parkSym}(ptr, ptr)`);
     const pk = B.tmp();
-    B.line(`${pk} = call i32 @scr_coro_park(ptr %sc_b, ptr ${pr.name})`);
+    B.line(`${pk} = call i32 @${parkSym}(ptr %sc_b, ptr ${pr.name})`);
     B.terminate("ret void ; to the scheduler -- one ready_push charged");
 
     // ── the far side ──────────────────────────────────────────────────────
@@ -5292,6 +5365,63 @@ class LlEmitter {
     B.line(`call void @scr_promise_release(ptr ${aw})`);
     B.line(`store ptr null, ptr ${pa2}`);
     return out;
+  }
+
+  /** A GENERATOR's yield on a frame: the value leaves the RC frame into the handle's OUT slot, the frame's live state is spilled (the same carry as
+   * a park), the state is written and the resume function RETURNS to the consumer; the label on the far side reloads and takes the resumed
+   * `.next(v)` argument out of the handle's IN slot. An async generator's arm additionally settles the in-flight request (or schedules the native
+   * sink); the operand-await hop it needs is a separate `async.hop` point the lowering emits ahead of the yield. */
+  private emitCoroYield(fn: IrFunction, node: object, loc: SrcLoc, v: LlValue, yt: IrType, resultType: IrType, isAsync: boolean): LlValue {
+    const B = this.B;
+    const layout = this.currentCoroLayout!;
+    const index = this.coroDrawState(fn, node, "yieldExpr", loc, "yield");
+    if (isRefCounted(yt)) this.moveTemp(v); // the OUT slot takes ownership
+    this.emitCoroTempSpill(index);
+    this.emitCoroSpill();
+    this.emitCoroSlotSpill(index);
+    const g = B.tmp();
+    B.line(`${g} = load ptr, ptr ${this.coroField(layout.genIndex, "sc_gen")}`);
+    // Spelled in full (the ABI scanner reads this file as text).
+    const Y = isAsync
+      ? { f64: "scr_agen_coro_yield_f64", bool: "scr_agen_coro_yield_bool", ref: "scr_agen_coro_yield_ref" }
+      : { f64: "scr_gen_coro_yield_f64", bool: "scr_gen_coro_yield_bool", ref: "scr_gen_coro_yield_ref" };
+    if (yt.kind === "f64") {
+      this.declare(`declare void @${Y.f64}(ptr, double)`);
+      B.line(`call void @${Y.f64}(ptr ${g}, double ${v.name})`);
+    } else if (yt.kind === "bool") {
+      this.declare(`declare void @${Y.bool}(ptr, i1 zeroext)`);
+      B.line(`call void @${Y.bool}(ptr ${g}, i1 ${v.name})`);
+    } else {
+      this.declare(`declare void @${Y.ref}(ptr, ptr, ptr)`);
+      B.line(`call void @${Y.ref}(ptr ${g}, ptr ${v.name}, ptr ${vAdapters(this, yt).release})`);
+    }
+    const ps = this.coroStateField();
+    B.line(`store i32 ${index + 1}, ptr ${ps}`);
+    B.terminate("ret void ; to the CONSUMER -- no ready push, no microtask turn");
+
+    // -- the far side ------------------------------------------------------
+    B.startBlock(coroLabel(index));
+    B.parkBoundary();
+    this.emitCoroTempReload(index);
+    this.emitCoroReload();
+    this.emitCoroSlotReload(index);
+    if (resultType.kind === "void") return { name: "", type: resultType };
+    const g2 = B.tmp();
+    B.line(`${g2} = load ptr, ptr ${this.coroField(layout.genIndex, "sc_gen")}`);
+    const t = B.tmp();
+    if (resultType.kind === "f64") {
+      this.declare(`declare double @scr_gen_coro_take_in_f64(ptr)`);
+      B.line(`${t} = call double @scr_gen_coro_take_in_f64(ptr ${g2})`);
+      return { name: t, type: resultType };
+    }
+    if (resultType.kind === "bool") {
+      this.declare(`declare zeroext i1 @scr_gen_coro_take_in_bool(ptr)`);
+      B.line(`${t} = call zeroext i1 @scr_gen_coro_take_in_bool(ptr ${g2})`);
+      return { name: t, type: resultType };
+    }
+    this.declare(`declare ptr @scr_gen_coro_take_in_ref(ptr)`);
+    B.line(`${t} = call ptr @scr_gen_coro_take_in_ref(ptr ${g2})`);
+    return this.own({ name: t, type: resultType });
   }
 
   /** The bare microtask hop at a lowerable suspending libCall.
@@ -5337,8 +5467,9 @@ class LlEmitter {
     this.emitCoroSlotSpill(index);
     const ps = this.coroStateField();
     B.line(`store i32 ${index + 1}, ptr ${ps}`);
-    this.declare(`declare void @scr_coro_hop(ptr)`);
-    B.line(`call void @scr_coro_hop(ptr %sc_b)`);
+    const hopSym = fn.generator !== undefined && fn.async === true ? "scr_agen_coro_hop" : "scr_coro_hop";
+    this.declare(`declare void @${hopSym}(ptr)`);
+    B.line(`call void @${hopSym}(ptr %sc_b)`);
     B.terminate("ret void ; to the scheduler -- one ready_push charged");
 
     // -- the far side ------------------------------------------------------
@@ -5472,17 +5603,19 @@ class LlEmitter {
     const peek = this.unionPeek(u.name);
     const pa = this.coroField(layout.awaitedIndex, "sc_awaited");
     B.line(`store ptr ${peek}, ptr ${pa} ; BORROWED from the union, never released here`);
-    this.declare(`declare i32 @scr_coro_park(ptr, ptr)`);
+    const parkSymU = fn.generator !== undefined && fn.async === true ? "scr_agen_coro_park" : "scr_coro_park";
+    this.declare(`declare i32 @${parkSymU}(ptr, ptr)`);
     const pk = B.tmp();
-    B.line(`${pk} = call i32 @scr_coro_park(ptr %sc_b, ptr ${peek})`);
+    B.line(`${pk} = call i32 @${parkSymU}(ptr %sc_b, ptr ${peek})`);
     B.terminate("ret void ; to the scheduler -- one ready_push charged");
 
     // ── the unit arm: a bare microtask hop ────────────────────────────────
     B.startBlock(lh);
     const pah = this.coroField(layout.awaitedIndex, "sc_awaited");
     B.line(`store ptr null, ptr ${pah} ; the discriminator the resume reads`);
-    this.declare(`declare void @scr_coro_hop(ptr)`);
-    B.line(`call void @scr_coro_hop(ptr %sc_b)`);
+    const hopSymU = fn.generator !== undefined && fn.async === true ? "scr_agen_coro_hop" : "scr_coro_hop";
+    this.declare(`declare void @${hopSymU}(ptr)`);
+    B.line(`call void @${hopSymU}(ptr %sc_b)`);
     B.terminate("ret void ; to the scheduler -- one ready_push charged");
 
     // ── the far side: ONE label, ONE boundary, shared by both arms ────────
@@ -5569,6 +5702,27 @@ class LlEmitter {
       const env = this.coroEnvReload();
       B.line(`call void @scr_closure_release(ptr ${env})`);
     }
+    if (fn.generator !== undefined) {
+      // A GENERATOR's completion parks the value in the handle's OUT slot and marks the frame DONE; the handle (sync) or the resume's outcome
+      // read (async) settles whatever is waiting. Names spelled in full for the ABI scanner.
+      const g = B.tmp();
+      B.line(`${g} = load ptr, ptr ${this.coroField(this.currentCoroLayout!.genIndex, "sc_gen")}`);
+      if (v === null || retType.kind === "void") {
+        this.declare(`declare void @scr_gen_coro_finish_void(ptr)`);
+        B.line(`call void @scr_gen_coro_finish_void(ptr ${g})`);
+      } else if (retType.kind === "f64") {
+        this.declare(`declare void @scr_gen_coro_finish_f64(ptr, double)`);
+        B.line(`call void @scr_gen_coro_finish_f64(ptr ${g}, double ${v.name})`);
+      } else if (retType.kind === "bool") {
+        this.declare(`declare void @scr_gen_coro_finish_bool(ptr, i1 zeroext)`);
+        B.line(`call void @scr_gen_coro_finish_bool(ptr ${g}, i1 ${v.name})`);
+      } else {
+        this.declare(`declare void @scr_gen_coro_finish_ref(ptr, ptr, ptr)`);
+        B.line(`call void @scr_gen_coro_finish_ref(ptr ${g}, ptr ${v.name}, ptr ${vAdapters(this, retType).release})`);
+      }
+      B.terminate("ret void");
+      return;
+    }
     if (v === null || retType.kind === "void") {
       this.declare(`declare void @scr_coro_finish_void(ptr)`);
       B.line(`call void @scr_coro_finish_void(ptr %sc_b)`);
@@ -5610,6 +5764,14 @@ class LlEmitter {
       this.declare(`declare void @scr_closure_release(ptr)`);
       const env = this.coroEnvReload();
       B.line(`call void @scr_closure_release(ptr ${env})`);
+    }
+    if (fn.generator !== undefined) {
+      const g = B.tmp();
+      B.line(`${g} = load ptr, ptr ${this.coroField(this.currentCoroLayout!.genIndex, "sc_gen")}`);
+      this.declare(`declare void @scr_gen_coro_finish_throw(ptr)`);
+      B.line(`call void @scr_gen_coro_finish_throw(ptr ${g})`);
+      B.terminate("ret void");
+      return;
     }
     this.declare(`declare void @scr_coro_finish_throw(ptr)`);
     B.line(`call void @scr_coro_finish_throw(ptr %sc_b)`);
@@ -11151,6 +11313,13 @@ class LlEmitter {
         if (e.value === null) throw new Error("llvm emitter bug: yieldExpr with no operand (frontend fills undefined)");
         const v = this.emitExpr(e.value);
         const yt = e.value.type;
+        if (this.currentCoro !== null) {
+          // STACKLESS: spill, hand the value to the handle's OUT slot (an async generator's arm also settles the in-flight request) and RETURN to
+          // the consumer; the resume label takes the .next(v) argument out of the IN slot.
+          const out = this.emitCoroYield(this.fnByName.get(this.currentFnName)!, e, e.loc, v, yt, e.type, e.async === true);
+          this.emitPendingCheck();
+          return out;
+        }
         if (yt.kind === "f64") {
           this.declare(`declare void @${Y.f64}(double)`);
           B.line(`call void @${Y.f64}(double ${v.name})`);
