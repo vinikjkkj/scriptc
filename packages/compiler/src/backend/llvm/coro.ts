@@ -213,6 +213,8 @@ export interface CoroFrameLayout {
   fields: Map<string, CoroFrameField>;
   /** The GEP index of `sc_awaited`. */
   awaitedIndex: number;
+  /** Index of the `sc_gen` field (the frame's generator handle), or -1 for a function that is not a generator. */
+  genIndex: number;
   /** True when the base is `%ScrCoroExc` rather than `%ScrCoroBase`. */
   fat: boolean;
   /** The ordered local ids the spill and the reload walk. */
@@ -287,6 +289,12 @@ export function coroFrameLayout(
   // in the middle would renumber `sc_awaited` on the second pass -- the same
   // GEP index addressing a different member, which on this host is a load of
   // the wrong field of a plausible type rather than any kind of error.
+  let genIndex = -1;
+  if (fn.generator !== undefined) {
+    genIndex = members.length;
+    members.push("ptr");
+    comments.push("sc_gen");
+  }
   const tempFields = new Map<string, CoroFrameField>();
   for (const t of tempSpills) {
     tempFields.set(t.name, { index: members.length, llType: t.llType, comment: `sc_tmp_${t.name.slice(1)}` });
@@ -308,6 +316,7 @@ export function coroFrameLayout(
     typeBody: `%${mangleCoroFrame(fn.name)} = type { ${members.join(", ")} } ; ${comments.join(", ")}`,
     fields,
     awaitedIndex,
+    genIndex,
     fat,
     localIds,
     tempFields,
@@ -374,11 +383,11 @@ export const LLVM_LOWERABLE_POINT_KIND_LIST = [
   // one unit arm is still refused, at emission, with its own census reason --
   // see emitCoroUnionAwait.
   "awaitUnionExpr",
-] as const satisfies readonly SuspensionPointKind[];
-
-export const LLVM_UNLOWERABLE_POINT_KIND_LIST = [
+  // A generator's yield: spill, park the value in the handle's OUT slot, return to the consumer (emitCoroYield).
   "yieldExpr",
 ] as const satisfies readonly SuspensionPointKind[];
+
+export const LLVM_UNLOWERABLE_POINT_KIND_LIST = [] as const satisfies readonly SuspensionPointKind[];
 
 type _Lowerable = (typeof LLVM_LOWERABLE_POINT_KIND_LIST)[number];
 type _Unlowerable = (typeof LLVM_UNLOWERABLE_POINT_KIND_LIST)[number];
@@ -768,8 +777,8 @@ export function llvmCoroPlans(
  * condition N buy?") is answered by running the compiler rather than by
  * reading this file. */
 export function coroRefusalReason(fn: IrFunction, plan: StacklessPlan): string | null {
-  if (fn.generator !== undefined) return "generator";
-  if (fn.async !== true) return "not-async";
+  // A GENERATOR (sync or async) is lowered as a frame-backed handle, mirroring the C lane (emit-gen-coro.ts); any other non-async function is not.
+  if (fn.generator === undefined && fn.async !== true) return "not-async";
   // A PLAN WITH NO POINT IS ADMITTED, and the paragraph that used to stand
   // here refused it on an argument that has since been retired by its own
   // premise. It said such a plan "cannot arrive today -- suspensionLiveness
@@ -864,10 +873,13 @@ export type { IrStmt };
  * emitter did. Reading the rendered body is an independent measurement of what
  * came out, so a site emitted twice, or a state drawn with no site emitted at
  * all, moves one side and not the other. */
-export function coroSuspensionSites(body: string): { parks: number; hops: number } {
+export function coroSuspensionSites(body: string): { parks: number; hops: number; yields: number } {
   return {
-    parks: (body.match(/call i32 @scr_coro_park\(/g) ?? []).length,
-    hops: (body.match(/call void @scr_coro_hop\(/g) ?? []).length,
+    // An async generator's frame parks and hops through its own entries (scr_agen_coro_park / scr_agen_coro_hop); a generator's YIELD draws a
+    // state and a resume label too but returns to the CONSUMER, not the scheduler, so it is counted on its own and joins the sum.
+    parks: (body.match(/call i32 @scr_(?:agen_)?coro_park\(/g) ?? []).length,
+    hops: (body.match(/call void @scr_(?:agen_)?coro_hop\(/g) ?? []).length,
+    yields: (body.match(/call void @scr_(?:a)?gen_coro_yield_(?:f64|bool|ref)\(/g) ?? []).length,
   };
 }
 
@@ -906,11 +918,11 @@ export function coroCheckSuspensionSites(
   statesDrawn: number,
   unionPoints: number,
 ): void {
-  const { parks, hops } = coroSuspensionSites(body);
+  const { parks, hops, yields } = coroSuspensionSites(body);
   const expected = statesDrawn + unionPoints;
-  if (parks + hops !== expected) {
+  if (parks + hops + yields !== expected) {
     throw new Error(
-      `llvm emitter bug: ${fnName} emitted ${parks} park(s) and ${hops} hop(s) -- ${parks + hops} ` +
+      `llvm emitter bug: ${fnName} emitted ${parks} park(s), ${hops} hop(s) and ${yields} yield(s) -- ${parks + hops + yields} ` +
         `suspension call(s) -- but drew ${statesDrawn} state(s) with ${unionPoints} two-armed ` +
         `point(s), which requires ${expected}. Too few means a point drew a state and a resume ` +
         `label but never returns to the scheduler: every value stays correct and the TURN COUNT ` +
