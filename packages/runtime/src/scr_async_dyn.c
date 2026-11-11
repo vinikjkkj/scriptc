@@ -11,6 +11,7 @@
  * and process.emitWarning's argument grammar. The stderr report and the
  * timer delay warnings live in scr_async.c, always linked. */
 #include "scr_runtime.h"
+#include "scr_coro.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -830,6 +831,13 @@ ScrDyn *scr_caught_to_dyn(const ScrCaught *c) {
 ScrDyn *scr_await_dyn(ScrPromise *p) {
   if (!scr_promise_await_settled(p)) return NULL;
   return scr_dyn_from_settled(p);
+}
+
+/* The stackless await's take for a dyn operand adopted through Promise.resolve(v) (dyn.adoptPromise): mark the settlement observed, re-throw a
+ * rejection into the active cell (NULL), else the fulfillment as a dyn (+1) whatever payload kind the promise carries. */
+ScrDyn *scr_coro_take_dyn(ScrCoroBase *base, ScrPromise *p) {
+  (void)base;
+  return scr_promise_settled_take(p) ? scr_dyn_from_settled(p) : NULL;
 }
 
 /* The fulfillment value of an already-settled, fulfilled promise as a dyn (+1) -- the part of scr_await_dyn after

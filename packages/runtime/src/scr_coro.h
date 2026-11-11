@@ -222,6 +222,8 @@ double scr_coro_take_f64(ScrCoroBase *base, ScrPromise *p);
 bool   scr_coro_take_bool(ScrCoroBase *base, ScrPromise *p);
 void  *scr_coro_take_ref(ScrCoroBase *base, ScrPromise *p);  /* +1, NULL on throw */
 void   scr_coro_take_void(ScrCoroBase *base, ScrPromise *p);
+/** A dyn operand adopted through Promise.resolve(v): the fulfillment as a dyn (+1), whatever payload kind the promise carries (scr_async_dyn.c). */
+ScrDyn *scr_coro_take_dyn(ScrCoroBase *base, ScrPromise *p);
 
 /* ---- the window onto ScrPromise (implemented in scr_async.c) ----------
  * ScrPromise is opaque outside scr_async.c; these are the only internals a
