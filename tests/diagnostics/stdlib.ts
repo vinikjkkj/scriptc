@@ -15,7 +15,7 @@ const read = readFileSync;
 const cwd = process.cwd;
 const p = process;
 const env = process.env;
-const mx = Math.max;
+// Math.max as a value is native now (corpus 24944), so it no longer belongs in this refusal list.
 const upper = "abc".toUpperCase;
 const fix = (1.5).toFixed;
 const pf = parseFloat;

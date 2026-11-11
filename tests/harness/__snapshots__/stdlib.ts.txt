@@ -21,16 +21,9 @@ stdlib.ts:15:13 - error SC1090: process methods as values (call 'cwd' directly) 
      |             ^~~~~~~~~~~
   16 | const p = process;
 
-stdlib.ts:18:12 - error SC1090: Math methods as values (call 'max' directly) are not supported yet
-
-  17 | const env = process.env;
-  18 | const mx = Math.max;
-     |            ^~~~~~~~
-  19 | const upper = "abc".toUpperCase;
-
 stdlib.ts:19:15 - error SC1090: string methods as values (call 'toUpperCase' directly) are not supported yet
 
-  18 | const mx = Math.max;
+  18 | // Math.max as a value is native now (corpus 24944), so it no longer belongs in this refusal list.
   19 | const upper = "abc".toUpperCase;
      |               ^~~~~~~~~~~~~~~~~
   20 | const fix = (1.5).toFixed;
