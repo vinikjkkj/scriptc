@@ -3234,6 +3234,11 @@ ScrExcCell *scr_exc_swap_cell(ScrExcCell *cell); /* NULL = main's cell */
 ScrExcCell *scr_exc_current_cell(void);          /* the ACTIVE cell */
 
 bool scr_exc_pending(void);
+/* The pending test is on the hot path of every may-throw call site, so it is read INLINE: the active cell's
+ * kind. (An out-of-line call here measured +40% on a recursive scalar function.) The cell pointer is the one
+ * scr_exc_swap_cell maintains. */
+extern ScrExcCell *scr_exc_cur_cell;
+#define scr_exc_pending() (scr_exc_cur_cell->kind != SCR_EXC_NONE)
 
 void scr_throw_f64(double v);
 void scr_throw_bool(bool v);
