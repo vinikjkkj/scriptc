@@ -22609,6 +22609,43 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
     return false;
   }
 
+  /** `x instanceof Array` / `x instanceof Object`; see the call site. */
+  function lowerArrayObjectInstanceOf(L: Lowerer, expr: ts.BinaryExpression, loc: SrcLoc, which: "Array" | "Object"): IrExpr {
+    const caught = L.caughtLocalOf(expr.left);
+    const operand: IrExpr = caught
+      ? { kind: "caughtToDyn", value: { kind: "varRef", localId: caught.id, type: CAUGHT, loc }, type: DYN, loc }
+      : L.lowerExpr(expr.left);
+    const bool = (value: boolean): IrExpr => ({ kind: "boolLit", value, type: BOOL, loc });
+    const tmp = L.declareHiddenLocal("%instAO", operand.type);
+    const ref = (): IrExpr => ({ kind: "varRef", localId: tmp.id, type: operand.type, loc });
+    const bind: IrStmt = { kind: "varDecl", localId: tmp.id, init: operand, loc };
+    const done = (result: IrExpr): IrExpr => ({ kind: "seqExpr", stmts: [bind], result, type: BOOL, loc });
+    const armTrue = (t: IrType): boolean => {
+      if (which === "Array") return t.kind === "array" || (t.kind === "record" && L.shapes.get(t.shapeId)?.tuple === true);
+      return !["f64", "string", "bool", "bigint", "undefinedT", "nullT", "void", "symbol", "dyn", "union"].includes(t.kind);
+    };
+    if (operand.type.kind === "dyn") {
+      if (which === "Array") return done({ kind: "dynTest", test: "array", value: ref(), type: BOOL, loc });
+      // typeof "function", or typeof "object" and not null.
+      const isFn: IrExpr = { kind: "dynTest", test: "function", value: ref(), type: BOOL, loc };
+      const isObj: IrExpr = { kind: "dynTest", test: "object", value: ref(), type: BOOL, loc };
+      const notNull: IrExpr = { kind: "dynTest", test: "null", negated: true, value: ref(), type: BOOL, loc };
+      const objNotNull: IrExpr = { kind: "logical", op: "&&", left: isObj, right: notNull, type: BOOL, loc };
+      return done({ kind: "logical", op: "||", left: isFn, right: objNotNull, type: BOOL, loc });
+    }
+    if (operand.type.kind === "union") {
+      const arms = L.unions.get(operand.type.unionId)?.arms ?? [];
+      let result: IrExpr | null = null;
+      arms.forEach((arm, tag) => {
+        if (!armTrue(arm)) return;
+        const test: IrExpr = { kind: "unionIsTag", unionId: (operand.type as { unionId: string }).unionId, tag, negated: false, value: ref(), type: BOOL, loc };
+        result = result === null ? test : { kind: "logical", op: "||", left: result, right: test, type: BOOL, loc };
+      });
+      return done(result ?? bool(false));
+    }
+    return done(bool(armTrue(operand.type)));
+  }
+
   export function lowerInstanceOf(L: Lowerer, expr: ts.BinaryExpression, loc: SrcLoc): IrExpr {
     // `x instanceof P` where P is a declaration-file class paired with the
     // program's constructor (the require's module.exports value). The class is
@@ -22626,6 +22663,12 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
           pairedLeft.type.kind === "f64" || pairedLeft.type.kind === "string" || pairedLeft.type.kind === "bool") {
         return { kind: "seqExpr", stmts: [exprStmt], result: { kind: "boolLit", value: false, type: BOOL, loc }, type: BOOL, loc };
       }
+    }
+    // `x instanceof Array` / `x instanceof Object` (the stdlib globals): Array answers for arrays and tuples, Object for every non-null object-like
+    // value (arrays, records, class instances, functions, collections, promises...) and never for a primitive or a unit. A dyn operand asks the
+    // dyn kind tests, a static operand folds per type (per arm for a union), a catch binding converts to its dyn value first.
+    if (ts.isIdentifier(expr.right) && (expr.right.text === "Array" || expr.right.text === "Object") && L.isStdlibGlobal(expr.right, expr.right.text)) {
+      return lowerArrayObjectInstanceOf(L, expr, loc, expr.right.text);
     }
     // `x instanceof net.Socket` over a union with a netSocket arm — the
     // h2 compat 'connect' narrowing (lower-server.ts): a union tag test.
