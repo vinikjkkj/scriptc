@@ -79,6 +79,9 @@ enum {
    * the body", which are the two ways a resume function can return and which
    * need opposite handling. */
   SCR_CORO_SUSPENDED = 1u << 3,
+  /** This frame is an ASYNC GENERATOR's: its `promise` slot holds the ScrGen handle (not a promise, never released as one), and a resume's
+   * outcome is read by scr_agen_coro_resumed instead of settling a promise. */
+  SCR_CORO_AGEN = 1u << 5,
 };
 
 /* The LEAN frame: 40 bytes on x86_64, and it is what D1-D3 suspension
@@ -450,5 +453,15 @@ typedef struct {
 
 void scr_coro_state_in(ScrCoroBase *base, ScrCoroTaskState *st);
 void scr_coro_state_out(ScrCoroTaskState *st);
+
+/* ---- ASYNC GENERATORS ON A FRAME (see scr_async.c) ---- */
+ScrGen *scr_agen_coro_of(ScrCoroBase *base, void (*drop)(void *), void (*settle)(ScrGen *, ScrPromise *));
+/** The yield arms: park the value in OUT, settle the in-flight request (or schedule the native sink), mark the frame YIELDED. The operand
+ * await hop is a separate suspension the lowering emits ahead of the yield. */
+void scr_agen_coro_yield_f64(ScrGen *g, double v);
+void scr_agen_coro_yield_bool(ScrGen *g, bool v);
+void scr_agen_coro_yield_ref(ScrGen *g, void *v, void (*release)(void *));
+/** Reads the outcome of one run of an async generator frame (yielded / parked / done / threw), inside the INV-5 window. */
+void scr_agen_coro_resumed(ScrCoroBase *base);
 
 #endif /* SCR_CORO_H */

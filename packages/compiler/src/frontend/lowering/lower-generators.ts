@@ -88,7 +88,24 @@ export function lowerYield(L: Lowerer, expr: ts.YieldExpression): IrExpr {
   // pick the yield helper from it, so neither backend can fall back to
   // the synchronous one by forgetting to consult the enclosing function.
   const isAsyncGen = L.ctx.isAsync === true;
-  return { kind: "yieldExpr", value, ...(isAsyncGen ? { async: true as const } : {}), type, loc };
+  if (isAsyncGen) {
+    // JS's AsyncGeneratorYield awaits its operand: one microtask turn before the request promise settles. That turn is an EXPLICIT
+    // `async.hop` here (operand evaluated into a local, hop, then the yield), so every lane takes it the same way -- the fiber lane through
+    // its hop libCall, the stackless lane as an ordinary suspension point -- and the runtime's yield arm no longer takes it itself.
+    const tmp = L.declareHiddenLocal("%ayield", value.type);
+    const ref: IrExpr = { kind: "varRef", localId: tmp.id, type: value.type, loc };
+    return {
+      kind: "seqExpr",
+      stmts: [
+        { kind: "varDecl", localId: tmp.id, init: value, loc },
+        { kind: "exprStmt", expr: { kind: "libCall", fn: "async.hop", args: [], type: VOID, loc }, loc },
+      ],
+      result: { kind: "yieldExpr", value: ref, async: true as const, type, loc },
+      type,
+      loc,
+    };
+  }
+  return { kind: "yieldExpr", value, type, loc };
 }
 
 /** True when this call's VALUE is consumed by an `await` right here —
