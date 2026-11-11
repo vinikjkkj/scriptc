@@ -3367,7 +3367,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
           ib_cstr(&nb, " {}");
           return ib_take(&nb);
         }
-        return d->null_proto ? scr_str_new("[Object: null prototype] {}", 27)
+        return d->null_proto ? scr_str_new(d->module_ns ? "[Module: null prototype] {}" : "[Object: null prototype] {}", 27)
                              : scr_str_new("{}", 2);
       }
       if (recurse > depth) {
@@ -3378,7 +3378,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
           ib_char(&nb, ']');
           return insp_sty(ib_take(&nb), INSP_STY_SPECIAL);
         }
-        return d->null_proto ? insp_sty_lit("[Object: null prototype]", INSP_STY_SPECIAL)
+        return d->null_proto ? (d->module_ns ? insp_sty_lit("[Module: null prototype]", INSP_STY_SPECIAL) : insp_sty_lit("[Object: null prototype]", INSP_STY_SPECIAL))
                              : insp_sty_lit("[Object]", INSP_STY_SPECIAL);
       }
       insp_begin_obj(recurse + 1);
@@ -3451,7 +3451,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         ib_cstr(&pb, cn);
         ib_cstr(&pb, " {");
       } else if (d->null_proto) {
-        ib_cstr(&pb, "[Object: null prototype] {");
+        ib_cstr(&pb, d->module_ns ? "[Module: null prototype] {" : "[Object: null prototype] {"); /* a namespace is "Module" (its Symbol.toStringTag) */
       } else {
         ib_cstr(&pb, "{");
       }
