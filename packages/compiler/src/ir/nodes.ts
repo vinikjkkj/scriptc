@@ -12660,7 +12660,11 @@ const ENGINE_FN_MEMO = new WeakMap<IrModule, boolean>();
 interface IrUp { node: Record<string, unknown>; field: string; index: number; up: IrUp | null }
 
 const CTOR_BENIGN_KEYS = new Set(["name", "length", "prototype", "displayName"]);
-const CTOR_BENIGN_METHODS = new Set(["toString", "hasOwnProperty", "isPrototypeOf", "propertyIsEnumerable", "valueOf", "toLocaleString"]);
+/** A method called ON the value never runs text unless it is one of the four that reach the Function constructor's behavior: `call`, `apply`
+ * and `bind` (Function.call(null, "return 1") builds a function) and `constructor` (Function.constructor is Function). Every other method
+ * name (toString, hasOwnProperty, a static like `alloc`) answers a string, a boolean, or throws "is not a function", none of which is the
+ * Function constructor again. `valueOf` returns the receiver itself, so it passes the carrier on instead of ending it. */
+const CTOR_TEXT_METHODS = new Set(["call", "apply", "bind", "constructor"]);
 
 /** Where does a value that might be the Function constructor GO? `Object.getPrototypeOf(f).constructor` of a function yields the Function
  * constructor value, and CALLING it with text is the one thing here that needs the embedded engine (an `eval`-class use, which is allowed and
@@ -12682,13 +12686,19 @@ function ctorCarrierUse(at: IrUp | null): "benign" | "escapes" | { taint: string
     if ((k === "assign" || k === "assignExpr") && up.field === "value") return { taint: String(p["localId"]) };
     if (k === "exprStmt") return "benign";
     if (k === "dynTest" || k === "dynScalarEq") return "benign"; // a type test, an identity comparison
-    if (k === "libCall" && (p["fn"] === "dyn.instanceOf" || p["fn"] === "dyn.typeof")) return "benign";
+    // instanceOf/typeof answer a boolean/string about the value; dyn.toString is `value.toString()` (a string, never the value again)
+    if (k === "libCall" && (p["fn"] === "dyn.instanceOf" || p["fn"] === "dyn.typeof" || p["fn"] === "dyn.toString")) return "benign";
     if (k === "dynKeyGet" && up.field === "value") {
       const key = p["key"] as { kind?: unknown; value?: unknown } | undefined;
       return key?.kind === "strLit" && typeof key.value === "string" && CTOR_BENIGN_KEYS.has(key.value) ? "benign" : "escapes";
     }
     if (k === "dynInvoke") {
-      if (up.field === "recv") return typeof p["method"] === "string" && CTOR_BENIGN_METHODS.has(p["method"]) ? "benign" : "escapes";
+      if (up.field === "recv") {
+        const m = p["method"];
+        if (typeof m !== "string" || CTOR_TEXT_METHODS.has(m)) return "escapes";
+        if (m === "valueOf") continue; // the receiver itself comes back: the call's result is a carrier too
+        return "benign";
+      }
       // `f.call(value)` / `f.apply(value, ...)`: the value is only the `this` of f, which is not the Function constructor itself (a tainted
       // or call/apply-read receiver is its own escape: it is judged where it is read).
       if (up.field === "args" && up.index === 0 && (p["method"] === "call" || p["method"] === "apply")) {
@@ -12701,6 +12711,25 @@ function ctorCarrierUse(at: IrUp | null): "benign" | "escapes" | { taint: string
     return "escapes";
   }
   return "escapes";
+}
+
+/** SCRIPTC_ENGINE_WHY=1: names the IR site that links the embedded engine (stderr), so a binary that links it can be explained. */
+function engineWhy(reason: string, node: Record<string, unknown> | null, up: IrUp | null): void {
+  const mode = process.env["SCRIPTC_ENGINE_WHY"];
+  if (mode !== "1" && mode !== "2") return;
+  const label = (n: Record<string, unknown>): string => {
+    const extra = [n["fn"], n["method"], n["name"], n["op"]].find((x) => typeof x === "string");
+    return `${String(n["kind"])}${typeof extra === "string" ? `(${extra})` : ""}`;
+  };
+  const chain: string[] = [];
+  let loc = node === null ? undefined : (node["loc"] as { file?: unknown; start?: unknown } | undefined);
+  for (let u = up; u !== null && chain.length < 8; u = u.up) {
+    chain.push(`${label(u.node)}.${u.field}`);
+    if (loc === undefined) loc = u.node["loc"] as { file?: unknown; start?: unknown } | undefined;
+  }
+  const at = loc ? ` at ${String(loc.file)} offset ${String(loc.start)}` : "";
+  const self = node === null ? "" : ` node=${label(node)}`;
+  process.stderr.write(`scriptc: engine linked: ${reason}${self}${at} (inside ${chain.join(" < ")})\n`);
 }
 
 export function moduleUsesEngineFn(mod: IrModule): boolean {
@@ -12726,6 +12755,7 @@ export function moduleUsesEngineFn(mod: IrModule): boolean {
     const node = v as Record<string, unknown> & { kind?: unknown; op?: unknown; name?: unknown; fn?: unknown; method?: unknown; key?: { kind?: unknown; value?: unknown } };
     if (node.kind === "jsOp" && node.op === "globalGet" && node.name === "Function") {
       found = true;
+      engineWhy("globalGet Function", node, up);
       return;
     }
     if (node.kind === "libCall" && node.fn === "dyn.getPrototypeOf") sawGetPrototypeOf = true;
@@ -12744,19 +12774,28 @@ export function moduleUsesEngineFn(mod: IrModule): boolean {
   // through the locals it is stored in). Taking the prototype and reading, testing or comparing `.constructor` never needs the engine.
   let escapes = false;
   const tainted = new Set<string>();
-  const judge = (use: "benign" | "escapes" | { taint: string }): void => {
-    if (use === "escapes") escapes = true;
+  const judge = (use: "benign" | "escapes" | { taint: string }, site?: { node: Record<string, unknown>; up: IrUp | null }): void => {
+    if (use === "escapes") {
+      if (site !== undefined) engineWhy("a constructor read escapes", site.node, site.up);
+      escapes = true;
+    }
     else if (use !== "benign") tainted.add(use.taint);
   };
-  for (const r of ctorReads) judge(ctorCarrierUse(r.up));
+  for (const r of ctorReads) judge(ctorCarrierUse(r.up), r);
   for (let changed = true; changed && !escapes;) {
     changed = false;
     const before = tainted.size;
-    for (const r of localReads) if (tainted.has(r.id)) judge(ctorCarrierUse(r.up));
+    for (const r of localReads) if (tainted.has(r.id)) judge(ctorCarrierUse(r.up), r);
     if (tainted.size !== before) changed = true;
   }
-  for (const id of tainted) if (captured.has(id)) escapes = true;
+  for (const id of tainted) if (captured.has(id) && !escapes) { engineWhy(`a local holding a constructor read is captured by a closure (local ${id})`, null, null); escapes = true; }
   const viaCtor = sawGetPrototypeOf && (sawConstructorCall || escapes);
+  if (process.env["SCRIPTC_ENGINE_WHY"] === "2" && !ENGINE_FN_MEMO.has(mod)) {
+    if (found || viaCtor) process.stderr.write("scriptc: engine linked: analysis complete\n");
+    else process.stderr.write("scriptc: engine NOT linked by moduleUsesEngineFn\n");
+    process.exit(0);
+  }
+  if (viaCtor && !found) engineWhy(`Function constructor reached through getPrototypeOf (constructorCall=${sawConstructorCall}, escapes=${escapes})`, null, null);
   const result = found || viaCtor;
   ENGINE_FN_MEMO.set(mod, result);
   return result;
