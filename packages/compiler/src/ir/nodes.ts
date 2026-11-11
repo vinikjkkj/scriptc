@@ -12657,15 +12657,13 @@ const CTOR_BENIGN_METHODS = new Set(["toString", "hasOwnProperty", "isPrototypeO
  * local that holds one) through the wrappers that pass the value on, and answers "benign" for those consumers, "taint L" for a store into
  * a local (whose reads are carriers in turn), and "escapes" for any other use (a call argument, a return, a field, a callee, a capture):
  * escaping is the conservative answer, so the engine links for it. */
-function ctorCarrierUse(at: IrUp | null, child: Record<string, unknown>): "benign" | "escapes" | { taint: string } {
-  let cur = child;
+function ctorCarrierUse(at: IrUp | null): "benign" | "escapes" | { taint: string } {
   for (let up = at; up !== null; up = up.up) {
     const p = up.node;
     const k = p["kind"];
-    if (k === "logical" || k === "nullish" || k === "dynFrom" || k === "unionWrap") { cur = p; continue; }
+    if (k === "logical" || k === "nullish" || k === "dynFrom" || k === "unionWrap") continue;
     if (k === "ternary") {
       if (up.field === "cond") return "benign"; // the value only decides a branch
-      cur = p;
       continue;
     }
     if (k === "varDecl" && up.field === "init") return { taint: String(p["localId"]) };
@@ -12738,11 +12736,11 @@ export function moduleUsesEngineFn(mod: IrModule): boolean {
     if (use === "escapes") escapes = true;
     else if (use !== "benign") tainted.add(use.taint);
   };
-  for (const r of ctorReads) judge(ctorCarrierUse(r.up, r.node));
+  for (const r of ctorReads) judge(ctorCarrierUse(r.up));
   for (let changed = true; changed && !escapes;) {
     changed = false;
     const before = tainted.size;
-    for (const r of localReads) if (tainted.has(r.id)) judge(ctorCarrierUse(r.up, r.node));
+    for (const r of localReads) if (tainted.has(r.id)) judge(ctorCarrierUse(r.up));
     if (tainted.size !== before) changed = true;
   }
   for (const id of tainted) if (captured.has(id)) escapes = true;
