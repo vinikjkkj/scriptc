@@ -3856,7 +3856,7 @@ export class LlDyn {
             // function boundary (the dynFrom func special case, sans name).
             const pp = B.tmp();
             const p = B.tmp();
-            B.line(`${pp} = getelementptr inbounds %ScrUnion, ptr %v, i64 0, i32 5`);
+            B.line(`${pp} = getelementptr inbounds %ScrUnion, ptr %v, i64 0, i32 3`);
             B.line(`${p} = load ptr, ptr ${pp}`);
             const r = B.tmp();
             B.line(`${r} = call ptr @${this.dynFuncBoxHelper(arm)}(ptr ${p}, ptr null, ptr null)`);
@@ -3864,7 +3864,7 @@ export class LlDyn {
           } else {
             const pp = B.tmp();
             const p = B.tmp();
-            B.line(`${pp} = getelementptr inbounds %ScrUnion, ptr %v, i64 0, i32 5`);
+            B.line(`${pp} = getelementptr inbounds %ScrUnion, ptr %v, i64 0, i32 3`);
             B.line(`${p} = load ptr, ptr ${pp}`);
             const r = B.tmp();
             B.line(`${r} = call ptr @${this.toDynHelper(arm)}(ptr ${p}) ; ${arm.kind}`);

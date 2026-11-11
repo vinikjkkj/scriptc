@@ -2805,7 +2805,7 @@ class LlEmitter {
       `%ScrStr = type { i32, i32, i32 }`,
       `%ScrLogArg = type { i32, i64 }`,
       `%ScrVt = type { i64, i64, ptr, ptr }`,
-      `%ScrUnion = type { i64, i32, ptr, ptr, ptr, i64 }`,
+      `%ScrUnion = type { i64, i32, i32, i64, ptr, ptr }`,
       // …including `implicit_proto` (field 4), the prototype object
       // scr_dyn_fn_prototype mints: the caps[] tail is addressed as one
       // WHOLE struct past the base, so a missing field would shift every
@@ -2945,7 +2945,7 @@ class LlEmitter {
       // rc == SIZE_MAX, so these never join the RC audit or a trace walk.
       const [unionId, tag] = key.split(":");
       out.push(
-        `@${sym} = internal global %ScrUnion { i64 -1, i32 ${tag}, ptr null, ptr null, ptr null, i64 0 } ; ${unionId} unit arm`,
+        `@${sym} = internal global %ScrUnion { i64 -1, i32 ${tag}, i32 0, i64 0, ptr null, ptr null } ; ${unionId} unit arm`,
       );
     }
     if (this.unitInstances.size > 0) out.push(``);
@@ -5961,7 +5961,7 @@ class LlEmitter {
   private unionPeek(uName: string): string {
     const p = this.B.tmp();
     const t = this.B.tmp();
-    this.B.line(`${p} = getelementptr inbounds %ScrUnion, ptr ${uName}, i64 0, i32 5`);
+    this.B.line(`${p} = getelementptr inbounds %ScrUnion, ptr ${uName}, i64 0, i32 3`);
     this.B.line(`${t} = load ptr, ptr ${p}`);
     return t;
   }
@@ -13809,7 +13809,7 @@ class LlEmitter {
         const av = vAdapters(this, arm);
         this.declare(`declare ptr @scr_union_new_ref(i32, ptr, ptr, ptr, ptr)`);
         d.push(
-          `  %pp${i} = getelementptr inbounds %ScrUnion, ptr %u0, i64 0, i32 5`,
+          `  %pp${i} = getelementptr inbounds %ScrUnion, ptr %u0, i64 0, i32 3`,
           `  %p${i} = load ptr, ptr %pp${i}`,
           `  %r${i} = call ptr ${av.retain}(ptr %p${i})`,
           `  %v${i} = call ptr @scr_union_new_ref(i32 ${tag}, ptr %r${i}, ptr ${av.retain}, ptr ${av.release}, ptr ${traceArg(this, arm)})`,
@@ -13863,7 +13863,7 @@ class LlEmitter {
     // scr_union_peek is a static inline in the header, so the IR reads the
     // payload field directly — the race adapter's own technique.
     const peek = (i: number): string[] => [
-      `  %pp${i} = getelementptr inbounds %ScrUnion, ptr %u0, i64 0, i32 5`,
+      `  %pp${i} = getelementptr inbounds %ScrUnion, ptr %u0, i64 0, i32 3`,
       `  %p${i} = load ptr, ptr %pp${i}`,
     ];
     const d: string[] = [
@@ -14176,7 +14176,7 @@ class LlEmitter {
           const av = vAdapters(this, arm);
           this.declare(`declare ptr @scr_union_new_ref(i32, ptr, ptr, ptr, ptr)`);
           lines.push(
-            `  %${px}pp${i} = getelementptr inbounds %ScrUnion, ptr %${px}u0, i64 0, i32 5`,
+            `  %${px}pp${i} = getelementptr inbounds %ScrUnion, ptr %${px}u0, i64 0, i32 3`,
             `  %${px}p${i} = load ptr, ptr %${px}pp${i}`,
             `  %${px}r${i} = call ptr ${av.retain}(ptr %${px}p${i})`,
             `  %${px}v${i} = call ptr @scr_union_new_ref(i32 ${tag}, ptr %${px}r${i}, ptr ${av.retain}, ptr ${av.release}, ptr ${traceArg(this, arm)})`,
@@ -14474,7 +14474,7 @@ class LlEmitter {
     B.startBlock(ly);
     const pp = B.tmp();
     const pv = B.tmp();
-    B.line(`${pp} = getelementptr inbounds %ScrUnion, ptr ${u}, i64 0, i32 5`);
+    B.line(`${pp} = getelementptr inbounds %ScrUnion, ptr ${u}, i64 0, i32 3`);
     B.line(`${pv} = load ptr, ptr ${pp}`);
     const r = B.tmp();
     B.line(`${r} = call ptr @scr_closure_retain_v(ptr ${pv})`);
@@ -14547,7 +14547,7 @@ class LlEmitter {
       `  %isfn = icmp eq i32 %tag, ${funcTag}`,
       `  br i1 %isfn, label %fn, label %go`,
       `fn:`,
-      `  %pp = getelementptr inbounds %ScrUnion, ptr %cbu, i64 0, i32 5`,
+      `  %pp = getelementptr inbounds %ScrUnion, ptr %cbu, i64 0, i32 3`,
       `  %pv = load ptr, ptr %pp`,
     ];
     if (oneParam) {
@@ -14881,7 +14881,7 @@ class LlEmitter {
         `  %hit${a} = icmp eq i32 %tg${a}, ${tag}`,
         `  br i1 %hit${a}, label %yes${a}, label %done${a}`,
         `yes${a}:`,
-        `  %pp${a} = getelementptr inbounds %ScrUnion, ptr ${u}, i64 0, i32 5`,
+        `  %pp${a} = getelementptr inbounds %ScrUnion, ptr ${u}, i64 0, i32 3`,
         `  %pv${a} = load ptr, ptr %pp${a}`,
         `  %rt${a} = call ptr ${retain}(ptr %pv${a})`,
         `  store ptr %rt${a}, ptr ${slot}`,
@@ -18675,7 +18675,7 @@ class LlEmitter {
         }
         const pk = B.tmp();
         const pv = B.tmp();
-        B.line(`${pk} = getelementptr inbounds %ScrUnion, ptr ${args[1]!.name}, i64 0, i32 5`);
+        B.line(`${pk} = getelementptr inbounds %ScrUnion, ptr ${args[1]!.name}, i64 0, i32 3`);
         B.line(`${pv} = load ptr, ptr ${pk} ; borrowed payload`);
         const r = B.tmp();
         if (pushing) {

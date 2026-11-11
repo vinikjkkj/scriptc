@@ -121,7 +121,7 @@ export class LlWalkers {
   private unionPeek(B: BlockBuilder, uName: string): string {
     const p = B.tmp();
     const t = B.tmp();
-    B.line(`${p} = getelementptr inbounds %ScrUnion, ptr ${uName}, i64 0, i32 5`);
+    B.line(`${p} = getelementptr inbounds %ScrUnion, ptr ${uName}, i64 0, i32 3`);
     B.line(`${t} = load ptr, ptr ${p}`);
     return t;
   }
