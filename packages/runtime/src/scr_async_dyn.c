@@ -488,6 +488,16 @@ adopt_loop:
 
 static void scr_dyn_then_step(void *ap) {
   ScrDynThenPack *a = (ScrDynThenPack *)ap;
+  /* A wake is not a settlement. A reaction on a declaration-claimed promise parks on its SOURCE's waiter list while
+   * the claim is pending, so the source's settle can wake it before the claim itself has settled (the claim's
+   * adapter helper may still be pending: the awaiting-form helpers for void/undefined/null payloads). The fiber this
+   * replaced looped `while (p->state == PENDING) scr_await_park(p)` (scr_await_settled); without the same check the
+   * reaction would read the pending promise as a fulfilled undefined. Park again instead. */
+  ScrPromise *waiting = a->stage == 1 ? a->r->v.promise : a->src;
+  if (scr_promise_is_pending(waiting)) {
+    scr_promise_wait_raw(waiting, scr_dyn_then_step, a);
+    return;
+  }
   /* The reaction's AsyncLocalStorage context for this turn (what the fiber switch used to install). */
   ScrAlsCtx *slot = a->als;
   ScrAlsCtx **prev = scr_als_active;
