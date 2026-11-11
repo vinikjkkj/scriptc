@@ -528,7 +528,7 @@ function functionOf(sf: ts.SourceFile): ts.FunctionExpression | null {
 }
 
 export function functionCtorEdits(fileName: string, text: string): string | null {
-  if (!/\bFunction\b/.test(text)) return null;
+  if (!/\bFunction\b|\bconstructor\b/.test(text)) return null;
   const sf = ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
   // `Function` / `JSON` rebound anywhere in the file: do nothing at all.
   const bound = new Set<string>();
@@ -634,7 +634,62 @@ export function functionCtorEdits(fileName: string, text: string): string | null
     edits.push({ start: site.getStart(sf), end: site.getEnd(), text: out });
   };
 
+  /** The text a constant argument stringifies to (String(value)), or null when it is not a program-known constant. */
+  const constArg = (e: ts.Expression): string | null => {
+    e = unparen(e);
+    if (ts.isStringLiteralLike(e)) return e.text;
+    if (ts.isNumericLiteral(e)) {
+      const v = Number(e.text);
+      return Number.isFinite(v) ? String(v) : null;
+    }
+    if (ts.isPrefixUnaryExpression(e) && e.operator === ts.SyntaxKind.MinusToken && ts.isNumericLiteral(e.operand)) {
+      const v = -Number(e.operand.text);
+      return Number.isFinite(v) ? String(v) : null;
+    }
+    if (e.kind === ts.SyntaxKind.TrueKeyword) return "true";
+    if (e.kind === ts.SyntaxKind.FalseKeyword) return "false";
+    if (e.kind === ts.SyntaxKind.NullKeyword) return "null";
+    if (ts.isIdentifier(e) && e.text === "undefined" && !bound.has("undefined")) return "undefined";
+    return null;
+  };
+  /** A reference chain that reads no getter-bearing computation we could not repeat: `this`, an identifier, `.name` hops. */
+  const pureChain = (e: ts.Expression): boolean => {
+    e = unparen(e);
+    if (e.kind === ts.SyntaxKind.ThisKeyword || ts.isIdentifier(e)) return true;
+    return ts.isPropertyAccessExpression(e) && e.questionDotToken === undefined && pureChain(e.expression);
+  };
+  /** `new E(consts)` / `E(consts)` where E is `<chain>.constructor`: E may turn out to be the Function constructor at run time. When it is, the
+   * text is a build-time constant, so the function it denotes is staged natively; when it is not, the original call runs unchanged. */
+  const rewriteDyn = (site: ts.NewExpression | ts.CallExpression, callee: ts.PropertyAccessExpression, args: readonly ts.Expression[], isNew: boolean): void => {
+    if (callee.questionDotToken !== undefined || callee.name.text !== "constructor" || !pureChain(callee.expression)) return;
+    if (args.some((a) => ts.isSpreadElement(a))) return;
+    // already staged (the rewrite is applied until it reaches a fixed point)
+    const par = site.parent;
+    if (par !== undefined && ts.isConditionalExpression(par) && par.whenFalse === site && ts.isBinaryExpression(par.condition) &&
+      par.condition.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken && ts.isIdentifier(par.condition.right) &&
+      par.condition.right.text === "Function" && par.condition.left.getText(sf) === callee.getText(sf)) return;
+    const ropes: Rope[] = [];
+    for (const a of args) {
+      const c = constArg(a);
+      if (c !== null) {
+        ropes.push([{ k: "c", s: c }]);
+        continue;
+      }
+      const r = folder.str(a, false);
+      if (r === null || r.length !== 1 || r[0]!.guards.length !== 0 || r[0]!.rope.some((p) => p.k !== "c")) return;
+      ropes.push(r[0]!.rope);
+    }
+    const fn = render(site, ropes, 0);
+    if (fn === null) return;
+    const e = callee.getText(sf);
+    const argText = args.map((a) => a.getText(sf)).join(", ");
+    const orig = isNew ? `new ${e}(${argText})` : `${e}(${argText})`;
+    edits.push({ start: site.getStart(sf), end: site.getEnd(), text: `(${e} === Function ? ${fn} : ${orig})` });
+  };
+
   const visit = (n: ts.Node): void => {
+    if (ts.isNewExpression(n) && ts.isPropertyAccessExpression(n.expression)) rewriteDyn(n, n.expression, n.arguments ?? [], true);
+    else if (ts.isCallExpression(n) && ts.isPropertyAccessExpression(n.expression)) rewriteDyn(n, n.expression, n.arguments, false);
     if (ts.isNewExpression(n) && ts.isIdentifier(n.expression) && n.expression.text === "Function") {
       rewrite(n, n.arguments ?? []);
       return;
