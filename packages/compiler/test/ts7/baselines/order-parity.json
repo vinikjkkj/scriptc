@@ -27419,6 +27419,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25081-deep-recursion-throws-a-catchable-range-error-and-the-stack-stays-usable.ts": {
+   "order": [
+    "<repo>/tests/corpus/25081-deep-recursion-throws-a-catchable-range-error-and-the-stack-stays-usable.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25082-deep-recursion-through-a-method-a-closure-and-a-callback-throws-a-catchable-range-error.ts": {
+   "order": [
+    "<repo>/tests/corpus/25082-deep-recursion-through-a-method-a-closure-and-a-callback-throws-a-catchable-range-error.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/25060-class-instance-read-through-a-record-of-methods-is-the-same-object/main.ts": {
    "order": [
     "<repo>/tests/corpus/25060-class-instance-read-through-a-record-of-methods-is-the-same-object/main.ts"
