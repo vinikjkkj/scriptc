@@ -4,7 +4,7 @@
  * package boundary fences for node_modules-declared symbols. */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { STATS_T, BOOL, DYN, F64, IrExpr, IrStmt, IrType, JSVAL, MAX_ISLAND_CALLBACK_ARITY, STRING, VOID, arrayOf, canBoxFuncIntoDyn, canMarshalTypedFuncIntoIsland, funcOf, islandPromisePayloadTag, isUnitType, typeEquals } from "../../ir/nodes.js";
+import { STATS_T, BOOL, DYN, F64, IrExpr, IrStmt, IrType, JSVAL, MAX_ISLAND_CALLBACK_ARITY, STRING, URL_T, VOID, arrayOf, canBoxFuncIntoDyn, canMarshalTypedFuncIntoIsland, funcOf, islandPromisePayloadTag, isUnitType, typeEquals } from "../../ir/nodes.js";
 import { ISLAND_SURFACE, IslandFnEntry, STATIC_MATH_CONSTS, STATIC_MATH_FNS, boundaryIntoIslandMsg } from "./surfaces.js";
 import { requiresDynamicApiDiag, requiresDynamicPackageDiag } from "../../diagnostics/diagnostic.js";
 import { contextImportFiles, contextImportPattern, orderedImportsOf } from "../program.js";
@@ -18,6 +18,7 @@ import { liveBagRef, liveTwinOf } from "./cjs-live-exports.js";
 import { cjsLexedExportsOf, cjsLexerVisibleNames } from "../cjs-lexer.js";
 import * as nodePath from "node:path";
 import { existsSync, readFileSync } from "node:fs";
+import { pathToFileURL } from "node:url";
 import { moduleNsStarExports } from "./lower-namespaces.js";
 import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } from "./lowerer.js";
 
@@ -656,7 +657,7 @@ function namespaceBindingUsedAsValue(L: Lowerer, decl: ts.VariableDeclaration): 
           callee: importRejectFnOf(L, loc, true),
           args: [
             { kind: "strLit", value: "ERR_IMPORT_ATTRIBUTE_TYPE_INCOMPATIBLE", type: STRING, loc },
-            { kind: "strLit", value: `Module "file://${absMod}" is not of type "json"`, type: STRING, loc },
+            { kind: "strLit", value: `Module "${pathToFileURL(absMod).href}" is not of type "json"`, type: STRING, loc },
             { kind: "strLit", value: "", type: STRING, loc },
           ],
           type: { kind: "promise", inner: DYN },
@@ -676,7 +677,7 @@ function namespaceBindingUsedAsValue(L: Lowerer, decl: ts.VariableDeclaration): 
           callee: rej,
           args: [
             { kind: "strLit", value: "ERR_IMPORT_ATTRIBUTE_MISSING", type: STRING, loc },
-            { kind: "strLit", value: `Module "file://${absJson}" needs an import attribute of "type: json"`, type: STRING, loc },
+            { kind: "strLit", value: `Module "${pathToFileURL(absJson).href}" needs an import attribute of "type: json"`, type: STRING, loc },
             { kind: "strLit", value: "", type: STRING, loc },
           ],
           type: promiseT,
@@ -2071,9 +2072,14 @@ function namespaceBindingUsedAsValue(L: Lowerer, decl: ts.VariableDeclaration): 
     if (attr === "json" && contextImportFiles(call.getSourceFile().fileName, pattern).some((f) => /\.m?ts$/.test(f))) refuseTsJsonAttribute(L, call);
     const specIr = L.lowerExprExpecting(arg, STRING);
     if (specIr.type.kind !== "string") return null;
-    const importer = call.getSourceFile().fileName;
+    const sourceImporter = call.getSourceFile().fileName;
+    const importer = sourceImporter;
     const dir = importer.slice(0, Math.max(importer.lastIndexOf("/"), importer.lastIndexOf("\\")));
-    const key = `${importer}\u0000${pattern.prefix}\u0000${pattern.suffix}\u0000${attr ?? ""}`;
+    // Under a win32 target the program is Node on Windows: paths are native (backslashes, path.win32 resolution) in every message and compare,
+    // and a file URL is the pathToFileURL of the native path (file:///D:/...), never "file://" + the path.
+    const win = L.targetPlatform === "win32";
+    const native = (p: string): string => (win ? p.replace(/\//g, "\\") : p);
+    const key = `${sourceImporter}\u0000${pattern.prefix}\u0000${pattern.suffix}\u0000${attr ?? ""}`;
     let fname = L.dynImportComputed.get(key);
     if (fname === undefined) {
       fname = `%dynimpc.${L.dynImportComputed.size}`;
@@ -2087,13 +2093,17 @@ function namespaceBindingUsedAsValue(L: Lowerer, decl: ts.VariableDeclaration): 
         const abs = L.declareHiddenLocal("%impabs", STRING);
         const absRef = (): IrExpr => ({ kind: "varRef", localId: abs.id, type: STRING, loc });
         const concat = (...parts: IrExpr[]): IrExpr => parts.reduce((l, r) => ({ kind: "strConcat", left: l, right: r, type: STRING, loc }));
+        const urlOf = (): IrExpr => ({
+          kind: "libCall", fn: "url.href", type: STRING, loc,
+          args: [{ kind: "libCall", fn: win ? "url.pathToFileURLWin32" : "url.pathToFileURL", args: [absRef()], type: URL_T, loc }],
+        });
         const rejFn = importRejectFnOf(L, loc);
         const rejFnT = importRejectFnOf(L, loc, true);
         const reject = (code: string, message: IrExpr, withUrl = false): IrStmt[] => [
-          { kind: "return", value: { kind: "call", callee: code.startsWith("ERR_IMPORT_ATTRIBUTE") ? rejFnT : rejFn, args: [str(code), message, withUrl ? concat(str("file://"), absRef()) : str("")], type: promiseT, loc }, loc },
+          { kind: "return", value: { kind: "call", callee: code.startsWith("ERR_IMPORT_ATTRIBUTE") ? rejFnT : rejFn, args: [str(code), message, withUrl ? urlOf() : str("")], type: promiseT, loc }, loc },
         ];
         const body: IrStmt[] = [
-          { kind: "varDecl", localId: abs.id, init: { kind: "libCall", fn: "path.resolve", args: [{ kind: "arrayLit", elems: [str(dir), spec], type: arrayOf(STRING), loc }], type: STRING, loc }, loc },
+          { kind: "varDecl", localId: abs.id, init: { kind: "libCall", fn: win ? "path.win32Resolve" : "path.resolve", args: [{ kind: "arrayLit", elems: [str(native(dir)), spec], type: arrayOf(STRING), loc }], type: STRING, loc }, loc },
         ];
         const seen = new Set<string>();
         for (const sf of [...L.initNameOf.keys()]) {
@@ -2104,9 +2114,9 @@ function namespaceBindingUsedAsValue(L: Lowerer, decl: ts.VariableDeclaration): 
           if (builder === null) continue;
           body.push({
             kind: "if",
-            cond: { kind: "strEq", negated: false, left: absRef(), right: str(sf.fileName), type: BOOL, loc },
+            cond: { kind: "strEq", negated: false, left: absRef(), right: str(native(sf.fileName)), type: BOOL, loc },
             then: attr === "json"
-              ? reject("ERR_IMPORT_ATTRIBUTE_TYPE_INCOMPATIBLE", concat(str('Module "file://'), absRef(), str('" is not of type "json"')))
+              ? reject("ERR_IMPORT_ATTRIBUTE_TYPE_INCOMPATIBLE", concat(str('Module "'), urlOf(), str('" is not of type "json"')))
               : [{ kind: "return", value: { kind: "call", callee: builder, args: [], type: promiseT, loc }, loc }],
             else_: [],
             loc,
@@ -2116,10 +2126,10 @@ function namespaceBindingUsedAsValue(L: Lowerer, decl: ts.VariableDeclaration): 
           if (!jf.endsWith(".json")) continue;
           body.push({
             kind: "if",
-            cond: { kind: "strEq", negated: false, left: absRef(), right: str(jf), type: BOOL, loc },
+            cond: { kind: "strEq", negated: false, left: absRef(), right: str(native(jf)), type: BOOL, loc },
             then: attr === "json"
               ? [{ kind: "return", value: { kind: "call", callee: jsonImportFnOf(L, jf, loc), args: [], type: promiseT, loc }, loc }]
-              : reject("ERR_IMPORT_ATTRIBUTE_MISSING", concat(str('Module "file://'), absRef(), str('" needs an import attribute of "type: json"'))),
+              : reject("ERR_IMPORT_ATTRIBUTE_MISSING", concat(str('Module "'), urlOf(), str('" needs an import attribute of "type: json"'))),
             else_: [],
             loc,
           });
@@ -2136,11 +2146,11 @@ function namespaceBindingUsedAsValue(L: Lowerer, decl: ts.VariableDeclaration): 
         } as unknown as IrExpr;
         const exists: IrExpr = { kind: "libCall", fn: "fs.existsSync", args: [absRef()], type: BOOL, loc };
         body.push(
-          { kind: "if", cond: bare, then: reject("ERR_MODULE_NOT_FOUND", concat(str("Cannot find package '"), spec, str(`' imported from ${importer}`))), else_: [], loc },
+          { kind: "if", cond: bare, then: reject("ERR_MODULE_NOT_FOUND", concat(str("Cannot find package '"), spec, str(`' imported from ${native(importer)}`))), else_: [], loc },
           {
             kind: "if",
             cond: { kind: "unary", op: "!", operand: exists, type: BOOL, loc } as unknown as IrExpr,
-            then: reject("ERR_MODULE_NOT_FOUND", concat(str("Cannot find module '"), absRef(), str(`' imported from ${importer}`)), true),
+            then: reject("ERR_MODULE_NOT_FOUND", concat(str("Cannot find module '"), absRef(), str(`' imported from ${native(importer)}`)), true),
             else_: [],
             loc,
           },
@@ -2148,11 +2158,11 @@ function namespaceBindingUsedAsValue(L: Lowerer, decl: ts.VariableDeclaration): 
         body.push({
           kind: "if",
           cond: { kind: "libCall", fn: "stats.isDirectory", args: [{ kind: "libCall", fn: "fs.statSync", args: [absRef()], type: STATS_T, loc }], type: BOOL, loc },
-          then: reject("ERR_UNSUPPORTED_DIR_IMPORT", concat(str("Directory import '"), absRef(), str(`' is not supported resolving ES modules imported from ${importer}`)), true),
+          then: reject("ERR_UNSUPPORTED_DIR_IMPORT", concat(str("Directory import '"), absRef(), str(`' is not supported resolving ES modules imported from ${native(importer)}`)), true),
           else_: [],
           loc,
         });
-        body.push(...reject("ERR_MODULE_NOT_FOUND", concat(str("Cannot find module '"), absRef(), str(`' imported from ${importer} (the file exists but was not part of the build)`)), true));
+        body.push(...reject("ERR_MODULE_NOT_FOUND", concat(str("Cannot find module '"), absRef(), str(`' imported from ${native(importer)} (the file exists but was not part of the build)`)), true));
         L.liftedFns.push({
           name: fname,
           params: [{ localId: "spec.0", name: "spec", type: STRING }],
