@@ -5,6 +5,7 @@
  * ToBoolean/ToString coercion helpers, and field/element reads and writes
  * (FieldTarget). */
 import { readFileSync } from "node:fs";
+import { tupleSnapshotArray } from "./lower-stmts.js";
 import { evalStaticInfoOf, lowerEvalClassInstanceOf } from "./lower-evalclass.js";
 import { protoDataFieldRead, protoDataHasKey, protoDataMemberRead } from "./lower-protodata.js";
 import { dynFnCheckedAsFunc, dynFnReadable, fnReturnsProjection, protoSlotOf, slotReadOr } from "./lower-protoslots.js";
@@ -14808,6 +14809,13 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
   function tupleElementRead(L: Lowerer, expr: ts.ElementAccessExpression, obj: IrExpr, shapeId: string, shape: IrRecordShape): IrExpr {
     const idx = tupleLiteralIndex(expr.argumentExpression);
     if (idx === null) {
+      // A computed index (`settled[i]`): the positions snapshot into an array (the union of the position types when they differ, which is what
+      // the checker gives the read) and the element is read from it. The index traps out of range like any array read.
+      const index = L.lowerExpr(expr.argumentExpression);
+      const snap = index.type.kind === "f64" ? tupleSnapshotArray(L, obj, expr.expression) : null;
+      if (snap !== null && snap.type.kind === "array") {
+        return L.maybeNarrow({ kind: "arrayGet", arr: snap, index, type: snap.type.elem, loc: locOf(expr) }, expr);
+      }
       L.unsupported(
         "SC1090",
         expr.argumentExpression,

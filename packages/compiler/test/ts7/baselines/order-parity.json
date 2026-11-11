@@ -27576,6 +27576,12 @@
     "<repo>/tests/corpus/25129-for-of-destructures-a-tuple-of-tuples-whose-positions-differ.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25130-promise-combinators-over-differently-typed-promises-iterate-their-results.ts": {
+   "order": [
+    "<repo>/tests/corpus/25130-promise-combinators-over-differently-typed-promises-iterate-their-results.ts"
+   ],
+   "diags": []
   }
  }
 }
