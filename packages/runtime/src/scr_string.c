@@ -1150,6 +1150,34 @@ ScrStr *scr_str_new(const char *bytes, size_t len) {
   return s;
 }
 
+/* Array.prototype.join(sep) over the elements of a Uint8Array (String(u8) is sep ","). The length is known before a byte is written (1, 2 or 3 digits
+ * per element and a separator between), so the string is allocated once at exactly that size and filled in place. Going through an array of
+ * doubles and one small string per element instead held the whole input as 8 bytes an element beside the result, and a result built by
+ * concatenation carries geometric slack and keeps the old and the new block alive across every regrow. */
+ScrStr *scr_str_u8_join(const uint8_t *d, size_t n, const char *sep, size_t seplen) {
+  size_t len = n > 0 ? (n - 1) * seplen : 0;
+  for (size_t i = 0; i < n; i++) len += 1u + (size_t)(d[i] >= 10) + (size_t)(d[i] >= 100);
+  ScrStr *s = scr_str_alloc(len, len);
+  char *p = s->data;
+  for (size_t i = 0; i < n; i++) {
+    unsigned v = d[i];
+    if (i > 0) {
+      if (seplen == 1) *p = sep[0]; else memcpy(p, sep, seplen);
+      p += seplen;
+    }
+    if (v >= 100) {
+      *p++ = (char)('0' + v / 100);
+      v %= 100;
+      *p++ = (char)('0' + v / 10);
+    } else if (v >= 10) {
+      *p++ = (char)('0' + v / 10);
+    }
+    *p++ = (char)('0' + v % 10);
+  }
+  *p = '\0';
+  return s;
+}
+
 /* One-slot free-block cache for append loops: `s += x` compiles to
  * concat + release-of-the-old-string every iteration, so the block freed
  * on iteration n is (with the geometric slack below) big enough for the

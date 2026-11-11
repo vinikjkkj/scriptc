@@ -867,6 +867,7 @@ static inline void scr_str_size_check(size_t n) {
 }
 
 ScrStr *scr_str_new(const char *bytes, size_t len); /* returns +1 */
+ScrStr *scr_str_u8_join(const uint8_t *d, size_t n, const char *sep, size_t seplen); /* the decimals of d[0..n) joined by sep ("1,2,3"), built once at its exact size; returns +1 */
 
 /* The immortal "absent" string: an empty string object whose IDENTITY says
  * "this array slot is Node's undefined" (a split capture group that did not

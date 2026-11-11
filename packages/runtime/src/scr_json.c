@@ -7866,6 +7866,7 @@ ScrStr *scr_dyn_to_string(const ScrDyn *d, const ScrStr *enc) {
     if (d->v.bytes->flavor == SCR_BF_DATAVIEW) return scr_str_new("[object DataView]", 17);
     if (d->buffer) return scr_bytes_to_str(d->v.bytes, enc);
     /* Uint8Array.prototype.toString is Array's: elements joined */
+    if (d->v.bytes->elem == SCR_BYTES_U8 || d->v.bytes->elem == SCR_BYTES_U8C) return scr_str_u8_join(d->v.bytes->data, d->v.bytes->len, ",", 1);
     {
       ScrStr *out = scr_str_new("", 0);
       for (size_t i = 0; i < d->v.bytes->len; i++) {

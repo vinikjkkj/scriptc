@@ -160,6 +160,10 @@ ScrArr *scr_bytes_to_arr(const ScrBytes *b) {
 }
 
 ScrStr *scr_bytes_join(const ScrBytes *b, const ScrStr *separator) {
+  /* A byte-wide view joins without the array of doubles in between: the result is sized from the digit counts and written once. */
+  if (separator != NULL && (b->elem == SCR_BYTES_U8 || b->elem == SCR_BYTES_U8C)) {
+    return scr_str_u8_join(b->data, b->len, separator->data, separator->len);
+  }
   ScrArr *values = scr_bytes_to_arr(b);
   ScrStr *out = scr_arr_join(values, (ScrStr *)separator);
   scr_arr_release(values);
