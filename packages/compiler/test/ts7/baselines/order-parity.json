@@ -27570,6 +27570,12 @@
     "<repo>/tests/corpus/25128-string-of-a-thrown-array-or-object-runs-its-own-conversion.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25129-for-of-destructures-a-tuple-of-tuples-whose-positions-differ.ts": {
+   "order": [
+    "<repo>/tests/corpus/25129-for-of-destructures-a-tuple-of-tuples-whose-positions-differ.ts"
+   ],
+   "diags": []
   }
  }
 }

@@ -10730,7 +10730,51 @@ function prototypeInstallerCallStmt(L: Lowerer, expr: ts.Expression): IrStmt | n
         const first = byIndex[0]?.type;
         const homogeneous = first !== undefined && byIndex.every((f) => typeEquals(f.type, first));
         let elemT: IrType | null = homogeneous ? first : null;
+        // A tuple of TUPLES whose element tuples differ in their position types (`[["a", 1], ["b", "x"]] as const`): TypeScript types the
+        // loop variable as the union of the element tuples, and each position of that union reads as the union of the arms' types. The
+        // snapshot widens every element tuple to ONE tuple shape whose positions carry those unions (each value wrapped into its arm),
+        // which the loop then iterates like any array of same-shaped tuples. Equal arities and scalar-or-composite positions only.
+        let uniformPositions: { name: string; type: IrType }[] | null = null;
+        // Per outer position: how to read inner position j (a tuple record's field, or the element of the array a homogeneous tuple
+        // maps to) and its type. The arity comes from the checker's tuple type, which the array mapping has lost.
+        let innerRead: ((p: number, outer: IrExpr, j: number, loc: SrcLoc) => IrExpr) | null = null;
         if (!homogeneous && byIndex.length > 0) {
+          const tsOuter = L.typeOf(stmt.expression);
+          const tsPositions = L.checker.isTupleType(tsOuter) ? L.checker.getTypeArguments(tsOuter as ts.TypeReference) : [];
+          const arities = tsPositions.map((t) => (L.checker.isTupleType(t) ? L.checker.getTypeArguments(t as ts.TypeReference).length : -1));
+          if (tsPositions.length === byIndex.length && arities.every((n) => n > 0 && n === arities[0])) {
+            const arity = arities[0]!;
+            const cols: { name: string; type: IrType }[] = [];
+            let ok = true;
+            for (let j = 0; j < arity && ok; j++) {
+              const arms: IrType[] = [];
+              for (const f of byIndex) {
+                let ft: IrType | undefined;
+                if (f.type.kind === "record") {
+                  const sh = L.shapes.get(f.type.shapeId);
+                  ft = sh?.tuple === true ? sh.fields.find((x) => x.name === String(j))?.type : undefined;
+                } else if (f.type.kind === "array") {
+                  ft = f.type.elem;
+                }
+                if (ft === undefined || !["f64", "string", "bool", "record", "array"].includes(ft.kind)) { ok = false; break; }
+                if (!arms.some((x) => typeEquals(x, ft!))) arms.push(ft);
+              }
+              if (!ok) break;
+              cols.push({ name: String(j), type: arms.length === 1 ? arms[0]! : { kind: "union", unionId: L.unions.intern(arms) } });
+            }
+            if (ok) {
+              uniformPositions = cols;
+              innerRead = (_p, outer, j, loc) =>
+                outer.type.kind === "record"
+                  ? { kind: "recordGet", obj: outer, shapeId: outer.type.shapeId, field: String(j), type: L.shapes.get(outer.type.shapeId)!.fields.find((x) => x.name === String(j))!.type, loc }
+                  : { kind: "arrayGet", arr: outer, index: { kind: "numLit", value: j, type: F64, loc }, type: (outer.type as { elem: IrType }).elem, loc };
+            }
+          }
+        }
+        if (uniformPositions !== null) {
+          const sorted = [...uniformPositions].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+          elemT = { kind: "record", shapeId: L.shapes.intern(sorted, true) };
+        } else if (!homogeneous && byIndex.length > 0) {
           // Collect every arm FIRST, then intern once: interning inside the
           // loop registers the partial list, and the very first pass makes a
           // one-arm union — degenerate, and the validator rejects it. One
@@ -10747,21 +10791,39 @@ function prototypeInstallerCallStmt(L: Lowerer, expr: ts.Expression): IrStmt | n
               ? arms[0]!
               : { kind: "union", unionId: L.unions.intern(arms) };
         }
-        if (elemT !== null && pureReemittable(iterable)) {
+        if (elemT !== null) {
           const loc = locOf(stmt.expression);
           const shapeId = iterable.type.shapeId;
           const snapshotElem = elemT;
-          iterable = {
+          // The positions are read once each, so a literal (or any receiver whose re-emission would repeat effects or allocate)
+          // is bound to a hidden local first and the reads go through it: a tuple of tuples written inline is the usual shape.
+          const pre: IrStmt[] = [];
+          let src: IrExpr = iterable;
+          if (!pureReemittable(iterable)) {
+            const tmp = L.declareHiddenLocal("%tupof", iterable.type);
+            pre.push({ kind: "varDecl", localId: tmp.id, init: iterable, loc });
+            src = { kind: "varRef", localId: tmp.id, type: iterable.type, loc };
+          }
+          const snapshot: IrExpr = {
             kind: "arrayLit",
             elems: byIndex.map((f) => {
               const read: IrExpr = {
                 kind: "recordGet",
-                obj: iterable,
+                obj: src,
                 shapeId,
                 field: f.name,
                 type: f.type,
                 loc,
               };
+              if (uniformPositions !== null && innerRead !== null) {
+                const fields = uniformPositions
+                  .map((col, j) => {
+                    const got: IrExpr = innerRead!(0, read, j, loc);
+                    return { name: col.name, value: typeEquals(got.type, col.type) ? got : L.coerceInto(stmt.expression, got, col.type) };
+                  })
+                  .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+                return { kind: "recordLit", fields, type: snapshotElem, loc } as IrExpr;
+              }
               return typeEquals(f.type, snapshotElem)
                 ? read
                 : L.coerceInto(stmt.expression, read, snapshotElem);
@@ -10769,6 +10831,7 @@ function prototypeInstallerCallStmt(L: Lowerer, expr: ts.Expression): IrStmt | n
             type: arrayOf(snapshotElem),
             loc,
           };
+          iterable = pre.length === 0 ? snapshot : { kind: "seqExpr", stmts: pre, result: snapshot, type: snapshot.type, loc };
         } else {
           L.noLowering("for-of over tuples", stmt.expression,
             "tuples with union-typed or unrepresentable positions are fixed-shape — read t[0], t[1], ... directly (plain-position tuples purely iterate)");
