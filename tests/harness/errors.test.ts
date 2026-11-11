@@ -304,20 +304,17 @@ console.log("unreachable");
     expect(d.some((x) => /^SC1090: constructor-assigned fields shadowing methods \(only a function assigned over a method inherited from a base class\) are not supported yet$/.test(x)), d.join(" | ")).toBe(true);
   });
 
-  test("destructuring a SURFACED builtin global's member is refused at the pattern (JS lane)", async () => {
-    // `const { max } = Math` would detach a member whose lowering is
-    // keyed to its receiver (Math.max) — the pattern fences by member
-    // and global name instead of binding a token whose calls fail late.
-    // Corpus 2558 pins the OPAQUE globals, where members DO bind tokens.
-    const d = await compileRefused(
-      "destructure-surfaced-global",
-      `'use strict';
-const { max } = Math;
-console.log(max(1, 2));
-`,
-      "cjs",
-    );
-    expect(d.some((x) => /^SC1031: destructuring the member 'max' of the builtin global 'Math' /.test(x)), d.join(" | ")).toBe(true);
+  test("destructuring a SURFACED builtin global's member binds the member itself (JS lane)", async () => {
+    // `const { max } = Math` is legal JavaScript and Node binds Math.max, a function that answers any argument count. The pattern used to
+    // be fenced because a detached member's lowering was keyed to its receiver; every Math member is now a first-class value (rest-slot
+    // members max/min/hypot as closures over the packed argument array), so the program compiles and prints what Node prints.
+    const source = `'use strict';
+const { max, min: lowest, PI } = Math;
+console.log(max(1, 2), max(), lowest(3, 1, 2), lowest(), max(-0, 0) === 0, PI);
+`;
+    const r = await compileAndRun("destructure-surfaced-global", source, "cjs");
+    expect(r.exitCode, r.stderr).toBe(0);
+    expect(r.stdout).toBe("2 -Infinity 1 Infinity true 3.141592653589793\n");
   });
 
   test("an OPAQUE global's destructured member binds a token; each use of it is refused (JS lane)", async () => {
