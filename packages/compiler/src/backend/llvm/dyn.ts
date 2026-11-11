@@ -4384,7 +4384,19 @@ export class LlDyn {
       const isErr = B.tmp();
       B.line(`${isErr} = call zeroext i1 @scr_error_is(ptr ${p})`);
       const lErr = B.newLabel("cd.e");
-      B.condBr(isErr, lErr, lDef);
+      const lHier = B.newLabel("cd.h");
+      B.condBr(isErr, lErr, lHier);
+      B.startBlock(lHier);
+      // A non-Error hierarchy instance boxes as an instance of its own class (the registry), the C walker's arm; NULL keeps the type-erased box.
+      host.declare(`declare ptr @scr_dyn_from_hier_obj(ptr)`);
+      const hb = B.tmp();
+      const hnull = B.tmp();
+      B.line(`${hb} = call ptr @scr_dyn_from_hier_obj(ptr ${p})`);
+      B.line(`${hnull} = icmp eq ptr ${hb}, null`);
+      const lHierRet = B.newLabel("cd.hr");
+      B.condBr(hnull, lDef, lHierRet);
+      B.startBlock(lHierRet);
+      B.terminate(`ret ptr ${hb}`);
       B.startBlock(lErr);
       // The identity-cached crossing (scr_json.c): one error instance,
       // one dyn node — the C walker's arm exactly.

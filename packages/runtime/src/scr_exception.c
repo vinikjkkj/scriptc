@@ -170,6 +170,10 @@ ScrStr *scr_caught_to_string(const ScrCaught *c) {
     if (scr_error_is(c->payload)) {
       return scr_error_to_string((ScrError *)c->payload);
     }
+    if (scr_caught_obj_str_hook != NULL) {
+      ScrStr *r = scr_caught_obj_str_hook(c); /* the instance's own toString/valueOf, through its dyn class descriptor */
+      if (r != NULL) return r;
+    }
     /* fall through */
   case SCR_EXC_REF:
     /* Object.prototype.toString — exact for thrown records and class
@@ -281,6 +285,8 @@ void scr_library_check_exc(void) {
 /* Filled in by the dyn unit (scr_dyn_alloc); NULL wherever that unit is
  * not linked, where no dyn can be thrown in the first place. */
 ScrThrowDynHook scr_throw_dyn_hook = NULL;
+
+ScrStr *(*scr_caught_obj_str_hook)(const ScrCaught *c) = NULL;
 
 void scr_throw_f64(double v) {
   scr_exc_reset();

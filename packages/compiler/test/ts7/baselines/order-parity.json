@@ -27594,6 +27594,12 @@
     "<repo>/tests/corpus/25132-unknown-array-literal-of-mixed-element-kinds.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25133-string-of-a-thrown-hierarchy-class-instance-runs-its-conversion.ts": {
+   "order": [
+    "<repo>/tests/corpus/25133-string-of-a-thrown-hierarchy-class-instance-runs-its-conversion.ts"
+   ],
+   "diags": []
   }
  }
 }

@@ -4775,9 +4775,13 @@ static size_t scr_cls_reg_n = 0;
 const ScrDynClassOps *scr_dyn_class_ops = NULL;
 const ScrDynEeOps *scr_dyn_ee_ops = NULL;
 
+static ScrStr *scr_caught_obj_str(const ScrCaught *c);
+
 void scr_dyn_objinst_registry(const ScrDynClass *const *descs, size_t n) {
   scr_cls_reg = descs;
   scr_cls_reg_n = n;
+  /* A program with class descriptors lets String(e) of a thrown hierarchy instance find its class (scr_exception.c's hook). */
+  scr_caught_obj_str_hook = scr_caught_obj_str;
 }
 
 const ScrDynClass *const *scr_dyn_class_registry(size_t *n) {
@@ -6568,11 +6572,36 @@ ScrStr *scr_dyn_string_explicit(const ScrDyn *d, ScrStr *(*walker)(const ScrDyn 
   return walker(d);
 }
 
+/* A thrown HIERARCHY class instance that is not an Error (the OBJ arm), as the dyn instance box of ITS class: the registry (the descriptors the
+ * program interned for every class that can be thrown) is searched by the instance's own vtable position, so a derived instance finds the
+ * derived descriptor. NULL when no descriptor is registered (a class the program never boxed): callers keep their type-erased answer. */
+ScrDyn *scr_dyn_from_hier_obj(void *o) {
+  if (scr_cls_reg == NULL) return NULL;
+  const ScrVt *vt = ((const ScrError *)o)->vt;
+  if (vt == NULL) return NULL;
+  for (size_t i = 0; i < scr_cls_reg_n; i++) {
+    const ScrDynClass *c = scr_cls_reg[i];
+    if (c->vt && !c->errorRooted && c->pre == vt->pre) return scr_dyn_new_objinst(o, c);
+  }
+  return NULL;
+}
+
 ScrStr *scr_caught_to_string_dyn(const ScrCaught *c, int hint, ScrStr *(*walker)(const ScrDyn *)) {
   if (c->kind != SCR_EXC_REF || c->retain_fn != scr_dyn_retain_v) return scr_caught_to_string(c);
   const ScrDyn *d = (const ScrDyn *)c->payload;
   if (hint == 2) return scr_dyn_to_primitive_string(d);
   return hint == 1 ? scr_dyn_template_to_string(d, walker) : scr_dyn_string_explicit(d, walker);
+}
+
+/* The hook scr_caught_to_string (scr_exception.c, which cannot name the dyn unit) calls for a thrown hierarchy instance that is not an Error:
+ * the instance as its own class's dyn box, converted by the dyn string path (user toString/valueOf run; a throw from them stays pending for the
+ * emitted check). NULL when the class has no registered descriptor. */
+static ScrStr *scr_caught_obj_str(const ScrCaught *c) {
+  ScrDyn *boxed = scr_dyn_from_hier_obj(c->payload);
+  if (boxed == NULL) return NULL;
+  ScrStr *r = scr_dyn_to_string(boxed, NULL);
+  scr_dyn_release(boxed);
+  return r;
 }
 
 /* A template literal's ToString of an unknown span: a Symbol throws, everything

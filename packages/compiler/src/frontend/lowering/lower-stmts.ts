@@ -1432,6 +1432,22 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
       // A thrown array, record or standalone class instance rides the dyn representation (a copy for data, the instance by reference),
       // which is what lets String(e) / `${e}` / `e + ""` over the catch binding run the value's own toString/valueOf and join an
       // array like Node. Hierarchy classes keep the OBJ arm (catch-side instanceof reads it); a type the dyn unit cannot hold stays as it was.
+      // A thrown HIERARCHY instance that is not an Error keeps the OBJ arm (catch-side instanceof reads its vtable); the dyn class descriptors of
+      // its whole hierarchy are interned so String(e) and the dyn conversion can find the instance's own class and run its toString/valueOf.
+      if (value.type.kind === "object") {
+        const thrown = L.classes.get(value.type.className);
+        if (thrown !== undefined && L.inHierarchy(thrown) && !RUNTIME_ERROR_CLASSES.has(value.type.className)) {
+          let rooted = false;
+          for (let c: typeof thrown | null = thrown; c; c = c.base) if (RUNTIME_ERROR_CLASSES.has(c.def.name) || c.def.runtime === true) rooted = true;
+          if (!rooted) {
+            for (const [name, info] of L.classes) {
+              if (name === value.type.className || L.isSubclassOf(name, value.type.className) || L.isSubclassOf(value.type.className, name)) {
+                if (info.def.runtime !== true && info.evalClass === undefined && L.inHierarchy(info)) L.noteDynBoxedClass(name);
+              }
+            }
+          }
+        }
+      }
       if (value.type.kind === "array" || value.type.kind === "record" || value.type.kind === "object") {
         const info = value.type.kind === "object" ? L.classes.get(value.type.className) : undefined;
         if (value.type.kind !== "object" || (info !== undefined && !L.inHierarchy(info) && !RUNTIME_ERROR_CLASSES.has(value.type.className))) {

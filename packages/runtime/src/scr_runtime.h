@@ -3325,6 +3325,8 @@ bool scr_caught_instanceof(const ScrCaught *c, size_t pre, size_t post);
  * records and toString-less class instances; a documented approximation
  * for thrown arrays/closures/union boxes). Borrows the box; returns +1. */
 ScrStr *scr_caught_to_string(const ScrCaught *c);
+/* Filled in by the dyn unit when a program registers class descriptors: the string of a thrown hierarchy instance that is not an Error, or NULL. */
+extern ScrStr *(*scr_caught_obj_str_hook)(const ScrCaught *c);
 /* `e as C` on a catch binding (scr_lib.c): an OBJ payload inside C's
  * preorder interval extracts (retained, +1); every other payload THROWS a
  * catchable TypeError naming `cls`. Callers are compiler-emitted pending
@@ -7316,6 +7318,8 @@ ScrStr *scr_dyn_string_explicit(const ScrDyn *d, ScrStr *(*walker)(const ScrDyn 
  * toString/valueOf that crossed into the cell as a dyn) converts through the dyn string paths above (hint 0 = String(), 1 = template span, 2 =
  * `+`'s default hint); every other payload is scr_caught_to_string's answer. Borrows the box; +1; may leave an exception pending (user code). */
 ScrStr *scr_caught_to_string_dyn(const ScrCaught *c, int hint, ScrStr *(*walker)(const ScrDyn *));
+/* A thrown hierarchy (non-Error) class instance as the dyn instance box of its own class, +1; NULL when the class has no registered descriptor. */
+ScrDyn *scr_dyn_from_hier_obj(void *o);
 /* Keyed read on a HANDLE box (the emitted sc_dyn_key_get's arm): the
  * tag's modeled properties answer boxed values; everything else answers
  * the undefined singleton (the checked-dynamic tree's own-property stance — SEMANTICS.md)

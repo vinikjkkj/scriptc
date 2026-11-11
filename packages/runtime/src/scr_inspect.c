@@ -2126,9 +2126,11 @@ static ScrDyn *insp_caught_dyn(const ScrCaught *c) {
     case SCR_EXC_REF:
       if (c->retain_fn == scr_dyn_retain_v) return scr_dyn_retain((ScrDyn *)c->payload);
       return scr_dyn_new_obj();
-    case SCR_EXC_OBJ:
+    case SCR_EXC_OBJ: {
       if (scr_error_is(c->payload)) return scr_dyn_from_error((const ScrError *)c->payload);
-      return scr_dyn_new_obj();
+      ScrDyn *inst = scr_dyn_from_hier_obj(c->payload);
+      return inst != NULL ? inst : scr_dyn_new_obj();
+    }
     default: return scr_dyn_new_obj();
   }
 }
