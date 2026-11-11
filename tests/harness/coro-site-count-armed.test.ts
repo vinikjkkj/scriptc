@@ -44,11 +44,11 @@ const body = (...sites: string[]): string => [NOISE, ...sites].join("\n");
 
 describe("the suspension-site counter counts call sites", () => {
   test("declares and comments are not call sites", () => {
-    expect(coroSuspensionSites(NOISE)).toEqual({ parks: 0, hops: 0 });
+    expect(coroSuspensionSites(NOISE)).toEqual({ parks: 0, hops: 0, yields: 0 });
   });
 
   test("parks and hops are counted apart", () => {
-    expect(coroSuspensionSites(body(PARK, HOP, HOP))).toEqual({ parks: 1, hops: 2 });
+    expect(coroSuspensionSites(body(PARK, HOP, HOP))).toEqual({ parks: 1, hops: 2, yields: 0 });
   });
 });
 
@@ -82,7 +82,7 @@ describe("the suspension-site invariant is armed", () => {
     // scheduler. Every value it produces is still correct and only the TURN
     // COUNT is wrong, so a value comparison agrees with it.
     expect(() => coroCheckSuspensionSites("f", body(PARK), 2, 0))
-      .toThrow(/emitted 1 park\(s\) and 0 hop\(s\).*drew 2 state\(s\)/s);
+      .toThrow(/emitted 1 park\(s\), 0 hop\(s\) and 0 yield\(s\).*drew 2 state\(s\)/s);
   });
 
   test("FIRES when a point emitted its suspension call twice", () => {

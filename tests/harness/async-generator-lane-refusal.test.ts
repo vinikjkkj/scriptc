@@ -269,9 +269,9 @@ function genLowered(b: Built): boolean {
 
 /* 2026-11-11: THE C LANE NOW LOWERS ASYNC GENERATORS (frame-backed protocol in scr_async.c, explicit yield hop in lower-generators.ts), so the C arms
  * assert the OPPOSITE of what this file was written to pin and keep the Node comparison, which is the part that still bites: the turn order must be
- * Node's with the generator on a frame. The LLVM arms keep the refusal until that backend lowers generators too. */
+ * Node's with the generator on a frame. The LLVM lane lowers generators too (llvm/coro.ts, emitter.ts emitCoroYield), so both arms agree. */
 
-describe("an async generator: lowered on the C lane, still refused on LLVM, and the program is right on both", () => {
+describe("an async generator: lowered on both lanes, and the program is right on both", () => {
   for (const backend of ["c", "llvm"] as const) {
     test(backend + ": yielding async generator", async () => {
       const b = await build("ag" + backend, SRC, backend);
@@ -282,14 +282,9 @@ describe("an async generator: lowered on the C lane, still refused on LLVM, and 
         .toBeGreaterThan(0);
       expect(b.resumes.join(" "), say("the plain async function did NOT convert", b))
         .toContain("sc_cr_plain");
-      // THE LANE'S VERDICT: lowered on C, refused on LLVM (until its generator lowering lands).
-      if (backend === "c") {
-        expect(b.artifact, say("the async generator was NOT lowered on the C lane", b)).toContain("sc_cr_nums");
-        expect(genLowered(b), say("no frame-backed async generator spawn", b)).toBe(true);
-      } else {
-        expect(b.resumes.join(" "), say("an async generator was LOWERED", b)).not.toContain("sc_cr_nums");
-        expect(genLowered(b), say("a frame-backed generator was spawned", b)).toBe(false);
-      }
+      // THE LANE'S VERDICT: lowered, on both backends.
+      expect(b.artifact, say("the async generator was NOT lowered on the " + backend + " lane", b)).toContain("sc_cr_nums");
+      expect(genLowered(b), say("no frame-backed async generator spawn", b)).toBe(true);
       // AND IT IS STILL RIGHT, against NODE -- values and turn order.
       expect(b.code, say("binary died", b)).toBe(0);
       expect(b.stdout, say("output differs from node", b)).toBe(NODE_SRC);
@@ -301,13 +296,8 @@ describe("an async generator: lowered on the C lane, still refused on LLVM, and 
       expect(b.units, say("no artifact to read", b)).toBeGreaterThan(0);
       expect(b.resumes.join(" "), say("the plain async function did NOT convert", b))
         .toContain("sc_cr_plain");
-      if (backend === "c") {
-        expect(b.artifact, say("the yieldless async generator was NOT lowered on the C lane", b)).toContain("sc_cr_empty");
-        expect(genLowered(b), say("no frame-backed async generator spawn", b)).toBe(true);
-      } else {
-        expect(b.resumes.join(" "), say("a yieldless async generator was LOWERED", b)).not.toContain("sc_cr_empty");
-        expect(genLowered(b), say("a frame-backed generator was spawned", b)).toBe(false);
-      }
+      expect(b.artifact, say("the yieldless async generator was NOT lowered on the " + backend + " lane", b)).toContain("sc_cr_empty");
+      expect(genLowered(b), say("no frame-backed async generator spawn", b)).toBe(true);
       expect(b.code, say("binary died", b)).toBe(0);
       expect(b.stdout, say("output differs from node", b)).toBe(NODE_NOYIELD);
     }, 900_000);
