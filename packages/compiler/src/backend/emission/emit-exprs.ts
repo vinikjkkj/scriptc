@@ -9439,7 +9439,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           // no case for the yield's label and the resume would have taken
           // `default: abort()`.
           const yIdx = E.coroDrawState(E.currentFn!.name, E.currentCoro.points.length);
-          const sent = emitCoroYield(E, E.currentFn!, E.currentCoro, yIdx, v, yt, e.type);
+          const sent = emitCoroYield(E, E.currentFn!, E.currentCoro, yIdx, v, yt, e.type, e.async === true);
           E.emitPendingCheck();
           return { name: sent, type: e.type };
         }

@@ -106,6 +106,14 @@ const YIELD_ARMS = {
   ref: "scr_gen_coro_yield_ref",
 } as const;
 
+/** An ASYNC generator's yield arms settle the in-flight request (or schedule the native sink) before the frame suspends; the operand-await hop
+ * is a separate suspension the lowering emits ahead of the yield. */
+const AGEN_YIELD_ARMS = {
+  f64: "scr_agen_coro_yield_f64",
+  bool: "scr_agen_coro_yield_bool",
+  ref: "scr_agen_coro_yield_ref",
+} as const;
+
 /** Emit one `yield` inside a converted synchronous generator.
  *
  * Returns the C expression naming the resumed value -- the argument the
@@ -124,7 +132,9 @@ export function emitCoroYield(
   valueTemp: Temp,
   valueType: IrType,
   resultType: IrType,
+  isAsync = false,
 ): string {
+  const arms = isAsync ? AGEN_YIELD_ARMS : YIELD_ARMS;
   /* THE YIELDED VALUE LEAVES THE RC FRAME. It is a C local in the resume
    * function; the return kills it, so the emitter's ordinary scope release
    * would later release a dangling pointer. The OUT slot takes the +1 and
@@ -149,10 +159,10 @@ export function emitCoroYield(
    * ref arm is not routed through it -- its call takes a release adapter,
    * so a swap would fail at the C compiler rather than at the value. */
   if (valueType.kind === "f64" || valueType.kind === "bool") {
-    const arm = poisonYieldArm(valueType.kind, YIELD_ARMS);
+    const arm = poisonYieldArm(valueType.kind, arms);
     E.line(`${arm}(sc_f->sc_gen, ${valueTemp.name});`);
   } else {
-    E.line(`${YIELD_ARMS.ref}(sc_f->sc_gen, ${valueTemp.name}, ${vAdapters(valueType).release});`);
+    E.line(`${arms.ref}(sc_f->sc_gen, ${valueTemp.name}, ${vAdapters(valueType).release});`);
   }
 
   /* No park, no push. The runtime entry above marks the frame YIELDED --
@@ -283,6 +293,7 @@ export function emitGenCoroSpawn(
   out: string[],
   fn: IrFunction,
   plan: StacklessPlan,
+  settleName?: string,
 ): void {
   const frame = mangleCoroFrame(fn.name);
   const boxedIds = new Set(fn.locals.filter((l) => l.boxed === true).map((l) => l.id));
@@ -374,7 +385,9 @@ export function emitGenCoroSpawn(
      * through it, so this fix is scoped to the call site actually proven to
      * fail -- flagging the sibling as likely carrying the same latent gap,
      * for whoever owns that lane to confirm and fix. */
-    `  ScrGen *sc_g = scr_gen_of_coro((ScrCoroBase *)&sc_f->base, &${mangleGenDrop(fn.name)});`,
+    fn.async === true && settleName !== undefined
+      ? `  ScrGen *sc_g = scr_agen_coro_of((ScrCoroBase *)&sc_f->base, &${mangleGenDrop(fn.name)}, &${settleName});`
+      : `  ScrGen *sc_g = scr_gen_of_coro((ScrCoroBase *)&sc_f->base, &${mangleGenDrop(fn.name)});`,
     `  sc_f->sc_gen = sc_g;`,
     `  return sc_g; /* NOTHING has run: the body starts at the first .next() */`,
     `}`,

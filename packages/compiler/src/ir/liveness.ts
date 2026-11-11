@@ -1184,7 +1184,6 @@ export function stacklessPlan(fn: IrFunction): StacklessPlan | null {
   const syncGenerator = fn.generator !== undefined && fn.async !== true;
   if (fn.async !== true && !syncGenerator) return null;
   if (hasFiberOnlySuspender(fn)) return null;
-  if (fn.generator !== undefined && fn.async === true) return null;
   if (fn.asyncCacheGlobal !== undefined || fn.asyncCycleCacheGlobal !== undefined) return null;
   // A boxed PARAM used to be refused here. The stated reason -- "both the raw
   // name and the box would have to be frame state" -- was not the mechanism.

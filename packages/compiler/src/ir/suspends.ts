@@ -36,19 +36,19 @@ type AssertNever<T extends never> = T;
 
 /* ── IR node kinds that suspend ──────────────────────────────────────── */
 
+/* `genResume` and `agenResume` are NOT in this list any more. They are the CONSUMER side of a generator: scr_gen_resume / scr_agen_next arm a
+ * request and run the body (on its own stack, or as a nested frame step) and come back before they return, so they never suspend the caller.
+ * Listing them made every function that drives a generator unlowerable, and that kept every `for await` consumer on a fiber. The runtime
+ * entry points save and restore the caller's exception cell and ALS slot around the hop, so a frame may call them. */
 export type SuspendingNodeKind =
   | "awaitExpr"
   | "awaitUnionExpr"
-  | "yieldExpr"
-  | "genResume"
-  | "agenResume";
+  | "yieldExpr";
 
 export const SUSPENDING_NODE_KINDS = [
   "awaitExpr",
   "awaitUnionExpr",
   "yieldExpr",
-  "genResume",
-  "agenResume",
 ] as const satisfies readonly SuspendingNodeKind[];
 
 type _NodeKindsCovered = AssertNever<
@@ -191,8 +191,6 @@ export const SUSPENSION_POINT_KINDS = [
   "awaitExpr",
   "awaitUnionExpr",
   "yieldExpr",
-  "genResume",
-  "agenResume",
   "libCall:async.hop",
 ] as const satisfies readonly SuspensionPointKind[];
 
