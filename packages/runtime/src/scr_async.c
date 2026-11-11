@@ -2852,7 +2852,15 @@ static void scr_fiber_pool_teardown(void) {
  * retraction at the census body itself for the measurement and its
  * negative control. */
 #ifndef SCR_HEAP_TRIM_MS
+/* glibc keeps the free memory a burst leaves behind in its arenas: MEASURED on the zapo mysql arm (callgrind-free runs, idle box, 3 runs per arm)
+ * a one-second window gives back 7-10 MiB of RssAnon at the end of the run (end 78.9 -> 70.9 MiB median), never touches the peak, and the CPU is
+ * unchanged (11.1 s base against 11.2 s at 1000 ms; a 250 ms window cost 6% in the median, so the default is the coarser one). Other targets keep
+ * the old default: the Windows heap returns about 1.5% (see above). SCR_HEAP_TRIM_MS=0 restores the pre-trim runtime exactly. */
+#if defined(__GLIBC__)
+#define SCR_HEAP_TRIM_MS 1000
+#else
 #define SCR_HEAP_TRIM_MS 0
+#endif
 #endif
 
 /* -- handing SQLite's idle page cache back at the same seam -----------
