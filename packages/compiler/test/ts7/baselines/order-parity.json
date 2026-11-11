@@ -6,6 +6,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24970-static-methods-called-on-a-constructor-read-do-not-link-the-engine.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24970-static-methods-called-on-a-constructor-read-do-not-link-the-engine.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24971-function-constructor-reached-through-call-bind-valueof-and-constructor-runs-text.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24971-function-constructor-reached-through-call-bind-valueof-and-constructor-runs-text.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/002-log-args.ts": {
    "order": [
     "<repo>/tests/corpus/002-log-args.ts"
