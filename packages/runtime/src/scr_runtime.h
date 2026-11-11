@@ -1137,6 +1137,7 @@ void scr_error_install_options(ScrError *e, struct ScrDyn *options);
 void scr_error_install_required_cause(ScrError *e, struct ScrDyn *options);
 /* AggregateError's non-enumerable `errors` (arr owned) */
 void scr_error_set_errors(ScrError *e, struct ScrDyn *arr);
+void scr_error_set_errors_b(ScrError *e, struct ScrDyn *arr); /* borrows arr */
 struct ScrDyn *scr_error_prop_get(ScrError *e, ScrStr *key);
 
 ScrError *scr_error_retain(ScrError *e);

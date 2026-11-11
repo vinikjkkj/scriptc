@@ -1374,6 +1374,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "error.propSet": { argTypes: [null, STRING, DYN], result: VOID },
   "error.propGet": { argTypes: [null, STRING], result: DYN },
   "error.setCause": { argTypes: [null, DYN], result: VOID },
+  "error.setErrors": { argTypes: [null, DYN], result: VOID },
   "error.installOptions": { argTypes: [null, DYN], result: VOID },
   "error.installRequiredCause": { argTypes: [null, DYN], result: VOID },
   // Receiver (any error-hierarchy object) and the program-dependent
@@ -5967,10 +5968,10 @@ function validateFunction(
           }
         }
         if (e.fn === "error.ctor" || e.fn === "error.toString" || e.fn === "error.stack" || e.fn === "error.captureStack" ||
-            e.fn === "error.propSet" || e.fn === "error.propGet" || e.fn === "error.setCause" || e.fn === "error.installOptions" || e.fn === "error.installRequiredCause") {
+            e.fn === "error.propSet" || e.fn === "error.propGet" || e.fn === "error.setCause" || e.fn === "error.setErrors" || e.fn === "error.installOptions" || e.fn === "error.installRequiredCause") {
           const recv = e.args[0];
           const wantErrorRoot = e.fn === "error.toString" || e.fn === "error.stack" || e.fn === "error.captureStack" ||
-            e.fn === "error.propSet" || e.fn === "error.propGet" || e.fn === "error.setCause" || e.fn === "error.installOptions" || e.fn === "error.installRequiredCause";
+            e.fn === "error.propSet" || e.fn === "error.propGet" || e.fn === "error.setCause" || e.fn === "error.setErrors" || e.fn === "error.installOptions" || e.fn === "error.installRequiredCause";
           const ok =
             recv &&
             isBuiltinErrorObject(recv.type) &&

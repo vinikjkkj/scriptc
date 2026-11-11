@@ -11590,6 +11590,30 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
    * stored (the `%props` expando bag, the same slot `err.fatal = true`
    * uses): the construction binds to a hidden local, the cause is stored
    * through error.propSet, and the local is the value. */
+  /** `new AggregateError(errors, message?, options?)`: the error with its message, then the iterable's elements as the hidden `errors` array
+   * (a dyn array copy, the dyn boundary converting each element), then the options' cause. */
+  export function lowerAggregateErrorNew(L: Lowerer, args: readonly ts.Expression[], loc: SrcLoc, blame: ts.Node): IrExpr {
+    if (args.length < 1) L.noLowering("new AggregateError without its errors argument", blame);
+    const itemsNode = args[0]!;
+    const items = L.coerceToExpected(L.lowerExpr(itemsNode), DYN);
+    if (items.type.kind !== "dyn") L.badType(itemsNode, L.typeOf(itemsNode));
+    const msg = L.errorMessageArg(args.slice(1), loc, blame, true);
+    const made: IrExpr = { kind: "libCall", fn: "error.new", args: [msg], type: { kind: "object", className: "%AggregateError" }, loc };
+    const h = L.declareHiddenLocal("%aggNew", made.type);
+    const ref: IrExpr = { kind: "varRef", localId: h.id, type: made.type, loc };
+    const withErrors: IrExpr = {
+      kind: "seqExpr",
+      stmts: [
+        { kind: "varDecl", localId: h.id, init: made, loc },
+        { kind: "exprStmt", expr: { kind: "libCall", fn: "error.setErrors", args: [L.upcastTo(ref, "%Error"), items], type: VOID, loc }, loc },
+      ],
+      result: ref,
+      type: made.type,
+      loc,
+    };
+    return errorWithCause(L, withErrors, args.slice(1), blame);
+  }
+
   export function errorWithCause(
     L: Lowerer,
     made: IrExpr,
@@ -12382,7 +12406,7 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
       if (errInfo && errInfo.def.name === "%AggregateError") {
         // AggregateError is made by the runtime (a failed connect chain); its constructor
         // takes an array of errors and is not lowered.
-        L.noLowering("new AggregateError", expr);
+        return lowerAggregateErrorNew(L, expr.arguments ?? [], loc, expr);
       }
       if (errInfo) {
         const msg = L.errorMessageArg(expr.arguments ?? [], loc, expr, true);

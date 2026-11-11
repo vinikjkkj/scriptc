@@ -4,6 +4,7 @@
  * generic instantiation (bounded by MAX_GENERIC_INSTANCES). */
 import { programAssignsNonPlainPrototype } from "./prim-subclass-gate.js";
 import { stringFromCharCodeCallAliasOf, timerDelayArg } from "./lower-builtins.js";
+import { lowerAggregateErrorNew } from "./lower-classes.js";
 import { lowerAbsentRequireCall } from "./lower-require-absent.js";
 import * as ts from "../ts7/adapter.js";
 import { defineAccessorCallOf, liveBagRef, liveDefinePropOf, liveDepOfBinding, liveExportsOf } from "./cjs-live-exports.js";
@@ -5304,7 +5305,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       if (errInfo && errInfo.def.name === "%AggregateError") {
         // AggregateError is made by the runtime (a failed connect chain); its constructor
         // takes an array of errors and is not lowered.
-        L.noLowering("new AggregateError", expr);
+        return lowerAggregateErrorNew(L, expr.arguments, loc, expr);
       }
       if (errInfo && errInfo.def.name !== "%DOMException") {
         const msg = L.errorMessageArg(expr.arguments, loc, expr, true);

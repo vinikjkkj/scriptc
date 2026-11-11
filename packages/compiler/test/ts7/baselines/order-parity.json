@@ -27612,6 +27612,30 @@
     "<repo>/tests/corpus/25135-for-of-over-pairs-of-a-name-and-functions-with-different-results.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25136-promise-any-settles-in-node-s-microtask-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/25136-promise-any-settles-in-node-s-microtask-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25137-promise-any-rejects-with-an-aggregate-error-carrying-the-reasons.ts": {
+   "order": [
+    "<repo>/tests/corpus/25137-promise-any-rejects-with-an-aggregate-error-carrying-the-reasons.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25138-an-unhandled-aggregate-error-from-promise-any-exits-1.ts": {
+   "order": [
+    "<repo>/tests/corpus/25138-an-unhandled-aggregate-error-from-promise-any-exits-1.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25139-new-aggregate-error-keeps-a-copy-of-its-errors.ts": {
+   "order": [
+    "<repo>/tests/corpus/25139-new-aggregate-error-keeps-a-copy-of-its-errors.ts"
+   ],
+   "diags": []
   }
  }
 }

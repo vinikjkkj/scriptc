@@ -15948,6 +15948,18 @@ void scr_error_set_errors(ScrError *e, ScrDyn *arr) {
   scr_dyn_release(arr); /* the caller's +1 */
 }
 
+/* The compiled `new AggregateError(errors)`: stores a +1 copy of the borrowed dyn array as the hidden `errors`. */
+void scr_error_set_errors_b(ScrError *e, ScrDyn *arr) {
+  /* The constructor iterates its argument into a FRESH array: a later push to the caller's array is not seen. */
+  if (arr->kind != SCR_DYN_ARR) {
+    scr_error_set_errors(e, scr_dyn_retain(arr));
+    return;
+  }
+  ScrDyn *copy = scr_dyn_new_arr();
+  for (size_t i = 0; i < arr->v.arr.len; i++) scr_dyn_arr_push(copy, scr_dyn_retain(arr->v.arr.items[i]));
+  scr_error_set_errors(e, copy);
+}
+
 void scr_error_set_cause(ScrError *e, ScrDyn *value) {
   scr_error_install_props_drop(&scr_error_props_drop_impl);
   if (e->props == NULL || e->props->kind != SCR_DYN_OBJ) {

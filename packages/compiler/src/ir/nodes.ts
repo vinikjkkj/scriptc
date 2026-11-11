@@ -5949,6 +5949,8 @@ export type IrLibFn =
    * creates an ordinary enumerable property, and only the constructor
    * option is hidden. Never throws. */
   | "error.setCause"
+  /** `new AggregateError(errors, ...)`: the hidden non-enumerable `errors` array (a dyn array, borrowed; the runtime keeps its own +1). */
+  | "error.setErrors"
   /** `super(message, options)` / `new Error(message, options)` with a
    * NON-literal options value (a dyn box): InstallErrorCause (ES2022) at
    * run time. Borrowed receiver and dyn options; scr_error_install_options

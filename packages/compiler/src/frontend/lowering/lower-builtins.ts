@@ -7732,6 +7732,18 @@ let digestInputValueDispatches = 0;
       const ekey: IrExpr = { kind: "strLit", value: member, type: STRING, loc: eloc };
       return { kind: "libCall", fn: "error.ext", args: [erecv, ekey], type: DYN, loc: eloc };
     }
+    if (member === "errors" && recvT.className === "%AggregateError" && L.isStdlibMember(expr)) {
+      // AggregateError's own non-enumerable `errors` (an `any[]`): the hidden data the runtime stored at construction, as a dyn array.
+      const aloc = locOf(expr);
+      const arecv = L.lowerExpr(expr.expression);
+      return {
+        kind: "libCall",
+        fn: "error.propGet",
+        args: [L.upcastTo(arecv, "%Error"), { kind: "strLit", value: "errors", type: STRING, loc: aloc }],
+        type: DYN,
+        loc: aloc,
+      };
+    }
     if (member === "cause") {
       // ES2022 `Error.cause`: the own property the options form stored in
       // the expando bag (the dyn undefined when none was).
@@ -12561,12 +12573,39 @@ function inertAliasExpr(L: Lowerer, e: ts.Expression): boolean {
       );
     }
     if (member === "any") {
-      L.noLowering(
-        `Promise.${member}`,
-        call,
-        "await each element in a loop (Promise.all compiles over a Promise<T>[] array, " +
-          "Promise.race over an array literal)",
-      );
+      // Promise.any runs on the dyn statics tier (scr_promise_static.c: the spec's PerformPromiseAny, AggregateError "All promises were
+      // rejected" with its `errors`): the entries box as dyn values (a promise by reference, anything else by value), the call goes to the
+      // Promise constructor value's `any`, and the dyn promise it answers adopts into the checker's Promise<T>, whose payload converts
+      // through the same claim adapter every declaration-claimed promise uses.
+      const argNode = call.arguments.length === 1 ? call.arguments[0]! : null;
+      const resultT = L.mapTypeOf(L.typeOf(call));
+      if (!argNode || resultT?.kind !== "promise") {
+        L.noLowering(`Promise.${member}`, call, "one iterable of promises or values, with a representable combined result type");
+      }
+      const toDyn = (e: IrExpr, at: ts.Node): IrExpr => {
+        const d = L.coerceToExpected(e, DYN);
+        if (d.type.kind !== "dyn") L.badType(at, L.typeOf(at));
+        return d;
+      };
+      let list: IrExpr;
+      if (ts.isArrayLiteralExpression(argNode) && !argNode.elements.some(ts.isSpreadElement)) {
+        list = { kind: "dynArrLit", elems: argNode.elements.map((el) => toDyn(L.lowerExpr(el), el)), type: DYN, loc };
+      } else {
+        list = toDyn(L.lowerExpr(argNode), argNode);
+      }
+      const ctor: IrExpr = { kind: "libCall", fn: "dyn.promiseCtor", args: [], type: DYN, loc };
+      const invoked: IrExpr = {
+        kind: "dynInvoke",
+        recv: ctor,
+        method: "any",
+        calleeName: "Promise.any",
+        args: [list],
+        type: DYN,
+        loc,
+      };
+      const adopted = L.adoptDynIntoPromise(invoked, { kind: "promise", inner: DYN });
+      if (adopted === null) L.noLowering(`Promise.${member}`, call, "the dyn promise did not adopt");
+      return L.coerceToExpected(adopted, resultT);
     }
     // Promise.withResolvers<T>(): the executor pieces without an
     // executor — a pending promise plus its runtime resolve/reject
