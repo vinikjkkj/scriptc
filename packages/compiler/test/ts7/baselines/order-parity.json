@@ -27594,6 +27594,12 @@
     "<repo>/tests/corpus/25097-forty-thousand-async-generator-fibers-alive-at-once.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25102-string-of-a-uint8array-joins-its-decimals-at-every-size-and-digit-width.ts": {
+   "order": [
+    "<repo>/tests/corpus/25102-string-of-a-uint8array-joins-its-decimals-at-every-size-and-digit-width.ts"
+   ],
+   "diags": []
   }
  }
 }
