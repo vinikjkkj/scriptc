@@ -27486,6 +27486,12 @@
     "<repo>/tests/corpus/24943-math-members-with-missing-and-extra-arguments.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/24944-math-max-and-min-and-every-member-as-first-class-values.ts": {
+   "order": [
+    "<repo>/tests/corpus/24944-math-max-and-min-and-every-member-as-first-class-values.ts"
+   ],
+   "diags": []
   }
  }
 }

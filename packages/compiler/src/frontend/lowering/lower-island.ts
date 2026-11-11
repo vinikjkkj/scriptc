@@ -2178,10 +2178,11 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
    * The admission rule is the CHECKER's type, not a table of arities: the
    * lift is built only when the declared type maps to exactly
    * `(f64 × arity) => f64`, which is what `lib.es5.d.ts` declares for
-   * every fixed-arity entry of STATIC_MATH_FNS. `min`/`max` are declared
-   * `(...values: number[]) => number`, which does not map to that shape,
-   * so they keep the fence rather than silently becoming binary — the
-   * one place where the n-ary call form and a value form would disagree.
+   * every fixed-arity entry of STATIC_MATH_FNS. `min`/`max`/`hypot` are declared
+   * `(...values: number[]) => number`: a rest-slot signature, so their value
+   * is the lifted closure over the packed argument array (`math.maxArr`,
+   * `math.minArr`, `math.hypotArr`), which is what a call with any number of
+   * arguments reaches.
    *
    * One divergence, stated (the Number lift's, verbatim): the closure is
    * a fresh allocation per read, so `Math.pow === Math.pow` is false
@@ -2196,9 +2197,11 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
   export function mathMemberValue(L: Lowerer, member: string, tsType: ts.Type, loc: SrcLoc): IrExpr | null {
     const entry = own(STATIC_MATH_FNS, member);
     if (entry === undefined) return null;
-    // Math.hypot is declared `(...values: number[]) => number`: a REST-slot signature, whose ABI is one number[] holding the call's arguments
-    // (call sites pack them). The lifted function hands that array to the n-ary runtime form; every other member is fixed-arity f64.
-    const variadic = member === "hypot";
+    // Math.hypot, Math.max and Math.min are declared `(...values: number[]) => number`: a REST-slot signature, whose ABI is one number[]
+    // holding the call's arguments (call sites pack them). The lifted function hands that array to the n-ary runtime form; every other
+    // member is fixed-arity f64.
+    const variadic = member === "hypot" || member === "max" || member === "min";
+    const arrFn = member === "max" ? "math.maxArr" : member === "min" ? "math.minArr" : "math.hypotArr";
     const params: IrType[] = [];
     if (variadic) params.push(arrayOf(F64));
     else for (let i = 0; i < entry.arity; i++) params.push(F64);
@@ -2218,7 +2221,7 @@ import { PoisonError, dynUndefinedExpr, newFnCtx, own, referencedValueSymbol } f
             kind: "return",
             value: {
               kind: "libCall",
-              fn: variadic ? "math.hypotArr" : entry.fn,
+              fn: variadic ? arrFn : entry.fn,
               args: ids.map((id, i) => ({ kind: "varRef", localId: id, type: params[i]!, loc }) as IrExpr),
               type: F64,
               loc,
