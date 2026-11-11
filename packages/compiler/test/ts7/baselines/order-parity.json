@@ -16490,6 +16490,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/2750-class-view-optional-and-inherited-members/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/2750-class-view-optional-and-inherited-members/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2751-class-with-async-method-boxed-into-unknown/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/2751-class-with-async-method-boxed-into-unknown/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2719-freeze-builder-binding.ts": {
    "order": [
     "<repo>/tests/corpus/2719-freeze-builder-binding.ts"
