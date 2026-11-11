@@ -13,7 +13,7 @@ import type { IcuUse } from "../ir/nodes.js";
 
 const execFileAsync = promisify(execFile);
 
-const RUNTIME_SOURCES = ["scr_number.c", "scr_string.c", "scr_array.c", "scr_bytes.c", "scr_bytes_io.c", "scr_map.c", "scr_closure.c", "scr_object.c", "scr_union.c", "scr_exception.c", "scr_error.c", "scr_console.c", "scr_lib.c", "scr_path.c", "scr_json.c", "scr_async.c", "scr_coro.c", "scr_child.c", "scr_cycle.c", "scr_random_fill.c", "scr_stack_margin.c", "scr_arm_pow.c"];
+const RUNTIME_SOURCES = ["scr_number.c", "scr_string.c", "scr_array.c", "scr_bytes.c", "scr_bytes_io.c", "scr_map.c", "scr_closure.c", "scr_object.c", "scr_union.c", "scr_exception.c", "scr_error.c", "scr_console.c", "scr_lib.c", "scr_path.c", "scr_json.c", "scr_async.c", "scr_coro.c", "scr_child.c", "scr_cycle.c", "scr_random_fill.c", "scr_stack_margin.c"];
 
 /* ---------------------- the runtime link-closure check ---------------------
  * The selection above and the gated arms in compileC/compileLibArchive are a
@@ -1848,6 +1848,23 @@ function coreRuntimeSources(url: boolean, coro: boolean, dynArr: boolean, frozen
   return out;
 }
 
+/** True when the program, or any object it links, references the Math.pow family (scr_math_pow, scr_math_pow_lit, scr_math_pow_half). */
+function usesPow(opts: { cPath: string; linkInputs?: readonly string[] }): boolean {
+  for (const f of [opts.cPath, ...(opts.linkInputs ?? [])]) {
+    try {
+      if (readFileSync(f, "latin1").includes("scr_math_pow")) return true;
+    } catch {
+      /* unreadable input: the link reports it */
+    }
+  }
+  return false;
+}
+
+/** The pow TU, plus the vendored ARM routine it calls on a win32 target (the file is empty elsewhere). */
+function powSources(driver: CcDriver): string[] {
+  return targetPlatform(driver) === "win32" ? ["scr_math_pow.c", "scr_arm_pow.c"] : ["scr_math_pow.c"];
+}
+
 const LIB_RUNTIME_SOURCES = [
   ...RUNTIME_SOURCES.filter(
     (f) => f !== "scr_async.c" && f !== "scr_coro.c" && f !== "scr_child.c" && f !== "scr_random_fill.c",
@@ -1926,6 +1943,8 @@ export async function compileLibArchive(opts: LibArchiveOptions): Promise<void> 
     // carries no -l flags. Never present off win32, so host archives
     // cannot change by a byte.
     ...(targetPlatform(driver) === "win32" ? ["scr_win.c"] : []),
+    // An archive member is pulled only when referenced, so the pow TU (and the vendored ARM routine on win32) rides every archive.
+    ...powSources(driver),
     ...(regex ? ["scr_regex.c"] : []),
     ...(opts.assert || regex || opts.symbol ? ["scr_assert.c"] : []),
     ...(opts.inspect ? ["scr_inspect.c"] : []),
@@ -2627,6 +2646,9 @@ export async function compileC(opts: CcOptions): Promise<void> {
     // moves later. Two sources for one fact is what made the four faces.
     ...(coreRuntimeSources(url, coro, dynArr, frozenArr).includes("scr_coro.c") ? ["-DSCR_CORO_LANE"] : []),
     ...coreRuntimeSources(url, coro, dynArr, frozenArr).map((f) => rt(join(rtDir, f))),
+    // Math.pow and **: a TU of their own, linked only when the program (or an object it links) names scr_math_pow. On a win32 target it
+    // brings the vendored ARM pow (about a page of code and tables) with it, so a static hello-world keeps its size class.
+    ...(usesPow(opts) ? powSources(driver).map((f) => rt(join(rtDir, f))) : []),
     ...(opts.copying ? [rt(join(rtDir, "scr_copying.c"))] : []),
     // win32 targets compile the libc-shim TU (stpcpy, arc4random_buf,
     // gmtime_r, strcasestr — the _WIN32 block in scr_runtime.h declares
