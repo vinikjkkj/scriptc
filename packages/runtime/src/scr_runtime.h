@@ -7312,6 +7312,10 @@ ScrStr *scr_dyn_symbol_descriptive(const ScrDyn *d);
 ScrStr *scr_dyn_template_to_string(const ScrDyn *d, ScrStr *(*walker)(const ScrDyn *));
 /* String(unknown) at its explicit call site: a Symbol answers "Symbol(desc)". */
 ScrStr *scr_dyn_string_explicit(const ScrDyn *d, ScrStr *(*walker)(const ScrDyn *));
+/* `String(e)` / `${e}` / ToPrimitive over a catch binding: a payload that is a thrown DYN (an array, an object, a class instance with its own
+ * toString/valueOf that crossed into the cell as a dyn) converts through the dyn string paths above (hint 0 = String(), 1 = template span, 2 =
+ * `+`'s default hint); every other payload is scr_caught_to_string's answer. Borrows the box; +1; may leave an exception pending (user code). */
+ScrStr *scr_caught_to_string_dyn(const ScrCaught *c, int hint, ScrStr *(*walker)(const ScrDyn *));
 /* Keyed read on a HANDLE box (the emitted sc_dyn_key_get's arm): the
  * tag's modeled properties answer boxed values; everything else answers
  * the undefined singleton (the checked-dynamic tree's own-property stance — SEMANTICS.md)

@@ -1429,6 +1429,16 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
       if (value.kind === "unitLit") {
         return { kind: "throw", value: { kind: "dynFrom", value, type: DYN, loc: value.loc }, loc: locOf(stmt) };
       }
+      // A thrown array, record or standalone class instance rides the dyn representation (a copy for data, the instance by reference),
+      // which is what lets String(e) / `${e}` / `e + ""` over the catch binding run the value's own toString/valueOf and join an
+      // array like Node. Hierarchy classes keep the OBJ arm (catch-side instanceof reads it); a type the dyn unit cannot hold stays as it was.
+      if (value.type.kind === "array" || value.type.kind === "record" || value.type.kind === "object") {
+        const info = value.type.kind === "object" ? L.classes.get(value.type.className) : undefined;
+        if (value.type.kind !== "object" || (info !== undefined && !L.inHierarchy(info) && !RUNTIME_ERROR_CLASSES.has(value.type.className))) {
+          const boxed = L.coerceToExpected(value, DYN);
+          if (boxed.type.kind === "dyn") return { kind: "throw", value: boxed, loc: locOf(stmt) };
+        }
+      }
       // A dyn throw rides the REF cell arm (scr_throw_ref over the checked-dynamic tree
       // node — identity preserved through catch bindings, caughtToDyn
       // passes it back by reference). The JS-lane traced-call shape:

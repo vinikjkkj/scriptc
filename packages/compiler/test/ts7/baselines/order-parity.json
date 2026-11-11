@@ -27564,6 +27564,12 @@
     "<repo>/tests/corpus/25122-plus-with-a-string-on-an-unknown-converts-like-node.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25128-string-of-a-thrown-array-or-object-runs-its-own-conversion.ts": {
+   "order": [
+    "<repo>/tests/corpus/25128-string-of-a-thrown-array-or-object-runs-its-own-conversion.ts"
+   ],
+   "diags": []
   }
  }
 }

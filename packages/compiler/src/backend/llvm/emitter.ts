@@ -9050,10 +9050,16 @@ class LlEmitter {
         if (v.type.kind === "caught") {
           // String(e) / `${e}` on a catch binding: JS's String() over the
           // snapshot (scr_caught_to_string — borrows the box, +1 result).
-          this.declare(`declare ptr @scr_caught_to_string(ptr)`);
+          // A thrown DYN payload (array, object, class instance with its own toString/valueOf) converts through the dyn string
+          // paths (the C twin's scr_caught_to_string_dyn), which can run user code: pending check after, like the dyn operand arm.
+          this.declare(`declare ptr @scr_caught_to_string_dyn(ptr, i32, ptr)`);
+          const hint = e.hint === "default" ? 2 : e.hint === "template" ? 1 : 0;
+          const helper = this.dyn.dynToStrHelper();
           const t = B.tmp();
-          B.line(`${t} = call ptr @scr_caught_to_string(ptr ${v.name})`);
-          return this.own({ name: t, type: e.type });
+          B.line(`${t} = call ptr @scr_caught_to_string_dyn(ptr ${v.name}, i32 ${hint}, ptr @${helper})`);
+          const out = this.own({ name: t, type: e.type });
+          this.emitPendingCheck();
+          return out;
         }
         if (v.type.kind === "dyn") {
           // String(unknown): dispatch over the dyn kind (dyn.ts's sc_ds —

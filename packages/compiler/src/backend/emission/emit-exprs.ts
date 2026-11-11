@@ -911,8 +911,13 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           return t;
         }
         if (v.type.kind === "caught") {
-          // String(e) over the exception snapshot. Box borrowed; result +1.
-          return E.newTemp(e.type, `scr_caught_to_string(${v.name})`);
+          // String(e) over the exception snapshot. Box borrowed; result +1. A thrown DYN payload (an array, an object or a class
+          // instance with its own toString/valueOf) goes through the dyn string paths, which can run user code: the result joins
+          // the frame before the pending check, like the dyn operand arm below.
+          const hint = e.hint === "default" ? 2 : e.hint === "template" ? 1 : 0;
+          const t = E.newTemp(e.type, `scr_caught_to_string_dyn(${v.name}, ${hint}, ${E.dynToStrHelper()})`);
+          E.emitPendingCheck();
+          return t;
         }
         if (v.type.kind === "dyn") {
           // String(unknown): dispatch over the dyn kind (dynToStrHelper —

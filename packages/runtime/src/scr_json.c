@@ -6568,6 +6568,13 @@ ScrStr *scr_dyn_string_explicit(const ScrDyn *d, ScrStr *(*walker)(const ScrDyn 
   return walker(d);
 }
 
+ScrStr *scr_caught_to_string_dyn(const ScrCaught *c, int hint, ScrStr *(*walker)(const ScrDyn *)) {
+  if (c->kind != SCR_EXC_REF || c->retain_fn != scr_dyn_retain_v) return scr_caught_to_string(c);
+  const ScrDyn *d = (const ScrDyn *)c->payload;
+  if (hint == 2) return scr_dyn_to_primitive_string(d);
+  return hint == 1 ? scr_dyn_template_to_string(d, walker) : scr_dyn_string_explicit(d, walker);
+}
+
 /* A template literal's ToString of an unknown span: a Symbol throws, everything
  * else is the per-program String(unknown) walker's answer. */
 ScrStr *scr_dyn_template_to_string(const ScrDyn *d, ScrStr *(*walker)(const ScrDyn *)) {
