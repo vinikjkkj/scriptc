@@ -79,16 +79,22 @@ OPT[k as K]('x');
 export {};
 `;
 
-/* Every shape both rungs must decline, and nothing they must not. */
+/* Every shape both rungs must decline, and nothing they must not. The two callee shapes `FNS[(k + '')]` and `FNS[key()]` left this list when
+ * v8CalleeText learned CallPrinter's spelling of them (Node: `FNS[(k + "")] is not a function`, `FNS[key(...)] is not a function`): they are
+ * served now, pinned by P_SPELLED below. */
 const P_DECL = `${TABLES}interface Obj { m(): string }
 const OBJS: Record<K, Obj> = { a: { m: () => 'A' }, b: { m: () => 'B' } };
-function key(): K { return k as K }
-FNS[(k + '') as K]('x', 'y');
-FNS[key()]('x', 'y');
 console.log(OBJS[k as K].m());
 ROWS[k as K].v = 'Z';
 [ROWS[k as K].v] = ['Z'];
 delete (ROWS as unknown as Record<string, Record<string, string>>)[k].v;
+export {};
+`;
+
+/* The computed-key and call-key callees, spelled the way V8's CallPrinter prints them. */
+const P_SPELLED = `${TABLES}function key(): K { return k as K }
+FNS[(k + '') as K]('x', 'y');
+FNS[key()]('x', 'y');
 export {};
 `;
 
@@ -222,6 +228,13 @@ describe("the two keyed-read consumers that throw the way Node throws", () => {
     const off = await emit(P_DECL, DIALS);
     expect(off.diags).toEqual([]);
     expect(off.tu).toBe(on.tu);
+  }, 600_000);
+
+  test("the computed-key and call-key callees carry V8's own spelling of the access", async () => {
+    const on = await emit(P_SPELLED, []);
+    expect(on.diags).toEqual([]);
+    expect(on.tu).toContain('"FNS[(k + \\"\\")] is not a function"');
+    expect(on.tu).toContain('"FNS[key(...)] is not a function"');
   }, 600_000);
 
   test("nothing becomes a compile-time fence, and no bracket is introduced", async () => {
