@@ -2908,7 +2908,25 @@ class LlEmitter {
       `declare void @scr_init()`,
       `declare void @scr_lib_init(i32, ptr)`,
     );
-    for (const d of this.decls) out.push(d);
+    for (const d of this.decls) {
+      if (d === "declare zeroext i1 @scr_exc_pending()") {
+        // The pending test is on the hot path of every may-throw call site; the C lane reads it inline (a macro over
+        // scr_exc_cur_cell, scr_runtime.h), so this lane defines the same inline read under the same name. Internal
+        // linkage shadows the runtime's out-of-line definition for this module's calls. ScrExcCell.kind is the first
+        // member (a 4-byte enum).
+        out.push(
+          `@scr_exc_cur_cell = external global ptr`,
+          `define internal zeroext i1 @scr_exc_pending() alwaysinline nounwind {`,
+          `  %c = load ptr, ptr @scr_exc_cur_cell`,
+          `  %k = load i32, ptr %c`,
+          `  %r = icmp ne i32 %k, 0`,
+          `  ret i1 %r`,
+          `}`,
+        );
+        continue;
+      }
+      out.push(d);
+    }
     out.push(``);
     for (const [text, lit] of this.literals) {
       // Immortal interned ScrStr: { rc = UINT32_MAX, len, cap = len, bytes\0 }

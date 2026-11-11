@@ -36,29 +36,32 @@ _Noreturn void scr_trap_fmt(const char *fmt, ...) {
 #endif /* !SCR_LIB */
 
 static ScrExcCell scr_main_exc; /* fiber zero (the main stack) */
-static ScrExcCell *scr_cur = &scr_main_exc;
+/* Global (not static): scr_exc_pending is a macro over it (scr_runtime.h) so the emitted pending checks read it inline. */
+ScrExcCell *scr_exc_cur_cell = &scr_main_exc;
 
 /* Fiber switching (scr_async.c) points the exception machinery at the
  * incoming fiber's cell; returns the previous cell. */
 ScrExcCell *scr_exc_swap_cell(ScrExcCell *cell) {
-  ScrExcCell *prev = scr_cur;
-  scr_cur = cell ? cell : &scr_main_exc;
+  ScrExcCell *prev = scr_exc_cur_cell;
+  scr_exc_cur_cell = cell ? cell : &scr_main_exc;
   return prev;
 }
 
 /* The ACTIVE cell, for runtime code that moves a pending payload out of it
  * (a new-Promise executor throw rejecting the promise). */
-ScrExcCell *scr_exc_current_cell(void) { return scr_cur; }
+ScrExcCell *scr_exc_current_cell(void) { return scr_exc_cur_cell; }
 
-#define scr_exc_kind (scr_cur->kind)
-#define scr_exc_f64 (scr_cur->f64)
-#define scr_exc_bool (scr_cur->b)
-#define scr_exc_payload (scr_cur->payload)
-#define scr_exc_retain_fn (scr_cur->retain_fn)
-#define scr_exc_release_fn (scr_cur->release_fn)
-#define scr_exc_trace_fn (scr_cur->trace_fn)
+#define scr_exc_kind (scr_exc_cur_cell->kind)
+#define scr_exc_f64 (scr_exc_cur_cell->f64)
+#define scr_exc_bool (scr_exc_cur_cell->b)
+#define scr_exc_payload (scr_exc_cur_cell->payload)
+#define scr_exc_retain_fn (scr_exc_cur_cell->retain_fn)
+#define scr_exc_release_fn (scr_exc_cur_cell->release_fn)
+#define scr_exc_trace_fn (scr_exc_cur_cell->trace_fn)
 
-bool scr_exc_pending(void) { return scr_exc_kind != SCR_EXC_NONE; }
+/* Parenthesized: scr_exc_pending is a function-like macro in the header; this is the out-of-line definition the LLVM lane's
+ * address-taking or non-inlined callers still link against. */
+bool (scr_exc_pending)(void) { return scr_exc_kind != SCR_EXC_NONE; }
 
 /* Release the current payload (if any) and reset to NONE. Shared by clear,
  * the uncaught printer, and every throw (replace semantics). */
