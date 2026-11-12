@@ -934,6 +934,25 @@ static void scr_stack_poison_selftest(ScrStack *s) {
 #endif
 
 struct ScrFiber {
+  /* THE ENVELOPE PREFIX. A stackless envelope (queueMicrotask, a raw continuation, a parked await) rides the ready queue as a ScrFiber* but is
+   * only these four words: scr_resume_fiber reads micro_raw, then micro_cb, and frees it before it touches any other member, and no other
+   * code looks inside a queued entry. So an envelope is allocated as just this prefix (scr_envelope_new) and a real fiber as the whole
+   * record (sizeof is over a kilobyte, almost all of it the exception cell). Keep these first and keep that order of reads. */
+  /* queueMicrotask entries: a stackless pseudo-fiber — the READY queue's
+   * FIFO IS the microtask queue, so a closure rides it as a fiber-shaped
+   * envelope and scr_resume_fiber runs it on the main stack (a throw is
+   * an UNCAUGHT exception, like Node's queueMicrotask, never a
+   * rejection). Owned; NULL on real fibers. */
+  ScrClosure *micro_cb;
+  /* The runtime's OWN stackless envelope, on the same queue: a raw hook
+   * plus one owned argument. The native async-generator sink rides it —
+   * a settlement that must reach the main stack a microtask turn later
+   * has no ScrDyn to box, and boxing one would put a cycle-collected
+   * closure on a path the collector never needs to see. Owned: the
+   * envelope releases `micro_arg` through `micro_arg_release`. */
+  void (*micro_raw)(void *);
+  void *micro_arg;
+  void (*micro_arg_release)(void *);
   ScrStack *st;      /* the context we run on; NULL on the stackless
                       * microtask envelopes at the bottom of this struct */
   ScrCtx *return_to; /* whoever resumed us last (spawner or the loop) */
@@ -951,25 +970,17 @@ struct ScrFiber {
    * argpack; the trampoline copies it out before the spawner resumes. */
   void *argpack;
   void (*entry)(ScrFiber *self, void *argpack);
-  /* queueMicrotask entries: a stackless pseudo-fiber — the READY queue's
-   * FIFO IS the microtask queue, so a closure rides it as a fiber-shaped
-   * envelope and scr_resume_fiber runs it on the main stack (a throw is
-   * an UNCAUGHT exception, like Node's queueMicrotask, never a
-   * rejection). Owned; NULL on real fibers. */
-  ScrClosure *micro_cb;
-  /* The runtime's OWN stackless envelope, on the same queue: a raw hook
-   * plus one owned argument. The native async-generator sink rides it —
-   * a settlement that must reach the main stack a microtask turn later
-   * has no ScrDyn to box, and boxing one would put a cycle-collected
-   * closure on a path the collector never needs to see. Owned: the
-   * envelope releases `micro_arg` through `micro_arg_release`. */
-  void (*micro_raw)(void *);
-  void *micro_arg;
-  void (*micro_arg_release)(void *);
 #ifdef SCR_ASAN_FIBERS
   void *fake_stack;
 #endif
 };
+
+/* A zeroed stackless envelope: the prefix of a ScrFiber up to `st` (see the struct). Never hand one to anything that reads past the prefix. */
+static ScrFiber *scr_envelope_new(void) {
+  ScrFiber *f = calloc(1, offsetof(struct ScrFiber, st));
+  if (!f) scr_oom();
+  return f;
+}
 
 /* ── AsyncLocalStorage (node:async_hooks) ─────────────────────────────
  * Stores are process-lived ids; the CONTEXT is an immutable refcounted
@@ -4394,8 +4405,7 @@ ScrDyn *scr_set_interval_dyn_value(void) {
  * main stack; a throw is an uncaught exception (Node's queueMicrotask),
  * never a rejection. */
 void scr_queue_microtask(ScrClosure *cb) {
-  ScrFiber *f = calloc(1, sizeof *f);
-  if (!f) scr_oom();
+  ScrFiber *f = scr_envelope_new();
   f->micro_cb = cb; /* ownership moves in */
   scr_ready_push(f);
 }
@@ -4404,8 +4414,7 @@ void scr_queue_microtask(ScrClosure *cb) {
  * `arg`'s reference moving in (released after fn returns). */
 void scr_queue_microtask_raw(void (*fn)(void *), void *arg,
                              void (*arg_release)(void *)) {
-  ScrFiber *f = calloc(1, sizeof *f);
-  if (!f) scr_oom();
+  ScrFiber *f = scr_envelope_new();
   f->micro_raw = fn;
   f->micro_arg = arg;
   f->micro_arg_release = arg_release;
@@ -4430,8 +4439,7 @@ void scr_queue_microtask_raw(void (*fn)(void *), void *arg,
  * `fn(arg)` runs on the main stack when the turn comes; it owns `arg`. */
 static void scr_promise_park_envelope(ScrPromise *p, void (*fn)(void *), void *arg,
                                       void (*arg_release)(void *)) {
-  ScrFiber *f = calloc(1, sizeof *f);
-  if (!f) scr_oom();
+  ScrFiber *f = scr_envelope_new();
   f->micro_raw = fn;
   f->micro_arg = arg;
   f->micro_arg_release = arg_release;
