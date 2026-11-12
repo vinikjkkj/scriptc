@@ -148,6 +148,20 @@ static void scr_dyncen_walk(ScrDynCenKind *rows) {
       }
       break;
     }
+    case SCR_DYN_NUM: {
+      double v = d->v.num;
+      int c;
+      if (d->rc == (size_t)-1) r->num_hist[17]++;
+      if (v != v || v > 9e15 || v < -9e15) c = 0;
+      else if (v == 0.0) { unsigned long long bits; memcpy(&bits, &v, sizeof bits); c = (bits >> 63) ? 1 : 5; }
+      else if (v != (double)(long long)v) c = 0;
+      else {
+        long long x = (long long)v;
+        c = x < -128 ? 2 : x < -1 ? 3 : x == -1 ? 4 : x == 1 ? 6 : x < 16 ? 7 : x < 32 ? 8 : x < 64 ? 9 : x < 128 ? 10 : x < 256 ? 11 : x < 512 ? 12 : x < 1024 ? 13 : x < 4096 ? 14 : x < 65536 ? 15 : 16;
+      }
+      r->num_hist[c]++;
+      break;
+    }
     case SCR_DYN_STR: {
       const ScrStr *s = d->v.str;
       if (!s) { r->n_empty_buf++; break; }
