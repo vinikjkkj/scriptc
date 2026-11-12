@@ -27618,6 +27618,12 @@
     "<repo>/tests/corpus/25103-short-string-of-unknown-results-held-after-a-large-stringify-keep-exact-contents.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25150-method-reading-its-own-prototype-method-and-a-base-class-property-off-a-detached-receiver.js": {
+   "order": [
+    "<repo>/tests/corpus/25150-method-reading-its-own-prototype-method-and-a-base-class-property-off-a-detached-receiver.js"
+   ],
+   "diags": []
   }
  }
 }
