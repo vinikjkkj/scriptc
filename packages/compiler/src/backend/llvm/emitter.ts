@@ -96,7 +96,7 @@ import { seqScopedLocals, stackCheckPolicy, stackCheckTargetHasFloor, stackMargi
 // S0 ran neither tsc nor a test that imports this file.
 import { coroPlans } from "../../ir/coro-plans.js";
 import { libCallPointKind } from "../../ir/suspends.js";
-import { coroElidedLocals, suspensionLiveness, type StacklessPlan } from "../../ir/liveness.js";
+import { coroElidedLocals, stacklessRefusal, suspensionLiveness, type StacklessPlan } from "../../ir/liveness.js";
 import { slotCarryLiveness, withoutSlotCarry } from "./slot-liveness.js";
 import {
   CoroRefusedError,
@@ -125,6 +125,7 @@ import {
   type CoroViolations,
   PromotedTempInPhiError,
 } from "./blocks.js";
+import { failOnFiberLane, type FiberLaneUse } from "../../ir/fiber-census.js";
 import { BORROWING_DYN_LIBCALLS, isStableReceiverOperand, singleWriterLocals, writesLocal } from "../../ir/analysis.js";
 import { SCR_BYTES_LEN_OFFSET } from "./runtime-layout.js";
 import {
@@ -2415,6 +2416,7 @@ class LlEmitter {
     const classObjDefs = emitClassObjDefs(this, this.classMeta, this.classObjs, this.fnByName, (t) => this.llType(t));
     const wrappers = this.emitFnValueDefs();
     const asyncDefs = this.emitAsyncScaffolding();
+    failOnFiberLane("llvm", this.fiberLaneUses);
 
     // Module globals, FIRST OCCURRENCE per id: a class-expression static
     // instantiated through several mixin applications registers one global
@@ -3897,6 +3899,15 @@ class LlEmitter {
    * for the runtime to reject with), and a spawn wrapper call sites and
    * closures enter through (packs the args +1, scr_async_spawn runs the
    * fiber eagerly to its first suspension and returns the promise). */
+  /** The functions this emission gave the fiber lane (the SCRIPTC_NO_FIBERS census), with the reason. */
+  private fiberLaneUses: FiberLaneUse[] = [];
+
+  private fiberLaneReason(fn: IrFunction): string {
+    const plan = this.coroCensusPlans.get(fn.name);
+    if (plan === undefined) return stacklessRefusal(fn) ?? "no-plan";
+    return this.coroRefusedAtEmission.get(fn.name) ?? coroRefusalReason(fn, plan) ?? "?";
+  }
+
   private emitAsyncScaffolding(): string[] {
     const out: string[] = [];
     for (const fn of this.mod.functions) {
@@ -3917,6 +3928,7 @@ class LlEmitter {
         appendAll(out, this.emitCoroScaffolding(fn, coro));
         continue;
       }
+      this.fiberLaneUses.push({ fn: fn.name, reason: this.fiberLaneReason(fn) });
       const pack = mangleArgPack(fn.name);
       const lifted = fn.captures !== undefined;
       const fieldTys = [...(lifted ? ["ptr"] : []), ...fn.params.map((p) => this.llType(p.type))];
@@ -4099,6 +4111,7 @@ class LlEmitter {
         appendAll(out, this.emitCoroScaffolding(fn, coroGen));
         continue;
       }
+      this.fiberLaneUses.push({ fn: fn.name, reason: this.fiberLaneReason(fn) });
       const isAsyncGen = fn.async === true;
       const pack = mangleArgPack(fn.name);
       const lifted = fn.captures !== undefined;
