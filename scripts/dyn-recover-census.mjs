@@ -119,7 +119,7 @@ const DECL = /^\s*(?:const\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\*\s*([A-Za-z_][A-Za-z
 // refcount retain, or a union narrow (which hands back the arm's payload
 // pointer, not a fresh struct). `sc_f__x25_union_narrow_183` is the step
 // between zapo's `pickContextInfoTarget` result and the store that is lost.
-const COPY = /^\s*(?:(?:const\s+)?[A-Za-z_][A-Za-z0-9_]*\s*\*\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:sc_rretain_r\d+|scr_arr_retain|scr_union_retain|sc_f__x25_union_narrow_\d+)?\(?\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)?\s*;\s*(?:\/\*.*)?$/;
+const COPY = /^\s*(?:(?:const\s+)?[A-Za-z_][A-Za-z0-9_]*\s*\*\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:sc_rretain_r\d+|scr_arr_retain|scr_union_retain|sc_f__x25_union_narrow_[A-Za-z0-9]+)?\(?\s*([A-Za-z_][A-Za-z0-9_]*)\s*\)?\s*;\s*(?:\/\*.*)?$/;
 // `ScrUnion *u = scr_union_new_ref(1, rec, ...)` — a union built AROUND the
 // recovered record holds it by reference, so returning the union returns the
 // record. The checker sometimes hands back the union itself (zapo's
