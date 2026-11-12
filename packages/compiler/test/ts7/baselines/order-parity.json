@@ -27810,6 +27810,42 @@
     "<repo>/tests/corpus/25153-module-initialisers-with-top-level-await-run-as-state-machines-through-diamonds-and-cycles/main.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25154-every-async-result-kind-and-await-shape-answers-the-same-values-as-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25154-every-async-result-kind-and-await-shape-answers-the-same-values-as-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25155-a-suspension-inside-a-finally-body-answers-on-every-completion-path.ts": {
+   "order": [
+    "<repo>/tests/corpus/25155-a-suspension-inside-a-finally-body-answers-on-every-completion-path.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25156-values-carried-across-a-park-in-nested-and-widened-shapes.ts": {
+   "order": [
+    "<repo>/tests/corpus/25156-values-carried-across-a-park-in-nested-and-widened-shapes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25157-a-then-adapter-whose-handler-returns-a-promise-awaits-each-step.ts": {
+   "order": [
+    "<repo>/tests/corpus/25157-a-then-adapter-whose-handler-returns-a-promise-awaits-each-step.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25158-a-lifted-async-closure-carries-its-environment-across-a-park.ts": {
+   "order": [
+    "<repo>/tests/corpus/25158-a-lifted-async-closure-carries-its-environment-across-a-park.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25159-a-finally-stash-survives-a-suspension.ts": {
+   "order": [
+    "<repo>/tests/corpus/25159-a-finally-stash-survives-a-suspension.ts"
+   ],
+   "diags": []
   }
  }
 }

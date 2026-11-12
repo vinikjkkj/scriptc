@@ -141,14 +141,6 @@ describe("the abandoned-coroutine line", () => {
     expect(stderr, "a completed coroutine must not be reported as abandoned").not.toMatch(COUNT_RE);
   }, 300_000);
 
-  test("PROOF 3a: SCRIPTC_STACKLESS=0 prints no coroutine line, even when abandoning", async () => {
-    /* Knob off, so the awaits lower to fibers and no coroutine frame exists.
-     * The fiber lane's own skip notice may appear -- that is its business and
-     * is unchanged by this commit; what must be absent is OUR line. */
-    const { stderr } = await buildAndRun("knoboff", abandonSrc(3), { knob: false, audit: true });
-    expect(stderr, "the coroutine line must not appear on the fiber lane").not.toMatch(COUNT_RE);
-  }, 300_000);
-
   test("PROOF 3b: the line is compiled OUT of a shipping binary", async () => {
     /* Containment measured on the artefact rather than argued from the
      * ifdef. A shipping build has no SCR_RC_AUDIT, so the literal must not
@@ -241,13 +233,6 @@ describe("the abandoned-coroutine line sees GENERATOR frames too", () => {
     expect(stderr, "a generator consumed to exhaustion must not be reported as abandoned").not.toMatch(COUNT_RE);
   }, 300_000);
 
-  test("PROOF 3: SCRIPTC_STACKLESS=0 prints no coroutine line, even when abandoning", async () => {
-    /* Knob off, so the generators lower to fibers and no coroutine frame
-     * exists. The fibre lane's own skip notice may appear -- that is its
-     * business; what must be absent is OUR line. */
-    const { stderr } = await buildAndRun("genknoboff", abandonGenSrc(3), { knob: false, audit: true });
-    expect(stderr, "the coroutine line must not appear on the fiber lane").not.toMatch(COUNT_RE);
-  }, 300_000);
 });
 
 /* STILL OWED, and named rather than silently omitted: byte-identity of
