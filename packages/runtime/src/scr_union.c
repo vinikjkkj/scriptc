@@ -47,16 +47,61 @@ static ScrUnion *scr_union_alloc(uint32_t tag, bool scalar) {
   return u;
 }
 
+/* SHARED IMMORTAL SCALAR BOXES. A union box is immutable, so two boxes with the same tag and payload are interchangeable, and a program that
+ * builds a few hundred thousand of them (a padded parameter list, a table of flags) pays 40 bytes each for a handful of distinct values. The
+ * values that dominate are -1, 0, 1 and the two bools, so those get one static box per arm tag (tags 0..15; a larger tag allocates as before):
+ * rc == SIZE_MAX, which every retain and release already skips, and no cycle header, like the emitted immortal unit arms. Matching is on
+ * the exact bit pattern, so -0.0 and NaN allocate. Static, not heap: nothing to free, nothing for the RC audit to count. */
+#define SCR_UK_TAGS 16u
+#define SCR_UK_F64(t) {SIZE_MAX, t, 1u, 0xBFF0000000000000ull, NULL, NULL}, {SIZE_MAX, t, 1u, 0ull, NULL, NULL}, {SIZE_MAX, t, 1u, 0x3FF0000000000000ull, NULL, NULL}
+#define SCR_UK_BOOL(t) {SIZE_MAX, t, 1u, 0ull, NULL, NULL}, {SIZE_MAX, t, 1u, 1ull, NULL, NULL}
+#define SCR_UK_ROW(M) M(0), M(1), M(2), M(3), M(4), M(5), M(6), M(7), M(8), M(9), M(10), M(11), M(12), M(13), M(14), M(15)
+static ScrUnion scr_uk_f64[SCR_UK_TAGS * 3u] = {SCR_UK_ROW(SCR_UK_F64)};
+static ScrUnion scr_uk_bool[SCR_UK_TAGS * 2u] = {SCR_UK_ROW(SCR_UK_BOOL)};
+/* The empty string as a ref arm: one box per tag, built on first use (its payload and release entry are addresses). */
+static ScrUnion scr_uk_empty[SCR_UK_TAGS];
+
 ScrUnion *scr_union_new_f64(uint32_t tag, double v) {
+  if (tag < SCR_UK_TAGS) {
+    uint64_t b;
+    memcpy(&b, &v, sizeof b);
+    if (b == 0ull) return &scr_uk_f64[tag * 3u + 1u];
+    if (b == 0x3FF0000000000000ull) return &scr_uk_f64[tag * 3u + 2u];
+    if (b == 0xBFF0000000000000ull) return &scr_uk_f64[tag * 3u];
+  }
   ScrUnion *u = scr_union_alloc(tag, true);
   memcpy(&u->slot, &v, sizeof v);
   return u;
 }
 
 ScrUnion *scr_union_new_bool(uint32_t tag, bool v) {
+  if (tag < SCR_UK_TAGS) return &scr_uk_bool[tag * 2u + (v ? 1u : 0u)];
   ScrUnion *u = scr_union_alloc(tag, true);
   u->slot = v ? 1 : 0;
   return u;
+}
+
+/* A string arm: the empty string is one shared immortal box per tag. Compared by content, not address: the program's own "" literal is a
+ * different object from the runtime's, and a heap-built empty string is a third. The absent marker is an empty string too but means undefined.
+ * Reached only for string arms (the header macro routes a call whose release entry is scr_str_release_v here, folded at compile time in
+ * emitted code; the LLVM lane rewrites the same call), so no other ref arm pays the length test. */
+#undef scr_union_new_ref
+ScrUnion *scr_union_new_str(uint32_t tag, ScrStr *s) {
+  if (s->len == 0 && tag < SCR_UK_TAGS && !scr_str_is_absent(s)) {
+    ScrUnion *e = &scr_uk_empty[tag];
+    if (e->rc != SIZE_MAX) { /* first use: this string's count moves into the box, which is never freed */
+      e->rc = SIZE_MAX;
+      e->tag = tag;
+      e->scalar = 0u;
+      memcpy(&e->slot, &s, sizeof s);
+      e->arm_release = &scr_str_release_v;
+      e->arm_trace = NULL;
+    } else {
+      scr_str_release(s); /* the +1 that arrived is not needed: the box already holds an empty string */
+    }
+    return e;
+  }
+  return scr_union_new_ref(tag, s, &scr_str_retain_v, &scr_str_release_v, NULL);
 }
 
 ScrUnion *scr_union_new_ref(uint32_t tag, void *v, void *(*retain)(void *),

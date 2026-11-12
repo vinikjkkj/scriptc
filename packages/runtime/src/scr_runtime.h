@@ -2618,6 +2618,12 @@ ScrUnion *scr_union_new_ref(uint32_t tag, void *v,
                              void *(*retain)(void *),
                              void (*release)(void *),
                              ScrTraceFn trace);
+ScrUnion *scr_union_new_str(uint32_t tag, ScrStr *s); /* a string arm; the empty string is a shared box */
+/* A call whose release entry is the string arm's goes to scr_union_new_str. In emitted code the test is a comparison of two address
+ * constants, so it folds away and only the taken call remains; scr_union.c undefines this to define the function itself. */
+#define scr_union_new_ref(tag, v, retain, release, trace)                                            \
+  ((release) == &scr_str_release_v ? scr_union_new_str((tag), (ScrStr *)(v))                         \
+                                   : (scr_union_new_ref)((tag), (v), (retain), (release), (trace)))
 
 static inline ScrUnion *scr_union_retain(ScrUnion *u) {
   if (u->rc != SIZE_MAX) {
@@ -6282,6 +6288,9 @@ ScrDyn *scr_dyn_new_null(void);
 ScrDyn *scr_dyn_new_bool(bool b);
 ScrDyn *scr_dyn_new_num(double n);
 ScrDyn *scr_dyn_new_str(ScrStr *s);
+/* The union walkers' forms: -1, 0, 1 and the empty string are shared immortal nodes (see scr_json.c). Retains like the plain forms. */
+ScrDyn *scr_dyn_new_num_sh(double n);
+ScrDyn *scr_dyn_new_str_sh(ScrStr *s);
 ScrDyn *scr_dyn_web_crypto(void); /* globalThis.crypto, the process singleton (+1) */
 extern ScrStr *(*scr_dyn_obj_tag_hook)(const ScrDyn *d);
 extern ScrStr *(*scr_insp_hook)(ScrDyn *d, const char *cn, double recurse, double depth);

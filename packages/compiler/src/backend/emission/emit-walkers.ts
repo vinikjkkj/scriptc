@@ -4082,9 +4082,12 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           } else if (arm.kind === "nullT") {
             d.push(`  case ${i}: return scr_dyn_new_null();`);
           } else if (arm.kind === "f64") {
-            d.push(`  case ${i}: return scr_dyn_new_num(scr_union_get_f64(v));`);
+            d.push(`  case ${i}: return scr_dyn_new_num_sh(scr_union_get_f64(v));`);
           } else if (arm.kind === "bool") {
             d.push(`  case ${i}: return scr_dyn_new_bool(scr_union_get_bool(v));`);
+          } else if (arm.kind === "string") {
+            // The string arm boxes through the shared-empty form: a padded parameter list is hundreds of thousands of the same "".
+            d.push(`  case ${i}: return scr_dyn_new_str_sh((ScrStr *)scr_union_peek(v));`);
           } else if (dynNeverIn(arm)) {
             // No value inhabits this arm (a Blob cannot be constructed
             // natively), so no box can carry its tag.

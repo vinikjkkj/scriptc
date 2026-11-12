@@ -76,6 +76,7 @@ import type {
 } from "../../ir/nodes.js";
 import { BUFFER_NUM_ACCESSOR_METHODS, dynKeyGetUsesLitTwin, propsTableRoot, errorOwnFlagFor, moduleFuncLaneShapes, moduleUsesEngineFn, moduleUsesTextMb, moduleUsesDc, moduleUsesTls, ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, presenceMaskStores, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesFnText, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesInstanceRecordLane, moduleInstanceLaneNeedsKg, moduleUsesDynClass, moduleUsesEmitter, moduleBoxesEmitters, canBoxFuncIntoDyn, isDynPackFunc, moduleUsesBigInt, moduleUsesRegexExecDyn, moduleUsesBytesOwn, moduleUsesAsym, moduleUsesDynAsync, moduleBoxesProcStream, moduleUsesNodeTest, irFunctionValueCode, fnNameTableRows } from "../../ir/nodes.js";
 import { setDynOrderPlan, setDynInspExt } from "../dyn-members.js";
+import { rewriteStringUnions } from "./strunion.js";
 import { orderRecordPlanCached, moduleUsesInspColors } from "../../ir/nodes.js";
 import { classvalCandidates, dynClassDisplayName, dynDescBase, dynEmitterSlot, dynRuntimeBaseInfo, dynRuntimeRoot, dynEnumerationFenced, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
 import { computeMayThrow } from "../emission/may-throw.js";
@@ -3118,7 +3119,7 @@ class LlEmitter {
       // symbols instead, from the same IR facts the C emission consumes.
       appendAll(out, this.emitLibDefs(globals, globalReleaseLines, stamps));
       out.push(`attributes #0 = { sanitize_address }`, `attributes #9 = { cold noinline }`, ``);
-      return out.join("\n");
+      return rewriteStringUnions(out.join("\n"));
     }
     out.push(
       `define i32 @main(i32 %argc, ptr %argv) ${FN_ATTRS} {`,
@@ -3294,7 +3295,7 @@ class LlEmitter {
       `attributes #9 = { cold noinline }`,
       ``,
     );
-    return out.join("\n");
+    return rewriteStringUnions(out.join("\n"));
   }
 
   /** LIBRARY mode: the profile-declared external definitions — the

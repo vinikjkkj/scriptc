@@ -3831,11 +3831,11 @@ export class LlDyn {
             B.terminate(`ret ptr ${r}`);
           } else if (arm.kind === "f64") {
             host.declare(`declare double @scr_union_get_f64(ptr)`);
-            host.declare(`declare ptr @scr_dyn_new_num(double)`);
+            host.declare(`declare ptr @scr_dyn_new_num_sh(double)`);
             const x = B.tmp();
             const r = B.tmp();
             B.line(`${x} = call double @scr_union_get_f64(ptr %v)`);
-            B.line(`${r} = call ptr @scr_dyn_new_num(double ${x})`);
+            B.line(`${r} = call ptr @scr_dyn_new_num_sh(double ${x})`);
             B.terminate(`ret ptr ${r}`);
           } else if (arm.kind === "bool") {
             host.declare(`declare zeroext i1 @scr_union_get_bool(ptr)`);
@@ -3844,6 +3844,16 @@ export class LlDyn {
             const r = B.tmp();
             B.line(`${x} = call zeroext i1 @scr_union_get_bool(ptr %v)`);
             B.line(`${r} = call ptr @scr_dyn_new_bool(i1 ${x})`);
+            B.terminate(`ret ptr ${r}`);
+          } else if (arm.kind === "string") {
+            // The string arm boxes through the shared-empty form (the C twin's note).
+            host.declare(`declare ptr @scr_dyn_new_str_sh(ptr)`);
+            const pp = B.tmp();
+            const p = B.tmp();
+            const r = B.tmp();
+            B.line(`${pp} = getelementptr inbounds %ScrUnion, ptr %v, i64 0, i32 3`);
+            B.line(`${p} = load ptr, ptr ${pp}`);
+            B.line(`${r} = call ptr @scr_dyn_new_str_sh(ptr ${p}) ; retains the string`);
             B.terminate(`ret ptr ${r}`);
           } else if (dynNeverIn(arm)) {
             // No value inhabits this arm (a Blob cannot be constructed
