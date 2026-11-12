@@ -6670,6 +6670,9 @@ void scr_dyn_obj_set_present(ScrDyn *obj, const char *key, size_t key_len, ScrDy
  * — scr_dyn_key_set, JSON.parse, spread, Object.assign — keeps the
  * copying entry above. */
 void scr_dyn_obj_set_lit(ScrDyn *obj, const char *key, size_t key_len, ScrDyn *value);
+/* Room for n members in one allocation: a literal or a record conversion knows how many members it is about to write, so the table is sized
+ * for them once instead of doubling up to the next power of two (3 members cost 4 slots, 5 cost 8). A no-op when the table already holds n. */
+void scr_dyn_obj_reserve(ScrDyn *obj, size_t n);
 void scr_dyn_obj_set_present_lit(ScrDyn *obj, const char *key, size_t key_len, ScrDyn *value);
 /* The checked-dynamic keyed WRITE (`h.k = v` on a dyn receiver): OBJ sets
  * the member (JS: later writes win, insertion order); undefined/null and

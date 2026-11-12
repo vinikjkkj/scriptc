@@ -3253,6 +3253,16 @@ export class LlDyn {
         ];
         const fillFor = (ord: string[], withInternal = true): void => {
         const dynFields = dynFieldsFor(ord, withInternal);
+        // The members every value of this shape certainly has (emit-walkers.ts's row): the table is sized for them once.
+        if (!shape.ownmask && !accShape) {
+          const certain = dynFields.filter(
+            (f) => !internal.has(f.name) && !f.name.startsWith("__@") && !isUndefinedArmedUnion(f.type, (id: string) => this.host.unionsById.get(id)),
+          ).length;
+          if (certain >= 2) {
+            host.declare(`declare void @scr_dyn_obj_reserve(ptr, i64)`);
+            B.line(`call void @scr_dyn_obj_reserve(ptr ${d}, i64 ${certain})`);
+          }
+        }
         for (const f of dynFields) {
           const klen = Buffer.byteLength(f.name, "utf8");
           if (accProps.has(f.name) && !byName.has(f.name)) {

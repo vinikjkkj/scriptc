@@ -12287,6 +12287,11 @@ class LlEmitter {
         this.declare(`declare void @scr_dyn_key_set(ptr, ptr, ptr)`);
         const obj = B.tmp();
         B.line(`${obj} = call ptr @scr_dyn_new_obj()`);
+        if ((e.fields?.length ?? 0) >= 2) {
+          // The member count is known, so the table is sized once (one member is already exact).
+          this.declare(`declare void @scr_dyn_obj_reserve(ptr, i64)`);
+          B.line(`call void @scr_dyn_obj_reserve(ptr ${obj}, i64 ${e.fields!.length})`);
+        }
         const out = this.own({ name: obj, type: e.type });
         for (const f of e.fields ?? []) {
           const k = this.emitExpr(f.key);
