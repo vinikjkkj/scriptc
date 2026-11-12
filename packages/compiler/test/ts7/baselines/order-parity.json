@@ -27762,6 +27762,12 @@
     "<repo>/tests/corpus/25104-promise-resolving-functions-settle-once-and-keep-their-promise-alive.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25108-typed-arrays-crossing-into-dyn-keep-length-elements-holes-and-growth.ts": {
+   "order": [
+    "<repo>/tests/corpus/25108-typed-arrays-crossing-into-dyn-keep-length-elements-holes-and-growth.ts"
+   ],
+   "diags": []
   }
  }
 }
