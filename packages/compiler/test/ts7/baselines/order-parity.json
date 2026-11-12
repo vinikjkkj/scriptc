@@ -27751,6 +27751,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25107-dyn-object-tables-sized-once-keep-order-growth-delete-and-expandos.js": {
+   "order": [
+    "<repo>/tests/corpus/25107-dyn-object-tables-sized-once-keep-order-growth-delete-and-expandos.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/25104-promise-resolving-functions-settle-once-and-keep-their-promise-alive.ts": {
    "order": [
     "<repo>/tests/corpus/25104-promise-resolving-functions-settle-once-and-keep-their-promise-alive.ts"
