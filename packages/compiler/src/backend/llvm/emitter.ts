@@ -96,7 +96,7 @@ import { seqScopedLocals, stackCheckPolicy, stackCheckTargetHasFloor, stackMargi
 // S0 ran neither tsc nor a test that imports this file.
 import { coroPlans } from "../../ir/coro-plans.js";
 import { libCallPointKind } from "../../ir/suspends.js";
-import { suspensionLiveness, type StacklessPlan } from "../../ir/liveness.js";
+import { coroElidedLocals, suspensionLiveness, type StacklessPlan } from "../../ir/liveness.js";
 import { slotCarryLiveness, withoutSlotCarry } from "./slot-liveness.js";
 import {
   CoroRefusedError,
@@ -4983,7 +4983,14 @@ class LlEmitter {
    * declared in this iteration must not be released twice); boxed locals, captures and hidden `%` locals never. */
   private emitCoroReleaseDead(fn: IrFunction, index: number): void {
     const pt = this.currentCoro!.points[this.coroStates[index]!];
-    if (pt === undefined || pt.keepAtPark === undefined) return;
+    const elided = coroElidedLocals(fn, this.currentCoro!);
+    if (pt === undefined || pt.keepAtPark === undefined) {
+      // An elided local has no frame slot, so this park MUST be the one that releases it.
+      if (elided.size > 0 && process.env["SCRIPTC_FRAME_ELIDE"] !== "force") {
+        throw new Error(`internal: ${fn.name} elides frame slots but a park has no release plan`);
+      }
+      return;
+    }
     const bySlot = new Map(fn.locals.map((l) => [`%${mangleLocal(l.id)}`, l]));
     const captured = new Set((fn.captures ?? []).map((c) => c.localId));
     const done = new Set<string>();
@@ -5007,6 +5014,16 @@ class LlEmitter {
         if (single !== null && si === innermost && single.has(l.id)) drop.push(ent);
       }
       for (const ent of drop) scope.splice(scope.indexOf(ent), 1);
+      if (elided.size > 0 && process.env["SCRIPTC_FRAME_ELIDE"] !== "force") {
+        // The build-time guard behind frame-slot elision (emit-coro.ts coroAssertElidedReleased): an elided local that is
+        // owned here must have been released here.
+        for (const ent of scope) {
+          const l = bySlot.get(ent.slot);
+          if (l !== undefined && elided.has(l.id) && !done.has(ent.slot) && ent.boxed !== true && isRefCounted(ent.type)) {
+            throw new Error(`internal: ${fn.name} elides the frame slot of ${l.name} but it is not released at this park`);
+          }
+        }
+      }
     }
   }
 

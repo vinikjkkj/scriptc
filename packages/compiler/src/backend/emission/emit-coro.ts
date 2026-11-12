@@ -47,7 +47,7 @@ import { boxAccess, cDecl, cType, vAdapters } from "./emit-types.js";
 import { type IrFunction, type IrType, isRefCounted } from "../../ir/nodes.js";
 // `coroPlans` moved to ir/coro-plans.ts: it is backend-agnostic policy and
 // only looked C-specific because it lived here. The TYPE is still needed.
-import { type StacklessPlan } from "../../ir/liveness.js";
+import { type StacklessPlan, coroElidedLocals } from "../../ir/liveness.js";
 import { singleWriterLocals } from "../../ir/analysis.js";
 import { poisonFinishArm, poisonSpillOrder, poisonTakeArm } from "./coro-poison.js";
 
@@ -108,6 +108,8 @@ export function coroFrameLocals(fn: IrFunction, plan: StacklessPlan): string[] {
   // must NOT also get frame slots — two sources for one binding is how a
   // shared box silently stops being shared.
   for (const c of fn.captures ?? []) ids.delete(c.localId);
+  // Slots that would only ever carry NULL (see coroElidedLocals): not allocated, not spilled, not reloaded.
+  for (const id of coroElidedLocals(fn, plan)) ids.delete(id);
   // Deterministic order: declaration order, so the struct layout is stable
   // across runs and two builds of the same source produce the same bytes.
   return fn.locals.filter((l) => ids.has(l.id)).map((l) => l.id);
@@ -385,7 +387,14 @@ export function coroSpill(E: CEmitter, fn: IrFunction, plan: StacklessPlan): str
  * twice. Boxed (closure-captured) locals, captures and the lowering's hidden `%` locals are never released here. */
 function coroReleaseDead(E: CEmitter, fn: IrFunction, plan: StacklessPlan, node: object): void {
   const pt = plan.points.find((p) => p.node === node);
-  if (pt === undefined || pt.keepAtPark === undefined) return;
+  const elided = coroElidedLocals(fn, plan);
+  if (pt === undefined || pt.keepAtPark === undefined) {
+    // An elided local has no frame slot, so this park MUST be the one that releases it.
+    if (elided.size > 0 && process.env["SCRIPTC_FRAME_ELIDE"] !== "force") {
+      throw new Error(`internal: ${fn.name} elides frame slots but a park has no release plan`);
+    }
+    return;
+  }
   const byName = new Map(fn.locals.map((l) => [mangleLocal(l.id), l]));
   const captured = new Set((fn.captures ?? []).map((c) => c.localId));
   const done = new Set<string>();
@@ -410,6 +419,13 @@ function coroReleaseDead(E: CEmitter, fn: IrFunction, plan: StacklessPlan, node:
     }
     for (const ent of drop) scope.splice(scope.indexOf(ent as never), 1);
   }
+  coroAssertElidedReleased(
+    fn,
+    elided,
+    byName,
+    E.scopes.flat().filter((e) => e.boxed !== true && e.immortal !== true && isRefCounted(e.type)).map((e) => e.name),
+    done,
+  );
 }
 type ScopeEntryLike = object;
 
@@ -642,3 +658,22 @@ export function coroUnwind(lifted = false): string[] {
 }
 
 export { isRefCounted };
+
+/** The build-time guard behind frame-slot elision: an elided local that is OWNED at this park (it has an entry in an
+ * open scope) must have been released by it. `done` is what coroReleaseDead released; an owned elided local missing
+ * from it would reach the frame as a live pointer with no slot to carry it, and leak. */
+function coroAssertElidedReleased(
+  fn: IrFunction,
+  elided: ReadonlySet<string>,
+  byName: Map<string, { id: string }>,
+  openNames: string[],
+  done: Set<string>,
+): void {
+  if (elided.size === 0 || process.env["SCRIPTC_FRAME_ELIDE"] === "force") return;
+  for (const n of openNames) {
+    const l = byName.get(n);
+    if (l !== undefined && elided.has(l.id) && !done.has(n)) {
+      throw new Error(`internal: ${fn.name} elides the frame slot of ${n} but it is not released at this park`);
+    }
+  }
+}

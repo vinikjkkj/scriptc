@@ -30,6 +30,7 @@
  * descended into: lambdas are lifted, so they cannot name this frame's
  * locals except through `captures`, which IS read here. */
 import type { IrExpr, IrFunction, IrStmt, SrcLoc } from "./nodes.js";
+import { isRefCounted } from "./nodes.js";
 import {
   SUSPENDING_NODE_KINDS,
   SUSPENDING_LIB_CALLS,
@@ -1302,3 +1303,40 @@ export function stacklessPlan(fn: IrFunction): StacklessPlan | null {
   if (!r.points.every((p) => p.straightLine)) return null;
   return { fnName: fn.name, points: r.points, frameLocals: r.frameLocals };
 }
+
+/** THE FRAME SLOTS THAT CARRY NOTHING, by local id.
+ *
+ * `coroFrameLocals` gives every refcounted local a slot whether or not it is live across a suspension, because a
+ * resume re-enters the function with its C locals NULLed and an owned local missing from the frame leaked its whole
+ * graph. Since a park releases and NULLs every owned local the plan marks dead across it (SuspensionPoint.keepAtPark,
+ * emitted by coroReleaseDead / emitCoroReleaseDead), the value spilled into such a slot at that park is always NULL, and
+ * the reload only writes NULL back over a C local that the re-entry has just initialised to NULL. The slot is dead
+ * weight: 8 bytes per local per frame, 650 KB of the redis bench's peak, paid by every in-flight call.
+ *
+ * A local qualifies when ALL of these hold:
+ *  - it is refcounted, not boxed, not a capture, not a parameter (the first entry reads the argument back out of the
+ *    frame) and not one of the lowering's hidden `%` locals (the park does not release those);
+ *  - it is in no point's live set (otherwise it is a real slot);
+ *  - EVERY suspension point of the function is an `await` carrying keepAtPark. A yield, a runtime-call suspension, a
+ *    union await or a `for await` park releases nothing, so the value reaches the slot unchanged and the slot is the
+ *    only owner across the wait. One such point anywhere keeps all slots of the function.
+ * A function with no point at all never parks, so none of its slots is ever read.
+ *
+ * SCRIPTC_FRAME_ELIDE=off turns it off; =force skips the every-point rule and exists only as the positive control
+ * (a function the rule rejects must then leak, which shows the rule is what keeps it clean). */
+export function coroElidedLocals(fn: IrFunction, plan: StacklessPlan): ReadonlySet<string> {
+  const mode = process.env["SCRIPTC_FRAME_ELIDE"];
+  if (mode === "off") return NO_ELIDED;
+  if (mode !== "force" && !plan.points.every((p) => p.keepAtPark !== undefined)) return NO_ELIDED;
+  const keep = new Set<string>(plan.frameLocals);
+  for (const p of fn.params) keep.add(p.localId);
+  for (const c of fn.captures ?? []) keep.add(c.localId);
+  for (const p of plan.points) if (p.keepAtPark !== undefined) for (const id of p.keepAtPark) keep.add(id);
+  let out: Set<string> | null = null;
+  for (const l of fn.locals) {
+    if (l.boxed === true || !isRefCounted(l.type) || l.name.startsWith("%") || keep.has(l.id)) continue;
+    (out ??= new Set<string>()).add(l.id);
+  }
+  return out ?? NO_ELIDED;
+}
+const NO_ELIDED: ReadonlySet<string> = new Set<string>();

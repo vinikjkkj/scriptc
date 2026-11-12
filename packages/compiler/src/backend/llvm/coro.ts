@@ -48,7 +48,7 @@
  * out the shapes that would trip it rather than lowering them wrong. */
 import type { IrFunction, IrLocal, IrStmt, IrType } from "../../ir/nodes.js";
 import { isRefCounted } from "../../ir/nodes.js";
-import type { StacklessPlan } from "../../ir/liveness.js";
+import { type StacklessPlan, coroElidedLocals } from "../../ir/liveness.js";
 import {
   libCallPointKind,
   STACKLESS_LOWERABLE_LIB_CALL_LIST,
@@ -185,6 +185,8 @@ export function coroFrameLocals(fn: IrFunction, plan: StacklessPlan): string[] {
   for (const p of fn.params) ids.add(p.localId);
   for (const l of fn.locals) if (l.boxed === true || isRefCounted(l.type)) ids.add(l.id);
   for (const c of fn.captures ?? []) ids.delete(c.localId);
+  // Slots that would only ever carry NULL (ir/liveness.ts coroElidedLocals): no field, no spill, no reload.
+  for (const id of coroElidedLocals(fn, plan)) ids.delete(id);
   // Declaration order, so the struct layout is stable across runs and two
   // builds of the same source produce the same bytes.
   return fn.locals.filter((l) => ids.has(l.id)).map((l) => l.id);
