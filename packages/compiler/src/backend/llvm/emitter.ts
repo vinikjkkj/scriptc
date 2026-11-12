@@ -76,6 +76,7 @@ import type {
 } from "../../ir/nodes.js";
 import { BUFFER_NUM_ACCESSOR_METHODS, dynKeyGetUsesLitTwin, propsTableRoot, errorOwnFlagFor, moduleFuncLaneShapes, moduleUsesEngineFn, moduleUsesTextMb, moduleUsesDc, moduleUsesTls, ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, presenceMaskStores, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesFnText, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesInstanceRecordLane, moduleInstanceLaneNeedsKg, moduleUsesDynClass, moduleUsesEmitter, moduleBoxesEmitters, canBoxFuncIntoDyn, isDynPackFunc, moduleUsesBigInt, moduleUsesRegexExecDyn, moduleUsesBytesOwn, moduleUsesAsym, moduleUsesDynAsync, moduleBoxesProcStream, moduleUsesNodeTest, irFunctionValueCode, fnNameTableRows } from "../../ir/nodes.js";
 import { setDynOrderPlan, setDynInspExt } from "../dyn-members.js";
+import { rewriteArmDescriptors } from "./armvt.js";
 import { orderRecordPlanCached, moduleUsesInspColors } from "../../ir/nodes.js";
 import { classvalCandidates, dynClassDisplayName, dynDescBase, dynEmitterSlot, dynRuntimeBaseInfo, dynRuntimeRoot, dynEnumerationFenced, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
 import { computeMayThrow } from "../emission/may-throw.js";
@@ -2805,7 +2806,7 @@ class LlEmitter {
       `%ScrStr = type { i32, i32, i32 }`,
       `%ScrLogArg = type { i32, i64 }`,
       `%ScrVt = type { i64, i64, ptr, ptr }`,
-      `%ScrUnion = type { i64, i32, i32, i64, ptr, ptr }`,
+      `%ScrUnion = type { i64, i32, i32, i64 }`,
       // …including `implicit_proto` (field 4), the prototype object
       // scr_dyn_fn_prototype mints: the caps[] tail is addressed as one
       // WHOLE struct past the base, so a missing field would shift every
@@ -2861,9 +2862,9 @@ class LlEmitter {
       // scr_runtime.h's natural alignment: kind at 8, f64 at 16, b at 24,
       // payload at 32).
       `%ScrCaught = type { i64, i32, double, i8, ptr, ptr, ptr, ptr }`,
-      // The capture box { rc, kind, obj_retain, obj_release, obj_trace,
-      // slot } — TDZ reads peek the payload slot (offset 40) directly.
-      `%ScrBox = type { i64, i32, ptr, ptr, ptr, i64 }`,
+      // The capture box { rc, kind, vt, slot } — TDZ reads peek the payload slot
+      // (offset 16) directly. `vt` is the encoded arm descriptor (scr_runtime.h).
+      `%ScrBox = type { i64, i32, i32, i64 }`,
       // The stack buffer of the emitted JSON serializers { data, len, cap }.
       `%ScrJsonBuf = type { ptr, i64, i64, ptr, i64, i64 }`,
       // The dynCheck error-path spine { parent, key, index } — the emitted
@@ -2945,7 +2946,7 @@ class LlEmitter {
       // rc == SIZE_MAX, so these never join the RC audit or a trace walk.
       const [unionId, tag] = key.split(":");
       out.push(
-        `@${sym} = internal global %ScrUnion { i64 -1, i32 ${tag}, i32 0, i64 0, ptr null, ptr null } ; ${unionId} unit arm`,
+        `@${sym} = internal global %ScrUnion { i64 -1, i32 ${tag}, i32 0, i64 0 } ; ${unionId} unit arm`,
       );
     }
     if (this.unitInstances.size > 0) out.push(``);
@@ -3118,7 +3119,7 @@ class LlEmitter {
       // symbols instead, from the same IR facts the C emission consumes.
       appendAll(out, this.emitLibDefs(globals, globalReleaseLines, stamps));
       out.push(`attributes #0 = { sanitize_address }`, `attributes #9 = { cold noinline }`, ``);
-      return out.join("\n");
+      return rewriteArmDescriptors(out.join("\n"));
     }
     out.push(
       `define i32 @main(i32 %argc, ptr %argv) ${FN_ATTRS} {`,
@@ -3294,7 +3295,7 @@ class LlEmitter {
       `attributes #9 = { cold noinline }`,
       ``,
     );
-    return out.join("\n");
+    return rewriteArmDescriptors(out.join("\n"));
   }
 
   /** LIBRARY mode: the profile-declared external definitions — the
@@ -6395,7 +6396,7 @@ class LlEmitter {
     const slotp = B.tmp();
     const slotv = B.tmp();
     const empty = B.tmp();
-    B.line(`${slotp} = getelementptr inbounds %ScrBox, ptr ${box}, i64 0, i32 5`);
+    B.line(`${slotp} = getelementptr inbounds %ScrBox, ptr ${box}, i64 0, i32 3`);
     B.line(`${slotv} = load i64, ptr ${slotp}`);
     B.line(`${empty} = icmp eq i64 ${slotv}, 0`);
     const lt = B.newLabel("tdz.t");
@@ -8667,7 +8668,7 @@ class LlEmitter {
             const box = this.loadBox(b.slot);
             const slotp = B.tmp();
             const slotv = B.tmp();
-            B.line(`${slotp} = getelementptr inbounds %ScrBox, ptr ${box}, i64 0, i32 5`);
+            B.line(`${slotp} = getelementptr inbounds %ScrBox, ptr ${box}, i64 0, i32 3`);
             B.line(`${slotv} = load i64, ptr ${slotp}`);
             B.line(`${nt} = icmp eq i64 ${slotv}, 0`);
           } else {

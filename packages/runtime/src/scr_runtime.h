@@ -2446,23 +2446,52 @@ typedef enum {
   SCR_BOX_OBJ, /* class instance: retain/release via the fn ptrs below */
 } ScrBoxKind;
 
+/* The per-TYPE entry points of a SCR_BOX_OBJ payload or a ref-armed union, shared by every instance. A box or union used to carry
+ * them as three 8-byte pointers each (24 of its 48 bytes) although they are facts of the payload type. They now live in one
+ * constant ScrArmVt per distinct (retain, release) pair, emitted by the compiler (a static const at each call site in C, a
+ * deduplicated global in the LLVM lane), and the instance holds a 32-bit offset to it from the cycle anchor:
+ *
+ *   vt = (int32 offset of the descriptor from scr_cyc_base()) | has_trace      (bit 0; descriptors are 8-aligned)
+ *   vt == 0: no payload entry points (a scalar arm, an immortal unit arm, or a non-OBJ box)
+ *
+ * has_trace is "the payload type carries a cycle header" (the old `trace != NULL`); the trace FUNCTION itself was only ever
+ * tested for non-NULL, never called, so one bit is all of it. */
+typedef struct ScrArmVt {
+  void *(*retain)(void *);
+  void (*release)(void *);
+} ScrArmVt;
+
+static inline uint32_t scr_armvt_enc(const ScrArmVt *vt, bool trace) {
+  return (uint32_t)(int32_t)((const char *)vt - scr_cyc_base()) | (trace ? 1u : 0u);
+}
+static inline const ScrArmVt *scr_armvt_dec(uint32_t e) {
+  return (const ScrArmVt *)(const void *)(scr_cyc_base() + (int32_t)(e & ~1u));
+}
+
 typedef struct ScrBox {
   size_t rc;
   ScrBoxKind kind;
-  /* SCR_BOX_OBJ only: class instances are per-class C structs the runtime
-   * knows nothing about, so the compiler supplies their RC entry points.
-   * obj_trace is non-NULL exactly when the payload type carries a cycle
-   * header (the box's own trace then visits the payload; NULL means the
-   * payload is acyclic and the box releases it itself at teardown). */
-  void *(*obj_retain)(void *);
-  void (*obj_release)(void *);
-  ScrTraceFn obj_trace;
+  /* SCR_BOX_OBJ only (0 for every other kind): the payload's ScrArmVt, encoded as above. Class instances are per-class C structs
+   * the runtime knows nothing about, so the compiler supplies their RC entry points. Bit 0 is non-zero exactly when the payload
+   * type carries a cycle header (the box's own trace then visits the payload; clear means the payload is acyclic and the box
+   * releases it itself at teardown). */
+  uint32_t vt;
   uint64_t slot; /* double/bool/pointer via memcpy and casts */
 } ScrBox;
 
 ScrBox *scr_box_new(ScrBoxKind kind); /* returns +1, slot zeroed */
-ScrBox *scr_box_new_obj(void *(*retain)(void *), void (*release)(void *),
-                         ScrTraceFn trace);
+const ScrArmVt *scr_armvt_rt_intern(void *(*retain)(void *), void (*release)(void *));
+ScrBox *scr_box_new_objd(const ScrArmVt *vt, bool trace);
+/* The general form, for a caller whose entry points are not link-time constants (the descriptor is interned in a small static
+ * table, so it is slower than the macro below). */
+ScrBox *scr_box_new_obj_rt(void *(*retain)(void *), void (*release)(void *), ScrTraceFn trace);
+/* The emitted form: one constant descriptor per call site, the trace flag folded at compile time. `retain` and `release` must
+ * be address constants (a function name or &function). */
+#define scr_box_new_obj(retain, release, trace)                                                    \
+  ({                                                                                               \
+    static const ScrArmVt scr_vt_ = {(retain), (release)};                                         \
+    scr_box_new_objd(&scr_vt_, (void *)(trace) != NULL);                                           \
+  })
 
 static inline ScrBox *scr_box_retain(ScrBox *b) {
   if (b->rc != SIZE_MAX) {
@@ -2599,25 +2628,27 @@ void scr_closure_release(ScrClosure *c); /* releases the boxes; NULL-tolerant */
 typedef struct ScrUnion {
   size_t rc; /* SIZE_MAX = immortal (unused for unions; kept per convention) */
   uint32_t tag;
-  /* 1 for a SCALAR arm (f64, bool): such a box is allocated with only the fields above `arm_release` (24 bytes), so nothing may read
-   * arm_release / arm_trace of a box with `scalar` set. 0 for ref arms and for the emitted immortal unit instances (whole struct). */
-  uint32_t scalar;
+  /* Ref arms: the payload's ScrArmVt (release entry point), encoded as scr_armvt_enc, bit 0 = the arm type carries a cycle header
+   * (like ScrBox: the union's trace then visits the payload). 0 for a SCALAR arm (f64, bool) and for the emitted immortal unit
+   * instances: nothing to release, nothing to trace. The retain entry point is never used through a union box (it is retained as
+   * a box), so only `release` is read from the descriptor. */
+  uint32_t vt;
   uint64_t slot; /* double/bool/pointer via memcpy and casts */
-  /* Ref arms only: the payload's release entry point and, when the arm type carries a cycle header, its trace (non-NULL exactly then,
-   * like ScrBox.obj_trace: the union's trace then visits the payload). The retain entry point the constructor still takes is not stored:
-   * a union box is retained as a box and no code ever retained the payload through it. */
-  void (*arm_release)(void *);
-  ScrTraceFn arm_trace;
 } ScrUnion;
 
 ScrUnion *scr_union_new_f64(uint32_t tag, double v);  /* returns +1 */
 ScrUnion *scr_union_new_bool(uint32_t tag, bool v);   /* returns +1 */
 /* Takes ownership of v (+1 moves in); retain/release must be non-NULL;
  * trace is non-NULL iff the arm type carries a cycle header. */
-ScrUnion *scr_union_new_ref(uint32_t tag, void *v,
-                             void *(*retain)(void *),
-                             void (*release)(void *),
-                             ScrTraceFn trace);
+ScrUnion *scr_union_new_refd(uint32_t tag, void *v, const ScrArmVt *vt, bool trace);
+/* General form for callers whose entry points are not link-time constants. */
+ScrUnion *scr_union_new_ref_rt(uint32_t tag, void *v, void *(*retain)(void *), void (*release)(void *), ScrTraceFn trace);
+/* The emitted form: see scr_box_new_obj. */
+#define scr_union_new_ref(tag, v, retain, release, trace)                                          \
+  ({                                                                                               \
+    static const ScrArmVt scr_vt_ = {(retain), (release)};                                         \
+    scr_union_new_refd((tag), (v), &scr_vt_, (void *)(trace) != NULL);                             \
+  })
 
 static inline ScrUnion *scr_union_retain(ScrUnion *u) {
   if (u->rc != SIZE_MAX) {

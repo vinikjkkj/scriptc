@@ -94,6 +94,16 @@ export const RUNTIME_FIELD_OFFSETS: readonly RuntimeFieldOffset[] = [
   { struct: "ScrCoroBase", field: "state", offset: SCR_CORO_BASE_STATE_OFFSET },
   { struct: "ScrCoroBase", field: "flags", offset: 28 },
   { struct: "ScrCoroBase", field: "rc", offset: 32 },
+  /* ScrUnion { size_t rc; uint32_t tag; uint32_t vt; uint64_t slot; } and ScrBox { size_t rc; ScrBoxKind kind; uint32_t vt;
+   * uint64_t slot; }: both 24 bytes. The LLVM lane reads `tag` and `slot` of a union and `slot` of a box by field GEP, and emits
+   * the immortal unit arms as whole %ScrUnion literals, so %ScrUnion / %ScrBox in emitter.ts must have these exact fields. `vt` is
+   * the encoded arm descriptor (offset from the cycle anchor | has_trace, scr_runtime.h); only the runtime reads it. */
+  { struct: "ScrUnion", field: "tag", offset: 8 },
+  { struct: "ScrUnion", field: "vt", offset: 12 },
+  { struct: "ScrUnion", field: "slot", offset: 16 },
+  { struct: "ScrBox", field: "kind", offset: 8 },
+  { struct: "ScrBox", field: "vt", offset: 12 },
+  { struct: "ScrBox", field: "slot", offset: 16 },
   { struct: "ScrCoroExc", field: "base", offset: 0 },
   { struct: "ScrCoroExc", field: "exc", offset: 40 },
 ];
