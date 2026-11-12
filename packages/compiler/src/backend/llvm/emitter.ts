@@ -117,7 +117,7 @@ import {
   type CoroTempSpill,
 } from "./coro.js";
 import { mangleCoroFrame, mangleCoroResume } from "../mangle.js";
-import { mangleAgenSettleThunk, mangleArgPack, mangleAsyncSpawn, mangleClassNew, mangleClassObj, mangleClassRetain, mangleClassStruct, mangleFnClosure, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleResolveThunk, mangleTrampoline, mangleVtStruct, mangleWrapper } from "../mangle.js";
+import { mangleAgenSettleThunk, mangleAsyncSpawn, mangleClassNew, mangleClassObj, mangleClassRetain, mangleClassStruct, mangleFnClosure, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleResolveThunk, mangleVtStruct, mangleWrapper } from "../mangle.js";
 import {
   BlockBuilder,
   CrossParkSlotError,
@@ -125,7 +125,6 @@ import {
   type CoroViolations,
   PromotedTempInPhiError,
 } from "./blocks.js";
-import { failOnFiberLane, type FiberLaneUse } from "../../ir/fiber-census.js";
 import { BORROWING_DYN_LIBCALLS, isStableReceiverOperand, singleWriterLocals, writesLocal } from "../../ir/analysis.js";
 import { SCR_BYTES_LEN_OFFSET } from "./runtime-layout.js";
 import {
@@ -1479,8 +1478,6 @@ const LIB_FN_SYMS: Record<string, string> = {
   "process.offRejectionHandled": "scr_process_off_rejection_handled",
   // The await lowering's loop hop and the dyn await (both park the
   // current fiber — USES_TIMERS_LIB_FNS marks the loop live).
-  "async.hop": "scr_await_hop",
-  "async.awaitDyn": "scr_await_dyn_value",
   // node:test (scr_test.c): the registration surface and the TestContext
   // members. Same runtime entries and argument order as emit-exprs.ts; the
   // two bodyless forms (registerEmpty, subEmpty) pass NULL in the middle of
@@ -2416,7 +2413,12 @@ class LlEmitter {
     const classObjDefs = emitClassObjDefs(this, this.classMeta, this.classObjs, this.fnByName, (t) => this.llType(t));
     const wrappers = this.emitFnValueDefs();
     const asyncDefs = this.emitAsyncScaffolding();
-    failOnFiberLane("llvm", this.fiberLaneUses);
+    if (this.fiberLaneUses.length > 0) {
+      throw new Error(
+        `no stackless lowering for ${this.fiberLaneUses.length} async function(s) or generator(s), and there is no fiber lane to run them on: ` +
+          this.fiberLaneUses.map((u) => `${u.fn} (${u.reason})`).join(", "),
+      );
+    }
 
     // Module globals, FIRST OCCURRENCE per id: a class-expression static
     // instantiated through several mixin applications registers one global
@@ -3900,7 +3902,7 @@ class LlEmitter {
    * closures enter through (packs the args +1, scr_async_spawn runs the
    * fiber eagerly to its first suspension and returns the promise). */
   /** The functions this emission gave the fiber lane (the SCRIPTC_NO_FIBERS census), with the reason. */
-  private fiberLaneUses: FiberLaneUse[] = [];
+  private fiberLaneUses: { fn: string; reason: string }[] = [];
 
   private fiberLaneReason(fn: IrFunction): string {
     const plan = this.coroCensusPlans.get(fn.name);
@@ -3929,166 +3931,6 @@ class LlEmitter {
         continue;
       }
       this.fiberLaneUses.push({ fn: fn.name, reason: this.fiberLaneReason(fn) });
-      const pack = mangleArgPack(fn.name);
-      const lifted = fn.captures !== undefined;
-      const fieldTys = [...(lifted ? ["ptr"] : []), ...fn.params.map((p) => this.llType(p.type))];
-      out.push(`%${pack} = type { ${fieldTys.join(", ") || "i8"} } ; ${fn.name} args`);
-      const sizeOf = `ptrtoint (ptr getelementptr (%${pack}, ptr null, i32 1) to i64)`;
-
-      this.declare(`declare void @free(ptr)`);
-      this.declare(`declare ptr @malloc(i64)`);
-      this.declare(`declare zeroext i1 @scr_exc_pending()`);
-      this.declare(`declare ptr @scr_fiber_promise(ptr)`);
-      this.declare(`declare ptr @scr_async_spawn(ptr, ptr)`);
-      this.needOom();
-
-      // Trampoline: unpack, free, run the body, settle.
-      const tr: string[] = [
-        `define internal void @${mangleTrampoline(fn.name)}(ptr %self, ptr %ap) ${FN_ATTRS} {`,
-        `entry:`,
-      ];
-      const loads: string[] = [];
-      fieldTys.forEach((ty, i) => {
-        tr.push(
-          `  %fp${i} = getelementptr inbounds %${pack}, ptr %ap, i64 0, i32 ${i}`,
-          `  %a${i} = load ${ty}, ptr %fp${i}`,
-        );
-        loads.push(`${ty} %a${i}`);
-      });
-      tr.push(`  call void @free(ptr %ap)`);
-      const ret = fn.returnType;
-      const retTy = this.llType(ret);
-      const bodyCall = `call ${retTy} @${mangleFunction(fn.name)}(${loads.join(", ")})`;
-      tr.push(retTy === "void" ? `  ${bodyCall}` : `  %r = ${bodyCall}`);
-      if (lifted) {
-        this.declare(`declare void @scr_closure_release(ptr)`);
-        tr.push(`  call void @scr_closure_release(ptr %a0)`);
-      }
-      tr.push(
-        `  %pend = call zeroext i1 @scr_exc_pending()`,
-        `  br i1 %pend, label %thrown, label %clean`,
-        `clean:`,
-        `  %pr = call ptr @scr_fiber_promise(ptr %self)`,
-      );
-      switch (ret.kind) {
-        case "void":
-          this.declare(`declare void @scr_promise_fulfill_void(ptr)`);
-          tr.push(`  call void @scr_promise_fulfill_void(ptr %pr)`);
-          break;
-        case "f64":
-          this.declare(`declare void @scr_promise_fulfill_f64(ptr, double)`);
-          tr.push(`  call void @scr_promise_fulfill_f64(ptr %pr, double %r)`);
-          break;
-        case "bool":
-          this.declare(`declare void @scr_promise_fulfill_bool(ptr, i1 zeroext)`);
-          tr.push(`  call void @scr_promise_fulfill_bool(ptr %pr, i1 %r)`);
-          break;
-        case "string":
-          this.declare(`declare void @scr_promise_fulfill_str(ptr, ptr)`);
-          tr.push(`  call void @scr_promise_fulfill_str(ptr %pr, ptr %r) ; moves in`);
-          break;
-        default: {
-          const v = vAdapters(this, ret);
-          this.declare(`declare void @scr_promise_fulfill_ref(ptr, ptr, ptr, ptr, ptr)`);
-          tr.push(
-            `  call void @scr_promise_fulfill_ref(ptr %pr, ptr %r, ptr ${v.retain}, ptr ${v.release}, ptr ${traceArg(this, ret)})`,
-          );
-        }
-      }
-      tr.push(`  ret void`, `thrown:`);
-      if (ret.kind !== "void" && isRefCounted(ret)) {
-        // An escaping throw means %r is the never-read dummy (NULL).
-        tr.push(`  call void ${releaseSym(this, ret)}(ptr %r)`);
-      }
-      tr.push(`  ret void`, `}`, ``);
-      appendAll(out, tr);
-
-      // Spawn wrapper: pack the args (+1 moves in), spawn the fiber.
-      const params = fieldTys.map((ty, i) => `${ty} %a${i}`);
-      const cache = fn.asyncCacheGlobal !== undefined ? mangleGlobal(fn.asyncCacheGlobal) : null;
-      const cycleCache =
-        fn.asyncCycleCacheGlobal !== undefined ? mangleGlobal(fn.asyncCycleCacheGlobal) : null;
-      if (cache !== null || cycleCache !== null) {
-        this.declare(`declare ptr @scr_promise_retain_v(ptr)`);
-        this.declare(`declare void @scr_promise_release(ptr)`);
-      }
-      if (cache !== null) {
-        this.declare(`declare void @scr_promise_mark_handled(ptr)`);
-      }
-      const sp: string[] = [
-        `define internal ptr @${mangleAsyncSpawn(fn.name)}(${params.join(", ")}) ${FN_ATTRS} { ; spawn ${fn.name}`,
-        `entry:`,
-        ...(cache !== null
-          ? [
-              `  %cached = load ptr, ptr @${cache}`,
-              `  %cache_hit = icmp ne ptr %cached, null`,
-              `  br i1 %cache_hit, label %cached_return, label %cache_miss`,
-              `cached_return:`,
-              `  %cached_owned = call ptr @scr_promise_retain_v(ptr %cached)`,
-              `  ret ptr %cached_owned`,
-              `cache_miss:`,
-            ]
-          : []),
-        `  %ap = call ptr @malloc(i64 ${sizeOf})`,
-        `  %isnull = icmp eq ptr %ap, null`,
-        `  br i1 %isnull, label %oom, label %ok`,
-        `oom:`,
-        `  call void @sc_oom()`,
-        `  unreachable`,
-        `ok:`,
-      ];
-      if (lifted) {
-        // scr_closure_retain is a header static inline — the `_v` twin is
-        // the exported symbol.
-        this.declare(`declare ptr @scr_closure_retain_v(ptr)`);
-        sp.push(`  %env = call ptr @scr_closure_retain_v(ptr %a0)`);
-      }
-      fieldTys.forEach((ty, i) => {
-        const src = lifted && i === 0 ? "%env" : `%a${i}`;
-        sp.push(
-          `  %sp${i} = getelementptr inbounds %${pack}, ptr %ap, i64 0, i32 ${i}`,
-          `  store ${ty} ${src}, ptr %sp${i}`,
-        );
-      });
-      sp.push(
-        `  %p = call ptr @scr_async_spawn(ptr @${mangleTrampoline(fn.name)}, ptr %ap)`,
-        ...(cache !== null
-          ? [
-              // The module loader owns this evaluation promise
-              // immediately. A later sibling can throw before the
-              // aggregate dependency wait is built, but this rejection
-              // must never become an unrelated unhandled rejection.
-              `  call void @scr_promise_mark_handled(ptr %p)`,
-            ]
-          : []),
-        ...(cache !== null
-          ? [
-              `  %cache_owned = call ptr @scr_promise_retain_v(ptr %p)`,
-              // The eager spawn may have re-entered this guarded module
-              // through an admitted async cycle and installed a temporary
-              // cache entry. Drop that owned slot before replacing it
-              // with the outer evaluation promise.
-              `  %replaced_cache = load ptr, ptr @${cache}`,
-              `  call void @scr_promise_release(ptr %replaced_cache)`,
-              `  store ptr %cache_owned, ptr @${cache}`,
-            ]
-          : []),
-        ...(cycleCache !== null
-          ? [
-              // Eager recursive spawns publish from the inside out. The
-              // runtime-requested outermost member writes last and is the
-              // SCC's actual evaluation root.
-              `  %cycle_cache_owned = call ptr @scr_promise_retain_v(ptr %p)`,
-              `  %replaced_cycle_cache = load ptr, ptr @${cycleCache}`,
-              `  call void @scr_promise_release(ptr %replaced_cycle_cache)`,
-              `  store ptr %cycle_cache_owned, ptr @${cycleCache}`,
-            ]
-          : []),
-        `  ret ptr %p`,
-        `}`,
-        ``,
-      );
-      appendAll(out, sp);
     }
     appendAll(out, this.emitGenScaffolding());
     return out;
@@ -4112,160 +3954,6 @@ class LlEmitter {
         continue;
       }
       this.fiberLaneUses.push({ fn: fn.name, reason: this.fiberLaneReason(fn) });
-      const isAsyncGen = fn.async === true;
-      const pack = mangleArgPack(fn.name);
-      const lifted = fn.captures !== undefined;
-      const fieldTys = [...(lifted ? ["ptr"] : []), ...fn.params.map((p) => this.llType(p.type))];
-      out.push(`%${pack} = type { ${fieldTys.join(", ") || "i8"} } ; ${fn.name} args`);
-      const sizeOf = `ptrtoint (ptr getelementptr (%${pack}, ptr null, i32 1) to i64)`;
-
-      this.declare(`declare void @free(ptr)`);
-      this.declare(`declare ptr @malloc(i64)`);
-      this.declare(`declare zeroext i1 @scr_exc_pending()`);
-      this.declare(`declare zeroext i1 @scr_exc_genret_pending()`);
-      this.declare(`declare void @scr_exc_clear()`);
-      this.declare(`declare ptr @scr_gen_of_fiber(ptr)`);
-      this.declare(`declare void @scr_gen_ret_to_out(ptr)`);
-      this.declare(`declare ptr @scr_gen_new(ptr, ptr, ptr)`);
-      this.needOom();
-
-      const tr: string[] = [
-        `define internal void @${mangleTrampoline(fn.name)}(ptr %self, ptr %ap) ${FN_ATTRS} {`,
-        `entry:`,
-      ];
-      const loads: string[] = [];
-      fieldTys.forEach((ty, i) => {
-        tr.push(
-          `  %fp${i} = getelementptr inbounds %${pack}, ptr %ap, i64 0, i32 ${i}`,
-          `  %a${i} = load ${ty}, ptr %fp${i}`,
-        );
-        loads.push(`${ty} %a${i}`);
-      });
-      tr.push(`  call void @free(ptr %ap)`);
-      const ret = fn.returnType;
-      const retTy = this.llType(ret);
-      const bodyCall = `call ${retTy} @${mangleFunction(fn.name)}(${loads.join(", ")})`;
-      tr.push(retTy === "void" ? `  ${bodyCall}` : `  %r = ${bodyCall}`);
-      if (lifted) {
-        this.declare(`declare void @scr_closure_release(ptr)`);
-        tr.push(`  call void @scr_closure_release(ptr %a0)`);
-      }
-      // Normal completion stores the (typed) return value; void completes
-      // with the NONE slot — JS's undefined done-value. A GENRET unwind
-      // consumes the sentinel and promotes the parked .return value; a
-      // real exception stays pending (the consumer-side resume moves it).
-      tr.push(
-        `  %g = call ptr @scr_gen_of_fiber(ptr %self)`,
-        `  %pend = call zeroext i1 @scr_exc_pending()`,
-        `  br i1 %pend, label %thrown, label %clean`,
-        `clean:`,
-      );
-      switch (ret.kind) {
-        case "void":
-          tr.push(`  br label %done ; void body: the done value is undefined (NONE)`);
-          break;
-        case "f64":
-          this.declare(`declare void @scr_gen_out_f64(ptr, double)`);
-          tr.push(`  call void @scr_gen_out_f64(ptr %g, double %r)`, `  br label %done`);
-          break;
-        case "bool":
-          this.declare(`declare void @scr_gen_out_bool(ptr, i1 zeroext)`);
-          tr.push(`  call void @scr_gen_out_bool(ptr %g, i1 %r)`, `  br label %done`);
-          break;
-        default: {
-          const v = vAdapters(this, ret);
-          this.declare(`declare void @scr_gen_out_ref(ptr, ptr, ptr)`);
-          tr.push(`  call void @scr_gen_out_ref(ptr %g, ptr %r, ptr ${v.release})`, `  br label %done`);
-        }
-      }
-      tr.push(
-        `thrown:`,
-        `  %genret = call zeroext i1 @scr_exc_genret_pending()`,
-        `  br i1 %genret, label %promote, label %dropdummy`,
-        `promote:`,
-        `  call void @scr_exc_clear()`,
-        `  call void @scr_gen_ret_to_out(ptr %g)`,
-        `  br label %dropdummy`,
-        `dropdummy:`,
-      );
-      if (ret.kind !== "void" && isRefCounted(ret)) {
-        tr.push(`  call void ${releaseSym(this, ret)}(ptr %r) ; unwound: the never-read dummy`);
-      }
-      tr.push(`  br label %done`, `done:`, `  ret void`, `}`, ``);
-      appendAll(out, tr);
-
-      // The never-started teardown: drop the packed (+1) arguments.
-      const dr: string[] = [
-        `define internal void @${mangleGenDrop(fn.name)}(ptr %ap) ${FN_ATTRS} {`,
-        `entry:`,
-      ];
-      fieldTys.forEach((ty, i) => {
-        const pType = lifted && i === 0 ? null : fn.params[lifted ? i - 1 : i]!.type;
-        const refcounted = pType === null || isRefCounted(pType);
-        if (!refcounted) return;
-        dr.push(
-          `  %dp${i} = getelementptr inbounds %${pack}, ptr %ap, i64 0, i32 ${i}`,
-          `  %dv${i} = load ptr, ptr %dp${i}`,
-        );
-        if (pType === null) {
-          this.declare(`declare void @scr_closure_release(ptr)`);
-          dr.push(`  call void @scr_closure_release(ptr %dv${i})`);
-        } else {
-          dr.push(`  call void ${releaseSym(this, pType)}(ptr %dv${i})`);
-        }
-      });
-      dr.push(`  call void @free(ptr %ap)`, `  ret void`, `}`, ``);
-      appendAll(out, dr);
-
-      // Spawn wrapper: pack the args (+1 moves in), allocate the
-      // SUSPENDED fiber — nothing runs until the first .next().
-      const params = fieldTys.map((ty, i) => `${ty} %a${i}`);
-      const sp: string[] = [
-        `define internal ptr @${mangleGenSpawn(fn.name)}(${params.join(", ")}) ${FN_ATTRS} { ; gen spawn ${fn.name}`,
-        `entry:`,
-        `  %ap = call ptr @malloc(i64 ${sizeOf})`,
-        `  %isnull = icmp eq ptr %ap, null`,
-        `  br i1 %isnull, label %oom, label %ok`,
-        `oom:`,
-        `  call void @sc_oom()`,
-        `  unreachable`,
-        `ok:`,
-      ];
-      if (lifted) {
-        this.declare(`declare ptr @scr_closure_retain_v(ptr)`);
-        sp.push(`  %env = call ptr @scr_closure_retain_v(ptr %a0)`);
-      }
-      fieldTys.forEach((ty, i) => {
-        const src = lifted && i === 0 ? "%env" : `%a${i}`;
-        sp.push(
-          `  %sp${i} = getelementptr inbounds %${pack}, ptr %ap, i64 0, i32 ${i}`,
-          `  store ${ty} ${src}, ptr %sp${i}`,
-        );
-      });
-      if (isAsyncGen) {
-        // An ASYNC generator carries its emitted SETTLE thunk into the
-        // handle: the runtime calls it at every yield and at completion to
-        // fulfill the in-flight request promise. Same lazy allocation —
-        // nothing runs until the first resume.
-        const settle = this.agenSettleThunkFor(
-          { kind: "asyncGenerator", yieldT: fn.generator.yieldT, retT: fn.returnType, nextT: fn.generator.nextT },
-          { kind: "record", shapeId: fn.generator.resultShapeId! },
-        );
-        this.declare(`declare ptr @scr_agen_new(ptr, ptr, ptr, ptr)`);
-        sp.push(
-          `  %gg = call ptr @scr_agen_new(ptr @${mangleTrampoline(fn.name)}, ptr %ap, ptr @${mangleGenDrop(fn.name)}, ptr @${settle})`,
-        );
-      } else {
-        sp.push(
-          `  %gg = call ptr @scr_gen_new(ptr @${mangleTrampoline(fn.name)}, ptr %ap, ptr @${mangleGenDrop(fn.name)})`,
-        );
-      }
-      sp.push(
-        `  ret ptr %gg`,
-        `}`,
-        ``,
-      );
-      appendAll(out, sp);
     }
     return out;
   }
@@ -11451,18 +11139,6 @@ class LlEmitter {
         // suspending. Selected from the NODE, exactly as the C lane does,
         // and never from the enclosing function: neither helper can then
         // be emitted by forgetting to consult something.
-        //
-        // The six names are spelled IN FULL rather than built from a
-        // `scr_agen_yield` / `scr_gen_yield` prefix. llvm-runtime-abi's
-        // scanner reads this file as TEXT and checks every scr_* name the
-        // backend can emit against scr_runtime.h; a name assembled at
-        // runtime reaches it as a prefix that declares nothing, and the
-        // guard then reports a phantom missing prototype instead of
-        // checking the real ones. A symbol the backend emits has to be
-        // READABLE here.
-        const Y = e.async === true
-          ? { f64: "scr_agen_yield_f64", bool: "scr_agen_yield_bool", ref: "scr_agen_yield_ref" }
-          : { f64: "scr_gen_yield_f64", bool: "scr_gen_yield_bool", ref: "scr_gen_yield_ref" };
         if (e.value === null) throw new Error("llvm emitter bug: yieldExpr with no operand (frontend fills undefined)");
         const v = this.emitExpr(e.value);
         const yt = e.value.type;
@@ -11473,38 +11149,7 @@ class LlEmitter {
           this.emitPendingCheck();
           return out;
         }
-        if (yt.kind === "f64") {
-          this.declare(`declare void @${Y.f64}(double)`);
-          B.line(`call void @${Y.f64}(double ${v.name})`);
-        } else if (yt.kind === "bool") {
-          this.declare(`declare void @${Y.bool}(i1 zeroext)`);
-          B.line(`call void @${Y.bool}(i1 ${v.name})`);
-        } else {
-          this.moveTemp(v); // the OUT slot takes ownership
-          this.declare(`declare void @${Y.ref}(ptr, ptr)`);
-          B.line(`call void @${Y.ref}(ptr ${v.name}, ptr ${vAdapters(this, yt).release})`);
-        }
-        this.emitPendingCheck();
-        if (e.type.kind === "void") {
-          // An undefined next-channel: nothing to read (the frontend
-          // fences value-position yields on this channel).
-          return { name: "", type: e.type };
-        }
-        const t = B.tmp();
-        if (e.type.kind === "f64") {
-          this.declare(`declare double @scr_gen_take_in_f64()`);
-          B.line(`${t} = call double @scr_gen_take_in_f64()`);
-          return { name: t, type: e.type };
-        }
-        if (e.type.kind === "bool") {
-          this.declare(`declare zeroext i1 @scr_gen_take_in_bool()`);
-          B.line(`${t} = call zeroext i1 @scr_gen_take_in_bool()`);
-          return { name: t, type: e.type };
-        }
-        // Refcounted channels: the slot's +1 moves out.
-        this.declare(`declare ptr @scr_gen_take_in_ref()`);
-        B.line(`${t} = call ptr @scr_gen_take_in_ref()`);
-        return this.own({ name: t, type: e.type });
+        throw new Error(`llvm emitter bug: ${this.currentFnName} holds a yield outside a stackless frame (the fiber lane is gone)`);
       }
       case "genResume": {
         // One consumer resume: park the sent value (typed per mode), hop
@@ -11622,34 +11267,7 @@ class LlEmitter {
           this.emitPendingCheck();
           return out0;
         }
-        // Parks the fiber until the promise settles; rejected promises
-        // re-throw here (hence the pending check). Promise temp borrowed;
-        // refcounted results arrive +1 and join the frame pre-check so an
-        // unwind releases the dummy (NULL) harmlessly.
-        const pr = this.emitExpr(e.value);
-        if (e.type.kind === "void") {
-          this.declare(`declare void @scr_await_void(ptr)`);
-          B.line(`call void @scr_await_void(ptr ${pr.name})`);
-          this.emitPendingCheck();
-          return { name: "", type: e.type };
-        }
-        const t = B.tmp();
-        if (e.type.kind === "f64") {
-          this.declare(`declare double @scr_await_f64(ptr)`);
-          B.line(`${t} = call double @scr_await_f64(ptr ${pr.name})`);
-        } else if (e.type.kind === "bool") {
-          this.declare(`declare zeroext i1 @scr_await_bool(ptr)`);
-          B.line(`${t} = call zeroext i1 @scr_await_bool(ptr ${pr.name})`);
-        } else if (e.type.kind === "string") {
-          this.declare(`declare ptr @scr_await_str(ptr)`);
-          B.line(`${t} = call ptr @scr_await_str(ptr ${pr.name})`);
-        } else {
-          this.declare(`declare ptr @scr_await_ref(ptr)`);
-          B.line(`${t} = call ptr @scr_await_ref(ptr ${pr.name})`);
-        }
-        const out = this.own({ name: t, type: e.type });
-        this.emitPendingCheck();
-        return out;
+        throw new Error(`llvm emitter bug: ${this.currentFnName} holds an await outside a stackless frame (the fiber lane is gone)`);
       }
       case "awaitUnionExpr": {
         // Await of a promise-or-absent union: the promise arm awaits like
@@ -11678,98 +11296,7 @@ class LlEmitter {
           this.emitPendingCheck();
           return out0;
         }
-        this.declare(`declare void @scr_await_hop()`);
-        if (e.type.kind === "void") {
-          const lp = B.newLabel("au.p");
-          const lh = B.newLabel("au.h");
-          const lj = B.newLabel("au.j");
-          B.condBr(isP, lp, lh);
-          B.startBlock(lp);
-          this.declare(`declare void @scr_await_void(ptr)`);
-          B.line(`call void @scr_await_void(ptr ${this.unionPeek(u.name)})`);
-          B.br(lj);
-          B.startBlock(lh);
-          B.line(`call void @scr_await_hop()`);
-          B.br(lj);
-          B.startBlock(lj);
-          this.emitPendingCheck();
-          return { name: "", type: e.type };
-        }
-        if (e.type.kind !== "union") {
-          throw new Error("llvm emitter bug: awaitUnion result is neither void nor a union");
-        }
-        const resUnionId = e.type.unionId;
-        const resDef = this.unionsById.get(resUnionId);
-        if (!resDef) throw new Error("llvm emitter bug: awaitUnion result union unknown");
-        const resTagOf = (arm: IrType): number => {
-          const t = resDef.arms.findIndex((a) => typeEquals(a, arm));
-          if (t < 0) throw new Error("llvm emitter bug: awaitUnion result arm missing");
-          return t;
-        };
-        const innerTag = resTagOf(inner);
-        const slot = B.slot();
-        B.entryAllocas.push(`${slot} = alloca ptr`);
-        B.line(`store ptr null, ptr ${slot}`);
-        const lp = B.newLabel("au.p");
-        const lh = B.newLabel("au.h");
-        const lj = B.newLabel("au.j");
-        B.condBr(isP, lp, lh);
-        B.startBlock(lp);
-        const peek = this.unionPeek(u.name);
-        let awaited: LlValue;
-        if (inner.kind === "f64") {
-          this.declare(`declare double @scr_await_f64(ptr)`);
-          const x = B.tmp();
-          B.line(`${x} = call double @scr_await_f64(ptr ${peek})`);
-          awaited = { name: x, type: inner };
-        } else if (inner.kind === "bool") {
-          this.declare(`declare zeroext i1 @scr_await_bool(ptr)`);
-          const x = B.tmp();
-          B.line(`${x} = call zeroext i1 @scr_await_bool(ptr ${peek})`);
-          awaited = { name: x, type: inner };
-        } else if (inner.kind === "string") {
-          this.declare(`declare ptr @scr_await_str(ptr)`);
-          const x = B.tmp();
-          B.line(`${x} = call ptr @scr_await_str(ptr ${peek})`);
-          awaited = { name: x, type: inner };
-        } else {
-          this.declare(`declare ptr @scr_await_ref(ptr)`);
-          const x = B.tmp();
-          B.line(`${x} = call ptr @scr_await_ref(ptr ${peek})`);
-          awaited = { name: x, type: inner };
-        }
-        B.line(`store ptr ${this.unionNewOwned(innerTag, awaited)}, ptr ${slot}`);
-        B.br(lj);
-        B.startBlock(lh);
-        B.line(`call void @scr_await_hop()`);
-        const unitTags = def.arms.flatMap((a, i) => (isUnitType(a) ? [i] : []));
-        if (unitTags.length === 1) {
-          B.line(`store ptr ${this.unitInstanceRef(resUnionId, resTagOf(def.arms[unitTags[0]!]!))}, ptr ${slot}`);
-          B.br(lj);
-        } else {
-          // Several unit arms: dispatch on the source tag (each maps to
-          // its own interned instance in the result union).
-          const bad = B.newLabel("au.b");
-          const labels = unitTags.map(() => B.newLabel("au.u"));
-          B.terminate(
-            `switch i32 ${tag}, label %${bad} [ ${unitTags.map((t2, i) => `i32 ${t2}, label %${labels[i]}`).join(" ")} ]`,
-          );
-          unitTags.forEach((t2, i) => {
-            B.startBlock(labels[i]!);
-            B.line(`store ptr ${this.unitInstanceRef(resUnionId, resTagOf(def.arms[t2]!))}, ptr ${slot}`);
-            B.br(lj);
-          });
-          B.startBlock(bad);
-          this.needsBadTag = true;
-          B.line(`call void @sc_bad_tag()`);
-          B.terminate(`unreachable`);
-        }
-        B.startBlock(lj);
-        const t = B.tmp();
-        B.line(`${t} = load ptr, ptr ${slot}`);
-        const out = this.own({ name: t, type: e.type });
-        this.emitPendingCheck();
-        return out;
+        throw new Error(`llvm emitter bug: ${this.currentFnName} holds an await union outside a stackless frame (the fiber lane is gone)`);
       }
       case "newPromise": {
         // Pending promise + resolve closure, executor run synchronously
@@ -17645,12 +17172,9 @@ class LlEmitter {
     if (USES_TIMERS_LIB_FNS.has(e.fn)) this.usesTimers = true;
     /* THE STACKLESS HOP, and it goes here rather than beside the name table.
      *
-     * `async.hop` reaches the generic lowering through LIB_FN_RUNTIME_NAMES
-     * ("async.hop" -> "scr_await_hop"), which is a FIBER primitive: reaching it
-     * from a body that has no fiber aborts at runtime with "await outside an
-     * async function", which is precisely what shipped once on the C lane and
-     * crashed fifteen admitted bodies. So the branch has to be in front of the
-     * table, not inside it.
+     * `async.hop` has no runtime symbol of its own any more (the fiber await it
+     * once named is gone); it is a suspension point of a stackless frame, so the
+     * branch has to be in front of the generic lowering.
      *
      * THE CONDITION IS `currentCoro`, NOT THE KNOB. A knob-absent build has an
      * empty `coroPlans`, so `currentCoro` is null in every function and this
@@ -17662,9 +17186,15 @@ class LlEmitter {
      * The loop-liveness line above runs for BOTH lanes deliberately: the hop
      * still needs the event loop alive, and the C lane sets `usesTimers` on its
      * stackless arm for the same reason. */
-    if (e.fn === "async.hop" && this.currentCoro !== null) {
+    if (e.fn === "async.hop") {
+      if (this.currentCoro === null) {
+        throw new Error(`llvm emitter bug: ${this.currentFnName} holds an async.hop outside a stackless frame (the fiber lane is gone)`);
+      }
       this.emitCoroHop(this.fnByName.get(this.currentFnName)!, e, e.loc);
       return { name: "", type: e.type };
+    }
+    if (e.fn === "async.awaitDyn") {
+      throw new Error("llvm emitter bug: async.awaitDyn has no lowering (it was fiber-only and nothing mints it any more)");
     }
     // The handful with non-generic shapes first.
     if (e.fn === "error.argTypeThrow") {

@@ -1,8 +1,7 @@
 /* Expression C emission: the whole IrExpr dispatch (emitExpr) — every IR
  * expression lands in a fresh C temp, with RC ownership tracked on the
  * emitter's frames (see the discipline comment in emitter core). */
-import { fiberOnly, type Fenced } from "../../ir/suspends.js";
-import { poisonYieldArm } from "./gen-poison.js";
+import { type Fenced } from "../../ir/suspends.js";
 import { emitCoroYield } from "./emit-gen-coro.js";
 import type { CEmitter, Temp } from "./emitter.js";
 
@@ -3865,8 +3864,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         }
         const arg = (i: number) => args[i]!.name;
         // Fenced<S>: a raw fragment spelling scr_await_ does not compile here.
-        // See ir/suspends.ts -- fiberOnly was opt-in, and that is how the
-        // second fiber-only primitive reached an admitted coroutine body.
+        // See ir/suspends.ts.
         const finish = <S extends string>(call: Fenced<S>): Temp => {
           // Math.* propagates a marker operand's NaN payload (libm does); canonicalise.
           const c = e.fn.startsWith("math.") ? canonNum(e.type, call as unknown as string, E.canonElided(e)) : (call as unknown as string);
@@ -7493,11 +7491,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
               // rejection for it to re-throw. The fiber arm emits none either.
               return finish(`((void)0)`);
             }
-            // Through fiberOnly: a fiber-only primitive may only be emitted
-            // by naming the REGISTERED suspender it belongs to, so it cannot
-            // reach the output without liveness being able to see it. This is
-            // the half of the binding that lives where the knowledge is.
-            return finish(fiberOnly("async.hop", `scr_await_hop()`));
+            throw new Error(`emitter bug: ${E.currentFn?.name ?? "?"} holds an async.hop outside a stackless frame (the fiber lane is gone)`);
           case "promise.adaptHas":
             return finish(`scr_promise_adapt_has(${arg(0)}, ${arg(1)})`);
           case "promise.adaptGet":
@@ -7515,11 +7509,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "promise.payloadRef":
             return finish(`(${cType(e.type).trim()})scr_promise_payload_ref(${arg(0)})`);
           case "async.awaitDyn":
-            E.usesTimers = true; // the hop rides the loop
-            // Through fiberOnly for the same reason async.hop is: a
-            // fiber-only await emitted raw reached admitted coroutine
-            // bodies, where it fail-fasts with STATUS_STACK_BUFFER_OVERRUN.
-            return finish(fiberOnly("async.awaitDyn", `scr_await_dyn_value(${arg(0)})`));
+            throw new Error("emitter bug: async.awaitDyn has no lowering (it was fiber-only and nothing mints it any more)");
           case "als.new":
             return finish(`scr_als_new()`);
           case "als.get":
@@ -9461,48 +9451,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           E.emitPendingCheck();
           return { name: sent, type: e.type };
         }
-        // The ASYNC form additionally takes JS's AsyncGeneratorYield
-        // microtask hop and SETTLES the in-flight request promise before
-        // suspending. Selected from the node, never from the enclosing
-        // function, so neither can be emitted by omission.
-        //
-        // Spelled in full rather than built from a prefix, for the reason
-        // the LLVM twin records: a runtime symbol this backend can emit
-        // has to be findable by reading the source, and the ABI guard on
-        // the other lane is built on exactly that.
-        const Y = e.async === true
-          ? { f64: "scr_agen_yield_f64", bool: "scr_agen_yield_bool", ref: "scr_agen_yield_ref" }
-          : { f64: "scr_gen_yield_f64", bool: "scr_gen_yield_bool", ref: "scr_gen_yield_ref" };
-        // THE VALUE GUARD. The scalar arm is chosen through gen-poison so a
-        // wrong-arm defect can be INJECTED on demand: a parity test that has
-        // never been watched failing cannot distinguish agreement from
-        // blindness. Unpoisoned this returns exactly Y.f64 / Y.bool, so the
-        // emitted C is byte-identical with the knob absent. `ref` is never
-        // swapped -- its call takes a release adapter, so a swap would fail
-        // at the C compiler instead of at the value.
-        const scalarArm = poisonYieldArm(yt.kind, Y);
-        if (yt.kind === "f64") {
-          E.line(`${scalarArm}(${v.name});${E.srcComment(e.loc)}`);
-        } else if (yt.kind === "bool") {
-          E.line(`${scalarArm}(${v.name});${E.srcComment(e.loc)}`);
-        } else {
-          E.moveTemp(v); // the OUT slot takes ownership
-          E.line(`${Y.ref}(${v.name}, ${vAdapters(yt).release});${E.srcComment(e.loc)}`);
-        }
-        E.emitPendingCheck();
-        switch (e.type.kind) {
-          case "void":
-            // An undefined next-channel: nothing to read (the frontend
-            // fences value-position yields on this channel).
-            return { name: "", type: e.type };
-          case "f64":
-            return E.newTemp(e.type, `scr_gen_take_in_f64()`);
-          case "bool":
-            return E.newTemp(e.type, `scr_gen_take_in_bool()`);
-          default:
-            // Refcounted channels (dyn included): the slot's +1 moves out.
-            return E.newTemp(e.type, `(${cType(e.type).trim()})scr_gen_take_in_ref()`);
-        }
+        throw new Error(`emitter bug: ${E.currentFn?.name ?? "?"} holds a yield outside a stackless frame (the fiber lane is gone)`);
       }
       case "genResume": {
         // One consumer resume: park the sent value (typed per mode), hop
@@ -9686,37 +9635,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           E.emitPendingCheck();
           return { name: nm, type: e.type };
         }
-        // Parks the fiber until the promise settles; rejected promises
-        // re-throw here (hence the pending check). Promise temp borrowed;
-        // refcounted results arrive +1 and join the frame pre-check so an
-        // unwind releases the dummy (NULL) harmlessly.
-        const pr = E.emitExpr(e.value);
-        let read: string;
-        switch (e.type.kind) {
-          case "f64":
-            read = `scr_await_f64(${pr.name})`;
-            break;
-          case "bool":
-            read = `scr_await_bool(${pr.name})`;
-            break;
-          case "string":
-            read = `scr_await_str(${pr.name})`;
-            break;
-          case "void": {
-            E.line(`scr_await_void(${pr.name});${E.srcComment(e.loc)}`);
-            E.emitPendingCheck();
-            return { name: "", type: e.type };
-          }
-          case "dyn":
-            // The checked-dynamic tree-crossing await: void fulfillments (a boxed
-            // promise<void> that skipped its adapter) answer the
-            // undefined VALUE, never NULL.
-            read = `scr_await_dyn(${pr.name})`;
-            break;
-          default:
-            read = `(${cType(e.type).trim()})scr_await_ref(${pr.name})`;
-        }
-        return E.fallibleTemp(e.type, read);
+        throw new Error(`emitter bug: ${E.currentFn?.name ?? "?"} holds an await outside a stackless frame (the fiber lane is gone)`);
       }
       case "awaitUnionExpr": {
         // Await of a promise-or-absent union: the promise arm awaits like
@@ -9811,65 +9730,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           E.emitPendingCheck();
           return { name: nm, type: e.type };
         }
-        if (e.type.kind === "void") {
-          E.line(
-            `if (${u.name}->tag == ${e.promiseTag}) scr_await_void(${peek}); else scr_await_hop();${E.srcComment(e.loc)}`,
-          );
-          E.emitPendingCheck();
-          return { name: "", type: e.type };
-        }
-        if (e.type.kind !== "union") {
-          throw new Error("emitter bug: awaitUnion result is neither void nor a union");
-        }
-        const resDef = E.unionsById.get(e.type.unionId);
-        if (!resDef) throw new Error("emitter bug: awaitUnion result union unknown");
-        const resTagOf = (arm: (typeof resDef.arms)[number]): number => {
-          const tag = resDef.arms.findIndex((a) => typeEquals(a, arm));
-          if (tag < 0) throw new Error("emitter bug: awaitUnion result arm missing");
-          return tag;
-        };
-        const innerTag = resTagOf(inner);
-        const name = `sc_t${E.tempCounter++}`;
-        E.line(`${cDecl(e.type, name)} = NULL;${E.srcComment(e.loc)}`);
-        E.currentFrame().push({ name, type: e.type });
-        E.line(`if (${u.name}->tag == ${e.promiseTag}) {`);
-        E.indent++;
-        let wrap: string;
-        switch (inner.kind) {
-          case "f64":
-            wrap = `scr_union_new_f64(${innerTag}, scr_await_f64(${peek}))`;
-            break;
-          case "bool":
-            wrap = `scr_union_new_bool(${innerTag}, scr_await_bool(${peek}))`;
-            break;
-          case "string":
-            wrap = `scr_union_new_ref(${innerTag}, scr_await_str(${peek}), scr_str_retain_v, scr_str_release_v, NULL)`;
-            break;
-          default: {
-            const v = vAdapters(inner);
-            wrap = `scr_union_new_ref(${innerTag}, scr_await_ref(${peek}), ${v.retain}, ${v.release}, ${E.traceArgC(inner)})`;
-          }
-        }
-        E.line(`${name} = ${wrap};`);
-        E.indent--;
-        E.line(`} else {`);
-        E.indent++;
-        E.line(`scr_await_hop();`);
-        const unitTags = def.arms.flatMap((a, i) => (isUnitType(a) ? [i] : []));
-        if (unitTags.length === 1) {
-          E.line(`${name} = ${E.unitInstanceRef(e.type.unionId, resTagOf(def.arms[unitTags[0]!]!))};`);
-        } else {
-          E.line(`switch (${u.name}->tag) {`);
-          for (const t of unitTags) {
-            E.line(`case ${t}: ${name} = ${E.unitInstanceRef(e.type.unionId, resTagOf(def.arms[t]!))}; break;`);
-          }
-          E.line(`default: break;`);
-          E.line(`}`);
-        }
-        E.indent--;
-        E.line(`}`);
-        E.emitPendingCheck();
-        return { name, type: e.type };
+        throw new Error(`emitter bug: ${E.currentFn?.name ?? "?"} holds an await union outside a stackless frame (the fiber lane is gone)`);
       }
       case "newPromise": {
         // Pending promise + resolve closure, executor run synchronously

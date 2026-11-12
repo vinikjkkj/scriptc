@@ -138,15 +138,9 @@ export function mangleGlobal(globalId: string): string {
   return `sc_g_${sanitize(globalId.replace(/^%g\./, ""))}`;
 }
 
-/** Async function machinery: spawn wrapper, trampoline, argument pack. */
+/** Async function machinery: the spawn wrapper of a stackless frame. */
 export function mangleAsyncSpawn(fnName: string): string {
   return `sc_as_${sanitize(fnName)}`;
-}
-export function mangleTrampoline(fnName: string): string {
-  return `sc_tr_${sanitize(fnName)}`;
-}
-export function mangleArgPack(fnName: string): string {
-  return `sc_ap_${sanitize(fnName)}`;
 }
 /** Generator function machinery: spawn wrapper (allocates the suspended
  * fiber — nothing runs) and the never-started argpack drop. The pack and
