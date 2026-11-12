@@ -2278,7 +2278,15 @@ export const TEXT_DRIFT_TOLERANCE = 256;
  * uncaughtException exit semantics, always linked: scr_exitcode_at_exit (47 B),
  * scr_exit_code_hint_get (7 B) and their data words; scr_error_reld 111 -> 259 B
  * (releases the fs-error errno/syscall/path extension chain); scr_init 55 -> 67 B. */
-export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 72_694 : null;
+/* RE-RECORDED 2026-11-12 for the box train (main 0df2193a8 + descvt2 + sharedbox1): 72,694 -> 72,950 (+256). MEASURED by the Windows lane of CI
+ * run 43146520353 on descvt2 ("the static hello-world .text GREW by 256 bytes: 72950 against the recorded 72694") and reproduced with the
+ * local zig 0.16.0 windows-gnu cross build (SCRIPTC_CC=zigcc SCRIPTC_TARGET=x86_64-windows-gnu): main 0df2193a8 measures 72,902 there (208 above the
+ * record, inside the tolerance), the box train 72,950 (+48 over main; sharedbox1 adds no always-linked text beyond what descvt2 did). WHAT THE BYTES
+ * BOUGHT (INFERRED from the diff, not measured per function): the page-return sweep's per-chunk bookkeeping in scr_cycle.c (the skip test and the
+ * two-sweep candidate mask), always linked; scr_box_new_objd / scr_armvt_enc and the descriptor-decoding release and retain paths in scr_closure.c;
+ * the static shared-box tables' constructors checks in scr_union_new_f64 / scr_union_new_bool. Against that, a box and a union no longer store three
+ * function pointers each. */
+export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 72_950 : null;
 
 /** .text VirtualSize of the canonical regex program, same commit, same lane.
  * Recorded separately rather than derived: the two classes do not move
@@ -2434,7 +2442,11 @@ export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 72_694 : null;
  * below the old record: the old 133,750 was measured before the renderer and its neighbours (scr_json.c's function-text arm) were
  * reshaped, and the composition's figure sits that much under it. A later change that grows the class by more than the tolerance
  * moves this record again, with its own measured cause. */
-export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 133_478 : null;
+/* 2026-11-12 (the box train, see STATIC_CLASS_TEXT_RECORDED above): RE-RECORDED 133_478 -> 133_798 (+320). SOURCE: the local zig 0.16.0 windows-gnu
+ * cross build of this probe, which reproduced CI's static-class figure exactly for the same tree (72,950): main 0df2193a8 measures 133,702 there (224 above
+ * the record), the box train 133,798 (+96 over main). The regex program carries the same always-linked growth as the hello-world plus the arm descriptors
+ * of its union arms. NOT yet seen in a CI Windows log. */
+export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 133_798 : null;
 
 /* 2026-10-21 -- THE LINK NOW COLLECTS DEAD SECTIONS, and every figure above moves.
  * The numbers in this block, and the two ceilings (STATIC_CLASS_MAX and
