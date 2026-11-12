@@ -27726,6 +27726,18 @@
     "<repo>/tests/corpus/25099-return-in-an-async-generator-awaits-its-operand.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25151-a-local-dead-across-an-await-is-released-before-the-park-and-live-ones-are-kept.ts": {
+   "order": [
+    "<repo>/tests/corpus/25151-a-local-dead-across-an-await-is-released-before-the-park-and-live-ones-are-kept.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25152-dead-local-release-before-a-park-across-loops-switches-finally-and-for-of.ts": {
+   "order": [
+    "<repo>/tests/corpus/25152-dead-local-release-before-a-park-across-loops-switches-finally-and-for-of.ts"
+   ],
+   "diags": []
   }
  }
 }
