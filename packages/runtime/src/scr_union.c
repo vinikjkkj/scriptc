@@ -21,24 +21,26 @@ long scr_union_live_count(void) { return scr_live_unions; }
 
 static void scr_union_trace(void *o, ScrTraceVisit visit, void *ctx) {
   ScrUnion *u = (ScrUnion *)o;
-  if (u->arm_trace) visit(scr_union_peek(u), ctx);
+  if (!u->scalar && u->arm_trace) visit(scr_union_peek(u), ctx);
 }
 
 /* Teardown for the collector: release the payload only when the trace does
  * NOT visit it (the complement — see the contract in scr_runtime.h). */
 static void scr_union_gcfree(void *o) {
   ScrUnion *u = (ScrUnion *)o;
-  if (u->arm_release && !u->arm_trace) u->arm_release(scr_union_peek(u));
+  if (!u->scalar && u->arm_release && !u->arm_trace) u->arm_release(scr_union_peek(u));
 #ifdef SCR_RC_AUDIT
   scr_live_unions--;
 #endif
   scr_cyc_free(u);
 }
 
-static ScrUnion *scr_union_alloc(uint32_t tag) {
-  ScrUnion *u = scr_cyc_alloc(sizeof(ScrUnion), &scr_union_trace, &scr_union_gcfree);
+/* A scalar box (f64, bool) has no payload entry points to keep, so it is allocated without them: 24 bytes instead of 40. */
+static ScrUnion *scr_union_alloc(uint32_t tag, bool scalar) {
+  ScrUnion *u = scr_cyc_alloc(scalar ? offsetof(ScrUnion, arm_release) : sizeof(ScrUnion), &scr_union_trace, &scr_union_gcfree);
   u->rc = 1;
   u->tag = tag;
+  u->scalar = scalar ? 1u : 0u;
 #ifdef SCR_RC_AUDIT
   scr_live_unions++;
 #endif
@@ -46,22 +48,22 @@ static ScrUnion *scr_union_alloc(uint32_t tag) {
 }
 
 ScrUnion *scr_union_new_f64(uint32_t tag, double v) {
-  ScrUnion *u = scr_union_alloc(tag);
+  ScrUnion *u = scr_union_alloc(tag, true);
   memcpy(&u->slot, &v, sizeof v);
   return u;
 }
 
 ScrUnion *scr_union_new_bool(uint32_t tag, bool v) {
-  ScrUnion *u = scr_union_alloc(tag);
+  ScrUnion *u = scr_union_alloc(tag, true);
   u->slot = v ? 1 : 0;
   return u;
 }
 
 ScrUnion *scr_union_new_ref(uint32_t tag, void *v, void *(*retain)(void *),
                              void (*release)(void *), ScrTraceFn trace) {
-  ScrUnion *u = scr_union_alloc(tag);
+  ScrUnion *u = scr_union_alloc(tag, false);
   memcpy(&u->slot, &v, sizeof v); /* ownership of v moves in (+1 arrived) */
-  u->arm_retain = retain;
+  (void)retain;
   u->arm_release = release;
   u->arm_trace = trace;
   return u;
@@ -71,12 +73,12 @@ void scr_union_release(ScrUnion *u) {
   if (!u || u->rc == SIZE_MAX) return; /* NULL: an uninitialized `let` local */
   if (--u->rc == 0) {
     scr_cyc_on_dead(u);
-    if (u->arm_release) u->arm_release(scr_union_peek(u));
+    if (!u->scalar && u->arm_release) u->arm_release(scr_union_peek(u));
 #ifdef SCR_RC_AUDIT
     scr_live_unions--;
 #endif
     scr_cyc_free(u);
-  } else if (u->arm_trace) {
+  } else if (!u->scalar && u->arm_trace) {
     /* A possible cycle root only when its arm carries a cycle header: arm_trace is NULL for f64, bool, string and bytes arms (and
      * for every scalar union), so scr_union_trace visits nothing from such a box and it cannot be a member of a cycle. The field is
      * fixed when the box is built (a union never changes arm), so no store can invalidate this. MEASURED on the zapobench mysql arm:

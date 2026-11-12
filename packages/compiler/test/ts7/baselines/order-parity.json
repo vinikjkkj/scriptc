@@ -27595,6 +27595,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25100-scalar-union-boxes-under-a-collector-with-1000-concurrent-coroutines.ts": {
+   "order": [
+    "<repo>/tests/corpus/25100-scalar-union-boxes-under-a-collector-with-1000-concurrent-coroutines.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25101-scalar-union-values-in-arrays-promises-and-retags-under-collector-pressure.ts": {
+   "order": [
+    "<repo>/tests/corpus/25101-scalar-union-values-in-arrays-promises-and-retags-under-collector-pressure.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/25097-forty-thousand-async-generator-fibers-alive-at-once.ts": {
    "order": [
     "<repo>/tests/corpus/25097-forty-thousand-async-generator-fibers-alive-at-once.ts"

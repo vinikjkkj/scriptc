@@ -16,7 +16,7 @@
  * The C emitter writes those as C text and lets clang lay the structs
  * out; here the layout is the emitter's own — record fields are GEPs at
  * `i32 <index + 1>` past the i64 rc, ScrUnion's tag is field 1 and its
- * payload slot field 5, and a ScrClosure's caps ride immediately past
+ * payload slot field 3, and a ScrClosure's caps ride immediately past
  * the struct. Nothing else differs, and the ownership rules below are
  * emit-ws.ts's, restated because they are the part a port gets wrong:
  *
@@ -337,7 +337,7 @@ function dispatcher(host: WsHost, plan: WsGlobalPlan, names: WsNames): string[] 
     B.line(`${ok} = icmp eq i32 ${tv}, ${h.fnTag}`);
     B.line(`br i1 ${ok}, label %${go}, label %${out}`);
     B.label(go);
-    B.line(`${pp} = getelementptr inbounds %ScrUnion, ptr ${hv}, i64 0, i32 5`);
+    B.line(`${pp} = getelementptr inbounds %ScrUnion, ptr ${hv}, i64 0, i32 3`);
     B.line(`${pv} = load ptr, ptr ${pp}`);
     // Retained across the call: a listener that reassigns its own slot
     // (the self-detaching handler) would otherwise release the closure
@@ -409,7 +409,7 @@ function sendMethod(host: WsHost, plan: WsGlobalPlan, names: WsNames): string[] 
       const pp = B.tmp();
       const pv = B.tmp();
       B.label(a.lbl);
-      B.line(`${pp} = getelementptr inbounds %ScrUnion, ptr %a0, i64 0, i32 5`);
+      B.line(`${pp} = getelementptr inbounds %ScrUnion, ptr %a0, i64 0, i32 3`);
       B.line(`${pv} = load ptr, ptr ${pp}`);
       B.line(sendCall(a.armT, pv));
       B.line(`br label %${fin}`);
@@ -467,7 +467,7 @@ function closeMethod(host: WsHost, plan: WsGlobalPlan, names: WsNames): string[]
       } else {
         const pp = B.tmp();
         const pv = B.tmp();
-        B.line(`${pp} = getelementptr inbounds %ScrUnion, ptr %a${n}, i64 0, i32 5`);
+        B.line(`${pp} = getelementptr inbounds %ScrUnion, ptr %a${n}, i64 0, i32 3`);
         B.line(`${pv} = load ptr, ptr ${pp}`);
         B.line(`store ptr ${pv}, ptr %reasp`);
       }
@@ -551,7 +551,7 @@ function initBagArm(
   const unionPayload = (u: string): string => {
     const p = B.tmp();
     const v = B.tmp();
-    B.line(`${p} = getelementptr inbounds %ScrUnion, ptr ${u}, i64 0, i32 5`);
+    B.line(`${p} = getelementptr inbounds %ScrUnion, ptr ${u}, i64 0, i32 3`);
     B.line(`${v} = load ptr, ptr ${p}`);
     return v;
   };
@@ -783,7 +783,7 @@ function ctorWrapper(
         const pp = B.tmp();
         const pv = B.tmp();
         if (a.kind !== "absent") {
-          B.line(`${pp} = getelementptr inbounds %ScrUnion, ptr %a1, i64 0, i32 5`);
+          B.line(`${pp} = getelementptr inbounds %ScrUnion, ptr %a1, i64 0, i32 3`);
           B.line(`${pv} = load ptr, ptr ${pp}`);
         }
         armLines(a.kind, pv);

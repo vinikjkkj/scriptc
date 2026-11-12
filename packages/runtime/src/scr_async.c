@@ -4254,6 +4254,20 @@ double scr_promise_value_f64(const ScrPromise *p) { return p->f64; }
 bool scr_promise_value_bool(const ScrPromise *p) { return p->b; }
 void *scr_promise_value_ref(const ScrPromise *p) { return p->payload ? p->retain_fn(p->payload) : NULL; }
 
+/* The part of scr_await_settled after the wait, fused with the "is it settled yet" test so the caller pays ONE call
+ * for both: -1 while the promise is still pending (nothing consumed: the caller waits again, which is the
+ * `while (pending) park` of the fiber this replaced), otherwise the settlement is marked observed and a rejection's
+ * reason is copied into the ACTIVE exception cell: 0 for a rejection, 1 for a fulfillment. */
+int scr_promise_settled_try_take(ScrPromise *p) {
+  if (p->state == SCR_PROM_PENDING) return -1;
+  scr_prom_observe(p);
+  if (p->state == SCR_PROM_REJECTED) {
+    scr_promise_rethrow(p);
+    return 0;
+  }
+  return 1;
+}
+
 #ifdef SCR_CORO_LANE
 /* GATED ON THE LINK, not on a knob. cc.ts defines SCR_CORO_LANE exactly when
  * scr_coro.c is in this link -- derived from the source list itself, so the

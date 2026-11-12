@@ -425,7 +425,17 @@ static bool scr_dyn_then_run(ScrDynThenPack *a) {
   ScrDyn *r = NULL;
   if (a->stage == 1) goto adopt_resumed;
   {
-    bool ok = scr_promise_settled_take(a->src);
+    /* A wake is not a settlement. A reaction on a declaration-claimed promise parks on its SOURCE's waiter list while
+     * the claim is pending, so the source's settle can wake it before the claim itself has settled (the claim's
+     * adapter helper may still be pending: the awaiting-form helpers for void/undefined/null payloads). The fiber
+     * this replaced looped `while (p->state == PENDING) scr_await_park(p)` (scr_await_settled); without the same
+     * check the reaction would read the pending promise as a fulfilled undefined. Park again instead. */
+    int t = scr_promise_settled_try_take(a->src);
+    if (t < 0) {
+      scr_promise_wait_raw(a->src, scr_dyn_then_step, a);
+      return true;
+    }
+    bool ok = t == 1;
     a->rejected = !ok;
     a->c = a->rejected ? scr_exc_take() : NULL;
     a->v = ok ? scr_dyn_from_settled(a->src) : NULL;
@@ -464,7 +474,12 @@ static bool scr_dyn_then_run(ScrDynThenPack *a) {
 adopt_resumed: {
     /* The returned promise has settled: take its value (or its rejection), then keep walking. */
     ScrPromise *ip = a->r->v.promise;
-    bool ok = scr_promise_settled_take(ip);
+    int t = scr_promise_settled_try_take(ip);
+    if (t < 0) {
+      scr_promise_wait_raw(ip, scr_dyn_then_step, a);
+      return true;
+    }
+    bool ok = t == 1;
     ScrDyn *inner = ok ? scr_dyn_from_settled(ip) : NULL;
     scr_dyn_release(a->r);
     a->r = NULL;

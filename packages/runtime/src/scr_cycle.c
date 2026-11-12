@@ -1202,7 +1202,17 @@ static __attribute__((cold, noinline, minsize)) int scr_cyc_pr_revive(ScrCycChun
   c->gone &= (uint16_t)(~(1u << target));
   scr_cyc_pr_revived++;
   nslots = (size_t)(c->bump - cs) / stride;
-  for (i = 0; i < nslots; i++) {
+  /* Only the slots that overlap the page being revived can pass the `target` test below, so visit those and no others: the chunk holds
+   * 64 KiB / stride slots (1,600 at a 40-byte stride) and a revival used to walk all of them to thread about 100. */
+  {
+    uintptr_t pl = first + (uintptr_t)target * SCR_CYC_PAGE;
+    uintptr_t ph = pl + SCR_CYC_PAGE;
+    size_t i0 = pl > (uintptr_t)(void *)cs ? (size_t)((pl - (uintptr_t)(void *)cs) / stride) : 0;
+    size_t i1 = (size_t)((ph - 1u - (uintptr_t)(void *)cs) / stride) + 1u;
+    if (i1 < nslots) nslots = i1;
+    i = i0;
+  }
+  for (; i < nslots; i++) {
     uintptr_t a = (uintptr_t)(void *)(cs + i * stride);
     uintptr_t z = a + stride;
     unsigned k0, k1;
