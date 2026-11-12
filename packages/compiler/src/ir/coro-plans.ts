@@ -25,43 +25,11 @@ import { stacklessPlan, type StacklessPlan } from "./liveness.js";
 import { hoistSuspendingHeaders } from "./hoist-suspensions.js";
 
 /** Which functions this slice lowers, keyed by IR name. Computed once per
- * module: the emitters below and emit-async.ts's fiber path both consult it,
- * and a function appearing in neither or both would emit a duplicate symbol
- * or none at all. */
+ * module: the emitters below consult it; a function with no plan fails the build. */
 export function coroPlans(fns: readonly IrFunction[]): Map<string, StacklessPlan> {
   const out = new Map<string, StacklessPlan>();
-  /* THE DEFAULT IS ON; THE OPT-OUT IS SPELLED `0` AND NOTHING ELSE.
-   *
-   * This read INVERTED on 2026-10-09. The lowering used to ship OFF with
-   * `SCRIPTC_STACKLESS=1` opting in; it now ships ON with
-   * `SCRIPTC_STACKLESS=0` opting out. Absent is ON, and so is every other
-   * value: `0` is the ONLY spelling that disables the lane. That asymmetry
-   * is deliberate. A misspelled opt-out ships the DEFAULT lane rather than
-   * silently restoring the old one, so a rig that means to measure the
-   * fiber arm and gets the spelling wrong reads a visibly wrong arm instead
-   * of a quietly right-looking one.
-   *
-   * WHY AN OPT-OUT SURVIVES THE FLIP rather than this read being deleted.
-   * The fiber lane is the REFERENCE ARM of every instrument on this front,
-   * and an instrument whose reference arm is gone does not fail -- it
-   * compares a lane with itself and reports agreement. These nine set the
-   * knob per arm and would do exactly that:
-   *
-   *   tests/harness/stackless-values.test.ts            buildArm
-   *   tests/harness/stackless-finally-body.test.ts      buildArm, build
-   *   tests/harness/stackless-then-adapter.test.ts      buildArm
-   *   tests/harness/llvm-stackless-lifted.test.ts       buildArm
-   *   tests/harness/coro-abandoned-count.test.ts        buildAndRun
-   *   tests/harness/generator-lane-parity.test.ts       OFF / OFF_AUDIT
-   *   tests/harness/stackless-opt-out-identity.test.ts  leg
-   *   packages/compiler/test/coro-poison.test.ts        buildArm
-   *   tests/perf/llvmparity/knobon-preflight.ps1        the "off" arm
-   *
-   * Keeping the read is what let all nine be RESPELLED (`0` where they said
-   * "absent") instead of deleted. This is a change of DEFAULT, not the
-   * removal of a lane: both lowerings are still built, still emitted, and
-   * still differentially compared against each other. */
-  if (process.env["SCRIPTC_STACKLESS"] === "0") return out;
+  /* There is no opt-out: the fiber lane is gone, so every async function and generator is planned or the build fails (emit-async.ts / the LLVM
+   * scaffolding name the refusal). SCRIPTC_NO_FIBERS and SCRIPTC_STACKLESS=0 no longer select anything. */
   // Suspensions in statement headers the state machine cannot resume into move out of them first (ir/hoist-suspensions.ts).
   for (const fn of fns) if (fn.async === true || fn.generator !== undefined) hoistSuspendingHeaders(fn);
   for (const fn of fns) {

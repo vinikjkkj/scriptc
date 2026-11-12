@@ -7,141 +7,34 @@ import { mangleAgenSettleThunk, mangleArgPack, mangleAsyncSpawn, mangleChildData
 import { cDecl, cType, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { IrFunction, IrType, canBoxFuncIntoDyn, isDynPackFunc, isRefCounted, isUnitType, presenceMaskStores, typeEquals, typeKey } from "../../ir/nodes.js";
 import { OWNMASK_MEMBER } from "./emit-shapes.js";
-import { failOnFiberLane, type FiberLaneUse } from "../../ir/fiber-census.js";
 import { stacklessRefusal } from "../../ir/liveness.js";
 
-/** Per-async-function machinery: an argument pack, a fiber trampoline
-   * (unpacks, runs the ordinary compiled body, settles the promise), and a
-   * spawn wrapper call sites use. Lifted async lambdas additionally thread
-   * their closure env through the pack (+1, released after the body). */
+/** Every async function and every generator runs as a stackless frame (a state machine over a heap frame): its scaffolding is emitted by
+ * emit-coro.ts / emit-gen-coro.ts. This pass only asserts that none was left without a plan -- there is no fiber lane to fall back to, so
+ * a function the plan refuses is a build error naming why. */
   export function emitAsyncScaffolding(E: CEmitter, out: string[]): void {
-    const fiberUses: FiberLaneUse[] = [];
+    const fiberUses: { fn: string; reason: string }[] = [];
     for (const fn of E.mod.functions) {
-      // An ASYNC GENERATOR sets both flags; it is not an async function and
-      // must not get the eager spawn wrapper (nothing may run before the
-      // first .next()). emitGenScaffolding below owns it.
-      if (!fn.async || fn.generator !== undefined) continue;
-      // The D1 slice emits this function's frame, resume and spawn wrapper
-      // itself. Emitting the fiber scaffolding too would define
-      // mangleAsyncSpawn twice.
-      if (E.coroPlansByFn.has(fn.name)) continue;
-      fiberUses.push({ fn: fn.name, reason: stacklessRefusal(fn) ?? "no-plan" });
-      const pack = mangleArgPack(fn.name);
-      const lifted = fn.captures !== undefined;
-      const fields: string[] = [];
-      if (lifted) fields.push("ScrClosure *sc_env;");
-      const boxedIds = new Set(fn.locals.filter((l) => l.boxed).map((l) => l.id));
-      const pname = (p: { localId: string }) =>
-        boxedIds.has(p.localId) ? mangleRawParam(p.localId) : mangleLocal(p.localId);
-      for (const p of fn.params) fields.push(`${cDecl(p.type, pname(p))};`);
-      out.push(``, `typedef struct { ${fields.join(" ") || "char sc_unused;"} } ${pack};`);
-
-      const callArgs = [
-        ...(lifted ? ["sc_a.sc_env"] : []),
-        ...fn.params.map((p) => `sc_a.${pname(p)}`),
-      ].join(", ");
-      const ret = fn.returnType;
-      const bodyCall = `${mangleFunction(fn.name)}(${callArgs})`;
-      const lines: string[] = [
-        `${E.link}void ${mangleTrampoline(fn.name)}(ScrFiber *sc_self, void *sc_ap0) {`,
-        `  ${pack} sc_a = *(${pack} *)sc_ap0;`,
-        `  free(sc_ap0);`,
-      ];
-      if (ret.kind === "void") {
-        lines.push(`  ${bodyCall};`);
-      } else {
-        lines.push(`  ${cDecl(ret, "sc_r")} = ${bodyCall};`);
-      }
-      if (lifted) lines.push(`  scr_closure_release(sc_a.sc_env);`);
-      lines.push(`  if (!scr_exc_pending()) {`);
-      switch (ret.kind) {
-        case "void":
-          lines.push(`    scr_promise_fulfill_void(scr_fiber_promise(sc_self));`);
-          break;
-        case "f64":
-          lines.push(`    scr_promise_fulfill_f64(scr_fiber_promise(sc_self), sc_r);`);
-          break;
-        case "bool":
-          lines.push(`    scr_promise_fulfill_bool(scr_fiber_promise(sc_self), sc_r);`);
-          break;
-        case "string":
-          lines.push(`    scr_promise_fulfill_str(scr_fiber_promise(sc_self), sc_r);`);
-          break;
-        default: {
-          const v = vAdapters(ret);
-          lines.push(
-            `    scr_promise_fulfill_ref(scr_fiber_promise(sc_self), sc_r, ${v.retain}, ${v.release}, ${E.traceArgC(ret)});`,
-          );
+      if (!fn.async && fn.generator === undefined) continue;
+      if (E.coroPlansByFn.has(fn.name)) {
+        if (fn.generator !== undefined) {
+          const genPlan = E.coroPlansByFn.get(fn.name)!;
+          // An async generator's frame handle carries its settle thunk (prototype repeated here: it is defined with the interned walkers).
+          const settle = fn.async === true ? agenSettleThunkFor(E, agenTypeOf(fn), agenResultTypeOf(fn)) : undefined;
+          if (settle !== undefined) out.push(`${E.link}void ${settle}(ScrGen *sc_g, ScrPromise *sc_p);`);
+          emitGenCoroSpawn(E, out, fn, genPlan, settle);
         }
+        continue;
       }
-      lines.push(`  }`);
-      if (ret.kind !== "void" && isRefCounted(ret)) {
-        // An escaping throw means sc_r is the never-read dummy (NULL).
-        lines.push(`  else { ${releaseCallC(ret, "sc_r")}; }`);
-      }
-      lines.push(`}`);
-      // A whole function body: unbounded, so never spread (appendLines).
-      appendLines(out, lines);
-
-      const spawnParams = [
-        ...(lifted ? ["ScrClosure *sc_env"] : []),
-        ...fn.params.map((p) => cDecl(p.type, pname(p))),
-      ];
-      const cache = fn.asyncCacheGlobal !== undefined ? mangleGlobal(fn.asyncCacheGlobal) : null;
-      const cycleCache =
-        fn.asyncCycleCacheGlobal !== undefined ? mangleGlobal(fn.asyncCycleCacheGlobal) : null;
-      // Every `await f()` in any part calls the spawn wrapper.
-      E.decl(`ScrPromise *${mangleAsyncSpawn(fn.name)}(${spawnParams.join(", ") || "void"});`);
-      out.push(
-        `${E.link}ScrPromise *${mangleAsyncSpawn(fn.name)}(${spawnParams.join(", ") || "void"}) {`,
-        ...(cache !== null
-          ? [`  if (${cache}) return scr_promise_retain(${cache});`]
-          : []),
-        `  ${pack} *sc_ap = malloc(sizeof *sc_ap);`,
-        `  if (!sc_ap) { ${E.oomAbortC()}; }`,
-        ...(lifted ? [`  sc_ap->sc_env = scr_closure_retain(sc_env);`] : []),
-        ...fn.params.map((p) => `  sc_ap->${pname(p)} = ${pname(p)};`),
-        `  ScrPromise *sc_p = scr_async_spawn(&${mangleTrampoline(fn.name)}, sc_ap);`,
-        ...(cache !== null
-          ? [
-              // Module evaluation promises are loader-owned from the
-              // moment evaluation starts. Mark even a pending promise
-              // handled before a later sibling initializer can throw and
-              // unwind past the dependency wait.
-              `  scr_promise_mark_handled(sc_p);`,
-            ]
-          : []),
-        ...(cache !== null
-          ? [
-              // scr_async_spawn runs eagerly. An admitted async import
-              // cycle can therefore re-enter this initializer after its
-              // guard sets but before this outer spawn returns; that
-              // guarded inner spawn temporarily fills the cache. Replace
-              // it ownership-safely when the real evaluation promise
-              // arrives.
-              `  ScrPromise *sc_cache_owned = scr_promise_retain(sc_p);`,
-              `  scr_promise_release(${cache});`,
-              `  ${cache} = sc_cache_owned;`,
-            ]
-          : []),
-        ...(cycleCache !== null
-          ? [
-              // Every member of an async SCC publishes while eager spawn
-              // recursion unwinds. The outermost wrapper writes last, so
-              // this records the member that actually rooted evaluation.
-              `  ScrPromise *sc_cycle_cache_owned = scr_promise_retain(sc_p);`,
-              `  scr_promise_release(${cycleCache});`,
-              `  ${cycleCache} = sc_cycle_cache_owned;`,
-            ]
-          : []),
-        `  return sc_p;`,
-        `}`,
+      fiberUses.push({ fn: fn.name, reason: stacklessRefusal(fn) ?? "no-plan" });
+    }
+    if (fiberUses.length > 0) {
+      throw new Error(
+        `no stackless plan for ${fiberUses.length} async function(s) or generator(s), and there is no fiber lane to run them on: ` +
+          fiberUses.map((u) => `${u.fn} (${u.reason})`).join(", "),
       );
     }
-    emitGenScaffolding(E, out, fiberUses);
-    failOnFiberLane("c", fiberUses);
   }
-
 
 /** The asyncGenerator TYPE of an async-generator IrFunction, rebuilt from
  * the three places the IR keeps its channels: yield/next on `generator`,
@@ -169,137 +62,6 @@ function agenResultTypeOf(fn: IrFunction): IrType & { kind: "record" } {
   }
   return { kind: "record", shapeId: id };
 }
-/** Per-generator-function machinery — the async scaffolding's lazy
-   * sibling: the same argument pack, a fiber trampoline whose epilogue
-   * stores the COMPLETION value (or consumes the GENRET sentinel,
-   * promoting the parked .return value), a spawn wrapper that only
-   * ALLOCATES the suspended fiber (nothing runs until the first .next()),
-   * and the never-started teardown that drops the packed (+1) arguments. */
-  function emitGenScaffolding(E: CEmitter, out: string[], fiberUses: FiberLaneUse[]): void {
-    for (const fn of E.mod.functions) {
-      if (!fn.generator) continue;
-      // STACKLESS: a CONVERTED SYNCHRONOUS generator is backed by a frame,
-      // so none of the scaffolding below exists for it -- no argument pack,
-      // no fibre trampoline, no never-started teardown. The frame IS the
-      // pack.
-      //
-      // THE `!fn.async` IS NOT REDUNDANT, and leaving it out was the same
-      // defect this slice already paid for once. Testing only membership in
-      // the plan map branches on a SET THAT GROWS: the moment the hop front
-      // admits async generators, an async one arrives here and is handed to
-      // emitGenCoroSpawn, which emits the synchronous spawn -- no promise,
-      // no settle thunk, nothing that an async consumer needs. Testing the
-      // PROPERTY instead means a member that could not previously exist
-      // falls through to the scaffolding written for it, and whoever opens
-      // that gate gets a visible gap rather than a silent wrong lowering.
-      const genPlan = E.coroPlansByFn.get(fn.name);
-      if (genPlan !== undefined) {
-        // An async generator's frame handle carries its settle thunk (prototype repeated here: it is defined with the interned walkers).
-        const settle = fn.async === true ? agenSettleThunkFor(E, agenTypeOf(fn), agenResultTypeOf(fn)) : undefined;
-        if (settle !== undefined) out.push(`${E.link}void ${settle}(ScrGen *sc_g, ScrPromise *sc_p);`);
-        emitGenCoroSpawn(E, out, fn, genPlan, settle);
-        continue;
-      }
-      fiberUses.push({ fn: fn.name, reason: stacklessRefusal(fn) ?? "no-plan" });
-      const isAsyncGen = fn.async === true;
-      const pack = mangleArgPack(fn.name);
-      const lifted = fn.captures !== undefined;
-      const fields: string[] = [];
-      if (lifted) fields.push("ScrClosure *sc_env;");
-      const boxedIds = new Set(fn.locals.filter((l) => l.boxed).map((l) => l.id));
-      const pname = (p: { localId: string }) =>
-        boxedIds.has(p.localId) ? mangleRawParam(p.localId) : mangleLocal(p.localId);
-      for (const p of fn.params) fields.push(`${cDecl(p.type, pname(p))};`);
-      out.push(``, `typedef struct { ${fields.join(" ") || "char sc_unused;"} } ${pack};`);
-
-      const callArgs = [
-        ...(lifted ? ["sc_a.sc_env"] : []),
-        ...fn.params.map((p) => `sc_a.${pname(p)}`),
-      ].join(", ");
-      const ret = fn.returnType;
-      const bodyCall = `${mangleFunction(fn.name)}(${callArgs})`;
-      const lines: string[] = [
-        `${E.link}void ${mangleTrampoline(fn.name)}(ScrFiber *sc_self, void *sc_ap0) {`,
-        `  ${pack} sc_a = *(${pack} *)sc_ap0;`,
-        `  free(sc_ap0);`,
-      ];
-      if (ret.kind === "void") {
-        lines.push(`  ${bodyCall};`);
-      } else {
-        lines.push(`  ${cDecl(ret, "sc_r")} = ${bodyCall};`);
-      }
-      if (lifted) lines.push(`  scr_closure_release(sc_a.sc_env);`);
-      lines.push(`  ScrGen *sc_g = scr_gen_of_fiber(sc_self);`);
-      // Normal completion stores the (typed) return value; void completes
-      // with the NONE slot — JS's undefined done-value. A GENRET unwind
-      // consumes the sentinel and promotes the parked .return value; a
-      // real exception stays pending (the consumer-side resume moves it).
-      const store = (() => {
-        switch (ret.kind) {
-          case "void":
-            return null;
-          case "f64":
-            return `scr_gen_out_f64(sc_g, sc_r);`;
-          case "bool":
-            return `scr_gen_out_bool(sc_g, sc_r);`;
-          default: {
-            const v = vAdapters(ret);
-            return `scr_gen_out_ref(sc_g, sc_r, ${v.release});`;
-          }
-        }
-      })();
-      lines.push(
-        `  if (!scr_exc_pending()) {`,
-        ...(store ? [`    ${store}`] : [`    /* void body: the done value is undefined (NONE) */`]),
-        `  } else {`,
-        `    if (scr_exc_genret_pending()) { scr_exc_clear(); scr_gen_ret_to_out(sc_g); }`,
-        ...(ret.kind !== "void" && isRefCounted(ret)
-          ? [`    ${releaseCallC(ret, "sc_r")}; /* unwound: the never-read dummy */`]
-          : []),
-        `  }`,
-        `}`,
-      );
-      // A whole function body: unbounded, so never spread (appendLines).
-      appendLines(out, lines);
-
-      const spawnParams = [
-        ...(lifted ? ["ScrClosure *sc_env"] : []),
-        ...fn.params.map((p) => cDecl(p.type, pname(p))),
-      ];
-      // Every call of a generator function, from any part, goes here.
-      E.decl(`ScrGen *${mangleGenSpawn(fn.name)}(${spawnParams.join(", ") || "void"});`);
-      out.push(
-        // The settle thunk is DEFINED with the interned walkers, far below
-        // this spawn wrapper, so its prototype has to be repeated here.
-        ...(isAsyncGen
-          ? [`${E.link}void ${agenSettleThunkFor(E, agenTypeOf(fn), agenResultTypeOf(fn))}(ScrGen *sc_g, ScrPromise *sc_p);`]
-          : []),
-        `${E.link}void ${mangleGenDrop(fn.name)}(void *sc_ap0) {`,
-        `  ${pack} sc_a = *(${pack} *)sc_ap0;`,
-        `  free(sc_ap0);`,
-        ...(lifted ? [`  scr_closure_release(sc_a.sc_env);`] : []),
-        ...fn.params
-          .filter((p) => isRefCounted(p.type))
-          .map((p) => `  ${releaseCallC(p.type, `sc_a.${pname(p)}`)};`),
-        ...(!lifted && !fn.params.some((p) => isRefCounted(p.type)) ? [`  (void)sc_a;`] : []),
-        `}`,
-        `${E.link}ScrGen *${mangleGenSpawn(fn.name)}(${spawnParams.join(", ") || "void"}) {`,
-        `  ${pack} *sc_ap = malloc(sizeof *sc_ap);`,
-        `  if (!sc_ap) { ${E.oomAbortC()}; }`,
-        ...(lifted ? [`  sc_ap->sc_env = scr_closure_retain(sc_env);`] : []),
-        ...fn.params.map((p) => `  sc_ap->${pname(p)} = ${pname(p)};`),
-        // An ASYNC generator carries its settle thunk into the handle: the
-        // runtime calls it at every yield and at completion to fulfill the
-        // in-flight request promise. Same lazy allocation either way —
-        // nothing runs until the first resume.
-        isAsyncGen
-          ? `  return scr_agen_new(&${mangleTrampoline(fn.name)}, sc_ap, &${mangleGenDrop(fn.name)}, &${agenSettleThunkFor(E, agenTypeOf(fn), agenResultTypeOf(fn))});`
-          : `  return scr_gen_new(&${mangleTrampoline(fn.name)}, sc_ap, &${mangleGenDrop(fn.name)});`,
-        `}`,
-      );
-    }
-  }
-
 /** Interned per-union child exit adapter: the runtime invokes
    * adapter(cb, has_code, code, signal_name); the adapter builds the
    * `number | null` union value (tags are program data — the frontend
