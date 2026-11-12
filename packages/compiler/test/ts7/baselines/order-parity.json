@@ -27738,6 +27738,18 @@
     "<repo>/tests/corpus/25152-dead-local-release-before-a-park-across-loops-switches-finally-and-for-of.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25105-functions-crossing-into-dyn-keep-name-source-length-identity-and-properties.js": {
+   "order": [
+    "<repo>/tests/corpus/25105-functions-crossing-into-dyn-keep-name-source-length-identity-and-properties.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25106-dyn-values-of-every-kind-grow-shrink-and-recycle-across-size-classes.js": {
+   "order": [
+    "<repo>/tests/corpus/25106-dyn-values-of-every-kind-grow-shrink-and-recycle-across-size-classes.js"
+   ],
+   "diags": []
   }
  }
 }
