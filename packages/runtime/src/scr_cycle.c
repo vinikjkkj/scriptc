@@ -453,6 +453,14 @@ struct ScrCycChunk {
    * (see the page-return block below). Bit p set means no block overlapping
    * page p is on `freelist`, and those blocks are free. 16 pages at 64 KiB. */
   uint16_t gone;
+  /* Pages that were whole-free at the previous sweep and not yet returned: a page is handed back only on the SECOND consecutive
+   * sweep that finds it whole-free, so a page that empties and refills inside one cycle of work is never discarded and
+   * re-faulted (measured on a box churn: 708 madvise calls and a page fault each against 3 before this). */
+  uint16_t cand;
+  /* `used` as of the last sweep of this chunk (UINT32_MAX = never swept). A sweep reads every slot of the chunk, and it runs
+   * for EVERY chunk with free space at the end of EVERY collector pass; a chunk whose live count has not dropped since its last
+   * sweep, and that carries no pending candidate page, cannot have gained a whole-free page, so it is skipped for two loads. */
+  uint32_t swept_used;
 #ifdef SCR_PAGECEN_ON
   /* tests/perf/pagecensus's list of EVERY live chunk, and it exists because
    * the two lists above cannot answer the census's question. A chunk that is
@@ -508,6 +516,8 @@ static ScrCycChunk scr_cyc_ar_empty = {
     /* gone: no page of a non-chunk is returned, and nothing may read it as a
      * pointer. */
     .gone = 0u,
+    .cand = 0u,
+    .swept_used = 0u,
 #ifdef SCR_PAGECEN_ON
     /* never on the census's all-chunk list: it is not a chunk. */
     .all_next = NULL,
@@ -1064,6 +1074,8 @@ static __attribute__((cold, noinline, minsize)) void scr_cyc_pr_sweep_chunk(ScrC
   size_t guard;
 
   scr_cyc_pr_visited++;
+  if (c->cand == 0 && c->used >= c->swept_used) return; /* nothing was freed here since the last sweep */
+  c->swept_used = c->used;
   if (stride == 0 || c->bump <= cs) return;
   nslots = (size_t)(c->bump - cs) / stride;
   if (nslots == 0 || nslots > sizeof scr_cyc_pr_freemap) return;
@@ -1107,7 +1119,12 @@ static __attribute__((cold, noinline, minsize)) void scr_cyc_pr_sweep_chunk(ScrC
   for (k = 0; k < npages; k++) {
     if (used_page[k] || ((c->gone >> k) & 1u)) continue;
     mask |= 1u << k;
-    n++;
+  }
+  {
+    unsigned cand = mask;
+    mask &= (unsigned)c->cand; /* whole-free at the last sweep too */
+    c->cand = (uint16_t)(cand & ~mask);
+    for (k = 0; k < npages; k++) n += (mask >> k) & 1u;
   }
   if (n < thresh) return;
 
@@ -1581,6 +1598,8 @@ static ScrCycChunk *scr_cyc_ar_new(uint8_t blk, size_t stride) {
    * so no page of a fresh chunk is ever missing. Were that asymmetric, a
    * recycled slot would start with pages that read as present and are not. */
   c->gone = 0;
+  c->cand = 0;
+  c->swept_used = UINT32_MAX;
   scr_cyc_ar_held += SCR_CYC_ARENA_CHUNK;
   SCR_PC_LINK(c);
   SCR_CS_BUMP(archunk);
