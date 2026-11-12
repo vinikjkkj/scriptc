@@ -1873,7 +1873,7 @@ static ScrDyn *scr_dns_get_servers_thunk(ScrClosure *clo, ScrDyn *const *args, s
   return arr;
 }
 
-static ScrClosure scr_dns_set_servers_clo = {SIZE_MAX, (void *)scr_dns_set_servers_thunk, 0, NULL, NULL};
+static ScrClosure scr_dns_set_servers_clo = {SIZE_MAX, (void *)scr_dns_set_servers_thunk, 0, NULL};
 
 /* A function box bound to one resolver: its closure carries the resolver pointer. */
 static ScrDyn *scr_dns_bound_fn(ScrResolver *r, ScrDynThunk thunk, uint32_t arity, const char *sig, const char *name) {
@@ -2129,11 +2129,11 @@ static ScrDyn *scr_dns_resolver_set_local(ScrClosure *clo, ScrDyn *const *args, 
   return scr_dyn_undefined();
 }
 
-static ScrClosure scr_dns_resolver_srv_clo = {SIZE_MAX, (void *)scr_dns_resolver_resolve_srv, 0, NULL, NULL};
-static ScrClosure scr_dns_resolver_get_clo = {SIZE_MAX, (void *)scr_dns_resolver_get_servers, 0, NULL, NULL};
-static ScrClosure scr_dns_resolver_set_clo = {SIZE_MAX, (void *)scr_dns_resolver_set_servers, 0, NULL, NULL};
-static ScrClosure scr_dns_resolver_cancel_clo = {SIZE_MAX, (void *)scr_dns_resolver_cancel, 0, NULL, NULL};
-static ScrClosure scr_dns_resolver_local_clo = {SIZE_MAX, (void *)scr_dns_resolver_set_local, 0, NULL, NULL};
+static ScrClosure scr_dns_resolver_srv_clo = {SIZE_MAX, (void *)scr_dns_resolver_resolve_srv, 0, NULL};
+static ScrClosure scr_dns_resolver_get_clo = {SIZE_MAX, (void *)scr_dns_resolver_get_servers, 0, NULL};
+static ScrClosure scr_dns_resolver_set_clo = {SIZE_MAX, (void *)scr_dns_resolver_set_servers, 0, NULL};
+static ScrClosure scr_dns_resolver_cancel_clo = {SIZE_MAX, (void *)scr_dns_resolver_cancel, 0, NULL};
+static ScrClosure scr_dns_resolver_local_clo = {SIZE_MAX, (void *)scr_dns_resolver_set_local, 0, NULL};
 
 static void scr_dns_resolver_teardown(void) {
   scr_dyn_release(scr_dns_resolver_ctor_box);
@@ -2285,7 +2285,7 @@ static ScrDyn *scr_dns_lookup_thunk(ScrClosure *clo, ScrDyn *const *args, size_t
   scr_str_release(hs);
   return scr_dyn_undefined();
 }
-static ScrClosure scr_dns_lookup_clo = {SIZE_MAX, (void *)scr_dns_lookup_thunk, 0, NULL, NULL};
+static ScrClosure scr_dns_lookup_clo = {SIZE_MAX, (void *)scr_dns_lookup_thunk, 0, NULL};
 ScrDyn *scr_dns_lookup_dyn_value(void) {
   scr_dgram_install();
   return scr_dyn_new_func(&scr_dns_lookup_clo, scr_dns_lookup_thunk, 3, "(hostname,options,callback)", "lookup");

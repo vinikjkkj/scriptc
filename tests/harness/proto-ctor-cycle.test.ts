@@ -82,8 +82,8 @@ describe("the minted prototype is a traced edge (source contract)", () => {
       closureC.indexOf("void (*scr_closure_ctor_unlink)"),
     );
     expect(body, "scr_closure_trace not found").not.toBe("");
-    expect(body).toContain("visit(c->props, ctx);");
-    expect(body).toContain("visit(c->implicit_proto, ctx);");
+    expect(body).toContain("visit(c->ext->props, ctx);");
+    expect(body).toContain("visit(c->ext->implicit_proto, ctx);");
     // The captures too, or the edge that started this whole population
     // (`Foo.create = () => new Foo()`) goes with it.
     expect(body).toContain("for (size_t i = 0; i < c->ncaps; i++) visit(c->caps[i], ctx);");
@@ -91,7 +91,7 @@ describe("the minted prototype is a traced edge (source contract)", () => {
 
   test("scr_closure_may_cycle names every child the trace can visit", () => {
     expect(closureC).toContain(
-      "return c->ncaps != 0 || c->props != NULL || c->implicit_proto != NULL;",
+      "return c->ncaps != 0 || c->ext != NULL;",
     );
   });
 

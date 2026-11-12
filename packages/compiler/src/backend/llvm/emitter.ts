@@ -2806,11 +2806,11 @@ class LlEmitter {
       `%ScrLogArg = type { i32, i64 }`,
       `%ScrVt = type { i64, i64, ptr, ptr }`,
       `%ScrUnion = type { i64, i32, ptr, ptr, ptr, i64 }`,
-      // …including `implicit_proto` (field 4), the prototype object
-      // scr_dyn_fn_prototype mints: the caps[] tail is addressed as one
+      // …including `ext` (field 3), the pointer to the lazy props table and
+      // implicit prototype (ScrClosure::ext): the caps[] tail is addressed as one
       // WHOLE struct past the base, so a missing field would shift every
       // capture read as well as being a write past the object.
-      `%ScrClosure = type { i64, ptr, i64, ptr, ptr }`,
+      `%ScrClosure = type { i64, ptr, i64, ptr }`,
       `%ScrRegex = type { i64, ptr, ptr, ptr, double, ptr }`,
       // ScrArr mirror { rc, len, cap, elem(i32+pad), elem_retain,
       // elem_release, elem_trace, data } — the immortal tagged-template
@@ -3666,7 +3666,7 @@ class LlEmitter {
         ret === "void" ? `  ${call}` : `  %r = ${call}`,
         ret === "void" ? `  ret void` : `  ret ${ret} %r`,
         `}`,
-        `@${mangleFnClosure(name)} = internal global %ScrClosure { i64 -1, ptr @${mangleWrapper(name)}, i64 0, ptr null, ptr null }`,
+        `@${mangleFnClosure(name)} = internal global %ScrClosure { i64 -1, ptr @${mangleWrapper(name)}, i64 0, ptr null }`,
         ``,
       );
     }

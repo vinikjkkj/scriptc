@@ -1947,8 +1947,8 @@ static ScrDyn *insp_inst_sym_bag(const ScrDyn *d) {
 
 /* A function value's closure table when it hosts symbol-keyed properties (+1), else NULL. */
 static ScrDyn *insp_fn_sym_table(const ScrDyn *d) {
-  if (d->v.fn.clo->props == NULL) return NULL;
-  ScrDyn *t = (ScrDyn *)scr_box_get_ref(d->v.fn.clo->props); /* +1 */
+  if (scr_closure_props(d->v.fn.clo) == NULL) return NULL;
+  ScrDyn *t = (ScrDyn *)scr_box_get_ref(scr_closure_props(d->v.fn.clo)); /* +1 */
   if (t != NULL && t->kind == SCR_DYN_OBJ && scr_dyn_ext(t)->syms != NULL) return t;
   scr_dyn_release(t);
   return NULL;
@@ -3501,8 +3501,8 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         }
         /* the properties a program ADDED to the function object follow the statics */
         ScrDyn *eextra = NULL;
-        if (d->v.fn.clo->props != NULL) {
-          ScrDyn *tbl = (ScrDyn *)scr_box_get_ref(d->v.fn.clo->props); /* +1 */
+        if (scr_closure_props(d->v.fn.clo) != NULL) {
+          ScrDyn *tbl = (ScrDyn *)scr_box_get_ref(scr_closure_props(d->v.fn.clo)); /* +1 */
           eextra = tbl != NULL ? scr_dyn_objwalk(tbl, SCR_OBJWALK_ENTRIES) : NULL;
           scr_dyn_release(tbl);
           size_t shownExtra = 0;
@@ -3654,7 +3654,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         /* The function's own ENUMERABLE properties follow its base in braces, as an object's do
          * (`[Function: g] { listener: [Function: f] }`): the closure's property table minus the built-ins
          * (name, length, prototype are non-enumerable in Node). */
-        ScrDyn *table = d->v.fn.clo->props != NULL ? (ScrDyn *)scr_box_get_ref(d->v.fn.clo->props) : NULL; /* +1 */
+        ScrDyn *table = scr_closure_props(d->v.fn.clo) != NULL ? (ScrDyn *)scr_box_get_ref(scr_closure_props(d->v.fn.clo)) : NULL; /* +1 */
         size_t nown = 0;
         if (table != NULL && table->kind == SCR_DYN_OBJ) {
           for (size_t i = 0; i < table->v.obj.len; i++) {
@@ -3792,7 +3792,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
 #ifdef SCR_INSP_COLORS
       if (INSP_SH) {
         /* the properties a program added to the function object follow its built-in names, then its own symbols */
-        ScrDyn *htable = d->v.fn.clo->props != NULL ? (ScrDyn *)scr_box_get_ref(d->v.fn.clo->props) : NULL; /* +1 */
+        ScrDyn *htable = scr_closure_props(d->v.fn.clo) != NULL ? (ScrDyn *)scr_box_get_ref(scr_closure_props(d->v.fn.clo)) : NULL; /* +1 */
         if (htable != NULL && htable->kind == SCR_DYN_OBJ) {
           insp_emit_obj_keys(htable, recurse, depth, true);
           insp_emit_syms(htable, recurse, depth);

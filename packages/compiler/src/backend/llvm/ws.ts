@@ -152,7 +152,7 @@ export function wsGlobalCtorFor(host: WsHost, t: IrType, site?: string): string 
     // The interned immortal closure: the VALUE of globalThis.WebSocket,
     // one per program. Field for field ScrClosure's — rc SIZE_MAX so
     // retain and release are both no-ops, no captures, no props.
-    `${sym} = internal global %ScrClosure { i64 -1, ptr @${names.wrap}, i64 0, ptr null, ptr null } ; globalThis.WebSocket`,
+    `${sym} = internal global %ScrClosure { i64 -1, ptr @${names.wrap}, i64 0, ptr null } ; globalThis.WebSocket`,
     ``,
   ]);
   return sym;

@@ -1654,7 +1654,7 @@ export class CEmitter {
       // as a value; the wrapper is named by the closure's initialiser.
       this.decl(`${retType}${retType.endsWith("*") ? "" : " "}${mangleWrapper(name)}(${params.join(", ")});`);
       this.declData(
-        `extern struct { size_t rc; void *fn; size_t ncaps; ScrBox *props; void *implicit_proto; } ${mangleFnClosure(name)};`,
+        `extern struct { size_t rc; void *fn; size_t ncaps; ScrClosureExt *ext; } ${mangleFnClosure(name)};`,
       );
       out.push(
         ``,
@@ -1665,10 +1665,10 @@ export class CEmitter {
         // The field list MIRRORS ScrClosure's, and it has to stay exact:
         // the runtime casts &sc_fc_* to ScrClosure * and writes through
         // it, so a field the literal omits is a write past the object.
-        // `implicit_proto` is the prototype object scr_dyn_fn_prototype
-        // mints on first demand.
-        `${this.link}struct { size_t rc; void *fn; size_t ncaps; ScrBox *props; void *implicit_proto; } ${mangleFnClosure(name)} =`,
-        `    { SIZE_MAX, (void *)&${mangleWrapper(name)}, 0, NULL, NULL };`,
+        // `ext` holds the lazy own-property table and the prototype object
+        // scr_dyn_fn_prototype mints on first demand (ScrClosure::ext).
+        `${this.link}struct { size_t rc; void *fn; size_t ncaps; ScrClosureExt *ext; } ${mangleFnClosure(name)} =`,
+        `    { SIZE_MAX, (void *)&${mangleWrapper(name)}, 0, NULL };`,
       );
     }
     // Construct-thunk definitions (prototyped with the class objects

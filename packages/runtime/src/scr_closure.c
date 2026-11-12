@@ -297,8 +297,10 @@ static void scr_closure_trace(void *o, ScrTraceVisit visit, void *ctx) {
    * Landing on the immortal sentinel by unsigned underflow is not a
    * contract. `false` is what scr_runtime.h's trace/teardown rule requires
    * and what every other free_fn in the tree already does. */
-  visit(c->props, ctx);
-  visit(c->implicit_proto, ctx);
+  if (c->ext != NULL) {
+    visit(c->ext->props, ctx);
+    visit(c->ext->implicit_proto, ctx);
+  }
 }
 
 /* NULL until the dyn unit mints its first implicit prototype object; see
@@ -310,7 +312,7 @@ void (*scr_closure_ctor_unlink)(ScrClosure *c, bool release) = NULL;
  * so the registry never holds a borrowed pointer to a closure that is
  * already being freed. */
 static void scr_closure_drop_ctor(ScrClosure *c, bool release) {
-  if (c->implicit_proto != NULL) scr_closure_ctor_unlink(c, release);
+  if (scr_closure_proto(c) != NULL) scr_closure_ctor_unlink(c, release);
 }
 
 static void scr_closure_gcfree(void *o) {
@@ -320,6 +322,7 @@ static void scr_closure_gcfree(void *o) {
    * registry entry keyed by that prototype is not a counted reference and
    * nothing else erases it. */
   scr_closure_drop_ctor((ScrClosure *)o, false);
+  scr_closure_ext_free((ScrClosure *)o);
 #ifdef SCR_RC_AUDIT
   scr_live_closures--;
   scr_clo_bump(((ScrClosure *)o)->fn, -1);
@@ -433,14 +436,40 @@ void scr_rc_audit_sites_report(void) {
   }
 }
 #endif /* SCR_RC_AUDIT */
+/* The ext blocks are 16 bytes and every one of them is created by the first
+ * property write or `new` on a function value and dropped with its closure, so
+ * they recycle through a size-class pool instead of paying malloc and free
+ * (measured: calloc+free was 96 instructions per closure that carried one). */
+static ScrPool scr_clo_ext_blocks;
+
+ScrClosureExt *scr_closure_ext_make(ScrClosure *c) {
+  if (c->ext == NULL) {
+    ScrClosureExt *e = (ScrClosureExt *)scr_pool_take(&scr_clo_ext_blocks, sizeof(ScrClosureExt));
+    if (e == NULL) {
+      e = (ScrClosureExt *)malloc(sizeof(ScrClosureExt));
+      if (e == NULL) scr_trap("scriptc: out of memory\n");
+    }
+    e->props = NULL;
+    e->implicit_proto = NULL;
+    c->ext = e;
+  }
+  return c->ext;
+}
+
+void scr_closure_ext_free(ScrClosure *c) {
+  ScrClosureExt *e = c->ext;
+  if (e == NULL) return;
+  c->ext = NULL;
+  if (!scr_pool_give(&scr_clo_ext_blocks, e, sizeof(ScrClosureExt))) free(e);
+}
+
 ScrClosure *scr_closure_new(void *fn, size_t ncaps) {
   ScrClosure *c = scr_cyc_alloc(sizeof(ScrClosure) + ncaps * sizeof(ScrBox *),
                                  &scr_closure_trace, &scr_closure_gcfree);
   c->rc = 1;
   c->fn = fn;
   c->ncaps = ncaps;
-  c->props = NULL; /* lazily allocated by Object.defineProperties */
-  c->implicit_proto = NULL; /* lazily minted by scr_dyn_fn_prototype */
+  c->ext = NULL; /* props and implicit_proto: lazily allocated, see ScrClosure::ext */
 #ifdef SCR_RC_AUDIT
   scr_live_closures++;
   scr_clo_bump(fn, +1);
@@ -457,7 +486,7 @@ ScrClosure *scr_closure_new(void *fn, size_t ncaps) {
  * whose ring is never collected. */
 static inline bool scr_closure_may_cycle(const ScrClosure *c) {
 #if SCR_CYC_LEAF_SKIP
-  return c->ncaps != 0 || c->props != NULL || c->implicit_proto != NULL;
+  return c->ncaps != 0 || c->ext != NULL;
 #else
   (void)c;
   return true;
@@ -470,7 +499,8 @@ void scr_closure_release(ScrClosure *c) {
     if (scr_closure_may_cycle(c)) scr_cyc_on_dead(c); /* see scr_box_release */
     for (size_t i = 0; i < c->ncaps; i++) scr_box_release(c->caps[i]);
     scr_closure_drop_ctor(c, true);
-    scr_box_release(c->props); /* NULL-tolerant */
+    if (c->ext != NULL) scr_box_release(c->ext->props); /* NULL-tolerant */
+    scr_closure_ext_free(c);
 #ifdef SCR_RC_AUDIT
     scr_live_closures--;
     scr_clo_bump(c->fn, -1);
@@ -491,8 +521,11 @@ void scr_closure_release(ScrClosure *c) {
 void scr_closure_static_teardown(ScrClosure *c) {
   if (c == NULL) return;
   scr_closure_drop_ctor(c, true);
-  scr_box_release(c->props);
-  c->props = NULL;
+  if (c->ext != NULL) {
+    scr_box_release(c->ext->props);
+    c->ext->props = NULL;
+  }
+  scr_closure_ext_free(c);
 }
 
 void scr_closure_trace_v(void *c, ScrTraceVisit visit, void *ctx) {

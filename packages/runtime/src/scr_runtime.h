@@ -2482,51 +2482,60 @@ void scr_box_set_bool(ScrBox *b, bool v);
 void scr_box_set_ref(ScrBox *b, void *v); /* releases old, owns new */
 ScrStr *scr_box_str_unshare(ScrBox *b, ScrStr *acc); /* captured `s += x`: give up the box's own ref when it still holds acc */
 
+/* The closure's lazily created members. See ScrClosure::ext.
+ *
+ * props: the function's OWN-PROPERTY table, a box whose payload is an OBJ
+ * ScrDyn (owned; lazily allocated by Object.defineProperties). It lives on
+ * the CLOSURE, not the dyn box: boxing the same function value twice yields
+ * distinct boxes sharing one closure, and JS has ONE function object, so
+ * property writes must be visible through every box. A ScrBox so this unit
+ * stays dyn-free. TRACED by the cycle collector: the commonest ring in real
+ * JavaScript runs through it (`Foo.create = () => new Foo()`).
+ *
+ * implicit_proto: the IMPLICIT prototype object this function value minted,
+ * OWNED (+1) and opaque here (an OBJ ScrDyn). NULL until
+ * scr_dyn_fn_prototype mints one. It is the closure's OWN edge rather than
+ * a second reference through `props` because the props table's `prototype`
+ * member can be REPLACED (`F.prototype = Object.create(P)`) while instances
+ * built before the replacement still inherit from the minted object, and
+ * that object is the key the `constructor` registry is indexed by. Dropped
+ * by scr_closure_ctor_unlink at teardown, which keeps the registry's
+ * borrowed closure pointer from dangling. TRACED: the prototype is
+ * reachable twice (from `props` and from here), so an untraced edge left an
+ * un-decremented +1 through every trial deletion and every ring through a
+ * function's OWN prototype object survived collection
+ * (`N.prototype.constructor = N`). The COLLECTOR's teardown path erases the
+ * registry entry WITHOUT releasing the prototype.
+ */
+typedef struct ScrClosureExt {
+  ScrBox *props;
+  void *implicit_proto;
+} ScrClosureExt;
+
 typedef struct ScrClosure {
   size_t rc; /* SIZE_MAX = immortal (interned top-level function value) */
   void *fn;
   size_t ncaps;
-  /* The function's OWN-PROPERTY table: a box whose payload is an OBJ
-   * ScrDyn (owned; lazily allocated by Object.defineProperties —
-   * test/common copying name/length onto the mustCall wrapper), NULL
-   * until first defined. It lives on the CLOSURE, not the dyn box:
-   * boxing the same function value twice (the declaration's box, the
-   * return's box) yields distinct boxes sharing one closure, and JS has
-   * ONE function object — property writes must be visible through every
-   * box. A ScrBox so this unit stays dyn-free (the payload's release
-   * rides the box, like every capture). TRACED by the cycle collector
-   * — scr_closure_trace visits it, because the commonest ring in real
-   * JavaScript runs through it (`Foo.create = () => new Foo()`). The
-   * sentence that stood here until the RC-audit lane was read — "untraced
-   * by the cycle collector (like the dyn→closure edge): a cycle through
-   * it is merely never collected" — had drifted from the code on BOTH
-   * halves: scr_dyn_trace visits a FUNC node's closure too. */
-  ScrBox *props;
-  /* The IMPLICIT prototype object this function value minted, OWNED (+1)
-   * and opaque here (an OBJ ScrDyn — this unit stays dyn-free). NULL until
-   * scr_dyn_fn_prototype mints one.
-   *
-   * It is the closure's OWN edge rather than a second reference through
-   * `props` because the props table's `prototype` member can be REPLACED
-   * (`F.prototype = Object.create(P)`) while instances built before the
-   * replacement still inherit from the minted object — and that object is
-   * the key the `constructor` registry is indexed by, so it must stay
-   * addressable and un-recycled for exactly as long as this closure can
-   * still be named. Dropped by scr_closure_ctor_unlink at teardown, which
-   * is what keeps the registry's borrowed closure pointer from dangling.
-   *
-   * TRACED, since the RC-audit lane was read. The prototype is reachable
-   * TWICE — from the props table's `prototype` member, which is traced,
-   * and from here — so while this edge was untraced it left one
-   * un-decremented +1 on the prototype through every trial deletion,
-   * scan() read that as "externally referenced" and re-blackened the whole
-   * subgraph, and every ring through a function's OWN prototype object
-   * survived collection. `N.prototype.constructor = N` is that ring.
-   * The teardown complement moves with the edge: the COLLECTOR's path
-   * erases the registry entry WITHOUT releasing the prototype. */
-  void *implicit_proto;
+  /* The two LAZY members, behind ONE pointer: the own-property table
+   * (`props`) and the minted implicit prototype (`implicit_proto`). Both
+   * are NULL on almost every closure, so two inline words cost 16 bytes on
+   * EVERY closure and one costs 8 here plus a 16-byte ScrClosureExt on the
+   * few that need either. NULL until the first write of either; owned by
+   * the closure, freed by every teardown path (scr_closure_release,
+   * scr_closure_gcfree, scr_closure_static_teardown), and plain malloc
+   * memory, not a cycle block. Read through scr_closure_props /
+   * scr_closure_proto, never directly. The field comments that stood on
+   * `props` and `implicit_proto` now live on ScrClosureExt. */
+  struct ScrClosureExt *ext;
   ScrBox *caps[];
 } ScrClosure;
+
+static inline ScrBox *scr_closure_props(const ScrClosure *c) { return c->ext != NULL ? c->ext->props : NULL; }
+static inline void *scr_closure_proto(const ScrClosure *c) { return c->ext != NULL ? c->ext->implicit_proto : NULL; }
+/* The closure's ext, allocated zeroed on first use. Aborts on OOM. */
+ScrClosureExt *scr_closure_ext_make(ScrClosure *c);
+/* Drops the ext block itself (members already released/cleared by the caller). */
+void scr_closure_ext_free(ScrClosure *c);
 
 /* Installed by the dyn unit the first time it mints an implicit prototype
  * (scr_dyn_fn_prototype), NULL in a program that never does. Called from

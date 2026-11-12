@@ -4133,9 +4133,9 @@ static ScrDyn *scr_interval_dyn_thunk(ScrClosure *clo, ScrDyn *const *args, size
 /* One immortal closure per function (rc SIZE_MAX, like an interned top-level
  * function): every evaluation of the global boxes the SAME closure, and a
  * function box compares by its closure, so `setTimeout === setTimeout`. */
-static ScrClosure scr_imm_dyn_clo = {SIZE_MAX, (void *)scr_imm_dyn_thunk, 0, NULL, NULL};
-static ScrClosure scr_timeout_dyn_clo = {SIZE_MAX, (void *)scr_timeout_dyn_thunk, 0, NULL, NULL};
-static ScrClosure scr_interval_dyn_clo = {SIZE_MAX, (void *)scr_interval_dyn_thunk, 0, NULL, NULL};
+static ScrClosure scr_imm_dyn_clo = {SIZE_MAX, (void *)scr_imm_dyn_thunk, 0, NULL};
+static ScrClosure scr_timeout_dyn_clo = {SIZE_MAX, (void *)scr_timeout_dyn_thunk, 0, NULL};
+static ScrClosure scr_interval_dyn_clo = {SIZE_MAX, (void *)scr_interval_dyn_thunk, 0, NULL};
 
 ScrDyn *scr_set_immediate_dyn_value(void) {
   return scr_dyn_new_func(&scr_imm_dyn_clo, scr_imm_dyn_thunk, 1, "(callback,...args)", "setImmediate");

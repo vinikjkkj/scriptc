@@ -94,6 +94,15 @@ export const RUNTIME_FIELD_OFFSETS: readonly RuntimeFieldOffset[] = [
   { struct: "ScrCoroBase", field: "state", offset: SCR_CORO_BASE_STATE_OFFSET },
   { struct: "ScrCoroBase", field: "flags", offset: 28 },
   { struct: "ScrCoroBase", field: "rc", offset: 32 },
+  /* ScrClosure { size_t rc; void *fn; size_t ncaps; ScrClosureExt *ext;
+   * ScrBox *caps[]; }. The LLVM lane reads `fn` by field GEP and addresses
+   * caps[] as ONE WHOLE %ScrClosure past the base (`i64 1`), so the size of
+   * the %ScrClosure type in emitter.ts must equal offsetof(caps) = 32. The
+   * lazy props table and implicit prototype ride behind `ext`. */
+  { struct: "ScrClosure", field: "fn", offset: 8 },
+  { struct: "ScrClosure", field: "ncaps", offset: 16 },
+  { struct: "ScrClosure", field: "ext", offset: 24 },
+  { struct: "ScrClosure", field: "caps", offset: 32 },
   { struct: "ScrCoroExc", field: "base", offset: 0 },
   { struct: "ScrCoroExc", field: "exc", offset: 40 },
 ];

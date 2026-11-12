@@ -285,8 +285,8 @@ static int dyn_cls_ops_class_walk(const ScrDyn *v, ScrObjWalk mode, ScrDyn *out)
     scr_dyn_release(val);
   }
   /* ...then the properties a program ADDED to the function object, in creation order. */
-  if (v->v.fn.clo->props != NULL) {
-    ScrDyn *table = (ScrDyn *)scr_box_get_ref(v->v.fn.clo->props); /* +1 */
+  if (scr_closure_props(v->v.fn.clo) != NULL) {
+    ScrDyn *table = (ScrDyn *)scr_box_get_ref(scr_closure_props(v->v.fn.clo)); /* +1 */
     ScrDyn *extra = table != NULL ? scr_dyn_objwalk(table, mode) : NULL;
     /* the minted `prototype` object lives in this table but is NON-enumerable on a class: it is no expando */
     ScrDyn *ekeys = table != NULL ? scr_dyn_objwalk(table, SCR_OBJWALK_KEYS) : NULL;
@@ -430,7 +430,7 @@ static ScrDyn *dyn_class_prototype(const ScrDyn *d) {
   const ScrDynClassMember *ownRow = inner != NULL ? scr_dyn_objinst_member(inner, "%dynOwn", 7) : dyn_class_static(cls, "%dynOwn", 7);
   if (ownRow == NULL || ownRow->call == NULL) return NULL;
   void *recv = inner != NULL ? inner->v.inst.o : NULL;
-  const bool first = d->v.fn.clo->implicit_proto == NULL;
+  const bool first = scr_closure_proto(d->v.fn.clo) == NULL;
   ScrDyn *P = scr_dyn_fn_prototype((ScrDyn *)d); /* +1 */
   if (!first) return P;
   /* the instance class: an evaluation's through a stamped, never-constructed instance; a declared class's is its own */

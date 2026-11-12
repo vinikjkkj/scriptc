@@ -1455,8 +1455,8 @@ static void scr_ctor_erase(const ScrDyn *p) {
  * scr_closure_ctor_unlink the first time a prototype is minted, and
  * reached only for a closure that has one. */
 static void scr_dyn_ctor_unlink(ScrClosure *c, bool release) {
-  ScrDyn *proto = (ScrDyn *)c->implicit_proto;
-  c->implicit_proto = NULL;
+  ScrDyn *proto = (ScrDyn *)scr_closure_proto(c);
+  if (c->ext != NULL) c->ext->implicit_proto = NULL;
   /* By ADDRESS only — never dereferenced — which is what makes this
    * correct on the collector's path, where `proto` may already have been
    * freed earlier in the same white-set teardown loop. */
@@ -9588,8 +9588,8 @@ static ScrDyn *scr_u8_static_member(const char *key, size_t key_len);
  * writable too. Object.hasOwn is exact. */
 bool scr_dyn_fn_has(const ScrDyn *v, const char *key, size_t key_len) {
   /* An accessor property is PRESENT without running its getter (`k in F` has no side effect in JS). */
-  if (v->v.fn.clo->props != NULL) {
-    ScrDyn *table = (ScrDyn *)scr_box_get_ref(v->v.fn.clo->props); /* +1 */
+  if (scr_closure_props(v->v.fn.clo) != NULL) {
+    ScrDyn *table = (ScrDyn *)scr_box_get_ref(scr_closure_props(v->v.fn.clo)); /* +1 */
     ScrDyn *found = NULL;
     const bool acc = table != NULL && scr_dyn_obj_resolve(table, key, key_len, &found, NULL) == SCR_PROP_ACCESSOR;
     scr_dyn_release(table);
@@ -11792,8 +11792,8 @@ ScrDyn *scr_dyn_fn_get(const ScrDyn *d, const char *key, size_t key_len) {
     ScrDyn *cs = scr_dyn_class_ops->fn_get(d, key, key_len);
     if (cs != NULL || scr_exc_pending()) return cs;
   }
-  if (d->v.fn.clo->props) {
-    ScrDyn *table = (ScrDyn *)scr_box_get_ref(d->v.fn.clo->props); /* +1 */
+  if (scr_closure_props(d->v.fn.clo)) {
+    ScrDyn *table = (ScrDyn *)scr_box_get_ref(scr_closure_props(d->v.fn.clo)); /* +1 */
     ScrDyn *m = table ? scr_dyn_obj_get(table, key, key_len) : NULL;
     ScrDyn *r = m ? scr_dyn_retain(m) : NULL;
     /* An ACCESSOR property of the function (Object.defineProperty(F, k, { get, set }) lands in this table's `hidden` half): the getter runs
@@ -11878,17 +11878,17 @@ ScrDyn *scr_dyn_fn_get(const ScrDyn *d, const char *key, size_t key_len) {
  * value shares it — which is what makes a per-USE box correct: JS has one
  * function object per closure, not one per boundary crossing. +1. */
 void scr_dyn_fn_share_props(ScrClosure *adapter, const ScrDyn *fn) {
-  if (fn->kind != SCR_DYN_FUNC || adapter == NULL || adapter->props != NULL) return;
+  if (fn->kind != SCR_DYN_FUNC || adapter == NULL || scr_closure_props(adapter) != NULL) return;
   /* An IMMORTAL closure (a function declared once at file scope, rc == SIZE_MAX) is never freed, so a table allocated onto it here would never be
    * released: it keeps the table it already has and otherwise stays without one (nothing wrote a property on it that an adapter could lose). */
-  if (fn->v.fn.clo->props == NULL && *(const size_t *)fn->v.fn.clo == SIZE_MAX) return;
+  if (scr_closure_props(fn->v.fn.clo) == NULL && *(const size_t *)fn->v.fn.clo == SIZE_MAX) return;
   ScrDyn *t = scr_dyn_fn_props((ScrDyn *)fn); /* +1: allocates the table on first use */
   scr_dyn_release(t);
-  adapter->props = scr_box_retain(fn->v.fn.clo->props);
+  scr_closure_ext_make(adapter)->props = scr_box_retain(scr_closure_props(fn->v.fn.clo));
 }
 
 ScrDyn *scr_dyn_fn_props(ScrDyn *d) {
-  if (!d->v.fn.clo->props) {
+  if (!scr_closure_props(d->v.fn.clo)) {
     scr_fn_own_tostring_hook = &scr_dyn_fn_own_tostring;
     /* TRACED: the table can hold a function value that captures the very
      * closure this table belongs to (`Foo.create = () => new Foo()`), which
@@ -11897,9 +11897,9 @@ ScrDyn *scr_dyn_fn_props(ScrDyn *d) {
     ScrBox *box = scr_box_new_obj(&scr_dyn_retain_v, &scr_dyn_release_v, &scr_dyn_trace_v);
     ScrDyn *table = scr_dyn_new_obj();
     scr_box_set_ref(box, table); /* the box owns the fresh table */
-    d->v.fn.clo->props = box;
+    scr_closure_ext_make(d->v.fn.clo)->props = box;
   }
-  return (ScrDyn *)scr_box_get_ref(d->v.fn.clo->props); /* +1 */
+  return (ScrDyn *)scr_box_get_ref(scr_closure_props(d->v.fn.clo)); /* +1 */
 }
 
 /* The FUNC node's `prototype` OBJECT, minted on first demand and stored
@@ -11938,13 +11938,13 @@ ScrDyn *scr_dyn_fn_prototype(ScrDyn *fn) {
    * teardown hook that drops both is installed here — it can only be
    * reached by a closure that got this far. */
   ScrClosure *clo = fn->v.fn.clo;
-  if (clo->implicit_proto == NULL) {
+  if (scr_closure_proto(clo) == NULL) {
     if (scr_ctor_len * 2 >= scr_ctor_cap) scr_ctor_grow();
     ScrCtorDesc d = {clo, fn->v.fn.thunk, scr_dyn_fn_sig(fn), scr_dyn_fn_name(fn), scr_dyn_fn_src(fn),
                      scr_dyn_fn_len(fn)};
     scr_ctor_insert(scr_ctor_tab, scr_ctor_cap, proto, d);
     scr_ctor_len++;
-    clo->implicit_proto = scr_dyn_retain(proto);
+    scr_closure_ext_make(clo)->implicit_proto = scr_dyn_retain(proto);
     scr_closure_ctor_unlink = &scr_dyn_ctor_unlink;
   }
   return proto; /* the caller's +1 */
@@ -14836,7 +14836,7 @@ static ScrDyn *scr_sc_dyn_thunk(ScrClosure *clo, ScrDyn *const *args, size_t arg
   return scr_structured_clone(args[0], argc > 1 ? args[1] : scr_dyn_undefined());
 }
 
-static ScrClosure scr_sc_dyn_clo = {SIZE_MAX, (void *)scr_sc_dyn_thunk, 0, NULL, NULL};
+static ScrClosure scr_sc_dyn_clo = {SIZE_MAX, (void *)scr_sc_dyn_thunk, 0, NULL};
 
 ScrDyn *scr_structured_clone_dyn_value(void) {
   return scr_dyn_new_func(&scr_sc_dyn_clo, scr_sc_dyn_thunk, 1, "(value,options)", "structuredClone");
@@ -15140,7 +15140,7 @@ ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode) {
     }
     return out;
   }
-  if (v->kind == SCR_DYN_FUNC && v->v.fn.clo->props) {
+  if (v->kind == SCR_DYN_FUNC && scr_closure_props(v->v.fn.clo)) {
     /* A function value's own ENUMERABLE keys — the property table, minus
      * the two built-ins. Without this arm the keyed WRITE would create a
      * new wrong answer of its own (`f.x = 1; Object.keys(f)` answering
@@ -15156,7 +15156,7 @@ ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode) {
      * one is listed here where Node hides it, which is the runtime's
      * already-documented "dyn properties are plain data properties"
      * divergence (SEMANTICS.md), not a new one. */
-    ScrDyn *table = (ScrDyn *)scr_box_get_ref(v->v.fn.clo->props); /* +1 */
+    ScrDyn *table = (ScrDyn *)scr_box_get_ref(scr_closure_props(v->v.fn.clo)); /* +1 */
     if (table != NULL && table->kind == SCR_DYN_OBJ) {
       /* A function's own keys take the same projection as an object's —
        * `f.a = 1; f[0] = 2` lists ["0","a"] in Node too. */
@@ -15279,7 +15279,7 @@ static void scr_dyn_assign_from(ScrDyn *target, const ScrDyn *src) {
   if (src->kind == SCR_DYN_OBJ || src->kind == SCR_DYN_ARR) {
     if (scr_dyn_ext(src)->syms != NULL && !scr_exc_pending()) scr_dyn_sym_copy_enum(target, src);
   } else if (src->kind == SCR_DYN_FUNC) {
-    if (src->v.fn.clo->props != NULL && !scr_exc_pending()) scr_dyn_sym_copy_enum(target, src);
+    if (scr_closure_props(src->v.fn.clo) != NULL && !scr_exc_pending()) scr_dyn_sym_copy_enum(target, src);
   } else if (src->kind == SCR_DYN_BYTES) {
     if (src->v.bytes->own != NULL && src->v.bytes->own->ext.syms != NULL && !scr_exc_pending()) scr_dyn_sym_copy_enum(target, src);
   } else if (src->kind == SCR_DYN_MAP) {

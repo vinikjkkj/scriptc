@@ -162,7 +162,7 @@ ScrDyn *scr_dyn_get_own_desc(ScrDyn *v, ScrStr *key) {
     case SCR_DYN_FUNC: {
       if (!scr_dyn_fn_has_own(v, k, kl)) return gopd_undefined();
       const bool is_class = scr_dyn_class_ops != NULL && scr_dyn_class_ops->class_of_value != NULL && scr_dyn_class_ops->class_of_value(v) != NULL;
-      ScrDyn *table = v->v.fn.clo->props != NULL ? (ScrDyn *)scr_box_get_ref(v->v.fn.clo->props) : NULL; /* +1 */
+      ScrDyn *table = scr_closure_props(v->v.fn.clo) != NULL ? (ScrDyn *)scr_box_get_ref(scr_closure_props(v->v.fn.clo)) : NULL; /* +1 */
       /* a property the program DEFINED with its own flags (the hidden table) wins over everything below */
       if (table != NULL && scr_dyn_obj_hidden_attrs(table, k, kl, NULL, NULL, NULL, NULL)) {
         ScrDyn *d = gopd_obj(table, k, kl);

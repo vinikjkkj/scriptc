@@ -99,9 +99,9 @@ export function wsGlobalCtorFor(E: CEmitter, t: IrType, site?: string): string {
   // Field list MIRRORS ScrClosure's — the runtime casts this to
   // ScrClosure * and writes through it (emitter.ts's note).
   E.walkerData(
-    `extern struct { size_t rc; void *fn; size_t ncaps; ScrBox *props; void *implicit_proto; } ${sym};`,
-    `${E.link}struct { size_t rc; void *fn; size_t ncaps; ScrBox *props; void *implicit_proto; } ${sym} =`,
-    `    { SIZE_MAX, (void *)&${names.wrap}, 0, NULL, NULL }; /* globalThis.WebSocket */`,
+    `extern struct { size_t rc; void *fn; size_t ncaps; ScrClosureExt *ext; } ${sym};`,
+    `${E.link}struct { size_t rc; void *fn; size_t ncaps; ScrClosureExt *ext; } ${sym} =`,
+    `    { SIZE_MAX, (void *)&${names.wrap}, 0, NULL }; /* globalThis.WebSocket */`,
   );
 
   E.walkerDefs.push(

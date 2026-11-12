@@ -361,7 +361,7 @@ static ScrDyn *scr_fs_dirent_is(int kind) {
     (void)clo; (void)args; (void)argc;                                                             \
     return scr_fs_dirent_is(kindno);                                                               \
   }                                                                                                \
-  static ScrClosure scr_fs_dirent_##fname##_clo = {SIZE_MAX, (void *)scr_fs_dirent_##fname, 0, NULL, NULL};
+  static ScrClosure scr_fs_dirent_##fname##_clo = {SIZE_MAX, (void *)scr_fs_dirent_##fname, 0, NULL};
 SCR_FS_DIRENT_IS(isFile, 1)
 SCR_FS_DIRENT_IS(isDirectory, 2)
 SCR_FS_DIRENT_IS(isSymbolicLink, 3)
