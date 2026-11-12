@@ -748,6 +748,21 @@ static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
   return fresh;
 }
 
+/* scr_dyn_keep: the store paths pass the value they are about to own through here (see the small-integer table below). Inline test, out-of-line work. */
+static ScrDyn *scr_dyn_keep_num(ScrDyn *d);
+#ifdef SCR_SMALLINT_LAB
+/* LAB ONLY (never defined in a shipped build): 0 no sharing, 1 shared at the stores, 2 shared at every creation; chosen by SCR_SMALLINT_MODE. */
+static int scr_smallint_mode_v = -1;
+static __attribute__((noinline)) int scr_smallint_mode_init(void) {
+  const char *e = getenv("SCR_SMALLINT_MODE");
+  return scr_smallint_mode_v = e != NULL ? atoi(e) : 1;
+}
+static inline int scr_smallint_lab_mode(void) { return scr_smallint_mode_v >= 0 ? scr_smallint_mode_v : scr_smallint_mode_init(); }
+#endif
+static inline ScrDyn *scr_dyn_keep(ScrDyn *d) {
+  return d != NULL && d->kind == SCR_DYN_NUM && d->rc != SIZE_MAX ? scr_dyn_keep_num(d) : d;
+}
+
 static void scr_dyn_handle_release(void *h, ScrDynHandleTag tag);
 /* The Proxy operations live in the gated prototype-dispatch unit
  * (scr_dyn_invoke.c) and install their table when the first proxy is made, so
@@ -1697,7 +1712,7 @@ void scr_dyn_arr_push_slot(ScrDyn *arr, ScrDyn *item) {
     arr->v.arr.items = items;
     arr->v.arr.cap = (uint32_t)cap;
   }
-  arr->v.arr.items[arr->v.arr.len++] = item; /* ownership moves in */
+  arr->v.arr.items[arr->v.arr.len++] = scr_dyn_keep(item); /* ownership moves in */
 }
 
 /* A VALUE push: a hole read out of another slot carries the absent node, and
@@ -2163,6 +2178,7 @@ uint32_t scr_wrap_epoch = 1;
 
 static void scr_dyn_obj_put_k(ScrDyn *obj, char *key, size_t key_len, ScrDyn *value,
                               uint32_t key_static) {
+  value = scr_dyn_keep(value); /* a stored small integer is the shared box */
 #ifdef SCR_DYNCEN_ON
   /* tests/perf/dyncensus: EVERY key store, before the duplicate scan, so
    * an overwrite -- which allocated a key buffer and is about to free it
@@ -2391,7 +2407,7 @@ __attribute__((noinline, cold)) void scr_dyn_phantom_update(void) {
       else if (c->kind == SCR_DYN_BOOL || c->kind == SCR_DYN_NULL || c->kind == SCR_DYN_NUM || c->kind == SCR_DYN_STR) scr_ph_total++;
     }
   }
-  if (scr_ph_total == 0 || scr_nd_total == 0) return; /* nothing real in the sample (every slot a shared box) would divide by zero */
+  if (scr_ph_total == 0 || scr_nd_total == 0) return; /* nothing real in the sample (all slots shared boxes) would divide by zero */
   size_t real = scr_cyc_live - scr_ph_applied;
   size_t ph = real * scr_ph_total / scr_nd_total;
   ph += ph / 3; /* the flat sample sees a container child once, as a slot, and again if buffered: it reads a ratio about a quarter low */
@@ -2422,7 +2438,79 @@ ScrDyn *scr_dyn_new_bool(bool b) {
   return &scr_dyn_bool_singletons[b];
 }
 
+/* SHARED SMALL-INTEGER BOXES. A dyn number node is immutable once built (nothing writes a NUM payload after the node is handed out;
+ * scr_dyn_obj_unset's position fix-up below replaces the node instead of decrementing it), so every integer in
+ * [SCR_SMALLINT_LO, SCR_SMALLINT_HI] is ONE immortal node (rc == SIZE_MAX: retain and release skip it, the collector skips it, nothing
+ * frees it), like the bool and null singletons. The census of the live dyn population (REST app, redis bench) found the large majority
+ * of live NUM boxes to be small integers: field lengths, offsets, char codes, flags, counters.
+ *
+ * What stays OUT, each by construction of the test below: NaN and +-Infinity (the range compare is false for NaN and the conversion
+ * is never reached for the infinities), every non-integer (the round trip through int32 differs), and negative zero (equal to the
+ * integer 0 by ==, a different value by Object.is and by 1/x, so it is told apart by its sign bit and allocates).
+ * */
+#define SCR_SMALLINT_LO (-128)
+#define SCR_SMALLINT_HI 1023
+/* The table is BSS, not initialized data: 1,152 nodes of 48 bytes would be 55 KB of the executable's file for every program that links this unit,
+ * and a program that never boxes a small integer would carry it for nothing. A node is filled on its FIRST use (rc == 0 marks an unfilled one: a live
+ * node's rc is never 0, immortal ones are SIZE_MAX), so a program touches only the pages of the values it actually boxes, and start-up does nothing. */
+static ScrDyn scr_dyn_smallint[SCR_SMALLINT_HI - SCR_SMALLINT_LO + 1];
+static inline ScrDyn *scr_smallint_node(int32_t i) {
+  ScrDyn *d = &scr_dyn_smallint[i - SCR_SMALLINT_LO];
+  if (d->rc == 0) {
+    d->rc = SIZE_MAX;
+    d->kind = SCR_DYN_NUM;
+    d->v.num = (double)i;
+  }
+  return d;
+}
+
+/* WHEN the table is consulted: where a number is RETAINED, not where it is made. Arithmetic on dyn operands makes a node per result and drops
+ * it a moment later; a check at creation costs every one of those and saves nothing (+4.0% instructions on big or fractional dyn arithmetic,
+ * measured). A number that is STORED (an array element, an object member, a parsed JSON value) lives as long as its holder, and a million of
+ * the same small integer held that way is the memory the table exists to stop. So the stores ask (scr_dyn_keep, defined with the allocator
+ * above) and the creation path is untouched. */
+static __attribute__((noinline)) ScrDyn *scr_smallint_of(double n) {
+  if (n >= (double)SCR_SMALLINT_LO && n <= (double)SCR_SMALLINT_HI) { /* false for NaN, and the infinities are out of range */
+    int32_t i = (int32_t)n;
+    if ((double)i == n) {
+      if (i != 0) return scr_smallint_node(i);
+      uint64_t bits;
+      memcpy(&bits, &n, sizeof bits);
+      if (bits == 0u) return scr_smallint_node(0); /* +0 only: -0 has the sign bit set and allocates */
+    }
+  }
+  return NULL;
+}
+
+/* The slow half of scr_dyn_keep: `d` is a counted number node the caller is about to store an owned reference to. If its value has a shared box,
+ * the caller's reference is given up and the shared box is returned (immortal: no count to take). Correct whatever the count was: a node of
+ * rc > 1 is only ever the caller's reference being exchanged for another one. */
+static __attribute__((noinline)) ScrDyn *scr_dyn_keep_num(ScrDyn *d) {
+#ifdef SCR_SMALLINT_LAB
+  if (scr_smallint_lab_mode() == 0) return d;
+#endif
+  ScrDyn *sh = scr_smallint_of(d->v.num);
+  if (sh == NULL) return d;
+  scr_dyn_release(d);
+  return sh;
+}
+
+/* A parsed JSON number is always stored. */
+static ScrDyn *scr_dyn_new_num_kept(double n) {
+#ifdef SCR_SMALLINT_LAB
+  if (scr_smallint_lab_mode() == 0) return scr_dyn_new_num(n);
+#endif
+  ScrDyn *sh = scr_smallint_of(n);
+  return sh != NULL ? sh : scr_dyn_new_num(n);
+}
+
 ScrDyn *scr_dyn_new_num(double n) {
+#ifdef SCR_SMALLINT_LAB
+  if (scr_smallint_lab_mode() == 2) {
+    ScrDyn *sh = scr_smallint_of(n);
+    if (sh != NULL) return sh;
+  }
+#endif
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_NUM);
   d->v.num = n;
   return d;
@@ -2461,15 +2549,7 @@ ScrDyn *scr_dyn_new_str(ScrStr *s) {
  * string are one immortal node each, like the bool and null singletons: a padded parameter list converts to hundreds of thousands of
  * identical boxes otherwise. Exact bit pattern, so -0.0 and NaN allocate. The pacing estimator counts NUM as shared already; it
  * learns the empty STR in the same place. */
-static ScrDyn scr_dyn_num_singletons[3] = { { SIZE_MAX, SCR_DYN_NUM, .v = { .num = -1.0 } }, { SIZE_MAX, SCR_DYN_NUM, .v = { .num = 0.0 } }, { SIZE_MAX, SCR_DYN_NUM, .v = { .num = 1.0 } } };
-ScrDyn *scr_dyn_new_num_sh(double n) {
-  uint64_t b;
-  memcpy(&b, &n, sizeof b);
-  if (b == 0ull) return &scr_dyn_num_singletons[1];
-  if (b == 0x3FF0000000000000ull) return &scr_dyn_num_singletons[2];
-  if (b == 0xBFF0000000000000ull) return &scr_dyn_num_singletons[0];
-  return scr_dyn_new_num(n);
-}
+ScrDyn *scr_dyn_new_num_sh(double n) { return scr_dyn_new_num(n); } /* -1, 0 and 1 are in the shared table scr_dyn_new_num itself consults */
 
 ScrDyn *scr_dyn_new_str_sh(ScrStr *s) {
   static ScrDyn empty;
@@ -9148,7 +9228,13 @@ static void scr_dyn_obj_unset(ScrDyn *obj, const char *key, size_t key_len) {
         ScrDyn *hid = scr_dyn_ext_w(obj)->hidden;
         for (size_t hi = 0; hi < hid->v.obj.len; hi++) {
           ScrDyn *hq = hid->v.obj.entries[hi].value;
-          if (hq != NULL && hq->kind == SCR_DYN_ARR && hq->v.arr.len >= 7 && hq->v.arr.items[6]->kind == SCR_DYN_NUM && hq->v.arr.items[6]->v.num > (double)i) hq->v.arr.items[6]->v.num -= 1;
+          if (hq != NULL && hq->kind == SCR_DYN_ARR && hq->v.arr.len >= 7 && hq->v.arr.items[6]->kind == SCR_DYN_NUM && hq->v.arr.items[6]->v.num > (double)i) {
+            /* REPLACE the position node, never edit it in place: a small integer is a shared immortal box */
+            ScrDyn *np = scr_dyn_new_num(hq->v.arr.items[6]->v.num - 1);
+            ScrDyn *old_pos = hq->v.arr.items[6];
+            hq->v.arr.items[6] = np;
+            scr_dyn_release(old_pos);
+          }
         }
       }
 #ifdef SCR_WRAP_WATCH
@@ -10082,7 +10168,7 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
       /* unlink before release, and retain before either: `value` may BE
        * the element already stored here */
       ScrDyn *old = recv->v.arr.items[idx];
-      recv->v.arr.items[idx] = scr_dyn_retain(scr_dyn_elem_val(value));
+      recv->v.arr.items[idx] = scr_dyn_keep(scr_dyn_retain(scr_dyn_elem_val(value)));
       scr_dyn_release(old);
       return;
     }
@@ -11145,20 +11231,17 @@ static ScrDyn *scr_json_number(ScrJsonP *p) {
     }
     exp10 += eneg ? -ev : ev;
   }
-  ScrDyn *d = scr_dyn_alloc(SCR_DYN_NUM);
   if (precise && exp10 >= -22 && exp10 <= 22) {
     double v = (double)mant; /* exact: mant < 10^15 < 2^53 */
     if (exp10 > 0) v *= scr_json_pow10[exp10];
     else if (exp10 < 0) v /= scr_json_pow10[-exp10];
-    d->v.num = neg ? -v : v;
-    return d;
+    return scr_dyn_new_num_kept(neg ? -v : v); /* a small integer is the shared box; "-0" stays a fresh -0 */
   }
   /* The validated span re-parses with strtod (correctly rounded, and the
    * grammar above is a strict subset of what strtod accepts). The ScrStr
    * data is NUL-terminated, and strtod stops at the first non-number char,
    * so parsing from `start` reads exactly the validated token. */
-  d->v.num = strtod(p->s + start, NULL);
-  return d;
+  return scr_dyn_new_num_kept(strtod(p->s + start, NULL));
 }
 
 static bool scr_json_lit(ScrJsonP *p, const char *word, size_t n) {
