@@ -48,6 +48,7 @@ import { type IrFunction, type IrType, isRefCounted } from "../../ir/nodes.js";
 // `coroPlans` moved to ir/coro-plans.ts: it is backend-agnostic policy and
 // only looked C-specific because it lived here. The TYPE is still needed.
 import { type StacklessPlan } from "../../ir/liveness.js";
+import { singleWriterLocals } from "../../ir/analysis.js";
 import { poisonFinishArm, poisonSpillOrder, poisonTakeArm } from "./coro-poison.js";
 
 /** The frame's field name for a local. The naming lives in mangle.ts beside
@@ -369,6 +370,49 @@ export function coroSpill(E: CEmitter, fn: IrFunction, plan: StacklessPlan): str
   return out;
 }
 
+/** RELEASE, BEFORE THE PARK, EVERY OWNED LOCAL THE RESUME NEVER READS AGAIN.
+ *
+ * The frame carries every refcounted local to function end (coroFrameLocals: the release path must find its owner
+ * after a resume re-enters the function), so a local whose last use was an argument of the awaited call kept its
+ * whole graph alive for the whole wait -- zapo's getSessionsBatch held 1000 padded parameter arrays for as long as
+ * 1000 queued queries were pending. A local the plan says is dead across THIS point (SuspensionPoint.keepAtPark: not
+ * live, not read by the enclosing expression outside this await's own operand, not handed to a runtime call there)
+ * is released here and set NULL, so the spill below writes NULL into its frame slot and every later release (scope
+ * exit, function end, an unwind) is the NULL-tolerant no-op it already is.
+ *
+ * ONLY ENTRIES OF THE OPEN SCOPES ARE TOUCHED: a local whose varDecl has not been emitted yet (or whose scope has
+ * exited) is not in `E.scopes` and may hold a stale pointer from a previous loop iteration, which must not be released
+ * twice. Boxed (closure-captured) locals, captures and the lowering's hidden `%` locals are never released here. */
+function coroReleaseDead(E: CEmitter, fn: IrFunction, plan: StacklessPlan, node: object): void {
+  const pt = plan.points.find((p) => p.node === node);
+  if (pt === undefined || pt.keepAtPark === undefined) return;
+  const byName = new Map(fn.locals.map((l) => [mangleLocal(l.id), l]));
+  const captured = new Set((fn.captures ?? []).map((c) => c.localId));
+  const done = new Set<string>();
+  // A root-of-statement await in the scope that owns the local, and the local written only by its declaration: every path
+  // from the declaration to this scope's exit passes this park (a jump out of the scope before it was emitted before it,
+  // with the entry still in place), so the exit release is a certain no-op and the entry is dropped -- the release moves
+  // to the park instead of being paid twice.
+  const innermost = E.scopes.length - 1;
+  const single = pt.nestedInExpression ? null : singleWriterLocals(fn);
+  for (let si = 0; si < E.scopes.length; si++) {
+    const scope = E.scopes[si]!;
+    const drop: ScopeEntryLike[] = [];
+    for (const ent of scope) {
+      if (ent.boxed === true || ent.immortal === true || !isRefCounted(ent.type)) continue;
+      const l = byName.get(ent.name);
+      if (l === undefined || l.boxed === true || l.name.startsWith("%")) continue;
+      if (captured.has(l.id) || pt.keepAtPark.has(l.id) || done.has(ent.name)) continue;
+      done.add(ent.name);
+      E.releaseValue(ent.name, ent.type);
+      E.line(`${ent.name} = NULL;`);
+      if (single !== null && si === innermost && single.has(l.id)) drop.push(ent);
+    }
+    for (const ent of drop) scope.splice(scope.indexOf(ent as never), 1);
+  }
+}
+type ScopeEntryLike = object;
+
 /** The await site: spill, park, return to the scheduler, and on re-entry
  * reload and take the settled value.
  *
@@ -384,6 +428,7 @@ export function emitCoroAwait(
   promiseTemp: Temp,
   resultType: IrType,
   dynAdopt = false,
+  node?: object,
 ): string {
   // THE OPERAND PROMISE MOVES INTO THE FRAME, and that is not a nicety.
   // `promiseTemp` is a C local in the resume function. The park RETURNS to
@@ -395,6 +440,7 @@ export function emitCoroAwait(
   // first version left the temp in the frame and it was released twice, once
   // through a dangling local.)
   E.moveTemp(promiseTemp);
+  if (node !== undefined) coroReleaseDead(E, fn, plan, node);
   // Every OTHER temp the RC frames still own has the same dangling-local
   // problem, so it goes in the frame too. Recorded for the struct, which is
   // emitted after the bodies.

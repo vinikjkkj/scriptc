@@ -9664,7 +9664,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           // Any port that reuses coroPointIndex inherits this; the LLVM plan
           // already carries the note.
           const idx = E.coroDrawState(E.currentFn!.name, E.currentCoro.points.length);
-          const nm = emitCoroAwait(E, E.currentFn!, E.currentCoro, idx, pr0, e.type, e.value.kind === "libCall" && e.value.fn === "dyn.adoptPromise");
+          const nm = emitCoroAwait(E, E.currentFn!, E.currentCoro, idx, pr0, e.type, e.value.kind === "libCall" && e.value.fn === "dyn.adoptPromise", e);
           E.emitPendingCheck();
           return { name: nm, type: e.type };
         }

@@ -125,7 +125,7 @@ import {
   type CoroViolations,
   PromotedTempInPhiError,
 } from "./blocks.js";
-import { BORROWING_DYN_LIBCALLS, isStableReceiverOperand, writesLocal } from "../../ir/analysis.js";
+import { BORROWING_DYN_LIBCALLS, isStableReceiverOperand, singleWriterLocals, writesLocal } from "../../ir/analysis.js";
 import { SCR_BYTES_LEN_OFFSET } from "./runtime-layout.js";
 import {
   buildClassGraph,
@@ -4976,6 +4976,40 @@ class LlEmitter {
     this.emitCoroReload();
   }
 
+  /** RELEASE, BEFORE THE PARK, EVERY OWNED LOCAL THE RESUME NEVER READS AGAIN (emit-coro.ts coroReleaseDead is the C
+   * lane's statement of the rule and its reasons): a refcounted local the plan marks dead across this point (not in
+   * SuspensionPoint.keepAtPark) is released and its slot set to null, so the spill carries null and every later
+   * release is the NULL-tolerant no-op. Only the open scopes' entries are touched (a stale slot of a local not yet
+   * declared in this iteration must not be released twice); boxed locals, captures and hidden `%` locals never. */
+  private emitCoroReleaseDead(fn: IrFunction, index: number): void {
+    const pt = this.currentCoro!.points[this.coroStates[index]!];
+    if (pt === undefined || pt.keepAtPark === undefined) return;
+    const bySlot = new Map(fn.locals.map((l) => [`%${mangleLocal(l.id)}`, l]));
+    const captured = new Set((fn.captures ?? []).map((c) => c.localId));
+    const done = new Set<string>();
+    // The scope entry is DROPPED (the exit release moves to the park) for a root-of-statement await in the scope that
+    // owns a local written only by its declaration; see emit-coro.ts coroReleaseDead for the argument.
+    const innermost = this.scopes.length - 1;
+    const single = pt.nestedInExpression ? null : singleWriterLocals(fn);
+    for (let si = 0; si < this.scopes.length; si++) {
+      const scope = this.scopes[si]!;
+      const drop: LlScopeEntry[] = [];
+      for (const ent of scope) {
+        if (ent.boxed === true || !isRefCounted(ent.type)) continue;
+        const l = bySlot.get(ent.slot);
+        if (l === undefined || l.boxed === true || l.name.startsWith("%")) continue;
+        if (captured.has(l.id) || pt.keepAtPark.has(l.id) || done.has(ent.slot)) continue;
+        done.add(ent.slot);
+        const t = this.B.tmp();
+        this.B.line(`${t} = load ptr, ptr ${ent.slot}`);
+        this.releaseValue(t, ent.type);
+        this.B.line(`store ptr null, ptr ${ent.slot}`);
+        if (single !== null && si === innermost && single.has(l.id)) drop.push(ent);
+      }
+      for (const ent of drop) scope.splice(scope.indexOf(ent), 1);
+    }
+  }
+
   /** Spill every frame local: load the alloca, store it to its frame field.
    * Emitted immediately before a park. */
   private emitCoroSpill(): void {
@@ -5312,6 +5346,7 @@ class LlEmitter {
     // handling -- the +1 does not move, only the name it is spelled with,
     // because the scope-exit release is emitted through `line()` and is
     // therefore rewritten by the same rename as every other use.
+    this.emitCoroReleaseDead(fn, index);
     this.emitCoroTempSpill(index);
     this.emitCoroSpill();
     this.emitCoroSlotSpill(index);
