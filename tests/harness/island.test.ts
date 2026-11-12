@@ -6,15 +6,9 @@
  *   scriptc string. Node's engine (V8) words some messages differently, so
  *   message content is asserted here against OUR bridge, never against Node
  *   (island VALUE results stay differential — tests/corpus/1100..).
- * - Stack-overflow containment on fibers: on the OPT-OUT lane
- *   (SCRIPTC_STACKLESS=0) async bodies run on ucontext fibers (256KB; 1MB
- *   under ASan — frames inflate) and the island re-anchors the engine's
- *   stack check on every entry. Unbounded recursion in an island eval must
- *   surface as a catchable RangeError — a crash here means the re-anchor
- *   regressed. The lane ships STACKLESS since 2026-10-09, so the two tests
- *   that cover this run on BOTH lanes and prove which one they got from the
- *   emitted C (`expectLane`); inheriting the default tested the state
- *   machine under a name that said fiber.
+ * - Stack-overflow containment: every async body is a state machine on the process stack, and the island re-anchors the engine's stack
+ *   check on every entry (scr_island.c isl_anchor_here). Unbounded recursion in an island eval must surface as a catchable
+ *   RangeError — a crash here means the re-anchor regressed (`expectLane` proves from the emitted C that the body converted).
  * - The static/dynamic fence: --dynamic must not change emitted C, and a
  *   static binary must stay in its size class (the ~620KB engine must never
  *   leak into default builds).
@@ -141,32 +135,14 @@ async function compileAndRun(
   }
 }
 
-/* THE TWO LANES, AND THE ARM IS READ OFF THE ARTIFACT.
- *
- * An async body runs on a ucontext fiber only when it did NOT convert to a
- * state machine. The lane ships ON (ir/coro-plans.ts, 2026-10-09), so a test
- * that says "on a fiber" and names no lane has been testing the stackless
- * path since that morning -- MEASURED here: with the knob absent `deep` and
- * `calc` both emit `sc_cr_<name>(`, and with it "0" neither does.
- *
- * Each lane asserts the SAME behaviour, and each proves which lane it got
- * from the emitted C rather than from the environment it asked for: reading
- * the env back would assert the request, not the result. */
-const LANES: ReadonlyArray<{ lane: "fiber" | "stackless"; knob: "0" | "1" }> = [
-  { lane: "fiber", knob: "0" },
-  { lane: "stackless", knob: "1" },
-];
+/* THE LANE. There are no fibers: every async body is a state machine on the ordinary process stack, so the island has ONE stack to anchor
+ * to (scr_island.c isl_anchor_here) and one budget. The cases stay table-driven so each is named for the lane it exercises, and the arming
+ * check proves from the emitted C that the body really converted. */
+const LANES: ReadonlyArray<{ lane: "stackless"; knob: "1" }> = [{ lane: "stackless", knob: "1" }];
 
 /** The arming check for a lane-pinned island test: did `fn` convert? */
-function expectLane(cSource: string, fn: string, lane: "fiber" | "stackless"): void {
-  const converted = cSource.includes(`sc_cr_${fn}(`);
-  expect(
-    converted,
-    lane === "fiber"
-      ? "the fiber arm compiled " + fn + " into a state machine -- there is no fiber here, " +
-        "so this test is measuring the other lane and the re-anchor it exists for is uncovered"
-      : "the stackless arm did NOT convert " + fn + " -- the knob did not reach the emitter",
-  ).toBe(lane === "stackless");
+function expectLane(cSource: string, fn: string, _lane: "stackless"): void {
+  expect(cSource.includes(`sc_cr_${fn}(`), "the stackless arm did NOT convert " + fn).toBe(true);
 }
 
 describe(`island engine (scriptc-only${sanitize ? ", sanitized" : ""})`, () => {
