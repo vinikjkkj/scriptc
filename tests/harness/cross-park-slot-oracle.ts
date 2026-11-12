@@ -286,7 +286,10 @@ export function auditFn(fn: LlFunction): FnAudit {
   for (const b of fn.blocks) {
     for (const ln of b.lines) {
       const m = /^(%[A-Za-z0-9_.$]+) = alloca /.exec(ln.text);
-      if (m !== null) allocas.push(m[1]!);
+      // A slot the emitter marked "(frame slot elided)" has no frame field BY DESIGN: every park releases and NULLs the
+      // local it held (coroElidedLocals), so the entry store re-initialising it to NULL on resume is the value it
+      // already had. Everything else, including every slot of a function with any other kind of park, stays examined.
+      if (m !== null && !/\(frame slot elided\)/.test(ln.text)) allocas.push(m[1]!);
     }
   }
   const isCoro = fn.blocks.some((b) => RESUME.test(b.label.slice(1)));

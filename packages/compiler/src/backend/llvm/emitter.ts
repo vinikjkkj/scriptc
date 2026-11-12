@@ -7233,7 +7233,11 @@ class LlEmitter {
         local.boxed || this.captureIds.has(local.id) || local.type.kind === "caught"
           ? "ptr"
           : this.llType(local.type);
-      B.entryAllocas.push(`%${mangleLocal(local.id)} = alloca ${slotTy} ; ${local.name}`);
+      // A slot with no frame field (ir/liveness.ts coroElidedLocals) is marked so the cross-park slot oracle can tell
+      // the deliberate NULL-over-NULL re-initialisation from a reload someone dropped by mistake.
+      B.entryAllocas.push(
+        `%${mangleLocal(local.id)} = alloca ${slotTy} ; ${local.name}${coro !== null && coroElidedLocals(fn, coro).has(local.id) ? " (frame slot elided)" : ""}`,
+      );
       // Refcounted/boxed locals start NULL (the C prologue's `= NULL`):
       // scope-exit releases run whether or not an assign ever did.
       //
