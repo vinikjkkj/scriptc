@@ -5510,7 +5510,13 @@ export class Lowerer {
       const found = this.findMethodOn(c, mName);
       if (found === null || found.sig.abstract === true) continue;
       if (found.sig.params.some((q) => q.mode !== "required" && q.mode !== "omittable")) continue;
-      unboundMethodThunk(this, c, mName, found, { file: c.decl?.getSourceFile().fileName ?? "%dynbox", start: 0, end: 0 }, true);
+      // A thunk this root cannot build (its detached variant is refused) has already recorded its diagnostic; the poison ends THIS
+      // thunk, not the compilation, so the program is reported with the diagnostic instead of dying on an uncaught PoisonError.
+      try {
+        unboundMethodThunk(this, c, mName, found, { file: c.decl?.getSourceFile().fileName ?? "%dynbox", start: 0, end: 0 }, true);
+      } catch (e) {
+        if (!(e instanceof PoisonError)) throw e;
+      }
     }
     for (const sh of c.shadowFields ?? []) this.noteEdge(`%${c.def.name}.${sh}`);
     for (const [mName] of this.protoClassBodies.get(c.def.name) ?? []) {
