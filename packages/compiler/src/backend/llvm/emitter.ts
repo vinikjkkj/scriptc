@@ -3728,9 +3728,29 @@ class LlEmitter {
       ...(lifted ? ["ptr %a_env"] : []),
       ...fn.params.map((p) => `${this.llType(p.type)} %a_${mangleLocal(p.localId)}`),
     ];
+    // A MODULE INITIALISER's evaluation promise is cached (asyncCacheGlobal) and, for an async import cycle, so is the cycle
+    // root's (asyncCycleCacheGlobal); the same wrapper logic as the fiber spawn below and as the C lane's stackless spawn.
+    const cacheG = !isGen && fn.asyncCacheGlobal !== undefined ? mangleGlobal(fn.asyncCacheGlobal) : null;
+    const cycleCacheG = !isGen && fn.asyncCycleCacheGlobal !== undefined ? mangleGlobal(fn.asyncCycleCacheGlobal) : null;
+    if (cacheG !== null || cycleCacheG !== null) {
+      this.declare(`declare ptr @scr_promise_retain_v(ptr)`);
+      this.declare(`declare void @scr_promise_release(ptr)`);
+    }
+    if (cacheG !== null) this.declare(`declare void @scr_promise_mark_handled(ptr)`);
     const sp: string[] = [
       `define internal ptr @${isGen ? mangleGenSpawn(fn.name) : mangleAsyncSpawn(fn.name)}(${params.join(", ")}) ${FN_ATTRS} { ; stackless spawn ${fn.name}`,
       `entry:`,
+      ...(cacheG !== null
+        ? [
+            `  %cached = load ptr, ptr @${cacheG}`,
+            `  %cache_hit = icmp ne ptr %cached, null`,
+            `  br i1 %cache_hit, label %cached_return, label %cache_miss`,
+            `cached_return:`,
+            `  %cached_owned = call ptr @scr_promise_retain_v(ptr %cached)`,
+            `  ret ptr %cached_owned`,
+            `cache_miss:`,
+          ]
+        : []),
       // The frame pointer IS the base pointer: ScrCoroBase (or ScrCoroExc,
       // which embeds it first) is member 0, so &f->base == f and every
       // scr_coro_* call takes the same value. scr_coro.h states the property
@@ -3804,6 +3824,23 @@ class LlEmitter {
     }
     sp.push(
       `  %pr = call ptr @scr_coro_spawn(ptr %f)`,
+      ...(cacheG !== null ? [`  call void @scr_promise_mark_handled(ptr %pr)`] : []),
+      ...(cacheG !== null
+        ? [
+            `  %cache_owned = call ptr @scr_promise_retain_v(ptr %pr)`,
+            `  %replaced_cache = load ptr, ptr @${cacheG}`,
+            `  call void @scr_promise_release(ptr %replaced_cache)`,
+            `  store ptr %cache_owned, ptr @${cacheG}`,
+          ]
+        : []),
+      ...(cycleCacheG !== null
+        ? [
+            `  %cycle_cache_owned = call ptr @scr_promise_retain_v(ptr %pr)`,
+            `  %replaced_cycle_cache = load ptr, ptr @${cycleCacheG}`,
+            `  call void @scr_promise_release(ptr %replaced_cycle_cache)`,
+            `  store ptr %cycle_cache_owned, ptr @${cycleCacheG}`,
+          ]
+        : []),
       `  ret ptr %pr`,
       `}`,
       ``,
@@ -11791,6 +11828,13 @@ class LlEmitter {
       case "libCall":
         return this.emitLibCall(e);
       case "intrinsic": {
+        if (e.name === "module.pending") {
+          const p = this.emitExpr(e.args[0]!);
+          this.declare(`declare zeroext i1 @scr_promise_is_pending(ptr)`);
+          const r = B.tmp();
+          B.line(`${r} = call zeroext i1 @scr_promise_is_pending(ptr ${p.name})`);
+          return { name: r, type: e.type };
+        }
         if (e.name === "module.await") {
           // Internal ESM dependency wait: pending promises park the module
           // fiber, while settled ones continue synchronously.

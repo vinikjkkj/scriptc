@@ -4062,13 +4062,14 @@ function activationsOf(L: Lowerer, sf: ts.SourceFile): Map<ts.Node, number> {
           type: promiseT,
           loc: dep.loc,
         };
-        header.push({
-          kind: "exprStmt",
-          expr: dep.cycleInternal
-            ? { kind: "intrinsic", name: "module.await", args: [value], type: VOID, loc: dep.loc }
-            : { kind: "awaitExpr", value, type: VOID, loc: dep.loc },
-          loc: dep.loc,
-        });
+        if (dep.cycleInternal) {
+          // ECMAScript's INTERNAL dependency wait: a settled dependency continues synchronously (no promise-job hop), a pending one is awaited.
+          // Spelled as an ordinary await under a pending test, so the function stays a state machine; the settled arm observes the promise and
+          // rethrows a rejection without parking.
+          header.push(moduleDepWait(value, dep.loc));
+        } else {
+          header.push({ kind: "exprStmt", expr: { kind: "awaitExpr", value, type: VOID, loc: dep.loc }, loc: dep.loc });
+        }
       } else if (asyncDeps.length > 1) {
         const promiseT: IrType = { kind: "promise", inner: VOID };
         const loc = asyncDeps[0]!.loc;
@@ -4090,13 +4091,13 @@ function activationsOf(L: Lowerer, sf: ts.SourceFile): Map<ts.Node, number> {
           type: promiseT,
           loc,
         };
-        header.push({
-          kind: "exprStmt",
-          expr: asyncDeps.every((dep) => dep.cycleInternal)
-            ? { kind: "intrinsic", name: "module.await", args: [all], type: VOID, loc }
-            : { kind: "awaitExpr", value: all, type: VOID, loc },
-          loc,
-        });
+        if (asyncDeps.every((dep) => dep.cycleInternal)) {
+          const allLocal = L.declareHiddenLocal("%depAll", promiseT);
+          header.push({ kind: "varDecl", localId: allLocal.id, init: all, loc });
+          header.push(moduleDepWait({ kind: "varRef", localId: allLocal.id, type: promiseT, loc }, loc));
+        } else {
+          header.push({ kind: "exprStmt", expr: { kind: "awaitExpr", value: all, type: VOID, loc }, loc });
+        }
       }
       // Module-scope `var` hoisting: undefined-armed var globals hold the
       // interned undefined from module entry (before any body statement —
@@ -4636,4 +4637,16 @@ function isFunctionCtorNew(L: Lowerer, e: ts.Expression): boolean {
     }
   }
   return false;
+}
+
+/** The module evaluator's dependency wait over a promise<void> value: a PENDING dependency is awaited (an ordinary await, so the initialiser
+ * is a state machine), a settled one is observed in this turn -- no promise-job hop -- and a rejection rethrows. */
+function moduleDepWait(value: IrExpr, loc: SrcLoc): IrStmt {
+  return {
+    kind: "if",
+    cond: { kind: "intrinsic", name: "module.pending", args: [value], type: BOOL, loc },
+    then: [{ kind: "exprStmt", expr: { kind: "awaitExpr", value, type: VOID, loc }, loc }],
+    else_: [{ kind: "exprStmt", expr: { kind: "intrinsic", name: "module.await", args: [value], type: VOID, loc }, loc }],
+    loc,
+  };
 }
