@@ -9,7 +9,9 @@
  *     extra lambda: the lambdas of every other function carry exactly the same names in both builds;
  *   - the negative control is SCRIPTC_STABLE_NAMES=0 (the old counter names): on the same two programs it must NOT preserve
  *     them, so a pass that did nothing could not pass;
- *   - names are unique and carry no counter.
+ *   - names are unique and carry no counter;
+ *   - the interned helpers (%rec.width.N, %union.retag.N, %promise.adapt.N ...) are named from what they are, so they survive the
+ *     same kind of edit too, and the counter names do not.
  */
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -124,4 +126,47 @@ test("names are unique and carry no counter", () => {
   const mentioned = [...lambdasByParent(m).values()].flat();
   expect(mentioned.length).toBeGreaterThan(5);
   expect(mentioned.filter((n) => /^%fn\d/.test(n))).toEqual([]);
+});
+
+const HELPERS = `
+interface Route { hostname: string; port: number; tailscaleUrl?: string }
+function findRoute(routes: Route[], host: string, strict?: boolean): { hostname: string; port: number } | undefined {
+  return routes.find((r) => r.hostname === host) || (strict ? undefined : routes.find((r) => host.endsWith("." + r.hostname)));
+}
+async function widen(): Promise<number | string> {
+  const p: Promise<number> = Promise.resolve(1);
+  const q: Promise<number | string> = p;
+  return await q;
+}
+const routes: Route[] = [{ hostname: "a.test", port: 3000 }];
+console.log(findRoute(routes, "a.test"), findRoute(routes, "x.test", true) === undefined);
+widen().then((v) => console.log(v));
+`;
+/** An unrelated function with its own width-copy and union re-tag (the same findRoute pattern over other records), inserted ABOVE everything and called first. */
+const HELPERS_EDITED = `
+interface Peer { host: string; weight: number; note?: string }
+function pick(peers: Peer[], h: string, strict?: boolean): { host: string; weight: number } | undefined {
+  return peers.find((p) => p.host === h) || (strict ? undefined : peers.find((p) => h.endsWith("." + p.host)));
+}
+console.log(pick([{ host: "p.test", weight: 1 }], "p.test"));
+${HELPERS}`;
+
+const HELPER_NAME = /^%(?:rec\.width|union\.retag|promise\.adapt|fn\.adapt|fn\.width|obj\.width|boundmeth|obj\.cview|union\.field|unit\.strand|union\.narrow)\./;
+const helperNames = (m: IrModule): string[] => m.functions.map((f: IrFunction) => f.name).filter((n: string) => HELPER_NAME.test(n));
+
+test("interned helpers keep their names across an unrelated edit", () => {
+  delete process.env["SCRIPTC_STABLE_NAMES"];
+  const a = helperNames(lower(HELPERS));
+  const b = new Set(helperNames(lower(HELPERS_EDITED)));
+  expect(a.length).toBeGreaterThan(2);
+  for (const n of a) expect(b.has(n), `${n} survives`).toBe(true);
+  expect(a.filter((n) => /\.\d+(\.|$)/.test(n))).toEqual([]);
+});
+
+test("negative control: with the counter names the helpers are renumbered", () => {
+  process.env["SCRIPTC_STABLE_NAMES"] = "0";
+  const a = helperNames(lower(HELPERS));
+  const b = new Set(helperNames(lower(HELPERS_EDITED)));
+  expect(a.length).toBeGreaterThan(2);
+  expect(a.some((n) => !b.has(n))).toBe(true);
 });
