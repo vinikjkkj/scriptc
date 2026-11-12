@@ -27612,6 +27612,18 @@
     "<repo>/tests/corpus/25097-forty-thousand-async-generator-fibers-alive-at-once.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25168-union-boxes-of-every-arm-kind-release-and-collect-through-their-descriptors.ts": {
+   "order": [
+    "<repo>/tests/corpus/25168-union-boxes-of-every-arm-kind-release-and-collect-through-their-descriptors.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25169-capture-boxes-of-every-kind-release-and-trace-through-their-descriptors.ts": {
+   "order": [
+    "<repo>/tests/corpus/25169-capture-boxes-of-every-kind-release-and-trace-through-their-descriptors.ts"
+   ],
+   "diags": []
   }
  }
 }
