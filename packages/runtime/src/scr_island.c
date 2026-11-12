@@ -642,18 +642,16 @@ static int isl_budget_is_fiber = -1; /* tri-state: unset/main/fiber */
  * identity, NULL for the main stack, or the initial sentinel. `strayed`
  * flags an anchor moved by a nested stack while a host call was live —
  * the wrapper restores on its way out. */
-static void *isl_anchor_fiber = (void *)&isl_anchor_fiber;
 static bool isl_anchor_strayed = false;
 
 /* Anchor the overflow check to the CURRENT stack and size the budget for
  * it (fibers tight, main roomy). */
 static void isl_anchor_here(void) {
   JS_UpdateStackTop(isl_rt);
-  isl_anchor_fiber = scr_fiber_self();
-  int fiber = isl_anchor_fiber != NULL;
-  if (fiber != isl_budget_is_fiber) {
-    JS_SetMaxStackSize(isl_rt, fiber ? ISL_STACK_BUDGET : ISL_MAIN_STACK_BUDGET);
-    isl_budget_is_fiber = fiber;
+  /* Every async frame and every callback runs on the process stack (there are no fibers), so there is exactly one budget. */
+  if (isl_budget_is_fiber != 0) {
+    JS_SetMaxStackSize(isl_rt, ISL_MAIN_STACK_BUDGET);
+    isl_budget_is_fiber = 0;
   }
 }
 
@@ -663,10 +661,8 @@ static void isl_anchor_here(void) {
  * into static code ON THIS STACK. */
 static void isl_entry(void) {
   if (!isl_rt) isl_init();
-  if (isl_host_depth > 0) {
-    if (scr_fiber_self() == isl_anchor_fiber) return;
-    isl_anchor_strayed = true;
-  }
+  /* While the engine itself is calling back into static code, the anchor stays where it is: there is one stack. */
+  if (isl_host_depth > 0) return;
   isl_anchor_here();
 }
 

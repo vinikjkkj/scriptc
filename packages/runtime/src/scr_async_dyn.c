@@ -531,24 +531,6 @@ ScrDyn *scr_dyn_promise_then(ScrPromise *src, ScrDyn *onf, ScrDyn *onr, ScrDyn *
   scr_promise_wait_raw(src, scr_dyn_then_step, a);
   return boxed;
 }
-/* `await v` where v is a CHECKED-DYNAMIC value: a dyn promise adopts
- * (the boxed promise awaits — rejections re-throw); every other kind is
- * JS's await-of-a-non-thenable — one microtask hop, the value itself
- * (+1). Thenable ADOPTION (a plain object carrying a then method) is not
- * modeled — SEMANTICS.md. */
-ScrDyn *scr_await_dyn_value(ScrDyn *v) {
-  if (v->kind == SCR_DYN_PROMISE) return scr_await_dyn(v->v.promise);
-  if (scr_dyn_may_be_thenable(v)) {
-    /* `await v` is PromiseResolve(v) then the await: a thenable's then runs
-     * in its own job, and the awaiter parks on the resolved promise. */
-    ScrPromise *p = scr_dyn_adopt_promise(v);
-    ScrDyn *r = scr_await_dyn(p);
-    scr_promise_release(p);
-    return r;
-  }
-  scr_await_hop();
-  return scr_dyn_retain(v);
-}
 
 
 /* ── process warnings: the 'warning' listeners (emitWarning + the event) ─
@@ -838,15 +820,6 @@ ScrDyn *scr_caught_to_dyn(const ScrCaught *c) {
   }
 }
 
-/* Await a dyn-CROSSING promise (SCR_DYN_PROMISE's boundary contract —
- * dyn or void fulfillment): the payload as a dyn value (+1; a void
- * fulfillment answers the undefined value, and the defensive scalar arms
- * cover payload kinds a direct box could theoretically carry), or NULL
- * with the rejection re-thrown into the awaiter. */
-ScrDyn *scr_await_dyn(ScrPromise *p) {
-  if (!scr_promise_await_settled(p)) return NULL;
-  return scr_dyn_from_settled(p);
-}
 
 /* The stackless await's take for a dyn operand adopted through Promise.resolve(v) (dyn.adoptPromise): mark the settlement observed, re-throw a
  * rejection into the active cell (NULL), else the fulfillment as a dyn (+1) whatever payload kind the promise carries. */
