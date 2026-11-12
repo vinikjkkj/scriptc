@@ -73,7 +73,7 @@ static void scr_box_trace(void *o, ScrTraceVisit visit, void *ctx) {
     visit(p, ctx);
     break;
   case SCR_BOX_OBJ:
-    if (b->obj_trace) visit(p, ctx);
+    if (b->vt & 1u) visit(p, ctx);
     break;
   default:
     break;
@@ -94,7 +94,7 @@ static void scr_box_gcfree(void *o) {
       scr_arr_release((ScrArr *)p);
       break;
     case SCR_BOX_OBJ:
-      if (!b->obj_trace) b->obj_release(p);
+      if (!(b->vt & 1u)) scr_armvt_dec(b->vt)->release(p);
       break;
     default: /* FUNC is traced; scalars own nothing */
       break;
@@ -116,13 +116,14 @@ ScrBox *scr_box_new(ScrBoxKind kind) {
   return b;
 }
 
-ScrBox *scr_box_new_obj(void *(*retain)(void *), void (*release)(void *),
-                         ScrTraceFn trace) {
+ScrBox *scr_box_new_objd(const ScrArmVt *vt, bool trace) {
   ScrBox *b = scr_box_new(SCR_BOX_OBJ);
-  b->obj_retain = retain;
-  b->obj_release = release;
-  b->obj_trace = trace;
+  b->vt = scr_armvt_enc(vt, trace);
   return b;
+}
+
+ScrBox *scr_box_new_obj_rt(void *(*retain)(void *), void (*release)(void *), ScrTraceFn trace) {
+  return scr_box_new_objd(scr_armvt_rt_intern(retain, release), trace != NULL);
 }
 
 /* Release one payload pointer by the box's kind. Factored so set_ref can
@@ -141,7 +142,7 @@ static void scr_box_release_payload(ScrBox *b, void *p) {
     scr_closure_release((ScrClosure *)p);
     break;
   case SCR_BOX_OBJ:
-    b->obj_release(p);
+    scr_armvt_dec(b->vt)->release(p);
     break;
   case SCR_BOX_F64:
   case SCR_BOX_BOOL:
@@ -153,7 +154,7 @@ static void scr_box_release_payload(ScrBox *b, void *p) {
 static inline bool scr_box_may_cycle(const ScrBox *b) {
 #if SCR_CYC_LEAF_SKIP
   return b->kind == SCR_BOX_FUNC ||
-         (b->kind == SCR_BOX_OBJ && b->obj_trace != NULL);
+         (b->kind == SCR_BOX_OBJ && (b->vt & 1u));
 #else
   (void)b;
   return true;
@@ -196,7 +197,7 @@ void *scr_box_get_ref(ScrBox *b) {
   case SCR_BOX_FUNC:
     return scr_closure_retain((ScrClosure *)p);
   case SCR_BOX_OBJ:
-    return b->obj_retain(p);
+    return scr_armvt_dec(b->vt)->retain(p);
   default:
     scr_trap("scriptc: internal error: box_get_ref on a scalar box\n");
   }

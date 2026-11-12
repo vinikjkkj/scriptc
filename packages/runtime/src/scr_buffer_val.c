@@ -339,9 +339,9 @@ static ScrPromise *scr_blob_deferred(void (*fn)(ScrClosure *), void *payload,
                                      void *(*pl_retain)(void *), void (*pl_release)(void *)) {
   ScrPromise *p = scr_promise_new(); /* +1, ours */
   ScrClosure *c = scr_closure_new((void *)fn, 2);
-  ScrBox *pb = scr_box_new_obj(pretain, prelease, NULL);
+  ScrBox *pb = scr_box_new_obj_rt(pretain, prelease, NULL);
   scr_box_set_ref(pb, scr_promise_retain(p));
-  ScrBox *vb = scr_box_new_obj(pl_retain, pl_release, NULL);
+  ScrBox *vb = scr_box_new_obj_rt(pl_retain, pl_release, NULL);
   scr_box_set_ref(vb, pl_retain(payload));
   c->caps[0] = pb;
   c->caps[1] = vb;
