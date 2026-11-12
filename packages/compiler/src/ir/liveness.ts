@@ -1339,3 +1339,16 @@ export function coroElidedLocals(fn: IrFunction, plan: StacklessPlan): ReadonlyS
   return out ?? NO_ELIDED;
 }
 const NO_ELIDED: ReadonlySet<string> = new Set<string>();
+
+/** WHY a function is not given a stackless plan (null when it is, or when it never suspends), for the fiber-lane census. Mirrors the gates of
+ * `stacklessPlan` in order; the blockers of a non-straight-line point name the statement position that refused it. */
+export function stacklessRefusal(fn: IrFunction): string | null {
+  const syncGenerator = fn.generator !== undefined && fn.async !== true;
+  if (fn.async !== true && !syncGenerator) return "not-async";
+  if (hasFiberOnlySuspender(fn)) return "fiber-only-suspender";
+  const r = suspensionLiveness(fn);
+  if (r === null) return null;
+  const bad = r.points.filter((p) => !p.straightLine);
+  if (bad.length === 0) return null;
+  return "not-straight-line:" + [...new Set(bad.map((p) => `${p.kind}[${p.blockers.join("|") || "?"}]`))].join(",");
+}

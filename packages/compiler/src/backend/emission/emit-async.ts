@@ -7,12 +7,15 @@ import { mangleAgenSettleThunk, mangleArgPack, mangleAsyncSpawn, mangleChildData
 import { cDecl, cType, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
 import { IrFunction, IrType, canBoxFuncIntoDyn, isDynPackFunc, isRefCounted, isUnitType, presenceMaskStores, typeEquals, typeKey } from "../../ir/nodes.js";
 import { OWNMASK_MEMBER } from "./emit-shapes.js";
+import { failOnFiberLane, type FiberLaneUse } from "../../ir/fiber-census.js";
+import { stacklessRefusal } from "../../ir/liveness.js";
 
 /** Per-async-function machinery: an argument pack, a fiber trampoline
    * (unpacks, runs the ordinary compiled body, settles the promise), and a
    * spawn wrapper call sites use. Lifted async lambdas additionally thread
    * their closure env through the pack (+1, released after the body). */
   export function emitAsyncScaffolding(E: CEmitter, out: string[]): void {
+    const fiberUses: FiberLaneUse[] = [];
     for (const fn of E.mod.functions) {
       // An ASYNC GENERATOR sets both flags; it is not an async function and
       // must not get the eager spawn wrapper (nothing may run before the
@@ -22,6 +25,7 @@ import { OWNMASK_MEMBER } from "./emit-shapes.js";
       // itself. Emitting the fiber scaffolding too would define
       // mangleAsyncSpawn twice.
       if (E.coroPlansByFn.has(fn.name)) continue;
+      fiberUses.push({ fn: fn.name, reason: stacklessRefusal(fn) ?? "no-plan" });
       const pack = mangleArgPack(fn.name);
       const lifted = fn.captures !== undefined;
       const fields: string[] = [];
@@ -134,7 +138,8 @@ import { OWNMASK_MEMBER } from "./emit-shapes.js";
         `}`,
       );
     }
-    emitGenScaffolding(E, out);
+    emitGenScaffolding(E, out, fiberUses);
+    failOnFiberLane("c", fiberUses);
   }
 
 
@@ -170,7 +175,7 @@ function agenResultTypeOf(fn: IrFunction): IrType & { kind: "record" } {
    * promoting the parked .return value), a spawn wrapper that only
    * ALLOCATES the suspended fiber (nothing runs until the first .next()),
    * and the never-started teardown that drops the packed (+1) arguments. */
-  function emitGenScaffolding(E: CEmitter, out: string[]): void {
+  function emitGenScaffolding(E: CEmitter, out: string[], fiberUses: FiberLaneUse[]): void {
     for (const fn of E.mod.functions) {
       if (!fn.generator) continue;
       // STACKLESS: a CONVERTED SYNCHRONOUS generator is backed by a frame,
@@ -195,6 +200,7 @@ function agenResultTypeOf(fn: IrFunction): IrType & { kind: "record" } {
         emitGenCoroSpawn(E, out, fn, genPlan, settle);
         continue;
       }
+      fiberUses.push({ fn: fn.name, reason: stacklessRefusal(fn) ?? "no-plan" });
       const isAsyncGen = fn.async === true;
       const pack = mangleArgPack(fn.name);
       const lifted = fn.captures !== undefined;
