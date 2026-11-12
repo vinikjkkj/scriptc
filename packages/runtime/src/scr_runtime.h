@@ -8386,16 +8386,8 @@ ScrPromise *scr_promise_adapt_put(ScrPromise *src, double id, ScrPromise *made);
 ScrPromise *scr_promise_claim(ScrPromise *src, double id, ScrClosure *conv);
 
 typedef struct ScrFiber ScrFiber;
-/* Spawn + run eagerly to the first suspension; returns the promise, +1. */
-ScrPromise *scr_async_spawn(void (*entry)(ScrFiber *, void *), void *argpack);
-
-double scr_await_f64(ScrPromise *p); /* rejected promises re-throw */
-bool scr_await_bool(ScrPromise *p);
-ScrStr *scr_await_str(ScrPromise *p); /* +1 */
-void *scr_await_ref(ScrPromise *p);   /* +1 via the stored retain */
-void scr_await_void(ScrPromise *p);
-/* Internal ESM dependency wait: parks while pending but, unlike a
- * JavaScript await expression, does not hop when already settled. */
+/* Internal ESM dependency wait on a SETTLED promise: unlike a JavaScript await expression it does not hop (a pending dependency is awaited
+ * by the initialiser's own state machine). */
 void scr_module_await(ScrPromise *p);
 /* After the root-aware event loop returns, inspect the executable's async
  * module-root promise without another microtask hop: 0 = fulfilled,
@@ -8406,14 +8398,7 @@ void scr_module_await(ScrPromise *p);
  * competitors are suppressed by the executable-module verdict. */
 int scr_promise_finish_top_level(ScrPromise *p);
 void scr_promise_rethrow_top_level(ScrPromise *p);
-/* The checked-dynamic tree-crossing await (SCR_DYN_PROMISE's boundary contract): the
- * payload as a dyn value (+1; void fulfillments answer the undefined
- * value), or NULL with the rejection re-thrown into the awaiter. */
-ScrDyn *scr_await_dyn(ScrPromise *p);
 ScrDyn *scr_dyn_from_settled(ScrPromise *p); /* +1; the promise must be settled and fulfilled */
-/* `await v` over a checked-dynamic VALUE: dyn promises adopt, everything
- * else takes JS's one-hop non-thenable await and answers itself (+1). */
-ScrDyn *scr_await_dyn_value(ScrDyn *v);
 /* .then/.catch/.finally over a dyn promise (scr_dyn_invoke's promise arm
  * and the compiled dyn-receiver path): one reaction fiber per
  * registration — awaits src, runs the checked-dynamic tree handler (non-callable handlers
@@ -8513,9 +8498,6 @@ void scr_warning_dispatch(ScrDyn *w); /* borrowed; report, then listeners */
  * its one-time trace hint. The listener hook is set by the first listener. */
 void scr_warn_report(const char *name, const char *code, const char *msg, const char *detail);
 void scr_warn_set_listener_hook(void (*hook)(const char *name, const char *msg));
-/* The promise-or-absent await's unit arm: one microtask hop, like JS's
- * await of any non-thenable (and like awaiting a settled promise). */
-void scr_await_hop(void);
 
 void scr_promise_fulfill_f64(ScrPromise *p, double v);
 void scr_promise_fulfill_bool(ScrPromise *p, bool v);
@@ -8822,13 +8804,6 @@ void scr_loop_set_sqlite_idle_release(int (*fn)(double, double, int *));
  * drain declined, and writes blocks moved out of the pool. */
 int scr_str_idle_drain(int *drained_out);
 long scr_abandoned_fiber_count(void);
-/* True while executing on an async fiber (vs the main stack) — the island
- * sizes its engine stack budget per stack (see scr_island.c). */
-bool scr_on_fiber(void);
-/* Identity of the running fiber (NULL on the main stack) — the island's
- * stack-anchor bookkeeping tells STACKS apart, not just fiber-vs-main
- * (a host callback may spawn a fiber that re-enters the engine). */
-void *scr_fiber_self(void);
 void scr_note_abandoned_fibers(long n); /* scr_console.c owns the flag */
 #ifdef SCR_RC_AUDIT
 /* Live coroutine frames. scr_console.c owns the counter; scr_coro.c pushes. */
@@ -8855,10 +8830,6 @@ ScrClosure *scr_make_reject_dyn(ScrPromise *p); /* reason: dyn (any thrown value
 void scr_promise_run_executor(ScrPromise *p, ScrClosure *exec, ScrClosure *resolve);
 void scr_promise_run_executor0(ScrPromise *p, ScrClosure *exec);
 void scr_promise_run_executor2(ScrPromise *p, ScrClosure *exec, ScrClosure *resolve, ScrClosure *reject);
-
-/* The promise a fiber settles (borrowed) — the emitted trampolines fulfill
- * through it. */
-ScrPromise *scr_fiber_promise(ScrFiber *f);
 
 /* ── sync generators (function*) ──────────────────────────────────────
  * A generator is a refcounted handle (ScrGen) over a fiber created
@@ -8897,8 +8868,6 @@ ScrPromise *scr_fiber_promise(ScrFiber *f);
  */
 typedef struct ScrGen ScrGen;
 
-ScrGen *scr_gen_new(void (*entry)(ScrFiber *, void *), void *argpack,
-                     void (*drop_args)(void *));
 ScrGen *scr_gen_retain(ScrGen *g);
 void scr_gen_release(ScrGen *g); /* NULL-tolerant */
 void *scr_gen_retain_v(void *g);
@@ -8914,9 +8883,6 @@ void scr_gen_in_f64(ScrGen *g, double v);
 void scr_gen_in_bool(ScrGen *g, bool v);
 void scr_gen_in_ref(ScrGen *g, void *v, void (*release)(void *)); /* moves */
 void scr_gen_in_none(ScrGen *g);
-double scr_gen_take_in_f64(void); /* body side: the running fiber's gen */
-bool scr_gen_take_in_bool(void);
-void *scr_gen_take_in_ref(void); /* +1 moved out; NONE → NULL */
 
 /* RET slot (consumer parks the `.return(v)` value before resume_return). */
 void scr_gen_ret_f64(ScrGen *g, double v);
@@ -8929,9 +8895,6 @@ void scr_gen_ret_none(ScrGen *g);
  * fiber's generator and switch back to the resumer; control returns when
  * the consumer resumes again (the emitted pending check right after sees
  * an injected .throw payload or the GENRET sentinel). */
-void scr_gen_yield_f64(double v);
-void scr_gen_yield_bool(bool v);
-void scr_gen_yield_ref(void *v, void (*release)(void *)); /* moves */
 void scr_gen_out_f64(ScrGen *g, double v); /* trampoline completion stores */
 void scr_gen_out_bool(ScrGen *g, bool v);
 void scr_gen_out_ref(ScrGen *g, void *v, void (*release)(void *)); /* moves */
@@ -8946,7 +8909,6 @@ void *scr_gen_take_out_ref(ScrGen *g); /* +1 moved out; NONE → NULL */
  * value. gen_of answers the generator a fiber belongs to (borrowed). */
 bool scr_exc_genret_pending(void);
 void scr_gen_ret_to_out(ScrGen *g);
-ScrGen *scr_gen_of_fiber(ScrFiber *f);
 
 /* ── async generators (async function*) ───────────────────────────────
  * The SAME ScrGen handle over the SAME suspended fiber as a synchronous
@@ -8971,9 +8933,6 @@ ScrGen *scr_gen_of_fiber(ScrFiber *f);
  * and Readable.from desugars (strictly one request at a time) reach here.
  * An overlapping request aborts loudly rather than dropping a settlement.
  */
-ScrGen *scr_agen_new(void (*entry)(ScrFiber *, void *), void *argpack,
-                     void (*drop_args)(void *),
-                     void (*settle)(ScrGen *, ScrPromise *));
 ScrPromise *scr_agen_next(ScrGen *g);
 ScrPromise *scr_agen_return(ScrGen *g);
 ScrPromise *scr_agen_throw(ScrGen *g);
@@ -8981,9 +8940,6 @@ ScrPromise *scr_agen_throw(ScrGen *g);
  * AsyncGeneratorYield hop, settles the in-flight request, then suspends.
  * Control returns at the next resume (the emitted pending check right
  * after sees an injected .throw payload or the GENRET sentinel). */
-void scr_agen_yield_f64(double v);
-void scr_agen_yield_bool(bool v);
-void scr_agen_yield_ref(void *v, void (*release)(void *)); /* moves */
 
 /* ── the NATIVE consumer (Readable.from's stream bridge) ──────────────
  * A second consumer shape for the SAME handle: instead of arming a

@@ -1,21 +1,15 @@
-/* Async runtime: stackful fibers, promises, and a dependency-free event
+/* Async runtime: promises, the microtask queue and a dependency-free event
  * loop (microtask queue + timer min-heap).
  *
  * Model (see docs/ir.md):
- * - An async function's body is ordinary compiled C, run on its own fiber
- *   (heap-allocated ucontext stack). Calling it runs the body EAGERLY until
- *   the first suspension (JS's synchronous-prefix rule), then control
- *   returns to the spawner with a +1 promise.
- * - `await` on a pending promise parks the fiber on the promise's waiter
- *   list and switches back to whoever resumed it. Fulfillment moves waiters
- *   to the microtask queue (microtasks run before timers, like Node).
- * - Each fiber carries its own exception cell (scr_exc_swap_cell) so a
- *   pending exception can't leak across concurrent execution contexts. A
- *   throw escaping an async body rejects its promise; awaiting a rejected
- *   promise re-throws into the awaiter.
- * - Loop exhaustion with still-suspended fibers exits normally (Node's
- *   behavior); those stacks are deliberately not unwound, and the RC audit
- *   downgrades to a note in that case.
+ * - An async function's body is a state machine over a heap frame (scr_coro.c). Calling it runs the body EAGERLY until the first
+ *   suspension (JS's synchronous-prefix rule), then control returns to the caller with a +1 promise. There are no fibers and no
+ *   separate stacks: everything runs on the process stack.
+ * - `await` on a pending promise parks the frame on the promise's waiter list. Fulfillment moves waiters to the microtask queue
+ *   (microtasks run before timers, like Node).
+ * - A throw escaping an async body rejects its promise; awaiting a rejected promise re-throws into the awaiter.
+ * - Loop exhaustion with still-suspended frames exits normally (Node's behavior); those frames are deliberately not unwound, and the
+ *   RC audit downgrades to a note in that case.
  */
 #define _XOPEN_SOURCE 700
 #ifndef _DEFAULT_SOURCE
@@ -31,9 +25,7 @@
 #include <string.h>
 #include <time.h>
 #ifdef _WIN32
-/* Windows arm: fibers come from the Win32 Fibers API (CreateFiber /
- * SwitchToFiber — the direct ucontext analog: cooperatively scheduled,
- * same thread, own stack); the idle sleep is nanosleep (mingw-w64 ships
+/* Windows arm: the idle sleep is nanosleep (mingw-w64 ships
  * it, over Sleep). poll(2) has no Windows arm — see the sleep seam in
  * scr_loop_run: the poller-backed units (net/dgram/watch) are not built
  * for win32 targets (cc.ts gates them), so their fds never appear; the
@@ -58,162 +50,9 @@
 #ifndef MAP_NORESERVE
 #define MAP_NORESERVE 0
 #endif
-#include <ucontext.h>
 #include <unistd.h>
 #endif
 
-#if defined(__has_feature)
-#if __has_feature(address_sanitizer)
-#define SCR_ASAN_FIBERS 1
-void __sanitizer_start_switch_fiber(void **fake_stack_save, const void *bottom, size_t size);
-void __sanitizer_finish_switch_fiber(void *fake_stack_save, const void **bottom_old, size_t *size_old);
-#endif
-#endif
-
-/* ASan inflates stack frames severalfold (unoptimized locals + redzones),
- * so the sanitized lane gets proportionally bigger fiber stacks — same
- * headroom DISCIPLINE, instrumented scale. Keep the island's stack budget
- * (scr_island.c) at half of whichever size is active. 8MB under ASan is
- * the measured need: an engine call costs 64–96KB there, and a real
- * embedded graph entered FROM A FIBER (a commander action awaiting
- * generateText — zod parses inside promise chains) nests dozens of engine
- * frames; the memory is malloc'd and committed lazily, so idle fibers pay
- * address space, not RSS. */
-/* The guard below a POSIX fiber stack: one page (the page size is 4 KiB on every supported POSIX target; a larger page only makes it larger). */
-#define SCR_FIBER_GUARD ((size_t)4096)
-#ifdef SCR_ASAN_FIBERS
-#define SCR_FIBER_STACK (8 * 1024 * 1024)
-#else
-/* 1 MiB of address space per fiber (was 256 KiB). It is RESERVED, not committed: the mapping below is MAP_NORESERVE and the kernel hands
- * out a page only on first touch, so RSS counts touched pages, and 1 MiB gets deep async recursion nearer Node's ~10k frames. */
-#define SCR_FIBER_STACK (1024 * 1024)
-#endif
-
-/* The INITIAL COMMITTED size of a win32 fiber stack, which is a different
- * thing from the reserve above and was the whole of this runtime's page-
- * fault bill. CreateFiber's dwStackSize parameter is the COMMIT, not a
- * reserve and not lazy: every async call committed 256 KiB of fresh
- * demand-zero stack and DeleteFiber handed it straight back.
- *
- * Measured standalone on this toolchain (dynimp-lab/arena/fiberfault.c),
- * 164,711 create/switch/delete cycles touching two stack pages each --
- * which is the fiber count of ONE phase of the zapo messaging bench:
- *
- *   commit    reserve            kernel   elapsed    faults
- *   262144    16 MiB (default)   2,594     2.733 s   329,445  <- was
- *    16384    16 MiB (default)   2,406     2.632 s   329,445  <- is
- *   262144     1 MiB             1,312     1.545 s   329,445
- *    16384     1 MiB             1,234     1.425 s   329,445
- *   262144    16 MiB (control)   2,484     2.694 s   329,445
- *
- * 329,445 against the 329,111 the bench itself measures for that phase,
- * so the fiber is the whole of that bill and not a piece of it.
- *
- * BUT THE RESERVE IS THE COST, NOT THE COMMIT, and the first version of
- * this note said the opposite. The reserve here is the executable's
- * 16 MiB SizeOfStackReserve, and reserving and releasing 16 MiB of
- * address space 164,711 times is what the kernel time is. Dropping the
- * commit at the same reserve is 7%, and shipping exactly that measured
- * NOTHING on the real bench (5 plain / 4 post reps, kernel medians 3,969
- * vs 3,992 ms, ranges fully overlapping) -- which is what 7% looks like.
- *
- * SO WHY KEEP IT: COMMIT CHARGE. 16 KiB instead of 256 KiB per LIVE
- * fiber is 16x less pagefile commit on a phase that keeps hundreds in
- * flight. That is unmeasured -- cpuphase reports working set, not
- * PagefileUsage -- and it is the honest reason this line reads as it
- * does. The reserve is left at the executable default exactly as
- * CreateFiber left it, because lowering it caps how deep an async body
- * may recurse and that is a semantic change, not a tuning one.
- *
- * THE FAULTS DO NOT MOVE IN ANY ARM ABOVE -- 329,445 in all six -- and
- * that is expected: they are the demand-zero first touches of a FRESH
- * stack, so only reusing stacks removes them. A
- * pool of 8 reusable fibers measures 34 faults and 0.025 s for the same
- * 164,711 switches (dynimp-lab/arena/fiberpool.c). That is the next
- * change and it is not this one.
- *
- * Left alone under SCR_ASAN_FIBERS: that arm wants 8 MiB actually
- * committed so ASan can poison the whole stack.
- *
- * 2026-10-02: the default moved 16 KiB -> 4 KiB, and the "unmeasured" above is
- * now measured. A VirtualQuery walk of peak private commit
- * (docs/estado-vmwalk.md) found the kernel charges 28,672 B per fiber, not
- * 16,384: the requested commit PLUS a 12,288 B PAGE_GUARD region that is a
- * Windows constant, additive, and independent of what is requested. Dropping
- * the request to 4 KiB takes the per-stack charge to 16,384 B and the peak of
- * a 19,200-message history sync from 715.0 to 486.8 MiB, -31.9%.
- *
- * WHAT IT COSTS: a fiber that touches more than one page now takes a guard
- * fault and grows. Resident pages per stack on that workload: 89.8% touch
- * exactly one page, 9.8% two, 0.16% more than two. So about one fiber in ten
- * takes one extra fault, and ~2,000 faults inside a 14-second decode is 0.14%
- * even at a generous 10 us each -- below what wall or CPU can resolve here,
- * and invisible in the page-fault counter (-1.1% against a baseline whose own
- * runs differ by 2.2%).
- *
- * SCOPE: these fibers are shallow. A workload with deeper async bodies has a
- * larger tail and could invert the trade; SCR_FIBER_COMMIT is read from the
- * environment for exactly that case. */
-#ifndef SCR_FIBER_COMMIT
-#define SCR_FIBER_COMMIT (4 * 1024)
-#endif
-
-/* The RESERVE passed to CreateFiberEx. 0 means "the executable's own
- * SizeOfStackReserve", which is what this file passed until 2026-10-02.
- *
- * IT IS A LATENT DEFECT BEFORE IT IS A SAVING, and that is the reason to
- * change it. cc.ts pins -Wl,--stack,8388608 only inside the engineArchive
- * block, so a statically lowered program pins nothing and inherits whatever
- * lld defaults to -- 16 MiB today, and in that file's own words "nobody's
- * contract". A future lld default would change every static program's fiber
- * stacks in silence, with no commit in this repository, and the symptom would
- * be a stack overflow traced to a toolchain bump. Naming the reserve here
- * makes fibers immune to that whatever the PE says.
- *
- * 1 MiB IS DEPTH PARITY WITH NODE, and that is the reason for the value.
- * Measured max synchronous recursion depth inside an async body:
- *
- *     node v22     9,520 frames     node v25   9,642 frames
- *     scriptc      10,547 frames    at this reserve -- 1.10x node
- *
- * The inherited PE default (16 MiB) allowed 174,219 frames, 18x node. A program
- * that works at 16 MiB and breaks at 1 MiB is a program that recurses past the
- * point where node would already have thrown: it only worked BECAUSE of the
- * divergence. The 16 MiB protected no correct program. The deepest fiber stack
- * measured on the real history-sync workload was 86,016 B, 12.2x under this
- * ceiling.
- *
- * Naming the value also closes a latent defect independent of the size: cc.ts
- * pins a stack only inside the engineArchive block, so a statically lowered
- * program inherited whatever lld defaulted to -- "nobody's contract" in that
- * file's own words -- and a toolchain bump would have changed every fiber stack
- * in silence.
- *
- * WHAT IS STILL DIVERGENT IS THE BEHAVIOUR AT THE CEILING, NOT ITS DEPTH:
- *
- *     node      throws a catchable RangeError; the process continues
- *     scriptc   dies with 0xC00000FD STATUS_STACK_OVERFLOW, uncaught
- *
- * That holds at EVERY reserve -- 1 MiB, 16 MiB and 64 MiB alike -- because
- * there is no stack-overflow handler in this runtime at all: no __try, no
- * vectored handler, no SetUnhandledExceptionFilter. With the depth now at
- * parity, this is the ONLY thing left between the fiber stacks and node's
- * contract, and it is a handler's job, not a constant's.
- *
- * WHY IT IS NOW NAMEABLE. A walk of the address space at peak private commit
- * (docs/estado-vmwalk.md) found one page-table page charged per live fiber --
- * about 4 KiB each, 98 MiB at 24,246 fibers -- because a 4 KiB page-table page
- * maps 2 MiB of address space and a 16 MiB reserve puts every stack alone in
- * its own span. Measured, 2,000 fibers: a 16 MiB reserve costs 4,325 B/fiber,
- * 1 MiB costs 2,181, 256 KiB costs 645, 64 KiB costs 262.
- *
- * It is a per-FIBER reserve and deliberately not the PE's. Lowering the PE's
- * SizeOfStackReserve at link would shrink the MAIN thread's stack too, and that
- * is a semantic change; this is not. The reserve still caps how deep one async
- * body may recurse, so it is a knob with a real ceiling and not a free one. */
-#ifndef SCR_FIBER_RESERVE
-#define SCR_FIBER_RESERVE (1024 * 1024)
-#endif
 
 /* ── promises ─────────────────────────────────────────────────────────── */
 
@@ -764,264 +603,22 @@ void scr_promise_trace_v(void *p, ScrTraceVisit visit, void *ctx) {
 
 /* ── fibers and the scheduler ─────────────────────────────────────────── */
 
-/* One saved execution context. POSIX: a ucontext_t (swapcontext saves the
- * outgoing context INTO the `from` slot). Windows: the fiber HANDLE —
- * SwitchToFiber saves the outgoing state inside the fiber object itself,
- * so the slot only needs to name the destination; `from` is unused. */
-#ifdef _WIN32
-typedef void *ScrCtx;
-#else
-typedef ucontext_t ScrCtx;
-#endif
-
-/* One EXECUTION CONTEXT: a stack, plus the saved state naming where on it
- * to resume. Deliberately NOT part of ScrFiber, which is per-TASK: a
- * finished fiber's stack is empty but perfectly good, and the trampoline
- * loops so one stack serves task after task. See scr_stack_acquire. */
-typedef struct ScrStack {
-  ScrCtx ctx;
-  char *mem;             /* POSIX only; Windows fibers own their stack */
-  struct ScrStack *next; /* free-list link; meaningful only while pooled */
-  /* The stack's own address range, learned by the fiber itself on first
-   * entry (see scr_stack_note_region). Only the POISON arm reads it; it is
-   * recorded unconditionally because the recording is two VirtualQuery
-   * calls on a path that runs once per stack, and a field that is only
-   * populated when a diagnostic is armed cannot be checked by the
-   * diagnostic that needs it. NULL means the stack was never entered --
-   * PRISTINE -- and cannot be located, which the arm counts rather than
-   * silently skips. */
-  void *res_base;
-  size_t res_size;
-} ScrStack;
-/* POSIX only (res_base/res_size belong to the Windows poison arm and are unused here, so reusing one keeps this struct, and the malloc size class
- * every fresh stack pays for, exactly as it was): res_size != 0 marks a stack carved from a shared region (scr_ug_take), returned to it rather
- * than unmapped, and with no guard page under it. */
-#define SCR_STACK_SHARED(s) ((s)->res_size != 0)
-#define SCR_STACK_GUARD(s) (SCR_STACK_SHARED(s) ? (size_t)0 : SCR_FIBER_GUARD)
-
-/* -- THE POISONING ARM: make a reclaimed stack FAULT instead of go quiet --
- *
- * Three mechanisms for the reported pairing fault have been proposed and all
- * three are refuted: a use-after-free on a pooled stack (ScrStack is confined
- * to this translation unit and no native binding can hold one), the decay
- * shortening the I/O poll (the socket cap overrides it whenever `net` is
- * pending), and DeleteFiber running library destructors (the binary imports
- * no Fls* at all, and FLS callbacks are the only thing DeleteFiber runs).
- *
- * Reading has now been wrong about the mechanism three times, so this stops
- * arguing and makes the failure point at itself.
- *
- * WHAT IT DOES. Instead of DeleteFiber, decommit the stack's reservation and
- * LEAVE IT RESERVED. Every byte of physical memory and commit goes back --
- * the whole reclaim the decay exists for -- but the address range stays owned
- * and untouchable, so any access to a reclaimed stack is an access violation
- * at the exact offending instruction instead of a silent read of whatever now
- * occupies that address.
- *
- * DELIBERATELY NOT DeleteFiber: that RELEASES the reservation and hands the
- * addresses back for reuse, which is precisely the condition being ruled out.
- * The cost is that the FIBER object itself leaks, and it is NOT negligible:
- * MEASURED at 1,689 bytes per reclaimed stack (settled private WS 18.77 MiB
- * with this armed against 4.26 without, over 9,001 poisoned stacks). A FIBER
- * holds a full x64 CONTEXT, so that figure is structural rather than
- * surprising.
- *
- * SO THIS ARM DOES NOT DELIVER THE DECAY'S MEMORY WIN. The stack pages come
- * back -- that is what MEM_DECOMMIT does -- but the per-fiber object does
- * not, so a run with this armed retains MORE than an unpoisoned one, not
- * less. Anyone reading RSS during a poisoned run must not mistake that for
- * the fault being investigated. It is the price of keeping the address
- * range owned, and it is why this is a diagnostic and never a default.
- *
- * IT TESTS THE ARGUMENT RATHER THAN RESTATING IT. The confinement argument
- * says nothing can hold such a pointer. A clean run with this armed confirms
- * that by experiment and retires the whole class; a fault hands over an
- * address, a faulting instruction and a stack instead of a deduction.
- *
- * It also covers the one avenue reading could not reach: address reuse
- * exposing a latent dangling pointer anywhere ABOVE the runtime, which is
- * benign while the pool holds the pages and live once they go back. A
- * poisoned range faults on first touch where a released one returns
- * plausible bytes.
- *
- * SCR_FIBER_POOL_POISON=1 arms it. Default 0. */
-
-/* COMPILE-TIME GATE FOR THIS TU'S DIAGNOSTIC REPORTS, and the number below is
- * why it exists rather than a preference.
- *
- * MEASURED, this branch against its merge base, by reading the PE section
- * table of the static hello-world rather than trusting the test's complaint:
- *
- *     main   681,472      branch   714,752      +33,280
- *     .text  +28,160   .rdata +4,608   .pdata +512   = +33,280 exactly
- *
- * It is not the added code. This TU's diagnostics are deliberately fputs plus
- * a hand-rolled decimal (see scr_utoa) precisely so the always-linked runtime
- * pulls in no printf -- and main honours that: its only fprintf pair lives
- * behind `#ifdef SCR_LOOP_WHY`, off by default, so a default binary links no
- * formatting machinery at all. The two fprintf calls this branch added to
- * scr_fiber_pool_teardown were guarded only by a runtime getenv, so they are
- * ALWAYS LINKED, and they drag the whole formatting path in with them. The
- * note at the per-window stat line already prices one %zu at this same
- * 33,280 bytes; these two were the ones still doing it.
- *
- * So the counters READ in every build and their REPORTS do not ship, which is
- * the arrangement SCR_CYC_PAGERETURN_STAT already uses in scr_cycle.c for the
- * same reason, in that file's words: a shipping binary should not carry a
- * diagnosis "for a line nobody will ever ask it to print". Build with
- * -DSCR_ASYNC_STAT=1 and every env knob below behaves as before.
- *
- * WHAT DOES NOT GO BEHIND THIS GATE, deliberately:
- *   - every counter increment: a comparison and an add, no string
- *   - scr_pool_stat(), so the counters keep a reader with external linkage
- *     in a default build. Without one they would be write-only statics that
- *     a compiler may legally delete, and the symptom would be a counter
- *     reading zero in a shipping binary -- the same silent-zero class this
- *     file has already been bitten by.
- *   - scr_stack_pool_decay_clamp(), the arm that restores the pre-fix
- *     unfloored wake. It is the reachable danger arm and it is worth more in
- *     a year than it costs now. It reads its own env and depends on no
- *     counter, so the gate cannot reach it.
- *   - the fence in scr_stack_release: the CHECK and its counter stay in every
- *     build; only the message goes behind the gate. See that site. */
-#ifndef SCR_ASYNC_STAT
-#define SCR_ASYNC_STAT 0
-#endif
-
-/* Fence violations: see scr_stack_release. Counted in EVERY build so the
- * check there has an observable effect and cannot be optimised away. */
-static unsigned long long scr_fence_violations = 0;
-
-#ifdef _WIN32
-static unsigned long long scr_stack_poisoned = 0;
-static unsigned long long scr_stack_poison_unlocatable = 0;
-
-static bool scr_stack_poison_on(void) {
-  static bool once = false;
-  static bool cached = false;
-  if (!once) {
-    const char *e = getenv("SCR_FIBER_POOL_POISON");
-    cached = e != NULL && strtol(e, NULL, 10) != 0;
-    once = true;
-  }
-  return cached;
-}
-
-/* Learn the running fiber's own stack reservation. Called FROM the fiber, on
- * its own stack, so a VirtualQuery of a local lands inside it and
- * AllocationBase is the base of the whole reservation CreateFiberEx made.
- * The region walk sums the pieces the stack has been split into (guard,
- * committed, uncommitted) -- they share an AllocationBase, which is the
- * termination condition. Documented API only; no TEB offsets. */
-static void scr_stack_note_region(ScrStack *s) {
-  MEMORY_BASIC_INFORMATION mbi;
-  volatile char probe = 0;
-  unsigned char *p;
-  void *base;
-  size_t total = 0;
-  (void)probe;
-  if (VirtualQuery((LPCVOID)&probe, &mbi, sizeof mbi) == 0) return;
-  base = mbi.AllocationBase;
-  if (base == NULL) return;
-  for (p = (unsigned char *)base;;) {
-    MEMORY_BASIC_INFORMATION m;
-    if (VirtualQuery((LPCVOID)p, &m, sizeof m) == 0) break;
-    if (m.AllocationBase != base) break;
-    total += (size_t)m.RegionSize;
-    p += m.RegionSize;
-  }
-  if (total == 0) return;
-  s->res_base = base;
-  s->res_size = total;
-}
-
-/* THE POSITIVE CONTROL, and the arm is worth nothing without it. A poisoning
- * pass that silently poisons nothing produces a clean run indistinguishable
- * from one that proves the stacks are untouched -- the same "found none vs
- * there are none" confusion this file has already made twice.
- *
- * SCR_FIBER_POOL_POISON_SELFTEST=1 touches the FIRST poisoned range on
- * purpose. An access violation there is a PASS: it proves the poisoning is
- * real and that a stray access to a reclaimed stack really does fault at the
- * offending instruction. Reaching the line after the read is a FAIL and says
- * so, because it means the range is still readable and a clean production run
- * would have meant nothing. */
-static void scr_stack_poison_selftest(ScrStack *s) {
-#if !SCR_ASYNC_STAT
-  /* The selftest is a diagnostic in both halves: it deliberately FAULTS to
-   * prove the poisoning is real, and its two messages are the whole output.
-   * A default build carries neither. The arm it validates
-   * (SCR_FIBER_POOL_POISON) is itself off by default, so nothing a shipping
-   * binary does is left unchecked by gating this. */
-  (void)s;
-#else
-  static bool done = false;
-  const char *e;
-  if (done) return;
-  e = getenv("SCR_FIBER_POOL_POISON_SELFTEST");
-  if (e == NULL || strtol(e, NULL, 10) == 0) return;
-  done = true;
-  fputs("[fiberpoison] SELFTEST: reading a just-poisoned stack on purpose."
-        " AN ACCESS VIOLATION HERE IS A PASS.\n", stderr);
-  fflush(stderr);
-  {
-    volatile unsigned char *q = (volatile unsigned char *)s->res_base;
-    unsigned char v = q[4096 < s->res_size ? 4096 : 0];
-    (void)v;
-  }
-  fputs("[fiberpoison] SELFTEST FAILED: that read did NOT fault, so the range"
-        " is still accessible and POISONING IS INERT. A clean run with this"
-        " arm proves nothing.\n", stderr);
-  fflush(stderr);
-#endif /* SCR_ASYNC_STAT */
-}
-#endif
-
+/* THE MICROTASK RECORD. Everything on the ready queue is a stackless envelope: a queueMicrotask closure, a raw hook plus one owned argument
+ * (scr_coro_park's resume entry, the async-generator sink), or a parked await's continuation. There are no fibers and no stacks: every
+ * async function and generator is a state machine over a heap frame (scr_coro.c), so the queue holds exactly these four words. */
 struct ScrFiber {
-  /* THE ENVELOPE PREFIX. A stackless envelope (queueMicrotask, a raw continuation, a parked await) rides the ready queue as a ScrFiber* but is
-   * only these four words: scr_resume_fiber reads micro_raw, then micro_cb, and frees it before it touches any other member, and no other
-   * code looks inside a queued entry. So an envelope is allocated as just this prefix (scr_envelope_new) and a real fiber as the whole
-   * record (sizeof is over a kilobyte, almost all of it the exception cell). Keep these first and keep that order of reads. */
-  /* queueMicrotask entries: a stackless pseudo-fiber — the READY queue's
-   * FIFO IS the microtask queue, so a closure rides it as a fiber-shaped
-   * envelope and scr_resume_fiber runs it on the main stack (a throw is
-   * an UNCAUGHT exception, like Node's queueMicrotask, never a
-   * rejection). Owned; NULL on real fibers. */
+  /* queueMicrotask entries: the READY queue's FIFO IS the microtask queue, so a closure rides it as an envelope and scr_resume_fiber runs
+   * it on the main stack (a throw is an UNCAUGHT exception, like Node's queueMicrotask, never a rejection). Owned. */
   ScrClosure *micro_cb;
-  /* The runtime's OWN stackless envelope, on the same queue: a raw hook
-   * plus one owned argument. The native async-generator sink rides it —
-   * a settlement that must reach the main stack a microtask turn later
-   * has no ScrDyn to box, and boxing one would put a cycle-collected
-   * closure on a path the collector never needs to see. Owned: the
-   * envelope releases `micro_arg` through `micro_arg_release`. */
+  /* The runtime's OWN envelope: a raw hook plus one owned argument. Owned: the envelope releases `micro_arg` through `micro_arg_release`. */
   void (*micro_raw)(void *);
   void *micro_arg;
   void (*micro_arg_release)(void *);
-  ScrStack *st;      /* the context we run on; NULL on the stackless
-                      * microtask envelopes at the bottom of this struct */
-  ScrCtx *return_to; /* whoever resumed us last (spawner or the loop) */
-  ScrPromise *promise; /* the promise this fiber settles (owned +1); NULL
-                        * for generator fibers (gen non-NULL instead) */
-  ScrGen *gen;         /* the generator this fiber runs (borrowed — the
-                        * ScrGen owns the fiber, never the reverse) */
-  ScrExcCell exc;
-  /* AsyncLocalStorage context (owned; NULL = empty). Inherited from the
-   * SPAWNER at spawn (Node's init-time capture), swapped active with the
-   * fiber (the exc-cell pattern) so run()'s window rides awaits. */
-  ScrAlsCtx *als;
-  bool done;
-  /* Trampoline args: the spawn wrapper stores a pointer to a stack-local
-   * argpack; the trampoline copies it out before the spawner resumes. */
-  void *argpack;
-  void (*entry)(ScrFiber *self, void *argpack);
-#ifdef SCR_ASAN_FIBERS
-  void *fake_stack;
-#endif
 };
 
-/* A zeroed stackless envelope: the prefix of a ScrFiber up to `st` (see the struct). Never hand one to anything that reads past the prefix. */
+/* A zeroed envelope. */
 static ScrFiber *scr_envelope_new(void) {
-  ScrFiber *f = calloc(1, offsetof(struct ScrFiber, st));
+  ScrFiber *f = calloc(1, sizeof *f);
   if (!f) scr_oom();
   return f;
 }
@@ -1056,18 +653,11 @@ void scr_als_ctx_release(ScrAlsCtx *c) {
 
 
 
-static ScrCtx scr_loop_ctx; /* the main stack (scheduler home) */
-static ScrFiber *scr_current = NULL;
 static long scr_fibers_live = 0;
 static long scr_fibers_abandoned = 0;
 
 long scr_abandoned_fiber_count(void) { return scr_fibers_abandoned; }
 
-/* True while executing on an async fiber (vs the main stack). The island
- * sizes its engine stack budget per stack: fibers are small and fixed,
- * the main stack is the process's megabytes (scr_island.c isl_entry). */
-bool scr_on_fiber(void) { return scr_current != NULL; }
-void *scr_fiber_self(void) { return scr_current; }
 
 /* Microtask queue: ready fibers, FIFO. */
 static ScrFiber **scr_ready = NULL;
@@ -1754,60 +1344,6 @@ static void scr_track_rejection(ScrPromise *p) {
   scr_maybe_unhandled[scr_nunhandled++] = scr_promise_retain(p);
 }
 
-/* ── context switching (ASan-annotated) ───────────────────────────────── */
-
-#ifdef SCR_ASAN_FIBERS
-static void *scr_main_fake_stack; /* fake-stack slot for the main context */
-#endif
-
-#ifdef _WIN32
-/* The current context's handle, converting the main thread to a fiber on
- * first need (SwitchToFiber requires the caller BE a fiber; the runtime is
- * single-threaded, so one lazy conversion covers the process). Also the
- * loop-home keeper: whenever main is the caller this IS scr_loop_ctx's
- * value — assigned at the conversion so parked fibers can always switch
- * back to it. */
-static void *scr_win_self(void) {
-  static bool converted = false;
-  if (!converted) {
-    scr_loop_ctx = ConvertThreadToFiber(NULL);
-    if (scr_loop_ctx == NULL) {
-      fputs("scriptc: ConvertThreadToFiber failed\n", stderr);
-      abort();
-    }
-    converted = true;
-  }
-  return GetCurrentFiber();
-}
-#endif
-
-static void scr_switch(ScrCtx *from, ScrCtx *to, ScrFiber *to_fiber) {
-#ifdef SCR_ASAN_FIBERS
-  ScrFiber *from_fiber = scr_current;
-#endif
-  scr_current = to_fiber;
-  scr_exc_swap_cell(to_fiber ? &to_fiber->exc : NULL);
-  scr_als_active = to_fiber ? &to_fiber->als : &scr_als_main_slot;
-#ifdef _WIN32
-  /* SwitchToFiber snapshots the outgoing fiber's state inside its own
-   * fiber object — `from` has nothing to record. */
-  (void)from;
-  SwitchToFiber(*to);
-#elif defined(SCR_ASAN_FIBERS)
-  void **save = from_fiber ? &from_fiber->fake_stack : &scr_main_fake_stack;
-  const void *bottom = to_fiber ? to_fiber->st->mem + SCR_STACK_GUARD(to_fiber->st) : NULL;
-  size_t size = to_fiber ? SCR_FIBER_STACK : 0;
-  __sanitizer_start_switch_fiber(save, bottom, size);
-  swapcontext(from, to);
-  const void *old_bottom;
-  size_t old_size;
-  __sanitizer_finish_switch_fiber(
-      scr_current ? scr_current->fake_stack : scr_main_fake_stack, &old_bottom, &old_size);
-#else
-  swapcontext(from, to);
-#endif
-}
-
 static void scr_promise_settle_wake(ScrPromise *p);
 
 /* Copies src's settlement into a still-pending dst (payload RETAINED —
@@ -2092,12 +1628,10 @@ ScrStr *scr_promise_payload_str(ScrPromise *p) {
  * KIND, whether a REF payload is a dyn value (the dyn adapters), and the
  * settled-await primitive (park/hop + rejection re-throw; true =
  * fulfilled). */
-static bool scr_await_settled(ScrPromise *p); /* defined with the await family */
 int scr_promise_payload_kind(const ScrPromise *p) { return (int)p->payload_kind; }
 bool scr_promise_payload_is_dyn(const ScrPromise *p) { return PV(p)->retain == scr_dyn_retain_v; }
 double scr_promise_payload_num(const ScrPromise *p) { SCR_PROM_SCALAR_KIND(p, SCR_EXC_F64); return p->f64; }
 bool scr_promise_payload_flag(const ScrPromise *p) { SCR_PROM_SCALAR_KIND(p, SCR_EXC_BOOL); return p->b; }
-bool scr_promise_await_settled(ScrPromise *p) { return scr_await_settled(p); }
 void scr_promise_payload_release(const ScrPromise *p, void *v) { PV(p)->release(v); }
 
 void *scr_promise_payload_ref(ScrPromise *p) {
@@ -2119,739 +1653,6 @@ static void scr_promise_reject_from_cell(ScrPromise *p, ScrExcCell *cell) {
 }
 
 static void scr_agen_finish_gen(ScrGen *g, ScrExcCell *cell);
-/* Marks a generator handle DONE after its fiber finished on a LOOP resume
- * (async generators only — a sync generator's fiber is only ever resumed
- * from a consumer's stack). Defined with the generator section below,
- * where struct ScrGen is complete. */
-static void scr_gen_fiber_completed(ScrGen *g);
-/* True for a generator handle created by scr_agen_new (its settle thunk is
- * set) — the one bit that tells the two generator flavours apart on the
- * shared completion path. */
-static bool scr_gen_is_async(ScrGen *g);
-static void scr_fiber_finish(ScrFiber *self) {
-  if (self->gen != NULL) {
-    /* Generator completion: the emitted trampoline already stored the
-     * completion value (or consumed the GENRET sentinel); a real body
-     * exception stays pending in this fiber's cell — the consumer-side
-     * resume moves it into the resumer's cell. No promise to settle.
-     *
-     * An ASYNC generator differs on exactly that last clause: its consumer
-     * holds a promise, not a stack frame, so the completion (or the
-     * escaping exception) has to settle `pending` HERE — the resumer may
-     * be the event loop, which has no call site to propagate into. */
-    if (scr_gen_is_async(self->gen)) scr_agen_finish_gen(self->gen, &self->exc);
-    self->done = true;
-    return;
-  }
-  ScrPromise *p = self->promise;
-  if (scr_exc_pending()) {
-    /* The body's exception escaped: the promise rejects with the payload
-     * (moved from the fiber's cell into the promise). */
-    scr_promise_reject_from_cell(p, &self->exc);
-  }
-  /* Fulfillment payload was stored by the trampoline before finishing. */
-  scr_promise_settle_wake(p);
-  self->done = true;
-}
-
-#ifdef _WIN32
-static void CALLBACK scr_trampoline(void *param) {
-  (void)param;
-#else
-static void scr_trampoline(void) {
-#endif
-#ifdef SCR_ASAN_FIBERS
-  const void *ob;
-  size_t os;
-  __sanitizer_finish_switch_fiber(scr_current->fake_stack, &ob, &os);
-#endif
-  /* THE TASK LOOP. A fiber whose body RETURNS is finished and can never
-   * be re-entered, which is why this used to be straight-line code and
-   * why every async call used to cost a CreateFiber/DeleteFiber pair. A
-   * fiber whose body YIELDS instead can be handed a new task forever, so
-   * the stack outlives the task that ran on it and goes back in the pool.
-   *
-   * `self` is dangling the instant control leaves the switch below — the
-   * call site frees the ScrFiber and returns the ScrStack to the pool —
-   * so every iteration re-reads scr_current and nothing here touches a
-   * value carried across the switch. The one thing that does survive is
-   * `st`, which is the pooled object itself. */
-  ScrStack *st = scr_current->st;
-#ifdef _WIN32
-  /* Recorded from ON the stack, which is the only place it can be learned
-   * without undocumented TEB offsets. Once is enough; re-entry is a no-op. */
-  if (st->res_base == NULL) scr_stack_note_region(st);
-#endif
-  for (;;) {
-    ScrFiber *self = scr_current;
-    self->entry(self, self->argpack);
-    scr_fiber_finish(self);
-    /* Dead TASK, live STACK: hop back to whoever resumed us. The call
-     * site frees the fiber and decides whether this stack is pooled. */
-    scr_switch(&st->ctx, self->return_to, NULL);
-  }
-  /* unreachable */
-}
-
-/* ── the stack pool ───────────────────────────────────────────────────
- * A free list of idle execution contexts. Every entry is in one of two
- * states and BOTH resume correctly into the task loop: PRISTINE (created
- * and never entered — resuming enters scr_trampoline at the top) or
- * PARKED (its last task finished and the loop yielded — resuming returns
- * from that scr_switch and falls round to the next iteration). Nothing
- * else can reach the pool: a SUSPENDED fiber is never destroyed (loop
- * exhaustion abandons it deliberately), and the stackless microtask
- * envelopes never own a stack at all.
- *
- * The stack is empty in both states, so there is nothing to unwind. The
- * runtime propagates a throw through an exception CELL and an early
- * return, never setjmp/longjmp (scr_runtime.h's `catch` note), so the
- * body's entry call returns normally however it ended and scr_fiber_finish
- * has already moved the payload into the promise.
- *
- * Why a cap: an idle entry keeps its TOUCHED pages resident, which is
- * exactly what removes the faults and exactly what costs RSS. The cap
- * bounds the IDLE set only — a burst that wants more contexts than the cap
- * still gets them, they are just not all kept afterwards.
- *
- * WHERE THE CAP COMES FROM, and why it used to be 64. The first sweep
- * stopped at 256, called 64 the knee, and read the flattening between 64
- * and 256 as the curve running out. It was not: the sweep ended one
- * octave below the interesting region, and it scored only send_1to1 and
- * recv_group. send_group is the phase that pins the cap and it was not in
- * that table.
- *
- * send_group builds an array of 1000 promises and Promise.all's it (the
- * bench's scenarioSendGroup), so a thousand message sends are in flight at
- * once, each a nested chain of async calls. The number of stacks LIVE at
- * the peak is therefore between 4,096 and 16,384 — measured, from where
- * this table stops moving — and a 64-entry idle list against that is
- * ~136,000 fresh CreateFiberEx/DeleteFiber pairs in one phase. Each fresh
- * stack costs exactly two demand-zero faults (see SCR_FIBER_COMMIT above),
- * which is that phase's whole 272,738-fault bill.
- *
- * Re-measured on the real zapo messaging bench, full default workload, all
- * four scenarios, ONE session with the arms interleaved and every ratio
- * formed inside a rep, the SAME binary in every arm — only this env knob
- * changes. 3 reps, medians. The A/A floor on this lane (the same cap run
- * twice in each rep) is 1.3% on send_group wall, 1.2% on its cycles, 0.3%
- * on its faults and 0.1% on peak RSS:
- *
- *   cap    send_group    send_group   send_group   6-phase    peak
- *            faults        Mcyc         kern ms      Mcyc      RSS
- *      0     461,782      47,691        3,766      107,864   175.4 MiB
- *     64     272,738      41,174        2,063       64,225   186.6 MiB
- *   4096      83,449      35,583          750       56,235   189.8 MiB
- *  16384      17,830      33,322           47       52,838   250.9 MiB
- *  65536      17,984      33,032          125       53,132   254.0 MiB
- *
- * 4096 is the knee OF THE TRADE, not of the CPU column. The CPU column
- * keeps improving to 16,384 and then stops dead — 65,536 buys nothing over
- * 16,384, which is what "the peak live set is below 16,384" looks like —
- * but the RSS column turns over first. 64 -> 4096 is -13.6% on send_group
- * cycles, -69.4% on its faults and -12.4% on the six-phase sum for
- * +1.7% peak RSS, which is inside this lane's 6.76% RSS noise floor.
- * 4096 -> 16384 buys a further -6.4% of cycles and costs +32.2% peak RSS,
- * far outside it. An idle pooled stack keeps its touched pages resident
- * and the pool holds them ACROSS phases, so the retained set lands on top
- * of the next phase's live set rather than under it — which is why this
- * cost is real and not, as first reasoned, free because the pages were
- * resident at the peak anyway.
- *
- * So the cap that would minimise CPU alone is 16,384 and it is not taken.
- * Anyone optimising only for cycles should set SCR_FIBER_POOL=16384 and
- * pay the 61 MiB. SCR_FIBER_POOL=0 turns the pool off entirely (the
- * pre-pool runtime, and the positive control that proves an arm of this
- * experiment can move the number at all). */
-#ifndef SCR_FIBER_POOL
-#define SCR_FIBER_POOL 4096
-#endif
-
-/* Gauges for tests/perf/fiberstat/scr_fiber_stat.h. With that header absent
- * every one of these preprocesses to nothing at all, so an uninstrumented
- * build carries no instruction of them -- the same contract scr_string.c
- * states for SCR_CS_BUMP. They exist because the pool's two populations
- * are indistinguishable from outside the process: a VirtualQuery walk sees
- * N stack regions and cannot say which of them a task is sitting on. */
-#ifndef SCR_FST_ACQUIRE
-#define SCR_FST_ACQUIRE() ((void)0)
-#endif
-#ifndef SCR_FST_RELEASE
-#define SCR_FST_RELEASE() ((void)0)
-#endif
-#ifndef SCR_FST_POOLED
-#define SCR_FST_POOLED(n) ((void)0)
-#endif
-#ifndef SCR_FST_FRESH_ONE
-#define SCR_FST_FRESH_ONE() ((void)0)
-#endif
-#ifndef SCR_FST_FREED_ONE
-#define SCR_FST_FREED_ONE() ((void)0)
-#endif
-/* E2's park-attribution hooks, same contract: absent header -> no
- * instruction. `out` above cannot answer "how many frames of ONE entry are
- * suspended at once" -- it mixes scr_gen_new's population in with
- * scr_async_spawn's, and it counts an eagerly-completed spawn that never
- * suspended at all. These five carry the entry pointer, which both spawn
- * paths already store on the fiber, to the suspension itself. */
-#ifndef SCR_FST_SPAWN
-#define SCR_FST_SPAWN(e, k) ((void)0)
-#endif
-#ifndef SCR_FST_PARK_IN
-#define SCR_FST_PARK_IN(e) ((void)0)
-#endif
-#ifndef SCR_FST_PARK_OUT
-#define SCR_FST_PARK_OUT(e) ((void)0)
-#endif
-#ifndef SCR_FST_YIELD_IN
-#define SCR_FST_YIELD_IN(e) ((void)0)
-#endif
-#ifndef SCR_FST_YIELD_OUT
-#define SCR_FST_YIELD_OUT(e) ((void)0)
-#endif
-
-/* ── THE CAP BOUNDS THE IDLE SET; NOTHING BOUNDED HOW LONG IT IS HELD ──
- *
- * The table above measures the pool against a bench that stays busy, so
- * every arm's retained set sits UNDER the next phase's live set and the
- * only visible cost is +1.7% peak RSS. A long-lived server is the other
- * shape: one burst, then hours of near-idle. The cap is a high-water
- * mark there, and until this decay existed nothing ever lowered it —
- * scr_fiber_pool_teardown runs at LOOP TEARDOWN, i.e. process exit.
- *
- * Measured, this file's probe (K concurrent chains, 8 async levels each,
- * so ~9K live stacks at the peak; RSS sampled every 100 ms and read as
- * the mean over a 5 s window well after the burst drained):
- *
- *   pool    idle before    burst peak    idle AFTER the burst
- *      0        4.75          212.23           15.00 MiB
- *     64        4.75          212.25           15.29
- *    512        4.74          212.29           17.97
- *   1024        4.75          212.31           20.85
- *   4096        4.75          212.27           37.42
- *  16384        4.75          212.23          104.11
- *
- * The PEAK column is flat across every arm — 212.23-212.31, a 0.04%
- * spread — which is what makes this a controlled experiment: the knob
- * moves only what is KEPT, never what is needed. The slope is 5.44 KiB
- * of resident stack per pooled entry, linear across five octaves, so the
- * shipped default retains 4096 x 5.44 KiB = 22.4 MiB after any burst
- * that touches 4096 stacks, for the life of the process.
- *
- * THE POLICY IS A LOW-WATER MARK, not a timeout. scr_stack_pool_lo
- * tracks the smallest the idle list got during the current window; an
- * entry above that low mark was demonstrably not needed at ANY instant
- * of the window, so it is not serving the burst locality the cap was
- * bought for. Each window frees half of that provable excess. Halving
- * rather than dropping all of it costs a few extra windows and buys the
- * margin a workload with a period near the window would otherwise lose.
- *
- * What this deliberately does NOT do is time out idle entries. A server
- * with steady concurrency holds pool_lo high and never trims, which is
- * the case the cap exists for; a server whose concurrency COLLAPSED
- * after a sync has pool_lo == pool_n and drains geometrically, ~12
- * windows from a full 4096.
- *
- * SCR_FIBER_POOL_DECAY_MS=0 disables decay and restores the pre-decay
- * runtime exactly — the negative control for every number above.
- *
- * The window must exceed the traffic's real gaps, or the decay trims
- * between bursts and the next burst re-faults what it freed. Measured on
- * a periodic-burst probe (1500 chains x 7 live stacks, saturating the
- * 4096 cap), gaps of 2.5s: a 1000ms window costs +34% page faults
- * (136,170 -> 182,452) and reclaims to 19.4 MiB; a 5000ms window costs
- * nothing measurable and reclaims to 29.9 -> 29.9 (i.e. does not trim at
- * all on that traffic). On the case the feature is for -- one burst then
- * quiet -- 5000ms reaches 10.1 MiB against 1000ms's 8.8 MiB in the same
- * 20s, still descending. Near-identical reclaim, no burst cost, so 5000
- * is the default: a one-second lull is not idleness for a server. */
-#ifndef SCR_FIBER_POOL_DECAY_MS
-/* ON by default, 5000 ms. It was off; the pairing fault below is why, and it
- * is now understood and fixed one knob over.
- *
- * A user's compiled WhatsApp service reached `[auth] paired` and was then
- * dropped by the server with `stream:error device removed`, reproducibly,
- * on every attempt. The same binary with SCR_FIBER_POOL_DECAY_MS=0 pairs
- * every time. The control is exact: the decay prints one line per window,
- * so a run with the knob off carries ZERO `[fiberpool]` lines, and the
- * failing run carried nine -- three of them mid-handshake (freed=18
- * between the QR and the pairing code, then 9, then 10 before
- * pair-success). Same binary, same custom pairing code, same store.
- *
- * THAT QUESTION NOW HAS AN ANSWER AND IT IS NOT DeleteFiber.
- *
- * SCR_FIBER_POOL_POISON decommits a reclaimed stack and leaves its range
- * RESERVED, so any access to one becomes an access violation at the
- * offending instruction instead of a silent read of whatever took the
- * address. Run against the real service WHILE THE FAULT OCCURRED: 44 stacks
- * poisoned and untouchable at the moment of the anomaly, 137 by the end,
- * unlocatable=0 throughout, and NOT ONE access violation. The same binary's
- * self-test proves a poisoned read kills the process, so that silence is a
- * measurement rather than an absence of evidence. The two windows spanning
- * the failure are freed=0 with decayedTotal frozen, so nothing was freed
- * while the connection died either.
- *
- * SCOPE, because it decides what the result is worth: this refutes reads of
- * decay-FREED stacks. It does not refute reads of pooled-and-reused ones,
- * which are live memory and are not poisoned. But those recycle identically
- * with the decay OFF, and the decay-off arm pairs every time -- so the
- * decay-specific class is exactly what was on trial, and it is gone.
- *
- * WHAT BREAKS PAIRING IS THE POLL CLAMP, NOT THE FREEING. The decay used to
- * cap the loop's sleep so a window could not be slept through, and that
- * shortens the I/O poll deadline, which reorders socket reads against timers
- * and microtasks. With SCR_FIBER_POOL_DECAY_CLAMP=0 and the decay otherwise
- * unchanged, the same binary paired and stayed live -- auth_credentials=1,
- * 811 prekeys, 355 mailbox messages, no device-removed, no cleared
- * credentials -- while the decay did heavy work throughout: 1,429 stacks
- * freed, 1,111 of them in a single window, from a pool that peaked at 2,531.
- * clampApplied=0 confirms the knob reached the binary, measured rather than
- * inferred.
- *
- * EVIDENCE STRENGTH, PLAINLY: the failing side has TWO runs, the passing
- * side has ONE. The result is clean and binary, and it is n=1 on the success
- * arm.
- *
- * ONE THING THAT LOOKED LIKE THE SIGNATURE AND IS NOT: `received socket
- * payload before noise session init` appears in the SUCCESSFUL run too. It
- * is a benign reconnect artefact. It was the most visibly anomalous line in
- * the first failing log and a hypothesis was built around it; recorded here
- * so the next reader does not build another one.
- *
- * WHAT TURNING IT ON IS WORTH, on the shipped binary, three arms rotated with
- * one environment variable between them:
- *
- *   working set held   64.04 -> 16.62 MiB   returned 47.42 MiB   -74.0%
- *   private commit     +157.34 -> +18.6     returned 138.7       -88.2%
- *
- * The two ON arms agree (17.00 / 16.25) with the OFF arm between them in
- * position, so that is not a position effect.
- *
- * AND WHAT IS LEFT IS NOT WASTE. Measured against a MATCHED floor -- same
- * binary, same session, LIVEMSGS=0 arms that held -0.86 and -0.13 MiB, so a
- * run with no burst returns to its own floor -- the remaining 13.86 MiB of
- * held working set sits against 12.98 MiB of held LIVE heap objects. Those
- * agree to 0.88 MiB, inside the burst arms' own 4.02 MiB spread. What remains
- * is data the program was asked to keep.
- *
- * The free heap does stay large: +31.54 MiB held, of which at most ~0.9 MiB
- * can be resident. It costs COMMIT, not working set -- which is why the
- * user-visible number improves by 74% while a loaded box can still feel the
- * commit charge.
- *
- * SAFE BECAUSE THE CLAMP IS OFF, not because the freeing was ever unsafe.
- * SCR_FIBER_POOL_POISON refuted the decay-freed-stack class by experiment on
- * real infrastructure with the fault occurring: 44 stacks poisoned and
- * untouchable at the anomaly, 137 by the end, and not one access violation in
- * a binary whose self-test proves a poisoned read kills the process. The
- * clamp -- which shortened the I/O poll deadline -- is what broke pairing, and
- * it defaults to 0 below.
- *
- * EVIDENCE STRENGTH, PLAINLY: the failing side has TWO runs, the passing side
- * has ONE. */
-#define SCR_FIBER_POOL_DECAY_MS 5000
-#endif
-
-static ScrStack *scr_stack_pool = NULL;
-static size_t scr_stack_pool_n = 0;
-/* Smallest scr_stack_pool_n seen since the last decay window closed.
- * SIZE_MAX means "no acquire has narrowed it yet this window", which the
- * tick reads as pool_n. */
-static size_t scr_stack_pool_lo = (size_t)-1;
-static double scr_stack_pool_next_ms = 0;
-/* Counts entries actually freed BY DECAY (never by the cap's overflow
- * path), so the stat line below can tell "the trim found nothing to free"
- * from "the trim never ran" — the two readings this tree keeps confusing.
- * Deliberately NOT exported: an unused external symbol in the
- * always-linked runtime cannot be dead-stripped, and this file is measured
- * to the page by tests/harness/island.test.ts. */
-static unsigned long long scr_stack_pool_decayed = 0;
-
-/* -- THE POLL CLAMP, AND WHY IT IS NOW A KNOB ------------------------
- *
- * scr_stack_pool_decay_due caps the loop's sleep so a decay window cannot
- * be slept through. That fixed a real defect -- a trim that never RAN read
- * exactly like a trim that did not work -- but it has a consequence nobody
- * costed: AN IDLE-TIME HOUSEKEEPING TASK SHORTENS THE I/O POLL DEADLINE.
- * With a timer pending further out than the window, the loop stops sleeping
- * to its natural deadline and wakes on the window instead, which reorders
- * socket reads against timers and microtasks.
- *
- * It bites only when the natural deadline EXCEEDS the window. With no
- * timers the floor is SCR_IO_POLL_MS = 1000 ms, shorter than any sane
- * window, so the clamp never fires and an idle process is unaffected. A
- * handshake holding a 10 s keepalive is the opposite case, and that is the
- * shape the pairing fault was reported on.
- *
- * THE DECAY DOES NOT NEED THE CLAMP TO FUNCTION. scr_fiber_pool_decay is
- * called unconditionally at the top of the sleep seam, before and
- * independent of the `due` computation, so it runs on whatever wakeups the
- * loop already has. Removing the clamp costs the decay its PROMPTNESS, not
- * its function: a window still elapses and still runs on the next natural
- * wakeup, so the pool drains slightly later and still drains.
- *
- * DEFAULT 0: THE CLAMP IS OFF, AND THAT IS THE PAIRING FIX. This was built
- * and committed on a hygiene argument -- an idle-time housekeeping task has
- * no business shortening the I/O poll deadline -- and explicitly NOT as the
- * fix, because the socket cap below overrides the clamp whenever `net` is
- * pending and that appeared to make it inert on a live connection. The
- * measurement disagreed with the reasoning: with the decay on and only this
- * knob changed, the service that had failed to pair twice paired and stayed
- * live. See the block above SCR_FIBER_POOL_DECAY_MS for the evidence and for
- * its n=1 caveat.
- *
- * ONE MACRO IS CORRECT HERE, and that is worth stating because the sibling
- * case is not. SCR_CYC_ARENA_VM in scr_cycle.c gates `#if` over the code
- * itself, so setting it to 0 COMPILES THE FEATURE OUT rather than defaulting
- * it off, and it needs a separate _DEFAULT macro. This one guards nothing:
- * the clamp site is a runtime `if (scr_stack_pool_decay_clamp())`, so the
- * macro is only the fallback when the environment is silent, and flipping it
- * changes behaviour without removing anything. Verified before the flip.
- *
- * SCR_FIBER_POOL_DECAY_CLAMP=1 restores the old behaviour. Env knob, not a
- * build flag, so both arms stay one binary and any comparison carries no
- * code-layout confound. */
-#ifndef SCR_FIBER_POOL_DECAY_CLAMP
-#define SCR_FIBER_POOL_DECAY_CLAMP 0
-#endif
-
-/* Loop-wakeup accounting for the clamp A/B. `eligible` is counted the same
- * way in BOTH arms -- it records that the clamp WOULD have shortened this
- * sleep -- so the two arms are comparable rather than each measuring only
- * its own behaviour. `applied` counts the times it actually did. */
-static unsigned long long scr_loop_turns = 0;
-static unsigned long long scr_pool_clamp_elig = 0;
-static unsigned long long scr_pool_clamp_applied = 0;
-static unsigned long long scr_pool_subcap = 0; /* decay pushed due BELOW the poll cap */
-static unsigned long long scr_pool_cap50 = 0;  /* turns taking the COARSE (50 ms) cap */
-/* THE HONEST ONE. `applied` counts the clamp modifying `due`, and it is
- * recorded BEFORE the socket and child caps below can lower `due` again -- so
- * with a live socket it reads large and means nothing, which is worse than
- * absent because it looks like data. `survived` counts only the turns where
- * the clamp's value was still the final `due` when the loop actually slept,
- * which is the only form in which the clamp can have changed anything.
- *
- * It is also the direct measurement of the one hypothesis still standing: the
- * socket gap at a connection restart, where `net` is momentarily false, the
- * 1 ms cap does not apply, and the clamp is live again. Those turns are
- * exactly what this counts, and `applied - survived` is how often it fired
- * and was overridden. */
-static unsigned long long scr_pool_clamp_survived = 0;
-
-/* THE COUNTERS' READER, AND IT SHIPS IN EVERY BUILD. Ten loads, no string,
- * no formatting -- the same bargain scr_cyc_pr_stat() strikes in scr_cycle.c,
- * in that file's words "how a harness reads the counters without parsing
- * text".
- *
- * IT IS NOT A CONVENIENCE. Every counter above is `static`, and once their
- * reports went behind SCR_ASYNC_STAT their only reader went with them: a
- * static that is incremented and never read is dead code a compiler may
- * legally delete, and the symptom would be a counter reading zero in a
- * shipping binary while the source still shows it being incremented. That is
- * the silent-zero shape this tree has been bitten by repeatedly, and it is
- * exactly what gating the reports would otherwise have created. External
- * linkage is deliberate: a reader the optimiser cannot prove nobody calls.
- *
- * Indices are positional and append-only; nothing persists them, but the
- * fence at 5 is cited by name in scr_stack_release. */
-unsigned long long scr_pool_stat(int which) {
-  switch (which) {
-    case 0: return scr_loop_turns;
-    case 1: return scr_pool_clamp_elig;
-    case 2: return scr_pool_clamp_applied;
-    case 3: return scr_pool_subcap;
-    case 4: return scr_pool_clamp_survived;
-    case 5: return scr_fence_violations;
-    case 6: return scr_stack_pool_decayed;
-    case 9: return scr_pool_cap50;
-#ifdef _WIN32
-    case 7: return scr_stack_poisoned;
-    case 8: return scr_stack_poison_unlocatable;
-#else
-    case 7:
-    case 8: return 0;
-#endif
-    default: return 0;
-  }
-}
-
-static bool scr_stack_pool_decay_clamp(void) {
-  static bool once = false;
-  static bool cached = SCR_FIBER_POOL_DECAY_CLAMP != 0;
-  if (!once) {
-    const char *env = getenv("SCR_FIBER_POOL_DECAY_CLAMP");
-    if (env != NULL) cached = strtol(env, NULL, 10) != 0;
-    once = true;
-  }
-  return cached;
-}
-
-static size_t scr_stack_pool_max(void) {
-  static bool once = false;
-  static size_t cached = SCR_FIBER_POOL;
-  if (!once) {
-    const char *env = getenv("SCR_FIBER_POOL");
-    if (env != NULL) {
-      long v = strtol(env, NULL, 10);
-      if (v >= 0) cached = (size_t)v;
-    }
-    once = true;
-  }
-  return cached;
-}
-
-/* SCR_FIBER_COMMIT and SCR_FIBER_RESERVE as runtime knobs, same shape as
- * scr_stack_pool_max above. Both are read once; both default to the compile
- * time value, so an unset environment reproduces today exactly. */
-static size_t scr_stack_commit(void) {
-  static bool once = false;
-  static size_t cached = SCR_FIBER_COMMIT;
-  if (!once) {
-    const char *env = getenv("SCR_FIBER_COMMIT");
-    if (env != NULL) {
-      long v = strtol(env, NULL, 10);
-      if (v > 0) cached = (size_t)v;
-    }
-    once = true;
-  }
-  return cached;
-}
-
-static size_t scr_stack_reserve(void) {
-  static bool once = false;
-  static size_t cached = SCR_FIBER_RESERVE;
-  if (!once) {
-    const char *env = getenv("SCR_FIBER_RESERVE");
-    if (env != NULL) {
-      long v = strtol(env, NULL, 10);
-      if (v >= 0) cached = (size_t)v;
-    }
-    once = true;
-  }
-  return cached;
-}
-
-#ifndef _WIN32
-/* ── POSIX fiber stack mappings: guarded while affordable, shared-region otherwise ─────────────────────────────────────────────────── */
-/* Guarded stacks still affordable: one is spent per guarded stack made and given back when it is unmapped. -1 until first use. A guarded stack
- * costs TWO kernel mappings, and the kernel allows vm.max_map_count of them per process (65530 by default), so the budget is an eighth of that
- * limit (read once; 65530 when the file cannot be read): the guards take at most a quarter of the mappings and the heap, thread stacks and the
- * loader keep the rest. */
-static long scr_guard_left = -1;
-
-static __attribute__((noinline)) void scr_guard_budget_init(void) {
-  size_t limit = 65530;
-  int fd = open("/proc/sys/vm/max_map_count", O_RDONLY);
-  if (fd >= 0) {
-    char buf[32];
-    ssize_t n = read(fd, buf, sizeof buf - 1);
-    close(fd);
-    unsigned long v = 0;
-    for (ssize_t i = 0; i < n && buf[i] >= '0' && buf[i] <= '9'; i++) v = v * 10 + (unsigned long)(buf[i] - '0');
-    if (v >= 1024) limit = (size_t)v;
-  }
-  size_t cap = limit / 8;
-  const char *env = getenv("SCR_FIBER_GUARD_CAP"); /* test knob: force the shared-region path on a box whose limit is huge */
-  if (env != NULL && *env >= '0' && *env <= '9') cap = (size_t)strtoul(env, NULL, 10);
-  scr_guard_left = (long)cap;
-}
-
-#define SCR_UG_REGION_STACKS 64
-static char *scr_ug_bump;       /* next unused stack of the newest region */
-static size_t scr_ug_left;      /* stacks left in it */
-static char **scr_ug_free;      /* returned stacks, reused before a new region is mapped */
-static size_t scr_ug_free_n, scr_ug_free_cap;
-
-/* One stack of SCR_FIBER_STACK bytes with no guard under it, from the free list or the newest region (a new region is one mapping of
- * SCR_UG_REGION_STACKS stacks, adjacent anonymous mappings merge so the count stays small, and none of it is touched until used). */
-static __attribute__((noinline)) char *scr_ug_take(void) {
-  if (scr_ug_free_n != 0) return scr_ug_free[--scr_ug_free_n];
-  if (scr_ug_left == 0) {
-    char *r = mmap(NULL, (size_t)SCR_UG_REGION_STACKS * SCR_FIBER_STACK, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
-    if (r == (char *)MAP_FAILED) scr_oom();
-#ifdef MADV_NOHUGEPAGE
-    /* A huge page would commit 2 MiB for the first touch of a stack that needs one 4 KiB page: 3.9 GB of RSS for 2000 fibers MEASURED. */
-    madvise(r, (size_t)SCR_UG_REGION_STACKS * SCR_FIBER_STACK, MADV_NOHUGEPAGE);
-#endif
-    scr_ug_bump = r;
-    scr_ug_left = SCR_UG_REGION_STACKS;
-  }
-  char *m = scr_ug_bump;
-  scr_ug_bump += SCR_FIBER_STACK;
-  scr_ug_left--;
-  return m;
-}
-
-/* Gives a shared stack back: its pages return to the kernel (so RSS counts only live stacks) and the address is reused. If the list cannot grow
- * the address is leaked; it is address space only. */
-static __attribute__((noinline)) void scr_ug_give(char *m) {
-  madvise(m, SCR_FIBER_STACK, MADV_DONTNEED);
-  if (scr_ug_free_n == scr_ug_free_cap) {
-    size_t ncap = scr_ug_free_cap ? scr_ug_free_cap * 2 : 256;
-    char **nf = (char **)realloc(scr_ug_free, ncap * sizeof *nf);
-    if (nf == NULL) return;
-    scr_ug_free = nf;
-    scr_ug_free_cap = ncap;
-  }
-  scr_ug_free[scr_ug_free_n++] = m;
-}
-#endif
-
-static void scr_stack_free(ScrStack *s) {
-  SCR_FST_FREED_ONE();
-#ifdef _WIN32
-  if (scr_stack_poison_on()) {
-    if (s->res_base != NULL) {
-      /* Physical memory and commit go back; the range stays RESERVED and
-       * PAGE_NOACCESS, so a later touch faults here rather than reading
-       * whatever took the address. No DeleteFiber: that would release the
-       * reservation and reopen it for reuse. The FIBER object leaks, which
-       * is why this arm is not a shipping default. */
-      VirtualFree(s->res_base, s->res_size, MEM_DECOMMIT);
-      scr_stack_poisoned++;
-      scr_stack_poison_selftest(s);
-    } else {
-      /* PRISTINE: created and never entered, so it never learned its own
-       * address and cannot be poisoned. COUNTED, not skipped in silence --
-       * an arm that quietly poisons nothing reports a clean run that means
-       * nothing at all. */
-      scr_stack_poison_unlocatable++;
-      DeleteFiber(s->ctx);
-    }
-  } else {
-    DeleteFiber(s->ctx);
-  }
-#else
-  if (SCR_STACK_SHARED(s)) {
-    scr_ug_give(s->mem);
-  } else {
-    munmap(s->mem, SCR_FIBER_GUARD + SCR_FIBER_STACK);
-    scr_guard_left++;
-  }
-#endif
-  free(s);
-}
-
-/* A context to run a task on: a pooled one if there is one, otherwise a
- * fresh one. The fresh arm is the code that used to sit inline in
- * scr_async_spawn and scr_gen_new, unchanged. */
-static ScrStack *scr_stack_acquire(void) {
-  ScrStack *s = scr_stack_pool;
-  if (s != NULL) {
-    scr_stack_pool = s->next;
-    scr_stack_pool_n--;
-    /* The low-water mark for this decay window. Only the take side can
-     * lower it, so this is the one place it is narrowed. */
-    if (scr_stack_pool_n < scr_stack_pool_lo) scr_stack_pool_lo = scr_stack_pool_n;
-    s->next = NULL;
-    SCR_FST_POOLED(scr_stack_pool_n);
-    SCR_FST_ACQUIRE();
-    return s;
-  }
-  s = calloc(1, sizeof *s);
-  if (!s) scr_oom();
-  SCR_FST_FRESH_ONE();
-  SCR_FST_ACQUIRE();
-#ifdef _WIN32
-  /* NOT lazy, and that mistake cost this runtime its whole page-fault
-   * bill: dwStackSize is the initial COMMITTED size, so the old
-   * CreateFiber(SCR_FIBER_STACK) committed 256 KiB of demand-zero stack
-   * per async CALL. The reserve is unchanged -- 0 means the executable
-   * default, which is what CreateFiber used. See SCR_FIBER_COMMIT. */
-  s->ctx =
-#ifdef SCR_ASAN_FIBERS
-      CreateFiber(SCR_FIBER_STACK, scr_trampoline, NULL);
-#else
-      CreateFiberEx(scr_stack_commit(), scr_stack_reserve(), 0, scr_trampoline, NULL);
-#endif
-  if (s->ctx == NULL) scr_oom();
-#else
-  /* One PROT_NONE guard page below the usable stack (stacks grow down): an overflow faults here instead of running silently into whatever
-   * malloc placed next to the block, and the mapping returns to the kernel whole on release. Pages are committed lazily by first touch.
-   * A guarded stack costs TWO kernel mappings (the guard and the stack never merge), and the kernel allows vm.max_map_count of them per
-   * process (65530 by default), so only the first scr_guard_left (an eighth of the limit) live stacks get one. Past that, and whenever a mapping fails, the stack is
-   * carved from a shared region (scr_ug_take): no guard, one mapping per 64 stacks, and no limit that Node does not also lack. */
-  s->mem = NULL;
-  if (__builtin_expect(scr_guard_left < 0, 0)) scr_guard_budget_init();
-  if (scr_guard_left > 0) {
-    char *m = mmap(NULL, SCR_FIBER_GUARD + SCR_FIBER_STACK, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
-    if (m != (char *)MAP_FAILED) {
-      if (mprotect(m, SCR_FIBER_GUARD, PROT_NONE) == 0) {
-        s->mem = m;
-        scr_guard_left--;
-      } else {
-        munmap(m, SCR_FIBER_GUARD + SCR_FIBER_STACK);
-      }
-    }
-  }
-  if (s->mem == NULL) {
-    s->mem = scr_ug_take();
-    s->res_size = 1;
-  }
-  getcontext(&s->ctx);
-  s->ctx.uc_stack.ss_sp = s->mem + SCR_STACK_GUARD(s);
-  s->ctx.uc_stack.ss_size = SCR_FIBER_STACK;
-  s->ctx.uc_link = NULL;
-  makecontext(&s->ctx, scr_trampoline, 0);
-#endif
-  return s;
-}
-
-static void scr_stack_release(ScrStack *s) {
-  if (s == NULL) return;
-  /* THE PRECONDITION ON scr_fiber_destroy, CHECKED RATHER THAN ASSERTED.
-   *
-   * That comment argues releasing a parked stack is legal because "a
-   * finished fiber has switched away and can never be current". That is a
-   * reachability claim owned by no code: true when written, and silently
-   * voidable by any later change that makes a live fiber reach here. This
-   * project has already combined two individually safe changes into a
-   * use-after-free with exactly such a fence staying quiet.
-   *
-   * WHAT A SILENT RUN PROVES, AND WHAT IT DOES NOT. This tests NOT CURRENT.
-   * Safe release requires NOT REFERENCED, which is strictly stronger: a
-   * pending callback, a timer, or a registered await resume can hold this
-   * ScrStack without being the running fiber. Do not read silence here as
-   * "the release is safe" -- read it as "the written claim still holds".
-   *
-   * Verified both ways when added: inverted, it fires once per release
-   * (200/200 on a 200-fiber probe); as written it is silent across a
-   * history sync with SCR_FIBER_POOL_DECAY_MS=1000 active, 130 decay
-   * windows and 4,313 stacks deleted. */
-  if (scr_current != NULL && scr_current->st == s) {
-    /* THE CHECK AND THE COUNT STAY IN EVERY BUILD; only the message is
-     * gated. A check whose only effect is a message that does not ship is a
-     * check the optimiser is free to delete -- and the source would still
-     * LOOK like it guarded something, which is worse than removing the fence
-     * on purpose. The increment is the observable effect that keeps it, and
-     * scr_pool_stat(5) is how a harness reads it without parsing text. */
-    scr_fence_violations++;
-#if SCR_ASYNC_STAT
-    fputs("[fencefail] scr_stack_release on the CURRENT fiber stack\n", stderr);
-#endif
-  }
-  SCR_FST_RELEASE();
-  if (scr_stack_pool_n < scr_stack_pool_max()) {
-    s->next = scr_stack_pool;
-    scr_stack_pool = s;
-    scr_stack_pool_n++;
-    SCR_FST_POOLED(scr_stack_pool_n);
-    return;
-  }
-  scr_stack_free(s);
-}
-
-/* Gated with its only caller: the window line it arms is the sole call site,
- * so a default build would carry an unused static and -Wunused-function. */
-#if SCR_ASYNC_STAT
-static bool scr_stack_pool_stat(void) {
-  static bool once = false;
-  static bool cached = false;
-  if (!once) { cached = getenv("SCR_FIBER_POOL_STAT") != NULL; once = true; }
-  return cached;
-}
-#endif /* SCR_ASYNC_STAT */
-
 /* Unsigned to decimal into a caller buffer of at least 24 bytes. Exists so
  * the stat line below needs no printf; see the note at its call site.
  * NOT gated: scr_heap_trim_line still calls it in every build. */
@@ -2860,184 +1661,6 @@ static const char *scr_utoa(size_t v, char *buf) {
   *p = '\0';
   do { *--p = (char)('0' + (v % 10u)); v /= 10u; } while (v != 0);
   return p;
-}
-
-static size_t scr_stack_pool_decay_ms(void) {
-  static bool once = false;
-  static size_t cached = SCR_FIBER_POOL_DECAY_MS;
-  if (!once) {
-    const char *env = getenv("SCR_FIBER_POOL_DECAY_MS");
-    if (env != NULL) {
-      long v = strtol(env, NULL, 10);
-      if (v >= 0) cached = (size_t)v;
-    }
-    once = true;
-  }
-  return cached;
-}
-
-/* One decay window. Called once per loop turn from the sleep seam in
- * scr_loop_run — the point the loop has already decided it has no
- * runnable work — so it costs one double compare on a path that is about
- * to block anyway, and it cannot run while a fiber is mid-switch.
- *
- * `now` is the loop's own scr_now_ms(), passed in rather than re-read so
- * the window boundary lines up with the turn the caller is timing. */
-/* How long the loop may sleep before the next decay window is due, or a
- * negative number when there is nothing to decay and the sleep is free to
- * run to its natural deadline.
- *
- * THIS SEAM IS LOAD-BEARING AND THE FIRST VERSION DID NOT HAVE IT. The
- * decay ticks once per loop turn, and a process whose only pending work is
- * one long timer takes the WHOLE timer in a single turn — the probe below
- * sleeps 8 s after its burst, so the trim ran once, freed the half of a
- * low-water mark that was still 0 from the burst, and the measurement came
- * back 36.69 MiB against 37.93 for decay off. That reads exactly like a
- * fix that does not work, and it was a fix that never RAN.
- *
- * So the sleep is capped to the window, but ONLY while there is something
- * to free: an empty pool imposes no wakeups at all, and a full one costs
- * one wakeup per second until it drains. */
-static double scr_stack_pool_decay_due(double now) {
-  if (scr_stack_pool_n == 0) return -1.0;
-  size_t win = scr_stack_pool_decay_ms();
-  if (win == 0) return -1.0;
-  if (scr_stack_pool_next_ms == 0) return now + (double)win;
-  return scr_stack_pool_next_ms;
-}
-
-static void scr_fiber_pool_decay(double now) {
-  size_t win = scr_stack_pool_decay_ms();
-  if (win == 0) return; /* decay off: the pre-decay runtime, exactly */
-  if (scr_stack_pool_next_ms == 0) {
-    scr_stack_pool_next_ms = now + (double)win;
-    return;
-  }
-  if (now < scr_stack_pool_next_ms) return;
-  scr_stack_pool_next_ms = now + (double)win;
-
-  /* Entries above the window's low-water mark were idle at every instant
-   * of the window. Free half of them, rounded up so a pool of 1 still
-   * makes progress. */
-  size_t lo = scr_stack_pool_lo == (size_t)-1 ? scr_stack_pool_n : scr_stack_pool_lo;
-  size_t drop = (lo + 1u) / 2u;
-  size_t freed = 0;
-  while (drop-- > 0 && scr_stack_pool != NULL) {
-    ScrStack *s = scr_stack_pool;
-    scr_stack_pool = s->next;
-    scr_stack_pool_n--;
-    scr_stack_free(s);
-    scr_stack_pool_decayed++;
-    freed++;
-  }
-  SCR_FST_POOLED(scr_stack_pool_n);
-  /* ARMING. A trim that silently finds nothing to free is indistinguishable
-   * from a trim that never ran, and this file has now made that exact
-   * mistake once (see scr_stack_pool_decay_due). SCR_FIBER_POOL_STAT=1
-   * prints EVERY window including the ones that free nothing, so the
-   * negative control — SCR_FIBER_POOL_DECAY_MS=0, which must print no
-   * lines at all — is distinguishable from a live decay that has already
-   * drained the pool, which prints `freed=0 idle=0`. */
-#if SCR_ASYNC_STAT
-  if (scr_stack_pool_stat()) {
-    /* fputs and a hand-rolled decimal, NOT fprintf. This TU's diagnostics
-     * are all fputs/fwrite, so a single %zu here was the only printf in
-     * the always-linked runtime: it grew a static hello-world by 33,280
-     * bytes — eight times tests/harness/size-class.ts's one-page drift
-     * tolerance — for a line no default build ever prints. */
-    char nb[24];
-    fputs("[fiberpool] window freed=", stderr);
-    fputs(scr_utoa(freed, nb), stderr);
-    fputs(" idle=", stderr);
-    fputs(scr_utoa(scr_stack_pool_n, nb), stderr);
-    fputs(" lo=", stderr);
-    fputs(scr_utoa(lo, nb), stderr);
-    fputs(" decayedTotal=", stderr);
-    fputs(scr_utoa((size_t)scr_stack_pool_decayed, nb), stderr);
-    /* THE POISON AND CLAMP COUNTERS RIDE THIS LINE, and that is not
-     * tidiness. The teardown report is UNREACHABLE in the binary these
-     * counters exist for: zapo-rest ends through process.exit, which
-     * lowers to _Exit and skips loop teardown, so a run there prints no
-     * counters at all -- verified, not assumed. This line prints once
-     * per window and was observed reaching stderr from a real
-     * zapo-rest run, so it is the only place the numbers survive. */
-#ifdef _WIN32
-    fputs(" poisoned=", stderr);
-    fputs(scr_utoa((size_t)scr_stack_poisoned, nb), stderr);
-    fputs(" unlocatable=", stderr);
-    fputs(scr_utoa((size_t)scr_stack_poison_unlocatable, nb), stderr);
-#endif
-    fputs(" clampApplied=", stderr);
-    fputs(scr_utoa((size_t)scr_pool_clamp_applied, nb), stderr);
-    fputs(" subcap=", stderr);
-    fputs(scr_utoa((size_t)scr_pool_subcap, nb), stderr);
-    fputs(" cap50=", stderr);
-    fputs(scr_utoa((size_t)scr_pool_cap50, nb), stderr);
-    fputs(" clampSurvived=", stderr);
-    fputs(scr_utoa((size_t)scr_pool_clamp_survived, nb), stderr);
-    fputc('\n', stderr);
-  }
-#else
-  /* `freed` is counted above and only ever READ by the gated line, so a
-   * default build must say so or -Wunused-but-set-variable fires. The count
-   * itself stays: scr_stack_pool_decayed carries the same total and IS
-   * readable through scr_pool_stat() in every build. */
-  (void)freed;
-#endif /* SCR_ASYNC_STAT */
-  scr_stack_pool_lo = scr_stack_pool_n;
-}
-
-/* Drops every idle context. Called from the loop's teardown so a run that
- * ends with a warm pool does not read as a leak to the sanitized lane;
- * fibers still in flight are untouched (they are abandoned by design). */
-static void scr_fiber_pool_teardown(void) {
-  while (scr_stack_pool != NULL) {
-    ScrStack *s = scr_stack_pool;
-    scr_stack_pool = s->next;
-    scr_stack_free(s);
-  }
-  scr_stack_pool_n = 0;
-  SCR_FST_POOLED(0);
-  scr_stack_pool_lo = (size_t)-1;
-  scr_stack_pool_next_ms = 0;
-  /* SCR_LOOP_WAKE_STAT=1 prints the clamp accounting at loop teardown.
-   * ALWAYS prints when armed, all-zero lines included: a clamp that never
-   * fired and an instrument that never ran produce the same silence, and
-   * this file has already made that exact mistake once.
-   *
-   * THESE TWO fprintf CALLS WERE THE +33,280 BYTES. Guarded only by the
-   * getenv below, they were always linked, and they were the sole reason a
-   * default binary pulled in printf formatting at all -- main's only other
-   * fprintf pair sits behind `#ifdef SCR_LOOP_WHY` and never ships. Measured
-   * by PE section, not inferred: .text +28,160, .rdata +4,608, .pdata +512.
-   * They stay written with fprintf rather than being hand-rolled, because
-   * behind a compile-time gate the formatting cost is paid only by a build
-   * that asked for it, and %llu over six values is far clearer there. */
-#if SCR_ASYNC_STAT
-  if (getenv("SCR_LOOP_WAKE_STAT") != NULL) {
-    fprintf(stderr,
-            "[loopwake] turns=%llu clampEligible=%llu clampApplied=%llu"
-            " clampSurvived=%llu decayedTotal=%llu clamp=%d\n",
-            scr_loop_turns, scr_pool_clamp_elig, scr_pool_clamp_applied,
-            scr_pool_clamp_survived, scr_stack_pool_decayed,
-            scr_stack_pool_decay_clamp() ? 1 : 0);
-#ifdef _WIN32
-    fprintf(stderr, "[fiberpoison] poisoned=%llu unlocatable=%llu armed=%d",
-            scr_stack_poisoned, scr_stack_poison_unlocatable,
-            scr_stack_poison_on() ? 1 : 0);
-    fputs(scr_stack_poison_on() && scr_stack_poisoned == 0
-              ? " -- ARMED BUT POISONED NOTHING: no stack was ever reclaimed,"
-                " so this run does not test the claim at all.\n"
-              : "\n",
-          stderr);
-#endif
-    if (scr_pool_clamp_elig == 0) {
-      fputs("[loopwake] CLAMP NEVER ELIGIBLE - no sleep was ever longer than"
-            " the decay window, so this run does not exercise the clamp at"
-            " all. Not evidence either way.\n", stderr);
-    }
-  }
-#endif /* SCR_ASYNC_STAT */
 }
 
 /* -- returning free heap pages to the OS at the idle seam -------------
@@ -3412,6 +2035,13 @@ static size_t scr_heap_trim_ms(void) {
   return cached;
 }
 
+static bool __attribute__((unused)) scr_heap_trim_census_on(void) {
+  static bool once = false;
+  static bool cached = false;
+  if (!once) { cached = getenv("SCR_HEAP_TRIM_CENSUS") != NULL; once = true; }
+  return cached;
+}
+
 static bool scr_heap_trim_stat(void) {
   static bool once = false;
   static bool cached = false;
@@ -3419,12 +2049,6 @@ static bool scr_heap_trim_stat(void) {
   return cached;
 }
 
-static bool scr_heap_trim_census_on(void) {
-  static bool once = false;
-  static bool cached = false;
-  if (!once) { cached = getenv("SCR_HEAP_TRIM_CENSUS") != NULL; once = true; }
-  return cached;
-}
 
 /* How long the loop may sleep before the next trim window is due, or a
  * negative number when the knob is off and the sleep runs to its natural
@@ -3835,96 +2459,6 @@ static void scr_heap_trim(double now) {
 #endif
 }
 
-/* Frees a finished fiber's execution resources (the promise release and
- * bookkeeping stay at the call sites). The STACK does not die with the
- * task — it goes back to the pool, which is the whole point; only the
- * overflow past the cap is actually torn down. Releasing a stack whose
- * trampoline is parked is exactly as legal as the DeleteFiber this used to
- * do: a finished fiber has switched away and can never be current. */
-static void scr_fiber_destroy(ScrFiber *f) {
-  scr_stack_release(f->st);
-  scr_als_ctx_release(f->als);
-  free(f);
-}
-
-/* Spawns and EAGERLY runs an async body until its first suspension (JS's
- * synchronous-prefix rule). Returns the fiber's promise, +1. */
-ScrPromise *scr_async_spawn(void (*entry)(ScrFiber *, void *), void *argpack) {
-  ScrFiber *f = calloc(1, sizeof *f);
-  if (!f) scr_oom();
-  f->promise = scr_promise_new();
-  f->entry = entry;
-  f->argpack = argpack;
-  SCR_FST_SPAWN(entry, 0);
-  /* AsyncLocalStorage: the child runs in the SPAWNER's context (Node's
-   * init-time capture); snapshots are immutable, so a retain suffices. */
-  f->als = scr_als_ctx_retain(*scr_als_active);
-  scr_fibers_live++;
-
-  f->st = scr_stack_acquire();
-#ifdef _WIN32
-  ScrCtx here = scr_win_self();
-#else
-  ucontext_t here;
-#endif
-  f->return_to = &here;
-  ScrFiber *spawner = scr_current;
-  scr_switch(&here, &f->st->ctx, f);
-  /* back: the fiber suspended or finished. The switch back targeted NULL
-   * (the child doesn't know who spawned it), which pointed both the current
-   * fiber AND the exception machinery at main — restore the spawner's cell
-   * too, or a fiber that eagerly spawned another keeps throwing/catching
-   * against main's cell and completes with its own cell empty (a phantom
-   * `undefined` rejection while the real payload leaks). */
-  scr_current = spawner;
-  scr_exc_swap_cell(spawner ? &spawner->exc : NULL);
-  scr_als_active = spawner ? &spawner->als : &scr_als_main_slot;
-  ScrPromise *result = scr_promise_retain(f->promise);
-  if (f->done) {
-    scr_promise_release(f->promise);
-    scr_fiber_destroy(f);
-    scr_fibers_live--;
-  }
-  return result;
-}
-
-/* Parks the current fiber on `p` until it settles. Only fibers await. */
-static void scr_await_park(ScrPromise *p) {
-  ScrFiber *self = scr_current;
-  if (!self) {
-    fputs("scriptc: internal error: await outside an async function\n", stderr);
-    abort();
-  }
-  p = scr_prom_reg_target(p);
-  scr_prom_wadd(p, self);
-  SCR_FST_PARK_IN(self->entry);
-  scr_switch(&self->st->ctx, self->return_to, NULL);
-  SCR_FST_PARK_OUT(self->entry);
-  /* Resumed by the loop: return_to must now point at the loop's context. */
-}
-
-/* One microtask hop: park the current fiber on the READY queue itself and
- * yield. JS's `await` ALWAYS suspends — even on an already-settled promise
- * the continuation runs as a microtask — so without this hop an awaiter of
- * a settled promise would continue synchronously inside the spawner,
- * observably earlier than Node (corpus 1428 pins the ordering). */
-static void scr_await_yield(void) {
-  ScrFiber *self = scr_current;
-  if (!self) {
-    fputs("scriptc: internal error: await outside an async function\n", stderr);
-    abort();
-  }
-  scr_ready_push(self);
-  SCR_FST_YIELD_IN(self->entry);
-  scr_switch(&self->st->ctx, self->return_to, NULL);
-  SCR_FST_YIELD_OUT(self->entry);
-}
-
-/* The emitted promise-or-absent await's unit arm (`await u` where u holds
- * undefined/null): JS awaits non-thenables through exactly one microtask
- * turn — the same hop a settled promise takes. */
-void scr_await_hop(void) { scr_await_yield(); }
-
 /* Copies a rejection into the active execution context's exception cell.
  * The payload is RETAINED, not moved — a promise can be awaited more than
  * once, and the executable's top-level completion probe consumes the same
@@ -3976,43 +2510,14 @@ static bool scr_tick_poison(void) {
   return on != 0;
 }
 
-/* Await result extraction. Rejection re-throws into the awaiter. */
-static bool scr_await_settled(ScrPromise *p) {
-  if (p->state != SCR_PROM_PENDING) {
-    scr_await_yield();
-    if (scr_tick_poison()) scr_await_yield();
-  }
-  while (p->state == SCR_PROM_PENDING) scr_await_park(p);
-  scr_prom_observe(p);
-  if (p->state == SCR_PROM_REJECTED) {
-    scr_promise_rethrow(p);
-    return false;
-  }
-  return true;
-}
-
-double scr_await_f64(ScrPromise *p) {
-  if (!scr_await_settled(p)) return 0;
-  SCR_PROM_SCALAR_KIND(p, SCR_EXC_F64);
-  return p->f64;
-}
-bool scr_await_bool(ScrPromise *p) {
-  if (!scr_await_settled(p)) return false;
-  SCR_PROM_SCALAR_KIND(p, SCR_EXC_BOOL);
-  return p->b;
-}
-void *scr_await_ref(ScrPromise *p) {
-  return scr_await_settled(p) && p->payload ? PV(p)->retain(p->payload) : NULL;
-}
-void scr_await_void(ScrPromise *p) { scr_await_settled(p); }
-
-/* ECMAScript's INTERNAL module-dependency wait. Unlike a user-authored
- * await, an already-completed dependency does not introduce a promise-job
- * hop: the evaluator continues synchronously into the importer. A pending
- * dependency still parks this module fiber, and rejection propagates into
- * it exactly like an ordinary await. */
+/* ECMAScript's INTERNAL module-dependency wait, on a SETTLED dependency: an already-completed dependency does not introduce a promise-job hop,
+ * so the evaluator observes it in this turn and a rejection propagates like an ordinary await. A pending dependency is awaited by the
+ * initialiser's own state machine (lower-modules: `module.pending` guards the await), never here. */
 void scr_module_await(ScrPromise *p) {
-  while (p->state == SCR_PROM_PENDING) scr_await_park(p);
+  if (p->state == SCR_PROM_PENDING) {
+    fputs("scriptc: internal error: module dependency wait on a pending promise\n", stderr);
+    abort();
+  }
   scr_prom_observe(p);
   if (p->state == SCR_PROM_REJECTED) scr_promise_rethrow(p);
 }
@@ -4102,9 +2607,6 @@ void scr_promise_fulfill_str(ScrPromise *p, ScrStr *v) {
   p->payload = v; /* ownership moves in */
   p->vt = scr_prom_vt_intern((void *(*)(void *))scr_str_retain, (void (*)(void *))scr_str_release, NULL);
   scr_promise_settle_wake(p);
-}
-ScrStr *scr_await_str(ScrPromise *p) {
-  return scr_await_settled(p) && p->payload ? scr_str_retain((ScrStr *)p->payload) : NULL;
 }
 
 /* REJECTS `p` with the exception pending in the ACTIVE cell (moved out —
@@ -4733,30 +3235,9 @@ static void scr_resume_fiber(ScrFiber *f) {
     scr_closure_release(cb);
     return;
   }
-#ifdef _WIN32
-  /* The loop runs on the main stack; make sure scr_loop_ctx names its
-   * fiber handle (a no-op after the first conversion). */
-  (void)scr_win_self();
-#endif
-  f->return_to = &scr_loop_ctx;
-  ScrGen *g = f->gen; /* read BEFORE the switch: the finish path clears it */
-  scr_switch(&scr_loop_ctx, &f->st->ctx, f);
-  if (f->done) {
-    if (g != NULL) {
-      /* An ASYNC generator body that ran to completion on a LOOP resume
-       * (it had parked on an await). The ScrGen owns the fiber, so the
-       * async teardown below would free a fiber the handle still points
-       * at; hand the handle its own teardown instead. scr_fiber_finish
-       * already settled the pending promise. */
-      scr_gen_fiber_completed(g);
-      scr_fiber_destroy(f);
-      scr_fibers_live--;
-      return;
-    }
-    scr_promise_release(f->promise);
-    scr_fiber_destroy(f);
-    scr_fibers_live--;
-  }
+  /* An empty envelope cannot be queued: every producer fills micro_raw or micro_cb. */
+  free(f);
+  abort();
 }
 
 /* Reap granularity while children are pending on the POLLING fallback:
@@ -4781,39 +3262,6 @@ static void scr_resume_fiber(ScrFiber *f) {
  * the wake pipe and fd 0 directly. */
 #define SCR_SIGNAL_POLL_MS 50.0
 
-/* THE CAP THE SLEEP ARMS BELOW WILL ACTUALLY IMPOSE on this turn, given what
- * is pending. 0 means nothing caps.
- *
- * ONE function with TWO callers, and that is the whole point. The floor that
- * stops the decay shortening the poll, and the counter that detects it
- * shortening the poll anyway, used to be two separate constants -- and they
- * disagreed. The floor took SCR_CHILD_POLL_MS (1 ms) while two paths cap at
- * SCR_SIGNAL_POLL_MS (50 ms), so the decay could shorten a 50 ms sleep to 1 ms
- * and the counter, testing against that same wrong 1 ms, recorded nothing.
- *
- * A detector that shares its subject's mistake reads zero for exactly the
- * reason the defect exists, and a zero like that is worse than no counter: it
- * was read as a satisfied control. Both callers now move together, or neither
- * does, whatever path is added next.
- *
- * Mirrors the arms below exactly:
- *   io      : else-if, so kids wins; otherwise the coarse signal cap
- *   non-io  : three caps applied in SEQUENCE, so the TIGHTEST wins
- *   kids    : its own arm, child cap */
-static double scr_loop_poll_cap_ms(bool io, bool kids, bool net, bool dgram,
-                                   bool watch, bool evw) {
-  if (io) {
-    if (kids) return SCR_CHILD_POLL_MS;
-    if (evw || net || dgram || watch) return SCR_SIGNAL_POLL_MS;
-    return 0.0;
-  }
-  if (evw || net || dgram || watch) {
-    if (net || dgram || watch || kids) return SCR_CHILD_POLL_MS;
-    return SCR_SIGNAL_POLL_MS; /* evw alone */
-  }
-  if (kids) return SCR_CHILD_POLL_MS;
-  return 0.0;
-}
 
 
 /* The loop's idle sleep.
@@ -5433,10 +3881,6 @@ static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed, bool cjs_ent
     /* Hoisted above the decay-due block: the floor that block applies has to
      * know every predicate that will later cap the sleep. */
     bool evw = scr_events_watching_fn != NULL && scr_events_watching_fn();
-    /* The loop has no runnable work at this point and is about to block:
-     * the one place a fiber-stack trim can never race a switch. */
-    scr_loop_turns++;
-    scr_fiber_pool_decay(now);
     /* And the same seam for the heap itself: the loop is about to
      * block, so a heap-wide walk cannot land between two allocations
      * of one turn. Off unless SCR_HEAP_TRIM_MS says otherwise. */
@@ -5451,78 +3895,6 @@ static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed, bool cjs_ent
     /* And the string pool, same seam, same no-clamp rule. */
     scr_str_idle_drain_tick(now);
     double due = scr_ntimers > 0 ? scr_timers[0].deadline_ms : now + SCR_IO_POLL_MS;
-    /* A pool with entries left to free caps the sleep at its next window;
-     * an empty one does not (see scr_stack_pool_decay_due). */
-    double pool_clamp_due = -1.0; /* the value the clamp set, if it fired */
-    {
-      double pool_due = scr_stack_pool_decay_due(now);
-      /* THE DECAY WAKES THE LOOP, BUT NEVER SHORTENS THE POLL.
-       *
-       * The old clamp set `due = pool_due` outright, which near a window is
-       * BELOW the ~1 ms cap the I/O arms impose -- extra sub-millisecond
-       * turns, extra drain passes, and socket emits reordered against short
-       * timers. That reordering is what broke pairing (1e41c351e), so the
-       * clamp was defaulted off -- and with it off a process with no pending
-       * I/O has no natural wakeup to ride and sleeps through windows.
-       *
-       * Both properties at once: floor the decay deadline at the cap that
-       * WILL be applied below. With I/O pending the cap already wakes the
-       * loop far more often than a 5 s window needs, so the decay asks for
-       * nothing and cannot reorder anything. With no I/O pending there is no
-       * cap, the floor is zero, and the decay deadline governs -- which is
-       * the case the clamp existed for and the case its removal lost.
-       *
-       * The decay does not need sub-millisecond precision. It needs to fire
-       * within its window, not within a fraction of the poll granularity. */
-      /* The cap the arms below WILL impose, computed once per turn and used
-       * by both the floor and the sub-cap counter. cap50 counts the turns
-       * that take the COARSE cap -- it exists to tell "the 50 ms path never
-       * happened" apart from "it happened and the floor covered it", which a
-       * subcap of zero cannot distinguish on its own. */
-      double poll_cap = scr_loop_poll_cap_ms(io, kids, net, dgram, watch, evw);
-      if (poll_cap == SCR_SIGNAL_POLL_MS) scr_pool_cap50++;
-      /* THE FLOOR IS THE CAP. It used to be SCR_CHILD_POLL_MS for every
-       * pending predicate, which is right for the socket and child arms and
-       * wrong for the two that cap at SCR_SIGNAL_POLL_MS: there the arm
-       * intends a 50 ms sleep and the floor only promised 1 ms, so the decay
-       * could still shorten the poll 50x -- the same shortening, at 1/50th
-       * the magnitude, that the clamp was disabled for.
-       *
-       * MEASURED on the dynamic probe, which is the build that can reach it
-       * (`io` is registered only by the island, scr_island.c:556, so a fully
-       * static program never takes that arm): with the old 1 ms floor the
-       * shipping default produced cap50=8 subcap=2 -- two turns shortened
-       * below the cap WITH the floor on, which the old counter reported as
-       * zero because it tested against the same wrong constant. */
-      double wake_floor = poll_cap;
-      /* SCR_FIBER_POOL_DECAY_CLAMP=1 restores the UNFLOORED pre-fix wake, so
-       * the arm that reintroduces the pairing hazard stays reachable for an
-       * A/B on one binary. Default 0 is the floored wake. */
-      double pool_wake = scr_stack_pool_decay_clamp()
-                             ? pool_due
-                             : (pool_due > now + wake_floor ? pool_due : now + wake_floor);
-      if (pool_due >= 0 && pool_wake < due) {
-        /* `elig` records that the decay WANTED this turn shortened; `applied`
-         * that it got it. With the floor on and I/O pending the two diverge,
-         * which is the fix working rather than the decay being idle. */
-        scr_pool_clamp_elig++;
-        due = pool_wake;
-        pool_clamp_due = pool_wake;
-        scr_pool_clamp_applied++;
-        /* THE HAZARD, counted directly: a sleep shorter than the cap the I/O
-         * arms will impose is an extra sub-cap turn, and extra drain passes
-         * reorder a socket emit past a short timer. Must be 0 with the floor
-         * on; the unfloored arm is what makes it non-zero. */
-        /* AGAINST THE REAL CAP for this turn's predicates, not a constant.
-         * The floor above still takes SCR_CHILD_POLL_MS, so on the two paths
-         * that cap at SCR_SIGNAL_POLL_MS this now counts what it previously
-         * could not see -- which is the point of fixing the detector before
-         * the defect rather than after. */
-        {
-          if (poll_cap > 0.0 && due < now + poll_cap) scr_pool_subcap++;
-        }
-      }
-    }
     /* Likewise the heap trim: a turn that sleeps past its window is a
      * window that never ran (see scr_heap_trim_due). */
     {
@@ -5664,14 +4036,6 @@ static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed, bool cjs_ent
         now = due;
       }
     }
-    /* DID THE CLAMP ACTUALLY DECIDE THE SLEEP? Every later cap only ever
-     * LOWERS `due`, so the clamp survived iff `due` is still the exact value
-     * it set. Checked HERE because this is the single point at which `due` is
-     * final for the turn: the io, events/net and children branches each apply
-     * their own caps inside themselves, and the immediates check zeroes it
-     * earlier. Exact double comparison is correct rather than sloppy -- a
-     * surviving value is the same double copied through, never recomputed. */
-    if (pool_clamp_due >= 0 && due == pool_clamp_due) scr_pool_clamp_survived++;
     while (scr_ntimers > 0 && scr_timers[0].deadline_ms <= now) {
       ScrTimer t = scr_timer_pop();
       /* Timer callbacks are plain sync closures, run on the main stack.
@@ -5762,7 +4126,6 @@ static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed, bool cjs_ent
   scr_children_teardown();
   scr_fibers_abandoned = scr_fibers_live;
   scr_note_abandoned_fibers(scr_fibers_abandoned);
-  scr_fiber_pool_teardown();
   return rejection_failed;
 }
 
@@ -5968,8 +4331,6 @@ void scr_resolve_ref_impl(ScrClosure *self, void *v, void *(*retain)(void *), vo
 
 /* ── emitter support ──────────────────────────────────────────────────── */
 
-ScrPromise *scr_fiber_promise(ScrFiber *f) { return f->promise; }
-
 /* Generalized resolve construction: `fn` is an emitted thunk with closure
  * calling convention (self, value) that forwards to scr_resolve_ref_impl
  * with the concrete RC helpers. */
@@ -6165,31 +4526,6 @@ static void scr_exc_cell_drop(ScrExcCell *c) {
   c->trace_fn = NULL;
 }
 
-ScrGen *scr_gen_new(void (*entry)(ScrFiber *, void *), void *argpack,
-                     void (*drop_args)(void *)) {
-  ScrGen *g = calloc(1, sizeof *g);
-  if (!g) scr_oom();
-  g->rc = 1;
-  g->state = SCR_GEN_UNSTARTED;
-  g->drop_args = drop_args;
-  scr_obj_alloc_note();
-
-  ScrFiber *f = calloc(1, sizeof *f);
-  if (!f) scr_oom();
-  f->gen = g;
-  f->entry = entry;
-  SCR_FST_SPAWN(entry, 1);
-  f->argpack = argpack; /* owned by the fiber start; drop_args if never started */
-  /* AsyncLocalStorage: generator bodies run in their CREATOR's context
-   * (the spawn-inheritance stance; resumes swap it active like any
-   * fiber switch). */
-  f->als = scr_als_ctx_retain(*scr_als_active);
-  scr_fibers_live++;
-  f->st = scr_stack_acquire();
-  g->fiber = f;
-  return g;
-}
-
 ScrGen *scr_gen_retain(ScrGen *g) {
   if (g) g->rc++;
   return g;
@@ -6289,26 +4625,8 @@ void scr_gen_release(ScrGen *g) {
       }
       g->frame = NULL;
     }
-  } else
-#endif /* SCR_CORO_LANE */
-  if (g->fiber != NULL) {
-    if (g->state == SCR_GEN_UNSTARTED) {
-      /* Never ran: nothing on the stack owns anything — clean teardown.
-       * The packed arguments (+1 each) drop through the emitted helper. */
-      if (g->drop_args != NULL) g->drop_args(g->fiber->argpack);
-      else free(g->fiber->argpack);
-      scr_fiber_destroy(g->fiber);
-      scr_fibers_live--;
-    } else {
-      /* Suspended: the stack holds live locals — unwinding would run user
-       * finally blocks Node's GC never runs, so the fiber is deliberately
-       * ABANDONED (it stays in the live count; a program that drops a
-       * suspended generator gets the abandoned-fiber audit note, the
-       * loop-exhaustion story). The fiber's back-pointer clears so a
-       * dangling resume can never reach the freed ScrGen. */
-      g->fiber->gen = NULL;
-    }
   }
+#endif /* SCR_CORO_LANE */
   scr_obj_free_note();
   free(g);
 }
@@ -6317,7 +4635,6 @@ void *scr_gen_retain_v(void *g) { return scr_gen_retain((ScrGen *)g); }
 void scr_gen_release_v(void *g) { scr_gen_release((ScrGen *)g); }
 
 bool scr_gen_done(ScrGen *g) { return g->state == SCR_GEN_DONE; }
-ScrGen *scr_gen_of_fiber(ScrFiber *f) { return f->gen; }
 
 /* Slot setters (release the previous occupant; payloads MOVE in). */
 static void scr_gen_slot_f64(ScrGenSlot *s, double v) {
@@ -6382,40 +4699,6 @@ double scr_gen_take_out_f64(ScrGen *g) { return scr_gen_slot_take_f64(&g->out); 
 bool scr_gen_take_out_bool(ScrGen *g) { return scr_gen_slot_take_bool(&g->out); }
 void *scr_gen_take_out_ref(ScrGen *g) { return scr_gen_slot_take_ref(&g->out); }
 
-/* The running fiber's generator — the body-side helpers' anchor. */
-static ScrGen *scr_gen_self(void) {
-  ScrGen *g = scr_current != NULL ? scr_current->gen : NULL;
-  if (g == NULL) {
-    fputs("scriptc: internal error: yield outside a generator\n", stderr);
-    abort();
-  }
-  return g;
-}
-
-double scr_gen_take_in_f64(void) { return scr_gen_slot_take_f64(&scr_gen_self()->in); }
-bool scr_gen_take_in_bool(void) { return scr_gen_slot_take_bool(&scr_gen_self()->in); }
-void *scr_gen_take_in_ref(void) { return scr_gen_slot_take_ref(&scr_gen_self()->in); }
-
-/* yield: park the value in OUT and hop back to the resumer. Control
- * returns here at the next resume — possibly with an injected .throw
- * payload or the GENRET sentinel pending (the emitted check handles it). */
-static void scr_gen_yield_switch(void) {
-  ScrFiber *self = scr_current;
-  scr_switch(&self->st->ctx, self->return_to, NULL);
-}
-void scr_gen_yield_f64(double v) {
-  scr_gen_slot_f64(&scr_gen_self()->out, v);
-  scr_gen_yield_switch();
-}
-void scr_gen_yield_bool(bool v) {
-  scr_gen_slot_bool(&scr_gen_self()->out, v);
-  scr_gen_yield_switch();
-}
-void scr_gen_yield_ref(void *v, void (*release)(void *)) {
-  scr_gen_slot_ref(&scr_gen_self()->out, v, release);
-  scr_gen_yield_switch();
-}
-
 bool scr_exc_genret_pending(void) {
   return scr_exc_current_cell()->kind == SCR_EXC_GENRET;
 }
@@ -6467,12 +4750,6 @@ void scr_gen_ret_to_out(ScrGen *g) {
  * promise.
  */
 
-static void scr_gen_fiber_completed(ScrGen *g) {
-  g->state = SCR_GEN_DONE;
-  g->fiber = NULL;
-}
-
-static bool scr_gen_is_async(ScrGen *g) { return g->settle != NULL; }
 
 /* The completion epilogue, called from scr_fiber_finish while still ON the
  * dying fiber. The emitted trampoline has already stored the completion
@@ -6523,14 +4800,6 @@ static void scr_agen_finish_gen(ScrGen *g, ScrExcCell *cell) {
   scr_promise_release(p);
 }
 
-ScrGen *scr_agen_new(void (*entry)(ScrFiber *, void *), void *argpack,
-                     void (*drop_args)(void *),
-                     void (*settle)(ScrGen *, ScrPromise *)) {
-  ScrGen *g = scr_gen_new(entry, argpack, drop_args);
-  g->settle = settle;
-  return g;
-}
-
 #ifdef SCR_CORO_LANE
 static void scr_agen_coro_step(ScrGen *g, int inject);
 #endif
@@ -6547,71 +4816,17 @@ static void scr_agen_drop_unstarted(ScrGen *g) {
     return;
   }
 #endif
-  if (g->drop_args != NULL) g->drop_args(g->fiber->argpack);
-  else free(g->fiber->argpack);
-  scr_fiber_destroy(g->fiber);
-  g->fiber = NULL;
-  scr_fibers_live--;
   g->state = SCR_GEN_DONE;
 }
 
-static void scr_agen_switch_in(ScrGen *g);
-
-/* The consumer->body hop for an async generator, whichever backing it has. `inject`: 0 = a plain next(), 1 = return() (the GENRET sentinel
- * goes in the body's cell), 2 = throw() (the payload pending in the CALLER's cell moves into the body's). A frame-backed body takes the
- * sentinel and the payload inside the INV-5 window (scr_gen_coro_step), a fiber's cell is written here. */
+/* The consumer->body hop for an async generator: always the frame's step. `inject`: 0 = a plain next(), 1 = return(), 2 = throw(). */
 static void scr_agen_enter(ScrGen *g, int inject) {
 #ifdef SCR_CORO_LANE
-  if (g->backing == SCR_GEN_BACKED_FRAME) {
-    scr_agen_coro_step(g, inject);
-    return;
-  }
-#endif
-  if (inject == 1) {
-    if (g->fiber->exc.kind == SCR_EXC_NONE) g->fiber->exc.kind = SCR_EXC_GENRET;
-  } else if (inject == 2) {
-    scr_exc_cell_move(&g->fiber->exc, scr_exc_current_cell());
-  }
-  scr_agen_switch_in(g);
-}
-
-/* The consumer->fiber hop for an async generator. Unlike the synchronous
- * scr_gen_switch_in this never moves an exception into the resumer: an
- * async generator reports failure through its promise, never by throwing
- * at the .next() call site. */
-static void scr_agen_switch_in(ScrGen *g) {
-  ScrFiber *f = g->fiber;
-  scr_gen_retain(g);
-  g->state = SCR_GEN_RUNNING;
-#ifdef _WIN32
-  ScrCtx here = scr_win_self();
+  scr_agen_coro_step(g, inject);
 #else
-  ucontext_t here;
+  (void)g; (void)inject;
+  abort(); /* an async generator is a frame, and a frame links scr_coro.c (SCR_CORO_LANE) */
 #endif
-  f->return_to = &here;
-  ScrFiber *me = scr_current;
-  /* The CALLER's cell and ALS slot, saved and restored exactly: a stackless consumer frame has installed its own, which is neither `me`'s nor
-   * main's, and the switch back would otherwise leave main's active. */
-  ScrExcCell *cell_saved = scr_exc_current_cell();
-  ScrAlsCtx **als_saved = scr_als_active;
-  scr_switch(&here, &f->st->ctx, f);
-  scr_current = me;
-  scr_exc_swap_cell(cell_saved);
-  scr_als_active = als_saved;
-  if (f->done) {
-    /* Completed synchronously inside this resume; scr_fiber_finish already
-     * settled the promise. */
-    scr_gen_fiber_completed(g);
-    scr_fiber_destroy(f);
-    scr_fibers_live--;
-  } else {
-    /* Either parked at a yield (promise already settled) or parked on an
-     * await (promise still pending, fiber owned by the loop). Both read as
-     * SUSPENDED to a later resume, and a later resume cannot happen before
-     * the promise settles because the consumer awaits it. */
-    g->state = SCR_GEN_SUSPENDED;
-  }
-  scr_gen_release(g);
 }
 
 /* Arms a fresh request promise. Aborts rather than overwrite one already
@@ -6787,97 +5002,6 @@ ScrPromise *scr_agen_throw(ScrGen *g) {
   }
   }
 }
-
-/* yield, body side. JS's AsyncGeneratorYield awaits its operand before
- * answering the request, which is one microtask turn even for a plain
- * value — that hop is why awaiting g.next() costs exactly one turn more
- * than awaiting a plain async call (measured against Node v25.9.0, not
- * assumed). Taking it here, BEFORE settling, is also what lets the
- * consumer's own await park first, so the settlement always wakes a
- * waiter rather than racing one. */
-static void scr_agen_yield_settle(void) {
-  ScrGen *g = scr_gen_self();
-  /* The hop is no longer taken here: the lowering emits it as an explicit `async.hop` before the yield (lower-generators.ts), so the
-   * fiber lane and the stackless lane both take it as an ordinary suspension. */
-  if (g->sink != NULL) {
-    /* A NATIVE consumer: the value stays in OUT and the envelope hands it
-     * over on the NEXT microtask turn, on the main stack. Calling the sink
-     * from here would run it on this fiber's stack, inside the yield —
-     * and a stream sink pulls again, which would re-enter the very
-     * generator that is suspended one frame below. */
-    scr_agen_sink_schedule(g);
-    scr_gen_yield_switch();
-    return;
-  }
-  ScrPromise *p = g->pending;
-  g->pending = NULL;
-  if (p != NULL) {
-    g->settle(g, p); /* { value: OUT, done: false } — state is not DONE */
-    scr_promise_release(p);
-  } else {
-    scr_gen_slot_reset(&g->out);
-  }
-  scr_gen_yield_switch();
-}
-
-void scr_agen_yield_f64(double v) {
-  scr_gen_slot_f64(&scr_gen_self()->out, v);
-  scr_agen_yield_settle();
-}
-void scr_agen_yield_bool(bool v) {
-  scr_gen_slot_bool(&scr_gen_self()->out, v);
-  scr_agen_yield_settle();
-}
-void scr_agen_yield_ref(void *v, void (*release)(void *)) {
-  scr_gen_slot_ref(&scr_gen_self()->out, v, release);
-  scr_agen_yield_settle();
-}
-
-/* The consumer→fiber hop shared by every resume mode: switches in, and on
- * the way back moves a pending body exception into the RESUMER's cell
- * (synchronous propagation — the await-rethrow analog) and tears down a
- * finished fiber. The gen is retained across the hop so a body that
- * releases the consumer's last reference cannot free it mid-run. */
-static void scr_gen_switch_in(ScrGen *g) {
-  ScrFiber *f = g->fiber;
-  scr_gen_retain(g);
-  g->state = SCR_GEN_RUNNING;
-#ifdef _WIN32
-  ScrCtx here = scr_win_self();
-#else
-  ucontext_t here;
-#endif
-  f->return_to = &here;
-  ScrFiber *me = scr_current;
-  ScrExcCell *cell_saved = scr_exc_current_cell(); /* see scr_agen_switch_in: a frame consumer's own cell and ALS slot */
-  ScrAlsCtx **als_saved = scr_als_active;
-  scr_switch(&here, &f->st->ctx, f);
-  /* Back on the consumer: restore identity + the consumer's cell (the
-   * yield/finish switch targeted NULL — main's cell). */
-  scr_current = me;
-  scr_exc_swap_cell(cell_saved);
-  scr_als_active = als_saved;
-  if (f->done) {
-    g->state = SCR_GEN_DONE;
-    if (f->exc.kind != SCR_EXC_NONE) {
-      /* The body's exception escaped: move it into the resumer's cell
-       * (replace semantics match a throw at the resume site; the resumer's
-       * cell is clean here — a pending exception cannot reach a resume). */
-      ScrExcCell *mine = scr_exc_current_cell();
-      *mine = f->exc;
-      f->exc.kind = SCR_EXC_NONE;
-      f->exc.payload = NULL;
-      f->exc.trace_fn = NULL;
-    }
-    scr_fiber_destroy(f);
-    g->fiber = NULL;
-    scr_fibers_live--;
-  } else {
-    g->state = SCR_GEN_SUSPENDED;
-  }
-  scr_gen_release(g);
-}
-
 
 #ifdef SCR_CORO_LANE
 /* ── SYNCHRONOUS GENERATORS BACKED BY A FRAME ─────────────────────────
@@ -7233,13 +5357,8 @@ void scr_gen_resume(ScrGen *g) {
     return;
   default:
 #ifdef SCR_CORO_LANE
-    if (g->backing == SCR_GEN_BACKED_FRAME) {
-      scr_gen_coro_step(g, SCR_GEN_INJECT_NONE, false);
-    } else
+    scr_gen_coro_step(g, SCR_GEN_INJECT_NONE, false);
 #endif
-    {
-      scr_gen_switch_in(g);
-    }
   }
 }
 
@@ -7266,13 +5385,6 @@ void scr_gen_resume_return(ScrGen *g) {
       return;
     }
 #endif
-    if (g->drop_args != NULL) g->drop_args(g->fiber->argpack);
-    else free(g->fiber->argpack);
-    scr_fiber_destroy(g->fiber);
-    g->fiber = NULL;
-    scr_fibers_live--;
-    g->state = SCR_GEN_DONE;
-    scr_gen_ret_to_out(g);
     return;
   default:
     /* Suspended at a yield: inject the sentinel (an earlier .return whose
@@ -7286,8 +5398,6 @@ void scr_gen_resume_return(ScrGen *g) {
       return;
     }
 #endif
-    if (g->fiber->exc.kind == SCR_EXC_NONE) g->fiber->exc.kind = SCR_EXC_GENRET;
-    scr_gen_switch_in(g);
   }
 }
 
@@ -7315,12 +5425,6 @@ void scr_gen_resume_throw(ScrGen *g) {
       return;
     }
 #endif
-    if (g->drop_args != NULL) g->drop_args(g->fiber->argpack);
-    else free(g->fiber->argpack);
-    scr_fiber_destroy(g->fiber);
-    g->fiber = NULL;
-    scr_fibers_live--;
-    g->state = SCR_GEN_DONE;
     return;
   default: {
     /* Move the caller's pending payload into the fiber's cell (an
@@ -7335,19 +5439,6 @@ void scr_gen_resume_throw(ScrGen *g) {
       return;
     }
 #endif
-    ScrExcCell *mine = scr_exc_current_cell();
-    ScrExcCell *dst = &g->fiber->exc;
-    dst->kind = mine->kind;
-    dst->f64 = mine->f64;
-    dst->b = mine->b;
-    dst->payload = mine->payload;
-    dst->retain_fn = mine->retain_fn;
-    dst->release_fn = mine->release_fn;
-    dst->trace_fn = mine->trace_fn;
-    mine->kind = SCR_EXC_NONE;
-    mine->payload = NULL;
-    mine->trace_fn = NULL;
-    scr_gen_switch_in(g);
   }
   }
 }
