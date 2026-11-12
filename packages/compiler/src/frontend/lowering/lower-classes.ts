@@ -9615,7 +9615,13 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
           // A method that reads `arguments` (its parameter is the variadic dyn pack) is a value too: unboundMethodThunk's own admission.
           const variadicOnly = found.sig.params.some((q) => q.mode === "dynRest") && found.sig.params.every((q) => q.mode === "required" || q.mode === "omittable" || q.mode === "dynRest");
           if (found.sig.abstract === true || (found.sig.params.some((q) => q.mode !== "required" && q.mode !== "omittable") && !(variadicOnly && !L.overrideBelow(info, lname)))) continue;
-          thunk = unboundMethodThunk(L, info, lname, found, lloc, true);
+          // A refused detached variant has recorded its diagnostic: the poison ends this thunk, the program is reported, not killed.
+          try {
+            thunk = unboundMethodThunk(L, info, lname, found, lloc, true);
+          } catch (e) {
+            if (!(e instanceof PoisonError)) throw e;
+            continue;
+          }
         } else {
           // An implicit-any late method (ioredis' `Pipeline.prototype.exec = function (callback)`): its default instance's closure.
           const generic = unboundGenericClosures(L, info.decl!, info, lname, false);
@@ -9659,7 +9665,12 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
         const found = L.findMethodOn(info, mName);
         if (found === null || found.sig.abstract === true) continue;
         if (found.sig.params.some((q) => q.mode !== "required" && q.mode !== "omittable")) continue;
-        unboundMethodThunk(L, info, mName, found, { file: info.decl?.getSourceFile().fileName ?? "%dynbox", start: 0, end: 0 }, true);
+        // Same: the diagnostic is recorded, the poison ends this thunk only.
+        try {
+          unboundMethodThunk(L, info, mName, found, { file: info.decl?.getSourceFile().fileName ?? "%dynbox", start: 0, end: 0 }, true);
+        } catch (e) {
+          if (!(e instanceof PoisonError)) throw e;
+        }
       }
     }
     // The write half of the same box (see dynSetFn): every class a dyn box
