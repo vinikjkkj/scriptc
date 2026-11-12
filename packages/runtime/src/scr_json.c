@@ -532,8 +532,35 @@ void scr_dyn_from_leave(void) {
  * in the audit lane so ASan sees real frees and the live count stays a
  * strict alloc/free balance.
  */
+/* A node is allocated at the size its KIND needs, not at sizeof(ScrDyn): the header (rc, kind, flags) is 16 bytes and the payload union is as
+ * wide as its widest arm (the function box, 32), but a number, string, bool or bytes box uses 8 of those, a handle or class instance 16, and an
+ * array, object, map or proxy 24. The size is therefore a function of the kind, fixed at alloc, and a node never changes kind, so the free
+ * lists are split by size class and a recycled node is always the size its new kind wants. Nothing may read a payload arm wider than the
+ * node's kind owns: every reader of v.* tests `kind` first, and the audit lane (malloc per node, ASan) is what proves it. */
+#define SCR_DYN_ARMS(X) \
+  X(SCR_DYN_NULL, 1) X(SCR_DYN_BOOL, 1) X(SCR_DYN_NUM, 8) X(SCR_DYN_STR, 8) X(SCR_DYN_ARR, 24) X(SCR_DYN_OBJ, 24) X(SCR_DYN_UNDEF, 1) \
+  X(SCR_DYN_BYTES, 8) X(SCR_DYN_FUNC, 32) X(SCR_DYN_HANDLE, 16) X(SCR_DYN_PROMISE, 8) X(SCR_DYN_JSVAL, 8) X(SCR_DYN_OBJINST, 16) \
+  X(SCR_DYN_ARRBUF, 8) X(SCR_DYN_BIG, 8) X(SCR_DYN_MAP, 24) X(SCR_DYN_PROXY, 24)
+#define SCR_DYN_ARM_ROW(k, n) [k] = n,
+static const uint8_t scr_dyn_arm_bytes[SCR_DYN_KIND_COUNT] = {SCR_DYN_ARMS(SCR_DYN_ARM_ROW)};
+_Static_assert(sizeof(((ScrDyn *)0)->v) == 32, "the widest arm is the function box");
+_Static_assert(sizeof(((ScrDyn *)0)->v.arr) == 24 && sizeof(((ScrDyn *)0)->v.obj) == 24, "arr and obj arms are 24 bytes");
+_Static_assert(sizeof(((ScrDyn *)0)->v.map) <= 24 && sizeof(((ScrDyn *)0)->v.proxy) <= 24, "map and proxy arms fit 24 bytes");
+_Static_assert(sizeof(((ScrDyn *)0)->v.handle) <= 16 && sizeof(((ScrDyn *)0)->v.inst) <= 16, "handle and instance arms fit 16 bytes");
+_Static_assert(sizeof(((ScrDyn *)0)->v.num) == 8 && sizeof(((ScrDyn *)0)->v.str) == 8 && sizeof(((ScrDyn *)0)->v.bytes) == 8 &&
+                   sizeof(((ScrDyn *)0)->v.promise) == 8 && sizeof(((ScrDyn *)0)->v.big) == 8,
+               "the scalar arms are one word");
+/* The arm's size in 8-byte words (1 to 4) and the free list a kind recycles on (0..3 by arm words, 4 arr, 5 obj), both fixed by the kind. */
+#define SCR_DYN_WORDS_ROW(k, n) [k] = ((n) + 7) / 8,
+static const uint8_t scr_dyn_arm_words[SCR_DYN_KIND_COUNT] = {SCR_DYN_ARMS(SCR_DYN_WORDS_ROW)};
+static inline size_t scr_dyn_node_bytes(ScrDynKind k) { return offsetof(ScrDyn, v) + (size_t)scr_dyn_arm_words[k] * 8u; }
+
 #ifndef SCR_RC_AUDIT
-static ScrDyn *scr_dyn_free_arr, *scr_dyn_free_obj, *scr_dyn_free_misc;
+/* arr and obj keep their own lists (they preserve the items/entries buffer); every other kind recycles by ARM size: 8, 16, 24 (map, proxy), 32. */
+static ScrDyn *scr_dyn_free_lists[6];
+#define SCR_DYN_FL_ROW(k, n) [k] = ((n) + 7) / 8 - 1,
+static const uint8_t scr_dyn_fl_idx[SCR_DYN_KIND_COUNT] = {SCR_DYN_ARMS(SCR_DYN_FL_ROW) [SCR_DYN_ARR] = 4, [SCR_DYN_OBJ] = 5};
+static inline ScrDyn **scr_dyn_free_list(ScrDynKind k) { return &scr_dyn_free_lists[scr_dyn_fl_idx[k]]; }
 static size_t scr_dyn_free_count;
 #define SCR_DYN_FREE_MAX 8192
 #endif
@@ -655,9 +682,7 @@ void scr_throw_dyn(ScrDyn *v) {
 
 static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
 #ifndef SCR_RC_AUDIT
-  ScrDyn **list = kind == SCR_DYN_ARR   ? &scr_dyn_free_arr
-                  : kind == SCR_DYN_OBJ ? &scr_dyn_free_obj
-                                        : &scr_dyn_free_misc;
+  ScrDyn **list = scr_dyn_free_list(kind);
   ScrDyn *d = *list;
   if (d) {
 #ifdef SCR_CYCEN_ON
@@ -693,7 +718,14 @@ static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
       d->v.obj.len = 0; /* cap/entries preserved */
       d->v.obj.ext = NULL; /* release already dropped it; belt and braces */
     } else {
-      memset(&d->v, 0, sizeof d->v);
+      /* Zero the arm this kind owns, word by word (a variable-length memset is a call). */
+      uint64_t *w = (uint64_t *)(void *)&d->v;
+      switch (scr_dyn_arm_words[kind]) {
+        case 4: w[3] = 0; /* fall through */
+        case 3: w[2] = 0; /* fall through */
+        case 2: w[1] = 0; /* fall through */
+        default: w[0] = 0;
+      }
     }
 #ifdef SCR_DYNCEN_ON
     scr_dyncen_note_alloc(d); /* the RECYCLED path: a node re-entering the
@@ -703,7 +735,7 @@ static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
     return d;
   }
 #endif
-  ScrDyn *fresh = scr_cyc_alloc(sizeof *fresh, &scr_dyn_trace, &scr_dyn_gcfree);
+  ScrDyn *fresh = scr_cyc_alloc(scr_dyn_node_bytes(kind), &scr_dyn_trace, &scr_dyn_gcfree);
   fresh->rc = 1;
   fresh->kind = kind;
 #ifdef SCR_DYNCEN_ON
@@ -994,9 +1026,7 @@ static __attribute__((noinline)) void scr_dyn_release_final(ScrDyn *d) {
 #endif
 #ifndef SCR_RC_AUDIT
   if (scr_dyn_free_count < SCR_DYN_FREE_MAX) {
-    ScrDyn **list = d->kind == SCR_DYN_ARR   ? &scr_dyn_free_arr
-                    : d->kind == SCR_DYN_OBJ ? &scr_dyn_free_obj
-                                             : &scr_dyn_free_misc;
+    ScrDyn **list = scr_dyn_free_list(d->kind);
 #ifdef SCR_CYCEN_ON
     /* The node is NOT freed at any level from here: it and its
      * items/entries buffer stay resident until the freelist is full. */
