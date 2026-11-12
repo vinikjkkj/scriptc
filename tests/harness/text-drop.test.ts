@@ -5,7 +5,8 @@
  * process's resident set, not system memory. The measured effect (redis bench: peak RSS 116.7 -> 104.8 MiB) is in the
  * commit; what is pinned HERE is the mechanism, deterministically:
  *
- *   knob on  -- exactly one `[textdrop] drop #1` line (a 600 ms program never reaches the 2 s repeat interval), with a residency after the drop no larger than before;
+ *   knob on  -- exactly one `[textdrop] drop #1` line from a 600 ms program (the first drop lands after the 200 ms delay and the next is due 500 ms later, past the program's end), with a residency after the drop no larger than before;
+ *   the repeat interval -- a program with idle seams for ~1.6 s drops again by default (the interval is 500 ms), and exactly once when SCR_TEXT_DROP_EVERY_MS=2000 (the previous default) or 0;
  *   SCR_TEXT_DROP=0 -- prints nothing at all (the negative control: a drop that found nothing still prints);
  *   a short program that exits before the delay pays nothing: no line even with the stat knob on;
  *   stdout is identical in every arm.
@@ -48,9 +49,11 @@ async function run(bin: string, env: Record<string, string>): Promise<{ stdout: 
 describe.skipIf(!linux)("the text drop fires once at the first idle seam, behind a knob", () => {
   let idle = "";
   let short = "";
+  let idleLong = "";
   beforeAll(async () => {
     idle = await build("idle");
     short = await build("short");
+    idleLong = await build("idle-long");
   }, 300_000);
 
   test("on: exactly one line, residency does not grow", async () => {
@@ -61,6 +64,19 @@ describe.skipIf(!linux)("the text drop fires once at the first idle seam, behind
     expect(m).not.toBeNull();
     expect(Number(m![1])).toBeGreaterThanOrEqual(1);
     expect(Number(m![3])).toBeLessThanOrEqual(Number(m![2]));
+  });
+
+  test("the repeat interval defaults to 500 ms: a 1.6 s program drops again, and 2000 or 0 drops once", async () => {
+    const dflt = await run(idleLong, { SCR_TEXT_DROP_STAT: "1" });
+    expect(dflt.stdout).toBe("done 16\n");
+    expect(dflt.lines.length).toBeGreaterThanOrEqual(2);
+    expect(dflt.lines.length).toBeLessThanOrEqual(4);
+    expect(dflt.lines[1]).toContain("drop #2");
+    for (const every of ["2000", "0"]) {
+      const r = await run(idleLong, { SCR_TEXT_DROP_STAT: "1", SCR_TEXT_DROP_EVERY_MS: every });
+      expect(r.stdout).toBe("done 16\n");
+      expect(r.lines, `SCR_TEXT_DROP_EVERY_MS=${every}`).toHaveLength(1);
+    }
   });
 
   test("SCR_TEXT_DROP=0 prints nothing (the negative control)", async () => {
