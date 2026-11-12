@@ -108,23 +108,15 @@ ScrUnion *scr_union_new_str(uint32_t tag, ScrStr *s) {
   return scr_union_new_refd(tag, s, &scr_vt_str, false);
 }
 
-/* Descriptors for callers whose entry points are not link-time constants. They must sit in the image (the descriptor reference is
- * a 32-bit offset from the cycle anchor, which a heap address would not fit), so they are interned in a fixed static table;
- * a runtime has a few dozen such pairs, and the table is a hard stop rather than a silent wrap. */
-static ScrArmVt scr_armvt_rt[512];
-static unsigned scr_armvt_rt_n = 0;
-const ScrArmVt *scr_armvt_rt_intern(void *(*retain)(void *), void (*release)(void *)) {
-  for (unsigned i = 0; i < scr_armvt_rt_n; i++) {
-    if (scr_armvt_rt[i].retain == retain && scr_armvt_rt[i].release == release) return &scr_armvt_rt[i];
-  }
-  if (scr_armvt_rt_n == sizeof scr_armvt_rt / sizeof scr_armvt_rt[0]) scr_trap("scriptc: internal error: runtime arm descriptor table full\n");
-  scr_armvt_rt[scr_armvt_rt_n].retain = retain;
-  scr_armvt_rt[scr_armvt_rt_n].release = release;
-  return &scr_armvt_rt[scr_armvt_rt_n++];
-}
-
 ScrUnion *scr_union_new_ref_rt(uint32_t tag, void *v, void *(*retain)(void *), void (*release)(void *), ScrTraceFn trace) {
   return scr_union_new_refd(tag, v, scr_armvt_rt_intern(retain, release), trace != NULL);
+}
+
+/* The function behind the header macro of the same name, for a caller that takes its address or links it by name (the LLVM declare table
+ * still lists it, and llvm-runtime-abi.test.ts holds every declare to a prototype). The macro is what emitted C calls. */
+#undef scr_union_new_ref
+ScrUnion *scr_union_new_ref(uint32_t tag, void *v, void *(*retain)(void *), void (*release)(void *), ScrTraceFn trace) {
+  return scr_union_new_ref_rt(tag, v, retain, release, trace);
 }
 
 void scr_union_release(ScrUnion *u) {

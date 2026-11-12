@@ -2482,6 +2482,7 @@ typedef struct ScrBox {
 
 ScrBox *scr_box_new(ScrBoxKind kind); /* returns +1, slot zeroed */
 const ScrArmVt *scr_armvt_rt_intern(void *(*retain)(void *), void (*release)(void *));
+ScrBox *scr_box_new_obj(void *(*retain)(void *), void (*release)(void *), ScrTraceFn trace); /* the function; emitted C calls the macro below */
 ScrBox *scr_box_new_objd(const ScrArmVt *vt, bool trace);
 /* The general form, for a caller whose entry points are not link-time constants (the descriptor is interned in a small static
  * table, so it is slower than the macro below). */
@@ -2641,6 +2642,7 @@ ScrUnion *scr_union_new_f64(uint32_t tag, double v);  /* returns +1 */
 ScrUnion *scr_union_new_bool(uint32_t tag, bool v);   /* returns +1 */
 /* Takes ownership of v (+1 moves in); retain/release must be non-NULL;
  * trace is non-NULL iff the arm type carries a cycle header. */
+ScrUnion *scr_union_new_ref(uint32_t tag, void *v, void *(*retain)(void *), void (*release)(void *), ScrTraceFn trace); /* the function; emitted C calls the macro below */
 ScrUnion *scr_union_new_refd(uint32_t tag, void *v, const ScrArmVt *vt, bool trace);
 /* General form for callers whose entry points are not link-time constants. */
 ScrUnion *scr_union_new_ref_rt(uint32_t tag, void *v, void *(*retain)(void *), void (*release)(void *), ScrTraceFn trace);

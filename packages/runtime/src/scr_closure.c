@@ -116,6 +116,21 @@ ScrBox *scr_box_new(ScrBoxKind kind) {
   return b;
 }
 
+/* Descriptors for callers whose entry points are not link-time constants. They must sit in the image (the descriptor reference is
+ * a 32-bit offset from the cycle anchor, which a heap address would not fit), so they are interned in a fixed static table;
+ * a runtime has a few dozen such pairs, and the table is a hard stop rather than a silent wrap. */
+static ScrArmVt scr_armvt_rt[512];
+static unsigned scr_armvt_rt_n = 0;
+const ScrArmVt *scr_armvt_rt_intern(void *(*retain)(void *), void (*release)(void *)) {
+  for (unsigned i = 0; i < scr_armvt_rt_n; i++) {
+    if (scr_armvt_rt[i].retain == retain && scr_armvt_rt[i].release == release) return &scr_armvt_rt[i];
+  }
+  if (scr_armvt_rt_n == sizeof scr_armvt_rt / sizeof scr_armvt_rt[0]) scr_trap("scriptc: internal error: runtime arm descriptor table full\n");
+  scr_armvt_rt[scr_armvt_rt_n].retain = retain;
+  scr_armvt_rt[scr_armvt_rt_n].release = release;
+  return &scr_armvt_rt[scr_armvt_rt_n++];
+}
+
 ScrBox *scr_box_new_objd(const ScrArmVt *vt, bool trace) {
   ScrBox *b = scr_box_new(SCR_BOX_OBJ);
   b->vt = scr_armvt_enc(vt, trace);
@@ -124,6 +139,12 @@ ScrBox *scr_box_new_objd(const ScrArmVt *vt, bool trace) {
 
 ScrBox *scr_box_new_obj_rt(void *(*retain)(void *), void (*release)(void *), ScrTraceFn trace) {
   return scr_box_new_objd(scr_armvt_rt_intern(retain, release), trace != NULL);
+}
+
+/* The function behind the header macro of the same name (see scr_union_new_ref in scr_union.c). */
+#undef scr_box_new_obj
+ScrBox *scr_box_new_obj(void *(*retain)(void *), void (*release)(void *), ScrTraceFn trace) {
+  return scr_box_new_obj_rt(retain, release, trace);
 }
 
 /* Release one payload pointer by the box's kind. Factored so set_ref can
