@@ -27594,6 +27594,24 @@
     "<repo>/tests/corpus/25097-forty-thousand-async-generator-fibers-alive-at-once.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25160-function-own-properties-survive-boxing-and-teardown.js": {
+   "order": [
+    "<repo>/tests/corpus/25160-function-own-properties-survive-boxing-and-teardown.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25161-implicit-prototype-of-a-plain-function-and-its-ring.js": {
+   "order": [
+    "<repo>/tests/corpus/25161-implicit-prototype-of-a-plain-function-and-its-ring.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25162-closures-with-captures-and-properties-in-containers.js": {
+   "order": [
+    "<repo>/tests/corpus/25162-closures-with-captures-and-properties-in-containers.js"
+   ],
+   "diags": []
   }
  }
 }
