@@ -3486,7 +3486,7 @@ static void scr_heap_trim_line(const char *const *labels, const size_t *vals,
 
 static bool scr_text_drop_env(const char *name, bool dflt) {
   const char *e = getenv(name);
-  if (e == NULL) return dflt;
+  if (e == NULL || e[0] == '\0') return dflt; /* an empty value is "unset", not "on" */
   return e[0] != '0';
 }
 
