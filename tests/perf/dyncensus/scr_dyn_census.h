@@ -241,6 +241,8 @@ typedef struct {
   long long str_len_sum, str_len_max, str_phys;
   long long str_hist[SCR_DYNCEN_BUCKETS];
   long long str_le7, str_le15, str_le23, str_le31;
+  /* NUM only: the VALUE classes (what a shared-small-integer table could take). 0 non-integer or NaN/inf, 1 negative zero, 2 <-128, 3 -128..-2, 4 -1, 5 0, 6 1, 7 2..15, 8 16..31, 9 32..63, 10 64..127, 11 128..255, 12 256..511, 13 512..1023, 14 1024..4095, 15 4096..65535, 16 >=65536; 17 already immortal (rc==SIZE_MAX) */
+  long long num_hist[18];
   /* FUNC only. */
   long long fn_sig, fn_name, fn_src, fn_arity_max;
   /* HANDLE / OBJINST / MAP: how many carry a non-NULL side pointer. */
@@ -561,6 +563,11 @@ SCR_DYNCEN_FN void scr_dyncen_report(void) {
           fprintf(f, "DYNCEN-%s-STRLEN %u", tag, k);
           for (b = 0; b < SCR_DYNCEN_BUCKETS; b++) fprintf(f, " %lld", r->str_hist[b]);
           fprintf(f, "\n");
+          if (k == 2u) { /* SCR_DYN_NUM; this header cannot see the enum */
+            fprintf(f, "DYNCEN-%s-NUMH %u", tag, k);
+            for (b = 0; b < 18; b++) fprintf(f, " %lld", r->num_hist[b]);
+            fprintf(f, "\n");
+          }
           fprintf(f, "DYNCEN-%s-PHYS %u side=%lld key=%lld\n", tag, k,
                   r->phys_side, r->phys_key);
           /* A SEPARATE LINE, not three more columns on the row above: the
