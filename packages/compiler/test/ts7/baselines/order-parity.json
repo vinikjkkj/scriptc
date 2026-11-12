@@ -6,18 +6,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/24970-static-methods-called-on-a-constructor-read-do-not-link-the-engine.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24970-static-methods-called-on-a-constructor-read-do-not-link-the-engine.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24971-function-constructor-reached-through-call-bind-valueof-and-constructor-runs-text.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24971-function-constructor-reached-through-call-bind-valueof-and-constructor-runs-text.cjs"
-   ],
-   "diags": []
-  },
   "<repo>/tests/corpus/002-log-args.ts": {
    "order": [
     "<repo>/tests/corpus/002-log-args.ts"
@@ -15000,30 +14988,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/24916-a-socket-read-through-a-dynamic-value-answers-connecting-pending-and-timeout.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24916-a-socket-read-through-a-dynamic-value-answers-connecting-pending-and-timeout.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24917-a-listener-prepended-on-a-dynamic-socket-fires-first.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24917-a-listener-prepended-on-a-dynamic-socket-fires-first.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24918-a-late-method-with-an-instance-override-slot-answers-through-a-dynamic-receiver.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24918-a-late-method-with-an-instance-override-slot-answers-through-a-dynamic-receiver.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24919-json-stringify-accepts-a-tuple-array-with-error-and-unknown-members.ts": {
-   "order": [
-    "<repo>/tests/corpus/24919-json-stringify-accepts-a-tuple-array-with-error-and-unknown-members.ts"
-   ],
-   "diags": []
-  },
   "<repo>/tests/corpus/2485-inspect-circular-refs.ts": {
    "order": [
     "<repo>/tests/corpus/2485-inspect-circular-refs.ts"
@@ -15132,6 +15096,54 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24890-fs-readdir-nonascii-names.js": {
+   "order": [
+    "<repo>/tests/corpus/24890-fs-readdir-nonascii-names.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24891-fs-open-nonascii-path.js": {
+   "order": [
+    "<repo>/tests/corpus/24891-fs-open-nonascii-path.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24892-fs-stat-nonascii-path.js": {
+   "order": [
+    "<repo>/tests/corpus/24892-fs-stat-nonascii-path.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24893-fs-namespace-ops-nonascii-path.js": {
+   "order": [
+    "<repo>/tests/corpus/24893-fs-namespace-ops-nonascii-path.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24894-fs-realpath-nonascii-path.js": {
+   "order": [
+    "<repo>/tests/corpus/24894-fs-realpath-nonascii-path.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24895-fs-rename-replaces-and-errors.js": {
+   "order": [
+    "<repo>/tests/corpus/24895-fs-rename-replaces-and-errors.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24896-fs-promises-readdir-options.js": {
+   "order": [
+    "<repo>/tests/corpus/24896-fs-promises-readdir-options.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24897-fs-buffer-encoded-names-are-buffers.js": {
+   "order": [
+    "<repo>/tests/corpus/24897-fs-buffer-encoded-names-are-buffers.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/24898-buffer-numeric-accessors-dyn-direct-families-bad-offsets.js": {
    "order": [
     "<repo>/tests/corpus/24898-buffer-numeric-accessors-dyn-direct-families-bad-offsets.js"
@@ -15144,12 +15156,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/24900-dyn-release-shared-boxes-scalars-strings-containers-churn.js": {
-   "order": [
-    "<repo>/tests/corpus/24900-dyn-release-shared-boxes-scalars-strings-containers-churn.js"
-   ],
-   "diags": []
-  },
   "<repo>/tests/corpus/2490-find-miss-null-compare.ts": {
    "order": [
     "<repo>/tests/corpus/2490-find-miss-null-compare.ts"
@@ -15159,6 +15165,12 @@
   "<repo>/tests/corpus/24900-a-class-instance-handed-out-as-an-interface-keeps-its-identity.ts": {
    "order": [
     "<repo>/tests/corpus/24900-a-class-instance-handed-out-as-an-interface-keeps-its-identity.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24900-dyn-release-shared-boxes-scalars-strings-containers-churn.js": {
+   "order": [
+    "<repo>/tests/corpus/24900-dyn-release-shared-boxes-scalars-strings-containers-churn.js"
    ],
    "diags": []
   },
@@ -15263,6 +15275,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24916-a-socket-read-through-a-dynamic-value-answers-connecting-pending-and-timeout.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24916-a-socket-read-through-a-dynamic-value-answers-connecting-pending-and-timeout.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24917-a-listener-prepended-on-a-dynamic-socket-fires-first.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24917-a-listener-prepended-on-a-dynamic-socket-fires-first.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24918-a-late-method-with-an-instance-override-slot-answers-through-a-dynamic-receiver.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24918-a-late-method-with-an-instance-override-slot-answers-through-a-dynamic-receiver.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24919-json-stringify-accepts-a-tuple-array-with-error-and-unknown-members.ts": {
+   "order": [
+    "<repo>/tests/corpus/24919-json-stringify-accepts-a-tuple-array-with-error-and-unknown-members.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2492-loose-null-compare-unions.ts": {
    "order": [
     "<repo>/tests/corpus/2492-loose-null-compare-unions.ts"
@@ -15293,9 +15329,9 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/24929-a-cast-method-call-through-an-interface-typed-receiver-keeps-its-receiver.ts": {
+  "<repo>/tests/corpus/24927-a-captured-string-accumulator-appends-in-place-and-keeps-js-semantics.ts": {
    "order": [
-    "<repo>/tests/corpus/24929-a-cast-method-call-through-an-interface-typed-receiver-keeps-its-receiver.ts"
+    "<repo>/tests/corpus/24927-a-captured-string-accumulator-appends-in-place-and-keeps-js-semantics.ts"
    ],
    "diags": []
   },
@@ -15305,9 +15341,9 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/24927-a-captured-string-accumulator-appends-in-place-and-keeps-js-semantics.ts": {
+  "<repo>/tests/corpus/24929-a-cast-method-call-through-an-interface-typed-receiver-keeps-its-receiver.ts": {
    "order": [
-    "<repo>/tests/corpus/24927-a-captured-string-accumulator-appends-in-place-and-keeps-js-semantics.ts"
+    "<repo>/tests/corpus/24929-a-cast-method-call-through-an-interface-typed-receiver-keeps-its-receiver.ts"
    ],
    "diags": []
   },
@@ -15317,9 +15353,51 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/24930-dyn-object-keys-of-every-short-length-differing-in-one-byte.ts": {
+   "order": [
+    "<repo>/tests/corpus/24930-dyn-object-keys-of-every-short-length-differing-in-one-byte.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2494-no-arm-compare-effects.ts": {
    "order": [
     "<repo>/tests/corpus/2494-no-arm-compare-effects.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24960-prototype-constructor-reads-that-never-call-do-not-link-the-engine.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24960-prototype-constructor-reads-that-never-call-do-not-link-the-engine.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24961-the-function-constructor-reached-through-a-prototype-still-runs-its-text.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24961-the-function-constructor-reached-through-a-prototype-still-runs-its-text.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24970-static-methods-called-on-a-constructor-read-do-not-link-the-engine.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24970-static-methods-called-on-a-constructor-read-do-not-link-the-engine.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24971-function-constructor-reached-through-call-bind-valueof-and-constructor-runs-text.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24971-function-constructor-reached-through-call-bind-valueof-and-constructor-runs-text.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24972-a-dynamic-constructor-called-with-constant-text-is-staged-natively.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24972-a-dynamic-constructor-called-with-constant-text-is-staged-natively.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/24973-a-dynamic-constructor-called-with-runtime-text-still-runs-it.cjs": {
+   "order": [
+    "<repo>/tests/corpus/24973-a-dynamic-constructor-called-with-runtime-text-still-runs-it.cjs"
    ],
    "diags": []
   },
@@ -15329,15 +15407,234 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25010-dyn-socket-property-surface-by-lifecycle-stage.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25010-dyn-socket-property-surface-by-lifecycle-stage.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25011-dyn-socket-address-cork-read-listeners-and-emitter-methods.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25011-dyn-socket-address-cork-read-listeners-and-emitter-methods.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25012-dyn-socket-destroy-with-error-and-reset.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25012-dyn-socket-destroy-with-error-and-reset.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25013-dyn-socket-lifecycle-events-ready-pause-resume-pipe-and-meta.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25013-dyn-socket-lifecycle-events-ready-pause-resume-pipe-and-meta.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25014-dyn-socket-bytes-read-and-paused-readable-length.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25014-dyn-socket-bytes-read-and-paused-readable-length.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25030-generator-spread-into-array-literal-rest-push-and-array-from.ts": {
+   "order": [
+    "<repo>/tests/corpus/25030-generator-spread-into-array-literal-rest-push-and-array-from.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25040-dyn-for-of-custom-iterable-through-any.js": {
+   "order": [
+    "<repo>/tests/corpus/25040-dyn-for-of-custom-iterable-through-any.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25041-dyn-for-of-lazy-close-order-and-errors.js": {
+   "order": [
+    "<repo>/tests/corpus/25041-dyn-for-of-lazy-close-order-and-errors.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25042-dyn-for-of-class-iterables-and-iterators.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25042-dyn-for-of-class-iterables-and-iterators.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25050-record-projection-keeps-the-source-as-receiver/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/25050-record-projection-keeps-the-source-as-receiver/lib.cjs",
+    "<repo>/tests/corpus/25050-record-projection-keeps-the-source-as-receiver/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25051-function-value-cast-through-unknown-answers-a-record-view/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/25051-function-value-cast-through-unknown-answers-a-record-view/lib.cjs",
+    "<repo>/tests/corpus/25051-function-value-cast-through-unknown-answers-a-record-view/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25060-class-instance-read-through-a-record-of-methods-is-the-same-object/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/25060-class-instance-read-through-a-record-of-methods-is-the-same-object/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25061-class-view-survives-a-call-that-keeps-or-mutates-the-record/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/25061-class-view-survives-a-call-that-keeps-or-mutates-the-record/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25062-class-constructor-writes-after-it-leaks-this-to-a-projection/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/25062-class-constructor-writes-after-it-leaks-this-to-a-projection/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25063-class-view-keeps-the-class-tostring/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/25063-class-view-keeps-the-class-tostring/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25070-class-getter-read-through-an-interface-typed-binding/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/25070-class-getter-read-through-an-interface-typed-binding/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25080-promise-all-tuple-result-survives-a-collection-while-its-claims-settle.ts": {
+   "order": [
+    "<repo>/tests/corpus/25080-promise-all-tuple-result-survives-a-collection-while-its-claims-settle.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25090-async-generator-fiber-runs-a-recursion-thousands-of-frames-deep.ts": {
+   "order": [
+    "<repo>/tests/corpus/25090-async-generator-fiber-runs-a-recursion-thousands-of-frames-deep.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25091-async-generator-yield-await-interleaving-with-microtasks.ts": {
+   "order": [
+    "<repo>/tests/corpus/25091-async-generator-yield-await-interleaving-with-microtasks.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25092-async-generator-return-throw-finally-and-early-exit.ts": {
+   "order": [
+    "<repo>/tests/corpus/25092-async-generator-return-throw-finally-and-early-exit.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25093-async-generator-deep-synchronous-recursion-after-an-await.ts": {
+   "order": [
+    "<repo>/tests/corpus/25093-async-generator-deep-synchronous-recursion-after-an-await.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25094-two-thousand-async-generators-suspended-at-once.ts": {
+   "order": [
+    "<repo>/tests/corpus/25094-two-thousand-async-generators-suspended-at-once.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25095-yield-star-in-async-generators-over-async-and-sync-delegates.ts": {
+   "order": [
+    "<repo>/tests/corpus/25095-yield-star-in-async-generators-over-async-and-sync-delegates.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25096-static-namespace-import-stored-in-a-binding-and-passed-to-a-function/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/25096-static-namespace-import-stored-in-a-binding-and-passed-to-a-function/lib.ts",
+    "<repo>/tests/corpus/25096-static-namespace-import-stored-in-a-binding-and-passed-to-a-function/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25097-forty-thousand-async-generator-fibers-alive-at-once.ts": {
+   "order": [
+    "<repo>/tests/corpus/25097-forty-thousand-async-generator-fibers-alive-at-once.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25098-arrays-of-sync-and-async-generators.ts": {
+   "order": [
+    "<repo>/tests/corpus/25098-arrays-of-sync-and-async-generators.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25099-return-in-an-async-generator-awaits-its-operand.ts": {
+   "order": [
+    "<repo>/tests/corpus/25099-return-in-an-async-generator-awaits-its-operand.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2510-dyn-evolving-array-map.ts": {
    "order": [
     "<repo>/tests/corpus/2510-dyn-evolving-array-map.ts"
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25100-scalar-union-boxes-under-a-collector-with-1000-concurrent-coroutines.ts": {
+   "order": [
+    "<repo>/tests/corpus/25100-scalar-union-boxes-under-a-collector-with-1000-concurrent-coroutines.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25101-scalar-union-values-in-arrays-promises-and-retags-under-collector-pressure.ts": {
+   "order": [
+    "<repo>/tests/corpus/25101-scalar-union-values-in-arrays-promises-and-retags-under-collector-pressure.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25103-short-string-of-unknown-results-held-after-a-large-stringify-keep-exact-contents.ts": {
+   "order": [
+    "<repo>/tests/corpus/25103-short-string-of-unknown-results-held-after-a-large-stringify-keep-exact-contents.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25104-promise-resolving-functions-settle-once-and-keep-their-promise-alive.ts": {
+   "order": [
+    "<repo>/tests/corpus/25104-promise-resolving-functions-settle-once-and-keep-their-promise-alive.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25105-functions-crossing-into-dyn-keep-name-source-length-identity-and-properties.js": {
+   "order": [
+    "<repo>/tests/corpus/25105-functions-crossing-into-dyn-keep-name-source-length-identity-and-properties.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25106-dyn-values-of-every-kind-grow-shrink-and-recycle-across-size-classes.js": {
+   "order": [
+    "<repo>/tests/corpus/25106-dyn-values-of-every-kind-grow-shrink-and-recycle-across-size-classes.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25107-dyn-object-tables-sized-once-keep-order-growth-delete-and-expandos.js": {
+   "order": [
+    "<repo>/tests/corpus/25107-dyn-object-tables-sized-once-keep-order-growth-delete-and-expandos.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25108-typed-arrays-crossing-into-dyn-keep-length-elements-holes-and-growth.ts": {
+   "order": [
+    "<repo>/tests/corpus/25108-typed-arrays-crossing-into-dyn-keep-length-elements-holes-and-growth.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2511-dyn-evolving-array-filter-foreach.ts": {
    "order": [
     "<repo>/tests/corpus/2511-dyn-evolving-array-filter-foreach.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25110-then-catch-finally-on-a-dyn-promise-run-as-microtasks-in-order-with-the-registration-context.ts": {
+   "order": [
+    "<repo>/tests/corpus/25110-then-catch-finally-on-a-dyn-promise-run-as-microtasks-in-order-with-the-registration-context.ts"
    ],
    "diags": []
   },
@@ -15350,6 +15647,90 @@
   "<repo>/tests/corpus/2513-dyn-evolving-array-derived.ts": {
    "order": [
     "<repo>/tests/corpus/2513-dyn-evolving-array-derived.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25150-method-reading-its-own-prototype-method-and-a-base-class-property-off-a-detached-receiver.js": {
+   "order": [
+    "<repo>/tests/corpus/25150-method-reading-its-own-prototype-method-and-a-base-class-property-off-a-detached-receiver.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25151-a-local-dead-across-an-await-is-released-before-the-park-and-live-ones-are-kept.ts": {
+   "order": [
+    "<repo>/tests/corpus/25151-a-local-dead-across-an-await-is-released-before-the-park-and-live-ones-are-kept.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25152-dead-local-release-before-a-park-across-loops-switches-finally-and-for-of.ts": {
+   "order": [
+    "<repo>/tests/corpus/25152-dead-local-release-before-a-park-across-loops-switches-finally-and-for-of.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25163-pending-promises-of-each-payload-kind-settle-and-stay-unsettled.ts": {
+   "order": [
+    "<repo>/tests/corpus/25163-pending-promises-of-each-payload-kind-settle-and-stay-unsettled.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25164-combinators-with-pending-entries-park-callbacks-and-leave-some-unsettled.ts": {
+   "order": [
+    "<repo>/tests/corpus/25164-combinators-with-pending-entries-park-callbacks-and-leave-some-unsettled.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25165-payload-adapters-and-claims-convert-pending-sources-and-stay-pending.ts": {
+   "order": [
+    "<repo>/tests/corpus/25165-payload-adapters-and-claims-convert-pending-sources-and-stay-pending.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25166-dynamic-promises-hold-every-payload-kind-and-combinators-over-them.js": {
+   "order": [
+    "<repo>/tests/corpus/25166-dynamic-promises-hold-every-payload-kind-and-combinators-over-them.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25168-union-boxes-of-every-arm-kind-release-and-collect-through-their-descriptors.ts": {
+   "order": [
+    "<repo>/tests/corpus/25168-union-boxes-of-every-arm-kind-release-and-collect-through-their-descriptors.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25169-capture-boxes-of-every-kind-release-and-trace-through-their-descriptors.ts": {
+   "order": [
+    "<repo>/tests/corpus/25169-capture-boxes-of-every-kind-release-and-trace-through-their-descriptors.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25170-union-scalars-of-the-common-constants-share-one-box-and-never-mix-with-lookalikes.ts": {
+   "order": [
+    "<repo>/tests/corpus/25170-union-scalars-of-the-common-constants-share-one-box-and-never-mix-with-lookalikes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25171-padded-parameter-lists-of-unions-convert-to-the-dynamic-copy-with-shared-constants.ts": {
+   "order": [
+    "<repo>/tests/corpus/25171-padded-parameter-lists-of-unions-convert-to-the-dynamic-copy-with-shared-constants.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25172-empty-strings-in-unions-are-shared-and-stay-strings.ts": {
+   "order": [
+    "<repo>/tests/corpus/25172-empty-strings-in-unions-are-shared-and-stay-strings.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25173-heap-built-empty-strings-never-stay-in-the-shared-empty-boxes.ts": {
+   "order": [
+    "<repo>/tests/corpus/25173-heap-built-empty-strings-never-stay-in-the-shared-empty-boxes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25192-frame-slots-of-locals-dead-at-every-park-are-dropped-across-loops-try-finally-for-of-and-branches.ts": {
+   "order": [
+    "<repo>/tests/corpus/25192-frame-slots-of-locals-dead-at-every-park-are-dropped-across-loops-try-finally-for-of-and-branches.ts"
    ],
    "diags": []
   },
@@ -16526,99 +16907,9 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/2750-class-view-optional-and-inherited-members/main.ts": {
+  "<repo>/tests/corpus/2718-dynamic-import-evaluation-order/main.ts": {
    "order": [
-    "<repo>/tests/corpus/2750-class-view-optional-and-inherited-members/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/2751-class-with-async-method-boxed-into-unknown/main.ts": {
-   "order": [
-    "<repo>/tests/corpus/2751-class-with-async-method-boxed-into-unknown/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/2752-class-views-share-a-bound-method/main.ts": {
-   "order": [
-    "<repo>/tests/corpus/2752-class-views-share-a-bound-method/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/2731-dynamic-import-ticks-tla/main.ts": {
-   "order": [
-    "<repo>/tests/corpus/2731-dynamic-import-ticks-tla/state.ts",
-    "<repo>/tests/corpus/2731-dynamic-import-ticks-tla/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/2732-dynamic-import-computed-specifier/main.ts": {
-   "order": [
-    "<repo>/tests/corpus/2732-dynamic-import-computed-specifier/lazy.ts",
-    "<repo>/tests/corpus/2732-dynamic-import-computed-specifier/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/2733-module-namespace-object-semantics/main.ts": {
-   "order": [
-    "<repo>/tests/corpus/2733-module-namespace-object-semantics/lib1.ts",
-    "<repo>/tests/corpus/2733-module-namespace-object-semantics/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/2734-module-namespace-identity-and-values/main.ts": {
-   "order": [
-    "<repo>/tests/corpus/2734-module-namespace-identity-and-values/lib1.ts",
-    "<repo>/tests/corpus/2734-module-namespace-identity-and-values/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/2735-dynamic-import-former-static-refusals/main.ts": {
-   "order": [
-    "<repo>/tests/corpus/2735-dynamic-import-former-static-refusals/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/2736-dynamic-import-context-module/main.ts": {
-   "order": [
-    "<repo>/tests/corpus/2736-dynamic-import-context-module/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/2737-dynamic-import-builtin-namespace/main.ts": {
-   "order": [
-    "<repo>/tests/corpus/2737-dynamic-import-builtin-namespace/state.ts",
-    "<repo>/tests/corpus/2737-dynamic-import-builtin-namespace/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/dynamic-import-unconstrained.ts": {
-   "order": [
-    "<repo>/tests/diagnostics/dynamic-import-unconstrained.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/2738-dynamic-import-cjs/main.ts": {
-   "order": [
-    "<repo>/tests/corpus/2738-dynamic-import-cjs/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/2739-dynamic-import-json/main.ts": {
-   "order": [
-    "<repo>/tests/corpus/2739-dynamic-import-json/state.ts",
-    "<repo>/tests/corpus/2739-dynamic-import-json/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/2740-dynamic-import-context-cjs-json/main.ts": {
-   "order": [
-    "<repo>/tests/corpus/2740-dynamic-import-context-cjs-json/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/diagnostics/dynamic-import-ts-json-attribute/main.ts": {
-   "order": [
-    "<repo>/tests/diagnostics/dynamic-import-ts-json-attribute/main.ts"
+    "<repo>/tests/corpus/2718-dynamic-import-evaluation-order/main.ts"
    ],
    "diags": []
   },
@@ -16700,9 +16991,23 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/2731-dynamic-import-ticks-tla/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/2731-dynamic-import-ticks-tla/state.ts",
+    "<repo>/tests/corpus/2731-dynamic-import-ticks-tla/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2732-create-secret-key.ts": {
    "order": [
     "<repo>/tests/corpus/2732-create-secret-key.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2732-dynamic-import-computed-specifier/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/2732-dynamic-import-computed-specifier/lazy.ts",
+    "<repo>/tests/corpus/2732-dynamic-import-computed-specifier/main.ts"
    ],
    "diags": []
   },
@@ -16730,6 +17035,13 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/2733-module-namespace-object-semantics/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/2733-module-namespace-object-semantics/lib1.ts",
+    "<repo>/tests/corpus/2733-module-namespace-object-semantics/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2734-deferred-call-typed-argument.ts": {
    "order": [
     "<repo>/tests/corpus/2734-deferred-call-typed-argument.ts"
@@ -16742,9 +17054,28 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/2734-module-namespace-identity-and-values/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/2734-module-namespace-identity-and-values/lib1.ts",
+    "<repo>/tests/corpus/2734-module-namespace-identity-and-values/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2735-dynamic-import-former-static-refusals/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/2735-dynamic-import-former-static-refusals/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2735-random-fill-deferred-callback.ts": {
    "order": [
     "<repo>/tests/corpus/2735-random-fill-deferred-callback.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2736-dynamic-import-context-module/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/2736-dynamic-import-context-module/main.ts"
    ],
    "diags": []
   },
@@ -16760,6 +17091,13 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/2737-dynamic-import-builtin-namespace/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/2737-dynamic-import-builtin-namespace/state.ts",
+    "<repo>/tests/corpus/2737-dynamic-import-builtin-namespace/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2738-array-in-place-mutators.ts": {
    "order": [
     "<repo>/tests/corpus/2738-array-in-place-mutators.ts"
@@ -16769,6 +17107,12 @@
   "<repo>/tests/corpus/2738-caught-shorthand-property.ts": {
    "order": [
     "<repo>/tests/corpus/2738-caught-shorthand-property.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2738-dynamic-import-cjs/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/2738-dynamic-import-cjs/main.ts"
    ],
    "diags": []
   },
@@ -16790,9 +17134,22 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/2739-dynamic-import-json/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/2739-dynamic-import-json/state.ts",
+    "<repo>/tests/corpus/2739-dynamic-import-json/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2739-number-statics-over-nullish-unions.ts": {
    "order": [
     "<repo>/tests/corpus/2739-number-statics-over-nullish-unions.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2740-dynamic-import-context-cjs-json/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/2740-dynamic-import-context-cjs-json/main.ts"
    ],
    "diags": []
   },
@@ -16892,9 +17249,21 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/2750-class-view-optional-and-inherited-members/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/2750-class-view-optional-and-inherited-members/main.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2750-process-global-behind-a-cast.ts": {
    "order": [
     "<repo>/tests/corpus/2750-process-global-behind-a-cast.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2751-class-with-async-method-boxed-into-unknown/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/2751-class-with-async-method-boxed-into-unknown/main.ts"
    ],
    "diags": []
   },
@@ -16907,6 +17276,12 @@
   "<repo>/tests/corpus/2752-chained-property-assignment.ts": {
    "order": [
     "<repo>/tests/corpus/2752-chained-property-assignment.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/2752-class-views-share-a-bound-method/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/2752-class-views-share-a-bound-method/main.ts"
    ],
    "diags": []
   },
@@ -25429,6 +25804,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/dynamic-import-ts-json-attribute/main.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/dynamic-import-ts-json-attribute/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/dynamic-import-unconstrained.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/dynamic-import-unconstrained.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/dynamic-import/main.ts": {
    "order": [
     "<repo>/tests/diagnostics/dynamic-import/helper.ts",
@@ -27385,387 +27772,6 @@
   "<repo>/tests/fixtures/node-types/streams.ts": {
    "order": [
     "<repo>/tests/fixtures/node-types/streams.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25010-dyn-socket-property-surface-by-lifecycle-stage.cjs": {
-   "order": [
-    "<repo>/tests/corpus/25010-dyn-socket-property-surface-by-lifecycle-stage.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25011-dyn-socket-address-cork-read-listeners-and-emitter-methods.cjs": {
-   "order": [
-    "<repo>/tests/corpus/25011-dyn-socket-address-cork-read-listeners-and-emitter-methods.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25012-dyn-socket-destroy-with-error-and-reset.cjs": {
-   "order": [
-    "<repo>/tests/corpus/25012-dyn-socket-destroy-with-error-and-reset.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25013-dyn-socket-lifecycle-events-ready-pause-resume-pipe-and-meta.cjs": {
-   "order": [
-    "<repo>/tests/corpus/25013-dyn-socket-lifecycle-events-ready-pause-resume-pipe-and-meta.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25014-dyn-socket-bytes-read-and-paused-readable-length.cjs": {
-   "order": [
-    "<repo>/tests/corpus/25014-dyn-socket-bytes-read-and-paused-readable-length.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24890-fs-readdir-nonascii-names.js": {
-   "order": [
-    "<repo>/tests/corpus/24890-fs-readdir-nonascii-names.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24891-fs-open-nonascii-path.js": {
-   "order": [
-    "<repo>/tests/corpus/24891-fs-open-nonascii-path.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24892-fs-stat-nonascii-path.js": {
-   "order": [
-    "<repo>/tests/corpus/24892-fs-stat-nonascii-path.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24893-fs-namespace-ops-nonascii-path.js": {
-   "order": [
-    "<repo>/tests/corpus/24893-fs-namespace-ops-nonascii-path.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24894-fs-realpath-nonascii-path.js": {
-   "order": [
-    "<repo>/tests/corpus/24894-fs-realpath-nonascii-path.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24895-fs-rename-replaces-and-errors.js": {
-   "order": [
-    "<repo>/tests/corpus/24895-fs-rename-replaces-and-errors.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24896-fs-promises-readdir-options.js": {
-   "order": [
-    "<repo>/tests/corpus/24896-fs-promises-readdir-options.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24897-fs-buffer-encoded-names-are-buffers.js": {
-   "order": [
-    "<repo>/tests/corpus/24897-fs-buffer-encoded-names-are-buffers.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25030-generator-spread-into-array-literal-rest-push-and-array-from.ts": {
-   "order": [
-    "<repo>/tests/corpus/25030-generator-spread-into-array-literal-rest-push-and-array-from.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25040-dyn-for-of-custom-iterable-through-any.js": {
-   "order": [
-    "<repo>/tests/corpus/25040-dyn-for-of-custom-iterable-through-any.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25041-dyn-for-of-lazy-close-order-and-errors.js": {
-   "order": [
-    "<repo>/tests/corpus/25041-dyn-for-of-lazy-close-order-and-errors.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25042-dyn-for-of-class-iterables-and-iterators.cjs": {
-   "order": [
-    "<repo>/tests/corpus/25042-dyn-for-of-class-iterables-and-iterators.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25070-class-getter-read-through-an-interface-typed-binding/main.ts": {
-   "order": [
-    "<repo>/tests/corpus/25070-class-getter-read-through-an-interface-typed-binding/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25080-promise-all-tuple-result-survives-a-collection-while-its-claims-settle.ts": {
-   "order": [
-    "<repo>/tests/corpus/25080-promise-all-tuple-result-survives-a-collection-while-its-claims-settle.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25110-then-catch-finally-on-a-dyn-promise-run-as-microtasks-in-order-with-the-registration-context.ts": {
-   "order": [
-    "<repo>/tests/corpus/25110-then-catch-finally-on-a-dyn-promise-run-as-microtasks-in-order-with-the-registration-context.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25060-class-instance-read-through-a-record-of-methods-is-the-same-object/main.ts": {
-   "order": [
-    "<repo>/tests/corpus/25060-class-instance-read-through-a-record-of-methods-is-the-same-object/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25061-class-view-survives-a-call-that-keeps-or-mutates-the-record/main.ts": {
-   "order": [
-    "<repo>/tests/corpus/25061-class-view-survives-a-call-that-keeps-or-mutates-the-record/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25062-class-constructor-writes-after-it-leaks-this-to-a-projection/main.ts": {
-   "order": [
-    "<repo>/tests/corpus/25062-class-constructor-writes-after-it-leaks-this-to-a-projection/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25063-class-view-keeps-the-class-tostring/main.ts": {
-   "order": [
-    "<repo>/tests/corpus/25063-class-view-keeps-the-class-tostring/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25050-record-projection-keeps-the-source-as-receiver/main.ts": {
-   "order": [
-    "<repo>/tests/corpus/25050-record-projection-keeps-the-source-as-receiver/lib.cjs",
-    "<repo>/tests/corpus/25050-record-projection-keeps-the-source-as-receiver/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25051-function-value-cast-through-unknown-answers-a-record-view/main.ts": {
-   "order": [
-    "<repo>/tests/corpus/25051-function-value-cast-through-unknown-answers-a-record-view/lib.cjs",
-    "<repo>/tests/corpus/25051-function-value-cast-through-unknown-answers-a-record-view/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24960-prototype-constructor-reads-that-never-call-do-not-link-the-engine.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24960-prototype-constructor-reads-that-never-call-do-not-link-the-engine.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24961-the-function-constructor-reached-through-a-prototype-still-runs-its-text.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24961-the-function-constructor-reached-through-a-prototype-still-runs-its-text.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24930-dyn-object-keys-of-every-short-length-differing-in-one-byte.ts": {
-   "order": [
-    "<repo>/tests/corpus/24930-dyn-object-keys-of-every-short-length-differing-in-one-byte.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/2718-dynamic-import-evaluation-order/main.ts": {
-   "order": [
-    "<repo>/tests/corpus/2718-dynamic-import-evaluation-order/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25096-static-namespace-import-stored-in-a-binding-and-passed-to-a-function/main.ts": {
-   "order": [
-    "<repo>/tests/corpus/25096-static-namespace-import-stored-in-a-binding-and-passed-to-a-function/lib.ts",
-    "<repo>/tests/corpus/25096-static-namespace-import-stored-in-a-binding-and-passed-to-a-function/main.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24972-a-dynamic-constructor-called-with-constant-text-is-staged-natively.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24972-a-dynamic-constructor-called-with-constant-text-is-staged-natively.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/24973-a-dynamic-constructor-called-with-runtime-text-still-runs-it.cjs": {
-   "order": [
-    "<repo>/tests/corpus/24973-a-dynamic-constructor-called-with-runtime-text-still-runs-it.cjs"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25090-async-generator-fiber-runs-a-recursion-thousands-of-frames-deep.ts": {
-   "order": [
-    "<repo>/tests/corpus/25090-async-generator-fiber-runs-a-recursion-thousands-of-frames-deep.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25100-scalar-union-boxes-under-a-collector-with-1000-concurrent-coroutines.ts": {
-   "order": [
-    "<repo>/tests/corpus/25100-scalar-union-boxes-under-a-collector-with-1000-concurrent-coroutines.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25101-scalar-union-values-in-arrays-promises-and-retags-under-collector-pressure.ts": {
-   "order": [
-    "<repo>/tests/corpus/25101-scalar-union-values-in-arrays-promises-and-retags-under-collector-pressure.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25097-forty-thousand-async-generator-fibers-alive-at-once.ts": {
-   "order": [
-    "<repo>/tests/corpus/25097-forty-thousand-async-generator-fibers-alive-at-once.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25163-pending-promises-of-each-payload-kind-settle-and-stay-unsettled.ts": {
-   "order": [
-    "<repo>/tests/corpus/25163-pending-promises-of-each-payload-kind-settle-and-stay-unsettled.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25164-combinators-with-pending-entries-park-callbacks-and-leave-some-unsettled.ts": {
-   "order": [
-    "<repo>/tests/corpus/25164-combinators-with-pending-entries-park-callbacks-and-leave-some-unsettled.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25165-payload-adapters-and-claims-convert-pending-sources-and-stay-pending.ts": {
-   "order": [
-    "<repo>/tests/corpus/25165-payload-adapters-and-claims-convert-pending-sources-and-stay-pending.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25166-dynamic-promises-hold-every-payload-kind-and-combinators-over-them.js": {
-   "order": [
-    "<repo>/tests/corpus/25166-dynamic-promises-hold-every-payload-kind-and-combinators-over-them.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25103-short-string-of-unknown-results-held-after-a-large-stringify-keep-exact-contents.ts": {
-   "order": [
-    "<repo>/tests/corpus/25103-short-string-of-unknown-results-held-after-a-large-stringify-keep-exact-contents.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25150-method-reading-its-own-prototype-method-and-a-base-class-property-off-a-detached-receiver.js": {
-   "order": [
-    "<repo>/tests/corpus/25150-method-reading-its-own-prototype-method-and-a-base-class-property-off-a-detached-receiver.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25168-union-boxes-of-every-arm-kind-release-and-collect-through-their-descriptors.ts": {
-   "order": [
-    "<repo>/tests/corpus/25168-union-boxes-of-every-arm-kind-release-and-collect-through-their-descriptors.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25169-capture-boxes-of-every-kind-release-and-trace-through-their-descriptors.ts": {
-   "order": [
-    "<repo>/tests/corpus/25169-capture-boxes-of-every-kind-release-and-trace-through-their-descriptors.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25170-union-scalars-of-the-common-constants-share-one-box-and-never-mix-with-lookalikes.ts": {
-   "order": [
-    "<repo>/tests/corpus/25170-union-scalars-of-the-common-constants-share-one-box-and-never-mix-with-lookalikes.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25171-padded-parameter-lists-of-unions-convert-to-the-dynamic-copy-with-shared-constants.ts": {
-   "order": [
-    "<repo>/tests/corpus/25171-padded-parameter-lists-of-unions-convert-to-the-dynamic-copy-with-shared-constants.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25172-empty-strings-in-unions-are-shared-and-stay-strings.ts": {
-   "order": [
-    "<repo>/tests/corpus/25172-empty-strings-in-unions-are-shared-and-stay-strings.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25173-heap-built-empty-strings-never-stay-in-the-shared-empty-boxes.ts": {
-   "order": [
-    "<repo>/tests/corpus/25173-heap-built-empty-strings-never-stay-in-the-shared-empty-boxes.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25091-async-generator-yield-await-interleaving-with-microtasks.ts": {
-   "order": [
-    "<repo>/tests/corpus/25091-async-generator-yield-await-interleaving-with-microtasks.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25092-async-generator-return-throw-finally-and-early-exit.ts": {
-   "order": [
-    "<repo>/tests/corpus/25092-async-generator-return-throw-finally-and-early-exit.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25093-async-generator-deep-synchronous-recursion-after-an-await.ts": {
-   "order": [
-    "<repo>/tests/corpus/25093-async-generator-deep-synchronous-recursion-after-an-await.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25094-two-thousand-async-generators-suspended-at-once.ts": {
-   "order": [
-    "<repo>/tests/corpus/25094-two-thousand-async-generators-suspended-at-once.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25095-yield-star-in-async-generators-over-async-and-sync-delegates.ts": {
-   "order": [
-    "<repo>/tests/corpus/25095-yield-star-in-async-generators-over-async-and-sync-delegates.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25098-arrays-of-sync-and-async-generators.ts": {
-   "order": [
-    "<repo>/tests/corpus/25098-arrays-of-sync-and-async-generators.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25099-return-in-an-async-generator-awaits-its-operand.ts": {
-   "order": [
-    "<repo>/tests/corpus/25099-return-in-an-async-generator-awaits-its-operand.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25151-a-local-dead-across-an-await-is-released-before-the-park-and-live-ones-are-kept.ts": {
-   "order": [
-    "<repo>/tests/corpus/25151-a-local-dead-across-an-await-is-released-before-the-park-and-live-ones-are-kept.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25152-dead-local-release-before-a-park-across-loops-switches-finally-and-for-of.ts": {
-   "order": [
-    "<repo>/tests/corpus/25152-dead-local-release-before-a-park-across-loops-switches-finally-and-for-of.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25105-functions-crossing-into-dyn-keep-name-source-length-identity-and-properties.js": {
-   "order": [
-    "<repo>/tests/corpus/25105-functions-crossing-into-dyn-keep-name-source-length-identity-and-properties.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25106-dyn-values-of-every-kind-grow-shrink-and-recycle-across-size-classes.js": {
-   "order": [
-    "<repo>/tests/corpus/25106-dyn-values-of-every-kind-grow-shrink-and-recycle-across-size-classes.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25107-dyn-object-tables-sized-once-keep-order-growth-delete-and-expandos.js": {
-   "order": [
-    "<repo>/tests/corpus/25107-dyn-object-tables-sized-once-keep-order-growth-delete-and-expandos.js"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25104-promise-resolving-functions-settle-once-and-keep-their-promise-alive.ts": {
-   "order": [
-    "<repo>/tests/corpus/25104-promise-resolving-functions-settle-once-and-keep-their-promise-alive.ts"
-   ],
-   "diags": []
-  },
-  "<repo>/tests/corpus/25108-typed-arrays-crossing-into-dyn-keep-length-elements-holes-and-growth.ts": {
-   "order": [
-    "<repo>/tests/corpus/25108-typed-arrays-crossing-into-dyn-keep-length-elements-holes-and-growth.ts"
    ],
    "diags": []
   }
