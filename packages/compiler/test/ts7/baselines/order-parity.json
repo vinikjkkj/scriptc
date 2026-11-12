@@ -27870,6 +27870,12 @@
     "<repo>/tests/corpus/25167-an-await-before-a-receiver-a-compound-store-a-destructuring-a-union-or-a-yield-in-a-generator.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25130-small-integers-in-dyn-values-share-boxes-and-keep-zero-sign-nan-and-fractions.js": {
+   "order": [
+    "<repo>/tests/corpus/25130-small-integers-in-dyn-values-share-boxes-and-keep-zero-sign-nan-and-fractions.js"
+   ],
+   "diags": []
   }
  }
 }
