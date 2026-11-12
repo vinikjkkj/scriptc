@@ -27750,6 +27750,12 @@
     "<repo>/tests/corpus/25106-dyn-values-of-every-kind-grow-shrink-and-recycle-across-size-classes.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25104-promise-resolving-functions-settle-once-and-keep-their-promise-alive.ts": {
+   "order": [
+    "<repo>/tests/corpus/25104-promise-resolving-functions-settle-once-and-keep-their-promise-alive.ts"
+   ],
+   "diags": []
   }
  }
 }
