@@ -4668,6 +4668,17 @@ function validateFunction(
         break;
       }
       case "intrinsic":
+        if (e.name === "module.pending") {
+          if (e.args.length !== 1) err("module.pending takes exactly one argument", e.loc);
+          for (const a of e.args) {
+            checkExpr(a);
+            if (a.type.kind !== "promise" || a.type.inner.kind !== "void") {
+              err(`${typeKey(a.type)} argument to module.pending (needs promise<void>)`, a.loc);
+            }
+          }
+          if (e.type.kind !== "bool") err("module.pending must be bool", e.loc);
+          break;
+        }
         if (e.name === "module.await") {
           if (e.args.length !== 1) err("module.await takes exactly one argument", e.loc);
           for (const a of e.args) {

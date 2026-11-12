@@ -42,7 +42,7 @@
  * past an initialiser into a scope the label cannot see, and the whole
  * transformation would need the body restructured first. */
 import { appendLines, type CEmitter, type Temp } from "./emitter.js";
-import { mangleCoroField, mangleCoroFrame, mangleCoroResume, mangleAsyncSpawn, mangleLocal, mangleRawParam } from "../mangle.js";
+import { mangleGlobal, mangleCoroField, mangleCoroFrame, mangleCoroResume, mangleAsyncSpawn, mangleLocal, mangleRawParam } from "../mangle.js";
 import { boxAccess, cDecl, cType, vAdapters } from "./emit-types.js";
 import { type IrFunction, type IrType, isRefCounted } from "../../ir/nodes.js";
 // `coroPlans` moved to ir/coro-plans.ts: it is backend-agnostic policy and
@@ -265,9 +265,17 @@ export function emitCoroSpawns(E: CEmitter, out: string[], plans: Map<string, St
     ];
     const sig = `ScrPromise *${mangleAsyncSpawn(fn.name)}(${params.join(", ") || "void"})`;
     E.decl(`${sig};`);
+    // A MODULE INITIALISER's evaluation promise is cached (asyncCacheGlobal) and, for an async import cycle, so is the
+    // cycle root's (asyncCycleCacheGlobal): the wrapper is entered once per importer and every later entry gets the
+    // first one's promise. The same wrapper logic as the fiber spawn (emit-async.ts); scr_coro_spawn runs the body
+    // eagerly just as scr_async_spawn did, so an admitted cycle can re-enter this wrapper after its guard sets but
+    // before this outer spawn returns, and the inner entry's temporary cache fill is replaced by the real promise.
+    const cache = fn.asyncCacheGlobal !== undefined ? mangleGlobal(fn.asyncCacheGlobal) : null;
+    const cycleCache = fn.asyncCycleCacheGlobal !== undefined ? mangleGlobal(fn.asyncCycleCacheGlobal) : null;
     appendLines(out, [
       ``,
       `${E.link}${sig} {`,
+      ...(cache !== null ? [`  if (${cache}) return scr_promise_retain(${cache});`] : []),
       `  ${frame} *sc_f = (${frame} *)scr_coro_alloc(sizeof *sc_f, &${mangleCoroResume(fn.name)}, /*has_exc=*/${coroNeedsExcCell(fn) ? "true" : "false"});`,
       ...(lifted ? [`  sc_f->sc_env = scr_closure_retain(sc_env);`] : []),
       ...fn.params.flatMap((p) => {
@@ -297,7 +305,29 @@ export function emitCoroSpawns(E: CEmitter, out: string[], plans: Map<string, St
       // INV-2: the body runs synchronously up to its first suspension, so a
       // function that never awaits has already settled by the time this
       // returns — same observable timing as scr_async_spawn's fiber switch.
-      `  return scr_coro_spawn(&sc_f->base);`,
+      ...(cache === null && cycleCache === null
+        ? [`  return scr_coro_spawn(&sc_f->base);`]
+        : [
+            `  ScrPromise *sc_p = scr_coro_spawn(&sc_f->base);`,
+            // Loader-owned from the moment evaluation starts: even a pending rejection must not become an unrelated
+            // unhandled rejection when a later sibling initializer throws before the dependency wait is built.
+            ...(cache !== null ? [`  scr_promise_mark_handled(sc_p);`] : []),
+            ...(cache !== null
+              ? [
+                  `  ScrPromise *sc_cache_owned = scr_promise_retain(sc_p);`,
+                  `  scr_promise_release(${cache});`,
+                  `  ${cache} = sc_cache_owned;`,
+                ]
+              : []),
+            ...(cycleCache !== null
+              ? [
+                  `  ScrPromise *sc_cycle_cache_owned = scr_promise_retain(sc_p);`,
+                  `  scr_promise_release(${cycleCache});`,
+                  `  ${cycleCache} = sc_cycle_cache_owned;`,
+                ]
+              : []),
+            `  return sc_p;`,
+          ]),
       `}`,
     ]);
   }

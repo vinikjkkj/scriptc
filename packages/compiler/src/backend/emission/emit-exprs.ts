@@ -3643,6 +3643,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         return E.newTemp(e.type, `${E.caughtToDynHelper()}(${c.name})`);
       }
       case "intrinsic": {
+        if (e.name === "module.pending") {
+          // Whether the dependency has not settled: the module evaluator awaits only then (a settled one continues in this turn).
+          const p = E.emitExpr(e.args[0]!);
+          return E.newTemp(e.type, `scr_promise_is_pending(${p.name})`);
+        }
         if (e.name === "module.await") {
           // The module evaluator's dependency wait: park only while the
           // promise is pending. A settled dependency continues in this
