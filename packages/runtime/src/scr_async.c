@@ -236,8 +236,17 @@ struct ScrPromise {
     bool b;
   };
   void *payload;
-  /* Fibers parked on this promise. */
-  ScrFiber **waiters;
+  /* Fibers parked on this promise, in registration order. Nearly every awaited
+   * promise has exactly ONE waiter, so the first lives INLINE in this word: with
+   * nwaiters == 1 `w1` is the waiter, with nwaiters >= 2 `wv` is a malloc'd
+   * vector of waiters_cap entries holding all of them, with 0 there is neither
+   * (settle frees the vector). Same offset and size as the old pointer, so a
+   * promise nobody awaits pays nothing and a single-awaiter one skips the
+   * 4-entry array malloc. Reach it only through scr_prom_wadd/wat/wdrain. */
+  union {
+    ScrFiber *w1;
+    ScrFiber **wv;
+  };
   /* retain/release/trace of a REF payload, as one interned triple (ScrPromVt)
    * named by a 32-bit index; 0 = none. These are per-TYPE facts, so they were 24
    * bytes of per-instance pointers. */
@@ -305,6 +314,41 @@ struct ScrPromiseExt {
 };
 
 static void scr_oom(void);
+
+
+/* Append waiter `f` to `p`. */
+static inline void scr_prom_wadd(ScrPromise *p, ScrFiber *f) {
+  uint32_t n = p->nwaiters;
+  if (n == 0) {
+    p->w1 = f;
+  } else if (n == 1) {
+    ScrFiber **v = (ScrFiber **)malloc(4 * sizeof *v);
+    if (!v) scr_oom();
+    v[0] = p->w1;
+    v[1] = f;
+    p->wv = v;
+    p->waiters_cap = 4;
+  } else {
+    if (n == p->waiters_cap) {
+      p->waiters_cap *= 2;
+      p->wv = (ScrFiber **)realloc(p->wv, p->waiters_cap * sizeof *p->wv);
+      if (!p->wv) scr_oom();
+    }
+    p->wv[n] = f;
+  }
+  p->nwaiters = n + 1;
+}
+
+/* Waiter `i` of a list of `n` held as (w1|wv). */
+static inline ScrFiber *scr_prom_wat(ScrFiber *w1, ScrFiber **wv, size_t n, size_t i) {
+  return n == 1 ? w1 : wv[i];
+}
+
+/* Free the vector a promise being torn down still owns. */
+static inline void scr_prom_wfree(ScrPromise *p) {
+  if (p->nwaiters >= 2) free(p->wv);
+}
+
 static inline struct ScrPromiseExt *scr_prom_xmk(ScrPromise *p) {
   if (p->ext == NULL) {
     p->ext = (struct ScrPromiseExt *)calloc(1, sizeof *p->ext);
@@ -456,7 +500,7 @@ static void scr_promise_gcfree(void *o) {
     free(p->ext);
     p->ext = NULL;
   }
-  free(p->waiters);
+  scr_prom_wfree(p);
 #ifdef SCR_RC_AUDIT
   scr_live_promises--;
 #endif
@@ -619,7 +663,7 @@ void scr_promise_release(ScrPromise *p) {
   if (--p->rc == 0) {
     scr_cyc_on_dead(p);
     scr_promise_release_payload(p);
-    free(p->waiters);
+    scr_prom_wfree(p);
     if (p->ext != NULL) {
       scr_promise_adapts_free(p, true);
       if (p->ext->alias) scr_promise_release(p->ext->alias);
@@ -1852,7 +1896,13 @@ static struct ScrPromiseCbWaiter *scr_prom_cb_add(ScrPromise *in) {
 static void scr_promise_claim_run(ScrPromise *dst, ScrPromise *src, ScrClosure *conv);
 static void scr_promise_settle_wake(ScrPromise *p) {
   size_t nw = p->nwaiters, w = 0;
+  /* Take the waiter list: p ends with none (a settled promise parks nothing
+   * more), and the vector is freed here once the wakes are queued. */
+  ScrFiber *w1 = nw == 1 ? p->w1 : NULL;
+  ScrFiber **wv = nw >= 2 ? p->wv : NULL;
   p->nwaiters = 0;
+  p->waiters_cap = 0;
+  p->wv = NULL;
   /* Detach the callback list BEFORE running it. Each entry's dst/via/conv
    * references are dropped as it is processed, and a release inside the loop
    * (or inside the adapter a claim runs) can start a cycle collection; the
@@ -1869,7 +1919,7 @@ static void scr_promise_settle_wake(ScrPromise *p) {
     p->ext->cbs_cap = 0;
   }
   for (size_t i = 0; i < ncbs; i++) {
-    for (; w < nw && w < cbs[i].wpos; w++) scr_ready_push(p->waiters[w]);
+    for (; w < nw && w < cbs[i].wpos; w++) scr_ready_push(scr_prom_wat(w1, wv, nw, w));
     /* A callback parked here for a claim consumes the CLAIM (already settled: its
      * own callback sits earlier on this list), everything else consumes p. */
     ScrPromise *s = cbs[i].via ? cbs[i].via : p;
@@ -1895,7 +1945,8 @@ static void scr_promise_settle_wake(ScrPromise *p) {
     }
     scr_promise_release(cbs[i].dst);
   }
-  for (; w < nw; w++) scr_ready_push(p->waiters[w]);
+  for (; w < nw; w++) scr_ready_push(scr_prom_wat(w1, wv, nw, w));
+  free(wv);
   free(cbs);
   if (p->state == SCR_PROM_REJECTED) scr_track_rejection(p);
 }
@@ -3827,12 +3878,7 @@ static void scr_await_park(ScrPromise *p) {
     abort();
   }
   p = scr_prom_reg_target(p);
-  if (p->nwaiters == p->waiters_cap) {
-    p->waiters_cap = p->waiters_cap ? p->waiters_cap * 2 : 4;
-    p->waiters = realloc(p->waiters, p->waiters_cap * sizeof *p->waiters);
-    if (!p->waiters) scr_oom();
-  }
-  p->waiters[p->nwaiters++] = self;
+  scr_prom_wadd(p, self);
   SCR_FST_PARK_IN(self->entry);
   scr_switch(&self->st->ctx, self->return_to, NULL);
   SCR_FST_PARK_OUT(self->entry);
@@ -4444,12 +4490,7 @@ static void scr_promise_park_envelope(ScrPromise *p, void (*fn)(void *), void *a
   f->micro_arg = arg;
   f->micro_arg_release = arg_release;
   p = scr_prom_reg_target(p);
-  if (p->nwaiters == p->waiters_cap) {
-    p->waiters_cap = p->waiters_cap ? p->waiters_cap * 2 : 4;
-    p->waiters = realloc(p->waiters, p->waiters_cap * sizeof *p->waiters);
-    if (!p->waiters) scr_oom();
-  }
-  p->waiters[p->nwaiters++] = f;
+  scr_prom_wadd(p, f);
 }
 
 typedef struct {
