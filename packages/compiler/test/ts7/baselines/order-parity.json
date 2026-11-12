@@ -27786,6 +27786,18 @@
     "<repo>/tests/fixtures/node-types/streams.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25153-module-initialisers-with-top-level-await-run-as-state-machines-through-diamonds-and-cycles/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/25153-module-initialisers-with-top-level-await-run-as-state-machines-through-diamonds-and-cycles/shared.ts",
+    "<repo>/tests/corpus/25153-module-initialisers-with-top-level-await-run-as-state-machines-through-diamonds-and-cycles/leaf.ts",
+    "<repo>/tests/corpus/25153-module-initialisers-with-top-level-await-run-as-state-machines-through-diamonds-and-cycles/left.ts",
+    "<repo>/tests/corpus/25153-module-initialisers-with-top-level-await-run-as-state-machines-through-diamonds-and-cycles/right.ts",
+    "<repo>/tests/corpus/25153-module-initialisers-with-top-level-await-run-as-state-machines-through-diamonds-and-cycles/ping.ts",
+    "<repo>/tests/corpus/25153-module-initialisers-with-top-level-await-run-as-state-machines-through-diamonds-and-cycles/pong.ts",
+    "<repo>/tests/corpus/25153-module-initialisers-with-top-level-await-run-as-state-machines-through-diamonds-and-cycles/main.ts"
+   ],
+   "diags": []
   }
  }
 }
