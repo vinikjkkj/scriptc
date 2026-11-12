@@ -5,7 +5,7 @@
  * process's resident set, not system memory. The measured effect (redis bench: peak RSS 116.7 -> 104.8 MiB) is in the
  * commit; what is pinned HERE is the mechanism, deterministically:
  *
- *   knob on  -- exactly one `[textdrop] fired once` line, with a residency after the drop no larger than before;
+ *   knob on  -- exactly one `[textdrop] drop #1` line (a 600 ms program never reaches the 2 s repeat interval), with a residency after the drop no larger than before;
  *   SCR_TEXT_DROP=0 -- prints nothing at all (the negative control: a drop that found nothing still prints);
  *   a short program that exits before the delay pays nothing: no line even with the stat knob on;
  *   stdout is identical in every arm.
@@ -57,7 +57,7 @@ describe.skipIf(!linux)("the text drop fires once at the first idle seam, behind
     const r = await run(idle, { SCR_TEXT_DROP_STAT: "1" });
     expect(r.stdout).toBe("done 6\n");
     expect(r.lines).toHaveLength(1);
-    const m = /fired once mappings=(\d+) exeTextKiB (\d+)->(\d+)/.exec(r.lines[0]!);
+    const m = /drop #1 mappings=(\d+) exeTextKiB (\d+)->(\d+)/.exec(r.lines[0]!);
     expect(m).not.toBeNull();
     expect(Number(m![1])).toBeGreaterThanOrEqual(1);
     expect(Number(m![3])).toBeLessThanOrEqual(Number(m![2]));

@@ -3480,6 +3480,9 @@ static void scr_heap_trim_line(const char *const *labels, const size_t *vals,
 #ifndef SCR_TEXT_DROP_AFTER_MS
 #define SCR_TEXT_DROP_AFTER_MS 200
 #endif
+#ifndef SCR_TEXT_DROP_EVERY_MS
+#define SCR_TEXT_DROP_EVERY_MS 2000 /* repeat at most this often; 0 = the first drop only */
+#endif
 
 static bool scr_text_drop_env(const char *name, bool dflt) {
   const char *e = getenv(name);
@@ -3557,22 +3560,41 @@ static bool scr_has_textrel(void) {
   return false;
 }
 
-static bool scr_text_drop_done = false;
-static double scr_text_drop_first_ms = 0;
+static bool scr_text_drop_first_done = false;
+static double scr_text_drop_first_ms = 0, scr_text_drop_last_ms = 0;
+static size_t scr_text_drop_n = 0;
+
+static size_t scr_text_env_num(const char *name, size_t dflt) {
+  const char *e = getenv(name);
+  if (e == NULL) return dflt;
+  long v = strtol(e, NULL, 10);
+  return v >= 0 ? (size_t)v : dflt;
+}
 
 static void scr_text_drop_tick(double now) {
-  if (scr_text_drop_done) return;
+  size_t every = scr_text_env_num("SCR_TEXT_DROP_EVERY_MS", SCR_TEXT_DROP_EVERY_MS);
+  if (scr_text_drop_first_done && every == 0) return;
   if (scr_text_drop_first_ms == 0) { scr_text_drop_first_ms = now; return; }
-  if (now - scr_text_drop_first_ms < (double)SCR_TEXT_DROP_AFTER_MS) return;
-  scr_text_drop_done = true;
-  if (!scr_text_drop_env("SCR_TEXT_DROP", SCR_TEXT_DROP != 0) || scr_has_textrel()) return;
+  if (!scr_text_drop_first_done) {
+    if (now - scr_text_drop_first_ms < (double)SCR_TEXT_DROP_AFTER_MS) return;
+    scr_text_drop_first_done = true;
+    if (!scr_text_drop_env("SCR_TEXT_DROP", SCR_TEXT_DROP != 0) || scr_has_textrel()) { scr_text_drop_n = (size_t)-1; return; }
+  } else {
+    if (scr_text_drop_n == (size_t)-1) return;
+    /* A repeat: at most once per interval. */
+    if (now - scr_text_drop_last_ms < (double)every) return;
+  }
   bool stat = scr_text_drop_env("SCR_TEXT_DROP_STAT", false);
   size_t before = stat ? scr_text_scan(false) : 0;
   size_t maps = scr_text_scan(true);
+  scr_text_drop_last_ms = now;
+  scr_text_drop_n++;
   if (stat) {
     size_t after = scr_text_scan(false);
     char nb[24];
-    fputs("[textdrop] fired once mappings=", stderr);
+    fputs("[textdrop] drop #", stderr);
+    fputs(scr_utoa(scr_text_drop_n, nb), stderr);
+    fputs(" mappings=", stderr);
     fputs(scr_utoa(maps, nb), stderr);
     fputs(" exeTextKiB ", stderr);
     fputs(scr_utoa(before, nb), stderr);
