@@ -85,8 +85,11 @@ describe("the minted prototype is a traced edge (source contract)", () => {
     expect(body).toContain("visit(c->props, ctx);");
     expect(body).toContain("visit(c->implicit_proto, ctx);");
     // The captures too, or the edge that started this whole population
-    // (`Foo.create = () => new Foo()`) goes with it.
-    expect(body).toContain("for (size_t i = 0; i < c->ncaps; i++) visit(c->caps[i], ctx);");
+    // (`Foo.create = () => new Foo()`) goes with it. EVERY capture slot is visited, whichever kind it holds: a counted box as itself, and a
+    // runtime-made closure's tagged promise slot (bit 0 set, see SCR_CAP_RAW in scr_runtime.h) as the promise it points at. A loop that
+    // visited only the plain slots would leave a resolving function's promise edge invisible to the collector.
+    expect(body).toMatch(/for \(size_t i = 0; i < c->ncaps; i\+\+\) visit\(/);
+    expect(body).toContain("scr_cap_is_raw(c->caps[i]) ? scr_cap_raw_ptr(c->caps[i]) : (void *)c->caps[i]");
   });
 
   test("scr_closure_may_cycle names every child the trace can visit", () => {
