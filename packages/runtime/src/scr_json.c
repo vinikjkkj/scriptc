@@ -360,6 +360,14 @@ ScrStr *scr_jb_finish(ScrJsonBuf *b) {
    * document cannot pin big allocations forever). */
   if (s->cap > scr_jb_hint) scr_jb_hint = s->cap < (1 << 16) ? s->cap : (1 << 16);
   scr_jb_init(b);
+  /* The block was sized by the hint (up to 64 KiB) or by doubling, not by the text: a short result would keep the whole block for as long as
+   * it lives. Hand back an exact string when more than half the capacity is slack; the big block goes to the spare slot, where the next
+   * builder takes it, so a stream of short documents still reuses one block. */
+  if (s->cap >= 128 && (size_t)s->cap > (size_t)s->len * 2) {
+    ScrStr *t = scr_str_new(s->data, s->len);
+    scr_str_release(s);
+    return t;
+  }
   return s;
 }
 

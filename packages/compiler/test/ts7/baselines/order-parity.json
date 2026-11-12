@@ -27613,6 +27613,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25103-short-string-of-unknown-results-held-after-a-large-stringify-keep-exact-contents.ts": {
+   "order": [
+    "<repo>/tests/corpus/25103-short-string-of-unknown-results-held-after-a-large-stringify-keep-exact-contents.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/25091-async-generator-yield-await-interleaving-with-microtasks.ts": {
    "order": [
     "<repo>/tests/corpus/25091-async-generator-yield-await-interleaving-with-microtasks.ts"
