@@ -10329,6 +10329,13 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
     L.diagSink = captured;
     let fn: IrFunction | null = null;
     let poisoned = false;
+    // The variant is built from INSIDE whatever body asked for the method as a value, and that body may be a late method (a donor's body
+    // lowered for a borrower class: `ChangeUser.prototype.m = ClientHandshake.prototype.m`) whose `this` stands in as the borrower's
+    // type. The donor's own variant is typed by the donor: the enclosing `this` must not leak into it.
+    const outerThisType = L.activeThisType;
+    const outerThisFn = L.activeThisFn;
+    L.activeThisType = null;
+    L.activeThisFn = null;
     try {
       fn = withInstanceBindings(L, info, () => lowerMethodBodyInner(L, info, mName, member, true));
     } catch (e) {
@@ -10337,6 +10344,9 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
         throw e;
       }
       poisoned = true;
+    } finally {
+      L.activeThisType = outerThisType;
+      L.activeThisFn = outerThisFn;
     }
     L.diagSink = saved;
     if (fn === null || poisoned || captured.length > 0) {
