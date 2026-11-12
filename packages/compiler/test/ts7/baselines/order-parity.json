@@ -15728,6 +15728,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25190-a-promise-wakes-one-two-and-many-awaiters-in-registration-order-with-callbacks-interleaved.ts": {
+   "order": [
+    "<repo>/tests/corpus/25190-a-promise-wakes-one-two-and-many-awaiters-in-registration-order-with-callbacks-interleaved.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25191-many-parked-awaiters-on-shared-promises-free-their-vector-exactly-once.ts": {
+   "order": [
+    "<repo>/tests/corpus/25191-many-parked-awaiters-on-shared-promises-free-their-vector-exactly-once.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/25192-frame-slots-of-locals-dead-at-every-park-are-dropped-across-loops-try-finally-for-of-and-branches.ts": {
    "order": [
     "<repo>/tests/corpus/25192-frame-slots-of-locals-dead-at-every-park-are-dropped-across-loops-try-finally-for-of-and-branches.ts"
