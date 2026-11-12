@@ -4635,7 +4635,7 @@ export class Lowerer {
       }
     }
     // Closure names from what is stable (parent function + ordinal) instead of the module-wide counter (stable-names.ts).
-    if (this.diags.length === 0 && process.env["SCRIPTC_STABLE_NAMES"] !== "0") renameLiftedFunctions(functions, [functions, artifacts.classes, artifacts.records, artifacts.unions, this.globalsList]);
+    if (this.diags.length === 0 && process.env["SCRIPTC_STABLE_NAMES"] !== "0") renameLiftedFunctions(functions, [functions, artifacts.classes, artifacts.records, artifacts.unions, this.globalsList], { records: artifacts.records, unions: artifacts.unions });
     const module: IrModule | null =
       this.diags.length > 0
         ? null
