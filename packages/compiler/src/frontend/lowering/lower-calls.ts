@@ -20,7 +20,7 @@ import { protoDataCallee } from "./lower-protodata.js";
 import { lowerAbortMethodCall } from "./lower-abort.js";
 import { lowerEventMethodCall } from "./lower-event.js";
 import { lowerFetchMethodCall } from "./lower-fetch.js";
-import { ABORTSIGNAL_T, EVENT_T, BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, F64, canAdaptDynFuncTo, IrExpr, IrFunction, IrLibFn, IrLocal, IrParam, IrStmt, IrType, JSVAL, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxClassIntoDyn, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, dynCopyIsObservable, dynCopyHasLiveView, canMarshalTypedFuncIntoIsland, funcOf, isUnitType, RUNTIME_EMITTER_CLASS, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
+import { strandTrap, ABORTSIGNAL_T, EVENT_T, BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, F64, canAdaptDynFuncTo, IrExpr, IrFunction, IrLibFn, IrLocal, IrParam, IrStmt, IrType, JSVAL, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxClassIntoDyn, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, dynCopyIsObservable, dynCopyHasLiveView, canMarshalTypedFuncIntoIsland, funcOf, isUnitType, RUNTIME_EMITTER_CLASS, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import type { IrFfiImport } from "../../ir/nodes.js";
 import { isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
 import { siblingDtsMethodReturnKind } from "../npm.js";
@@ -29,7 +29,7 @@ import { PoisonError, dynFallbackType, dynUndefinedExpr, fnValueCodeOfNode, impo
 import { pairedProtoClassOfValue, protoThisType } from "./proto-class-consume.js";
 import { enforceLibBoundary } from "./lib-boundary.js";
 import { hasProtoTab, protoTabReadChain } from "./lower-prototab.js";
-import { checkedArmBridge, lowerInstanceOverrideRead, lowerWebCryptoGetRandomValues, refuseUnloweredSubtleCall, refuseUnloweredWebCrypto, refuseWebCryptoDestructuredArgs, refuseWebCryptoOwnKeys, sameValueDynOperand, unboundMethodThunk, undefinedArmedInAnswer, lowerWebCryptoMemberCall } from "./lower-exprs.js";
+import { undeclaredByHierarchy, checkedArmBridge, lowerInstanceOverrideRead, lowerWebCryptoGetRandomValues, refuseUnloweredSubtleCall, refuseUnloweredWebCrypto, refuseWebCryptoDestructuredArgs, refuseWebCryptoOwnKeys, sameValueDynOperand, unboundMethodThunk, undefinedArmedInAnswer, lowerWebCryptoMemberCall } from "./lower-exprs.js";
 import { cjsRequireAliasTargetOf, requireDepValueOf } from "./lower-island.js";
 import { NARROW_FIRST, builtinFenceHintOf, builtinModuleFnOf, dynOwnNamesHelper } from "./surfaces.js";
 import { OBJECT_PROTOTYPE_METHODS } from "./lowerer.js";
@@ -6976,6 +6976,28 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
       {
         const viaCast = lowerCastReceiverMethodCall(L, expr);
         if (viaCast !== null) return viaCast;
+      }
+      {
+        // A call of a name no instance of the receiver's class (nor a descendant) can hold, in JS: the callee is the engine's undefined,
+        // so the call throws Node's TypeError after its arguments are evaluated (mysql2's `this.onResult(err)` in a donor method, behind
+        // an `if (this.onResult)` the run time never takes for this class).
+        const recvNode = expr.expression.expression;
+        if (isJsSourceFile(expr.getSourceFile()) && (L.typeOf(expr.expression).flags & ts.TypeFlags.Any) !== 0 && (L.typeOf(expr).flags & ts.TypeFlags.Any) !== 0 &&
+            (plainReadChain(recvNode) || recvNode.kind === ts.SyntaxKind.ThisKeyword)) {
+          const probe = probeLower(L, recvNode);
+          const cinfo = probe !== null && probe.type.kind === "object" ? L.classes.get(probe.type.className) : undefined;
+          if (cinfo !== undefined && undeclaredByHierarchy(L, cinfo, expr.expression.name.text, expr)) {
+            const loc = locOf(expr);
+            const argStmts: IrStmt[] = expr.arguments.map((a) => ({ kind: "exprStmt" as const, expr: L.lowerExpr(a), loc }));
+            return {
+              kind: "seqExpr",
+              stmts: [...argStmts, { kind: "if", cond: { kind: "boolLit", value: false, type: BOOL, loc }, then: [], else_: [strandTrap(`${expr.expression.getText()} is not a function`, loc)], loc }],
+              result: dynUndefinedExpr(loc),
+              type: DYN,
+              loc,
+            };
+          }
+        }
       }
       L.unsupported("SC1090", expr, `method calls like '${expr.expression.getText()}'`);
     }

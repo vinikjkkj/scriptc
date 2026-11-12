@@ -4282,6 +4282,13 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           const readT = L.mapTypeOf(L.typeOf(expr));
           const absent = readT === null ? null : L.wrappedUndefined(readT, loc);
           if (absent !== null) return L.maybeNarrow(absent, expr);
+          // An `any`-typed read of a name this class never declares (a JS method reading a property only a SIBLING class sets, the
+          // donor of a borrowed method: mysql2's ClientHandshake.handshakeResult reads `this.onResult`, which ChangeUser sets and the
+          // base class never declares). No instance of this class or of a descendant has a slot for it and no property table holds one,
+          // so the read is the engine's undefined, exactly Node's answer; a borrower runs its own copy of the body.
+          if ((readT === null ? (L.typeOf(expr).flags & ts.TypeFlags.Any) !== 0 : readT.kind === "jsval") && undeclaredByHierarchy(L, adoptedInfo, expr.name.text, expr)) {
+            return L.maybeNarrow(dynUndefinedExpr(loc), expr);
+          }
         }
       }
       if (process.env["SCRIPTC_READ_WHY"] !== undefined) {
@@ -25862,6 +25869,17 @@ export function slotBypassTarget(L: Lowerer, declarer: ClassInfo, method: string
 /** The detached-function closure of class method `method` of `info` (see
    * lowerUnboundClassMethodValue); also what an object-literal method adopted
    * as a late method becomes inside its literal. */
+  /** True when no instance of `info` or of a descendant can hold a property `name` in a JS source: the class declares no slot for it,
+   * no descendant does, and no run-time property table exists. A read of such a name is the engine's undefined and a call of it is
+   * Node's "is not a function". */
+  export function undeclaredByHierarchy(L: Lowerer, info: ClassInfo, name: string, at: ts.Node): boolean {
+    // A prototype datum (`Object.defineProperty(P, 'isPoint', ...)` of a prototype class) or a prototype table is the PROTOTYPE'S answer,
+    // not an absence: those reads keep their own routes.
+    return info.hasPropsTable !== true && isJsSourceFile(at.getSourceFile()) && !protoDataNameAnywhere(name) && !hasProtoTab(L, info) &&
+      !info.fields.has(name) && L.findMethodOn(info, name) === null && L.findMethodOn(info, `get:${name}`) === null &&
+      ![...L.classes.values()].some((c) => c !== info && c.fields.has(name) && L.isSubclassOf(c.def.name, info.def.name));
+  }
+
   export function unboundMethodThunk(L: Lowerer, info: ClassInfo, method: string,
     found: { declarer: ClassInfo; sig: { params: ParamShape[]; ret: IrType } }, loc: SrcLoc, direct = false): IrExpr {
     // A method nobody overrides is the declarer's own function whichever way it
