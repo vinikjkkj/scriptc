@@ -326,6 +326,19 @@ static uint32_t scr_prom_vt_n = 1, scr_prom_vt_cap = 0;
 static struct { void *(*r)(void *); void (*l)(void *); ScrTraceFn t; uint32_t vt; } scr_prom_vt_cache[32];
 static ScrPromVt scr_prom_vt_zero;
 #define PV(p) (scr_prom_vt_tab ? &scr_prom_vt_tab[(p)->vt] : &scr_prom_vt_zero)
+/* The scalar payload is ONE word shared by the f64 and bool members, so a reader that does not match the settle kind
+ * reads the wrong member. Every reader below is reached with the matching kind (the emitter picks the accessor from the
+ * promise's static type, the dyn adapters switch on the kind); the audit lane (--sanitize) checks it. A settled-void
+ * promise (NONE) reads as zero, as it always did. */
+#ifdef SCR_RC_AUDIT
+#define SCR_PROM_SCALAR_KIND(p, want)                                                                \
+  do {                                                                                                \
+    if ((p)->payload_kind != (want) && (p)->payload_kind != SCR_EXC_NONE)                             \
+      scr_trap("scriptc: internal error: promise scalar payload read as the wrong kind\n");          \
+  } while (0)
+#else
+#define SCR_PROM_SCALAR_KIND(p, want) ((void)0)
+#endif
 static uint32_t scr_prom_vt_intern(void *(*retain)(void *), void (*release)(void *), ScrTraceFn trace) {
   if (retain == NULL && release == NULL && trace == NULL) return 0;
   size_t h = (((uintptr_t)release >> 4) ^ ((uintptr_t)retain >> 3)) & 31u;
@@ -2008,8 +2021,8 @@ void scr_promise_all_store_ref(ScrArr *a, double i, ScrPromise *src) {
 
 /* Fulfillment payload accessors for the emitted race adapters — all
  * retained/by-value (the source keeps its settlement). */
-double scr_promise_payload_f64(ScrPromise *p) { return p->f64; }
-bool scr_promise_payload_bool(ScrPromise *p) { return p->b; }
+double scr_promise_payload_f64(ScrPromise *p) { SCR_PROM_SCALAR_KIND(p, SCR_EXC_F64); return p->f64; }
+bool scr_promise_payload_bool(ScrPromise *p) { SCR_PROM_SCALAR_KIND(p, SCR_EXC_BOOL); return p->b; }
 ScrStr *scr_promise_payload_str(ScrPromise *p) {
   return scr_str_retain((ScrStr *)p->payload);
 }
@@ -2020,8 +2033,8 @@ ScrStr *scr_promise_payload_str(ScrPromise *p) {
 static bool scr_await_settled(ScrPromise *p); /* defined with the await family */
 int scr_promise_payload_kind(const ScrPromise *p) { return (int)p->payload_kind; }
 bool scr_promise_payload_is_dyn(const ScrPromise *p) { return PV(p)->retain == scr_dyn_retain_v; }
-double scr_promise_payload_num(const ScrPromise *p) { return p->f64; }
-bool scr_promise_payload_flag(const ScrPromise *p) { return p->b; }
+double scr_promise_payload_num(const ScrPromise *p) { SCR_PROM_SCALAR_KIND(p, SCR_EXC_F64); return p->f64; }
+bool scr_promise_payload_flag(const ScrPromise *p) { SCR_PROM_SCALAR_KIND(p, SCR_EXC_BOOL); return p->b; }
 bool scr_promise_await_settled(ScrPromise *p) { return scr_await_settled(p); }
 void scr_promise_payload_release(const ScrPromise *p, void *v) { PV(p)->release(v); }
 
@@ -3882,10 +3895,14 @@ static bool scr_await_settled(ScrPromise *p) {
 }
 
 double scr_await_f64(ScrPromise *p) {
-  return scr_await_settled(p) ? p->f64 : 0;
+  if (!scr_await_settled(p)) return 0;
+  SCR_PROM_SCALAR_KIND(p, SCR_EXC_F64);
+  return p->f64;
 }
 bool scr_await_bool(ScrPromise *p) {
-  return scr_await_settled(p) ? p->b : false;
+  if (!scr_await_settled(p)) return false;
+  SCR_PROM_SCALAR_KIND(p, SCR_EXC_BOOL);
+  return p->b;
 }
 void *scr_await_ref(ScrPromise *p) {
   return scr_await_settled(p) && p->payload ? PV(p)->retain(p->payload) : NULL;
@@ -4529,8 +4546,8 @@ void scr_coro_promise_rethrow(ScrPromise *p) { scr_promise_rethrow(p); }
 
 /* Settled payload readers. No parking, no observation -- the caller has
  * already established that the promise is settled and fulfilled. */
-double scr_coro_promise_f64(const ScrPromise *p) { return p->f64; }
-bool   scr_coro_promise_bool(const ScrPromise *p) { return p->b; }
+double scr_coro_promise_f64(const ScrPromise *p) { SCR_PROM_SCALAR_KIND(p, SCR_EXC_F64); return p->f64; }
+bool   scr_coro_promise_bool(const ScrPromise *p) { SCR_PROM_SCALAR_KIND(p, SCR_EXC_BOOL); return p->b; }
 void  *scr_coro_promise_ref(const ScrPromise *p) {
   return p->payload ? PV(p)->retain(p->payload) : NULL;
 }
