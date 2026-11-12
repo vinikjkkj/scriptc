@@ -27612,6 +27612,30 @@
     "<repo>/tests/corpus/25097-forty-thousand-async-generator-fibers-alive-at-once.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25163-pending-promises-of-each-payload-kind-settle-and-stay-unsettled.ts": {
+   "order": [
+    "<repo>/tests/corpus/25163-pending-promises-of-each-payload-kind-settle-and-stay-unsettled.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25164-combinators-with-pending-entries-park-callbacks-and-leave-some-unsettled.ts": {
+   "order": [
+    "<repo>/tests/corpus/25164-combinators-with-pending-entries-park-callbacks-and-leave-some-unsettled.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25165-payload-adapters-and-claims-convert-pending-sources-and-stay-pending.ts": {
+   "order": [
+    "<repo>/tests/corpus/25165-payload-adapters-and-claims-convert-pending-sources-and-stay-pending.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25166-dynamic-promises-hold-every-payload-kind-and-combinators-over-them.js": {
+   "order": [
+    "<repo>/tests/corpus/25166-dynamic-promises-hold-every-payload-kind-and-combinators-over-them.js"
+   ],
+   "diags": []
   }
  }
 }
