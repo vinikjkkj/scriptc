@@ -136,3 +136,41 @@ export function writesLocal(e: IrExpr, localId: string): boolean {
   };
   return walk(e);
 }
+
+/** The locals of `fn` written by exactly one node, and that node a `varDecl` (or a parameter nothing writes): declared once, never assigned, never
+ * incremented, never a for-of binding. Cached per function object (the IR is not mutated between emitter passes). */
+const singleWriterCache = new WeakMap<object, Set<string>>();
+export function singleWriterLocals(fn: { body: unknown; params: readonly { localId: string }[] }): Set<string> {
+  const hit = singleWriterCache.get(fn);
+  if (hit !== undefined) return hit;
+  const count = new Map<string, number>();
+  const decl = new Map<string, number>();
+  const seen = new Set<object>();
+  const walk = (n: unknown): void => {
+    if (n === null || typeof n !== "object") return;
+    if (seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) {
+      for (const x of n) walk(x);
+      return;
+    }
+    const rec = n as Record<string, unknown>;
+    const kind = rec["kind"];
+    if (
+      (kind === "assignExpr" || kind === "assign" || kind === "incDec" || kind === "varDecl" || kind === "forOf") &&
+      typeof rec["localId"] === "string"
+    ) {
+      const id = rec["localId"] as string;
+      count.set(id, (count.get(id) ?? 0) + 1);
+      if (kind === "varDecl") decl.set(id, (decl.get(id) ?? 0) + 1);
+    }
+    for (const k in rec) walk(rec[k]);
+  };
+  walk(fn.body);
+  const out = new Set<string>();
+  for (const [id, c] of count) if (c === 1 && decl.get(id) === 1) out.add(id);
+  // A parameter nothing writes is owned from entry and never re-owned.
+  for (const p of fn.params) if (!count.has(p.localId)) out.add(p.localId);
+  singleWriterCache.set(fn, out);
+  return out;
+}

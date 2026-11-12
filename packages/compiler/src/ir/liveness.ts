@@ -82,6 +82,14 @@ export interface SuspensionPoint {
    * by a box a closure still references. Excludes the locals this very
    * statement defines — they do not exist yet when it suspends. */
   live: ReadonlySet<string>;
+  /** The locals a park must NOT release (every other owned local is dead across this point and may be released
+   * before the park instead of being carried through it): `live` refined for an `await` nested in a larger
+   * expression. `live` widens a nested point to every local the whole enclosing expression reads; the reads inside
+   * the await's OWN operand all happen before the park, so a local read only there is dead across it. A local the
+   * operand hands to a runtime call (`libCall`) is always kept: a runtime operation may hold the borrowed pointer
+   * for as long as it is pending, and only this frame's reference keeps the value alive meanwhile. Absent on a
+   * point this refinement does not cover (a libCall suspension, a yield): nothing there is released. */
+  keepAtPark?: ReadonlySet<string>;
   /** True when the suspension sits nested inside a larger expression, so
    * operands evaluated BEFORE it are already materialised in temporaries
    * the frame must also hold. `live` is exact when this is false. */
@@ -154,6 +162,53 @@ function readsOf(node: unknown, out: Set<string>): void {
     for (const k in rec) walk(rec[k]);
   };
   walk(node);
+}
+
+/** `readsOf` over `root`, skipping the whole subtree of the node `skip` (an await's own operand is not read AFTER
+ * that await's park). The same read set otherwise: varRef, incDec, closure captures. */
+function readsOfExcept(root: unknown, skip: object, out: Set<string>): void {
+  const seen = new Set<object>();
+  const walk = (n: unknown): void => {
+    if (n === null || typeof n !== "object") return;
+    if (n === skip) return;
+    if (seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) {
+      for (const x of n) walk(x);
+      return;
+    }
+    const rec = n as Record<string, unknown>;
+    const kind = rec["kind"];
+    if (kind === "varRef" || kind === "incDec") {
+      const id = rec["localId"];
+      if (typeof id === "string") out.add(id);
+    } else if (kind === "closure") {
+      const caps = rec["captures"];
+      if (Array.isArray(caps)) {
+        for (const c of caps) if (typeof c === "string") out.add(c);
+      }
+    }
+    for (const k in rec) walk(rec[k]);
+  };
+  walk(root);
+}
+
+/** Adds every local read inside a `libCall` (a runtime operation) within `root`. */
+function libCallReadsOf(root: unknown, out: Set<string>): void {
+  const seen = new Set<object>();
+  const walk = (n: unknown): void => {
+    if (n === null || typeof n !== "object") return;
+    if (seen.has(n)) return;
+    seen.add(n);
+    if (Array.isArray(n)) {
+      for (const x of n) walk(x);
+      return;
+    }
+    const rec = n as Record<string, unknown>;
+    if (rec["kind"] === "libCall") readsOf(rec, out);
+    for (const k in rec) walk(rec[k]);
+  };
+  walk(root);
 }
 
 interface FoundSuspension {
@@ -452,6 +507,14 @@ function recordPoints(
     if (e !== null && susps.some((s) => s.nested)) readsOf(e, enclosingReads);
     for (const s of susps) {
       const loc = s.node["loc"] as SrcLoc | undefined;
+      let keepAtPark: Set<string> | undefined;
+      if (s.node["kind"] === "awaitExpr" && e !== null) {
+        // The reads of the enclosing expression OTHER THAN this await's own operand (the operands of other
+        // suspensions in the expression stay: they may run after this park).
+        keepAtPark = new Set(base);
+        if (s.nested) readsOfExcept(e, s.node, keepAtPark);
+        libCallReadsOf(s.node["value"], keepAtPark);
+      }
       ctx.points.push({
         kind: s.pointKind,
         loc: loc ?? { file: "", start: 0, end: 0 },
@@ -461,6 +524,7 @@ function recordPoints(
         // gave no position are still two nodes.
         node: s.node,
         live: s.nested ? union(base, enclosingReads) : new Set(base),
+        ...(keepAtPark !== undefined ? { keepAtPark } : {}),
         nestedInExpression: s.nested,
         // D2d: an `awaitUnionExpr` is straight-line too, now that BOTH of its
         // arms have a stackless lowering -- the promise arm parks and the unit
