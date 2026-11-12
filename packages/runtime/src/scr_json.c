@@ -2221,6 +2221,18 @@ static void scr_dyn_obj_put_k(ScrDyn *obj, char *key, size_t key_len, ScrDyn *va
 }
 
 /* The copying put, unchanged for every caller that had one. */
+void scr_dyn_obj_reserve(ScrDyn *obj, size_t n) {
+  /* Only an object has a member table, and a node is allocated at its kind's size: reading v.obj of any other kind would run past it. */
+  if (obj->kind != SCR_DYN_OBJ || n <= (size_t)obj->v.obj.cap || n > SCR_DYN_LEN_MAX) return;
+  ScrDynEntry *entries = realloc(obj->v.obj.entries, n * sizeof *entries);
+  if (!entries) scr_json_oom();
+#ifdef SCR_DYNCEN_ON
+  scr_dyncen_note_grow(1, (long long)obj->v.obj.cap, (long long)n, (long long)sizeof *entries);
+#endif
+  obj->v.obj.entries = entries;
+  obj->v.obj.cap = (uint32_t)n;
+}
+
 static void scr_dyn_obj_put(ScrDyn *obj, char *key, size_t key_len, ScrDyn *value) {
   scr_dyn_obj_put_k(obj, key, key_len, value, 0);
 }

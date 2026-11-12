@@ -3154,6 +3154,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // release with the frame as usual; the receiver is a fresh OBJ,
         // so the non-object throw paths are unreachable here.
         const obj = E.newTemp(e.type, "scr_dyn_new_obj()");
+        // The member count is known, so the table is sized once (one member is already exact).
+        if ((e.fields?.length ?? 0) >= 2) E.line(`scr_dyn_obj_reserve(${obj.name}, ${e.fields!.length});`);
         for (const f of e.fields ?? []) {
           const k = E.emitExpr(f.key);
           const v = E.emitExpr(f.value);

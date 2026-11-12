@@ -3747,6 +3747,15 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           ];
           const fillFor = (ord: string[], withInternal = true): void => {
           const dynFields = dynFieldsFor(ord, withInternal);
+          // The members every value of this shape certainly has: a field that cannot be absent, is a plain key (not an internal slot, a
+          // symbol-keyed member or an accessor) and is not filtered through a source's own-key mask. The table is sized for exactly
+          // those once, instead of doubling up to the next power of two; members beyond them still grow as before.
+          if (!shape.ownmask && !accShape) {
+            const certain = dynFields.filter(
+              (f) => !internal.has(f.name) && !f.name.startsWith("__@") && !isUndefinedArmedUnion(f.type, (id) => E.unionsById.get(id)),
+            ).length;
+            if (certain >= 2) d.push(`  scr_dyn_obj_reserve(d, ${certain});`);
+          }
           for (const f of dynFields) {
             const keyLit = cStringLiteral(Buffer.from(f.name, "utf8"));
             const keyLen = Buffer.byteLength(f.name, "utf8");
