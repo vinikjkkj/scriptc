@@ -225,24 +225,46 @@ struct ScrPromise {
   size_t rc;
   int state;
   /* Payload (fulfillment value or rejection reason), ScrExcCell-style.
-   * trace_fn is non-NULL iff the REF payload type carries a cycle header
+   * The payload's trace function is non-NULL iff the REF payload type carries a cycle header
    * (a promise settled with a cycle-capable value can be a cycle member —
    * e.g. a closure that captures a box holding this very promise). */
   ScrExcKind payload_kind; /* NONE = void fulfillment */
-  double f64;
-  bool b;
+  /* A scalar payload is EITHER an f64 or a bool, by payload_kind, never both:
+   * one word. Writers set the member the kind names; readers read by kind. */
+  union {
+    double f64;
+    bool b;
+  };
   void *payload;
-  void *(*retain_fn)(void *);
-  void (*release_fn)(void *);
-  ScrTraceFn trace_fn;
   /* Fibers parked on this promise. */
   ScrFiber **waiters;
-  size_t nwaiters, waiters_cap;
+  /* retain/release/trace of a REF payload, as one interned triple (ScrPromVt)
+   * named by a 32-bit index; 0 = none. These are per-TYPE facts, so they were 24
+   * bytes of per-instance pointers. */
+  uint32_t vt;
+  uint32_t nwaiters, waiters_cap;
+  /* Unhandled-rejection tracking: set when rejected, cleared on await. */
+  bool rejection_observed;
+  /* Set when the checkpoint report delivered THIS promise to
+   * 'unhandledRejection' listeners — a handler attached after that is
+   * Node's 'rejectionHandled' moment (scr_prom_observe below). */
+  bool reported_unhandled;
+  /* Rare members behind ONE lazy pointer (see ScrPromiseExt below): nearly every
+   * promise has none of a pending claim alias, combinator callbacks or conversion
+   * memos, so inline they cost 56 bytes on each. NULL until first needed; freed with
+   * the promise. */
+  struct ScrPromiseExt *ext;
+};
+
+_Static_assert(sizeof(struct ScrPromise) == 64, "ScrPromise layout");
+
+/* The rare members of a promise. */
+struct ScrPromiseExt {
   /* A pending declaration-claimed promise parks its reactions on its SOURCE's
    * lists (scr_promise_claim): Node keeps one reaction list, in registration
    * order. Owned (+1, traced: the pair is a cycle while the source is pending),
    * only followed while this promise is pending, dropped when the claim settles. */
-  struct ScrPromise *alias;
+  ScrPromise *alias;
   /* Combinator callbacks (Promise.race / Promise.all): at settle,
    * fulfilled promises run adapt(dst, this) — an emitted adapter
    * converting the payload into the destination's inner type — and
@@ -267,26 +289,68 @@ struct ScrPromise {
      * `via`, not the list's owner. +1. */
     struct ScrPromise *via;
   } *cbs;
-  size_t ncbs, cbs_cap;
+  uint32_t ncbs, cbs_cap;
   /* Payload-conversion memo (scr_runtime.h states the contract): the
    * adapted promises this one has already been converted into, keyed by
    * the lowerer's adapter id. NULL for every promise in a program that
    * never converts a payload -- one pointer, no allocation. Entries are
    * OWNED (+1) and traced. */
   struct ScrPromiseAdapt *adapts;
-  /* Unhandled-rejection tracking: set when rejected, cleared on await. */
-  bool rejection_observed;
   /* How many of the awaits still owed on this promise belong to a
    * PAYLOAD-CONVERSION ADAPTER rather than to the source program. One per
    * adapter filed in `adapts` (each adapter awaits its source exactly
    * once, by construction of promiseCoerceAdapter), decremented by the
    * first observation that arrives. See scr_prom_observe. */
   unsigned adapter_observes_pending;
-  /* Set when the checkpoint report delivered THIS promise to
-   * 'unhandledRejection' listeners — a handler attached after that is
-   * Node's 'rejectionHandled' moment (scr_prom_observe below). */
-  bool reported_unhandled;
 };
+
+static void scr_oom(void);
+static inline struct ScrPromiseExt *scr_prom_xmk(ScrPromise *p) {
+  if (p->ext == NULL) {
+    p->ext = (struct ScrPromiseExt *)calloc(1, sizeof *p->ext);
+    if (!p->ext) scr_oom();
+  }
+  return p->ext;
+}
+
+/* Interned (retain, release, trace) triples of REF payloads. A program has a few
+ * dozen distinct payload types, so the table is tiny and the lookup is a
+ * direct-mapped cache in front of a linear scan. Index 0 is the empty triple. */
+typedef struct ScrPromVt {
+  void *(*retain)(void *);
+  void (*release)(void *);
+  ScrTraceFn trace;
+} ScrPromVt;
+static ScrPromVt *scr_prom_vt_tab;
+static uint32_t scr_prom_vt_n = 1, scr_prom_vt_cap = 0;
+static struct { void *(*r)(void *); void (*l)(void *); ScrTraceFn t; uint32_t vt; } scr_prom_vt_cache[32];
+static ScrPromVt scr_prom_vt_zero;
+#define PV(p) (scr_prom_vt_tab ? &scr_prom_vt_tab[(p)->vt] : &scr_prom_vt_zero)
+static uint32_t scr_prom_vt_intern(void *(*retain)(void *), void (*release)(void *), ScrTraceFn trace) {
+  if (retain == NULL && release == NULL && trace == NULL) return 0;
+  size_t h = (((uintptr_t)release >> 4) ^ ((uintptr_t)retain >> 3)) & 31u;
+  if (scr_prom_vt_cache[h].r == retain && scr_prom_vt_cache[h].l == release && scr_prom_vt_cache[h].t == trace &&
+      scr_prom_vt_cache[h].vt)
+    return scr_prom_vt_cache[h].vt;
+  uint32_t i;
+  for (i = 1; i < scr_prom_vt_n; i++) {
+    if (scr_prom_vt_tab[i].retain == retain && scr_prom_vt_tab[i].release == release && scr_prom_vt_tab[i].trace == trace) break;
+  }
+  if (i == scr_prom_vt_n) {
+    if (scr_prom_vt_n >= scr_prom_vt_cap) {
+      scr_prom_vt_cap = scr_prom_vt_cap ? scr_prom_vt_cap * 2 : 64;
+      scr_prom_vt_tab = (ScrPromVt *)realloc(scr_prom_vt_tab, (size_t)scr_prom_vt_cap * sizeof *scr_prom_vt_tab);
+      if (!scr_prom_vt_tab) scr_oom();
+      memset(&scr_prom_vt_tab[0], 0, sizeof scr_prom_vt_tab[0]);
+    }
+    scr_prom_vt_tab[i].retain = retain;
+    scr_prom_vt_tab[i].release = release;
+    scr_prom_vt_tab[i].trace = trace;
+    scr_prom_vt_n++;
+  }
+  scr_prom_vt_cache[h].r = retain; scr_prom_vt_cache[h].l = release; scr_prom_vt_cache[h].t = trace; scr_prom_vt_cache[h].vt = i;
+  return i;
+}
 
 /* One payload-conversion memo entry: see the contract on
  * scr_promise_adapt_has in scr_runtime.h. */
@@ -337,18 +401,20 @@ static void scr_promise_trace(void *o, ScrTraceVisit visit, void *ctx) {
    * the combinator destinations are the strong references this promise
    * owns (destination promises are cycle-headered). */
   if ((p->payload_kind == SCR_EXC_REF || p->payload_kind == SCR_EXC_OBJ) &&
-      p->trace_fn) {
+      PV(p)->trace) {
     visit(p->payload, ctx);
   }
-  if (p->alias) visit(p->alias, ctx);
-  for (size_t i = 0; i < p->ncbs; i++) {
-    visit(p->cbs[i].dst, ctx);
-    if (p->cbs[i].via) visit(p->cbs[i].via, ctx);
+  struct ScrPromiseExt *x = p->ext;
+  if (x == NULL) return;
+  if (x->alias) visit(x->alias, ctx);
+  for (size_t i = 0; i < x->ncbs; i++) {
+    visit(x->cbs[i].dst, ctx);
+    if (x->cbs[i].via) visit(x->cbs[i].via, ctx);
   }
   /* Memo entries are strong and cycle-headered, and the pair IS a
    * cycle while the adapter's fiber still holds the source, so the
    * collector has to be able to see this edge. */
-  for (ScrPromiseAdapt *a = p->adapts; a; a = a->next) visit(a->adapted, ctx);
+  for (ScrPromiseAdapt *a = x->adapts; a; a = a->next) visit(a->adapted, ctx);
 }
 
 /* Teardown for the collector: release the payload only when the trace does
@@ -359,21 +425,25 @@ static void scr_promise_gcfree(void *o) {
   if (p->payload_kind == SCR_EXC_STR) {
     scr_str_release((ScrStr *)p->payload);
   } else if ((p->payload_kind == SCR_EXC_REF || p->payload_kind == SCR_EXC_OBJ) &&
-             p->payload && !p->trace_fn) {
-    p->release_fn(p->payload);
+             p->payload && !PV(p)->trace) {
+    PV(p)->release(p->payload);
   }
   /* Parked Promise.all states are NOT traced children (their values array
    * is reachable only through them) — release like the untraced payload
    * above; the cb destinations stay untouched (trace visits them). */
-  for (size_t i = 0; i < p->ncbs; i++) {
-    if (p->cbs[i].all) scr_promise_all_state_release(p->cbs[i].all);
-    if (p->cbs[i].conv) scr_closure_release(p->cbs[i].conv);
+  if (p->ext != NULL) {
+    for (size_t i = 0; i < p->ext->ncbs; i++) {
+      if (p->ext->cbs[i].all) scr_promise_all_state_release(p->ext->cbs[i].all);
+      if (p->ext->cbs[i].conv) scr_closure_release(p->ext->cbs[i].conv);
+    }
+    /* Memo entries ARE visited by the trace, so only the spine frees
+     * here -- the collector owns the adapted promises' releases. */
+    scr_promise_adapts_free(p, false);
+    free(p->ext->cbs);
+    free(p->ext);
+    p->ext = NULL;
   }
-  /* Memo entries ARE visited by the trace, so only the spine frees
-   * here -- the collector owns the adapted promises' releases. */
-  scr_promise_adapts_free(p, false);
   free(p->waiters);
-  free(p->cbs);
 #ifdef SCR_RC_AUDIT
   scr_live_promises--;
 #endif
@@ -451,8 +521,8 @@ static void scr_prom_observe(ScrPromise *p) {
    * the same settle and their order is not fixed — and any observation
    * beyond the credits is one the program itself wrote. */
   bool by_adapter = false;
-  if (p->adapter_observes_pending > 0) {
-    p->adapter_observes_pending--;
+  if (p->ext != NULL && p->ext->adapter_observes_pending > 0) {
+    p->ext->adapter_observes_pending--;
     by_adapter = true;
   }
   p->rejection_observed = true;
@@ -496,7 +566,7 @@ static void scr_prom_observe(ScrPromise *p) {
    * reporting again — measured, on the first attempt at this. The
    * per-adapter `rejection_observed` test below is what bounds the walk. */
   if (by_adapter) return;
-  for (ScrPromiseAdapt *a = p->adapts; a != NULL; a = a->next) {
+  for (ScrPromiseAdapt *a = p->ext ? p->ext->adapts : NULL; a != NULL; a = a->next) {
     if (a->adapted != NULL && !a->adapted->rejection_observed) {
       scr_prom_observe(a->adapted);
     }
@@ -526,7 +596,7 @@ ScrPromise *scr_promise_retain(ScrPromise *p) {
 static void scr_promise_release_payload(ScrPromise *p) {
   if (p->payload_kind == SCR_EXC_STR) scr_str_release((ScrStr *)p->payload);
   else if ((p->payload_kind == SCR_EXC_REF || p->payload_kind == SCR_EXC_OBJ) &&
-           p->payload) p->release_fn(p->payload);
+           p->payload) PV(p)->release(p->payload);
   p->payload_kind = SCR_EXC_NONE;
   p->payload = NULL;
 }
@@ -536,16 +606,20 @@ void scr_promise_release(ScrPromise *p) {
   if (--p->rc == 0) {
     scr_cyc_on_dead(p);
     scr_promise_release_payload(p);
-    scr_promise_adapts_free(p, true);
     free(p->waiters);
-    if (p->alias) scr_promise_release(p->alias);
-    for (size_t i = 0; i < p->ncbs; i++) {
-      scr_promise_release(p->cbs[i].dst);
-      if (p->cbs[i].all) scr_promise_all_state_release(p->cbs[i].all);
-      if (p->cbs[i].conv) scr_closure_release(p->cbs[i].conv);
-      if (p->cbs[i].via) scr_promise_release(p->cbs[i].via);
+    if (p->ext != NULL) {
+      scr_promise_adapts_free(p, true);
+      if (p->ext->alias) scr_promise_release(p->ext->alias);
+      for (size_t i = 0; i < p->ext->ncbs; i++) {
+        scr_promise_release(p->ext->cbs[i].dst);
+        if (p->ext->cbs[i].all) scr_promise_all_state_release(p->ext->cbs[i].all);
+        if (p->ext->cbs[i].conv) scr_closure_release(p->ext->cbs[i].conv);
+        if (p->ext->cbs[i].via) scr_promise_release(p->ext->cbs[i].via);
+      }
+      free(p->ext->cbs);
+      free(p->ext);
+      p->ext = NULL;
     }
-    free(p->cbs);
 #ifdef SCR_RC_AUDIT
     scr_live_promises--;
 #endif
@@ -559,9 +633,10 @@ void scr_promise_release(ScrPromise *p) {
  * the refcount path owns the entries' references, the collector path
  * does not (scr_promise_trace visits them -- the complement rule). */
 static void scr_promise_adapts_free(ScrPromise *p, bool release) {
-  ScrPromiseAdapt *a = p->adapts;
-  p->adapts = NULL;
-  p->adapter_observes_pending = 0;
+  if (p->ext == NULL) return;
+  ScrPromiseAdapt *a = p->ext->adapts;
+  p->ext->adapts = NULL;
+  p->ext->adapter_observes_pending = 0;
   while (a) {
     ScrPromiseAdapt *next = a->next;
     if (release) scr_promise_release(a->adapted);
@@ -579,7 +654,7 @@ static void scr_promise_adapts_free(ScrPromise *p, bool release) {
  * emits a small non-negative integer. */
 static ScrPromiseAdapt *scr_promise_adapt_find(ScrPromise *src, double id) {
   if (!src) return NULL;
-  for (ScrPromiseAdapt *a = src->adapts; a; a = a->next) {
+  for (ScrPromiseAdapt *a = src->ext ? src->ext->adapts : NULL; a; a = a->next) {
     if (a->id == id) return a;
   }
   return NULL;
@@ -603,12 +678,13 @@ ScrPromise *scr_promise_adapt_put(ScrPromise *src, double id, ScrPromise *made) 
   if (src && !scr_promise_adapt_find(src, id)) {
     ScrPromiseAdapt *a = (ScrPromiseAdapt *)malloc(sizeof *a);
     if (!a) scr_oom();
-    a->next = src->adapts;
+    struct ScrPromiseExt *sx = scr_prom_xmk(src);
+    a->next = sx->adapts;
     a->id = id;
     a->adapted = scr_promise_retain(made);
-    src->adapts = a;
+    sx->adapts = a;
     /* One await credit for the adapter just filed (scr_prom_observe). */
-    src->adapter_observes_pending++;
+    sx->adapter_observes_pending++;
   }
   /* The other order of the same fact: a conversion written AFTER the
    * source was already handled inherits the handling, because in the
@@ -1675,17 +1751,14 @@ static void scr_promise_settle_from(ScrPromise *dst, ScrPromise *src) {
   if (dst->state == SCR_PROM_PENDING) {
     dst->state = src->state;
     dst->payload_kind = src->payload_kind;
-    dst->f64 = src->f64;
-    dst->b = src->b;
-    dst->retain_fn = src->retain_fn;
-    dst->release_fn = src->release_fn;
-    dst->trace_fn = src->trace_fn;
+    dst->f64 = src->f64; /* the scalar word: an f64 or a bool by kind */
+    dst->vt = src->vt;
     dst->payload = NULL;
     if (src->payload_kind == SCR_EXC_STR && src->payload) {
       dst->payload = scr_str_retain((ScrStr *)src->payload);
     } else if ((src->payload_kind == SCR_EXC_REF || src->payload_kind == SCR_EXC_OBJ) &&
                src->payload) {
-      dst->payload = src->retain_fn(src->payload);
+      dst->payload = PV(src)->retain(src->payload);
     }
     scr_promise_settle_wake(dst);
   }
@@ -1731,7 +1804,7 @@ static void scr_promise_all_settle(ScrAllState *st, ScrPromise *result, size_t i
  * their shared countdown state instead of the adapt pair. */
 /* Where a reaction on `p` is parked: a pending claim shares its source's lists. */
 static ScrPromise *scr_prom_reg_target(ScrPromise *p) {
-  while (p->state == SCR_PROM_PENDING && p->alias) p = p->alias;
+  while (p->state == SCR_PROM_PENDING && p->ext && p->ext->alias) p = p->ext->alias;
   return p;
 }
 
@@ -1739,12 +1812,13 @@ static ScrPromise *scr_prom_reg_target(ScrPromise *p) {
  * waiters already parked there so the settle replays both in order. */
 static struct ScrPromiseCbWaiter *scr_prom_cb_add(ScrPromise *in) {
   ScrPromise *t = scr_prom_reg_target(in);
-  if (t->ncbs == t->cbs_cap) {
-    t->cbs_cap = t->cbs_cap ? t->cbs_cap * 2 : 4;
-    t->cbs = realloc(t->cbs, t->cbs_cap * sizeof *t->cbs);
-    if (!t->cbs) scr_oom();
+  struct ScrPromiseExt *tx = scr_prom_xmk(t);
+  if (tx->ncbs == tx->cbs_cap) {
+    tx->cbs_cap = tx->cbs_cap ? tx->cbs_cap * 2 : 4;
+    tx->cbs = realloc(tx->cbs, tx->cbs_cap * sizeof *tx->cbs);
+    if (!tx->cbs) scr_oom();
   }
-  struct ScrPromiseCbWaiter *cb = &t->cbs[t->ncbs++];
+  struct ScrPromiseCbWaiter *cb = &tx->cbs[tx->ncbs++];
   memset(cb, 0, sizeof *cb);
   cb->wpos = t->nwaiters;
   cb->via = t != in ? scr_promise_retain(in) : NULL;
@@ -1763,11 +1837,13 @@ static void scr_promise_settle_wake(ScrPromise *p) {
    * free a payload another holder still counts. The detached list is held by
    * this frame only (untraced = external counts = conservative), and p ends
    * with no callbacks exactly as before. */
-  struct ScrPromiseCbWaiter *cbs = p->cbs;
-  size_t ncbs = p->ncbs;
-  p->cbs = NULL;
-  p->ncbs = 0;
-  p->cbs_cap = 0;
+  struct ScrPromiseCbWaiter *cbs = p->ext ? p->ext->cbs : NULL;
+  size_t ncbs = p->ext ? p->ext->ncbs : 0;
+  if (p->ext != NULL) {
+    p->ext->cbs = NULL;
+    p->ext->ncbs = 0;
+    p->ext->cbs_cap = 0;
+  }
   for (size_t i = 0; i < ncbs; i++) {
     for (; w < nw && w < cbs[i].wpos; w++) scr_ready_push(p->waiters[w]);
     /* A callback parked here for a claim consumes the CLAIM (already settled: its
@@ -1788,10 +1864,10 @@ static void scr_promise_settle_wake(ScrPromise *p) {
       if (cbs[i].conv) scr_closure_release(cbs[i].conv);
     }
     if (cbs[i].via) scr_promise_release(cbs[i].via);
-    if (cbs[i].conv && cbs[i].dst->alias) {
+    if (cbs[i].conv && cbs[i].dst->ext && cbs[i].dst->ext->alias) {
       /* The claim is settled now: it stops sharing this list. */
-      scr_promise_release(cbs[i].dst->alias);
-      cbs[i].dst->alias = NULL;
+      scr_promise_release(cbs[i].dst->ext->alias);
+      cbs[i].dst->ext->alias = NULL;
     }
     scr_promise_release(cbs[i].dst);
   }
@@ -1851,7 +1927,7 @@ ScrPromise *scr_promise_claim(ScrPromise *src, double id, ScrClosure *conv) {
     struct ScrPromiseCbWaiter *cb = scr_prom_cb_add(src);
     cb->dst = scr_promise_retain(dst);
     cb->conv = scr_closure_retain(conv);
-    dst->alias = scr_promise_retain(src);
+    scr_prom_xmk(dst)->alias = scr_promise_retain(src);
   } else if (src->state == SCR_PROM_FULFILLED) {
     scr_promise_claim_run(dst, src, conv);
   } else {
@@ -1943,14 +2019,14 @@ ScrStr *scr_promise_payload_str(ScrPromise *p) {
  * fulfilled). */
 static bool scr_await_settled(ScrPromise *p); /* defined with the await family */
 int scr_promise_payload_kind(const ScrPromise *p) { return (int)p->payload_kind; }
-bool scr_promise_payload_is_dyn(const ScrPromise *p) { return p->retain_fn == scr_dyn_retain_v; }
+bool scr_promise_payload_is_dyn(const ScrPromise *p) { return PV(p)->retain == scr_dyn_retain_v; }
 double scr_promise_payload_num(const ScrPromise *p) { return p->f64; }
 bool scr_promise_payload_flag(const ScrPromise *p) { return p->b; }
 bool scr_promise_await_settled(ScrPromise *p) { return scr_await_settled(p); }
-void scr_promise_payload_release(const ScrPromise *p, void *v) { p->release_fn(v); }
+void scr_promise_payload_release(const ScrPromise *p, void *v) { PV(p)->release(v); }
 
 void *scr_promise_payload_ref(ScrPromise *p) {
-  return p->payload ? p->retain_fn(p->payload) : NULL;
+  return p->payload ? PV(p)->retain(p->payload) : NULL;
 }
 
 /* MOVES a pending exception out of `cell` into `p` as its rejection payload
@@ -1959,12 +2035,9 @@ void *scr_promise_payload_ref(ScrPromise *p) {
 static void scr_promise_reject_from_cell(ScrPromise *p, ScrExcCell *cell) {
   p->state = SCR_PROM_REJECTED;
   p->payload_kind = cell->kind;
-  p->f64 = cell->f64;
-  p->b = cell->b;
+  if (cell->kind == SCR_EXC_BOOL) p->b = cell->b; else p->f64 = cell->f64;
   p->payload = cell->payload;
-  p->retain_fn = cell->retain_fn;
-  p->release_fn = cell->release_fn;
-  p->trace_fn = cell->trace_fn;
+  p->vt = scr_prom_vt_intern(cell->retain_fn, cell->release_fn, cell->trace_fn);
   cell->kind = SCR_EXC_NONE;
   cell->payload = NULL;
   cell->trace_fn = NULL;
@@ -3623,8 +3696,8 @@ static void scr_promise_rethrow(ScrPromise *p) {
   case SCR_EXC_F64: scr_throw_f64(p->f64); break;
   case SCR_EXC_BOOL: scr_throw_bool(p->b); break;
   case SCR_EXC_STR: scr_throw_str(scr_str_retain((ScrStr *)p->payload)); break;
-  case SCR_EXC_REF: scr_throw_ref(p->retain_fn(p->payload), p->retain_fn, p->release_fn, p->trace_fn); break;
-  case SCR_EXC_OBJ: scr_throw_obj(p->retain_fn(p->payload), p->retain_fn, p->release_fn, p->trace_fn); break;
+  case SCR_EXC_REF: scr_throw_ref(PV(p)->retain(p->payload), PV(p)->retain, PV(p)->release, PV(p)->trace); break;
+  case SCR_EXC_OBJ: scr_throw_obj(PV(p)->retain(p->payload), PV(p)->retain, PV(p)->release, PV(p)->trace); break;
   case SCR_EXC_NONE:
   case SCR_EXC_GENRET: /* unreachable: the sentinel never settles a promise */
     scr_throw_str(scr_str_new("undefined", 9));
@@ -3687,7 +3760,7 @@ bool scr_await_bool(ScrPromise *p) {
   return scr_await_settled(p) ? p->b : false;
 }
 void *scr_await_ref(ScrPromise *p) {
-  return scr_await_settled(p) && p->payload ? p->retain_fn(p->payload) : NULL;
+  return scr_await_settled(p) && p->payload ? PV(p)->retain(p->payload) : NULL;
 }
 void scr_await_void(ScrPromise *p) { scr_await_settled(p); }
 
@@ -3763,9 +3836,7 @@ void scr_promise_fulfill_ref_raw(ScrPromise *p, void *v, void *(*retain)(void *)
   p->state = SCR_PROM_FULFILLED;
   p->payload_kind = v ? SCR_EXC_REF : SCR_EXC_NONE;
   p->payload = v;
-  p->retain_fn = retain;
-  p->release_fn = release;
-  p->trace_fn = trace;
+  p->vt = scr_prom_vt_intern(retain, release, trace);
   scr_promise_settle_wake(p);
 }
 bool scr_promise_is_pending(const ScrPromise *p) {
@@ -3787,8 +3858,7 @@ void scr_promise_fulfill_str(ScrPromise *p, ScrStr *v) {
   p->state = SCR_PROM_FULFILLED;
   p->payload_kind = SCR_EXC_STR;
   p->payload = v; /* ownership moves in */
-  p->retain_fn = (void *(*)(void *))scr_str_retain;
-  p->release_fn = (void (*)(void *))scr_str_release;
+  p->vt = scr_prom_vt_intern((void *(*)(void *))scr_str_retain, (void (*)(void *))scr_str_release, NULL);
   scr_promise_settle_wake(p);
 }
 ScrStr *scr_await_str(ScrPromise *p) {
@@ -4334,7 +4404,7 @@ void scr_coro_promise_rethrow(ScrPromise *p) { scr_promise_rethrow(p); }
 double scr_coro_promise_f64(const ScrPromise *p) { return p->f64; }
 bool   scr_coro_promise_bool(const ScrPromise *p) { return p->b; }
 void  *scr_coro_promise_ref(const ScrPromise *p) {
-  return p->payload ? p->retain_fn(p->payload) : NULL;
+  return p->payload ? PV(p)->retain(p->payload) : NULL;
 }
 #endif /* SCR_CORO_LANE */
 
@@ -5658,9 +5728,7 @@ static void scr_reject_thunk(ScrClosure *self, ScrError *reason) {
     p->state = SCR_PROM_REJECTED;
     p->payload_kind = SCR_EXC_OBJ;
     p->payload = reason; /* ownership moves in */
-    p->retain_fn = scr_error_retain_v;
-    p->release_fn = scr_error_release_v;
-    p->trace_fn = scr_error_trace_arg();
+    p->vt = scr_prom_vt_intern(scr_error_retain_v, scr_error_release_v, scr_error_trace_arg());
     scr_promise_settle_wake(p);
   }
   scr_promise_release(p);
