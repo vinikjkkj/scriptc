@@ -1472,6 +1472,8 @@ static const ScrChar1 scr_ascii1[128] = {
 static const SCR_STR_LIT(1) scr_lit_empty = {SCR_STR_IMMORTAL, 0, 0, ""};
 
 static ScrStr *scr_str_empty(void) { return (ScrStr *)&scr_lit_empty; }
+/* The one immortal empty string, for a shared box that must never hold a counted (heap) string: see scr_union_new_str. */
+ScrStr *scr_str_empty_obj(void) { return scr_str_empty(); }
 
 /* Same bytes as the empty literal, a different object: see scr_str_absent in
  * the header. Non-static and written through the same SCR_STR_LIT shape. */

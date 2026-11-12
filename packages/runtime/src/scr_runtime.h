@@ -875,6 +875,7 @@ ScrStr *scr_str_new(const char *bytes, size_t len); /* returns +1 */
  * apart (index reads, util.inspect, JSON). Never freed, never mutated. */
 ScrStr *scr_str_absent(void);
 bool scr_str_is_absent(const ScrStr *s);
+ScrStr *scr_str_empty_obj(void); /* the immortal empty string */
 
 /* Internal allocators for buffer builders (scr_json.c): a +1 string with
  * UNINITIALIZED data (the builder fills bytes, then len and the NUL), and
@@ -2643,12 +2644,16 @@ ScrUnion *scr_union_new_bool(uint32_t tag, bool v);   /* returns +1 */
 ScrUnion *scr_union_new_refd(uint32_t tag, void *v, const ScrArmVt *vt, bool trace);
 /* General form for callers whose entry points are not link-time constants. */
 ScrUnion *scr_union_new_ref_rt(uint32_t tag, void *v, void *(*retain)(void *), void (*release)(void *), ScrTraceFn trace);
-/* The emitted form: see scr_box_new_obj. */
+ScrUnion *scr_union_new_str(uint32_t tag, ScrStr *s); /* a string arm; the empty string is a shared box */
+/* The emitted form: one constant descriptor per call site, the trace flag folded at compile time (see scr_box_new_obj). A call whose release
+ * entry is the string arm's goes to scr_union_new_str instead; in emitted code that test compares two address constants, so it folds away. */
 #define scr_union_new_ref(tag, v, retain, release, trace)                                          \
-  ({                                                                                               \
-    static const ScrArmVt scr_vt_ = {(retain), (release)};                                         \
-    scr_union_new_refd((tag), (v), &scr_vt_, (void *)(trace) != NULL);                             \
-  })
+  ((release) == &scr_str_release_v                                                                 \
+       ? scr_union_new_str((tag), (ScrStr *)(v))                                                   \
+       : ({                                                                                        \
+           static const ScrArmVt scr_vt_ = {(retain), (release)};                                  \
+           scr_union_new_refd((tag), (v), &scr_vt_, (void *)(trace) != NULL);                      \
+         }))
 
 static inline ScrUnion *scr_union_retain(ScrUnion *u) {
   if (u->rc != SIZE_MAX) {
@@ -6313,6 +6318,9 @@ ScrDyn *scr_dyn_new_null(void);
 ScrDyn *scr_dyn_new_bool(bool b);
 ScrDyn *scr_dyn_new_num(double n);
 ScrDyn *scr_dyn_new_str(ScrStr *s);
+/* The union walkers' forms: -1, 0, 1 and the empty string are shared immortal nodes (see scr_json.c). Retains like the plain forms. */
+ScrDyn *scr_dyn_new_num_sh(double n);
+ScrDyn *scr_dyn_new_str_sh(ScrStr *s);
 ScrDyn *scr_dyn_web_crypto(void); /* globalThis.crypto, the process singleton (+1) */
 extern ScrStr *(*scr_dyn_obj_tag_hook)(const ScrDyn *d);
 extern ScrStr *(*scr_insp_hook)(ScrDyn *d, const char *cn, double recurse, double depth);

@@ -2329,7 +2329,7 @@ __attribute__((noinline, cold)) void scr_dyn_phantom_update(void) {
       const ScrDyn *c = *(const ScrDyn *const *)at;
       if (c == NULL) continue;
       if (c->rc != SIZE_MAX) scr_nd_total += 2;
-      else if (c->kind == SCR_DYN_BOOL || c->kind == SCR_DYN_NULL || c->kind == SCR_DYN_NUM) scr_ph_total++;
+      else if (c->kind == SCR_DYN_BOOL || c->kind == SCR_DYN_NULL || c->kind == SCR_DYN_NUM || c->kind == SCR_DYN_STR) scr_ph_total++;
     }
   }
   if (scr_ph_total == 0) return;
@@ -2395,6 +2395,34 @@ ScrDyn *scr_dyn_new_str(ScrStr *s) {
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_STR);
   d->v.str = scr_str_retain(s);
   return d;
+}
+
+/* SHARED DYN BOXES, for the typed-to-dyn conversion of a UNION value only (the union walkers call these; nothing else does, so a program
+ * that boxes numbers some other way pays no check). A dyn number or string node is immutable once built, so -1, 0, 1 and the empty
+ * string are one immortal node each, like the bool and null singletons: a padded parameter list converts to hundreds of thousands of
+ * identical boxes otherwise. Exact bit pattern, so -0.0 and NaN allocate. The pacing estimator counts NUM as shared already; it
+ * learns the empty STR in the same place. */
+static ScrDyn scr_dyn_num_singletons[3] = { { SIZE_MAX, SCR_DYN_NUM, .v = { .num = -1.0 } }, { SIZE_MAX, SCR_DYN_NUM, .v = { .num = 0.0 } }, { SIZE_MAX, SCR_DYN_NUM, .v = { .num = 1.0 } } };
+ScrDyn *scr_dyn_new_num_sh(double n) {
+  uint64_t b;
+  memcpy(&b, &n, sizeof b);
+  if (b == 0ull) return &scr_dyn_num_singletons[1];
+  if (b == 0x3FF0000000000000ull) return &scr_dyn_num_singletons[2];
+  if (b == 0xBFF0000000000000ull) return &scr_dyn_num_singletons[0];
+  return scr_dyn_new_num(n);
+}
+
+ScrDyn *scr_dyn_new_str_sh(ScrStr *s) {
+  static ScrDyn empty;
+  if (s->len == 0 && s->cap < 0xFFFD0000u && !scr_str_is_absent(s)) { /* the plain empty string; the absent marker and the codec strings keep their own handling */
+    if (empty.rc != SIZE_MAX) {
+      empty.rc = SIZE_MAX;
+      empty.kind = SCR_DYN_STR;
+      empty.v.str = scr_str_empty_obj(); /* immortal: never a counted string of the caller's */
+    }
+    return &empty;
+  }
+  return scr_dyn_new_str(s);
 }
 
 ScrDyn *scr_dyn_new_arr(void) {
