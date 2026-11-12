@@ -7,7 +7,7 @@ export interface FiberLaneUse {
 }
 
 export function fiberCensusEnabled(): boolean {
-  return process.env["SCRIPTC_NO_FIBERS"] === "1";
+  return true;
 }
 
 /** Throws one error naming every fiber-lane function when the census is on and any exists. */
