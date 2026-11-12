@@ -27660,6 +27660,30 @@
     "<repo>/tests/corpus/25169-capture-boxes-of-every-kind-release-and-trace-through-their-descriptors.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25170-union-scalars-of-the-common-constants-share-one-box-and-never-mix-with-lookalikes.ts": {
+   "order": [
+    "<repo>/tests/corpus/25170-union-scalars-of-the-common-constants-share-one-box-and-never-mix-with-lookalikes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25171-padded-parameter-lists-of-unions-convert-to-the-dynamic-copy-with-shared-constants.ts": {
+   "order": [
+    "<repo>/tests/corpus/25171-padded-parameter-lists-of-unions-convert-to-the-dynamic-copy-with-shared-constants.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25172-empty-strings-in-unions-are-shared-and-stay-strings.ts": {
+   "order": [
+    "<repo>/tests/corpus/25172-empty-strings-in-unions-are-shared-and-stay-strings.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25173-heap-built-empty-strings-never-stay-in-the-shared-empty-boxes.ts": {
+   "order": [
+    "<repo>/tests/corpus/25173-heap-built-empty-strings-never-stay-in-the-shared-empty-boxes.ts"
+   ],
+   "diags": []
   }
  }
 }
