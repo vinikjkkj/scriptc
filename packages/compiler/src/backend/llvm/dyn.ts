@@ -3749,6 +3749,11 @@ export class LlDyn {
         B.line(`${d} = call ptr @scr_dyn_new_arr()`);
         const len = B.tmp();
         B.line(`${len} = call double @scr_arr_len(ptr %v)`);
+        // The length is known: size the buffer once (a no-op for 0 and 1 elements, which are already exact).
+        host.declare(`declare void @scr_dyn_arr_reserve(ptr, i64)`);
+        const lenI = B.tmp();
+        B.line(`${lenI} = fptoui double ${len} to i64`);
+        B.line(`call void @scr_dyn_arr_reserve(ptr ${d}, i64 ${lenI})`);
         const iSlot = B.slot();
         B.entryAllocas.push(`${iSlot} = alloca double`);
         B.line(`store double ${f64Lit(0)}, ptr ${iSlot}`);

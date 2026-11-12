@@ -6604,6 +6604,9 @@ ScrDyn *scr_dyn_new_arrbuf_ref(ScrBytes *b);
  * signature and no length). +1, never throws, never NULL. */
 ScrDyn *scr_dyn_arrbuf_key_get(const ScrDyn *d, const ScrStr *k);
 void scr_dyn_arr_push(ScrDyn *arr, ScrDyn *item);
+/* Room for n elements in one allocation: a conversion that knows the length it is about to write (a typed array crossing to dyn) sizes the
+ * buffer once, instead of doubling up to the next power of two (751 elements cost 1,024 slots). A no-op when the buffer already holds n. */
+void scr_dyn_arr_reserve(ScrDyn *arr, size_t n);
 /* Slot-for-slot push: keeps a hole a hole (copies, map results). */
 void scr_dyn_arr_push_slot(ScrDyn *arr, ScrDyn *item);
 /* Spread completion for a runtime-arity argument list (`f(...xs)` in the

@@ -4064,6 +4064,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         const cyclicArr = E.traceAdapterC(t) !== null;
         if (cyclicArr) d.push(`  scr_dyn_from_enter(v);`);
         d.push(`  ScrDyn *d = scr_dyn_new_arr();`);
+        d.push(`  if (v->len > 1) scr_dyn_arr_reserve(d, v->len); /* the length is known: one allocation, no doubling */`);
         d.push(`  for (size_t i = 0; i < v->len; i++) {`);
         // A HOLE crosses as the dyn array's hole (the absent node), not as undefined.
         if (elem.kind !== "bool") d.push(`    if (scr_arr_slot_is_hole(v, i)) { scr_dyn_arr_push_slot(d, scr_dyn_retain(scr_dyn_absent())); continue; }`);

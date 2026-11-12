@@ -1653,6 +1653,18 @@ void scr_dyn_obj_set_proto(ScrDyn *obj, ScrDyn *proto) {
 
 /* Public: the compiler-emitted static→dyn converters push through this
  * too. Ownership of the item moves in. */
+void scr_dyn_arr_reserve(ScrDyn *arr, size_t n) {
+  /* Only an array has an items buffer, and a node is allocated at its kind's size: reading v.arr of any other kind would run past it. */
+  if (arr->kind != SCR_DYN_ARR || n <= (size_t)arr->v.arr.cap || n > SCR_DYN_LEN_MAX) return;
+  ScrDyn **items = realloc(arr->v.arr.items, n * sizeof *items);
+  if (!items) scr_json_oom();
+#ifdef SCR_DYNCEN_ON
+  scr_dyncen_note_grow(0, (long long)arr->v.arr.cap, (long long)n, (long long)sizeof *items);
+#endif
+  arr->v.arr.items = items;
+  arr->v.arr.cap = (uint32_t)n;
+}
+
 void scr_dyn_arr_push_slot(ScrDyn *arr, ScrDyn *item) {
   if (arr->v.arr.len == arr->v.arr.cap) {
     /* `cap` is a uint32 now (the payload union is 32 bytes instead of 56
