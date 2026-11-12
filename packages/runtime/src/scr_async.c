@@ -5836,25 +5836,43 @@ void scr_discard_unhandled_rejections(void) {
 
 /* resolve closures: caps[0] is a box whose slot holds the promise (+1). */
 static ScrPromise *scr_resolve_target(ScrClosure *self) {
-  return (ScrPromise *)scr_box_get_ref(self->caps[0]);
+  /* The slot holds the promise itself, tagged: no cell between the closure and the promise it settles. A resolving function is
+   * single-shot (the first settle wins and every later call does nothing), so the call TAKES the closure's reference out of the slot:
+   * the caller owns the +1 it gets and drops it when done, a second call finds NULL and does nothing, and a closure that is kept long
+   * after its call no longer holds, or makes the collector trace, a promise it can never settle again. */
+  ScrPromise *p = (ScrPromise *)scr_cap_raw_ptr(self->caps[0]);
+  self->caps[0] = SCR_CAP_RAW(NULL);
+  return p;
+}
+/* The closure of a resolving function: ONE capture, the promise, owned by the closure (+1). Resolve and reject share their
+ * "already settled" state through the promise itself (state != PENDING), so nothing else needs a cell. */
+static ScrClosure *scr_make_settler(void *fn, ScrPromise *p) {
+  ScrClosure *c = scr_closure_new(fn, 1);
+  scr_cap_raw_release = scr_promise_release_v;
+  c->caps[0] = SCR_CAP_RAW(scr_promise_retain(p));
+  return c;
 }
 static void scr_resolve_thunk_f64(ScrClosure *self, double v) {
   ScrPromise *p = scr_resolve_target(self);
+  if (p == NULL) return;
   scr_promise_fulfill_f64(p, v);
   scr_promise_release(p);
 }
 static void scr_resolve_thunk_bool(ScrClosure *self, bool v) {
   ScrPromise *p = scr_resolve_target(self);
+  if (p == NULL) return;
   scr_promise_fulfill_bool(p, v);
   scr_promise_release(p);
 }
 static void scr_resolve_thunk_str(ScrClosure *self, ScrStr *v) {
   ScrPromise *p = scr_resolve_target(self);
+  if (p == NULL) { scr_str_release(v); return; }
   scr_promise_fulfill_str(p, v); /* callee owns its params: moves in */
   scr_promise_release(p);
 }
 static void scr_resolve_thunk_void(ScrClosure *self) {
   ScrPromise *p = scr_resolve_target(self);
+  if (p == NULL) return;
   scr_promise_fulfill_void(p);
   scr_promise_release(p);
 }
@@ -5867,17 +5885,16 @@ static void scr_resolve_thunk_void(ScrClosure *self) {
 ScrClosure *scr_make_resolve(ScrPromise *p, int kind /*0 f64,1 bool,2 str,3 void*/) {
   void *fns[4] = {(void *)&scr_resolve_thunk_f64, (void *)&scr_resolve_thunk_bool,
                   (void *)&scr_resolve_thunk_str, (void *)&scr_resolve_thunk_void};
-  ScrClosure *c = scr_closure_new(fns[kind], 1);
-  ScrBox *b = scr_box_new_obj(scr_promise_retain_v, scr_promise_release_v,
-                               scr_promise_trace_v);
-  scr_box_set_ref(b, scr_promise_retain(p));
-  c->caps[0] = b;
-  return c;
+  return scr_make_settler(fns[kind], p);
 }
 
 /* Emitted ref-kind resolve thunks call this. */
 void scr_resolve_ref_impl(ScrClosure *self, void *v, void *(*retain)(void *), void (*release)(void *), ScrTraceFn trace) {
   ScrPromise *p = scr_resolve_target(self);
+  if (p == NULL) {
+    if (release != NULL) release(v);
+    return;
+  }
   scr_promise_fulfill_ref(p, v, retain, release, trace);
   scr_promise_release(p);
 }
@@ -5890,12 +5907,7 @@ ScrPromise *scr_fiber_promise(ScrFiber *f) { return f->promise; }
  * calling convention (self, value) that forwards to scr_resolve_ref_impl
  * with the concrete RC helpers. */
 ScrClosure *scr_make_resolve_fn(ScrPromise *p, void *fn) {
-  ScrClosure *c = scr_closure_new(fn, 1);
-  ScrBox *b = scr_box_new_obj(scr_promise_retain_v, scr_promise_release_v,
-                               scr_promise_trace_v);
-  scr_box_set_ref(b, scr_promise_retain(p));
-  c->caps[0] = b;
-  return c;
+  return scr_make_settler(fn, p);
 }
 
 /* ── reject closures (new Promise((resolve, reject) => ...)) ──────────
@@ -5910,6 +5922,10 @@ ScrClosure *scr_make_resolve_fn(ScrPromise *p, void *fn) {
  * own its param, like every compiled callee. */
 static void scr_reject_thunk(ScrClosure *self, ScrError *reason) {
   ScrPromise *p = scr_resolve_target(self);
+  if (p == NULL) {
+    scr_error_release(reason);
+    return;
+  }
   if (p->state != SCR_PROM_PENDING) {
     scr_error_release(reason);
   } else {
@@ -5923,12 +5939,7 @@ static void scr_reject_thunk(ScrClosure *self, ScrError *reason) {
 }
 
 ScrClosure *scr_make_reject(ScrPromise *p) {
-  ScrClosure *c = scr_closure_new((void *)&scr_reject_thunk, 1);
-  ScrBox *b = scr_box_new_obj(scr_promise_retain_v, scr_promise_release_v,
-                               scr_promise_trace_v);
-  scr_box_set_ref(b, scr_promise_retain(p));
-  c->caps[0] = b;
-  return c;
+  return scr_make_settler((void *)&scr_reject_thunk, p);
 }
 
 /* The executor's reject for ANY reason (the (reason: unknown) => void shape):
@@ -5940,6 +5951,10 @@ ScrClosure *scr_make_reject(ScrPromise *p) {
  * rethrows the same value and catch sees the same identity. */
 static void scr_reject_dyn_thunk(ScrClosure *self, ScrDyn *reason) {
   ScrPromise *p = scr_resolve_target(self);
+  if (p == NULL) {
+    scr_dyn_release(reason);
+    return;
+  }
   if (p->state != SCR_PROM_PENDING) {
     scr_dyn_release(reason);
   } else {
@@ -5950,12 +5965,7 @@ static void scr_reject_dyn_thunk(ScrClosure *self, ScrDyn *reason) {
 }
 
 ScrClosure *scr_make_reject_dyn(ScrPromise *p) {
-  ScrClosure *c = scr_closure_new((void *)&scr_reject_dyn_thunk, 1);
-  ScrBox *b = scr_box_new_obj(scr_promise_retain_v, scr_promise_release_v,
-                               scr_promise_trace_v);
-  scr_box_set_ref(b, scr_promise_retain(p));
-  c->caps[0] = b;
-  return c;
+  return scr_make_settler((void *)&scr_reject_dyn_thunk, p);
 }
 
 /* Shared executor epilogue: an escaping throw rejects a still-pending

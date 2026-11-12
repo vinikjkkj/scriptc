@@ -259,7 +259,7 @@ ScrStr *scr_box_str_unshare(ScrBox *b, ScrStr *acc) {
 
 static void scr_closure_trace(void *o, ScrTraceVisit visit, void *ctx) {
   ScrClosure *c = (ScrClosure *)o;
-  for (size_t i = 0; i < c->ncaps; i++) visit(c->caps[i], ctx);
+  for (size_t i = 0; i < c->ncaps; i++) visit(scr_cap_is_raw(c->caps[i]) ? scr_cap_raw_ptr(c->caps[i]) : (void *)c->caps[i], ctx);
   /* The OWN-PROPERTY table. It is a box like any capture, and it was the
    * last untraced strong edge out of a closure — which made the single
    * commonest ring in real JavaScript invisible:
@@ -326,6 +326,9 @@ static void scr_closure_trace(void *o, ScrTraceVisit visit, void *ctx) {
 /* NULL until the dyn unit mints its first implicit prototype object; see
  * scr_runtime.h. */
 void (*scr_closure_ctor_unlink)(ScrClosure *c, bool release) = NULL;
+
+/* Drops the owned reference of a raw (tagged) capture slot; set by the constructor that stores the first one. See scr_runtime.h. */
+void (*scr_cap_raw_release)(void *p) = NULL;
 
 /* The one teardown step both paths below share: drop the minted implicit
  * prototype (and its `constructor` registry entry) BEFORE `props` goes,
@@ -490,7 +493,11 @@ void scr_closure_release(ScrClosure *c) {
   if (!c || c->rc == SIZE_MAX) return; /* NULL: an uninitialized `let` local */
   if (--c->rc == 0) {
     if (scr_closure_may_cycle(c)) scr_cyc_on_dead(c); /* see scr_box_release */
-    for (size_t i = 0; i < c->ncaps; i++) scr_box_release(c->caps[i]);
+    for (size_t i = 0; i < c->ncaps; i++) {
+      ScrBox *cap = c->caps[i];
+      if (scr_cap_is_raw(cap)) scr_cap_raw_release(scr_cap_raw_ptr(cap));
+      else scr_box_release(cap);
+    }
     scr_closure_drop_ctor(c, true);
     scr_box_release(c->props); /* NULL-tolerant */
 #ifdef SCR_RC_AUDIT

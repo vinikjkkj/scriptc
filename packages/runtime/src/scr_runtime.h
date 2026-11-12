@@ -2597,6 +2597,16 @@ void scr_closure_static_teardown(ScrClosure *c);
 
 ScrClosure *scr_closure_new(void *fn, size_t ncaps); /* +1; caller fills caps with +1 box refs */
 
+/* A capture slot normally holds a counted ScrBox. A RUNTIME-made closure whose capture is one promise may hold the promise itself instead,
+ * with bit 0 of the slot set (every promise is at least 8-byte aligned): the closure owns that +1 and drops it through the hook. Only the
+ * closure teardown and trace read slots generically, and both honour the tag; code that reads a slot as a box must know the closure is its
+ * own. The hook is installed by the first constructor that stores one, so a program that makes none links nothing of the promise unit
+ * into the closure core. */
+#define SCR_CAP_RAW(p) ((ScrBox *)((uintptr_t)(p) | (uintptr_t)1))
+static inline bool scr_cap_is_raw(const ScrBox *b) { return ((uintptr_t)b & (uintptr_t)1) != 0; }
+static inline void *scr_cap_raw_ptr(const ScrBox *b) { return (void *)((uintptr_t)b & ~(uintptr_t)1); }
+extern void (*scr_cap_raw_release)(void *p);
+
 static inline ScrClosure *scr_closure_retain(ScrClosure *c) {
   if (c->rc != SIZE_MAX) {
     c->rc++;
