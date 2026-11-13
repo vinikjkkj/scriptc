@@ -22,6 +22,7 @@
  */
 import type { IrFunction } from "./nodes.js";
 import { stacklessPlan, type StacklessPlan } from "./liveness.js";
+import { hoistSuspendingHeaders } from "./hoist-suspensions.js";
 
 /** Which functions this slice lowers, keyed by IR name. Computed once per
  * module: the emitters below and emit-async.ts's fiber path both consult it,
@@ -61,6 +62,8 @@ export function coroPlans(fns: readonly IrFunction[]): Map<string, StacklessPlan
    * removal of a lane: both lowerings are still built, still emitted, and
    * still differentially compared against each other. */
   if (process.env["SCRIPTC_STACKLESS"] === "0") return out;
+  // Suspensions in statement headers the state machine cannot resume into move out of them first (ir/hoist-suspensions.ts).
+  for (const fn of fns) if (fn.async === true || fn.generator !== undefined) hoistSuspendingHeaders(fn);
   for (const fn of fns) {
     const plan = stacklessPlan(fn);
     if (plan !== null) out.set(fn.name, plan);

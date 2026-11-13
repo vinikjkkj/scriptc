@@ -322,6 +322,11 @@ function operandCount(rec: Record<string, unknown>): number {
   return n;
 }
 
+/** Does this expression contain a suspension point (an await, a yield or a lowerable suspending libCall)? */
+export function containsSuspension(root: IrExpr | null): boolean {
+  return suspensionsOf(root).length > 0;
+}
+
 function suspensionsOf(root: IrExpr | null): FoundSuspension[] {
   const out: FoundSuspension[] = [];
   if (root === null) return out;
