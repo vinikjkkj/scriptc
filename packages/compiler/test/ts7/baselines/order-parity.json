@@ -27876,6 +27876,12 @@
     "<repo>/tests/corpus/25130-small-integers-in-dyn-values-share-boxes-and-keep-zero-sign-nan-and-fractions.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25131-dyn-class-fields-keep-small-integers-shared-and-never-edited-in-place.js": {
+   "order": [
+    "<repo>/tests/corpus/25131-dyn-class-fields-keep-small-integers-shared-and-never-edited-in-place.js"
+   ],
+   "diags": []
   }
  }
 }
