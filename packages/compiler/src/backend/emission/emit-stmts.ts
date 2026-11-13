@@ -2,6 +2,7 @@
  * dispatch (emitStmt), try/catch lowering, and switch — plus the small
  * branch/condition helpers they share with expression emission. All frame,
  * scope, and temp state lives on CEmitter; these functions drive it. */
+import { storesFreshDynNumber } from "../../ir/dyn-keep.js";
 import type { CEmitter, ScopeEntry } from "./emitter.js";
 import type { IrFunction, IrLocal, IrType } from "../../ir/nodes.js";
 import { mangleField, mangleGlobal, mangleLocal, mangleRawParam } from "../mangle.js";
@@ -967,9 +968,11 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
         }
         if (isRefCounted(v.type)) {
           E.moveTemp(v);
+          // A fresh dyn number stored into a dyn field lives as long as its holder: a small integer is the runtime's shared box (ir/dyn-keep.ts).
+          const kept = s.kind === "fieldSet" && storesFreshDynNumber(s.value) ? `scr_dyn_keep(${v.name})` : v.name;
           const old = `sc_t${E.tempCounter++}`;
           E.line(`${cDecl(v.type, old)} = ${field};`);
-          E.line(`${field} = ${v.name};${E.srcComment(s.loc)}`);
+          E.line(`${field} = ${kept};${E.srcComment(s.loc)}`);
           E.releaseValue(old, v.type);
         } else {
           E.line(`${field} = ${v.name};${E.srcComment(s.loc)}`);

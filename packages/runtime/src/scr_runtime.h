@@ -5571,6 +5571,17 @@ static inline ScrDyn *scr_dyn_retain(ScrDyn *d) {
 }
 
 void scr_dyn_release_v(void *d);
+
+/* scr_dyn_keep: pass the owned dyn value a store is about to keep through here. A number node with a shared small-integer box (see scr_json.c)
+ * gives up the caller's reference and answers the shared box; anything else comes back unchanged. The compiler emits it only where a freshly
+ * computed value is stored into a dyn-typed class field; the runtime's own store paths call it too. The out-of-line scr_dyn_keep_v is the same
+ * function for an emitter that cannot inline (LLVM IR). */
+ScrDyn *scr_dyn_keep_num(ScrDyn *d);
+ScrDyn *scr_dyn_keep_v(ScrDyn *d);
+static inline ScrDyn *scr_dyn_keep(ScrDyn *d) {
+  return d != NULL && d->kind == SCR_DYN_NUM && d->rc != SIZE_MAX ? scr_dyn_keep_num(d) : d;
+}
+
 void scr_dyn_release(ScrDyn *d); /* releases the tree recursively; NULL-tolerant */
 
 /* The slot of a by-value capture of a dyn value (SCR_CAP_TAG_DYN): retains (NULL-tolerant), tags, and makes sure the closure core can release it. */
