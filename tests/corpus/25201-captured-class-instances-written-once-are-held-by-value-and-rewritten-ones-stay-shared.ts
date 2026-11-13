@@ -82,6 +82,19 @@ function perIteration(): string[] {
   return fs.map((f) => f());
 }
 
+function take(f: Function): string {
+  return f.toString();
+}
+
+// a function value held by value inside the adapter closure of a `Function` slot: its text is still the wrapped function's (the runtime reads the
+// wrapped closure out of caps[0], which is a tagged counted pointer when the capture is by value)
+function adapted(): string {
+  const inner = (n: number): number => n + 100;
+  const asFn: Function = inner;
+  const viaUnion: string | Function = take(inner) === "" ? "none" : inner;
+  return take(asFn) + "|" + String(viaUnion) + "|" + take(function named(x: number) { return x; });
+}
+
 async function main(): Promise<void> {
   const h = new Holder("abc");
   console.log(h.tagger()(), h.viaSelf()()(), h.lateWrite()());
@@ -97,6 +110,7 @@ async function main(): Promise<void> {
   console.log(JSON.stringify(rewritten()));
   console.log(params(new Holder("A"), new Holder("B"), new Holder("C")));
   console.log(perIteration().join(","));
+  console.log(adapted());
   console.log(await h.slow("-done"));
   const many = await Promise.all([new Holder("p"), new Holder("q")].map((x) => x.slow("?")));
   console.log(many.join(","));
