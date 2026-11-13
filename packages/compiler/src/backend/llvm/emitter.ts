@@ -5648,6 +5648,7 @@ class LlEmitter {
      * suspension behind and no state drawn for it. */
     let innerTag = -1;
     let unitResTag = -1;
+    let unitMap: [number, number][] = [];
     if (resType.kind !== "void") {
       if (resType.kind !== "union") {
         throw new Error("llvm emitter bug: awaitUnion result is neither void nor a union");
@@ -5661,22 +5662,14 @@ class LlEmitter {
       };
       innerTag = resTagOf(inner);
       const unitTags = def.arms.flatMap((a, i) => (isUnitType(a) ? [i] : []));
-      /* SEVERAL UNIT ARMS IS A REFUSAL, NOT A SWITCH, and the reason is the one
-       * that kept this whole shape out of the backend until the mechanism
-       * arrived. `Promise<T> | undefined | null` is expressible and reaches
-       * here, but no program in the corpus or the value fixture has one, so a
-       * tag dispatch written for it would be code that real data never
-       * executes -- green for ever, and no guard of it could ever fail. The
-       * fiber lane carries such a switch and it is untested there too.
-       *
-       * A refusal costs coverage and can never be a wrong answer, which is the
-       * safe side of exactly this trade. It gets its OWN census reason rather
-       * than borrowing one, because the census is the next slice's worklist and
-       * a doubled label is how a census starts lying. */
-      if (unitTags.length !== 1) {
-        throw new CoroRefusedError(this.currentFnName, `awaitUnion-unit-arms=${unitTags.length}`);
+      /* SEVERAL UNIT ARMS (`Promise<T> | undefined | null`): the resume's unit arm picks the result's unit instance from the operand's own
+       * tag, a chain of selects below. This used to be a refusal that kept the function on the fiber lane; the fiber lane is gone, and
+       * the C lane has always carried the same dispatch as a switch. */
+      if (unitTags.length === 0) {
+        throw new Error("llvm emitter bug: awaitUnion operand has no unit arm");
       }
-      unitResTag = resTagOf(def.arms[unitTags[0]!]!);
+      unitMap = unitTags.map((t) => [t, resTagOf(def.arms[t]!)] as [number, number]);
+      unitResTag = unitMap[0]![1];
     }
 
     // ONE STATE FOR THE PAIR, drawn ONCE: the two arms share it, share the
@@ -5787,7 +5780,20 @@ class LlEmitter {
     B.br(lj);
 
     B.startBlock(lu);
-    B.line(`store ptr ${this.unitInstanceRef(resType.unionId, unitResTag)}, ptr ${slot}`);
+    {
+      let cur = this.unitInstanceRef(resType.unionId, unitResTag);
+      if (unitMap.length > 1) {
+        const tagv = this.unionTag(u.name);
+        for (const [t, rt] of unitMap.slice(1)) {
+          const c = B.tmp();
+          B.line(`${c} = icmp eq i32 ${tagv}, ${t}`);
+          const sel = B.tmp();
+          B.line(`${sel} = select i1 ${c}, ptr ${this.unitInstanceRef(resType.unionId, rt)}, ptr ${cur}`);
+          cur = sel;
+        }
+      }
+      B.line(`store ptr ${cur}, ptr ${slot}`);
+    }
     B.br(lj);
 
     B.startBlock(lj);
