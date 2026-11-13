@@ -50,10 +50,12 @@ describe.skipIf(!linux)("the text drop fires once at the first idle seam, behind
   let idle = "";
   let short = "";
   let idleLong = "";
+  let faultBurst = "";
   beforeAll(async () => {
     idle = await build("idle");
     short = await build("short");
     idleLong = await build("idle-long");
+    faultBurst = await build("fault-burst");
   }, 300_000);
 
   test("on: exactly one line, residency does not grow", async () => {
@@ -77,6 +79,18 @@ describe.skipIf(!linux)("the text drop fires once at the first idle seam, behind
       expect(r.stdout).toBe("done 16\n");
       expect(r.lines, `SCR_TEXT_DROP_EVERY_MS=${every}`).toHaveLength(1);
     }
+  });
+
+  test("a fault burst past the budget drops again between timer intervals, and SCR_TEXT_DROP_FAULTS=0 does not", async () => {
+    /* the timer interval is pushed out of reach, so only the fault trigger (default 256 minor faults per drop) can repeat the drop */
+    const on = await run(faultBurst, { SCR_TEXT_DROP_STAT: "1", SCR_TEXT_DROP_EVERY_MS: "100000" });
+    expect(on.stdout).toBe("done 30 30\n");
+    expect(on.lines.length).toBeGreaterThanOrEqual(3);
+    expect(on.lines[1]).toContain("drop #2");
+    /* the negative control: the same program with the budget off drops once */
+    const off = await run(faultBurst, { SCR_TEXT_DROP_STAT: "1", SCR_TEXT_DROP_EVERY_MS: "100000", SCR_TEXT_DROP_FAULTS: "0" });
+    expect(off.stdout).toBe("done 30 30\n");
+    expect(off.lines).toHaveLength(1);
   });
 
   test("SCR_TEXT_DROP=0 prints nothing (the negative control)", async () => {
