@@ -27834,6 +27834,30 @@
     "<repo>/tests/corpus/25159-a-finally-stash-survives-a-suspension.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25160-an-await-in-a-loop-condition-a-for-of-iterable-or-a-throw-value-evaluates-once-in-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/25160-an-await-in-a-loop-condition-a-for-of-iterable-or-a-throw-value-evaluates-once-in-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25161-an-await-in-any-statement-position-evaluates-once-in-order-throw-loop-headers-keyed-stores-switch-try.ts": {
+   "order": [
+    "<repo>/tests/corpus/25161-an-await-in-any-statement-position-evaluates-once-in-order-throw-loop-headers-keyed-stores-switch-try.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25162-an-await-inside-an-expression-keeps-evaluation-order-and-the-values-live-across-the-park.ts": {
+   "order": [
+    "<repo>/tests/corpus/25162-an-await-inside-an-expression-keeps-evaluation-order-and-the-values-live-across-the-park.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25167-an-await-before-a-receiver-a-compound-store-a-destructuring-a-union-or-a-yield-in-a-generator.ts": {
+   "order": [
+    "<repo>/tests/corpus/25167-an-await-before-a-receiver-a-compound-store-a-destructuring-a-union-or-a-yield-in-a-generator.ts"
+   ],
+   "diags": []
   }
  }
 }
