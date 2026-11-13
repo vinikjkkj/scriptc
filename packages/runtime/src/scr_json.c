@@ -10056,7 +10056,9 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
       scr_dyn_obj_define_hidden_data(recv, key->data, key->len, value, true, true);
       return;
     }
-    scr_dyn_obj_set(recv, key->data, key->len, scr_dyn_retain(value));
+    /* A key that is itself an immortal string (a compiler literal) outlives every object: store it by pointer, as the literal-member path does. */
+    if (key->rc == SCR_STR_IMMORTAL) scr_dyn_obj_set_lit(recv, key->data, key->len, scr_dyn_retain(value));
+    else scr_dyn_obj_set(recv, key->data, key->len, scr_dyn_retain(value));
     return;
   }
   if (recv->kind == SCR_DYN_ARR) {
@@ -14802,7 +14804,10 @@ static ScrDyn *scr_sc_clone(const ScrDyn *v, const ScrScParent *up) {
        * what crosses — the clone is a plain data object either way, which
        * is Node's answer too. A tombstone is not an own enumerable key.
        * The key bytes are snapshotted before the getter can delete them. */
-      ScrStr *k = scr_str_new(e->key, e->key_len); /* +1 */
+      const bool kstatic = e->key_static; /* a static key cannot be freed under the getter: no snapshot, copied by pointer */
+      const char *kptr = e->key;
+      const size_t klen = e->key_len;
+      ScrStr *k = kstatic ? NULL : scr_str_new(e->key, e->key_len); /* +1 */
       bool sl_skip = false;
       ScrDyn *mv = scr_dyn_obj_entry_read((ScrDyn *)v, e, &sl_skip); /* +1 or NULL */
       if (mv == NULL) {
@@ -14821,7 +14826,8 @@ static ScrDyn *scr_sc_clone(const ScrDyn *v, const ScrScParent *up) {
 #ifdef SCR_DYNCEN_ON
       scr_dyncen_note_korigin(SCR_DYNCEN_KO_COPY);
 #endif
-      scr_dyn_obj_set(out, k->data, k->len, c); /* ownership moves */
+      if (kstatic) scr_dyn_obj_set_lit(out, kptr, klen, c); /* ownership moves */
+      else scr_dyn_obj_set(out, k->data, k->len, c); /* ownership moves */
       scr_str_release(k);
     }
     return out;
@@ -15417,7 +15423,11 @@ static void scr_dyn_assign_strs(ScrDyn *target, const ScrDyn *src) {
        * property — Object.assign copies values, never descriptors, which
        * is why `Object.keys(Object.assign({}, o))` and `Object.keys(o)`
        * agree while the target has no accessor at all. */
-      ScrStr *k = scr_str_new(e->key, e->key_len); /* +1 */
+      /* A STATIC key (a literal stored by pointer) cannot be freed under the getter, so it needs no snapshot and is copied by pointer. */
+      const bool kstatic = e->key_static;
+      const char *kptr = e->key;
+      const size_t klen = e->key_len;
+      ScrStr *k = kstatic ? NULL : scr_str_new(e->key, e->key_len); /* +1 */
       bool sl_skip = false;
       ScrDyn *mv = scr_dyn_obj_entry_read((ScrDyn *)src, e, &sl_skip); /* +1 or NULL */
       if (mv == NULL) {
@@ -15428,7 +15438,8 @@ static void scr_dyn_assign_strs(ScrDyn *target, const ScrDyn *src) {
 #ifdef SCR_DYNCEN_ON
       scr_dyncen_note_korigin(SCR_DYNCEN_KO_COPY);
 #endif
-      scr_dyn_obj_set(target, k->data, k->len, mv); /* ownership moves */
+      if (kstatic) scr_dyn_obj_set_lit(target, kptr, klen, mv); /* ownership moves */
+      else scr_dyn_obj_set(target, k->data, k->len, mv); /* ownership moves */
       scr_str_release(k);
     }
     return;
