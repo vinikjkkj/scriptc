@@ -15776,6 +15776,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25220-a-typed-array-handed-to-a-dynamic-callee-keeps-its-origin-unless-its-local-is-dead.ts": {
+   "order": [
+    "<repo>/tests/corpus/25220-a-typed-array-handed-to-a-dynamic-callee-keeps-its-origin-unless-its-local-is-dead.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2523-private-statics-aliased-class.ts": {
    "order": [
     "<repo>/tests/corpus/2523-private-statics-aliased-class.ts"
