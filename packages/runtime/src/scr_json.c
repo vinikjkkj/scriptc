@@ -748,8 +748,6 @@ static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
   return fresh;
 }
 
-/* scr_dyn_keep: the store paths pass the value they are about to own through here (see the small-integer table below). Inline test, out-of-line work. */
-static ScrDyn *scr_dyn_keep_num(ScrDyn *d);
 #ifdef SCR_SMALLINT_LAB
 /* LAB ONLY (never defined in a shipped build): 0 no sharing, 1 shared at the stores, 2 shared at every creation; chosen by SCR_SMALLINT_MODE. */
 static int scr_smallint_mode_v = -1;
@@ -759,9 +757,7 @@ static __attribute__((noinline)) int scr_smallint_mode_init(void) {
 }
 static inline int scr_smallint_lab_mode(void) { return scr_smallint_mode_v >= 0 ? scr_smallint_mode_v : scr_smallint_mode_init(); }
 #endif
-static inline ScrDyn *scr_dyn_keep(ScrDyn *d) {
-  return d != NULL && d->kind == SCR_DYN_NUM && d->rc != SIZE_MAX ? scr_dyn_keep_num(d) : d;
-}
+ScrDyn *scr_dyn_keep_v(ScrDyn *d) { return scr_dyn_keep(d); }
 
 static void scr_dyn_handle_release(void *h, ScrDynHandleTag tag);
 /* The Proxy operations live in the gated prototype-dispatch unit
@@ -2484,7 +2480,7 @@ static __attribute__((noinline)) ScrDyn *scr_smallint_of(double n) {
 /* The slow half of scr_dyn_keep: `d` is a counted number node the caller is about to store an owned reference to. If its value has a shared box,
  * the caller's reference is given up and the shared box is returned (immortal: no count to take). Correct whatever the count was: a node of
  * rc > 1 is only ever the caller's reference being exchanged for another one. */
-static __attribute__((noinline)) ScrDyn *scr_dyn_keep_num(ScrDyn *d) {
+__attribute__((noinline)) ScrDyn *scr_dyn_keep_num(ScrDyn *d) {
 #ifdef SCR_SMALLINT_LAB
   if (scr_smallint_lab_mode() == 0) return d;
 #endif
