@@ -2391,7 +2391,7 @@ __attribute__((noinline, cold)) void scr_dyn_phantom_update(void) {
       else if (c->kind == SCR_DYN_BOOL || c->kind == SCR_DYN_NULL || c->kind == SCR_DYN_NUM || c->kind == SCR_DYN_STR) scr_ph_total++;
     }
   }
-  if (scr_ph_total == 0) return;
+  if (scr_ph_total == 0 || scr_nd_total == 0) return; /* nothing real in the sample (every slot a shared box) would divide by zero */
   size_t real = scr_cyc_live - scr_ph_applied;
   size_t ph = real * scr_ph_total / scr_nd_total;
   ph += ph / 3; /* the flat sample sees a container child once, as a slot, and again if buffered: it reads a ratio about a quarter low */
