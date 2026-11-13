@@ -73,7 +73,17 @@ ScrStr *scr_fn_text(const ScrClosure *c) {
       break;
     }
     if (c->ncaps < 1 || c->caps[0] == NULL) break;
-    ScrClosure *next = (ScrClosure *)scr_box_get_ref(c->caps[0]);
+    /* The wrapped closure sits in caps[0] either as the payload of a shared cell (a rewritten or older-shaped capture) or, when the compiler held
+     * the capture by value, as a tagged counted pointer to the closure itself. */
+    ScrBox *cap0 = c->caps[0];
+    ScrClosure *next;
+    if (scr_cap_tag(cap0) == SCR_CAP_TAG_CLO) {
+      next = (ScrClosure *)scr_cap_raw_ptr(cap0);
+      if (next == NULL) break;
+      next = scr_closure_retain(next);
+    } else {
+      next = (ScrClosure *)scr_box_get_ref(cap0);
+    }
     if (held != NULL) scr_closure_release(held);
     held = next;
     c = next;
