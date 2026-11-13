@@ -1665,7 +1665,20 @@ ScrArr *scr_arr_new_ref(void *(*elem_retain)(void *),
                          void (*elem_release)(void *),
                          ScrTraceFn elem_trace, size_t initial_cap);
 
+/* OWNXFER TRIPWIRE (audit builds only). A typed-array local whose crossing into a dynamic value the compiler declared its LAST use
+ * (ir/dead-source.ts, srcDead) is replaced, once nothing else holds the array, by this immortal tombstone; retaining it (every
+ * IR-level read of a local array retains) means the program used the array after the compiler said it was dead, which would have been a
+ * silently lost write in a plain build. Plain builds have neither the tombstone nor the check. */
+#ifdef SCR_RC_AUDIT
+extern ScrArr scr_ownxfer_tomb;
+void scr_ownxfer_dead_abort(void);
+#endif
+/* After a dead-source crossing: in an audit build, free the array now and leave the tombstone in the local; a no-op otherwise. */
+void scr_ownxfer_poison(ScrArr **slot);
 static inline ScrArr *scr_arr_retain(ScrArr *a) {
+#ifdef SCR_RC_AUDIT
+  if (__builtin_expect(a == &scr_ownxfer_tomb, 0)) scr_ownxfer_dead_abort();
+#endif
   if (a->rc != SIZE_MAX) {
     a->rc++;
     if (a->elem_trace) scr_cyc_mark_live(a);
@@ -6529,6 +6542,12 @@ ScrDyn *scr_dyn_origin_mark_elem(ScrDyn *d, void *obj, const char *tkey, void *(
 const ScrDynElemOps *scr_dyn_origin_elem_ops(const ScrDyn *d);
 ScrDyn *scr_dyn_origin_mark(ScrDyn *d, void *obj, const char *tkey,
                             void *(*retain)(void *), void (*release)(void *));
+/* The same two marks for an ARRAY crossing whose source local is dead after the call: when the call's operand temp and that local are
+ * the only references (rc == 2) the mark and the pin it takes on the source are skipped; any other count marks exactly as above. */
+ScrDyn *scr_dyn_origin_mark_own(ScrDyn *d, void *obj, const char *tkey,
+                                void *(*retain)(void *), void (*release)(void *));
+ScrDyn *scr_dyn_origin_mark_elem_own(ScrDyn *d, void *obj, const char *tkey, void *(*retain)(void *),
+                                     void (*release)(void *), const ScrDynElemOps *ops);
 /* "Was this copy made from a live <tkey>?" — the origin BORROWED, or
  * NULL, in which case the caller builds the fresh object it always
  * built. NULL for everything that is not a marked ARR/OBJ copy, so the

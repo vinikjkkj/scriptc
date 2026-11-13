@@ -1170,16 +1170,17 @@ export class LlDyn {
   private readonly recSrcMapNames = new Map<string, string>();
 
   /** scr_dyn_origin_mark over an array crossing - with the converters a union-element array carries. */
-  originMarkCall(B: BlockBuilder, t: IrType, conv: string, obj: string, retain: string, release: string): string {
+  originMarkCall(B: BlockBuilder, t: IrType, conv: string, obj: string, retain: string, release: string, own = false): string {
     const host = this.host;
     const m = B.tmp();
+    const sfx = own ? "_own" : "";
     if (t.kind === "array" && t.elem.kind === "union") {
-      host.declare(`declare ptr @scr_dyn_origin_mark_elem(ptr, ptr, ptr, ptr, ptr, ptr)`);
-      B.line(`${m} = call ptr @scr_dyn_origin_mark_elem(ptr ${conv}, ptr ${obj}, ptr ${host.cstr(typeKey(t))}, ptr ${retain}, ptr ${release}, ptr ${this.viewElemOps(t)})`);
+      host.declare(`declare ptr @scr_dyn_origin_mark_elem${sfx}(ptr, ptr, ptr, ptr, ptr, ptr)`);
+      B.line(`${m} = call ptr @scr_dyn_origin_mark_elem${sfx}(ptr ${conv}, ptr ${obj}, ptr ${host.cstr(typeKey(t))}, ptr ${retain}, ptr ${release}, ptr ${this.viewElemOps(t)})`);
       return m;
     }
-    host.declare(`declare ptr @scr_dyn_origin_mark(ptr, ptr, ptr, ptr, ptr)`);
-    B.line(`${m} = call ptr @scr_dyn_origin_mark(ptr ${conv}, ptr ${obj}, ptr ${host.cstr(typeKey(t))}, ptr ${retain}, ptr ${release})`);
+    host.declare(`declare ptr @scr_dyn_origin_mark${sfx}(ptr, ptr, ptr, ptr, ptr)`);
+    B.line(`${m} = call ptr @scr_dyn_origin_mark${sfx}(ptr ${conv}, ptr ${obj}, ptr ${host.cstr(typeKey(t))}, ptr ${retain}, ptr ${release})`);
     return m;
   }
 
