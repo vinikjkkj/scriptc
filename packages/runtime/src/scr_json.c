@@ -1058,6 +1058,11 @@ static __attribute__((noinline)) void scr_dyn_release_final(ScrDyn *d) {
 }
 /* noinline: the body is small enough that the compiler would copy it into every release site of this unit; one shared leaf keeps the
  * runtime (and every Windows size anchor) where it was. */
+ScrBox *scr_cap_from_dyn(ScrDyn *d) {
+  scr_cap_dyn_release = &scr_dyn_release_v;
+  return (ScrBox *)((uintptr_t)(d != NULL ? scr_dyn_retain(d) : NULL) | SCR_CAP_TAG_DYN);
+}
+
 __attribute__((noinline)) void scr_dyn_release(ScrDyn *d) {
   if (!d || d->rc == SIZE_MAX) return; /* NULL: an uninitialized `let` local */
   if (--d->rc != 0) {

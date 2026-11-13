@@ -2410,7 +2410,18 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           `scr_closure_new((void *)&${E.callTargetC(e.fnName)}, ${e.captures.length})`,
         );
         e.captures.forEach((localId, i) => {
-          E.line(`${t.name}->caps[${i}] = scr_box_retain(${mangleLocal(localId)});`);
+          const capLocal = E.currentLocals.get(localId);
+          // A capture whose local is not boxed is held BY VALUE (ir/capture-by-value.ts): the slot carries a counted, tagged pointer.
+          if (capLocal !== undefined && capLocal.boxed !== true) {
+            if (capLocal.type.kind === "object") {
+              const v = vAdapters(capLocal.type);
+              E.line(`${t.name}->caps[${i}] = scr_cap_from_obj(${retainCallC(capLocal.type, mangleLocal(localId))}, &${v.retain}, &${v.release}, ${E.traceArgC(capLocal.type)} != NULL);`);
+            } else {
+              E.line(`${t.name}->caps[${i}] = ${capLocal.type.kind === "func" ? "scr_cap_from_closure" : "scr_cap_from_dyn"}(${mangleLocal(localId)});`);
+            }
+          } else {
+            E.line(`${t.name}->caps[${i}] = scr_box_retain(${mangleLocal(localId)});`);
+          }
         });
         return t;
       }

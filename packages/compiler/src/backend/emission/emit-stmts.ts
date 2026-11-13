@@ -6,7 +6,7 @@ import type { CEmitter, ScopeEntry } from "./emitter.js";
 import type { IrFunction, IrLocal, IrType } from "../../ir/nodes.js";
 import { mangleField, mangleGlobal, mangleLocal, mangleRawParam } from "../mangle.js";
 import { BOOL, CAUGHT, errorOwnFlagFor, F64, IrExpr, IrStmt, ORD_MEMBER, orderRecordPlanCached, RUNTIME_ERROR_CLASSES, isRefCounted, ownMaskKeyBit } from "../../ir/nodes.js";
-import { boxAccess, cDecl, cStringLiteral, elemAccess, vAdapters } from "./emit-types.js";
+import { boxAccess, cDecl, cStringLiteral, cType, elemAccess, vAdapters } from "./emit-types.js";
 import { KEYLIST_MEMBER, OVERFLOW_MEMBER, OWNMASK_MEMBER, ownPresentCondC } from "./emit-shapes.js";
 import { emitStableReceiver } from "./emit-exprs.js";
 import { writesLocal } from "../../ir/analysis.js";
@@ -365,7 +365,13 @@ export function emitFunction(E: CEmitter, fn: IrFunction): void {
     // Captured bindings come in through the environment — borrowed for the
     // whole call (the closure owns them): bound here, never released here.
     (fn.captures ?? []).forEach((c, i) => {
-      E.line(`ScrBox *${mangleLocal(c.localId)} = sc_env->caps[${i}]; /* captured ${c.name} */`);
+      const capLocal = fn.locals.find((l) => l.id === c.localId);
+      if (capLocal !== undefined && capLocal.boxed !== true) {
+        // Held by value: the slot's tagged pointer, borrowed for the whole call (the closure owns the counted reference).
+        E.line(`${cDecl(capLocal.type, mangleLocal(c.localId))} = (${cType(capLocal.type).trim()})scr_cap_raw_ptr(sc_env->caps[${i}]); /* captured ${c.name} (by value) */`);
+      } else {
+        E.line(`ScrBox *${mangleLocal(c.localId)} = sc_env->caps[${i}]; /* captured ${c.name} */`);
+      }
     });
 
     const paramIds = new Set(fn.params.map((p) => p.localId));

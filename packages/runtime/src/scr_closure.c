@@ -259,7 +259,11 @@ ScrStr *scr_box_str_unshare(ScrBox *b, ScrStr *acc) {
 
 static void scr_closure_trace(void *o, ScrTraceVisit visit, void *ctx) {
   ScrClosure *c = (ScrClosure *)o;
-  for (size_t i = 0; i < c->ncaps; i++) visit(scr_cap_is_raw(c->caps[i]) ? scr_cap_raw_ptr(c->caps[i]) : (void *)c->caps[i], ctx);
+  for (size_t i = 0; i < c->ncaps; i++) {
+    ScrBox *cap = c->caps[i];
+    if (scr_cap_tag(cap) == SCR_CAP_TAG_OBJ && !scr_cap_obj_traced(cap)) continue; /* acyclic payload: no header to visit */
+    visit(scr_cap_is_raw(cap) ? scr_cap_raw_ptr(cap) : (void *)cap, ctx);
+  }
   /* The OWN-PROPERTY table. It is a box like any capture, and it was the
    * last untraced strong edge out of a closure — which made the single
    * commonest ring in real JavaScript invisible:
@@ -329,6 +333,49 @@ void (*scr_closure_ctor_unlink)(ScrClosure *c, bool release) = NULL;
 
 /* Drops the owned reference of a raw (tagged) capture slot; set by the constructor that stores the first one. See scr_runtime.h. */
 void (*scr_cap_raw_release)(void *p) = NULL;
+/* Drops the counted reference of a by-value dyn capture; set by scr_cap_from_dyn. */
+void (*scr_cap_dyn_release)(void *p) = NULL;
+
+ScrBox *scr_cap_from_obj(void *p, void *(*retain)(void *), void (*release)(void *), bool traced) {
+  /* THE SLOT PACKS THE DESCRIPTOR INDEX INTO THE POINTER'S TOP 16 BITS, so it holds only for a user address that fits in 48 bits and is 8-aligned. That is every
+   * supported target's heap (x86-64 Linux and Windows hand out user addresses below 2^47 -- a 5-level-paging kernel only maps above that for an
+   * mmap that asks for it, which nothing here does; arm64 Linux is 48-bit), and ASan's shadow lives outside the application range. A pointer that
+   * does not fit would be silently corrupted here, so the one cheap test is made where the slot is built and the process stops with a clear message. */
+  if ((((uintptr_t)p >> 48) | ((uintptr_t)p & 7u)) != 0)
+    scr_trap("scriptc: internal error: a by-value capture needs a user pointer below 2^48 and 8-aligned (see scr_cap_from_obj)\n");
+  /* A direct-mapped cache in front of the intern scan: a program has a few dozen classes and this runs once per closure created. */
+  static struct { void (*release)(void *); void *(*retain)(void *); uintptr_t idx; } cache[64];
+  unsigned h = (unsigned)(((uintptr_t)release >> 4) ^ ((uintptr_t)retain >> 7)) & 63u;
+  uintptr_t idx;
+  if (cache[h].release == release && cache[h].retain == retain && release != NULL) {
+    idx = cache[h].idx;
+  } else {
+    idx = (uintptr_t)(scr_armvt_rt_intern(retain, release) - scr_armvt_rt);
+    cache[h].release = release;
+    cache[h].retain = retain;
+    cache[h].idx = idx;
+  }
+  return (ScrBox *)(((uintptr_t)p & (uintptr_t)0x0000FFFFFFFFFFF8ull) | SCR_CAP_TAG_OBJ | ((idx << 1 | (traced ? 1u : 0u)) << 48));
+}
+
+ScrBox *scr_cap_from_closure(ScrClosure *c) {
+  return (ScrBox *)((uintptr_t)(c != NULL ? scr_closure_retain(c) : NULL) | SCR_CAP_TAG_CLO);
+}
+
+/* The one release step for a capture slot of any shape: a counted cell, a tagged promise, dyn value or closure. */
+static inline void scr_cap_release(ScrBox *cap) {
+  switch (scr_cap_tag(cap)) {
+    case 0: scr_box_release(cap); break;
+    case 1: scr_cap_raw_release(scr_cap_raw_ptr(cap)); break;
+    case 3: scr_cap_dyn_release(scr_cap_raw_ptr(cap)); break;
+    case 5: scr_closure_release((ScrClosure *)scr_cap_raw_ptr(cap)); break;
+    default: {
+      void *p = scr_cap_raw_ptr(cap);
+      if (p != NULL) scr_armvt_rt[((uintptr_t)cap >> 49) & 0x7FFF].release(p);
+      break;
+    }
+  }
+}
 
 /* The one teardown step both paths below share: drop the minted implicit
  * prototype (and its `constructor` registry entry) BEFORE `props` goes,
@@ -494,9 +541,7 @@ void scr_closure_release(ScrClosure *c) {
   if (--c->rc == 0) {
     if (scr_closure_may_cycle(c)) scr_cyc_on_dead(c); /* see scr_box_release */
     for (size_t i = 0; i < c->ncaps; i++) {
-      ScrBox *cap = c->caps[i];
-      if (scr_cap_is_raw(cap)) scr_cap_raw_release(scr_cap_raw_ptr(cap));
-      else scr_box_release(cap);
+      scr_cap_release(c->caps[i]);
     }
     scr_closure_drop_ctor(c, true);
     scr_box_release(c->props); /* NULL-tolerant */
