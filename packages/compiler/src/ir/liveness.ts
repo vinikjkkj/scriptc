@@ -29,8 +29,8 @@
  * only by NAME — a call's callee, a closure's `fnName` — are correctly not
  * descended into: lambdas are lifted, so they cannot name this frame's
  * locals except through `captures`, which IS read here. */
-import type { IrExpr, IrFunction, IrStmt, SrcLoc } from "./nodes.js";
-import { isRefCounted } from "./nodes.js";
+import type { IrExpr, IrFunction, IrStmt, IrType, SrcLoc } from "./nodes.js";
+import { isRefCounted, typeKey } from "./nodes.js";
 import {
   SUSPENDING_NODE_KINDS,
   SUSPENDING_LIB_CALLS,
@@ -1160,7 +1160,10 @@ function hasFiberOnlySuspender(fn: IrFunction): boolean {
   return found;
 }
 
-export function stacklessPlan(fn: IrFunction): StacklessPlan | null {
+/** The rule's census (SCRIPTC_PARK_KEEP_STAT=1), written to stderr by coroPlans. */
+export const parkKeepLog: string[] = [];
+
+export function stacklessPlan(fn: IrFunction, holdsPending?: (t: IrType) => boolean): StacklessPlan | null {
   /* A SYNCHRONOUS GENERATOR IS IN, and the two gates it used to die at were
    * not saying what they appeared to say.
    *
@@ -1305,6 +1308,34 @@ export function stacklessPlan(fn: IrFunction): StacklessPlan | null {
   // throwing at its caller.
   if (r === null) return { fnName: fn.name, points: [], frameLocals: new Set<string>() };
   if (!r.points.every((p) => p.straightLine)) return null;
+  /* A COLLECTION THAT HOLDS REFERENCES TO PENDING WORK IS NOT RELEASED AT A PARK. An array of promises, a record carrying a closure, a map of
+   * them: the pending computations keep every element alive, so releasing the container early frees almost nothing and decrements each
+   * element to a non-zero count, which buffers it as a cycle candidate and starts a collection pass over a graph that cannot yet be
+   * freed. MEASURED on an await micro (1000 deferred promises held in two arrays, awaited together): releasing them at the park added
+   * 80 passes and 7M Ir (2.6%); the fiber lane held them to scope exit and never paid it. Uniquely owned data (strings, scalars, arrays
+   * of union boxes, byte buffers) frees outright and still releases, and so does any single object, record, union, promise or closure local: that is one
+   * decrement, and keeping a settled promise would keep its payload alive to scope exit. (Measured on the zapo redis build: applying the rule to every
+   * record or union that merely contains a callback would have kept 545 locals; the collections alone are the churn.) The kept locals keep their frame slot, exactly as before the
+   * release existed. */
+  if (holdsPending !== undefined) {
+    const holders = fn.locals.filter((l) => !l.name.startsWith("%") && l.boxed !== true && holdsPending(l.type)).map((l) => l.id);
+    if (process.env["SCRIPTC_PARK_KEEP_STAT"] === "1") {
+      // A census of the rule for a real build: what it keeps until scope exit, and which array locals still release at a park.
+      for (const l of fn.locals) {
+        if (l.name.startsWith("%") || l.boxed === true) continue;
+        if (holders.includes(l.id)) parkKeepLog.push(`KEPT\t${fn.name}\t${l.name}\t${typeKey(l.type)}`);
+        else if (l.type.kind === "array" && r.points.some((p) => p.keepAtPark !== undefined)) parkKeepLog.push(`RELEASED-ARRAY\t${fn.name}\t${l.name}\t${typeKey(l.type)}`);
+      }
+    }
+    if (holders.length > 0) {
+      for (const pt of r.points) {
+        if (pt.keepAtPark === undefined) continue;
+        const k = new Set(pt.keepAtPark);
+        for (const id of holders) k.add(id);
+        pt.keepAtPark = k;
+      }
+    }
+  }
   return { fnName: fn.name, points: r.points, frameLocals: r.frameLocals };
 }
 

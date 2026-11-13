@@ -1398,7 +1398,7 @@ export class CEmitter {
     // Decided once, before any body: emit-async.ts must skip exactly the
     // functions emitted here, or the module gets two spawn wrappers with the
     // same name (or none).
-    this.coroPlansByFn = coroPlans(this.mod.functions);
+    this.coroPlansByFn = coroPlans(this.mod.functions, this.mod);
     /* NO ASYNC GENERATOR MAY BE IN THE MAP, checked here rather than trusted
      * from liveness.ts -- because the line that holds it there is
      * `fn.generator !== undefined && fn.async === true`, which is precisely

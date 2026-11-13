@@ -2269,7 +2269,7 @@ class LlEmitter {
     // and reports, and every run after that is served the previous answer and
     // reports silence. Measured, not feared.
     {
-      const plans = coroPlans(mod.functions);
+      const plans = coroPlans(mod.functions, mod);
       for (const [name, plan] of llvmCoroPlans(mod.functions, plans)) {
         this.coroLoweredByFn.set(name, plan);
       }

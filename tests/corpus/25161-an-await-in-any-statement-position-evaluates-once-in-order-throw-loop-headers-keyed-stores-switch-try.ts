@@ -98,6 +98,12 @@ async function s_label_break(): Promise<string> {
 async function s_label_continue(): Promise<string> {
   let t = 0; outer: for (let i = 0; i < 3; i++) { for (let j = 0; j < 3; j++) { if (await f(j === 1)) continue outer; t++; } } return String(t);
 }
+async function s_pending_containers_dead_after_the_await(): Promise<string> {
+  const ds: { p: Promise<number>; ok: (n: number) => void }[] = []; const ps: Promise<number>[] = []; for (let i = 0; i < 5; i++) { let ok!: (n: number) => void; const p = new Promise<number>((a) => { ok = a; }); ds.push({ p, ok }); ps.push(p.then((x) => x + 1)); } for (let i = 0; i < 5; i++) ds[i].ok(i); let t = 0; for (const v of await Promise.all(ps)) t += v; return String(t);
+}
+async function s_pending_container_in_loop(): Promise<string> {
+  let t = 0; for (let r = 0; r < 3; r++) { const ps: Promise<number>[] = []; for (let i = 0; i < 4; i++) ps.push(v(i + r)); const all = await Promise.all(ps); for (const x of all) t += x; } return String(t);
+}
 async function s_while_true_break(): Promise<string> {
   let i = 0; while (true) { i++; if (await f(i === 3)) break; } return String(i);
 }
@@ -135,6 +141,8 @@ async function main(): Promise<void> {
   console.log("finally_await", await s_finally_await());
   console.log("label_break", await s_label_break());
   console.log("label_continue", await s_label_continue());
+  console.log("pending_containers_dead_after_the_await", await s_pending_containers_dead_after_the_await());
+  console.log("pending_container_in_loop", await s_pending_container_in_loop());
   console.log("while_true_break", await s_while_true_break());
   console.log("nested_loops_conds", await s_nested_loops_conds());
   console.log("await_in_loop_with_locals", await s_await_in_loop_with_locals());
