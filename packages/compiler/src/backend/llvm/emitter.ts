@@ -60,6 +60,7 @@
  * invoke adapters receive a va_list — the C-companion-TU decision) and
  * the island surface (jsval/jsExit — the engine bridge).
  */
+import { storesFreshDynNumber } from "../../ir/dyn-keep.js";
 import { canonPlanOf, type CanonPlan } from "../../ir/num-canon.js";
 import type {
   IrExpr,
@@ -7649,9 +7650,16 @@ class LlEmitter {
             : this.recordFieldPtr(obj.name, s.shapeId, s.field);
         if (isRefCounted(type)) {
           this.moveTemp(v);
+          // A fresh dyn number stored into a dyn field: a small integer is the runtime's shared box (ir/dyn-keep.ts; emit-stmts.ts's twin).
+          let kept = v.name;
+          if (s.kind === "fieldSet" && type.kind === "dyn" && storesFreshDynNumber(s.value)) {
+            this.declare(`declare ptr @scr_dyn_keep_v(ptr)`);
+            kept = B.tmp();
+            B.line(`${kept} = call ptr @scr_dyn_keep_v(ptr ${v.name})`);
+          }
           const old = B.tmp();
           B.line(`${old} = load ptr, ptr ${ptr}`);
-          this.storeField(ptr, type, v.name);
+          this.storeField(ptr, type, kept);
           this.releaseValue(old, type);
         } else {
           this.storeField(ptr, type, v.name);
