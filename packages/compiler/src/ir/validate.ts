@@ -1889,6 +1889,12 @@ function ffiClassType(cls: string): IrType {
   }
 }
 
+/** A captured local that is not boxed is held BY VALUE by its closures (ir/capture-by-value.ts): only the two reference kinds the
+ * closure core can release from a tagged slot. */
+function byValueCapturable(t: { kind: string }): boolean {
+  return t.kind === "dyn" || t.kind === "func" || t.kind === "object";
+}
+
 export function validateModule(mod: IrModule): IrValidationError[] {
   const errors: IrValidationError[] = [];
   const functionsByName = new Map<string, IrFunction>();
@@ -2405,7 +2411,7 @@ function validateFunction(
   for (const c of fn.captures ?? []) {
     const local = locals.get(c.localId);
     if (!local) err(`capture "${c.name}" has no local entry "${c.localId}"`, fn.loc);
-    else if (!local.boxed) err(`capture local "${c.localId}" is not boxed`, fn.loc);
+    else if (!local.boxed && !byValueCapturable(local.type)) err(`capture local "${c.localId}" is not boxed`, fn.loc);
     if (c.type.kind === "caught") err(`capture "${c.name}" is caught-typed`, fn.loc);
   }
 
@@ -3593,7 +3599,7 @@ function validateFunction(
           const local = locals.get(id);
           const want = wantCaps[i];
           if (!local) err(`closure capture of undeclared local "${id}"`, e.loc);
-          else if (!local.boxed) err(`closure capture "${id}" is not boxed`, e.loc);
+          else if (!local.boxed && !byValueCapturable(local.type)) err(`closure capture "${id}" is not boxed`, e.loc);
           else if (want && !typeEquals(local.type, want.type)) {
             err(`closure capture "${id}" type ${local.type.kind} != ${want.type.kind}`, e.loc);
           }

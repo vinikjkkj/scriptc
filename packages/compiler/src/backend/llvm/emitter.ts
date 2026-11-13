@@ -7284,7 +7284,19 @@ class LlEmitter {
       B.line(`${base} = getelementptr inbounds %ScrClosure, ptr ${envPtr}, i64 1 ; caps`);
       B.line(`${p} = getelementptr inbounds ptr, ptr ${base}, i64 ${i} ; caps[${i}]`);
       B.line(`${box} = load ptr, ptr ${p}`);
-      B.line(`store ptr ${box}, ptr %${mangleLocal(c.localId)} ; captured ${c.name}`);
+      const capLocal = fn.locals.find((l) => l.id === c.localId);
+      if (capLocal !== undefined && capLocal.boxed !== true) {
+        // Held by value: the slot's tagged pointer, untagged and borrowed for the whole call.
+        const asInt = B.tmp();
+        const masked = B.tmp();
+        const raw = B.tmp();
+        B.line(`${asInt} = ptrtoint ptr ${box} to i64`);
+        B.line(`${masked} = and i64 ${asInt}, 281474976710648`); // 0x0000FFFFFFFFFFF8: drops the 3-bit tag and the descriptor bits
+        B.line(`${raw} = inttoptr i64 ${masked} to ptr`);
+        B.line(`store ptr ${raw}, ptr %${mangleLocal(c.localId)} ; captured ${c.name} (by value)`);
+      } else {
+        B.line(`store ptr ${box}, ptr %${mangleLocal(c.localId)} ; captured ${c.name}`);
+      }
     });
     // THE DISPATCH. Everything above is in the entry block and therefore
     // dominates every resume block; everything below is inside sc_S0. On the C
@@ -10760,8 +10772,28 @@ class LlEmitter {
         B.line(`${c} = call ptr @scr_closure_new(ptr @${this.callTarget(e.fnName)}, i64 ${e.captures.length})`);
         const out = this.own({ name: c, type: e.type });
         e.captures.forEach((localId, i) => {
-          const box = this.loadBox(`%${mangleLocal(localId)}`);
-          const retained = this.retainBox(box);
+          const capLocal = this.currentLocals.get(localId);
+          let retained: string;
+          if (capLocal !== undefined && capLocal.boxed !== true) {
+            // Held BY VALUE (ir/capture-by-value.ts): the slot carries a counted, tagged pointer to the value.
+            const v = B.tmp();
+            B.line(`${v} = load ptr, ptr %${mangleLocal(localId)}`);
+            retained = B.tmp();
+            if (capLocal.type.kind === "object") {
+              const ad = vAdapters(this, capLocal.type);
+              const tr = traceArg(this, capLocal.type);
+              const rv = this.retainValue(v, capLocal.type);
+              this.declare(`declare ptr @scr_cap_from_obj(ptr, ptr, ptr, i1 zeroext)`);
+              B.line(`${retained} = call ptr @scr_cap_from_obj(ptr ${rv}, ptr ${ad.retain}, ptr ${ad.release}, i1 ${tr === "null" ? "false" : "true"})`);
+            } else {
+              const helper = capLocal.type.kind === "func" ? "scr_cap_from_closure" : "scr_cap_from_dyn";
+              this.declare(`declare ptr @${helper}(ptr)`);
+              B.line(`${retained} = call ptr @${helper}(ptr ${v})`);
+            }
+          } else {
+            const box = this.loadBox(`%${mangleLocal(localId)}`);
+            retained = this.retainBox(box);
+          }
           const capp = B.tmp();
           const capsBase = B.tmp();
           B.line(`${capsBase} = getelementptr inbounds %ScrClosure, ptr ${c}, i64 1 ; caps`);

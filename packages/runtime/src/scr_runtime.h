@@ -2604,8 +2604,23 @@ ScrClosure *scr_closure_new(void *fn, size_t ncaps); /* +1; caller fills caps wi
  * into the closure core. */
 #define SCR_CAP_RAW(p) ((ScrBox *)((uintptr_t)(p) | (uintptr_t)1))
 static inline bool scr_cap_is_raw(const ScrBox *b) { return ((uintptr_t)b & (uintptr_t)1) != 0; }
-static inline void *scr_cap_raw_ptr(const ScrBox *b) { return (void *)((uintptr_t)b & ~(uintptr_t)1); }
+static inline void *scr_cap_raw_ptr(const ScrBox *b) { return (void *)((uintptr_t)b & (uintptr_t)0x0000FFFFFFFFFFF8ull); }
 extern void (*scr_cap_raw_release)(void *p);
+
+/* A COMPILED closure may hold a captured local BY VALUE (the compiler's capture-by-value pass: a local written once, by its declaration, needs
+ * no shared cell). The slot then carries a counted pointer to the value itself, tagged in its low three bits (every pointer stored is at least
+ * 8-byte aligned): 001 a promise (above), 011 a dyn value, 101 a closure. Teardown drops the counted reference by tag, and the cycle collector
+ * visits the pointer like any child. A dyn value is released through a hook the dyn unit installs when the first one is stored, for the reason
+ * the promise is: this unit stays free of the dyn core. */
+#define SCR_CAP_TAG_DYN ((uintptr_t)3)
+#define SCR_CAP_TAG_CLO ((uintptr_t)5)
+#define SCR_CAP_TAG_OBJ ((uintptr_t)7)
+/* 111: a counted pointer to a per-class payload (a class instance). Bits 48..: (index into the runtime arm-descriptor table << 1) | has-trace, so the
+ * slot needs no second word to say how to release it, and the collector visits the pointer only when has-trace is set (an acyclic payload has no
+ * cycle header to visit). The 48-bit pointer is what every 64-bit user address space of the supported targets fits. */
+static inline bool scr_cap_obj_traced(const ScrBox *b) { return (((uintptr_t)b >> 48) & 1u) != 0; }
+static inline unsigned scr_cap_tag(const ScrBox *b) { return (unsigned)((uintptr_t)b & (uintptr_t)7); }
+extern void (*scr_cap_dyn_release)(void *p);
 
 static inline ScrClosure *scr_closure_retain(ScrClosure *c) {
   if (c->rc != SIZE_MAX) {
@@ -2616,6 +2631,12 @@ static inline ScrClosure *scr_closure_retain(ScrClosure *c) {
 }
 
 void scr_closure_release(ScrClosure *c); /* releases the boxes; NULL-tolerant */
+
+/* The slot of a by-value capture of a closure (SCR_CAP_TAG_CLO): retains (NULL-tolerant) and tags. Out of line, so both emitters call the same symbol. */
+ScrBox *scr_cap_from_closure(ScrClosure *c);
+/* The slot of a by-value capture of a class instance (SCR_CAP_TAG_OBJ): `p` is already retained for the closure. `retain`/`release` are the type's
+ * void*-thunks (the pair a SCR_BOX_OBJ box would carry), `traced` whether the type carries a cycle header. */
+ScrBox *scr_cap_from_obj(void *p, void *(*retain)(void *), void (*release)(void *), bool traced);
 
 /* ── unions ─────────────────────────────────────────────────────────
  * A union value (`A | B`) is an IMMUTABLE tagged box: a refcounted header,
@@ -5549,7 +5570,11 @@ static inline ScrDyn *scr_dyn_retain(ScrDyn *d) {
   return d;
 }
 
+void scr_dyn_release_v(void *d);
 void scr_dyn_release(ScrDyn *d); /* releases the tree recursively; NULL-tolerant */
+
+/* The slot of a by-value capture of a dyn value (SCR_CAP_TAG_DYN): retains (NULL-tolerant), tags, and makes sure the closure core can release it. */
+ScrBox *scr_cap_from_dyn(ScrDyn *d);
 
 /* ── reading a narrowed ScrDyn ─────────────────────────────────────────
  * The three places the payload union stopped being a plain field, behind
