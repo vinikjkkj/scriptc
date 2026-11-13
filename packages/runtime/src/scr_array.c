@@ -456,6 +456,28 @@ static void scr_arr_grow(ScrArr *a, size_t need) {
   }
 }
 
+#ifdef SCR_RC_AUDIT
+ScrArr scr_ownxfer_tomb = { .rc = SIZE_MAX };
+
+void scr_ownxfer_dead_abort(void) {
+  fputs("ownxfer: a typed array was used after the compiler declared it dead (its last use was a crossing into a dynamic callee, "
+        "SCRIPTC_OWNXFER); the stack names the use. Rebuild with SCRIPTC_OWNXFER=0 to compare.\n", stderr);
+  abort();
+}
+#endif
+
+void scr_ownxfer_poison(ScrArr **slot) {
+#ifdef SCR_RC_AUDIT
+  ScrArr *a = *slot;
+  if (a != NULL && a != &scr_ownxfer_tomb && a->rc == 1) {
+    scr_arr_release(a);
+    *slot = &scr_ownxfer_tomb;
+  }
+#else
+  (void)slot;
+#endif
+}
+
 ScrArr *scr_arr_new(ScrElemKind elem, size_t initial_cap) {
   ScrArr *a = malloc(sizeof(ScrArr));
   if (!a) scr_arr_oom();

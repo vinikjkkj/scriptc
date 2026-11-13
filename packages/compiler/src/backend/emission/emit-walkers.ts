@@ -4344,12 +4344,13 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
   }
 
   /** scr_dyn_origin_mark over an array crossing, with the converters a union-element array needs. */
-  export function originMarkC(E: CEmitter, t: IrType, conv: string, obj: string, tk: string, retain: string, release: string): string {
+  export function originMarkC(E: CEmitter, t: IrType, conv: string, obj: string, tk: string, retain: string, release: string, own = false): string {
+    const sfx = own ? "_own" : "";
     if (t.kind === "array" && t.elem.kind === "union") {
       const ops = viewElemOpsC(E, t);
-      return `scr_dyn_origin_mark_elem(${conv}, (void *)${obj}, ${tk}, ${retain}, ${release}, ${ops})`;
+      return `scr_dyn_origin_mark_elem${sfx}(${conv}, (void *)${obj}, ${tk}, ${retain}, ${release}, ${ops})`;
     }
-    return `scr_dyn_origin_mark(${conv}, (void *)${obj}, ${tk}, ${retain}, ${release})`;
+    return `scr_dyn_origin_mark${sfx}(${conv}, (void *)${obj}, ${tk}, ${retain}, ${release})`;
   }
 
   /** A class FIELD read as dyn: the converter's copy, marked with the field's

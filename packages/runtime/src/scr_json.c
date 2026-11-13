@@ -3352,6 +3352,20 @@ ScrDyn *scr_dyn_origin_mark(ScrDyn *d, void *obj, const char *tkey,
   return d;
 }
 
+/* The crossing of a typed ARRAY whose source local is dead after this call (the compiler proves a single use). The origin exists so a
+ * write through the copy, or a recovery of the original, reaches the object the program still names; when the call's temp and the dead
+ * local are the ONLY references (rc == 2 here: the local and the operand temp), nothing can name it after the call, so the mark (and the
+ * pin it takes on the source) is skipped and the source is freed when the local goes. Any other count (aliased, captured, in a field)
+ * keeps the full mark. */
+static inline bool dyn_origin_sole_array(const ScrDyn *d, void *obj, void (*release)(void *)) {
+  return d != NULL && d->rc == 1 && obj != NULL && release == &scr_arr_release_v && ((ScrArr *)obj)->rc == 2;
+}
+
+ScrDyn *scr_dyn_origin_mark_own(ScrDyn *d, void *obj, const char *tkey, void *(*retain)(void *), void (*release)(void *)) {
+  if (dyn_origin_sole_array(d, obj, release)) return d;
+  return scr_dyn_origin_mark(d, obj, tkey, retain, release);
+}
+
 void *scr_dyn_origin_take(const ScrDyn *d, const char *tkey) {
   /* The recovery's question: "was this copy made from a live <tkey>?".
    * Answers the origin at +1, or NULL — in which case the caller builds
@@ -16552,6 +16566,12 @@ const ScrDynElemOps *scr_dyn_origin_elem_ops(const ScrDyn *d) {
   if (d == NULL || !d->static_copy || dyn_origin_cap == 0) return NULL;
   ScrDynOriginEnt *e = &dyn_origin_tab[dyn_origin_slot(d)];
   return e->d == d ? (const ScrDynElemOps *)e->elemops : NULL;
+}
+
+ScrDyn *scr_dyn_origin_mark_elem_own(ScrDyn *d, void *obj, const char *tkey, void *(*retain)(void *),
+                                     void (*release)(void *), const ScrDynElemOps *ops) {
+  if (dyn_origin_sole_array(d, obj, release)) return d;
+  return scr_dyn_origin_mark_elem(d, obj, tkey, retain, release, ops);
 }
 
 ScrDyn *scr_dyn_origin_mark_elem(ScrDyn *d, void *obj, const char *tkey, void *(*retain)(void *),

@@ -245,11 +245,11 @@ export interface LlvmEmitStats {
  * runtime base name, its prototype layer and the own-table-complete flag. */
 const DYN_CLASS_EXT_TYPE = `{ ptr, i64, i64, i8, ptr, ptr, ptr, i64, i8, i8, i8, ptr, i64, i8, ptr, i8, i8, i64, i64, i64, i64, ptr, i8, i8 }`;
 
-export function emitLlvmModule(mod: IrModule, stats?: LlvmEmitStats): string {
+export function emitLlvmModule(mod: IrModule, stats?: LlvmEmitStats, audit = false): string {
   resetSrcSiteCache();
   setDynOrderPlan(orderRecordPlanCached(mod.classes ?? []));
   setDynInspExt(moduleUsesInspColors(mod));
-  const e = new LlEmitter(mod);
+  const e = new LlEmitter(mod, audit);
   const out = e.emit();
   if (stats !== undefined) stats.coroLowered = e.coroLoweredCount();
   return out;
@@ -2252,7 +2252,7 @@ class LlEmitter {
     return (this.dynViewMemo ??= moduleUsesDynView(this.mod));
   }
 
-  constructor(private readonly mod: IrModule) {
+  constructor(private readonly mod: IrModule, private readonly audit: boolean = false) {
     for (const fn of mod.functions) this.fnByName.set(fn.name, fn);
     // The stackless admission, computed ONCE. `coroPlans` is the backend-
     // agnostic policy (ir/coro-plans.ts, which reads the knob); llvmCoroPlans
@@ -11703,7 +11703,25 @@ class LlEmitter {
         // one. See emit-exprs.ts's row for the whole argument.
         if (dynCopyIsObservable(e.value) || dynCopyHasLiveView(e.value)) {
           const { retain, release } = vAdapters(this, v.type);
-          const m = this.dyn.originMarkCall(B, v.type, t, v.name, retain, release);
+          // The C emitter's twin (see emit-exprs.ts): a typed ARRAY read straight from a local is carried by a retained
+          // operand temp that only the converter and the mark read, so release it right here; and a source the lowering
+          // proved dead after the call (srcDead) lets the runtime skip the mark when that temp and the local are the
+          // array's only references (scr_dyn_origin_mark_own).
+          const fromLocalArray = e.value.kind === "varRef" && v.type.kind === "array" && e.value.nullTest !== true;
+          const m = this.dyn.originMarkCall(B, v.type, t, v.name, retain, release, fromLocalArray && e.srcDead === true);
+          if (fromLocalArray) {
+            this.moveTemp(v);
+            this.releaseValue(v.name, v.type);
+            if (e.srcDead === true && e.value.kind === "varRef") {
+              const bd = this.binding(e.value.localId);
+              if (bd.kind === "local" && this.audit) {
+                // audit (--sanitize) builds free the array now and leave a tombstone that aborts on any later read; a plain build
+                // emits nothing here, so its IR is exactly the pass without the tripwire
+                this.declare(`declare void @scr_ownxfer_poison(ptr)`);
+                B.line(`call void @scr_ownxfer_poison(ptr ${bd.slot})`);
+              }
+            }
+          }
           return this.own({ name: m, type: e.type });
         }
         return this.own({ name: t, type: e.type });

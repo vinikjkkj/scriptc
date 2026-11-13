@@ -3013,7 +3013,19 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         if (dynCopyIsObservable(e.value) || dynCopyHasLiveView(e.value)) {
           const { retain, release } = vAdapters(v.type);
           const tk = cStringLiteral(Buffer.from(typeKey(v.type), "utf8"));
-          return E.newTemp(e.type, originMarkC(E, v.type, conv, v.name, tk, retain, release));
+          // A typed ARRAY read straight from a local: `v` is the retained operand temp, which only the converter and the mark
+          // ever read. Release it right after the crossing instead of carrying it (spilled, across a park) to the end of the
+          // statement: the mark takes its own reference, so a program that keeps nothing else pointing at the array can then
+          // free it as soon as its local dies. When the lowering proved the local dead after this call (srcDead) the runtime
+          // also skips the mark when the temp and the local are the array's only references (scr_dyn_origin_mark_own).
+          const fromLocalArray = e.value.kind === "varRef" && v.type.kind === "array" && e.value.nullTest !== true;
+          const res = E.newTemp(e.type, originMarkC(E, v.type, conv, v.name, tk, retain, release, fromLocalArray && e.srcDead === true));
+          if (fromLocalArray) E.line(`scr_arr_release(${v.name}); ${v.name} = NULL;`);
+          if (fromLocalArray && e.srcDead === true && e.value.kind === "varRef") {
+            const lcl = E.currentLocals.get(e.value.localId);
+            if (lcl !== undefined && lcl.boxed !== true) E.line(`#ifdef SCR_RC_AUDIT\n  scr_ownxfer_poison(&${mangleLocal(e.value.localId)});\n#endif`);
+          }
+          return res;
         }
         return E.newTemp(e.type, conv);
       }

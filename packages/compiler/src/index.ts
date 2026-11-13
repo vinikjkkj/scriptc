@@ -1424,7 +1424,7 @@ async function compileTracked(
   if (opts.backend !== "c") {
     try {
       const llPath = join(opts.outDir, `${stem}.ll`);
-      const llRead = await emitLlvmFile(lowered.module!, llStats, llPath);
+      const llRead = await emitLlvmFile(lowered.module!, llStats, llPath, opts.sanitize ?? false);
       emittedReadsObjinstMembers = llRead.members;
       emittedReadsLitKey = llRead.lit;
       cPath = llPath;
@@ -1528,8 +1528,8 @@ async function compileTracked(
 
 /** The LLVM unit, written; the emitted text is local to this call so it does not outlive the write in the caller's frame. Answers
  * whether the text reads class-box members (the dyn dispatch unit must then link). */
-async function emitLlvmFile(mod: IrModule, llStats: LlvmEmitStats, llPath: string): Promise<{ members: boolean; lit: boolean }> {
-  const ll = tapped("emit.llvm", () => emitLlvmModule(mod, llStats));
+async function emitLlvmFile(mod: IrModule, llStats: LlvmEmitStats, llPath: string, audit: boolean): Promise<{ members: boolean; lit: boolean }> {
+  const ll = tapped("emit.llvm", () => emitLlvmModule(mod, llStats, audit));
   await writeFile(llPath, ll);
   return { members: DYN_DISPATCH_REF.test(ll), lit: DYN_LIT_REF.test(ll) };
 }
@@ -2248,7 +2248,7 @@ export async function compileLibrary(opts: CompileLibraryOptions): Promise<Compi
       // referencing a ScrPromise window compiled out -- undefined symbols at
       // archive time. So there is no link switch to feed here and no stats
       // object to thread; the omission is deliberate and not an oversight.
-      const ll = emitLlvmModule(mod);
+      const ll = emitLlvmModule(mod, undefined, opts.sanitize ?? false);
       cPath = join(opts.outDir, `${stem}.lib.ll`);
       await writeFile(cPath, ll);
     } catch (err) {
