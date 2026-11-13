@@ -971,7 +971,7 @@ function programNativeFeatures(
     // plan admits, the two expressions converge and the count can go.
     coro:
       backend === "c"
-        ? coroPlans(mod.functions).size > 0
+        ? coroPlans(mod.functions, mod).size > 0
         : coroLowered > 0,
     url: moduleUsesUrl(mod),
     // The link switch for scr_url_params.c: sp.* libCalls, the
