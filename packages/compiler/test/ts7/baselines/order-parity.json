@@ -15752,6 +15752,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25200-captured-dyn-and-function-locals-written-once-are-held-by-value-and-written-after-capture-stay-shared.js": {
+   "order": [
+    "<repo>/tests/corpus/25200-captured-dyn-and-function-locals-written-once-are-held-by-value-and-written-after-capture-stay-shared.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25201-captured-class-instances-written-once-are-held-by-value-and-rewritten-ones-stay-shared.ts": {
+   "order": [
+    "<repo>/tests/corpus/25201-captured-class-instances-written-once-are-held-by-value-and-rewritten-ones-stay-shared.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2521-private-statics-class-expression.ts": {
    "order": [
     "<repo>/tests/corpus/2521-private-statics-class-expression.ts"
