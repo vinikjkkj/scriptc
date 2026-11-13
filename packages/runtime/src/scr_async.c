@@ -2236,6 +2236,7 @@ static size_t scr_text_scan(bool drop) {
 }
 
 #include <link.h>
+#include <sys/resource.h>
 
 static bool scr_has_textrel(void) {
   if (_DYNAMIC == NULL) return false; /* declared by <link.h>; weak so a static link without a dynamic section answers false */
@@ -2261,16 +2262,50 @@ static size_t scr_text_env_num(const char *name, size_t dflt) {
  * environment lookup it used to do each time (getenv scans the whole environment) was most of a turn's own cost: on a
  * 20k-turn timer loop the lookup was about half of all user instructions. State 2 is final "off" (disabled, text
  * relocations, or a one-shot drop that has been done), so a program that will never drop again pays one predictable
- * branch per turn. Nothing observable changes: the same knobs, the same defaults, the same drops at the same times. */
+ * branch per turn.
+ *
+ * While live, the per-turn work is ONE compare of the loop's own clock against scr_td_next_ms, the earlier of the next
+ * thing that could make a drop due: the timer interval and the next fault check.
+ *
+ * Fault-triggered repeat (SCR_TEXT_DROP_FAULTS=N, default 256, 0 = off): a timer cannot react inside a burst of first-use
+ * code, but the kernel counts the faults that map it. At most every SCR_TEXT_DROP_FAULT_CHECK_MS of loop time (default 8)
+ * the process's minor-fault count is read (getrusage); once N faults have accrued since the last drop the drop runs at
+ * once and the timer's interval does not apply. Every fault counts, heap growth included; a text fault maps up to 16
+ * pages. MEASURED on the zapo REST app (one binary, env only, 2 runs each): peak RSS in the request phase 48.9 / 47.3 MB
+ * with the 500 ms timer alone against 43.4 / 43.8 MB with the timer plus N=256 at equal CPU; N=128 alone costs ~10% CPU,
+ * N >= 512 changes nothing. */
+#ifndef SCR_TEXT_DROP_FAULTS
+#define SCR_TEXT_DROP_FAULTS 256
+#endif
 static int scr_td_state = 0; /* 0 unresolved, 1 live, 2 off */
-static size_t scr_td_every = 0;
+static size_t scr_td_every = 0, scr_td_faults = 0;
+static double scr_td_check_ms = 8, scr_td_next_check_ms = 0, scr_td_next_ms = 0;
 static bool scr_td_stat = false;
+static long scr_td_last_flt = 0;
+
+static long scr_text_minflt(void) {
+  struct rusage ru;
+  if (getrusage(RUSAGE_SELF, &ru) != 0) return 0;
+  return ru.ru_minflt;
+}
 
 static void scr_td_resolve(void) {
   scr_td_state = 1;
   scr_td_every = scr_text_env_num("SCR_TEXT_DROP_EVERY_MS", SCR_TEXT_DROP_EVERY_MS);
+  scr_td_faults = scr_text_env_num("SCR_TEXT_DROP_FAULTS", SCR_TEXT_DROP_FAULTS);
+  if (scr_td_every == 0) scr_td_faults = 0; /* EVERY_MS=0 is "the first drop only", faults included */
+  size_t chk = scr_text_env_num("SCR_TEXT_DROP_FAULT_CHECK_MS", 8);
+  scr_td_check_ms = (double)(chk == 0 ? 1 : chk);
   scr_td_stat = scr_text_drop_env("SCR_TEXT_DROP_STAT", false);
   if (!scr_text_drop_env("SCR_TEXT_DROP", SCR_TEXT_DROP != 0) || scr_has_textrel()) scr_td_state = 2;
+}
+
+/* The earlier of the timer's next due time and the next fault check (never, if neither is armed). */
+static void scr_td_set_next(void) {
+  double t = 1e300;
+  if (scr_td_every != 0) t = scr_text_drop_last_ms + (double)scr_td_every;
+  if (scr_td_faults != 0 && scr_td_next_check_ms < t) t = scr_td_next_check_ms;
+  scr_td_next_ms = t;
 }
 
 static void scr_text_drop_tick(double now) {
@@ -2279,20 +2314,30 @@ static void scr_text_drop_tick(double now) {
     scr_td_resolve();
     if (scr_td_state == 2) return;
   }
+  if (now < scr_td_next_ms) return; /* the whole per-turn cost while live */
+  long flt = 0;
   if (!scr_text_drop_first_done) {
-    if (scr_text_drop_first_ms == 0) { scr_text_drop_first_ms = now; return; }
-    if (now - scr_text_drop_first_ms < (double)SCR_TEXT_DROP_AFTER_MS) return;
+    if (scr_text_drop_first_ms == 0) { scr_text_drop_first_ms = now; scr_td_next_ms = now + (double)SCR_TEXT_DROP_AFTER_MS; return; }
+    if (now - scr_text_drop_first_ms < (double)SCR_TEXT_DROP_AFTER_MS) { scr_td_next_ms = scr_text_drop_first_ms + (double)SCR_TEXT_DROP_AFTER_MS; return; }
     scr_text_drop_first_done = true;
   } else {
-    /* A repeat: at most once per interval; 0 = the first drop only. */
-    if (scr_td_every == 0 || now - scr_text_drop_last_ms < (double)scr_td_every) return;
+    bool trigger = false;
+    if (scr_td_faults != 0 && now >= scr_td_next_check_ms) {
+      scr_td_next_check_ms = now + scr_td_check_ms;
+      flt = scr_text_minflt();
+      trigger = (size_t)(flt - scr_td_last_flt) >= scr_td_faults;
+    }
+    /* A repeat: at most once per interval, unless the fault budget is spent. */
+    if (!trigger && (scr_td_every == 0 || now - scr_text_drop_last_ms < (double)scr_td_every)) { scr_td_set_next(); return; }
   }
   bool stat = scr_td_stat;
   size_t before = stat ? scr_text_scan(false) : 0;
   size_t maps = scr_text_scan(true);
   scr_text_drop_last_ms = now;
   scr_text_drop_n++;
-  if (scr_td_every == 0) scr_td_state = 2; /* the one-shot is done */
+  if (scr_td_faults != 0) { scr_td_last_flt = flt != 0 ? flt : scr_text_minflt(); scr_td_next_check_ms = now + scr_td_check_ms; }
+  if (scr_td_every == 0 && scr_td_faults == 0) scr_td_state = 2; /* the one-shot is done */
+  else scr_td_set_next();
   if (stat) {
     size_t after = scr_text_scan(false);
     char nb[24];
