@@ -3633,24 +3633,42 @@ static size_t scr_text_env_num(const char *name, size_t dflt) {
   return v >= 0 ? (size_t)v : dflt;
 }
 
+/* The knobs are read ONCE, at the first seam, into statics. The seam runs on every turn that is about to block, and the
+ * environment lookup it used to do each time (getenv scans the whole environment) was most of a turn's own cost: on a
+ * 20k-turn timer loop the lookup was about half of all user instructions. State 2 is final "off" (disabled, text
+ * relocations, or a one-shot drop that has been done), so a program that will never drop again pays one predictable
+ * branch per turn. Nothing observable changes: the same knobs, the same defaults, the same drops at the same times. */
+static int scr_td_state = 0; /* 0 unresolved, 1 live, 2 off */
+static size_t scr_td_every = 0;
+static bool scr_td_stat = false;
+
+static void scr_td_resolve(void) {
+  scr_td_state = 1;
+  scr_td_every = scr_text_env_num("SCR_TEXT_DROP_EVERY_MS", SCR_TEXT_DROP_EVERY_MS);
+  scr_td_stat = scr_text_drop_env("SCR_TEXT_DROP_STAT", false);
+  if (!scr_text_drop_env("SCR_TEXT_DROP", SCR_TEXT_DROP != 0) || scr_has_textrel()) scr_td_state = 2;
+}
+
 static void scr_text_drop_tick(double now) {
-  size_t every = scr_text_env_num("SCR_TEXT_DROP_EVERY_MS", SCR_TEXT_DROP_EVERY_MS);
-  if (scr_text_drop_first_done && every == 0) return;
-  if (scr_text_drop_first_ms == 0) { scr_text_drop_first_ms = now; return; }
+  if (__builtin_expect(scr_td_state != 1, 0)) {
+    if (scr_td_state == 2) return;
+    scr_td_resolve();
+    if (scr_td_state == 2) return;
+  }
   if (!scr_text_drop_first_done) {
+    if (scr_text_drop_first_ms == 0) { scr_text_drop_first_ms = now; return; }
     if (now - scr_text_drop_first_ms < (double)SCR_TEXT_DROP_AFTER_MS) return;
     scr_text_drop_first_done = true;
-    if (!scr_text_drop_env("SCR_TEXT_DROP", SCR_TEXT_DROP != 0) || scr_has_textrel()) { scr_text_drop_n = (size_t)-1; return; }
   } else {
-    if (scr_text_drop_n == (size_t)-1) return;
-    /* A repeat: at most once per interval. */
-    if (now - scr_text_drop_last_ms < (double)every) return;
+    /* A repeat: at most once per interval; 0 = the first drop only. */
+    if (scr_td_every == 0 || now - scr_text_drop_last_ms < (double)scr_td_every) return;
   }
-  bool stat = scr_text_drop_env("SCR_TEXT_DROP_STAT", false);
+  bool stat = scr_td_stat;
   size_t before = stat ? scr_text_scan(false) : 0;
   size_t maps = scr_text_scan(true);
   scr_text_drop_last_ms = now;
   scr_text_drop_n++;
+  if (scr_td_every == 0) scr_td_state = 2; /* the one-shot is done */
   if (stat) {
     size_t after = scr_text_scan(false);
     char nb[24];
