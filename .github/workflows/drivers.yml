@@ -23,6 +23,10 @@ on:
         description: Free text echoed in the run name, to find the run
         required: false
         default: ""
+      node_heap_mb:
+        description: "Override of the node heap (MB) the driver build runs with (default 12288); a tiny value is the positive control that a build which dies fails the zapo gate"
+        required: false
+        default: ""
 
 permissions:
   contents: read
@@ -106,14 +110,18 @@ jobs:
           path: ~/.cache/scriptc/provenance
           key: provenance-${{ matrix.driver }}-${{ hashFiles('rigsrc/tests/driver-rigs/pnpm-lock.yaml') }}
       - name: Build the driver
+        env:
+          DRIVER_NODE_HEAP_MB: ${{ inputs.node_heap_mb }}
         run: bash rigsrc/tests/driver-rigs/build.sh "${{ matrix.driver }}" "$GITHUB_WORKSPACE/wt/packages/cli/dist/main.js" "$GITHUB_WORKSPACE/out/${{ matrix.driver }}"
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: driver-${{ matrix.driver }}
           path: out/${{ matrix.driver }}.txt
           retention-days: 14
       # The binary of a successful build, to run it (absent when the build is refused).
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: driver-${{ matrix.driver }}-bin
           path: out/${{ matrix.driver }}.bin
