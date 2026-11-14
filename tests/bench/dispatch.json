@@ -1,1 +1,1 @@
-{"target": "6598fb4c587290de0ad3b1423b9c0c81bdc2dda4", "programs": "messaging-redis", "variants": "plain", "reps": "3", "backend": "c", "node_ref": "true", "ir": "0"}
+{"target": "6598fb4c587290de0ad3b1423b9c0c81bdc2dda4", "programs": "messaging-redis messaging-mysql", "variants": "plain census", "reps": "3", "backend": "c", "node_ref": "true", "ir": "0"}
