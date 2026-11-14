@@ -1136,8 +1136,13 @@ static inline bool scr_dyn_bytes_eq(const char *a, const char *b, size_t n) {
 #define SCR_DYN_KEY_EQ(ent, kp, len) ((ent)->key_len == (len) && scr_dyn_bytes_eq((ent)->key, (kp), (len)))
 
 ScrDyn *scr_dyn_obj_get(const ScrDyn *d, const char *key, size_t key_len) {
-  for (size_t i = 0; i < d->v.obj.len; i++) {
-    const ScrDynEntry *e = &d->v.obj.entries[i];
+  /* A COUNT-DOWN WALK THAT KEEPS ITS COUNTER. With 24-byte entries clang rewrites a counted loop into "advance until the end pointer", whose setup
+   * is len * 24 (an lea and a shift) on every call where the 32-byte entry was one shift; this is the hottest loop over dyn objects, so that one
+   * instruction per call showed up as +0.75% on a lookup-dominated micro. The empty asm makes the counter a live value the loop must keep, so the
+   * test stays dec/jnz and no end pointer is formed. It emits no instruction of its own. */
+  const ScrDynEntry *e = d->v.obj.entries;
+  for (size_t n = d->v.obj.len; n != 0; n--, e++) {
+    __asm__("" : "+r"(n));
     if (SCR_DYN_KEY_EQ(e, key, key_len)) {
       /* An accessor SLOT is not a member. It sits in this table to hold
        * the property's CREATION POSITION and carries no value at all, so
@@ -1147,8 +1152,9 @@ ScrDyn *scr_dyn_obj_get(const ScrDyn *d, const char *key, size_t key_len) {
        * and `in`, unchanged. Every builtin that reads an option out of a
        * bag through this function then behaves exactly as it did when an
        * accessor could only be non-enumerable: it sees no option. */
-      if (e->value == scr_dyn_acc_slot()) return NULL;
-      return e->value;
+      ScrDyn *v = e->value; /* a branch, not a select: the select kept the result in a callee-saved register and cost a move on every hit */
+      if (__builtin_expect(v == scr_dyn_acc_slot(), 0)) return NULL;
+      return v;
     }
   }
   return NULL;
@@ -2180,19 +2186,20 @@ static void scr_dyn_obj_put_k(ScrDyn *obj, char *key, size_t key_len, ScrDyn *va
    * again -- is counted like any other allocation of that name. */
   scr_dyncen_key_note(&scr_dyncen_keyrun, key, (long long)key_len);
 #endif
-  for (size_t i = 0; i < obj->v.obj.len; i++) {
-    ScrDynEntry *e = &obj->v.obj.entries[i];
-    if (SCR_DYN_KEY_EQ(e, key, key_len)) {
+  ScrDynEntry *se = obj->v.obj.entries;
+  for (size_t n = obj->v.obj.len; n != 0; n--, se++) {
+    __asm__("" : "+r"(n)); /* keep the counter: see scr_dyn_obj_get */
+    if (SCR_DYN_KEY_EQ(se, key, key_len)) {
       /* UNLINK BEFORE RELEASE (scr_cycle.c's second global invariant): the
        * slot must already hold the new value when the old one's release
        * runs, because that release can trigger a collection and the walk
        * must not see an edge whose count was just given up. Harmless while
        * dyn values were invisible to the collector; a double decrement now
        * that they are nodes. */
-      ScrDyn *old = e->value;
-      bool old_owned = !e->value_borrowed;
-      e->value = value;
-      e->value_borrowed = 0;
+      ScrDyn *old = se->value;
+      bool old_owned = !se->value_borrowed;
+      se->value = value;
+      se->value_borrowed = 0;
       /* the surviving entry keeps its own, equal key; the loser's bytes
        * go back only if this call owned them */
       if (!key_static) scr_json_key_free(key, key_len);
@@ -8717,8 +8724,9 @@ static bool scr_hid_lead(const ScrDyn *q) {
  * kind test, no sentinel value a program could forge. */
 bool scr_dyn_obj_entry_is_slot(const ScrDyn *d, const char *key, size_t key_len) {
   if (d == NULL || d->kind != SCR_DYN_OBJ) return false;
-  for (size_t i = 0; i < d->v.obj.len; i++) {
-    const ScrDynEntry *e = &d->v.obj.entries[i];
+  const ScrDynEntry *e = d->v.obj.entries;
+  for (size_t n = d->v.obj.len; n != 0; n--, e++) {
+    __asm__("" : "+r"(n)); /* keep the counter: see scr_dyn_obj_get */
     if (SCR_DYN_KEY_EQ(e, key, key_len)) {
       return e->value == scr_dyn_acc_slot();
     }
