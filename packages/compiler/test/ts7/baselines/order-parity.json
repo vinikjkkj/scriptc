@@ -27918,6 +27918,12 @@
     "<repo>/tests/corpus/25221-a-concat-chain-of-three-or-more-operands-matches-the-fold-at-every-size-edge.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25222-object-assign-of-four-or-more-members-keeps-order-values-and-duplicates-at-every-size-edge.js": {
+   "order": [
+    "<repo>/tests/corpus/25222-object-assign-of-four-or-more-members-keeps-order-values-and-duplicates-at-every-size-edge.js"
+   ],
+   "diags": []
   }
  }
 }
