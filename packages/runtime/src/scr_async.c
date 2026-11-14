@@ -62,23 +62,22 @@ typedef struct ScrFiber ScrFiber;
 
 struct ScrPromise {
   size_t rc;
-  int state;
-  /* Payload (fulfillment value or rejection reason), ScrExcCell-style.
-   * The payload's trace function is non-NULL iff the REF payload type carries a cycle header
-   * (a promise settled with a cycle-capable value can be a cycle member —
-   * e.g. a closure that captures a box holding this very promise). */
-  ScrExcKind payload_kind; /* NONE = void fulfillment */
-  /* A scalar payload is EITHER an f64 or a bool, by payload_kind, never both:
-   * one word. Writers set the member the kind names; readers read by kind. */
+  /* The settled value, ONE word, read by payload_kind: an f64 (SCR_EXC_F64), a bool (SCR_EXC_BOOL) or the owned payload pointer
+   * (SCR_EXC_STR / REF / OBJ; NULL for NONE and GENRET). A scalar payload and a pointer payload were never both live, yet each had
+   * its own word. The payload's trace function is non-NULL iff the REF payload type carries a cycle header (a promise settled with
+   * a cycle-capable value can be a cycle member -- e.g. a closure that captures a box holding this very promise).
+   * A pointer reader that the compiler emits only for reference payload types goes through scr_prom_ptr (checked in the audit lane,
+   * see there). Writers set the member the kind names, and a pointer clear (`payload = NULL`) must not follow a scalar store: they
+   * share storage. */
   union {
     double f64;
     bool b;
+    void *payload;
   };
-  void *payload;
   /* Fibers parked on this promise, in registration order. Nearly every awaited
    * promise has exactly ONE waiter, so the first lives INLINE in this word: with
    * nwaiters == 1 `w1` is the waiter, with nwaiters >= 2 `wv` is a malloc'd
-   * vector of waiters_cap entries holding all of them, with 0 there is neither
+   * vector of scr_prom_wcap(nwaiters) entries holding all of them, with 0 there is neither
    * (settle frees the vector). Same offset and size as the old pointer, so a
    * promise nobody awaits pays nothing and a single-awaiter one skips the
    * 4-entry array malloc. Reach it only through scr_prom_wadd/wat/wdrain. */
@@ -86,25 +85,29 @@ struct ScrPromise {
     ScrFiber *w1;
     ScrFiber **wv;
   };
-  /* retain/release/trace of a REF payload, as one interned triple (ScrPromVt)
-   * named by a 32-bit index; 0 = none. These are per-TYPE facts, so they were 24
-   * bytes of per-instance pointers. */
-  uint32_t vt;
-  uint32_t nwaiters, waiters_cap;
-  /* Unhandled-rejection tracking: set when rejected, cleared on await. */
-  bool rejection_observed;
-  /* Set when the checkpoint report delivered THIS promise to
-   * 'unhandledRejection' listeners — a handler attached after that is
-   * Node's 'rejectionHandled' moment (scr_prom_observe below). */
-  bool reported_unhandled;
   /* Rare members behind ONE lazy pointer (see ScrPromiseExt below): nearly every
    * promise has none of a pending claim alias, combinator callbacks or conversion
    * memos, so inline they cost 56 bytes on each. NULL until first needed; freed with
    * the promise. */
   struct ScrPromiseExt *ext;
+  /* retain/release/trace of a REF payload, as one interned triple (ScrPromVt)
+   * named by a 32-bit index; 0 = none. These are per-TYPE facts, so they were 24
+   * bytes of per-instance pointers. */
+  uint32_t vt;
+  uint32_t nwaiters;
+  /* The three small words that used to take two 8-byte slots with padding (an int, an enum, two bools and a 32-bit capacity):
+   * the capacity of the waiter vector is a function of nwaiters (see scr_prom_wcap) and was never stored independently. */
+  uint8_t state;
+  uint8_t payload_kind; /* a ScrExcKind */
+  /* Unhandled-rejection tracking: set when rejected, cleared on await. */
+  bool rejection_observed;
+  /* Set when the checkpoint report delivered THIS promise to
+   * 'unhandledRejection' listeners -- a handler attached after that is
+   * Node's 'rejectionHandled' moment (scr_prom_observe below). */
+  bool reported_unhandled;
 };
 
-_Static_assert(sizeof(struct ScrPromise) == 64, "ScrPromise layout");
+_Static_assert(sizeof(struct ScrPromise) == 48, "ScrPromise layout: 48 + the 16-byte cycle header = 64, one stride below the 80 it was");
 
 /* The rare members of a promise. */
 struct ScrPromiseExt {
@@ -155,6 +158,30 @@ struct ScrPromiseExt {
 static void scr_oom(void);
 
 
+/* The vector holds 4 entries when it is first made (the second waiter) and DOUBLES when a waiter arrives with it full, so with n >= 2
+ * waiters its capacity is 4 up to n == 4 and the next power of two above that: it is a function of n, which is why the promise does not
+ * store it. The vector is full exactly when n is 4 or a larger power of two (n == capacity). Waiters are only ever appended, and settle
+ * drops the whole list (nwaiters = 0, vector freed). */
+static inline bool scr_prom_wfull(uint32_t n) { return n >= 4 && (n & (n - 1u)) == 0; }
+
+/* The pointer payload of a promise for a reader the compiler only emits for a promise whose payload type is a REFERENCE (the typed
+ * awaits: a number or bool payload reads through scr_promise_payload_f64/bool instead). The word is shared with the scalar payload,
+ * so a reader that is handed a scalar-kind promise would see a double's bits as a pointer. That cannot be emitted -- the kind is a
+ * function of the payload type -- and the hot path does not pay a branch to say so; the audit lane (--sanitize, SCR_RC_AUDIT) does, and
+ * aborts instead of dereferencing. NONE (a void fulfillment) and GENRET read as NULL, as they always did. */
+#ifdef SCR_RC_AUDIT
+static inline void *scr_prom_ptr_checked(const ScrPromise *p) {
+  if (p->payload_kind == SCR_EXC_F64 || p->payload_kind == SCR_EXC_BOOL) {
+    fputs("scriptc: audit: a pointer read of a promise whose payload kind is a scalar\n", stderr);
+    abort();
+  }
+  return p->payload;
+}
+#define scr_prom_ptr(p) scr_prom_ptr_checked(p)
+#else
+#define scr_prom_ptr(p) ((p)->payload)
+#endif
+
 /* Append waiter `f` to `p`. */
 static inline void scr_prom_wadd(ScrPromise *p, ScrFiber *f) {
   uint32_t n = p->nwaiters;
@@ -166,11 +193,9 @@ static inline void scr_prom_wadd(ScrPromise *p, ScrFiber *f) {
     v[0] = p->w1;
     v[1] = f;
     p->wv = v;
-    p->waiters_cap = 4;
   } else {
-    if (n == p->waiters_cap) {
-      p->waiters_cap *= 2;
-      p->wv = (ScrFiber **)realloc(p->wv, p->waiters_cap * sizeof *p->wv);
+    if (scr_prom_wfull(n)) {
+      p->wv = (ScrFiber **)realloc(p->wv, (size_t)n * 2 * sizeof *p->wv);
       if (!p->wv) scr_oom();
     }
     p->wv[n] = f;
@@ -1355,14 +1380,17 @@ static void scr_promise_settle_from(ScrPromise *dst, ScrPromise *src) {
   if (dst->state == SCR_PROM_PENDING) {
     dst->state = src->state;
     dst->payload_kind = src->payload_kind;
-    dst->f64 = src->f64; /* the scalar word: an f64 or a bool by kind */
     dst->vt = src->vt;
-    dst->payload = NULL;
-    if (src->payload_kind == SCR_EXC_STR && src->payload) {
-      dst->payload = scr_str_retain((ScrStr *)src->payload);
-    } else if ((src->payload_kind == SCR_EXC_REF || src->payload_kind == SCR_EXC_OBJ) &&
-               src->payload) {
-      dst->payload = PV(src)->retain(src->payload);
+    if (src->payload_kind == SCR_EXC_F64 || src->payload_kind == SCR_EXC_BOOL) {
+      dst->f64 = src->f64; /* the scalar word: an f64 or a bool by kind (the word is shared with the pointer) */
+    } else {
+      dst->payload = NULL;
+      if (src->payload_kind == SCR_EXC_STR && src->payload) {
+        dst->payload = scr_str_retain((ScrStr *)src->payload);
+      } else if ((src->payload_kind == SCR_EXC_REF || src->payload_kind == SCR_EXC_OBJ) &&
+                 src->payload) {
+        dst->payload = PV(src)->retain(src->payload);
+      }
     }
     scr_promise_settle_wake(dst);
   }
@@ -1437,7 +1465,6 @@ static void scr_promise_settle_wake(ScrPromise *p) {
   ScrFiber *w1 = nw == 1 ? p->w1 : NULL;
   ScrFiber **wv = nw >= 2 ? p->wv : NULL;
   p->nwaiters = 0;
-  p->waiters_cap = 0;
   p->wv = NULL;
   /* Detach the callback list BEFORE running it. Each entry's dst/via/conv
    * references are dropped as it is processed, and a release inside the loop
@@ -1635,7 +1662,8 @@ bool scr_promise_payload_flag(const ScrPromise *p) { SCR_PROM_SCALAR_KIND(p, SCR
 void scr_promise_payload_release(const ScrPromise *p, void *v) { PV(p)->release(v); }
 
 void *scr_promise_payload_ref(ScrPromise *p) {
-  return p->payload ? PV(p)->retain(p->payload) : NULL;
+  void *pl = scr_prom_ptr(p);
+  return pl ? PV(p)->retain(pl) : NULL;
 }
 
 /* MOVES a pending exception out of `cell` into `p` as its rejection payload
@@ -1644,8 +1672,9 @@ void *scr_promise_payload_ref(ScrPromise *p) {
 static void scr_promise_reject_from_cell(ScrPromise *p, ScrExcCell *cell) {
   p->state = SCR_PROM_REJECTED;
   p->payload_kind = cell->kind;
-  if (cell->kind == SCR_EXC_BOOL) p->b = cell->b; else p->f64 = cell->f64;
-  p->payload = cell->payload;
+  if (cell->kind == SCR_EXC_BOOL) p->b = cell->b;
+  else if (cell->kind == SCR_EXC_F64) p->f64 = cell->f64;
+  else p->payload = cell->payload;
   p->vt = scr_prom_vt_intern(cell->retain_fn, cell->release_fn, cell->trace_fn);
   cell->kind = SCR_EXC_NONE;
   cell->payload = NULL;
@@ -3159,7 +3188,7 @@ bool scr_promise_settled_take(ScrPromise *p) {
  * (scr_promise_wait_raw) after scr_promise_settled_take answered true. */
 double scr_promise_value_f64(const ScrPromise *p) { return p->f64; }
 bool scr_promise_value_bool(const ScrPromise *p) { return p->b; }
-void *scr_promise_value_ref(const ScrPromise *p) { return p->payload ? PV(p)->retain(p->payload) : NULL; }
+void *scr_promise_value_ref(const ScrPromise *p) { void *pl = scr_prom_ptr(p); return pl ? PV(p)->retain(pl) : NULL; }
 
 /* The part of scr_await_settled after the wait, fused with the "is it settled yet" test so the caller pays ONE call
  * for both: -1 while the promise is still pending (nothing consumed: the caller waits again, which is the
@@ -3259,7 +3288,8 @@ void scr_coro_promise_rethrow(ScrPromise *p) { scr_promise_rethrow(p); }
 double scr_coro_promise_f64(const ScrPromise *p) { SCR_PROM_SCALAR_KIND(p, SCR_EXC_F64); return p->f64; }
 bool   scr_coro_promise_bool(const ScrPromise *p) { SCR_PROM_SCALAR_KIND(p, SCR_EXC_BOOL); return p->b; }
 void  *scr_coro_promise_ref(const ScrPromise *p) {
-  return p->payload ? PV(p)->retain(p->payload) : NULL;
+  void *pl = scr_prom_ptr(p);
+  return pl ? PV(p)->retain(pl) : NULL;
 }
 #endif /* SCR_CORO_LANE */
 
