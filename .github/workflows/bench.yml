@@ -6,6 +6,11 @@ run-name: bench ${{ inputs.target }} [${{ inputs.programs }}] ${{ inputs.variant
 # lowering for flag-only variants (SCRIPTC_PROF_CFLAGS is not part of the lowering key), then run the binaries beside Node against service containers and upload the numbers.
 # CPU seconds on shared runners are noise: the only CPU figure produced here is callgrind Ir.
 on:
+  # TEMPORARY, bench1 only: a workflow file can be dispatched only once it is on the default branch, so on this branch a push reads its inputs from tests/bench/dispatch.json.
+  # Remove this trigger (and dispatch.json) when the workflow lands on main.
+  push:
+    branches: [bench1]
+    paths: [tests/bench/dispatch.json]
   workflow_dispatch:
     inputs:
       target:
@@ -54,14 +59,39 @@ jobs:
     timeout-minutes: 5
     outputs:
       matrix: ${{ steps.m.outputs.matrix }}
+      target: ${{ steps.m.outputs.target }}
+      programs: ${{ steps.m.outputs.programs }}
+      variants: ${{ steps.m.outputs.variants }}
+      reps: ${{ steps.m.outputs.reps }}
+      backend: ${{ steps.m.outputs.backend }}
+      node_ref: ${{ steps.m.outputs.node_ref }}
+      ir: ${{ steps.m.outputs.ir }}
+      node_heap_mb: ${{ steps.m.outputs.node_heap_mb }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: tests/bench/dispatch.json
       - id: m
         env:
-          PROGRAMS: ${{ inputs.programs }}
-          VARIANTS: ${{ inputs.variants }}
-          BACKEND: ${{ inputs.backend }}
+          EVENT: ${{ github.event_name }}
+          I_TARGET: ${{ inputs.target }}
+          I_PROGRAMS: ${{ inputs.programs }}
+          I_VARIANTS: ${{ inputs.variants }}
+          I_REPS: ${{ inputs.reps }}
+          I_BACKEND: ${{ inputs.backend }}
+          I_NODE_REF: ${{ inputs.node_ref }}
+          I_IR: ${{ inputs.ir }}
+          I_HEAP: ${{ inputs.node_heap_mb }}
         run: |
           set -euo pipefail
+          if [ "$EVENT" = push ]; then
+            j=tests/bench/dispatch.json
+            TARGET=$(jq -r .target $j); PROGRAMS=$(jq -r '.programs // "messaging-redis"' $j); VARIANTS=$(jq -r '.variants // "plain"' $j)
+            REPS=$(jq -r '.reps // "3"' $j); BACKEND=$(jq -r '.backend // "c"' $j); NODE_REF=$(jq -r '.node_ref // "true"' $j)
+            IR=$(jq -r '.ir // "0"' $j); HEAP=$(jq -r '.node_heap_mb // "12288"' $j)
+          else
+            TARGET=$I_TARGET; PROGRAMS=$I_PROGRAMS; VARIANTS=$I_VARIANTS; REPS=$I_REPS; BACKEND=$I_BACKEND; NODE_REF=$I_NODE_REF; IR=$I_IR; HEAP=$I_HEAP
+          fi
           out=()
           for p in ${PROGRAMS//,/ }; do
             case "$p" in
@@ -75,7 +105,11 @@ jobs:
             case "$v" in plain|census) ;; *) echo "unknown variant: $v"; exit 1 ;; esac
           done
           case "$BACKEND" in c|llvm) ;; *) echo "unknown backend: $BACKEND"; exit 1 ;; esac
-          echo "matrix=[$(IFS=,; echo "${out[*]}")]" >> "$GITHUB_OUTPUT"
+          {
+            echo "matrix=[$(IFS=,; echo "${out[*]}")]"
+            echo "target=$TARGET"; echo "programs=$PROGRAMS"; echo "variants=$VARIANTS"; echo "reps=$REPS"; echo "backend=$BACKEND"
+            echo "node_ref=$NODE_REF"; echo "ir=$IR"; echo "node_heap_mb=$HEAP"
+          } >> "$GITHUB_OUTPUT"
 
   bench:
     name: ${{ matrix.program }}
@@ -122,7 +156,7 @@ jobs:
     env:
       BENCH_WORK: ${{ github.workspace }}/bench-work
       SCRIPTC_CACHE_DIR: ${{ github.workspace }}/scc-cache
-      NODE_HEAP_MB: ${{ inputs.node_heap_mb }}
+      NODE_HEAP_MB: ${{ needs.plan.outputs.node_heap_mb }}
     steps:
       - name: Record the runner hardware
         run: |
@@ -139,7 +173,7 @@ jobs:
             tests/perf/dyncensus
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.target }}
+          ref: ${{ needs.plan.outputs.target }}
           path: wt
       - uses: pnpm/action-setup@v4
         with:
@@ -153,7 +187,7 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm build
       - name: Tools (valgrind for the Ir run)
-        if: ${{ inputs.ir != '0' }}
+        if: ${{ needs.plan.outputs.ir != '0' }}
         run: sudo apt-get update -q && sudo apt-get install -y -q valgrind
       # The provenance cache holds the zapo source the compiler maps (fetched by commit from github).
       - uses: actions/cache@v4
@@ -177,9 +211,9 @@ jobs:
         run: |
           set -u
           store=${{ matrix.program }}; store=${store#messaging-}
-          variants="${{ inputs.variants }}"; variants=${variants//,/ }
+          variants="${{ needs.plan.outputs.variants }}"; variants=${variants//,/ }
           for one in $variants; do
-            bash tests/bench/harness/build.sh "$store" "${{ inputs.backend }}" "$BENCH_WORK/out" "$one" || echo "build of variant $one failed"
+            bash tests/bench/harness/build.sh "$store" "${{ needs.plan.outputs.backend }}" "$BENCH_WORK/out" "$one" || echo "build of variant $one failed"
           done
           cat "$BENCH_WORK/out/build-summary.txt"
       - name: Run the binaries beside Node, measure
@@ -189,18 +223,18 @@ jobs:
           store=${{ matrix.program }}; store=${store#messaging-}
           . tests/bench/harness/env.sh
           arms=()
-          variants="${{ inputs.variants }}"; variants=${variants//,/ }
+          variants="${{ needs.plan.outputs.variants }}"; variants=${variants//,/ }
           for one in $variants; do
             suffix=""; [ "$one" = census ] && suffix="-census"
-            f="$BENCH_WORK/out/messaging-$store-${{ inputs.backend }}$suffix.bin"
+            f="$BENCH_WORK/out/messaging-$store-${{ needs.plan.outputs.backend }}$suffix.bin"
             [ -f "$f" ] && { chmod +x "$f"; arms+=("$one:$f"); }
           done
           [ ${#arms[@]} -gt 0 ] || { echo "no binary was built"; exit 1; }
-          flags=(--store "$store" --out "$BENCH_WORK/result" --reps "${{ inputs.reps }}" --smaps)
-          [ "${{ inputs.node_ref }}" = true ] && flags+=(--node)
-          [ "${{ inputs.ir }}" != 0 ] && flags+=(--ir "${{ inputs.ir }}")
+          flags=(--store "$store" --out "$BENCH_WORK/result" --reps "${{ needs.plan.outputs.reps }}" --smaps)
+          [ "${{ needs.plan.outputs.node_ref }}" = true ] && flags+=(--node)
+          [ "${{ needs.plan.outputs.ir }}" != 0 ] && flags+=(--ir "${{ needs.plan.outputs.ir }}")
           node tests/bench/harness/run.mjs "${flags[@]}" "${arms[@]}" | tee "$BENCH_WORK/result-summary.txt"
-          { echo "### ${{ matrix.program }} (${{ inputs.backend }}) on \`${{ inputs.target }}\`"; echo '```'; cat "$BENCH_WORK/out/build-summary.txt"; cat "$BENCH_WORK/result-summary.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          { echo "### ${{ matrix.program }} (${{ needs.plan.outputs.backend }}) on \`${{ needs.plan.outputs.target }}\`"; echo '```'; cat "$BENCH_WORK/out/build-summary.txt"; cat "$BENCH_WORK/result-summary.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
