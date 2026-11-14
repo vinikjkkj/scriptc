@@ -128,17 +128,6 @@ export interface EarlyBuildCacheOptions {
   implementation: string;
   /** Digest of the SCRIPTC_* environment. */
   environment: string;
-  /** cc.ts's SCRIPTC_PROF_CFLAGS discriminator, which folds the CONTENTS of
-   * every file a `-include` names and not merely the flag string naming it.
-   *
-   * The environment digest above already carries the flag STRING, and an
-   * instrument lives in the header, not in the string — editing the header
-   * leaves the string byte-identical. cc.ts's own comment records what that
-   * cost: a build handed back a binary carrying the PREVIOUS instrument, and
-   * a block reported three runs as successful which had measured the old
-   * header. The native key folds these bytes; folding them here too means
-   * this cache does not depend on a downstream component to be right. */
-  profFlavor: string;
   /** process.cwd(): tsgo resolves relative to it. */
   cwd: string;
 }
@@ -180,9 +169,34 @@ const CACHE_ONLY_ENV = new Set([
   "SCRIPTC_CACHE_VERIFY",
 ]);
 
+/** The SCRIPTC_* variables that act ONLY on the C-compiler and link stage (backend/cc.ts is the only module that reads any of them), so
+ * changing one cannot change the emitted program or the metadata this cache stores. They are left out of the digest, which is what lets a
+ * flag-only variant (an extra -D, a -include census header, another -O level) hit this cache and re-run just clang and the link.
+ *
+ * Why that is safe: a hit never returns an executable. linkProgram runs compileC on the restored TU, and compileC's own key (cc.ts, the
+ * "bin-v1" key) hashes the full compiler argv -- every flag these variables add, the optimisation level, the link ordering -- together with
+ * the bytes of the program TU, of every part and header, and of every forced -include file (profFlavor). A change to any variable listed here
+ * therefore changes the binary's key and rebuilds it; none of them can serve a stale binary through this cache.
+ *
+ * What is NOT here, and must stay in the digest: every variable that reaches lowering or emission (the ~190 *_OFF, *_WHY, STABLE_NAMES,
+ * OWNXFER, SPLIT_PARTS, STACKLESS ... knobs) and SCRIPTC_CC / SCRIPTC_TARGET, which backend/emission/emit-stmts.ts also reads. This is an
+ * explicit denylist of nine names, each checked by grepping its readers; a variable added tomorrow is in the key until someone proves it is
+ * C-stage-only and adds it here. */
+export const C_STAGE_ONLY_ENV: ReadonlySet<string> = new Set([
+  "SCRIPTC_PROF_CFLAGS",
+  "SCRIPTC_OPT_LEVEL",
+  "SCRIPTC_CC_JOBS",
+  "SCRIPTC_CC_ARGV",
+  "SCRIPTC_OBJ_CACHE_MAX_MB",
+  "SCRIPTC_VENDOR_CACHE_STRICT",
+  "SCRIPTC_KEEP_PDB",
+  "SCRIPTC_LAYOUT_LINK_ORDER",
+  "SCRIPTC_FETCH_CURL",
+]);
+
 export function scriptcEnvironmentFingerprint(env: NodeJS.ProcessEnv = process.env): string {
   const hash = createHash("sha256").update("scriptc-env-v1\0");
-  for (const name of Object.keys(env).filter((n) => n.startsWith("SCRIPTC_") && !CACHE_ONLY_ENV.has(n)).sort()) {
+  for (const name of Object.keys(env).filter((n) => n.startsWith("SCRIPTC_") && !CACHE_ONLY_ENV.has(n) && !C_STAGE_ONLY_ENV.has(n)).sort()) {
     hash.update(name).update("\0").update(env[name] ?? "").update("\0");
   }
   return hash.digest("hex");
@@ -233,13 +247,11 @@ function cacheKey(options: EarlyBuildCacheOptions): string {
     .update(resolve(options.cwd)).update("\0")
     .update(resolve(options.entryPath)).update("\0")
     .update(resolve(options.outDir)).update("\0")
-    .update(resolve(options.outPath)).update("\0")
     .update(options.compileOptions).update("\0")
     .update(options.provenance).update("\0")
     .update(options.target).update("\0")
     .update(options.cc).update("\0")
-    .update(options.environment).update("\0")
-    .update(options.profFlavor)
+    .update(options.environment)
     .digest("hex");
 }
 
@@ -271,6 +283,7 @@ function outputExclusions(options: EarlyBuildCacheOptions, publish: EarlyBuildCa
     join(options.outDir, `${stem}.ll`),
     join(options.outDir, `${stem}.scrh`),
     join(options.outDir, `${stem}.ir.json`),
+    join(options.outDir, `${stem}.keep.json`),
     ...Array.from({ length: 32 }, (_, i) => join(options.outDir, `${stem}.part${i + 1}.c`)),
   ].map((path) => resolve(path));
   const outputDirectories = new Set<string>();

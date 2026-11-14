@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { parseLayoutOrder, reorderLlvmText, type LayoutOrder } from "./backend/layout-order.js";
 import { tapPhase, tapped } from "./phase-tap.js";
 import { basename, dirname, join, resolve } from "node:path";
-import { cacheRootDir, CcCompileError, compileC, compileLibArchive, profFlavor, resolveCc, targetPlatform } from "./backend/cc.js";
+import { cacheRootDir, CcCompileError, compileC, compileLibArchive, resolveCc, targetPlatform } from "./backend/cc.js";
 import { emitModule, emitModuleProgram } from "./backend/emission/emitter.js";
 import { coroPlans } from "./ir/coro-plans.js";
 import { emitFinalKeyReadWidths, emitFinalNarrowBridges, flushKeyReadCensus, flushNarrowBridgeCensus, keyReadCensusOnly } from "./frontend/lowering/keyread-census.js";
@@ -1208,7 +1208,8 @@ async function earlyCacheOptionsFor(
   const compileOptions = JSON.stringify({
     emitIr: opts.emitIr ?? false,
     sanitize: opts.sanitize ?? false,
-    layoutProfile: opts.layoutProfile ?? false,
+    // layoutProfile is NOT here: it only adds a compile-only coverage flag and the profiler unit at the native stage (no emitter, IR or
+    // lowering code reads it), and compileC's own key carries it, so a profiled build reuses the lowering of its unprofiled twin.
     // the order file's BYTES, not its name: editing the file must miss the cache
     layoutOrder: opts.layoutOrder === undefined ? null : fnv1a(readFileSync(opts.layoutOrder, "utf8")),
     dynamic: opts.dynamic ?? false,
@@ -1238,7 +1239,6 @@ async function earlyCacheOptionsFor(
     nodeVersion: process.version,
     implementation: await compilerImplementationFingerprint(),
     environment: scriptcEnvironmentFingerprint(),
-    profFlavor: profFlavor(),
     cwd: process.cwd(),
   };
 }
@@ -1620,6 +1620,87 @@ interface ProgramBuildPlan {
   npmStatic: NpmStaticStatus[];
 }
 
+/** What a kept build directory needs besides the emitted files to be linked again: which backend wrote them, the split parts and header, and
+ * the native link gates derived from the IR (ProgramNativeFeatures), which a C or .ll file alone cannot answer. Written next to the program
+ * TU as `<stem>.keep.json` by every build and read by `scriptc build --from-kept`, so a variant that changes only C-compiler flags re-runs
+ * just clang and the link, from the directory a build already left behind. Paths are relative to the file. */
+interface KeepFile {
+  version: 1;
+  backend: "c" | "llvm";
+  program: string;
+  parts: string[];
+  header: string | null;
+  features: ProgramNativeFeatures;
+  /** A program built with --ffi links libraries this file does not name: it cannot be re-linked from here. */
+  ffi: boolean;
+  /** Whether the build was --sanitize: the LLVM emitter writes audit-only code for it, so the kept IR only suits the same setting. */
+  sanitize: boolean;
+}
+
+function keepFilePath(cPath: string): string {
+  return `${cPath.replace(/\.(c|ll)$/, "")}.keep.json`;
+}
+
+async function writeKeepFile(plan: ProgramBuildPlan, ffi: boolean, sanitize: boolean): Promise<void> {
+  const dir = dirname(plan.cPath);
+  const keep: KeepFile = {
+    version: 1,
+    backend: plan.backend,
+    program: basename(plan.cPath),
+    parts: plan.programUnits.map((p) => basename(p)),
+    header: plan.programHeader === undefined ? null : basename(plan.programHeader),
+    features: plan.features,
+    ffi,
+    sanitize,
+  };
+  // an auxiliary record, not part of the build's result: an unwritable directory must not fail a build that is otherwise complete
+  await writeFile(join(dir, basename(keepFilePath(plan.cPath))), `${JSON.stringify(keep, null, 2)}\n`).catch(() => undefined);
+}
+
+export interface CompileKeptOptions {
+  outPath: string;
+  sanitize?: boolean;
+  dynamic?: boolean;
+  layoutProfile?: boolean;
+}
+
+/** Re-runs ONLY the native stage (clang and the link) from a kept build directory: no frontend, no lowering, no emission. The C-compiler
+ * flags come from the environment as in any build (SCRIPTC_PROF_CFLAGS, SCRIPTC_OPT_LEVEL ...). Whatever changes the EMITTED program
+ * (--layout-order, any emission switch, the backend) needs a real build, because the kept files were emitted without it; the caller
+ * refuses those. */
+export async function compileKept(keepPath: string, opts: CompileKeptOptions): Promise<void> {
+  const raw: unknown = JSON.parse(await readFile(keepPath, "utf8"));
+  const k = raw as Partial<KeepFile> | null;
+  if (k === null || typeof k !== "object" || k.version !== 1 || (k.backend !== "c" && k.backend !== "llvm") || typeof k.program !== "string" ||
+      !Array.isArray(k.parts) || k.features === null || typeof k.features !== "object") {
+    throw new Error(`${keepPath}: not a scriptc keep file (version 1)`);
+  }
+  if ((k.sanitize === true) !== (opts.sanitize === true)) {
+    throw new Error(`${keepPath}: the kept build was ${k.sanitize === true ? "" : "not "}--sanitize and this one ${opts.sanitize === true ? "is" : "is not"}: the emitted program differs, rebuild it`);
+  }
+  if (k.ffi === true) throw new Error(`${keepPath}: the program was built with --ffi, whose libraries a keep file does not record; rebuild it`);
+  const dir = dirname(resolve(keepPath));
+  const cPath = join(dir, k.program);
+  const programUnits = k.parts.map((p) => join(dir, p));
+  const programHeader = typeof k.header === "string" ? join(dir, k.header) : undefined;
+  for (const f of [cPath, ...programUnits, ...(programHeader === undefined ? [] : [programHeader])]) {
+    await readFile(f).catch(() => {
+      throw new Error(`${keepPath}: kept file ${f} is missing (a build with --no-keep-c removes them)`);
+    });
+  }
+  await mkdir(dirname(opts.outPath), { recursive: true });
+  await compileC({
+    cPath,
+    ...(programUnits.length > 0 ? { programUnits } : {}),
+    ...(programHeader !== undefined ? { programHeader } : {}),
+    outPath: opts.outPath,
+    sanitize: opts.sanitize ?? false,
+    dynamic: opts.dynamic ?? false,
+    ...(opts.layoutProfile ? { layoutProfile: true } : {}),
+    ...(k.features as ProgramNativeFeatures),
+  });
+}
+
 /** The native stage, shared by a real build and by a cache hit. compileC
  * re-derives its OWN key from the restored TU's bytes, so the binary's
  * identity chain stays entirely in cc.ts's hands — this cache never copies an
@@ -1633,6 +1714,7 @@ async function linkProgram(
 ): Promise<CompileResult> {
   const { cPath, programUnits, programHeader, irPath, backend, llvmRefusal, features } = plan;
   await mkdir(dirname(opts.outPath), { recursive: true });
+  await writeKeepFile(plan, ffi !== null, opts.sanitize ?? false);
   try {
     const ccT0 = performance.now();
     await compileC({

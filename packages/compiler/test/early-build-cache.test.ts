@@ -176,7 +176,6 @@ describe("early build cache", () => {
         nodeVersion: process.version,
         implementation: "compiler-dist-A",
         environment: "env",
-        profFlavor: "",
         cwd: dir,
       };
       const armB = { ...armA, implementation: "compiler-dist-B" };
@@ -225,7 +224,6 @@ describe("early build cache", () => {
         nodeVersion: process.version,
         implementation: "impl",
         environment: "env",
-        profFlavor: "",
         cwd: dir,
       };
       await publishEarlyBuildCache(root, options, {
@@ -334,7 +332,6 @@ describe("early build cache", () => {
         nodeVersion: process.version,
         implementation: "impl",
         environment: "env",
-        profFlavor: "",
         cwd: dir,
       };
       await publishEarlyBuildCache(root, baseline, {
@@ -362,8 +359,18 @@ describe("early build cache", () => {
       // The enumeration itself must not be empty, or the loop is vacuous.
       expect(fields.length).toBeGreaterThan(0);
 
+      // `outPath` is the one declared exception: it names the native stage's output, which the cache never stores
+      // (the executable is not cached), so a different -o must still HIT. Asserted, not skipped silently.
+      const nativeStageOnly: (keyof EarlyBuildCacheOptions)[] = ["outPath"];
+      for (const field of nativeStageOnly) {
+        expect(fields).toContain(field);
+        const mutant: EarlyBuildCacheOptions = { ...baseline, [field]: `${baseline[field]}-mutant` };
+        expect(await readEarlyBuildCache(root, mutant), `${field} must not participate`).not.toBeNull();
+      }
+
       const ignored: string[] = [];
       for (const field of fields) {
+        if (nativeStageOnly.includes(field)) continue;
         const mutant: EarlyBuildCacheOptions = { ...baseline, [field]: `${baseline[field]}-mutant` };
         if ((await readEarlyBuildCache(root, mutant)) !== null) ignored.push(field);
       }
@@ -576,7 +583,6 @@ describe("early build cache", () => {
         nodeVersion: process.version,
         implementation: "impl",
         environment: "env",
-        profFlavor: "",
         cwd: dir,
       };
       await publishEarlyBuildCache(root, options, {
@@ -642,7 +648,6 @@ describe("early build cache", () => {
         nodeVersion: process.version,
         implementation: "impl",
         environment: "env",
-        profFlavor: "",
         cwd: dir,
       };
       await publishEarlyBuildCache(root, options, {

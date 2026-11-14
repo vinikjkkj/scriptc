@@ -4,7 +4,7 @@ import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { analyze, compile, compileC, compileLibrary, layoutOrderFromProfile, ProvenanceRefusalError, renderAll, renderCoverageLines, resolveProvenanceSources, setProvenanceSources } from "@scriptc/compiler";
+import { analyze, compile, compileC, compileKept, compileLibrary, layoutOrderFromProfile, ProvenanceRefusalError, renderAll, renderCoverageLines, resolveProvenanceSources, setProvenanceSources } from "@scriptc/compiler";
 import { defaultExecutableName } from "./paths.js";
 
 const USAGE = `scriptc — TypeScript/JavaScript to native executables (experimental)
@@ -31,6 +31,12 @@ Options:
                      stderr note names the construct — while an explicit
                      --backend llvm fails with that construct named
       --from-c       treat input as a C (or .ll) file (toolchain plumbing/debugging)
+      --from-kept    treat input as the \`<stem>.keep.json\` a build writes next to its kept
+                     program TU, and re-run ONLY clang and the link from that directory
+                     (split parts and link gates included), with whatever C flags the
+                     environment gives (SCRIPTC_PROF_CFLAGS, SCRIPTC_OPT_LEVEL ...) and
+                     --sanitize/--layout-profile. Anything that changes the emitted program
+                     (--layout-order, --backend, an emission switch) needs a real build.
       --keep-c       keep the generated program TU next to the executable
                      (default; the .ll — or the .c under --backend=c or
                      when the build fell back)
@@ -124,6 +130,7 @@ const CLI_OPTIONS = {
   // (LLVM with the transparent C fallback); an explicit value pins.
   backend: { type: "string" },
   "from-c": { type: "boolean", default: false },
+  "from-kept": { type: "boolean", default: false },
   "keep-c": { type: "boolean", default: true },
   "emit-ir": { type: "boolean", default: false },
   sanitize: { type: "boolean", default: false },
@@ -293,10 +300,28 @@ async function main(): Promise<number> {
   }
 
   const outDir = values.out ? dirname(resolve(values.out)) : join(dirname(input), ".scriptc");
-  const stem = basename(input).replace(/\.(ts|js|mjs|cjs|c|ll)$/, "");
+  const stem = basename(input).replace(/\.keep\.json$/, "").replace(/\.(ts|js|mjs|cjs|c|ll)$/, "");
   const outPath = values.out ? resolve(values.out) : join(outDir, defaultExecutableName(stem));
 
   const build = async (): Promise<string> => {
+    if (values["from-kept"]) {
+      if (ffiProfilePath !== undefined) fail("--ffi cannot be combined with --from-kept (a keep file does not record the libraries)");
+      if (values["layout-order"] !== undefined) {
+        fail("--layout-order changes the emitted program, so it needs a real build; --from-kept only re-runs clang and the link");
+      }
+      if (backend !== undefined || npmStatic !== undefined) fail("--backend and --npm-static pick what is emitted: --from-kept uses the kept build as it is");
+      try {
+        await compileKept(input, {
+          outPath,
+          sanitize: values.sanitize,
+          dynamic: values.dynamic,
+          ...(values["layout-profile"] ? { layoutProfile: true } : {}),
+        });
+      } catch (err) {
+        fail(err instanceof Error ? err.message : String(err));
+      }
+      return outPath;
+    }
     if (values["from-c"]) {
       if (ffiProfilePath !== undefined) {
         fail("--ffi is a TypeScript/JavaScript compiler feature and cannot be combined with --from-c");
