@@ -92,7 +92,7 @@ export function lastStringArg(line, open) {
  * Zero here is the most flattering number this tool can print and it was
  * mechanical: measured 2026-09-02 on a 139 MB zapo TU whose census says
  * 7 aborting helpers over 9 call sites. */
-const HDR = /^(?:static\s+)?(.+?)\s*\*?\s*(sc_rkg_\d+)\(([^)]*)\)\s*\{\s*\/\* r\[k\] on (\S+) as (.+?) \*\//;
+const HDR = /^(?:static\s+)?(.+?)\s*\*?\s*(sc_rkg_[0-9a-z]+)\(([^)]*)\)\s*\{\s*\/\* r\[k\] on (\S+) as (.+?) \*\//;
 
 export function analyse(raw) {
   const lines = raw.split("\n");
@@ -152,8 +152,8 @@ export function analyse(raw) {
   // 2. the call sites, one pass over the file
   const wanted = new Set([...helpers.keys()]);
   if (wanted.size > 0) {
-    const CALL = /(^|[^A-Za-z0-9_])(sc_rkg_\d+)\s*\(/g;
-    const PTR = /&(sc_rkg_\d+)\b/g;
+    const CALL = /(^|[^A-Za-z0-9_])(sc_rkg_[0-9a-z]+)\s*\(/g;
+    const PTR = /&(sc_rkg_[0-9a-z]+)\b/g;
     for (let i = 0; i < lines.length; i++) {
       const l = lines[i];
       if (!l.includes("sc_rkg_")) continue;

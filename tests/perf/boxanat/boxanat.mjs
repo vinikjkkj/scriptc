@@ -83,8 +83,8 @@ export function capFor(n) {
  * comment — the interned typeKey of the static type it converts. The label
  * is what makes the two lanes comparable at all, so a converter WITHOUT one
  * is skipped and counted, never guessed at. */
-const C_HEAD = /^\s*(?:static\s+)?ScrDyn\s*\*\s*(sc_td_\d+)\s*\([^)]*\)\s*\{\s*\/\*\s*to-dyn\s+(.*?)\s*\*\//;
-const LL_HEAD = /^define\s+internal\s+ptr\s+@(sc_td_\d+)\s*\([^)]*\)[^{]*\{\s*;\s*to-dyn\s+(.*?)\s*$/;
+const C_HEAD = /^\s*(?:static\s+)?ScrDyn\s*\*\s*(sc_td_[0-9a-z]+)\s*\([^)]*\)\s*\{\s*\/\*\s*to-dyn\s+(.*?)\s*\*\//;
+const LL_HEAD = /^define\s+internal\s+ptr\s+@(sc_td_[0-9a-z]+)\s*\([^)]*\)[^{]*\{\s*;\s*to-dyn\s+(.*?)\s*$/;
 
 export function parseHelpers(text) {
   const lines = text.split(/\r?\n/);
@@ -129,7 +129,7 @@ const CTORS = [
 
 export function classify(h) {
   const b = h.body;
-  const children = [...b.matchAll(/\b(sc_td_\d+)\s*\(/g)]
+  const children = [...b.matchAll(/\b(sc_td_[0-9a-z]+)\s*\(/g)]
     .map((m) => m[1])
     .filter((n) => n !== h.name);
   // MEMBERS ARE COUNTED BY DISTINCT KEY, not by call site, and that is not

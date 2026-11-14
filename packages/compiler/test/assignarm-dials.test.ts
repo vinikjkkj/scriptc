@@ -132,7 +132,7 @@ const count = (tu: string, re: RegExp): number => (tu.match(re) ?? []).length;
  * shape, a "code" argument scr_trap_fmt never carried. */
 const TRAP = /scr_throw_error_fmt_code\(SCR_ERR_TYPE, "SC9003", "scriptc: TypeError: record has no key/g;
 /* The interned per-union strict-equality helper — the allocating compare. */
-const UNION_EQ = /\bsc_ue_\d+\(/g;
+const UNION_EQ = /\bsc_ue_[0-9a-z]+\(/g;
 /* The allocation itself — one fresh tagged box. */
 const UNION_NEW = /scr_union_new_ref\(/g;
 /* Node's own receiver message, spelled by the recvarm rung. */

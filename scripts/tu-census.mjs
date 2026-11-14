@@ -301,7 +301,7 @@ const HOST_ATTRIB = [
   // classifies the older TUs so a base measurement stays readable).  Coded
   // and still BRACKETLESS: the box is interned per SIGNATURE, so it has no
   // one source location.
-  { re: /^sc_dfs_\d+_thunk$/,       site: "emit-walkers.ts:2077 strandedDynFuncBoxHelper" },
+  { re: /^sc_dfs_[0-9a-z]+_thunk$/,       site: "emit-walkers.ts:2077 strandedDynFuncBoxHelper" },
   { re: /^sc_f__x25_fence_fn_\d+$/, site: "lower-exprs.ts:5845 fenceClosureProbe" },
   { re: /^sc_f__x25_fn\d+_dyntrap$/, site: "lower-island.ts:815 dynTrapFnValue" },
   { re: /^sc_wsw_/,                 site: "emit-ws.ts:446 (backend, no loc)" },
@@ -704,8 +704,8 @@ if (bracketUnit !== oldTraps) {
 // helper on a HYBRID shape emits one `if` per declared field and runs to
 // hundreds of lines (§ my own wrong measurements).
 const SHARED_HELPER = [
-  /^sc_rkg_\d+$/,                  // r[k] keyed read            (emit-walkers)
-  /^sc_dfs_\d+_thunk$/,            // stranded dyn func thunk    (emit-walkers:2077)
+  /^sc_rkg_[0-9a-z]+$/,                  // r[k] keyed read            (emit-walkers)
+  /^sc_dfs_[0-9a-z]+_thunk$/,            // stranded dyn func thunk    (emit-walkers:2077)
   /^sc_wsw_\d+$/,                  // WebSocket ctor wrapper     (emit-ws)
   /^sc_f__x25_fence_fn_\d+$/,      // fenceClosureProbe stub     (lower-exprs:5845)
   /^sc_f__x25_fn\d+_dyntrap$/,     // island export trap value   (lower-island:815)

@@ -55,7 +55,7 @@ export function classifyInit(init) {
   if (!call) {
     if (/^sc_t\d+$/.test(init)) return 'alias-temp'
     if (/^sc_(?:l|a|p)_/.test(init)) return 'alias-local'
-    if (/^\(Scr[A-Za-z]+ \*\)&sc_(?:lit|unit)_\d+$/.test(init)) return 'immortal-static'
+    if (/^\(Scr[A-Za-z]+ \*\)&sc_(?:lit|unit)_[0-9a-z]+$/.test(init)) return 'immortal-static'
     return 'other'
   }
   const f = call[1]

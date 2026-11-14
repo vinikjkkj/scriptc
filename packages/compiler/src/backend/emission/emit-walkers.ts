@@ -93,7 +93,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
     }
     const meta = E.classMeta.get(className);
     if (!meta) throw new Error(`emitter bug: dyn box descriptor for unknown class ${className}`);
-    const name = `sc_dcl_${E.dynClassDescs.size}`;
+    const name = E.namer.name("sc_dcl", className, E.dynClassDescs.size);
     E.dynClassDescs.set(className, name);
     const rc = vAdapters({ kind: "object", className });
     const display = dynClassDisplayName(meta.def);
@@ -510,7 +510,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
     if (existing) return existing;
     const def = E.unionsById.get(unionId);
     if (!def) throw new Error(`emitter bug: truthiness of unknown union ${unionId}`);
-    const name = `sc_ut_${E.unionTruthyFns.size}`;
+    const name = E.namer.name("sc_ut", unionId, E.unionTruthyFns.size);
     E.unionTruthyFns.set(unionId, name);
     const sig = `${E.link}bool ${name}(ScrUnion *v)`;
     E.walkerProtos.push(`${sig}; /* ToBoolean ${unionId} */`);
@@ -597,7 +597,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
     if (existing) return existing;
     const def = E.unionsById.get(unionId);
     if (!def) throw new Error(`emitter bug: equality of unknown union ${unionId}`);
-    const name = `sc_ue_${E.unionEqFns.size}`;
+    const name = E.namer.name("sc_ue", key, E.unionEqFns.size);
     E.unionEqFns.set(key, name);
     const what = sameValue ? "SameValue" : "strict equality";
     const sig = `${E.link}bool ${name}(ScrUnion *a, ScrUnion *b)`;
@@ -685,7 +685,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
     if (existing) return existing;
     const def = E.unionsById.get(unionId);
     if (!def) throw new Error(`emitter bug: ToString of unknown union ${unionId}`);
-    const name = `sc_us_${E.unionToStrFns.size}`;
+    const name = E.namer.name("sc_us", unionId, E.unionToStrFns.size);
     E.unionToStrFns.set(unionId, name);
     const sig = `${E.link}ScrStr *${name}(ScrUnion *v)`;
     E.walkerProtos.push(`${sig}; /* ToString ${unionId} */`);
@@ -771,7 +771,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
     if (existing) return existing;
     const def = E.unionsById.get(unionId);
     if (!def) throw new Error(`emitter bug: join of unknown union ${unionId}`);
-    const name = `sc_uj_${E.unionJoinFns.size}`;
+    const name = E.namer.name("sc_uj", unionId, E.unionJoinFns.size);
     E.unionJoinFns.set(unionId, name);
     const toStr = unionToStrHelper(E, unionId);
     const unitTags = def.arms.flatMap((a, i) =>
@@ -1103,7 +1103,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     const key = typeKey(t);
     const existing = E.jsonWriters.get(key);
     if (existing) return existing;
-    const name = `sc_jw_${E.jsonWriters.size}`;
+    const name = E.namer.name("sc_jw", key, E.jsonWriters.size);
     E.jsonWriters.set(key, name);
     const sig = `${E.link}void ${name}(ScrJsonBuf *b, ${cDecl(t, "v")})`;
     E.walkerProtos.push(`${sig}; /* stringify ${key} */`);
@@ -1418,7 +1418,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     const key = typeKey(t);
     const existing = E.dynMatchers.get(key);
     if (existing) return existing;
-    const name = `sc_dm_${E.dynMatchers.size}`;
+    const name = E.namer.name("sc_dm", key, E.dynMatchers.size);
     E.dynMatchers.set(key, name);
     const sig = `${E.link}bool ${name}(const ScrDyn *d)`;
     E.walkerProtos.push(`${sig}; /* matches ${key} */`);
@@ -1732,7 +1732,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     const memoKey = `%dlit:${JSON.stringify(pairs)}`;
     const existing = E.dynBuilders.get(memoKey);
     if (existing) return existing;
-    const name = `sc_dlit_${E.dynBuilders.size}`;
+    const name = E.namer.name("sc_dlit", memoKey, E.dynBuilders.size);
     E.dynBuilders.set(memoKey, name);
     const sig = `${E.link}bool ${name}(const ScrDyn *d)`;
     // The pairs ride into a C BLOCK comment, so a literal spelling `*/`
@@ -2248,7 +2248,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     const key = typeKey(t);
     const existing = E.dynBuilders.get(key);
     if (existing) return existing;
-    const name = `sc_dc_${E.dynBuilders.size}`;
+    const name = E.namer.name("sc_dc", key, E.dynBuilders.size);
     E.dynBuilders.set(key, name);
     const sig = `${E.link}${cType(t)}${cType(t).endsWith("*") ? "" : " "}${name}(const ScrDyn *d, const ScrDynPath *path)`;
     E.walkerProtos.push(`${sig}; /* check ${key} */`);
@@ -2313,7 +2313,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     const key = typeKey(t);
     const existing = E.dynArmBuilders.get(key);
     if (existing) return existing;
-    const name = `sc_da_${E.dynArmBuilders.size}`;
+    const name = E.namer.name("sc_da", key, E.dynArmBuilders.size);
     E.dynArmBuilders.set(key, name);
     const sig = `${E.link}${cType(t)}${cType(t).endsWith("*") ? "" : " "}${name}(const ScrDyn *d, const ScrDynPath *path, bool *ok)`;
     E.walkerProtos.push(`${sig}; /* arm ${key} */`);
@@ -3534,7 +3534,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     const key = typeKey(t);
     const existing = E.toDynFns.get(key);
     if (existing) return existing;
-    const name = `sc_td_${E.toDynFns.size}`;
+    const name = E.namer.name("sc_td", key, E.toDynFns.size);
     E.toDynFns.set(key, name);
     const sig = `${E.link}ScrDyn *${name}(${cDecl(t, "v")})`;
     E.walkerProtos.push(`${sig}; /* to-dyn ${key} */`);
@@ -4170,7 +4170,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     const key = typeKey(inner);
     const existing = E.promiseDynAdapters.get(key);
     if (existing) return existing;
-    const name = `sc_pda_${E.promiseDynAdapters.size}`;
+    const name = E.namer.name("sc_pda", key, E.promiseDynAdapters.size);
     E.promiseDynAdapters.set(key, name);
     const sig = `${E.link}void ${name}(ScrPromise *dst, ScrPromise *src)`;
     E.walkerProtos.push(`${sig}; /* dyn-box settle adapter for promise<${key}> */`);
@@ -4253,7 +4253,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     const key = typeKey(u);
     const memo = E.viewElemOps.get(key);
     if (memo !== undefined) return `&${memo}`;
-    const name = `sc_velem_${E.viewElemOps.size}`;
+    const name = E.namer.name("sc_velem", key, E.viewElemOps.size);
     E.viewElemOps.set(key, name);
     const ct = cType(u).trim();
     E.walkerProtos.push(`static const ScrDynElemOps ${name}; /* live view of ${key}[] */`);
@@ -4272,7 +4272,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
   export function viewSyncHelper(E: CEmitter, shapeId: string): string {
     const memo = E.viewSyncs.get(shapeId);
     if (memo !== undefined) return memo;
-    const name = `sc_vsync_${E.viewSyncs.size}`;
+    const name = E.namer.name("sc_vsync", shapeId, E.viewSyncs.size);
     E.viewSyncs.set(shapeId, name);
     const st = mangleRecordStruct(shapeId);
     E.walkerProtos.push(`static void ${name}(${st} *r);`);
@@ -4299,7 +4299,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     const key = `${srcShapeId}->${shapeId}`;
     const memo = E.recSrcMaps.get(key);
     if (memo !== undefined) return memo;
-    const name = `sc_rsm_${E.recSrcMaps.size}`;
+    const name = E.namer.name("sc_rsm", key, E.recSrcMaps.size);
     E.recSrcMaps.set(key, name);
     // A CLASS source ("%class:<Name>"): the instance struct's data fields at their own offsets, a method slot (a target field the
     // class holds no field for) at -1, no own-key mask.
@@ -4376,7 +4376,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     const key = typeKey(t);
     const existing = E.dynFuncThunks.get(key);
     if (existing) return existing;
-    const name = `sc_dfk_${E.dynFuncThunks.size}`;
+    const name = E.namer.name("sc_dfk", key, E.dynFuncThunks.size);
     E.dynFuncThunks.set(key, name);
     const sig = `${E.link}ScrDyn *${name}(ScrClosure *c, ScrDyn *const *args, size_t argc)`;
     E.walkerProtos.push(`${sig}; /* dyn call thunk for ${key} */`);
@@ -4513,7 +4513,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     const ikey = `${key}\u0000${field}`;
     const existing = E.strandedDynFuncBoxes.get(ikey);
     if (existing) return existing;
-    const name = `sc_dfs_${E.strandedDynFuncBoxes.size}`;
+    const name = E.namer.name("sc_dfs", ikey, E.strandedDynFuncBoxes.size);
     E.strandedDynFuncBoxes.set(ikey, name);
     const thunkName = `${name}_thunk`;
     const thunkSig = `${E.link}ScrDyn *${thunkName}(ScrClosure *c, ScrDyn *const *args, size_t argc)`;
@@ -4632,7 +4632,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     const key = typeKey(t);
     const existing = E.dynFuncBoxes.get(key);
     if (existing) return existing;
-    const name = `sc_dfb_${E.dynFuncBoxes.size}`;
+    const name = E.namer.name("sc_dfb", key, E.dynFuncBoxes.size);
     E.dynFuncBoxes.set(key, name);
     const sig = `${E.link}ScrDyn *${name}(ScrClosure *v, const char *fname, const char *fsrc)`;
     E.walkerProtos.push(`${sig}; /* box ${key} into dyn */`);
@@ -4655,7 +4655,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     const key = typeKey(t);
     const existing = E.dynFuncAdapters.get(key);
     if (existing) return existing;
-    const name = `sc_dfa_${E.dynFuncAdapters.size}`;
+    const name = E.namer.name("sc_dfa", key, E.dynFuncAdapters.size);
     E.dynFuncAdapters.set(key, name);
     // RC-audit per-SITE attribution: an adapter has no source position of
     // its own -- its identity is the target signature it adapts to.
@@ -4747,7 +4747,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     if (existing) return existing;
     const shape = E.recordsById.get(shapeId);
     if (!shape) throw new Error(`emitter bug: keyed read of unknown shape ${shapeId}`);
-    const name = `sc_rkg_${E.recordKeyGetFns.size}`;
+    const name = E.namer.name("sc_rkg", key, E.recordKeyGetFns.size);
     E.recordKeyGetFns.set(key, name);
     const struct = mangleRecordStruct(shapeId);
     // Does the MISS path throw the catchable SC9003 TypeError?  Decided
@@ -4955,7 +4955,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     // the map insert tail.
     const iv = shape?.indexValue ?? shape?.fields[0]?.type;
     if (!shape || !iv) throw new Error(`emitter bug: keyed write on field-free non-overflow shape ${shapeId}`);
-    const name = `sc_rks_${E.recordKeySetFns.size}`;
+    const name = E.namer.name("sc_rks", shapeId, E.recordKeySetFns.size);
     E.recordKeySetFns.set(shapeId, name);
     const struct = mangleRecordStruct(shapeId);
     const sig = `${E.link}void ${name}(${struct} *r, ScrStr *k, ${cDecl(iv, "v")})`;

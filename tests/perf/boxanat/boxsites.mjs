@@ -49,7 +49,7 @@ import { readFileSync } from "node:fs";
 /* Every crossing the C emitter can produce: a bare converter call, and the
  * same call wrapped in the origin mark when the source is an lvalue whose
  * mutation would be observable (ir/nodes.ts's dynCopyIsObservable). */
-const CROSS = /(\w+)\s*=\s*(?:scr_dyn_origin_mark\s*\(\s*)?(sc_td_\d+)\s*\(/g;
+const CROSS = /(\w+)\s*=\s*(?:scr_dyn_origin_mark\s*\(\s*)?(sc_td_[0-9a-z]+)\s*\(/g;
 /* `static` is OPTIONAL, and that is not tidiness — it is the difference
  * between a census and a page of zeroes. A single-TU build emits every
  * program function `static`; a SPLIT build (zapo is 14 parts plus the shared
@@ -85,7 +85,7 @@ export function parse(text) {
   // The converters themselves are not crossings: they ARE the crossing's
   // body, and a `sc_td_` call inside one is a child conversion.
   for (let i = 0; i < lines.length; i++) {
-    if (!/^\s*(?:static\s+)?ScrDyn\s*\*\s*sc_td_\d+\s*\(/.test(lines[i])) continue;
+    if (!/^\s*(?:static\s+)?ScrDyn\s*\*\s*sc_td_[0-9a-z]+\s*\(/.test(lines[i])) continue;
     if (!/\{/.test(lines[i])) continue;
     let j = i + 1;
     for (; j < lines.length; j++) if (/^\}/.test(lines[j])) break;

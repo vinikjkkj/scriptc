@@ -92,7 +92,7 @@ const PROGRAM = [
 
 const TRAP = /record has no key/g;
 const HIT = /\bSC_RK_HIT\((\d+)\)/g;
-const SITE = /\/\*RKSITE k=(\d+) h=(sc_rkg_\d+) s=(\S+) t=(\S+)\*\//g;
+const SITE = /\/\*RKSITE k=(\d+) h=(sc_rkg_[0-9a-z]+) s=(\S+) t=(\S+)\*\//g;
 
 /* real-aborts.mjs's own call-site unit, reproduced here rather than imported
  * so the two instruments can disagree out loud: a call on an INDENTED line
@@ -102,7 +102,7 @@ function abortingHelpers(tu: string): Set<string> {
   const aborting = new Set<string>();
   const lines = tu.split("\n");
   for (let i = 0; i < lines.length; i++) {
-    const m = /^static .*?\b(sc_rkg_\d+)\(.*\{ \/\* r\[k\] on /.exec(lines[i]!);
+    const m = /^static .*?\b(sc_rkg_[0-9a-z]+)\(.*\{ \/\* r\[k\] on /.exec(lines[i]!);
     if (!m) continue;
     for (let j = i + 1; j < lines.length && lines[j] !== "}"; j++) {
       if (lines[j]!.includes("record has no key")) aborting.add(m[1]!);
@@ -115,7 +115,7 @@ function abortableCallSites(tu: string): number {
   let n = 0;
   for (const l of tu.split("\n")) {
     if (l.length === 0 || (l[0] !== " " && l[0] !== "\t")) continue;
-    const re = /(^|[^A-Za-z0-9_])(sc_rkg_\d+)\s*\(/g;
+    const re = /(^|[^A-Za-z0-9_])(sc_rkg_[0-9a-z]+)\s*\(/g;
     for (let m; (m = re.exec(l)) !== null; ) if (aborting.has(m[2]!)) n++;
   }
   return n;
@@ -190,7 +190,7 @@ describe("SCRIPTC_RKG_COUNT", () => {
     for (const h of marked) expect(aborting.has(h)).toBe(true);
     /* and the dyn-result helper serving `loose` answers the undefined dyn:
      * it is not in ABORT.real and carries no marker. */
-    const dynHelpers = [...on.matchAll(/^static ScrDyn \*(sc_rkg_\d+)\(/gm)].map((m) => m[1]!);
+    const dynHelpers = [...on.matchAll(/^static ScrDyn \*(sc_rkg_[0-9a-z]+)\(/gm)].map((m) => m[1]!);
     expect(dynHelpers.length).toBeGreaterThanOrEqual(1);
     for (const h of dynHelpers) expect(marked.has(h)).toBe(false);
   });

@@ -41,9 +41,9 @@ import fs from "node:fs";
 function resolveUnions(kinds, src) {
   const calls = new Map();
   for (const fn of functions(src)) {
-    if (!/^sc_d[ca]_\d+$/.test(fn.name)) continue;
+    if (!/^sc_d[ca]_[0-9a-z]+$/.test(fn.name)) continue;
     const out = new Set();
-    for (const line of fn.body) for (const m of line.matchAll(/\b(sc_d[ca]_\d+)\(/g)) if (m[1] !== fn.name) out.add(m[1]);
+    for (const line of fn.body) for (const m of line.matchAll(/\b(sc_d[ca]_[0-9a-z]+)\(/g)) if (m[1] !== fn.name) out.add(m[1]);
     calls.set(fn.name, out);
   }
   let grew = true, rounds = 0;
@@ -69,7 +69,7 @@ function classifyCheckers(src) {
   // static sc_rs_r1 *sc_dc_0(const ScrDyn *d, const ScrDynPath *path); /* check record:r1 */
   // static ScrArr *sc_da_3(const ScrDyn *d, const ScrDynPath *path, bool *ok); /* arm array<...> */
   const kind = new Map();
-  const re = /^static\s+(?:const\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\*\s*(sc_d[ca]_\d+)\([^)]*\);\s*\/\*\s*(check|arm)\s+([^*]+?)\s*\*\//gm;
+  const re = /^static\s+(?:const\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\*\s*(sc_d[ca]_[0-9a-z]+)\([^)]*\);\s*\/\*\s*(check|arm)\s+([^*]+?)\s*\*\//gm;
   let m;
   while ((m = re.exec(src)) !== null) {
     const cType = m[1], fn = m[2], what = m[4];
@@ -114,7 +114,7 @@ function isProgramFunction(name) {
   return name === "main" || name.startsWith("sc_f_");
 }
 
-const DECL = /^\s*(?:const\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\*\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(sc_d[ca]_\d+)\(/;
+const DECL = /^\s*(?:const\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*\*\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(sc_d[ca]_[0-9a-z]+)\(/;
 // A step that keeps the SAME underlying composite: a plain temp copy, a
 // refcount retain, or a union narrow (which hands back the arm's payload
 // pointer, not a fresh struct). `sc_f__x25_union_narrow_183` is the step
@@ -151,7 +151,7 @@ function analyse(src, kinds, listLimit) {
         if (k) { totals.recoveries++; totals.other++; }
         continue;
       }
-      roots.push({ varName: m[2], helper: m[3], k, line: n, arg: (/=\s*sc_d[ca]_\d+\(\s*([A-Za-z_][A-Za-z0-9_]*)/.exec(fn.body[n]) || [])[1] });
+      roots.push({ varName: m[2], helper: m[3], k, line: n, arg: (/=\s*sc_d[ca]_[0-9a-z]+\(\s*([A-Za-z_][A-Za-z0-9_]*)/.exec(fn.body[n]) || [])[1] });
     }
     if (roots.length === 0) continue;
     // Which dyn values in this body are a MARKED STATIC COPY of a composite

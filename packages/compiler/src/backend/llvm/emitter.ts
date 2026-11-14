@@ -62,6 +62,7 @@
  */
 import { storesFreshDynNumber } from "../../ir/dyn-keep.js";
 import { canonPlanOf, type CanonPlan } from "../../ir/num-canon.js";
+import { HelperNamer } from "../helper-names.js";
 import type {
   IrExpr,
   IrFfiImport,
@@ -117,7 +118,7 @@ import {
   type CoroSlotSpill,
   type CoroTempSpill,
 } from "./coro.js";
-import { mangleCoroFrame, mangleCoroResume } from "../mangle.js";
+import { mangleCoroFrame, mangleCoroResume, setShapeTokens } from "../mangle.js";
 import { mangleAgenSettleThunk, mangleAsyncSpawn, mangleClassNew, mangleClassObj, mangleClassRetain, mangleClassStruct, mangleFnClosure, mangleFunction, mangleGenDrop, mangleGenResThunk, mangleGenSpawn, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleResolveThunk, mangleVtStruct, mangleWrapper } from "../mangle.js";
 import {
   BlockBuilder,
@@ -1977,6 +1978,8 @@ class LlEmitter {
    * typeKey → thunk symbol (CEmitter.resolveThunks). */
   private readonly resolveThunks = new Map<string, string>();
   private readonly resolveThunkDefs: string[] = [];
+  /** Stable names for the interned helpers (helper-names.ts). */
+  readonly namer = new HelperNamer((id) => this.recordsById.get(id), (id) => this.unionsById.get(id));
   readonly unionsById = new Map<string, IrUnionDef>();
   readonly recordsById = new Map<string, IrRecordShape>();
   readonly tracedShapes: Set<string>;
@@ -2287,6 +2290,7 @@ class LlEmitter {
     }
     for (const u of mod.unions ?? []) this.unionsById.set(u.id, u);
     for (const r of mod.records ?? []) this.recordsById.set(r.id, r);
+    setShapeTokens(this.namer.shapeTokens(mod.records ?? []));
     const traced = computeTraced(mod);
     this.tracedShapes = traced.shapes;
     this.tracedUnions = traced.unions;
@@ -3997,7 +4001,7 @@ class LlEmitter {
     const key = `${unionId}:${tag}`;
     let sym = this.unitInstances.get(key);
     if (!sym) {
-      sym = `sc_unit_${this.unitInstances.size}`;
+      sym = this.namer.name("sc_unit", key, this.unitInstances.size);
       this.unitInstances.set(key, sym);
     }
     return `@${sym}`;
@@ -4024,7 +4028,7 @@ class LlEmitter {
       throw new Error(`llvm emitter bug: dyn box descriptor for non-boxable class ${className}`);
     }
     const meta = this.classMetaOf(className);
-    const sym = `sc_dcl_${this.dynClassDescSyms.size}`;
+    const sym = this.namer.name("sc_dcl", className, this.dynClassDescSyms.size);
     // Interned BEFORE the member table is built, and that ordering is
     // load-bearing: a member wrapper boxes its field and return types,
     // and a class-typed one asks for a descriptor — including, for a
@@ -13041,7 +13045,7 @@ class LlEmitter {
     const key = `dns:${errU}/${addrU}/${famU}/${nparams}`;
     const seen = this.resolveThunks.get(key);
     if (seen) return seen;
-    const sym = `sc_dnsl_${this.resolveThunks.size}`;
+    const sym = this.namer.name("sc_dnsl", key, this.resolveThunks.size);
     this.resolveThunks.set(key, sym);
     const armOf = (unionId: string, kind: string): number => {
       const def = this.unionsById.get(unionId);
@@ -13133,7 +13137,7 @@ class LlEmitter {
     const key = `connect:${sockT.unionId}/${cbT.params.length}`;
     const seen = this.resolveThunks.get(key);
     if (seen) return seen;
-    const sym = `sc_hconn_${this.resolveThunks.size}`;
+    const sym = this.namer.name("sc_hconn", key, this.resolveThunks.size);
     this.resolveThunks.set(key, sym);
     const def = this.unionsById.get(sockT.unionId);
     const tag = def ? def.arms.findIndex((a) => a.kind === "netSocket") : -1;
@@ -13182,7 +13186,7 @@ class LlEmitter {
     const key = `dgmt:${param.shapeId}:${typeKey(msgT)}`;
     const seen = this.resolveThunks.get(key);
     if (seen) return seen;
-    const sym = `sc_dgmt_${this.resolveThunks.size}`;
+    const sym = this.namer.name("sc_dgmt", key, this.resolveThunks.size);
     this.resolveThunks.set(key, sym);
     const struct = mangleRecordStruct(param.shapeId);
     const shape = this.recordShape(param.shapeId);
@@ -13333,7 +13337,7 @@ class LlEmitter {
     const key = `ita:${fn.params.map((p) => typeKey(p)).join(",")}=>${ret.async ? "P:" : ""}${ret.tag}`;
     let sym = this.resolveThunks.get(key);
     if (sym) return sym;
-    sym = `sc_ita_${this.resolveThunks.size}`;
+    sym = this.namer.name("sc_ita", key, this.resolveThunks.size);
     this.resolveThunks.set(key, sym);
     const d: string[] = [
       `define internal ptr @${sym}(ptr %c, ptr %argv) ${FN_ATTRS} { ; typed island host-call adapter: ${key}`,
@@ -13615,7 +13619,7 @@ class LlEmitter {
     const key = `race:${typeKey(from)}=>${typeKey(to)}`;
     let sym = this.resolveThunks.get(key);
     if (sym) return sym;
-    sym = `sc_race_${this.resolveThunks.size}`;
+    sym = this.namer.name("sc_race", key, this.resolveThunks.size);
     this.resolveThunks.set(key, sym);
     if (to.kind !== "union") throw new Error("llvm emitter bug: race adapter to a non-union");
     const toDef = this.unionsById.get(to.unionId);
@@ -13742,7 +13746,7 @@ class LlEmitter {
     const key = `adopt:${typeKey(sov)}=>${typeKey(inner)}`;
     let sym = this.resolveThunks.get(key);
     if (sym) return sym;
-    sym = `sc_race_${this.resolveThunks.size}`;
+    sym = this.namer.name("sc_race", key, this.resolveThunks.size);
     this.resolveThunks.set(key, sym);
     if (sov.kind !== "union") throw new Error("llvm emitter bug: adopt adapter over a non-union");
     const def = this.unionsById.get(sov.unionId);
@@ -14127,7 +14131,7 @@ class LlEmitter {
     const key = `cx:${param.unionId}`;
     let sym = this.resolveThunks.get(key);
     if (sym) return sym;
-    sym = `sc_cx_${this.resolveThunks.size}`;
+    sym = this.namer.name("sc_cx", key, this.resolveThunks.size);
     this.resolveThunks.set(key, sym);
     const def = this.unionsById.get(param.unionId);
     const f64Tag = def ? def.arms.findIndex((a) => a.kind === "f64") : -1;
@@ -14169,7 +14173,7 @@ class LlEmitter {
     const key = `cx2:${codeParam.unionId}+${sigParam.unionId}`;
     let sym = this.resolveThunks.get(key);
     if (sym) return sym;
-    sym = `sc_cx_${this.resolveThunks.size}`;
+    sym = this.namer.name("sc_cx", key, this.resolveThunks.size);
     this.resolveThunks.set(key, sym);
     const codeDef = this.unionsById.get(codeParam.unionId);
     const f64Tag = codeDef ? codeDef.arms.findIndex((a) => a.kind === "f64") : -1;
@@ -14232,7 +14236,7 @@ class LlEmitter {
     const key = `cd:${param.unionId}`;
     let sym = this.resolveThunks.get(key);
     if (sym) return sym;
-    sym = `sc_cd_${this.resolveThunks.size}`;
+    sym = this.namer.name("sc_cd", key, this.resolveThunks.size);
     this.resolveThunks.set(key, sym);
     const def = this.unionsById.get(param.unionId);
     const bytesTag = def ? def.arms.findIndex((a) => a.kind === "bytes" && a.elem === "u8") : -1;
@@ -14278,7 +14282,7 @@ class LlEmitter {
     const key = `ee:${typeKey(cbT)}`;
     let sym = this.resolveThunks.get(key);
     if (sym) return { fn: sym, shim };
-    sym = `sc_ee_ad_${this.resolveThunks.size}`;
+    sym = this.namer.name("sc_ee_ad", key, this.resolveThunks.size);
     this.resolveThunks.set(key, sym);
     this.declare(`declare ptr @scr_box_get_ref(ptr)`);
     this.declare(`declare void @scr_closure_release(ptr)`);
@@ -14392,7 +14396,7 @@ class LlEmitter {
     const key = `ncb:${cbUnion.unionId}:${retServer ? "srv" : "void"}`;
     let sym = this.resolveThunks.get(key);
     if (sym) return sym;
-    sym = `sc_ncb_${this.resolveThunks.size}`;
+    sym = this.namer.name("sc_ncb", key, this.resolveThunks.size);
     this.resolveThunks.set(key, sym);
     const def = this.unionsById.get(cbUnion.unionId);
     const funcTag = def ? def.arms.findIndex((a) => a.kind === "func") : -1;
@@ -14489,7 +14493,7 @@ class LlEmitter {
     const key = `ncw:${cbUnion.unionId}:${retServer ? "srv" : "void"}`;
     let sym = this.resolveThunks.get(key);
     if (sym) return sym;
-    sym = `sc_ncw_${this.resolveThunks.size}`;
+    sym = this.namer.name("sc_ncw", key, this.resolveThunks.size);
     this.resolveThunks.set(key, sym);
     const def = this.unionsById.get(cbUnion.unionId);
     const undefTag = def ? def.arms.findIndex((a) => a.kind === "undefinedT") : -1;
@@ -14530,7 +14534,7 @@ class LlEmitter {
     const key = `eed:${typeKey(cbT)}`;
     let sym = this.resolveThunks.get(key);
     if (sym) return sym;
-    sym = `sc_ee_dad_${this.resolveThunks.size}`;
+    sym = this.namer.name("sc_ee_dad", key, this.resolveThunks.size);
     this.resolveThunks.set(key, sym);
     const p = cbT.params[0];
     if (cbT.params.length > 1 || (p && p.kind !== "bytes" && p.kind !== "string" && p.kind !== "dyn")) {
@@ -14640,7 +14644,7 @@ class LlEmitter {
     const key = `fsstat:${nparams}:${errT?.kind === "union" ? errT.unionId : "-"}:${statsU?.kind === "union" ? statsU.unionId : "-"}`;
     let sym = this.resolveThunks.get(key);
     if (sym) return sym;
-    sym = `sc_fsstat_${this.resolveThunks.size}`;
+    sym = this.namer.name("sc_fsstat", key, this.resolveThunks.size);
     this.resolveThunks.set(key, sym);
     this.declare(`declare ptr @scr_error_retain_v(ptr)`);
     this.declare(`declare void @scr_error_release_v(ptr)`);
@@ -14719,7 +14723,7 @@ class LlEmitter {
     const key = `sd:${kind}:${typeKey(doneT)}`;
     let sym = this.resolveThunks.get(key);
     if (sym) return sym;
-    sym = `sc_sd_${this.resolveThunks.size}`;
+    sym = this.namer.name("sc_sd", key, this.resolveThunks.size);
     this.resolveThunks.set(key, sym);
     const errT = doneT.params[0];
     let errTag = -1;
@@ -14826,7 +14830,7 @@ class LlEmitter {
     const key = `scb:${kind}:${typeKey(cbT)}`;
     let sym = this.resolveThunks.get(key);
     if (sym) return sym;
-    sym = `sc_scb_${this.resolveThunks.size}`;
+    sym = this.namer.name("sc_scb", key, this.resolveThunks.size);
     this.resolveThunks.set(key, sym);
     const runtimeParams =
       kind === "r" ? ["ptr %s", "double %size"] :

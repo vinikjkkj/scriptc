@@ -146,7 +146,7 @@ describe("the dyn->static recovery is a copy, and the store into it is lost", ()
     // whole effect and additionally records the object the copy was made
     // FROM — so the marking this row is about is unchanged, and only its
     // call site's name moved.
-    expect(c).toMatch(/scr_dyn_origin_mark\(sc_td_\d+\(/);
+    expect(c).toMatch(/scr_dyn_origin_mark\(sc_td_[0-9a-z]+\(/);
     expect(c).toMatch(/sc_dyn_key_get\(/);
   });
 
@@ -165,7 +165,7 @@ describe("the dyn->static recovery is a copy, and the store into it is lost", ()
     // origin lookup misses, and the fresh struct below is what the store
     // lands on. The divergence this file pins is therefore intact, and the
     // assertion is deliberately kept as "it allocates" rather than relaxed.
-    const checkers = [...c.matchAll(/static sc_rs_r\d+ \*(sc_dc_\d+)\(const ScrDyn \*d[^)]*\) \{/g)];
+    const checkers = [...c.matchAll(/static sc_rs_r\d+ \*(sc_dc_[0-9a-z]+)\(const ScrDyn \*d[^)]*\) \{/g)];
     expect(checkers.length).toBeGreaterThan(0);
     for (const m of checkers) {
       const body = c.slice(m.index!, c.indexOf("\n}\n", m.index!));

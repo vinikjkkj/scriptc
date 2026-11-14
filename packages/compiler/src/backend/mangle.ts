@@ -107,29 +107,40 @@ export function mangleClassGcFree(className: string): string {
   return `sc_gcfree_${sanitize(className)}`;
 }
 
+/** The name token of a record shape in the symbols below. The frontend numbers shapes in first-seen order (`r0`, `r1`, ...), so an
+ * unrelated edit renumbers them and every symbol built from the id; an emitter installs a table (helper-names.ts shapeTokens) that
+ * names each shape from its structure instead, and the default is the id itself (SCRIPTC_STABLE_NAMES=0, or no table). */
+let shapeTokens: ReadonlyMap<string, string> | null = null;
+export function setShapeTokens(t: ReadonlyMap<string, string> | null): void {
+  shapeTokens = t;
+}
+function shapeToken(shapeId: string): string {
+  return shapeTokens?.get(shapeId) ?? shapeId;
+}
+
 /** Per-record-shape emitted C struct and RC helpers. Shape ids are
  * compiler-generated (`r0`, `r1`, ...), but the prefixes are still disjoint
  * from every class prefix above (sc_rs_X vs sc_o_Y, sc_rnew_X vs
  * sc_new_Y, ...) so no user class name can collide with a record symbol. */
 export function mangleRecordStruct(shapeId: string): string {
-  return `sc_rs_${sanitize(shapeId)}`;
+  return `sc_rs_${sanitize(shapeToken(shapeId))}`;
 }
 export function mangleRecordNew(shapeId: string): string {
-  return `sc_rnew_${sanitize(shapeId)}`;
+  return `sc_rnew_${sanitize(shapeToken(shapeId))}`;
 }
 export function mangleRecordRetain(shapeId: string): string {
-  return `sc_rretain_${sanitize(shapeId)}`;
+  return `sc_rretain_${sanitize(shapeToken(shapeId))}`;
 }
 export function mangleRecordRelease(shapeId: string): string {
-  return `sc_rrelease_${sanitize(shapeId)}`;
+  return `sc_rrelease_${sanitize(shapeToken(shapeId))}`;
 }
 /** Cycle-collector entry points of a cycle-capable record shape (mirrors
  * the class pair above; prefixes stay disjoint from class symbols). */
 export function mangleRecordTrace(shapeId: string): string {
-  return `sc_rtrace_${sanitize(shapeId)}`;
+  return `sc_rtrace_${sanitize(shapeToken(shapeId))}`;
 }
 export function mangleRecordGcFree(shapeId: string): string {
-  return `sc_rgcfree_${sanitize(shapeId)}`;
+  return `sc_rgcfree_${sanitize(shapeToken(shapeId))}`;
 }
 
 /** Module-level variable ("%g.e.count" → "sc_g_e_count"). The id's tag

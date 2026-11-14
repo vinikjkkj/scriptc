@@ -157,7 +157,7 @@ if (classified + unclassified.length + outsideHelper.length !== occTotal) {
 // crosses the boundary.  Calls from inside a walker are the recursive descent
 // (a record field, an array element, a union arm) and are counted apart.
 const CALL = /\bsc_dc_(\d+)\s*\(/g;
-const PROTO = /^static\s.*\bsc_dc_\d+\(const ScrDyn \*d, const ScrDynPath \*path\)\s*[;{]/;
+const PROTO = /^static\s.*\bsc_dc_[0-9a-z]+\(const ScrDyn \*d, const ScrDynPath \*path\)\s*[;{]/;
 const callsOutside = new Map();
 const callsInside = new Map();
 // enclosing top-level definition, so a call site can be attributed to a module

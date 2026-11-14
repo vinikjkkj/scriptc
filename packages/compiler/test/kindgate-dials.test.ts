@@ -96,7 +96,7 @@ const GATE =
  * ScrDynPath *path, bool *ok) {` at column 0 -- and takes each body up to the
  * next `\n}` at column 0, which is how emit-walkers.ts closes every one. */
 function armBodiesContaining(tu: string, needle: string): number {
-  const header = /^static [^\n]*?\bsc_da_\d+\(const ScrDyn \*d, const ScrDynPath \*path, bool \*ok\) \{/gm;
+  const header = /^static [^\n]*?\bsc_da_[0-9a-z]+\(const ScrDyn \*d, const ScrDynPath \*path, bool \*ok\) \{/gm;
   let n = 0;
   let m: RegExpExecArray | null;
   while ((m = header.exec(tu)) !== null) {
@@ -248,7 +248,7 @@ describe("the record kind gate and its two control dials", () => {
     }
     /* and it separates bodies from prototypes and call sites: the file
      * mentions sc_da_ far more often than it defines one. */
-    expect((off.match(/sc_da_\d+/g) ?? []).length).toBeGreaterThan(
+    expect((off.match(/sc_da_[0-9a-z]+/g) ?? []).length).toBeGreaterThan(
       armBodiesContaining(off, "const ScrDyn *d"),
     );
   });
@@ -355,7 +355,7 @@ interface LlBody {
 }
 
 const LL_HEADER =
-  /^define\s+(?:internal\s+)?[^@\n]*@(sc_d[cam]_\d+)\([^\n]*\)\s*#\d+\s*\{\s*;\s*(check|arm|match)\s+(.*)$/;
+  /^define\s+(?:internal\s+)?[^@\n]*@(sc_d[cam]_[0-9a-z]+)\([^\n]*\)\s*#\d+\s*\{\s*;\s*(check|arm|match)\s+(.*)$/;
 
 function llBodies(tu: string): LlBody[] {
   const out: LlBody[] = [];
@@ -382,7 +382,7 @@ function llBodies(tu: string): LlBody[] {
  * `static <T> sc_dc_<n>(const ScrDyn *d, const ScrDynPath *path) {` at
  * column 0, up to the next `\n}` at column 0. */
 function hardBodiesContaining(tu: string, needle: string): number {
-  const header = /^static [^\n]*?\bsc_dc_\d+\(const ScrDyn \*d, const ScrDynPath \*path\) \{/gm;
+  const header = /^static [^\n]*?\bsc_dc_[0-9a-z]+\(const ScrDyn \*d, const ScrDynPath \*path\) \{/gm;
   let n = 0;
   let m: RegExpExecArray | null;
   while ((m = header.exec(tu)) !== null) {
@@ -409,7 +409,7 @@ describe("the kind-gate dials on the LLVM lane, and the two lanes against each o
     expect((off.match(LL_FAIL) ?? []).length).toBeGreaterThanOrEqual(8);
     /* and the parser separates DEFINITIONS from mentions: the file names
      * sc_da_ more often than it defines one. */
-    expect((off.match(/sc_da_\d+/g) ?? []).length).toBeGreaterThan(
+    expect((off.match(/sc_da_[0-9a-z]+/g) ?? []).length).toBeGreaterThan(
       bodies.filter((b) => b.role === "arm").length,
     );
   });

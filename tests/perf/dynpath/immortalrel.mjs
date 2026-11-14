@@ -43,7 +43,7 @@ const REL = /^\s*scr_[a-z0-9]+_release\((sc_t\d+)\);\s*$/;
 // The initialiser forms that name an immortal static, with or without the
 // no-op retain around them and with or without a cast.
 const IMMORTAL_INIT =
-  /^(?:scr_[a-z0-9]+_retain\()?(?:\([A-Za-z_]\w* \*\))?&(sc_(?:lit|unit|re|tsa|co)_\d+)\)?$/;
+  /^(?:scr_[a-z0-9]+_retain\()?(?:\([A-Za-z_]\w* \*\))?&(sc_(?:lit|unit|re|tsa|co)_[0-9a-z]+)\)?$/;
 
 export async function scan(stream) {
   const perFamily = Object.fromEntries(FAMILIES.map((f) => [f, { temps: 0, retained: 0, releases: 0 }]));

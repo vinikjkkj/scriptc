@@ -211,7 +211,7 @@ export function analyse(raw) {
   // whose tag can be checked against that union's own arm count.
   const units = [];
   {
-    const UNIT = /^static (?:const )?ScrUnion (sc_unit_\d+) = \{[^}]*\.tag = (\d+)[^}]*\}; \/\* u(\d+) unit arm \*\/$/;
+    const UNIT = /^static (?:const )?ScrUnion (sc_unit_[0-9a-z]+) = \{[^}]*\.tag = (\d+)[^}]*\}; \/\* u(\d+) unit arm \*\/$/;
     for (const l of lines) {
       const m = UNIT.exec(l);
       if (m) units.push({ sym: m[1], tag: Number(m[2]), unionId: 'u' + m[3] });

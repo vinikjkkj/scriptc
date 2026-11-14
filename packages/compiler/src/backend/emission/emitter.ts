@@ -51,6 +51,7 @@ import {
   mangleRawParam,
   mangleVtSlot,
   mangleWrapper,
+  setShapeTokens,
 } from "../mangle.js";
 import { cType, releaseCallC, cStringLiteral, cDecl } from "./emit-types.js";
 import { computeMayThrow } from "./may-throw.js";
@@ -65,6 +66,7 @@ import { emitFunction, emitBlock, emitStmts, emitStmt, emitTryCatch, emitSwitch,
 import fs from "node:fs";
 import { servedSourceText } from "../../source-text.js";
 import { emitExpr } from "./emit-exprs.js";
+import { HelperNamer } from "../helper-names.js";
 
 /** SCRIPTC_RC_SITES=1 at BUILD time: emit the RC-audit per-SITE table — one
  * row per emitted closure body, carrying the source position it was written
@@ -662,6 +664,8 @@ export class CEmitter {
   /** Manifest-bound native imports, used by ffiCall emission. */
   readonly ffiByName = new Map<string, IrFfiImport>();
   readonly globalsById = new Map<string, IrGlobal>();
+  /** Stable names for the interned helpers (helper-names.ts). */
+  readonly namer = new HelperNamer((id) => this.recordsById.get(id), (id) => this.unionsById.get(id));
   readonly unionsById = new Map<string, IrUnionDef>();
   /** Active optional-chain bind temps, by chain id (chainRecv reads). */
   readonly chainTemps = new Map<string, Temp>();
@@ -1081,6 +1085,7 @@ export class CEmitter {
     for (const g of mod.globals ?? []) this.globalsById.set(g.id, g);
     for (const u of mod.unions ?? []) this.unionsById.set(u.id, u);
     for (const r of mod.records ?? []) this.recordsById.set(r.id, r);
+    setShapeTokens(this.namer.shapeTokens(mod.records ?? []));
     // The class graph. Link base/children, number the forest in preorder
     // (roots and children in module class order — deterministic), and
     // compute each hierarchy's virtual slots: a class's method gets a slot

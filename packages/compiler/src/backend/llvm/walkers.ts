@@ -18,12 +18,15 @@ import { mangleRecordStruct } from "../mangle.js";
 import { BlockBuilder } from "./blocks.js";
 import { emitOwnPresentLl, llFieldType, releaseSym, traceAdapter, keyIxSlotIndex, keyListSlotIndex, viewSlotIndex, type ShapeHost } from "./shapes.js";
 import { LlvmUnsupportedError } from "./unsupported.js";
+import { HelperNamer } from "../helper-names.js";
 
 /** What the walkers need from the emitter beyond the shape tables: union
  * defs, the undefined-arm probe, interned ScrStr literals (unit-arm
  * ToString), and NUL-terminated C-string constants (scr_jb_puts /
  * scr_error-style label texts). */
 export interface WalkerHost extends ShapeHost {
+  /** Stable names for the interned helpers (helper-names.ts). */
+  readonly namer: HelperNamer;
   readonly unionsById: Map<string, IrUnionDef>;
   undefinedArmTag(t: IrType): number;
   /** `@`-ref of an interned immortal ScrStr literal. */
@@ -55,6 +58,9 @@ export class LlWalkers {
   readonly defs: string[] = [];
 
   constructor(private readonly host: WalkerHost) {}
+  private get namer(): HelperNamer {
+    return this.host.namer;
+  }
 
   /** The value-parameter LLVM type of a writer for `t`. */
   private valTy(t: IrType): string {
@@ -165,7 +171,7 @@ export class LlWalkers {
     const key = typeKey(t);
     const existing = this.jsonWriters.get(key);
     if (existing) return existing;
-    const name = `sc_jw_${this.jsonWriters.size}`;
+    const name = this.namer.name("sc_jw", key, this.jsonWriters.size);
     this.jsonWriters.set(key, name);
     const B = new BlockBuilder();
     switch (t.kind) {
@@ -988,7 +994,7 @@ export class LlWalkers {
     if (existing) return existing;
     const def = this.host.unionsById.get(unionId);
     if (!def) throw new Error(`llvm emitter bug: ToString of unknown union ${unionId}`);
-    const name = `sc_us_${this.unionToStrFns.size}`;
+    const name = this.namer.name("sc_us", unionId, this.unionToStrFns.size);
     this.unionToStrFns.set(unionId, name);
     const host = this.host;
     const B = new BlockBuilder();
@@ -1072,7 +1078,7 @@ export class LlWalkers {
     if (existing) return existing;
     const def = this.host.unionsById.get(unionId);
     if (!def) throw new Error(`llvm emitter bug: join of unknown union ${unionId}`);
-    const name = `sc_uj_${this.unionJoinFns.size}`;
+    const name = this.namer.name("sc_uj", unionId, this.unionJoinFns.size);
     this.unionJoinFns.set(unionId, name);
     const toStr = this.unionToStrHelper(unionId);
     const unitTags = def.arms.flatMap((a, i) => (a.kind === "undefinedT" || a.kind === "nullT" ? [i] : []));

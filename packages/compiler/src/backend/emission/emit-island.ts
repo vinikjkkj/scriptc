@@ -160,7 +160,7 @@ export function emitNpmEmbedding(E: CEmitter, out: string[]): void {
     const key = `${fn.params.map((p) => typeKey(p)).join(",")}=>${ret.async ? "P:" : ""}${ret.tag}`;
     const existing = E.islandTypedAdapters.get(key);
     if (existing) return existing;
-    const name = `sc_ita_${E.islandTypedAdapters.size}`;
+    const name = E.namer.name("sc_ita", key, E.islandTypedAdapters.size);
     E.islandTypedAdapters.set(key, name);
     const decls: string[] = [];
     const conv: string[] = [];

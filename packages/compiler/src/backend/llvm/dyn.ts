@@ -45,6 +45,7 @@ import { BlockBuilder } from "./blocks.js";
 import { keyIxSlotIndex, keyListSlotIndex, arrNewCall, elemAccess, llFieldType, ownMaskSlotIndex, releaseSym, srcProtoSlotIndex, toStrSlotIndex, traceAdapter, traceArg, vAdapters, viewSlotIndex } from "./shapes.js";
 import { LlvmUnsupportedError } from "./unsupported.js";
 import type { WalkerHost } from "./walkers.js";
+import { HelperNamer } from "../helper-names.js";
 
 /** ScrDynKind values (scr_runtime.h). */
 /** ScrDynHandleTag numeric values (scr_runtime.h's enum order). */
@@ -224,6 +225,9 @@ export class LlDyn {
   readonly defs: string[] = [];
 
   constructor(private readonly host: DynHost) {}
+  private get namer(): HelperNamer {
+    return this.host.namer;
+  }
 
   /** The value LLVM type of a dynCheck result / toDyn operand for `t`. */
   private valTy(t: IrType): string {
@@ -589,7 +593,7 @@ export class LlDyn {
     const key = typeKey(t);
     const existing = this.dynMatchers.get(key);
     if (existing) return existing;
-    const name = `sc_dm_${this.dynMatchers.size}`;
+    const name = this.namer.name("sc_dm", key, this.dynMatchers.size);
     this.dynMatchers.set(key, name);
     const B = new BlockBuilder();
     const kindIs = (k: number): void => {
@@ -951,7 +955,7 @@ export class LlDyn {
     const memoKey = `%dlit:${JSON.stringify(pairs)}`;
     const existing = this.dynBuilders.get(memoKey);
     if (existing) return existing;
-    const name = `sc_dlit_${this.dynBuilders.size}`;
+    const name = this.namer.name("sc_dlit", memoKey, this.dynBuilders.size);
     this.dynBuilders.set(memoKey, name);
     this.host.declare(`declare i32 @memcmp(ptr, ptr, i64)`);
     const B = new BlockBuilder();
@@ -1040,7 +1044,7 @@ export class LlDyn {
     const key = typeKey(u);
     const memo = this.viewElemOpsNames.get(key);
     if (memo !== undefined) return `@${memo}`;
-    const name = `sc_velem_${this.viewElemOpsNames.size}`;
+    const name = this.namer.name("sc_velem", key, this.viewElemOpsNames.size);
     this.viewElemOpsNames.set(key, name);
     const box = this.toDynHelper(u);
     const fits = this.dynMatchHelper(u);
@@ -1062,7 +1066,7 @@ export class LlDyn {
   viewSyncHelper(shapeId: string): string {
     const memo = this.viewSyncNames.get(shapeId);
     if (memo !== undefined) return memo;
-    const name = `sc_vsync_${this.viewSyncNames.size}`;
+    const name = this.namer.name("sc_vsync", shapeId, this.viewSyncNames.size);
     this.viewSyncNames.set(shapeId, name);
     const host = this.host;
     const shape = host.recordsById.get(shapeId)!;
@@ -1101,7 +1105,7 @@ export class LlDyn {
     const key = `${srcShapeId}->${shapeId}`;
     const memo = this.recSrcMapNames.get(key);
     if (memo !== undefined) return memo;
-    const name = `sc_rsm_${this.recSrcMapNames.size}`;
+    const name = this.namer.name("sc_rsm", key, this.recSrcMapNames.size);
     this.recSrcMapNames.set(key, name);
     const host = this.host;
     // A CLASS source ("%class:<Name>", emit-walkers.ts recSrcMapC's twin): the instance struct's data fields, -1 for a method slot.
@@ -1188,7 +1192,7 @@ export class LlDyn {
     const key = typeKey(t);
     const existing = this.dynBuilders.get(key);
     if (existing) return existing;
-    const name = `sc_dc_${this.dynBuilders.size}`;
+    const name = this.namer.name("sc_dc", key, this.dynBuilders.size);
     this.dynBuilders.set(key, name);
     const B = new BlockBuilder();
     this.dynWalkerBody(t, name, B, false);
@@ -1227,7 +1231,7 @@ export class LlDyn {
     const key = typeKey(t);
     const existing = this.dynArmBuilders.get(key);
     if (existing) return existing;
-    const name = `sc_da_${this.dynArmBuilders.size}`;
+    const name = this.namer.name("sc_da", key, this.dynArmBuilders.size);
     this.dynArmBuilders.set(key, name);
     const B = new BlockBuilder();
     this.dynWalkerBody(t, name, B, true);
@@ -3020,7 +3024,7 @@ export class LlDyn {
     const key = typeKey(t);
     const existing = this.toDynFns.get(key);
     if (existing) return existing;
-    const name = `sc_td_${this.toDynFns.size}`;
+    const name = this.namer.name("sc_td", key, this.toDynFns.size);
     this.toDynFns.set(key, name);
     const host = this.host;
     const B = new BlockBuilder();
@@ -3997,7 +4001,7 @@ export class LlDyn {
     const key = typeKey(inner);
     const existing = this.promiseDynAdapters.get(key);
     if (existing) return existing;
-    const name = `sc_pda_${this.promiseDynAdapters.size}`;
+    const name = this.namer.name("sc_pda", key, this.promiseDynAdapters.size);
     this.promiseDynAdapters.set(key, name);
     const host = this.host;
     const B = new BlockBuilder();
@@ -5572,7 +5576,7 @@ export class LlDyn {
     const key = typeKey(t);
     const existing = this.dynFuncThunks.get(key);
     if (existing) return existing;
-    const name = `sc_dfk_${this.dynFuncThunks.size}`;
+    const name = this.namer.name("sc_dfk", key, this.dynFuncThunks.size);
     this.dynFuncThunks.set(key, name);
     const host = this.host;
     const B = new BlockBuilder();
@@ -6171,7 +6175,7 @@ export class LlDyn {
     const ikey = `${key}\u0000${field}`; // the C twin's separator, exactly
     const existing = this.strandedDynFuncBoxes.get(ikey);
     if (existing) return existing;
-    const name = `sc_dfs_${this.strandedDynFuncBoxes.size}`;
+    const name = this.namer.name("sc_dfs", ikey, this.strandedDynFuncBoxes.size);
     this.strandedDynFuncBoxes.set(ikey, name);
     const host = this.host;
     const thunk = `${name}_thunk`;
@@ -6220,7 +6224,7 @@ export class LlDyn {
     const key = typeKey(t);
     const existing = this.dynFuncBoxes.get(key);
     if (existing) return existing;
-    const name = `sc_dfb_${this.dynFuncBoxes.size}`;
+    const name = this.namer.name("sc_dfb", key, this.dynFuncBoxes.size);
     this.dynFuncBoxes.set(key, name);
     const host = this.host;
     const thunk = this.dynFuncThunkHelper(t);
@@ -6245,7 +6249,7 @@ export class LlDyn {
     const key = typeKey(t);
     const existing = this.dynFuncAdapters.get(key);
     if (existing) return existing;
-    const name = `sc_dfa_${this.dynFuncAdapters.size}`;
+    const name = this.namer.name("sc_dfa", key, this.dynFuncAdapters.size);
     this.dynFuncAdapters.set(key, name);
     const host = this.host;
     const B = new BlockBuilder();

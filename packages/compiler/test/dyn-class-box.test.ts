@@ -125,7 +125,7 @@ function memberSummary(rows: readonly { name: string; get: boolean; enumerable: 
 function cMemberTables(c: string): Map<string, string> {
   const out = new Map<string, string>();
   const re =
-    /(?:static )?const ScrDynClassMember (sc_dclt_\d+)\[\] = \{ \/\* members of [^*]*\*\/\n([\s\S]*?)\n\};/g;
+    /(?:static )?const ScrDynClassMember (sc_dclt_[0-9a-z]+)\[\] = \{ \/\* members of [^*]*\*\/\n([\s\S]*?)\n\};/g;
   for (const m of c.matchAll(re)) {
     const rows: { name: string; get: boolean; enumerable: boolean }[] = [];
     // The flag is a u8: true/false for the rows with one answer, 1 or 2 (yes,
@@ -145,7 +145,7 @@ function cMemberTables(c: string): Map<string, string> {
  * through the same pool the descriptor's display name comes from. */
 function llMemberTables(ll: string, cstrs: Map<string, string>): Map<string, string> {
   const out = new Map<string, string>();
-  const re = /@(sc_dclt_\d+) = internal constant \[\d+ x %ScrDynClassMember\] \[([\s\S]*?)\n\]/g;
+  const re = /@(sc_dclt_[0-9a-z]+) = internal constant \[\d+ x %ScrDynClassMember\] \[([\s\S]*?)\n\]/g;
   for (const m of ll.matchAll(re)) {
     const rows: { name: string; get: boolean; enumerable: boolean }[] = [];
     const ent =
@@ -169,8 +169,8 @@ function llCstrs(ll: string): Map<string, string> {
   return cstrs;
 }
 
-const C_DESC_ANCHOR = /const ScrDynClass sc_dcl_\d+ = \{/;
-const LL_DESC_ANCHOR = /^@sc_dcl_\d+ = internal constant %ScrDynClass \{/;
+const C_DESC_ANCHOR = /const ScrDynClass sc_dcl_[0-9a-z]+ = \{/;
+const LL_DESC_ANCHOR = /^@sc_dcl_[0-9a-z]+ = internal constant %ScrDynClass \{/;
 
 /** ScrDynClass.ee_off, as a lane-neutral word: -1 no emitter, 0 the ScrEmitter prefix, anything else a hidden slot
  * (offsetof on the C lane, a ptrtoint GEP on LLVM). */
@@ -192,7 +192,7 @@ function cDescriptors(c: string): Map<string, string> {
   // class is optional here rather than assumed.
   // const ScrDynClass sc_dcl_0 = { "Lone", 5, 5, false, &r, &rl, sc_dclt_0, 1, false, false, false, NULL, 0, false, NULL, 0 }; /* dyn box: class Lone */
   const re =
-    /(?:static )?const ScrDynClass sc_dcl_\d+ = \{ "([^"]*)", (\d+), (\d+), (true|false), &(\w+), &(\w+), (NULL|\w+), (\d+), (true|false), (true|false), (true|false), (NULL|\w+), (\d+), (true|false), (NULL|"[^"]*"), (\d), (\d), \d+, \d+, (-1|0|offsetof\(\w+, \w+\)), (-1|offsetof\(\w+, \w+\)) \};/g;
+    /(?:static )?const ScrDynClass sc_dcl_[0-9a-z]+ = \{ "([^"]*)", (\d+), (\d+), (true|false), &(\w+), &(\w+), (NULL|\w+), (\d+), (true|false), (true|false), (true|false), (NULL|\w+), (\d+), (true|false), (NULL|"[^"]*"), (\d), (\d), \d+, \d+, (-1|0|offsetof\(\w+, \w+\)), (-1|offsetof\(\w+, \w+\)) \};/g;
   for (const m of c.matchAll(re)) {
     const mem = m[7] === "NULL" ? "[]" : (tbls.get(m[7]!) ?? `<missing table ${m[7]}>`);
     const declared = Number(m[8]);
@@ -215,7 +215,7 @@ function llDescriptors(ll: string): Map<string, string> {
   const out = new Map<string, string>();
   // @sc_dcl_0 = internal constant %ScrDynClass { ptr @sc_cs_3, i64 5, i64 5, i8 0, ptr @r, ptr @rl, ptr @sc_dclt_0, i64 1, i8 0, i8 0, i8 0, ptr null, i64 0, i8 0, ptr null, i8 0 }
   const re =
-    /^@sc_dcl_\d+ = internal constant %ScrDynClass \{ ptr @(sc_cs_\d+), i64 (\d+), i64 (\d+), i8 ([01]), ptr @(\w+), ptr @(\w+), ptr (null|@sc_dclt_\d+), i64 (\d+), i8 ([01]), i8 ([01]), i8 ([01]), ptr (null|@sc_dclt_\d+), i64 (\d+), i8 ([01]), ptr (null|@sc_cs_\d+), i8 (\d), i8 ([01]), i64 \d+, i64 \d+, i64 (-1|0|ptrtoint [^}]*?), i64 (-1|ptrtoint [^}]*?) \}/gm;
+    /^@sc_dcl_[0-9a-z]+ = internal constant %ScrDynClass \{ ptr @(sc_cs_\d+), i64 (\d+), i64 (\d+), i8 ([01]), ptr @(\w+), ptr @(\w+), ptr (null|@sc_dclt_[0-9a-z]+), i64 (\d+), i8 ([01]), i8 ([01]), i8 ([01]), ptr (null|@sc_dclt_[0-9a-z]+), i64 (\d+), i8 ([01]), ptr (null|@sc_cs_\d+), i8 (\d), i8 ([01]), i64 \d+, i64 \d+, i64 (-1|0|ptrtoint [^}]*?), i64 (-1|ptrtoint [^}]*?) \}/gm;
   for (const m of ll.matchAll(re)) {
     const name = cstrs.get(m[1]!);
     if (name === undefined) throw new Error(`llvm descriptor names an undefined cstr ${m[1]}`);
@@ -501,7 +501,7 @@ describe("an %Error leaf crosses nested, which is the shape the emit trampoline 
     // replaced all four copies, which is also why the two lanes below can
     // be checked for the SAME symbol rather than for two spellings.
     const cm =
-      /(sc_da_\d+)\(const ScrDyn \*d, const ScrDynPath \*path, bool \*ok\) \{ \/\* arm object:%Error \*\/\n([\s\S]*?)\n\}/.exec(
+      /(sc_da_[0-9a-z]+)\(const ScrDyn \*d, const ScrDynPath \*path, bool \*ok\) \{ \/\* arm object:%Error \*\/\n([\s\S]*?)\n\}/.exec(
         c,
       );
     expect(cm, "no C arm walker for object:%Error — this test has gone blind").not.toBeNull();
@@ -518,7 +518,7 @@ describe("an %Error leaf crosses nested, which is the shape the emit trampoline 
     // which is the shape the C lane had before ITS merge; the pin is
     // unchanged.
     const lm =
-      /define internal ptr @sc_da_\d+\(ptr %d, ptr %path, ptr %ok\) #\d+ \{ ; arm object:%Error\n([\s\S]*?)\n\}/.exec(
+      /define internal ptr @sc_da_[0-9a-z]+\(ptr %d, ptr %path, ptr %ok\) #\d+ \{ ; arm object:%Error\n([\s\S]*?)\n\}/.exec(
         ll,
       );
     expect(lm, "no LLVM arm walker for object:%Error — this test has gone blind").not.toBeNull();

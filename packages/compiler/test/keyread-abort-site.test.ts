@@ -92,7 +92,7 @@ function abortingHelpers(tu: string): Set<string> {
   const aborting = new Set<string>();
   const lines = tu.split("\n");
   for (let i = 0; i < lines.length; i++) {
-    const m = /^static .*?\b(sc_rkg_\d+)\(.*\{ \/\* r\[k\] on /.exec(lines[i]!);
+    const m = /^static .*?\b(sc_rkg_[0-9a-z]+)\(.*\{ \/\* r\[k\] on /.exec(lines[i]!);
     if (!m) continue;
     for (let j = i + 1; j < lines.length && lines[j] !== "}"; j++) {
       if (lines[j]!.includes("record has no key")) aborting.add(m[1]!);
@@ -109,7 +109,7 @@ function callSites(tu: string): { helper: string; site: string | null }[] {
   const out: { helper: string; site: string | null }[] = [];
   for (const l of tu.split("\n")) {
     if (l.length === 0 || (l[0] !== " " && l[0] !== "\t")) continue;
-    const re = /(^|[^A-Za-z0-9_])(sc_rkg_\d+)\s*\(/g;
+    const re = /(^|[^A-Za-z0-9_])(sc_rkg_[0-9a-z]+)\s*\(/g;
     for (let m; (m = re.exec(l)) !== null; ) {
       if (!aborting.has(m[2]!)) continue;
       const open = m.index + m[0].length - 1;
@@ -184,13 +184,13 @@ describe("SC9003: the keyed-read abort names its source site", () => {
     const aborting = abortingHelpers(tu);
     expect(aborting.size).toBe(2);
     expect(callSites(tu).length).toBe(2);
-    expect(/^static ScrDyn \*sc_rkg_\d+\(/m.test(tu)).toBe(true);
+    expect(/^static ScrDyn \*sc_rkg_[0-9a-z]+\(/m.test(tu)).toBe(true);
   });
 
   test("an ABORTING helper takes the site; one that answers undefined takes nothing", async () => {
     const tu = await cTu();
     const aborting = abortingHelpers(tu);
-    const decls = [...tu.matchAll(/^static .*?\b(sc_rkg_\d+)\((.*?)\) \{ \/\* r\[k\] on /gm)];
+    const decls = [...tu.matchAll(/^static .*?\b(sc_rkg_[0-9a-z]+)\((.*?)\) \{ \/\* r\[k\] on /gm)];
     expect(decls.length).toBeGreaterThanOrEqual(3);
     for (const d of decls) {
       const takesSite = d[2]!.includes("const char *sc_site");
@@ -232,7 +232,7 @@ describe("SC9003: the keyed-read abort names its source site", () => {
     /* INDEX-MISS: the key really was absent. */
     expect(tu).toContain("the key is absent from the index signature and the result width has no undefined");
     /* and neither sentence is on the wrong helper */
-    const declaredKeysHelper = /static double (sc_rkg_\d+)\(/.exec(tu)?.[1];
+    const declaredKeysHelper = /static double (sc_rkg_[0-9a-z]+)\(/.exec(tu)?.[1];
     expect(declaredKeysHelper).toBeTruthy();
   });
 

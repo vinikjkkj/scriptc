@@ -65,7 +65,7 @@ const FAILC = /\bSC_DC_FAIL\((\d+)\)/g;
 /* The shape half must admit DIGITS: `prim.f64` is a shape name, and a
  * `[A-Za-z]+` tail silently dropped exactly that one marker while the other
  * eleven matched, so the count read 11 of 12 and the regex looked healthy. */
-const SITE = /\/\*DCSITE k=(\d+) v=(sc_dc_\d+) s=([a-z]+\.[A-Za-z0-9]+)\*\//g;
+const SITE = /\/\*DCSITE k=(\d+) v=(sc_dc_[0-9a-z]+) s=([a-z]+\.[A-Za-z0-9]+)\*\//g;
 
 const SHAPES = new Set([
   "prim.f64",

@@ -986,7 +986,7 @@ export function emitterBoxedOnFor(E: CEmitter, cbT: IrType & { kind: "func" }): 
   const key = typeKey(cbT);
   let sym = E.emitterBoxedOns.get(key);
   if (sym) return sym;
-  sym = `sc_eeon_${E.emitterBoxedOns.size}`;
+  sym = E.namer.name("sc_eeon", key, E.emitterBoxedOns.size);
   E.emitterBoxedOns.set(key, sym);
   const thunk = E.emitterInvokeThunkFor(cbT);
   const box = E.dynFuncBoxHelper(cbT);
@@ -1012,7 +1012,7 @@ export function emitterTwinOnFor(E: CEmitter, cbT: IrType & { kind: "func" }, tw
   const key = `${typeKey(cbT)}|${typeKey(twT)}`;
   let sym = E.emitterTwinOns.get(key);
   if (sym) return sym;
-  sym = `sc_eetw_${E.emitterTwinOns.size}`;
+  sym = E.namer.name("sc_eetw", key, E.emitterTwinOns.size);
   E.emitterTwinOns.set(key, sym);
   const thunk = E.emitterInvokeThunkFor(cbT);
   const box = E.dynFuncBoxHelper(twT);

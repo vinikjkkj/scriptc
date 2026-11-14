@@ -175,6 +175,6 @@ describe("a dyn-checked function member below the top level arms the unwind", ()
     // helper's body instead.
     const adapter = nested.slice(nested.indexOf("{ /* dyn fn adapter to func(string)=>string */"));
     const body = adapter.slice(adapter.indexOf("{"), adapter.indexOf("\n}"));
-    expect(body).toMatch(/=\s*sc_dc_\d+\(sc_r, NULL\);/);
+    expect(body).toMatch(/=\s*sc_dc_[0-9a-z]+\(sc_r, NULL\);/);
   });
 });
