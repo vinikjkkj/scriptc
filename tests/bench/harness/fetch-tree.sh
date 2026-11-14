@@ -13,6 +13,8 @@ if [ ! -f "$TREE/.fetched-$ZAPO_SHA" ]; then
 fi
 cp "$BENCH_DIR/app/package.json" "$BENCH_DIR/app/package-lock.json" "$ZB_APP/"
 ( cd "$ZB_APP" && npm ci --ignore-scripts --no-audit --no-fund )
+# the Node reference arm of the sqlite bench needs better-sqlite3's native binding (npm ci ran with --ignore-scripts): fetch/build just that one
+( cd "$ZB_APP" && npm rebuild better-sqlite3 --no-audit --no-fund ) || echo "better-sqlite3 rebuild failed: the sqlite Node reference arm will not run"
 # pmon, the external instrument
 cc -O2 -o "$BENCH_WORK/pmon" "$BENCH_DIR/harness/pmon.c"
 echo "tree: $TREE ($ZAPO_SHA); pmon: $BENCH_WORK/pmon"
