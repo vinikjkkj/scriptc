@@ -333,13 +333,30 @@ SCR_DYNCEN_FN void scr_dyncen_ptbl_erase(unsigned hole) {
   }
 }
 
+/* THE TABLE MUST NEVER FILL SILENTLY. A full table makes every allocation probe all SCR_DYNCEN_PSLOTS slots (a quadratic crawl: the mysql bench
+ * census ran 56 minutes at ~92% CPU in one phase) and the report's counts become floors. So one stderr line when the live count passes 75% of the
+ * table, and one more the first time an insert is lost. Rebuild with a larger -DSCR_DYNCEN_PSLOTS (a power of two) when it fires. */
+SCR_DYNCEN_SHARED long long scr_dyncen_ptbl_n = 0;
+SCR_DYNCEN_SHARED int scr_dyncen_warned75 = 0, scr_dyncen_warnedfull = 0;
 SCR_DYNCEN_FN void scr_dyncen_ptbl_add(const void *p) {
   unsigned h = scr_dyncen_phash(p);
   unsigned i;
   for (i = 0; i < SCR_DYNCEN_PSLOTS; i++) {
     unsigned j = (h + i) & (SCR_DYNCEN_PSLOTS - 1u);
-    if (scr_dyncen_ptbl[j] == NULL) { scr_dyncen_ptbl[j] = p; return; }
+    if (scr_dyncen_ptbl[j] == NULL) {
+      scr_dyncen_ptbl[j] = p;
+      if (++scr_dyncen_ptbl_n * 4 > (long long)SCR_DYNCEN_PSLOTS * 3 && !scr_dyncen_warned75) {
+        scr_dyncen_warned75 = 1;
+        fprintf(stderr, "scr-dyncen: WARNING the live-node table is over 75%% full (%lld of %u slots); rebuild with a larger -DSCR_DYNCEN_PSLOTS or the census will crawl and undercount\n",
+                scr_dyncen_ptbl_n, (unsigned)SCR_DYNCEN_PSLOTS);
+      }
+      return;
+    }
     if (scr_dyncen_ptbl[j] == p) return; /* already live: not an insert */
+  }
+  if (!scr_dyncen_warnedfull) {
+    scr_dyncen_warnedfull = 1;
+    fprintf(stderr, "scr-dyncen: ERROR the live-node table is FULL (%u slots): inserts are being lost and every allocation now probes the whole table; the report is a floor\n", (unsigned)SCR_DYNCEN_PSLOTS);
   }
   scr_dyncen_ptr_lost++;
 }
@@ -350,7 +367,7 @@ SCR_DYNCEN_FN int scr_dyncen_ptbl_del(const void *p) {
   for (unsigned i = 0; i < SCR_DYNCEN_PSLOTS; i++) {
     unsigned j = (h + i) & (SCR_DYNCEN_PSLOTS - 1u);
     if (scr_dyncen_ptbl[j] == NULL) return 0;
-    if (scr_dyncen_ptbl[j] == p) { scr_dyncen_ptbl_erase(j); return 1; }
+    if (scr_dyncen_ptbl[j] == p) { scr_dyncen_ptbl_erase(j); scr_dyncen_ptbl_n--; return 1; }
   }
   return 0;
 }
