@@ -13,7 +13,9 @@ import { execFileSync } from "node:child_process";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, test } from "vitest";
+import { readFileSync } from "node:fs";
 import { compile } from "@scriptc/compiler";
+import { cDefinedNames } from "../../packages/compiler/src/backend/layout-order.js";
 import { exeName } from "./exe.js";
 
 const repoRoot = join(import.meta.dirname, "../..");
@@ -64,4 +66,70 @@ describe("--layout-order with a split C program", () => {
     expect(out(split.binary)).toBe(out(whole.binary));
     expect(out(split.binary)).toBe("x,y y,x y,x 3\n");
   }, 240_000);
+});
+
+/* The same programs tu-split.test.ts uses for the split itself, now with an order file that REVERSES every function the whole build
+ * defines (the most a permutation can move). Whole, split in 3 and split in 4 must all answer the same, and no function may be lost or
+ * duplicated by the reordering. These programs drag in the families a split has to keep apart: vtables and class helpers, async spawn
+ * wrappers and frames, generators, and the lazily interned dyn walkers with their data.
+ *
+ * NOT covered, and said so: the per-shape record helpers (sc_rnew/rrelease/rretain/rtrace/rgcfree) are written in the prelude, before
+ * the function bodies, and are not reordered on the C backend; this checks only that they do not break the build or the answer. */
+const PROGRAMS = [
+  "tests/corpus/1020-async-basics.ts",
+  "tests/corpus/1301-errors-subclass.ts",
+  "tests/corpus/2252-class-iterators.ts",
+  "tests/corpus/24111-union-array-live-view-in-a-split-program.js",
+];
+
+async function buildFile(src: string, tag: string, parts: number | null, orderFile: string | null): Promise<{ binary: string; cPath: string; units: string[] }> {
+  const dir = join(cacheDir, `layout-split-${tag}`);
+  await rm(dir, { recursive: true, force: true });
+  await mkdir(dir, { recursive: true });
+  const previous = process.env["SCRIPTC_SPLIT_PARTS"];
+  if (parts === null) delete process.env["SCRIPTC_SPLIT_PARTS"];
+  else process.env["SCRIPTC_SPLIT_PARTS"] = String(parts);
+  try {
+    const result = await compile(join(repoRoot, src), {
+      outPath: join(dir, exeName("program")),
+      outDir: dir,
+      backend: "c",
+      ...(orderFile !== null ? { layoutOrder: orderFile } : {}),
+    });
+    if (!result.ok) throw new Error(result.diagnostics.map((d) => `${d.code}: ${d.message}`).join("\n"));
+    return { binary: result.binaryPath, cPath: result.cPath, units: [result.cPath, ...(result.cPathParts ?? [])] };
+  } finally {
+    if (previous === undefined) delete process.env["SCRIPTC_SPLIT_PARTS"];
+    else process.env["SCRIPTC_SPLIT_PARTS"] = previous;
+  }
+}
+
+const definedNames = (units: readonly string[]): string[] => units.flatMap((u) => cDefinedNames(readFileSync(u, "utf8").split("\n")));
+
+describe("--layout-order with the programs the TU split is tested on", () => {
+  for (const src of PROGRAMS) {
+    test(`${src}: a full reversal builds whole, split in 3 and split in 4 and answers the same`, async () => {
+      const tag = src.replace(/[^a-z0-9]+/gi, "-").slice(-40);
+      const whole = await buildFile(src, `${tag}-whole`, null, null);
+      const wholeNames = definedNames(whole.units);
+      expect(wholeNames.length).toBeGreaterThan(0);
+      const order = join(cacheDir, `layout-split-${tag}-order.txt`);
+      await writeFile(order, [...wholeNames].reverse().join("\n") + "\n");
+      const answer = (b: string): string => {
+        try {
+          return execFileSync(b, [], { encoding: "utf8" });
+        } catch (err) {
+          return (err as { stdout?: string }).stdout ?? "";
+        }
+      };
+      const expected = answer(whole.binary);
+      for (const parts of [null, 3, 4]) {
+        const built = await buildFile(src, `${tag}-p${parts ?? "1"}`, parts, order);
+        if (parts !== null) expect(built.units.length, `split in ${parts}`).toBeGreaterThan(1);
+        expect(answer(built.binary), `parts=${parts}`).toBe(expected);
+        // nothing lost, nothing duplicated (a split may rename linkage, never the set of definitions)
+        expect([...definedNames(built.units)].sort(), `parts=${parts}`).toEqual([...wholeNames].sort());
+      }
+    }, 600_000);
+  }
 });
