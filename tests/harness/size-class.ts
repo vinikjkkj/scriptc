@@ -2446,7 +2446,10 @@ export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 72_950 : null;
  * cross build of this probe, which reproduced CI's static-class figure exactly for the same tree (72,950): main 0df2193a8 measures 133,702 there (224 above
  * the record), the box train 133,798 (+96 over main). The regex program carries the same always-linked growth as the hello-world plus the arm descriptors
  * of its union arms. NOT yet seen in a CI Windows log. */
-export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 133_798 : null;
+/* 2026-11-14 (post-collection trim of parked dyn buffers, idletrim2): RE-RECORDED 133_798 -> 134_118 (+320). SOURCE: CI Windows 3/20 of run 43621360482 on b2dadab58
+ * (the branch on main 5780f92e5, whose own figure is inside the old record), "the regex program .text GREW by 320 bytes: 134118 against the recorded 133798".
+ * The growth is the always-linked trim in scr_json.c (a walk over the two parked lists) plus the hook call at the end of scr_collect_cycles. */
+export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 134_118 : null;
 
 /* 2026-10-21 -- THE LINK NOW COLLECTS DEAD SECTIONS, and every figure above moves.
  * The numbers in this block, and the two ceilings (STATIC_CLASS_MAX and
