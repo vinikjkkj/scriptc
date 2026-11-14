@@ -1364,6 +1364,15 @@ ScrDyn *scr_process_exitcode_get(void) {
 double scr_process_exitcode_effective(void) { return scr_exitcode_has ? (double)scr_exitcode_val : 0.0; }
 bool scr_process_exitcode_is_set(void) { return scr_exitcode_has; }
 
+/* The layout profiler (scr_layout_prof.c, linked only under --layout-profile) writes its log from a destructor, and both _Exit paths below
+ * skip every destructor, so a program that ends with process.exit() (or with process.exitCode set) would leave no profile. The profiler's
+ * constructor stores its dump here; in every other build it stays null and costs one compare on the way out. A plain function pointer, not
+ * a weak symbol: Mach-O's linker refuses an undefined weak reference that is not marked weak_import. */
+void (*scr_layout_prof_exit)(void) = NULL;
+static void scr_layout_prof_flush(void) {
+  if (scr_layout_prof_exit != NULL) scr_layout_prof_exit();
+}
+
 /* The last atexit handler (registered first, by scr_init, so it runs after
  * the 'exit' listeners, the cycle collection, the RC audit and the stdout
  * flush): a program that SET process.exitCode and returned normally ends
@@ -1372,6 +1381,7 @@ bool scr_process_exitcode_is_set(void) { return scr_exitcode_has; }
 void scr_exitcode_at_exit(void) {
   if (scr_exitcode_has && scr_exit_code_hint_get() == 0) {
     fflush(stdout);
+    scr_layout_prof_flush();
     _Exit((int)scr_exitcode_val);
   }
 }
@@ -1390,6 +1400,7 @@ static void scr_process_exit_now(void) {
 #ifdef SCR_F64_CENSUS
   { extern void scr_f64_census_flush(void); scr_f64_census_flush(); }
 #endif
+  scr_layout_prof_flush();
   _Exit((int)scr_process_exitcode_effective());
 }
 

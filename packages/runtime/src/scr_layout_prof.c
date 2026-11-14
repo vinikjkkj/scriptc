@@ -84,6 +84,11 @@ NOCOV static void scr_lp_dump(void) {
   fclose(f);
 }
 
+/* The program is about to leave through _Exit (process.exit(), or process.exitCode set), which runs no destructor: scr_lib.c calls the
+ * function pointer the constructor below stores in scr_layout_prof_exit. Dumping twice is harmless: the file is simply rewritten. */
+extern void (*scr_layout_prof_exit)(void);
+NOCOV static void scr_lp_dump_at_exit(void) { scr_lp_dump(); }
+
 __attribute__((constructor(101))) NOCOV static void scr_lp_start(void) {
   struct sigaction sa;
   memset(&sa, 0, sizeof sa);
@@ -91,6 +96,9 @@ __attribute__((constructor(101))) NOCOV static void scr_lp_start(void) {
   sa.sa_flags = SA_RESTART;
   sigemptyset(&sa.sa_mask);
   sigaction(SIGUSR1, &sa, NULL);
+  scr_layout_prof_exit = scr_lp_dump_at_exit;
 }
 
 __attribute__((destructor)) NOCOV static void scr_lp_finish(void) { scr_lp_dump(); }
+
+
