@@ -59,7 +59,8 @@ export function cDefinedNames(lines: readonly string[]): string[] {
   const out: string[] = [];
   for (const l of lines) {
     if (l.length === 0 || l.charCodeAt(0) <= 32) continue;
-    const m = C_HEADER.exec(l);
+    // a header already marked `used` (an emitted TU read back) carries `__attribute__((used))`, whose own parenthesis must not read as the parameter list
+    const m = C_HEADER.exec(l.includes("__attribute__") ? l.replace(/__attribute__\(\([^)]*\)\)\s*/g, "") : l);
     if (m !== null) out.push(m[1]!);
   }
   return out;

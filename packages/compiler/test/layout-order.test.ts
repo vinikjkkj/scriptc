@@ -53,6 +53,9 @@ describe("C function chunks", () => {
     expect(chunks.map((c) => c.length)).toEqual([3, 3]);
     expect(rest).toEqual(["typedef struct {", "  int x;", "} T;", "", "static const char *tbl[] = {", "  \"x\",", "};"]);
   });
+  it("reads the name of a header that is already marked used (an emitted TU read back)", () => {
+    expect(cDefinedNames(["static __attribute__((used)) int sc_a(int v) { /* /p/t.ts:3 */", "}"])).toEqual(["sc_a"]);
+  });
   it("marks only the NAMED internal definitions used and touches nothing else", () => {
     const o = parseLayoutOrder("sc_b\n");
     const out = markUsedDefinitions(["static void sc_b(void) {", "  static int n = 0;", "}", "static void sc_c(void) {", "}", "int main(void) {", "}"], o);
