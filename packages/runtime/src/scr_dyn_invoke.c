@@ -1716,7 +1716,7 @@ static ScrDyn *dyn_bind_func(ScrDyn *fn, ScrDyn *const *args, size_t argc) {
 static ScrDyn *dyn_rebound_intrinsic_call(const ScrDyn *fn, const ScrDyn *thisv, ScrDyn *const *args, size_t argc,
                                           bool *handled) {
   *handled = false;
-  if (fn->kind != SCR_DYN_FUNC || fn->v.fn.thunk != dyn_bound_intrinsic_thunk) return NULL;
+  if (fn->kind != SCR_DYN_FUNC || scr_dyn_fn_thunk(fn) != dyn_bound_intrinsic_thunk) return NULL;
   *handled = true;
   ScrDyn *recv0 = (ScrDyn *)scr_box_get_ref(fn->v.fn.clo->caps[0]); /* +1 */
   ScrDyn *name = (ScrDyn *)scr_box_get_ref(fn->v.fn.clo->caps[1]);  /* +1 */
@@ -2240,7 +2240,7 @@ ScrDyn *scr_dyn_proxy_invoke(ScrDyn *p, const ScrStr *key, ScrDyn *const *args, 
   /* An array target's push/pop/shift/unshift (the intrinsic, not a function
    * the handler or target substituted) run through the traps. */
   if (p->v.proxy.target->kind == SCR_DYN_ARR &&
-      (f->kind == SCR_DYN_UNDEF || (f->kind == SCR_DYN_FUNC && f->v.fn.thunk == dyn_bound_intrinsic_thunk))) {
+      (f->kind == SCR_DYN_UNDEF || (f->kind == SCR_DYN_FUNC && scr_dyn_fn_thunk(f) == dyn_bound_intrinsic_thunk))) {
     ScrDyn *out;
     if (px_array_mutator(p, key->data, args, argc, &out)) {
       scr_dyn_release(f);
@@ -2709,7 +2709,7 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
         if (rebound) return r0;
       } else {
         const ScrDyn *list0 = argc >= 2 ? args[1] : NULL;
-        if (recv->v.fn.thunk == dyn_bound_intrinsic_thunk) {
+        if (scr_dyn_fn_thunk(recv) == dyn_bound_intrinsic_thunk) {
           if (list0 == NULL || list0->kind == SCR_DYN_UNDEF || list0->kind == SCR_DYN_NULL) {
             ScrDyn *r0 = dyn_rebound_intrinsic_call(recv, thisv0, NULL, 0, &rebound);
             if (rebound) return r0;

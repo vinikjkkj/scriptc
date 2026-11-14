@@ -48,7 +48,7 @@ static ScrDyn *dyn_class_box_thunk(ScrClosure *clo, ScrDyn *const *args, size_t 
 }
 
 const ScrDynClass *dyn_cls_impl_of_value(const ScrDyn *d) {
-  if (d == NULL || d->kind != SCR_DYN_FUNC || d->v.fn.thunk != dyn_class_box_thunk) return NULL;
+  if (d == NULL || d->kind != SCR_DYN_FUNC || scr_dyn_fn_thunk(d) != dyn_class_box_thunk) return NULL;
   return dyn_class_of_clo(d->v.fn.clo);
 }
 
@@ -121,7 +121,7 @@ static const ScrDyn *dyn_eval_inner_of_clo(ScrClosure *clo) {
 }
 
 static const ScrDyn *dyn_cls_eval_inner(const ScrDyn *d) {
-  if (d == NULL || d->kind != SCR_DYN_FUNC || d->v.fn.thunk != dyn_eval_class_thunk) return NULL;
+  if (d == NULL || d->kind != SCR_DYN_FUNC || scr_dyn_fn_thunk(d) != dyn_eval_class_thunk) return NULL;
   return dyn_eval_inner_of_clo(d->v.fn.clo);
 }
 

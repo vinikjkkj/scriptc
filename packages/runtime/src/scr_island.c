@@ -2669,7 +2669,7 @@ static JSValue isl_dynfn_invoke(JSContext *ctx, JSValueConst this_val, int argc,
   for (int i = 0; i < argc; i++) dargs[i] = isl_dyn_from_value(argv[i]);
   bool strayed_before = isl_anchor_strayed;
   isl_host_depth++;
-  ScrDyn *r = box->v.fn.thunk(box->v.fn.clo, dargs, (size_t)argc);
+  ScrDyn *r = scr_dyn_fn_thunk(box)(box->v.fn.clo, dargs, (size_t)argc);
   isl_host_depth--;
   if (isl_anchor_strayed && !strayed_before) {
     /* The isl_hostfn_invoke re-anchor dance: a fiber the callback spawned

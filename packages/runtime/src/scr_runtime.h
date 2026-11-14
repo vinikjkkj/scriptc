@@ -5322,6 +5322,20 @@ _Static_assert(sizeof(ScrDynEntry) == 24 && offsetof(ScrDynEntry, key_len) == 8 
 typedef int32_t ScrRva;
 #define SCR_RVA_NULL INT32_MIN
 
+/* What a SCR_DYN_FUNC box says about its function, in ONE shared record (interned: scr_dyn_new_func_src makes at most one per distinct
+ * (entry, thunk, signature, name, source, arity) a program ever boxes, a few hundred). The box used to carry all of it inline -- the
+ * thunk, the three static literals as 32-bit offsets and the arity word, 24 of its 32 payload bytes -- so a function value crossing into dyn
+ * cost a 64-byte arena block (16 + 32 + the 16-byte cycle header). The box now holds the closure and a pointer to this record: 16 payload
+ * bytes, a 48-byte block. `thunk` is the FIRST member on purpose: the LLVM lane reads it with one more load than before, at offset 0. The
+ * three literals are still offsets (scr_rva_of), so every existing check on them (scr_rva_fits, the NULL-signature trap) is unchanged. */
+typedef struct ScrFnDesc {
+  ScrDynThunk thunk;
+  ScrRva sig;
+  ScrRva name;
+  ScrRva src;
+  uint32_t arity; /* the JS length in the low 24 bits, the kind code (SCR_FNK_*) above them */
+} ScrFnDesc;
+
 /* The OBJ arm's four RARE members, behind one pointer.
  *
  * The census (tests/perf/dyncensus) walked zapo's 10,104 live OBJ dyn
@@ -5571,15 +5585,12 @@ struct ScrDyn {
      *   - NULL: a compiled user function whose text this build did not
      *     carry. There is no honest string for it, so the renderers REFUSE
      *     loudly instead of claiming native code. */
-    /* sig/name/src are STATIC compiler-emitted literals, so each is
-      * stored as a signed 32-bit offset from the same anchor the cycle
-      * header uses (scr_cyc_base, whose value cancels). Three pointers
-      * became three words and the arm went from 48 bytes to 32 with
-      * `clo` and `thunk` left exactly where they were -- which is why
-      * neither the C emitter's `d->v.fn.clo` / `d->v.fn.thunk` nor the
-      * LLVM backend's +16 / +24 moves. Read them through
-      * scr_dyn_fn_sig/_name/_src, never directly. */
-    struct { ScrClosure *clo; ScrDynThunk thunk; ScrRva sig; ScrRva name; ScrRva src; uint32_t arity; } fn;
+    /* The function box is a closure and a pointer to its ScrFnDesc (the thunk, the signature, the name, the source text and the arity word, one
+      * shared record per function; see ScrFnDesc). sig/name/src are STATIC compiler-emitted literals, stored in the record as signed 32-bit
+      * offsets from the anchor the cycle header uses (scr_cyc_base, whose value cancels). The closure is at +16 and the record pointer at +24,
+      * which is where the LLVM backend reads them (backend/llvm/dyn.ts DYN_FN_CLO_OFF / DYN_FN_DESC_OFF, pinned by the assert after this
+      * struct). Read the record through scr_dyn_fn_thunk/_sig/_name/_src/_len/_code, never directly. */
+    struct { ScrClosure *clo; const ScrFnDesc *desc; } fn;
     /* SCR_DYN_HANDLE: the retained native handle + its type tag. The
      * dyn→handle edge is NOT visible to the cycle collector (the dyn→
      * closure stance): handles drop their listener lists at settlement,
@@ -5616,6 +5627,8 @@ struct ScrDyn {
     struct { struct ScrDyn *target; struct ScrDyn *handler; bool strict; bool revoked; } proxy;
   } v;
 };
+_Static_assert(offsetof(ScrDyn, v.fn.clo) == 16 && offsetof(ScrDyn, v.fn.desc) == 24 && offsetof(ScrFnDesc, thunk) == 0 && sizeof(((ScrDyn *)0)->v.fn) == 16,
+               "SCR_DYN_FUNC layout: backend/llvm/dyn.ts DYN_FN_CLO_OFF, DYN_FN_DESC_OFF and the thunk-first record mirror it");
 
 static inline ScrDyn *scr_dyn_retain(ScrDyn *d) {
   if (d->rc != SIZE_MAX) {
@@ -5687,7 +5700,12 @@ static inline bool scr_rva_fits(const void *p) {
 }
 
 /* The SCR_DYN_FUNC box's three static literals. */
-static inline const char *scr_dyn_fn_sig(const ScrDyn *d) { return scr_rva_str(d->v.fn.sig); }
+static inline const ScrFnDesc *scr_dyn_fn_desc(const ScrDyn *d) { return d->v.fn.desc; }
+/* The box's entry point (what the dyn call and the adapters invoke with the closure). */
+static inline ScrDynThunk scr_dyn_fn_thunk(const ScrDyn *d) { return d->v.fn.desc->thunk; }
+/* The raw arity word (length plus kind code), for a box that mints a sibling of this one. */
+static inline uint32_t scr_dyn_fn_arity_word(const ScrDyn *d) { return d->v.fn.desc->arity; }
+static inline const char *scr_dyn_fn_sig(const ScrDyn *d) { return scr_rva_str(d->v.fn.desc->sig); }
 /* A BOUND function's name is per-VALUE (`bound ` + the target's name), and a
  * FUNC box stores its name as a static literal offset. So a bound box stores
  * this marker in its name slot and keeps the spelling in its closure (scr_json.c,
@@ -5698,11 +5716,11 @@ extern const char *(*scr_dyn_bound_name_fn)(const ScrDyn *d);
 /* One out-of-line body (scr_json.c), not an inline check: the check at every
  * caller grew the always-linked code. */
 const char *scr_dyn_fn_name(const ScrDyn *d);
-static inline const char *scr_dyn_fn_src(const ScrDyn *d) { return scr_rva_str(d->v.fn.src); }
+static inline const char *scr_dyn_fn_src(const ScrDyn *d) { return scr_rva_str(d->v.fn.desc->src); }
 /* The JS `length` of a FUNC box (the arity word without its kind code). */
-static inline uint32_t scr_dyn_fn_len(const ScrDyn *d) { return d->v.fn.arity & 0xffffffu; }
+static inline uint32_t scr_dyn_fn_len(const ScrDyn *d) { return d->v.fn.desc->arity & 0xffffffu; }
 /* The kind code of a FUNC box (SCR_FNK_*). */
-static inline unsigned scr_dyn_fn_code(const ScrDyn *d) { return (unsigned)(d->v.fn.arity >> SCR_FNK_SHIFT) & SCR_FNK_CODE_MASK; }
+static inline unsigned scr_dyn_fn_code(const ScrDyn *d) { return (unsigned)(d->v.fn.desc->arity >> SCR_FNK_SHIFT) & SCR_FNK_CODE_MASK; }
 /* The same three as callable symbols: the LLVM backend emits calls, not
  * C, so it cannot reach a static inline -- and it used to read `sig` as
  * a plain pointer load at +32, which is the kind of hardcoded layout
