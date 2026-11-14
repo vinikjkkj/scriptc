@@ -1768,7 +1768,10 @@ export const SIZE_DRIFT_PAGE = 4_096;
  *     45be81090   713,216   +28,672, all of it in one commit (the fprintf)
  *     a9ee25126   685,056   after the recovery -- .text +512, nothing else
  */
-export const STATIC_CLASS_RECORDED = platform === "win32" ? 116_736 : null;
+/* 2026-11-14 (large concat chain table, strdedup1): RE-RECORDED 116_736 -> 120_832. SOURCE: CI Windows 1/20 and 3/20 of run 43640991782: "the static hello-world GREW by 4096 bytes:
+ * 120832 against the recorded 116736". The local zig 0.16.0 windows-gnu cross build reproduces that figure exactly (main 120,320, this change 120,832: +512 B of always-linked
+ * scr_string.c); main was already 3,584 B above the old record, so the table's 512 B tipped it over the one-page tolerance. */
+export const STATIC_CLASS_RECORDED = platform === "win32" ? 120_832 : null;
 
 /* 2026-09-26 - +4,608 on the REGEX class only, and the bytes are accounted
  * for: non-owning intern entries (SCR_STRING_INTERN_WEAK, off by default).
@@ -2286,7 +2289,9 @@ export const TEXT_DRIFT_TOLERANCE = 256;
  * two-sweep candidate mask), always linked; scr_box_new_objd / scr_armvt_enc and the descriptor-decoding release and retain paths in scr_closure.c;
  * the static shared-box tables' constructors checks in scr_union_new_f64 / scr_union_new_bool. Against that, a box and a union no longer store three
  * function pointers each. */
-export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 72_950 : null;
+/* 2026-11-14 (large concat chain table, strdedup1): RE-RECORDED 72_950 -> 73_366. Local zig windows-gnu cross build: main 73,190 (240 above the old record, inside the 256
+ * tolerance), this change 73,366 (+176: scr_str_concat_big and its table). The regex class text moved by the same 176 and stays inside its tolerance. */
+export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 73_366 : null;
 
 /** .text VirtualSize of the canonical regex program, same commit, same lane.
  * Recorded separately rather than derived: the two classes do not move
