@@ -27936,6 +27936,12 @@
     "<repo>/tests/corpus/25310-a-method-called-through-a-structural-record-view-runs-with-the-object-as-this.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25292-boxed-functions-keep-name-length-and-call-across-three-hundred-distinct-descriptors.js": {
+   "order": [
+    "<repo>/tests/corpus/25292-boxed-functions-keep-name-length-and-call-across-three-hundred-distinct-descriptors.js"
+   ],
+   "diags": []
   }
  }
 }
