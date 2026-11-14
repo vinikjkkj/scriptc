@@ -9,12 +9,18 @@ import sys, os, time, json, subprocess, re
 out = sys.argv[1]; cmd = sys.argv[sys.argv.index('--') + 1:]
 so = open(out + '.stdout', 'wb')
 p = subprocess.Popen(cmd, stdout=so, stderr=subprocess.STDOUT)
-best = (0, None); samples = 0; hwm = 0; t0 = time.time(); tl = []
+best = (0, None); samples = 0; hwm = 0; t0 = time.time(); tl = []; thr_at_best = None; thr_max = 0
 def rss_kb(pid):
     try:
         with open(f'/proc/{pid}/status') as f:
             for l in f:
                 if l.startswith('VmRSS:'): return int(l.split()[1])
+    except Exception: return None
+def threads(pid):
+    try:
+        with open(f'/proc/{pid}/status') as f:
+            for l in f:
+                if l.startswith('Threads:'): return int(l.split()[1])
     except Exception: return None
 def snap(pid):
     try:
@@ -27,7 +33,7 @@ while p.poll() is None:
         if samples % 50 == 0: tl.append((round(time.time() - t0, 2), r))
         if r > best[0]:
             s = snap(p.pid)
-            if s: best = (r, s)
+            if s: best = (r, s); thr_at_best = threads(p.pid)
     time.sleep(0.01)
 def parse(s):
     cls = {}; cur = None; perms = ''; name = ''
@@ -49,7 +55,7 @@ def parse(s):
         m = re.match(r'^(Rss|Pss|Private_Dirty|Anonymous):\s+(\d+) kB', l)
         if m and cur is not None: cur[m.group(1)] += int(m.group(2))
     return cls
-res = {'cmd': cmd, 'exit': p.returncode, 'peak_vmrss_kb': best[0], 'samples': samples, 'timeline': tl[::max(1, len(tl) // 40)]}
+res = {'threads_at_peak': thr_at_best, 'cmd': cmd, 'exit': p.returncode, 'peak_vmrss_kb': best[0], 'samples': samples, 'timeline': tl[::max(1, len(tl) // 40)]}
 if best[1]: res['classes'] = parse(best[1]); res['sum_rss_kb'] = sum(v['Rss'] for v in res['classes'].values())
 json.dump(res, open(out, 'w'), indent=1)
 print(out, 'exit', p.returncode, 'peak', best[0], 'kB')

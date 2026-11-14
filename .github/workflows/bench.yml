@@ -41,6 +41,10 @@ on:
         description: "Messages per scenario for one callgrind run per variant (0 = no callgrind). The only CPU figure; 250 takes about an hour"
         required: false
         default: "0"
+      smaps_reps:
+        description: "Number of extra smapspeak runs per arm, each with its own smaps snapshot at the peak by bucket, thread count and RSS timeline (0 = off)"
+        required: false
+        default: "0"
       massif:
         description: "Messages per scenario for one massif run per arm (0 = off; set SCR_CYCLE_ARENA=0 in extra_env for the arena-off view)"
         required: false
@@ -204,6 +208,7 @@ jobs:
           NODE_REF: ${{ inputs.node_ref }}
           IR: ${{ inputs.ir }}
           MASSIF: ${{ inputs.massif }}
+          SMAPS_REPS: ${{ inputs.smaps_reps }}
           LAYOUT: ${{ inputs.layout }}
           EXTRA_ENV: ${{ inputs.extra_env }}
         run: bash tests/bench/harness/job.sh "${{ matrix.program }}"

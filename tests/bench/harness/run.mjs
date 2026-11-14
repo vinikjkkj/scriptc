@@ -9,12 +9,12 @@ import { readFileSync, writeFileSync, mkdirSync, statSync, copyFileSync } from '
 import { createHash } from 'node:crypto'
 const W = process.env.BENCH_WORK, ROOT = process.env.BENCH_DIR, NODE = process.env.BENCH_NODE || 'node', TREE = process.env.TREE
 const args = process.argv.slice(2)
-let store = 'memory', out = 'out', reps = 3, withNode = false, smaps = false, irMsgs = 0, massifMsgs = 0
+let store = 'memory', out = 'out', reps = 3, withNode = false, smaps = false, irMsgs = 0, massifMsgs = 0, smapsReps = 0
 const arms = []
 for (let i = 0; i < args.length; i++) {
   const a = args[i]
   if (a === '--store') store = args[++i]; else if (a === '--out') out = args[++i]; else if (a === '--reps') reps = Number(args[++i])
-  else if (a === '--node') withNode = true; else if (a === '--smaps') smaps = true; else if (a === '--ir') irMsgs = Number(args[++i]); else if (a === '--massif') massifMsgs = Number(args[++i])
+  else if (a === '--node') withNode = true; else if (a === '--smaps') smaps = true; else if (a === '--ir') irMsgs = Number(args[++i]); else if (a === '--massif') massifMsgs = Number(args[++i]); else if (a === '--smaps-reps') smapsReps = Number(args[++i])
   else arms.push(a)
 }
 mkdirSync(out, { recursive: true })
@@ -70,6 +70,17 @@ if (irMsgs > 0) for (const a of arms) {
   const m = /Collected\s*:\s*(\d+)/.exec(r.stderr.toString())
   results.ir[label] = m ? Number(m[1]) : null
 }
+// one smapspeak run per rep (--smaps-reps N): the smaps snapshot at the highest VmRSS of EACH run, by bucket, with the thread count and the RSS timeline (what separates a 110 MB run from a 122 MB one)
+results.smapsRuns = {}
+if (smapsReps > 0) for (const a of arms) {
+  const label = a.split(':')[0]; results.smapsRuns[label] = []
+  for (let k = 0; k < smapsReps; k++) {
+    resetdb()
+    const sj = `${out}/${label}.smaps.${k}.json`
+    spawnSync('python3', [`${ROOT}/harness/smapspeak.py`, sj, '--', bin(a)], { cwd: TREE, env: envFor(), timeout: 3600e3 })
+    try { results.smapsRuns[label].push(JSON.parse(readFileSync(sj, 'utf8'))) } catch { results.smapsRuns[label].push(null) }
+  }
+}
 if (massifMsgs > 0) for (const a of arms) {
   const label = a.split(':')[0]; resetdb()
   mkdirSync(`${out}/cg`, { recursive: true }); copyFileSync(bin(a), `${out}/cg/prog`); spawnSync('chmod', ['+x', `${out}/cg/prog`])
@@ -100,5 +111,8 @@ for (const l of [...(withNode ? ['node'] : []), ...labels]) {
   const fb = sm && sm.classes ? Object.entries(sm.classes).filter(([k]) => /^(main-binary|shared-libs)/.test(k)).reduce((t, [, v]) => t + v.Rss, 0) : ''
   rows.push(`| ${l} | ${rs.map((r) => r.rss_peak_kb).join(' / ')} | ${rssMed(l)} | ${hasBase ? pct(rssMed(baseL), rssMed(l)) : ''} | ${[...new Set(rs.map((r) => r.parity))].join('/')} | ${results.ir[l] ?? ''} | ${hasBase ? pct(results.ir[baseL], results.ir[l]) : ''} | ${sm && sm.classes ? sm.classes['heap(brk)']?.Rss ?? 0 : ''} | ${fb} | ${sm && sm.classes ? sm.classes['main-binary:code(r-x)']?.Rss ?? 0 : ''} | ${sm && sm.classes ? sm.classes['main-binary:rodata(r--)']?.Rss ?? 0 : ''} |`)
 }
+const sr = []
+for (const [l, runs] of Object.entries(results.smapsRuns)) for (const [k, sm] of runs.entries()) if (sm && sm.classes) sr.push(`| ${l} | ${k} | ${sm.peak_vmrss_kb} | ${sm.classes['heap(brk)']?.Rss ?? 0} | ${sm.classes['anon-mmap']?.Rss ?? 0} | ${sm.classes['anon-mmap']?.maps ?? 0} | ${Object.entries(sm.classes).filter(([c]) => /^(main-binary|shared-libs)/.test(c)).reduce((t, [, v]) => t + v.Rss, 0)} | ${sm.threads_at_peak ?? ''} |`)
+if (sr.length) rows.push('', '| smaps run | # | peak_vmrss_kb | heap_brk | anon_mmap | anon maps | file-backed | threads |', '|---|---|---|---|---|---|---|---|', ...sr)
 writeFileSync(`${out}/summary.md`, `store: ${store}, reps: ${reps}, node ${results.node}\n\n` + rows.join('\n') + '\n')
 console.log(sumlines.join('\n'))
