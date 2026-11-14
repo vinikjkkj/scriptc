@@ -82,40 +82,49 @@ describe("the minted prototype is a traced edge (source contract)", () => {
       closureC.indexOf("void (*scr_closure_ctor_unlink)"),
     );
     expect(body, "scr_closure_trace not found").not.toBe("");
-    expect(body).toContain("visit(c->props, ctx);");
-    expect(body).toContain("visit(c->implicit_proto, ctx);");
+    // props and the prototype live in the closure's ext now (scr_runtime.h ScrClosureExt); a closure without an ext has neither to visit
+    expect(body).toContain("visit(ext->props, ctx);");
+    expect(body).toContain("visit(ext->implicit_proto, ctx);");
     // The captures too, or the edge that started this whole population
     // (`Foo.create = () => new Foo()`) goes with it. EVERY capture slot is visited, whichever kind it holds: a counted box as itself, and a
     // runtime-made closure's tagged promise slot (bit 0 set, see SCR_CAP_RAW in scr_runtime.h) as the promise it points at. A loop that
     // visited only the plain slots would leave a resolving function's promise edge invisible to the collector.
     // The loop body is a block since a by-value capture of a class instance whose type carries no cycle header (SCR_CAP_TAG_OBJ, has-trace clear) has
     // nothing to visit -- it has no header for the collector to read -- so exactly that slot is skipped and every other slot is still visited.
-    expect(body).toMatch(/for \(size_t i = 0; i < c->ncaps; i\+\+\) \{/);
+    expect(body).toMatch(/for \(size_t i = 0; i < ncaps; i\+\+\) \{/);
     expect(body).toContain("scr_cap_tag(cap) == SCR_CAP_TAG_OBJ && !scr_cap_obj_traced(cap)) continue;");
     expect(body).toContain("visit(scr_cap_is_raw(cap) ? scr_cap_raw_ptr(cap) : (void *)cap, ctx);");
   });
 
   test("scr_closure_may_cycle names every child the trace can visit", () => {
+    // the three-way test, now over the inline count and the ext: no captures and no ext is the only "cannot cycle" answer, an inline
+    // count of one or more is always "may", and with an ext all three disjuncts are still asked
+    expect(closureC).toContain("if (m == SCR_CLO_META_STATIC) return false;");
+    expect(closureC).toContain("if (m & 1u) return true;");
     expect(closureC).toContain(
-      "return c->ncaps != 0 || c->props != NULL || c->implicit_proto != NULL;",
+      "return x->ncaps != 0 || x->props != NULL || x->implicit_proto != NULL;",
     );
   });
 
   test("the COLLECTOR's teardown erases without releasing; the refcount paths release", () => {
     // The trace/teardown complement (scr_runtime.h): a free_fn must not
     // release a traced child, because markGray already accounted it.
-    expect(closureC).toContain("scr_closure_drop_ctor((ScrClosure *)o, false);");
-    // …and both ordinary refcount paths still own the release.
-    expect(closureC).toContain("scr_closure_drop_ctor(c, true);");
-    expect(closureC.match(/scr_closure_drop_ctor\(c, true\);/g)?.length).toBe(2);
+    expect(closureC).toContain("scr_closure_teardown_ext((ScrClosure *)o, false);");
+    // …and the ordinary refcount path and the immortal teardown still own the release.
+    expect(closureC).toContain("scr_closure_teardown_ext(c, true);");
+    expect(closureC.match(/scr_closure_teardown_ext\(c, true\);/g)?.length).toBe(1);
+    expect(closureC.match(/scr_closure_drop_ctor\(c, true\);/g)?.length).toBe(1);
+    // The one teardown body: the prototype is unlinked with the caller's decision, and the props table is released ONLY when it says so.
+    expect(closureC).toContain("if (x->implicit_proto != NULL) scr_closure_ctor_unlink(c, release);");
+    expect(closureC).toContain("if (release) scr_box_release(x->props); /* NULL-tolerant */");
     // Spelled out rather than `[^)]*`, which cannot span the ")" inside the
     // cast — the first spelling of this assertion matched nothing and read
     // as `undefined`, which is the shape of a check that measures nothing.
     expect(
-      closureC.match(/scr_closure_drop_ctor\(\(ScrClosure \*\)o, false\);/g)?.length,
+      closureC.match(/scr_closure_teardown_ext\(\(ScrClosure \*\)o, false\);/g)?.length,
     ).toBe(1);
     // No call site may leave the release decision implicit.
-    expect(closureC).not.toMatch(/scr_closure_drop_ctor\([^,]*\);/);
+    expect(closureC).not.toMatch(/scr_closure_(drop_ctor|teardown_ext)\([^,]*\);/);
   });
 
   test("the registry erase is keyed by ADDRESS and never dereferences it", () => {

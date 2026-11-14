@@ -1617,7 +1617,7 @@ static ScrDyn *dyn_bound_intrinsic_thunk(ScrClosure *clo, ScrDyn *const *args, s
 static ScrDyn *dyn_bound_fn_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
   ScrDyn *target = (ScrDyn *)scr_box_get_ref(clo->caps[0]); /* +1 */
   ScrDyn *thisv = (ScrDyn *)scr_box_get_ref(clo->caps[1]);  /* +1 */
-  size_t nb = clo->ncaps - 3;
+  size_t nb = scr_closure_ncaps(clo) - 3;
   size_t total = nb + argc;
   ScrDyn **all = (ScrDyn **)malloc((total > 0 ? total : 1) * sizeof(ScrDyn *));
   if (all == NULL) {

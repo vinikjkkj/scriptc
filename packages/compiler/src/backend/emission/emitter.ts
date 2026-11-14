@@ -22,6 +22,7 @@
  */
 import { bestRank, cDefinedNames, extractCFunctionChunks, markUsedDefinitions, stableByRank, type LayoutOrder } from "../layout-order.js";
 import { canonPlanOf } from "../../ir/num-canon.js";
+import { CLOSURE_C_STRUCT, closureStaticCInit } from "../closure-layout.js";
 import type {
   IrGlobal,
   IrRecordShape,
@@ -1694,7 +1695,7 @@ export class CEmitter {
       // as a value; the wrapper is named by the closure's initialiser.
       this.decl(`${retType}${retType.endsWith("*") ? "" : " "}${mangleWrapper(name)}(${params.join(", ")});`);
       this.declData(
-        `extern struct { size_t rc; void *fn; size_t ncaps; ScrBox *props; void *implicit_proto; } ${mangleFnClosure(name)};`,
+        `extern ${CLOSURE_C_STRUCT} ${mangleFnClosure(name)};`,
       );
       out.push(
         ``,
@@ -1707,8 +1708,8 @@ export class CEmitter {
         // it, so a field the literal omits is a write past the object.
         // `implicit_proto` is the prototype object scr_dyn_fn_prototype
         // mints on first demand.
-        `${this.link}struct { size_t rc; void *fn; size_t ncaps; ScrBox *props; void *implicit_proto; } ${mangleFnClosure(name)} =`,
-        `    { SIZE_MAX, (void *)&${mangleWrapper(name)}, 0, NULL, NULL };`,
+        `${this.link}${CLOSURE_C_STRUCT} ${mangleFnClosure(name)} =`,
+        `    ${closureStaticCInit(`&${mangleWrapper(name)}`)};`,
       );
     }
     // Construct-thunk definitions (prototyped with the class objects

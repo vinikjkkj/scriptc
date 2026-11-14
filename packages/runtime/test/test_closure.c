@@ -63,9 +63,9 @@ int main(void) {
   CHECK(scr_closure_live_count() == 0);
 
   /* immortal closure: retain/release are no-ops */
-  static struct { size_t rc; void *fn; size_t ncaps; } immortal = {SIZE_MAX, NULL, 0};
+  static ScrClosure immortal = SCR_CLO_STATIC(NULL);
   immortal.fn = (void *)&dummy_fn;
-  ScrClosure *ic = (ScrClosure *)&immortal;
+  ScrClosure *ic = &immortal;
   CHECK(scr_closure_retain(ic) == ic);
   scr_closure_release(ic);
   CHECK(ic->rc == SIZE_MAX);

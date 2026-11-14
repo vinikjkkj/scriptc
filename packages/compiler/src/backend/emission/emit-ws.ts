@@ -27,6 +27,7 @@
  * these thunks build moves into the listener the same way.
  */
 import type { CEmitter } from "./emitter.js";
+import { CLOSURE_C_STRUCT, closureStaticCInit } from "../closure-layout.js";
 import {
   mangleField,
   mangleRecordNew,
@@ -99,9 +100,9 @@ export function wsGlobalCtorFor(E: CEmitter, t: IrType, site?: string): string {
   // Field list MIRRORS ScrClosure's — the runtime casts this to
   // ScrClosure * and writes through it (emitter.ts's note).
   E.walkerData(
-    `extern struct { size_t rc; void *fn; size_t ncaps; ScrBox *props; void *implicit_proto; } ${sym};`,
-    `${E.link}struct { size_t rc; void *fn; size_t ncaps; ScrBox *props; void *implicit_proto; } ${sym} =`,
-    `    { SIZE_MAX, (void *)&${names.wrap}, 0, NULL, NULL }; /* globalThis.WebSocket */`,
+    `extern ${CLOSURE_C_STRUCT} ${sym};`,
+    `${E.link}${CLOSURE_C_STRUCT} ${sym} =`,
+    `    ${closureStaticCInit(`&${names.wrap}`)}; /* globalThis.WebSocket */`,
   );
 
   E.walkerDefs.push(

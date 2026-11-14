@@ -2534,10 +2534,11 @@ void scr_box_set_bool(ScrBox *b, bool v);
 void scr_box_set_ref(ScrBox *b, void *v); /* releases old, owns new */
 ScrStr *scr_box_str_unshare(ScrBox *b, ScrStr *acc); /* captured `s += x`: give up the box's own ref when it still holds acc */
 
-typedef struct ScrClosure {
-  size_t rc; /* SIZE_MAX = immortal (interned top-level function value) */
-  void *fn;
-  size_t ncaps;
+/* The RARE members of a closure, behind ONE word (see ScrClosure::meta). Nearly every closure has neither an own-property table nor a
+ * minted prototype, so they used to cost two words on each (16 of its 40 bytes before the captures). Allocated on first need by
+ * scr_closure_ext, freed with the closure. The accessors below are the only way to reach them. */
+typedef struct ScrClosureExt {
+  size_t ncaps; /* the capture count, which the closure's own word held until the ext took that word */
   /* The function's OWN-PROPERTY table: a box whose payload is an OBJ
    * ScrDyn (owned; lazily allocated by Object.defineProperties —
    * test/common copying name/length onto the mustCall wrapper), NULL
@@ -2577,8 +2578,38 @@ typedef struct ScrClosure {
    * The teardown complement moves with the edge: the COLLECTOR's path
    * erases the registry entry WITHOUT releasing the prototype. */
   void *implicit_proto;
+} ScrClosureExt;
+
+/* ScrClosure is THREE words before the captures (it was five): the refcount, the entry, and `meta`, which is one of
+ *   - odd:  (ncaps << 1) | 1 -- no ext, the capture count is inline (every closure that never gets an own property or a prototype);
+ *   - even: a pointer to a ScrClosureExt (8-aligned, so bit 0 is clear) -- the count lives there.
+ * With the 16-byte cycle header that is a 40-byte object where a 56-byte one stood, so EVERY closure drops one 16-byte arena stride whatever
+ * its capture count. The LLVM lane declares the same three-word type (backend/closure-layout.ts) and indexes the captures as element 1
+ * past the struct, as it did. */
+typedef struct ScrClosure {
+  size_t rc; /* SIZE_MAX = immortal (interned top-level function value) */
+  void *fn;
+  size_t meta;
   ScrBox *caps[];
 } ScrClosure;
+
+/* The meta of a closure with no captures and no ext: what every emitted or runtime-static (immortal) closure literal starts as. */
+#define SCR_CLO_META_STATIC ((size_t)1)
+/* An immortal function-value closure literal, as the runtime's own static ones are written. */
+#define SCR_CLO_STATIC(f) {SIZE_MAX, (void *)(f), SCR_CLO_META_STATIC}
+
+_Static_assert(sizeof(ScrClosure) == 24 && offsetof(ScrClosure, fn) == 8 && offsetof(ScrClosure, meta) == 16 && offsetof(ScrClosure, caps) == 24,
+               "ScrClosure layout: backend/closure-layout.ts and the LLVM %ScrClosure type mirror it");
+
+static inline ScrClosureExt *scr_closure_ext_of(const ScrClosure *c) { return (c->meta & 1u) ? NULL : (ScrClosureExt *)(uintptr_t)c->meta; }
+static inline size_t scr_closure_ncaps(const ScrClosure *c) { return (c->meta & 1u) ? (c->meta >> 1) : ((ScrClosureExt *)(uintptr_t)c->meta)->ncaps; }
+static inline ScrBox *scr_closure_props(const ScrClosure *c) { const ScrClosureExt *x = scr_closure_ext_of(c); return x ? x->props : NULL; }
+static inline void *scr_closure_proto(const ScrClosure *c) { const ScrClosureExt *x = scr_closure_ext_of(c); return x ? x->implicit_proto : NULL; }
+/* The ext of `c`, made on first need (the capture count moves into it). Aborts on exhaustion like every runtime allocation. */
+ScrClosureExt *scr_closure_ext(ScrClosure *c);
+static inline void scr_closure_set_props(ScrClosure *c, ScrBox *b) { scr_closure_ext(c)->props = b; }
+static inline void scr_closure_set_proto(ScrClosure *c, void *p) { scr_closure_ext(c)->implicit_proto = p; }
+
 
 /* Installed by the dyn unit the first time it mints an implicit prototype
  * (scr_dyn_fn_prototype), NULL in a program that never does. Called from
