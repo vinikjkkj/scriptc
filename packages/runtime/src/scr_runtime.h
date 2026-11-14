@@ -2317,6 +2317,7 @@ void scr_map_idle_shrink(void);
  * collector to the map is an undefined symbol in those builds. scr_map.c
  * installs it when the first map becomes a shrink candidate. */
 extern void (*scr_cyc_idle_hook)(void);
+extern void (*scr_cyc_idle_trim_hook)(void);
 void scr_map_clear(ScrMap *m);
 
 bool scr_map_has_f64(const ScrMap *m, double key);
