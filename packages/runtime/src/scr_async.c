@@ -2308,6 +2308,60 @@ static void scr_td_set_next(void) {
   scr_td_next_ms = t;
 }
 
+/* -- Release the executable's own relocation table (Linux, glibc) --------------------------------------------------
+ * A PIE carries one R_X86_64_RELATIVE-style record per pointer-bearing datum: .rela.dyn is 1.4-1.6 MiB in the REST and redis bench binaries (60-66k
+ * records of 24 bytes). ld.so reads it once, before main, and nothing reads it again (a lazily bound PLT reads .rela.plt, a SEPARATE table named by
+ * DT_JMPREL; dlopen relocates the library, not the program). Its pages stay resident anyway: the kernel mapped them in 64 KiB fault-around runs
+ * while the loader walked the table. They are file-backed and clean, so MADV_DONTNEED costs nothing but a refault that never comes.
+ *
+ * Whole pages INSIDE the table only: the partial first and last pages may share a page with .dynsym, .rela.plt or .init, which are read later, so
+ * they stay. The range is found from the program headers the kernel handed us (AT_PHDR), the same source ld.so used; nothing here parses a file.
+ * Refused when the table is not in a read-only PT_LOAD (nothing to drop safely), when DT_RELA is absent, or when it is under a page. Done with the
+ * first text drop, after SCR_TEXT_DROP_AFTER_MS of loop time, so a short program pays nothing; SCR_TEXT_DROP=0 turns both off. Returns the KiB released. */
+extern const ElfW(Ehdr) __ehdr_start __attribute__((weak)); /* the ELF header in memory, provided by the linker: no PLT call, no lazy binding to resolve */
+static size_t scr_rela_release(void) {
+  const ElfW(Ehdr) *eh = &__ehdr_start;
+  if (eh == NULL || eh->e_phoff == 0 || eh->e_phnum == 0) return 0;
+  const ElfW(Phdr) *ph = (const ElfW(Phdr) *)((uintptr_t)eh + eh->e_phoff);
+  unsigned n = eh->e_phnum;
+  uintptr_t bias = 0;
+  bool have_bias = false;
+  for (unsigned i = 0; i < n; i++) if (ph[i].p_type == PT_LOAD && ph[i].p_offset == 0) { bias = (uintptr_t)eh - (uintptr_t)ph[i].p_vaddr; have_bias = true; break; }
+  if (!have_bias) return 0;
+  const ElfW(Dyn) *dyn = NULL;
+  for (unsigned i = 0; i < n; i++) if (ph[i].p_type == PT_DYNAMIC) dyn = (const ElfW(Dyn) *)(bias + ph[i].p_vaddr);
+  if (dyn == NULL) return 0;
+  uintptr_t rela = 0, relasz = 0, jmprel = 0;
+  for (; dyn->d_tag != DT_NULL; dyn++) {
+    if (dyn->d_tag == DT_RELA) rela = (uintptr_t)dyn->d_un.d_ptr;
+    else if (dyn->d_tag == DT_RELASZ) relasz = (uintptr_t)dyn->d_un.d_val;
+    else if (dyn->d_tag == DT_JMPREL) jmprel = (uintptr_t)dyn->d_un.d_ptr;
+  }
+  if (rela == 0 || relasz == 0) return 0;
+  if (rela < bias) rela += bias;                       /* ld.so adjusts these in place on x86-64, not everywhere */
+  if (jmprel != 0 && jmprel < bias) jmprel += bias;
+  uintptr_t end = rela + relasz;
+  if (jmprel > rela && jmprel < end) end = jmprel;   /* a linker that folded the PLT records into DT_RELASZ */
+#if defined(__aarch64__) || defined(__powerpc64__)
+  const uintptr_t pg = 65536; /* the largest page these kernels use; a 4 KiB kernel is aligned by it too (sysconf would be one more lazily bound call) */
+#else
+  const uintptr_t pg = 4096;
+#endif
+  uintptr_t lo = (rela + pg - 1) & ~(pg - 1), hi = end & ~(pg - 1);
+  if (hi <= lo) return 0;
+  bool readonly = false;
+  for (unsigned i = 0; i < n; i++) {
+    if (ph[i].p_type != PT_LOAD) continue;
+    uintptr_t seg_lo = bias + ph[i].p_vaddr, seg_hi = seg_lo + ph[i].p_memsz;
+    if (lo >= seg_lo && hi <= seg_hi) readonly = (ph[i].p_flags & PF_W) == 0;
+  }
+  if (!readonly) return 0;
+  if (madvise((void *)lo, hi - lo, MADV_DONTNEED) != 0) return 0;
+  return (size_t)(hi - lo) >> 10;
+}
+
+static size_t scr_rela_released_kib; /* KiB of .rela.dyn released with the first drop (SCR_TEXT_DROP_STAT shows it) */
+
 static void scr_text_drop_tick(double now) {
   if (__builtin_expect(scr_td_state != 1, 0)) {
     if (scr_td_state == 2) return;
@@ -2320,6 +2374,7 @@ static void scr_text_drop_tick(double now) {
     if (scr_text_drop_first_ms == 0) { scr_text_drop_first_ms = now; scr_td_next_ms = now + (double)SCR_TEXT_DROP_AFTER_MS; return; }
     if (now - scr_text_drop_first_ms < (double)SCR_TEXT_DROP_AFTER_MS) { scr_td_next_ms = scr_text_drop_first_ms + (double)SCR_TEXT_DROP_AFTER_MS; return; }
     scr_text_drop_first_done = true;
+    scr_rela_released_kib = scr_rela_release();
   } else {
     bool trigger = false;
     if (scr_td_faults != 0 && now >= scr_td_next_check_ms) {
@@ -2349,6 +2404,7 @@ static void scr_text_drop_tick(double now) {
     fputs(scr_utoa(before, nb), stderr);
     fputs("->", stderr);
     fputs(scr_utoa(after, nb), stderr);
+    if (scr_text_drop_n == 1) { fputs(" relaDynKiBReleased ", stderr); fputs(scr_utoa(scr_rela_released_kib, nb), stderr); }
     fputs("\n", stderr);
   }
 }
