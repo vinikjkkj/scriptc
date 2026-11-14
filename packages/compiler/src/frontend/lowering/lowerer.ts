@@ -174,7 +174,7 @@ import { lowerComptime, comptimeBakeable, rejectComptimeCaptures, comptimeValueT
 import { lowerDeleteValue, lowerElemValuePosition, lowerStmts, noteBlockedBindings, isBlockedBinding, lowerScopedBlock, predeclareForwardCapture, probeBindWhy, predeclareForwardFnDecl, predeclareForwardVar, rejectJumpCrossingFinally, lowerStmt, lowerVarStatement, lowerDestructuringDecl, lowerDestructuringAssignParts, lowerBindingPattern, lowerJsvalBindingPattern, checkBindingElement, bindPatternTarget, lowerVarDeclList, lowerVarDecl, lowerSwitch, lowerTry, lowerExprStatement, lowerForOf, lowerForStatement } from "./lower-stmts.js";
 import { unboundMethodThunk, recordKeyResultOk, narrowBridgeDyn, FieldTarget, bufferValueIndexOf, bufferValueOf, lowerDynObjectLiteral, lowerDynSpreadObjectLiteral, lowerExpr, maybeNarrow, lowerUnitComparison, lowerNullishCoalesce, lowerOptionalChain, finishOptionalChain, lowerCondition, ensureBool, requireTruthyUnion, eqComparableUnion, lowerIntrinsicProperty, lowerArrayLiteral, lowerObjectLiteral, lowerShorthandValue, rejectThisInObjectMethod, lowerElementAccess, lowerElementWrite, lowerRecordKeyRead, ensureString, numberConvAtDynWidth, lowerTemplate, lowerAsExpression, lowerPrefixUnary, lowerBinary, lowerCaughtTypeofTest, caughtRead, caughtLocalOf, caughtToString, lowerInstanceOf, lowerRegexLiteral, lowerFieldRead, lowerUnionProperty, fieldTarget, fieldGetExpr, fieldSetStmt, lowerFieldCompound, uniqueSymbolKeyOf, foldedStringKeyOf } from "./lower-exprs.js";
 import { assertExpandoAccounting, expandoCounters, type ExpandoBind, type ExpandoMember } from "./lower-expando.js";
-import { isWidenedValueNode, lowerRecordFieldCall, lowerObjectMethodCall, classHasOwnValueOf, classToStringDispatch, throwOnlyValueType } from "./lower-calls.js";
+import { dynCallWithThis, isWidenedValueNode, lowerRecordFieldCall, lowerObjectMethodCall, classHasOwnValueOf, classToStringDispatch, throwOnlyValueType } from "./lower-calls.js";
 import { fenceCrossBlockNsRef, nsPathPrefix } from "./lower-namespaces.js";
 import { dtsWitnessClassOf } from "./lower-twin-witness.js";
 import { pairedProtoInstanceType } from "./proto-class-consume.js";
@@ -12595,6 +12595,38 @@ export class Lowerer {
         if (Array.isArray(node)) {
           for (const x of node) visit(x);
           return;
+        }
+        {
+          // PRE-ORDER, before the callee's own read is rewritten: `v.f(args)` where v is a record of a VIEW-granted shape and f a dyn-typed member
+          // (zapo's postgres stores pass the pool as `{ query: PoolClient['query'] }`). JavaScript runs f with this = v, and a view's member read
+          // answers the object's own UNBOUND function, so the call has to carry the receiver: a view calls through the object it views, any
+          // other record of the shape through itself boxed (recordIsView decides at run time).
+          const dc = node as Record<string, unknown> & { kind?: unknown };
+          const cal = dc["callee"] as (IrExpr & { kind: string }) | undefined;
+          if (
+            dc.kind === "dynCall" && cal !== undefined && cal.kind === "recordGet" && viewShapes.has((cal as { shapeId: string }).shapeId) &&
+            cal.type.kind === "dyn" && isSimple((cal as { obj: IrExpr }).obj) && typeof dc["calleeName"] === "string" && (dc["calleeName"] as string).includes(".") &&
+            dc["spreads"] === undefined
+          ) {
+            const g = cal as unknown as Extract<IrExpr, { kind: "recordGet" }>;
+            const recT = g.obj.type;
+            if (recT.kind === "record" && this.dynConvertible(recT)) {
+              const loc = g.loc;
+              const ref = (): IrExpr => ({ ...g.obj });
+              const choice: IrExpr = {
+                kind: "ternary",
+                cond: { kind: "recordIsView", obj: ref(), shapeId: g.shapeId, type: BOOL, loc },
+                then: { kind: "recordView", obj: ref(), shapeId: g.shapeId, type: DYN, loc },
+                else_: { kind: "dynFrom", value: ref(), type: DYN, loc },
+                type: DYN,
+                loc,
+              };
+              const call = dc as unknown as Extract<IrExpr, { kind: "dynCall" }>;
+              const rep = dynCallWithThis(this, choice, g, call.args, call.calleeName, call.loc);
+              for (const k of Object.keys(dc)) delete dc[k];
+              Object.assign(dc, rep);
+            }
+          }
         }
         for (const v of Object.values(node as Record<string, unknown>)) visit(v);
         const o = node as Record<string, unknown> & { kind?: unknown };
