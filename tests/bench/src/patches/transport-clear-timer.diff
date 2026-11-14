@@ -1,0 +1,21 @@
+--- bench/server-rpc.ts	2026-11-06 23:13:07.286771498 -0300
++++ bench/server-rpc.ts	2026-11-06 23:13:07.278771539 -0300
+@@ -171,8 +171,9 @@
+             })
+         })
+ 
++        let connTimer: ReturnType<typeof setTimeout> | undefined
+         const timedOut = new Promise<void>((_resolve, reject) => {
+-            setTimeout(() => {
++            connTimer = setTimeout(() => {
+                 reject(
+                     new Error(
+                         `bench control channel: the server child did not connect to 127.0.0.1:${port} ` +
+@@ -211,6 +212,7 @@
+             void childFailed.catch(reject)
+         })
+         await Promise.race([this.readyPromise, childFailed, timedOut])
++        clearTimeout(connTimer)
+     }
+ 
+     /** One decoded frame from the child: a `{ready:true}` announcement or
