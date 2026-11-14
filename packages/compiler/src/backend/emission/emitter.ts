@@ -1440,15 +1440,23 @@ export class CEmitter {
       else appendLines(body, this.lines);
       this.lines.length = 0;
     }
-    if (layout !== undefined) {
-      // The interned walkers (dyn builders, matchers, adapters) are definitions too: they join the pool so the steady set is one
-      // contiguous run. Their prototypes sit in the prototype block, so a definition can stand anywhere after it.
-      const walkers = extractCFunctionChunks(this.walkerDefs);
-      this.walkerDefs.length = 0;
-      for (const l of walkers.rest) this.walkerDefs.push(l);
-      const pool = [...walkers.chunks, ...fnChunks];
-      for (const chunk of stableByRank(pool, (c) => bestRank(layout, cDefinedNames(c)))) appendLines(body, markUsedDefinitions(chunk, layout));
-    }
+    // The function chunks in profile order. The interned walkers (dyn builders, matchers, adapters) are definitions too and join the pool
+    // so the steady set is one contiguous run, but ONLY in a single TU: a walker's static data (key-order tables, descriptors) lives in
+    // walkerDefs, which a split program emits in a different part than the bodies, so a walker moved into a body part would name data
+    // its part cannot see (clang: use of undeclared identifier sc_ko_*). The split decision weighs the bodies alone, as it always did,
+    // so it is taken before the walkers are pooled and never sees them.
+    const orderBody = (withWalkers: boolean): void => {
+      body.length = 0;
+      let pool = fnChunks;
+      if (withWalkers) {
+        const walkers = extractCFunctionChunks(this.walkerDefs);
+        this.walkerDefs.length = 0;
+        for (const l of walkers.rest) this.walkerDefs.push(l);
+        pool = [...walkers.chunks, ...fnChunks];
+      }
+      for (const chunk of stableByRank(pool, (c) => bestRank(layout!, cDefinedNames(c)))) appendLines(body, markUsedDefinitions(chunk, layout!));
+    };
+    if (layout !== undefined) orderBody(false);
 
     // THE SPLIT DECISION, taken here and nowhere else.
     //
@@ -1469,6 +1477,7 @@ export class CEmitter {
     // external surface, the profile pins the emission, and no library is
     // anywhere near the threshold. One less shape to reason about.
     const nParts = this.mod.lib !== undefined ? 1 : splitPartCount(bodyBytes);
+    if (layout !== undefined && nParts <= 1) orderBody(true);
     if (nParts > 1) {
       this.link = "";
       // Every `static ` in the body region is a file-scope definition
