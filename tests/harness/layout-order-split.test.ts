@@ -127,6 +127,13 @@ describe("--layout-order with the programs the TU split is tested on", () => {
         const built = await buildFile(src, `${tag}-p${parts ?? "1"}`, parts, order);
         if (parts !== null) expect(built.units.length, `split in ${parts}`).toBeGreaterThan(1);
         expect(answer(built.binary), `parts=${parts}`).toBe(expected);
+        // the per-shape record helpers (written between struct definitions) and the interned walkers are ordered where they stand: under a
+        // full reversal their relative order is the reverse of the whole build's, whether or not the program is split
+        for (const family of [/^sc_rrelease_r\d+$/, /^sc_dc_/, /^sc_td_/]) {
+          const was = wholeNames.filter((n) => family.test(n));
+          const now = definedNames(built.units).filter((n) => family.test(n));
+          if (was.length >= 2) expect(now, `${family} parts=${parts}`).toEqual([...was].reverse());
+        }
         // nothing lost, nothing duplicated (a split may rename linkage, never the set of definitions)
         expect([...definedNames(built.units)].sort(), `parts=${parts}`).toEqual([...wholeNames].sort());
       }
