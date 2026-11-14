@@ -1457,6 +1457,14 @@ export class CEmitter {
       for (const chunk of stableByRank(pool, (c) => bestRank(layout!, cDefinedNames(c)))) appendLines(body, markUsedDefinitions(chunk, layout!));
     };
     if (layout !== undefined) orderBody(false);
+    if (layout !== undefined) {
+      // Walkers that are not pooled (a split program) are still ordered where they stand: measured on the REST app, 0.51 MiB of the request
+      // set was 901 walkers scattered over 7 MiB of walkerDefs. Their data stays first and the sorted bodies follow it.
+      const inPlace = extractCFunctionChunks(this.walkerDefs);
+      this.walkerDefs.length = 0;
+      for (const l of inPlace.rest) this.walkerDefs.push(l);
+      for (const chunk of stableByRank(inPlace.chunks, (c) => bestRank(layout, cDefinedNames(c)))) appendLines(this.walkerDefs, markUsedDefinitions(chunk, layout));
+    }
 
     // THE SPLIT DECISION, taken here and nowhere else.
     //
@@ -1525,6 +1533,16 @@ export class CEmitter {
     // time and be DEFINED earlier in the file than the newFn bodies.
     const structDefs: string[] = [];
     this.emitStructDefs(structDefs);
+    if (this.layoutOrder !== undefined) {
+      // --layout-order: the per-shape record helpers (new/retain/release/trace/gcFree: thousands of tiny functions, measured 0.17 MiB of
+      // the REST request set scattered over 8 MiB) are written by emitStructDefs between struct definitions; their bodies move to the end of
+      // this buffer in rank order. A body only needs the struct types and prototypes, all of which come earlier.
+      const layout = this.layoutOrder;
+      const helpers = extractCFunctionChunks(structDefs);
+      structDefs.length = 0;
+      for (const l of helpers.rest) structDefs.push(l);
+      for (const chunk of stableByRank(helpers.chunks, (c) => bestRank(layout, cDefinedNames(c)))) appendLines(structDefs, markUsedDefinitions(chunk, layout));
+    }
     // ASYNC GENERATOR settle thunks are interned HERE, ahead of the
     // unit-instance flush below, not where the spawn wrappers name them
     // (emitAsyncScaffolding, much further down). Building one interns the
