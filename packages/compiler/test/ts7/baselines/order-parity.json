@@ -27912,6 +27912,12 @@
     "<repo>/tests/corpus/25203-a-dyn-object-checked-into-an-index-signature-record-keeps-every-member.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25221-a-concat-chain-of-three-or-more-operands-matches-the-fold-at-every-size-edge.js": {
+   "order": [
+    "<repo>/tests/corpus/25221-a-concat-chain-of-three-or-more-operands-matches-the-fold-at-every-size-edge.js"
+   ],
+   "diags": []
   }
  }
 }
