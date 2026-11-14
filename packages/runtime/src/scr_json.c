@@ -563,6 +563,30 @@ static const uint8_t scr_dyn_fl_idx[SCR_DYN_KIND_COUNT] = {SCR_DYN_ARMS(SCR_DYN_
 static inline ScrDyn **scr_dyn_free_list(ScrDynKind k) { return &scr_dyn_free_lists[scr_dyn_fl_idx[k]]; }
 static size_t scr_dyn_free_count;
 #define SCR_DYN_FREE_MAX 8192
+/* THE POST-COLLECTION TRIM. Park and reuse (and the allocation hit path) are unchanged: a parked ARR/OBJ node keeps its buffer, and a churn loop recycles it for free.
+ * But the node is recycled by whatever container comes next, so after a burst (1,000 queued queries each holding a 751-slot params vector, 1,000 per-command 92-slot option
+ * tables) settles, the parked nodes come back under three-element arrays and two-member objects still holding the big buffer (mysql bench census: 6.77 MB and 8.3 MB).
+ * scr_collect_cycles calls this once its sweep has finished (never while it is walking): every parked array buffer past SCR_DYN_TRIM_ARR slots and every table past
+ * SCR_DYN_TRIM_OBJ entries is freed and the node stays parked EMPTY. A collection is already paced and already walks the live graph, so seams that do not collect pay nothing;
+ * the walk is bounded by the free-list length (at most SCR_DYN_FREE_MAX nodes). */
+#ifndef SCR_DYN_TRIM_ARR
+#define SCR_DYN_TRIM_ARR 64
+#endif
+#ifndef SCR_DYN_TRIM_OBJ
+#define SCR_DYN_TRIM_OBJ 32
+#endif
+static size_t scr_dyn_trim_seen = (size_t)-1;
+static void scr_dyn_idle_trim(void) {
+  /* An unchanged parked count since the last walk means no burst has settled: skip. (A pop and a park that cancel can hide a big buffer for a collection or two; the
+   * count moves again on the next settle.) The walk itself costs about 5 Ir per parked node. */
+  if (scr_dyn_free_count == scr_dyn_trim_seen) return;
+  scr_dyn_trim_seen = scr_dyn_free_count;
+  for (ScrDyn *d = scr_dyn_free_lists[4]; d != NULL; d = (ScrDyn *)(size_t)d->rc)
+    if (d->v.arr.cap > SCR_DYN_TRIM_ARR) { free(d->v.arr.items); d->v.arr.items = NULL; d->v.arr.cap = 0; }
+  for (ScrDyn *d = scr_dyn_free_lists[5]; d != NULL; d = (ScrDyn *)(size_t)d->rc)
+    if (d->v.obj.cap > SCR_DYN_TRIM_OBJ) { free(d->v.obj.entries); d->v.obj.entries = NULL; d->v.obj.cap = 0; }
+}
+__attribute__((constructor)) static void scr_dyn_idle_trim_reg(void) { scr_cyc_idle_trim_hook = scr_dyn_idle_trim; }
 #endif
 
 /* ── ScrDyn is a cycle-collector node ─────────────────────────────────
