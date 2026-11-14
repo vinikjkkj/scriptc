@@ -1,5 +1,5 @@
 name: bench
-run-name: bench ${{ inputs.target }} [${{ inputs.programs }}] ${{ inputs.variants }} ${{ inputs.tag }}
+run-name: bench ${{ inputs.target }}${{ inputs.base != '' && format(' vs {0}', inputs.base) || '' }} [${{ inputs.programs }}] ${{ inputs.variants }} ${{ inputs.tag }}
 
 # App builds and RAM measurements on GitHub runners instead of the box. The compiler under test is checked out from `target`; the harness (tests/bench), the census headers
 # (tests/perf/dyncensus) and the clientbench transport come from the dispatched ref. One job per program: build once per (sha, program, codegen flags) and reuse the cached
@@ -14,8 +14,12 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: Branch or FULL 40-character commit whose compiler is measured
+        description: Branch or FULL 40-character commit whose compiler is measured (the CANDIDATE arm)
         required: true
+      base:
+        description: "Optional second compiler (branch or FULL sha), the BASE arm: both compilers are built and measured on the SAME runner in the same run, arms interleaved, and the summary tabulates the difference"
+        required: false
+        default: ""
       programs:
         description: "Space or comma separated: messaging-redis messaging-mysql messaging-postgres messaging-sqlite messaging-memory (rest: not implemented yet)"
         required: false
@@ -60,6 +64,7 @@ jobs:
     outputs:
       matrix: ${{ steps.m.outputs.matrix }}
       target: ${{ steps.m.outputs.target }}
+      base: ${{ steps.m.outputs.base }}
       programs: ${{ steps.m.outputs.programs }}
       variants: ${{ steps.m.outputs.variants }}
       reps: ${{ steps.m.outputs.reps }}
@@ -75,6 +80,7 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           I_TARGET: ${{ inputs.target }}
+          I_BASE: ${{ inputs.base }}
           I_PROGRAMS: ${{ inputs.programs }}
           I_VARIANTS: ${{ inputs.variants }}
           I_REPS: ${{ inputs.reps }}
@@ -86,11 +92,11 @@ jobs:
           set -euo pipefail
           if [ "$EVENT" = push ]; then
             j=tests/bench/dispatch.json
-            TARGET=$(jq -r .target $j); PROGRAMS=$(jq -r '.programs // "messaging-redis"' $j); VARIANTS=$(jq -r '.variants // "plain"' $j)
+            TARGET=$(jq -r .target $j); BASE=$(jq -r '.base // ""' $j); PROGRAMS=$(jq -r '.programs // "messaging-redis"' $j); VARIANTS=$(jq -r '.variants // "plain"' $j)
             REPS=$(jq -r '.reps // "3"' $j); BACKEND=$(jq -r '.backend // "c"' $j); NODE_REF=$(jq -r '.node_ref // "true"' $j)
             IR=$(jq -r '.ir // "0"' $j); HEAP=$(jq -r '.node_heap_mb // "12288"' $j)
           else
-            TARGET=$I_TARGET; PROGRAMS=$I_PROGRAMS; VARIANTS=$I_VARIANTS; REPS=$I_REPS; BACKEND=$I_BACKEND; NODE_REF=$I_NODE_REF; IR=$I_IR; HEAP=$I_HEAP
+            TARGET=$I_TARGET; BASE=$I_BASE; PROGRAMS=$I_PROGRAMS; VARIANTS=$I_VARIANTS; REPS=$I_REPS; BACKEND=$I_BACKEND; NODE_REF=$I_NODE_REF; IR=$I_IR; HEAP=$I_HEAP
           fi
           out=()
           for p in ${PROGRAMS//,/ }; do
@@ -107,7 +113,7 @@ jobs:
           case "$BACKEND" in c|llvm) ;; *) echo "unknown backend: $BACKEND"; exit 1 ;; esac
           {
             echo "matrix=[$(IFS=,; echo "${out[*]}")]"
-            echo "target=$TARGET"; echo "programs=$PROGRAMS"; echo "variants=$VARIANTS"; echo "reps=$REPS"; echo "backend=$BACKEND"
+            echo "target=$TARGET"; echo "base=$BASE"; echo "programs=$PROGRAMS"; echo "variants=$VARIANTS"; echo "reps=$REPS"; echo "backend=$BACKEND"
             echo "node_ref=$NODE_REF"; echo "ir=$IR"; echo "node_heap_mb=$HEAP"
           } >> "$GITHUB_OUTPUT"
 
@@ -175,17 +181,25 @@ jobs:
         with:
           ref: ${{ needs.plan.outputs.target }}
           path: wt
+      - uses: actions/checkout@v4
+        if: ${{ needs.plan.outputs.base != '' }}
+        with:
+          ref: ${{ needs.plan.outputs.base }}
+          path: wt-base
       - uses: pnpm/action-setup@v4
         with:
           version: 11.1.3
       - uses: actions/setup-node@v4
         with:
           node-version-file: wt/.node-version
-      - name: Build the compiler under test
-        working-directory: wt
+      - name: Build the compiler(s) under test
         run: |
-          pnpm install --frozen-lockfile
-          pnpm build
+          set -eu
+          for d in wt wt-base; do
+            [ -d "$d" ] || continue
+            ( cd "$d" && pnpm install --frozen-lockfile && pnpm build && git rev-parse HEAD > "$GITHUB_WORKSPACE/$d.sha" )
+          done
+          echo "candidate: $(cat wt.sha)"; [ -f wt-base.sha ] && echo "base: $(cat wt-base.sha)" || true
       - name: Tools (valgrind for the Ir run)
         if: ${{ needs.plan.outputs.ir != '0' }}
         run: sudo apt-get update -q && sudo apt-get install -y -q valgrind
@@ -204,18 +218,19 @@ jobs:
         run: |
           store=${{ matrix.program }}; store=${store#messaging-}
           bash tests/bench/harness/mkbench.sh "$store" messaging
-      - name: Build every variant (the lowering runs once)
+      - name: Build every arm and variant (one lowering per compiler; flag-only variants re-run only clang)
         working-directory: benchsrc
-        env:
-          SCC_CLI: ${{ github.workspace }}/wt/packages/cli/dist/main.js
         run: |
           set -u
           store=${{ matrix.program }}; store=${store#messaging-}
           variants="${{ needs.plan.outputs.variants }}"; variants=${variants//,/ }
-          for one in $variants; do
-            bash tests/bench/harness/build.sh "$store" "${{ needs.plan.outputs.backend }}" "$BENCH_WORK/out" "$one" || echo "build of variant $one failed"
+          for side in cand base; do
+            if [ $side = cand ]; then cli="$GITHUB_WORKSPACE/wt/packages/cli/dist/main.js"; else cli="$GITHUB_WORKSPACE/wt-base/packages/cli/dist/main.js"; [ -d "$GITHUB_WORKSPACE/wt-base" ] || continue; fi
+            for one in $variants; do
+              SCC_CLI="$cli" bash tests/bench/harness/build.sh "$store" "${{ needs.plan.outputs.backend }}" "$BENCH_WORK/out/$side" "$one" || echo "build of $side/$one failed"
+            done
           done
-          cat "$BENCH_WORK/out/build-summary.txt"
+          cat "$BENCH_WORK"/out/*/build-summary.txt
       - name: Run the binaries beside Node, measure
         working-directory: benchsrc
         run: |
@@ -224,33 +239,37 @@ jobs:
           . tests/bench/harness/env.sh
           arms=()
           variants="${{ needs.plan.outputs.variants }}"; variants=${variants//,/ }
-          for one in $variants; do
-            suffix=""; [ "$one" = census ] && suffix="-census"
-            f="$BENCH_WORK/out/messaging-$store-${{ needs.plan.outputs.backend }}$suffix.bin"
-            [ -f "$f" ] && { chmod +x "$f"; arms+=("$one:$f"); }
+          # base first, then cand, so a table row reads base then candidate; the harness rotates the order per rep
+          for side in base cand; do
+            [ -d "$BENCH_WORK/out/$side" ] || continue
+            for one in $variants; do
+              suffix=""; [ "$one" = census ] && suffix="-census"
+              f="$BENCH_WORK/out/$side/messaging-$store-${{ needs.plan.outputs.backend }}$suffix.bin"
+              [ -f "$f" ] && { chmod +x "$f"; arms+=("$side$suffix:$f"); }
+            done
           done
           [ ${#arms[@]} -gt 0 ] || { echo "no binary was built"; exit 1; }
           flags=(--store "$store" --out "$BENCH_WORK/result" --reps "${{ needs.plan.outputs.reps }}" --smaps)
           [ "${{ needs.plan.outputs.node_ref }}" = true ] && flags+=(--node)
           [ "${{ needs.plan.outputs.ir }}" != 0 ] && flags+=(--ir "${{ needs.plan.outputs.ir }}")
           node tests/bench/harness/run.mjs "${flags[@]}" "${arms[@]}" | tee "$BENCH_WORK/result-summary.txt"
-          { echo "### ${{ matrix.program }} (${{ needs.plan.outputs.backend }}) on \`${{ needs.plan.outputs.target }}\`"; echo '```'; cat "$BENCH_WORK/out/build-summary.txt"; cat "$BENCH_WORK/result-summary.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          { echo "### ${{ matrix.program }} (${{ needs.plan.outputs.backend }})"; echo "candidate \`$(cat $GITHUB_WORKSPACE/wt.sha)\`$( [ -f $GITHUB_WORKSPACE/wt-base.sha ] && echo " base \`$(cat $GITHUB_WORKSPACE/wt-base.sha)\`")"; echo; cat "$BENCH_WORK/result/summary.md"; echo; echo '```'; cat "$BENCH_WORK"/out/*/build-summary.txt; cat "$BENCH_WORK/result-summary.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: bench-${{ matrix.program }}
           path: |
-            bench-work/out/*.log
-            bench-work/out/build-summary.txt
+            bench-work/out/*/*.log
+            bench-work/out/*/build-summary.txt
             bench-work/result/
             bench-work/result-summary.txt
           if-no-files-found: ignore
           retention-days: 14
-      # the binary, so a later turn can reuse it by path and sha instead of rebuilding
+      # the binaries, so a later turn can reuse them by path and sha instead of rebuilding
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: bench-${{ matrix.program }}-bin
-          path: bench-work/out/*.bin
+          path: bench-work/out/*/*.bin
           if-no-files-found: ignore
           retention-days: 14

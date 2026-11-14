@@ -80,4 +80,17 @@ for (const l of [...(withNode ? ['node'] : []), ...labels]) {
   sumlines.push(`${store} ${l} reps=${rs.length} exit=${rs.map((r) => r.exit).join(',')} rss_peak_kb=${rs.map((r) => r.rss_peak_kb).join(',')} median=${med(rs.map((r) => r.rss_peak_kb))} parity=${[...new Set(rs.map((r) => r.parity))].join('/')}${results.ir[l] != null ? ` callgrind_Ir=${results.ir[l]}` : ''}${sm && sm.classes ? ` smaps_peak_vmrss_kb=${sm.peak_vmrss_kb} heap_brk=${sm.classes['heap(brk)']?.Rss ?? 0} anon_mmap=${sm.classes['anon-mmap']?.Rss ?? 0} file_backed=${Object.entries(sm.classes).filter(([k]) => /^(main-binary|shared-libs)/.test(k)).reduce((t, [, v]) => t + v.Rss, 0)} stack=${sm.classes.stack?.Rss ?? 0}` : ''}`)
 }
 writeFileSync(`${out}/summary.txt`, sumlines.join('\n') + '\n')
+// summary.md: one table; when a `base` and a `cand` arm both ran (bench.yml with two targets, built and measured on the same runner), each cand row also carries its difference to the matching base row
+const pct = (a, b) => (a == null || b == null || a === 0 ? '' : `${b >= a ? '+' : ''}${(((b - a) / a) * 100).toFixed(2)}%`)
+const rows = ['| arm | rss_peak_kb per rep | median | vs base | parity | callgrind Ir | Ir vs base | heap_brk | file-backed |', '|---|---|---|---|---|---|---|---|---|']
+const rssMed = (l) => med(results.runs.filter((r) => r.label === l).map((r) => r.rss_peak_kb))
+for (const l of [...(withNode ? ['node'] : []), ...labels]) {
+  const rs = results.runs.filter((r) => r.label === l)
+  const baseL = l.startsWith('cand') ? 'base' + l.slice(4) : null
+  const hasBase = baseL !== null && labels.includes(baseL)
+  const sm = results.smaps[l]
+  const fb = sm && sm.classes ? Object.entries(sm.classes).filter(([k]) => /^(main-binary|shared-libs)/.test(k)).reduce((t, [, v]) => t + v.Rss, 0) : ''
+  rows.push(`| ${l} | ${rs.map((r) => r.rss_peak_kb).join(' / ')} | ${rssMed(l)} | ${hasBase ? pct(rssMed(baseL), rssMed(l)) : ''} | ${[...new Set(rs.map((r) => r.parity))].join('/')} | ${results.ir[l] ?? ''} | ${hasBase ? pct(results.ir[baseL], results.ir[l]) : ''} | ${sm && sm.classes ? sm.classes['heap(brk)']?.Rss ?? 0 : ''} | ${fb} |`)
+}
+writeFileSync(`${out}/summary.md`, `store: ${store}, reps: ${reps}, node ${results.node}\n\n` + rows.join('\n') + '\n')
 console.log(sumlines.join('\n'))
