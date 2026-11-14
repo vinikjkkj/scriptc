@@ -1,6 +1,7 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
-import { parseLayoutOrder, reorderLlvmText, type LayoutOrder } from "./backend/layout-order.js";
+import { parseLayoutOrder, reorderLlvmText, staticSymbolRanks, type LayoutOrder } from "./backend/layout-order.js";
+import { STATIC_MID, staticLayoutRanks } from "./ir/static-layout.js";
 import { tapPhase, tapped } from "./phase-tap.js";
 import { basename, dirname, join, resolve } from "node:path";
 import { cacheRootDir, CcCompileError, compileC, compileLibArchive, resolveCc, targetPlatform } from "./backend/cc.js";
@@ -1555,6 +1556,11 @@ async function compileTracked(
 async function emitLlvmFile(mod: IrModule, llStats: LlvmEmitStats, llPath: string, audit: boolean, layout?: LayoutOrder): Promise<{ members: boolean; lit: boolean }> {
   let ll = tapped("emit.llvm", () => emitLlvmModule(mod, llStats, audit));
   if (layout !== undefined) ll = reorderLlvmText(ll, layout);
+  else {
+    // no profile: the static order (ir/static-layout.ts); a symbol the pass does not name (walkers, record helpers, scaffolding) sits in the MID tier
+    const ranks = staticLayoutRanks(mod);
+    if (ranks !== undefined) ll = reorderLlvmText(ll, staticSymbolRanks(mod, ranks), STATIC_MID);
+  }
   await writeFile(llPath, ll);
   return { members: DYN_DISPATCH_REF.test(ll), lit: DYN_LIT_REF.test(ll) };
 }

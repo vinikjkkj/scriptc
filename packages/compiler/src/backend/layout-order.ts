@@ -14,6 +14,9 @@
  * The rank of a function is the line number of its symbol; a unit that holds several functions (one IR function can emit its
  * frame, resume function and spawn wrapper together) ranks as its best-ranked member and moves as one piece. */
 
+import type { IrModule } from "../ir/nodes.js";
+import { mangleAsyncSpawn, mangleCoroResume, mangleFunction, mangleGenDrop, mangleGenSpawn, mangleWrapper } from "./mangle.js";
+
 export interface LayoutOrder {
   readonly rank: ReadonlyMap<string, number>;
 }
@@ -107,6 +110,11 @@ export function markUsedDefinitions(chunk: readonly string[], order: LayoutOrder
   });
 }
 
+/** Marks EVERY internal-linkage function definition in `chunk` `used` (the static layout's tiers are all reachable code; see markUsedDefinitions for why). */
+export function markAllUsedDefinitions(chunk: readonly string[]): string[] {
+  return chunk.map((l) => (l.startsWith("static ") && !l.includes("__attribute__((used))") && C_HEADER.test(l) ? `static __attribute__((used)) ${l.slice(7)}` : l));
+}
+
 /* ------------------------------------------------------------- LLVM */
 
 /** `define ... @name(` -> name (quoted names included). */
@@ -115,7 +123,7 @@ const LL_DEFINE = /^define\b[^@]*@("(?:[^"\\]|\\.)*"|[\w.$-]+)\(/;
 /** Reorders the `define` blocks of an LLVM IR text by rank. Functions are the only thing moved: every non-function line keeps its
  * relative order and the sorted blocks follow them. LLVM IR has no definition-before-use rule for functions or
  * globals, so this cannot change what the module means. A text with no ranked function is returned as is (the same string). */
-export function reorderLlvmText(ll: string, order: LayoutOrder): string {
+export function reorderLlvmText(ll: string, order: LayoutOrder, unrankedRank = Infinity): string {
   const lines = ll.split("\n");
   const blocks: { name: string; lines: string[] }[] = [];
   const rest: string[] = [];
@@ -143,7 +151,7 @@ export function reorderLlvmText(ll: string, order: LayoutOrder): string {
   }
   if (cur !== null) return ll; // malformed: leave it alone
   if (blocks.length === 0 || !blocks.some((b) => order.rank.has(b.name))) return ll;
-  const sorted = stableByRank(blocks, (b) => order.rank.get(b.name) ?? Infinity);
+  const sorted = stableByRank(blocks, (b) => order.rank.get(b.name) ?? unrankedRank);
   // The sorted blocks go AFTER every other line, not where the first define stood: named types are defined between functions, and a
   // function body that GEPs into a type has to see the complete type before it ("base element of getelementptr must be sized").
   // Functions, globals, attributes and metadata may all be referenced forward, so nothing else is order-sensitive.
@@ -151,4 +159,18 @@ export function reorderLlvmText(ll: string, order: LayoutOrder): string {
   for (const l of rest) out.push(l);
   for (const b of sorted) for (const l of b.lines) out.push(l);
   return out.join("\n");
+}
+
+/** The static layout's rank per IR function name, as a rank per EMITTED SYMBOL (the function, its coroutine resume function, spawn wrapper and
+ * value wrapper), for the LLVM text reorder. Every symbol of one function carries that function's rank. */
+export function staticSymbolRanks(mod: IrModule, ranks: ReadonlyMap<string, number>): LayoutOrder {
+  const rank = new Map<string, number>();
+  for (const f of mod.functions) {
+    const r = ranks.get(f.name);
+    if (r === undefined) continue;
+    for (const sym of [mangleFunction(f.name), mangleCoroResume(f.name), mangleAsyncSpawn(f.name), mangleGenSpawn(f.name), mangleGenDrop(f.name), mangleWrapper(f.name)]) {
+      if (!rank.has(sym)) rank.set(sym, r);
+    }
+  }
+  return { rank };
 }

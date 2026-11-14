@@ -20,7 +20,8 @@
  * The generated C is a debugging surface: locals keep their TS names inside
  * the mangled form and every statement carries a `source line` comment.
  */
-import { bestRank, cDefinedNames, extractCFunctionChunks, markUsedDefinitions, stableByRank, type LayoutOrder } from "../layout-order.js";
+import { bestRank, cDefinedNames, extractCFunctionChunks, markAllUsedDefinitions, markUsedDefinitions, stableByRank, type LayoutOrder } from "../layout-order.js";
+import { STATIC_MID, STATIC_STARTUP, staticLayoutRanks } from "../../ir/static-layout.js";
 import { canonPlanOf } from "../../ir/num-canon.js";
 import type {
   IrGlobal,
@@ -1433,12 +1434,23 @@ export class CEmitter {
     // --layout-order: each function's lines are kept as one chunk so the chunks can be ordered once emission is complete. Emission
     // itself runs in the module's own order (it names counter helpers as it goes), so the file is ordered afterwards.
     const layout = this.layoutOrder;
+    // No profile: the STATIC order (ir/static-layout.ts) of the function chunks, from the program's own call graph.
+    const staticRanks = layout === undefined ? staticLayoutRanks(this.mod) : undefined;
     const fnChunks: string[][] = [];
+    const fnRankOf: number[] = [];
     for (const fn of this.mod.functions) {
       this.emitFunction(fn);
       if (layout !== undefined) fnChunks.push(this.lines.slice());
+      else if (staticRanks !== undefined) { fnChunks.push(this.lines.slice()); fnRankOf.push(staticRanks.get(fn.name) ?? STATIC_MID); }
       else appendLines(body, this.lines);
       this.lines.length = 0;
+    }
+    if (staticRanks !== undefined) {
+      // clang defers a `static` function until something references it, so the emitted order only reaches the object file for functions marked
+      // `used`; the hot, startup and error tiers are all reached from a root, so marking them keeps no dead code alive
+      const idx = fnChunks.map((_, i) => i);
+      idx.sort((a, b) => (fnRankOf[a]! === fnRankOf[b]! ? a - b : fnRankOf[a]! - fnRankOf[b]!));
+      for (const i of idx) appendLines(body, fnRankOf[i]! >= STATIC_MID && fnRankOf[i]! < STATIC_STARTUP ? fnChunks[i]! : markAllUsedDefinitions(fnChunks[i]!));
     }
     // The function chunks in profile order. The interned walkers (dyn builders, matchers, adapters) are definitions too and join the pool
     // so the steady set is one contiguous run, but ONLY in a single TU: a walker's static data (key-order tables, descriptors) lives in
