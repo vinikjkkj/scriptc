@@ -129,9 +129,9 @@ typedef struct {
  * first SCR_CYCEN_SITE_DEPTH return addresses up the frame-pointer chain from scr_dyn_alloc (build with -fno-omit-frame-pointer); the report
  * prints the raw addresses and the reader picks the first frame that is not a scr_* runtime function (the EMITTING function). */
 #define SCR_CYCEN_CHUNKS 1
-#define SCR_CYCEN_SITE_DEPTH 6
+#define SCR_CYCEN_SITE_DEPTH 5 /* 6 frames made ~300k distinct chains on the redis bench, saturated the table and stalled every later dyn alloc (CI 43630870607) */
 #ifndef SCR_CYCEN_SITES
-#define SCR_CYCEN_SITES 65536u
+#define SCR_CYCEN_SITES 262144u
 #endif
 SCR_CYCEN_SHARED unsigned long long scr_cycen_sites[SCR_CYCEN_SITES][SCR_CYCEN_SITE_DEPTH];
 SCR_CYCEN_SHARED unsigned scr_cycen_nsites = 1; /* slot 0 = none */
@@ -237,7 +237,7 @@ __attribute__((noinline)) SCR_CYCEN_FN unsigned scr_cycen_site_capture(void) {
   unsigned long long h = 1469598103934665603ULL;
   for (int i = 0; i < SCR_CYCEN_SITE_DEPTH; i++) { h ^= r[i]; h *= 1099511628211ULL; }
   unsigned mask = SCR_CYCEN_SITES - 1u, j = (unsigned)(h >> 20) & mask;
-  for (unsigned t = 0; t < SCR_CYCEN_SITES; t++, j = (j + 1u) & mask) {
+  for (unsigned t = 0; t < 32u; t++, j = (j + 1u) & mask) { /* bounded probe: a full table must cost O(1) per allocation, not O(table) */
     if (j == 0) continue;
     if (scr_cycen_sites[j][0] == 0) {
       for (int i = 0; i < SCR_CYCEN_SITE_DEPTH; i++) scr_cycen_sites[j][i] = r[i];
