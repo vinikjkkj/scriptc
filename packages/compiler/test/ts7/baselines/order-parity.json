@@ -27900,6 +27900,18 @@
     "<repo>/tests/corpus/25204-a-function-member-read-as-a-value-in-a-module-that-runs-engine-code-holds-its-by-value-captures.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25202-dyn-object-members-with-literal-and-built-keys-survive-growth-delete-readd-json-and-spread.js": {
+   "order": [
+    "<repo>/tests/corpus/25202-dyn-object-members-with-literal-and-built-keys-survive-growth-delete-readd-json-and-spread.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25203-a-dyn-object-checked-into-an-index-signature-record-keeps-every-member.ts": {
+   "order": [
+    "<repo>/tests/corpus/25203-a-dyn-object-checked-into-an-index-signature-record-keeps-every-member.ts"
+   ],
+   "diags": []
   }
  }
 }
