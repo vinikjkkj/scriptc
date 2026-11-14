@@ -27918,6 +27918,18 @@
     "<repo>/tests/corpus/25221-a-concat-chain-of-three-or-more-operands-matches-the-fold-at-every-size-edge.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25290-promise-payload-word-and-waiter-vector-growth-keep-scalar-string-ref-and-rejection-results.ts": {
+   "order": [
+    "<repo>/tests/corpus/25290-promise-payload-word-and-waiter-vector-growth-keep-scalar-string-ref-and-rejection-results.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25291-closures-of-every-capture-count-and-rings-through-captured-nodes-keep-their-results.ts": {
+   "order": [
+    "<repo>/tests/corpus/25291-closures-of-every-capture-count-and-rings-through-captured-nodes-keep-their-results.ts"
+   ],
+   "diags": []
   }
  }
 }
