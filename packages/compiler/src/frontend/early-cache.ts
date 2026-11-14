@@ -128,17 +128,6 @@ export interface EarlyBuildCacheOptions {
   implementation: string;
   /** Digest of the SCRIPTC_* environment. */
   environment: string;
-  /** cc.ts's SCRIPTC_PROF_CFLAGS discriminator, which folds the CONTENTS of
-   * every file a `-include` names and not merely the flag string naming it.
-   *
-   * The environment digest above already carries the flag STRING, and an
-   * instrument lives in the header, not in the string — editing the header
-   * leaves the string byte-identical. cc.ts's own comment records what that
-   * cost: a build handed back a binary carrying the PREVIOUS instrument, and
-   * a block reported three runs as successful which had measured the old
-   * header. The native key folds these bytes; folding them here too means
-   * this cache does not depend on a downstream component to be right. */
-  profFlavor: string;
   /** process.cwd(): tsgo resolves relative to it. */
   cwd: string;
 }
@@ -169,6 +158,9 @@ function digestBytes(bytes: Uint8Array): string {
 /** Every SCRIPTC_* variable except the four that configure THIS cache and
  * nothing else. A blanket rather than an allowlist: see the header comment. */
 const CACHE_ONLY_ENV = new Set([
+  // SCRIPTC_PROF_CFLAGS reaches ONLY the C compiler (cc.ts folds it, and the contents of every -include it names, into the native key). The lowering and the emitted C do not read
+  // it, so a flag-only variant (census headers, -D switches, lab counters) must hit this cache and re-run just clang and the link, not the 25-minute lowering of an app.
+  "SCRIPTC_PROF_CFLAGS",
   "SCRIPTC_CACHE_DIR",
   "SCRIPTC_NO_CACHE",
   "SCRIPTC_CACHE_MAX_MB",
@@ -238,8 +230,7 @@ function cacheKey(options: EarlyBuildCacheOptions): string {
     .update(options.provenance).update("\0")
     .update(options.target).update("\0")
     .update(options.cc).update("\0")
-    .update(options.environment).update("\0")
-    .update(options.profFlavor)
+    .update(options.environment)
     .digest("hex");
 }
 

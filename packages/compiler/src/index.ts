@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { parseLayoutOrder, reorderLlvmText, type LayoutOrder } from "./backend/layout-order.js";
 import { tapPhase, tapped } from "./phase-tap.js";
 import { basename, dirname, join, resolve } from "node:path";
-import { cacheRootDir, CcCompileError, compileC, compileLibArchive, profFlavor, resolveCc, targetPlatform } from "./backend/cc.js";
+import { cacheRootDir, CcCompileError, compileC, compileLibArchive, resolveCc, targetPlatform } from "./backend/cc.js";
 import { emitModule, emitModuleProgram } from "./backend/emission/emitter.js";
 import { coroPlans } from "./ir/coro-plans.js";
 import { emitFinalKeyReadWidths, emitFinalNarrowBridges, flushKeyReadCensus, flushNarrowBridgeCensus, keyReadCensusOnly } from "./frontend/lowering/keyread-census.js";
@@ -1238,7 +1238,6 @@ async function earlyCacheOptionsFor(
     nodeVersion: process.version,
     implementation: await compilerImplementationFingerprint(),
     environment: scriptcEnvironmentFingerprint(),
-    profFlavor: profFlavor(),
     cwd: process.cwd(),
   };
 }

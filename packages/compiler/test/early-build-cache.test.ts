@@ -147,6 +147,13 @@ describe("early build cache", () => {
     ).toBe(base);
   });
 
+  it("SCRIPTC_PROF_CFLAGS reaches only the C compiler: a flag-only variant shares the lowering entry", async () => {
+    // The emitted TU does not depend on the C flags (census -include headers, -D switches, lab counters), and compileC keys the native build on them
+    // itself. A variant that differed only there used to redo the whole lowering (about 25 minutes for an app).
+    expect(scriptcEnvironmentFingerprint({ SCRIPTC_PROF_CFLAGS: "-DX=1" })).toBe(scriptcEnvironmentFingerprint({}));
+    expect(scriptcEnvironmentFingerprint({ SCRIPTC_PROF_CFLAGS: "-DX=1", SCRIPTC_FOO: "1" })).not.toBe(scriptcEnvironmentFingerprint({ SCRIPTC_PROF_CFLAGS: "-DX=1" }));
+  });
+
   it("two compiler arms over byte-identical input do not share an entry", async () => {
     // The A/B rig's failure mode, and the reason `implementation` is in the
     // key at all. Two compiler builds read the same entry, the same
@@ -176,7 +183,6 @@ describe("early build cache", () => {
         nodeVersion: process.version,
         implementation: "compiler-dist-A",
         environment: "env",
-        profFlavor: "",
         cwd: dir,
       };
       const armB = { ...armA, implementation: "compiler-dist-B" };
@@ -225,7 +231,6 @@ describe("early build cache", () => {
         nodeVersion: process.version,
         implementation: "impl",
         environment: "env",
-        profFlavor: "",
         cwd: dir,
       };
       await publishEarlyBuildCache(root, options, {
@@ -334,7 +339,6 @@ describe("early build cache", () => {
         nodeVersion: process.version,
         implementation: "impl",
         environment: "env",
-        profFlavor: "",
         cwd: dir,
       };
       await publishEarlyBuildCache(root, baseline, {
@@ -576,7 +580,6 @@ describe("early build cache", () => {
         nodeVersion: process.version,
         implementation: "impl",
         environment: "env",
-        profFlavor: "",
         cwd: dir,
       };
       await publishEarlyBuildCache(root, options, {
@@ -642,7 +645,6 @@ describe("early build cache", () => {
         nodeVersion: process.version,
         implementation: "impl",
         environment: "env",
-        profFlavor: "",
         cwd: dir,
       };
       await publishEarlyBuildCache(root, options, {
