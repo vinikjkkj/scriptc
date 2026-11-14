@@ -122,8 +122,21 @@ typedef struct {
   unsigned row;
   unsigned phys;
   unsigned size;
+  unsigned site; /* dyn nodes only: index into scr_cycen_sites (0 = none) */
 } ScrCyCenPtr;
 
+/* ALLOCATION SITES of dyn nodes. The census is -include'd before scr_runtime.h, so it cannot name ScrDyn; scr_json.c calls these. A site is the
+ * first SCR_CYCEN_SITE_DEPTH return addresses up the frame-pointer chain from scr_dyn_alloc (build with -fno-omit-frame-pointer); the report
+ * prints the raw addresses and the reader picks the first frame that is not a scr_* runtime function (the EMITTING function). */
+#define SCR_CYCEN_CHUNKS 1
+#define SCR_CYCEN_SITE_DEPTH 6
+#ifndef SCR_CYCEN_SITES
+#define SCR_CYCEN_SITES 65536u
+#endif
+SCR_CYCEN_SHARED unsigned long long scr_cycen_sites[SCR_CYCEN_SITES][SCR_CYCEN_SITE_DEPTH];
+SCR_CYCEN_SHARED unsigned scr_cycen_nsites = 1; /* slot 0 = none */
+SCR_CYCEN_SHARED unsigned scr_cycen_site_pending = 0;
+SCR_CYCEN_SHARED long long scr_cycen_site_lost = 0;
 SCR_CYCEN_SHARED ScrCyCenRow scr_cycen_tbl[SCR_CYCEN_SLOTS] = {{0}};
 SCR_CYCEN_SHARED ScrCyCenPtr scr_cycen_ptbl[SCR_CYCEN_PSLOTS] = {{0}};
 /* The occupied rows in insertion order, so a snapshot is O(kinds) and can
@@ -210,6 +223,44 @@ SCR_CYCEN_FN unsigned scr_cycen_phash(const void *p) {
   return (unsigned)(x & (SCR_CYCEN_PSLOTS - 1u));
 }
 
+__attribute__((noinline)) SCR_CYCEN_FN unsigned scr_cycen_site_capture(void) {
+  unsigned long long r[SCR_CYCEN_SITE_DEPTH];
+  int n = 0;
+  void **fp = (void **)__builtin_frame_address(0);
+  for (int i = 0; i < SCR_CYCEN_SITE_DEPTH; i++) r[i] = 0;
+  while (n < SCR_CYCEN_SITE_DEPTH && fp != NULL && ((unsigned long long)(size_t)fp & 7u) == 0) {
+    void **nfp = (void **)fp[0];
+    r[n++] = (unsigned long long)(size_t)fp[1];
+    if (nfp == NULL || nfp <= fp || (char *)nfp - (char *)fp > (1 << 20)) break;
+    fp = nfp;
+  }
+  unsigned long long h = 1469598103934665603ULL;
+  for (int i = 0; i < SCR_CYCEN_SITE_DEPTH; i++) { h ^= r[i]; h *= 1099511628211ULL; }
+  unsigned mask = SCR_CYCEN_SITES - 1u, j = (unsigned)(h >> 20) & mask;
+  for (unsigned t = 0; t < SCR_CYCEN_SITES; t++, j = (j + 1u) & mask) {
+    if (j == 0) continue;
+    if (scr_cycen_sites[j][0] == 0) {
+      for (int i = 0; i < SCR_CYCEN_SITE_DEPTH; i++) scr_cycen_sites[j][i] = r[i];
+      scr_cycen_nsites++;
+      return j;
+    }
+    int same = 1;
+    for (int i = 0; i < SCR_CYCEN_SITE_DEPTH; i++) if (scr_cycen_sites[j][i] != r[i]) { same = 0; break; }
+    if (same) return j;
+  }
+  scr_cycen_site_lost++;
+  return 0;
+}
+SCR_CYCEN_FN void scr_cycen_resite(const void *hdr) {
+  unsigned site = scr_cycen_site_capture();
+  unsigned mask = SCR_CYCEN_PSLOTS - 1u, h = scr_cycen_phash(hdr);
+  for (unsigned i = 0; i < SCR_CYCEN_PSLOTS; i++) {
+    unsigned j = (h + i) & mask;
+    if (scr_cycen_ptbl[j].p == NULL) return;
+    if (scr_cycen_ptbl[j].p == hdr) { scr_cycen_ptbl[j].site = site; return; }
+  }
+}
+
 SCR_CYCEN_FN unsigned scr_cycen_row_of(const void *key) {
   unsigned h = scr_cycen_khash(key);
   for (unsigned i = 0; i < SCR_CYCEN_SLOTS; i++) {
@@ -285,6 +336,8 @@ SCR_CYCEN_FN void scr_cycen_note_alloc(const void *obj, size_t phys, size_t size
         scr_cycen_ptbl[j].row = ri;
         scr_cycen_ptbl[j].phys = (unsigned)phys;
         scr_cycen_ptbl[j].size = (unsigned)size;
+        scr_cycen_ptbl[j].site = scr_cycen_site_pending;
+        scr_cycen_site_pending = 0;
         scr_cycen_ptr_live++;
         if (scr_cycen_ptr_live > scr_cycen_ptr_live_peak)
           scr_cycen_ptr_live_peak = scr_cycen_ptr_live;
@@ -379,6 +432,7 @@ SCR_CYCEN_FN void scr_cycen_note_free(const void *obj, int pooled, size_t cyc_li
   scr_cycen_ptbl[hole].row = 0;
   scr_cycen_ptbl[hole].phys = 0;
   scr_cycen_ptbl[hole].size = 0;
+  scr_cycen_ptbl[hole].site = 0;
   for (unsigned k = (hole + 1u) & mask; scr_cycen_ptbl[k].p != NULL; k = (k + 1u) & mask) {
     unsigned ideal = scr_cycen_phash(scr_cycen_ptbl[k].p);
     int blocked = (hole <= k) ? (ideal > hole && ideal <= k) : (ideal > hole || ideal <= k);
@@ -388,6 +442,7 @@ SCR_CYCEN_FN void scr_cycen_note_free(const void *obj, int pooled, size_t cyc_li
     scr_cycen_ptbl[k].row = 0;
     scr_cycen_ptbl[k].phys = 0;
     scr_cycen_ptbl[k].size = 0;
+    scr_cycen_ptbl[k].site = 0;
     hole = k;
   }
 }
@@ -443,6 +498,136 @@ SCR_CYCEN_FN void scr_cycen_note_unpark(const void *obj, long long side) {
   scr_cycen_park_delta(obj, side, -1);
 }
 
+
+/* ── SEAM PROBE: live objects per kind before vs after a FORCED collection ──
+ * scr_cycen_seam() is called from scr_collect_cycles_idle (the between-turns
+ * seam). When the live bytes have grown >= SCR_CYCEN_PROBE_STEP percent past the last probe (and are
+ * above SCR_CYCEN_PROBE_MIN), it copies every row's live_n/live_phys ("before"), runs scr_collect_cycles() regardless of
+ * pace, and copies them again ("after"). The probe with the largest "before" is kept whole and written by the report
+ * (CYCEN-PROBE-ROW). Every probe is also summarised (CYCEN-PROBE). A forced collection moves timing after the seam: RSS
+ * figures must come from an uninstrumented run. */
+#ifndef SCR_CYCEN_PROBE_STEP
+#define SCR_CYCEN_PROBE_STEP 2
+#endif
+#ifndef SCR_CYCEN_PROBE_MIN
+#define SCR_CYCEN_PROBE_MIN (1 << 20)
+#endif
+#ifndef SCR_CYCEN_PROBE_MAX
+#define SCR_CYCEN_PROBE_MAX 1024
+#endif
+SCR_CYCEN_SHARED long long scr_cycen_pr_last = 0, scr_cycen_pr_n = 0;
+SCR_CYCEN_SHARED long long scr_cycen_pr_sum[SCR_CYCEN_PROBE_MAX][6];
+SCR_CYCEN_SHARED long long scr_cycen_pr_best = -1, scr_cycen_pr_best_before = -1;
+SCR_CYCEN_SHARED long long scr_cycen_pr_rows = 0;
+SCR_CYCEN_SHARED long long scr_cycen_pr_bn[SCR_CYCEN_SLOTS], scr_cycen_pr_bp[SCR_CYCEN_SLOTS];
+SCR_CYCEN_SHARED long long scr_cycen_pr_an[SCR_CYCEN_SLOTS], scr_cycen_pr_ap[SCR_CYCEN_SLOTS];
+SCR_CYCEN_SHARED long long scr_cycen_pr_hn[SCR_CYCEN_SLOTS], scr_cycen_pr_hp[SCR_CYCEN_SLOTS];
+SCR_CYCEN_SHARED long long scr_cycen_pr_hanc[SCR_CYCEN_SLOTS], scr_cycen_pr_hsave_rows = 0;
+SCR_CYCEN_SHARED int scr_cycen_pr_busy = 0;
+
+/* ── exact arena counters + dyn-node allocation sites, at the probe instant ── */
+#define SCR_CYCEN_NCLASS 40
+long long scr_cycen_arena_walk(long long (*out)[13], int nclass);
+const void *scr_cycen_dyn_key(void);
+int scr_cycen_dyn_peek(const void *hdr, unsigned *len);
+long long scr_cycen_dyn_free_count(void);
+SCR_CYCEN_SHARED long long scr_cycen_ar_cur[SCR_CYCEN_NCLASS][13], scr_cycen_ar_best[SCR_CYCEN_NCLASS][13];
+SCR_CYCEN_SHARED long long scr_cycen_ar_held_cur = 0, scr_cycen_ar_held_best = 0;
+/* census-side counters at the same instant, for the cross-check against the arena's own `used` sum (blocks <= 256 B are the arena's) */
+SCR_CYCEN_SHARED long long scr_cycen_x_small_n = 0, scr_cycen_x_small_phys = 0, scr_cycen_x_big_n = 0, scr_cycen_x_big_phys = 0;
+SCR_CYCEN_SHARED long long scr_cycen_x_best[4], scr_cycen_x_park_best[3], scr_cycen_x_dynfree_best = 0;
+/* dyn aggregates: (site,kind) -> n,bytes ; (kind,len bucket) -> n,bytes */
+#define SCR_CYCEN_SKSLOTS 32768u
+typedef struct { unsigned key; long long n, bytes; } ScrCyCenSK; /* key = site<<5 | kind, +1 so 0 = empty */
+SCR_CYCEN_SHARED ScrCyCenSK scr_cycen_sk[SCR_CYCEN_SKSLOTS], scr_cycen_sk_best[SCR_CYCEN_SKSLOTS];
+#define SCR_CYCEN_LB 48
+SCR_CYCEN_SHARED long long scr_cycen_shape[32][SCR_CYCEN_LB][2], scr_cycen_shape_best[32][SCR_CYCEN_LB][2];
+SCR_CYCEN_SHARED long long scr_cycen_dyn_total_n = 0, scr_cycen_dyn_total_b = 0, scr_cycen_dyn_total_best_n = 0, scr_cycen_dyn_total_best_b = 0;
+
+SCR_CYCEN_FN int scr_cycen_lbucket(unsigned len) {
+  if (len < 16) return (int)len;
+  int b = 0; unsigned v = len;
+  while (v > 1) { v >>= 1; b++; }
+  return 16 + (b - 4) * 2 + ((len >> (b - 1)) & 1u); /* two rows per power of two from 16 */
+}
+
+SCR_CYCEN_FN void scr_cycen_sk_add(unsigned site, int kind, long long bytes) {
+  unsigned key = ((site << 5) | (unsigned)(kind & 31)) + 1u, mask = SCR_CYCEN_SKSLOTS - 1u, j = (key * 2654435761u >> 7) & mask;
+  for (unsigned t = 0; t < SCR_CYCEN_SKSLOTS; t++, j = (j + 1u) & mask) {
+    if (scr_cycen_sk[j].key == 0) scr_cycen_sk[j].key = key;
+    if (scr_cycen_sk[j].key == key) { scr_cycen_sk[j].n++; scr_cycen_sk[j].bytes += bytes; return; }
+  }
+}
+
+/* One pass over the pointer table: the census's own view of the live population, aggregated. */
+SCR_CYCEN_FN void scr_cycen_x_aggregate(void) {
+  const void *dk = scr_cycen_dyn_key();
+  scr_cycen_x_small_n = scr_cycen_x_small_phys = scr_cycen_x_big_n = scr_cycen_x_big_phys = 0;
+  scr_cycen_dyn_total_n = scr_cycen_dyn_total_b = 0;
+  for (unsigned i = 0; i < SCR_CYCEN_SKSLOTS; i++) { scr_cycen_sk[i].key = 0; scr_cycen_sk[i].n = 0; scr_cycen_sk[i].bytes = 0; }
+  for (int k = 0; k < 32; k++) for (int b = 0; b < SCR_CYCEN_LB; b++) scr_cycen_shape[k][b][0] = scr_cycen_shape[k][b][1] = 0;
+  for (unsigned i = 0; i < SCR_CYCEN_PSLOTS; i++) {
+    ScrCyCenPtr *e = &scr_cycen_ptbl[i];
+    if (e->p == NULL) continue;
+    if (e->phys <= 256u) { scr_cycen_x_small_n++; scr_cycen_x_small_phys += e->phys; }
+    else { scr_cycen_x_big_n++; scr_cycen_x_big_phys += e->phys; }
+    if (e->row < SCR_CYCEN_SLOTS && scr_cycen_tbl[e->row].key == dk) {
+      unsigned len = 0; int kind = scr_cycen_dyn_peek(e->p, &len);
+      int b = scr_cycen_lbucket(len); if (b >= SCR_CYCEN_LB) b = SCR_CYCEN_LB - 1;
+      scr_cycen_dyn_total_n++; scr_cycen_dyn_total_b += e->phys;
+      scr_cycen_sk_add(e->site, kind, (long long)e->phys);
+      if (kind >= 0 && kind < 32) { scr_cycen_shape[kind][b][0]++; scr_cycen_shape[kind][b][1] += e->phys; }
+    }
+  }
+}
+
+SCR_CYCEN_FN void scr_cycen_seam(void) {
+  if (scr_cycen_pr_busy || scr_cycen_pr_n >= SCR_CYCEN_PROBE_MAX) return;
+  if (getenv("SCR_CYCEN_PROBE") == NULL) return;
+  long long live = scr_cycen_live_phys;
+  if (live < (long long)SCR_CYCEN_PROBE_MIN) return;
+  if (getenv("SCR_CYCEN_PROBE_FORCE") == NULL && live * 100 < scr_cycen_pr_last * (100 + SCR_CYCEN_PROBE_STEP)) return; /* FORCE: probe at every seam (micro controls) */
+  scr_cycen_pr_busy = 1;
+  scr_cycen_pr_last = live;
+  long long rows = scr_cycen_rows;
+  long long bN = scr_cycen_live_n, bP = scr_cycen_live_phys;
+  int will_be_best = bP > scr_cycen_pr_best_before || getenv("SCR_CYCEN_PROBE_LAST") != NULL; /* LAST: report the last probe (micro controls) */
+  for (long long i = 0; i < rows; i++) {
+    ScrCyCenRow *r = &scr_cycen_tbl[scr_cycen_order[i]];
+    scr_cycen_pr_hn[i] = r->live_n;
+    scr_cycen_pr_hp[i] = r->live_phys;
+    scr_cycen_pr_hanc[i] = (long long)(size_t)r->key;
+  }
+  /* THE SAME INSTANT: arena walk, census aggregation and park counters, all before the forced collection. */
+  scr_cycen_ar_held_cur = scr_cycen_arena_walk(scr_cycen_ar_cur, SCR_CYCEN_NCLASS);
+  if (will_be_best) scr_cycen_x_aggregate();
+  scr_collect_cycles();
+  long long aN = scr_cycen_live_n, aP = scr_cycen_live_phys;
+  long long k = scr_cycen_pr_n++;
+  scr_cycen_pr_sum[k][0] = scr_cycen_alloc_total;
+  scr_cycen_pr_sum[k][1] = bN; scr_cycen_pr_sum[k][2] = bP;
+  scr_cycen_pr_sum[k][3] = aN; scr_cycen_pr_sum[k][4] = aP;
+  scr_cycen_pr_sum[k][5] = scr_cycen_live_peak;
+  if (will_be_best) {
+    scr_cycen_pr_best_before = bP; scr_cycen_pr_best = k; scr_cycen_pr_rows = rows;
+    for (long long i = 0; i < rows; i++) {
+      ScrCyCenRow *r = &scr_cycen_tbl[scr_cycen_order[i]];
+      scr_cycen_pr_bn[i] = scr_cycen_pr_hn[i]; scr_cycen_pr_bp[i] = scr_cycen_pr_hp[i];
+      scr_cycen_pr_an[i] = r->live_n; scr_cycen_pr_ap[i] = r->live_phys;
+    }
+    for (int c = 0; c < SCR_CYCEN_NCLASS; c++) for (int q = 0; q < 13; q++) scr_cycen_ar_best[c][q] = scr_cycen_ar_cur[c][q];
+    scr_cycen_ar_held_best = scr_cycen_ar_held_cur;
+    scr_cycen_x_best[0] = scr_cycen_x_small_n; scr_cycen_x_best[1] = scr_cycen_x_small_phys;
+    scr_cycen_x_best[2] = scr_cycen_x_big_n; scr_cycen_x_best[3] = scr_cycen_x_big_phys;
+    scr_cycen_dyn_total_best_n = scr_cycen_dyn_total_n; scr_cycen_dyn_total_best_b = scr_cycen_dyn_total_b;
+    for (unsigned q = 0; q < SCR_CYCEN_SKSLOTS; q++) scr_cycen_sk_best[q] = scr_cycen_sk[q];
+    for (int a = 0; a < 32; a++) for (int b = 0; b < SCR_CYCEN_LB; b++) { scr_cycen_shape_best[a][b][0] = scr_cycen_shape[a][b][0]; scr_cycen_shape_best[a][b][1] = scr_cycen_shape[a][b][1]; }
+    scr_cycen_x_park_best[0] = scr_cycen_park_n; scr_cycen_x_park_best[1] = scr_cycen_park_phys; scr_cycen_x_park_best[2] = scr_cycen_park_side;
+    scr_cycen_x_dynfree_best = scr_cycen_dyn_free_count();
+  }
+  scr_cycen_pr_busy = 0;
+}
+
 SCR_CYCEN_FN void scr_cycen_report(void) {
   if (scr_cycen_reported) return;
   scr_cycen_reported = 1;
@@ -468,6 +653,36 @@ SCR_CYCEN_FN void scr_cycen_report(void) {
               scr_cycen_curve[i][1], scr_cycen_curve[i][2], scr_cycen_curve[i][3],
               scr_cycen_curve[i][4], scr_cycen_curve[i][5]);
     }
+    if (scr_cycen_pr_best >= 0) {
+      fprintf(f, "CYCEN-ARENA-HELD best=%lld held=%lld\n", scr_cycen_pr_best, scr_cycen_ar_held_best);
+      for (int c = 0; c < SCR_CYCEN_NCLASS; c++) {
+        long long *a = scr_cycen_ar_best[c];
+        if (a[0] == 0) continue;
+        fprintf(f, "CYCEN-ARENA class=%d stride=%lld chunks=%lld chunkB=%lld liveB=%lld freeB=%lld goneB=%lld uncarvedB=%lld partialChunks=%lld partialB=%lld liveBlocks=%lld freeBlocks=%lld curChunks=%lld hdrB=%lld\n",
+                c, a[8], a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[9], a[10], a[11], a[12]);
+      }
+      fprintf(f, "CYCEN-X smallN=%lld smallPhys=%lld bigN=%lld bigPhys=%lld parkN=%lld parkPhys=%lld parkSide=%lld dynFreeList=%lld dynNodesN=%lld dynNodesB=%lld sitesLost=%lld nsites=%u\n",
+              scr_cycen_x_best[0], scr_cycen_x_best[1], scr_cycen_x_best[2], scr_cycen_x_best[3],
+              scr_cycen_x_park_best[0], scr_cycen_x_park_best[1], scr_cycen_x_park_best[2], scr_cycen_x_dynfree_best,
+              scr_cycen_dyn_total_best_n, scr_cycen_dyn_total_best_b, scr_cycen_site_lost, scr_cycen_nsites);
+      for (unsigned q = 0; q < SCR_CYCEN_SKSLOTS; q++) {
+        if (scr_cycen_sk_best[q].key == 0) continue;
+        unsigned key = scr_cycen_sk_best[q].key - 1u, site = key >> 5;
+        fprintf(f, "CYCEN-DYNSITE kind=%u n=%lld bytes=%lld", key & 31u, scr_cycen_sk_best[q].n, scr_cycen_sk_best[q].bytes);
+        for (int d = 0; d < SCR_CYCEN_SITE_DEPTH; d++) fprintf(f, " %llx", site ? scr_cycen_sites[site][d] : 0ULL);
+        fprintf(f, "\n");
+      }
+      for (int a = 0; a < 32; a++) for (int b = 0; b < SCR_CYCEN_LB; b++)
+        if (scr_cycen_shape_best[a][b][0]) fprintf(f, "CYCEN-DYNSHAPE kind=%d lenrow=%d n=%lld bytes=%lld\n", a, b, scr_cycen_shape_best[a][b][0], scr_cycen_shape_best[a][b][1]);
+    }
+    for (long long k = 0; k < scr_cycen_pr_n; k++)
+      fprintf(f, "CYCEN-PROBE %lld alloc=%lld beforeN=%lld beforePhys=%lld afterN=%lld afterPhys=%lld livePeakSoFar=%lld\n",
+              k, scr_cycen_pr_sum[k][0], scr_cycen_pr_sum[k][1], scr_cycen_pr_sum[k][2],
+              scr_cycen_pr_sum[k][3], scr_cycen_pr_sum[k][4], scr_cycen_pr_sum[k][5]);
+    for (long long i = 0; i < scr_cycen_pr_rows && scr_cycen_pr_best >= 0; i++)
+      fprintf(f, "CYCEN-PROBE-ROW best=%lld %lld %lld %lld %lld %llx\n", scr_cycen_pr_best,
+              scr_cycen_pr_bn[i], scr_cycen_pr_bp[i], scr_cycen_pr_an[i], scr_cycen_pr_ap[i],
+              (unsigned long long)scr_cycen_pr_hanc[i]);
     fprintf(f,
             "CYCEN-TOTAL rows=%lld allocs=%lld frees=%lld liveN=%lld livePhys=%lld "
             "livePayload=%lld poolN=%lld poolPhys=%lld osPeak=%lld osPeakN=%lld "
