@@ -1428,7 +1428,43 @@ static inline uint32_t scr_str_big_signature(ScrStr *const *ops, size_t n) {
   }
   return g;
 }
-static __attribute__((noinline)) ScrStr *scr_str_concat_big(ScrStr *const *ops, size_t n, size_t total) {
+/* THE SITE OF A LARGE CHAIN is its return address (the call in the compiled program that reached scr_str_concat3..8): a small open-addressed table counts, per site, the table's
+ * misses and hits. A site that has missed SCR_STR_SITE_LIMIT times with no hit stops consulting the table for good, so a chain that builds a different large string every time
+ * (a write buffer) pays at most that many lookups; a site that has hit once always consults. Only the large path (total >= 4 KB, already doing thousands of instructions) reads this;
+ * the small path executes none of it. A full table just means a site is not tracked and always consults. */
+#define SCR_STR_SITE_N 16
+#define SCR_STR_SITE_LIMIT 8u
+static struct { uintptr_t ra; uint32_t miss, hit; } scr_str_sites[SCR_STR_SITE_N];
+static unsigned scr_str_site_last;
+/* Up to two sites that were given up on, checked INLINE in the large path of scr_str_concat_n (two compares) so they take the plain copy without a call. */
+static uintptr_t scr_str_off_ra[2];
+static __attribute__((noinline)) ScrStr *scr_str_concat_big(uintptr_t ra, ScrStr *const *ops, size_t n, size_t total);
+static __attribute__((noinline)) ScrStr *scr_str_concat_big(uintptr_t ra, ScrStr *const *ops, size_t n, size_t total) {
+  unsigned si = scr_str_site_last, probes = 0;
+  if (scr_str_sites[si].ra != ra) { /* not the site that ran last: probe */
+    si = (unsigned)(ra >> 2) % SCR_STR_SITE_N;
+    while (probes < SCR_STR_SITE_N && scr_str_sites[si].ra != 0 && scr_str_sites[si].ra != ra) { si = (si + 1) % SCR_STR_SITE_N; probes++; }
+    scr_str_site_last = si % SCR_STR_SITE_N;
+  }
+  uint32_t *hit = NULL, *miss = NULL;
+  if (probes < SCR_STR_SITE_N) {
+    if (scr_str_sites[si].ra == 0) scr_str_sites[si].ra = ra;
+    hit = &scr_str_sites[si].hit;
+    miss = &scr_str_sites[si].miss;
+    if (*hit == 0 && *miss >= SCR_STR_SITE_LIMIT) { /* a site that never hits: the plain path, no lookup */
+      if (scr_str_off_ra[0] == 0) scr_str_off_ra[0] = ra;
+      else if (scr_str_off_ra[1] == 0 && scr_str_off_ra[0] != ra) scr_str_off_ra[1] = ra;
+      ScrStr *s = scr_str_take_spare(total);
+      if (!s) s = scr_str_alloc(total, total);
+      size_t off = 0;
+      for (size_t i = 0; i < n; i++) {
+        memcpy(s->data + off, ops[i]->data, ops[i]->len);
+        off += ops[i]->len;
+      }
+      s->data[total] = '\0';
+      return s;
+    }
+  }
   ScrStr **set = scr_str_big[total % SCR_STR_BIG_SETS];
   const uint32_t sig = scr_str_big_signature(ops, n);
   uint32_t *sigs = scr_str_big_sig[total % SCR_STR_BIG_SETS];
@@ -1436,9 +1472,11 @@ static __attribute__((noinline)) ScrStr *scr_str_concat_big(ScrStr *const *ops, 
     ScrStr *c = set[w];
     if (c != NULL && c->len == total && sigs[w] == sig && scr_str_big_same(c, ops, n)) {
       c->rc++;
+      if (hit != NULL) (*hit)++;
       return c;
     }
   }
+  if (miss != NULL) (*miss)++;
   ScrStr *s = scr_str_take_spare(total);
   if (!s) s = scr_str_alloc(total, total);
   size_t off = 0;
@@ -1491,7 +1529,7 @@ static ScrStr *scr_str_concat_fold(ScrStr *const *ops, size_t n) {
   return acc;
 }
 
-static ScrStr *scr_str_concat_n(ScrStr *const *ops, size_t n) {
+static inline __attribute__((always_inline)) ScrStr *scr_str_concat_n(ScrStr *const *ops, size_t n) {
   size_t total = 0;
   for (size_t i = 0; i < n; i++) {
     total += (size_t)ops[i]->len;
@@ -1500,7 +1538,11 @@ static ScrStr *scr_str_concat_n(ScrStr *const *ops, size_t n) {
   if (total <= SCR_STR_INTERN_MAXLEN) return scr_str_concat_fold(ops, n);
   ScrStr *a = ops[0];
   if (a->rc == 1 && a->cap >= total && a->cap < 0xFFFD0000u) return scr_str_concat_fold(ops, n);
-  if (total >= SCR_STR_BIG_MIN && total <= SCR_STR_BIG_MAX) return scr_str_concat_big(ops, n, total);
+  /* always_inline: the return address read here is the compiled program's call into scr_str_concat3..8, one per chain site */
+  if (total - SCR_STR_BIG_MIN <= SCR_STR_BIG_MAX - SCR_STR_BIG_MIN) {
+    const uintptr_t ra = (uintptr_t)__builtin_return_address(0);
+    if (ra != scr_str_off_ra[0] && ra != scr_str_off_ra[1]) return scr_str_concat_big(ra, ops, n, total);
+  }
   ScrStr *s = scr_str_take_spare(total);
   if (!s) s = scr_str_alloc(total, total);
   size_t off = 0;
