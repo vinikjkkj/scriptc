@@ -77,7 +77,7 @@ describe("the dyn-function adapter's capture", () => {
     expect(c).toContain("a->caps[0] = scr_box_new(SCR_BOX_FUNC);");
     expect(c).toContain("scr_box_set_ref(a->caps[0], scr_closure_retain(d->v.fn.clo));");
     expect(c).toContain("a->caps[1] = scr_box_new(SCR_BOX_F64);");
-    expect(c).toContain("scr_box_set_thunk(a->caps[1], d->v.fn.thunk);");
+    expect(c).toContain("scr_box_set_thunk(a->caps[1], scr_dyn_fn_thunk(d));");
 
     // And the untraced form is gone from the adapter arm. The same
     // `scr_box_new_obj(..., NULL)` spelling still appears for dyn-typed

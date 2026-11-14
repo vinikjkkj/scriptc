@@ -634,7 +634,12 @@ static size_t scr_fnname_probe(const ScrFnName **tab, size_t cap, const void *fn
   return i;
 }
 
+static unsigned scr_fn_names_epoch_v = 1;
+/* Bumped by every install: the dyn function-descriptor cache keys on it, because the name and kind code it caches come out of this table. */
+unsigned scr_fn_names_epoch(void) { return scr_fn_names_epoch_v; }
+
 void scr_fn_names_install(const ScrFnName *tbl, size_t n) {
+  scr_fn_names_epoch_v++;
   free(scr_fnname_idx);
   scr_fnname_idx = NULL;
   scr_fnname_idx_cap = 0;

@@ -54,6 +54,11 @@ export const DYN_ENTRY_SIZE = 24;
 export const DYN_ENTRY_KEYLEN_OFF = 8;
 export const DYN_ENTRY_VALUE_OFF = 16;
 
+/** The SCR_DYN_FUNC box (ScrDyn::v.fn in scr_runtime.h): the closure and a pointer to its ScrFnDesc, whose FIRST member is the thunk.
+ * test/dyn-fn-layout.test.ts parses the header's _Static_assert and compares. */
+export const DYN_FN_CLO_OFF = 16;
+export const DYN_FN_DESC_OFF = 24;
+
 /** ScrDynKind values (scr_runtime.h). */
 /** ScrDynHandleTag numeric values (scr_runtime.h's enum order). */
 export const DYN_HANDLE_TAG_NUM: Record<string, number> = {
@@ -2686,7 +2691,7 @@ export class LlDyn {
           const clop = B.tmp();
           const clo = B.tmp();
           const rclo = B.tmp();
-          B.line(`${clop} = getelementptr inbounds i8, ptr %d, i64 16 ; ->v.fn.clo`);
+          B.line(`${clop} = getelementptr inbounds i8, ptr %d, i64 ${DYN_FN_CLO_OFF} ; ->v.fn.clo`);
           B.line(`${clo} = load ptr, ptr ${clop}`);
           B.line(`${rclo} = call ptr @scr_closure_retain_v(ptr ${clo})`);
           B.line(`call void @scr_box_set_ref(ptr ${fbox}, ptr ${rclo})`);
@@ -2697,7 +2702,11 @@ export class LlDyn {
           B.line(`store ptr ${tbox}, ptr ${cap1}`);
           const thp = B.tmp();
           const th = B.tmp();
-          B.line(`${thp} = getelementptr inbounds i8, ptr %d, i64 24 ; ->v.fn.thunk`);
+          const descp = B.tmp();
+          const desc = B.tmp();
+          B.line(`${descp} = getelementptr inbounds i8, ptr %d, i64 ${DYN_FN_DESC_OFF} ; ->v.fn.desc`);
+          B.line(`${desc} = load ptr, ptr ${descp}`);
+          B.line(`${thp} = getelementptr inbounds i8, ptr ${desc}, i64 0 ; ->v.fn.desc->thunk (first member)`);
           B.line(`${th} = load ptr, ptr ${thp}`);
           B.line(`call void @scr_box_set_thunk_fn(ptr ${tbox}, ptr ${th})`);
           host.declare(`declare void @scr_dyn_fn_share_props(ptr, ptr)`);
@@ -2762,7 +2771,7 @@ export class LlDyn {
         const clop = B.tmp();
         const clo = B.tmp();
         const r = B.tmp();
-        B.line(`${clop} = getelementptr inbounds i8, ptr %d, i64 16 ; ->v.fn.clo`);
+        B.line(`${clop} = getelementptr inbounds i8, ptr %d, i64 ${DYN_FN_CLO_OFF} ; ->v.fn.clo`);
         B.line(`${clo} = load ptr, ptr ${clop}`);
         B.line(`${r} = call ptr @scr_closure_retain_v(ptr ${clo})`);
         B.terminate(`ret ptr ${r}`);
@@ -2833,7 +2842,7 @@ export class LlDyn {
         const clop2 = B.tmp();
         const clo2 = B.tmp();
         const rclo = B.tmp();
-        B.line(`${clop2} = getelementptr inbounds i8, ptr %d, i64 16 ; ->v.fn.clo`);
+        B.line(`${clop2} = getelementptr inbounds i8, ptr %d, i64 ${DYN_FN_CLO_OFF} ; ->v.fn.clo`);
         B.line(`${clo2} = load ptr, ptr ${clop2}`);
         B.line(`${rclo} = call ptr @scr_closure_retain_v(ptr ${clo2})`);
         B.line(`call void @scr_box_set_ref(ptr ${fbox}, ptr ${rclo})`);
@@ -2846,7 +2855,11 @@ export class LlDyn {
         B.line(`store ptr ${tbox}, ptr ${capp1}`);
         const thp = B.tmp();
         const th = B.tmp();
-        B.line(`${thp} = getelementptr inbounds i8, ptr %d, i64 24 ; ->v.fn.thunk`);
+        const descp = B.tmp();
+        const desc = B.tmp();
+        B.line(`${descp} = getelementptr inbounds i8, ptr %d, i64 ${DYN_FN_DESC_OFF} ; ->v.fn.desc`);
+        B.line(`${desc} = load ptr, ptr ${descp}`);
+        B.line(`${thp} = getelementptr inbounds i8, ptr ${desc}, i64 0 ; ->v.fn.desc->thunk (first member)`);
         B.line(`${th} = load ptr, ptr ${thp}`);
         B.line(`call void @scr_box_set_thunk_fn(ptr ${tbox}, ptr ${th})`);
         host.declare(`declare void @scr_dyn_fn_share_props(ptr, ptr)`);

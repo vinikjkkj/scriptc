@@ -186,11 +186,12 @@ static void scr_dyncen_walk(ScrDynCenKind *rows) {
        * their absent value is SCR_RVA_NULL, not 0 — `if (d->v.fn.sig)`
        * would answer true for an absent literal and false for one that
        * happens to sit at the anchor. */
+      if (d->v.fn.desc == NULL) break; /* allocated and not yet initialised: the record pointer is NULL where the inline offsets used to read 0 */
       if (scr_dyn_fn_sig(d)) r->fn_sig++;
       if (scr_dyn_fn_name(d)) r->fn_name++;
       if (scr_dyn_fn_src(d)) r->fn_src++;
-      if ((long long)d->v.fn.arity > r->fn_arity_max)
-        r->fn_arity_max = (long long)d->v.fn.arity;
+      if ((long long)scr_dyn_fn_arity_word(d) > r->fn_arity_max)
+        r->fn_arity_max = (long long)scr_dyn_fn_arity_word(d);
       break;
     case SCR_DYN_BYTES:
     case SCR_DYN_ARRBUF:

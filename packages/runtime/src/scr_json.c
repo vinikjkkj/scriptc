@@ -533,17 +533,18 @@ void scr_dyn_from_leave(void) {
  * strict alloc/free balance.
  */
 /* A node is allocated at the size its KIND needs, not at sizeof(ScrDyn): the header (rc, kind, flags) is 16 bytes and the payload union is as
- * wide as its widest arm (the function box, 32), but a number, string, bool or bytes box uses 8 of those, a handle or class instance 16, and an
+ * wide as its widest arm (the array, object, map and proxy arms, 24), but a number, string, bool or bytes box uses 8 of those, a handle or class instance 16, and an
  * array, object, map or proxy 24. The size is therefore a function of the kind, fixed at alloc, and a node never changes kind, so the free
  * lists are split by size class and a recycled node is always the size its new kind wants. Nothing may read a payload arm wider than the
  * node's kind owns: every reader of v.* tests `kind` first, and the audit lane (malloc per node, ASan) is what proves it. */
 #define SCR_DYN_ARMS(X) \
   X(SCR_DYN_NULL, 1) X(SCR_DYN_BOOL, 1) X(SCR_DYN_NUM, 8) X(SCR_DYN_STR, 8) X(SCR_DYN_ARR, 24) X(SCR_DYN_OBJ, 24) X(SCR_DYN_UNDEF, 1) \
-  X(SCR_DYN_BYTES, 8) X(SCR_DYN_FUNC, 32) X(SCR_DYN_HANDLE, 16) X(SCR_DYN_PROMISE, 8) X(SCR_DYN_JSVAL, 8) X(SCR_DYN_OBJINST, 16) \
+  X(SCR_DYN_BYTES, 8) X(SCR_DYN_FUNC, 16) X(SCR_DYN_HANDLE, 16) X(SCR_DYN_PROMISE, 8) X(SCR_DYN_JSVAL, 8) X(SCR_DYN_OBJINST, 16) \
   X(SCR_DYN_ARRBUF, 8) X(SCR_DYN_BIG, 8) X(SCR_DYN_MAP, 24) X(SCR_DYN_PROXY, 24)
 #define SCR_DYN_ARM_ROW(k, n) [k] = n,
 static const uint8_t scr_dyn_arm_bytes[SCR_DYN_KIND_COUNT] = {SCR_DYN_ARMS(SCR_DYN_ARM_ROW)};
-_Static_assert(sizeof(((ScrDyn *)0)->v) == 32, "the widest arm is the function box");
+_Static_assert(sizeof(((ScrDyn *)0)->v) == 24, "the widest arm is the array/object/map/proxy arm, 24 bytes");
+_Static_assert(sizeof(((ScrDyn *)0)->v.fn) == 16, "the function box is a closure and a descriptor pointer");
 _Static_assert(sizeof(((ScrDyn *)0)->v.arr) == 24 && sizeof(((ScrDyn *)0)->v.obj) == 24, "arr and obj arms are 24 bytes");
 _Static_assert(sizeof(((ScrDyn *)0)->v.map) <= 24 && sizeof(((ScrDyn *)0)->v.proxy) <= 24, "map and proxy arms fit 24 bytes");
 _Static_assert(sizeof(((ScrDyn *)0)->v.handle) <= 16 && sizeof(((ScrDyn *)0)->v.inst) <= 16, "handle and instance arms fit 16 bytes");
@@ -556,7 +557,7 @@ static const uint8_t scr_dyn_arm_words[SCR_DYN_KIND_COUNT] = {SCR_DYN_ARMS(SCR_D
 static inline size_t scr_dyn_node_bytes(ScrDynKind k) { return offsetof(ScrDyn, v) + (size_t)scr_dyn_arm_words[k] * 8u; }
 
 #ifndef SCR_RC_AUDIT
-/* arr and obj keep their own lists (they preserve the items/entries buffer); every other kind recycles by ARM size: 8, 16, 24 (map, proxy), 32. */
+/* arr and obj keep their own lists (they preserve the items/entries buffer); every other kind recycles by ARM size: 8, 16 (function box, handle, instance), 24 (map, proxy). */
 static ScrDyn *scr_dyn_free_lists[6];
 #define SCR_DYN_FL_ROW(k, n) [k] = ((n) + 7) / 8 - 1,
 static const uint8_t scr_dyn_fl_idx[SCR_DYN_KIND_COUNT] = {SCR_DYN_ARMS(SCR_DYN_FL_ROW) [SCR_DYN_ARR] = 4, [SCR_DYN_OBJ] = 5};
@@ -1320,7 +1321,7 @@ ScrDyn *scr_dyn_bound_method_to(const ScrDyn *m, const ScrDyn *d) {
    * through the adapter path rather than the direct-closure one.
    * SCR_FN_SRC_BOUND with a NULL name is Node's own answer for a bound
    * function's toString. */
-  return scr_dyn_new_func_src(clo, scr_bound_method_thunk, m->v.fn.arity, "()", NULL,
+  return scr_dyn_new_func_src(clo, scr_bound_method_thunk, scr_dyn_fn_arity_word(m), "()", NULL,
                               SCR_FN_SRC_BOUND);
 }
 
@@ -2373,7 +2374,7 @@ const char scr_dyn_bound_name_mark[] = "\x01bound-fn-name";
  * binds never links it. */
 const char *(*scr_dyn_bound_name_fn)(const ScrDyn *d) = NULL;
 __attribute__((noinline)) const char *scr_dyn_fn_name(const ScrDyn *d) {
-  const char *n = scr_rva_str(d->v.fn.name);
+  const char *n = scr_rva_str(d->v.fn.desc->name);
   return n == scr_dyn_bound_name_mark ? scr_dyn_bound_name_fn(d) : n;
 }
 const char *scr_dyn_fn_src_of(const ScrDyn *d) { return scr_dyn_fn_src(d); }
@@ -2381,8 +2382,12 @@ const char *scr_dyn_fn_src_of(const ScrDyn *d) { return scr_dyn_fn_src(d); }
 /* The compiler's PROVEN kind code for a FUNC box whose closure the table
  * cannot name (a static bind: one shared wrapper per signature, whose code
  * is the target's). Replaces the code bits and keeps the JS length. */
+static const ScrFnDesc *scr_fd_intern(const ScrFnDesc *want);
 ScrDyn *scr_dyn_fn_code_set(ScrDyn *d, unsigned code) {
-  d->v.fn.arity = (d->v.fn.arity & 0xffffffu) | ((uint32_t)(code & SCR_FNK_CODE_MASK) << SCR_FNK_SHIFT);
+  /* The record is shared by every box of the same function, so a changed code is a different record (interned: the same one every time). */
+  ScrFnDesc want = *d->v.fn.desc;
+  want.arity = (want.arity & 0xffffffu) | ((uint32_t)(code & SCR_FNK_CODE_MASK) << SCR_FNK_SHIFT);
+  d->v.fn.desc = scr_fd_intern(&want);
   return d;
 }
 
@@ -2816,8 +2821,8 @@ static uint32_t scr_fnad_hash(uintptr_t ident, const ScrStr *name, const void *c
 /* The engine identity a boxed function stands for, or false when it is not one of the two engine boxes. */
 static bool scr_fnad_key(const ScrDyn *d, uintptr_t *ident, ScrStr **name) {
   if (d->kind != SCR_DYN_FUNC) return false;
-  bool bound = d->v.fn.thunk == scr_isl_bound_thunk;
-  if (!bound && d->v.fn.thunk != scr_isl_call_thunk) return false;
+  bool bound = scr_dyn_fn_thunk(d) == scr_isl_bound_thunk;
+  if (!bound && scr_dyn_fn_thunk(d) != scr_isl_call_thunk) return false;
   ScrDyn *obj = (ScrDyn *)scr_box_get_ref(d->v.fn.clo->caps[0]); /* +1 */
   *ident = scr_dyn_jsval_ops()->ident(obj->v.jsval.cell);
   scr_dyn_release(obj);
@@ -2941,7 +2946,7 @@ ScrClosure *scr_fn_unbind(ScrClosure *c) {
     hit->caps[0] = scr_box_new(SCR_BOX_FUNC);
     scr_box_set_ref(hit->caps[0], scr_closure_retain(box->v.fn.clo));
     hit->caps[1] = scr_box_new(SCR_BOX_F64);
-    scr_box_set_thunk(hit->caps[1], box->v.fn.thunk);
+    scr_box_set_thunk(hit->caps[1], scr_dyn_fn_thunk(box));
     scr_dyn_fn_adapter_remember(box, c->fn, hit);
   }
   scr_dyn_release(box);
@@ -3632,11 +3637,85 @@ const char SCR_FN_SRC_BOUND[] = "<bound>";
  * — which is keyed on exactly that pointer for exactly this reason
  * (scr_runtime.h, ScrFnName). Still NULL after the lookup means the
  * function really is anonymous, and the renderers already say so. */
+/* ── the function descriptors ─────────────────────────────────────────────
+ * One ScrFnDesc per distinct (thunk, sig, name, src, arity word) a program boxes, made on first use and never freed (a few hundred records of 24
+ * bytes). Two levels: a small direct-mapped cache keyed on the INPUTS of scr_dyn_new_func_src -- the closure's entry, the thunk, the three
+ * literals and the arity -- answers the steady state with one compare chain and no table lookup, and skips the two name-table lookups the
+ * old path made on every box (scr_fn_name_of, scr_fn_code_of); behind it a hash table of the records themselves, compared whole, makes
+ * the record unique. The cache is flushed when the name table is installed again (scr_fn_names_epoch), because the name and the kind code
+ * it caches come out of that table. */
+extern unsigned scr_fn_names_epoch(void);
+#define SCR_FD_CACHE 128u
+static struct {
+  const void *entry;
+  ScrDynThunk thunk;
+  const char *sig, *name, *src;
+  uint32_t arity;
+  unsigned epoch;
+  const ScrFnDesc *desc;
+} scr_fd_cache[SCR_FD_CACHE];
+static const ScrFnDesc **scr_fd_tab; /* open addressing; a power of two */
+static size_t scr_fd_cap, scr_fd_len;
+static ScrFnDesc *scr_fd_chunk;
+static size_t scr_fd_chunk_left;
+
+static size_t scr_fd_hash(const ScrFnDesc *d) {
+  uint64_t x = (uint64_t)(uintptr_t)d->thunk;
+  x = x * 0x9e3779b97f4a7c15ull + (uint32_t)d->sig;
+  x = x * 0x9e3779b97f4a7c15ull + (uint32_t)d->name;
+  x = x * 0x9e3779b97f4a7c15ull + (uint32_t)d->src;
+  x = x * 0x9e3779b97f4a7c15ull + d->arity;
+  x ^= x >> 29;
+  return (size_t)x;
+}
+
+static const ScrFnDesc *scr_fd_intern(const ScrFnDesc *want) {
+  if (scr_fd_len * 2 >= scr_fd_cap) {
+    size_t ncap = scr_fd_cap ? scr_fd_cap * 2 : 256;
+    const ScrFnDesc **nt = (const ScrFnDesc **)calloc(ncap, sizeof *nt);
+    if (nt == NULL) scr_trap("scriptc: out of memory\n");
+    for (size_t i = 0; i < scr_fd_cap; i++) {
+      const ScrFnDesc *e = scr_fd_tab[i];
+      if (e == NULL) continue;
+      size_t k = scr_fd_hash(e) & (ncap - 1);
+      while (nt[k] != NULL) k = (k + 1) & (ncap - 1);
+      nt[k] = e;
+    }
+    free(scr_fd_tab);
+    scr_fd_tab = nt;
+    scr_fd_cap = ncap;
+  }
+  size_t k = scr_fd_hash(want) & (scr_fd_cap - 1);
+  while (scr_fd_tab[k] != NULL) {
+    const ScrFnDesc *e = scr_fd_tab[k];
+    if (e->thunk == want->thunk && e->sig == want->sig && e->name == want->name && e->src == want->src && e->arity == want->arity) return e;
+    k = (k + 1) & (scr_fd_cap - 1);
+  }
+  if (scr_fd_chunk_left == 0) {
+    scr_fd_chunk = (ScrFnDesc *)malloc(170 * sizeof(ScrFnDesc));
+    if (scr_fd_chunk == NULL) scr_trap("scriptc: out of memory\n");
+    scr_fd_chunk_left = 170;
+  }
+  ScrFnDesc *nd = scr_fd_chunk++;
+  scr_fd_chunk_left--;
+  *nd = *want;
+  scr_fd_tab[k] = nd;
+  scr_fd_len++;
+  return nd;
+}
+
 ScrDyn *scr_dyn_new_func_src(ScrClosure *clo, ScrDynThunk thunk, uint32_t arity, const char *sig, const char *name,
                              const char *src) {
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_FUNC);
   d->v.fn.clo = clo;
-  d->v.fn.thunk = thunk;
+  const void *entry = clo != NULL ? clo->fn : NULL;
+  const unsigned epoch = scr_fn_names_epoch();
+  size_t ci = (size_t)(((uintptr_t)entry >> 4) ^ ((uintptr_t)src >> 3) ^ ((uintptr_t)thunk >> 5) ^ ((uintptr_t)sig >> 6)) & (SCR_FD_CACHE - 1u);
+  if (scr_fd_cache[ci].desc != NULL && scr_fd_cache[ci].entry == entry && scr_fd_cache[ci].thunk == thunk && scr_fd_cache[ci].sig == sig &&
+      scr_fd_cache[ci].name == name && scr_fd_cache[ci].src == src && scr_fd_cache[ci].arity == arity && scr_fd_cache[ci].epoch == epoch) {
+    d->v.fn.desc = scr_fd_cache[ci].desc;
+    return d;
+  }
   /* NEVER NULL, and the box refuses to exist rather than carry one. The
    * emitted dynCheck for a function type reaches straight for
    * `strcmp(scr_dyn_fn_sig(d), "<typeKey>")` -- so a NULL stored here is a
@@ -3658,7 +3737,7 @@ ScrDyn *scr_dyn_new_func_src(ScrClosure *clo, ScrDynThunk thunk, uint32_t arity,
    * scr_rva_fits is the ROUND TRIP, not a range guess: the contract these
    * three carry is "a static compiler-emitted literal, never freed", and
    * a pointer that is not one is answered here, at the mint, naming the
-   * box — rather than by a wild read at the first
+   * box -- rather than by a wild read at the first
    * Function.prototype.toString. Widening the existing condition keeps
    * the count of uncatchable abort CALL SITES exactly where it was. */
   if (sig == NULL || !scr_rva_fits(sig) || !scr_rva_fits(name) || !scr_rva_fits(src)) {
@@ -3678,19 +3757,32 @@ ScrDyn *scr_dyn_new_func_src(ScrClosure *clo, ScrDynThunk thunk, uint32_t arity,
                        " this image round-trips through one\n",
                  name != NULL ? name : "<anonymous>");
   }
-  d->v.fn.sig = scr_rva_of(sig);
+  ScrFnDesc want;
+  memset(&want, 0, sizeof want);
+  want.thunk = thunk;
+  want.sig = scr_rva_of(sig);
   {
     const char *n = (name != NULL || clo == NULL) ? name : scr_fn_name_of(clo->fn);
     /* The name table's entries are static literals too, but this one did
      * not go through the check above — it came out of a lookup. */
     if (!scr_rva_fits(n)) n = NULL;
-    d->v.fn.name = scr_rva_of(n);
+    want.name = scr_rva_of(n);
   }
-  d->v.fn.src = scr_rva_of(src);
+  want.src = scr_rva_of(src);
   /* The kind code (SCR_FNK_*) rides in the top of the arity word. A
    * compiled closure's code comes from the program's own name table; a box
    * the runtime builds itself (a bound function) passes its code in `arity`. */
-  d->v.fn.arity = (arity & 0xffffffu) | ((uint32_t)(clo != NULL ? scr_fn_code_of(clo->fn) : 0u) << SCR_FNK_SHIFT) | (arity & 0x3f000000u);
+  want.arity = (arity & 0xffffffu) | ((uint32_t)(clo != NULL ? scr_fn_code_of(clo->fn) : 0u) << SCR_FNK_SHIFT) | (arity & 0x3f000000u);
+  const ScrFnDesc *desc = scr_fd_intern(&want);
+  scr_fd_cache[ci].entry = entry;
+  scr_fd_cache[ci].thunk = thunk;
+  scr_fd_cache[ci].sig = sig;
+  scr_fd_cache[ci].name = name;
+  scr_fd_cache[ci].src = src;
+  scr_fd_cache[ci].arity = arity;
+  scr_fd_cache[ci].epoch = epoch;
+  scr_fd_cache[ci].desc = desc;
+  d->v.fn.desc = desc;
   return d;
 }
 
@@ -3854,7 +3946,7 @@ ScrDyn *scr_dyn_call(const ScrDyn *d, ScrDyn *const *args, size_t argc, const ch
     scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
     return NULL;
   }
-  return d->v.fn.thunk(d->v.fn.clo, args, argc);
+  return scr_dyn_fn_thunk(d)(d->v.fn.clo, args, argc);
 }
 
 /* scr_dyn_call over a dyn ARRAY's elements — the spread-application form
@@ -7784,7 +7876,7 @@ static ScrDyn *err_cls_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) 
 }
 
 static bool err_cls_is(const ScrDyn *d) {
-  return d != NULL && d->kind == SCR_DYN_FUNC && d->v.fn.thunk == err_cls_thunk;
+  return d != NULL && d->kind == SCR_DYN_FUNC && scr_dyn_fn_thunk(d) == err_cls_thunk;
 }
 
 ScrDyn *scr_dyn_error_class_box(int kind) {
@@ -12170,7 +12262,7 @@ ScrDyn *scr_dyn_fn_prototype(ScrDyn *fn) {
   ScrClosure *clo = fn->v.fn.clo;
   if (scr_closure_proto(clo) == NULL) {
     if (scr_ctor_len * 2 >= scr_ctor_cap) scr_ctor_grow();
-    ScrCtorDesc d = {clo, fn->v.fn.thunk, scr_dyn_fn_sig(fn), scr_dyn_fn_name(fn), scr_dyn_fn_src(fn),
+    ScrCtorDesc d = {clo, scr_dyn_fn_thunk(fn), scr_dyn_fn_sig(fn), scr_dyn_fn_name(fn), scr_dyn_fn_src(fn),
                      scr_dyn_fn_len(fn)};
     scr_ctor_insert(scr_ctor_tab, scr_ctor_cap, proto, d);
     scr_ctor_len++;
@@ -14682,7 +14774,7 @@ static ScrDyn *scr_u8_construct(const ScrDyn *args) {
  * itself with the bound mark, and its closure holds the target (caps[0]), the bound
  * receiver (caps[1]), the name (caps[2]) and the bound arguments (caps[3..]). */
 static bool dyn_fn_is_bound_box(const ScrDyn *fn) {
-  return fn->kind == SCR_DYN_FUNC && scr_rva_str(fn->v.fn.name) == scr_dyn_bound_name_mark;
+  return fn->kind == SCR_DYN_FUNC && scr_rva_str(fn->v.fn.desc->name) == scr_dyn_bound_name_mark;
 }
 
 /* The target of a bound box, +1 (the caller releases it). */

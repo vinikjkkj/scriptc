@@ -376,8 +376,8 @@ static void scr_ee_emit_meta(ScrEmitter *em, const char *meta, ScrStr *name, con
   if (proto == NULL) {
     scr_ee_emit_va(em, m, name, (void *)scr_dyn_undefined());
   } else {
-    ScrDyn *box = scr_dyn_new_func_src(scr_closure_retain(proto->v.fn.clo), proto->v.fn.thunk,
-                                       proto->v.fn.arity, scr_dyn_fn_sig(proto),
+    ScrDyn *box = scr_dyn_new_func_src(scr_closure_retain(proto->v.fn.clo), scr_dyn_fn_thunk(proto),
+                                       scr_dyn_fn_arity_word(proto), scr_dyn_fn_sig(proto),
                                        scr_dyn_fn_name(proto), scr_dyn_fn_src(proto));
     scr_ee_emit_va(em, m, name, (void *)box);
     scr_dyn_release(box);
@@ -408,6 +408,14 @@ static void scr_ee_warn_maybe(ScrEmitter *em, ScrEeBucket *b) {
  * add, like Node. A listener throw inside the meta emit leaves the
  * exception pending; the add still happens (Node's addListener has no
  * try). */
+/* The listener entry keeps BY VALUE a copy of the function box it dispatches through (fnproto / idproto). A SCR_DYN_FUNC node is allocated at its kind's size,
+ * the 16-byte header and the 16-byte arm, which is less than sizeof(ScrDyn) (the widest arm is 24), so a whole-struct assignment would read past the node.
+ * Copy only what the node owns; the rest of the entry's slot stays zero. */
+static inline void scr_ee_copy_fnbox(ScrDyn *dst, const ScrDyn *src) {
+  memset(dst, 0, sizeof *dst);
+  memcpy(dst, src, offsetof(ScrDyn, v) + sizeof src->v.fn);
+}
+
 static ScrEmitter *scr_ee_add3(ScrEmitter *em, ScrStr *name, ScrClosure *cb /*moves*/,
                                ScrClosure *orig /*moves; may be NULL*/,
                                const ScrDyn *box /*borrowed; NULL for direct*/,
@@ -442,18 +450,18 @@ static ScrEmitter *scr_ee_add3(ScrEmitter *em, ScrStr *name, ScrClosure *cb /*mo
   e->orig = orig;
   e->twin = twin;
   if (ident != NULL) {
-    e->idproto = *ident;
+    scr_ee_copy_fnbox(&e->idproto, ident);
     e->has_idproto = true;
   }
   if (box != NULL) {
-    e->fnproto = *box;
+    scr_ee_copy_fnbox(&e->fnproto, box);
     e->has_fnproto = true;
   } else if (proto != NULL) {
     /* A TYPED listener whose function payload was boxed by the compiler (a module that
      * can reach this emitter through a dynamic value): kept so emit.apply / emit(...spread) /
      * listeners() can call and answer it, without the newListener observers seeing it
      * (they keep the registration's own view). */
-    e->fnproto = *proto;
+    scr_ee_copy_fnbox(&e->fnproto, proto);
     e->has_fnproto = true;
   }
   e->inv = inv;
@@ -1171,8 +1179,8 @@ static bool ee_knows(const char *name, size_t n) { return ee_op_of(name, n) >= 0
 
 static ScrDyn *ee_func_box(const ScrEeEntry *e) {
   const ScrDyn *p = e->has_idproto ? &e->idproto : &e->fnproto;
-  ScrDyn *box = scr_dyn_new_func_src(scr_closure_retain(p->v.fn.clo), p->v.fn.thunk,
-                                     p->v.fn.arity, scr_dyn_fn_sig(p),
+  ScrDyn *box = scr_dyn_new_func_src(scr_closure_retain(p->v.fn.clo), scr_dyn_fn_thunk(p),
+                                     scr_dyn_fn_arity_word(p), scr_dyn_fn_sig(p),
                                      scr_dyn_fn_name(p), scr_dyn_fn_src(p));
   return box;
 }
