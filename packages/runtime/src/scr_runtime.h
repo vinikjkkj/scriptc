@@ -899,6 +899,8 @@ void scr_str_release(ScrStr *s); /* NULL-tolerant (uninitialized locals) */
  * not strings the cache is holding) and packages/runtime/test/test_intern.c
  * (which asserts the difference). */
 void scr_str_intern_drain(void);
+/* Release the large-chain table entries nobody else holds (after a cycle collection). */
+void scr_str_big_reap(void);
 
 /* Borrow both args, return +1. */
 ScrStr *scr_str_concat(ScrStr *a, ScrStr *b);

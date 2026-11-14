@@ -577,6 +577,7 @@ static size_t scr_dyn_free_count;
 #endif
 static size_t scr_dyn_trim_seen = (size_t)-1;
 static void scr_dyn_idle_trim(void) {
+  scr_str_big_reap();
   /* An unchanged parked count since the last walk means no burst has settled: skip. (A pop and a park that cancel can hide a big buffer for a collection or two; the
    * count moves again on the next settle.) The walk itself costs about 5 Ir per parked node. */
   if (scr_dyn_free_count == scr_dyn_trim_seen) return;

@@ -540,9 +540,11 @@ static void scr_str_intern_forget(ScrStr *s) {
  * can never change any value, because an entry is byte-equal to whatever the
  * next miss will build. This is what makes scr_str_live_count mean the same
  * thing it meant before interning existed. */
+static void scr_str_big_drain(void);
 void scr_str_intern_drain(void) {
   size_t i;
   int weak = scr_str_intern_weak();
+  scr_str_big_drain();
   if (scr_str_itab_used == 0) return;
   for (i = 0; i < SCR_STR_INTERN_SLOTS; i++) {
     ScrStr *e = scr_str_itab[i];
@@ -1390,6 +1392,95 @@ ScrStr *scr_str_concat(ScrStr *a, ScrStr *b) {
  * result is allocated EXACT and copied once. A result in the interning range (16..128 bytes) or a chain with a sole-owner left operand that has the
  * room keeps the exact fold semantics, so the intern table and the in-place append arm behave as they did. The accumulator form `s += x` is the
  * BINARY scr_str_concat and is not touched. Operands are borrowed, the result is +1, like scr_str_concat. */
+/* LARGE CONCAT RESULTS ARE SHARED. A chain result of 4 KB to 64 KB goes through a small table keyed by EXACT LENGTH: a second chain that builds the SAME bytes gets the first one's string
+ * back (rc + 1) instead of a second copy. mysql bench: the store builds the same padded 751-placeholder SQL text per queued query, 1,029 live byte-identical copies of an 11.1 KB string
+ * (census: STRCEN-TOP n=104 of one content at 100 messages; dupBytes 26.6 MB at 1,000). There is no hash: the probe is one set (length % sets) of a few ways, an entry is a candidate only
+ * if its length equals the new total, and then the operands are compared against it byte for byte, so a miss costs a few loads and compares and never touches the bytes unless a length
+ * matches. Strings are immutable to JS; the in-place append arm needs rc == 1 and a table-held string has rc >= 2 whenever anyone else uses it, so a string a user holds can never be
+ * appended to in place; and only the n-ary path (an exact-size result nobody grows) takes part, so `s += x` accumulators keep their rc == 1 path. The table OWNS one reference per entry,
+ * so a dropped string (rc == 1, only the table) is still a valid hit: a dropped-then-rebuilt identical chain allocates nothing. The entries nobody else holds are reaped after each cycle
+ * collection (scr_str_big_reap, called from the dyn trim hook) and at exit, so a dead string is not pinned for long; at most SCR_STR_BIG_SETS * SCR_STR_BIG_WAYS entries. */
+#define SCR_STR_BIG_MIN 4096u
+#define SCR_STR_BIG_MAX 65536u
+#define SCR_STR_BIG_SETS 8
+#define SCR_STR_BIG_WAYS 4
+static ScrStr *scr_str_big[SCR_STR_BIG_SETS][SCR_STR_BIG_WAYS];
+static uint32_t scr_str_big_sig[SCR_STR_BIG_SETS][SCR_STR_BIG_WAYS];
+static unsigned char scr_str_big_next[SCR_STR_BIG_SETS];
+static bool scr_str_big_same(const ScrStr *c, ScrStr *const *ops, size_t n) {
+  size_t off = 0;
+  for (size_t i = 0; i < n; i++) {
+    if (ops[i]->len != 0 && memcmp(c->data + off, ops[i]->data, ops[i]->len) != 0) return false;
+    off += ops[i]->len;
+  }
+  return true;
+}
+/* A cheap signature of the operand list: each operand's length and its first three and last bytes, so equal-length chains that differ in a varying operand (a counter, an id) are
+ * told apart without reading the big bytes. Only a candidate whose length AND signature match is compared in full. */
+static inline uint32_t scr_str_big_signature(ScrStr *const *ops, size_t n) {
+  uint32_t g = (uint32_t)n;
+  for (size_t i = 0; i < n; i++) {
+    const unsigned char *d = (const unsigned char *)ops[i]->data;
+    uint32_t m = ops[i]->len;
+    uint32_t b = m;
+    if (m != 0) b ^= ((uint32_t)d[0] << 8) ^ ((uint32_t)d[m - 1] << 16) ^ ((m > 1 ? (uint32_t)d[1] : 0u) << 24) ^ (m > 2 ? (uint32_t)d[2] : 0u);
+    g = (g * 0x9E3779B1u) ^ b;
+  }
+  return g;
+}
+static __attribute__((noinline)) ScrStr *scr_str_concat_big(ScrStr *const *ops, size_t n, size_t total) {
+  ScrStr **set = scr_str_big[total % SCR_STR_BIG_SETS];
+  const uint32_t sig = scr_str_big_signature(ops, n);
+  uint32_t *sigs = scr_str_big_sig[total % SCR_STR_BIG_SETS];
+  for (unsigned w = 0; w < SCR_STR_BIG_WAYS; w++) {
+    ScrStr *c = set[w];
+    if (c != NULL && c->len == total && sigs[w] == sig && scr_str_big_same(c, ops, n)) {
+      c->rc++;
+      return c;
+    }
+  }
+  ScrStr *s = scr_str_take_spare(total);
+  if (!s) s = scr_str_alloc(total, total);
+  size_t off = 0;
+  for (size_t i = 0; i < n; i++) {
+    memcpy(s->data + off, ops[i]->data, ops[i]->len);
+    off += ops[i]->len;
+  }
+  s->data[total] = '\0';
+  unsigned w = 0;
+  while (w < SCR_STR_BIG_WAYS && set[w] != NULL) w++;
+  if (w == SCR_STR_BIG_WAYS) { /* the set is full: replace in turn; the evicted string lives on while anyone holds it */
+    unsigned char *nx = &scr_str_big_next[total % SCR_STR_BIG_SETS];
+    w = (*nx)++ % SCR_STR_BIG_WAYS;
+    scr_str_release(set[w]);
+  }
+  s->rc++; /* the table's reference */
+  set[w] = s;
+  sigs[w] = sig;
+  return s;
+}
+/* Give back the references of the entries nobody else holds (rc == 1). Called after a cycle collection. */
+void scr_str_big_reap(void) {
+  for (unsigned i = 0; i < SCR_STR_BIG_SETS; i++)
+    for (unsigned w = 0; w < SCR_STR_BIG_WAYS; w++) {
+      ScrStr *c = scr_str_big[i][w];
+      if (c != NULL && c->rc == 1) {
+        scr_str_big[i][w] = NULL;
+        scr_str_release(c);
+      }
+    }
+}
+/* At exit (the audit lane's drain): give the table's references back. */
+static void scr_str_big_drain(void) {
+  for (unsigned i = 0; i < SCR_STR_BIG_SETS; i++)
+    for (unsigned w = 0; w < SCR_STR_BIG_WAYS; w++)
+      if (scr_str_big[i][w] != NULL) {
+        ScrStr *c = scr_str_big[i][w];
+        scr_str_big[i][w] = NULL;
+        scr_str_release(c);
+      }
+}
+
 static ScrStr *scr_str_concat_fold(ScrStr *const *ops, size_t n) {
   ScrStr *acc = scr_str_concat(ops[0], ops[1]);
   for (size_t i = 2; i < n; i++) {
@@ -1409,6 +1500,7 @@ static ScrStr *scr_str_concat_n(ScrStr *const *ops, size_t n) {
   if (total <= SCR_STR_INTERN_MAXLEN) return scr_str_concat_fold(ops, n);
   ScrStr *a = ops[0];
   if (a->rc == 1 && a->cap >= total && a->cap < 0xFFFD0000u) return scr_str_concat_fold(ops, n);
+  if (total >= SCR_STR_BIG_MIN && total <= SCR_STR_BIG_MAX) return scr_str_concat_big(ops, n, total);
   ScrStr *s = scr_str_take_spare(total);
   if (!s) s = scr_str_alloc(total, total);
   size_t off = 0;
