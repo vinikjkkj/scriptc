@@ -2876,6 +2876,11 @@ void scr_dyn_fn_adapter_remember(const ScrDyn *d, const void *code, ScrClosure *
  * +1. A member the engine will not read back (a getter that throws, a non-function) leaves the bound adapter as it is. */
 ScrClosure *scr_fn_unbind(ScrClosure *c) {
   if (c == NULL || c->rc == SIZE_MAX || c->ncaps < 2) return c == NULL ? NULL : scr_closure_retain(c);
+  /* An adapter of a bound engine method holds two shared cells: caps[0] a FUNC cell, caps[1] a scalar cell with the call thunk. Any other
+   * closure with two or more captures reaches this test too, and a COMPILED one may hold a capture by value, whose slot is a tagged pointer to
+   * the value (scr_runtime.h, SCR_CAP_TAG_*), not a cell: reading it as one dereferences a pointer with the tag bits set. A tagged slot is
+   * never an adapter's cell, so such a closure answers itself. */
+  if (scr_cap_tag(c->caps[0]) != 0 || scr_cap_tag(c->caps[1]) != 0) return scr_closure_retain(c);
   ScrDynThunk th = scr_box_get_thunk((const ScrBox *)c->caps[1]);
   if (th != scr_isl_bound_thunk) return scr_closure_retain(c);
   ScrClosure *inner = (ScrClosure *)scr_box_get_ref((ScrBox *)c->caps[0]); /* +1 */
