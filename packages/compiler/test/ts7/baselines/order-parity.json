@@ -27930,6 +27930,12 @@
     "<repo>/tests/corpus/25291-closures-of-every-capture-count-and-rings-through-captured-nodes-keep-their-results.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25292-boxed-functions-keep-name-length-and-call-across-three-hundred-distinct-descriptors.js": {
+   "order": [
+    "<repo>/tests/corpus/25292-boxed-functions-keep-name-length-and-call-across-three-hundred-distinct-descriptors.js"
+   ],
+   "diags": []
   }
  }
 }
