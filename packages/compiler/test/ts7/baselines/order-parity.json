@@ -27894,6 +27894,12 @@
     "<repo>/tests/corpus/25132-dyn-keyed-writes-with-literal-keys-copy-and-assign-keep-key-order-delete-and-readd.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25204-a-function-member-read-as-a-value-in-a-module-that-runs-engine-code-holds-its-by-value-captures.ts": {
+   "order": [
+    "<repo>/tests/corpus/25204-a-function-member-read-as-a-value-in-a-module-that-runs-engine-code-holds-its-by-value-captures.ts"
+   ],
+   "diags": []
   }
  }
 }
