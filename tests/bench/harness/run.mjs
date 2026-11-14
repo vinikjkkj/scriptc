@@ -82,7 +82,7 @@ for (const l of [...(withNode ? ['node'] : []), ...labels]) {
 writeFileSync(`${out}/summary.txt`, sumlines.join('\n') + '\n')
 // summary.md: one table; when a `base` and a `cand` arm both ran (bench.yml with two targets, built and measured on the same runner), each cand row also carries its difference to the matching base row
 const pct = (a, b) => (a == null || b == null || a === 0 ? '' : `${b >= a ? '+' : ''}${(((b - a) / a) * 100).toFixed(2)}%`)
-const rows = ['| arm | rss_peak_kb per rep | median | vs base | parity | callgrind Ir | Ir vs base | heap_brk | file-backed |', '|---|---|---|---|---|---|---|---|---|']
+const rows = ['| arm | rss_peak_kb per rep | median | vs base | parity | callgrind Ir | Ir vs base | heap_brk | file-backed | exe code | exe rodata |', '|---|---|---|---|---|---|---|---|---|---|---|']
 const rssMed = (l) => med(results.runs.filter((r) => r.label === l).map((r) => r.rss_peak_kb))
 for (const l of [...(withNode ? ['node'] : []), ...labels]) {
   const rs = results.runs.filter((r) => r.label === l)
@@ -90,7 +90,7 @@ for (const l of [...(withNode ? ['node'] : []), ...labels]) {
   const hasBase = baseL !== null && labels.includes(baseL)
   const sm = results.smaps[l]
   const fb = sm && sm.classes ? Object.entries(sm.classes).filter(([k]) => /^(main-binary|shared-libs)/.test(k)).reduce((t, [, v]) => t + v.Rss, 0) : ''
-  rows.push(`| ${l} | ${rs.map((r) => r.rss_peak_kb).join(' / ')} | ${rssMed(l)} | ${hasBase ? pct(rssMed(baseL), rssMed(l)) : ''} | ${[...new Set(rs.map((r) => r.parity))].join('/')} | ${results.ir[l] ?? ''} | ${hasBase ? pct(results.ir[baseL], results.ir[l]) : ''} | ${sm && sm.classes ? sm.classes['heap(brk)']?.Rss ?? 0 : ''} | ${fb} |`)
+  rows.push(`| ${l} | ${rs.map((r) => r.rss_peak_kb).join(' / ')} | ${rssMed(l)} | ${hasBase ? pct(rssMed(baseL), rssMed(l)) : ''} | ${[...new Set(rs.map((r) => r.parity))].join('/')} | ${results.ir[l] ?? ''} | ${hasBase ? pct(results.ir[baseL], results.ir[l]) : ''} | ${sm && sm.classes ? sm.classes['heap(brk)']?.Rss ?? 0 : ''} | ${fb} | ${sm && sm.classes ? sm.classes['main-binary:code(r-x)']?.Rss ?? 0 : ''} | ${sm && sm.classes ? sm.classes['main-binary:rodata(r--)']?.Rss ?? 0 : ''} |`)
 }
 writeFileSync(`${out}/summary.md`, `store: ${store}, reps: ${reps}, node ${results.node}\n\n` + rows.join('\n') + '\n')
 console.log(sumlines.join('\n'))
