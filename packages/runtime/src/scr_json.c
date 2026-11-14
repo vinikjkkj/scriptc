@@ -15524,6 +15524,14 @@ static void scr_dyn_assign_strs(ScrDyn *target, const ScrDyn *src) {
   if (src->kind == SCR_DYN_UNDEF || src->kind == SCR_DYN_NULL) return;
   if (src->kind == SCR_DYN_OBJ) {
     const size_t n = src->v.obj.len;
+    /* SIZE THE TABLE TO THE COPY, NOT TO A DOUBLING. mysql2's ConnectionConfig.queryOptions builds a 46-member object and Object.assign()s five more
+     * keys onto it per command: the per-key put doubled 46 -> 92, and when those commands settle the parked 92-slot tables come back under
+     * two-member objects (mysql bench census: 2,955 objects at cap 65-128, 97.8% unfilled; the lab micro reproduces 97.8% exactly). The copy knows its
+     * member count up front: grow once, to what the copy can add, but never by less than a quarter so repeated bulk assigns stay amortized. Sources of fewer than four members keep the per-key doubling (a loop of one-key assigns measured +0.19% Ir with the reserve). */
+    if (n >= 4 && target->kind == SCR_DYN_OBJ && (size_t)target->v.obj.len + n > (size_t)target->v.obj.cap) {
+      size_t need = (size_t)target->v.obj.len + n, geo = (size_t)target->v.obj.cap + ((size_t)target->v.obj.cap >> 2);
+      scr_dyn_obj_reserve(target, need > geo ? need : geo);
+    }
     for (size_t i = 0; i < n; i++) {
       if (src->v.obj.len != n) break; /* a getter below resized the source */
       const ScrDynEntry *e = &src->v.obj.entries[i];
