@@ -12,7 +12,7 @@ on:
         description: Branch or commit whose compiler is measured
         required: true
       drivers:
-        description: Drivers to build (space or comma separated subset of mysql2 pg ioredis mongodb, plus the connect and roundtrip entries mysql2-connect pg-connect mysql2-roundtrip pg-roundtrip, plus the zapo-js core entries zapo-core zapo-core-llvm)
+        description: Drivers to build (space or comma separated subset of mysql2 pg ioredis mongodb, plus the connect and roundtrip entries mysql2-connect pg-connect mysql2-roundtrip pg-roundtrip, plus the zapo-js core entries zapo-core zapo-core-llvm, plus the zapo-js startup run entries zapo-startup zapo-startup-llvm)
         required: false
         default: mysql2 pg ioredis mongodb
       run:
@@ -47,7 +47,7 @@ jobs:
           for d in ${DRIVERS//,/ }; do
             case "$d" in
               mysql2|pg|ioredis|mongodb|zapo-core|zapo-core-llvm) out+=("\"$d\"") ;;
-              mysql2-connect|pg-connect|mysql2-roundtrip|pg-roundtrip) out+=("\"$d\""); runs+=("\"$d\"") ;;
+              mysql2-connect|pg-connect|mysql2-roundtrip|pg-roundtrip|zapo-startup|zapo-startup-llvm) out+=("\"$d\""); runs+=("\"$d\"") ;;
               *) echo "unknown driver: $d"; exit 1 ;;
             esac
           done
