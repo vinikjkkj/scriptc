@@ -23,9 +23,9 @@
  *            through @scr_dyn_fn_sig_of and its siblings, because a
  *            hardcoded copy of a layout this file does not own is what
  *            made the 16-byte cycle header three bugs instead of one.
- *   ScrDynEntry { char *key; uint32_t key_len; uint32_t key_static;
- *                 uint32_t value_borrowed; ScrDyn *value; } — 32 bytes, key +0,
- *                 key_len +8 (i32), value +24.
+ *   ScrDynEntry { char *key; uint32_t key_len; uint32_t key_static:1,
+ *                 value_borrowed:1; ScrDyn *value; } — 24 bytes, key +0,
+ *                 key_len +8 (i32), value +16.
  *   ScrDynKind: NULL=0 BOOL=1 NUM=2 STR=3 ARR=4 OBJ=5 UNDEF=6 BYTES=7
  *               FUNC=8 HANDLE=9.
  *   ScrBytes { rc +0; len +8; elem +16; data +24 }.
@@ -46,6 +46,13 @@ import { keyIxSlotIndex, keyListSlotIndex, arrNewCall, elemAccess, llFieldType, 
 import { LlvmUnsupportedError } from "./unsupported.js";
 import type { WalkerHost } from "./walkers.js";
 import { HelperNamer } from "../helper-names.js";
+
+/** The layout of one dyn object member, ScrDynEntry in scr_runtime.h. EVERY number the entry reads below comes from here, and
+ * test/dyn-entry-layout.test.ts parses the header's own _Static_assert line and compares, so a change to the struct that this file
+ * does not follow fails a test instead of reading the wrong bytes. */
+export const DYN_ENTRY_SIZE = 24;
+export const DYN_ENTRY_KEYLEN_OFF = 8;
+export const DYN_ENTRY_VALUE_OFF = 16;
 
 /** ScrDynKind values (scr_runtime.h). */
 /** ScrDynHandleTag numeric values (scr_runtime.h's enum order). */
@@ -296,33 +303,35 @@ export class LlDyn {
     return e;
   }
 
-  /** Object entry field addresses: entries + i*32 (+0 key, +8 key_len,
-   * +24 value; value_borrowed sits at +16).
+  /** Object entry field addresses: entries + i*DYN_ENTRY_SIZE (+0 key, +DYN_ENTRY_KEYLEN_OFF key_len, +DYN_ENTRY_VALUE_OFF value; the
+   * two flag bits share the word at +12). The member's VALUE is not loaded here: only the match walk reads it inline (entryValue), and a
+   * convert walk hands the entry to the runtime (scr_dyn_obj_entry_read), so an inline value load there was dead.
    *
-   * `key_len` is a 32-bit field, not a 64-bit one: ScrDynEntry spends the
-   * other four bytes on the flag that says whether the key bytes are a
-   * compiler-emitted literal (stored by pointer, never freed) or a
-   * malloc'd copy. The struct is still 24 bytes and `key` and `value` are
-   * still at +0 and +16, which is why the flag went where it did. This is
-   * the ONLY place in this backend that reads the entry layout. */
-  private entryAt(B: BlockBuilder, entries: string, i: string): { key: string; keyLen: string; value: string; base: string } {
+   * `key_len` is a 32-bit field, not a 64-bit one: ScrDynEntry spends the other four bytes on two one-bit flags (a literal key stored
+   * by pointer and never freed, a non-owning value). This and entryValue are the ONLY places in this backend that read the entry layout. */
+  private entryAt(B: BlockBuilder, entries: string, i: string): { key: string; keyLen: string; base: string } {
     const off = B.tmp();
     const base = B.tmp();
-    B.line(`${off} = mul i64 ${i}, 32 ; sizeof(ScrDynEntry)`);
+    B.line(`${off} = mul i64 ${i}, ${DYN_ENTRY_SIZE} ; sizeof(ScrDynEntry)`);
     B.line(`${base} = getelementptr inbounds i8, ptr ${entries}, i64 ${off}`);
     const key = B.tmp();
     B.line(`${key} = load ptr, ptr ${base}`);
     const klp = B.tmp();
     const keyLen = B.tmp();
-    B.line(`${klp} = getelementptr inbounds i8, ptr ${base}, i64 8`);
+    B.line(`${klp} = getelementptr inbounds i8, ptr ${base}, i64 ${DYN_ENTRY_KEYLEN_OFF}`);
     const keyLen32 = B.tmp();
     B.line(`${keyLen32} = load i32, ptr ${klp} ; ScrDynEntry.key_len is 32-bit`);
     B.line(`${keyLen} = zext i32 ${keyLen32} to i64`);
+    return { key, keyLen, base };
+  }
+
+  /** The (borrowed) value of the entry at `base`. */
+  private entryValue(B: BlockBuilder, base: string): string {
     const vp = B.tmp();
     const value = B.tmp();
-    B.line(`${vp} = getelementptr inbounds i8, ptr ${base}, i64 24`);
-    B.line(`${value} = load ptr, ptr ${vp}`);
-    return { key, keyLen, value, base };
+    B.line(`${vp} = getelementptr inbounds i8, ptr ${base}, i64 ${DYN_ENTRY_VALUE_OFF}`);
+    B.line(`${value} = load ptr, ptr ${vp} ; ScrDynEntry.value`);
+    return value;
   }
 
   /** An ScrStr's (len, data) pair — len via the %ScrStr header (a u32,
@@ -768,7 +777,7 @@ export class LlDyn {
               B.startBlock(lNo);
             }
             const ok = B.tmp();
-            B.line(`${ok} = call zeroext i1 @${this.dynMatchHelper(shape.indexValue!)}(ptr ${ent.value})`);
+            B.line(`${ok} = call zeroext i1 @${this.dynMatchHelper(shape.indexValue!)}(ptr ${this.entryValue(B, ent.base)})`);
             const lOk = B.newLabel("dm.vo");
             B.condBr(ok, lOk, fail);
             B.startBlock(lOk);

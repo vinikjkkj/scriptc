@@ -5248,13 +5248,19 @@ extern ScrStr *(*scr_fn_own_tostring_hook)(const ScrDyn *d);
 typedef struct {
   char *key;
   uint32_t key_len;
-  uint32_t key_static; /* the bytes are a compiler-emitted literal: never freed */
+  /* TWO ONE-BIT FLAGS IN THE FOUR BYTES BESIDE key_len, so the struct is 24 bytes, key at +0, key_len at +8, value at +16 (the LLVM backend
+   * hardcodes this in backend/llvm/dyn.ts entryAt; the assertion below keeps the two in step). It grew to 32 when `value_borrowed` became a
+   * second whole word, which cost 8 bytes on EVERY member of EVERY dyn object. */
+  uint32_t key_static : 1; /* the bytes are a compiler-emitted literal: never freed */
   /* the value is a NON-OWNING back-reference (scr_dyn_obj_set_borrowed): no
    * reference is held, so the holder's release, the cycle walk and an
    * overwrite all skip it. */
-  uint32_t value_borrowed;
+  uint32_t value_borrowed : 1;
+  uint32_t : 30;
   ScrDyn *value; /* owned unless value_borrowed */
 } ScrDynEntry;
+_Static_assert(sizeof(ScrDynEntry) == 24 && offsetof(ScrDynEntry, key_len) == 8 && offsetof(ScrDynEntry, value) == 16,
+               "ScrDynEntry layout: backend/llvm/dyn.ts entryAt hardcodes 24 bytes, key_len at +8 and value at +16");
 
 /* A STATIC pointer stored as a signed 32-bit offset from scr_cyc_base().
  *
