@@ -2551,7 +2551,10 @@ ScrDyn *scr_dyn_new_str(ScrStr *s) {
  * string are one immortal node each, like the bool and null singletons: a padded parameter list converts to hundreds of thousands of
  * identical boxes otherwise. Exact bit pattern, so -0.0 and NaN allocate. The pacing estimator counts NUM as shared already; it
  * learns the empty STR in the same place. */
-ScrDyn *scr_dyn_new_num_sh(double n) { return scr_dyn_new_num(n); } /* -1, 0 and 1 are in the shared table scr_dyn_new_num itself consults */
+/* The union walkers box the padded entries of a parameter list through here (a store pads a 750-slot IN-list with {"", "", -1}), and a stored
+ * small integer is the shared immortal box. scr_dyn_new_num no longer consults the table (only the stores do, see scr_dyn_keep), so this must:
+ * a forward to scr_dyn_new_num made every padded -1 and 0 a fresh 40-byte node (246,296 live at the mysql bench peak, ~9.9 MB). */
+ScrDyn *scr_dyn_new_num_sh(double n) { return scr_dyn_new_num_kept(n); }
 
 ScrDyn *scr_dyn_new_str_sh(ScrStr *s) {
   static ScrDyn empty;
