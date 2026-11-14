@@ -1044,7 +1044,7 @@ async function layoutLinkArgs(driver: { argv: readonly string[] }, orderPath: st
   if (names.length === 0) return [];
   if (help.includes("--section-ordering-file")) {
     const file = `${outPath}.layout.ld`;
-    await writeFile(file, `.text : {\n${names.map((n) => `  *(.text.${n})`).join("\n")}\n}\n`);
+    await writeFile(file, `.text : {\n${names.map((n) => `  *(.text.${n} .text.unlikely.${n} .text.hot.${n} .text.startup.${n})`).join("\n")}\n}\n`);
     return [`-Wl,--section-ordering-file=${file}`];
   }
   if (help.includes("--symbol-ordering-file")) {
