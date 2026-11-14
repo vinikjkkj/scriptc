@@ -2102,6 +2102,8 @@ static size_t scr_cyc_idle_pace(void) {
  * removes the init-order question entirely. Before that moment there is
  * nothing to shrink, so NULL is not merely safe here, it is correct. */
 void (*scr_cyc_idle_hook)(void) = NULL;
+/* A second between-turns owner (scr_json.c's parked-buffer trim). Called only when no collection is running, after the first hook. */
+void (*scr_cyc_idle_trim_hook)(void) = NULL;
 
 void scr_collect_cycles_idle(void) {
   /* Runs FIRST, before the pace gate below can return early. This is not a
@@ -2109,6 +2111,7 @@ void scr_collect_cycles_idle(void) {
    * come back" to an unrelated threshold, and a burst that leaves sparse
    * maps need not leave cycle roots. */
   if (scr_cyc_idle_hook != NULL) scr_cyc_idle_hook();
+  if (scr_cyc_idle_trim_hook != NULL && !scr_collecting) scr_cyc_idle_trim_hook();
 
   size_t pace = scr_cyc_idle_pace();
   if (pace != 0) {

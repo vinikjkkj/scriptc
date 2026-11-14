@@ -563,6 +563,42 @@ static const uint8_t scr_dyn_fl_idx[SCR_DYN_KIND_COUNT] = {SCR_DYN_ARMS(SCR_DYN_
 static inline ScrDyn **scr_dyn_free_list(ScrDynKind k) { return &scr_dyn_free_lists[scr_dyn_fl_idx[k]]; }
 static size_t scr_dyn_free_count;
 #define SCR_DYN_FREE_MAX 8192
+/* THE IDLE TRIM. Park and reuse stay as they were: a parked ARR/OBJ node keeps its buffer, and a churn loop inside one turn recycles it for free. But the node is
+ * recycled by whatever container comes next, so after a burst (1,000 queued queries each holding a 751-slot params vector, 1,000 per-command 92-slot option tables)
+ * settles, the parked nodes come back under three-element arrays and two-member objects still holding the big buffer (mysql bench census: 6.77 MB and 8.3 MB).
+ * At the between-turns seam (scr_collect_cycles_idle, never while a collection runs) up to SCR_DYN_TRIM_BUDGET parked nodes are taken off the head of each list,
+ * their buffers past SCR_DYN_TRIM_ARR slots / SCR_DYN_TRIM_OBJ entries are freed, and they move to a CLEAN list that scr_dyn_alloc consults only when the main list is
+ * empty (the miss path, which was a heap allocation before). Walked nodes leave the main list, so successive seams make progress through a deep pool and each seam costs a
+ * bounded number of nodes; a seam with nothing parked costs one load per list. Nodes deeper than the budget wait for a later seam. */
+#ifndef SCR_DYN_TRIM_ARR
+#define SCR_DYN_TRIM_ARR 64
+#endif
+#ifndef SCR_DYN_TRIM_OBJ
+#define SCR_DYN_TRIM_OBJ 32
+#endif
+#ifndef SCR_DYN_TRIM_BUDGET
+#define SCR_DYN_TRIM_BUDGET 64
+#endif
+static ScrDyn *scr_dyn_clean_lists[2]; /* 0 arr, 1 obj */
+static void scr_dyn_idle_trim(void) {
+  ScrDyn **ml = &scr_dyn_free_lists[4];
+  for (size_t budget = SCR_DYN_TRIM_BUDGET; *ml != NULL && budget != 0; budget--) {
+    ScrDyn *d = *ml;
+    *ml = (ScrDyn *)(size_t)d->rc;
+    if (d->v.arr.cap > SCR_DYN_TRIM_ARR) { free(d->v.arr.items); d->v.arr.items = NULL; d->v.arr.cap = 0; }
+    d->rc = (size_t)(void *)scr_dyn_clean_lists[0];
+    scr_dyn_clean_lists[0] = d;
+  }
+  ml = &scr_dyn_free_lists[5];
+  for (size_t budget = SCR_DYN_TRIM_BUDGET; *ml != NULL && budget != 0; budget--) {
+    ScrDyn *d = *ml;
+    *ml = (ScrDyn *)(size_t)d->rc;
+    if (d->v.obj.cap > SCR_DYN_TRIM_OBJ) { free(d->v.obj.entries); d->v.obj.entries = NULL; d->v.obj.cap = 0; }
+    d->rc = (size_t)(void *)scr_dyn_clean_lists[1];
+    scr_dyn_clean_lists[1] = d;
+  }
+}
+__attribute__((constructor)) static void scr_dyn_idle_trim_reg(void) { scr_cyc_idle_trim_hook = scr_dyn_idle_trim; }
 #endif
 
 /* ── ScrDyn is a cycle-collector node ─────────────────────────────────
@@ -684,6 +720,10 @@ static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
 #ifndef SCR_RC_AUDIT
   ScrDyn **list = scr_dyn_free_list(kind);
   ScrDyn *d = *list;
+  if (d == NULL && (kind == SCR_DYN_ARR || kind == SCR_DYN_OBJ)) { /* main list empty: the idle trim's clean nodes */
+    ScrDyn **cl = &scr_dyn_clean_lists[kind == SCR_DYN_OBJ];
+    if (*cl != NULL) { list = cl; d = *cl; }
+  }
   if (d) {
 #ifdef SCR_CYCEN_ON
     /* tests/perf/cycensus/scr_cyc_census.h. The link lives in `rc` now,
