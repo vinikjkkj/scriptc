@@ -71,7 +71,7 @@ async function main(): Promise<void> {
   // a function-typed member read as a value off a record that holds a closure over class instances (the shape a session table has)
   const table = sessions.map((s) => ({ id: s.id, describe: () => s.id + ":" + s.events + ":" + (s.qr === null ? "no-qr" : "qr") }));
   const describe = table[0]!.describe;
-  console.log("zapo startup", sessions.length, typeof sessions[0]!.client.on, typeof sessions[0]!.client.message.send, typeof sessions[0]!.client.connect, describe(), table[1]!.describe());
+  console.log("zapo startup", sessions.length, typeof sessions[0]!.client.message.send, typeof sessions[0]!.client.connect, describe(), table[1]!.describe());
   await pool.end();
   process.exit(0);
 }
