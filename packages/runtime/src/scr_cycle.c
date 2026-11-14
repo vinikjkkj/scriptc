@@ -251,9 +251,14 @@ static inline void scr_cyc_stamp(ScrCycHdr *h, ScrTraceFn trace,
  * that have no such call (cc-driver's five ELF cells are what rules it
  * out). A field in a header we own needs no platform symbol and is exact.
  *
- * BLOCKS ARE 16-BYTE ALIGNED: the chunk base is 256-aligned and the carve
- * stride is `phys` rounded up to 16, so the OBJECT pointer keeps the
- * alignment the 16-byte header was shaped to give it.
+ * BLOCKS ARE 8-BYTE ALIGNED, and the stride is `phys` itself. The size classes were already 8 bytes wide (SCR_POOL_GRAIN), but the carve rounded
+ * every stride up to 16, so a 40-byte class (a 24-byte union or box payload behind the 16-byte header) was carved at 48, a 56 at 64, a 72 at 80:
+ * 8 bytes of rounding on every object of an odd class. Measured at the redis peak: 23,681,152 live stride-rounded bytes against 22,008,384
+ * physical, +1.67 MB (+7.6%) of rounding alone. The 16 existed to keep the OBJECT pointer 16-byte aligned behind the 16-byte header, and
+ * nothing needs that: no type in the runtime or the emitted program is over-aligned (no _Alignas, long double, __int128 or SIMD-typed
+ * member; the SHA code loads with _mm_loadu), the LLVM backend emits no `align 16`, the by-value capture tags use the low THREE bits and
+ * trap on `p & 7`, the closure meta tag is bit 0, and the string arena has carved 8-aligned blocks since it was written. The chunk base stays
+ * 256-aligned, which is all the `pad` block->chunk map needs. SCR_CYC_ARENA_STRIDE_ALIGN=16 restores the old stride (the control arm).
  *
  * THE SIZE-CLASS POOL IS EXCLUDED FROM CARVED BLOCKS, and that is the
  * deliberate half of this design. A pooled block keeps its chunk pinned:
@@ -288,6 +293,11 @@ static inline void scr_cyc_stamp(ScrCycHdr *h, ScrTraceFn trace,
 #ifndef SCR_CYC_ARENA_CHUNK
 #define SCR_CYC_ARENA_CHUNK ((size_t)64 << 10)
 #endif
+#ifndef SCR_CYC_ARENA_STRIDE_ALIGN
+#define SCR_CYC_ARENA_STRIDE_ALIGN 8u
+#endif
+_Static_assert(SCR_CYC_ARENA_STRIDE_ALIGN >= 8u && (SCR_CYC_ARENA_STRIDE_ALIGN & (SCR_CYC_ARENA_STRIDE_ALIGN - 1u)) == 0,
+               "SCR_CYC_ARENA_STRIDE_ALIGN must be a power of two of at least 8 (a free-list link is a pointer written at the block's start)");
 
 /* The granule the block->chunk map is expressed in, and the size of the
  * chunk's own header zone. Both are 256 for one reason: ScrCycHdr::pad is
@@ -1643,7 +1653,7 @@ static inline ScrCycHdr *scr_cyc_ar_pop(size_t phys) {
  * is already correct — the carve stamps it, and a block off a free list
  * never lost it. */
 static ScrCycHdr *scr_cyc_ar_refill(size_t phys, uint8_t blk) {
-  size_t stride = (phys + 15u) & ~(size_t)15u;
+  size_t stride = (phys + (SCR_CYC_ARENA_STRIDE_ALIGN - 1u)) & ~(size_t)(SCR_CYC_ARENA_STRIDE_ALIGN - 1u);
   for (;;) {
     ScrCycChunk *c = scr_cyc_ar_cur[blk];
     void *b;
