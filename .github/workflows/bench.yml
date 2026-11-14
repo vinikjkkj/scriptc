@@ -1,0 +1,222 @@
+name: bench
+run-name: bench ${{ inputs.target }} [${{ inputs.programs }}] ${{ inputs.variants }} ${{ inputs.tag }}
+
+# App builds and RAM measurements on GitHub runners instead of the box. The compiler under test is checked out from `target`; the harness (tests/bench), the census headers
+# (tests/perf/dyncensus) and the clientbench transport come from the dispatched ref. One job per program: build once per (sha, program, codegen flags) and reuse the cached
+# lowering for flag-only variants (SCRIPTC_PROF_CFLAGS is not part of the lowering key), then run the binaries beside Node against service containers and upload the numbers.
+# CPU seconds on shared runners are noise: the only CPU figure produced here is callgrind Ir.
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Branch or FULL 40-character commit whose compiler is measured
+        required: true
+      programs:
+        description: "Space or comma separated: messaging-redis messaging-mysql messaging-postgres messaging-sqlite messaging-memory (rest: not implemented yet)"
+        required: false
+        default: messaging-redis
+      variants:
+        description: "Space or comma separated: plain (the shipped build) and/or census (dyn + string census headers, same lowering, clang only). layout-profile / layout-order: not implemented yet"
+        required: false
+        default: plain
+      reps:
+        description: Interleaved pmon runs per arm (rss_peak_kb median over these)
+        required: false
+        default: "3"
+      backend:
+        description: c or llvm
+        required: false
+        default: c
+      node_ref:
+        description: "true: also run the same bench entry on Node (tsx) as the output-parity reference and the Node RSS baseline"
+        required: false
+        default: "true"
+      ir:
+        description: "Messages per scenario for one callgrind run per variant (0 = no callgrind). The only CPU figure; 250 takes about an hour"
+        required: false
+        default: "0"
+      node_heap_mb:
+        description: Node heap (MB) of the compiler process
+        required: false
+        default: "12288"
+      tag:
+        description: Free text echoed in the run name
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Select programs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      matrix: ${{ steps.m.outputs.matrix }}
+    steps:
+      - id: m
+        env:
+          PROGRAMS: ${{ inputs.programs }}
+          VARIANTS: ${{ inputs.variants }}
+          BACKEND: ${{ inputs.backend }}
+        run: |
+          set -euo pipefail
+          out=()
+          for p in ${PROGRAMS//,/ }; do
+            case "$p" in
+              messaging-redis|messaging-mysql|messaging-postgres|messaging-sqlite|messaging-memory) out+=("\"$p\"") ;;
+              rest) echo "rest is not implemented in bench.yml yet"; exit 1 ;;
+              *) echo "unknown program: $p"; exit 1 ;;
+            esac
+          done
+          [ ${#out[@]} -gt 0 ] || { echo "no program selected"; exit 1; }
+          for v in ${VARIANTS//,/ }; do
+            case "$v" in plain|census) ;; *) echo "unknown variant: $v"; exit 1 ;; esac
+          done
+          case "$BACKEND" in c|llvm) ;; *) echo "unknown backend: $BACKEND"; exit 1 ;; esac
+          echo "matrix=[$(IFS=,; echo "${out[*]}")]" >> "$GITHUB_OUTPUT"
+
+  bench:
+    name: ${{ matrix.program }}
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 345
+    strategy:
+      fail-fast: false
+      matrix:
+        program: ${{ fromJSON(needs.plan.outputs.matrix) }}
+    services:
+      redis:
+        image: redis:8
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: "yes"
+          MYSQL_DATABASE: zapo_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h 127.0.0.1"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_PASSWORD: x
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      BENCH_WORK: ${{ github.workspace }}/bench-work
+      SCRIPTC_CACHE_DIR: ${{ github.workspace }}/scc-cache
+      NODE_HEAP_MB: ${{ inputs.node_heap_mb }}
+    steps:
+      - name: Record the runner hardware
+        run: |
+          lscpu | grep -E 'Model name|^CPU\(s\)|Thread|MHz' || true
+          free -m | sed -n 1,2p
+          df -h / | tail -1
+          uname -r; ldd --version | head -1
+      - uses: actions/checkout@v4
+        with:
+          path: benchsrc
+          sparse-checkout: |
+            tests/bench
+            tests/perf/clientbench/transport
+            tests/perf/dyncensus
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target }}
+          path: wt
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.1.3
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: wt/.node-version
+      - name: Build the compiler under test
+        working-directory: wt
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+      - name: Tools (valgrind for the Ir run)
+        if: ${{ inputs.ir != '0' }}
+        run: sudo apt-get update -q && sudo apt-get install -y -q valgrind
+      # The provenance cache holds the zapo source the compiler maps (fetched by commit from github).
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/scriptc/provenance
+          key: provenance-bench-${{ hashFiles('benchsrc/tests/bench/app/package-lock.json') }}
+      - name: Fetch the zapo tree and the app dependencies
+        working-directory: benchsrc
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bash tests/bench/harness/fetch-tree.sh
+      - name: Make the bench program
+        working-directory: benchsrc
+        run: |
+          store=${{ matrix.program }}; store=${store#messaging-}
+          bash tests/bench/harness/mkbench.sh "$store" messaging
+      - name: Build every variant (the lowering runs once)
+        working-directory: benchsrc
+        env:
+          SCC_CLI: ${{ github.workspace }}/wt/packages/cli/dist/main.js
+        run: |
+          set -u
+          store=${{ matrix.program }}; store=${store#messaging-}
+          variants="${{ inputs.variants }}"; variants=${variants//,/ }
+          for one in $variants; do
+            bash tests/bench/harness/build.sh "$store" "${{ inputs.backend }}" "$BENCH_WORK/out" "$one" || echo "build of variant $one failed"
+          done
+          cat "$BENCH_WORK/out/build-summary.txt"
+      - name: Run the binaries beside Node, measure
+        working-directory: benchsrc
+        run: |
+          set -u
+          store=${{ matrix.program }}; store=${store#messaging-}
+          . tests/bench/harness/env.sh
+          arms=()
+          variants="${{ inputs.variants }}"; variants=${variants//,/ }
+          for one in $variants; do
+            suffix=""; [ "$one" = census ] && suffix="-census"
+            f="$BENCH_WORK/out/messaging-$store-${{ inputs.backend }}$suffix.bin"
+            [ -f "$f" ] && { chmod +x "$f"; arms+=("$one:$f"); }
+          done
+          [ ${#arms[@]} -gt 0 ] || { echo "no binary was built"; exit 1; }
+          flags=(--store "$store" --out "$BENCH_WORK/result" --reps "${{ inputs.reps }}" --smaps)
+          [ "${{ inputs.node_ref }}" = true ] && flags+=(--node)
+          [ "${{ inputs.ir }}" != 0 ] && flags+=(--ir "${{ inputs.ir }}")
+          node tests/bench/harness/run.mjs "${flags[@]}" "${arms[@]}" | tee "$BENCH_WORK/result-summary.txt"
+          { echo "### ${{ matrix.program }} (${{ inputs.backend }}) on \`${{ inputs.target }}\`"; echo '```'; cat "$BENCH_WORK/out/build-summary.txt"; cat "$BENCH_WORK/result-summary.txt"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-${{ matrix.program }}
+          path: |
+            bench-work/out/*.log
+            bench-work/out/build-summary.txt
+            bench-work/result/
+            bench-work/result-summary.txt
+          if-no-files-found: ignore
+          retention-days: 14
+      # the binary, so a later turn can reuse it by path and sha instead of rebuilding
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: bench-${{ matrix.program }}-bin
+          path: bench-work/out/*.bin
+          if-no-files-found: ignore
+          retention-days: 14

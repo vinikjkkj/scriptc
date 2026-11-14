@@ -1,0 +1,4 @@
+# Patches applied to the rig by mkbench.sh / the harness (the transport diffs under bench-src/patches/ and tests/perf/clientbench are the others).
+# ladder-prekeytimeout (2026-11-09): fake-server src/api/PreKeyDispenser.ts + FakeWaServer.ts: the pre-key wait default reads
+#   ZAPO_BENCH_PREKEY_TIMEOUT_MS (unset = 15000, unchanged). For callgrind runs only (client ~50x slower vs a wall-clock server timer);
+#   use the SAME value on every arm of an A/B. Rig copy only, never the user's app.
