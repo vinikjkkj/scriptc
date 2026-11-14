@@ -81,6 +81,7 @@ import { setDynOrderPlan, setDynInspExt } from "../dyn-members.js";
 import { rewriteArmDescriptors } from "./armvt.js";
 import { rewriteStringUnions } from "./strunion.js";
 import { orderRecordPlanCached, moduleUsesInspColors } from "../../ir/nodes.js";
+import { concatFn, flattenStrConcat } from "../emission/emit-exprs.js";
 import { classvalCandidates, dynClassDisplayName, dynDescBase, dynEmitterSlot, dynRuntimeBaseInfo, dynRuntimeRoot, dynEnumerationFenced, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals, stackCheckPolicy, stackCheckTargetHasFloor, stackMarginBytes, stackMarginSymbol } from "../emission/emit-stmts.js";
@@ -8892,6 +8893,25 @@ class LlEmitter {
         return this.own({ name: t, type: e.type });
       }
       case "strConcat": {
+        // A left-nested chain of three or more operands is ONE exact-size runtime call (see the C emitter's identical arm).
+        const chain = flattenStrConcat(e);
+        if (chain.length >= 3) {
+          const names = chain.map((x) => this.emitExpr(x).name);
+          let acc = names[0]!;
+          let i = 1;
+          while (i < names.length) {
+            const take = Math.min(7, names.length - i);
+            const group = [acc, ...names.slice(i, i + take)];
+            const sig = group.map(() => "ptr").join(", ");
+            this.declare(`declare ptr @${concatFn(group.length)}(${sig})`);
+            const ct = B.tmp();
+            B.line(`${ct} = call ptr @${concatFn(group.length)}(${group.map((g) => `ptr ${g}`).join(", ")})`);
+            acc = ct;
+            i += take;
+            if (i >= names.length) return this.own({ name: ct, type: e.type });
+            this.own({ name: ct, type: e.type });
+          }
+        }
         const l = this.emitExpr(e.left);
         const r = this.emitExpr(e.right);
         this.declare(`declare ptr @scr_str_concat(ptr, ptr)`);

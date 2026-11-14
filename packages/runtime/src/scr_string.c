@@ -1384,6 +1384,67 @@ ScrStr *scr_str_concat(ScrStr *a, ScrStr *b) {
   return s;
 }
 
+/* N-ARY CONCAT: `a + b + c + ...` in ONE expression (a template literal is one) reaches here as ONE call instead of a left fold of scr_str_concat.
+ * The fold allocates every intermediate and, for any result of 512 bytes or more, sizes each one +50%, so the final string carried up to 5 KB of
+ * capacity nothing ever filled (mysql bench: 1,029 SQL texts of 16,416 B holding 11.1 KB). Here the total is known before the first copy, so the
+ * result is allocated EXACT and copied once. A result in the interning range (16..128 bytes) or a chain with a sole-owner left operand that has the
+ * room keeps the exact fold semantics, so the intern table and the in-place append arm behave as they did. The accumulator form `s += x` is the
+ * BINARY scr_str_concat and is not touched. Operands are borrowed, the result is +1, like scr_str_concat. */
+static ScrStr *scr_str_concat_fold(ScrStr *const *ops, size_t n) {
+  ScrStr *acc = scr_str_concat(ops[0], ops[1]);
+  for (size_t i = 2; i < n; i++) {
+    ScrStr *next = scr_str_concat(acc, ops[i]);
+    scr_str_release(acc);
+    acc = next;
+  }
+  return acc;
+}
+
+static ScrStr *scr_str_concat_n(ScrStr *const *ops, size_t n) {
+  size_t total = 0;
+  for (size_t i = 0; i < n; i++) {
+    total += (size_t)ops[i]->len;
+    scr_str_size_check(total);
+  }
+  if (total <= SCR_STR_INTERN_MAXLEN) return scr_str_concat_fold(ops, n);
+  ScrStr *a = ops[0];
+  if (a->rc == 1 && a->cap >= total && a->cap < 0xFFFD0000u) return scr_str_concat_fold(ops, n);
+  ScrStr *s = scr_str_take_spare(total);
+  if (!s) s = scr_str_alloc(total, total);
+  size_t off = 0;
+  for (size_t i = 0; i < n; i++) {
+    memcpy(s->data + off, ops[i]->data, ops[i]->len);
+    off += ops[i]->len;
+  }
+  s->data[total] = '\0';
+  return s;
+}
+
+ScrStr *scr_str_concat3(ScrStr *a, ScrStr *b, ScrStr *c) {
+  ScrStr *const ops[] = {a, b, c};
+  return scr_str_concat_n(ops, 3);
+}
+ScrStr *scr_str_concat4(ScrStr *a, ScrStr *b, ScrStr *c, ScrStr *d) {
+  ScrStr *const ops[] = {a, b, c, d};
+  return scr_str_concat_n(ops, 4);
+}
+ScrStr *scr_str_concat5(ScrStr *a, ScrStr *b, ScrStr *c, ScrStr *d, ScrStr *e) {
+  ScrStr *const ops[] = {a, b, c, d, e};
+  return scr_str_concat_n(ops, 5);
+}
+ScrStr *scr_str_concat6(ScrStr *a, ScrStr *b, ScrStr *c, ScrStr *d, ScrStr *e, ScrStr *f) {
+  ScrStr *const ops[] = {a, b, c, d, e, f};
+  return scr_str_concat_n(ops, 6);
+}
+ScrStr *scr_str_concat7(ScrStr *a, ScrStr *b, ScrStr *c, ScrStr *d, ScrStr *e, ScrStr *f, ScrStr *g) {
+  ScrStr *const ops[] = {a, b, c, d, e, f, g};
+  return scr_str_concat_n(ops, 7);
+}
+ScrStr *scr_str_concat8(ScrStr *a, ScrStr *b, ScrStr *c, ScrStr *d, ScrStr *e, ScrStr *f, ScrStr *g, ScrStr *h) {
+  ScrStr *const ops[] = {a, b, c, d, e, f, g, h};
+  return scr_str_concat_n(ops, 8);
+}
+
 bool scr_str_eq(ScrStr *a, ScrStr *b) {
   return a == b || (a->len == b->len && memcmp(a->data, b->data, a->len) == 0);
 }

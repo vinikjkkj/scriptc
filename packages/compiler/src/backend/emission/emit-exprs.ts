@@ -873,6 +873,23 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         return { name, type: e.type };
       }
       case "strConcat": {
+        // `a + b + c ...` is a LEFT-NESTED chain: three or more operands go to ONE exact-size runtime call (scr_str_concat3..8) instead of a fold
+        // that allocates each intermediate and gives every result of 512 bytes or more +50% slack. Operand evaluation order is unchanged.
+        const chain = flattenStrConcat(e);
+        if (chain.length >= 3) {
+          const names = chain.map((x) => E.emitExpr(x).name);
+          let acc = names[0]!;
+          let i = 1;
+          let res: ReturnType<typeof E.newTemp> | undefined;
+          while (i < names.length) {
+            const take = Math.min(7, names.length - i);
+            const group = [acc, ...names.slice(i, i + take)];
+            res = E.newTemp(e.type, `${concatFn(group.length)}(${group.join(", ")})`);
+            acc = res.name;
+            i += take;
+          }
+          return res!;
+        }
         const l = E.emitExpr(e.left);
         const r = E.emitExpr(e.right);
         return E.newTemp(e.type, `scr_str_concat(${l.name}, ${r.name})`);
@@ -10200,3 +10217,20 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
       }
     }
   }
+
+/** The operands of a left-nested `strConcat` chain, in evaluation order (a + b + c -> [a, b, c]). */
+export function flattenStrConcat(e: Extract<IrExpr, { kind: "strConcat" }>): IrExpr[] {
+  const out: IrExpr[] = [];
+  let n: IrExpr = e;
+  while (n.kind === "strConcat") {
+    out.push(n.right);
+    n = n.left;
+  }
+  out.push(n);
+  return out.reverse();
+}
+
+/** The runtime entry for a group of `n` operands: the binary scr_str_concat for two, scr_str_concat3..8 above. */
+export function concatFn(n: number): string {
+  return n === 2 ? "scr_str_concat" : `scr_str_concat${n}`;
+}

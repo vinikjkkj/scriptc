@@ -902,6 +902,13 @@ void scr_str_intern_drain(void);
 
 /* Borrow both args, return +1. */
 ScrStr *scr_str_concat(ScrStr *a, ScrStr *b);
+/* One call for a whole `a + b + c ...` chain of 3..8 operands: exact-size result, see scr_string.c. Borrow all, return +1. */
+ScrStr *scr_str_concat3(ScrStr *a, ScrStr *b, ScrStr *c);
+ScrStr *scr_str_concat4(ScrStr *a, ScrStr *b, ScrStr *c, ScrStr *d);
+ScrStr *scr_str_concat5(ScrStr *a, ScrStr *b, ScrStr *c, ScrStr *d, ScrStr *e);
+ScrStr *scr_str_concat6(ScrStr *a, ScrStr *b, ScrStr *c, ScrStr *d, ScrStr *e, ScrStr *f);
+ScrStr *scr_str_concat7(ScrStr *a, ScrStr *b, ScrStr *c, ScrStr *d, ScrStr *e, ScrStr *f, ScrStr *g);
+ScrStr *scr_str_concat8(ScrStr *a, ScrStr *b, ScrStr *c, ScrStr *d, ScrStr *e, ScrStr *f, ScrStr *g, ScrStr *h);
 
 bool scr_str_eq(ScrStr *a, ScrStr *b);
 
