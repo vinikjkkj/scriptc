@@ -736,6 +736,7 @@ static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
                           : kind == SCR_DYN_OBJ
                               ? (long long)(d->v.obj.cap * sizeof(ScrDynEntry))
                               : 0);
+    scr_cycen_resite(scr_cyc_hdr(d)); /* a recycled node is a new life: file it under the new allocation site */
 #endif
     *list = (ScrDyn *)(size_t)d->rc; /* freelist link, see the release end */
     scr_dyn_free_count--;
@@ -776,6 +777,9 @@ static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
     return d;
   }
 #endif
+#ifdef SCR_CYCEN_ON
+  scr_cycen_site_pending = scr_cycen_site_capture();
+#endif
   ScrDyn *fresh = scr_cyc_alloc(scr_dyn_node_bytes(kind), &scr_dyn_trace, &scr_dyn_gcfree);
   fresh->rc = 1;
   fresh->kind = kind;
@@ -789,6 +793,17 @@ static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
   return fresh;
 }
 
+#ifdef SCR_CYCEN_ON
+/* tests/perf/cycensus: what the seam probe needs from a ScrDyn without seeing the type. */
+const void *scr_cycen_dyn_key(void) { return (const void *)&scr_dyn_gcfree; }
+/* returns the node's kind; *len = element/entry count for ARR/OBJ, byte length for STR, else 0. */
+int scr_cycen_dyn_peek(const void *hdr, unsigned *len) {
+  const ScrDyn *d = (const ScrDyn *)(const void *)((const char *)hdr + sizeof(ScrCycHdr));
+  *len = d->kind == SCR_DYN_ARR ? (unsigned)d->v.arr.len : d->kind == SCR_DYN_OBJ ? (unsigned)d->v.obj.len : 0;
+  return (int)d->kind;
+}
+long long scr_cycen_dyn_free_count(void) { return (long long)scr_dyn_free_count; }
+#endif
 #ifdef SCR_SMALLINT_LAB
 /* LAB ONLY (never defined in a shipped build): 0 no sharing, 1 shared at the stores, 2 shared at every creation; chosen by SCR_SMALLINT_MODE. */
 static int scr_smallint_mode_v = -1;
