@@ -20,6 +20,7 @@
  * The generated C is a debugging surface: locals keep their TS names inside
  * the mangled form and every statement carries a `source line` comment.
  */
+import { bestRank, cDefinedNames, extractCFunctionChunks, markUsedDefinitions, stableByRank, type LayoutOrder } from "../layout-order.js";
 import { canonPlanOf } from "../../ir/num-canon.js";
 import type {
   IrGlobal,
@@ -153,12 +154,14 @@ export function emitModuleProgram(
   mod: IrModule,
   sourceText: string | undefined,
   headerName: string,
+  layout?: LayoutOrder,
 ): EmittedProgram {
   setDynOrderPlan(orderRecordPlanCached(mod.classes ?? []));
   setDynInspExt(moduleUsesInspColors(mod));
   resetSrcSiteCache();
   const E = new CEmitter(mod, sourceText);
   E.headerName = headerName;
+  E.layoutOrder = layout;
   return E.emitProgram();
 }
 
@@ -962,6 +965,8 @@ export class CEmitter {
   }
 
   readonly walkerProtos: string[] = [];
+  /** --layout-order: the profile order the function definitions are written in (undefined: the module's own order). */
+  layoutOrder: LayoutOrder | undefined;
   readonly walkerDefs: string[] = [];
   /** Island host-call adapters, interned per (arity, void-ness): the one
    * uniform shape scr_jsval_from_closure calls — unpack the cell array,
@@ -1420,10 +1425,24 @@ export class CEmitter {
      * widening, not a control. Nothing about it being green is evidence. */
     // Function bodies are emitted first (into this.lines) so the literal
     // table is complete; the file is then assembled around them.
+    // --layout-order: each function's lines are kept as one chunk so the chunks can be ordered once emission is complete. Emission
+    // itself runs in the module's own order (it names counter helpers as it goes), so the file is ordered afterwards.
+    const layout = this.layoutOrder;
+    const fnChunks: string[][] = [];
     for (const fn of this.mod.functions) {
       this.emitFunction(fn);
-      appendLines(body, this.lines);
+      if (layout !== undefined) fnChunks.push(this.lines.slice());
+      else appendLines(body, this.lines);
       this.lines.length = 0;
+    }
+    if (layout !== undefined) {
+      // The interned walkers (dyn builders, matchers, adapters) are definitions too: they join the pool so the steady set is one
+      // contiguous run. Their prototypes sit in the prototype block, so a definition can stand anywhere after it.
+      const walkers = extractCFunctionChunks(this.walkerDefs);
+      this.walkerDefs.length = 0;
+      for (const l of walkers.rest) this.walkerDefs.push(l);
+      const pool = [...walkers.chunks, ...fnChunks];
+      for (const chunk of stableByRank(pool, (c) => bestRank(layout, cDefinedNames(c)))) appendLines(body, markUsedDefinitions(chunk, layout));
     }
 
     // THE SPLIT DECISION, taken here and nowhere else.

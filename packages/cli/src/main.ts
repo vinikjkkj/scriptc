@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { readFileSync, rmSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { analyze, compile, compileC, compileLibrary, ProvenanceRefusalError, renderAll, renderCoverageLines, resolveProvenanceSources, setProvenanceSources } from "@scriptc/compiler";
+import { analyze, compile, compileC, compileLibrary, layoutOrderFromProfile, ProvenanceRefusalError, renderAll, renderCoverageLines, resolveProvenanceSources, setProvenanceSources } from "@scriptc/compiler";
 import { defaultExecutableName } from "./paths.js";
 
 const USAGE = `scriptc — TypeScript/JavaScript to native executables (experimental)
@@ -37,6 +37,16 @@ Options:
       --no-keep-c    delete the generated program TU after compiling
       --emit-ir      also write the IR as JSON next to the executable
       --sanitize     build with ASan + runtime RC audit
+      --layout-profile
+                     build an INSTRUMENTED binary that records which functions run
+                     (written to $SCR_LAYOUT_PROFILE_OUT at exit; SIGUSR1 starts a new
+                     epoch, send it when startup is over). Feed the file to
+                     \`scriptc layout-order <exe> <profile> -o order.txt\`.
+      --layout-order <file>
+                     write the program's functions in the order <file> lists
+                     (steady set first, then other executed code, then startup-only;
+                     names not listed go last, unknown names are ignored). Both
+                     flags are off by default and change nothing unless passed.
       --dynamic      embed the dynamic engine (adds ~620KB; static stays the default)
       --ffi <file>   bind signature-only TypeScript declarations to native
                      C symbols and link the manifest's archives/libraries
@@ -117,6 +127,8 @@ const CLI_OPTIONS = {
   "keep-c": { type: "boolean", default: true },
   "emit-ir": { type: "boolean", default: false },
   sanitize: { type: "boolean", default: false },
+  "layout-profile": { type: "boolean", default: false },
+  "layout-order": { type: "string" },
   dynamic: { type: "boolean", default: false },
   ffi: { type: "string" },
   "npm-static": { type: "string", multiple: true },
@@ -141,6 +153,14 @@ async function main(): Promise<number> {
   }
 
   const [command, inputArg] = positionals;
+  if (command === "layout-order") {
+    const profileArg = positionals[2];
+    if (inputArg === undefined || profileArg === undefined) fail(`usage: scriptc layout-order <exe> <profile> [-o order.txt]\n\n${USAGE}`);
+    const text = layoutOrderFromProfile(resolve(inputArg), readFileSync(resolve(profileArg), "utf8"));
+    if (values.out) writeFileSync(resolve(values.out), text);
+    else process.stdout.write(text);
+    return 0;
+  }
   if (command !== "build" && command !== "run" && command !== "coverage") {
     fail(`unknown command "${command}"\n\n${USAGE}`);
   }
@@ -290,6 +310,8 @@ async function main(): Promise<number> {
       emitIr: values["emit-ir"],
       sanitize: values.sanitize,
       dynamic: values.dynamic,
+      ...(values["layout-profile"] ? { layoutProfile: true } : {}),
+      ...(values["layout-order"] !== undefined ? { layoutOrder: resolve(values["layout-order"]) } : {}),
       ...(backend !== undefined ? { backend } : {}),
       ...(npmStatic !== undefined ? { npmStatic } : {}),
       ...(ffiProfilePath !== undefined ? { ffiProfilePath } : {}),

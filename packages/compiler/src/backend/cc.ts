@@ -1,3 +1,4 @@
+import { parseLayoutOrder } from "./layout-order.js";
 import { execFile } from "node:child_process";
 import { tapPhase } from "../phase-tap.js";
 import { createHash } from "node:crypto";
@@ -251,6 +252,13 @@ export interface CcOptions {
   outPath: string;
   /** Build with ASan + the runtime RC audit (test/debug lane). */
   sanitize?: boolean;
+  /** --layout-profile: instrument every compiled unit (the program, the runtime, the vendored caches) with sanitizer-coverage guards
+   * and link the profiler unit (scr_layout_prof.c) that owns the callbacks. The coverage flag is COMPILE-ONLY by construction: it is
+   * on the compile argv and never on the link argv, because clang links its own sanitizer runtime (whose weak callbacks would shadow
+   * ours) whenever the flag reaches the link. */
+  layoutProfile?: boolean;
+  /** --layout-order: the order file the emitters already applied; here it only feeds a linker that supports an ordering file. */
+  layoutOrder?: string;
   /** Additional native archives/objects, appended after the generated
    * program TU so their symbols resolve outbound FFI calls. */
   linkInputs?: readonly string[];
@@ -1007,6 +1015,56 @@ function profCflags(): string[] {
   return v.split(/\s+/).filter((s) => s.length > 0);
 }
 
+/** --layout-order on the LINK line: only where the linker has an ordering-file option, DETECTED and never assumed. The emitters have
+ * already written the program TU's functions in profile order (backend/layout-order.ts), which every linker honours; this adds the
+ * runtime's own functions, scattered across ~100 objects, to the same order. zig cc rejects every spelling of it ("unsupported
+ * linker arg", measured on zig 0.16, linux-gnu and windows-gnu), so it is skipped there; a linker whose --help names neither option
+ * gets nothing. GNU ld spells it --section-ordering-file (binutils >= 2.43), lld --symbol-ordering-file. */
+async function layoutLinkArgs(driver: { argv: readonly string[] }, orderPath: string | undefined, outPath: string): Promise<string[]> {
+  if (orderPath === undefined) return [];
+  // SCRIPTC_LAYOUT_LINK_ORDER=0: emission order only (the knob the tests use to prove the emitters' order does not lean on the linker).
+  if (process.env["SCRIPTC_LAYOUT_LINK_ORDER"] === "0") return [];
+  const cc = driver.argv[0] ?? "clang";
+  if (/(^|[\\/])zig(\.exe)?$/.test(cc)) return [];
+  let ld = "ld";
+  try {
+    const r = await execFileAsync(cc, [...driver.argv.slice(1), "-print-prog-name=ld"]);
+    const got = String(r.stdout).trim();
+    if (got !== "") ld = got;
+  } catch {
+    return [];
+  }
+  let help = "";
+  try {
+    help = String((await execFileAsync(ld, ["--help"])).stdout);
+  } catch {
+    return [];
+  }
+  const names = [...parseLayoutOrder(await readFile(orderPath, "utf8")).rank.keys()];
+  if (names.length === 0) return [];
+  if (help.includes("--section-ordering-file")) {
+    const file = `${outPath}.layout.ld`;
+    await writeFile(file, `.text : {\n${names.map((n) => `  *(.text.${n})`).join("\n")}\n}\n`);
+    return [`-Wl,--section-ordering-file=${file}`];
+  }
+  if (help.includes("--symbol-ordering-file")) {
+    const file = `${outPath}.layout.sym`;
+    await writeFile(file, `${names.join("\n")}\n`);
+    return [`-Wl,--symbol-ordering-file=${file}`];
+  }
+  return [];
+}
+
+/** --layout-profile is in effect for the build compileC is running (set at its entry; one build per process at a time). */
+let layoutProfileActive = false;
+
+/** The compile-only coverage flag of --layout-profile. Deliberately NOT part of profCflags()/optAuditArgs(): those also reach the link
+ * line, and the flag must not (see CcOptions.layoutProfile). The vendored caches take it too, with profFlavor() folding it into their
+ * key, so an instrumented build can never pick up a clean cached object. */
+function layoutCovFlags(): string[] {
+  return layoutProfileActive ? ["-fsanitize-coverage=func,trace-pc-guard"] : [];
+}
+
 /** The cache-flavor discriminator for SCRIPTC_PROF_CFLAGS, and the reason the
  * vendored units could not be profiled before.
  *
@@ -1057,6 +1115,7 @@ function profIncludeFiles(v: string): string[] {
 
 export function profFlavor(): string {
   const v = process.env.SCRIPTC_PROF_CFLAGS;
+  if (layoutProfileActive && (v === undefined || v === "")) return "-layoutcov";
   if (v === undefined || v === "") return "";
   let h = 0x811c9dc5;
   const fold = (s: string): void => {
@@ -1083,7 +1142,7 @@ export function profFlavor(): string {
     }
     fold(body);
   }
-  return `-prof${h.toString(16).padStart(8, "0")}`;
+  return `${layoutProfileActive ? "-layoutcov" : ""}-prof${h.toString(16).padStart(8, "0")}`;
 }
 
 /* DEAD-CODE ELIMINATION: every native link the driver performs drops the
@@ -1423,6 +1482,7 @@ async function ensureLreObjects(sanitize: boolean, driver: CcDriver): Promise<st
           // clean cached object and the profiler would read a truthful zero
           // for a unit it never instrumented.
           ...profCflags(),
+          ...layoutCovFlags(),
         ],
         { cwd: buildDir },
       );
@@ -1495,6 +1555,7 @@ async function ensureZlibObjects(sanitize: boolean, driver: CcDriver): Promise<s
           // clean cached object and the profiler would read a truthful zero
           // for a unit it never instrumented.
           ...profCflags(),
+          ...layoutCovFlags(),
         ],
         { cwd: buildDir },
       );
@@ -1616,6 +1677,7 @@ async function ensureSqliteObjects(sanitize: boolean, driver: CcDriver): Promise
         "-c", join(vendor, "sqlite3.c"),
         "-o", join(buildDir, "sqlite3.o"),
         ...profCflags(),
+        ...layoutCovFlags(),
       ],
       { cwd: buildDir },
     );
@@ -1759,6 +1821,7 @@ async function buildTlsArchiveLocked(
       "-I", join(vendor, "include"),
       "-I", join(vendor, "library"),
       ...profCflags(),
+      ...layoutCovFlags(),
     ];
     const width = availableParallelism();
     for (let i = 0; i < sources.length; i += width) {
@@ -2419,6 +2482,7 @@ function icuUseFromOptions(opts: CcOptions): IcuUse | null {
 }
 
 export async function compileC(opts: CcOptions): Promise<void> {
+  layoutProfileActive = opts.layoutProfile ?? false;
   const rtDir = runtimeSrcDir();
   // The ICU locale data unit: generated beside the program, compiled with it (never through the runtime object cache).
   let icuFile: string | undefined;
@@ -2586,6 +2650,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
   // reference builds only.
   const curlStubDir =
     curlFetch && driver.target !== null ? await ensureCurlStub(driver) : null;
+  const layoutLink = await layoutLinkArgs(driver, opts.layoutOrder, opts.outPath);
   // rt() maps each runtime source's path on the command line: identity for
   // the historical single invocation, cached-.o substitution on cache misses.
   const buildArgs = (rt: (path: string) => string, pu: (path: string) => string = (p) => p): string[] => [
@@ -2625,6 +2690,8 @@ export async function compileC(opts: CcOptions): Promise<void> {
     // moves later. Two sources for one fact is what made the four faces.
     ...(coreRuntimeSources(url, coro, dynArr, frozenArr).includes("scr_coro.c") ? ["-DSCR_CORO_LANE"] : []),
     ...coreRuntimeSources(url, coro, dynArr, frozenArr).map((f) => rt(join(rtDir, f))),
+    // --layout-profile: the profiler unit that owns the coverage callbacks (compiled uninstrumented: its functions carry no_sanitize).
+    ...(opts.layoutProfile ? [rt(join(rtDir, "scr_layout_prof.c"))] : []),
     ...(opts.copying ? [rt(join(rtDir, "scr_copying.c"))] : []),
     // win32 targets compile the libc-shim TU (stpcpy, arc4random_buf,
     // gmtime_r, strcasestr — the _WIN32 block in scr_runtime.h declares
@@ -2929,6 +2996,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     ...(opts.linkInputs ?? []),
     ...(opts.systemLibraries ?? []).map((name) => `-l${name}`),
     ...gcSectionsLinkArgs(driver),
+    ...layoutLink,
     // glibc keeps libm separate from libc. This must trail the generated
     // program and every native FFI input because GNU ld resolves archives
     // from left to right.
@@ -2996,6 +3064,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     "-std=c11",
     ...driver.targetArgs,
     ...optAuditArgs(opts.sanitize ?? false),
+    ...(opts.layoutProfile ? ["-DSCR_LAYOUT_PROFILE", ...layoutCovFlags()] : []),
     ...(opts.wrapWatch ? ["-DSCR_WRAP_WATCH"] : []),
     // The wrapper-object / prototype-link code of the always-linked dyn core compiles in only for a program that links scr_dyn_proto.c.
     ...(opts.dynProto ? ["-DSCR_DYN_PROTO"] : []),
@@ -3045,7 +3114,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     tapPhase("cc.nocache", 0);
     const jobs = ccJobCount();
     const all = [...new Set([...rtInputs, ...programUnitPaths])];
-    if (jobs > 1 && all.length > 1) {
+    if ((jobs > 1 && all.length > 1) || opts.layoutProfile) {
       // One clang driver compiles its inputs one after another: the runtime's sources and the program's units are
       // independent translation units, so they build as parallel jobs and the objects link in command-line order.
       const dir = await mkdtemp(join(dirname(opts.outPath), ".scr-cc-"));

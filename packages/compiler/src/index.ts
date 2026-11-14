@@ -1,4 +1,6 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import { parseLayoutOrder, reorderLlvmText, type LayoutOrder } from "./backend/layout-order.js";
 import { tapPhase, tapped } from "./phase-tap.js";
 import { basename, dirname, join, resolve } from "node:path";
 import { cacheRootDir, CcCompileError, compileC, compileLibArchive, profFlavor, resolveCc, targetPlatform } from "./backend/cc.js";
@@ -57,6 +59,7 @@ export const VERSION = "0.0.1";
 
 export { compileC, runtimeSrcDir, type CcOptions } from "./backend/cc.js";
 export { emitModule } from "./backend/emission/emitter.js";
+export { layoutOrderFromProfile } from "./backend/layout-profile.js";
 export type { ScrDiagnostic } from "./diagnostics/diagnostic.js";
 export { renderAll, renderDiagnostic } from "./diagnostics/render.js";
 export { renderCoverage, renderCoverageLines, type CoverageInput } from "./coverage/report.js";
@@ -121,6 +124,16 @@ export {
 } from "./frontend/provenance-registry.js";
 export * as ir from "./ir/nodes.js";
 
+/** FNV-1a of a string, hex: a cache-key fold (not a signature). */
+function fnv1a(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16);
+}
+
 export interface CompileOptions {
   /** Output executable path. Default: <outDir>/<stem>. */
   outPath: string;
@@ -128,6 +141,13 @@ export interface CompileOptions {
   outDir: string;
   emitIr?: boolean;
   sanitize?: boolean;
+  /** --layout-profile: build an INSTRUMENTED binary that records which functions run (sanitizer-coverage guards with the runtime's
+   * own callbacks, first execution only, epoch re-arm at the first loop idle) and writes the list to $SCR_LAYOUT_PROFILE_OUT at exit.
+   * Off by default: nothing about codegen or linking changes. */
+  layoutProfile?: boolean;
+  /** --layout-order <file>: write the program TU's functions in the order the file lists them (see backend/layout-order.ts), and
+   * hand the same order to a linker that supports an ordering file. Off by default. */
+  layoutOrder?: string;
   /** Embed the dynamic-island engine (--dynamic). Off = the static default:
    * island constructs are diagnostics and nothing about codegen or linking
    * changes. */
@@ -1188,6 +1208,9 @@ async function earlyCacheOptionsFor(
   const compileOptions = JSON.stringify({
     emitIr: opts.emitIr ?? false,
     sanitize: opts.sanitize ?? false,
+    layoutProfile: opts.layoutProfile ?? false,
+    // the order file's BYTES, not its name: editing the file must miss the cache
+    layoutOrder: opts.layoutOrder === undefined ? null : fnv1a(readFileSync(opts.layoutOrder, "utf8")),
     dynamic: opts.dynamic ?? false,
     backend: opts.backend ?? null,
     npmStatic:
@@ -1401,6 +1424,7 @@ async function compileTracked(
 
   await mkdir(opts.outDir, { recursive: true });
   const stem = basename(entryPath).replace(/\.(ts|js|mjs|cjs)$/, "");
+  const layoutOrder = opts.layoutOrder === undefined ? undefined : parseLayoutOrder(readFileSync(opts.layoutOrder, "utf8"));
   // Both backends hang off the same in-memory IrModule (never the JSON
   // dump); the LLVM backend's .ll takes the .c's seat on the exact clang
   // command line below — compileC accepts either. The default lane tries
@@ -1424,7 +1448,7 @@ async function compileTracked(
   if (opts.backend !== "c") {
     try {
       const llPath = join(opts.outDir, `${stem}.ll`);
-      const llRead = await emitLlvmFile(lowered.module!, llStats, llPath, opts.sanitize ?? false);
+      const llRead = await emitLlvmFile(lowered.module!, llStats, llPath, opts.sanitize ?? false, layoutOrder);
       emittedReadsObjinstMembers = llRead.members;
       emittedReadsLitKey = llRead.lit;
       cPath = llPath;
@@ -1447,7 +1471,7 @@ async function compileTracked(
   let programHeader: string | undefined;
   const headerName = `${stem}.scrh`;
   if (backend === "c") {
-    const written = await emitCFiles(lowered.module!, entryText, headerName, cPath, opts.outDir, stem);
+    const written = await emitCFiles(lowered.module!, entryText, headerName, cPath, opts.outDir, stem, layoutOrder);
     programHeader = written.programHeader;
     programUnits = written.programUnits;
     emittedReadsObjinstMembers = written.readsObjinstMembers;
@@ -1528,8 +1552,9 @@ async function compileTracked(
 
 /** The LLVM unit, written; the emitted text is local to this call so it does not outlive the write in the caller's frame. Answers
  * whether the text reads class-box members (the dyn dispatch unit must then link). */
-async function emitLlvmFile(mod: IrModule, llStats: LlvmEmitStats, llPath: string, audit: boolean): Promise<{ members: boolean; lit: boolean }> {
-  const ll = tapped("emit.llvm", () => emitLlvmModule(mod, llStats, audit));
+async function emitLlvmFile(mod: IrModule, llStats: LlvmEmitStats, llPath: string, audit: boolean, layout?: LayoutOrder): Promise<{ members: boolean; lit: boolean }> {
+  let ll = tapped("emit.llvm", () => emitLlvmModule(mod, llStats, audit));
+  if (layout !== undefined) ll = reorderLlvmText(ll, layout);
   await writeFile(llPath, ll);
   return { members: DYN_DISPATCH_REF.test(ll), lit: DYN_LIT_REF.test(ll) };
 }
@@ -1542,8 +1567,9 @@ async function emitCFiles(
   cPath: string,
   outDir: string,
   stem: string,
+  layout?: LayoutOrder,
 ): Promise<{ programUnits: string[]; programHeader: string | undefined; readsObjinstMembers: boolean; readsLitKey: boolean }> {
-  const program = tapped("emit.c", () => emitModuleProgram(mod, entryText, headerName));
+  const program = tapped("emit.c", () => emitModuleProgram(mod, entryText, headerName, layout));
   await writeFile(cPath, program.units[0]!);
   const readsObjinstMembers = program.units.some((u) => DYN_DISPATCH_REF.test(u)) || (program.header !== null && DYN_DISPATCH_REF.test(program.header));
   const readsLitKey = program.units.some((u) => DYN_LIT_REF.test(u)) || (program.header !== null && DYN_LIT_REF.test(program.header));
@@ -1616,6 +1642,8 @@ async function linkProgram(
       outPath: opts.outPath,
       sanitize: opts.sanitize ?? false,
       dynamic: opts.dynamic ?? false,
+      ...(opts.layoutProfile ? { layoutProfile: true } : {}),
+      ...(opts.layoutOrder !== undefined ? { layoutOrder: opts.layoutOrder } : {}),
       ...features,
       ...(ffi !== null
         ? {
