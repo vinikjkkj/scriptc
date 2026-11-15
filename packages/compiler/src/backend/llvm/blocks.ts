@@ -563,6 +563,16 @@ export class BlockBuilder {
     return s.replace(/%t[0-9]+/g, (m) => this.rename.get(m) ?? m);
   }
 
+  /** The suspension generation the builder is in: 0 before the first park of a coroutine body, +1 at each resume label. */
+  suspensionGeneration(): number {
+    return this.gen;
+  }
+
+  /** The text a use of `name` is spelled with RIGHT NOW: a reload after a resume label may have renamed it. */
+  spelled(name: string): string {
+    return this.applyRename(name);
+  }
+
   /** The reload after a resume label has loaded `old` into `fresh`: every line
    * appended from now on spells it the new way. */
   renameTemp(old: string, fresh: string): void {
