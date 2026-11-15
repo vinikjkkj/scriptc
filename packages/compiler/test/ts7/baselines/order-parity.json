@@ -27966,6 +27966,18 @@
     "<repo>/tests/corpus/25320-a-dyn-number-checked-and-boxed-again-keeps-its-value-and-node.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25311-expando-properties-of-a-class-instance-keep-values-order-and-deletes.ts": {
+   "order": [
+    "<repo>/tests/corpus/25311-expando-properties-of-a-class-instance-keep-values-order-and-deletes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25312-define-property-rows-of-a-class-instance-switch-between-plain-accessor-and-hidden.ts": {
+   "order": [
+    "<repo>/tests/corpus/25312-define-property-rows-of-a-class-instance-switch-between-plain-accessor-and-hidden.ts"
+   ],
+   "diags": []
   }
  }
 }
