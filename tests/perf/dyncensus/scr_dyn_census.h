@@ -249,6 +249,24 @@ typedef struct {
   long long aux_nonnull;
 } ScrDynCenKind;
 
+/* props-table census (lab): the per-instance property tables of compiled class instances (%props), found by shape: an OBJ whose
+ * every entry value is a 5- or 6-element ARR with BOOL at 0,2,3,4. [0] = snapshot, [1] = exit. */
+typedef struct {
+  long long tables, tbl_node_phys, tbl_side_phys, tbl_key_phys;
+  long long ent_hist[6];
+  long long ents, plain, nondef, accessor, marker, nonbool;
+  long long plain_arr_node_phys, plain_arr_items_phys, marker_arr_node_phys, marker_arr_items_phys;
+  long long plain_kind[16];
+  long long plain_num, plain_num_small, plain_num_imm;
+  long long plain_num_rc[5];
+  long long plain_num_node_phys;
+  long long pidx_n, pidx_max, pidx_hist[8];
+  long long numall_rc[5], numheld_rc[5], numall_b[18], numheld_b[18];
+  long long keyhist_n;
+  char keyname[16][24]; long long keycnt[16];
+} ScrDynCenProps;
+SCR_DYNCEN_SHARED ScrDynCenProps scr_dyncen_props[2];
+
 SCR_DYNCEN_SHARED ScrDynCenKind scr_dyncen_snap[SCR_DYNCEN_KINDS] = {{0}};
 /* The same rows filled by the LAST walk, so the reader can compare the
  * at-exit population against the at-peak one without a second run. */
@@ -655,6 +673,36 @@ SCR_DYNCEN_FN void scr_dyncen_report(void) {
     for (long long i = 0; i < scr_dyncen_ncurve; i++)
       fprintf(f, "DYNCEN-CURVE %lld %lld %lld %lld\n", i, scr_dyncen_curve[i][0],
               scr_dyncen_curve[i][1], scr_dyncen_curve[i][2]);
+    {
+      int pi;
+      for (pi = 0; pi < 2; pi++) {
+        const ScrDynCenProps *p = &scr_dyncen_props[pi];
+        const char *nm = pi == 0 ? "snap" : "exit";
+        int q;
+        fprintf(f, "DYNCEN-PROPS %s tables=%lld tblNodePhys=%lld tblSidePhys=%lld tblKeyPhys=%lld ents=%lld plain=%lld nondef=%lld accessor=%lld marker=%lld nonbool=%lld\n",
+                nm, p->tables, p->tbl_node_phys, p->tbl_side_phys, p->tbl_key_phys, p->ents, p->plain, p->nondef, p->accessor, p->marker, p->nonbool);
+        fprintf(f, "DYNCEN-PROPS-BYTES %s plainArrNode=%lld plainArrItems=%lld markerArrNode=%lld markerArrItems=%lld plainNumNode=%lld\n",
+                nm, p->plain_arr_node_phys, p->plain_arr_items_phys, p->marker_arr_node_phys, p->marker_arr_items_phys, p->plain_num_node_phys);
+        fprintf(f, "DYNCEN-PROPS-ENTHIST %s", nm);
+        for (q = 0; q < 6; q++) fprintf(f, " %lld", p->ent_hist[q]);
+        fprintf(f, "\nDYNCEN-PROPS-KIND %s", nm);
+        for (q = 0; q < 16; q++) fprintf(f, " %lld", p->plain_kind[q]);
+        fprintf(f, "\nDYNCEN-PROPS-NUM %s num=%lld small=%lld imm=%lld nodePhys=%lld rc", nm, p->plain_num, p->plain_num_small, p->plain_num_imm, p->plain_num_node_phys);
+        for (q = 0; q < 5; q++) fprintf(f, " %lld", p->plain_num_rc[q]);
+        fprintf(f, "\nDYNCEN-PROPS-PIDX %s n=%lld max=%lld hist", nm, p->pidx_n, p->pidx_max);
+        for (q = 0; q < 8; q++) fprintf(f, " %lld", p->pidx_hist[q]);
+        fprintf(f, "\nDYNCEN-PROPS-NUMALL %s rc", nm);
+        for (q = 0; q < 5; q++) fprintf(f, " %lld", p->numall_rc[q]);
+        fprintf(f, " buckets");
+        for (q = 0; q < 18; q++) fprintf(f, " %lld", p->numall_b[q]);
+        fprintf(f, "\nDYNCEN-PROPS-NUMHELD %s rc", nm);
+        for (q = 0; q < 5; q++) fprintf(f, " %lld", p->numheld_rc[q]);
+        fprintf(f, " buckets");
+        for (q = 0; q < 18; q++) fprintf(f, " %lld", p->numheld_b[q]);
+        fputc(0x0a, f);
+        for (q = 0; q < p->keyhist_n; q++) fprintf(f, "DYNCEN-PROPS-KEY %s %s %lld\n", nm, p->keyname[q], p->keycnt[q]);
+      }
+    }
     fprintf(f,
             "DYNCEN-TOTAL allocs=%lld deaths=%lld liveN=%lld livePeak=%lld snapN=%lld "
             "snapOrd=%lld snapT=%lld snaps=%lld snapBand=%lld walks=%lld walkReads=%lld "
