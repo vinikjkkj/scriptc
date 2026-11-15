@@ -88,3 +88,26 @@ if strs:
     print("  nodes   literal  heapstr  strBytes(phys)  shared  distinct   site")
     for name, (n, nimm, sl, sp, nsh, nd) in sorted(agg2.items(), key=lambda kv: -kv[1][0])[:14]:
         print(f"  {n:6d}  {nimm:7d}  {n-nimm:7d}  {sp:13d}  {nsh:6d}  {nd:8d}   {name[:70]}")
+
+# ---- per-site length histogram and distinct-content samples (lines follow their CYCEN-STR line)
+cur = None; sites = []
+for l in lines:
+    if l.startswith('CYCEN-STR '):
+        m = re.match(r'CYCEN-STR n=(\d+).*?((?: [0-9a-f]+)+)$', l)
+        fr = [int(a, 16) for a in m.group(2).split()]
+        name = None
+        for a in fr:
+            sy = sym(a)
+            if sy is None or sy.startswith('scr_'): continue
+            name = sy; break
+        cur = {'name': name or '(runtime only)', 'n': int(m.group(1)), 'len': {}, 'samp': []}; sites.append(cur)
+    elif l.startswith('CYCEN-STRLEN') and cur is not None:
+        for kv_ in l.split()[2:]:
+            a, b = kv_.split(':'); cur['len'][int(a)] = int(b)
+    elif l.startswith('CYCEN-STRSAMP') and cur is not None:
+        m = re.match(r'CYCEN-STRSAMP q=\d+ len=(\d+) \|(.*)\|$', l)
+        if m: cur['samp'].append((int(m.group(1)), m.group(2)))
+for s_ in sorted(sites, key=lambda x: -x['n'])[:3]:
+    top = sorted(s_['len'].items(), key=lambda kv: -kv[1])[:8]
+    print(f"\nSITE {s_['name'][:70]}: {s_['n']} nodes; node count by string length (len:count) {top}")
+    for ln, tx in s_['samp'][:24]: print(f"   len {ln:3d} |{tx}|")
