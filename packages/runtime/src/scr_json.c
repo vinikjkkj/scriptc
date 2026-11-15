@@ -2353,6 +2353,10 @@ __attribute__((noinline)) const char *scr_dyn_fn_name(const ScrDyn *d) {
   return n == scr_dyn_bound_name_mark ? scr_dyn_bound_name_fn(d) : n;
 }
 const char *scr_dyn_fn_src_of(const ScrDyn *d) { return scr_dyn_fn_src(d); }
+/* The closure a FUNC value calls and the thunk of its descriptor, as callable symbols for the LLVM lane (which cannot reach the static inlines): a
+ * closure is itself the FUNC value when it carries the isdyn tag, so the node's pointer fields are not always there to load. */
+ScrClosure *scr_dyn_fn_clo_of(const ScrDyn *d) { return scr_dyn_fn_clo(d); }
+ScrDynThunk scr_dyn_fn_thunk_of(const ScrDyn *d) { return scr_dyn_fn_thunk(d); }
 
 /* The compiler's PROVEN kind code for a FUNC box whose closure the table
  * cannot name (a static bind: one shared wrapper per signature, whose code

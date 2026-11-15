@@ -10736,7 +10736,7 @@ class LlEmitter {
         for (const a of args) this.moveTemp(a);
         const fnp = B.tmp();
         const fn = B.tmp();
-        B.line(`${fnp} = getelementptr inbounds %ScrClosure, ptr ${callee.name}, i64 0, i32 1`);
+        B.line(`${fnp} = getelementptr inbounds %ScrClosure, ptr ${callee.name}, i64 0, i32 6`);
         B.line(`${fn} = load ptr, ptr ${fnp}`);
         const argList = [
           `ptr ${callee.name}`,
@@ -13290,7 +13290,7 @@ class LlEmitter {
       args.push("ptr %ff");
     }
     body.push(
-      `  %fnp = getelementptr inbounds %ScrClosure, ptr %cb, i64 0, i32 1`,
+      `  %fnp = getelementptr inbounds %ScrClosure, ptr %cb, i64 0, i32 6`,
       `  %fn = load ptr, ptr %fnp`,
       `  call void %fn(${args.join(", ")})`,
       `  ret void`,
@@ -13329,7 +13329,7 @@ class LlEmitter {
     this.declare(`declare void @scr_net_sock_release_v(ptr)`);
     this.declare(`declare void @scr_bytes_release(ptr)`);
     const body: string[] = [
-      `  %fnp = getelementptr inbounds %ScrClosure, ptr %cb, i64 0, i32 1`,
+      `  %fnp = getelementptr inbounds %ScrClosure, ptr %cb, i64 0, i32 6`,
       ...(three ? [] : [`  call void @scr_bytes_release(ptr %head)`]),
       `  %u = call ptr @scr_union_new_ref(i32 ${tag}, ptr %sock, ptr @scr_net_sock_retain_v, ptr @scr_net_sock_release_v, ptr null)`,
       `  %fn = load ptr, ptr %fnp`,
@@ -13415,7 +13415,7 @@ class LlEmitter {
       `  ${gep("%ps", size.idx)}`,
       `  store double %size, ptr %ps`,
       `  %m = call ptr ${retMsg}(ptr %msg)`,
-      `  %fnp = getelementptr inbounds %ScrClosure, ptr %cb, i64 0, i32 1`,
+      `  %fnp = getelementptr inbounds %ScrClosure, ptr %cb, i64 0, i32 6`,
       `  %fn = load ptr, ptr %fnp`,
       `  call void %fn(ptr %cb, ptr %m, ptr %ri)`,
       `  ret void`,
@@ -13453,7 +13453,7 @@ class LlEmitter {
       passed.push(`ptr %ar${i}`);
     }
     d.push(
-      `  %fnp = getelementptr inbounds %ScrClosure, ptr %c, i64 0, i32 1`,
+      `  %fnp = getelementptr inbounds %ScrClosure, ptr %c, i64 0, i32 6`,
       `  %fn = load ptr, ptr %fnp`,
     );
     switch (retKind) {
@@ -13657,7 +13657,7 @@ class LlEmitter {
       }
     });
     d.push(
-      `  %fnp = getelementptr inbounds %ScrClosure, ptr %c, i64 0, i32 1`,
+      `  %fnp = getelementptr inbounds %ScrClosure, ptr %c, i64 0, i32 6`,
       `  %fn = load ptr, ptr %fnp`,
     );
     if (ret.async) {
@@ -14333,7 +14333,7 @@ class LlEmitter {
       `  br label %go`,
       `go:`,
       `  %u = load ptr, ptr %slot`,
-      `  %fnp = getelementptr inbounds %ScrClosure, ptr %cb, i64 0, i32 1`,
+      `  %fnp = getelementptr inbounds %ScrClosure, ptr %cb, i64 0, i32 6`,
       `  %fn = load ptr, ptr %fnp`,
       `  call void %fn(ptr %cb, ptr %u)`,
       `  ret void`,
@@ -14399,7 +14399,7 @@ class LlEmitter {
       `go:`,
       `  %u = load ptr, ptr %uslot`,
       `  %s = load ptr, ptr %sslot`,
-      `  %fnp = getelementptr inbounds %ScrClosure, ptr %cb, i64 0, i32 1`,
+      `  %fnp = getelementptr inbounds %ScrClosure, ptr %cb, i64 0, i32 6`,
       `  %fn = load ptr, ptr %fnp`,
       `  call void %fn(ptr %cb, ptr %u, ptr %s)`,
       `  ret void`,
@@ -14430,7 +14430,7 @@ class LlEmitter {
       `entry:`,
       `  %r = call ptr @scr_bytes_retain_v(ptr %chunk)`,
       `  %u = call ptr @scr_union_new_ref(i32 ${bytesTag}, ptr %r, ptr @scr_bytes_retain_v, ptr @scr_bytes_release_v, ptr null)`,
-      `  %fnp = getelementptr inbounds %ScrClosure, ptr %cb, i64 0, i32 1`,
+      `  %fnp = getelementptr inbounds %ScrClosure, ptr %cb, i64 0, i32 6`,
       `  %fn = load ptr, ptr %fnp`,
       `  call void %fn(ptr %cb, ptr %u)`,
       `  ret void`,
@@ -14498,7 +14498,7 @@ class LlEmitter {
       }
     });
     d.push(
-      `  %fnp = getelementptr inbounds %ScrClosure, ptr %orig, i64 0, i32 1`,
+      `  %fnp = getelementptr inbounds %ScrClosure, ptr %orig, i64 0, i32 6`,
       `  %fn = load ptr, ptr %fnp`,
     );
     const retTy = this.llType(cbT.ret);
@@ -14603,7 +14603,7 @@ class LlEmitter {
         `  %capsp = getelementptr inbounds %ScrClosure, ptr %self, i64 1`,
         `  %bx = load ptr, ptr %capsp`,
         `  %inner = call ptr @scr_box_get_ref(ptr %bx) ; +1`,
-        `  %fnp = getelementptr inbounds %ScrClosure, ptr %inner, i64 0, i32 1`,
+        `  %fnp = getelementptr inbounds %ScrClosure, ptr %inner, i64 0, i32 6`,
         `  %fn = load ptr, ptr %fnp`,
         `  call void %fn(ptr %inner, ptr ${this.unitInstanceRef(errParam.unionId, undefTag)})`,
         `  call void @scr_closure_release(ptr %inner)`,
@@ -14688,7 +14688,7 @@ class LlEmitter {
       `  %capsp = getelementptr inbounds %ScrClosure, ptr %self, i64 1`,
       `  %bx = load ptr, ptr %capsp`,
       `  %inner = call ptr @scr_box_get_ref(ptr %bx) ; +1`,
-      `  %fnp = getelementptr inbounds %ScrClosure, ptr %inner, i64 0, i32 1`,
+      `  %fnp = getelementptr inbounds %ScrClosure, ptr %inner, i64 0, i32 6`,
       `  %fn = load ptr, ptr %fnp`,
       ...(retServer
         ? [
@@ -14732,7 +14732,7 @@ class LlEmitter {
     ];
     const finish = (arg: string | null): void => {
       d.push(
-        `  %fnp = getelementptr inbounds %ScrClosure, ptr %orig, i64 0, i32 1`,
+        `  %fnp = getelementptr inbounds %ScrClosure, ptr %orig, i64 0, i32 6`,
         `  %fn = load ptr, ptr %fnp`,
       );
       const retTy = this.llType(cbT.ret);
@@ -14833,7 +14833,7 @@ class LlEmitter {
     const d: string[] = [
       `define internal void @${sym}(ptr %cb, ptr %err, ptr %st) ${FN_ATTRS} { ; fs.stat callback adapter`,
       `entry:`,
-      `  %fnp = getelementptr inbounds %ScrClosure, ptr %cb, i64 0, i32 1`,
+      `  %fnp = getelementptr inbounds %ScrClosure, ptr %cb, i64 0, i32 6`,
       `  %fn = load ptr, ptr %fnp`,
     ];
     if (nparams === 0) {
@@ -15198,7 +15198,7 @@ class LlEmitter {
       }
     }
     d.push(
-      `  %fnp = getelementptr inbounds %ScrClosure, ptr %cb, i64 0, i32 1`,
+      `  %fnp = getelementptr inbounds %ScrClosure, ptr %cb, i64 0, i32 6`,
       `  %fn = load ptr, ptr %fnp`,
     );
     const retTy = this.llType(cbT.ret);
