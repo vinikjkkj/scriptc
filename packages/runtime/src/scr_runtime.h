@@ -8503,7 +8503,20 @@ ScrPromise *scr_promise_adapt_put(ScrPromise *src, double id, ScrPromise *made);
  * memoised per (src, id). See scr_async.c. */
 ScrPromise *scr_promise_claim(ScrPromise *src, double id, ScrClosure *conv);
 
-typedef struct ScrFiber ScrFiber;
+/* THE MICROTASK RECORD (runtime-internal; here so a reaction can embed one). Everything on the ready queue is a stackless envelope: a queueMicrotask closure, a raw hook plus one owned argument
+ * (scr_coro_park's resume entry, the async-generator sink), or a parked await's continuation. There are no fibers and no stacks: every
+ * async function and generator is a state machine over a heap frame (scr_coro.c), so the queue holds exactly these four words. */
+typedef struct ScrFiber {
+  /* queueMicrotask entries: the READY queue's FIFO IS the microtask queue, so a closure rides it as an envelope and scr_resume_fiber runs
+   * it on the main stack (a throw is an UNCAUGHT exception, like Node's queueMicrotask, never a rejection). Owned. */
+  ScrClosure *micro_cb;
+  /* The runtime's OWN envelope: a raw hook plus one owned argument. Owned: the envelope releases `micro_arg` through `micro_arg_release`. */
+  void (*micro_raw)(void *);
+  void *micro_arg;
+  void (*micro_arg_release)(void *);
+} ScrFiber;
+/* Park `fn` on `p` through `env`, which must be the first member of the object `fn` receives (see scr_async.c). */
+void scr_promise_wait_embedded(ScrPromise *p, ScrFiber *env, void (*fn)(void *));
 /* Internal ESM dependency wait on a SETTLED promise: unlike a JavaScript await expression it does not hop (a pending dependency is awaited
  * by the initialiser's own state machine). */
 void scr_module_await(ScrPromise *p);
