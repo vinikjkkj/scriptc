@@ -25,6 +25,81 @@
  * At most one object per walk is in that state, and `n_empty_buf` /
  * `aux_nonnull` are where it shows up rather than a crash.
  */
+
+/* props-table census pass (see ScrDynCenProps): a second walk over the live pointer table. */
+static int scr_dyncen_numbucket(double v) {
+  if (v != v || v > 9e15 || v < -9e15) return 0;
+  if (v == 0.0) { unsigned long long bits; memcpy(&bits, &v, sizeof bits); return (bits >> 63) ? 1 : 5; }
+  if (v != (double)(long long)v) return 0;
+  { long long x = (long long)v;
+    return x < -128 ? 2 : x < -1 ? 3 : x == -1 ? 4 : x == 1 ? 6 : x < 16 ? 7 : x < 32 ? 8 : x < 64 ? 9 : x < 128 ? 10 : x < 256 ? 11 : x < 512 ? 12 : x < 1024 ? 13 : x < 4096 ? 14 : x < 65536 ? 15 : 16; }
+}
+static int scr_dyncen_rcb(size_t rc) { return rc == (size_t)-1 ? 4 : rc >= 4 ? 3 : rc >= 1 ? (int)rc - 1 : 0; }
+static void scr_dyncen_props_pass(ScrDynCenProps *p) {
+  unsigned j;
+  memset(p, 0, sizeof *p);
+  for (j = 0; j < SCR_DYNCEN_PSLOTS; j++) {
+    const ScrDyn *d = (const ScrDyn *)scr_dyncen_ptbl[j];
+    if (!d) continue;
+    if (d->kind == SCR_DYN_NUM) {
+      p->numall_rc[scr_dyncen_rcb(d->rc)]++;
+      p->numall_b[scr_dyncen_numbucket(d->v.num)]++;
+    }
+    if (d->kind != SCR_DYN_OBJ || !d->v.obj.entries || d->v.obj.len == 0) continue;
+    {
+      size_t i; int ok = 1;
+      for (i = 0; i < d->v.obj.len && ok; i++) {
+        const ScrDyn *q = d->v.obj.entries[i].value;
+        if (!q || q->kind != SCR_DYN_ARR || !q->v.arr.items || q->v.arr.len < 5 || q->v.arr.len > 6) { ok = 0; break; }
+        if (q->v.arr.items[0]->kind != SCR_DYN_BOOL || q->v.arr.items[2]->kind != SCR_DYN_BOOL ||
+            q->v.arr.items[3]->kind != SCR_DYN_BOOL || q->v.arr.items[4]->kind != SCR_DYN_BOOL) ok = 0;
+      }
+      if (!ok) continue;
+      p->tables++;
+      { size_t n = d->v.obj.len; p->ent_hist[n == 1 ? 0 : n == 2 ? 1 : n == 3 ? 2 : n < 8 ? 3 : n < 16 ? 4 : 5]++; }
+      p->tbl_node_phys += scr_dyncen_phys((long long)(sizeof(ScrCycHdr) + sizeof(ScrDyn)));
+      p->tbl_side_phys += scr_dyncen_phys((long long)d->v.obj.cap * (long long)sizeof(ScrDynEntry));
+      if (d->v.obj.ext != NULL) p->tbl_side_phys += scr_dyncen_phys((long long)sizeof(ScrDynObjExt));
+      for (i = 0; i < d->v.obj.len; i++) {
+        const ScrDynEntry *e = &d->v.obj.entries[i];
+        const ScrDyn *q = e->value;
+        long long anode = scr_dyncen_phys((long long)(sizeof(ScrCycHdr) + sizeof(ScrDyn)));
+        long long aitems = scr_dyncen_phys((long long)q->v.arr.cap * (long long)sizeof(ScrDyn *));
+        p->ents++;
+        if (!e->key_static) p->tbl_key_phys += (long long)scr_pool_bytes((size_t)e->key_len + 1);
+        if (q->v.arr.len == 6) { p->marker++; p->marker_arr_node_phys += anode; p->marker_arr_items_phys += aitems; continue; }
+        if (!scr_dyn_truthy(q->v.arr.items[0])) { p->accessor++; continue; }
+        if (scr_dyn_truthy(q->v.arr.items[2]) && scr_dyn_truthy(q->v.arr.items[3]) && scr_dyn_truthy(q->v.arr.items[4])) {
+          const ScrDyn *v = q->v.arr.items[1];
+          p->plain++; p->plain_arr_node_phys += anode; p->plain_arr_items_phys += aitems;
+          p->plain_kind[(unsigned)v->kind < 16 ? (unsigned)v->kind : 15]++;
+          { long long kk;
+            for (kk = 0; kk < p->keyhist_n; kk++)
+              if (strlen(p->keyname[kk]) == (size_t)e->key_len && memcmp(p->keyname[kk], e->key, e->key_len) == 0) break;
+            if (kk == p->keyhist_n && kk < 16 && e->key_len < 23) { memcpy(p->keyname[kk], e->key, e->key_len); p->keyname[kk][e->key_len] = 0; p->keyhist_n++; }
+            if (kk < p->keyhist_n) p->keycnt[kk]++; }
+          if (v->kind == SCR_DYN_NUM) {
+            double x = v->v.num; int b = scr_dyncen_numbucket(x);
+            p->plain_num++;
+            p->plain_num_rc[scr_dyncen_rcb(v->rc)]++;
+            p->numheld_rc[scr_dyncen_rcb(v->rc)]++;
+            p->numheld_b[b]++;
+            if (v->rc == (size_t)-1) p->plain_num_imm++;
+            else p->plain_num_node_phys += scr_dyncen_phys((long long)(sizeof(ScrCycHdr) + sizeof(ScrDyn)));
+            if (x == (double)(long long)x && x >= -128 && x <= 1023 && !(x == 0 && 1 / x < 0)) p->plain_num_small++;
+            if (e->key_len == 13 && memcmp(e->key, "pipelineIndex", 13) == 0) {
+              long long xi = (long long)x;
+              p->pidx_n++;
+              if (xi > p->pidx_max) p->pidx_max = xi;
+              p->pidx_hist[xi < 4 ? 0 : xi < 16 ? 1 : xi < 64 ? 2 : xi < 256 ? 3 : xi < 1024 ? 4 : xi < 4096 ? 5 : xi < 16384 ? 6 : 7]++;
+            }
+          }
+        } else p->nondef++;
+      }
+    }
+  }
+}
+
 static void scr_dyncen_walk(ScrDynCenKind *rows) {
   unsigned j;
   /* The key table belongs to the same population as the rows: a walk into
@@ -232,6 +307,8 @@ static void scr_dyncen_walk(ScrDynCenKind *rows) {
     }
     }
   }
+  if (rows == scr_dyncen_snap) scr_dyncen_props_pass(&scr_dyncen_props[0]);
+  else if (rows == scr_dyncen_exit) scr_dyncen_props_pass(&scr_dyncen_props[1]);
 }
 
 /* The two hooks scr_json.c calls. `note_alloc` runs at the END of
