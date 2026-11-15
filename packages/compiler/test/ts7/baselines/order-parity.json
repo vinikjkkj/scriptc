@@ -27942,6 +27942,18 @@
     "<repo>/tests/corpus/25292-boxed-functions-keep-name-length-and-call-across-three-hundred-distinct-descriptors.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25293-a-wide-record-of-one-member-type-crosses-into-dyn-and-back-through-a-field-table.ts": {
+   "order": [
+    "<repo>/tests/corpus/25293-a-wide-record-of-one-member-type-crosses-into-dyn-and-back-through-a-field-table.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25294-a-record-of-mixed-member-types-keeps-its-unrolled-conversion-beside-a-field-table-loop.ts": {
+   "order": [
+    "<repo>/tests/corpus/25294-a-record-of-mixed-member-types-keeps-its-unrolled-conversion-beside-a-field-table-loop.ts"
+   ],
+   "diags": []
   }
  }
 }
