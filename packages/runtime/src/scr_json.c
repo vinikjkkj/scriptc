@@ -562,6 +562,8 @@ static ScrDyn *scr_dyn_free_lists[6];
 static const uint8_t scr_dyn_fl_idx[SCR_DYN_KIND_COUNT] = {SCR_DYN_ARMS(SCR_DYN_FL_ROW) [SCR_DYN_ARR] = 4, [SCR_DYN_OBJ] = 5};
 static inline ScrDyn **scr_dyn_free_list(ScrDynKind k) { return &scr_dyn_free_lists[scr_dyn_fl_idx[k]]; }
 static size_t scr_dyn_free_count;
+/* LAB (sockbuf), never shipped: bytes of array/object buffers sitting on the parked free lists (park +, reuse -, trim -), sampled by scr_async.c. */
+long long scr_ss_parked_bytes = 0;
 #define SCR_DYN_FREE_MAX 8192
 /* THE POST-COLLECTION TRIM. Park and reuse (and the allocation hit path) are unchanged: a parked ARR/OBJ node keeps its buffer, and a churn loop recycles it for free.
  * But the node is recycled by whatever container comes next, so after a burst (1,000 queued queries each holding a 751-slot params vector, 1,000 per-command 92-slot option
@@ -582,9 +584,9 @@ static void scr_dyn_idle_trim(void) {
   if (scr_dyn_free_count == scr_dyn_trim_seen) return;
   scr_dyn_trim_seen = scr_dyn_free_count;
   for (ScrDyn *d = scr_dyn_free_lists[4]; d != NULL; d = (ScrDyn *)(size_t)d->rc)
-    if (d->v.arr.cap > SCR_DYN_TRIM_ARR) { free(d->v.arr.items); d->v.arr.items = NULL; d->v.arr.cap = 0; }
+    if (d->v.arr.cap > SCR_DYN_TRIM_ARR) { scr_ss_parked_bytes -= (long long)d->v.arr.cap * 8; free(d->v.arr.items); d->v.arr.items = NULL; d->v.arr.cap = 0; }
   for (ScrDyn *d = scr_dyn_free_lists[5]; d != NULL; d = (ScrDyn *)(size_t)d->rc)
-    if (d->v.obj.cap > SCR_DYN_TRIM_OBJ) { free(d->v.obj.entries); d->v.obj.entries = NULL; d->v.obj.cap = 0; }
+    if (d->v.obj.cap > SCR_DYN_TRIM_OBJ) { scr_ss_parked_bytes -= (long long)d->v.obj.cap * 32; free(d->v.obj.entries); d->v.obj.entries = NULL; d->v.obj.cap = 0; }
 }
 __attribute__((constructor)) static void scr_dyn_idle_trim_reg(void) { scr_cyc_idle_trim_hook = scr_dyn_idle_trim; }
 #endif
@@ -721,6 +723,7 @@ static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
                               : 0);
 #endif
     *list = (ScrDyn *)(size_t)d->rc; /* freelist link, see the release end */
+    if (kind == SCR_DYN_ARR) scr_ss_parked_bytes -= (long long)d->v.arr.cap * 8; else if (kind == SCR_DYN_OBJ) scr_ss_parked_bytes -= (long long)d->v.obj.cap * 32; /* LAB sockbuf */
     scr_dyn_free_count--;
     /* A recycled node re-enters the graph BLACK. Its `buffered` flag was
      * already cleared by scr_cyc_on_dead on the way out, but its color is
@@ -1083,6 +1086,7 @@ static __attribute__((noinline)) void scr_dyn_release_final(ScrDyn *d) {
      * buffer entry and every edge it owned has been released. */
     d->rc = (size_t)(void *)*list; /* buffer and capacity survive intact */
     *list = d;
+    if (d->kind == SCR_DYN_ARR) scr_ss_parked_bytes += (long long)d->v.arr.cap * 8; else if (d->kind == SCR_DYN_OBJ) scr_ss_parked_bytes += (long long)d->v.obj.cap * 32; /* LAB sockbuf */
     scr_dyn_free_count++;
     return;
   }

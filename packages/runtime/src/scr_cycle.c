@@ -2328,8 +2328,11 @@ static void scr_collect_white(void *obj) {
   }
 }
 
+/* LAB (sockbuf): collections that ran */
+unsigned long long scr_ss_colls = 0;
 void scr_collect_cycles(void) {
   if (scr_collecting || scr_nroots == 0) return;
+  scr_ss_colls++;
   scr_collecting = true;
   SCR_CS_PASS_BEGIN();
 

@@ -694,9 +694,10 @@ static ScrFiber **scr_ready = NULL;
 #include <unistd.h>
 #include <malloc.h>
 extern unsigned long long scr_ss_rd, scr_ss_dl;
-extern long long scr_ss_bytes_live;
+extern long long scr_ss_bytes_live, scr_ss_parked_bytes;
+extern unsigned long long scr_ss_colls;
 extern size_t scr_cyc_live;
-typedef struct { unsigned t_ms; unsigned long long rd, dl; long long live; unsigned ready, cyc, rss_kb, arena_kb, uord_kb, ford_kb; } ScrSsSample;
+typedef struct { unsigned t_ms; unsigned long long rd, dl; long long live; unsigned ready, cyc, rss_kb, arena_kb, uord_kb, ford_kb; long long parked; unsigned long long colls; } ScrSsSample;
 static ScrSsSample scr_ss_samples[8192];
 static volatile unsigned scr_ss_n;
 static void *scr_ss_thread(void *arg);
@@ -737,6 +738,8 @@ static void *scr_ss_thread(void *arg) {
     x->arena_kb = (unsigned)((mi.arena + mi.hblkhd) / 1024);
     x->uord_kb = (unsigned)(mi.uordblks / 1024);
     x->ford_kb = (unsigned)(mi.fordblks / 1024);
+    x->parked = scr_ss_parked_bytes;
+    x->colls = scr_ss_colls;
     scr_ss_n = i + 1;
   }
 }
@@ -754,11 +757,11 @@ __attribute__((destructor)) static void scr_ss_dump(void) {
   if (path == NULL) return;
   FILE *f = fopen(path, "w");
   if (f == NULL) return;
-  fprintf(f, "# t_ms rd dl live_bytes ready cyc_live rss_kb arena_kb uord_kb ford_kb\n");
+  fprintf(f, "# t_ms rd dl live_bytes ready cyc_live rss_kb arena_kb uord_kb ford_kb parked_bytes collections\n");
   unsigned n = scr_ss_n;
   for (unsigned i = 0; i < n && i < 8192; i++) {
     const ScrSsSample *x = &scr_ss_samples[i];
-    fprintf(f, "%u %llu %llu %lld %u %u %u %u %u %u\n", x->t_ms, x->rd, x->dl, x->live, x->ready, x->cyc, x->rss_kb, x->arena_kb, x->uord_kb, x->ford_kb);
+    fprintf(f, "%u %llu %llu %lld %u %u %u %u %u %u %lld %llu\n", x->t_ms, x->rd, x->dl, x->live, x->ready, x->cyc, x->rss_kb, x->arena_kb, x->uord_kb, x->ford_kb, x->parked, x->colls);
   }
   fclose(f);
 }
