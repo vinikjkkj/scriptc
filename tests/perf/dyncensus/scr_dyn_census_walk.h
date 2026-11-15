@@ -25,6 +25,94 @@
  * At most one object per walk is in that state, and `n_empty_buf` /
  * `aux_nonnull` are where it shows up rather than a crash.
  */
+/* LAB (gap2): how many live dyn STR boxes point at the SAME ScrStr block. scr_dyn_new_str / the JSON string site register (site, block) and the node's death unregisters the block, so
+ * the table holds, at any instant, the live box count of every block. The peak snapshot and the exit report print its histogram and the sites that created a box for a block that
+ * already had one (SCR_STRBOX_OUT names the file). */
+#define SCR_SB_SLOTS (1u << 20)
+typedef struct { const void *p; unsigned n; unsigned pad; } ScrSbSlot;
+static ScrSbSlot scr_sb_tab[SCR_SB_SLOTS];
+static long long scr_sb_boxes, scr_sb_blocks, scr_sb_lost;
+typedef struct { const void *ra0, *ra1; long long created, dup; } ScrSbSite;
+#define SCR_SB_SITES 8192u
+static ScrSbSite scr_sb_sites[SCR_SB_SITES];
+static long long scr_sb_hist_peak[8], scr_sb_boxes_peak, scr_sb_blocks_peak, scr_sb_hist_peak_set;
+static unsigned scr_sb_h(const void *p) { unsigned long long x = (unsigned long long)(size_t)p; x ^= x >> 17; x *= 0x9E3779B97F4A7C15ull; return (unsigned)(x >> 40) & (SCR_SB_SLOTS - 1u); }
+static void scr_sb_add(const void *ra0, const void *ra1, const void *blk) {
+  unsigned j = scr_sb_h(blk), i;
+  unsigned long long hs;
+  unsigned sj;
+  int dup = 0;
+  for (i = 0; i < SCR_SB_SLOTS; i++, j = (j + 1u) & (SCR_SB_SLOTS - 1u)) {
+    if (scr_sb_tab[j].p == blk) { dup = scr_sb_tab[j].n > 0; scr_sb_tab[j].n++; break; }
+    if (scr_sb_tab[j].p == NULL) { scr_sb_tab[j].p = blk; scr_sb_tab[j].n = 1; scr_sb_blocks++; break; }
+  }
+  if (i == SCR_SB_SLOTS) { scr_sb_lost++; return; }
+  scr_sb_boxes++;
+  hs = (unsigned long long)(size_t)ra0 * 0x9E3779B97F4A7C15ull + (unsigned long long)(size_t)ra1;
+  sj = (unsigned)(hs >> 40) & (SCR_SB_SITES - 1u);
+  for (i = 0; i < SCR_SB_SITES; i++, sj = (sj + 1u) & (SCR_SB_SITES - 1u)) {
+    if (scr_sb_sites[sj].ra0 == ra0 && scr_sb_sites[sj].ra1 == ra1) break;
+    if (scr_sb_sites[sj].ra0 == NULL) { scr_sb_sites[sj].ra0 = ra0; scr_sb_sites[sj].ra1 = ra1; break; }
+  }
+  if (i < SCR_SB_SITES) { scr_sb_sites[sj].created++; if (dup) scr_sb_sites[sj].dup++; }
+}
+static void scr_sb_del(const void *blk) {
+  unsigned mask = SCR_SB_SLOTS - 1u, j = scr_sb_h(blk), i;
+  for (i = 0; i < SCR_SB_SLOTS; i++, j = (j + 1u) & mask) {
+    if (scr_sb_tab[j].p == NULL) return;
+    if (scr_sb_tab[j].p == blk) break;
+  }
+  if (i == SCR_SB_SLOTS) return;
+  scr_sb_boxes--;
+  if (--scr_sb_tab[j].n > 0) return;
+  scr_sb_blocks--;
+  { /* backward-shift erase */
+    unsigned hole = j, k;
+    scr_sb_tab[hole].p = NULL;
+    for (k = (hole + 1u) & mask; scr_sb_tab[k].p != NULL; k = (k + 1u) & mask) {
+      unsigned ideal = scr_sb_h(scr_sb_tab[k].p);
+      if (((k - ideal) & mask) >= ((k - hole) & mask)) { scr_sb_tab[hole] = scr_sb_tab[k]; scr_sb_tab[k].p = NULL; hole = k; }
+    }
+  }
+}
+static void scr_sb_hist(long long *h) {
+  unsigned j;
+  int b;
+  for (b = 0; b < 8; b++) h[b] = 0;
+  for (j = 0; j < SCR_SB_SLOTS; j++) {
+    unsigned n = scr_sb_tab[j].n;
+    if (scr_sb_tab[j].p == NULL || n == 0) continue;
+    b = n == 1 ? 0 : n == 2 ? 1 : n <= 4 ? 2 : n <= 16 ? 3 : n <= 64 ? 4 : n <= 256 ? 5 : n <= 1024 ? 6 : 7;
+    h[b]++;
+  }
+}
+static void scr_sb_report(void) {
+  const char *path = getenv("SCR_STRBOX_OUT");
+  FILE *f;
+  long long h[8];
+  unsigned i;
+  int b, top;
+  if (!path || !(f = fopen(path, "w"))) return;
+  fprintf(f, "STRBOX-ANCHOR %p\n", (void *)&scr_collect_cycles);
+  fprintf(f, "STRBOX-BUCKETS blocks_with_boxes: 1 | 2 | 3-4 | 5-16 | 17-64 | 65-256 | 257-1024 | >1024\n");
+  if (scr_sb_hist_peak_set) {
+    fprintf(f, "STRBOX-PEAK boxes=%lld blocks=%lld saveIfOneBoxPerBlockNodes=%lld hist", scr_sb_boxes_peak, scr_sb_blocks_peak, scr_sb_boxes_peak - scr_sb_blocks_peak);
+    for (b = 0; b < 8; b++) fprintf(f, " %lld", scr_sb_hist_peak[b]);
+    fprintf(f, "\n");
+  }
+  scr_sb_hist(h);
+  fprintf(f, "STRBOX-EXIT boxes=%lld blocks=%lld lost=%lld hist", scr_sb_boxes, scr_sb_blocks, scr_sb_lost);
+  for (b = 0; b < 8; b++) fprintf(f, " %lld", h[b]);
+  fprintf(f, "\n");
+  for (top = 0; top < 40; top++) { /* top sites by dup-created, selection */
+    long long best = 0; int bi = -1;
+    for (i = 0; i < SCR_SB_SITES; i++) if (scr_sb_sites[i].dup > best) { best = scr_sb_sites[i].dup; bi = (int)i; }
+    if (bi < 0) break;
+    fprintf(f, "STRBOX-SITE ra0=%p ra1=%p created=%lld dupCreated=%lld\n", scr_sb_sites[bi].ra0, scr_sb_sites[bi].ra1, scr_sb_sites[bi].created, scr_sb_sites[bi].dup);
+    scr_sb_sites[bi].dup = -best; /* mark taken (negative) */
+  }
+  fclose(f);
+}
 static void scr_dyncen_walk(ScrDynCenKind *rows) {
   unsigned j;
   /* The key table belongs to the same population as the rows: a walk into
@@ -33,6 +121,8 @@ static void scr_dyncen_walk(ScrDynCenKind *rows) {
   ScrDynCenKeyTab *kt = rows == scr_dyncen_snap ? &scr_dyncen_keysnap
                       : rows == scr_dyncen_exit ? &scr_dyncen_keyexit
                                                 : NULL;
+  if (rows == scr_dyncen_snap) { scr_sb_hist(scr_sb_hist_peak); scr_sb_boxes_peak = scr_sb_boxes; scr_sb_blocks_peak = scr_sb_blocks; scr_sb_hist_peak_set = 1; }
+  if (rows == scr_dyncen_exit) scr_sb_report();
   memset(rows, 0, sizeof(ScrDynCenKind) * SCR_DYNCEN_KINDS);
   if (kt) scr_dyncen_key_reset(kt);
   scr_dyncen_walks++;
@@ -278,6 +368,7 @@ static void scr_dyncen_note_alloc(const ScrDyn *d) {
 
 static void scr_dyncen_note_dead(const ScrDyn *d) {
   unsigned k = (unsigned)d->kind;
+  if (k == (unsigned)SCR_DYN_STR && d->v.str != NULL && d->rc != SIZE_MAX) scr_sb_del(d->v.str);
   if (!scr_dyncen_ptbl_del(d)) {
     scr_dyncen_dead_unknown++;
     return;
