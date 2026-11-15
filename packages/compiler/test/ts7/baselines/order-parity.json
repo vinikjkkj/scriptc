@@ -27954,6 +27954,18 @@
     "<repo>/tests/corpus/25294-a-record-of-mixed-member-types-keeps-its-unrolled-conversion-beside-a-field-table-loop.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25311-expando-properties-of-a-class-instance-keep-values-order-and-deletes.ts": {
+   "order": [
+    "<repo>/tests/corpus/25311-expando-properties-of-a-class-instance-keep-values-order-and-deletes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25312-define-property-rows-of-a-class-instance-switch-between-plain-accessor-and-hidden.ts": {
+   "order": [
+    "<repo>/tests/corpus/25312-define-property-rows-of-a-class-instance-switch-between-plain-accessor-and-hidden.ts"
+   ],
+   "diags": []
   }
  }
 }
