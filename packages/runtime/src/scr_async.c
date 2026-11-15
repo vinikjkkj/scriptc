@@ -2311,6 +2311,8 @@ static size_t scr_td_every = 0, scr_td_faults = 0;
 static double scr_td_check_ms = 8, scr_td_next_check_ms = 0, scr_td_next_ms = 0;
 static bool scr_td_stat = false;
 static long scr_td_last_flt = 0;
+static double scr_td_after_ms = (double)SCR_TEXT_DROP_AFTER_MS; /* LAB: SCR_TEXT_DROP_AFTER_MS env override, read at resolve */
+static void scr_lab_tm_exit(void);
 
 static long scr_text_minflt(void) {
   struct rusage ru;
@@ -2326,6 +2328,8 @@ static void scr_td_resolve(void) {
   size_t chk = scr_text_env_num("SCR_TEXT_DROP_FAULT_CHECK_MS", 8);
   scr_td_check_ms = (double)(chk == 0 ? 1 : chk);
   scr_td_stat = scr_text_drop_env("SCR_TEXT_DROP_STAT", false);
+  scr_td_after_ms = (double)scr_text_env_num("SCR_TEXT_DROP_AFTER_MS", SCR_TEXT_DROP_AFTER_MS); /* LAB: env override */
+  if (getenv("SCR_LAB_TEXTMAP") != NULL) atexit(scr_lab_tm_exit);
   if (!scr_text_drop_env("SCR_TEXT_DROP", SCR_TEXT_DROP != 0) || scr_has_textrel()) scr_td_state = 2;
 }
 
@@ -2391,6 +2395,108 @@ static size_t scr_rela_release(void) {
 
 static size_t scr_rela_released_kib; /* KiB of .rela.dyn released with the first drop (SCR_TEXT_DROP_STAT shows it) */
 
+/* LAB ONLY (branch lab/floor2, never lands): SCR_LAB_TEXTMAP=<file, %p = pid> appends, at the first idle seam, just before the first text drop,
+ * just after it and at exit, one STATUS line (VmRSS, VmHWM, minor faults, loop ms) and, for the first two, the executable's r-xp pages that are
+ * RESIDENT (pagemap bit 63, readable without privileges for the process's own pages) as `R <firstpage> <npages>` runs per mapping. */
+static char scr_lab_tm_path[512];
+static int scr_lab_tm_state = 0; /* 0 unresolved, 1 on, 2 off */
+static void scr_lab_tm_w(int fd, const char *s) { size_t n = strlen(s); while (n > 0) { ssize_t w = write(fd, s, n); if (w <= 0) return; s += w; n -= (size_t)w; } }
+static void scr_lab_tm_dump(const char *tag, int with_pages, double now) {
+  if (scr_lab_tm_state == 0) {
+    const char *e = getenv("SCR_LAB_TEXTMAP");
+    scr_lab_tm_state = 2;
+    if (e != NULL && e[0] != '\0') {
+      size_t o = 0;
+      char nb[24];
+      for (; *e != '\0' && o + 24 < sizeof scr_lab_tm_path; e++) {
+        if (e[0] == '%' && e[1] == 'p') { const char *pid = scr_utoa((size_t)getpid(), nb); while (*pid) scr_lab_tm_path[o++] = *pid++; e++; }
+        else scr_lab_tm_path[o++] = *e;
+      }
+      scr_lab_tm_path[o] = '\0';
+      scr_lab_tm_state = 1;
+    }
+  }
+  if (scr_lab_tm_state != 1) return;
+  int out = open(scr_lab_tm_path, O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0644);
+  if (out < 0) return;
+  char nb[24];
+  /* STATUS */
+  {
+    char st[4096];
+    int fd = open("/proc/self/status", O_RDONLY | O_CLOEXEC);
+    size_t rss = 0, hwm = 0;
+    if (fd >= 0) {
+      ssize_t n = read(fd, st, sizeof st - 1);
+      close(fd);
+      if (n > 0) {
+        st[n] = '\0';
+        const char *a = strstr(st, "VmRSS:");
+        const char *b = strstr(st, "VmHWM:");
+        if (a) rss = (size_t)strtoul(a + 6, NULL, 10);
+        if (b) hwm = (size_t)strtoul(b + 6, NULL, 10);
+      }
+    }
+    scr_lab_tm_w(out, "STATUS "); scr_lab_tm_w(out, tag);
+    scr_lab_tm_w(out, " VmRSS="); scr_lab_tm_w(out, scr_utoa(rss, nb));
+    scr_lab_tm_w(out, " VmHWM="); scr_lab_tm_w(out, scr_utoa(hwm, nb));
+    scr_lab_tm_w(out, " minflt="); scr_lab_tm_w(out, scr_utoa((size_t)scr_text_minflt(), nb));
+    scr_lab_tm_w(out, " loop_ms="); scr_lab_tm_w(out, scr_utoa((size_t)now, nb));
+    scr_lab_tm_w(out, "\n");
+  }
+  if (with_pages) {
+    char exe[1024];
+    ssize_t en = readlink("/proc/self/exe", exe, sizeof exe - 1);
+    int mf = open("/proc/self/maps", O_RDONLY | O_CLOEXEC);
+    int pm = open("/proc/self/pagemap", O_RDONLY | O_CLOEXEC);
+    if (en > 0 && mf >= 0 && pm >= 0) {
+      exe[en] = '\0';
+      static char mb[1 << 18];
+      size_t have = 0;
+      ssize_t n;
+      while (have < sizeof mb - 1 && (n = read(mf, mb + have, sizeof mb - 1 - have)) > 0) have += (size_t)n;
+      mb[have] = '\0';
+      for (char *line = mb; line != NULL && *line != '\0';) {
+        char *nl = strchr(line, '\n');
+        if (nl) *nl = '\0';
+        unsigned long long a = 0, b = 0, off = 0;
+        char perms[8] = {0};
+        if (sscanf(line, "%llx-%llx %7s %llx", &a, &b, perms, &off) == 4 && perms[0] == 'r' && perms[2] == 'x') {
+          size_t ll = strlen(line), pl = strlen(exe);
+          if (ll >= pl && strcmp(line + ll - pl, exe) == 0) {
+            scr_lab_tm_w(out, "MAP "); scr_lab_tm_w(out, tag);
+            scr_lab_tm_w(out, " start="); scr_lab_tm_w(out, scr_utoa((size_t)a, nb));
+            scr_lab_tm_w(out, " offset="); scr_lab_tm_w(out, scr_utoa((size_t)off, nb));
+            scr_lab_tm_w(out, " pages="); scr_lab_tm_w(out, scr_utoa((size_t)((b - a) / 4096), nb));
+            scr_lab_tm_w(out, "\n");
+            size_t np = (size_t)((b - a) / 4096), i = 0;
+            while (i < np) {
+              uint64_t e[512];
+              size_t chunk = np - i < 512 ? np - i : 512;
+              ssize_t r = pread(pm, e, chunk * 8, (off_t)(((a / 4096) + i) * 8));
+              if (r <= 0) break;
+              size_t got = (size_t)r / 8;
+              for (size_t k = 0; k < got;) {
+                if (!(e[k] >> 63)) { k++; continue; }
+                size_t j = k;
+                while (j < got && (e[j] >> 63)) j++;
+                scr_lab_tm_w(out, "R "); scr_lab_tm_w(out, scr_utoa(i + k, nb));
+                scr_lab_tm_w(out, " "); scr_lab_tm_w(out, scr_utoa(j - k, nb)); scr_lab_tm_w(out, "\n");
+                k = j;
+              }
+              i += got;
+            }
+          }
+        }
+        line = nl ? nl + 1 : NULL;
+      }
+    }
+    if (mf >= 0) close(mf);
+    if (pm >= 0) close(pm);
+  }
+  close(out);
+}
+static void scr_lab_tm_exit(void) { scr_lab_tm_dump("exit", 0, 0); }
+
 static void scr_text_drop_tick(double now) {
   if (__builtin_expect(scr_td_state != 1, 0)) {
     if (scr_td_state == 2) return;
@@ -2400,8 +2506,12 @@ static void scr_text_drop_tick(double now) {
   if (now < scr_td_next_ms) return; /* the whole per-turn cost while live */
   long flt = 0;
   if (!scr_text_drop_first_done) {
-    if (scr_text_drop_first_ms == 0) { scr_text_drop_first_ms = now; scr_td_next_ms = now + (double)SCR_TEXT_DROP_AFTER_MS; return; }
-    if (now - scr_text_drop_first_ms < (double)SCR_TEXT_DROP_AFTER_MS) { scr_td_next_ms = scr_text_drop_first_ms + (double)SCR_TEXT_DROP_AFTER_MS; return; }
+    if (scr_text_drop_first_ms == 0) {
+      scr_text_drop_first_ms = now;
+      scr_lab_tm_dump("firstseam", 1, now);
+      scr_td_next_ms = now + scr_td_after_ms;
+      if (scr_td_after_ms > 0) return;
+    } else if (now - scr_text_drop_first_ms < scr_td_after_ms) { scr_td_next_ms = scr_text_drop_first_ms + scr_td_after_ms; return; }
     scr_text_drop_first_done = true;
     scr_rela_released_kib = scr_rela_release();
   } else {
@@ -2414,6 +2524,7 @@ static void scr_text_drop_tick(double now) {
     /* A repeat: at most once per interval, unless the fault budget is spent. */
     if (!trigger && (scr_td_every == 0 || now - scr_text_drop_last_ms < (double)scr_td_every)) { scr_td_set_next(); return; }
   }
+  if (scr_text_drop_n == 0) scr_lab_tm_dump("predrop", 1, now);
   bool stat = scr_td_stat;
   size_t before = stat ? scr_text_scan(false) : 0;
   size_t maps = scr_text_scan(true);
@@ -2422,6 +2533,7 @@ static void scr_text_drop_tick(double now) {
   if (scr_td_faults != 0) { scr_td_last_flt = flt != 0 ? flt : scr_text_minflt(); scr_td_next_check_ms = now + scr_td_check_ms; }
   if (scr_td_every == 0 && scr_td_faults == 0) scr_td_state = 2; /* the one-shot is done */
   else scr_td_set_next();
+  if (scr_text_drop_n == 1) scr_lab_tm_dump("postdrop", 1, now);
   if (stat) {
     size_t after = scr_text_scan(false);
     char nb[24];
