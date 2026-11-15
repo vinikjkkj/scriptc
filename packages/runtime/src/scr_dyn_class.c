@@ -891,8 +891,11 @@ static ScrDyn *dyn_bag_keys(const ScrDyn *bag) {
   for (size_t oi = 0; oi < n; oi++) {
     const ScrDynEntry *e = &bag->v.obj.entries[ord != NULL ? ord[oi] : oi];
     const ScrDyn *q = e->value;
-    if (e->key == NULL || q == NULL || q->kind != SCR_DYN_ARR) continue;
-    if (!(q->v.arr.len >= 5 && scr_dyn_truthy(q->v.arr.items[4]))) continue;
+    if (e->key == NULL || q == NULL) continue;
+    if (!e->plain_prop) { /* a plain entry is the default (enumerable) data property; any other is a row */
+      if (q->kind != SCR_DYN_ARR) continue;
+      if (!(q->v.arr.len >= 5 && scr_dyn_truthy(q->v.arr.items[4]))) continue;
+    }
     scr_dyn_arr_push(out, dyn_cls_objwalk_key(e->key, e->key_len));
   }
   free(ord);
@@ -1162,8 +1165,11 @@ static int dyn_cls_objinst_props_has(const ScrDyn *d, const ScrStr *key) {
 /* A data row's value (+1) read straight off the table row; NULL for an accessor row (*acc set) or a missing key. scr_cls_props_get lives in
  * the dyn-invoke unit, which this unit cannot assume is linked. */
 static ScrDyn *dyn_bag_data_get(const ScrDyn *bag, const char *k, size_t klen, bool *acc) {
-  const ScrDyn *ent = scr_dyn_obj_get(bag, k, klen);
-  if (ent == NULL || ent->kind != SCR_DYN_ARR || ent->v.arr.len != 5) return NULL;
+  const ScrDynEntry *pe = scr_dyn_props_find(bag, k, klen);
+  if (pe == NULL) return NULL;
+  if (pe->plain_prop) return scr_dyn_retain(pe->value);
+  const ScrDyn *ent = pe->value;
+  if (ent->kind != SCR_DYN_ARR || ent->v.arr.len != 5) return NULL;
   if (!scr_dyn_truthy(ent->v.arr.items[0])) {
     if (acc != NULL) *acc = true;
     return NULL;
@@ -1177,8 +1183,8 @@ static ScrDyn *dyn_bag_data_get(const ScrDyn *bag, const char *k, size_t klen, b
 static ScrDyn *dyn_cls_objinst_extra_get(const ScrDyn *d, const char *k, size_t klen) {
   ScrDyn *bag = dyn_cls_props_bag(d);
   if (bag != NULL) {
-    const ScrDyn *ent = scr_dyn_obj_get(bag, k, klen);
-    if (ent != NULL && ent->kind == SCR_DYN_ARR && ent->v.arr.len == 5) {
+    const ScrDynEntry *pe = scr_dyn_props_find(bag, k, klen);
+    if (pe != NULL && (pe->plain_prop || (pe->value->kind == SCR_DYN_ARR && pe->value->v.arr.len == 5))) {
       ScrDyn *v = dyn_bag_data_get(bag, k, klen, NULL); /* an accessor row is not answered here (NULL: the caller's own miss) */
       scr_dyn_release(bag);
       return v;
@@ -1229,7 +1235,7 @@ static ScrDyn *dyn_cls_objinst_snapshot(const ScrDyn *v, bool *unsup) {
   ScrDyn *bag = dyn_cls_props_bag(v);
   bool marked = false;
   if (bag != NULL) {
-    for (size_t i = 0; i < bag->v.obj.len && !marked; i++) marked = dyn_row_is_marker(bag->v.obj.entries[i].value);
+    for (size_t i = 0; i < bag->v.obj.len && !marked; i++) marked = !bag->v.obj.entries[i].plain_prop && dyn_row_is_marker(bag->v.obj.entries[i].value);
   }
   bool ok = true;
   if (marked) {
@@ -1239,15 +1245,16 @@ static ScrDyn *dyn_cls_objinst_snapshot(const ScrDyn *v, bool *unsup) {
     for (size_t i = 0; i < bag->v.obj.len && ok; i++) {
       const ScrDynEntry *e = &bag->v.obj.entries[i];
       const ScrDyn *q = e->value;
-      if (e->key == NULL || q == NULL || q->kind != SCR_DYN_ARR || q->v.arr.len < 5) continue;
+      if (e->key == NULL || q == NULL) continue;
+      if (!e->plain_prop && (q->kind != SCR_DYN_ARR || q->v.arr.len < 5)) continue;
       ScrDyn *val = NULL;
-      if (dyn_row_is_marker(q)) {
+      if (!e->plain_prop && dyn_row_is_marker(q)) {
         const ScrDynClassMember *m = scr_dyn_objinst_member(v, e->key, e->key_len);
         if (m == NULL || m->get == NULL || m->call != NULL || !m->enumerable) continue;
         val = m->get(v->v.inst.o);
         if (val == NULL) { ok = false; break; }
       } else {
-        if (!scr_dyn_truthy(q->v.arr.items[4])) continue;
+        if (!e->plain_prop && !scr_dyn_truthy(q->v.arr.items[4])) continue;
         bool acc = false;
         val = dyn_bag_data_get(bag, e->key, e->key_len, &acc);
         if (val == NULL) { if (acc) *unsup = true; ok = false; break; } /* an accessor row: the loud fence */
