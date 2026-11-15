@@ -387,6 +387,25 @@ static inline void scr_cap_release(ScrBox *cap) {
  * already being freed. */
 /* The ext of `c`, made on first need. The cached descriptor moves from the closure's own word into it; an immortal closure keeps its ext for
  * the life of the process (its teardown frees it, scr_closure_static_teardown). */
+
+#ifdef SCR_CLOSTAT
+/* LAB ONLY (never lands): live closures by capture count, the peak, and the side-table size, printed to stderr. */
+static long scr_cs_live = 0, scr_cs_peak = 0, scr_cs_hist[10], scr_cs_peak_hist[10];
+static unsigned long scr_cs_news = 0;
+static int scr_cs_bucket(size_t n) { return n < 8 ? (int)n : n < 16 ? 8 : 9; }
+static void scr_cs_report(const char *why);
+static void scr_cs_atexit(void) { scr_cs_report("exit"); }
+static void scr_cs_new(size_t ncaps) {
+  static int armed = 0;
+  if (!armed) { armed = 1; atexit(scr_cs_atexit); }
+  scr_cs_live++;
+  scr_cs_hist[scr_cs_bucket(ncaps)]++;
+  if (scr_cs_live > scr_cs_peak) { scr_cs_peak = scr_cs_live; for (int i = 0; i < 10; i++) scr_cs_peak_hist[i] = scr_cs_hist[i]; }
+  if ((++scr_cs_news & 0xFFFFFu) == 0) scr_cs_report("tick");
+}
+static void scr_cs_free(size_t ncaps) { scr_cs_live--; scr_cs_hist[scr_cs_bucket(ncaps)]--; }
+
+static size_t scr_cs_cx_peak = 0;
 /* The side table of rare-member exts, keyed by closure address (open addressing, linear probing, backward-shift deletion). Almost no closure
  * has an ext (an own property, a minted prototype, 255+ captures), so bit 0 of ScrClosure::w says whether to look, and the common closure pays
  * no word and no branch for it. */
@@ -405,6 +424,13 @@ ScrClosureExt *scr_closure_ext_lookup(const ScrClosure *c) {
     if (scr_cx_tab[i].k == NULL) return NULL;
   }
 }
+#ifdef SCR_CLOSTAT
+static void scr_cs_report(const char *why) {
+  fprintf(stderr, "CLOSTAT %s live=%ld peak=%ld peak_hist(0..7,8-15,16+)=[%ld %ld %ld %ld %ld %ld %ld %ld %ld %ld] cx_len=%zu cx_cap=%zu cx_peak=%zu slot_bytes=%zu\n", why, scr_cs_live, scr_cs_peak,
+          scr_cs_peak_hist[0], scr_cs_peak_hist[1], scr_cs_peak_hist[2], scr_cs_peak_hist[3], scr_cs_peak_hist[4], scr_cs_peak_hist[5], scr_cs_peak_hist[6], scr_cs_peak_hist[7], scr_cs_peak_hist[8], scr_cs_peak_hist[9],
+          scr_cx_len, scr_cx_cap, scr_cs_cx_peak, scr_cx_cap * sizeof(ScrCxSlot));
+}
+#endif
 static void scr_cx_put(const ScrClosure *c, ScrClosureExt *x) {
   if ((scr_cx_len + 1) * 2 > scr_cx_cap) {
     ScrCxSlot *old = scr_cx_tab;
@@ -425,6 +451,9 @@ static void scr_cx_put(const ScrClosure *c, ScrClosureExt *x) {
   scr_cx_tab[i].k = c;
   scr_cx_tab[i].v = x;
   scr_cx_len++;
+#ifdef SCR_CLOSTAT
+  if (scr_cx_len > scr_cs_cx_peak) scr_cs_cx_peak = scr_cx_len;
+#endif
 }
 static void scr_cx_erase(const ScrClosure *c) {
   if (scr_cx_cap == 0) return;
@@ -471,6 +500,9 @@ static void scr_closure_drop_ctor(ScrClosure *c, bool release) {
 }
 
 static void scr_closure_gcfree(void *o) {
+#ifdef SCR_CLOSTAT
+  scr_cs_free(scr_closure_ncaps((ScrClosure *)o));
+#endif
   /* Caps, the own-property table AND the minted prototype are all traced,
    * so the reference complement this teardown owes is NOTHING. The ctor
    * hook still runs — with release=false — because the `constructor`
@@ -594,6 +626,9 @@ ScrClosure *scr_closure_new(void *fn, size_t ncaps) {
   ScrClosure *c = scr_cyc_alloc(sizeof(ScrClosure) + ncaps * sizeof(ScrBox *),
                                  &scr_closure_trace, &scr_closure_gcfree);
   c->rc = 1;
+#ifdef SCR_CLOSTAT
+  scr_cs_new(ncaps);
+#endif
   c->kind = (uint32_t)SCR_DYN_FUNC;
   c->isdyn = 1;
   c->pad[0] = c->pad[1] = 0;
@@ -637,6 +672,9 @@ static inline bool scr_closure_may_cycle(const ScrClosure *c) {
 bool scr_closure_may_cycle_x(const ScrClosure *c) { return scr_closure_may_cycle(c); }
 
 void scr_closure_free_dead(ScrClosure *c) {
+#ifdef SCR_CLOSTAT
+  scr_cs_free(scr_closure_ncaps(c));
+#endif
   if (scr_closure_may_cycle(c)) scr_cyc_on_dead(c); /* see scr_box_release */
   const size_t ncaps = scr_closure_ncaps(c);
   for (size_t i = 0; i < ncaps; i++) {
