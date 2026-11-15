@@ -794,6 +794,29 @@ int scr_cycen_dyn_peek2(const void *hdr, unsigned *len, unsigned *cap, unsigned 
   else if (d->kind == SCR_DYN_OBJ) { *len = (unsigned)d->v.obj.len; *cap = (unsigned)d->v.obj.cap; *ext = (unsigned long long)d->v.obj.cap * sizeof(ScrDynEntry); }
   return (int)d->kind;
 }
+/* LAB: what an ARR/OBJ node holds, for the per-site shape table: the kinds of its first four items (one byte each, 0xFF past the end), the node's
+ * reference count, for an ARR whose first item is a STR the reference count of that string, and for an OBJ the first two keys ("k0|k1"). */
+int scr_cycen_dyn_peek3(const void *hdr, unsigned *eks, char *key, unsigned long long *rc, unsigned long long *e0src) {
+  const ScrDyn *d = (const ScrDyn *)(const void *)((const char *)hdr + sizeof(ScrCycHdr));
+  *eks = 0xFFFFFFFFu; key[0] = 0; *rc = (unsigned long long)d->rc; *e0src = 0;
+  if (d->kind == SCR_DYN_ARR && d->v.arr.items != NULL) {
+    unsigned v = 0xFFFFFFFFu;
+    for (unsigned i = 0; i < 4 && i < d->v.arr.len; i++) { v &= ~(0xFFu << (8 * i)); v |= ((unsigned)d->v.arr.items[i]->kind & 0xFFu) << (8 * i); }
+    *eks = v;
+    if (d->v.arr.len > 0 && d->v.arr.items[0]->kind == SCR_DYN_STR && d->v.arr.items[0]->v.str != NULL) *e0src = (unsigned long long)d->v.arr.items[0]->v.str->rc;
+  } else if (d->kind == SCR_DYN_OBJ && d->v.obj.entries != NULL) {
+    unsigned v = 0xFFFFFFFFu, o = 0;
+    for (unsigned i = 0; i < 2 && i < d->v.obj.len; i++) {
+      const ScrDynEntry *e = &d->v.obj.entries[i];
+      v &= ~(0xFFu << (8 * i)); v |= ((unsigned)e->value->kind & 0xFFu) << (8 * i);
+      for (unsigned k = 0; k < e->key_len && o < 22; k++) key[o++] = e->key[k];
+      if (i == 0 && d->v.obj.len > 1 && o < 22) key[o++] = '|';
+    }
+    key[o] = 0;
+    *eks = v;
+  }
+  return (int)d->kind;
+}
 long long scr_cycen_dyn_free_count(void) { return (long long)scr_dyn_free_count; }
 /* STR nodes: the node's string (immortal literal or heap), its length, capacity and reference count, and an FNV-1a hash of up to the first 256 bytes, for the per-site duplicate/literal census. */
 int scr_cycen_dyn_peek_str(const void *hdr, unsigned *len, unsigned *cap, int *imm, unsigned long long *rc, unsigned long long *hash, const char **data) {
