@@ -888,15 +888,14 @@ static void scr_dyn_gcfree(void *o) {
      * this image and was never allocated, so there is nothing to hand
      * back — and handing one to the pool would put a .rdata address on a
      * freelist that the next take() returns as writable memory. */
-    {
+    if (__builtin_expect(SCR_DYN_IS_PROPS_TABLE(d), 0)) {
       size_t ghosts = 0;
-      for (size_t i = 0; i < d->v.obj.len; i++) {
-        ghosts += d->v.obj.entries[i].plain_prop;
-        if (!d->v.obj.entries[i].key_static)
-          scr_json_key_free(d->v.obj.entries[i].key, d->v.obj.entries[i].key_len);
-      }
+      for (size_t i = 0; i < d->v.obj.len; i++) ghosts += d->v.obj.entries[i].plain_prop;
       SCR_PROPS_GHOST_SUB(ghosts);
     }
+    for (size_t i = 0; i < d->v.obj.len; i++)
+      if (!d->v.obj.entries[i].key_static)
+        scr_json_key_free(d->v.obj.entries[i].key, d->v.obj.entries[i].key_len);
     /* …and the ext BLOCK, whose three dyn children the trace has already
      * accounted for. Releasing them here would be a double free; leaving
      * the block would leak 32 bytes per object that had one. */
@@ -1007,15 +1006,15 @@ static __attribute__((noinline)) void scr_dyn_release_final(ScrDyn *d) {
     break;
   case SCR_DYN_OBJ:
     if (d->static_copy) scr_dyn_origin_forget(d);
-    {
-      size_t ghosts = 0; /* plain property-table entries: each stops counting the row it never had (scr_runtime.h SCR_PROPS_GHOST) */
-      for (size_t i = 0; i < d->v.obj.len; i++) {
-        ghosts += d->v.obj.entries[i].plain_prop;
-        if (!d->v.obj.entries[i].key_static)
-          scr_json_key_free(d->v.obj.entries[i].key, d->v.obj.entries[i].key_len);
-        if (!d->v.obj.entries[i].value_borrowed) scr_dyn_release(d->v.obj.entries[i].value);
-      }
+    if (__builtin_expect(SCR_DYN_IS_PROPS_TABLE(d), 0)) { /* a property table: each plain entry stops counting the row it never had (SCR_PROPS_GHOST) */
+      size_t ghosts = 0;
+      for (size_t i = 0; i < d->v.obj.len; i++) ghosts += d->v.obj.entries[i].plain_prop;
       SCR_PROPS_GHOST_SUB(ghosts);
+    }
+    for (size_t i = 0; i < d->v.obj.len; i++) {
+      if (!d->v.obj.entries[i].key_static)
+        scr_json_key_free(d->v.obj.entries[i].key, d->v.obj.entries[i].key_len);
+      if (!d->v.obj.entries[i].value_borrowed) scr_dyn_release(d->v.obj.entries[i].value);
     }
     /* The [[Prototype]] link, the NON-ENUMERABLE table and the slot
      * table are owned; the constructor NAME is a static literal. The
@@ -2244,7 +2243,6 @@ static void scr_dyn_obj_put_k(ScrDyn *obj, char *key, size_t key_len, ScrDyn *va
   e->key_len = (uint32_t)key_len;
   e->key_static = key_static;
   e->value_borrowed = 0;
-  e->plain_prop = 0;
   e->value = value;
 #ifdef SCR_WRAP_WATCH
   /* A NEW member named toString / valueOf can change what a primitive-wrapper subclass answers (scr_dyn_wrapper_user_member's cache).
@@ -9373,7 +9371,7 @@ static void scr_dyn_obj_unset(ScrDyn *obj, const char *key, size_t key_len) {
        * the value's release can trigger a collection */
       ScrDyn *old = e->value;
       bool old_owned = !e->value_borrowed;
-      SCR_PROPS_GHOST_SUB(e->plain_prop);
+      if (SCR_DYN_IS_PROPS_TABLE(obj)) SCR_PROPS_GHOST_SUB(e->plain_prop);
       if (!e->key_static) scr_json_key_free(e->key, e->key_len);
       memmove(&obj->v.obj.entries[i], &obj->v.obj.entries[i + 1],
               (obj->v.obj.len - i - 1) * sizeof *obj->v.obj.entries);

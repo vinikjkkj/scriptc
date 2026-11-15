@@ -4262,7 +4262,9 @@ static bool clsent_enumerable(const ScrDynEntry *e) {
 
 ScrDyn *scr_cls_props_ensure(ScrDyn *cur) {
   if (cur != NULL && cur->kind == SCR_DYN_OBJ) return scr_dyn_retain(cur);
-  return scr_dyn_new_obj();
+  ScrDyn *t = scr_dyn_new_obj();
+  t->buffer = true; /* SCR_DYN_IS_PROPS_TABLE */
+  return t;
 }
 
 /* ── clones: Object.create(Object.getPrototypeOf(x), Object.getOwnPropertyDescriptors(x))
@@ -4283,13 +4285,16 @@ static ScrDyn *dyn_clone_rows_copy(const ScrDyn *v, bool rows) {
 
 static ScrDyn *dyn_clone_table(const ScrDyn *tbl, bool rows) {
   ScrDyn *o = scr_dyn_new_obj();
+  const bool is_tbl = SCR_DYN_IS_PROPS_TABLE(tbl); /* only a property table's entries carry a meaningful plain_prop */
+  o->buffer = is_tbl;
   for (size_t i = 0; i < tbl->v.obj.len; i++) {
     const ScrDynEntry *e = &tbl->v.obj.entries[i];
+    const bool plain = is_tbl && e->plain_prop;
     /* a plain property's value is the property, never a row: shared, and still plain in the copy (keys are unique, so the store appends) */
-    scr_dyn_obj_set(o, e->key, e->key_len, dyn_clone_rows_copy(e->value, rows && !e->plain_prop));
-    if (e->plain_prop) {
-      o->v.obj.entries[o->v.obj.len - 1].plain_prop = 1;
-      SCR_PROPS_GHOST_ADD(1);
+    scr_dyn_obj_set(o, e->key, e->key_len, dyn_clone_rows_copy(e->value, rows && !plain));
+    if (is_tbl) {
+      o->v.obj.entries[o->v.obj.len - 1].plain_prop = plain;
+      if (plain) SCR_PROPS_GHOST_ADD(1);
     }
   }
   return o;
@@ -4424,6 +4429,7 @@ bool scr_cls_props_note(ScrDyn *tbl, const ScrStr *key) {
   scr_dyn_arr_push(row, scr_dyn_new_bool(false));
   scr_dyn_arr_push(row, scr_dyn_new_bool(true));
   scr_dyn_obj_set(tbl, key->data, key->len, row); /* ownership moves in */
+  tbl->v.obj.entries[tbl->v.obj.len - 1].plain_prop = 0; /* the key was absent: the new entry is the last, a row */
   return true;
 }
 
@@ -4612,6 +4618,7 @@ bool scr_cls_props_define(ScrDyn *tbl, const ScrStr *key, ScrDyn *desc,
     scr_dyn_release(old);
   } else {
     scr_dyn_obj_set(tbl, key->data, key->len, ent); /* ownership moves in */
+    if (cure == NULL) tbl->v.obj.entries[tbl->v.obj.len - 1].plain_prop = 0; /* a new entry is the last one, a row */
   }
   return true;
 }

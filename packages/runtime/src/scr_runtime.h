@@ -5300,7 +5300,9 @@ typedef struct {
   uint32_t value_borrowed : 1;
   /* A PER-INSTANCE PROPERTY TABLE ENTRY (scr_cls_props_*) whose value IS the property: an ordinary writable, enumerable, configurable data
    * property, stored as the bare value instead of a five-element descriptor row. Only scr_dyn_props_append_plain sets it, and only a table
-   * entry carries it (the table never escapes, see "the per-instance property table"); every other entry is created with it clear. */
+   * entry carries it (the table never escapes, see "the per-instance property table"). The GENERIC store does not initialise it, so on any
+   * object that is not a property table the bit is whatever the buffer held: a reader must know it holds a table (SCR_DYN_IS_PROPS_TABLE), and
+   * every code path that CREATES a table entry sets the bit itself, 1 or 0. */
   uint32_t plain_prop : 1;
   uint32_t : 29;
   ScrDyn *value; /* owned unless value_borrowed */
@@ -6839,6 +6841,9 @@ static inline bool scr_dyn_bytes_eq(const char *a, const char *b, size_t n) {
 #ifndef SCR_PROPS_GHOST
 #define SCR_PROPS_GHOST 1
 #endif
+/* A per-instance property table is marked by `buffer` on its OBJ node: that flag is a BYTES flavor and nothing reads it on an OBJ, so it costs no
+ * byte; a recycled node starts with it clear (scr_dyn_alloc). Set only by scr_cls_props_ensure and a clone of a table. */
+#define SCR_DYN_IS_PROPS_TABLE(d) ((d)->buffer)
 extern size_t scr_cyc_live;
 #if SCR_PROPS_GHOST
 #define SCR_PROPS_GHOST_ADD(n) (scr_cyc_live += (size_t)(n))
