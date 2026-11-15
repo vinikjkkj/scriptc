@@ -415,6 +415,9 @@ static void scr_closure_drop_ctor(ScrClosure *c, bool release) {
 }
 
 static void scr_closure_gcfree(void *o) {
+#ifdef SCR_CLOSTAT
+  { const size_t m = ((ScrClosure *)o)->meta; scr_cs_free((m & 1u) ? (m >> 1) : ((const ScrClosureExt *)(uintptr_t)m)->ncaps); }
+#endif
   /* Caps, the own-property table AND the minted prototype are all traced,
    * so the reference complement this teardown owes is NOTHING. The ctor
    * hook still runs — with release=false — because the `constructor`
@@ -534,9 +537,35 @@ void scr_rc_audit_sites_report(void) {
   }
 }
 #endif /* SCR_RC_AUDIT */
+
+#ifdef SCR_CLOSTAT
+/* LAB ONLY (never lands): live closures by capture count, the peak, and the side-table size, printed to stderr. */
+static long scr_cs_live = 0, scr_cs_peak = 0, scr_cs_hist[10], scr_cs_peak_hist[10];
+static unsigned long scr_cs_news = 0;
+static int scr_cs_bucket(size_t n) { return n < 8 ? (int)n : n < 16 ? 8 : 9; }
+static void scr_cs_report(const char *why);
+static void scr_cs_atexit(void) { scr_cs_report("exit"); }
+static void scr_cs_new(size_t ncaps) {
+  static int armed = 0;
+  if (!armed) { armed = 1; atexit(scr_cs_atexit); }
+  scr_cs_live++;
+  scr_cs_hist[scr_cs_bucket(ncaps)]++;
+  if (scr_cs_live > scr_cs_peak) { scr_cs_peak = scr_cs_live; for (int i = 0; i < 10; i++) scr_cs_peak_hist[i] = scr_cs_hist[i]; }
+  if ((++scr_cs_news & 0xFFFFFu) == 0) scr_cs_report("tick");
+}
+static void scr_cs_free(size_t ncaps) { scr_cs_live--; scr_cs_hist[scr_cs_bucket(ncaps)]--; }
+#ifdef SCR_CLOSTAT
+static void scr_cs_report(const char *why) {
+  fprintf(stderr, "CLOSTAT %s live=%ld peak=%ld peak_hist(0..7,8-15,16+)=[%ld %ld %ld %ld %ld %ld %ld %ld %ld %ld] cx_len=0 cx_cap=0 cx_peak=0 slot_bytes=0\n", why, scr_cs_live, scr_cs_peak,
+          scr_cs_peak_hist[0], scr_cs_peak_hist[1], scr_cs_peak_hist[2], scr_cs_peak_hist[3], scr_cs_peak_hist[4], scr_cs_peak_hist[5], scr_cs_peak_hist[6], scr_cs_peak_hist[7], scr_cs_peak_hist[8], scr_cs_peak_hist[9]);
+}
+#endif
 ScrClosure *scr_closure_new(void *fn, size_t ncaps) {
   ScrClosure *c = scr_cyc_alloc(sizeof(ScrClosure) + ncaps * sizeof(ScrBox *),
                                  &scr_closure_trace, &scr_closure_gcfree);
+#ifdef SCR_CLOSTAT
+  scr_cs_new(ncaps);
+#endif
   c->rc = 1;
   c->fn = fn;
   c->meta = (ncaps << 1) | 1u; /* no ext: the own-property table and the implicit prototype are made lazily (scr_closure_ext) */
@@ -573,6 +602,9 @@ void scr_closure_release(ScrClosure *c) {
     if (scr_closure_may_cycle(c)) scr_cyc_on_dead(c); /* see scr_box_release */
     const size_t meta = c->meta;
     const size_t ncaps = (meta & 1u) ? (meta >> 1) : ((const ScrClosureExt *)(uintptr_t)meta)->ncaps;
+#ifdef SCR_CLOSTAT
+    scr_cs_free(ncaps);
+#endif
     for (size_t i = 0; i < ncaps; i++) {
       scr_cap_release(c->caps[i]);
     }
