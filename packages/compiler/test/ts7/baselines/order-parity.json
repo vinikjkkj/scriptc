@@ -27990,6 +27990,24 @@
     "<repo>/tests/corpus/25312-define-property-rows-of-a-class-instance-switch-between-plain-accessor-and-hidden.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25350-a-throw-at-each-call-of-a-sequence-with-growing-live-temporaries-releases-each-exactly-once-and-keeps-the-output.js": {
+   "order": [
+    "<repo>/tests/corpus/25350-a-throw-at-each-call-of-a-sequence-with-growing-live-temporaries-releases-each-exactly-once-and-keeps-the-output.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25351-calls-that-throw-one-after-another-with-live-temporaries-of-every-ownership-kind-keep-the-result.ts": {
+   "order": [
+    "<repo>/tests/corpus/25351-calls-that-throw-one-after-another-with-live-temporaries-of-every-ownership-kind-keep-the-result.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25352-an-async-method-with-a-try-over-two-awaits-a-spread-return-and-an-awaiting-catch-keeps-its-unwind-across-the-awaits.ts": {
+   "order": [
+    "<repo>/tests/corpus/25352-an-async-method-with-a-try-over-two-awaits-a-spread-return-and-an-awaiting-catch-keeps-its-unwind-across-the-awaits.ts"
+   ],
+   "diags": []
   }
  }
 }

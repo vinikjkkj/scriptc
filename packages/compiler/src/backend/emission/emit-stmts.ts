@@ -317,6 +317,9 @@ export function emitFunction(E: CEmitter, fn: IrFunction): void {
     E.scopes = [];
     E.jumpTargets = [];
     E.tryStack = [];
+    E.unwindLadders = new Map();
+    E.unwindSeq = new Map();
+    E.unwindCounter = 0;
     E.finallyStack = [];
     E.currentReturnType = fn.returnType;
     E.currentGenerator = fn.generator ?? null;
