@@ -2830,7 +2830,6 @@ export class LlDyn {
           const fbox = B.tmp();
           B.line(`${fbox} = call ptr @scr_box_new(i32 4) ; SCR_BOX_FUNC — traced`);
           B.line(`store ptr ${fbox}, ptr ${cap0}`);
-          const clop = B.tmp();
           const clo = B.tmp();
           const rclo = B.tmp();
           {
@@ -2853,10 +2852,7 @@ export class LlDyn {
           const tbox = B.tmp();
           B.line(`${tbox} = call ptr @scr_box_new(i32 0) ; SCR_BOX_F64 — the call descriptor`);
           B.line(`store ptr ${tbox}, ptr ${cap1}`);
-          const thp = B.tmp();
           const th = B.tmp();
-          const descp = B.tmp();
-          const desc = B.tmp();
           {
           const wv = B.tmp();
           const dm = B.tmp();
@@ -2927,7 +2923,6 @@ export class LlDyn {
         B.condBr(same, lSame, lWrap);
         B.startBlock(lSame);
         host.declare(`declare ptr @scr_closure_retain_v(ptr)`);
-        const clop = B.tmp();
         const clo = B.tmp();
         const r = B.tmp();
         {
@@ -3009,7 +3004,6 @@ export class LlDyn {
         const fbox = B.tmp();
         B.line(`${fbox} = call ptr @scr_box_new(i32 4) ; SCR_BOX_FUNC`);
         B.line(`store ptr ${fbox}, ptr ${capp}`);
-        const clop2 = B.tmp();
         const clo2 = B.tmp();
         const rclo = B.tmp();
         {
@@ -3034,10 +3028,7 @@ export class LlDyn {
         const tbox = B.tmp();
         B.line(`${tbox} = call ptr @scr_box_new(i32 0) ; SCR_BOX_F64`);
         B.line(`store ptr ${tbox}, ptr ${capp1}`);
-        const thp = B.tmp();
         const th = B.tmp();
-        const descp = B.tmp();
-        const desc = B.tmp();
         {
         const wv = B.tmp();
         const dm = B.tmp();
