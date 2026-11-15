@@ -3051,6 +3051,13 @@ export async function compileC(opts: CcOptions): Promise<void> {
     rtInputs.push(p);
     return p;
   });
+  if (process.env["SCRIPTC_LINK_DEBUG"] === "1") {
+    // LAB (branch lab/pgprof1, never lands): which runtime units this link carries and the gates that chose them
+    process.stderr.write(
+      `[linkdbg] layoutProfile=${opts.layoutProfile ?? false} procDyn=${opts.procDyn ?? false} bin=${binRoot !== null} obj=${root !== null} ` +
+        `units=${rtInputs.map((u) => basename(u)).join(",")} program=${[opts.cPath, ...(opts.programUnits ?? [])].map((u) => basename(u)).join(",")}\n`,
+    );
+  }
   const includeArgs: string[] = [];
   const seenInclude = new Set<string>();
   for (let i = 0; i < cmdLine.length; i++) {
