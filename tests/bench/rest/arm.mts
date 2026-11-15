@@ -58,6 +58,7 @@ const onOut = (d: Buffer) => { const s = d.toString(); log.write(s); buf += s
         if (q >= 0 && !l.includes('ttlMs=') && l.split(',').length >= 5) resolveQr(l.slice(q + 5)) } }
 client.stdout.on('data', onOut); client.stderr.on('data', onOut)
 let exited: any = null
+const times: any = { spawn: Date.now() - t0 }
 client.on('exit', (c, s) => { exited = { code: c, signal: s } })
 
 const results: any[] = []
@@ -75,11 +76,13 @@ async function req(method: string, path: string, body?: any) {
 }
 try {
     const pipeline = await Promise.race([loginP, sleep(60000).then(() => { throw new Error('no login in 60s') })])
+    times.login = Date.now() - t0
     const self = await server.createFakePeer({ jid: `${SELF}@s.whatsapp.net` }, pipeline)
     const keys = Array.from({ length: 3 }, (_, i) => ({ keyId: new Uint8Array(16).fill(i + 1), keyData: new Uint8Array(32).fill(i + 9),
         fingerprint: { rawId: 0, currentIndex: 0, deviceIndexes: [] as number[] }, timestamp: 1700000000000 }))
     for (const k of keys) server.registerAppStateSyncKey(k.keyId, k.keyData)
     await self.sendMessage(buildAppStateSyncKeyShareMessage({ keys } as any))
+    times.keyShareSent = Date.now() - t0
     await sleep(3000)
     for (let c = 1; c <= 2; c++) {
         await self.sendHistorySync({ chunkOrder: c, progress: c * 50, conversations: Array.from({ length: 3 }, (_, i) => ({
@@ -98,6 +101,7 @@ try {
         '/events?type=history_sync_chunk', '/events?since=3', '/nonexistent', '/s/bad%20id/state', '/s/nosuch/state', '/qr',
         '/chat/sync']
     if (process.env.RR_SIGUSR1) { client.kill('SIGUSR1'); await sleep(500) } // layout profile: start the steady-state epoch where the HTTP requests begin
+    times.firstGet = Date.now() - t0
     for (const g of GETS) await req('GET', g)
     await req('POST', '/message/sendText', { to: `${SELF}@s.whatsapp.net`, text: 'rest hello' })
     await req('POST', '/message/sendText', { to: '5511933334444@s.whatsapp.net', text: 'to another' })
@@ -119,6 +123,8 @@ for (let i = 0; i < 40 && exited === null; i++) await sleep(250)
 if (exited === null) { results.push({ note: 'app did not exit after shutdown; killing by pid', pid: client.pid }); client.kill('SIGTERM'); await sleep(1000) }
 writeFileSync(join(OUT, 'http.json'), JSON.stringify(results, null, 1))
 writeFileSync(join(OUT, 'stanzas.json'), JSON.stringify(stanzas, null, 1))
+times.end = Date.now() - t0
+writeFileSync(join(OUT, 'times.json'), JSON.stringify(times))
 writeFileSync(join(OUT, 'exit.json'), JSON.stringify({ exited, ms: Date.now() - t0 }))
 await server.stop(); log.end()
 console.log(label, 'done', JSON.stringify(exited), results.length, 'requests', stanzas.length, 'stanzas')
