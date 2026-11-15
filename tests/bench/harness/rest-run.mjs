@@ -33,11 +33,37 @@ if (profile !== null) { // one run of a --layout-profile binary, SIGUSR1 where t
   const db = 'zapo_profile'
   const c = await mysql.createConnection({ host: process.env.ZAPO_TEST_MYSQL_HOST ?? '127.0.0.1', port: Number(process.env.ZAPO_TEST_MYSQL_PORT ?? 3306), user: 'root', password: process.env.ZAPO_TEST_MYSQL_PASSWORD ?? '' })
   await c.query(`DROP DATABASE IF EXISTS ${db}`); await c.query(`CREATE DATABASE ${db}`); await c.end()
-  const env = { ...process.env, RR_OUT: out, RR_APPDIR: APPDIR, RR_DBPORT: process.env.ZAPO_TEST_MYSQL_PORT ?? '3306', ZAPO_FAKE_SERVER: `${TREE}/packages/fake-server`, RR_SIGUSR1: '1', SCR_LAYOUT_PROFILE_OUT: profile[1] }
+  const env = { ...process.env, RR_OUT: out, RR_APPDIR: APPDIR, RR_DBPORT: process.env.ZAPO_TEST_MYSQL_PORT ?? '3306', ZAPO_FAKE_SERVER: `${TREE}/packages/fake-server`, RR_SIGUSR1: '1', SCR_LAYOUT_PROFILE_OUT: profile[1], RR_SCENARIO: '' }
   const r = spawnSync(NODE, ['--import', 'tsx', `${ROOT}/rest/arm.mts`, 'profile', db, profile[0]], { cwd: TREE, env, maxBuffer: 1 << 28, timeout: 900e3 })
   writeFileSync(`${out}/profile-run.stdout.txt`, r.stdout.toString()); writeFileSync(`${out}/profile-run.stderr.txt`, r.stderr.toString().slice(-20000))
   console.log(`rest profile run exit=${r.status} profile=${profile[1]}`)
   process.exit(r.status === 0 ? 0 : 1)
+}
+
+// LAB scenarios (RR_SCENARIO=idle|history, see rest/arm.mts): timeline.json holds a 1 s RSS timeline of the app and the scenario marks. The summary reads it as: peak, the value at the start and end of the
+// steady window (median of the last 30 samples), and the drift of the steady window in kB per minute (least squares), where growth while idle is a leak signal.
+function labSummary(file) {
+  let j; try { j = JSON.parse(readFileSync(file, 'utf8')) } catch { return null }
+  const tl = j.timeline, mk = j.marks
+  if (!tl.length) return { scenario: j.scenario, samples: 0 }
+  const at = (what) => mk.find((m) => m.what.startsWith(what))?.t
+  const med30 = (xs) => { const t = xs.slice(-30).map((x) => x.rss).sort((a, b) => a - b); return t[Math.floor(t.length / 2)] }
+  const slope = (xs) => { if (xs.length < 10) return null; const n = xs.length, mx = xs.reduce((a, x) => a + x.t, 0) / n, my = xs.reduce((a, x) => a + x.rss, 0) / n
+    let num = 0, den = 0; for (const x of xs) { num += (x.t - mx) * (x.rss - my); den += (x.t - mx) ** 2 } return den ? (num / den) * 60000 : null }
+  const out = { scenario: j.scenario, samples: tl.length, peak_rss_kb: Math.max(...tl.map((x) => x.rss)), hwm_kb: tl[tl.length - 1].hwm, first_rss_kb: tl[0].rss, marks: mk.map((m) => `${m.t}:${m.what}`) }
+  if (j.scenario === 'idle') {
+    const b = at('idle-begin'), e = at('idle-end')
+    const win = tl.filter((x) => x.t >= b && x.t <= e)
+    out.idle_start_rss_kb = win.slice(0, 5).map((x) => x.rss).sort((a, c) => a - c)[2]; out.idle_end_rss_kb = med30(win)
+    out.idle_slope_kb_per_min = slope(win.filter((x) => x.t >= b + (e - b) * 0.2)); out.idle_seconds = Math.round((e - b) / 1000)
+  } else {
+    const b = at('history-begin'), st = at('history-settled'), se = at('steady-end')
+    out.before_rss_kb = tl.filter((x) => x.t < b).slice(-5).map((x) => x.rss).sort((a, c) => a - c)[2]
+    out.sync_peak_rss_kb = Math.max(...tl.filter((x) => x.t >= b && x.t <= st).map((x) => x.rss))
+    const steady = tl.filter((x) => x.t >= st && x.t <= se)
+    out.steady_rss_kb = med30(steady); out.steady_slope_kb_per_min = slope(steady); out.sync_seconds = Math.round((st - b) / 1000)
+  }
+  return out
 }
 const all = [`node:NODE`, ...arms]
 const results = { reps, node: spawnSync(NODE, ['--version']).stdout.toString().trim(), runs: [] }
@@ -58,7 +84,8 @@ for (let rep = 0; rep < reps; rep++) {
     let pm = null; try { pm = JSON.parse(readFileSync(pj, 'utf8')) } catch {}
     const fp = fingerprint(`${run}/arm`)
     if (label === 'node' && nodeFp === null) nodeFp = fp
-    results.runs.push({ label, rep, exit: pm ? pm.exit : r.status, vmhwm_kb: pm?.rss_peak_kb ?? null, cpu_ms: pm?.cpu_self_ms ?? null, fp })
+    const lab = labSummary(`${run}/arm/timeline.json`)
+    results.runs.push({ label, rep, exit: pm ? pm.exit : r.status, vmhwm_kb: pm?.rss_peak_kb ?? null, cpu_ms: pm?.cpu_self_ms ?? null, fp, lab })
     console.error(`rep ${rep} ${label}: exit=${pm ? pm.exit : r.status} vmhwm_kb=${pm?.rss_peak_kb}`)
   }
 }
@@ -81,7 +108,7 @@ if (smaps) for (const a of all) {
   results.smaps[label] = sm ? { ...sm, times: tm } : null
   console.error(`smaps ${label}: peak_vmrss_kb=${sm?.peak_vmrss_kb}`)
 }
-for (const r of results.runs) r.parity = nodeFp === null ? 'no-node-ref' : r.fp === nodeFp ? 'SAME' : 'DIFFERS'
+for (const r of results.runs) r.parity = r.lab ? 'n/a (lab scenario)' : nodeFp === null ? 'no-node-ref' : r.fp === nodeFp ? 'SAME' : 'DIFFERS'
 writeFileSync(`${out}/results.json`, JSON.stringify(results, null, 1))
 const med = (xs) => { const s = xs.filter((x) => x != null).sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : null }
 const pct = (a, b) => (a == null || b == null || a === 0 ? '' : `${b >= a ? '+' : ''}${(((b - a) / a) * 100).toFixed(2)}%`)
@@ -99,6 +126,7 @@ for (const l of labels) { const sm = results.smaps[l]; if (!sm) continue
   for (const [k, v] of Object.entries(sm.classes ?? sm.by_class ?? {}).sort((a, b) => (b[1].Rss ?? 0) - (a[1].Rss ?? 0))) smapsLines.push(`| ${k} | ${v.Rss} | ${v.Pss} | ${v.Private_Dirty} | ${v.Anonymous} |`)
   smapsLines.push(`timeline (s, VmRSS kB): ${JSON.stringify(sm.timeline)}`)
 }
-writeFileSync(`${out}/summary.md`, `REST (zapo-rest-mysql), reps: ${reps}, node ${results.node}\n\n` + rows.join('\n') + '\n' + smapsLines.join('\n') + '\n')
+const labLines = results.runs.filter((r) => r.lab).map((r) => `lab ${r.label}.${r.rep}: ${JSON.stringify({ ...r.lab, marks: undefined })}`)
+writeFileSync(`${out}/summary.md`, `REST (zapo-rest-mysql), reps: ${reps}, node ${results.node}\n\n` + rows.join('\n') + '\n' + labLines.join('\n') + '\n' + smapsLines.join('\n') + '\n')
 writeFileSync(`${out}/summary.txt`, labels.map((l) => { const rs = results.runs.filter((r) => r.label === l); return `rest ${l} reps=${rs.length} exit=${rs.map((r) => r.exit).join(',')} vmhwm_kb=${rs.map((r) => r.vmhwm_kb).join(',')} median=${med(rs.map((r) => r.vmhwm_kb))} parity=${[...new Set(rs.map((r) => r.parity))].join('/')}` }).join('\n') + '\n')
-console.log(readFileSync(`${out}/summary.txt`, 'utf8'))
+console.log(readFileSync(`${out}/summary.txt`, 'utf8') + labLines.join('\n'))
