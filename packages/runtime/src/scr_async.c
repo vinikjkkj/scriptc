@@ -58,8 +58,6 @@
 
 enum { SCR_PROM_PENDING = 0, SCR_PROM_FULFILLED = 1, SCR_PROM_REJECTED = 2 };
 
-typedef struct ScrFiber ScrFiber;
-
 struct ScrPromise {
   size_t rc;
   /* The settled value, ONE word, read by payload_kind: an f64 (SCR_EXC_F64), a bool (SCR_EXC_BOOL) or the owned payload pointer
@@ -628,18 +626,7 @@ void scr_promise_trace_v(void *p, ScrTraceVisit visit, void *ctx) {
 
 /* ── fibers and the scheduler ─────────────────────────────────────────── */
 
-/* THE MICROTASK RECORD. Everything on the ready queue is a stackless envelope: a queueMicrotask closure, a raw hook plus one owned argument
- * (scr_coro_park's resume entry, the async-generator sink), or a parked await's continuation. There are no fibers and no stacks: every
- * async function and generator is a state machine over a heap frame (scr_coro.c), so the queue holds exactly these four words. */
-struct ScrFiber {
-  /* queueMicrotask entries: the READY queue's FIFO IS the microtask queue, so a closure rides it as an envelope and scr_resume_fiber runs
-   * it on the main stack (a throw is an UNCAUGHT exception, like Node's queueMicrotask, never a rejection). Owned. */
-  ScrClosure *micro_cb;
-  /* The runtime's OWN envelope: a raw hook plus one owned argument. Owned: the envelope releases `micro_arg` through `micro_arg_release`. */
-  void (*micro_raw)(void *);
-  void *micro_arg;
-  void (*micro_arg_release)(void *);
-};
+/* THE MICROTASK RECORD (struct ScrFiber): defined in scr_runtime.h, because scr_async_dyn.c embeds one in each reaction. */
 
 /* A zeroed envelope. */
 static ScrFiber *scr_envelope_new(void) {
@@ -3143,6 +3130,9 @@ static void scr_promise_park_envelope(ScrPromise *p, void (*fn)(void *), void *a
   scr_prom_wadd(p, f);
 }
 
+/* scr_promise_wait_raw for a continuation that carries its own envelope: `env` is the first member of the object `fn` receives, so the wait
+ * allocates nothing, and a reaction that parks again reuses the same envelope. Same push accounting as scr_promise_wait_raw. */
+
 typedef struct {
   void (*fn)(void *);
   void *arg;
@@ -3154,6 +3144,24 @@ static void scr_wait_hop2_run(void *hp) {
   void *arg = h->arg;
   free(h);
   scr_queue_microtask_raw(fn, arg, NULL);
+}
+
+void scr_promise_wait_embedded(ScrPromise *p, ScrFiber *env, void (*fn)(void *)) {
+  if (p->state != SCR_PROM_PENDING && scr_tick_poison()) {
+    /* The two-hop poison path keeps its stand-alone envelopes (arg != envelope, so they are freed as usual). */
+    scr_promise_wait_raw(p, fn, env);
+    return;
+  }
+  env->micro_cb = NULL;
+  env->micro_raw = fn;
+  env->micro_arg = env;
+  env->micro_arg_release = NULL;
+  if (p->state != SCR_PROM_PENDING) {
+    scr_ready_push(env);
+    return;
+  }
+  p = scr_prom_reg_target(p);
+  scr_prom_wadd(p, env);
 }
 
 void scr_promise_wait_raw(ScrPromise *p, void (*fn)(void *), void *arg) {
@@ -3350,7 +3358,9 @@ static void scr_resume_fiber(ScrFiber *f) {
     void (*fn)(void *) = f->micro_raw;
     void *arg = f->micro_arg;
     void (*rel)(void *) = f->micro_arg_release;
-    free(f);
+    /* An envelope that is the FIRST member of its own argument (scr_promise_wait_embedded) is owned by that argument: the reaction frees
+     * or re-parks it. Every other envelope is a stand-alone allocation. */
+    if (arg != (void *)f) free(f);
     fn(arg);
     if (rel != NULL) rel(arg);
     return;

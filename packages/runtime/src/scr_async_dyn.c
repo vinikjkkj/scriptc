@@ -394,95 +394,112 @@ ScrPromise *scr_immediate_promise(void) {
  * which pushes ONE ready-queue entry per wait exactly like the fiber's await did, and runs on the main stack
  * like a queueMicrotask envelope. Microtask counts are unchanged; the callback's AsyncLocalStorage context is
  * the one captured at registration, installed for the turn like a fiber switch did. */
-typedef struct {
-  ScrPromise *src, *dst; /* owned */
-  ScrDyn *onf, *onr, *onfin; /* owned or NULL */
+/* ONE ALLOCATION PER REACTION. The pack embeds the microtask envelope it parks on the source's waiter list (`env` is the FIRST member, so the
+ * envelope pointer IS the pack pointer; scr_resume_fiber does not free an envelope whose argument is itself) and every later turn re-parks
+ * the same envelope, so a reaction costs one 72-byte block where it used to cost an 88-byte pack plus a 32-byte envelope, two chunks. The
+ * stage state the old pack carried (the fulfilment value, the rejection, the rejected flag) lives in locals of one turn: it is dead before the
+ * reaction ever parks again. The one slot that changes meaning is `u`: the source while the reaction waits for it (mode 0/1), the dyn promise
+ * a handler returned while the reaction waits to adopt it (mode 2, the source released at that point). The MODE is which entry the envelope
+ * was parked with (env.micro_raw), so it costs no field: 0 = then/catch, 1 = finally, 2 = adopting a returned promise. */
+typedef struct ScrDynThenPack {
+  ScrFiber env;              /* first: the envelope the waiter list holds */
+  union {
+    ScrPromise *src;         /* modes 0 and 1: owned */
+    ScrDyn *r;               /* mode 2: the callback's returned promise (owned) */
+  } u;
+  ScrPromise *dst;           /* owned */
+  ScrDyn *h0, *h1;           /* then/catch: onf, onr. finally: h0 = onfin, h1 = NULL. owned or NULL */
   ScrAlsCtx *als;            /* owned: the context captured at registration */
-  /* state carried across the adoption wait */
-  int stage;                 /* 0: the source just settled; 1: a returned promise just settled */
-  ScrDyn *v;                 /* the source's fulfillment value (owned) */
-  ScrCaught *c;              /* the source's rejection (owned) */
-  bool rejected;
-  ScrDyn *r;                 /* the callback's value being adopted (owned) */
 } ScrDynThenPack;
 
-static void scr_dyn_then_step(void *ap);
+_Static_assert(sizeof(ScrDynThenPack) == 72, "one 72-byte reaction block (an 80-byte malloc chunk)");
 
-static void scr_dyn_then_finish(ScrDynThenPack *a) {
-  scr_caught_release(a->c);
-  scr_dyn_release(a->v);
-  scr_promise_release(a->src);
+static void scr_dyn_then_step(void *ap);
+static void scr_dyn_fin_step(void *ap);
+static void scr_dyn_adopt_step(void *ap);
+
+static void scr_dyn_then_park(ScrDynThenPack *a, ScrPromise *p, int mode) {
+  scr_promise_wait_embedded(p, &a->env, mode == 0 ? scr_dyn_then_step : mode == 1 ? scr_dyn_fin_step : scr_dyn_adopt_step);
+}
+
+static void scr_dyn_then_finish(ScrDynThenPack *a, int mode) {
+  if (mode == 2) scr_dyn_release(a->u.r);
+  else scr_promise_release(a->u.src);
   scr_promise_release(a->dst);
-  scr_dyn_release(a->onf);
-  scr_dyn_release(a->onr);
-  scr_dyn_release(a->onfin);
+  scr_dyn_release(a->h0);
+  scr_dyn_release(a->h1);
   scr_als_ctx_release(a->als);
   free(a);
 }
 
 /* Runs one turn of the reaction. Returns true when it parked again (the pack lives on). */
-static bool scr_dyn_then_run(ScrDynThenPack *a) {
+static bool scr_dyn_then_run(ScrDynThenPack *a, int mode) {
   ScrDyn *r = NULL;
-  if (a->stage == 1) goto adopt_resumed;
+  if (mode == 2) goto adopt_resumed;
   {
     /* A wake is not a settlement. A reaction on a declaration-claimed promise parks on its SOURCE's waiter list while
      * the claim is pending, so the source's settle can wake it before the claim itself has settled (the claim's
      * adapter helper may still be pending: the awaiting-form helpers for void/undefined/null payloads). The fiber
      * this replaced looped `while (p->state == PENDING) scr_await_park(p)` (scr_await_settled); without the same
      * check the reaction would read the pending promise as a fulfilled undefined. Park again instead. */
-    int t = scr_promise_settled_try_take(a->src);
+    int t = scr_promise_settled_try_take(a->u.src);
     if (t < 0) {
-      scr_promise_wait_raw(a->src, scr_dyn_then_step, a);
+      scr_dyn_then_park(a, a->u.src, mode);
       return true;
     }
     bool ok = t == 1;
-    a->rejected = !ok;
-    a->c = a->rejected ? scr_exc_take() : NULL;
-    a->v = ok ? scr_dyn_from_settled(a->src) : NULL;
-    ScrDyn *handler = a->onfin ? a->onfin : (a->rejected ? a->onr : a->onf);
+    bool rejected = !ok;
+    ScrCaught *c = rejected ? scr_exc_take() : NULL;
+    ScrDyn *v = ok ? scr_dyn_from_settled(a->u.src) : NULL;
+    bool fin = mode == 1;
+    ScrDyn *handler = fin ? a->h0 : (rejected ? a->h1 : a->h0);
     if (handler != NULL && handler->kind == SCR_DYN_FUNC) {
       ScrDyn *arg = NULL;
-      if (a->onfin == NULL) arg = a->rejected ? scr_caught_to_dyn(a->c) : scr_dyn_retain(a->v);
+      if (!fin) arg = rejected ? scr_caught_to_dyn(c) : scr_dyn_retain(v);
       r = scr_dyn_call(handler, arg ? &arg : NULL, arg ? 1 : 0, "handler");
       scr_dyn_release(arg);
       if (r == NULL) {
         /* The handler threw: dst rejects with that. */
         scr_promise_reject_pending(a->dst);
-      } else if (a->onfin != NULL) {
+      } else if (fin) {
         /* finally: the callback's value is dropped and the source
          * settlement passes through (JS: a finally callback returning a
          * promise would delay adoption; that refinement waits for a use). */
         scr_dyn_release(r);
-        if (a->rejected) {
-          scr_rethrow(a->c);
+        if (rejected) {
+          scr_rethrow(c);
           scr_promise_reject_pending(a->dst);
         } else {
-          scr_promise_fulfill_ref(a->dst, scr_dyn_retain(a->v), scr_dyn_retain_v, scr_dyn_release_v, NULL);
+          scr_promise_fulfill_ref(a->dst, scr_dyn_retain(v), scr_dyn_retain_v, scr_dyn_release_v, NULL);
         }
       } else {
-        /* Adopt dyn-promise results (JS's resolve walk). */
+        /* Adopt dyn-promise results (JS's resolve walk): the source's value and rejection are dead from here on. */
+        scr_caught_release(c);
+        scr_dyn_release(v);
         goto adopt_loop;
       }
-    } else if (a->rejected) {
-      scr_rethrow(a->c);
+    } else if (rejected) {
+      scr_rethrow(c);
       scr_promise_reject_pending(a->dst);
     } else {
-      scr_promise_fulfill_ref(a->dst, scr_dyn_retain(a->v), scr_dyn_retain_v, scr_dyn_release_v, NULL);
+      scr_promise_fulfill_ref(a->dst, scr_dyn_retain(v), scr_dyn_retain_v, scr_dyn_release_v, NULL);
     }
+    scr_caught_release(c);
+    scr_dyn_release(v);
     return false;
   }
 adopt_resumed: {
     /* The returned promise has settled: take its value (or its rejection), then keep walking. */
-    ScrPromise *ip = a->r->v.promise;
+    ScrPromise *ip = a->u.r->v.promise;
     int t = scr_promise_settled_try_take(ip);
     if (t < 0) {
-      scr_promise_wait_raw(ip, scr_dyn_then_step, a);
+      scr_dyn_then_park(a, ip, 2);
       return true;
     }
     bool ok = t == 1;
     ScrDyn *inner = ok ? scr_dyn_from_settled(ip) : NULL;
-    scr_dyn_release(a->r);
-    a->r = NULL;
+    scr_dyn_release(a->u.r);
+    a->u.r = NULL;
     r = inner;
     if (scr_exc_pending()) {
       scr_promise_reject_pending(a->dst);
@@ -491,9 +508,14 @@ adopt_resumed: {
   }
 adopt_loop:
   if (r != NULL && r->kind == SCR_DYN_PROMISE) {
-    a->r = r;
-    a->stage = 1;
-    scr_promise_wait_raw(r->v.promise, scr_dyn_then_step, a);
+    if (mode != 2) {
+      /* First adoption: the source is no longer needed; its slot now holds the returned promise. */
+      scr_promise_release(a->u.src);
+    } else {
+      /* Already adopting: the previous inner promise was released above. */
+    }
+    a->u.r = r;
+    scr_dyn_then_park(a, r->v.promise, 2);
     return true;
   }
   if (r != NULL) {
@@ -502,16 +524,20 @@ adopt_loop:
   return false;
 }
 
-static void scr_dyn_then_step(void *ap) {
+static void scr_dyn_then_turn(void *ap, int mode) {
   ScrDynThenPack *a = (ScrDynThenPack *)ap;
   /* The reaction's AsyncLocalStorage context for this turn (what the fiber switch used to install). */
   ScrAlsCtx *slot = a->als;
   ScrAlsCtx **prev = scr_als_active;
   scr_als_active = &slot;
-  bool parked = scr_dyn_then_run(a);
+  bool parked = scr_dyn_then_run(a, mode);
   scr_als_active = prev;
-  if (!parked) scr_dyn_then_finish(a);
+  if (!parked) scr_dyn_then_finish(a, mode);
 }
+
+static void scr_dyn_then_step(void *ap) { scr_dyn_then_turn(ap, 0); }
+static void scr_dyn_fin_step(void *ap) { scr_dyn_then_turn(ap, 1); }
+static void scr_dyn_adopt_step(void *ap) { scr_dyn_then_turn(ap, 2); }
 
 ScrDyn *scr_dyn_promise_then(ScrPromise *src, ScrDyn *onf, ScrDyn *onr, ScrDyn *onfin) {
   /* A rejection HANDLER marks the source handled at attach (Node's
@@ -521,14 +547,18 @@ ScrDyn *scr_dyn_promise_then(ScrPromise *src, ScrDyn *onf, ScrDyn *onr, ScrDyn *
   if (onr != NULL) scr_promise_mark_handled(src);
   ScrDynThenPack *a = calloc(1, sizeof *a);
   if (!a) scr_ad_oom();
-  a->src = scr_promise_retain(src);
+  a->u.src = scr_promise_retain(src);
   a->dst = scr_promise_new();
-  a->onf = onf ? scr_dyn_retain(onf) : NULL;
-  a->onr = onr ? scr_dyn_retain(onr) : NULL;
-  a->onfin = onfin ? scr_dyn_retain(onfin) : NULL;
+  int mode = onfin != NULL ? 1 : 0;
+  if (mode == 1) {
+    a->h0 = scr_dyn_retain(onfin);
+  } else {
+    a->h0 = onf ? scr_dyn_retain(onf) : NULL;
+    a->h1 = onr ? scr_dyn_retain(onr) : NULL;
+  }
   a->als = scr_als_ctx_retain(*scr_als_active);
   ScrDyn *boxed = scr_dyn_new_promise(a->dst);
-  scr_promise_wait_raw(src, scr_dyn_then_step, a);
+  scr_dyn_then_park(a, src, mode);
   return boxed;
 }
 
