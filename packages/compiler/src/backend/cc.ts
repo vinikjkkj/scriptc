@@ -1220,7 +1220,7 @@ function keepPdbRequested(): boolean {
  * COFF COMDATs that /OPT:REF can drop; the driver passes no -g. */
 function gcSectionsLinkArgs(driver: CcDriver): string[] {
   const platform = targetPlatform(driver);
-  if (platform === "linux") return ["-Wl,--gc-sections"];
+  if (platform === "linux") return ["-Wl,--gc-sections", "-Wl,-z,pack-relative-relocs"]; // LAB ONLY (lab/relr): force RELR on, never lands
   if (platform === "darwin") return ["-Wl,-dead_strip"];
   if (platform === "win32" && driver.argv[0] === "zig" && !keepPdbRequested()) {
     return ["-Wl,--gc-sections", "-Wl,--strip-all"];
