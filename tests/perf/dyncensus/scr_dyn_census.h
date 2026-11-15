@@ -249,6 +249,20 @@ typedef struct {
   long long aux_nonnull;
 } ScrDynCenKind;
 
+/* accessor census (lab): the hidden-table accessor rows of every live OBJ (ext->hidden). [0] = snapshot. */
+#define SCR_DYNCEN_ACC_SET 65536
+typedef struct {
+  long long owners, owner_len_sum, rows, acc_rows, data_rows, acc_enum, acc_conf, acc_get_only, acc_both;
+  long long row_node_phys, row_items_phys, hid_node_phys, hid_side_phys, ext_phys, slot_entries;
+  long long getter_kind[16], setter_kind[16];
+  long long distinct_get_node, distinct_get_clo, distinct_set_node, distinct_set_clo, distinct_triple;
+  long long shared_get_node;                       /* accessor rows whose getter node is held by another row too */
+  long long keyhist_n; char keyname[24][32]; long long keycnt[24];
+  long long cnhist_n; char cname[16][32]; long long cncnt[16];
+  unsigned long long set_get_node[SCR_DYNCEN_ACC_SET], set_get_clo[SCR_DYNCEN_ACC_SET], set_set_node[SCR_DYNCEN_ACC_SET], set_set_clo[SCR_DYNCEN_ACC_SET], set_triple[SCR_DYNCEN_ACC_SET];
+} ScrDynCenAcc;
+SCR_DYNCEN_SHARED ScrDynCenAcc scr_dyncen_acc;
+
 SCR_DYNCEN_SHARED ScrDynCenKind scr_dyncen_snap[SCR_DYNCEN_KINDS] = {{0}};
 /* The same rows filled by the LAST walk, so the reader can compare the
  * at-exit population against the at-peak one without a second run. */
@@ -655,6 +669,23 @@ SCR_DYNCEN_FN void scr_dyncen_report(void) {
     for (long long i = 0; i < scr_dyncen_ncurve; i++)
       fprintf(f, "DYNCEN-CURVE %lld %lld %lld %lld\n", i, scr_dyncen_curve[i][0],
               scr_dyncen_curve[i][1], scr_dyncen_curve[i][2]);
+    {
+      const ScrDynCenAcc *a = &scr_dyncen_acc;
+      int q;
+      fprintf(f, "DYNCEN-ACC snap owners=%lld ownerLenSum=%lld rows=%lld acc=%lld data=%lld accEnum=%lld accConf=%lld getOnly=%lld both=%lld\n",
+              a->owners, a->owner_len_sum, a->rows, a->acc_rows, a->data_rows, a->acc_enum, a->acc_conf, a->acc_get_only, a->acc_both);
+      fprintf(f, "DYNCEN-ACC-BYTES snap rowNode=%lld rowItems=%lld hidNode=%lld hidSide=%lld ext=%lld slotEntries=%lld\n",
+              a->row_node_phys, a->row_items_phys, a->hid_node_phys, a->hid_side_phys, a->ext_phys, a->slot_entries);
+      fprintf(f, "DYNCEN-ACC-DISTINCT snap getNode=%lld getClo=%lld setNode=%lld setClo=%lld triple=%lld sharedGetNode=%lld\n",
+              a->distinct_get_node, a->distinct_get_clo, a->distinct_set_node, a->distinct_set_clo, a->distinct_triple, a->shared_get_node);
+      fprintf(f, "DYNCEN-ACC-GETKIND snap");
+      for (q = 0; q < 16; q++) fprintf(f, " %lld", a->getter_kind[q]);
+      fprintf(f, "\nDYNCEN-ACC-SETKIND snap");
+      for (q = 0; q < 16; q++) fprintf(f, " %lld", a->setter_kind[q]);
+      fputc(0x0a, f);
+      for (q = 0; q < a->keyhist_n; q++) fprintf(f, "DYNCEN-ACC-KEY snap %s %lld\n", a->keyname[q], a->keycnt[q]);
+      for (q = 0; q < a->cnhist_n; q++) fprintf(f, "DYNCEN-ACC-OWNER snap %s %lld\n", a->cname[q], a->cncnt[q]);
+    }
     fprintf(f,
             "DYNCEN-TOTAL allocs=%lld deaths=%lld liveN=%lld livePeak=%lld snapN=%lld "
             "snapOrd=%lld snapT=%lld snaps=%lld snapBand=%lld walks=%lld walkReads=%lld "

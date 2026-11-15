@@ -25,6 +25,78 @@
  * At most one object per walk is in that state, and `n_empty_buf` /
  * `aux_nonnull` are where it shows up rather than a crash.
  */
+
+/* accessor census pass (see ScrDynCenAcc) */
+static long long scr_dyncen_set_add(unsigned long long *set, unsigned long long v) {
+  unsigned long long h = (v * 11400714819323198485ull) >> 48; /* 16 bits */
+  if (v == 0) return 0;
+  for (;;) {
+    h &= (SCR_DYNCEN_ACC_SET - 1);
+    if (set[h] == v) return 0;
+    if (set[h] == 0) { set[h] = v; return 1; }
+    h++;
+  }
+}
+static void scr_dyncen_acc_note(char (*names)[32], long long *cnt, long long *n, long long cap, const char *s, size_t len) {
+  long long k;
+  if (len > 30) len = 30;
+  for (k = 0; k < *n; k++)
+    if (strlen(names[k]) == len && memcmp(names[k], s, len) == 0) break;
+  if (k == *n && k < cap) { memcpy(names[k], s, len); names[k][len] = 0; (*n)++; }
+  if (k < *n) cnt[k]++;
+}
+static void scr_dyncen_acc_pass(ScrDynCenAcc *a) {
+  unsigned j;
+  memset(a, 0, sizeof *a);
+  for (j = 0; j < SCR_DYNCEN_PSLOTS; j++) {
+    const ScrDyn *d = (const ScrDyn *)scr_dyncen_ptbl[j];
+    const ScrDynObjExt *x;
+    const ScrDyn *hid;
+    size_t i;
+    if (!d || d->kind != SCR_DYN_OBJ || d->v.obj.ext == NULL) continue;
+    x = d->v.obj.ext;
+    hid = x->hidden;
+    if (hid == NULL || hid->kind != SCR_DYN_OBJ) continue;
+    a->owners++;
+    a->owner_len_sum += d->v.obj.len;
+    a->ext_phys += scr_dyncen_phys((long long)sizeof(ScrDynObjExt));
+    a->hid_node_phys += scr_dyncen_phys((long long)(sizeof(ScrCycHdr) + sizeof(ScrDyn)));
+    a->hid_side_phys += scr_dyncen_phys((long long)hid->v.obj.cap * (long long)sizeof(ScrDynEntry));
+    if (x->cname) scr_dyncen_acc_note(a->cname, a->cncnt, &a->cnhist_n, 16, x->cname, strlen(x->cname));
+    for (i = 0; i < hid->v.obj.len; i++) {
+      const ScrDynEntry *e = &hid->v.obj.entries[i];
+      const ScrDyn *q = e->value;
+      const ScrDyn *g, *s;
+      unsigned long long gn, gc, sn, sc;
+      if (!q || q->kind != SCR_DYN_ARR || !q->v.arr.items || q->v.arr.len < 5) continue;
+      a->rows++;
+      if (scr_dyn_truthy(q->v.arr.items[0])) { a->data_rows++; continue; }
+      a->acc_rows++;
+      a->row_node_phys += scr_dyncen_phys((long long)(sizeof(ScrCycHdr) + sizeof(ScrDyn)));
+      a->row_items_phys += scr_dyncen_phys((long long)q->v.arr.cap * (long long)sizeof(ScrDyn *));
+      if (scr_dyn_truthy(q->v.arr.items[3])) a->acc_conf++;
+      if (q->v.arr.len >= 5 && scr_dyn_truthy(q->v.arr.items[4])) { a->acc_enum++; a->slot_entries++; }
+      g = q->v.arr.items[1]; s = q->v.arr.items[2];
+      a->getter_kind[(unsigned)g->kind < 16 ? (unsigned)g->kind : 15]++;
+      a->setter_kind[(unsigned)s->kind < 16 ? (unsigned)s->kind : 15]++;
+      if (g->kind == SCR_DYN_FUNC && s->kind != SCR_DYN_FUNC) a->acc_get_only++;
+      if (g->kind == SCR_DYN_FUNC && s->kind == SCR_DYN_FUNC) a->acc_both++;
+      gn = g->kind == SCR_DYN_FUNC ? (unsigned long long)(uintptr_t)g : 0;
+      gc = g->kind == SCR_DYN_FUNC ? (unsigned long long)(uintptr_t)g->v.fn.clo : 0;
+      sn = s->kind == SCR_DYN_FUNC ? (unsigned long long)(uintptr_t)s : 0;
+      sc = s->kind == SCR_DYN_FUNC ? (unsigned long long)(uintptr_t)s->v.fn.clo : 0;
+      if (gn && !scr_dyncen_set_add(a->set_get_node, gn)) a->shared_get_node++;
+      a->distinct_get_node += gn ? 0 : 0;
+      if (gn) a->distinct_get_node = a->distinct_get_node;
+      if (gc) a->distinct_get_clo += scr_dyncen_set_add(a->set_get_clo, gc);
+      if (sn) a->distinct_set_node += scr_dyncen_set_add(a->set_set_node, sn);
+      if (sc) a->distinct_set_clo += scr_dyncen_set_add(a->set_set_clo, sc);
+      a->distinct_triple += scr_dyncen_set_add(a->set_triple, (gc * 31ull) ^ (sc * 131ull) ^ ((unsigned long long)scr_dyn_truthy(q->v.arr.items[4]) << 1) ^ 1ull);
+      scr_dyncen_acc_note(a->keyname, a->keycnt, &a->keyhist_n, 24, e->key, e->key_len);
+    }
+  }
+  a->distinct_get_node = a->acc_rows - a->shared_get_node; /* rows whose getter node was first seen here (FUNC getters) */
+}
 static void scr_dyncen_walk(ScrDynCenKind *rows) {
   unsigned j;
   /* The key table belongs to the same population as the rows: a walk into
@@ -232,6 +304,7 @@ static void scr_dyncen_walk(ScrDynCenKind *rows) {
     }
     }
   }
+  if (rows == scr_dyncen_snap) scr_dyncen_acc_pass(&scr_dyncen_acc);
 }
 
 /* The two hooks scr_json.c calls. `note_alloc` runs at the END of
