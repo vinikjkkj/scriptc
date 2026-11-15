@@ -1862,13 +1862,14 @@ void scr_cls_props_inspect(const ScrDyn *tbl, double recurse, double depth, bool
     const ScrDynEntry *ent = &tbl->v.obj.entries[ord ? ord[i] : i];
     const ScrDyn *q = ent->value;
     if (scr_dyn_obj_key_is_index(ent->key, ent->key_len) != index_keys) continue;
-    if (q->kind != SCR_DYN_ARR || q->v.arr.len < 5) continue;
-    if (!scr_dyn_truthy(q->v.arr.items[4])) continue; /* non-enumerable */
+    const bool pl = ent->plain_prop; /* a plain entry: the value IS the (enumerable data) property */
+    if (!pl && (q->kind != SCR_DYN_ARR || q->v.arr.len < 5)) continue;
+    if (!pl && !scr_dyn_truthy(q->v.arr.items[4])) continue; /* non-enumerable */
 #ifdef SCR_INSP_COLORS
     InspBuf eb = {0};
     insp_key_into(&eb, ent->key, ent->key_len);
-    if (scr_dyn_truthy(q->v.arr.items[0])) { /* data: the value renders */
-      ScrStr *val = scr_insp_dyn(q->v.arr.items[1], recurse + 1, depth);
+    if (pl || scr_dyn_truthy(q->v.arr.items[0])) { /* data: the value renders */
+      ScrStr *val = scr_insp_dyn(pl ? (ScrDyn *)q : q->v.arr.items[1], recurse + 1, depth);
       insp_kv(&eb, val);
       scr_str_release(val);
     } else {
@@ -1881,8 +1882,8 @@ void scr_cls_props_inspect(const ScrDyn *tbl, double recurse, double depth, bool
     InspBuf eb = {0};
     insp_key_into(&eb, ent->key, ent->key_len);
     ib_cstr(&eb, ": ");
-    if (scr_dyn_truthy(q->v.arr.items[0])) { /* data: the value renders */
-      ScrStr *val = scr_insp_dyn(q->v.arr.items[1], recurse + 1, depth);
+    if (pl || scr_dyn_truthy(q->v.arr.items[0])) { /* data: the value renders */
+      ScrStr *val = scr_insp_dyn(pl ? (ScrDyn *)q : q->v.arr.items[1], recurse + 1, depth);
       ib_bytes(&eb, val->data, val->len);
       scr_str_release(val);
     } else {
