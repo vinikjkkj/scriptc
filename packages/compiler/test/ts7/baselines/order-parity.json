@@ -27972,6 +27972,12 @@
     "<repo>/tests/corpus/25340-object-entries-and-values-of-a-wide-record-keep-key-order-holes-and-absent-members-through-a-field-loop.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25341-object-entries-and-values-of-a-required-absent-record-loop-over-only-the-members-that-were-filled.ts": {
+   "order": [
+    "<repo>/tests/corpus/25341-object-entries-and-values-of-a-required-absent-record-loop-over-only-the-members-that-were-filled.ts"
+   ],
+   "diags": []
   }
  }
 }

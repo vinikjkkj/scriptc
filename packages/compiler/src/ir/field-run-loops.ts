@@ -19,7 +19,7 @@
  *
  * What a run may NOT contain, and what stays unrolled: a member whose name appears in any other role (the canonical texts then differ), a member of another type
  * (recordGet carries its type), a member with a different own-mask situation (the bit is part of what recordKeyPresent answers: a run is all-with or all-without),
- * and any member of a shape the required-absent read applies to (its throw names the member, and a loop cannot spell that: such a shape is skipped entirely).
+ * and nothing else is excluded: a shape the required-absent read applies to loops too, because recordGetAt carries that read (scr_throw_absent_key names the member from the run's key table).
  * MIN members or more make a run (default 8; SCRIPTC_FIELD_LOOP_MIN, 0 = off, the same knob as the walkers). Only the three helper families above are examined. */
 import type { IrExpr, IrFunction, IrRecordShape, IrStmt, SrcLoc } from "./nodes.js";
 import { F64, BOOL, ownMaskKeyBit, typeKey } from "./nodes.js";
@@ -111,8 +111,6 @@ export function compressFieldRunLoops(functions: IrFunction[], records: readonly
       if (m === null) return null;
       const shape = shapes.get(m.shapeId);
       if (shape === undefined || !shape.fields.some((f) => f.name === m.field)) return null;
-      // a shape the required-absent read applies to keeps its unrolled per-member throw
-      if (shape.reqabsent === true && ownMaskKeyBit(shape, m.field) !== null) return null;
       const probe: string[] = [];
       const ix = () => ({ kind: "varRef", localId: "\u0001i", type: F64, loc: undefined as unknown as SrcLoc }) as IrExpr;
       return { member: m, text: canonical(u.stmts.map((st) => rewrite(st, m, probe, ix)), probe) };

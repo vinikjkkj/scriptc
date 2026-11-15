@@ -14,6 +14,7 @@
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 static void scr_error_oom(void) {
   scr_trap("scriptc: out of memory\n");
@@ -649,6 +650,25 @@ void scr_throw_error_fmt_code(int kind, const char *code, const char *fmt, ...) 
   va_end(ap);
   size_t len = n < 0 ? 0 : ((size_t)n >= sizeof buf ? sizeof buf - 1 : (size_t)n);
   scr_throw_error_msg_code(kind, buf, len, code);
+}
+
+/* The required-absent read's throw (SC9005), for the field-run loop (ir/field-run-loops.ts): the message the unrolled read spells as one literal per
+ * member, built here from the member's key and the shape id, byte for byte the same text. `key` is borrowed and so is `shape`. Always throws. */
+void scr_throw_absent_key(const ScrStr *key, const char *shape) {
+  static const char pre[] = "reading '";
+  static const char mid[] = "': this value was completed from a narrower record and never carried that key (JavaScript answers undefined here, and ";
+  static const char post[] = " has no undefined arm to hold it)";
+  size_t sl = strlen(shape), kl = key->len;
+  char buf[sizeof pre + sizeof mid + sizeof post + 2 * kl + sl + 2];
+  char *w = buf;
+  memcpy(w, pre, sizeof pre - 1), w += sizeof pre - 1;
+  memcpy(w, key->data, kl), w += kl;
+  memcpy(w, mid, sizeof mid - 1), w += sizeof mid - 1;
+  memcpy(w, shape, sl), w += sl;
+  *w++ = '.';
+  memcpy(w, key->data, kl), w += kl;
+  memcpy(w, post, sizeof post - 1), w += sizeof post - 1;
+  scr_throw_error_msg_code(SCR_ERR_TYPE, buf, (size_t)(w - buf), "SC9005");
 }
 
 /* A compiler-resolved Node-parity throw (the always-throwing lowered
