@@ -6829,8 +6829,11 @@ static inline bool scr_dyn_bytes_eq(const char *a, const char *b, size_t n) {
 }
 
 static inline const ScrDynEntry *scr_dyn_props_find(const ScrDyn *tbl, const char *key, size_t key_len) {
+  /* The count-down walk of scr_dyn_obj_get, for its reason: the empty asm keeps the counter a live value, so clang does not rewrite the loop into
+   * "advance until an end pointer" (a len * 24 setup on every call). It emits no instruction of its own. */
   const ScrDynEntry *e = tbl->v.obj.entries;
   for (size_t n = tbl->v.obj.len; n != 0; n--, e++) {
+    __asm__("" : "+r"(n));
     if (e->key_len == key_len && scr_dyn_bytes_eq(e->key, key, key_len)) return e;
   }
   return NULL;
