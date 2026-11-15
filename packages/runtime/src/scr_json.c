@@ -10380,11 +10380,29 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
         return;
       }
       size_t want = (size_t)nl;
+      /* `a = new Array(n); ...fill...; a.length = k` is the pre-size-then-trim idiom, and the trim used to keep all n slots for the life of the array (the sqlite bench holds 2,000
+       * arrays of 500 slots with about 250 used). A buffer that was EXACTLY full when it is trimmed is such an array (a push-grown one is full only for an instant, and a rollback loop
+       * `a.length = saved` trims arrays that are not full), so only that case gives the unused slots back: at least 8 of them and at least a quarter of the capacity, never to length 0
+       * (a `length = 0` reset keeps its buffer for the refill). A pop or a shift never goes through here. */
+      bool was_full = recv->v.arr.len == recv->v.arr.cap;
+      { extern void scr_ash_note(int kind, size_t len, size_t cap, size_t want); scr_ash_note(0, recv->v.arr.len, recv->v.arr.cap, want); }
       while (recv->v.arr.len > want) {
         ScrDyn *gone = recv->v.arr.items[recv->v.arr.len - 1];
         recv->v.arr.len--;
         scr_dyn_release(gone);
       }
+#ifndef SCR_NO_ARRSHRINK /* LAB: base emulation, removed before commit */
+      if (was_full && want > 0 && recv->v.arr.len == want) {
+        size_t freed = (size_t)recv->v.arr.cap - want;
+        if (freed >= 8 && freed >= (size_t)recv->v.arr.cap / 4) {
+          ScrDyn **shrunk = (ScrDyn **)realloc(recv->v.arr.items, want * sizeof *shrunk);
+          if (shrunk != NULL) { /* a failed shrink keeps the old, larger buffer */
+            recv->v.arr.items = shrunk;
+            recv->v.arr.cap = (uint32_t)want;
+          }
+        }
+      }
+#endif
       while (recv->v.arr.len < want) {
         scr_dyn_arr_push_slot(recv, scr_dyn_retain(scr_dyn_absent())); /* length growth makes holes */
       }
@@ -16770,4 +16788,18 @@ ScrDyn *scr_dyn_origin_mark_elem(ScrDyn *d, void *obj, const char *tkey, void *(
 void scr_rec_swap_body(void *a, void *b, size_t size) {
   unsigned char *x = (unsigned char *)a + sizeof(size_t), *y = (unsigned char *)b + sizeof(size_t);
   for (size_t i = 0; i + sizeof(size_t) < size; i++) { unsigned char t = x[i]; x[i] = y[i]; y[i] = t; }
+}
+
+/* LAB (ashstat): counts of dyn `length =` writes that shrink, by whether the buffer was exactly full, and the slots a trim would free. */
+#include <stdio.h>
+static unsigned long long scr_ash_n[4], scr_ash_slots_full[2], scr_ash_slots_notfull[2];
+void scr_ash_note(int kind, size_t len, size_t cap, size_t want) {
+  (void)kind;
+  if (want >= len) { scr_ash_n[0]++; return; }
+  if (len == cap) { scr_ash_n[1]++; scr_ash_slots_full[0] += cap - want; }
+  else { scr_ash_n[2]++; scr_ash_slots_notfull[0] += cap - want; }
+}
+__attribute__((destructor)) static void scr_ash_report(void) {
+  if (getenv("SCR_ARRSHRINK_STAT") == NULL) return;
+  fprintf(stderr, "ARRSHRINK-STAT dyn length= writes: noShrink=%llu fullBuffer=%llu (slots freeable %llu) notFull=%llu (slots %llu)\n", scr_ash_n[0], scr_ash_n[1], scr_ash_slots_full[0], scr_ash_n[2], scr_ash_slots_notfull[0]);
 }

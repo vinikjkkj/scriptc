@@ -1339,10 +1339,25 @@ void scr_arr_truncate(ScrArr *a, double n) {
   double want = n;
   if (!(want >= 0)) want = 0; /* NaN and negatives empty it */
   size_t target = want >= (double)a->len ? a->len : (size_t)want;
+  /* The pre-size-then-trim idiom (`new Array(n)`, fill, `length = k`) keeps all n slots otherwise: only a buffer that was exactly full is trimmed, by at least 8 slots and a quarter of
+   * the capacity, never to 0, never a VM-backed reservation. See the dyn twin in scr_json.c. */
+  bool was_full = a->len == a->cap;
   while (a->len > target) {
     uint64_t slot = a->data[--a->len];
     if (scr_elem_is_ref(a->elem)) scr_elem_release(a, slot);
   }
+#ifndef SCR_NO_ARRSHRINK /* LAB: base emulation, removed before commit */
+  if (was_full && target > 0 && a->len == target && !a->vmbacked) {
+    size_t freed = a->cap - target;
+    if (freed >= 8 && freed >= a->cap / 4) {
+      uint64_t *shrunk = (uint64_t *)realloc(a->data, target * sizeof *shrunk);
+      if (shrunk != NULL) {
+        a->data = shrunk;
+        a->cap = target;
+      }
+    }
+  }
+#endif
 }
 
 /* Entry points for scr_array_dyn.c (the dyn-element operations, linked only
