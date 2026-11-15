@@ -1501,7 +1501,10 @@ static void scr_net_sock_eof(ScrNetSocket *s) {
 /* Deliver one arrived chunk to the socket's consumers (the protocol
  * layer, the pipe destination, the 'data' listeners). Returns false when
  * a callback threw (the caller bails; the loop surfaces it). */
+/* LAB (sockbuf): bytes read from sockets / handed to their consumers; sampled by scr_async.c. Never shipped. */
+unsigned long long scr_ss_rd = 0, scr_ss_dl = 0;
 static bool scr_net_sock_deliver(ScrNetSocket *s, const char *buf, size_t n) {
+  scr_ss_dl += n;
   if (s->native_data) {
     s->native_data(s->native_ctx, buf, n);
     if (scr_exc_pending()) return false;
@@ -1627,6 +1630,7 @@ static void scr_net_sock_read(ScrNetSocket *s) {
       return;
     }
     s->bytes_read += (size_t)n;
+    scr_ss_rd += (size_t)n;
     scr_net_sock_touch(s);
     if (flowing) {
       if (!scr_net_sock_deliver(s, buf, (size_t)n)) return;

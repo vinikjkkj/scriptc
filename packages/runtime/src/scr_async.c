@@ -686,7 +686,84 @@ long scr_abandoned_fiber_count(void) { return scr_fibers_abandoned; }
 
 /* Microtask queue: ready fibers, FIFO. */
 static ScrFiber **scr_ready = NULL;
+
+#if !defined(_WIN32) && defined(__linux__)
+/* LAB (sockbuf), never shipped: with SCR_SOCKSTAT_OUT=<file> a sampler thread records every 100 ms the bytes read from sockets and handed to their consumers, the live bytes held in
+ * ScrBytes blocks, the ready-queue length, the cycle collector's live node count, VmRSS and mallinfo2, and writes them at exit. It allocates nothing after start. */
+#include <pthread.h>
+#include <unistd.h>
+#include <malloc.h>
+extern unsigned long long scr_ss_rd, scr_ss_dl;
+extern long long scr_ss_bytes_live;
+extern size_t scr_cyc_live;
+typedef struct { unsigned t_ms; unsigned long long rd, dl; long long live; unsigned ready, cyc, rss_kb, arena_kb, uord_kb, ford_kb; } ScrSsSample;
+static ScrSsSample scr_ss_samples[8192];
+static volatile unsigned scr_ss_n;
+static void *scr_ss_thread(void *arg);
+static unsigned scr_ss_rss_kb(void) {
+  int fd = open("/proc/self/statm", O_RDONLY);
+  if (fd < 0) return 0;
+  char b[128];
+  ssize_t n = read(fd, b, sizeof b - 1);
+  close(fd);
+  if (n <= 0) return 0;
+  b[n] = 0;
+  unsigned long a = 0, r = 0;
+  sscanf(b, "%lu %lu", &a, &r);
+  return (unsigned)(r * (unsigned long)(sysconf(_SC_PAGESIZE) / 1024));
+}
+#endif
+
 static size_t scr_ready_head = 0, scr_ready_len = 0, scr_ready_cap = 0;
+#if !defined(_WIN32) && defined(__linux__)
+static void *scr_ss_thread(void *arg) {
+  (void)arg;
+  struct timespec t0, t;
+  clock_gettime(CLOCK_MONOTONIC, &t0);
+  for (;;) {
+    usleep(100000);
+    unsigned i = scr_ss_n;
+    if (i >= 8192) return NULL;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    struct mallinfo2 mi = mallinfo2();
+    ScrSsSample *x = &scr_ss_samples[i];
+    x->t_ms = (unsigned)((t.tv_sec - t0.tv_sec) * 1000 + (t.tv_nsec - t0.tv_nsec) / 1000000);
+    x->rd = scr_ss_rd;
+    x->dl = scr_ss_dl;
+    x->live = scr_ss_bytes_live;
+    x->ready = (unsigned)scr_ready_len;
+    x->cyc = (unsigned)scr_cyc_live;
+    x->rss_kb = scr_ss_rss_kb();
+    x->arena_kb = (unsigned)((mi.arena + mi.hblkhd) / 1024);
+    x->uord_kb = (unsigned)(mi.uordblks / 1024);
+    x->ford_kb = (unsigned)(mi.fordblks / 1024);
+    scr_ss_n = i + 1;
+  }
+}
+static void scr_ss_dump(void);
+extern void (*scr_layout_prof_exit)(void); /* process.exit() ends in _Exit and skips destructors: the exit path calls this hook (scr_lib.c) */
+__attribute__((constructor)) static void scr_ss_start(void) {
+  if (getenv("SCR_SOCKSTAT_OUT") == NULL) return;
+  scr_layout_prof_exit = scr_ss_dump;
+  pthread_t th;
+  pthread_create(&th, NULL, scr_ss_thread, NULL);
+  pthread_detach(th);
+}
+__attribute__((destructor)) static void scr_ss_dump(void) {
+  const char *path = getenv("SCR_SOCKSTAT_OUT");
+  if (path == NULL) return;
+  FILE *f = fopen(path, "w");
+  if (f == NULL) return;
+  fprintf(f, "# t_ms rd dl live_bytes ready cyc_live rss_kb arena_kb uord_kb ford_kb\n");
+  unsigned n = scr_ss_n;
+  for (unsigned i = 0; i < n && i < 8192; i++) {
+    const ScrSsSample *x = &scr_ss_samples[i];
+    fprintf(f, "%u %llu %llu %lld %u %u %u %u %u %u\n", x->t_ms, x->rd, x->dl, x->live, x->ready, x->cyc, x->rss_kb, x->arena_kb, x->uord_kb, x->ford_kb);
+  }
+  fclose(f);
+}
+#endif
+
 
 static void scr_ready_push(ScrFiber *f) {
   if (scr_ready_head + scr_ready_len == scr_ready_cap) {

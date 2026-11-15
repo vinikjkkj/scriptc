@@ -90,6 +90,8 @@ size_t scr_bytes_elem_size(ScrBytesElem elem) {
 
 /* ── lifecycle ─────────────────────────────────────────────────────────── */
 
+/* LAB (sockbuf): live bytes held in ScrBytes data blocks, sampled by scr_async.c's sampler thread. Never shipped. */
+long long scr_ss_bytes_live = 0;
 static ScrBytes *scr_bytes_alloc(ScrBytesElem elem, size_t len) {
   ScrBytes *b = calloc(1, sizeof(ScrBytes)) /* own = NULL */;
   if (!b) scr_bytes_oom();
@@ -102,6 +104,7 @@ static ScrBytes *scr_bytes_alloc(ScrBytesElem elem, size_t len) {
   b->flavor = (elem == SCR_BYTES_U8) ? SCR_BF_UNKNOWN : SCR_BF_PLAIN;
   b->data = calloc(len ? len : 1, scr_bytes_elem_size(elem));
   if (!b->data) scr_bytes_oom();
+  scr_ss_bytes_live += (long long)(len * scr_bytes_elem_size(elem));
   b->backing = NULL;
   b->weakkey = 0;
   b->abuf = NULL;
@@ -245,6 +248,7 @@ void scr_bytes_release(ScrBytes *b) {
       if (b->elem == SCR_BYTES_BUF && b->backing->abuf == b) b->backing->abuf = NULL;
       scr_bytes_release(b->backing); /* a view: data points into the owner */
     } else {
+      scr_ss_bytes_live -= (long long)(b->len * scr_bytes_elem_size(b->elem));
       free(b->data);
     }
     if (b->own != NULL) scr_bytes_own_ops->free(b);
