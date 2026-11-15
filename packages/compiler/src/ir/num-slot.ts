@@ -20,7 +20,7 @@
  *  - some read of the field in the module is a NUMERIC use (an operand of dyn arithmetic or comparison, or a number check): a field that is
  *    only ever a pointer (a buffer, a string) gains nothing from an f64 half;
  *  - no struct view (`%class:<C>` record source) names the class or a descendant, because a view reads the dyn slot at its offset, and no
- *    union read (unionKeyGet/unionDisc) names a field of that name, because those read the live arm's slot directly.
+ *    unionDisc names a field of that name, because it reads the live arm's slot directly (unionKeyGet never reads a class arm).
  *
  * SCRIPTC_NUMSLOT=off disables the pass (the A/B arm). SCRIPTC_NUMSLOT_WHY=1 prints one line per picked field to stderr, and one line per
  * constructor-written candidate field that was refused, with the reason. */
@@ -104,9 +104,8 @@ export function numSlotPass(mod: IrModule): NumSlotPick[] {
     return f;
   };
   const viewed = new Set<string>();
-  /** Field names read through a union arm (unionKeyGet/unionDisc read the slot of whichever arm is live, class arms included). */
+  /** Field names read by unionDisc (it reads the slot of whichever arm is live, class arms included). unionKeyGet reads only record and array arms: the emitters refuse a class arm there. */
   const unionRead = new Set<string>();
-  let unionAnyKey = false;
 
   const noteRead = (e: IrExpr): void => {
     if (e.kind !== "fieldGet" || e.type.kind !== "dyn") return;
@@ -136,10 +135,6 @@ export function numSlotPass(mod: IrModule): NumSlotPick[] {
       }
     } else if (kind === "unionDisc" && typeof node["field"] === "string") {
       unionRead.add(node["field"]);
-    } else if (kind === "unionKeyGet") {
-      const key = node["key"] as IrExpr;
-      if (key.kind === "strLit") unionRead.add(key.value);
-      else unionAnyKey = true; // a computed key could name any field
     } else if (kind === "libCall" && NUM_USE_FNS.has(node["fn"] as string)) {
       for (const a of node["args"] as IrExpr[]) noteRead(a);
     } else if (kind === "dynCheck" && (node["type"] as { kind: string }).kind === "f64") {
@@ -183,7 +178,7 @@ export function numSlotPass(mod: IrModule): NumSlotPick[] {
         refuse("absent/hidden/prototype-data field");
         continue;
       }
-      if (unionAnyKey || unionRead.has(f.name)) {
+      if (unionRead.has(f.name)) {
         refuse("the field name is read through a union arm");
         continue;
       }
