@@ -866,6 +866,9 @@ function icuFeatureFlags(use: IcuUse): Record<string, boolean> {
 /** The members of scr_dyn_invoke.c that emitted walkers and thunks call directly. */
 /** The literal-key class-instance read (scr_dyn_oim.c): its own unit, linked only by a program whose emitted code names it. */
 const DYN_LIT_REF = /\bscr_dyn_objinst_member_get_lit\b/;
+/** The process-stream box (scr_proc_dyn.c): a to-dyn converter or a thunk for a type that mentions a process stream names it even where no value is ever boxed,
+ * so the link gate reads the emitted text as well as the IR (a function the linker drops from a plain link stays in a profile link). */
+const PROC_STREAM_REF = /\bscr_proc_stream_box\b/;
 const DYN_DISPATCH_REF = /\bscr_dyn_(?:objinst_member_get(?:_lit)?|objinst_miss|intrinsic_method_get|proxy_get)\b/;
 
 function programNativeFeatures(
@@ -1445,12 +1448,14 @@ async function compileTracked(
   // the IR-level predicates said.
   let emittedReadsObjinstMembers = false;
   let emittedReadsLitKey = false;
+  let emittedReadsProcStream = false;
   if (opts.backend !== "c") {
     try {
       const llPath = join(opts.outDir, `${stem}.ll`);
       const llRead = await emitLlvmFile(lowered.module!, llStats, llPath, opts.sanitize ?? false, layoutOrder);
       emittedReadsObjinstMembers = llRead.members;
       emittedReadsLitKey = llRead.lit;
+      emittedReadsProcStream = llRead.procStream;
       cPath = llPath;
       backend = "llvm";
     } catch (err) {
@@ -1476,6 +1481,7 @@ async function compileTracked(
     programUnits = written.programUnits;
     emittedReadsObjinstMembers = written.readsObjinstMembers;
     emittedReadsLitKey = written.readsLitKey;
+    emittedReadsProcStream = written.readsProcStream;
   }
   // A previous build of the same program may have been split when this one
   // is not (an edit that shrank it, or a threshold change). Its parts would
@@ -1491,6 +1497,7 @@ async function compileTracked(
   const features = programNativeFeatures(lowered.module!, backend, llStats.coroLowered);
   if (emittedReadsObjinstMembers) features.dynInvoke = true;
   if (emittedReadsLitKey) features.dynOim = true;
+  if (emittedReadsProcStream) features.procDyn = true;
   let irPath: string | undefined;
   if (opts.emitIr) {
     irPath = join(opts.outDir, `${stem}.ir.json`);
@@ -1552,11 +1559,11 @@ async function compileTracked(
 
 /** The LLVM unit, written; the emitted text is local to this call so it does not outlive the write in the caller's frame. Answers
  * whether the text reads class-box members (the dyn dispatch unit must then link). */
-async function emitLlvmFile(mod: IrModule, llStats: LlvmEmitStats, llPath: string, audit: boolean, layout?: LayoutOrder): Promise<{ members: boolean; lit: boolean }> {
+async function emitLlvmFile(mod: IrModule, llStats: LlvmEmitStats, llPath: string, audit: boolean, layout?: LayoutOrder): Promise<{ members: boolean; lit: boolean; procStream: boolean }> {
   let ll = tapped("emit.llvm", () => emitLlvmModule(mod, llStats, audit));
   if (layout !== undefined) ll = reorderLlvmText(ll, layout);
   await writeFile(llPath, ll);
-  return { members: DYN_DISPATCH_REF.test(ll), lit: DYN_LIT_REF.test(ll) };
+  return { members: DYN_DISPATCH_REF.test(ll), lit: DYN_LIT_REF.test(ll), procStream: PROC_STREAM_REF.test(ll) };
 }
 
 /** The C units (and the header a split program shares), written; the emitted text stays local to this call. */
@@ -1568,11 +1575,12 @@ async function emitCFiles(
   outDir: string,
   stem: string,
   layout?: LayoutOrder,
-): Promise<{ programUnits: string[]; programHeader: string | undefined; readsObjinstMembers: boolean; readsLitKey: boolean }> {
+): Promise<{ programUnits: string[]; programHeader: string | undefined; readsObjinstMembers: boolean; readsLitKey: boolean; readsProcStream: boolean }> {
   const program = tapped("emit.c", () => emitModuleProgram(mod, entryText, headerName, layout));
   await writeFile(cPath, program.units[0]!);
   const readsObjinstMembers = program.units.some((u) => DYN_DISPATCH_REF.test(u)) || (program.header !== null && DYN_DISPATCH_REF.test(program.header));
   const readsLitKey = program.units.some((u) => DYN_LIT_REF.test(u)) || (program.header !== null && DYN_LIT_REF.test(program.header));
+  const readsProcStream = program.units.some((u) => PROC_STREAM_REF.test(u)) || (program.header !== null && PROC_STREAM_REF.test(program.header));
   let programHeader: string | undefined;
   let programUnits: string[] = [];
   if (program.header !== null) {
@@ -1581,7 +1589,7 @@ async function emitCFiles(
     programUnits = program.units.slice(1).map((_, i) => join(outDir, `${stem}.part${i + 1}.c`));
     await Promise.all(programUnits.map((p, i) => writeFile(p, program.units[i + 1]!)));
   }
-  return { programUnits, programHeader, readsObjinstMembers, readsLitKey };
+  return { programUnits, programHeader, readsObjinstMembers, readsLitKey, readsProcStream };
 }
 
 /** Read a verification subject off disk. `roles` maps an artifact's role name
