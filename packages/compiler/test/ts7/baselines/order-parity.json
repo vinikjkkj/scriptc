@@ -27954,6 +27954,12 @@
     "<repo>/tests/corpus/25294-a-record-of-mixed-member-types-keeps-its-unrolled-conversion-beside-a-field-table-loop.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25320-a-dyn-number-checked-and-boxed-again-keeps-its-value-and-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25320-a-dyn-number-checked-and-boxed-again-keeps-its-value-and-node.ts"
+   ],
+   "diags": []
   }
  }
 }
