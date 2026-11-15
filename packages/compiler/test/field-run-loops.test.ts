@@ -9,7 +9,8 @@ import { afterEach, expect, test } from "vitest";
 import { loadProgram } from "../src/frontend/program.js";
 import { lowerToIr } from "../src/frontend/lowering/lowerer.js";
 import { validateModule } from "../src/ir/validate.js";
-import type { IrModule } from "../src/ir/nodes.js";
+import { compressFieldRunLoops } from "../src/ir/field-run-loops.js";
+import type { IrFunction, IrModule, IrRecordShape, IrType, SrcLoc } from "../src/ir/nodes.js";
 
 function source(n: number): string {
   const L = ["type W = {"];
@@ -144,6 +145,39 @@ test("interleaved member kinds loop as ONE mixed run with a kind table, and MIN=
   const off = lowerMixed(30, "0");
   expect(helpers(off).flatMap((f) => nodes(f.body, "runKindAt")).length).toBe(0);
   expect(helpers(off).some((f) => nodes(f.body, "recordGet").length >= 30)).toBe(true);
+});
+
+/** The lowering names each member's temporaries apart (`%vwr.0`, `%vwr.1`, ...). Members whose statements are the same code over such temporaries must still loop. */
+function syntheticCapture(n: number, odd: (i: number) => number): { fn: IrFunction; records: IrRecordShape[] } {
+  const loc = { file: "x.ts", start: 0, end: 0 } as unknown as SrcLoc;
+  const F64 = { kind: "f64" } as IrType;
+  const rec = { kind: "record", shapeId: "r0" } as IrType;
+  const name = (i: number): string => `m${String(i).padStart(3, "0")}`;
+  const records = [{ id: "r0", fields: Array.from({ length: n }, (_, i) => ({ name: name(i), type: F64 })) }] as unknown as IrRecordShape[];
+  const body: unknown[] = [];
+  for (let i = 0; i < n; i++) {
+    const id = `%vwr.${i}`;
+    body.push({
+      kind: "block",
+      body: [
+        { kind: "varDecl", localId: id, init: { kind: "recordGet", obj: { kind: "varRef", localId: "s.0", type: rec, loc }, shapeId: "r0", field: name(i), type: F64, loc }, loc },
+        { kind: "exprStmt", expr: { kind: "bin", op: "+", left: { kind: "varRef", localId: id, type: F64, loc }, right: { kind: "numLit", value: odd(i), type: F64, loc }, type: F64, loc }, loc },
+      ],
+      loc,
+    });
+  }
+  const fn = { name: "%rec.capture.synthetic", locals: Array.from({ length: n }, (_, i) => ({ id: `%vwr.${i}`, name: "%vwr", type: F64, mutable: false })), body } as unknown as IrFunction;
+  return { fn, records };
+}
+
+test("members whose temporaries are numbered apart loop; a member that differs in anything else does not", () => {
+  const same = syntheticCapture(20, () => 1);
+  expect(compressFieldRunLoops([same.fn], same.records, 8)).toBe(1);
+  expect(same.fn.body.length, "one loop replaces the twenty units").toBe(1);
+  // control: the same members with a differing constant are not interchangeable, so there is no single loop over all twenty
+  const diff = syntheticCapture(20, (i) => i);
+  compressFieldRunLoops([diff.fn], diff.records, 8);
+  expect(diff.fn.body.length, "a member with its own constant stays unrolled").toBeGreaterThan(1);
 });
 
 test("the validator rejects a malformed kind table", () => {

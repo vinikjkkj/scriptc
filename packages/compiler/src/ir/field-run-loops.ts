@@ -80,9 +80,24 @@ function rewrite(n: unknown, m: { field: string; shapeId: string; localId: strin
   return out;
 }
 
-/** Canonical text of a rewritten statement: locations dropped, the run placeholder named. */
+/** Canonical text of a rewritten statement: locations dropped, the run placeholder named, and the locals the statements DECLARE renamed by order of declaration.
+ * The lowering gives every member's temporaries a numbered name of their own (`%vwr.0`, `%vwr.1`, ...), so two members' statements that are the same code differ only in
+ * those names; a local declared inside the statements is private to them, so renaming it by position changes no meaning. A name used but not declared there (the
+ * helper's own receiver and result) is never renamed. */
 function canonical(x: unknown, run: string[]): string {
-  return JSON.stringify(x, (k, v) => (k === "loc" ? undefined : v === run ? RUN : v));
+  const declared = new Map<string, string>();
+  const find = (n: unknown): void => {
+    if (n === null || typeof n !== "object") return;
+    if (Array.isArray(n)) {
+      for (const e of n) find(e);
+      return;
+    }
+    const o = n as Obj;
+    if (o["kind"] === "varDecl" && typeof o["localId"] === "string" && !declared.has(o["localId"])) declared.set(o["localId"], `\u0003L${declared.size}`);
+    for (const [k, v] of Object.entries(o)) if (k !== "loc" && k !== "type") find(v);
+  };
+  find(x);
+  return JSON.stringify(x, (k, v) => (k === "loc" ? undefined : v === run ? RUN : k === "localId" && typeof v === "string" ? (declared.get(v) ?? v) : v));
 }
 
 interface Cand {
