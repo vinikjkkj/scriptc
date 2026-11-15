@@ -126,6 +126,31 @@ export function compressFieldRunLoops(functions: IrFunction[], records: readonly
       const f = shape.fields.find((x) => x.name === c.member.field)!;
       return `${c.text}|${typeKey(f.type)}|${ownMaskKeyBit(shape, c.member.field) !== null}`;
     };
+    if (process.env["SCRIPTC_FRL_DEBUG"] !== undefined && units.length >= 50) {
+      // LAB ONLY: why does this helper not loop? counts of units, non-candidates, kinds, and the first differences between neighbouring candidate texts
+      const kindsSeen = new Map<string, number>();
+      let nulls = 0;
+      const multi = units.filter((u) => u.stmts.length !== 1).length;
+      for (const c of cands) {
+        if (c === null) nulls++;
+        else kindsSeen.set(kindOf(c), (kindsSeen.get(kindOf(c)) ?? 0) + 1);
+      }
+      const dbg: string[] = [`FRL ${fn.name} units=${units.length} nullCands=${nulls} multiStmtUnits=${multi} kinds=${kindsSeen.size}`];
+      const cs = cands.filter((c): c is Cand => c !== null);
+      for (let q = 0; q + 1 < cs.length && dbg.length < 5; q++) {
+        const a = cs[q]!.text, b = cs[q + 1]!.text;
+        if (a !== b) {
+          let d = 0;
+          while (d < a.length && a[d] === b[d]) d++;
+          dbg.push(`  diff ${cs[q]!.member.field} vs ${cs[q + 1]!.member.field} at ${d}: A=${a.slice(Math.max(0, d - 60), d + 120)} | B=${b.slice(Math.max(0, d - 60), d + 120)}`);
+        }
+      }
+      if (nulls > 0) {
+        const u = units.find((x) => x.member === null);
+        dbg.push(`  first non-candidate stmt: ${JSON.stringify(u?.stmts[0], (k, v) => (k === "loc" ? undefined : v)).slice(0, 600)}`);
+      }
+      console.error(dbg.join("\n"));
+    }
     const out: IrStmt[] = [];
     let i = 0;
     const idLocals = new Set(fn.locals.map((l) => l.id));
