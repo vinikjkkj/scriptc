@@ -563,6 +563,19 @@ static ScrDyn *scr_dyn_free_lists[6];
 static const uint8_t scr_dyn_fl_idx[SCR_DYN_KIND_COUNT] = {SCR_DYN_ARMS(SCR_DYN_FL_ROW) [SCR_DYN_ARR] = 4, [SCR_DYN_OBJ] = 5};
 static inline ScrDyn **scr_dyn_free_list(ScrDynKind k) { return &scr_dyn_free_lists[scr_dyn_fl_idx[k]]; }
 static size_t scr_dyn_free_count;
+#ifndef SCR_PARKFREE_ARR
+#define SCR_PARKFREE_ARR 256
+#endif
+#ifndef SCR_PARKFREE_OBJ
+#define SCR_PARKFREE_OBJ 64
+#endif
+/* LAB counters: park-time frees. Printed to stderr at exit when SCR_PARKSTAT is set (through the exit hook, since process.exit skips destructors). */
+static unsigned long long scr_ss_pf_arr, scr_ss_pf_obj;
+extern void (*scr_layout_prof_exit)(void);
+static void scr_ss_pf_report(void) {
+  if (getenv("SCR_PARKSTAT") != NULL) fprintf(stderr, "PARKSTAT thresholds arr=%d obj=%d park_frees arr=%llu obj=%llu\n", (int)SCR_PARKFREE_ARR, (int)SCR_PARKFREE_OBJ, scr_ss_pf_arr, scr_ss_pf_obj);
+}
+__attribute__((constructor)) static void scr_ss_pf_reg(void) { if (getenv("SCR_PARKSTAT") != NULL) scr_layout_prof_exit = scr_ss_pf_report; }
 #define SCR_DYN_FREE_MAX 8192
 /* THE POST-COLLECTION TRIM. Park and reuse (and the allocation hit path) are unchanged: a parked ARR/OBJ node keeps its buffer, and a churn loop recycles it for free.
  * But the node is recycled by whatever container comes next, so after a burst (1,000 queued queries each holding a 751-slot params vector, 1,000 per-command 92-slot option
@@ -1082,6 +1095,10 @@ static __attribute__((noinline)) void scr_dyn_release_final(ScrDyn *d) {
      * set back to 1 by scr_dyn_alloc on the way out. Nothing walks a
      * parked node: scr_cyc_on_dead has already dropped its candidate
      * buffer entry and every edge it owned has been released. */
+    /* LAB (parkfree-t256): a parked node keeps its buffer unless it is BIG (more than SCR_PARKFREE_ARR slots / SCR_PARKFREE_OBJ entries), then the buffer is freed here and the node parks empty,
+     * so a parked node can never hand a big buffer to a small container (the mysql bimodality: the 751-slot params vectors and 92-slot option tables). Smaller buffers keep today's reuse. */
+    if (d->kind == SCR_DYN_ARR && d->v.arr.cap > SCR_PARKFREE_ARR) { scr_ss_pf_arr++; free(d->v.arr.items); d->v.arr.items = NULL; d->v.arr.cap = 0; }
+    if (d->kind == SCR_DYN_OBJ && d->v.obj.cap > SCR_PARKFREE_OBJ) { scr_ss_pf_obj++; free(d->v.obj.entries); d->v.obj.entries = NULL; d->v.obj.cap = 0; }
     d->rc = (size_t)(void *)*list; /* buffer and capacity survive intact */
     *list = d;
     scr_dyn_free_count++;
