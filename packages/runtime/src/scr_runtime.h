@@ -1337,6 +1337,9 @@ void scr_throw_errno_error_raw(double errno_val, const char *code, const char *m
  * needs a RUNTIME format the way scr_trap_fmt's abort did, and this is
  * that same formatting landing in a throw instead. See scr_error.c. */
 void scr_throw_error_fmt_code(int kind, const char *code, const char *fmt, ...);
+/* The required-absent read's catchable TypeError (SC9005) for one member of a field-run loop: the text the unrolled read spells per member, from `key` and
+ * the shape id. Borrows both; always throws. See scr_error.c. */
+void scr_throw_absent_key(const ScrStr *key, const char *shape);
 /* The compiler-resolved Node-parity throw (error.nodeThrow): builtin
  * error of `kind`, `code` stamped when non-empty. Borrows both. */
 void scr_throw_node_coded(double kind, const ScrStr *code, const ScrStr *msg);

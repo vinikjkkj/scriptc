@@ -131,6 +131,12 @@ function fieldRunTableC(E: CEmitter, shapeId: string, run: string[], kind: "off"
   return name;
 }
 
+/** Does a recordGetAt over this run carry the required-absent read (the same scoping as recordGet's: a shape a width completion targeted, a member with an own-mask bit,
+ * and a type with no undefined arm)? Uniform over a run: the pass only builds runs of one type and one own-mask situation. */
+export function fieldRunAbsentCheck(shape: IrRecordShape, run: string[], type: IrType, undefinedArmTag: (t: IrType) => number): boolean {
+  return shape.reqabsent === true && ownMaskKeyBit(shape, run[0]!) !== null && undefinedArmTag(type) < 0;
+}
+
 /** Declare, ahead of a `for` statement, the tables its body's field-run nodes read (one declaration per table in the function, at the enclosing scope of the loop). */
 export function predeclareFieldRunTables(E: CEmitter, body: unknown): void {
   const walk = (n: unknown): void => {
@@ -144,6 +150,10 @@ export function predeclareFieldRunTables(E: CEmitter, body: unknown): void {
       fieldRunTableC(E, o.shapeId!, o.run!, "off");
       const shape = E.recordsById.get(o.shapeId!);
       if (o.kind === "recordKeyPresentAt" && shape && ownMaskKeyBit(shape, o.run![0]!) !== null) fieldRunTableC(E, o.shapeId!, o.run!, "bits");
+      if (o.kind === "recordGetAt" && shape && fieldRunAbsentCheck(shape, o.run!, (o as { type: IrType }).type, (t) => E.undefinedArmTag(t))) {
+        fieldRunTableC(E, o.shapeId!, o.run!, "bits");
+        fieldRunTableC(E, "", o.run!, "keys");
+      }
     } else if (o.kind === "runKeyAt") fieldRunTableC(E, "", o.run!, "keys");
     for (const [k, v] of Object.entries(o)) if (k !== "loc" && k !== "type") walk(v);
   };
@@ -2767,6 +2777,18 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // without the required-absent read, so there is no per-member throw to spell.
         const obj = emitBorrowedLocal(E, e.obj, []);
         const ix = E.emitExpr(e.index);
+        const rshape = E.recordsById.get(e.shapeId);
+        if (rshape && fieldRunAbsentCheck(rshape, e.run, e.type, (t) => E.undefinedArmTag(t))) {
+          // recordGet's required-absent read, over the run's tables: the same test, the same text (scr_throw_absent_key)
+          const tb = fieldRunTableC(E, e.shapeId, e.run, "bits");
+          const ks = fieldRunTableC(E, "", e.run, "keys");
+          const m = `${obj.name}->${OWNMASK_MEMBER}`;
+          E.line(
+            `if ((${m}[0] & ${OWNMASK_COMPLETED}) && !(${m}[${tb}[2 * (size_t)${ix.name}]] & ${tb}[2 * (size_t)${ix.name} + 1])) {`
+              + ` scr_throw_absent_key(${ks}[(size_t)${ix.name}], ${cStringLiteral(Buffer.from(e.shapeId, "utf8"))}); }`,
+          );
+          E.emitPendingCheck();
+        }
         const off = fieldRunTableC(E, e.shapeId, e.run, "off");
         const field = `(*(__typeof__(${obj.name}->${mangleField(e.run[0]!)}) *)((char *)${obj.name} + ${off}[(size_t)${ix.name}]))`;
         return E.newTemp(e.type, isRefCounted(e.type) ? retainCallC(e.type, field) : field);
