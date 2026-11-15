@@ -15800,6 +15800,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25311-dyn-promise-reactions-keep-microtask-order-across-settled-pending-adopted-and-finally.ts": {
+   "order": [
+    "<repo>/tests/corpus/25311-dyn-promise-reactions-keep-microtask-order-across-settled-pending-adopted-and-finally.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2532-param-destructuring-options.ts": {
    "order": [
     "<repo>/tests/corpus/2532-param-destructuring-options.ts"
