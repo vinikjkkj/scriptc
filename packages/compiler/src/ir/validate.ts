@@ -4090,6 +4090,46 @@ function validateFunction(
         }
         break;
       }
+      case "recordGetAt":
+      case "recordKeyPresentAt":
+      case "runKeyAt": {
+        // THE FIELD-RUN LOOP's reads (ir/field-run-loops.ts). A run is a non-empty list of DISTINCT field names of one shape; a recordGetAt run's fields all have the node's
+        // type. The index is an f64 and, when it is a constant, an integer inside the run: a loop that could read past the table is malformed, not undefined behaviour.
+        checkExpr(e.index);
+        if (e.index.type.kind !== "f64") err(`${e.kind} index must be f64, got ${e.index.type.kind}`, e.loc);
+        if (e.index.kind === "numLit" && (!Number.isInteger(e.index.value) || e.index.value < 0 || e.index.value >= e.run.length)) {
+          err(`${e.kind} constant index ${e.index.value} is outside the run of ${e.run.length} field(s)`, e.loc);
+        }
+        if (e.run.length === 0) err(`${e.kind} over an empty run`, e.loc);
+        if (new Set(e.run).size !== e.run.length) err(`${e.kind} run names a field twice`, e.loc);
+        if (e.kind === "runKeyAt") {
+          if (e.type.kind !== "string") err(`runKeyAt must be string, got ${e.type.kind}`, e.loc);
+          break;
+        }
+        checkExpr(e.obj);
+        const shape = records.get(e.shapeId);
+        if (!shape) {
+          err(`${e.kind} on undeclared shape "${e.shapeId}"`, e.loc);
+          break;
+        }
+        expectType(e.obj, { kind: "record", shapeId: e.shapeId }, `${e.kind} receiver`);
+        for (const name of e.run) {
+          const f = shape.fields.find((x) => x.name === name);
+          if (!f) err(`shape ${e.shapeId} has no field "${name}" (${e.kind} run)`, e.loc);
+          else if (e.kind === "recordGetAt" && !typeEquals(f.type, e.type)) {
+            err(`${e.kind} run field "${name}" has type ${f.type.kind}, not the node's ${e.type.kind}`, e.loc);
+          }
+        }
+        if (e.kind === "recordKeyPresentAt") {
+          const f0 = shape.fields.find((x) => x.name === e.run[0]);
+          for (const name of e.run) {
+            const f = shape.fields.find((x) => x.name === name);
+            if (f0 && f && !typeEquals(f.type, f0.type)) err(`recordKeyPresentAt run field "${name}" differs in type from "${e.run[0]}"`, e.loc);
+          }
+        }
+        if (e.kind === "recordKeyPresentAt" && e.type.kind !== "bool") err(`recordKeyPresentAt must be bool, got ${e.type.kind}`, e.loc);
+        break;
+      }
       case "recordViewSync": {
         checkExpr(e.obj);
         const shape = records.get(e.shapeId);

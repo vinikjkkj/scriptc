@@ -27960,6 +27960,12 @@
     "<repo>/tests/corpus/25320-a-dyn-number-checked-and-boxed-again-keeps-its-value-and-node.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25340-object-entries-and-values-of-a-wide-record-keep-key-order-holes-and-absent-members-through-a-field-loop.ts": {
+   "order": [
+    "<repo>/tests/corpus/25340-object-entries-and-values-of-a-wide-record-keep-key-order-holes-and-absent-members-through-a-field-loop.ts"
+   ],
+   "diags": []
   }
  }
 }

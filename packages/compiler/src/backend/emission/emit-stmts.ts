@@ -9,7 +9,7 @@ import { mangleField, mangleGlobal, mangleLocal, mangleRawParam } from "../mangl
 import { BOOL, CAUGHT, errorOwnFlagFor, F64, IrExpr, IrStmt, ORD_MEMBER, orderRecordPlanCached, RUNTIME_ERROR_CLASSES, isRefCounted, ownMaskKeyBit } from "../../ir/nodes.js";
 import { boxAccess, cDecl, cStringLiteral, cType, elemAccess, vAdapters } from "./emit-types.js";
 import { KEYLIST_MEMBER, OVERFLOW_MEMBER, OWNMASK_MEMBER, ownPresentCondC } from "./emit-shapes.js";
-import { emitStableReceiver } from "./emit-exprs.js";
+import { emitStableReceiver, predeclareFieldRunTables } from "./emit-exprs.js";
 import { writesLocal } from "../../ir/analysis.js";
 import { coroPrologue, coroDispatch, coroFinish, coroField } from "./emit-coro.js";
 import { genCoroFinish } from "./emit-gen-coro.js";
@@ -790,6 +790,7 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
         E.line(`{${E.srcComment(s.loc)}`);
         E.indent++;
         E.scopes.push([]);
+        predeclareFieldRunTables(E, s.body);
         if (s.init) E.emitStmt(s.init);
         E.line(`for (;;) {`);
         E.indent++;
