@@ -3644,16 +3644,30 @@ const char SCR_FN_SRC_BOUND[] = "<bound>";
  * old path made on every box (scr_fn_name_of, scr_fn_code_of); behind it a hash table of the records themselves, compared whole, makes
  * the record unique. The cache is flushed when the name table is installed again (scr_fn_names_epoch), because the name and the kind code
  * it caches come out of that table. */
-extern unsigned scr_fn_names_epoch(void);
-#define SCR_FD_CACHE 128u
-static struct {
+extern unsigned scr_fn_names_epoch_v;
+/* 4-WAY SET-ASSOCIATIVE, 64 sets. The cache was direct-mapped with 128 slots indexed by a xor of shifted pointers, and measured on the real apps it missed 4-33% of
+ * the function boxes (postgres 32.8% after an unrelated change moved the code): two hot box sites whose indexes collide evict each other on EVERY call, and which pairs
+ * collide is decided by code addresses. Now the set comes from the HIGH bits of a multiplicative hash of the three pointers that tell sites apart, and a set holds four
+ * tuples, so a collision needs five hot sites in one set. A hit still compares the WHOLE tuple, so the answer is exact whatever the hash does. */
+#define SCR_FD_SETS 64u
+#define SCR_FD_WAYS 4u
+typedef struct {
   const void *entry;
   ScrDynThunk thunk;
   const char *sig, *name, *src;
   uint32_t arity;
   unsigned epoch;
   const ScrFnDesc *desc;
-} scr_fd_cache[SCR_FD_CACHE];
+} ScrFdWay;
+static ScrFdWay scr_fd_cache[SCR_FD_SETS][SCR_FD_WAYS];
+static uint8_t scr_fd_victim[SCR_FD_SETS];
+#ifdef SCR_FD_STAT
+/* LAB ONLY (never in a shipped build): -DSCR_FD_STAT prints the box count and the cache misses at exit, to stderr. */
+static unsigned long long scr_fd_stat_calls, scr_fd_stat_miss;
+__attribute__((destructor)) static void scr_fd_stat_report(void) {
+  fprintf(stderr, "SCR_FD_STAT calls=%llu miss=%llu\n", scr_fd_stat_calls, scr_fd_stat_miss);
+}
+#endif
 static const ScrFnDesc **scr_fd_tab; /* open addressing; a power of two */
 static size_t scr_fd_cap, scr_fd_len;
 static ScrFnDesc *scr_fd_chunk;
@@ -3709,13 +3723,30 @@ ScrDyn *scr_dyn_new_func_src(ScrClosure *clo, ScrDynThunk thunk, uint32_t arity,
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_FUNC);
   d->v.fn.clo = clo;
   const void *entry = clo != NULL ? clo->fn : NULL;
-  const unsigned epoch = scr_fn_names_epoch();
-  size_t ci = (size_t)(((uintptr_t)entry >> 4) ^ ((uintptr_t)src >> 3) ^ ((uintptr_t)thunk >> 5) ^ ((uintptr_t)sig >> 6)) & (SCR_FD_CACHE - 1u);
-  if (scr_fd_cache[ci].desc != NULL && scr_fd_cache[ci].entry == entry && scr_fd_cache[ci].thunk == thunk && scr_fd_cache[ci].sig == sig &&
-      scr_fd_cache[ci].name == name && scr_fd_cache[ci].src == src && scr_fd_cache[ci].arity == arity && scr_fd_cache[ci].epoch == epoch) {
-    d->v.fn.desc = scr_fd_cache[ci].desc;
-    return d;
+  const unsigned epoch = scr_fn_names_epoch_v;
+  /* The set. ENTRY and SRC tell box sites apart (the thunk and signature belong to the TYPE and are shared by most sites). A plain sum of the two products
+   * is an arithmetic progression across sites laid out at fixed strides, and for some strides the step cancels in the top bits (measured: all 40 sites of a
+   * program in ONE set), so a xor-fold sits between two multiplications. The top 6 bits of the result: SCR_FD_SETS == 64. */
+  uint64_t hx = (uint64_t)(uintptr_t)entry * 0x9E3779B97F4A7C15ull;
+  hx ^= (uint64_t)(uintptr_t)src * 0xC2B2AE3D27D4EB4Full;
+  hx ^= hx >> 32;
+  hx *= 0x165667B19E3779F9ull;
+  const size_t set = (size_t)(hx >> 58);
+  ScrFdWay *ways = scr_fd_cache[set];
+#ifdef SCR_FD_STAT
+  scr_fd_stat_calls++;
+#endif
+  for (unsigned wi = 0; wi < SCR_FD_WAYS; wi++) {
+    ScrFdWay *w = &ways[wi];
+    if (w->entry == entry && w->src == src && w->thunk == thunk && w->sig == sig && w->name == name && w->arity == arity && w->epoch == epoch &&
+        w->desc != NULL) {
+      d->v.fn.desc = w->desc;
+      return d;
+    }
   }
+#ifdef SCR_FD_STAT
+  scr_fd_stat_miss++;
+#endif
   /* NEVER NULL, and the box refuses to exist rather than carry one. The
    * emitted dynCheck for a function type reaches straight for
    * `strcmp(scr_dyn_fn_sig(d), "<typeKey>")` -- so a NULL stored here is a
@@ -3774,14 +3805,22 @@ ScrDyn *scr_dyn_new_func_src(ScrClosure *clo, ScrDynThunk thunk, uint32_t arity,
    * the runtime builds itself (a bound function) passes its code in `arity`. */
   want.arity = (arity & 0xffffffu) | ((uint32_t)(clo != NULL ? scr_fn_code_of(clo->fn) : 0u) << SCR_FNK_SHIFT) | (arity & 0x3f000000u);
   const ScrFnDesc *desc = scr_fd_intern(&want);
-  scr_fd_cache[ci].entry = entry;
-  scr_fd_cache[ci].thunk = thunk;
-  scr_fd_cache[ci].sig = sig;
-  scr_fd_cache[ci].name = name;
-  scr_fd_cache[ci].src = src;
-  scr_fd_cache[ci].arity = arity;
-  scr_fd_cache[ci].epoch = epoch;
-  scr_fd_cache[ci].desc = desc;
+  {
+    /* an empty way first (a stale-epoch way counts as free), else the set's round-robin victim */
+    unsigned slot = SCR_FD_WAYS;
+    for (unsigned wi = 0; wi < SCR_FD_WAYS; wi++)
+      if (ways[wi].desc == NULL || ways[wi].epoch != epoch) { slot = wi; break; }
+    if (slot == SCR_FD_WAYS) slot = scr_fd_victim[set]++ & (SCR_FD_WAYS - 1u);
+    ScrFdWay *w = &ways[slot];
+    w->entry = entry;
+    w->thunk = thunk;
+    w->sig = sig;
+    w->name = name;
+    w->src = src;
+    w->arity = arity;
+    w->epoch = epoch;
+    w->desc = desc;
+  }
   d->v.fn.desc = desc;
   return d;
 }
