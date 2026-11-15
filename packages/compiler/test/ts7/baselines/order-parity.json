@@ -15848,6 +15848,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25362-a-closure-with-more-than-254-captures-keeps-its-count-in-the-ext-and-works-boxed.ts": {
+   "order": [
+    "<repo>/tests/corpus/25362-a-closure-with-more-than-254-captures-keeps-its-count-in-the-ext-and-works-boxed.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2537-destructuring-assign-member-targets.ts": {
    "order": [
     "<repo>/tests/corpus/2537-destructuring-assign-member-targets.ts"
