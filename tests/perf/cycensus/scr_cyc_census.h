@@ -780,7 +780,11 @@ SCR_CYCEN_FN void scr_cycen_x_aggregate(void) {
   }
 }
 
-SCR_CYCEN_FN void scr_cycen_seam(void) {
+SCR_CYCEN_FN void scr_cycen_seam_x(int force);
+SCR_CYCEN_FN void scr_cycen_seam(void) { scr_cycen_seam_x(1); }
+/* LAB: the same probe at the START of a collector pass, where send_group's live set is at its largest (the idle seam only exists between turns), without the forced collection */
+SCR_CYCEN_FN void scr_cycen_seam_pass(void) { if (getenv("SCR_CYCEN_PROBE_PASS") != NULL) scr_cycen_seam_x(0); }
+SCR_CYCEN_FN void scr_cycen_seam_x(int force) {
   if (scr_cycen_pr_busy || scr_cycen_pr_n >= SCR_CYCEN_PROBE_MAX) return;
   if (getenv("SCR_CYCEN_PROBE") == NULL) return;
   long long live = scr_cycen_live_phys;
@@ -801,7 +805,7 @@ SCR_CYCEN_FN void scr_cycen_seam(void) {
   scr_cycen_ar_held_cur = scr_cycen_arena_walk(scr_cycen_ar_cur, SCR_CYCEN_NCLASS);
   if (will_be_best) scr_cycen_x_aggregate();
   if (will_be_best) { scr_cycen_holders(); for (unsigned q = 0; q < SCR_CYCEN_HOLDSLOTS; q++) { scr_cycen_hold_best[q] = scr_cycen_hold[q]; scr_cycen_holdt_best[q] = scr_cycen_holdt[q]; } for (unsigned q = 0; q < scr_cycen_nsn; q++) scr_cycen_sn_best[q] = scr_cycen_sn[q]; scr_cycen_nsn_best = scr_cycen_nsn; }
-  scr_collect_cycles();
+  if (force) scr_collect_cycles();
   long long aN = scr_cycen_live_n, aP = scr_cycen_live_phys;
   long long k = scr_cycen_pr_n++;
   scr_cycen_pr_sum[k][0] = scr_cycen_alloc_total;

@@ -2394,6 +2394,9 @@ static void scr_collect_white(void *obj) {
 
 void scr_collect_cycles(void) {
   if (scr_collecting || scr_nroots == 0) return;
+#ifdef SCR_CYCEN_ON
+  scr_cycen_seam_pass(); /* census probe at the START of a pass (the live set at its largest), no forced collection */
+#endif
   scr_collecting = true;
   SCR_CS_PASS_BEGIN();
 
