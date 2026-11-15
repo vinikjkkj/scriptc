@@ -42,6 +42,9 @@
 #include "scr_runtime.h"
 
 #include <stdio.h>
+#ifdef SCR_TRIG_LOG
+#include <unistd.h>
+#endif
 #include <stdlib.h>
 #include <string.h>
 
@@ -2338,8 +2341,36 @@ static void scr_collect_white(void *obj) {
   }
 }
 
+#ifdef SCR_TRIG_LOG
+/* lab only: the state at every pass (live count as the pacing sees it, buffered roots, pass number) written once at exit */
+typedef struct { size_t live, roots, base; } ScrTrigRec;
+static ScrTrigRec scr_trig[8192];
+static unsigned scr_trig_n, scr_trig_total;
+static void scr_trig_dump(void) {
+  const char *pre = getenv("SCR_TRIG_OUT");
+  if (pre == NULL || *pre == 0) return;
+  char exe[512] = {0}, path[1024];
+  ssize_t k = readlink("/proc/self/exe", exe, sizeof exe - 1);
+  for (ssize_t i = 0; i < k; i++) if (exe[i] == '/') exe[i] = '_';
+  snprintf(path, sizeof path, "%s.%s.%d.txt", pre, exe, (int)getpid());
+  FILE *f = fopen(path, "w");
+  if (!f) return;
+  fprintf(f, "TRIGTOTAL %u recorded %u\n", scr_trig_total, scr_trig_n);
+  for (unsigned i = 0; i < scr_trig_n; i++) fprintf(f, "TRIG %u live=%zu roots=%zu base=%zu\n", i, scr_trig[i].live, scr_trig[i].roots, scr_trig[i].base);
+  fclose(f);
+}
+#endif
+
 void scr_collect_cycles(void) {
   if (scr_collecting || scr_nroots == 0) return;
+#ifdef SCR_TRIG_LOG
+  {
+    static int armed;
+    if (!armed) { armed = 1; atexit(scr_trig_dump); }
+    if (scr_trig_n < 8192) { scr_trig[scr_trig_n].live = scr_cyc_live; scr_trig[scr_trig_n].roots = scr_nroots; scr_trig[scr_trig_n].base = scr_cyc_threshold(); scr_trig_n++; }
+    scr_trig_total++;
+  }
+#endif
   scr_collecting = true;
   SCR_CS_PASS_BEGIN();
 
