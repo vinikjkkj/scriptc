@@ -398,10 +398,18 @@ static inline size_t scr_cx_home(const ScrClosure *k) {
   x ^= x >> 29;
   return (size_t)x & (scr_cx_cap - 1);
 }
+/* One-entry memo of the last answer: the same few closures (class constructors with own properties) are asked again and again. Cleared by erase. */
+static const ScrClosure *scr_cx_memo_k = NULL;
+static ScrClosureExt *scr_cx_memo_v = NULL;
 ScrClosureExt *scr_closure_ext_lookup(const ScrClosure *c) {
+  if (c == scr_cx_memo_k) return scr_cx_memo_v;
   if (scr_cx_cap == 0) return NULL;
   for (size_t i = scr_cx_home(c);; i = (i + 1) & (scr_cx_cap - 1)) {
-    if (scr_cx_tab[i].k == c) return scr_cx_tab[i].v;
+    if (scr_cx_tab[i].k == c) {
+      scr_cx_memo_k = c;
+      scr_cx_memo_v = scr_cx_tab[i].v;
+      return scr_cx_tab[i].v;
+    }
     if (scr_cx_tab[i].k == NULL) return NULL;
   }
 }
@@ -428,6 +436,7 @@ static void scr_cx_put(const ScrClosure *c, ScrClosureExt *x) {
 }
 static void scr_cx_erase(const ScrClosure *c) {
   if (scr_cx_cap == 0) return;
+  if (scr_cx_memo_k == c) scr_cx_memo_k = NULL;
   size_t i = scr_cx_home(c);
   while (scr_cx_tab[i].k != c) {
     if (scr_cx_tab[i].k == NULL) return;
