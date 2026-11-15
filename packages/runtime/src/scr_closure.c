@@ -257,6 +257,30 @@ ScrStr *scr_box_str_unshare(ScrBox *b, ScrStr *acc) {
 
 /* ── closures ─────────────────────────────────────────────────────────── */
 
+
+#ifdef SCR_CLOSTAT
+/* LAB ONLY (never lands): live closures by capture count, the peak, and the side-table size, printed to stderr. */
+static long scr_cs_live = 0, scr_cs_peak = 0, scr_cs_hist[10], scr_cs_peak_hist[10];
+static unsigned long scr_cs_news = 0;
+static int scr_cs_bucket(size_t n) { return n < 8 ? (int)n : n < 16 ? 8 : 9; }
+static void scr_cs_report(const char *why);
+static void scr_cs_atexit(void) { scr_cs_report("exit"); }
+static void scr_cs_new(size_t ncaps) {
+  static int armed = 0;
+  if (!armed) { armed = 1; atexit(scr_cs_atexit); }
+  scr_cs_live++;
+  scr_cs_hist[scr_cs_bucket(ncaps)]++;
+  if (scr_cs_live > scr_cs_peak) { scr_cs_peak = scr_cs_live; for (int i = 0; i < 10; i++) scr_cs_peak_hist[i] = scr_cs_hist[i]; }
+  if ((++scr_cs_news & 0xFFFFFu) == 0) scr_cs_report("tick");
+}
+static void scr_cs_free(size_t ncaps) { scr_cs_live--; scr_cs_hist[scr_cs_bucket(ncaps)]--; }
+#endif
+#ifdef SCR_CLOSTAT
+static void scr_cs_report(const char *why) {
+  fprintf(stderr, "CLOSTAT %s live=%ld peak=%ld peak_hist(0..7,8-15,16+)=[%ld %ld %ld %ld %ld %ld %ld %ld %ld %ld] cx_len=0 cx_cap=0 cx_peak=0 slot_bytes=0\n", why, scr_cs_live, scr_cs_peak,
+          scr_cs_peak_hist[0], scr_cs_peak_hist[1], scr_cs_peak_hist[2], scr_cs_peak_hist[3], scr_cs_peak_hist[4], scr_cs_peak_hist[5], scr_cs_peak_hist[6], scr_cs_peak_hist[7], scr_cs_peak_hist[8], scr_cs_peak_hist[9]);
+}
+#endif
 static void scr_closure_trace(void *o, ScrTraceVisit visit, void *ctx) {
   ScrClosure *c = (ScrClosure *)o;
   const size_t meta = c->meta;
@@ -537,29 +561,6 @@ void scr_rc_audit_sites_report(void) {
   }
 }
 #endif /* SCR_RC_AUDIT */
-
-#ifdef SCR_CLOSTAT
-/* LAB ONLY (never lands): live closures by capture count, the peak, and the side-table size, printed to stderr. */
-static long scr_cs_live = 0, scr_cs_peak = 0, scr_cs_hist[10], scr_cs_peak_hist[10];
-static unsigned long scr_cs_news = 0;
-static int scr_cs_bucket(size_t n) { return n < 8 ? (int)n : n < 16 ? 8 : 9; }
-static void scr_cs_report(const char *why);
-static void scr_cs_atexit(void) { scr_cs_report("exit"); }
-static void scr_cs_new(size_t ncaps) {
-  static int armed = 0;
-  if (!armed) { armed = 1; atexit(scr_cs_atexit); }
-  scr_cs_live++;
-  scr_cs_hist[scr_cs_bucket(ncaps)]++;
-  if (scr_cs_live > scr_cs_peak) { scr_cs_peak = scr_cs_live; for (int i = 0; i < 10; i++) scr_cs_peak_hist[i] = scr_cs_hist[i]; }
-  if ((++scr_cs_news & 0xFFFFFu) == 0) scr_cs_report("tick");
-}
-static void scr_cs_free(size_t ncaps) { scr_cs_live--; scr_cs_hist[scr_cs_bucket(ncaps)]--; }
-#ifdef SCR_CLOSTAT
-static void scr_cs_report(const char *why) {
-  fprintf(stderr, "CLOSTAT %s live=%ld peak=%ld peak_hist(0..7,8-15,16+)=[%ld %ld %ld %ld %ld %ld %ld %ld %ld %ld] cx_len=0 cx_cap=0 cx_peak=0 slot_bytes=0\n", why, scr_cs_live, scr_cs_peak,
-          scr_cs_peak_hist[0], scr_cs_peak_hist[1], scr_cs_peak_hist[2], scr_cs_peak_hist[3], scr_cs_peak_hist[4], scr_cs_peak_hist[5], scr_cs_peak_hist[6], scr_cs_peak_hist[7], scr_cs_peak_hist[8], scr_cs_peak_hist[9]);
-}
-#endif
 ScrClosure *scr_closure_new(void *fn, size_t ncaps) {
   ScrClosure *c = scr_cyc_alloc(sizeof(ScrClosure) + ncaps * sizeof(ScrBox *),
                                  &scr_closure_trace, &scr_closure_gcfree);
