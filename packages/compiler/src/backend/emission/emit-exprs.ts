@@ -103,7 +103,7 @@ const EVT_C_SYMS: Record<string, string> = {
 
 /** The static constant tables of a field run (ir/field-run-loops.ts). They are declared by `predeclareFieldRunTables` at the loop that owns the run, BEFORE the loop, so
  * every reader in the loop body, in whatever nested block, sees one declaration. `kind` is "off" (member offsets), "bits" (own-mask byte, bit pairs) or "keys". */
-function fieldRunTableC(E: CEmitter, shapeId: string, run: string[], kind: "off" | "bits" | "keys"): string {
+function fieldRunTableC(E: CEmitter, shapeId: string, run: string[], kind: "off" | "bits" | "keys" | "kinds"): string {
   const key = `${E.currentFn?.name ?? ""}|${kind}|${shapeId}|${run.join("\u0001")}`;
   const have = E.fieldRunTables.get(key);
   if (have !== undefined) return have;
@@ -122,6 +122,10 @@ function fieldRunTableC(E: CEmitter, shapeId: string, run: string[], kind: "off"
       if (b === null) throw new Error(`emitter bug: a field run mixes members with and without an own-mask bit (${shapeId})`);
       return [String(b.byte), String(b.bit)];
     });
+  } else if (kind === "kinds") {
+    // the mixed run's kind table: `run` carries the kind numbers as text
+    ty = "uint8_t";
+    elems = run;
   } else {
     ty = "ScrStr *const";
     elems = run.map((n) => `(ScrStr *)&${E.internLiteral(n)}`);
@@ -155,6 +159,7 @@ export function predeclareFieldRunTables(E: CEmitter, body: unknown): void {
         fieldRunTableC(E, "", o.run!, "keys");
       }
     } else if (o.kind === "runKeyAt") fieldRunTableC(E, "", o.run!, "keys");
+    else if (o.kind === "runKindAt") fieldRunTableC(E, "", (o as unknown as { kinds: number[] }).kinds.map(String), "kinds");
     for (const [k, v] of Object.entries(o)) if (k !== "loc" && k !== "type") walk(v);
   };
   walk(body);
@@ -2820,6 +2825,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         const keys = fieldRunTableC(E, "", e.run, "keys");
         // an interned literal is an immortal static, like strLit's
         return E.newImmortalTemp(e.type, `${keys}[(size_t)${ix.name}]`);
+      }
+      case "runKindAt": {
+        const ix = E.emitExpr(e.index);
+        const tb = fieldRunTableC(E, "", e.kinds.map(String), "kinds");
+        return E.newTemp(e.type, `(double)${tb}[(size_t)${ix.name}]`);
       }
       case "recordViewSync": {
         const obj = emitStableReceiver(E, e.obj, []);

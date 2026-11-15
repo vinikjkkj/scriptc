@@ -27990,6 +27990,18 @@
     "<repo>/tests/corpus/25312-define-property-rows-of-a-class-instance-switch-between-plain-accessor-and-hidden.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25342-object-entries-and-values-of-a-record-with-three-interleaved-member-kinds-keep-key-order-and-every-value.ts": {
+   "order": [
+    "<repo>/tests/corpus/25342-object-entries-and-values-of-a-record-with-three-interleaved-member-kinds-keep-key-order-and-every-value.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25343-object-entries-and-values-of-optional-members-of-three-interleaved-kinds-skip-the-absent-ones-in-key-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/25343-object-entries-and-values-of-optional-members-of-three-interleaved-kinds-skip-the-absent-ones-in-key-order.ts"
+   ],
+   "diags": []
   }
  }
 }

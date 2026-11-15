@@ -4090,6 +4090,18 @@ function validateFunction(
         }
         break;
       }
+      case "runKindAt": {
+        // THE MIXED RUN's kind table: an f64 index into a non-empty table of small integers (ir/field-run-loops.ts).
+        checkExpr(e.index);
+        if (e.index.type.kind !== "f64") err(`runKindAt index must be f64, got ${e.index.type.kind}`, e.loc);
+        if (e.index.kind === "numLit" && (!Number.isInteger(e.index.value) || e.index.value < 0 || e.index.value >= e.kinds.length)) {
+          err(`runKindAt constant index ${e.index.value} is outside the table of ${e.kinds.length} kind(s)`, e.loc);
+        }
+        if (e.kinds.length === 0) err(`runKindAt over an empty table`, e.loc);
+        if (e.kinds.some((k) => !Number.isInteger(k) || k < 0 || k > 255)) err(`runKindAt table has an entry outside [0, 256)`, e.loc);
+        if (e.type.kind !== "f64") err(`runKindAt must be f64, got ${e.type.kind}`, e.loc);
+        break;
+      }
       case "recordGetAt":
       case "recordKeyPresentAt":
       case "runKeyAt": {

@@ -8168,6 +8168,10 @@ export type IrExpr =
   | { kind: "recordGetAt"; obj: IrExpr; shapeId: string; run: string[]; index: IrExpr; type: IrType; loc: SrcLoc }
   | { kind: "recordKeyPresentAt"; obj: IrExpr; shapeId: string; run: string[]; index: IrExpr; orSlot?: true; type: IrType; loc: SrcLoc }
   | { kind: "runKeyAt"; run: string[]; index: IrExpr; type: IrType; loc: SrcLoc }
+  /** The MIXED run's kind table (ir/field-run-loops.ts): `kinds[index]` as an f64, the small integer naming which of the loop's bodies handles member `index` of the whole
+   * member list. Each kind's body reads its own members through a run of that kind and a running counter. `index` is an f64 integer in [0, kinds.length); every entry is
+   * an integer in [0, 256). The validator rejects a constant index outside the table, a non-f64 index, an empty table and an entry out of range. */
+  | { kind: "runKindAt"; kinds: number[]; index: IrExpr; type: IrType; loc: SrcLoc }
   /** `in`'s question about a REQUIRED field of a shape some literal
    * COMPLETED: was this slot ever written on THIS instance?
    *
