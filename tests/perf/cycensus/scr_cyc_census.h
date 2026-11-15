@@ -644,7 +644,7 @@ SCR_CYCEN_FN void scr_cycen_holders(void) {
     ScrCyCenPtr *e = &scr_cycen_ptbl[i];
     if (e->p == NULL || e->row >= SCR_CYCEN_SLOTS || scr_cycen_tbl[e->row].key != dk) continue;
     unsigned eks = 0; char kb[24]; unsigned long long rc = 0, e0 = 0;
-    if (scr_cycen_dyn_peek3(e->p, &eks, kb, &rc, &e0) != 4) continue;
+    if ((scr_cycen_dyn_peek3(e->p, &eks, kb, &rc, &e0) != 4 && (scr_cycen_dyn_peek3(e->p, &eks, kb, &rc, &e0) != 2))) continue;
     unsigned j = scr_cycen_hs_find((unsigned long long)(size_t)((const char *)e->p + scr_cycen_hdr_bytes), 1);
     if (j != (unsigned)-1) { scr_cycen_hs_site[j] = e->site; scr_cycen_hs_rc[j] = rc == (unsigned long long)-1 ? 0 : rc; }
   }
