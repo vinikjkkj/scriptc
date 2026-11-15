@@ -629,6 +629,13 @@ __attribute__((constructor)) static void scr_dyn_idle_trim_reg(void) { scr_cyc_i
  * whereas a traced edge the teardown also releases is a double free. */
 static void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx);
 static void scr_dyn_gcfree(void *o);
+/* The ghost weight (scr_runtime.h SCR_PROPS_GHOST) of a property table that is being torn down: one out-of-line copy for the release and the
+ * collector's teardown, so neither carries the loop. */
+static __attribute__((noinline, cold)) void scr_props_ghost_drop(const ScrDyn *d) {
+  size_t ghosts = 0;
+  for (size_t i = 0; i < d->v.obj.len; i++) ghosts += d->v.obj.entries[i].plain_prop;
+  SCR_PROPS_GHOST_SUB(ghosts);
+}
 
 #ifdef SCR_DYNCEN_ON
 /* tests/perf/dyncensus. The -include'd half cannot see ScrDyn (it is read
@@ -888,11 +895,7 @@ static void scr_dyn_gcfree(void *o) {
      * this image and was never allocated, so there is nothing to hand
      * back — and handing one to the pool would put a .rdata address on a
      * freelist that the next take() returns as writable memory. */
-    if (__builtin_expect(SCR_DYN_IS_PROPS_TABLE(d), 0)) {
-      size_t ghosts = 0;
-      for (size_t i = 0; i < d->v.obj.len; i++) ghosts += d->v.obj.entries[i].plain_prop;
-      SCR_PROPS_GHOST_SUB(ghosts);
-    }
+    if (__builtin_expect(SCR_DYN_IS_PROPS_TABLE(d), 0)) scr_props_ghost_drop(d);
     for (size_t i = 0; i < d->v.obj.len; i++)
       if (!d->v.obj.entries[i].key_static)
         scr_json_key_free(d->v.obj.entries[i].key, d->v.obj.entries[i].key_len);
@@ -1006,11 +1009,7 @@ static __attribute__((noinline)) void scr_dyn_release_final(ScrDyn *d) {
     break;
   case SCR_DYN_OBJ:
     if (d->static_copy) scr_dyn_origin_forget(d);
-    if (__builtin_expect(SCR_DYN_IS_PROPS_TABLE(d), 0)) { /* a property table: each plain entry stops counting the row it never had (SCR_PROPS_GHOST) */
-      size_t ghosts = 0;
-      for (size_t i = 0; i < d->v.obj.len; i++) ghosts += d->v.obj.entries[i].plain_prop;
-      SCR_PROPS_GHOST_SUB(ghosts);
-    }
+    if (__builtin_expect(SCR_DYN_IS_PROPS_TABLE(d), 0)) scr_props_ghost_drop(d); /* a property table: its plain entries stop counting the rows they never had */
     for (size_t i = 0; i < d->v.obj.len; i++) {
       if (!d->v.obj.entries[i].key_static)
         scr_json_key_free(d->v.obj.entries[i].key, d->v.obj.entries[i].key_len);
@@ -9371,7 +9370,7 @@ static void scr_dyn_obj_unset(ScrDyn *obj, const char *key, size_t key_len) {
        * the value's release can trigger a collection */
       ScrDyn *old = e->value;
       bool old_owned = !e->value_borrowed;
-      if (SCR_DYN_IS_PROPS_TABLE(obj)) SCR_PROPS_GHOST_SUB(e->plain_prop);
+      if (__builtin_expect(SCR_DYN_IS_PROPS_TABLE(obj), 0)) SCR_PROPS_GHOST_SUB(e->plain_prop);
       if (!e->key_static) scr_json_key_free(e->key, e->key_len);
       memmove(&obj->v.obj.entries[i], &obj->v.obj.entries[i + 1],
               (obj->v.obj.len - i - 1) * sizeof *obj->v.obj.entries);
