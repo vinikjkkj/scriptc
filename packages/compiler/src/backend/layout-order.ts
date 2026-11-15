@@ -152,3 +152,41 @@ export function reorderLlvmText(ll: string, order: LayoutOrder): string {
   for (const b of sorted) for (const l of b.lines) out.push(l);
   return out.join("\n");
 }
+
+/* ------------------------------------------------------------ staleness */
+
+/** Names in an order file that the PROGRAM emitted (`sc_*`; the runtime's `scr_*` functions live in other objects and are not in the
+ * program TU), and how many of them the program being built still defines. A file recorded from an older version of the program lists
+ * names the program no longer has: those are ignored by the ordering (nothing breaks), but a file that has mostly gone stale orders
+ * little, so the build says so once. */
+export function layoutMatchStats(order: LayoutOrder, defined: ReadonlySet<string>): { listed: number; found: number } {
+  let listed = 0;
+  let found = 0;
+  for (const name of order.rank.keys()) {
+    if (!name.startsWith("sc_") || name.startsWith("scr_")) continue;
+    listed++;
+    if (defined.has(name)) found++;
+  }
+  return { listed, found };
+}
+
+/** The stale-file warning, or null: at least 30 program functions listed and fewer than 60% of them still defined. */
+export const LAYOUT_STALE_MIN_NAMES = 30;
+export const LAYOUT_STALE_MIN_RATE = 0.6;
+export function layoutStaleWarning(orderPath: string, stats: { listed: number; found: number }): string | null {
+  if (stats.listed < LAYOUT_STALE_MIN_NAMES) return null;
+  if (stats.found / stats.listed >= LAYOUT_STALE_MIN_RATE) return null;
+  const pct = Math.round((100 * stats.found) / stats.listed);
+  return `scriptc: warning: the layout order ${orderPath} lists ${stats.listed} functions of this program and only ${stats.found} (${pct}%) still exist; it was recorded from an older version. The build is correct but little is ordered: regenerate it with \`scriptc build --pgo\`.`;
+}
+
+/** The names `define`d in an LLVM IR text. */
+export function llvmDefinedNames(ll: string): string[] {
+  const out: string[] = [];
+  for (const l of ll.split("\n")) {
+    if (!l.startsWith("define ")) continue;
+    const m = LL_DEFINE.exec(l);
+    if (m !== null) out.push(m[1]!.startsWith('"') ? m[1]!.slice(1, -1) : m[1]!);
+  }
+  return out;
+}
