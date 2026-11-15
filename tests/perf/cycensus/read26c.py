@@ -63,3 +63,28 @@ if agg:
     print("DYN NODES by shape (kind, entries/len), top 15")
     for (k, r), (n, b) in sorted(sh.items(), key=lambda kv: -kv[1][1])[:15]:
         print(f"  {n:8d} {b:9d} B  {KN[k] if k < len(KN) else k:8s} len {lab(r)}")
+
+# ---- STR dyn nodes per emitting site: literals (immortal), heap strings, sharing, distinct contents
+strs = []
+tot = [l for l in lines if l.startswith('CYCEN-STRTOTAL')]
+for l in lines:
+    if l.startswith('CYCEN-STR '):
+        m = re.match(r'CYCEN-STR n=(\d+) nimm=(\d+) sumlen=(\d+) sumphys=(\d+) nshared=(\d+) ndistinct=(\d+)((?: [0-9a-f]+)+)', l)
+        n, nimm, sl, sp, nsh, nd = (int(m.group(i)) for i in range(1, 7)); fr = [int(a, 16) for a in m.group(7).split()]
+        name = None; rt = []
+        for a in fr:
+            sy = sym(a)
+            if sy is None: continue
+            if sy.startswith('scr_'): rt.append(sy); continue
+            name = sy; break
+        strs.append((name or ('(runtime only: ' + (rt[0] if rt else '?') + ')'), n, nimm, sl, sp, nsh, nd))
+if strs:
+    agg2 = {}
+    for name, n, nimm, sl, sp, nsh, nd in strs:
+        d = agg2.setdefault(name, [0, 0, 0, 0, 0, 0]); 
+        for i, v in enumerate((n, nimm, sl, sp, nsh, nd)): d[i] += v
+    N = sum(v[0] for v in agg2.values())
+    print(f"\nSTR DYN NODES by emitting function (total {N} nodes = {N*40/1048576:.2f} MiB of 40-B nodes; {tot[0] if tot else ''})")
+    print("  nodes   literal  heapstr  strBytes(phys)  shared  distinct   site")
+    for name, (n, nimm, sl, sp, nsh, nd) in sorted(agg2.items(), key=lambda kv: -kv[1][0])[:14]:
+        print(f"  {n:6d}  {nimm:7d}  {n-nimm:7d}  {sp:13d}  {nsh:6d}  {nd:8d}   {name[:70]}")
