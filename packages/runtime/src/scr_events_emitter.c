@@ -412,8 +412,7 @@ static void scr_ee_warn_maybe(ScrEmitter *em, ScrEeBucket *b) {
  * the 16-byte header and the 16-byte arm, which is less than sizeof(ScrDyn) (the widest arm is 24), so a whole-struct assignment would read past the node.
  * Copy only what the node owns; the rest of the entry's slot stays zero. */
 static inline void scr_ee_copy_fnbox(ScrDyn *dst, const ScrDyn *src) {
-  memset(dst, 0, sizeof *dst);
-  memcpy(dst, src, offsetof(ScrDyn, v) + sizeof src->v.fn);
+  *dst = *src; /* LAB POSITIVE CONTROL ONLY: the whole-struct copy of the 40-byte ScrDyn out of a 32-byte function box (reintroduces the heap-buffer-overflow the fix removed) */
 }
 
 static ScrEmitter *scr_ee_add3(ScrEmitter *em, ScrStr *name, ScrClosure *cb /*moves*/,
