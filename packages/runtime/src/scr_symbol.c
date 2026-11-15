@@ -603,7 +603,7 @@ static ScrDynObjExt *scr_dsym_host(ScrDyn *recv, bool create, bool *none) {
     return &b->own->ext;
   }
   if (recv->kind == SCR_DYN_FUNC) {
-    if (!create && scr_closure_props(recv->v.fn.clo) == NULL) {
+    if (!create && scr_closure_props(scr_dyn_fn_clo(recv)) == NULL) {
       *none = true;
       return NULL;
     }
