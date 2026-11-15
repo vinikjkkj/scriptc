@@ -341,7 +341,7 @@ export const STATIC_CLASS_MAX =
  * is +165,208 (543,752 static, 708,960 regex, local clang 19 at 91c553a3).
  * The distance to the engine class (~+620 KB over static) is untouched. */
 export const REGEX_CLASS_MAX =
-  platform === "linux" ? 229_376 : platform === "win32" ? 219_648 : 526_848;
+  platform === "linux" ? 229_376 : platform === "win32" ? 229_376 : 526_848;
 
 /* ── the ARMED half of the guard ───────────────────────────────────────
  *
@@ -1867,7 +1867,10 @@ export const STATIC_CLASS_RECORDED = platform === "win32" ? 116_736 : null;
  * file-size granule, which is why the file size moved one page while no single commit moved it past one. The anchor was already
  * 3,584 below the cc21b109b tree before the typed-array work (212,992 against 216,576 measured here), so the 212,992 figure was
  * recorded on a different zig build. The 217,088 figure is the one this branch's CI reports for the regex program. */
-export const REGEX_CLASS_RECORDED = platform === "win32" ? 217_088 : null;
+/* 2026-11-15 (cloufunc1, a closure is its own dyn function value): RE-RECORDED 217_088 -> 220_672 (+3_584). SOURCE: CI Windows 3/20 of run 43712282700 on ccbdee537,
+ * "expected 220672 to be less than 219648" (the ceiling check, reached once the text figure above had been re-recorded; the recorded check passes inside its page).
+ * The always-linked closure core grew the regex program's .text by 1_648 and its sections by the rest; the ceiling below moves one page-multiple with it. */
+export const REGEX_CLASS_RECORDED = platform === "win32" ? 220_672 : null;
 
 /** The complaint a recorded-figure check makes, or null when the size is
  * within one page of what was recorded. A string rather than a thrown
