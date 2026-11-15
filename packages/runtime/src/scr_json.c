@@ -1081,6 +1081,10 @@ static __attribute__((noinline)) void scr_dyn_release_final(ScrDyn *d) {
      * set back to 1 by scr_dyn_alloc on the way out. Nothing walks a
      * parked node: scr_cyc_on_dead has already dropped its candidate
      * buffer entry and every edge it owned has been released. */
+    /* LAB (parkfree-app): a parked node keeps its buffer only while it is small (64 slots / 16 entries); a bigger one is freed here, at park, so a parked node can never hand a big buffer to
+     * a small container. The plain-free design (parkfree1): +4.6% Ir on pure-churn micros; this branch measures what it does to the app peak. Never lands. */
+    if (d->kind == SCR_DYN_ARR && d->v.arr.cap > 64) { free(d->v.arr.items); d->v.arr.items = NULL; d->v.arr.cap = 0; }
+    if (d->kind == SCR_DYN_OBJ && d->v.obj.cap > 16) { free(d->v.obj.entries); d->v.obj.entries = NULL; d->v.obj.cap = 0; }
     d->rc = (size_t)(void *)*list; /* buffer and capacity survive intact */
     *list = d;
     scr_dyn_free_count++;
