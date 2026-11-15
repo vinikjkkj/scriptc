@@ -5034,7 +5034,7 @@ typedef struct ScrDynClass {
   long long props_off;
   /* The class-table index + 1 of a class whose instances carry the DYN HEAD (an instance of it IS its own SCR_DYN_OBJINST value: see ScrObjHead
    * below), or 0 for a class that boxes through a stand-alone node. APPENDED, like every trailing member; emitted by both lanes. */
-  unsigned short head;
+  unsigned short head; /* bits 0-14: class-table index + 1 (0: no head); bit 15: an instance of the class can be a member of a garbage cycle */
 #ifdef SCR_INSP_COLORS
   /* util.inspect showHidden over a class VALUE: the nearest runtime-provided class in the chain (JavaScript name: "Error", "TypeError",
    * "EventEmitter", "Readable", ...), NULL when the chain holds none; `rt_layer` is the number of user classes between this class and it
