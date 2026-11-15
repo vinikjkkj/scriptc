@@ -1944,6 +1944,27 @@ static ScrDyn *dyn_member_field_get(const ScrDynClassMember *cm, void *obj) {
   return v;
 }
 
+#ifdef SCR_FIELDREAD_COUNT
+/* LAB (never in a shipped build): how often each (class, member) FIELD is read through a dyn keyed read of a boxed class instance. */
+typedef struct { const char *cls, *mem; unsigned long long n; } ScrFrRow;
+static ScrFrRow scr_fr_rows[4096];
+static unsigned scr_fr_n;
+static void scr_fr_dump(void) {
+  const char *path = getenv("SCR_FIELDREAD_OUT");
+  FILE *f = fopen(path != NULL && *path ? path : "scr-fieldread.txt", "w");
+  if (!f) return;
+  for (unsigned i = 0; i < scr_fr_n; i++) fprintf(f, "FR %s %s %llu\n", scr_fr_rows[i].cls, scr_fr_rows[i].mem, scr_fr_rows[i].n);
+  fclose(f);
+}
+static void scr_fr_note(const ScrDynClass *cls, const ScrDynClassMember *cm) {
+  static int armed;
+  if (!armed) { armed = 1; atexit(scr_fr_dump); }
+  for (unsigned i = 0; i < scr_fr_n; i++)
+    if (scr_fr_rows[i].cls == cls->name && scr_fr_rows[i].mem == cm->name) { scr_fr_rows[i].n++; return; }
+  if (scr_fr_n < 4096) { scr_fr_rows[scr_fr_n].cls = cls->name; scr_fr_rows[scr_fr_n].mem = cm->name; scr_fr_rows[scr_fr_n].n = 1; scr_fr_n++; }
+}
+#endif
+
 /* What a keyed read of a class instance answers once the member row `cm` (never NULL) is found: the field, the datum it inherits, or
  * the bound method. Shared by the two entries below, which differ only in how they find the row. */
 #if defined(__GNUC__) || defined(__clang__)
@@ -1953,6 +1974,9 @@ static
 #endif
 ScrDyn *objinst_member_row_get(ScrDyn *d, const ScrStr *key, const ScrDynClassMember *cm) {
   if (cm->get != NULL) {
+#ifdef SCR_FIELDREAD_COUNT
+    scr_fr_note(scr_dyn_objinst_class_of(d), cm);
+#endif
     /* An unset field under a name the class inherits as prototype data reads the datum (Node's lookup reaches the prototype). */
     ScrDyn *v = dyn_member_field_get(cm, d->v.inst.o);
     /* A grafted emitter's keys before EventEmitter.call(this) ran read as the prototype's own values: _eventsCount is 0
