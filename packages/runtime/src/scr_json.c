@@ -3738,12 +3738,26 @@ static const ScrFnDesc *scr_fd_intern(const ScrFnDesc *want) {
 
 /* A box of `clo` described by `desc`. The closure IS the value when it carries no other descriptor yet (it then caches this one) or already carries
  * this very one; a closure boxed at another static type gets a stand-alone node over it. `clo`'s reference moves into the answer either way. */
+#ifdef SCR_FNBOX_STAT
+static unsigned long scr_fnbox_t, scr_fnbox_d, scr_fnbox_r, scr_fnbox_f, scr_fnbox_imm;
+static void scr_fnbox_note(int what) {
+  scr_fnbox_t++;
+  if (what == 0) scr_fnbox_d++; else if (what == 1) scr_fnbox_r++; else scr_fnbox_f++;
+  if ((scr_fnbox_t & 4095u) == 0) fprintf(stderr, "FNBOX total=%lu first=%lu repeat=%lu fallback=%lu\n", scr_fnbox_t, scr_fnbox_d, scr_fnbox_r, scr_fnbox_f);
+}
+#endif
 static ScrDyn *scr_fn_box(ScrClosure *clo, const ScrFnDesc *desc) {
   if (clo != NULL) {
     const void *have = scr_closure_desc(clo);
     if (have == NULL) scr_closure_set_desc(clo, desc);
+#ifdef SCR_FNBOX_STAT
+    scr_fnbox_note(have == NULL ? 0 : have == (const void *)desc ? 1 : 2);
+#endif
     if (have == NULL || have == (const void *)desc) return (ScrDyn *)(uintptr_t)clo;
   }
+#ifdef SCR_FNBOX_STAT
+  else scr_fnbox_note(2);
+#endif
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_FUNC);
   d->v.fn.clo = clo;
   d->v.fn.desc = desc;
