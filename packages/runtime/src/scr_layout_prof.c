@@ -24,6 +24,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #define NOCOV __attribute__((no_sanitize("coverage")))
 
@@ -89,6 +90,15 @@ NOCOV static void scr_lp_dump(void) {
 extern void (*scr_layout_prof_exit)(void);
 NOCOV static void scr_lp_dump_at_exit(void) { scr_lp_dump(); }
 
+/* SIGTERM and SIGINT dump the profile and leave: a profiling driver (`scriptc build --pgo`) ends a server it cannot ask to quit by terminating it,
+ * and a default-action SIGTERM would lose the whole log. The dump is not async-signal-safe (stdio), which is acceptable for a profiling binary that
+ * is about to die anyway and never runs in production. */
+NOCOV static void scr_lp_term(int sig) {
+  (void)sig;
+  scr_lp_dump();
+  _exit(0);
+}
+
 __attribute__((constructor(101))) NOCOV static void scr_lp_start(void) {
   struct sigaction sa;
   memset(&sa, 0, sizeof sa);
@@ -96,7 +106,23 @@ __attribute__((constructor(101))) NOCOV static void scr_lp_start(void) {
   sa.sa_flags = SA_RESTART;
   sigemptyset(&sa.sa_mask);
   sigaction(SIGUSR1, &sa, NULL);
+  struct sigaction st;
+  memset(&st, 0, sizeof st);
+  st.sa_handler = scr_lp_term;
+  sigemptyset(&st.sa_mask);
+  sigaction(SIGTERM, &st, NULL);
+  sigaction(SIGINT, &st, NULL);
   scr_layout_prof_exit = scr_lp_dump_at_exit;
+  /* $SCR_LAYOUT_PROFILE_PID: where to write this process's id, so a driver that starts the program through a wrapper (a test harness, a
+   * script) can still send the SIGUSR1 epoch signal to the right process. */
+  const char *pidfile = getenv("SCR_LAYOUT_PROFILE_PID");
+  if (pidfile != NULL && pidfile[0] != '\0') {
+    FILE *pf = fopen(pidfile, "w");
+    if (pf != NULL) {
+      fprintf(pf, "%ld\n", (long)getpid());
+      fclose(pf);
+    }
+  }
 }
 
 __attribute__((destructor)) NOCOV static void scr_lp_finish(void) { scr_lp_dump(); }
