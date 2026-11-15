@@ -1229,7 +1229,7 @@ static ScrDyn *ee_call(ScrDyn *recv, ScrEmitter *em, const char *name, size_t n,
       ScrDyn *md = scr_dyn_new_str(ms); /* retains */
       scr_str_release(ms);
       ScrDyn *av[3] = {md, (ScrDyn *)a0, (ScrDyn *)a1};
-      ScrDyn *r = row->call(recv->v.inst.o, av, 3, what);
+      ScrDyn *r = row->call(scr_dyn_inst_o(recv), av, 3, what);
       scr_dyn_release(md);
       if (r == NULL) return NULL;
       scr_dyn_release(r);

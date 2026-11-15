@@ -5025,6 +5025,9 @@ typedef struct ScrDynClass {
    * class whose instances carry none. A subclass of a table-carrying class has the same offset (the base chain's fields are an identical
    * prefix). APPENDED, like every trailing member; scr_dyn_objinst_props_table reads it. */
   long long props_off;
+  /* The class-table index + 1 of a class whose instances carry the DYN HEAD (an instance of it IS its own SCR_DYN_OBJINST value: see ScrObjHead
+   * below), or 0 for a class that boxes through a stand-alone node. APPENDED, like every trailing member; emitted by both lanes. */
+  unsigned short head;
 #ifdef SCR_INSP_COLORS
   /* util.inspect showHidden over a class VALUE: the nearest runtime-provided class in the chain (JavaScript name: "Error", "TypeError",
    * "EventEmitter", "Readable", ...), NULL when the chain holds none; `rt_layer` is the number of user classes between this class and it
@@ -5675,6 +5678,24 @@ static inline void scr_closure_init_static(ScrClosure *c, void *fn) {
   c->pad[0] = c->pad[1] = 0;
   c->fn = fn;
   c->w = SCR_CLO_W_STATIC;
+}
+/* ── the dyn head of a class instance ───────────────────────────────────
+ * A standalone, cycle-headered class the program can box lays out its instances as { size_t rc; uint32_t sc_kind; uint16_t sc_hx; uint16_t sc_hz; fields }:
+ * the first two words of a ScrDyn. sc_kind is SCR_DYN_OBJINST, sc_hx is 0x8000 | the class-table index (it sits on the ScrDyn flag bytes 12-13; bytes
+ * 14-15, static_copy and module_ns, stay 0 because the weak-key checks read them on any kind). Bit 7 of byte 13 is the head marker: a stand-alone
+ * node has 0 there. The instance's refcount IS the dyn value's refcount; the class table maps the index to its ScrDynClass. */
+#define SCR_OBJ_HEAD_KIND 12u
+_Static_assert(SCR_DYN_OBJINST == SCR_OBJ_HEAD_KIND, "emitted instances stamp this kind");
+_Static_assert(offsetof(ScrDyn, buffer) == 12 && offsetof(ScrDyn, null_proto) == 13 && offsetof(ScrDyn, static_copy) == 14, "the head's class slot sits on these flag bytes");
+extern const ScrDynClass *const *scr_dyn_head_tbl;
+void scr_dyn_head_classes(const ScrDynClass *const *tbl, size_t n);
+static inline bool scr_dyn_inst_is_head(const ScrDyn *d) { return (((const uint8_t *)d)[13] & 0x80u) != 0; }
+static inline void *scr_dyn_inst_o(const ScrDyn *d) { return scr_dyn_inst_is_head(d) ? (void *)(uintptr_t)d : d->v.inst.o; }
+static inline const ScrDynClass *scr_dyn_inst_cls(const ScrDyn *d) {
+  if (!scr_dyn_inst_is_head(d)) return d->v.inst.cls;
+  uint16_t hx;
+  __builtin_memcpy(&hx, (const uint8_t *)d + 12, sizeof hx);
+  return scr_dyn_head_tbl[hx & 0x7fffu];
 }
 /* The closure a FUNC value calls: the value itself when it is an embedded closure (ScrClosure above), else the stand-alone node's pointer. */
 static inline ScrClosure *scr_dyn_fn_clo(const ScrDyn *d) { return ((const ScrClosure *)d)->isdyn ? (ScrClosure *)(uintptr_t)d : d->v.fn.clo; }

@@ -210,6 +210,8 @@ export interface ClassMeta {
        * per-instance order record (ir/nodes.ts ORD_MEMBER), laid out first among
        * the fields so every class of the hierarchy shares its offset. */
       ordBytes?: number;
+      /** A class that carries the dyn head: its class-table index (ir/boxed-classes.ts headClassPlan). */
+      headIdx?: number;
       comment: string;
       /** Class shapes only; hierarchy members get the vtable machinery. */
       meta: ClassMeta | null;
@@ -229,6 +231,7 @@ export interface ClassMeta {
         traced: E.tracedShapes.has(`object:${cls.name}`),
         fields: cls.fields,
         ordBytes: orderRecordPlanCached(E.mod.classes ?? []).recordBytes(cls.name),
+        ...(E.headIdx(cls.name) !== undefined ? { headIdx: E.headIdx(cls.name)! } : {}),
         comment: `class ${cls.name}`,
         meta: E.classMeta.get(cls.name) ?? null,
       })),
@@ -311,6 +314,10 @@ export interface ClassMeta {
     decl.push("");
     for (const s of shapes) {
       decl.push(`struct ${s.struct} { /* ${s.comment} */`, `  size_t rc;`);
+      if (s.headIdx !== undefined) {
+        // The dyn head (scr_runtime.h, ScrObjHead): the instance IS its dyn value. kind is ScrDyn::kind, hx the class-table index with the head bit.
+        decl.push(`  uint32_t sc_kind; uint16_t sc_hx; uint16_t sc_hz; /* dyn head: SCR_DYN_OBJINST, 0x8000 | class index */`);
+      }
       if (inHierarchy(s)) {
         // The hierarchy prefix: base fields follow at identical offsets in
         // every subclass, so vt must sit between rc and the field list.
@@ -470,6 +477,7 @@ export interface ClassMeta {
       }
       out.push(
         `    scr_obj_free_note();`,
+        ...(s.headIdx !== undefined ? [`    scr_cyc_live--; /* the head's pacing weight, returned */`] : []),
         `    scr_cyc_free(o);`,
         `  } else${lazyGate === null ? "" : ` if (${lazyGate})`} {`,
         `    scr_cyc_on_release(o); /* possible cycle root; may collect */`,
@@ -478,6 +486,7 @@ export interface ClassMeta {
         `${E.link}${s.struct} *${s.newFn}(void) {`,
         `  ${s.struct} *o = scr_cyc_alloc(sizeof *o, &${s.trace}, &${s.gcFree});`,
         `  o->rc = 1;`,
+        ...(s.headIdx !== undefined ? [`  o->sc_kind = SCR_OBJ_HEAD_KIND; o->sc_hx = (uint16_t)(0x8000u | ${s.headIdx}u);`, `  scr_cyc_live++; /* pacing weight of the stand-alone node this head replaces (the collector's trigger counts live objects) */`] : []),
         ...undefFieldInitC(s),
         ...(s.indexValue ? [`  o->${OVERFLOW_MEMBER} = ${overflowNewC(s)};`] : []),
         `  scr_obj_alloc_note();`,
@@ -500,6 +509,7 @@ export interface ClassMeta {
             ]
           : []),
         `  scr_obj_free_note();`,
+        ...(s.headIdx !== undefined ? [`  scr_cyc_live--; /* the head's pacing weight, returned */`] : []),
         `  scr_cyc_free(o0);`,
         `}`,
         `${E.link}void *${s.retain}_v(void *o) { return ${s.retain}((${s.struct} *)o); }`,
@@ -507,6 +517,8 @@ export interface ClassMeta {
         ``,
       );
     }
+    // The dyn head's class table indexes descriptors that must exist by the time the table is emitted: intern them here, with the shapes.
+    for (const name of E.headPlan().keys()) E.dynClassDesc(name);
   }
 
 /** The root's slot list as seen by one class: the implementation the

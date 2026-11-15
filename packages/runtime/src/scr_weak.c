@@ -538,8 +538,8 @@ static ScrWeakDynKey scr_weak_dyn_key(const ScrDyn *d) {
      * instance, so the box is a boundary artifact and not the identity -- the
      * same rule the dyn-land OBJ arm follows. An ACYCLIC instance (cyc == 0)
      * has no header to stamp and stays refused below. */
-    if (d->v.inst.cls != NULL && d->v.inst.cls->cyc) {
-      k.addr = d->v.inst.o;
+    if (scr_dyn_inst_cls(d) != NULL && scr_dyn_inst_cls(d)->cyc) {
+      k.addr = scr_dyn_inst_o(d);
       k.mark = scr_cyc_weak_mark;
       return k;
     }
