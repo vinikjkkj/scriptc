@@ -1948,8 +1948,8 @@ static ScrDyn *insp_inst_sym_bag(const ScrDyn *d) {
 
 /* A function value's closure table when it hosts symbol-keyed properties (+1), else NULL. */
 static ScrDyn *insp_fn_sym_table(const ScrDyn *d) {
-  if (scr_closure_props(d->v.fn.clo) == NULL) return NULL;
-  ScrDyn *t = (ScrDyn *)scr_box_get_ref(scr_closure_props(d->v.fn.clo)); /* +1 */
+  if (scr_closure_props(scr_dyn_fn_clo(d)) == NULL) return NULL;
+  ScrDyn *t = (ScrDyn *)scr_box_get_ref(scr_closure_props(scr_dyn_fn_clo(d))); /* +1 */
   if (t != NULL && t->kind == SCR_DYN_OBJ && scr_dyn_ext(t)->syms != NULL) return t;
   scr_dyn_release(t);
   return NULL;
@@ -2796,7 +2796,7 @@ static ScrStr *insp_sh_class_value_in(ScrDyn *d, const ScrDynClass *vc, const Sc
     return insp_sty_lit("[Function]", INSP_STY_SPECIAL);
   }
   {
-    const double cid0 = scr_insp_circ_check(d->v.fn.clo);
+    const double cid0 = scr_insp_circ_check(scr_dyn_fn_clo(d));
     if (cid0 > 0) {
       scr_str_release(base);
       return scr_insp_circular(cid0);
@@ -2817,7 +2817,7 @@ static ScrStr *insp_sh_class_value_in(ScrDyn *d, const ScrDynClass *vc, const Sc
     }
   }
   insp_begin_obj(recurse + 1);
-  scr_insp_seen_push(d->v.fn.clo);
+  scr_insp_seen_push(scr_dyn_fn_clo(d));
   {
     InspBuf eb = {0};
     ib_hname(&eb, "length");
@@ -2884,7 +2884,7 @@ static ScrStr *insp_sh_class_value_in(ScrDyn *d, const ScrDynClass *vc, const Sc
       {
         InspBuf cb = {0};
         ib_hname(&cb, "constructor");
-        ScrStr *cv = scr_insp_circular(scr_insp_circ_check(d->v.fn.clo));
+        ScrStr *cv = scr_insp_circular(scr_insp_circ_check(scr_dyn_fn_clo(d)));
         insp_kv(&cb, cv);
         scr_str_release(cv);
         ScrStr *ce = ib_take(&cb);
@@ -3072,7 +3072,7 @@ static ScrStr *insp_sh_class_value_in(ScrDyn *d, const ScrDynClass *vc, const Sc
   scr_str_release(base);
   scr_str_release(hb0);
   scr_str_release(hb1);
-  ScrStr *hw = scr_insp_ref_wrap(d->v.fn.clo, hout);
+  ScrStr *hw = scr_insp_ref_wrap(scr_dyn_fn_clo(d), hout);
   scr_str_release(hout);
   return hw;
 }
@@ -3502,8 +3502,8 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         }
         /* the properties a program ADDED to the function object follow the statics */
         ScrDyn *eextra = NULL;
-        if (scr_closure_props(d->v.fn.clo) != NULL) {
-          ScrDyn *tbl = (ScrDyn *)scr_box_get_ref(scr_closure_props(d->v.fn.clo)); /* +1 */
+        if (scr_closure_props(scr_dyn_fn_clo(d)) != NULL) {
+          ScrDyn *tbl = (ScrDyn *)scr_box_get_ref(scr_closure_props(scr_dyn_fn_clo(d))); /* +1 */
           eextra = tbl != NULL ? scr_dyn_objwalk(tbl, SCR_OBJWALK_ENTRIES) : NULL;
           scr_dyn_release(tbl);
           size_t shownExtra = 0;
@@ -3655,7 +3655,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         /* The function's own ENUMERABLE properties follow its base in braces, as an object's do
          * (`[Function: g] { listener: [Function: f] }`): the closure's property table minus the built-ins
          * (name, length, prototype are non-enumerable in Node). */
-        ScrDyn *table = scr_closure_props(d->v.fn.clo) != NULL ? (ScrDyn *)scr_box_get_ref(scr_closure_props(d->v.fn.clo)) : NULL; /* +1 */
+        ScrDyn *table = scr_closure_props(scr_dyn_fn_clo(d)) != NULL ? (ScrDyn *)scr_box_get_ref(scr_closure_props(scr_dyn_fn_clo(d))) : NULL; /* +1 */
         size_t nown = 0;
         if (table != NULL && table->kind == SCR_DYN_OBJ) {
           for (size_t i = 0; i < table->v.obj.len; i++) {
@@ -3714,7 +3714,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         return insp_sty(ib_take(&db), INSP_STY_SPECIAL);
       }
       {
-        double cid0 = scr_insp_circ_check(d->v.fn.clo);
+        double cid0 = scr_insp_circ_check(scr_dyn_fn_clo(d));
         if (cid0 > 0) {
           scr_str_release(hbase);
           return scr_insp_circular(cid0);
@@ -3722,7 +3722,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       }
       const bool hproto = (fcode & SCR_FNK_NOPROTO) == 0;
       insp_begin_obj(recurse + 1);
-      scr_insp_seen_push(d->v.fn.clo);
+      scr_insp_seen_push(scr_dyn_fn_clo(d));
       {
         InspBuf eb = {0};
         ib_hname(&eb, "length");
@@ -3768,7 +3768,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
           insp_begin_obj(recurse + 2);
           InspBuf cb = {0};
           ib_hname(&cb, "constructor");
-          ScrStr *cv = scr_insp_circular(scr_insp_circ_check(d->v.fn.clo));
+          ScrStr *cv = scr_insp_circular(scr_insp_circ_check(scr_dyn_fn_clo(d)));
           insp_kv(&cb, cv);
           scr_str_release(cv);
           ScrStr *ce = ib_take(&cb);
@@ -3793,7 +3793,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
 #ifdef SCR_INSP_COLORS
       if (INSP_SH) {
         /* the properties a program added to the function object follow its built-in names, then its own symbols */
-        ScrDyn *htable = scr_closure_props(d->v.fn.clo) != NULL ? (ScrDyn *)scr_box_get_ref(scr_closure_props(d->v.fn.clo)) : NULL; /* +1 */
+        ScrDyn *htable = scr_closure_props(scr_dyn_fn_clo(d)) != NULL ? (ScrDyn *)scr_box_get_ref(scr_closure_props(scr_dyn_fn_clo(d))) : NULL; /* +1 */
         if (htable != NULL && htable->kind == SCR_DYN_OBJ) {
           insp_emit_obj_keys(htable, recurse, depth, true);
           insp_emit_syms(htable, recurse, depth);
@@ -3824,7 +3824,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       scr_str_release(hbase);
       scr_str_release(hb0);
       scr_str_release(hb1);
-      ScrStr *hwrapped = scr_insp_ref_wrap(d->v.fn.clo, hout); /* <ref *1> when the prototype's constructor circled back */
+      ScrStr *hwrapped = scr_insp_ref_wrap(scr_dyn_fn_clo(d), hout); /* <ref *1> when the prototype's constructor circled back */
       scr_str_release(hout);
       return hwrapped;
     }

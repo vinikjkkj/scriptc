@@ -49,7 +49,7 @@ static ScrDyn *dyn_class_box_thunk(ScrClosure *clo, ScrDyn *const *args, size_t 
 
 const ScrDynClass *dyn_cls_impl_of_value(const ScrDyn *d) {
   if (d == NULL || d->kind != SCR_DYN_FUNC || scr_dyn_fn_thunk(d) != dyn_class_box_thunk) return NULL;
-  return dyn_class_of_clo(d->v.fn.clo);
+  return dyn_class_of_clo(scr_dyn_fn_clo(d));
 }
 
 typedef struct { const ScrDynClass *cls; ScrDyn *box; } DynClsBox;
@@ -122,7 +122,7 @@ static const ScrDyn *dyn_eval_inner_of_clo(ScrClosure *clo) {
 
 static const ScrDyn *dyn_cls_eval_inner(const ScrDyn *d) {
   if (d == NULL || d->kind != SCR_DYN_FUNC || scr_dyn_fn_thunk(d) != dyn_eval_class_thunk) return NULL;
-  return dyn_eval_inner_of_clo(d->v.fn.clo);
+  return dyn_eval_inner_of_clo(scr_dyn_fn_clo(d));
 }
 
 static ScrDyn *dyn_eval_class_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
@@ -285,8 +285,8 @@ static int dyn_cls_ops_class_walk(const ScrDyn *v, ScrObjWalk mode, ScrDyn *out)
     scr_dyn_release(val);
   }
   /* ...then the properties a program ADDED to the function object, in creation order. */
-  if (scr_closure_props(v->v.fn.clo) != NULL) {
-    ScrDyn *table = (ScrDyn *)scr_box_get_ref(scr_closure_props(v->v.fn.clo)); /* +1 */
+  if (scr_closure_props(scr_dyn_fn_clo(v)) != NULL) {
+    ScrDyn *table = (ScrDyn *)scr_box_get_ref(scr_closure_props(scr_dyn_fn_clo(v))); /* +1 */
     ScrDyn *extra = table != NULL ? scr_dyn_objwalk(table, mode) : NULL;
     /* the minted `prototype` object lives in this table but is NON-enumerable on a class: it is no expando */
     ScrDyn *ekeys = table != NULL ? scr_dyn_objwalk(table, SCR_OBJWALK_KEYS) : NULL;
@@ -430,7 +430,7 @@ static ScrDyn *dyn_class_prototype(const ScrDyn *d) {
   const ScrDynClassMember *ownRow = inner != NULL ? scr_dyn_objinst_member(inner, "%dynOwn", 7) : dyn_class_static(cls, "%dynOwn", 7);
   if (ownRow == NULL || ownRow->call == NULL) return NULL;
   void *recv = inner != NULL ? inner->v.inst.o : NULL;
-  const bool first = scr_closure_proto(d->v.fn.clo) == NULL;
+  const bool first = scr_closure_proto(scr_dyn_fn_clo(d)) == NULL;
   ScrDyn *P = scr_dyn_fn_prototype((ScrDyn *)d); /* +1 */
   if (!first) return P;
   /* the instance class: an evaluation's through a stamped, never-constructed instance; a declared class's is its own */

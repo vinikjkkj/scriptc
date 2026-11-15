@@ -3320,7 +3320,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             d.push(`  if (d->kind == SCR_DYN_FUNC) { /* adapt to arm ${i}: ${typeKey(arm)} */`);
             d.push(`    ScrClosure *ad = scr_closure_new((void *)&${adapter}, 2);`);
             d.push(`    ad->caps[0] = scr_box_new(SCR_BOX_FUNC); /* TRACED — the ring closes here */`);
-            d.push(`    scr_box_set_ref(ad->caps[0], scr_closure_retain(d->v.fn.clo));`);
+            d.push(`    scr_box_set_ref(ad->caps[0], scr_closure_retain(scr_dyn_fn_clo(d)));`);
             d.push(`    ad->caps[1] = scr_box_new(SCR_BOX_F64); /* the call descriptor: owns nothing */`);
             d.push(`    scr_box_set_thunk(ad->caps[1], scr_dyn_fn_thunk(d));`);
             d.push(`    scr_dyn_fn_share_props(ad, d); /* the adapter is the same function to JS: one own-property table */`);
@@ -3376,7 +3376,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           d.push(
             `  if (d->kind != SCR_DYN_FUNC || strcmp(scr_dyn_fn_sig(d), ${sigLit}) != 0) { *ok = false; return NULL; }`,
           );
-          d.push(`  return scr_closure_retain(d->v.fn.clo);`);
+          d.push(`  return scr_closure_retain(scr_dyn_fn_clo(d));`);
           break;
         }
         // An ENGINE function (a callback the embedded engine hands a typed parameter, a method of an engine-built object) is a
@@ -3390,7 +3390,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           d.push(`  }`);
         }
         d.push(fail(`  `, "func.kind", `d->kind != SCR_DYN_FUNC`, `NULL`));
-        d.push(`  if (strcmp(scr_dyn_fn_sig(d), ${sigLit}) == 0) return scr_closure_retain(d->v.fn.clo);`);
+        d.push(`  if (strcmp(scr_dyn_fn_sig(d), ${sigLit}) == 0) return scr_closure_retain(scr_dyn_fn_clo(d));`);
         // A TARGET with a SPELLED rest slot (`(...args: unknown[]) => R`)
         // whose boxed signature is not the same one: the adapter's single
         // parameter IS the packed array, and the thunk it forwards to
@@ -3422,7 +3422,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           }
           d.push(`    ScrClosure *a = scr_closure_new((void *)&${adapter}, ${engineFn ? 3 : 2});${engineFn ? " /* caps[2]: the identity table's sentinel */" : ""}`);
           d.push(`    a->caps[0] = scr_box_new(SCR_BOX_FUNC); /* TRACED — the ring closes here */`);
-          d.push(`    scr_box_set_ref(a->caps[0], scr_closure_retain(d->v.fn.clo));`);
+          d.push(`    scr_box_set_ref(a->caps[0], scr_closure_retain(scr_dyn_fn_clo(d)));`);
           d.push(`    a->caps[1] = scr_box_new(SCR_BOX_F64); /* the call descriptor: owns nothing */`);
           d.push(`    scr_box_set_thunk(a->caps[1], scr_dyn_fn_thunk(d));`);
           d.push(`    scr_dyn_fn_share_props(a, d); /* the adapter is the same function to JS: one own-property table */`);

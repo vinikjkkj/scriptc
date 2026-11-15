@@ -831,7 +831,7 @@ static void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx) {
 #endif
     break;
   case SCR_DYN_FUNC:
-    visit(d->v.fn.clo, ctx);
+    visit(scr_dyn_fn_clo(d), ctx);
     break;
   case SCR_DYN_PROXY:
     visit(d->v.proxy.target, ctx);
@@ -1023,7 +1023,7 @@ static __attribute__((noinline)) void scr_dyn_release_final(ScrDyn *d) {
     scr_dyn_ext_drop(d, true);
     break;
   case SCR_DYN_FUNC:
-    scr_closure_release(d->v.fn.clo); /* sig/name are static literals */
+    scr_closure_release(scr_dyn_fn_clo(d)); /* sig/name are static literals */
     break;
   case SCR_DYN_HANDLE:
     scr_dyn_handle_release(d->v.handle.ptr, d->v.handle.tag);
@@ -1122,6 +1122,10 @@ __attribute__((noinline)) void scr_dyn_release(ScrDyn *d) {
         d->kind == SCR_DYN_FUNC) {
       scr_cyc_on_release(d); /* may collect - d is done being touched */
     }
+    return;
+  }
+  if (d->kind == SCR_DYN_FUNC && ((ScrClosure *)d)->isdyn) { /* an embedded closure: the one object, the one teardown */
+    scr_closure_free_dead((ScrClosure *)d);
     return;
   }
   scr_dyn_release_final(d);
@@ -2345,7 +2349,7 @@ const char scr_dyn_bound_name_mark[] = "\x01bound-fn-name";
  * binds never links it. */
 const char *(*scr_dyn_bound_name_fn)(const ScrDyn *d) = NULL;
 __attribute__((noinline)) const char *scr_dyn_fn_name(const ScrDyn *d) {
-  const char *n = scr_rva_str(d->v.fn.desc->name);
+  const char *n = scr_rva_str(scr_dyn_fn_desc(d)->name);
   return n == scr_dyn_bound_name_mark ? scr_dyn_bound_name_fn(d) : n;
 }
 const char *scr_dyn_fn_src_of(const ScrDyn *d) { return scr_dyn_fn_src(d); }
@@ -2356,9 +2360,19 @@ const char *scr_dyn_fn_src_of(const ScrDyn *d) { return scr_dyn_fn_src(d); }
 static const ScrFnDesc *scr_fd_intern(const ScrFnDesc *want);
 ScrDyn *scr_dyn_fn_code_set(ScrDyn *d, unsigned code) {
   /* The record is shared by every box of the same function, so a changed code is a different record (interned: the same one every time). */
-  ScrFnDesc want = *d->v.fn.desc;
+  ScrFnDesc want = *scr_dyn_fn_desc(d);
   want.arity = (want.arity & 0xffffffu) | ((uint32_t)(code & SCR_FNK_CODE_MASK) << SCR_FNK_SHIFT);
-  d->v.fn.desc = scr_fd_intern(&want);
+  const ScrFnDesc *nd = scr_fd_intern(&want);
+  if (((const ScrClosure *)d)->isdyn) {
+    /* An embedded closure carries ONE descriptor for every box of it, and this answer is about THIS box (a static bind shares one wrapper
+     * closure between binds): the changed record rides a stand-alone node over the same closure, which the caller gets in the embedded
+     * value's place (this function already returns the box it was given, so the caller is written for a different answer). */
+    ScrDyn *n = scr_dyn_alloc(SCR_DYN_FUNC);
+    n->v.fn.clo = (ScrClosure *)(uintptr_t)d; /* the caller's reference moves in */
+    n->v.fn.desc = nd;
+    return n;
+  }
+  d->v.fn.desc = nd;
   return d;
 }
 
@@ -2794,12 +2808,12 @@ static bool scr_fnad_key(const ScrDyn *d, uintptr_t *ident, ScrStr **name) {
   if (d->kind != SCR_DYN_FUNC) return false;
   bool bound = scr_dyn_fn_thunk(d) == scr_isl_bound_thunk;
   if (!bound && scr_dyn_fn_thunk(d) != scr_isl_call_thunk) return false;
-  ScrDyn *obj = (ScrDyn *)scr_box_get_ref(d->v.fn.clo->caps[0]); /* +1 */
+  ScrDyn *obj = (ScrDyn *)scr_box_get_ref(scr_dyn_fn_clo(d)->caps[0]); /* +1 */
   *ident = scr_dyn_jsval_ops()->ident(obj->v.jsval.cell);
   scr_dyn_release(obj);
   *name = NULL;
   if (bound) {
-    ScrDyn *nm = (ScrDyn *)scr_box_get_ref(d->v.fn.clo->caps[1]);
+    ScrDyn *nm = (ScrDyn *)scr_box_get_ref(scr_dyn_fn_clo(d)->caps[1]);
     *name = scr_str_retain(nm->v.str);
     scr_dyn_release(nm);
   }
@@ -2915,7 +2929,7 @@ ScrClosure *scr_fn_unbind(ScrClosure *c) {
     /* the same adapter code over the engine function's own call: the shape every emitted adapter site builds */
     hit = scr_closure_new(c->fn, 3);
     hit->caps[0] = scr_box_new(SCR_BOX_FUNC);
-    scr_box_set_ref(hit->caps[0], scr_closure_retain(box->v.fn.clo));
+    scr_box_set_ref(hit->caps[0], scr_closure_retain(scr_dyn_fn_clo(box)));
     hit->caps[1] = scr_box_new(SCR_BOX_F64);
     scr_box_set_thunk(hit->caps[1], scr_dyn_fn_thunk(box));
     scr_dyn_fn_adapter_remember(box, c->fn, hit);
@@ -3689,10 +3703,22 @@ static const ScrFnDesc *scr_fd_intern(const ScrFnDesc *want) {
   return nd;
 }
 
-ScrDyn *scr_dyn_new_func_src(ScrClosure *clo, ScrDynThunk thunk, uint32_t arity, const char *sig, const char *name,
-                             const char *src) {
+/* A box of `clo` described by `desc`. The closure IS the value when it carries no other descriptor yet (it then caches this one) or already carries
+ * this very one; a closure boxed at another static type gets a stand-alone node over it. `clo`'s reference moves into the answer either way. */
+static ScrDyn *scr_fn_box(ScrClosure *clo, const ScrFnDesc *desc) {
+  if (clo != NULL) {
+    const void *have = scr_closure_desc(clo);
+    if (have == NULL) scr_closure_set_desc(clo, desc);
+    if (have == NULL || have == (const void *)desc) return (ScrDyn *)(uintptr_t)clo;
+  }
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_FUNC);
   d->v.fn.clo = clo;
+  d->v.fn.desc = desc;
+  return d;
+}
+
+ScrDyn *scr_dyn_new_func_src(ScrClosure *clo, ScrDynThunk thunk, uint32_t arity, const char *sig, const char *name,
+                             const char *src) {
   const void *entry = clo != NULL ? clo->fn : NULL;
   const unsigned epoch = scr_fn_names_epoch_v;
   /* The set. ENTRY and SRC tell box sites apart (the thunk and signature belong to the TYPE and are shared by most sites). A plain sum of the two products
@@ -3711,8 +3737,7 @@ ScrDyn *scr_dyn_new_func_src(ScrClosure *clo, ScrDynThunk thunk, uint32_t arity,
     ScrFdWay *w = &ways[wi];
     if (w->entry == entry && w->src == src && w->thunk == thunk && w->sig == sig && w->name == name && w->arity == arity && w->epoch == epoch &&
         w->desc != NULL) {
-      d->v.fn.desc = w->desc;
-      return d;
+      return scr_fn_box(clo, w->desc);
     }
   }
 #ifdef SCR_FD_STAT
@@ -3792,8 +3817,7 @@ ScrDyn *scr_dyn_new_func_src(ScrClosure *clo, ScrDynThunk thunk, uint32_t arity,
     w->epoch = epoch;
     w->desc = desc;
   }
-  d->v.fn.desc = desc;
-  return d;
+  return scr_fn_box(clo, desc);
 }
 
 /* The RUNTIME's own boxing spelling: every closure minted here is native
@@ -3808,7 +3832,7 @@ ScrDyn *scr_dyn_new_func(ScrClosure *clo, ScrDynThunk thunk, uint32_t arity, con
    * compiler's exact-signature branch
    *
    *     if (strcmp(scr_dyn_fn_sig(d), "func(f64,dyn)=>void") == 0)
-   *         return scr_closure_retain(d->v.fn.clo);
+   *         return scr_closure_retain(scr_dyn_fn_clo(d));
    *
    * UNWRAPS the closure and calls `clo->fn` through the STATIC C
    * signature that type key names. So a runtime sig that happens to
@@ -3881,7 +3905,7 @@ ScrStr *scr_fn_to_string(const ScrDyn *d) {
   }
   if (src == NULL && scr_fn_text_row_hook != NULL) {
     /* A box minted where the creation site was not provable still names a closure whose text the build's table carries. */
-    const char *row = scr_fn_text_row_hook(d->v.fn.clo);
+    const char *row = scr_fn_text_row_hook(scr_dyn_fn_clo(d));
     if (row != NULL) return scr_str_new(row, strlen(row));
   }
   if (src == NULL) {
@@ -3956,7 +3980,7 @@ ScrDyn *scr_dyn_call(const ScrDyn *d, ScrDyn *const *args, size_t argc, const ch
     scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&b));
     return NULL;
   }
-  return scr_dyn_fn_thunk(d)(d->v.fn.clo, args, argc);
+  return scr_dyn_fn_thunk(d)(scr_dyn_fn_clo(d), args, argc);
 }
 
 /* scr_dyn_call over a dyn ARRAY's elements — the spread-application form
@@ -7933,7 +7957,7 @@ static ScrDyn *scr_dyn_error_ctor_by_chain(const ScrDyn *recv) {
 static ScrDyn *err_cls_fn_get(const ScrDyn *d, const char *key, size_t key_len) {
   if (key_len == 4 && memcmp(key, "name", 4) == 0) return NULL;
   if (key_len == 9 && memcmp(key, "prototype", 9) == 0) {
-    return scr_dyn_error_kind_prototype(err_cls_kind_of_clo(d->v.fn.clo));
+    return scr_dyn_error_kind_prototype(err_cls_kind_of_clo(scr_dyn_fn_clo(d)));
   }
   ScrJsonBuf fb;
   scr_jb_init(&fb);
@@ -9921,8 +9945,8 @@ static ScrDyn *scr_u8_static_member(const char *key, size_t key_len);
  * writable too. Object.hasOwn is exact. */
 bool scr_dyn_fn_has(const ScrDyn *v, const char *key, size_t key_len) {
   /* An accessor property is PRESENT without running its getter (`k in F` has no side effect in JS). */
-  if (scr_closure_props(v->v.fn.clo) != NULL) {
-    ScrDyn *table = (ScrDyn *)scr_box_get_ref(scr_closure_props(v->v.fn.clo)); /* +1 */
+  if (scr_closure_props(scr_dyn_fn_clo(v)) != NULL) {
+    ScrDyn *table = (ScrDyn *)scr_box_get_ref(scr_closure_props(scr_dyn_fn_clo(v))); /* +1 */
     ScrDyn *found = NULL;
     const bool acc = table != NULL && scr_dyn_obj_resolve(table, key, key_len, &found, NULL) == SCR_PROP_ACCESSOR;
     scr_dyn_release(table);
@@ -10445,7 +10469,7 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
      * spellings would each keep their own answer — which is exactly the
      * split this registry exists to close, and the worse half of it: a
      * write nothing static could ever see. */
-    if (scr_dyn_expando_set(recv->v.fn.clo, key->data, key->len, value)) return;
+    if (scr_dyn_expando_set(scr_dyn_fn_clo(recv), key->data, key->len, value)) return;
     ScrDyn *table = scr_dyn_fn_props(recv); /* +1 */
     /* [[Set]] over an ACCESSOR property of the function: the setter takes the write with `this` bound to the function; a getter-only one is
      * a strict-mode TypeError (this runtime does not do the sloppy silent ignore). */
@@ -11846,7 +11870,7 @@ size_t scr_dyn_classval_pre(const ScrDyn *d) {
 
 const void *scr_dyn_fn_ident(const ScrDyn *d) {
   const ScrDyn *in = scr_dyn_class_eval_inner(d);
-  return in != NULL ? (const void *)in->v.inst.o : (const void *)d->v.fn.clo;
+  return in != NULL ? (const void *)in->v.inst.o : (const void *)scr_dyn_fn_clo(d);
 }
 
 bool scr_dyn_strict_eq(const ScrDyn *a, const ScrDyn *b) {
@@ -12071,7 +12095,7 @@ void scr_dyn_expando_bind(ScrDyn *fn, ScrStr *key, ScrDyn *get, ScrDyn *set) {
   if (fn->kind != SCR_DYN_FUNC) return; /* unreachable from the emitted call */
   const char *kd = key->data;
   size_t kl = key->len;
-  ScrClosure *clo = fn->v.fn.clo;
+  ScrClosure *clo = scr_dyn_fn_clo(fn);
   ScrExpSlot *existing = scr_exp_find(clo, kd, kl);
   if (existing != NULL) {
     /* Re-binding one member is a module %init that ran twice; the run-once
@@ -12125,8 +12149,8 @@ ScrDyn *scr_dyn_fn_get(const ScrDyn *d, const char *key, size_t key_len) {
     ScrDyn *cs = scr_dyn_class_ops->fn_get(d, key, key_len);
     if (cs != NULL || scr_exc_pending()) return cs;
   }
-  if (scr_closure_props(d->v.fn.clo)) {
-    ScrDyn *table = (ScrDyn *)scr_box_get_ref(scr_closure_props(d->v.fn.clo)); /* +1 */
+  if (scr_closure_props(scr_dyn_fn_clo(d))) {
+    ScrDyn *table = (ScrDyn *)scr_box_get_ref(scr_closure_props(scr_dyn_fn_clo(d))); /* +1 */
     ScrDyn *m = table ? scr_dyn_obj_get(table, key, key_len) : NULL;
     ScrDyn *r = m ? scr_dyn_retain(m) : NULL;
     /* An ACCESSOR property of the function (Object.defineProperty(F, k, { get, set }) lands in this table's `hidden` half): the getter runs
@@ -12154,7 +12178,7 @@ ScrDyn *scr_dyn_fn_get(const ScrDyn *d, const char *key, size_t key_len) {
    * by the built-in — the compiler fences that write anyway. */
   {
     ScrDyn *lifted = NULL; /* +1 when an accessor answered */
-    if (scr_dyn_expando_get(d->v.fn.clo, key, key_len, &lifted)) return lifted;
+    if (scr_dyn_expando_get(scr_dyn_fn_clo(d), key, key_len, &lifted)) return lifted;
   }
   if (key_len == 4 && memcmp(key, "name", 4) == 0) {
     const char *n = scr_dyn_fn_name(d) ? scr_dyn_fn_name(d) : "";
@@ -12214,14 +12238,14 @@ void scr_dyn_fn_share_props(ScrClosure *adapter, const ScrDyn *fn) {
   if (fn->kind != SCR_DYN_FUNC || adapter == NULL || scr_closure_props(adapter) != NULL) return;
   /* An IMMORTAL closure (a function declared once at file scope, rc == SIZE_MAX) is never freed, so a table allocated onto it here would never be
    * released: it keeps the table it already has and otherwise stays without one (nothing wrote a property on it that an adapter could lose). */
-  if (scr_closure_props(fn->v.fn.clo) == NULL && *(const size_t *)fn->v.fn.clo == SIZE_MAX) return;
+  if (scr_closure_props(scr_dyn_fn_clo(fn)) == NULL && *(const size_t *)scr_dyn_fn_clo(fn) == SIZE_MAX) return;
   ScrDyn *t = scr_dyn_fn_props((ScrDyn *)fn); /* +1: allocates the table on first use */
   scr_dyn_release(t);
-  scr_closure_set_props(adapter, scr_box_retain(scr_closure_props(fn->v.fn.clo)));
+  scr_closure_set_props(adapter, scr_box_retain(scr_closure_props(scr_dyn_fn_clo(fn))));
 }
 
 ScrDyn *scr_dyn_fn_props(ScrDyn *d) {
-  if (!scr_closure_props(d->v.fn.clo)) {
+  if (!scr_closure_props(scr_dyn_fn_clo(d))) {
     scr_fn_own_tostring_hook = &scr_dyn_fn_own_tostring;
     /* TRACED: the table can hold a function value that captures the very
      * closure this table belongs to (`Foo.create = () => new Foo()`), which
@@ -12230,9 +12254,9 @@ ScrDyn *scr_dyn_fn_props(ScrDyn *d) {
     ScrBox *box = scr_box_new_obj(&scr_dyn_retain_v, &scr_dyn_release_v, &scr_dyn_trace_v);
     ScrDyn *table = scr_dyn_new_obj();
     scr_box_set_ref(box, table); /* the box owns the fresh table */
-    scr_closure_set_props(d->v.fn.clo, box);
+    scr_closure_set_props(scr_dyn_fn_clo(d), box);
   }
-  return (ScrDyn *)scr_box_get_ref(scr_closure_props(d->v.fn.clo)); /* +1 */
+  return (ScrDyn *)scr_box_get_ref(scr_closure_props(scr_dyn_fn_clo(d))); /* +1 */
 }
 
 /* The FUNC node's `prototype` OBJECT, minted on first demand and stored
@@ -12270,7 +12294,7 @@ ScrDyn *scr_dyn_fn_prototype(ScrDyn *fn) {
    * never be freed or its address recycled underneath the entry, and the
    * teardown hook that drops both is installed here — it can only be
    * reached by a closure that got this far. */
-  ScrClosure *clo = fn->v.fn.clo;
+  ScrClosure *clo = scr_dyn_fn_clo(fn);
   if (scr_closure_proto(clo) == NULL) {
     if (scr_ctor_len * 2 >= scr_ctor_cap) scr_ctor_grow();
     ScrCtorDesc d = {clo, scr_dyn_fn_thunk(fn), scr_dyn_fn_sig(fn), scr_dyn_fn_name(fn), scr_dyn_fn_src(fn),
@@ -12371,7 +12395,7 @@ bool scr_dyn_instance_of(const ScrDyn *v, ScrDyn *fn) {
    * user subclass instance and a caught runtime error both carry. A primitive left operand is false (step 3). */
   if (err_cls_is(fn)) {
     if (!scr_dyn_is_object_kind(v)) return false;
-    return scr_dyn_err_instanceof(v, (double)err_cls_kind_of_clo(fn->v.fn.clo));
+    return scr_dyn_err_instanceof(v, (double)err_cls_kind_of_clo(scr_dyn_fn_clo(fn)));
   }
   /* The Promise constructor value: its instances are the promise boxes. */
   if (scr_promise_ctor_box != NULL && fn == scr_promise_ctor_box) {
@@ -14785,12 +14809,12 @@ static ScrDyn *scr_u8_construct(const ScrDyn *args) {
  * itself with the bound mark, and its closure holds the target (caps[0]), the bound
  * receiver (caps[1]), the name (caps[2]) and the bound arguments (caps[3..]). */
 static bool dyn_fn_is_bound_box(const ScrDyn *fn) {
-  return fn->kind == SCR_DYN_FUNC && scr_rva_str(fn->v.fn.desc->name) == scr_dyn_bound_name_mark;
+  return fn->kind == SCR_DYN_FUNC && scr_rva_str(scr_dyn_fn_desc(fn)->name) == scr_dyn_bound_name_mark;
 }
 
 /* The target of a bound box, +1 (the caller releases it). */
 static ScrDyn *dyn_bound_target(const ScrDyn *fn) {
-  return (ScrDyn *)scr_box_get_ref(fn->v.fn.clo->caps[0]);
+  return (ScrDyn *)scr_box_get_ref(scr_dyn_fn_clo(fn)->caps[0]);
 }
 
 bool scr_dyn_fn_is_ctor(const ScrDyn *fn) {
@@ -14843,7 +14867,7 @@ ScrDyn *scr_dyn_construct(const ScrDyn *fn, const ScrDyn *args, const ScrStr *wh
     if (wrapped) return wr;
   }
   if (err_cls_is(fn)) {
-    return err_cls_make(err_cls_kind_of_clo(fn->v.fn.clo),
+    return err_cls_make(err_cls_kind_of_clo(scr_dyn_fn_clo(fn)),
                         args->kind == SCR_DYN_ARR && args->v.arr.len > 0 ? args->v.arr.items[0] : NULL);
   }
   if (scr_dyn_class_ops != NULL) {
@@ -14865,9 +14889,9 @@ ScrDyn *scr_dyn_construct(const ScrDyn *fn, const ScrDyn *args, const ScrStr *wh
      * arguments first; the bound receiver is ignored (the new instance is the
      * target's own). */
     ScrDyn *target = dyn_bound_target(fn);
-    size_t nb = scr_closure_ncaps(fn->v.fn.clo) - 3;
+    size_t nb = scr_closure_ncaps(scr_dyn_fn_clo(fn)) - 3;
     ScrDyn *all = scr_dyn_new_arr();
-    for (size_t i = 0; i < nb; i++) scr_dyn_arr_push(all, (ScrDyn *)scr_box_get_ref(fn->v.fn.clo->caps[3 + i]));
+    for (size_t i = 0; i < nb; i++) scr_dyn_arr_push(all, (ScrDyn *)scr_box_get_ref(scr_dyn_fn_clo(fn)->caps[3 + i]));
     for (size_t j = 0; j < args->v.arr.len; j++) scr_dyn_arr_push(all, scr_dyn_retain(args->v.arr.items[j]));
     ScrDyn *made = scr_dyn_construct(target, all, what);
     scr_dyn_release(all);
@@ -15477,7 +15501,7 @@ ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode) {
     }
     return out;
   }
-  if (v->kind == SCR_DYN_FUNC && scr_closure_props(v->v.fn.clo)) {
+  if (v->kind == SCR_DYN_FUNC && scr_closure_props(scr_dyn_fn_clo(v))) {
     /* A function value's own ENUMERABLE keys — the property table, minus
      * the two built-ins. Without this arm the keyed WRITE would create a
      * new wrong answer of its own (`f.x = 1; Object.keys(f)` answering
@@ -15493,7 +15517,7 @@ ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode) {
      * one is listed here where Node hides it, which is the runtime's
      * already-documented "dyn properties are plain data properties"
      * divergence (SEMANTICS.md), not a new one. */
-    ScrDyn *table = (ScrDyn *)scr_box_get_ref(scr_closure_props(v->v.fn.clo)); /* +1 */
+    ScrDyn *table = (ScrDyn *)scr_box_get_ref(scr_closure_props(scr_dyn_fn_clo(v))); /* +1 */
     if (table != NULL && table->kind == SCR_DYN_OBJ) {
       /* A function's own keys take the same projection as an object's —
        * `f.a = 1; f[0] = 2` lists ["0","a"] in Node too. */
@@ -15616,7 +15640,7 @@ static void scr_dyn_assign_from(ScrDyn *target, const ScrDyn *src) {
   if (src->kind == SCR_DYN_OBJ || src->kind == SCR_DYN_ARR) {
     if (scr_dyn_ext(src)->syms != NULL && !scr_exc_pending()) scr_dyn_sym_copy_enum(target, src);
   } else if (src->kind == SCR_DYN_FUNC) {
-    if (scr_closure_props(src->v.fn.clo) != NULL && !scr_exc_pending()) scr_dyn_sym_copy_enum(target, src);
+    if (scr_closure_props(scr_dyn_fn_clo(src)) != NULL && !scr_exc_pending()) scr_dyn_sym_copy_enum(target, src);
   } else if (src->kind == SCR_DYN_BYTES) {
     if (src->v.bytes->own != NULL && src->v.bytes->own->ext.syms != NULL && !scr_exc_pending()) scr_dyn_sym_copy_enum(target, src);
   } else if (src->kind == SCR_DYN_MAP) {

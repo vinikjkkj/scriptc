@@ -259,9 +259,7 @@ ScrStr *scr_box_str_unshare(ScrBox *b, ScrStr *acc) {
 
 static void scr_closure_trace(void *o, ScrTraceVisit visit, void *ctx) {
   ScrClosure *c = (ScrClosure *)o;
-  const size_t meta = c->meta;
-  const ScrClosureExt *ext = (meta & 1u) ? NULL : (const ScrClosureExt *)(uintptr_t)meta;
-  const size_t ncaps = ext ? ext->ncaps : (meta >> 1);
+  const size_t ncaps = scr_closure_ncaps(c);
   for (size_t i = 0; i < ncaps; i++) {
     ScrBox *cap = c->caps[i];
     if (scr_cap_tag(cap) == SCR_CAP_TAG_OBJ && !scr_cap_obj_traced(cap)) continue; /* acyclic payload: no header to visit */
@@ -326,6 +324,7 @@ static void scr_closure_trace(void *o, ScrTraceVisit visit, void *ctx) {
    * Landing on the immortal sentinel by unsigned underflow is not a
    * contract. `false` is what scr_runtime.h's trace/teardown rule requires
    * and what every other free_fn in the tree already does. */
+  const ScrClosureExt *ext = scr_closure_ext_of(c);
   if (ext != NULL) { /* the rare members; visit tolerates NULL, but nearly every closure has no ext to ask */
     visit(ext->props, ctx);
     visit(ext->implicit_proto, ctx);
@@ -386,15 +385,16 @@ static inline void scr_cap_release(ScrBox *cap) {
  * prototype (and its `constructor` registry entry) BEFORE `props` goes,
  * so the registry never holds a borrowed pointer to a closure that is
  * already being freed. */
-/* The ext of `c`, made on first need. The capture count moves from the closure's own word into it; an immortal closure keeps its ext for
+/* The ext of `c`, made on first need. The cached descriptor moves from the closure's own word into it; an immortal closure keeps its ext for
  * the life of the process (its teardown frees it, scr_closure_static_teardown). */
 ScrClosureExt *scr_closure_ext(ScrClosure *c) {
   ScrClosureExt *x = scr_closure_ext_of(c);
   if (x == NULL) {
     x = (ScrClosureExt *)calloc(1, sizeof *x);
     if (x == NULL) scr_trap("scriptc: out of memory\n");
-    x->ncaps = c->meta >> 1;
-    c->meta = (size_t)(uintptr_t)x;
+    x->ncaps = c->ncaps8;
+    x->desc = (const void *)c->w;
+    c->w = (uintptr_t)x | 1u;
   }
   return x;
 }
@@ -420,7 +420,7 @@ static void scr_closure_gcfree(void *o) {
    * hook still runs — with release=false — because the `constructor`
    * registry entry keyed by that prototype is not a counted reference and
    * nothing else erases it. */
-  if ((((ScrClosure *)o)->meta & 1u) == 0) scr_closure_teardown_ext((ScrClosure *)o, false);
+  if ((((ScrClosure *)o)->w & 1u) != 0) scr_closure_teardown_ext((ScrClosure *)o, false);
 #ifdef SCR_RC_AUDIT
   scr_live_closures--;
   scr_clo_bump(((ScrClosure *)o)->fn, -1);
@@ -538,8 +538,18 @@ ScrClosure *scr_closure_new(void *fn, size_t ncaps) {
   ScrClosure *c = scr_cyc_alloc(sizeof(ScrClosure) + ncaps * sizeof(ScrBox *),
                                  &scr_closure_trace, &scr_closure_gcfree);
   c->rc = 1;
+  c->kind = (uint32_t)SCR_DYN_FUNC;
+  c->isdyn = 1;
+  c->pad[0] = c->pad[1] = 0;
+  c->w = 0;
   c->fn = fn;
-  c->meta = (ncaps << 1) | 1u; /* no ext: the own-property table and the implicit prototype are made lazily (scr_closure_ext) */
+  /* no ext (w == 0): the own-property table, the implicit prototype and the cached descriptor are made lazily */
+  if (ncaps < 255) {
+    c->ncaps8 = (uint8_t)ncaps;
+  } else {
+    c->ncaps8 = 255;
+    scr_closure_ext(c)->ncaps = ncaps;
+  }
 #ifdef SCR_RC_AUDIT
   scr_live_closures++;
   scr_clo_bump(fn, +1);
@@ -556,32 +566,36 @@ ScrClosure *scr_closure_new(void *fn, size_t ncaps) {
  * whose ring is never collected. */
 static inline bool scr_closure_may_cycle(const ScrClosure *c) {
 #if SCR_CYC_LEAF_SKIP
-  const size_t m = c->meta;
-  if (m == SCR_CLO_META_STATIC) return false; /* no captures, no ext */
-  if (m & 1u) return true;                    /* inline count, and it is not zero */
-  const ScrClosureExt *x = (const ScrClosureExt *)(uintptr_t)m;
-  return x->ncaps != 0 || x->props != NULL || x->implicit_proto != NULL;
+  if (c->ncaps8 != 0 && c->ncaps8 != 255) return true; /* inline count, and it is not zero */
+  const ScrClosureExt *x = scr_closure_ext_of(c);
+  if (x == NULL) return false; /* no captures, no ext */
+  return scr_closure_ncaps(c) != 0 || x->props != NULL || x->implicit_proto != NULL;
 #else
   (void)c;
   return true;
 #endif
 }
 
+/* The teardown of a closure whose count just reached zero: shared by scr_closure_release and by scr_dyn_release, which reaches the same object
+ * through its dyn FUNC identity (the object is one, so is its teardown). */
+void scr_closure_free_dead(ScrClosure *c) {
+  if (scr_closure_may_cycle(c)) scr_cyc_on_dead(c); /* see scr_box_release */
+  const size_t ncaps = scr_closure_ncaps(c);
+  for (size_t i = 0; i < ncaps; i++) {
+    scr_cap_release(c->caps[i]);
+  }
+  if ((c->w & 1u) != 0) scr_closure_teardown_ext(c, true); /* re-read: releasing a capture can run arbitrary teardown code */
+#ifdef SCR_RC_AUDIT
+  scr_live_closures--;
+  scr_clo_bump(c->fn, -1);
+#endif
+  scr_cyc_free(c);
+}
+
 void scr_closure_release(ScrClosure *c) {
   if (!c || c->rc == SIZE_MAX) return; /* NULL: an uninitialized `let` local */
   if (--c->rc == 0) {
-    if (scr_closure_may_cycle(c)) scr_cyc_on_dead(c); /* see scr_box_release */
-    const size_t meta = c->meta;
-    const size_t ncaps = (meta & 1u) ? (meta >> 1) : ((const ScrClosureExt *)(uintptr_t)meta)->ncaps;
-    for (size_t i = 0; i < ncaps; i++) {
-      scr_cap_release(c->caps[i]);
-    }
-    if ((c->meta & 1u) == 0) scr_closure_teardown_ext(c, true); /* re-read: releasing a capture can run arbitrary teardown code */
-#ifdef SCR_RC_AUDIT
-    scr_live_closures--;
-    scr_clo_bump(c->fn, -1);
-#endif
-    scr_cyc_free(c);
+    scr_closure_free_dead(c);
   } else if (scr_closure_may_cycle(c)) {
     scr_cyc_on_release(c); /* possible cycle root; may collect — c is done */
   }
@@ -601,7 +615,7 @@ void scr_closure_static_teardown(ScrClosure *c) {
   if (x == NULL) return;
   scr_box_release(x->props);
   x->props = NULL;
-  c->meta = (x->ncaps << 1) | 1u; /* back to the no-ext form: idempotent, and the ext is not leaked */
+  c->w = (uintptr_t)x->desc; /* back to the no-ext form: idempotent, and the ext is not leaked */
   free(x);
 }
 

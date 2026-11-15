@@ -155,7 +155,7 @@ static void dc_throw_bad_subscriber(const ScrDyn *cb) {
  * identity otherwise. */
 static bool dc_sub_matches(const ScrDyn *a, const ScrDyn *b) {
   if (a == b) return true;
-  return a->kind == SCR_DYN_FUNC && b->kind == SCR_DYN_FUNC && a->v.fn.clo == b->v.fn.clo;
+  return a->kind == SCR_DYN_FUNC && b->kind == SCR_DYN_FUNC && scr_dyn_fn_clo(a) == scr_dyn_fn_clo(b);
 }
 
 static void dc_sub_add(ScrDcChannel *ch, ScrDyn *cb) {

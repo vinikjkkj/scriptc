@@ -1662,7 +1662,7 @@ bool scr_dyn_is_global_this(const ScrDyn *d) {
 /* The name of a bound box: capture 2 holds the dyn string the box owns. Read
  * off the box, which keeps it alive for as long as the function is. */
 static const char *dyn_bound_name_of(const ScrDyn *d) {
-  ScrDyn *s = (ScrDyn *)scr_box_get_ref(d->v.fn.clo->caps[2]); /* +1 */
+  ScrDyn *s = (ScrDyn *)scr_box_get_ref(scr_dyn_fn_clo(d)->caps[2]); /* +1 */
   const char *p = s->v.str->data;
   scr_dyn_release(s);
   return p;
@@ -1718,8 +1718,8 @@ static ScrDyn *dyn_rebound_intrinsic_call(const ScrDyn *fn, const ScrDyn *thisv,
   *handled = false;
   if (fn->kind != SCR_DYN_FUNC || scr_dyn_fn_thunk(fn) != dyn_bound_intrinsic_thunk) return NULL;
   *handled = true;
-  ScrDyn *recv0 = (ScrDyn *)scr_box_get_ref(fn->v.fn.clo->caps[0]); /* +1 */
-  ScrDyn *name = (ScrDyn *)scr_box_get_ref(fn->v.fn.clo->caps[1]);  /* +1 */
+  ScrDyn *recv0 = (ScrDyn *)scr_box_get_ref(scr_dyn_fn_clo(fn)->caps[0]); /* +1 */
+  ScrDyn *name = (ScrDyn *)scr_box_get_ref(scr_dyn_fn_clo(fn)->caps[1]);  /* +1 */
   ScrDyn *r = NULL;
   if (thisv->kind == recv0->kind && (thisv->kind == SCR_DYN_ARR || thisv->kind == SCR_DYN_STR || thisv->kind == SCR_DYN_BYTES)) {
     r = scr_dyn_invoke((ScrDyn *)thisv, name->v.str->data, args, argc, "a built-in method");
@@ -4966,7 +4966,7 @@ static void dyn_reflect_render(ScrJsonBuf *b, const ScrDyn *d) {
     /* Node prints the function's source text. A TypeScript program's
      * functions carry none in this build (scr_fn_to_string traps on that),
      * so the message names the boundary instead of guessing the text. */
-    const char *table = (scr_dyn_fn_src(d) == NULL && scr_fn_text_row_hook != NULL) ? scr_fn_text_row_hook(d->v.fn.clo) : NULL;
+    const char *table = (scr_dyn_fn_src(d) == NULL && scr_fn_text_row_hook != NULL) ? scr_fn_text_row_hook(scr_dyn_fn_clo(d)) : NULL;
     if (table != NULL) {
       scr_jb_puts(b, table);
       return;
