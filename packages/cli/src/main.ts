@@ -1,11 +1,13 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { analyze, compile, compileC, compileKept, compileLibrary, layoutOrderFromProfile, ProvenanceRefusalError, renderAll, renderCoverageLines, resolveProvenanceSources, setProvenanceSources } from "@scriptc/compiler";
 import { defaultExecutableName } from "./paths.js";
+import { runProfiling, splitArgv } from "./pgo.js";
 
 const USAGE = `scriptc — TypeScript/JavaScript to native executables (experimental)
 
@@ -53,6 +55,43 @@ Options:
                      (steady set first, then other executed code, then startup-only;
                      names not listed go last, unknown names are ignored). Both
                      flags are off by default and change nothing unless passed.
+                     A build also picks up \`<entry>.scriptc-order.txt\` beside the entry
+                     by itself and prints one line saying so; --layout-order <file>
+                     names another, --no-layout-order ignores the file. A file recorded
+                     from an older version of the program never breaks the build or
+                     changes behaviour (unknown names are ignored, new functions go
+                     last); the build warns once when fewer than 60% of the 30 or more
+                     program functions it lists still exist.
+      --no-layout-order
+                     do not pick up \`<entry>.scriptc-order.txt\` automatically
+      --pgo          profile-guided layout in one command: an instrumented build, one
+                     profiling run, the order file, and the final ordered binary.
+                     Requires --pgo-run and either --pgo-signal or --pgo-no-signal.
+                     Writes \`<entry>.scriptc-order.txt\` (check it in) or the path
+                     --layout-order-out names. Linux and macOS only.
+      --pgo-run "<cmd>"
+                     the profiling run. WARNING: it EXECUTES the program you name; it
+                     is never inferred and never run by a normal build. The command is
+                     split into words (whitespace; 'single' and "double" quotes; a
+                     backslash escapes the next character) and started WITHOUT a shell,
+                     so pipes, redirections, globs and $VARIABLES are not interpreted:
+                     name a shell yourself (--pgo-run "sh -c '...'") when you need one.
+                     {bin} in any word is replaced by the instrumented binary, which
+                     is also exported as $SCR_PGO_BIN for a driver that starts it. The
+                     program must exit (or be terminated: SIGTERM keeps the profile).
+      --pgo-signal <regex>
+                     send the epoch signal (SIGUSR1) to the profiled program when a
+                     line of the command's output first matches <regex>: put it where
+                     startup is over and the real work begins. The run fails if it
+                     never matches.
+      --pgo-no-signal
+                     profile without an epoch signal: one epoch, so the order is
+                     first-reached order only (weaker for servers, whose steady-state
+                     code is what an epoch signal separates from startup).
+      --pgo-timeout <seconds>
+                     stop the profiling run after this long (default 120)
+      --layout-order-out <path>
+                     where --pgo writes the order file
       --dynamic      embed the dynamic engine (adds ~620KB; static stays the default)
       --ffi <file>   bind signature-only TypeScript declarations to native
                      C symbols and link the manifest's archives/libraries
@@ -136,6 +175,14 @@ const CLI_OPTIONS = {
   sanitize: { type: "boolean", default: false },
   "layout-profile": { type: "boolean", default: false },
   "layout-order": { type: "string" },
+  // declared only so parseArgs accepts the spelling: with allowNegative it arrives as `layout-order: false` (read below), never as this key
+  "no-layout-order": { type: "boolean", default: false },
+  pgo: { type: "boolean", default: false },
+  "pgo-run": { type: "string" },
+  "pgo-signal": { type: "string" },
+  "pgo-no-signal": { type: "boolean", default: false },
+  "pgo-timeout": { type: "string" },
+  "layout-order-out": { type: "string" },
   dynamic: { type: "boolean", default: false },
   ffi: { type: "string" },
   "npm-static": { type: "string", multiple: true },
@@ -303,16 +350,36 @@ async function main(): Promise<number> {
   const stem = basename(input).replace(/\.keep\.json$/, "").replace(/\.(ts|js|mjs|cjs|c|ll)$/, "");
   const outPath = values.out ? resolve(values.out) : join(outDir, defaultExecutableName(stem));
 
-  const build = async (): Promise<string> => {
+  // The order file a normal build applies: --layout-order names one; otherwise `<entry>.scriptc-order.txt` beside the entry, unless
+  // --no-layout-order. One stderr line says it was applied.
+  const entryOrderPath = join(dirname(input), `${basename(input).replace(/\.(ts|js|mjs|cjs)$/, "")}.scriptc-order.txt`);
+  const resolveLayoutOrder = (): string | undefined => {
+    // parseArgs runs with allowNegative, so `--no-layout-order` arrives as `layout-order: false`
+    if ((values["layout-order"] as unknown) === false || values["no-layout-order"]) return undefined;
+    if (typeof values["layout-order"] === "string") return resolve(values["layout-order"]);
+    if (values["layout-profile"] || values["from-kept"] || values["from-c"]) return undefined;
+    if (!existsSync(entryOrderPath)) return undefined;
+    process.stderr.write(`scriptc: layout order applied: ${entryOrderPath}\n`);
+    return entryOrderPath;
+  };
+
+  interface BuildOverrides {
+    outPath?: string;
+    layoutProfile?: boolean;
+    /** `null`: no order file at all (not even the beside-the-entry one). */
+    layoutOrder?: string | null;
+  }
+  const build = async (ov: BuildOverrides = {}): Promise<string> => {
+    const buildOut = ov.outPath ?? outPath;
     if (values["from-kept"]) {
       if (ffiProfilePath !== undefined) fail("--ffi cannot be combined with --from-kept (a keep file does not record the libraries)");
-      if (values["layout-order"] !== undefined) {
+      if (typeof values["layout-order"] === "string") {
         fail("--layout-order changes the emitted program, so it needs a real build; --from-kept only re-runs clang and the link");
       }
       if (backend !== undefined || npmStatic !== undefined) fail("--backend and --npm-static pick what is emitted: --from-kept uses the kept build as it is");
       try {
         await compileKept(input, {
-          outPath,
+          outPath: buildOut,
           sanitize: values.sanitize,
           dynamic: values.dynamic,
           ...(values["layout-profile"] ? { layoutProfile: true } : {}),
@@ -320,23 +387,24 @@ async function main(): Promise<number> {
       } catch (err) {
         fail(err instanceof Error ? err.message : String(err));
       }
-      return outPath;
+      return buildOut;
     }
     if (values["from-c"]) {
       if (ffiProfilePath !== undefined) {
         fail("--ffi is a TypeScript/JavaScript compiler feature and cannot be combined with --from-c");
       }
-      await compileC({ cPath: input, outPath, sanitize: values.sanitize, dynamic: values.dynamic });
-      return outPath;
+      await compileC({ cPath: input, outPath: buildOut, sanitize: values.sanitize, dynamic: values.dynamic });
+      return buildOut;
     }
+    const layoutOrderPath = ov.layoutOrder === undefined ? resolveLayoutOrder() : ov.layoutOrder === null ? undefined : ov.layoutOrder;
     const result = await compile(input, {
-      outPath,
+      outPath: buildOut,
       outDir,
       emitIr: values["emit-ir"],
       sanitize: values.sanitize,
       dynamic: values.dynamic,
-      ...(values["layout-profile"] ? { layoutProfile: true } : {}),
-      ...(values["layout-order"] !== undefined ? { layoutOrder: resolve(values["layout-order"]) } : {}),
+      ...(values["layout-profile"] || ov.layoutProfile ? { layoutProfile: true } : {}),
+      ...(layoutOrderPath !== undefined ? { layoutOrder: layoutOrderPath } : {}),
       ...(backend !== undefined ? { backend } : {}),
       ...(npmStatic !== undefined ? { npmStatic } : {}),
       ...(ffiProfilePath !== undefined ? { ffiProfilePath } : {}),
@@ -393,6 +461,67 @@ async function main(): Promise<number> {
     }
     return result.binaryPath;
   };
+
+  if (values.pgo) {
+    if (command !== "build") fail(`--pgo is a build mode (scriptc build <entry> --pgo --pgo-run "<cmd>" ...)\n\n${USAGE}`);
+    if (values["from-kept"] || values["from-c"] || values["layout-profile"] || values["layout-order"] !== undefined) {
+      fail(`--pgo drives its own instrumented and ordered builds: it cannot be combined with --from-kept, --from-c, --layout-profile or --layout-order\n\n${USAGE}`);
+    }
+    if (process.platform === "win32") fail("--pgo needs SIGUSR1 and is not supported on Windows");
+    const runCmd = values["pgo-run"];
+    if (runCmd === undefined || runCmd.trim() === "") {
+      fail(`--pgo needs --pgo-run "<cmd>": the profiling run executes your program and is never inferred\n\n${USAGE}`);
+    }
+    const sig = values["pgo-signal"];
+    if ((sig === undefined) === !values["pgo-no-signal"]) {
+      fail(`--pgo needs exactly one of --pgo-signal <regex> and --pgo-no-signal\n\n${USAGE}`);
+    }
+    let signalRe: RegExp | null = null;
+    if (sig !== undefined) {
+      try {
+        signalRe = new RegExp(sig);
+      } catch (e) {
+        fail(`--pgo-signal: not a regular expression: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    const timeoutS = values["pgo-timeout"] === undefined ? 120 : Number(values["pgo-timeout"]);
+    if (!Number.isFinite(timeoutS) || timeoutS <= 0) fail("--pgo-timeout needs a positive number of seconds");
+    let argv: string[];
+    try {
+      argv = splitArgv(runCmd);
+    } catch (e) {
+      fail(e instanceof Error ? e.message : String(e));
+    }
+    const orderOut = values["layout-order-out"] !== undefined ? resolve(values["layout-order-out"]) : entryOrderPath;
+    const work = mkdtempSync(join(tmpdir(), "scriptc-pgo-"));
+    const profBin = `${outPath}.pgo-prof`;
+    const profilePath = join(work, "profile.txt");
+    try {
+      process.stderr.write(`pgo: 1/4 instrumented build\n`);
+      await build({ outPath: profBin, layoutProfile: true, layoutOrder: null });
+      process.stderr.write(`pgo: 2/4 profiling run: ${runCmd}\n`);
+      const run = await runProfiling({ argv, cwd: dirname(input), bin: profBin, profilePath, pidPath: join(work, "pid"), signal: signalRe, timeoutMs: timeoutS * 1000 }).catch(
+        (e: unknown) => fail(e instanceof Error ? e.message : String(e)),
+      );
+      if (signalRe !== null && !run.signalled) {
+        fail(`--pgo-signal ${JSON.stringify(sig)} never matched a line of the command's output (or the profiled program never started), so no epoch signal was sent. ` +
+          `Fix the pattern, or use --pgo-no-signal for a single-epoch profile.`);
+      }
+      if (!run.timedOut && run.exitCode !== 0) fail(`--pgo-run exited with status ${run.exitCode}; the profile of a failed run is not trusted`);
+      if (run.timedOut) process.stderr.write(`pgo: the run reached --pgo-timeout (${timeoutS}s) and was stopped; its profile is used\n`);
+      process.stderr.write(`pgo: 3/4 order file ${orderOut}\n`);
+      const text = layoutOrderFromProfile(profBin, readFileSync(profilePath, "utf8"));
+      writeFileSync(orderOut, text);
+      process.stderr.write(`pgo: 4/4 ordered build\n`);
+      const finalBinary = await build({ layoutOrder: orderOut });
+      process.stderr.write(`scriptc: layout order applied: ${orderOut}\n`);
+      process.stdout.write(`${finalBinary}\n`);
+      return 0;
+    } finally {
+      rmSync(profBin, { force: true });
+      rmSync(work, { recursive: true, force: true });
+    }
+  }
 
   const binary = await build();
 
