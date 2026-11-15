@@ -637,6 +637,18 @@ __attribute__((constructor)) static void scr_dyn_idle_trim_reg(void) { scr_cyc_i
  * edge is uncollectable (what the whole tree was before this change),
  * whereas a traced edge the teardown also releases is a double free. */
 static void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx);
+#ifndef SCR_BC_BITS
+#define SCR_BC_BITS 13
+#endif
+struct ScrBoxCacheEnt { const ScrStr *s; ScrDyn *box; };
+static struct ScrBoxCacheEnt scr_bc[1u << SCR_BC_BITS];
+static inline void scr_bc_clear(ScrDyn *d) {
+  const ScrStr *s = d->v.str;
+  if (s != NULL) {
+    unsigned h = (unsigned)(((size_t)s >> 4) * 2654435761u) >> (32 - SCR_BC_BITS);
+    if (scr_bc[h].box == d) scr_bc[h].s = NULL;
+  }
+}
 static void scr_dyn_gcfree(void *o);
 /* The ghost weight (scr_runtime.h SCR_PROPS_GHOST) of a property table that is being torn down: one out-of-line copy for the release and the
  * collector's teardown, so neither carries the loop. */
@@ -869,6 +881,7 @@ void scr_dyn_trace_v(void *o, ScrTraceVisit visit, void *ctx) {
  * the collector has already accounted for. Buffers and malloc'd keys are this function's, because
  * they are not references at all. */
 static void scr_dyn_gcfree(void *o) {
+  if (((ScrDyn *)o)->kind == SCR_DYN_STR) scr_bc_clear((ScrDyn *)o);
   ScrDyn *d = (ScrDyn *)o;
 #ifdef SCR_DYNCEN_ON
   scr_dyncen_note_dead(d); /* the collector's exit from the live set; the
@@ -953,6 +966,7 @@ static void scr_dyn_gcfree(void *o) {
 /* The teardown of a dyn whose count just reached zero. Out of line and cold so scr_dyn_release below is a leaf the compiler need not give
  * a register-saving prologue: a decrement that does not free (about 4 releases in 5 on the mysql arm) is a handful of instructions. */
 static __attribute__((noinline)) void scr_dyn_release_final(ScrDyn *d) {
+  if (d->kind == SCR_DYN_STR) scr_bc_clear(d);
   scr_cyc_on_dead(d); /* drop any candidate-buffer entry before teardown */
   /* THE WEAK-KEY DEATH HOOK, AND THE ROUTE scr_cyc_free CANNOT SEE.
    *
@@ -2572,9 +2586,17 @@ ScrDyn *scr_dyn_new_str(ScrStr *s) {
    * allocates; an immortal literal's cap is its length, so only a codec string
    * has a cap this large. */
   if (s->cap >= 0xFFFD0000u) return scr_textcodec_box_fn(s); /* immortal or heap codec (cap marker) */
-  ScrDyn *d = scr_dyn_alloc(SCR_DYN_STR);
-  d->v.str = scr_str_retain(s);
-  return d;
+  /* LAB (gap3), never lands: one weak box per string block in a small direct-mapped cache. A STR node is immutable, so a second box of the same block is the same value; a hit answers
+   * a retain of the live box instead of a fresh 40-byte node. The entry is weak: the node's death (scr_dyn_release_final / scr_dyn_gcfree) clears it. */
+  {
+    unsigned h = (unsigned)(((size_t)s >> 4) * 2654435761u) >> (32 - SCR_BC_BITS);
+    if (scr_bc[h].s == s) return scr_dyn_retain(scr_bc[h].box);
+    ScrDyn *d = scr_dyn_alloc(SCR_DYN_STR);
+    d->v.str = scr_str_retain(s);
+    scr_bc[h].s = s;
+    scr_bc[h].box = d;
+    return d;
+  }
 }
 
 /* SHARED DYN BOXES, for the typed-to-dyn conversion of a UNION value only (the union walkers call these; nothing else does, so a program
