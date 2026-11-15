@@ -6831,6 +6831,22 @@ static inline bool scr_dyn_bytes_eq(const char *a, const char *b, size_t n) {
 #endif
 }
 
+/* THE COLLECTOR'S PACING WEIGHT OF A PLAIN ENTRY. The cycle collector paces its passes by scr_cyc_live/8, and a plain property used to be a
+ * descriptor row, one live array node, that is no longer allocated. A program whose live set is mostly such properties would then collect several
+ * times as often over the same edges (measured: +56% instructions on a small expando micro), so every plain entry keeps counting the node it no
+ * longer has: +1 here when one is made, -1 where one dies (the dyn object teardown, the collector's teardown, a delete, a redefinition into a row).
+ * -DSCR_PROPS_GHOST=0 switches the weight off (the control that shows the cost). */
+#ifndef SCR_PROPS_GHOST
+#define SCR_PROPS_GHOST 1
+#endif
+extern size_t scr_cyc_live;
+#if SCR_PROPS_GHOST
+#define SCR_PROPS_GHOST_ADD(n) (scr_cyc_live += (size_t)(n))
+#define SCR_PROPS_GHOST_SUB(n) (scr_cyc_live -= (size_t)(n))
+#else
+#define SCR_PROPS_GHOST_ADD(n) ((void)(n))
+#define SCR_PROPS_GHOST_SUB(n) ((void)(n))
+#endif
 static inline const ScrDynEntry *scr_dyn_props_find(const ScrDyn *tbl, const char *key, size_t key_len) {
   /* The count-down walk of scr_dyn_obj_get, for its reason: the empty asm keeps the counter a live value, so clang does not rewrite the loop into
    * "advance until an end pointer" (a len * 24 setup on every call). It emits no instruction of its own. */
@@ -6844,6 +6860,7 @@ static inline const ScrDynEntry *scr_dyn_props_find(const ScrDyn *tbl, const cha
 static inline void scr_dyn_props_append_plain(ScrDyn *tbl, const char *key, size_t key_len, ScrDyn *value) {
   scr_dyn_obj_set(tbl, key, key_len, value);
   tbl->v.obj.entries[tbl->v.obj.len - 1].plain_prop = 1;
+  SCR_PROPS_GHOST_ADD(1);
 }
 /* A non-owning member (value_borrowed): `value` is held WITHOUT a reference, so
  * the holder's release skips it. Only for a back-reference to the holder itself,
