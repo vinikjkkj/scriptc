@@ -60,7 +60,7 @@
  * invoke adapters receive a va_list — the C-companion-TU decision) and
  * the island surface (jsval/jsExit — the engine bridge).
  */
-import { storesFreshDynNumber } from "../../ir/dyn-keep.js";
+import { dynRoundTripShare, storesFreshDynNumber } from "../../ir/dyn-keep.js";
 import { canonPlanOf, type CanonPlan } from "../../ir/num-canon.js";
 import { HelperNamer } from "../helper-names.js";
 import { CLOSURE_LLVM_TYPE, closureStaticLlvmInit } from "../closure-layout.js";
@@ -11670,6 +11670,21 @@ class LlEmitter {
         return { name: "", type: e.type };
       }
       case "dynFrom": {
+        // A dyn that is checked into a number and boxed again keeps its node (ir/dyn-keep.ts dynRoundTripShare): the check runs for its throw,
+        // then the same node is retained.
+        const shared = dynRoundTripShare(e);
+        if (shared !== null) {
+          const inner = this.emitExpr(shared.value);
+          const helper = this.dyn.dynCheckHelper(shared.type);
+          const chk = B.tmp();
+          B.line(`${chk} = call double @${helper}(ptr ${inner.name}, ptr null)`);
+          this.own({ name: chk, type: shared.type });
+          this.emitPendingCheck();
+          this.declare(`declare ptr @scr_dyn_retain_v(ptr)`);
+          const kept = B.tmp();
+          B.line(`${kept} = call ptr @scr_dyn_retain_v(ptr ${inner.name})`);
+          return this.own({ name: kept, type: e.type });
+        }
         // Static value → fresh dyn tree (+1) through the interned per-type
         // converter; the operand stays borrowed (frame-released as usual).
         // Bare unit literals (an `undefined`/`null` stored under an

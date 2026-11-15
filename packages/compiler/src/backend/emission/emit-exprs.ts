@@ -21,6 +21,7 @@ import { dynDestrCheckHelper, dynIterNHelper, dynKeyGetHelper, originMarkC, recS
 import { genResultThunkFor } from "./emit-async.js";
 import { emitCoroAwait, emitCoroHop, emitCoroUnionSuspend } from "./emit-coro.js";
 import { BORROWING_DYN_LIBCALLS, isStableReceiverOperand } from "../../ir/analysis.js";
+import { dynRoundTripShare } from "../../ir/dyn-keep.js";
 import { wsGlobalCtorFor } from "./emit-ws.js";
 
 
@@ -163,6 +164,45 @@ function borrowedDynLocal(E: CEmitter, a: IrExpr): boolean {
   if (a.kind !== "varRef" || a.nullTest || a.type.kind !== "dyn") return false;
   const local = E.currentLocals.get(a.localId);
   return local !== undefined && !local.boxed && !local.tdz && !E.globalsById.has(a.localId);
+}
+
+/** The dynCheck of `e` over its already-evaluated BORROWED dyn operand `dyn` (shared by the dynCheck arm and by the dyn round trip that keeps
+ * its node, ir/dyn-keep.ts dynRoundTripShare): the helper call and its pending check, and the two compile-time instruments. */
+function dynCheckOn(E: CEmitter, e: Extract<IrExpr, { kind: "dynCheck" }>, dyn: Temp): Temp {
+    const helper = E.dynCheckHelper(e.type);
+    // SCRIPTC_DC_WHERE=1 — the RUNTIME instrument for this family. The
+    // helper is interned per TARGET TYPE (`sc_dc_0` is every check into
+    // `string`), so a thrown `expected string at $, got undefined` names
+    // the type and not the site, and zapo's TU holds hundreds of them.
+    // The path argument is otherwise NULL and renders as the bare root
+    // `$`; a one-segment path whose KEY is `file@offset` renders the
+    // site into the very message, with no runtime change and no effect
+    // on which values pass. Off by default: it is a diagnostic spelling
+    // of an error text, not a behaviour.
+    const where = process.env["SCRIPTC_DC_WHERE"] === "1"
+      ? `&(ScrDynPath){ NULL, ${cStringLiteral(Buffer.from(`${e.loc.file}@${String(e.loc.start)}`, "utf8"))}, 0 }`
+      : "NULL";
+    // SCRIPTC_DC_CENSUS=1 — the COMPILE-TIME instrument for this family,
+    // and the twin SCRIPTC_DC_WHERE has no way to be. DC_WHERE renames a
+    // path segment in a message only a check that FIRES ever prints, so
+    // it can only be read from a run, and only for the sites that failed.
+    // This one names every emitted boundary crossing whether it fires or
+    // not: the interned helper (`sc_dc_<n>` — one per TARGET TYPE, so the
+    // statements the census counts are its arms, not these calls), the
+    // target typeKey, and the SOURCE position the crossing came from. It
+    // writes to stderr and touches no emitted byte.
+    if (process.env["SCRIPTC_DC_CENSUS"] !== undefined) {
+      // The position comes off the IR NODE, never off srcComment: that
+      // one names the emitter's CURRENT module, which during walker and
+      // helper emission is not the module the crossing came from. Reading
+      // it here attributed all 1 768 of zapo's crossings to the ENTRY
+      // file, which is the shape of a wrong answer that looks tidy.
+      const at = `${e.loc.file}@${String(e.loc.start)}`;
+      process.stderr.write(
+        `DCCENSUS ${helper} ${e.narrowBridge === true ? "narrowBridge" : "check"} ${at} :: ${typeKey(e.type)}\n`,
+      );
+    }
+    return E.fallibleTemp(e.type, `${helper}(${dyn.name}, ${where})`);
 }
 
 export function emitExpr(E: CEmitter, e: IrExpr): Temp {
@@ -2959,6 +2999,17 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         return E.newTemp(e.type, `(${cType(e.type).trim()})scr_map_iter_val_ref(${m}, ${slot.name})`);
       }
       case "dynFrom": {
+        // A dyn that is checked into a number and boxed again keeps its node (ir/dyn-keep.ts dynRoundTripShare): the check runs for its throw,
+        // then the same node is retained.
+        const shared = dynRoundTripShare(e);
+        if (shared !== null) {
+          const inner = E.emitExpr(shared.value);
+          dynCheckOn(E, shared, inner);
+          if (process.env["SCRIPTC_DC_CENSUS"] !== undefined) {
+            process.stderr.write(`DCSHARE ${shared.loc.file}@${String(shared.loc.start)}\n`);
+          }
+          return E.newTemp(e.type, `scr_dyn_retain(${inner.name})`);
+        }
         // Static value → fresh dyn tree (+1) through the interned per-type
         // converter; the operand stays borrowed (frame-released as usual).
         // Bare unit literals (an `undefined`/`null` stored under an
@@ -9407,41 +9458,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // TypeError-shaped, path-annotated string. The dyn temp is BORROWED;
         // the result joins the frame BEFORE the pending check so an unwind
         // releases the dummy (NULL for refcounted targets) harmlessly.
-        const dyn = E.emitExpr(e.value);
-        const helper = E.dynCheckHelper(e.type);
-        // SCRIPTC_DC_WHERE=1 — the RUNTIME instrument for this family. The
-        // helper is interned per TARGET TYPE (`sc_dc_0` is every check into
-        // `string`), so a thrown `expected string at $, got undefined` names
-        // the type and not the site, and zapo's TU holds hundreds of them.
-        // The path argument is otherwise NULL and renders as the bare root
-        // `$`; a one-segment path whose KEY is `file@offset` renders the
-        // site into the very message, with no runtime change and no effect
-        // on which values pass. Off by default: it is a diagnostic spelling
-        // of an error text, not a behaviour.
-        const where = process.env["SCRIPTC_DC_WHERE"] === "1"
-          ? `&(ScrDynPath){ NULL, ${cStringLiteral(Buffer.from(`${e.loc.file}@${String(e.loc.start)}`, "utf8"))}, 0 }`
-          : "NULL";
-        // SCRIPTC_DC_CENSUS=1 — the COMPILE-TIME instrument for this family,
-        // and the twin SCRIPTC_DC_WHERE has no way to be. DC_WHERE renames a
-        // path segment in a message only a check that FIRES ever prints, so
-        // it can only be read from a run, and only for the sites that failed.
-        // This one names every emitted boundary crossing whether it fires or
-        // not: the interned helper (`sc_dc_<n>` — one per TARGET TYPE, so the
-        // statements the census counts are its arms, not these calls), the
-        // target typeKey, and the SOURCE position the crossing came from. It
-        // writes to stderr and touches no emitted byte.
-        if (process.env["SCRIPTC_DC_CENSUS"] !== undefined) {
-          // The position comes off the IR NODE, never off srcComment: that
-          // one names the emitter's CURRENT module, which during walker and
-          // helper emission is not the module the crossing came from. Reading
-          // it here attributed all 1 768 of zapo's crossings to the ENTRY
-          // file, which is the shape of a wrong answer that looks tidy.
-          const at = `${e.loc.file}@${String(e.loc.start)}`;
-          process.stderr.write(
-            `DCCENSUS ${helper} ${e.narrowBridge === true ? "narrowBridge" : "check"} ${at} :: ${typeKey(e.type)}\n`,
-          );
-        }
-        return E.fallibleTemp(e.type, `${helper}(${dyn.name}, ${where})`);
+        return dynCheckOn(E, e, E.emitExpr(e.value));
       }
       case "yieldExpr": {
         // Park the operand in the generator's OUT slot (moved in, typed by
