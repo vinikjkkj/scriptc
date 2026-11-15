@@ -4253,6 +4253,12 @@ static bool clsprop_configurable(const ScrDyn *q) { return scr_dyn_truthy(q->v.a
 static bool scr_clsprop_enumerable(const ScrDyn *q) {
   return q->v.arr.len >= 5 && scr_dyn_truthy(q->v.arr.items[4]);
 }
+/* A table ENTRY is either a plain data property (ScrDynEntry.plain_prop: the value IS the property, writable + enumerable + configurable, no
+ * row) or a descriptor row (a non-default property, or a field marker). The helpers below read the row of a non-plain entry. */
+static bool clsent_marker(const ScrDynEntry *e) { return !e->plain_prop && e->value->kind == SCR_DYN_ARR && e->value->v.arr.len == 6; }
+static bool clsent_enumerable(const ScrDynEntry *e) {
+  return e->plain_prop || (e->value->kind == SCR_DYN_ARR && scr_clsprop_enumerable(e->value));
+}
 
 ScrDyn *scr_cls_props_ensure(ScrDyn *cur) {
   if (cur != NULL && cur->kind == SCR_DYN_OBJ) return scr_dyn_retain(cur);
@@ -4279,7 +4285,9 @@ static ScrDyn *dyn_clone_table(const ScrDyn *tbl, bool rows) {
   ScrDyn *o = scr_dyn_new_obj();
   for (size_t i = 0; i < tbl->v.obj.len; i++) {
     const ScrDynEntry *e = &tbl->v.obj.entries[i];
-    scr_dyn_obj_set(o, e->key, e->key_len, dyn_clone_rows_copy(e->value, rows));
+    /* a plain property's value is the property, never a row: shared, and still plain in the copy (keys are unique, so the store appends) */
+    scr_dyn_obj_set(o, e->key, e->key_len, dyn_clone_rows_copy(e->value, rows && !e->plain_prop));
+    if (e->plain_prop) o->v.obj.entries[o->v.obj.len - 1].plain_prop = 1;
   }
   return o;
 }
@@ -4329,8 +4337,8 @@ ScrDyn *scr_dyn_clone_own(ScrDyn *src) {
 
 bool scr_cls_props_has(const ScrDyn *tbl, const ScrStr *key) {
   if (tbl == NULL || tbl->kind != SCR_DYN_OBJ || key == NULL) return false;
-  const ScrDyn *ent = scr_dyn_obj_get(tbl, key->data, key->len);
-  return ent != NULL && !(ent->kind == SCR_DYN_ARR && ent->v.arr.len == 6); /* a field marker is not a table key */
+  const ScrDynEntry *ent = scr_dyn_props_find(tbl, key->data, key->len);
+  return ent != NULL && !clsent_marker(ent); /* a field marker is not a table key */
 }
 
 /* How many ENUMERABLE properties the table holds. util.inspect asks
@@ -4341,8 +4349,7 @@ double scr_cls_props_count(const ScrDyn *tbl) {
   if (tbl == NULL || tbl->kind != SCR_DYN_OBJ) return 0;
   size_t n = 0;
   for (size_t i = 0; i < tbl->v.obj.len; i++) {
-    const ScrDyn *q = tbl->v.obj.entries[i].value;
-    if (q->kind == SCR_DYN_ARR && scr_clsprop_enumerable(q)) n++;
+    if (clsent_enumerable(&tbl->v.obj.entries[i])) n++;
   }
 #ifdef SCR_SYMTAB
   /* ...and the enumerable symbol-keyed properties the table's ext hosts (scr_symbol.c) */
@@ -4354,8 +4361,11 @@ double scr_cls_props_count(const ScrDyn *tbl) {
 
 ScrDyn *scr_cls_props_get(const ScrDyn *tbl, const ScrStr *key) {
   if (tbl == NULL || tbl->kind != SCR_DYN_OBJ || key == NULL) return NULL;
-  ScrDyn *ent = scr_dyn_obj_get(tbl, key->data, key->len);
-  if (ent == NULL || ent->v.arr.len < 5 || ent->v.arr.len == 6) return NULL; /* a field marker names no table value */
+  const ScrDynEntry *pe = scr_dyn_props_find(tbl, key->data, key->len);
+  if (pe == NULL) return NULL;
+  if (pe->plain_prop) return scr_dyn_retain(pe->value);
+  ScrDyn *ent = pe->value;
+  if (ent->v.arr.len < 5 || ent->v.arr.len == 6) return NULL; /* a field marker names no table value */
   if (clsprop_is_data(ent)) return scr_dyn_retain(clsprop_value(ent));
   ScrDyn *g = clsprop_getter(ent);
   /* A set-only accessor reads `undefined` — JS's answer, not a fence:
@@ -4389,7 +4399,7 @@ ScrDyn *scr_cls_props_keys(const ScrDyn *tbl) {
   for (size_t oi = 0; oi < tbl->v.obj.len; oi++) {
     const ScrDynEntry *e = &tbl->v.obj.entries[ord != NULL ? ord[oi] : oi];
     const ScrDyn *q = e->value;
-    if (e->key == NULL || q == NULL || q->kind != SCR_DYN_ARR || !scr_clsprop_enumerable(q)) continue;
+    if (e->key == NULL || q == NULL || !clsent_enumerable(e)) continue;
     ScrStr *ks = scr_str_new(e->key, e->key_len);
     scr_dyn_arr_push(out, scr_dyn_new_str(ks));
     scr_str_release(ks);
@@ -4425,7 +4435,16 @@ void scr_cls_props_set(ScrDyn *tbl, const ScrStr *key, const ScrDyn *value) {
     scr_throw_error_msg(SCR_ERR_ERROR, "the instance property table is missing", 37);
     return;
   }
-  ScrDyn *ent = scr_dyn_obj_get(tbl, key->data, key->len);
+  const ScrDynEntry *pe = scr_dyn_props_find(tbl, key->data, key->len);
+  if (pe != NULL && pe->plain_prop) {
+    /* an ordinary data property: the bare value is replaced (a stored small integer is the shared box) */
+    ScrDynEntry *m = (ScrDynEntry *)pe;
+    ScrDyn *old = m->value;
+    m->value = scr_dyn_keep(scr_dyn_retain((ScrDyn *)value));
+    scr_dyn_release(old); /* after the store: value may BE old */
+    return;
+  }
+  ScrDyn *ent = pe != NULL ? pe->value : NULL;
   if (ent != NULL && ent->kind == SCR_DYN_ARR && ent->v.arr.len >= 5) {
     if (clsprop_is_data(ent)) {
       if (!clsprop_writable(ent)) {
@@ -4438,7 +4457,7 @@ void scr_cls_props_set(ScrDyn *tbl, const ScrStr *key, const ScrDyn *value) {
         return;
       }
       ScrDyn *old = ent->v.arr.items[1];
-      ent->v.arr.items[1] = scr_dyn_retain((ScrDyn *)value);
+      ent->v.arr.items[1] = scr_dyn_keep(scr_dyn_retain((ScrDyn *)value));
       scr_dyn_release(old); /* after the retain: value may BE old */
       return;
     }
@@ -4456,13 +4475,8 @@ void scr_cls_props_set(ScrDyn *tbl, const ScrStr *key, const ScrDyn *value) {
     scr_throw_error_msg(SCR_ERR_ERROR, msg, strlen(msg));
     return;
   }
-  ScrDyn *fresh = scr_dyn_new_arr();
-  scr_dyn_arr_push(fresh, scr_dyn_new_bool(true));
-  scr_dyn_arr_push(fresh, scr_dyn_retain((ScrDyn *)value));
-  scr_dyn_arr_push(fresh, scr_dyn_new_bool(true));
-  scr_dyn_arr_push(fresh, scr_dyn_new_bool(true));
-  scr_dyn_arr_push(fresh, scr_dyn_new_bool(true));
-  scr_dyn_obj_set(tbl, key->data, key->len, fresh); /* ownership moves in */
+  /* A missing key creates the ordinary data property: the bare value in a plain entry, no descriptor row */
+  scr_dyn_props_append_plain(tbl, key->data, key->len, scr_dyn_keep(scr_dyn_retain((ScrDyn *)value)));
 }
 
 /* One boolean out of a descriptor: present-and-truthy, present-and-falsy,
@@ -4529,9 +4543,12 @@ bool scr_cls_props_define(ScrDyn *tbl, const ScrStr *key, ScrDyn *desc,
    * EXISTS, and defaults it to false only on creation. The table is the
    * only place such a property can live, so `current` is read from it
    * and from nowhere else. */
-  ScrDyn *cur = scr_dyn_obj_get(tbl, key->data, key->len);
+  const ScrDynEntry *cure = scr_dyn_props_find(tbl, key->data, key->len);
+  const ScrDyn *cur = cure != NULL && !cure->plain_prop ? cure->value : NULL;
   bool curEnum = false, curConf = false, curWrite = false;
-  if (cur != NULL && cur->v.arr.len >= 5) {
+  if (cure != NULL && cure->plain_prop) {
+    curEnum = curConf = curWrite = true; /* a plain entry is the default data property */
+  } else if (cur != NULL && cur->v.arr.len >= 5) {
     curEnum = scr_clsprop_enumerable(cur);
     curConf = clsprop_configurable(cur);
     curWrite = clsprop_is_data(cur) && clsprop_writable(cur);
@@ -4560,6 +4577,20 @@ bool scr_cls_props_define(ScrDyn *tbl, const ScrStr *key, ScrDyn *desc,
       return false;
     }
   }
+  if (!is_acc && writable && configurable && enumerable) {
+    /* the default data property: the bare value in a plain entry */
+    ScrDyn *pv = scr_dyn_keep(scr_dyn_retain(value ? value : scr_dyn_undefined()));
+    if (cure == NULL) {
+      scr_dyn_props_append_plain(tbl, key->data, key->len, pv);
+    } else {
+      ScrDynEntry *m = (ScrDynEntry *)cure;
+      ScrDyn *old = m->value;
+      m->value = pv;
+      m->plain_prop = 1;
+      scr_dyn_release(old);
+    }
+    return true;
+  }
   ScrDyn *ent = scr_dyn_new_arr();
   scr_dyn_arr_push(ent, scr_dyn_new_bool(!is_acc));
   scr_dyn_arr_push(ent, scr_dyn_retain(is_acc ? (getter ? getter : scr_dyn_undefined())
@@ -4568,7 +4599,15 @@ bool scr_cls_props_define(ScrDyn *tbl, const ScrStr *key, ScrDyn *desc,
                                : scr_dyn_new_bool(writable));
   scr_dyn_arr_push(ent, scr_dyn_new_bool(configurable));
   scr_dyn_arr_push(ent, scr_dyn_new_bool(enumerable));
-  scr_dyn_obj_set(tbl, key->data, key->len, ent); /* ownership moves in */
+  if (cure != NULL && cure->plain_prop) {
+    ScrDynEntry *m = (ScrDynEntry *)cure; /* a plain entry turns into a row: the row replaces the bare value in place, keeping the key's position */
+    ScrDyn *old = m->value;
+    m->value = ent;
+    m->plain_prop = 0;
+    scr_dyn_release(old);
+  } else {
+    scr_dyn_obj_set(tbl, key->data, key->len, ent); /* ownership moves in */
+  }
   return true;
 }
 
