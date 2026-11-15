@@ -1128,11 +1128,11 @@ __attribute__((noinline)) void scr_dyn_release(ScrDyn *d) {
      * Buffering them would cost a full graph walk per 256 releases of the
      * hottest allocation in the runtime and could never find anything. */
     if (d->kind == SCR_DYN_OBJINST) {
-      if (scr_dyn_inst_is_head(d)) { /* undo the decrement and let the class release do its own: count, gate, root buffering */
+      if (scr_dyn_inst_is_head(d) && (scr_dyn_inst_cls(d)->head & 0x8000u) != 0) { /* a class that can sit in a garbage cycle: undo the decrement and let its own release run (count, gate, root buffering) */
         d->rc++;
         scr_dyn_inst_cls(d)->release(d);
       }
-      return;
+      return; /* a head of a class that cannot be in a cycle is never a root: the count is already down */
     }
     if (d->kind == SCR_DYN_ARR || d->kind == SCR_DYN_OBJ ||
         (d->kind == SCR_DYN_FUNC && (!((ScrClosure *)d)->isdyn || scr_closure_may_cycle_x((ScrClosure *)d)))) {

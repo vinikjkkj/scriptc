@@ -39,7 +39,7 @@ import type {
 import { DYN, funcOf, moduleBoxesEmitters, moduleUsesEmitter, moduleUsesTextMb, moduleUsesDc, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesDynAsync, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesRegexExecDyn, moduleUsesSymbol, moduleUsesFnText, moduleUsesTls, moduleUsesBigInt, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, moduleUsesBytesOwn, moduleUsesAsym , moduleBoxesProcStream} from "../../ir/nodes.js";
 import { readKindgateDials } from "../kindgate.js";
 import { setDynOrderPlan, setDynInspExt } from "../dyn-members.js";
-import { headClassPlan } from "../../ir/boxed-classes.js";
+import { headClassPlan, classMayCycle, type HeadClass } from "../../ir/boxed-classes.js";
 import { canBoxClassIntoDyn } from "../../ir/nodes.js";
 import { orderRecordPlanCached, isRuntimeRootedClassName, moduleUsesObjectWeakKeys, fnNameTableRows, moduleUsesInspColors } from "../../ir/nodes.js";
 import {
@@ -1062,8 +1062,9 @@ export class CEmitter {
   readonly tracedShapes = new Set<string>();
   readonly tracedUnions = new Set<string>();
   /** The standalone cycle-headered classes the program can box, with their class-table index: their instances carry the dyn head (ir/boxed-classes.ts). */
-  private headPlanCache: Map<string, number> | null = null;
-  headPlan(): Map<string, number> {
+  private headPlanCache: Map<string, HeadClass> | null = null;
+  private readonly headLogged = new Set<string>();
+  headPlan(): Map<string, HeadClass> {
     if (this.headPlanCache === null) {
       this.headPlanCache = headClassPlan(
         this.mod,
@@ -1075,7 +1076,19 @@ export class CEmitter {
     return this.headPlanCache;
   }
   headIdx(className: string): number | undefined {
-    return this.headPlan().get(className);
+    return this.headPlan().get(className)?.idx;
+  }
+  /** The descriptor's `head` word: class-table index + 1, with bit 15 set when an instance can be a member of a garbage cycle. */
+  headWord(className: string): number {
+    if (process.env["SCRIPTC_HEADPLAN_LOG"] === "1" && !this.headLogged.has(className) && this.headPlan().has(className)) {
+      this.headLogged.add(className);
+      const why: string[] = [];
+      const mc = classMayCycle(this.mod, className, why);
+      const fields = (this.mod.classes ?? []).find((c) => c.name === className)?.fields.length ?? 0;
+      process.stderr.write(`HEADPLAN class=${className} idx=${this.headPlan().get(className)!.idx} mayCycle=${mc} fields=${fields} reaching=[${why.slice(0, 12).join(",")}]\n`);
+    }
+    const h = this.headPlan().get(className);
+    return h === undefined ? 0 : (h.idx + 1) | (h.mayCycle ? 0x8000 : 0);
   }
   /** The class graph (single inheritance): base/children links, hierarchy
    * membership (extends anywhere ⇒ vtable word + dynamic release), the
@@ -1885,7 +1898,7 @@ export class CEmitter {
     // Emitted HERE, after the walker block, because that is where the
     // last descriptor can still be interned: a body emitted earlier is
     // what asks for one.
-    const headClassNames = [...this.headPlan().entries()].sort((a, b) => a[1] - b[1]).map(([n]) => n);
+    const headClassNames = [...this.headPlan().entries()].sort((a, b) => a[1].idx - b[1].idx).map(([n]) => n);
     if (headClassNames.length > 0) {
       // The class table the dyn head indexes (scr_runtime.h): in plan order, so the index a class stamps is its position here. The descriptors were
       // interned with the struct definitions (emitStructDefs), so nothing is created this late.
