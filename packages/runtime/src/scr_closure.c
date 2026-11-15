@@ -387,14 +387,69 @@ static inline void scr_cap_release(ScrBox *cap) {
  * already being freed. */
 /* The ext of `c`, made on first need. The cached descriptor moves from the closure's own word into it; an immortal closure keeps its ext for
  * the life of the process (its teardown frees it, scr_closure_static_teardown). */
+/* The side table of rare-member exts, keyed by closure address (open addressing, linear probing, backward-shift deletion). Almost no closure
+ * has an ext (an own property, a minted prototype, 255+ captures), so bit 0 of ScrClosure::w says whether to look, and the common closure pays
+ * no word and no branch for it. */
+typedef struct { const ScrClosure *k; ScrClosureExt *v; } ScrCxSlot;
+static ScrCxSlot *scr_cx_tab = NULL;
+static size_t scr_cx_cap = 0, scr_cx_len = 0;
+static inline size_t scr_cx_home(const ScrClosure *k) {
+  uint64_t x = (uint64_t)((uintptr_t)k >> 3) * 0x9E3779B97F4A7C15ull;
+  x ^= x >> 29;
+  return (size_t)x & (scr_cx_cap - 1);
+}
+ScrClosureExt *scr_closure_ext_lookup(const ScrClosure *c) {
+  if (scr_cx_cap == 0) return NULL;
+  for (size_t i = scr_cx_home(c);; i = (i + 1) & (scr_cx_cap - 1)) {
+    if (scr_cx_tab[i].k == c) return scr_cx_tab[i].v;
+    if (scr_cx_tab[i].k == NULL) return NULL;
+  }
+}
+static void scr_cx_put(const ScrClosure *c, ScrClosureExt *x) {
+  if ((scr_cx_len + 1) * 2 > scr_cx_cap) {
+    ScrCxSlot *old = scr_cx_tab;
+    size_t ocap = scr_cx_cap;
+    scr_cx_cap = ocap ? ocap * 2 : 64;
+    scr_cx_tab = (ScrCxSlot *)calloc(scr_cx_cap, sizeof *scr_cx_tab);
+    if (scr_cx_tab == NULL) scr_trap("scriptc: out of memory\n");
+    for (size_t j = 0; j < ocap; j++) {
+      if (old[j].k == NULL) continue;
+      size_t i = scr_cx_home(old[j].k);
+      while (scr_cx_tab[i].k != NULL) i = (i + 1) & (scr_cx_cap - 1);
+      scr_cx_tab[i] = old[j];
+    }
+    free(old);
+  }
+  size_t i = scr_cx_home(c);
+  while (scr_cx_tab[i].k != NULL) i = (i + 1) & (scr_cx_cap - 1);
+  scr_cx_tab[i].k = c;
+  scr_cx_tab[i].v = x;
+  scr_cx_len++;
+}
+static void scr_cx_erase(const ScrClosure *c) {
+  if (scr_cx_cap == 0) return;
+  size_t i = scr_cx_home(c);
+  while (scr_cx_tab[i].k != c) {
+    if (scr_cx_tab[i].k == NULL) return;
+    i = (i + 1) & (scr_cx_cap - 1);
+  }
+  scr_cx_tab[i].k = NULL;
+  scr_cx_len--;
+  for (size_t j = (i + 1) & (scr_cx_cap - 1); scr_cx_tab[j].k != NULL; j = (j + 1) & (scr_cx_cap - 1)) {
+    ScrCxSlot s = scr_cx_tab[j];
+    scr_cx_tab[j].k = NULL;
+    scr_cx_len--;
+    scr_cx_put(s.k, s.v);
+  }
+}
 ScrClosureExt *scr_closure_ext(ScrClosure *c) {
   ScrClosureExt *x = scr_closure_ext_of(c);
   if (x == NULL) {
     x = (ScrClosureExt *)calloc(1, sizeof *x);
     if (x == NULL) scr_trap("scriptc: out of memory\n");
     x->ncaps = c->ncaps8;
-    x->desc = (const void *)c->w;
-    c->w = (uintptr_t)x | 1u;
+    scr_cx_put(c, x);
+    c->w |= 1u;
   }
   return x;
 }
@@ -407,6 +462,7 @@ static void scr_closure_teardown_ext(ScrClosure *c, bool release) {
   ScrClosureExt *x = scr_closure_ext_of(c);
   if (x->implicit_proto != NULL) scr_closure_ctor_unlink(c, release);
   if (release) scr_box_release(x->props); /* NULL-tolerant */
+  scr_cx_erase(c);
   free(x);
 }
 
@@ -615,7 +671,8 @@ void scr_closure_static_teardown(ScrClosure *c) {
   if (x == NULL) return;
   scr_box_release(x->props);
   x->props = NULL;
-  c->w = (uintptr_t)x->desc; /* back to the no-ext form: idempotent, and the ext is not leaked */
+  c->w &= ~(uintptr_t)1; /* back to the no-ext form: idempotent, and the ext is not leaked */
+  scr_cx_erase(c);
   free(x);
 }
 
