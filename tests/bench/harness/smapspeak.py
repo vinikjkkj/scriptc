@@ -7,9 +7,10 @@ Reports per class: Rss, Pss, Private_Dirty, Anonymous (kB). Also records the VmH
 Stdout of the lane goes to <out>.stdout. This is an OUTSIDE measurement with the same instrument for every lane."""
 import sys, os, time, json, subprocess, re
 out = sys.argv[1]; cmd = sys.argv[sys.argv.index('--') + 1:]
-so = open(out + '.stdout', 'wb')
+# SMAPS_STDOUT=inherit: the lane's output stays on this process's stdout (the REST scenario reads the app's QR line from it); default: <out>.stdout
+so = None if os.environ.get('SMAPS_STDOUT') == 'inherit' else open(out + '.stdout', 'wb')
 p = subprocess.Popen(cmd, stdout=so, stderr=subprocess.STDOUT)
-best = (0, None); samples = 0; hwm = 0; t0 = time.time(); tl = []
+best = (0, None); best_t = 0.0; samples = 0; hwm = 0; t0 = time.time(); tl = []
 def rss_kb(pid):
     try:
         with open(f'/proc/{pid}/status') as f:
@@ -27,7 +28,7 @@ while p.poll() is None:
         if samples % 50 == 0: tl.append((round(time.time() - t0, 2), r))
         if r > best[0]:
             s = snap(p.pid)
-            if s: best = (r, s)
+            if s: best = (r, s); best_t = round(time.time() - t0, 3)
     time.sleep(0.01)
 def parse(s):
     cls = {}; cur = None; perms = ''; name = ''
@@ -49,7 +50,7 @@ def parse(s):
         m = re.match(r'^(Rss|Pss|Private_Dirty|Anonymous):\s+(\d+) kB', l)
         if m and cur is not None: cur[m.group(1)] += int(m.group(2))
     return cls
-res = {'cmd': cmd, 'exit': p.returncode, 'peak_vmrss_kb': best[0], 'samples': samples, 'timeline': tl[::max(1, len(tl) // 40)]}
+res = {'cmd': cmd, 'exit': p.returncode, 'peak_vmrss_kb': best[0], 'peak_at_s': best_t, 'samples': samples, 'timeline': tl[::max(1, len(tl) // 40)]}
 if best[1]: res['classes'] = parse(best[1]); res['sum_rss_kb'] = sum(v['Rss'] for v in res['classes'].values())
 json.dump(res, open(out, 'w'), indent=1)
 print(out, 'exit', p.returncode, 'peak', best[0], 'kB')

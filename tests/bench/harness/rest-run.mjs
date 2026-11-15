@@ -7,9 +7,9 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 const W = process.env.BENCH_WORK, ROOT = process.env.BENCH_DIR, NODE = process.env.BENCH_NODE || 'node', TREE = process.env.TREE
 const args = process.argv.slice(2)
-let out = 'out', reps = 3, profile = null
+let out = 'out', reps = 3, profile = null, smaps = false
 const arms = []
-for (let i = 0; i < args.length; i++) { const a = args[i]; if (a === '--out') out = args[++i]; else if (a === '--reps') reps = Number(args[++i]); else if (a === '--profile') { profile = [args[++i], args[++i]] } else arms.push(a) }
+for (let i = 0; i < args.length; i++) { const a = args[i]; if (a === '--out') out = args[++i]; else if (a === '--reps') reps = Number(args[++i]); else if (a === '--profile') { profile = [args[++i], args[++i]] } else if (a === '--smaps') smaps = true; else arms.push(a) }
 mkdirSync(out, { recursive: true })
 const req = createRequire(process.env.ZB_APP + '/package.json')
 const mysql = req('mysql2/promise')
@@ -62,6 +62,25 @@ for (let rep = 0; rep < reps; rep++) {
     console.error(`rep ${rep} ${label}: exit=${pm ? pm.exit : r.status} vmhwm_kb=${pm?.rss_peak_kb}`)
   }
 }
+// --smaps: one extra run per arm (the Node arm too) under smapspeak.py, which polls VmRSS every 10 ms and keeps the /proc/<pid>/smaps snapshot at the highest VmRSS, bucketed (code, rodata, data,
+// heap(brk), anon-mmap, stack ...), plus an Rss timeline; arm.mts writes times.json (login, key share sent, first GET, spawn: ms since the arm started) to place the peak in the scenario.
+results.smaps = {}
+if (smaps) for (const a of all) {
+  const label = a.split(':')[0], bin = a.slice(a.indexOf(':') + 1)
+  const db = `zapo_${label.replace(/[^a-z0-9]/gi, '')}sm`
+  const c = await mysql.createConnection({ host: process.env.ZAPO_TEST_MYSQL_HOST ?? '127.0.0.1', port: Number(process.env.ZAPO_TEST_MYSQL_PORT ?? 3306), user: 'root', password: process.env.ZAPO_TEST_MYSQL_PASSWORD ?? '' })
+  await c.query(`DROP DATABASE IF EXISTS ${db}`); await c.query(`CREATE DATABASE ${db}`); await c.end()
+  const run = `${out}/${label}.smaps`; mkdirSync(run, { recursive: true })
+  const sj = `${run}/smaps.json`
+  const cmd = label === 'node' ? [NODE, `${APPDIR}/zapo-rest-mysql.ts`] : [bin]
+  const env = { ...process.env, RR_OUT: run, RR_APPDIR: APPDIR, RR_DBPORT: process.env.ZAPO_TEST_MYSQL_PORT ?? '3306', ZAPO_FAKE_SERVER: `${TREE}/packages/fake-server`, SMAPS_STDOUT: 'inherit' }
+  const r = spawnSync(NODE, ['--import', 'tsx', `${ROOT}/rest/arm.mts`, 'arm', db, 'python3', `${ROOT}/harness/smapspeak.py`, sj, '--', ...cmd], { cwd: TREE, env, maxBuffer: 1 << 28, timeout: 900e3 })
+  writeFileSync(`${run}/arm.stdout.txt`, r.stdout.toString()); writeFileSync(`${run}/arm.stderr.txt`, r.stderr.toString().slice(-20000))
+  let sm = null, tm = null; try { sm = JSON.parse(readFileSync(sj, 'utf8')) } catch {}
+  try { tm = JSON.parse(readFileSync(`${run}/arm/times.json`, 'utf8')) } catch {}
+  results.smaps[label] = sm ? { ...sm, times: tm } : null
+  console.error(`smaps ${label}: peak_vmrss_kb=${sm?.peak_vmrss_kb}`)
+}
 for (const r of results.runs) r.parity = nodeFp === null ? 'no-node-ref' : r.fp === nodeFp ? 'SAME' : 'DIFFERS'
 writeFileSync(`${out}/results.json`, JSON.stringify(results, null, 1))
 const med = (xs) => { const s = xs.filter((x) => x != null).sort((a, b) => a - b); return s.length ? s[Math.floor(s.length / 2)] : null }
@@ -73,6 +92,13 @@ for (const l of labels) {
   const baseL = l.endsWith('-ordered') ? l.slice(0, -8) : l.startsWith('cand') ? 'base' + l.slice(4) : null
   rows.push(`| ${l} | ${rs.map((r) => r.vmhwm_kb).join(' / ')} | ${med(rs.map((r) => r.vmhwm_kb))} | ${baseL && labels.includes(baseL) ? pct(med(results.runs.filter((r) => r.label === baseL).map((r) => r.vmhwm_kb)), med(rs.map((r) => r.vmhwm_kb))) : ''} | ${[...new Set(rs.map((r) => r.parity))].join('/')} |`)
 }
-writeFileSync(`${out}/summary.md`, `REST (zapo-rest-mysql), reps: ${reps}, node ${results.node}\n\n` + rows.join('\n') + '\n')
+const smapsLines = []
+for (const l of labels) { const sm = results.smaps[l]; if (!sm) continue
+  smapsLines.push(`\nsmaps at the VmRSS peak, ${l}: peak ${sm.peak_vmrss_kb} kB, VmHWM at exit ${sm.vmhwm_kb ?? '?'} kB, scenario times ${JSON.stringify(sm.times)}`)
+  smapsLines.push('| class | Rss kB | Pss kB | Private_Dirty kB | Anonymous kB |', '|---|---|---|---|---|')
+  for (const [k, v] of Object.entries(sm.classes ?? sm.by_class ?? {}).sort((a, b) => (b[1].Rss ?? 0) - (a[1].Rss ?? 0))) smapsLines.push(`| ${k} | ${v.Rss} | ${v.Pss} | ${v.Private_Dirty} | ${v.Anonymous} |`)
+  smapsLines.push(`timeline (s, VmRSS kB): ${JSON.stringify(sm.timeline)}`)
+}
+writeFileSync(`${out}/summary.md`, `REST (zapo-rest-mysql), reps: ${reps}, node ${results.node}\n\n` + rows.join('\n') + '\n' + smapsLines.join('\n') + '\n')
 writeFileSync(`${out}/summary.txt`, labels.map((l) => { const rs = results.runs.filter((r) => r.label === l); return `rest ${l} reps=${rs.length} exit=${rs.map((r) => r.exit).join(',')} vmhwm_kb=${rs.map((r) => r.vmhwm_kb).join(',')} median=${med(rs.map((r) => r.vmhwm_kb))} parity=${[...new Set(rs.map((r) => r.parity))].join('/')}` }).join('\n') + '\n')
 console.log(readFileSync(`${out}/summary.txt`, 'utf8'))
