@@ -81,7 +81,7 @@ import { BUFFER_NUM_ACCESSOR_METHODS, dynKeyGetUsesLitTwin, propsTableRoot, erro
 import { setDynOrderPlan, setDynInspExt } from "../dyn-members.js";
 import { rewriteArmDescriptors } from "./armvt.js";
 import { rewriteStringUnions } from "./strunion.js";
-import { orderRecordPlanCached, moduleUsesInspColors } from "../../ir/nodes.js";
+import { orderRecordPlanCached, moduleUsesInspColors, numSlotHalf } from "../../ir/nodes.js";
 import { concatFn, fieldRunAbsentCheck, flattenStrConcat } from "../emission/emit-exprs.js";
 import { classvalCandidates, dynClassDisplayName, dynDescBase, dynEmitterSlot, dynRuntimeBaseInfo, dynRuntimeRoot, dynEnumerationFenced, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
 import { computeMayThrow } from "../emission/may-throw.js";
@@ -4147,6 +4147,9 @@ class LlEmitter {
   classFieldGep(className: string, field: string): number {
     return classFieldIndex(this.classMetaOf(className), field).index;
   }
+  numSlotHalfOf(className: string, field: string): string | undefined {
+    return numSlotHalf(this.mod.classes, className, field);
+  }
   /** The GEP index of a class's per-instance order record (llOrdIndexOf; -1 when its hierarchy has none). */
   classOrdGep(className: string): number {
     return llOrdIndexOf(this.classMetaOf(className));
@@ -6370,6 +6373,7 @@ class LlEmitter {
       !operand.tagTest &&
       operand.type.kind === "dyn" &&
       !RUNTIME_ERROR_CLASSES.has(operand.className) &&
+      numSlotHalf(this.mod.classes, operand.className, operand.field) === undefined &&
       following.length === 0
     ) {
       const obj = this.emitBorrowedLocal(operand.obj, []);
@@ -7779,7 +7783,14 @@ class LlEmitter {
           s.kind === "fieldSet"
             ? this.classFieldPtr(obj.name, s.className, s.field)
             : this.recordFieldPtr(obj.name, s.shapeId, s.field);
-        if (isRefCounted(type)) {
+        const slotHalf = s.kind === "fieldSet" && type.kind === "dyn" ? numSlotHalf(this.mod.classes, s.className, s.field) : undefined;
+        if (slotHalf !== undefined) {
+          // A NUMBER-SLOT field (ir/num-slot.ts): a number is unboxed into the raw half and the dyn slot takes the marker.
+          this.moveTemp(v);
+          const hp = this.classFieldPtr(obj.name, (s as { className: string }).className, slotHalf);
+          this.declare(`declare void @scr_numslot_put_v(ptr, ptr, ptr)`);
+          B.line(`call void @scr_numslot_put_v(ptr ${ptr}, ptr ${hp.ptr}, ptr ${v.name})`);
+        } else if (isRefCounted(type)) {
           this.moveTemp(v);
           // A fresh dyn number stored into a dyn field: a small integer is the runtime's shared box (ir/dyn-keep.ts; emit-stmts.ts's twin).
           let kept = v.name;
@@ -11007,6 +11018,21 @@ class LlEmitter {
         const obj: { name: string; type: IrType } = this.emitBorrowedLocal(e.obj, []);
         const { ptr, type } = this.classFieldPtr(obj.name, e.className, e.field);
         const v = this.loadField(ptr, type);
+        // A NUMBER-SLOT field (ir/num-slot.ts): the value is the raw half when the dyn slot holds the marker.
+        const slotHalf = e.type.kind === "dyn" ? numSlotHalf(this.mod.classes, e.className, e.field) : undefined;
+        if (slotHalf !== undefined) {
+          const hp = this.classFieldPtr(obj.name, e.className, slotHalf);
+          const hv = this.loadField(hp.ptr, hp.type);
+          const r = B.tmp();
+          if (process.env["SCRIPTC_NUMSLOT_PLANT"] === "read") {
+            this.declare(`declare ptr @scr_dyn_new_num(double)`);
+            B.line(`${r} = call ptr @scr_dyn_new_num(double ${hv})`);
+          } else {
+            this.declare(`declare ptr @scr_numslot_get_v(ptr, double)`);
+            B.line(`${r} = call ptr @scr_numslot_get_v(ptr ${v}, double ${hv})`);
+          }
+          return this.own({ name: r, type: e.type });
+        }
         if (e.nullTest) {
           const t = B.tmp();
           B.line(`${t} = icmp eq ptr ${v}, null`);

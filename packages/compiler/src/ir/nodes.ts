@@ -1785,6 +1785,11 @@ export interface IrClassDef {
    * offsets agree through any static type — then this class's own fields.
    * The validator enforces the prefix property. */
   fields: { name: string; type: IrType }[];
+  /** NUMBER SLOTS (ir/num-slot.ts): checked-dynamic fields (inherited included) stored as TWO slots, the field's own dyn slot plus the hidden f64
+   * `half`. A number lives raw in the half and the dyn slot holds THE immortal marker (scr_numslot_node); any other value lives in the dyn slot
+   * and the half is dead. Every reader of the field answers `marker ? box(half) : slot`. The half is also listed in `fields` (hidden, `%`-named,
+   * after the class's own fields), so layouts, new and release treat it like any f64 field. */
+  numSlots?: { field: string; half: string }[];
   /** Field names (inherited included) whose slot's undefined arm means the
    * property does not EXIST yet (a JS field the constructor assigns only in
    * a conditional position): enumeration through a dyn box skips them while
@@ -15870,4 +15875,22 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
  * key list (IrRecordShape.keyList) never orders them. */
 export function isIntegerKeyName(n: string): boolean {
   return /^(0|[1-9][0-9]*)$/.test(n) && Number(n) < 4294967295;
+}
+
+const NUMSLOT_CACHE = new WeakMap<readonly IrClassDef[], Map<string, string> | null>();
+/** The hidden f64 half of a number-slot field, or undefined when `field` of `className` is an ordinary slot (one table build per module, then one lookup). */
+export function numSlotHalf(classes: readonly IrClassDef[] | undefined, className: string, field: string): string | undefined {
+  if (classes === undefined) return undefined;
+  let t = NUMSLOT_CACHE.get(classes);
+  if (t === undefined) {
+    t = null;
+    for (const c of classes) {
+      for (const x of c.numSlots ?? []) {
+        if (t === null) t = new Map();
+        t.set(`${c.name}\0${x.field}`, x.half);
+      }
+    }
+    NUMSLOT_CACHE.set(classes, t);
+  }
+  return t === null ? undefined : t.get(`${className}\0${field}`);
 }
