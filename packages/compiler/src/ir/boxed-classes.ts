@@ -86,19 +86,84 @@ export function boxedClassNames(mod: IrModule): Set<string> {
  * standalone (no base, no subclass, not runtime-provided), cycle-headered (traced) and boxable, AND the program can box it (boxedClassNames).
  * The index fits the 15 bits of the head's class slot; a program with more qualifying classes simply stops assigning (the rest keep stand-alone nodes). */
 export const HEAD_CLASS_MAX = 0x7fff;
+/** Can an instance of `className` be a member of a garbage cycle? Walks the type structure its fields reach: a `dyn`, a function, or anything this
+ * walk does not know reaches everything (a dyn can hold the instance itself), and so does reaching the class again. Only a class that answers false
+ * never needs buffering as a cycle-root candidate when a release leaves its count above zero: a root must be a member of the cycle it starts. */
+export function classMayCycle(mod: IrModule, className: string, why?: string[]): boolean {
+  const classes = new Map<string, IrClassDef>();
+  for (const c of mod.classes ?? []) classes.set(c.name, c);
+  const records = new Map<string, IrRecordShape>();
+  for (const r of mod.records ?? []) records.set(r.id, r);
+  const unions = new Map<string, IrUnionDef>();
+  for (const u of mod.unions ?? []) unions.set(u.id, u);
+  const SAFE = new Set(["f64", "string", "bool", "bytes", "regex", "url", "searchParams", "symbol", "undefinedT", "nullT", "void"]);
+  const seen = new Set<string>();
+  const reaches = (t: IrType | undefined): boolean => {
+    if (t === undefined) return false;
+    if (SAFE.has(t.kind)) return false;
+    const k = t as Record<string, unknown>;
+    switch (t.kind) {
+      case "object": {
+        const name = (t as { className: string }).className;
+        if (name === className) return true;
+        if (seen.has("o:" + name)) return false;
+        seen.add("o:" + name);
+        const def = classes.get(name);
+        if (def === undefined || def.runtime) return true;
+        return def.fields.some((f) => reaches(f.type));
+      }
+      case "record": {
+        const id = (t as { shapeId: string }).shapeId;
+        if (seen.has("r:" + id)) return false;
+        seen.add("r:" + id);
+        const r = records.get(id);
+        return r === undefined || r.fields.some((f) => reaches(f.type)) || r.indexValue !== undefined;
+      }
+      case "union": {
+        const id = (t as { unionId: string }).unionId;
+        if (seen.has("u:" + id)) return false;
+        seen.add("u:" + id);
+        const u = unions.get(id);
+        return u === undefined || u.arms.some((a) => reaches(a));
+      }
+      case "array":
+        return reaches(k["elem"] as IrType);
+      case "set":
+        return reaches(k["elem"] as IrType);
+      case "map":
+      case "weakmap":
+        return reaches(k["key"] as IrType) || reaches(k["value"] as IrType);
+      default:
+        return true; // dyn, func, promise, handles, anything unknown
+    }
+  };
+  const def = classes.get(className);
+  if (def === undefined) return true;
+  let any = false;
+  for (const f of def.fields) {
+    if (reaches(f.type)) {
+      any = true;
+      why?.push(`${f.name}:${f.type.kind}`);
+      if (why === undefined) return true;
+    }
+  }
+  return any;
+}
+
+export interface HeadClass { idx: number; mayCycle: boolean }
 export function headClassPlan(
   mod: IrModule,
   isStandalone: (className: string) => boolean,
   isTraced: (className: string) => boolean,
   canBox: (className: string) => boolean,
-): Map<string, number> {
-  const plan = new Map<string, number>();
+): Map<string, HeadClass> {
+  const plan = new Map<string, HeadClass>();
   if (process.env["SCRIPTC_NO_OBJ_HEAD"] === "1") return plan; // A/B control
   const boxed = boxedClassNames(mod);
   for (const c of mod.classes ?? []) {
     if (c.runtime || !boxed.has(c.name) || !isStandalone(c.name) || !isTraced(c.name) || !canBox(c.name)) continue;
     if (plan.size >= HEAD_CLASS_MAX) break;
-    plan.set(c.name, plan.size);
+    plan.set(c.name, { idx: plan.size, mayCycle: classMayCycle(mod, c.name) });
   }
   return plan;
 }
