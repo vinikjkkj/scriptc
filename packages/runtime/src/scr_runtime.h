@@ -2612,8 +2612,9 @@ typedef struct ScrClosure {
 
 /* The initial w of a closure with no descriptor and no ext: what every emitted or runtime-static (immortal) closure literal starts as. */
 #define SCR_CLO_W_STATIC ((uintptr_t)0)
-/* An immortal function-value closure literal, as the runtime's own static ones are written. SCR_DYN_FUNC is the dyn kind enum (below). */
-#define SCR_CLO_STATIC(f) {SIZE_MAX, (uint32_t)SCR_DYN_FUNC, 1, 0, {0, 0}, (void *)(f), SCR_CLO_W_STATIC}
+/* An immortal function-value closure literal, as the runtime's own static ones are written. SCR_CLO_KIND_FUNC is the dyn kind code of a function. */
+#define SCR_CLO_KIND_FUNC 8u /* SCR_DYN_FUNC; the assert after the enum pins it (the enum cannot be named here) */
+#define SCR_CLO_STATIC(f) {SIZE_MAX, SCR_CLO_KIND_FUNC, 1, 0, {0, 0}, (void *)(f), SCR_CLO_W_STATIC}
 
 _Static_assert(sizeof(ScrClosure) == 32 && offsetof(ScrClosure, kind) == 8 && offsetof(ScrClosure, isdyn) == 12 && offsetof(ScrClosure, ncaps8) == 13 &&
                    offsetof(ScrClosure, fn) == 16 && offsetof(ScrClosure, w) == 24 && offsetof(ScrClosure, caps) == 32,
