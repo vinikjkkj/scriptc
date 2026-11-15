@@ -1035,6 +1035,13 @@ export class CEmitter {
    * out of the function. Purely compile-time: entering a try emits no code. */
   tryStack: { label: string; used: boolean; frameDepth: number; scopeDepth: number }[] =
     [];
+  /** THE SHARED UNWIND LADDER (unwind1). Per unwind target ("" = out of the function, else the try label): the cascades already written, each a descending run of
+   * entry sequence numbers with a label at every rung boundary, so a later exit whose release list ENDS with a suffix of one jumps into it instead of writing the whole
+   * list again. Entries are numbered on first sight (older = smaller, scopes outer to inner, then frames outer to inner); releases then run in DESCENDING number,
+   * i.e. newest first, which is also what makes the suffix property hold. */
+  unwindLadders: Map<string, { label: string; seqs: number[] }[]> = new Map();
+  unwindSeq: Map<object, number> = new Map();
+  unwindCounter = 0;
   /** Enclosing try-with-FINALLY regions, innermost last — the pending-
    * return analogue of tryStack: a `return` inside one snapshots its value
    * into the function's pending-return slot (sc_pret), releases down to
@@ -2869,13 +2876,60 @@ export class CEmitter {
    * `if (scr_exc_pending())`; a `throw` unwinds unconditionally. */
   emitUnwind(): void {
     const target = this.tryStack[this.tryStack.length - 1];
-    if (target) {
+    const ladder = process.env.SCRIPTC_NO_UNWIND_LADDER !== "1";
+    const key = target ? target.label : "";
+    if (ladder) {
+      const fd = target ? target.frameDepth : 0;
+      const sd = target ? target.scopeDepth : 0;
+      const live: ScopeEntry[] = [];
+      for (let i = sd; i < this.scopes.length; i++) live.push(...this.scopes[i]!);
+      for (let i = fd; i < this.frames.length; i++) live.push(...this.frames[i]!);
+      const owned = live.filter((t) => !t.immortal && (t.boxed === true || isRefCounted(t.type)));
+      for (const t of owned) if (!this.unwindSeq.has(t)) this.unwindSeq.set(t, this.unwindCounter++);
+      owned.sort((a, b) => this.unwindSeq.get(b)! - this.unwindSeq.get(a)!);
+      const seqs = owned.map((t) => this.unwindSeq.get(t)!);
+      let list = this.unwindLadders.get(key);
+      if (!list) this.unwindLadders.set(key, (list = []));
+      let best: { label: string; j: number; len: number } | null = null;
+      for (const c of list) {
+        for (let j = 0; j <= c.seqs.length; j++) {
+          const len = c.seqs.length - j;
+          if (len > seqs.length || (best !== null && len <= best.len)) continue;
+          let ok = true;
+          for (let k = 0; k < len; k++) if (seqs[seqs.length - len + k] !== c.seqs[j + k]) { ok = false; break; }
+          if (!ok && len >= 1 && process.env.SCRIPTC_UNWIND_LADDER_PLANT === "1") ok = true; // positive control only: a deliberately wrong entry
+          if (ok) best = { label: `${c.label}_${j}`, j, len };
+        }
+      }
+      const emitRung = (t: ScopeEntry): void => {
+        if (t.boxed) this.line(`scr_box_release(${t.name});`);
+        else this.releaseValue(t.name, t.type);
+      };
+      if (best !== null) {
+        for (let i = 0; i < seqs.length - best.len; i++) emitRung(owned[i]!);
+        if (target) target.used = true;
+        this.line(`goto ${best.label};`);
+        return;
+      }
+      const label = `sc_ul${this.unwindCounter++}`;
+      list.push({ label, seqs });
+      for (let i = 0; i < owned.length; i++) {
+        this.line(`${label}_${i}:;`);
+        emitRung(owned[i]!);
+      }
+      this.line(`${label}_${owned.length}:;`);
+      if (target) {
+        target.used = true;
+        this.line(`goto ${target.label};`);
+        return;
+      }
+    } else if (target) {
       this.releaseForJump(target.frameDepth, target.scopeDepth);
       target.used = true;
       this.line(`goto ${target.label};`);
       return;
     }
-    this.releaseForJump(0, 0);
+    if (!ladder) this.releaseForJump(0, 0);
     if (this.currentCoro !== null) {
       // THE FOURTH COMPLETION PATH, dispatched on the PROPERTY exactly as
       // finishLines in emit-stmts.ts dispatches the other three. A converted

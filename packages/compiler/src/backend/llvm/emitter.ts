@@ -2205,6 +2205,12 @@ class LlEmitter {
    * `label` (the catch, or the exception-path finally) instead of
    * returning out of the function. Entering a try emits no code. */
   private tryStack: { label: string; used: boolean; frameDepth: number; scopeDepth: number }[] = [];
+  /** THE SHARED UNWIND LADDER (unwind1), CEmitter.unwindLadders' twin: per unwind target, the cascades already written (descending entry numbers, one block per rung boundary),
+   * so a later exit whose release list ENDS with a suffix of one writes only its extra rungs and branches into it. The SSA values a rung uses dominate every branch into it
+   * (they are live at the later exit and were live at the earlier one), and slot loads read the CURRENT value like before. */
+  private unwindLadders: Map<string, { label: string; seqs: number[]; labels: string[] }[]> = new Map();
+  private unwindSeq: Map<object, number> = new Map();
+  private unwindCounter = 0;
   /** Return type of the function being emitted — the unwind path returns
    * a dummy of this type (never read: callers check the flag first). */
   private currentReturnType: IrType = VOID;
@@ -5608,13 +5614,77 @@ class LlEmitter {
    * `throw` unwinds unconditionally. CEmitter.emitUnwind, block-flavored. */
   private emitUnwind(): void {
     const target = this.tryStack[this.tryStack.length - 1];
-    if (target) {
+    const ladder = process.env.SCRIPTC_NO_UNWIND_LADDER !== "1";
+    if (ladder) {
+      const B = this.B;
+      const key = target ? target.label : "";
+      const fd = target ? target.frameDepth : 0;
+      const sd = target ? target.scopeDepth : 0;
+      type Ent = { o: object; frame: LlValue | null; scope: LlScopeEntry | null };
+      const owned: Ent[] = [];
+      for (let i = sd; i < this.scopes.length; i++) for (const s of this.scopes[i]!) owned.push({ o: s, frame: null, scope: s });
+      for (let i = fd; i < this.frames.length; i++) for (const v of this.frames[i]!) if (!v.immortal) owned.push({ o: v, frame: v, scope: null });
+      for (const t of owned) if (!this.unwindSeq.has(t.o)) this.unwindSeq.set(t.o, this.unwindCounter++);
+      owned.sort((a, b) => this.unwindSeq.get(b.o)! - this.unwindSeq.get(a.o)!);
+      const seqs = owned.map((t) => this.unwindSeq.get(t.o)!);
+      let list = this.unwindLadders.get(key);
+      if (!list) this.unwindLadders.set(key, (list = []));
+      let best: { label: string; len: number } | null = null;
+      for (const c of list) {
+        for (let j = 0; j <= c.seqs.length; j++) {
+          const len = c.seqs.length - j;
+          if (len > seqs.length || (best !== null && len <= best.len)) continue;
+          let ok = true;
+          for (let k = 0; k < len; k++) if (seqs[seqs.length - len + k] !== c.seqs[j + k]) { ok = false; break; }
+          if (!ok && len >= 1 && process.env.SCRIPTC_UNWIND_LADDER_PLANT === "1") ok = true; // positive control only: a deliberately wrong entry
+          if (ok) best = { label: c.labels[j]!, len };
+        }
+      }
+      const emitRung = (t: Ent): void => {
+        if (t.scope) {
+          const tt = B.tmp();
+          B.line(`${tt} = load ptr, ptr ${t.scope.slot}`);
+          if (t.scope.boxed) {
+            this.declare(`declare void @scr_box_release(ptr)`);
+            B.line(`call void @scr_box_release(ptr ${tt})`);
+          } else this.releaseValue(tt, t.scope.type);
+        } else {
+          const v = t.frame!;
+          if (v.slot) {
+            const tt = B.tmp();
+            B.line(`${tt} = load ptr, ptr ${v.name}`);
+            this.releaseValue(tt, v.type);
+          } else this.releaseValue(v.name, v.type);
+        }
+      };
+      if (best !== null) {
+        for (let i = 0; i < owned.length - best.len; i++) emitRung(owned[i]!);
+        if (target) target.used = true;
+        B.terminate(`br label %${best.label}`);
+        return;
+      }
+      const labels: string[] = [];
+      for (let i = 0; i <= owned.length; i++) labels.push(B.newLabel("ul"));
+      list.push({ label: labels[0]!, seqs, labels });
+      B.br(labels[0]!);
+      for (let i = 0; i < owned.length; i++) {
+        B.startBlock(labels[i]!);
+        emitRung(owned[i]!);
+        B.br(labels[i + 1]!);
+      }
+      B.startBlock(labels[owned.length]!);
+      if (target) {
+        target.used = true;
+        B.terminate(`br label %${target.label}`);
+        return;
+      }
+    } else if (target) {
       this.releaseForJump(target.frameDepth, target.scopeDepth);
       target.used = true;
       this.B.terminate(`br label %${target.label}`);
       return;
     }
-    this.releaseForJump(0, 0);
+    if (!ladder) this.releaseForJump(0, 0);
     if (this.currentCoro !== null) {
       // THE FOURTH COMPLETION PATH. The frame owns the promise, so an escaping
       // exception settles it as a REJECTION rather than returning a dummy to a
@@ -5687,6 +5757,13 @@ class LlEmitter {
     }
     const lu = B.newLabel("exc.u");
     const lk = B.newLabel("exc.k");
+    if (process.env.SCRIPTC_NO_UNWIND_LADDER !== "1") {
+      // the pending branch is the cold arm: no throw is the common case at every one of these sites
+      this.declare(`declare i1 @llvm.expect.i1(i1, i1)`);
+      const pe = B.tmp();
+      B.line(`${pe} = call i1 @llvm.expect.i1(i1 ${p}, i1 false)`);
+      p = pe;
+    }
     B.condBr(p, lu, lk);
     B.startBlock(lu);
     this.emitUnwind();
@@ -6898,6 +6975,9 @@ class LlEmitter {
     this.chainSlots.clear();
     this.finallyStack = [];
     this.tryStack = [];
+    this.unwindLadders = new Map();
+    this.unwindSeq = new Map();
+    this.unwindCounter = 0;
     this.currentReturnType = fn.returnType;
     this.currentGenerator = fn.generator ?? null;
     this.logArgSlots = 0;
