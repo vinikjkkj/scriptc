@@ -438,7 +438,7 @@ static bool scr_assert_dyn_same_value(const ScrDyn *a, const ScrDyn *b) {
       return a->v.handle.tag == b->v.handle.tag && a->v.handle.ptr == b->v.handle.ptr;
     case SCR_DYN_OBJINST:
       /* Identity is the INSTANCE (the strict_eq stance). */
-      return a->v.inst.o == b->v.inst.o;
+      return scr_dyn_inst_o(a) == scr_dyn_inst_o(b);
     case SCR_DYN_ARRBUF:
       /* Identity is the PAYLOAD (the strict_eq stance) — SameValue, so
        * content plays no part here even though deepStrictEqual below
@@ -609,7 +609,7 @@ static bool scr_assert_dyn_deep_eq(const ScrDyn *a, const ScrDyn *b) {
       /* Same story for a boxed class instance: the own-property walk Node
        * runs needs a member table the box does not carry, so identity is
        * the only honest answer (documented with the handle stance). */
-      return a->v.inst.o == b->v.inst.o;
+      return scr_dyn_inst_o(a) == scr_dyn_inst_o(b);
     case SCR_DYN_MAP:
       /* The SAME ScrMap is equal, and Node agrees without qualification.
        * Two DIFFERENT maps are where this arm stops: Node compares

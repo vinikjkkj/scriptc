@@ -39,6 +39,8 @@ import type {
 import { DYN, funcOf, moduleBoxesEmitters, moduleUsesEmitter, moduleUsesTextMb, moduleUsesDc, isRefCounted, isUnitType, mapOf, moduleEmbedsCompressedNpm, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesDynAsync, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesRegex, moduleUsesRegexExecDyn, moduleUsesSymbol, moduleUsesFnText, moduleUsesTls, moduleUsesBigInt, moduleUsesWsGlobal, moduleUsesNodeTest, moduleUsesProcessEvents, moduleUsesStream, RUNTIME_EMITTER_CLASS, STRING, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesDynClass, moduleUsesBytesOwn, moduleUsesAsym , moduleBoxesProcStream} from "../../ir/nodes.js";
 import { readKindgateDials } from "../kindgate.js";
 import { setDynOrderPlan, setDynInspExt } from "../dyn-members.js";
+import { headClassPlan } from "../../ir/boxed-classes.js";
+import { canBoxClassIntoDyn } from "../../ir/nodes.js";
 import { orderRecordPlanCached, isRuntimeRootedClassName, moduleUsesObjectWeakKeys, fnNameTableRows, moduleUsesInspColors } from "../../ir/nodes.js";
 import {
   mangleAsyncSpawn,
@@ -1059,6 +1061,22 @@ export class CEmitter {
    * Computed as a greatest fixpoint in the constructor — see there. */
   readonly tracedShapes = new Set<string>();
   readonly tracedUnions = new Set<string>();
+  /** The standalone cycle-headered classes the program can box, with their class-table index: their instances carry the dyn head (ir/boxed-classes.ts). */
+  private headPlanCache: Map<string, number> | null = null;
+  headPlan(): Map<string, number> {
+    if (this.headPlanCache === null) {
+      this.headPlanCache = headClassPlan(
+        this.mod,
+        (c) => this.classMeta.get(c)?.hierarchy === false,
+        (c) => this.tracedShapes.has(`object:${c}`),
+        (c) => canBoxClassIntoDyn(c),
+      );
+    }
+    return this.headPlanCache;
+  }
+  headIdx(className: string): number | undefined {
+    return this.headPlan().get(className);
+  }
   /** The class graph (single inheritance): base/children links, hierarchy
    * membership (extends anywhere ⇒ vtable word + dynamic release), the
    * whole-program preorder numbering behind O(1) instanceof, and the
@@ -1867,6 +1885,17 @@ export class CEmitter {
     // Emitted HERE, after the walker block, because that is where the
     // last descriptor can still be interned: a body emitted earlier is
     // what asks for one.
+    const headClassNames = [...this.headPlan().entries()].sort((a, b) => a[1] - b[1]).map(([n]) => n);
+    if (headClassNames.length > 0) {
+      // The class table the dyn head indexes (scr_runtime.h): in plan order, so the index a class stamps is its position here. The descriptors were
+      // interned with the struct definitions (emitStructDefs), so nothing is created this late.
+      out.push(
+        `${this.link}const ScrDynClass *const sc_head_tbl[] = {`,
+        ...headClassNames.map((n) => `  &${this.dynClassDesc(n)},`),
+        `};`,
+        ``,
+      );
+    }
     const dynClassDescSyms = [...this.dynClassDescs.values()].sort();
     if (dynClassDescSyms.length > 0) {
       out.push(
@@ -1901,6 +1930,7 @@ export class CEmitter {
       `  scr_init();`,
       // Before anything can box: the registry is read by every keyed
       // access and every method call on a boxed instance.
+      ...(headClassNames.length > 0 ? [`  scr_dyn_head_classes(sc_head_tbl, sizeof sc_head_tbl / sizeof sc_head_tbl[0]);`] : []),
       ...(dynClassDescSyms.length > 0
         ? [`  scr_dyn_objinst_registry(sc_dcl_tbl, sizeof sc_dcl_tbl / sizeof sc_dcl_tbl[0]);`]
         : []),

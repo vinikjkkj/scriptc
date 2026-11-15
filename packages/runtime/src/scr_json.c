@@ -701,9 +701,9 @@ void scr_throw_dyn(ScrDyn *v) {
   /* A class instance of a HIERARCHY class (an Error subclass, a user class
    * with a base) keeps its identity in the OBJ arm, so catch-side instanceof
    * answers exactly as for a statically thrown instance. */
-  if (d->kind == SCR_DYN_OBJINST && d->v.inst.cls->vt) {
-    const ScrDynClass *cls = d->v.inst.cls;
-    void *o = cls->retain(d->v.inst.o); /* +1 for the throw */
+  if (d->kind == SCR_DYN_OBJINST && scr_dyn_inst_cls(d)->vt) {
+    const ScrDynClass *cls = scr_dyn_inst_cls(d);
+    void *o = cls->retain(scr_dyn_inst_o(d)); /* +1 for the throw */
     scr_dyn_release(v);
     scr_throw_obj(o, cls->retain, cls->release, NULL);
     return;
@@ -842,7 +842,7 @@ static void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx) {
      * cycle node: without this edge a cycle through it (instance -> field or
      * property -> dyn -> instance) is invisible and leaks under the RC audit.
      * A calloc'd instance has no cycle header, so it is never visited. */
-    if (d->v.inst.cls->cyc) visit(d->v.inst.o, ctx);
+    if (scr_dyn_inst_cls(d)->cyc) visit(scr_dyn_inst_o(d), ctx);
     break;
   default:
     break; /* scalars, strings, bytes, handles, promises, jsvals, bigints:
@@ -920,7 +920,7 @@ static void scr_dyn_gcfree(void *o) {
     /* A traced (collector-owned) instance is accounted for by the trace, so
      * the collector frees it itself; releasing it here would double-free it.
      * A calloc'd instance is not traced and is released as before. */
-    if (!d->v.inst.cls->cyc) d->v.inst.cls->release(d->v.inst.o);
+    if (!scr_dyn_inst_cls(d)->cyc) scr_dyn_inst_cls(d)->release(scr_dyn_inst_o(d));
     break;
   case SCR_DYN_MAP:
     /* Owned, and NOT traced — the dyn→map edge is invisible to the
@@ -1054,7 +1054,12 @@ static __attribute__((noinline)) void scr_dyn_release_final(ScrDyn *d) {
      * through the class's own `_v` release — which for a hierarchy class
      * dispatches on the instance's vtable, so a base-typed box still
      * tears down the derived object. */
-    d->v.inst.cls->release(d->v.inst.o);
+    if (scr_dyn_inst_is_head(d)) { /* the instance IS the value: its count just reached zero; the class teardown takes it at 1 */
+      d->rc = 1;
+      scr_dyn_inst_cls(d)->release(d);
+      return;
+    }
+    scr_dyn_inst_cls(d)->release(scr_dyn_inst_o(d));
     break;
   case SCR_DYN_MAP:
     /* The strong reference the box took at construction. scr_map.c is in
@@ -1122,6 +1127,13 @@ __attribute__((noinline)) void scr_dyn_release(ScrDyn *d) {
      * which the visit filter handles without it ever being a root.
      * Buffering them would cost a full graph walk per 256 releases of the
      * hottest allocation in the runtime and could never find anything. */
+    if (d->kind == SCR_DYN_OBJINST) {
+      if (scr_dyn_inst_is_head(d)) { /* undo the decrement and let the class release do its own: count, gate, root buffering */
+        d->rc++;
+        scr_dyn_inst_cls(d)->release(d);
+      }
+      return;
+    }
     if (d->kind == SCR_DYN_ARR || d->kind == SCR_DYN_OBJ ||
         (d->kind == SCR_DYN_FUNC && (!((ScrClosure *)d)->isdyn || scr_closure_may_cycle_x((ScrClosure *)d)))) {
       /* An embedded closure is buffered under the SAME predicate its own release and teardown use (scr_closure_may_cycle): the teardown
@@ -1827,7 +1839,7 @@ static ScrDyn *dyn_iter_prop(ScrDyn *d, const char *name) {
   if (d->kind == SCR_DYN_OBJ) return scr_dyn_obj_key_get(d, name, n);
   if (d->kind == SCR_DYN_OBJINST) {
     const ScrDynClassMember *m = scr_dyn_objinst_member(d, name, n);
-    if (m != NULL && m->get != NULL) return m->get(d->v.inst.o);
+    if (m != NULL && m->get != NULL) return m->get(scr_dyn_inst_o(d));
   }
   return scr_dyn_retain(scr_dyn_undefined());
 }
@@ -1838,7 +1850,7 @@ static ScrDyn *dyn_iter_call(ScrDyn *iter, ScrDyn *fn, const char *name, bool *f
   *found = true;
   if (iter->kind == SCR_DYN_OBJINST) {
     const ScrDynClassMember *m = dyn_iter_inst_member(iter, name);
-    if (m != NULL) return m->call(iter->v.inst.o, NULL, 0, name);
+    if (m != NULL) return m->call(scr_dyn_inst_o(iter), NULL, 0, name);
   }
   if (fn != NULL && fn->kind == SCR_DYN_FUNC) {
     scr_dyn_this_push_dyn(iter);
@@ -1874,7 +1886,7 @@ static ScrDyn *dyn_iter_proto_open(ScrDyn *src, bool *no_method) {
       *no_method = true;
       return NULL;
     }
-    iter = m->call(src->v.inst.o, NULL, 0, "[Symbol.iterator]");
+    iter = m->call(scr_dyn_inst_o(src), NULL, 0, "[Symbol.iterator]");
   } else {
     size_t kl = 0;
     char *key = dyn_iter_obj_key(src, &kl);
@@ -3057,7 +3069,7 @@ ScrDyn *scr_dyn_rec_wide_inst(const ScrDyn *d, const char *const *keys, const un
        * Object.prototype answers, so a METHOD row can only be a lying declaration. */
       const ScrDynClassMember *lm = scr_dyn_objinst_member(d, kd, kl);
       if (lm != NULL && lm->get != NULL) {
-        v = lm->get(d->v.inst.o);
+        v = lm->get(scr_dyn_inst_o(d));
       } else if (lm != NULL) {
         scr_dyn_objinst_fence(d, "a property read");
         v = NULL;
@@ -5050,7 +5062,15 @@ ScrDyn *scr_arrlike_from(const ScrDyn *v) {
  * by a fabricated shape. The descriptor is compiler-emitted, so nothing
  * here needs an install hook the way handles do. */
 
+const ScrDynClass *const *scr_dyn_head_tbl = NULL;
+void scr_dyn_head_classes(const ScrDynClass *const *tbl, size_t n) {
+  (void)n;
+  scr_dyn_head_tbl = tbl;
+}
+
 ScrDyn *scr_dyn_new_objinst(void *o, const ScrDynClass *cls) {
+  /* A class whose instances carry the dyn head: the instance IS the value; the caller's reference is the instance's own count. */
+  if (cls->head != 0) return (ScrDyn *)cls->retain(o);
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_OBJINST);
   d->v.inst.o = cls->retain(o);
   d->v.inst.cls = cls;
@@ -5062,8 +5082,8 @@ size_t scr_dyn_objinst_pre(const ScrDyn *d) {
    * the same reinterpret scr_caught_instanceof does, for the same
    * reason. A standalone class carries no vt word and can have no
    * subclass, so its descriptor's `pre` IS the instance's position. */
-  if (!d->v.inst.cls->vt) return d->v.inst.cls->pre;
-  return ((const ScrError *)d->v.inst.o)->vt->pre;
+  if (!scr_dyn_inst_cls(d)->vt) return scr_dyn_inst_cls(d)->pre;
+  return ((const ScrError *)scr_dyn_inst_o(d))->vt->pre;
 }
 
 bool scr_dyn_objinst_is(const ScrDyn *d, size_t pre, size_t post) {
@@ -5086,11 +5106,11 @@ void *scr_dyn_objinst_unbox(const ScrDyn *d, size_t pre, size_t post,
   }
   if (d->kind == SCR_DYN_FUNC) d = scr_dyn_class_eval_inner(d); /* the evaluation's own box */
   /* The SAME pointer, retained — identity survives box/unbox. */
-  return d->v.inst.cls->retain(d->v.inst.o);
+  return scr_dyn_inst_cls(d)->retain(scr_dyn_inst_o(d));
 }
 
 const char *scr_dyn_objinst_cls(const ScrDyn *d) {
-  return d->v.inst.cls->name;
+  return scr_dyn_inst_cls(d)->name;
 }
 
 /* The boxed instance pointer, and only when the instance's OWN class is
@@ -5103,7 +5123,7 @@ const char *scr_dyn_objinst_cls(const ScrDyn *d) {
  * The test is `scr_dyn_objinst_is`, i.e. the RUN-TIME preorder position
  * against this descriptor's interval -- the very predicate `instanceof`
  * uses, and it is the whole point. This function used to compare
- * `d->v.inst.cls == cls`, which is a test on the box's STATIC descriptor:
+ * `scr_dyn_inst_cls(d) == cls`, which is a test on the box's STATIC descriptor:
  * a Derived instance in a Base-typed slot boxes as Base, so the walker
  * that asked about Derived was told no and every hierarchy class had to
  * be refused an arm. But the descriptor is not the only thing the box
@@ -5131,11 +5151,11 @@ void *scr_dyn_objinst_ptr_of(const ScrDyn *d, const ScrDynClass *cls) {
    * hierarchy class and its descriptor's `pre` for a standalone one (scr_dyn_objinst_pre), tested against this interval. A FUNC box
    * (a per-evaluation class value) keeps the evaluation's own path. */
   if (d->kind == SCR_DYN_OBJINST) {
-    const ScrDynClass *own = d->v.inst.cls;
-    const size_t p = own->vt ? ((const ScrError *)d->v.inst.o)->vt->pre : own->pre;
-    return (cls->pre <= p && p <= cls->post) ? d->v.inst.o : NULL;
+    const ScrDynClass *own = scr_dyn_inst_cls(d);
+    const size_t p = own->vt ? ((const ScrError *)scr_dyn_inst_o(d))->vt->pre : own->pre;
+    return (cls->pre <= p && p <= cls->post) ? scr_dyn_inst_o(d) : NULL;
   }
-  return scr_dyn_objinst_is(d, cls->pre, cls->post) ? d->v.inst.o : NULL;
+  return scr_dyn_objinst_is(d, cls->pre, cls->post) ? scr_dyn_inst_o(d) : NULL;
 }
 
 /* ── the class MEMBER REGISTRY ─────────────────────────────────────
@@ -5195,21 +5215,21 @@ static void scr_props_tab_build(void) {
 }
 
 const ScrDyn *scr_dyn_objinst_props_table(const ScrDyn *d) {
-  const ScrDynClass *own = d->v.inst.cls;
+  const ScrDynClass *own = scr_dyn_inst_cls(d);
   long long off;
   if (!own->vt) {
     off = own->props_off;
   } else {
     if (!scr_props_tab_built) scr_props_tab_build();
-    const size_t p = ((const ScrError *)d->v.inst.o)->vt->pre;
+    const size_t p = ((const ScrError *)scr_dyn_inst_o(d))->vt->pre;
     off = p < scr_props_tab_n ? scr_props_tab[p] : -1;
   }
   if (off < 0) return NULL;
-  return *(const ScrDyn *const *)((const char *)d->v.inst.o + off);
+  return *(const ScrDyn *const *)((const char *)scr_dyn_inst_o(d) + off);
 }
 
 const ScrDynClass *scr_dyn_objinst_class_of(const ScrDyn *d) {
-  const ScrDynClass *own = d->v.inst.cls;
+  const ScrDynClass *own = scr_dyn_inst_cls(d);
   /* A STANDALONE class needs no scan, and this is not an optimization
    * bolted on afterwards -- it is the same fact scr_dyn_objinst_pre reads
    * two functions up. `vt` false means no base and no subclass, so the
@@ -5262,8 +5282,8 @@ ScrEmitter *scr_dyn_objinst_emitter(const ScrDyn *d) {
   if (d == NULL || d->kind != SCR_DYN_OBJINST) return NULL;
   const ScrDynClass *c = scr_dyn_objinst_class_of(d);
   if (c->ee_off < 0) return NULL;
-  if (c->ee_off == 0) return (ScrEmitter *)d->v.inst.o; /* the ScrEmitter prefix */
-  return *(ScrEmitter **)((char *)d->v.inst.o + c->ee_off); /* a grafted class's hidden slot */
+  if (c->ee_off == 0) return (ScrEmitter *)scr_dyn_inst_o(d); /* the ScrEmitter prefix */
+  return *(ScrEmitter **)((char *)scr_dyn_inst_o(d) + c->ee_off); /* a grafted class's hidden slot */
 }
 
 bool scr_dyn_objinst_emitter_api(const ScrDyn *d, size_t pre, size_t post, const char *member, size_t mlen) {
@@ -5339,7 +5359,7 @@ static ScrDyn *scr_shadow_method_thunk(ScrClosure *clo, ScrDyn *const *args, siz
   const ScrDynClassMember *cm = scr_dyn_objinst_member(recv, nm->v.str->data, nm->v.str->len);
   ScrDyn *r = NULL;
   if (cm != NULL && cm->call != NULL) {
-    r = cm->call(recv->v.inst.o, args, argc, "method");
+    r = cm->call(scr_dyn_inst_o(recv), args, argc, "method");
   } else {
     scr_throw_error_named(scr_str_new("TypeError", 9),
                           scr_str_new("Cannot read properties of undefined", 35));
@@ -5371,7 +5391,7 @@ const ScrDynClassMember *scr_dyn_objinst_member_at(const ScrDyn *d, size_t i) {
   const ScrDynClass *c = scr_dyn_objinst_class_of(d);
   if (i >= c->nmembers) return NULL;
   if (c->nord == 0) return &c->members[i];
-  const uint8_t *rec = (const uint8_t *)d->v.inst.o + c->ord_off;
+  const uint8_t *rec = (const uint8_t *)scr_dyn_inst_o(d) + c->ord_off;
   size_t nstat = 0;
   for (size_t k = 0; k < c->nmembers; k++) if (c->members[k].ordk == 0) nstat++;
   if (i < nstat) {
@@ -5656,7 +5676,7 @@ static uint64_t dm_hash_key(void *p) {
       parts[1] = (uint64_t)(uintptr_t)d->v.promise;
       break;
     case SCR_DYN_OBJINST:
-      parts[1] = (uint64_t)(uintptr_t)d->v.inst.o;
+      parts[1] = (uint64_t)(uintptr_t)scr_dyn_inst_o(d);
       break;
     case SCR_DYN_BYTES:
     case SCR_DYN_ARRBUF:
@@ -6877,7 +6897,7 @@ static ScrDyn *scr_dyn_json_tojson(const ScrDyn *d, const char *key, size_t key_
     ScrStr *iks = scr_str_new(key, key_len); /* +1 */
     ScrDyn *ikarg = scr_dyn_new_str(iks);    /* +1; RETAINS iks */
     scr_str_release(iks);
-    ScrDyn *ir = cm->call(d->v.inst.o, &ikarg, 1, "toJSON");
+    ScrDyn *ir = cm->call(scr_dyn_inst_o(d), &ikarg, 1, "toJSON");
     scr_dyn_release(ikarg);
     return ir;
   }
@@ -7177,7 +7197,7 @@ static bool scr_dyn_json_write_raw(ScrJsonBuf *b, const ScrDyn *d) {
       bool unsup = false;
       ScrDyn *sn = scr_dyn_objinst_snapshot(d, &unsup);
       if (sn != NULL) {
-        if (!scr_jb_enter_named(b, d->v.inst.o, scr_dyn_objinst_ctor_name(d))) { scr_dyn_release(sn); return true; } /* cyclic; pending */
+        if (!scr_jb_enter_named(b, scr_dyn_inst_o(d), scr_dyn_objinst_ctor_name(d))) { scr_dyn_release(sn); return true; } /* cyclic; pending */
         scr_jb_putc(b, '{');
         bool pfirst = true;
         size_t *ord = scr_dyn_obj_key_order(sn);
@@ -7208,14 +7228,14 @@ static bool scr_dyn_json_write_raw(ScrJsonBuf *b, const ScrDyn *d) {
       scr_dyn_objinst_fence(d, "JSON.stringify");
       return true; /* pending exception; caller checks */
     }
-    if (!scr_jb_enter_named(b, d->v.inst.o, scr_dyn_objinst_ctor_name(d))) return true; /* cyclic; pending */
+    if (!scr_jb_enter_named(b, scr_dyn_inst_o(d), scr_dyn_objinst_ctor_name(d))) return true; /* cyclic; pending */
     scr_jb_putc(b, '{');
     bool ifirst = true;
     const size_t inm = scr_dyn_objinst_member_count(d);
     for (size_t i = 0; i < inm; i++) {
       const ScrDynClassMember *m = scr_dyn_objinst_member_at(d, i);
       if (!m->enumerable || m->get == NULL) continue;
-      ScrDyn *mv = m->get(d->v.inst.o); /* +1 */
+      ScrDyn *mv = m->get(scr_dyn_inst_o(d)); /* +1 */
       if (mv == NULL) { scr_jb_leave(b); return true; } /* threw; pending */
       if (scr_dyn_json_absent(mv)) { /* undefined/function members drop, like Node */
         scr_dyn_release(mv);
@@ -7378,7 +7398,7 @@ static bool scr_errdyn_entry_dead(const ScrErrDynEnt *ent) {
   if (ent->dyn->kind == SCR_DYN_OBJ) return ent->err->rc == 1 && ent->err->props == ent->dyn && ent->dyn->rc == 2;
   /* A user class's BOX: the node is the OBJINST box over this very error. The error's holders are the table and the box
    * (rc 2); the box's only holder is the table (rc 1). */
-  if (ent->dyn->kind == SCR_DYN_OBJINST) return ent->dyn->v.inst.o == (void *)ent->err && ent->err->rc == 2 && ent->dyn->rc == 1;
+  if (ent->dyn->kind == SCR_DYN_OBJINST) return scr_dyn_inst_o(ent->dyn) == (void *)ent->err && ent->err->rc == 2 && ent->dyn->rc == 1;
   return false;
 }
 
@@ -7706,7 +7726,7 @@ const ScrDyn *scr_dyn_err_read(const ScrDyn *d, const char *key, size_t key_len)
 
 ScrError *scr_error_from_dyn(const ScrDyn *d) {
   /* A boxed instance of an Error-rooted class IS the error: same object. */
-  if (scr_dyn_objinst_error_rooted(d)) return scr_error_retain((ScrError *)d->v.inst.o);
+  if (scr_dyn_objinst_error_rooted(d)) return scr_error_retain((ScrError *)scr_dyn_inst_o(d));
   ScrError *hit = scr_errdyn_err_of(d);
   if (hit) return hit;
   /* name/message/code live wherever the encoding put them: an ASSIGNED
@@ -8650,7 +8670,7 @@ ScrDyn *scr_dyn_objinst_builtin_prim(const ScrDyn *d) {
     scr_dyn_check_fail(NULL, "a primitive value", d);
     return NULL;
   }
-  ScrStr *s = scr_dyn_objinst_error_rooted(d) ? scr_error_to_string((ScrError *)d->v.inst.o)
+  ScrStr *s = scr_dyn_objinst_error_rooted(d) ? scr_error_to_string((ScrError *)scr_dyn_inst_o(d))
                                               : scr_str_new("[object Object]", 15);
   ScrDyn *out = scr_dyn_new_str(s); /* retains s into the node */
   scr_str_release(s);
@@ -8665,7 +8685,7 @@ ScrStr *scr_dyn_objinst_builtin_string(const ScrDyn *d) {
     scr_dyn_objinst_fence(d, "String()");
     return scr_str_new("", 0); /* the pending throw wins */
   }
-  if (scr_dyn_objinst_error_rooted(d)) return scr_error_to_string((ScrError *)d->v.inst.o);
+  if (scr_dyn_objinst_error_rooted(d)) return scr_error_to_string((ScrError *)scr_dyn_inst_o(d));
   return scr_str_new("[object Object]", 15);
 }
 
@@ -10069,7 +10089,7 @@ bool scr_dyn_has_key(const ScrDyn *v, const ScrStr *key) {
     /* a field `delete` removed is not a property any more */
     if (hm != NULL) {
       /* (a field with prototype data under its name stays a member of the instance through the prototype) */
-      if (hm->enumerable == 4 && hm->value == NULL && scr_dyn_member_hidden(hm, v->v.inst.o)) {
+      if (hm->enumerable == 4 && hm->value == NULL && scr_dyn_member_hidden(hm, scr_dyn_inst_o(v))) {
         /* a grafted emitter's key before EventEmitter.call(this) ran: still the prototype's, so `in` is true */
         return scr_dyn_ee_ops != NULL && scr_dyn_objinst_emitter(v) != NULL && scr_dyn_ee_ops->is_state(key->data, key->len);
       }
@@ -10696,7 +10716,7 @@ static void scr_jb_put_dyn_raw(ScrJsonBuf *b, const ScrDyn *d) {
       bool unsup = false;
       ScrDyn *sn = scr_dyn_objinst_snapshot(d, &unsup);
       if (sn != NULL) {
-        if (!scr_jb_enter_named(b, d->v.inst.o, scr_dyn_objinst_ctor_name(d))) { scr_dyn_release(sn); scr_jb_puts(b, "null"); return; }
+        if (!scr_jb_enter_named(b, scr_dyn_inst_o(d), scr_dyn_objinst_ctor_name(d))) { scr_dyn_release(sn); scr_jb_puts(b, "null"); return; }
         scr_jb_putc(b, '{');
         bool pfirst = true;
         size_t *ord = scr_dyn_obj_key_order(sn);
@@ -10728,14 +10748,14 @@ static void scr_jb_put_dyn_raw(ScrJsonBuf *b, const ScrDyn *d) {
       scr_jb_puts(b, "null"); /* the buffer never surfaces: the throw wins */
       return;
     }
-    if (!scr_jb_enter_named(b, d->v.inst.o, scr_dyn_objinst_ctor_name(d))) { scr_jb_puts(b, "null"); return; }
+    if (!scr_jb_enter_named(b, scr_dyn_inst_o(d), scr_dyn_objinst_ctor_name(d))) { scr_jb_puts(b, "null"); return; }
     scr_jb_putc(b, '{');
     bool ifirst = true;
     const size_t inm = scr_dyn_objinst_member_count(d);
     for (size_t i = 0; i < inm; i++) {
       const ScrDynClassMember *m = scr_dyn_objinst_member_at(d, i);
       if (!m->enumerable || m->get == NULL) continue;
-      ScrDyn *mv = m->get(d->v.inst.o); /* +1 */
+      ScrDyn *mv = m->get(scr_dyn_inst_o(d)); /* +1 */
       if (mv == NULL) { scr_jb_leave(b); return; } /* threw; pending */
       if (scr_dyn_json_absent(mv)) {
         scr_dyn_release(mv);
@@ -11876,7 +11896,7 @@ size_t scr_dyn_classval_pre(const ScrDyn *d) {
 
 const void *scr_dyn_fn_ident(const ScrDyn *d) {
   const ScrDyn *in = scr_dyn_class_eval_inner(d);
-  return in != NULL ? (const void *)in->v.inst.o : (const void *)scr_dyn_fn_clo(d);
+  return in != NULL ? (const void *)scr_dyn_inst_o(in) : (const void *)scr_dyn_fn_clo(d);
 }
 
 bool scr_dyn_strict_eq(const ScrDyn *a, const ScrDyn *b) {
@@ -11954,7 +11974,7 @@ bool scr_dyn_strict_eq(const ScrDyn *a, const ScrDyn *b) {
     /* And the class INSTANCE: the box is a boundary artifact, the object
      * is the JS value. Two boxes of one instance compare ===-equal, and
      * `unbox(box(x)) == x` holds by the same pointer. */
-    return a->v.inst.o == b->v.inst.o;
+    return scr_dyn_inst_o(a) == scr_dyn_inst_o(b);
   case SCR_DYN_BYTES:
     /* And the typed-array VIEW: the ScrBytes payload is the JS value and
      * the box is a boundary artifact, exactly as for the ArrayBuffer
@@ -15410,7 +15430,7 @@ ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode) {
     const size_t nm = scr_dyn_objinst_member_count(v);
     for (size_t i = 0; i < nm; i++) {
       const ScrDynClassMember *m = scr_dyn_objinst_member_at(v, i);
-      if (scr_dyn_member_hidden(m, v->v.inst.o)) continue;
+      if (scr_dyn_member_hidden(m, scr_dyn_inst_o(v))) continue;
       if (mode == SCR_OBJWALK_KEYS) {
         /* KEYS runs nothing -- the OBJ arm's rule: listing a name is not
          * a [[Get]], and reading the field here would be a side effect JS
@@ -15418,7 +15438,7 @@ ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode) {
         scr_dyn_arr_push(out, scr_dyn_objwalk_key(m->name, m->len));
         continue;
       }
-      ScrDyn *val = m->get(v->v.inst.o); /* +1 */
+      ScrDyn *val = m->get(scr_dyn_inst_o(v)); /* +1 */
       if (val == NULL) { /* the read threw */
         scr_dyn_release(out);
         return NULL;
@@ -15899,7 +15919,7 @@ bool scr_dyn_for_in_accessor(const ScrDyn *v, const ScrStr *key) {
    * so a visible one is an own key whatever it holds -- the value test must not drop an own undefined. */
   if (v != NULL && v->kind == SCR_DYN_OBJINST) {
     const ScrDynClassMember *cm = scr_dyn_objinst_member(v, key->data, key->len);
-    return cm != NULL && cm->enumerable == 4 && cm->get != NULL && !scr_dyn_member_hidden(cm, v->v.inst.o);
+    return cm != NULL && cm->enumerable == 4 && cm->get != NULL && !scr_dyn_member_hidden(cm, scr_dyn_inst_o(v));
   }
   if (v == NULL || v->kind != SCR_DYN_OBJ) return false;
   bool is_data = true, enumerable = false;
@@ -16001,11 +16021,11 @@ bool scr_dyn_has_own(const ScrDyn *v, const ScrStr *key) {
     const ScrDynClassMember *cm = scr_dyn_objinst_member(v, key->data, key->len);
     /* A field that does not exist until its write runs (enumerable 2/3: undefined means unset; 4: the absent marker) is not OWN
      * while unset: a name only the prototype carries is inherited, as `"k" in x` already says. */
-    if (cm != NULL) return cm->enumerable && !(cm->get != NULL && scr_dyn_member_hidden(cm, v->v.inst.o));
+    if (cm != NULL) return cm->enumerable && !(cm->get != NULL && scr_dyn_member_hidden(cm, scr_dyn_inst_o(v)));
     /* An Error-rooted instance's own `stack` (captured at construction) and `message` (a constructed error owns it, as the
      * dyn error encoding does) are not table rows: the runtime error's cells answer them. */
     if (scr_dyn_objinst_error_rooted(v)) {
-      const ScrError *oe = (const ScrError *)v->v.inst.o;
+      const ScrError *oe = (const ScrError *)scr_dyn_inst_o(v);
       if (key->len == 5 && memcmp(key->data, "stack", 5) == 0) return true;
       /* `message` is own once a message was provided or assigned (`new Error()` has none), `name` once the program
        * assigned one -- even the canonical "Error": both are recorded as facts in the error object. */
@@ -16025,7 +16045,7 @@ bool scr_dyn_has_own(const ScrDyn *v, const ScrStr *key) {
     /* An Error-rooted class with a complete member table owns its rows (answered above), `stack` and `message` (above)
      * and whatever the program assigned or the constructor stored in the error's property bag (`cause`, an expando). */
     if (scr_dyn_objinst_error_rooted(v) && scr_dyn_objinst_has_members(v)) {
-      const ScrError *err = (const ScrError *)v->v.inst.o;
+      const ScrError *err = (const ScrError *)scr_dyn_inst_o(v);
       return err->props != NULL && err->props->kind == SCR_DYN_OBJ && scr_dyn_obj_key_present(err->props, key->data, key->len);
     }
     return scr_dyn_objinst_fence(v, "Object.hasOwn");

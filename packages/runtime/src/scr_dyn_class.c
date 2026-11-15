@@ -184,7 +184,7 @@ static ScrDyn *dyn_eval_static_call_thunk(ScrClosure *clo, ScrDyn *const *args, 
   ScrDyn *nm = (ScrDyn *)scr_box_get_ref((ScrBox *)clo->caps[1]);    /* +1 */
   const ScrDynClassMember *m = scr_dyn_objinst_member(inner, nm->v.str->data, nm->v.str->len);
   ScrDyn *r = NULL;
-  if (m != NULL && m->call != NULL) r = m->call(inner->v.inst.o, args, argc, "a static method");
+  if (m != NULL && m->call != NULL) r = m->call(scr_dyn_inst_o(inner), args, argc, "a static method");
   else dyn_eval_fence(inner, "a static member");
   scr_dyn_release(nm);
   scr_dyn_release(inner);
@@ -209,11 +209,11 @@ static ScrDyn *dyn_eval_static_get(const ScrDyn *inner, const char *key, size_t 
   const ScrDynClassMember *row = scr_dyn_objinst_member(inner, key, key_len);
   if (row != NULL && row->get == NULL && row->call != NULL && key[0] != '%') return dyn_eval_static_method_value(inner, row);
   /* a data row: the evaluation's own field (rows with a hidden name are the synthesized ones) */
-  if (row != NULL && row->get != NULL && key[0] != '%') return row->get(inner->v.inst.o); /* +1, or NULL with the throw pending */
+  if (row != NULL && row->get != NULL && key[0] != '%') return row->get(scr_dyn_inst_o(inner)); /* +1, or NULL with the throw pending */
   if (key_len == 6 && memcmp(key, "length", 6) == 0) {
     /* the constructor's arity: a synthesized row */
     const ScrDynClassMember *lm = scr_dyn_objinst_member(inner, "%dynLen", 7);
-    if (lm != NULL && lm->call != NULL) return lm->call(inner->v.inst.o, NULL, 0, "length");
+    if (lm != NULL && lm->call != NULL) return lm->call(scr_dyn_inst_o(inner), NULL, 0, "length");
   }
   if ((key_len == 6 && memcmp(key, "length", 6) == 0) || (key_len == 9 && memcmp(key, "prototype", 9) == 0)) {
     dyn_eval_fence(inner, key_len == 6 ? "reading 'length'" : "reading 'prototype'");
@@ -229,7 +229,7 @@ static ScrDyn *dyn_eval_construct(const ScrDyn *inner, const ScrDyn *args) {
     return NULL;
   }
   ScrDyn *av[1] = { (ScrDyn *)args };
-  return m->call(inner->v.inst.o, av, 1, "new");
+  return m->call(scr_dyn_inst_o(inner), av, 1, "new");
 }
 
 static const ScrDynClassMember *dyn_class_static(const ScrDynClass *cls, const char *k, size_t n);
@@ -239,7 +239,7 @@ static ScrStr *dyn_cls_ops_class_text(const ScrDyn *d) {
   ScrDyn *r = NULL;
   if (inner != NULL) {
     const ScrDynClassMember *m = scr_dyn_objinst_member(inner, "%dynSrc", 7);
-    if (m != NULL && m->call != NULL) r = m->call(inner->v.inst.o, NULL, 0, "String");
+    if (m != NULL && m->call != NULL) r = m->call(scr_dyn_inst_o(inner), NULL, 0, "String");
   } else {
     const ScrDynClass *cls = dyn_cls_impl_of_value(d);
     const ScrDynClassMember *m = cls != NULL ? dyn_class_static(cls, "%dynSrc", 7) : NULL;
@@ -270,7 +270,7 @@ static int dyn_cls_ops_class_walk(const ScrDyn *v, ScrObjWalk mode, ScrDyn *out)
    * statics table (receiver-free). Both list only ENUMERABLE data rows: static methods are not. */
   const ScrDynClassMember *rows = inner != NULL ? cls->members : cls->statics;
   size_t n = inner != NULL ? cls->nmembers : cls->nstatics;
-  void *recv = inner != NULL ? inner->v.inst.o : NULL;
+  void *recv = inner != NULL ? scr_dyn_inst_o(inner) : NULL;
   for (size_t i = 0; i < n; i++) {
     const ScrDynClassMember *m = &rows[i];
     if (m->enumerable == 0 || m->enumerable == 3 || m->get == NULL || m->name[0] == '%') continue;
@@ -325,7 +325,7 @@ static bool dyn_cls_ops_instance_of(const ScrDyn *v, const ScrDyn *fn, bool *han
       return false;
     }
     ScrDyn *av[1] = { (ScrDyn *)v };
-    ScrDyn *r = m->call(inner->v.inst.o, av, 1, "instanceof");
+    ScrDyn *r = m->call(scr_dyn_inst_o(inner), av, 1, "instanceof");
     if (r == NULL) return false; /* threw */
     bool yes = r->kind == SCR_DYN_BOOL && r->v.b;
     scr_dyn_release(r);
@@ -367,7 +367,7 @@ static ScrDyn *dyn_proto_method_thunk(ScrClosure *clo, ScrDyn *const *args, size
   ScrDyn *r = NULL;
   if (recv->kind == SCR_DYN_OBJINST && scr_dyn_objinst_is(recv, w->idesc->pre, w->idesc->post)) {
     if (w->kind == 1) {
-      r = w->row->get(recv->v.inst.o); /* the getter's value, +1 */
+      r = w->row->get(scr_dyn_inst_o(recv)); /* the getter's value, +1 */
     } else if (w->kind == 2) {
       const ScrDynClassMember *ds = scr_dyn_objinst_member(recv, "%dynSet", 7);
       if (ds == NULL || ds->call == NULL) {
@@ -377,7 +377,7 @@ static ScrDyn *dyn_proto_method_thunk(ScrClosure *clo, ScrDyn *const *args, size
         ScrDyn *kd = scr_dyn_new_str(ks);
         scr_str_release(ks);
         ScrDyn *av[2] = { kd, argc > 0 ? args[0] : scr_dyn_undefined() };
-        ScrDyn *rr = ds->call(recv->v.inst.o, av, 2, "a property write");
+        ScrDyn *rr = ds->call(scr_dyn_inst_o(recv), av, 2, "a property write");
         scr_dyn_release(kd);
         if (rr != NULL) {
           scr_dyn_release(rr);
@@ -385,7 +385,7 @@ static ScrDyn *dyn_proto_method_thunk(ScrClosure *clo, ScrDyn *const *args, size
         }
       }
     } else {
-      r = w->row->call(recv->v.inst.o, args, argc, "method");
+      r = w->row->call(scr_dyn_inst_o(recv), args, argc, "method");
     }
   } else {
     scr_throw_error_named(scr_str_new("TypeError", 9), scr_str_new("Cannot read properties of undefined", 35));
@@ -428,7 +428,7 @@ static ScrDyn *dyn_class_prototype(const ScrDyn *d) {
   if (cls == NULL) return NULL;
   const ScrDynClassMember *ownRow = inner != NULL ? scr_dyn_objinst_member(inner, "%dynOwn", 7) : dyn_class_static(cls, "%dynOwn", 7);
   if (ownRow == NULL || ownRow->call == NULL) return NULL;
-  void *recv = inner != NULL ? inner->v.inst.o : NULL;
+  void *recv = inner != NULL ? scr_dyn_inst_o(inner) : NULL;
   const bool first = scr_closure_proto(scr_dyn_fn_clo(d)) == NULL;
   ScrDyn *P = scr_dyn_fn_prototype((ScrDyn *)d); /* +1 */
   if (!first) return P;
@@ -609,7 +609,7 @@ static bool dyn_err_key_is(const ScrStr *k, const char *lit, size_t n) {
 }
 
 ScrDyn *dyn_cls_impl_err_get(ScrDyn *d, const ScrStr *key) {
-  ScrError *e = (ScrError *)d->v.inst.o;
+  ScrError *e = (ScrError *)scr_dyn_inst_o(d);
   /* An own property in the bag shadows the cell it names (a message or name
    * written with a non-string value lives there). */
   if (e->props != NULL && e->props->kind == SCR_DYN_OBJ &&
@@ -629,7 +629,7 @@ ScrDyn *dyn_cls_impl_err_get(ScrDyn *d, const ScrStr *key) {
 }
 
 void dyn_cls_impl_err_set(ScrDyn *d, const ScrStr *key, const ScrDyn *value) {
-  ScrError *e = (ScrError *)d->v.inst.o;
+  ScrError *e = (ScrError *)scr_dyn_inst_o(d);
   bool is_msg = dyn_err_key_is(key, "message", 7);
   bool is_name = dyn_err_key_is(key, "name", 4);
   bool is_code = dyn_err_key_is(key, "code", 4);
@@ -648,7 +648,7 @@ void dyn_cls_impl_err_set(ScrDyn *d, const ScrStr *key, const ScrDyn *value) {
 }
 
 bool dyn_cls_impl_err_has(const ScrDyn *d, const char *key, size_t key_len) {
-  ScrError *e = (ScrError *)d->v.inst.o;
+  ScrError *e = (ScrError *)scr_dyn_inst_o(d);
   if ((key_len == 7 && memcmp(key, "message", 7) == 0) || (key_len == 4 && memcmp(key, "name", 4) == 0) ||
       (key_len == 5 && memcmp(key, "stack", 5) == 0)) {
     return true;
@@ -658,7 +658,7 @@ bool dyn_cls_impl_err_has(const ScrDyn *d, const char *key, size_t key_len) {
 }
 
 bool dyn_cls_impl_err_delete(ScrDyn *d, const ScrStr *key) {
-  ScrError *e = (ScrError *)d->v.inst.o;
+  ScrError *e = (ScrError *)scr_dyn_inst_o(d);
   if (dyn_err_key_is(key, "message", 7) || dyn_err_key_is(key, "name", 4) || dyn_err_key_is(key, "stack", 5) ||
       dyn_err_key_is(key, "code", 4)) {
     return false;
@@ -752,13 +752,13 @@ static bool dyn_cls_ops_set(ScrDyn *recv, const ScrStr *key, const ScrDyn *value
        * list would come out wrong. Loud rather than reordered. */
       const ScrDynClassMember *rm = scr_dyn_objinst_member(recv, key->data, key->len);
       /* A field under a prototype-data name starts absent, so ITS first write is no re-adding (rm->value names the datum). */
-      if (rm != NULL && rm->enumerable == 4 && rm->value == NULL && value != scr_dyn_absent() && scr_dyn_member_hidden(rm, recv->v.inst.o)) {
+      if (rm != NULL && rm->enumerable == 4 && rm->value == NULL && value != scr_dyn_absent() && scr_dyn_member_hidden(rm, scr_dyn_inst_o(recv))) {
         scr_dyn_objinst_fence(recv, "re-adding a deleted field");
         return true;
       }
       ScrDyn *kd = scr_dyn_new_str((ScrStr *)key);
       ScrDyn *av[2] = { kd, (ScrDyn *)value };
-      ScrDyn *r = ds->call(recv->v.inst.o, av, 2, "a property write");
+      ScrDyn *r = ds->call(scr_dyn_inst_o(recv), av, 2, "a property write");
       scr_dyn_release(kd);
       if (r == NULL) return true; /* the write threw */
       bool taken = r->kind == SCR_DYN_BOOL && r->v.b;
@@ -828,7 +828,7 @@ static int dyn_cls_ops_delete(ScrDyn *recv, const ScrStr *key) {
       if (fm != NULL && fm->enumerable == 4 && ds != NULL && ds->call != NULL) {
         ScrDyn *kd = scr_dyn_new_str((ScrStr *)key);
         ScrDyn *av[2] = { kd, scr_dyn_absent() };
-        ScrDyn *r = ds->call(recv->v.inst.o, av, 2, "'delete'");
+        ScrDyn *r = ds->call(scr_dyn_inst_o(recv), av, 2, "'delete'");
         scr_dyn_release(kd);
         if (r == NULL) return 0; /* the store threw */
         scr_dyn_release(r);
@@ -839,7 +839,7 @@ static int dyn_cls_ops_delete(ScrDyn *recv, const ScrStr *key) {
     if (dd != NULL && dd->call != NULL) {
       ScrDyn *kd = scr_dyn_new_str((ScrStr *)key);
       ScrDyn *av[1] = { kd };
-      ScrDyn *r = dd->call(recv->v.inst.o, av, 1, "'delete'");
+      ScrDyn *r = dd->call(scr_dyn_inst_o(recv), av, 1, "'delete'");
       scr_dyn_release(kd);
       if (r == NULL) return 0; /* the delete threw */
       bool taken = r->kind == SCR_DYN_BOOL && r->v.b;
@@ -860,7 +860,7 @@ static int dyn_cls_ops_delete(ScrDyn *recv, const ScrStr *key) {
 static ScrDyn *dyn_cls_props_bag(const ScrDyn *v) {
   const ScrDynClassMember *m = scr_dyn_objinst_member(v, "%props", 6);
   if (m == NULL || m->get == NULL) return NULL;
-  ScrDyn *b = m->get(v->v.inst.o); /* +1; NULL only when a read threw (none for a hidden field) */
+  ScrDyn *b = m->get(scr_dyn_inst_o(v)); /* +1; NULL only when a read threw (none for a hidden field) */
   if (b == NULL) return NULL;
   if (b->kind != SCR_DYN_OBJ) {
     scr_dyn_release(b);
@@ -915,7 +915,7 @@ static ScrDyn *dyn_cls_props_keys(const ScrDyn *v) {
   const size_t nm = scr_dyn_objinst_member_count(v);
   for (size_t i = 0; i < nm; i++) {
     const ScrDynClassMember *m = scr_dyn_objinst_member_at(v, i);
-    if (scr_dyn_member_hidden(m, v->v.inst.o)) continue;
+    if (scr_dyn_member_hidden(m, scr_dyn_inst_o(v))) continue;
     ScrDyn *k = dyn_cls_objwalk_key(m->name, m->len);
     if (dyn_keys_has(keys, k)) scr_dyn_release(k);
     else scr_dyn_arr_push(keys, k); /* the array takes the +1 */
@@ -962,7 +962,7 @@ static ScrDyn *dyn_cls_ops_walk_error(const ScrDyn *v, ScrObjWalk mode) {
     const size_t nm = scr_dyn_objinst_member_count(v);
     for (size_t i = 0; i < nm; i++) {
       const ScrDynClassMember *m = scr_dyn_objinst_member_at(v, i);
-      if (scr_dyn_member_hidden(m, v->v.inst.o)) continue;
+      if (scr_dyn_member_hidden(m, scr_dyn_inst_o(v))) continue;
       scr_dyn_arr_push(keys, dyn_cls_objwalk_key(m->name, m->len));
     }
     return keys;
@@ -978,7 +978,7 @@ static ScrDyn *dyn_cls_ops_walk_error(const ScrDyn *v, ScrObjWalk mode) {
      * enumerable); then the class's own fields and the expando bag, in
      * that order. Order among them is the one thing the cells cannot
      * state: Node lists them in ASSIGNMENT order. */
-    ScrError *e = (ScrError *)v->v.inst.o;
+    ScrError *e = (ScrError *)scr_dyn_inst_o(v);
     const size_t pre = scr_dyn_objinst_pre(v);
     int own_kind = 0;
     size_t own_pre = 0;
@@ -1004,12 +1004,12 @@ static ScrDyn *dyn_cls_ops_walk_error(const ScrDyn *v, ScrObjWalk mode) {
     const size_t nm = scr_dyn_objinst_member_count(v);
     for (size_t i = 0; i < nm; i++) {
       const ScrDynClassMember *m = scr_dyn_objinst_member_at(v, i);
-      if (scr_dyn_member_hidden(m, v->v.inst.o)) continue;
+      if (scr_dyn_member_hidden(m, scr_dyn_inst_o(v))) continue;
       if (mode == SCR_OBJWALK_KEYS) {
         scr_dyn_arr_push(out, dyn_cls_objwalk_key(m->name, m->len));
         continue;
       }
-      ScrDyn *val = m->get(v->v.inst.o);
+      ScrDyn *val = m->get(scr_dyn_inst_o(v));
       if (val == NULL) {
         scr_dyn_release(out);
         return NULL;
@@ -1078,9 +1078,9 @@ static ScrDyn *dyn_cls_toprim_step(const ScrDyn *d, const ScrDynClassMember *m, 
   if (m == NULL) return NULL; /* no row: nothing to call */
   ScrDyn *r = NULL;
   if (m->call != NULL) {
-    r = m->call(d->v.inst.o, NULL, 0, name);
+    r = m->call(scr_dyn_inst_o(d), NULL, 0, name);
   } else {
-    ScrDyn *fv = m->get != NULL ? m->get(d->v.inst.o) : NULL; /* +1; NULL: the read threw */
+    ScrDyn *fv = m->get != NULL ? m->get(scr_dyn_inst_o(d)) : NULL; /* +1; NULL: the read threw */
     if (fv == NULL) return NULL;
     if (dyn_cls_is_callable(fv)) {
       scr_dyn_this_push_dyn(d);
@@ -1132,7 +1132,7 @@ static int dyn_cls_objinst_user_tostring(const ScrDyn *d) {
   const ScrDynClassMember *cm = scr_dyn_objinst_member(d, "toString", 8);
   if (cm == NULL) return 0;
   if (cm->call != NULL) return 1;
-  ScrDyn *fv = cm->get != NULL ? cm->get(d->v.inst.o) : NULL;
+  ScrDyn *fv = cm->get != NULL ? cm->get(scr_dyn_inst_o(d)) : NULL;
   if (fv == NULL) return scr_exc_pending() ? 2 : 0;
   int user = dyn_cls_is_callable(fv) ? 1 : 0;
   scr_dyn_release(fv);
@@ -1197,10 +1197,10 @@ static ScrDyn *dyn_cls_objinst_extra_get(const ScrDyn *d, const char *k, size_t 
   ScrDyn *kd = scr_dyn_new_str(ks);
   scr_str_release(ks);
   ScrDyn *av[1] = { kd };
-  ScrDyn *r = h->call(d->v.inst.o, av, 1, "a prototype lookup");
+  ScrDyn *r = h->call(scr_dyn_inst_o(d), av, 1, "a prototype lookup");
   bool has = r != NULL && r->kind == SCR_DYN_BOOL && r->v.b;
   if (r != NULL) scr_dyn_release(r);
-  ScrDyn *out = has ? g->call(d->v.inst.o, av, 1, "a prototype lookup") : NULL;
+  ScrDyn *out = has ? g->call(scr_dyn_inst_o(d), av, 1, "a prototype lookup") : NULL;
   scr_dyn_release(kd);
   return out;
 }
@@ -1209,7 +1209,7 @@ static ScrDyn *dyn_cls_objinst_extra_get(const ScrDyn *d, const char *k, size_t 
 static ScrDyn *dyn_cls_objinst_proto_keys(const ScrDyn *d) {
   const ScrDynClassMember *kr = scr_dyn_objinst_member(d, "%dynProtoKeys", 13);
   if (kr == NULL || kr->call == NULL) return NULL;
-  ScrDyn *r = kr->call(d->v.inst.o, NULL, 0, "a prototype lookup");
+  ScrDyn *r = kr->call(scr_dyn_inst_o(d), NULL, 0, "a prototype lookup");
   if (r != NULL && r->kind != SCR_DYN_ARR) { scr_dyn_release(r); return NULL; }
   return r;
 }
@@ -1250,7 +1250,7 @@ static ScrDyn *dyn_cls_objinst_snapshot(const ScrDyn *v, bool *unsup) {
       if (!e->plain_prop && dyn_row_is_marker(q)) {
         const ScrDynClassMember *m = scr_dyn_objinst_member(v, e->key, e->key_len);
         if (m == NULL || m->get == NULL || m->call != NULL || !m->enumerable) continue;
-        val = m->get(v->v.inst.o);
+        val = m->get(scr_dyn_inst_o(v));
         if (val == NULL) { ok = false; break; }
       } else {
         if (!e->plain_prop && !scr_dyn_truthy(q->v.arr.items[4])) continue;
@@ -1263,8 +1263,8 @@ static ScrDyn *dyn_cls_objinst_snapshot(const ScrDyn *v, bool *unsup) {
   } else {
     for (size_t i = 0; i < nm && ok; i++) {
       const ScrDynClassMember *m = scr_dyn_objinst_member_at(v, i);
-      if (scr_dyn_member_hidden(m, v->v.inst.o)) continue;
-      ScrDyn *val = m->get(v->v.inst.o);
+      if (scr_dyn_member_hidden(m, scr_dyn_inst_o(v))) continue;
+      ScrDyn *val = m->get(scr_dyn_inst_o(v));
       if (val == NULL) { ok = false; break; }
       scr_dyn_obj_set(out, m->name, m->len, val);
     }
@@ -1402,7 +1402,7 @@ static ScrDyn *dyn_forin_keys_core(const ScrDyn *v) {
     const char *name = SCR_EE_PROTO_KEYS[i];
     const size_t len = strlen(name);
     const ScrDynClassMember *sm = scr_dyn_objinst_member(v, name, len);
-    if (sm != NULL && !scr_dyn_member_hidden(sm, v->v.inst.o)) continue; /* shadowed by a live member */
+    if (sm != NULL && !scr_dyn_member_hidden(sm, scr_dyn_inst_o(v))) continue; /* shadowed by a live member */
     scr_dyn_arr_push(keys, dyn_cls_objwalk_key(name, len));
   }
   return keys;
@@ -1410,7 +1410,7 @@ static ScrDyn *dyn_forin_keys_core(const ScrDyn *v) {
 
 /* A field row with prototype data (row->value) whose field is still unset: the name is an enumerable INHERITED property. */
 static bool dyn_cls_datum_member_unset(const ScrDyn *v, const ScrDynClassMember *m) {
-  return m->value != NULL && m->get != NULL && m->name[0] != '%' && m->enumerable >= 2 && scr_dyn_member_hidden(m, v->v.inst.o);
+  return m->value != NULL && m->get != NULL && m->name[0] != '%' && m->enumerable >= 2 && scr_dyn_member_hidden(m, scr_dyn_inst_o(v));
 }
 
 /* The enumerable keys a plain object inherits along its [[Prototype]] chain, appended after its own: per level in Object.keys order (array
@@ -1457,7 +1457,7 @@ ScrDyn *scr_dyn_forin_keys(const ScrDyn *v) {
     /* The prototype data names, nearest class level first (the compiler's %dynDatumKeys row: the flattened member table below lists the base
      * level first, which is not Node's order). A class without the row keeps the member order. */
     const ScrDynClassMember *dr = scr_dyn_objinst_member(v, "%dynDatumKeys", 13);
-    ScrDyn *order = dr != NULL && dr->call != NULL ? dr->call(v->v.inst.o, NULL, 0, "a prototype lookup") : NULL;
+    ScrDyn *order = dr != NULL && dr->call != NULL ? dr->call(scr_dyn_inst_o(v), NULL, 0, "a prototype lookup") : NULL;
     if (order != NULL && order->kind == SCR_DYN_ARR) {
       for (size_t i = 0; i < order->v.arr.len; i++) {
         const ScrStr *nm = scr_dyn_str_value(order->v.arr.items[i]);
@@ -1528,7 +1528,7 @@ bool scr_dyn_forin_certain(const ScrDyn *v, const ScrStr *key) {
     if (strlen(own_pre[i]) == n && memcmp(own_pre[i], s, n) == 0) return true;
   }
   const ScrDynClassMember *m = scr_dyn_objinst_member(v, s, n);
-  if (m != NULL && !scr_dyn_member_hidden(m, v->v.inst.o)) return true;
+  if (m != NULL && !scr_dyn_member_hidden(m, scr_dyn_inst_o(v))) return true;
   if (props_instance(v)) {
     /* A table key is visited while the table lists it (enumerable): the same key list Object.keys walks. */
     ScrDyn *bag = dyn_cls_props_bag(v);
