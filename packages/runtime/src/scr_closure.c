@@ -676,7 +676,7 @@ void scr_closure_free_dead(ScrClosure *c) {
 #ifdef SCR_CLOSTAT
   scr_cs_free(scr_closure_ncaps(c));
 #endif
-  if (scr_closure_may_cycle(c)) scr_cyc_on_dead(c); /* see scr_box_release */
+  scr_cyc_on_dead(c); /* LAB (pace): unconditional, because scr_dyn_release buffers every boxed function again, as the stand-alone node did */
   const size_t ncaps = scr_closure_ncaps(c);
   for (size_t i = 0; i < ncaps; i++) {
     scr_cap_release(c->caps[i]);

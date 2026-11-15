@@ -2338,9 +2338,25 @@ static void scr_collect_white(void *obj) {
   }
 }
 
+#ifdef SCR_CLOSTAT
+/* LAB ONLY: print the number of collection passes at exit. */
+static unsigned long *scr_cs_passes_p = NULL;
+static void scr_cs_passes_print(void) { fprintf(stderr, "CYCPASS passes=%lu\n", *scr_cs_passes_p); }
+void scr_cs_passes_atexit_register(unsigned long *p) { scr_cs_passes_p = p; atexit(scr_cs_passes_print); }
+#endif
+
 void scr_collect_cycles(void) {
   if (scr_collecting || scr_nroots == 0) return;
   scr_collecting = true;
+#ifdef SCR_CLOSTAT
+  {
+    static unsigned long passes = 0;
+    static int armed = 0;
+    extern void scr_cs_passes_atexit_register(unsigned long *);
+    passes++;
+    if (!armed) { armed = 1; scr_cs_passes_atexit_register(&passes); }
+  }
+#endif
   SCR_CS_PASS_BEGIN();
 
   /* markRoots: keep live candidates (still purple), drop the rest — an
