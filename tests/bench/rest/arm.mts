@@ -1,7 +1,7 @@
 /* arm.mts <label> <db> <exe> [args...]  : one scenario arm of the REST app against the zapo fake server (Node, never compiled).
  * Run from the zapo root (tsx tsconfig paths) with ZAPO_FAKE_SERVER, RR_OUT, RR_APPDIR, RR_DBPORT set. Output: $RR_OUT/<label>/{http.json,stanzas.json,exit.json,app.log} */
 import { spawn } from 'node:child_process'
-import { mkdirSync, writeFileSync, createWriteStream } from 'node:fs'
+import { mkdirSync, writeFileSync, createWriteStream, readFileSync, readdirSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -14,6 +14,7 @@ const { FakeWaServer } = await imp('api/FakeWaServer')
 const { parsePairingQrString } = await imp('protocol/auth/pair-device')
 const { buildAppStateSyncKeyShareMessage } = await imp('protocol/push/app-state-key-share')
 const { bytesToHex } = await imp('transport/util')
+const { encodeHistorySyncPlaintext } = await imp('protocol/push/history-sync')
 const SELF = '5511920387975'
 const PORT = Number(process.env.RR_PORT ?? 18800)
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
@@ -58,8 +59,33 @@ const onOut = (d: Buffer) => { const s = d.toString(); log.write(s); buf += s
         if (q >= 0 && !l.includes('ttlMs=') && l.split(',').length >= 5) resolveQr(l.slice(q + 5)) } }
 client.stdout.on('data', onOut); client.stderr.on('data', onOut)
 let exited: any = null
+const times: any = { spawn: Date.now() - t0 }
 client.on('exit', (c, s) => { exited = { code: c, signal: s } })
 
+
+// LAB (RR_SCENARIO=idle|history): the app is held idle with the connection up, or driven through a history sync, while its RSS is sampled every second from /proc.
+const SCEN = process.env.RR_SCENARIO ?? ''
+const timeline: { t: number; rss: number; hwm: number }[] = []
+const marks: { t: number; what: string }[] = []
+const procStatus = (pid: number): { rss: number; hwm: number } | null => {
+    try { const t = readFileSync(`/proc/${pid}/status`, 'utf8'); const g = (k: string) => Number((t.match(new RegExp(`^${k}:\\s+(\\d+)`, 'm')) ?? [])[1] ?? 0)
+        return { rss: g('VmRSS'), hwm: g('VmHWM') } } catch { return null }
+}
+// the app is the descendant of the spawned wrapper (pmon, smapspeak) with the most resident memory; with no wrapper it is the child itself
+const appPid = (root: number): number => {
+    const ppid = new Map<number, number>()
+    for (const d of readdirSync('/proc')) { if (!/^\d+$/.test(d)) continue
+        try { const st = readFileSync(`/proc/${d}/stat`, 'utf8'); ppid.set(Number(d), Number(st.slice(st.lastIndexOf(')') + 2).split(' ')[1])) } catch {} }
+    const kin = new Set<number>([root]); let grew = true
+    while (grew) { grew = false; for (const [p, pp] of ppid) if (!kin.has(p) && kin.has(pp)) { kin.add(p); grew = true } }
+    let best = root, bestRss = -1
+    for (const p of kin) { const s = procStatus(p); if (s && s.rss > bestRss) { best = p; bestRss = s.rss } }
+    return best
+}
+let sampler: ReturnType<typeof setInterval> | null = null
+const startSampler = () => { if (sampler !== null) return
+    sampler = setInterval(() => { if (client.pid === undefined) return; const s = procStatus(appPid(client.pid)); if (s) timeline.push({ t: Date.now() - t0, rss: s.rss, hwm: s.hwm }) }, 1000) }
+const mark = (what: string) => { marks.push({ t: Date.now() - t0, what }); log.write(`[lab] ${what}\n`) }
 const results: any[] = []
 async function req(method: string, path: string, body?: any) {
     const o: any = { method, headers: {} }
@@ -75,12 +101,55 @@ async function req(method: string, path: string, body?: any) {
 }
 try {
     const pipeline = await Promise.race([loginP, sleep(60000).then(() => { throw new Error('no login in 60s') })])
+    times.login = Date.now() - t0
     const self = await server.createFakePeer({ jid: `${SELF}@s.whatsapp.net` }, pipeline)
     const keys = Array.from({ length: 3 }, (_, i) => ({ keyId: new Uint8Array(16).fill(i + 1), keyData: new Uint8Array(32).fill(i + 9),
         fingerprint: { rawId: 0, currentIndex: 0, deviceIndexes: [] as number[] }, timestamp: 1700000000000 }))
     for (const k of keys) server.registerAppStateSyncKey(k.keyId, k.keyData)
     await self.sendMessage(buildAppStateSyncKeyShareMessage({ keys } as any))
+    times.keyShareSent = Date.now() - t0
     await sleep(3000)
+    if (SCEN === 'idle' || SCEN === 'history') {
+        startSampler()
+        mark('login-settled')
+        if (SCEN === 'history') {
+            // realistic history: RR_HS_CHATS chats of RR_HS_MSGS messages, sent as RR_HS_CHUNKS external blobs (the shape a real bootstrap takes: one notification per chunk, the blob downloaded and decrypted by the app)
+            const chats = Number(process.env.RR_HS_CHATS ?? 400), per = Number(process.env.RR_HS_MSGS ?? 25), chunks = Number(process.env.RR_HS_CHUNKS ?? 8)
+            const perChunk = Math.ceil(chats / chunks)
+            const body = (c: number, i: number, m: number) => `message ${m} of chat ${c}.${i}: ${'lorem ipsum dolor sit amet '.repeat(1 + ((c + i + m) % 4))}`
+            mark(`history-begin chats=${chats} msgs=${per} chunks=${chunks}`)
+            for (let c = 0; c < chunks; c++) {
+                const conversations = Array.from({ length: Math.min(perChunk, chats - c * perChunk) }, (_, i) => ({
+                    id: `55119${String(100000 + c * perChunk + i).padStart(6, '0')}@s.whatsapp.net`, name: `Contact ${c}-${i}`, unreadCount: i % 3,
+                    messages: Array.from({ length: per }, (_, m) => ({ id: `3B${String(c).padStart(2, '0')}${String(i).padStart(4, '0')}${String(m).padStart(4, '0')}`.padEnd(20, 'F'), fromMe: m % 2 === 0,
+                        timestamp: 1700000000 + c * 100000 + i * 100 + m, message: { conversation: body(c, i, m) } })) }))
+                const plaintext = await encodeHistorySyncPlaintext({ chunkOrder: c, progress: Math.round(((c + 1) / chunks) * 100), conversations: conversations as any })
+                const blob = await server.publishMediaBlob({ mediaType: 'history', plaintext })
+                await self.sendHistorySyncExternal({ chunkOrder: c, progress: Math.round(((c + 1) / chunks) * 100), directPath: server.mediaUrl(blob.path), mediaKey: blob.mediaKey,
+                    fileSha256: blob.fileSha256, fileEncSha256: blob.fileEncSha256, fileLength: blob.fileLength })
+                mark(`chunk ${c} sent plaintext=${plaintext.length}`)
+                await sleep(Number(process.env.RR_HS_GAP_MS ?? 1000))
+            }
+            // settled: the stored message count has not moved for 10 s (polled every 2 s), at most 10 minutes
+            let last = -1, still = 0
+            for (let i = 0; i < 300 && still < 5; i++) {
+                await sleep(2000)
+                const r = await req('GET', '/store/counts'); results.pop()
+                let n = -2; try { const j = JSON.parse(r.body_resp ?? '{}'); n = Number(j.messages ?? j.counts?.messages ?? JSON.stringify(j).length) } catch {}
+                if (n === last) still++; else { still = 0; last = n }
+            }
+            mark(`history-settled count=${last}`)
+            await sleep(Number(process.env.RR_HS_STEADY_S ?? 60) * 1000)
+            mark('steady-end')
+        } else {
+            const idleS = Number(process.env.RR_IDLE_SECONDS ?? 300)
+            mark(`idle-begin ${idleS}s`)
+            await sleep(idleS * 1000)
+            mark('idle-end')
+        }
+        await req('GET', '/health')
+        await req('POST', '/s/drive/shutdown')
+    } else {
     for (let c = 1; c <= 2; c++) {
         await self.sendHistorySync({ chunkOrder: c, progress: c * 50, conversations: Array.from({ length: 3 }, (_, i) => ({
             id: `55119${100000 + c * 1000 + i}@s.whatsapp.net`, name: `Contact ${c}-${i}`, unreadCount: i,
@@ -98,6 +167,7 @@ try {
         '/events?type=history_sync_chunk', '/events?since=3', '/nonexistent', '/s/bad%20id/state', '/s/nosuch/state', '/qr',
         '/chat/sync']
     if (process.env.RR_SIGUSR1) { client.kill('SIGUSR1'); await sleep(500) } // layout profile: start the steady-state epoch where the HTTP requests begin
+    times.firstGet = Date.now() - t0
     for (const g of GETS) await req('GET', g)
     await req('POST', '/message/sendText', { to: `${SELF}@s.whatsapp.net`, text: 'rest hello' })
     await req('POST', '/message/sendText', { to: '5511933334444@s.whatsapp.net', text: 'to another' })
@@ -114,11 +184,15 @@ try {
     await sleep(2000)
     for (const g of ['/store/messages?thread=55119101000@s.whatsapp.net', '/store/threads', '/store/counts', '/events']) await req('GET', g)
     await req('POST', '/s/drive/shutdown')
+    }
 } catch (e) { results.push({ driverError: String(e) }) }
 for (let i = 0; i < 40 && exited === null; i++) await sleep(250)
 if (exited === null) { results.push({ note: 'app did not exit after shutdown; killing by pid', pid: client.pid }); client.kill('SIGTERM'); await sleep(1000) }
 writeFileSync(join(OUT, 'http.json'), JSON.stringify(results, null, 1))
 writeFileSync(join(OUT, 'stanzas.json'), JSON.stringify(stanzas, null, 1))
+times.end = Date.now() - t0
+writeFileSync(join(OUT, 'times.json'), JSON.stringify(times))
+if (SCEN) { if (sampler) clearInterval(sampler); writeFileSync(join(OUT, 'timeline.json'), JSON.stringify({ scenario: SCEN, marks, timeline })) }
 writeFileSync(join(OUT, 'exit.json'), JSON.stringify({ exited, ms: Date.now() - t0 }))
 await server.stop(); log.end()
 console.log(label, 'done', JSON.stringify(exited), results.length, 'requests', stanzas.length, 'stanzas')
