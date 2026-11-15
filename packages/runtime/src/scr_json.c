@@ -573,6 +573,15 @@ static size_t scr_dyn_free_count;
 #ifndef SCR_DYN_TRIM_ARR
 #define SCR_DYN_TRIM_ARR 64
 #endif
+/* A BIG buffer is not parked with its node (user-approved tradeoff, 2026-11-15): an array buffer past SCR_DYN_PARKFREE_ARR slots or an object table past SCR_DYN_PARKFREE_OBJ
+ * entries is freed at park time and the node parks EMPTY. A parked big buffer is otherwise inherited by whatever small container is allocated next (the mysql bench's 751-slot params
+ * vectors and 92-slot option tables), and whether the post-collection trim frees it before that reuse decides a 10 MB peak RSS gap run to run. Smaller buffers keep the reuse. */
+#ifndef SCR_DYN_PARKFREE_ARR
+#define SCR_DYN_PARKFREE_ARR 256
+#endif
+#ifndef SCR_DYN_PARKFREE_OBJ
+#define SCR_DYN_PARKFREE_OBJ 64
+#endif
 #ifndef SCR_DYN_TRIM_OBJ
 #define SCR_DYN_TRIM_OBJ 32
 #endif
@@ -1082,7 +1091,9 @@ static __attribute__((noinline)) void scr_dyn_release_final(ScrDyn *d) {
      * set back to 1 by scr_dyn_alloc on the way out. Nothing walks a
      * parked node: scr_cyc_on_dead has already dropped its candidate
      * buffer entry and every edge it owned has been released. */
-    d->rc = (size_t)(void *)*list; /* buffer and capacity survive intact */
+    if (d->kind == SCR_DYN_ARR && d->v.arr.cap > SCR_DYN_PARKFREE_ARR) { free(d->v.arr.items); d->v.arr.items = NULL; d->v.arr.cap = 0; }
+    else if (d->kind == SCR_DYN_OBJ && d->v.obj.cap > SCR_DYN_PARKFREE_OBJ) { free(d->v.obj.entries); d->v.obj.entries = NULL; d->v.obj.cap = 0; }
+    d->rc = (size_t)(void *)*list; /* a small buffer and its capacity survive intact */
     *list = d;
     scr_dyn_free_count++;
     return;
