@@ -634,7 +634,7 @@ static size_t scr_fnname_probe(const ScrFnName **tab, size_t cap, const void *fn
   return i;
 }
 
-static unsigned scr_fn_names_epoch_v = 1;
+unsigned scr_fn_names_epoch_v = 1; /* read inline by the dyn function-descriptor cache (scr_json.c) */
 /* Bumped by every install: the dyn function-descriptor cache keys on it, because the name and kind code it caches come out of this table. */
 unsigned scr_fn_names_epoch(void) { return scr_fn_names_epoch_v; }
 
