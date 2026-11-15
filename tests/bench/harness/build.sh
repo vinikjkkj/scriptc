@@ -25,6 +25,6 @@ secs=$(( $(date +%s) - s ))
 echo "rc=$rc secs=$secs variant=$VAR" | tee -a "$O/messaging-$S-$BE$suffix.build.log"
 [ $rc -eq 0 ] && cp "$BUILD" "$O/messaging-$S-$BE$suffix.bin"
 # LAB (llcapture): a failed build keeps its IR, gzipped, as a .log so the artifact upload picks it up
-if [ $rc -ne 0 ]; then for f in "$O"/build/*.ll; do [ -f "$f" ] && gzip -c "$f" > "$O/failed-ir-$S-$BE$suffix.ll.gz.log"; done; fi
+if true; then for f in "$O"/build/*.ll; do [ -f "$f" ] && gzip -c "$f" > "$O/failed-ir-$S-$BE$suffix.ll.gz.log"; done; fi
 echo "$S $BE $VAR$TAG rc=$rc build_secs=$secs" >> "$O/build-summary.txt"
 exit $rc
