@@ -80,8 +80,8 @@ ScrDyn *scr_dyn_objinst_member_get_lit(ScrDyn *d, const ScrStr *key) {
     exit(98);
   }
 #endif
-  const ScrDynClass *own = d->v.inst.cls;
-  const uint32_t pos = (uint32_t)(own->vt ? ((const ScrError *)d->v.inst.o)->vt->pre : own->pre);
+  const ScrDynClass *own = scr_dyn_inst_cls(d);
+  const uint32_t pos = (uint32_t)(own->vt ? ((const ScrError *)scr_dyn_inst_o(d))->vt->pre : own->pre);
   ScrOimSlot *s = &scr_oim[(size_t)((((uint64_t)(uintptr_t)own * 0x9E3779B97F4A7C15ull) ^ ((uint64_t)(uintptr_t)key * 0xC2B2AE3D27D4EB4Full) ^
                                      ((uint64_t)pos * 0x165667B19E3779F9ull)) >> 54)];
   const ScrDynClassMember *cm;
@@ -103,6 +103,6 @@ ScrDyn *scr_dyn_objinst_member_get_lit(ScrDyn *d, const ScrStr *key) {
   /* The common row, a declared FIELD, finishes here: scr_dyn_objinst_member_get reads cm->get(obj) and adds only two things (the
    * datum a row carries in cm->value, and the _eventsCount cell of an enumerable-4 row), so a get row with neither is exactly the
    * field read. Everything else (a method row, a datum row, an enumerable-4 row) takes the dispatch unit's own body. */
-  if (cm->get != NULL && cm->value == NULL && cm->enumerable != 4) return cm->get(d->v.inst.o);
+  if (cm->get != NULL && cm->value == NULL && cm->enumerable != 4) return cm->get(scr_dyn_inst_o(d));
   return scr_dyn_objinst_row_get(d, key, cm);
 }

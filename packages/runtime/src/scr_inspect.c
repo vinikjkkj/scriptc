@@ -1940,7 +1940,7 @@ static size_t insp_sym_count(const ScrDyn *d) { return d == NULL ? 0 : insp_sym_
 static ScrDyn *insp_inst_sym_bag(const ScrDyn *d) {
   const ScrDynClassMember *m = scr_dyn_objinst_member(d, "%props", 6);
   if (m == NULL || m->get == NULL) return NULL;
-  ScrDyn *b = m->get(d->v.inst.o);
+  ScrDyn *b = m->get(scr_dyn_inst_o(d));
   if (b != NULL && b->kind == SCR_DYN_OBJ && scr_dyn_ext(b)->syms != NULL) return b;
   scr_dyn_release(b);
   return NULL;
@@ -2347,7 +2347,7 @@ static void insp_emit_proto_acc(ScrDyn *d, double recurse, double depth) {
       insp_sh_acc_label_fwd(&eb, m->accl);
     } else {
       g_indent += 2;
-      ScrDyn *tmp = m->get(d->v.inst.o); /* the getter runs with the instance as `this` */
+      ScrDyn *tmp = m->get(scr_dyn_inst_o(d)); /* the getter runs with the instance as `this` */
       insp_acc_value(&eb, label, tmp, recurse + 1, depth + 1);
       g_indent -= 2;
     }
@@ -3084,14 +3084,14 @@ static ScrStr *insp_sh_class_value(ScrDyn *d, const ScrDynClass *vc, const ScrDy
   if (einner == NULL) return insp_sh_class_value_in(d, vc, vc, vc->statics, vc->nstatics, vc->staticsOpaque, NULL, 0, NULL, recurse, depth);
   const ScrDynClass *ecls = scr_dyn_objinst_class_of(einner);
   const ScrDynClassMember *im = scr_dyn_objinst_member(einner, "%dynInst", 8);
-  ScrDyn *ib = im != NULL && im->call != NULL ? im->call(einner->v.inst.o, NULL, 0, "prototype") : NULL;
+  ScrDyn *ib = im != NULL && im->call != NULL ? im->call(scr_dyn_inst_o(einner), NULL, 0, "prototype") : NULL;
   if (ib == NULL || ib->kind != SCR_DYN_OBJINST) {
     scr_dyn_release(ib);
     return insp_sh_fence("a per-evaluation class value whose instance side is not reachable");
   }
   /* the declared base class's statics (an evaluation's own rows hold only its own members) */
   const ScrDynClassMember *bm = scr_dyn_objinst_member(einner, "%dynBase", 8);
-  ScrDyn *bv = bm != NULL && bm->call != NULL ? bm->call(einner->v.inst.o, NULL, 0, "prototype") : NULL;
+  ScrDyn *bv = bm != NULL && bm->call != NULL ? bm->call(scr_dyn_inst_o(einner), NULL, 0, "prototype") : NULL;
   const ScrDynClass *bc = bv != NULL && bv->kind == SCR_DYN_FUNC ? scr_dyn_class_of_value(bv) : NULL;
   if (bc != NULL && bc->staticsOpaque) {
     scr_dyn_release(bv);
@@ -3099,7 +3099,7 @@ static ScrStr *insp_sh_class_value(ScrDyn *d, const ScrDynClass *vc, const ScrDy
     return insp_sh_fence("a per-evaluation class value whose base class has an incomplete static table");
   }
   ScrStr *r = insp_sh_class_value_in(d, ecls, scr_dyn_objinst_class_of(ib), ecls->members, ecls->nmembers, ecls->opaque, bc != NULL ? bc->statics : NULL,
-                                     bc != NULL ? bc->nstatics : 0, einner->v.inst.o, recurse, depth);
+                                     bc != NULL ? bc->nstatics : 0, scr_dyn_inst_o(einner), recurse, depth);
   scr_dyn_release(bv);
   scr_dyn_release(ib);
   return r;
@@ -3493,7 +3493,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
           ib_cstr(&out, ecls->base);
         }
         ib_char(&out, ']');
-        void *eo = einner->v.inst.o;
+        void *eo = scr_dyn_inst_o(einner);
         size_t eshown = 0;
         for (size_t i = 0; i < ecls->nmembers; i++) {
           const ScrDynClassMember *m = &ecls->members[i];
@@ -3927,12 +3927,12 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
           cargs[0] = scr_dyn_new_num(depth - recurse);
           cargs[1] = scr_insp_custom_opts(g_custom_stylize);
           cargs[2] = scr_dyn_retain(g_custom_inspect);
-          ScrDyn *cr = cust->call(d->v.inst.o, cargs, 3, "inspect");
+          ScrDyn *cr = cust->call(scr_dyn_inst_o(d), cargs, 3, "inspect");
           scr_dyn_release(cargs[0]);
           scr_dyn_release(cargs[1]);
           scr_dyn_release(cargs[2]);
           if (cr == NULL) return scr_str_new("", 0); /* the method threw: the pending throw wins */
-          if (!(cr->kind == SCR_DYN_OBJINST && cr->v.inst.o == d->v.inst.o)) {
+          if (!(cr->kind == SCR_DYN_OBJINST && scr_dyn_inst_o(cr) == scr_dyn_inst_o(d))) {
             ScrStr *cs = scr_insp_custom_result(cr, recurse, depth);
             scr_dyn_release(cr);
             return cs;
@@ -3974,7 +3974,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
        * stack renders [Circular *N] and the ancestor gets <ref *N>. Keyed by the INSTANCE, so two boxes of one object
        * are one value. */
       {
-        double cid = scr_insp_circ_check(d->v.inst.o);
+        double cid = scr_insp_circ_check(scr_dyn_inst_o(d));
         if (cid > 0) {
           if (isnap != NULL) scr_dyn_release(isnap);
           return scr_insp_circular(cid);
@@ -3984,7 +3984,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       size_t ishown = 0;
       for (size_t i = 0; i < inm && isnap == NULL; i++) {
         const ScrDynClassMember *m = scr_dyn_objinst_member_at(d, i);
-        if (!scr_dyn_member_hidden(m, d->v.inst.o)) ishown++;
+        if (!scr_dyn_member_hidden(m, scr_dyn_inst_o(d))) ishown++;
       }
       if (isnap != NULL) ishown = isnap->v.obj.len;
       /* the instance's symbol-keyed own properties live in its run-time property table (scr_symbol.c) */
@@ -4011,7 +4011,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
         return insp_sty(ib_take(&nb), INSP_STY_SPECIAL);
       }
       insp_begin_obj(recurse + 1);
-      scr_insp_seen_push(d->v.inst.o);
+      scr_insp_seen_push(scr_dyn_inst_o(d));
       bool ithrew = false;
       if (isnap != NULL) {
         size_t *iord = scr_dyn_obj_key_order(isnap);
@@ -4032,8 +4032,8 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       }
       for (size_t i = 0; i < inm && !ithrew && isnap == NULL && !scr_dyn_objinst_has_props(d); i++) {
         const ScrDynClassMember *m = scr_dyn_objinst_member_at(d, i);
-        if (scr_dyn_member_hidden(m, d->v.inst.o)) continue;
-        ScrDyn *mv = m->get(d->v.inst.o); /* +1 */
+        if (scr_dyn_member_hidden(m, scr_dyn_inst_o(d))) continue;
+        ScrDyn *mv = m->get(scr_dyn_inst_o(d)); /* +1 */
         if (mv == NULL) { /* the read threw */
           ithrew = true;
           break;
@@ -4053,7 +4053,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
          * shapeMode and kCapture (both false), after every string key; util.inspect lists them once the emitter's
          * keys are born. */
         const ScrDynClassMember *cm = scr_dyn_objinst_member(d, "_eventsCount", 12);
-        if (cm != NULL && !scr_dyn_member_hidden(cm, d->v.inst.o)) {
+        if (cm != NULL && !scr_dyn_member_hidden(cm, scr_dyn_inst_o(d))) {
           /* Node prints the two own enumerable symbol keys as `Symbol(shapeMode): false`: the symbol text in the `symbol` style, the value as a boolean. */
           InspBuf e1b = {0};
           ib_sty_cstr(&e1b, "Symbol(shapeMode)", INSP_STY_SYMBOL);
@@ -4094,7 +4094,7 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       scr_str_release(ibase);
       scr_str_release(ib0);
       scr_str_release(ib1);
-      ScrStr *iwrapped = scr_insp_ref_wrap(d->v.inst.o, iout); /* <ref *N> when this instance was a circle's target */
+      ScrStr *iwrapped = scr_insp_ref_wrap(scr_dyn_inst_o(d), iout); /* <ref *N> when this instance was a circle's target */
       scr_str_release(iout);
       if (ithrew) {
         scr_str_release(iwrapped);
