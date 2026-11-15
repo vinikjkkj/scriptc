@@ -404,6 +404,7 @@ static void scr_cs_new(size_t ncaps) {
   if ((++scr_cs_news & 0xFFFFFu) == 0) scr_cs_report("tick");
 }
 static void scr_cs_free(size_t ncaps) { scr_cs_live--; scr_cs_hist[scr_cs_bucket(ncaps)]--; }
+#endif
 
 static size_t scr_cs_cx_peak = 0;
 /* The side table of rare-member exts, keyed by closure address (open addressing, linear probing, backward-shift deletion). Almost no closure
