@@ -60,9 +60,10 @@ for (let r = 0; r < 40; r++) {
 const h = {};
 for (const l of log) h[l.length > 24 ? l.slice(0, 24) : l] = (h[l.length > 24 ? l.slice(0, 24) : l] || 0) + 1;
 console.log(log.length, Object.keys(h).length, JSON.stringify(Object.entries(h).slice(0, 5)));
-async function ar(gg, r) { const s = "r" + r; const a = [s]; await null; gg.step(11, a); const b = { s }; gg.step(12, b); return s; }
+async function ar(gg, r) { const s = "r" + r; const a = [s]; gg.step(13, a); await null; gg.step(11, a); const b = { s }; gg.step(12, b); await null; gg.step(14, b); return s; }
 (async () => {
   let c = 0;
-  for (let i = 0; i < 30; i++) { which = 11 + (i % 3); try { await ar(g, i); } catch (e) { c += e.message.length; } }
+
+  for (let i = 0; i < 40; i++) { which = 11 + (i % 5); try { await ar(g, i); } catch (e) { c += e.message.length; } }
   console.log("async", c);
 })();

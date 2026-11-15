@@ -2208,7 +2208,7 @@ class LlEmitter {
   /** THE SHARED UNWIND LADDER (unwind1), CEmitter.unwindLadders' twin: per unwind target, the cascades already written (descending entry numbers, one block per rung boundary),
    * so a later exit whose release list ENDS with a suffix of one writes only its extra rungs and branches into it. The SSA values a rung uses dominate every branch into it
    * (they are live at the later exit and were live at the earlier one), and slot loads read the CURRENT value like before. */
-  private unwindLadders: Map<string, { seqs: number[]; labels: string[] }[]> = new Map();
+  private unwindLadders: Map<string, { seqs: string[]; labels: string[] }[]> = new Map();
   private unwindSeq: Map<object, number> = new Map();
   private unwindCounter = 0;
   /** Return type of the function being emitted — the unwind path returns
@@ -5626,10 +5626,11 @@ class LlEmitter {
       for (let i = fd; i < this.frames.length; i++) for (const v of this.frames[i]!) if (!v.immortal) owned.push({ o: v, frame: v, scope: null });
       for (const t of owned) if (!this.unwindSeq.has(t.o)) this.unwindSeq.set(t.o, this.unwindCounter++);
       owned.sort((a, b) => this.unwindSeq.get(b.o)! - this.unwindSeq.get(a.o)!);
-      const seqs = owned.map((t) => this.unwindSeq.get(t.o)!);
+      // an entry's identity at an exit is its number AND the name it is released through: a coroutine resume renames a spilled temp, and a cascade written under the old name must not be entered from there
+      const seqs = owned.map((t) => `${this.unwindSeq.get(t.o)!}:${t.scope ? "s:" + t.scope.slot + (t.scope.boxed ? ":b" : "") : "f:" + t.frame!.name + (t.frame!.slot ? ":slot" : "")}`);
       let list = this.unwindLadders.get(key);
       if (!list) this.unwindLadders.set(key, (list = []));
-      let best: { c: { seqs: number[]; labels: string[] }; j: number; len: number } | null = null;
+      let best: { c: { seqs: string[]; labels: string[] }; j: number; len: number } | null = null;
       for (const c of list) {
         for (let j = 0; j <= c.seqs.length; j++) {
           const len = c.seqs.length - j;

@@ -22,6 +22,12 @@ function outer(r: number, s: string): number {
   const q = step(5, w.s);
   return v + q + z.length;
 }
+interface Rec { id: number; s: number; k: number; z: string[]; n: Box }
+async function astep(i: number, x: number): Promise<number> { await null; if (i === which) throw new Error("a" + i); return x; }
+async function lit(r: number): Promise<Rec> {
+  // a record under construction is live across the await; a call before it can throw, and so can the await itself
+  return { id: r, s: step(16, "s" + r), n: new Box("n" + r, [r]), k: await astep(15, r), z: [String(r)] };
+}
 let ok = 0, bad = 0, msgs = 0;
 for (let i = 0; i < 60; i++) {
   for (which = -1; which <= 5; which++) {
@@ -29,3 +35,12 @@ for (let i = 0; i < 60; i++) {
   }
 }
 console.log(ok, bad, msgs);
+(async () => {
+  let c = 0, e2 = 0;
+  for (let i = 0; i < 60; i++) {
+    for (which = 14; which <= 16; which++) {
+      try { c += (await lit(i)).k; } catch (e) { e2 += (e as Error).message.length; }
+    }
+  }
+  console.log("lit", c, e2);
+})();

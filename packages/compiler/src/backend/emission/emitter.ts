@@ -1039,7 +1039,7 @@ export class CEmitter {
    * entry sequence numbers with a label at every rung boundary, so a later exit whose release list ENDS with a suffix of one jumps into it instead of writing the whole
    * list again. Entries are numbered on first sight (older = smaller, scopes outer to inner, then frames outer to inner); releases then run in DESCENDING number,
    * i.e. newest first, which is also what makes the suffix property hold. */
-  unwindLadders: Map<string, { seqs: number[]; labels: string[] }[]> = new Map();
+  unwindLadders: Map<string, { seqs: string[]; labels: string[] }[]> = new Map();
   unwindSeq: Map<object, number> = new Map();
   unwindCounter = 0;
   /** Enclosing try-with-FINALLY regions, innermost last — the pending-
@@ -2887,10 +2887,11 @@ export class CEmitter {
       const owned = live.filter((t) => !t.immortal && (t.boxed === true || isRefCounted(t.type)));
       for (const t of owned) if (!this.unwindSeq.has(t)) this.unwindSeq.set(t, this.unwindCounter++);
       owned.sort((a, b) => this.unwindSeq.get(b)! - this.unwindSeq.get(a)!);
-      const seqs = owned.map((t) => this.unwindSeq.get(t)!);
+      // an entry's identity at an exit is its number AND the name it is released through: a coroutine resume renames a spilled temp, and a cascade written under the old name must not be entered from there
+      const seqs = owned.map((t) => `${this.unwindSeq.get(t)!}:${t.boxed === true ? "b" : "v"}:${t.name}`);
       let list = this.unwindLadders.get(key);
       if (!list) this.unwindLadders.set(key, (list = []));
-      let best: { c: { seqs: number[]; labels: string[] }; j: number; len: number } | null = null;
+      let best: { c: { seqs: string[]; labels: string[] }; j: number; len: number } | null = null;
       for (const c of list) {
         for (let j = 0; j <= c.seqs.length; j++) {
           const len = c.seqs.length - j;
