@@ -111,3 +111,48 @@ for s_ in sorted(sites, key=lambda x: -x['n'])[:3]:
     top = sorted(s_['len'].items(), key=lambda kv: -kv[1])[:8]
     print(f"\nSITE {s_['name'][:70]}: {s_['n']} nodes; node count by string length (len:count) {top}")
     for ln, tx in s_['samp'][:24]: print(f"   len {ln:3d} |{tx}|")
+
+# ---- ALL cyc objects by (allocation site, kind): the per-Command byte budget
+def symk(a):
+    if a == 0: return None
+    t = a - off
+    if t < addr[0] or t > addr[-1] + 0x100000: return None
+    i = bisect.bisect_right(addr, t) - 1
+    return syms[i] if i >= 0 else None
+allrows = []
+alltot = 0
+for l in lines:
+    if l.startswith('CYCEN-ALLTOTAL'): alltot = int(re.search(r'phys=(\d+)', l).group(1))
+    if l.startswith('CYCEN-ALL '):
+        m = re.match(r'CYCEN-ALL n=(\d+) phys=(\d+) ext=(\d+) kind=([0-9a-f]+)((?: [0-9a-f]+)+)', l)
+        n, ph, ex, kd = int(m.group(1)), int(m.group(2)), int(m.group(3)), int(m.group(4), 16)
+        fr = [int(a, 16) for a in m.group(5).split()]
+        site = None; rt = []
+        for a in fr:
+            sy = sym(a)
+            if sy is None: continue
+            if sy.startswith('scr_'): rt.append(sy); continue
+            site = sy; break
+        allrows.append((n, ph, ex, symk(kd) or '?', site or ('(rt:' + (rt[0] if rt else '?') + ')')))
+if allrows:
+    cmd_kinds = [r for r in allrows if 'Command' in r[3] and 'gcfree' in r[3] and 'Pipeline' not in r[3]]
+    N = sum(r[0] for r in cmd_kinds)
+    ext_total = sum(r[2] for r in allrows)
+    print(f"\nALL CYC OBJECTS at the probe: {sum(r[0] for r in allrows)} objects, {alltot/1048576:.2f} MiB phys (+{ext_total/1048576:.2f} MiB dyn ARR/OBJ side buffers); Command objects N={N}")
+    print(f"census total / N = {(alltot+ext_total)/max(N,1):.0f} B per Command (everything live, workload included)")
+    agg3 = {}
+    for n, ph, ex, kd, st in allrows:
+        d = agg3.setdefault((kd, st), [0, 0, 0]); d[0] += n; d[1] += ph; d[2] += ex
+    rows = sorted(agg3.items(), key=lambda kv: -(kv[1][1] + kv[1][2]))
+    print(f"{'kind':34s} {'site (first non-runtime frame)':44s} {'count':>7} {'n/N':>6} {'B each':>7} {'+side':>6} {'MiB':>6}")
+    for (kd, st), (n, ph, ex) in rows[:36]:
+        print(f"{kd[:34]:34s} {st[:44]:44s} {n:7d} {n/max(N,1):6.2f} {ph/max(n,1):7.0f} {ex/max(n,1):6.0f} {(ph+ex)/1048576:6.2f}")
+    per = []
+    for (kd, st), (n, ph, ex) in rows:
+        r_ = n / max(N, 1)
+        k = round(r_)
+        if k >= 1 and abs(r_ - k) <= 0.04 * max(k, 1) and k <= 12: per.append((kd, st, n, k, ph, ex))
+    S = sum(p[4] + p[5] for p in per)
+    print(f"\nPER-COMMAND rows (count within 4% of an integer multiple k of N, k<=12): {len(per)} rows, {S/1048576:.2f} MiB => {S/max(N,1):.0f} B per Command ({100*S/max(alltot+ext_total,1):.1f}% of the census total)")
+    for kd, st, n, k, ph, ex in sorted(per, key=lambda p: -(p[4] + p[5]))[:24]:
+        print(f"  x{k:<2d} {(ph+ex)/max(N,1):6.0f} B/Cmd  {kd[:34]:34s} {st[:50]}")
