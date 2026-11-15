@@ -27978,6 +27978,18 @@
     "<repo>/tests/corpus/25341-object-entries-and-values-of-a-required-absent-record-loop-over-only-the-members-that-were-filled.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25342-object-entries-and-values-of-a-record-with-three-interleaved-member-kinds-keep-key-order-and-every-value.ts": {
+   "order": [
+    "<repo>/tests/corpus/25342-object-entries-and-values-of-a-record-with-three-interleaved-member-kinds-keep-key-order-and-every-value.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25343-object-entries-and-values-of-optional-members-of-three-interleaved-kinds-skip-the-absent-ones-in-key-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/25343-object-entries-and-values-of-optional-members-of-three-interleaved-kinds-skip-the-absent-ones-in-key-order.ts"
+   ],
+   "diags": []
   }
  }
 }
