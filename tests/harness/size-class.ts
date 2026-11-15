@@ -2449,7 +2449,13 @@ export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 72_950 : null;
 /* 2026-11-14 (post-collection trim of parked dyn buffers, idletrim2): RE-RECORDED 133_798 -> 134_118 (+320). SOURCE: CI Windows 3/20 of run 43621360482 on b2dadab58
  * (the branch on main 5780f92e5, whose own figure is inside the old record), "the regex program .text GREW by 320 bytes: 134118 against the recorded 133798".
  * The growth is the always-linked trim in scr_json.c (a walk over the two parked lists) plus the hook call at the end of scr_collect_cycles. */
-export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 134_118 : null;
+/* 2026-11-15 (the property-table plain-entry train, propsfind2): RE-RECORDED 134_118 -> 134_374 (+256). SOURCE: the local zig 0.16.0 windows-gnu cross build
+ * of this probe (SCRIPTC_CC=zigcc SCRIPTC_TARGET=x86_64-windows-gnu --backend c, the PE .text section's VirtualSize), which reproduced CI's figure exactly
+ * for the first head of the train (134,774, "the regex program .text GREW by 656 bytes", CI Windows 3/20 of run 43719017748): main d425029fe measures
+ * 134,214 there (96 above the record), the train 134,374 (+160 over main) after the plain-entry sum became one cold out-of-line function (it was two inlined
+ * loops, +560). The always-linked growth is scr_json.c's table-teardown accounting: the flag test and call in the dyn object release and in the collector's
+ * teardown, that function, and the delete arm's table check. The hello-world program is unchanged (73,190 on main and on the train). */
+export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 134_374 : null;
 
 /* 2026-10-21 -- THE LINK NOW COLLECTS DEAD SECTIONS, and every figure above moves.
  * The numbers in this block, and the two ceilings (STATIC_CLASS_MAX and
