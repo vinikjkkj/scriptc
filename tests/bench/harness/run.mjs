@@ -21,7 +21,13 @@ mkdirSync(out, { recursive: true })
 const md5 = (s) => createHash('md5').update(s).digest('hex')
 const resetdb = () => { const r = spawnSync(NODE, [`${ROOT}/harness/resetdb.mjs`, store], { stdio: 'inherit' }); if (r.status !== 0) { console.error('resetdb failed'); process.exit(3) } }
 const entry = `packages/fake-server/bench-messaging-${store}/messaging.bench.ts`
-const envFor = () => ({ ...process.env, ZAPO_BENCH_STORE: store, ZAPO_BENCH_JSON: '1' })
+// BENCH_CENSUS_DIR: every run writes its OWN census files there (SCR_DYNCEN_OUT / SCR_STRCEN_OUT = <dir>/<label>.<n>.dyn.txt / .str.txt), so reps can be compared one by one
+let runSeq = 0
+const envFor = () => {
+  const e = { ...process.env, ZAPO_BENCH_STORE: store, ZAPO_BENCH_JSON: '1' }
+  if (process.env.BENCH_CENSUS_DIR) { mkdirSync(process.env.BENCH_CENSUS_DIR, { recursive: true }); const n = runSeq++; e.SCR_DYNCEN_OUT = `${process.env.BENCH_CENSUS_DIR}/run${n}.dyn.txt`; e.SCR_STRCEN_OUT = `${process.env.BENCH_CENSUS_DIR}/run${n}.str.txt` }
+  return e
+}
 function scenarios(stdout) {
   const k = stdout.lastIndexOf('\n[\n')
   if (k < 0) return null
