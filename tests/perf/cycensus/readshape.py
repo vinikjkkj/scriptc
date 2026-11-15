@@ -34,3 +34,27 @@ for r in rows:
     if want and not any(w in r[0] or w in r[1] for w in want): continue
     ek = [int(r[5][i:i+2], 16) for i in (6, 4, 2, 0)]
     print(f"{r[0][:62]:62s} {KN.get(r[2], r[2])} len={r[3]:<3d} cap={r[4]:<3d} n={r[6]:6d} side={r[7]:8d} B rc/node={r[8]/max(r[6],1):.2f} items={[k for k in ek if k != 255]} e0strShared={r[9]} keys={r[10]}")
+
+# ---- holders of dyn ARR nodes (CYCEN-HOLDT / CYCEN-HOLD)
+def emit_of(frs):
+    fr = [sym(int(a, 16)) for a in frs]
+    return (next((x for x in fr if x and not x.startswith('scr_')), None) or '(runtime)'), '<-'.join((x or '?') for x in fr[:3])
+print()
+for l in lines:
+    if not l.startswith('CYCEN-HOLDT'): continue
+    m = re.match(r'CYCEN-HOLDT ntargets=(\d+) rcsum=(\d+) found=(\d+) unexplained=(\d+) norefs=(\d+)((?: [0-9a-f]+)+)', l)
+    nt, rcs, fd, un, nr = (int(m.group(i)) for i in range(1, 6))
+    e, ch = emit_of(m.group(6).split())
+    if want and not any(w in e or w in ch for w in want): continue
+    print(f"ARR TARGETS {e[:60]:60s} n={nt:6d} rc/node={rcs/max(nt,1):.2f} found/node={fd/max(nt,1):.2f} unexplained(rc-found)={un} ({un/max(nt,1):.2f}/node) nodesWithNoHeapHolder={nr}")
+    hs = []
+    for l2 in lines:
+        if not l2.startswith('CYCEN-HOLD '): continue
+        m2 = re.match(r'CYCEN-HOLD n=(\d+) via=(\d) hkind=([0-9a-f]+) tsite((?: [0-9a-f]+){5}) hsite((?: [0-9a-f]+){5})', l2)
+        if not m2: continue
+        if emit_of(m2.group(4).split()) != (e, ch): continue
+        he, hch = emit_of(m2.group(5).split())
+        hk = sym(int(m2.group(3), 16)) or m2.group(3)
+        hs.append((int(m2.group(1)), hk, he, hch, m2.group(2)))
+    for n, hk, he, hch, via in sorted(hs, reverse=True)[:8]:
+        print(f"      held by {n:6d}x  holder kind {hk:28s} created in {he[:50]:50s} via {'side-buffer' if via == '1' else 'payload'}")

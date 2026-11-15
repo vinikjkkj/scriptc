@@ -833,6 +833,14 @@ int scr_cycen_dyn_peek3(const void *hdr, unsigned *eks, char *key, unsigned long
   }
   return (int)d->kind;
 }
+/* LAB: the side buffer of an ARR (items) or OBJ (entries) node, for the holder scan. */
+int scr_cycen_dyn_side(const void *hdr, const void **buf, unsigned long long *bytes) {
+  const ScrDyn *d = (const ScrDyn *)(const void *)((const char *)hdr + sizeof(ScrCycHdr));
+  *buf = NULL; *bytes = 0;
+  if (d->kind == SCR_DYN_ARR && d->v.arr.items != NULL) { *buf = d->v.arr.items; *bytes = (unsigned long long)d->v.arr.len * sizeof(ScrDyn *); }
+  else if (d->kind == SCR_DYN_OBJ && d->v.obj.entries != NULL) { *buf = d->v.obj.entries; *bytes = (unsigned long long)d->v.obj.len * sizeof(ScrDynEntry); }
+  return (int)d->kind;
+}
 long long scr_cycen_dyn_free_count(void) { return (long long)scr_dyn_free_count; }
 /* STR nodes: the node's string (immortal literal or heap), its length, capacity and reference count, and an FNV-1a hash of up to the first 256 bytes, for the per-site duplicate/literal census. */
 int scr_cycen_dyn_peek_str(const void *hdr, unsigned *len, unsigned *cap, int *imm, unsigned long long *rc, unsigned long long *hash, const char **data) {
