@@ -99,10 +99,10 @@ describe("the minted prototype is a traced edge (source contract)", () => {
   test("scr_closure_may_cycle names every child the trace can visit", () => {
     // the three-way test, now over the inline count and the ext: no captures and no ext is the only "cannot cycle" answer, an inline
     // count of one or more is always "may", and with an ext all three disjuncts are still asked
-    expect(closureC).toContain("if (m == SCR_CLO_META_STATIC) return false;");
-    expect(closureC).toContain("if (m & 1u) return true;");
+    expect(closureC).toContain("if (c->ncaps8 != 0 && c->ncaps8 != 255) return true;");
+    expect(closureC).toContain("if (x == NULL) return false;");
     expect(closureC).toContain(
-      "return x->ncaps != 0 || x->props != NULL || x->implicit_proto != NULL;",
+      "return scr_closure_ncaps(c) != 0 || x->props != NULL || x->implicit_proto != NULL;",
     );
   });
 

@@ -75,7 +75,7 @@ describe("the dyn-function adapter's capture", () => {
     // caps[0] is the CLOSURE in a FUNC box (the box's trace visits a FUNC
     // payload unconditionally), and caps[1] is the thunk in a scalar box.
     expect(c).toContain("a->caps[0] = scr_box_new(SCR_BOX_FUNC);");
-    expect(c).toContain("scr_box_set_ref(a->caps[0], scr_closure_retain(d->v.fn.clo));");
+    expect(c).toContain("scr_box_set_ref(a->caps[0], scr_closure_retain(scr_dyn_fn_clo(d)));");
     expect(c).toContain("a->caps[1] = scr_box_new(SCR_BOX_F64);");
     expect(c).toContain("scr_box_set_thunk(a->caps[1], scr_dyn_fn_thunk(d));");
 

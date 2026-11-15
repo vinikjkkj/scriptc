@@ -2455,7 +2455,11 @@ export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 72_950 : null;
  * 134,214 there (96 above the record), the train 134,374 (+160 over main) after the plain-entry sum became one cold out-of-line function (it was two inlined
  * loops, +560). The always-linked growth is scr_json.c's table-teardown accounting: the flag test and call in the dyn object release and in the collector's
  * teardown, that function, and the delete arm's table check. The hello-world program is unchanged (73,190 on main and on the train). */
-export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 134_374 : null;
+/* 2026-11-15 (cloufunc1, a closure is its own dyn function value): RE-RECORDED 134_374 -> 136_022 (+1_648, the measured size of this change on its own base 134_118 -> 135_766, added to the propsfind2 figure above). SOURCE: CI Windows 3/20 of run 43708699383 on 580a09625,
+ * "the regex program .text GREW by 1648 bytes: 135766 against the recorded 134118"; the sum is an ESTIMATE until a CI Windows 3/20 log of the combined head reports the real figure. The growth is the always-linked closure core: the ext side table
+ * (lookup, insert, erase), scr_closure_free_dead shared with scr_dyn_release, the embedded-closure arms of the FUNC release and the descriptor readers, and
+ * scr_fn_box. It is the price of removing one 48-byte function node per boxing; the hello-world class stayed inside its tolerance. */
+export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 136_022 : null;
 
 /* 2026-10-21 -- THE LINK NOW COLLECTS DEAD SECTIONS, and every figure above moves.
  * The numbers in this block, and the two ceilings (STATIC_CLASS_MAX and
