@@ -2991,6 +2991,8 @@ class LlEmitter {
       );
     }
     if (this.cstrs.size > 0) out.push(``);
+    for (const g of this.extraGlobals) out.push(g);
+    if (this.extraGlobals.length > 0) out.push(``);
     if (npm !== null) {
       appendAll(out, npm.defs);
       out.push(``);
@@ -3989,6 +3991,14 @@ class LlEmitter {
 
   needBadTag(): void {
     this.needsBadTag = true;
+  }
+
+  /** Module-level constants the walkers add (the record field tables), rendered after the C-string constants. */
+  readonly extraGlobals: string[] = [];
+  addGlobal(prefix: string, body: (sym: string) => string): string {
+    const sym = `${prefix}_${this.extraGlobals.length}`;
+    this.extraGlobals.push(body(sym));
+    return `@${sym}`;
   }
 
   /** The interned immortal instance for a UNIT arm of a union — asserts

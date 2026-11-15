@@ -35,6 +35,9 @@ export interface WalkerHost extends ShapeHost {
   cstr(text: string): string;
   /** Request the shared invalid-union-tag abort helper (@sc_bad_tag). */
   needBadTag(): void;
+  /** A module-level constant the walkers build (the field tables of a record loop): `body` is given the fresh symbol (without `@`) and returns the
+   * whole definition line. Answers the `@`-ref. */
+  addGlobal(prefix: string, body: (sym: string) => string): string;
 }
 
 /** Exact double literal (the emitter's f64Lit — duplicated to avoid a

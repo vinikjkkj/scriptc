@@ -6,6 +6,7 @@
  * interning ORDER is part of the emitted C, so the registries stay on
  * CEmitter and these functions only consult them through it. */
 import type { CEmitter } from "./emitter.js";
+import { compressFieldRuns, type FieldBlock } from "./field-loop.js";
 import { rcSitesRequested } from "./emitter.js";
 import { moduleFuncLaneShapes, moduleUsesEngineFn, accessorKeyOrderOf, accessorSlotProp, shapeHasAccessorSlots, VOID, arrayTypeHasLiveView, bytesAliasOnExtract, canConvertToDyn, canDynCheckTo, moduleUsesDynView, moduleInstanceLaneNeedsKg, moduleUsesInstanceRecordLane } from "../../ir/nodes.js";
 import { CLASS_PROPS_FIELD, propsTableRoot, EVAL_STATIC_CLASSES, moduleUsesInspColors, dynNeverArm, dynNeverIn, armDiscrimLits, dynErrorClassKind, isDynErrorClass, canAdaptDynFuncTo, dynRestApplyable, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, UNION_ARM_JS_OBJECT_KINDS, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
@@ -2844,7 +2845,11 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           d.push(`  r->${TOSTR_MEMBER} = scr_dyn_tostr_closure(${wide || inst || jsv ? "(sc_orig->kind == SCR_DYN_OBJINST ? sc_orig : d)" : "d"});`);
         }
         const buildInternal = new Set(internalSlotFields(shape));
+        // Each member's emitted block, so a run of interchangeable ones becomes one loop over a table (field-loop.ts). A member on a special path
+        // (an internal slot, the soft arm form) is a null entry: it ends a run.
+        const buildBlocks: (FieldBlock | null)[] = [];
         for (const f of shape.fields) {
+          const blockStart = d.length;
           const keyLit = cStringLiteral(Buffer.from(f.name, "utf8"));
           const keyLen = Buffer.byteLength(f.name, "utf8");
           const fieldWant = cStringLiteral(Buffer.from(E.dynDesc(f.type), "utf8"));
@@ -2867,7 +2872,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             d.push(`    r->${mangleField(f.name)} = ${childC(f.type)}(ms, path${childArg});`);
             d.push(afterChild(`    `, `${rel("r")}; `, `NULL`));
             d.push(`  }`);
-            continue;
+            { buildBlocks.push(null); continue; }
           }
           // Width tolerance: only declared fields are looked up — extra JSON
           // keys are simply never examined (check-and-extract, not shape
@@ -2988,7 +2993,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
               d.push(afterChild(`    `, `${rel("r")}; `, `NULL`));
             }
             d.push(`  }`);
-            continue;
+            { buildBlocks.push(null); continue; }
           }
           // The same [[Get]]-minus-accessors read the predicate above
           // takes, and it has to be the same one for the DATA half.
@@ -3037,7 +3042,24 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             d.push(`    if (scr_exc_pending()) { ${rel("r")}; return NULL; }`);
           }
           d.push(`  }`);
+          {
+            const member = mangleField(f.name);
+            buildBlocks.push({
+              start: blockStart,
+              end: d.length,
+              base: "r",
+              member,
+              fieldRef: `r->${member}`,
+              keyLit,
+              keyLen,
+              own: maskBit ?? null,
+              ownForms: maskBit
+                ? [{ text: `r->${OWNMASK_MEMBER}[${maskBit.byte}] |= ${maskBit.bit}`, make: (e: string) => `r->${OWNMASK_MEMBER}[${e}->byte] |= ${e}->bit` }]
+                : [],
+            });
+          }
         }
+        compressFieldRuns(d, buildBlocks);
         // Index-signature shapes CAPTURE undeclared keys into the overflow
         // map (width tolerance became width capture — plain shapes above
         // keep ignoring extras). dyn value types retain the checked-dynamic tree subtree
@@ -3756,7 +3778,11 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             ).length;
             if (certain >= 2) d.push(`  scr_dyn_obj_reserve(d, ${certain});`);
           }
+          // Each member's emitted block, so a run of interchangeable ones becomes one loop over a table (field-loop.ts). A member that takes one of the
+          // special paths below (accessor, internal slot, symbol key) is a null entry: it ends a run.
+          const fieldBlocks: (FieldBlock | null)[] = [];
           for (const f of dynFields) {
+            const blockStart = d.length;
             const keyLit = cStringLiteral(Buffer.from(f.name, "utf8"));
             const keyLen = Buffer.byteLength(f.name, "utf8");
             if (accProps.has(f.name) && !byName.has(f.name)) {
@@ -3777,7 +3803,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
               d.push(`    if (sc_g) scr_dyn_release(sc_g);`);
               d.push(`    if (sc_s) scr_dyn_release(sc_s);`);
               d.push(`  }`);
-              continue;
+              { fieldBlocks.push(null); continue; }
             }
             // THE ABSENT SLOT IS NOT READABLE, so the whole per-field
             // emission has to sit BEHIND the question rather than compute
@@ -3842,7 +3868,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
               const slotLit = cStringLiteral(Buffer.from(sk, "utf8"));
               const slotLen = Buffer.byteLength(sk, "utf8");
               d.push(`  scr_dyn_obj_set_slot(d, ${slotLit}, ${slotLen}, ${fv}); /* internal slot: no key */`);
-              continue;
+              { fieldBlocks.push(null); continue; }
             }
             // A SYMBOL-KEYED member (`[Symbol.asyncDispose]`, spelled
             // `__@name@id` by the mapper): the dyn tree has string keys only,
@@ -3851,7 +3877,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             // name. An absent optional one is simply not there.
             if (f.name.startsWith("__@") && liveBit === null) {
               d.push(`  scr_dyn_obj_set_symkey(d, ${keyLit}, ${keyLen}, ${fv}, ${isUndefinedArmedUnion(f.type, (id) => E.unionsById.get(id)) ? "true" : "false"});`);
-              continue;
+              { fieldBlocks.push(null); continue; }
             }
             const setBase = isUndefinedArmedUnion(f.type, (id) => E.unionsById.get(id))
               ? `scr_dyn_obj_set_present_lit(d, ${keyLit}, ${keyLen}, sc_fv);`
@@ -3937,7 +3963,27 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
               );
               d.push(`  }`);
             }
+            {
+              const mm = `v->${OWNMASK_MEMBER}`;
+              const member = mangleField(f.name);
+              fieldBlocks.push(
+                liveBit
+                  ? null
+                  : {
+                      start: blockStart,
+                      end: d.length,
+                      base: "v",
+                      member,
+                      fieldRef: `v->${member}`,
+                      keyLit,
+                      keyLen,
+                      own: bit ?? null,
+                      ownForms: bit ? [{ text: `${mm}[${bit.byte}] & ${bit.bit}`, make: (e: string) => `${mm}[${e}->byte] & ${e}->bit` }] : [],
+                    },
+              );
+            }
           }
+          compressFieldRuns(d, fieldBlocks);
           };
           // One fill per key order. A shape every construction agrees on has one (its declaredOrder); a shape with several
           // (IrRecordShape.keyOrders) inserts the keys in the order the instance was built in.
