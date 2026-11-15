@@ -27961,15 +27961,15 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/25350-a-throw-at-every-depth-of-a-call-chain-with-mixed-live-temporaries-releases-each-exactly-once-and-keeps-the-output.js": {
+  "<repo>/tests/corpus/25350-a-throw-at-each-call-of-a-sequence-with-growing-live-temporaries-releases-each-exactly-once-and-keeps-the-output.js": {
    "order": [
-    "<repo>/tests/corpus/25350-a-throw-at-every-depth-of-a-call-chain-with-mixed-live-temporaries-releases-each-exactly-once-and-keeps-the-output.js"
+    "<repo>/tests/corpus/25350-a-throw-at-each-call-of-a-sequence-with-growing-live-temporaries-releases-each-exactly-once-and-keeps-the-output.js"
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/25351-nested-calls-that-throw-after-many-live-temporaries-of-every-ownership-kind-keep-the-result.ts": {
+  "<repo>/tests/corpus/25351-calls-that-throw-one-after-another-with-live-temporaries-of-every-ownership-kind-keep-the-result.ts": {
    "order": [
-    "<repo>/tests/corpus/25351-nested-calls-that-throw-after-many-live-temporaries-of-every-ownership-kind-keep-the-result.ts"
+    "<repo>/tests/corpus/25351-calls-that-throw-one-after-another-with-live-temporaries-of-every-ownership-kind-keep-the-result.ts"
    ],
    "diags": []
   }

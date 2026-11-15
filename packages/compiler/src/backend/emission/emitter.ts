@@ -1039,7 +1039,7 @@ export class CEmitter {
    * entry sequence numbers with a label at every rung boundary, so a later exit whose release list ENDS with a suffix of one jumps into it instead of writing the whole
    * list again. Entries are numbered on first sight (older = smaller, scopes outer to inner, then frames outer to inner); releases then run in DESCENDING number,
    * i.e. newest first, which is also what makes the suffix property hold. */
-  unwindLadders: Map<string, { label: string; seqs: number[] }[]> = new Map();
+  unwindLadders: Map<string, { seqs: number[]; labels: string[] }[]> = new Map();
   unwindSeq: Map<object, number> = new Map();
   unwindCounter = 0;
   /** Enclosing try-with-FINALLY regions, innermost last — the pending-
@@ -2890,15 +2890,14 @@ export class CEmitter {
       const seqs = owned.map((t) => this.unwindSeq.get(t)!);
       let list = this.unwindLadders.get(key);
       if (!list) this.unwindLadders.set(key, (list = []));
-      let best: { label: string; j: number; len: number } | null = null;
+      let best: { c: { seqs: number[]; labels: string[] }; j: number; len: number } | null = null;
       for (const c of list) {
         for (let j = 0; j <= c.seqs.length; j++) {
           const len = c.seqs.length - j;
           if (len > seqs.length || (best !== null && len <= best.len)) continue;
           let ok = true;
           for (let k = 0; k < len; k++) if (seqs[seqs.length - len + k] !== c.seqs[j + k]) { ok = false; break; }
-          if (!ok && len >= 1 && process.env.SCRIPTC_UNWIND_LADDER_PLANT === "1") ok = true; // positive control only: a deliberately wrong entry
-          if (ok) best = { label: `${c.label}_${j}`, j, len };
+          if (ok) best = { c, j, len };
         }
       }
       const emitRung = (t: ScopeEntry): void => {
@@ -2906,18 +2905,34 @@ export class CEmitter {
         else this.releaseValue(t.name, t.type);
       };
       if (best !== null) {
-        for (let i = 0; i < seqs.length - best.len; i++) emitRung(owned[i]!);
+        const extras = seqs.length - best.len;
+        if (extras > 0) {
+          // the new exit is itself a cascade: its extra rungs get labels, and from the shared part on it enters the base cascade's labels
+          const label = `sc_ul${this.unwindCounter++}`;
+          const labels: string[] = [];
+          for (let i = 0; i < extras; i++) labels.push(`${label}_${i}`);
+          for (let i = 0; i <= best.len; i++) labels.push(best.c.labels[best.j + i]!);
+          list.push({ seqs, labels });
+          for (let i = 0; i < extras; i++) {
+            this.line(`${labels[i]}:;`);
+            emitRung(owned[i]!);
+          }
+        }
+        // PLANT (test hook, SCRIPTC_UNWIND_LADDER_PLANT=1): enter one rung late, so one temporary is never released
+        const enter = process.env.SCRIPTC_UNWIND_LADDER_PLANT === "1" && best.len >= 2 ? best.c.labels[best.j + 1]! : best.c.labels[best.j]!;
         if (target) target.used = true;
-        this.line(`goto ${best.label};`);
+        this.line(`goto ${enter};`);
         return;
       }
       const label = `sc_ul${this.unwindCounter++}`;
-      list.push({ label, seqs });
+      const labels: string[] = [];
+      for (let i = 0; i <= owned.length; i++) labels.push(`${label}_${i}`);
+      list.push({ seqs, labels });
       for (let i = 0; i < owned.length; i++) {
-        this.line(`${label}_${i}:;`);
+        this.line(`${labels[i]}:;`);
         emitRung(owned[i]!);
       }
-      this.line(`${label}_${owned.length}:;`);
+      this.line(`${labels[owned.length]}:;`);
       if (target) {
         target.used = true;
         this.line(`goto ${target.label};`);
@@ -2978,7 +2993,8 @@ export class CEmitter {
   /** The emitter contract for exceptions: after EVERY call that can throw
    * (per the may-throw analysis), test the pending flag and unwind. */
   emitPendingCheck(): void {
-    this.line(`if (scr_exc_pending()) {`);
+    // the pending branch is the cold arm: no throw is the common case at every one of these sites
+    this.line(process.env.SCRIPTC_NO_UNWIND_LADDER === "1" ? `if (scr_exc_pending()) {` : `if (__builtin_expect(scr_exc_pending(), 0)) {`);
     this.indent++;
     this.emitUnwind();
     this.indent--;

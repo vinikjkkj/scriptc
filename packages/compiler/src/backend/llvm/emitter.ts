@@ -2208,7 +2208,7 @@ class LlEmitter {
   /** THE SHARED UNWIND LADDER (unwind1), CEmitter.unwindLadders' twin: per unwind target, the cascades already written (descending entry numbers, one block per rung boundary),
    * so a later exit whose release list ENDS with a suffix of one writes only its extra rungs and branches into it. The SSA values a rung uses dominate every branch into it
    * (they are live at the later exit and were live at the earlier one), and slot loads read the CURRENT value like before. */
-  private unwindLadders: Map<string, { label: string; seqs: number[]; labels: string[] }[]> = new Map();
+  private unwindLadders: Map<string, { seqs: number[]; labels: string[] }[]> = new Map();
   private unwindSeq: Map<object, number> = new Map();
   private unwindCounter = 0;
   /** Return type of the function being emitted — the unwind path returns
@@ -5629,15 +5629,14 @@ class LlEmitter {
       const seqs = owned.map((t) => this.unwindSeq.get(t.o)!);
       let list = this.unwindLadders.get(key);
       if (!list) this.unwindLadders.set(key, (list = []));
-      let best: { label: string; len: number } | null = null;
+      let best: { c: { seqs: number[]; labels: string[] }; j: number; len: number } | null = null;
       for (const c of list) {
         for (let j = 0; j <= c.seqs.length; j++) {
           const len = c.seqs.length - j;
           if (len > seqs.length || (best !== null && len <= best.len)) continue;
           let ok = true;
           for (let k = 0; k < len; k++) if (seqs[seqs.length - len + k] !== c.seqs[j + k]) { ok = false; break; }
-          if (!ok && len >= 1 && process.env.SCRIPTC_UNWIND_LADDER_PLANT === "1") ok = true; // positive control only: a deliberately wrong entry
-          if (ok) best = { label: c.labels[j]!, len };
+          if (ok) best = { c, j, len };
         }
       }
       const emitRung = (t: Ent): void => {
@@ -5658,14 +5657,30 @@ class LlEmitter {
         }
       };
       if (best !== null) {
-        for (let i = 0; i < owned.length - best.len; i++) emitRung(owned[i]!);
+        const extras = owned.length - best.len;
+        // PLANT (test hook, SCRIPTC_UNWIND_LADDER_PLANT=1): enter one rung late, so one temporary is never released
+        const enter = process.env.SCRIPTC_UNWIND_LADDER_PLANT === "1" && best.len >= 2 ? best.c.labels[best.j + 1]! : best.c.labels[best.j]!;
         if (target) target.used = true;
-        B.terminate(`br label %${best.label}`);
+        if (extras > 0) {
+          const labels: string[] = [];
+          for (let i = 0; i < extras; i++) labels.push(B.newLabel("ul"));
+          for (let i = 0; i <= best.len; i++) labels.push(best.c.labels[best.j + i]!);
+          list.push({ seqs, labels });
+          B.br(labels[0]!);
+          for (let i = 0; i < extras; i++) {
+            B.startBlock(labels[i]!);
+            emitRung(owned[i]!);
+            B.br(i + 1 < extras ? labels[i + 1]! : enter);
+          }
+          // the block this branch left is terminated; the caller starts its continuation block next
+          return;
+        }
+        B.terminate(`br label %${enter}`);
         return;
       }
       const labels: string[] = [];
       for (let i = 0; i <= owned.length; i++) labels.push(B.newLabel("ul"));
-      list.push({ label: labels[0]!, seqs, labels });
+      list.push({ seqs, labels });
       B.br(labels[0]!);
       for (let i = 0; i < owned.length; i++) {
         B.startBlock(labels[i]!);
