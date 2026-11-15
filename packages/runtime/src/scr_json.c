@@ -786,6 +786,14 @@ int scr_cycen_dyn_peek(const void *hdr, unsigned *len) {
   *len = d->kind == SCR_DYN_ARR ? (unsigned)d->v.arr.len : d->kind == SCR_DYN_OBJ ? (unsigned)d->v.obj.len : 0;
   return (int)d->kind;
 }
+/* kind, length, capacity and the bytes of the node's SIDE buffer (an ARR's items vector, an OBJ's entry table; 0 for every other kind). */
+int scr_cycen_dyn_peek2(const void *hdr, unsigned *len, unsigned *cap, unsigned long long *ext) {
+  const ScrDyn *d = (const ScrDyn *)(const void *)((const char *)hdr + sizeof(ScrCycHdr));
+  *len = 0; *cap = 0; *ext = 0;
+  if (d->kind == SCR_DYN_ARR) { *len = (unsigned)d->v.arr.len; *cap = (unsigned)d->v.arr.cap; *ext = (unsigned long long)d->v.arr.cap * sizeof(ScrDyn *); }
+  else if (d->kind == SCR_DYN_OBJ) { *len = (unsigned)d->v.obj.len; *cap = (unsigned)d->v.obj.cap; *ext = (unsigned long long)d->v.obj.cap * sizeof(ScrDynEntry); }
+  return (int)d->kind;
+}
 long long scr_cycen_dyn_free_count(void) { return (long long)scr_dyn_free_count; }
 /* STR nodes: the node's string (immortal literal or heap), its length, capacity and reference count, and an FNV-1a hash of up to the first 256 bytes, for the per-site duplicate/literal census. */
 int scr_cycen_dyn_peek_str(const void *hdr, unsigned *len, unsigned *cap, int *imm, unsigned long long *rc, unsigned long long *hash, const char **data) {
