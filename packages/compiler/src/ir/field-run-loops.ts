@@ -90,6 +90,9 @@ interface Cand {
   text: string;
 }
 
+/** At most this many different bodies in one mixed run (one per kind of member); more kinds keep the unrolled statements. */
+const MAX_KINDS = 8;
+
 export function compressFieldRunLoops(functions: IrFunction[], records: readonly IrRecordShape[], min = fieldLoopMin()): number {
   if (min <= 0) return 0;
   const shapes = new Map(records.map((s) => [s.id, s]));
@@ -115,51 +118,103 @@ export function compressFieldRunLoops(functions: IrFunction[], records: readonly
       const ix = () => ({ kind: "varRef", localId: "\u0001i", type: F64, loc: undefined as unknown as SrcLoc }) as IrExpr;
       return { member: m, text: canonical(u.stmts.map((st) => rewrite(st, m, probe, ix)), probe) };
     });
-    // Maximal runs of identical units over distinct members with one own-mask situation and one field type.
+    // A member's KIND: the canonical text of its unit (which carries the field type through recordGet's type), its field type and its own-mask situation. A run is
+    // MIXED when its members have up to MAX_KINDS kinds interleaved in any order: ONE loop over the whole member list, a per-member kind table and a chain of the
+    // kinds' bodies, each reading its own members' tables with a running counter, so the key order stays the run's order.
+    const kindOf = (c: Cand): string => {
+      const shape = shapes.get(c.member.shapeId)!;
+      const f = shape.fields.find((x) => x.name === c.member.field)!;
+      return `${c.text}|${typeKey(f.type)}|${ownMaskKeyBit(shape, c.member.field) !== null}`;
+    };
     const out: IrStmt[] = [];
     let i = 0;
     const idLocals = new Set(fn.locals.map((l) => l.id));
+    const fresh = (base: string, name: string, mutable: boolean): string => {
+      let n = 0;
+      while (idLocals.has(`${base}.${n}`)) n++;
+      const id = `${base}.${n}`;
+      idLocals.add(id);
+      fn.locals.push({ id, name, type: F64, mutable });
+      return id;
+    };
     // The emitters declare a run's constant tables once per function, in the first loop that reads them, so one (shape, run) is looped once per function.
     const looped = new Set<string>();
     while (i < units.length) {
       const c0 = cands[i];
       let j = i + 1;
+      const classes = new Map<string, number>();
+      const classOf: number[] = [];
       if (c0 !== null && c0 !== undefined) {
-        const shape = shapes.get(c0.member.shapeId)!;
-        const bit0 = ownMaskKeyBit(shape, c0.member.field) !== null;
-        const t0 = typeKey(shape.fields.find((f) => f.name === c0.member.field)!.type);
-        const seen = new Set<string>([c0.member.field]);
+        const seen = new Set<string>();
+        j = i;
         while (j < units.length) {
           const cj = cands[j];
-          if (cj === null || cj === undefined || cj.text !== c0.text || cj.member.shapeId !== c0.member.shapeId || cj.member.localId !== c0.member.localId) break;
+          if (cj === null || cj === undefined || cj.member.shapeId !== c0.member.shapeId || cj.member.localId !== c0.member.localId) break;
           if (seen.has(cj.member.field)) break;
-          if ((ownMaskKeyBit(shape, cj.member.field) !== null) !== bit0) break;
-          if (typeKey(shape.fields.find((f) => f.name === cj.member.field)!.type) !== t0) break;
+          const key = kindOf(cj);
+          let k = classes.get(key);
+          if (k === undefined) {
+            if (classes.size >= MAX_KINDS) break;
+            k = classes.size;
+            classes.set(key, k);
+          }
+          classOf.push(k);
           seen.add(cj.member.field);
           j++;
         }
       }
-      const runKey = c0 ? `${c0.member.shapeId}|${units.slice(i, j).map((u) => u.member!.field).join("\u0001")}` : "";
-      if (c0 !== null && c0 !== undefined && j - i >= min && !looped.has(runKey)) {
-        looped.add(runKey);
-        const run = units.slice(i, j).map((u) => u.member!.field);
-        let n = 0;
-        while (idLocals.has(`fi.${n}`)) n++;
-        const id = `fi.${n}`;
-        idLocals.add(id);
-        fn.locals.push({ id, name: "fi", type: F64, mutable: true });
+      const n = j - i;
+      const K = classes.size;
+      const subRuns: string[][] = Array.from({ length: K }, () => []);
+      for (let t = 0; t < classOf.length; t++) subRuns[classOf[t]!]!.push(units[i + t]!.member!.field);
+      const subKeys = subRuns.map((r) => `${c0?.member.shapeId}|${r.join("\u0001")}`);
+      // a loop pays for K bodies: it needs at least two members per kind on average, and no table of it may already belong to another loop of this function
+      if (c0 !== null && c0 !== undefined && n >= min && n >= 2 * K && subKeys.every((k) => !looped.has(k))) {
+        for (const k of subKeys) looped.add(k);
         const loc = (units[i]!.stmts[0] as { loc: SrcLoc }).loc;
-        const ref = (): IrExpr => ({ kind: "varRef", localId: id, type: F64, loc });
+        const fi = fresh("fi", "fi", true);
         const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
-        const loopBody = units[i]!.stmts.map((st) => rewrite(st, c0.member, run, ref) as IrStmt);
+        const ref = (id: string): IrExpr => ({ kind: "varRef", localId: id, type: F64, loc });
+        const add1 = (id: string): IrStmt => ({ kind: "assign", localId: id, value: { kind: "bin", op: "+", left: ref(id), right: num(1), type: F64, loc }, loc });
+        let loopBody: IrStmt[];
+        if (K === 1) {
+          loopBody = units[i]!.stmts.map((st) => rewrite(st, c0.member, subRuns[0]!, () => ref(fi)) as IrStmt);
+        } else {
+          const kinds = classOf.slice();
+          const fk = fresh("fk", "fk", true);
+          const counters: string[] = [];
+          for (let k = 0; k < K; k++) {
+            const id = fresh("fc", "fc", true);
+            counters.push(id);
+            out.push({ kind: "varDecl", localId: id, init: num(0), loc } as IrStmt);
+          }
+          // the first member of each kind is the body's template
+          const first: number[] = [];
+          for (let t = 0; t < n; t++) if (first[classOf[t]!] === undefined) first[classOf[t]!] = t;
+          const bodies: IrStmt[][] = [];
+          for (let k = 0; k < K; k++) {
+            const u = units[i + first[k]!]!;
+            const stmts = u.stmts.map((st) => rewrite(st, u.member!, subRuns[k]!, () => ref(counters[k]!)) as IrStmt);
+            stmts.push(add1(counters[k]!));
+            bodies.push(stmts);
+          }
+          let chain: IrStmt[] | null = bodies[K - 1]!;
+          for (let k = K - 2; k >= 0; k--) {
+            chain = [{ kind: "if", cond: { kind: "bin", op: "===", left: ref(fk), right: num(k), type: BOOL, loc }, then: bodies[k]!, else_: chain, loc } as IrStmt];
+          }
+          loopBody = [
+            { kind: "varDecl", localId: fk, init: { kind: "runKindAt", kinds, index: ref(fi), type: F64, loc } as IrExpr, loc } as IrStmt,
+            ...chain!,
+          ];
+        }
         out.push({
           kind: "for",
-          init: { kind: "varDecl", localId: id, init: num(0), loc },
-          cond: { kind: "bin", op: "<", left: ref(), right: num(run.length), type: BOOL, loc },
-          update: { kind: "assign", localId: id, value: { kind: "bin", op: "+", left: ref(), right: num(1), type: F64, loc }, loc },
+          init: { kind: "varDecl", localId: fi, init: num(0), loc },
+          cond: { kind: "bin", op: "<", left: ref(fi), right: num(n), type: BOOL, loc },
+          update: add1(fi),
           body: loopBody,
           loc,
-        });
+        } as IrStmt);
         loops++;
         i = j;
       } else {

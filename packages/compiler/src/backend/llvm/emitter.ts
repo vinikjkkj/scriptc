@@ -9734,6 +9734,17 @@ class LlEmitter {
         B.line(`${k} = load ptr, ptr ${kp}`);
         return this.ownImmortal({ name: k, type: e.type });
       }
+      case "runKindAt": {
+        const ix = this.runIndex(e.index);
+        const tb = this.addGlobal("sc_fr_kinds", (sym) => `@${sym} = private unnamed_addr constant [${e.kinds.length} x i8] [${e.kinds.map((k) => `i8 ${k}`).join(", ")}]`);
+        const kp = B.tmp();
+        B.line(`${kp} = getelementptr inbounds i8, ptr ${tb}, i64 ${ix}`);
+        const k8 = B.tmp();
+        B.line(`${k8} = load i8, ptr ${kp}`);
+        const kd = B.tmp();
+        B.line(`${kd} = uitofp i8 ${k8} to double`);
+        return { name: kd, type: e.type };
+      }
       case "recordSlotFilled": {
         // `in`'s question on a shape a completion targeted - emit-exprs's
         // twin, and folding the same way where no completion happened.

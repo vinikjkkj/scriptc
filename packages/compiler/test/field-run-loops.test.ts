@@ -101,3 +101,62 @@ test("an all-optional record loops too: its two statements per member form one u
     load.dispose();
   }
 });
+
+/** A record whose members have three kinds interleaved in key order (the shape of zapo's WA_ABPROPS): no run of one kind is long, so only a MIXED run loops. */
+function mixedSource(n: number): string {
+  const kinds = ["BoolP", "NumP", "StrP"];
+  const pattern = [0, 1, 2, 0, 0, 1, 2, 1, 0, 2];
+  const pick = (i: number): string => kinds[pattern[i % pattern.length]!]!;
+  const L = ["interface BoolP { code: number; type: 'boolean'; def: boolean }", "interface NumP { code: number; type: 'int'; def: number }", "interface StrP { code: number; type: 'string'; def: string }", "type M = {"];
+  for (let i = 0; i < n; i++) L.push(`  m${i}: ${pick(i)};`);
+  L.push("};", "const m: M = {");
+  for (let i = 0; i < n; i++) {
+    const k = pick(i);
+    L.push(`  m${i}: ${k === "BoolP" ? `{ code: ${i}, type: 'boolean', def: true }` : k === "NumP" ? `{ code: ${i}, type: 'int', def: ${i} }` : `{ code: ${i}, type: 'string', def: 's${i}' }`},`);
+  }
+  L.push("};", "console.log(Object.entries(m).length, Object.values(m).length);");
+  return L.join("\n") + "\n";
+}
+
+function lowerMixed(n: number, min: string | undefined): IrModule {
+  const dir = mkdtempSync(join(tmpdir(), "scriptc-runloop-mixed-"));
+  const entry = join(dir, "main.ts");
+  writeFileSync(entry, mixedSource(n));
+  if (min === undefined) delete process.env["SCRIPTC_FIELD_LOOP_MIN"];
+  else process.env["SCRIPTC_FIELD_LOOP_MIN"] = min;
+  const load = loadProgram(entry);
+  try {
+    const r = lowerToIr(load.program, load.entry, load.moduleOrder);
+    if (r.module === null) throw new Error(`lowering refused: ${r.diagnostics.map((d) => d.code).join(", ")}`);
+    return r.module;
+  } finally {
+    load.dispose();
+  }
+}
+
+test("interleaved member kinds loop as ONE mixed run with a kind table, and MIN=0 keeps them unrolled", () => {
+  const on = lowerMixed(30, undefined);
+  expect(validateModule(on)).toEqual([]);
+  const kt = helpers(on).flatMap((f) => nodes(f.body, "runKindAt"));
+  expect(kt.length, "one kind table per looped helper").toBeGreaterThan(0);
+  expect(new Set((kt[0]!["kinds"] as number[])).size, "three kinds").toBe(3);
+  expect((kt[0]!["kinds"] as number[]).length, "the table covers the whole member list").toBe(30);
+  const off = lowerMixed(30, "0");
+  expect(helpers(off).flatMap((f) => nodes(f.body, "runKindAt")).length).toBe(0);
+  expect(helpers(off).some((f) => nodes(f.body, "recordGet").length >= 30)).toBe(true);
+});
+
+test("the validator rejects a malformed kind table", () => {
+  const bad = (mutate: (n: Obj) => void): number => {
+    const m = lowerMixed(30, undefined);
+    const n = helpers(m).flatMap((f) => nodes(f.body, "runKindAt"))[0]!;
+    mutate(n);
+    return validateModule(m).length;
+  };
+  expect(bad(() => undefined)).toBe(0);
+  expect(bad((n) => (n["kinds"] = []))).toBeGreaterThan(0);
+  expect(bad((n) => (n["kinds"] = [0, 1.5, 2]))).toBeGreaterThan(0);
+  expect(bad((n) => (n["kinds"] = [0, 256, 2]))).toBeGreaterThan(0);
+  expect(bad((n) => (n["index"] = { kind: "numLit", value: 99, type: { kind: "f64" }, loc: n["loc"] }))).toBeGreaterThan(0);
+  expect(bad((n) => (n["index"] = { kind: "boolLit", value: true, type: { kind: "bool" }, loc: n["loc"] }))).toBeGreaterThan(0);
+});
