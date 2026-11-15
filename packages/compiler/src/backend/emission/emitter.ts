@@ -2876,76 +2876,66 @@ export class CEmitter {
    * `if (scr_exc_pending())`; a `throw` unwinds unconditionally. */
   emitUnwind(): void {
     const target = this.tryStack[this.tryStack.length - 1];
-    const ladder = process.env.SCRIPTC_NO_UNWIND_LADDER !== "1";
     const key = target ? target.label : "";
-    if (ladder) {
-      const fd = target ? target.frameDepth : 0;
-      const sd = target ? target.scopeDepth : 0;
-      const live: ScopeEntry[] = [];
-      for (let i = sd; i < this.scopes.length; i++) live.push(...this.scopes[i]!);
-      for (let i = fd; i < this.frames.length; i++) live.push(...this.frames[i]!);
-      const owned = live.filter((t) => !t.immortal && (t.boxed === true || isRefCounted(t.type)));
-      for (const t of owned) if (!this.unwindSeq.has(t)) this.unwindSeq.set(t, this.unwindCounter++);
-      owned.sort((a, b) => this.unwindSeq.get(b)! - this.unwindSeq.get(a)!);
-      // an entry's identity at an exit is its number AND the name it is released through: a coroutine resume renames a spilled temp, and a cascade written under the old name must not be entered from there
-      const seqs = owned.map((t) => `${this.unwindSeq.get(t)!}:${t.boxed === true ? "b" : "v"}:${t.name}`);
-      let list = this.unwindLadders.get(key);
-      if (!list) this.unwindLadders.set(key, (list = []));
-      let best: { c: { seqs: string[]; labels: string[] }; j: number; len: number } | null = null;
-      for (const c of list) {
-        for (let j = 0; j <= c.seqs.length; j++) {
-          const len = c.seqs.length - j;
-          if (len > seqs.length || (best !== null && len <= best.len)) continue;
-          let ok = true;
-          for (let k = 0; k < len; k++) if (seqs[seqs.length - len + k] !== c.seqs[j + k]) { ok = false; break; }
-          if (ok) best = { c, j, len };
+    const fd = target ? target.frameDepth : 0;
+    const sd = target ? target.scopeDepth : 0;
+    const live: ScopeEntry[] = [];
+    for (let i = sd; i < this.scopes.length; i++) live.push(...this.scopes[i]!);
+    for (let i = fd; i < this.frames.length; i++) live.push(...this.frames[i]!);
+    const owned = live.filter((t) => !t.immortal && (t.boxed === true || isRefCounted(t.type)));
+    for (const t of owned) if (!this.unwindSeq.has(t)) this.unwindSeq.set(t, this.unwindCounter++);
+    owned.sort((a, b) => this.unwindSeq.get(b)! - this.unwindSeq.get(a)!);
+    // an entry's identity at an exit is its number AND the name it is released through: a coroutine resume renames a spilled temp, and a cascade written under the old name must not be entered from there
+    const seqs = owned.map((t) => `${this.unwindSeq.get(t)!}:${t.boxed === true ? "b" : "v"}:${t.name}`);
+    let list = this.unwindLadders.get(key);
+    if (!list) this.unwindLadders.set(key, (list = []));
+    let best: { c: { seqs: string[]; labels: string[] }; j: number; len: number } | null = null;
+    for (const c of list) {
+      for (let j = 0; j <= c.seqs.length; j++) {
+        const len = c.seqs.length - j;
+        if (len > seqs.length || (best !== null && len <= best.len)) continue;
+        let ok = true;
+        for (let k = 0; k < len; k++) if (seqs[seqs.length - len + k] !== c.seqs[j + k]) { ok = false; break; }
+        if (ok) best = { c, j, len };
+      }
+    }
+    const emitRung = (t: ScopeEntry): void => {
+      if (t.boxed) this.line(`scr_box_release(${t.name});`);
+      else this.releaseValue(t.name, t.type);
+    };
+    if (best !== null) {
+      const extras = seqs.length - best.len;
+      if (extras > 0) {
+        // the new exit is itself a cascade: its extra rungs get labels, and from the shared part on it enters the base cascade's labels
+        const label = `sc_ul${this.unwindCounter++}`;
+        const labels: string[] = [];
+        for (let i = 0; i < extras; i++) labels.push(`${label}_${i}`);
+        for (let i = 0; i <= best.len; i++) labels.push(best.c.labels[best.j + i]!);
+        list.push({ seqs, labels });
+        for (let i = 0; i < extras; i++) {
+          this.line(`${labels[i]}:;`);
+          emitRung(owned[i]!);
         }
       }
-      const emitRung = (t: ScopeEntry): void => {
-        if (t.boxed) this.line(`scr_box_release(${t.name});`);
-        else this.releaseValue(t.name, t.type);
-      };
-      if (best !== null) {
-        const extras = seqs.length - best.len;
-        if (extras > 0) {
-          // the new exit is itself a cascade: its extra rungs get labels, and from the shared part on it enters the base cascade's labels
-          const label = `sc_ul${this.unwindCounter++}`;
-          const labels: string[] = [];
-          for (let i = 0; i < extras; i++) labels.push(`${label}_${i}`);
-          for (let i = 0; i <= best.len; i++) labels.push(best.c.labels[best.j + i]!);
-          list.push({ seqs, labels });
-          for (let i = 0; i < extras; i++) {
-            this.line(`${labels[i]}:;`);
-            emitRung(owned[i]!);
-          }
-        }
-        // PLANT (test hook, SCRIPTC_UNWIND_LADDER_PLANT=1): enter one rung late, so one temporary is never released
-        const enter = process.env.SCRIPTC_UNWIND_LADDER_PLANT === "1" && best.len >= 2 ? best.c.labels[best.j + 1]! : best.c.labels[best.j]!;
-        if (target) target.used = true;
-        this.line(`goto ${enter};`);
-        return;
-      }
-      const label = `sc_ul${this.unwindCounter++}`;
-      const labels: string[] = [];
-      for (let i = 0; i <= owned.length; i++) labels.push(`${label}_${i}`);
-      list.push({ seqs, labels });
-      for (let i = 0; i < owned.length; i++) {
-        this.line(`${labels[i]}:;`);
-        emitRung(owned[i]!);
-      }
-      this.line(`${labels[owned.length]}:;`);
-      if (target) {
-        target.used = true;
-        this.line(`goto ${target.label};`);
-        return;
-      }
-    } else if (target) {
-      this.releaseForJump(target.frameDepth, target.scopeDepth);
+      const enter = best.c.labels[best.j]!;
+      if (target) target.used = true;
+      this.line(`goto ${enter};`);
+      return;
+    }
+    const label = `sc_ul${this.unwindCounter++}`;
+    const labels: string[] = [];
+    for (let i = 0; i <= owned.length; i++) labels.push(`${label}_${i}`);
+    list.push({ seqs, labels });
+    for (let i = 0; i < owned.length; i++) {
+      this.line(`${labels[i]}:;`);
+      emitRung(owned[i]!);
+    }
+    this.line(`${labels[owned.length]}:;`);
+    if (target) {
       target.used = true;
       this.line(`goto ${target.label};`);
       return;
     }
-    if (!ladder) this.releaseForJump(0, 0);
     if (this.currentCoro !== null) {
       // THE FOURTH COMPLETION PATH, dispatched on the PROPERTY exactly as
       // finishLines in emit-stmts.ts dispatches the other three. A converted
@@ -2995,7 +2985,7 @@ export class CEmitter {
    * (per the may-throw analysis), test the pending flag and unwind. */
   emitPendingCheck(): void {
     // the pending branch is the cold arm: no throw is the common case at every one of these sites
-    this.line(process.env.SCRIPTC_NO_UNWIND_LADDER === "1" ? `if (scr_exc_pending()) {` : `if (__builtin_expect(scr_exc_pending(), 0)) {`);
+    this.line(`if (__builtin_expect(scr_exc_pending(), 0)) {`);
     this.indent++;
     this.emitUnwind();
     this.indent--;
