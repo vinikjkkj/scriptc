@@ -2271,6 +2271,7 @@ static void scr_dyn_obj_put_k(ScrDyn *obj, char *key, size_t key_len, ScrDyn *va
   e->key_len = (uint32_t)key_len;
   e->key_static = key_static;
   e->value_borrowed = 0;
+  e->plain_prop = 0;
   e->value = value;
 #ifdef SCR_WRAP_WATCH
   /* A NEW member named toString / valueOf can change what a primitive-wrapper subclass answers (scr_dyn_wrapper_user_member's cache).

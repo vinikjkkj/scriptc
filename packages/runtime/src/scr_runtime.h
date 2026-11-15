@@ -5295,7 +5295,11 @@ typedef struct {
    * reference is held, so the holder's release, the cycle walk and an
    * overwrite all skip it. */
   uint32_t value_borrowed : 1;
-  uint32_t : 30;
+  /* A PER-INSTANCE PROPERTY TABLE ENTRY (scr_cls_props_*) whose value IS the property: an ordinary writable, enumerable, configurable data
+   * property, stored as the bare value instead of a five-element descriptor row. Only scr_dyn_props_append_plain sets it, and only a table
+   * entry carries it (the table never escapes, see "the per-instance property table"); every other entry is created with it clear. */
+  uint32_t plain_prop : 1;
+  uint32_t : 29;
   ScrDyn *value; /* owned unless value_borrowed */
 } ScrDynEntry;
 _Static_assert(sizeof(ScrDynEntry) == 24 && offsetof(ScrDynEntry, key_len) == 8 && offsetof(ScrDynEntry, value) == 16,
@@ -6243,6 +6247,11 @@ ScrDyn *scr_dyn_obj_own_enum_read(ScrDyn *recv, const char *key, size_t key_len)
  * `hidden`'s order is not decoration — the same scr_hid_* readers walk
  * both.
  *
+ * A PLAIN data property (writable, enumerable, configurable: what an expando write creates, and what a default defineProperty creates) is NOT a row:
+ * its entry carries ScrDynEntry.plain_prop and its value is the property itself, which spares the row's node and its items buffer (about 140 bytes
+ * per property). Only a non-default property (an accessor, a hidden or read-only or sealed data property) and a field marker keep a row. Every
+ * reader asks the entry first (scr_dyn_props_find); a bare value is never read as a row, whatever kind it is.
+ *
  * scr_cls_props_ensure answers the table to store back into the field:
  * the existing one retained, or a fresh one. scr_cls_props_define is
  * ValidateAndApplyPropertyDescriptor over it, LOUD for every shape it
@@ -6777,6 +6786,19 @@ ScrArr *scr_arr_to_f64_dyn(ScrArr *a);
 double scr_dyn_arr_len(const ScrDyn *d);
 ScrDyn *scr_dyn_arr_at(const ScrDyn *d, double i);
 void scr_dyn_obj_set(ScrDyn *obj, const char *key, size_t key_len, ScrDyn *value);
+/* The per-instance property table's two private helpers (ScrDynEntry.plain_prop): the entry of `key` (NULL when absent), and the append of a plain
+ * data property under a key the table does NOT hold (ownership of `value` moves in; the store appends, so the new entry is the last one). */
+static inline const ScrDynEntry *scr_dyn_props_find(const ScrDyn *tbl, const char *key, size_t key_len) {
+  const ScrDynEntry *e = tbl->v.obj.entries;
+  for (size_t n = tbl->v.obj.len; n != 0; n--, e++) {
+    if (e->key_len == key_len && memcmp(e->key, key, key_len) == 0) return e;
+  }
+  return NULL;
+}
+static inline void scr_dyn_props_append_plain(ScrDyn *tbl, const char *key, size_t key_len, ScrDyn *value) {
+  scr_dyn_obj_set(tbl, key, key_len, value);
+  tbl->v.obj.entries[tbl->v.obj.len - 1].plain_prop = 1;
+}
 /* A non-owning member (value_borrowed): `value` is held WITHOUT a reference, so
  * the holder's release skips it. Only for a back-reference to the holder itself,
  * reachable only through a live holder (scr_tls.c's peer certificate). */
