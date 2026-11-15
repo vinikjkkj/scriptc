@@ -1949,7 +1949,7 @@ static ScrDyn *dyn_member_field_get(const ScrDynClassMember *cm, void *obj) {
 typedef struct { const char *cls, *mem; unsigned long long n; } ScrFrRow;
 static ScrFrRow scr_fr_rows[4096];
 static unsigned scr_fr_n;
-static void scr_fr_dump(void) {
+void scr_fr_dump(void) {
   const char *path = getenv("SCR_FIELDREAD_OUT");
   FILE *f = fopen(path != NULL && *path ? path : "scr-fieldread.txt", "w");
   if (!f) return;
