@@ -1014,6 +1014,10 @@ static __attribute__((noinline)) void scr_dyn_release_final(ScrDyn *d) {
     scr_dyn_ext_drop(d, true);
     break;
   case SCR_DYN_FUNC:
+    if (((ScrClosure *)d)->isdyn) { /* an embedded closure: the one object, the one teardown (its own header is dropped again there, harmlessly) */
+      scr_closure_free_dead((ScrClosure *)d);
+      return;
+    }
     scr_closure_release(scr_dyn_fn_clo(d)); /* sig/name are static literals */
     break;
   case SCR_DYN_HANDLE:
@@ -1113,10 +1117,6 @@ __attribute__((noinline)) void scr_dyn_release(ScrDyn *d) {
         d->kind == SCR_DYN_FUNC) {
       scr_cyc_on_release(d); /* may collect - d is done being touched */
     }
-    return;
-  }
-  if (d->kind == SCR_DYN_FUNC && ((ScrClosure *)d)->isdyn) { /* an embedded closure: the one object, the one teardown */
-    scr_closure_free_dead((ScrClosure *)d);
     return;
   }
   scr_dyn_release_final(d);

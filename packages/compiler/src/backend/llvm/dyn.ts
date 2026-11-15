@@ -2833,8 +2833,19 @@ export class LlDyn {
           const clop = B.tmp();
           const clo = B.tmp();
           const rclo = B.tmp();
-          host.declare(`declare ptr @scr_dyn_fn_clo_of(ptr)`);
-          B.line(`${clo} = call ptr @scr_dyn_fn_clo_of(ptr %d) ; the closure a FUNC value calls (the value itself when it is an embedded closure)`);
+          {
+          const cflag = B.tmp();
+          const cnz = B.tmp();
+          const cnp = B.tmp();
+          const cnd = B.tmp();
+          const cnl = B.tmp();
+          B.line(`${cflag} = getelementptr inbounds i8, ptr %d, i64 12 ; isdyn: this value IS the closure`);
+          B.line(`${cnz} = load i8, ptr ${cflag}`);
+          B.line(`${cnp} = icmp ne i8 ${cnz}, 0`);
+          B.line(`${cnd} = getelementptr inbounds i8, ptr %d, i64 ${DYN_FN_CLO_OFF} ; ->v.fn.clo (stand-alone node)`);
+          B.line(`${cnl} = load ptr, ptr ${cnd}`);
+          B.line(`${clo} = select i1 ${cnp}, ptr %d, ptr ${cnl}`);
+          }
           B.line(`${rclo} = call ptr @scr_closure_retain_v(ptr ${clo})`);
           B.line(`call void @scr_box_set_ref(ptr ${fbox}, ptr ${rclo})`);
           const cap1 = B.tmp();
@@ -2846,8 +2857,16 @@ export class LlDyn {
           const th = B.tmp();
           const descp = B.tmp();
           const desc = B.tmp();
-          host.declare(`declare ptr @scr_dyn_fn_thunk_of(ptr)`);
-          B.line(`${th} = call ptr @scr_dyn_fn_thunk_of(ptr %d) ; ->v.fn.desc->thunk, through the descriptor an embedded closure caches`);
+          {
+          const wv = B.tmp();
+          const dm = B.tmp();
+          const dp = B.tmp();
+          B.line(`${dp} = getelementptr inbounds i8, ptr %d, i64 ${DYN_FN_DESC_OFF} ; ->v.fn.desc (a closure keeps it in w, at the same offset)`);
+          B.line(`${wv} = load i64, ptr ${dp}`);
+          B.line(`${dm} = and i64 ${wv}, -2 ; bit 0 of w flags an ext`);
+          B.line(`${dm}.p = inttoptr i64 ${dm} to ptr`);
+          B.line(`${th} = load ptr, ptr ${dm}.p ; the descriptor's first member is the thunk`);
+          }
           B.line(`call void @scr_box_set_thunk_fn(ptr ${tbox}, ptr ${th})`);
           host.declare(`declare void @scr_dyn_fn_share_props(ptr, ptr)`);
           B.line(`call void @scr_dyn_fn_share_props(ptr ${ad}, ptr %d) ; the adapter is the same function to JS: one own-property table`);
@@ -2911,8 +2930,19 @@ export class LlDyn {
         const clop = B.tmp();
         const clo = B.tmp();
         const r = B.tmp();
-        host.declare(`declare ptr @scr_dyn_fn_clo_of(ptr)`);
-        B.line(`${clo} = call ptr @scr_dyn_fn_clo_of(ptr %d) ; the closure a FUNC value calls (the value itself when it is an embedded closure)`);
+        {
+        const cflag = B.tmp();
+        const cnz = B.tmp();
+        const cnp = B.tmp();
+        const cnd = B.tmp();
+        const cnl = B.tmp();
+        B.line(`${cflag} = getelementptr inbounds i8, ptr %d, i64 12 ; isdyn: this value IS the closure`);
+        B.line(`${cnz} = load i8, ptr ${cflag}`);
+        B.line(`${cnp} = icmp ne i8 ${cnz}, 0`);
+        B.line(`${cnd} = getelementptr inbounds i8, ptr %d, i64 ${DYN_FN_CLO_OFF} ; ->v.fn.clo (stand-alone node)`);
+        B.line(`${cnl} = load ptr, ptr ${cnd}`);
+        B.line(`${clo} = select i1 ${cnp}, ptr %d, ptr ${cnl}`);
+        }
         B.line(`${r} = call ptr @scr_closure_retain_v(ptr ${clo})`);
         B.terminate(`ret ptr ${r}`);
         B.startBlock(lWrap);
@@ -2982,8 +3012,19 @@ export class LlDyn {
         const clop2 = B.tmp();
         const clo2 = B.tmp();
         const rclo = B.tmp();
-        host.declare(`declare ptr @scr_dyn_fn_clo_of(ptr)`);
-        B.line(`${clo2} = call ptr @scr_dyn_fn_clo_of(ptr %d) ; the closure a FUNC value calls (the value itself when it is an embedded closure)`);
+        {
+        const cflag = B.tmp();
+        const cnz = B.tmp();
+        const cnp = B.tmp();
+        const cnd = B.tmp();
+        const cnl = B.tmp();
+        B.line(`${cflag} = getelementptr inbounds i8, ptr %d, i64 12 ; isdyn: this value IS the closure`);
+        B.line(`${cnz} = load i8, ptr ${cflag}`);
+        B.line(`${cnp} = icmp ne i8 ${cnz}, 0`);
+        B.line(`${cnd} = getelementptr inbounds i8, ptr %d, i64 ${DYN_FN_CLO_OFF} ; ->v.fn.clo (stand-alone node)`);
+        B.line(`${cnl} = load ptr, ptr ${cnd}`);
+        B.line(`${clo2} = select i1 ${cnp}, ptr %d, ptr ${cnl}`);
+        }
         B.line(`${rclo} = call ptr @scr_closure_retain_v(ptr ${clo2})`);
         B.line(`call void @scr_box_set_ref(ptr ${fbox}, ptr ${rclo})`);
         // caps[1]: that closure's thunk, in a scalar box — a function
@@ -2997,8 +3038,16 @@ export class LlDyn {
         const th = B.tmp();
         const descp = B.tmp();
         const desc = B.tmp();
-        host.declare(`declare ptr @scr_dyn_fn_thunk_of(ptr)`);
-        B.line(`${th} = call ptr @scr_dyn_fn_thunk_of(ptr %d) ; ->v.fn.desc->thunk, through the descriptor an embedded closure caches`);
+        {
+        const wv = B.tmp();
+        const dm = B.tmp();
+        const dp = B.tmp();
+        B.line(`${dp} = getelementptr inbounds i8, ptr %d, i64 ${DYN_FN_DESC_OFF} ; ->v.fn.desc (a closure keeps it in w, at the same offset)`);
+        B.line(`${wv} = load i64, ptr ${dp}`);
+        B.line(`${dm} = and i64 ${wv}, -2 ; bit 0 of w flags an ext`);
+        B.line(`${dm}.p = inttoptr i64 ${dm} to ptr`);
+        B.line(`${th} = load ptr, ptr ${dm}.p ; the descriptor's first member is the thunk`);
+        }
         B.line(`call void @scr_box_set_thunk_fn(ptr ${tbox}, ptr ${th})`);
         host.declare(`declare void @scr_dyn_fn_share_props(ptr, ptr)`);
         B.line(`call void @scr_dyn_fn_share_props(ptr ${a}, ptr %d) ; the adapter is the same function to JS: one own-property table`);
