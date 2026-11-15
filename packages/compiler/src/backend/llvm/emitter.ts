@@ -6128,7 +6128,7 @@ class LlEmitter {
       if (idx < 0) throw new Error(`llvm emitter bug: unknown field ${n} on shape ${shapeId}`);
       return `i32 trunc (i64 ptrtoint (ptr getelementptr inbounds (%${struct}, ptr null, i64 0, i32 ${idx + 1}) to i64) to i32)`;
     });
-    const tb = this.addGlobal("scr_run_off", (sym) => `@${sym} = private unnamed_addr constant [${run.length} x i32] [${rows.join(", ")}]`);
+    const tb = this.addGlobal("sc_fr_off", (sym) => `@${sym} = private unnamed_addr constant [${run.length} x i32] [${rows.join(", ")}]`);
     const op = this.B.tmp();
     this.B.line(`${op} = getelementptr inbounds i32, ptr ${tb}, i64 ${ix}`);
     const o32 = this.B.tmp();
@@ -9565,7 +9565,7 @@ class LlEmitter {
         let byte = "0";
         let bit = "0";
         if (hasBit) {
-          const tb = this.addGlobal("scr_run_bits", (sym) => `@${sym} = private unnamed_addr constant [${bits.length * 2} x i8] [${bits.flatMap((b) => [`i8 ${b!.byte}`, `i8 ${b!.bit}`]).join(", ")}]`);
+          const tb = this.addGlobal("sc_fr_bits", (sym) => `@${sym} = private unnamed_addr constant [${bits.length * 2} x i8] [${bits.flatMap((b) => [`i8 ${b!.byte}`, `i8 ${b!.bit}`]).join(", ")}]`);
           const i2 = B.tmp();
           B.line(`${i2} = shl i64 ${ix}, 1`);
           const bpb = B.tmp();
@@ -9587,7 +9587,7 @@ class LlEmitter {
       }
       case "runKeyAt": {
         const ix = this.runIndex(e.index);
-        const tb = this.addGlobal("scr_run_keys", (sym) => `@${sym} = private unnamed_addr constant [${e.run.length} x ptr] [${e.run.map((n) => `ptr ${this.internLiteral(n)}`).join(", ")}]`);
+        const tb = this.addGlobal("sc_fr_keys", (sym) => `@${sym} = private unnamed_addr constant [${e.run.length} x ptr] [${e.run.map((n) => `ptr ${this.internLiteral(n)}`).join(", ")}]`);
         const kp = B.tmp();
         B.line(`${kp} = getelementptr inbounds ptr, ptr ${tb}, i64 ${ix}`);
         const k = B.tmp();
