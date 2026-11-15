@@ -531,6 +531,7 @@ long long scr_cycen_arena_walk(long long (*out)[13], int nclass);
 const void *scr_cycen_dyn_key(void);
 int scr_cycen_dyn_peek(const void *hdr, unsigned *len);
 int scr_cycen_dyn_peek2(const void *hdr, unsigned *len, unsigned *cap, unsigned long long *ext);
+int scr_cycen_dyn_peek3(const void *hdr, unsigned *eks, char *key, unsigned long long *rc, unsigned long long *e0src);
 /* ALL cyc objects by (allocation site, kind): count, physical bytes (header included), and the side-buffer bytes of dyn ARR/OBJ nodes */
 #define SCR_CYCEN_AKSLOTS 131072u
 typedef struct { unsigned long long key; const void *kind; long long n, phys, ext; } ScrCyCenAK; /* key = site<<13 | row, +1 */
@@ -577,12 +578,29 @@ SCR_CYCEN_FN void scr_cycen_sk_add(unsigned site, int kind, long long bytes) {
   }
 }
 
+/* LAB: per-site SHAPE table. One row per (site, kind, len, cap, first-item kinds): count, side bytes, summed node rc, strings behind a first-item STR that are shared, sample keys. */
+#define SCR_CYCEN_SHSLOTS 65536u
+typedef struct { unsigned long long key; unsigned site, kind, len, cap, eks; long long n, ext, rcsum, e0shared; char keys[24]; } ScrCyCenSh;
+SCR_CYCEN_SHARED ScrCyCenSh scr_cycen_sh[SCR_CYCEN_SHSLOTS], scr_cycen_sh_best[SCR_CYCEN_SHSLOTS];
+SCR_CYCEN_FN void scr_cycen_sh_add(unsigned site, int kind, unsigned len, unsigned cap, unsigned eks, unsigned long long ext, unsigned long long rc, unsigned long long e0src, const char *keys) {
+  unsigned long long key = (((unsigned long long)site * 1000003ULL + (unsigned)kind) * 1000003ULL + len) * 1000003ULL + cap;
+  key = (key * 1000003ULL + eks) | 1ULL;
+  unsigned mask = SCR_CYCEN_SHSLOTS - 1u, j = (unsigned)((key * 0x9E3779B97F4A7C15ULL) >> 40) & mask;
+  for (unsigned t = 0; t < SCR_CYCEN_SHSLOTS; t++, j = (j + 1u) & mask) {
+    if (scr_cycen_sh[j].key == 0) { scr_cycen_sh[j].n = scr_cycen_sh[j].ext = scr_cycen_sh[j].rcsum = scr_cycen_sh[j].e0shared = 0; scr_cycen_sh[j].key = key; scr_cycen_sh[j].site = site; scr_cycen_sh[j].kind = (unsigned)kind; scr_cycen_sh[j].len = len; scr_cycen_sh[j].cap = cap; scr_cycen_sh[j].eks = eks; for (int q = 0; q < 23; q++) scr_cycen_sh[j].keys[q] = keys[q]; scr_cycen_sh[j].keys[23] = 0; }
+    if (scr_cycen_sh[j].key != key) continue;
+    scr_cycen_sh[j].n++; scr_cycen_sh[j].ext += (long long)ext; scr_cycen_sh[j].rcsum += (long long)(rc == (unsigned long long)-1 ? 0 : rc); if (e0src > 1) scr_cycen_sh[j].e0shared++;
+    return;
+  }
+}
+
 /* One pass over the pointer table: the census's own view of the live population, aggregated. */
 SCR_CYCEN_FN void scr_cycen_x_aggregate(void) {
   const void *dk = scr_cycen_dyn_key();
   scr_cycen_x_small_n = scr_cycen_x_small_phys = scr_cycen_x_big_n = scr_cycen_x_big_phys = 0;
   scr_cycen_dyn_total_n = scr_cycen_dyn_total_b = 0;
   for (unsigned i = 0; i < SCR_CYCEN_SKSLOTS; i++) { scr_cycen_sk[i].key = 0; scr_cycen_sk[i].n = 0; scr_cycen_sk[i].bytes = 0; }
+  for (unsigned i = 0; i < SCR_CYCEN_SHSLOTS; i++) scr_cycen_sh[i].key = 0;
   for (int k = 0; k < 32; k++) for (int b = 0; b < SCR_CYCEN_LB; b++) scr_cycen_shape[k][b][0] = scr_cycen_shape[k][b][1] = 0;
   for (unsigned i = 0; i < SCR_CYCEN_STRSLOTS; i++) { scr_cycen_str[i].key = 0; scr_cycen_str[i].n = scr_cycen_str[i].nimm = scr_cycen_str[i].sumlen = scr_cycen_str[i].sumphys = scr_cycen_str[i].nshared = scr_cycen_str[i].ndistinct = 0; }
   for (unsigned i = 0; i < SCR_CYCEN_DSET; i++) scr_cycen_dset[i] = 0;
@@ -612,6 +630,7 @@ SCR_CYCEN_FN void scr_cycen_x_aggregate(void) {
       int b = scr_cycen_lbucket(len); if (b >= SCR_CYCEN_LB) b = SCR_CYCEN_LB - 1;
       scr_cycen_dyn_total_n++; scr_cycen_dyn_total_b += e->phys;
       scr_cycen_sk_add(e->site, kind, (long long)e->phys);
+      if (kind == 4 || kind == 5) { unsigned l3 = 0, c3 = 0, eks = 0; unsigned long long x3 = 0, rc3 = 0, e0 = 0; char kb[24]; (void)scr_cycen_dyn_peek2(e->p, &l3, &c3, &x3); (void)scr_cycen_dyn_peek3(e->p, &eks, kb, &rc3, &e0); scr_cycen_sh_add(e->site, kind, l3, c3, eks, x3, rc3, e0, kb); }
       if (kind >= 0 && kind < 32) { scr_cycen_shape[kind][b][0]++; scr_cycen_shape[kind][b][1] += e->phys; }
       if (kind == 3) {
         unsigned slen = 0, scap = 0; int imm = 0; unsigned long long rc = 0, hh = 0; const char *sdata = NULL;
@@ -686,6 +705,7 @@ SCR_CYCEN_FN void scr_cycen_seam(void) {
     scr_cycen_x_best[2] = scr_cycen_x_big_n; scr_cycen_x_best[3] = scr_cycen_x_big_phys;
     scr_cycen_dyn_total_best_n = scr_cycen_dyn_total_n; scr_cycen_dyn_total_best_b = scr_cycen_dyn_total_b;
     for (unsigned q = 0; q < SCR_CYCEN_SKSLOTS; q++) scr_cycen_sk_best[q] = scr_cycen_sk[q];
+    for (unsigned q = 0; q < SCR_CYCEN_SHSLOTS; q++) scr_cycen_sh_best[q] = scr_cycen_sh[q];
     for (unsigned q = 0; q < SCR_CYCEN_STRSLOTS; q++) { scr_cycen_str_best[q] = scr_cycen_str[q]; scr_cycen_strx_best[q] = scr_cycen_strx[q]; }
     for (unsigned q = 0; q < SCR_CYCEN_AKSLOTS; q++) scr_cycen_ak_best[q] = scr_cycen_ak[q];
     scr_cycen_ak_phys_best = scr_cycen_ak_phys;
@@ -739,6 +759,13 @@ SCR_CYCEN_FN void scr_cycen_report(void) {
         unsigned key = scr_cycen_sk_best[q].key - 1u, site = key >> 5;
         fprintf(f, "CYCEN-DYNSITE kind=%u n=%lld bytes=%lld", key & 31u, scr_cycen_sk_best[q].n, scr_cycen_sk_best[q].bytes);
         for (int d = 0; d < SCR_CYCEN_SITE_DEPTH; d++) fprintf(f, " %llx", site ? scr_cycen_sites[site][d] : 0ULL);
+        fprintf(f, "\n");
+      }
+      for (unsigned q = 0; q < SCR_CYCEN_SHSLOTS; q++) {
+        const ScrCyCenSh *r = &scr_cycen_sh_best[q];
+        if (r->key == 0) continue;
+        fprintf(f, "CYCEN-SHAPE kind=%u len=%u cap=%u eks=%08x n=%lld ext=%lld rcsum=%lld e0shared=%lld keys=%s", r->kind, r->len, r->cap, r->eks, r->n, r->ext, r->rcsum, r->e0shared, r->keys[0] ? r->keys : "-");
+        for (int d = 0; d < SCR_CYCEN_SITE_DEPTH; d++) fprintf(f, " %llx", r->site ? scr_cycen_sites[r->site][d] : 0ULL);
         fprintf(f, "\n");
       }
       fprintf(f, "CYCEN-STRTOTAL nodes=%lld distinctSiteContents=%lld\n", scr_cycen_str_total_best, scr_cycen_str_distinct_best);
