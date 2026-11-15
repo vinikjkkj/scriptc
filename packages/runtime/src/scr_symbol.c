@@ -509,7 +509,7 @@ static bool scr_dsym_site_ok(const ScrDyn *d, const ScrDynClassMember *m, ScrSym
   if (ks == NULL) return false; /* a symbol the program did not make from a traced Symbol() call is no class member's key */
   const ScrDynClassMember *cm = scr_dsym_inst_row(d, "%symid:", 7, m->name, m->len);
   if (cm == NULL || cm->call == NULL) return false;
-  ScrDyn *r = cm->call(d->v.inst.o, NULL, 0, "a symbol-keyed member");
+  ScrDyn *r = cm->call(scr_dyn_inst_o(d), NULL, 0, "a symbol-keyed member");
   if (r == NULL) return false;
   const bool same = r->kind == SCR_DYN_STR && scr_str_eq(r->v.str, ks);
   scr_dyn_release(r);
@@ -545,7 +545,7 @@ static bool scr_dsym_inst_complete(const ScrDyn *d) { return !scr_dyn_objinst_cl
 static ScrDyn *scr_dsym_inst_bag(const ScrDyn *d, bool ensure) {
   if (scr_dyn_objinst_error_rooted(d)) {
     /* an Error subclass keeps its expando properties in the runtime's own bag (ScrError.props); the symbol table rides its ext */
-    ScrError *e = (ScrError *)d->v.inst.o;
+    ScrError *e = (ScrError *)scr_dyn_inst_o(d);
     if (e->props == NULL || e->props->kind == SCR_DYN_UNDEF) { /* an Error subclass's %props starts as the undefined value */
       if (!ensure) return NULL;
       ScrDyn *old = e->props;
@@ -556,13 +556,13 @@ static ScrDyn *scr_dsym_inst_bag(const ScrDyn *d, bool ensure) {
   }
   const ScrDynClassMember *m = scr_dyn_objinst_member(d, "%props", 6);
   if (m == NULL || m->get == NULL) return NULL;
-  ScrDyn *b = m->get(d->v.inst.o); /* +1 */
+  ScrDyn *b = m->get(scr_dyn_inst_o(d)); /* +1 */
   if (b != NULL && b->kind == SCR_DYN_OBJ) return b;
   scr_dyn_release(b);
   if (!ensure) return NULL;
   const ScrDynClassMember *ds = scr_dyn_objinst_member(d, "%dynBag", 7);
   if (ds == NULL || ds->call == NULL) return NULL;
-  ScrDyn *r = ds->call(d->v.inst.o, NULL, 0, "a symbol-keyed property");
+  ScrDyn *r = ds->call(scr_dyn_inst_o(d), NULL, 0, "a symbol-keyed property");
   if (r != NULL && r->kind == SCR_DYN_OBJ) return r;
   scr_dyn_release(r);
   return NULL;
@@ -703,7 +703,7 @@ static ScrDyn *scr_dsym_get(ScrDyn *recv, ScrSym *k, ScrDyn *self) {
     break;
   case SCR_DSYM_INST: {
     const ScrDynClassMember *m = scr_dsym_inst_member(recv, k);
-    if (m != NULL && m->get != NULL) return m->get(recv->v.inst.o);
+    if (m != NULL && m->get != NULL) return m->get(scr_dyn_inst_o(recv));
     if (m != NULL && m->value != NULL) return m->value();
     if (m != NULL) {
       scr_dsym_fence(recv, "reading"); /* a method row with no function value */
@@ -954,7 +954,7 @@ ScrDyn *scr_dyn_sym_get_own_desc(ScrDyn *recv, ScrSym *k) {
     /* a FIELD keyed by the symbol is an own data property; a method or accessor lives on the prototype */
     const ScrDynClassMember *m = scr_dsym_inst_member(recv, k);
     if (m != NULL && m->len > 7 && memcmp(m->name, "Symbol(", 7) == 0 && m->get != NULL) {
-      ScrDyn *val = m->get(recv->v.inst.o);
+      ScrDyn *val = m->get(scr_dyn_inst_o(recv));
       ScrDyn *o = scr_dyn_new_obj();
       scr_dyn_obj_set(o, "value", 5, val);
       scr_dyn_obj_set(o, "writable", 8, scr_dsym_flag(true));

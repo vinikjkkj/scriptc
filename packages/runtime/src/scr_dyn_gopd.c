@@ -208,7 +208,7 @@ ScrDyn *scr_dyn_get_own_desc(ScrDyn *v, ScrStr *key) {
     case SCR_DYN_OBJINST: {
       const ScrDynClassMember *cm = scr_dyn_objinst_member(v, k, kl);
       if (cm != NULL && cm->get != NULL && scr_dyn_has_own(v, key)) {
-        ScrDyn *val = cm->get(v->v.inst.o);
+        ScrDyn *val = cm->get(scr_dyn_inst_o(v));
         return gopd_data(val, true, cm->enumerable != 0, true);
       }
       return gopd_undefined();

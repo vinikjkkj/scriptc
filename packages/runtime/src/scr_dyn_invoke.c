@@ -1756,7 +1756,7 @@ bool scr_dyn_has_intrinsic_method(const ScrDyn *recv, const char *key, size_t ke
     const ScrDynClassMember *hm = scr_dyn_objinst_member(recv, key, key_len);
     if (hm == NULL && scr_dyn_ee_ops != NULL && scr_dyn_objinst_emitter(recv) != NULL &&
         (scr_dyn_ee_ops->knows(key, key_len) || scr_dyn_ee_ops->is_state(key, key_len))) return true;
-    if (hm != NULL && hm->enumerable == 4 && scr_dyn_member_hidden(hm, recv->v.inst.o)) {
+    if (hm != NULL && hm->enumerable == 4 && scr_dyn_member_hidden(hm, scr_dyn_inst_o(recv))) {
       /* a grafted emitter's key before EventEmitter.call(this) ran: still the prototype's, so `in` is true */
       return scr_dyn_ee_ops != NULL && scr_dyn_objinst_emitter(recv) != NULL && scr_dyn_ee_ops->is_state(key, key_len);
     }
@@ -1924,7 +1924,7 @@ static ScrDyn *objinst_method_thunk(ScrClosure *clo, ScrDyn *const *args, size_t
   ScrDyn *recv = scr_dyn_this_get(); /* +1 */
   ScrDyn *r = NULL;
   if (recv->kind == SCR_DYN_OBJINST && scr_dyn_objinst_is(recv, w->cls->pre, w->cls->post)) {
-    r = w->cm->call(recv->v.inst.o, args, argc, "method");
+    r = w->cm->call(scr_dyn_inst_o(recv), args, argc, "method");
   } else {
     scr_throw_error_named(scr_str_new("TypeError", 9),
                           scr_str_new("Cannot read properties of undefined", 35));
@@ -1954,7 +1954,7 @@ static
 ScrDyn *objinst_member_row_get(ScrDyn *d, const ScrStr *key, const ScrDynClassMember *cm) {
   if (cm->get != NULL) {
     /* An unset field under a name the class inherits as prototype data reads the datum (Node's lookup reaches the prototype). */
-    ScrDyn *v = dyn_member_field_get(cm, d->v.inst.o);
+    ScrDyn *v = dyn_member_field_get(cm, scr_dyn_inst_o(d));
     /* A grafted emitter's keys before EventEmitter.call(this) ran read as the prototype's own values: _eventsCount is 0
      * (the other two are undefined, which the absent marker already reads as). */
     if (v == scr_dyn_absent() && cm->enumerable == 4 && key->len == 12 && memcmp(key->data, "_eventsCount", 12) == 0 &&
@@ -2061,7 +2061,7 @@ ScrDyn *scr_dyn_objinst_miss(ScrDyn *d, const ScrStr *key) {
      * class and two instances of one class answer one box. */
     /* An instance of a per-evaluation class carries its evaluation: the `%dynCls` row answers that class value. */
     const ScrDynClassMember *ev = scr_dyn_objinst_member(d, "%dynCls", 7);
-    if (ev != NULL && ev->call != NULL) return ev->call(d->v.inst.o, NULL, 0, "constructor");
+    if (ev != NULL && ev->call != NULL) return ev->call(scr_dyn_inst_o(d), NULL, 0, "constructor");
     return scr_dyn_class_box(scr_dyn_objinst_class_of(d));
   }
   if (scr_dyn_objinst_error_rooted(d)) {
@@ -2595,13 +2595,13 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
        * passes the instance as the method's own first parameter, which
        * is what `this` is on the static side. No ambient window is
        * pushed, because none is read. */
-      return cm->call(recv->v.inst.o, args, argc, what);
+      return cm->call(scr_dyn_inst_o(recv), args, argc, what);
     }
     if (cm != NULL) {
       /* A DATA member holding a function value: `o.m()` is Get then Call,
        * and the call binds the instance (the OBJ arm's ambient-receiver
        * window, same reason). */
-      ScrDyn *fv = dyn_member_field_get(cm, recv->v.inst.o);
+      ScrDyn *fv = dyn_member_field_get(cm, scr_dyn_inst_o(recv));
       if (fv == NULL) return NULL; /* the read threw */
       if (fv->kind == SCR_DYN_FUNC ||
           (fv->kind == SCR_DYN_JSVAL && scr_dyn_isl_typeof_is(fv, "function"))) {
@@ -2620,7 +2620,7 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
      * function value there being called with the instance as receiver. */
     if (scr_dyn_objinst_error_rooted(recv)) {
       if (strcmp(method, "toString") == 0) {
-        ScrStr *s = scr_error_to_string((ScrError *)recv->v.inst.o);
+        ScrStr *s = scr_error_to_string((ScrError *)scr_dyn_inst_o(recv));
         ScrDyn *r = scr_dyn_new_str(s);
         scr_str_release(s);
         return r;
@@ -4318,7 +4318,7 @@ ScrDyn *scr_dyn_clone_own(ScrDyn *src) {
   }
   if (src->kind == SCR_DYN_OBJINST) {
     const ScrDynClassMember *m = scr_dyn_objinst_member(src, "%dynClone", 9);
-    if (m != NULL && m->call != NULL) return m->call(src->v.inst.o, NULL, 0, "Object.create");
+    if (m != NULL && m->call != NULL) return m->call(scr_dyn_inst_o(src), NULL, 0, "Object.create");
     scr_dyn_objinst_fence(src, "Object.create of a class instance");
     return NULL;
   }
@@ -4799,7 +4799,7 @@ static ScrDyn *scr_px_target_get(ScrDyn *t, const ScrStr *key) {
   case SCR_DYN_OBJINST: {
     const ScrDynClassMember *m = scr_dyn_objinst_member(t, key->data, key->len);
     if (m == NULL) return scr_dyn_retain(scr_dyn_undefined());
-    if (m->get != NULL) return m->get(t->v.inst.o);
+    if (m->get != NULL) return m->get(scr_dyn_inst_o(t));
     scr_px_refuse(t, "reading a method as a value");
     return NULL;
   }
@@ -5360,7 +5360,7 @@ void scr_dyn_capture_stack(ScrDyn *target) {
     if (target->kind == SCR_DYN_OBJINST && scr_dyn_objinst_error_rooted(target)) {
       /* An Error-rooted instance owns its stack: the capture re-forms the header from the instance's CURRENT name
        * and message, so the memoised one is forgotten and the next read forms it afresh. */
-      scr_error_capture_stack((ScrError *)target->v.inst.o);
+      scr_error_capture_stack((ScrError *)scr_dyn_inst_o(target));
       return;
     }
     if (target->kind == SCR_DYN_OBJINST) {
