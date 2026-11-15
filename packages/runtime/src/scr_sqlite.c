@@ -1266,3 +1266,97 @@ ScrDyn *scr_sqlite_pragma(ScrSqliteDb *db, const ScrStr *source, bool simple) {
   scr_sqlite_stmt_release(st);
   return out;
 }
+
+/* LAB (gap1), never lands: with SCR_GAP_OUT=<file> a sampler thread records every 50 ms the process RSS, the glibc heap (mallinfo2) and the SQLite engine's own per-connection memory
+ * (sqlite3_db_status of every live connection), and dumps them at exit through the scr_layout_prof_exit hook. Read racily from a second thread: it is a measurement, not a feature. */
+#if !defined(_WIN32) && defined(__linux__)
+#include <fcntl.h>
+#include <malloc.h>
+#include <pthread.h>
+#include <time.h>
+#include <unistd.h>
+typedef struct { unsigned t_ms, rss_kb, arena_kb, hblkhd_kb, uord_kb, ford_kb, keep_kb, ordblks, smblks, fsm_kb, db_cache_kb, db_schema_kb, db_stmt_kb, db_lookaside_kb, ndb; unsigned long long cyc_live; } ScrGapSample;
+#define SCR_GAP_MAX 8192
+static ScrGapSample scr_gap_samples[SCR_GAP_MAX];
+static volatile unsigned scr_gap_n;
+extern size_t scr_cyc_live; /* scr_cycle.c */
+static unsigned scr_gap_rss_kb(void) {
+  int fd = open("/proc/self/statm", O_RDONLY);
+  char b[128];
+  unsigned long a = 0, r = 0;
+  ssize_t n;
+  if (fd < 0) return 0;
+  n = read(fd, b, sizeof b - 1);
+  close(fd);
+  if (n <= 0) return 0;
+  b[n] = 0;
+  sscanf(b, "%lu %lu", &a, &r);
+  return (unsigned)(r * (unsigned long)(sysconf(_SC_PAGESIZE) / 1024));
+}
+static void *scr_gap_thread(void *arg) {
+  struct timespec t0, t;
+  (void)arg;
+  clock_gettime(CLOCK_MONOTONIC, &t0);
+  for (;;) {
+    unsigned i = scr_gap_n;
+    ScrGapSample *x;
+    struct mallinfo2 mi;
+    ScrSqliteDb *d;
+    int cur, hi;
+    long long c = 0, s = 0, st = 0, la = 0;
+    unsigned nd = 0;
+    usleep(50000);
+    if (i >= SCR_GAP_MAX) return NULL;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    mi = mallinfo2();
+    x = &scr_gap_samples[i];
+    x->t_ms = (unsigned)((t.tv_sec - t0.tv_sec) * 1000 + (t.tv_nsec - t0.tv_nsec) / 1000000);
+    x->rss_kb = scr_gap_rss_kb();
+    x->arena_kb = (unsigned)(mi.arena / 1024);
+    x->hblkhd_kb = (unsigned)(mi.hblkhd / 1024);
+    x->uord_kb = (unsigned)(mi.uordblks / 1024);
+    x->ford_kb = (unsigned)(mi.fordblks / 1024);
+    x->keep_kb = (unsigned)(mi.keepcost / 1024);
+    x->ordblks = (unsigned)mi.ordblks;
+    x->smblks = (unsigned)mi.smblks;
+    x->fsm_kb = (unsigned)(mi.fsmblks / 1024);
+    for (d = scr_sqlite_live; d != NULL; d = d->lnext) {
+      if (!d->open || d->h == NULL) continue;
+      nd++;
+      cur = 0; hi = 0;
+      if (sqlite3_db_status(d->h, SQLITE_DBSTATUS_CACHE_USED, &cur, &hi, 0) == SQLITE_OK) c += cur;
+      if (sqlite3_db_status(d->h, SQLITE_DBSTATUS_SCHEMA_USED, &cur, &hi, 0) == SQLITE_OK) s += cur;
+      if (sqlite3_db_status(d->h, SQLITE_DBSTATUS_STMT_USED, &cur, &hi, 0) == SQLITE_OK) st += cur;
+      if (sqlite3_db_status(d->h, SQLITE_DBSTATUS_LOOKASIDE_USED, &cur, &hi, 0) == SQLITE_OK) la += cur;
+    }
+    x->ndb = nd;
+    x->db_cache_kb = (unsigned)(c / 1024);
+    x->db_schema_kb = (unsigned)(s / 1024);
+    x->db_stmt_kb = (unsigned)(st / 1024);
+    x->db_lookaside_kb = (unsigned)(la / 1024);
+    x->cyc_live = (unsigned long long)scr_cyc_live;
+    scr_gap_n = i + 1;
+  }
+}
+extern void (*scr_layout_prof_exit)(void);
+__attribute__((destructor)) static void scr_gap_dump(void);
+static void scr_gap_dump(void) {
+  const char *path = getenv("SCR_GAP_OUT");
+  FILE *f;
+  unsigned i, n = scr_gap_n;
+  if (path == NULL || (f = fopen(path, "w")) == NULL) return;
+  fprintf(f, "# t_ms rss_kb malloc_arena_kb mmapped_kb in_use_kb free_kb top_free_kb free_chunks small_free_chunks fastbin_kb db_cache_kb db_schema_kb db_stmt_kb db_lookaside_kb ndb cyc_live\n");
+  for (i = 0; i < n && i < SCR_GAP_MAX; i++) {
+    const ScrGapSample *x = &scr_gap_samples[i];
+    fprintf(f, "%u %u %u %u %u %u %u %u %u %u %u %u %u %u %u %llu\n", x->t_ms, x->rss_kb, x->arena_kb, x->hblkhd_kb, x->uord_kb, x->ford_kb, x->keep_kb, x->ordblks, x->smblks, x->fsm_kb, x->db_cache_kb, x->db_schema_kb, x->db_stmt_kb, x->db_lookaside_kb, x->ndb, x->cyc_live);
+  }
+  fclose(f);
+}
+__attribute__((constructor)) static void scr_gap_start(void) {
+  pthread_t th;
+  if (getenv("SCR_GAP_OUT") == NULL) return;
+  scr_layout_prof_exit = scr_gap_dump;
+  pthread_create(&th, NULL, scr_gap_thread, NULL);
+  pthread_detach(th);
+}
+#endif
