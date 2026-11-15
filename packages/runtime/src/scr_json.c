@@ -812,6 +812,22 @@ int scr_cycen_dyn_peek(const void *hdr, unsigned *len) {
   return (int)d->kind;
 }
 long long scr_cycen_dyn_free_count(void) { return (long long)scr_dyn_free_count; }
+/* STR nodes: the node's string (immortal literal or heap), its length, capacity and reference count, and an FNV-1a hash of up to the first 256 bytes, for the per-site duplicate/literal census. */
+int scr_cycen_dyn_peek_str(const void *hdr, unsigned *len, unsigned *cap, int *imm, unsigned long long *rc, unsigned long long *hash) {
+  const ScrDyn *d = (const ScrDyn *)(const void *)((const char *)hdr + sizeof(ScrCycHdr));
+  if (d->kind != SCR_DYN_STR || d->v.str == NULL) return 0;
+  const ScrStr *st = d->v.str;
+  *len = st->len;
+  *cap = st->cap;
+  *imm = st->rc == SIZE_MAX;
+  *rc = (unsigned long long)st->rc;
+  unsigned long long h = 1469598103934665603ULL;
+  unsigned n = st->len < 256u ? st->len : 256u;
+  for (unsigned i = 0; i < n; i++) { h ^= (unsigned char)st->data[i]; h *= 1099511628211ULL; }
+  h ^= st->len;
+  *hash = h;
+  return 1;
+}
 #endif
 #ifdef SCR_SMALLINT_LAB
 /* LAB ONLY (never defined in a shipped build): 0 no sharing, 1 shared at the stores, 2 shared at every creation; chosen by SCR_SMALLINT_MODE. */
