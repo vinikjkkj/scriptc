@@ -25,7 +25,7 @@ const entry = `packages/fake-server/bench-messaging-${store}/messaging.bench.ts`
 let runSeq = 0
 const envFor = () => {
   const e = { ...process.env, ZAPO_BENCH_STORE: store, ZAPO_BENCH_JSON: '1' }
-  if (process.env.BENCH_CENSUS_DIR) { mkdirSync(process.env.BENCH_CENSUS_DIR, { recursive: true }); const n = runSeq++; e.SCR_DYNCEN_OUT = `${process.env.BENCH_CENSUS_DIR}/run${n}.dyn.txt`; e.SCR_STRCEN_OUT = `${process.env.BENCH_CENSUS_DIR}/run${n}.str.txt` }
+  if (process.env.BENCH_CENSUS_DIR) { mkdirSync(process.env.BENCH_CENSUS_DIR, { recursive: true }); const n = runSeq++; e.SCR_DYNCEN_OUT = `${process.env.BENCH_CENSUS_DIR}/run${n}.dyn.txt`; e.SCR_STRCEN_OUT = `${process.env.BENCH_CENSUS_DIR}/run${n}.str.txt`; e.SCR_SOCKSTAT_OUT = `${process.env.BENCH_CENSUS_DIR}/run${n}.sock.txt` }
   return e
 }
 function scenarios(stdout) {
