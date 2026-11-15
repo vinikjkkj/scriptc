@@ -7650,6 +7650,8 @@ ScrDyn *scr_dyn_new_evalclass(void *o, const ScrDynClass *cls);
 /* The identity a function value compares and hashes by: the evaluation of a per-evaluation class value,
  * else the closure (one function crossing the dyn boundary twice is one JS function). */
 const void *scr_dyn_fn_ident(const ScrDyn *d);
+ScrClosure *scr_dyn_fn_clo_of(const ScrDyn *d);
+ScrDynThunk scr_dyn_fn_thunk_of(const ScrDyn *d);
 ScrDyn *scr_dyn_error_class_box(int kind); /* the builtin error class value of a kind (scr_json.c), always linked; NULL for DOMException */
 ScrDyn *scr_dyn_error_class_value(double kind); /* the same, as a value of the dyn.errorClass libCall (+1) */
 static inline ScrDyn *scr_dyn_error_member_get(ScrDyn *d, const ScrStr *key) { return scr_dyn_class_ops ? scr_dyn_class_ops->error_get(d, key) : NULL; }

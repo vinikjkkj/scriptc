@@ -2833,8 +2833,8 @@ export class LlDyn {
           const clop = B.tmp();
           const clo = B.tmp();
           const rclo = B.tmp();
-          B.line(`${clop} = getelementptr inbounds i8, ptr %d, i64 ${DYN_FN_CLO_OFF} ; ->v.fn.clo`);
-          B.line(`${clo} = load ptr, ptr ${clop}`);
+          host.declare(`declare ptr @scr_dyn_fn_clo_of(ptr)`);
+          B.line(`${clo} = call ptr @scr_dyn_fn_clo_of(ptr %d) ; the closure a FUNC value calls (the value itself when it is an embedded closure)`);
           B.line(`${rclo} = call ptr @scr_closure_retain_v(ptr ${clo})`);
           B.line(`call void @scr_box_set_ref(ptr ${fbox}, ptr ${rclo})`);
           const cap1 = B.tmp();
@@ -2846,10 +2846,8 @@ export class LlDyn {
           const th = B.tmp();
           const descp = B.tmp();
           const desc = B.tmp();
-          B.line(`${descp} = getelementptr inbounds i8, ptr %d, i64 ${DYN_FN_DESC_OFF} ; ->v.fn.desc`);
-          B.line(`${desc} = load ptr, ptr ${descp}`);
-          B.line(`${thp} = getelementptr inbounds i8, ptr ${desc}, i64 0 ; ->v.fn.desc->thunk (first member)`);
-          B.line(`${th} = load ptr, ptr ${thp}`);
+          host.declare(`declare ptr @scr_dyn_fn_thunk_of(ptr)`);
+          B.line(`${th} = call ptr @scr_dyn_fn_thunk_of(ptr %d) ; ->v.fn.desc->thunk, through the descriptor an embedded closure caches`);
           B.line(`call void @scr_box_set_thunk_fn(ptr ${tbox}, ptr ${th})`);
           host.declare(`declare void @scr_dyn_fn_share_props(ptr, ptr)`);
           B.line(`call void @scr_dyn_fn_share_props(ptr ${ad}, ptr %d) ; the adapter is the same function to JS: one own-property table`);
@@ -2913,8 +2911,8 @@ export class LlDyn {
         const clop = B.tmp();
         const clo = B.tmp();
         const r = B.tmp();
-        B.line(`${clop} = getelementptr inbounds i8, ptr %d, i64 ${DYN_FN_CLO_OFF} ; ->v.fn.clo`);
-        B.line(`${clo} = load ptr, ptr ${clop}`);
+        host.declare(`declare ptr @scr_dyn_fn_clo_of(ptr)`);
+        B.line(`${clo} = call ptr @scr_dyn_fn_clo_of(ptr %d) ; the closure a FUNC value calls (the value itself when it is an embedded closure)`);
         B.line(`${r} = call ptr @scr_closure_retain_v(ptr ${clo})`);
         B.terminate(`ret ptr ${r}`);
         B.startBlock(lWrap);
@@ -2984,8 +2982,8 @@ export class LlDyn {
         const clop2 = B.tmp();
         const clo2 = B.tmp();
         const rclo = B.tmp();
-        B.line(`${clop2} = getelementptr inbounds i8, ptr %d, i64 ${DYN_FN_CLO_OFF} ; ->v.fn.clo`);
-        B.line(`${clo2} = load ptr, ptr ${clop2}`);
+        host.declare(`declare ptr @scr_dyn_fn_clo_of(ptr)`);
+        B.line(`${clo2} = call ptr @scr_dyn_fn_clo_of(ptr %d) ; the closure a FUNC value calls (the value itself when it is an embedded closure)`);
         B.line(`${rclo} = call ptr @scr_closure_retain_v(ptr ${clo2})`);
         B.line(`call void @scr_box_set_ref(ptr ${fbox}, ptr ${rclo})`);
         // caps[1]: that closure's thunk, in a scalar box — a function
@@ -2999,10 +2997,8 @@ export class LlDyn {
         const th = B.tmp();
         const descp = B.tmp();
         const desc = B.tmp();
-        B.line(`${descp} = getelementptr inbounds i8, ptr %d, i64 ${DYN_FN_DESC_OFF} ; ->v.fn.desc`);
-        B.line(`${desc} = load ptr, ptr ${descp}`);
-        B.line(`${thp} = getelementptr inbounds i8, ptr ${desc}, i64 0 ; ->v.fn.desc->thunk (first member)`);
-        B.line(`${th} = load ptr, ptr ${thp}`);
+        host.declare(`declare ptr @scr_dyn_fn_thunk_of(ptr)`);
+        B.line(`${th} = call ptr @scr_dyn_fn_thunk_of(ptr %d) ; ->v.fn.desc->thunk, through the descriptor an embedded closure caches`);
         B.line(`call void @scr_box_set_thunk_fn(ptr ${tbox}, ptr ${th})`);
         host.declare(`declare void @scr_dyn_fn_share_props(ptr, ptr)`);
         B.line(`call void @scr_dyn_fn_share_props(ptr ${a}, ptr %d) ; the adapter is the same function to JS: one own-property table`);
@@ -6022,7 +6018,7 @@ export class LlDyn {
     // The closure CONSUMES its params (+1 each moved in).
     const fnp = B.tmp();
     const fn = B.tmp();
-    B.line(`${fnp} = getelementptr inbounds %ScrClosure, ptr %c, i64 0, i32 1`);
+    B.line(`${fnp} = getelementptr inbounds %ScrClosure, ptr %c, i64 0, i32 6`);
     B.line(`${fn} = load ptr, ptr ${fnp}`);
     const retTy = t.ret.kind === "void" ? "void" : this.valTy(t.ret);
     const callArgs = [

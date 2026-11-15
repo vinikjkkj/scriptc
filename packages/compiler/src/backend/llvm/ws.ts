@@ -354,7 +354,7 @@ function dispatcher(host: WsHost, plan: WsGlobalPlan, names: WsNames): string[] 
     B.line(`call void @scr_closure_release(ptr ${cb})`);
     B.line(`br label %${out}`);
     B.label(call);
-    B.line(`${fnp} = getelementptr inbounds %ScrClosure, ptr ${cb}, i64 0, i32 1`);
+    B.line(`${fnp} = getelementptr inbounds %ScrClosure, ptr ${cb}, i64 0, i32 6`);
     B.line(`${fn} = load ptr, ptr ${fnp}`);
     B.line(`call void ${fn}(ptr ${cb}, ptr ${ev})`);
     B.line(`call void @scr_closure_release(ptr ${cb})`);
