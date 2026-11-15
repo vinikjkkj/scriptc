@@ -46,6 +46,7 @@ import { keyIxSlotIndex, keyListSlotIndex, arrNewCall, elemAccess, llFieldType, 
 import { LlvmUnsupportedError } from "./unsupported.js";
 import type { WalkerHost } from "./walkers.js";
 import { HelperNamer } from "../helper-names.js";
+import { fieldLoopMin } from "../emission/field-loop.js";
 
 /** The layout of one dyn object member, ScrDynEntry in scr_runtime.h. EVERY number the entry reads below comes from here, and
  * test/dyn-entry-layout.test.ts parses the header's own _Static_assert line and compares, so a change to the struct that this file
@@ -58,6 +59,38 @@ export const DYN_ENTRY_VALUE_OFF = 16;
  * test/dyn-fn-layout.test.ts parses the header's _Static_assert and compares. */
 export const DYN_FN_CLO_OFF = 16;
 export const DYN_FN_DESC_OFF = 24;
+
+/** A member key as operands (a loop reads them from its table row): the pointer and the length (an i64 operand). A string means "the literal key of this member". */
+export interface LlKeyOp {
+  ptr: string;
+  len: string;
+}
+
+/** The operands of one member of the dynCheck record builder (see LlMemberAcc): the key (a name or operands), its pointer and length, the own-mask bit it stamps
+ * (undefined: ask the shape; null: none), how its path node is set, and how its value is stored into the record being built. */
+export interface LlDcAcc {
+  keyArg: () => string | LlKeyOp;
+  keyPtr: () => string;
+  klen: string;
+  own: () => { byte: string; bit: string } | null | undefined;
+  setPath: () => void;
+  store: (ft: IrType, value: string) => void;
+}
+
+/** What one member of a record walker's per-member code reads that differs from the next member: where its value is loaded from, its key and the key's
+ * length, and the own-mask byte and bit it owns. The unrolled code passes the constants it always did (so a record that does not loop emits the same
+ * .ll as before); a table loop passes values loaded from its row. Everything else the per-member code does is the same for every member of a run. */
+export interface LlMemberAcc {
+  /** The member's key as a ptr operand (lazy: an unrolled member interns its key only when the code reaches for it). */
+  key: () => string;
+  /** The key length as an i64 operand. */
+  klen: string;
+  /** The member's loaded value (i1 for a bool). */
+  load: () => string;
+  /** The own-mask byte index (an i64 operand) and bit (an i8 operand) for a member that owns one. */
+  byte: (bit: { byte: number; bit: number | string }) => string;
+  bit: (bit: { byte: number; bit: number | string }) => string;
+}
 
 /** ScrDynKind values (scr_runtime.h). */
 /** ScrDynHandleTag numeric values (scr_runtime.h's enum order). */
@@ -383,11 +416,15 @@ export class LlDyn {
    * runtime symbol, so the two lanes cannot disagree about where a member
    * lives — the split that scr_dyn_obj_key_get already prevents for the
    * keyed read. objGetLit stays, for the own-only readers. */
-  private dataGetLit(B: BlockBuilder, d: string, key: string): string {
+  private keyOp(key: string | LlKeyOp): LlKeyOp {
+    return typeof key === "string" ? { ptr: this.host.cstr(key), len: String(Buffer.byteLength(key, "utf8")) } : key;
+  }
+
+  private dataGetLit(B: BlockBuilder, d: string, key: string | LlKeyOp): string {
     this.host.declare(`declare ptr @scr_dyn_obj_data_get(ptr, ptr, i64)`);
     const t = B.tmp();
-    const len = Buffer.byteLength(key, "utf8");
-    B.line(`${t} = call ptr @scr_dyn_obj_data_get(ptr ${d}, ptr ${this.host.cstr(key)}, i64 ${len}) ; .${key}`);
+    const k = this.keyOp(key);
+    B.line(`${t} = call ptr @scr_dyn_obj_data_get(ptr ${d}, ptr ${k.ptr}, i64 ${k.len}) ; .${typeof key === "string" ? key : "member"}`);
     return t;
   }
 
@@ -418,13 +455,15 @@ export class LlDyn {
    * reads. The builder and the walker have to ask internalSlotFields the
    * SAME question: a key the builder skips and the walker masks is demoted
    * to the prototype on every crossing, silently. */
-  private stampOwnBit(B: BlockBuilder, shape: IrRecordShape, key: string, d: string, r: string): void {
-    const bit = maskKeyBit(shape, key);
+  private stampOwnBit(B: BlockBuilder, shape: IrRecordShape, key: string | LlKeyOp, d: string, r: string, own?: { byte: string; bit: string } | null): void {
+    // `own` undefined: the unrolled member, asked of the shape by its key; an object or null: a table loop's own-mask operands (null = this run owns none).
+    const mb = own === undefined ? maskKeyBit(shape, key as string) : null;
+    const bit = own !== undefined ? own : mb ? { byte: String(mb.byte), bit: String(mb.bit) } : null;
     if (!bit) return;
     this.host.declare(`declare ptr @scr_dyn_obj_get(ptr, ptr, i64)`);
-    const len = Buffer.byteLength(key, "utf8");
+    const k = this.keyOp(key);
     const g = B.tmp();
-    B.line(`${g} = call ptr @scr_dyn_obj_get(ptr ${d}, ptr ${this.host.cstr(key)}, i64 ${len}) ; own .${key}`);
+    B.line(`${g} = call ptr @scr_dyn_obj_get(ptr ${d}, ptr ${k.ptr}, i64 ${k.len}) ; own .${typeof key === "string" ? key : "member"}`);
     const has = B.tmp();
     B.line(`${has} = icmp ne ptr ${g}, null`);
     const lSet = B.newLabel("own.s");
@@ -446,11 +485,11 @@ export class LlDyn {
 
   /** The record BUILDER's read for a field that can hold a function:
    * the same walk, +1, an INHERITED callable bound to the receiver. */
-  private memberGetLit(B: BlockBuilder, d: string, key: string): string {
+  private memberGetLit(B: BlockBuilder, d: string, key: string | LlKeyOp): string {
     this.host.declare(`declare ptr @scr_dyn_obj_member_get(ptr, ptr, i64)`);
     const t = B.tmp();
-    const len = Buffer.byteLength(key, "utf8");
-    B.line(`${t} = call ptr @scr_dyn_obj_member_get(ptr ${d}, ptr ${this.host.cstr(key)}, i64 ${len}) ; .${key}`);
+    const k = this.keyOp(key);
+    B.line(`${t} = call ptr @scr_dyn_obj_member_get(ptr ${d}, ptr ${k.ptr}, i64 ${k.len}) ; .${typeof key === "string" ? key : "member"}`);
     return t;
   }
 
@@ -2021,11 +2060,11 @@ export class LlDyn {
           B.line(`store ptr ${ts}, ptr ${tsp}`);
         }
         const buildInternal = new Set(internalSlotFields(shape));
-        for (const f of shape.fields) {
+        const emitDcMember = (f: { name: string; type: IrType }, mem: LlDcAcc): void => {
           const fieldWant = host.cstr(this.dynDesc(f.type));
           const utag = f.type.kind === "union" ? host.undefinedArmTag(f.type) : -1;
           const bind = this.mayHoldFunc(f.type);
-          const klen = Buffer.byteLength(f.name, "utf8");
+          const klen = mem.klen;
           // An INTERNAL SLOT reads from the slot table and from nowhere
           // else, and its refusal names the RECEIVER rather than the field
           // — the field is not a key any program can see or supply. Same
@@ -2043,14 +2082,14 @@ export class LlDyn {
             B.startBlock(lHaveS);
             const vS = B.tmp();
             B.line(`${vS} = call ${this.valTy(f.type)} @${childC(f.type)}(ptr ${ms}, ptr %path${childArg})`);
-            storeInto(f.name, f.type, vS);
+            mem.store(f.type, vS);
             afterChild("dcs", releaseR, "ptr null");
-            continue;
+            return;
           }
           // The own-key stamp goes HERE, below the internal-slot arm: a
           // field that reaches this line is a KEY, and the record-to-dyn
           // walker masks exactly the same set.
-          this.stampOwnBit(B, shape, f.name, dRef, "%r0");
+          this.stampOwnBit(B, shape, mem.keyArg(), dRef, "%r0", mem.own());
           if (soft && f.type.kind !== "dyn") {
             // The ARM form's decision, and it is the MATCHER's, not the
             // builder's — dynArmHelper's comment says why the two differ
@@ -2067,7 +2106,7 @@ export class LlDyn {
               // an inherited method back wrapped (signature "()"); the
               // DECISION has to stay on the raw member, which is what the
               // predicate tested. The one place a matcher call survives.
-              const raw = this.dataGetLit(B, dRef, f.name);
+              const raw = this.dataGetLit(B, dRef, mem.keyArg());
               const hasRaw = B.tmp();
               B.line(`${hasRaw} = icmp ne ptr ${raw}, null`);
               const lChk = B.newLabel("dar.c");
@@ -2081,9 +2120,9 @@ export class LlDyn {
               B.startBlock(lMiss);
               softMiss();
               B.startBlock(lPass);
-              mm = this.memberGetLit(B, dRef, f.name);
+              mm = this.memberGetLit(B, dRef, mem.keyArg());
             } else {
-              mm = this.dataGetLit(B, dRef, f.name);
+              mm = this.dataGetLit(B, dRef, mem.keyArg());
             }
             const dropBind = (): void => {
               if (!bind) return;
@@ -2104,7 +2143,7 @@ export class LlDyn {
               const lEnd = B.newLabel("dao.e");
               B.condBr(hasM, lPres, lAcc);
               B.startBlock(lPres);
-              setPath(f.name, "0");
+              mem.setPath();
               {
                 const v = B.tmp();
                 // A BOUND member keeps the hard builder (the value is the
@@ -2112,12 +2151,12 @@ export class LlDyn {
                 // read); a plain data member takes the soft edge.
                 if (bind) {
                   B.line(`${v} = call ptr @${this.dynCheckHelper(f.type)}(ptr ${mm}, ptr ${pathSlot})`);
-                  storeInto(f.name, f.type, v);
+                  mem.store(f.type, v);
                   dropBind();
                   afterHard("dao", releaseR, "ptr null");
                 } else {
                   B.line(`${v} = call ptr @${childC(f.type)}(ptr ${mm}, ptr ${pathSlot}${childArg})`);
-                  storeInto(f.name, f.type, v);
+                  mem.store(f.type, v);
                   afterChild("dao", releaseR, "ptr null");
                 }
               }
@@ -2125,7 +2164,7 @@ export class LlDyn {
               B.startBlock(lAcc);
               host.declare(`declare ptr @scr_dyn_obj_accessor_get(ptr, ptr, i64)`);
               const acc = B.tmp();
-              B.line(`${acc} = call ptr @scr_dyn_obj_accessor_get(ptr ${dRef}, ptr ${host.cstr(f.name)}, i64 ${klen}) ; .${f.name} accessor`);
+              B.line(`${acc} = call ptr @scr_dyn_obj_accessor_get(ptr ${dRef}, ptr ${mem.keyPtr()}, i64 ${klen}) ; .${f.name} accessor`);
               afterHard("dao", releaseR, "ptr null");
               const hasAcc = B.tmp();
               B.line(`${hasAcc} = icmp ne ptr ${acc}, null`);
@@ -2133,21 +2172,21 @@ export class LlDyn {
               const lNone = B.newLabel("dao.n");
               B.condBr(hasAcc, lGot, lNone);
               B.startBlock(lGot);
-              setPath(f.name, "0");
+              mem.setPath();
               {
                 const v = B.tmp();
                 B.line(`${v} = call ptr @${this.dynCheckHelper(f.type)}(ptr ${acc}, ptr ${pathSlot})`);
-                storeInto(f.name, f.type, v);
+                mem.store(f.type, v);
                 host.declare(`declare void @scr_dyn_release(ptr)`);
                 B.line(`call void @scr_dyn_release(ptr ${acc})`);
                 afterHard("dao", releaseR, "ptr null");
               }
               B.br(lEnd);
               B.startBlock(lNone);
-              storeInto(f.name, f.type, unit); // absent key -> the undefined arm
+              mem.store(f.type, unit); // absent key -> the undefined arm
               B.br(lEnd);
               B.startBlock(lEnd);
-              continue;
+              return;
             }
             // Required, and no accessor probe: the predicate demands the
             // key present as DATA, so an arm whose member only a getter
@@ -2161,21 +2200,21 @@ export class LlDyn {
             B.startBlock(lGone);
             softMiss();
             B.startBlock(lHave);
-            setPath(f.name, "0");
+            mem.setPath();
             const v = B.tmp();
             if (bind) {
               B.line(`${v} = call ${this.valTy(f.type)} @${this.dynCheckHelper(f.type)}(ptr ${mm}, ptr ${pathSlot})`);
-              storeInto(f.name, f.type, v);
+              mem.store(f.type, v);
               dropBind();
               afterHard("dar", releaseR, "ptr null");
             } else {
               B.line(`${v} = call ${this.valTy(f.type)} @${childC(f.type)}(ptr ${mm}, ptr ${pathSlot}${childArg})`);
-              storeInto(f.name, f.type, v);
+              mem.store(f.type, v);
               afterChild("dar", releaseR, "ptr null");
             }
-            continue;
+            return;
           }
-          const m0 = bind ? this.memberGetLit(B, dRef, f.name) : this.dataGetLit(B, dRef, f.name);
+          const m0 = bind ? this.memberGetLit(B, dRef, mem.keyArg()) : this.dataGetLit(B, dRef, mem.keyArg());
           // ... and, ONLY when that read missed, the ACCESSOR half of
           // [[Get]] the borrow-only read cannot answer — emit-walkers.ts's
           // row exactly, block for block. A field a getter provides read as
@@ -2199,7 +2238,7 @@ export class LlDyn {
             B.condBr(hasD, lJoin, lAcc);
             B.startBlock(lAcc);
             const acc = B.tmp();
-            B.line(`${acc} = call ptr @scr_dyn_obj_accessor_get(ptr ${dRef}, ptr ${host.cstr(f.name)}, i64 ${klen}) ; .${f.name} accessor`);
+            B.line(`${acc} = call ptr @scr_dyn_obj_accessor_get(ptr ${dRef}, ptr ${mem.keyPtr()}, i64 ${klen}) ; .${f.name} accessor`);
             afterHard("dca", releaseR, "ptr null");
             B.line(`store ptr ${acc}, ptr ${mSlot}`);
             B.line(`store ptr ${acc}, ptr ${accSlot}`);
@@ -2242,7 +2281,7 @@ export class LlDyn {
             const sel = B.tmp();
             const u = this.undef(B);
             B.line(`${sel} = select i1 ${has}, ptr ${m}, ptr ${u}`);
-            storeInto(f.name, f.type, this.retainDyn(B, sel));
+            mem.store(f.type, this.retainDyn(B, sel));
             dropAcc();
           } else if (utag >= 0 && f.type.kind === "union") {
             const unit = host.unitInstanceRef(f.type.unionId, utag);
@@ -2253,13 +2292,13 @@ export class LlDyn {
             const lj = B.newLabel("dcr.j");
             B.condBr(has, lp, la);
             B.startBlock(la);
-            storeInto(f.name, f.type, unit); // absent key -> the undefined arm
+            mem.store(f.type, unit); // absent key -> the undefined arm
             B.br(lj);
             B.startBlock(lp);
-            setPath(f.name, "0");
+            mem.setPath();
             const v = B.tmp();
             B.line(`${v} = call ptr @${this.dynCheckHelper(f.type)}(ptr ${m}, ptr ${pathSlot})`);
-            storeInto(f.name, f.type, v);
+            mem.store(f.type, v);
             dropM();
             dropAcc();
             afterHard("dcr", releaseR, "ptr null");
@@ -2272,16 +2311,119 @@ export class LlDyn {
             const la = B.newLabel("dcr.a");
             B.condBr(has, lp, la);
             B.startBlock(la);
-            setPath(f.name, "0");
+            mem.setPath();
             failRet(releaseR, fieldWant, "null", pathSlot);
             B.startBlock(lp);
-            setPath(f.name, "0");
+            mem.setPath();
             const v = B.tmp();
             B.line(`${v} = call ${this.valTy(f.type)} @${this.dynCheckHelper(f.type)}(ptr ${m}, ptr ${pathSlot})`);
-            storeInto(f.name, f.type, v);
+            mem.store(f.type, v);
             dropM();
             dropAcc();
             afterHard("dcr", releaseR, "ptr null");
+          }
+        };
+        const dcAcc = (f: { name: string; type: IrType }): LlDcAcc => ({
+          keyArg: () => f.name,
+          keyPtr: () => host.cstr(f.name),
+          klen: String(Buffer.byteLength(f.name, "utf8")),
+          own: () => undefined,
+          setPath: () => setPath(f.name, "0"),
+          store: (ft, v) => storeInto(f.name, ft, v),
+        });
+        // Interchangeable members: not an internal slot, and decided by their type and by owning an own-mask bit (the C twin compares the emitted text).
+        const dcSig = (f: { name: string; type: IrType }): string | null => {
+          if (buildInternal.has(f.name)) return null;
+          return `${typeKey(f.type)}|${maskKeyBit(shape, f.name) === null ? "n" : "m"}`;
+        };
+        const emitDcLoop = (fs: { name: string; type: IrType }[]): void => {
+          const f0 = fs[0]!;
+          const hasBit = maskKeyBit(shape, f0.name) !== null;
+          const pool = host.cstr(fs.map((f) => f.name).join("\0"));
+          let ko = 0;
+          const rows = fs.map((f) => {
+            const kl = Buffer.byteLength(f.name, "utf8");
+            const mb = maskKeyBit(shape, f.name);
+            const row = `{ i32, i32, i32, i8, i8 } { i32 ${ko}, i32 ${kl}, i32 trunc (i64 ptrtoint (ptr getelementptr inbounds (%${struct}, ptr null, i32 0, i32 ${fieldIndex.get(f.name)!}) to i64) to i32), i8 ${mb ? mb.byte : 0}, i8 ${mb ? mb.bit : 0} }`;
+            ko += kl + 1;
+            return row;
+          });
+          const tab = host.addGlobal("sc_ft", (sym) => `@${sym} = internal constant [${fs.length} x { i32, i32, i32, i8, i8 }] [${rows.join(", ")}] ; ${fs.length} members of one kind`);
+          const iSlot = B.slot();
+          B.entryAllocas.push(`${iSlot} = alloca i64`);
+          B.line(`store i64 0, ptr ${iSlot}`);
+          const lHead = B.newLabel("dcf.h");
+          const lBody = B.newLabel("dcf.b");
+          const lEnd = B.newLabel("dcf.e");
+          B.br(lHead);
+          B.startBlock(lHead);
+          const i = B.tmp();
+          B.line(`${i} = load i64, ptr ${iSlot}`);
+          const more = B.tmp();
+          B.line(`${more} = icmp ult i64 ${i}, ${fs.length}`);
+          B.condBr(more, lBody, lEnd);
+          B.startBlock(lBody);
+          const rp = B.tmp();
+          B.line(`${rp} = getelementptr inbounds [${fs.length} x { i32, i32, i32, i8, i8 }], ptr ${tab}, i64 0, i64 ${i}`);
+          const col = (idx: number, ty: string): string => {
+            const p = B.tmp();
+            B.line(`${p} = getelementptr inbounds { i32, i32, i32, i8, i8 }, ptr ${rp}, i32 0, i32 ${idx}`);
+            const v = B.tmp();
+            B.line(`${v} = load ${ty}, ptr ${p}`);
+            return v;
+          };
+          const koV = col(0, "i32");
+          const klV = col(1, "i32");
+          const offV = col(2, "i32");
+          const byteV = hasBit ? col(3, "i8") : "0";
+          const bitV = hasBit ? col(4, "i8") : "0";
+          const ko64 = B.tmp();
+          B.line(`${ko64} = zext i32 ${koV} to i64`);
+          const kl64 = B.tmp();
+          B.line(`${kl64} = zext i32 ${klV} to i64`);
+          const off64 = B.tmp();
+          B.line(`${off64} = zext i32 ${offV} to i64`);
+          const byte64 = hasBit ? B.tmp() : "0";
+          if (hasBit) B.line(`${byte64} = zext i8 ${byteV} to i64`);
+          const keyP = B.tmp();
+          B.line(`${keyP} = getelementptr inbounds i8, ptr ${pool}, i64 ${ko64}`);
+          emitDcMember(f0, {
+            keyArg: () => ({ ptr: keyP, len: kl64 }),
+            keyPtr: () => keyP,
+            klen: kl64,
+            own: () => (hasBit ? { byte: byte64, bit: bitV } : null),
+            setPath: () => setPathKeyPtr(keyP),
+            store: (ft, v) => {
+              const p = B.tmp();
+              B.line(`${p} = getelementptr inbounds i8, ptr %r0, i64 ${off64}`);
+              if (llFieldType(ft) === "i8") {
+                const z = B.tmp();
+                B.line(`${z} = zext i1 ${v} to i8`);
+                B.line(`store i8 ${z}, ptr ${p}`);
+              } else {
+                B.line(`store ${llFieldType(ft)} ${v}, ptr ${p}`);
+              }
+            },
+          });
+          const ni = B.tmp();
+          B.line(`${ni} = add i64 ${i}, 1`);
+          B.line(`store i64 ${ni}, ptr ${iSlot}`);
+          B.br(lHead);
+          B.startBlock(lEnd);
+        };
+        {
+          const min = fieldLoopMin();
+          let at = 0;
+          while (at < shape.fields.length) {
+            const sig = dcSig(shape.fields[at]!);
+            let to = at + 1;
+            if (sig !== null) while (to < shape.fields.length && dcSig(shape.fields[to]!) === sig) to++;
+            if (sig !== null && min > 0 && to - at >= min) {
+              emitDcLoop(shape.fields.slice(at, to));
+            } else {
+              for (let k = at; k < to; k++) emitDcMember(shape.fields[k]!, dcAcc(shape.fields[k]!));
+            }
+            at = to;
           }
         }
         // Index-signature shapes CAPTURE undeclared keys into the
@@ -3290,8 +3432,8 @@ export class LlDyn {
             B.line(`call void @scr_dyn_obj_reserve(ptr ${d}, i64 ${certain})`);
           }
         }
-        for (const f of dynFields) {
-          const klen = Buffer.byteLength(f.name, "utf8");
+        const emitMember = (f: { name: string; type: IrType }, acc: LlMemberAcc): void => {
+          const klen = acc.klen;
           if (accProps.has(f.name) && !byName.has(f.name)) {
             // An ACCESSOR property: the getter and setter closures boxed like
             // any func field, installed through the runtime's accessor define
@@ -3319,10 +3461,10 @@ export class LlDyn {
             const sSel = s ?? undef;
             host.declare(`declare void @scr_dyn_obj_define_accessor(ptr, ptr, i64, ptr, ptr, i1, i1)`);
             host.declare(`declare void @scr_dyn_release(ptr)`);
-            B.line(`call void @scr_dyn_obj_define_accessor(ptr ${d}, ptr ${host.cstr(f.name)}, i64 ${klen}, ptr ${gSel}, ptr ${sSel}, i1 true, i1 true) ; accessor ${f.name}`);
+            B.line(`call void @scr_dyn_obj_define_accessor(ptr ${d}, ptr ${acc.key()}, i64 ${klen}, ptr ${gSel}, ptr ${sSel}, i1 true, i1 true) ; accessor ${f.name}`);
             if (g) B.line(`call void @scr_dyn_release(ptr ${g}) ; the getter box`);
             if (s) B.line(`call void @scr_dyn_release(ptr ${s}) ; the setter box`);
-            continue;
+            return;
           }
           // THE ABSENT SLOT IS NOT READABLE - emit-walkers.ts's row, and
           // here the branch has to come before the LOAD as well as before
@@ -3361,7 +3503,7 @@ export class LlDyn {
             B.condBr(live, lY, liveEnd);
             B.startBlock(lY);
           }
-          const fv = loadFieldOf(f.name, f.type);
+          const fv = acc.load();
           const conv = B.tmp();
           // Same rule as the ordered pass above: a FUNCTION field boxes
           // through the closure path, stranded when its signature has no
@@ -3383,15 +3525,15 @@ export class LlDyn {
             const sk = slotStorageKey(shape, f.name);
             host.declare(`declare void @scr_dyn_obj_set_slot(ptr, ptr, i64, ptr)`);
             B.line(`call void @scr_dyn_obj_set_slot(ptr ${d}, ptr ${host.cstr(sk)}, i64 ${Buffer.byteLength(sk, "utf8")}, ptr ${conv}) ; slot ${sk}`);
-            continue;
+            return;
           }
           // A SYMBOL-KEYED member (`__@name@id`): hidden non-enumerable, the C
           // lane's row (emit-walkers.ts).
           if (f.name.startsWith("__@") && liveEnd === null) {
             host.declare(`declare void @scr_dyn_obj_set_symkey(ptr, ptr, i64, ptr, i1 zeroext)`);
             const absentOk = isUndefinedArmedUnion(f.type, (id: string) => this.host.unionsById.get(id));
-            B.line(`call void @scr_dyn_obj_set_symkey(ptr ${d}, ptr ${host.cstr(f.name)}, i64 ${klen}, ptr ${conv}, i1 ${absentOk ? "true" : "false"}) ; ${f.name}`);
-            continue;
+            B.line(`call void @scr_dyn_obj_set_symkey(ptr ${d}, ptr ${acc.key()}, i64 ${klen}, ptr ${conv}, i1 ${absentOk ? "true" : "false"}) ; ${f.name}`);
+            return;
           }
           // No '%'-spelling test: internalSlotFields above is the whole
           // exemption, and it is the STRICTER one - a user's own "%dtype"
@@ -3401,9 +3543,9 @@ export class LlDyn {
           const setPresent = (): void => {
             if (isUndefinedArmedUnion(f.type, (id: string) => this.host.unionsById.get(id))) {
               host.declare(`declare void @scr_dyn_obj_set_present_lit(ptr, ptr, i64, ptr)`);
-              B.line(`call void @scr_dyn_obj_set_present_lit(ptr ${d}, ptr ${host.cstr(f.name)}, i64 ${klen}, ptr ${conv}) ; ${f.name}`);
+              B.line(`call void @scr_dyn_obj_set_present_lit(ptr ${d}, ptr ${acc.key()}, i64 ${klen}, ptr ${conv}) ; ${f.name}`);
             } else {
-              B.line(`call void @scr_dyn_obj_set_lit(ptr ${d}, ptr ${host.cstr(f.name)}, i64 ${klen}, ptr ${conv}) ; ${f.name}`);
+              B.line(`call void @scr_dyn_obj_set_lit(ptr ${d}, ptr ${acc.key()}, i64 ${klen}, ptr ${conv}) ; ${f.name}`);
             }
           };
           if (maskBitF === null) {
@@ -3431,19 +3573,19 @@ export class LlDyn {
             B.startBlock(lM);
             const bp = B.tmp();
             B.line(
-              `${bp} = getelementptr inbounds %${struct}, ptr %v, i64 0, i32 ${ownMaskSlotIndex(shape)}, i64 ${bit.byte}`,
+              `${bp} = getelementptr inbounds %${struct}, ptr %v, i64 0, i32 ${ownMaskSlotIndex(shape)}, i64 ${acc.byte(bit)}`,
             );
             const bv = B.tmp();
             B.line(`${bv} = load i8, ptr ${bp}`);
             const an = B.tmp();
-            B.line(`${an} = and i8 ${bv}, ${bit.bit}`);
+            B.line(`${an} = and i8 ${bv}, ${acc.bit(bit)}`);
             const own = B.tmp();
             B.line(`${own} = icmp ne i8 ${an}, 0`);
             const lS = B.newLabel("tdm.s");
             const lD = B.newLabel("tdm.d");
             B.condBr(own, lS, lD);
             B.startBlock(lS);
-            B.line(`call void @scr_dyn_obj_set_lit(ptr ${d}, ptr ${host.cstr(f.name)}, i64 ${klen}, ptr ${conv}) ; ${f.name}`);
+            B.line(`call void @scr_dyn_obj_set_lit(ptr ${d}, ptr ${acc.key()}, i64 ${klen}, ptr ${conv}) ; ${f.name}`);
             B.br(lE);
             B.startBlock(lD);
             // AN INHERITED MEMBER IS DEMOTED, NOT DELETED — emit-walkers.ts
@@ -3474,7 +3616,7 @@ export class LlDyn {
                 // slot under a clear bit is a member whose bit nobody set,
                 // and dropping it to a synthesised prototype would lose the
                 // key. It is own (emit-walkers.ts's row).
-                B.line(`call void @scr_dyn_obj_set_lit(ptr ${d}, ptr ${host.cstr(f.name)}, i64 ${klen}, ptr ${conv}) ; ${f.name}`);
+                B.line(`call void @scr_dyn_obj_set_lit(ptr ${d}, ptr ${acc.key()}, i64 ${klen}, ptr ${conv}) ; ${f.name}`);
                 B.br(lE);
               } else {
               if (shape.srcproto) {
@@ -3490,7 +3632,7 @@ export class LlDyn {
                 const spv = B.tmp();
                 B.line(`${spv} = load ptr, ptr ${sp}`);
                 const hs = B.tmp();
-                B.line(`${hs} = call i32 @scr_dyn_proto_has(ptr ${spv}, ptr ${host.cstr(f.name)}, i64 ${klen})`);
+                B.line(`${hs} = call i32 @scr_dyn_proto_has(ptr ${spv}, ptr ${acc.key()}, i64 ${klen})`);
                 const hsb = B.tmp();
                 B.line(`${hsb} = icmp ne i32 ${hs}, 0`);
                 const lChain = B.newLabel("tdp.c");
@@ -3514,7 +3656,7 @@ export class LlDyn {
               B.startBlock(lPut);
               const pp = B.tmp();
               B.line(`${pp} = load ptr, ptr ${protoSlot}`);
-              B.line(`call void @scr_dyn_obj_set_lit(ptr ${pp}, ptr ${host.cstr(f.name)}, i64 ${klen}, ptr ${conv}) ; inherited .${f.name}`);
+              B.line(`call void @scr_dyn_obj_set_lit(ptr ${pp}, ptr ${acc.key()}, i64 ${klen}, ptr ${conv}) ; inherited .${f.name}`);
               B.br(lE);
               }
             }
@@ -3526,6 +3668,112 @@ export class LlDyn {
           if (liveEnd !== null) {
             B.br(liveEnd);
             B.startBlock(liveEnd);
+          }
+        };
+        // The unrolled spelling of one member's operands: the constants the code always used.
+        const memberAcc = (f: { name: string; type: IrType }): LlMemberAcc => ({
+          key: () => host.cstr(f.name),
+          klen: String(Buffer.byteLength(f.name, "utf8")),
+          load: () => loadFieldOf(f.name, f.type),
+          byte: (b) => String(b.byte),
+          bit: (b) => String(b.bit),
+        });
+        // A member is INTERCHANGEABLE with its neighbours when nothing below depends on it but its operands: not an accessor, an internal slot, a symbol
+        // key, a function (its box helper is named by the member) or one that tests the completion bit; then its handling is decided by its type and by
+        // whether it owns an own-mask bit, which is the signature. (The C twin compares the emitted text of the blocks instead: field-loop.ts.)
+        const memberSig = (f: { name: string; type: IrType }): string | null => {
+          if (accProps.has(f.name) && !byName.has(f.name)) return null;
+          if (internal.has(f.name) || f.name.startsWith("__@") || f.type.kind === "func") return null;
+          if (shape.reqabsent === true && maskKeyBit(shape, f.name) !== null) return null;
+          return `${typeKey(f.type)}|${maskKeyBit(shape, f.name) === null ? "n" : "m"}`;
+        };
+        const emitMemberLoop = (fs: { name: string; type: IrType }[]): void => {
+          const f0 = fs[0]!;
+          const hasBit = maskKeyBit(shape, f0.name) !== null;
+          const keys = fs.map((f) => f.name);
+          const pool = host.cstr(keys.join("\0"));
+          let ko = 0;
+          const rows = fs.map((f) => {
+            const kl = Buffer.byteLength(f.name, "utf8");
+            const mb = maskKeyBit(shape, f.name);
+            const row = `{ i32, i32, i32, i8, i8 } { i32 ${ko}, i32 ${kl}, i32 trunc (i64 ptrtoint (ptr getelementptr inbounds (%${struct}, ptr null, i32 0, i32 ${fieldIndex.get(f.name)!}) to i64) to i32), i8 ${mb ? mb.byte : 0}, i8 ${mb ? mb.bit : 0} }`;
+            ko += kl + 1;
+            return row;
+          });
+          const tab = host.addGlobal("sc_ft", (sym) => `@${sym} = internal constant [${fs.length} x { i32, i32, i32, i8, i8 }] [${rows.join(", ")}] ; ${fs.length} members of one kind`);
+          const iSlot = B.slot();
+          B.entryAllocas.push(`${iSlot} = alloca i64`);
+          B.line(`store i64 0, ptr ${iSlot}`);
+          const lHead = B.newLabel("tdf.h");
+          const lBody = B.newLabel("tdf.b");
+          const lEnd = B.newLabel("tdf.e");
+          B.br(lHead);
+          B.startBlock(lHead);
+          const i = B.tmp();
+          B.line(`${i} = load i64, ptr ${iSlot}`);
+          const more = B.tmp();
+          B.line(`${more} = icmp ult i64 ${i}, ${fs.length}`);
+          B.condBr(more, lBody, lEnd);
+          B.startBlock(lBody);
+          const rp = B.tmp();
+          B.line(`${rp} = getelementptr inbounds [${fs.length} x { i32, i32, i32, i8, i8 }], ptr ${tab}, i64 0, i64 ${i}`);
+          const col = (idx: number, ty: string): string => {
+            const p = B.tmp();
+            B.line(`${p} = getelementptr inbounds { i32, i32, i32, i8, i8 }, ptr ${rp}, i32 0, i32 ${idx}`);
+            const v = B.tmp();
+            B.line(`${v} = load ${ty}, ptr ${p}`);
+            return v;
+          };
+          const koV = col(0, "i32");
+          const klV = col(1, "i32");
+          const offV = col(2, "i32");
+          const byteV = hasBit ? col(3, "i8") : "0";
+          const bitV = hasBit ? col(4, "i8") : "0";
+          const ko64 = B.tmp();
+          B.line(`${ko64} = zext i32 ${koV} to i64`);
+          const kl64 = B.tmp();
+          B.line(`${kl64} = zext i32 ${klV} to i64`);
+          const off64 = B.tmp();
+          B.line(`${off64} = zext i32 ${offV} to i64`);
+          const byte64 = hasBit ? B.tmp() : "0";
+          if (hasBit) B.line(`${byte64} = zext i8 ${byteV} to i64`);
+          const keyP = B.tmp();
+          B.line(`${keyP} = getelementptr inbounds i8, ptr ${pool}, i64 ${ko64}`);
+          emitMember(f0, {
+            key: () => keyP,
+            klen: kl64,
+            load: () => {
+              const fp = B.tmp();
+              B.line(`${fp} = getelementptr inbounds i8, ptr %v, i64 ${off64}`);
+              const raw = B.tmp();
+              B.line(`${raw} = load ${llFieldType(f0.type)}, ptr ${fp}`);
+              if (llFieldType(f0.type) !== "i8") return raw;
+              const b1 = B.tmp();
+              B.line(`${b1} = trunc i8 ${raw} to i1`);
+              return b1;
+            },
+            byte: () => byte64,
+            bit: () => bitV,
+          });
+          const ni = B.tmp();
+          B.line(`${ni} = add i64 ${i}, 1`);
+          B.line(`store i64 ${ni}, ptr ${iSlot}`);
+          B.br(lHead);
+          B.startBlock(lEnd);
+        };
+        {
+          const min = fieldLoopMin();
+          let at = 0;
+          while (at < dynFields.length) {
+            const sig = memberSig(dynFields[at]!);
+            let to = at + 1;
+            if (sig !== null) while (to < dynFields.length && memberSig(dynFields[to]!) === sig) to++;
+            if (sig !== null && min > 0 && to - at >= min) {
+              emitMemberLoop(dynFields.slice(at, to));
+            } else {
+              for (let k = at; k < to; k++) emitMember(dynFields[k]!, memberAcc(dynFields[k]!));
+            }
+            at = to;
           }
         }
         };
