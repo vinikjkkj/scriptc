@@ -15830,6 +15830,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25360-a-closure-boxed-several-times-is-one-function-value-with-one-identity-and-one-set-of-properties.ts": {
+   "order": [
+    "<repo>/tests/corpus/25360-a-closure-boxed-several-times-is-one-function-value-with-one-identity-and-one-set-of-properties.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25361-boxed-functions-inspect-and-keep-their-name-length-and-own-properties-through-every-box.ts": {
+   "order": [
+    "<repo>/tests/corpus/25361-boxed-functions-inspect-and-keep-their-name-length-and-own-properties-through-every-box.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2537-destructuring-assign-member-targets.ts": {
    "order": [
     "<repo>/tests/corpus/2537-destructuring-assign-member-targets.ts"
