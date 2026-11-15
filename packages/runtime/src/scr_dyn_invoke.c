@@ -4287,7 +4287,10 @@ static ScrDyn *dyn_clone_table(const ScrDyn *tbl, bool rows) {
     const ScrDynEntry *e = &tbl->v.obj.entries[i];
     /* a plain property's value is the property, never a row: shared, and still plain in the copy (keys are unique, so the store appends) */
     scr_dyn_obj_set(o, e->key, e->key_len, dyn_clone_rows_copy(e->value, rows && !e->plain_prop));
-    if (e->plain_prop) o->v.obj.entries[o->v.obj.len - 1].plain_prop = 1;
+    if (e->plain_prop) {
+      o->v.obj.entries[o->v.obj.len - 1].plain_prop = 1;
+      SCR_PROPS_GHOST_ADD(1);
+    }
   }
   return o;
 }
@@ -4586,6 +4589,7 @@ bool scr_cls_props_define(ScrDyn *tbl, const ScrStr *key, ScrDyn *desc,
       ScrDynEntry *m = (ScrDynEntry *)cure;
       ScrDyn *old = m->value;
       m->value = pv;
+      if (!m->plain_prop) SCR_PROPS_GHOST_ADD(1); /* a row turns into a plain entry: the row node dies below, the weight stays */
       m->plain_prop = 1;
       scr_dyn_release(old);
     }
@@ -4604,6 +4608,7 @@ bool scr_cls_props_define(ScrDyn *tbl, const ScrStr *key, ScrDyn *desc,
     ScrDyn *old = m->value;
     m->value = ent;
     m->plain_prop = 0;
+    SCR_PROPS_GHOST_SUB(1); /* the row now allocated counts itself */
     scr_dyn_release(old);
   } else {
     scr_dyn_obj_set(tbl, key->data, key->len, ent); /* ownership moves in */
