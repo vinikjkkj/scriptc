@@ -266,9 +266,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
             const half = row.type.kind === "dyn" ? numSlotHalf(E.mod.classes, className, row.name) : undefined;
             if (half === undefined) return `  return ${fieldDynC(E, row.type, `((${struct} *)o)->${mangleField(row.name)}`)};`;
             const raw = `((${struct} *)o)->${mangleField(half)}`;
-            return process.env["SCRIPTC_NUMSLOT_PLANT"] === "read"
-              ? `  return scr_dyn_new_num(${raw});`
-              : `  return scr_numslot_get(((${struct} *)o)->${mangleField(row.name)}, ${raw});`;
+            return `  return scr_numslot_get(((${struct} *)o)->${mangleField(row.name)}, ${raw});`;
           })(),
           `}`,
           ``,

@@ -11024,13 +11024,8 @@ class LlEmitter {
           const hp = this.classFieldPtr(obj.name, e.className, slotHalf);
           const hv = this.loadField(hp.ptr, hp.type);
           const r = B.tmp();
-          if (process.env["SCRIPTC_NUMSLOT_PLANT"] === "read") {
-            this.declare(`declare ptr @scr_dyn_new_num(double)`);
-            B.line(`${r} = call ptr @scr_dyn_new_num(double ${hv})`);
-          } else {
-            this.declare(`declare ptr @scr_numslot_get_v(ptr, double)`);
-            B.line(`${r} = call ptr @scr_numslot_get_v(ptr ${v}, double ${hv})`);
-          }
+          this.declare(`declare ptr @scr_numslot_get_v(ptr, double)`);
+          B.line(`${r} = call ptr @scr_numslot_get_v(ptr ${v}, double ${hv})`);
           return this.own({ name: r, type: e.type });
         }
         if (e.nullTest) {

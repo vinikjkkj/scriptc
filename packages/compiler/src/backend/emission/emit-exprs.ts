@@ -2729,8 +2729,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           const half = numSlotHalf(E.mod.classes, e.className, e.field);
           if (half !== undefined) {
             const raw = `${obj.name}->${mangleField(half)}`;
-            // SCRIPTC_NUMSLOT_PLANT=read: the planted defect (every read boxes the half, whatever the slot holds).
-            return E.newTemp(e.type, process.env["SCRIPTC_NUMSLOT_PLANT"] === "read" ? `scr_dyn_new_num(${raw})` : `scr_numslot_get(${field}, ${raw})`);
+            return E.newTemp(e.type, `scr_numslot_get(${field}, ${raw})`);
           }
         }
         if (e.kind === "fieldGet" && e.nullTest) return E.newTemp(e.type, `(${field} == NULL)`);

@@ -6230,13 +6230,8 @@ export class LlDyn {
           const hv = B.tmp();
           B.line(`${hv} = load double, ptr ${hp}`);
           slotOut = B.tmp();
-          if (process.env["SCRIPTC_NUMSLOT_PLANT"] === "read") {
-            host.declare(`declare ptr @scr_dyn_new_num(double)`);
-            B.line(`${slotOut} = call ptr @scr_dyn_new_num(double ${hv})`);
-          } else {
-            host.declare(`declare ptr @scr_numslot_get_v(ptr, double)`);
-            B.line(`${slotOut} = call ptr @scr_numslot_get_v(ptr ${raw}, double ${hv})`);
-          }
+          host.declare(`declare ptr @scr_numslot_get_v(ptr, double)`);
+          B.line(`${slotOut} = call ptr @scr_numslot_get_v(ptr ${raw}, double ${hv})`);
         }
         // BORROWED: every toDyn walker retains or copies, and the instance
         // stays owned by the box the caller is holding.
