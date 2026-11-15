@@ -1,7 +1,7 @@
 /* Cheap whole-module may-throw analysis (see computeMayThrow). Pure function
  * of the IR module; the emitter consults the result to place unwind checks. */
 import type { IrArrIntrinsicMethod, IrBytesIntrinsicMethod, IrLibFn, IrModule, IrType } from "../../ir/nodes.js";
-import { MAY_THROW_ARR_METHODS, MAY_THROW_BYTES_METHODS, MAY_THROW_LIB_FNS } from "../../ir/nodes.js";
+import { MAY_THROW_ARR_METHODS, MAY_THROW_BYTES_METHODS, MAY_THROW_LIB_FNS, ownMaskKeyBit } from "../../ir/nodes.js";
 
 /** Does a dynCheck against `t` mint a function ADAPTER anywhere inside it?
  *
@@ -228,6 +228,24 @@ export function computeMayThrow(mod: IrModule): { fns: Set<string>; indirect: bo
           // reentrancy TypeError throws here too.
           f.throws = true;
           break;
+        case "recordGet":
+        case "recordGetAt": {
+          // THE REQUIRED-ABSENT READ (IrRecordShape.reqabsent) throws the catchable SC9005 TypeError on a member the completion never filled (emit-exprs's recordGet
+          // case, its LLVM twin, and recordGetAt's over a run). The condition is the emitters': a reqabsent shape, a member with an own-mask bit, a field type with no
+          // undefined arm. Without this case no caller of the function ever tested for the pending exception, and the NULL it returned flowed into the next use
+          // (a segfault at the call site: `Record<string, V>` of a partially filled `{} as Record<Union, V>`, then Object.keys).
+          const shape = (mod.records ?? []).find((r) => r.id === rec["shapeId"]);
+          const names = rec["kind"] === "recordGetAt" ? (rec["run"] as string[]) : [rec["field"] as string];
+          const fld = shape?.fields.find((x) => x.name === names[0]);
+          if (shape && fld && shape.reqabsent === true && ownMaskKeyBit(shape, names[0]!) !== null) {
+            const t = fld.type;
+            const hasUndefinedArm =
+              t.kind === "union" &&
+              (mod.unions ?? []).find((u) => u.id === t.unionId)?.arms.some((a) => a.kind === "undefinedT") === true;
+            if (!hasUndefinedArm) f.throws = true;
+          }
+          break;
+        }
         case "recordKeyGet": {
           // Converted 2026-10-19: a keyed read whose result width cannot
           // spell `undefined` now throws the catchable SC9003 TypeError
