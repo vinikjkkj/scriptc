@@ -1114,7 +1114,9 @@ __attribute__((noinline)) void scr_dyn_release(ScrDyn *d) {
      * Buffering them would cost a full graph walk per 256 releases of the
      * hottest allocation in the runtime and could never find anything. */
     if (d->kind == SCR_DYN_ARR || d->kind == SCR_DYN_OBJ ||
-        d->kind == SCR_DYN_FUNC) {
+        (d->kind == SCR_DYN_FUNC && (!((ScrClosure *)d)->isdyn || scr_closure_may_cycle_x((ScrClosure *)d)))) {
+      /* An embedded closure is buffered under the SAME predicate its own release and teardown use (scr_closure_may_cycle): the teardown
+       * only unbuffers an object that predicate admitted, so a closure buffered here regardless would be freed while still listed. */
       scr_cyc_on_release(d); /* may collect - d is done being touched */
     }
     return;

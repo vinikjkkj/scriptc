@@ -634,6 +634,8 @@ static inline bool scr_closure_may_cycle(const ScrClosure *c) {
 
 /* The teardown of a closure whose count just reached zero: shared by scr_closure_release and by scr_dyn_release, which reaches the same object
  * through its dyn FUNC identity (the object is one, so is its teardown). */
+bool scr_closure_may_cycle_x(const ScrClosure *c) { return scr_closure_may_cycle(c); }
+
 void scr_closure_free_dead(ScrClosure *c) {
   if (scr_closure_may_cycle(c)) scr_cyc_on_dead(c); /* see scr_box_release */
   const size_t ncaps = scr_closure_ncaps(c);

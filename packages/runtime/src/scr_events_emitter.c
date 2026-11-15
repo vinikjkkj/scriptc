@@ -1334,8 +1334,7 @@ static ScrDyn *ee_value(const char *name, size_t n) {
   if (op == EEOP_OFF) op = EEOP_REMOVE;
   if (!scr_ee_fns_ready) {
     for (int i = 0; i < EEOP_N; i++) {
-      scr_ee_fns[i].clo.rc = SIZE_MAX; /* immortal, like an interned top-level function */
-      scr_ee_fns[i].clo.fn = (void *)ee_method_thunk;
+      scr_closure_init_static(&scr_ee_fns[i].clo, (void *)ee_method_thunk); /* immortal, like an interned top-level function */
       scr_ee_fns[i].op = i;
     }
     scr_ee_fns_ready = true;
