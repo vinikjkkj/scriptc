@@ -26,7 +26,7 @@ echo "rc=$rc secs=$secs variant=$VAR" | tee -a "$O/messaging-$S-$BE$suffix.build
 [ $rc -eq 0 ] && cp "$BUILD" "$O/messaging-$S-$BE$suffix.bin"
 # LAB (structdump): every emitted class struct, as text (uploaded with the *.log files)
 ls -la "$O/build" > "$O/structs-$S-$BE$suffix.log" 2>&1 || true
-for f in "$O"/build/*.c; do [ -f "$f" ] && awk '/^struct sc_o_[A-Za-z0-9_]+ \{/,/^\};/' "$f" >> "$O/structs-$S-$BE$suffix.log"; done
+for f in "$O"/build/*.c "$O"/build/*.scrh; do [ -f "$f" ] && awk '/^struct sc_o_[A-Za-z0-9_]+ \{/,/^\};/' "$f" >> "$O/structs-$S-$BE$suffix.log"; done
 for f in "$O"/build/*.ll; do [ -f "$f" ] && grep -E '^%sc_o_[A-Za-z0-9_]+ = type' "$f" >> "$O/structs-$S-$BE$suffix.log"; done
 echo "$S $BE $VAR$TAG rc=$rc build_secs=$secs" >> "$O/build-summary.txt"
 exit $rc
