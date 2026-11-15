@@ -101,6 +101,55 @@ const EVT_C_SYMS: Record<string, string> = {
   "evt.missingType": "scr_event_missing_type",
 };
 
+/** The static constant tables of a field run (ir/field-run-loops.ts). They are declared by `predeclareFieldRunTables` at the loop that owns the run, BEFORE the loop, so
+ * every reader in the loop body, in whatever nested block, sees one declaration. `kind` is "off" (member offsets), "bits" (own-mask byte, bit pairs) or "keys". */
+function fieldRunTableC(E: CEmitter, shapeId: string, run: string[], kind: "off" | "bits" | "keys"): string {
+  const key = `${E.currentFn?.name ?? ""}|${kind}|${shapeId}|${run.join("\u0001")}`;
+  const have = E.fieldRunTables.get(key);
+  if (have !== undefined) return have;
+  const name = `sc_fr${E.tempCounter++}`;
+  let ty: string;
+  let elems: string[];
+  if (kind === "off") {
+    ty = "uint32_t";
+    elems = run.map((n) => `(uint32_t)__builtin_offsetof(${mangleRecordStruct(shapeId)}, ${mangleField(n)})`);
+  } else if (kind === "bits") {
+    const shape = E.recordsById.get(shapeId);
+    if (!shape) throw new Error(`emitter bug: field run over unknown shape ${shapeId}`);
+    ty = "uint8_t";
+    elems = run.flatMap((n) => {
+      const b = ownMaskKeyBit(shape, n);
+      if (b === null) throw new Error(`emitter bug: a field run mixes members with and without an own-mask bit (${shapeId})`);
+      return [String(b.byte), String(b.bit)];
+    });
+  } else {
+    ty = "ScrStr *const";
+    elems = run.map((n) => `(ScrStr *)&${E.internLiteral(n)}`);
+  }
+  E.line(`static ${ty} ${name}[] = { ${elems.join(", ")} };`);
+  E.fieldRunTables.set(key, name);
+  return name;
+}
+
+/** Declare, ahead of a `for` statement, the tables its body's field-run nodes read (one declaration per table in the function, at the enclosing scope of the loop). */
+export function predeclareFieldRunTables(E: CEmitter, body: unknown): void {
+  const walk = (n: unknown): void => {
+    if (n === null || typeof n !== "object") return;
+    if (Array.isArray(n)) {
+      for (const x of n) walk(x);
+      return;
+    }
+    const o = n as { kind?: string; shapeId?: string; run?: string[] };
+    if (o.kind === "recordGetAt" || o.kind === "recordKeyPresentAt") {
+      fieldRunTableC(E, o.shapeId!, o.run!, "off");
+      const shape = E.recordsById.get(o.shapeId!);
+      if (o.kind === "recordKeyPresentAt" && shape && ownMaskKeyBit(shape, o.run![0]!) !== null) fieldRunTableC(E, o.shapeId!, o.run!, "bits");
+    } else if (o.kind === "runKeyAt") fieldRunTableC(E, "", o.run!, "keys");
+    for (const [k, v] of Object.entries(o)) if (k !== "loc" && k !== "type") walk(v);
+  };
+  walk(body);
+}
+
 export function emitStableReceiver(E: CEmitter, receiver: IrExpr, following: IrExpr[]): Temp {
   if (
     receiver.kind === "varRef" &&
@@ -2712,6 +2761,43 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         if (!f) throw new Error(`emitter bug: recordKeyPresent of unknown field ${e.shapeId}.${e.field}`);
         const cond = ownPresentCondC(shape, e.field, obj.name, E.undefinedArmTag(f.type), false, e.orSlot === true);
         return E.newTemp(e.type, cond ?? "true");
+      }
+      case "recordGetAt": {
+        // THE FIELD-RUN LOOP's read: recordGet of field run[index], by the member's offset (ir/field-run-loops.ts). The pass only builds it for a run of one type on a shape
+        // without the required-absent read, so there is no per-member throw to spell.
+        const obj = emitBorrowedLocal(E, e.obj, []);
+        const ix = E.emitExpr(e.index);
+        const off = fieldRunTableC(E, e.shapeId, e.run, "off");
+        const field = `(*(__typeof__(${obj.name}->${mangleField(e.run[0]!)}) *)((char *)${obj.name} + ${off}[(size_t)${ix.name}]))`;
+        return E.newTemp(e.type, isRefCounted(e.type) ? retainCallC(e.type, field) : field);
+      }
+      case "recordKeyPresentAt": {
+        const obj = E.emitExpr(e.obj);
+        const shape = E.recordsById.get(e.shapeId);
+        if (!shape) throw new Error(`emitter bug: recordKeyPresentAt of unknown shape ${e.shapeId}`);
+        const f0 = shape.fields.find((x) => x.name === e.run[0]);
+        if (!f0) throw new Error(`emitter bug: recordKeyPresentAt of unknown field ${e.shapeId}.${e.run[0]}`);
+        const ix = E.emitExpr(e.index);
+        const off = fieldRunTableC(E, e.shapeId, e.run, "off");
+        const bits = e.run.map((n) => ownMaskKeyBit(shape, n));
+        const hasBit = bits[0] !== null;
+        if (bits.some((b) => (b !== null) !== hasBit)) throw new Error(`emitter bug: a recordKeyPresentAt run mixes members with and without an own-mask bit (${e.shapeId})`);
+        let byte = "0";
+        let bit = "0";
+        if (hasBit) {
+          const tb = fieldRunTableC(E, e.shapeId, e.run, "bits");
+          byte = `${tb}[2 * (size_t)${ix.name}]`;
+          bit = `${tb}[2 * (size_t)${ix.name} + 1]`;
+        }
+        const fieldRef = `(*(__typeof__(${obj.name}->${mangleField(e.run[0]!)}) *)((char *)${obj.name} + ${off}[(size_t)${ix.name}]))`;
+        const cond = ownPresentCondC(shape, e.run[0]!, obj.name, E.undefinedArmTag(f0.type), false, e.orSlot === true, { fieldRef, byte, bit, hasBit });
+        return E.newTemp(e.type, cond ?? "true");
+      }
+      case "runKeyAt": {
+        const ix = E.emitExpr(e.index);
+        const keys = fieldRunTableC(E, "", e.run, "keys");
+        // an interned literal is an immortal static, like strLit's
+        return E.newImmortalTemp(e.type, `${keys}[(size_t)${ix.name}]`);
       }
       case "recordViewSync": {
         const obj = emitStableReceiver(E, e.obj, []);

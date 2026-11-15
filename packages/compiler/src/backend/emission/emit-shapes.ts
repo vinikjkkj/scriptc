@@ -71,12 +71,15 @@ export function ownPresentCondC(
   utag: number,
   dropUndefined: boolean,
   orSlot = false,
+  /** The FIELD-RUN LOOP's spelling (ir/field-run-loops.ts): the member is read through a table by the loop index, so its slot expression and its mask byte and bit are
+   * C expressions, and `hasBit` says whether the run owns a bit at all. Absent for every per-field emission, which is unchanged byte for byte. */
+  at?: { fieldRef: string; byte: string; bit: string; hasBit: boolean },
 ): string | null {
-  const armTest = utag >= 0 ? `${recv}->${mangleField(fieldName)}->tag != ${utag}` : null;
+  const armTest = utag >= 0 ? `${at !== undefined ? at.fieldRef : `${recv}->${mangleField(fieldName)}`}->tag != ${utag}` : null;
   // INTERNAL SLOTS take no bit — ownMaskKeyBit carries the whole argument,
   // and it is the one question the builder, this condition, the write side
   // and the record→dyn walker all ask.
-  const bit = ownMaskKeyBit(shape, fieldName);
+  const bit = at !== undefined ? (at.hasBit ? { byte: at.byte, bit: at.bit } : null) : ownMaskKeyBit(shape, fieldName);
   if (!bit) return armTest;
   const m = `${recv}->${OWNMASK_MEMBER}`;
   // `orSlot` is `in`'s question: own OR inherited, and a crossing's

@@ -6111,6 +6111,35 @@ class LlEmitter {
     return { ptr: p, type: shape.fields[idx]!.type };
   }
 
+  /** The field-run index (an f64 in [0, run.length)) as an i64 register. */
+  private runIndex(index: IrExpr): string {
+    const iv = this.emitExpr(index);
+    const r = this.B.tmp();
+    this.B.line(`${r} = fptosi double ${iv.name} to i64`);
+    return r;
+  }
+
+  /** The pointer to field run[ix] of the record in `objName`: base plus a byte offset from a constant table (the walkers' offset spelling). */
+  private runFieldPtr(objName: string, shapeId: string, run: string[], ix: string): string {
+    const shape = this.recordShape(shapeId);
+    const struct = mangleRecordStruct(shapeId);
+    const rows = run.map((n) => {
+      const idx = shape.fields.findIndex((f) => f.name === n);
+      if (idx < 0) throw new Error(`llvm emitter bug: unknown field ${n} on shape ${shapeId}`);
+      return `i32 trunc (i64 ptrtoint (ptr getelementptr inbounds (%${struct}, ptr null, i64 0, i32 ${idx + 1}) to i64) to i32)`;
+    });
+    const tb = this.addGlobal("scr_run_off", (sym) => `@${sym} = private unnamed_addr constant [${run.length} x i32] [${rows.join(", ")}]`);
+    const op = this.B.tmp();
+    this.B.line(`${op} = getelementptr inbounds i32, ptr ${tb}, i64 ${ix}`);
+    const o32 = this.B.tmp();
+    this.B.line(`${o32} = load i32, ptr ${op}`);
+    const o64 = this.B.tmp();
+    this.B.line(`${o64} = zext i32 ${o32} to i64`);
+    const p = this.B.tmp();
+    this.B.line(`${p} = getelementptr inbounds i8, ptr ${objName}, i64 ${o64}`);
+    return p;
+  }
+
   /** The overflow map's slot pointer on an index-signature shape. */
   private recordOvfPtr(objName: string, shapeId: string): string {
     const shape = this.recordShape(shapeId);
@@ -9512,6 +9541,58 @@ class LlEmitter {
         const v = this.loadField(ptr, type);
         if (isRefCounted(e.type)) return this.own({ name: this.retainValue(v, e.type), type: e.type });
         return { name: v, type: e.type };
+      }
+      case "recordGetAt": {
+        // The field-run loop's read (emit-exprs's twin): the member's byte offset out of a constant table.
+        const obj = this.emitBorrowedLocal(e.obj, []);
+        const ix = this.runIndex(e.index);
+        const fp = this.runFieldPtr(obj.name, e.shapeId, e.run, ix);
+        const v = this.loadField(fp, e.type);
+        if (isRefCounted(e.type)) return this.own({ name: this.retainValue(v, e.type), type: e.type });
+        return { name: v, type: e.type };
+      }
+      case "recordKeyPresentAt": {
+        const obj = this.emitExpr(e.obj);
+        const shape = this.recordsById.get(e.shapeId);
+        if (!shape) throw new Error(`llvm emitter bug: recordKeyPresentAt of unknown shape ${e.shapeId}`);
+        const f0 = shape.fields.find((x) => x.name === e.run[0]);
+        if (!f0) throw new Error(`llvm emitter bug: recordKeyPresentAt of unknown field ${e.shapeId}.${e.run[0]}`);
+        const bits = e.run.map((n) => ownMaskKeyBit(shape, n));
+        const hasBit = bits[0] !== null;
+        if (bits.some((b) => (b !== null) !== hasBit)) throw new Error(`llvm emitter bug: a recordKeyPresentAt run mixes members with and without an own-mask bit (${e.shapeId})`);
+        const ix = this.runIndex(e.index);
+        const fp = this.runFieldPtr(obj.name, e.shapeId, e.run, ix);
+        let byte = "0";
+        let bit = "0";
+        if (hasBit) {
+          const tb = this.addGlobal("scr_run_bits", (sym) => `@${sym} = private unnamed_addr constant [${bits.length * 2} x i8] [${bits.flatMap((b) => [`i8 ${b!.byte}`, `i8 ${b!.bit}`]).join(", ")}]`);
+          const i2 = B.tmp();
+          B.line(`${i2} = shl i64 ${ix}, 1`);
+          const bpb = B.tmp();
+          B.line(`${bpb} = getelementptr inbounds i8, ptr ${tb}, i64 ${i2}`);
+          const b8 = B.tmp();
+          B.line(`${b8} = load i8, ptr ${bpb}`);
+          byte = B.tmp();
+          B.line(`${byte} = zext i8 ${b8} to i64`);
+          const i3 = B.tmp();
+          B.line(`${i3} = or i64 ${i2}, 1`);
+          const bpt = B.tmp();
+          B.line(`${bpt} = getelementptr inbounds i8, ptr ${tb}, i64 ${i3}`);
+          bit = B.tmp();
+          B.line(`${bit} = load i8, ptr ${bpt}`);
+        }
+        const r = emitOwnPresentLl(B, shape, e.run[0]!, obj.name, this.undefinedArmTag(f0.type), false, e.orSlot === true, { fieldPtr: fp, byte, bit });
+        if (r === null) return { name: "true", type: e.type };
+        return { name: r, type: e.type };
+      }
+      case "runKeyAt": {
+        const ix = this.runIndex(e.index);
+        const tb = this.addGlobal("scr_run_keys", (sym) => `@${sym} = private unnamed_addr constant [${e.run.length} x ptr] [${e.run.map((n) => `ptr ${this.internLiteral(n)}`).join(", ")}]`);
+        const kp = B.tmp();
+        B.line(`${kp} = getelementptr inbounds ptr, ptr ${tb}, i64 ${ix}`);
+        const k = B.tmp();
+        B.line(`${k} = load ptr, ptr ${kp}`);
+        return this.ownImmortal({ name: k, type: e.type });
       }
       case "recordSlotFilled": {
         // `in`'s question on a shape a completion targeted - emit-exprs's

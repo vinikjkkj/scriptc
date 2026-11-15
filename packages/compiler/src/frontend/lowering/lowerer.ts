@@ -14,6 +14,7 @@
  */
 import { renameLiftedFunctions } from "./stable-names.js";
 import { markDeadSourceCrossings } from "../../ir/dead-source.js";
+import { compressFieldRunLoops } from "../../ir/field-run-loops.js";
 import { stdlibBufferTypes } from "../buffer-refinement.js";
 import { appendFileSync, readFileSync } from "node:fs";
 import { basename } from "node:path";
@@ -4636,6 +4637,7 @@ export class Lowerer {
       }
     }
     // Closure names from what is stable (parent function + ordinal) instead of the module-wide counter (stable-names.ts).
+    if (this.diags.length === 0) compressFieldRunLoops(functions, artifacts.records);
     if (this.diags.length === 0) markDeadSourceCrossings(functions);
     if (this.diags.length === 0 && process.env["SCRIPTC_STABLE_NAMES"] !== "0") renameLiftedFunctions(functions, [functions, artifacts.classes, artifacts.records, artifacts.unions, this.globalsList], { records: artifacts.records, unions: artifacts.unions });
     const module: IrModule | null =

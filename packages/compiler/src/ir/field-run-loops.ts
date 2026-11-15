@@ -1,0 +1,178 @@
+/* FIELD-RUN LOOPS for the enumeration and reshape helpers.
+ *
+ * `Object.entries(record)`, `Object.values(record)` and the width reshape of `as Record<string, V>` are lowered to one IR function per record shape
+ * (`%obj.entries.N`, `%obj.values.N`, `%rec.capture.N`), and the lowering writes ONE STATEMENT PER MEMBER:
+ *
+ *     if (recordKeyPresent(r, "p0")) { out.push({"0": "p0", "1": <value of recordGet(r, "p0")>}); }
+ *     if (recordKeyPresent(r, "p1")) { out.push({"0": "p1", "1": <value of recordGet(r, "p1")>}); }   ...
+ *
+ * For zapo's WA_ABPROPS, a record of 2,151 members of one type, the two helpers were 471 KB and 452 KB of machine code, run once and resident at the startup
+ * peak. This pass runs AFTER every guard, patch and shape unification has been applied (so the statements are final), finds a RUN of consecutive top-level
+ * statements that are, after replacing the member's name in exactly three roles, the SAME statement for every member, and replaces the run with a loop:
+ *
+ *     for (fi = 0; fi < N; fi++) { if (recordKeyPresentAt(r, run, fi)) { out.push({"0": runKeyAt(run, fi), "1": ...recordGetAt(r, run, fi)...}); } }
+ *
+ * The three roles are recordGet.field, recordKeyPresent.field and a strLit whose value IS the member's name; the *At nodes mean exactly what those nodes mean for
+ * the field run[fi] (ir/nodes.ts). The loop body is the first statement of the run rewritten that way, and every statement of the run is rewritten the same way and
+ * compared with it (as canonical text, locations ignored), so a run is a loop only when each statement was the first one's code for another member. Key order is
+ * the run's order, which is the statements' order; the own-bit test, the undefined-arm test and the hole/absent behaviour are inside the statement and unchanged.
+ *
+ * What a run may NOT contain, and what stays unrolled: a member whose name appears in any other role (the canonical texts then differ), a member of another type
+ * (recordGet carries its type), a member with a different own-mask situation (the bit is part of what recordKeyPresent answers: a run is all-with or all-without),
+ * and any member of a shape the required-absent read applies to (its throw names the member, and a loop cannot spell that: such a shape is skipped entirely).
+ * MIN members or more make a run (default 8; SCRIPTC_FIELD_LOOP_MIN, 0 = off, the same knob as the walkers). Only the three helper families above are examined. */
+import type { IrExpr, IrFunction, IrRecordShape, IrStmt, SrcLoc } from "./nodes.js";
+import { F64, BOOL, ownMaskKeyBit, typeKey } from "./nodes.js";
+import { fieldLoopMin } from "../backend/emission/field-loop.js";
+
+const HELPER_PREFIXES = ["%obj.entries.", "%obj.values.", "%rec.capture."];
+const RUN = "\u0001RUN\u0001";
+
+type Obj = Record<string, unknown>;
+const isObj = (x: unknown): x is Obj => x !== null && typeof x === "object" && !Array.isArray(x);
+
+/** The member a statement is about: every recordGet / recordKeyPresent over a record-typed LOCAL names the same member of the same shape through the same local.
+ * null when there is none, or when they disagree (such a statement is not a per-member statement). */
+function memberOf(stmt: unknown): { field: string; shapeId: string; localId: string } | null {
+  let found: { field: string; shapeId: string; localId: string } | null = null;
+  let ok = true;
+  const walk = (n: unknown): void => {
+    if (!ok || n === null || typeof n !== "object") return;
+    if (Array.isArray(n)) {
+      for (const x of n) walk(x);
+      return;
+    }
+    const o = n as Obj;
+    if ((o["kind"] === "recordGet" || o["kind"] === "recordKeyPresent") && isObj(o["obj"]) && o["obj"]["kind"] === "varRef") {
+      const t = o["obj"]["type"];
+      const cand = { field: String(o["field"]), shapeId: String(o["shapeId"]), localId: String(o["obj"]["localId"]) };
+      if (isObj(t) && t["kind"] === "record" && t["shapeId"] === cand.shapeId) {
+        if (found === null) found = cand;
+        else if (found.field !== cand.field || found.shapeId !== cand.shapeId || found.localId !== cand.localId) ok = false;
+      }
+    }
+    for (const [k, v] of Object.entries(o)) if (k !== "loc") walk(v);
+  };
+  walk(stmt);
+  return ok ? found : null;
+}
+
+/** A copy of `n` with the member's three roles rewritten to the At nodes, over the shared `run` array and the index expression. */
+function rewrite(n: unknown, m: { field: string; shapeId: string; localId: string }, run: string[], index: () => IrExpr): unknown {
+  if (Array.isArray(n)) return n.map((x) => rewrite(x, m, run, index));
+  if (!isObj(n)) return n;
+  const o = n;
+  const kind = o["kind"];
+  const isMemberRef =
+    (kind === "recordGet" || kind === "recordKeyPresent") && o["field"] === m.field && o["shapeId"] === m.shapeId && isObj(o["obj"]) && o["obj"]["kind"] === "varRef" && o["obj"]["localId"] === m.localId;
+  if (isMemberRef) {
+    const { field: _f, kind: _k, ...rest } = o;
+    void _f;
+    void _k;
+    const out: Obj = { ...(rewrite(rest, m, run, index) as Obj), kind: kind === "recordGet" ? "recordGetAt" : "recordKeyPresentAt", run, index: index() };
+    return out;
+  }
+  if (kind === "strLit" && o["value"] === m.field) {
+    return { kind: "runKeyAt", run, index: index(), type: o["type"], loc: o["loc"] };
+  }
+  const out: Obj = {};
+  for (const [k, v] of Object.entries(o)) out[k] = rewrite(v, m, run, index);
+  return out;
+}
+
+/** Canonical text of a rewritten statement: locations dropped, the run placeholder named. */
+function canonical(x: unknown, run: string[]): string {
+  return JSON.stringify(x, (k, v) => (k === "loc" ? undefined : v === run ? RUN : v));
+}
+
+interface Cand {
+  member: { field: string; shapeId: string; localId: string };
+  text: string;
+}
+
+export function compressFieldRunLoops(functions: IrFunction[], records: readonly IrRecordShape[], min = fieldLoopMin()): number {
+  if (min <= 0) return 0;
+  const shapes = new Map(records.map((s) => [s.id, s]));
+  let loops = 0;
+  for (const fn of functions) {
+    if (!HELPER_PREFIXES.some((p) => fn.name.startsWith(p))) continue;
+    const body = fn.body;
+    // UNITS: the consecutive statements about one member (an optional member lowers to two: the undefined-arm test and its complement), or one statement that is
+    // about none. A unit is a candidate when it is about a member of a known shape.
+    const units: { stmts: IrStmt[]; member: { field: string; shapeId: string; localId: string } | null }[] = [];
+    for (const st of body) {
+      const m = memberOf(st);
+      const last = units[units.length - 1];
+      if (m !== null && last !== undefined && last.member !== null && last.member.field === m.field && last.member.shapeId === m.shapeId && last.member.localId === m.localId) last.stmts.push(st);
+      else units.push({ stmts: [st], member: m });
+    }
+    const cands: (Cand | null)[] = units.map((u) => {
+      const m = u.member;
+      if (m === null) return null;
+      const shape = shapes.get(m.shapeId);
+      if (shape === undefined || !shape.fields.some((f) => f.name === m.field)) return null;
+      // a shape the required-absent read applies to keeps its unrolled per-member throw
+      if (shape.reqabsent === true && ownMaskKeyBit(shape, m.field) !== null) return null;
+      const probe: string[] = [];
+      const ix = () => ({ kind: "varRef", localId: "\u0001i", type: F64, loc: undefined as unknown as SrcLoc }) as IrExpr;
+      return { member: m, text: canonical(u.stmts.map((st) => rewrite(st, m, probe, ix)), probe) };
+    });
+    // Maximal runs of identical units over distinct members with one own-mask situation and one field type.
+    const out: IrStmt[] = [];
+    let i = 0;
+    const idLocals = new Set(fn.locals.map((l) => l.id));
+    // The emitters declare a run's constant tables once per function, in the first loop that reads them, so one (shape, run) is looped once per function.
+    const looped = new Set<string>();
+    while (i < units.length) {
+      const c0 = cands[i];
+      let j = i + 1;
+      if (c0 !== null && c0 !== undefined) {
+        const shape = shapes.get(c0.member.shapeId)!;
+        const bit0 = ownMaskKeyBit(shape, c0.member.field) !== null;
+        const t0 = typeKey(shape.fields.find((f) => f.name === c0.member.field)!.type);
+        const seen = new Set<string>([c0.member.field]);
+        while (j < units.length) {
+          const cj = cands[j];
+          if (cj === null || cj === undefined || cj.text !== c0.text || cj.member.shapeId !== c0.member.shapeId || cj.member.localId !== c0.member.localId) break;
+          if (seen.has(cj.member.field)) break;
+          if ((ownMaskKeyBit(shape, cj.member.field) !== null) !== bit0) break;
+          if (typeKey(shape.fields.find((f) => f.name === cj.member.field)!.type) !== t0) break;
+          seen.add(cj.member.field);
+          j++;
+        }
+      }
+      const runKey = c0 ? `${c0.member.shapeId}|${units.slice(i, j).map((u) => u.member!.field).join("\u0001")}` : "";
+      if (c0 !== null && c0 !== undefined && j - i >= min && !looped.has(runKey)) {
+        looped.add(runKey);
+        const run = units.slice(i, j).map((u) => u.member!.field);
+        let n = 0;
+        while (idLocals.has(`fi.${n}`)) n++;
+        const id = `fi.${n}`;
+        idLocals.add(id);
+        fn.locals.push({ id, name: "fi", type: F64, mutable: true });
+        const loc = (units[i]!.stmts[0] as { loc: SrcLoc }).loc;
+        const ref = (): IrExpr => ({ kind: "varRef", localId: id, type: F64, loc });
+        const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
+        const loopBody = units[i]!.stmts.map((st) => rewrite(st, c0.member, run, ref) as IrStmt);
+        out.push({
+          kind: "for",
+          init: { kind: "varDecl", localId: id, init: num(0), loc },
+          cond: { kind: "bin", op: "<", left: ref(), right: num(run.length), type: BOOL, loc },
+          update: { kind: "assign", localId: id, value: { kind: "bin", op: "+", left: ref(), right: num(1), type: F64, loc }, loc },
+          body: loopBody,
+          loc,
+        });
+        loops++;
+        i = j;
+      } else {
+        out.push(...units[i]!.stmts);
+        i++;
+      }
+    }
+    if (out.length !== body.length) {
+      body.length = 0;
+      body.push(...out);
+    }
+  }
+  return loops;
+}

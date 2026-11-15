@@ -8157,6 +8157,17 @@ export type IrExpr =
    * copy fills its destination's list this way). */
   | { kind: "recordOrd"; op: "has" | "count" | "at" | "note" | "isAt" | "empty"; obj: IrExpr; shapeId: string; ord?: number; idx?: IrExpr; type: IrType; loc: SrcLoc }
   | { kind: "recordKeyPresent"; obj: IrExpr; shapeId: string; field: string; orSlot?: true; type: IrType; loc: SrcLoc }
+  /** THE FIELD-RUN LOOP's three reads (ir/field-run-loops.ts builds them; nothing in the source language spells them). A RUN is a list of field names of one
+   * record shape whose members have ONE type and are handled alike; the loop's index counts over the run. Each node means EXACTLY what its per-field twin means
+   * for the field `run[index]` -- the pass only builds them from statements that were, after replacing the field name, the same statement for every member.
+   *   recordGetAt          = recordGet of field run[index]            (type = the run's field type)
+   *   recordKeyPresentAt   = recordKeyPresent of field run[index]     (bool; orSlot as in recordKeyPresent)
+   *   runKeyAt             = the string literal run[index]            (string; an immortal literal like strLit)
+   * `index` is an f64 expression that must be an integer in [0, run.length) whenever the node runs: the validator rejects a constant index outside the run and a
+   * non-f64 index; the loop the pass builds counts exactly 0..run.length-1. */
+  | { kind: "recordGetAt"; obj: IrExpr; shapeId: string; run: string[]; index: IrExpr; type: IrType; loc: SrcLoc }
+  | { kind: "recordKeyPresentAt"; obj: IrExpr; shapeId: string; run: string[]; index: IrExpr; orSlot?: true; type: IrType; loc: SrcLoc }
+  | { kind: "runKeyAt"; run: string[]; index: IrExpr; type: IrType; loc: SrcLoc }
   /** `in`'s question about a REQUIRED field of a shape some literal
    * COMPLETED: was this slot ever written on THIS instance?
    *

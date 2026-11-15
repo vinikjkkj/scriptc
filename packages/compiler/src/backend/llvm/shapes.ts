@@ -579,12 +579,16 @@ export function emitOwnPresentLl(
   utag: number,
   dropUndefined: boolean,
   orSlot = false,
+  at?: { fieldPtr: string; byte: string; bit: string },
 ): string | null {
   const struct = mangleRecordStruct(shape.id);
   const fieldIdx = shape.fields.findIndex((f) => f.name === fieldName);
   const armTest = (): string => {
-    const p = B.tmp();
-    B.line(`${p} = getelementptr inbounds %${struct}, ptr ${recv}, i64 0, i32 ${fieldIdx + 1} ; .${fieldName}`);
+    let p = at ? at.fieldPtr : "";
+    if (!at) {
+      p = B.tmp();
+      B.line(`${p} = getelementptr inbounds %${struct}, ptr ${recv}, i64 0, i32 ${fieldIdx + 1} ; .${fieldName}`);
+    }
     const u = B.tmp();
     B.line(`${u} = load ptr, ptr ${p}`);
     const tp = B.tmp();
@@ -611,11 +615,11 @@ export function emitOwnPresentLl(
   B.condBr(valid, lOwn, lArm);
   B.startBlock(lOwn);
   const bp = B.tmp();
-  B.line(`${bp} = getelementptr inbounds %${struct}, ptr ${recv}, i64 0, i32 ${mi}, i64 ${bit.byte}`);
+  B.line(`${bp} = getelementptr inbounds %${struct}, ptr ${recv}, i64 0, i32 ${mi}, i64 ${at ? at.byte : bit.byte}`);
   const bv = B.tmp();
   B.line(`${bv} = load i8, ptr ${bp}`);
   const msk = B.tmp();
-  B.line(`${msk} = and i8 ${bv}, ${bit.bit}`);
+  B.line(`${msk} = and i8 ${bv}, ${at ? at.bit : bit.bit}`);
   const own0 = B.tmp();
   B.line(`${own0} = icmp ne i8 ${msk}, 0`);
   // `in` asks own OR inherited: an instance a crossing wrote can carry a

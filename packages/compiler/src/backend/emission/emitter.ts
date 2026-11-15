@@ -314,6 +314,8 @@ export class CEmitter {
   readonly lines: string[] = [];
   indent = 0;
   tempCounter = 0;
+  /** The member tables of the field-run loops (ir/field-run-loops.ts) already declared in the function being emitted: run signature -> the static table's name. */
+  readonly fieldRunTables = new Map<string, string>();
   /** The linkage token every FILE-SCOPE definition carries. `"static "` for
    * the historical single TU; `""` once the program is split, because a
    * symbol a sibling TU calls cannot have internal linkage.
