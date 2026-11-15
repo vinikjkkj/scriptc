@@ -40,7 +40,7 @@ if [ "$program" = rest ]; then
     fi
   done
   [ ${#arms[@]} -gt 0 ] || { echo "no REST binary was built"; exit 1; }
-  $BENCH_NODE "$BENCH_DIR/harness/rest-run.mjs" --out "$BENCH_WORK/result" --reps "$REPS" "${arms[@]}" | tee "$BENCH_WORK/result-summary.txt"
+  $BENCH_NODE "$BENCH_DIR/harness/rest-run.mjs" --out "$BENCH_WORK/result" --reps "$REPS" --smaps "${arms[@]}" | tee "$BENCH_WORK/result-summary.txt"
   summary "$BENCH_WORK/result"; exit 0
 fi
 store=${program#messaging-}
