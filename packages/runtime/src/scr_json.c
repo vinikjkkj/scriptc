@@ -5074,7 +5074,7 @@ static void scr_os_report(const char *why) {
   fprintf(stderr, "OBJSTAT %s total_boxings=%ld live=%ld distinct=%ld peak_boxes=%ld peak_distinct=%ld classes_at_peak=%zu\n", why, scr_os_total, scr_os_live, scr_os_distinct,
           scr_os_peak, scr_os_peak_distinct, scr_os_peak_ncls);
   for (size_t i = 0; i < scr_os_peak_ncls; i++)
-    fprintf(stderr, "OBJSTAT   class %s boxes=%ld distinct=%ld\n", scr_os_peak_cls[i].cls->name, scr_os_peak_cls[i].boxes, scr_os_peak_cls[i].distinct);
+    fprintf(stderr, "OBJSTAT   class %s cyc=%d vt=%d boxes=%ld distinct=%ld\n", scr_os_peak_cls[i].cls->name, (int)scr_os_peak_cls[i].cls->cyc, (int)scr_os_peak_cls[i].cls->vt, scr_os_peak_cls[i].boxes, scr_os_peak_cls[i].distinct);
 }
 static void scr_os_atexit(void) { scr_os_report("exit"); }
 static size_t scr_os_h(const void *k) { uint64_t x = (uint64_t)((uintptr_t)k >> 3) * 0x9E3779B97F4A7C15ull; x ^= x >> 29; return (size_t)x; }
