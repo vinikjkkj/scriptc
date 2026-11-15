@@ -362,7 +362,7 @@ static ScrDyn *wsd_nop(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
  * dynCheck for a function type does
  *
  *     if (strcmp(d->v.fn.sig, "func(f64,dyn,dyn)=>void") == 0)
- *         return scr_closure_retain(d->v.fn.clo);
+ *         return scr_closure_retain(scr_dyn_fn_clo(d));
  *
  * -- an exact-signature match UNWRAPS the closure and calls `clo->fn`
  * through the STATIC C signature. These closures carry the dyn THUNK in

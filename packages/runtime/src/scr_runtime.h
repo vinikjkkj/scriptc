@@ -2538,7 +2538,7 @@ ScrStr *scr_box_str_unshare(ScrBox *b, ScrStr *acc); /* captured `s += x`: give 
  * minted prototype, so they used to cost two words on each (16 of its 40 bytes before the captures). Allocated on first need by
  * scr_closure_ext, freed with the closure. The accessors below are the only way to reach them. */
 typedef struct ScrClosureExt {
-  size_t ncaps; /* the capture count, which the closure's own word held until the ext took that word */
+  size_t ncaps; /* the capture count when it does not fit the closure's own byte (>= 255); otherwise unused */
   /* The function's OWN-PROPERTY table: a box whose payload is an OBJ
    * ScrDyn (owned; lazily allocated by Object.defineProperties —
    * test/common copying name/length onto the mustCall wrapper), NULL
@@ -2578,35 +2578,57 @@ typedef struct ScrClosureExt {
    * The teardown complement moves with the edge: the COLLECTOR's path
    * erases the registry entry WITHOUT releasing the prototype. */
   void *implicit_proto;
+  /* The FUNC descriptor (ScrFnDesc *) the closure's embedded dyn identity carries, moved here from ScrClosure::w when the ext is made. */
+  const void *desc;
 } ScrClosureExt;
 
-/* ScrClosure is THREE words before the captures (it was five): the refcount, the entry, and `meta`, which is one of
- *   - odd:  (ncaps << 1) | 1 -- no ext, the capture count is inline (every closure that never gets an own property or a prototype);
- *   - even: a pointer to a ScrClosureExt (8-aligned, so bit 0 is clear) -- the count lives there.
- * With the 16-byte cycle header that is a 40-byte object where a 56-byte one stood, so EVERY closure drops one 16-byte arena stride whatever
- * its capture count. The LLVM lane declares the same three-word type (backend/closure-layout.ts) and indexes the captures as element 1
- * past the struct, as it did. */
+/* ScrClosure is FOUR words before the captures, and its first two words are the first two words of a ScrDyn: a closure IS a dyn FUNC value.
+ * Boxing a function (scr_dyn_new_func*) used to allocate a 48-byte SCR_DYN_FUNC node that pointed at the closure and at an interned
+ * ScrFnDesc; now it hands back the closure itself, tagged `isdyn`, with the descriptor cached in `w`. One object, one refcount, one
+ * cycle header. A box whose descriptor differs from the one the closure already carries (the same function boxed at another static type) is
+ * still a stand-alone node pointing at the closure, so every reader asks scr_dyn_fn_clo / scr_dyn_fn_desc, never the node's fields.
+ *   rc     the refcount (SIZE_MAX = immortal, an interned top-level function value); ScrDyn::rc
+ *   kind   SCR_DYN_FUNC, always;                                                  ScrDyn::kind    (offset 8)
+ *   isdyn  1: this object is a dyn FUNC value;                                    ScrDyn::buffer  (offset 12; false on a node)
+ *   ncaps8 the capture count, or 255 = it is in the ext;                          ScrDyn::null_proto (offset 13, an OBJ/ARR flag)
+ *   pad    0 -- the ScrDyn::static_copy / module_ns bytes, which the weak-key checks read on any kind
+ *   fn     the entry
+ *   w      0 (no descriptor yet), a ScrFnDesc * (bit 0 clear), or (ScrClosureExt *) | 1 once the rare members exist (the descriptor then
+ *          lives in the ext). Interned descriptors and exts are 8-aligned, so bit 0 is free.
+ * With the 16-byte cycle header that is a 48-byte object where a 40-byte closure plus a 48-byte FUNC node stood. The LLVM lane declares the
+ * same four-word type (backend/closure-layout.ts) and indexes the captures as element 1 past the struct. */
 typedef struct ScrClosure {
-  size_t rc; /* SIZE_MAX = immortal (interned top-level function value) */
+  size_t rc;
+  uint32_t kind;
+  uint8_t isdyn;
+  uint8_t ncaps8;
+  uint8_t pad[2];
   void *fn;
-  size_t meta;
+  uintptr_t w;
   ScrBox *caps[];
 } ScrClosure;
 
-/* The meta of a closure with no captures and no ext: what every emitted or runtime-static (immortal) closure literal starts as. */
-#define SCR_CLO_META_STATIC ((size_t)1)
-/* An immortal function-value closure literal, as the runtime's own static ones are written. */
-#define SCR_CLO_STATIC(f) {SIZE_MAX, (void *)(f), SCR_CLO_META_STATIC}
+/* The initial w of a closure with no descriptor and no ext: what every emitted or runtime-static (immortal) closure literal starts as. */
+#define SCR_CLO_W_STATIC ((uintptr_t)0)
+/* An immortal function-value closure literal, as the runtime's own static ones are written. SCR_DYN_FUNC is the dyn kind enum (below). */
+#define SCR_CLO_STATIC(f) {SIZE_MAX, (uint32_t)SCR_DYN_FUNC, 1, 0, {0, 0}, (void *)(f), SCR_CLO_W_STATIC}
 
-_Static_assert(sizeof(ScrClosure) == 24 && offsetof(ScrClosure, fn) == 8 && offsetof(ScrClosure, meta) == 16 && offsetof(ScrClosure, caps) == 24,
+_Static_assert(sizeof(ScrClosure) == 32 && offsetof(ScrClosure, kind) == 8 && offsetof(ScrClosure, isdyn) == 12 && offsetof(ScrClosure, ncaps8) == 13 &&
+                   offsetof(ScrClosure, fn) == 16 && offsetof(ScrClosure, w) == 24 && offsetof(ScrClosure, caps) == 32,
                "ScrClosure layout: backend/closure-layout.ts and the LLVM %ScrClosure type mirror it");
 
-static inline ScrClosureExt *scr_closure_ext_of(const ScrClosure *c) { return (c->meta & 1u) ? NULL : (ScrClosureExt *)(uintptr_t)c->meta; }
-static inline size_t scr_closure_ncaps(const ScrClosure *c) { return (c->meta & 1u) ? (c->meta >> 1) : ((ScrClosureExt *)(uintptr_t)c->meta)->ncaps; }
+static inline ScrClosureExt *scr_closure_ext_of(const ScrClosure *c) { return (c->w & 1u) ? (ScrClosureExt *)(c->w & ~(uintptr_t)1) : NULL; }
+static inline size_t scr_closure_ncaps(const ScrClosure *c) { return c->ncaps8 != 255 ? (size_t)c->ncaps8 : scr_closure_ext_of(c)->ncaps; }
 static inline ScrBox *scr_closure_props(const ScrClosure *c) { const ScrClosureExt *x = scr_closure_ext_of(c); return x ? x->props : NULL; }
 static inline void *scr_closure_proto(const ScrClosure *c) { const ScrClosureExt *x = scr_closure_ext_of(c); return x ? x->implicit_proto : NULL; }
-/* The ext of `c`, made on first need (the capture count moves into it). Aborts on exhaustion like every runtime allocation. */
+/* The descriptor this closure's embedded dyn identity carries (NULL until the first boxing), and its setter. */
+static inline const void *scr_closure_desc(const ScrClosure *c) { const ScrClosureExt *x = scr_closure_ext_of(c); return x ? x->desc : (const void *)c->w; }
+/* The ext of `c`, made on first need (the descriptor moves into it). Aborts on exhaustion like every runtime allocation. */
 ScrClosureExt *scr_closure_ext(ScrClosure *c);
+static inline void scr_closure_set_desc(ScrClosure *c, const void *d) {
+  ScrClosureExt *x = scr_closure_ext_of(c);
+  if (x) x->desc = d; else c->w = (uintptr_t)d;
+}
 static inline void scr_closure_set_props(ScrClosure *c, ScrBox *b) { scr_closure_ext(c)->props = b; }
 static inline void scr_closure_set_proto(ScrClosure *c, void *p) { scr_closure_ext(c)->implicit_proto = p; }
 
@@ -2683,6 +2705,7 @@ static inline ScrClosure *scr_closure_retain(ScrClosure *c) {
 }
 
 void scr_closure_release(ScrClosure *c); /* releases the boxes; NULL-tolerant */
+void scr_closure_free_dead(ScrClosure *c); /* the teardown once the count reached zero (scr_dyn_release reaches it too) */
 
 /* The slot of a by-value capture of a closure (SCR_CAP_TAG_CLO): retains (NULL-tolerant) and tags. Out of line, so both emitters call the same symbol. */
 ScrBox *scr_cap_from_closure(ScrClosure *c);
@@ -5629,6 +5652,13 @@ struct ScrDyn {
 };
 _Static_assert(offsetof(ScrDyn, v.fn.clo) == 16 && offsetof(ScrDyn, v.fn.desc) == 24 && offsetof(ScrFnDesc, thunk) == 0 && sizeof(((ScrDyn *)0)->v.fn) == 16,
                "SCR_DYN_FUNC layout: backend/llvm/dyn.ts DYN_FN_CLO_OFF, DYN_FN_DESC_OFF and the thunk-first record mirror it");
+_Static_assert(offsetof(ScrDyn, kind) == offsetof(ScrClosure, kind) && sizeof(ScrDynKind) == sizeof(uint32_t) && offsetof(ScrDyn, buffer) == offsetof(ScrClosure, isdyn) &&
+                   offsetof(ScrDyn, null_proto) == offsetof(ScrClosure, ncaps8) && offsetof(ScrDyn, static_copy) == offsetof(ScrClosure, pad[0]) &&
+                   offsetof(ScrDyn, module_ns) == offsetof(ScrClosure, pad[1]) && offsetof(ScrDyn, rc) == offsetof(ScrClosure, rc),
+               "a ScrClosure is the head of a dyn FUNC value: its kind and flag bytes sit where ScrDyn keeps its own");
+_Static_assert(SCR_DYN_FUNC == 8, "backend/closure-layout.ts CLOSURE_DYN_FUNC_KIND hardcodes the kind code in the LLVM lane's closure literals");
+/* The closure a FUNC value calls: the value itself when it is an embedded closure (ScrClosure above), else the stand-alone node's pointer. */
+static inline ScrClosure *scr_dyn_fn_clo(const ScrDyn *d) { return ((const ScrClosure *)d)->isdyn ? (ScrClosure *)(uintptr_t)d : d->v.fn.clo; }
 
 static inline ScrDyn *scr_dyn_retain(ScrDyn *d) {
   if (d->rc != SIZE_MAX) {
@@ -5700,12 +5730,12 @@ static inline bool scr_rva_fits(const void *p) {
 }
 
 /* The SCR_DYN_FUNC box's three static literals. */
-static inline const ScrFnDesc *scr_dyn_fn_desc(const ScrDyn *d) { return d->v.fn.desc; }
+static inline const ScrFnDesc *scr_dyn_fn_desc(const ScrDyn *d) { return ((const ScrClosure *)d)->isdyn ? (const ScrFnDesc *)scr_closure_desc((const ScrClosure *)d) : d->v.fn.desc; }
 /* The box's entry point (what the dyn call and the adapters invoke with the closure). */
-static inline ScrDynThunk scr_dyn_fn_thunk(const ScrDyn *d) { return d->v.fn.desc->thunk; }
+static inline ScrDynThunk scr_dyn_fn_thunk(const ScrDyn *d) { return scr_dyn_fn_desc(d)->thunk; }
 /* The raw arity word (length plus kind code), for a box that mints a sibling of this one. */
-static inline uint32_t scr_dyn_fn_arity_word(const ScrDyn *d) { return d->v.fn.desc->arity; }
-static inline const char *scr_dyn_fn_sig(const ScrDyn *d) { return scr_rva_str(d->v.fn.desc->sig); }
+static inline uint32_t scr_dyn_fn_arity_word(const ScrDyn *d) { return scr_dyn_fn_desc(d)->arity; }
+static inline const char *scr_dyn_fn_sig(const ScrDyn *d) { return scr_rva_str(scr_dyn_fn_desc(d)->sig); }
 /* A BOUND function's name is per-VALUE (`bound ` + the target's name), and a
  * FUNC box stores its name as a static literal offset. So a bound box stores
  * this marker in its name slot and keeps the spelling in its closure (scr_json.c,
@@ -5716,11 +5746,11 @@ extern const char *(*scr_dyn_bound_name_fn)(const ScrDyn *d);
 /* One out-of-line body (scr_json.c), not an inline check: the check at every
  * caller grew the always-linked code. */
 const char *scr_dyn_fn_name(const ScrDyn *d);
-static inline const char *scr_dyn_fn_src(const ScrDyn *d) { return scr_rva_str(d->v.fn.desc->src); }
+static inline const char *scr_dyn_fn_src(const ScrDyn *d) { return scr_rva_str(scr_dyn_fn_desc(d)->src); }
 /* The JS `length` of a FUNC box (the arity word without its kind code). */
-static inline uint32_t scr_dyn_fn_len(const ScrDyn *d) { return d->v.fn.desc->arity & 0xffffffu; }
+static inline uint32_t scr_dyn_fn_len(const ScrDyn *d) { return scr_dyn_fn_desc(d)->arity & 0xffffffu; }
 /* The kind code of a FUNC box (SCR_FNK_*). */
-static inline unsigned scr_dyn_fn_code(const ScrDyn *d) { return (unsigned)(d->v.fn.desc->arity >> SCR_FNK_SHIFT) & SCR_FNK_CODE_MASK; }
+static inline unsigned scr_dyn_fn_code(const ScrDyn *d) { return (unsigned)(scr_dyn_fn_desc(d)->arity >> SCR_FNK_SHIFT) & SCR_FNK_CODE_MASK; }
 /* The same three as callable symbols: the LLVM backend emits calls, not
  * C, so it cannot reach a static inline -- and it used to read `sig` as
  * a plain pointer load at +32, which is the kind of hardcoded layout
