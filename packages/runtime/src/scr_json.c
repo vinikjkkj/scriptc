@@ -2563,6 +2563,9 @@ ScrDyn *scr_dyn_new_str(ScrStr *s) {
   if (s->cap >= 0xFFFD0000u) return scr_textcodec_box_fn(s); /* immortal or heap codec (cap marker) */
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_STR);
   d->v.str = scr_str_retain(s);
+#ifdef SCR_DYNCEN_ON
+  { void **fp = (void **)__builtin_frame_address(0); void **cf = fp ? (void **)fp[0] : NULL; scr_sb_add(__builtin_return_address(0), cf ? cf[1] : NULL, d->v.str); }
+#endif
   return d;
 }
 
@@ -11607,6 +11610,9 @@ static ScrDyn *scr_json_value_inner(ScrJsonP *p) {
     if (!sv) return NULL;
     ScrDyn *d = scr_dyn_alloc(SCR_DYN_STR);
     d->v.str = sv;
+#ifdef SCR_DYNCEN_ON
+    scr_sb_add((const void *)1, NULL, d->v.str);
+#endif
     return d;
   }
   if (c == 't') {
