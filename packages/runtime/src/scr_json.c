@@ -628,6 +628,9 @@ __attribute__((constructor)) static void scr_dyn_idle_trim_reg(void) { scr_cyc_i
  * edge is uncollectable (what the whole tree was before this change),
  * whereas a traced edge the teardown also releases is a double free. */
 static void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx);
+#ifdef SCR_OBJSTAT
+static void scr_os_free(const void *o, const ScrDynClass *cls);
+#endif
 static void scr_dyn_gcfree(void *o);
 /* The ghost weight (scr_runtime.h SCR_PROPS_GHOST) of a property table that is being torn down: one out-of-line copy for the release and the
  * collector's teardown, so neither carries the loop. */
@@ -920,6 +923,9 @@ static void scr_dyn_gcfree(void *o) {
     /* A traced (collector-owned) instance is accounted for by the trace, so
      * the collector frees it itself; releasing it here would double-free it.
      * A calloc'd instance is not traced and is released as before. */
+#ifdef SCR_OBJSTAT
+    scr_os_free(d->v.inst.o, d->v.inst.cls);
+#endif
     if (!d->v.inst.cls->cyc) d->v.inst.cls->release(d->v.inst.o);
     break;
   case SCR_DYN_MAP:
@@ -1054,6 +1060,9 @@ static __attribute__((noinline)) void scr_dyn_release_final(ScrDyn *d) {
      * through the class's own `_v` release — which for a hierarchy class
      * dispatches on the instance's vtable, so a base-typed box still
      * tears down the derived object. */
+#ifdef SCR_OBJSTAT
+    scr_os_free(d->v.inst.o, d->v.inst.cls);
+#endif
     d->v.inst.cls->release(d->v.inst.o);
     break;
   case SCR_DYN_MAP:
@@ -5050,10 +5059,80 @@ ScrDyn *scr_arrlike_from(const ScrDyn *v) {
  * by a fabricated shape. The descriptor is compiler-emitted, so nothing
  * here needs an install hook the way handles do. */
 
+
+#ifdef SCR_OBJSTAT
+/* LAB ONLY (never lands): live OBJINST boxes, distinct boxed instances and per-class counts, snapshotted at the peak of live boxes. */
+typedef struct { const void *k; const ScrDynClass *cls; unsigned cnt; } ScrOsSlot;
+static ScrOsSlot *scr_os_tab = NULL;
+static size_t scr_os_cap = 0, scr_os_used = 0;
+typedef struct { const ScrDynClass *cls; long boxes, distinct; } ScrOsCls;
+static ScrOsCls scr_os_cls[256], scr_os_peak_cls[256];
+static size_t scr_os_ncls = 0, scr_os_peak_ncls = 0;
+static long scr_os_live = 0, scr_os_distinct = 0, scr_os_peak = 0, scr_os_peak_distinct = 0, scr_os_total = 0;
+static unsigned long scr_os_events = 0;
+static void scr_os_report(const char *why) {
+  fprintf(stderr, "OBJSTAT %s total_boxings=%ld live=%ld distinct=%ld peak_boxes=%ld peak_distinct=%ld classes_at_peak=%zu\n", why, scr_os_total, scr_os_live, scr_os_distinct,
+          scr_os_peak, scr_os_peak_distinct, scr_os_peak_ncls);
+  for (size_t i = 0; i < scr_os_peak_ncls; i++)
+    fprintf(stderr, "OBJSTAT   class %s boxes=%ld distinct=%ld\n", scr_os_peak_cls[i].cls->name, scr_os_peak_cls[i].boxes, scr_os_peak_cls[i].distinct);
+}
+static void scr_os_atexit(void) { scr_os_report("exit"); }
+static size_t scr_os_h(const void *k) { uint64_t x = (uint64_t)((uintptr_t)k >> 3) * 0x9E3779B97F4A7C15ull; x ^= x >> 29; return (size_t)x; }
+static ScrOsCls *scr_os_cls_of(const ScrDynClass *c) {
+  for (size_t i = 0; i < scr_os_ncls; i++) if (scr_os_cls[i].cls == c) return &scr_os_cls[i];
+  if (scr_os_ncls == 256) return &scr_os_cls[255];
+  scr_os_cls[scr_os_ncls].cls = c;
+  return &scr_os_cls[scr_os_ncls++];
+}
+static ScrOsSlot *scr_os_find(const void *k, bool create) {
+  if (scr_os_cap == 0 || (scr_os_used + 1) * 2 > scr_os_cap) {
+    ScrOsSlot *old = scr_os_tab; size_t oc = scr_os_cap;
+    scr_os_cap = oc ? oc * 2 : 1024;
+    scr_os_tab = (ScrOsSlot *)calloc(scr_os_cap, sizeof *scr_os_tab);
+    scr_os_used = 0;
+    for (size_t j = 0; j < oc; j++) {
+      if (old[j].k == NULL || old[j].cnt == 0) continue;
+      size_t i = scr_os_h(old[j].k) & (scr_os_cap - 1);
+      while (scr_os_tab[i].k != NULL) i = (i + 1) & (scr_os_cap - 1);
+      scr_os_tab[i] = old[j]; scr_os_used++;
+    }
+    free(old);
+  }
+  size_t i = scr_os_h(k) & (scr_os_cap - 1);
+  while (scr_os_tab[i].k != NULL) { if (scr_os_tab[i].k == k) return &scr_os_tab[i]; i = (i + 1) & (scr_os_cap - 1); }
+  if (!create) return NULL;
+  scr_os_tab[i].k = k; scr_os_used++;
+  return &scr_os_tab[i];
+}
+static void scr_os_new(const void *o, const ScrDynClass *cls) {
+  static int armed = 0;
+  if (!armed) { armed = 1; atexit(scr_os_atexit); }
+  ScrOsSlot *sl = scr_os_find(o, true);
+  ScrOsCls *c = scr_os_cls_of(cls);
+  sl->cls = cls;
+  if (sl->cnt++ == 0) { scr_os_distinct++; c->distinct++; }
+  c->boxes++; scr_os_live++; scr_os_total++;
+  if (scr_os_live > scr_os_peak && (scr_os_live & 255) == 0) {
+    scr_os_peak = scr_os_live; scr_os_peak_distinct = scr_os_distinct; scr_os_peak_ncls = scr_os_ncls;
+    for (size_t i = 0; i < scr_os_ncls; i++) scr_os_peak_cls[i] = scr_os_cls[i];
+  }
+  if ((++scr_os_events & 0xFFFFFu) == 0) scr_os_report("tick");
+}
+static void scr_os_free(const void *o, const ScrDynClass *cls) {
+  ScrOsSlot *sl = scr_os_find(o, false);
+  ScrOsCls *c = scr_os_cls_of(cls);
+  if (sl == NULL || sl->cnt == 0) return;
+  c->boxes--; scr_os_live--;
+  if (--sl->cnt == 0) { scr_os_distinct--; c->distinct--; }
+}
+#endif
 ScrDyn *scr_dyn_new_objinst(void *o, const ScrDynClass *cls) {
   ScrDyn *d = scr_dyn_alloc(SCR_DYN_OBJINST);
   d->v.inst.o = cls->retain(o);
   d->v.inst.cls = cls;
+#ifdef SCR_OBJSTAT
+  scr_os_new(o, cls);
+#endif
   return d;
 }
 
