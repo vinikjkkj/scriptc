@@ -6847,7 +6847,9 @@ extern size_t scr_cyc_live;
 #define SCR_PROPS_GHOST_ADD(n) ((void)(n))
 #define SCR_PROPS_GHOST_SUB(n) ((void)(n))
 #endif
-static inline const ScrDynEntry *scr_dyn_props_find(const ScrDyn *tbl, const char *key, size_t key_len) {
+/* Out of line on purpose: inlined into scr_cls_props_get/has the loop gave every call a larger prologue, including the calls that find no table at all
+ * (about 4 in 5 on the mysql bench: +17 instructions each). Each unit that uses it gets its own static copy. */
+static __attribute__((noinline)) const ScrDynEntry *scr_dyn_props_find(const ScrDyn *tbl, const char *key, size_t key_len) {
   /* The count-down walk of scr_dyn_obj_get, for its reason: the empty asm keeps the counter a live value, so clang does not rewrite the loop into
    * "advance until an end pointer" (a len * 24 setup on every call). It emits no instruction of its own. */
   const ScrDynEntry *e = tbl->v.obj.entries;
