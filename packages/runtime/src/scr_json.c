@@ -570,6 +570,10 @@ static size_t scr_dyn_free_count;
 #define SCR_PARKFREE_OBJ 64
 #endif
 /* LAB counters: park-time frees. Printed to stderr at exit when SCR_PARKSTAT is set (through the exit hook, since process.exit skips destructors). */
+#ifndef SCR_PARKKEEP_K
+#define SCR_PARKKEEP_K 8
+#endif
+static unsigned scr_pk_arr, scr_pk_obj; /* big buffers currently parked (kept) per kind */
 static unsigned long long scr_ss_pf_arr, scr_ss_pf_obj;
 extern void (*scr_layout_prof_exit)(void);
 static void scr_ss_pf_report(void) {
@@ -595,6 +599,7 @@ static void scr_dyn_idle_trim(void) {
    * count moves again on the next settle.) The walk itself costs about 5 Ir per parked node. */
   if (scr_dyn_free_count == scr_dyn_trim_seen) return;
   scr_dyn_trim_seen = scr_dyn_free_count;
+  scr_pk_arr = 0; scr_pk_obj = 0; /* the walk below frees every big kept buffer (trim thresholds < keep thresholds) */
   for (ScrDyn *d = scr_dyn_free_lists[4]; d != NULL; d = (ScrDyn *)(size_t)d->rc)
     if (d->v.arr.cap > SCR_DYN_TRIM_ARR) { free(d->v.arr.items); d->v.arr.items = NULL; d->v.arr.cap = 0; }
   for (ScrDyn *d = scr_dyn_free_lists[5]; d != NULL; d = (ScrDyn *)(size_t)d->rc)
@@ -750,9 +755,11 @@ static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
     d->static_copy = false;
     d->module_ns = false;
     if (kind == SCR_DYN_ARR) {
+      if (d->v.arr.cap > SCR_PARKFREE_ARR) scr_pk_arr--;
       d->v.arr.len = 0; /* cap/items preserved from the node's last life */
       d->v.arr.ext = NULL; /* release already dropped it; belt and braces */
     } else if (kind == SCR_DYN_OBJ) {
+      if (d->v.obj.cap > SCR_PARKFREE_OBJ) scr_pk_obj--;
       d->v.obj.len = 0; /* cap/entries preserved */
       d->v.obj.ext = NULL; /* release already dropped it; belt and braces */
     } else {
@@ -1097,8 +1104,8 @@ static __attribute__((noinline)) void scr_dyn_release_final(ScrDyn *d) {
      * buffer entry and every edge it owned has been released. */
     /* LAB (parkfree-t256): a parked node keeps its buffer unless it is BIG (more than SCR_PARKFREE_ARR slots / SCR_PARKFREE_OBJ entries), then the buffer is freed here and the node parks empty,
      * so a parked node can never hand a big buffer to a small container (the mysql bimodality: the 751-slot params vectors and 92-slot option tables). Smaller buffers keep today's reuse. */
-    if (d->kind == SCR_DYN_ARR && d->v.arr.cap > SCR_PARKFREE_ARR) { scr_ss_pf_arr++; free(d->v.arr.items); d->v.arr.items = NULL; d->v.arr.cap = 0; }
-    if (d->kind == SCR_DYN_OBJ && d->v.obj.cap > SCR_PARKFREE_OBJ) { scr_ss_pf_obj++; free(d->v.obj.entries); d->v.obj.entries = NULL; d->v.obj.cap = 0; }
+    if (d->kind == SCR_DYN_ARR && d->v.arr.cap > SCR_PARKFREE_ARR) { if (scr_pk_arr < SCR_PARKKEEP_K) scr_pk_arr++; else { scr_ss_pf_arr++; free(d->v.arr.items); d->v.arr.items = NULL; d->v.arr.cap = 0; } }
+    if (d->kind == SCR_DYN_OBJ && d->v.obj.cap > SCR_PARKFREE_OBJ) { if (scr_pk_obj < SCR_PARKKEEP_K) scr_pk_obj++; else { scr_ss_pf_obj++; free(d->v.obj.entries); d->v.obj.entries = NULL; d->v.obj.cap = 0; } }
     d->rc = (size_t)(void *)*list; /* buffer and capacity survive intact */
     *list = d;
     scr_dyn_free_count++;
