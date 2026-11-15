@@ -1,6 +1,6 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
-import { parseLayoutOrder, reorderLlvmText, type LayoutOrder } from "./backend/layout-order.js";
+import { cDefinedNames, layoutMatchStats, layoutStaleWarning, llvmDefinedNames, parseLayoutOrder, reorderLlvmText, type LayoutOrder } from "./backend/layout-order.js";
 import { tapPhase, tapped } from "./phase-tap.js";
 import { basename, dirname, join, resolve } from "node:path";
 import { cacheRootDir, CcCompileError, compileC, compileLibArchive, resolveCc, targetPlatform } from "./backend/cc.js";
@@ -1202,6 +1202,36 @@ function recordResolutionAnchors(entryPath: string): void {
   }
 }
 
+/** One stderr line, once per process, when an order file names mostly functions this program no longer has (see layoutStaleWarning). */
+let layoutStaleWarned = false;
+async function warnIfLayoutOrderStale(
+  orderPath: string,
+  order: ReturnType<typeof parseLayoutOrder>,
+  backend: "c" | "llvm",
+  programPath: string,
+  programUnits: readonly string[],
+  outDir: string,
+): Promise<void> {
+  if (layoutStaleWarned) return;
+  const defined = new Set<string>();
+  try {
+    if (backend === "llvm") {
+      for (const n of llvmDefinedNames(await readFile(programPath, "utf8"))) defined.add(n);
+    } else {
+      for (const file of [programPath, ...programUnits.map((u) => (u.includes("/") || u.includes("\\") ? u : join(outDir, u)))]) {
+        for (const n of cDefinedNames((await readFile(file, "utf8")).split("\n"))) defined.add(n);
+      }
+    }
+  } catch {
+    return; // a warning must never fail a build
+  }
+  const warning = layoutStaleWarning(orderPath, layoutMatchStats(order, defined));
+  if (warning !== null) {
+    layoutStaleWarned = true;
+    process.stderr.write(`${warning}\n`);
+  }
+}
+
 /** Everything that is an input to this build and is NOT a file. See
  * frontend/early-cache.ts for why the SCRIPTC_* env rule is a blanket. */
 async function earlyCacheOptionsFor(
@@ -1493,6 +1523,7 @@ async function compileTracked(
   // binary below was linked from. The same sweep runs on a cache hit, from
   // the same helper, so the two paths cannot leave different directories.
   await sweepStaleOutputs(opts.outDir, stem, backend, programUnits.length, programHeader !== undefined);
+  if (layoutOrder !== undefined) await warnIfLayoutOrderStale(opts.layoutOrder!, layoutOrder, backend, cPath, programUnits, opts.outDir);
 
   const features = programNativeFeatures(lowered.module!, backend, llStats.coroLowered);
   if (emittedReadsObjinstMembers) features.dynInvoke = true;
