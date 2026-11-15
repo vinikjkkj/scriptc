@@ -76,12 +76,109 @@ queueMicrotask(() => note("qm1"));
 Promise.resolve().then(() => note("p1")).then(() => note("p2")).then(() => note("p3")).then(() => note("p4"));
 queueMicrotask(() => note("qm2"));
 
+// The source is REJECTED and the handler returns a PENDING promise that rejects later: the reaction parks again to adopt it, with the source
+// already released. The source's payload must outlive that release (the handler kept it), the derived promise must reject exactly once with
+// the inner reason, and unhandled-rejection tracking must see that one rejection (and none for the handled twin).
+process.on("unhandledRejection", (reason: any) => {
+  note("unhandled " + reason.message);
+});
+let rejectSrc1: any;
+let rejectSrc2: any;
+let rejectSrc3: any;
+let rejectInner1: any;
+let rejectInner2: any;
+let resolveInner3: any;
+let kept1: any;
+let kept3: any;
+function mk1(): any {
+  return new Promise((_res, rej) => {
+    rejectSrc1 = rej;
+  });
+}
+function arm1(src1: any): void {
+  // no downstream handler: the inner rejection surfaces as ONE unhandled rejection
+  src1.catch((e: any) => {
+    kept1 = e;
+    note("src1.handler " + e.message);
+    return pend1;
+  });
+}
+function mk2(): any {
+  return new Promise((_res, rej) => {
+    rejectSrc2 = rej;
+  });
+}
+function arm2(src2: any): void {
+  // handled downstream: no report
+  src2
+    .then(undefined, (e: any) => {
+      note("src2.handler " + e.message);
+      return pend2;
+    })
+    .catch((e: any) => note("src2.caught " + e.message));
+}
+function mk3(): any {
+  return new Promise((_res, rej) => {
+    rejectSrc3 = rej;
+  });
+}
+function arm3(src3: any): void {
+  // the adopted promise fulfils; the kept source payload is read after the adoption completes
+  src3
+    .catch((e: any) => {
+      kept3 = e;
+      return pend3;
+    })
+    .then((v: any) => note("src3.done " + v + " " + kept3.message));
+}
+let resolveSrc4: any;
+let resolveInner4: any;
+function mk4(): any {
+  return new Promise((res) => {
+    resolveSrc4 = res;
+  });
+}
+// a FULFILLED source whose only holder is the reaction (no rejection ledger entry): releasing it when the adoption starts is the last drop
+function arm4(src4: any): void {
+  src4
+    .then((v: any) => {
+      note("src4.handler " + v);
+      return pend4;
+    })
+    .then((v: any) => note("src4.done " + v));
+}
+const pend4: any = new Promise((res) => {
+  resolveInner4 = res;
+});
+const pend1: any = new Promise((_res, rej) => {
+  rejectInner1 = rej;
+});
+const pend2: any = new Promise((_res, rej) => {
+  rejectInner2 = rej;
+});
+const pend3: any = new Promise((res) => {
+  resolveInner3 = res;
+});
+arm1(mk1());
+arm2(mk2());
+arm3(mk3());
+arm4(mk4());
+
 setTimeout(() => {
   resolveA(10);
+  rejectSrc1(new Error("s1"));
+  rejectSrc2(new Error("s2"));
+  rejectSrc3(new Error("s3"));
+  resolveSrc4("v4");
   rejectB(new Error("late"));
   setTimeout(() => {
     resolveInner("inner-value");
+    rejectInner1(new Error("i1"));
+    rejectInner2(new Error("i2"));
+    resolveInner3("i3");
+    resolveInner4("i4");
     setTimeout(() => {
+      note("kept1 " + kept1.message);
       for (const line of log) console.log(line);
       vals.sort();
       for (const line of vals) console.log(line);
