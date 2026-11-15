@@ -15848,6 +15848,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25363-a-leaf-closure-released-while-boxed-and-then-freed-leaves-no-stale-cycle-root.ts": {
+   "order": [
+    "<repo>/tests/corpus/25363-a-leaf-closure-released-while-boxed-and-then-freed-leaves-no-stale-cycle-root.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2537-destructuring-assign-member-targets.ts": {
    "order": [
     "<repo>/tests/corpus/2537-destructuring-assign-member-targets.ts"
