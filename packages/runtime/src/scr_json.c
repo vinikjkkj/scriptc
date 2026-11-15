@@ -1688,7 +1688,9 @@ void scr_dyn_obj_set_proto(ScrDyn *obj, ScrDyn *proto) {
 
 /* Public: the compiler-emitted static→dyn converters push through this
  * too. Ownership of the item moves in. */
+extern void scr_as_note(const void *ra, size_t n, int which);
 void scr_dyn_arr_reserve(ScrDyn *arr, size_t n) {
+  scr_as_note(__builtin_return_address(0), n, 0);
   /* Only an array has an items buffer, and a node is allocated at its kind's size: reading v.arr of any other kind would run past it. */
   if (arr->kind != SCR_DYN_ARR || n <= (size_t)arr->v.arr.cap || n > SCR_DYN_LEN_MAX) return;
   ScrDyn **items = realloc(arr->v.arr.items, n * sizeof *items);
@@ -2618,6 +2620,7 @@ ScrDyn *scr_dyn_new_arr(void) {
  * exactly and only the hole-vs-undefined observers (`i in a`,
  * Object.keys, forEach/map's skip) can tell. Returns +1. */
 ScrDyn *scr_dyn_new_arr_len(double n) {
+  scr_as_note(__builtin_return_address(0), (size_t)n, 1);
   if (!(n >= 0) || n > 4294967295.0 || n != (double)(uint32_t)n) {
     static const char msg[] = "Invalid array length";
     scr_throw_error_msg(SCR_ERR_RANGE, msg, sizeof msg - 1);
@@ -16770,4 +16773,34 @@ ScrDyn *scr_dyn_origin_mark_elem(ScrDyn *d, void *obj, const char *tkey, void *(
 void scr_rec_swap_body(void *a, void *b, size_t size) {
   unsigned char *x = (unsigned char *)a + sizeof(size_t), *y = (unsigned char *)b + sizeof(size_t);
   for (size_t i = 0; i + sizeof(size_t) < size; i++) { unsigned char t = x[i]; x[i] = y[i]; y[i] = t; }
+}
+
+/* LAB (ashsite), never lands: which call sites reserve a dyn array of 256 or more slots, and how often. */
+#include <stdio.h>
+typedef struct { const void *ra; size_t n; int which; unsigned long long cnt; } ScrAsSite;
+static ScrAsSite scr_as_tab[4096];
+void scr_as_note(const void *ra, size_t n, int which) {
+  unsigned h, i;
+  if (n < 256) return;
+  h = (unsigned)((((size_t)ra >> 2) ^ (n * 40503u) ^ (unsigned)which) * 2654435761u) >> 20;
+  for (i = 0; i < 4096; i++, h = (h + 1) & 4095u) {
+    if (scr_as_tab[h].ra == ra && scr_as_tab[h].n == n && scr_as_tab[h].which == which) { scr_as_tab[h].cnt++; return; }
+    if (scr_as_tab[h].ra == NULL) { scr_as_tab[h].ra = ra; scr_as_tab[h].n = n; scr_as_tab[h].which = which; scr_as_tab[h].cnt = 1; return; }
+  }
+}
+__attribute__((destructor)) static void scr_as_report(void) {
+  const char *path = getenv("SCR_ASHSITE_OUT");
+  FILE *f;
+  int top, bi;
+  unsigned i;
+  if (!path || !(f = fopen(path, "w"))) return;
+  fprintf(f, "ASHSITE-ANCHOR %p\n", (void *)&scr_collect_cycles);
+  for (top = 0; top < 40; top++) {
+    unsigned long long best = 0; bi = -1;
+    for (i = 0; i < 4096; i++) if (scr_as_tab[i].ra != NULL && scr_as_tab[i].cnt > best) { best = scr_as_tab[i].cnt; bi = (int)i; }
+    if (bi < 0) break;
+    fprintf(f, "ASHSITE ra=%p n=%zu which=%d count=%llu\n", scr_as_tab[bi].ra, scr_as_tab[bi].n, scr_as_tab[bi].which, scr_as_tab[bi].cnt);
+    scr_as_tab[bi].cnt = 0;
+  }
+  fclose(f);
 }
