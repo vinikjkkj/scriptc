@@ -2702,6 +2702,7 @@ static inline ScrClosure *scr_closure_retain(ScrClosure *c) {
 }
 
 void scr_closure_release(ScrClosure *c); /* releases the boxes; NULL-tolerant */
+bool scr_closure_may_cycle_x(const ScrClosure *c); /* the predicate that admits a closure to the cycle-root buffer */
 void scr_closure_free_dead(ScrClosure *c); /* the teardown once the count reached zero (scr_dyn_release reaches it too) */
 
 /* The slot of a by-value capture of a closure (SCR_CAP_TAG_CLO): retains (NULL-tolerant) and tags. Out of line, so both emitters call the same symbol. */
@@ -5655,6 +5656,16 @@ _Static_assert(offsetof(ScrDyn, kind) == offsetof(ScrClosure, kind) && sizeof(Sc
                "a ScrClosure is the head of a dyn FUNC value: its kind and flag bytes sit where ScrDyn keeps its own");
 _Static_assert(offsetof(ScrDyn, v.fn.desc) == offsetof(ScrClosure, w), "a FUNC node and an embedded closure keep the descriptor at the same offset (scr_dyn_fn_desc reads it without a representation test)");
 _Static_assert(SCR_DYN_FUNC == 8, "backend/closure-layout.ts CLOSURE_DYN_FUNC_KIND hardcodes the kind code in the LLVM lane's closure literals");
+/* Fills in a runtime-made IMMORTAL closure that lives inside a larger zeroed object (a per-method wrapper record): the same fields SCR_CLO_STATIC writes. */
+static inline void scr_closure_init_static(ScrClosure *c, void *fn) {
+  c->rc = SIZE_MAX;
+  c->kind = (uint32_t)SCR_DYN_FUNC;
+  c->isdyn = 1;
+  c->ncaps8 = 0;
+  c->pad[0] = c->pad[1] = 0;
+  c->fn = fn;
+  c->w = SCR_CLO_W_STATIC;
+}
 /* The closure a FUNC value calls: the value itself when it is an embedded closure (ScrClosure above), else the stand-alone node's pointer. */
 static inline ScrClosure *scr_dyn_fn_clo(const ScrDyn *d) { return ((const ScrClosure *)d)->isdyn ? (ScrClosure *)(uintptr_t)d : d->v.fn.clo; }
 

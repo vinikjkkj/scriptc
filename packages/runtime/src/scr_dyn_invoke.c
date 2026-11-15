@@ -1973,8 +1973,7 @@ ScrDyn *objinst_member_row_get(ScrDyn *d, const ScrStr *key, const ScrDynClassMe
       fputs("scriptc: out of memory\n", stderr);
       abort();
     }
-    w->clo.rc = SIZE_MAX; /* immortal, like an interned top-level function */
-    w->clo.fn = (void *)objinst_method_thunk;
+    scr_closure_init_static(&w->clo, (void *)objinst_method_thunk); /* immortal, like an interned top-level function */
     w->cls = cls;
     w->cm = cm;
     w->next = scr_objinst_fns;

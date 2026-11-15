@@ -400,8 +400,7 @@ static ScrDyn *dyn_proto_method_value(const ScrDynClass *idesc, const ScrDynClas
   if (w == NULL) {
     w = (DynProtoFn *)calloc(1, sizeof *w);
     if (w == NULL) scr_trap("scriptc: out of memory\n");
-    w->clo.rc = SIZE_MAX; /* immortal, like an interned top-level function */
-    w->clo.fn = (void *)dyn_proto_method_thunk;
+    scr_closure_init_static(&w->clo, (void *)dyn_proto_method_thunk); /* immortal, like an interned top-level function */
     w->idesc = idesc;
     w->row = row;
     w->kind = kind;
