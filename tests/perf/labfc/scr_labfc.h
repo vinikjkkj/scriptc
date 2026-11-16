@@ -27,8 +27,7 @@ static void __attribute__((unused)) scr_labfc_report(void) {
   for (int k = 0; k < 2; k++)
     for (int i = 0; i < 64; i++)
       if (scr_labfc_cnt[k][i] != 0) fprintf(f, "%c %d %llu\n", k == 0 ? 'R' : 'W', i, scr_labfc_cnt[k][i]);
-  for (int i = 0; i < 64; i++) { unsigned long long t = 0; for (int c = 0; c < 6; c++) t += scr_labfc_val[i][c]; if (t != 0) fprintf(f, "V %d u10=%llu u16=%llu u32=%llu big=%llu frac=%llu other=%llu
-", i, scr_labfc_val[i][0], scr_labfc_val[i][1], scr_labfc_val[i][2], scr_labfc_val[i][3], scr_labfc_val[i][4], scr_labfc_val[i][5]); }
+  for (int i = 0; i < 64; i++) { unsigned long long t = 0; for (int c = 0; c < 6; c++) t += scr_labfc_val[i][c]; if (t != 0) fprintf(f, "V %d u10=%llu u16=%llu u32=%llu big=%llu frac=%llu other=%llu\n", i, scr_labfc_val[i][0], scr_labfc_val[i][1], scr_labfc_val[i][2], scr_labfc_val[i][3], scr_labfc_val[i][4], scr_labfc_val[i][5]); }
   if (f != stderr) fclose(f);
 }
 __attribute__((constructor)) static void scr_labfc_install(void) {
