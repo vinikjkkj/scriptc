@@ -7271,6 +7271,7 @@ export class Lowerer {
     // The baked consumers rebuild NOW — before moduleArtifacts collects the
     // shapes a body names and before armOwnMasks installs into it.
     for (const shapeId of rewritten) {
+      if (this.enumOrderBakes.get(shapeId)?.indexable.has("inspect")) rebuildRecordInspect(this, shapeId);
       for (const refill of this.enumOrderBakes.get(shapeId)?.refills ?? []) applyEnumRefill(this, refill, "rebuild");
     }
     this.keyOrderReconciled = true;
