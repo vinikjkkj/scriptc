@@ -1156,13 +1156,11 @@ __attribute__((noinline)) void scr_dyn_release(ScrDyn *d) {
     }
     if (d->kind < SCR_DYN_FUNC) return; /* null, bool, number, string, undefined, bytes: past the ARR/OBJ test above, the same compare the plain chain made for FUNC */
     if (d->kind == SCR_DYN_OBJINST) {
-      /* byte 13 is the high byte of the instance's class slot: 0x80 head, 0x40 a possible root, 0x20 a possible root once its container bit is set. A
-       * stand-alone node and a head of a class that cannot be in a cycle have neither (the count is already down); a gated instance whose bit is still
-       * clear is not a root either. No class-table read on any of those. */
-      const unsigned f = ((const uint8_t *)d)[13];
-      if ((f & 0x60u) == 0) return;
-      if ((f & 0x40u) == 0 && (scr_cyc_hdr(d)->blk & SCR_CYC_CBIT) == 0) return;
-      scr_dyn_release_inst(d);
+      /* Two byte tests decide it, in the order the common case needs them. The container bit (cycle header, set only on a gated head instance
+       * that was handed a container) says "a root now"; byte 13 (the high byte of the head's class slot) carries 0x40 for a class that can sit
+       * in a garbage cycle and is not gated, which is always a root. A stand-alone node, a head of a class that cannot be in a cycle and a
+       * gated instance whose bit is still clear have neither: the count is already down and nothing else is read. */
+      if ((scr_cyc_hdr(d)->blk & SCR_CYC_CBIT) != 0 || (((const uint8_t *)d)[13] & 0x40u) != 0) scr_dyn_release_inst(d);
       return;
     }
     if (d->kind == SCR_DYN_FUNC) {
