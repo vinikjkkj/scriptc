@@ -1560,6 +1560,48 @@ static void scr_cyc_ar_unlink(ScrCycChunk *c) {
   c->prevp = NULL;
 }
 
+#ifdef SCR_HS_CHUNKS
+/* LAB ONLY: the startup-heap chunk census. A flat registry of every live chunk and a dump that reports, per chunk, how much is carved (bump) and how many pages are RESIDENT
+ * (mincore over the chunk's 64 KiB), split into the carved span and the untouched tail. */
+#include <sys/mman.h>
+#include <unistd.h>
+static ScrCycChunk *scr_hs_reg[8192];
+static size_t scr_hs_nreg;
+static void scr_hs_reg_add(ScrCycChunk *c) { if (scr_hs_nreg < 8192) scr_hs_reg[scr_hs_nreg++] = c; }
+static void scr_hs_reg_del(ScrCycChunk *c) {
+  for (size_t i = 0; i < scr_hs_nreg; i++) if (scr_hs_reg[i] == c) { scr_hs_reg[i] = scr_hs_reg[--scr_hs_nreg]; return; }
+}
+void scr_hs_chunks_dump(FILE *f, const char *tag) {
+  size_t pg = (size_t)sysconf(_SC_PAGESIZE);
+  unsigned long tot_carved = 0, tot_res = 0, tot_resc = 0, tot_rest = 0, tot_pages = 0, tot_untouched_pages = 0, nvm = 0, tot_used_b = 0;
+  for (size_t i = 0; i < scr_hs_nreg; i++) {
+    ScrCycChunk *c = scr_hs_reg[i];
+    uintptr_t base = (uintptr_t)(void *)c, a0 = base & ~(uintptr_t)(pg - 1u), end = (uintptr_t)(void *)c->lim;
+    size_t npg = (size_t)((end - a0 + pg - 1u) / pg);
+    unsigned char vec[64];
+    unsigned long res = 0, resc = 0, rest = 0, carved = (unsigned long)(c->bump - ((unsigned char *)c + SCR_CYC_ARENA_GRAN));
+    uintptr_t bump = (uintptr_t)(void *)c->bump;
+    if (npg > 64u || mincore((void *)a0, npg * pg, vec) != 0) { fprintf(f, "HSCHUNK-ERR %zu\n", i); continue; }
+    for (size_t k = 0; k < npg; k++) {
+      if (!(vec[k] & 1u)) continue;
+      res++;
+      if (a0 + k * pg < bump) resc++; else rest++;
+    }
+    fprintf(f, "HSCHUNK %s blk=%u stride=%u used=%u carved=%lu slots=%lu pages=%zu resident=%lu res_in_carved=%lu res_in_tail=%lu vm=%u\n", tag, (unsigned)c->blk, (unsigned)c->stride, (unsigned)c->used,
+            carved, c->stride ? carved / c->stride : 0ul, npg, res, resc, rest, (unsigned)c->vm);
+    tot_carved += carved; tot_res += res; tot_resc += resc; tot_rest += rest; tot_pages += npg; nvm += c->vm; tot_used_b += (unsigned long)c->used * c->stride;
+    tot_untouched_pages += npg - res;
+  }
+  fprintf(f, "HSCHUNK-TOTAL %s chunks=%zu vm=%lu pages=%lu resident=%lu (%.1f%%) res_in_carved=%lu res_in_tail=%lu carved_bytes=%lu used_bytes=%lu resident_bytes=%lu untouched_pages=%lu\n", tag, scr_hs_nreg, nvm, tot_pages, tot_res,
+          tot_pages ? 100.0 * (double)tot_res / (double)tot_pages : 0.0, tot_resc, tot_rest, tot_carved, tot_used_b, tot_res * pg, tot_untouched_pages);
+}
+#define SCR_HS_REG_ADD(c) scr_hs_reg_add(c)
+#define SCR_HS_REG_DEL(c) scr_hs_reg_del(c)
+#else
+#define SCR_HS_REG_ADD(c) ((void)0)
+#define SCR_HS_REG_DEL(c) ((void)0)
+#endif
+
 /* NULL when the chunk could not be had — a budget refusal or a real OOM.
  * Every caller falls back to calloc, so a failure here is a slower program
  * and not a broken one. */
@@ -1611,6 +1653,7 @@ static ScrCycChunk *scr_cyc_ar_new(uint8_t blk, size_t stride) {
   c->cand = 0;
   c->swept_used = UINT32_MAX;
   scr_cyc_ar_held += SCR_CYC_ARENA_CHUNK;
+  SCR_HS_REG_ADD(c);
   SCR_PC_LINK(c);
   SCR_CS_BUMP(archunk);
   SCR_CS_MAX(arpeak, scr_cyc_ar_held / SCR_CYC_ARENA_CHUNK);
@@ -1620,6 +1663,7 @@ static ScrCycChunk *scr_cyc_ar_new(uint8_t blk, size_t stride) {
 /* Only ever reached for a chunk that is NOT its class's current one, so
  * `avail` here can only mean "on the partial list". */
 static void scr_cyc_ar_release(ScrCycChunk *c) {
+  SCR_HS_REG_DEL(c);
   if (c->avail) scr_cyc_ar_unlink(c);
   SCR_PC_UNLINK(c);
   scr_cyc_ar_held -= SCR_CYC_ARENA_CHUNK;
