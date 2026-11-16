@@ -2198,7 +2198,8 @@ void scr_cyc_on_release(void *obj) {
     if (__builtin_expect(scr_nroots == scr_roots_cap, 0)) {
       scr_roots_cap = scr_roots_cap ? scr_roots_cap * 2 : 64;
       /* The 27-bit index of the cycle header addresses at most SCR_CYC_IDX_MASK + 1 slots; past that the buffer cannot be indexed, which is the same abort as running out of memory. */
-      scr_roots = scr_roots_cap > (size_t)SCR_CYC_IDX_MASK + 1u ? NULL : realloc(scr_roots, scr_roots_cap * sizeof *scr_roots);
+      if (scr_roots_cap > (size_t)SCR_CYC_IDX_MASK + 1u) scr_cyc_oom();
+      scr_roots = realloc(scr_roots, scr_roots_cap * sizeof *scr_roots);
       if (!scr_roots) scr_cyc_oom();
     }
     h->w = (h->w & ~SCR_CYC_IDX_MASK) | SCR_CYC_BUF | (uint32_t)scr_nroots;
