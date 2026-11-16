@@ -856,7 +856,7 @@ function dynSlotWhy(L: Lowerer, t: IrType): string | null {
 function collectKeyedShapes(functions: IrFunction[], L: Lowerer): { keyed: Set<string>; written: Map<string, Set<string>> } {
   const kinds = new Set([
     "recordKeyGet", "recordKeySet", "recordKeyDelete", "recordOrd", "recordProtoHasKey", "recordOvfKeys", "recordOvfHas",
-    "recordOvfSlots", "recordOvfSlotGet", "recordHasSrc", "recordSrcGet",
+    "recordOvfSlots", "recordOvfSlotGet", "recordHasSrc", "recordSrcGet", "recordSrcPresent",
     "recordSrcSet", "recordSrcView", "recordNullProto", "recordKeyOrderIs",
   ]);
   const out = new Set<string>();

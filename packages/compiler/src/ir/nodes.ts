@@ -8220,6 +8220,8 @@ export type IrExpr =
   | { kind: "recordHasSrc"; obj: IrExpr; shapeId: string; type: IrType; loc: SrcLoc }
   | { kind: "recordSrcGet"; obj: IrExpr; shapeId: string; field: string; own?: true; type: IrType; loc: SrcLoc }
   | { kind: "recordSrcSet"; obj: IrExpr; shapeId: string; field: string; value: IrExpr; unset?: true; type: IrType; loc: SrcLoc }
+  /** STRUCT VIEW: the own-key question of one target field, answered from the SOURCE struct (recordKeyPresent's twin for a record whose view slot holds a source): the source's own-key mask when it carries one and the field has a bit, otherwise the field's undefined-arm tag test. Needs no dynamic copy of the source, so a source with a platform-object member (an AbortSignal, an agent) answers it. `orSlot` is `in`'s question. */
+  | { kind: "recordSrcPresent"; obj: IrExpr; shapeId: string; field: string; orSlot?: true; type: IrType; loc: SrcLoc }
   | { kind: "recordSrcView"; src: IrExpr; srcShapeId: string; shapeId: string; /** The hidden toString slot fill (a `() => string` closure over the source), as recordLit's: present only on a class view whose class has a callable toString. */ toStr?: IrExpr; type: IrType; loc: SrcLoc }
   /** Does `obj`'s SOURCE [[Prototype]] chain carry `key`? — the `in`
    * operator's last question, after the declared names and the overflow

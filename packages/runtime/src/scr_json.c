@@ -16706,6 +16706,23 @@ void *scr_recsrc_slot(const ScrDyn *slot, size_t idx) {
 void *scr_recsrc_slot_or(const ScrDyn *slot, size_t idx, void *own) {
   return scr_recsrc_slot_or_i(slot, idx, own);
 }
+/* The own-key question of target field `idx` answered from the SOURCE struct (see recordSrcPresent in ir/nodes.ts): the source's own-key mask when it has one armed and the field owns a bit, else the field's undefined-arm tag
+ * test (`utag` < 0: no such arm, always present). A field the source does not hold (offset < 0, a class method) is present. Reads the source in place, never builds a dynamic copy. */
+bool scr_recsrc_present(const ScrDyn *slot, size_t idx, int utag, bool or_slot) {
+  const ScrRecSrc *r = scr_recsrc_of(slot);
+  long long off = r->map->off[idx];
+  bool arm = true;
+  if (off < 0) return true;
+  if (utag >= 0) {
+    const ScrUnion *u = *(ScrUnion *const *)((const char *)r->src + off);
+    arm = u->tag != (uint32_t)utag;
+  }
+  if (r->map->own_off >= 0 && r->map->own_bit[idx]) {
+    const unsigned char *m = (const unsigned char *)r->src + r->map->own_off;
+    if (m[0]) return ((m[r->map->own_byte[idx]] & r->map->own_bit[idx]) != 0) || (or_slot && utag >= 0 && arm);
+  }
+  return arm;
+}
 void scr_recsrc_unown(const ScrDyn *slot, size_t idx) {
   const ScrRecSrc *r = scr_recsrc_of(slot);
   if (r->map->own_off >= 0 && r->map->own_bit[idx]) ((unsigned char *)r->src + r->map->own_off)[r->map->own_byte[idx]] &= (unsigned char)~r->map->own_bit[idx];

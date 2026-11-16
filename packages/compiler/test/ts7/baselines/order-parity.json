@@ -15872,6 +15872,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25380-a-record-seen-through-a-narrower-view-over-a-source-with-platform-object-members-answers-in-and-reads-exactly.ts": {
+   "order": [
+    "<repo>/tests/corpus/25380-a-record-seen-through-a-narrower-view-over-a-source-with-platform-object-members-answers-in-and-reads-exactly.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2539-class-instance-rest.ts": {
    "order": [
     "<repo>/tests/corpus/2539-class-instance-rest.ts"

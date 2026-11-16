@@ -6604,6 +6604,7 @@ const ScrRecSrc *scr_recsrc_of(const ScrDyn *slot); /* NULL when the slot is not
 ScrDyn *scr_rec_view_cross(ScrDyn *slot);
 void *scr_recsrc_slot(const ScrDyn *slot, size_t idx); /* the field slot in the source struct */
 void *scr_recsrc_slot_or(const ScrDyn *slot, size_t idx, void *own); /* the same, or `own` when the source holds no such field (offset < 0) */
+bool scr_recsrc_present(const ScrDyn *slot, size_t idx, int utag, bool or_slot); /* recordSrcPresent: the own-key question of target field idx, from the source struct */
 /* The hot form, for a record whose view slot is NULL (not a view: `own`) or a struct view over a source (a class-sourced view of a shape no
  * dynamic-object view reaches): the source slot, or `own` when the source holds no such field (offset < 0). The caller knows the slot is
  * one of those two; nothing is checked. */

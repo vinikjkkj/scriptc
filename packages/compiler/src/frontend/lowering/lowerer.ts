@@ -12935,6 +12935,18 @@ export class Lowerer {
       out = { kind: "ternary", cond: isView(), then: via, else_: copy as unknown as IrExpr, type: e["type"] as IrType, loc };
     } else if (kind === "recordKeyPresent") {
       out = { kind: "ternary", cond: isView(), then: { kind: "dynHasKey", key: e["field"] as string, value: view(), type: BOOL, loc }, else_: copy as unknown as IrExpr, type: BOOL, loc };
+      // A record that views ANOTHER record's struct answers from that struct (its own-key mask or the field's undefined arm): the dynamic copy the arm above asks for does not exist
+      // when the source holds a member with no dynamic form (an AbortSignal, an agent), and the question never needed one.
+      if (this.structViewShapes.has(shapeId) && !this.classViewShapes.has(shapeId)) {
+        out = {
+          kind: "ternary",
+          cond: { kind: "recordHasSrc", obj: ref(), shapeId, type: BOOL, loc },
+          then: { kind: "recordSrcPresent", obj: ref(), shapeId, field: e["field"] as string, ...(e["orSlot"] === true ? { orSlot: true as const } : {}), type: BOOL, loc },
+          else_: out as IrExpr,
+          type: BOOL,
+          loc,
+        };
+      }
     } else if (kind === "recordOvfHas") {
       const key = hoist(e["key"] as IrExpr);
       copy["key"] = key();

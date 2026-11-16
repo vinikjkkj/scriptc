@@ -2883,6 +2883,14 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         );
         return { name: "", type: e.type };
       }
+      case "recordSrcPresent": {
+        // STRUCT VIEW: the own-key question of one field, from the source struct (scr_recsrc_present); the undefined-arm tag is the field's own, as recordKeyPresent passes it.
+        const obj = emitStableReceiver(E, e.obj, []);
+        const shape = E.recordsById.get(e.shapeId);
+        const idx = shape ? shape.fields.findIndex((x) => x.name === e.field) : -1;
+        if (!shape || idx < 0) throw new Error(`emitter bug: recordSrcPresent of unknown field ${e.shapeId}.${e.field}`);
+        return E.newTemp(e.type, `scr_recsrc_present(${obj.name}->${VIEW_MEMBER}, ${idx}, ${E.undefinedArmTag(shape.fields[idx]!.type)}, ${e.orSlot === true ? "true" : "false"})`);
+      }
       case "recordSrcView": {
         // A record of the target shape whose view slot is a box of the source struct and the pair's map. The source is borrowed
         // here (the box retains it).

@@ -9940,6 +9940,22 @@ class LlEmitter {
         );
         return { name: "", type: e.type };
       }
+      case "recordSrcPresent": {
+        // STRUCT VIEW (emit-exprs.ts's twin): the own-key question of one field from the source struct.
+        const obj = this.emitStableReceiver(e.obj, []);
+        const vshape = this.recordsById.get(e.shapeId);
+        if (!vshape) throw new Error(`llvm emitter bug: recordSrcPresent of unknown shape ${e.shapeId}`);
+        const idx = vshape.fields.findIndex((x) => x.name === e.field);
+        if (idx < 0) throw new Error(`llvm emitter bug: recordSrcPresent of unknown field ${e.shapeId}.${e.field}`);
+        const vp = B.tmp();
+        B.line(`${vp} = getelementptr inbounds %${mangleRecordStruct(e.shapeId)}, ptr ${obj.name}, i64 0, i32 ${viewSlotIndex(vshape)} ; <view>`);
+        const vslot = B.tmp();
+        B.line(`${vslot} = load ptr, ptr ${vp}`);
+        this.declare(`declare zeroext i1 @scr_recsrc_present(ptr, i64, i32, i1 zeroext)`);
+        const r = B.tmp();
+        B.line(`${r} = call zeroext i1 @scr_recsrc_present(ptr ${vslot}, i64 ${idx}, i32 ${this.undefinedArmTag(vshape.fields[idx]!.type)}, i1 ${e.orSlot === true ? "true" : "false"})`);
+        return { name: r, type: e.type };
+      }
       case "recordSrcView": {
         const src = this.emitExpr(e.src);
         const vshape = this.recordsById.get(e.shapeId);

@@ -4168,6 +4168,7 @@ function validateFunction(
       }
       case "recordHasSrc":
       case "recordSrcGet":
+      case "recordSrcPresent":
       case "recordSrcSet": {
         checkExpr(e.obj);
         if (e.kind === "recordSrcSet") checkExpr(e.value);
@@ -4182,6 +4183,7 @@ function validateFunction(
             const f = shape.fields.find((x) => x.name === e.field);
             if (!f) err(`${e.kind} of unknown field ${e.shapeId}.${e.field}`, e.loc);
             else if (e.kind === "recordSrcGet") expectType(e, f.type, "recordSrcGet result");
+            else if (e.kind === "recordSrcPresent") { if (e.type.kind !== "bool") err(`recordSrcPresent must be bool, got ${e.type.kind}`, e.loc); }
             else {
               expectType(e.value, f.type, "recordSrcSet value");
               if (e.type.kind !== "void") err(`recordSrcSet must be void, got ${e.type.kind}`, e.loc);
