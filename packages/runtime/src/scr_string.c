@@ -1048,6 +1048,50 @@ int scr_str_idle_drain(int *drained_out) {
     SCR_CS_MAX(sarchunkgive, tallied);
     SCR_CS_MAX(sarchunkforeign, foreign);
   }
+#ifdef SCR_STRPAGE_LAB
+  {
+    /* LAB (strpage), never lands: per-chunk live fraction and the whole free 4 KiB pages inside the chunks the drain could not free. A page counts as free only when
+     * the free blocks cover all of its bytes (a block straddling two pages counts toward both); the chunk header page never qualifies. */
+    enum { MAXC = 1024 };
+    static ScrStrChunk *cl[MAXC];
+    static unsigned short pf[MAXC][SCR_STR_ARENA_CHUNK / 4096];
+    unsigned nc = 0, i2;
+    unsigned long long carvedT = 0, freeT = 0, freeBytes = 0, wholePages = 0;
+    unsigned hist[11] = {0};
+    for (h = scr_str_ar_chunks; h != NULL && nc < MAXC; h = h->next) { cl[nc] = h; memset(pf[nc], 0, sizeof pf[nc]); nc++; }
+    for (c = 0; c <= (size_t)SCR_POOL_CLASSES; c++) {
+      size_t r = (c + 1u) * SCR_POOL_GRAIN;
+      void *b = scr_str_ar_free[c];
+      while (b != NULL) {
+        ScrStrChunk *o = scr_str_ar_chunk_of(b);
+        void *next;
+        if (o != NULL) {
+          for (i2 = 0; i2 < nc; i2++) if (cl[i2] == o) break;
+          if (i2 < nc) {
+            size_t lo = (size_t)((unsigned char *)b - (unsigned char *)o), hi = lo + r;
+            freeBytes += r; freeT++;
+            for (size_t pg = lo / 4096; pg <= (hi - 1) / 4096 && pg < SCR_STR_ARENA_CHUNK / 4096; pg++) {
+              size_t pl = pg * 4096, ph = pl + 4096, a1 = lo > pl ? lo : pl, b1 = hi < ph ? hi : ph;
+              pf[i2][pg] = (unsigned short)(pf[i2][pg] + (b1 - a1));
+            }
+          }
+        }
+        __builtin_memcpy(&next, b, sizeof next);
+        b = next;
+      }
+    }
+    for (i2 = 0; i2 < nc; i2++) {
+      unsigned long live = cl[i2]->carved - cl[i2]->freeseen;
+      unsigned bin = cl[i2]->carved ? (unsigned)(live * 10 / cl[i2]->carved) : 0;
+      hist[bin > 10 ? 10 : bin]++;
+      carvedT += cl[i2]->carved;
+      for (size_t pg = 1; pg < SCR_STR_ARENA_CHUNK / 4096; pg++) if (pf[i2][pg] >= 4096) wholePages++;
+    }
+    fprintf(stderr, "[strpage] chunks=%u carved=%llu freeBlocks=%llu freeBytes=%llu wholeFreePages=%llu (%.2f MiB) liveFracHist(0-10%%..100%%)=", nc, carvedT, freeT, freeBytes, wholePages, (double)wholePages * 4096.0 / 1048576.0);
+    for (i2 = 0; i2 < 11; i2++) fprintf(stderr, "%u ", hist[i2]);
+    fprintf(stderr, "\n");
+  }
+#endif
   /* purge, THEN free -- see the note above */
   for (c = 0; c <= (size_t)SCR_POOL_CLASSES; c++) {
     void **link = &scr_str_ar_free[c];
