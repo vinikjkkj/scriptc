@@ -636,7 +636,7 @@ __attribute__((constructor)) static void scr_dyn_idle_trim_reg(void) { scr_cyc_i
  * An incomplete trace is the SAFE direction: a ring through an untraced
  * edge is uncollectable (what the whole tree was before this change),
  * whereas a traced edge the teardown also releases is a double free. */
-/* scr_dyn_trace is external (scr_runtime.h): the collector calls it directly for kind SCR_CYC_KIND_DYN. */
+static void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx);
 static void scr_dyn_gcfree(void *o);
 /* The ghost weight (scr_runtime.h SCR_PROPS_GHOST) of a property table that is being torn down: one out-of-line copy for the release and the
  * collector's teardown, so neither carries the loop. */
@@ -821,7 +821,7 @@ ScrDyn *scr_dyn_alloc_proxy(void) { return scr_dyn_alloc(SCR_DYN_PROXY); }
 
 /* The traced children: every one is a ScrDyn or a ScrClosure, so every one
  * carries a header (or is immortal, which the visit filter skips). */
-void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx) {
+static void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx) {
   ScrDyn *d = (ScrDyn *)o;
   switch (d->kind) {
   case SCR_DYN_ARR:
