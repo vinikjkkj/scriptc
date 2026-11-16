@@ -12,12 +12,14 @@
  * A class qualifies when ALL hold:
  *  - it is a standalone class (no base, and nobody extends it), not runtime-provided, with no lazyCycle slots;
  *  - every field is a scalar, a string or a dyn field (nothing else can own a reference), and at least one is dyn;
- *  - it has no run-time property table (`%props`: the runtime writes containers into it without a field store) and no emitter mixin slot;
+ *  - it has no emitter mixin slot (the runtime writes it). A run-time property table (`%props`, filled by Object.defineProperty) is fine: its field is a dyn field whose
+ *    only writer is the IR fieldSet of `cls.propsEnsure`, a container, so the first table sets the bit like any other container store (the table's contents are the
+ *    table's own edges, not the instance's);
  *  - no struct view (`%class:<C>` source) names it, because a view could write a field without the store sites that set the bit.
  *
  * SCRIPTC_CBIT=off disables the pass (the A/B arm). SCRIPTC_CBIT_WHY=1 prints one line per gated class and per refused dyn-field class with the reason. */
 
-import { CLASS_PROPS_FIELD, EMITTER_MIXIN_FIELD_NAME, isRefCounted, type IrClassDef, type IrModule } from "./nodes.js";
+import { EMITTER_MIXIN_FIELD_NAME, isRefCounted, type IrClassDef, type IrModule } from "./nodes.js";
 
 export function cbitPass(mod: IrModule): string[] {
   const classes = mod.classes ?? [];
@@ -60,7 +62,7 @@ export function cbitPass(mod: IrModule): string[] {
       refuse("a struct view names the class");
       continue;
     }
-    const bad = c.fields.find((f) => f.name === CLASS_PROPS_FIELD || f.name === EMITTER_MIXIN_FIELD_NAME);
+    const bad = c.fields.find((f) => f.name === EMITTER_MIXIN_FIELD_NAME);
     if (bad !== undefined) {
       refuse(`field ${bad.name} is written by the runtime`);
       continue;
