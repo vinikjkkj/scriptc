@@ -28087,6 +28087,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25420-a-record-rewritten-to-its-literals-spelling-inspects-in-that-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/25420-a-record-rewritten-to-its-literals-spelling-inspects-in-that-order.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/25421-a-record-filled-by-assignment-and-returned-as-a-typed-shape-enumerates-in-fill-order.ts": {
    "order": [
     "<repo>/tests/corpus/25421-a-record-filled-by-assignment-and-returned-as-a-typed-shape-enumerates-in-fill-order.ts"
