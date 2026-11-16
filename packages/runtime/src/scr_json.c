@@ -2436,8 +2436,11 @@ __attribute__((noinline, cold)) void scr_dyn_phantom_update(void) {
     for (size_t i = 0; i < len && i < 8; i++, at += step) {
       const ScrDyn *c = *(const ScrDyn *const *)at;
       if (c == NULL) continue;
-      if (c->rc != SIZE_MAX) scr_nd_total += 2;
-      else if (c->kind == SCR_DYN_BOOL || c->kind == SCR_DYN_NULL || c->kind == SCR_DYN_NUM || c->kind == SCR_DYN_STR) scr_ph_total++;
+      if (c->rc != SIZE_MAX) {
+        /* a string box held more than once is a SHARED box (scr_dyn_new_str_conv): one live node behind several slots, which a pass still walks slot by slot, so it is a phantom like the immortal ones */
+        if (c->kind == SCR_DYN_STR && c->rc > 1) scr_ph_total++;
+        else scr_nd_total += 2;
+      } else if (c->kind == SCR_DYN_BOOL || c->kind == SCR_DYN_NULL || c->kind == SCR_DYN_NUM || c->kind == SCR_DYN_STR) scr_ph_total++;
     }
   }
   if (scr_ph_total == 0 || scr_nd_total == 0) return; /* nothing real in the sample (all slots shared boxes) would divide by zero */
@@ -2679,7 +2682,10 @@ static __attribute__((noinline)) ScrDyn *scr_bxc_miss(ScrStr *s, ScrBxcEnt *e) {
  * hit needs no eligibility test: the key is the block's address, and the entry's box keeps that block alive, so the key cannot belong to another string. */
 ScrDyn *scr_dyn_new_str_conv(ScrStr *s) {
   ScrBxcEnt *e = &scr_bxc[(unsigned)(((size_t)s >> 4) * 2654435761u) >> (32 - SCR_BXC_BITS)];
-  if (e->s == s) return scr_dyn_retain(e->box);
+  if (e->s == s) {
+    scr_dyn_phantom_note(); /* a shared handout is a slot with no new node behind it: it counts in the collector's pacing estimate like an immortal one */
+    return scr_dyn_retain(e->box);
+  }
   return scr_bxc_miss(s, e);
 }
 
