@@ -404,6 +404,21 @@ export function emitClassShapes(
       }
       return { lines, cond: acc };
     })();
+    // CONTAINER BIT (ir/cbit.ts): a gated instance is a possible cycle root only once a container was stored into it. blk is byte 10 of the 16-byte header (object - 6).
+    const cbit = traced && cls.cbit === true && lazyGate === null;
+    const bitTest = (pfx: string): { lines: string[]; cond: string } => ({
+      lines: [
+        `  %${pfx}p = getelementptr inbounds i8, ptr %o, i64 -6`,
+        `  %${pfx}b = load i8, ptr %${pfx}p`,
+        `  %${pfx}m = and i8 %${pfx}b, 64`,
+      ],
+      cond: `%${pfx}s`,
+    });
+    const cbitGate = cbit ? ((): { lines: string[]; cond: string } => {
+      const t = bitTest("cb");
+      return { lines: [...t.lines, `  %cbs = icmp ne i8 %cbm, 0`], cond: "%cbs" };
+    })() : null;
+    const releaseGate = lazyGate ?? cbitGate;
     // An embedded prefix slot (the emitter registry at 2, the stream
     // state at 4) handed to one of the runtime's prefix helpers —
     // teardown/trace/collector.
@@ -512,7 +527,7 @@ export function emitClassShapes(
         host.declare(`declare void @scr_cyc_on_release(ptr)`);
         reld.push(
           `root:`,
-          ...(lazyGate !== null ? [...lazyGate.lines, `  br i1 ${lazyGate.cond}, label %arm, label %done`, `arm:`] : []),
+          ...(releaseGate !== null ? [...releaseGate.lines, `  br i1 ${releaseGate.cond}, label %arm, label %done`, `arm:`] : []),
           `  call void @scr_cyc_on_release(ptr %o) ; possible cycle root; may collect`,
           `  br label %done`,
         );
@@ -542,7 +557,7 @@ export function emitClassShapes(
         host.declare(`declare void @scr_cyc_on_release(ptr)`);
         rel.push(
           `root:`,
-          ...(lazyGate !== null ? [...lazyGate.lines, `  br i1 ${lazyGate.cond}, label %arm, label %done`, `arm:`] : []),
+          ...(releaseGate !== null ? [...releaseGate.lines, `  br i1 ${releaseGate.cond}, label %arm, label %done`, `arm:`] : []),
           `  call void @scr_cyc_on_release(ptr %o) ; possible cycle root; may collect`,
           `  br label %done`,
         );
@@ -613,6 +628,10 @@ export function emitClassShapes(
         `define internal void @${mangleClassTrace(cls.name)}(ptr %o, ptr %visit, ptr %ctx) ${FN_ATTRS} { ; trace ${cls.name}`,
         `entry:`,
       ];
+      if (cbit) {
+        const t = bitTest("tb");
+        tr.push(...t.lines, `  %tbs = icmp ne i8 %tbm, 0`, `  br i1 %tbs, label %tbody, label %tbskip`, `tbskip:`, `  ret void`, `tbody:`); // no container ever stored: no edge to visit
+      }
       if (isEmitterRooted) tr.push(...regCall("tr", "scr_emitter_reg_trace", ", ptr %visit, ptr %ctx"));
       if (isStreamRooted) tr.push(...stCall("trs", "scr_stream_st_trace", ", ptr %visit, ptr %ctx"));
       tracedFields.forEach((f, i) => {
@@ -629,6 +648,19 @@ export function emitClassShapes(
         `define internal void @${mangleClassGcFree(cls.name)}(ptr %o) ${FN_ATTRS} { ; gcFree ${cls.name}`,
         `entry:`,
       ];
+      if (cbit) {
+        // The complement contract, decided per instance: a bit-clear instance was never traced, so release its dyn fields here.
+        const t = bitTest("gb");
+        gf.push(...t.lines, `  %gbs = icmp eq i8 %gbm, 0`, `  br i1 %gbs, label %gbclr, label %gbjoin`, `gbclr:`);
+        tracedFields.forEach((f, i) => {
+          gf.push(
+            `  %gcf${i} = getelementptr inbounds %${struct}, ptr %o, i64 0, i32 ${f.index}`,
+            `  %gcv${i} = load ptr, ptr %gcf${i}`,
+            `  call void ${releaseSym(host, f.type)}(ptr %gcv${i}) ; ${f.name} (bit clear)`,
+          );
+        });
+        gf.push(`  br label %gbjoin`, `gbjoin:`);
+      }
       if (isEmitterRooted) gf.push(...regCall("gf", "scr_emitter_reg_gcfree", ""));
       if (isStreamRooted) gf.push(...stCall("gfs", "scr_stream_st_gcfree", ""));
       untracedRefFields.forEach((f, i) => {

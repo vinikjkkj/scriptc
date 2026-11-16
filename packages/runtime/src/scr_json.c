@@ -2537,6 +2537,8 @@ static ScrDyn *scr_dyn_new_num_kept(double n) {
   return sh != NULL ? sh : scr_dyn_new_num(n);
 }
 
+void scr_cbit_note_v(void *o, const ScrDyn *v) { scr_cbit_note(o, v); }
+
 ScrDyn *scr_dyn_new_num(double n) {
 #ifdef SCR_SMALLINT_LAB
   if (scr_smallint_lab_mode() == 2) {

@@ -1785,6 +1785,10 @@ export interface IrClassDef {
    * offsets agree through any static type — then this class's own fields.
    * The validator enforces the prefix property. */
   fields: { name: string; type: IrType }[];
+  /** CONTAINER-BIT GATE (ir/cbit.ts): every field that can hold a reference is a dyn field, and the class is standalone (no base, no subclass). Its instances carry a
+   * per-instance bit in the cycle header (scr_runtime.h SCR_CYC_CBIT) that every store of a non-leaf dyn value sets; while it is clear the instance cannot be on a cycle,
+   * so its release does not buffer it as a root and its trace visits nothing (its collector teardown then releases the dyn fields itself). */
+  cbit?: true;
   /** Field names (inherited included) whose slot's undefined arm means the
    * property does not EXIST yet (a JS field the constructor assigns only in
    * a conditional position): enumeration through a dyn box skips them while
@@ -15876,4 +15880,16 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
  * key list (IrRecordShape.keyList) never orders them. */
 export function isIntegerKeyName(n: string): boolean {
   return /^(0|[1-9][0-9]*)$/.test(n) && Number(n) < 4294967295;
+}
+
+const CBIT_CACHE = new WeakMap<readonly IrClassDef[], Set<string>>();
+/** True when `className` is container-bit gated (ir/cbit.ts): one set build per module, then one lookup. */
+export function classCbit(classes: readonly IrClassDef[] | undefined, className: string): boolean {
+  if (classes === undefined) return false;
+  let t = CBIT_CACHE.get(classes);
+  if (t === undefined) {
+    t = new Set(classes.filter((c) => c.cbit === true).map((c) => c.name));
+    CBIT_CACHE.set(classes, t);
+  }
+  return t.has(className);
 }
