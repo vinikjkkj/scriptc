@@ -3248,6 +3248,11 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             if (dynNeverArm(arm)) return;
             const lits = withLits ? armDiscrimLits(def, i) : {};
             const litTest = Object.keys(lits).length > 0 ? `${dynLitHelper(E, lits)}(d)` : null;
+            // PASS 1 is the discriminant pass: a RECORD arm that pins no literal is left to pass 2. Walked here it would take, by width alone, a value
+            // whose literal discriminant names a narrower sibling (an all-optional catch-all such as zapo's Proto.IMessage is the widest arm of
+            // WaSendMessageContent and matched every `{ type: 'text', text }` before the `text` arm was tried, so the guard that followed threw the
+            // stranded-arm TypeError). A value no literal arm claims still reaches pass 2, the old chain verbatim.
+            if (withLits && litTest === null && arm.kind === "record") return;
             if (arm.kind === "undefinedT" || arm.kind === "nullT") {
               // A matched unit arm builds nothing: the result is THE interned
               // immortal instance (rc == SIZE_MAX — RC entry points and the

@@ -15932,6 +15932,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25430-a-dyn-object-with-a-literal-discriminant-takes-its-own-union-arm-over-a-wider-all-optional-record.ts": {
+   "order": [
+    "<repo>/tests/corpus/25430-a-dyn-object-with-a-literal-discriminant-takes-its-own-union-arm-over-a-wider-all-optional-record.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2550-generics-keyof-pick.ts": {
    "order": [
     "<repo>/tests/corpus/2550-generics-keyof-pick.ts"
