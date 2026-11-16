@@ -2729,6 +2729,11 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             E.emitPendingCheck();
           }
         }
+        // LAB (never shipped): SCRIPTC_LABFC=<ClassName> counts typed reads of that class's fields (tests/perf/labfc/scr_labfc.h).
+        if (e.kind === "fieldGet") {
+          const lab = labFieldIndex(E, e.className, e.field);
+          if (lab >= 0) { E.line("#ifdef SCR_LABFC"); E.line(`SCR_LABFC_R(${lab});`); E.line("#endif"); }
+        }
         // A NUMBER-SLOT field (ir/num-slot.ts): the value is the raw half when the dyn slot holds the marker.
         if (e.kind === "fieldGet" && e.type.kind === "dyn") {
           const half = numSlotHalf(E.mod.classes, e.className, e.field);
@@ -10385,4 +10390,18 @@ export function flattenStrConcat(e: Extract<IrExpr, { kind: "strConcat" }>): IrE
 /** The runtime entry for a group of `n` operands: the binary scr_str_concat for two, scr_str_concat3..8 above. */
 export function concatFn(n: number): string {
   return n === 2 ? "scr_str_concat" : `scr_str_concat${n}`;
+}
+
+/** LAB: the index of `field` in the class named by SCRIPTC_LABFC (matched as `.<name>` suffix), or -1; prints the class's field table once. */
+const labFieldTableShown = new Set<string>();
+export function labFieldIndex(E: CEmitter, className: string, field: string): number {
+  const want = process.env["SCRIPTC_LABFC"];
+  if (want === undefined || want === "" || (className !== want && !className.endsWith(`.${want}`))) return -1;
+  const def = (E.mod.classes ?? []).find((c) => c.name === className);
+  if (def === undefined) return -1;
+  if (!labFieldTableShown.has(className)) {
+    labFieldTableShown.add(className);
+    process.stderr.write(`LABFC class ${className} fields: ${def.fields.map((f, i) => `${i}=${f.name}:${f.type.kind}`).join(" ")}\n`);
+  }
+  return Math.min(62, def.fields.findIndex((f) => f.name === field));
 }

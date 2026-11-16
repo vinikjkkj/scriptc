@@ -9,7 +9,7 @@ import { mangleField, mangleGlobal, mangleLocal, mangleRawParam } from "../mangl
 import { BOOL, CAUGHT, numSlotHalf, errorOwnFlagFor, F64, IrExpr, IrStmt, ORD_MEMBER, orderRecordPlanCached, RUNTIME_ERROR_CLASSES, isRefCounted, ownMaskKeyBit } from "../../ir/nodes.js";
 import { boxAccess, cDecl, cStringLiteral, cType, elemAccess, vAdapters } from "./emit-types.js";
 import { KEYLIST_MEMBER, OVERFLOW_MEMBER, OWNMASK_MEMBER, ownPresentCondC } from "./emit-shapes.js";
-import { emitStableReceiver, predeclareFieldRunTables } from "./emit-exprs.js";
+import { emitStableReceiver, labFieldIndex, predeclareFieldRunTables } from "./emit-exprs.js";
 import { writesLocal } from "../../ir/analysis.js";
 import { coroPrologue, coroDispatch, coroFinish, coroField } from "./emit-coro.js";
 import { genCoroFinish } from "./emit-gen-coro.js";
@@ -949,6 +949,10 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
             ? (s.field === "%code" ? "code" : s.field)
             : mangleField(s.field);
         const field = `${obj.name}->${member}`;
+        if (s.kind === "fieldSet") {
+          const lab = labFieldIndex(E, s.className, s.field);
+          if (lab >= 0) { E.line("#ifdef SCR_LABFC"); E.line(`SCR_LABFC_W(${lab});`); E.line("#endif"); }
+        }
         if (s.kind === "recordSet") {
           // A shape with a key list: a write of an ABSENT key appends it to the order record, a delete removes it (the class
           // model's scr_ord_note / scr_ord_forget). Presence is asked BEFORE the write.
