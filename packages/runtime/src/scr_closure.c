@@ -64,7 +64,7 @@ static void *scr_box_ptr(const ScrBox *b) {
 #define SCR_CYC_LEAF_SKIP 1
 #endif
 
-void scr_box_trace(void *o, ScrTraceVisit visit, void *ctx) {
+static void scr_box_trace(void *o, ScrTraceVisit visit, void *ctx) {
   ScrBox *b = (ScrBox *)o;
   void *p = scr_box_ptr(b);
   if (!p) return; /* freshly-created boxes hold NULL until first write */
@@ -259,7 +259,7 @@ ScrStr *scr_box_str_unshare(ScrBox *b, ScrStr *acc) {
 
 /* ── closures ─────────────────────────────────────────────────────────── */
 
-void scr_closure_trace(void *o, ScrTraceVisit visit, void *ctx) {
+static void scr_closure_trace(void *o, ScrTraceVisit visit, void *ctx) {
   ScrClosure *c = (ScrClosure *)o;
   const size_t ncaps = scr_closure_ncaps(c);
   for (size_t i = 0; i < ncaps; i++) {
