@@ -198,6 +198,9 @@ jobs:
           sudo apt-get install -y -q linux-tools-common "linux-tools-$(uname -r)" || sudo apt-get install -y -q linux-tools-generic
           sudo sysctl -w kernel.perf_event_paranoid=-1 kernel.kptr_restrict=0
           perf --version
+      - name: Tools (lld for the ordered link of layout=order, on a runner whose GNU ld predates --section-ordering-file)
+        if: ${{ inputs.layout != 'none' }}
+        run: sudo apt-get update -q && sudo apt-get install -y -q lld && ld.lld --version
       # The provenance cache holds the zapo source the compiler maps (fetched by commit from github).
       - uses: actions/cache@v4
         with:
