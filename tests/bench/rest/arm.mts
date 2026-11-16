@@ -123,11 +123,18 @@ try {
                     id: `55119${String(100000 + c * perChunk + i).padStart(6, '0')}@s.whatsapp.net`, name: `Contact ${c}-${i}`, unreadCount: i % 3,
                     messages: Array.from({ length: per }, (_, m) => ({ id: `3B${String(c).padStart(2, '0')}${String(i).padStart(4, '0')}${String(m).padStart(4, '0')}`.padEnd(20, 'F'), fromMe: m % 2 === 0,
                         timestamp: 1700000000 + c * 100000 + i * 100 + m, message: { conversation: body(c, i, m) } })) }))
-                const plaintext = await encodeHistorySyncPlaintext({ chunkOrder: c, progress: Math.round(((c + 1) / chunks) * 100), conversations: conversations as any })
-                const blob = await server.publishMediaBlob({ mediaType: 'history', plaintext })
-                await self.sendHistorySyncExternal({ chunkOrder: c, progress: Math.round(((c + 1) / chunks) * 100), directPath: server.mediaUrl(blob.path), mediaKey: blob.mediaKey,
-                    fileSha256: blob.fileSha256, fileEncSha256: blob.fileEncSha256, fileLength: blob.fileLength })
-                mark(`chunk ${c} sent plaintext=${plaintext.length}`)
+                const progress = Math.round(((c + 1) / chunks) * 100)
+                if ((process.env.RR_HS_MODE ?? 'inline') === 'external') {
+                    // the blob download needs the app to trust the fake server's media TLS certificate, which the REST app does not (self-signed certificate): kept for apps that do
+                    const plaintext = await encodeHistorySyncPlaintext({ chunkOrder: c, progress, conversations: conversations as any })
+                    const blob = await server.publishMediaBlob({ mediaType: 'history', plaintext })
+                    await self.sendHistorySyncExternal({ chunkOrder: c, progress, directPath: server.mediaUrl(blob.path), mediaKey: blob.mediaKey,
+                        fileSha256: blob.fileSha256, fileEncSha256: blob.fileEncSha256, fileLength: blob.fileLength })
+                    mark(`chunk ${c} sent external plaintext=${plaintext.length}`)
+                } else {
+                    await self.sendHistorySync({ chunkOrder: c, progress, conversations: conversations as any })
+                    mark(`chunk ${c} sent inline chats=${conversations.length}`)
+                }
                 await sleep(Number(process.env.RR_HS_GAP_MS ?? 1000))
             }
             // settled: the stored message count has not moved for 10 s (polled every 2 s), at most 10 minutes
@@ -138,7 +145,9 @@ try {
                 let n = -2; try { const j = JSON.parse(r.body_resp ?? '{}'); n = Number(j.messages ?? j.counts?.messages ?? JSON.stringify(j).length) } catch {}
                 if (n === last) still++; else { still = 0; last = n }
             }
-            mark(`history-settled count=${last}`)
+            const fin = await req('GET', '/store/counts'); results.pop()
+            const ev = await req('GET', '/events?type=history_sync_chunk'); results.pop()
+            mark(`history-settled count=${last} storeCounts=${(fin.body_resp ?? '').slice(0, 400)} chunkEvents=${(ev.body_resp ?? '').length}b:${(ev.body_resp ?? '').slice(0, 300)}`)
             await sleep(Number(process.env.RR_HS_STEADY_S ?? 60) * 1000)
             mark('steady-end')
         } else {
