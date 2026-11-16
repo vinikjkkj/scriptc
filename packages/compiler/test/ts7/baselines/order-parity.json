@@ -15890,6 +15890,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25390-a-class-field-written-once-from-a-property-read-keeps-every-kind-of-value-through-typed-and-dyn-readers.ts": {
+   "order": [
+    "<repo>/tests/corpus/25390-a-class-field-written-once-from-a-property-read-keeps-every-kind-of-value-through-typed-and-dyn-readers.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25391-a-number-slot-class-field-is-one-own-enumerable-property-in-its-declared-position-for-every-enumerating-surface.ts": {
+   "order": [
+    "<repo>/tests/corpus/25391-a-number-slot-class-field-is-one-own-enumerable-property-in-its-declared-position-for-every-enumerating-surface.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25392-a-number-slot-class-field-rewritten-through-a-dyn-key-with-another-kind-reads-back-the-new-value-everywhere.ts": {
+   "order": [
+    "<repo>/tests/corpus/25392-a-number-slot-class-field-rewritten-through-a-dyn-key-with-another-kind-reads-back-the-new-value-everywhere.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25393-a-number-slot-field-in-a-base-class-keeps-its-value-and-key-order-through-subclasses-and-upcasts.ts": {
+   "order": [
+    "<repo>/tests/corpus/25393-a-number-slot-field-in-a-base-class-keeps-its-value-and-key-order-through-subclasses-and-upcasts.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25394-a-number-slot-field-in-an-error-subclass-and-in-a-class-with-an-error-sibling-keeps-the-error-layout.ts": {
+   "order": [
+    "<repo>/tests/corpus/25394-a-number-slot-field-in-an-error-subclass-and-in-a-class-with-an-error-sibling-keeps-the-error-layout.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2540-accessor-destructuring-defaults.ts": {
    "order": [
     "<repo>/tests/corpus/2540-accessor-destructuring-defaults.ts"
