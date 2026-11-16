@@ -2318,6 +2318,8 @@ async function ensureRuntimeObjects(
   sources: string[],
   keyPrefix: string,
   post?: (obj: string) => Promise<void>,
+  /** The key prefix of the same set WITHOUT `post`: a missing object is derived from that set's object (copy + post) instead of recompiled. */
+  derivePrefix?: string,
 ): Promise<Map<string, string>> {
   const setKey = createHash("sha256")
     .update(keyPrefix)
@@ -2326,6 +2328,7 @@ async function ensureRuntimeObjects(
     .slice(0, 24);
   const objDir = join(root, "obj", setKey);
   const objOf = (src: string): string => join(objDir, `${basename(src, ".c")}.o`);
+  const deriveFrom = derivePrefix === undefined ? null : join(root, "obj", createHash("sha256").update(derivePrefix).update(cflags.join("\x1f")).digest("hex").slice(0, 24));
   const present = await Promise.all(sources.map((s) => fileExists(objOf(s))));
   const missing = sources.filter((_, i) => !present[i]);
   // An object HIT bumps its mtime, exactly as a binary hit does. Without this
@@ -2351,6 +2354,15 @@ async function ensureRuntimeObjects(
         await Promise.all(
           missing.slice(i, i + width).map(async (src) => {
             const tmpObj = join(tmpDir, `${basename(src, ".c")}.o`);
+            if (post !== undefined && deriveFrom !== null) {
+              const from = join(deriveFrom, `${basename(src, ".c")}.o`);
+              if (await fileExists(from)) {
+                await copyFile(from, tmpObj);
+                await post(tmpObj);
+                await rename(tmpObj, objOf(src));
+                return;
+              }
+            }
             const argv = [...(useCcache ? ["ccache"] : []), ...ccArgv, ...cflags, "-c", src, "-o", tmpObj];
             await execFileAsync(argv[0] ?? "clang", argv.slice(1));
             if (post !== undefined) await post(tmpObj);
@@ -3296,9 +3308,10 @@ export async function compileC(opts: CcOptions): Promise<void> {
   // object under a live key is the worst failure a cache has. Empty when
   // SCRIPTC_PROF_CFLAGS is unset, so an ordinary build's prefix is unchanged.
   const objKeyPrefix = `obj-v2\0${ccName}\0${cv}\0${fingerprint}\0${profFlavor()}${stripTool !== null ? "\0strmerge-v1" : ""}`;
+  const objKeyPrefixPlain = `obj-v2\0${ccName}\0${cv}\0${fingerprint}\0${profFlavor()}`;
   const stripPost = stripTool !== null ? (o: string): Promise<void> => clearStringMerge(stripTool, o) : undefined;
   try {
-    objects = await ensureRuntimeObjects(root, driver.argv, cflags, rtInputs, objKeyPrefix, stripPost);
+    objects = await ensureRuntimeObjects(root, driver.argv, cflags, rtInputs, objKeyPrefix, stripPost, stripTool !== null ? objKeyPrefixPlain : undefined);
     // Between the presence check inside ensureRuntimeObjects and the link
     // below there is a window of a few hundred milliseconds. A concurrent
     // sweep in that window used to surface as a screenful of `lld-link:
@@ -3306,7 +3319,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     // cause, and indistinguishable from a code regression. Re-check, and
     // give the set exactly one chance to be recompiled.
     if (!(await objectsStillPresent(objects))) {
-      objects = await ensureRuntimeObjects(root, driver.argv, cflags, rtInputs, objKeyPrefix, stripPost);
+      objects = await ensureRuntimeObjects(root, driver.argv, cflags, rtInputs, objKeyPrefix, stripPost, stripTool !== null ? objKeyPrefixPlain : undefined);
       // Still gone: something is actively deleting this cache. Drop the
       // substitution entirely and compile the historical way — slower, and
       // right, which is the trade this whole file is about.
