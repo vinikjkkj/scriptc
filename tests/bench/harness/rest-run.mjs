@@ -11,7 +11,7 @@ let out = 'out', reps = 3, profile = null, smaps = false
 const arms = []
 for (let i = 0; i < args.length; i++) { const a = args[i]; if (a === '--out') out = args[++i]; else if (a === '--reps') reps = Number(args[++i]); else if (a === '--profile') { profile = [args[++i], args[++i]] } else if (a === '--smaps') smaps = true; else arms.push(a) }
 mkdirSync(out, { recursive: true })
-if ((process.env.RR_HS_MODE ?? '') === 'external') spawnSync('sudo', ['sh', '-c', "grep -q fake-media.local /etc/hosts || echo '127.0.0.1 fake-media.local' >> /etc/hosts"]) // CI runner only: the fake media certificate names fake-media.local
+if ((process.env.RR_HS_MODE ?? '') === 'external' || (process.env.RR_SCENARIO ?? '') === 'sweep') spawnSync('sudo', ['sh', '-c', "grep -q fake-media.local /etc/hosts || echo '127.0.0.1 fake-media.local' >> /etc/hosts"]) // CI runner only: the fake media certificate names fake-media.local
 const req = createRequire(process.env.ZB_APP + '/package.json')
 const mysql = req('mysql2/promise')
 const APPDIR = `${W}/rest`

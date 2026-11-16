@@ -54,7 +54,7 @@ const env: NodeJS.ProcessEnv = { ...process.env,
 // RR_HS_MODE=external: the app downloads the history blob over HTTPS from the fake media server, whose certificate (CN=fake-media.local, no SAN, self-signed) the REST app does not trust and whose host is
 // 127.0.0.1. The harness gives the app process the certificate as an extra CA (NODE_EXTRA_CA_CERTS, read by Node and by the compiled runtime alike) and sends the blob URL with the host fake-media.local
 // (rest-run.mjs maps it to 127.0.0.1 in /etc/hosts). The certificate is READ from the fake server's source file; neither the server nor the app is edited.
-if ((process.env.RR_HS_MODE ?? '') === 'external') {
+if ((process.env.RR_HS_MODE ?? '') === 'external' || (process.env.RR_SCENARIO ?? '') === 'sweep') {
     const src = readFileSync(join(FS, 'src/infra/WaFakeMediaHttpsServer.ts'), 'utf8')
     const m = src.match(/FAKE_MEDIA_TLS_CERT_PEM = `(-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----)/)
     if (!m) throw new Error('media certificate not found in the fake server source')
@@ -98,7 +98,7 @@ const startSampler = () => { if (sampler !== null) return
 const mark = (what: string) => { marks.push({ t: Date.now() - t0, what }); log.write(`[lab] ${what}\n`) }
 const results: any[] = []
 async function req(method: string, path: string, body?: any) {
-    const o: any = { method, headers: {} }
+    const o: any = { method, headers: {}, signal: AbortSignal.timeout(Number(process.env.RR_REQ_TIMEOUT_MS ?? 120000)) }
     if (body !== undefined) { o.body = typeof body === 'string' ? body : JSON.stringify(body); o.headers['content-type'] = 'application/json' }
     const rec: any = { method, path, body }
     try {
@@ -119,7 +119,11 @@ try {
     await self.sendMessage(buildAppStateSyncKeyShareMessage({ keys } as any))
     times.keyShareSent = Date.now() - t0
     await sleep(3000)
-    if (SCEN === 'idle' || SCEN === 'history') {
+    if (SCEN === 'sweep') {
+        const { runSweep } = await import('./sweep.mts')
+        await runSweep({ server, self, pipeline, req, results, sleep, SELF, mark, outDir: OUT })
+        await req('POST', '/s/drive/shutdown')
+    } else if (SCEN === 'idle' || SCEN === 'history') {
         startSampler()
         mark('login-settled')
         if (SCEN === 'history') {
@@ -211,7 +215,7 @@ writeFileSync(join(OUT, 'http.json'), JSON.stringify(results, null, 1))
 writeFileSync(join(OUT, 'stanzas.json'), JSON.stringify(stanzas, null, 1))
 times.end = Date.now() - t0
 writeFileSync(join(OUT, 'times.json'), JSON.stringify(times))
-if (SCEN) { if (sampler) clearInterval(sampler); writeFileSync(join(OUT, 'timeline.json'), JSON.stringify({ scenario: SCEN, marks, timeline })) }
+if (SCEN === 'idle' || SCEN === 'history') { if (sampler) clearInterval(sampler); writeFileSync(join(OUT, 'timeline.json'), JSON.stringify({ scenario: SCEN, marks, timeline })) }
 writeFileSync(join(OUT, 'exit.json'), JSON.stringify({ exited, ms: Date.now() - t0 }))
 await server.stop(); log.end()
 console.log(label, 'done', JSON.stringify(exited), results.length, 'requests', stanzas.length, 'stanzas')
