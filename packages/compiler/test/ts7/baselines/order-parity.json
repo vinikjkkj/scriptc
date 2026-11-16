@@ -15926,6 +15926,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25400-a-string-held-by-many-converted-records-keeps-value-identity-and-independent-edits-through-shared-boxes.ts": {
+   "order": [
+    "<repo>/tests/corpus/25400-a-string-held-by-many-converted-records-keeps-value-identity-and-independent-edits-through-shared-boxes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25401-thousands-of-shared-strings-converted-past-the-box-cache-size-keep-every-value-after-evictions-and-sweeps.ts": {
+   "order": [
+    "<repo>/tests/corpus/25401-thousands-of-shared-strings-converted-past-the-box-cache-size-keep-every-value-after-evictions-and-sweeps.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2541-destructuring-eval-order.ts": {
    "order": [
     "<repo>/tests/corpus/2541-destructuring-eval-order.ts"
