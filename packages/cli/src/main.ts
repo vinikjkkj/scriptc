@@ -69,6 +69,11 @@ Options:
                      Requires --pgo-run and either --pgo-signal or --pgo-no-signal.
                      Writes \`<entry>.scriptc-order.txt\` (check it in) or the path
                      --layout-order-out names. Linux and macOS only.
+                     An order-file edit later costs only the native compile and link when
+                     the linker can apply it (GNU ld 2.43+, or ld.lld, which an ordered
+                     build then links with); without either, or under zig cc, the TU is
+                     ordered at emission instead: the same memory win, but every order
+                     edit re-runs the frontend and lowering.
       --pgo-run "<cmd>"
                      the profiling run. WARNING: it EXECUTES the program you name; it
                      is never inferred and never run by a normal build. The command is

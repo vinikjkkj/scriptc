@@ -58,6 +58,37 @@ console.log(ra(20), rb(20), rc(20));
       .join(" ");
   const hit = /early cache hit/;
 
+  // The lld lane: SCRIPTC_LAYOUT_FORCE_LLD=1 makes the driver pass over GNU ld's own option and link the ORDERED build with ld.lld.
+  const lldPresent = ((): boolean => {
+    try {
+      execFileSync("ld.lld", ["--version"]);
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  describe.skipIf(!lldPresent)("ordered build linked by ld.lld", () => {
+    for (const backend of ["c", "llvm"]) {
+      test(`lld, ${backend}: cache hit, binary follows the file, output unchanged, the plain build keeps its linker`, { timeout: 900_000 }, () => {
+        const env = { SCRIPTC_LAYOUT_FORCE_LLD: "1" };
+        const plain = join(dir, `lldplain.${backend}`);
+        let r = run(["build", entry, "--backend", backend, "--no-layout-order", "-o", plain], env);
+        expect(r.status, r.stderr).toBe(0);
+        const want = execFileSync(plain, [], { encoding: "utf8" });
+        expect(execFileSync("readelf", ["-p", ".comment", plain], { encoding: "utf8" })).not.toMatch(/LLD/);
+        for (const [name, file, order] of [["fwd", fwd, "sc_f_ra sc_f_rb sc_f_rc"], ["rev", rev, "sc_f_rc sc_f_rb sc_f_ra"]] as const) {
+          const bin = join(dir, `lld.${name}.${backend}`);
+          r = run(["build", entry, "--backend", backend, "--layout-order", file, "-o", bin], env);
+          expect(r.status, r.stderr).toBe(0);
+          expect(r.stderr).toMatch(hit);
+          expect(placed(bin)).toBe(order);
+          expect(execFileSync(bin, [], { encoding: "utf8" })).toBe(want);
+          expect(execFileSync("readelf", ["-p", ".comment", bin], { encoding: "utf8" })).toMatch(/LLD/); // positive control: lld did link it
+        }
+      });
+    }
+  });
+
   for (const backend of ["c", "llvm"]) {
     test(`an order edit hits the early cache and the binary follows the file, ${backend}`, { timeout: 900_000 }, () => {
       const plain = join(dir, `plain.${backend}`);

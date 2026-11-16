@@ -1020,7 +1020,8 @@ function profCflags(): string[] {
  * runtime's own functions, scattered across ~100 objects, to the same order. zig cc rejects every spelling of it ("unsupported
  * linker arg", measured on zig 0.16, linux-gnu and windows-gnu), so it is skipped there; a linker whose --help names neither option
  * gets nothing. GNU ld spells it --section-ordering-file (binutils >= 2.43), lld --symbol-ordering-file. */
-type LayoutLinkKind = { kind: "section"; } | { kind: "symbol"; } | null;
+/** `lld` marks a linker the ORDERED link line switches to (-fuse-ld=lld) because the default GNU ld is too old; a plain link keeps its linker. */
+type LayoutLinkKind = { kind: "section"; lld: false } | { kind: "symbol"; lld: boolean } | null;
 
 /** Which ordering-file option the build's linker has, or null. Detected once per driver spelling and never assumed. */
 const layoutLinkKindCache = new Map<string, Promise<LayoutLinkKind>>();
@@ -1045,9 +1046,17 @@ function detectLayoutLinkKind(driver: { argv: readonly string[] }): Promise<Layo
       } catch {
         return null;
       }
-      if (help.includes("--section-ordering-file")) return { kind: "section" };
-      if (help.includes("--symbol-ordering-file")) return { kind: "symbol" };
-      return null;
+      // SCRIPTC_LAYOUT_FORCE_LLD=1: skip the GNU ld options so the lld path can be tested on a host whose ld is new enough.
+      const forceLld = process.env["SCRIPTC_LAYOUT_FORCE_LLD"] === "1";
+      if (!forceLld && help.includes("--section-ordering-file")) return { kind: "section", lld: false };
+      if (!forceLld && help.includes("--symbol-ordering-file")) return { kind: "symbol", lld: false };
+      // GNU ld < 2.43 (the Ubuntu 24.04 runners' 2.42): an ordered build alone is linked by ld.lld when it is installed.
+      try {
+        await execFileAsync("ld.lld", ["--version"]);
+        return { kind: "symbol", lld: true };
+      } catch {
+        return null;
+      }
     })();
     layoutLinkKindCache.set(key, hit);
   }
@@ -1079,7 +1088,7 @@ async function layoutLinkArgs(driver: { argv: readonly string[] }, orderPath: st
   }
   const file = `${outPath}.layout.sym`;
   await writeFile(file, `${names.join("\n")}\n`);
-  return [`-Wl,--symbol-ordering-file=${file}`];
+  return [...(found.lld ? ["-fuse-ld=lld"] : []), `-Wl,--symbol-ordering-file=${file}`];
 }
 
 /** --layout-profile is in effect for the build compileC is running (set at its entry; one build per process at a time). */
