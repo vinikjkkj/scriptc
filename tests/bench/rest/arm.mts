@@ -61,6 +61,7 @@ if ((process.env.RR_HS_MODE ?? '') === 'external' || (process.env.RR_SCENARIO ??
     writeFileSync(join(OUT, 'media-ca.pem'), m[1] + '\n')
     env.NODE_EXTRA_CA_CERTS = join(OUT, 'media-ca.pem')
 }
+if (process.env.RR_NODE_SNAP === '1' && label.startsWith('node')) env.NODE_OPTIONS = `${env.NODE_OPTIONS ?? ''} --heapsnapshot-signal=SIGUSR2`
 const client = spawn(exe, exeArgs, { cwd: process.env.RR_APPDIR ?? OUT, env, stdio: ['ignore', 'pipe', 'pipe'] })
 let buf = ''
 const onOut = (d: Buffer) => { const s = d.toString(); log.write(s); buf += s
@@ -96,6 +97,25 @@ let sampler: ReturnType<typeof setInterval> | null = null
 const startSampler = () => { if (sampler !== null) return
     sampler = setInterval(() => { if (client.pid === undefined) return; const s = procStatus(appPid(client.pid)); if (s) timeline.push({ t: Date.now() - t0, rss: s.rss, hwm: s.hwm }) }, 1000) }
 const mark = (what: string) => { marks.push({ t: Date.now() - t0, what }); log.write(`[lab] ${what}\n`) }
+// LAB (RR_HS_SNAP=1): a per-class /proc/<pid>/smaps breakdown of the app at a scenario point, written into the timeline marks (heap(brk), anon-mmap = arena chunks, file-backed code and rodata).
+const smapsClasses = (pid: number): Record<string, number> | null => {
+    try {
+        const exe = readFileSync(`/proc/${pid}/cmdline`, 'utf8').split('\0')[0]
+        const out: Record<string, number> = {}
+        let cls = ''
+        for (const line of readFileSync(`/proc/${pid}/smaps`, 'utf8').split('\n')) {
+            const m = line.match(/^[0-9a-f]+-[0-9a-f]+ (\S+) \S+ \S+ \S+\s*(.*)$/)
+            if (m) { const perms = m[1], path = m[2]
+                cls = path === '[heap]' ? 'heap(brk)' : path === '[stack]' ? 'stack' : path === '' ? 'anon-mmap' : path === exe ? (perms.includes('x') ? 'exe:code' : perms.includes('w') ? 'exe:rw' : 'exe:ro') : path.startsWith('[') ? 'vdso' : 'libs'
+                continue }
+            const r = line.match(/^Rss:\s+(\d+) kB/)
+            if (r) out[cls] = (out[cls] ?? 0) + Number(r[1])
+        }
+        return out
+    } catch { return null }
+}
+const snapMark = (what: string) => { if (process.env.RR_HS_SNAP !== '1' || client.pid === undefined) return; const pid = appPid(client.pid); const c = smapsClasses(pid); const st = procStatus(pid)
+    marks.push({ t: Date.now() - t0, what: `smaps ${what} rss=${st?.rss ?? 0} ${JSON.stringify(c)}` }) }
 const results: any[] = []
 async function req(method: string, path: string, body?: any) {
     const o: any = { method, headers: {}, signal: AbortSignal.timeout(Number(process.env.RR_REQ_TIMEOUT_MS ?? 120000)) }
@@ -126,6 +146,7 @@ try {
     } else if (SCEN === 'idle' || SCEN === 'history') {
         startSampler()
         mark('login-settled')
+        snapMark('login-settled')
         if (SCEN === 'history') {
             // realistic history: RR_HS_CHATS chats of RR_HS_MSGS messages, sent as RR_HS_CHUNKS external blobs (the shape a real bootstrap takes: one notification per chunk, the blob downloaded and decrypted by the app)
             const chats = Number(process.env.RR_HS_CHATS ?? 400), per = Number(process.env.RR_HS_MSGS ?? 25), chunks = Number(process.env.RR_HS_CHUNKS ?? 8)
@@ -150,6 +171,7 @@ try {
                     mark(`chunk ${c} sent inline chats=${conversations.length}`)
                 }
                 await sleep(Number(process.env.RR_HS_GAP_MS ?? 1000))
+                snapMark(`after-chunk-${c}`)
             }
             // settled: the stored message count has not moved for 10 s (polled every 2 s), at most 10 minutes
             let last = -1, still = 0
@@ -162,7 +184,25 @@ try {
             const fin = await req('GET', '/store/counts'); results.pop()
             const ev = await req('GET', '/events?type=history_sync_chunk'); results.pop()
             mark(`history-settled count=${last} storeCounts=${(fin.body_resp ?? '').slice(0, 400)} chunkEvents=${(ev.body_resp ?? '').length}b:${(ev.body_resp ?? '').slice(0, 300)}`)
+            snapMark('settled')
+            if (process.env.RR_NODE_SNAP === '1' && label.startsWith('node') && client.pid !== undefined) {
+                // Node's retained heap shape: SIGUSR2 writes a heap snapshot (NODE_OPTIONS=--heapsnapshot-signal), summarised by constructor to node-heap.json
+                const pid = appPid(client.pid); const dir = process.env.RR_APPDIR ?? OUT
+                try { process.kill(pid, 'SIGUSR2') } catch {}
+                await sleep(25000)
+                const fs = await import('node:fs'); const files = fs.readdirSync(dir).filter((f: string) => f.endsWith('.heapsnapshot'))
+                if (files.length > 0) { const f = join(dir, files[files.length - 1]); const snap = JSON.parse(fs.readFileSync(f, 'utf8'))
+                    const nf = snap.snapshot.meta.node_fields as string[]; const nt = snap.snapshot.meta.node_types[0] as string[]; const stride = nf.length
+                    const ti = nf.indexOf('type'), ni = nf.indexOf('name'), si = nf.indexOf('self_size')
+                    const by = new Map<string, { n: number; b: number }>()
+                    for (let i = 0; i < snap.nodes.length; i += stride) { const k = `${nt[snap.nodes[i + ti]]}:${snap.strings[snap.nodes[i + ni]]}`.slice(0, 80); const e = by.get(k) ?? { n: 0, b: 0 }; e.n++; e.b += snap.nodes[i + si]; by.set(k, e) }
+                    const top = [...by.entries()].sort((a, b) => b[1].b - a[1].b).slice(0, 60).map(([k, v]) => ({ k, n: v.n, bytes: v.b }))
+                    const total = [...by.values()].reduce((a, v) => a + v.b, 0)
+                    writeFileSync(join(OUT, 'node-heap.json'), JSON.stringify({ file: files[files.length - 1], nodes: snap.nodes.length / stride, totalSelfBytes: total, top }, null, 1))
+                    try { fs.unlinkSync(f) } catch {} }
+            }
             await sleep(Number(process.env.RR_HS_STEADY_S ?? 60) * 1000)
+            snapMark('steady-end')
             mark('steady-end')
         } else {
             const idleS = Number(process.env.RR_IDLE_SECONDS ?? 300)
