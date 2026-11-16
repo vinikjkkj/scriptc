@@ -8,6 +8,7 @@
  * main() from the compiler's cycle fixpoint) because this one compilation
  * unit serves every program.
  */
+#include <execinfo.h>
 #include "scr_runtime.h"
 
 #include <errno.h>
@@ -617,6 +618,14 @@ static void scr_trap_trace_note(const char *message, size_t len,
  * exec throwers' one-call spelling. */
 void scr_throw_error_msg_code(int kind, const char *message, size_t len,
                                const char *code) {
+  /* LAB (narrowtrace), never lands: name the code that throws SC9004 (a value narrowed past its union). */
+  if (code != NULL && getenv("SCR_NARROW_TRACE") != NULL) {
+    void *bt[24];
+    int n = backtrace(bt, 24), i;
+    fprintf(stderr, "NARROW-TRACE code=%s anchor=%p bt=", code, (void *)&scr_throw_error_msg_code);
+    for (i = 0; i < n; i++) fprintf(stderr, "%p ", bt[i]);
+    fprintf(stderr, "\n");
+  }
 #ifdef SCR_TRAP_TRACE
   scr_trap_trace_note(message, len, code);
 #endif
