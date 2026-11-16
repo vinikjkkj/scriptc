@@ -645,7 +645,7 @@ ScrMap *scr_map_new(ScrMapKeyKind key_kind, ScrMapValKind val_kind,
   ScrMap *m;
   if (val_trace) {
     /* Cycle-capable values can point back: collector header + trace. */
-    m = scr_cyc_alloc(sizeof *m, &scr_map_trace, &scr_map_gcfree);
+    m = SCR_CYC_ALLOC(sizeof *m, &scr_map_trace, &scr_map_gcfree);
   } else {
     m = calloc(1, sizeof *m);
     if (!m) scr_map_oom();
@@ -928,7 +928,7 @@ ScrMap *scr_set_new_ref_traced(void *(*elem_retain)(void *), void (*elem_release
                                ScrTraceFn elem_trace) {
   /* Headered allocation: scr_map_new keys that off val_trace, and a set has
    * no value side, so the header is taken here and the trace hooked after. */
-  ScrMap *m = scr_cyc_alloc(sizeof *m, &scr_map_trace, &scr_map_gcfree);
+  ScrMap *m = SCR_CYC_ALLOC(sizeof *m, &scr_map_trace, &scr_map_gcfree);
   m->rc = 1;
   m->key_kind = SCR_MAP_KEY_REF;
   m->val_kind = SCR_MAP_VAL_F64;
@@ -950,7 +950,7 @@ ScrMap *scr_set_new_union(void *(*elem_retain)(void *), void (*elem_release)(voi
                           ScrTraceFn elem_trace, const ScrStr *classes) {
   ScrMap *m;
   if (elem_trace) {
-    m = scr_cyc_alloc(sizeof *m, &scr_map_trace, &scr_map_gcfree);
+    m = SCR_CYC_ALLOC(sizeof *m, &scr_map_trace, &scr_map_gcfree);
     m->rc = 1;
     m->val_kind = SCR_MAP_VAL_F64;
 #ifdef SCR_RC_AUDIT
