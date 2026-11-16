@@ -2399,6 +2399,9 @@ static void scr_hs_dump(const char *tag) {
     if (f != NULL) {
       struct mallinfo2 mi = mallinfo2(); /* <malloc.h> came in with the prof header (which includes it before the malloc macros) or above */
       fprintf(f, "MALLINFO tag=%s arena=%zu uordblks=%zu fordblks=%zu hblkhd=%zu ordblks=%zu\n", tag, mi.arena, mi.uordblks, mi.fordblks, mi.hblkhd, mi.ordblks);
+#ifdef SCR_HS_CHUNKS
+      { extern void scr_hs_chunks_dump(FILE *f, const char *tag); scr_hs_chunks_dump(f, tag); }
+#endif
       FILE *sm = fopen("/proc/self/smaps_rollup", "r");
       char line[256];
       while (sm != NULL && fgets(line, sizeof line, sm)) fprintf(f, "SMAPS_ROLLUP %s", line);
