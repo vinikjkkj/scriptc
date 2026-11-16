@@ -61,6 +61,9 @@ export function absentTaintCensus(L: AbsentTaintHost, functions: IrFunction[]): 
         visitType(f.type, seen);
       }
     } else if (k === "union") {
+      const uid = `u:${(t as unknown as { unionId: string }).unionId}`;
+      if (seen.has(uid)) return;
+      seen.add(uid);
       const d = L.unions.get((t as unknown as { unionId: string }).unionId);
       for (const a of d?.arms ?? []) visitType(a, seen);
     } else if (k === "array") {
