@@ -81,7 +81,7 @@ import { BUFFER_NUM_ACCESSOR_METHODS, dynKeyGetUsesLitTwin, propsTableRoot, erro
 import { setDynOrderPlan, setDynInspExt } from "../dyn-members.js";
 import { rewriteArmDescriptors } from "./armvt.js";
 import { rewriteStringUnions } from "./strunion.js";
-import { orderRecordPlanCached, moduleUsesInspColors, numSlotHalf, classCbit } from "../../ir/nodes.js";
+import { orderRecordPlanCached, moduleUsesInspColors, numSlotHalf, numSlotLane, classCbit } from "../../ir/nodes.js";
 import { concatFn, fieldRunAbsentCheck, flattenStrConcat } from "../emission/emit-exprs.js";
 import { classvalCandidates, dynClassDisplayName, dynDescBase, dynEmitterSlot, dynRuntimeBaseInfo, dynRuntimeRoot, dynEnumerationFenced, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
 import { computeMayThrow } from "../emission/may-throw.js";
@@ -4147,8 +4147,8 @@ class LlEmitter {
   classFieldGep(className: string, field: string): number {
     return classFieldIndex(this.classMetaOf(className), field).index;
   }
-  numSlotHalfOf(className: string, field: string): string | undefined {
-    return numSlotHalf(this.mod.classes, className, field);
+  numSlotLaneOf(className: string, field: string): { half: string; lane: number } | undefined {
+    return numSlotLane(this.mod.classes, className, field);
   }
   /** The GEP index of a class's per-instance order record (llOrdIndexOf; -1 when its hierarchy has none). */
   classOrdGep(className: string): number {
@@ -7788,13 +7788,15 @@ class LlEmitter {
           this.declare(`declare void @scr_cbit_note_v(ptr, ptr)`);
           B.line(`call void @scr_cbit_note_v(ptr ${obj.name}, ptr ${v.name})`);
         }
-        const slotHalf = s.kind === "fieldSet" && type.kind === "dyn" ? numSlotHalf(this.mod.classes, s.className, s.field) : undefined;
+        const slotHalf = s.kind === "fieldSet" && type.kind === "dyn" ? numSlotLane(this.mod.classes, s.className, s.field) : undefined;
         if (slotHalf !== undefined) {
-          // A NUMBER-SLOT field (ir/num-slot.ts): a number is unboxed into the raw half and the dyn slot takes the marker.
+          // A NUMBER-SLOT field (ir/num-slot.ts): an integer 0..65535 is unboxed into its 16-bit lane and the dyn slot takes the marker.
           this.moveTemp(v);
-          const hp = this.classFieldPtr(obj.name, (s as { className: string }).className, slotHalf);
-          this.declare(`declare void @scr_numslot_put_v(ptr, ptr, ptr)`);
-          B.line(`call void @scr_numslot_put_v(ptr ${ptr}, ptr ${hp.ptr}, ptr ${v.name})`);
+          const hp = this.classFieldPtr(obj.name, (s as { className: string }).className, slotHalf.half);
+          const lp = B.tmp();
+          B.line(`${lp} = getelementptr inbounds i16, ptr ${hp.ptr}, i64 ${slotHalf.lane}`);
+          this.declare(`declare void @scr_numslot_put_lv(ptr, ptr, ptr)`);
+          B.line(`call void @scr_numslot_put_lv(ptr ${ptr}, ptr ${lp}, ptr ${v.name})`);
         } else if (isRefCounted(type)) {
           this.moveTemp(v);
           // A fresh dyn number stored into a dyn field: a small integer is the runtime's shared box (ir/dyn-keep.ts; emit-stmts.ts's twin).
@@ -11051,13 +11053,16 @@ class LlEmitter {
         const { ptr, type } = this.classFieldPtr(obj.name, e.className, e.field);
         const v = this.loadField(ptr, type);
         // A NUMBER-SLOT field (ir/num-slot.ts): the value is the raw half when the dyn slot holds the marker.
-        const slotHalf = e.type.kind === "dyn" ? numSlotHalf(this.mod.classes, e.className, e.field) : undefined;
+        const slotHalf = e.type.kind === "dyn" ? numSlotLane(this.mod.classes, e.className, e.field) : undefined;
         if (slotHalf !== undefined) {
-          const hp = this.classFieldPtr(obj.name, e.className, slotHalf);
-          const hv = this.loadField(hp.ptr, hp.type);
+          const hp = this.classFieldPtr(obj.name, e.className, slotHalf.half);
+          const lp = B.tmp();
+          B.line(`${lp} = getelementptr inbounds i16, ptr ${hp.ptr}, i64 ${slotHalf.lane}`);
+          const hv = B.tmp();
+          B.line(`${hv} = load i16, ptr ${lp}`);
           const r = B.tmp();
-          this.declare(`declare ptr @scr_numslot_get_v(ptr, double)`);
-          B.line(`${r} = call ptr @scr_numslot_get_v(ptr ${v}, double ${hv})`);
+          this.declare(`declare ptr @scr_numslot_get_lv(ptr, i16 zeroext)`);
+          B.line(`${r} = call ptr @scr_numslot_get_lv(ptr ${v}, i16 zeroext ${hv})`);
           return this.own({ name: r, type: e.type });
         }
         if (e.nullTest) {

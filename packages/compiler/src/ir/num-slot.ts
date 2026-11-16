@@ -3,7 +3,7 @@
  * A dyn field holding a number holds a pointer to a 40-byte heap node (scr_json.c) that nothing else shares once the value leaves the
  * [-128, 1023] range. For a field that only the constructor writes, with a value that is a property read, an arithmetic result or a large
  * literal, the node is pure overhead: the field is split into TWO slots, its own dyn slot plus a hidden f64 half (IrClassDef.numSlots).
- * A number is stored raw in the half and the dyn slot holds THE immortal marker (scr_numslot_node); every other value is stored in the dyn
+ * A number is stored in the half (a 16-bit lane of a hidden word, integers 0..65535 only) and the dyn slot holds THE immortal marker (scr_numslot_node); every other value is stored in the dyn
  * slot unchanged. A reader answers `slot == marker ? box(half) : retain(slot)`. Release, trace and retain never see the marker as
  * anything but an immortal dyn node, which is why the structural consumers (new, release, trace, clone) need no change; only the readers
  * and writers of the value do (fieldGet, fieldSet, the dyn member row), in both emitters.
@@ -186,7 +186,8 @@ export function numSlotPass(mod: IrModule): NumSlotPick[] {
   const subtreeClean = (owner: string): boolean => classes.every((d) => !descendsFrom(d.name, owner) || cleanPrefix(d));
 
   const picks: NumSlotPick[] = [];
-  const halves = new Map<string, { field: string; half: string }[]>();
+  /** Per class, its own picks in layout order; the lane words are assigned at rebuild (four 16-bit lanes per hidden f64 word). */
+  const halves = new Map<string, { field: string }[]>();
   for (const c of classes) {
     if (c.runtime === true) continue;
     for (const f of c.fields) {
@@ -246,7 +247,7 @@ export function numSlotPass(mod: IrModule): NumSlotPick[] {
       }
       picks.push({ className: c.name, field: f.name, rule });
       const l = halves.get(c.name) ?? [];
-      l.push({ field: f.name, half: `%ns:${f.name}` });
+      l.push({ field: f.name });
       halves.set(c.name, l);
     }
   }
@@ -254,7 +255,7 @@ export function numSlotPass(mod: IrModule): NumSlotPick[] {
 
   // Rebuild every layout base-first: base layout, the class's own original fields, then its own halves (the prefix property holds).
   const done = new Map<string, IrClassDef["fields"]>();
-  const slotsOf = new Map<string, { field: string; half: string }[]>();
+  const slotsOf = new Map<string, { field: string; half: string; lane: number }[]>();
   const affected = (c: IrClassDef): boolean => classes.some((a) => halves.has(a.name) && descendsFrom(c.name, a.name));
   const rebuild = (c: IrClassDef): void => {
     if (done.has(c.name)) return;
@@ -265,8 +266,11 @@ export function numSlotPass(mod: IrModule): NumSlotPick[] {
     }
     const orig = origFields.get(c.name)!;
     const own = base === undefined ? orig : orig.slice(origFields.get(base.name)!.length);
-    const mine = halves.get(c.name) ?? [];
-    c.fields = [...(base === undefined ? [] : done.get(base.name)!), ...own, ...mine.map((m) => ({ name: m.half, type: { kind: "f64" as const } }))];
+    const picked = halves.get(c.name) ?? [];
+    const words: string[] = [];
+    for (let k = 0; k < Math.ceil(picked.length / 4); k++) words.push(`%nsw:${c.name}:${k}`);
+    const mine = picked.map((m, i) => ({ field: m.field, half: words[Math.floor(i / 4)]!, lane: i % 4 }));
+    c.fields = [...(base === undefined ? [] : done.get(base.name)!), ...own, ...words.map((w) => ({ name: w, type: { kind: "f64" as const } }))];
     done.set(c.name, c.fields);
     const all = [...(base === undefined ? [] : (slotsOf.get(base.name) ?? [])), ...mine];
     if (all.length > 0) {

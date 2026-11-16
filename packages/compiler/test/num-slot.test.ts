@@ -43,10 +43,10 @@ const c: any = new Col(new Packet([1, 2, 3]));
 console.log(c.piece);
 `;
 
-function lower(): IrModule {
+function lower(src: string = SRC): IrModule {
   const dir = mkdtempSync(join(tmpdir(), "scriptc-numslot-"));
   const entry = join(dir, "main.ts");
-  writeFileSync(entry, SRC);
+  writeFileSync(entry, src);
   const load = loadProgram(entry);
   try {
     const r = lowerToIr(load.program, load.entry, load.moduleOrder);
@@ -64,8 +64,8 @@ test("a property-read field with a numeric use is split; pointer-only, call, cop
   const picks = numSlotPass(m).map((p) => `${p.className}.${p.field}`);
   expect(picks).toEqual(["Col.start"]);
   const col = m.classes!.find((c) => c.name === "Col")!;
-  expect(col.numSlots).toEqual([{ field: "start", half: "%ns:start" }]);
-  expect(col.fields.map((f) => f.name)).toEqual(["_buf", "start", "len", "tp", "small", "moved", "%ns:start"]);
+  expect(col.numSlots).toEqual([{ field: "start", half: "%nsw:Col:0", lane: 0 }]);
+  expect(col.fields.map((f) => f.name)).toEqual(["_buf", "start", "len", "tp", "small", "moved", "%nsw:Col:0"]);
   expect(col.fields[col.fields.length - 1]!.type.kind).toBe("f64");
   expect(validateModule(m)).toEqual([]);
 });
@@ -74,7 +74,7 @@ test("a second run over a split module is a no-op", () => {
   const m = lower();
   expect(numSlotPass(m).length).toBe(1);
   expect(numSlotPass(m)).toEqual([]);
-  expect(m.classes!.find((c) => c.name === "Col")!.fields.filter((f) => f.name === "%ns:start").length).toBe(1);
+  expect(m.classes!.find((c) => c.name === "Col")!.fields.filter((f) => f.name === "%nsw:Col:0").length).toBe(1);
 });
 
 test("SCRIPTC_NUMSLOT=off picks nothing", () => {
@@ -82,4 +82,29 @@ test("SCRIPTC_NUMSLOT=off picks nothing", () => {
   const m = lower();
   expect(numSlotPass(m)).toEqual([]);
   expect(m.classes!.some((c) => c.numSlots !== undefined)).toBe(false);
+});
+
+test("five picked fields share two hidden words, four 16-bit lanes each, in pick order", () => {
+  const src = `
+class Cell {
+  a: any; b: any; c: any; d: any; e: any;
+  constructor(s: any) { this.a = s.p; this.b = s.q; this.c = s.r; this.d = s.t; this.e = s.u; }
+  sum(): any { return this.a + this.b + this.c + this.d + this.e; }
+}
+const x: any = new Cell({ p: 1, q: 2, r: 3, t: 4, u: 5 });
+console.log(x.sum());
+`;
+  const m = lower(src);
+  expect(numSlotPass(m).map((p) => p.field)).toEqual(["a", "b", "c", "d", "e"]);
+  const cell = m.classes!.find((c) => c.name === "Cell")!;
+  expect(cell.numSlots).toEqual([
+    { field: "a", half: "%nsw:Cell:0", lane: 0 },
+    { field: "b", half: "%nsw:Cell:0", lane: 1 },
+    { field: "c", half: "%nsw:Cell:0", lane: 2 },
+    { field: "d", half: "%nsw:Cell:0", lane: 3 },
+    { field: "e", half: "%nsw:Cell:1", lane: 0 },
+  ]);
+  // the control the lanes exist for: five halves of 8 B became two words of 8 B
+  expect(cell.fields.filter((f) => f.name.startsWith("%ns")).map((f) => f.name)).toEqual(["%nsw:Cell:0", "%nsw:Cell:1"]);
+  expect(validateModule(m)).toEqual([]);
 });

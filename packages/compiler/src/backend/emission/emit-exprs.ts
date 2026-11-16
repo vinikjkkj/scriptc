@@ -13,7 +13,7 @@ function canonNum(type: { kind: string }, expr: string, elide = false): string {
   return type.kind === "f64" && !elide ? `scr_num_canon(${expr})` : expr;
 }
 import { rcSitesRequested, rcSiteLabel } from "./emitter.js";
-import { BUFFER_NUM_ACCESSOR_METHODS, dynKeyGetUsesLitTwin, moduleUsesEngineFn, ORD_MEMBER, orderRecordPlanCached, ABSENT_KEY_TRAP_CODE, arrayOf, canBoxFuncIntoDyn, BOOL, BYTES_U8, bytesOf, ownMaskKeyBit, presenceMaskStores, OWNMASK_COMPLETED, OWNMASK_VALID, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, IrExpr, IrRecordShape, IrType, irFunctionJsName, irFunctionValueCode, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals, typeKey, numSlotHalf } from "../../ir/nodes.js";
+import { BUFFER_NUM_ACCESSOR_METHODS, dynKeyGetUsesLitTwin, moduleUsesEngineFn, ORD_MEMBER, orderRecordPlanCached, ABSENT_KEY_TRAP_CODE, arrayOf, canBoxFuncIntoDyn, BOOL, BYTES_U8, bytesOf, ownMaskKeyBit, presenceMaskStores, OWNMASK_COMPLETED, OWNMASK_VALID, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, IrExpr, IrRecordShape, IrType, irFunctionJsName, irFunctionValueCode, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals, typeKey, numSlotHalf, numSlotLane } from "../../ir/nodes.js";
 import { unionKeyClasses, boxAccess, BYTES_NUM_KIND_C, BYTES_NUM_VAR_C, bytesElemKindC, cDecl, cFnPtrCast, cNumberLiteral, cStringLiteral, cType, DV_GET_KIND_C, DV_SET_KIND_C, elemAccess, mapKeyAccess, mapKeyKindC, mapValKindC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassNew, mangleClassRetain, mangleClassStruct, mangleField, mangleFnClosure, mangleFunction, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleVtStruct, mangleWrapper } from "../mangle.js";
 import { KEYIX_MEMBER, KEYLIST_MEMBER, OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, VIEW_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
@@ -2731,10 +2731,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         }
         // A NUMBER-SLOT field (ir/num-slot.ts): the value is the raw half when the dyn slot holds the marker.
         if (e.kind === "fieldGet" && e.type.kind === "dyn") {
-          const half = numSlotHalf(E.mod.classes, e.className, e.field);
+          const half = numSlotLane(E.mod.classes, e.className, e.field);
           if (half !== undefined) {
-            const raw = `${obj.name}->${mangleField(half)}`;
-            return E.newTemp(e.type, `scr_numslot_get(${field}, ${raw})`);
+            const raw = `((const uint16_t *)&${obj.name}->${mangleField(half.half)})[${half.lane}]`;
+            return E.newTemp(e.type, `scr_numslot_get_l(${field}, ${raw})`);
           }
         }
         if (e.kind === "fieldGet" && e.nullTest) return E.newTemp(e.type, `(${field} == NULL)`);

@@ -6944,6 +6944,30 @@ static inline void scr_numslot_put(ScrDyn **p, double *n, ScrDyn *v) {
   }
   scr_dyn_release(old);
 }
+/* LANE FORM (the one the compilers emit): the raw half is a 16-bit lane of a hidden f64 word (four lanes per word), so only an integer in 0..65535 is held raw;
+ * every other number (fraction, negative, -0, NaN, larger) stays a node in `p` like any other value. The marker slot, the pacing weight and every structural
+ * consumer are as above. */
+static inline bool scr_numslot_fits(double n) {
+  return n >= 0 && n <= 65535 && n == (double)(uint16_t)n && !__builtin_signbit(n);
+}
+ScrDyn *scr_numslot_get_lv(ScrDyn *p, uint16_t n);
+void scr_numslot_put_lv(ScrDyn **p, uint16_t *n, ScrDyn *v);
+static inline ScrDyn *scr_numslot_get_l(ScrDyn *p, uint16_t n) {
+  return p == &scr_numslot_node ? scr_dyn_new_num((double)n) : scr_dyn_retain(p);
+}
+static inline void scr_numslot_put_l(ScrDyn **p, uint16_t *n, ScrDyn *v) {
+  ScrDyn *old = *p;
+  if (v->kind == SCR_DYN_NUM && scr_numslot_fits(v->v.num)) {
+    *n = (uint16_t)v->v.num;
+    *p = &scr_numslot_node;
+    scr_dyn_release(v);
+    if (old != &scr_numslot_node) SCR_PROPS_GHOST_ADD(1);
+  } else {
+    *p = v;
+    if (old == &scr_numslot_node) SCR_PROPS_GHOST_SUB(1);
+  }
+  scr_dyn_release(old);
+}
 /* Out of line on purpose: inlined into scr_cls_props_get/has the loop gave every call a larger prologue, including the calls that find no table at all
  * (about 4 in 5 on the mysql bench: +17 instructions each). Each unit that uses it gets its own static copy. */
 static __attribute__((noinline)) const ScrDynEntry *scr_dyn_props_find(const ScrDyn *tbl, const char *key, size_t key_len) {

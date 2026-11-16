@@ -2545,6 +2545,8 @@ ScrDyn scr_numslot_node = { SIZE_MAX, SCR_DYN_UNDEF, { false } };
 ScrDyn *scr_numslot_get_v(ScrDyn *p, double n) { return scr_numslot_get(p, n); }
 void scr_numslot_put_v(ScrDyn **p, double *n, ScrDyn *v) { scr_numslot_put(p, n, v); }
 /* A dying instance's slot: a marker stops counting the node it never had (scr_runtime.h NUMBER SLOTS, pacing). The LLVM lane's per-field call. */
+ScrDyn *scr_numslot_get_lv(ScrDyn *p, uint16_t n) { return scr_numslot_get_l(p, n); }
+void scr_numslot_put_lv(ScrDyn **p, uint16_t *n, ScrDyn *v) { scr_numslot_put_l(p, n, v); }
 void scr_numslot_ghost_one(ScrDyn *p) { SCR_PROPS_GHOST_SUB(SCR_NUMSLOT_GHOSTS(p)); }
 void scr_cbit_note_v(void *o, const ScrDyn *v) { scr_cbit_note(o, v); }
 

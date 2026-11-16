@@ -1786,10 +1786,11 @@ export interface IrClassDef {
    * The validator enforces the prefix property. */
   fields: { name: string; type: IrType }[];
   /** NUMBER SLOTS (ir/num-slot.ts): checked-dynamic fields (inherited included) stored as TWO slots, the field's own dyn slot plus the hidden f64
-   * `half`. A number lives raw in the half and the dyn slot holds THE immortal marker (scr_numslot_node); any other value lives in the dyn slot
-   * and the half is dead. Every reader of the field answers `marker ? box(half) : slot`. The half is also listed in `fields` (hidden, `%`-named,
-   * after the class's own fields), so layouts, new and release treat it like any f64 field. */
-  numSlots?: { field: string; half: string }[];
+   * `half` WORD, lane `lane` of it: the hidden f64 words (`%nsw:<class>:<k>`, listed in `fields` after the class's own fields) are each four 16-bit
+   * lanes. A number that is an integer in 0..65535 lives in its lane and the dyn slot holds THE immortal marker (scr_numslot_node); any other value
+   * (another kind, a fraction, a negative, -0, NaN, a larger number) lives in the dyn slot and the lane is dead. Every reader of the field answers
+   * `marker ? box(lane) : slot`. */
+  numSlots?: { field: string; half: string; lane: number }[];
   /** CONTAINER-BIT GATE (ir/cbit.ts): every field that can hold a reference is a dyn field, and the class is standalone (no base, no subclass). Its instances carry a
    * per-instance bit in the cycle header (scr_runtime.h SCR_CYC_CBIT) that every store of a non-leaf dyn value sets; while it is clear the instance cannot be on a cycle,
    * so its release does not buffer it as a root and its trace visits nothing (its collector teardown then releases the dyn fields itself). */
@@ -15887,9 +15888,9 @@ export function isIntegerKeyName(n: string): boolean {
   return /^(0|[1-9][0-9]*)$/.test(n) && Number(n) < 4294967295;
 }
 
-const NUMSLOT_CACHE = new WeakMap<readonly IrClassDef[], Map<string, string> | null>();
-/** The hidden f64 half of a number-slot field, or undefined when `field` of `className` is an ordinary slot (one table build per module, then one lookup). */
-export function numSlotHalf(classes: readonly IrClassDef[] | undefined, className: string, field: string): string | undefined {
+const NUMSLOT_CACHE = new WeakMap<readonly IrClassDef[], Map<string, { half: string; lane: number }> | null>();
+/** The hidden f64 word and the 16-bit lane of a number-slot field, or undefined when `field` of `className` is an ordinary slot (one table build per module, then one lookup). */
+export function numSlotLane(classes: readonly IrClassDef[] | undefined, className: string, field: string): { half: string; lane: number } | undefined {
   if (classes === undefined) return undefined;
   let t = NUMSLOT_CACHE.get(classes);
   if (t === undefined) {
@@ -15897,12 +15898,16 @@ export function numSlotHalf(classes: readonly IrClassDef[] | undefined, classNam
     for (const c of classes) {
       for (const x of c.numSlots ?? []) {
         if (t === null) t = new Map();
-        t.set(`${c.name}\0${x.field}`, x.half);
+        t.set(`${c.name}\0${x.field}`, { half: x.half, lane: x.lane });
       }
     }
     NUMSLOT_CACHE.set(classes, t);
   }
   return t === null ? undefined : t.get(`${className}\0${field}`);
+}
+/** The hidden word of a number-slot field (see numSlotLane). */
+export function numSlotHalf(classes: readonly IrClassDef[] | undefined, className: string, field: string): string | undefined {
+  return numSlotLane(classes, className, field)?.half;
 }
 
 const CBIT_CACHE = new WeakMap<readonly IrClassDef[], Set<string>>();

@@ -223,7 +223,7 @@ export interface DynHost extends WalkerHost {
    * (the hierarchy prefix already counted). */
   classFieldGep(className: string, field: string): number;
   /** The hidden f64 half of a number-slot field (ir/num-slot.ts), or undefined. */
-  numSlotHalfOf(className: string, field: string): string | undefined;
+  numSlotLaneOf(className: string, field: string): { half: string; lane: number } | undefined;
   /** The GEP index of a class's per-instance order record (-1 when its hierarchy has none). */
   classOrdGep(className: string): number;
 }
@@ -6241,16 +6241,18 @@ export class LlDyn {
           v = b;
         }
         // A NUMBER-SLOT field (ir/num-slot.ts): the row answers the raw half when the dyn slot holds the marker.
-        const slotHalf = row.type.kind === "dyn" ? host.numSlotHalfOf(className, row.name) : undefined;
+        const slotHalf = row.type.kind === "dyn" ? host.numSlotLaneOf(className, row.name) : undefined;
         let slotOut: string | null = null;
         if (slotHalf !== undefined) {
           const hp = B.tmp();
-          B.line(`${hp} = getelementptr inbounds %${struct}, ptr %o, i64 0, i32 ${host.classFieldGep(className, slotHalf)} ; .${slotHalf}`);
+          B.line(`${hp} = getelementptr inbounds %${struct}, ptr %o, i64 0, i32 ${host.classFieldGep(className, slotHalf.half)} ; .${slotHalf.half}`);
+          const lp = B.tmp();
+          B.line(`${lp} = getelementptr inbounds i16, ptr ${hp}, i64 ${slotHalf.lane}`);
           const hv = B.tmp();
-          B.line(`${hv} = load double, ptr ${hp}`);
+          B.line(`${hv} = load i16, ptr ${lp}`);
           slotOut = B.tmp();
-          host.declare(`declare ptr @scr_numslot_get_v(ptr, double)`);
-          B.line(`${slotOut} = call ptr @scr_numslot_get_v(ptr ${raw}, double ${hv})`);
+          host.declare(`declare ptr @scr_numslot_get_lv(ptr, i16 zeroext)`);
+          B.line(`${slotOut} = call ptr @scr_numslot_get_lv(ptr ${raw}, i16 zeroext ${hv})`);
         }
         // BORROWED: every toDyn walker retains or copies, and the instance
         // stays owned by the box the caller is holding.

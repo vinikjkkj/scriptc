@@ -16,7 +16,7 @@ import type { ClassMeta } from "./emit-shapes.js";
 import { RUNTIME_EMITTER_CLASS as RUNTIME_EMITTER_CLASS_W } from "../../ir/nodes.js";
 import { isIntegerKeyName } from "../../ir/nodes.js";
 import { classvalCandidates, dynClassDisplayName, dynDescBase, dynEmitterSlot, dynRuntimeBaseInfo, dynRuntimeRoot, dynEnumerationFenced, dynMemberRows, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
-import { EMITTER_MIXIN_FIELD_NAME, ORD_MEMBER, orderRecordPlanCached, numSlotHalf } from "../../ir/nodes.js";
+import { EMITTER_MIXIN_FIELD_NAME, ORD_MEMBER, orderRecordPlanCached, numSlotLane } from "../../ir/nodes.js";
 import { KINDGATE_WIDE_KINDS, kindgateInstanceLane, kindgateWideLane, kindgateFuncLane, soleRecordArmWithFuncMember, kindgateJsvalLane } from "../kindgate.js";
 import { KEYIX_MEMBER, KEYLIST_MEMBER, OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, VIEW_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
 
@@ -263,10 +263,10 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
           // arm's twin): a write through the dyn copy reaches the field.
           (() => {
             // A NUMBER-SLOT field (ir/num-slot.ts): the member row answers the raw half when the dyn slot holds the marker.
-            const half = row.type.kind === "dyn" ? numSlotHalf(E.mod.classes, className, row.name) : undefined;
+            const half = row.type.kind === "dyn" ? numSlotLane(E.mod.classes, className, row.name) : undefined;
             if (half === undefined) return `  return ${fieldDynC(E, row.type, `((${struct} *)o)->${mangleField(row.name)}`)};`;
-            const raw = `((${struct} *)o)->${mangleField(half)}`;
-            return `  return scr_numslot_get(((${struct} *)o)->${mangleField(row.name)}, ${raw});`;
+            const raw = `((const uint16_t *)&((${struct} *)o)->${mangleField(half.half)})[${half.lane}]`;
+            return `  return scr_numslot_get_l(((${struct} *)o)->${mangleField(row.name)}, ${raw});`;
           })(),
           `}`,
           ``,
