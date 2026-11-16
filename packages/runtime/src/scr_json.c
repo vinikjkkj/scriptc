@@ -2436,11 +2436,8 @@ __attribute__((noinline, cold)) void scr_dyn_phantom_update(void) {
     for (size_t i = 0; i < len && i < 8; i++, at += step) {
       const ScrDyn *c = *(const ScrDyn *const *)at;
       if (c == NULL) continue;
-      if (c->rc != SIZE_MAX) {
-        /* a string box held more than once is a SHARED box (scr_dyn_new_str_conv): one live node behind several slots, which a pass still walks slot by slot, so it is a phantom like the immortal ones */
-        if (c->kind == SCR_DYN_STR && c->rc > 1) scr_ph_total++;
-        else scr_nd_total += 2;
-      } else if (c->kind == SCR_DYN_BOOL || c->kind == SCR_DYN_NULL || c->kind == SCR_DYN_NUM || c->kind == SCR_DYN_STR) scr_ph_total++;
+      if (c->rc != SIZE_MAX) scr_nd_total += 2;
+      else if (c->kind == SCR_DYN_BOOL || c->kind == SCR_DYN_NULL || c->kind == SCR_DYN_NUM || c->kind == SCR_DYN_STR) scr_ph_total++;
     }
   }
   if (scr_ph_total == 0 || scr_nd_total == 0) return; /* nothing real in the sample (all slots shared boxes) would divide by zero */
@@ -2608,86 +2605,7 @@ ScrDyn *scr_dyn_new_str_sh(ScrStr *s) {
     }
     return &empty;
   }
-  return s->rc >= 2u ? scr_dyn_new_str_conv(s) : scr_dyn_new_str(s); /* a string held once cannot have another box */
-}
-
-/* SHARED BOXES OF A SHARED STRING, for the typed-to-dyn string leaf (the sc_td_ converters and the union walkers; no other boxing consults it).
- * A conversion boxes the string it is handed, and a string that many converted trees contain gets one 40-byte box per conversion: zapo's sqlite
- * send_group holds ~1,000 participant JIDs in ~509 converted participant lists at once, 509,920 boxes (20.4 MB) for ~1,000 distinct string blocks,
- * the string block's own count reading 509. A STR node is immutable, so a second box of the same block is the same value (=== on strings is by
- * value; Object.is, Map keys and inspect read the string, never the node), and the converter can hand out the box it already made.
- *
- * ZERO COST WHERE NOTHING IS SHARED: the cache is consulted only when the string block's own count is at least 2 (the emitted leaf and scr_dyn_new_str_sh test it), i.e. something
- * besides the caller's reference holds it. A string held once (a row value, a fresh substring) cannot have another box, and pays one load and one
- * compare. Only short strings (<= SCR_BXC_MAXLEN) take part.
- *
- * The cache is a direct-mapped table keyed by the string block's address. An entry OWNS one reference to its box (and so the box owns the string, which
- * therefore cannot be freed and reused under the entry's key). It is weak in effect, not in mechanism: every SCR_BXC_SWEEP_EVERY insertions a sweep drops
- * the entries whose box nothing else holds (rc == 1), so a box lives at most that many insertions past its last user, and a collision evicts. No
- * work is added to the death of any node. An audit build releases the entries at exit so the leak audit sees the cache as it sees any other owner. */
-#ifndef SCR_BXC_BITS
-#define SCR_BXC_BITS 12
-#endif
-#ifndef SCR_BXC_MAXLEN
-#define SCR_BXC_MAXLEN 256u
-#endif
-#ifndef SCR_BXC_SWEEP_EVERY
-#define SCR_BXC_SWEEP_EVERY 4096u
-#endif
-typedef struct { ScrStr *s; ScrDyn *box; } ScrBxcEnt;
-static ScrBxcEnt scr_bxc[1u << SCR_BXC_BITS];
-static unsigned scr_bxc_inserts;
-static void scr_bxc_sweep(void) {
-  for (unsigned i = 0; i < (1u << SCR_BXC_BITS); i++) {
-    ScrBxcEnt *e = &scr_bxc[i];
-    if (e->box != NULL && e->box->rc == 1) {
-      ScrDyn *b = e->box;
-      e->box = NULL;
-      e->s = NULL;
-      scr_dyn_release(b);
-    }
-  }
-}
-#ifdef SCR_RC_AUDIT
-static void scr_bxc_teardown(void) {
-  for (unsigned i = 0; i < (1u << SCR_BXC_BITS); i++) {
-    ScrBxcEnt *e = &scr_bxc[i];
-    if (e->box != NULL) {
-      ScrDyn *b = e->box;
-      e->box = NULL;
-      e->s = NULL;
-      scr_dyn_release(b);
-    }
-  }
-}
-#endif
-/* The miss path, out of line so the hit path below is a leaf with nothing to save: only a short plain string takes part, and the absent marker and the codec strings
- * (whose boxes mean something else) never do. */
-static __attribute__((noinline)) ScrDyn *scr_bxc_miss(ScrStr *s, ScrBxcEnt *e) {
-  if (s->len > SCR_BXC_MAXLEN || s->cap >= 0xFFFD0000u || scr_str_is_absent(s)) return scr_dyn_new_str(s);
-  ScrDyn *d = scr_dyn_new_str(s);
-  ScrDyn *old = e->box;
-  e->s = s;
-  e->box = scr_dyn_retain(d);
-  if (old != NULL) scr_dyn_release(old);
-#ifdef SCR_RC_AUDIT
-  {
-    static int reg;
-    if (!reg) { reg = 1; atexit(scr_bxc_teardown); }
-  }
-#endif
-  if (++scr_bxc_inserts % SCR_BXC_SWEEP_EVERY == 0) scr_bxc_sweep();
-  return d;
-}
-/* The caller (the emitted string leaf, scr_dyn_new_str_sh) has already seen the string's count is >= 2. An entry exists only for an eligible string, so the
- * hit needs no eligibility test: the key is the block's address, and the entry's box keeps that block alive, so the key cannot belong to another string. */
-ScrDyn *scr_dyn_new_str_conv(ScrStr *s) {
-  ScrBxcEnt *e = &scr_bxc[(unsigned)(((size_t)s >> 4) * 2654435761u) >> (32 - SCR_BXC_BITS)];
-  if (e->s == s) {
-    scr_dyn_phantom_note(); /* a shared handout is a slot with no new node behind it: it counts in the collector's pacing estimate like an immortal one */
-    return scr_dyn_retain(e->box);
-  }
-  return scr_bxc_miss(s, e);
+  return scr_dyn_new_str(s);
 }
 
 ScrDyn *scr_dyn_new_arr(void) {

@@ -6514,9 +6514,6 @@ ScrDyn *scr_dyn_new_str(ScrStr *s);
 /* The union walkers' forms: -1, 0, 1 and the empty string are shared immortal nodes (see scr_json.c). Retains like the plain forms. */
 ScrDyn *scr_dyn_new_num_sh(double n);
 ScrDyn *scr_dyn_new_str_sh(ScrStr *s);
-/* The typed-to-dyn STRING LEAF: scr_dyn_new_str, except that a string block someone else also holds (count >= 2, short) hands out the one box already made
- * for it instead of a fresh node (scr_json.c, "SHARED BOXES OF A SHARED STRING"). Retains the string like scr_dyn_new_str; +1 on the returned node. */
-ScrDyn *scr_dyn_new_str_conv(ScrStr *s);
 ScrDyn *scr_dyn_web_crypto(void); /* globalThis.crypto, the process singleton (+1) */
 extern ScrStr *(*scr_dyn_obj_tag_hook)(const ScrDyn *d);
 extern ScrStr *(*scr_insp_hook)(ScrDyn *d, const char *cn, double recurse, double depth);
