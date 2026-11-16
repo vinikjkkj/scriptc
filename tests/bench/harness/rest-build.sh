@@ -15,8 +15,13 @@ fi
 cp "$APP" "$R/zapo-rest-mysql.ts"
 cd "$R"
 s=$(date +%s); set +e
-$BENCH_NODE --max-old-space-size=${NODE_HEAP_MB:-12288} "$SCC_CLI" build zapo-rest-mysql.ts --provenance-sources --npm-static mysql2 ${EXTRA_ARGS:-} --backend "$BE" -o "$O/build-$BE$TAG.bin" > "$O/zapo-rest-mysql-$BE$TAG.build.log" 2>&1
+$BENCH_NODE --max-old-space-size=${NODE_HEAP_MB:-12288} "$SCC_CLI" build zapo-rest-mysql.ts --provenance-sources --npm-static mysql2 ${EXTRA_ARGS:-} ${RAMAP:+--keep-c} --backend "$BE" -o "$O/build-$BE$TAG.bin" > "$O/zapo-rest-mysql-$BE$TAG.build.log" 2>&1
 rc=$?; set -e
+# RAMAP=1: the kept program TU gives every sc_* function its source file (ramap.py's origin split); the TU itself is then deleted, it is large
+if [ -n "${RAMAP:-}" ] && [ $rc -eq 0 ]; then
+  python3 "$BENCH_DIR/harness/symfile.py" "$O/zapo-rest-mysql-$BE$TAG.symfile.tsv" "$O"/zapo-rest-mysql*.c | tee -a "$O/zapo-rest-mysql-$BE$TAG.build.log" || true
+  rm -f "$O"/zapo-rest-mysql*.c "$O"/zapo-rest-mysql*.scrh "$O"/zapo-rest-mysql*.keep.json "$O"/zapo-rest-mysql*.ll
+fi
 secs=$(( $(date +%s) - s ))
 echo "rc=$rc secs=$secs" | tee -a "$O/zapo-rest-mysql-$BE$TAG.build.log"
 [ $rc -eq 0 ] && cp "$O/build-$BE$TAG.bin" "$O/zapo-rest-mysql-$BE$TAG.bin"
