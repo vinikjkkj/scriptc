@@ -6893,6 +6893,39 @@ extern size_t scr_cyc_live;
 #define SCR_PROPS_GHOST_ADD(n) ((void)(n))
 #define SCR_PROPS_GHOST_SUB(n) ((void)(n))
 #endif
+/* NUMBER SLOTS (compiler ir/num-slot.ts). A class field split in two: the dyn slot `p` and a hidden f64 half `n`. A number lives raw in `n` and `p` holds
+ * THE marker below (an immortal undefined-kind node, distinct by pointer alone, which is why release/retain/trace of `p` need no special case); any
+ * other value lives in `p`. scr_numslot_get answers the field's value +1 (a fresh number node for a raw number, the retained slot otherwise);
+ * scr_numslot_put MOVES `v` in: a number is unboxed into `n` (its node released), anything else replaces `p`, and the old slot is released after the
+ * new one is in place. The _v forms are the same functions out of line, for the LLVM lane.
+ *
+ * PACING. A number held raw is a dyn node that is no longer allocated, so the collector's pacing weight (scr_cyc_live, see SCR_PROPS_GHOST) keeps
+ * counting it: +1 when a slot turns into a marker, -1 when a marker slot takes a value, and -SCR_NUMSLOT_GHOSTS(field...) where the instance dies (the
+ * class's release and collector teardown, both emitters). Without it a program whose live set is mostly such numbers collected about 1.4x as often
+ * over the same edges (measured on the mysql bench: 17 more passes, +0.90% instructions). */
+extern ScrDyn scr_numslot_node;
+ScrDyn *scr_dyn_new_num(double n);
+void scr_dyn_release(ScrDyn *d);
+ScrDyn *scr_numslot_get_v(ScrDyn *p, double n);
+void scr_numslot_put_v(ScrDyn **p, double *n, ScrDyn *v);
+void scr_numslot_ghost_one(ScrDyn *p);
+#define SCR_NUMSLOT_GHOSTS(p) ((size_t)((p) == &scr_numslot_node))
+static inline ScrDyn *scr_numslot_get(ScrDyn *p, double n) {
+  return p == &scr_numslot_node ? scr_dyn_new_num(n) : scr_dyn_retain(p);
+}
+static inline void scr_numslot_put(ScrDyn **p, double *n, ScrDyn *v) {
+  ScrDyn *old = *p;
+  if (v->kind == SCR_DYN_NUM) {
+    *n = v->v.num;
+    *p = &scr_numslot_node;
+    scr_dyn_release(v);
+    if (old != &scr_numslot_node) SCR_PROPS_GHOST_ADD(1);
+  } else {
+    *p = v;
+    if (old == &scr_numslot_node) SCR_PROPS_GHOST_SUB(1);
+  }
+  scr_dyn_release(old);
+}
 /* Out of line on purpose: inlined into scr_cls_props_get/has the loop gave every call a larger prologue, including the calls that find no table at all
  * (about 4 in 5 on the mysql bench: +17 instructions each). Each unit that uses it gets its own static copy. */
 static __attribute__((noinline)) const ScrDynEntry *scr_dyn_props_find(const ScrDyn *tbl, const char *key, size_t key_len) {

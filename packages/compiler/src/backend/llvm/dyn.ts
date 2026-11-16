@@ -222,6 +222,8 @@ export interface DynHost extends WalkerHost {
   /** The GEP index of a declared field inside the class's own struct
    * (the hierarchy prefix already counted). */
   classFieldGep(className: string, field: string): number;
+  /** The hidden f64 half of a number-slot field (ir/num-slot.ts), or undefined. */
+  numSlotHalfOf(className: string, field: string): string | undefined;
   /** The GEP index of a class's per-instance order record (-1 when its hierarchy has none). */
   classOrdGep(className: string): number;
 }
@@ -6219,9 +6221,21 @@ export class LlDyn {
           B.line(`${b} = trunc i8 ${raw} to i1`);
           v = b;
         }
+        // A NUMBER-SLOT field (ir/num-slot.ts): the row answers the raw half when the dyn slot holds the marker.
+        const slotHalf = row.type.kind === "dyn" ? host.numSlotHalfOf(className, row.name) : undefined;
+        let slotOut: string | null = null;
+        if (slotHalf !== undefined) {
+          const hp = B.tmp();
+          B.line(`${hp} = getelementptr inbounds %${struct}, ptr %o, i64 0, i32 ${host.classFieldGep(className, slotHalf)} ; .${slotHalf}`);
+          const hv = B.tmp();
+          B.line(`${hv} = load double, ptr ${hp}`);
+          slotOut = B.tmp();
+          host.declare(`declare ptr @scr_numslot_get_v(ptr, double)`);
+          B.line(`${slotOut} = call ptr @scr_numslot_get_v(ptr ${raw}, double ${hv})`);
+        }
         // BORROWED: every toDyn walker retains or copies, and the instance
         // stays owned by the box the caller is holding.
-        const out = row.type.kind === "func"
+        const out = slotOut !== null ? slotOut : row.type.kind === "func"
           ? (() => {
               const box = canBoxFuncIntoDyn(row.type, (id: string) => host.recordsById.get(id), (id: string) => host.unionsById.get(id))
                 ? this.dynFuncBoxHelper(row.type)

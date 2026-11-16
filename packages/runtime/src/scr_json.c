@@ -2537,6 +2537,13 @@ static ScrDyn *scr_dyn_new_num_kept(double n) {
   return sh != NULL ? sh : scr_dyn_new_num(n);
 }
 
+/* The number-slot marker (scr_runtime.h): immortal, undefined-kind, never handed to a reader. */
+ScrDyn scr_numslot_node = { SIZE_MAX, SCR_DYN_UNDEF, { false } };
+ScrDyn *scr_numslot_get_v(ScrDyn *p, double n) { return scr_numslot_get(p, n); }
+void scr_numslot_put_v(ScrDyn **p, double *n, ScrDyn *v) { scr_numslot_put(p, n, v); }
+/* A dying instance's slot: a marker stops counting the node it never had (scr_runtime.h NUMBER SLOTS, pacing). The LLVM lane's per-field call. */
+void scr_numslot_ghost_one(ScrDyn *p) { SCR_PROPS_GHOST_SUB(SCR_NUMSLOT_GHOSTS(p)); }
+
 ScrDyn *scr_dyn_new_num(double n) {
 #ifdef SCR_SMALLINT_LAB
   if (scr_smallint_lab_mode() == 2) {
