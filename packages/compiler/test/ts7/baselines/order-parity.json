@@ -15914,6 +15914,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25412-a-class-with-a-run-time-property-table-is-gated-and-a-cycle-through-a-defined-property-is-still-collected.ts": {
+   "order": [
+    "<repo>/tests/corpus/25412-a-class-with-a-run-time-property-table-is-gated-and-a-cycle-through-a-defined-property-is-still-collected.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2550-generics-keyof-pick.ts": {
    "order": [
     "<repo>/tests/corpus/2550-generics-keyof-pick.ts"
