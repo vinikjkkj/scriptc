@@ -6865,6 +6865,17 @@ export class Lowerer {
       for (const e of flowEdges) if (matters.has(e.dst) && !matters.has(e.src)) { matters.add(e.src); ch = true; }
     }
     const listed = new Set<string>([...needs].filter((id) => matters.has(id)));
+    if (process.env["SCRIPTC_KEYORDER_COUNT"] !== undefined) {
+      // MEASUREMENT ONLY (keyorder1-count): the shapes that are the target of an interned `%rec.width` copy and are enumerated.
+      const tgt = new Map<string, Set<string>>();
+      for (const k of this.widthHelpers.keys()) {
+        const m = /^rec:(.+):(.+)$/.exec(k);
+        if (m) { if (!tgt.has(m[2]!)) tgt.set(m[2]!, new Set()); tgt.get(m[2]!)!.add(m[1]!); }
+      }
+      const enumTargets = [...tgt.keys()].filter((id) => this.enumeratedRecords.has(id));
+      const idxSrc = enumTargets.filter((id) => [...tgt.get(id)!].some((s) => this.shapes.get(s)?.indexValue !== undefined));
+      console.error(`[keyorder-count] ${JSON.stringify({ widthTargets: tgt.size, widthTargetsEnumerated: enumTargets.length, fromIndexSig: idxSrc.length, listedNow: listed.size, names: enumTargets.slice(0, 40).map((id) => ({ id, fields: this.shapes.get(id)?.fields.length, srcs: [...tgt.get(id)!].length })) })}`);
+    }
     const patches = edges.filter((e) => listed.has(e.src) && listed.has(e.dst));
     const dests = new Set(patches.map((e) => e.dst));
     const patchLocs = new Map<string, { lk: string; src: string; dst: string }>();
