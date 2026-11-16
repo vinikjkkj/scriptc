@@ -10184,6 +10184,12 @@ export class Lowerer {
     this.identityEdges.length = 0;
   }
 
+  /** Some conversion views another shape's struct AS this one (recordSrcView): its fields must keep their types, so it cannot grow. */
+  isStructViewTarget(shapeId: string): boolean {
+    const sh = this.shapes.get(shapeId);
+    return sh !== undefined && structViewTargetKeys.has(viewShapeKey(sh.fields, sh.indexValue));
+  }
+
   /** Shape unification closed the pair (shape-unify.ts): it is one shape now, so no view is ever made for it. */
   noteUnifiedPair(fromKey: string, toKey: string): void {
     if (fromKey === "" || toKey === "") return;

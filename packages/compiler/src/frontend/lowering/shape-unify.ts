@@ -308,6 +308,10 @@ export function unifyWidthShapes(L: Lowerer, functions: IrFunction[]): UnifyOutc
     // A carry shape (a spread literal widened so it drops nothing) is exempt: the cap exists to avoid growing a view to spare a copy,
     // and here the copy is what would lose members.
     const carries = ms.some((m) => L.carryShapes.has(m));
+    // A struct-view TARGET (some conversion views another shape's struct as this one: recordSrcView) cannot grow: the view reads its
+    // source's fields at identical types, and a carried member would change that type. The carry edge then stays a struct view of the
+    // wide struct, which is exact and never crosses the dyn boundary.
+    if (carries) for (const m of ms) if (!L.carryShapes.has(m) && L.isStructViewTarget(m) && names.length > ownFields(m).length) return `carry-grows-a-view-target ${m}`;
     for (const m of ms) {
       if (!carries && names.length - ownFields(m).length > GROWTH_CAP) return `over-cap ${m} +${names.length - ownFields(m).length}`;
     }
