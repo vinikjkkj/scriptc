@@ -28212,6 +28212,12 @@
     "<repo>/tests/corpus/25463-tls-connect-an-ip-literal-identity-failure-reject-unauthorized-and-the-override.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25464-fetch-https-to-an-ip-literal-verifies-the-cert-ip-san-and-fails-the-identity-check-with-nodes-error.ts": {
+   "order": [
+    "<repo>/tests/corpus/25464-fetch-https-to-an-ip-literal-verifies-the-cert-ip-san-and-fails-the-identity-check-with-nodes-error.ts"
+   ],
+   "diags": []
   }
  }
 }
