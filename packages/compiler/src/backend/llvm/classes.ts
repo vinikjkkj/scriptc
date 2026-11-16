@@ -194,12 +194,24 @@ export function streamRooted(meta: LlClassMeta): boolean {
   return false;
 }
 
+/** The standalone classes whose instances carry the dyn head, with their class-table index (ir/boxed-classes.ts headClassPlan; the C lane's
+ * E.headPlan). Set once per module before any class is laid out: the layout below, the stamp in new and the descriptor all read it. */
+let llHeadIdx: ReadonlyMap<string, number> = new Map();
+export function setLlHeadPlan(plan: ReadonlyMap<string, number>): void {
+  llHeadIdx = plan;
+}
+/** The i64 stored at byte 8 of a head instance: ScrDyn::kind (SCR_OBJ_HEAD_KIND = SCR_DYN_OBJINST = 12) in the low word, then the class slot
+ * 0x8000 | index (the head marker is bit 7 of byte 13) and the two flag bytes the weak-key checks read, zero. */
+export function llHeadWord(idx: number): string {
+  return ((BigInt(0x8000 | idx) << 32n) | 12n).toString();
+}
+
 /** The GEP index where a class's own fields start: rc at 0, the vtable
  * word at 1 on hierarchy members, then the emitter prefix (registry +
  * display name) on emitter-rooted classes, then the stream-state slot on
  * stream-rooted ones. */
 function fieldBase(meta: LlClassMeta): number {
-  if (!meta.hierarchy) return 1;
+  if (!meta.hierarchy) return llHeadIdx.has(meta.def.name) ? 2 : 1; // a head class keeps the dyn head word at 1
   if (streamRooted(meta)) return 5;
   return emitterRooted(meta) ? 4 : 2;
 }
@@ -227,6 +239,17 @@ export function classFieldIndex(meta: LlClassMeta, field: string): { index: numb
   const idx = meta.def.fields.findIndex((f) => f.name === field);
   if (idx < 0) throw new Error(`llvm emitter bug: unknown field ${field} on class ${meta.def.name}`);
   return { index: fieldBase(meta) + recShift(meta) + idx, type: meta.def.fields[idx]!.type };
+}
+
+/** scr_cyc_live +/- 1: the collector paces by live cycle-capable objects, and a head instance replaces a stand-alone dyn node that counted one
+ * (the C lane's `scr_cyc_live++` / `--` beside scr_obj_alloc_note / scr_obj_free_note). */
+function headWeightIr(sign: "+" | "-"): string[] {
+  const t = sign === "+" ? "hwu" : "hwd";
+  return [
+    `  %${t}l = load i64, ptr @scr_cyc_live`,
+    `  %${t}n = ${sign === "+" ? "add" : "sub"} i64 %${t}l, 1`,
+    `  store i64 %${t}n, ptr @scr_cyc_live`,
+  ];
 }
 
 /** What class emission needs beyond ShapeHost: interned unit instances for
@@ -300,6 +323,7 @@ export function emitClassShapes(
   const emittedFnNames = new Set((mod.functions ?? []).map((f) => f.name));
   host.declare(`declare void @scr_obj_alloc_note()`);
   host.declare(`declare void @scr_obj_free_note()`);
+  if (llHeadIdx.size > 0) host.declare(`@scr_cyc_live = external global i64`);
 
   for (const cls of emitted) {
     const meta = metaMap.get(cls.name)!;
@@ -314,7 +338,7 @@ export function emitClassShapes(
       : ["ptr"]
       : [];
     const ordBytes = llOrdBytesOf(cls.name);
-    const members = [...prefix, ...(ordBytes > 0 ? [`[${ordBytes} x i8]`] : []), ...fieldTys];
+    const members = [...(llHeadIdx.has(cls.name) ? ["i64"] : []), ...prefix, ...(ordBytes > 0 ? [`[${ordBytes} x i8]`] : []), ...fieldTys];
     typeDefs.push(
       `%${mangleClassStruct(cls.name)} = type { i64${members.length ? ", " + members.join(", ") : ""} } ` +
         `; class ${cls.name}${meta.hierarchy ? " (vt at 1)" : ""}${streamRooted(meta) ? " (ScrStream prefix at 2)" : emitterRooted(meta) ? " (ScrEmitter prefix at 2)" : ""} { ${cls.fields.map((f) => f.name).join("; ")} }`,
@@ -460,6 +484,7 @@ export function emitClassShapes(
       if (isEmitterRooted) lines.push(...regCall("td", "scr_emitter_reg_drop", ""));
       if (isStreamRooted) lines.push(...stCall("tds", "scr_stream_st_release", ""));
       lines.push(`  call void @scr_obj_free_note()`);
+      if (llHeadIdx.has(cls.name)) lines.push(...headWeightIr("-"));
       if (traced) {
         host.declare(`declare void @scr_cyc_free(ptr)`);
         lines.push(`  call void @scr_cyc_free(ptr %o)`);
@@ -578,6 +603,13 @@ export function emitClassShapes(
       );
     }
     nw.push(`  store i64 1, ptr %o`);
+    if (llHeadIdx.has(cls.name)) {
+      nw.push(
+        `  %hdp = getelementptr inbounds %${struct}, ptr %o, i64 0, i32 1`,
+        `  store i64 ${llHeadWord(llHeadIdx.get(cls.name)!)}, ptr %hdp ; dyn head: SCR_DYN_OBJINST, 0x8000 | class index ${llHeadIdx.get(cls.name)}`,
+        ...headWeightIr("+"), // pacing weight of the stand-alone node this head replaces
+      );
+    }
     if (meta.hierarchy) {
       nw.push(
         `  %vtp = getelementptr inbounds %${struct}, ptr %o, i64 0, i32 1`,
@@ -639,7 +671,7 @@ export function emitClassShapes(
         );
       });
       host.declare(`declare void @scr_cyc_free(ptr)`);
-      gf.push(`  call void @scr_obj_free_note()`, `  call void @scr_cyc_free(ptr %o)`, `  ret void`, `}`, ``);
+      gf.push(`  call void @scr_obj_free_note()`, ...(llHeadIdx.has(cls.name) ? headWeightIr("-") : []), `  call void @scr_cyc_free(ptr %o)`, `  ret void`, `}`, ``);
       defs.push(...gf);
     }
   }
