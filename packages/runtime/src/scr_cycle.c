@@ -1356,6 +1356,30 @@ static void scr_cyc_ar_pagecensus(const char *when) {
   /* One instant: the byte counter read here, the list walked just above. */
   scr_pc_arena_held = (unsigned long)(scr_cyc_ar_held / SCR_CYC_ARENA_CHUNK);
   scr_pc_report(when);
+  /* LAB (pcclass), never lands: the same walk per SIZE CLASS, at the exit reading only. */
+  if (when != NULL && when[0] == 'e') {
+    struct { unsigned long chunks, empty, used, carved, flen, gonepg, cur, stride; } cl[64];
+    memset(cl, 0, sizeof cl);
+    for (c = scr_cyc_ar_all; c != NULL; c = c->all_next) {
+      unsigned b = c->blk < 64 ? c->blk : 63;
+      unsigned long fl = 0, nsl = c->stride ? (unsigned long)(c->bump - ((unsigned char *)c + SCR_CYC_ARENA_GRAN)) / c->stride : 0;
+      void *f;
+      for (f = c->freelist; f != NULL && fl <= nsl; f = *(void **)f) fl++;
+      cl[b].chunks++;
+      cl[b].stride = c->stride;
+      if (c->used == 0) cl[b].empty++;
+      if (scr_cyc_ar_cur[c->blk] == c) cl[b].cur++;
+      cl[b].used += c->used;
+      cl[b].carved += nsl;
+      cl[b].flen += fl;
+      cl[b].gonepg += (unsigned long)__builtin_popcount((unsigned)c->gone);
+    }
+    for (unsigned b = 0; b < 64; b++) {
+      if (cl[b].chunks == 0) continue;
+      fprintf(stderr, "[pcclass] blk=%u stride=%lu chunks=%lu cur=%lu fullyFree=%lu liveBlocks=%lu carvedSlots=%lu onFreelist=%lu returnedPages=%lu freeBytesOnList=%lu\n",
+              b, cl[b].stride, cl[b].chunks, cl[b].cur, cl[b].empty, cl[b].used, cl[b].carved, cl[b].flen, cl[b].gonepg, cl[b].flen * cl[b].stride);
+    }
+  }
 }
 
 
