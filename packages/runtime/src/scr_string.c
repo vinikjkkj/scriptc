@@ -313,7 +313,7 @@ __attribute__((constructor)) static void scr_poolstat_reg_string(void) {
  * scr_str_live_count drains the table before answering -- see the note on
  * that function. */
 #ifndef SCR_STR_INTERN
-#define SCR_STR_INTERN 1
+#define SCR_STR_INTERN 0
 #endif
 #ifndef SCR_STR_INTERN_BITS
 #define SCR_STR_INTERN_BITS 16
