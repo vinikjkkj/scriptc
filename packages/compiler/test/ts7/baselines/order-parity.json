@@ -28176,6 +28176,12 @@
     "<repo>/tests/corpus/25427-a-literal-spelling-another-order-than-its-declared-shape-plus-an-undeclared-member-keeps-both.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25431-a-merged-carry-pair-enumerates-the-carried-members-on-every-surface.ts": {
+   "order": [
+    "<repo>/tests/corpus/25431-a-merged-carry-pair-enumerates-the-carried-members-on-every-surface.ts"
+   ],
+   "diags": []
   }
  }
 }
