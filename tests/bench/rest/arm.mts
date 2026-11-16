@@ -51,6 +51,16 @@ const env: NodeJS.ProcessEnv = { ...process.env,
     ZAPO_REST_ALLOW_SHUTDOWN: '1', ZAPO_MYSQL_PORT: process.env.RR_DBPORT ?? '33306', ZAPO_MYSQL_DATABASE: db,
     ZAPO_WS_URL: server.url, ZAPO_WS_CA_PUB: bytesToHex(server.noiseRootCa.publicKey),
     ZAPO_WS_CA_SERIAL: String(server.noiseRootCa.serial) }
+// RR_HS_MODE=external: the app downloads the history blob over HTTPS from the fake media server, whose certificate (CN=fake-media.local, no SAN, self-signed) the REST app does not trust and whose host is
+// 127.0.0.1. The harness gives the app process the certificate as an extra CA (NODE_EXTRA_CA_CERTS, read by Node and by the compiled runtime alike) and sends the blob URL with the host fake-media.local
+// (rest-run.mjs maps it to 127.0.0.1 in /etc/hosts). The certificate is READ from the fake server's source file; neither the server nor the app is edited.
+if ((process.env.RR_HS_MODE ?? '') === 'external') {
+    const src = readFileSync(join(FS, 'src/infra/WaFakeMediaHttpsServer.ts'), 'utf8')
+    const m = src.match(/FAKE_MEDIA_TLS_CERT_PEM = `(-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----)/)
+    if (!m) throw new Error('media certificate not found in the fake server source')
+    writeFileSync(join(OUT, 'media-ca.pem'), m[1] + '\n')
+    env.NODE_EXTRA_CA_CERTS = join(OUT, 'media-ca.pem')
+}
 const client = spawn(exe, exeArgs, { cwd: process.env.RR_APPDIR ?? OUT, env, stdio: ['ignore', 'pipe', 'pipe'] })
 let buf = ''
 const onOut = (d: Buffer) => { const s = d.toString(); log.write(s); buf += s
@@ -128,7 +138,7 @@ try {
                     // the blob download needs the app to trust the fake server's media TLS certificate, which the REST app does not (self-signed certificate): kept for apps that do
                     const plaintext = await encodeHistorySyncPlaintext({ chunkOrder: c, progress, conversations: conversations as any })
                     const blob = await server.publishMediaBlob({ mediaType: 'history', plaintext })
-                    await self.sendHistorySyncExternal({ chunkOrder: c, progress, directPath: server.mediaUrl(blob.path), mediaKey: blob.mediaKey,
+                    await self.sendHistorySyncExternal({ chunkOrder: c, progress, directPath: server.mediaUrl(blob.path).replace('//127.0.0.1:', '//fake-media.local:'), mediaKey: blob.mediaKey,
                         fileSha256: blob.fileSha256, fileEncSha256: blob.fileEncSha256, fileLength: blob.fileLength })
                     mark(`chunk ${c} sent external plaintext=${plaintext.length}`)
                 } else {
