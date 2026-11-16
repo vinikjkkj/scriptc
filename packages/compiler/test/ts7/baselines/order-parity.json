@@ -28188,6 +28188,24 @@
     "<repo>/tests/corpus/25432-a-spread-literal-typed-as-a-struct-view-target-compiles-and-reads-through-it.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25440-function-names-and-texts-read-through-the-name-and-text-tables.ts": {
+   "order": [
+    "<repo>/tests/corpus/25440-function-names-and-texts-read-through-the-name-and-text-tables.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25441-record-keys-projected-from-a-dyn-value-read-through-the-key-tables.ts": {
+   "order": [
+    "<repo>/tests/corpus/25441-record-keys-projected-from-a-dyn-value-read-through-the-key-tables.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25442-dyn-class-members-read-through-the-member-tables.ts": {
+   "order": [
+    "<repo>/tests/corpus/25442-dyn-class-members-read-through-the-member-tables.ts"
+   ],
+   "diags": []
   }
  }
 }
