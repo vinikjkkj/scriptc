@@ -977,6 +977,7 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
         const slotHalf = s.kind === "fieldSet" && v.type.kind === "dyn" ? numSlotLane(E.mod.classes, s.className, s.field) : undefined;
         if (slotHalf !== undefined) {
           // A NUMBER-SLOT field: an integer 0..65535 is unboxed into its 16-bit lane and the dyn slot takes the marker; anything else replaces the slot.
+          if (process.env["SCRIPTC_LABNS"] === "1") { E.line("#ifdef SCR_LABNS"); E.line(`SCR_LABNS_P(${labNsSite((s as { className: string }).className, s.field)}, ${v.name});`); E.line("#endif"); }
           E.moveTemp(v);
           E.line(`scr_numslot_put_l(&${field}, &((uint16_t *)&${obj.name}->${mangleField(slotHalf.half)})[${slotHalf.lane}], ${v.name});${E.srcComment(s.loc)}`);
         } else if (isRefCounted(v.type)) {
@@ -1779,4 +1780,17 @@ function emitStrAccum(E: CEmitter, s: Extract<IrStmt, { kind: "assign" }>, local
   E.moveTemp(res);
   E.line(`${target} = ${res.name};${E.srcComment(s.loc)}`);
   return true;
+}
+
+/** LAB: a stable id per (class, field) number-slot put site, printed once. */
+const labNsSites = new Map<string, number>();
+function labNsSite(className: string, field: string): number {
+  const k = `${className}.${field}`;
+  let id = labNsSites.get(k);
+  if (id === undefined) {
+    id = Math.min(254, labNsSites.size);
+    labNsSites.set(k, id);
+    process.stderr.write(`LABNS site ${id} = ${k}\n`);
+  }
+  return id;
 }
