@@ -264,7 +264,7 @@ static void fs_response_gcfree(void *obj) {
 }
 
 static ScrResponse *fs_response_new(void) {
-  ScrResponse *r = scr_cyc_alloc(sizeof *r, &fs_response_trace, &fs_response_gcfree);
+  ScrResponse *r = SCR_CYC_ALLOC(sizeof *r, &fs_response_trace, &fs_response_gcfree);
   r->rc = 1;
   r->status = 0;
   r->status_text = scr_str_new("", 0);
@@ -566,7 +566,7 @@ ScrFetchInit *scr_fetch_init_new(ScrStr *method /*borrowed, nullable*/,
                                  ScrArr *header_pairs /*borrowed, nullable*/,
                                  ScrBytes *body /*borrowed, nullable*/, bool body_text,
                                  void *signal /*borrowed, nullable*/) {
-  ScrFetchInit *i = scr_cyc_alloc(sizeof *i, &fs_init_trace, &fs_init_gcfree);
+  ScrFetchInit *i = SCR_CYC_ALLOC(sizeof *i, &fs_init_trace, &fs_init_gcfree);
   i->rc = 1;
   i->method = method != NULL && method->len > 0 ? scr_str_retain(method) : scr_str_new("GET", 3);
   i->headers = header_pairs != NULL ? scr_arr_retain(header_pairs) : scr_arr_new(SCR_ELEM_STR, 0);

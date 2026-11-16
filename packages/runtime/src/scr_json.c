@@ -636,7 +636,7 @@ __attribute__((constructor)) static void scr_dyn_idle_trim_reg(void) { scr_cyc_i
  * An incomplete trace is the SAFE direction: a ring through an untraced
  * edge is uncollectable (what the whole tree was before this change),
  * whereas a traced edge the teardown also releases is a double free. */
-static void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx);
+/* scr_dyn_trace is external (scr_runtime.h): the collector calls it directly for kind SCR_CYC_KIND_DYN. */
 static void scr_dyn_gcfree(void *o);
 /* The ghost weight (scr_runtime.h SCR_PROPS_GHOST) of a property table that is being torn down: one out-of-line copy for the release and the
  * collector's teardown, so neither carries the loop. */
@@ -721,6 +721,25 @@ void scr_throw_dyn(ScrDyn *v) {
   scr_throw_ref(v, scr_dyn_retain_v, scr_dyn_release_v, scr_dyn_trace_v);
 }
 
+/* The fresh-node arm of scr_dyn_alloc, out of line on purpose. Its per-site kind cache (SCR_CYC_ALLOC's function-local static and the one-time scr_cyc_kind_of call)
+ * made scr_dyn_alloc big enough that clang stopped inlining it into its callers (measured: +1.67G instructions on the mysql bench, 48M calls at about 34 each,
+ * where the inlined copies had folded `kind` to a constant); the recycling arm above stays small and inlinable. */
+static __attribute__((noinline)) ScrDyn *scr_dyn_alloc_fresh(ScrDynKind kind) {
+  /* The dyn node's kind index is a reserved one (SCR_CYC_KIND_DYN), so the collector can call scr_dyn_trace directly. */
+  static uint16_t dyn_ck;
+  if (__builtin_expect(dyn_ck == 0, 0)) dyn_ck = scr_cyc_kind_fixed(SCR_CYC_KIND_DYN, &scr_dyn_trace, &scr_dyn_gcfree);
+  ScrDyn *fresh = scr_cyc_alloc_k(scr_dyn_node_bytes(kind), dyn_ck);
+  fresh->rc = 1;
+  fresh->kind = kind;
+#ifdef SCR_DYNCEN_ON
+  scr_dyncen_note_alloc(fresh);
+#endif
+#ifdef SCR_RC_AUDIT
+  scr_live_dyns++;
+  scr_dyn_live_by_kind[kind]++;
+#endif
+  return fresh;
+}
 static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
 #ifndef SCR_RC_AUDIT
   ScrDyn **list = scr_dyn_free_list(kind);
@@ -776,17 +795,7 @@ static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
     return d;
   }
 #endif
-  ScrDyn *fresh = scr_cyc_alloc(scr_dyn_node_bytes(kind), &scr_dyn_trace, &scr_dyn_gcfree);
-  fresh->rc = 1;
-  fresh->kind = kind;
-#ifdef SCR_DYNCEN_ON
-  scr_dyncen_note_alloc(fresh);
-#endif
-#ifdef SCR_RC_AUDIT
-  scr_live_dyns++;
-  scr_dyn_live_by_kind[kind]++;
-#endif
-  return fresh;
+  return scr_dyn_alloc_fresh(kind);
 }
 
 #ifdef SCR_SMALLINT_LAB
@@ -812,7 +821,7 @@ ScrDyn *scr_dyn_alloc_proxy(void) { return scr_dyn_alloc(SCR_DYN_PROXY); }
 
 /* The traced children: every one is a ScrDyn or a ScrClosure, so every one
  * carries a header (or is immortal, which the visit filter skips). */
-static void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx) {
+void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx) {
   ScrDyn *d = (ScrDyn *)o;
   switch (d->kind) {
   case SCR_DYN_ARR:
@@ -2423,7 +2432,7 @@ __attribute__((noinline, cold)) void scr_dyn_phantom_update(void) {
   if (n > 128) n = 128;
   for (size_t r = 0; r < n; r++) {
     const ScrDyn *d = (const ScrDyn *)scr_roots[r];
-    if (scr_cyc_trace_of(scr_cyc_hdr(d)) != scr_dyn_trace) continue;
+    if (scr_cyc_kind(scr_cyc_hdr(d)) != SCR_CYC_KIND_DYN) continue;
     const char *at;
     size_t len, step;
     if (d->kind == SCR_DYN_ARR) {

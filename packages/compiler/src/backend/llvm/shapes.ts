@@ -827,9 +827,22 @@ export function emitRecordShapes(host: ShapeHost, mod: IrModule): { typeDefs: st
       `entry:`,
     ];
     if (traced) {
-      host.declare(`declare ptr @scr_cyc_alloc(i64, ptr, ptr)`);
+      // The kind index of this (trace, free) pair is looked up once and cached in a module-level i16 (the 8-byte cycle header's kind, scr_runtime.h).
+      host.declare(`declare ptr @scr_cyc_alloc_k(i64, i32)`);
+      host.declare(`declare i16 @scr_cyc_kind_of(ptr, ptr)`);
+      defs.push(`@ck.${mangleRecordNew(shape.id)} = internal global i16 0`);
       nw.push(
-        `  %o = call ptr @scr_cyc_alloc(i64 ${sizeOf}, ptr @${mangleRecordTrace(shape.id)}, ptr @${mangleRecordGcFree(shape.id)})`,
+        `  %ck = load i16, ptr @ck.${mangleRecordNew(shape.id)}`,
+        `  %ckz = icmp eq i16 %ck, 0`,
+        `  br i1 %ckz, label %ckinit, label %ckdone`,
+        `ckinit:`,
+        `  %ckn = call i16 @scr_cyc_kind_of(ptr @${mangleRecordTrace(shape.id)}, ptr @${mangleRecordGcFree(shape.id)})`,
+        `  store i16 %ckn, ptr @ck.${mangleRecordNew(shape.id)}`,
+        `  br label %ckdone`,
+        `ckdone:`,
+        `  %ckv = phi i16 [ %ck, %entry ], [ %ckn, %ckinit ]`,
+        `  %ckw = zext i16 %ckv to i32`,
+        `  %o = call ptr @scr_cyc_alloc_k(i64 ${sizeOf}, i32 %ckw)`,
       );
     } else {
       host.declare(`declare ptr @calloc(i64, i64)`);

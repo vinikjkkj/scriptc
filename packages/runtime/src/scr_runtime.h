@@ -501,7 +501,7 @@ static inline size_t scr_pool_bytes(size_t n) {
 
 /* NULL when the class is empty, the size is out of range, or the audit
  * lane has turned the pool off. */
-static inline void *scr_pool_take(ScrPool *p, size_t n) {
+static inline __attribute__((always_inline)) void *scr_pool_take_at(ScrPool *p, size_t n, size_t link_off) {
 #ifdef SCR_RC_AUDIT
   (void)p; (void)n;
   return NULL;
@@ -527,7 +527,7 @@ static inline void *scr_pool_take(ScrPool *p, size_t n) {
   /* the free-list link lives in the block's first word; every class is
    * at least 16 bytes, so it always fits and is always aligned. */
   void *next;
-  __builtin_memcpy(&next, b, sizeof next);
+  __builtin_memcpy(&next, (char *)b + link_off, sizeof next);
   p->head[c] = next;
 #if SCR_POOL_BUDGET
   p->bytes -= r;
@@ -542,7 +542,7 @@ static inline void *scr_pool_take(ScrPool *p, size_t n) {
 }
 
 /* true when the pool took the block: the caller must NOT free it then. */
-static inline bool scr_pool_give(ScrPool *p, void *b, size_t n) {
+static inline __attribute__((always_inline)) bool scr_pool_give_at(ScrPool *p, void *b, size_t n, size_t link_off) {
 #ifdef SCR_RC_AUDIT
   (void)p; (void)b; (void)n;
   return false;
@@ -569,7 +569,7 @@ static inline bool scr_pool_give(ScrPool *p, void *b, size_t n) {
     return false;
   }
 #endif
-  __builtin_memcpy(b, &p->head[c], sizeof(void *));
+  __builtin_memcpy((char *)b + link_off, &p->head[c], sizeof(void *));
   p->head[c] = b;
 #if SCR_POOL_BUDGET
   p->bytes = held;
@@ -583,85 +583,63 @@ static inline bool scr_pool_give(ScrPool *p, void *b, size_t n) {
 #endif
 }
 
+/* The link in the block's first word: every pool but the cycle-block pool (whose first word is the header). */
+static inline void *scr_pool_take(ScrPool *p, size_t n) { return scr_pool_take_at(p, n, 0); }
+static inline bool scr_pool_give(ScrPool *p, void *b, size_t n) { return scr_pool_give_at(p, b, n, 0); }
+
+/* THE CYCLE HEADER, 8 BYTES (it was 16). Every cycle-headered object in a compiled program carries one, so each byte here is tens of thousands of bytes of heap:
+ *
+ *   byte 0    color     SCR_CYC_*; the inlined retain writes it with ONE byte store, so it keeps a byte of its own at a fixed distance in front of the object
+ *                       (object - 8: the LLVM lane stores it by that offset, llvm/shapes.ts CYC_COLOR_OFF_FROM_OBJ)
+ *   byte 1    pad       the arena block's offset from its chunk in 256-byte granules (the block->chunk map, 0 = not carved)
+ *   byte 2    blk       the block's size class in the low six bits (0 = not pooled), the container bit 0x40 and the weak-key stamp 0x80 (object - 6)
+ *   bytes 3-5 idx_lo    the low 24 bits of buf_index, the position in the candidate-root buffer
+ *   bytes 6-7 kb        bits 0-11 the KIND index, bits 12-14 the high three bits of buf_index (27 bits in all, 134M roots; the largest seen on the benches is 65,024),
+ *                       bit 15 `buffered`
+ *
+ * The layout is chosen for instruction counts on the paths that run most: `buffered` is the top bit of the LAST byte, so the on_dead / on_release exit is one
+ * `testb $0x80, 7(%rdi)` (as the old `cmpb $0, 9(%rdi)` was); the kind is one 16-bit load and a mask; retain's mark-live is still one byte store.
+ *
+ * THE KIND is a 12-bit index into scr_cyc_kind_tab, one row per distinct (trace, free) pair a program allocates (557-603 measured on mysql, redis and the
+ * REST app; 4,095 is the limit and exceeding it aborts loudly). It replaces the two 4-byte RVAs the header used to carry. The row holds the two RVAs. Kinds
+ * 1..SCR_CYC_KIND_FIXED_END-1 are RESERVED for the hottest runtime kinds (dyn nodes are 78% of the collector's trace calls) so the collector can call their trace
+ * function directly after one compare instead of loading it from the table (see scr_cyc_trace_call). Index 0 means "not assigned yet": each allocation site caches
+ * its index (scr_cyc_kind_of is called once per site) and passes it to scr_cyc_alloc_k.
+ *
+ * THE FREE-LIST LINK LIVES IN THE PAYLOAD (SCR_CYC_LINK_OFF = 8), not in the first word of the block as it did when the header was 16 bytes: the old position was
+ * the header itself, safe only because pad and blk sat past byte 8. Every cycle object has at least its 8-byte rc word of payload, and the allocation zeroes
+ * the payload, which clears the link. */
 typedef struct ScrCycHdr {
-  /* The trace and teardown functions, as SIGNED offsets from one anchor
-   * (see scr_cyc_base below) rather than as pointers. EVERY cycle-headered object carries this
-   * header, and on zapo that is the single largest term in the heap:
-   * two 8-byte function pointers were 16 of the 32 header bytes and 16
-   * of the 104 physical bytes a ScrDyn cost BEFORE this change. Storing
-   * them as RVAs is a runtime-only change -- scr_cyc_alloc keeps taking
-   * real function pointers, so none of the 1,451 call sites (1,434 of
-   * them in the emitted TU) moves.
-   *
-   * THOSE TWO NUMBERS ARE HISTORY, NOT THE LAYOUT, and they read as
-   * present tense. They describe the state this change replaced.
-   * Measured on x86_64-windows-gnu today -- tests/perf/dyncensus prints
-   * all three in its LAYOUT line, and tests/perf/boxanat builds its cost
-   * model on them:
-   *
-   *     sizeof(ScrCycHdr)   16      (was 32)
-   *     sizeof(ScrDyn)      48      (was 72)
-   *     one dyn node        64 physical, = scr_pool_bytes(16 + 48) at
-   *                         the 8-byte grain   (was 104)
-   *
-   * Spelled out rather than corrected in place, because a stale constant
-   * in a header is how the next reader builds a wrong model of the heap.
-   * 104 against 64 is a 1.6x error on the most numerous object in the
-   * program, and it survives every gate in this project because nothing
-   * compiles against a comment. */
-  int32_t trace_off;
-  int32_t free_off;
-  /* color, buffered and blk were a uint32 each and needed 2, 1 and 6
-   * bits. They are bytes now, which keeps the single-byte store in
-   * scr_cyc_mark_live -- the inlined retain writes color on every
-   * retain in the program, so it must not become a read-modify-write. */
-  uint8_t color;    /* SCR_CYC_* */
-  uint8_t buffered; /* 1 = sitting in the candidate-root buffer */
-  /* The block's physical size in SCR_POOL_GRAIN units, stamped by
-   * scr_cyc_alloc so scr_cyc_free can hand the block back to the right
-   * pool class. SCR_POOL_MAX / SCR_POOL_GRAIN is 32, so a byte holds it
-   * with room. 0 = not pooled, free it.
-   *
-   * THE TOP BIT IS THE WEAK-KEY STAMP (SCR_CYC_WEAKKEY), and it rides
-   * here because THIS HEADER HAS NO PADDING LEFT. ScrBytes::weakkey and
-   * ScrArr::weakkey each found a spare byte in their own struct;
-   * ScrCycHdr is exactly 16 bytes with every one of them assigned
-   * (4+4+1+1+1+1+4), and the one byte that used to be slack — `pad` — is
-   * now the block's chunk offset. Growing the header to make room costs
-   * 8 bytes on EVERY cycle-headered object (16 is the last size that
-   * keeps the object pointer 16-byte aligned), which is the trade the
-   * field comments above already refused once.
-   *
-   * `blk` is the one field with real slack and no hot writer. Its value
-   * is in [0, SCR_POOL_MAX / SCR_POOL_GRAIN] = [0, 32] — six bits — and
-   * it is written in exactly one place, scr_cyc_stamp, once per
-   * allocation. color, buffered and buf_index are all written on hot
-   * paths by single-instruction stores that a packed flag would turn
-   * into read-modify-writes, which is the thing their own comments say
-   * must not happen.
-   *
-   * That the stamp is CLEARED by scr_cyc_stamp is not incidental, it is
-   * the correct semantics: a block coming back out of the pool or the
-   * arena is a new object at a recycled address, and it must not inherit
-   * the previous occupant's mark. ScrBytes and ScrArr keep their mark
-   * for life (see the tail of scr_weak.c) because their storage is
-   * malloc'd afresh; a recycled cycle block is the case that argument
-   * does not cover. */
-  uint8_t blk;
+  uint8_t color;
   uint8_t pad;
-  /* Position in the candidate-root buffer (O(1) removal when rc hits 0).
-   * uint32 rather than size_t: the header is EXACTLY 16 bytes and
-   * every cycle-headered object in a compiled program carries one, so
-   * a word here is tens of thousands of words of heap on zapo. The
-   * buffer holds candidate roots, not objects, and 4 billion of them
-   * is not a limit any program reaches.
-   *
-   * 16 also keeps the OBJECT pointer 16-byte aligned behind a
-   * 16-byte aligned block, which 24 would not -- that is why the two
-   * function pointers became RVAs rather than the flags simply being
-   * packed into one word. */
-  uint32_t buf_index;
+  uint8_t blk;
+  uint8_t idx_lo[3];
+  uint16_t kb;
 } ScrCycHdr;
+#define SCR_CYC_KIND_MASK 0x0fffu
+#define SCR_CYC_KIND_MAX 4096u
+#define SCR_CYC_KIND_DYN 1u
+#define SCR_CYC_KIND_FIXED_END 4u
+#define SCR_CYC_IDX_MAX 0x07ffffffu
+#define SCR_CYC_LINK_OFF 8u
+_Static_assert(sizeof(ScrCycHdr) == 8 && offsetof(ScrCycHdr, kb) == 6, "the cycle header is 8 bytes with the kind word last");
+#if !defined(__BYTE_ORDER__) || __BYTE_ORDER__ != __ORDER_LITTLE_ENDIAN__
+#error "the cycle header's single-byte tests of the buffered bit assume a little-endian target"
+#endif
+/* `buffered`: bit 15 of kb = bit 7 of the last byte of the header. Byte-sized accesses, so each is one instruction. */
+#define SCR_CYC_BUFFERED(h) (((const uint8_t *)(h))[7] & 0x80u)
+#define SCR_CYC_SET_BUFFERED(h) (((uint8_t *)(h))[7] |= 0x80u)
+#define SCR_CYC_CLR_BUFFERED(h) (((uint8_t *)(h))[7] &= 0x7fu)
+static inline uint32_t scr_cyc_idx(const ScrCycHdr *h) {
+  return (uint32_t)h->idx_lo[0] | ((uint32_t)h->idx_lo[1] << 8) | ((uint32_t)h->idx_lo[2] << 16) | ((((uint32_t)h->kb >> 12) & 7u) << 24);
+}
+/* Sets buf_index and leaves the kind and the buffered bit alone. */
+static inline void scr_cyc_set_idx(ScrCycHdr *h, uint32_t i) {
+  h->idx_lo[0] = (uint8_t)i;
+  h->idx_lo[1] = (uint8_t)(i >> 8);
+  h->idx_lo[2] = (uint8_t)(i >> 16);
+  h->kb = (uint16_t)((h->kb & ~(7u << 12)) | (((i >> 24) & 7u) << 12));
+}
 
 /* ScrCycHdr::blk, split. The size class is the low bits; the top bit says
  * "this object is a WeakMap key, consult the registry before handing the
@@ -678,8 +656,9 @@ _Static_assert((SCR_POOL_MAX / SCR_POOL_GRAIN) <= SCR_CYC_BLK_MASK,
                "ScrCycHdr::blk's container and weak-key bits");
 
 static inline ScrCycHdr *scr_cyc_hdr(void *obj) { return (ScrCycHdr *)obj - 1; }
-/* The LLVM lane reads the container bit at a fixed distance in front of the object (llvm/classes.ts): blk is byte 10 of the 16-byte header. */
-_Static_assert(offsetof(ScrCycHdr, blk) == 10 && sizeof(ScrCycHdr) == 16, "llvm/classes.ts addresses ScrCycHdr::blk at object - 6");
+/* The LLVM lane addresses color at object - 8 and blk (the container bit) at object - 6 (llvm/shapes.ts, llvm/classes.ts): pinned here. */
+_Static_assert(sizeof(ScrCycHdr) == 8 && sizeof(ScrCycHdr) - offsetof(ScrCycHdr, color) == 8 && sizeof(ScrCycHdr) - offsetof(ScrCycHdr, blk) == 6,
+               "llvm/shapes.ts and llvm/classes.ts address ScrCycHdr::color at object - 8 and ::blk at object - 6");
 
 /* The header stores the two functions as SIGNED 32-bit offsets from one
  * anchor; these three inlines are the only places that convert.
@@ -708,16 +687,46 @@ static inline const char *scr_cyc_base(void) {
 static inline int32_t scr_cyc_off(const void *fn) {
   return (int32_t)((const char *)fn - scr_cyc_base());
 }
+typedef struct ScrCycKindRow {
+  int32_t trace_off;
+  int32_t free_off;
+} ScrCycKindRow;
+extern ScrCycKindRow scr_cyc_kind_tab[SCR_CYC_KIND_MAX];
+static inline uint32_t scr_cyc_kind(const ScrCycHdr *h) { return (uint32_t)h->kb & SCR_CYC_KIND_MASK; }
 static inline ScrTraceFn scr_cyc_trace_of(const ScrCycHdr *h) {
-  return (ScrTraceFn)(void *)(scr_cyc_base() + h->trace_off);
+  return (ScrTraceFn)(void *)(scr_cyc_base() + scr_cyc_kind_tab[scr_cyc_kind(h)].trace_off);
 }
 static inline ScrCycFreeFn scr_cyc_free_of(const ScrCycHdr *h) {
-  return (ScrCycFreeFn)(void *)(scr_cyc_base() + h->free_off);
+  return (ScrCycFreeFn)(void *)(scr_cyc_base() + scr_cyc_kind_tab[scr_cyc_kind(h)].free_off);
+}
+
+/* The collector's call of an object's trace function. Dyn nodes (kind SCR_CYC_KIND_DYN, reserved) are about 78% of the calls the benches make, so they are called
+ * directly after one compare; every other kind goes through the kind table. */
+void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx);
+static inline void scr_cyc_trace_call(const ScrCycHdr *h, void *o, ScrTraceVisit visit, void *ctx) {
+  if (scr_cyc_kind(h) == SCR_CYC_KIND_DYN) {
+    scr_dyn_trace(o, visit, ctx);
+    return;
+  }
+  scr_cyc_trace_of(h)(o, visit, ctx);
 }
 
 /* Zeroed allocation with a cycle header in front; returns the OBJECT
  * pointer (header at scr_cyc_hdr). Aborts on OOM. */
 void *scr_cyc_alloc(size_t size, ScrTraceFn trace, ScrCycFreeFn free_fn);
+/* The kind index of a (trace, free) pair, assigned on first use (1..4095; aborts past that). Out of line and not fast: every allocation site calls it ONCE and
+ * caches the answer. scr_cyc_alloc_k is the allocation proper, taking the cached kind in place of the two functions. */
+uint16_t scr_cyc_kind_of(ScrTraceFn trace, ScrCycFreeFn free_fn);
+/* The same for a pair that owns one of the RESERVED indices (1 .. SCR_CYC_KIND_FIXED_END - 1); scr_cyc_kind_of never hands those out. */
+uint16_t scr_cyc_kind_fixed(uint32_t idx, ScrTraceFn trace, ScrCycFreeFn free_fn);
+void *scr_cyc_alloc_k(size_t size, uint32_t kind);
+/* The allocation of a site whose trace/free are compile-time constants: a function-local static caches the kind. */
+#define SCR_CYC_ALLOC(size, trace, free_fn) \
+  __extension__({ \
+    static uint16_t scr_ck_; \
+    if (__builtin_expect(scr_ck_ == 0, 0)) scr_ck_ = scr_cyc_kind_of((trace), (free_fn)); \
+    scr_cyc_alloc_k((size), scr_ck_); \
+  })
 void scr_cyc_free(void *obj); /* frees the block, header included */
 
 /* RC hooks for cycle-headered types. on_release: rc was decremented and

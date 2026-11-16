@@ -525,7 +525,7 @@ ScrArr *scr_arr_new_ref(void *(*elem_retain)(void *),
                          ScrTraceFn elem_trace, size_t initial_cap) {
   ScrArr *a;
   if (elem_trace) {
-    a = scr_cyc_alloc(sizeof(ScrArr), &scr_arr_trace_v, &scr_arr_gc_free);
+    a = SCR_CYC_ALLOC(sizeof(ScrArr), &scr_arr_trace_v, &scr_arr_gc_free);
   } else {
     a = malloc(sizeof(ScrArr));
     if (!a) scr_arr_oom();
