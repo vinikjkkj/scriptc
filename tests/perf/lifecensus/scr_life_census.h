@@ -451,7 +451,7 @@ SCR_LIFE_FN void scr_life_note_chunk(const void *basev, const void *limv,
     flen++;
     if (bp >= cs && bp < bump && ((unsigned long)(bp - cs) % stride) == 0)
       live[(unsigned long)(bp - cs) / stride] = 0;
-    memcpy(&b, bp, sizeof(void *));
+    memcpy(&b, bp + SCR_PC_LINK_OFF, sizeof(void *));
   }
   /* Blocks on a RETURNED page are free and deliberately off the list; the
    * page census's note explains why.  The indexing must match the sweep's,
