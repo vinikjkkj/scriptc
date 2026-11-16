@@ -337,9 +337,16 @@ export function unifyWidthShapes(L: Lowerer, functions: IrFunction[]): UnifyOutc
       }
     }
     // OBLIGATION 2 — one order that restricts to every member's own order.
-    const order = mergeOrders(ms.map((m) => orderOf(m)), names);
+    // A CARRY component (a spread literal widened to keep what its declared type lacks) has a member whose order nothing
+    // witnesses: the declared type's own order, when no literal builds it and nothing baked or indexed it. Its enumeration order
+    // IS whatever the carry literal spells (Node's object is that literal's), so it adopts the merged order instead of vetoing it.
+    const freeOf = (m: string): boolean =>
+      carries && !L.carryShapes.has(m) && !L.shapeOrderEvidence.has(m) && L.shapes.get(m)?.keyOrders === undefined &&
+      !L.enumOrderBakes.has(m);
+    const bound = ms.filter((m) => !freeOf(m));
+    const order = mergeOrders(bound.map((m) => orderOf(m)), names);
     if (order === null) return `order-cycle ${ms.join(",")}`;
-    for (const m of ms) {
+    for (const m of bound) {
       const have = new Set(ownFields(m).map((f) => f.name));
       const restricted = order.filter((n) => have.has(n));
       const want = orderOf(m);
@@ -484,6 +491,15 @@ export function unifyWidthShapes(L: Lowerer, functions: IrFunction[]): UnifyOutc
     const shape = shapeOf(canonId);
     // The canonical shape's OWN field types still name pre-merge shapes;
     // substitution below rewrites them in place along with everything else.
+    // A member whose order was FREE (see freeOf: no literal builds it and nothing baked its order) adopts the merged order
+    // restricted to its own fields; nothing needs rebuilding because nothing baked the old one.
+    if ([...ms].some((x) => L.carryShapes.has(x))) {
+      for (const id of ms) {
+        if (id === canonId || L.carryShapes.has(id) || L.shapeOrderEvidence.has(id) || L.shapes.get(id)?.keyOrders !== undefined) continue;
+        const own = new Set(shapeOf(id).fields.map((f) => f.name));
+        shapeOf(id).declaredOrder = m.order.filter((n) => own.has(n));
+      }
+    }
     shape.fields = m.fields;
     shape.declaredOrder = m.order;
     // A hidden per-instance slot any member carried, the whole component
