@@ -183,6 +183,9 @@ jobs:
       - name: Tools (valgrind for the Ir and massif runs)
         if: ${{ inputs.ir != '0' || inputs.massif != '0' }}
         run: sudo apt-get update -q && sudo apt-get install -y -q valgrind
+      - name: Tools (lld for the ordered link of layout=order, on a runner whose GNU ld predates --section-ordering-file)
+        if: ${{ inputs.layout != 'none' }}
+        run: sudo apt-get update -q && sudo apt-get install -y -q lld && ld.lld --version
       # The provenance cache holds the zapo source the compiler maps (fetched by commit from github).
       - uses: actions/cache@v4
         with:
