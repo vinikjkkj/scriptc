@@ -12,6 +12,7 @@
  * - Lexical scoping is resolved here: locals get function-unique ids
  *   ("x.0", "x.1" for shadowing); the IR is scope-flat.
  */
+import { absentTaintCensus } from "../../ir/absent-taint.js";
 import { renameLiftedFunctions } from "./stable-names.js";
 import { markDeadSourceCrossings } from "../../ir/dead-source.js";
 import { compressFieldRunLoops } from "../../ir/field-run-loops.js";
@@ -4396,6 +4397,7 @@ export class Lowerer {
     // is not complete until the last body is lowered.
     this.reportRecordWidthCopies(functions);
     this.viewRewrite(functions);
+    if (process.env["SCRIPTC_ABSENT_TAINT_CENSUS"] !== undefined) absentTaintCensus(this as never, functions);
     this.frozenArrayRewrite(functions);
     this.fenceDynArrFromOnStrandedBox(functions);
 
