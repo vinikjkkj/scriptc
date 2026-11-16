@@ -196,9 +196,11 @@ try {
                     const ti = nf.indexOf('type'), ni = nf.indexOf('name'), si = nf.indexOf('self_size')
                     const by = new Map<string, { n: number; b: number }>()
                     for (let i = 0; i < snap.nodes.length; i += stride) { const k = `${nt[snap.nodes[i + ti]]}:${snap.strings[snap.nodes[i + ni]]}`.slice(0, 80); const e = by.get(k) ?? { n: 0, b: 0 }; e.n++; e.b += snap.nodes[i + si]; by.set(k, e) }
+                    const byType = new Map<string, { n: number; b: number }>()
+                    for (let i = 0; i < snap.nodes.length; i += stride) { const k = nt[snap.nodes[i + ti]]; const e = byType.get(k) ?? { n: 0, b: 0 }; e.n++; e.b += snap.nodes[i + si]; byType.set(k, e) }
                     const top = [...by.entries()].sort((a, b) => b[1].b - a[1].b).slice(0, 60).map(([k, v]) => ({ k, n: v.n, bytes: v.b }))
                     const total = [...by.values()].reduce((a, v) => a + v.b, 0)
-                    writeFileSync(join(OUT, 'node-heap.json'), JSON.stringify({ file: files[files.length - 1], nodes: snap.nodes.length / stride, totalSelfBytes: total, top }, null, 1))
+                    writeFileSync(join(OUT, 'node-heap.json'), JSON.stringify({ byType: Object.fromEntries([...byType.entries()].sort((a, b) => b[1].b - a[1].b)), file: files[files.length - 1], nodes: snap.nodes.length / stride, totalSelfBytes: total, top }, null, 1))
                     try { fs.unlinkSync(f) } catch {} }
             }
             await sleep(Number(process.env.RR_HS_STEADY_S ?? 60) * 1000)
