@@ -22,6 +22,12 @@ sig = os.environ.get('RAMAP_SIGNAL')
 p = subprocess.Popen(cmd, stdout=so, stderr=subprocess.STDOUT)
 pid = p.pid
 exe_base = os.path.basename(cmd[0])
+exe_path = None
+def refresh_exe():
+    global exe_base, exe_path
+    try:
+        exe_path = os.readlink(f'/proc/{pid}/exe'); exe_base = os.path.basename(exe_path)
+    except Exception: pass
 t0 = time.time()
 FIELDS = ('Size', 'Rss', 'Pss', 'Shared_Clean', 'Shared_Dirty', 'Private_Clean', 'Private_Dirty', 'Anonymous')
 HEAD = re.compile(r'^([0-9a-f]+)-([0-9a-f]+) (\S+) ([0-9a-f]+) \S+ \d+\s*(.*)$')
@@ -107,9 +113,17 @@ def read_pagemap(maps):
     return res
 
 best = None; best_score = 0; best_rss = 0; best_t = 0.0; last_hwm = 0; last_snap_t = 0.0; samples = 0; tl = []; events = []; final_hwm = 0; final_rss = 0
-max_code = 0; dropped = False; post_max = 0; post_best = None; post_best_t = 0.0; post_score = 0
+last_faults = (None, None); max_code = 0; dropped = False; post_max = 0; post_best = None; post_best_t = 0.0; post_score = 0
 STEADY_AT = [float(x) for x in os.environ.get('RAMAP_STEADY_AT', '1.5,3.0,7.0,10.0').split(',') if x]; steady_snaps = []
+def faults():
+    try:
+        t = open(f'/proc/{pid}/stat').read()
+        f = t[t.rindex(')') + 2:].split()
+        return int(f[7]), int(f[9])  # minflt, majflt
+    except Exception:
+        return None, None
 def take():
+    refresh_exe()
     with open(f'/proc/{pid}/smaps') as f: s = f.read()
     maps = parse_smaps(s)
     return maps, read_pagemap(maps)
@@ -118,12 +132,15 @@ while p.poll() is None:
     now = time.time() - t0
     if rss is not None:
         samples += 1; final_hwm = max(final_hwm, hwm or 0); final_rss = rss
+        if samples % 25 == 0:
+            fl = faults()
+            if fl[0] is not None: last_faults = fl
         if samples % 100 == 0: tl.append((round(now, 2), rss))
         if STEADY_AT and now >= STEADY_AT[0]:
             t_s = STEADY_AT.pop(0)
             try:
                 maps, pm = take(); r2, h2 = status()
-                steady_snaps.append((round(now, 2), maps, pm, r2, h2))
+                steady_snaps.append((round(now, 2), maps, pm, r2, h2, faults()))
             except Exception: pass
         new_hwm = hwm is not None and hwm > last_hwm
         new_post = dropped and rss > post_max + 256
@@ -137,7 +154,7 @@ while p.poll() is None:
                 code = cls0.get('main-binary:code(r-x)', {}).get('Rss', 0)
                 if new_hwm:
                     last_hwm = hwm
-                    events.append({'t': round(now, 3), 'vmrss': rss2, 'hwm': hwm2, 'vmrss_before_read': rss,
+                    events.append({'t': round(now, 3), 'vmrss': rss2, 'hwm': hwm2, 'vmrss_before_read': rss, 'minflt': faults()[0], 'majflt': faults()[1],
                                    'heap': cls0.get('heap(brk)', {}).get('Rss', 0), 'anon': cls0.get('anon-mmap', {}).get('Rss', 0), 'code': code})
                     if best is None or score >= best_score:
                         best = (maps, pm, rss2, hwm2); best_rss = score; best_score = score; best_t = round(now, 3)
@@ -164,7 +181,7 @@ def analyze(maps, pm, rss2, hwm2):
     res['mappings'] = [{'range': f"{m['start']:x}-{m['end']:x}", 'perms': m['perms'], 'name': m['name'] or '[anon]', 'class': classify(m), **{k: m[k] for k in FIELDS}} for m in top]
     # ---- resident text by function and origin
     try:
-        binp = cmd[0]
+        binp = exe_path or cmd[0]
         nm = subprocess.run(['nm', '-S', '--defined-only', '-n', binp], capture_output=True, text=True).stdout
         syms = []
         for l in nm.split('\n'):
@@ -243,13 +260,13 @@ def analyze(maps, pm, rss2, hwm2):
 
     return res
 
-res = {'cmd': cmd, 'exit': p.returncode, 'peak_vmrss_kb': best_rss, 'peak_at_s': best_t, 'samples': samples,
+res = {'minflt_last_seen': last_faults[0], 'majflt_last_seen': last_faults[1], 'cmd': cmd, 'exit': p.returncode, 'peak_vmrss_kb': best_rss, 'peak_at_s': best_t, 'samples': samples,
        'timeline': tl[::max(1, len(tl) // 40)], 'final_hwm_seen_kb': final_hwm, 'peak_gap_kb': (final_hwm - best_rss) if best else None,
        'hwm_events': len(events), 'events': events[-60:]}
 if best:
     res.update(analyze(*best))
     # the phases after the text drop: the best post-drop spike, and the timed steady snapshots
     if post_best: res['post_drop_peak'] = dict(analyze(*post_best), t=post_best_t)
-    res['steady'] = [dict(analyze(*sn[1:]), t=sn[0]) for sn in steady_snaps]
+    res['steady'] = [dict(analyze(*sn[1:5]), t=sn[0], minflt=sn[5][0], majflt=sn[5][1]) for sn in steady_snaps]
 json.dump(res, open(out, 'w'), indent=1)
 print(out, 'exit', p.returncode, 'peak', best_rss, 'kB; final VmHWM seen', final_hwm, 'kB; events', len(events))
