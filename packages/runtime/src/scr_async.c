@@ -2263,6 +2263,28 @@ static bool scr_has_textrel(void) {
   return false;
 }
 
+/* LAB (never shipped): SCR_TEXT_MADV=random|nohuge|random,nohuge applies MADV_RANDOM / MADV_NOHUGEPAGE to the executable's own executable (PF_X) PT_LOAD
+ * segments before main, so a single binary can A/B the fault policy of its text mapping by environment alone. */
+static int scr_lab_madv_cb(struct dl_phdr_info *info, size_t size, void *arg) {
+  (void)size;
+  if (info->dlpi_name != NULL && info->dlpi_name[0] != '\0') return 0; /* the main program is the first object, with an empty name */
+  int adv = *(int *)arg;
+  for (int i = 0; i < info->dlpi_phnum; i++) {
+    const ElfW(Phdr) *ph = &info->dlpi_phdr[i];
+    if (ph->p_type != PT_LOAD || (ph->p_flags & PF_X) == 0) continue;
+    uintptr_t a = (uintptr_t)info->dlpi_addr + (uintptr_t)ph->p_vaddr;
+    uintptr_t lo = a & ~(uintptr_t)4095, hi = (a + (uintptr_t)ph->p_memsz + 4095) & ~(uintptr_t)4095;
+    (void)madvise((void *)lo, hi - lo, adv);
+  }
+  return 1;
+}
+__attribute__((constructor)) static void scr_lab_text_madv(void) {
+  const char *e = getenv("SCR_TEXT_MADV");
+  if (e == NULL || e[0] == '\0') return;
+  if (strstr(e, "random") != NULL) { int adv = MADV_RANDOM; dl_iterate_phdr(scr_lab_madv_cb, &adv); }
+  if (strstr(e, "nohuge") != NULL) { int adv = MADV_NOHUGEPAGE; dl_iterate_phdr(scr_lab_madv_cb, &adv); }
+}
+
 static bool scr_text_drop_first_done = false;
 static double scr_text_drop_first_ms = 0, scr_text_drop_last_ms = 0;
 static size_t scr_text_drop_n = 0;
@@ -2294,7 +2316,7 @@ static size_t scr_text_env_num(const char *name, size_t dflt) {
 #define SCR_TEXT_DROP_FAULTS 256
 #endif
 static int scr_td_state = 0; /* 0 unresolved, 1 live, 2 off */
-static size_t scr_td_every = 0, scr_td_faults = 0;
+static size_t scr_td_every = 0, scr_td_faults = 0, scr_td_after_ms = SCR_TEXT_DROP_AFTER_MS; /* LAB: SCR_TEXT_DROP_AFTER_MS in the environment overrides the 200 ms */
 static double scr_td_check_ms = 8, scr_td_next_check_ms = 0, scr_td_next_ms = 0;
 static bool scr_td_stat = false;
 static long scr_td_last_flt = 0;
@@ -2307,6 +2329,7 @@ static long scr_text_minflt(void) {
 
 static void scr_td_resolve(void) {
   scr_td_state = 1;
+  scr_td_after_ms = scr_text_env_num("SCR_TEXT_DROP_AFTER_MS", SCR_TEXT_DROP_AFTER_MS);
   scr_td_every = scr_text_env_num("SCR_TEXT_DROP_EVERY_MS", SCR_TEXT_DROP_EVERY_MS);
   scr_td_faults = scr_text_env_num("SCR_TEXT_DROP_FAULTS", SCR_TEXT_DROP_FAULTS);
   if (scr_td_every == 0) scr_td_faults = 0; /* EVERY_MS=0 is "the first drop only", faults included */
@@ -2387,8 +2410,8 @@ static void scr_text_drop_tick(double now) {
   if (now < scr_td_next_ms) return; /* the whole per-turn cost while live */
   long flt = 0;
   if (!scr_text_drop_first_done) {
-    if (scr_text_drop_first_ms == 0) { scr_text_drop_first_ms = now; scr_td_next_ms = now + (double)SCR_TEXT_DROP_AFTER_MS; return; }
-    if (now - scr_text_drop_first_ms < (double)SCR_TEXT_DROP_AFTER_MS) { scr_td_next_ms = scr_text_drop_first_ms + (double)SCR_TEXT_DROP_AFTER_MS; return; }
+    if (scr_text_drop_first_ms == 0) { scr_text_drop_first_ms = now; scr_td_next_ms = now + (double)scr_td_after_ms; return; }
+    if (now - scr_text_drop_first_ms < (double)scr_td_after_ms) { scr_td_next_ms = scr_text_drop_first_ms + (double)scr_td_after_ms; return; }
     scr_text_drop_first_done = true;
     scr_rela_released_kib = scr_rela_release();
   } else {
