@@ -28158,6 +28158,24 @@
     "<repo>/tests/corpus/25424-a-keyed-accumulator-returned-as-required-fields-enumerates-in-fill-order-once-per-key.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25425-a-spread-literal-typed-as-a-narrower-interface-carries-the-members-it-does-not-declare-through-async-and-unknown.ts": {
+   "order": [
+    "<repo>/tests/corpus/25425-a-spread-literal-typed-as-a-narrower-interface-carries-the-members-it-does-not-declare-through-async-and-unknown.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25426-a-spread-contributing-more-undeclared-members-than-the-growth-cap-keeps-every-one.ts": {
+   "order": [
+    "<repo>/tests/corpus/25426-a-spread-contributing-more-undeclared-members-than-the-growth-cap-keeps-every-one.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25427-a-literal-spelling-another-order-than-its-declared-shape-plus-an-undeclared-member-keeps-both.ts": {
+   "order": [
+    "<repo>/tests/corpus/25427-a-literal-spelling-another-order-than-its-declared-shape-plus-an-undeclared-member-keeps-both.ts"
+   ],
+   "diags": []
   }
  }
 }
