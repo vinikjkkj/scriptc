@@ -776,7 +776,7 @@ static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
     return d;
   }
 #endif
-  ScrDyn *fresh = scr_cyc_alloc(scr_dyn_node_bytes(kind), &scr_dyn_trace, &scr_dyn_gcfree);
+  ScrDyn *fresh = SCR_CYC_ALLOC(scr_dyn_node_bytes(kind), &scr_dyn_trace, &scr_dyn_gcfree);
   fresh->rc = 1;
   fresh->kind = kind;
 #ifdef SCR_DYNCEN_ON
