@@ -27,12 +27,14 @@ static size_t scr_fntext_probe(const ScrFnText **tab, size_t cap, const void *fn
 
 static const char *scr_fn_text_row(const ScrClosure *c);
 
-void scr_fn_texts_install(const ScrFnText *tbl, size_t n) {
-  scr_fn_text_row_hook = scr_fn_text_row;
-  free(scr_fntext_idx);
-  scr_fntext_idx = NULL;
-  scr_fntext_idx_cap = 0;
-  if (tbl == NULL || n == 0) return;
+/* Recorded at install, indexed on the first lookup (see scr_fn_names_install: the same reasoning, the index here is about 16 bytes per row). */
+static const ScrFnText *scr_fntext_tbl = NULL;
+static size_t scr_fntext_n = 0;
+
+static void scr_fntext_build(void) {
+  const ScrFnText *tbl = scr_fntext_tbl;
+  size_t n = scr_fntext_n;
+  if (scr_fntext_idx != NULL || tbl == NULL || n == 0) return;
   size_t cap = 16;
   while (cap < n * 2) cap *= 2;
   const ScrFnText **idx = (const ScrFnText **)calloc(cap, sizeof *idx);
@@ -42,8 +44,18 @@ void scr_fn_texts_install(const ScrFnText *tbl, size_t n) {
     size_t k = scr_fntext_probe(idx, cap, tbl[i].fn);
     if (idx[k] == NULL) idx[k] = &tbl[i];
   }
-  scr_fntext_idx = idx;
+  if (scr_fntext_idx != NULL) { free(idx); return; }
   scr_fntext_idx_cap = cap;
+  scr_fntext_idx = idx;
+}
+
+void scr_fn_texts_install(const ScrFnText *tbl, size_t n) {
+  scr_fn_text_row_hook = scr_fn_text_row;
+  free(scr_fntext_idx);
+  scr_fntext_idx = NULL;
+  scr_fntext_idx_cap = 0;
+  scr_fntext_tbl = tbl;
+  scr_fntext_n = n;
 }
 
 /* An adapter closure (a row with a NULL text: the lowerer's %fn.adapt.N.impl,
@@ -55,6 +67,7 @@ void scr_fn_texts_install(const ScrFnText *tbl, size_t n) {
 /* The table's text for a closure's entry point, or NULL when the table has none (no
  * default: a caller that needs an exact answer must not print a guessed one). */
 static const char *scr_fn_text_row(const ScrClosure *c) {
+  if (scr_fntext_idx == NULL) scr_fntext_build();
   if (scr_fntext_idx == NULL || c == NULL || c->fn == NULL) return NULL;
   size_t i = scr_fntext_probe(scr_fntext_idx, scr_fntext_idx_cap, c->fn);
   const ScrFnText *row = scr_fntext_idx[i];
@@ -62,6 +75,7 @@ static const char *scr_fn_text_row(const ScrClosure *c) {
 }
 
 ScrStr *scr_fn_text(const ScrClosure *c) {
+  if (scr_fntext_idx == NULL) scr_fntext_build();
   const char *text = "function () { [native code] }";
   ScrClosure *held = NULL; /* +1 on the wrapped closure of the last adapter hop */
   for (int hop = 0; hop < SCR_FNTEXT_MAX_HOPS && scr_fntext_idx != NULL && c != NULL && c->fn != NULL; hop++) {

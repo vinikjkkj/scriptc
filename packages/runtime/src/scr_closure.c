@@ -720,12 +720,16 @@ unsigned scr_fn_names_epoch_v = 1; /* read inline by the dyn function-descriptor
 /* Bumped by every install: the dyn function-descriptor cache keys on it, because the name and kind code it caches come out of this table. */
 unsigned scr_fn_names_epoch(void) { return scr_fn_names_epoch_v; }
 
-void scr_fn_names_install(const ScrFnName *tbl, size_t n) {
-  scr_fn_names_epoch_v++;
-  free(scr_fnname_idx);
-  scr_fnname_idx = NULL;
-  scr_fnname_idx_cap = 0;
-  if (tbl == NULL || n == 0) return;
+/* The table is only RECORDED at install; its hash index is built on the first lookup. A program that never asks for a function's name
+ * (no `[Function: name]`, no kind code of a boxed function) pays neither the index (about 16 bytes per row of heap) nor the read of every row
+ * at startup. A racing first lookup may build the index twice; the loser's array is freed, and both are identical. */
+static const ScrFnName *scr_fnname_tbl = NULL;
+static size_t scr_fnname_n = 0;
+
+static void scr_fnname_build(void) {
+  const ScrFnName *tbl = scr_fnname_tbl;
+  size_t n = scr_fnname_n;
+  if (scr_fnname_idx != NULL || tbl == NULL || n == 0) return;
   size_t cap = 16;
   while (cap < n * 2) cap *= 2;
   const ScrFnName **idx = (const ScrFnName **)calloc(cap, sizeof *idx);
@@ -735,11 +739,22 @@ void scr_fn_names_install(const ScrFnName *tbl, size_t n) {
     size_t k = scr_fnname_probe(idx, cap, tbl[i].fn);
     if (idx[k] == NULL) idx[k] = &tbl[i]; /* first row wins; rows are unique */
   }
-  scr_fnname_idx = idx;
+  if (scr_fnname_idx != NULL) { free(idx); return; }
   scr_fnname_idx_cap = cap;
+  scr_fnname_idx = idx;
+}
+
+void scr_fn_names_install(const ScrFnName *tbl, size_t n) {
+  scr_fn_names_epoch_v++;
+  free(scr_fnname_idx);
+  scr_fnname_idx = NULL;
+  scr_fnname_idx_cap = 0;
+  scr_fnname_tbl = tbl;
+  scr_fnname_n = n;
 }
 
 const char *scr_fn_name_of(const void *fn) {
+  if (scr_fnname_idx == NULL) scr_fnname_build();
   if (scr_fnname_idx == NULL || fn == NULL) return NULL;
   size_t i = scr_fnname_probe(scr_fnname_idx, scr_fnname_idx_cap, fn);
   const ScrFnName *row = scr_fnname_idx[i];
@@ -747,6 +762,7 @@ const char *scr_fn_name_of(const void *fn) {
 }
 
 unsigned scr_fn_code_of(const void *fn) {
+  if (scr_fnname_idx == NULL) scr_fnname_build();
   if (scr_fnname_idx == NULL || fn == NULL) return 0;
   size_t i = scr_fnname_probe(scr_fnname_idx, scr_fnname_idx_cap, fn);
   const ScrFnName *row = scr_fnname_idx[i];
