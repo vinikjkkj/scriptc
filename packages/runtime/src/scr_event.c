@@ -66,7 +66,7 @@ static void scr_event_gcfree(void *obj) {
 
 /* `type` BORROWED. */
 ScrEvent *scr_event_new(ScrStr *type, bool bubbles, bool cancelable, bool composed) {
-  ScrEvent *e = scr_cyc_alloc(sizeof *e, &scr_event_trace, &scr_event_gcfree);
+  ScrEvent *e = SCR_CYC_ALLOC(sizeof *e, &scr_event_trace, &scr_event_gcfree);
   e->rc = 1;
   e->type = scr_str_retain(type);
   e->bubbles = bubbles;

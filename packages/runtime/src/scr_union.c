@@ -19,7 +19,7 @@ static long scr_live_unions = 0;
 long scr_union_live_count(void) { return scr_live_unions; }
 #endif
 
-static void scr_union_trace(void *o, ScrTraceVisit visit, void *ctx) {
+void scr_union_trace(void *o, ScrTraceVisit visit, void *ctx) {
   ScrUnion *u = (ScrUnion *)o;
   if (u->vt & 1u) visit(scr_union_peek(u), ctx);
 }
@@ -36,7 +36,9 @@ static void scr_union_gcfree(void *o) {
 }
 
 static ScrUnion *scr_union_alloc(uint32_t tag) {
-  ScrUnion *u = scr_cyc_alloc(sizeof(ScrUnion), &scr_union_trace, &scr_union_gcfree);
+  static uint16_t union_ck;
+  if (__builtin_expect(union_ck == 0, 0)) union_ck = scr_cyc_kind_fixed(SCR_CYC_KIND_UNION, &scr_union_trace, &scr_union_gcfree);
+  ScrUnion *u = scr_cyc_alloc_k(sizeof(ScrUnion), union_ck);
   u->rc = 1;
   u->tag = tag;
 #ifdef SCR_RC_AUDIT
