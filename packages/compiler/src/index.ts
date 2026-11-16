@@ -33,6 +33,7 @@ import { validateModule } from "./ir/validate.js";
 import { captureByValue } from "./ir/capture-by-value.js";
 import { numSlotPass } from "./ir/num-slot.js";
 import { cbitPass } from "./ir/cbit.js";
+import { reportNarrowScope } from "./ir/narrow-slot.js";
 import { canonicalBuiltinModule, checkPreflight, isNodeTypesPath, loadProgram, locOf, requiresOf, resolveNpmImport, type LoadResult } from "./frontend/program.js";
 import { npmStaticIneligibleReason, npmStaticOffenders, npmStaticPackageOfPath } from "./frontend/npm-static.js";
 import { provenanceSources } from "./frontend/provenance-registry.js";
@@ -1432,6 +1433,7 @@ async function compileTracked(
     if (lowered.module === null) return fail(lowered.diagnostics);
 
     captureByValue(lowered.module!);
+    reportNarrowScope(lowered.module!); // before numSlotPass: the scope of the narrow-slot rule over the lowered classes
     numSlotPass(lowered.module!);
     cbitPass(lowered.module!);
     const validation = tapped("fe.validate", () => validateModule(lowered.module!));
