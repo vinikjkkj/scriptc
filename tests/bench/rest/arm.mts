@@ -61,7 +61,7 @@ if ((process.env.RR_HS_MODE ?? '') === 'external' || (process.env.RR_SCENARIO ??
     writeFileSync(join(OUT, 'media-ca.pem'), m[1] + '\n')
     env.NODE_EXTRA_CA_CERTS = join(OUT, 'media-ca.pem')
 }
-if (process.env.RR_NODE_SNAP === '1' && label.startsWith('node')) env.NODE_OPTIONS = `${env.NODE_OPTIONS ?? ''} --heapsnapshot-signal=SIGUSR2`
+if (process.env.RR_NODE_SNAP === '1' && [exe, ...exeArgs].join(' ').includes('zapo-rest-mysql.ts')) env.NODE_OPTIONS = `${env.NODE_OPTIONS ?? ''} --heapsnapshot-signal=SIGUSR2`
 const client = spawn(exe, exeArgs, { cwd: process.env.RR_APPDIR ?? OUT, env, stdio: ['ignore', 'pipe', 'pipe'] })
 let buf = ''
 const onOut = (d: Buffer) => { const s = d.toString(); log.write(s); buf += s
@@ -185,7 +185,7 @@ try {
             const ev = await req('GET', '/events?type=history_sync_chunk'); results.pop()
             mark(`history-settled count=${last} storeCounts=${(fin.body_resp ?? '').slice(0, 400)} chunkEvents=${(ev.body_resp ?? '').length}b:${(ev.body_resp ?? '').slice(0, 300)}`)
             snapMark('settled')
-            if (process.env.RR_NODE_SNAP === '1' && label.startsWith('node') && client.pid !== undefined) {
+            if (process.env.RR_NODE_SNAP === '1' && [exe, ...exeArgs].join(' ').includes('zapo-rest-mysql.ts') && client.pid !== undefined) {
                 // Node's retained heap shape: SIGUSR2 writes a heap snapshot (NODE_OPTIONS=--heapsnapshot-signal), summarised by constructor to node-heap.json
                 const pid = appPid(client.pid); const dir = process.env.RR_APPDIR ?? OUT
                 try { process.kill(pid, 'SIGUSR2') } catch {}
