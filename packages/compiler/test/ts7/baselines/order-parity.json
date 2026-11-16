@@ -28182,6 +28182,12 @@
     "<repo>/tests/corpus/25431-a-merged-carry-pair-enumerates-the-carried-members-on-every-surface.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25432-a-spread-literal-typed-as-a-struct-view-target-compiles-and-reads-through-it.ts": {
+   "order": [
+    "<repo>/tests/corpus/25432-a-spread-literal-typed-as-a-struct-view-target-compiles-and-reads-through-it.ts"
+   ],
+   "diags": []
   }
  }
 }
