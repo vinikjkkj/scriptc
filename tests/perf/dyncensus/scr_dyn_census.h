@@ -691,6 +691,26 @@ SCR_DYNCEN_FN void scr_dyncen_final(void) {
   scr_dyncen_report();
 }
 
+/* LAB (lever 2, dyn capacity slack): one extra walk at a PHASE (the event loop's first turn, the text drop), printing only what the capacity question needs:
+ * per kind, n / lenSum / capSum / physical side bytes, and per capacity class the object count, the capacity held and the length that fills it. Idempotent: it
+ * zeroes its own rows, never touches the peak/exit rows, and does not set `reported`. Written to the FILE it is handed. */
+SCR_DYNCEN_FN void scr_dyncen_phase_dump(FILE *f, const char *tag) {
+  static ScrDynCenKind rows[SCR_DYNCEN_KINDS];
+  unsigned k;
+  int c;
+  if (!scr_dyncen_walk_fn) { fprintf(f, "DYNCAP-ERR %s no walk\n", tag); return; }
+  memset(rows, 0, sizeof rows);
+  scr_dyncen_walk_fn(rows);
+  fprintf(f, "DYNCAP-LAYOUT entry=%lld ptr=8 liveN=%lld\n", scr_dyncen_sizeof_entry, scr_dyncen_live_n);
+  for (k = 0; k < SCR_DYNCEN_KINDS; k++) {
+    const ScrDynCenKind *r = &rows[k];
+    if (r->n == 0) continue;
+    fprintf(f, "DYNCAP %s kind=%u n=%lld lenSum=%lld capSum=%lld side=%lld phys=%lld emptyBuf=%lld\n", tag, k, r->n, r->len_sum, r->cap_sum, r->side_bytes, r->phys_side, r->n_empty_buf);
+    for (c = 0; c < SCR_DYNCEN_CAPS; c++)
+      if (r->cap_hist[c]) fprintf(f, "DYNCAP-CLASS %s kind=%u class=%d n=%lld capSum=%lld lenSum=%lld\n", tag, k, c, r->cap_hist[c], r->cap_cap_sum[c], r->cap_len_sum[c]);
+  }
+}
+
 __attribute__((constructor)) SCR_DYNCEN_FN void scr_dyncen_install(void) {
   static int done = 0;
   if (done) return;

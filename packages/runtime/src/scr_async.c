@@ -2384,7 +2384,7 @@ static size_t scr_rela_release(void) {
 
 static size_t scr_rela_released_kib; /* KiB of .rela.dyn released with the first drop (SCR_TEXT_DROP_STAT shows it) */
 
-#ifdef SCR_PROF_ALLOC
+#if defined(SCR_PROF_ALLOC) || defined(SCR_DYNCEN_ON)
 /* LAB ONLY (-DSCR_PROF_ALLOC, tests/perf/prof/scr_prof.h): the startup-heap census. A phase dump of the allocation lane's live-bytes-per-site table at the loop's first
  * turn and at the text drop, plus glibc's own accounting at the same instant so the share the lane cannot see (libc, vendored archives) is a number. SCR_HS_OUT is the
  * path prefix; SCR_HSTART_PLANT=1 plants a 1 MiB startup allocation (the positive control: its site must show). */
@@ -2393,7 +2393,16 @@ static void scr_hs_dump(const char *tag) {
   char path[600];
   if (base == NULL || *base == 0) return;
   snprintf(path, sizeof path, "%s.%s", base, tag);
+#ifdef SCR_PROF_ALLOC
   scr_prof_report_to(path);
+#endif
+#ifdef SCR_DYNCEN_ON
+  {
+    FILE *df = fopen(path, "a");
+    if (df != NULL) { scr_dyncen_phase_dump(df, tag); fclose(df); }
+  }
+#endif
+#ifdef SCR_PROF_ALLOC
   {
     FILE *f = fopen(path, "a");
     if (f != NULL) {
@@ -2409,6 +2418,7 @@ static void scr_hs_dump(const char *tag) {
       fclose(f);
     }
   }
+#endif
 }
 __attribute__((constructor)) static void scr_hs_plant(void) {
   const char *e = getenv("SCR_HSTART_PLANT");
