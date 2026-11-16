@@ -693,19 +693,18 @@ static inline ScrCycFreeFn scr_cyc_free_of(const ScrCycHdr *h) {
 }
 
 /* The collector's call of an object's trace function. Dyn nodes are called directly after one byte compare; every other kind goes through the kind table. */
-void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx);
-void scr_closure_trace(void *o, ScrTraceVisit visit, void *ctx);
-void scr_box_trace(void *o, ScrTraceVisit visit, void *ctx);
-void scr_union_trace(void *o, ScrTraceVisit visit, void *ctx);
+/* The reserved kinds' trace functions as ABSOLUTE pointers (filled by scr_cyc_kind_fixed when the owning unit first allocates one), so the collector reaches them with one
+ * load and no RVA arithmetic, and scr_cycle.c carries no link-time reference to the units that own them (a program or a unit test that links the collector without
+ * scr_json.c / scr_closure.c / scr_union.c must still link: a DIRECT call from here broke exactly those links). */
+extern ScrTraceFn scr_cyc_fast_trace[SCR_CYC_KIND_FIXED_END];
 static inline void scr_cyc_trace_call(const ScrCycHdr *h, void *o, ScrTraceVisit visit, void *ctx) {
   /* The kinds that carry about 90% of the collector's trace calls on the benches (redis: dyn 68.9%, closure 11.4%, box 5.1%, union 2.5%; mysql: dyn 78.6%, closure 3.9%)
-   * are RESERVED indices whose low byte is unique, so one byte compare each and a direct call; every other kind goes through the kind table. */
-  switch (h->kind_lo) {
-    case SCR_CYC_KIND_DYN: scr_dyn_trace(o, visit, ctx); return;
-    case SCR_CYC_KIND_CLOSURE: scr_closure_trace(o, visit, ctx); return;
-    case SCR_CYC_KIND_BOX: scr_box_trace(o, visit, ctx); return;
-    case SCR_CYC_KIND_UNION: scr_union_trace(o, visit, ctx); return;
-    default: break;
+   * are RESERVED indices (1 .. SCR_CYC_KIND_FIXED_END - 1) whose low byte is unique: one unsigned compare, one pointer load, an indirect call. Every other kind goes
+   * through the kind table. */
+  uint32_t k = h->kind_lo;
+  if (k - 1u < SCR_CYC_KIND_FIXED_END - 1u) {
+    scr_cyc_fast_trace[k](o, visit, ctx);
+    return;
   }
   scr_cyc_trace_of(h)(o, visit, ctx);
 }

@@ -19,7 +19,7 @@ static long scr_live_unions = 0;
 long scr_union_live_count(void) { return scr_live_unions; }
 #endif
 
-void scr_union_trace(void *o, ScrTraceVisit visit, void *ctx) {
+static void scr_union_trace(void *o, ScrTraceVisit visit, void *ctx) {
   ScrUnion *u = (ScrUnion *)o;
   if (u->vt & 1u) visit(scr_union_peek(u), ctx);
 }
