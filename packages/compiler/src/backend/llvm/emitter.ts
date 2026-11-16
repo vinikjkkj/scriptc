@@ -77,7 +77,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { headClassPlan, type HeadClass } from "../../ir/boxed-classes.js";
+import { headClassPlan, headFlagBits, type HeadClass } from "../../ir/boxed-classes.js";
 import { BUFFER_NUM_ACCESSOR_METHODS, dynKeyGetUsesLitTwin, propsTableRoot, errorOwnFlagFor, moduleFuncLaneShapes, moduleUsesEngineFn, moduleUsesTextMb, moduleUsesDc, moduleUsesTls, ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, presenceMaskStores, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesFnText, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesInstanceRecordLane, moduleInstanceLaneNeedsKg, moduleUsesDynClass, moduleUsesEmitter, moduleBoxesEmitters, canBoxFuncIntoDyn, isDynPackFunc, moduleUsesBigInt, moduleUsesRegexExecDyn, moduleUsesBytesOwn, moduleUsesAsym, moduleUsesDynAsync, moduleBoxesProcStream, moduleUsesNodeTest, irFunctionValueCode, fnNameTableRows } from "../../ir/nodes.js";
 import { setDynOrderPlan, setDynInspExt } from "../dyn-members.js";
 import { rewriteArmDescriptors } from "./armvt.js";
@@ -2358,7 +2358,7 @@ class LlEmitter {
         (c) => canBoxClassIntoDyn(c),
       );
       this.headPlanCache = plan;
-      setLlHeadPlan(new Map([...plan].map(([n, h]) => [n, h.idx])));
+      setLlHeadPlan(new Map([...plan].map(([n, h]) => [n, { idx: h.idx, bits: headFlagBits(h) }])));
     }
     for (const [name, rec] of RUNTIME_ERROR_CLASSES) {
       const meta = this.classMeta.get(name);

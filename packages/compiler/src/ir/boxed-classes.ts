@@ -85,7 +85,7 @@ export function boxedClassNames(mod: IrModule): Set<string> {
 /** The classes that carry the dyn head, with their class-table index (declaration order, so both backends agree). A class qualifies when it is
  * standalone (no base, no subclass, not runtime-provided), cycle-headered (traced) and boxable, AND the program can box it (boxedClassNames).
  * The index fits the 15 bits of the head's class slot; a program with more qualifying classes simply stops assigning (the rest keep stand-alone nodes). */
-export const HEAD_CLASS_MAX = 0x7fff;
+export const HEAD_CLASS_MAX = 0x1ffe; // an instance's class slot keeps the index in bits 0-12 (bits 13-14 are the flags below)
 /** Can an instance of `className` be a member of a garbage cycle? Walks the type structure its fields reach: a `dyn`, a function, or anything this
  * walk does not know reaches everything (a dyn can hold the instance itself), and so does reaching the class again. Only a class that answers false
  * never needs buffering as a cycle-root candidate when a release leaves its count above zero: a root must be a member of the cycle it starts. */
@@ -150,7 +150,14 @@ export function classMayCycle(mod: IrModule, className: string, why?: string[]):
   return any;
 }
 
-export interface HeadClass { idx: number; mayCycle: boolean }
+/** `cbit`: the class carries the container bit (ir/cbit.ts), so an instance whose bit is clear is not a possible cycle root even though its class can sit in a cycle. */
+export interface HeadClass { idx: number; mayCycle: boolean; cbit: boolean }
+/** The flag bits an instance's class slot (ScrObjHead sc_hx) carries beside the class index, so a release decides root buffering from the instance alone,
+ * without the class table: 0x4000 an instance can be a member of a garbage cycle and is always a possible root; 0x2000 it can be one only once its
+ * container bit (ir/cbit.ts) is set. Neither: the class cannot sit in a cycle. */
+export function headFlagBits(h: HeadClass): number {
+  return !h.mayCycle ? 0 : h.cbit ? 0x2000 : 0x4000;
+}
 export function headClassPlan(
   mod: IrModule,
   isStandalone: (className: string) => boolean,
@@ -163,7 +170,7 @@ export function headClassPlan(
   for (const c of mod.classes ?? []) {
     if (c.runtime || !boxed.has(c.name) || !isStandalone(c.name) || !isTraced(c.name) || !canBox(c.name)) continue;
     if (plan.size >= HEAD_CLASS_MAX) break;
-    plan.set(c.name, { idx: plan.size, mayCycle: classMayCycle(mod, c.name) });
+    plan.set(c.name, { idx: plan.size, mayCycle: classMayCycle(mod, c.name), cbit: c.cbit === true });
   }
   return plan;
 }

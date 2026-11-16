@@ -5688,7 +5688,7 @@ static inline void scr_closure_init_static(ScrClosure *c, void *fn) {
 }
 /* ── the dyn head of a class instance ───────────────────────────────────
  * A standalone, cycle-headered class the program can box lays out its instances as { size_t rc; uint32_t sc_kind; uint16_t sc_hx; uint16_t sc_hz; fields }:
- * the first two words of a ScrDyn. sc_kind is SCR_DYN_OBJINST, sc_hx is 0x8000 | the class-table index (it sits on the ScrDyn flag bytes 12-13; bytes
+ * the first two words of a ScrDyn. sc_kind is SCR_DYN_OBJINST, sc_hx is 0x8000 | flag bits | the class-table index (bits 0-12; flag 0x4000: an instance can be in a garbage cycle and is always a possible root, 0x2000: it is a possible root once its container bit is set; it sits on the ScrDyn flag bytes 12-13; bytes
  * 14-15, static_copy and module_ns, stay 0 because the weak-key checks read them on any kind). Bit 7 of byte 13 is the head marker: a stand-alone
  * node has 0 there. The instance's refcount IS the dyn value's refcount; the class table maps the index to its ScrDynClass. */
 #define SCR_OBJ_HEAD_KIND 12u
@@ -5702,7 +5702,7 @@ static inline const ScrDynClass *scr_dyn_inst_cls(const ScrDyn *d) {
   if (!scr_dyn_inst_is_head(d)) return d->v.inst.cls;
   uint16_t hx;
   __builtin_memcpy(&hx, (const uint8_t *)d + 12, sizeof hx);
-  return scr_dyn_head_tbl[hx & 0x7fffu];
+  return scr_dyn_head_tbl[hx & 0x1fffu];
 }
 /* The closure a FUNC value calls: the value itself when it is an embedded closure (ScrClosure above), else the stand-alone node's pointer. */
 static inline ScrClosure *scr_dyn_fn_clo(const ScrDyn *d) { return ((const ScrClosure *)d)->isdyn ? (ScrClosure *)(uintptr_t)d : d->v.fn.clo; }
