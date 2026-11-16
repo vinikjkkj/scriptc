@@ -708,6 +708,11 @@ static inline ScrCycFreeFn scr_cyc_free_of(const ScrCycHdr *h) {
   return (ScrCycFreeFn)(void *)(scr_cyc_base() + h->free_off);
 }
 
+/* LAB ONLY: -DSCR_CBIT_COUNT counts, per class, the kinds of dyn values stored into class fields (the compiler emits the call under SCRIPTC_LAB_CBIT=1) and the
+ * collector's work per class (on_release calls, new roots, trace calls and child visits per phase). The report is written by scr_cb_dump. */
+void scr_lab_cb_store(const char *cls, const char *fld, const void *v); /* v: a ScrDyn * */
+void scr_cb_dump(void);
+
 /* Zeroed allocation with a cycle header in front; returns the OBJECT
  * pointer (header at scr_cyc_hdr). Aborts on OOM. */
 void *scr_cyc_alloc(size_t size, ScrTraceFn trace, ScrCycFreeFn free_fn);

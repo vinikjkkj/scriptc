@@ -2141,9 +2141,71 @@ void scr_cyc_on_dead(void *obj) {
   h->buffered = 0;
 }
 
+#ifdef SCR_CBIT_COUNT
+/* LAB ONLY (see scr_runtime.h). One row per trace function (= per class), one per (class, field) store site. */
+typedef struct { ScrTraceFn fn; unsigned long long onrel, newroot, dead, trace[4], visit[4]; } ScrCbRow;
+static ScrCbRow scr_cb_rows[1024];
+static unsigned scr_cb_nrows;
+static ScrCbRow *scr_cb_cur;
+static unsigned long long scr_cb_passes;
+static ScrCbRow *scr_cb_row(const ScrCycHdr *h) {
+  ScrTraceFn fn = scr_cyc_trace_of(h);
+  if (scr_cb_cur != NULL && scr_cb_cur->fn == fn) return scr_cb_cur;
+  for (unsigned i = 0; i < scr_cb_nrows; i++) if (scr_cb_rows[i].fn == fn) return &scr_cb_rows[i];
+  if (scr_cb_nrows == 1024) return &scr_cb_rows[1023];
+  scr_cb_rows[scr_cb_nrows].fn = fn;
+  return &scr_cb_rows[scr_cb_nrows++];
+}
+#define SCR_CB_TRACE(o, ph) do { ScrCbRow *r_ = scr_cb_row(scr_cyc_hdr(o)); r_->trace[ph]++; scr_cb_cur = r_; } while (0)
+#define SCR_CB_VISIT(ph) do { if (scr_cb_cur) scr_cb_cur->visit[ph]++; } while (0)
+typedef struct { const char *cls, *fld; unsigned long long n, kind[64]; } ScrCbStore;
+static ScrCbStore scr_cb_stores[4096];
+static unsigned scr_cb_nstores;
+void scr_lab_cb_store(const char *cls, const char *fld, const void *vp) {
+  const ScrDyn *v = (const ScrDyn *)vp;
+  unsigned i;
+  for (i = 0; i < scr_cb_nstores; i++) if (scr_cb_stores[i].cls == cls && scr_cb_stores[i].fld == fld) break;
+  if (i == scr_cb_nstores) {
+    if (i == 4096) return;
+    scr_cb_stores[i].cls = cls; scr_cb_stores[i].fld = fld; scr_cb_nstores++;
+  }
+  scr_cb_stores[i].n++;
+  unsigned k = v == NULL ? 63 : (unsigned)v->kind;
+  scr_cb_stores[i].kind[k < 63 ? k : 62]++;
+}
+void scr_cb_dump(void) {
+  static int done;
+  if (done) return;
+  done = 1;
+  const char *path = getenv("SCR_CBIT_OUT");
+  FILE *f = fopen(path != NULL && *path ? path : "scr-cbit.txt", "w");
+  if (!f) return;
+  fprintf(f, "ANCHOR collect=%p passes=%llu\n", (void *)&scr_collect_cycles, scr_cb_passes);
+  for (unsigned i = 0; i < scr_cb_nrows; i++) {
+    const ScrCbRow *r = &scr_cb_rows[i];
+    fprintf(f, "CLS %p onrel=%llu newroot=%llu dead=%llu trace=%llu,%llu,%llu,%llu visit=%llu,%llu,%llu,%llu\n", (void *)r->fn, r->onrel, r->newroot, r->dead,
+            r->trace[0], r->trace[1], r->trace[2], r->trace[3], r->visit[0], r->visit[1], r->visit[2], r->visit[3]);
+  }
+  for (unsigned i = 0; i < scr_cb_nstores; i++) {
+    const ScrCbStore *s = &scr_cb_stores[i];
+    fprintf(f, "ST %s %s n=%llu", s->cls, s->fld, s->n);
+    for (unsigned k = 0; k < 64; k++) if (s->kind[k]) fprintf(f, " k%u=%llu", k, s->kind[k]);
+    fprintf(f, "\n");
+  }
+  fclose(f);
+}
+__attribute__((constructor)) static void scr_cb_install(void) { atexit(scr_cb_dump); }
+#else
+#define SCR_CB_TRACE(o, ph) ((void)0)
+#define SCR_CB_VISIT(ph) ((void)0)
+#endif
+
 void scr_cyc_on_release(void *obj) {
   ScrCycHdr *h = scr_cyc_hdr(obj);
   h->color = SCR_CYC_PURPLE;
+#ifdef SCR_CBIT_COUNT
+  { ScrCbRow *r_ = scr_cb_row(h); r_->onrel++; if (!h->buffered) r_->newroot++; }
+#endif
   if (!h->buffered) {
     if (scr_nroots == scr_roots_cap) {
       scr_roots_cap = scr_roots_cap ? scr_roots_cap * 2 : 64;
@@ -2240,6 +2302,7 @@ static void scr_wl_push(void *obj) {
 
 static void scr_mg_visit(void *child, void *ctx) {
   (void)ctx;
+  SCR_CB_VISIT(0);
   if (SCR_CYC_SKIP(child)) return;
   SCR_RC(child) -= 1; /* trial-delete this internal edge */
   ScrCycHdr *h = scr_cyc_hdr(child);
@@ -2255,12 +2318,14 @@ static void scr_mark_gray(void *obj) {
   scr_wl_push(obj);
   while (scr_wl_n > floor) {
     void *o = scr_wl[--scr_wl_n];
+    SCR_CB_TRACE(o, 0);
     scr_cyc_trace_of(scr_cyc_hdr(o))(o, scr_mg_visit, NULL);
   }
 }
 
 static void scr_sb_visit(void *child, void *ctx) {
   (void)ctx;
+  SCR_CB_VISIT(1);
   if (SCR_CYC_SKIP(child)) return;
   SCR_RC(child) += 1; /* restore the trial decrement */
   ScrCycHdr *h = scr_cyc_hdr(child);
@@ -2274,12 +2339,14 @@ static void scr_scan_black(void *obj) {
   scr_wl_push(obj);
   while (scr_wl_n > floor) {
     void *o = scr_wl[--scr_wl_n];
+    SCR_CB_TRACE(o, 1);
     scr_cyc_trace_of(scr_cyc_hdr(o))(o, scr_sb_visit, NULL);
   }
 }
 
 static void scr_scan_visit(void *child, void *ctx) {
   (void)ctx;
+  SCR_CB_VISIT(2);
   if (SCR_CYC_SKIP(child)) return;
   ScrCycHdr *h = scr_cyc_hdr(child);
   if (h->color != SCR_CYC_GRAY) return;
@@ -2308,12 +2375,14 @@ static void scr_scan(void *obj) {
      * and that scanBlack blackened all of its children, so there is
      * nothing here for this phase to do. */
     if (scr_cyc_hdr(o)->color != SCR_CYC_WHITE) continue;
+    SCR_CB_TRACE(o, 2);
     scr_cyc_trace_of(scr_cyc_hdr(o))(o, scr_scan_visit, NULL);
   }
 }
 
 static void scr_cw_visit(void *child, void *ctx) {
   (void)ctx;
+  SCR_CB_VISIT(3);
   if (SCR_CYC_SKIP(child)) return;
   ScrCycHdr *h = scr_cyc_hdr(child);
   if (h->color != SCR_CYC_WHITE || h->buffered) return;
@@ -2328,6 +2397,7 @@ static void scr_collect_white(void *obj) {
   scr_wl_push(obj);
   while (scr_wl_n > floor) {
     void *o = scr_wl[--scr_wl_n];
+    SCR_CB_TRACE(o, 3);
     scr_cyc_trace_of(scr_cyc_hdr(o))(o, scr_cw_visit, NULL);
     if (scr_nwhite == scr_white_cap) {
       scr_white_cap = scr_white_cap ? scr_white_cap * 2 : 64;
@@ -2339,6 +2409,9 @@ static void scr_collect_white(void *obj) {
 }
 
 void scr_collect_cycles(void) {
+#ifdef SCR_CBIT_COUNT
+  scr_cb_passes++;
+#endif
   if (scr_collecting || scr_nroots == 0) return;
   scr_collecting = true;
   SCR_CS_PASS_BEGIN();

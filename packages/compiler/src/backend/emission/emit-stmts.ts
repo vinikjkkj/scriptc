@@ -981,6 +981,10 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
         } else {
           E.line(`${field} = ${v.name};${E.srcComment(s.loc)}`);
         }
+        // LAB ONLY (never set in a shipped build): SCRIPTC_LAB_CBIT=1 counts the kind of every dyn value stored into a class field (runtime scr_lab_cb_store).
+        if (process.env["SCRIPTC_LAB_CBIT"] === "1" && s.kind === "fieldSet" && v.type.kind === "dyn") {
+          E.line(`scr_lab_cb_store(${JSON.stringify(s.className)}, ${JSON.stringify(s.field)}, ${field});`);
+        }
         // An Error's `name` / `message` WRITE is the fact "own property" (an assignment creates it even when the value equals
         // the prototype's): recorded at the store, whatever the receiver's spelling.
         if (s.kind === "fieldSet") {
