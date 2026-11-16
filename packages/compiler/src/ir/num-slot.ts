@@ -136,7 +136,18 @@ export function numSlotPass(mod: IrModule): NumSlotPick[] {
     } else if (kind === "unionDisc" && typeof node["field"] === "string") {
       unionRead.add(node["field"]);
     } else if (kind === "libCall" && NUM_USE_FNS.has(node["fn"] as string)) {
-      for (const a of node["args"] as IrExpr[]) noteRead(a);
+      for (const a of node["args"] as IrExpr[]) {
+        noteRead(a);
+        if (why && a.kind === "dynKeyGet" && a.key.kind !== "strLit") {
+          const sh = (e: unknown, d: number): string => {
+            if (e === null || typeof e !== "object" || Array.isArray(e)) return "";
+            const o = e as Record<string, unknown>;
+            const kids = d <= 0 ? [] : Object.keys(o).filter((k) => typeof o[k] === "object" && o[k] !== null && k !== "type" && k !== "loc").map((k) => `${k}=${sh(o[k], d - 1)}`);
+            return `${String(o["kind"] ?? "?")}${typeof o["value"] === "string" ? `(${JSON.stringify(o["value"])})` : ""}${kids.length > 0 ? `{${kids.join(",")}}` : ""}`;
+          };
+          process.stderr.write(`numslot: numop computed-key read in ${fn.name}: key ${sh(a.key, 3)} recv ${sh(a.value, 1)}\n`);
+        }
+      }
     } else if (kind === "dynCheck" && (node["type"] as { kind: string }).kind === "f64") {
       noteRead(node["value"] as IrExpr);
     }
@@ -157,6 +168,20 @@ export function numSlotPass(mod: IrModule): NumSlotPick[] {
     return false;
   };
 
+  /** The class lays its fields out as its base's layout followed by its own (the prefix property the emitters rely on). A subclass that
+   * renames or routes an inherited slot (an Error subclass declaring `code`) breaks it; a layout that is not a clean extension is never rebuilt. */
+  const cleanPrefix = (c: IrClassDef): boolean => {
+    if (c.base === undefined) return true;
+    const b = byName.get(c.base);
+    if (b === undefined) return false;
+    const bf = origFields.get(b.name)!;
+    const cf = origFields.get(c.name)!;
+    if (cf.length < bf.length) return false;
+    for (let i = 0; i < bf.length; i++) if (cf[i]!.name !== bf[i]!.name) return false;
+    return cleanPrefix(b);
+  };
+  const subtreeClean = (owner: string): boolean => classes.every((d) => !descendsFrom(d.name, owner) || cleanPrefix(d));
+
   const picks: NumSlotPick[] = [];
   const halves = new Map<string, { field: string; half: string }[]>();
   for (const c of classes) {
@@ -176,6 +201,10 @@ export function numSlotPass(mod: IrModule): NumSlotPick[] {
       }
       if (c.absentInit?.includes(f.name) || c.absentFields?.includes(f.name) || c.hiddenFields?.includes(f.name) || c.dynFieldData?.some((d) => d.name === f.name)) {
         refuse("absent/hidden/prototype-data field");
+        continue;
+      }
+      if (!subtreeClean(c.name)) {
+        refuse("the class or a descendant does not lay out as base layout plus own fields");
         continue;
       }
       if (unionRead.has(f.name)) {
@@ -215,10 +244,14 @@ export function numSlotPass(mod: IrModule): NumSlotPick[] {
   // Rebuild every layout base-first: base layout, the class's own original fields, then its own halves (the prefix property holds).
   const done = new Map<string, IrClassDef["fields"]>();
   const slotsOf = new Map<string, { field: string; half: string }[]>();
+  const affected = (c: IrClassDef): boolean => classes.some((a) => halves.has(a.name) && descendsFrom(c.name, a.name));
   const rebuild = (c: IrClassDef): void => {
     if (done.has(c.name)) return;
     const base = c.base === undefined ? undefined : byName.get(c.base);
-    if (base !== undefined) rebuild(base);
+    if (base !== undefined) {
+      if (affected(base)) rebuild(base);
+      else done.set(base.name, origFields.get(base.name)!);
+    }
     const orig = origFields.get(c.name)!;
     const own = base === undefined ? orig : orig.slice(origFields.get(base.name)!.length);
     const mine = halves.get(c.name) ?? [];
@@ -230,7 +263,7 @@ export function numSlotPass(mod: IrModule): NumSlotPick[] {
       slotsOf.set(c.name, all);
     }
   };
-  for (const c of classes) rebuild(c);
+  for (const c of classes) if (affected(c)) rebuild(c);
   if (why) for (const p of picks) process.stderr.write(`numslot: pick ${p.className}.${p.field} (rule ${p.rule})\n`);
   return picks;
 }
