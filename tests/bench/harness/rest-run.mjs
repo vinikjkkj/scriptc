@@ -110,6 +110,15 @@ for (const l of labels) { const sm = results.smaps[l]; if (!sm) continue
       smapsLines.push('| text origin | functions | bytes in binary | bytes in resident pages | functions with a resident page |', '|---|---|---|---|---|')
       for (const [k, v] of Object.entries(sm.text_origin).slice(0, 14)) smapsLines.push(`| ${k} | ${v.functions} | ${v.bytes_total} | ${v.bytes_in_resident_pages} | ${v.functions_with_resident_page} |`)
     }
+    const snapTable = (title, sn) => {
+      smapsLines.push(`\n${title} (${l}): t=${sn.t}s, VmRSS ${sn.snap_vmrss_kb} kB`)
+      smapsLines.push('| class | Rss | Pss | Shared_Clean | Private_Clean | Private_Dirty | Anonymous |', '|---|---|---|---|---|---|---|')
+      for (const [k, v] of Object.entries(sn.classes ?? {}).sort((a, b) => b[1].Rss - a[1].Rss)) smapsLines.push(`| ${k} | ${v.Rss} | ${v.Pss} | ${v.Shared_Clean} | ${v.Private_Clean} | ${v.Private_Dirty} | ${v.Anonymous} |`)
+      if (sn.text_pages) smapsLines.push(`text pages: ${JSON.stringify(sn.text_pages)}`)
+      if (sn.text_origin) { smapsLines.push('| text origin | functions | bytes in binary | bytes in resident pages |', '|---|---|---|---|'); for (const [k, v] of Object.entries(sn.text_origin).slice(0, 12)) smapsLines.push(`| ${k} | ${v.functions} | ${v.bytes_total} | ${v.bytes_in_resident_pages} |`) }
+    }
+    if (sm.post_drop_peak) snapTable('post-text-drop peak', sm.post_drop_peak)
+    for (const sn of sm.steady ?? []) snapTable('steady snapshot', sn)
     if (sm.text_top30) smapsLines.push('top 30 functions with a resident page, by size: ' + sm.text_top30.map((f) => `${f.name}(${f.size},${f.origin.split('(')[0]})`).join(' '))
   }
 }

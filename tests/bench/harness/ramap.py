@@ -107,27 +107,47 @@ def read_pagemap(maps):
     return res
 
 best = None; best_score = 0; best_rss = 0; best_t = 0.0; last_hwm = 0; last_snap_t = 0.0; samples = 0; tl = []; events = []; final_hwm = 0; final_rss = 0
+max_code = 0; dropped = False; post_max = 0; post_best = None; post_best_t = 0.0; post_score = 0
+STEADY_AT = [float(x) for x in os.environ.get('RAMAP_STEADY_AT', '1.5,3.0,7.0,10.0').split(',') if x]; steady_snaps = []
+def take():
+    with open(f'/proc/{pid}/smaps') as f: s = f.read()
+    maps = parse_smaps(s)
+    return maps, read_pagemap(maps)
 while p.poll() is None:
     rss, hwm = status()
     now = time.time() - t0
     if rss is not None:
         samples += 1; final_hwm = max(final_hwm, hwm or 0); final_rss = rss
         if samples % 100 == 0: tl.append((round(now, 2), rss))
-        if hwm is not None and hwm > last_hwm and now - last_snap_t >= 0.003:
+        if STEADY_AT and now >= STEADY_AT[0]:
+            t_s = STEADY_AT.pop(0)
             try:
-                with open(f'/proc/{pid}/smaps') as f: s = f.read()
-                maps = parse_smaps(s)
-                pm = read_pagemap(maps)
+                maps, pm = take(); r2, h2 = status()
+                steady_snaps.append((round(now, 2), maps, pm, r2, h2))
+            except Exception: pass
+        new_hwm = hwm is not None and hwm > last_hwm
+        new_post = dropped and rss > post_max + 256
+        if (new_hwm or new_post) and now - last_snap_t >= 0.003:
+            try:
+                maps, pm = take()
                 rss2, hwm2 = status()
                 score = min(rss or 0, rss2 or 0)  # a snapshot whose read straddled a drop of RSS (the runtime's text drop at ~0.23 s) scores low
-                last_hwm = hwm; last_snap_t = time.time() - t0
+                last_snap_t = time.time() - t0
                 cls0, _ = summarize(maps)
-                events.append({'t': round(now, 3), 'vmrss': rss2, 'hwm': hwm2,
-                               'heap': cls0.get('heap(brk)', {}).get('Rss', 0), 'anon': cls0.get('anon-mmap', {}).get('Rss', 0),
-                               'code': cls0.get('main-binary:code(r-x)', {}).get('Rss', 0)})
-                events[-1]['vmrss_before_read'] = rss
-                if best is None or score >= best_score:
-                    best = (maps, pm, rss2, hwm2); best_rss = score; best_score = score; best_t = round(now, 3)
+                code = cls0.get('main-binary:code(r-x)', {}).get('Rss', 0)
+                if new_hwm:
+                    last_hwm = hwm
+                    events.append({'t': round(now, 3), 'vmrss': rss2, 'hwm': hwm2, 'vmrss_before_read': rss,
+                                   'heap': cls0.get('heap(brk)', {}).get('Rss', 0), 'anon': cls0.get('anon-mmap', {}).get('Rss', 0), 'code': code})
+                    if best is None or score >= best_score:
+                        best = (maps, pm, rss2, hwm2); best_rss = score; best_score = score; best_t = round(now, 3)
+                if not dropped and max_code > 4096 and code < max_code * 0.2:
+                    dropped = True; post_max = 0  # the runtime's text drop has happened: from here on the post-drop spikes are tracked apart
+                max_code = max(max_code, code)
+                if dropped:
+                    post_max = max(post_max, rss2 or 0)
+                    if post_best is None or score >= post_score:
+                        post_best = (maps, pm, rss2, hwm2); post_score = score; post_best_t = round(now, 3)
                 if sig:
                     try: os.kill(pid, getattr(signal, 'SIG' + sig))
                     except Exception: pass
@@ -135,11 +155,8 @@ while p.poll() is None:
                 pass
     time.sleep(0.002)
 
-res = {'cmd': cmd, 'exit': p.returncode, 'peak_vmrss_kb': best_rss, 'peak_at_s': best_t, 'samples': samples,
-       'timeline': tl[::max(1, len(tl) // 40)], 'final_hwm_seen_kb': final_hwm, 'peak_gap_kb': (final_hwm - best_rss) if best else None,
-       'hwm_events': len(events), 'events': events[-60:]}
-if best:
-    maps, pm, rss2, hwm2 = best
+def analyze(maps, pm, rss2, hwm2):
+    res = {}
     cls, libs = summarize(maps)
     res['classes'] = cls; res['libs'] = libs; res['sum_rss_kb'] = sum(v['Rss'] for v in cls.values())
     res['snap_vmrss_kb'] = rss2; res['snap_hwm_kb'] = hwm2
@@ -223,5 +240,16 @@ if best:
             res['text_top30'] = [{'name': n, 'size': sz, 'bytes_in_resident_pages': rb, 'origin': o} for (sz, rb, n, o) in funcs[:30]]
     except Exception as e:
         res['text_error'] = repr(e)
+
+    return res
+
+res = {'cmd': cmd, 'exit': p.returncode, 'peak_vmrss_kb': best_rss, 'peak_at_s': best_t, 'samples': samples,
+       'timeline': tl[::max(1, len(tl) // 40)], 'final_hwm_seen_kb': final_hwm, 'peak_gap_kb': (final_hwm - best_rss) if best else None,
+       'hwm_events': len(events), 'events': events[-60:]}
+if best:
+    res.update(analyze(*best))
+    # the phases after the text drop: the best post-drop spike, and the timed steady snapshots
+    if post_best: res['post_drop_peak'] = dict(analyze(*post_best), t=post_best_t)
+    res['steady'] = [dict(analyze(*sn[1:]), t=sn[0]) for sn in steady_snaps]
 json.dump(res, open(out, 'w'), indent=1)
 print(out, 'exit', p.returncode, 'peak', best_rss, 'kB; final VmHWM seen', final_hwm, 'kB; events', len(events))
