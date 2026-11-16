@@ -1091,6 +1091,32 @@ async function layoutLinkArgs(driver: { argv: readonly string[] }, orderPath: st
   return [...(found.lld ? ["-fuse-ld=lld"] : []), `-Wl,--symbol-ordering-file=${file}`];
 }
 
+/** The objcopy a lld-linked (ordered) build clears the merge flag with, or null. Detected once; llvm-objcopy is the fallback. */
+let objcopyToolMemo: Promise<string | null> | null = null;
+function objcopyTool(): Promise<string | null> {
+  objcopyToolMemo ??= (async () => {
+    for (const tool of ["objcopy", "llvm-objcopy"]) {
+      try {
+        await execFileAsync(tool, ["--version"]);
+        return tool;
+      } catch {
+        /* try the next */
+      }
+    }
+    return null;
+  })();
+  return objcopyToolMemo;
+}
+
+/** Clear SHF_MERGE|SHF_STRINGS on an object's string and constant pools. ld.lld places a mergeable section's strings by HASH
+ * (MergeNoTailSection shards), which scatters the strings of one function over the whole pool and costs the process about 2 MB
+ * of resident rodata on the REST app; GNU ld keeps them in input order. A plain input section is laid out in input order by lld
+ * too. The price is the cross-object string dedup the merge flag buys (about 20 KB over the runtime's objects). Ordered (lld)
+ * lane only: a plain build never calls this. */
+async function clearStringMerge(tool: string, obj: string): Promise<void> {
+  await execFileAsync(tool, ["--set-section-flags", ".rodata.str*=alloc,readonly,data", "--set-section-flags", ".rodata.cst*=alloc,readonly,data", obj]);
+}
+
 /** --layout-profile is in effect for the build compileC is running (set at its entry; one build per process at a time). */
 let layoutProfileActive = false;
 
@@ -2291,6 +2317,7 @@ async function ensureRuntimeObjects(
   cflags: string[],
   sources: string[],
   keyPrefix: string,
+  post?: (obj: string) => Promise<void>,
 ): Promise<Map<string, string>> {
   const setKey = createHash("sha256")
     .update(keyPrefix)
@@ -2326,6 +2353,7 @@ async function ensureRuntimeObjects(
             const tmpObj = join(tmpDir, `${basename(src, ".c")}.o`);
             const argv = [...(useCcache ? ["ccache"] : []), ...ccArgv, ...cflags, "-c", src, "-o", tmpObj];
             await execFileAsync(argv[0] ?? "clang", argv.slice(1));
+            if (post !== undefined) await post(tmpObj);
             await rename(tmpObj, objOf(src));
           }),
         );
@@ -2687,6 +2715,8 @@ export async function compileC(opts: CcOptions): Promise<void> {
   const curlStubDir =
     curlFetch && driver.target !== null ? await ensureCurlStub(driver) : null;
   const layoutLink = await layoutLinkArgs(driver, opts.layoutOrder, opts.outPath);
+  // The lld lane (an ordered build linked by ld.lld): the objects it links carry no merge flag, so lld keeps their strings in input order.
+  const stripTool = layoutLink.includes("-fuse-ld=lld") && process.env["SCRIPTC_KEEP_STRING_MERGE"] !== "1" ? await objcopyTool() : null;
   // rt() maps each runtime source's path on the command line: identity for
   // the historical single invocation, cached-.o substitution on cache misses.
   const buildArgs = (rt: (path: string) => string, pu: (path: string) => string = (p) => p): string[] => [
@@ -3138,6 +3168,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
         const unit = sources[i]!;
         const out = join(dir, `u${i}-${basename(unit).replace(/\.[^.]+$/, "")}.o`);
         await runClang([...cflags, ...(unit.endsWith(".ll") ? ["-Wno-override-module"] : []), "-c", unit, "-o", out]);
+        if (stripTool !== null) await clearStringMerge(stripTool, out);
         done.set(unit, out);
       }
     };
@@ -3150,7 +3181,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     tapPhase("cc.nocache", 0);
     const jobs = ccJobCount();
     const all = [...new Set([...rtInputs, ...programUnitPaths])];
-    if ((jobs > 1 && all.length > 1) || opts.layoutProfile) {
+    if ((jobs > 1 && all.length > 1) || opts.layoutProfile || stripTool !== null) {
       // One clang driver compiles its inputs one after another: the runtime's sources and the program's units are
       // independent translation units, so they build as parallel jobs and the objects link in command-line order.
       const dir = await mkdtemp(join(dirname(opts.outPath), ".scr-cc-"));
@@ -3215,6 +3246,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
   // two keyspaces here. It returns "" when SCRIPTC_PROF_CFLAGS is unset, and
   // the guard keeps an ordinary build's key byte-for-byte historical.
   if (profFlavor() !== "") key.update("\0prof\0").update(profFlavor());
+  if (stripTool !== null) key.update("\0strmerge\0");
   // The shared header and the other units of a split program. Every byte
   // the compiler will read has to be in the key, or an edit that lands in
   // one part alone is served the previous binary out of the cache.
@@ -3263,9 +3295,10 @@ export async function compileC(opts: CcOptions): Promise<void> {
   // a forced include, the fingerprint cannot see it, and a stale runtime
   // object under a live key is the worst failure a cache has. Empty when
   // SCRIPTC_PROF_CFLAGS is unset, so an ordinary build's prefix is unchanged.
-  const objKeyPrefix = `obj-v2\0${ccName}\0${cv}\0${fingerprint}\0${profFlavor()}`;
+  const objKeyPrefix = `obj-v2\0${ccName}\0${cv}\0${fingerprint}\0${profFlavor()}${stripTool !== null ? "\0strmerge-v1" : ""}`;
+  const stripPost = stripTool !== null ? (o: string): Promise<void> => clearStringMerge(stripTool, o) : undefined;
   try {
-    objects = await ensureRuntimeObjects(root, driver.argv, cflags, rtInputs, objKeyPrefix);
+    objects = await ensureRuntimeObjects(root, driver.argv, cflags, rtInputs, objKeyPrefix, stripPost);
     // Between the presence check inside ensureRuntimeObjects and the link
     // below there is a window of a few hundred milliseconds. A concurrent
     // sweep in that window used to surface as a screenful of `lld-link:
@@ -3273,7 +3306,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     // cause, and indistinguishable from a code regression. Re-check, and
     // give the set exactly one chance to be recompiled.
     if (!(await objectsStillPresent(objects))) {
-      objects = await ensureRuntimeObjects(root, driver.argv, cflags, rtInputs, objKeyPrefix);
+      objects = await ensureRuntimeObjects(root, driver.argv, cflags, rtInputs, objKeyPrefix, stripPost);
       // Still gone: something is actively deleting this cache. Drop the
       // substitution entirely and compile the historical way — slower, and
       // right, which is the trade this whole file is about.
@@ -3290,7 +3323,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
   let unitObjects: Map<string, string> | null = null;
   let unitDir: string | null = null;
   const jobs = ccJobCount();
-  if (objects !== null && units.length > 1 && jobs > 1) {
+  if (objects !== null && ((units.length > 1 && jobs > 1) || stripTool !== null)) {
     await mkdir(objStagingRoot(root), { recursive: true });
     unitDir = await mkdtemp(join(objStagingRoot(root), "units-"));
     try {
