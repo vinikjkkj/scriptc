@@ -370,7 +370,7 @@ static void scr_promise_gcfree(void *o) {
 }
 
 ScrPromise *scr_promise_new(void) {
-  ScrPromise *p = scr_cyc_alloc(sizeof *p, &scr_promise_trace, &scr_promise_gcfree);
+  ScrPromise *p = SCR_CYC_ALLOC(sizeof *p, &scr_promise_trace, &scr_promise_gcfree);
   p->rc = 1;
 #ifdef SCR_RC_AUDIT
   scr_live_promises++;

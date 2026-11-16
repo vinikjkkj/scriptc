@@ -326,7 +326,7 @@ ScrEmitter *scr_emitter_new(void) {
   /* Always collector-headered: the registry holds closures, so the
    * emitter hierarchy is unconditionally cycle-capable (the canonical
    * capture cycle is `e.on('x', () => e.emit(...))`). */
-  ScrEmitter *em = scr_cyc_alloc(sizeof *em, &scr_emitter_trace, &scr_emitter_gcfree);
+  ScrEmitter *em = SCR_CYC_ALLOC(sizeof *em, &scr_emitter_trace, &scr_emitter_gcfree);
   em->rc = 1;
   em->vt = &scr_emitter_vt;
   em->reg = NULL;

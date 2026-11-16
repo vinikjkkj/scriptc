@@ -36,7 +36,7 @@ static void scr_union_gcfree(void *o) {
 }
 
 static ScrUnion *scr_union_alloc(uint32_t tag) {
-  ScrUnion *u = scr_cyc_alloc(sizeof(ScrUnion), &scr_union_trace, &scr_union_gcfree);
+  ScrUnion *u = SCR_CYC_ALLOC(sizeof(ScrUnion), &scr_union_trace, &scr_union_gcfree);
   u->rc = 1;
   u->tag = tag;
 #ifdef SCR_RC_AUDIT
