@@ -1130,14 +1130,11 @@ ScrBox *scr_cap_from_dyn(ScrDyn *d) {
 
 _Static_assert(SCR_DYN_ARR + 1 == SCR_DYN_OBJ && SCR_DYN_OBJ < SCR_DYN_FUNC && SCR_DYN_FUNC < SCR_DYN_OBJINST, "the non-final release tests kinds by range");
 
-/* The non-final release of a boxed class instance. Out of line so scr_dyn_release's own count store stays the plain decrement: the undo below
- * would otherwise make the compiler keep the old count live across the whole function. */
+/* The non-final release of a head instance that IS a possible cycle root (scr_dyn_release decided that from the instance's own flag bits): undo the
+ * decrement and let the class's release run (count, gate, root buffering). Out of line so scr_dyn_release's own count store stays the plain decrement. */
 static __attribute__((noinline)) void scr_dyn_release_inst(ScrDyn *d) {
-  if (scr_dyn_inst_is_head(d) && (scr_dyn_inst_cls(d)->head & 0x8000u) != 0) { /* a class that can sit in a garbage cycle: undo the decrement and let its own release run (count, gate, root buffering) */
-    d->rc++;
-    scr_dyn_inst_cls(d)->release(d);
-  }
-  /* a head of a class that cannot be in a cycle is never a root: the count is already down */
+  d->rc++;
+  scr_dyn_inst_cls(d)->release(d);
 }
 
 __attribute__((noinline)) void scr_dyn_release(ScrDyn *d) {
@@ -1158,14 +1155,22 @@ __attribute__((noinline)) void scr_dyn_release(ScrDyn *d) {
       return;
     }
     if (d->kind < SCR_DYN_FUNC) return; /* null, bool, number, string, undefined, bytes: past the ARR/OBJ test above, the same compare the plain chain made for FUNC */
+    if (d->kind == SCR_DYN_OBJINST) {
+      /* byte 13 is the high byte of the instance's class slot: 0x80 head, 0x40 a possible root, 0x20 a possible root once its container bit is set. A
+       * stand-alone node and a head of a class that cannot be in a cycle have neither (the count is already down); a gated instance whose bit is still
+       * clear is not a root either. No class-table read on any of those. */
+      const unsigned f = ((const uint8_t *)d)[13];
+      if ((f & 0x60u) == 0) return;
+      if ((f & 0x40u) == 0 && (scr_cyc_hdr(d)->blk & SCR_CYC_CBIT) == 0) return;
+      scr_dyn_release_inst(d);
+      return;
+    }
     if (d->kind == SCR_DYN_FUNC) {
       if (!((ScrClosure *)d)->isdyn || scr_closure_may_cycle_x((ScrClosure *)d)) {
         /* An embedded closure is buffered under the SAME predicate its own release and teardown use (scr_closure_may_cycle): the teardown
          * only unbuffers an object that predicate admitted, so a closure buffered here regardless would be freed while still listed. */
         scr_cyc_on_release(d);
       }
-    } else if (d->kind == SCR_DYN_OBJINST) {
-      scr_dyn_release_inst(d);
     }
     return;
   }

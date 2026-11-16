@@ -57,6 +57,16 @@ describe.skipIf(!linux)("the LLVM head word, against the runtime's accessors", (
   test("slot 0..3: kind 12, marker set, class slot as stamped", () => {
     for (const slot of [0, 1, 2, 3]) expect(probe(llHeadWord(slot), slot), `slot ${slot}`).toEqual({ status: 0, out: "ok" });
   });
+  test("the flag bits (possible root / root once the container bit is set) do not disturb the class slot, and byte 13 carries them", () => {
+    for (const bits of [0x4000, 0x2000]) {
+      expect(probe(llHeadWord(3, bits), 3), `bits ${bits.toString(16)}`).toEqual({ status: 0, out: "ok" });
+    }
+    // the release arm reads byte 13: 0x80 head, 0x40 always a root, 0x20 a root once the bit is set
+    const byte13 = (w: string): number => Number((BigInt(w) >> 40n) & 0xffn);
+    expect(byte13(llHeadWord(1, 0))).toBe(0x80);
+    expect(byte13(llHeadWord(1, 0x4000))).toBe(0xc0);
+    expect(byte13(llHeadWord(1, 0x2000))).toBe(0xa0);
+  });
   test("planted controls: a word with no marker, with the wrong kind, with the wrong slot all fail", () => {
     const good = BigInt(llHeadWord(2));
     expect(probe((good & ~(0x8000n << 32n)).toString(), 2).out).toBe("marker"); // bit 7 of byte 13 cleared
@@ -71,16 +81,32 @@ function checkHeads(ll: string): string[] {
   const table = /@sc_head_tbl = internal constant \[(\d+) x ptr\]/.exec(ll);
   if (table === null) return ["no @sc_head_tbl"];
   if (!/call void @scr_dyn_head_classes\(ptr @sc_head_tbl, i64 \d+\)/.test(ll)) errs.push("no scr_dyn_head_classes call in main");
-  const stamps = [...ll.matchAll(/define internal ptr @sc_new_(\w+)\(\)[\s\S]*?store i64 (\d+), ptr %hdp ; dyn head: [^\n]*class index (\d+)/g)];
+  const stamps = [...ll.matchAll(/define internal ptr @sc_new_(\w+)\(\)[\s\S]*?store i64 (\d+), ptr %hdp ; dyn head: [^\n]*flags 0x([0-9a-f]+) \| class index (\d+)/g)];
   if (stamps.length !== Number(table[1])) errs.push(`${stamps.length} stamped classes for a ${table[1]}-entry table`);
   for (const m of stamps) {
-    if (m[2] !== llHeadWord(Number(m[3]))) errs.push(`class ${m[1]} stores ${m[2]}, expected ${llHeadWord(Number(m[3]))}`);
+    if (m[2] !== llHeadWord(Number(m[4]), parseInt(m[3]!, 16))) errs.push(`class ${m[1]} stores ${m[2]}, expected ${llHeadWord(Number(m[4]), parseInt(m[3]!, 16))}`);
     if (!new RegExp(`%sc_o_${m[1]} = type \\{ i64, i64[,} ]`).test(ll)) errs.push(`class ${m[1]}: struct does not start with i64, i64`);
   }
   return errs;
 }
 
 const PROGRAMS: Record<string, string> = {
+  // A gated class (dyn fields only: the container bit) whose instances are boxed: a bit-clear instance dies by plain release, and an instance that
+  // is later handed a container pointing back at itself (the flip) is a garbage cycle the collector must still find.
+  flip: `class Col { name: string; meta: any; idx: number; constructor(i: number) { this.name = "c" + i; this.meta = null; this.idx = i; } }
+const hold: any[] = [];
+let s = 0;
+for (let r = 0; r < 30000; r++) {
+  const c = new Col(r);
+  const a: any = c;
+  hold.push(a);
+  if (r % 3 === 0) c.meta = a; // the instance holds itself: a one-member garbage cycle once the bit flips
+  else if (r % 3 === 1) c.meta = "leaf" + r;
+  if (hold.length > 40) { s += hold.length; hold.length = 0; }
+}
+const k: any = new Col(5);
+console.log(s, k.idx, k.name, k.meta);
+`,
   cycles: `class Cyc { next: Cyc | null; tag: any; idx: number; constructor(i: number) { this.next = null; this.tag = null; this.idx = i; } }
 class Col { name: string; meta: any; idx: number; constructor(i: number) { this.name = "c" + i; this.meta = null; this.idx = i; } }
 const hold: any[] = [];

@@ -4,6 +4,7 @@
  * constructors. Everything here is driven by the class graph (ClassMeta,
  * VtSlot) the emitter builds up front; emission ORDER is part of the C. */
 import type { CEmitter } from "./emitter.js";
+import { headFlagBits } from "../../ir/boxed-classes.js";
 import type { IrBuiltinRendering, IrFunction, OwnMaskShape } from "../../ir/nodes.js";
 import { DYN, IrClassDef, IrType, moduleUsesCtorName, ORD_MEMBER, orderRecordPlanCached, OWNMASK_SRC_NULL_PROTO, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, funcOf, isRefCounted, mapOf, nullProtoRule, ownMaskBytes, ownMaskKeyBit, STRING } from "../../ir/nodes.js";
 import { mangleClassGcFree, mangleClassNew, mangleClassRelease, mangleClassReleaseDirect, mangleClassRetain, mangleClassStruct, mangleClassTrace, mangleCtorThunk, mangleField, mangleFunction, mangleRecordGcFree, mangleRecordNew, mangleRecordRelease, mangleRecordRetain, mangleRecordStruct, mangleRecordTrace, mangleVtAdapter, mangleVtInstance, mangleVtStruct } from "../mangle.js";
@@ -212,6 +213,8 @@ export interface ClassMeta {
       ordBytes?: number;
       /** A class that carries the dyn head: its class-table index (ir/boxed-classes.ts headClassPlan). */
       headIdx?: number;
+      /** The flag bits stamped beside it (ir/boxed-classes.ts headFlagBits). */
+      headBits?: number;
       comment: string;
       /** Class shapes only; hierarchy members get the vtable machinery. */
       meta: ClassMeta | null;
@@ -231,7 +234,7 @@ export interface ClassMeta {
         traced: E.tracedShapes.has(`object:${cls.name}`),
         fields: cls.fields,
         ordBytes: orderRecordPlanCached(E.mod.classes ?? []).recordBytes(cls.name),
-        ...(E.headIdx(cls.name) !== undefined ? { headIdx: E.headIdx(cls.name)! } : {}),
+        ...(E.headIdx(cls.name) !== undefined ? { headIdx: E.headIdx(cls.name)!, headBits: headFlagBits(E.headPlan().get(cls.name)!) } : {}),
         comment: `class ${cls.name}`,
         meta: E.classMeta.get(cls.name) ?? null,
       })),
@@ -489,7 +492,7 @@ export interface ClassMeta {
         `${E.link}${s.struct} *${s.newFn}(void) {`,
         `  ${s.struct} *o = scr_cyc_alloc(sizeof *o, &${s.trace}, &${s.gcFree});`,
         `  o->rc = 1;`,
-        ...(s.headIdx !== undefined ? [`  o->sc_kind = SCR_OBJ_HEAD_KIND; o->sc_hx = (uint16_t)(0x8000u | ${s.headIdx}u);`, `  scr_cyc_live++; /* pacing weight of the stand-alone node this head replaces (the collector's trigger counts live objects) */`] : []),
+        ...(s.headIdx !== undefined ? [`  o->sc_kind = SCR_OBJ_HEAD_KIND; o->sc_hx = (uint16_t)(0x8000u | 0x${(s.headBits ?? 0).toString(16)}u | ${s.headIdx}u);`, `  scr_cyc_live++; /* pacing weight of the stand-alone node this head replaces (the collector's trigger counts live objects) */`] : []),
         ...undefFieldInitC(s),
         ...(s.indexValue ? [`  o->${OVERFLOW_MEMBER} = ${overflowNewC(s)};`] : []),
         `  scr_obj_alloc_note();`,

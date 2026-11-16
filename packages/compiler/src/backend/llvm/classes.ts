@@ -196,14 +196,14 @@ export function streamRooted(meta: LlClassMeta): boolean {
 
 /** The standalone classes whose instances carry the dyn head, with their class-table index (ir/boxed-classes.ts headClassPlan; the C lane's
  * E.headPlan). Set once per module before any class is laid out: the layout below, the stamp in new and the descriptor all read it. */
-let llHeadIdx: ReadonlyMap<string, number> = new Map();
-export function setLlHeadPlan(plan: ReadonlyMap<string, number>): void {
+let llHeadIdx: ReadonlyMap<string, { idx: number; bits: number }> = new Map();
+export function setLlHeadPlan(plan: ReadonlyMap<string, { idx: number; bits: number }>): void {
   llHeadIdx = plan;
 }
 /** The i64 stored at byte 8 of a head instance: ScrDyn::kind (SCR_OBJ_HEAD_KIND = SCR_DYN_OBJINST = 12) in the low word, then the class slot
- * 0x8000 | index (the head marker is bit 7 of byte 13) and the two flag bytes the weak-key checks read, zero. */
-export function llHeadWord(idx: number): string {
-  return ((BigInt(0x8000 | idx) << 32n) | 12n).toString();
+ * 0x8000 | flag bits (boxed-classes.ts headFlagBits) | index (the head marker is bit 7 of byte 13) and the two flag bytes the weak-key checks read, zero. */
+export function llHeadWord(idx: number, bits = 0): string {
+  return ((BigInt(0x8000 | bits | idx) << 32n) | 12n).toString();
 }
 
 /** The GEP index where a class's own fields start: rc at 0, the vtable
@@ -621,7 +621,7 @@ export function emitClassShapes(
     if (llHeadIdx.has(cls.name)) {
       nw.push(
         `  %hdp = getelementptr inbounds %${struct}, ptr %o, i64 0, i32 1`,
-        `  store i64 ${llHeadWord(llHeadIdx.get(cls.name)!)}, ptr %hdp ; dyn head: SCR_DYN_OBJINST, 0x8000 | class index ${llHeadIdx.get(cls.name)}`,
+        `  store i64 ${llHeadWord(llHeadIdx.get(cls.name)!.idx, llHeadIdx.get(cls.name)!.bits)}, ptr %hdp ; dyn head: SCR_DYN_OBJINST, 0x8000 | flags 0x${llHeadIdx.get(cls.name)!.bits.toString(16)} | class index ${llHeadIdx.get(cls.name)!.idx}`,
         ...headWeightIr("+"), // pacing weight of the stand-alone node this head replaces
       );
     }
