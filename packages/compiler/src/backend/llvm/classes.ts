@@ -445,11 +445,27 @@ export function emitClassShapes(
     // The field-releasing teardown body shared by both release shapes
     // (the public one on standalone classes, the DIRECT one on hierarchy
     // members). Runs at rc == 0.
+    // NUMBER SLOTS (ir/num-slot.ts): each slot field still holding the marker stops counting the number node it never had (pacing weight).
+    const slotGhostLines = (pfx: string): string[] => {
+      const out: string[] = [];
+      (cls.numSlots ?? []).forEach((x, i) => {
+        const idx = cls.fields.findIndex((f) => f.name === x.field);
+        if (idx < 0) return;
+        host.declare(`declare void @scr_numslot_ghost_one(ptr)`);
+        out.push(
+          `  %${pfx}p${i} = getelementptr inbounds %${struct}, ptr %o, i64 0, i32 ${fieldIndex(idx)}`,
+          `  %${pfx}v${i} = load ptr, ptr %${pfx}p${i}`,
+          `  call void @scr_numslot_ghost_one(ptr %${pfx}v${i}) ; ${x.field}`,
+        );
+      });
+      return out;
+    };
     const teardown = (lines: string[]): void => {
       if (traced) {
         host.declare(`declare void @scr_cyc_on_dead(ptr)`);
         lines.push(`  call void @scr_cyc_on_dead(ptr %o)`);
       }
+      lines.push(...slotGhostLines("tg"));
       refFields.forEach((f, t) => {
         lines.push(
           `  %f${t} = getelementptr inbounds %${struct}, ptr %o, i64 0, i32 ${f.index}`,
@@ -629,6 +645,7 @@ export function emitClassShapes(
         `define internal void @${mangleClassGcFree(cls.name)}(ptr %o) ${FN_ATTRS} { ; gcFree ${cls.name}`,
         `entry:`,
       ];
+      gf.push(...slotGhostLines("gg"));
       if (isEmitterRooted) gf.push(...regCall("gf", "scr_emitter_reg_gcfree", ""));
       if (isStreamRooted) gf.push(...stCall("gfs", "scr_stream_st_gcfree", ""));
       untracedRefFields.forEach((f, i) => {

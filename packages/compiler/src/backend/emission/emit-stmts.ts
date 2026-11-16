@@ -6,7 +6,7 @@ import { storesFreshDynNumber } from "../../ir/dyn-keep.js";
 import type { CEmitter, ScopeEntry } from "./emitter.js";
 import type { IrFunction, IrLocal, IrType } from "../../ir/nodes.js";
 import { mangleField, mangleGlobal, mangleLocal, mangleRawParam } from "../mangle.js";
-import { BOOL, CAUGHT, errorOwnFlagFor, F64, IrExpr, IrStmt, ORD_MEMBER, orderRecordPlanCached, RUNTIME_ERROR_CLASSES, isRefCounted, ownMaskKeyBit } from "../../ir/nodes.js";
+import { BOOL, CAUGHT, numSlotHalf, errorOwnFlagFor, F64, IrExpr, IrStmt, ORD_MEMBER, orderRecordPlanCached, RUNTIME_ERROR_CLASSES, isRefCounted, ownMaskKeyBit } from "../../ir/nodes.js";
 import { boxAccess, cDecl, cStringLiteral, cType, elemAccess, vAdapters } from "./emit-types.js";
 import { KEYLIST_MEMBER, OVERFLOW_MEMBER, OWNMASK_MEMBER, ownPresentCondC } from "./emit-shapes.js";
 import { emitStableReceiver, predeclareFieldRunTables } from "./emit-exprs.js";
@@ -970,7 +970,12 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
           const fn = s.unset === true ? "scr_ord_forget" : "scr_ord_note";
           if (ord !== null) E.line(`${fn}(${obj.name}->${ORD_MEMBER}, ${ord});${E.srcComment(s.loc)}`);
         }
-        if (isRefCounted(v.type)) {
+        const slotHalf = s.kind === "fieldSet" && v.type.kind === "dyn" ? numSlotHalf(E.mod.classes, s.className, s.field) : undefined;
+        if (slotHalf !== undefined) {
+          // A NUMBER-SLOT field: a number is unboxed into the raw half and the dyn slot takes the marker; anything else replaces the slot.
+          E.moveTemp(v);
+          E.line(`scr_numslot_put(&${field}, &${obj.name}->${mangleField(slotHalf)}, ${v.name});${E.srcComment(s.loc)}`);
+        } else if (isRefCounted(v.type)) {
           E.moveTemp(v);
           // A fresh dyn number stored into a dyn field lives as long as its holder: a small integer is the runtime's shared box (ir/dyn-keep.ts).
           const kept = s.kind === "fieldSet" && storesFreshDynNumber(s.value) ? `scr_dyn_keep(${v.name})` : v.name;
