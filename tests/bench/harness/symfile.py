@@ -1,15 +1,18 @@
 #!/usr/bin/env python3
-"""symfile.py <out.tsv> <c files...>: symbol<TAB>source path for every `sc_*` function definition whose opening line carries the emitter's `/* path:line */`
-source comment (CEmitter.srcComment). The input is the kept program TU (--keep-c); ramap.py reads the TSV to give each resident function an origin."""
-import re, sys
-rx = re.compile(r'\b(sc_[A-Za-z0-9_]+)\s*\([^;{]*\)\s*\{\s*/\*\s*(\S+?):\d+\s*\*/')
-out = sys.argv[1]; n = 0; seen = set()
+"""symfile.py <out.tsv> <ir.json>: symbol<TAB>source file for every IR function, written from `--emit-ir`'s module dump (functions[].name, .loc.file).
+The C emitter's own `/* file:line */` comment names the ENTRY file for every function (it prints mod.sourceFile), so it cannot say where a function came
+from; the IR's per-function loc can. Names are mangled exactly as backend/mangle.ts does (sc_f_ / sc_w_ / sc_fc_ + sanitize); ramap.py reads the TSV."""
+import json, re, sys
+out, irp = sys.argv[1], sys.argv[2]
+def sanitize(n): return re.sub(r'[^A-Za-z0-9_]', lambda m: '_' if m.group(0) == '.' else '_x%x_' % ord(m.group(0)), n)
+d = json.load(open(irp))
+n = 0
 with open(out, 'w') as o:
-    for f in sys.argv[2:]:
-        with open(f, encoding='utf8', errors='replace') as fh:
-            for line in fh:
-                if '/*' not in line or '{' not in line: continue
-                m = rx.search(line)
-                if m and m.group(1) not in seen:
-                    seen.add(m.group(1)); o.write(f'{m.group(1)}\t{m.group(2)}\n'); n += 1
-print(f'symfile: {n} functions with a source -> {out}')
+    for f in d['functions']:
+        loc = f.get('loc') or {}
+        file = loc.get('file')
+        if not file: continue
+        s = sanitize(f['name'])
+        for pre in ('sc_f_', 'sc_w_', 'sc_fc_'):
+            o.write(f'{pre}{s}\t{file}\n'); n += 1
+print(f'symfile: {len(d["functions"])} IR functions, {n} symbols -> {out}')
