@@ -87,6 +87,8 @@ import type { IrExpr, IrFunction, IrRecordShape, IrType, SrcLoc } from "../../ir
 import { canConvertToDyn, canDynCheckTo, DYN, internalSlotFields, typeKey, UNDEFINED_T } from "../../ir/nodes.js";
 import type { Lowerer } from "./lowerer.js";
 import { dynUndefinedExpr } from "./lowerer.js";
+import { rebuildRecordInspect } from "./lower-inspect.js";
+import { applyEnumRefill } from "./ir-patch.js";
 import { viewShapeKey } from "../types.js";
 
 /** The cap, in FIELDS a member may gain. Decided on measurement: it takes
@@ -342,7 +344,7 @@ export function unifyWidthShapes(L: Lowerer, functions: IrFunction[]): UnifyOutc
     // IS whatever the carry literal spells (Node's object is that literal's), so it adopts the merged order instead of vetoing it.
     const freeOf = (m: string): boolean =>
       carries && !L.carryShapes.has(m) && !L.shapeOrderEvidence.has(m) && L.shapes.get(m)?.keyOrders === undefined &&
-      !L.enumOrderBakes.has(m);
+      L.enumOrderBakes.get(m)?.blocked !== true && L.enumOrderBakes.get(m)?.indexable.has("list") !== true;
     const bound = ms.filter((m) => !freeOf(m));
     const order = mergeOrders(bound.map((m) => orderOf(m)), names);
     if (order === null) return `order-cycle ${ms.join(",")}`;
@@ -491,13 +493,18 @@ export function unifyWidthShapes(L: Lowerer, functions: IrFunction[]): UnifyOutc
     const shape = shapeOf(canonId);
     // The canonical shape's OWN field types still name pre-merge shapes;
     // substitution below rewrites them in place along with everything else.
-    // A member whose order was FREE (see freeOf: no literal builds it and nothing baked its order) adopts the merged order
-    // restricted to its own fields; nothing needs rebuilding because nothing baked the old one.
     if ([...ms].some((x) => L.carryShapes.has(x))) {
       for (const id of ms) {
-        if (id === canonId || L.carryShapes.has(id) || L.shapeOrderEvidence.has(id) || L.shapes.get(id)?.keyOrders !== undefined) continue;
-        const own = new Set(shapeOf(id).fields.map((f) => f.name));
-        shapeOf(id).declaredOrder = m.order.filter((n) => own.has(n));
+        if (id === canonId || L.carryShapes.has(id)) continue;
+        const sh = shapeOf(id);
+        sh.fields = m.fields;
+        sh.declaredOrder = m.order;
+        const bake = L.enumOrderBakes.get(id);
+        const before = L.liftedFns.length;
+        if (bake?.indexable.has("inspect")) rebuildRecordInspect(L, id);
+        for (const refill of bake?.refills ?? []) applyEnumRefill(L, refill, "rebuild");
+        // helpers the rebuild interned (nested inspect helpers) exist only in liftedFns; the pass's function list must carry them
+        for (let i = before; i < L.liftedFns.length; i++) if (!functions.includes(L.liftedFns[i]!)) functions.push(L.liftedFns[i]!);
       }
     }
     shape.fields = m.fields;
