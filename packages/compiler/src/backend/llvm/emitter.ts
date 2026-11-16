@@ -77,6 +77,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
+import { headClassPlan, type HeadClass } from "../../ir/boxed-classes.js";
 import { BUFFER_NUM_ACCESSOR_METHODS, dynKeyGetUsesLitTwin, propsTableRoot, errorOwnFlagFor, moduleFuncLaneShapes, moduleUsesEngineFn, moduleUsesTextMb, moduleUsesDc, moduleUsesTls, ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, presenceMaskStores, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesFnText, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesInstanceRecordLane, moduleInstanceLaneNeedsKg, moduleUsesDynClass, moduleUsesEmitter, moduleBoxesEmitters, canBoxFuncIntoDyn, isDynPackFunc, moduleUsesBigInt, moduleUsesRegexExecDyn, moduleUsesBytesOwn, moduleUsesAsym, moduleUsesDynAsync, moduleBoxesProcStream, moduleUsesNodeTest, irFunctionValueCode, fnNameTableRows } from "../../ir/nodes.js";
 import { setDynOrderPlan, setDynInspExt } from "../dyn-members.js";
 import { rewriteArmDescriptors } from "./armvt.js";
@@ -134,6 +135,7 @@ import { SCR_BYTES_LEN_OFFSET } from "./runtime-layout.js";
 import {
   buildClassGraph,
   classFieldIndex,
+  setLlHeadPlan,
   classStructSym,
   llOrdIndexOf,
   emitClassObjDefs,
@@ -246,7 +248,7 @@ export interface LlvmEmitStats {
 
 /** The descriptor's literal type in a program that can ask util.inspect for showHidden (ScrDynClass under SCR_INSP_COLORS): %ScrDynClass plus the
  * runtime base name, its prototype layer and the own-table-complete flag. */
-const DYN_CLASS_EXT_TYPE = `{ ptr, i64, i64, i8, ptr, ptr, ptr, i64, i8, i8, i8, ptr, i64, i8, ptr, i8, i8, i64, i64, i64, i64, ptr, i8, i8 }`;
+const DYN_CLASS_EXT_TYPE = `{ ptr, i64, i64, i8, ptr, ptr, ptr, i64, i8, i8, i8, ptr, i64, i8, ptr, i8, i8, i64, i64, i64, i64, i16, ptr, i8, i8 }`;
 
 export function emitLlvmModule(mod: IrModule, stats?: LlvmEmitStats, audit = false): string {
   resetSrcSiteCache();
@@ -1911,6 +1913,13 @@ class LlEmitter {
    * emitter's dynClassDescs, ported. Emitted as internal constants beside
    * the other interned globals; see dynClassDesc. */
   private readonly dynClassDescSyms = new Map<string, { sym: string; body: string }>();
+  /** The standalone classes whose instances carry the dyn head, with their class-table index (see the constructor). */
+  private headPlanCache: Map<string, HeadClass> = new Map();
+  /** The descriptor's `head` word: class-table index + 1, bit 15 set when an instance can be a member of a garbage cycle (the C twin: headWord). */
+  headWord(className: string): number {
+    const h = this.headPlanCache.get(className);
+    return h === undefined ? 0 : (h.idx + 1) | (h.mayCycle ? 0x8000 : 0);
+  }
   /** The boxed Map/Set conversion tables (`@sc_mo_<n>`, dyn.ts's
    * dynMapOpsHelper), emitted beside the class descriptors. */
   private readonly dynMapOpsSyms = new Map<string, string>();
@@ -2340,6 +2349,17 @@ class LlEmitter {
     // runtime-made and compiled error objects agree on instanceof through
     // either backend), and the per-hierarchy virtual slot lists.
     this.classMeta = buildClassGraph(mod, this.fnByName);
+    // The classes whose instances carry the dyn head (the C lane's E.headPlan): decided before any class struct is laid out.
+    {
+      const plan = headClassPlan(
+        mod,
+        (c) => this.classMeta.get(c)?.hierarchy === false,
+        (c) => this.tracedShapes.has(`object:${c}`),
+        (c) => canBoxClassIntoDyn(c),
+      );
+      this.headPlanCache = plan;
+      setLlHeadPlan(new Map([...plan].map(([n, h]) => [n, h.idx])));
+    }
     for (const [name, rec] of RUNTIME_ERROR_CLASSES) {
       const meta = this.classMeta.get(name);
       if (!meta) break; // hand-written IR without the builtin defs: no stamps
@@ -2423,6 +2443,8 @@ class LlEmitter {
     }
     const shapes = emitRecordShapes(this, this.mod);
     const classShapes = emitClassShapes(this, this.mod, this.classMeta);
+    // The head table indexes descriptors that must exist by the time it is written: intern them with the class shapes.
+    for (const name of this.headPlanCache.keys()) this.dynClassDesc(name);
     const classObjDefs = emitClassObjDefs(this, this.classMeta, this.classObjs, this.fnByName, (t) => this.llType(t));
     const wrappers = this.emitFnValueDefs();
     const asyncDefs = this.emitAsyncScaffolding();
@@ -2854,7 +2876,7 @@ class LlEmitter {
       // always-linked dyn core a descriptor whose `members` read runs off
       // the end of the object — measured, as an access violation on the
       // first boxed method call.
-      `%ScrDynClass = type { ptr, i64, i64, i8, ptr, ptr, ptr, i64, i8, i8, i8, ptr, i64, i8, ptr, i8, i8, i64, i64, i64, i64 }`,
+      `%ScrDynClass = type { ptr, i64, i64, i8, ptr, ptr, ptr, i64, i8, i8, i8, ptr, i64, i8, ptr, i8, i8, i64, i64, i64, i64, i16 }`,
       // One row of a class's instance MEMBER TABLE
       // { name, len, get, call, enumerable } (ScrDynClassMember in
       // scr_runtime.h) — what `x.get()` and `x.v` read through once the
@@ -3058,6 +3080,15 @@ class LlEmitter {
     if (moduleUsesDynClass(this.mod)) out.push(`declare void @scr_dyn_class_install()`, ``);
     if (dynClassDescSyms.length > 0 && moduleUsesEmitter(this.mod)) out.push(`declare void @scr_dyn_ee_install()`, ``);
     if (this.emitterBoxesListeners) out.push(`@scr_nonerr_unhandled_fn = external global ptr`, `declare ptr @scr_insp_unhandled_nonerr(ptr)`, ``);
+    const headClassNames = [...this.headPlanCache.entries()].sort((a, b) => a[1].idx - b[1].idx).map(([n]) => n);
+    if (headClassNames.length > 0) {
+      // The class table the dyn head indexes (scr_runtime.h), in plan order: the index a class stamps is its position here.
+      out.push(
+        `declare void @scr_dyn_head_classes(ptr, i64)`,
+        `@sc_head_tbl = internal constant [${headClassNames.length} x ptr] [` + headClassNames.map((n) => `ptr ${this.dynClassDesc(n)}`).join(", ") + `]`,
+        ``,
+      );
+    }
     if (dynClassDescSyms.length > 0) {
       out.push(
         `declare void @scr_dyn_objinst_registry(ptr, i64)`,
@@ -3147,6 +3178,7 @@ class LlEmitter {
       `  call void @scr_init()`,
       // Before anything can box: the registry is read by every keyed
       // access and every method call on a boxed class instance.
+      ...(headClassNames.length > 0 ? [`  call void @scr_dyn_head_classes(ptr @sc_head_tbl, i64 ${headClassNames.length})`] : []),
       ...(dynClassDescSyms.length > 0
         ? [`  call void @scr_dyn_objinst_registry(ptr @sc_dcl_tbl, i64 ${dynClassDescSyms.length})`]
         : []),
@@ -4091,7 +4123,7 @@ class LlEmitter {
       `ptr ${statics === null ? "null" : `@${statics.sym}`}, i64 ${statics === null ? 0 : statics.count}, i8 ${staticsOpaque ? 1 : 0}, ` +
       `ptr ${dynDescBase(this.classMeta, meta) === null ? "null" : this.cstr(dynClassDisplayName(dynDescBase(this.classMeta, meta)!.def))}, i8 ${dynRuntimeRoot(meta)}, ` +
       `i8 ${this.tracedShapes.has(`object:${className}`) ? 1 : 0}, ` +
-      `i64 ${this.ordNordOf(className)}, i64 ${this.ordOffsetOf(className)}, i64 ${this.eeOffsetOf(className)}, i64 ${this.propsOffsetOf(className)}${rtTail} }`;
+      `i64 ${this.ordNordOf(className)}, i64 ${this.ordOffsetOf(className)}, i64 ${this.eeOffsetOf(className)}, i64 ${this.propsOffsetOf(className)}, i16 ${this.headWord(className)}${rtTail} }`;
     this.dynClassDescSyms.set(className, { sym, body });
     // Subclass descriptors join the registry (see the C twin): a base-typed
     // box can hold a derived instance whose own member table must resolve.
