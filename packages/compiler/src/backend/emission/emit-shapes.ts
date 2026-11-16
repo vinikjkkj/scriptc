@@ -487,7 +487,10 @@ export interface ClassMeta {
         `  }`,
         `}`,
         `${E.link}${s.struct} *${s.newFn}(void) {`,
-        `  ${s.struct} *o = scr_cyc_alloc(sizeof *o, &${s.trace}, &${s.gcFree});`,
+        // The kind index of this (trace, free) pair is looked up once and cached in a function-local static (the 8-byte cycle header's kind, scr_runtime.h).
+        `  static uint16_t sc_ck;`,
+        `  if (__builtin_expect(sc_ck == 0, 0)) sc_ck = scr_cyc_kind_of(&${s.trace}, &${s.gcFree});`,
+        `  ${s.struct} *o = scr_cyc_alloc_k(sizeof *o, sc_ck);`,
         `  o->rc = 1;`,
         ...undefFieldInitC(s),
         ...(s.indexValue ? [`  o->${OVERFLOW_MEMBER} = ${overflowNewC(s)};`] : []),
@@ -744,7 +747,11 @@ export interface ClassMeta {
       `}`,
       `${E.link}${s.struct} *${s.newFn}(void) {`,
       ...(s.traced
-        ? [`  ${s.struct} *o = scr_cyc_alloc(sizeof *o, &${s.trace}, &${s.gcFree});`]
+        ? [
+            `  static uint16_t sc_ck;`,
+            `  if (__builtin_expect(sc_ck == 0, 0)) sc_ck = scr_cyc_kind_of(&${s.trace}, &${s.gcFree});`,
+            `  ${s.struct} *o = scr_cyc_alloc_k(sizeof *o, sc_ck);`,
+          ]
         : [
             `  ${s.struct} *o = calloc(1, sizeof *o);`,
             `  if (!o) { ${E.oomAbortC()}; }`,
