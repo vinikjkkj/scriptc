@@ -147,13 +147,21 @@ static inline void scr_cycen_alloc_note(ScrCycHdr *h, size_t phys, size_t size,
  * calloc'd one may not be. Folding that into one conditional cost five
  * instructions (`shr / xor / cmp / cmovb / mov`) on the path that already
  * knows the answer. */
-static inline void scr_cyc_stamp(ScrCycHdr *h, ScrTraceFn trace,
-                                 ScrCycFreeFn free_fn, uint8_t blk) {
-  h->trace_off = scr_cyc_off((const void *)trace);
-  h->free_off = scr_cyc_off((const void *)free_fn);
+static inline void scr_cyc_stamp(ScrCycHdr *h, uint32_t kind, uint8_t blk) {
   h->color = SCR_CYC_BLACK;
   h->blk = blk;
+  h->kind_lo = (uint8_t)kind;
+  /* buf_index and `buffered` start at zero, the kind's high four bits ride in the same word: one store for all three. */
+  h->w = (kind >> 8) << SCR_CYC_KINDHI_SHIFT;
 }
+
+/* The free-list link of a free block (arena and pool alike) lives at SCR_CYC_LINK_OFF, in the payload: the header carries pad, blk and the kind and must survive. */
+static inline void *scr_cyc_link_get(const void *b) {
+  void *n;
+  __builtin_memcpy(&n, (const char *)b + SCR_CYC_LINK_OFF, sizeof n);
+  return n;
+}
+static inline void scr_cyc_link_set(void *b, void *n) { __builtin_memcpy((char *)b + SCR_CYC_LINK_OFF, &n, sizeof n); }
 
 /* ── the block arena ──────────────────────────────────────────────────
  * The pool above recycles blocks; it does not change where a block COMES
@@ -1103,7 +1111,7 @@ static __attribute__((cold, noinline, minsize)) void scr_cyc_pr_sweep_chunk(ScrC
     if (bp < cs || bp >= c->bump) break;
     idx = (size_t)(bp - cs) / stride;
     if (idx < nslots) scr_cyc_pr_freemap[idx] = 1;
-    __builtin_memcpy(&b, bp, sizeof(void *));
+    b = scr_cyc_link_get(bp);
   }
 
   memset(used_page, 0, sizeof used_page);
@@ -1146,7 +1154,7 @@ static __attribute__((cold, noinline, minsize)) void scr_cyc_pr_sweep_chunk(ScrC
       uintptr_t a = (uintptr_t)(void *)bp;
       uintptr_t z = a + stride;
       void *next;
-      __builtin_memcpy(&next, bp, sizeof(void *));
+      next = scr_cyc_link_get(bp);
       if (z > first && a < last) {
         unsigned k0 = a <= first ? 0u : (unsigned)((a - first) / SCR_CYC_PAGE);
         unsigned k1 = (unsigned)((z - 1u - first) / SCR_CYC_PAGE);
@@ -1161,7 +1169,7 @@ static __attribute__((cold, noinline, minsize)) void scr_cyc_pr_sweep_chunk(ScrC
           continue;
         }
       }
-      link = (void **)(void *)bp;
+      link = (void **)(void *)(bp + SCR_CYC_LINK_OFF);
     }
   }
   for (k = 0; k < npages; k++) {
@@ -1257,7 +1265,7 @@ static __attribute__((cold, noinline, minsize)) int scr_cyc_pr_revive(ScrCycChun
       ScrCycHdr *h = (ScrCycHdr *)(void *)(cs + i * stride);
       h->pad = (uint8_t)(((uintptr_t)(void *)h - (uintptr_t)(void *)c) /
                          SCR_CYC_ARENA_GRAN);
-      __builtin_memcpy(h, &c->freelist, sizeof(void *));
+      scr_cyc_link_set(h, c->freelist);
       c->freelist = h;
     }
   }
@@ -1642,7 +1650,7 @@ static inline ScrCycHdr *scr_cyc_ar_pop(size_t phys) {
   c = scr_cyc_ar_cur[phys / SCR_POOL_GRAIN]; /* never NULL; see the sentinel */
   b = c->freelist;
   if (b == NULL) return NULL;
-  __builtin_memcpy(&c->freelist, b, sizeof(void *));
+  c->freelist = scr_cyc_link_get(b);
   c->used++;
   SCR_CS_BUMP(arhit);
   return (ScrCycHdr *)b;
@@ -1669,7 +1677,7 @@ static ScrCycHdr *scr_cyc_ar_refill(size_t phys, uint8_t blk) {
     }
     b = c->freelist;
     if (b != NULL) {
-      __builtin_memcpy(&c->freelist, b, sizeof(void *));
+      c->freelist = scr_cyc_link_get(b);
       c->used++;
       SCR_CS_BUMP(arhit);
       return (ScrCycHdr *)b;
@@ -1704,7 +1712,7 @@ static void scr_cyc_ar_give(ScrCycHdr *h) {
   ScrCycChunk *c = scr_cyc_ar_chunk(h);
   SCR_CS_BUMP(argive);
   scr_cyc_ar_verify(c, h);
-  __builtin_memcpy(h, &c->freelist, sizeof(void *));
+  scr_cyc_link_set(h, c->freelist);
   c->freelist = h;
   if (--c->used == 0) {
     if (scr_cyc_ar_cur[c->blk] != c) scr_cyc_ar_release(c);
@@ -1715,6 +1723,38 @@ static void scr_cyc_ar_give(ScrCycHdr *h) {
    * makes this ONE byte-test on the path every free takes; see its
    * declaration. */
   if (!c->avail) scr_cyc_ar_link(c);
+}
+
+/* ── the kind table ──────────────────────────────────────────────────────
+ * One row per distinct (trace, free) pair, indexed by the 12-bit kind in the header (scr_runtime.h). Index 0 means "not assigned". scr_cyc_kind_of is the only
+ * writer: it hashes the pair into an open-addressed table of indices and assigns the next row on a miss. It runs once per allocation site (the site caches the
+ * answer), plus on every allocation of the one site that passes variable functions (scr_error.c), so it is a hash, not a scan. */
+ScrCycKindRow scr_cyc_kind_tab[SCR_CYC_KIND_MAX];
+static uint32_t scr_cyc_nkinds = 1u;
+static uint16_t scr_cyc_kind_hash[8192];
+uint16_t scr_cyc_kind_of(ScrTraceFn trace, ScrCycFreeFn free_fn) {
+  int32_t t = scr_cyc_off((const void *)trace);
+  int32_t f = scr_cyc_off((const void *)free_fn);
+  uint32_t hs = (((uint32_t)f * 2654435761u) ^ (uint32_t)t) >> 19; /* 13 bits */
+  for (;;) {
+    uint16_t k = scr_cyc_kind_hash[hs];
+    if (k == 0) break;
+    if (scr_cyc_kind_tab[k].trace_off == t && scr_cyc_kind_tab[k].free_off == f) return k;
+    hs = (hs + 1u) & 8191u;
+  }
+  if (scr_cyc_nkinds >= SCR_CYC_KIND_MAX) scr_trap("scriptc: more than 4095 distinct cycle-object kinds in one program (the 8-byte cycle header's kind index is 12 bits)\n");
+  {
+    uint16_t k = (uint16_t)scr_cyc_nkinds++;
+    scr_cyc_kind_tab[k].trace_off = t;
+    scr_cyc_kind_tab[k].free_off = f;
+    scr_cyc_kind_hash[hs] = k;
+    return k;
+  }
+}
+
+/* The old entry point, kept for a site whose functions are not constants. */
+void *scr_cyc_alloc(size_t size, ScrTraceFn trace, ScrCycFreeFn free_fn) {
+  return scr_cyc_alloc_k(size, scr_cyc_kind_of(trace, free_fn));
 }
 
 /* The miss, and DELIBERATELY the whole of it: the refill, the pool, the
@@ -1747,9 +1787,7 @@ static void scr_cyc_ar_give(ScrCycHdr *h) {
  * block was calloc'd once and has been 0 ever since. Zeroing the payload
  * rather than the whole block is what keeps that true — a memset over the
  * header would send a carved block to free(). */
-static __attribute__((noinline)) void *scr_cyc_alloc_miss(size_t size,
-                                                          ScrTraceFn trace,
-                                                          ScrCycFreeFn free_fn) {
+static __attribute__((noinline)) void *scr_cyc_alloc_miss(size_t size, uint32_t kind) {
   size_t phys = scr_pool_bytes(sizeof(ScrCycHdr) + size);
   uint8_t blk = phys <= SCR_POOL_MAX ? (uint8_t)(phys / SCR_POOL_GRAIN) : 0u;
   ScrCycHdr *h = NULL;
@@ -1760,7 +1798,7 @@ static __attribute__((noinline)) void *scr_cyc_alloc_miss(size_t size,
   SCR_PC_ARM();
   SCR_LIFE_ARM();
   if (blk != 0 && scr_cyc_arena_on()) h = scr_cyc_ar_refill(phys, blk);
-  if (h == NULL) h = (ScrCycHdr *)scr_pool_take(&scr_cyc_blocks, phys);
+  if (h == NULL) h = (ScrCycHdr *)scr_pool_take_at(&scr_cyc_blocks, phys, SCR_CYC_LINK_OFF);
   if (h == NULL) {
     SCR_CS_BUMP(arcalloc);
     h = calloc(1, phys);
@@ -1768,12 +1806,10 @@ static __attribute__((noinline)) void *scr_cyc_alloc_miss(size_t size,
     /* calloc zeroed the whole block, `pad` included: provenance 0, which
      * is what sends it to free() rather than to a chunk. */
   }
-  scr_cyc_stamp(h, trace, free_fn, blk);
-  h->buffered = 0;
-  h->buf_index = 0;
+  scr_cyc_stamp(h, kind, blk);
   scr_cyc_live++; /* the pacing denominator; see below */
-  SCR_CYCEN_NOTE_ALLOC(h, phys, size, free_fn, 0);
-  SCR_LIFE_NOTE_ALLOC(h, phys, free_fn);
+  SCR_CYCEN_NOTE_ALLOC(h, phys, size, scr_cyc_free_of(h), 0);
+  SCR_LIFE_NOTE_ALLOC(h, phys, scr_cyc_free_of(h));
   /* calloc's contract, kept, and only over the payload; see the note in
    * scr_cyc_alloc for why the header is stamped rather than zeroed. */
   return memset((unsigned char *)h + sizeof(ScrCycHdr), 0,
@@ -1873,11 +1909,11 @@ static __attribute__((noinline)) void *scr_cyc_alloc_miss(size_t size,
  *
  * Zeroed allocation with a cycle header in front; returns the OBJECT
  * pointer (header at scr_cyc_hdr). Aborts on OOM. */
-void *scr_cyc_alloc(size_t size, ScrTraceFn trace, ScrCycFreeFn free_fn) {
+void *scr_cyc_alloc_k(size_t size, uint32_t kind) {
   SCR_LIFE_SITE();
   size_t phys = scr_pool_bytes(sizeof(ScrCycHdr) + size);
   ScrCycHdr *h = scr_cyc_ar_pop(phys);
-  if (h == NULL) return scr_cyc_alloc_miss(size, trace, free_fn);
+  if (h == NULL) return scr_cyc_alloc_miss(size, kind);
   /* The carved arm. scr_cyc_ar_pop only returns a block whose physical size
    * is in range, so `blk` needs no test, and `phys / SCR_POOL_GRAIN` is the
    * class index it just computed. The block's `pad` — its offset from the
@@ -1895,7 +1931,7 @@ void *scr_cyc_alloc(size_t size, ScrTraceFn trace, ScrCycFreeFn free_fn) {
     h->pad = prov;
   }
 #endif
-  scr_cyc_stamp(h, trace, free_fn, (uint8_t)(phys / SCR_POOL_GRAIN));
+  scr_cyc_stamp(h, kind, (uint8_t)(phys / SCR_POOL_GRAIN));
 #if !SCR_CYC_ZERO_WHOLE
   /* calloc's contract, kept, but only where it is observable. Four of the
    * header's six fields are assigned by the stamp and the other two are
@@ -1905,12 +1941,10 @@ void *scr_cyc_alloc(size_t size, ScrTraceFn trace, ScrCycFreeFn free_fn) {
    * "freshly-created boxes hold NULL" rule depends on it), so the payload
    * zeroing is NOT optional and is kept exactly. SCR_CYC_ZERO_WHOLE=1
    * restores the old single memset. */
-  h->buffered = 0;
-  h->buf_index = 0;
 #endif
   scr_cyc_live++;
-  SCR_CYCEN_NOTE_ALLOC(h, phys, size, free_fn, 1);
-  SCR_LIFE_NOTE_ALLOC(h, phys, free_fn);
+  SCR_CYCEN_NOTE_ALLOC(h, phys, size, scr_cyc_free_of(h), 1);
+  SCR_LIFE_NOTE_ALLOC(h, phys, scr_cyc_free_of(h));
 #if SCR_CYC_ZERO_WHOLE
   return h + 1;
 #else
@@ -1986,7 +2020,7 @@ void scr_cyc_free(void *obj) {
   /* Masked: the top bit is the stamp above, not part of the size class. */
   const uint8_t cls = h->blk & SCR_CYC_BLK_MASK;
   if (cls != 0 &&
-      scr_pool_give(&scr_cyc_blocks, h, (size_t)cls * SCR_POOL_GRAIN)) {
+      scr_pool_give_at(&scr_cyc_blocks, h, (size_t)cls * SCR_POOL_GRAIN, SCR_CYC_LINK_OFF)) {
 #ifdef SCR_CYCEN_ON
     scr_cycen_note_free(h, 1, scr_cyc_live);
 #endif
@@ -2132,26 +2166,29 @@ void scr_collect_cycles_idle(void) {
 
 void scr_cyc_on_dead(void *obj) {
   ScrCycHdr *h = scr_cyc_hdr(obj);
-  if (!h->buffered) return;
+  if (!(h->w & SCR_CYC_BUF)) return;
   /* O(1) removal: swap the last entry into the hole. */
-  size_t i = (size_t)h->buf_index;
+  size_t i = (size_t)(h->w & SCR_CYC_IDX_MASK);
   void *last = scr_roots[--scr_nroots];
   scr_roots[i] = last;
-  if (last != obj) scr_cyc_hdr(last)->buf_index = (uint32_t)i;
-  h->buffered = 0;
+  if (last != obj) {
+    ScrCycHdr *lh = scr_cyc_hdr(last);
+    lh->w = (lh->w & ~SCR_CYC_IDX_MASK) | (uint32_t)i;
+  }
+  h->w &= ~SCR_CYC_BUF;
 }
 
 void scr_cyc_on_release(void *obj) {
   ScrCycHdr *h = scr_cyc_hdr(obj);
   h->color = SCR_CYC_PURPLE;
-  if (!h->buffered) {
+  if (!(h->w & SCR_CYC_BUF)) {
     if (scr_nroots == scr_roots_cap) {
       scr_roots_cap = scr_roots_cap ? scr_roots_cap * 2 : 64;
       scr_roots = realloc(scr_roots, scr_roots_cap * sizeof *scr_roots);
       if (!scr_roots) scr_cyc_oom();
     }
-    h->buffered = 1;
-    h->buf_index = (uint32_t)scr_nroots;
+    if (__builtin_expect(scr_nroots > SCR_CYC_IDX_MASK, 0)) scr_trap("scriptc: the candidate-root buffer outgrew the 27-bit index of the cycle header\n");
+    h->w = (h->w & ~SCR_CYC_IDX_MASK) | SCR_CYC_BUF | (uint32_t)scr_nroots;
     scr_roots[scr_nroots++] = obj;
   }
   /* Threshold trigger. Never re-entered: a teardown's releases of untraced
@@ -2316,14 +2353,14 @@ static void scr_cw_visit(void *child, void *ctx) {
   (void)ctx;
   if (SCR_CYC_SKIP(child)) return;
   ScrCycHdr *h = scr_cyc_hdr(child);
-  if (h->color != SCR_CYC_WHITE || h->buffered) return;
+  if (h->color != SCR_CYC_WHITE || (h->w & SCR_CYC_BUF)) return;
   h->color = SCR_CYC_BLACK; /* visited marker — prevents re-gathering */
   scr_wl_push(child);
 }
 static void scr_collect_white(void *obj) {
   ScrCycHdr *h = scr_cyc_hdr(obj);
   size_t floor = scr_wl_n;
-  if (h->color != SCR_CYC_WHITE || h->buffered) return;
+  if (h->color != SCR_CYC_WHITE || (h->w & SCR_CYC_BUF)) return;
   h->color = SCR_CYC_BLACK;
   scr_wl_push(obj);
   while (scr_wl_n > floor) {
@@ -2353,10 +2390,10 @@ void scr_collect_cycles(void) {
     ScrCycHdr *h = scr_cyc_hdr(obj);
     if (h->color == SCR_CYC_PURPLE) {
       scr_mark_gray(obj);
-      h->buf_index = (uint32_t)out;
+      h->w = (h->w & ~SCR_CYC_IDX_MASK) | (uint32_t)out;
       scr_roots[out++] = obj;
     } else {
-      h->buffered = 0;
+      h->w &= ~SCR_CYC_BUF;
     }
   }
   scr_nroots = out;
@@ -2371,7 +2408,7 @@ void scr_collect_cycles(void) {
    * the recursion can gather buffered members of an earlier root's cycle. */
   size_t n = scr_nroots;
   scr_nroots = 0;
-  for (size_t i = 0; i < n; i++) scr_cyc_hdr(scr_roots[i])->buffered = 0;
+  for (size_t i = 0; i < n; i++) scr_cyc_hdr(scr_roots[i])->w &= ~SCR_CYC_BUF;
   scr_nwhite = 0;
   SCR_CS_PHASE_BEGIN();
   for (size_t i = 0; i < n; i++) scr_collect_white(scr_roots[i]);

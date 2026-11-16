@@ -107,7 +107,7 @@ static void scr_box_gcfree(void *o) {
 }
 
 ScrBox *scr_box_new(ScrBoxKind kind) {
-  ScrBox *b = scr_cyc_alloc(sizeof(ScrBox), &scr_box_trace, &scr_box_gcfree);
+  ScrBox *b = SCR_CYC_ALLOC(sizeof(ScrBox), &scr_box_trace, &scr_box_gcfree);
   b->rc = 1;
   b->kind = kind;
 #ifdef SCR_RC_AUDIT
@@ -600,7 +600,7 @@ void scr_rc_audit_sites_report(void) {
 }
 #endif /* SCR_RC_AUDIT */
 ScrClosure *scr_closure_new(void *fn, size_t ncaps) {
-  ScrClosure *c = scr_cyc_alloc(sizeof(ScrClosure) + ncaps * sizeof(ScrBox *),
+  ScrClosure *c = SCR_CYC_ALLOC(sizeof(ScrClosure) + ncaps * sizeof(ScrBox *),
                                  &scr_closure_trace, &scr_closure_gcfree);
   c->rc = 1;
   c->kind = (uint32_t)SCR_DYN_FUNC;
