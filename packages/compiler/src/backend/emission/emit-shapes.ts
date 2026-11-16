@@ -450,6 +450,9 @@ export interface ClassMeta {
       // Cycle-capable shape: cycle-headered allocation, root-buffer hooks
       // on release, and the trace/teardown complement pair.
       const lazyGate = lazyCycleGateC(E, s.meta?.def, s.fields);
+      // CONTAINER BIT (ir/cbit.ts): a gated instance is a possible cycle root only once a container was stored into it.
+      const cbit = s.meta?.def.cbit === true && lazyGate === null;
+      const cbitGate = cbit ? `scr_cyc_hdr(o)->blk & SCR_CYC_CBIT` : null;
       const tracedFields = rcMembers(s).filter((m) => E.traceAdapterC(m.type) !== null);
       const untracedRefFields = rcMembers(s).filter(
         (m) => isRefCounted(m.type) && E.traceAdapterC(m.type) === null,
@@ -479,7 +482,7 @@ export interface ClassMeta {
       out.push(
         `    scr_obj_free_note();`,
         `    scr_cyc_free(o);`,
-        `  } else${lazyGate === null ? "" : ` if (${lazyGate})`} {`,
+        `  } else${cbitGate !== null ? ` if (${cbitGate})` : lazyGate === null ? "" : ` if (${lazyGate})`} {`,
         `    scr_cyc_on_release(o); /* possible cycle root; may collect */`,
         `  }`,
         `}`,
@@ -493,15 +496,24 @@ export interface ClassMeta {
         `}`,
         `${E.link}void ${s.trace}(void *o0, ScrTraceVisit visit, void *ctx) {`,
         `  ${s.struct} *o = (${s.struct} *)o0;`,
+        ...(cbit ? [`  if (!(scr_cyc_hdr(o)->blk & SCR_CYC_CBIT)) return; /* no container ever stored: no edge to visit */`] : []),
         ...tracedFields.map(
           (m) => `  visit(o->${m.member}, ctx); /* ${m.name} */`,
         ),
         `}`,
         `${E.link}void ${s.gcFree}(void *o0) {`,
-        ...(untracedRefFields.length > 0 || numSlotGhostsC(s.meta?.def) !== ""
+        ...(untracedRefFields.length > 0 || cbit || numSlotGhostsC(s.meta?.def) !== ""
           ? [
               `  ${s.struct} *o = (${s.struct} *)o0;`,
               ...(numSlotGhostsC(s.meta?.def) !== "" ? [`  SCR_PROPS_GHOST_SUB(${numSlotGhostsC(s.meta?.def)});`] : []),
+              // The complement contract, decided per instance: a bit-clear instance was never traced, so the collector did not free its dyn fields; release them here.
+              ...(cbit
+                ? [
+                    `  if (!(scr_cyc_hdr(o)->blk & SCR_CYC_CBIT)) {`,
+                    ...tracedFields.map((m) => `    if (o->${m.member}) ${releaseCallC(m.type, `o->${m.member}`)}; /* ${m.name} (bit clear) */`),
+                    `  }`,
+                  ]
+                : []),
               ...untracedRefFields.map((m) => {
                 const field = `o->${m.member}`;
                 return `  if (${field}) ${releaseCallC(m.type, field)}; /* ${m.name} (acyclic) */`;
