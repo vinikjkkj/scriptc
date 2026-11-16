@@ -17,8 +17,10 @@
  *    receiver is not `this`; (b) a dyn arithmetic result or a boxed numeric arithmetic; (c) a boxed numeric literal outside [-128, 1023];
  *    NOT a call result, a copy of one of this's own fields, an index read, a parameter or an in-range literal (those are small or unbounded
  *    in kind and a slot would only add a transient box per read);
- *  - some read of the field in the module is a NUMERIC use (an operand of dyn arithmetic or comparison, or a number check): a field that is
- *    only ever a pointer (a buffer, a string) gains nothing from an f64 half;
+ *  - the field is NUMERIC: some read of it in the module is a numeric use (an operand of dyn arithmetic or comparison, or a number check), or a
+ *    constructor write is an arithmetic / large-literal store, or is a property read of a property the program itself writes as a number (a
+ *    ++/--, an arithmetic or large-literal store, or an f64-typed field): a field that is only ever a pointer (a buffer, a string) gains nothing
+ *    from an f64 half. (A computed-key read such as `this[startKey]` hides the use from the read side, which is why the source side counts.)
  *  - no struct view (`%class:<C>` record source) names the class or a descendant, because a view reads the dyn slot at its offset, and no
  *    unionDisc names a field of that name, because it reads the live arm's slot directly (unionKeyGet never reads a class arm).
  *
@@ -104,6 +106,9 @@ export function numSlotPass(mod: IrModule): NumSlotPick[] {
     return f;
   };
   const viewed = new Set<string>();
+  /** Property names the program itself writes as a number: a ++/-- , an arithmetic or large-literal store, or a field typed f64. */
+  const numericProps = new Set<string>();
+  for (const c of classes) for (const f of c.fields) if (f.type.kind === "f64" && !f.name.startsWith("%")) numericProps.add(f.name);
   /** Field names read by unionDisc (it reads the slot of whichever arm is live, class arms included). unionKeyGet reads only record and array arms: the emitters refuse a class arm there. */
   const unionRead = new Set<string>();
 
@@ -121,6 +126,13 @@ export function numSlotPass(mod: IrModule): NumSlotPick[] {
     }
     const node = n as Record<string, unknown>;
     const kind = node["kind"];
+    if (kind === "fieldIncDec") numericProps.add(node["field"] as string);
+    else if (kind === "fieldSet" && node["unset"] !== true) {
+      const wv = node["value"] as IrExpr;
+      const r = ruleOf(wv);
+      if (r === "b" || r === "c" || wv.type.kind === "f64") numericProps.add(node["field"] as string);
+      else if (wv.kind === "dynFrom" && wv.value.type.kind === "f64") numericProps.add(node["field"] as string);
+    }
     if (kind === "fieldSet" || kind === "fieldIncDec") {
       const className = node["className"] as string;
       const field = node["field"] as string;
@@ -138,15 +150,6 @@ export function numSlotPass(mod: IrModule): NumSlotPick[] {
     } else if (kind === "libCall" && NUM_USE_FNS.has(node["fn"] as string)) {
       for (const a of node["args"] as IrExpr[]) {
         noteRead(a);
-        if (why && a.kind === "dynKeyGet" && a.key.kind !== "strLit") {
-          const sh = (e: unknown, d: number): string => {
-            if (e === null || typeof e !== "object" || Array.isArray(e)) return "";
-            const o = e as Record<string, unknown>;
-            const kids = d <= 0 ? [] : Object.keys(o).filter((k) => typeof o[k] === "object" && o[k] !== null && k !== "type" && k !== "loc").map((k) => `${k}=${sh(o[k], d - 1)}`);
-            return `${String(o["kind"] ?? "?")}${typeof o["value"] === "string" ? `(${JSON.stringify(o["value"])})` : ""}${kids.length > 0 ? `{${kids.join(",")}}` : ""}`;
-          };
-          process.stderr.write(`numslot: numop computed-key read in ${fn.name}: key ${sh(a.key, 3)} recv ${sh(a.value, 1)}\n`);
-        }
       }
     } else if (kind === "dynCheck" && (node["type"] as { kind: string }).kind === "f64") {
       noteRead(node["value"] as IrExpr);
@@ -229,8 +232,16 @@ export function numSlotPass(mod: IrModule): NumSlotPick[] {
         refuse("a constructor write stores a call result, a copy, an index read, a parameter or an in-range literal");
         continue;
       }
-      if (!ff.numericUse) {
-        refuse("no numeric use of any read (a pointer-only field gains nothing)");
+      // A numeric value is certain for an arithmetic or large-literal store, and likely for a property read of a property the program itself writes
+      // as a number (`this.start = packet.offset` where `packet.offset += n` exists); otherwise some read of the field must be a numeric use.
+      const numericSource = ff.ctorWrites.some((w) => {
+        const r = ruleOf(w);
+        if (r === "b" || r === "c") return true;
+        if (w.kind === "dynKeyGet" && w.key.kind === "strLit") return numericProps.has(w.key.value);
+        return w.kind === "fieldGet" && numericProps.has(w.field);
+      });
+      if (!ff.numericUse && !numericSource) {
+        refuse("no numeric use of any read and no numeric source (a pointer-only field gains nothing)");
         continue;
       }
       picks.push({ className: c.name, field: f.name, rule });
