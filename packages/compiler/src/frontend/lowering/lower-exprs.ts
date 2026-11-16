@@ -12537,7 +12537,7 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         }
       }
       if (extras.length > 0) {
-        const wid = L.shapes.intern([...shape.fields.map((f) => ({ name: f.name, type: f.type })), ...extras], false, undefined);
+        const wid = L.shapes.intern([...shape.fields.map((f) => ({ name: f.name, type: f.type })), ...extras].sort((l, r) => (l.name < r.name ? -1 : l.name > r.name ? 1 : 0)), false, undefined, esOwnKeyOrder([...shape.declaredOrder, ...extras.map((x) => x.name)]));
         L.carryShapes.add(wid);
         type = { kind: "record", shapeId: wid };
         shape = L.shapes.get(wid)!;

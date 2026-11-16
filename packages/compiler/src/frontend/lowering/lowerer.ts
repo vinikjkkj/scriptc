@@ -4388,6 +4388,31 @@ export class Lowerer {
     this.cdctMemo.clear();
     this.cdctMemoRetired = true;
     this.unifyOutcome = unifyWidthShapes(this, functions);
+    if (process.env["SCRIPTC_CARRY_COUNT"] !== undefined && this.carryShapes.size > 0) {
+      // MEASUREMENT ONLY: per carry shape (a spread literal widened to keep the members its declared type lacks), how many fields it
+      // has, how many it carries beyond the declared ones, whether the width edge MERGED (one struct) or stayed a view/copy, and the
+      // construction sites of the widened shape in the emitted IR.
+      const sites = new Map<string, number>();
+      const seenN = new Set<object>();
+      const walkN = (n: unknown): void => {
+        if (n === null || typeof n !== "object" || seenN.has(n)) return;
+        seenN.add(n);
+        if (Array.isArray(n)) { for (const x of n) walkN(x); return; }
+        const o = n as Record<string, unknown>;
+        if (o["kind"] === "recordLit") {
+          const t = o["type"] as { kind?: string; shapeId?: string } | undefined;
+          if (t?.kind === "record" && t.shapeId !== undefined && this.carryShapes.has(t.shapeId)) sites.set(t.shapeId, (sites.get(t.shapeId) ?? 0) + 1);
+        }
+        for (const v of Object.values(o)) walkN(v);
+      };
+      walkN(functions);
+      walkN(this.globalsList);
+      const merged = new Set((this.unifyOutcome?.components ?? []).flat());
+      for (const id of this.carryShapes) {
+        const sh = this.shapes.get(id);
+        console.error(`[carry-count] ${JSON.stringify({ shape: id, fields: sh?.fields.length, merged: merged.has(id), sites: sites.get(id) ?? 0 })}`);
+      }
+    }
     this.checkIdentityEdges();
     this.armKeyRiskFnReturns(functions);
     this.reportKeyEnumerationRisks();
