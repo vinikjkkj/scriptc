@@ -2384,6 +2384,40 @@ static size_t scr_rela_release(void) {
 
 static size_t scr_rela_released_kib; /* KiB of .rela.dyn released with the first drop (SCR_TEXT_DROP_STAT shows it) */
 
+#ifdef SCR_PROF_ALLOC
+/* LAB ONLY (-DSCR_PROF_ALLOC, tests/perf/prof/scr_prof.h): the startup-heap census. A phase dump of the allocation lane's live-bytes-per-site table at the loop's first
+ * turn and at the text drop, plus glibc's own accounting at the same instant so the share the lane cannot see (libc, vendored archives) is a number. SCR_HS_OUT is the
+ * path prefix; SCR_HSTART_PLANT=1 plants a 1 MiB startup allocation (the positive control: its site must show). */
+static void scr_hs_dump(const char *tag) {
+  const char *base = getenv("SCR_HS_OUT");
+  char path[600];
+  if (base == NULL || *base == 0) return;
+  snprintf(path, sizeof path, "%s.%s", base, tag);
+  scr_prof_report_to(path);
+  {
+    FILE *f = fopen(path, "a");
+    if (f != NULL) {
+      struct mallinfo2 mi = mallinfo2(); /* <malloc.h> came in with the prof header (which includes it before the malloc macros) or above */
+      fprintf(f, "MALLINFO tag=%s arena=%zu uordblks=%zu fordblks=%zu hblkhd=%zu ordblks=%zu\n", tag, mi.arena, mi.uordblks, mi.fordblks, mi.hblkhd, mi.ordblks);
+      FILE *sm = fopen("/proc/self/smaps_rollup", "r");
+      char line[256];
+      while (sm != NULL && fgets(line, sizeof line, sm)) fprintf(f, "SMAPS_ROLLUP %s", line);
+      if (sm != NULL) fclose(sm);
+      fclose(f);
+    }
+  }
+}
+__attribute__((constructor)) static void scr_hs_plant(void) {
+  const char *e = getenv("SCR_HSTART_PLANT");
+  if (e != NULL && *e == '1') {
+    void *p = malloc((size_t)1 << 20); /* the planted startup allocation: this line is its site */
+    if (p != NULL) memset(p, 1, (size_t)1 << 20);
+  }
+}
+#else
+#define scr_hs_dump(tag) ((void)0)
+#endif
+
 static void scr_text_drop_tick(double now) {
   if (__builtin_expect(scr_td_state != 1, 0)) {
     if (scr_td_state == 2) return;
@@ -2393,9 +2427,10 @@ static void scr_text_drop_tick(double now) {
   if (now < scr_td_next_ms) return; /* the whole per-turn cost while live */
   long flt = 0;
   if (!scr_text_drop_first_done) {
-    if (scr_text_drop_first_ms == 0) { scr_text_drop_first_ms = now; scr_td_next_ms = now + (double)SCR_TEXT_DROP_AFTER_MS; return; }
+    if (scr_text_drop_first_ms == 0) { scr_hs_dump("first"); scr_text_drop_first_ms = now; scr_td_next_ms = now + (double)SCR_TEXT_DROP_AFTER_MS; return; }
     if (now - scr_text_drop_first_ms < (double)SCR_TEXT_DROP_AFTER_MS) { scr_td_next_ms = scr_text_drop_first_ms + (double)SCR_TEXT_DROP_AFTER_MS; return; }
     scr_text_drop_first_done = true;
+    scr_hs_dump("drop");
     scr_rela_released_kib = scr_rela_release();
   } else {
     bool trigger = false;
