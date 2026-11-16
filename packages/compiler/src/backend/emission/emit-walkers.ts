@@ -3252,7 +3252,11 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             // whose literal discriminant names a narrower sibling (an all-optional catch-all such as zapo's Proto.IMessage is the widest arm of
             // WaSendMessageContent and matched every `{ type: 'text', text }` before the `text` arm was tried, so the guard that followed threw the
             // stranded-arm TypeError). A value no literal arm claims still reaches pass 2, the old chain verbatim.
-            if (withLits && litTest === null && arm.kind === "record") return;
+            if (withLits && litTest === null && arm.kind === "record") {
+              // LAB (dlcount), never lands: count the union walkers whose chain this fix changed.
+              if (process.env["SCRIPTC_DL_COUNT"] !== undefined) process.stderr.write(`DLCOUNT union=${t.unionId} arm=${String(i)} skipped-in-pass-1\n`);
+              return;
+            }
             if (arm.kind === "undefinedT" || arm.kind === "nullT") {
               // A matched unit arm builds nothing: the result is THE interned
               // immortal instance (rc == SIZE_MAX — RC entry points and the
