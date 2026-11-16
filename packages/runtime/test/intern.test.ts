@@ -73,8 +73,18 @@ function score(stderr: string): { admitted: number; kept: number; total: number 
   return { admitted: Number(m[1]), kept: Number(m[3]), total: Number(m[2]) };
 }
 
-test("content interning: the four invariants, under the shipping settings", async () => {
+test("content interning: the shipping default is weak entries, and the knob is an off-switch", async () => {
+  // SCR_STR_INTERN_WEAK defaults to 1: an unset environment runs the weak arm, and SCR_STRING_INTERN_WEAK=0 restores the owning table.
   const stderr = await run({});
+  expect(stderr.trim().split("\n").at(-1)).toBe("all intern tests passed");
+  expect(stderr).toContain("intern WEAK");
+  const owning = await run({ SCR_STRING_INTERN_WEAK: "0" });
+  expect(owning).toContain("intern ON");
+  expect(owning).not.toContain("intern WEAK");
+});
+
+test("content interning: the four invariants, under the owning table (SCR_STRING_INTERN_WEAK=0)", async () => {
+  const stderr = await run({ SCR_STRING_INTERN_WEAK: "0" });
   expect(stderr.trim().split("\n").at(-1)).toBe("all intern tests passed");
   const { admitted, kept, total } = score(stderr);
   // I4. Every ADMITTED entry survives a cold stream sixty times the table's
@@ -133,6 +143,7 @@ test("the direct-mapped control loses hot entries the shipping table keeps", asy
   // If this arm ever reports a full house, the survival test has stopped
   // colliding and the shipping arm's green is meaningless.
   const control = score(await run({
+    SCR_STRING_INTERN_WEAK: "0",
     SCR_STRING_INTERN_WAYS: "1",
     SCR_STRING_INTERN_ADMIT: "0",
   }));
@@ -145,8 +156,8 @@ test("the direct-mapped control loses hot entries the shipping table keeps", asy
   // already keeps a held entry as long as its set has one spare way, and
   // admission alone keeps every held entry even direct-mapped. What the pair
   // buys over admission alone is the case admission has to refuse.
-  const waysOnly = score(await run({ SCR_STRING_INTERN_ADMIT: "0" }));
-  const admitOnly = score(await run({ SCR_STRING_INTERN_WAYS: "1" }));
+  const waysOnly = score(await run({ SCR_STRING_INTERN_WEAK: "0", SCR_STRING_INTERN_ADMIT: "0" }));
+  const admitOnly = score(await run({ SCR_STRING_INTERN_WEAK: "0", SCR_STRING_INTERN_WAYS: "1" }));
   expect(waysOnly.kept).toBeGreaterThan(control.kept);
   expect(admitOnly.kept).toBe(admitOnly.admitted);
 });

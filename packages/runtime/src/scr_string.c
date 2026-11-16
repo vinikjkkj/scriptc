@@ -358,9 +358,12 @@ __attribute__((constructor)) static void scr_poolstat_reg_string(void) {
  * rebuilt later hits in the owning table and misses in this one, so some
  * of the 4.27 million avoided allocations come back. Retention against
  * allocation count is exactly the trade this arm exists to price, and on
- * this machine retention is the objective. */
+ * this machine retention is the objective. THE DEFAULT IS ON since 2026-11-16: same-run CI A/B of weak against owning entries measured the
+ * retention at 4.6 MB of REST-history heap and 3-6 MB of peak RSS on redis, sqlite and memory, for +0.3..+0.7% Ir; SCR_STRING_INTERN_WEAK=0
+ * restores the owning table, and SCR_STRING_INTERN=0 (no table at all) is NOT a substitute: it loses the dedup between live strings, +47% peak RSS
+ * on the memory store and +49% on sqlite. */
 #ifndef SCR_STR_INTERN_WEAK
-#define SCR_STR_INTERN_WEAK 0
+#define SCR_STR_INTERN_WEAK 1
 #endif
 
 static ScrStr *scr_str_itab[SCR_STR_INTERN_SLOTS];
@@ -369,12 +372,24 @@ static ScrStr *scr_str_itab[SCR_STR_INTERN_SLOTS];
  * in a program that never made a single concat in the band. */
 static size_t scr_str_itab_used;
 
+/* The environment read of every on/off knob below lives in ONE cold out-of-line function: the call sites (release, concat, regrow, drain and the
+ * accessors, which the compiler inlines) keep a load and a test. With the getenv/strtol sequence repeated at each knob and each inlined copy,
+ * flipping the weak knob's DEFAULT changed the code of four functions and grew a hello-world's .text past the size-class tolerance. */
+/* 1 once the intern table is in use AND its entries are weak: the death, regrow and in-place-append paths test only this (a plain load), because an
+ * entry can exist only after scr_str_intern_on() ran, which publishes the knob here. Those paths never read the environment, so a program that never
+ * concatenates in the band links none of the knob's code. */
+static int scr_str_weak_live;
+static __attribute__((noinline, cold)) int scr_str_env_flag(const char *name, int dflt) {
+  const char *env = getenv(name);
+  return env != NULL ? (strtol(env, NULL, 10) != 0) : dflt;
+}
+
 static int scr_str_intern_on(void) {
   static int cached = -1;
   SCR_CS_ARM();
   if (cached < 0) {
-    const char *env = getenv("SCR_STRING_INTERN");
-    cached = env != NULL ? (strtol(env, NULL, 10) != 0) : (SCR_STR_INTERN != 0);
+    cached = scr_str_env_flag("SCR_STRING_INTERN", SCR_STR_INTERN != 0);
+    if (cached) scr_str_weak_live = scr_str_env_flag("SCR_STRING_INTERN_WEAK", SCR_STR_INTERN_WEAK != 0);
   }
   return cached;
 }
@@ -407,21 +422,15 @@ static unsigned scr_str_intern_ways(void) {
  * attributed to one of them rather than to "the rewrite". */
 static int scr_str_intern_admit(void) {
   static int cached = -1;
-  if (cached < 0) {
-    const char *env = getenv("SCR_STRING_INTERN_ADMIT");
-    cached = env != NULL ? (strtol(env, NULL, 10) != 0) : 1;
-  }
+  if (cached < 0) cached = scr_str_env_flag("SCR_STRING_INTERN_ADMIT", 1);
   return cached;
 }
 
 /* Weak entries on/off. Cached like every other knob here, so the branch is
- * a load and the shipping default is the historical table. */
+ * a load and the shipping default is the non-owning table. */
 static int scr_str_intern_weak(void) {
   static int cached = -1;
-  if (cached < 0) {
-    const char *env = getenv("SCR_STRING_INTERN_WEAK");
-    cached = env != NULL ? (strtol(env, NULL, 10) != 0) : (SCR_STR_INTERN_WEAK != 0);
-  }
+  if (cached < 0) cached = scr_str_env_flag("SCR_STRING_INTERN_WEAK", SCR_STR_INTERN_WEAK != 0);
   return cached;
 }
 
@@ -1218,7 +1227,7 @@ ScrStr *scr_str_regrow(ScrStr *s, size_t newcap) {
    * make that fact load-bearing. The entry is therefore dropped before the
    * realloc: one table probe on a path already doing a realloc, and the
    * fence means what it says again on both paths. */
-  if (scr_str_intern_weak()) scr_str_intern_forget(s);
+  if (scr_str_weak_live) scr_str_intern_forget(s);
 #ifdef SCR_RC_AUDIT
   if (s->rc != 1) {
     scr_trap("scriptc: scr_str_regrow on a shared string\n");
@@ -1268,7 +1277,7 @@ void scr_str_release(ScrStr *s) {
      * would then name a live block holding different bytes, and the next
      * lookup would memcmp against it and could hand the program a string
      * it never built. Not a leak: a wrong answer. */
-    if (scr_str_intern_weak()) scr_str_intern_forget(s);
+    if (scr_str_weak_live) scr_str_intern_forget(s);
     scr_sidx_purge(s); /* the address may be recycled by the next malloc */
 #ifdef SCR_STRCEN_ON
     scr_strcen_died(s, (long long)s->len, (long long)s->cap);
@@ -1327,7 +1336,7 @@ ScrStr *scr_str_concat(ScrStr *a, ScrStr *b) {
      * hashes the CURRENT bytes, looks in the wrong set, does not find it,
      * and leaves a dangling pointer behind. So the entry goes before the
      * mutation, while the old bytes are still there to hash. */
-    if (scr_str_intern_weak()) scr_str_intern_forget(a);
+    if (scr_str_weak_live) scr_str_intern_forget(a);
     memcpy(a->data + a->len, b->data, b->len);
     a->len = (uint32_t)newlen;
     a->data[newlen] = '\0';
