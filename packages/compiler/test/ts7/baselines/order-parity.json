@@ -28087,6 +28087,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25421-a-record-filled-by-assignment-and-returned-as-a-typed-shape-enumerates-in-fill-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/25421-a-record-filled-by-assignment-and-returned-as-a-typed-shape-enumerates-in-fill-order.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/25422-a-literal-spreading-members-its-shape-does-not-declare-enumerates-in-its-own-spelling.ts": {
    "order": [
     "<repo>/tests/corpus/25422-a-literal-spreading-members-its-shape-does-not-declare-enumerates-in-its-own-spelling.ts"
