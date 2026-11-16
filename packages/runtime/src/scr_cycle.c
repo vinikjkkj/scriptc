@@ -471,7 +471,7 @@ struct ScrCycChunk {
    * for EVERY chunk with free space at the end of EVERY collector pass; a chunk whose live count has not dropped since its last
    * sweep, and that carries no pending candidate page, cannot have gained a whole-free page, so it is skipped for two loads. */
   uint32_t swept_used;
-#ifdef SCR_PAGECEN_ON
+#if defined(SCR_PAGECEN_ON) || defined(SCR_CYCEN_CHUNKS)
   /* tests/perf/pagecensus's list of EVERY live chunk, and it exists because
    * the two lists above cannot answer the census's question. A chunk that is
    * neither current nor on its class's partial list is FULL — reachable from
@@ -528,7 +528,7 @@ static ScrCycChunk scr_cyc_ar_empty = {
     .gone = 0u,
     .cand = 0u,
     .swept_used = 0u,
-#ifdef SCR_PAGECEN_ON
+#if defined(SCR_PAGECEN_ON) || defined(SCR_CYCEN_CHUNKS)
     /* never on the census's all-chunk list: it is not a chunk. */
     .all_next = NULL,
     .all_prevp = NULL,
@@ -1404,8 +1404,59 @@ static void scr_pc_arm(void) {
 #else
 #define SCR_PC_ARM() ((void)0)
 #define SCR_PC_PASS() ((void)0)
+#ifdef SCR_CYCEN_CHUNKS
+/* tests/perf/cycensus: the all-chunk list WITHOUT the page census, for the exact arena counters (scr_cycen_arena_walk below). */
+static ScrCycChunk *scr_cyc_ar_all = NULL;
+#define SCR_PC_LINK(c)                                          \
+  do {                                                          \
+    (c)->all_next = scr_cyc_ar_all;                             \
+    (c)->all_prevp = &scr_cyc_ar_all;                           \
+    if ((c)->all_next != NULL)                                  \
+      (c)->all_next->all_prevp = &(c)->all_next;                \
+    scr_cyc_ar_all = (c);                                       \
+  } while (0)
+#define SCR_PC_UNLINK(c)                                        \
+  do {                                                          \
+    *(c)->all_prevp = (c)->all_next;                            \
+    if ((c)->all_next != NULL)                                  \
+      (c)->all_next->all_prevp = (c)->all_prevp;                \
+  } while (0)
+#else
 #define SCR_PC_LINK(c) ((void)0)
 #define SCR_PC_UNLINK(c) ((void)0)
+#endif
+#endif
+
+#ifdef SCR_CYCEN_CHUNKS
+/* EXACT arena counters at ONE instant (the caller is the census's seam probe). out[class][k], class = ScrCycChunk::blk (phys/8), k:
+ *  0 chunks  1 chunk bytes (64 KiB each, what malloc/the reservation handed over)  2 live bytes (used * stride)  3 free-list bytes (blocks on a chunk's list * stride)
+ *  4 page-returned bytes (popcount(gone) * 4096: handed back to the OS, not resident)  5 uncarved bytes (lim - bump: never carved)  6 partially-used chunks (0 < used < carved)
+ *  7 bytes of those partial chunks  8 stride  9 live blocks (sum of used)  10 free-list blocks  11 current-chunk count  12 header bytes (256 per chunk)
+ * Returns scr_cyc_ar_held (the arena's own byte counter). */
+long long scr_cycen_arena_walk(long long (*out)[13], int nclass) {
+  for (int i = 0; i < nclass; i++) for (int k = 0; k < 13; k++) out[i][k] = 0;
+  for (ScrCycChunk *c = scr_cyc_ar_all; c != NULL; c = c->all_next) {
+    int i = (int)c->blk;
+    if (i < 0 || i >= nclass) continue;
+    unsigned char *base = (unsigned char *)(void *)c;
+    long long carved = c->stride ? (long long)(c->bump - (base + SCR_CYC_ARENA_GRAN)) / (long long)c->stride : 0;
+    long long flen = 0;
+    for (void *b = c->freelist; b != NULL; flen++) { void *n; __builtin_memcpy(&n, b, sizeof n); b = n; }
+    out[i][0]++;
+    out[i][1] += (long long)SCR_CYC_ARENA_CHUNK;
+    out[i][2] += (long long)c->used * c->stride;
+    out[i][3] += flen * c->stride;
+    out[i][4] += (long long)__builtin_popcount((unsigned)c->gone) * 4096;
+    out[i][5] += (long long)(c->lim - c->bump);
+    if (c->used > 0 && (long long)c->used < carved) { out[i][6]++; out[i][7] += (long long)SCR_CYC_ARENA_CHUNK; }
+    out[i][8] = c->stride;
+    out[i][9] += c->used;
+    out[i][10] += flen;
+    if (scr_cyc_ar_cur[c->blk] == c) out[i][11]++;
+    out[i][12] += (long long)SCR_CYC_ARENA_GRAN;
+  }
+  return (long long)scr_cyc_ar_held;
+}
 #endif
 
 /* -- the lifetime census hook --------------------------------------------
@@ -2116,6 +2167,9 @@ void (*scr_cyc_idle_hook)(void) = NULL;
 void (*scr_cyc_idle_trim_hook)(void) = NULL;
 
 void scr_collect_cycles_idle(void) {
+#ifdef SCR_CYCEN_ON
+  scr_cycen_seam(); /* census probe: before/after dump around a forced collection at the quiescent seam */
+#endif
   /* Runs FIRST, before the pace gate below can return early. This is not a
    * collection: pacing it by the cycle-root count would tie "does memory
    * come back" to an unrelated threshold, and a burst that leaves sparse
@@ -2340,6 +2394,9 @@ static void scr_collect_white(void *obj) {
 
 void scr_collect_cycles(void) {
   if (scr_collecting || scr_nroots == 0) return;
+#ifdef SCR_CYCEN_ON
+  scr_cycen_seam_pass(); /* census probe at the START of a pass (the live set at its largest), no forced collection */
+#endif
   scr_collecting = true;
   SCR_CS_PASS_BEGIN();
 

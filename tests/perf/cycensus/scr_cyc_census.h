@@ -52,6 +52,11 @@
  */
 #ifndef SCR_CYC_CENSUS_H
 #define SCR_CYC_CENSUS_H
+#ifdef SCR_CYCEN_RAWSTR
+/* LAB (holdraw): the string census header's _Exit chain names scr_prof_report, which only the profiler header defines; a weak no-op keeps the chain linkable */
+void scr_prof_report(void);
+__attribute__((weak)) void scr_prof_report(void) {}
+#endif
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -122,8 +127,21 @@ typedef struct {
   unsigned row;
   unsigned phys;
   unsigned size;
+  unsigned site; /* dyn nodes only: index into scr_cycen_sites (0 = none) */
 } ScrCyCenPtr;
 
+/* ALLOCATION SITES of dyn nodes. The census is -include'd before scr_runtime.h, so it cannot name ScrDyn; scr_json.c calls these. A site is the
+ * first SCR_CYCEN_SITE_DEPTH return addresses up the frame-pointer chain from scr_dyn_alloc (build with -fno-omit-frame-pointer); the report
+ * prints the raw addresses and the reader picks the first frame that is not a scr_* runtime function (the EMITTING function). */
+#define SCR_CYCEN_CHUNKS 1
+#define SCR_CYCEN_SITE_DEPTH 5 /* 6 frames made ~300k distinct chains on the redis bench, saturated the table and stalled every later dyn alloc (CI 43630870607) */
+#ifndef SCR_CYCEN_SITES
+#define SCR_CYCEN_SITES 262144u
+#endif
+SCR_CYCEN_SHARED unsigned long long scr_cycen_sites[SCR_CYCEN_SITES][SCR_CYCEN_SITE_DEPTH];
+SCR_CYCEN_SHARED unsigned scr_cycen_nsites = 1; /* slot 0 = none */
+SCR_CYCEN_SHARED unsigned scr_cycen_site_pending = 0;
+SCR_CYCEN_SHARED long long scr_cycen_site_lost = 0;
 SCR_CYCEN_SHARED ScrCyCenRow scr_cycen_tbl[SCR_CYCEN_SLOTS] = {{0}};
 SCR_CYCEN_SHARED ScrCyCenPtr scr_cycen_ptbl[SCR_CYCEN_PSLOTS] = {{0}};
 /* The occupied rows in insertion order, so a snapshot is O(kinds) and can
@@ -210,6 +228,44 @@ SCR_CYCEN_FN unsigned scr_cycen_phash(const void *p) {
   return (unsigned)(x & (SCR_CYCEN_PSLOTS - 1u));
 }
 
+__attribute__((noinline)) SCR_CYCEN_FN unsigned scr_cycen_site_capture(void) {
+  unsigned long long r[SCR_CYCEN_SITE_DEPTH];
+  int n = 0;
+  void **fp = (void **)__builtin_frame_address(0);
+  for (int i = 0; i < SCR_CYCEN_SITE_DEPTH; i++) r[i] = 0;
+  while (n < SCR_CYCEN_SITE_DEPTH && fp != NULL && ((unsigned long long)(size_t)fp & 7u) == 0) {
+    void **nfp = (void **)fp[0];
+    r[n++] = (unsigned long long)(size_t)fp[1];
+    if (nfp == NULL || nfp <= fp || (char *)nfp - (char *)fp > (1 << 20)) break;
+    fp = nfp;
+  }
+  unsigned long long h = 1469598103934665603ULL;
+  for (int i = 0; i < SCR_CYCEN_SITE_DEPTH; i++) { h ^= r[i]; h *= 1099511628211ULL; }
+  unsigned mask = SCR_CYCEN_SITES - 1u, j = (unsigned)(h >> 20) & mask;
+  for (unsigned t = 0; t < 32u; t++, j = (j + 1u) & mask) { /* bounded probe: a full table must cost O(1) per allocation, not O(table) */
+    if (j == 0) continue;
+    if (scr_cycen_sites[j][0] == 0) {
+      for (int i = 0; i < SCR_CYCEN_SITE_DEPTH; i++) scr_cycen_sites[j][i] = r[i];
+      scr_cycen_nsites++;
+      return j;
+    }
+    int same = 1;
+    for (int i = 0; i < SCR_CYCEN_SITE_DEPTH; i++) if (scr_cycen_sites[j][i] != r[i]) { same = 0; break; }
+    if (same) return j;
+  }
+  scr_cycen_site_lost++;
+  return 0;
+}
+SCR_CYCEN_FN void scr_cycen_resite(const void *hdr) {
+  unsigned site = scr_cycen_site_capture();
+  unsigned mask = SCR_CYCEN_PSLOTS - 1u, h = scr_cycen_phash(hdr);
+  for (unsigned i = 0; i < SCR_CYCEN_PSLOTS; i++) {
+    unsigned j = (h + i) & mask;
+    if (scr_cycen_ptbl[j].p == NULL) return;
+    if (scr_cycen_ptbl[j].p == hdr) { scr_cycen_ptbl[j].site = site; return; }
+  }
+}
+
 SCR_CYCEN_FN unsigned scr_cycen_row_of(const void *key) {
   unsigned h = scr_cycen_khash(key);
   for (unsigned i = 0; i < SCR_CYCEN_SLOTS; i++) {
@@ -285,6 +341,8 @@ SCR_CYCEN_FN void scr_cycen_note_alloc(const void *obj, size_t phys, size_t size
         scr_cycen_ptbl[j].row = ri;
         scr_cycen_ptbl[j].phys = (unsigned)phys;
         scr_cycen_ptbl[j].size = (unsigned)size;
+        scr_cycen_ptbl[j].site = scr_cycen_site_pending != 0 ? scr_cycen_site_pending : scr_cycen_site_capture(); /* every cyc object gets its allocation site, not only dyn nodes */
+        scr_cycen_site_pending = 0;
         scr_cycen_ptr_live++;
         if (scr_cycen_ptr_live > scr_cycen_ptr_live_peak)
           scr_cycen_ptr_live_peak = scr_cycen_ptr_live;
@@ -379,6 +437,7 @@ SCR_CYCEN_FN void scr_cycen_note_free(const void *obj, int pooled, size_t cyc_li
   scr_cycen_ptbl[hole].row = 0;
   scr_cycen_ptbl[hole].phys = 0;
   scr_cycen_ptbl[hole].size = 0;
+  scr_cycen_ptbl[hole].site = 0;
   for (unsigned k = (hole + 1u) & mask; scr_cycen_ptbl[k].p != NULL; k = (k + 1u) & mask) {
     unsigned ideal = scr_cycen_phash(scr_cycen_ptbl[k].p);
     int blocked = (hole <= k) ? (ideal > hole && ideal <= k) : (ideal > hole || ideal <= k);
@@ -388,6 +447,7 @@ SCR_CYCEN_FN void scr_cycen_note_free(const void *obj, int pooled, size_t cyc_li
     scr_cycen_ptbl[k].row = 0;
     scr_cycen_ptbl[k].phys = 0;
     scr_cycen_ptbl[k].size = 0;
+    scr_cycen_ptbl[k].site = 0;
     hole = k;
   }
 }
@@ -443,6 +503,407 @@ SCR_CYCEN_FN void scr_cycen_note_unpark(const void *obj, long long side) {
   scr_cycen_park_delta(obj, side, -1);
 }
 
+
+/* ── SEAM PROBE: live objects per kind before vs after a FORCED collection ──
+ * scr_cycen_seam() is called from scr_collect_cycles_idle (the between-turns
+ * seam). When the live bytes have grown >= SCR_CYCEN_PROBE_STEP percent past the last probe (and are
+ * above SCR_CYCEN_PROBE_MIN), it copies every row's live_n/live_phys ("before"), runs scr_collect_cycles() regardless of
+ * pace, and copies them again ("after"). The probe with the largest "before" is kept whole and written by the report
+ * (CYCEN-PROBE-ROW). Every probe is also summarised (CYCEN-PROBE). A forced collection moves timing after the seam: RSS
+ * figures must come from an uninstrumented run. */
+#ifndef SCR_CYCEN_PROBE_STEP
+#define SCR_CYCEN_PROBE_STEP 2
+#endif
+#ifndef SCR_CYCEN_PROBE_MIN
+#define SCR_CYCEN_PROBE_MIN (1 << 20)
+#endif
+#ifndef SCR_CYCEN_PROBE_MAX
+#define SCR_CYCEN_PROBE_MAX 1024
+#endif
+SCR_CYCEN_SHARED long long scr_cycen_pr_last = 0, scr_cycen_pr_n = 0;
+SCR_CYCEN_SHARED long long scr_cycen_pr_sum[SCR_CYCEN_PROBE_MAX][6];
+SCR_CYCEN_SHARED long long scr_cycen_pr_best = -1, scr_cycen_pr_best_before = -1;
+SCR_CYCEN_SHARED long long scr_cycen_pr_rows = 0;
+SCR_CYCEN_SHARED long long scr_cycen_pr_bn[SCR_CYCEN_SLOTS], scr_cycen_pr_bp[SCR_CYCEN_SLOTS];
+SCR_CYCEN_SHARED long long scr_cycen_pr_an[SCR_CYCEN_SLOTS], scr_cycen_pr_ap[SCR_CYCEN_SLOTS];
+SCR_CYCEN_SHARED long long scr_cycen_pr_hn[SCR_CYCEN_SLOTS], scr_cycen_pr_hp[SCR_CYCEN_SLOTS];
+SCR_CYCEN_SHARED long long scr_cycen_pr_hanc[SCR_CYCEN_SLOTS], scr_cycen_pr_hsave_rows = 0;
+SCR_CYCEN_SHARED int scr_cycen_pr_busy = 0;
+
+/* ── exact arena counters + dyn-node allocation sites, at the probe instant ── */
+#define SCR_CYCEN_NCLASS 40
+long long scr_cycen_arena_walk(long long (*out)[13], int nclass);
+const void *scr_cycen_dyn_key(void);
+int scr_cycen_dyn_peek(const void *hdr, unsigned *len);
+int scr_cycen_dyn_peek2(const void *hdr, unsigned *len, unsigned *cap, unsigned long long *ext);
+int scr_cycen_dyn_side(const void *hdr, const void **buf, unsigned long long *bytes);
+int scr_cycen_arr_side(const void *key, const void *hdr, const void **buf, unsigned long long *bytes);
+int scr_cycen_map_side(const void *key, const void *hdr, const void **buf, unsigned long long *bytes);
+int scr_cycen_dyn_peek3(const void *hdr, unsigned *eks, char *key, unsigned long long *rc, unsigned long long *e0src);
+/* ALL cyc objects by (allocation site, kind): count, physical bytes (header included), and the side-buffer bytes of dyn ARR/OBJ nodes */
+#define SCR_CYCEN_AKSLOTS 131072u
+typedef struct { unsigned long long key; const void *kind; long long n, phys, ext; } ScrCyCenAK; /* key = site<<13 | row, +1 */
+SCR_CYCEN_SHARED ScrCyCenAK scr_cycen_ak[SCR_CYCEN_AKSLOTS], scr_cycen_ak_best[SCR_CYCEN_AKSLOTS];
+SCR_CYCEN_SHARED long long scr_cycen_ak_phys = 0, scr_cycen_ak_phys_best = 0;
+long long scr_cycen_dyn_free_count(void);
+int scr_cycen_dyn_peek_str(const void *hdr, unsigned *len, unsigned *cap, int *imm, unsigned long long *rc, unsigned long long *hash, const char **data);
+/* per-site STR node census: key = site, +1; n nodes, nimm nodes whose string is an immortal literal, sumlen/sumphys of the NON-immortal strings, nshared those with rc > 1, ndistinct distinct contents */
+#define SCR_CYCEN_STRSLOTS 8192u
+typedef struct { unsigned key; long long n, nimm, sumlen, sumphys, nshared, ndistinct; } ScrCyCenStr;
+SCR_CYCEN_SHARED ScrCyCenStr scr_cycen_str[SCR_CYCEN_STRSLOTS], scr_cycen_str_best[SCR_CYCEN_STRSLOTS];
+/* per site: node count by exact string length (64 = 64 or more) and the first SCR_CYCEN_NSAMP distinct heap contents (length + the first 47 bytes) */
+#define SCR_CYCEN_NSAMP 24
+typedef struct { unsigned lenhist[65]; unsigned nsamp; struct { unsigned len; char txt[48]; } samp[SCR_CYCEN_NSAMP]; } ScrCyCenStrX;
+SCR_CYCEN_SHARED ScrCyCenStrX scr_cycen_strx[SCR_CYCEN_STRSLOTS], scr_cycen_strx_best[SCR_CYCEN_STRSLOTS];
+#define SCR_CYCEN_DSET (1u << 21)
+SCR_CYCEN_SHARED unsigned long long scr_cycen_dset[SCR_CYCEN_DSET];
+SCR_CYCEN_SHARED long long scr_cycen_str_total = 0, scr_cycen_str_total_best = 0, scr_cycen_str_distinct = 0, scr_cycen_str_distinct_best = 0;
+SCR_CYCEN_SHARED long long scr_cycen_ar_cur[SCR_CYCEN_NCLASS][13], scr_cycen_ar_best[SCR_CYCEN_NCLASS][13];
+SCR_CYCEN_SHARED long long scr_cycen_ar_held_cur = 0, scr_cycen_ar_held_best = 0;
+/* census-side counters at the same instant, for the cross-check against the arena's own `used` sum (blocks <= 256 B are the arena's) */
+SCR_CYCEN_SHARED long long scr_cycen_x_small_n = 0, scr_cycen_x_small_phys = 0, scr_cycen_x_big_n = 0, scr_cycen_x_big_phys = 0;
+SCR_CYCEN_SHARED long long scr_cycen_x_best[4], scr_cycen_x_park_best[3], scr_cycen_x_dynfree_best = 0;
+/* dyn aggregates: (site,kind) -> n,bytes ; (kind,len bucket) -> n,bytes */
+#define SCR_CYCEN_SKSLOTS 32768u
+typedef struct { unsigned key; long long n, bytes; } ScrCyCenSK; /* key = site<<5 | kind, +1 so 0 = empty */
+SCR_CYCEN_SHARED ScrCyCenSK scr_cycen_sk[SCR_CYCEN_SKSLOTS], scr_cycen_sk_best[SCR_CYCEN_SKSLOTS];
+#define SCR_CYCEN_LB 48
+SCR_CYCEN_SHARED long long scr_cycen_shape[32][SCR_CYCEN_LB][2], scr_cycen_shape_best[32][SCR_CYCEN_LB][2];
+SCR_CYCEN_SHARED long long scr_cycen_dyn_total_n = 0, scr_cycen_dyn_total_b = 0, scr_cycen_dyn_total_best_n = 0, scr_cycen_dyn_total_best_b = 0;
+
+SCR_CYCEN_FN int scr_cycen_lbucket(unsigned len) {
+  if (len < 16) return (int)len;
+  int b = 0; unsigned v = len;
+  while (v > 1) { v >>= 1; b++; }
+  return 16 + (b - 4) * 2 + ((len >> (b - 1)) & 1u); /* two rows per power of two from 16 */
+}
+
+SCR_CYCEN_FN void scr_cycen_sk_add(unsigned site, int kind, long long bytes) {
+  unsigned key = ((site << 5) | (unsigned)(kind & 31)) + 1u, mask = SCR_CYCEN_SKSLOTS - 1u, j = (key * 2654435761u >> 7) & mask;
+  for (unsigned t = 0; t < SCR_CYCEN_SKSLOTS; t++, j = (j + 1u) & mask) {
+    if (scr_cycen_sk[j].key == 0) scr_cycen_sk[j].key = key;
+    if (scr_cycen_sk[j].key == key) { scr_cycen_sk[j].n++; scr_cycen_sk[j].bytes += bytes; return; }
+  }
+}
+
+/* LAB: per-site SHAPE table. One row per (site, kind, len, cap, first-item kinds): count, side bytes, summed node rc, strings behind a first-item STR that are shared, sample keys. */
+#define SCR_CYCEN_SHSLOTS 65536u
+typedef struct { unsigned long long key; unsigned site, kind, len, cap, eks; long long n, ext, rcsum, e0shared; char keys[24]; } ScrCyCenSh;
+SCR_CYCEN_SHARED ScrCyCenSh scr_cycen_sh[SCR_CYCEN_SHSLOTS], scr_cycen_sh_best[SCR_CYCEN_SHSLOTS];
+SCR_CYCEN_FN void scr_cycen_sh_add(unsigned site, int kind, unsigned len, unsigned cap, unsigned eks, unsigned long long ext, unsigned long long rc, unsigned long long e0src, const char *keys) {
+  unsigned long long key = (((unsigned long long)site * 1000003ULL + (unsigned)kind) * 1000003ULL + len) * 1000003ULL + cap;
+  key = (key * 1000003ULL + eks) | 1ULL;
+  unsigned mask = SCR_CYCEN_SHSLOTS - 1u, j = (unsigned)((key * 0x9E3779B97F4A7C15ULL) >> 40) & mask;
+  for (unsigned t = 0; t < SCR_CYCEN_SHSLOTS; t++, j = (j + 1u) & mask) {
+    if (scr_cycen_sh[j].key == 0) { scr_cycen_sh[j].n = scr_cycen_sh[j].ext = scr_cycen_sh[j].rcsum = scr_cycen_sh[j].e0shared = 0; scr_cycen_sh[j].key = key; scr_cycen_sh[j].site = site; scr_cycen_sh[j].kind = (unsigned)kind; scr_cycen_sh[j].len = len; scr_cycen_sh[j].cap = cap; scr_cycen_sh[j].eks = eks; for (int q = 0; q < 23; q++) scr_cycen_sh[j].keys[q] = keys[q]; scr_cycen_sh[j].keys[23] = 0; }
+    if (scr_cycen_sh[j].key != key) continue;
+    scr_cycen_sh[j].n++; scr_cycen_sh[j].ext += (long long)ext; scr_cycen_sh[j].rcsum += (long long)(rc == (unsigned long long)-1 ? 0 : rc); if (e0src > 1) scr_cycen_sh[j].e0shared++;
+    return;
+  }
+}
+
+/* LAB: WHO HOLDS EACH dyn ARR. A conservative word scan: the set of every live ARR node, then every word of every live cyc object's payload and of every
+ * dyn ARR/OBJ side buffer, tag bits stripped, looked up in it. A hit is a holder (target site, holder kind = its free function, holder site, via
+ * payload or side buffer). A target's refcount minus the holders found is the count a heap object does not explain (a stack temp, a global, a
+ * pending-exception cell, a promise reaction list or a hash entry). */
+#ifndef SCR_CYCEN_HSET
+#define SCR_CYCEN_HSET (1u << 21)
+#endif /* 2M targets: the sqlite send_group peak holds ~543k dyn STR nodes */
+#ifndef SCR_CYCEN_HOLD_CHAIN
+#define SCR_CYCEN_HOLD_CHAIN 0
+#endif
+#ifndef SCR_CYCEN_HOLD_KIND
+#define SCR_CYCEN_HOLD_KIND 4 /* the dyn kind whose nodes are the targets: 4 = ARR (the original scan), 3 = STR */
+#endif
+#ifndef SCR_CYCEN_RSTRIDE
+#define SCR_CYCEN_RSTRIDE 300u /* LAB (holdraw): sample every Nth live heap string */
+#endif
+#ifndef SCR_CYCEN_RMINLEN
+#define SCR_CYCEN_RMINLEN 8u /* ... of at least this length */
+#endif
+#define SCR_CYCEN_NSN 200u
+#define SCR_CYCEN_SNSTRIDE 2500u
+#define SCR_CYCEN_HOLDSLOTS 16384u
+typedef struct { unsigned tsite; const void *hkind; unsigned hsite; unsigned via; long long n; } ScrCyCenHold;
+typedef struct { unsigned tsite; long long ntargets, rcsum, found, unexplained, norefs; } ScrCyCenHoldT;
+SCR_CYCEN_SHARED unsigned long long scr_cycen_hs_key[SCR_CYCEN_HSET];
+SCR_CYCEN_SHARED unsigned scr_cycen_hs_site[SCR_CYCEN_HSET], scr_cycen_hs_found[SCR_CYCEN_HSET];
+SCR_CYCEN_SHARED unsigned long long scr_cycen_hs_rc[SCR_CYCEN_HSET];
+/* the FIRST holder found for each target, for the payload samples */
+SCR_CYCEN_SHARED const void *scr_cycen_hs_hk[SCR_CYCEN_HSET];
+SCR_CYCEN_SHARED unsigned scr_cycen_hs_hsite[SCR_CYCEN_HSET], scr_cycen_hs_via[SCR_CYCEN_HSET];
+/* CHAIN mode (-DSCR_CYCEN_HOLD_CHAIN=1): every live cyc object is in the set, with its own kind (free function) and the ADDRESS of its first holder, so a sampled STR node can be followed up through its holders to a non-dyn object */
+SCR_CYCEN_SHARED const void *scr_cycen_hs_selfk[SCR_CYCEN_HSET], *scr_cycen_hs_hp[SCR_CYCEN_HSET];
+/* ~200 sampled targets (every SCR_CYCEN_SNSTRIDE-th STR target): the node's site and reference count, the string's reference count and length, its first 40 bytes, and the first holder */
+#define SCR_CYCEN_CHAINMAX 12
+typedef struct { unsigned tsite, len, via, hsite, slot, found, nchain; unsigned long long noderc, strrc; const void *hkind; char txt[41]; const void *chk[SCR_CYCEN_CHAINMAX]; unsigned chs[SCR_CYCEN_CHAINMAX]; } ScrCyCenSN;
+SCR_CYCEN_SHARED ScrCyCenSN scr_cycen_sn[SCR_CYCEN_NSN], scr_cycen_sn_best[SCR_CYCEN_NSN];
+SCR_CYCEN_SHARED unsigned scr_cycen_nsn, scr_cycen_nsn_best;
+SCR_CYCEN_SHARED ScrCyCenHold scr_cycen_hold[SCR_CYCEN_HOLDSLOTS], scr_cycen_hold_best[SCR_CYCEN_HOLDSLOTS];
+SCR_CYCEN_SHARED ScrCyCenHoldT scr_cycen_holdt[SCR_CYCEN_HOLDSLOTS], scr_cycen_holdt_best[SCR_CYCEN_HOLDSLOTS];
+SCR_CYCEN_FN unsigned scr_cycen_hs_find(unsigned long long k, int insert) {
+  unsigned m = SCR_CYCEN_HSET - 1u, j = (unsigned)((k * 0x9E3779B97F4A7C15ULL) >> 40) & m;
+  for (unsigned t = 0; t < SCR_CYCEN_HSET; t++, j = (j + 1u) & m) {
+    if (scr_cycen_hs_key[j] == k) return j;
+    if (scr_cycen_hs_key[j] == 0) { if (insert) { scr_cycen_hs_key[j] = k; return j; } return (unsigned)-1; }
+  }
+  return (unsigned)-1;
+}
+SCR_CYCEN_FN void scr_cycen_hold_add(unsigned tsite, const void *hkind, unsigned hsite, unsigned via) {
+  unsigned long long k = (((unsigned long long)tsite * 1000003ULL + (unsigned long long)(size_t)hkind) * 1000003ULL + hsite) * 3ULL + via + 1ULL;
+  unsigned m = SCR_CYCEN_HOLDSLOTS - 1u, j = (unsigned)((k * 0x9E3779B97F4A7C15ULL) >> 40) & m;
+  for (unsigned t = 0; t < SCR_CYCEN_HOLDSLOTS; t++, j = (j + 1u) & m) {
+    ScrCyCenHold *h = &scr_cycen_hold[j];
+    if (h->n == 0) { h->tsite = tsite; h->hkind = hkind; h->hsite = hsite; h->via = via; h->n = 1; return; }
+    if (h->tsite == tsite && h->hkind == hkind && h->hsite == hsite && h->via == via) { h->n++; return; }
+  }
+}
+SCR_CYCEN_FN void scr_cycen_scan_words(const void *base, unsigned long long bytes, unsigned hsite, const void *hkind, unsigned via, const void *haddr) {
+  const unsigned long long *w = (const unsigned long long *)base;
+  for (unsigned long long i = 0; i < bytes / 8; i++) {
+    unsigned long long c = w[i] & 0x0000FFFFFFFFFFF8ULL;
+    if (c < 4096ULL) continue;
+    unsigned j = scr_cycen_hs_find(c, 0);
+    if (j == (unsigned)-1) continue;
+    if (scr_cycen_hs_found[j] == 0) { scr_cycen_hs_hk[j] = hkind; scr_cycen_hs_hsite[j] = hsite; scr_cycen_hs_via[j] = via; scr_cycen_hs_hp[j] = haddr; }
+    scr_cycen_hs_found[j]++;
+    scr_cycen_hold_add(scr_cycen_hs_site[j], hkind, hsite, via);
+  }
+}
+SCR_CYCEN_FN void scr_cycen_holders(void) {
+  const void *dk = scr_cycen_dyn_key();
+  for (unsigned i = 0; i < SCR_CYCEN_HSET; i++) { scr_cycen_hs_key[i] = 0; scr_cycen_hs_found[i] = 0; }
+  scr_cycen_nsn = 0;
+  for (unsigned i = 0; i < SCR_CYCEN_HOLDSLOTS; i++) { scr_cycen_hold[i].n = 0; scr_cycen_holdt[i].ntargets = 0; }
+  for (unsigned i = 0; i < SCR_CYCEN_PSLOTS; i++) {
+    ScrCyCenPtr *e = &scr_cycen_ptbl[i];
+    if (e->p == NULL || e->row >= SCR_CYCEN_SLOTS) continue;
+    unsigned eks = 0; char kb[24]; unsigned long long rc = 0, e0 = 0;
+    int isdyn = scr_cycen_tbl[e->row].key == dk;
+#if SCR_CYCEN_HOLD_CHAIN
+    int istarget = 1; /* every live cyc object is a node of the holder graph */
+    if (isdyn) (void)scr_cycen_dyn_peek3(e->p, &eks, kb, &rc, &e0);
+#else
+    if (!isdyn) continue;
+    int istarget = scr_cycen_dyn_peek3(e->p, &eks, kb, &rc, &e0) == SCR_CYCEN_HOLD_KIND;
+    if (!istarget) continue;
+#endif
+    unsigned j = scr_cycen_hs_find((unsigned long long)(size_t)((const char *)e->p + scr_cycen_hdr_bytes), 1);
+    if (j != (unsigned)-1) {
+      scr_cycen_hs_site[j] = e->site; scr_cycen_hs_rc[j] = rc == (unsigned long long)-1 ? 0 : rc;
+      scr_cycen_hs_hk[j] = NULL; scr_cycen_hs_hsite[j] = 0; scr_cycen_hs_via[j] = 0; scr_cycen_hs_hp[j] = NULL; scr_cycen_hs_selfk[j] = scr_cycen_tbl[e->row].key;
+#if SCR_CYCEN_HOLD_KIND == 3 && !defined(SCR_CYCEN_RAWSTR)
+      if (isdyn) { static unsigned long long ordinal; if (i == 0) ordinal = 0;
+        if (((ordinal++) % SCR_CYCEN_SNSTRIDE) == 0 && scr_cycen_nsn < SCR_CYCEN_NSN) {
+          unsigned slen = 0, scap = 0; int imm = 0; unsigned long long src = 0, hh = 0; const char *sdata = NULL;
+          if (scr_cycen_dyn_peek_str(e->p, &slen, &scap, &imm, &src, &hh, &sdata)) {
+            ScrCyCenSN *s = &scr_cycen_sn[scr_cycen_nsn++];
+            s->tsite = e->site; s->len = slen; s->slot = j; s->noderc = rc; s->strrc = src;
+            unsigned c = slen < 40u ? slen : 40u;
+            for (unsigned q = 0; q < c; q++) { char ch = sdata[q]; s->txt[q] = (ch >= 32 && ch < 127 && ch != '|') ? ch : '.'; }
+            s->txt[c] = 0;
+          }
+        } }
+#endif
+    }
+  }
+#ifdef SCR_CYCEN_RAWSTR
+  /* LAB (holdraw), never lands: targets are the live HEAP STRINGS of the string census (scr_str_census.h must be included BEFORE this header). A sample
+   * is every SCR_CYCEN_RSTRIDE-th live string with a non-trivial length; the scan below then finds its holders, and chain mode follows them up.
+   * ScrStr layout (the census's own LAYOUT line): rc u32 @0, len u32 @4, cap u32 @8, data @12. */
+  { unsigned long long ord = 0;
+    for (unsigned ti = 0; ti < SCR_STRCEN_PSLOTS && scr_cycen_nsn < SCR_CYCEN_NSN; ti++) {
+      const unsigned char *sp = (const unsigned char *)scr_strcen_ptbl[ti];
+      if (sp == NULL) continue;
+      unsigned srcn = *(const unsigned *)(sp + 0), slen2 = *(const unsigned *)(sp + 4);
+      if (slen2 < SCR_CYCEN_RMINLEN) continue;
+      if ((ord++ % SCR_CYCEN_RSTRIDE) != 0) continue;
+      unsigned j = scr_cycen_hs_find((unsigned long long)(size_t)sp, 1);
+      if (j == (unsigned)-1) continue;
+      scr_cycen_hs_site[j] = 0; scr_cycen_hs_rc[j] = srcn; scr_cycen_hs_hk[j] = NULL; scr_cycen_hs_hsite[j] = 0; scr_cycen_hs_via[j] = 0; scr_cycen_hs_hp[j] = NULL; scr_cycen_hs_selfk[j] = NULL;
+      ScrCyCenSN *s = &scr_cycen_sn[scr_cycen_nsn++];
+      s->tsite = 0; s->len = slen2; s->slot = j; s->noderc = srcn; s->strrc = srcn;
+      unsigned c = slen2 < 40u ? slen2 : 40u;
+      for (unsigned q = 0; q < c; q++) { char ch = (char)sp[12 + q]; s->txt[q] = (ch >= 32 && ch < 127 && ch != '|') ? ch : '.'; }
+      s->txt[c] = 0;
+    } }
+#endif
+  for (unsigned i = 0; i < SCR_CYCEN_PSLOTS; i++) {
+    ScrCyCenPtr *e = &scr_cycen_ptbl[i];
+    if (e->p == NULL) continue;
+    const void *hk = e->row < SCR_CYCEN_SLOTS ? scr_cycen_tbl[e->row].key : NULL;
+    scr_cycen_scan_words((const char *)e->p + scr_cycen_hdr_bytes, e->size, e->site, hk, 0, (const char *)e->p + scr_cycen_hdr_bytes);
+    if (e->row < SCR_CYCEN_SLOTS && scr_cycen_tbl[e->row].key == dk) {
+      const void *sb = NULL; unsigned long long sbytes = 0;
+      (void)scr_cycen_dyn_side(e->p, &sb, &sbytes);
+      if (sb != NULL) scr_cycen_scan_words(sb, sbytes, e->site, hk, 1, (const char *)e->p + scr_cycen_hdr_bytes);
+    }
+#if SCR_CYCEN_HOLD_CHAIN
+    else if (e->row < SCR_CYCEN_SLOTS) {
+      const void *sb2 = NULL; unsigned long long sbytes2 = 0;
+      if (scr_cycen_arr_side(hk, e->p, &sb2, &sbytes2) || scr_cycen_map_side(hk, e->p, &sb2, &sbytes2)) {
+        if (sb2 != NULL) scr_cycen_scan_words(sb2, sbytes2, e->site, hk, 1, (const char *)e->p + scr_cycen_hdr_bytes);
+      }
+    }
+#endif
+  }
+  for (unsigned q = 0; q < scr_cycen_nsn; q++) {
+    ScrCyCenSN *s = &scr_cycen_sn[q];
+    s->found = scr_cycen_hs_found[s->slot]; s->hkind = scr_cycen_hs_hk[s->slot]; s->hsite = scr_cycen_hs_hsite[s->slot]; s->via = scr_cycen_hs_via[s->slot];
+    s->nchain = 0;
+#if SCR_CYCEN_HOLD_CHAIN
+    { unsigned slot = s->slot;
+      for (unsigned lv = 0; lv < SCR_CYCEN_CHAINMAX; lv++) {
+        const void *h = scr_cycen_hs_hp[slot]; if (h == NULL) break;
+        unsigned hj = scr_cycen_hs_find((unsigned long long)(size_t)h, 0); if (hj == (unsigned)-1) break;
+        s->chk[s->nchain] = scr_cycen_hs_selfk[hj]; s->chs[s->nchain] = scr_cycen_hs_site[hj]; s->nchain++; slot = hj;
+      } }
+#endif
+  }
+  for (unsigned i = 0; i < SCR_CYCEN_HSET; i++) {
+    if (scr_cycen_hs_key[i] == 0) continue;
+    unsigned ts = scr_cycen_hs_site[i];
+    unsigned m = SCR_CYCEN_HOLDSLOTS - 1u, j = (ts * 2654435761u >> 7) & m;
+    for (unsigned t = 0; t < SCR_CYCEN_HOLDSLOTS; t++, j = (j + 1u) & m) {
+      ScrCyCenHoldT *h = &scr_cycen_holdt[j];
+      if (h->ntargets == 0) { h->tsite = ts; h->rcsum = h->found = h->unexplained = h->norefs = 0; }
+      else if (h->tsite != ts) continue;
+      h->ntargets++; h->rcsum += (long long)scr_cycen_hs_rc[i]; h->found += scr_cycen_hs_found[i];
+      if (scr_cycen_hs_rc[i] > scr_cycen_hs_found[i]) h->unexplained += (long long)(scr_cycen_hs_rc[i] - scr_cycen_hs_found[i]);
+      if (scr_cycen_hs_found[i] == 0) h->norefs++;
+      break;
+    }
+  }
+}
+
+/* One pass over the pointer table: the census's own view of the live population, aggregated. */
+SCR_CYCEN_FN void scr_cycen_x_aggregate(void) {
+  const void *dk = scr_cycen_dyn_key();
+  scr_cycen_x_small_n = scr_cycen_x_small_phys = scr_cycen_x_big_n = scr_cycen_x_big_phys = 0;
+  scr_cycen_dyn_total_n = scr_cycen_dyn_total_b = 0;
+  for (unsigned i = 0; i < SCR_CYCEN_SKSLOTS; i++) { scr_cycen_sk[i].key = 0; scr_cycen_sk[i].n = 0; scr_cycen_sk[i].bytes = 0; }
+  for (unsigned i = 0; i < SCR_CYCEN_SHSLOTS; i++) scr_cycen_sh[i].key = 0;
+  for (int k = 0; k < 32; k++) for (int b = 0; b < SCR_CYCEN_LB; b++) scr_cycen_shape[k][b][0] = scr_cycen_shape[k][b][1] = 0;
+  for (unsigned i = 0; i < SCR_CYCEN_STRSLOTS; i++) { scr_cycen_str[i].key = 0; scr_cycen_str[i].n = scr_cycen_str[i].nimm = scr_cycen_str[i].sumlen = scr_cycen_str[i].sumphys = scr_cycen_str[i].nshared = scr_cycen_str[i].ndistinct = 0; }
+  for (unsigned i = 0; i < SCR_CYCEN_DSET; i++) scr_cycen_dset[i] = 0;
+  for (unsigned i = 0; i < SCR_CYCEN_STRSLOTS; i++) { for (int h = 0; h < 65; h++) scr_cycen_strx[i].lenhist[h] = 0; scr_cycen_strx[i].nsamp = 0; }
+  scr_cycen_str_total = scr_cycen_str_distinct = 0;
+  for (unsigned i = 0; i < SCR_CYCEN_AKSLOTS; i++) { scr_cycen_ak[i].key = 0; scr_cycen_ak[i].n = scr_cycen_ak[i].phys = scr_cycen_ak[i].ext = 0; }
+  scr_cycen_ak_phys = 0;
+  for (unsigned i = 0; i < SCR_CYCEN_PSLOTS; i++) {
+    ScrCyCenPtr *e = &scr_cycen_ptbl[i];
+    if (e->p == NULL) continue;
+    if (e->phys <= 256u) { scr_cycen_x_small_n++; scr_cycen_x_small_phys += e->phys; }
+    else { scr_cycen_x_big_n++; scr_cycen_x_big_phys += e->phys; }
+    {
+      unsigned long long akey = (((unsigned long long)e->site << 13) | (e->row & 8191u)) + 1ULL;
+      unsigned am = SCR_CYCEN_AKSLOTS - 1u, aj = (unsigned)((akey * 0x9E3779B97F4A7C15ULL) >> 40) & am;
+      unsigned long long ext = 0;
+      if (e->row < SCR_CYCEN_SLOTS && scr_cycen_tbl[e->row].key == dk) { unsigned l2 = 0, c2 = 0; (void)scr_cycen_dyn_peek2(e->p, &l2, &c2, &ext); }
+      for (unsigned t = 0; t < SCR_CYCEN_AKSLOTS; t++, aj = (aj + 1u) & am) {
+        if (scr_cycen_ak[aj].key == 0) { scr_cycen_ak[aj].key = akey; scr_cycen_ak[aj].kind = e->row < SCR_CYCEN_SLOTS ? scr_cycen_tbl[e->row].key : NULL; }
+        if (scr_cycen_ak[aj].key != akey) continue;
+        scr_cycen_ak[aj].n++; scr_cycen_ak[aj].phys += e->phys; scr_cycen_ak[aj].ext += (long long)ext; scr_cycen_ak_phys += e->phys;
+        break;
+      }
+    }
+    if (e->row < SCR_CYCEN_SLOTS && scr_cycen_tbl[e->row].key == dk) {
+      unsigned len = 0; int kind = scr_cycen_dyn_peek(e->p, &len);
+      int b = scr_cycen_lbucket(len); if (b >= SCR_CYCEN_LB) b = SCR_CYCEN_LB - 1;
+      scr_cycen_dyn_total_n++; scr_cycen_dyn_total_b += e->phys;
+      scr_cycen_sk_add(e->site, kind, (long long)e->phys);
+      if (kind == 4 || kind == 5) { unsigned l3 = 0, c3 = 0, eks = 0; unsigned long long x3 = 0, rc3 = 0, e0 = 0; char kb[24]; (void)scr_cycen_dyn_peek2(e->p, &l3, &c3, &x3); (void)scr_cycen_dyn_peek3(e->p, &eks, kb, &rc3, &e0); scr_cycen_sh_add(e->site, kind, l3, c3, eks, x3, rc3, e0, kb); }
+      if (kind >= 0 && kind < 32) { scr_cycen_shape[kind][b][0]++; scr_cycen_shape[kind][b][1] += e->phys; }
+      if (kind == 3) {
+        unsigned slen = 0, scap = 0; int imm = 0; unsigned long long rc = 0, hh = 0; const char *sdata = NULL;
+        if (scr_cycen_dyn_peek_str(e->p, &slen, &scap, &imm, &rc, &hh, &sdata)) {
+          unsigned skey = e->site + 1u, smask = SCR_CYCEN_STRSLOTS - 1u, sj = (skey * 2654435761u >> 9) & smask;
+          for (unsigned t = 0; t < SCR_CYCEN_STRSLOTS; t++, sj = (sj + 1u) & smask) {
+            if (scr_cycen_str[sj].key == 0) scr_cycen_str[sj].key = skey;
+            if (scr_cycen_str[sj].key != skey) continue;
+            ScrCyCenStr *r = &scr_cycen_str[sj];
+            r->n++;
+            scr_cycen_strx[sj].lenhist[slen < 64u ? slen : 64u]++;
+            scr_cycen_str_total++;
+            if (imm) r->nimm++;
+            else { r->sumlen += slen; r->sumphys += (long long)((12u + scap + 1u + 7u) & ~7u); if (rc > 1) r->nshared++; }
+            /* distinct content per site: a 64-bit (site, content) key in an open-addressed set */
+            unsigned long long dk = (hh ^ ((unsigned long long)skey * 0x9E3779B97F4A7C15ULL)) | 1ULL;
+            unsigned dm = SCR_CYCEN_DSET - 1u, dj = (unsigned)(dk >> 11) & dm;
+            for (unsigned u = 0; u < 64u; u++, dj = (dj + 1u) & dm) {
+              if (scr_cycen_dset[dj] == 0) {
+                scr_cycen_dset[dj] = dk; r->ndistinct++; scr_cycen_str_distinct++;
+                ScrCyCenStrX *x = &scr_cycen_strx[sj];
+                if (!imm && x->nsamp < SCR_CYCEN_NSAMP) { unsigned c = slen < 47u ? slen : 47u; x->samp[x->nsamp].len = slen; for (unsigned q = 0; q < c; q++) x->samp[x->nsamp].txt[q] = sdata[q]; x->samp[x->nsamp].txt[c] = 0; x->nsamp++; }
+                break;
+              }
+              if (scr_cycen_dset[dj] == dk) break;
+            }
+            break;
+          }
+        }
+      }
+    }
+  }
+}
+
+SCR_CYCEN_FN void scr_cycen_seam_x(int force);
+SCR_CYCEN_FN void scr_cycen_seam(void) { scr_cycen_seam_x(1); }
+/* LAB: the same probe at the START of a collector pass, where send_group's live set is at its largest (the idle seam only exists between turns), without the forced collection */
+SCR_CYCEN_FN void scr_cycen_seam_pass(void) { if (getenv("SCR_CYCEN_PROBE_PASS") != NULL) scr_cycen_seam_x(0); }
+SCR_CYCEN_FN void scr_cycen_seam_x(int force) {
+  if (scr_cycen_pr_busy || scr_cycen_pr_n >= SCR_CYCEN_PROBE_MAX) return;
+  if (getenv("SCR_CYCEN_PROBE") == NULL) return;
+  long long live = scr_cycen_live_phys;
+  if (live < (long long)SCR_CYCEN_PROBE_MIN) return;
+  if (getenv("SCR_CYCEN_PROBE_FORCE") == NULL && live * 100 < scr_cycen_pr_last * (100 + SCR_CYCEN_PROBE_STEP)) return; /* FORCE: probe at every seam (micro controls) */
+  scr_cycen_pr_busy = 1;
+  scr_cycen_pr_last = live;
+  long long rows = scr_cycen_rows;
+  long long bN = scr_cycen_live_n, bP = scr_cycen_live_phys;
+  int will_be_best = bP > scr_cycen_pr_best_before || getenv("SCR_CYCEN_PROBE_LAST") != NULL; /* LAST: report the last probe (micro controls) */
+  for (long long i = 0; i < rows; i++) {
+    ScrCyCenRow *r = &scr_cycen_tbl[scr_cycen_order[i]];
+    scr_cycen_pr_hn[i] = r->live_n;
+    scr_cycen_pr_hp[i] = r->live_phys;
+    scr_cycen_pr_hanc[i] = (long long)(size_t)r->key;
+  }
+  /* THE SAME INSTANT: arena walk, census aggregation and park counters, all before the forced collection. */
+  scr_cycen_ar_held_cur = scr_cycen_arena_walk(scr_cycen_ar_cur, SCR_CYCEN_NCLASS);
+  if (will_be_best) scr_cycen_x_aggregate();
+  if (will_be_best) { scr_cycen_holders(); for (unsigned q = 0; q < SCR_CYCEN_HOLDSLOTS; q++) { scr_cycen_hold_best[q] = scr_cycen_hold[q]; scr_cycen_holdt_best[q] = scr_cycen_holdt[q]; } for (unsigned q = 0; q < scr_cycen_nsn; q++) scr_cycen_sn_best[q] = scr_cycen_sn[q]; scr_cycen_nsn_best = scr_cycen_nsn; }
+  if (force) scr_collect_cycles();
+  long long aN = scr_cycen_live_n, aP = scr_cycen_live_phys;
+  long long k = scr_cycen_pr_n++;
+  scr_cycen_pr_sum[k][0] = scr_cycen_alloc_total;
+  scr_cycen_pr_sum[k][1] = bN; scr_cycen_pr_sum[k][2] = bP;
+  scr_cycen_pr_sum[k][3] = aN; scr_cycen_pr_sum[k][4] = aP;
+  scr_cycen_pr_sum[k][5] = scr_cycen_live_peak;
+  if (will_be_best) {
+    scr_cycen_pr_best_before = bP; scr_cycen_pr_best = k; scr_cycen_pr_rows = rows;
+    for (long long i = 0; i < rows; i++) {
+      ScrCyCenRow *r = &scr_cycen_tbl[scr_cycen_order[i]];
+      scr_cycen_pr_bn[i] = scr_cycen_pr_hn[i]; scr_cycen_pr_bp[i] = scr_cycen_pr_hp[i];
+      scr_cycen_pr_an[i] = r->live_n; scr_cycen_pr_ap[i] = r->live_phys;
+    }
+    for (int c = 0; c < SCR_CYCEN_NCLASS; c++) for (int q = 0; q < 13; q++) scr_cycen_ar_best[c][q] = scr_cycen_ar_cur[c][q];
+    scr_cycen_ar_held_best = scr_cycen_ar_held_cur;
+    scr_cycen_x_best[0] = scr_cycen_x_small_n; scr_cycen_x_best[1] = scr_cycen_x_small_phys;
+    scr_cycen_x_best[2] = scr_cycen_x_big_n; scr_cycen_x_best[3] = scr_cycen_x_big_phys;
+    scr_cycen_dyn_total_best_n = scr_cycen_dyn_total_n; scr_cycen_dyn_total_best_b = scr_cycen_dyn_total_b;
+    for (unsigned q = 0; q < SCR_CYCEN_SKSLOTS; q++) scr_cycen_sk_best[q] = scr_cycen_sk[q];
+    for (unsigned q = 0; q < SCR_CYCEN_SHSLOTS; q++) scr_cycen_sh_best[q] = scr_cycen_sh[q];
+    for (unsigned q = 0; q < SCR_CYCEN_STRSLOTS; q++) { scr_cycen_str_best[q] = scr_cycen_str[q]; scr_cycen_strx_best[q] = scr_cycen_strx[q]; }
+    for (unsigned q = 0; q < SCR_CYCEN_AKSLOTS; q++) scr_cycen_ak_best[q] = scr_cycen_ak[q];
+    scr_cycen_ak_phys_best = scr_cycen_ak_phys;
+    scr_cycen_str_total_best = scr_cycen_str_total; scr_cycen_str_distinct_best = scr_cycen_str_distinct;
+    for (int a = 0; a < 32; a++) for (int b = 0; b < SCR_CYCEN_LB; b++) { scr_cycen_shape_best[a][b][0] = scr_cycen_shape[a][b][0]; scr_cycen_shape_best[a][b][1] = scr_cycen_shape[a][b][1]; }
+    scr_cycen_x_park_best[0] = scr_cycen_park_n; scr_cycen_x_park_best[1] = scr_cycen_park_phys; scr_cycen_x_park_best[2] = scr_cycen_park_side;
+    scr_cycen_x_dynfree_best = scr_cycen_dyn_free_count();
+  }
+  scr_cycen_pr_busy = 0;
+}
+
 SCR_CYCEN_FN void scr_cycen_report(void) {
   if (scr_cycen_reported) return;
   scr_cycen_reported = 1;
@@ -468,6 +929,99 @@ SCR_CYCEN_FN void scr_cycen_report(void) {
               scr_cycen_curve[i][1], scr_cycen_curve[i][2], scr_cycen_curve[i][3],
               scr_cycen_curve[i][4], scr_cycen_curve[i][5]);
     }
+    if (scr_cycen_pr_best >= 0) {
+      fprintf(f, "CYCEN-ARENA-HELD best=%lld held=%lld\n", scr_cycen_pr_best, scr_cycen_ar_held_best);
+      for (int c = 0; c < SCR_CYCEN_NCLASS; c++) {
+        long long *a = scr_cycen_ar_best[c];
+        if (a[0] == 0) continue;
+        fprintf(f, "CYCEN-ARENA class=%d stride=%lld chunks=%lld chunkB=%lld liveB=%lld freeB=%lld goneB=%lld uncarvedB=%lld partialChunks=%lld partialB=%lld liveBlocks=%lld freeBlocks=%lld curChunks=%lld hdrB=%lld\n",
+                c, a[8], a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7], a[9], a[10], a[11], a[12]);
+      }
+      fprintf(f, "CYCEN-X smallN=%lld smallPhys=%lld bigN=%lld bigPhys=%lld parkN=%lld parkPhys=%lld parkSide=%lld dynFreeList=%lld dynNodesN=%lld dynNodesB=%lld sitesLost=%lld nsites=%u\n",
+              scr_cycen_x_best[0], scr_cycen_x_best[1], scr_cycen_x_best[2], scr_cycen_x_best[3],
+              scr_cycen_x_park_best[0], scr_cycen_x_park_best[1], scr_cycen_x_park_best[2], scr_cycen_x_dynfree_best,
+              scr_cycen_dyn_total_best_n, scr_cycen_dyn_total_best_b, scr_cycen_site_lost, scr_cycen_nsites);
+      for (unsigned q = 0; q < SCR_CYCEN_SKSLOTS; q++) {
+        if (scr_cycen_sk_best[q].key == 0) continue;
+        unsigned key = scr_cycen_sk_best[q].key - 1u, site = key >> 5;
+        fprintf(f, "CYCEN-DYNSITE kind=%u n=%lld bytes=%lld", key & 31u, scr_cycen_sk_best[q].n, scr_cycen_sk_best[q].bytes);
+        for (int d = 0; d < SCR_CYCEN_SITE_DEPTH; d++) fprintf(f, " %llx", site ? scr_cycen_sites[site][d] : 0ULL);
+        fprintf(f, "\n");
+      }
+      for (unsigned q = 0; q < SCR_CYCEN_SHSLOTS; q++) {
+        const ScrCyCenSh *r = &scr_cycen_sh_best[q];
+        if (r->key == 0) continue;
+        fprintf(f, "CYCEN-SHAPE kind=%u len=%u cap=%u eks=%08x n=%lld ext=%lld rcsum=%lld e0shared=%lld keys=%s", r->kind, r->len, r->cap, r->eks, r->n, r->ext, r->rcsum, r->e0shared, r->keys[0] ? r->keys : "-");
+        for (int d = 0; d < SCR_CYCEN_SITE_DEPTH; d++) fprintf(f, " %llx", r->site ? scr_cycen_sites[r->site][d] : 0ULL);
+        fprintf(f, "\n");
+      }
+      for (unsigned q = 0; q < SCR_CYCEN_HOLDSLOTS; q++) {
+        const ScrCyCenHoldT *h = &scr_cycen_holdt_best[q];
+        if (h->ntargets == 0) continue;
+        fprintf(f, "CYCEN-HOLDT ntargets=%lld rcsum=%lld found=%lld unexplained=%lld norefs=%lld", h->ntargets, h->rcsum, h->found, h->unexplained, h->norefs);
+        for (int d = 0; d < SCR_CYCEN_SITE_DEPTH; d++) fprintf(f, " %llx", h->tsite ? scr_cycen_sites[h->tsite][d] : 0ULL);
+        fprintf(f, "\n");
+      }
+      for (unsigned q = 0; q < SCR_CYCEN_HOLDSLOTS; q++) {
+        const ScrCyCenHold *h = &scr_cycen_hold_best[q];
+        if (h->n == 0) continue;
+        fprintf(f, "CYCEN-HOLD n=%lld via=%u hkind=%llx tsite", h->n, h->via, (unsigned long long)(size_t)h->hkind);
+        for (int d = 0; d < SCR_CYCEN_SITE_DEPTH; d++) fprintf(f, " %llx", h->tsite ? scr_cycen_sites[h->tsite][d] : 0ULL);
+        fprintf(f, " hsite");
+        for (int d = 0; d < SCR_CYCEN_SITE_DEPTH; d++) fprintf(f, " %llx", h->hsite ? scr_cycen_sites[h->hsite][d] : 0ULL);
+        fprintf(f, "\n");
+      }
+      for (unsigned q = 0; q < scr_cycen_nsn_best; q++) {
+        const ScrCyCenSN *s = &scr_cycen_sn_best[q];
+        fprintf(f, "CYCEN-SN noderc=%llu strrc=%llu len=%u found=%u via=%u hkind=%llx tsite", s->noderc, s->strrc, s->len, s->found, s->via, (unsigned long long)(size_t)s->hkind);
+        for (int d = 0; d < SCR_CYCEN_SITE_DEPTH; d++) fprintf(f, " %llx", s->tsite ? scr_cycen_sites[s->tsite][d] : 0ULL);
+        fprintf(f, " hsite");
+        for (int d = 0; d < SCR_CYCEN_SITE_DEPTH; d++) fprintf(f, " %llx", s->hsite ? scr_cycen_sites[s->hsite][d] : 0ULL);
+        fprintf(f, " |%s|\n", s->txt);
+        for (unsigned lv = 0; lv < s->nchain; lv++) {
+          fprintf(f, "CYCEN-CH q=%u lv=%u hkind=%llx site", q, lv, (unsigned long long)(size_t)s->chk[lv]);
+          for (int d = 0; d < SCR_CYCEN_SITE_DEPTH; d++) fprintf(f, " %llx", s->chs[lv] ? scr_cycen_sites[s->chs[lv]][d] : 0ULL);
+          fprintf(f, "\n");
+        }
+      }
+      fprintf(f, "CYCEN-STRTOTAL nodes=%lld distinctSiteContents=%lld\n", scr_cycen_str_total_best, scr_cycen_str_distinct_best);
+      fprintf(f, "CYCEN-ALLTOTAL phys=%lld\n", scr_cycen_ak_phys_best);
+      for (unsigned q = 0; q < SCR_CYCEN_AKSLOTS; q++) {
+        ScrCyCenAK *r = &scr_cycen_ak_best[q];
+        if (r->key == 0) continue;
+        unsigned site = (unsigned)((r->key - 1ULL) >> 13);
+        fprintf(f, "CYCEN-ALL n=%lld phys=%lld ext=%lld kind=%llx", r->n, r->phys, r->ext, (unsigned long long)(size_t)r->kind);
+        for (int d = 0; d < SCR_CYCEN_SITE_DEPTH; d++) fprintf(f, " %llx", site ? scr_cycen_sites[site][d] : 0ULL);
+        fprintf(f, "\n");
+      }
+      for (unsigned q = 0; q < SCR_CYCEN_STRSLOTS; q++) {
+        ScrCyCenStr *r = &scr_cycen_str_best[q];
+        if (r->key == 0) continue;
+        unsigned site = r->key - 1u;
+        fprintf(f, "CYCEN-STR n=%lld nimm=%lld sumlen=%lld sumphys=%lld nshared=%lld ndistinct=%lld", r->n, r->nimm, r->sumlen, r->sumphys, r->nshared, r->ndistinct);
+        for (int d = 0; d < SCR_CYCEN_SITE_DEPTH; d++) fprintf(f, " %llx", site ? scr_cycen_sites[site][d] : 0ULL);
+        fprintf(f, "\n");
+        ScrCyCenStrX *x = &scr_cycen_strx_best[q];
+        fprintf(f, "CYCEN-STRLEN q=%u", q);
+        for (int h = 0; h < 65; h++) if (x->lenhist[h]) fprintf(f, " %d:%u", h, x->lenhist[h]);
+        fprintf(f, "\n");
+        for (unsigned k = 0; k < x->nsamp; k++) {
+          fprintf(f, "CYCEN-STRSAMP q=%u len=%u |", q, x->samp[k].len);
+          for (const char *c = x->samp[k].txt; *c; c++) fputc((*c >= 32 && *c < 127 && *c != '|') ? *c : '.', f);
+          fprintf(f, "|\n");
+        }
+      }
+      for (int a = 0; a < 32; a++) for (int b = 0; b < SCR_CYCEN_LB; b++)
+        if (scr_cycen_shape_best[a][b][0]) fprintf(f, "CYCEN-DYNSHAPE kind=%d lenrow=%d n=%lld bytes=%lld\n", a, b, scr_cycen_shape_best[a][b][0], scr_cycen_shape_best[a][b][1]);
+    }
+    for (long long k = 0; k < scr_cycen_pr_n; k++)
+      fprintf(f, "CYCEN-PROBE %lld alloc=%lld beforeN=%lld beforePhys=%lld afterN=%lld afterPhys=%lld livePeakSoFar=%lld\n",
+              k, scr_cycen_pr_sum[k][0], scr_cycen_pr_sum[k][1], scr_cycen_pr_sum[k][2],
+              scr_cycen_pr_sum[k][3], scr_cycen_pr_sum[k][4], scr_cycen_pr_sum[k][5]);
+    for (long long i = 0; i < scr_cycen_pr_rows && scr_cycen_pr_best >= 0; i++)
+      fprintf(f, "CYCEN-PROBE-ROW best=%lld %lld %lld %lld %lld %llx\n", scr_cycen_pr_best,
+              scr_cycen_pr_bn[i], scr_cycen_pr_bp[i], scr_cycen_pr_an[i], scr_cycen_pr_ap[i],
+              (unsigned long long)scr_cycen_pr_hanc[i]);
     fprintf(f,
             "CYCEN-TOTAL rows=%lld allocs=%lld frees=%lld liveN=%lld livePhys=%lld "
             "livePayload=%lld poolN=%lld poolPhys=%lld osPeak=%lld osPeakN=%lld "

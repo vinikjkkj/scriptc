@@ -1254,3 +1254,13 @@ ScrArr *scr_map_slots_js_order(const ScrMap *m) {
   }
   return out;
 }
+
+#ifdef SCR_CYCEN_ON
+/* LAB (tests/perf/cycensus holder scan): the entry table of a cycle-headered map (keys and values). 1 when `key` is scr_map_gcfree. */
+int scr_cycen_map_side(const void *key, const void *hdr, const void **buf, unsigned long long *bytes) {
+  if (key != (const void *)&scr_map_gcfree) return 0;
+  const ScrMap *m = (const ScrMap *)(const void *)((const char *)hdr + sizeof(ScrCycHdr));
+  *buf = m->entries; *bytes = m->entries != NULL ? (unsigned long long)m->nentries * sizeof(ScrMapEntry) : 0;
+  return 1;
+}
+#endif

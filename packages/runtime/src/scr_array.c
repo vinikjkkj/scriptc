@@ -1357,3 +1357,13 @@ void scr_arr_grow_ext(ScrArr *a, size_t need) { scr_arr_grow(a, need); }
 void scr_join_append_ext(char **buf, size_t *len, size_t *cap, const char *bytes, size_t n) {
   scr_join_append(buf, len, cap, bytes, n);
 }
+
+#ifdef SCR_CYCEN_ON
+/* LAB (tests/perf/cycensus holder scan): the slot storage of a cycle-headered REF array, so the scan sees the pointers a typed array holds. 1 when `key` is scr_arr_gc_free. */
+int scr_cycen_arr_side(const void *key, const void *hdr, const void **buf, unsigned long long *bytes) {
+  if (key != (const void *)&scr_arr_gc_free) return 0;
+  const ScrArr *a = (const ScrArr *)(const void *)((const char *)hdr + sizeof(ScrCycHdr));
+  *buf = a->data; *bytes = a->data != NULL ? (unsigned long long)a->len * 8ull : 0;
+  return 1;
+}
+#endif
