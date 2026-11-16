@@ -1014,7 +1014,7 @@ static __attribute__((cold)) void scr_cyc_pr_arm(void) {
 #define SCR_CYC_PR_REPORT() scr_cyc_pr_absent("built without -DSCR_CYC_PAGERETURN_STAT=1")
 #endif
 
-static int scr_cyc_pr_on(void) {
+static inline __attribute__((always_inline)) int scr_cyc_pr_on(void) {
   static int cached = -1;
   if (cached < 0) {
     const char *e = getenv("SCR_CYCLE_PAGERETURN");
@@ -1731,6 +1731,7 @@ static void scr_cyc_ar_give(ScrCycHdr *h) {
  * writer: it hashes the pair into an open-addressed table of indices and assigns the next row on a miss. It runs once per allocation site (the site caches the
  * answer), plus on every allocation of the one site that passes variable functions (scr_error.c), so it is a hash, not a scan. */
 ScrCycKindRow scr_cyc_kind_tab[SCR_CYC_KIND_MAX];
+ScrTraceFn scr_cyc_trace_abs[SCR_CYC_KIND_MAX];
 static uint32_t scr_cyc_nkinds = SCR_CYC_KIND_FIXED_END;
 static uint16_t scr_cyc_kind_hash[8192];
 uint16_t scr_cyc_kind_of(ScrTraceFn trace, ScrCycFreeFn free_fn) {
@@ -1743,12 +1744,13 @@ uint16_t scr_cyc_kind_of(ScrTraceFn trace, ScrCycFreeFn free_fn) {
     if (scr_cyc_kind_tab[k].trace_off == t && scr_cyc_kind_tab[k].free_off == f) return k;
     hs = (hs + 1u) & 8191u;
   }
-  /* An index whose low byte is 1..3 would look like a reserved kind to scr_cyc_trace_call's one-byte test: skip it. */
+  /* An index whose low byte is 1..3 would look like a reserved kind to the one-byte kind_lo checks (the dyn phantom test): skip it. */
   while ((scr_cyc_nkinds & 0xffu) >= 1u && (scr_cyc_nkinds & 0xffu) < SCR_CYC_KIND_FIXED_END) scr_cyc_nkinds++;
   if (scr_cyc_nkinds >= SCR_CYC_KIND_MAX) scr_trap("scriptc: more than 4095 distinct cycle-object kinds in one program (the 8-byte cycle header's kind index is 12 bits)\n");
   {
     uint16_t k = (uint16_t)scr_cyc_nkinds++;
     scr_cyc_kind_tab[k].trace_off = t;
+    scr_cyc_trace_abs[k] = trace;
     scr_cyc_kind_tab[k].free_off = f;
     scr_cyc_kind_hash[hs] = k;
     return k;
@@ -1756,9 +1758,8 @@ uint16_t scr_cyc_kind_of(ScrTraceFn trace, ScrCycFreeFn free_fn) {
 }
 
 /* A pair that owns a reserved index (the hottest runtime kinds). The row is written once. */
-ScrTraceFn scr_cyc_fast_trace[SCR_CYC_KIND_FIXED_END];
 uint16_t scr_cyc_kind_fixed(uint32_t idx, ScrTraceFn trace, ScrCycFreeFn free_fn) {
-  scr_cyc_fast_trace[idx] = trace;
+  scr_cyc_trace_abs[idx] = trace;
   scr_cyc_kind_tab[idx].trace_off = scr_cyc_off((const void *)trace);
   scr_cyc_kind_tab[idx].free_off = scr_cyc_off((const void *)free_fn);
   return (uint16_t)idx;
@@ -2194,12 +2195,12 @@ void scr_cyc_on_release(void *obj) {
   ScrCycHdr *h = scr_cyc_hdr(obj);
   h->color = SCR_CYC_PURPLE;
   if (!SCR_CYC_BUFFERED(h)) {
-    if (scr_nroots == scr_roots_cap) {
+    if (__builtin_expect(scr_nroots == scr_roots_cap, 0)) {
       scr_roots_cap = scr_roots_cap ? scr_roots_cap * 2 : 64;
-      scr_roots = realloc(scr_roots, scr_roots_cap * sizeof *scr_roots);
+      /* The 27-bit index of the cycle header addresses at most SCR_CYC_IDX_MASK + 1 slots; past that the buffer cannot be indexed, which is the same abort as running out of memory. */
+      scr_roots = scr_roots_cap > (size_t)SCR_CYC_IDX_MASK + 1u ? NULL : realloc(scr_roots, scr_roots_cap * sizeof *scr_roots);
       if (!scr_roots) scr_cyc_oom();
     }
-    if (__builtin_expect(scr_nroots > SCR_CYC_IDX_MASK, 0)) scr_trap("scriptc: the candidate-root buffer outgrew the 27-bit index of the cycle header\n");
     h->w = (h->w & ~SCR_CYC_IDX_MASK) | SCR_CYC_BUF | (uint32_t)scr_nroots;
     scr_roots[scr_nroots++] = obj;
   }
@@ -2317,7 +2318,8 @@ static void scr_sb_visit(void *child, void *ctx) {
   h->color = SCR_CYC_BLACK;
   scr_wl_push(child);
 }
-static inline __attribute__((always_inline)) void scr_scan_black(void *obj) {
+/* NOT always_inline: inlined into the scan phase it grew scr_collect_cycles by about 150 bytes and measured slower on redis (v4); out of line it is one call per black subtree. */
+static __attribute__((noinline)) void scr_scan_black(void *obj) {
   size_t floor = scr_wl_n;
   scr_cyc_hdr(obj)->color = SCR_CYC_BLACK;
   scr_wl_push(obj);
