@@ -2438,8 +2438,11 @@ __attribute__((noinline, cold)) void scr_dyn_phantom_update(void) {
       if (c == NULL) continue;
       if (c->rc != SIZE_MAX) {
         /* a string box held more than once is a SHARED box (scr_dyn_new_str_conv): one live node behind several slots, which a pass still walks slot by slot, so it is a phantom like the immortal ones */
+#ifndef _WIN32
         if (c->kind == SCR_DYN_STR && c->rc > 1) scr_ph_total++;
-        else scr_nd_total += 2;
+        else
+#endif
+        scr_nd_total += 2;
       } else if (c->kind == SCR_DYN_BOOL || c->kind == SCR_DYN_NULL || c->kind == SCR_DYN_NUM || c->kind == SCR_DYN_STR) scr_ph_total++;
     }
   }
@@ -2674,6 +2677,9 @@ static __attribute__((noinline)) ScrDyn *scr_bxc_miss(ScrStr *s, ScrBxcEnt *e) {
 /* The caller (the emitted string leaf, scr_dyn_new_str_sh) has already seen the string's count is >= 2. An entry exists only for an eligible string, so the
  * hit needs no eligibility test: the key is the block's address, and the entry's box keeps that block alive, so the key cannot belong to another string. */
 ScrDyn *scr_dyn_new_str_conv(ScrStr *s) {
+#ifdef _WIN32
+  return scr_dyn_new_str(s); /* LAB (lab/sb-nowin): the shared-box cache compiled out on Windows only, to ask whether the shard failures follow it */
+#endif
   ScrBxcEnt *e = &scr_bxc[(unsigned)(((size_t)s >> 4) * 2654435761u) >> (32 - SCR_BXC_BITS)];
   if (e->s == s) {
     scr_dyn_phantom_note(); /* a shared handout is a slot with no new node behind it: it counts in the collector's pacing estimate like an immortal one */
