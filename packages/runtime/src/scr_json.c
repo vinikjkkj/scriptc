@@ -2604,7 +2604,7 @@ ScrDyn *scr_dyn_new_str_sh(ScrStr *s) {
     }
     return &empty;
   }
-  return scr_dyn_new_str_conv(s);
+  return s->rc >= 2u ? scr_dyn_new_str_conv(s) : scr_dyn_new_str(s); /* a string held once cannot have another box */
 }
 
 /* SHARED BOXES OF A SHARED STRING, for the typed-to-dyn string leaf (the sc_td_ converters and the union walkers; no other boxing consults it).
@@ -2613,7 +2613,7 @@ ScrDyn *scr_dyn_new_str_sh(ScrStr *s) {
  * the string block's own count reading 509. A STR node is immutable, so a second box of the same block is the same value (=== on strings is by
  * value; Object.is, Map keys and inspect read the string, never the node), and the converter can hand out the box it already made.
  *
- * ZERO COST WHERE NOTHING IS SHARED: the cache is consulted only when the string block's own count is at least SCR_BXC_MINRC, i.e. something
+ * ZERO COST WHERE NOTHING IS SHARED: the cache is consulted only when the string block's own count is at least 2 (the emitted leaf and scr_dyn_new_str_sh test it), i.e. something
  * besides the caller's reference holds it. A string held once (a row value, a fresh substring) cannot have another box, and pays one load and one
  * compare. Only short strings (<= SCR_BXC_MAXLEN) take part.
  *
@@ -2624,14 +2624,11 @@ ScrDyn *scr_dyn_new_str_sh(ScrStr *s) {
 #ifndef SCR_BXC_BITS
 #define SCR_BXC_BITS 12
 #endif
-#ifndef SCR_BXC_MINRC
-#define SCR_BXC_MINRC 2u
-#endif
 #ifndef SCR_BXC_MAXLEN
 #define SCR_BXC_MAXLEN 256u
 #endif
 #ifndef SCR_BXC_SWEEP_EVERY
-#define SCR_BXC_SWEEP_EVERY 1024u
+#define SCR_BXC_SWEEP_EVERY 4096u
 #endif
 typedef struct { ScrStr *s; ScrDyn *box; } ScrBxcEnt;
 static ScrBxcEnt scr_bxc[1u << SCR_BXC_BITS];
@@ -2660,25 +2657,30 @@ static void scr_bxc_teardown(void) {
   }
 }
 #endif
-ScrDyn *scr_dyn_new_str_conv(ScrStr *s) {
-  if (s->rc >= SCR_BXC_MINRC && s->len <= SCR_BXC_MAXLEN && s->cap < 0xFFFD0000u && !scr_str_is_absent(s)) {
-    ScrBxcEnt *e = &scr_bxc[(unsigned)(((size_t)s >> 4) * 2654435761u) >> (32 - SCR_BXC_BITS)];
-    if (e->s == s) return scr_dyn_retain(e->box);
-    ScrDyn *d = scr_dyn_new_str(s);
-    ScrDyn *old = e->box;
-    e->s = s;
-    e->box = scr_dyn_retain(d);
-    if (old != NULL) scr_dyn_release(old);
+/* The miss path, out of line so the hit path below is a leaf with nothing to save: only a short plain string takes part, and the absent marker and the codec strings
+ * (whose boxes mean something else) never do. */
+static __attribute__((noinline)) ScrDyn *scr_bxc_miss(ScrStr *s, ScrBxcEnt *e) {
+  if (s->len > SCR_BXC_MAXLEN || s->cap >= 0xFFFD0000u || scr_str_is_absent(s)) return scr_dyn_new_str(s);
+  ScrDyn *d = scr_dyn_new_str(s);
+  ScrDyn *old = e->box;
+  e->s = s;
+  e->box = scr_dyn_retain(d);
+  if (old != NULL) scr_dyn_release(old);
 #ifdef SCR_RC_AUDIT
-    {
-      static int reg;
-      if (!reg) { reg = 1; atexit(scr_bxc_teardown); }
-    }
-#endif
-    if (++scr_bxc_inserts % SCR_BXC_SWEEP_EVERY == 0) scr_bxc_sweep();
-    return d;
+  {
+    static int reg;
+    if (!reg) { reg = 1; atexit(scr_bxc_teardown); }
   }
-  return scr_dyn_new_str(s);
+#endif
+  if (++scr_bxc_inserts % SCR_BXC_SWEEP_EVERY == 0) scr_bxc_sweep();
+  return d;
+}
+/* The caller (the emitted string leaf, scr_dyn_new_str_sh) has already seen the string's count is >= 2. An entry exists only for an eligible string, so the
+ * hit needs no eligibility test: the key is the block's address, and the entry's box keeps that block alive, so the key cannot belong to another string. */
+ScrDyn *scr_dyn_new_str_conv(ScrStr *s) {
+  ScrBxcEnt *e = &scr_bxc[(unsigned)(((size_t)s >> 4) * 2654435761u) >> (32 - SCR_BXC_BITS)];
+  if (e->s == s) return scr_dyn_retain(e->box);
+  return scr_bxc_miss(s, e);
 }
 
 ScrDyn *scr_dyn_new_arr(void) {
