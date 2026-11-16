@@ -1349,6 +1349,7 @@ void scr_cyc_arenavm_report(void) {
 #ifdef SCR_PAGECEN_ON
 _Static_assert(SCR_PC_CHUNK == SCR_CYC_ARENA_CHUNK,
                "the page census was compiled for a different chunk size");
+_Static_assert(SCR_PC_LINK_OFF == SCR_CYC_LINK_OFF, "the page census reads the free-list link at a different offset");
 static ScrCycChunk *scr_cyc_ar_all = NULL;
 
 static void scr_cyc_ar_pagecensus(const char *when) {
@@ -1755,7 +1756,9 @@ uint16_t scr_cyc_kind_of(ScrTraceFn trace, ScrCycFreeFn free_fn) {
 }
 
 /* A pair that owns a reserved index (the hottest runtime kinds). The row is written once. */
+ScrTraceFn scr_cyc_fast_trace[SCR_CYC_KIND_FIXED_END];
 uint16_t scr_cyc_kind_fixed(uint32_t idx, ScrTraceFn trace, ScrCycFreeFn free_fn) {
+  scr_cyc_fast_trace[idx] = trace;
   scr_cyc_kind_tab[idx].trace_off = scr_cyc_off((const void *)trace);
   scr_cyc_kind_tab[idx].free_off = scr_cyc_off((const void *)free_fn);
   return (uint16_t)idx;
