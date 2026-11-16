@@ -6,7 +6,7 @@ import { storesFreshDynNumber } from "../../ir/dyn-keep.js";
 import type { CEmitter, ScopeEntry } from "./emitter.js";
 import type { IrFunction, IrLocal, IrType } from "../../ir/nodes.js";
 import { mangleField, mangleGlobal, mangleLocal, mangleRawParam } from "../mangle.js";
-import { BOOL, CAUGHT, numSlotHalf, errorOwnFlagFor, F64, IrExpr, IrStmt, ORD_MEMBER, orderRecordPlanCached, RUNTIME_ERROR_CLASSES, isRefCounted, ownMaskKeyBit } from "../../ir/nodes.js";
+import { BOOL, CAUGHT, numSlotHalf, classCbit, errorOwnFlagFor, F64, IrExpr, IrStmt, ORD_MEMBER, orderRecordPlanCached, RUNTIME_ERROR_CLASSES, isRefCounted, ownMaskKeyBit } from "../../ir/nodes.js";
 import { boxAccess, cDecl, cStringLiteral, cType, elemAccess, vAdapters } from "./emit-types.js";
 import { KEYLIST_MEMBER, OVERFLOW_MEMBER, OWNMASK_MEMBER, ownPresentCondC } from "./emit-shapes.js";
 import { emitStableReceiver, predeclareFieldRunTables } from "./emit-exprs.js";
@@ -969,6 +969,10 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
           const ord = orderRecordPlanCached(E.mod.classes ?? []).ordinalOf(s.className, s.field);
           const fn = s.unset === true ? "scr_ord_forget" : "scr_ord_note";
           if (ord !== null) E.line(`${fn}(${obj.name}->${ORD_MEMBER}, ${ord});${E.srcComment(s.loc)}`);
+        }
+        // CONTAINER BIT (ir/cbit.ts): a non-leaf dyn value stored into an instance of a gated class sets the instance's bit before the value moves in.
+        if (s.kind === "fieldSet" && v.type.kind === "dyn" && classCbit(E.mod.classes, s.className)) {
+          E.line(`scr_cbit_note(${obj.name}, ${v.name});${E.srcComment(s.loc)}`);
         }
         const slotHalf = s.kind === "fieldSet" && v.type.kind === "dyn" ? numSlotHalf(E.mod.classes, s.className, s.field) : undefined;
         if (slotHalf !== undefined) {
