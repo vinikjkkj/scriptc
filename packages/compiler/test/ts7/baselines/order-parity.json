@@ -28188,6 +28188,30 @@
     "<repo>/tests/corpus/25432-a-spread-literal-typed-as-a-struct-view-target-compiles-and-reads-through-it.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25460-https-get-an-ip-literal-host-verifies-the-certificate-ip-san.ts": {
+   "order": [
+    "<repo>/tests/corpus/25460-https-get-an-ip-literal-host-verifies-the-certificate-ip-san.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25461-https-get-an-ip-literal-host-fails-the-identity-check-with-nodes-error.ts": {
+   "order": [
+    "<repo>/tests/corpus/25461-https-get-an-ip-literal-host-fails-the-identity-check-with-nodes-error.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25462-https-get-a-dns-host-fails-the-identity-check-with-nodes-error.ts": {
+   "order": [
+    "<repo>/tests/corpus/25462-https-get-a-dns-host-fails-the-identity-check-with-nodes-error.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25463-tls-connect-an-ip-literal-identity-failure-reject-unauthorized-and-the-override.ts": {
+   "order": [
+    "<repo>/tests/corpus/25463-tls-connect-an-ip-literal-identity-failure-reject-unauthorized-and-the-override.ts"
+   ],
+   "diags": []
   }
  }
 }
