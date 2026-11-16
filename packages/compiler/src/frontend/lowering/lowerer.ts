@@ -12667,6 +12667,36 @@ export class Lowerer {
           }
         }
       };
+      // Un-share first. An expression node reachable from two places (literalEqArmBridge re-emits its pure union operand for the tag test and
+      // the payload) would be rewritten once, in place, and then sit in both positions with the SAME `%vwr` temps: the two emissions assign one
+      // slot twice (the first record reference leaks) and its scope-exit release list names the slot twice (a double release, a use-after-free
+      // on `a?.b.c === true`). Each position gets its own copy, so every copy mints its own temps.
+      const isExprNode = (x: unknown): x is Record<string, unknown> =>
+        x !== null && typeof x === "object" && !Array.isArray(x) && "kind" in x && "loc" in x && "type" in x;
+      const cloneExpr = (x: unknown): unknown => {
+        if (Array.isArray(x)) return x.map(cloneExpr);
+        if (!isExprNode(x)) return x;
+        const c: Record<string, unknown> = {};
+        for (const k of Object.keys(x)) c[k] = cloneExpr(x[k]);
+        return c;
+      };
+      const owned = new Set<object>();
+      const walked = new Set<object>();
+      const unshare = (node: unknown): void => {
+        if (node === null || typeof node !== "object" || walked.has(node)) return;
+        walked.add(node);
+        const rec = node as Record<string, unknown>;
+        for (const k of Object.keys(rec)) {
+          const v = rec[k];
+          if (v === null || typeof v !== "object") continue;
+          if (isExprNode(v)) {
+            if (owned.has(v)) rec[k] = cloneExpr(v);
+            owned.add(rec[k] as object);
+          }
+          unshare(rec[k]);
+        }
+      };
+      unshare(fn.body);
       visit(fn.body);
     }
     // Closures minted by the rewrite (an optional method read per access) join the program.

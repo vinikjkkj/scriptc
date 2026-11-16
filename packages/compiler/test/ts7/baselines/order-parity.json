@@ -15878,6 +15878,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25381-a-union-operand-compared-to-a-literal-through-optional-chains-of-view-records-releases-each-copy-once.ts": {
+   "order": [
+    "<repo>/tests/corpus/25381-a-union-operand-compared-to-a-literal-through-optional-chains-of-view-records-releases-each-copy-once.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2539-class-instance-rest.ts": {
    "order": [
     "<repo>/tests/corpus/2539-class-instance-rest.ts"
