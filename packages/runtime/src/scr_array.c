@@ -1,3 +1,7 @@
+#ifndef SCR_CYCEN_PARR_ADD /* LAB (holdraw) hooks: no-ops unless tests/perf/cycensus/scr_cyc_census.h is force-included with -DSCR_CYCEN_RAWSTR */
+#define SCR_CYCEN_PARR_ADD(a) ((void)0)
+#define SCR_CYCEN_PARR_DEL(a) ((void)0)
+#endif
 #include "scr_runtime.h"
 
 #include <math.h>
@@ -481,6 +485,7 @@ void scr_ownxfer_poison(ScrArr **slot) {
 ScrArr *scr_arr_new(ScrElemKind elem, size_t initial_cap) {
   ScrArr *a = malloc(sizeof(ScrArr));
   if (!a) scr_arr_oom();
+  if (scr_elem_is_ref(elem)) SCR_CYCEN_PARR_ADD(a);
   a->rc = 1;
   a->len = 0;
   a->cap = 0;
@@ -529,6 +534,7 @@ ScrArr *scr_arr_new_ref(void *(*elem_retain)(void *),
   } else {
     a = malloc(sizeof(ScrArr));
     if (!a) scr_arr_oom();
+    SCR_CYCEN_PARR_ADD(a);
   }
   a->rc = 1;
   a->len = 0;
@@ -586,6 +592,7 @@ void scr_arr_release(ScrArr *a) {
 #ifdef SCR_RC_AUDIT
       scr_live_arrays--;
 #endif
+      SCR_CYCEN_PARR_DEL(a);
       free(a);
     }
   } else if (a->elem_trace) {
@@ -1366,4 +1373,15 @@ int scr_cycen_arr_side(const void *key, const void *hdr, const void **buf, unsig
   *buf = a->data; *bytes = a->data != NULL ? (unsigned long long)a->len * 8ull : 0;
   return 1;
 }
+#endif
+
+#ifdef SCR_CYCEN_RAWSTR
+/* LAB (holdraw): the slot storage of a PLAIN ref array, and the kind marker its chain level prints as. */
+int scr_cycen_parr_peek(const void *a0, const void **buf, unsigned long long *bytes) {
+  const ScrArr *a = (const ScrArr *)a0;
+  if (!scr_elem_is_ref(a->elem)) { *buf = NULL; *bytes = 0; return 0; }
+  *buf = a->data; *bytes = a->data != NULL ? (unsigned long long)a->len * 8ull : 0;
+  return 1;
+}
+const void *scr_cycen_parr_kind(void) { return (const void *)&scr_arr_release; }
 #endif

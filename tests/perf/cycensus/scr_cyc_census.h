@@ -606,6 +606,49 @@ SCR_CYCEN_FN void scr_cycen_sh_add(unsigned site, int kind, unsigned len, unsign
  * dyn ARR/OBJ side buffer, tag bits stripped, looked up in it. A hit is a holder (target site, holder kind = its free function, holder site, via
  * payload or side buffer). A target's refcount minus the holders found is the count a heap object does not explain (a stack temp, a global, a
  * pending-exception cell, a promise reaction list or a hash entry). */
+
+#ifdef SCR_CYCEN_RAWSTR
+/* LAB (holdraw): a registry of the live PLAIN (not cycle-headered) ref arrays, so the holder scan can read their slot storage and use them as chain nodes.
+ * Filled by two hooks in scr_array.c (scr_arr_new_ref's malloc branch, scr_arr_release's free). Open addressing, backward-shift delete, no allocation. */
+#ifndef SCR_CYCEN_PARR_SLOTS
+#define SCR_CYCEN_PARR_SLOTS (1u << 20)
+#endif
+SCR_CYCEN_SHARED const void *scr_cycen_parr[SCR_CYCEN_PARR_SLOTS];
+SCR_CYCEN_SHARED long long scr_cycen_parr_n, scr_cycen_parr_lost;
+SCR_CYCEN_FN unsigned scr_cycen_parr_hash(const void *p) {
+  unsigned long long x = (unsigned long long)(size_t)p; x ^= x >> 33; x *= 0xff51afd7ed558ccdULL; x ^= x >> 29;
+  return (unsigned)(x & (SCR_CYCEN_PARR_SLOTS - 1u));
+}
+SCR_CYCEN_FN void scr_cycen_parr_add(const void *p) {
+  unsigned h = scr_cycen_parr_hash(p);
+  for (unsigned i = 0; i < SCR_CYCEN_PARR_SLOTS; i++) { unsigned j = (h + i) & (SCR_CYCEN_PARR_SLOTS - 1u); if (scr_cycen_parr[j] == NULL) { scr_cycen_parr[j] = p; scr_cycen_parr_n++; return; } if (scr_cycen_parr[j] == p) return; }
+  scr_cycen_parr_lost++;
+}
+SCR_CYCEN_FN void scr_cycen_parr_del(const void *p) {
+  unsigned m = SCR_CYCEN_PARR_SLOTS - 1u, h = scr_cycen_parr_hash(p);
+  for (unsigned i = 0; i < SCR_CYCEN_PARR_SLOTS; i++) {
+    unsigned j = (h + i) & m;
+    if (scr_cycen_parr[j] == NULL) return;
+    if (scr_cycen_parr[j] == p) {
+      unsigned hole = j; scr_cycen_parr[hole] = NULL; scr_cycen_parr_n--;
+      for (unsigned k = (hole + 1u) & m; scr_cycen_parr[k] != NULL; k = (k + 1u) & m) {
+        unsigned ideal = scr_cycen_parr_hash(scr_cycen_parr[k]);
+        int blocked = (hole <= k) ? (ideal > hole && ideal <= k) : (ideal > hole || ideal <= k);
+        if (blocked) continue;
+        scr_cycen_parr[hole] = scr_cycen_parr[k]; scr_cycen_parr[k] = NULL; hole = k;
+      }
+      return;
+    }
+  }
+}
+int scr_cycen_parr_peek(const void *a, const void **buf, unsigned long long *bytes); /* scr_array.c */
+const void *scr_cycen_parr_kind(void);                                                 /* scr_array.c */
+#define SCR_CYCEN_PARR_ADD(a) scr_cycen_parr_add(a)
+#define SCR_CYCEN_PARR_DEL(a) scr_cycen_parr_del(a)
+#else
+#define SCR_CYCEN_PARR_ADD(a) ((void)0)
+#define SCR_CYCEN_PARR_DEL(a) ((void)0)
+#endif
 #ifndef SCR_CYCEN_HSET
 #define SCR_CYCEN_HSET (1u << 21)
 #endif /* 2M targets: the sqlite send_group peak holds ~543k dyn STR nodes */
@@ -708,6 +751,13 @@ SCR_CYCEN_FN void scr_cycen_holders(void) {
     }
   }
 #ifdef SCR_CYCEN_RAWSTR
+  for (unsigned pi = 0; pi < SCR_CYCEN_PARR_SLOTS; pi++) {
+    const void *pa = scr_cycen_parr[pi]; if (pa == NULL) continue;
+    unsigned pj = scr_cycen_hs_find((unsigned long long)(size_t)pa, 1); if (pj == (unsigned)-1) continue;
+    scr_cycen_hs_site[pj] = 0; scr_cycen_hs_rc[pj] = 0; scr_cycen_hs_hk[pj] = NULL; scr_cycen_hs_hsite[pj] = 0; scr_cycen_hs_via[pj] = 0; scr_cycen_hs_hp[pj] = NULL; scr_cycen_hs_selfk[pj] = scr_cycen_parr_kind();
+  }
+#endif
+#ifdef SCR_CYCEN_RAWSTR
   /* LAB (holdraw), never lands: targets are the live HEAP STRINGS of the string census (scr_str_census.h must be included BEFORE this header). A sample
    * is every SCR_CYCEN_RSTRIDE-th live string with a non-trivial length; the scan below then finds its holders, and chain mode follows them up.
    * ScrStr layout (the census's own LAYOUT line): rc u32 @0, len u32 @4, cap u32 @8, data @12. */
@@ -747,6 +797,13 @@ SCR_CYCEN_FN void scr_cycen_holders(void) {
     }
 #endif
   }
+#ifdef SCR_CYCEN_RAWSTR
+  for (unsigned pi = 0; pi < SCR_CYCEN_PARR_SLOTS; pi++) {
+    const void *pa = scr_cycen_parr[pi]; if (pa == NULL) continue;
+    const void *sb3 = NULL; unsigned long long sbytes3 = 0;
+    if (scr_cycen_parr_peek(pa, &sb3, &sbytes3) && sb3 != NULL) scr_cycen_scan_words(sb3, sbytes3, 0, scr_cycen_parr_kind(), 1, pa);
+  }
+#endif
   for (unsigned q = 0; q < scr_cycen_nsn; q++) {
     ScrCyCenSN *s = &scr_cycen_sn[q];
     s->found = scr_cycen_hs_found[s->slot]; s->hkind = scr_cycen_hs_hk[s->slot]; s->hsite = scr_cycen_hs_hsite[s->slot]; s->via = scr_cycen_hs_via[s->slot];
