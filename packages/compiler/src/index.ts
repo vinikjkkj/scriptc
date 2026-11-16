@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { cDefinedNames, layoutMatchStats, layoutStaleWarning, llvmDefinedNames, parseLayoutOrder, reorderLlvmText, type LayoutOrder } from "./backend/layout-order.js";
 import { tapPhase, tapped } from "./phase-tap.js";
 import { basename, dirname, join, resolve } from "node:path";
-import { cacheRootDir, CcCompileError, compileC, compileLibArchive, resolveCc, targetPlatform } from "./backend/cc.js";
+import { cacheRootDir, CcCompileError, compileC, compileLibArchive, layoutLinkOrderingAvailable, resolveCc, targetPlatform } from "./backend/cc.js";
 import { emitModule, emitModuleProgram } from "./backend/emission/emitter.js";
 import { coroPlans } from "./ir/coro-plans.js";
 import { emitFinalKeyReadWidths, emitFinalNarrowBridges, flushKeyReadCensus, flushNarrowBridgeCensus, keyReadCensusOnly } from "./frontend/lowering/keyread-census.js";
@@ -1237,6 +1237,7 @@ async function warnIfLayoutOrderStale(
 async function earlyCacheOptionsFor(
   entryPath: string,
   opts: CompileOptions,
+  emitOrdered: boolean,
 ): Promise<EarlyBuildCacheOptions> {
   const compileOptions = JSON.stringify({
     emitIr: opts.emitIr ?? false,
@@ -1244,7 +1245,9 @@ async function earlyCacheOptionsFor(
     // layoutProfile is NOT here: it only adds a compile-only coverage flag and the profiler unit at the native stage (no emitter, IR or
     // lowering code reads it), and compileC's own key carries it, so a profiled build reuses the lowering of its unprofiled twin.
     // the order file's BYTES, not its name: editing the file must miss the cache
-    layoutOrder: opts.layoutOrder === undefined ? null : fnv1a(readFileSync(opts.layoutOrder, "utf8")),
+    // Only when the emitters order the TU: where the linker applies the order (layoutLinkOrderingAvailable) the TU is the same for every
+    // order file, so the entry is shared and an order edit costs the native compile and link only.
+    layoutOrder: opts.layoutOrder === undefined || !emitOrdered ? null : fnv1a(readFileSync(opts.layoutOrder, "utf8")),
     dynamic: opts.dynamic ?? false,
     backend: opts.backend ?? null,
     npmStatic:
@@ -1317,7 +1320,10 @@ async function compileTracked(
   // emitted TU's bytes, so it cannot exist until the work it would save has
   // already been done.
   if (inputs !== null) recordResolutionAnchors(entryPath);
-  const earlyOptions = cacheRoot === null ? null : await earlyCacheOptionsFor(entryPath, opts);
+  // Who applies --layout-order: the linker when it can (the TU stays in natural order and shares one cache entry across order files), the
+  // emitters otherwise (zig cc, binutils < 2.43 without lld).
+  const emitOrdered = opts.layoutOrder !== undefined && !(await layoutLinkOrderingAvailable());
+  const earlyOptions = cacheRoot === null ? null : await earlyCacheOptionsFor(entryPath, opts, emitOrdered);
   if (process.env["SCRIPTC_CACHE_DEBUG"] === "1") {
     process.stderr.write(
       `scriptc: compiler implementation ${compilerImplementationDir()}` +
@@ -1354,6 +1360,16 @@ async function compileTracked(
       // cached artifact's mtime, and a silent hit is indistinguishable from a
       // build that did the work.
       process.stderr.write("scriptc: early cache hit (frontend and codegen skipped)\n");
+      if (opts.layoutOrder !== undefined) {
+        await warnIfLayoutOrderStale(
+          opts.layoutOrder,
+          parseLayoutOrder(readFileSync(opts.layoutOrder, "utf8")),
+          hit.meta.backend,
+          hit.cPath,
+          hit.cPathParts,
+          opts.outDir,
+        );
+      }
       return linkProgram(
         entryPath,
         opts,
@@ -1458,6 +1474,8 @@ async function compileTracked(
   await mkdir(opts.outDir, { recursive: true });
   const stem = basename(entryPath).replace(/\.(ts|js|mjs|cjs)$/, "");
   const layoutOrder = opts.layoutOrder === undefined ? undefined : parseLayoutOrder(readFileSync(opts.layoutOrder, "utf8"));
+  // What the emitters get: nothing when the linker orders the program (see emitOrdered above).
+  const emitLayout = emitOrdered ? layoutOrder : undefined;
   // Both backends hang off the same in-memory IrModule (never the JSON
   // dump); the LLVM backend's .ll takes the .c's seat on the exact clang
   // command line below — compileC accepts either. The default lane tries
@@ -1482,7 +1500,7 @@ async function compileTracked(
   if (opts.backend !== "c") {
     try {
       const llPath = join(opts.outDir, `${stem}.ll`);
-      const llRead = await emitLlvmFile(lowered.module!, llStats, llPath, opts.sanitize ?? false, layoutOrder);
+      const llRead = await emitLlvmFile(lowered.module!, llStats, llPath, opts.sanitize ?? false, emitLayout);
       emittedReadsObjinstMembers = llRead.members;
       emittedReadsLitKey = llRead.lit;
       emittedReadsProcStream = llRead.procStream;
@@ -1506,7 +1524,7 @@ async function compileTracked(
   let programHeader: string | undefined;
   const headerName = `${stem}.scrh`;
   if (backend === "c") {
-    const written = await emitCFiles(lowered.module!, entryText, headerName, cPath, opts.outDir, stem, layoutOrder);
+    const written = await emitCFiles(lowered.module!, entryText, headerName, cPath, opts.outDir, stem, emitLayout);
     programHeader = written.programHeader;
     programUnits = written.programUnits;
     emittedReadsObjinstMembers = written.readsObjinstMembers;

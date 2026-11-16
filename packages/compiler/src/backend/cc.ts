@@ -1020,39 +1020,66 @@ function profCflags(): string[] {
  * runtime's own functions, scattered across ~100 objects, to the same order. zig cc rejects every spelling of it ("unsupported
  * linker arg", measured on zig 0.16, linux-gnu and windows-gnu), so it is skipped there; a linker whose --help names neither option
  * gets nothing. GNU ld spells it --section-ordering-file (binutils >= 2.43), lld --symbol-ordering-file. */
+type LayoutLinkKind = { kind: "section"; } | { kind: "symbol"; } | null;
+
+/** Which ordering-file option the build's linker has, or null. Detected once per driver spelling and never assumed. */
+const layoutLinkKindCache = new Map<string, Promise<LayoutLinkKind>>();
+function detectLayoutLinkKind(driver: { argv: readonly string[] }): Promise<LayoutLinkKind> {
+  const key = driver.argv.join("\0");
+  let hit = layoutLinkKindCache.get(key);
+  if (hit === undefined) {
+    hit = (async (): Promise<LayoutLinkKind> => {
+      const cc = driver.argv[0] ?? "clang";
+      if (/(^|[\\/])zig(\.exe)?$/.test(cc)) return null;
+      let ld = "ld";
+      try {
+        const r = await execFileAsync(cc, [...driver.argv.slice(1), "-print-prog-name=ld"]);
+        const got = String(r.stdout).trim();
+        if (got !== "") ld = got;
+      } catch {
+        return null;
+      }
+      let help = "";
+      try {
+        help = String((await execFileAsync(ld, ["--help"])).stdout);
+      } catch {
+        return null;
+      }
+      if (help.includes("--section-ordering-file")) return { kind: "section" };
+      if (help.includes("--symbol-ordering-file")) return { kind: "symbol" };
+      return null;
+    })();
+    layoutLinkKindCache.set(key, hit);
+  }
+  return hit;
+}
+
+/** True when the linker alone can apply a --layout-order file (and SCRIPTC_LAYOUT_LINK_ORDER is not 0). The driver then leaves the
+ * emitted program TU in its natural order: the TU and its early-cache entry are the same for every order file, so editing the file
+ * costs the native compile and link only, never the frontend, lowering or emission. Where this is false (zig cc, binutils < 2.43
+ * without lld) the emitters order the TU themselves, exactly as before. SCRIPTC_LAYOUT_EMIT_ORDER=1 forces that emission path. */
+export async function layoutLinkOrderingAvailable(): Promise<boolean> {
+  if (process.env["SCRIPTC_LAYOUT_LINK_ORDER"] === "0") return false;
+  if (process.env["SCRIPTC_LAYOUT_EMIT_ORDER"] === "1") return false;
+  return (await detectLayoutLinkKind(resolveCc())) !== null;
+}
+
 async function layoutLinkArgs(driver: { argv: readonly string[] }, orderPath: string | undefined, outPath: string): Promise<string[]> {
   if (orderPath === undefined) return [];
   // SCRIPTC_LAYOUT_LINK_ORDER=0: emission order only (the knob the tests use to prove the emitters' order does not lean on the linker).
   if (process.env["SCRIPTC_LAYOUT_LINK_ORDER"] === "0") return [];
-  const cc = driver.argv[0] ?? "clang";
-  if (/(^|[\\/])zig(\.exe)?$/.test(cc)) return [];
-  let ld = "ld";
-  try {
-    const r = await execFileAsync(cc, [...driver.argv.slice(1), "-print-prog-name=ld"]);
-    const got = String(r.stdout).trim();
-    if (got !== "") ld = got;
-  } catch {
-    return [];
-  }
-  let help = "";
-  try {
-    help = String((await execFileAsync(ld, ["--help"])).stdout);
-  } catch {
-    return [];
-  }
+  const found = await detectLayoutLinkKind(driver);
+  if (found === null) return [];
   const names = [...parseLayoutOrder(await readFile(orderPath, "utf8")).rank.keys()];
   if (names.length === 0) return [];
-  if (help.includes("--section-ordering-file")) {
+  if (found.kind === "section") {
     const file = `${outPath}.layout.ld`;
     await writeFile(file, `.text : {\n${names.map((n) => `  *(.text.${n} .text.unlikely.${n} .text.hot.${n} .text.startup.${n})`).join("\n")}\n}\n`);
     return [`-Wl,--section-ordering-file=${file}`];
   }
-  if (help.includes("--symbol-ordering-file")) {
-    const file = `${outPath}.layout.sym`;
-    await writeFile(file, `${names.join("\n")}\n`);
-    return [`-Wl,--symbol-ordering-file=${file}`];
-  }
-  return [];
+  const file = `${outPath}.layout.sym`;
+  await writeFile(file, `${names.join("\n")}\n`);
+  return [`-Wl,--symbol-ordering-file=${file}`];
 }
 
 /** --layout-profile is in effect for the build compileC is running (set at its entry; one build per process at a time). */

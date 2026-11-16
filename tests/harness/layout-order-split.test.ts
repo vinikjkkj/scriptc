@@ -18,6 +18,11 @@ import { compile } from "@scriptc/compiler";
 import { cDefinedNames } from "../../packages/compiler/src/backend/layout-order.js";
 import { exeName } from "./exe.js";
 
+// These tests are about the EMITTERS' ordering (a split program's parts, the pooled walkers). Where the linker can order the program the
+// emitters are left in natural order (layoutLinkOrderingAvailable), so the emitter path is forced here; layout-link-order.test.ts covers
+// the other one.
+process.env["SCRIPTC_LAYOUT_EMIT_ORDER"] = "1";
+
 const repoRoot = join(import.meta.dirname, "../..");
 const cacheDir = join(repoRoot, "node_modules/.cache/scriptc-tests");
 
