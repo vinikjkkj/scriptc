@@ -85,7 +85,7 @@ import { CLASS_BUILTIN_CTORLESS, CLASS_NO_DYN_NEW, EVAL_NO_SRC_CLASSES, GRAFTED_
 import { computeTwinEdits, type TwinEdits } from "./emitter-twin.js";
 import { unbindEngineMemberReads } from "./engine-fn-unbind.js";
 import { canBoxFuncIntoDyn } from "../../ir/nodes.js";
-import { arrayTypeHasLiveView, procStreamDynMemberFence, NULL_T, strandTrap, armDiscrimLits, arrayOf, BOOL, canBoxClassIntoDyn, internalSlotFields, isRefCounted, canAdaptDynFuncTo, dynRestApplyable, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, shapeHasAccessorSlots, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_EMITTER_CLASS, RUNTIME_STREAM_CLASSES, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
+import { arrayTypeHasLiveView, procStreamDynMemberFence, NULL_T, strandTrap, armDiscrimLits, arrayOf, BOOL, isIntegerKeyName, canBoxClassIntoDyn, internalSlotFields, isRefCounted, canAdaptDynFuncTo, dynRestApplyable, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, shapeHasAccessorSlots, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_EMITTER_CLASS, RUNTIME_STREAM_CLASSES, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
 import { type DynamicImportResolution, type NpmBuiltinUse, type NpmLazyTrap } from "../npm.js";
 import { provenanceActive } from "../provenance-registry.js";
 import {
@@ -6853,6 +6853,11 @@ export class Lowerer {
     // needs = written late, or the destination of a copy of a shape that needs; matters = enumerated, or the source of a copy
     // whose destination matters. A shape pays for the list only when it is both.
     const needs = new Set<string>([...late].filter(eligible));
+    // A pure index-signature source is ordered at run time (insertion order): its width-copy destination needs the list.
+    for (const c of this.listConsumers) {
+      const sv = this.shapes.get(c.src);
+      if (sv?.indexValue && sv.fields.length === 0 && !this.shapes.get(c.dst)?.indexValue && eligible(c.dst) && this.shapes.get(c.dst)?.keyOrders === undefined) needs.add(c.dst);
+    }
     for (let ch = true; ch;) {
       ch = false;
       for (const e of flowEdges) if (needs.has(e.src) && !needs.has(e.dst) && eligible(e.dst) && this.shapes.get(e.dst)?.keyOrders === undefined) { needs.add(e.dst); ch = true; }
@@ -6872,7 +6877,7 @@ export class Lowerer {
     for (const id of listed) {
       const s = this.shapes.get(id)!;
       s.keyList = true;
-      if (dests.has(id)) s.keyListAll = true;
+      if (dests.has(id) || this.listConsumers.some((c) => c.dst === id && this.shapes.get(c.src)?.indexValue && this.shapes.get(c.src)!.fields.length === 0)) s.keyListAll = true;
       if (process.env["SCRIPTC_KEYORDER_WHY"] !== undefined) console.error(`[keyorder] ${id} KEYLIST${dests.has(id) ? " ALL" : ""}`);
     }
     // The copies fill their destination's list in the order JS gives the copy: written parts in order, a spread contributing its
@@ -6955,7 +6960,7 @@ export class Lowerer {
       for (const f of [...functions]) visit(f.body, f);
     }
     for (const c of this.listConsumers) {
-      if (listed.has(c.src)) c.rebuild();
+      if (listed.has(c.src) || (listed.has(c.dst) && this.shapes.get(c.src)?.indexValue && this.shapes.get(c.src)!.fields.length === 0)) c.rebuild();
     }
     // Baked consumers rebuild over the list, now that the shapes carry it.
     for (const id of listed) {
@@ -7140,17 +7145,17 @@ export class Lowerer {
       for (const [lk, ord] of filledOrders.get(shapeId) ?? []) {
         if (known.has(lk)) known.set(lk, ord);
       }
-      const spellings = new Set([...known.values()].map((v) => v.join(",")));
-      if (spellings.size !== 1) { reject(`${spellings.size} distinct filled spellings`); return; }
-      const all = litSites.get(shapeId) ?? new Set<string>();
-      // NO LITERAL IN THE EMITTED IR is not evidence, whatever the walk
-      // recorded. A speculative lowering that was rolled back still reports
       // A literal that spreads a source with members the shape does not declare (zapo's group metadata: `{ ...commons, owner }`
       // typed as a narrower interface) is evidence by PROJECTION: JS enumerates the spelling, and the shape keeps the members it
       // declares, in that relative order.
       for (const [lk, ord] of known) {
         if (!ord.every((n) => shape.declaredOrder!.includes(n))) known.set(lk, ord.filter((n) => shape.declaredOrder!.includes(n)));
       }
+      const spellings = new Set([...known.values()].map((v) => v.join(",")));
+      if (spellings.size !== 1) { reject(`${spellings.size} distinct filled spellings`); return; }
+      const all = litSites.get(shapeId) ?? new Set<string>();
+      // NO LITERAL IN THE EMITTED IR is not evidence, whatever the walk
+      // recorded. A speculative lowering that was rolled back still reports
       // its spelling here, and a shape whose only values come from somewhere
       // this walk cannot point at has no construction to take an order from.
       if (all.size === 0) { reject("no recordLit of this shape reached the IR"); return; }
@@ -13223,7 +13228,7 @@ export class Lowerer {
         ownIf: { kind: "recordKeyPresent", obj: r, shapeId: fromId, field: fname, type: BOOL, loc },
       };
     };
-    this.liftedFns.push({
+    const widthFn: IrFunction = {
       name,
       params: [{ localId: "r.0", name: "r", type: fromT }],
       returnType: toT,
@@ -13286,8 +13291,65 @@ export class Lowerer {
         },
       ],
       loc,
-    });
+    };
+    this.liftedFns.push(widthFn);
+    // A PURE index-signature source (`Record<string, V>` filled by assignment) enumerates in INSERTION order, which the typed
+    // destination cannot carry in its fields: the copy fills the destination's key list from the source's slots, in order.
+    // Registered as a list consumer, so markKeyLists gives the destination a list when it is enumerated, and rebuilt then.
+    if (from.indexValue && from.fields.length === 0 && !to.tuple && !to.indexValue) {
+      this.noteListConsumer(fromId, toId, () => this.rebuildWidthFill(widthFn, fromId, toId, loc));
+    }
     return name;
+  }
+
+  /** Re-emits an index-signature -> record width helper so it also notes the destination's key list from the source's slots. */
+  rebuildWidthFill(fn: IrFunction, fromId: string, toId: string, loc: SrcLoc): void {
+    const to = this.shapes.get(toId)!;
+    const from = this.shapes.get(fromId)!;
+    if (to.keyList !== true || !from.indexValue) return;
+    const last = fn.body[fn.body.length - 1];
+    if (last === undefined || last.kind !== "return" || last.value === undefined) return; // already rebuilt
+    const toT: IrType = { kind: "record", shapeId: toId };
+    const fromT: IrType = { kind: "record", shapeId: fromId };
+    const ksT = arrayOf(F64);
+    const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
+    const ref = (id: string, type: IrType): IrExpr => ({ kind: "varRef", localId: id, type, loc });
+    const r = ref("r.0", fromT);
+    const notes: IrStmt[] = [];
+    to.fields.forEach((f, ord) => {
+      if (f.name.startsWith("%") || f.name.startsWith("__@") || isIntegerKeyName(f.name)) return;
+      notes.push({
+        kind: "if",
+        cond: { kind: "strEq", negated: false, left: ref("k.0", STRING), right: { kind: "strLit", value: f.name, type: STRING, loc }, type: BOOL, loc },
+        then: [{ kind: "exprStmt", expr: { kind: "recordOrd", op: "note", obj: ref("d.0", toT), shapeId: toId, ord, type: BOOL, loc }, loc }],
+        else_: null,
+        loc,
+      });
+    });
+    fn.locals.push(
+      { id: "d.0", name: "d", type: toT, mutable: true },
+      { id: "sls.0", name: "sls", type: ksT, mutable: false },
+      { id: "i.0", name: "i", type: F64, mutable: true },
+      { id: "sl.0", name: "sl", type: F64, mutable: false },
+      { id: "k.0", name: "k", type: STRING, mutable: false },
+    );
+    fn.body = [
+      { kind: "varDecl", localId: "d.0", init: last.value, loc },
+      { kind: "varDecl", localId: "sls.0", init: { kind: "recordOvfSlots", obj: r, shapeId: fromId, type: ksT, loc }, loc },
+      {
+        kind: "for",
+        init: { kind: "varDecl", localId: "i.0", init: num(0), loc },
+        cond: { kind: "bin", op: "<", left: ref("i.0", F64), right: { kind: "arrIntrinsic", method: "length", receiver: ref("sls.0", ksT), args: [], type: F64, loc }, type: BOOL, loc },
+        update: { kind: "assign", localId: "i.0", value: { kind: "bin", op: "+", left: ref("i.0", F64), right: num(1), type: F64, loc }, loc },
+        body: [
+          { kind: "varDecl", localId: "sl.0", init: { kind: "arrayGet", arr: ref("sls.0", ksT), index: ref("i.0", F64), type: F64, loc }, loc },
+          { kind: "varDecl", localId: "k.0", init: { kind: "recordOvfSlotGet", obj: r, shapeId: fromId, slot: ref("sl.0", F64), part: "key", type: STRING, loc }, loc },
+          ...notes,
+        ],
+        loc,
+      },
+      { kind: "return", value: ref("d.0", toT), loc },
+    ];
   }
 
   /** Interned `%arr.width.<n>(a)` — the per-element copy loop over
