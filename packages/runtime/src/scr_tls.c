@@ -644,9 +644,10 @@ static int scr_tls_vrfy_cb(void *ctx, mbedtls_x509_crt *crt, int depth, uint32_t
   ScrTlsSock *t = (ScrTlsSock *)ctx;
   bool self = crt->issuer_raw.len == crt->subject_raw.len &&
               memcmp(crt->issuer_raw.p, crt->subject_raw.p, crt->subject_raw.len) == 0;
-  /* a user checkServerIdentity REPLACES mbedTLS's name check (Node's rule): the
-   * CN flag is not a verdict then, and the identity run decides it */
-  if (t->cli != NULL && t->cli->identity != NULL) *flags &= ~MBEDTLS_X509_BADCERT_CN_MISMATCH;
+  /* a user checkServerIdentity REPLACES mbedTLS's name check (Node's rule), and so does the builtin Node-exact one (tls.checkServerIdentity
+   * ported below): mbedTLS has no IP-SAN matching and words nothing like Node, so the CN flag is never a verdict on a verifying client and
+   * the identity run after the handshake decides it */
+  if (t->cli != NULL && (t->cli->identity != NULL || t->cli->verify_recorded)) *flags &= ~MBEDTLS_X509_BADCERT_CN_MISMATCH;
   if (*flags & MBEDTLS_X509_BADCERT_EXPIRED) t->vrfy_expired = true;
   if (*flags & MBEDTLS_X509_BADCERT_CN_MISMATCH) t->vrfy_cn_mismatch = true;
   if (*flags & MBEDTLS_X509_BADCERT_NOT_TRUSTED) {
@@ -1956,14 +1957,23 @@ static ScrDyn *scr_id_copy_own_enum(const ScrDyn *src) {
  * set; with rejectUnauthorized:false the socket connects unauthorized. */
 static bool scr_tls_ident_run(ScrTlsSock *t) {
   ScrTlsCli *cli = t->cli;
-  if (cli == NULL || cli->identity == NULL || !cli->verify_recorded) return true;
+  if (cli == NULL || !cli->verify_recorded) return true;
+  if (cli->identity == NULL && t->resumed) return true; /* a resumed session was identity-checked when it was made */
   if (t->vrfy_expired || t->vrfy_leaf_self || t->vrfy_chain_self) return true;
   if (mbedtls_ssl_get_verify_result(&t->ssl) & MBEDTLS_X509_BADCERT_NOT_TRUSTED) return true;
   ScrDyn *args[2];
   args[0] = scr_id_dyn_str(cli->verify_name, strlen(cli->verify_name));
   const mbedtls_x509_crt *pc = mbedtls_ssl_get_peer_cert(&t->ssl);
   args[1] = pc != NULL ? scr_tls_cert_obj(pc, pc, 0) : scr_dyn_new_obj();
-  ScrDyn *r = scr_dyn_call(cli->identity, args, 2, "checkServerIdentity");
+  ScrDyn *r;
+  if (cli->identity != NULL) {
+    r = scr_dyn_call(cli->identity, args, 2, "checkServerIdentity");
+  } else {
+    /* the builtin: tls.checkServerIdentity, algorithm-exact, so the error is Node's (message with its reason, code, host, cert) */
+    ScrStr *hs = scr_str_new(cli->verify_name, strlen(cli->verify_name));
+    r = scr_tls_check_server_identity_dyn(hs, args[1]);
+    scr_str_release(hs);
+  }
   scr_dyn_release(args[0]);
   scr_dyn_release(args[1]);
   if (scr_exc_pending()) {
@@ -1977,6 +1987,7 @@ static bool scr_tls_ident_run(ScrTlsSock *t) {
     /* scr_error_new retains its message: the borrowed string needs no extra ref */
     ScrError *e = m != NULL && m->kind == SCR_DYN_STR ? scr_error_new(SCR_ERR_ERROR, m->v.str)
                                                       : scr_id_err_new("", 0);
+    if (cli->identity == NULL) scr_error_set_code(e, "ERR_TLS_CERT_ALTNAME_INVALID"); /* the builtin check's one code (tls.js) */
     if (c != NULL && c->kind == SCR_DYN_STR) {
       char code[64];
       size_t cl = c->v.str->len < sizeof code - 1 ? c->v.str->len : sizeof code - 1;
@@ -2198,7 +2209,9 @@ static void scr_tls_cli_wrap(ScrNetSocket *sock, void *ctx) {
   scr_tlssock_alloc_note();
   mbedtls_ssl_init(&t->ssl);
   if (mbedtls_ssl_setup(&t->ssl, &cli->conf) != 0) scr_tls_oom();
-  if (cli->hostname != NULL) (void)mbedtls_ssl_set_hostname(&t->ssl, cli->hostname);
+  /* An IP-literal peer sends no SNI and its name is checked by the identity run, but mbedTLS 3 refuses to verify a chain at all unless the
+   * hostname was set - or EXPLICITLY set to NULL (MBEDTLS_ERR_SSL_CERTIFICATE_VERIFICATION_WITHOUT_HOSTNAME otherwise). */
+  (void)mbedtls_ssl_set_hostname(&t->ssl, cli->hostname);
   if (cli->resume != NULL) (void)mbedtls_ssl_set_session(&t->ssl, cli->resume);
   mbedtls_ssl_set_verify(&t->ssl, &scr_tls_vrfy_cb, t);
   t->sock = sock;
@@ -3359,6 +3372,11 @@ void scr_tls_h2_client_wrap(ScrNetSocket *sock, ScrStr *host /*borrowed*/,
  * authorized). Chain errors dominate the identity check — Node records
  * ssl.verifyError() first and only reaches checkServerIdentity's
  * ERR_TLS_CERT_ALTNAME_INVALID on a VERIFIED chain. */
+/* The chain verified AND the identity check (mbedTLS's, now stripped from the verify flags, or the Node-exact builtin / the user's) passed: Node's `authorized`. */
+static bool scr_tls_verified_ok(ScrTlsSock *t) {
+  return mbedtls_ssl_get_verify_result(&t->ssl) == 0 && !t->vrfy_cn_mismatch;
+}
+
 static const char *scr_tls_auth_code(ScrTlsSock *t) {
   uint32_t vr = mbedtls_ssl_get_verify_result(&t->ssl);
   if (t->vrfy_expired) return "CERT_HAS_EXPIRED";
@@ -3494,13 +3512,13 @@ ScrDyn *scr_tls_sock_peer_cert(ScrNetSocket *s, bool detailed) {
 bool scr_tls_sock_authorized(ScrNetSocket *s) {
   ScrTlsSock *t = scr_tls_sock_of(s);
   return t != NULL && t->established && t->cli != NULL && t->cli->verify_recorded &&
-         mbedtls_ssl_get_verify_result(&t->ssl) == 0;
+         scr_tls_verified_ok(t);
 }
 
 ScrStr *scr_tls_sock_auth_error(ScrNetSocket *s) {
   ScrTlsSock *t = scr_tls_sock_of(s);
   if (t == NULL || !t->established || t->cli == NULL || !t->cli->verify_recorded ||
-      mbedtls_ssl_get_verify_result(&t->ssl) == 0) {
+      scr_tls_verified_ok(t)) {
     return NULL; /* the null arm — authorized, or never verified */
   }
   const char *code = scr_tls_auth_code(t);
@@ -3529,13 +3547,13 @@ static bool scr_tls_dynh_get(ScrNetSocket *s, const char *key, ScrDyn **out) {
   if (t == NULL) return false; /* a plain socket: the net dispatch answers */
   if (strcmp(key, "authorized") == 0) {
     bool a = t->established && t->cli != NULL && t->cli->verify_recorded &&
-             mbedtls_ssl_get_verify_result(&t->ssl) == 0;
+             scr_tls_verified_ok(t);
     *out = scr_dyn_new_bool(a);
     return true;
   }
   if (strcmp(key, "authorizationError") == 0) {
     if (!t->established || t->cli == NULL || !t->cli->verify_recorded ||
-        mbedtls_ssl_get_verify_result(&t->ssl) == 0) {
+        scr_tls_verified_ok(t)) {
       *out = scr_dyn_new_null();
       return true;
     }

@@ -742,6 +742,7 @@ struct ScrNetSocket {
    * (tls.connect's checkServerIdentity): listeners receive it with its
    * code; NULL = the message-only error */
   ScrError *pending_obj;
+  ScrError *cur_err_obj; /* BORROWED: the Error being delivered right now (set around the protocol layer's native_err hook) */
   /* every failed attempt of the autoSelectFamily chain (Node's AggregateError
    * members, each an Error with code/errno/syscall/address/port). Cleared when
    * an attempt connects. */
@@ -4474,6 +4475,10 @@ void scr_net_sock_transport_error_obj(ScrNetSocket *s, ScrError *e) {
   scr_net_sock_close_fd(s);
 }
 
+/* The Error object a transport set behind the pending message (a verification failure's Node error with its code and reason), borrowed; NULL when
+ * the failure is only a message. The http client reads it to fire the OBJECT on the request, as Node's socket error reaches it. */
+ScrError *scr_net_sock_pending_obj(ScrNetSocket *s) { return s->cur_err_obj; }
+
 void scr_net_sock_transport_error(ScrNetSocket *s, const char *msg) {
   if (msg != NULL) {
     if (!s->pending_err) s->pending_err = scr_str_new(msg, strlen(msg));
@@ -4941,7 +4946,9 @@ static bool scr_net_sock_fire_pending_error(ScrNetSocket *sock) {
    * teardown); unconsumed errors fall through to the socket's own
    * listeners — and the unhandled-'error' exit */
   bool consumed = false;
+  sock->cur_err_obj = obj;
   if (sock->native_err) consumed = sock->native_err(sock->native_ctx, msg);
+  sock->cur_err_obj = NULL;
   if (!consumed && !scr_exc_pending()) {
     if (obj != NULL) scr_net_fire_err_impl(&sock->err_ls, msg, obj, sock, SCR_DYNH_NET_SOCKET);
     else scr_net_fire_err_this(&sock->err_ls, msg, sock, SCR_DYNH_NET_SOCKET);

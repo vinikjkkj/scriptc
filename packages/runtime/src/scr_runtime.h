@@ -11631,6 +11631,7 @@ void scr_net_sock_transport_error(ScrNetSocket *s, const char *msg);
 /* The same failure carrying its Error object (tls.connect's checkServerIdentity):
  * listeners receive `e` (moved) with its code. */
 void scr_net_sock_transport_error_obj(ScrNetSocket *s, ScrError *e);
+ScrError *scr_net_sock_pending_obj(ScrNetSocket *s);
 /* Defer the server's 'connection' listeners to handshake completion —
  * tls.createServer's handler is the 'secureConnection' event, fired with
  * the socket only once the TLS layer stands (Node's timing). */

@@ -3409,7 +3409,14 @@ static bool scr_http_client_sock_err(ScrHttpConn *conn, ScrStr *msg) {
     /* connect/read failure before any response: the socket's message IS
      * Node's ('connect ECONNREFUSED ip:port') — fire it on the request */
     c->response_done = true;
-    scr_http_client_error(c, msg);
+    ScrError *po = c->sock != NULL ? scr_net_sock_pending_obj(c->sock) : NULL;
+    if (po != NULL && !c->close_emitted) {
+      /* a transport error with an identity (Node's ERR_TLS_CERT_ALTNAME_INVALID: code, reason, host, cert) reaches the request as that object */
+      c->had_error = true;
+      scr_net_fire_err_obj(&c->err_ls, po);
+    } else {
+      scr_http_client_error(c, msg);
+    }
     if (!scr_exc_pending()) scr_http_client_queue_close(c);
   } else {
     scr_http_client_premature(conn);
