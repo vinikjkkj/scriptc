@@ -124,6 +124,66 @@ __attribute__((constructor)) static void scr_poolstat_reg_cycle(void) {
 #define SCR_CS_MAX(which, n) ((void)0)
 #endif
 
+#ifdef SCR_HDR_COUNT
+/* LAB ONLY (-DSCR_HDR_COUNT): the numbers an 8-byte ScrCycHdr would be judged on: live cycle objects at their peak, the distinct (trace, free) pairs a program allocates
+ * (they would index a table of at most 16 bits), the largest root-buffer index ever used (buf_index width), and the payload sizes per pair. The report is rewritten at
+ * every power-of-two pass count and at exit (scr_hc_dump, also reached through the _Exit macro of tests/perf/dyncensus/scr_hc_exit.h). */
+typedef struct { ScrTraceFn trace; ScrCycFreeFn free_fn; unsigned long long n, live, snap; size_t smin, smax; } ScrHcPair;
+static ScrHcPair scr_hc_pairs[4096];
+static unsigned scr_hc_np;
+static ScrHcPair *scr_hc_last;
+static unsigned long long scr_hc_live, scr_hc_peak, scr_hc_snaplive, scr_hc_allocs, scr_hc_frees, scr_hc_passes;
+static size_t scr_hc_maxroots;
+static ScrHcPair *scr_hc_find(ScrTraceFn t, ScrCycFreeFn f) {
+  if (scr_hc_last != NULL && scr_hc_last->trace == t && scr_hc_last->free_fn == f) return scr_hc_last;
+  for (unsigned i = 0; i < scr_hc_np; i++) if (scr_hc_pairs[i].trace == t && scr_hc_pairs[i].free_fn == f) return scr_hc_last = &scr_hc_pairs[i];
+  if (scr_hc_np == 4096) return &scr_hc_pairs[4095];
+  ScrHcPair *r = &scr_hc_pairs[scr_hc_np++];
+  r->trace = t; r->free_fn = f; r->smin = (size_t)-1;
+  return scr_hc_last = r;
+}
+static void scr_hc_note_alloc(size_t size, ScrTraceFn t, ScrCycFreeFn f) {
+  ScrHcPair *r = scr_hc_find(t, f);
+  r->n++; r->live++;
+  if (size < r->smin) r->smin = size;
+  if (size > r->smax) r->smax = size;
+  scr_hc_allocs++;
+  if (++scr_hc_live > scr_hc_peak) {
+    scr_hc_peak = scr_hc_live;
+    if (scr_hc_live >= scr_hc_snaplive + 1024) {
+      scr_hc_snaplive = scr_hc_live;
+      for (unsigned i = 0; i < scr_hc_np; i++) scr_hc_pairs[i].snap = scr_hc_pairs[i].live;
+    }
+  }
+}
+static void scr_hc_note_free(const ScrCycHdr *h) {
+  scr_hc_find(scr_cyc_trace_of(h), scr_cyc_free_of(h))->live--;
+  scr_hc_live--; scr_hc_frees++;
+}
+void scr_hc_dump(void) {
+  const char *path = getenv("SCR_HDR_OUT");
+  FILE *f = fopen(path != NULL && *path ? path : "scr-hdr.txt", "w");
+  if (!f) return;
+  fprintf(f, "HC anchor=%p pairs=%u allocs=%llu frees=%llu peaklive=%llu snaplive=%llu maxroots=%zu hdr=%zu passes=%llu\n", (void *)&scr_collect_cycles, scr_hc_np, scr_hc_allocs,
+          scr_hc_frees, scr_hc_peak, scr_hc_snaplive, scr_hc_maxroots, sizeof(ScrCycHdr), scr_hc_passes);
+  for (unsigned i = 0; i < scr_hc_np; i++) {
+    const ScrHcPair *r = &scr_hc_pairs[i];
+    fprintf(f, "PAIR trace=%p free=%p n=%llu snap=%llu size=%zu..%zu\n", (void *)r->trace, (void *)r->free_fn, r->n, r->snap, r->smin, r->smax);
+  }
+  fclose(f);
+}
+__attribute__((constructor)) static void scr_hc_install(void) { atexit(scr_hc_dump); }
+#define SCR_HC_ALLOC(size, t, f) scr_hc_note_alloc((size), (t), (f))
+#define SCR_HC_FREE(h) scr_hc_note_free(h)
+#define SCR_HC_ROOTS() do { if (scr_nroots > scr_hc_maxroots) scr_hc_maxroots = scr_nroots; } while (0)
+#define SCR_HC_PASS() do { scr_hc_passes++; if ((scr_hc_passes & (scr_hc_passes - 1)) == 0) scr_hc_dump(); } while (0)
+#else
+#define SCR_HC_ALLOC(size, t, f) ((void)0)
+#define SCR_HC_FREE(h) ((void)0)
+#define SCR_HC_ROOTS() ((void)0)
+#define SCR_HC_PASS() ((void)0)
+#endif
+
 /* The census hook, as one macro rather than an #ifdef inside each arm of
  * the allocator below. With tests/perf/cycensus/scr_cyc_census.h absent
  * this expands to nothing, which is what makes an ordinary build carry no
@@ -1875,6 +1935,7 @@ static __attribute__((noinline)) void *scr_cyc_alloc_miss(size_t size,
  * pointer (header at scr_cyc_hdr). Aborts on OOM. */
 void *scr_cyc_alloc(size_t size, ScrTraceFn trace, ScrCycFreeFn free_fn) {
   SCR_LIFE_SITE();
+  SCR_HC_ALLOC(size, trace, free_fn);
   size_t phys = scr_pool_bytes(sizeof(ScrCycHdr) + size);
   ScrCycHdr *h = scr_cyc_ar_pop(phys);
   if (h == NULL) return scr_cyc_alloc_miss(size, trace, free_fn);
@@ -1946,6 +2007,7 @@ void scr_cyc_weak_mark(void *key) {
  * offered to the pool and then to free(), exactly as before. */
 void scr_cyc_free(void *obj) {
   scr_cyc_live--;
+  SCR_HC_FREE(scr_cyc_hdr(obj));
   SCR_LIFE_NOTE_FREE(obj);
   ScrCycHdr *h = scr_cyc_hdr(obj);
   /* THE WEAKMAP DEATH HOOK, AND IT IS FIRST ON PURPOSE — before the arena
@@ -2153,6 +2215,7 @@ void scr_cyc_on_release(void *obj) {
     h->buffered = 1;
     h->buf_index = (uint32_t)scr_nroots;
     scr_roots[scr_nroots++] = obj;
+    SCR_HC_ROOTS();
   }
   /* Threshold trigger. Never re-entered: a teardown's releases of untraced
    * children can buffer new candidates mid-collection, but they only wait
@@ -2339,6 +2402,7 @@ static void scr_collect_white(void *obj) {
 }
 
 void scr_collect_cycles(void) {
+  SCR_HC_PASS();
   if (scr_collecting || scr_nroots == 0) return;
   scr_collecting = true;
   SCR_CS_PASS_BEGIN();
