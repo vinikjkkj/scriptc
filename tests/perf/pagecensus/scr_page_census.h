@@ -187,6 +187,8 @@ SCR_PC_FN void scr_pc_reset(void) {
 /* One chunk. Everything is passed in rather than reached through a struct
  * definition this header cannot see; the free list is a plain singly-linked
  * list through the first word of each free block, which is generic. */
+/* Where a free block keeps its free-list link: past the 8-byte ScrCycHdr, which must survive (pad, blk, kind). scr_cycle.c asserts this equals SCR_CYC_LINK_OFF. */
+#define SCR_PC_LINK_OFF 8u
 SCR_PC_FN void scr_pc_note_chunk(const void *basev, const void *rawv,
                                  const void *limv, unsigned long hdrzone,
                                  unsigned long stride, const void *bumpv,
@@ -236,7 +238,7 @@ SCR_PC_FN void scr_pc_note_chunk(const void *basev, const void *rawv,
     } else {
       live[(unsigned long)(bp - cs) / stride] = 0;
     }
-    memcpy(&b, bp, sizeof(void *));
+    memcpy(&b, bp + SCR_PC_LINK_OFF, sizeof(void *));
   }
   /* SLOTS ON RETURNED PAGES ARE FREE AND DELIBERATELY NOT ON THE LIST.
    * scr_cyc_pr_sweep_chunk unthreads them before the discard, because the
@@ -409,7 +411,7 @@ SCR_PC_FN void scr_pc_synth_case(int idx, int mode, long arg, unsigned want) {
       unsigned char *b;
       if (scr_pc_synth_live(mode, arg, i)) continue;
       b = cs + i * SCR_PC_SYNTH_STRIDE;
-      memcpy(b, &head, sizeof(void *));
+      memcpy(b + SCR_PC_LINK_OFF, &head, sizeof(void *));
       head = (void *)b;
       flen++;
     }
