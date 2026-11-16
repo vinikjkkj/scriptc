@@ -1,11 +1,10 @@
 /* THE FIRST IDLE SEAM AFTER STARTUP DROPS THE PROGRAM'S OWN EXECUTABLE TEXT ONCE -- AND SAYS SO.
  *
- * scr_async.c's sleep seam calls MADV_DONTNEED on the executable's r-xp mappings once, after SCR_TEXT_DROP_AFTER_MS
- * of loop time (Linux/glibc only). The pages stay in the page cache and fault back in on use: this lowers the
+ * scr_async.c's sleep seam calls MADV_DONTNEED on the executable's r-xp mappings once, at the second idle seam (SCR_TEXT_DROP_AFTER_MS = 0 of loop time; it was 200 ms until the REST start-up peak was measured to sit just before the drop) (Linux/glibc only). The pages stay in the page cache and fault back in on use: this lowers the
  * process's resident set, not system memory. The measured effect (redis bench: peak RSS 116.7 -> 104.8 MiB) is in the
  * commit; what is pinned HERE is the mechanism, deterministically:
  *
- *   knob on  -- exactly one `[textdrop] drop #1` line from a 600 ms program (the first drop lands after the 200 ms delay and the next is due 500 ms later, past the program's end), with a residency after the drop no larger than before;
+ *   knob on  -- exactly one `[textdrop] drop #1` line from a 500 ms program (the first drop lands at the second idle seam and the next is due 500 ms later, past the program's end), with a residency after the drop no larger than before;
  *   the repeat interval -- a program with idle seams for ~1.6 s drops again by default (the interval is 500 ms), and exactly once when SCR_TEXT_DROP_EVERY_MS=2000 (the previous default) or 0;
  *   SCR_TEXT_DROP=0 -- prints nothing at all (the negative control: a drop that found nothing still prints);
  *   a short program that exits before the delay pays nothing: no line even with the stat knob on;
@@ -51,16 +50,18 @@ describe.skipIf(!linux)("the text drop fires once at the first idle seam, behind
   let short = "";
   let idleLong = "";
   let faultBurst = "";
+  let early = "";
   beforeAll(async () => {
     idle = await build("idle");
     short = await build("short");
     idleLong = await build("idle-long");
     faultBurst = await build("fault-burst");
+    early = await build("early");
   }, 300_000);
 
   test("on: exactly one line, residency does not grow", async () => {
     const r = await run(idle, { SCR_TEXT_DROP_STAT: "1" });
-    expect(r.stdout).toBe("done 6\n");
+    expect(r.stdout).toBe("done 5\n");
     expect(r.lines).toHaveLength(1);
     const m = /drop #1 mappings=(\d+) exeTextKiB (\d+)->(\d+)/.exec(r.lines[0]!);
     expect(m).not.toBeNull();
@@ -93,9 +94,19 @@ describe.skipIf(!linux)("the text drop fires once at the first idle seam, behind
     expect(off.lines).toHaveLength(1);
   });
 
+  test("the first drop does not wait 200 ms: a 150 ms program that idles three times drops once", async () => {
+    const r = await run(early, { SCR_TEXT_DROP_STAT: "1" });
+    expect(r.stdout).toBe("done 3\n");
+    expect(r.lines).toHaveLength(1);
+    expect(r.lines[0]).toContain("drop #1");
+    /* the negative control: the old delay, built in, would print nothing for this program; SCR_TEXT_DROP=0 prints nothing now */
+    const off = await run(early, { SCR_TEXT_DROP: "0", SCR_TEXT_DROP_STAT: "1" });
+    expect(off.lines).toHaveLength(0);
+  });
+
   test("SCR_TEXT_DROP=0 prints nothing (the negative control)", async () => {
     const r = await run(idle, { SCR_TEXT_DROP: "0", SCR_TEXT_DROP_STAT: "1" });
-    expect(r.stdout).toBe("done 6\n");
+    expect(r.stdout).toBe("done 5\n");
     expect(r.lines).toHaveLength(0);
   });
 

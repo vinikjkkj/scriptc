@@ -2171,7 +2171,7 @@ static void scr_heap_trim_line(const char *const *labels, const size_t *vals,
  * faults unchanged (68.9k vs 68.2k), no measurable CPU change.
  *
  * Only the executable's own r-xp mappings are touched (shared libraries are left alone), and only once, and only
- * after SCR_TEXT_DROP_AFTER_MS of loop time, so a short program that reaches an idle seam within that time pays
+ * after SCR_TEXT_DROP_AFTER_MS of loop time (0: at the second idle seam), so a program that idles fewer than twice pays
  * nothing and one that exits before any seam never gets here. SCR_TEXT_DROP=0 is the negative control.
  * SCR_TEXT_DROP_STAT=1 prints one line with the text residency before and after (from /proc/self/smaps).
  * A binary with text relocations would lose them under DONTNEED, so the drop is refused when the dynamic section
@@ -2179,8 +2179,14 @@ static void scr_heap_trim_line(const char *const *labels, const size_t *vals,
 #ifndef SCR_TEXT_DROP
 #define SCR_TEXT_DROP 1
 #endif
+/* The FIRST drop: 0 = at the second idle seam (the first seam only records its time, so a program that never idles twice pays nothing).
+ * It used to wait 200 ms of loop time. MEASURED on the zapo REST app (CI, main 8fbf6f210, one binary, the knob alone, 3 reps, VmHWM): the peak is the
+ * instant just BEFORE this drop (0.23 s: 26.9 of 46.3 MB is executable text that fault-around mapped during module init, 90% of it in the first 45 ms),
+ * so an earlier drop lowers the peak itself: plain 46.07 -> 42.78 MB (30 ms: 42.24), --pgo ordered 32.42 -> 30.65 MB (30 ms: 30.76); with the kernel's
+ * fault-around at 4 KiB 41.04 -> 35.34 (30 ms: 38.09) and 27.92 -> 27.06. The price is the startup code re-faulting after the drop: +11% minor faults at
+ * 1.5 s (4,802 -> 5,363), no major faults, login time inside run-to-run noise. The repeat cadence below (500 ms / 256 faults) is unchanged. */
 #ifndef SCR_TEXT_DROP_AFTER_MS
-#define SCR_TEXT_DROP_AFTER_MS 200
+#define SCR_TEXT_DROP_AFTER_MS 0
 #endif
 #ifndef SCR_TEXT_DROP_EVERY_MS
 #define SCR_TEXT_DROP_EVERY_MS 500 /* repeat at most this often; 0 = the first drop only. MEASURED on the zapo REST app (peak RSS, two runs each): 2000 ms gave 52.3 / 52.0 MB, 1000 ms 52.1 / 49.4, 500 ms 47.7 / 45.2, 250 ms 48.6 / 47.8 -- the drop only fires at an idle seam, so a shorter interval than 500 buys nothing more; minor faults rose 9.1k -> 9.1-9.3k at 500 (10.2k at 250) and CPU stayed inside run-to-run noise. */
