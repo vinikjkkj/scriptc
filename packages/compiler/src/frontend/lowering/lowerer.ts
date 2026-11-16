@@ -6038,6 +6038,9 @@ export class Lowerer {
    * untouched, which is what tests/corpus/2026 has always relied on. */
   /** Object literals holding one spread of a plain read, by location: when the SOURCE's shape has several key orders the
    * literal's order is the source instance's, so the post-lowering order pass derives the literal's orders from it. */
+  /** Shapes a spread literal WIDENED to carry the members its source has and its declared type does not (lower-exprs): the
+   * width edge into the declared shape must merge whatever the growth, because the alternative is dropping a member Node keeps. */
+  readonly carryShapes = new Set<string>();
   readonly spreadLiterals = new Map<string, {
     shapeId: string;
     srcShapeId: string;

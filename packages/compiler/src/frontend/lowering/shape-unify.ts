@@ -303,8 +303,11 @@ export function unifyWidthShapes(L: Lowerer, functions: IrFunction[]): UnifyOutc
     }
     const names = [...byName.keys()];
     // THE CAP.
+    // A carry shape (a spread literal widened so it drops nothing) is exempt: the cap exists to avoid growing a view to spare a copy,
+    // and here the copy is what would lose members.
+    const carries = ms.some((m) => L.carryShapes.has(m));
     for (const m of ms) {
-      if (names.length - ownFields(m).length > GROWTH_CAP) return `over-cap ${m} +${names.length - ownFields(m).length}`;
+      if (!carries && names.length - ownFields(m).length > GROWTH_CAP) return `over-cap ${m} +${names.length - ownFields(m).length}`;
     }
     // OBLIGATION 1 — every field this adds to any member must be optional-
     // flavored, so the unset slot IS the undefined arm and every own-key

@@ -12515,6 +12515,34 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         shape = L.shapes.get(narrowedId)!;
       }
     }
+    // CARRY THE SPREAD'S UNDECLARED MEMBERS. Node's object keeps every member a spread contributes, whatever interface the
+    // literal is then typed as. The shape the literal builds is the DECLARED one, so a source member it does not declare used to be
+    // dropped (divergence 36) - silent data loss. The literal now builds a WIDENED shape: the declared members plus each undeclared
+    // source member as an optional-flavored field. The flow into the declared type is an ordinary width edge; shape-unify closes it
+    // by merging the two shapes (cap-exempt for a carry shape, which must never drop), so the extras live in the one struct, and
+    // an instance built elsewhere leaves them unset (the undefined arm IS "absent").
+    if (!shape.tuple && !shape.indexValue && shape.declaredOrder && !shape.fields.some((f) => f.name.startsWith("%"))) {
+      const extras: { name: string; type: IrType }[] = [];
+      for (const p of expr.properties) {
+        if (!ts.isSpreadAssignment(p) || conditionalSpreadOf(p.expression)) continue;
+        const st = L.mapTypeOf(L.typeOf(p.expression));
+        if (st?.kind !== "record") continue;
+        const ss = L.shapes.get(st.shapeId);
+        if (!ss || ss.tuple || ss.indexValue) continue;
+        for (const f of ss.fields) {
+          if (f.name.startsWith("%") || f.name.startsWith("__@") || f.type.kind === "func") continue;
+          if (shape.fields.some((x) => x.name === f.name) || extras.some((x) => x.name === f.name)) continue;
+          const armed = f.type.kind === "union" && L.armTag(f.type.unionId, UNDEFINED_T) >= 0;
+          extras.push({ name: f.name, type: armed ? f.type : L.withUndefinedArm(f.type) });
+        }
+      }
+      if (extras.length > 0) {
+        const wid = L.shapes.intern([...shape.fields.map((f) => ({ name: f.name, type: f.type })), ...extras], false, undefined);
+        L.carryShapes.add(wid);
+        type = { kind: "record", shapeId: wid };
+        shape = L.shapes.get(wid)!;
+      }
+    }
     const fieldTypes = new Map(shape.fields.map((f) => [f.name, f.type]));
 
     // KEY-ORDER risk, the LITERAL half. `declaredOrder` is the first-interned
