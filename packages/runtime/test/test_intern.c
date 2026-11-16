@@ -445,8 +445,11 @@ int main(int argc, char **argv) {
     return failures ? 1 : 0;
   }
 
-  if (getenv("SCR_STRING_INTERN_WEAK") != NULL &&
-      strtol(getenv("SCR_STRING_INTERN_WEAK"), NULL, 10) != 0) {
+  /* The shipping default is WEAK entries (scr_string.c SCR_STR_INTERN_WEAK 1), so an UNSET knob selects the weak arm; the owning table, whose
+   * retention the arm below pins, is chosen with SCR_STRING_INTERN_WEAK=0. */
+  const char *weakenv = getenv("SCR_STRING_INTERN_WEAK");
+  int weak = weakenv == NULL ? 1 : strtol(weakenv, NULL, 10) != 0;
+  if (weak) {
     /* I2, I4 and I3's MECHANISM are void by construction here; t_weak
      * asserts what replaces them. t_band/t_gap/t_walk/t_bounded are
      * table-policy claims that a weak table must still satisfy. */

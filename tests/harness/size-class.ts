@@ -1771,7 +1771,7 @@ export const SIZE_DRIFT_PAGE = 4_096;
 export const STATIC_CLASS_RECORDED = platform === "win32" ? 116_736 : null;
 
 /* 2026-09-26 - +4,608 on the REGEX class only, and the bytes are accounted
- * for: non-owning intern entries (SCR_STRING_INTERN_WEAK, off by default).
+ * for: non-owning intern entries (SCR_STRING_INTERN_WEAK; the default since 2026-11-16).
  *
  * WHAT BOUGHT THEM, measured rather than inferred. Compiling scr_string.c
  * ALONE at the two revisions, same flags, same target:
