@@ -90,6 +90,9 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
+#ifdef __GLIBC__
+#include <malloc.h> /* LAB: a unit that includes <malloc.h> AFTER the allocation macros below does not compile; include its guard first */
+#endif
 
 #ifdef _WIN32
 /* windows.h pulls in <winsock.h> unless something suppresses it, and this
