@@ -1,7 +1,7 @@
-/* The cycle arena carves blocks at 8-byte strides (SCR_CYC_ARENA_STRIDE_ALIGN), not 16: a 40-byte class is carved at 40, not 48.
+/* The cycle arena carves blocks at 8-byte strides (SCR_CYC_ARENA_STRIDE_ALIGN), not 16: a 40-byte class is carved at 40, not 48. (With the 8-byte ScrCycHdr a union box is a 32-byte block, a 16 multiple, so it no longer exercises the stride; a three-pointer class instance is the 40-byte block.)
  *
- * POSITIVE CONTROL: the same program built with -DSCR_CYC_ARENA_STRIDE_ALIGN=16 (the old stride) must hold 8 more bytes per union box, so two million
- * boxes cost about 16 MB more, and the 8-byte arm must land near 49 bytes per array element (a 40-byte union block plus an 8-byte slot, plus the
+ * POSITIVE CONTROL: the same program built with -DSCR_CYC_ARENA_STRIDE_ALIGN=16 (the old stride) must hold 8 more bytes per instance, so two million
+ * instances cost about 16 MB more, and the 8-byte arm must land near 49 bytes per array element (a 40-byte union block plus an 8-byte slot, plus the
  * program's own growth) against about 57. The program prints the same numbers either way: only the resident size differs. Linux only: the resident
  * size is read from /proc/self/status, and the arena is off under --sanitize (SCR_RC_AUDIT), so this runs plain. */
 import { spawnSync } from "node:child_process";
@@ -17,10 +17,11 @@ const cacheDir = join(repoRoot, "node_modules/.cache/scriptc-tests");
 const SOURCE = [
   'import { readFileSync } from "node:fs";',
   'const rss = (): number => { const m = /VmRSS:\\s+(\\d+)/.exec(readFileSync("/proc/self/status", "utf8")); return m ? Number(m[1]) : -1; };',
+  "class Node3 { a: Node3 | null = null; b: Node3 | null = null; c: Node3 | null = null; }",
   "const N = 2_000_000;",
   "const before = rss();",
-  "const a: (number | string)[] = [];",
-  'for (let i = 0; i < N; i++) a.push(i % 3 === 0 ? "s" : i * 1.5);',
+  "const a: Node3[] = [];",
+  "for (let i = 0; i < N; i++) a.push(new Node3());",
   'console.log("objects", a.length, "delta_kB", rss() - before);',
   "",
 ].join("\n");
@@ -53,7 +54,7 @@ const delta = (bin: string): number => {
 };
 
 describe.skipIf(process.platform !== "linux")("the cycle arena stride", () => {
-  test("8-byte strides hold 2M union boxes in about 16 MB less than 16-byte strides", async () => {
+  test("8-byte strides hold 2M 40-byte instances in about 16 MB less than 16-byte strides", async () => {
     const eight = await build("8", undefined);
     const sixteen = await build("16", "-DSCR_CYC_ARENA_STRIDE_ALIGN=16");
     const d8 = delta(eight);

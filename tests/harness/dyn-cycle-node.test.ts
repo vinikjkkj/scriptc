@@ -84,7 +84,9 @@ describe("a dyn value is a cycle-collector node", () => {
     expect(
       c,
       "Owner's only cycle-capable field is dyn and it was allocated without a cycle header",
-    ).toContain("scr_cyc_alloc(sizeof *o, &sc_trace_Owner, &sc_gcfree_Owner)");
+    ).toContain("scr_cyc_kind_of(&sc_trace_Owner, &sc_gcfree_Owner)");
+    // ...and the allocation itself carves a cycle-headered block of that kind (the kind is cached per site in sc_ck).
+    expect(c, "Owner's allocation does not take the cycle-headered path").toContain("scr_cyc_alloc_k(sizeof *o, sc_ck)");
     expect(c).toContain("scr_cyc_on_dead(o);");
 
     // And its trace visits the dyn field — a header with a trace that
