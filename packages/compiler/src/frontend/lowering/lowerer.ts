@@ -7080,7 +7080,9 @@ export class Lowerer {
       const declared = shape.declaredOrder;
       const orders: string[][] = [declared];
       const at = new Map<string, number>();
-      for (const [lk, spelled] of ev.locs) {
+      for (const [lk, spelledAll] of ev.locs) {
+        // Members the shape does not declare (a spread of a wider literal) drop out: the projection is the order JS gives them.
+        const spelled = spelledAll.every((n) => declared.includes(n)) ? spelledAll : spelledAll.filter((n) => declared.includes(n));
         if (spelled.length < 2 || !spelled.every((n) => declared.includes(n))) {
           if (spelled.length >= 2) { if (why) console.error(`[keyorder] ${shapeId} NO-INDEX #8`); return false; }
           at.set(lk, 0);
@@ -7143,6 +7145,12 @@ export class Lowerer {
       const all = litSites.get(shapeId) ?? new Set<string>();
       // NO LITERAL IN THE EMITTED IR is not evidence, whatever the walk
       // recorded. A speculative lowering that was rolled back still reports
+      // A literal that spreads a source with members the shape does not declare (zapo's group metadata: `{ ...commons, owner }`
+      // typed as a narrower interface) is evidence by PROJECTION: JS enumerates the spelling, and the shape keeps the members it
+      // declares, in that relative order.
+      for (const [lk, ord] of known) {
+        if (!ord.every((n) => shape.declaredOrder!.includes(n))) known.set(lk, ord.filter((n) => shape.declaredOrder!.includes(n)));
+      }
       // its spelling here, and a shape whose only values come from somewhere
       // this walk cannot point at has no construction to take an order from.
       if (all.size === 0) { reject("no recordLit of this shape reached the IR"); return; }

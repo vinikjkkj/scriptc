@@ -28086,6 +28086,18 @@
     "<repo>/tests/corpus/25343-object-entries-and-values-of-optional-members-of-three-interleaved-kinds-skip-the-absent-ones-in-key-order.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25422-a-literal-spreading-members-its-shape-does-not-declare-enumerates-in-its-own-spelling.ts": {
+   "order": [
+    "<repo>/tests/corpus/25422-a-literal-spreading-members-its-shape-does-not-declare-enumerates-in-its-own-spelling.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25423-two-literals-with-undeclared-spread-members-spelling-different-orders-each-enumerate-their-own.ts": {
+   "order": [
+    "<repo>/tests/corpus/25423-two-literals-with-undeclared-spread-members-spelling-different-orders-each-enumerate-their-own.ts"
+   ],
+   "diags": []
   }
  }
 }
