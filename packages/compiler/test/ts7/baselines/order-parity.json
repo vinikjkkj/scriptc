@@ -15932,6 +15932,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25410-an-instance-that-never-holds-a-container-skips-the-collector-and-one-that-later-does-is-still-collected-in-a-cycle.ts": {
+   "order": [
+    "<repo>/tests/corpus/25410-an-instance-that-never-holds-a-container-skips-the-collector-and-one-that-later-does-is-still-collected-in-a-cycle.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25411-classes-the-container-bit-cannot-gate-keep-collecting-their-cycles-expando-tables-typed-edges-and-subclasses.ts": {
+   "order": [
+    "<repo>/tests/corpus/25411-classes-the-container-bit-cannot-gate-keep-collecting-their-cycles-expando-tables-typed-edges-and-subclasses.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25412-a-class-with-a-run-time-property-table-is-gated-and-a-cycle-through-a-defined-property-is-still-collected.ts": {
+   "order": [
+    "<repo>/tests/corpus/25412-a-class-with-a-run-time-property-table-is-gated-and-a-cycle-through-a-defined-property-is-still-collected.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25413-a-gated-class-with-number-slot-fields-keeps-values-and-collects-its-cycles-with-balanced-pacing.ts": {
+   "order": [
+    "<repo>/tests/corpus/25413-a-gated-class-with-number-slot-fields-keeps-values-and-collects-its-cycles-with-balanced-pacing.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/25430-a-dyn-object-with-a-literal-discriminant-takes-its-own-union-arm-over-a-wider-all-optional-record.ts": {
    "order": [
     "<repo>/tests/corpus/25430-a-dyn-object-with-a-literal-discriminant-takes-its-own-union-arm-over-a-wider-all-optional-record.ts"
