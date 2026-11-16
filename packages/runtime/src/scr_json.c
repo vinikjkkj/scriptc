@@ -1128,28 +1128,44 @@ ScrBox *scr_cap_from_dyn(ScrDyn *d) {
   return (ScrBox *)((uintptr_t)(d != NULL ? scr_dyn_retain(d) : NULL) | SCR_CAP_TAG_DYN);
 }
 
+_Static_assert(SCR_DYN_ARR + 1 == SCR_DYN_OBJ && SCR_DYN_OBJ < SCR_DYN_FUNC && SCR_DYN_FUNC < SCR_DYN_OBJINST, "the non-final release tests kinds by range");
+
+/* The non-final release of a boxed class instance. Out of line so scr_dyn_release's own count store stays the plain decrement: the undo below
+ * would otherwise make the compiler keep the old count live across the whole function. */
+static __attribute__((noinline)) void scr_dyn_release_inst(ScrDyn *d) {
+  if (scr_dyn_inst_is_head(d) && (scr_dyn_inst_cls(d)->head & 0x8000u) != 0) { /* a class that can sit in a garbage cycle: undo the decrement and let its own release run (count, gate, root buffering) */
+    d->rc++;
+    scr_dyn_inst_cls(d)->release(d);
+  }
+  /* a head of a class that cannot be in a cycle is never a root: the count is already down */
+}
+
 __attribute__((noinline)) void scr_dyn_release(ScrDyn *d) {
   if (!d || d->rc == SIZE_MAX) return; /* NULL: an uninitialized `let` local */
   if (--d->rc != 0) {
-    /* Candidate-root buffering is restricted to the three kinds that OWN a
-     * traced child. A scalar, string, bytes, handle, promise, jsval,
-     * bigint or boxed-instance dyn points at nothing the collector walks,
-     * so it can never be a MEMBER of a cycle - only reachable from one,
-     * which the visit filter handles without it ever being a root.
-     * Buffering them would cost a full graph walk per 256 releases of the
+    /* Candidate-root buffering is restricted to the kinds that OWN a traced child. A scalar, string, bytes, handle, promise, jsval,
+     * bigint or boxed-instance dyn points at nothing the collector walks, so it can never be a MEMBER of a cycle - only reachable from one,
+     * which the visit filter handles without it ever being a root. Buffering them would cost a full graph walk per 256 releases of the
      * hottest allocation in the runtime and could never find anything. */
-    if (d->kind == SCR_DYN_OBJINST) {
-      if (scr_dyn_inst_is_head(d) && (scr_dyn_inst_cls(d)->head & 0x8000u) != 0) { /* a class that can sit in a garbage cycle: undo the decrement and let its own release run (count, gate, root buffering) */
-        d->rc++;
-        scr_dyn_inst_cls(d)->release(d);
-      }
-      return; /* a head of a class that cannot be in a cycle is never a root: the count is already down */
-    }
-    if (d->kind == SCR_DYN_ARR || d->kind == SCR_DYN_OBJ ||
-        (d->kind == SCR_DYN_FUNC && (!((ScrClosure *)d)->isdyn || scr_closure_may_cycle_x((ScrClosure *)d)))) {
-      /* An embedded closure is buffered under the SAME predicate its own release and teardown use (scr_closure_may_cycle): the teardown
-       * only unbuffers an object that predicate admitted, so a closure buffered here regardless would be freed while still listed. */
+    /* ARR and OBJ first, with the subtract spelled as an lea: the compiler turns "kind - ARR < 2" into mask-and-compare (one instruction more
+     * than the lea form the plain chain had), and these are the kinds that pay for the whole chain above them. */
+    uint32_t rel_k = (uint32_t)d->kind - (uint32_t)SCR_DYN_ARR;
+#if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
+    __asm__("" : "+r"(rel_k)); /* the subtract stays a separate lea; the test below is then cmp/jb */
+#endif
+    if (rel_k < 2u) {
       scr_cyc_on_release(d); /* may collect - d is done being touched */
+      return;
+    }
+    if (d->kind < SCR_DYN_FUNC) return; /* null, bool, number, string, undefined, bytes: past the ARR/OBJ test above, the same compare the plain chain made for FUNC */
+    if (d->kind == SCR_DYN_FUNC) {
+      if (!((ScrClosure *)d)->isdyn || scr_closure_may_cycle_x((ScrClosure *)d)) {
+        /* An embedded closure is buffered under the SAME predicate its own release and teardown use (scr_closure_may_cycle): the teardown
+         * only unbuffers an object that predicate admitted, so a closure buffered here regardless would be freed while still listed. */
+        scr_cyc_on_release(d);
+      }
+    } else if (d->kind == SCR_DYN_OBJINST) {
+      scr_dyn_release_inst(d);
     }
     return;
   }
