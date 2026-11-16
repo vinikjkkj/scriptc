@@ -16716,7 +16716,17 @@ void scr_recsrc_own(const ScrDyn *slot, size_t idx) {
 }
 /* A struct view over a source with a member that has no dynamic form (a platform object): the surfaces that need a dynamic copy
  * of the record (enumeration, JSON, inspect, crossing into untyped code) have none to give. Loud, never silent. */
-static ScrDyn *scr_rec_view_unboxable(void) {
+#include <execinfo.h>
+static ScrDyn *scr_rec_view_unboxable_at(const ScrRecSrc *r, const char *how);
+static ScrDyn *scr_rec_view_unboxable_at(const ScrRecSrc *r, const char *how) {
+  /* LAB (recview), never lands: name the code that hands a source with a platform-object member to untyped code. */
+  if (getenv("SCR_RECVIEW_TRACE") != NULL) {
+    void *bt[24];
+    int n = backtrace(bt, 24), i;
+    fprintf(stderr, "RECVIEW-UNBOXABLE how=%s anchor=%p srcRetain=%p srcRelease=%p targetFields=%zu bt=", how, (void *)&scr_collect_cycles, r ? (void *)r->map->retain : NULL, r ? (void *)r->map->release : NULL, r ? r->map->n : (size_t)0);
+    for (i = 0; i < n; i++) fprintf(stderr, "%p ", bt[i]);
+    fprintf(stderr, "\n");
+  }
   static const char msg[] = "this record has a member with no dynamic form, so it cannot be enumerated, serialised or handed to untyped code through another type's view yet";
   scr_throw_error_msg(SCR_ERR_ERROR, msg, sizeof msg - 1);
   return scr_dyn_undefined();
@@ -16725,7 +16735,7 @@ ScrDyn *scr_rec_view_get(ScrDyn *slot) {
   if (slot == NULL) return scr_dyn_undefined();
   const ScrRecSrc *r = scr_recsrc_of(slot);
   if (r != NULL) {
-    if (r->map->snapshot == NULL) return scr_rec_view_unboxable();
+    if (r->map->snapshot == NULL) return scr_rec_view_unboxable_at(r, "snapshot");
     return r->map->snapshot(r->src);
   }
   return scr_dyn_retain(slot);
@@ -16733,7 +16743,7 @@ ScrDyn *scr_rec_view_get(ScrDyn *slot) {
 ScrDyn *scr_rec_view_cross(ScrDyn *slot) {
   const ScrRecSrc *r = scr_recsrc_of(slot);
   if (r != NULL) {
-    if (r->map->cross == NULL) return scr_rec_view_unboxable();
+    if (r->map->cross == NULL) return scr_rec_view_unboxable_at(r, "cross");
     return r->map->cross(r->src);
   }
   return scr_rec_view_get(slot);
