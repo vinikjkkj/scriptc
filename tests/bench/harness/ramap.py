@@ -2,7 +2,7 @@
 """ramap.py <out.json> -- cmd args...   (env passed through; same call shape as smapspeak.py, a superset of its output)
 A peak-RSS map of ONE process. The lane's VmRSS/VmHWM are polled every ~2 ms; every time the kernel's VmHWM rises the process's smaps, and the
 page-presence bitmap (/proc/pid/pagemap) of the main executable's r-x mapping, are snapshotted (never more often than every 3 ms), so the snapshot kept
-is the one taken after the LAST rise: the VmHWM instant. Each snapshot records its own VmRSS and the VmHWM seen at that poll, and the result says how
+is the one with the highest min(VmRSS before the read, VmRSS after it): the VmHWM instant, and a read that straddled a drop of RSS (the text drop) does not win. Each snapshot records its own VmRSS and the VmHWM seen at that poll, and the result says how
 far the kept snapshot is from the final VmHWM (`peak_gap_kb`), so a sampler that missed the peak says so.
 Output (JSON): everything smapspeak.py reports (classes with Rss/Pss/Private_Dirty/Anonymous, peak_vmrss_kb, peak_at_s, timeline) plus
   classes[*].Shared_Clean / Private_Clean / Shared_Dirty, libs (shared libraries split: icu, libc, libstdc++/libgcc, other), mappings (top 25 by Rss
@@ -106,7 +106,7 @@ def read_pagemap(maps):
         os.close(fd)
     return res
 
-best = None; best_rss = 0; best_t = 0.0; last_hwm = 0; last_snap_t = 0.0; samples = 0; tl = []; events = []; final_hwm = 0; final_rss = 0
+best = None; best_score = 0; best_rss = 0; best_t = 0.0; last_hwm = 0; last_snap_t = 0.0; samples = 0; tl = []; events = []; final_hwm = 0; final_rss = 0
 while p.poll() is None:
     rss, hwm = status()
     now = time.time() - t0
@@ -119,12 +119,15 @@ while p.poll() is None:
                 maps = parse_smaps(s)
                 pm = read_pagemap(maps)
                 rss2, hwm2 = status()
+                score = min(rss or 0, rss2 or 0)  # a snapshot whose read straddled a drop of RSS (the runtime's text drop at ~0.23 s) scores low
                 last_hwm = hwm; last_snap_t = time.time() - t0
                 cls0, _ = summarize(maps)
                 events.append({'t': round(now, 3), 'vmrss': rss2, 'hwm': hwm2,
                                'heap': cls0.get('heap(brk)', {}).get('Rss', 0), 'anon': cls0.get('anon-mmap', {}).get('Rss', 0),
                                'code': cls0.get('main-binary:code(r-x)', {}).get('Rss', 0)})
-                best = (maps, pm, rss2, hwm2); best_rss = rss2 or 0; best_t = round(now, 3)
+                events[-1]['vmrss_before_read'] = rss
+                if best is None or score >= best_score:
+                    best = (maps, pm, rss2, hwm2); best_rss = score; best_score = score; best_t = round(now, 3)
                 if sig:
                     try: os.kill(pid, getattr(signal, 'SIG' + sig))
                     except Exception: pass
