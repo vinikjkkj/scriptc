@@ -81,7 +81,7 @@ import { BUFFER_NUM_ACCESSOR_METHODS, dynKeyGetUsesLitTwin, propsTableRoot, erro
 import { setDynOrderPlan, setDynInspExt } from "../dyn-members.js";
 import { rewriteArmDescriptors } from "./armvt.js";
 import { rewriteStringUnions } from "./strunion.js";
-import { orderRecordPlanCached, moduleUsesInspColors, numSlotHalf } from "../../ir/nodes.js";
+import { orderRecordPlanCached, moduleUsesInspColors, numSlotHalf, classCbit } from "../../ir/nodes.js";
 import { concatFn, fieldRunAbsentCheck, flattenStrConcat } from "../emission/emit-exprs.js";
 import { classvalCandidates, dynClassDisplayName, dynDescBase, dynEmitterSlot, dynRuntimeBaseInfo, dynRuntimeRoot, dynEnumerationFenced, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
 import { computeMayThrow } from "../emission/may-throw.js";
@@ -7783,6 +7783,11 @@ class LlEmitter {
           s.kind === "fieldSet"
             ? this.classFieldPtr(obj.name, s.className, s.field)
             : this.recordFieldPtr(obj.name, s.shapeId, s.field);
+        // CONTAINER BIT (ir/cbit.ts): a non-leaf dyn value stored into an instance of a gated class sets the instance's bit before the value moves in.
+        if (s.kind === "fieldSet" && type.kind === "dyn" && classCbit(this.mod.classes, s.className)) {
+          this.declare(`declare void @scr_cbit_note_v(ptr, ptr)`);
+          B.line(`call void @scr_cbit_note_v(ptr ${obj.name}, ptr ${v.name})`);
+        }
         const slotHalf = s.kind === "fieldSet" && type.kind === "dyn" ? numSlotHalf(this.mod.classes, s.className, s.field) : undefined;
         if (slotHalf !== undefined) {
           // A NUMBER-SLOT field (ir/num-slot.ts): a number is unboxed into the raw half and the dyn slot takes the marker.
