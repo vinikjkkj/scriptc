@@ -28104,6 +28104,12 @@
     "<repo>/tests/corpus/25423-two-literals-with-undeclared-spread-members-spelling-different-orders-each-enumerate-their-own.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25424-a-keyed-accumulator-returned-as-required-fields-enumerates-in-fill-order-once-per-key.ts": {
+   "order": [
+    "<repo>/tests/corpus/25424-a-keyed-accumulator-returned-as-required-fields-enumerates-in-fill-order-once-per-key.ts"
+   ],
+   "diags": []
   }
  }
 }

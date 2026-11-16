@@ -1196,7 +1196,8 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         const droppable =
           emitFields.some((f) => E.undefinedArmTag(f.type) >= 0 || f.type.kind === "f64" || f.type.kind === "dyn") ||
           !!shape.indexValue ||
-          shape.ownmask === true;
+          shape.ownmask === true ||
+          shape.keyList === true;
         d.push(`  scr_jb_putc(b, '{');`);
         // One field list per key order. A shape every construction agrees on has one (its declaredOrder): the code below is
         // then the code it always was. A shape with several (IrRecordShape.keyOrders) switches on the instance's order index

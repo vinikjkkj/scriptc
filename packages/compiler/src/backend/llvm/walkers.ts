@@ -321,7 +321,8 @@ export class LlWalkers {
     const droppable =
       emitFields.some((f) => this.host.undefinedArmTag(f.type) >= 0 || f.type.kind === "f64" || f.type.kind === "dyn") ||
       !!shape.indexValue ||
-      shape.ownmask === true;
+      shape.ownmask === true ||
+      shape.keyList === true;
     this.putc(B, "%b", "123"); // '{'
     // One field list per key order. A shape every construction agrees on has one (its declaredOrder), and the code is then
     // what it always was; a shape with several (IrRecordShape.keyOrders) switches on the instance's order index.
