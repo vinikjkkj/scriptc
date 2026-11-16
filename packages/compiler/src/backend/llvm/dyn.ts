@@ -3244,10 +3244,24 @@ export class LlDyn {
         break;
       }
       case "string": {
+        host.declare(`declare ptr @scr_dyn_new_str_conv(ptr)`);
         host.declare(`declare ptr @scr_dyn_new_str(ptr)`);
-        const r = B.tmp();
-        B.line(`${r} = call ptr @scr_dyn_new_str(ptr %v) ; retains v`);
-        B.terminate(`ret ptr ${r}`);
+        // a string held once cannot have another box: one load and compare of its count, no call into the cache (the C twin is the ternary in emit-walkers.ts)
+        const rc = B.tmp();
+        const shared = B.tmp();
+        const lShared = B.newLabel("str.sh");
+        const lOnce = B.newLabel("str.once");
+        B.line(`${rc} = load i32, ptr %v`);
+        B.line(`${shared} = icmp uge i32 ${rc}, 2`);
+        B.condBr(shared, lShared, lOnce);
+        B.startBlock(lShared);
+        const r1 = B.tmp();
+        B.line(`${r1} = call ptr @scr_dyn_new_str_conv(ptr %v) ; retains v; a string someone else also holds shares its one box`);
+        B.terminate(`ret ptr ${r1}`);
+        B.startBlock(lOnce);
+        const r2 = B.tmp();
+        B.line(`${r2} = call ptr @scr_dyn_new_str(ptr %v) ; retains v`);
+        B.terminate(`ret ptr ${r2}`);
         break;
       }
       case "object": {

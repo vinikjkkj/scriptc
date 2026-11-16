@@ -3569,7 +3569,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         d.push(`  return scr_dyn_new_bool(v);`);
         break;
       case "string":
-        d.push(`  return scr_dyn_new_str(v); /* retains v */`);
+        d.push(`  return v->rc >= 2u ? scr_dyn_new_str_conv(v) : scr_dyn_new_str(v); /* retains v; a string held once cannot have another box: one load and compare, no call into the cache */`);
         break;
       case "undefinedT":
         // A bare unit field (`x: undefined` in a record — the tls
