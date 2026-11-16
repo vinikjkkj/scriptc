@@ -418,6 +418,10 @@ export interface ClassMeta {
           `  if (!o || o->rc == SIZE_MAX) return;`,
           `  if (--o->rc == 0) {`,
         );
+        {
+          const g = numSlotGhostsC(s.meta?.def);
+          if (g !== "") out.push(`    SCR_PROPS_GHOST_SUB(${g});`);
+        }
         for (const m of rcMembers(s)) {
           if (!isRefCounted(m.type)) continue;
           const field = `o->${m.member}`;
@@ -463,6 +467,10 @@ export interface ClassMeta {
         `  if (--o->rc == 0) {`,
         `    scr_cyc_on_dead(o);`,
       );
+      {
+        const g = numSlotGhostsC(s.meta?.def);
+        if (g !== "") out.push(`    SCR_PROPS_GHOST_SUB(${g});`);
+      }
       for (const m of rcMembers(s)) {
         if (!isRefCounted(m.type)) continue;
         const field = `o->${m.member}`;
@@ -490,9 +498,10 @@ export interface ClassMeta {
         ),
         `}`,
         `${E.link}void ${s.gcFree}(void *o0) {`,
-        ...(untracedRefFields.length > 0
+        ...(untracedRefFields.length > 0 || numSlotGhostsC(s.meta?.def) !== ""
           ? [
               `  ${s.struct} *o = (${s.struct} *)o0;`,
+              ...(numSlotGhostsC(s.meta?.def) !== "" ? [`  SCR_PROPS_GHOST_SUB(${numSlotGhostsC(s.meta?.def)});`] : []),
               ...untracedRefFields.map((m) => {
                 const field = `o->${m.member}`;
                 return `  if (${field}) ${releaseCallC(m.type, field)}; /* ${m.name} (acyclic) */`;
@@ -635,7 +644,12 @@ export interface ClassMeta {
     }
   }
 
-/** The C condition under which a release that left rc > 0 may be a cycle root, for a class whose ONLY cycle-capable fields are
+/** NUMBER SLOTS (ir/num-slot.ts): the pacing weight a dying instance gives back, one term per slot field that still holds the marker (empty when the class has none). */
+  function numSlotGhostsC(def: IrClassDef | undefined): string {
+    return (def?.numSlots ?? []).map((x) => `SCR_NUMSLOT_GHOSTS(o->${mangleField(x.field)})`).join(" + ");
+  }
+
+  /** The C condition under which a release that left rc > 0 may be a cycle root, for a class whose ONLY cycle-capable fields are
    * instance-override slots (IrClassDef.lazyCycle): some slot holds a function. Null when the class buffers every release (the
    * ordinary case: another traced field, or no such slots). */
   export function lazyCycleGateC(E: CEmitter, def: IrClassDef | undefined, fields: readonly { name: string; type: IrType }[]): string | null {
@@ -695,6 +709,9 @@ export interface ClassMeta {
       `  if (--o->rc == 0) {`,
       ...(s.traced ? [`    scr_cyc_on_dead(o);`] : []),
     );
+    // NUMBER SLOTS (ir/num-slot.ts): each field still holding the marker stops counting the number node it never had (pacing weight).
+    const slotGhosts = numSlotGhostsC(meta.def);
+    if (slotGhosts !== "") out.push(`    SCR_PROPS_GHOST_SUB(${slotGhosts});`);
     for (const f of s.fields) {
       if (!isRefCounted(f.type)) continue;
       const field = `o->${mangleField(f.name)}`;
@@ -750,9 +767,10 @@ export interface ClassMeta {
         ...tracedFields.map((f) => `  visit(o->${mangleField(f.name)}, ctx); /* ${f.name} */`),
         `}`,
         `${E.link}void ${s.gcFree}(void *o0) {`,
-        ...(untracedRefFields.length > 0 || emitterRooted
+        ...(untracedRefFields.length > 0 || emitterRooted || slotGhosts !== ""
           ? [`  ${s.struct} *o = (${s.struct} *)o0;`]
           : []),
+        ...(slotGhosts !== "" ? [`  SCR_PROPS_GHOST_SUB(${slotGhosts});`] : []),
         ...(emitterRooted
           ? [`  scr_emitter_reg_gcfree(o->sc_eereg); /* EventEmitter prefix */`]
           : []),

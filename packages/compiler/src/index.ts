@@ -31,6 +31,7 @@ import { moduleBoxesFunctionLikeValues, moduleUsesDestroyDyn, moduleUsesTimersPr
 import { writeModuleFile } from "./ir/serialize.js";
 import { validateModule } from "./ir/validate.js";
 import { captureByValue } from "./ir/capture-by-value.js";
+import { numSlotPass } from "./ir/num-slot.js";
 import { canonicalBuiltinModule, checkPreflight, isNodeTypesPath, loadProgram, locOf, requiresOf, resolveNpmImport, type LoadResult } from "./frontend/program.js";
 import { npmStaticIneligibleReason, npmStaticOffenders, npmStaticPackageOfPath } from "./frontend/npm-static.js";
 import { provenanceSources } from "./frontend/provenance-registry.js";
@@ -1414,6 +1415,7 @@ async function compileTracked(
     if (lowered.module === null) return fail(lowered.diagnostics);
 
     captureByValue(lowered.module!);
+    numSlotPass(lowered.module!);
     const validation = tapped("fe.validate", () => validateModule(lowered.module!));
     if (validation.length > 0) {
       return fail(validation.map((v) => iceDiag(v.message, v.loc)));
@@ -2384,6 +2386,7 @@ export async function compileLibrary(opts: CompileLibraryOptions): Promise<Compi
   }
 
   captureByValue(mod);
+  numSlotPass(mod);
   const validation = validateModule(mod);
   if (validation.length > 0) return fail(validation.map((v) => iceDiag(v.message, v.loc)));
 
