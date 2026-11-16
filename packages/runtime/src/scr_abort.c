@@ -121,7 +121,7 @@ static void scr_abort_signal_gcfree(void *obj) {
 
 ScrAbortSignal *scr_abort_signal_new(void) {
   ScrAbortSignal *s =
-      scr_cyc_alloc(sizeof *s, &scr_abort_signal_trace, &scr_abort_signal_gcfree);
+      SCR_CYC_ALLOC(sizeof *s, &scr_abort_signal_trace, &scr_abort_signal_gcfree);
   s->rc = 1;
   scr_abortsig_alloc_note();
   return s;
@@ -475,7 +475,7 @@ static void scr_abort_ctl_gcfree(void *obj) {
 
 ScrAbortController *scr_abort_controller_new(void) {
   ScrAbortController *c =
-      scr_cyc_alloc(sizeof *c, &scr_abort_ctl_trace, &scr_abort_ctl_gcfree);
+      SCR_CYC_ALLOC(sizeof *c, &scr_abort_ctl_trace, &scr_abort_ctl_gcfree);
   c->rc = 1;
   c->sig = scr_abort_signal_new();
   scr_abortctl_alloc_note();

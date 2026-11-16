@@ -64,7 +64,7 @@ static void *scr_box_ptr(const ScrBox *b) {
 #define SCR_CYC_LEAF_SKIP 1
 #endif
 
-static void scr_box_trace(void *o, ScrTraceVisit visit, void *ctx) {
+void scr_box_trace(void *o, ScrTraceVisit visit, void *ctx) {
   ScrBox *b = (ScrBox *)o;
   void *p = scr_box_ptr(b);
   if (!p) return; /* freshly-created boxes hold NULL until first write */
@@ -107,7 +107,9 @@ static void scr_box_gcfree(void *o) {
 }
 
 ScrBox *scr_box_new(ScrBoxKind kind) {
-  ScrBox *b = scr_cyc_alloc(sizeof(ScrBox), &scr_box_trace, &scr_box_gcfree);
+  static uint16_t box_ck;
+  if (__builtin_expect(box_ck == 0, 0)) box_ck = scr_cyc_kind_fixed(SCR_CYC_KIND_BOX, &scr_box_trace, &scr_box_gcfree);
+  ScrBox *b = scr_cyc_alloc_k(sizeof(ScrBox), box_ck);
   b->rc = 1;
   b->kind = kind;
 #ifdef SCR_RC_AUDIT
@@ -257,7 +259,7 @@ ScrStr *scr_box_str_unshare(ScrBox *b, ScrStr *acc) {
 
 /* ── closures ─────────────────────────────────────────────────────────── */
 
-static void scr_closure_trace(void *o, ScrTraceVisit visit, void *ctx) {
+void scr_closure_trace(void *o, ScrTraceVisit visit, void *ctx) {
   ScrClosure *c = (ScrClosure *)o;
   const size_t ncaps = scr_closure_ncaps(c);
   for (size_t i = 0; i < ncaps; i++) {
@@ -600,8 +602,9 @@ void scr_rc_audit_sites_report(void) {
 }
 #endif /* SCR_RC_AUDIT */
 ScrClosure *scr_closure_new(void *fn, size_t ncaps) {
-  ScrClosure *c = scr_cyc_alloc(sizeof(ScrClosure) + ncaps * sizeof(ScrBox *),
-                                 &scr_closure_trace, &scr_closure_gcfree);
+  static uint16_t clo_ck;
+  if (__builtin_expect(clo_ck == 0, 0)) clo_ck = scr_cyc_kind_fixed(SCR_CYC_KIND_CLOSURE, &scr_closure_trace, &scr_closure_gcfree);
+  ScrClosure *c = scr_cyc_alloc_k(sizeof(ScrClosure) + ncaps * sizeof(ScrBox *), clo_ck);
   c->rc = 1;
   c->kind = (uint32_t)SCR_DYN_FUNC;
   c->isdyn = 1;
