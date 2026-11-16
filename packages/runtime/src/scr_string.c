@@ -360,7 +360,7 @@ __attribute__((constructor)) static void scr_poolstat_reg_string(void) {
  * allocation count is exactly the trade this arm exists to price, and on
  * this machine retention is the objective. */
 #ifndef SCR_STR_INTERN_WEAK
-#define SCR_STR_INTERN_WEAK 0
+#define SCR_STR_INTERN_WEAK 1
 #endif
 
 static ScrStr *scr_str_itab[SCR_STR_INTERN_SLOTS];
