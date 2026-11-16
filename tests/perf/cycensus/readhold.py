@@ -12,7 +12,7 @@ syms, addr = [], []
 for l in nm:
     p = l.split()
     if len(p) == 3 and p[1] in 'tTwW': syms.append(p[2]); addr.append(int(p[0], 16))
-lines = open(rep).read().split('\n')
+lines = open(rep, errors='replace').read().split('\n')
 anc = None
 for l in lines:
     if l.startswith('CYCEN-KIND'): anc = int(re.search(r'anchor=([0-9a-f]+)', l).group(1), 16)
@@ -67,3 +67,17 @@ for l in lines:
     if want and not any(w in te or w in he for w in want): continue
     imm = ' IMMORTAL' if int(m.group(2)) > 1 << 40 else ''
     print(f"node-rc={m.group(1):>2s} str-rc={m.group(2) if not imm else 'imm':>5s} len={int(m.group(3)):3d} found={m.group(4)} {te[:34]:34s} <- held by {hk[:30]:30s} @ {he[:34]:34s} |{m.group(9)}|")
+# ---- HOLDER CHAINS (-DSCR_CYCEN_HOLD_CHAIN=1): each sampled STR node followed up through its first holders
+ch = {}
+for l in lines:
+    m = re.match(r'CYCEN-CH q=(\d+) lv=(\d+) hkind=([0-9a-f]+) site((?: [0-9a-f]+){5})', l)
+    if not m: continue
+    e, _ = emit_of(m.group(4).split())
+    k = kindname(int(m.group(3), 16)) if int(m.group(3), 16) else '-'
+    ch.setdefault(int(m.group(1)), []).append(f"{k[:26]}@{e[:40]}")
+if ch:
+    print('--- HOLDER CHAINS of the samples (node <- holder <- holder ...), grouped')
+    sig = {}
+    for q, v in ch.items(): sig[' <- '.join(v)] = sig.get(' <- '.join(v), 0) + 1
+    for s_, n in sorted(sig.items(), key=lambda kv: -kv[1])[:12]:
+        print(f"{n:4d}x  STR <- {s_}")
