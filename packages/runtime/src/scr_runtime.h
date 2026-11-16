@@ -667,12 +667,19 @@ typedef struct ScrCycHdr {
  * "this object is a WeakMap key, consult the registry before handing the
  * storage back" (see scr_cyc_free). Every read of the size class masks. */
 #define SCR_CYC_WEAKKEY 0x80u
-#define SCR_CYC_BLK_MASK 0x7fu
-_Static_assert((SCR_POOL_MAX / SCR_POOL_GRAIN) < SCR_CYC_WEAKKEY,
+/* CONTAINER BIT (compiler ir/cbit.ts): set on an instance of a statically gated class the first time a NON-LEAF dyn value is stored into one of its fields. Clear =
+ * every field holds a leaf (undefined, null, bool, number, string, bytes, array buffer, bigint), so the instance owns no edge the collector could follow and cannot
+ * be on a cycle: its release does not buffer it as a possible root, and its trace visits nothing. It rides in the one blk bit the size class does not need
+ * (the class index is at most 32, six bits) and is cleared by scr_cyc_stamp with the rest of the header on every recycled block. Never cleared afterwards. */
+#define SCR_CYC_CBIT 0x40u
+#define SCR_CYC_BLK_MASK 0x3fu
+_Static_assert((SCR_POOL_MAX / SCR_POOL_GRAIN) <= SCR_CYC_BLK_MASK,
                "the pool's size-class index no longer fits under "
-               "ScrCycHdr::blk's weak-key bit");
+               "ScrCycHdr::blk's container and weak-key bits");
 
 static inline ScrCycHdr *scr_cyc_hdr(void *obj) { return (ScrCycHdr *)obj - 1; }
+/* The LLVM lane reads the container bit at a fixed distance in front of the object (llvm/classes.ts): blk is byte 10 of the 16-byte header. */
+_Static_assert(offsetof(ScrCycHdr, blk) == 10 && sizeof(ScrCycHdr) == 16, "llvm/classes.ts addresses ScrCycHdr::blk at object - 6");
 
 /* The header stores the two functions as SIGNED 32-bit offsets from one
  * anchor; these three inlines are the only places that convert.
@@ -5702,6 +5709,14 @@ static inline ScrDyn *scr_dyn_keep(ScrDyn *d) {
   return d != NULL && d->kind == SCR_DYN_NUM && d->rc != SIZE_MAX ? scr_dyn_keep_num(d) : d;
 }
 
+/* The leaf kinds, as a bit set over ScrDynKind (all below 32): NULL, BOOL, NUM, STR, UNDEF, BYTES, ARRBUF, BIG. Every other kind (arrays, objects, functions, handles,
+ * promises, js values, boxed instances, maps, proxies) is a container for the container bit. */
+#define SCR_DYN_LEAF_MASK ((1u << SCR_DYN_NULL) | (1u << SCR_DYN_BOOL) | (1u << SCR_DYN_NUM) | (1u << SCR_DYN_STR) | (1u << SCR_DYN_UNDEF) | (1u << SCR_DYN_BYTES) | (1u << SCR_DYN_ARRBUF) | (1u << SCR_DYN_BIG))
+/* scr_cbit_note: the store of dyn `v` into a field of the gated instance `o`. NULL (an uninitialised slot) is a leaf. The out-of-line _v form is for the LLVM lane. */
+void scr_cbit_note_v(void *o, const ScrDyn *v);
+static inline void scr_cbit_note(void *o, const ScrDyn *v) {
+  if (__builtin_expect(v != NULL && ((1u << (unsigned)v->kind) & SCR_DYN_LEAF_MASK) == 0, 0)) scr_cyc_hdr(o)->blk |= (uint8_t)SCR_CYC_CBIT;
+}
 void scr_dyn_release(ScrDyn *d); /* releases the tree recursively; NULL-tolerant */
 
 /* The slot of a by-value capture of a dyn value (SCR_CAP_TAG_DYN): retains (NULL-tolerant), tags, and makes sure the closure core can release it. */

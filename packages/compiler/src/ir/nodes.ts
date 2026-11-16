@@ -1790,6 +1790,10 @@ export interface IrClassDef {
    * and the half is dead. Every reader of the field answers `marker ? box(half) : slot`. The half is also listed in `fields` (hidden, `%`-named,
    * after the class's own fields), so layouts, new and release treat it like any f64 field. */
   numSlots?: { field: string; half: string }[];
+  /** CONTAINER-BIT GATE (ir/cbit.ts): every field that can hold a reference is a dyn field, and the class is standalone (no base, no subclass). Its instances carry a
+   * per-instance bit in the cycle header (scr_runtime.h SCR_CYC_CBIT) that every store of a non-leaf dyn value sets; while it is clear the instance cannot be on a cycle,
+   * so its release does not buffer it as a root and its trace visits nothing (its collector teardown then releases the dyn fields itself). */
+  cbit?: true;
   /** Field names (inherited included) whose slot's undefined arm means the
    * property does not EXIST yet (a JS field the constructor assigns only in
    * a conditional position): enumeration through a dyn box skips them while
@@ -15899,4 +15903,16 @@ export function numSlotHalf(classes: readonly IrClassDef[] | undefined, classNam
     NUMSLOT_CACHE.set(classes, t);
   }
   return t === null ? undefined : t.get(`${className}\0${field}`);
+}
+
+const CBIT_CACHE = new WeakMap<readonly IrClassDef[], Set<string>>();
+/** True when `className` is container-bit gated (ir/cbit.ts): one set build per module, then one lookup. */
+export function classCbit(classes: readonly IrClassDef[] | undefined, className: string): boolean {
+  if (classes === undefined) return false;
+  let t = CBIT_CACHE.get(classes);
+  if (t === undefined) {
+    t = new Set(classes.filter((c) => c.cbit === true).map((c) => c.name));
+    CBIT_CACHE.set(classes, t);
+  }
+  return t.has(className);
 }
