@@ -75,6 +75,7 @@ afterAll(async () => {
 
 interface RunResult {
   stdout: Buffer;
+  stderr: Buffer;
   exitCode: number;
 }
 
@@ -84,13 +85,19 @@ async function runBinary(
   env?: NodeJS.ProcessEnv,
 ): Promise<RunResult> {
   try {
-    const { stdout } = await execFileAsync(cmd, args, { encoding: "buffer", env });
-    return { stdout, exitCode: 0 };
+    const { stdout, stderr } = await execFileAsync(cmd, args, { encoding: "buffer", env });
+    return { stdout, stderr, exitCode: 0 };
   } catch (err) {
-    const e = err as { code?: unknown; stdout?: Buffer };
+    const e = err as { code?: unknown; stdout?: Buffer; stderr?: Buffer };
     if (typeof e.code !== "number" || !Buffer.isBuffer(e.stdout)) throw err;
-    return { stdout: e.stdout, exitCode: e.code };
+    return { stdout: e.stdout, stderr: Buffer.isBuffer(e.stderr) ? e.stderr : Buffer.alloc(0), exitCode: e.code };
   }
+}
+
+/* What a failure message must say that the stdout diff cannot: how each side ended. On the Windows shard the Node REFERENCE output has twice been the
+ * truncated one (2026-11-16, island-http and user-fetch, native complete and correct); the diff alone never showed whether Node exited non-zero, and with what on stderr. */
+function ending(side: string, r: RunResult): string {
+  return `${side}: exit ${r.exitCode}, ${r.stdout.length} B stdout, stderr tail ${JSON.stringify(r.stderr.toString("utf8").slice(-400))}`;
 }
 
 async function build(entry: string): Promise<string> {
@@ -168,9 +175,11 @@ describe(`fetch differential (${cases.length} programs${sanitize ? ", sanitized"
       runBinary(binary, argv),
     ]);
     if (!nodeRes.stdout.equals(nativeRes.stdout)) {
-      expect(nativeRes.stdout.toString("utf8")).toBe(nodeRes.stdout.toString("utf8"));
+      expect(nativeRes.stdout.toString("utf8"), `${ending("node", nodeRes)}; ${ending("native", nativeRes)}`).toBe(
+        nodeRes.stdout.toString("utf8"),
+      );
       expect.unreachable("stdout differed at byte level but not after utf8 decode");
     }
-    expect(nativeRes.exitCode).toBe(nodeRes.exitCode);
+    expect(nativeRes.exitCode, `${ending("node", nodeRes)}; ${ending("native", nativeRes)}`).toBe(nodeRes.exitCode);
   }, 120_000);
 });
