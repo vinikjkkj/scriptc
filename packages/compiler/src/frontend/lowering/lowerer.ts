@@ -12,6 +12,7 @@
  * - Lexical scoping is resolved here: locals get function-unique ids
  *   ("x.0", "x.1" for shadowing); the IR is scope-flat.
  */
+import { lowerErasedMapArg } from "./lower-erasedmap.js";
 import { renameLiftedFunctions } from "./stable-names.js";
 import { markDeadSourceCrossings } from "../../ir/dead-source.js";
 import { compressFieldRunLoops } from "../../ir/field-run-loops.js";
@@ -9131,6 +9132,11 @@ export class Lowerer {
     // both sides of the A/B, so "the abort is gone" is checkable against
     // the same compiler with only this rung removed.
     if (process.env["SCRIPTC_ARGARM_OFF"] === "1") return this.lowerExprExpecting(node, expected);
+    if (expected !== undefined && expected.kind === "map" && expected.value.kind === "dyn") {
+      // A typed Map into a `Map<K, unknown>` parameter that never reads a value (lower-erasedmap.ts).
+      const erased = lowerErasedMapArg(this, node, expected);
+      if (erased !== null) return erased;
+    }
     if (expected !== undefined && expected.kind === "union" && this.armTag(expected.unionId, UNDEFINED_T) >= 0) {
       // The parens/cast chain is skipped, and the CAST is the third
       // decliner of this same shape — measured, not guessed.
