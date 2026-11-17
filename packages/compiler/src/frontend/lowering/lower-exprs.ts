@@ -29,6 +29,7 @@ import { cjsClassExprWholeExportOf, dynReplaceOf, cjsExportsGetterDefineOf, cjsE
 import { DNS_NATIVE_FN_VALUES, absentGlobalMemberValue, absentProcessMemberValue, absentRecordMemberValue, ARRAY_METHODS, builtinConstLit, builtinFenceHintOf, objectStaticFnValueOf, stdlibExistenceTestOf, stringMethodFnValueOf, builtinModuleConstOf, builtinModulesArrayLit, builtinModuleFnOf, COMPOUND_ASSIGN_OPS, CompoundOp, ISLAND_SURFACE, isChildSurfaceMember, MAP_METHODS, NARROW_FIRST, SET_METHODS, STR_METHODS, UNSUPPORTED_EXPR, sideEffectFreeOptionValue, stdlibGlobalNameOf, stdlibHandleObjectTypeOf, stdlibHandleTypeOfAnswersObject, stdlibHandleDeclaresMember } from "./surfaces.js";
 import { UNSUPPORTED, assertionDropsMembersDiag, assertionOverflowsMembersDiag, blockedBindingUseDiag, recordShapeMismatchDiag, requiresDynamicPackageDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
 import { PoisonError, dynUndefinedExpr, jsFuncValueNameOf, jsFuncValueSourceOf, neverTaintedJsType, nodeThrowExpr, own } from "./lowerer.js";
+import { isPrintedLiteral } from "./inspect-any-literal.js";
 import { pairedProtoClassOfValue, protoDataNameAnywhere, protoDataNamesOf, protoDataReadOf, protoThisType } from "./proto-class-consume.js";
 import { absentRead, lowerLyingPlus, lowerNullablePointerChain, nullableFieldRead, presenceComparison } from "./lower-absent.js";
 import { arrayAtOf, BYTES_CTORS, lowerBufferFlavorTest, condPresenceSlot, IndexMergeContributor, lowerIndexMergeHelper, lowerNpmStaticSafeIndexRead, lowerOobTolerantIndexRead, mapIterDrainHelperCall, oobTolerantElem, regexToStringExpr, strCharsCall, ovfGrantViable } from "./lower-containers.js";
@@ -11838,7 +11839,8 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     // annotation the author wrote, not inference residue over a value that was
     // never a struct.
     if (
-      isJsSourceFile(expr.getSourceFile()) &&
+      // ...and a TypeScript literal that is printed or initialises an unannotated variable (inspect-any-literal.ts): its `any` spread source has no record type to desugar either.
+      (isJsSourceFile(expr.getSourceFile()) || isPrintedLiteral(expr)) &&
       expr.properties.some(
         (p) =>
           ts.isSpreadAssignment(p) && conditionalSpreadOf(p.expression) === null &&
