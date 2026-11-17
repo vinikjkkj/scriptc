@@ -7582,8 +7582,11 @@ static void scr_err_hide(ScrDyn *d, const char *key, size_t key_len, ScrDyn *v) 
 static void scr_error_props_drop_impl(void *obj);
 static bool scr_error_props_code_impl(ScrError *e, ScrStr **out);
 static size_t scr_error_props_count_impl(void *obj);
+static void scr_error_spill_set_impl(void *obj, int which, size_t pos);
+static size_t scr_error_spill_get_impl(const void *obj, int which);
+static void scr_error_props_sync_impl(void *obj, int which);
 /* Both hooks the error unit consults once a property bag exists. */
-#define scr_error_install_props_drop(fn) (scr_error_install_props_drop((fn)), scr_error_install_props_code(&scr_error_props_code_impl), scr_error_install_props_count(&scr_error_props_count_impl))
+#define scr_error_install_props_drop(fn) (scr_error_install_props_drop((fn)), scr_error_install_props_code(&scr_error_props_code_impl), scr_error_install_props_count(&scr_error_props_count_impl), scr_error_install_props_spill(&scr_error_spill_set_impl, &scr_error_spill_get_impl, &scr_error_props_sync_impl))
 
 /* Enter one (error, dyn node) pair into the identity cache. Retains both. */
 static void scr_errdyn_enter(const ScrError *e, ScrDyn *d) {
@@ -7802,15 +7805,15 @@ ScrDyn *scr_dyn_from_error(const ScrError *e) {
         size_t nmk = 0;
         if (put_name) {
           mk[nmk].key = "name"; mk[nmk].len = 4; mk[nmk].cell = e->name;
-          mk[nmk++].pos = e->own_name && e->name_at != 0 ? (size_t)e->name_at - 1 : 0;
+          mk[nmk++].pos = e->own_name ? scr_error_own_pos(e, 0) : 0;
         }
         if (e->code != NULL && e->code_at != 0) {
           mk[nmk].key = "code"; mk[nmk].len = 4; mk[nmk].cell = e->code;
-          mk[nmk++].pos = (size_t)e->code_at - 1;
+          mk[nmk++].pos = scr_error_own_pos(e, 1);
         }
         if (e->msg_at != 0 && e->message != NULL) {
           mk[nmk].key = "message"; mk[nmk].len = 7; mk[nmk].cell = e->message;
-          mk[nmk++].pos = (size_t)e->msg_at - 1;
+          mk[nmk++].pos = scr_error_own_pos(e, 2);
         }
         for (size_t i = 1; i < nmk; i++) {
           __typeof__(mk[0]) t = mk[i];
@@ -16447,6 +16450,39 @@ static void scr_error_props_drop_impl(void *obj) {
 static size_t scr_error_props_count_impl(void *obj) {
   const ScrError *e = (const ScrError *)obj;
   return e->props != NULL && e->props->kind == SCR_DYN_OBJ ? scr_dyn_obj_enum_key_count(e->props) : 0;
+}
+
+/* A creation position that overflows ScrError's 16-bit slot: kept exactly, as a hidden number in the property table. */
+static const char *const scr_error_spill_keys[3] = {"%at_name", "%at_code", "%at_msg"};
+static void scr_error_spill_set_impl(void *obj, int which, size_t pos) {
+  ScrError *e = (ScrError *)obj;
+  if (e->props == NULL || e->props->kind != SCR_DYN_OBJ) return;
+  ScrDyn *v = scr_dyn_new_num((double)pos);
+  scr_dyn_obj_define_hidden_data(e->props, scr_error_spill_keys[which], strlen(scr_error_spill_keys[which]), v, true, true);
+  scr_dyn_release(v);
+}
+static size_t scr_error_spill_get_impl(const void *obj, int which) {
+  const ScrError *e = (const ScrError *)obj;
+  if (e->props == NULL || e->props->kind != SCR_DYN_OBJ) return 0;
+  ScrDyn *v = scr_dyn_obj_key_get(e->props, scr_error_spill_keys[which], strlen(scr_error_spill_keys[which]));
+  size_t r = v != NULL && v->kind == SCR_DYN_NUM ? (size_t)v->v.num : 0;
+  scr_dyn_release(v);
+  return r;
+}
+
+/* A typed `e.name = ...` / `e.message = ...` on an error whose dyn copy exists: the copy is its own object (and the error's bag), so the
+ * write is carried across. A property the copy gains here is created NOW, which is where a new key goes in insertion order. */
+static void scr_error_props_sync_impl(void *obj, int which) {
+  ScrError *e = (ScrError *)obj;
+  ScrDyn *d = e->props;
+  if (d == NULL || d->kind != SCR_DYN_OBJ || !scr_dyn_is_error_encoding(d)) return;
+  if (which == 0) {
+    if (scr_error_kind_of(e) == SCR_ERR_DOMEX) scr_err_hide(d, "name", 4, scr_dyn_new_str(e->name));
+    else scr_dyn_obj_set(d, "name", 4, scr_dyn_new_str(e->name));
+  } else if (which == 2) {
+    if (e->msg_at == 0 && e->own_message && scr_dyn_obj_has_own_prop(d, "message", 7)) scr_err_hide(d, "message", 7, scr_dyn_new_str(e->message));
+    else scr_dyn_obj_set(d, "message", 7, scr_dyn_new_str(e->message));
+  }
 }
 
 /* An `err.code = "X"` the program assigned lands in the bag and wins over a stamped code (own data property); a non-string

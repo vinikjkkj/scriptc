@@ -1026,12 +1026,12 @@ typedef struct ScrError {
   /* Where `name` and `code` were CREATED among the own enumerable keys that are not declared fields: the index into the merged
    * list of expando keys (props) and these two cells, at the moment of creation (0 = first; code_at 0 with a code present is a
    * throw-site stamp, first by construction). Node lists own keys in creation order, which no value can state. Ninth to
-   * eleventh slots of the layout prefix (BOOL `%nameAt` / `%codeAt` / `%msgAt` in %Error's compiler def; only the runtime reads them;
-   * the stored value is the position PLUS ONE, 0 = unrecorded). Saturates at
-   * 255. These live in what was tail padding: ScrError is the same size. */
-  uint8_t name_at;
-  uint8_t code_at;
-  uint8_t msg_at;   /* `message` created by an ASSIGNMENT over an absent own one: an own ENUMERABLE property (the constructed one is not) */
+   * eleventh slots of the layout prefix (six BOOL `%nameAt0/1` .. `%msgAt0/1` in %Error's compiler def; only the runtime reads them;
+   * the stored value is the position PLUS ONE, 0 = unrecorded). These live in what was tail padding (two bools
+   * and three uint16 fill the eighth word exactly): ScrError is the same size. */
+  uint16_t name_at;
+  uint16_t code_at;
+  uint16_t msg_at;  /* `message` created by an ASSIGNMENT over an absent own one: an own ENUMERABLE property (the constructed one is not) */
 } ScrError;
 
 enum {
@@ -1077,9 +1077,9 @@ typedef struct ScrDomException {
                     * prefix (see there). */
   bool own_name;    /* mirrors ScrError's */
   bool own_message;
-  uint8_t name_at; /* mirror ScrError's */
-  uint8_t code_at;
-  uint8_t msg_at;
+  uint16_t name_at; /* mirror ScrError's */
+  uint16_t code_at;
+  uint16_t msg_at;
   double dom_code; /* the WebIDL legacy code (0 when the name is off-table) */
   bool has_cause;  /* the options form carried a `cause` member */
   struct ScrDyn *cause; /* owned; NULL when has_cause is false */
@@ -1150,6 +1150,14 @@ void scr_error_stack_limit_set(double v);
  * memo for those two names. */
 void scr_error_install_props_drop(void (*fn)(void *obj));
 void scr_error_install_props_count(size_t (*fn)(void *obj));
+/* A recorded position that does not fit the 16-bit slot spills into the error's property table (a hidden entry, exact as a double). */
+#define SCR_ERR_AT_SPILL 0xFFFFu
+void scr_error_install_props_spill(void (*set)(void *obj, int which, size_t pos), size_t (*get)(const void *obj, int which),
+                                   void (*sync)(void *obj, int which));
+/* The recorded creation position of name (0) / code (1) / message (2); 0 when unrecorded. */
+size_t scr_error_own_pos(const ScrError *e, int which);
+/* An expando at merged index `m` was removed: everything recorded after it moves up one. */
+void scr_error_own_pos_shift(ScrError *e, size_t m);
 /* `name`/`code` of an Error was just ASSIGNED: set the own flag and record the creation position (which 0 = name, 1 = code, 2 = message). */
 void scr_error_mark_own(ScrError *e, int which);
 /* The lookup of a program-assigned `code` in the bag; installed with the props drop (see scr_json.c). */
