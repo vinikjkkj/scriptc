@@ -84,32 +84,72 @@ void scr_error_install_props_drop(void (*fn)(void *obj)) { scr_error_props_drop 
 static size_t (*scr_error_props_count)(void *obj) = NULL;
 void scr_error_install_props_count(size_t (*fn)(void *obj)) { scr_error_props_count = fn; }
 
+static void (*scr_error_spill_set)(void *obj, int which, size_t pos) = NULL;
+static size_t (*scr_error_spill_get)(const void *obj, int which) = NULL;
+static void (*scr_error_props_sync)(void *obj, int which) = NULL;
+void scr_error_install_props_spill(void (*set)(void *obj, int which, size_t pos), size_t (*get)(const void *obj, int which),
+                                   void (*sync)(void *obj, int which)) {
+  scr_error_spill_set = set;
+  scr_error_spill_get = get;
+  scr_error_props_sync = sync;
+}
+
+static uint16_t *scr_error_at_slot(ScrError *e, int which) {
+  return which == 0 ? &e->name_at : which == 1 ? &e->code_at : &e->msg_at;
+}
+
+size_t scr_error_own_pos(const ScrError *e, int which) {
+  const uint16_t v = *scr_error_at_slot((ScrError *)e, which);
+  if (v == 0) return 0;
+  if (v == SCR_ERR_AT_SPILL) return scr_error_spill_get != NULL ? scr_error_spill_get(e, which) : 0;
+  return (size_t)v - 1;
+}
+
+static void scr_error_own_pos_put(ScrError *e, int which, size_t pos) {
+  uint16_t *slot = scr_error_at_slot(e, which);
+  if (pos + 1 < SCR_ERR_AT_SPILL) {
+    *slot = (uint16_t)(pos + 1);
+    return;
+  }
+  /* it does not fit the slot: the exact position goes in the property table (one that holds this many keys exists) */
+  *slot = SCR_ERR_AT_SPILL;
+  if (scr_error_spill_set != NULL) scr_error_spill_set(e, which, pos);
+}
+
+void scr_error_own_pos_shift(ScrError *e, size_t m) {
+  for (int w = 0; w < 3; w++) {
+    if (*scr_error_at_slot(e, w) == 0) continue;
+    const size_t p = scr_error_own_pos(e, w);
+    if (p > m) scr_error_own_pos_put(e, w, p - 1);
+  }
+}
+
 /* `name`, `code` or an assigned `message` just came into being as an own property of `e`. Node lists own keys in CREATION order,
  * so where it was created among the keys that are not declared fields is recorded: the index into the merged list of expando
- * keys and these cells at this moment (position PLUS ONE in the byte, saturating; 0 = unrecorded = first). Re-assigning a property
- * that exists keeps its place. The walks (dyn_cls_ops_walk_error) merge the cells back in by these positions. */
+ * keys and these cells at this moment (position PLUS ONE in the slot; 0 = unrecorded = first). Re-assigning a property
+ * that exists keeps its place. The walks (dyn_cls_ops_walk_error) merge the cells back in by these positions.
+ *
+ * An error already boxed into the checked-dynamic tree (a plain runtime Error's dyn copy IS its property bag from then on)
+ * is brought up to date here too: the copy is a separate object, so a typed write has to reach it (scr_error_props_sync). */
 void scr_error_mark_own(ScrError *e, int which) {
+  if (e->props != NULL && scr_error_props_sync != NULL) scr_error_props_sync(e, which);
   size_t n = e->props != NULL && scr_error_props_count != NULL ? scr_error_props_count(e) : 0;
   size_t pos;
-  uint8_t *slot;
   if (which == 0) {
     if (e->own_name) return;
     pos = n + (e->code != NULL ? 1 : 0) + (e->msg_at != 0 ? 1 : 0);
-    slot = &e->name_at;
     e->own_name = true;
   } else if (which == 1) {
     if (e->code_at != 0) return;
     pos = n + (e->own_name ? 1 : 0) + (e->msg_at != 0 ? 1 : 0);
-    slot = &e->code_at;
   } else {
     /* a constructed message is a non-enumerable own property; only an assignment over an ABSENT one creates an enumerable one */
     const bool had = e->own_message;
     e->own_message = true;
     if (had || e->msg_at != 0) return;
     pos = n + (e->own_name ? 1 : 0) + (e->code != NULL ? 1 : 0);
-    slot = &e->msg_at;
   }
-  *slot = (uint8_t)(pos >= 254 ? 255 : pos + 1);
+  scr_error_own_pos_put(e, which, pos);
 }
 
 static void scr_error_gcfree(void *obj) {

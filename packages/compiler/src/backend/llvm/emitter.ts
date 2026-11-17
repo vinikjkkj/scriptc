@@ -2842,7 +2842,7 @@ class LlEmitter {
       // on builtin errors and classval loads GEP through these. `stack` is
       // the `.stack` memo (scr_runtime.h), appended LAST so the three field
       // indices above it never move.
-      `%ScrError = type { i64, ptr, ptr, ptr, ptr, ptr, ptr, i8, i8, i8, i8, i8 }`,
+      `%ScrError = type { i64, ptr, ptr, ptr, ptr, ptr, ptr, i8, i8, i8, i8, i8, i8, i8, i8 }`,
       `%ScrClassObj = type { i64, i64, i64, ptr, ptr }`,
       // The SCR_DYN_OBJINST boxing descriptor { name, pre, post, vt,
       // retain, release } — one internal constant per boxed class
