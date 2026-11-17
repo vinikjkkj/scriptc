@@ -7,8 +7,7 @@ import { expect, test } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const testDir = import.meta.dirname;
-// STRFIT_SRC points the same test at another runtime tree (the positive control: the pre-change sources must FAIL it).
-const srcDir = process.env.STRFIT_SRC ?? join(testDir, "../src");
+const srcDir = join(testDir, "../src");
 const SRC = [
   "scr_string.c", "scr_number.c", "scr_array.c", "scr_bytes.c", "scr_error.c", "scr_exception.c", "scr_object.c", "scr_cycle.c",
 ].map((f) => join(srcDir, f));
@@ -33,4 +32,10 @@ async function runBin(bin: string): Promise<string> {
 test("one-byte strings are shared immortals and never mutated (RC audit lane)", async () => {
   const out = await runBin(await build("test_strfit_audit", ["-DSCR_RC_AUDIT"]));
   expect(out).toContain("all strfit tests passed");
+});
+
+test("a big spare block is not reused for a much smaller string, an append loop still reuses its blocks", async () => {
+  const out = await runBin(await build("test_strfit_plain", []));
+  expect(out).toContain("all strfit tests passed");
+  expect(out).toMatch(/spare: len=11000 cap=\d+/);
 });
