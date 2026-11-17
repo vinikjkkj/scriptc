@@ -28812,6 +28812,12 @@
     "<repo>/tests/corpus/25661-typeof-then-is-function-for-promise-typed-and-optional-receivers.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25675-promise-resolve-over-a-void-or-promise-result-passes-the-promise-through.ts": {
+   "order": [
+    "<repo>/tests/corpus/25675-promise-resolve-over-a-void-or-promise-result-passes-the-promise-through.ts"
+   ],
+   "diags": []
   }
  }
 }
