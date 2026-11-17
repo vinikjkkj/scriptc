@@ -27,6 +27,7 @@ import type {
 import type { SourceFile } from "typescript/unstable/ast";
 import { CheckerFacade } from "./checker.js";
 import { installSymbolCanon } from "./symbol-canon.js";
+import { closeTsgo, phaseTimesOn, registerTsgo, span } from "../../phase-times.js";
 import { enumKeyOf, ModuleKind, ModuleResolutionKind, ScriptTarget } from "./enums.js";
 import { tsgoPath } from "../shared.js";
 import { jsDesugar } from "../js-desugar.js";
@@ -137,6 +138,7 @@ function desugaredJs(fileName: string, derived: string | undefined): string | un
 export class Ts7Host {
   private readonly virtualFiles = new Map<string, string>();
   private readonly api: API;
+  private readonly reg: ReturnType<typeof registerTsgo>;
   private closed = false;
 
   constructor(options?: {
@@ -154,9 +156,9 @@ export class Ts7Host {
   }) {
     const virtualFiles = this.virtualFiles;
     const shadow = options?.fsShadow ?? null;
-    this.api = new API({
+    this.api = span("tsgo.spawn", () => new API({
       cwd: options?.cwd ?? process.cwd(),
-      ...(options?.collectTiming !== undefined ? { collectTiming: options.collectTiming } : {}),
+      ...(options?.collectTiming !== undefined ? { collectTiming: options.collectTiming } : phaseTimesOn ? { collectTiming: true } : {}),
       fs: {
         // string => virtual (or shadowed) hit; null => shadowed out of
         // existence; undefined => real-FS fallthrough.
@@ -212,7 +214,8 @@ export class Ts7Host {
             ? (trackedAccessibleEntries(path) ?? { files: [], directories: [] })
             : undefined,
       },
-    });
+    }));
+    this.reg = registerTsgo(this.api);
   }
 
   /** Registers an in-memory file served to tsgo by the virtual-FS hooks. */
@@ -243,8 +246,10 @@ export class Ts7Host {
       configPath,
       JSON.stringify({ compilerOptions: serializeOptions(options), files: roots, include: [] }),
     );
-    const snapshot = this.api.updateSnapshot({ openProjects: [configPath] });
-    const project = snapshot.getProject(configPath);
+    const { snapshot, project } = span("tsgo.snapshot", () => {
+      const snapshot = this.api.updateSnapshot({ openProjects: [configPath] });
+      return { snapshot, project: snapshot.getProject(configPath) };
+    });
     if (!project) {
       snapshot.dispose();
       throw new Error(`ts7 createProgram: project failed to open for ${first}`);
@@ -261,6 +266,7 @@ export class Ts7Host {
   close(): void {
     if (this.closed) return;
     this.closed = true;
+    closeTsgo(this.reg);
     this.api.close();
   }
 }
