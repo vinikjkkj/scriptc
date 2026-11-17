@@ -12715,6 +12715,31 @@ function inertAliasExpr(L: Lowerer, e: ts.Expression): boolean {
             const bridged = L.settleOrValueResolve(L.lowerExpr(argNode), locOf(argNode));
             if (bridged !== null) return bridged;
           }
+          // `Promise<void> | undefined` (a sink's `void | Promise<void>` result): the only data arm is the unit `undefined`, which Promise.resolve wraps
+          // into the already-settled payload-less promise (the zero-argument form), and the promise arm passes through identically. The union's tag picks.
+          if (pArm?.kind === "promise" && pArm.inner.kind === "void" && uArms.every((a) => a === pArm || a.kind === "undefinedT")) {
+            const lv = L.lowerExpr(argNode);
+            if (lv.type.kind === "union" && lv.type.unionId === argIr.unionId) {
+              const pTag = uArms.indexOf(pArm);
+              const slot = L.declareHiddenLocal("%presolveV", lv.type);
+              const ref: IrExpr = { kind: "varRef", localId: slot.id, type: lv.type, loc: locOf(argNode) };
+              const l0 = locOf(argNode);
+              return {
+                kind: "seqExpr",
+                stmts: [{ kind: "varDecl", localId: slot.id, init: lv, loc: l0 }],
+                result: {
+                  kind: "ternary",
+                  cond: { kind: "unionIsTag", unionId: argIr.unionId, tag: pTag, negated: false, value: ref, type: BOOL, loc: l0 },
+                  then: { kind: "unionNarrow", unionId: argIr.unionId, tag: pTag, value: ref, type: pArm, loc: l0 },
+                  else_: { kind: "intrinsic", name: "promise.resolve", args: [], type: pArm, loc: l0 },
+                  type: pArm,
+                  loc: l0,
+                },
+                type: pArm,
+                loc: l0,
+              };
+            }
+          }
           L.noLowering(
             "Promise.resolve over a value that may already be a promise",
             argNode,
