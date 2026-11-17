@@ -9398,8 +9398,8 @@ export function dynStaticFns(L: Lowerer, info: ClassInfo): { fns: IrFunction[]; 
   }
   for (const [key, v] of info.staticAccessors ?? []) {
     if (key.startsWith("get:") && !key.startsWith("get:#")) staticMembers.push({ name: key, fn: `%${className}.static:${key}`, pos: v.member.pos });
-    // The setter half of a static accessor pair rides as its own entry (`set:z`): the member rows read it to say the accessor has a setter.
-    else if (key.startsWith("set:") && !key.startsWith("set:#") && info.staticAccessors?.has(`get:${key.slice(4)}`) === true) {
+    // The setter of a static accessor rides as its own entry (`set:z`): beside a getter it marks the pair, alone it is a setter-only accessor (a read answers undefined).
+    else if (key.startsWith("set:") && !key.startsWith("set:#")) {
       staticMembers.push({ name: key, fn: `%${className}.static:${key}`, pos: v.member.pos });
     }
   }

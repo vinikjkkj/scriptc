@@ -7853,7 +7853,7 @@ typedef struct ScrDynClassOps {
   /* The class's PROTOTYPE OBJECT (the one `C.prototype` answers and `Object.getPrototypeOf(instance)` must answer too): +1, or NULL for a class that
    * carries no prototype rows (the caller keeps its intrinsic stand-in). */
   ScrDyn *(*class_prototype)(const ScrDynClass *cls);
-  /* A STATIC ACCESSOR of the class value `v` (`static get z()` / `static set z(v)`): 1 with *getter / *setter set to the two function values (+1, NULL
+  /* A STATIC ACCESSOR of the class value `v` (`static get z()` / `static set z(v)`): 2 when a BASE class declares it (not an own property of `v`); 1 with *getter / *setter set to the two function values (+1, NULL
    * for an absent half) when `key` names one, else 0 (a method, a field, an unknown name, an evaluation's class value). */
   int (*class_static_accessor)(const ScrDyn *v, const char *key, size_t key_len, ScrDyn **getter, ScrDyn **setter);
 } ScrDynClassOps;

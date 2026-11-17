@@ -185,7 +185,9 @@ ScrDyn *scr_dyn_get_own_desc(ScrDyn *v, ScrStr *key) {
         if (table != NULL) scr_dyn_release(table);
         if (scr_dyn_class_ops->class_static_accessor != NULL) {
           ScrDyn *g = NULL, *st = NULL;
-          if (scr_dyn_class_ops->class_static_accessor(v, k, kl, &g, &st) == 1) {
+          const int own = scr_dyn_class_ops->class_static_accessor(v, k, kl, &g, &st);
+          if (own == 2) return gopd_undefined();
+          if (own == 1) {
             return gopd_accessor(g != NULL ? g : scr_dyn_retain(scr_dyn_undefined()), st != NULL ? st : scr_dyn_retain(scr_dyn_undefined()), false, true);
           }
         }
