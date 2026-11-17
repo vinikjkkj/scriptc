@@ -2192,6 +2192,12 @@ static void scr_heap_trim_line(const char *const *labels, const size_t *vals,
 #define SCR_TEXT_DROP_EVERY_MS 500 /* repeat at most this often; 0 = the first drop only. MEASURED on the zapo REST app (peak RSS, two runs each): 2000 ms gave 52.3 / 52.0 MB, 1000 ms 52.1 / 49.4, 500 ms 47.7 / 45.2, 250 ms 48.6 / 47.8 -- the drop only fires at an idle seam, so a shorter interval than 500 buys nothing more; minor faults rose 9.1k -> 9.1-9.3k at 500 (10.2k at 250) and CPU stayed inside run-to-run noise. */
 #endif
 
+/* LAB ONLY (lab/textmap-target): a never-called 256 KiB function, the negative control of the text residency census: its interior pages are more than
+ * one fault-around window from any touched code, so they must show as NOT resident at the peak. */
+__attribute__((used, retain, noinline)) void scr_lab_planted_never_called(void) {
+  __asm__ volatile(".rept 262144\n\tnop\n\t.endr");
+}
+
 static bool scr_text_drop_env(const char *name, bool dflt) {
   const char *e = getenv(name);
   if (e == NULL || e[0] == '\0') return dflt; /* an empty value is "unset", not "on" */
