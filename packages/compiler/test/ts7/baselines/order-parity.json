@@ -16376,6 +16376,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25556-js-class-prototype-method-borrowed-through-an-untyped-receiver-with-call.js": {
+   "order": [
+    "<repo>/tests/corpus/25556-js-class-prototype-method-borrowed-through-an-untyped-receiver-with-call.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25557-js-class-prototype-method-saved-then-replaced-and-applied.js": {
+   "order": [
+    "<repo>/tests/corpus/25557-js-class-prototype-method-saved-then-replaced-and-applied.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25558-js-class-prototype-methods-stored-in-objects-and-passed-as-values.js": {
+   "order": [
+    "<repo>/tests/corpus/25558-js-class-prototype-methods-stored-in-objects-and-passed-as-values.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2556-crypto-introspection.ts": {
    "order": [
     "<repo>/tests/corpus/2556-crypto-introspection.ts"

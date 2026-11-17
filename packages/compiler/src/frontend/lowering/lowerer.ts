@@ -21052,6 +21052,9 @@ export class Lowerer {
   }
 
   lowerClassPrototypeValue(expr: ts.PropertyAccessExpression): IrExpr | null {
+    // A JavaScript source file keeps the prototype lowering it always had (a class prototype read as a value, a prototype method borrowed with .call,
+    // the late-method writes): the dyn prototype value below is for TypeScript, where those forms were refused.
+    if (isJsSourceFile(expr.getSourceFile())) return expr.name.text === "prototype" ? lowerNewTargetMember(this, expr) : null;
     return lowerClassPrototypeRead(this, expr) ?? lowerClassPrototypeMember(this, expr) ?? (expr.name.text === "prototype" ? lowerNewTargetMember(this, expr) : null);
   }
 
