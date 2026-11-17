@@ -316,9 +316,9 @@ export function contextImportFiles(importerFile: string, pattern: { prefix: stri
   return out;
 }
 
-/** Every context-import file the program's sources name that the program does not yet contain. */
-function contextImportRoots(program: ts.Program): string[] {
-  const have = new Set(program.getSourceFiles().map((s) => s.fileName));
+/** Every context-import file the program's sources name that the program does not yet contain (`named`: every one they name, present or not). */
+function contextImportRoots(program: ts.Program, named = false): string[] {
+  const have = named ? new Set<string>() : new Set(program.getSourceFiles().map((s) => s.fileName));
   const add = new Set<string>();
   for (const sf of program.getSourceFiles()) {
     if (sf.isDeclarationFile || sf.fileName.includes("/node_modules/") || !sf.text.includes("import(")) continue;
@@ -349,6 +349,9 @@ export interface StartupCrash {
   className: "%Error" | "%TypeError" | "%SyntaxError";
   loc: { file: string; start: number; end: number };
 }
+
+/** The context-import roots each bare root list resolved to (see the memo note in loadProgram7). */
+const contextRootsMemo = new Map<string, string[]>();
 
 function loadProgram7(host: ts.Ts7Host, entryPath: string): LoadResult & { disposeAll: () => void } {
   const config = adoptProjectConfig7(host, entryPath);
@@ -401,7 +404,31 @@ function loadProgram7(host: ts.Ts7Host, entryPath: string): LoadResult & { dispo
     if (npm !== null && isJsSourceFileName(npm.typesFile)) npmStaticRoots.push(npm.typesFile);
   }
   const baseRoots: string[] = [...coreRoots, overridesDtsPath(), ...provenanceDeclSiblings(), ...provenanceRequireRoots(), ...npmStaticRoots];
+  /* THE CONTEXT-ROOT MEMO (snap1). The rounds below create the program once WITHOUT the context-import files, find them, and create it again WITH
+   * them: two snapshots per load (about 19 s each on REST), and a reload (the pin and twin passes) repeats both. A reload of the same roots finds the
+   * same files, so the first load's answer seeds the next one and the program is created ONCE with the final roots, in the order the rounds produced.
+   * The seed is only TRUSTED after two checks on the program built from it, and the rounds then run exactly as before: (1) CLOSED: no further file is
+   * named (the loop below finds nothing new), and (2) JUSTIFIED: every seeded file is still named by a source of that program (a file deleted or a
+   * pattern edited away fails it). A failed check drops the seed and rebuilds from the bare roots, which is the historical path byte for byte. The key is
+   * the bare root list (entry, ambient files, the npm-static and provenance roots), so a different package set never shares an answer. */
+  const ctxKey = baseRoots.join("\n");
+  const bareRoots = [...baseRoots];
+  let seeded = false;
+  const seed = contextRootsMemo.get(ctxKey);
+  if (seed !== undefined && seed.length > 0) {
+    baseRoots.push(...seed);
+    seeded = true;
+  }
   let program = ts.createProgram(baseRoots, options, host);
+  if (seeded) {
+    const named = new Set(contextImportRoots(program, true));
+    if (!baseRoots.slice(bareRoots.length).every((f) => named.has(f))) {
+      program.dispose();
+      baseRoots.length = bareRoots.length;
+      seeded = false;
+      program = ts.createProgram(baseRoots, options, host);
+    }
+  }
   // CONTEXT imports (`import(`./locales/${x}.js`)`, `import('./plugins/' + name)`): the files the pattern can name join the program as extra
   // roots, so each is a module of the compiled graph (to a fixpoint: an added file may hold its own context imports).
   for (let round = 0; round < 3; round++) {
@@ -411,6 +438,7 @@ function loadProgram7(host: ts.Ts7Host, entryPath: string): LoadResult & { dispo
     baseRoots.push(...ctx);
     program = ts.createProgram(baseRoots, options, host);
   }
+  contextRootsMemo.set(ctxKey, baseRoots.slice(bareRoots.length));
   /* The two-phase ORACLE for the prescan`s spec-twin selection (see
    * provenanceSpecTwinsInProgram). Off by default -- the scan already put the
    * reached twins in baseRoots -- and reachable so a new driver`s selection can
