@@ -32,7 +32,7 @@ import { hasProtoTab, protoTabReadChain } from "./lower-prototab.js";
 import { undeclaredByHierarchy, checkedArmBridge, lowerInstanceOverrideRead, lowerWebCryptoGetRandomValues, refuseUnloweredSubtleCall, refuseUnloweredWebCrypto, refuseWebCryptoDestructuredArgs, refuseWebCryptoOwnKeys, sameValueDynOperand, unboundMethodThunk, undefinedArmedInAnswer, lowerWebCryptoMemberCall } from "./lower-exprs.js";
 import { cjsRequireAliasTargetOf, requireDepValueOf } from "./lower-island.js";
 import { NARROW_FIRST, builtinFenceHintOf, builtinModuleFnOf, dynOwnNamesHelper } from "./surfaces.js";
-import { OBJECT_PROTOTYPE_METHODS } from "./lowerer.js";
+import { OBJECT_PROTOTYPE_METHODS, propertyNameText } from "./lowerer.js";
 import { ffiBindingDiag, ffiSignatureDiag, requiresDynamicDiag } from "../../diagnostics/diagnostic.js";
 import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import { mixinFnShapeOf } from "./lower-mixins.js";
@@ -10599,9 +10599,13 @@ export function reconcileOverloadMemberDyn(L: Lowerer, expr: ts.CallExpression, 
     // function at its creation site, and an anonymous arrow in a binding
     // or property position takes that binding's name (NamedEvaluation) —
     // jsFuncNameOf is exactly that set. ACCESSORS decline: node spells
-    // their name `get x`/`set x`, and half of it would be a wrong answer.
+    // their name `get x`/`set x`, spelled here from the static key (a computed
+    // key the checker cannot fold keeps the empty name).
     // The empty string is the honest answer for `arr.map((x) => x)`.
-    const jsName = ts.isAccessor(node) ? "" : (nameIdent ? nameIdent.text : (jsFuncNameOf(node, L) ?? ""));
+    const accessorKey = ts.isAccessor(node) ? propertyNameText(L, node.name) : null;
+    const jsName = ts.isAccessor(node)
+      ? (accessorKey === null ? "" : `${ts.isGetAccessorDeclaration(node) ? "get" : "set"} ${accessorKey}`)
+      : (nameIdent ? nameIdent.text : (jsFuncNameOf(node, L) ?? ""));
     // Named function expressions/declarations can self-reference by name; an
     // object-literal method's name is a PROPERTY, not a binding — no self.
     const selfSymbol =
@@ -16579,7 +16583,15 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverr
       // it routes through a dyn dispatch whose arity rule diverges from a
       // compiled call's; importing that into a path that refuses today is
       // the trade this project does not make.
-      const callApplyIsJs = isJsSourceFile(call.getSourceFile());
+      // A getter or setter read off a property descriptor (`d.get!.call(obj)`) is a function that reads its receiver, whichever source file
+      // spells the call: the descriptor builds it from the member's own body, which runs against `this`.
+      const descriptorAccessorFn = ((): boolean => {
+        let e: ts.Expression = access.expression;
+        while (ts.isParenthesizedExpression(e) || ts.isNonNullExpression(e)) e = e.expression;
+        return ts.isPropertyAccessExpression(e) && (e.name.text === "get" || e.name.text === "set") &&
+          /PropertyDescriptor/.test(L.checker.typeToString(L.typeOf(e.expression)));
+      })();
+      const callApplyIsJs = isJsSourceFile(call.getSourceFile()) || descriptorAccessorFn;
       if (
         (name === "call" || name === "apply") &&
         L.checker.getCallSignatures(recvT).length > 0 &&

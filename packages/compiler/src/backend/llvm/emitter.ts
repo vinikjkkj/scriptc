@@ -1954,6 +1954,9 @@ class LlEmitter {
   private readonly fnTexts = new Map<string, string | null>();
   /** Entry symbol -> inspect kind code (see the C twin, emitter.ts fnCodes). */
   private readonly fnCodes = new Map<string, number>();
+  noteAdapterEntry(sym: string): void {
+    this.fnCodes.set(sym, (this.fnCodes.get(sym) ?? 0) | 0x40);
+  }
   private needsOom = false;
   private needsBadTag = false;
   private needsBadKey = false;

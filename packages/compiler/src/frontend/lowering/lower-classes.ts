@@ -9388,6 +9388,10 @@ export function dynStaticFns(L: Lowerer, info: ClassInfo): { fns: IrFunction[]; 
   }
   for (const [key, v] of info.staticAccessors ?? []) {
     if (key.startsWith("get:") && !key.startsWith("get:#")) staticMembers.push({ name: key, fn: `%${className}.static:${key}`, pos: v.member.pos });
+    // The setter half of a static accessor pair rides as its own entry (`set:z`): the member rows read it to say the accessor has a setter.
+    else if (key.startsWith("set:") && !key.startsWith("set:#") && info.staticAccessors?.has(`get:${key.slice(4)}`) === true) {
+      staticMembers.push({ name: key, fn: `%${className}.static:${key}`, pos: v.member.pos });
+    }
   }
   staticMembers.sort((x, y) => x.pos - y.pos);
   for (const sm of staticMembers) list.push({ name: sm.name, fn: sm.fn, ...(sm.len !== undefined ? { len: sm.len } : {}) });

@@ -5780,6 +5780,10 @@ static inline const char *scr_dyn_fn_sig(const ScrDyn *d) { return scr_rva_str(s
  * scr_dyn_bound_name). The marker is a static literal, so it round-trips
  * through scr_rva_of like every other name. */
 extern const char scr_dyn_bound_name_mark[];
+/* The name slot of an ACCESSOR function value minted for a class (`get x` / `set x`): the spelling lives in the minting unit (scr_dyn_class.c, which
+ * installs the reader the first time it mints one). */
+extern const char scr_dyn_accessor_name_mark[];
+extern const char *(*scr_dyn_accessor_name_fn)(const ScrDyn *d);
 extern const char *(*scr_dyn_bound_name_fn)(const ScrDyn *d);
 /* One out-of-line body (scr_json.c), not an inline check: the check at every
  * caller grew the always-linked code. */
@@ -7782,6 +7786,9 @@ typedef struct ScrDynClassOps {
   /* The class's PROTOTYPE OBJECT (the one `C.prototype` answers and `Object.getPrototypeOf(instance)` must answer too): +1, or NULL for a class that
    * carries no prototype rows (the caller keeps its intrinsic stand-in). */
   ScrDyn *(*class_prototype)(const ScrDynClass *cls);
+  /* A STATIC ACCESSOR of the class value `v` (`static get z()` / `static set z(v)`): 1 with *getter / *setter set to the two function values (+1, NULL
+   * for an absent half) when `key` names one, else 0 (a method, a field, an unknown name, an evaluation's class value). */
+  int (*class_static_accessor)(const ScrDyn *v, const char *key, size_t key_len, ScrDyn **getter, ScrDyn **setter);
 } ScrDynClassOps;
 /* +1 OBJ holding the instance's own ENUMERABLE string-keyed properties in Node's order (creation order: the table's insertion order
  * with the field markers scr_cls_props_note leaves, integer-like keys first ascending), values read once. NULL with *unsup true when

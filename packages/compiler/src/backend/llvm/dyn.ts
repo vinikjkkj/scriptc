@@ -173,6 +173,8 @@ export interface DynHost extends WalkerHost {
   /** moduleInstanceLaneNeedsKg: the instance lane reads through the emitted keyed read. */
   readonly instanceLaneNeedsKg: boolean;
   unitInstanceRef(unionId: string, tag: number): string;
+  /** Records a closure entry symbol as a name-table WRAPPER row (SCR_FNK_ADAPTER): its name is the wrapped function's, read at run time. */
+  noteAdapterEntry(sym: string): void;
   /** The two-array key table one record shape's WIDE lane projects
    * through — `@sc_kgk_<shapeId>` (the NUL-terminated key bytes) and
    * `@sc_kgl_<shapeId>` (their lengths), interned once per shape. The C
@@ -6591,6 +6593,7 @@ export class LlDyn {
     const name = this.namer.name("sc_dfa", key, this.dynFuncAdapters.size);
     this.dynFuncAdapters.set(key, name);
     const host = this.host;
+    host.noteAdapterEntry(name);
     const B = new BlockBuilder();
     host.declare(`declare ptr @scr_box_get_ref(ptr)`);
     host.declare(`declare ptr @scr_box_get_thunk_fn(ptr)`);
