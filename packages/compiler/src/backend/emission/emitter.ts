@@ -1940,6 +1940,7 @@ export class CEmitter {
       ...(fnNameRows.length > 0
         ? [`  scr_fn_names_install(sc_fn_name_tbl, sizeof sc_fn_name_tbl / sizeof sc_fn_name_tbl[0]);`]
         : []),
+      ...(fnNameRows.some((r) => (r[2] & 0xc0) !== 0) ? [`  scr_fn_wrap_names_enable();`] : []),
       ...(usesFnText
         ? [`  scr_fn_texts_install(sc_fn_text_tbl, sizeof sc_fn_text_tbl / sizeof sc_fn_text_tbl[0]);`]
         : []),

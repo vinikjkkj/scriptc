@@ -5808,6 +5808,8 @@ static inline const char *scr_dyn_fn_sig(const ScrDyn *d) { return scr_rva_str(s
 extern const char scr_dyn_bound_name_mark[];
 /* The name slot of an ACCESSOR function value minted for a class (`get x` / `set x`): the spelling lives in the minting unit (scr_dyn_class.c, which
  * installs the reader the first time it mints one). */
+extern const char *(*scr_dyn_wrapper_name_fn)(const ScrClosure *c);
+void scr_fn_wrap_names_enable(void);
 extern const char scr_dyn_accessor_name_mark[];
 extern const char *(*scr_dyn_accessor_name_fn)(const ScrDyn *d);
 extern const char *(*scr_dyn_bound_name_fn)(const ScrDyn *d);

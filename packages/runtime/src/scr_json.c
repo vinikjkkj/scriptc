@@ -2372,79 +2372,16 @@ const char scr_dyn_bound_name_mark[] = "\x01bound-fn-name";
 const char *(*scr_dyn_bound_name_fn)(const ScrDyn *d) = NULL;
 const char scr_dyn_accessor_name_mark[] = "\001accessor-fn-name";
 const char *(*scr_dyn_accessor_name_fn)(const ScrDyn *d) = NULL;
-/* The interned spelling of "bound " x depth + base: a bound function's name is computed per value, and the answer is a borrowed `const char *`
- * like every other name, so the few distinct spellings (one per bound target name and depth) live for the whole run. */
-typedef struct ScrBoundName {
-  const char *base;
-  unsigned depth;
-  char *text;
-} ScrBoundName;
-static ScrBoundName *scr_bound_names = NULL;
-static size_t scr_bound_names_len = 0, scr_bound_names_cap = 0;
-static const char *scr_fn_bound_name(const char *base, unsigned depth) {
-  const char *b = base != NULL ? base : "";
-  for (size_t i = 0; i < scr_bound_names_len; i++)
-    if (scr_bound_names[i].depth == depth && strcmp(scr_bound_names[i].base, b) == 0) return scr_bound_names[i].text;
-  const size_t blen = strlen(b);
-  char *text = (char *)malloc(depth * 6 + blen + 1);
-  if (text == NULL) return NULL;
-  for (unsigned k = 0; k < depth; k++) memcpy(text + (size_t)k * 6, "bound ", 6);
-  memcpy(text + (size_t)depth * 6, b, blen + 1);
-  if (scr_bound_names_len == scr_bound_names_cap) {
-    size_t nc = scr_bound_names_cap == 0 ? 8 : scr_bound_names_cap * 2;
-    ScrBoundName *nt = (ScrBoundName *)realloc(scr_bound_names, nc * sizeof *nt);
-    if (nt == NULL) return text;
-    scr_bound_names = nt;
-    scr_bound_names_cap = nc;
-  }
-  /* the key must outlive the lookup: it is the interned text of the BASE, copied after the prefix */
-  scr_bound_names[scr_bound_names_len].base = text + (size_t)depth * 6;
-  scr_bound_names[scr_bound_names_len].depth = depth;
-  scr_bound_names[scr_bound_names_len].text = text;
-  scr_bound_names_len++;
-  return text;
-}
-
-/* The name of the closure a WRAPPER row (SCR_FNK_WRAP_MASK) stands for: an adapter answers the function it wraps, a bound function answers "bound " +
- * its target's, followed through chains (bounded: a chain is finite). NULL when the underlying closure has no name. The wrapped closure is held by the
- * wrapper for as long as the wrapper lives, so the pointer outlives the transient +1 taken here. */
-static const char *scr_fn_wrapper_name(const ScrClosure *c) {
-  const char *out = NULL;
-  unsigned depth = 0;
-  ScrClosure *held = NULL;
-  for (int hop = 0; hop < 64 && c != NULL; hop++) {
-    const unsigned wrap = scr_fn_code_of(c->fn) & SCR_FNK_WRAP_MASK;
-    if (wrap == 0) {
-      /* The program's own table first (a compiled closure, boxed or not); a closure that is itself a described dyn FUNC value (a bound box, a
-       * runtime-made one) answers its descriptor's name. */
-      out = scr_fn_name_of(c->fn);
-      if (out == NULL && c->isdyn && scr_closure_desc(c) != NULL) out = scr_dyn_fn_name((const ScrDyn *)c);
-      break;
-    }
-    if (wrap != SCR_FNK_ADAPTER) depth++;
-    const size_t idx = wrap == SCR_FNK_WRAP_MASK ? 1u : 0u;
-    if (scr_closure_ncaps(c) <= idx || c->caps[idx] == NULL) break;
-    ScrBox *cap = c->caps[idx];
-    ScrClosure *next;
-    if (scr_cap_tag(cap) == SCR_CAP_TAG_CLO) {
-      next = (ScrClosure *)scr_cap_raw_ptr(cap);
-      if (next == NULL) break;
-      next = scr_closure_retain(next);
-    } else {
-      next = (ScrClosure *)scr_box_get_ref(cap);
-    }
-    if (held != NULL) scr_closure_release(held);
-    held = next;
-    c = next;
-  }
-  if (depth > 0) out = scr_fn_bound_name(out, depth);
-  if (held != NULL) scr_closure_release(held);
-  return out;
-}
+/* The name of a WRAPPER closure (an adapter, a bound function; SCR_FNK_WRAP_MASK rows) is derived from the closure it wraps by scr_closure.c's
+ * scr_fn_wrapper_name, reached through this hook: main() installs it (scr_fn_wrap_names_enable) only for a program whose name table has such a row, so a
+ * program without one links none of that code. */
+const char *(*scr_dyn_wrapper_name_fn)(const ScrClosure *c) = NULL;
 __attribute__((noinline)) const char *scr_dyn_fn_name(const ScrDyn *d) {
   const ScrFnDesc *desc = scr_dyn_fn_desc(d);
   const char *n = scr_rva_str(desc->name);
-  if (n == NULL && (desc->arity & (SCR_FNK_WRAP_MASK << SCR_FNK_SHIFT)) != 0) return scr_fn_wrapper_name(scr_dyn_fn_clo(d));
+  if (n == NULL && (desc->arity & (SCR_FNK_WRAP_MASK << SCR_FNK_SHIFT)) != 0) {
+    return scr_dyn_wrapper_name_fn != NULL ? scr_dyn_wrapper_name_fn(scr_dyn_fn_clo(d)) : NULL;
+  }
   if (n == scr_dyn_accessor_name_mark) return scr_dyn_accessor_name_fn(d);
   return n == scr_dyn_bound_name_mark ? scr_dyn_bound_name_fn(d) : n;
 }
