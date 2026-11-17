@@ -466,6 +466,11 @@ ScrDyn *scr_dyn_get_prototype_of(const ScrDyn *d) {
     }
     case SCR_DYN_OBJINST: {
       const ScrDynClass *cls = scr_dyn_objinst_class_of(d);
+      /* The class's own prototype OBJECT (what `C.prototype` reads), so the two answers are ONE value. */
+      if (scr_dyn_class_ops != NULL && scr_dyn_class_ops->class_prototype != NULL) {
+        ScrDyn *cp = scr_dyn_class_ops->class_prototype(cls);
+        if (cp != NULL) return cp;
+      }
       for (size_t i = 0; i < class_n; i++) if (class_keys[i] == cls) return scr_dyn_retain(class_protos[i]);
       if (class_n < 64) {
         class_keys[class_n] = cls;
