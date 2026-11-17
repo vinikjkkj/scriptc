@@ -18,6 +18,7 @@
  *
  * THE SUM CONTROL: every span's EXCLUSIVE time (dt minus its children's dt) is reported, and the exclusive times of all spans plus the unattributed
  * root remainder add up to the root span's dt by construction; `wallMs` (process start to exit) minus the root dt is the node startup and teardown. */
+import { createHash } from "node:crypto";
 import { appendFileSync, readFileSync } from "node:fs";
 
 const OUT = process.env["SCRIPTC_PHASE_TIMES"];
@@ -59,6 +60,15 @@ const plant = (() => {
   return i < 0 ? null : { name: v.slice(0, i), ms: Number(v.slice(i + 1)) };
 })();
 let installed = false;
+const hashes: Record<string, string> = {};
+
+/** Record the sha256 of one emitted artifact (the C translation units, the LLVM IR) so two builds can be compared byte for byte from their ledgers. */
+export function noteHash(label: string, ...texts: (string | null | undefined)[]): void {
+  if (!phaseTimesOn) return;
+  const h = createHash("sha256");
+  for (const t of texts) h.update(t ?? "\u0000");
+  hashes[label] = h.digest("hex");
+}
 
 function statusKb(pid: number | undefined, key: string): number {
   if (pid === undefined || process.platform !== "linux") return 0;
@@ -97,6 +107,8 @@ function install(): void {
       const line = {
         pid: process.pid,
         argv: process.argv.slice(2),
+        cli: process.argv[1],
+        hashes,
         cpus: (globalThis as { navigator?: { hardwareConcurrency?: number } }).navigator?.hardwareConcurrency ?? 0,
         wallMs: wall,
         rootMs,
