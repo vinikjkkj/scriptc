@@ -700,11 +700,16 @@ bool dyn_cls_impl_err_delete(ScrDyn *d, const ScrStr *key) {
       if (ks != NULL) {
         ScrErrOwnSlot mk[3];
         const size_t nmk = dyn_err_own_slots(d, e, mk);
+        size_t nmem = 0; /* the present member rows come first in the merged stream */
+        const size_t nrows = scr_dyn_objinst_member_count(d);
+        for (size_t i = 0; i < nrows; i++) {
+          if (!scr_dyn_member_hidden(scr_dyn_objinst_member_at(d, i), d->v.inst.o)) nmem++;
+        }
         size_t mi = 0;
         for (size_t bi = 0; bi < ks->v.arr.len; bi++) {
-          while (mi < nmk && mk[mi].pos <= bi + mi) mi++;
+          while (mi < nmk && mk[mi].pos <= nmem + bi + mi) mi++;
           const ScrStr *ks_s = scr_dyn_str_value(ks->v.arr.items[bi]);
-          if (ks_s->len == key->len && memcmp(ks_s->data, key->data, key->len) == 0) { m = bi + mi; break; }
+          if (ks_s->len == key->len && memcmp(ks_s->data, key->data, key->len) == 0) { m = nmem + bi + mi; break; }
         }
         scr_dyn_release(ks);
       } else if (scr_exc_pending()) {
@@ -1031,21 +1036,12 @@ static ScrDyn *dyn_cls_ops_walk_error(const ScrDyn *v, ScrObjWalk mode) {
      * `message` constructed with the error and `stack` are own NON-enumerable and never listed; a class that declares `name`,
      * `code` or `message` itself has the member row, which is the same slot: listed once, there. */
     ScrError *e = (ScrError *)v->v.inst.o;
+    /* The stream is: the class's present member rows (declared fields exist from construction; a JS constructor's inferred fields exist once
+     * assigned), then the expando bag's keys; the assigned cells are merged into it by the position each was created at. */
     const size_t nm = scr_dyn_objinst_member_count(v);
+    size_t nmem = 0;
     for (size_t i = 0; i < nm; i++) {
-      const ScrDynClassMember *m = scr_dyn_objinst_member_at(v, i);
-      if (scr_dyn_member_hidden(m, v->v.inst.o)) continue;
-      if (mode == SCR_OBJWALK_KEYS) {
-        scr_dyn_arr_push(out, dyn_cls_objwalk_key(m->name, m->len));
-        continue;
-      }
-      ScrDyn *val = m->get(v->v.inst.o);
-      if (val == NULL) {
-        scr_dyn_release(out);
-        return NULL;
-      }
-      scr_dyn_objwalk_push(out, mode, m->name, m->len, val);
-      scr_dyn_release(val);
+      if (!scr_dyn_member_hidden(scr_dyn_objinst_member_at(v, i), v->v.inst.o)) nmem++;
     }
     ScrDyn *bag = NULL;
     if (e->props != NULL && e->props->kind == SCR_DYN_OBJ) {
@@ -1058,16 +1054,32 @@ static ScrDyn *dyn_cls_ops_walk_error(const ScrDyn *v, ScrObjWalk mode) {
     ScrErrOwnSlot mk[3];
     const size_t nmk = dyn_err_own_slots(v, e, mk);
     const size_t nb = bag != NULL ? bag->v.arr.len : 0;
-    size_t bi = 0, mi = 0;
-    while (bi < nb || mi < nmk) {
-      const size_t at = bi + mi;
-      if (mi < nmk && (mk[mi].pos <= at || bi >= nb)) {
+    size_t mem_i = 0, mem_done = 0, bi = 0, mi = 0;
+    while (mem_done < nmem || bi < nb || mi < nmk) {
+      const size_t at = mem_done + bi + mi;
+      if (mi < nmk && (mk[mi].pos <= at || (mem_done >= nmem && bi >= nb))) {
         const ScrStr *cell = mk[mi].which == 0 ? e->name : mk[mi].which == 1 ? e->code : e->message;
         const char *kn = mk[mi].which == 0 ? "name" : mk[mi].which == 1 ? "code" : "message";
         ScrDyn *cv = scr_dyn_new_str((ScrStr *)cell);
         scr_dyn_objwalk_push(out, mode, kn, strlen(kn), cv);
         scr_dyn_release(cv);
         mi++;
+      } else if (mem_done < nmem) {
+        const ScrDynClassMember *m = scr_dyn_objinst_member_at(v, mem_i++);
+        if (scr_dyn_member_hidden(m, v->v.inst.o)) continue;
+        mem_done++;
+        if (mode == SCR_OBJWALK_KEYS) {
+          scr_dyn_arr_push(out, dyn_cls_objwalk_key(m->name, m->len));
+          continue;
+        }
+        ScrDyn *val = m->get(v->v.inst.o);
+        if (val == NULL) {
+          if (bag != NULL) scr_dyn_release(bag);
+          scr_dyn_release(out);
+          return NULL;
+        }
+        scr_dyn_objwalk_push(out, mode, m->name, m->len, val);
+        scr_dyn_release(val);
       } else {
         scr_dyn_arr_push(out, scr_dyn_retain(bag->v.arr.items[bi++]));
       }

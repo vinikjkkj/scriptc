@@ -1150,6 +1150,9 @@ void scr_error_stack_limit_set(double v);
  * memo for those two names. */
 void scr_error_install_props_drop(void (*fn)(void *obj));
 void scr_error_install_props_count(size_t (*fn)(void *obj));
+/* How many of a user subclass's own enumerable member rows (declared or inferred fields) exist on `e` right now: they are part of the key order
+ * `name` / `code` are created into (a JS constructor assigns `this.name` before the fields it assigns next). Installed with the class registry. */
+void scr_error_install_members_present(size_t (*fn)(const ScrError *e));
 /* A recorded position that does not fit the 16-bit slot spills into the error's property table (a hidden entry, exact as a double). */
 #define SCR_ERR_AT_SPILL 0xFFFFu
 void scr_error_install_props_spill(void (*set)(void *obj, int which, size_t pos), size_t (*get)(const void *obj, int which),

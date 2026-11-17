@@ -1725,6 +1725,19 @@ export function errorOwnFlagFor(classes: readonly IrClassDef[], className: strin
   return null;
 }
 
+/** True when some class of `className`'s chain has INFERRED fields (IrClassDef.ordered: a JS constructor or method creates them by assignment,
+ * so a `this.name = ...` in the same constructor may run before or after them). Their creation is not recorded for an Error-rooted hierarchy
+ * (the order record cannot sit before the runtime's ScrError prefix), so the key position of a `name` / `message` stored there is the one the
+ * runtime always gave it: first. A TypeScript class has none: its fields are declared, so they exist before the constructor body runs. */
+export function errorChainHasInferredFields(classes: readonly IrClassDef[], className: string): boolean {
+  const byName = new Map<string, IrClassDef>();
+  for (const c of classes) byName.set(c.name, c);
+  for (let c: string | undefined = className; c !== undefined; c = byName.get(c)?.base) {
+    if ((byName.get(c)?.ordered?.length ?? 0) > 0) return true;
+  }
+  return false;
+}
+
 /** A class whose instances may carry an OWN property that shadows one of its
  * methods with another method of the same class (`this.parseRow =
  * this._parseRowAsArray`) keeps the choice in a private boolean named

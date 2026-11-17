@@ -80,6 +80,9 @@ static void (*scr_error_props_drop)(void *obj) = NULL;
 
 void scr_error_install_props_drop(void (*fn)(void *obj)) { scr_error_props_drop = fn; }
 
+static size_t (*scr_error_members_present)(const ScrError *e) = NULL;
+void scr_error_install_members_present(size_t (*fn)(const ScrError *e)) { scr_error_members_present = fn; }
+
 /* How many own enumerable keys the expando bag lists: scr_json.c owns the dyn object and installs this beside the drop. */
 static size_t (*scr_error_props_count)(void *obj) = NULL;
 void scr_error_install_props_count(size_t (*fn)(void *obj)) { scr_error_props_count = fn; }
@@ -125,15 +128,20 @@ void scr_error_own_pos_shift(ScrError *e, size_t m) {
 }
 
 /* `name`, `code` or an assigned `message` just came into being as an own property of `e`. Node lists own keys in CREATION order,
- * so where it was created among the keys that are not declared fields is recorded: the index into the merged list of expando
+ * so where it was created is recorded: the index into the merged list of the class's present member rows, the expando
  * keys and these cells at this moment (position PLUS ONE in the slot; 0 = unrecorded = first). Re-assigning a property
  * that exists keeps its place. The walks (dyn_cls_ops_walk_error) merge the cells back in by these positions.
  *
  * An error already boxed into the checked-dynamic tree (a plain runtime Error's dyn copy IS its property bag from then on)
  * is brought up to date here too: the copy is a separate object, so a typed write has to reach it (scr_error_props_sync). */
 void scr_error_mark_own(ScrError *e, int which) {
+  /* bit 2: the store sits in a class whose inferred (JS-assigned) fields are not recorded, so a constructor may assign it before them: it keeps the
+   * position the runtime always gave it, first. */
+  const bool first = (which & 4) != 0;
+  which &= 3;
   if (e->props != NULL && scr_error_props_sync != NULL) scr_error_props_sync(e, which);
   size_t n = e->props != NULL && scr_error_props_count != NULL ? scr_error_props_count(e) : 0;
+  if (scr_error_members_present != NULL && !first) n += scr_error_members_present(e);
   size_t pos;
   if (which == 0) {
     if (e->own_name) return;
@@ -149,7 +157,7 @@ void scr_error_mark_own(ScrError *e, int which) {
     if (had || e->msg_at != 0) return;
     pos = n + (e->own_name ? 1 : 0) + (e->code != NULL ? 1 : 0);
   }
-  scr_error_own_pos_put(e, which, pos);
+  scr_error_own_pos_put(e, which, first ? 0 : pos);
 }
 
 static void scr_error_gcfree(void *obj) {

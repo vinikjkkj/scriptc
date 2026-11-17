@@ -5289,9 +5289,22 @@ static size_t scr_cls_reg_n = 0;
 const ScrDynClassOps *scr_dyn_class_ops = NULL;
 const ScrDynEeOps *scr_dyn_ee_ops = NULL;
 
+static const ScrDynClass *scr_dyn_error_user_class(const ScrError *e);
+/* scr_error_mark_own's member count: the class's own enumerable rows that exist on `e` now (the rows the key walk will list). */
+static size_t scr_error_members_present_impl(const ScrError *e) {
+  const ScrDynClass *c = scr_dyn_error_user_class(e);
+  if (c == NULL || c->members == NULL) return 0;
+  size_t n = 0;
+  for (size_t i = 0; i < c->nmembers; i++) {
+    if (!scr_dyn_member_hidden(&c->members[i], (void *)e)) n++;
+  }
+  return n;
+}
+
 void scr_dyn_objinst_registry(const ScrDynClass *const *descs, size_t n) {
   scr_cls_reg = descs;
   scr_cls_reg_n = n;
+  scr_error_install_members_present(&scr_error_members_present_impl);
 }
 
 const ScrDynClass *const *scr_dyn_class_registry(size_t *n) {

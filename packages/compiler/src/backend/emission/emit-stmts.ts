@@ -6,7 +6,7 @@ import { storesFreshDynNumber } from "../../ir/dyn-keep.js";
 import type { CEmitter, ScopeEntry } from "./emitter.js";
 import type { IrFunction, IrLocal, IrType } from "../../ir/nodes.js";
 import { mangleField, mangleGlobal, mangleLocal, mangleRawParam } from "../mangle.js";
-import { BOOL, CAUGHT, numSlotHalf, narrowSlotOf, classCbit, errorOwnFlagFor, F64, IrExpr, IrStmt, ORD_MEMBER, orderRecordPlanCached, RUNTIME_ERROR_CLASSES, isRefCounted, ownMaskKeyBit } from "../../ir/nodes.js";
+import { BOOL, CAUGHT, numSlotHalf, narrowSlotOf, classCbit, errorChainHasInferredFields, errorOwnFlagFor, F64, IrExpr, IrStmt, ORD_MEMBER, orderRecordPlanCached, RUNTIME_ERROR_CLASSES, isRefCounted, ownMaskKeyBit } from "../../ir/nodes.js";
 import { boxAccess, cDecl, cStringLiteral, cType, elemAccess, vAdapters } from "./emit-types.js";
 import { KEYLIST_MEMBER, OVERFLOW_MEMBER, OWNMASK_MEMBER, ownPresentCondC } from "./emit-shapes.js";
 import { emitStableReceiver, predeclareFieldRunTables } from "./emit-exprs.js";
@@ -1002,7 +1002,7 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
           const flag = errorOwnFlagFor(E.mod.classes ?? [], s.className, s.field);
           if (flag !== null) {
             // The runtime records the flag AND where the property was created among the own enumerable keys (Node lists own keys in creation order).
-            E.line(`scr_error_mark_own((ScrError *)${obj.name}, ${flag === "%ownName" ? 0 : 2});`);
+            E.line(`scr_error_mark_own((ScrError *)${obj.name}, ${(flag === "%ownName" ? 0 : 2) | (errorChainHasInferredFields(E.mod.classes ?? [], s.className) ? 4 : 0)});`);
           }
         }
         // A WRITE creates an own property — JS's [[Set]], and the reason a
