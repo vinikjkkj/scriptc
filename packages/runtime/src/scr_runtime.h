@@ -6941,6 +6941,43 @@ static inline void scr_numslot_put(ScrDyn **p, double *n, ScrDyn *v) {
   }
   scr_dyn_release(old);
 }
+/* NARROW SLOTS (compiler ir/narrow-slot.ts). A class's narrow dyn fields own no struct storage: field i is lane i (32 bits) of the hidden words `lanes` when bit
+ * i of the 16-bit presence `mask` is set, else entry i of the lazily allocated overflow ARRAY `ext` (a dyn ARR of `n` entries, undefined where unused; `ext`
+ * is an ordinary hidden dyn field, so new/release/trace/gcFree/clone treat it like any dyn field). A lane holds an integer 0..4294967295; every other
+ * value (a fraction, a negative, -0, NaN, a larger number, any non-number) goes to the array. The pacing weight is the numslot one: a lane stands for a
+ * number node that is not allocated, +1 when a lane is taken, -1 when it is given up, -popcount(mask) where the instance dies (SCR_NW_GHOSTS). */
+static inline bool scr_nw_fits(double n) {
+  return n >= 0 && n <= 4294967295.0 && n == (double)(uint32_t)n && !__builtin_signbit(n);
+}
+#define SCR_NW_GHOSTS(maskword) ((size_t)__builtin_popcount(*(const uint16_t *)&(maskword)))
+ScrDyn *scr_nw_get_v(const uint32_t *lanes, const uint16_t *mask, ScrDyn *ext, unsigned idx);
+void scr_nw_put_v(uint32_t *lanes, uint16_t *mask, ScrDyn **ext, unsigned idx, unsigned n, ScrDyn *v);
+void scr_nw_ghosts_v(const uint16_t *mask);
+void scr_nw_ext_store(ScrDyn **ext, unsigned idx, unsigned n, ScrDyn *v);
+void scr_nw_ext_clear(ScrDyn *ext, unsigned idx);
+static inline ScrDyn *scr_nw_get(const uint32_t *lanes, const uint16_t *mask, ScrDyn *ext, unsigned idx) {
+  if (*mask & (1u << idx)) return scr_dyn_new_num((double)lanes[idx]);
+  if (ext != NULL && ext->kind == SCR_DYN_ARR && idx < ext->v.arr.len && ext->v.arr.items[idx] != NULL) return scr_dyn_retain(ext->v.arr.items[idx]);
+  return scr_dyn_undefined();
+}
+static inline void scr_nw_put(uint32_t *lanes, uint16_t *mask, ScrDyn **ext, unsigned idx, unsigned n, ScrDyn *v) {
+  const unsigned bit = 1u << idx;
+  if (v->kind == SCR_DYN_NUM && scr_nw_fits(v->v.num)) {
+    lanes[idx] = (uint32_t)v->v.num;
+    scr_dyn_release(v);
+    if (!(*mask & bit)) {
+      *mask = (uint16_t)(*mask | bit);
+      SCR_PROPS_GHOST_ADD(1);
+      scr_nw_ext_clear(*ext, idx);
+    }
+    return;
+  }
+  scr_nw_ext_store(ext, idx, n, v);
+  if (*mask & bit) {
+    *mask = (uint16_t)(*mask & ~bit);
+    SCR_PROPS_GHOST_SUB(1);
+  }
+}
 /* Out of line on purpose: inlined into scr_cls_props_get/has the loop gave every call a larger prologue, including the calls that find no table at all
  * (about 4 in 5 on the mysql bench: +17 instructions each). Each unit that uses it gets its own static copy. */
 static __attribute__((noinline)) const ScrDynEntry *scr_dyn_props_find(const ScrDyn *tbl, const char *key, size_t key_len) {

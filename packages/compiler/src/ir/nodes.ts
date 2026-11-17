@@ -1790,6 +1790,12 @@ export interface IrClassDef {
    * and the half is dead. Every reader of the field answers `marker ? box(half) : slot`. The half is also listed in `fields` (hidden, `%`-named,
    * after the class's own fields), so layouts, new and release treat it like any f64 field. */
   numSlots?: { field: string; half: string }[];
+  /** NARROW SLOTS (ir/narrow-slot.ts): `fields` are dyn fields that keep their place in `fields` (so every name-based consumer, the member rows, keys,
+   * inspect and JSON, still sees them) but own NO struct storage: the value of narrow field i lives in 32-bit lane i of the hidden f64 words `lanes`
+   * (two lanes per word, the words are consecutive struct members) when bit i of the 16-bit mask kept in the hidden f64 word `mask` is set, and
+   * otherwise in entry i of the lazily allocated overflow array held by the hidden dyn field `ext` (undefined when there is none). A lane holds an
+   * integer 0..4294967295; every other value (a fraction, a negative, -0, NaN, a larger number, a non-number) goes to the overflow array. */
+  narrow?: { fields: string[]; lanes: string[]; mask: string; ext: string };
   /** CONTAINER-BIT GATE (ir/cbit.ts): every field that can hold a reference is a dyn field, and the class is standalone (no base, no subclass). Its instances carry a
    * per-instance bit in the cycle header (scr_runtime.h SCR_CYC_CBIT) that every store of a non-leaf dyn value sets; while it is clear the instance cannot be on a cycle,
    * so its release does not buffer it as a root and its trace visits nothing (its collector teardown then releases the dyn fields itself). */
@@ -15886,6 +15892,29 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
  * key list (IrRecordShape.keyList) never orders them. */
 export function isIntegerKeyName(n: string): boolean {
   return /^(0|[1-9][0-9]*)$/.test(n) && Number(n) < 4294967295;
+}
+
+const NARROW_CACHE = new WeakMap<readonly IrClassDef[], Map<string, { def: IrClassDef; idx: number }> | null>();
+/** The narrow-slot position of `field` of `className` (the class's `narrow` metadata and the field's index in it), or undefined for an ordinary field. */
+export function narrowSlotOf(classes: readonly IrClassDef[] | undefined, className: string, field: string): { def: IrClassDef; idx: number } | undefined {
+  if (classes === undefined) return undefined;
+  let t = NARROW_CACHE.get(classes);
+  if (t === undefined) {
+    t = null;
+    for (const c of classes) {
+      for (const [i, f] of (c.narrow?.fields ?? []).entries()) {
+        if (t === null) t = new Map();
+        t.set(`${c.name}\0${f}`, { def: c, idx: i });
+      }
+    }
+    NARROW_CACHE.set(classes, t);
+  }
+  return t === null ? undefined : t.get(`${className}\0${field}`);
+}
+/** The fields of `def` that own struct storage: its layout with the narrow fields taken out (the fields themselves stay in `def.fields` for every name-based consumer). */
+export function storageFields(def: IrClassDef): IrClassDef["fields"] {
+  const n = def.narrow;
+  return n === undefined ? def.fields : def.fields.filter((f) => !n.fields.includes(f.name));
 }
 
 const NUMSLOT_CACHE = new WeakMap<readonly IrClassDef[], Map<string, string> | null>();

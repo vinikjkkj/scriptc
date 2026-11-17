@@ -81,7 +81,8 @@ import { BUFFER_NUM_ACCESSOR_METHODS, dynKeyGetUsesLitTwin, propsTableRoot, erro
 import { setDynOrderPlan, setDynInspExt } from "../dyn-members.js";
 import { rewriteArmDescriptors } from "./armvt.js";
 import { rewriteStringUnions } from "./strunion.js";
-import { orderRecordPlanCached, moduleUsesInspColors, numSlotHalf, classCbit } from "../../ir/nodes.js";
+import { orderRecordPlanCached, moduleUsesInspColors, numSlotHalf, narrowSlotOf, classCbit } from "../../ir/nodes.js";
+import type { IrClassDef } from "../../ir/nodes.js";
 import { concatFn, fieldRunAbsentCheck, flattenStrConcat } from "../emission/emit-exprs.js";
 import { classvalCandidates, dynClassDisplayName, dynDescBase, dynEmitterSlot, dynRuntimeBaseInfo, dynRuntimeRoot, dynEnumerationFenced, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
 import { computeMayThrow } from "../emission/may-throw.js";
@@ -4148,6 +4149,9 @@ class LlEmitter {
   classFieldGep(className: string, field: string): number {
     return classFieldIndex(this.classMetaOf(className), field).index;
   }
+  narrowSlotOf(className: string, field: string): { def: IrClassDef; idx: number } | undefined {
+    return narrowSlotOf(this.mod.classes, className, field);
+  }
   numSlotHalfOf(className: string, field: string): string | undefined {
     return numSlotHalf(this.mod.classes, className, field);
   }
@@ -6375,6 +6379,7 @@ class LlEmitter {
       operand.type.kind === "dyn" &&
       !RUNTIME_ERROR_CLASSES.has(operand.className) &&
       numSlotHalf(this.mod.classes, operand.className, operand.field) === undefined &&
+      narrowSlotOf(this.mod.classes, operand.className, operand.field) === undefined &&
       following.length === 0
     ) {
       const obj = this.emitBorrowedLocal(operand.obj, []);
@@ -7780,17 +7785,31 @@ class LlEmitter {
         const v = this.emitExpr(s.value);
         if (s.kind === "fieldSet") this.noteOrderWrite(obj.name, s.className, s.field, s.unset === true);
         if (s.kind === "recordSet") this.noteKeyListWrite(obj.name, s.shapeId, s.field, s.unset === true);
+        // A NARROW field (ir/narrow-slot.ts) has no struct slot: its store goes through the lane accessor below.
+        const narrowDef = s.kind === "fieldSet" ? narrowSlotOf(this.mod.classes, s.className, s.field) : undefined;
         const { ptr, type } =
-          s.kind === "fieldSet"
-            ? this.classFieldPtr(obj.name, s.className, s.field)
-            : this.recordFieldPtr(obj.name, s.shapeId, s.field);
+          narrowDef !== undefined
+            ? { ptr: obj.name, type: { kind: "dyn" } as IrType }
+            : s.kind === "fieldSet"
+              ? this.classFieldPtr(obj.name, s.className, s.field)
+              : this.recordFieldPtr(obj.name, s.shapeId, s.field);
         // CONTAINER BIT (ir/cbit.ts): a non-leaf dyn value stored into an instance of a gated class sets the instance's bit before the value moves in.
         if (s.kind === "fieldSet" && type.kind === "dyn" && classCbit(this.mod.classes, s.className)) {
           this.declare(`declare void @scr_cbit_note_v(ptr, ptr)`);
           B.line(`call void @scr_cbit_note_v(ptr ${obj.name}, ptr ${v.name})`);
         }
         const slotHalf = s.kind === "fieldSet" && type.kind === "dyn" ? numSlotHalf(this.mod.classes, s.className, s.field) : undefined;
-        if (slotHalf !== undefined) {
+        if (narrowDef !== undefined) {
+          // an integer 0..4294967295 is unboxed into its 32-bit lane and its presence bit set; anything else goes to the overflow array
+          this.moveTemp(v);
+          const d = narrowDef.def.narrow!;
+          const cn = (s as { className: string }).className;
+          const lp = this.classFieldPtr(obj.name, cn, d.lanes[0]!);
+          const mp = this.classFieldPtr(obj.name, cn, d.mask);
+          const xp = this.classFieldPtr(obj.name, cn, d.ext);
+          this.declare(`declare void @scr_nw_put_v(ptr, ptr, ptr, i32, i32, ptr)`);
+          B.line(`call void @scr_nw_put_v(ptr ${lp.ptr}, ptr ${mp.ptr}, ptr ${xp.ptr}, i32 ${narrowDef.idx}, i32 ${d.fields.length}, ptr ${v.name})`);
+        } else if (slotHalf !== undefined) {
           // A NUMBER-SLOT field (ir/num-slot.ts): a number is unboxed into the raw half and the dyn slot takes the marker.
           this.moveTemp(v);
           const hp = this.classFieldPtr(obj.name, (s as { className: string }).className, slotHalf);
@@ -11049,6 +11068,19 @@ class LlEmitter {
         // A tag test over a plain local receiver reads through the borrowed local (no +1 copy of the receiver, no release).
         // EVERY field read over a plain local receiver borrows it (emit-exprs.ts's twin).
         const obj: { name: string; type: IrType } = this.emitBorrowedLocal(e.obj, []);
+        // A NARROW field (ir/narrow-slot.ts): no struct slot; lane `idx` when its presence bit is set, else the overflow array's entry.
+        const nwGet = e.type.kind === "dyn" ? narrowSlotOf(this.mod.classes, e.className, e.field) : undefined;
+        if (nwGet !== undefined) {
+          const d = nwGet.def.narrow!;
+          const lp = this.classFieldPtr(obj.name, e.className, d.lanes[0]!);
+          const mp = this.classFieldPtr(obj.name, e.className, d.mask);
+          const xp = this.classFieldPtr(obj.name, e.className, d.ext);
+          const xv = this.loadField(xp.ptr, xp.type);
+          const r = B.tmp();
+          this.declare(`declare ptr @scr_nw_get_v(ptr, ptr, ptr, i32)`);
+          B.line(`${r} = call ptr @scr_nw_get_v(ptr ${lp.ptr}, ptr ${mp.ptr}, ptr ${xv}, i32 ${nwGet.idx})`);
+          return this.own({ name: r, type: e.type });
+        }
         const { ptr, type } = this.classFieldPtr(obj.name, e.className, e.field);
         const v = this.loadField(ptr, type);
         // A NUMBER-SLOT field (ir/num-slot.ts): the value is the raw half when the dyn slot holds the marker.

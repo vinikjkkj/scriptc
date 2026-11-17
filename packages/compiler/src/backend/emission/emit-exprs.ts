@@ -13,7 +13,7 @@ function canonNum(type: { kind: string }, expr: string, elide = false): string {
   return type.kind === "f64" && !elide ? `scr_num_canon(${expr})` : expr;
 }
 import { rcSitesRequested, rcSiteLabel } from "./emitter.js";
-import { BUFFER_NUM_ACCESSOR_METHODS, dynKeyGetUsesLitTwin, moduleUsesEngineFn, ORD_MEMBER, orderRecordPlanCached, ABSENT_KEY_TRAP_CODE, arrayOf, canBoxFuncIntoDyn, BOOL, BYTES_U8, bytesOf, ownMaskKeyBit, presenceMaskStores, OWNMASK_COMPLETED, OWNMASK_VALID, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, IrExpr, IrRecordShape, IrType, irFunctionJsName, irFunctionValueCode, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals, typeKey, numSlotHalf } from "../../ir/nodes.js";
+import { BUFFER_NUM_ACCESSOR_METHODS, dynKeyGetUsesLitTwin, moduleUsesEngineFn, ORD_MEMBER, orderRecordPlanCached, ABSENT_KEY_TRAP_CODE, arrayOf, canBoxFuncIntoDyn, BOOL, BYTES_U8, bytesOf, ownMaskKeyBit, presenceMaskStores, OWNMASK_COMPLETED, OWNMASK_VALID, canMarshalFuncIntoIsland, CHILDSTREAM_T, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, IrExpr, IrRecordShape, IrType, irFunctionJsName, irFunctionValueCode, islandPromisePayloadTag, isRefCounted, isUnitType, MAY_THROW_LIB_FNS, RUNTIME_ERROR_CLASSES, settleOrValuePromiseTag, STRING, typeEquals, typeKey, numSlotHalf, narrowSlotOf } from "../../ir/nodes.js";
 import { unionKeyClasses, boxAccess, BYTES_NUM_KIND_C, BYTES_NUM_VAR_C, bytesElemKindC, cDecl, cFnPtrCast, cNumberLiteral, cStringLiteral, cType, DV_GET_KIND_C, DV_SET_KIND_C, elemAccess, mapKeyAccess, mapKeyKindC, mapValKindC, retainCallC, vAdapters } from "./emit-types.js";
 import { mangleClassNew, mangleClassRetain, mangleClassStruct, mangleField, mangleFnClosure, mangleFunction, mangleGlobal, mangleLocal, mangleRecordNew, mangleRecordStruct, mangleVtStruct, mangleWrapper } from "../mangle.js";
 import { KEYIX_MEMBER, KEYLIST_MEMBER, OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, VIEW_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
@@ -215,6 +215,7 @@ export function emitBorrowedPure(E: CEmitter, operand: IrExpr, following: IrExpr
     operand.type.kind === "dyn" &&
     !RUNTIME_ERROR_CLASSES.has(operand.className) &&
     numSlotHalf(E.mod.classes, operand.className, operand.field) === undefined &&
+    narrowSlotOf(E.mod.classes, operand.className, operand.field) === undefined &&
     following.length === 0
   ) {
     const obj = emitBorrowedLocal(E, operand.obj, []);
@@ -2727,6 +2728,14 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
                 + ` scr_throw_error_msg_code(SCR_ERR_TYPE, ${cStringLiteral(msg)}, ${msg.length}, "${ABSENT_KEY_TRAP_CODE}"); }`,
             );
             E.emitPendingCheck();
+          }
+        }
+        // A NARROW field (ir/narrow-slot.ts): no struct storage; the value is lane `idx` when its presence bit is set, else the overflow array's entry.
+        if (e.kind === "fieldGet" && e.type.kind === "dyn") {
+          const nw = narrowSlotOf(E.mod.classes, e.className, e.field);
+          if (nw !== undefined) {
+            const d = nw.def.narrow!;
+            return E.newTemp(e.type, `scr_nw_get((const uint32_t *)&${obj.name}->${mangleField(d.lanes[0]!)}, (const uint16_t *)&${obj.name}->${mangleField(d.mask)}, ${obj.name}->${mangleField(d.ext)}, ${nw.idx})`);
           }
         }
         // A NUMBER-SLOT field (ir/num-slot.ts): the value is the raw half when the dyn slot holds the marker.

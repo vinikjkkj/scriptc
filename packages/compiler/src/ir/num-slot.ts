@@ -193,6 +193,7 @@ export function numSlotPass(mod: IrModule): NumSlotPick[] {
       if (f.type.kind !== "dyn") continue;
       if (f.name.startsWith("%") || f.name.startsWith("#") || f.name.startsWith("__@")) continue;
       if (ownerOf(c.name, f.name) !== c.name) continue;
+      if (c.narrow?.fields.includes(f.name) === true) continue; // a narrow field has no dyn slot to split
       const refuse = (reason: string): void => {
         if (why && facts.get(`${c.name}\0${f.name}`)?.ctorWrites.length) process.stderr.write(`numslot: refuse ${c.name}.${f.name}: ${reason}\n`);
       };
