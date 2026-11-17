@@ -663,7 +663,7 @@ export interface ClassMeta {
   function numSlotGhostsC(def: IrClassDef | undefined): string {
     return [
       ...(def?.numSlots ?? []).map((x) => `SCR_NUMSLOT_GHOSTS(o->${mangleField(x.field)})`),
-      ...(def?.narrow !== undefined ? [`SCR_NW_GHOSTS(o->${mangleField(def.narrow.mask)})`] : []),
+      ...(def?.narrow !== undefined ? [`SCR_NW_GHOSTS(&o->${mangleField(def.narrow.mask)})`] : []),
     ].join(" + ");
   }
 

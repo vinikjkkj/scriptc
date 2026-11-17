@@ -141,10 +141,13 @@ export function narrowSlotPass(mod: IrModule): string[] {
     const fields = sc.eligible.slice(0, NARROW_MAX_FIELDS);
     const lanes: string[] = [];
     for (let k = 0; k < Math.ceil(fields.length / 2); k++) lanes.push(`%nwl:${def.name}:${k}`);
-    const mask = `%nwm:${def.name}`;
+    // The 16-bit presence mask is two adjacent bytes (bool-typed hidden fields) placed FIRST among the fields: they fill the padding the order record leaves before the
+    // first 8-byte field, where an f64 mask word would have taken a word of its own. Accessors read them as one unaligned-safe 16-bit value.
+    const mask = `%nwm:${def.name}:0`;
+    const maskHi = `%nwm:${def.name}:1`;
     const ext = `%nwx:${def.name}`;
-    def.fields = [...def.fields, ...lanes.map((n) => ({ name: n, type: { kind: "f64" as const } })), { name: mask, type: { kind: "f64" as const } }, { name: ext, type: { kind: "dyn" as const } }];
-    def.narrow = { fields, lanes, mask, ext };
+    def.fields = [{ name: mask, type: { kind: "bool" as const } }, { name: maskHi, type: { kind: "bool" as const } }, ...def.fields, ...lanes.map((n) => ({ name: n, type: { kind: "f64" as const } })), { name: ext, type: { kind: "dyn" as const } }];
+    def.narrow = { fields, lanes, mask, maskHi, ext };
     for (const f of fields) picks.push(`${def.name}.${f}`);
     if (why) process.stderr.write(`narrow: pick ${def.name} (${fields.length} fields: ${fields.join(",")})\n`);
   }

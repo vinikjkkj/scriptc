@@ -2735,7 +2735,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           const nw = narrowSlotOf(E.mod.classes, e.className, e.field);
           if (nw !== undefined) {
             const d = nw.def.narrow!;
-            return E.newTemp(e.type, `scr_nw_get((const uint32_t *)&${obj.name}->${mangleField(d.lanes[0]!)}, (const uint16_t *)&${obj.name}->${mangleField(d.mask)}, ${obj.name}->${mangleField(d.ext)}, ${nw.idx})`);
+            return E.newTemp(e.type, `scr_nw_get((const uint32_t *)&${obj.name}->${mangleField(d.lanes[0]!)}, (const uint8_t *)&${obj.name}->${mangleField(d.mask)}, ${obj.name}->${mangleField(d.ext)}, ${nw.idx})`);
           }
         }
         // A NUMBER-SLOT field (ir/num-slot.ts): the value is the raw half when the dyn slot holds the marker.
