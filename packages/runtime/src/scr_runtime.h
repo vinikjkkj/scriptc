@@ -7813,6 +7813,9 @@ typedef struct ScrDynClassOps {
   ScrDyn *(*objinst_proto_keys)(const ScrDyn *d);
   /* The class VALUE (the one immortal function box `x.constructor` answers) of a registered class descriptor: +1. */
   ScrDyn *(*class_value_of)(const ScrDynClass *cls);
+  /* The class's PROTOTYPE OBJECT (the one `C.prototype` answers and `Object.getPrototypeOf(instance)` must answer too): +1, or NULL for a class that
+   * carries no prototype rows (the caller keeps its intrinsic stand-in). */
+  ScrDyn *(*class_prototype)(const ScrDynClass *cls);
 } ScrDynClassOps;
 /* +1 OBJ holding the instance's own ENUMERABLE string-keyed properties in Node's order (creation order: the table's insertion order
  * with the field markers scr_cls_props_note leaves, integer-like keys first ascending), values read once. NULL with *unsup true when

@@ -21,7 +21,7 @@ import { cjsClassExprWholeExportOf, isCjsJsFile, isJsSourceFile, isModuleExports
 import { pairedProtoClassInfoFor, pairedProtoClassOfValue, protoClassArmOn, protoClassInfoFor, protoClassOfNamespaceMember, protoDataGetterFns } from "./proto-class-consume.js";
 import { PoisonError, dynFallbackType, dynUndefinedExpr, fnValueCodeOfNode, newFnCtx, own } from "./lowerer.js";
 import { isBufferSpeciesCtor, lowerFastBufferNew, bufEncoding, lowerMapCloneNew, lowerMapSeedArrayNew } from "./lower-containers.js";
-import { unboundGenericClosures, unboundMethodThunk, fnOwnCounters, fnOwnPropBox, fnOwnWhy, probeLower, pureReemittable } from "./lower-exprs.js";
+import { protoContextRefusal, unboundGenericClosures, unboundMethodThunk, fnOwnCounters, fnOwnPropBox, fnOwnWhy, probeLower, pureReemittable } from "./lower-exprs.js";
 import { lowerDateNumArg, lowerSearchParamsNew } from "./lower-builtins.js";
 import { readFileSync } from "node:fs";
 import { requiresDynamicPackageDiag, requiresDynamicTypeDiag, unsupportedDiag } from "../../diagnostics/diagnostic.js";
@@ -6925,6 +6925,53 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       return L.resolveValueSymbol(recv.name);
     }
     return null;
+  }
+
+  /** `C.prototype` for a program class C: the class value's prototype OBJECT as a dyn value. The runtime mints ONE per class (scr_dyn_class.c
+   * dyn_class_prototype: `constructor` and the own methods as detached function values) and `Object.getPrototypeOf(instance)` answers the same object, so
+   * identity holds both ways. The checker types it as the INSTANCE, which it is not, so the value stays dyn (no narrowing bridge) and its members read
+   * through the dyn box. Null (the existing fence) for a generic class, a per-evaluation class and a decorated name that can rebind. */
+  export function lowerClassPrototypeRead(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
+    if (expr.name.text !== "prototype" || expr.questionDotToken !== undefined || L.chainBlocked(expr)) return null;
+    const symbol = classReceiverSymbol(L, expr.expression);
+    if (symbol === null) return null;
+    const info = L.classBySymbol.get(symbol);
+    if (info === undefined || info.generic || info.evalClass !== undefined || info.classDecorators?.valueGlobalId !== undefined) return null;
+    const why = protoContextRefusal(expr, false);
+    if (why !== null) L.unsupported("SC1090", expr, why);
+    const loc = locOf(expr);
+    const cls: IrExpr = {
+      kind: "dynFrom",
+      value: { kind: "classRef", className: info.def.name, type: { kind: "classval", className: info.def.name }, loc },
+      type: DYN,
+      loc,
+    };
+    return { kind: "dynKeyGet", key: { kind: "strLit", value: "prototype", type: STRING, loc }, value: cls, type: DYN, loc };
+  }
+
+  /** `C.prototype.<member>` (a method as a function value, `constructor`): read through the prototype object's dyn box, left dyn (the checker's
+   * instance type for the receiver would bridge a function value into a method of an instance that is not there). */
+  /** The program class a `C.prototype` / `C.prototype.<m>` expression names, or null (also null for `new.target.prototype`, whose class is the one being constructed). */
+  export function protoRootClassOf(L: Lowerer, node: ts.Expression): ClassInfo | null {
+    let e: ts.Expression = node;
+    while (ts.isParenthesizedExpression(e)) e = e.expression;
+    while (ts.isPropertyAccessExpression(e) && e.name.text !== "prototype") e = e.expression;
+    if (!ts.isPropertyAccessExpression(e) || e.name.text !== "prototype") return null;
+    const symbol = classReceiverSymbol(L, e.expression);
+    return symbol === null ? null : L.classBySymbol.get(symbol) ?? null;
+  }
+
+  export function lowerClassPrototypeMember(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
+    if (expr.questionDotToken !== undefined) return null;
+    let inner: ts.Expression = expr.expression;
+    while (ts.isParenthesizedExpression(inner)) inner = inner.expression;
+    if (!ts.isPropertyAccessExpression(inner) || inner.name.text !== "prototype") return null;
+    const proto = lowerClassPrototypeRead(L, inner);
+    if (proto === null) return null;
+    const why = protoContextRefusal(expr, true);
+    if (why !== null) L.unsupported("SC1090", expr, why);
+    const loc = locOf(expr);
+    return { kind: "dynKeyGet", key: { kind: "strLit", value: expr.name.text, type: STRING, loc: locOf(expr.name) }, value: proto, type: DYN, loc };
   }
 
   export function lowerStaticFieldRead(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {

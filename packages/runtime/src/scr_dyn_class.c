@@ -1296,6 +1296,13 @@ static bool dyn_cls_objinst_own_shadows(const ScrDyn *d, const char *k, size_t k
   return e != NULL;
 }
 
+static ScrDyn *dyn_cls_impl_prototype(const ScrDynClass *cls) {
+  ScrDyn *box = dyn_cls_impl_box(cls); /* +1 */
+  ScrDyn *P = dyn_class_prototype(box); /* +1 or NULL */
+  scr_dyn_release(box);
+  return P;
+}
+
 static const ScrDynClassOps dyn_cls_ops_impl = {
   dyn_cls_impl_box, dyn_cls_impl_of_value,
   dyn_cls_impl_err_get, dyn_cls_impl_err_set, dyn_cls_impl_err_has, dyn_cls_impl_err_delete,
@@ -1309,6 +1316,7 @@ static const ScrDynClassOps dyn_cls_ops_impl = {
   dyn_cls_objinst_extra_get,
   dyn_cls_objinst_proto_keys,
   dyn_cls_impl_box,
+  dyn_cls_impl_prototype,
 };
 
 void scr_dyn_class_install(void) { scr_dyn_class_ops = &dyn_cls_ops_impl; }
