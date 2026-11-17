@@ -836,6 +836,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "insp.regex": "scr_insp_regex",
   "insp.date": "scr_insp_date",
   "insp.error": "scr_insp_error",
+  "insp.errorx": "scr_insp_error_x",
   "insp.begin": "scr_insp_begin",
   "insp.optsPush": "scr_insp_opts_push",
   "insp.optsPop": "scr_insp_opts_pop",
