@@ -69,6 +69,9 @@ export interface ProfilingRun {
   pidPath: string;
   /** Sends SIGUSR1 to the profiled process when a line of the command's output first matches; null = no epoch signal. */
   signal: RegExp | null;
+  /** A second SIGUSR1, sent when a line first matches AFTER the epoch signal: it opens the END epoch (shutdown, the last requests), which the order
+   * file places after the steady set. null = the profile has two epochs. */
+  endSignal?: RegExp | null;
   timeoutMs: number;
 }
 
@@ -99,6 +102,7 @@ export async function runProfiling(run: ProfilingRun): Promise<ProfilingResult> 
       stdio: ["ignore", "pipe", "pipe"],
     });
     let signalled = false;
+    let endSignalled = false;
     let timedOut = false;
     let buf = "";
     const trySignal = (): void => {
@@ -121,13 +125,18 @@ export async function runProfiling(run: ProfilingRun): Promise<ProfilingResult> 
     };
     const onData = (chunk: Buffer): void => {
       process.stderr.write(chunk); // the command's output stays visible: it is the user's program
-      if (run.signal === null || signalled) return;
+      const wantEnd = run.endSignal != null && signalled && !endSignalled;
+      if (run.signal === null || (signalled && !wantEnd)) return;
       buf += chunk.toString("utf8");
       let nl: number;
       while ((nl = buf.indexOf("\n")) >= 0) {
         const line = buf.slice(0, nl);
         buf = buf.slice(nl + 1);
-        if (run.signal.test(line) && !signalled) {
+        if (!signalled && run.signal.test(line)) {
+          trySignal();
+          if (run.endSignal == null) break;
+        } else if (signalled && !endSignalled && run.endSignal != null && run.endSignal.test(line)) {
+          endSignalled = true;
           trySignal();
           break;
         }

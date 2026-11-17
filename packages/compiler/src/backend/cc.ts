@@ -1394,7 +1394,11 @@ async function buildEngineArchiveLocked(
         : ["-DCMAKE_BUILD_TYPE=MinSizeRel"]),
       "-DQJS_BUILD_EXAMPLES=OFF",
       "-DQJS_ENABLE_INSTALL=OFF",
-      `-DCMAKE_C_FLAGS=${gcSectionsCompileArgs().join(" ")}`,
+      // --layout-profile: the engine is part of the program's code (287 of the 461 executed functions the order file did not list were its), so it is
+      // instrumented like every other unit; its flavor already carries "-layoutcov" (profFlavor). CMake's own compiler checks link a probe program, which
+      // cannot resolve the coverage callbacks, so they build a static library instead, and the coverage flag is clang's (CMake would pick cc, which is gcc here).
+      ...(layoutProfileActive ? ["-DCMAKE_TRY_COMPILE_TARGET_TYPE=STATIC_LIBRARY", ...(driver.argv.length === 1 ? [`-DCMAKE_C_COMPILER=${driver.argv[0]}`] : [])] : []),
+      `-DCMAKE_C_FLAGS=${[...gcSectionsCompileArgs(), ...layoutCovFlags()].join(" ")}`,
     ];
     try {
       await execFileAsync("cmake", configureArgs);

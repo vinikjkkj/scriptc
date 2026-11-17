@@ -68,12 +68,48 @@ export function layoutOrderFromProfile(exe: string, profile: string): string {
     return n;
   };
   const shift = hits(0) >= hits(base) ? 0 : base;
-  const last = new Map<string, { epoch: number; first: number }>();
-  entries.forEach((e, idx) => {
+  const named: { epoch: number; name: string }[] = [];
+  for (const e of entries) {
     const name = symbolAt(syms, e.off + shift);
-    if (name === undefined) return;
-    const cur = last.get(name);
-    if (cur === undefined || e.epoch > cur.epoch) last.set(name, { epoch: e.epoch, first: idx });
+    if (name !== undefined) named.push({ epoch: e.epoch, name });
+  }
+  return layoutOrderText(named, Number(head[3]));
+}
+
+/** The order file text for a run's named first-entries (in log order), `epochs` epochs long.
+ *
+ * Up to two epochs (startup, steady): last epoch highest first. From three on, the LAST epoch is the END phase (what the program does after the
+ * steady state: shutdown, the final requests) and the epochs between are the steady state, so the tiers are
+ *     steady        executed in any epoch from 1 to epochs-2 (placed first)
+ *     end           executed in the last epoch and in no steady epoch (placed after it)
+ *     startup-only  executed in epoch 0 only
+ * Ordering "last epoch first" there would put every steady function that also runs at shutdown ahead of the steady-only ones and tell nothing about what is
+ * shutdown-only. Inside a tier: the order the functions were first reached (in the epoch range of the tier). */
+export function layoutOrderText(named: readonly { epoch: number; name: string }[], epochs: number): string {
+  if (epochs >= 3) {
+    const last = epochs - 1;
+    const info = new Map<string, { steady: number; end: number; any0: boolean }>();
+    named.forEach((e, idx) => {
+      const cur = info.get(e.name) ?? { steady: -1, end: -1, any0: false };
+      if (e.epoch >= 1 && e.epoch <= last - 1) { if (cur.steady < 0) cur.steady = idx; }
+      else if (e.epoch === last) { if (cur.end < 0) cur.end = idx; }
+      else cur.any0 = true;
+      info.set(e.name, cur);
+    });
+    const steady = [...info.entries()].filter(([, v]) => v.steady >= 0).sort((a, b) => a[1].steady - b[1].steady).map(([n]) => n);
+    const end = [...info.entries()].filter(([, v]) => v.steady < 0 && v.end >= 0).sort((a, b) => a[1].end - b[1].end).map(([n]) => n);
+    const startup = [...info.entries()].filter(([, v]) => v.steady < 0 && v.end < 0).map(([n]) => n);
+    const out = [`# scriptc layout order: ${info.size} functions, tiers: steady (epochs 1..${last - 1}), end (epoch ${last} only), startup-only (epoch 0 only)`];
+    for (const [title, names] of [["steady", steady], ["end", end], ["startup-only", startup]] as const) {
+      out.push(`# tier: ${title}`);
+      out.push(...names);
+    }
+    return out.join("\n") + "\n";
+  }
+  const last = new Map<string, { epoch: number; first: number }>();
+  named.forEach((e, idx) => {
+    const cur = last.get(e.name);
+    if (cur === undefined || e.epoch > cur.epoch) last.set(e.name, { epoch: e.epoch, first: idx });
   });
   const ordered = [...last.entries()].sort((a, b) => (a[1].epoch !== b[1].epoch ? b[1].epoch - a[1].epoch : a[1].first - b[1].first));
   const out: string[] = [`# scriptc layout order: ${ordered.length} functions, last-epoch tiers (highest first = steady set; epoch 0 only = startup-only)`];

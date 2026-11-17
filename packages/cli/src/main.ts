@@ -89,6 +89,11 @@ Options:
                      line of the command's output first matches <regex>: put it where
                      startup is over and the real work begins. The run fails if it
                      never matches.
+      --pgo-end-signal <regex>
+                     with --pgo-signal: a second epoch signal, sent when a LATER line of
+                     the output matches (the start of shutdown, the last requests). The
+                     functions only that end phase runs get a tier of their own after the
+                     steady set. Off by default (two epochs).
       --pgo-no-signal
                      profile without an epoch signal: one epoch, so the order is
                      first-reached order only (weaker for servers, whose steady-state
@@ -185,6 +190,7 @@ const CLI_OPTIONS = {
   pgo: { type: "boolean", default: false },
   "pgo-run": { type: "string" },
   "pgo-signal": { type: "string" },
+  "pgo-end-signal": { type: "string" },
   "pgo-no-signal": { type: "boolean", default: false },
   "pgo-timeout": { type: "string" },
   "layout-order-out": { type: "string" },
@@ -489,6 +495,15 @@ async function main(): Promise<number> {
         fail(`--pgo-signal: not a regular expression: ${e instanceof Error ? e.message : String(e)}`);
       }
     }
+    let endSignalRe: RegExp | null = null;
+    if (values["pgo-end-signal"] !== undefined) {
+      if (sig === undefined) fail(`--pgo-end-signal needs --pgo-signal (the end epoch follows the steady one)\n\n${USAGE}`);
+      try {
+        endSignalRe = new RegExp(values["pgo-end-signal"]);
+      } catch (e) {
+        fail(`--pgo-end-signal: not a regular expression: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
     const timeoutS = values["pgo-timeout"] === undefined ? 120 : Number(values["pgo-timeout"]);
     if (!Number.isFinite(timeoutS) || timeoutS <= 0) fail("--pgo-timeout needs a positive number of seconds");
     let argv: string[];
@@ -505,7 +520,7 @@ async function main(): Promise<number> {
       process.stderr.write(`pgo: 1/4 instrumented build\n`);
       await build({ outPath: profBin, layoutProfile: true, layoutOrder: null });
       process.stderr.write(`pgo: 2/4 profiling run: ${runCmd}\n`);
-      const run = await runProfiling({ argv, cwd: dirname(input), bin: profBin, profilePath, pidPath: join(work, "pid"), signal: signalRe, timeoutMs: timeoutS * 1000 }).catch(
+      const run = await runProfiling({ argv, cwd: dirname(input), bin: profBin, profilePath, pidPath: join(work, "pid"), signal: signalRe, endSignal: endSignalRe, timeoutMs: timeoutS * 1000 }).catch(
         (e: unknown) => fail(e instanceof Error ? e.message : String(e)),
       );
       if (signalRe !== null && !run.signalled) {
