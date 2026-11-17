@@ -617,8 +617,8 @@ typedef struct ScrCycHdr {
 #define SCR_CYC_KINDHI_SHIFT 28
 #define SCR_CYC_KIND_MAX 4096u
 #define SCR_CYC_LINK_OFF 8u
-/* Kinds 1 .. SCR_CYC_KIND_FIXED_END - 1 are RESERVED for the hottest runtime kinds (dyn nodes are 78% of the collector's trace calls). A dynamically assigned kind
- * never has its LOW BYTE in 1..3 (scr_cyc_kind_of skips those indices), so `kind_lo == SCR_CYC_KIND_DYN` alone identifies a dyn node: one byte compare. */
+/* Kinds 1 .. SCR_CYC_KIND_FIXED_END - 1 are RESERVED for the hottest runtime kinds (dyn nodes are the most frequent trace calls). A dynamically assigned kind
+ * never has its LOW BYTE equal to SCR_CYC_KIND_DYN (scr_cyc_kind_of skips that index), so `kind_lo == SCR_CYC_KIND_DYN` alone identifies a dyn node: one byte compare. */
 #define SCR_CYC_KIND_DYN 1u
 #define SCR_CYC_KIND_CLOSURE 2u
 #define SCR_CYC_KIND_BOX 3u
