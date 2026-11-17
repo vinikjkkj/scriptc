@@ -1,0 +1,13 @@
+a-map-of-unknown-parameter-that-reads-or-writes-a-value-keeps-refusing-a-typed-map.ts:7:38 - error SC1090: a 'Map<string, { id: string }>' passed to a 'Map<string, unknown>' parameter: the parameter is declared with unknown values, the typed map stores them unboxed, and the flow is only compiled when every use of the parameter (in the callee and in every override of it) is value-free (identity compare, size, has, delete, clear, or passing it on to another such parameter). This one reads or writes a value, has no body to inspect, or is not a method or function the compiler can resolve is not supported yet
+
+  6 |   protected readonly recs: Map<string, Rec> = new Map();
+  7 |   writes(): void { this.writeForeign(this.recs, "k"); }
+    |                                      ^~~~~~~~~
+  8 |   reads(): void { this.readValue(this.recs, "k"); }
+
+a-map-of-unknown-parameter-that-reads-or-writes-a-value-keeps-refusing-a-typed-map.ts:8:34 - error SC1090: a 'Map<string, { id: string }>' passed to a 'Map<string, unknown>' parameter: the parameter is declared with unknown values, the typed map stores them unboxed, and the flow is only compiled when every use of the parameter (in the callee and in every override of it) is value-free (identity compare, size, has, delete, clear, or passing it on to another such parameter). This one reads or writes a value, has no body to inspect, or is not a method or function the compiler can resolve is not supported yet
+
+  7 |   writes(): void { this.writeForeign(this.recs, "k"); }
+  8 |   reads(): void { this.readValue(this.recs, "k"); }
+    |                                  ^~~~~~~~~
+  9 |   protected writeForeign(entries: Map<string, unknown>, key: string): void { entries.set(key, 42); }
