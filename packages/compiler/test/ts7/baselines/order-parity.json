@@ -28806,6 +28806,18 @@
     "<repo>/tests/corpus/25548-a-cast-of-an-error-to-a-record-lists-the-errors-own-keys.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25650-socket-destroy-with-an-error-emits-error-then-close-and-marks-the-socket-destroyed.ts": {
+   "order": [
+    "<repo>/tests/corpus/25650-socket-destroy-with-an-error-emits-error-then-close-and-marks-the-socket-destroyed.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25651-socket-destroy-with-an-error-is-ignored-on-a-socket-already-destroyed-and-treats-undefined-as-no-error.ts": {
+   "order": [
+    "<repo>/tests/corpus/25651-socket-destroy-with-an-error-is-ignored-on-a-socket-already-destroyed-and-treats-undefined-as-no-error.ts"
+   ],
+   "diags": []
   }
  }
 }
