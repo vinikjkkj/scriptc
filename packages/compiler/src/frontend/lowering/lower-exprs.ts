@@ -4371,6 +4371,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
     // no runtime invocation record exists), and `import.meta`/
     // `import.defer` are module-loader surface a native binary does not
     // carry.
+    if (ts.isMetaProperty(expr) && expr.keywordToken === ts.SyntaxKind.NewKeyword) return lowerNewTarget(L, expr);
     if (ts.isMetaProperty(expr)) {
       const name =
         expr.keywordToken === ts.SyntaxKind.NewKeyword ? "new.target" : `import.${expr.name.text}`;
@@ -21571,6 +21572,77 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     if (t.kind === "union" && scalarArmsUnion(L, t.unionId)) return boxed;
     if (t.kind === "object" && !RUNTIME_ERROR_CLASSES.has(t.className)) return boxed;
     return null;
+  }
+
+  /** `new.target`. */
+  /** `new.target.<member>` (`name`, `prototype`, a static): the member reads through the invoked class's dyn box like `this.constructor.<member>`. Null for any
+   * other receiver and for an optional chain (`new.target?.x` keeps the generic arms). Called FIRST by lowerFieldRead: the class-value arms behind it
+   * would see a `typeof C` receiver and fence a computed one. */
+  export function lowerNewTargetMember(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
+    if (!isNewTargetMeta(expr.expression) || expr.questionDotToken !== undefined) return null;
+    const loc = locOf(expr);
+    const key: IrExpr = { kind: "strLit", value: expr.name.text, type: STRING, loc: locOf(expr.name) };
+    return L.maybeNarrow({ kind: "dynKeyGet", key, value: lowerNewTarget(L, expr.expression), type: DYN, loc }, expr);
+  }
+
+  function isNewTargetMeta(e: ts.Node): e is ts.MetaProperty {
+    return ts.isMetaProperty(e) && e.keywordToken === ts.SyntaxKind.NewKeyword;
+  }
+
+  /** The nearest enclosing member that binds its own `new.target`: every non-arrow function-like (arrows see the enclosing one), a class static block or a
+   * field initializer (where it is undefined). */
+  function newTargetOwner(expr: ts.Node): ts.Node | undefined {
+    for (let n: ts.Node | undefined = expr.parent; n !== undefined; n = n.parent) {
+      if (ts.isArrowFunction(n)) continue;
+      if (ts.isFunctionLike(n) || ts.isClassStaticBlockDeclaration(n) || ts.isPropertyDeclaration(n)) return n;
+    }
+    return undefined;
+  }
+
+  /** `new.target` as a value. In a class constructor it is the class actually invoked: the object is allocated as the most-derived class before the
+   * constructor chain runs, so the answer is the runtime class of `this`, one `instanceOf` arm per descendant (deepest first), each the class value
+   * boxed as dyn (the `this.constructor` representation: `.name`, `===` and `.prototype` read through it). Everywhere else a compiled function is
+   * only ever called, never constructed, so it is undefined. */
+  function lowerNewTarget(L: Lowerer, expr: ts.MetaProperty): IrExpr {
+    const loc = locOf(expr);
+    const owner = newTargetOwner(expr);
+    if (owner === undefined || !ts.isConstructorDeclaration(owner)) return dynUndefinedExpr(loc);
+    const cls = L.currentClass;
+    if (cls === null || cls.decl !== owner.parent) L.unsupported("SC1090", expr, "'new.target' outside the constructor of the class being lowered");
+    const hasEvalBelow = (c: ClassInfo): boolean => c.subclasses.some((x) => x.evalClass !== undefined || hasEvalBelow(x));
+    if (cls.evalClass !== undefined || hasEvalBelow(cls)) {
+      L.unsupported("SC1090", expr, "'new.target' in a class with a per-evaluation constructor (a class expression minted inside a function)");
+    }
+    const local = L.resolveThis(expr);
+    if (local === null) L.unsupported("SC1090", expr, "'new.target' with no constructor receiver");
+    const ref = (): IrExpr => ({ kind: "varRef", localId: local.id, type: local.type, loc });
+    const classVal = (cn: string): IrExpr => ({
+      kind: "dynFrom",
+      value: { kind: "classRef", className: cn, type: { kind: "classval", className: cn }, loc },
+      type: DYN,
+      loc,
+    });
+    const subs: { cls: ClassInfo; depth: number }[] = [];
+    const walk = (c: ClassInfo, depth: number): void => {
+      for (const sub of c.subclasses) {
+        subs.push({ cls: sub, depth });
+        walk(sub, depth + 1);
+      }
+    };
+    walk(cls, 1);
+    subs.sort((x, y) => x.depth - y.depth);
+    let chain: IrExpr = classVal(cls.def.name);
+    for (const { cls: sub } of subs) {
+      chain = {
+        kind: "ternary",
+        cond: { kind: "instanceOf", value: ref(), className: sub.def.name, type: BOOL, loc },
+        then: classVal(sub.def.name),
+        else_: chain,
+        type: DYN,
+        loc,
+      };
+    }
+    return chain;
   }
 
   function lowerInstanceConstructorRead(L: Lowerer, expr: ts.Expression): IrExpr | null {

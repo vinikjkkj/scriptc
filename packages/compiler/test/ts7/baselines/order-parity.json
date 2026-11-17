@@ -15986,6 +15986,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25510-new-target-names-the-class-actually-constructed-through-a-super-chain.ts": {
+   "order": [
+    "<repo>/tests/corpus/25510-new-target-names-the-class-actually-constructed-through-a-super-chain.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25511-new-target-compared-with-a-class-guards-direct-construction.ts": {
+   "order": [
+    "<repo>/tests/corpus/25511-new-target-compared-with-a-class-guards-direct-construction.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25512-new-target-name-names-an-error-subclass.ts": {
+   "order": [
+    "<repo>/tests/corpus/25512-new-target-name-names-an-error-subclass.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25513-new-target-reads-the-static-member-of-the-invoked-class.ts": {
+   "order": [
+    "<repo>/tests/corpus/25513-new-target-reads-the-static-member-of-the-invoked-class.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25514-new-target-is-undefined-outside-a-constructor-and-reads-inside-arrows.ts": {
+   "order": [
+    "<repo>/tests/corpus/25514-new-target-is-undefined-outside-a-constructor-and-reads-inside-arrows.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2552-generics-iface-methods.ts": {
    "order": [
     "<repo>/tests/corpus/2552-generics-iface-methods.ts"
