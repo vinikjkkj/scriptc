@@ -28218,6 +28218,36 @@
     "<repo>/tests/corpus/25464-fetch-https-to-an-ip-literal-verifies-the-cert-ip-san-and-fails-the-identity-check-with-nodes-error.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25480-object-values-and-entries-over-a-narrowed-record-list-members-the-type-does-not-name.ts": {
+   "order": [
+    "<repo>/tests/corpus/25480-object-values-and-entries-over-a-narrowed-record-list-members-the-type-does-not-name.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25481-object-entries-over-a-narrowed-record-holding-members-of-other-types.ts": {
+   "order": [
+    "<repo>/tests/corpus/25481-object-entries-over-a-narrowed-record-holding-members-of-other-types.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25482-object-entries-over-a-record-that-is-not-a-view-keeps-the-typed-answer.ts": {
+   "order": [
+    "<repo>/tests/corpus/25482-object-entries-over-a-record-that-is-not-a-view-keeps-the-typed-answer.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25483-object-values-over-a-narrowed-record-feeds-a-typed-consumer-when-the-members-fit.ts": {
+   "order": [
+    "<repo>/tests/corpus/25483-object-values-over-a-narrowed-record-feeds-a-typed-consumer-when-the-members-fit.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25484-object-entries-over-a-narrowed-record-reaches-inspect-and-iteration.ts": {
+   "order": [
+    "<repo>/tests/corpus/25484-object-entries-over-a-narrowed-record-reaches-inspect-and-iteration.ts"
+   ],
+   "diags": []
   }
  }
 }
