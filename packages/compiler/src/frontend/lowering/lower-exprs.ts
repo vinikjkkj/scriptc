@@ -22750,7 +22750,7 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
     {
       let left: ts.Expression = expr.left;
       while (ts.isParenthesizedExpression(left) || (ts.isAsExpression(left) && left.type.kind === ts.SyntaxKind.UnknownKeyword)) left = left.expression;
-      if (ts.isPropertyAccessExpression(left) && left.name.text === "prototype") {
+      if (!isJsSourceFile(expr.getSourceFile()) && ts.isPropertyAccessExpression(left) && left.name.text === "prototype") {
         const root = L.protoRootClassOf(left);
         if (root !== null) {
           const rsym = ts.isIdentifier(expr.right) ? L.resolveValueSymbol(expr.right) : null;
