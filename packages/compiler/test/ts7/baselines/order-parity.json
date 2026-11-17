@@ -16532,6 +16532,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25640-a-set-of-function-values-adds-deletes-and-iterates-by-identity.ts": {
+   "order": [
+    "<repo>/tests/corpus/25640-a-set-of-function-values-adds-deletes-and-iterates-by-identity.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25641-a-set-of-closures-that-capture-the-set-is-collected-and-keeps-identity.ts": {
+   "order": [
+    "<repo>/tests/corpus/25641-a-set-of-closures-that-capture-the-set-is-collected-and-keeps-identity.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/25642-a-typed-map-passes-to-a-map-of-unknown-parameter-that-only-compares-counts-and-deletes.ts": {
    "order": [
     "<repo>/tests/corpus/25642-a-typed-map-passes-to-a-map-of-unknown-parameter-that-only-compares-counts-and-deletes.ts"

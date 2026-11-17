@@ -1008,6 +1008,9 @@ export interface ClassMeta {
       // string/bytes-element arrays stay lean.
       case "array":
         return E.traceAdapterC(t.elem) !== null ? "scr_arr_trace_v" : null;
+      // A Set of function values (the emitter's cycleCapable set rule): headered, its key trace visits the closures.
+      case "set":
+        return t.elem.kind === "func" ? "scr_map_trace_v" : null;
       default:
         return null;
     }

@@ -1012,6 +1012,8 @@ export function mapKeyAccess(key: IrType): "f64" | "str" | "ref" {
   // A union element rides the ref-key API; the runtime hashes the box by
   // the value it carries (scr_set_new_union).
   if (key.kind === "union") return "ref";
+  // A function value hashes by closure identity (isSupportedSetElem).
+  if (key.kind === "func") return "ref";
   throw new Error(`emitter bug: map key of ${key.kind} (frontend rejects these)`);
 }
 
