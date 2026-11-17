@@ -28812,6 +28812,36 @@
     "<repo>/tests/corpus/25660-instanceof-url-over-an-unknown-operand-is-false-for-every-value-the-program-can-hold.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25661-typeof-then-is-function-for-promise-typed-and-optional-receivers.ts": {
+   "order": [
+    "<repo>/tests/corpus/25661-typeof-then-is-function-for-promise-typed-and-optional-receivers.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25662-hasownproperty-call-over-a-record-with-optional-fields-through-an-alias.ts": {
+   "order": [
+    "<repo>/tests/corpus/25662-hasownproperty-call-over-a-record-with-optional-fields-through-an-alias.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25663-hasownproperty-call-over-index-signature-and-required-field-records.ts": {
+   "order": [
+    "<repo>/tests/corpus/25663-hasownproperty-call-over-index-signature-and-required-field-records.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25664-symbol-keyed-read-over-an-object-narrowed-by-an-own-key-guard.ts": {
+   "order": [
+    "<repo>/tests/corpus/25664-symbol-keyed-read-over-an-object-narrowed-by-an-own-key-guard.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25665-a-socket-data-listener-declared-string-or-buffer.ts": {
+   "order": [
+    "<repo>/tests/corpus/25665-a-socket-data-listener-declared-string-or-buffer.ts"
+   ],
+   "diags": []
   }
  }
 }
