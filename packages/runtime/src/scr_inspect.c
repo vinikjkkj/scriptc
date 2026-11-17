@@ -1671,12 +1671,63 @@ ScrStr *scr_insp_typed(ScrBytes *b, ScrStr *name) {
   return out;
 }
 
-ScrStr *scr_insp_error(ScrError *e, double recurse, double depth) {
+static void insp_key_into(InspBuf *b, const char *key, size_t len);
+
+/* The error's own-expando bag (a dyn OBJ: scr_error_prop_set / the dyn encoding). Its member entries are the ENUMERABLE own properties in creation order (a constructor's
+ * `cause` and AggregateError's `errors` live in the hidden table instead); keys starting with '%' are the runtime's own cells (%nonerr) and never print. */
+static const ScrDynEntry *insp_props_find(const ScrDyn *tbl, const char *key, size_t klen) {
+  if (tbl == NULL || tbl->kind != SCR_DYN_OBJ) return NULL;
+  for (size_t i = 0; i < tbl->v.obj.len; i++) {
+    const ScrDynEntry *ent = &tbl->v.obj.entries[i];
+    if (ent->key_len == klen && memcmp(ent->key, key, klen) == 0) return ent;
+  }
+  return NULL;
+}
+static bool insp_props_has_enum(const ScrDyn *tbl) {
+  if (tbl == NULL || tbl->kind != SCR_DYN_OBJ) return false;
+  for (size_t i = 0; i < tbl->v.obj.len; i++) {
+    const ScrDynEntry *ent = &tbl->v.obj.entries[i];
+    if (ent->key_len > 0 && ent->key[0] == '%') continue;
+    return true;
+  }
+  return false;
+}
+/* One `key: value` frame entry per listed member, JS key order, except `skip` (the stamped `code`, printed in its own slot). */
+static void insp_props_emit(const ScrDyn *tbl, double recurse, double depth, const char *skip) {
+  if (tbl == NULL || tbl->kind != SCR_DYN_OBJ) return;
+  const size_t sl = skip != NULL ? strlen(skip) : 0;
+  size_t *ord = scr_dyn_obj_key_order(tbl);
+  for (size_t i = 0; i < tbl->v.obj.len; i++) {
+    const ScrDynEntry *ent = &tbl->v.obj.entries[ord ? ord[i] : i];
+    if (ent->key_len > 0 && ent->key[0] == '%') continue;
+    if (skip != NULL && ent->key_len == sl && memcmp(ent->key, skip, sl) == 0) continue;
+    InspBuf eb = {0};
+    ScrStr *val = scr_insp_dyn(ent->value, recurse + 1, depth);
+    insp_key_into(&eb, ent->key, ent->key_len);
+    insp_kv(&eb, val);
+    scr_str_release(val);
+    ScrStr *entry = ib_take(&eb);
+    scr_insp_entry(entry, false);
+    scr_str_release(entry);
+  }
+  free(ord);
+}
+
+/* `extra`: the entries of an error subclass's DECLARED fields, already rendered, joined by 0x1F (NULL or empty: none). The compiler passes them because the runtime cannot see a
+ * subclass's fields. They sit after the stamped slots and before the assigned expandos: a constructor assigns its fields before any code can attach a property. */
+ScrStr *scr_insp_error_x(ScrError *e, double recurse, double depth, const ScrStr *extra) {
   double ext_errno = 0;
   const ScrStr *ext_syscall = NULL, *ext_path = NULL, *ext_dest = NULL;
   bool has_ext = scr_error_ext_get(e, &ext_errno, &ext_syscall, &ext_path, &ext_dest);
+  const ScrDynEntry *pc = insp_props_find(e->props, "code", 4);
+  const bool code_in_props = pc != NULL;
   bool has_code = e->code != NULL || has_ext; /* the stamped slots, read directly (borrowed) */
-  if ((has_code || INSP_SH) && recurse > depth) {
+  const ScrDynEntry *pcause = insp_props_find(e->props, "cause", 5);
+  /* the constructor's `cause` is a non-enumerable own property; an ASSIGNED one is an ordinary enumerable key */
+  const bool cause_hidden = pcause == NULL && e->props != NULL && e->props->kind == SCR_DYN_OBJ && scr_dyn_obj_has_own_prop(e->props, "cause", 5);
+  const bool has_extra = extra != NULL && extra->len > 0;
+  const bool has_keys = has_code || has_extra || insp_props_has_enum(e->props); /* a hidden `cause` is in the hidden table, so it never counts */
+  if ((has_keys || INSP_SH) && recurse > depth) {
     /* `[${getCtxStyle(...)}]` with the trailing space sliced: [Name] */
     InspBuf out = {0};
     ib_char(&out, '[');
@@ -1702,9 +1753,9 @@ ScrStr *scr_insp_error(ScrError *e, double recurse, double depth) {
   /* The constructor's own non-enumerable `cause` (Node's formatError lists it
    * after the enumerable keys, as `[cause]`), read as a value. */
   ScrDyn *cause_v = NULL;
-  if (e->props != NULL && e->props->kind == SCR_DYN_OBJ && scr_dyn_obj_has_own_prop(e->props, "cause", 5))
+  if (cause_hidden)
     cause_v = scr_dyn_obj_key_get(e->props, "cause", 5); /* +1; NULL only with a pending throw */
-  if (!has_code && cause_v == NULL && !INSP_SH) return base_str;
+  if (!has_keys && cause_v == NULL && !INSP_SH) return base_str;
   insp_begin_obj(recurse + 1);
 #ifdef SCR_INSP_COLORS
   if (INSP_SH) {
@@ -1751,6 +1802,11 @@ ScrStr *scr_insp_error(ScrError *e, double recurse, double depth) {
   if (e->code != NULL) {
     InspBuf entry = {0};
     ib_cstr(&entry, "code: ");
+    if (code_in_props) { /* the program re-assigned the stamped `code`: Node keeps its position and shows the new value */
+      ScrStr *cv = scr_insp_dyn(pc->value, recurse + 1, depth);
+      ib_bytes(&entry, cv->data, cv->len);
+      scr_str_release(cv);
+    } else
     insp_quote_into(&entry, e->code->data, e->code->len);
     ScrStr *entry_str = ib_take(&entry);
     scr_insp_entry(entry_str, false);
@@ -1772,6 +1828,20 @@ ScrStr *scr_insp_error(ScrError *e, double recurse, double depth) {
       scr_str_release(entry_str);
     }
   }
+  if (has_extra) {
+    size_t from = 0;
+    for (size_t i = 0; i <= extra->len; i++) {
+      if (i < extra->len && (unsigned char)extra->data[i] != 0x1f) continue;
+      if (i > from) {
+        ScrStr *ent = scr_str_new(extra->data + from, i - from);
+        scr_insp_entry(ent, false);
+        scr_str_release(ent);
+      }
+      from = i + 1;
+    }
+  }
+  /* the assigned expandos, in the order the table holds them (integer keys first, as [[OwnPropertyKeys]] does); the stamped `code` printed above is not repeated */
+  insp_props_emit(e->props, recurse, depth, e->code != NULL ? "code" : NULL);
   if (cause_v != NULL) {
     InspBuf eb = {0};
     ScrStr *val = scr_insp_dyn(cause_v, recurse + 1, depth);
@@ -1791,6 +1861,8 @@ ScrStr *scr_insp_error(ScrError *e, double recurse, double depth) {
   scr_str_release(base_str);
   return out;
 }
+
+ScrStr *scr_insp_error(ScrError *e, double recurse, double depth) { return scr_insp_error_x(e, recurse, depth, NULL); }
 
 /* ── dyn values (the checked-dynamic JSON dyn) ───────────────────────── */
 
@@ -3955,6 +4027,30 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       if (scr_dyn_objinst_class_of(d)->rt_root == 7 || scr_dyn_objinst_class_of(d)->rt_root == 8) {
         const char *bn = scr_dyn_objinst_class_of(d)->base;
         icn = bn != NULL ? bn : "";
+      }
+      /* An instance of a class that extends Error: the stackless error form, with the class's own enumerable data members as the declared-field entries (the typed path
+       * renders those by type and passes them the same way). The runtime-owned slots (name, message, code) print from the ScrError prefix, and the compiler's % cells never. */
+      if (scr_error_is(d->v.inst.o)) {
+        const size_t nm = scr_dyn_objinst_member_count(d);
+        InspBuf xb = {0};
+        for (size_t mi = 0; mi < nm; mi++) {
+          const ScrDynClassMember *m = scr_dyn_objinst_member_at(d, mi);
+          if (m->get == NULL || m->enumerable == 0 || m->name[0] == '%' || m->name[0] == '#') continue;
+          if ((m->len == 4 && memcmp(m->name, "name", 4) == 0) || (m->len == 7 && memcmp(m->name, "message", 7) == 0) || (m->len == 4 && memcmp(m->name, "code", 4) == 0)) continue;
+          ScrDyn *mv = m->get(d->v.inst.o); /* +1 */
+          if (mv == NULL) { free(xb.data); return scr_str_new("", 0); } /* the getter threw */
+          if ((m->enumerable == 2 && mv->kind == SCR_DYN_UNDEF) || (m->enumerable == 4 && scr_dyn_is_absent(mv))) { scr_dyn_release(mv); continue; }
+          if (xb.len > 0) ib_char(&xb, 0x1f);
+          insp_key_into(&xb, m->name, m->len);
+          ScrStr *mval = scr_insp_dyn(mv, recurse + 1, depth);
+          insp_kv(&xb, mval);
+          scr_str_release(mval);
+          scr_dyn_release(mv);
+        }
+        ScrStr *extra = xb.len > 0 ? ib_take(&xb) : NULL;
+        ScrStr *er = scr_insp_error_x((ScrError *)d->v.inst.o, recurse, depth, extra);
+        if (extra != NULL) scr_str_release(extra);
+        return er;
       }
       ScrDyn *isnap = NULL;
       if (!scr_dyn_objinst_enumerable(d)) {
