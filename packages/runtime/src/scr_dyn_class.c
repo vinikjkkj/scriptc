@@ -1345,6 +1345,7 @@ static int dyn_cls_impl_static_accessor(const ScrDyn *v, const char *key, size_t
   if (cls == NULL) return 0;
   const ScrDynClassMember *m = dyn_class_static(cls, key, key_len);
   if (m == NULL || (m->accl & 1u) == 0) return 0;
+  if (((m->accl >> 2) & 3u) != 0) return 2; /* declared by a base class: an own property of the base, not of this class value */
   const char *kname = m->name;
   if ((m->accl & 0x10u) == 0 && m->get != NULL) *getter = dyn_proto_fn_value(cls, m, 1, kname, m->len, 1);
   if ((m->accl & 0x12u) != 0) *setter = dyn_proto_fn_value(cls, m, 2, kname, m->len, 1);

@@ -522,7 +522,16 @@ export function dynStaticTable(
       if (c !== cls && entry.name.startsWith("%")) continue;
       // `get:` a static getter (non-enumerable, like a class accessor),
       // `field:` a static field read (an own ENUMERABLE data property).
-      if (entry.name.startsWith("set:")) continue; // the setter half of an accessor pair: it only marks the getter row (sSetter below)
+      if (entry.name.startsWith("set:")) {
+        // The setter half of an accessor pair only marks the getter row (sSetter below); a setter with no getter is a row of its own.
+        const sname = entry.name.slice(4);
+        if ((c.def.dynStatics ?? []).some((e) => e.name === `get:${sname}`) || seen.has(sname)) continue;
+        seen.add(sname);
+        let sl = 0;
+        for (let cc: DynMemberClass | null = cls; cc !== null && cc !== c; cc = cc.base) sl++;
+        rows.push({ kind: "setOnly", name: sname, accl: 1 | 2 | 16 | (Math.min(sl, 3) << 2) });
+        continue;
+      }
       const isField = entry.name.startsWith("field:");
       const accessor = isField || entry.name.startsWith("get:");
       const name = accessor ? entry.name.slice(isField ? 6 : 4) : entry.name;
