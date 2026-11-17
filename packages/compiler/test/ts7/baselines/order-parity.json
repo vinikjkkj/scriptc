@@ -16244,6 +16244,42 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25580-regexes-run-before-any-engine-use-and-a-never-run-function-site-stays-cold.ts": {
+   "order": [
+    "<repo>/tests/corpus/25580-regexes-run-before-any-engine-use-and-a-never-run-function-site-stays-cold.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25581-an-engine-use-after-regex-use-boots-then-and-sees-the-right-state.ts": {
+   "order": [
+    "<repo>/tests/corpus/25581-an-engine-use-after-regex-use-boots-then-and-sees-the-right-state.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25582-an-invalid-regex-pattern-throws-the-same-message-with-the-engine-cold-and-hot.ts": {
+   "order": [
+    "<repo>/tests/corpus/25582-an-invalid-regex-pattern-throws-the-same-message-with-the-engine-cold-and-hot.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25583-a-program-with-a-function-site-that-never-runs-prints-and-exits.ts": {
+   "order": [
+    "<repo>/tests/corpus/25583-a-program-with-a-function-site-that-never-runs-prints-and-exits.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25584-regex-heavy-mix-of-flags-groups-lookarounds-and-replacers-with-a-cold-engine.ts": {
+   "order": [
+    "<repo>/tests/corpus/25584-regex-heavy-mix-of-flags-groups-lookarounds-and-replacers-with-a-cold-engine.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25585-regex-heavy-use-after-the-engine-booted-matches-the-cold-results.ts": {
+   "order": [
+    "<repo>/tests/corpus/25585-regex-heavy-use-after-the-engine-booted-matches-the-cold-results.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2559-index-signature-container-values.ts": {
    "order": [
     "<repo>/tests/corpus/2559-index-signature-container-values.ts"
