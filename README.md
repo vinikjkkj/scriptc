@@ -38,6 +38,8 @@ $ pnpm scriptc build fib.ts      # or: node packages/cli/dist/main.js build fib.
 
 Requires a C compiler. Plain `clang` is the default (preinstalled with Xcode Command Line Tools). Where there is no clang, set `SCRIPTC_CC=zigcc` and the driver becomes `zig cc`; cross-target builds (`SCRIPTC_TARGET=<triple>`) require `zigcc`, because the default clang path has no cross-target sysroots. macOS arm64 is the primary platform; Linux and Windows binaries build by cross-compilation, each verified by its own differential test lane.
 
+Every command-line flag and every environment variable (the compiler's, the compiled program's runtime, and the runtime's build-time knobs) is listed in [docs/flags-and-env.md](docs/flags-and-env.md); a test keeps that file in step with the source.
+
 ## The idea: staticness you can see
 
 Most TypeScript is far more static than the ecosystem assumes. scriptc decides, construct by construct, what can compile to native code — and tells you:
