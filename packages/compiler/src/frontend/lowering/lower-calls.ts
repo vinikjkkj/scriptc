@@ -20,7 +20,7 @@ import { protoDataCallee } from "./lower-protodata.js";
 import { lowerAbortMethodCall } from "./lower-abort.js";
 import { lowerEventMethodCall } from "./lower-event.js";
 import { lowerFetchMethodCall } from "./lower-fetch.js";
-import { strandTrap, ABORTSIGNAL_T, EVENT_T, BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, F64, canAdaptDynFuncTo, IrExpr, IrFunction, IrLibFn, IrLocal, IrParam, IrStmt, IrType, JSVAL, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxClassIntoDyn, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, dynCopyIsObservable, dynCopyHasLiveView, canMarshalTypedFuncIntoIsland, funcOf, isUnitType, RUNTIME_EMITTER_CLASS, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
+import { RUNTIME_ERROR_CLASSES, strandTrap, ABORTSIGNAL_T, EVENT_T, BIGINT, BOOL, BYTES_U8, CAUGHT, DYN, F64, canAdaptDynFuncTo, IrExpr, IrFunction, IrLibFn, IrLocal, IrParam, IrStmt, IrType, JSVAL, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxClassIntoDyn, canBoxFuncIntoDyn, canConvertToDyn, canDynCheckTo, dynCopyIsObservable, dynCopyHasLiveView, canMarshalTypedFuncIntoIsland, funcOf, isUnitType, RUNTIME_EMITTER_CLASS, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import type { IrFfiImport } from "../../ir/nodes.js";
 import { isCjsJsFile, isJsSourceFile, isModuleExportsAccess, locOf } from "../program.js";
 import { siblingDtsMethodReturnKind } from "../npm.js";
@@ -55,6 +55,15 @@ import { declSymbolOf } from "./lower-modules.js";
 import { expandoMemberRead } from "./lower-expando.js";
 import { isNpmStaticPackage, npmStaticPackageOfPath } from "../npm-static.js";
 import { provenancePackageOfFile } from "../provenance-registry.js";
+
+/** True when `className`'s chain reaches a runtime Error class (Error, TypeError, ...): its own-key walk is exact in creation order. */
+function classRootsInRuntimeError(L: Lowerer, className: string): boolean {
+  if (RUNTIME_ERROR_CLASSES.has(className)) return true;
+  for (let info: ClassInfo | null | undefined = L.classes.get(className); info; info = info.base) {
+    if (RUNTIME_ERROR_CLASSES.has(info.def.name)) return true;
+  }
+  return false;
+}
 
 /** Does this parameter take paramShape's ISLAND-REST form? A JS
  * `(...args)` has no static element type — tsc's `any[]` is inference
@@ -14603,9 +14612,11 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       // defineProperty on an instance) keeps the refusal: the box's member
       // walk does not read that table, so the answer would silently omit
       // its keys (tests/harness/class-runtime-property-table.test.ts).
+      // values / entries are served for an ERROR-rooted class only (its walk lists every own enumerable key with the value cell,
+      // scr_dyn_class.c dyn_cls_ops_walk_error): the other classes' value walks keep their fence.
       const isInst =
-        objMember === "keys" && probed?.type.kind === "object" && L.classes.has(probed.type.className) &&
-        canBoxClassIntoDyn(probed.type.className) && L.dynConvertible(probed.type) &&
+        (objMember === "keys" || (probed?.type.kind === "object" && classRootsInRuntimeError(L, probed.type.className))) && probed?.type.kind === "object" && L.classes.has(probed.type.className) &&
+        (canBoxClassIntoDyn(probed.type.className) || RUNTIME_ERROR_CLASSES.has(probed.type.className)) && L.dynConvertible(probed.type) &&
         ![...L.classes.values()].some((c) => c.hasPropsTable === true);
       // A live export object (a requirer's namespace binding, or the module's own `exports` /
       // `module.exports`): its own keys are the bag's, not the static member table's.

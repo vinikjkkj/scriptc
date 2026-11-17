@@ -11790,8 +11790,8 @@ function prototypeInstallerCallStmt(L: Lowerer, expr: ts.Expression): IrStmt | n
   function classEnumerableForIn(L: Lowerer, className: string): boolean {
     for (let info: ClassInfo | null | undefined = L.classes.get(className); info; info = info.base) {
       const n = info.def.name;
-      // EventEmitter roots are modelled (scr_dyn_forin_keys walks EventEmitter.prototype's keys).
-      if (RUNTIME_STREAM_CLASSES.has(n) || RUNTIME_ERROR_CLASSES.has(n)) return false;
+      // EventEmitter roots are modelled (scr_dyn_forin_keys walks EventEmitter.prototype's keys); an Error root is exact too (scr_dyn_class.c dyn_cls_ops_walk_error lists it in creation order).
+      if (RUNTIME_STREAM_CLASSES.has(n)) return false;
       // A run-time property table walks exactly (dyn walk: the emitter's own keys, the members, then the table's
       // enumerable keys; scr_dyn_class.c dyn_cls_props_keys).
       if (protoKeyWritten(info)) return false;
