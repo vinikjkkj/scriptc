@@ -71,6 +71,12 @@ static void *scr_hm_thread(void *arg) {
     int woke = sem_timedwait(&scr_hm_sem, &dl) == 0;
     if (scr_hm_done) return NULL;
     scr_hm_sample(woke ? "P" : "S");
+    {
+      /* SCR_HEAPMAP_XML_AT_MS=<ms>: one malloc_info() dump (every bin's free chunks) the first time the clock passes it, to $SCR_HEAPMAP_OUT.at.xml: the IDLE heap. */
+      static int xml_done;
+      const char *at = getenv("SCR_HEAPMAP_XML_AT_MS");
+      if (at != NULL && !xml_done && scr_hm_ms() >= atol(at)) { xml_done = 1; scr_hm_dump_xml("at.xml"); }
+    }
   }
 }
 static void scr_hm_report(void) {
