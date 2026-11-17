@@ -645,6 +645,7 @@ export function strParse(text) {
     if (sp[0] === "STRCEN-HOLD") {
       const row = kv(sp.slice(4).filter((x) => x.includes("=")));
       row.ctx = (/ctx=([0-9a-f]+)/.exec(line) || [])[1] || "";
+      row.addr = (/addr=([0-9a-f]+)/.exec(line) || [])[1] || "";
       ((r.hold[+sp[1]] ||= [])[+sp[2]] ||= []).push(row);
       continue;
     }
@@ -830,7 +831,7 @@ export function strRender(r) {
     const ch = r.chunk[w] || [];
     if (ch.length) {
       o.push(`── STRING ARENA CHUNKS (${w === 0 ? "peak" : "exit"} walk): ${ch.length} chunk(s)`);
-      for (const c of ch) o.push(`   ${c.base} carved=${c.carved} live=${c.liveN} strings/${c.liveB} B, on the arena free lists=${c.freeN} blocks/${c.freeB} B`);
+      for (const c of ch) o.push(`   ${(Number(c.base) || 0) || "chunk"} carved=${c.carved} live=${c.liveN} strings/${c.liveB} B, on the arena free lists=${c.freeN} blocks/${c.freeB} B`);
     }
   }
   return o.join("\n");
