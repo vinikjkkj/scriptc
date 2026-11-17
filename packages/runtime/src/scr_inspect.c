@@ -1674,11 +1674,6 @@ ScrStr *scr_insp_typed(ScrBytes *b, ScrStr *name) {
 static void insp_key_into(InspBuf *b, const char *key, size_t len);
 
 /* An error-rooted boxed class instance whose name slot equals its class's display name. */
-static bool insp_err_name_is_class(const ScrDyn *d) {
-  const ScrError *ee = (const ScrError *)d->v.inst.o;
-  const char *cn = scr_dyn_objinst_class_of(d)->name;
-  return cn != NULL && ee->name != NULL && ee->name->len == strlen(cn) && memcmp(ee->name->data, cn, ee->name->len) == 0;
-}
 
 /* The error's own-expando bag (a dyn OBJ: scr_error_prop_set / the dyn encoding). Its member entries are the ENUMERABLE own properties in creation order (a constructor's
  * `cause` and AggregateError's `errors` live in the hidden table instead); keys starting with '%' are the runtime's own cells (%nonerr) and never print. */
@@ -1726,6 +1721,30 @@ static void insp_props_emit(const ScrDyn *tbl, double recurse, double depth, con
 
 /* `extra`: the entries of an error subclass's DECLARED fields, already rendered, joined by 0x1F (NULL or empty: none). The compiler passes them because the runtime cannot see a
  * subclass's fields. They sit after the stamped slots and before the assigned expandos: a constructor assigns its fields before any code can attach a property. */
+/* Node's improveStack for the header of an error whose `name` is still the inherited "...Error" but whose CONSTRUCTOR is another class:
+ * `Quiet [Error]: q` when the constructor name does not contain the name, the constructor name alone when it does (`ValidationError: v`).
+ * Only a name ending in "Error" is rewritten; an assigned name (`this.name = 'Named'`) prints as is. The constructor name rides the vtable
+ * (stamped for every module with an Error subclass); NULL = the runtime's own kinds, whose name IS the constructor. */
+static void insp_err_name_into(InspBuf *b, const ScrError *e) {
+  const ScrStr *name = e->name;
+  const ScrStr *ctor = e->vt != NULL ? e->vt->name : NULL;
+  if (ctor != NULL && ctor->len > 0 && name->len >= 5 && memcmp(name->data + name->len - 5, "Error", 5) == 0 &&
+      !(ctor->len == name->len && memcmp(ctor->data, name->data, name->len) == 0)) {
+    ib_str(b, (ScrStr *)ctor);
+    bool contains = false;
+    if (ctor->len >= name->len) {
+      for (size_t i = 0; i + name->len <= ctor->len && !contains; i++) contains = memcmp(ctor->data + i, name->data, name->len) == 0;
+    }
+    if (!contains) {
+      ib_cstr(b, " [");
+      ib_str(b, (ScrStr *)name);
+      ib_char(b, ']');
+    }
+    return;
+  }
+  ib_str(b, (ScrStr *)name);
+}
+
 ScrStr *scr_insp_error_x(ScrError *e, double recurse, double depth, const ScrStr *extra) {
   double ext_errno = 0;
   const ScrStr *ext_syscall = NULL, *ext_path = NULL, *ext_dest = NULL;
@@ -1742,13 +1761,14 @@ ScrStr *scr_insp_error_x(ScrError *e, double recurse, double depth, const ScrStr
     /* `[${getCtxStyle(...)}]` with the trailing space sliced: [Name] */
     InspBuf out = {0};
     ib_char(&out, '[');
-    ib_str(&out, e->name);
+    if (e->vt != NULL && e->vt->name != NULL && e->vt->name->len > 0) ib_str(&out, (ScrStr *)e->vt->name);
+    else ib_str(&out, e->name);
     ib_char(&out, ']');
     return ib_take(&out);
   }
   InspBuf base = {0};
   ib_char(&base, '[');
-  ib_str(&base, e->name);
+  insp_err_name_into(&base, e);
   if (e->message->len) {
     ib_cstr(&base, ": ");
     /* indent embedded newlines by the CURRENT level (formatError's
@@ -4064,9 +4084,9 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       }
       /* An instance of a class that extends Error: the stackless error form, with the class's own enumerable data members as the declared-field entries (the typed path
        * renders those by type and passes them the same way). The runtime-owned slots (name, message, code) print from the ScrError prefix, and the compiler's % cells never. */
-      /* Only when the error's own name slot IS the class name (`this.name = 'AppError'`): Node names a subclass that kept the default name `Class [Error]: msg`, a form the runtime
-       * cannot print until it carries the class name, so such an instance keeps the loud refusal below instead of a partial answer with the wrong name. */
-      if (scr_dyn_objinst_error_rooted(d) && insp_err_name_is_class(d)) {
+      /* The header is Node's own, constructor name included: a subclass that kept the default name prints `Class [Error]: msg` (scr_insp_error_x reads the class
+       * name off the vtable, which every module with an Error subclass stamps). */
+      if (scr_dyn_objinst_error_rooted(d)) {
         const size_t nm = scr_dyn_objinst_member_count(d);
         InspBuf xb = {0};
         for (size_t mi = 0; mi < nm; mi++) {

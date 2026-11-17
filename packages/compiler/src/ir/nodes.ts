@@ -13064,6 +13064,17 @@ export function moduleUsesWeakMap(mod: IrModule): boolean {
  * its class's name. Gated so every other program's vtables and literal table
  * stay byte-identical. Same walk shape as moduleUsesWeakMap. */
 export function moduleUsesCtorName(mod: IrModule): boolean {
+  // An Error subclass prints its CONSTRUCTOR name in util.inspect when its inherited `name` differs (Node's improveStack:
+  // `[Quiet [Error]: q]`), so a module with one stamps the class name on the vtable too.
+  if (mod.classes !== undefined) {
+    const byName = new Map<string, IrClassDef>();
+    for (const c of mod.classes) byName.set(c.name, c);
+    for (const c of mod.classes) {
+      for (let k: string | undefined = c.base; k !== undefined; k = byName.get(k)?.base) {
+        if (RUNTIME_ERROR_CLASSES.has(k)) return true;
+      }
+    }
+  }
   let found = false;
   const visit = (v: unknown): void => {
     if (found || v === null || typeof v !== "object") return;
