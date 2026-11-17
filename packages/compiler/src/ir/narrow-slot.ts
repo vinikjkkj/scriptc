@@ -123,3 +123,30 @@ export function reportNarrowScope(mod: IrModule): void {
     for (const r of s.refused) process.stderr.write(`NARROW refuse ${s.className}.${r.field}: ${r.reason}\n`);
   }
 }
+
+export const NARROW_MAX_FIELDS = 16; // the presence mask is 16 bits
+
+/** The pass: every standalone class with at least NARROW_MIN_FIELDS eligible fields keeps those fields in its layout list but gives them no storage (IrClassDef.narrow).
+ * SCRIPTC_NARROW=off disables it (the A/B arm); a second run over an already narrowed module is a no-op. Returns the picks as "Class.field". */
+export function narrowSlotPass(mod: IrModule): string[] {
+  const classes = mod.classes ?? [];
+  if (process.env["SCRIPTC_NARROW"] === "off" || classes.length === 0) return [];
+  if (classes.some((c) => c.narrow !== undefined)) return [];
+  const why = process.env["SCRIPTC_NARROW_WHY"] === "1";
+  const picks: string[] = [];
+  for (const sc of narrowSlotScope(mod)) {
+    if (sc.eligible.length < NARROW_MIN_FIELDS) continue;
+    const def = classes.find((c) => c.name === sc.className);
+    if (def === undefined) continue;
+    const fields = sc.eligible.slice(0, NARROW_MAX_FIELDS);
+    const lanes: string[] = [];
+    for (let k = 0; k < Math.ceil(fields.length / 2); k++) lanes.push(`%nwl:${def.name}:${k}`);
+    const mask = `%nwm:${def.name}`;
+    const ext = `%nwx:${def.name}`;
+    def.fields = [...def.fields, ...lanes.map((n) => ({ name: n, type: { kind: "f64" as const } })), { name: mask, type: { kind: "f64" as const } }, { name: ext, type: { kind: "dyn" as const } }];
+    def.narrow = { fields, lanes, mask, ext };
+    for (const f of fields) picks.push(`${def.name}.${f}`);
+    if (why) process.stderr.write(`narrow: pick ${def.name} (${fields.length} fields: ${fields.join(",")})\n`);
+  }
+  return picks;
+}
