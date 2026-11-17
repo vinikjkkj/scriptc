@@ -1,6 +1,6 @@
 /* The narrow-slot pass (ir/narrow-slot.ts): which standalone classes give their numeric dyn fields 32-bit lanes.
  *   - positive control: a class with five constructor-written numeric fields is narrowed: the fields stay in `fields` (name-based consumers) beside
- *     the hidden lane words, the 16-bit mask word and the overflow pointer, and `narrow` lists them in order; the module still validates;
+ *     the hidden lane words, the two 16-bit mask bytes and the overflow pointer, and `narrow` lists them in order; the module still validates;
  *   - negative controls: a class with fewer than four eligible fields, a class with a subclass and a field written outside the constructor are not
  *     (or are refused field by field);
  *   - the layout control: storageFields() leaves exactly the narrow fields out;
@@ -65,9 +65,9 @@ test("a class with five numeric fields is narrowed; three fields and a subclasse
   const m = lower();
   expect(narrowSlotPass(m).sort()).toEqual(["Five.a", "Five.b", "Five.c", "Five.d", "Five.e", "Moved.a", "Moved.b", "Moved.c", "Moved.d"]);
   const five = m.classes!.find((c) => c.name === "Five")!;
-  expect(five.narrow).toEqual({ fields: ["a", "b", "c", "d", "e"], lanes: ["%nwl:Five:0", "%nwl:Five:1", "%nwl:Five:2"], mask: "%nwm:Five", ext: "%nwx:Five" });
-  expect(five.fields.map((f) => f.name)).toEqual(["a", "b", "c", "d", "e", "tag", "%nwl:Five:0", "%nwl:Five:1", "%nwl:Five:2", "%nwm:Five", "%nwx:Five"]);
-  expect(storageFields(five).map((f) => f.name)).toEqual(["tag", "%nwl:Five:0", "%nwl:Five:1", "%nwl:Five:2", "%nwm:Five", "%nwx:Five"]);
+  expect(five.narrow).toEqual({ fields: ["a", "b", "c", "d", "e"], lanes: ["%nwl:Five:0", "%nwl:Five:1", "%nwl:Five:2"], mask: "%nwm:Five:0", maskHi: "%nwm:Five:1", ext: "%nwx:Five" });
+  expect(five.fields.map((f) => f.name)).toEqual(["%nwm:Five:0", "%nwm:Five:1", "a", "b", "c", "d", "e", "tag", "%nwl:Five:0", "%nwl:Five:1", "%nwl:Five:2", "%nwx:Five"]);
+  expect(storageFields(five).map((f) => f.name)).toEqual(["%nwm:Five:0", "%nwm:Five:1", "tag", "%nwl:Five:0", "%nwl:Five:1", "%nwl:Five:2", "%nwx:Five"]);
   for (const name of ["Three", "Base", "Derived"]) expect(m.classes!.find((c) => c.name === name)!.narrow).toBeUndefined();
   // `Moved.e` is rewritten by relocate(): it keeps its slot and stays out of the lanes
   expect(m.classes!.find((c) => c.name === "Moved")!.narrow!.fields).toEqual(["a", "b", "c", "d"]);
@@ -85,7 +85,7 @@ test("a second run over a narrowed module is a no-op, and SCRIPTC_NARROW=off pic
   const m = lower();
   expect(narrowSlotPass(m).length).toBe(9);
   expect(narrowSlotPass(m)).toEqual([]);
-  expect(m.classes!.find((c) => c.name === "Five")!.fields.filter((f) => f.name === "%nwm:Five").length).toBe(1);
+  expect(m.classes!.find((c) => c.name === "Five")!.fields.filter((f) => f.name === "%nwm:Five:0").length).toBe(1);
   process.env["SCRIPTC_NARROW"] = "off";
   expect(narrowSlotPass(lower())).toEqual([]);
 });

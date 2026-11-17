@@ -2551,9 +2551,9 @@ static ScrDyn *scr_dyn_new_num_kept(double n) {
 
 /* The number-slot marker (scr_runtime.h): immortal, undefined-kind, never handed to a reader. */
 ScrDyn scr_numslot_node = { SIZE_MAX, SCR_DYN_UNDEF, { false } };
-ScrDyn *scr_nw_get_v(const uint32_t *lanes, const uint16_t *mask, ScrDyn *ext, unsigned idx) { return scr_nw_get(lanes, mask, ext, idx); }
-void scr_nw_put_v(uint32_t *lanes, uint16_t *mask, ScrDyn **ext, unsigned idx, unsigned n, ScrDyn *v) { scr_nw_put(lanes, mask, ext, idx, n, v); }
-void scr_nw_ghosts_v(const uint16_t *mask) { SCR_PROPS_GHOST_SUB(SCR_NW_GHOSTS(*mask)); }
+ScrDyn *scr_nw_get_v(const uint32_t *lanes, const uint8_t *mask, ScrDyn *ext, unsigned idx) { return scr_nw_get(lanes, mask, ext, idx); }
+void scr_nw_put_v(uint32_t *lanes, uint8_t *mask, ScrDyn **ext, unsigned idx, unsigned n, ScrDyn *v) { scr_nw_put(lanes, mask, ext, idx, n, v); }
+void scr_nw_ghosts_v(const uint8_t *mask) { SCR_PROPS_GHOST_SUB(SCR_NW_GHOSTS(mask)); }
 /* The overflow array is created on the first value that does not fit a lane, `n` entries of the (immortal) undefined value; entry `idx` takes `v` (moved in)
  * and the old entry is released after the new one is in place. */
 void scr_nw_ext_store(ScrDyn **ext, unsigned idx, unsigned n, ScrDyn *v) {

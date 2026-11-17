@@ -6949,32 +6949,36 @@ static inline void scr_numslot_put(ScrDyn **p, double *n, ScrDyn *v) {
 static inline bool scr_nw_fits(double n) {
   return n >= 0 && n <= 4294967295.0 && n == (double)(uint32_t)n && !__builtin_signbit(n);
 }
-#define SCR_NW_GHOSTS(maskword) ((size_t)__builtin_popcount(*(const uint16_t *)&(maskword)))
-ScrDyn *scr_nw_get_v(const uint32_t *lanes, const uint16_t *mask, ScrDyn *ext, unsigned idx);
-void scr_nw_put_v(uint32_t *lanes, uint16_t *mask, ScrDyn **ext, unsigned idx, unsigned n, ScrDyn *v);
-void scr_nw_ghosts_v(const uint16_t *mask);
+/* The 16-bit presence mask is two adjacent bytes (two hidden bool fields placed first in the layout, so they fill the padding after the order record):
+ * every access goes through a byte pointer and a 2-byte memcpy, which is one unaligned-safe move. */
+static inline unsigned scr_nw_mask_rd(const uint8_t *m) { uint16_t v; __builtin_memcpy(&v, m, 2); return v; }
+static inline void scr_nw_mask_wr(uint8_t *m, unsigned v) { uint16_t w = (uint16_t)v; __builtin_memcpy(m, &w, 2); }
+#define SCR_NW_GHOSTS(maskptr) ((size_t)__builtin_popcount(scr_nw_mask_rd((const uint8_t *)(maskptr))))
+ScrDyn *scr_nw_get_v(const uint32_t *lanes, const uint8_t *mask, ScrDyn *ext, unsigned idx);
+void scr_nw_put_v(uint32_t *lanes, uint8_t *mask, ScrDyn **ext, unsigned idx, unsigned n, ScrDyn *v);
+void scr_nw_ghosts_v(const uint8_t *mask);
 void scr_nw_ext_store(ScrDyn **ext, unsigned idx, unsigned n, ScrDyn *v);
 void scr_nw_ext_clear(ScrDyn *ext, unsigned idx);
-static inline ScrDyn *scr_nw_get(const uint32_t *lanes, const uint16_t *mask, ScrDyn *ext, unsigned idx) {
-  if (*mask & (1u << idx)) return scr_dyn_new_num((double)lanes[idx]);
+static inline ScrDyn *scr_nw_get(const uint32_t *lanes, const uint8_t *mask, ScrDyn *ext, unsigned idx) {
+  if (scr_nw_mask_rd(mask) & (1u << idx)) return scr_dyn_new_num((double)lanes[idx]);
   if (ext != NULL && ext->kind == SCR_DYN_ARR && idx < ext->v.arr.len && ext->v.arr.items[idx] != NULL) return scr_dyn_retain(ext->v.arr.items[idx]);
   return scr_dyn_undefined();
 }
-static inline void scr_nw_put(uint32_t *lanes, uint16_t *mask, ScrDyn **ext, unsigned idx, unsigned n, ScrDyn *v) {
+static inline void scr_nw_put(uint32_t *lanes, uint8_t *mask, ScrDyn **ext, unsigned idx, unsigned n, ScrDyn *v) {
   const unsigned bit = 1u << idx;
   if (v->kind == SCR_DYN_NUM && scr_nw_fits(v->v.num)) {
     lanes[idx] = (uint32_t)v->v.num;
     scr_dyn_release(v);
-    if (!(*mask & bit)) {
-      *mask = (uint16_t)(*mask | bit);
+    if (!(scr_nw_mask_rd(mask) & bit)) {
+      scr_nw_mask_wr(mask, scr_nw_mask_rd(mask) | bit);
       SCR_PROPS_GHOST_ADD(1);
       scr_nw_ext_clear(*ext, idx);
     }
     return;
   }
   scr_nw_ext_store(ext, idx, n, v);
-  if (*mask & bit) {
-    *mask = (uint16_t)(*mask & ~bit);
+  if (scr_nw_mask_rd(mask) & bit) {
+    scr_nw_mask_wr(mask, scr_nw_mask_rd(mask) & ~bit);
     SCR_PROPS_GHOST_SUB(1);
   }
 }
