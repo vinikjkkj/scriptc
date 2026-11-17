@@ -28806,6 +28806,12 @@
     "<repo>/tests/corpus/25548-a-cast-of-an-error-to-a-record-lists-the-errors-own-keys.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25664-symbol-keyed-read-over-an-object-narrowed-by-an-own-key-guard.ts": {
+   "order": [
+    "<repo>/tests/corpus/25664-symbol-keyed-read-over-an-object-narrowed-by-an-own-key-guard.ts"
+   ],
+   "diags": []
   }
  }
 }
