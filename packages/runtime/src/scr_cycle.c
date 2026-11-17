@@ -1450,7 +1450,7 @@ long long scr_cycen_arena_walk(long long (*out)[13], int nclass) {
     unsigned char *base = (unsigned char *)(void *)c;
     long long carved = c->stride ? (long long)(c->bump - (base + SCR_CYC_ARENA_GRAN)) / (long long)c->stride : 0;
     long long flen = 0;
-    for (void *b = c->freelist; b != NULL; flen++) { void *n; __builtin_memcpy(&n, b, sizeof n); b = n; }
+    for (void *b = c->freelist; b != NULL; flen++) { b = scr_cyc_link_get(b); }
     out[i][0]++;
     out[i][1] += (long long)SCR_CYC_ARENA_CHUNK;
     out[i][2] += (long long)c->used * c->stride;
