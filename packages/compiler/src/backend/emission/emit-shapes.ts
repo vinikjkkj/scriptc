@@ -5,6 +5,7 @@
  * VtSlot) the emitter builds up front; emission ORDER is part of the C. */
 import type { CEmitter } from "./emitter.js";
 import type { IrBuiltinRendering, IrFunction, OwnMaskShape } from "../../ir/nodes.js";
+import { ordScopeSlot } from "../../ir/ord-scope.js";
 import { storageFields, DYN, IrClassDef, IrType, moduleUsesCtorName, ORD_MEMBER, orderRecordPlanCached, OWNMASK_SRC_NULL_PROTO, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, funcOf, isRefCounted, mapOf, nullProtoRule, ownMaskBytes, ownMaskKeyBit, STRING } from "../../ir/nodes.js";
 import { mangleClassGcFree, mangleClassNew, mangleClassRelease, mangleClassReleaseDirect, mangleClassRetain, mangleClassStruct, mangleClassTrace, mangleCtorThunk, mangleField, mangleFunction, mangleRecordGcFree, mangleRecordNew, mangleRecordRelease, mangleRecordRetain, mangleRecordStruct, mangleRecordTrace, mangleVtAdapter, mangleVtInstance, mangleVtStruct } from "../mangle.js";
 import { arrayElemIsRef, boxKindC, cDecl, cType, elemKindC, mapValKindC, rcAdapters, releaseCallC, vAdapters } from "./emit-types.js";
@@ -492,6 +493,8 @@ export interface ClassMeta {
         `  if (__builtin_expect(sc_ck == 0, 0)) sc_ck = scr_cyc_kind_of(&${s.trace}, &${s.gcFree});`,
         `  ${s.struct} *o = scr_cyc_alloc_k(sizeof *o, sc_ck);`,
         `  o->rc = 1;`,
+        // LAB (never shipped): SCRIPTC_ORDSCOPE=1 counts the instances of every class that owns an order record (tests/perf/labord/scr_labord.h).
+        ...(ordScopeSlot(E.mod, s.meta?.def.name ?? "") >= 0 ? [`#ifdef SCR_LABORD`, `  SCR_LABORD_COUNT(${ordScopeSlot(E.mod, s.meta?.def.name ?? "")});`, `#endif`] : []),
         ...undefFieldInitC(s),
         ...(s.indexValue ? [`  o->${OVERFLOW_MEMBER} = ${overflowNewC(s)};`] : []),
         `  scr_obj_alloc_note();`,
