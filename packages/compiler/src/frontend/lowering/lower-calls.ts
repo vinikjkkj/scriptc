@@ -14737,6 +14737,12 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     }
     const loc = locOf(call);
     const resultT = L.irTypeOf(call);
+    // `Object.values(r)` whose result element is dyn (`unknown[]` / `any[]`: a member of the record is dyn, so the element type is the dyn top) is the checked-dynamic
+    // array: the record crosses into the dyn tree and the runtime walk answers its values in own-key order.
+    if (resultT.kind === "dyn" && objMember === "values" && L.dynConvertible(argIr)) {
+      const boxed: IrExpr = { kind: "dynFrom", value: L.lowerExpr(argNode), type: DYN, loc };
+      return { kind: "libCall", fn: "dyn.objValues", args: [boxed], type: DYN, loc };
+    }
     if (resultT.kind !== "array") L.badType(call, L.typeOf(call)); // defensive
     const receiver = L.lowerExpr(argNode);
     if (objMember === "keys") {
@@ -17647,6 +17653,8 @@ function refillObjValuesHelper(Lu: unknown, r: EnumRefill): void {
     const elemOf = (value: IrExpr, vt: IrType): IrExpr | null => {
       if (!valueT) return null;
       if (typeEquals(vt, valueT)) return value;
+      // A dyn result element (a record with `unknown` / `any` members): every field crosses into the dyn tree.
+      if (valueT.kind === "dyn" && L.dynConvertible(vt)) return { kind: "dynFrom", value, type: DYN, loc };
       if (valueT.kind === "union" && vt.kind !== "union") {
         const tag = L.armTag(valueT.unionId, vt);
         if (tag >= 0) {
