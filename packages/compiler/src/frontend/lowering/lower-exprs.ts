@@ -16203,8 +16203,13 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
     const recvIr = L.mapTypeOf(L.typeOf(access.expression));
     // A function VALUE carries its own properties on its closure, so a box made here shares them with every other box of
     // the same closure (the defineProperty arm's rule).
-    if (recvIr !== null && recvIr.kind !== "dyn" && recvIr.kind !== "func") return null;
+    // A receiver the CHECKER narrowed to a record that cannot hold the symbol key (`v is Record<typeof K, unknown>` after an own-key
+    // guard over an `object`) is still the checked-dynamic value the guard tested: the narrowing is a validated extraction over it, and
+    // a static shape has no storage for a symbol key, so the read goes to the value's own symbol table.
+    const narrowedDyn = recvIr !== null && recvIr.kind === "record" && !ts.isPropertyAccessExpression(access.argumentExpression);
+    if (recvIr !== null && recvIr.kind !== "dyn" && recvIr.kind !== "func" && !narrowedDyn) return null;
     let recv = L.lowerExpr(access.expression);
+    if (narrowedDyn && recv.kind === "dynCheck" && recv.value.type.kind === "dyn") recv = recv.value;
     if (recv.type.kind === "func" && canBoxFuncIntoDyn(recv.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))) {
       recv = { kind: "dynFrom", value: recv, type: DYN, loc: recv.loc };
     }
