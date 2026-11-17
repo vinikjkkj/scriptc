@@ -1734,7 +1734,7 @@ ScrCycKindRow scr_cyc_kind_tab[SCR_CYC_KIND_MAX];
 ScrTraceFn scr_cyc_trace_abs[SCR_CYC_KIND_MAX];
 static uint32_t scr_cyc_nkinds = SCR_CYC_KIND_FIXED_END;
 static uint16_t scr_cyc_kind_hash[8192];
-uint16_t scr_cyc_kind_of(ScrTraceFn trace, ScrCycFreeFn free_fn) {
+__attribute__((noinline)) uint16_t scr_cyc_kind_of(ScrTraceFn trace, ScrCycFreeFn free_fn) {
   int32_t t = scr_cyc_off((const void *)trace);
   int32_t f = scr_cyc_off((const void *)free_fn);
   uint32_t hs = (((uint32_t)f * 2654435761u) ^ (uint32_t)t) >> 19; /* 13 bits */
@@ -1744,8 +1744,8 @@ uint16_t scr_cyc_kind_of(ScrTraceFn trace, ScrCycFreeFn free_fn) {
     if (scr_cyc_kind_tab[k].trace_off == t && scr_cyc_kind_tab[k].free_off == f) return k;
     hs = (hs + 1u) & 8191u;
   }
-  /* An index whose low byte is 1..3 would look like a reserved kind to the one-byte kind_lo checks (the dyn phantom test): skip it. */
-  while ((scr_cyc_nkinds & 0xffu) >= 1u && (scr_cyc_nkinds & 0xffu) < SCR_CYC_KIND_FIXED_END) scr_cyc_nkinds++;
+  /* An index whose low byte is 1 (SCR_CYC_KIND_DYN) would look like a dyn node to the one-byte kind_lo check (the dyn phantom test): skip it. */
+  if ((scr_cyc_nkinds & 0xffu) == SCR_CYC_KIND_DYN) scr_cyc_nkinds++;
   if (scr_cyc_nkinds >= SCR_CYC_KIND_MAX) scr_trap("scriptc: more than 4095 distinct cycle-object kinds in one program (the 8-byte cycle header's kind index is 12 bits)\n");
   {
     uint16_t k = (uint16_t)scr_cyc_nkinds++;
@@ -1922,7 +1922,7 @@ static __attribute__((noinline)) void *scr_cyc_alloc_miss(size_t size, uint32_t 
  *
  * Zeroed allocation with a cycle header in front; returns the OBJECT
  * pointer (header at scr_cyc_hdr). Aborts on OOM. */
-void *scr_cyc_alloc_k(size_t size, uint32_t kind) {
+__attribute__((noinline)) void *scr_cyc_alloc_k(size_t size, uint32_t kind) {
   SCR_LIFE_SITE();
   size_t phys = scr_pool_bytes(sizeof(ScrCycHdr) + size);
   ScrCycHdr *h = scr_cyc_ar_pop(phys);
