@@ -2843,7 +2843,7 @@ class LlEmitter {
       // on builtin errors and classval loads GEP through these. `stack` is
       // the `.stack` memo (scr_runtime.h), appended LAST so the three field
       // indices above it never move.
-      `%ScrError = type { i64, ptr, ptr, ptr, ptr, ptr, ptr, i8, i8 }`,
+      `%ScrError = type { i64, ptr, ptr, ptr, ptr, ptr, ptr, i8, i8, i8, i8, i8 }`,
       `%ScrClassObj = type { i64, i64, i64, ptr, ptr }`,
       // The SCR_DYN_OBJINST boxing descriptor { name, pre, post, vt,
       // retain, release } — one internal constant per boxed class
@@ -7835,8 +7835,8 @@ class LlEmitter {
         if (s.kind === "fieldSet") {
           const flag = errorOwnFlagFor(this.mod.classes ?? [], s.className, s.field);
           if (flag !== null) {
-            const fp = this.classFieldPtr(obj.name, s.className, flag);
-            this.storeField(fp.ptr, fp.type, "true");
+            this.declare(`declare void @scr_error_mark_own(ptr, i32)`);
+            B.line(`call void @scr_error_mark_own(ptr ${obj.name}, i32 ${flag === "%ownName" ? 0 : 2})`);
           }
         }
         // A WRITE creates an own property — JS's [[Set]], and the reason a

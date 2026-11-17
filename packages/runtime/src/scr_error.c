@@ -80,6 +80,38 @@ static void (*scr_error_props_drop)(void *obj) = NULL;
 
 void scr_error_install_props_drop(void (*fn)(void *obj)) { scr_error_props_drop = fn; }
 
+/* How many own enumerable keys the expando bag lists: scr_json.c owns the dyn object and installs this beside the drop. */
+static size_t (*scr_error_props_count)(void *obj) = NULL;
+void scr_error_install_props_count(size_t (*fn)(void *obj)) { scr_error_props_count = fn; }
+
+/* `name`, `code` or an assigned `message` just came into being as an own property of `e`. Node lists own keys in CREATION order,
+ * so where it was created among the keys that are not declared fields is recorded: the index into the merged list of expando
+ * keys and these cells at this moment (position PLUS ONE in the byte, saturating; 0 = unrecorded = first). Re-assigning a property
+ * that exists keeps its place. The walks (dyn_cls_ops_walk_error) merge the cells back in by these positions. */
+void scr_error_mark_own(ScrError *e, int which) {
+  size_t n = e->props != NULL && scr_error_props_count != NULL ? scr_error_props_count(e) : 0;
+  size_t pos;
+  uint8_t *slot;
+  if (which == 0) {
+    if (e->own_name) return;
+    pos = n + (e->code != NULL ? 1 : 0) + (e->msg_at != 0 ? 1 : 0);
+    slot = &e->name_at;
+    e->own_name = true;
+  } else if (which == 1) {
+    if (e->code_at != 0) return;
+    pos = n + (e->own_name ? 1 : 0) + (e->msg_at != 0 ? 1 : 0);
+    slot = &e->code_at;
+  } else {
+    /* a constructed message is a non-enumerable own property; only an assignment over an ABSENT one creates an enumerable one */
+    const bool had = e->own_message;
+    e->own_message = true;
+    if (had || e->msg_at != 0) return;
+    pos = n + (e->own_name ? 1 : 0) + (e->code != NULL ? 1 : 0);
+    slot = &e->msg_at;
+  }
+  *slot = (uint8_t)(pos >= 254 ? 255 : pos + 1);
+}
+
 static void scr_error_gcfree(void *obj) {
   ScrError *e = (ScrError *)obj;
   if (e->props != NULL && scr_error_props_drop != NULL) scr_error_props_drop(obj);
