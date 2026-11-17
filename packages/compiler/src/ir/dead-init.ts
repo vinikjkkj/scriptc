@@ -212,7 +212,7 @@ export function deadInitPass(mod: IrModule): DeadInitResult {
       case "setNew":
         return e["seed"] === undefined ? true : no("Set constructed from an iterable");
       default:
-        return no(`expression kind ${k}`);
+        return no(k === "libCall" || k === "intrinsic" ? `expression kind ${k} ${String(e["fn"] ?? e["name"])}` : `expression kind ${k}`);
     }
   };
 
