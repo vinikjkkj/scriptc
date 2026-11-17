@@ -13,6 +13,8 @@
 #ifndef SCR_HEAPMAP_H
 #define SCR_HEAPMAP_H
 #define SCR_HEAPMAP 1
+#include <execinfo.h>
+#include <fcntl.h>
 #include <malloc.h>
 #include <pthread.h>
 #include <semaphore.h>
@@ -89,12 +91,42 @@ static void scr_hm_report(void) {
   if (scr_hm_f != NULL) fclose(scr_hm_f);
   scr_hm_f = NULL;
 }
+/* SCR_HEAPMAP_CRASH=1: a SIGSEGV/SIGBUS/SIGABRT handler that writes the faulting address and a backtrace (backtrace_symbols_fd; build with -g -fno-omit-frame-pointer and
+ * the frames carry file offsets, resolvable with addr2line against the kept binary) to $SCR_HEAPMAP_OUT.crash, then re-raises. Lab only: it exists because a census probe crashed in
+ * CI where no core file is kept. */
+static void scr_hm_crash(int sig, siginfo_t *si, void *uc) {
+  (void)uc;
+  const char *p = getenv("SCR_HEAPMAP_OUT");
+  char path[1024];
+  snprintf(path, sizeof path, "%s.crash", p != NULL ? p : "/dev/stderr");
+  int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  if (fd >= 0) {
+    char b[128];
+    int n = snprintf(b, sizeof b, "signal %d addr %p\n", sig, si != NULL ? si->si_addr : NULL);
+    if (n > 0) { ssize_t w = write(fd, b, (size_t)n); (void)w; }
+    void *fr[48];
+    int k = backtrace(fr, 48);
+    backtrace_symbols_fd(fr, k, fd);
+    close(fd);
+  }
+  signal(sig, SIG_DFL);
+  raise(sig);
+}
 __attribute__((constructor)) static void scr_hm_install(void) {
   if (scr_hm_started) return;
   scr_hm_started = 1;
   clock_gettime(CLOCK_MONOTONIC, &scr_hm_t0);
   const char *p = getenv("SCR_HEAPMAP_OUT");
   scr_hm_f = p != NULL ? fopen(p, "w") : stderr;
+  if (getenv("SCR_HEAPMAP_CRASH") != NULL) {
+    struct sigaction ca;
+    memset(&ca, 0, sizeof ca);
+    ca.sa_sigaction = scr_hm_crash;
+    ca.sa_flags = SA_SIGINFO;
+    sigaction(SIGSEGV, &ca, NULL);
+    sigaction(SIGBUS, &ca, NULL);
+    sigaction(SIGABRT, &ca, NULL);
+  }
   sem_init(&scr_hm_sem, 0, 0);
   scr_hm_sample("B");
 #ifdef SCR_HEAPMAP_PLANT
