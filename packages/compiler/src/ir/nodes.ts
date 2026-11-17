@@ -1078,7 +1078,11 @@ export function isSupportedSetElem(t: IrType): boolean {
     // is what asks for it. That closure captures BOTH, so the pair is a
     // cycle through the set's element -- which the collector sees now that
     // a traced set visits its keys (scr_set_new_ref_traced).
-    t.kind === "promise"
+    t.kind === "promise" ||
+    // A FUNCTION value keys by reference identity (a closure is one heap object, and SameValueZero on a function is
+    // `===`): the registry idiom `Set<(tick: number) => void>` with add, delete and iteration. The closure can capture
+    // the set that holds it, so the set is traced on the key side like a promise set (traceAdapterC answers for func).
+    t.kind === "func"
   );
 }
 

@@ -379,6 +379,11 @@ export function traceAdapter(host: ShapeHost, t: IrType): string | null {
       if (traceAdapter(host, t.elem) === null) return null;
       host.declare(`declare void @scr_arr_trace_v(ptr, ptr, ptr)`);
       return "@scr_arr_trace_v";
+    // A Set of function values: emit-shapes.ts's row.
+    case "set":
+      if (t.elem.kind !== "func") return null;
+      host.declare(`declare void @scr_map_trace_v(ptr, ptr, ptr)`);
+      return "@scr_map_trace_v";
     default:
       return null;
   }
