@@ -16346,6 +16346,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25551-for-in-over-an-any-value-lists-keys-in-the-engines-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/25551-for-in-over-an-any-value-lists-keys-in-the-engines-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25552-for-in-over-class-instances-and-functions-boxed-as-any.ts": {
+   "order": [
+    "<repo>/tests/corpus/25552-for-in-over-class-instances-and-functions-boxed-as-any.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25553-for-in-over-inherited-keys-and-a-mutating-loop.ts": {
+   "order": [
+    "<repo>/tests/corpus/25553-for-in-over-inherited-keys-and-a-mutating-loop.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25554-for-in-over-typed-non-record-receivers-and-errors.ts": {
+   "order": [
+    "<repo>/tests/corpus/25554-for-in-over-typed-non-record-receivers-and-errors.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25555-for-in-over-a-buffer-lists-the-prototype-methods-after-the-indices.ts": {
+   "order": [
+    "<repo>/tests/corpus/25555-for-in-over-a-buffer-lists-the-prototype-methods-after-the-indices.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2556-crypto-introspection.ts": {
    "order": [
     "<repo>/tests/corpus/2556-crypto-introspection.ts"
