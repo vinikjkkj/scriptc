@@ -253,7 +253,8 @@ export function funcObjectPropOf(L: Lowerer, expr: ts.PropertyAccessExpression, 
   const recvType = L.typeOf(recv);
   const mappedFunc = L.mapTypeOf(recvType)?.kind === "func";
   const functionInterface = L.checker.typeToString(recvType) === "Function";
-  if (!mappedFunc && !(member === "name" && functionInterface)) return null;
+  const callable = member === "name" && L.checker.getCallSignatures(recvType).length > 0;
+  if (!mappedFunc && !(member === "name" && functionInterface) && !callable) return null;
   if (isEffectFree(recv)) {
     const c = creationOf(L, recv, new Set<ts.Symbol>());
     if (c !== null) {
@@ -268,9 +269,6 @@ export function funcObjectPropOf(L: Lowerer, expr: ts.PropertyAccessExpression, 
   // NamedEvaluation site answers its own name). `x.constructor.name` keeps its own lowering (the dyn class value).
   const inner = peel(recv);
   if (ts.isPropertyAccessExpression(inner) && inner.name.text === "constructor") return null;
-  // An accessor function read off a property descriptor (`d.get!.name`) is named "get x" in JS, and the accessor closures this build mints carry no
-  // such name (the dyn answer is ""), so that read keeps its SC2020 instead of answering wrongly.
-  if (ts.isPropertyAccessExpression(inner) && (inner.name.text === "get" || inner.name.text === "set")) return null;
   const value = L.lowerExpr(recv);
   const boxed: IrExpr = value.type.kind === "dyn" ? value : { kind: "dynFrom", value, type: DYN, loc };
   const read: IrExpr = { kind: "dynKeyGet", key: { kind: "strLit", value: "name", type: STRING, loc }, value: boxed, type: DYN, loc };

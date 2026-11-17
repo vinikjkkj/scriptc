@@ -357,12 +357,35 @@ typedef struct DynProtoFn {
   int kind; /* 0 method, 1 getter, 2 setter */
   const char *name;
   size_t len;
+  int isstatic; /* a STATIC accessor of the class value (no receiver check: the class value is the receiver) */
+  char *jsname; /* an accessor's JS name, "get x" / "set x"; NULL for a method */
   struct DynProtoFn *next;
 } DynProtoFn;
 static DynProtoFn *dyn_proto_fns = NULL;
 
+static const ScrDynClassMember *dyn_class_static(const ScrDynClass *cls, const char *k, size_t n);
+static const char *dyn_accessor_name(const ScrDyn *d) {
+  const DynProtoFn *w = (const DynProtoFn *)(const void *)scr_dyn_fn_clo(d);
+  return w->jsname;
+}
+
 static ScrDyn *dyn_proto_method_thunk(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
   const DynProtoFn *w = (const DynProtoFn *)clo;
+  if (w->isstatic) {
+    /* the class value's own static accessor: the getter reads the row, the setter goes through the class's %dynStaticSet */
+    if (w->kind == 1) return w->row->get(NULL);
+    const ScrDynClassMember *ss = dyn_class_static(w->idesc, "%dynStaticSet", 13);
+    if (ss == NULL || ss->call == NULL) return scr_dyn_retain(scr_dyn_undefined());
+    ScrStr *ks = scr_str_new(w->name, w->len);
+    ScrDyn *kd = scr_dyn_new_str(ks);
+    scr_str_release(ks);
+    ScrDyn *av[2] = { kd, argc > 0 ? args[0] : scr_dyn_undefined() };
+    ScrDyn *rr = ss->call(NULL, av, 2, "a static write");
+    scr_dyn_release(kd);
+    if (rr == NULL) return NULL;
+    scr_dyn_release(rr);
+    return scr_dyn_retain(scr_dyn_undefined());
+  }
   ScrDyn *recv = scr_dyn_this_get(); /* +1 */
   ScrDyn *r = NULL;
   if (recv->kind == SCR_DYN_OBJINST && scr_dyn_objinst_is(recv, w->idesc->pre, w->idesc->post)) {
@@ -394,9 +417,9 @@ static ScrDyn *dyn_proto_method_thunk(ScrClosure *clo, ScrDyn *const *args, size
   return r;
 }
 
-static ScrDyn *dyn_proto_method_value(const ScrDynClass *idesc, const ScrDynClassMember *row, int kind, const char *name, size_t len) {
+static ScrDyn *dyn_proto_fn_value(const ScrDynClass *idesc, const ScrDynClassMember *row, int kind, const char *name, size_t len, int isstatic) {
   DynProtoFn *w = dyn_proto_fns;
-  while (w != NULL && !(w->idesc == idesc && w->row == row && w->kind == kind && w->len == len && memcmp(w->name, name, len) == 0)) w = w->next;
+  while (w != NULL && !(w->idesc == idesc && w->row == row && w->kind == kind && w->len == len && w->isstatic == isstatic && memcmp(w->name, name, len) == 0)) w = w->next;
   if (w == NULL) {
     w = (DynProtoFn *)calloc(1, sizeof *w);
     if (w == NULL) scr_trap("scriptc: out of memory\n");
@@ -406,10 +429,23 @@ static ScrDyn *dyn_proto_method_value(const ScrDynClass *idesc, const ScrDynClas
     w->kind = kind;
     w->name = name;
     w->len = len;
+    w->isstatic = isstatic;
+    if (kind != 0) {
+      w->jsname = (char *)malloc(len + 5);
+      if (w->jsname == NULL) scr_trap("scriptc: out of memory\n");
+      memcpy(w->jsname, kind == 1 ? "get " : "set ", 4);
+      memcpy(w->jsname + 4, name, len);
+      w->jsname[len + 4] = '\0';
+      w->name = w->jsname + 4; /* the caller's key may live in a transient array */
+      scr_dyn_accessor_name_fn = dyn_accessor_name;
+    }
     w->next = dyn_proto_fns;
     dyn_proto_fns = w;
   }
-  return scr_dyn_new_func_src(&w->clo, dyn_proto_method_thunk, 0, "()", row != NULL ? row->name : name, NULL);
+  return scr_dyn_new_func_src(&w->clo, dyn_proto_method_thunk, 0, "()", kind != 0 ? scr_dyn_accessor_name_mark : (row != NULL ? row->name : name), NULL);
+}
+static ScrDyn *dyn_proto_method_value(const ScrDynClass *idesc, const ScrDynClassMember *row, int kind, const char *name, size_t len) {
+  return dyn_proto_fn_value(idesc, row, kind, name, len, 0);
 }
 
 static const ScrDynClassMember *dyn_row_in(const ScrDynClass *c, const char *k, size_t n) {
@@ -1303,6 +1339,18 @@ static ScrDyn *dyn_cls_impl_prototype(const ScrDynClass *cls) {
   return P;
 }
 
+static int dyn_cls_impl_static_accessor(const ScrDyn *v, const char *key, size_t key_len, ScrDyn **getter, ScrDyn **setter) {
+  if (dyn_cls_eval_inner(v) != NULL) return 0;
+  const ScrDynClass *cls = dyn_cls_impl_of_value(v);
+  if (cls == NULL) return 0;
+  const ScrDynClassMember *m = dyn_class_static(cls, key, key_len);
+  if (m == NULL || (m->accl & 1u) == 0) return 0;
+  const char *kname = m->name;
+  if ((m->accl & 0x10u) == 0 && m->get != NULL) *getter = dyn_proto_fn_value(cls, m, 1, kname, m->len, 1);
+  if ((m->accl & 0x12u) != 0) *setter = dyn_proto_fn_value(cls, m, 2, kname, m->len, 1);
+  return 1;
+}
+
 static const ScrDynClassOps dyn_cls_ops_impl = {
   dyn_cls_impl_box, dyn_cls_impl_of_value,
   dyn_cls_impl_err_get, dyn_cls_impl_err_set, dyn_cls_impl_err_has, dyn_cls_impl_err_delete,
@@ -1317,6 +1365,7 @@ static const ScrDynClassOps dyn_cls_ops_impl = {
   dyn_cls_objinst_proto_keys,
   dyn_cls_impl_box,
   dyn_cls_impl_prototype,
+  dyn_cls_impl_static_accessor,
 };
 
 void scr_dyn_class_install(void) { scr_dyn_class_ops = &dyn_cls_ops_impl; }

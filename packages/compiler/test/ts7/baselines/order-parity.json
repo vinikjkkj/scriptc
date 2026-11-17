@@ -16268,6 +16268,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25535-function-text-follows-a-function-through-a-converted-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/25535-function-text-follows-a-function-through-a-converted-slot.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25536-object-literal-accessor-functions-are-named-get-and-set.ts": {
+   "order": [
+    "<repo>/tests/corpus/25536-object-literal-accessor-functions-are-named-get-and-set.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25537-class-accessor-descriptor-on-the-prototype.ts": {
+   "order": [
+    "<repo>/tests/corpus/25537-class-accessor-descriptor-on-the-prototype.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25538-class-static-accessor-descriptor.ts": {
+   "order": [
+    "<repo>/tests/corpus/25538-class-static-accessor-descriptor.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25539-inherited-class-accessor-is-not-an-own-descriptor.ts": {
+   "order": [
+    "<repo>/tests/corpus/25539-inherited-class-accessor-is-not-an-own-descriptor.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2554-generics-frontier-mix.ts": {
    "order": [
     "<repo>/tests/corpus/2554-generics-frontier-mix.ts"

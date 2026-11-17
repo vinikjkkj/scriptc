@@ -2370,6 +2370,8 @@ const char scr_dyn_bound_name_mark[] = "\x01bound-fn-name";
  * which installs it the first time a bound box is minted; a program that never
  * binds never links it. */
 const char *(*scr_dyn_bound_name_fn)(const ScrDyn *d) = NULL;
+const char scr_dyn_accessor_name_mark[] = "\001accessor-fn-name";
+const char *(*scr_dyn_accessor_name_fn)(const ScrDyn *d) = NULL;
 /* The interned spelling of "bound " x depth + base: a bound function's name is computed per value, and the answer is a borrowed `const char *`
  * like every other name, so the few distinct spellings (one per bound target name and depth) live for the whole run. */
 typedef struct ScrBoundName {
@@ -2443,6 +2445,7 @@ __attribute__((noinline)) const char *scr_dyn_fn_name(const ScrDyn *d) {
   const ScrFnDesc *desc = scr_dyn_fn_desc(d);
   const char *n = scr_rva_str(desc->name);
   if (n == NULL && (desc->arity & (SCR_FNK_WRAP_MASK << SCR_FNK_SHIFT)) != 0) return scr_fn_wrapper_name(scr_dyn_fn_clo(d));
+  if (n == scr_dyn_accessor_name_mark) return scr_dyn_accessor_name_fn(d);
   return n == scr_dyn_bound_name_mark ? scr_dyn_bound_name_fn(d) : n;
 }
 const char *scr_dyn_fn_src_of(const ScrDyn *d) { return scr_dyn_fn_src(d); }

@@ -183,6 +183,12 @@ ScrDyn *scr_dyn_get_own_desc(ScrDyn *v, ScrStr *key) {
         /* a class's static: a method is non-enumerable, a static FIELD is an ordinary data property; the class unit's own enumeration
          * says which names are the enumerable ones */
         if (table != NULL) scr_dyn_release(table);
+        if (scr_dyn_class_ops->class_static_accessor != NULL) {
+          ScrDyn *g = NULL, *st = NULL;
+          if (scr_dyn_class_ops->class_static_accessor(v, k, kl, &g, &st) == 1) {
+            return gopd_accessor(g != NULL ? g : scr_dyn_retain(scr_dyn_undefined()), st != NULL ? st : scr_dyn_retain(scr_dyn_undefined()), false, true);
+          }
+        }
         ScrDyn *val = scr_dyn_fn_get(v, k, kl);
         if (val == NULL) return NULL;
         bool enumerable = false;

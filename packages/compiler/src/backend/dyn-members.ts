@@ -522,6 +522,7 @@ export function dynStaticTable(
       if (c !== cls && entry.name.startsWith("%")) continue;
       // `get:` a static getter (non-enumerable, like a class accessor),
       // `field:` a static field read (an own ENUMERABLE data property).
+      if (entry.name.startsWith("set:")) continue; // the setter half of an accessor pair: it only marks the getter row (sSetter below)
       const isField = entry.name.startsWith("field:");
       const accessor = isField || entry.name.startsWith("get:");
       const name = accessor ? entry.name.slice(isField ? 6 : 4) : entry.name;

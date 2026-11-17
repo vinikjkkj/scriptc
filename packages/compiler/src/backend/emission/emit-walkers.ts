@@ -4721,6 +4721,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
     if (existing) return existing;
     const name = E.namer.name("sc_dfa", key, E.dynFuncAdapters.size);
     E.dynFuncAdapters.set(key, name);
+    E.fnCodes.set(name, (E.fnCodes.get(name) ?? 0) | 0x40); /* a name-table WRAPPER row: the adapter's name is the wrapped function's (SCR_FNK_ADAPTER) */
     // RC-audit per-SITE attribution: an adapter has no source position of
     // its own -- its identity is the target signature it adapts to.
     if (rcSitesRequested()) E.closureSites.set(name, `<dyn fn adapter to ${key}>`);
