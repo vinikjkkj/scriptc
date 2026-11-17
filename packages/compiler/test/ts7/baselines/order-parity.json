@@ -28842,6 +28842,36 @@
     "<repo>/tests/corpus/25665-a-socket-data-listener-declared-string-or-buffer.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25666-a-literal-discriminated-by-a-union-typed-key-builds-the-arm-the-key-names.ts": {
+   "order": [
+    "<repo>/tests/corpus/25666-a-literal-discriminated-by-a-union-typed-key-builds-the-arm-the-key-names.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25667-a-discriminant-union-literal-evaluates-its-properties-once-in-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/25667-a-discriminant-union-literal-evaluates-its-properties-once-in-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25668-a-discriminant-union-literal-with-optional-and-nested-arm-values.ts": {
+   "order": [
+    "<repo>/tests/corpus/25668-a-discriminant-union-literal-with-optional-and-nested-arm-values.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25669-a-union-typed-discriminant-with-three-arms-and-a-narrowing-reader.ts": {
+   "order": [
+    "<repo>/tests/corpus/25669-a-union-typed-discriminant-with-three-arms-and-a-narrowing-reader.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25675-promise-resolve-over-a-void-or-promise-result-passes-the-promise-through.ts": {
+   "order": [
+    "<repo>/tests/corpus/25675-promise-resolve-over-a-void-or-promise-result-passes-the-promise-through.ts"
+   ],
+   "diags": []
   }
  }
 }
