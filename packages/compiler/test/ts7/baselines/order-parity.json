@@ -28806,6 +28806,18 @@
     "<repo>/tests/corpus/25548-a-cast-of-an-error-to-a-record-lists-the-errors-own-keys.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25654-a-conditional-spread-with-properties-on-both-arms-builds-the-keys-of-the-arm-taken.ts": {
+   "order": [
+    "<repo>/tests/corpus/25654-a-conditional-spread-with-properties-on-both-arms-builds-the-keys-of-the-arm-taken.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25655-a-conditional-spread-carrying-several-properties-against-an-empty-arm-keeps-their-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/25655-a-conditional-spread-carrying-several-properties-against-an-empty-arm-keeps-their-order.ts"
+   ],
+   "diags": []
   }
  }
 }
