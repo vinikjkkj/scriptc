@@ -229,6 +229,29 @@ SCR_STRCEN_SHARED long long scr_strcen_walk_phys[SCR_STRCEN_WALKSETS] = {0};
 SCR_STRCEN_SHARED long long scr_strcen_walk_len_sum[SCR_STRCEN_WALKSETS] = {0};
 SCR_STRCEN_SHARED long long scr_strcen_walk_len_max[SCR_STRCEN_WALKSETS] = {0};
 SCR_STRCEN_SHARED long long scr_strcen_walk_at_n[SCR_STRCEN_WALKSETS] = {0};
+/* Live PHYSICAL bytes the instrument's own books held when the walk ran, so the reader can audit that the peak walk is within its band of the peak. */
+SCR_STRCEN_SHARED long long scr_strcen_walk_at_phys[SCR_STRCEN_WALKSETS] = {0};
+/* Strings whose `cap` field is not a plausible capacity (> 2^30), counted by the walk, with the first one's shape. */
+SCR_STRCEN_SHARED long long scr_strcen_odd_n[SCR_STRCEN_WALKSETS] = {0};
+SCR_STRCEN_SHARED long long scr_strcen_odd_len[SCR_STRCEN_WALKSETS] = {0}, scr_strcen_odd_cap[SCR_STRCEN_WALKSETS] = {0}, scr_strcen_odd_rc[SCR_STRCEN_WALKSETS] = {0};
+SCR_STRCEN_SHARED char scr_strcen_odd_sample[SCR_STRCEN_WALKSETS][48] = {{0}};
+/* THE LARGE STRINGS (malloc-backed: beyond the pool/arena class range) of each walk, largest first, and who points at them. */
+#define SCR_STRCEN_BIGN 64
+typedef struct {
+  const void *p; long long len, cap, rc, phys; unsigned long long h; char sample[48];
+  unsigned nhold; unsigned long long hold[4]; unsigned char holdr[4]; unsigned char hctx[4][48];
+} ScrStrCenBig;
+SCR_STRCEN_SHARED ScrStrCenBig scr_strcen_big[SCR_STRCEN_WALKSETS][SCR_STRCEN_BIGN];
+SCR_STRCEN_SHARED long long scr_strcen_big_n[SCR_STRCEN_WALKSETS] = {0}, scr_strcen_big_all_n[SCR_STRCEN_WALKSETS] = {0}, scr_strcen_big_all_phys[SCR_STRCEN_WALKSETS] = {0};
+SCR_STRCEN_SHARED long long scr_strcen_big_shared[SCR_STRCEN_WALKSETS] = {0};
+/* The scan's own accounting (a scan that found nothing must be told apart from one that did not run). */
+SCR_STRCEN_SHARED long long scr_strcen_scan_bytes[SCR_STRCEN_WALKSETS] = {0}, scr_strcen_scan_hits[SCR_STRCEN_WALKSETS] = {0}, scr_strcen_scan_regions[SCR_STRCEN_WALKSETS] = {0};
+/* The arena chunks of each walk: how many live strings sit in each, in bytes. */
+#define SCR_STRCEN_CHUNKN 512
+typedef struct { const void *base; long long carved, live_n, live_bytes, free_n, free_bytes; } ScrStrCenChunk;
+SCR_STRCEN_SHARED ScrStrCenChunk scr_strcen_chunk[SCR_STRCEN_WALKSETS][SCR_STRCEN_CHUNKN];
+SCR_STRCEN_SHARED long long scr_strcen_chunk_n[SCR_STRCEN_WALKSETS] = {0};
+SCR_STRCEN_SHARED long long scr_strcen_chunk_plant_ok[SCR_STRCEN_WALKSETS] = {0};
 
 SCR_STRCEN_SHARED const void *scr_strcen_ptbl[SCR_STRCEN_PSLOTS] = {0};
 
@@ -348,7 +371,12 @@ SCR_STRCEN_FN void scr_strcen_born(const void *p, long long len, long long cap) 
     scr_strcen_peak_ord = scr_strcen_alloc_total;
     memcpy(scr_strcen_peak_hist, scr_strcen_hist, sizeof scr_strcen_peak_hist);
     if (scr_strcen_live_phys > scr_strcen_walk_at && scr_strcen_walk_hook) {
-      scr_strcen_walk_at = scr_strcen_live_phys + scr_strcen_live_phys / 4 + (1 << 20);
+      /* 1/8 + 8 KiB, not 1/4 + 1 MiB. The 1 MiB slack was the bug: the first
+       * birth walked at ~272 B and set the next threshold to ~1.05 MB, which
+       * is ABOVE the whole REST population (peak 1,041,776 B), so the peak
+       * walk never ran and the reader's audit refused the report. The band
+       * is printed per walk (atPhys) and audited against peakPhys. */
+      scr_strcen_walk_at = scr_strcen_live_phys + scr_strcen_live_phys / 8 + 8192;
       scr_strcen_walk_due = 1;
     }
   }
@@ -393,12 +421,13 @@ SCR_STRCEN_FN void scr_strcen_report(void) {
         fprintf(f,
                 "STRCEN-WALK %d walks=%lld n=%lld atLiveN=%lld rcSum=%lld "
                 "rcMax=%lld distinct=%lld dupBytes=%lld ascii=%lld phys=%lld "
-                "lenSum=%lld lenMax=%lld\n",
+                "lenSum=%lld lenMax=%lld atPhys=%lld oddCap=%lld\n",
                 w, scr_strcen_walks, scr_strcen_walk_n[w], scr_strcen_walk_at_n[w],
                 scr_strcen_walk_rc_sum[w], scr_strcen_walk_rc_max[w],
                 scr_strcen_walk_distinct[w], scr_strcen_walk_dup_bytes[w],
                 scr_strcen_walk_ascii[w], scr_strcen_walk_phys[w],
-                scr_strcen_walk_len_sum[w], scr_strcen_walk_len_max[w]);
+                scr_strcen_walk_len_sum[w], scr_strcen_walk_len_max[w],
+                scr_strcen_walk_at_phys[w], scr_strcen_odd_n[w]);
       }
     }
     {
@@ -409,6 +438,30 @@ SCR_STRCEN_FN void scr_strcen_report(void) {
                   w, j, scr_strcen_top[w][j].n, scr_strcen_top[w][j].bytes,
                   scr_strcen_top[w][j].len, scr_strcen_top[w][j].cap,
                   scr_strcen_top[w][j].sample);
+        }
+      }
+    }
+    {
+      int w, j, q;
+      for (w = 0; w < SCR_STRCEN_WALKSETS; w++) {
+        fprintf(f, "STRCEN-BIGSUM %d n=%lld phys=%lld shared=%lld listed=%lld scanBytes=%lld scanHits=%lld scanRegions=%lld\n", w,
+                scr_strcen_big_all_n[w], scr_strcen_big_all_phys[w], scr_strcen_big_shared[w], scr_strcen_big_n[w],
+                scr_strcen_scan_bytes[w], scr_strcen_scan_hits[w], scr_strcen_scan_regions[w]);
+        if (scr_strcen_odd_n[w] > 0)
+          fprintf(f, "STRCEN-ODD %d n=%lld len=%lld cap=%lld rc=%lld |%s|\n", w, scr_strcen_odd_n[w], scr_strcen_odd_len[w], scr_strcen_odd_cap[w], scr_strcen_odd_rc[w], scr_strcen_odd_sample[w]);
+        for (j = 0; j < (int)scr_strcen_big_n[w]; j++) {
+          const ScrStrCenBig *b = &scr_strcen_big[w][j];
+          fprintf(f, "STRCEN-BIG %d %d len=%lld cap=%lld rc=%lld phys=%lld h=%llx nhold=%u |%s|\n", w, j, b->len, b->cap, b->rc, b->phys, b->h, b->nhold, b->sample);
+          for (q = 0; q < (int)b->nhold && q < 4; q++) {
+            int z;
+            fprintf(f, "STRCEN-HOLD %d %d %d region=%d addr=%llx ctx=", w, j, q, (int)b->holdr[q], b->hold[q]);
+            for (z = 0; z < 48; z++) fprintf(f, "%02x", b->hctx[q][z]);
+            fprintf(f, "\n");
+          }
+        }
+        for (j = 0; j < (int)scr_strcen_chunk_n[w]; j++) {
+          const ScrStrCenChunk *c = &scr_strcen_chunk[w][j];
+          fprintf(f, "STRCEN-CHUNK %d %d base=%llx carved=%lld liveN=%lld liveB=%lld freeN=%lld freeB=%lld\n", w, j, (unsigned long long)(size_t)c->base, c->carved, c->live_n, c->live_bytes, c->free_n, c->free_bytes);
         }
       }
     }

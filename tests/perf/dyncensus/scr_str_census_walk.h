@@ -141,6 +141,159 @@ static void scr_strcen_walk_top(int w) {
   }
 }
 
+
+#include <fcntl.h>
+#include <unistd.h>
+
+/* ── the large-string ledger, the arena-chunk ledger and the holder scan ── */
+
+/* Which arena chunk (index into scr_str_ar_index) a block pointer is in, or -1. */
+static long scr_strcen_chunk_idx(const void *p) {
+  size_t lo = 0, hi = scr_str_ar_nindex;
+  while (lo < hi) {
+    size_t mid = lo + (hi - lo) / 2u;
+    const unsigned char *base = (const unsigned char *)(const void *)scr_str_ar_index[mid];
+    if ((const unsigned char *)p < base) { hi = mid; continue; }
+    if ((const unsigned char *)p >= base + SCR_STR_ARENA_CHUNK) { lo = mid + 1u; continue; }
+    return (long)mid;
+  }
+  return -1;
+}
+
+static void scr_strcen_chunks(int w) {
+  long i, n = (long)scr_str_ar_nindex;
+  int c;
+  if (n > SCR_STRCEN_CHUNKN) n = SCR_STRCEN_CHUNKN;
+  scr_strcen_chunk_n[w] = n;
+  for (i = 0; i < n; i++) {
+    ScrStrCenChunk *k = &scr_strcen_chunk[w][i];
+    k->base = scr_str_ar_index[i];
+    k->carved = (long long)scr_str_ar_index[i]->carved;
+    k->live_n = k->live_bytes = k->free_n = k->free_bytes = 0;
+  }
+  /* the live strings, from the census's own pointer table */
+  for (i = 0; i < (long)SCR_STRCEN_PSLOTS; i++) {
+    const ScrStr *s = (const ScrStr *)scr_strcen_ptbl[i];
+    long ci;
+    if (!s) continue;
+    ci = scr_strcen_chunk_idx(s);
+    if (ci < 0 || ci >= n) continue;
+    scr_strcen_chunk[w][ci].live_n++;
+    scr_strcen_chunk[w][ci].live_bytes += (long long)scr_pool_bytes(sizeof(ScrStr) + (size_t)s->cap + 1u);
+  }
+  /* the blocks the arena's own free lists hold */
+  for (c = 1; c <= SCR_POOL_CLASSES; c++) {
+    void *b = scr_str_ar_free[c];
+    while (b != NULL) {
+      long ci = scr_strcen_chunk_idx(b);
+      if (ci >= 0 && ci < n) {
+        scr_strcen_chunk[w][ci].free_n++;
+        scr_strcen_chunk[w][ci].free_bytes += (long long)c * (long long)SCR_POOL_GRAIN;
+      }
+      { void *nx; __builtin_memcpy(&nx, b, sizeof nx); b = nx; }
+    }
+  }
+}
+
+/* A tiny open-addressing set of the addresses the scan looks for. */
+#define SCR_STRCEN_TSET 512u
+static unsigned long long scr_strcen_tset_k[SCR_STRCEN_TSET];
+static unsigned short scr_strcen_tset_v[SCR_STRCEN_TSET];
+static void scr_strcen_tset_add(unsigned long long k, unsigned short v) {
+  unsigned j = (unsigned)((k * 0x9E3779B97F4A7C15ULL) >> 40) & (SCR_STRCEN_TSET - 1u);
+  for (unsigned t = 0; t < SCR_STRCEN_TSET; t++, j = (j + 1u) & (SCR_STRCEN_TSET - 1u)) {
+    if (scr_strcen_tset_k[j] == 0) { scr_strcen_tset_k[j] = k; scr_strcen_tset_v[j] = v; return; }
+    if (scr_strcen_tset_k[j] == k) return;
+  }
+}
+static int scr_strcen_tset_find(unsigned long long k) {
+  unsigned j = (unsigned)((k * 0x9E3779B97F4A7C15ULL) >> 40) & (SCR_STRCEN_TSET - 1u);
+  for (unsigned t = 0; t < SCR_STRCEN_TSET; t++, j = (j + 1u) & (SCR_STRCEN_TSET - 1u)) {
+    if (scr_strcen_tset_k[j] == k) return (int)scr_strcen_tset_v[j];
+    if (scr_strcen_tset_k[j] == 0) return -1;
+  }
+  return -1;
+}
+
+static char scr_strcen_maps_buf[1 << 18];
+
+/* Word scan of every readable-writable mapping for a pointer to one of the large strings of walk `w`
+ * (the string address itself, or its data[] address). The census's own tables are excluded by address, and so is this
+ * function's frame. Allocates nothing. Region codes: 1 [heap], 2 anonymous mmap, 3 file-backed (binary data/bss or a
+ * library), 4 [stack]. */
+static void scr_strcen_holders(int w) {
+  int fd = open("/proc/self/maps", O_RDONLY);
+  long n = 0, got;
+  char *b = scr_strcen_maps_buf, *q, *end;
+  unsigned long long skip_lo[6], skip_hi[6];
+  unsigned long long fr = (unsigned long long)(size_t)__builtin_frame_address(0);
+  int nskip = 0, j;
+  unsigned long long off = (unsigned long long)scr_strcen_off_data;
+  scr_strcen_scan_bytes[w] = scr_strcen_scan_hits[w] = scr_strcen_scan_regions[w] = 0;
+  if (fd < 0) return;
+  while ((got = (long)read(fd, b + n, sizeof scr_strcen_maps_buf - 1 - (size_t)n)) > 0) n += got;
+  close(fd);
+  b[n] = '\0';
+  memset(scr_strcen_tset_k, 0, sizeof scr_strcen_tset_k);
+  for (j = 0; j < (int)scr_strcen_big_n[w]; j++) {
+    unsigned long long a = (unsigned long long)(size_t)scr_strcen_big[w][j].p;
+    scr_strcen_big[w][j].nhold = 0;
+    scr_strcen_tset_add(a, (unsigned short)j);
+    scr_strcen_tset_add(a + off, (unsigned short)j);
+  }
+#define SCR_STRCEN_SKIP(x) do { skip_lo[nskip] = (unsigned long long)(size_t)&(x); skip_hi[nskip] = skip_lo[nskip] + sizeof(x); nskip++; } while (0)
+  SCR_STRCEN_SKIP(scr_strcen_ptbl);
+  SCR_STRCEN_SKIP(scr_strcen_htbl);
+  SCR_STRCEN_SKIP(scr_strcen_hcount);
+  SCR_STRCEN_SKIP(scr_strcen_big);
+  SCR_STRCEN_SKIP(scr_strcen_tset_k);
+  SCR_STRCEN_SKIP(scr_strcen_top);
+  for (q = b; q < b + n; q = end + 1) {
+    unsigned long long lo = 0, hi = 0, a;
+    char *p = q;
+    int region;
+    end = strchr(q, '\n');
+    if (!end) end = b + n;
+    for (; *p && *p != '-'; p++) { int d = *p <= '9' ? *p - '0' : (*p | 32) - 'a' + 10; lo = lo * 16u + (unsigned)d; }
+    if (*p == '-') p++;
+    for (; *p && *p != ' '; p++) { int d = *p <= '9' ? *p - '0' : (*p | 32) - 'a' + 10; hi = hi * 16u + (unsigned)d; }
+    while (*p == ' ') p++;
+    if (!(p[0] == 'r' && p[1] == 'w')) continue;
+    { /* skip to the path: perms, offset, dev, inode */
+      int f; char *r = p;
+      for (f = 0; f < 4 && r < end; f++) { while (r < end && *r != ' ') r++; while (r < end && *r == ' ') r++; }
+      if (r < end && *r == '[') {
+        if (r[1] == 'h') region = 1; else if (r[1] == 's') region = 4; else continue; /* vvar, vsyscall */
+      } else if (r < end && *r == '/') region = 3;
+      else region = 2;
+    }
+    scr_strcen_scan_regions[w]++;
+    for (a = lo; a + 8 <= hi; a += 8) {
+      unsigned long long v = *(const unsigned long long *)(size_t)a;
+      int t, k;
+      if (v < 4096ULL) continue;
+      t = scr_strcen_tset_find(v);
+      if (t < 0) continue;
+      for (k = 0; k < nskip; k++) if (a >= skip_lo[k] && a < skip_hi[k]) break;
+      if (k < nskip) continue;
+      if (a + 4096ULL > fr - 8192ULL && a < fr + 8192ULL) continue; /* this function's own frame */
+      scr_strcen_scan_hits[w]++;
+      {
+        ScrStrCenBig *bg = &scr_strcen_big[w][t];
+        unsigned h = bg->nhold++;
+        if (h < 4) {
+          bg->hold[h] = a;
+          bg->holdr[h] = (unsigned char)region;
+          if (a >= lo + 24 && a + 24 <= hi) memcpy(bg->hctx[h], (const void *)(size_t)(a - 24), 48);
+          else memset(bg->hctx[h], 0, 48);
+        }
+      }
+    }
+    scr_strcen_scan_bytes[w] += (long long)(hi - lo);
+  }
+#undef SCR_STRCEN_SKIP
+}
+
 static void scr_strcen_walk(int final) {
   unsigned i;
   int w = final ? 1 : 0;
@@ -149,6 +302,8 @@ static void scr_strcen_walk(int final) {
   memset(scr_strcen_htbl, 0, sizeof scr_strcen_htbl);
   memset(scr_strcen_hcount, 0, sizeof scr_strcen_hcount);
   for (i = 0; i < SCR_STRCEN_RCROWS; i++) scr_strcen_walk_rc[w][i] = 0;
+  scr_strcen_odd_n[w] = 0;
+  scr_strcen_big_n[w] = scr_strcen_big_all_n[w] = scr_strcen_big_all_phys[w] = scr_strcen_big_shared[w] = 0;
   for (i = 0; i < SCR_STRCEN_PSLOTS; i++) {
     const ScrStr *s = (const ScrStr *)scr_strcen_ptbl[i];
     long long cap, len, p;
@@ -159,6 +314,19 @@ static void scr_strcen_walk(int final) {
     rc = (unsigned long long)s->rc;
     cap = (long long)s->cap;
     len = (long long)s->len;
+    if (cap > (1LL << 30) || len > cap) {
+      /* NOT a capacity: a tag, or a string whose header the census books never saw change. Counted and sampled, not priced. */
+      if (scr_strcen_odd_n[w] == 0) {
+        size_t q, m = (size_t)s->len < 40u ? (size_t)s->len : 40u;
+        scr_strcen_odd_len[w] = len; scr_strcen_odd_cap[w] = cap; scr_strcen_odd_rc[w] = (long long)rc;
+        for (q = 0; q < m; q++) { unsigned char c = (unsigned char)s->data[q]; scr_strcen_odd_sample[w][q] = (c >= 0x21 && c < 0x7f && c != '|') ? (char)c : '.'; }
+        scr_strcen_odd_sample[w][m] = '\0';
+      }
+      scr_strcen_odd_n[w]++;
+      n++;
+      rcsum += (long long)rc;
+      continue;
+    }
     p = scr_strcen_phys_of_req((long long)sizeof(ScrStr) + cap + 1);
     n++;
     phys += p;
@@ -171,8 +339,31 @@ static void scr_strcen_walk(int final) {
       if ((unsigned char)s->data[j] >= 0x80) { pure = 0; break; }
     }
     if (pure) ascii++;
-    if (scr_strcen_hins(scr_strcen_chash(s->data, (size_t)len))) distinct++;
-    else dupb += p;
+    {
+      unsigned long long hh = scr_strcen_chash(s->data, (size_t)len);
+      if (scr_strcen_hins(hh)) distinct++;
+      else dupb += p;
+      if (scr_pool_bytes(sizeof(ScrStr) + (size_t)cap + 1u) > SCR_POOL_MAX) {
+        int q, pos = -1;
+        scr_strcen_big_all_n[w]++;
+        scr_strcen_big_all_phys[w] += p;
+        if (rc > 1) scr_strcen_big_shared[w]++;
+        for (q = 0; q < (int)scr_strcen_big_n[w]; q++) if (p > scr_strcen_big[w][q].phys) { pos = q; break; }
+        if (pos < 0 && scr_strcen_big_n[w] < SCR_STRCEN_BIGN) pos = (int)scr_strcen_big_n[w];
+        if (pos >= 0) {
+          int k2;
+          size_t m = (size_t)len < 40u ? (size_t)len : 40u, z;
+          int top = scr_strcen_big_n[w] < SCR_STRCEN_BIGN ? (int)scr_strcen_big_n[w] : SCR_STRCEN_BIGN - 1;
+          for (k2 = top; k2 > pos; k2--) scr_strcen_big[w][k2] = scr_strcen_big[w][k2 - 1];
+          scr_strcen_big[w][pos].p = s; scr_strcen_big[w][pos].len = len; scr_strcen_big[w][pos].cap = cap;
+          scr_strcen_big[w][pos].rc = (long long)rc; scr_strcen_big[w][pos].phys = p; scr_strcen_big[w][pos].h = hh;
+          scr_strcen_big[w][pos].nhold = 0;
+          for (z = 0; z < m; z++) { unsigned char c = (unsigned char)s->data[z]; scr_strcen_big[w][pos].sample[z] = (c >= 0x21 && c < 0x7f && c != '|') ? (char)c : '.'; }
+          scr_strcen_big[w][pos].sample[m] = '\0';
+          if (scr_strcen_big_n[w] < SCR_STRCEN_BIGN) scr_strcen_big_n[w]++;
+        }
+      }
+    }
   }
   scr_strcen_walks++;
   scr_strcen_walk_n[w] = n;
@@ -185,7 +376,12 @@ static void scr_strcen_walk(int final) {
   scr_strcen_walk_phys[w] = phys;
   scr_strcen_walk_len_sum[w] = lensum;
   scr_strcen_walk_len_max[w] = lenmax;
+  scr_strcen_walk_at_phys[w] = scr_strcen_live_phys;
   scr_strcen_walk_top(w);
+  scr_strcen_chunks(w);
+  /* The holder scan is O(mapped memory), so it runs on the final walk only; the large strings at exit are the large
+   * strings at the end of the run, and the reader prints that scope beside the result. */
+  if (final) scr_strcen_holders(w);
 }
 
 static void scr_strcen_walk_peak(void) { scr_strcen_walk(0); }

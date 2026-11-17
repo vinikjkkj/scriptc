@@ -612,7 +612,7 @@ function selfTest() {
 const RC_LABELS = ["1", "2", "3", "4", "5-8", "9-16", "17+"];
 
 export function strParse(text) {
-  const r = { layout: null, rows: new Map(), walk: [], rc: [], top: [], total: null };
+  const r = { layout: null, rows: new Map(), walk: [], rc: [], top: [], total: null, bigsum: [], big: [], hold: [], chunk: [], odd: [] };
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
     if (!line) continue;
@@ -633,6 +633,22 @@ export function strParse(text) {
       continue;
     }
     if (sp[0] === "STRCEN-TOTAL") { r.total = kv(sp.slice(1)); continue; }
+    if (sp[0] === "STRCEN-BIGSUM") { r.bigsum[+sp[1]] = kv(sp.slice(2)); continue; }
+    if (sp[0] === "STRCEN-ODD") { const m = /\|([^|]*)\|\s*$/.exec(line); r.odd[+sp[1]] = { ...kv(sp.slice(2).filter((x) => x.includes("="))), sample: m ? m[1] : "" }; continue; }
+    if (sp[0] === "STRCEN-BIG") {
+      const m = /\|([^|]*)\|\s*$/.exec(line);
+      const row = kv(sp.slice(3).filter((x) => x.includes("=")));
+      row.sample = m ? m[1] : "";
+      (r.big[+sp[1]] ||= [])[+sp[2]] = row;
+      continue;
+    }
+    if (sp[0] === "STRCEN-HOLD") {
+      const row = kv(sp.slice(4).filter((x) => x.includes("=")));
+      row.ctx = (/ctx=([0-9a-f]+)/.exec(line) || [])[1] || "";
+      ((r.hold[+sp[1]] ||= [])[+sp[2]] ||= []).push(row);
+      continue;
+    }
+    if (sp[0] === "STRCEN-CHUNK") { (r.chunk[+sp[1]] ||= []).push(kv(sp.slice(3))); continue; }
   }
   return r;
 }
@@ -715,6 +731,14 @@ export function strCheck(r) {
   if (w0 && w0.distinct > w0.n) bad.push(`distinct(${w0.distinct}) > n(${w0.n})`);
   if (w0 && w0.rcSum < w0.n) bad.push(`rcSum(${w0.rcSum}) < n(${w0.n}): a live string with no reference`);
   if (w0 && w0.lenSum > T.peakCap) bad.push(`the walk's lenSum(${w0.lenSum}) exceeds the peak capSum(${T.peakCap})`);
+  // 7. the peak walk is within its trigger band of the peak: the walk runs when live physical bytes cross a threshold that
+  //    grows by 1/8 + 8 KiB, and the snapshot band is 0.1% + 64 KiB, so the last walk of the run is at most that far below
+  //    the peak. A threshold with a megabyte of slack (the previous design) leaves a small population unwalked.
+  if (w0 && w0.atPhys !== undefined && T.peakPhys > w0.atPhys * 1.126 + 8192 + 66000 + T.peakPhys / 1000)
+    bad.push(`the peak walk ran at ${w0.atPhys} B live against a peak of ${T.peakPhys} B: it is not a walk of the peak population`);
+  // 8. the walk and the running books price the same population (strings whose cap is not a capacity are counted apart)
+  if (w0 && w0.atPhys !== undefined && !(w0.oddCap > 0) && w0.n > T.armN && Math.abs(w0.phys - w0.atPhys) > 0.02 * w0.atPhys + 4096)
+    bad.push(`the walk prices its strings at ${w0.phys} B and the running books say ${w0.atPhys} B: a string's cap changed after birth`);
   return bad;
 }
 
@@ -789,6 +813,25 @@ export function strRender(r) {
     }
     const d = tot - T.peakPhys;
     o.push(`${String(hdr).padStart(6)} ${n(tot).padStart(12)} ${n(d).padStart(12)} ${(100 * d / T.peakPhys).toFixed(2).padStart(9)}%   ${n(moved)}`);
+  }
+  for (const w of [0, 1]) {
+    const bs = r.bigsum[w];
+    if (!bs) continue;
+    o.push("");
+    o.push(`── LARGE STRINGS (malloc-backed), ${w === 0 ? "the peak walk" : "the exit walk"}: ${n(bs.n)} strings, ${n(bs.phys)} B, ${n(bs.shared)} shared (rc>1); ${n(bs.listed)} listed`);
+    if (w === 1) o.push(`   holder scan (exit walk only): ${n(bs.scanBytes)} B of rw memory in ${n(bs.scanRegions)} regions, ${n(bs.scanHits)} words point at a listed string`);
+    const odd = r.odd[w];
+    if (odd) o.push(`   ODD caps: ${n(odd.n)} string(s) whose cap field is not a capacity: len=${odd.len} cap=${odd.cap} rc=${odd.rc} |${odd.sample}|`);
+    for (const [j, b] of (r.big[w] || []).entries()) {
+      if (!b) continue;
+      const h = ((r.hold[w] || [])[j]) || [];
+      o.push(`   #${j} len=${b.len} cap=${b.cap} rc=${b.rc} phys=${b.phys} holders=${b.nhold}${h.length ? " [" + h.map((x) => `region${x.region}@${x.addr}`).join(" ") + "]" : ""}  |${b.sample}|`);
+    }
+    const ch = r.chunk[w] || [];
+    if (ch.length) {
+      o.push(`── STRING ARENA CHUNKS (${w === 0 ? "peak" : "exit"} walk): ${ch.length} chunk(s)`);
+      for (const c of ch) o.push(`   ${c.base} carved=${c.carved} live=${c.liveN} strings/${c.liveB} B, on the arena free lists=${c.freeN} blocks/${c.freeB} B`);
+    }
   }
   return o.join("\n");
 }
