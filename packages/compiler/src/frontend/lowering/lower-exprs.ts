@@ -11920,7 +11920,11 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
         // spread's own position (any position: they introduce one fresh
         // name, collision-fenced below). Everything else stays fenced.
         const cs = conditionalSpreadOf(prop.expression);
-        if (cs === "unsupported" || (cs && cs.props.length !== 1)) {
+        const gcs = conditionalSpreadEntriesOf(prop.expression);
+        // The general form (any number of properties on either arm, disjoint names, an unchangeable condition) is the field-by-field desugar's own; the
+        // other paths below keep their own single-property fences.
+        const generalCs = gcs !== null && gcs !== "unsupported" && (gcs.entries.length === 1 || immutableCondition(L, gcs.cond));
+        if (!generalCs && (cs === "unsupported" || (cs && cs.props.length !== 1))) {
           L.unsupported(
             "SC1090",
             prop,
@@ -13126,15 +13130,17 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       fields.some((x) => x.expl === true && !droppableStatic(x.value));
     for (const prop of expr.properties) {
       if (ts.isSpreadAssignment(prop)) {
-        const cs = conditionalSpreadOf(prop.expression);
-        if (cs && cs !== "unsupported") {
+        const gcs = conditionalSpreadEntriesOf(prop.expression);
+        if (gcs && gcs !== "unsupported" && (gcs.entries.length === 1 || immutableCondition(L, gcs.cond))) {
+         for (const ent of gcs.entries) {
+          const cs = { cond: gcs.cond, whenTrue: ent.whenTrue };
           // `...(c ? { k: v } : {})` — ONE conditional field at the
           // spread's own position: cond evaluates exactly once, `v` only
           // when the non-empty arm is taken (ternary arms are lazy), and
           // the empty arm holds the interned undefined arm — exactly the
           // omitted-optional-field representation, which is also why the
           // target field must be optional (tsc types the idiom that way).
-          const csProp = cs.props[0]!; // single-prop-checked in the fence pass
+          const csProp = ent.prop;
           const name = csProp.name.text;
           const fieldType = fieldTypes.get(name);
           if (!fieldType) {
@@ -13211,6 +13217,7 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
           } else {
             fields.push(merged);
           }
+         }
           continue;
         }
         // `{ ...base, ... }` — field-by-field copy of a known record
@@ -14291,6 +14298,65 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
       }
     }
     return { cond: e.condition, props, whenTrue: trueCarries };
+  }
+
+  /** The general conditional spread `...(c ? { a: 1, b: 2 } : { d: 3 })`: either arm may carry any number of plain properties (an arm may be empty), the
+   * two arms' names are disjoint, and each property is present exactly when `c` has the value its arm is under. Returns the condition and the entries in
+   * source order (true arm first, as the literal reads), "unsupported" for anything outside the idiom (a name in both arms, a computed key, a method or
+   * accessor, a non-literal arm), null when the source is no conditional. */
+  export function conditionalSpreadEntriesOf(expr: ts.Expression):
+    | { cond: ts.Expression; entries: { prop: CondSpreadProp; whenTrue: boolean }[] }
+    | "unsupported"
+    | null {
+    let e: ts.Expression = expr;
+    while (ts.isParenthesizedExpression(e)) e = e.expression;
+    if (!ts.isConditionalExpression(e)) return null;
+    const unwrap = (a: ts.Expression): ts.Expression => {
+      let x = a;
+      while (ts.isParenthesizedExpression(x)) x = x.expression;
+      return x;
+    };
+    const arms: [ts.Expression, boolean][] = [[unwrap(e.whenTrue), true], [unwrap(e.whenFalse), false]];
+    const entries: { prop: CondSpreadProp; whenTrue: boolean }[] = [];
+    const seen = new Set<string>();
+    for (const [arm, whenTrue] of arms) {
+      if (!ts.isObjectLiteralExpression(arm)) return "unsupported";
+      for (const p of arm.properties) {
+        if (
+          (ts.isPropertyAssignment(p) || ts.isShorthandPropertyAssignment(p)) &&
+          p.name && (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name))
+        ) {
+          if (seen.has(p.name.text)) return "unsupported";
+          seen.add(p.name.text);
+          entries.push({ prop: p as CondSpreadProp, whenTrue });
+        } else {
+          return "unsupported";
+        }
+      }
+    }
+    if (entries.length === 0) return "unsupported";
+    return { cond: e.condition, entries };
+  }
+
+  /** A condition whose value cannot change between two evaluations inside one literal: a `const` identifier (never reassigned), a literal, `!`, `===`/`!==`
+   * of such, `&&`/`||` of such. A conditional spread with several entries evaluates it once per entry. */
+  export function immutableCondition(L: Lowerer, n: ts.Expression): boolean {
+    let x = n;
+    while (ts.isParenthesizedExpression(x)) x = x.expression;
+    if (ts.isIdentifier(x)) {
+      const sym = L.checker.getSymbolAtLocation(x);
+      const d = sym ? L.checker.valueDeclarationOf(sym) : undefined;
+      return d !== undefined && ts.isVariableDeclaration(d) && (ts.getCombinedNodeFlags(d) & ts.NodeFlags.Const) !== 0;
+    }
+    if (ts.isLiteralExpression(x) || x.kind === ts.SyntaxKind.TrueKeyword || x.kind === ts.SyntaxKind.FalseKeyword || x.kind === ts.SyntaxKind.NullKeyword) return true;
+    if (ts.isPrefixUnaryExpression(x) && x.operator === ts.SyntaxKind.ExclamationToken) return immutableCondition(L, x.operand);
+    if (ts.isBinaryExpression(x)) {
+      const k = x.operatorToken.kind;
+      if (k === ts.SyntaxKind.EqualsEqualsEqualsToken || k === ts.SyntaxKind.ExclamationEqualsEqualsToken || k === ts.SyntaxKind.AmpersandAmpersandToken || k === ts.SyntaxKind.BarBarToken) {
+        return immutableCondition(L, x.left) && immutableCondition(L, x.right);
+      }
+    }
+    return false;
   }
 
 /** `{ ...idx, ...idx2 }` typed a DECLARED shape (no index signature) — the
