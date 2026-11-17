@@ -5298,6 +5298,13 @@ unsigned scr_fn_code_of(const void *fn);
 #define SCR_FNK_SHIFT 24
 #define SCR_FNK_SLOPPY 32u /* an ordinary function written in sloppy mode: it has own `arguments` and `caller` (null) */
 #define SCR_FNK_CODE_MASK 0x3fu
+/* Row-only markers (never part of the 6-bit kind code), the top two bits of a row's code (bits 30..31 of a descriptor's arity word). The entry
+ * point is a WRAPPER closure whose name is derived from the closure it wraps, at read time (scr_dyn_fn_name):
+ *   SCR_FNK_ADAPTER (01)   a lowerer function adapter (%fn.adapt.N.impl): the wrapped function is capture 0, and the name is that function's;
+ *   10                     a bound function over a TypeScript function (%bindthis.N without a receiver): the target is capture 0, "bound " + its name;
+ *   11                     a bound function that opens a receiver window: capture 0 is the receiver, the target is capture 1. */
+#define SCR_FNK_ADAPTER 0x40u
+#define SCR_FNK_WRAP_MASK 0xc0u
 
 /* Function.prototype.toString of a function VALUE (scr_fntext.c, linked only
  * when a program converts a function to a string: moduleUsesFnText). The
