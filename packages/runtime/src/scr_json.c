@@ -9691,7 +9691,7 @@ static void scr_dyn_obj_unset(ScrDyn *obj, const char *key, size_t key_len) {
           ScrDyn *hq = hid->v.obj.entries[hi].value;
           if (hq != NULL && hq->kind == SCR_DYN_ARR && hq->v.arr.len >= 7 && hq->v.arr.items[6]->kind == SCR_DYN_NUM && hq->v.arr.items[6]->v.num > (double)i) {
             /* REPLACE the position node, never edit it in place: a small integer is a shared immortal box */
-            ScrDyn *np = scr_dyn_new_num(hq->v.arr.items[6]->v.num - 1);
+            ScrDyn *np = scr_dyn_new_num_kept(hq->v.arr.items[6]->v.num - 1);
             ScrDyn *old_pos = hq->v.arr.items[6];
             hq->v.arr.items[6] = np;
             scr_dyn_release(old_pos);
@@ -9777,7 +9777,8 @@ static void scr_dyn_obj_put_hidden(ScrDyn *recv, const char *key, size_t key_len
     scr_dyn_arr_push(ent, scr_dyn_new_bool(lead));
     /* a redefinition of a hidden property keeps the position it had */
     if (old != NULL && old->kind == SCR_DYN_ARR && old->v.arr.len >= 7 && old->v.arr.items[6]->kind == SCR_DYN_NUM) hpos = old->v.arr.items[6]->v.num;
-    scr_dyn_arr_push(ent, scr_dyn_new_num(hpos));
+    /* the position is a small integer in practice (a member count), so it is the shared immortal box: one node per accessor was 32 B of every protobuf-style prototype */
+    scr_dyn_arr_push(ent, scr_dyn_new_num_kept(hpos));
   }
   scr_dyn_obj_set(scr_dyn_ext(recv)->hidden, key, key_len, ent); /* ownership moves in */
   /* …and CLAIM a position for a property that is enumerable and has none
