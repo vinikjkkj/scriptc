@@ -103,8 +103,10 @@ __attribute__((constructor)) static void scr_hm_install(void) {
   if (pthread_create(&th, NULL, scr_hm_thread, NULL) == 0) pthread_detach(th);
   atexit(scr_hm_report);
 }
-#ifdef _Exit
-#undef _Exit
-#endif
+/* process.exit lowers to _Exit, which skips atexit. The census headers redefine _Exit as a macro that writes THEIR report; this header must not clobber it
+ * (the first CI run did, and the census wrote nothing), so it only takes the name when no other header has. The sampler thread flushes every line, so the
+ * timeline survives an _Exit; only the final "E" sample and exit.xml are lost on that path. */
+#ifndef _Exit
 #define _Exit(c) (scr_hm_report(), _Exit(c))
+#endif
 #endif
