@@ -28806,6 +28806,66 @@
     "<repo>/tests/corpus/25548-a-cast-of-an-error-to-a-record-lists-the-errors-own-keys.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25630-order-fill-keeps-a-regex-first-used-only-on-the-cold-path.ts": {
+   "order": [
+    "<repo>/tests/corpus/25630-order-fill-keeps-a-regex-first-used-only-on-the-cold-path.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25631-order-fill-keeps-a-function-built-from-run-time-text.ts": {
+   "order": [
+    "<repo>/tests/corpus/25631-order-fill-keeps-a-function-built-from-run-time-text.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25632-order-fill-keeps-regex-exec-loops-and-last-index.ts": {
+   "order": [
+    "<repo>/tests/corpus/25632-order-fill-keeps-regex-exec-loops-and-last-index.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25633-order-fill-keeps-replace-and-split-with-callbacks.ts": {
+   "order": [
+    "<repo>/tests/corpus/25633-order-fill-keeps-replace-and-split-with-callbacks.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25634-order-fill-keeps-named-groups-and-lookbehind.ts": {
+   "order": [
+    "<repo>/tests/corpus/25634-order-fill-keeps-named-groups-and-lookbehind.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25635-order-fill-keeps-unicode-flag-and-property-escapes.ts": {
+   "order": [
+    "<repo>/tests/corpus/25635-order-fill-keeps-unicode-flag-and-property-escapes.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25636-order-fill-keeps-match-all-and-replace-all.ts": {
+   "order": [
+    "<repo>/tests/corpus/25636-order-fill-keeps-match-all-and-replace-all.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25637-order-fill-keeps-regex-flags-and-source.ts": {
+   "order": [
+    "<repo>/tests/corpus/25637-order-fill-keeps-regex-flags-and-source.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25638-order-fill-keeps-eval-text-that-only-the-cold-path-builds.ts": {
+   "order": [
+    "<repo>/tests/corpus/25638-order-fill-keeps-eval-text-that-only-the-cold-path-builds.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25639-order-fill-mixes-regex-eval-and-closures.ts": {
+   "order": [
+    "<repo>/tests/corpus/25639-order-fill-mixes-regex-eval-and-closures.ts"
+   ],
+   "diags": []
   }
  }
 }
