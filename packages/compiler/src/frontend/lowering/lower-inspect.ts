@@ -265,18 +265,36 @@ function symbolDescriptionSpelling(L: Lowerer, e: ts.Expression): string | null 
 
 /* ── type support ────────────────────────────────────────────────────── */
 
-/** The error-hierarchy gate: `info`'s instances render through the
- * runtime's name/message/code slots, which subclasses inherit — sound
- * only when NO descendant adds declared fields (they would be own
- * properties Node prints). */
+/** The user-declared fields of an error class that Node prints as own enumerable properties: the layout carries the builtin base's slots too (name, message, code, the `%` cells),
+ * which the runtime prints itself (or Node hides, like `name`), so those names are subtracted; #private fields are not properties at all. */
+function errorOwnFields(info: ClassInfo): { name: string; type: IrType }[] {
+  if (info.builtinError) return [];
+  let b: ClassInfo | null = info;
+  while (b !== null && !b.builtinError) b = b.base;
+  // `code` is the runtime slot the ScrError prefix stamps (a subclass's declared `code` is that same slot), so it prints from the runtime in its own place.
+  const builtin = new Set<string>(["name", "message", "code", ...(b === null ? [] : b.def.fields.map((f) => f.name))]);
+  return info.def.fields.filter((f) => !f.name.startsWith("#") && !f.name.startsWith("%") && !builtin.has(f.name));
+}
+
+/** Whether a field layout is one the error renderer can print by name and type alone: no absent-tracked or prototype-initialised slots (their presence is a run-time answer),
+ * no own method shadows, no run-time property table and no symbol-keyed or hidden-symbol fields. */
+function errorFieldsPlain(info: ClassInfo): boolean {
+  return (
+    info.hasPropsTable !== true &&
+    (info.symbolFields?.size ?? 0) === 0 &&
+    (info.hiddenSymbolFields?.size ?? 0) === 0 &&
+    (info.absentTrackedFields?.size ?? 0) === 0 &&
+    (info.absentInitFields?.size ?? 0) === 0 &&
+    info.def.fields.every((f) => parseOwnShadowField(f.name) === null)
+  );
+}
+
+/** The error-hierarchy gate: `info`'s instances render through the runtime's name/message/code slots, plus (insp.errorx) the entries of the DECLARED fields the compiler renders
+ * by type. A class with declared fields must have no subclass (the static type would hide a subclass's own fields), and a class without them only field-free subclasses. */
 function errorRenderable(info: ClassInfo): boolean {
-  // The builtin classes' name/message/code live in runtime slots (the
-  // ScrError prefix insp.error reads), not IR fields; only USER-declared
-  // fields are own properties the runtime rendering would miss. #private
-  // fields are NOT own properties — Node never prints them — so they
-  // don't disqualify.
-  if (!info.builtinError && info.def.fields.some((f) => !f.name.startsWith("#"))) return false;
-  return info.subclasses.every((s) => errorRenderable(s));
+  const own = errorOwnFields(info);
+  if (own.length > 0) return errorFieldsPlain(info) && info.subclasses.length === 0;
+  return info.subclasses.every((s) => errorOwnFields(s).length === 0 && errorRenderable(s));
 }
 
 function isErrorClass(L: Lowerer, className: string): boolean {
@@ -389,9 +407,14 @@ function inspectSupport(L: Lowerer, t: IrType, visiting: Set<string>, out: { rec
         return null;
       }
       if (isErrorClass(L, t.className)) {
-        return errorRenderable(info)
-          ? null
-          : "error subclasses with declared fields have no inspect lowering yet (the extra own properties are runtime-dynamic)";
+        if (!errorRenderable(info)) {
+          return "error subclasses whose declared fields cannot be rendered by type (or whose class has subclasses declaring fields) have no inspect lowering yet (the extra own properties are runtime-dynamic)";
+        }
+        for (const f of errorOwnFields(info)) {
+          const why = inspectSupport(L, f.type, visiting, out);
+          if (why !== null) return why;
+        }
+        return null;
       }
       if (info.subclasses.length > 0) {
         return `inspect of '${t.className}' values is not lowered (the class has subclasses — the runtime value's constructor name and fields are dynamic)`;
@@ -624,6 +647,10 @@ function inspectExpr(
           : { kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: value, loc }], result: text, type: STRING, loc };
       }
       if (isErrorClass(L, t.className)) {
+        const einfo = L.classes.get(t.className);
+        if (einfo !== undefined && !einfo.builtinError && errorOwnFields(einfo).length > 0) {
+          return { kind: "call", callee: inspectHelper(L, t, loc), args: [value, recurse, depth], type: STRING, loc };
+        }
         return { kind: "libCall", fn: "insp.error", args: [value, recurse, depth], type: STRING, loc };
       }
       L.refuseHelperFieldEnumeration(value, loc, "console.log/util.inspect");
@@ -1239,6 +1266,19 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc, rebuild = false): str
     case "object": {
       const info = L.classes.get(t.className);
       if (!info) throw new Error(`inspect of unknown class ${t.className}`);
+      if (isErrorClass(L, t.className) && !info.builtinError && errorOwnFields(info).length > 0) {
+        // An ERROR subclass with declared fields: the runtime renders the name, message, stamped slots, assigned expandos and cause (insp.errorx); the
+        // declared fields' entries are rendered here, by type, in layout order, and handed over joined by 0x1F (an entry's text never holds that byte: inspect
+        // escapes control characters in strings and keys).
+        const parts: IrExpr[] = [];
+        for (const f of errorOwnFields(info)) {
+          const fv: IrExpr = { kind: "fieldGet", obj: v(), className: t.className, field: f.name, type: f.type, loc };
+          if (parts.length > 0) parts.push(str("\x1f", loc));
+          parts.push(str(`${inspectKey(f.name)}: `, loc), child(f.type, fv));
+        }
+        body = [ret({ kind: "libCall", fn: "insp.errorx", args: [v(), r(), d(), concatAll(parts, loc)], type: STRING, loc })];
+        break;
+      }
       // Node prints the class's OWN name — the declaration's, never the
       // IR name's module qualifier (`m0.Timer` is the frontend's spelling
       // for a class declared in a non-entry module).
