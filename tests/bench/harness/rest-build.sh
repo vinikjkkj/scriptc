@@ -10,7 +10,7 @@ APP=$BENCH_DIR/rest/zapo-rest-mysql.ts
 R=$BENCH_WORK/rest; mkdir -p "$R" "$O"
 if [ ! -d "$R/node_modules" ]; then
   cp $BENCH_ROOT/tests/driver-rigs/package.json $BENCH_ROOT/tests/driver-rigs/pnpm-lock.yaml $BENCH_ROOT/tests/driver-rigs/tsconfig.json "$R/"
-  ( cd "$R" && pnpm install --frozen-lockfile --ignore-workspace --ignore-scripts --config.strict-dep-builds=false )
+  ( cd "$R" && pnpm install --frozen-lockfile --ignore-workspace --ignore-scripts --config.strict-dep-builds=false --config.minimumReleaseAge=0 )
 fi
 cp "$APP" "$R/zapo-rest-mysql.ts"
 cd "$R"
