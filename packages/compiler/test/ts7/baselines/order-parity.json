@@ -16514,6 +16514,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25592-large-built-strings-keep-their-value-after-a-big-block-was-freed.ts": {
+   "order": [
+    "<repo>/tests/corpus/25592-large-built-strings-keep-their-value-after-a-big-block-was-freed.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2560-arraybuffer-dataview-set.ts": {
    "order": [
     "<repo>/tests/corpus/2560-arraybuffer-dataview-set.ts"
