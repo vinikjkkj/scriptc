@@ -28806,6 +28806,18 @@
     "<repo>/tests/corpus/25548-a-cast-of-an-error-to-a-record-lists-the-errors-own-keys.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25652-an-object-literal-spreads-a-method-call-result-after-pure-fields-built-from-nullish-defaults.ts": {
+   "order": [
+    "<repo>/tests/corpus/25652-an-object-literal-spreads-a-method-call-result-after-pure-fields-built-from-nullish-defaults.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25653-a-spread-of-a-call-result-after-a-ternary-and-a-logical-field-reads-the-call-once.ts": {
+   "order": [
+    "<repo>/tests/corpus/25653-a-spread-of-a-call-result-after-a-ternary-and-a-logical-field-reads-the-call-once.ts"
+   ],
+   "diags": []
   }
  }
 }
