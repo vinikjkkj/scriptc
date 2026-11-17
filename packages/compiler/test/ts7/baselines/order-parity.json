@@ -28806,6 +28806,12 @@
     "<repo>/tests/corpus/25548-a-cast-of-an-error-to-a-record-lists-the-errors-own-keys.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25656-containers-of-one-kind-with-different-element-types-compare-by-identity.ts": {
+   "order": [
+    "<repo>/tests/corpus/25656-containers-of-one-kind-with-different-element-types-compare-by-identity.ts"
+   ],
+   "diags": []
   }
  }
 }
