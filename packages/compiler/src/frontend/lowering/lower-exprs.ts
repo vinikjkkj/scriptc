@@ -20786,6 +20786,15 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
         ) {
           return { kind: "bin", op: negated ? "!==" : "===", left: idLeft, right: idRight, type: BOOL, loc };
         }
+        // Two containers of the same KIND whose element types differ (a `Map<string, unknown>` parameter against a `Map<string, Entry>` field): tsc admits
+        // the comparison because one side is assignable to the other, and the answer is the pointer compare. Maps, sets and arrays are one runtime
+        // representation whatever their element types, so the compare is exact; a different kind of container, or a record, never reaches here.
+        if (
+          (idLeft.type.kind === "map" || idLeft.type.kind === "set" || idLeft.type.kind === "array") &&
+          idLeft.type.kind === idRight.type.kind
+        ) {
+          return { kind: "bin", op: negated ? "!==" : "===", left: idLeft, right: idRight, type: BOOL, loc };
+        }
         // Runtime HANDLES are objects to === too: one handle per socket/
         // request/response, so pointer identity IS JS's object equality
         // (`c.pause() === c` — Node's chaining assertions). */
