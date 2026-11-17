@@ -48983,16 +48983,25 @@ fail:
     return JS_EXCEPTION;
 }
 
+/* LOCAL MODIFICATION (scriptc, see vendor/README.md): a NULL opaque is a regex used with no context, which is how
+ * the host program compiles and runs its own static regexes without booting the engine. It behaves exactly as the
+ * host's standalone hooks do (no stack guard, no interrupt, plain libc allocation). A non-NULL opaque is a JSContext
+ * and takes the upstream path unchanged. */
 bool lre_check_stack_overflow(void *opaque, size_t alloca_size)
 {
     JSContext *ctx = opaque;
+    if (ctx == NULL)
+        return false;
     return js_check_stack_overflow(ctx->rt, alloca_size);
 }
 
 int lre_check_timeout(void *opaque)
 {
     JSContext *ctx = opaque;
-    JSRuntime *rt = ctx->rt;
+    JSRuntime *rt;
+    if (ctx == NULL)
+        return 0;
+    rt = ctx->rt;
     return (rt->interrupt_handler &&
             rt->interrupt_handler(rt, rt->interrupt_opaque));
 }
@@ -49000,6 +49009,14 @@ int lre_check_timeout(void *opaque)
 void *lre_realloc(void *opaque, void *ptr, size_t size)
 {
     JSContext *ctx = opaque;
+    if (ctx == NULL) {
+        /* the parenthesized names: this file #defines free/realloc as forbidden for engine allocation, which this is not */
+        if (size == 0) {
+            (free)(ptr);
+            return NULL;
+        }
+        return (realloc)(ptr, size);
+    }
     /* No JS exception is raised here */
     return js_realloc_rt(ctx->rt, ptr, size);
 }

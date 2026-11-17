@@ -9406,12 +9406,6 @@ long scr_promise_live_count(void);
  * pending checks (may-throw, like the fs.* surface). */
 ScrStr *scr_island_eval(ScrStr *code);
 
-/* The libregexp opaque for scr_regex.c (--dynamic builds share the engine
- * archive's libregexp, whose host hooks want the island's JSContext):
- * lazily boots the engine and re-anchors its stack check, then hands the
- * context out as an opaque pointer. */
-void *scr_island_lre_opaque(void);
-
 /* ── embedded npm modules ─────────────────────────────────────────────
  * npm package code is embedded into the binary at BUILD time: the emitted
  * C carries every reached module's source as a static string plus the

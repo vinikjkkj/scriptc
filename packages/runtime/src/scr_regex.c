@@ -47,18 +47,14 @@ static void scr_regex_oom(void) {
 /* ── libregexp host hooks ─────────────────────────────────────────────
  * Static builds provide the minimal hooks (malloc-backed, no interrupt,
  * no stack guard — patterns come from source literals and the executor's
- * backtrack stack is heap-allocated). --dynamic builds MUST NOT define
- * them: the engine archive's quickjs.c already does, with the opaque
- * interpreted as the island's JSContext — so under SCR_DYNAMIC (and under SCR_ENGINE, the Function-constructor engine linked
- * into an otherwise static program: the same archive, the same hooks) every
- * lre_compile/lre_exec call here passes the island's context instead
- * (forcing lazy engine init on first regex use).
- */
-#if defined(SCR_DYNAMIC) || defined(SCR_ENGINE)
-static void *lre_opaque(void) { return scr_island_lre_opaque(); }
-#else
+ * backtrack stack is heap-allocated). */
+/* Every regex call passes NO context, in every build: a regex never boots the engine. The static build supplies the
+ * three hooks below. The engine builds (SCR_DYNAMIC, SCR_ENGINE) link the archive, whose quickjs.c already defines them
+ * (defining them here would be a duplicate symbol), and the vendored definitions answer a NULL opaque exactly as the
+ * ones below do (no stack guard, no interrupt, plain libc allocation; see vendor/README.md). The island's own RegExp
+ * keeps passing its JSContext through the same hooks. */
 static void *lre_opaque(void) { return NULL; }
-
+#if !defined(SCR_DYNAMIC) && !defined(SCR_ENGINE)
 bool lre_check_stack_overflow(void *opaque, size_t alloca_size) {
   (void)opaque;
   (void)alloca_size;
@@ -78,7 +74,7 @@ void *lre_realloc(void *opaque, void *ptr, size_t size) {
   }
   return realloc(ptr, size);
 }
-#endif /* SCR_DYNAMIC || SCR_ENGINE */
+#endif /* !SCR_DYNAMIC && !SCR_ENGINE */
 
 /* ── lazy compilation ─────────────────────────────────────────────────
  * Compiled bytecodes are cached on the immortal ScrRegex statics and freed

@@ -666,17 +666,6 @@ static void isl_entry(void) {
   isl_anchor_here();
 }
 
-/* The libregexp opaque for scr_regex.c in --dynamic builds. Static regexes
- * and the island share ONE libregexp: the archive's copy, whose host hooks
- * (quickjs.c's lre_realloc & co.) interpret the opaque as a JSContext —
- * scr_regex.c defining its own hooks would be a duplicate symbol. So a
- * regex-using --dynamic program routes regex compilation/execution through
- * the island's context, booting the engine lazily on first regex use. */
-void *scr_island_lre_opaque(void) {
-  isl_entry();
-  return isl_ctx;
-}
-
 /* Units entering the engine from loop dispatch stations (the fetch
  * bridge's net callbacks fire from scr_net's dispatch, not through an
  * emitted island op) re-anchor through here — the every-entry rule. */
