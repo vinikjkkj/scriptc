@@ -29,7 +29,7 @@ def refresh_exe():
         exe_path = os.readlink(f'/proc/{pid}/exe'); exe_base = os.path.basename(exe_path)
     except Exception: pass
 t0 = time.time()
-FIELDS = ('Size', 'Rss', 'Pss', 'Shared_Clean', 'Shared_Dirty', 'Private_Clean', 'Private_Dirty', 'Anonymous')
+FIELDS = ('Size', 'Rss', 'Pss', 'Shared_Clean', 'Shared_Dirty', 'Private_Clean', 'Private_Dirty', 'Anonymous', 'Referenced')
 HEAD = re.compile(r'^([0-9a-f]+)-([0-9a-f]+) (\S+) ([0-9a-f]+) \S+ \d+\s*(.*)$')
 
 def status():
@@ -251,6 +251,18 @@ def analyze(maps, pm, rss2, hwm2):
                     d['functions_with_resident_page'] += 1; attributed += resb
                     funcs.append((sz, resb, name, o))
             funcs.sort(key=lambda r: -r[0])
+            # the full presence bitmap of the text mapping(s) at this snapshot, run-length coded (alternating run lengths in pages, starting with an ABSENT run),
+            # with the mapping's addresses: offline census joins it to the ELF symbol table and to the executed-instruction set
+            res['text_rle'] = []
+            for (s0, e0, bm) in pm:
+                runs = []; cur = 0; n = 0
+                for b in bm:
+                    if b == cur: n += 1
+                    else:
+                        runs.append(n); cur = b; n = 1
+                runs.append(n)
+                res['text_rle'].append({'start': s0, 'end': e0, 'runs': runs})
+            res['text_maps'] = [{'start': m['start'], 'end': m['end'], 'pgoff': m['pgoff'], 'perms': m['perms'], 'Rss': m['Rss'], 'Referenced': m['Referenced'], 'Size': m['Size']} for m in exe_maps]
             res['text_pages'] = {'resident': res_pages, 'mapped': tot_pages, 'resident_kb': res_pages * 4, 'bytes_attributed_to_symbols': attributed,
                                  'symbols_with_size': len(syms), 'symfile_entries': len(symfile), 'bias': bias}
             res['text_origin'] = dict(sorted(by_origin.items(), key=lambda kv: -kv[1]['bytes_in_resident_pages']))

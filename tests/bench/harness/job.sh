@@ -55,6 +55,33 @@ if [ "$program" = rest ]; then
     done
   fi
   $BENCH_NODE "$BENCH_DIR/harness/rest-run.mjs" --out "$BENCH_WORK/result" --reps "$REPS" --smaps "${arms[@]}" | tee "$BENCH_WORK/result-summary.txt"
+  # RAMAP_FA_SWEEP="4096": the same binaries again with the kernel's fault-around window set to each value (bytes), system-wide for the job; at 4096 the
+  # resident text of a snapshot is the pages that were actually TOUCHED, so (64 KiB run) - (4 KiB run) is the fault-around neighbours. The default is restored after.
+  if [ -n "${RAMAP_FA_SWEEP:-}" ]; then
+    fa_def=$(sudo cat /sys/kernel/debug/fault_around_bytes 2>/dev/null || echo 65536)
+    for fa in ${RAMAP_FA_SWEEP//,/ }; do
+      echo "$fa" | sudo tee /sys/kernel/debug/fault_around_bytes >/dev/null
+      echo "fault_around_bytes now $(sudo cat /sys/kernel/debug/fault_around_bytes)" | tee -a "$ART/sysinfo.txt"
+      mkdir -p "$ART/fa-$fa"
+      $BENCH_NODE "$BENCH_DIR/harness/rest-run.mjs" --out "$ART/fa-$fa" --reps "$REPS" --smaps "${arms[@]}" > "$ART/fa-$fa/result-summary.txt" 2>&1 || echo "fault-around $fa run failed"
+    done
+    echo "$fa_def" | sudo tee /sys/kernel/debug/fault_around_bytes >/dev/null
+  fi
+  # RAMAP_CG=1: every built arm once more under callgrind with per-instruction counts (the executed-instruction set of the whole run; the arm is the binary
+  # itself, so its addresses are the ones the residency bitmaps use). The output is compressed into the artifacts.
+  if [ -n "${RAMAP_CG:-}" ]; then
+    cg_arms=()
+    for a in "${arms[@]}"; do
+      lab=${a%%:*}; bin=${a#*:}
+      case "$lab" in *-after*|*-rand*|*-nohuge*) continue;; esac
+      w="$(dirname "$bin")/cg-$lab.sh"
+      printf '#!/bin/sh\nexec valgrind --tool=callgrind --dump-instr=yes --callgrind-out-file="%s/cg-%s.out" "%s" "$@"\n' "$ART" "$lab" "$bin" > "$w"; chmod +x "$w"
+      cg_arms+=("cg-$lab:$w")
+    done
+    mkdir -p "$ART/cg"
+    $BENCH_NODE "$BENCH_DIR/harness/rest-run.mjs" --out "$ART/cg" --reps 1 --smaps "${cg_arms[@]}" > "$ART/cg/result-summary.txt" 2>&1 || echo "callgrind run failed"
+    gzip -f "$ART"/cg-*.out 2>/dev/null || true
+  fi
   summary "$BENCH_WORK/result"; exit 0
 fi
 store=${program#messaging-}
