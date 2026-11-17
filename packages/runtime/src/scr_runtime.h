@@ -11029,6 +11029,7 @@ ScrStr *scr_insp_typed_big(ScrBytes *b, ScrStr *name); /* BigInt64/BigUint64 vie
  * code slot as its one extra property ({ code: 'X' }); [Name] beyond
  * depth when a code makes it composite. */
 ScrStr *scr_insp_error(ScrError *e, double recurse, double depth);
+ScrStr *scr_insp_error_x(ScrError *e, double recurse, double depth, const ScrStr *extra); /* + the rendered entries of a subclass's declared fields, joined by 0x1F */
 /* The checked-dynamic tree: shape lives in the value, so the whole
  * traversal is here. dyn-boxed bytes render in the checked-dynamic tree's documented
  * Uint8Array identity. */
