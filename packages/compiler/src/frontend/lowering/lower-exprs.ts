@@ -4,6 +4,7 @@
  * comparisons, nullish coalescing and optional chains, conditions and
  * ToBoolean/ToString coercion helpers, and field/element reads and writes
  * (FieldTarget). */
+import { eraseMapOperandForIdentity } from "./lower-erasedmap.js";
 import { readFileSync } from "node:fs";
 import { evalStaticInfoOf, lowerEvalClassInstanceOf } from "./lower-evalclass.js";
 import { protoDataFieldRead, protoDataHasKey, protoDataMemberRead } from "./lower-protodata.js";
@@ -20663,6 +20664,15 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
             idLeft = L.upcastTo(left, right.type.className);
           } else if (L.isSubclassOf(right.type.className, left.type.className)) {
             idRight = L.upcastTo(right, left.type.className);
+          }
+        }
+        // Two maps with the same key type and different value types (a typed map against a `Map<K, unknown>` view of it) compare by
+        // the one pointer they are; the typed side is retyped, no value is read.
+        {
+          const erasedPair = eraseMapOperandForIdentity(idLeft, idRight);
+          if (erasedPair !== null) {
+            idLeft = erasedPair[0];
+            idRight = erasedPair[1];
           }
         }
         // Two function values compare by identity whatever their STATIC

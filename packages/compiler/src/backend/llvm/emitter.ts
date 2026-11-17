@@ -11305,6 +11305,12 @@ class LlEmitter {
         this.emitPendingCheck();
         return out;
       }
+      case "mapEraseView": {
+        // One ScrMap* either way: ownership transfers, type-only.
+        const v = this.emitExpr(e.value);
+        if (isRefCounted(v.type)) this.moveTemp(v);
+        return this.own({ name: v.name, type: e.type });
+      }
       case "upcast":
       case "downcast": {
         // Prefix layout: both directions are reinterprets of the SAME

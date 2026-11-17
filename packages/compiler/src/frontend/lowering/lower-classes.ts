@@ -1225,7 +1225,7 @@ function heritageClassDeclOf(L: Lowerer, cls: ts.ClassLikeDeclaration): ts.Class
 }
 
 /** True when `sub` is `anc` or reaches it through `extends` links. */
-function declDescendsFrom(L: Lowerer, sub: ts.ClassLikeDeclaration, anc: ts.ClassLikeDeclaration): boolean {
+export function declDescendsFrom(L: Lowerer, sub: ts.ClassLikeDeclaration, anc: ts.ClassLikeDeclaration): boolean {
   let cur: ts.ClassLikeDeclaration | null = sub;
   for (let hop = 0; cur !== null && hop < 64; hop++) {
     if (cur === anc) return true;
