@@ -116,6 +116,22 @@ const LL_DEFINE = /^define\b[^@]*@("(?:[^"\\]|\\.)*"|[\w.$-]+)\(/;
  * relative order and the sorted blocks follow them. LLVM IR has no definition-before-use rule for functions or
  * globals, so this cannot change what the module means. A text with no ranked function is returned as is (the same string). */
 export function reorderLlvmText(ll: string, order: LayoutOrder): string {
+  const parsed = splitLlvmDefines(ll);
+  if (parsed === null) return ll;
+  const { blocks, rest } = parsed;
+  if (blocks.length === 0 || !blocks.some((b) => order.rank.has(b.name))) return ll;
+  const sorted = stableByRank(blocks, (b) => order.rank.get(b.name) ?? Infinity);
+  // The sorted blocks go AFTER every other line, not where the first define stood: named types are defined between functions, and a
+  // function body that GEPs into a type has to see the complete type before it ("base element of getelementptr must be sized").
+  // Functions, globals, attributes and metadata may all be referenced forward, so nothing else is order-sensitive.
+  const out: string[] = [];
+  for (const l of hotLiteralsFirst(rest, sorted, order)) out.push(l);
+  for (const b of sorted) for (const l of b.lines) out.push(l);
+  return out.join("\n");
+}
+
+/** The `define` blocks of an LLVM IR text and every other line, or null when a block is unterminated. */
+function splitLlvmDefines(ll: string): { blocks: { name: string; lines: string[] }[]; rest: string[] } | null {
   const lines = ll.split("\n");
   const blocks: { name: string; lines: string[] }[] = [];
   const rest: string[] = [];
@@ -141,16 +157,88 @@ export function reorderLlvmText(ll: string, order: LayoutOrder): string {
     }
     rest.push(l);
   }
-  if (cur !== null) return ll; // malformed: leave it alone
-  if (blocks.length === 0 || !blocks.some((b) => order.rank.has(b.name))) return ll;
-  const sorted = stableByRank(blocks, (b) => order.rank.get(b.name) ?? Infinity);
-  // The sorted blocks go AFTER every other line, not where the first define stood: named types are defined between functions, and a
-  // function body that GEPs into a type has to see the complete type before it ("base element of getelementptr must be sized").
-  // Functions, globals, attributes and metadata may all be referenced forward, so nothing else is order-sensitive.
-  const out: string[] = [];
-  for (const l of rest) out.push(l);
-  for (const b of sorted) for (const l of b.lines) out.push(l);
-  return out.join("\n");
+  return cur !== null ? null : { blocks, rest };
+}
+
+/** `rest` with its `@sc_lit_N = internal global ...` definitions repartitioned in place (hot literals first, see above): the lines keep the slots they held. */
+function hotLiteralsFirst(rest: string[], blocks: readonly { name: string; lines: string[] }[], order: LayoutOrder): string[] {
+  const LIT_DEF = /^@(sc_lit_\d+) = internal global /;
+  const slots: number[] = [];
+  const defs: { sym: string; line: string }[] = [];
+  const nonLit: string[] = [];
+  rest.forEach((l, i) => {
+    const m = LIT_DEF.exec(l);
+    if (m === null) {
+      nonLit.push(l);
+      return;
+    }
+    slots.push(i);
+    defs.push({ sym: m[1]!, line: l });
+  });
+  if (defs.length === 0) return rest;
+  const inCold = new Set<string>();
+  const inHot = literalRefs(nonLit);
+  for (const b of blocks) for (const r of literalRefs(b.lines)) (order.rank.has(b.name) ? inHot : inCold).add(r);
+  const cold = new Set<string>();
+  for (const r of inCold) if (!inHot.has(r)) cold.add(r);
+  if (cold.size === 0) return rest;
+  const sortedDefs = hotFirst(defs, (d) => d.sym, cold);
+  const out = rest.slice();
+  slots.forEach((slot, k) => {
+    out[slot] = sortedDefs[k]!.line;
+  });
+  return out;
+}
+
+/* ------------------------------------------------------- data literals */
+
+/* The program's string literals are immortal ScrStr statics in .data (2.2 MB of the REST app's 2.3 MB). The ordered lane already puts the functions the profile
+ * ran first, but the literals stay in the order they were interned, so the 0.9 MB the executed code references is scattered over every 64 KiB window of the
+ * section and the kernel's fault-around maps all of them (the section is 97% resident). A literal that ONLY cold functions mention goes after every other literal;
+ * every other literal keeps its relative order. The partition is conservative: a literal that appears in any text that is not an unranked function (a
+ * data table, a ranked function, a walker) counts as hot. Nothing is written to a literal, so the move changes no semantics. */
+const LITERAL_REF = /\bsc_lit_\d+\b/g;
+
+/** The distinct `sc_lit_N` names mentioned in `lines`. */
+export function literalRefs(lines: readonly string[]): Set<string> {
+  const out = new Set<string>();
+  for (const l of lines) {
+    if (!l.includes("sc_lit_")) continue;
+    for (const m of l.matchAll(LITERAL_REF)) out.add(m[0]);
+  }
+  return out;
+}
+
+/** `items` with the cold ones moved after the rest, each group in its original order. */
+export function hotFirst<T>(items: readonly T[], symOf: (t: T) => string, cold: ReadonlySet<string>): T[] {
+  const hot: T[] = [];
+  const late: T[] = [];
+  for (const t of items) (cold.has(symOf(t)) ? late : hot).push(t);
+  return [...hot, ...late];
+}
+
+/** The literals a linker ordering file should list, in order: every `sc_lit_N` that ranked functions or non-function text mention (see above), the program's
+ * emitted text in `texts` (C units, or one LLVM IR file). Names a cold-only literal never appear: the linker leaves them after everything it was told. */
+export function hotLiteralNames(texts: readonly string[], kind: "c" | "llvm", order: LayoutOrder): string[] {
+  const hot = new Set<string>();
+  const LIT_DECL = /^(?:extern |static )?SCR_STR_LIT\(\d+\) sc_lit_\d+/;
+  const LIT_DEF = /^@sc_lit_\d+ = internal global /;
+  for (const text of texts) {
+    if (kind === "llvm") {
+      const parsed = splitLlvmDefines(text);
+      if (parsed === null) continue;
+      const ranked = parsed.blocks.filter((b) => order.rank.has(b.name));
+      for (const b of stableByRank(ranked, (x) => order.rank.get(x.name) ?? Infinity)) for (const r of literalRefs(b.lines)) hot.add(r);
+      for (const r of literalRefs(parsed.rest.filter((l) => !LIT_DEF.test(l)))) hot.add(r);
+    } else {
+      const { chunks, rest } = extractCFunctionChunks(text.split("\n"));
+      const ranked = chunks.filter((c) => Number.isFinite(bestRank(order, cDefinedNames(c))));
+      for (const c of stableByRank(ranked, (x) => bestRank(order, cDefinedNames(x)))) for (const r of literalRefs(c)) hot.add(r);
+      for (const r of literalRefs(rest.filter((l) => !LIT_DECL.test(l)))) hot.add(r);
+    }
+  }
+  // only literals seen in ranked or data text are listed; a literal only unranked (cold) functions mention is left to the linker's default (last)
+  return [...hot];
 }
 
 /* ------------------------------------------------------------ staleness */

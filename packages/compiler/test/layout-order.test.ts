@@ -5,6 +5,9 @@ import {
   bestRank,
   cDefinedNames,
   extractCFunctionChunks,
+  hotFirst,
+  hotLiteralNames,
+  literalRefs,
   markUsedDefinitions,
   parseLayoutOrder,
   reorderLlvmText,
@@ -89,5 +92,61 @@ describe("reorderLlvmText", () => {
   it("returns the same text when nothing is named (or the named symbols are absent)", () => {
     expect(reorderLlvmText(ll, parseLayoutOrder("nothere\n"))).toBe(ll);
     expect(reorderLlvmText(ll, parseLayoutOrder(""))).toBe(ll);
+  });
+});
+
+describe("data literals", () => {
+  const lit = (n: number, text: string): string => `@sc_lit_${n} = internal global { i32, i32, i32, [${text.length + 1} x i8] } { i32 -1, i32 ${text.length}, i32 ${text.length}, [${text.length + 1} x i8] c"${text}\\00" }`;
+  const ll = [
+    "target triple = \"x\"",
+    lit(0, "cold-a"),
+    lit(1, "hot-a"),
+    lit(2, "cold-b"),
+    lit(3, "both"),
+    lit(4, "in-table"),
+    "@tbl = internal global [1 x ptr] [ptr @sc_lit_4]",
+    "define internal void @cold() #0 {",
+    "  call void @use(ptr @sc_lit_0, ptr @sc_lit_2, ptr @sc_lit_3)",
+    "  ret void",
+    "}",
+    "define internal void @steady() #0 {",
+    "  call void @use(ptr @sc_lit_1, ptr @sc_lit_3)",
+    "  ret void",
+    "}",
+  ].join("\n");
+  it("literalRefs lists the distinct names of a text", () => {
+    expect([...literalRefs(["x sc_lit_1 y sc_lit_22", "sc_lit_1 again", "no_sc_lit_x"])]).toEqual(["sc_lit_1", "sc_lit_22"]);
+  });
+  it("hotFirst moves the cold ones after the rest, each group in its original order", () => {
+    expect(hotFirst(["a", "b", "c", "d"], (x) => x, new Set(["a", "c"]))).toEqual(["b", "d", "a", "c"]);
+    expect(hotFirst(["a", "b"], (x) => x, new Set())).toEqual(["a", "b"]);
+  });
+  it("the LLVM reorder keeps every literal in its slot group and moves only the cold-only ones last", () => {
+    const out = reorderLlvmText(ll, parseLayoutOrder("steady\n")).split("\n");
+    const defs = out.filter((l) => l.startsWith("@sc_lit_")).map((l) => /^@(sc_lit_\d+)/.exec(l)![1]);
+    // sc_lit_0 and sc_lit_2 are mentioned only by the unranked function; sc_lit_3 is shared with a ranked one; sc_lit_4 is named by a data table
+    expect(defs).toEqual(["sc_lit_1", "sc_lit_3", "sc_lit_4", "sc_lit_0", "sc_lit_2"]);
+    // a literal definition is never dropped or duplicated
+    expect(out.filter((l) => l.startsWith("@sc_lit_")).length).toBe(5);
+    expect(out.slice().sort()).toEqual(ll.split("\n").slice().sort());
+  });
+  it("the hot name list holds every literal ranked or data text mentions, in rank order, and never a cold-only one", () => {
+    const names = hotLiteralNames([ll], "llvm", parseLayoutOrder("steady\n"));
+    expect(names).toEqual(["sc_lit_1", "sc_lit_3", "sc_lit_4"]);
+    expect(hotLiteralNames([ll], "llvm", parseLayoutOrder("nothere\n"))).toEqual(["sc_lit_4"]);
+  });
+  it("the same list from C text: definitions and extern declarations are not references", () => {
+    const c = [
+      "extern SCR_STR_LIT(6) sc_lit_0;",
+      "SCR_STR_LIT(6) sc_lit_0 =",
+      "    { SCR_STR_IMMORTAL, 5, 5, \"cold!\" };",
+      "static void sc_cold(void) { /* a.ts:1 */",
+      "  use(&sc_lit_0);",
+      "}",
+      "static void sc_hot(void) { /* a.ts:2 */",
+      "  use(&sc_lit_1);",
+      "}",
+    ];
+    expect(hotLiteralNames([c.join("\n")], "c", parseLayoutOrder("sc_hot\n"))).toEqual(["sc_lit_1"]);
   });
 });
