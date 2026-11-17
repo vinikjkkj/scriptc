@@ -15974,6 +15974,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25465-fetch-rejection-carries-the-refused-connection-as-its-cause.ts": {
+   "order": [
+    "<repo>/tests/corpus/25465-fetch-rejection-carries-the-refused-connection-as-its-cause.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25466-fetch-rejection-carries-the-dns-failure-as-its-cause.ts": {
+   "order": [
+    "<repo>/tests/corpus/25466-fetch-rejection-carries-the-dns-failure-as-its-cause.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25467-fetch-rejection-carries-the-tls-identity-error-as-its-cause.ts": {
+   "order": [
+    "<repo>/tests/corpus/25467-fetch-rejection-carries-the-tls-identity-error-as-its-cause.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25468-fetch-rejection-inspects-with-its-cause.ts": {
+   "order": [
+    "<repo>/tests/corpus/25468-fetch-rejection-inspects-with-its-cause.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25469-fetch-rejection-of-an-unresolvable-host-inspects-with-its-cause.ts": {
+   "order": [
+    "<repo>/tests/corpus/25469-fetch-rejection-of-an-unresolvable-host-inspects-with-its-cause.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2550-generics-keyof-pick.ts": {
    "order": [
     "<repo>/tests/corpus/2550-generics-keyof-pick.ts"
