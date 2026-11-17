@@ -28548,6 +28548,12 @@
     "<repo>/tests/corpus/25546-a-typed-write-to-an-error-name-or-message-reaches-its-boxed-copy.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25548-a-cast-of-an-error-to-a-record-lists-the-errors-own-keys.ts": {
+   "order": [
+    "<repo>/tests/corpus/25548-a-cast-of-an-error-to-a-record-lists-the-errors-own-keys.ts"
+   ],
+   "diags": []
   }
  }
 }

@@ -55,10 +55,3 @@ console.log(spread.x)
 // No cast anywhere: a widening assignment to an interface-typed binding.
 const viaInterface: I = c
 console.log(JSON.stringify(Object.keys(viaInterface)))
-
-// An Error instance is the other receiver kind the sweep found. The cast
-// is taken at the USE, not at the binding: an annotated binding reports
-// the record-shape mismatch (SC2002) at the initializer instead, one
-// fence earlier, and never reaches the key walk at all.
-const err = new Error("boom")
-console.log(JSON.stringify(Object.keys(err as unknown as { message: string })))

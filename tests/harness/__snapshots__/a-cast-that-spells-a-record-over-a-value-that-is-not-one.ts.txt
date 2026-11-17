@@ -18,10 +18,3 @@ a-cast-that-spells-a-record-over-a-value-that-is-not-one.ts:52:18 - error SC1090
   52 | const spread = { ...viaShape }
      |                  ^~~~~~~~~~~
   53 | console.log(spread.x)
-
-a-cast-that-spells-a-record-over-a-value-that-is-not-one.ts:64:28 - error SC1090: Object.keys over a 'Error' value a cast spells as a record (the walk would answer the CAST's declared fields, not the value's own keys — a class instance's own key set depends on runtime property creation the struct model does not track) is not supported yet
-
-  63 | const err = new Error("boom")
-  64 | console.log(JSON.stringify(Object.keys(err as unknown as { message: string })))
-     |                            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  65 | 
