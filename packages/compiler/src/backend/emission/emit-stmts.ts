@@ -995,8 +995,8 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
         if (s.kind === "fieldSet") {
           const flag = errorOwnFlagFor(E.mod.classes ?? [], s.className, s.field);
           if (flag !== null) {
-            const fm = RUNTIME_ERROR_CLASSES.has(s.className) ? (flag === "%ownName" ? "own_name" : "own_message") : mangleField(flag);
-            E.line(`${obj.name}->${fm} = true;`);
+            // The runtime records the flag AND where the property was created among the own enumerable keys (Node lists own keys in creation order).
+            E.line(`scr_error_mark_own((ScrError *)${obj.name}, ${flag === "%ownName" ? 0 : 2});`);
           }
         }
         // A WRITE creates an own property — JS's [[Set]], and the reason a

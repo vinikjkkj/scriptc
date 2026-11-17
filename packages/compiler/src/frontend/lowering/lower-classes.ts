@@ -2412,6 +2412,11 @@ export function prototypeInstallerSteps(L: Lowerer, e: ts.Expression, classSymbo
             // message was provided or assigned" -- an own property in Node whatever its value, which no value test can say.
             { name: "%ownName", type: BOOL },
             { name: "%ownMessage", type: BOOL },
+            // `%nameAt` / `%codeAt` / `%msgAt` are the eighth to tenth: where `name`, `code` and an assigned `message` were created
+            // among the own enumerable keys (the runtime's own bytes; the emitted code never reads them, they only hold the layout).
+            { name: "%nameAt", type: BOOL },
+            { name: "%codeAt", type: BOOL },
+            { name: "%msgAt", type: BOOL },
           ],
           loc,
         },

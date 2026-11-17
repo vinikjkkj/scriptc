@@ -7556,8 +7556,9 @@ static void scr_err_hide(ScrDyn *d, const char *key, size_t key_len, ScrDyn *v) 
 
 static void scr_error_props_drop_impl(void *obj);
 static bool scr_error_props_code_impl(ScrError *e, ScrStr **out);
+static size_t scr_error_props_count_impl(void *obj);
 /* Both hooks the error unit consults once a property bag exists. */
-#define scr_error_install_props_drop(fn) (scr_error_install_props_drop((fn)), scr_error_install_props_code(&scr_error_props_code_impl))
+#define scr_error_install_props_drop(fn) (scr_error_install_props_drop((fn)), scr_error_install_props_code(&scr_error_props_code_impl), scr_error_install_props_count(&scr_error_props_count_impl))
 
 /* Enter one (error, dyn node) pair into the identity cache. Retains both. */
 static void scr_errdyn_enter(const ScrError *e, ScrDyn *d) {
@@ -7697,7 +7698,10 @@ ScrDyn *scr_dyn_from_error(const ScrError *e) {
   ScrDyn *proto = scr_dyn_error_kind_prototype(kind); /* +1 */
   scr_dyn_obj_set_proto(d, proto);
   scr_dyn_release(proto);
-  scr_err_hide(d, "message", 7, scr_dyn_new_str(e->message));
+  /* `new Error()` has NO own `message` (the prototype's "" answers a read), and an assignment over it creates an own ENUMERABLE one. */
+  if (e->own_message || e->msg_at != 0 || (e->message != NULL && e->message->len != 0)) {
+    if (e->msg_at == 0) scr_err_hide(d, "message", 7, scr_dyn_new_str(e->message));
+  }
   /* `name`, and WHERE it goes is the whole question. The kind's own name
    * ("TypeError") is TypeError.prototype.name in Node — non-enumerable,
    * inherited, invisible to Object.keys — and the per-kind prototype above
@@ -7706,13 +7710,15 @@ ScrDyn *scr_dyn_from_error(const ScrError *e) {
    * Object.keys DOES list. DOMException is the one exception: its name is
    * a prototype GETTER in Node however far it is from the default, so
    * `Object.keys(new DOMException(m, "NotFoundError"))` is still []. */
+  /* The cells assigned over the kind's defaults are merged with the expando bag below, in CREATION order (scr_error_mark_own). */
+  bool put_name = false;
   {
     const char *canon = scr_error_kind_name(kind < 0 ? SCR_ERR_ERROR : kind);
     const size_t cl = strlen(canon);
-    const bool assigned = e->name->len != cl || memcmp(e->name->data, canon, cl) != 0;
+    const bool assigned = e->own_name || e->name->len != cl || memcmp(e->name->data, canon, cl) != 0;
     if (assigned) {
       if (kind == SCR_ERR_DOMEX) scr_err_hide(d, "name", 4, scr_dyn_new_str(e->name));
-      else scr_dyn_obj_set(d, "name", 4, scr_dyn_new_str(e->name));
+      else put_name = true;
     }
   }
   /* An fs/uv error's own properties, in Node's order: errno, code, syscall,
@@ -7721,7 +7727,8 @@ ScrDyn *scr_dyn_from_error(const ScrError *e) {
   const ScrStr *ext_syscall = NULL, *ext_path = NULL, *ext_dest = NULL;
   bool has_ext = scr_error_ext_get((const ScrError *)e, &ext_errno, &ext_syscall, &ext_path, &ext_dest);
   if (has_ext) scr_dyn_obj_set(d, "errno", 5, scr_dyn_new_num(ext_errno));
-  if (e->code) scr_dyn_obj_set(d, "code", 4, scr_dyn_new_str(e->code));
+  const bool code_stamped = e->code != NULL && e->code_at == 0; /* an ASSIGNED code (code_at != 0) is merged below */
+  if (code_stamped) scr_dyn_obj_set(d, "code", 4, scr_dyn_new_str(e->code));
   if (has_ext) {
     const ScrStr *ext_vals[3] = {ext_syscall, ext_path, ext_dest};
     static const char *const ext_keys[3] = {"syscall", "path", "dest"};
@@ -7760,13 +7767,49 @@ ScrDyn *scr_dyn_from_error(const ScrError *e) {
   {
     ScrError *me = (ScrError *)e;
     scr_error_install_props_drop(&scr_error_props_drop_impl);
-    if (me->props != NULL && me->props != d && me->props->kind == SCR_DYN_OBJ) {
-      ScrDyn *old = me->props;
-      for (size_t i = 0; i < old->v.obj.len; i++) {
-        const ScrDynEntry *ent = &old->v.obj.entries[i];
-        if (ent->value == scr_dyn_acc_slot()) continue;
-        scr_dyn_obj_set(d, ent->key, ent->key_len, scr_dyn_retain(ent->value));
+    ScrDyn *old = me->props != NULL && me->props != d && me->props->kind == SCR_DYN_OBJ ? me->props : NULL;
+    {
+      /* The cells the program assigned and the expandos, MERGED in creation order: `name`, an assigned `code` and a `message` an
+       * assignment created each carry the position they were created at (scr_error_mark_own), counted in the merged list that a
+       * throw-site-stamped `code` (already placed above) opens. */
+      {
+        struct { const char *key; size_t len; const ScrStr *cell; size_t pos; } mk[3];
+        size_t nmk = 0;
+        if (put_name) {
+          mk[nmk].key = "name"; mk[nmk].len = 4; mk[nmk].cell = e->name;
+          mk[nmk++].pos = e->own_name && e->name_at != 0 ? (size_t)e->name_at - 1 : 0;
+        }
+        if (e->code != NULL && e->code_at != 0) {
+          mk[nmk].key = "code"; mk[nmk].len = 4; mk[nmk].cell = e->code;
+          mk[nmk++].pos = (size_t)e->code_at - 1;
+        }
+        if (e->msg_at != 0 && e->message != NULL) {
+          mk[nmk].key = "message"; mk[nmk].len = 7; mk[nmk].cell = e->message;
+          mk[nmk++].pos = (size_t)e->msg_at - 1;
+        }
+        for (size_t i = 1; i < nmk; i++) {
+          __typeof__(mk[0]) t = mk[i];
+          size_t j = i;
+          while (j > 0 && mk[j - 1].pos > t.pos) { mk[j] = mk[j - 1]; j--; }
+          mk[j] = t;
+        }
+        size_t k = code_stamped ? 1 : 0, mi = 0, bi = 0;
+        const size_t nb = old != NULL ? old->v.obj.len : 0;
+        for (;;) {
+          while (bi < nb && old->v.obj.entries[bi].value == scr_dyn_acc_slot()) bi++;
+          if (bi >= nb && mi >= nmk) break;
+          if (mi < nmk && (mk[mi].pos <= k || bi >= nb)) {
+            scr_dyn_obj_set(d, mk[mi].key, mk[mi].len, scr_dyn_new_str((ScrStr *)mk[mi].cell));
+            mi++;
+          } else {
+            const ScrDynEntry *ent = &old->v.obj.entries[bi++];
+            scr_dyn_obj_set(d, ent->key, ent->key_len, scr_dyn_retain(ent->value));
+          }
+          k++;
+        }
       }
+    }
+    if (old != NULL) {
       /* The constructor's own NON-ENUMERABLE `cause` lives in the bag's hidden
        * table, which the entry walk above does not see. */
       /* PRESENCE, not the value, decides it: `cause: undefined` (an own
@@ -16373,6 +16416,12 @@ static void scr_error_props_drop_impl(void *obj) {
   ScrError *e = (ScrError *)obj;
   scr_dyn_release(e->props);
   e->props = NULL;
+}
+
+/* The bag's own enumerable key count (scr_error_mark_own's anchor): a tombstone or a non-enumerable property is not one. */
+static size_t scr_error_props_count_impl(void *obj) {
+  const ScrError *e = (const ScrError *)obj;
+  return e->props != NULL && e->props->kind == SCR_DYN_OBJ ? scr_dyn_obj_enum_key_count(e->props) : 0;
 }
 
 /* An `err.code = "X"` the program assigned lands in the bag and wins over a stamped code (own data property); a non-string

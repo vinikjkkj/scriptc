@@ -1023,6 +1023,15 @@ typedef struct ScrError {
                      * the canonical one (calloc'd false). Sixth/seventh slots of the layout prefix (BOOL
                      * `%ownName` / `%ownMessage` in %Error's compiler def). */
   bool own_message; /* a message was PROVIDED (or assigned): `new Error()` has no own `message`, `new Error("")` has. */
+  /* Where `name` and `code` were CREATED among the own enumerable keys that are not declared fields: the index into the merged
+   * list of expando keys (props) and these two cells, at the moment of creation (0 = first; code_at 0 with a code present is a
+   * throw-site stamp, first by construction). Node lists own keys in creation order, which no value can state. Ninth to
+   * eleventh slots of the layout prefix (BOOL `%nameAt` / `%codeAt` / `%msgAt` in %Error's compiler def; only the runtime reads them;
+   * the stored value is the position PLUS ONE, 0 = unrecorded). Saturates at
+   * 255. These live in what was tail padding: ScrError is the same size. */
+  uint8_t name_at;
+  uint8_t code_at;
+  uint8_t msg_at;   /* `message` created by an ASSIGNMENT over an absent own one: an own ENUMERABLE property (the constructed one is not) */
 } ScrError;
 
 enum {
@@ -1068,6 +1077,9 @@ typedef struct ScrDomException {
                     * prefix (see there). */
   bool own_name;    /* mirrors ScrError's */
   bool own_message;
+  uint8_t name_at; /* mirror ScrError's */
+  uint8_t code_at;
+  uint8_t msg_at;
   double dom_code; /* the WebIDL legacy code (0 when the name is off-table) */
   bool has_cause;  /* the options form carried a `cause` member */
   struct ScrDyn *cause; /* owned; NULL when has_cause is false */
@@ -1137,6 +1149,9 @@ void scr_error_stack_limit_set(double v);
  * an absent property, falling back to the errno `code` slot and the stack
  * memo for those two names. */
 void scr_error_install_props_drop(void (*fn)(void *obj));
+void scr_error_install_props_count(size_t (*fn)(void *obj));
+/* `name`/`code` of an Error was just ASSIGNED: set the own flag and record the creation position (which 0 = name, 1 = code, 2 = message). */
+void scr_error_mark_own(ScrError *e, int which);
 /* The lookup of a program-assigned `code` in the bag; installed with the props drop (see scr_json.c). */
 void scr_error_install_props_code(bool (*fn)(struct ScrError *e, struct ScrStr **out));
 void scr_error_prop_set(ScrError *e, ScrStr *key, struct ScrDyn *value);

@@ -639,8 +639,10 @@ void dyn_cls_impl_err_set(ScrDyn *d, const ScrStr *key, const ScrDyn *value) {
     ScrStr *old = *cell;
     *cell = s;
     scr_str_release(old);
-    if (is_msg) e->own_message = true; /* an assignment creates the own property, whatever the value */
-    if (is_name) e->own_name = true;
+    /* an assignment creates the own property, whatever the value; the mark records its place in the creation order */
+    if (is_msg) scr_error_mark_own(e, 2);
+    if (is_name) scr_error_mark_own(e, 0);
+    if (is_code && old == NULL) scr_error_mark_own(e, 1);
     if (e->props != NULL && e->props->kind == SCR_DYN_OBJ) scr_dyn_key_delete(e->props, (ScrStr *)key);
     return;
   }
@@ -657,13 +659,65 @@ bool dyn_cls_impl_err_has(const ScrDyn *d, const char *key, size_t key_len) {
   return e->props != NULL && e->props->kind == SCR_DYN_OBJ && scr_dyn_obj_key_present(e->props, key, key_len);
 }
 
+/* The assigned cells of an error that list as own ENUMERABLE keys, in creation order (ascending recorded position). Returns how
+ * many (0..3). A class that declares the name itself lists it as its member row instead. */
+typedef struct { int which; size_t pos; } ScrErrOwnSlot;
+static size_t dyn_err_own_slots(const ScrDyn *v, const ScrError *e, ScrErrOwnSlot out[3]) {
+  size_t n = 0;
+  if (e->own_name && e->name != NULL && scr_dyn_objinst_member(v, "name", 4) == NULL) {
+    out[n].which = 0;
+    out[n++].pos = e->name_at != 0 ? (size_t)e->name_at - 1 : 0;
+  }
+  if (e->code != NULL && scr_dyn_objinst_member(v, "code", 4) == NULL) {
+    out[n].which = 1;
+    out[n++].pos = e->code_at != 0 ? (size_t)e->code_at - 1 : 0;
+  }
+  if (e->msg_at != 0 && e->message != NULL && scr_dyn_objinst_member(v, "message", 7) == NULL) {
+    out[n].which = 2;
+    out[n++].pos = (size_t)e->msg_at - 1;
+  }
+  for (size_t i = 1; i < n; i++) { /* insertion sort: at most three */
+    ScrErrOwnSlot t = out[i];
+    size_t j = i;
+    while (j > 0 && out[j - 1].pos > t.pos) { out[j] = out[j - 1]; j--; }
+    out[j] = t;
+  }
+  return n;
+}
+
 bool dyn_cls_impl_err_delete(ScrDyn *d, const ScrStr *key) {
   ScrError *e = (ScrError *)d->v.inst.o;
   if (dyn_err_key_is(key, "message", 7) || dyn_err_key_is(key, "name", 4) || dyn_err_key_is(key, "stack", 5) ||
       dyn_err_key_is(key, "code", 4)) {
     return false;
   }
-  if (e->props != NULL && e->props->kind == SCR_DYN_OBJ) return scr_dyn_key_delete(e->props, (ScrStr *)key);
+  if (e->props != NULL && e->props->kind == SCR_DYN_OBJ) {
+    /* The recorded creation positions of name/code/message count the bag's keys, so removing one that sits before them moves
+     * them up by one: find its place in the merged order first. */
+    size_t m = (size_t)-1;
+    if (e->name_at != 0 || e->code_at != 0 || e->msg_at != 0) {
+      ScrDyn *ks = scr_dyn_objwalk(e->props, SCR_OBJWALK_KEYS);
+      if (ks != NULL) {
+        ScrErrOwnSlot mk[3];
+        const size_t nmk = dyn_err_own_slots(d, e, mk);
+        size_t mi = 0;
+        for (size_t bi = 0; bi < ks->v.arr.len; bi++) {
+          while (mi < nmk && mk[mi].pos <= bi + mi) mi++;
+          const ScrStr *ks_s = scr_dyn_str_value(ks->v.arr.items[bi]);
+          if (ks_s->len == key->len && memcmp(ks_s->data, key->data, key->len) == 0) { m = bi + mi; break; }
+        }
+        scr_dyn_release(ks);
+      } else if (scr_exc_pending()) {
+        return false;
+      }
+    }
+    bool r = scr_dyn_key_delete(e->props, (ScrStr *)key);
+    if (r && m != (size_t)-1) {
+      uint8_t *at[3] = { &e->name_at, &e->code_at, &e->msg_at };
+      for (int i = 0; i < 3; i++) if (*at[i] > 1 && (size_t)(*at[i] - 1) > m && *at[i] != 255) (*at[i])--;
+    }
+    return r;
+  }
   return true; /* nothing own by that name: Node answers true */
 }
 
@@ -969,38 +1023,15 @@ static ScrDyn *dyn_cls_ops_walk_error(const ScrDyn *v, ScrObjWalk mode) {
   }
   ScrDyn *out = scr_dyn_new_arr();
   {
-    /* An Error's own ENUMERABLE keys: `message` and `stack` are own
-     * NON-enumerable properties and never listed; `name` is listed only
-     * when something ASSIGNED it (otherwise it is the prototype's), which
-     * the cell shows by differing from the nearest builtin ancestor's
-     * default; `code` is listed when the cell holds one (assigned, or
-     * stamped by the throw site, which Node also makes own and
-     * enumerable); then the class's own fields and the expando bag, in
-     * that order. Order among them is the one thing the cells cannot
-     * state: Node lists them in ASSIGNMENT order. */
+    /* An Error's own ENUMERABLE keys, in the order Node lists them -- creation order:
+     *   - the class's DECLARED fields first, in declaration order (the field initialisers run before any later assignment);
+     *   - then, merged by the position each was CREATED at (ScrError.name_at/code_at/msg_at, scr_error_mark_own), the cells the
+     *     program ASSIGNED -- `name` (once assigned, even to the canonical value), `code` (assigned, or stamped by the throw
+     *     site, which Node also makes own and enumerable) and a `message` an assignment created over an absent one -- and the
+     *     expando bag's keys.
+     * `message` constructed with the error and `stack` are own NON-enumerable and never listed; a class that declares `name`,
+     * `code` or `message` itself has the member row, which is the same slot: listed once, there. */
     ScrError *e = (ScrError *)v->v.inst.o;
-    const size_t pre = scr_dyn_objinst_pre(v);
-    int own_kind = 0;
-    size_t own_pre = 0;
-    for (int k = 0; k < SCR_ERR_KINDS; k++) {
-      if (scr_error_vts[k].pre <= pre && pre <= scr_error_vts[k].post && scr_error_vts[k].pre >= own_pre) {
-        own_kind = k;
-        own_pre = scr_error_vts[k].pre;
-      }
-    }
-    const char *dflt = scr_error_kind_name(own_kind);
-    if (e->name != NULL && !(dflt != NULL && e->name->len == strlen(dflt) && memcmp(e->name->data, dflt, e->name->len) == 0)) {
-      ScrDyn *nv = scr_dyn_new_str(e->name);
-      scr_dyn_objwalk_push(out, mode, "name", 4, nv);
-      scr_dyn_release(nv);
-    }
-    /* (a class that DECLARES `code` has it as a member row below, and it is
-     * the same slot: listed once) */
-    if (e->code != NULL && scr_dyn_objinst_member(v, "code", 4) == NULL) {
-      ScrDyn *cv = scr_dyn_new_str(e->code);
-      scr_dyn_objwalk_push(out, mode, "code", 4, cv);
-      scr_dyn_release(cv);
-    }
     const size_t nm = scr_dyn_objinst_member_count(v);
     for (size_t i = 0; i < nm; i++) {
       const ScrDynClassMember *m = scr_dyn_objinst_member_at(v, i);
@@ -1017,15 +1048,32 @@ static ScrDyn *dyn_cls_ops_walk_error(const ScrDyn *v, ScrObjWalk mode) {
       scr_dyn_objwalk_push(out, mode, m->name, m->len, val);
       scr_dyn_release(val);
     }
+    ScrDyn *bag = NULL;
     if (e->props != NULL && e->props->kind == SCR_DYN_OBJ) {
-      ScrDyn *bag = scr_dyn_objwalk(e->props, mode);
+      bag = scr_dyn_objwalk(e->props, mode);
       if (bag == NULL) {
         scr_dyn_release(out);
         return NULL;
       }
-      for (size_t i = 0; i < bag->v.arr.len; i++) scr_dyn_arr_push(out, scr_dyn_retain(bag->v.arr.items[i]));
-      scr_dyn_release(bag);
     }
+    ScrErrOwnSlot mk[3];
+    const size_t nmk = dyn_err_own_slots(v, e, mk);
+    const size_t nb = bag != NULL ? bag->v.arr.len : 0;
+    size_t bi = 0, mi = 0;
+    while (bi < nb || mi < nmk) {
+      const size_t at = bi + mi;
+      if (mi < nmk && (mk[mi].pos <= at || bi >= nb)) {
+        const ScrStr *cell = mk[mi].which == 0 ? e->name : mk[mi].which == 1 ? e->code : e->message;
+        const char *kn = mk[mi].which == 0 ? "name" : mk[mi].which == 1 ? "code" : "message";
+        ScrDyn *cv = scr_dyn_new_str((ScrStr *)cell);
+        scr_dyn_objwalk_push(out, mode, kn, strlen(kn), cv);
+        scr_dyn_release(cv);
+        mi++;
+      } else {
+        scr_dyn_arr_push(out, scr_dyn_retain(bag->v.arr.items[bi++]));
+      }
+    }
+    if (bag != NULL) scr_dyn_release(bag);
     return out;
   }
 }
