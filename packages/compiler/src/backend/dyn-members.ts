@@ -638,5 +638,7 @@ export function dynClassDisplayName(def: IrClassDef): string {
   if (def.evalOf !== undefined) return def.jsName ?? "";
   const js = def.jsName ?? "";
   if (js !== "") return js;
+  // A class EXPRESSION whose name the lowering resolved to the empty string is anonymous: its `.name` is "", never the compiler's `cx<offset>.` spelling.
+  if (def.jsName === "" && /^(?:[^%]*)%cx[0-9]+\.$/.test(def.name)) return "";
   return def.name.startsWith("%") ? def.name.slice(1) : def.name;
 }
