@@ -7184,7 +7184,10 @@ export function keyedCalleeAtUndefinedArm(L: Lowerer, expr: ts.CallExpression, c
 function typeofMethodSniff(L: Lowerer, expr: ts.TypeOfExpression, loc: SrcLoc): IrExpr | null {
   let inner: ts.Expression = expr.expression;
   while (ts.isParenthesizedExpression(inner)) inner = inner.expression;
-  if (!ts.isPropertyAccessExpression(inner) || inner.questionDotToken !== undefined) return null;
+  if (!ts.isPropertyAccessExpression(inner)) return null;
+  // `x?.m`: a nullish receiver answers "undefined" (the chain short-circuits), a present one is the plain read. Only the undefined/null
+  // arms of a union can be that receiver; an optional chain over a non-nullable type reads exactly like the plain access.
+  const optional = inner.questionDotToken !== undefined;
   // A builtin MODULE namespace is not a class instance: its members are values (a number, a
   // function, an object), and the class-method reasoning below says nothing about them. Their
   // typeof answers come from the member lowerings (builtinModuleFnOf, bufferValueOf).
@@ -7194,6 +7197,8 @@ function typeofMethodSniff(L: Lowerer, expr: ts.TypeOfExpression, loc: SrcLoc): 
   let e0: ts.Expression = inner.expression;
   while (ts.isParenthesizedExpression(e0) || ts.isAsExpression(e0) || ts.isNonNullExpression(e0)) e0 = e0.expression;
   const t0 = L.mapTypeOf(L.typeOf(e0));
+  // The thenable test (`typeof p.then === 'function'`): the members of a Promise are its three methods, so the answer needs no bound value.
+  const PROMISE_METHODS = new Set(["then", "catch", "finally"]);
   const hasMethod = (className: string): boolean | null => {
     const info = L.classes.get(className) ?? null;
     if (info === null || info.fields.has(member)) return null;
@@ -7208,6 +7213,11 @@ function typeofMethodSniff(L: Lowerer, expr: ts.TypeOfExpression, loc: SrcLoc): 
     return { kind: "seqExpr", stmts: [{ kind: "varDecl", localId: slot.id, init: recv, loc }], result: build(ref), type: STRING, loc };
   };
   if (t0 === null) return null;
+  if (t0.kind === "promise") {
+    if (!PROMISE_METHODS.has(member)) return null;
+    const recv = L.lowerExpr(e0);
+    return evaluated(recv, () => fn);
+  }
   if (t0.kind === "object") {
     if (hasMethod(t0.className) !== true) return null;
     // The asserted type may only be the class itself or a base of it.
@@ -7222,7 +7232,14 @@ function typeofMethodSniff(L: Lowerer, expr: ts.TypeOfExpression, loc: SrcLoc): 
     if (def === undefined) return null;
     const answers: IrExpr[] = [];
     for (const arm of def.arms) {
-      if (arm.kind === "object") {
+      if (arm.kind === "promise") {
+        if (!PROMISE_METHODS.has(member)) return null;
+        answers.push(fn);
+      } else if (arm.kind === "undefinedT" || arm.kind === "nullT") {
+        // without `?.` the read throws on these arms: the sound answer is the existing path's
+        if (!optional) return null;
+        answers.push(undef);
+      } else if (arm.kind === "object") {
         if (hasMethod(arm.className) !== true) return null;
         answers.push(fn);
       } else if (arm.kind === "record") {
