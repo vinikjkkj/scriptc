@@ -12,7 +12,7 @@ import type { Lowerer } from "./lowerer.js";
 import { lowerCastViewOverrideWrite } from "./lower-instoverride.js";
 import { isEmitterMixinStatement } from "./lower-emitter-mixin.js";
 import { timersPromisesIntervalCallOf, lowerForAwaitTimersInterval, lowerForAwaitAsyncGenerator, lowerForOfGenerator, lowerYieldStarStatement, hasEscapingLabeledJump, genIterableOf, genIterableOpenCall } from "./lower-generators.js";
-import { RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, BIGINT, BOOL, isRefCounted, BYTES_U8, bytesValueType, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrLocal, type IrRecordShape, IrStmt, IrType, JSVAL, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
+import { RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, canConvertToDyn, BIGINT, BOOL, isRefCounted, BYTES_U8, bytesValueType, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrLocal, type IrRecordShape, IrStmt, IrType, JSVAL, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import { PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, neverTaintedJsType, nodeThrowExpr, stmtUsesIsland, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { dtsTwinOwnedConst, wholeExportRootRebindable } from "./lower-modules.js";
 import { builtinImportAwaitSpecOf, builtinImportBindingStmts, dynImportBindingDeclOf, dynImportBindingStmts } from "./lower-island.js";
@@ -11791,7 +11791,7 @@ function prototypeInstallerCallStmt(L: Lowerer, expr: ts.Expression): IrStmt | n
     for (let info: ClassInfo | null | undefined = L.classes.get(className); info; info = info.base) {
       const n = info.def.name;
       // EventEmitter roots are modelled (scr_dyn_forin_keys walks EventEmitter.prototype's keys).
-      if (RUNTIME_STREAM_CLASSES.has(n) || RUNTIME_ERROR_CLASSES.has(n)) return false;
+      if (RUNTIME_STREAM_CLASSES.has(n)) return false;
       // A run-time property table walks exactly (dyn walk: the emitter's own keys, the members, then the table's
       // enumerable keys; scr_dyn_class.c dyn_cls_props_keys).
       if (protoKeyWritten(info)) return false;
@@ -11923,7 +11923,7 @@ function prototypeInstallerCallStmt(L: Lowerer, expr: ts.Expression): IrStmt | n
     // parameter, an object with an untyped member): the value is checked-dynamic at run time, and the walk is
     // the dyn walk's -- a lowered value of another kind falls through to the
     // refusals below.
-    if (recvT === null && isJsSourceFile(stmt.getSourceFile())) {
+    if (recvT === null) {
       const probe = probeLower(L, stmt.expression);
       if (probe?.type.kind === "dyn") return lowerForInDyn(L, stmt, labels);
     }
@@ -11940,6 +11940,14 @@ function prototypeInstallerCallStmt(L: Lowerer, expr: ts.Expression): IrStmt | n
         stmt.expression,
         "for-in over class instances whose class chain roots in a runtime stream, emitter or error class, or carries a run-time property table (the runtime fences their key walk)",
       );
+    }
+    // Any other receiver the checked-dynamic tree can hold (a Map, a Set, a Date, a typed array, a Buffer, a function, a promise, a RegExp): the dyn walk,
+    // which lists the receiver's own enumerable string keys and whatever it inherits, as Object.keys and the any-typed loop do.
+    {
+      const probe = probeLower(L, stmt.expression);
+      if (probe !== null && probe.type.kind !== "void" && canConvertToDyn(probe.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))) {
+        return lowerForInDyn(L, stmt, labels);
+      }
     }
     L.unsupported(
       "SC1052",
