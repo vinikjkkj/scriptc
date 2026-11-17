@@ -15749,7 +15749,7 @@ ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode) {
     /* JS indexes strings by UTF-16 code units; the checked-dynamic tree stores UTF-8.
      * Code points walk one at a time — an astral code point stays WHOLE
      * (one entry where JS lists two lone surrogates; documented
-     * approximation, the keys stay dense). */
+     * approximation for values/entries — the KEYS list both indices). */
     const ScrStr *s = v->v.str;
     size_t unit = 0;
     for (size_t i = 0; i < s->len;) {
@@ -15759,6 +15759,11 @@ ScrDyn *scr_dyn_objwalk(const ScrDyn *v, ScrObjWalk mode) {
       int klen = snprintf(key, sizeof key, "%zu", unit);
       if (mode == SCR_OBJWALK_KEYS) {
         scr_dyn_arr_push(out, scr_dyn_objwalk_key(key, (size_t)klen));
+        if (step == 4) { /* an astral code point is TWO UTF-16 units: the keys (for-in, Object.keys) list both indices */
+          unit++;
+          klen = snprintf(key, sizeof key, "%zu", unit);
+          scr_dyn_arr_push(out, scr_dyn_objwalk_key(key, (size_t)klen));
+        }
       } else {
         ScrDyn *val = scr_dyn_objwalk_key(s->data + i, step);
         if (mode == SCR_OBJWALK_VALUES) {
