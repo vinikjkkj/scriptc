@@ -35,6 +35,9 @@ if [ "$program" = rest ]; then
       SCC_CLI=$(cli_of $side) EXTRA_ARGS="--layout-profile${HOTCOLD:+ --layout-block-profile}" bash "$BENCH_DIR/harness/rest-build.sh" "$BACKEND" "$o" -prof || { echo "instrumented build of $side failed"; continue; }
       mkdir -p "$ART/layout/$side"
       LLVM_PROFILE_FILE="$ART/layout/$side/block-%p.profraw" $BENCH_NODE "$BENCH_DIR/harness/rest-run.mjs" --out "$ART/layout/$side" --profile "$o/zapo-rest-mysql-$BACKEND-prof.bin" "$ART/layout/$side/profile.txt" || { echo "profile run of $side failed"; continue; }
+      # HOTCOLD: two more profiling runs of the same scenario (their .profraw files merge into the block profile; the function order stays run 1's): a path
+      # the first run's timing did not reach is then not "never executed"
+      if [ -n "${HOTCOLD:-}" ]; then for extra in 2 3; do mkdir -p "$ART/layout/$side/r$extra"; LLVM_PROFILE_FILE="$ART/layout/$side/block-r$extra-%p.profraw" $BENCH_NODE "$BENCH_DIR/harness/rest-run.mjs" --out "$ART/layout/$side/r$extra" --profile "$o/zapo-rest-mysql-$BACKEND-prof.bin" "$ART/layout/$side/r$extra/profile.txt" || echo "extra profile run $extra of $side failed"; done; fi
       $BENCH_NODE "$(cli_of $side)" layout-order "$o/zapo-rest-mysql-$BACKEND-prof.bin" "$ART/layout/$side/profile.txt" -o "$ART/layout/$side/order.txt" || continue
       SCC_CLI=$(cli_of $side) EXTRA_ARGS="--layout-order $ART/layout/$side/order.txt" bash "$BENCH_DIR/harness/rest-build.sh" "$BACKEND" "$o" -ordered || { echo "ordered build of $side failed"; continue; }
       arms+=("$side-ordered:$o/zapo-rest-mysql-$BACKEND-ordered.bin")
@@ -108,6 +111,7 @@ for side in "${sides[@]}"; do
     SCC_CLI=$(cli_of $side) EXTRA_ARGS="--layout-profile${HOTCOLD:+ --layout-block-profile}" bash "$BENCH_DIR/harness/build.sh" "$store" "$BACKEND" "$o" plain -prof || { echo "instrumented build of $side failed"; continue; }
     mkdir -p "$ART/layout/$side"
     LLVM_PROFILE_FILE="$ART/layout/$side/block-%p.profraw" $BENCH_NODE "$BENCH_DIR/harness/profile-run.mjs" "$store" "$o/messaging-$store-$BACKEND-prof.bin" "$ART/layout/$side/profile.txt" "$ART/layout/$side" || { echo "profile run of $side failed"; continue; }
+    if [ -n "${HOTCOLD:-}" ]; then for extra in 2 3; do mkdir -p "$ART/layout/$side/r$extra"; LLVM_PROFILE_FILE="$ART/layout/$side/block-r$extra-%p.profraw" $BENCH_NODE "$BENCH_DIR/harness/profile-run.mjs" "$store" "$o/messaging-$store-$BACKEND-prof.bin" "$ART/layout/$side/r$extra/profile.txt" "$ART/layout/$side/r$extra" || echo "extra profile run $extra of $side failed"; done; fi
     $BENCH_NODE "$(cli_of $side)" layout-order "$o/messaging-$store-$BACKEND-prof.bin" "$ART/layout/$side/profile.txt" -o "$ART/layout/$side/order.txt" || continue
     SCC_CLI=$(cli_of $side) EXTRA_ARGS="--layout-order $ART/layout/$side/order.txt" bash "$BENCH_DIR/harness/build.sh" "$store" "$BACKEND" "$o" plain -ordered || { echo "ordered build of $side failed"; continue; }
     f=$o/messaging-$store-$BACKEND-ordered.bin; [ -f "$f" ] && { chmod +x "$f"; arms+=("$side-ordered:$f"); }
