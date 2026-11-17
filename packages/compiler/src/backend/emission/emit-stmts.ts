@@ -6,7 +6,7 @@ import { storesFreshDynNumber } from "../../ir/dyn-keep.js";
 import type { CEmitter, ScopeEntry } from "./emitter.js";
 import type { IrFunction, IrLocal, IrType } from "../../ir/nodes.js";
 import { mangleField, mangleGlobal, mangleLocal, mangleRawParam } from "../mangle.js";
-import { BOOL, CAUGHT, numSlotHalf, classCbit, errorOwnFlagFor, F64, IrExpr, IrStmt, ORD_MEMBER, orderRecordPlanCached, RUNTIME_ERROR_CLASSES, isRefCounted, ownMaskKeyBit } from "../../ir/nodes.js";
+import { BOOL, CAUGHT, numSlotHalf, narrowSlotOf, classCbit, errorOwnFlagFor, F64, IrExpr, IrStmt, ORD_MEMBER, orderRecordPlanCached, RUNTIME_ERROR_CLASSES, isRefCounted, ownMaskKeyBit } from "../../ir/nodes.js";
 import { boxAccess, cDecl, cStringLiteral, cType, elemAccess, vAdapters } from "./emit-types.js";
 import { KEYLIST_MEMBER, OVERFLOW_MEMBER, OWNMASK_MEMBER, ownPresentCondC } from "./emit-shapes.js";
 import { emitStableReceiver, predeclareFieldRunTables } from "./emit-exprs.js";
@@ -974,8 +974,14 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
         if (s.kind === "fieldSet" && v.type.kind === "dyn" && classCbit(E.mod.classes, s.className)) {
           E.line(`scr_cbit_note(${obj.name}, ${v.name});${E.srcComment(s.loc)}`);
         }
-        const slotHalf = s.kind === "fieldSet" && v.type.kind === "dyn" ? numSlotHalf(E.mod.classes, s.className, s.field) : undefined;
-        if (slotHalf !== undefined) {
+        const narrowDef = s.kind === "fieldSet" && v.type.kind === "dyn" ? narrowSlotOf(E.mod.classes, s.className, s.field) : undefined;
+        const slotHalf = s.kind === "fieldSet" && v.type.kind === "dyn" && narrowDef === undefined ? numSlotHalf(E.mod.classes, s.className, s.field) : undefined;
+        if (narrowDef !== undefined) {
+          // A NARROW field (ir/narrow-slot.ts): an integer 0..4294967295 is unboxed into its 32-bit lane and its presence bit set; anything else goes to the overflow array.
+          const d = narrowDef.def.narrow!;
+          E.moveTemp(v);
+          E.line(`scr_nw_put((uint32_t *)&${obj.name}->${mangleField(d.lanes[0]!)}, (uint16_t *)&${obj.name}->${mangleField(d.mask)}, &${obj.name}->${mangleField(d.ext)}, ${narrowDef.idx}, ${d.fields.length}, ${v.name});${E.srcComment(s.loc)}`);
+        } else if (slotHalf !== undefined) {
           // A NUMBER-SLOT field: a number is unboxed into the raw half and the dyn slot takes the marker; anything else replaces the slot.
           E.moveTemp(v);
           E.line(`scr_numslot_put(&${field}, &${obj.name}->${mangleField(slotHalf)}, ${v.name});${E.srcComment(s.loc)}`);

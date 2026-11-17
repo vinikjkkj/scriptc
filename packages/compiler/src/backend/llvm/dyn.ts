@@ -30,7 +30,7 @@
  *               FUNC=8 HANDLE=9.
  *   ScrBytes { rc +0; len +8; elem +16; data +24 }.
  *   ScrDynPath { parent, key, index } — the %ScrDynPath type. */
-import type { IrBytesElem, IrFunction, IrRecordShape, IrType } from "../../ir/nodes.js";
+import type { IrBytesElem, IrClassDef, IrFunction, IrRecordShape, IrType } from "../../ir/nodes.js";
 import { EMITTER_MIXIN_FIELD_NAME, RUNTIME_EMITTER_CLASS, accessorKeyOrderOf, accessorSlotProp, shapeHasAccessorSlots, VOID, arrayTypeHasLiveView, bytesAliasOnExtract, canConvertToDyn, canDynCheckTo, dynErrorClassKind, isDynErrorClass } from "../../ir/nodes.js";
 import { armDiscrimLits, dynNeverArm, dynNeverIn, canAdaptDynFuncTo, dynRestApplyable, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey } from "../../ir/nodes.js";
 import { EVAL_STATIC_CLASSES } from "../../ir/nodes.js";
@@ -224,6 +224,7 @@ export interface DynHost extends WalkerHost {
   classFieldGep(className: string, field: string): number;
   /** The hidden f64 half of a number-slot field (ir/num-slot.ts), or undefined. */
   numSlotHalfOf(className: string, field: string): string | undefined;
+  narrowSlotOf(className: string, field: string): { def: IrClassDef; idx: number } | undefined;
   /** The GEP index of a class's per-instance order record (-1 when its hierarchy has none). */
   classOrdGep(className: string): number;
 }
@@ -6227,11 +6228,17 @@ export class LlDyn {
       }
       if (row.kind === "field") {
         const B = new BlockBuilder();
-        const idx = host.classFieldGep(className, row.name);
-        const p = B.tmp();
-        B.line(`${p} = getelementptr inbounds %${struct}, ptr %o, i64 0, i32 ${idx} ; .${row.name}`);
+        const nwRow = row.type.kind === "dyn" ? host.narrowSlotOf(className, row.name) : undefined;
+        // A narrow field owns no struct slot (ir/narrow-slot.ts): nothing to GEP or load here, the accessor below reads the lane.
         const raw = B.tmp();
-        B.line(`${raw} = load ${llFieldType(row.type)}, ptr ${p}`);
+        if (nwRow === undefined) {
+          const idx = host.classFieldGep(className, row.name);
+          const p = B.tmp();
+          B.line(`${p} = getelementptr inbounds %${struct}, ptr %o, i64 0, i32 ${idx} ; .${row.name}`);
+          B.line(`${raw} = load ${llFieldType(row.type)}, ptr ${p}`);
+        } else {
+          B.line(`${raw} = bitcast ptr null to ptr`);
+        }
         let v = raw;
         // A `bool` field is STORED as i8 and passed as i1 — the record
         // walker's own trunc, for the same reason.
@@ -6241,8 +6248,25 @@ export class LlDyn {
           v = b;
         }
         // A NUMBER-SLOT field (ir/num-slot.ts): the row answers the raw half when the dyn slot holds the marker.
-        const slotHalf = row.type.kind === "dyn" ? host.numSlotHalfOf(className, row.name) : undefined;
         let slotOut: string | null = null;
+        if (nwRow !== undefined) {
+          // A NARROW field (ir/narrow-slot.ts): lane `idx` when its presence bit is set, else the overflow array's entry.
+          const d = nwRow.def.narrow!;
+          const gp = (name: string): string => {
+            const t = B.tmp();
+            B.line(`${t} = getelementptr inbounds %${struct}, ptr %o, i64 0, i32 ${host.classFieldGep(className, name)} ; .${name}`);
+            return t;
+          };
+          const lp = gp(d.lanes[0]!);
+          const mp = gp(d.mask);
+          const xp = gp(d.ext);
+          const xv = B.tmp();
+          B.line(`${xv} = load ptr, ptr ${xp}`);
+          slotOut = B.tmp();
+          host.declare(`declare ptr @scr_nw_get_v(ptr, ptr, ptr, i32)`);
+          B.line(`${slotOut} = call ptr @scr_nw_get_v(ptr ${lp}, ptr ${mp}, ptr ${xv}, i32 ${nwRow.idx})`);
+        }
+        const slotHalf = nwRow === undefined && row.type.kind === "dyn" ? host.numSlotHalfOf(className, row.name) : undefined;
         if (slotHalf !== undefined) {
           const hp = B.tmp();
           B.line(`${hp} = getelementptr inbounds %${struct}, ptr %o, i64 0, i32 ${host.classFieldGep(className, slotHalf)} ; .${slotHalf}`);
