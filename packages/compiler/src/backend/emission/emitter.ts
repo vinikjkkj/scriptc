@@ -1320,6 +1320,10 @@ export class CEmitter {
         // finite trees, and the record/union cases read the fixpoint sets.
         case "array":
           return cycleCapable(t.elem);
+        // A Set of FUNCTION values: a registered closure can capture the set (or a shape holding it) that registers it, and the
+        // set owns its elements as keys, so it is cycle-capable (the set's key trace visits them).
+        case "set":
+          return t.elem.kind === "func";
         default:
           return false;
       }
