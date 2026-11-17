@@ -10311,7 +10311,37 @@ ScrDyn *scr_dyn_idx_get(ScrDyn *d, double i, bool opt, ScrDyn *(*slow)(ScrDyn *,
   return r;
 }
 
+static void scr_dyn_key_set_core(ScrDyn *recv, ScrStr *key, ScrDyn *value);
+
+/* A write of `name` / `message` to a plain runtime Error's dyn copy (which is the error's own bag, scr_dyn_from_error) also has to reach
+ * the typed ScrError's cells: the copy is a separate object, and a typed read of the same error would otherwise keep the old text. The
+ * copy is the truth for key ORDER from then on (an assignment appends a new key at the write), so only the cell and the own flag move. */
+__attribute__((noinline)) static void scr_dyn_error_copy_cells(ScrDyn *recv, const ScrStr *key, const ScrDyn *value) {
+  if (!scr_dyn_is_error_encoding(recv)) return;
+  const bool is_name = key->len == 4 && memcmp(key->data, "name", 4) == 0;
+  const bool is_msg = key->len == 7 && memcmp(key->data, "message", 7) == 0;
+  if (!is_name && !is_msg) return;
+  ScrError *e = scr_errdyn_err_of(recv); /* +1 */
+  if (e == NULL) return;
+  ScrStr *s = scr_dyn_string_coerce((ScrDyn *)value);
+  ScrStr **cell = is_name ? &e->name : &e->message;
+  ScrStr *old = *cell;
+  *cell = s;
+  scr_str_release(old);
+  if (is_name) e->own_name = true;
+  else e->own_message = true;
+  scr_error_release(e);
+}
+
 void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
+  scr_dyn_key_set_core(recv, key, value);
+  if (__builtin_expect(recv->kind == SCR_DYN_OBJ && (key->len == 4 || key->len == 7) && value->kind == SCR_DYN_STR &&
+                           scr_dyn_ext(recv)->proto != NULL && !scr_exc_pending(), 0)) {
+    scr_dyn_error_copy_cells(recv, key, value);
+  }
+}
+
+static void scr_dyn_key_set_core(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
 #ifdef SCR_DYNCEN_ON
   scr_dyncen_note_korigin(SCR_DYNCEN_KO_KEYSET);
 #endif
