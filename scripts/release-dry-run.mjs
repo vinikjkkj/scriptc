@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Rehearses a release without touching the registry.
 //
-// Three of the release's steps can only be done by a maintainer on
-// npmjs.com (claim the scope, create the Release environment, configure
+// Two of the release's steps can only be done by a maintainer on
+// GitHub and npmjs.com (create the Release environment, configure
 // trusted publishing). Everything BEFORE those steps — that the packed
 // tarballs are well formed, and that they install into a working compiler
 // — is checkable offline, and this script checks it so nobody has to take
@@ -355,9 +355,8 @@ function main() {
   }
   console.log("release-dry-run: the packed tarballs install into a working compiler.");
   console.log("Still required, and only a maintainer can do them — see RELEASING.md:");
-  console.log("  1. claim the @scriptc-fork scope on npmjs.com");
-  console.log("  2. create the 'Release' GitHub environment in this repository");
-  console.log("  3. configure trusted publishing for each of the three packages");
+  console.log("  1. create the 'Release' GitHub environment in this repository");
+  console.log("  2. configure trusted publishing for each of the three packages (the scope and the packages already exist)");
 }
 
 if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
