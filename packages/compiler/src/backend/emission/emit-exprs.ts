@@ -9043,6 +9043,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // prefix carries the name/message/code slots (the error.code
             // precedent).
             return finish(`scr_insp_error((ScrError *)${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "insp.errorx":
+            // An error subclass with declared fields: arg 3 is their rendered entries joined by 0x1F.
+            return finish(`scr_insp_error_x((ScrError *)${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
           case "insp.dyn":
             return finish(`scr_insp_dyn(${arg(0)}, ${arg(1)}, ${arg(2)})`);
           case "insp.dynH":

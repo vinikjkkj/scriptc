@@ -6654,6 +6654,7 @@ export type IrLibFn =
   | "insp.typed"
   | "insp.typedBig"
   | "insp.error"
+  | "insp.errorx"
   | "insp.dyn"
   | "insp.dynS"
   | "insp.dynH"
