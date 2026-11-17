@@ -28218,6 +28218,66 @@
     "<repo>/tests/corpus/25464-fetch-https-to-an-ip-literal-verifies-the-cert-ip-san-and-fails-the-identity-check-with-nodes-error.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25470-narrow-slots-hold-integers-up-to-4294967295-in-32-bit-lanes-and-read-them-back-exactly.ts": {
+   "order": [
+    "<repo>/tests/corpus/25470-narrow-slots-hold-integers-up-to-4294967295-in-32-bit-lanes-and-read-them-back-exactly.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25471-narrow-slots-send-every-value-a-lane-cannot-hold-to-the-overflow-array.ts": {
+   "order": [
+    "<repo>/tests/corpus/25471-narrow-slots-send-every-value-a-lane-cannot-hold-to-the-overflow-array.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25472-narrow-slots-keep-every-field-when-a-neighbour-flips-between-lane-and-overflow-through-the-dyn-key.ts": {
+   "order": [
+    "<repo>/tests/corpus/25472-narrow-slots-keep-every-field-when-a-neighbour-flips-between-lane-and-overflow-through-the-dyn-key.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25473-narrow-slots-leave-the-seventeenth-field-and-every-other-member-alone-and-keep-the-declared-key-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/25473-narrow-slots-leave-the-seventeenth-field-and-every-other-member-alone-and-keep-the-declared-key-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25474-classes-with-a-subclass-or-fewer-than-four-numeric-fields-keep-their-layout-and-their-values.ts": {
+   "order": [
+    "<repo>/tests/corpus/25474-classes-with-a-subclass-or-fewer-than-four-numeric-fields-keep-their-layout-and-their-values.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25475-narrow-slots-collect-a-cycle-that-runs-through-an-overflow-entry-and-leave-no-live-object-at-exit.ts": {
+   "order": [
+    "<repo>/tests/corpus/25475-narrow-slots-collect-a-cycle-that-runs-through-an-overflow-entry-and-leave-no-live-object-at-exit.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25476-narrow-slots-survive-spread-assign-json-and-inspect-with-lane-and-overflow-values-mixed.ts": {
+   "order": [
+    "<repo>/tests/corpus/25476-narrow-slots-survive-spread-assign-json-and-inspect-with-lane-and-overflow-values-mixed.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25477-narrow-slots-read-undefined-from-an-instance-whose-constructor-has-not-written-a-field-yet.ts": {
+   "order": [
+    "<repo>/tests/corpus/25477-narrow-slots-read-undefined-from-an-instance-whose-constructor-has-not-written-a-field-yet.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25478-narrow-slots-keep-the-collectors-pacing-with-many-live-lane-instances.ts": {
+   "order": [
+    "<repo>/tests/corpus/25478-narrow-slots-keep-the-collectors-pacing-with-many-live-lane-instances.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25479-narrow-slots-order-instances-by-lane-fields-before-and-after-an-overflow-write.ts": {
+   "order": [
+    "<repo>/tests/corpus/25479-narrow-slots-order-instances-by-lane-fields-before-and-after-an-overflow-write.ts"
+   ],
+   "diags": []
   }
  }
 }
