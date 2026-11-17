@@ -16590,39 +16590,14 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverr
         call.arguments.length === 2 &&
         !call.arguments.some((a) => ts.isSpreadElement(a))
       ) {
-        // The CHECKED-DYNAMIC receiver, and the restriction is not
-        // caution: the DECLARED-FIELD arm of Object.hasOwn carries the
-        // documented explicit-undefined-is-absent divergence (an own key
-        // holding `undefined` reads as absent), and a protobuf writer
-        // testing a field it set to undefined is exactly where that
-        // would become a new silent wrong answer. A record receiver with
-        // declared fields keeps the loud fence.
-        //
-        // A PURE index-signature receiver has no declared field to carry
-        // that divergence — its own-key set is the overflow map, exactly
-        // — so it joins the dyn arm here. The test is spelled out rather
-        // than delegated to lowerHasOwnOver's gate on purpose: that
-        // function also admits SIGNATURE-FREE records (Object.hasOwn's
-        // own spelling has taken them, divergence and all, for as long as
-        // the compare chain has existed), and this call site is precisely
-        // where the divergence was judged unacceptable. Widening the two
-        // spellings to agree is a separate decision from lifting this
-        // fence, and it is not this one. (zapo's WebSocket header probe
-        // is `for (const key in headers)` + this call over a
-        // `Readonly<Record<string, string>>`; the enumeration lowered and
-        // only the membership test did not.)
+        // A record receiver answers as Object.hasOwn does over it, and that is EXACT: the declared-field compare chain reads each undefined-armed
+        // field by its own-ness (an explicit `{ n: undefined }`, an assignment of undefined and a `delete` are all told apart from an omitted key,
+        // measured against Node in corpus rows 25662/25663), so the old fence on records with optional fields (an "explicit-undefined-is-absent
+        // divergence") no longer has a divergence to guard. The pure index-signature shape joins the same call; a shape lowerHasOwnOver declines
+        // (a tuple, accessors, declared fields beside an index signature) keeps the fence below.
         const recvProbe = probeLower(L, call.arguments[0]!)?.type;
         const recvShape = recvProbe?.kind === "record" ? L.shapes.get(recvProbe.shapeId) : undefined;
-        // A record whose declared fields are ALL always-present (no undefined
-        // arm anywhere) carries no such divergence either: a key it declares is
-        // an own key, whatever the value, so the compare chain is exact.
-        const allPresent =
-          recvShape !== undefined && !recvShape.indexValue && !recvShape.tuple &&
-          recvShape.fields.every((f) => f.type.kind !== "undefinedT" && !(f.type.kind === "union" && L.armTag(f.type.unionId, UNDEFINED_T) >= 0));
-        if (
-          recvProbe?.kind === "dyn" || allPresent ||
-          (recvShape !== undefined && recvShape.fields.length === 0 && !!recvShape.indexValue)
-        ) {
+        if (recvProbe?.kind === "dyn" || (recvShape !== undefined && !recvShape.tuple)) {
           const own = lowerHasOwnOver(L, call, call.arguments[0]!, call.arguments[1]!);
           if (own) return own;
         }
