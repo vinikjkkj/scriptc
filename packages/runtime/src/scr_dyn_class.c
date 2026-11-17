@@ -666,15 +666,15 @@ static size_t dyn_err_own_slots(const ScrDyn *v, const ScrError *e, ScrErrOwnSlo
   size_t n = 0;
   if (e->own_name && e->name != NULL && scr_dyn_objinst_member(v, "name", 4) == NULL) {
     out[n].which = 0;
-    out[n++].pos = e->name_at != 0 ? (size_t)e->name_at - 1 : 0;
+    out[n++].pos = scr_error_own_pos(e, 0);
   }
   if (e->code != NULL && scr_dyn_objinst_member(v, "code", 4) == NULL) {
     out[n].which = 1;
-    out[n++].pos = e->code_at != 0 ? (size_t)e->code_at - 1 : 0;
+    out[n++].pos = scr_error_own_pos(e, 1);
   }
   if (e->msg_at != 0 && e->message != NULL && scr_dyn_objinst_member(v, "message", 7) == NULL) {
     out[n].which = 2;
-    out[n++].pos = (size_t)e->msg_at - 1;
+    out[n++].pos = scr_error_own_pos(e, 2);
   }
   for (size_t i = 1; i < n; i++) { /* insertion sort: at most three */
     ScrErrOwnSlot t = out[i];
@@ -713,8 +713,7 @@ bool dyn_cls_impl_err_delete(ScrDyn *d, const ScrStr *key) {
     }
     bool r = scr_dyn_key_delete(e->props, (ScrStr *)key);
     if (r && m != (size_t)-1) {
-      uint8_t *at[3] = { &e->name_at, &e->code_at, &e->msg_at };
-      for (int i = 0; i < 3; i++) if (*at[i] > 1 && (size_t)(*at[i] - 1) > m && *at[i] != 255) (*at[i])--;
+      scr_error_own_pos_shift(e, m);
     }
     return r;
   }
