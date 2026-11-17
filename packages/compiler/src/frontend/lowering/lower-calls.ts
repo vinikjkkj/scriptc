@@ -4760,6 +4760,68 @@ function bindLocalEscapesToDyn(L: Lowerer, decl: ts.VariableDeclaration): boolea
   return false;
 }
 
+/** The source of a property descriptor value: `Object.getOwnPropertyDescriptor(target, "key")`, followed through a never-reassigned binding, a non-null
+ * assertion and a cast. Null when the expression is not provably one. */
+function descriptorSourceOf(L: Lowerer, e0: ts.Expression, depth = 0): { target: ts.Expression } | null {
+  let e: ts.Expression = e0;
+  while (ts.isParenthesizedExpression(e) || ts.isNonNullExpression(e) || ts.isAsExpression(e) || ts.isSatisfiesExpression(e)) e = e.expression;
+  if (ts.isCallExpression(e)) {
+    const c = e.expression;
+    if (
+      ts.isPropertyAccessExpression(c) && c.name.text === "getOwnPropertyDescriptor" && ts.isIdentifier(c.expression) &&
+      L.isStdlibGlobal(c.expression, "Object") && e.arguments.length === 2
+    ) return { target: e.arguments[0]! };
+    return null;
+  }
+  if (ts.isIdentifier(e) && depth < 4) {
+    const sym = L.resolveValueSymbol(e);
+    const decl = sym ? L.checker.valueDeclarationOf(sym) : undefined;
+    if (!sym || decl === undefined || !ts.isVariableDeclaration(decl) || decl.initializer === undefined) return null;
+    if ((ts.getCombinedNodeFlags(decl) & ts.NodeFlags.Const) === 0 && !bindingNeverReassigned(L, sym, decl)) return null;
+    return descriptorSourceOf(L, decl.initializer, depth + 1);
+  }
+  return null;
+}
+
+/** `d.get.call(thisArg)` / `.apply` / `.bind` where `d` is a property descriptor: the accessor's body reads `this`, and the compiled body can only run
+ * against the receiver it was compiled for (a class accessor against an instance of its class, an object-literal accessor against its own literal, a
+ * static accessor against its class). Node runs it against ANY receiver, so a receiver the compiler cannot prove to be one of those is refused here
+ * rather than left to throw at run time. Null when the call is not of this shape. */
+function descriptorAccessorCallRefusal(L: Lowerer, expr: ts.CallExpression): string | null {
+  const callee = expr.expression;
+  if (!ts.isPropertyAccessExpression(callee) || callee.questionDotToken !== undefined) return null;
+  const method = callee.name.text;
+  if (method !== "call" && method !== "apply" && method !== "bind") return null;
+  let fnExpr: ts.Expression = callee.expression;
+  while (ts.isParenthesizedExpression(fnExpr) || ts.isNonNullExpression(fnExpr)) fnExpr = fnExpr.expression;
+  if (!ts.isPropertyAccessExpression(fnExpr) || (fnExpr.name.text !== "get" && fnExpr.name.text !== "set")) return null;
+  const src = descriptorSourceOf(L, fnExpr.expression);
+  const typed = /PropertyDescriptor/.test(L.checker.typeToString(L.typeOf(fnExpr.expression)));
+  const what = `.${method}() of the ${fnExpr.name.text} function of a property descriptor`;
+  if (src === null) {
+    return typed
+      ? `${what} whose descriptor the compiler cannot trace to one getOwnPropertyDescriptor call (the accessor body only runs against the receiver it was compiled for)`
+      : null;
+  }
+  const thisNode = expr.arguments[0];
+  if (thisNode === undefined) return `${what} without a receiver`;
+  let target: ts.Expression = src.target;
+  while (ts.isParenthesizedExpression(target) || ts.isNonNullExpression(target) || ts.isAsExpression(target)) target = target.expression;
+  const root = L.protoRootClassOf(target);
+  if (root !== null && ts.isPropertyAccessExpression(target) && target.name.text === "prototype") {
+    const t = L.mapTypeOf(L.typeOf(thisNode));
+    if (t !== null && t.kind === "object" && (t.className === root.def.name || L.isSubclassOf(t.className, root.def.name))) return null;
+    return `${what} of '${root.def.jsName ?? root.def.name}'.prototype needs a receiver statically known to be an instance of '${root.def.jsName ?? root.def.name}' (or a subclass); Node would run the accessor body against any object, which this build cannot`;
+  }
+  let recv: ts.Expression = thisNode;
+  while (ts.isParenthesizedExpression(recv) || ts.isNonNullExpression(recv) || ts.isAsExpression(recv)) recv = recv.expression;
+  if (ts.isIdentifier(target) && ts.isIdentifier(recv)) {
+    const a = L.resolveValueSymbol(target), b = L.resolveValueSymbol(recv);
+    if (a !== null && a !== undefined && a === b) return null;
+  }
+  return `${what} needs the very object the descriptor was read from as its receiver (an object-literal or static accessor body is compiled against that one object; Node would run it against any other)`;
+}
+
 export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     // A codec reaching a string sink (String, JSON, Object.prototype.toString, toString/join): refuse.
     refuseCodecCoercionCall(L, expr);
@@ -4837,6 +4899,10 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
           "an overloaded function has no single parameter list for the argument array; call the value directly (f(a, b))",
         );
       }
+    }
+    {
+      const why = descriptorAccessorCallRefusal(L, expr);
+      if (why !== null) L.unsupported("SC1090", expr, why);
     }
     // `C.prototype.hasOwnProperty(k)` and `C.prototype.m.call(thisArg, ...)` (also apply / bind): a call on the class's prototype OBJECT or on one of its
     // function values, through the dyn box. Only the forms that cannot throw at run time lower: an Object.prototype member of the prototype object, and
