@@ -189,13 +189,3 @@ export function lowerErasedMapArg(L: Lowerer, node: ts.Expression, expected: IrT
   if (inner.type.value.kind === "dyn") return inner;
   return { kind: "mapEraseView", value: inner, type: expected, loc: inner.loc };
 }
-
-/** `a === b` over two maps with the same key type and different value types: a pointer compare, the typed side retyped. */
-export function eraseMapOperandForIdentity(left: IrExpr, right: IrExpr): [IrExpr, IrExpr] | null {
-  if (left.type.kind !== "map" || right.type.kind !== "map") return null;
-  if (left.type.weak === true || right.type.weak === true) return null;
-  if (!typeEquals(left.type.key, right.type.key) || typeEquals(left.type, right.type)) return null;
-  if (left.type.value.kind === "dyn") return [left, { kind: "mapEraseView", value: right, type: left.type, loc: right.loc }];
-  if (right.type.value.kind === "dyn") return [{ kind: "mapEraseView", value: left, type: right.type, loc: left.loc }, right];
-  return null;
-}
