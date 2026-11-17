@@ -28506,6 +28506,36 @@
     "<repo>/tests/corpus/25479-narrow-slots-order-instances-by-lane-fields-before-and-after-an-overflow-write.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25530-an-error-subclass-lists-declared-fields-then-its-assigned-name-in-keys-entries-values-and-for-in.ts": {
+   "order": [
+    "<repo>/tests/corpus/25530-an-error-subclass-lists-declared-fields-then-its-assigned-name-in-keys-entries-values-and-for-in.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25531-error-expandos-code-and-name-list-in-creation-order-through-any.ts": {
+   "order": [
+    "<repo>/tests/corpus/25531-error-expandos-code-and-name-list-in-creation-order-through-any.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25532-an-error-message-assigned-over-an-absent-one-is-an-own-key-and-a-constructed-one-is-not.ts": {
+   "order": [
+    "<repo>/tests/corpus/25532-an-error-message-assigned-over-an-absent-one-is-an-own-key-and-a-constructed-one-is-not.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25533-a-typed-error-lists-its-own-keys-in-keys-entries-values-and-for-in.ts": {
+   "order": [
+    "<repo>/tests/corpus/25533-a-typed-error-lists-its-own-keys-in-keys-entries-values-and-for-in.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25534-an-error-code-stamped-before-its-name-lists-first-and-a-declared-code-keeps-its-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/25534-an-error-code-stamped-before-its-name-lists-first-and-a-declared-code-keeps-its-slot.ts"
+   ],
+   "diags": []
   }
  }
 }
