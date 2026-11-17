@@ -28806,6 +28806,12 @@
     "<repo>/tests/corpus/25548-a-cast-of-an-error-to-a-record-lists-the-errors-own-keys.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25660-instanceof-url-over-an-unknown-operand-is-false-for-every-value-the-program-can-hold.ts": {
+   "order": [
+    "<repo>/tests/corpus/25660-instanceof-url-over-an-unknown-operand-is-false-for-every-value-the-program-can-hold.ts"
+   ],
+   "diags": []
   }
  }
 }
