@@ -26,6 +26,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import * as ts from "../ts7/adapter.js";
+import { tsgoPath } from "../shared.js";
 import type { Lowerer } from "./lowerer.js";
 
 /** The runtime file a `require()` of a package's declaration file loads. The
@@ -74,6 +75,17 @@ export function packageRootOf(file: string): string | null {
   }
 }
 
+/** The file among `files` that `hostPath` (a path built with node:path: `join`, `resolve`) names. TypeScript writes every file name with `/`, on Windows too, where
+ * node:path joins with `\`: `G:\pkg\umd\index.js` never equals `G:/pkg/umd/index.js`, so the two sides are compared in TypeScript's spelling (tsgoPath, which
+ * is the identity on POSIX, where a backslash is a legal file-name character). */
+export function sourceFileAtHostPath<F extends { readonly fileName: string }>(files: Iterable<F>, hostPath: string, platform: NodeJS.Platform = process.platform): F | null {
+  const want = tsgoPath(hostPath, platform);
+  for (const f of files) {
+    if (tsgoPath(f.fileName, platform) === want) return f;
+  }
+  return null;
+}
+
 /** The program's compiled source file the require of declaration file `dts`
  * under `spec` runs: its `require`-branch JS, found among the lowered files. */
 export function requiredTwinOf(L: Lowerer, dts: ts.SourceFile, spec: string): ts.SourceFile | null {
@@ -84,10 +96,7 @@ export function requiredTwinOf(L: Lowerer, dts: ts.SourceFile, spec: string): ts
   const rest = spec.slice(pkgName.length).replace(/^\//, "");
   const branch = requireBranchOf(pkgDir, rest === "" ? "." : `./${rest}`);
   if (branch === null) return null;
-  for (const f of L.fileTag.keys()) {
-    if (f.fileName === branch.js) return f;
-  }
-  return null;
+  return sourceFileAtHostPath(L.fileTag.keys(), branch.js);
 }
 
 /** null = conflicted (two different classes claimed it). */

@@ -283,7 +283,8 @@ export class Ts7Program {
   }
 
   getSourceFile(fileName: string): SourceFile | undefined {
-    return this.project.program.getSourceFile(resolve(fileName));
+    // resolve() spells a Windows path with backslashes; the project's file names are slash-normalized (tsgoPath)
+    return this.project.program.getSourceFile(tsgoPath(resolve(fileName)));
   }
 
   getSourceFileNames(): readonly string[] {
