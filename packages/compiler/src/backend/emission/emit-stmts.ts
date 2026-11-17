@@ -951,7 +951,7 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
         const field = `${obj.name}->${member}`;
         if (s.kind === "fieldSet") {
           const lab = labFieldIndex(E, s.className, s.field);
-          if (lab >= 0) { E.line("#ifdef SCR_LABFC"); E.line(`SCR_LABFC_W(${lab});`); if (v.type.kind === "dyn") E.line(`SCR_LABFC_V(${lab}, ${v.name});`); E.line("#endif"); }
+          if (lab >= 0) { E.line("#ifdef SCR_LABFC"); E.line(`SCR_LABFC_W(${lab});`); E.line(`SCR_LABFC_WO(${lab}, (const void *)${obj.name});`); if (v.type.kind === "dyn") E.line(`SCR_LABFC_V(${lab}, ${v.name});`); E.line("#endif"); }
         }
         if (s.kind === "recordSet") {
           // A shape with a key list: a write of an ABSENT key appends it to the order record, a delete removes it (the class

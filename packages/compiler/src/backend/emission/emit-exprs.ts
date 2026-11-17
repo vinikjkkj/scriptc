@@ -4233,7 +4233,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // current value borrowed, the table +1 (the same node when
             // there already is one), so the fieldSet that stores it back
             // balances. Never throws.
-            return finish(`scr_cls_props_ensure(${arg(0)})`);
+            return finish(process.env["SCRIPTC_LABFC"] !== undefined && process.env["SCRIPTC_LABFC"] !== "" ? `(SCR_LABFC_PE(), scr_cls_props_ensure(${arg(0)}))` : `scr_cls_props_ensure(${arg(0)})`);
           case "cls.propsDefine":
             // All five borrowed, no result; throws catchably (may-throw
             // seed) for a JS-rejected descriptor and LOUDLY for a shape
