@@ -1,0 +1,13 @@
+a-value-mentioning-method-called-on-an-erased-generic-view-keeps-refusing.ts:13:13 - error SC1090: 'read' on 'Cache<string, unknown>', a value reached through its erased view (the view carries only the methods whose signatures do not mention the erased type parameters of 'Cache': touch; 'read' is a field or a method that reads or writes the erased type, so call it on the concrete instantiation) is not supported yet
+
+  12 | pick(true).touch("k");
+  13 | console.log(pick(false).read("k"));
+     |             ^~~~~~~~~~~~~~~~~~~~~
+  14 | console.log(pick(true).map.size);
+
+a-value-mentioning-method-called-on-an-erased-generic-view-keeps-refusing.ts:14:13 - error SC1090: 'map' on 'Cache<string, unknown>', a value reached through its erased view (the view carries only the methods whose signatures do not mention the erased type parameters of 'Cache': touch; 'map' is a field or a method that reads or writes the erased type, so call it on the concrete instantiation) is not supported yet
+
+  13 | console.log(pick(false).read("k"));
+  14 | console.log(pick(true).map.size);
+     |             ^~~~~~~~~~~~~~
+  15 | 
