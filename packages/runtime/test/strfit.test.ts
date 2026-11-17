@@ -34,3 +34,9 @@ test("one-byte strings are shared immortals and never mutated (RC audit lane)", 
   const out = await runBin(await build("test_strfit_audit", ["-DSCR_RC_AUDIT"]));
   expect(out).toContain("all strfit tests passed");
 });
+
+test("a big spare block is not reused for a much smaller string, an append loop still reuses its blocks", async () => {
+  const out = await runBin(await build("test_strfit_plain", []));
+  expect(out).toContain("all strfit tests passed");
+  expect(out).toMatch(/spare: len=11000 cap=\d+/);
+});

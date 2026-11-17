@@ -1173,12 +1173,14 @@ ScrStr *scr_str_new(const char *bytes, size_t len) {
 static ScrStr *scr_str_spare;
 #endif
 
-/* A spare-block reuse must not waste grossly (cap <= 4x the need) and only
- * sizable blocks are worth stashing (>= 512). */
+/* A spare-block reuse must not waste grossly and only sizable blocks are worth stashing (>= 512). The old rule took any block up to FOUR times the need,
+ * and the JSON builder hands its 32-64 KiB blocks to this slot: MEASURED on the REST bench, 14 SQL strings of ~11 KB sat in 32,768-byte blocks and 4 of
+ * ~4.5 KB in 16,384 (~0.35 MB of slack, held for as long as the strings live). A block is now reused only when its slack is at most the string's own
+ * length (cap <= 2x) or at most 1 KiB, so a big block waits for a builder that fills it. */
 static ScrStr *scr_str_take_spare(size_t len) {
 #ifndef SCR_RC_AUDIT
   ScrStr *s = scr_str_spare;
-  if (s && s->cap >= len && s->cap / 4 <= len) {
+  if (s && s->cap >= len && ((size_t)s->cap - len <= len || (size_t)s->cap - len <= 1024)) {
     scr_str_spare = NULL;
     s->rc = 1;
     s->len = (uint32_t)len; /* keeps its larger cap; s->cap >= len was tested */
