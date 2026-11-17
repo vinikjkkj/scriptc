@@ -129,7 +129,9 @@ typedef struct {
  * first SCR_CYCEN_SITE_DEPTH return addresses up the frame-pointer chain from scr_dyn_alloc (build with -fno-omit-frame-pointer); the report
  * prints the raw addresses and the reader picks the first frame that is not a scr_* runtime function (the EMITTING function). */
 #define SCR_CYCEN_CHUNKS 1
+#ifndef SCR_CYCEN_SITE_DEPTH
 #define SCR_CYCEN_SITE_DEPTH 5 /* 6 frames made ~300k distinct chains on the redis bench, saturated the table and stalled every later dyn alloc (CI 43630870607) */
+#endif
 #ifndef SCR_CYCEN_SITES
 #define SCR_CYCEN_SITES 262144u
 #endif
