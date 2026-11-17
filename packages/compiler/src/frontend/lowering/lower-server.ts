@@ -1807,10 +1807,20 @@ function lowerNetSocketMethodCall(L: Lowerer, call: ts.CallExpression,
   }
   if (name === "destroy") {
     requireStatementPosition(L, call, "socket.destroy()");
-    if (args.length !== 0) {
-      L.noLowering(`destroy with ${args.length} arguments`, call, "destroy() takes no arguments here");
+    if (args.length > 1 || (args.length === 1 && ts.isSpreadElement(args[0]!))) {
+      L.noLowering(`destroy with ${args.length} arguments`, call, "destroy() takes no argument or one error");
     }
     const receiver = handleReceiver(L, access.expression, NETSOCKET_T);
+    if (args.length === 1) {
+      // socket.destroy(err): the socket is destroyed with that error, 'error' then 'close' (the runtime ignores a socket already destroyed, and
+      // treats undefined/null as no error, exactly Node).
+      const raw = L.lowerExpr(args[0]!);
+      if (raw.type.kind === "dyn" || raw.kind === "unitLit" || L.dynConvertible(raw.type)) {
+        const d: IrExpr = raw.type.kind === "dyn" ? raw : { kind: "dynFrom", value: raw, type: DYN, loc };
+        return { kind: "libCall", fn: "net.sockDestroyErr", args: [receiver, d], type: VOID, loc };
+      }
+      L.noLowering(`destroy of '${L.fmt(raw.type)}'`, args[0] ?? call, "destroy(err) takes an Error");
+    }
     return { kind: "libCall", fn: "net.sockDestroy", args: [receiver], type: VOID, loc };
   }
   if (name === "setEncoding") {

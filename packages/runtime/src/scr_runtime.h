@@ -11572,6 +11572,8 @@ void scr_net_sock_end_bytes(ScrNetSocket *s, ScrBytes *data /*borrowed*/);
  * socket): STR/BYTES dispatch; end() takes undefined/null as no chunk;
  * anything else throws Node's ERR_INVALID_ARG_TYPE chunk TypeError. */
 void scr_net_sock_write_dynv(ScrNetSocket *s, const ScrDyn *d /*borrowed*/);
+/* socket.destroy(err) from the static lowering: err borrowed; undefined or null destroys without an error (Node). */
+void scr_net_sock_destroy_errv(ScrNetSocket *s, const ScrDyn *err);
 void scr_net_sock_end_dynv(ScrNetSocket *s, const ScrDyn *d /*borrowed*/);
 void scr_net_sock_destroy(ScrNetSocket *s);
 /* Flow control (pause/resume — see the struct's flag comments), the

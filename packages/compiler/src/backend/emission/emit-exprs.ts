@@ -5681,6 +5681,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return stmt(`scr_net_sock_write_dynv(${arg(0)}, ${arg(1)})`);
           case "net.sockEndDyn":
             return stmt(`scr_net_sock_end_dynv(${arg(0)}, ${arg(1)})`);
+          case "net.sockDestroyErr":
+            E.line(`scr_net_sock_destroy_errv(${arg(0)}, ${arg(1)});${E.srcComment(e.loc)}`);
+            return { name: "", type: e.type };
           case "net.sockDestroy":
             E.line(`scr_net_sock_destroy(${arg(0)});${E.srcComment(e.loc)}`);
             return { name: "", type: e.type };

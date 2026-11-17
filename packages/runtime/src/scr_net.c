@@ -742,6 +742,7 @@ struct ScrNetSocket {
    * (tls.connect's checkServerIdentity): listeners receive it with its
    * code; NULL = the message-only error */
   ScrError *pending_obj;
+  bool idle_destroyed; /* destroy(err) on an idle socket: destroyed now, error and close queued */
   ScrError *cur_err_obj; /* BORROWED: the Error being delivered right now (set around the protocol layer's native_err hook) */
   /* every failed attempt of the autoSelectFamily chain (Node's AggregateError
    * members, each an Error with code/errno/syscall/address/port). Cleared when
@@ -2720,7 +2721,7 @@ typedef struct ScrIdleEv {
   size_t clk; /* scr_net_clk when queued */
   struct ScrIdleEv *next;
 } ScrIdleEv;
-enum { SCR_IDLE_CLOSE = 0, SCR_IDLE_WRITE = 1, SCR_IDLE_SERVER = 2, SCR_IDLE_FINISH = 3 };
+enum { SCR_IDLE_CLOSE = 0, SCR_IDLE_WRITE = 1, SCR_IDLE_SERVER = 2, SCR_IDLE_FINISH = 3, SCR_IDLE_DESTROYERR = 4 };
 
 static ScrIdleEv *scr_idle_q[2] = {NULL, NULL};  /* [0] destroys, [1] failed writes */
 static ScrIdleEv *scr_idle_qt[2] = {NULL, NULL};
@@ -2730,6 +2731,17 @@ static void scr_net_idle_push(int q, ScrIdleEv *ev) {
   if (scr_idle_qt[q]) scr_idle_qt[q]->next = ev;
   else scr_idle_q[q] = ev;
   scr_idle_qt[q] = ev;
+}
+
+/* destroy(err) on an unconnected socket: 'error' then 'close' on the DESTROY hop (Node queues emitErrorCloseNT at the call, in call order with every
+ * other destroy; only a failed write takes the second hop). */
+static void scr_net_idle_enqueue_destroy_err(ScrNetSocket *s) {
+  ScrIdleEv *ev = (ScrIdleEv *)calloc(1, sizeof *ev);
+  if (!ev) scr_net_oom();
+  ev->s = scr_net_sock_retain(s);
+  ev->kind = SCR_IDLE_DESTROYERR;
+  s->idle_queued = true;
+  scr_net_idle_push(0, ev);
 }
 
 static void scr_net_idle_enqueue(ScrNetSocket *s, bool err) {
@@ -2813,9 +2825,10 @@ static void scr_net_sock_destroy_err(ScrNetSocket *s, ScrDyn *err) {
   s->rd_eof = true;
   if (s->ns_state == SCR_NET_NS_IDLE) {
     scr_net_sock_set_pending_obj(s, e);
+    s->idle_destroyed = true;
     s->had_error = false;
     s->close_undef = true;
-    if (!s->idle_queued) scr_net_idle_enqueue(s, true);
+    if (!s->idle_queued) scr_net_idle_enqueue_destroy_err(s);
     return;
   }
   scr_net_fail_connect(s, e);
@@ -4374,7 +4387,8 @@ void scr_net_sock_clear_native_reader(ScrNetSocket *s) {
 /* socket.destroyed — true once the fd is gone (destroy() or full close),
  * Node's flag for "this stream is done". */
 bool scr_net_sock_destroyed(ScrNetSocket *s) {
-  return s->ns_state == SCR_NET_NS_CLOSED || (s->ns_state == SCR_NET_NS_LIVE && s->fd < 0);
+  /* An idle socket destroyed through destroy(err) is destroyed from that call on: its 'error' and 'close' are only QUEUED. */
+  return s->ns_state == SCR_NET_NS_CLOSED || (s->ns_state == SCR_NET_NS_LIVE && s->fd < 0) || s->idle_destroyed;
 }
 
 /* socket.writable — Node's stream flag: the write half is open (no end()
@@ -4900,7 +4914,7 @@ static void scr_net_idle_step(int q) {
       return;
     }
     ScrNetSocket *s = ev->s;
-    const bool err = ev->kind == SCR_IDLE_WRITE;
+    const bool err = ev->kind == SCR_IDLE_WRITE || ev->kind == SCR_IDLE_DESTROYERR;
     free(ev);
     s->idle_queued = false;
     if (s->ns_state == SCR_NET_NS_IDLE) s->ns_state = SCR_NET_NS_CLOSED;
@@ -6380,6 +6394,11 @@ void scr_net_dyn_install(void) {
  * STR/BYTES dispatch onto the typed entries; undefined/null end()s plain
  * (Node accepts them); anything else throws Node's ERR_INVALID_ARG_TYPE
  * chunk TypeError. Both borrowed. */
+void scr_net_sock_destroy_errv(ScrNetSocket *s, const ScrDyn *err) {
+  if (err->kind == SCR_DYN_UNDEF || err->kind == SCR_DYN_NULL) scr_net_sock_destroy(s);
+  else scr_net_sock_destroy_err(s, (ScrDyn *)err);
+}
+
 void scr_net_sock_write_dynv(ScrNetSocket *s, const ScrDyn *d) {
   if (d->kind == SCR_DYN_STR) scr_net_sock_write_str(s, d->v.str);
   else if (d->kind == SCR_DYN_BYTES) scr_net_sock_write_bytes(s, d->v.bytes);
