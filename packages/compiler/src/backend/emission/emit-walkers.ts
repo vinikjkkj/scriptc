@@ -16,7 +16,7 @@ import type { ClassMeta } from "./emit-shapes.js";
 import { RUNTIME_EMITTER_CLASS as RUNTIME_EMITTER_CLASS_W } from "../../ir/nodes.js";
 import { isIntegerKeyName } from "../../ir/nodes.js";
 import { classvalCandidates, dynClassDisplayName, dynDescBase, dynEmitterSlot, dynRuntimeBaseInfo, dynRuntimeRoot, dynEnumerationFenced, dynMemberRows, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
-import { EMITTER_MIXIN_FIELD_NAME, ORD_MEMBER, orderRecordPlanCached, numSlotHalf } from "../../ir/nodes.js";
+import { EMITTER_MIXIN_FIELD_NAME, ORD_MEMBER, orderRecordPlanCached, numSlotHalf, narrowSlotOf } from "../../ir/nodes.js";
 import { KINDGATE_WIDE_KINDS, kindgateInstanceLane, kindgateWideLane, kindgateFuncLane, soleRecordArmWithFuncMember, kindgateJsvalLane } from "../kindgate.js";
 import { KEYIX_MEMBER, KEYLIST_MEMBER, OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO_MEMBER, TOSTR_MEMBER, VIEW_MEMBER, nullProtoCondC, ownPresentCondC } from "./emit-shapes.js";
 
@@ -263,6 +263,12 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
           // arm's twin): a write through the dyn copy reaches the field.
           (() => {
             // A NUMBER-SLOT field (ir/num-slot.ts): the member row answers the raw half when the dyn slot holds the marker.
+            const nw = row.type.kind === "dyn" ? narrowSlotOf(E.mod.classes, className, row.name) : undefined;
+            if (nw !== undefined) {
+              const d = nw.def.narrow!;
+              const st = `((${struct} *)o)`;
+              return `  return scr_nw_get((const uint32_t *)&${st}->${mangleField(d.lanes[0]!)}, (const uint16_t *)&${st}->${mangleField(d.mask)}, ${st}->${mangleField(d.ext)}, ${nw.idx});`;
+            }
             const half = row.type.kind === "dyn" ? numSlotHalf(E.mod.classes, className, row.name) : undefined;
             if (half === undefined) return `  return ${fieldDynC(E, row.type, `((${struct} *)o)->${mangleField(row.name)}`)};`;
             const raw = `((${struct} *)o)->${mangleField(half)}`;

@@ -20,7 +20,7 @@
  * embed runtime registry/state slots and their surfaces are async-shaped);
  * the emitter refuses them by name before anything here runs. */
 import type { IrClassDef, IrFunction, IrModule, IrType } from "../../ir/nodes.js";
-import { isRefCounted, moduleUsesCtorName, ORD_MEMBER, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES } from "../../ir/nodes.js";
+import { storageFields, isRefCounted, moduleUsesCtorName, ORD_MEMBER, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES } from "../../ir/nodes.js";
 import { getDynOrderPlan } from "../dyn-members.js";
 import {
   mangleClassGcFree,
@@ -224,9 +224,11 @@ export { ORD_MEMBER };
  * at 1 on hierarchy members, then the order record (if any), then the
  * flattened field list. */
 export function classFieldIndex(meta: LlClassMeta, field: string): { index: number; type: IrType } {
-  const idx = meta.def.fields.findIndex((f) => f.name === field);
+  // The layout list: a narrow field (ir/narrow-slot.ts) owns no struct slot and is reached through its lane accessors, never through a GEP index.
+  const sf = storageFields(meta.def);
+  const idx = sf.findIndex((f) => f.name === field);
   if (idx < 0) throw new Error(`llvm emitter bug: unknown field ${field} on class ${meta.def.name}`);
-  return { index: fieldBase(meta) + recShift(meta) + idx, type: meta.def.fields[idx]!.type };
+  return { index: fieldBase(meta) + recShift(meta) + idx, type: sf[idx]!.type };
 }
 
 /** What class emission needs beyond ShapeHost: interned unit instances for
@@ -247,7 +249,7 @@ export interface ClassHost extends ShapeHost {
  * --dynamic) start at the engine's undefined cell. */
 function undefFieldInits(host: ClassHost, meta: LlClassMeta): string[] {
   const out: string[] = [];
-  meta.def.fields.forEach((f, i) => {
+  storageFields(meta.def).forEach((f, i) => {
     const { index } = classFieldIndex(meta, f.name);
     if (f.type.kind === "jsval") {
       host.declare(`declare ptr @scr_jsval_undefined()`);
@@ -303,7 +305,7 @@ export function emitClassShapes(
 
   for (const cls of emitted) {
     const meta = metaMap.get(cls.name)!;
-    const fieldTys = cls.fields.map((f) => llFieldType(f.type));
+    const fieldTys = storageFields(cls).map((f) => llFieldType(f.type));
     // Emitter subclasses embed ScrEmitter's remaining prefix (the registry
     // and display-name slots) between the vtable word and the field list;
     // stream subclasses add the state pointer — upcasts to ScrEmitter* /
@@ -372,7 +374,7 @@ export function emitClassShapes(
     const isEmitterRooted = emitterRooted(meta);
     const isStreamRooted = streamRooted(meta);
     const fieldIndex = (i: number): number => fieldBase(meta) + recShift(meta) + i;
-    const refFields = cls.fields
+    const refFields = storageFields(cls)
       .map((f, i) => ({ ...f, index: fieldIndex(i) }))
       .filter((f) => isRefCounted(f.type));
     const sizeOf = `ptrtoint (ptr getelementptr (%${struct}, ptr null, i32 1) to i64)`;
@@ -381,7 +383,7 @@ export function emitClassShapes(
     const lazyGate = ((): { lines: string[]; cond: string } | null => {
       const lazy = cls.lazyCycle;
       if (!traced || lazy === undefined || lazy.length === 0) return null;
-      const tracedIdx = cls.fields.map((f, i) => ({ ...f, index: fieldIndex(i) })).filter((f) => traceAdapter(host, f.type) !== null);
+      const tracedIdx = storageFields(cls).map((f, i) => ({ ...f, index: fieldIndex(i) })).filter((f) => traceAdapter(host, f.type) !== null);
       if (tracedIdx.length === 0 || tracedIdx.some((f) => !lazy.includes(f.name))) return null;
       const lines: string[] = [];
       let acc = "";
@@ -464,7 +466,7 @@ export function emitClassShapes(
     const slotGhostLines = (pfx: string): string[] => {
       const out: string[] = [];
       (cls.numSlots ?? []).forEach((x, i) => {
-        const idx = cls.fields.findIndex((f) => f.name === x.field);
+        const idx = storageFields(cls).findIndex((f) => f.name === x.field);
         if (idx < 0) return;
         host.declare(`declare void @scr_numslot_ghost_one(ptr)`);
         out.push(
@@ -473,6 +475,17 @@ export function emitClassShapes(
           `  call void @scr_numslot_ghost_one(ptr %${pfx}v${i}) ; ${x.field}`,
         );
       });
+      if (cls.narrow !== undefined) {
+        // NARROW SLOTS (ir/narrow-slot.ts): each lane still taken stops counting the number node it never had.
+        const mi = storageFields(cls).findIndex((f) => f.name === cls.narrow!.mask);
+        if (mi >= 0) {
+          host.declare(`declare void @scr_nw_ghosts_v(ptr)`);
+          out.push(
+            `  %${pfx}nwp = getelementptr inbounds %${struct}, ptr %o, i64 0, i32 ${fieldIndex(mi)}`,
+            `  call void @scr_nw_ghosts_v(ptr %${pfx}nwp) ; narrow lanes`,
+          );
+        }
+      }
       return out;
     };
     const teardown = (lines: string[]): void => {
@@ -635,7 +648,7 @@ export function emitClassShapes(
       // trace: visit exactly the cycle-capable fields; gcFree: release
       // exactly the complement, then free (the trace/teardown complement
       // contract in scr_runtime.h).
-      const indexed = cls.fields.map((f, i) => ({ ...f, index: fieldIndex(i) }));
+      const indexed = storageFields(cls).map((f, i) => ({ ...f, index: fieldIndex(i) }));
       const tracedFields = indexed.filter((f) => traceAdapter(host, f.type) !== null);
       const untracedRefFields = indexed.filter(
         (f) => isRefCounted(f.type) && traceAdapter(host, f.type) === null,

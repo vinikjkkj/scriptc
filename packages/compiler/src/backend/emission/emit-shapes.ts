@@ -5,7 +5,7 @@
  * VtSlot) the emitter builds up front; emission ORDER is part of the C. */
 import type { CEmitter } from "./emitter.js";
 import type { IrBuiltinRendering, IrFunction, OwnMaskShape } from "../../ir/nodes.js";
-import { DYN, IrClassDef, IrType, moduleUsesCtorName, ORD_MEMBER, orderRecordPlanCached, OWNMASK_SRC_NULL_PROTO, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, funcOf, isRefCounted, mapOf, nullProtoRule, ownMaskBytes, ownMaskKeyBit, STRING } from "../../ir/nodes.js";
+import { storageFields, DYN, IrClassDef, IrType, moduleUsesCtorName, ORD_MEMBER, orderRecordPlanCached, OWNMASK_SRC_NULL_PROTO, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, funcOf, isRefCounted, mapOf, nullProtoRule, ownMaskBytes, ownMaskKeyBit, STRING } from "../../ir/nodes.js";
 import { mangleClassGcFree, mangleClassNew, mangleClassRelease, mangleClassReleaseDirect, mangleClassRetain, mangleClassStruct, mangleClassTrace, mangleCtorThunk, mangleField, mangleFunction, mangleRecordGcFree, mangleRecordNew, mangleRecordRelease, mangleRecordRetain, mangleRecordStruct, mangleRecordTrace, mangleVtAdapter, mangleVtInstance, mangleVtStruct } from "../mangle.js";
 import { arrayElemIsRef, boxKindC, cDecl, cType, elemKindC, mapValKindC, rcAdapters, releaseCallC, vAdapters } from "./emit-types.js";
 
@@ -227,7 +227,7 @@ export interface ClassMeta {
         trace: mangleClassTrace(cls.name),
         gcFree: mangleClassGcFree(cls.name),
         traced: E.tracedShapes.has(`object:${cls.name}`),
-        fields: cls.fields,
+        fields: storageFields(cls), // the narrow fields (ir/narrow-slot.ts) own no struct storage: the layout list leaves them out
         ordBytes: orderRecordPlanCached(E.mod.classes ?? []).recordBytes(cls.name),
         comment: `class ${cls.name}`,
         meta: E.classMeta.get(cls.name) ?? null,
@@ -658,7 +658,10 @@ export interface ClassMeta {
 
 /** NUMBER SLOTS (ir/num-slot.ts): the pacing weight a dying instance gives back, one term per slot field that still holds the marker (empty when the class has none). */
   function numSlotGhostsC(def: IrClassDef | undefined): string {
-    return (def?.numSlots ?? []).map((x) => `SCR_NUMSLOT_GHOSTS(o->${mangleField(x.field)})`).join(" + ");
+    return [
+      ...(def?.numSlots ?? []).map((x) => `SCR_NUMSLOT_GHOSTS(o->${mangleField(x.field)})`),
+      ...(def?.narrow !== undefined ? [`SCR_NW_GHOSTS(o->${mangleField(def.narrow.mask)})`] : []),
+    ].join(" + ");
   }
 
   /** The C condition under which a release that left rc > 0 may be a cycle root, for a class whose ONLY cycle-capable fields are

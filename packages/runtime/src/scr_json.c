@@ -2542,6 +2542,31 @@ static ScrDyn *scr_dyn_new_num_kept(double n) {
 
 /* The number-slot marker (scr_runtime.h): immortal, undefined-kind, never handed to a reader. */
 ScrDyn scr_numslot_node = { SIZE_MAX, SCR_DYN_UNDEF, { false } };
+ScrDyn *scr_nw_get_v(const uint32_t *lanes, const uint16_t *mask, ScrDyn *ext, unsigned idx) { return scr_nw_get(lanes, mask, ext, idx); }
+void scr_nw_put_v(uint32_t *lanes, uint16_t *mask, ScrDyn **ext, unsigned idx, unsigned n, ScrDyn *v) { scr_nw_put(lanes, mask, ext, idx, n, v); }
+void scr_nw_ghosts_v(const uint16_t *mask) { SCR_PROPS_GHOST_SUB(SCR_NW_GHOSTS(*mask)); }
+/* The overflow array is created on the first value that does not fit a lane, `n` entries of the (immortal) undefined value; entry `idx` takes `v` (moved in)
+ * and the old entry is released after the new one is in place. */
+void scr_nw_ext_store(ScrDyn **ext, unsigned idx, unsigned n, ScrDyn *v) {
+  ScrDyn *a = *ext;
+  if (a == NULL || a->kind != SCR_DYN_ARR) {
+    ScrDyn *old = a;
+    a = scr_dyn_new_arr();
+    for (unsigned i = 0; i < n; i++) scr_dyn_arr_push(a, scr_dyn_undefined());
+    *ext = a;
+    scr_dyn_release(old); /* the undefined the field was initialised with: immortal, a no-op */
+  }
+  ScrDyn *old = a->v.arr.items[idx];
+  a->v.arr.items[idx] = v;
+  scr_dyn_release(old);
+}
+void scr_nw_ext_clear(ScrDyn *ext, unsigned idx) {
+  if (ext != NULL && ext->kind == SCR_DYN_ARR) {
+    ScrDyn *old = ext->v.arr.items[idx];
+    ext->v.arr.items[idx] = scr_dyn_undefined();
+    scr_dyn_release(old);
+  }
+}
 ScrDyn *scr_numslot_get_v(ScrDyn *p, double n) { return scr_numslot_get(p, n); }
 void scr_numslot_put_v(ScrDyn **p, double *n, ScrDyn *v) { scr_numslot_put(p, n, v); }
 /* A dying instance's slot: a marker stops counting the node it never had (scr_runtime.h NUMBER SLOTS, pacing). The LLVM lane's per-field call. */
