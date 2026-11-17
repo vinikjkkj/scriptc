@@ -186,12 +186,20 @@ function lowerCallbackArg(
       nparams: dynTuple.length,
     };
   }
+  // A chunk parameter under @types/node 26 is declared `string | Buffer` (the event payload is Buffer, or string once setEncoding ran): a union of just
+  // those two kinds is exactly what the dyn boundary delivers (a Buffer chunk, or the string a utf8 encoding window yields), so it adapts like an
+  // untyped parameter, and the boundary check on the way in is a no-throw for both arms.
+  const chunkUnion = (p: IrType): boolean => {
+    if (p.kind !== "union") return false;
+    const arms = L.unions.get(p.unionId)?.arms;
+    return arms !== undefined && arms.length >= 2 && arms.every((a) => a.kind === "string" || (a.kind === "bytes" && a.elem === "u8"));
+  };
   if (
     dynTuple !== undefined &&
     cb.type.kind === "func" &&
     (cb.type.rest === true ||
       (cb.type.params.length > 0 && cb.type.params.some((p) => !paramOk(p)))) &&
-    cb.type.params.every((p) => p.kind === "dyn") &&
+    cb.type.params.every((p) => p.kind === "dyn" || chunkUnion(p)) &&
     canBoxFuncIntoDyn(cb.type, (id) => L.shapes.get(id), (id) => L.unions.get(id))
   ) {
     // A plain-JS listener whose params carry no contextual type (a
