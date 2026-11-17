@@ -16004,6 +16004,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25485-error-expando-console-log.ts": {
+   "order": [
+    "<repo>/tests/corpus/25485-error-expando-console-log.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25486-error-expando-util-inspect.ts": {
+   "order": [
+    "<repo>/tests/corpus/25486-error-expando-util-inspect.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25487-error-expando-with-cause.ts": {
+   "order": [
+    "<repo>/tests/corpus/25487-error-expando-with-cause.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25488-error-subclass-own-fields.ts": {
+   "order": [
+    "<repo>/tests/corpus/25488-error-subclass-own-fields.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25489-error-expando-in-containers.ts": {
+   "order": [
+    "<repo>/tests/corpus/25489-error-expando-in-containers.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2550-generics-keyof-pick.ts": {
    "order": [
     "<repo>/tests/corpus/2550-generics-keyof-pick.ts"
