@@ -16466,6 +16466,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25590-one-character-strings-from-every-producer-keep-their-values.ts": {
+   "order": [
+    "<repo>/tests/corpus/25590-one-character-strings-from-every-producer-keep-their-values.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25591-appending-to-a-one-character-string-never-changes-the-shared-one.ts": {
+   "order": [
+    "<repo>/tests/corpus/25591-appending-to-a-one-character-string-never-changes-the-shared-one.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2560-arraybuffer-dataview-set.ts": {
    "order": [
     "<repo>/tests/corpus/2560-arraybuffer-dataview-set.ts"

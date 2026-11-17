@@ -1152,7 +1152,11 @@ static ScrStr *scr_str_alloc(size_t len, size_t cap) {
 #include "scr_str_census_walk.h"
 #endif
 
+static ScrStr *scr_str_ascii1_of(unsigned char c);
 ScrStr *scr_str_new(const char *bytes, size_t len) {
+  /* One ASCII byte is the shared immortal string (see scr_ascii1): 7,930 one-byte strings held 253 KB in the REST bench, each a 32-byte block for one byte,
+   * and a string of rc == IMMORTAL is never mutated, grown or freed. */
+  if (len == 1 && (unsigned char)bytes[0] < 0x80) return scr_str_ascii1_of((unsigned char)bytes[0]);
   ScrStr *s = scr_str_alloc(len, len);
   memcpy(s->data, bytes, len);
   s->data[len] = '\0';
@@ -1320,6 +1324,11 @@ ScrStr *scr_str_concat(ScrStr *a, ScrStr *b) {
    * catch. Same reason for every (size_t) below. */
   size_t newlen = (size_t)a->len + (size_t)b->len;
   scr_str_size_check(newlen);
+  /* An empty operand and one ASCII byte: the shared immortal one-byte string, not a fresh block (see scr_str_new). */
+  if (newlen == 1) {
+    unsigned char only = (unsigned char)(a->len != 0 ? a->data[0] : b->data[0]);
+    if (only < 0x80) return scr_str_ascii1_of(only);
+  }
   /* In-place append: a is uniquely owned by the caller's borrow (rc == 1 —
    * never an interned literal, those are SCR_STR_IMMORTAL) and has room. Fires on
    * concat chains (`a + b + c`, template literals), where each intermediate
@@ -1539,6 +1548,7 @@ static const ScrChar1 scr_ascii1[128] = {
   SCR_A8(64),  SCR_A8(72),  SCR_A8(80),  SCR_A8(88),
   SCR_A8(96),  SCR_A8(104), SCR_A8(112), SCR_A8(120),
 };
+static ScrStr *scr_str_ascii1_of(unsigned char c) { return (ScrStr *)&scr_ascii1[c]; }
 static const SCR_STR_LIT(1) scr_lit_empty = {SCR_STR_IMMORTAL, 0, 0, ""};
 
 static ScrStr *scr_str_empty(void) { return (ScrStr *)&scr_lit_empty; }
