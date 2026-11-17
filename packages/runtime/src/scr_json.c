@@ -824,6 +824,8 @@ int scr_cycen_dyn_peek2(const void *hdr, unsigned *len, unsigned *cap, unsigned 
 int scr_cycen_dyn_peek3(const void *hdr, unsigned *eks, char *key, unsigned long long *rc, unsigned long long *e0src) {
   const ScrDyn *d = (const ScrDyn *)(const void *)((const char *)hdr + sizeof(ScrCycHdr));
   *eks = 0xFFFFFFFFu; key[0] = 0; *rc = (unsigned long long)d->rc; *e0src = 0;
+  /* A PARKED node (on the per-kind free list) keeps its small buffer, whose items were released and may be freed or reused: its `rc` is the list link, a pointer-sized value, never a count. CI run 44132601216 faulted here on one. */
+  if (d->rc != (size_t)-1 && d->rc > 0xFFFFFFFFu) return (int)d->kind;
   if (d->kind == SCR_DYN_ARR && d->v.arr.items != NULL) {
     unsigned v = 0xFFFFFFFFu;
     for (unsigned i = 0; i < 4 && i < d->v.arr.len; i++) { v &= ~(0xFFu << (8 * i)); v |= (d->v.arr.items[i] != NULL ? ((unsigned)d->v.arr.items[i]->kind & 0xFFu) : 0xFEu) << (8 * i); }
@@ -855,6 +857,7 @@ long long scr_cycen_dyn_free_count(void) { return (long long)scr_dyn_free_count;
 int scr_cycen_dyn_peek_str(const void *hdr, unsigned *len, unsigned *cap, int *imm, unsigned long long *rc, unsigned long long *hash, const char **data) {
   const ScrDyn *d = (const ScrDyn *)(const void *)((const char *)hdr + sizeof(ScrCycHdr));
   if (d->kind != SCR_DYN_STR || d->v.str == NULL) return 0;
+  if (d->rc != (size_t)-1 && d->rc > 0xFFFFFFFFu) return 0; /* parked: the string was released */
   const ScrStr *st = d->v.str;
   *len = st->len;
   *cap = st->cap;
