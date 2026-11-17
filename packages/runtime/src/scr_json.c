@@ -577,10 +577,10 @@ static size_t scr_dyn_free_count;
  * entries is freed at park time and the node parks EMPTY. A parked big buffer is otherwise inherited by whatever small container is allocated next (the mysql bench's 751-slot params
  * vectors and 92-slot option tables), and whether the post-collection trim frees it before that reuse decides a 10 MB peak RSS gap run to run. Smaller buffers keep the reuse. */
 #ifndef SCR_DYN_PARKFREE_ARR
-#define SCR_DYN_PARKFREE_ARR 256
+#define SCR_DYN_PARKFREE_ARR 64
 #endif
 #ifndef SCR_DYN_PARKFREE_OBJ
-#define SCR_DYN_PARKFREE_OBJ 64
+#define SCR_DYN_PARKFREE_OBJ 16
 #endif
 #ifndef SCR_DYN_TRIM_OBJ
 #define SCR_DYN_TRIM_OBJ 32
