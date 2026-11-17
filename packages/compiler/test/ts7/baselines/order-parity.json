@@ -28428,6 +28428,24 @@
     "<repo>/tests/corpus/25484-object-entries-over-a-narrowed-record-reaches-inspect-and-iteration.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25490-an-error-subclass-without-its-own-name-prints-its-constructor-name.ts": {
+   "order": [
+    "<repo>/tests/corpus/25490-an-error-subclass-without-its-own-name-prints-its-constructor-name.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25491-an-error-subclass-that-assigns-its-name-prints-that-name.ts": {
+   "order": [
+    "<repo>/tests/corpus/25491-an-error-subclass-that-assigns-its-name-prints-that-name.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25493-a-boxed-error-subclass-prints-its-constructor-name-in-any.ts": {
+   "order": [
+    "<repo>/tests/corpus/25493-a-boxed-error-subclass-prints-its-constructor-name-in-any.ts"
+   ],
+   "diags": []
   }
  }
 }
