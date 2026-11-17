@@ -9,20 +9,18 @@
  *
  * The two halves are shown side by side deliberately: `admitted` is the
  * shape this file does NOT complain about, and its presence is what makes
- * each complaint below a boundary rather than a blanket refusal. */
+ * each complaint below a boundary rather than a blanket refusal. (An `any` member of a record LITERAL held in an unannotated variable is no longer one of
+ * them: it is the checked-dynamic slot, rows 25500-25509.) */
 interface Doc { [key: string]: any }
 const admitted: Doc = { a: 1 };
 
 // an `any` ARRAY: the element slot is a named slot
 const arr: any[] = [1, "x"];
 
-// an `any` MEMBER of a record: same
-const rec = { item: {} as any, width: "10px" };
-
 // Object.entries over the admitted store: the checker's element type is
 // the TUPLE `[string, any]`, whose second slot is named. Object.keys,
 // for...in, `in`, delete, spread and JSON.stringify all compile over it.
 for (const e of Object.entries(admitted)) console.log(e[0], String(e[1]));
 
-console.log(arr.length, rec.width);
+console.log(arr.length);
 export const marker: number = 1;
