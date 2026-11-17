@@ -16340,6 +16340,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25550-property-descriptor-parameter-accessor-called-with-a-matching-instance.ts": {
+   "order": [
+    "<repo>/tests/corpus/25550-property-descriptor-parameter-accessor-called-with-a-matching-instance.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2556-crypto-introspection.ts": {
    "order": [
     "<repo>/tests/corpus/2556-crypto-introspection.ts"
