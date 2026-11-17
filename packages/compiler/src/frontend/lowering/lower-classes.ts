@@ -6938,7 +6938,19 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     const info = L.classBySymbol.get(symbol);
     if (info === undefined || info.generic || info.evalClass !== undefined || info.classDecorators?.valueGlobalId !== undefined) return null;
     const why = protoContextRefusal(expr, false);
-    if (why !== null) L.unsupported("SC1090", expr, why);
+    if (why !== null) {
+      // `Object.defineProperty(C.prototype, ...)` / `defineProperties` keep the diagnostic they always had (the static-member fence at lowerStaticFieldRead):
+      // their first argument is not a position this value can fill, and the older text names the real limit (no prototype definition).
+      let top: ts.Node = expr;
+      while (top.parent !== undefined && (ts.isParenthesizedExpression(top.parent) || ts.isNonNullExpression(top.parent))) top = top.parent;
+      const call = top.parent;
+      if (
+        call !== undefined && ts.isCallExpression(call) && call.arguments[0] === top && ts.isPropertyAccessExpression(call.expression) &&
+        (call.expression.name.text === "defineProperty" || call.expression.name.text === "defineProperties") &&
+        ts.isIdentifier(call.expression.expression) && call.expression.expression.text === "Object"
+      ) return null;
+      L.unsupported("SC1090", expr, why);
+    }
     const loc = locOf(expr);
     const cls: IrExpr = {
       kind: "dynFrom",

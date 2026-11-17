@@ -193,13 +193,15 @@ describe("a function as a value, against Node", () => {
 
 describe("the boundary the function-object properties stop at", () => {
   test(
-    "a PARAMETER's .name still refuses — the case that decides the fold's honesty",
+    "a PARAMETER's .name is read from the VALUE, not folded — the case that decides the fold's honesty (its .length still refuses)",
     async () => {
       // The value comes from the caller; nothing at this site knows it. A
       // fold that answered here would print the parameter's own spelling,
-      // "f", where Node prints the caller's "g" — a refusal turned into a
-      // silent wrong answer, which is the one trade this project does not
-      // make.
+      // "f", where Node prints the caller's "g". The name is therefore read at
+      // run time from the closure itself (declarations, arrows, bound functions
+      // through converted slots), and the cells of dynamic.ts below hold every
+      // such value to Node on both backends. The count of parameters has no
+      // run-time column, so `.length` keeps its refusal.
       const name = await refusalCodes(
         workDir,
         "param-name",
@@ -210,7 +212,7 @@ describe("the boundary the function-object properties stop at", () => {
           "",
         ].join("\n"),
       );
-      expect(name, "a parameter's .name must not compile").toContain("SC2020");
+      expect(name, "a parameter's .name compiles (a run-time read of the value's own name)").toEqual([]);
       const len = await refusalCodes(
         workDir,
         "param-length",
@@ -228,7 +230,7 @@ describe("the boundary the function-object properties stop at", () => {
   );
 
   test(
-    "a REASSIGNED binding's .name still refuses",
+    "a REASSIGNED binding's .name is read from the value it holds",
     async () => {
       const codes = await refusalCodes(
         workDir,
@@ -242,7 +244,7 @@ describe("the boundary the function-object properties stop at", () => {
           "",
         ].join("\n"),
       );
-      expect(codes, "a reassigned binding's .name must not compile").toContain("SC2020");
+      expect(codes, "a reassigned binding's .name compiles (a run-time read of the held value)").toEqual([]);
     },
     900_000,
   );
@@ -371,4 +373,41 @@ describe("the boundary the function-object properties stop at", () => {
     },
     900_000,
   );
+});
+
+describe("a function's name read at run time, against Node", () => {
+  // Every value a parameter, a reassigned binding, an element, a record entry, a factory result or a bound function can hold, through typed, Function
+  // and any slots: the run-time read must print what Node prints, or the refusal comes back.
+  const dynDir = (): string => stage(workDir, "dynamic", readFileSync(join(repoRoot, "tests/fixtures/fn-identity/dynamic.ts"), "utf8"));
+  let nodeDyn: Run | null = null;
+  beforeAll(async () => {
+    const dir = dynDir();
+    nodeDyn = await run(process.execPath, [join(dir, "main.ts")], dir);
+  }, 600_000);
+
+  test("Node's answers are the baseline", () => {
+    expect(nodeDyn!.exitCode, nodeDyn!.stderr).toBe(0);
+    expect(nodeDyn!.stdout).toContain("p-bound bound g|bound arrow|bound bound g");
+    expect(nodeDyn!.stdout).toContain("r-4 bound anon");
+  });
+
+  for (const backend of ["c", "llvm"] as const) {
+    test(
+      `${backend}: every dynamic .name cell matches Node`,
+      async () => {
+        const dir = join(workDir, "dynamic");
+        const built = await compile(join(dir, "main.ts"), {
+          outPath: join(dir, exeName(`program-${backend}`)),
+          outDir: dir,
+          backend,
+        });
+        expect(
+          built.ok,
+          `${backend} build failed:\n` + (built.diagnostics ?? []).map((d) => `${d.code}: ${d.message}`).join("\n"),
+        ).toBe(true);
+        compareCells(backend, nodeDyn!, await run(built.binaryPath!, [], dir));
+      },
+      900_000,
+    );
+  }
 });

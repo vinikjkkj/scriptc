@@ -12,7 +12,7 @@ import type { Lowerer } from "./lowerer.js";
 import { lowerCastViewOverrideWrite } from "./lower-instoverride.js";
 import { isEmitterMixinStatement } from "./lower-emitter-mixin.js";
 import { timersPromisesIntervalCallOf, lowerForAwaitTimersInterval, lowerForAwaitAsyncGenerator, lowerForOfGenerator, lowerYieldStarStatement, hasEscapingLabeledJump, genIterableOf, genIterableOpenCall } from "./lower-generators.js";
-import { RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, canConvertToDyn, BIGINT, BOOL, isRefCounted, BYTES_U8, bytesValueType, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrLocal, type IrRecordShape, IrStmt, IrType, JSVAL, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
+import { RUNTIME_STREAM_CLASSES, canConvertToDyn, BIGINT, BOOL, isRefCounted, BYTES_U8, bytesValueType, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrLocal, type IrRecordShape, IrStmt, IrType, JSVAL, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import { PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, neverTaintedJsType, nodeThrowExpr, stmtUsesIsland, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { dtsTwinOwnedConst, wholeExportRootRebindable } from "./lower-modules.js";
 import { builtinImportAwaitSpecOf, builtinImportBindingStmts, dynImportBindingDeclOf, dynImportBindingStmts } from "./lower-island.js";
