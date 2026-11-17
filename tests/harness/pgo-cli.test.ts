@@ -6,6 +6,9 @@
  *   --pgo end to end (C and LLVM)
  *                             -- writes <entry>.scriptc-order.txt, the final binary prints what the plain build prints, a plain build applies the
  *                                file and says so once, --no-layout-order does not;
+ *   the block profile         -- where clang and llvm-profdata exist: --pgo also writes <entry>.scriptc-order.profdata, a plain build applies it once
+ *                                and says so, --no-layout-order does not, and a function with a never-executed branch is SPLIT (a `.cold` part) in
+ *                                the pgo build and in no other (the positive control), with the same output, on both backends;
  *   a STALE file              -- 40 names the program does not have: the build succeeds, the output is unchanged, the warning prints once; a file
  *                                that still matches prints none (the positive control for the warning). */
 import { execFileSync, spawnSync } from "node:child_process";
@@ -15,9 +18,11 @@ import { join } from "node:path";
 import { describe, expect, test } from "vitest";
 import { layoutMatchStats, layoutStaleWarning, parseLayoutOrder } from "../../packages/compiler/src/backend/layout-order.js";
 import { splitArgv } from "../../packages/cli/src/pgo.js";
+import { blockProfileSupported, findLlvmProfdata } from "../../packages/compiler/src/backend/cc.js";
 
 const cli = join(import.meta.dirname, "../../packages/cli/dist/main.js");
 const linux = process.platform === "linux";
+const blockLane = blockProfileSupported() && (await findLlvmProfdata()) !== null;
 
 describe("splitArgv", () => {
   test("words, quotes and escapes", () => {
@@ -116,18 +121,56 @@ console.log("done", acc);
       expect(order).toMatch(/tier: last executed in epoch 1/); // the epoch signal reached the profiled program
       expect(execFileSync(pgoBin, [], { encoding: "utf8" })).toBe(want);
       expect(existsSync(`${pgoBin}.pgo-prof`)).toBe(false); // the instrumented binary is cleaned up
+      const profdataFile = join(sub, "app.scriptc-order.profdata");
+      expect(existsSync(profdataFile)).toBe(blockLane);
       // a plain build now picks the file up, once, with the same output
       const autoBin = join(sub, "auto.bin");
       r = run(["build", entry, "--backend", backend, "-o", autoBin]);
       expect(r.status, r.stderr).toBe(0);
       expect(r.stderr.match(/layout order applied/g)?.length).toBe(1);
+      expect(r.stderr.match(/block profile applied/g)?.length ?? 0).toBe(blockLane ? 1 : 0);
       expect(execFileSync(autoBin, [], { encoding: "utf8" })).toBe(want);
       // --no-layout-order ignores it
       const offBin = join(sub, "off.bin");
       r = run(["build", entry, "--backend", backend, "--no-layout-order", "-o", offBin]);
       expect(r.status, r.stderr).toBe(0);
       expect(r.stderr).not.toMatch(/layout order applied/);
+      expect(r.stderr).not.toMatch(/block profile applied/);
       expect(execFileSync(offBin, [], { encoding: "utf8" })).toBe(want);
+    });
+
+    test.skipIf(!blockLane)(`the block profile splits the cold branch of an executed function, ${backend}, and only in the pgo build`, { timeout: 900_000 }, () => {
+      const sub = join(dir, `split-${backend}`);
+      mkdirSync(sub, { recursive: true });
+      const entry = join(sub, "split.ts");
+      writeFileSync(entry, `function parse(s: string, bad: boolean): number {
+  if (bad) {
+    throw new Error("rare path " + s + " " + s.length + " " + s.toUpperCase() + " " + s.toLowerCase() + " " + s.trim());
+  }
+  let n = 0;
+  for (let i = 0; i < s.length; i++) n = n * 31 + s.charCodeAt(i);
+  return n;
+}
+let t = 0;
+for (let i = 0; i < 20000; i++) t += parse("abc" + i, false);
+console.log(t);
+`);
+      const plainBin = join(sub, "plain.bin");
+      let r = run(["build", entry, "--backend", backend, "-o", plainBin]);
+      expect(r.status, r.stderr).toBe(0);
+      const want = execFileSync(plainBin, [], { encoding: "utf8" });
+      const pgoBin = join(sub, "pgo.bin");
+      r = run(["build", entry, "--backend", backend, "--pgo", "--pgo-run", "{bin}", "--pgo-no-signal", "-o", pgoBin]);
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.stderr).toMatch(/pgo: block profile /);
+      expect(execFileSync(pgoBin, [], { encoding: "utf8" })).toBe(want);
+      const coldParts = (bin: string): string[] => execFileSync("nm", [bin], { encoding: "utf8" }).split("\n").filter((l) => /\.cold$/.test(l));
+      expect(coldParts(pgoBin).length).toBeGreaterThan(0); // the split happened
+      expect(coldParts(plainBin).length).toBe(0); // positive control: no profile, no split
+      const offBin = join(sub, "off.bin");
+      r = run(["build", entry, "--backend", backend, "--no-layout-order", "-o", offBin]);
+      expect(r.status, r.stderr).toBe(0);
+      expect(coldParts(offBin).length).toBe(0);
     });
 
     test(`a stale order file never breaks the build or the output, ${backend}; the warning fires for it and not for a matching file`, { timeout: 900_000 }, () => {
