@@ -28770,6 +28770,69 @@
     "<repo>/tests/corpus/25548-a-cast-of-an-error-to-a-record-lists-the-errors-own-keys.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25610-an-unused-module-const-built-by-a-pure-initializer-is-not-built-and-the-rest-of-the-program-is-unchanged.ts": {
+   "order": [
+    "<repo>/tests/corpus/25610-an-unused-module-const-built-by-a-pure-initializer-is-not-built-and-the-rest-of-the-program-is-unchanged.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25611-an-unused-module-const-whose-initializer-throws-still-throws-at-module-evaluation.ts": {
+   "order": [
+    "<repo>/tests/corpus/25611-an-unused-module-const-whose-initializer-throws-still-throws-at-module-evaluation.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25612-an-unused-const-read-through-a-namespace-object-is-kept-and-built/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/25612-an-unused-const-read-through-a-namespace-object-is-kept-and-built/lib.ts",
+    "<repo>/tests/corpus/25612-an-unused-const-read-through-a-namespace-object-is-kept-and-built/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25613-an-unused-module-const-whose-initializer-reads-a-getter-keeps-the-getter-effect.ts": {
+   "order": [
+    "<repo>/tests/corpus/25613-an-unused-module-const-whose-initializer-reads-a-getter-keeps-the-getter-effect.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25614-a-const-re-exported-but-read-by-no-importer-is-not-built/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/25614-a-const-re-exported-but-read-by-no-importer-is-not-built/lib.ts",
+    "<repo>/tests/corpus/25614-a-const-re-exported-but-read-by-no-importer-is-not-built/barrel.ts",
+    "<repo>/tests/corpus/25614-a-const-re-exported-but-read-by-no-importer-is-not-built/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25615-an-unused-module-const-initialized-by-an-impure-call-keeps-the-call.ts": {
+   "order": [
+    "<repo>/tests/corpus/25615-an-unused-module-const-initialized-by-an-impure-call-keeps-the-call.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25616-a-module-const-read-by-a-function-that-is-never-called-is-kept-and-still-built.ts": {
+   "order": [
+    "<repo>/tests/corpus/25616-a-module-const-read-by-a-function-that-is-never-called-is-kept-and-still-built.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25617-unused-module-consts-built-by-loops-maps-and-filters-over-other-consts-print-what-they-always-printed.ts": {
+   "order": [
+    "<repo>/tests/corpus/25617-unused-module-consts-built-by-loops-maps-and-filters-over-other-consts-print-what-they-always-printed.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25618-an-unused-module-const-parsed-from-json-is-kept-because-the-parse-can-throw.ts": {
+   "order": [
+    "<repo>/tests/corpus/25618-an-unused-module-const-parsed-from-json-is-kept-because-the-parse-can-throw.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25619-an-unused-mutable-module-binding-keeps-its-initializer-and-its-effects.ts": {
+   "order": [
+    "<repo>/tests/corpus/25619-an-unused-mutable-module-binding-keeps-its-initializer-and-its-effects.ts"
+   ],
+   "diags": []
   }
  }
 }
