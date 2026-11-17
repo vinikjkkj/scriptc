@@ -4774,10 +4774,10 @@ function descriptorSourceOf(L: Lowerer, e0: ts.Expression, depth = 0): { target:
   return null;
 }
 
-/** `d.get.call(thisArg)` / `.apply` / `.bind` where `d` is a property descriptor: the accessor's body reads `this`, and the compiled body can only run
- * against the receiver it was compiled for (a class accessor against an instance of its class, an object-literal accessor against its own literal, a
- * static accessor against its class). Node runs it against ANY receiver, so a receiver the compiler cannot prove to be one of those is refused here
- * rather than left to throw at run time. Null when the call is not of this shape. */
+/** `d.get.call(thisArg)` / `.apply` / `.bind` where `d` is traced to `Object.getOwnPropertyDescriptor(K.prototype, "key")` and the receiver is statically
+ * KNOWN to be something other than an instance of K (or a subclass): a different class's instance or a primitive. The class accessor body runs only
+ * against an instance of its own class, so that call used to throw at run time where Node runs the body against the receiver; it is refused here. Every
+ * other shape (an untraceable descriptor, an any-typed receiver, an object-literal or static source) keeps its previous lowering. Null otherwise. */
 function descriptorAccessorCallRefusal(L: Lowerer, expr: ts.CallExpression): string | null {
   const callee = expr.expression;
   if (!ts.isPropertyAccessExpression(callee) || callee.questionDotToken !== undefined) return null;
@@ -4787,30 +4787,19 @@ function descriptorAccessorCallRefusal(L: Lowerer, expr: ts.CallExpression): str
   while (ts.isParenthesizedExpression(fnExpr) || ts.isNonNullExpression(fnExpr)) fnExpr = fnExpr.expression;
   if (!ts.isPropertyAccessExpression(fnExpr) || (fnExpr.name.text !== "get" && fnExpr.name.text !== "set")) return null;
   const src = descriptorSourceOf(L, fnExpr.expression);
-  const typed = /PropertyDescriptor/.test(L.checker.typeToString(L.typeOf(fnExpr.expression)));
-  const what = `.${method}() of the ${fnExpr.name.text} function of a property descriptor`;
-  if (src === null) {
-    return typed
-      ? `${what} whose descriptor the compiler cannot trace to one getOwnPropertyDescriptor call (the accessor body only runs against the receiver it was compiled for)`
-      : null;
-  }
   const thisNode = expr.arguments[0];
-  if (thisNode === undefined) return `${what} without a receiver`;
+  if (src === null || thisNode === undefined) return null;
   let target: ts.Expression = src.target;
   while (ts.isParenthesizedExpression(target) || ts.isNonNullExpression(target) || ts.isAsExpression(target)) target = target.expression;
   const root = L.protoRootClassOf(target);
-  if (root !== null && ts.isPropertyAccessExpression(target) && target.name.text === "prototype") {
-    const t = L.mapTypeOf(L.typeOf(thisNode));
-    if (t !== null && t.kind === "object" && (t.className === root.def.name || L.isSubclassOf(t.className, root.def.name))) return null;
-    return `${what} of '${root.def.jsName ?? root.def.name}'.prototype needs a receiver statically known to be an instance of '${root.def.jsName ?? root.def.name}' (or a subclass); Node would run the accessor body against any object, which this build cannot`;
-  }
-  let recv: ts.Expression = thisNode;
-  while (ts.isParenthesizedExpression(recv) || ts.isNonNullExpression(recv) || ts.isAsExpression(recv)) recv = recv.expression;
-  if (ts.isIdentifier(target) && ts.isIdentifier(recv)) {
-    const a = L.resolveValueSymbol(target), b = L.resolveValueSymbol(recv);
-    if (a !== null && a !== undefined && a === b) return null;
-  }
-  return `${what} needs the very object the descriptor was read from as its receiver (an object-literal or static accessor body is compiled against that one object; Node would run it against any other)`;
+  if (root === null || !ts.isPropertyAccessExpression(target) || target.name.text !== "prototype") return null;
+  const t = L.mapTypeOf(L.typeOf(thisNode));
+  if (t === null) return null;
+  const wrongObject = t.kind === "object" && !(t.className === root.def.name || L.isSubclassOf(t.className, root.def.name));
+  const primitive = t.kind === "f64" || t.kind === "string" || t.kind === "bool";
+  if (!wrongObject && !primitive) return null;
+  const cn = root.def.jsName ?? root.def.name;
+  return `.${method}() of the ${fnExpr.name.text} function of '${cn}'.prototype's descriptor with a receiver that is statically not an instance of '${cn}' (the accessor body only runs against an instance of its class; Node would run it against this receiver)`;
 }
 
 export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
