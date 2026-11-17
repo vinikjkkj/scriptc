@@ -1633,6 +1633,8 @@ export interface TypeMapperCtx {
    * declaration files, so a program-authored type that reaches the member
    * through a type argument keeps every refusal. Part of the memo key. */
   declMember?: boolean | undefined;
+  /** Map an `any` member as the checked-dynamic slot (DYN) instead of refusing it. Set only for a literal that is handed to a print call (lowering/inspect-any-literal.ts). Part of the memo key. */
+  anyDyn?: boolean | undefined;
   /** This mapping is an ATTEMPT whose failure is discarded by the caller.
    * Refusals collected under it are not the types' own answer and must not
    * reach the memo — the caller's rollback restores registries and the
@@ -1928,7 +1930,7 @@ const mapTypeMemo = new WeakMap<ts.Type, Map<string, { ctx: TypeMapperCtx; resul
  * characters because memoUsableUnder compares them with ===. */
 function memoModeKey(ctx: TypeMapperCtx): string {
   const f = (v: boolean | undefined): string => (v === undefined ? "u" : v ? "t" : "f");
-  return f(ctx.dynamic) + f(ctx.indexUnionOk) + f(ctx.restTupleFromErasure) + f(ctx.unionArmAnyReturn) + f(ctx.declMember);
+  return f(ctx.dynamic) + f(ctx.indexUnionOk) + f(ctx.restTupleFromErasure) + f(ctx.unionArmAnyReturn) + f(ctx.declMember) + f(ctx.anyDyn);
 }
 
 /* ── SCRIPTC_SPEC_AUDIT ────────────────────────────────────────────────────
@@ -2076,7 +2078,8 @@ function memoUsableUnder(entry: TypeMapperCtx, ctx: TypeMapperCtx): boolean {
       entry.indexUnionOk === ctx.indexUnionOk &&
       entry.restTupleFromErasure === ctx.restTupleFromErasure &&
       entry.unionArmAnyReturn === ctx.unionArmAnyReturn &&
-      entry.declMember === ctx.declMember)
+      entry.declMember === ctx.declMember &&
+      entry.anyDyn === ctx.anyDyn)
   );
 }
 
@@ -2553,7 +2556,7 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // dynamically-executed code); without the flag it stays unmapped and the
   // per-site diagnostic tells the user about --dynamic and the static
   // alternative (`unknown` + a checked cast).
-  if (flags & ts.TypeFlags.Any) return ctx.dynamic ? JSVAL : null;
+  if (flags & ts.TypeFlags.Any) return ctx.dynamic ? JSVAL : ctx.anyDyn === true ? DYN : null;
   // Enum types and enum member literal types: an enum VALUE at runtime IS
   // its underlying primitive (tsc's own emit stores plain numbers/strings
   // on the enum object; const enums inline them), so the enum type maps to

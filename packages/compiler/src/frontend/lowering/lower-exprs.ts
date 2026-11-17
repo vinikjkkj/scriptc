@@ -9566,7 +9566,7 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     }
     const ctxType = L.checker.getContextualType(expr);
     const tsType = ctxType ?? L.typeOf(expr);
-    let mapped = expected ?? L.mapTypeOf(tsType);
+    let mapped = expected ?? L.mapPrintedLiteralTypeOf(expr, tsType);
     // A JS literal whose OWN inferred type is never-tainted
     // (neverTaintedJsType — the evolving `const gb = []`, the mixed
     // command tuple `['pwd', []]`) carries no element information: route
@@ -9591,7 +9591,7 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
     // the literal's own inferred type is the real tuple.
     if (!mapped || mapped.kind === "union" || mapped.kind === "dyn") {
       const ctxUnion = mapped?.kind === "union" ? mapped : null;
-      mapped = L.mapTypeOf(L.typeOf(expr));
+      mapped = L.mapPrintedLiteralTypeOf(expr, L.typeOf(expr));
       // The never-tainted own type carries no element information here
       // either (the JS story above) — only a contextual union's single
       // array arm below may still supply a static home.
@@ -12041,7 +12041,7 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     if (tsType.isUnionType() && ts.constituentTypes(tsType).some((t) => t.getSymbol()?.name === "PromiseLike")) {
       tsType = L.checker.getAwaitedType(tsType) ?? tsType;
     }
-    let mapped = L.mapTypeOf(tsType);
+    let mapped = L.mapPrintedLiteralTypeOf(expr, tsType);
     /** The CONTEXTUAL union, when the slot's type mapped to one and the
      * literal therefore had to pick an arm to build as. Kept out here so
      * the refusal below can tell "the slot is a union and no arm fit"
@@ -12111,7 +12111,7 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
     // back, and let the slot coercion tell the story if there is one.
     if (mapped === null || mapped.kind === "union" || mapped.kind === "dyn" || mapped.kind === "object" || mapped.kind === "jsval" || mapped.kind === "array") {
       ctxUnion = mapped?.kind === "union" ? mapped : null;
-      mapped = L.mapTypeOf(L.typeOf(expr)) ?? mapped;
+      mapped = L.mapPrintedLiteralTypeOf(expr, L.typeOf(expr)) ?? mapped;
       shapeDeclared = false;
       // A literal whose own shape re-tags into NO arm of the contextual
       // union, where the union has exactly ONE record arm: build AS that
