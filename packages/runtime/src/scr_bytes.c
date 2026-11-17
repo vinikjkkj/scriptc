@@ -247,7 +247,7 @@ void scr_bytes_release(ScrBytes *b) {
     } else {
       free(b->data);
     }
-    if (b->own != NULL) scr_bytes_own_ops->free(b);
+    if (b->own != NULL) (scr_bytes_own_ops->free)(b);
 #ifdef SCR_RC_AUDIT
     scr_live_bytes--;
 #endif
