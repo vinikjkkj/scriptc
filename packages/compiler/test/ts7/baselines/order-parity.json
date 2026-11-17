@@ -16580,6 +16580,66 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25680-a-generic-index-reached-through-its-erased-view-keeps-both-maps-in-lru-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/25680-a-generic-index-reached-through-its-erased-view-keeps-both-maps-in-lru-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25681-both-arms-of-an-erased-view-ternary-select-by-identity-and-mutate-the-same-instance.ts": {
+   "order": [
+    "<repo>/tests/corpus/25681-both-arms-of-an-erased-view-ternary-select-by-identity-and-mutate-the-same-instance.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25682-two-views-of-one-generic-class-keep-their-key-types-apart.ts": {
+   "order": [
+    "<repo>/tests/corpus/25682-two-views-of-one-generic-class-keep-their-key-types-apart.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25683-a-constructed-unknown-instance-stays-a-plain-monomorph-beside-the-erased-view.ts": {
+   "order": [
+    "<repo>/tests/corpus/25683-a-constructed-unknown-instance-stays-a-plain-monomorph-beside-the-erased-view.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25684-a-subclass-of-an-instantiation-is-reached-through-the-erased-view.ts": {
+   "order": [
+    "<repo>/tests/corpus/25684-a-subclass-of-an-instantiation-is-reached-through-the-erased-view.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25685-instanceof-answers-for-every-instantiation-reached-through-the-erased-view.ts": {
+   "order": [
+    "<repo>/tests/corpus/25685-instanceof-answers-for-every-instantiation-reached-through-the-erased-view.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25686-statics-of-a-generic-class-stay-on-the-family-beside-the-erased-view.ts": {
+   "order": [
+    "<repo>/tests/corpus/25686-statics-of-a-generic-class-stay-on-the-family-beside-the-erased-view.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25687-an-erased-view-is-stored-in-fields-arrays-and-maps-and-passed-as-a-parameter.ts": {
+   "order": [
+    "<repo>/tests/corpus/25687-an-erased-view-is-stored-in-fields-arrays-and-maps-and-passed-as-a-parameter.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25688-methods-outside-the-erased-view-and-nullable-or-optional-view-slots.ts": {
+   "order": [
+    "<repo>/tests/corpus/25688-methods-outside-the-erased-view-and-nullable-or-optional-view-slots.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25689-an-unknown-typed-generic-class-with-no-typed-instantiation-stays-a-monomorph.ts": {
+   "order": [
+    "<repo>/tests/corpus/25689-an-unknown-typed-generic-class-with-no-typed-instantiation-stays-a-monomorph.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2569-upcast-identity.ts": {
    "order": [
     "<repo>/tests/corpus/2569-upcast-identity.ts"
@@ -25998,6 +26058,12 @@
   "<repo>/tests/diagnostics/a-subscribe-slot-whose-event-map-has-an-unspellable-handler.ts": {
    "order": [
     "<repo>/tests/diagnostics/a-subscribe-slot-whose-event-map-has-an-unspellable-handler.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/a-value-mentioning-method-called-on-an-erased-generic-view-keeps-refusing.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/a-value-mentioning-method-called-on-an-erased-generic-view-keeps-refusing.ts"
    ],
    "diags": []
   },
