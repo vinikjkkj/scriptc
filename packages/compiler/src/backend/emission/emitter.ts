@@ -20,7 +20,7 @@
  * The generated C is a debugging surface: locals keep their TS names inside
  * the mangled form and every statement carries a `source line` comment.
  */
-import { bestRank, cDefinedNames, extractCFunctionChunks, markUsedDefinitions, stableByRank, type LayoutOrder } from "../layout-order.js";
+import { bestRank, cDefinedNames, extractCFunctionChunks, hotFirst, literalRefs, markUsedDefinitions, stableByRank, type LayoutOrder } from "../layout-order.js";
 import { canonPlanOf } from "../../ir/num-canon.js";
 import { CLOSURE_C_STRUCT, closureStaticCInit } from "../closure-layout.js";
 import type {
@@ -1443,6 +1443,12 @@ export class CEmitter {
     // --layout-order: each function's lines are kept as one chunk so the chunks can be ordered once emission is complete. Emission
     // itself runs in the module's own order (it names counter helpers as it goes), so the file is ordered afterwards.
     const layout = this.layoutOrder;
+    // The string literals only cold (unranked) functions mention are written after the others, see layout-order.ts (data literals).
+    const litHot = new Set<string>();
+    const litCold = new Set<string>();
+    const noteLits = (lines: readonly string[], ranked: boolean): void => {
+      for (const r of literalRefs(lines)) (ranked ? litHot : litCold).add(r);
+    };
     const fnChunks: string[][] = [];
     for (const fn of this.mod.functions) {
       this.emitFunction(fn);
@@ -1462,9 +1468,13 @@ export class CEmitter {
         const walkers = extractCFunctionChunks(this.walkerDefs);
         this.walkerDefs.length = 0;
         for (const l of walkers.rest) this.walkerDefs.push(l);
+        noteLits(walkers.rest, true);
         pool = [...walkers.chunks, ...fnChunks];
       }
-      for (const chunk of stableByRank(pool, (c) => bestRank(layout!, cDefinedNames(c)))) appendLines(body, markUsedDefinitions(chunk, layout!));
+      for (const chunk of stableByRank(pool, (c) => bestRank(layout!, cDefinedNames(c)))) {
+        noteLits(chunk, Number.isFinite(bestRank(layout!, cDefinedNames(chunk))));
+        appendLines(body, markUsedDefinitions(chunk, layout!));
+      }
     };
     if (layout !== undefined) orderBody(false);
     if (layout !== undefined) {
@@ -1473,7 +1483,11 @@ export class CEmitter {
       const inPlace = extractCFunctionChunks(this.walkerDefs);
       this.walkerDefs.length = 0;
       for (const l of inPlace.rest) this.walkerDefs.push(l);
-      for (const chunk of stableByRank(inPlace.chunks, (c) => bestRank(layout, cDefinedNames(c)))) appendLines(this.walkerDefs, markUsedDefinitions(chunk, layout));
+      noteLits(inPlace.rest, true);
+      for (const chunk of stableByRank(inPlace.chunks, (c) => bestRank(layout, cDefinedNames(c)))) {
+        noteLits(chunk, Number.isFinite(bestRank(layout, cDefinedNames(chunk))));
+        appendLines(this.walkerDefs, markUsedDefinitions(chunk, layout));
+      }
     }
 
     // THE SPLIT DECISION, taken here and nowhere else.
@@ -1551,7 +1565,11 @@ export class CEmitter {
       const helpers = extractCFunctionChunks(structDefs);
       structDefs.length = 0;
       for (const l of helpers.rest) structDefs.push(l);
-      for (const chunk of stableByRank(helpers.chunks, (c) => bestRank(layout, cDefinedNames(c)))) appendLines(structDefs, markUsedDefinitions(chunk, layout));
+      noteLits(helpers.rest, true);
+      for (const chunk of stableByRank(helpers.chunks, (c) => bestRank(layout, cDefinedNames(c)))) {
+        noteLits(chunk, Number.isFinite(bestRank(layout, cDefinedNames(chunk))));
+        appendLines(structDefs, markUsedDefinitions(chunk, layout));
+      }
     }
     // ASYNC GENERATOR settle thunks are interned HERE, ahead of the
     // unit-instance flush below, not where the spawn wrappers name them
@@ -1568,7 +1586,11 @@ export class CEmitter {
         { kind: "record", shapeId: fn.generator.resultShapeId! },
       );
     }
-    for (const [text, sym] of this.literals) {
+    // --layout-order: a literal that only unranked functions mention goes after the rest (a literal also seen in ranked or data text stays hot).
+    const litCols = new Set<string>();
+    if (layout !== undefined) for (const r of litCold) if (!litHot.has(r)) litCols.add(r);
+    const literalEntries = layout === undefined || litCols.size === 0 ? [...this.literals] : hotFirst([...this.literals], (e) => e[1], litCols);
+    for (const [text, sym] of literalEntries) {
       // The SHAPE is scr_runtime.h's SCR_STR_LIT macro, not a struct spelled
       // out here, and that is deliberate. An ScrStr has a flexible array
       // member, so no literal can be declared with the type itself: every one
