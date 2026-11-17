@@ -7,6 +7,7 @@
  *
  * The scope is the literal's position, not the type: only an object, array or `new` expression reached from a print call's argument through other literals qualifies. */
 import * as ts from "../ts7/adapter.js";
+import type { Lowerer } from "./lowerer.js";
 
 const PRINT_OBJECTS = new Map<string, ReadonlySet<string>>([
   ["console", new Set(["log", "info", "warn", "error", "debug", "dir"])],
@@ -25,18 +26,60 @@ function isPrintCallee(callee: ts.Expression): boolean {
   return names !== undefined && names.has(callee.name.text);
 }
 
-/** True when `node` is an object/array literal or a `new` expression that sits, through nested literals only, in an argument of console.log/info/warn/error/debug/dir or util.inspect/format. */
-export function isPrintedLiteral(node: ts.Node): boolean {
-  if (!(ts.isObjectLiteralExpression(node) || ts.isArrayLiteralExpression(node) || ts.isNewExpression(node))) return false;
+function isLiteralLike(node: ts.Node): boolean {
+  return ts.isObjectLiteralExpression(node) || ts.isArrayLiteralExpression(node) || ts.isNewExpression(node);
+}
+
+/** An initializer slot with no annotation to vouch for its type: `const r = { n }` / `let r = [n]` (the binding's type IS the literal's inferred type, so the any member must be
+ * the checked-dynamic slot in the binding as well as in the literal). */
+function isUnannotatedInit(p: ts.Node, n: ts.Node): boolean {
+  return ts.isVariableDeclaration(p) && p.type === undefined && p.initializer !== undefined && same(p.initializer, n) && ts.isIdentifier(p.name);
+}
+
+/** Where a literal sits: the climb through nested literals ends at a print call's argument (`print`), at an unannotated variable's initializer (`init`), or at neither. */
+function literalSite(node: ts.Node): "print" | "init" | null {
+  if (!isLiteralLike(node)) return null;
   let n: ts.Node = node;
   for (;;) {
     const p: ts.Node | undefined = n.parent;
-    if (p === undefined) return false;
-    if (ts.isParenthesizedExpression(p) || ts.isSpreadElement(p) || ts.isArrayLiteralExpression(p) || ts.isObjectLiteralExpression(p)) { n = p; continue; }
+    if (p === undefined) return null;
+    if (ts.isParenthesizedExpression(p) || ts.isSpreadElement(p) || ts.isSpreadAssignment(p) || ts.isArrayLiteralExpression(p) || ts.isObjectLiteralExpression(p)) { n = p; continue; }
     if (ts.isPropertyAssignment(p) && same(p.initializer, n)) { n = p; continue; }
     if (ts.isShorthandPropertyAssignment(p)) { n = p; continue; }
     if (ts.isNewExpression(p) && p.arguments !== undefined && p.arguments.some((a) => same(a, n))) { n = p; continue; }
-    if (ts.isCallExpression(p) && p.arguments.some((a) => same(a, n))) return isPrintCallee(p.expression);
-    return false;
+    if (ts.isCallExpression(p) && p.arguments.some((a) => same(a, n))) return isPrintCallee(p.expression) ? "print" : null;
+    if (isUnannotatedInit(p, n)) return "init";
+    return null;
   }
+}
+
+/** True when `node` is an object/array literal or a `new` expression that sits, through nested literals only, in an argument of console.log/info/warn/error/debug/dir,
+ * util.inspect/format or JSON.stringify, or is the initializer of an unannotated variable. */
+export function isPrintedLiteral(node: ts.Node): boolean {
+  return literalSite(node) !== null;
+}
+
+/** True when the literal is (through nested literals) an argument of a print call: a value consumed only as a dyn argument, which is where a dyn-flavored container may stand in for a static one. */
+export function isPrintArgLiteral(node: ts.Node): boolean {
+  return literalSite(node) === "print";
+}
+
+/** True when `node` names (declaration or reference) an unannotated variable whose initializer is a literal: its type is the literal's own inferred type. */
+export function isAnyLiteralBinding(checker: Pick<Lowerer["checker"], "getSymbolAtLocation" | "valueDeclarationOf">, node: ts.Node): boolean {
+  if (!ts.isIdentifier(node)) return false;
+  const sym = checker.getSymbolAtLocation(node);
+  const decl = sym === undefined ? undefined : checker.valueDeclarationOf(sym);
+  if (decl === undefined || !ts.isVariableDeclaration(decl) || decl.type !== undefined || decl.initializer === undefined) return false;
+  let init: ts.Node = decl.initializer;
+  while (ts.isParenthesizedExpression(init)) init = init.expression;
+  return isLiteralLike(init);
+}
+
+/** True when `node` is a literal on the right of `=` whose left side is an identifier bound to an any-literal variable (`let r = { n }; r = { n: 7 }`): the new value must have the variable's slot types. */
+export function isAnyLiteralAssignRhs(checker: Pick<Lowerer["checker"], "getSymbolAtLocation" | "valueDeclarationOf">, node: ts.Node): boolean {
+  if (!isLiteralLike(node)) return false;
+  let n: ts.Node = node;
+  while (n.parent !== undefined && ts.isParenthesizedExpression(n.parent)) n = n.parent;
+  const p = n.parent;
+  return p !== undefined && ts.isBinaryExpression(p) && p.operatorToken.kind === ts.SyntaxKind.EqualsToken && same(p.right, n) && isAnyLiteralBinding(checker, p.left);
 }

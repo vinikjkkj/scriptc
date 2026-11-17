@@ -3,6 +3,7 @@
  * synthesized derived ctors and field initializers, super calls and super
  * accessor access, upcasts, `new` expressions, and the builtin Error
  * hierarchy registration. */
+import { isPrintArgLiteral } from "./inspect-any-literal.js";
 import type { ScrDiagnostic } from "../../diagnostics/diagnostic.js";
 import { protoDataFieldNames, registerProtoData } from "./lower-protodata.js";
 import { appliesEmitterMixin, EMITTER_MIXIN_FIELD, graftCtorEmitterInit } from "./lower-emitter-mixin.js";
@@ -13200,6 +13201,15 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
       if (symbol?.name === "Set" && L.isStdlibSymbol(symbol)) {
         const tsType = L.typeOf(expr);
         let mapped = L.mapTypeOf(tsType);
+        // `console.log(new Set([n, e]))` over any/unknown elements: no static Set holds dyn elements (Set elements are Map's key kinds), and the value is only
+        // printed, so the dyn-flavored Set (the form a JavaScript `new Set()` takes) stands in for it.
+        if (!isJsSourceFile(expr.getSourceFile()) && isPrintArgLiteral(expr)) {
+          const targ0 = L.checker.getTypeArguments(tsType as ts.TypeReference)[0];
+          if (targ0 !== undefined && ((targ0.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0)) {
+            const dynSet = dynAnyContainer(L, expr, tsType, "set", locOf(expr), true, true);
+            if (dynSet !== null) return dynSet;
+          }
+        }
         if (anyContainerContext(L, expr, "Set")) {
           const anySet = dynAnyContainer(L, expr, tsType, "set", locOf(expr), true);
           if (anySet !== null) return anySet;
@@ -15116,8 +15126,10 @@ function dynAnyContainer(
    * (anyContainerContext), so the expression's own type arguments (the
    * seed's inference) are not consulted. */
   forced = false,
+  /** A TypeScript `new Set([...])` printed directly (isPrintArgLiteral): the dyn-flavored form is consumed only as a dyn argument. */
+  allowTs = false,
 ): IrExpr | null {
-  if (!isJsSourceFile(expr.getSourceFile())) return null;
+  if (!allowTs && !isJsSourceFile(expr.getSourceFile())) return null;
   const args = expr.arguments ?? [];
   if (args.length > 1 || args.some(ts.isSpreadElement)) return null;
   const targs = L.checker.getTypeArguments(tsType as ts.TypeReference);
