@@ -10902,6 +10902,120 @@ function fenceAccessorSpreadSource(L: Lowerer, prop: ts.Node, srcShape: IrRecord
  * answers it; zero or several answer null and the caller keeps its
  * fences. Plain property-assignment/shorthand literals only — spreads,
  * accessors, methods, and unfoldable computed keys keep their own paths. */
+/** `{ kind: key, value } as Item` where `Item` is a union of records discriminated by string literals and `key` is typed as a union of those literals:
+ * the literal's arm is not decided at compile time, the discriminant's RUN-TIME value decides it, exactly as in JavaScript (the object is whatever the
+ * discriminant says). Each arm is built from the same once-evaluated property values: the discriminant becomes the arm's literal and every other property
+ * is converted to that arm's field type with the ordinary checked conversion (an `unknown` value is validated as the arm's type, the conversion every
+ * assertion from `unknown` already takes). Declined, leaving the existing fence, unless: the literal has only plain properties; one property's type is a union
+ * of string literals each naming exactly one member of the context union (every member's field of that name a single string literal); every
+ * member's record has exactly the literal's property names; and every member is a record arm of the slot's lowered union. */
+function lowerDiscriminantDispatchLiteral(
+  L: Lowerer,
+  expr: ts.ObjectLiteralExpression,
+  ctxTs: ts.Type,
+  ctxUnion: IrType & { kind: "union" },
+  loc: SrcLoc,
+): IrExpr | null {
+  if (!ctxTs.isUnionType()) return null;
+  const props: { name: string; node: ts.Expression; isShorthand: boolean; decl: ts.ObjectLiteralElementLike }[] = [];
+  for (const p of expr.properties) {
+    if (ts.isPropertyAssignment(p) && !ts.isComputedPropertyName(p.name)) {
+      props.push({ name: propNameText(L, p.name), node: p.initializer, isShorthand: false, decl: p });
+    } else if (ts.isShorthandPropertyAssignment(p) && ts.isIdentifier(p.name)) {
+      props.push({ name: p.name.text, node: p.name, isShorthand: true, decl: p });
+    } else {
+      return null;
+    }
+  }
+  if (props.length < 2) return null;
+  const def = L.unions.get(ctxUnion.unionId);
+  if (def === undefined) return null;
+  const members = ts.constituentTypes(ctxTs);
+  // the arm of each member: a record arm of the slot's union with exactly the literal's property names
+  const memberArm = new Map<ts.Type, { shapeId: string; tag: number }>();
+  for (const m of members) {
+    const mm = L.mapTypeOf(m);
+    if (mm?.kind !== "record") return null;
+    const shape = L.shapes.get(mm.shapeId);
+    if (shape === undefined || shape.tuple || shape.indexValue !== undefined) return null;
+    if (shape.fields.length !== props.length || !props.every((p) => shape.fields.some((f) => f.name === p.name))) return null;
+    const tag = def.arms.findIndex((a) => a.kind === "record" && a.shapeId === mm.shapeId);
+    if (tag < 0) return null;
+    memberArm.set(m, { shapeId: mm.shapeId, tag });
+  }
+  // the discriminant: the property whose literal type is a union of the members' literal values
+  const litOf = (m: ts.Type, name: string): string | null => {
+    const sym = L.checker.getPropertyOfType(m, name);
+    if (sym === undefined) return null;
+    const t = L.checker.getTypeOfSymbol(sym);
+    return t.isStringLiteralType() ? t.value : null;
+  };
+  let disc: (typeof props)[number] | null = null;
+  const armOfLiteral = new Map<string, { shapeId: string; tag: number }>();
+  for (const p of props) {
+    const t = L.typeOf(p.node);
+    const lits = t.isUnionType() ? ts.constituentTypes(t) : [t];
+    if (lits.length < 2 || !lits.every((x) => x.isStringLiteralType())) continue;
+    const byLit = new Map<string, { shapeId: string; tag: number }>();
+    let ok = true;
+    for (const m of members) {
+      const v = litOf(m, p.name);
+      if (v === null) { ok = false; break; }
+      if (byLit.has(v)) { ok = false; break; } // two members share a literal: not a discriminant
+      byLit.set(v, memberArm.get(m)!);
+    }
+    if (!ok) continue;
+    if (!lits.every((x) => byLit.has((x as ts.Type & { value: string }).value))) continue;
+    disc = p;
+    for (const [k, v] of byLit) armOfLiteral.set(k, v);
+    break;
+  }
+  if (disc === null) return null;
+  // evaluate the properties once, in source order
+  const stmts: IrStmt[] = [];
+  const slots = new Map<string, { id: string; type: IrType; node: ts.Node }>();
+  for (const p of props) {
+    const v = p.isShorthand ? L.lowerShorthandValue(p.decl as ts.ShorthandPropertyAssignment) : L.lowerExpr(p.node);
+    if (p.name === disc.name) {
+      if (v.type.kind !== "string") return null;
+    }
+    const hl = L.declareHiddenLocal(`%disc.${p.name}`, v.type);
+    stmts.push({ kind: "varDecl", localId: hl.id, init: v, loc });
+    slots.set(p.name, { id: hl.id, type: v.type, node: p.node });
+  }
+  const ref = (name: string): IrExpr => {
+    const sl = slots.get(name)!;
+    return { kind: "varRef", localId: sl.id, type: sl.type, loc };
+  };
+  const armValue = (shapeId: string, tag: number, litValue: string): IrExpr => {
+    const shape = L.shapes.get(shapeId)!;
+    const recT: IrType = { kind: "record", shapeId };
+    const fields = shape.fields.map((f) => {
+      if (f.name === disc!.name) return { name: f.name, value: { kind: "strLit", value: litValue, type: STRING, loc } as IrExpr };
+      const sl = slots.get(f.name)!;
+      const v = L.coerceInto(sl.node, ref(f.name), f.type);
+      if (!typeEquals(v.type, f.type)) L.badType(sl.node, L.typeOf(sl.node));
+      return { name: f.name, value: v };
+    });
+    return { kind: "unionWrap", unionId: ctxUnion.unionId, tag, value: { kind: "recordLit", fields, type: recT, loc }, type: ctxUnion, loc };
+  };
+  const entries = [...armOfLiteral.entries()];
+  // the last literal needs no test: the checker restricts the discriminant to the union of the literals
+  let chain = armValue(entries[entries.length - 1]![1].shapeId, entries[entries.length - 1]![1].tag, entries[entries.length - 1]![0]);
+  for (let i = entries.length - 2; i >= 0; i--) {
+    const [lit, arm] = entries[i]!;
+    chain = {
+      kind: "ternary",
+      cond: strEqExpr(false, ref(disc.name), { kind: "strLit", value: lit, type: STRING, loc }, loc),
+      then: armValue(arm.shapeId, arm.tag, lit),
+      else_: chain,
+      type: ctxUnion,
+      loc,
+    };
+  }
+  return { kind: "seqExpr", stmts, result: chain, type: ctxUnion, loc };
+}
+
 function literalUnionArmOf(
   L: Lowerer,
   expr: ts.ObjectLiteralExpression,
@@ -12165,6 +12279,12 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
           if (ownShapeId === null || !recordArms.some((a) => a.shapeId === ownShapeId)) {
             const arm = literalUnionArmOf(L, expr, tsType, recordArms);
             if (arm) { mapped = arm; shapeDeclared = ctxType0 !== undefined; }
+            else if (ctxType0 !== undefined) {
+              // The discriminant is a UNION of the arms' literals (`kind: key`, key typed "a" | "b"): no single arm fits at compile time, the run-time
+              // value of the discriminant picks it.
+              const dispatched = lowerDiscriminantDispatchLiteral(L, expr, ctxType0, ctxUnion, loc);
+              if (dispatched !== null) return dispatched;
+            }
           }
         }
       }
