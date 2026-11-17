@@ -1562,9 +1562,36 @@ static bool dyn_forin_inherited_has(const ScrDyn *v, const ScrStr *key) {
   return false;
 }
 
+/* The enumerable own keys of %Buffer.prototype% (Node v24, `Object.keys(Buffer.prototype)`): a Buffer inherits them, so for-in visits them after its indices. */
+static const char *const dyn_buffer_proto_keys[] = {
+  "readBigUInt64LE", "readBigUInt64BE", "readBigUint64LE", "readBigUint64BE", "readBigInt64LE", "readBigInt64BE", "writeBigUInt64LE",
+  "writeBigUInt64BE", "writeBigUint64LE", "writeBigUint64BE", "writeBigInt64LE", "writeBigInt64BE", "readUIntLE", "readUInt32LE", "readUInt16LE",
+  "readUInt8", "readUIntBE", "readUInt32BE", "readUInt16BE", "readUintLE", "readUint32LE", "readUint16LE", "readUint8", "readUintBE", "readUint32BE",
+  "readUint16BE", "readIntLE", "readInt32LE", "readInt16LE", "readInt8", "readIntBE", "readInt32BE", "readInt16BE", "writeUIntLE", "writeUInt32LE",
+  "writeUInt16LE", "writeUInt8", "writeUIntBE", "writeUInt32BE", "writeUInt16BE", "writeUintLE", "writeUint32LE", "writeUint16LE", "writeUint8",
+  "writeUintBE", "writeUint32BE", "writeUint16BE", "writeIntLE", "writeInt32LE", "writeInt16LE", "writeInt8", "writeIntBE", "writeInt32BE",
+  "writeInt16BE", "readFloatLE", "readFloatBE", "readDoubleLE", "readDoubleBE", "writeFloatLE", "writeFloatBE", "writeDoubleLE", "writeDoubleBE",
+  "asciiSlice", "base64Slice", "base64urlSlice", "latin1Slice", "hexSlice", "ucs2Slice", "utf8Slice", "asciiWrite", "base64Write", "base64urlWrite",
+  "latin1Write", "hexWrite", "ucs2Write", "utf8Write", "parent", "offset", "copy", "toString", "equals", "inspect", "compare", "indexOf",
+  "lastIndexOf", "includes", "fill", "write", "toJSON", "subarray", "slice", "swap16", "swap32", "swap64", "toLocaleString",
+};
+#define DYN_BUFFER_PROTO_KEY_COUNT (sizeof dyn_buffer_proto_keys / sizeof dyn_buffer_proto_keys[0])
+static bool dyn_buffer_proto_key(const ScrStr *key) {
+  for (size_t i = 0; i < DYN_BUFFER_PROTO_KEY_COUNT; i++)
+    if (strlen(dyn_buffer_proto_keys[i]) == key->len && memcmp(dyn_buffer_proto_keys[i], key->data, key->len) == 0) return true;
+  return false;
+}
+
 ScrDyn *scr_dyn_forin_keys(const ScrDyn *v) {
   ScrDyn *keys = dyn_forin_keys_core(v);
   if (keys == NULL || keys->kind != SCR_DYN_ARR) return keys;
+  if (v->kind == SCR_DYN_BYTES && v->buffer) {
+    for (size_t i = 0; i < DYN_BUFFER_PROTO_KEY_COUNT; i++) {
+      const char *name = dyn_buffer_proto_keys[i];
+      scr_dyn_arr_push(keys, dyn_cls_objwalk_key(name, strlen(name)));
+    }
+    return keys;
+  }
   if (v->kind != SCR_DYN_OBJINST) {
     if (__builtin_expect(v->kind == SCR_DYN_OBJ && v->v.obj.ext != NULL && v->v.obj.ext->proto != NULL, 0)) dyn_forin_append_inherited(v, keys);
     return keys;
@@ -1677,6 +1704,7 @@ __attribute__((noinline)) static bool dyn_forin_plain_inherited(const ScrDyn *v,
 }
 
 bool scr_dyn_forin_plain(const ScrDyn *v, const ScrStr *key) {
+  if (v->kind == SCR_DYN_BYTES && v->buffer && dyn_buffer_proto_key(key)) return true;
   if (ee_keys_instance(v) || props_instance(v)) return false;
   if (scr_dyn_has_own(v, key) || dyn_cls_proto_key_visited(v, key->data, key->len)) return true;
   return dyn_forin_plain_inherited(v, key);
