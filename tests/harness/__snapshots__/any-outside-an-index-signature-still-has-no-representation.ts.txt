@@ -1,8 +1,8 @@
-any-outside-an-index-signature-still-has-no-representation.ts:23:17 - error SC2011: values of type '[string, any][]' have no static representation but run in the embedded dynamic engine, which this build does not include (the static mapping refuses: [string, any][] > [string, any] > toLocaleString > { (): string; (locales: string | string[], options?: (NumberFormatOptions & DateTimeFormatOptions) | undefined): string; })
+any-outside-an-index-signature-still-has-no-representation.ts:22:7 - error SC2011: values of type 'any[]' have no static representation but run in the embedded dynamic engine, which this build does not include (the static mapping refuses: any[] > any)
 
-  22 | // for...in, `in`, delete, spread and JSON.stringify all compile over it.
-  23 | for (const e of Object.entries(admitted)) console.log(e[0], String(e[1]));
-     |                 ^~~~~~~~~~~~~~~~~~~~~~~~
-  24 | 
+  21 | // the for...in / spread / JSON.stringify surfaces compile over the admitted store.)
+  22 | const joined = arr.concat([2]);
+     |       ^~~~~~
+  23 | 
 
   hint: build with --dynamic to run these values in the embedded engine (adds ~620KB to the binary), or restate the type inside the static surface (https://scriptc.dev/limitations describes the boundary)

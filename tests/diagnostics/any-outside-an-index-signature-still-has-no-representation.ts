@@ -17,10 +17,9 @@ const admitted: Doc = { a: 1 };
 // an `any` ARRAY: the element slot is a named slot
 const arr: any[] = [1, "x"];
 
-// Object.entries over the admitted store: the checker's element type is
-// the TUPLE `[string, any]`, whose second slot is named. Object.keys,
-// for...in, `in`, delete, spread and JSON.stringify all compile over it.
-for (const e of Object.entries(admitted)) console.log(e[0], String(e[1]));
+// An `any[]` returned by a CALL (arr.concat): the result slot is named, so it keeps its SC2011. (Object.values / Object.entries over an `any`-valued signature and
+// the for...in / spread / JSON.stringify surfaces compile over the admitted store.)
+const joined = arr.concat([2]);
 
-console.log(arr.length);
+console.log(arr.length, joined.length, Object.keys(admitted).length);
 export const marker: number = 1;
