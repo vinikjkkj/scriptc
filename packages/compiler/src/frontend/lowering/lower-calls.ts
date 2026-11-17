@@ -4838,6 +4838,52 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         );
       }
     }
+    // `C.prototype.hasOwnProperty(k)` and `C.prototype.m.call(thisArg, ...)` (also apply / bind): a call on the class's prototype OBJECT or on one of its
+    // function values, through the dyn box. Only the forms that cannot throw at run time lower: an Object.prototype member of the prototype object, and
+    // call/apply/bind of a prototype method whose receiver is statically an instance of the class (or a subclass). A declared method called ON the
+    // prototype object (`C.prototype.m()`, whose receiver would be the object itself) and any other receiver are refused here.
+    if (ts.isPropertyAccessExpression(expr.expression) && !expr.expression.questionDotToken && ts.isPropertyAccessExpression(expr.expression.expression)) {
+      const protoRecv = L.lowerClassPrototypeValue(expr.expression.expression);
+      if (protoRecv !== null) {
+        const calleeName = expr.expression.name.text;
+        const rootCls = L.protoRootClassOf(expr.expression.expression);
+        const baseIsProto = ts.isPropertyAccessExpression(expr.expression.expression) && expr.expression.expression.name.text === "prototype";
+        const objectMembers = new Set(["hasOwnProperty", "isPrototypeOf", "propertyIsEnumerable", "toString", "toLocaleString", "valueOf"]);
+        if (expr.arguments.some(ts.isSpreadElement)) L.unsupported("SC1090", expr, "a spread argument in a call through a class prototype");
+        if (baseIsProto) {
+          if (!objectMembers.has(calleeName)) {
+            L.unsupported("SC1090", expr, `'${calleeName}' called ON the class prototype object (its receiver would be the prototype object itself, not an instance): call it through an instance, or with .call(instance, ...)`);
+          }
+        } else if (calleeName === "call" || calleeName === "apply" || calleeName === "bind") {
+          const thisNode = expr.arguments[0];
+          if (thisNode === undefined) L.unsupported("SC1090", expr, `.${calleeName}() of a class prototype method without a receiver`);
+          const thisIr = L.lowerExpr(thisNode!);
+          if (!(thisIr.type.kind === "object" && rootCls !== null && (thisIr.type.className === rootCls.def.name || L.isSubclassOf(thisIr.type.className, rootCls.def.name)))) {
+            L.unsupported("SC1090", expr, `.${calleeName}() of a class prototype method needs a receiver statically known to be an instance of '${rootCls !== null ? rootCls.def.name : "the class"}' (or a subclass); a '${L.fmt(thisIr.type)}' receiver may throw where Node duck-types`);
+          }
+          return {
+            kind: "dynInvoke",
+            recv: protoRecv,
+            method: calleeName,
+            calleeName: v8CallSite(expr.expression),
+            args: [{ kind: "dynFrom", value: thisIr, type: DYN, loc: locOf(thisNode!) }, ...expr.arguments.slice(1).map((arg) => L.lowerExprExpecting(arg, DYN))],
+            type: DYN,
+            loc: locOf(expr),
+          };
+        } else {
+          L.unsupported("SC1090", expr, `'${calleeName}' on a member of a class prototype (only .call/.apply/.bind of a prototype method lower)`);
+        }
+        return {
+          kind: "dynInvoke",
+          recv: protoRecv,
+          method: calleeName,
+          calleeName: v8CallSite(expr.expression),
+          args: expr.arguments.map((arg) => L.lowerExprExpecting(arg, DYN)),
+          type: DYN,
+          loc: locOf(expr),
+        };
+      }
+    }
     // A live requirer binding's member call (`m.f(x)`, m = require(M), M live): a dynamic call of the
     // bag's member. Spread arguments keep their own fence.
     if (ts.isPropertyAccessExpression(expr.expression) && !expr.expression.questionDotToken && ts.isIdentifier(expr.expression.expression) && !expr.arguments.some(ts.isSpreadElement)) {

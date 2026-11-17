@@ -16220,6 +16220,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25520-class-prototype-is-the-object-an-instance-reports-as-its-prototype.ts": {
+   "order": [
+    "<repo>/tests/corpus/25520-class-prototype-is-the-object-an-instance-reports-as-its-prototype.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25521-class-prototype-constructor-and-instanceof-agree.ts": {
+   "order": [
+    "<repo>/tests/corpus/25521-class-prototype-constructor-and-instanceof-agree.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25522-class-prototype-methods-are-function-values.ts": {
+   "order": [
+    "<repo>/tests/corpus/25522-class-prototype-methods-are-function-values.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25523-class-prototype-own-names-and-membership.ts": {
+   "order": [
+    "<repo>/tests/corpus/25523-class-prototype-own-names-and-membership.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25524-class-prototype-method-replacement-is-seen-by-instances.ts": {
+   "order": [
+    "<repo>/tests/corpus/25524-class-prototype-method-replacement-is-seen-by-instances.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2553-generics-signature-bindings.ts": {
    "order": [
     "<repo>/tests/corpus/2553-generics-signature-bindings.ts"
