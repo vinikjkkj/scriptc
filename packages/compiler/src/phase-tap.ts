@@ -12,6 +12,8 @@
  * by tests/harness/phase-collect.ts, which vitest loads via setupFiles when
  * SCRIPTC_PHASE_LOG names a directory.
  */
+import { phaseTimesOn, pointSpan, span, spanAsync } from "./phase-times.js";
+
 export type PhaseTap = (name: string, ms: number) => void;
 
 function tapOf(): PhaseTap | undefined {
@@ -20,11 +22,13 @@ function tapOf(): PhaseTap | undefined {
 
 /** Report `ms` spent in `name` to the listener, if any. */
 export function tapPhase(name: string, ms: number): void {
+  if (phaseTimesOn) pointSpan(name, ms);
   tapOf()?.(name, ms);
 }
 
 /** Time a synchronous stage. Identity (no clock read at all) when unlistened. */
 export function tapped<T>(name: string, fn: () => T): T {
+  if (phaseTimesOn) return span(name, fn);
   const tap = tapOf();
   if (tap === undefined) return fn();
   const t0 = performance.now();
@@ -37,6 +41,7 @@ export function tapped<T>(name: string, fn: () => T): T {
 
 /** Time an asynchronous stage. Identity when unlistened. */
 export async function tappedAsync<T>(name: string, fn: () => Promise<T>): Promise<T> {
+  if (phaseTimesOn) return spanAsync(name, fn);
   const tap = tapOf();
   if (tap === undefined) return fn();
   const t0 = performance.now();
