@@ -8079,6 +8079,11 @@ export type IrExpr =
    * fulfillment payload (scr_await_void) and rejections flow untyped.
    * Ownership of the operand transfers to the result, like upcast. */
   | { kind: "promiseVoidWiden"; value: IrExpr; type: IrType; loc: SrcLoc }
+  /** A typed map retyped as a `Map<K, unknown>` for a parameter whose every use is value-independent (frontend/lowering/
+   * lower-erasedmap.ts decides): the SAME ScrMap*, the key type equal, the static value type replaced by dyn. The runtime map
+   * operations a value-free use needs (identity, size, has, delete, clear, pass-through) work from the map's own adapters.
+   * Ownership of the operand transfers to the result, like upcast. */
+  | { kind: "mapEraseView"; value: IrExpr; type: IrType; loc: SrcLoc }
   /** Checker-trusted narrowing of a base-class value to a subclass (`type`
    * is the subclass). The frontend emits this only where tsc's control-flow
    * narrowing has already proven the dynamic class (an `instanceof` guard)

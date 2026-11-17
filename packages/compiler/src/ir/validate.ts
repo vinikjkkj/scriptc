@@ -3725,6 +3725,15 @@ function validateFunction(
         }
         break;
       }
+      case "mapEraseView": {
+        checkExpr(e.value);
+        if (e.value.type.kind !== "map" || e.type.kind !== "map") {
+          err("mapEraseView between non-map types", e.loc);
+        } else if (!typeEquals(e.value.type.key, e.type.key) || e.type.value.kind !== "dyn" || e.value.type.weak === true || e.type.weak === true) {
+          err("mapEraseView must keep the key type, produce a dyn-valued map and not involve a weak map", e.loc);
+        }
+        break;
+      }
       case "upcast":
       case "downcast": {
         // A pointer reinterpret is sound exactly between hierarchy

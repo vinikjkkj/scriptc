@@ -2633,6 +2633,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         E.moveTemp(v);
         return E.newTemp(e.type, v.name);
       }
+      case "mapEraseView": {
+        // One ScrMap* either way: ownership transfers, type-only (the map's own adapters release whatever it holds).
+        const v = E.emitExpr(e.value);
+        E.moveTemp(v);
+        return E.newTemp(e.type, v.name);
+      }
       case "upcast":
       case "downcast": {
         // Prefix layout: both directions are pointer reinterprets of the
