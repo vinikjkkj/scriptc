@@ -366,7 +366,16 @@ __attribute__((constructor)) static void scr_poolstat_reg_string(void) {
 #define SCR_STR_INTERN_WEAK 1
 #endif
 
-static ScrStr *scr_str_itab[SCR_STR_INTERN_SLOTS];
+/* THE TABLE IS HEAP, NOT BSS, AND IT GROWS. A 64K-slot table in BSS is 512 KiB of private dirty memory in any program that interns a few hundred strings:
+ * the hash scatters the first ~300 inserts over all 128 pages (MEASURED: 103 of 129 pages dirty at 100 live band strings, 129 of 129 from 500), so
+ * "faulted in lazily" meant "all of it, almost at once". The table now starts at 2^SCR_STR_INTERN_START_BITS slots (8 KiB) and doubles when a quarter of
+ * its slots are taken, up to SCR_STR_INTERN_SLOTS. Entries are re-placed by hashing their bytes, which is the hash the put used (see the note on forget).
+ * SCR_STRING_INTERN_START_BITS=16 starts at the full size (the old shape, in the same image). */
+#ifndef SCR_STR_INTERN_START_BITS
+#define SCR_STR_INTERN_START_BITS 10
+#endif
+static ScrStr **scr_str_itab;
+static unsigned scr_str_itab_mask; /* slots - 1 of the current table; 0 while there is none */
 /* Non-NULL slots. Only so the drain below can be O(1) when nothing was ever
  * interned: a table-wide scan would otherwise fault in all 512 KiB of BSS
  * in a program that never made a single concat in the band. */
@@ -442,18 +451,20 @@ static unsigned scr_str_ihash(const char *x, size_t nx, const char *y, size_t ny
   for (i = 0; i < ny; i++) { h ^= (unsigned char)y[i]; h *= 1099511628211ULL; }
   h ^= (unsigned long long)(nx + ny) * 2654435761ULL;
   h ^= h >> 32;
-  return (unsigned)h & (SCR_STR_INTERN_SLOTS - 1u);
+  return (unsigned)h;
 }
 
 /* A RETAINED string with these bytes if the cache holds one, else NULL.
- * *slot is always written with the SET BASE: a miss still names where a put
- * would look, so the caller hashes once. */
+ * *slot is always written with the HASH: a miss still names where a put
+ * would look (the table may grow before the put, so the set is derived from the hash then), so the caller hashes once. */
 static ScrStr *scr_str_intern_get(const char *x, size_t nx, const char *y,
                                   size_t ny, unsigned *slot) {
   unsigned w = scr_str_intern_ways();
-  unsigned base = scr_str_ihash(x, nx, y, ny) & ~(w - 1u);
-  unsigned i;
-  *slot = base;
+  unsigned hash = scr_str_ihash(x, nx, y, ny);
+  unsigned base, i;
+  *slot = hash;
+  if (scr_str_itab == NULL) { SCR_CS_BUMP(simiss); return NULL; }
+  base = hash & scr_str_itab_mask & ~(w - 1u);
   for (i = 0; i < w; i++) {
     ScrStr *e = scr_str_itab[base + i];
     if (e == NULL) continue;
@@ -477,9 +488,14 @@ static ScrStr *scr_str_intern_get(const char *x, size_t nx, const char *y,
  * least-referenced way, but ONLY when that way is table-only (rc == 1). A
  * set every one of whose ways the program still holds keeps them all and s
  * is simply not cached -- see the admission note above. */
-static void scr_str_intern_put(unsigned base, ScrStr *s) {
+static void scr_str_itab_grow(unsigned w);
+static void scr_str_intern_put(unsigned hash, ScrStr *s) {
   unsigned w = scr_str_intern_ways();
-  unsigned i, victim = base;
+  unsigned base, i, victim;
+  if (scr_str_itab == NULL || (scr_str_itab_mask < SCR_STR_INTERN_SLOTS - 1u && (scr_str_itab_used << 2) >= (size_t)scr_str_itab_mask + 1u)) scr_str_itab_grow(w);
+  if (scr_str_itab == NULL) return; /* no memory for a cache: the string is simply not cached */
+  base = hash & scr_str_itab_mask & ~(w - 1u);
+  victim = base;
   int weak = scr_str_intern_weak();
   uint32_t best = UINT32_MAX;
   for (i = 0; i < w; i++) {
@@ -534,13 +550,50 @@ static void scr_str_intern_forget(ScrStr *s) {
   n = (size_t)s->len;
   if (n < SCR_STR_INTERN_MINLEN || n > SCR_STR_INTERN_MAXLEN) return;
   w = scr_str_intern_ways();
-  base = scr_str_ihash(s->data, n, NULL, 0) & ~(w - 1u);
+  base = scr_str_ihash(s->data, n, NULL, 0) & scr_str_itab_mask & ~(w - 1u);
   for (i = 0; i < w; i++) {
     if (scr_str_itab[base + i] == s) {
       scr_str_itab[base + i] = NULL;
       scr_str_itab_used--;
       return;
     }
+  }
+}
+
+/* Allocate the table, or double it and re-place every entry. An entry's set in the new table is derived from its bytes; the two sets an old set
+ * splits into hold at most `w` of its entries between them, so every entry finds a way. A failed allocation keeps the table as it is. */
+static void scr_str_itab_grow(unsigned w) {
+  unsigned bits = (unsigned)SCR_STR_INTERN_START_BITS;
+  if (scr_str_itab == NULL) {
+    const char *env = getenv("SCR_STRING_INTERN_START_BITS");
+    if (env != NULL) {
+      long v = strtol(env, NULL, 10);
+      if (v >= 4 && v <= (long)SCR_STR_INTERN_BITS) bits = (unsigned)v;
+    }
+    if (bits > (unsigned)SCR_STR_INTERN_BITS) bits = (unsigned)SCR_STR_INTERN_BITS;
+    if (bits < 2) bits = 2;
+    if ((1u << bits) < w) bits = 2;
+    scr_str_itab = (ScrStr **)calloc((size_t)1 << bits, sizeof(ScrStr *));
+    if (scr_str_itab != NULL) scr_str_itab_mask = (1u << bits) - 1u;
+    return;
+  }
+  {
+    size_t oldn = (size_t)scr_str_itab_mask + 1u, i;
+    unsigned nmask = (unsigned)(oldn * 2u - 1u);
+    ScrStr **nt = (ScrStr **)calloc(oldn * 2u, sizeof(ScrStr *));
+    if (nt == NULL) return;
+    for (i = 0; i < oldn; i++) {
+      ScrStr *e = scr_str_itab[i];
+      unsigned b, k;
+      if (e == NULL) continue;
+      b = scr_str_ihash(e->data, (size_t)e->len, NULL, 0) & nmask & ~(w - 1u);
+      for (k = 0; k < w && nt[b + k] != NULL; k++) {}
+      if (k < w) nt[b + k] = e;
+      else { scr_str_itab_used--; if (!scr_str_intern_weak()) scr_str_release(e); }
+    }
+    free(scr_str_itab);
+    scr_str_itab = nt;
+    scr_str_itab_mask = nmask;
   }
 }
 
@@ -553,7 +606,7 @@ void scr_str_intern_drain(void) {
   size_t i;
   int weak = scr_str_intern_weak();
   if (scr_str_itab_used == 0) return;
-  for (i = 0; i < SCR_STR_INTERN_SLOTS; i++) {
+  for (i = 0; i <= (size_t)scr_str_itab_mask; i++) {
     ScrStr *e = scr_str_itab[i];
     if (e == NULL) continue;
     scr_str_itab[i] = NULL;

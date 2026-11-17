@@ -16202,6 +16202,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25560-concat-intern-table-grows-through-every-size-with-live-duplicates.ts": {
+   "order": [
+    "<repo>/tests/corpus/25560-concat-intern-table-grows-through-every-size-with-live-duplicates.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25561-concat-intern-table-survives-build-drop-rebuild-churn.ts": {
+   "order": [
+    "<repo>/tests/corpus/25561-concat-intern-table-survives-build-drop-rebuild-churn.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2557-tls-ca-store.ts": {
    "order": [
     "<repo>/tests/corpus/2557-tls-ca-store.ts"
