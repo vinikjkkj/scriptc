@@ -28488,6 +28488,12 @@
     "<repo>/tests/corpus/25546-a-typed-write-to-an-error-name-or-message-reaches-its-boxed-copy.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25547-a-dyn-write-to-a-boxed-error-name-or-message-reaches-the-typed-error.ts": {
+   "order": [
+    "<repo>/tests/corpus/25547-a-dyn-write-to-a-boxed-error-name-or-message-reaches-the-typed-error.ts"
+   ],
+   "diags": []
   }
  }
 }
