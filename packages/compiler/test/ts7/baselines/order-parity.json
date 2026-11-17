@@ -28536,6 +28536,18 @@
     "<repo>/tests/corpus/25534-an-error-code-stamped-before-its-name-lists-first-and-a-declared-code-keeps-its-slot.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25545-an-error-name-created-after-more-than-65535-expandos-keeps-its-place.ts": {
+   "order": [
+    "<repo>/tests/corpus/25545-an-error-name-created-after-more-than-65535-expandos-keeps-its-place.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25546-a-typed-write-to-an-error-name-or-message-reaches-its-boxed-copy.ts": {
+   "order": [
+    "<repo>/tests/corpus/25546-a-typed-write-to-an-error-name-or-message-reaches-its-boxed-copy.ts"
+   ],
+   "diags": []
   }
  }
 }
