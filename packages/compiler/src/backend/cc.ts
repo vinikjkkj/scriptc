@@ -1137,10 +1137,18 @@ export function blockProfileSupported(drv: CcDriver = resolveCc()): boolean {
 function blockProfileArgs(opts: CcOptions, drv: CcDriver): string[] {
   const bp = opts.blockProfile;
   if (bp === undefined || !blockProfileSupported(drv)) return [];
-  if ("generate" in bp) return ["-fprofile-generate"];
+  // No value profiling: nothing here uses indirect-call targets, and the instrumented run is faster without it.
+  if ("generate" in bp) return ["-fprofile-generate", "-mllvm", "-enable-value-profiling=false"];
   return [
     `-fprofile-use=${bp.use}`,
     "-fsplit-machine-functions",
+    // The profile is for PLACEMENT only. A profile of a short run also steers the optimizer (size-optimizing the code it saw rarely, the
+    // inliner's hot/cold thresholds), which cost +7% / +12% Ir on mysql / redis when this lane first measured it; these put those choices back
+    // to the ones a build without a profile makes.
+    "-mllvm", "-pgso=false",
+    "-mllvm", "-inlinecold-threshold=225",
+    "-mllvm", "-inline-cold-callsite-threshold=225",
+    "-mllvm", "-hot-callsite-threshold=225",
     // a function whose body changed since the profile was recorded, or that the profile never saw, is left alone: not a diagnostic
     "-Wno-profile-instr-unprofiled",
     "-Wno-profile-instr-out-of-date",
