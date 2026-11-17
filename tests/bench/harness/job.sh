@@ -31,12 +31,22 @@ if [ "$program" = rest ]; then
     SCC_CLI=$(cli_of $side) bash "$BENCH_DIR/harness/rest-build.sh" "$BACKEND" "$o" || echo "REST build of $side failed"
     [ -f "$o/zapo-rest-mysql-$BACKEND.bin" ] && arms+=("$side:$o/zapo-rest-mysql-$BACKEND.bin")
     if [ "$LAYOUT" = order ] && [ -f "$o/zapo-rest-mysql-$BACKEND.bin" ]; then
-      SCC_CLI=$(cli_of $side) EXTRA_ARGS="--layout-profile" bash "$BENCH_DIR/harness/rest-build.sh" "$BACKEND" "$o" -prof || { echo "instrumented build of $side failed"; continue; }
+      # HOTCOLD=1: the instrumented build also counts blocks (--layout-block-profile) and the one profiling run writes the .profraw files beside profile.txt
+      SCC_CLI=$(cli_of $side) EXTRA_ARGS="--layout-profile${HOTCOLD:+ --layout-block-profile}" bash "$BENCH_DIR/harness/rest-build.sh" "$BACKEND" "$o" -prof || { echo "instrumented build of $side failed"; continue; }
       mkdir -p "$ART/layout/$side"
-      $BENCH_NODE "$BENCH_DIR/harness/rest-run.mjs" --out "$ART/layout/$side" --profile "$o/zapo-rest-mysql-$BACKEND-prof.bin" "$ART/layout/$side/profile.txt" || { echo "profile run of $side failed"; continue; }
+      LLVM_PROFILE_FILE="$ART/layout/$side/block-%p.profraw" $BENCH_NODE "$BENCH_DIR/harness/rest-run.mjs" --out "$ART/layout/$side" --profile "$o/zapo-rest-mysql-$BACKEND-prof.bin" "$ART/layout/$side/profile.txt" || { echo "profile run of $side failed"; continue; }
       $BENCH_NODE "$(cli_of $side)" layout-order "$o/zapo-rest-mysql-$BACKEND-prof.bin" "$ART/layout/$side/profile.txt" -o "$ART/layout/$side/order.txt" || continue
       SCC_CLI=$(cli_of $side) EXTRA_ARGS="--layout-order $ART/layout/$side/order.txt" bash "$BENCH_DIR/harness/rest-build.sh" "$BACKEND" "$o" -ordered || { echo "ordered build of $side failed"; continue; }
       arms+=("$side-ordered:$o/zapo-rest-mysql-$BACKEND-ordered.bin")
+      if [ -n "${HOTCOLD:-}" ]; then
+        $BENCH_NODE "$(cli_of $side)" layout-profdata "$ART"/layout/$side/block-*.profraw -o "$ART/layout/$side/block.profdata" && ls -la "$ART/layout/$side/block.profdata" | tee -a "$ART/sysinfo.txt"
+        s0=$(date +%s)
+        SCC_CLI=$(cli_of $side) EXTRA_ARGS="--layout-order $ART/layout/$side/order.txt --layout-block-use $ART/layout/$side/block.profdata" bash "$BENCH_DIR/harness/rest-build.sh" "$BACKEND" "$o" -hotcold || { echo "hotcold build of $side failed"; continue; }
+        echo "hotcold build wall $(( $(date +%s) - s0 )) s (ordered build wall is in its build log)" | tee -a "$ART/sysinfo.txt"
+        arms+=("$side-hotcold:$o/zapo-rest-mysql-$BACKEND-hotcold.bin")
+        # A/A control: the SAME ordered binary under a second label
+        cp "$o/zapo-rest-mysql-$BACKEND-ordered.bin" "$o/zapo-rest-mysql-$BACKEND-ordered-aa.bin"; arms+=("$side-ordered-aa:$o/zapo-rest-mysql-$BACKEND-ordered-aa.bin")
+      fi
     fi
   done
   [ ${#arms[@]} -gt 0 ] || { echo "no REST binary was built"; exit 1; }
@@ -73,7 +83,7 @@ if [ "$program" = rest ]; then
     cg_arms=()
     for a in "${arms[@]}"; do
       lab=${a%%:*}; bin=${a#*:}
-      case "$lab" in *-after*|*-rand*|*-nohuge*) continue;; esac
+      case "$lab" in *-after*|*-rand*|*-nohuge*|*-aa) continue;; esac
       w="$(dirname "$bin")/cg-$lab.sh"
       printf '#!/bin/sh\nexec valgrind --tool=callgrind --dump-instr=yes --callgrind-out-file="%s/cg-%s.out" "%s" "$@"\n' "$ART" "$lab" "$bin" > "$w"; chmod +x "$w"
       cg_arms+=("cg-$lab:$w")
@@ -95,12 +105,20 @@ for side in "${sides[@]}"; do
   done
   plain=$o/messaging-$store-$BACKEND.bin
   if [ "$LAYOUT" = order ] && [ -f "$plain" ]; then
-    SCC_CLI=$(cli_of $side) EXTRA_ARGS="--layout-profile" bash "$BENCH_DIR/harness/build.sh" "$store" "$BACKEND" "$o" plain -prof || { echo "instrumented build of $side failed"; continue; }
+    SCC_CLI=$(cli_of $side) EXTRA_ARGS="--layout-profile${HOTCOLD:+ --layout-block-profile}" bash "$BENCH_DIR/harness/build.sh" "$store" "$BACKEND" "$o" plain -prof || { echo "instrumented build of $side failed"; continue; }
     mkdir -p "$ART/layout/$side"
-    $BENCH_NODE "$BENCH_DIR/harness/profile-run.mjs" "$store" "$o/messaging-$store-$BACKEND-prof.bin" "$ART/layout/$side/profile.txt" "$ART/layout/$side" || { echo "profile run of $side failed"; continue; }
+    LLVM_PROFILE_FILE="$ART/layout/$side/block-%p.profraw" $BENCH_NODE "$BENCH_DIR/harness/profile-run.mjs" "$store" "$o/messaging-$store-$BACKEND-prof.bin" "$ART/layout/$side/profile.txt" "$ART/layout/$side" || { echo "profile run of $side failed"; continue; }
     $BENCH_NODE "$(cli_of $side)" layout-order "$o/messaging-$store-$BACKEND-prof.bin" "$ART/layout/$side/profile.txt" -o "$ART/layout/$side/order.txt" || continue
     SCC_CLI=$(cli_of $side) EXTRA_ARGS="--layout-order $ART/layout/$side/order.txt" bash "$BENCH_DIR/harness/build.sh" "$store" "$BACKEND" "$o" plain -ordered || { echo "ordered build of $side failed"; continue; }
     f=$o/messaging-$store-$BACKEND-ordered.bin; [ -f "$f" ] && { chmod +x "$f"; arms+=("$side-ordered:$f"); }
+    if [ -n "${HOTCOLD:-}" ] && [ -f "$f" ]; then
+      $BENCH_NODE "$(cli_of $side)" layout-profdata "$ART"/layout/$side/block-*.profraw -o "$ART/layout/$side/block.profdata" && ls -la "$ART/layout/$side/block.profdata" | tee -a "$ART/sysinfo.txt"
+      s0=$(date +%s)
+      SCC_CLI=$(cli_of $side) EXTRA_ARGS="--layout-order $ART/layout/$side/order.txt --layout-block-use $ART/layout/$side/block.profdata" bash "$BENCH_DIR/harness/build.sh" "$store" "$BACKEND" "$o" plain -hotcold || { echo "hotcold build of $side failed"; continue; }
+      echo "hotcold build wall $(( $(date +%s) - s0 )) s" | tee -a "$ART/sysinfo.txt"
+      f2=$o/messaging-$store-$BACKEND-hotcold.bin; [ -f "$f2" ] && { chmod +x "$f2"; arms+=("$side-hotcold:$f2"); }
+      cp "$f" "$o/messaging-$store-$BACKEND-ordered-aa.bin"; chmod +x "$o/messaging-$store-$BACKEND-ordered-aa.bin"; arms+=("$side-ordered-aa:$o/messaging-$store-$BACKEND-ordered-aa.bin")
+    fi
   fi
 done
 [ ${#arms[@]} -gt 0 ] || { echo "no binary was built"; exit 1; }
