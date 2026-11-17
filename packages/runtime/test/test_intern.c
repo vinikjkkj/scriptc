@@ -107,7 +107,10 @@ static void t_band(void) {
   size_t i;
   for (i = 0; i < sizeof(below) / sizeof(*below); i++) {
     ScrStr *x = mk(below[i], 1), *y = mk(below[i], 1);
-    CHECK(x != y); /* below MINLEN: never interned */
+    /* below MINLEN: never interned. A ONE-byte string is the shared immortal static (scr_ascii1), which is not the table's sharing: the same object
+     * for every creator, whatever the band says. */
+    if (below[i] == 1) CHECK(x == y && x->rc == SCR_STR_IMMORTAL);
+    else CHECK(x != y);
     CHECK(scr_str_eq(x, y));
     scr_str_release(x);
     scr_str_release(y);
