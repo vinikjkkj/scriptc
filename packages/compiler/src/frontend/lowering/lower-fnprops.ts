@@ -59,7 +59,7 @@
  */
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
-import { F64, type IrExpr, type SrcLoc, STRING } from "../../ir/nodes.js";
+import { DYN, F64, type IrExpr, type SrcLoc, STRING } from "../../ir/nodes.js";
 import { bindingNeverReassigned } from "./lower-calls.js";
 import { propertyNameText } from "./lowerer.js";
 
@@ -250,11 +250,29 @@ export function funcObjectPropOf(L: Lowerer, expr: ts.PropertyAccessExpression, 
   if (member !== "name" && member !== "length") return null;
   if (expr.questionDotToken !== undefined) return null;
   const recv = expr.expression;
-  if (L.mapTypeOf(L.typeOf(recv))?.kind !== "func") return null;
-  if (!isEffectFree(recv)) return null;
-  const c = creationOf(L, recv, new Set<ts.Symbol>());
-  if (c === null) return null;
-  return member === "name"
-    ? { kind: "strLit", value: nameOf(c), type: STRING, loc }
-    : { kind: "numLit", value: lengthOf(c), type: F64, loc };
+  const recvType = L.typeOf(recv);
+  const mappedFunc = L.mapTypeOf(recvType)?.kind === "func";
+  const functionInterface = L.checker.typeToString(recvType) === "Function";
+  if (!mappedFunc && !(member === "name" && functionInterface)) return null;
+  if (isEffectFree(recv)) {
+    const c = creationOf(L, recv, new Set<ts.Symbol>());
+    if (c !== null) {
+      return member === "name"
+        ? { kind: "strLit", value: nameOf(c), type: STRING, loc }
+        : { kind: "numLit", value: lengthOf(c), type: F64, loc };
+    }
+  }
+  if (member !== "name") return null;
+  // The creation site is not provable here (a parameter, an element, a call result, an object property read, a reassigned binding): the value
+  // is a closure, and the dyn side answers its name per VALUE (a bound closure is "bound <target>", an anonymous arrow is "", a declaration or a
+  // NamedEvaluation site answers its own name). `x.constructor.name` keeps its own lowering (the dyn class value).
+  const inner = peel(recv);
+  if (ts.isPropertyAccessExpression(inner) && inner.name.text === "constructor") return null;
+  // An accessor function read off a property descriptor (`d.get!.name`) is named "get x" in JS, and the accessor closures this build mints carry no
+  // such name (the dyn answer is ""), so that read keeps its SC2020 instead of answering wrongly.
+  if (ts.isPropertyAccessExpression(inner) && (inner.name.text === "get" || inner.name.text === "set")) return null;
+  const value = L.lowerExpr(recv);
+  const boxed: IrExpr = value.type.kind === "dyn" ? value : { kind: "dynFrom", value, type: DYN, loc };
+  const read: IrExpr = { kind: "dynKeyGet", key: { kind: "strLit", value: "name", type: STRING, loc }, value: boxed, type: DYN, loc };
+  return L.coerceToExpected(read, STRING);
 }

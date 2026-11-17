@@ -16232,6 +16232,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25525-function-name-of-declarations-expressions-and-arrows.ts": {
+   "order": [
+    "<repo>/tests/corpus/25525-function-name-of-declarations-expressions-and-arrows.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25526-function-name-of-methods-and-object-members.ts": {
+   "order": [
+    "<repo>/tests/corpus/25526-function-name-of-methods-and-object-members.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25527-function-name-of-classes-and-constructors.ts": {
+   "order": [
+    "<repo>/tests/corpus/25527-function-name-of-classes-and-constructors.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25528-function-name-of-bound-functions.ts": {
+   "order": [
+    "<repo>/tests/corpus/25528-function-name-of-bound-functions.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25529-function-name-of-function-values-reaching-a-slot.ts": {
+   "order": [
+    "<repo>/tests/corpus/25529-function-name-of-function-values-reaching-a-slot.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2553-generics-signature-bindings.ts": {
    "order": [
     "<repo>/tests/corpus/2553-generics-signature-bindings.ts"

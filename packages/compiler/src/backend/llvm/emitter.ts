@@ -77,7 +77,7 @@ import type {
   IrUnionDef,
   SrcLoc,
 } from "../../ir/nodes.js";
-import { BUFFER_NUM_ACCESSOR_METHODS, dynKeyGetUsesLitTwin, propsTableRoot, errorOwnFlagFor, moduleFuncLaneShapes, moduleUsesEngineFn, moduleUsesTextMb, moduleUsesDc, moduleUsesTls, ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, presenceMaskStores, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesFnText, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesInstanceRecordLane, moduleInstanceLaneNeedsKg, moduleUsesDynClass, moduleUsesEmitter, moduleBoxesEmitters, canBoxFuncIntoDyn, isDynPackFunc, moduleUsesBigInt, moduleUsesRegexExecDyn, moduleUsesBytesOwn, moduleUsesAsym, moduleUsesDynAsync, moduleBoxesProcStream, moduleUsesNodeTest, irFunctionValueCode, fnNameTableRows } from "../../ir/nodes.js";
+import { BUFFER_NUM_ACCESSOR_METHODS, dynKeyGetUsesLitTwin, propsTableRoot, errorOwnFlagFor, moduleFuncLaneShapes, moduleUsesEngineFn, moduleUsesTextMb, moduleUsesDc, moduleUsesTls, ABSENT_KEY_TRAP_CODE, OWNMASK_COMPLETED, OWNMASK_VALID, UNION_ARM_JS_OBJECT_KINDS, irFunctionJsName, settleOrValuePromiseTag, canBoxClassIntoDyn, CLASS_PROPS_FIELD, canMarshalFuncIntoIsland, CAUGHT, DYN, dynCopyIsObservable, dynCopyHasLiveView, F64, islandCallbackRet, islandPromisePayloadTag, isRefCounted, nullProtoRule, OWNMASK_SRC_NULL_PROTO, ownMaskKeyBit, presenceMaskStores, isUnitType, MAY_THROW_LIB_FNS, moduleEmbedsBuiltin, moduleEmbedsNetIsland, moduleUsesAbortSignal, moduleUsesChildStream, moduleUsesDgram, moduleUsesFetch, moduleUsesFetchStatic, moduleUsesFetchDispatch, moduleUsesFsWatch, moduleUsesHttp2, moduleUsesHttpServer, moduleUsesNet, moduleUsesProcessEvents, moduleUsesRegex, moduleUsesSymbol, moduleUsesFnText, moduleUsesStream, moduleUsesWsGlobal, RUNTIME_EMITTER_CLASS, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, STRING, typeEquals, typeKey, VOID, moduleCreatesPromises, moduleUsesUncaughtListener, moduleUsesDateDyn, moduleUsesDynView, moduleUsesInstanceRecordLane, moduleInstanceLaneNeedsKg, moduleUsesDynClass, moduleUsesEmitter, moduleBoxesEmitters, canBoxFuncIntoDyn, isDynPackFunc, moduleUsesBigInt, moduleUsesRegexExecDyn, moduleUsesBytesOwn, moduleUsesAsym, moduleUsesDynAsync, moduleBoxesProcStream, moduleUsesNodeTest, irFunctionValueCode, irFunctionNameRowCode, fnNameTableRows } from "../../ir/nodes.js";
 import { setDynOrderPlan, setDynInspExt } from "../dyn-members.js";
 import { rewriteArmDescriptors } from "./armvt.js";
 import { rewriteStringUnions } from "./strunion.js";
@@ -10825,7 +10825,7 @@ class LlEmitter {
           if (declName !== null) this.fnNames.set(mangleWrapper(e.fnName), this.cstr(declName));
           if (target.srcText !== undefined) this.fnTexts.set(mangleWrapper(e.fnName), this.cstr(target.srcText));
           else if (target.srcForwardCap0 === true) this.fnTexts.set(mangleWrapper(e.fnName), null);
-          if (irFunctionValueCode(target) !== 0) this.fnCodes.set(mangleWrapper(e.fnName), irFunctionValueCode(target));
+          if (irFunctionNameRowCode(target) !== 0) this.fnCodes.set(mangleWrapper(e.fnName), irFunctionNameRowCode(target));
           return this.own({
             name: this.retainValue(`@${mangleFnClosure(e.fnName)}`, e.type),
             type: e.type,
@@ -10835,7 +10835,7 @@ class LlEmitter {
         if (liftedName !== null) this.fnNames.set(this.callTarget(e.fnName), this.cstr(liftedName));
         if (target.srcText !== undefined) this.fnTexts.set(this.callTarget(e.fnName), this.cstr(target.srcText));
         else if (target.srcForwardCap0 === true) this.fnTexts.set(this.callTarget(e.fnName), null);
-        if (irFunctionValueCode(target) !== 0) this.fnCodes.set(this.callTarget(e.fnName), irFunctionValueCode(target));
+        if (irFunctionNameRowCode(target) !== 0) this.fnCodes.set(this.callTarget(e.fnName), irFunctionNameRowCode(target));
         // Lifted async lambdas enter through their spawn wrapper (which
         // takes sc_env first, like every lifted function).
         this.declare(`declare ptr @scr_closure_new(ptr, i64)`);
