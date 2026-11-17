@@ -546,7 +546,18 @@ static void isl_teardown_at_exit(void) {
 #endif
 }
 
+#if defined(__GLIBC__)
+#include <execinfo.h>
+#endif
 static void isl_init(void) {
+#if defined(__GLIBC__)
+  if (getenv("SCR_ISL_BOOT_TRACE") != NULL) {
+    void *bt[48];
+    int n = backtrace(bt, 48);
+    fprintf(stderr, "ISLAND-BOOT\n");
+    backtrace_symbols_fd(bt, n, 2);
+  }
+#endif
   isl_rt = JS_NewRuntime2(&isl_mf, NULL);
   if (!isl_rt) {
     fprintf(stderr, "scriptc: island engine runtime allocation failed\n");
