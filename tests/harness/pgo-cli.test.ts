@@ -18,6 +18,7 @@ import { splitArgv } from "../../packages/cli/src/pgo.js";
 
 const cli = join(import.meta.dirname, "../../packages/cli/dist/main.js");
 const linux = process.platform === "linux";
+const blockLaneFree = linux;
 
 describe("splitArgv", () => {
   test("words, quotes and escapes", () => {
@@ -90,7 +91,61 @@ console.log("done", acc);
     expect(r.stderr).toMatch(/not a regular expression/);
   });
 
+  const cmakeAvailable = spawnSync("cmake", ["--version"]).status === 0;
   for (const backend of ["c", "llvm"]) {
+    test(`--pgo-end-signal gives the shutdown-only functions an end tier after the steady set, ${backend}`, { timeout: 900_000 }, () => {
+      const sub = join(dir, `end-${backend}`);
+      mkdirSync(sub, { recursive: true });
+      const entry = join(sub, "app.ts");
+      writeFileSync(entry, `function steadyWork(x: number): number { return x * 3 + 1; }
+function onlyAtShutdown(x: number): number { return x ^ 0x5a5a; }
+function startupOnly(): number { return 7; }
+console.log("boot", startupOnly());
+console.log("ready");
+let acc = 0;
+for (let i = 0; i < 40000000; i++) acc = (acc + steadyWork(i)) % 1000003;
+console.log("shutdown");
+let tail = acc;
+for (let i = 0; i < 40000000; i++) tail = onlyAtShutdown(tail + i) % 1000003;
+console.log("done", tail);
+`);
+      const bin = join(sub, "pgo.bin");
+      const r = run(["build", entry, "--backend", backend, "--pgo", "--pgo-run", "{bin}", "--pgo-signal", "^ready", "--pgo-end-signal", "^shutdown", "-o", bin]);
+      expect(r.status, r.stderr).toBe(0);
+      const order = readFileSync(join(sub, "app.scriptc-order.txt"), "utf8").split("\n");
+      const tierAt = (t: string): number => order.findIndex((l) => l === `# tier: ${t}`);
+      expect(tierAt("steady")).toBeGreaterThan(-1);
+      expect(tierAt("end")).toBeGreaterThan(tierAt("steady"));
+      expect(tierAt("startup-only")).toBeGreaterThan(tierAt("end"));
+      const at = (frag: string): number => order.findIndex((l) => !l.startsWith("#") && l.includes(frag));
+      // the program's own small functions are inlined into the init function; the RUNTIME's are the markers: console output runs in the steady epoch,
+      // the exit-time flush and cleanup only after the end signal, and scr_init only at startup
+      expect(at("scr_console_log")).toBeGreaterThan(tierAt("steady"));
+      expect(at("scr_console_log")).toBeLessThan(tierAt("end"));
+      expect(at("scr_flush_at_exit")).toBeGreaterThan(tierAt("end")); // shutdown-only: the end tier, after the steady set
+      expect(at("scr_flush_at_exit")).toBeLessThan(tierAt("startup-only"));
+      expect(at("scr_init")).toBeGreaterThan(tierAt("startup-only"));
+      expect(execFileSync(bin, [], { encoding: "utf8" })).toMatch(/done/);
+    });
+
+    test.skipIf(!blockLaneFree || !cmakeAvailable)(`--pgo lists the embedded engine's functions in the order file, ${backend}`, { timeout: 1_800_000 }, () => {
+      const sub = join(dir, `engine-${backend}`);
+      mkdirSync(sub, { recursive: true });
+      const entry = join(sub, "ev.ts");
+      writeFileSync(entry, `const k = process.argv.length + 20;
+const f = new Function("a", "return a * 2 + " + k);
+let s = 0;
+for (let i = 0; i < 100; i++) s += f(i) as number;
+console.log(s);
+`);
+      const bin = join(sub, "pgo.bin");
+      const r = run(["build", entry, "--backend", backend, "--pgo", "--pgo-run", "{bin}", "--pgo-no-signal", "-o", bin]);
+      expect(r.status, r.stderr).toBe(0);
+      const names = readFileSync(join(sub, "ev.scriptc-order.txt"), "utf8").split("\n").filter((l) => l !== "" && !l.startsWith("#"));
+      expect(names.filter((n) => /^(js_|JS_|lre_)/.test(n)).length).toBeGreaterThan(20); // before: none (the engine archive was not instrumented)
+      expect(execFileSync(bin, [], { encoding: "utf8" })).toBe("12100\n");
+    });
+
     test(`--pgo end to end, ${backend}: order file, identical output, applied once, --no-layout-order`, { timeout: 900_000 }, () => {
       const sub = join(dir, backend);
       mkdirSync(sub, { recursive: true });
