@@ -16124,6 +16124,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25540-class-static-setter-only-accessor-descriptor.ts": {
+   "order": [
+    "<repo>/tests/corpus/25540-class-static-setter-only-accessor-descriptor.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25541-class-static-accessor-pairs-and-inheritance.ts": {
+   "order": [
+    "<repo>/tests/corpus/25541-class-static-accessor-pairs-and-inheritance.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25542-class-accessor-descriptor-called-with-a-subclass-instance.ts": {
+   "order": [
+    "<repo>/tests/corpus/25542-class-accessor-descriptor-called-with-a-subclass-instance.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25543-object-literal-accessor-descriptor-called-with-its-own-object.ts": {
+   "order": [
+    "<repo>/tests/corpus/25543-object-literal-accessor-descriptor-called-with-its-own-object.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25544-class-setter-only-and-getter-only-prototype-accessors.ts": {
+   "order": [
+    "<repo>/tests/corpus/25544-class-setter-only-and-getter-only-prototype-accessors.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2555-generics-keyof-writes.ts": {
    "order": [
     "<repo>/tests/corpus/2555-generics-keyof-writes.ts"
