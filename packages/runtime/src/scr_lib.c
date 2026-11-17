@@ -1369,7 +1369,10 @@ bool scr_process_exitcode_is_set(void) { return scr_exitcode_has; }
  * constructor stores its dump here; in every other build it stays null and costs one compare on the way out. A plain function pointer, not
  * a weak symbol: Mach-O's linker refuses an undefined weak reference that is not marked weak_import. */
 void (*scr_layout_prof_exit)(void) = NULL;
+/* LAB ONLY (lab/ordfill1-target): called once, on the way out, and never earlier: the control of the order file's end tier (it must land there). */
+__attribute__((used, noinline)) void scr_lab_planted_shutdown_only(void) { __asm__ volatile("nop"); }
 static void scr_layout_prof_flush(void) {
+  scr_lab_planted_shutdown_only();
   if (scr_layout_prof_exit != NULL) scr_layout_prof_exit();
 }
 
