@@ -14806,6 +14806,8 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     // converts at ITS boundary, where a value that does not fit is refused, not at the enumeration.
     const viaFn = objMember === "values" ? "dyn.objValues" : "dyn.objEntries";
     if (L.isViewShape(receiver.type) && L.dynConvertible(resultT)) {
+      // LAB (entcount), never lands: one line per Object.values/entries site that takes the changed view path.
+      if (process.env["SCRIPTC_ENTVIEW_COUNT"] !== undefined) process.stderr.write(`ENTVIEW ${objMember} ${loc.file}@${String(loc.start)}\n`);
       return L.viewSplit(
         receiver,
         DYN,
