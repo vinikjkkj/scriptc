@@ -1,4 +1,4 @@
-import { parseLayoutOrder } from "./layout-order.js";
+import { hotLiteralNames, parseLayoutOrder } from "./layout-order.js";
 import { execFile } from "node:child_process";
 import { tapPhase } from "../phase-tap.js";
 import { createHash } from "node:crypto";
@@ -1073,21 +1073,32 @@ export async function layoutLinkOrderingAvailable(): Promise<boolean> {
   return (await detectLayoutLinkKind(resolveCc())) !== null;
 }
 
-async function layoutLinkArgs(driver: { argv: readonly string[] }, orderPath: string | undefined, outPath: string): Promise<string[]> {
+async function layoutLinkArgs(driver: { argv: readonly string[] }, orderPath: string | undefined, outPath: string, programFiles: readonly string[]): Promise<string[]> {
   if (orderPath === undefined) return [];
   // SCRIPTC_LAYOUT_LINK_ORDER=0: emission order only (the knob the tests use to prove the emitters' order does not lean on the linker).
   if (process.env["SCRIPTC_LAYOUT_LINK_ORDER"] === "0") return [];
   const found = await detectLayoutLinkKind(driver);
   if (found === null) return [];
-  const names = [...parseLayoutOrder(await readFile(orderPath, "utf8")).rank.keys()];
+  const order = parseLayoutOrder(await readFile(orderPath, "utf8"));
+  const names = [...order.rank.keys()];
   if (names.length === 0) return [];
+  // The string literals the ranked functions (and the data tables) use go first among the program's .data sections, so the 64 KiB fault-around windows of the section
+  // are not all touched (layout-order.ts, data literals). Read from the emitted program text; a failure here only costs the data ordering.
+  let lits: string[] = [];
+  try {
+    const texts = await Promise.all(programFiles.map((f) => readFile(f, "utf8")));
+    lits = hotLiteralNames(texts, programFiles[0]?.endsWith(".ll") ? "llvm" : "c", order);
+  } catch {
+    lits = [];
+  }
   if (found.kind === "section") {
     const file = `${outPath}.layout.ld`;
-    await writeFile(file, `.text : {\n${names.map((n) => `  *(.text.${n} .text.unlikely.${n} .text.hot.${n} .text.startup.${n})`).join("\n")}\n}\n`);
+    const data = lits.length === 0 ? "" : `.data : {\n${lits.map((n) => `  *(.data.${n})`).join("\n")}\n}\n`;
+    await writeFile(file, `.text : {\n${names.map((n) => `  *(.text.${n} .text.unlikely.${n} .text.hot.${n} .text.startup.${n})`).join("\n")}\n}\n${data}`);
     return [`-Wl,--section-ordering-file=${file}`];
   }
   const file = `${outPath}.layout.sym`;
-  await writeFile(file, `${names.join("\n")}\n`);
+  await writeFile(file, `${[...names, ...lits].join("\n")}\n`);
   return [...(found.lld ? ["-fuse-ld=lld"] : []), `-Wl,--symbol-ordering-file=${file}`];
 }
 
@@ -2726,7 +2737,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
   // reference builds only.
   const curlStubDir =
     curlFetch && driver.target !== null ? await ensureCurlStub(driver) : null;
-  const layoutLink = await layoutLinkArgs(driver, opts.layoutOrder, opts.outPath);
+  const layoutLink = await layoutLinkArgs(driver, opts.layoutOrder, opts.outPath, [opts.cPath, ...(opts.programUnits ?? [])]);
   // The lld lane (an ordered build linked by ld.lld): the objects it links carry no merge flag, so lld keeps their strings in input order.
   const stripTool = layoutLink.includes("-fuse-ld=lld") && process.env["SCRIPTC_KEEP_STRING_MERGE"] !== "1" ? await objcopyTool() : null;
   // rt() maps each runtime source's path on the command line: identity for
