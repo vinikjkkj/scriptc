@@ -16136,6 +16136,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25515-object-values-and-entries-over-any-member-records.ts": {
+   "order": [
+    "<repo>/tests/corpus/25515-object-values-and-entries-over-any-member-records.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25516-object-values-and-entries-over-unknown-and-mixed-records.ts": {
+   "order": [
+    "<repo>/tests/corpus/25516-object-values-and-entries-over-unknown-and-mixed-records.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25517-array-methods-over-any-element-variables.ts": {
+   "order": [
+    "<repo>/tests/corpus/25517-array-methods-over-any-element-variables.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25518-object-values-chains-over-any-records.ts": {
+   "order": [
+    "<repo>/tests/corpus/25518-object-values-chains-over-any-records.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25519-any-errors-through-values-entries-and-array-methods.ts": {
+   "order": [
+    "<repo>/tests/corpus/25519-any-errors-through-values-entries-and-array-methods.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2552-generics-iface-methods.ts": {
    "order": [
     "<repo>/tests/corpus/2552-generics-iface-methods.ts"
