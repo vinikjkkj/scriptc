@@ -13,6 +13,9 @@ if [ ! -d "$R/node_modules" ]; then
   ( cd "$R" && pnpm install --frozen-lockfile --ignore-workspace --ignore-scripts --config.strict-dep-builds=false --config.minimumReleaseAge=0 )
 fi
 cp "$APP" "$R/zapo-rest-mysql.ts"
+# LAB ONLY (zapo 1.12.0 repro): the repo copy of the app stays unedited. With Z112_LAB_ARGFIX=1 the CI COPY gets one coercion so the tsc stage passes and the
+# compiler's own errors (the lowering stage) become visible; the build is measurement only, never a fix.
+if [ "${Z112_LAB_ARGFIX:-}" = 1 ]; then sed -i 's/bool(p, "reasonIdentity")/(bool(p, "reasonIdentity") ?? false)/' "$R/zapo-rest-mysql.ts"; fi
 cd "$R"
 s=$(date +%s); set +e
 $BENCH_NODE --max-old-space-size=${NODE_HEAP_MB:-12288} "$SCC_CLI" build zapo-rest-mysql.ts --provenance-sources --npm-static mysql2 ${EXTRA_ARGS:-} --backend "$BE" -o "$O/build-$BE$TAG.bin" > "$O/zapo-rest-mysql-$BE$TAG.build.log" 2>&1
