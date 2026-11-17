@@ -14799,8 +14799,21 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
         loc,
       });
     }
-    // VIEW GRANT: a view lists the values / entries of the OBJECT it is a view of.
+    // VIEW GRANT: a view lists the values / entries of the OBJECT it is a view of. The members the record's own type does not
+    // name are unconstrained, so the answer is NOT the checker's element type: an `undefined`, a number or an object can ride
+    // in a `string[]`-typed result (Node's array simply holds it). Both arms therefore answer the dyn array; a consumer that
+    // takes `unknown` (JSON.stringify, console.log, a send(payload: unknown)) prints it as Node does, and a typed consumer
+    // converts at ITS boundary, where a value that does not fit is refused, not at the enumeration.
     const viaFn = objMember === "values" ? "dyn.objValues" : "dyn.objEntries";
+    if (L.isViewShape(receiver.type) && L.dynConvertible(resultT)) {
+      return L.viewSplit(
+        receiver,
+        DYN,
+        (obj) => ({ kind: "libCall", fn: viaFn, args: [obj], type: DYN, loc }),
+        (rcv) => ({ kind: "dynFrom", value: { kind: "call", callee: helper!, args: [rcv], type: resultT, loc }, type: DYN, loc }),
+        loc,
+      );
+    }
     return L.viewSplit(
       receiver,
       resultT,
