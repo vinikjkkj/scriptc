@@ -151,7 +151,7 @@ import { FileParts, isNestedClassDeclaration, splitFiles, collectProgram, collec
 import { scanDefinePropStringTables, scanDefinePropSymbolSlots, scanUntypedSymbolWrites } from "./lower-classes.js";
 import { protoClassArmOn, protoClassInstanceType } from "./proto-class-consume.js";
 import { genIterableDrainCall, genValueDrainCall, scanGenGate } from "./lower-generators.js";
-import { dynBoxedMethodInstances, ClassInfo, ClassIteratorInfo, GenericClassInfo, registerBuiltinErrorClasses, registerBuiltinEmitterClass, registerBuiltinStreamClasses, builtinErrorInfoOf, builtinEmitterInfoOf, builtinStreamInfoOf, analyzeClassDecoration, classIteratorDrainCall, classIteratorNextCall, classIteratorOf, classIteratorOpenCall, classIteratorRestDrainCall, classMemberNameOf, symbolSlotAccessorName, classValueRef, collectClassShape, exactClassOfReceiver, collectClassShapeInner, ctorAbiEquals, findMethodOn, findStaticOn, findGenericMethodOn, findGenericStaticOn, genericClassInstanceType, isSubclassOf, inHierarchy, overrideBelow, staticShadowBelow, upcastTo, lowerClassMembers, lowerClassCtor, lowerClassExpression, lowerClassExpressionInfo, lowerClassMethodMember, lowerProtoMethodMember, lowerClassValueProperty, lowerConstructorName, lowerStaticMethod, isProvenStaticThis, throwingSetterFn, shadowMethodFn, fieldInitStmts, lowerStaticFieldInits, lowerStaticFieldRead, lowerDerivedCtorBody, superCallStmt, lowerSuperMethodCall, superThisRef, lowerSuperAccessorRead, lowerSuperAccessorWrite, inheritsBuiltinErrorCtor, inheritsBuiltinEmitterCtor, errorMessageArg, lowerNew, accessorCall, virtualViewFitsSlot, vtThunkFn, findStaticAccessorOn, staticAccessorWrite, staticCompoundTarget, genericOverrideBelow } from "./lower-classes.js";
+import { dynBoxedMethodInstances, ClassInfo, ClassIteratorInfo, GenericClassInfo, registerBuiltinErrorClasses, registerBuiltinEmitterClass, registerBuiltinStreamClasses, builtinErrorInfoOf, builtinEmitterInfoOf, builtinStreamInfoOf, analyzeClassDecoration, classIteratorDrainCall, classIteratorNextCall, classIteratorOf, classIteratorOpenCall, classIteratorRestDrainCall, classMemberNameOf, symbolSlotAccessorName, classValueRef, collectClassShape, exactClassOfReceiver, collectClassShapeInner, ctorAbiEquals, findMethodOn, findStaticOn, findGenericMethodOn, findGenericStaticOn, genericClassInstanceType, isSubclassOf, inHierarchy, overrideBelow, staticShadowBelow, upcastTo, lowerClassMembers, lowerClassCtor, lowerClassExpression, lowerClassExpressionInfo, lowerClassMethodMember, lowerProtoMethodMember, lowerClassValueProperty, lowerConstructorName, lowerStaticMethod, isProvenStaticThis, throwingSetterFn, shadowMethodFn, fieldInitStmts, lowerStaticFieldInits, lowerStaticFieldRead, lowerClassPrototypeRead, lowerClassPrototypeMember, protoRootClassOf as protoRootClassOfImpl, lowerDerivedCtorBody, superCallStmt, lowerSuperMethodCall, superThisRef, lowerSuperAccessorRead, lowerSuperAccessorWrite, inheritsBuiltinErrorCtor, inheritsBuiltinEmitterCtor, errorMessageArg, lowerNew, accessorCall, virtualViewFitsSlot, vtThunkFn, findStaticAccessorOn, staticAccessorWrite, staticCompoundTarget, genericOverrideBelow } from "./lower-classes.js";
 import { MixinFnShape, mixinCallClassInfoOf, mixinIntersectionInstanceType } from "./lower-mixins.js";
 import { EVAL_ENV_SYM, evalClassNodeHook } from "./lower-evalclass.js";
 import { lowerTimersSchedulerCall } from "./lower-builtins.js";
@@ -21002,6 +21002,16 @@ export class Lowerer {
       return { kind: "jsOp", op: "construct", args: [ctor, arg], type: JSVAL, loc };
     }
     return lowerNew(this, expr);
+  }
+
+  /** `C.prototype`, `C.prototype.<member>` and `new.target.prototype`: dyn values (the checker types them as the instance, which they are not),
+   * so they return from the property-access entry BEFORE the generic chain, whose closing narrowing bridge would demand an instance. */
+  protoRootClassOf(expr: ts.Expression): ClassInfo | null {
+    return protoRootClassOfImpl(this, expr);
+  }
+
+  lowerClassPrototypeValue(expr: ts.PropertyAccessExpression): IrExpr | null {
+    return lowerClassPrototypeRead(this, expr) ?? lowerClassPrototypeMember(this, expr) ?? (expr.name.text === "prototype" ? lowerNewTargetMember(this, expr) : null);
   }
 
   lowerFieldRead(expr: ts.PropertyAccessExpression): IrExpr | null {

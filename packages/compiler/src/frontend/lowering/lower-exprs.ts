@@ -3684,6 +3684,10 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // the silent divergence this lowering closes. Reads in modules with
       // real `exports.<name> =` attachments keep their fences.
       {
+        const protoValue = L.lowerClassPrototypeValue(expr);
+        if (protoValue) return protoValue;
+      }
+      {
         const ex = lowerReplacedExportsRead(L, expr);
         if (ex) return ex;
       }
@@ -21578,14 +21582,68 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
   /** `new.target.<member>` (`name`, `prototype`, a static): the member reads through the invoked class's dyn box like `this.constructor.<member>`. Null for any
    * other receiver and for an optional chain (`new.target?.x` keeps the generic arms). Called FIRST by lowerFieldRead: the class-value arms behind it
    * would see a `typeof C` receiver and fence a computed one. */
+  /** Where a class PROTOTYPE value may appear. `C.prototype` and `C.prototype.<member>` are dyn values (the checker types them as an instance / a method of
+   * one, which they are not), so the compiler can only keep them honest in the positions that never ask for the instance type: an equality or
+   * instanceof operand, a typeof operand, the object of a member read or a call. A binding, an argument, a return, a cast to any and a write would each
+   * hand the dyn value to a slot typed as an instance, or let a write through a dyn reference reach a prototype object whose members instances do not
+   * consult: those are refused HERE, at compile time, never left to throw at run time. Null when the position is fine. */
+  export function protoContextRefusal(node: ts.Expression, member: boolean): string | null {
+    let n: ts.Node = node;
+    let p: ts.Node | undefined = n.parent;
+    while (
+      p !== undefined &&
+      (ts.isParenthesizedExpression(p) || ts.isNonNullExpression(p) ||
+        (ts.isAsExpression(p) && p.type.kind === ts.SyntaxKind.UnknownKeyword))
+    ) {
+      n = p;
+      p = p.parent;
+    }
+    const what = member ? "a member of a class prototype" : "a class prototype object";
+    const fix = member
+      ? "compare it, take typeof, or call it through .call/.apply/.bind with an instance receiver"
+      : "compare it, test typeof/instanceof, or read and call members through it directly (C.prototype.constructor, C.prototype.hasOwnProperty(k))";
+    if (p !== undefined) {
+      if (ts.isBinaryExpression(p)) {
+        const op = p.operatorToken.kind;
+        if (
+          op === ts.SyntaxKind.EqualsEqualsEqualsToken || op === ts.SyntaxKind.ExclamationEqualsEqualsToken ||
+          op === ts.SyntaxKind.EqualsEqualsToken || op === ts.SyntaxKind.ExclamationEqualsToken ||
+          (op === ts.SyntaxKind.InstanceOfKeyword && p.left === n)
+        ) return null;
+      }
+      if (ts.isTypeOfExpression(p)) return null;
+      if (!member && ts.isCallExpression(p) && p.arguments.includes(n as ts.Expression) && ts.isPropertyAccessExpression(p.expression) && p.expression.name.text === "isPrototypeOf") return null;
+      if (!member && ts.isCallExpression(p) && p.arguments.includes(n as ts.Expression) && ts.isPropertyAccessExpression(p.expression)) {
+        const callee = p.expression;
+        if (
+          ts.isIdentifier(callee.expression) && callee.expression.text === "Object" &&
+          (callee.name.text === "getPrototypeOf" || callee.name.text === "getOwnPropertyNames" || callee.name.text === "getOwnPropertyDescriptor" || callee.name.text === "hasOwn")
+        ) return null;
+      }
+      if (ts.isPropertyAccessExpression(p) && p.expression === n && p.questionDotToken === undefined) {
+        if (!member) return null;
+        const nm = p.name.text;
+        if (nm === "call" || nm === "apply" || nm === "bind" || nm === "name" || nm === "length") return null;
+      }
+    }
+    return `${what} is not an instance of the class although tsc types it as one, so it cannot be bound, passed, returned, cast or written here (${fix})`;
+  }
+
   export function lowerNewTargetMember(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
     if (!isNewTargetMeta(expr.expression) || expr.questionDotToken !== undefined) return null;
     const loc = locOf(expr);
     const key: IrExpr = { kind: "strLit", value: expr.name.text, type: STRING, loc: locOf(expr.name) };
-    return L.maybeNarrow({ kind: "dynKeyGet", key, value: lowerNewTarget(L, expr.expression), type: DYN, loc }, expr);
+    const read: IrExpr = { kind: "dynKeyGet", key, value: lowerNewTarget(L, expr.expression), type: DYN, loc };
+    // The checker types `.prototype` as the INSTANCE; the value is the prototype object, so it stays dyn (a narrowing bridge would demand an instance).
+    if (expr.name.text === "prototype") {
+      const why = protoContextRefusal(expr, false);
+      if (why !== null) L.unsupported("SC1090", expr, why);
+      return read;
+    }
+    return L.maybeNarrow(read, expr);
   }
 
-  function isNewTargetMeta(e: ts.Node): e is ts.MetaProperty {
+  export function isNewTargetMeta(e: ts.Node): e is ts.MetaProperty {
     return ts.isMetaProperty(e) && e.keywordToken === ts.SyntaxKind.NewKeyword;
   }
 
@@ -21603,7 +21661,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
    * constructor chain runs, so the answer is the runtime class of `this`, one `instanceOf` arm per descendant (deepest first), each the class value
    * boxed as dyn (the `this.constructor` representation: `.name`, `===` and `.prototype` read through it). Everywhere else a compiled function is
    * only ever called, never constructed, so it is undefined. */
-  function lowerNewTarget(L: Lowerer, expr: ts.MetaProperty): IrExpr {
+  export function lowerNewTarget(L: Lowerer, expr: ts.MetaProperty): IrExpr {
     const loc = locOf(expr);
     const owner = newTargetOwner(expr);
     if (owner === undefined || !ts.isConstructorDeclaration(owner)) return dynUndefinedExpr(loc);
@@ -22684,6 +22742,22 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
   }
 
   export function lowerInstanceOf(L: Lowerer, expr: ts.BinaryExpression, loc: SrcLoc): IrExpr {
+    // `C.prototype instanceof D`: the prototype object of C is an instance of D exactly when D is a strict ancestor of C (its chain is C's parent's
+    // prototype, and so on up). Both are program classes, so the answer is static; any other right operand is refused rather than answered from a
+    // dyn value that would say false.
+    {
+      let left: ts.Expression = expr.left;
+      while (ts.isParenthesizedExpression(left) || (ts.isAsExpression(left) && left.type.kind === ts.SyntaxKind.UnknownKeyword)) left = left.expression;
+      if (ts.isPropertyAccessExpression(left) && left.name.text === "prototype") {
+        const root = L.protoRootClassOf(left);
+        if (root !== null) {
+          const rsym = ts.isIdentifier(expr.right) ? L.resolveValueSymbol(expr.right) : null;
+          const rcls = rsym ? L.classBySymbol.get(rsym) ?? null : null;
+          if (rcls === null) L.unsupported("SC1090", expr, "a class prototype object tested with instanceof against something other than a program class");
+          return { kind: "boolLit", value: L.isSubclassOf(root.def.name, rcls!.def.name), type: BOOL, loc };
+        }
+      }
+    }
     // `x instanceof P` where P is a declaration-file class paired with the
     // program's constructor (the require's module.exports value). The class is
     // NOT ambient: its instances are the constructor's. A left operand whose
