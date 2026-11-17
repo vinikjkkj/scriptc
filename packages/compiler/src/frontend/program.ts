@@ -40,6 +40,7 @@
  *    JSON.parse's wording rather than tsc's, the one message-text delta on
  *    that path (no snapshot pins it). */
 
+import { span } from "../phase-times.js";
 import { builtinModules } from "node:module";
 import { existsSync, readdirSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
@@ -455,7 +456,7 @@ function loadProgram7(host: ts.Ts7Host, entryPath: string): LoadResult & { dispo
  * lowering. The caller runs checkPreflight, hands program/entry/
  * moduleOrder straight to lowerToIr, and MUST dispose() when done — the
  * spawned tsgo server must not outlive the compile. */
-export function loadProgram(
+function loadProgramImpl(
   entryPath: string,
   opts?: {
     /** --npm-static: package names whose shipped JS compiles as program
@@ -708,7 +709,7 @@ export function declTwinOf(program: ts.Program, sf: ts.SourceFile): ts.SourceFil
   return undefined;
 }
 
-export function checkPreflight(load: LoadResult): ScrDiagnostic[] {
+function checkPreflightImpl(load: LoadResult): ScrDiagnostic[] {
   const { diags, moduleOrder, startupCrash } = preflight7(load);
   const withTwins: ts.SourceFile[] = [];
   for (const sf of moduleOrder) {
@@ -5128,4 +5129,12 @@ export function cjsKeyedForEachOf(stmt: ts.Statement, sf: ts.SourceFile): CjsKey
   walk(fn.body);
   if (hasReturn) return null;
   return { stmt, keyParam, valueParam, body: fn.body, exportStmt, keys };
+}
+
+/* LAB timing hooks (phase-times.ts): spans named `load` and `preflight`; `fn()` itself when SCRIPTC_PHASE_TIMES is unset. */
+export function loadProgram(...args: Parameters<typeof loadProgramImpl>): ReturnType<typeof loadProgramImpl> {
+  return span("load", () => loadProgramImpl(...args));
+}
+export function checkPreflight(...args: Parameters<typeof checkPreflightImpl>): ReturnType<typeof checkPreflightImpl> {
+  return span("preflight", () => checkPreflightImpl(...args));
 }

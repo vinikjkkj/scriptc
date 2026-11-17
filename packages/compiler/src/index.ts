@@ -2,6 +2,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { cDefinedNames, layoutMatchStats, layoutStaleWarning, llvmDefinedNames, parseLayoutOrder, reorderLlvmText, type LayoutOrder } from "./backend/layout-order.js";
 import { tapPhase, tapped } from "./phase-tap.js";
+import { spanAsync } from "./phase-times.js";
 import { basename, dirname, join, resolve } from "node:path";
 import { cacheRootDir, CcCompileError, compileC, compileLibArchive, layoutLinkOrderingAvailable, resolveCc, targetPlatform } from "./backend/cc.js";
 import { emitModule, emitModuleProgram } from "./backend/emission/emitter.js";
@@ -679,7 +680,7 @@ export function runFrontend(entryPath: string, npmStatic?: readonly string[] | "
     }
   };
   const lowerPinned = (opts: LowerOptions): { result: LowerResult; pins?: NonNullable<LowerResult["pinReload"]>; folded?: true } => {
-      const first = lowerToIr(finalLoad.program, finalLoad.entry, finalLoad.moduleOrder, { ...opts, startupCrash: finalLoad.startupCrash ?? null });
+      const first = tapped("lower.1st", () => lowerToIr(finalLoad.program, finalLoad.entry, finalLoad.moduleOrder, { ...opts, startupCrash: finalLoad.startupCrash ?? null }));
       if (first.pinReload === undefined) return { result: first };
       if (process.env["SCRIPTC_TWIN_WHY"] !== undefined) process.stderr.write("[pin] reload\n");
       if (first.twinFold !== undefined && foldMode !== "off") {
@@ -694,11 +695,11 @@ export function runFrontend(entryPath: string, npmStatic?: readonly string[] | "
       freeFinalLoad();
       pinnedLoad = loadProgram(entryPath, { desugarMemo, npmStatic: effective, textEdits: first.pinReload, ...(decidedPins !== undefined ? { decidedPins } : {}) });
       checkPreflight(pinnedLoad);
-      const second = lowerToIr(pinnedLoad.program, pinnedLoad.entry, pinnedLoad.moduleOrder, {
+      const second = tapped("lower.pin", () => lowerToIr(pinnedLoad!.program, pinnedLoad!.entry, pinnedLoad!.moduleOrder, {
         ...opts,
-        startupCrash: pinnedLoad.startupCrash ?? null,
+        startupCrash: pinnedLoad!.startupCrash ?? null,
         noPinReload: true,
-      });
+      }));
       // The second lowering's locations are offsets into the EDITED text; a
       // diagnostic renders its source line off the file as the author wrote
       // it, so they map back (the edits only insert).
@@ -811,13 +812,13 @@ export function runFrontend(entryPath: string, npmStatic?: readonly string[] | "
           for (const f of foldVerifyTexts.keys()) if (!seq.has(f)) diff.push(f);
           process.stderr.write(`[twinfold] verify ${diff.length === 0 ? "EQUAL" : "DIFFER"}: ${seq.size} twinned file(s) compared byte for byte${diff.length > 0 ? `; differ: ${diff.join(", ")}` : ""}\n`);
         }
-        const again = lowerToIr(twinLoad.program, twinLoad.entry, twinLoad.moduleOrder, {
+        const again = tapped("lower.twin", () => lowerToIr(twinLoad!.program, twinLoad!.entry, twinLoad!.moduleOrder, {
           ...opts,
-          startupCrash: twinLoad.startupCrash ?? null,
+          startupCrash: twinLoad!.startupCrash ?? null,
           noPinReload: true,
           noTwinReload: true,
-        });
-        const bad = again.module === null ? [] : validateModule(again.module);
+        }));
+        const bad = again.module === null ? [] : tapped("validate.twin", () => validateModule(again.module!));
         if (again.module === null || again.diagnostics.length > 0 || bad.length > 0) {
           if (process.env["SCRIPTC_TWIN_WHY"] !== undefined) {
             for (const d of again.diagnostics.slice(0, 5)) process.stderr.write(`[twin] reload refused: ${d.code} ${d.message}\n`);
@@ -1411,7 +1412,12 @@ async function earlyCacheOptionsFor(
   };
 }
 
+/* LAB timing hook (phase-times.ts): the root span `compile`. */
 export async function compile(entryPath: string, opts: CompileOptions): Promise<CompileResult> {
+  return spanAsync("compile", () => compileImpl(entryPath, opts));
+}
+
+async function compileImpl(entryPath: string, opts: CompileOptions): Promise<CompileResult> {
   // The census lanes stop after the frontend and report a failed compile with
   // no artifact. They must neither read nor write an entry.
   const root = keyReadCensusOnly() ? null : cacheRootDir();
@@ -1561,12 +1567,14 @@ async function compileTracked(
     }
     if (lowered.module === null) return fail(lowered.diagnostics);
 
-    captureByValue(lowered.module!);
-    deadInitPass(lowered.module!);
-    reportNarrowScope(lowered.module!);
-    narrowSlotPass(lowered.module!);
-    numSlotPass(lowered.module!);
-    cbitPass(lowered.module!);
+    tapped("fe.passes", () => {
+      captureByValue(lowered.module!);
+      deadInitPass(lowered.module!);
+      reportNarrowScope(lowered.module!);
+      narrowSlotPass(lowered.module!);
+      numSlotPass(lowered.module!);
+      cbitPass(lowered.module!);
+    });
     const validation = tapped("fe.validate", () => validateModule(lowered.module!));
     if (validation.length > 0) {
       return fail(validation.map((v) => iceDiag(v.message, v.loc)));
