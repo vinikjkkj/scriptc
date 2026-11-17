@@ -33,6 +33,7 @@ import { validateModule } from "./ir/validate.js";
 import { captureByValue } from "./ir/capture-by-value.js";
 import { numSlotPass } from "./ir/num-slot.js";
 import { cbitPass } from "./ir/cbit.js";
+import { deadInitPass } from "./ir/dead-init.js";
 import { narrowSlotPass, reportNarrowScope } from "./ir/narrow-slot.js";
 import { canonicalBuiltinModule, checkPreflight, isNodeTypesPath, loadProgram, locOf, requiresOf, resolveNpmImport, type LoadResult } from "./frontend/program.js";
 import { npmStaticIneligibleReason, npmStaticOffenders, npmStaticPackageOfPath } from "./frontend/npm-static.js";
@@ -1433,6 +1434,7 @@ async function compileTracked(
     if (lowered.module === null) return fail(lowered.diagnostics);
 
     captureByValue(lowered.module!);
+    deadInitPass(lowered.module!);
     reportNarrowScope(lowered.module!);
     narrowSlotPass(lowered.module!);
     numSlotPass(lowered.module!);
