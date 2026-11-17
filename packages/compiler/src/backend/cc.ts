@@ -211,6 +211,10 @@ export function assertRuntimeUnitsClosed(
  * a vendor bump can never reuse a stale engine build. */
 const QJS_COMMIT = "3c8f3d68953955950074c41c6e4d999562ae82a7";
 
+/** Revision of the one local change to the vendored engine (quickjs.c's lre_* hooks answer a NULL opaque; see vendor/README.md).
+ * Keys the engine archive cache and the runtime fingerprint, so a stale archive built from the unmodified hooks is never reused. */
+const QJS_LOCAL_PATCH = "lre-null-opaque-1";
+
 /** The pinned mbedTLS snapshot under packages/runtime/vendor/mbedtls (see
  * vendor/README.md — update both together). Keys the archive cache so a
  * vendor bump can never reuse a stale TLS build, and joins the runtime
@@ -1348,7 +1352,7 @@ async function ensureEngineArchive(sanitize: boolean, driver: CcDriver): Promise
   const flavor = `${sanitize ? "asan" : "plain"}${driver.target !== null ? `-${driver.target}` : ""}${gcFlavor()}${profFlavor()}`;
   const vendor = vendorEngineDir();
   const cacheRoot = join(vendor, "..", ".cache");
-  const cacheDir = join(cacheRoot, `${QJS_COMMIT.slice(0, 12)}-${flavor}`);
+  const cacheDir = join(cacheRoot, `${QJS_COMMIT.slice(0, 12)}-${QJS_LOCAL_PATCH}-${flavor}`);
   const archive = join(cacheDir, "libqjs.a");
   if (await fileExists(archive)) {
     await checkToolchain(cacheDir, driver, "qjs");
@@ -2286,7 +2290,7 @@ export async function runtimeFingerprint(rtDir: string): Promise<string> {
   const sig =
     `${rtDir}\0` + stats.map((s, i) => `${inputs[i]?.[0] ?? ""}:${s.size}:${s.mtimeMs}`).join("|");
   if (rtFingerprintMemo !== null && rtFingerprintMemo.sig === sig) return rtFingerprintMemo.hash;
-  const h = createHash("sha256").update(QJS_COMMIT).update(MBEDTLS_VERSION).update(ZLIB_VERSION).update(SQLITE_VERSION);
+  const h = createHash("sha256").update(QJS_COMMIT).update(QJS_LOCAL_PATCH).update(MBEDTLS_VERSION).update(ZLIB_VERSION).update(SQLITE_VERSION);
   for (const [name, path] of inputs) h.update(name).update("\0").update(await readFile(path)).update("\0");
   const hash = h.digest("hex");
   rtFingerprintMemo = { sig, hash };

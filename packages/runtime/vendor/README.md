@@ -35,7 +35,7 @@ because mbedTLS has no Ed25519 at all.
 
 The QuickJS-ng JavaScript engine, embedded by the opt-in `--dynamic` build mode (see packages/runtime/src/scr_island.c). Static builds never compile or link any of this.
 
-The tree is a plain snapshot of the upstream commit with directories the library build does not need removed (tests/, docs/, examples/, test262 fixtures, CI config, generator scripts). No vendored file is modified; to update, re-clone upstream at the new commit, delete its .git directory, apply the same trim, and update this file.
+The tree is a plain snapshot of the upstream commit with directories the library build does not need removed (tests/, docs/, examples/, test262 fixtures, CI config, generator scripts). One vendored file is modified, and only here: the three `lre_*` host hooks at the end of quickjs.c answer a NULL opaque (plain libc allocation, no stack guard, no interrupt) so a program can compile and run its own static regexes without booting the engine; a non-NULL opaque (a JSContext) takes the upstream path unchanged. The cache key carries `QJS_LOCAL_PATCH` in cc.ts, so bump it with any further local change. To update, re-clone upstream at the new commit, re-apply that hook change, delete its .git directory, apply the same trim, and update this file.
 
 The engine archive (libqjs.a) is built lazily on the first `--dynamic` compile into `.cache/<commit>-<flavor>/` next to this file — one flavor per lane (plain, asan). The cache directory is gitignored and safe to delete.
 
