@@ -83,6 +83,7 @@ Columns: name, who reads it, class, what it does, default / accepted.
 | `SCRIPTC_CACHE_DEBUG` | compiler | debug/lab | Print the frontend's input-snapshot probe census (`SCRIPTC_INPUT_SNAPSHOT` prints the full JSON). | `1` = on. |
 | `SCRIPTC_CACHE_VERIFY` | compiler | debug/lab | Verify mode of the early frontend cache: a cached hit is checked against the build that is run anyway (the variable is in the cache-only environment, so it is not part of the cache key). | `1` = on. |
 | `SCRIPTC_CC_ARGV` | compiler | debug/lab | Append the exact argv of every cc invocation this build makes, with its wall time, to the file named. | unset = off; a file path. |
+| `SCRIPTC_DEADINIT` | compiler | debug/lab | The dead-initializer pass (`ir/dead-init.ts`): a never-read module `const` whose initializer is provably pure is not built. `off` disables the pass (the A/B arm); `report` prints one `DEADINIT drop <id>` or `DEADINIT keep <id>: <reason>` line per never-read candidate to stderr. | unset = on; `off`, `report`. |
 | `SCRIPTC_DIAG_STACK` | compiler | debug/lab | Print a stack with a diagnostic when it is raised. | any value (even empty) turns it on. |
 | `SCRIPTC_DOORS` | compiler | debug/lab | Print a `[doors]` trace line to stderr when a recursive pending record type is met in `frontend/types.ts`. | any value turns it on. |
 | `SCRIPTC_EMIT_ARM_NOTES` | compiler | debug/lab | Append `/*ARMS=<n>,TAG=<t>*/` notes to every tag-unchecked payload extraction in the generated translation unit, for static soundness census. | `1` = on. |
