@@ -16004,6 +16004,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25495-any-values-in-printed-object-array-and-map-literals.ts": {
+   "order": [
+    "<repo>/tests/corpus/25495-any-values-in-printed-object-array-and-map-literals.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25496-any-errors-with-expandos-in-printed-containers.ts": {
+   "order": [
+    "<repo>/tests/corpus/25496-any-errors-with-expandos-in-printed-containers.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25497-any-literals-through-util-inspect-and-format.ts": {
+   "order": [
+    "<repo>/tests/corpus/25497-any-literals-through-util-inspect-and-format.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25498-any-literals-through-json-stringify.ts": {
+   "order": [
+    "<repo>/tests/corpus/25498-any-literals-through-json-stringify.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25499-any-error-subclass-in-printed-containers.ts": {
+   "order": [
+    "<repo>/tests/corpus/25499-any-error-subclass-in-printed-containers.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2550-generics-keyof-pick.ts": {
    "order": [
     "<repo>/tests/corpus/2550-generics-keyof-pick.ts"
