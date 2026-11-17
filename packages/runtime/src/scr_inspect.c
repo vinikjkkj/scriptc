@@ -1671,11 +1671,26 @@ ScrStr *scr_insp_typed(ScrBytes *b, ScrStr *name) {
   return out;
 }
 
+static void insp_key_into(InspBuf *b, const char *key, size_t len);
+
+/* Does the error own an enumerable expando property that renders as a key (not cause, not a stamped slot)? */
+static bool insp_err_has_enum_props(const ScrError *e) {
+  if (e->props == NULL || e->props->kind != SCR_DYN_OBJ) return false;
+  for (size_t i = 0; i < e->props->v.obj.len; i++) {
+    const ScrDynEntry *ent = &e->props->v.obj.entries[i];
+    const ScrDyn *q = ent->value;
+    if (!ent->plain_prop && (q->kind != SCR_DYN_ARR || q->v.arr.len < 5 || !scr_dyn_truthy(q->v.arr.items[4]) || !scr_dyn_truthy(q->v.arr.items[0]))) continue;
+    if ((ent->key_len == 5 && memcmp(ent->key, "cause", 5) == 0) || (ent->key_len == 4 && memcmp(ent->key, "code", 4) == 0)) continue;
+    return true;
+  }
+  return false;
+}
+
 ScrStr *scr_insp_error(ScrError *e, double recurse, double depth) {
   double ext_errno = 0;
   const ScrStr *ext_syscall = NULL, *ext_path = NULL, *ext_dest = NULL;
   bool has_ext = scr_error_ext_get(e, &ext_errno, &ext_syscall, &ext_path, &ext_dest);
-  bool has_code = e->code != NULL || has_ext; /* the stamped slots, read directly (borrowed) */
+  bool has_code = e->code != NULL || has_ext || insp_err_has_enum_props(e); /* the stamped slots (and own enumerable expandos), read directly (borrowed) */
   if ((has_code || INSP_SH) && recurse > depth) {
     /* `[${getCtxStyle(...)}]` with the trailing space sliced: [Name] */
     InspBuf out = {0};
@@ -1771,6 +1786,55 @@ ScrStr *scr_insp_error(ScrError *e, double recurse, double depth) {
       scr_insp_entry(entry_str, false);
       scr_str_release(entry_str);
     }
+  }
+  /* net errors (Node's uvException for a socket op) carry address and port after the syscall */
+  if (has_ext) {
+    ScrStr *addr = scr_error_ext_address(e);
+    if (addr != NULL) {
+      InspBuf entry = {0};
+      ib_cstr(&entry, "address: ");
+      insp_quote_into(&entry, addr->data, addr->len);
+      ScrStr *entry_str = ib_take(&entry);
+      scr_insp_entry(entry_str, false);
+      scr_str_release(entry_str);
+    }
+    double eport = 0;
+    if (scr_error_ext_port(e, &eport)) {
+      InspBuf entry = {0};
+      char nb[40];
+      size_t nn = scr_f64_to_str(eport, nb);
+      ib_cstr(&entry, "port: ");
+      for (size_t i = 0; i < nn; i++) ib_char(&entry, nb[i]);
+      ScrStr *entry_str = ib_take(&entry);
+      scr_insp_entry(entry_str, false);
+      scr_str_release(entry_str);
+    }
+  }
+  /* the error's OWN enumerable expando properties (`err.fatal = true`, a TLS error's reason/host/cert), in insertion order, after the stamped
+   * ones; the non-enumerable cause/errors are not keys (cause renders below) and the stamped slots are never printed twice */
+  if (e->props != NULL && e->props->kind == SCR_DYN_OBJ) {
+    size_t *ord = scr_dyn_obj_key_order(e->props);
+    for (size_t i = 0; i < e->props->v.obj.len; i++) {
+      const ScrDynEntry *ent = &e->props->v.obj.entries[ord ? ord[i] : i];
+      const ScrDyn *q = ent->value;
+      const bool pl = ent->plain_prop;
+      if (!pl && (q->kind != SCR_DYN_ARR || q->v.arr.len < 5)) continue;
+      if (!pl && !scr_dyn_truthy(q->v.arr.items[4])) continue; /* non-enumerable */
+      if (!pl && !scr_dyn_truthy(q->v.arr.items[0])) continue; /* an accessor: not rendered here */
+      if ((ent->key_len == 5 && memcmp(ent->key, "cause", 5) == 0) || (ent->key_len == 4 && memcmp(ent->key, "code", 4) == 0)) continue;
+      if (has_ext && ((ent->key_len == 5 && memcmp(ent->key, "errno", 5) == 0) || (ent->key_len == 7 && memcmp(ent->key, "syscall", 7) == 0) ||
+                      (ent->key_len == 4 && (memcmp(ent->key, "path", 4) == 0 || memcmp(ent->key, "dest", 4) == 0 || memcmp(ent->key, "port", 4) == 0)) ||
+                      (ent->key_len == 7 && memcmp(ent->key, "address", 7) == 0) || (ent->key_len == 8 && memcmp(ent->key, "hostname", 8) == 0))) continue;
+      InspBuf eb = {0};
+      insp_key_into(&eb, ent->key, ent->key_len);
+      ScrStr *val = scr_insp_dyn(pl ? (ScrDyn *)q : q->v.arr.items[1], recurse + 1, depth);
+      insp_kv(&eb, val);
+      scr_str_release(val);
+      ScrStr *entry = ib_take(&eb);
+      scr_insp_entry(entry, false);
+      scr_str_release(entry);
+    }
+    free(ord);
   }
   if (cause_v != NULL) {
     InspBuf eb = {0};

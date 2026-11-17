@@ -732,6 +732,7 @@ static FsTransfer *fs_from(ScrClosure *cb) { return (FsTransfer *)scr_box_get_re
  * "fetch failed". The classified detail rides `code` (Node puts it on
  * `cause`, which no ScrError slot can hold — the documented divergence at
  * the head of this file). */
+static ScrError *fs_failure_with_cause(ScrError *cause /*borrowed, nullable*/);
 static ScrError *fs_failure(const char *code) {
   ScrStr *m = scr_str_new("fetch failed", 12);
   ScrError *e = scr_error_new(SCR_ERR_TYPE, m);
@@ -743,10 +744,22 @@ static ScrError *fs_failure(const char *code) {
   return e;
 }
 
+/* Node's network-failure shape: TypeError "fetch failed" whose own non-enumerable `cause` is the underlying error (connect ECONNREFUSED,
+ * getaddrinfo ENOTFOUND, ERR_TLS_CERT_ALTNAME_INVALID, undici's SocketError). The TypeError carries NO code of its own. */
+static ScrError *fs_failure_with_cause(ScrError *cause) {
+  ScrError *e = fs_failure(NULL);
+  ScrDyn *cd = scr_dyn_from_error(cause);
+  scr_error_set_cause(e, cd);
+  scr_dyn_release(cd);
+  return e;
+}
+
 /* A failure BEFORE the head: the fetch() promise rejects and no Response
  * is ever minted. A failure AFTER it: the body errors, and the rejection
  * lands on whatever consumer is parked (or on the next one to ask). */
-static void fs_error(FsTransfer *t, const char *code) {
+static void fs_error_c(FsTransfer *t, const char *code, ScrError *cause /*borrowed, nullable*/);
+static void fs_error(FsTransfer *t, const char *code) { fs_error_c(t, code, NULL); }
+static void fs_error_c(FsTransfer *t, const char *code, ScrError *cause) {
   if (t->done) return;
   /* An abort is not a network failure. Node rejects an aborted fetch with
    * the AbortError, never with "fetch failed", and the two are told apart
@@ -758,7 +771,7 @@ static void fs_error(FsTransfer *t, const char *code) {
     t->promise = NULL;
     if (p != NULL) {
       /* +1 in, and scr_throw_obj keeps it: no release here. */
-      ScrError *e = aborted ? fs_signal_error(t->signal) : fs_failure(code);
+      ScrError *e = aborted ? fs_signal_error(t->signal) : (cause != NULL ? fs_failure_with_cause(cause) : fs_failure(code));
       scr_throw_obj(e, &scr_error_retain_v, &scr_error_release_v, scr_error_trace_arg());
       scr_promise_reject_pending(p);
       scr_promise_release(p);
@@ -904,7 +917,7 @@ static int fs_url_port(const ScrUrl *u, int deflt) {
 /* ── the hop ─────────────────────────────────────────────────────── */
 
 static void fs_on_response(ScrClosure *cb, ScrHttpReq *res /*+1*/);
-static void fs_on_client_error(ScrClosure *cb, ScrStr *msg /*borrowed*/);
+static void fs_on_client_error_obj(ScrClosure *cb, ScrError *err /*+1*/);
 
 static void fs_start_hop(FsTransfer *t) {
   ScrUrl *u = t->url;
@@ -1033,7 +1046,9 @@ static void fs_start_hop(FsTransfer *t) {
   t->client = c;
   if (t->signal != NULL && fs_signal_attach != NULL) fs_signal_attach(t->signal, c);
   scr_http_client_on_response(c, fs_closure(t, (void *)&fs_on_response), &fs_on_response, true);
-  scr_http_client_on_error(c, fs_closure(t, (void *)&fs_on_client_error), &fs_on_client_error, false);
+  /* the OBJECT listener (scr_child_err_thunk_error is the net layer's marker for it): a transport that produced an Error hands it over whole, a
+   * message-only failure is wrapped by the thunk, so the cause below always has a code and a message */
+  scr_http_client_on_error(c, fs_closure(t, (void *)&fs_on_client_error_obj), &scr_child_err_thunk_error, false);
   if (t->body != NULL) scr_http_client_end_bytes(c, t->body);
   else scr_http_client_end(c);
 }
@@ -1295,35 +1310,44 @@ static void fs_on_response(ScrClosure *cb, ScrHttpReq *res /*+1*/) {
 
 /* Pre-response failure: classify into Node's codes exactly as
  * scr_fetch.c does, then reject. */
-static void fs_on_client_error(ScrClosure *cb, ScrStr *msg /*borrowed*/) {
+static void fs_on_client_error_obj(ScrClosure *cb, ScrError *err /*+1*/) {
   FsTransfer *t = fs_from(cb);
-  if (t == NULL) return;
-  if (t->done || t->responded) {
-    fs_release(t);
+  if (t == NULL) {
+    scr_error_release(err);
     return;
   }
-  const char *detail = msg->data;
-  const char *code = NULL;
-  char codebuf[32];
-  if (msg->len > 8 && memcmp(detail, "connect E", 9) == 0) {
-    const char *s = detail + 8;
-    size_t n = 0;
-    while (s[n] != '\0' && s[n] != ' ' && n < sizeof codebuf - 1) n++;
-    memcpy(codebuf, s, n);
-    codebuf[n] = '\0';
-    code = codebuf;
-  } else if (msg->len > 12 && memcmp(detail, "getaddrinfo E", 13) == 0) {
-    const char *s = detail + 12;
-    size_t n = 0;
-    while (s[n] != '\0' && s[n] != ' ' && n < sizeof codebuf - 1) n++;
-    memcpy(codebuf, s, n);
-    codebuf[n] = '\0';
-    code = codebuf;
-  } else if (fs_lit_ci(detail, msg->len, "socket hang up")) {
-    code = "UND_ERR_SOCKET";
+  if (t->done || t->responded) {
+    fs_release(t);
+    scr_error_release(err);
+    return;
   }
-  fs_error(t, code);
+  ScrStr *msg = err->message;
+  const char *detail = msg->data;
+  /* A name-resolution failure arrives as its message alone: Node's error also carries errno, syscall and hostname as own properties. */
+  if (msg->len > 13 && memcmp(detail, "getaddrinfo E", 13) == 0 && scr_error_ext_hostname(err) == NULL) {
+    const char *codep = detail + 12;
+    size_t cl = 0;
+    while (codep[cl] != '\0' && codep[cl] != ' ') cl++;
+    const char *host = codep + cl;
+    while (*host == ' ') host++;
+    double eno = (cl == 9 && memcmp(codep, "EAI_AGAIN", 9) == 0) ? -3001.0 : -3008.0;
+    scr_error_set_ext_dns(err, eno, "getaddrinfo", host);
+  }
+  if (fs_lit_ci(detail, msg->len, "socket hang up")) {
+    /* undici's cause for a server that died before the response head: SocketError "other side closed", code UND_ERR_SOCKET */
+    ScrStr *m = scr_str_new("other side closed", 17);
+    ScrError *sock = scr_error_new(SCR_ERR_ERROR, m);
+    scr_str_release(m);
+    scr_str_release(sock->name);
+    sock->name = scr_str_new("SocketError", 11);
+    scr_error_set_code(sock, "UND_ERR_SOCKET");
+    fs_error_c(t, NULL, sock);
+    scr_error_release(sock);
+  } else {
+    fs_error_c(t, NULL, err);
+  }
   fs_release(t);
+  scr_error_release(err);
 }
 
 /* ── the entry point ─────────────────────────────────────────────────
