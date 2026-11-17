@@ -2524,7 +2524,11 @@ function validateFunction(
             DYN_HANDLE_KINDS.has(e.left.type.kind))
         ) {
           // Reference identity: both operands must be the same ref type.
-          if (!typeEquals(e.left.type, e.right.type)) {
+          // Maps, sets and arrays are one runtime representation whatever their element types: two of the SAME kind compare by pointer even when the
+          // element types differ (tsc admits the overlap), exactly like function and class identity above.
+          const sameContainerKind =
+            (e.left.type.kind === "map" || e.left.type.kind === "set" || e.left.type.kind === "array") && e.left.type.kind === e.right.type.kind;
+          if (!sameContainerKind && !typeEquals(e.left.type, e.right.type)) {
             err(`bin ${e.op} on references: operand types differ`, e.loc);
           }
         } else if (isEq && e.left.type.kind === "bool") {
