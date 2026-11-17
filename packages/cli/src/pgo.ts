@@ -70,6 +70,8 @@ export interface ProfilingRun {
   /** Sends SIGUSR1 to the profiled process when a line of the command's output first matches; null = no epoch signal. */
   signal: RegExp | null;
   timeoutMs: number;
+  /** Extra environment for the profiled command (the block profile's LLVM_PROFILE_FILE). */
+  env?: Readonly<Record<string, string>>;
 }
 
 export interface ProfilingResult {
@@ -95,7 +97,7 @@ export async function runProfiling(run: ProfilingRun): Promise<ProfilingResult> 
   return new Promise<ProfilingResult>((resolveRun, rejectRun) => {
     const child = spawn(program, args, {
       cwd: run.cwd,
-      env: { ...process.env, SCR_PGO_BIN: run.bin, SCR_LAYOUT_PROFILE_OUT: run.profilePath, SCR_LAYOUT_PROFILE_PID: run.pidPath },
+      env: { ...process.env, ...(run.env ?? {}), SCR_PGO_BIN: run.bin, SCR_LAYOUT_PROFILE_OUT: run.profilePath, SCR_LAYOUT_PROFILE_PID: run.pidPath },
       stdio: ["ignore", "pipe", "pipe"],
     });
     let signalled = false;

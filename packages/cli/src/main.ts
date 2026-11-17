@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
-import { analyze, compile, compileC, compileKept, compileLibrary, layoutOrderFromProfile, ProvenanceRefusalError, renderAll, renderCoverageLines, resolveProvenanceSources, setProvenanceSources } from "@scriptc/compiler";
+import { analyze, blockProfileSupported, compile, compileC, findLlvmProfdata, compileKept, compileLibrary, layoutOrderFromProfile, ProvenanceRefusalError, renderAll, renderCoverageLines, resolveProvenanceSources, setProvenanceSources } from "@scriptc/compiler";
 import { defaultExecutableName } from "./paths.js";
 import { runProfiling, splitArgv } from "./pgo.js";
 
@@ -50,6 +50,16 @@ Options:
                      (written to $SCR_LAYOUT_PROFILE_OUT at exit; SIGUSR1 starts a new
                      epoch, send it when startup is over). Feed the file to
                      \`scriptc layout-order <exe> <profile> -o order.txt\`.
+      --layout-block-profile
+                     with --layout-profile: also instrument every basic block (clang IR PGO), so
+                     the same profiling run writes \$LLVM_PROFILE_FILE (*.profraw). Linux host,
+                     clang only. Merge with \`scriptc layout-profdata <raw...> -o x.profdata\`.
+      --layout-block-use <profdata>
+                     compile with that block profile and split the blocks that never ran out of
+                     the functions that did (-fsplit-machine-functions), so the pages a running
+                     program touches hold hot code only. A build also picks up
+                     \`<entry>.scriptc-order.profdata\` beside the entry. Linux host, clang only;
+                     anywhere else it is ignored and the build is the one without it.
       --layout-order <file>
                      write the program's functions in the order <file> lists
                      (steady set first, then other executed code, then startup-only;
@@ -68,7 +78,9 @@ Options:
                      profiling run, the order file, and the final ordered binary.
                      Requires --pgo-run and either --pgo-signal or --pgo-no-signal.
                      Writes \`<entry>.scriptc-order.txt\` (check it in) or the path
-                     --layout-order-out names. Linux and macOS only.
+                     --layout-order-out names, and where clang and llvm-profdata are found
+                     (Linux) the block profile \`<entry>.scriptc-order.profdata\` beside it.
+                     Linux and macOS only.
                      An order-file edit later costs only the native compile and link when
                      the linker can apply it (GNU ld 2.43+, or ld.lld, which an ordered
                      build then links with); without either, or under zig cc, the TU is
@@ -179,6 +191,8 @@ const CLI_OPTIONS = {
   "emit-ir": { type: "boolean", default: false },
   sanitize: { type: "boolean", default: false },
   "layout-profile": { type: "boolean", default: false },
+  "layout-block-profile": { type: "boolean", default: false },
+  "layout-block-use": { type: "string" },
   "layout-order": { type: "string" },
   // declared only so parseArgs accepts the spelling: with allowNegative it arrives as `layout-order: false` (read below), never as this key
   "no-layout-order": { type: "boolean", default: false },
@@ -218,6 +232,19 @@ async function main(): Promise<number> {
     const text = layoutOrderFromProfile(resolve(inputArg), readFileSync(resolve(profileArg), "utf8"));
     if (values.out) writeFileSync(resolve(values.out), text);
     else process.stdout.write(text);
+    return 0;
+  }
+  if (command === "layout-profdata") {
+    // scriptc layout-profdata <raw.profraw>... -o <out.profdata>: llvm-profdata merge, found beside clang or on PATH
+    const raws = positionals.slice(1).map((p) => resolve(p));
+    if (raws.length === 0 || !values.out) fail(`usage: scriptc layout-profdata <profraw>... -o <out.profdata>\n\n${USAGE}`);
+    const tool = await findLlvmProfdata();
+    if (tool === null) fail("llvm-profdata was not found (beside clang or on PATH)");
+    await new Promise<void>((resolveMerge, rejectMerge) => {
+      const c = spawn(tool, ["merge", "-o", resolve(values.out!), ...raws], { stdio: "inherit" });
+      c.on("error", rejectMerge);
+      c.on("exit", (code) => (code === 0 ? resolveMerge() : rejectMerge(new Error(`llvm-profdata merge exited with ${code}`))));
+    }).catch((e: unknown) => fail(e instanceof Error ? e.message : String(e)));
     return 0;
   }
   if (command !== "build" && command !== "run" && command !== "coverage") {
@@ -368,11 +395,25 @@ async function main(): Promise<number> {
     return entryOrderPath;
   };
 
+  // The block profile a normal build applies: --layout-block-use names one; otherwise `<entry>.scriptc-order.profdata` beside the entry, under the same
+  // rules as the order file. Where the host cannot use it the file is ignored and the build is the one without it.
+  const entryProfdataPath = join(dirname(input), `${basename(input).replace(/\.(ts|js|mjs|cjs)$/, "")}.scriptc-order.profdata`);
+  const resolveBlockUse = (): string | undefined => {
+    if ((values["layout-order"] as unknown) === false || values["no-layout-order"]) return undefined;
+    if (typeof values["layout-block-use"] === "string") return resolve(values["layout-block-use"]);
+    if (values["layout-profile"] || values["from-kept"] || values["from-c"]) return undefined;
+    if (!existsSync(entryProfdataPath) || !blockProfileSupported()) return undefined;
+    process.stderr.write(`scriptc: block profile applied: ${entryProfdataPath}\n`);
+    return entryProfdataPath;
+  };
+
   interface BuildOverrides {
     outPath?: string;
     layoutProfile?: boolean;
     /** `null`: no order file at all (not even the beside-the-entry one). */
     layoutOrder?: string | null;
+    /** `null`: no block profile at all; `generate`: instrument the blocks (the --pgo profiling build). */
+    blockProfile?: { generate: true } | { use: string } | null;
   }
   const build = async (ov: BuildOverrides = {}): Promise<string> => {
     const buildOut = ov.outPath ?? outPath;
@@ -388,6 +429,7 @@ async function main(): Promise<number> {
           sanitize: values.sanitize,
           dynamic: values.dynamic,
           ...(values["layout-profile"] ? { layoutProfile: true } : {}),
+          ...(values["layout-block-profile"] ? { blockProfile: { generate: true as const } } : typeof values["layout-block-use"] === "string" ? { blockProfile: { use: resolve(values["layout-block-use"]) } } : {}),
         });
       } catch (err) {
         fail(err instanceof Error ? err.message : String(err));
@@ -402,6 +444,8 @@ async function main(): Promise<number> {
       return buildOut;
     }
     const layoutOrderPath = ov.layoutOrder === undefined ? resolveLayoutOrder() : ov.layoutOrder === null ? undefined : ov.layoutOrder;
+    const blockUse = ov.blockProfile !== undefined ? undefined : values["layout-block-profile"] ? undefined : resolveBlockUse();
+    const blockProfile = ov.blockProfile === null ? undefined : ov.blockProfile ?? (values["layout-block-profile"] ? { generate: true as const } : blockUse !== undefined ? { use: blockUse } : undefined);
     const result = await compile(input, {
       outPath: buildOut,
       outDir,
@@ -410,6 +454,7 @@ async function main(): Promise<number> {
       dynamic: values.dynamic,
       ...(values["layout-profile"] || ov.layoutProfile ? { layoutProfile: true } : {}),
       ...(layoutOrderPath !== undefined ? { layoutOrder: layoutOrderPath } : {}),
+      ...(blockProfile !== undefined ? { blockProfile } : {}),
       ...(backend !== undefined ? { backend } : {}),
       ...(npmStatic !== undefined ? { npmStatic } : {}),
       ...(ffiProfilePath !== undefined ? { ffiProfilePath } : {}),
@@ -502,10 +547,23 @@ async function main(): Promise<number> {
     const profBin = `${outPath}.pgo-prof`;
     const profilePath = join(work, "profile.txt");
     try {
-      process.stderr.write(`pgo: 1/4 instrumented build\n`);
-      await build({ outPath: profBin, layoutProfile: true, layoutOrder: null });
+      // The block profile (clang IR PGO, so the final build can split the blocks that never ran out of the functions that did) needs a Linux host, clang
+      // and llvm-profdata. Anywhere else the instrumented build, the order file and the final build are exactly what they were.
+      const profdataTool = blockProfileSupported() ? await findLlvmProfdata() : null;
+      if (blockProfileSupported() && profdataTool === null) process.stderr.write("pgo: llvm-profdata was not found: no block profile, the layout order alone is applied\n");
+      process.stderr.write(`pgo: 1/4 instrumented build${profdataTool !== null ? " (with block counters)" : ""}\n`);
+      await build({ outPath: profBin, layoutProfile: true, layoutOrder: null, blockProfile: profdataTool !== null ? { generate: true } : null });
       process.stderr.write(`pgo: 2/4 profiling run: ${runCmd}\n`);
-      const run = await runProfiling({ argv, cwd: dirname(input), bin: profBin, profilePath, pidPath: join(work, "pid"), signal: signalRe, timeoutMs: timeoutS * 1000 }).catch(
+      const run = await runProfiling({
+        argv,
+        cwd: dirname(input),
+        bin: profBin,
+        profilePath,
+        pidPath: join(work, "pid"),
+        signal: signalRe,
+        timeoutMs: timeoutS * 1000,
+        env: profdataTool !== null ? { LLVM_PROFILE_FILE: join(work, "block-%p.profraw") } : {},
+      }).catch(
         (e: unknown) => fail(e instanceof Error ? e.message : String(e)),
       );
       if (signalRe !== null && !run.signalled) {
@@ -517,8 +575,24 @@ async function main(): Promise<number> {
       process.stderr.write(`pgo: 3/4 order file ${orderOut}\n`);
       const text = layoutOrderFromProfile(profBin, readFileSync(profilePath, "utf8"));
       writeFileSync(orderOut, text);
+      let blockUse: string | undefined;
+      if (profdataTool !== null) {
+        const raws = readdirSync(work).filter((f) => f.endsWith(".profraw")).map((f) => join(work, f));
+        const profdataOut = orderOut.endsWith(".txt") ? `${orderOut.slice(0, -4)}.profdata` : `${orderOut}.profdata`;
+        if (raws.length === 0) {
+          process.stderr.write("pgo: the profiled run wrote no block profile; the layout order alone is applied\n");
+        } else {
+          await new Promise<void>((resolveMerge, rejectMerge) => {
+            const c = spawn(profdataTool, ["merge", "-o", profdataOut, ...raws], { stdio: "inherit" });
+            c.on("error", rejectMerge);
+            c.on("exit", (code) => (code === 0 ? resolveMerge() : rejectMerge(new Error(`llvm-profdata merge exited with ${code}`))));
+          }).catch((e: unknown) => fail(e instanceof Error ? e.message : String(e)));
+          blockUse = profdataOut;
+          process.stderr.write(`pgo: block profile ${profdataOut}\n`);
+        }
+      }
       process.stderr.write(`pgo: 4/4 ordered build\n`);
-      const finalBinary = await build({ layoutOrder: orderOut });
+      const finalBinary = await build({ layoutOrder: orderOut, blockProfile: blockUse !== undefined ? { use: blockUse } : null });
       process.stderr.write(`scriptc: layout order applied: ${orderOut}\n`);
       process.stdout.write(`${finalBinary}\n`);
       return 0;

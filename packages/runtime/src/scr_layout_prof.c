@@ -71,7 +71,12 @@ NOCOV static void scr_lp_rearm(int sig) {
   __atomic_fetch_add(&scr_lp_epoch, 1, __ATOMIC_RELAXED);
 }
 
+/* --layout-profile with the block profile (-fprofile-generate): the program leaves through _exit / _Exit paths that run no atexit handler, which is where the
+ * profile runtime writes its .profraw, so it is written here too. The symbol is weak: absent (NULL) in a build without the block profile. */
+extern int __llvm_profile_write_file(void) __attribute__((weak));
+
 NOCOV static void scr_lp_dump(void) {
+  if (__llvm_profile_write_file != NULL) (void)__llvm_profile_write_file();
   const char *path = getenv("SCR_LAYOUT_PROFILE_OUT");
   if (path == NULL || path[0] == '\0') path = "scr-layout-profile.txt";
   FILE *f = fopen(path, "w");

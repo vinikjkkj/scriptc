@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { cDefinedNames, layoutMatchStats, layoutStaleWarning, llvmDefinedNames, parseLayoutOrder, reorderLlvmText, type LayoutOrder } from "./backend/layout-order.js";
 import { tapPhase, tapped } from "./phase-tap.js";
 import { basename, dirname, join, resolve } from "node:path";
-import { cacheRootDir, CcCompileError, compileC, compileLibArchive, layoutLinkOrderingAvailable, resolveCc, targetPlatform } from "./backend/cc.js";
+import { cacheRootDir, CcCompileError, compileC, type BlockProfile, compileLibArchive, layoutLinkOrderingAvailable, resolveCc, targetPlatform } from "./backend/cc.js";
 import { emitModule, emitModuleProgram } from "./backend/emission/emitter.js";
 import { coroPlans } from "./ir/coro-plans.js";
 import { emitFinalKeyReadWidths, emitFinalNarrowBridges, flushKeyReadCensus, flushNarrowBridgeCensus, keyReadCensusOnly } from "./frontend/lowering/keyread-census.js";
@@ -60,7 +60,7 @@ import {
 
 export const VERSION = "0.0.1";
 
-export { compileC, runtimeSrcDir, type CcOptions } from "./backend/cc.js";
+export { blockProfileSupported, compileC, findLlvmProfdata, runtimeSrcDir, type BlockProfile, type CcOptions } from "./backend/cc.js";
 export { emitModule } from "./backend/emission/emitter.js";
 export { layoutOrderFromProfile } from "./backend/layout-profile.js";
 export type { ScrDiagnostic } from "./diagnostics/diagnostic.js";
@@ -151,6 +151,10 @@ export interface CompileOptions {
   /** --layout-order <file>: write the program TU's functions in the order the file lists them (see backend/layout-order.ts), and
    * hand the same order to a linker that supports an ordering file. Off by default. */
   layoutOrder?: string;
+  /** Block-level profile for the ordered lane (backend/cc.ts BlockProfile): `generate` builds an IR-PGO instrumented binary (use with layoutProfile, so
+   * one profiling run yields both profiles); `use` compiles with the merged profile and splits the cold blocks of executed functions away from their hot
+   * parts (-fsplit-machine-functions). Off by default: nothing about codegen or linking changes. Not part of the lowering cache key: it acts at the native stage only. */
+  blockProfile?: BlockProfile;
   /** Embed the dynamic-island engine (--dynamic). Off = the static default:
    * island constructs are diagnostics and nothing about codegen or linking
    * changes. */
@@ -1726,6 +1730,7 @@ export interface CompileKeptOptions {
   sanitize?: boolean;
   dynamic?: boolean;
   layoutProfile?: boolean;
+  blockProfile?: BlockProfile;
 }
 
 /** Re-runs ONLY the native stage (clang and the link) from a kept build directory: no frontend, no lowering, no emission. The C-compiler
@@ -1761,6 +1766,7 @@ export async function compileKept(keepPath: string, opts: CompileKeptOptions): P
     sanitize: opts.sanitize ?? false,
     dynamic: opts.dynamic ?? false,
     ...(opts.layoutProfile ? { layoutProfile: true } : {}),
+    ...(opts.blockProfile !== undefined ? { blockProfile: opts.blockProfile } : {}),
     ...(k.features as ProgramNativeFeatures),
   });
 }
@@ -1790,6 +1796,7 @@ async function linkProgram(
       dynamic: opts.dynamic ?? false,
       ...(opts.layoutProfile ? { layoutProfile: true } : {}),
       ...(opts.layoutOrder !== undefined ? { layoutOrder: opts.layoutOrder } : {}),
+      ...(opts.blockProfile !== undefined ? { blockProfile: opts.blockProfile } : {}),
       ...features,
       ...(ffi !== null
         ? {

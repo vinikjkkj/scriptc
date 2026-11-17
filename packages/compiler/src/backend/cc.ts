@@ -259,6 +259,9 @@ export interface CcOptions {
   layoutProfile?: boolean;
   /** --layout-order: the order file the emitters already applied; here it only feeds a linker that supports an ordering file. */
   layoutOrder?: string;
+  /** The block-level profile of the ordered lane (BlockProfile). Honoured on a Linux host with the clang driver only; anywhere else it is
+   * ignored and the build is exactly the one without it. */
+  blockProfile?: BlockProfile;
   /** Additional native archives/objects, appended after the generated
    * program TU so their symbols resolve outbound FFI calls. */
   linkInputs?: readonly string[];
@@ -1115,6 +1118,46 @@ function objcopyTool(): Promise<string | null> {
  * lane only: a plain build never calls this. */
 async function clearStringMerge(tool: string, obj: string): Promise<void> {
   await execFileAsync(tool, ["--set-section-flags", ".rodata.str*=alloc,readonly,data", "--set-section-flags", ".rodata.cst*=alloc,readonly,data", obj]);
+}
+
+/** The block-level profile of the ordered lane. `generate` instruments every compiled unit that goes through compileC (the program TU, the runtime's
+ * sources; not the vendored caches) with clang's IR-level PGO counters and links the profile runtime: one run of the program then writes a .profraw
+ * (`llvm-profdata merge` makes the .profdata). `use` compiles with that profile and lets the machine-function splitter move the blocks that never ran
+ * into `.text.split.*` sections, which the linker places away from the hot parts, so the pages the running program touches hold hot code only.
+ * IR-level PGO works the same on the C lane's .c and the LLVM lane's .ll program TU. Functions the profile has no (or an out-of-date) record for are
+ * simply not split. */
+export type BlockProfile = { generate: true } | { use: string };
+
+/** The block profile needs an ELF host and the clang driver: the splitter is an ELF/ x86-64 and AArch64 feature, zig cc's bundled clang is not
+ * promised to carry the profile runtime, and a cross target has neither. Everywhere else the option is a no-op (the ordered lane is unchanged). */
+export function blockProfileSupported(drv: CcDriver = resolveCc()): boolean {
+  return process.platform === "linux" && drv.target === null && drv.argv.length === 1 && drv.argv[0] === "clang";
+}
+
+function blockProfileArgs(opts: CcOptions, drv: CcDriver): string[] {
+  const bp = opts.blockProfile;
+  if (bp === undefined || !blockProfileSupported(drv)) return [];
+  if ("generate" in bp) return ["-fprofile-generate"];
+  return [
+    `-fprofile-use=${bp.use}`,
+    "-fsplit-machine-functions",
+    // a function whose body changed since the profile was recorded, or that the profile never saw, is left alone: not a diagnostic
+    "-Wno-profile-instr-unprofiled",
+    "-Wno-profile-instr-out-of-date",
+    "-Wno-profile-instr-missing",
+  ];
+}
+
+/** `llvm-profdata`, beside the clang driver or on PATH (also the versioned spelling of clang's major), or null: the block profile is then skipped
+ * with a message and the ordered lane stays what it was. */
+export async function findLlvmProfdata(): Promise<string | null> {
+  const major = await execFileAsync("clang", ["--version"]).then((r) => /version (\d+)/.exec(r.stdout)?.[1] ?? null).catch(() => null);
+  const names = ["llvm-profdata", ...(major !== null ? [`llvm-profdata-${major}`] : [])];
+  for (const n of names) {
+    const ok = await execFileAsync(n, ["--version"]).then(() => true).catch(() => false);
+    if (ok) return n;
+  }
+  return null;
 }
 
 /** --layout-profile is in effect for the build compileC is running (set at its entry; one build per process at a time). */
@@ -2557,6 +2600,15 @@ function icuUseFromOptions(opts: CcOptions): IcuUse | null {
   return { nf: opts.icuNf === true, curr: opts.icuCurr === true, unit: opts.icuUnit === true, zone: opts.icuZone === true, date: opts.icuDate === true, langs: opts.icuAll === true ? null : langs.sort() };
 }
 
+/** The cache-key witness of the block profile: the sha256 of the profile's bytes for `use` (and of the flag for `generate`), "" when there is none or it is
+ * unsupported, so an ordinary build's keys stay byte for byte the historical ones. */
+async function blockProfileKey(opts: CcOptions, drv: CcDriver): Promise<string> {
+  const bp = opts.blockProfile;
+  if (bp === undefined || !blockProfileSupported(drv)) return "";
+  if ("generate" in bp) return "generate";
+  return createHash("sha256").update(await readFile(bp.use)).digest("hex");
+}
+
 export async function compileC(opts: CcOptions): Promise<void> {
   layoutProfileActive = opts.layoutProfile ?? false;
   const rtDir = runtimeSrcDir();
@@ -2756,6 +2808,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     // sets must stay in lockstep.
     "-fno-strict-aliasing",
     ...gcSectionsCompileArgs(),
+    ...blockProfileArgs(opts, driver),
     "-Wno-deprecated-declarations", // ucontext fibers (scr_async.c)
     "-I", rtDir,
     // SCR_CORO_LANE is DERIVED FROM THE SOURCE LIST, not from a second read
@@ -3152,6 +3205,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     "-fno-math-errno",
     "-fno-strict-aliasing", // the emitted object model type-puns — see buildArgs
     ...gcSectionsCompileArgs(),
+    ...blockProfileArgs(opts, driver),
     "-Wno-deprecated-declarations",
     ...includeArgs,
     ...(dynamic ? ["-DSCR_DYNAMIC"] : []),
@@ -3259,6 +3313,9 @@ export async function compileC(opts: CcOptions): Promise<void> {
   // the guard keeps an ordinary build's key byte-for-byte historical.
   if (profFlavor() !== "") key.update("\0prof\0").update(profFlavor());
   if (stripTool !== null) key.update("\0strmerge\0");
+  // The block profile's BYTES (the argument above names the file): a different profile makes a different binary.
+  const blockKey = await blockProfileKey(opts, driver);
+  if (blockKey !== "") key.update("\0blockprof\0").update(blockKey);
   // The shared header and the other units of a split program. Every byte
   // the compiler will read has to be in the key, or an edit that lands in
   // one part alone is served the previous binary out of the cache.
@@ -3307,8 +3364,8 @@ export async function compileC(opts: CcOptions): Promise<void> {
   // a forced include, the fingerprint cannot see it, and a stale runtime
   // object under a live key is the worst failure a cache has. Empty when
   // SCRIPTC_PROF_CFLAGS is unset, so an ordinary build's prefix is unchanged.
-  const objKeyPrefix = `obj-v2\0${ccName}\0${cv}\0${fingerprint}\0${profFlavor()}${stripTool !== null ? "\0strmerge-v1" : ""}`;
-  const objKeyPrefixPlain = `obj-v2\0${ccName}\0${cv}\0${fingerprint}\0${profFlavor()}`;
+  const objKeyPrefix = `obj-v2\0${ccName}\0${cv}\0${fingerprint}\0${profFlavor()}${stripTool !== null ? "\0strmerge-v1" : ""}${blockKey !== "" ? `\0blockprof\0${blockKey}` : ""}`;
+  const objKeyPrefixPlain = `obj-v2\0${ccName}\0${cv}\0${fingerprint}\0${profFlavor()}${blockKey !== "" ? `\0blockprof\0${blockKey}` : ""}`;
   const stripPost = stripTool !== null ? (o: string): Promise<void> => clearStringMerge(stripTool, o) : undefined;
   try {
     objects = await ensureRuntimeObjects(root, driver.argv, cflags, rtInputs, objKeyPrefix, stripPost, stripTool !== null ? objKeyPrefixPlain : undefined);
