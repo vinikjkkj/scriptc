@@ -4,6 +4,7 @@
  * comparisons, nullish coalescing and optional chains, conditions and
  * ToBoolean/ToString coercion helpers, and field/element reads and writes
  * (FieldTarget). */
+import { erasedViewMemberRefusal } from "./lower-erasedview.js";
 import { readFileSync } from "node:fs";
 import { evalStaticInfoOf, lowerEvalClassInstanceOf } from "./lower-evalclass.js";
 import { protoDataFieldRead, protoDataHasKey, protoDataMemberRead } from "./lower-protodata.js";
@@ -4363,6 +4364,10 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       {
         const absentProcess = absentProcessMemberValue(L, expr);
         if (absentProcess !== null) return L.maybeNarrow(absentProcess, expr);
+      }
+      {
+        const why = erasedViewMemberRefusal(L, recvLowered.type, expr.name.text, L.checker.typeToString(L.typeOf(expr.expression)));
+        if (why !== null) L.unsupported("SC1090", expr, why);
       }
       L.unsupported(
         "SC1090",

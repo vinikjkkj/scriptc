@@ -48,6 +48,7 @@ import { isAnyDynContainer, lowerProxyNew, CLASS_PROPS_FIELD, EMITTER_API_MEMBER
 import { boundEmitDispatcher, boundSubscribeDispatcher, emitterEventNames, emitterRooted, lowerEmitApplyCall, lowerEmitterMethodCall, lowerUnnamedEmitterCall } from "./lower-emitter.js";
 import { emitterCtorCallOnGraft, lowerEmitterMixinCall } from "./lower-emitter-mixin.js";
 import { internalBox } from "./lower-ownshadow.js";
+import { erasedViewMemberRefusal } from "./lower-erasedview.js";
 import { ArgHoist, lowerConsoleInspectArg, lowerFormatCall, lowerUtilFormatApply, refuseCodecCoercionCall, refuseCodecInspect } from "./lower-inspect.js";
 import { STREAM_API_MEMBERS, lowerStreamMethodCall, lowerStreamModuleCall, lowerStreamStaticCall, streamSidesOf } from "./lower-stream.js";
 import { isRequireBindingIdent, ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedFnSymbolOf, contextualUndefReadType, fenceEarlyAliasUse, fenceEarlyNsMemberRef, moduleNsOwnKeys, moduleNsSourceFileOf, nsMemberIdentOf, nsPathPrefix, nsUndefRead } from "./lower-namespaces.js";
@@ -7108,6 +7109,11 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
             };
           }
         }
+      }
+      {
+        const probe = probeLower(L, expr.expression.expression);
+        const why = erasedViewMemberRefusal(L, probe === null ? null : probe.type, expr.expression.name.text, L.checker.typeToString(L.typeOf(expr.expression.expression)));
+        if (why !== null) L.unsupported("SC1090", expr, why);
       }
       L.unsupported("SC1090", expr, `method calls like '${expr.expression.getText()}'`);
     }
