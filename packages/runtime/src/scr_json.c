@@ -10311,8 +10311,6 @@ ScrDyn *scr_dyn_idx_get(ScrDyn *d, double i, bool opt, ScrDyn *(*slow)(ScrDyn *,
   return r;
 }
 
-static void scr_dyn_key_set_core(ScrDyn *recv, ScrStr *key, ScrDyn *value);
-
 /* A write of `name` / `message` to a plain runtime Error's dyn copy (which is the error's own bag, scr_dyn_from_error) also has to reach
  * the typed ScrError's cells: the copy is a separate object, and a typed read of the same error would otherwise keep the old text. The
  * copy is the truth for key ORDER from then on (an assignment appends a new key at the write), so only the cell and the own flag move. */
@@ -10333,15 +10331,14 @@ __attribute__((noinline)) static void scr_dyn_error_copy_cells(ScrDyn *recv, con
   scr_error_release(e);
 }
 
-void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
-  scr_dyn_key_set_core(recv, key, value);
-  if (__builtin_expect(recv->kind == SCR_DYN_OBJ && (key->len == 4 || key->len == 7) && value->kind == SCR_DYN_STR &&
-                           scr_dyn_ext(recv)->proto != NULL && !scr_exc_pending(), 0)) {
-    scr_dyn_error_copy_cells(recv, key, value);
-  }
+/* Out of line on purpose: scr_dyn_key_set is one of the hottest runtime paths and the compiler's inlining of its callees follows its size. Only
+ * a receiver with a prototype link reaches it; `blocked` = a setter takes the write or it is read-only. */
+__attribute__((noinline, cold)) static void scr_dyn_error_copy_probe(ScrDyn *recv, const ScrStr *key, const ScrDyn *value, int pk, const ScrDyn *found) {
+  const bool blocked = pk == (int)SCR_PROP_ACCESSOR || (pk == (int)SCR_PROP_HIDDEN_DATA && !scr_hid_writable(found));
+  if (value->kind == SCR_DYN_STR && !blocked) scr_dyn_error_copy_cells(recv, key, value);
 }
 
-static void scr_dyn_key_set_core(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
+void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
 #ifdef SCR_DYNCEN_ON
   scr_dyncen_note_korigin(SCR_DYNCEN_KO_KEYSET);
 #endif
@@ -10433,6 +10430,9 @@ static void scr_dyn_key_set_core(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
     const ScrDyn *holder = NULL;
     if (scr_dyn_ext(recv)->hidden != NULL || scr_dyn_ext(recv)->proto != NULL) {
       ScrPropKind pk = scr_dyn_obj_resolve(recv, key->data, key->len, &found, &holder);
+      /* Only a receiver with a prototype link can be a boxed Error's copy, and only a write the chain does not intercept (a setter) or
+       * refuse (read-only) is one whose text the typed error has to take: this sits inside the block a plain object never enters. */
+      if (__builtin_expect(scr_dyn_ext(recv)->proto != NULL && (key->len == 4 || key->len == 7), 0)) scr_dyn_error_copy_probe(recv, key, value, (int)pk, found);
       if (pk == SCR_PROP_HIDDEN_DATA) {
         if (!scr_hid_writable(found)) {
           ScrJsonBuf sb;
@@ -10512,7 +10512,12 @@ static void scr_dyn_key_set_core(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
     }
     /* A key that is itself an immortal string (a compiler literal) outlives every object: store it by pointer, as the literal-member path does.
      * A stored small integer is the shared box (scr_dyn_keep) on either path. */
-    if (key->rc == SCR_STR_IMMORTAL) scr_dyn_obj_set_lit(recv, key->data, key->len, scr_dyn_keep(scr_dyn_retain(value)));
+    /* scr_dyn_obj_set_lit written out: the call was inlined here only while this function stayed small, and its loss is a measured cost on
+     * every dyn write, so the body is spelled in place rather than left to the compiler's budget. */
+    if (key->rc == SCR_STR_IMMORTAL) {
+      if (key->len > SCR_DYN_KEY_MAX) scr_json_oom();
+      scr_dyn_obj_put_k(recv, (char *)key->data, key->len, scr_dyn_keep(scr_dyn_retain(value)), 1);
+    }
     else scr_dyn_obj_set(recv, key->data, key->len, scr_dyn_keep(scr_dyn_retain(value)));
     return;
   }
