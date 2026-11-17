@@ -28899,6 +28899,12 @@
     "<repo>/tests/corpus/25619-an-unused-mutable-module-binding-keeps-its-initializer-and-its-effects.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25675-promise-resolve-over-a-void-or-promise-result-passes-the-promise-through.ts": {
+   "order": [
+    "<repo>/tests/corpus/25675-promise-resolve-over-a-void-or-promise-result-passes-the-promise-through.ts"
+   ],
+   "diags": []
   }
  }
 }
