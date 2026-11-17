@@ -33,6 +33,7 @@ import { STREAM_API_MEMBERS, STREAM_PROP_MEMBERS, UNDERSCORE_METHODS, lowerStrea
 import { erasableSuperDelegation } from "./lower-emitter.js";
 import { emitOverrideShapeReason, emitSpecSuperForward, emitterRooted, lowerEmitterSuperCall, type EmitOverrideRec } from "./lower-emitter.js";
 import { declSymbolOf } from "./lower-modules.js";
+import { erasedViewOfRef, viewBaseOfInstance, withoutErasedViews } from "./lower-erasedview.js";
 import { boundedKeyValuesOf, uniqueSymbolKeyOf } from "./lower-exprs.js";
 import { isNetSocketCtor, lowerHttpAgentNew, lowerHttpServerNew, lowerNetSocketNew } from "./lower-server.js";
 import { ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedClassSymbolOf, ambientUndefinedFnSymbolOf, fenceEarlyAliasUse, fenceEarlyNsMemberRef, nsMemberIdentOf, nsUndefRead } from "./lower-namespaces.js";
@@ -556,6 +557,10 @@ export interface GenericClassInfo {
   typeParams: ts.Symbol[];
   family: ClassInfo;
   instances: Map<string, { name: string; info: ClassInfo | null; poisoned?: boolean }>;
+  /** The ERASED VIEWS registered under this family (lower-erasedview.ts), by registry key. */
+  views?: Map<string, ClassInfo>;
+  /** Set on the `generic` of an erased view itself: a fieldless abstract class between the family and its instantiations. */
+  view?: true;
 }
 
 /** The KEY symbol behind a LATE-BOUND (`__@name@id`) property: resolved
@@ -3450,7 +3455,7 @@ function memberLengthsOf(decl: ts.ClassLikeDeclaration): Record<string, number> 
 }
 
 export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration, jsNameOverride?: string,
-    inst?: { family: ClassInfo; name: string; bindings: Map<ts.Symbol, IrType>; typeArgsText: string; ordinal: number; tsRef?: ts.Type },
+    inst?: { family: ClassInfo; name: string; bindings: Map<ts.Symbol, IrType>; typeArgsText: string; ordinal: number; tsRef?: ts.Type; viewBase?: ClassInfo },
     /** MIXIN instantiation mode (lower-mixins.ts): the class inside a
      * mixin function, collected per call site — `base` is the ARGUMENT
      * class (the heritage clause names the mixin's parameter and is
@@ -3645,7 +3650,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       // every other instantiation's base is its family (whose base is the
       // declared one, resolved when the family collected).
       const splitInst = inst !== undefined && inst.family.genericSplitBase === true;
-      let base: ClassInfo | null = inst ? (splitInst ? null : inst.family) : mixin ? mixin.base : null;
+      let base: ClassInfo | null = inst ? (splitInst ? null : (inst.viewBase ?? inst.family)) : mixin ? mixin.base : null;
       const resolvesHeritage = mixin !== undefined ? false : inst !== undefined ? splitInst : !splitsBase;
       for (const clause of resolvesHeritage ? (decl.heritageClauses ?? []) : []) {
         // `implements` is pure type-world: tsc checked the conformance and
@@ -3894,7 +3899,7 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
         // type (mapType registers/reuses `Box%0`).
         if (named?.generic) {
           const instT = L.checker.getTypeAtLocation(t);
-          const mappedBase = L.mapTypeOf(instT);
+          const mappedBase = withoutErasedViews(() => L.mapTypeOf(instT));
           const instBase = mappedBase?.kind === "object" ? L.classes.get(mappedBase.className) : undefined;
           if (!instBase || instBase.generic) {
             L.unsupported(
@@ -6273,6 +6278,10 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
         mapped.push(b);
       }
     }
+    // An ERASED VIEW (lower-erasedview.ts): `Foo<string, unknown>` names the abstract view the instantiations that share its
+    // non-erased arguments extend, once the discovery pass registered the flow that needs it.
+    const viewOfRef = args.length === gci.typeParams.length ? erasedViewOfRef(L, gci, args) : null;
+    if (viewOfRef !== null) return { kind: "object", className: viewOfRef.def.name };
     const key = mapped.map(typeKey).join(",");
     const existing = gci.instances.get(key);
     if (existing) {
@@ -6307,7 +6316,8 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
       for (const d of mine) L.pushDiag(d);
     };
     try {
-      L.collectClassShapeInner(decl, undefined, { family: gci.family, name, bindings, typeArgsText, ordinal, tsRef: ref });
+      const viewBase = args.length === gci.typeParams.length ? viewBaseOfInstance(L, gci, args) : null;
+      L.collectClassShapeInner(decl, undefined, { family: gci.family, name, bindings, typeArgsText, ordinal, tsRef: ref, ...(viewBase !== null ? { viewBase } : {}) });
     } catch (e) {
       // Collection fenced under THESE bindings: the diagnostic (with the
       // instantiation context) is recorded; the type stays unmapped.
@@ -10815,8 +10825,10 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
    * story (tsc forbids super() there). Ordinary classes answer their base
    * unchanged. */
   export function superBaseOf(info: ClassInfo): ClassInfo | null {
-    const b = info.base;
-    return b?.generic ? b.base : b;
+    let b = info.base;
+    // A generic family, and the erased view between it and an instantiation (lower-erasedview.ts), are never constructed.
+    while (b?.generic) b = b.base;
+    return b;
   }
 
 /** The class's OWN field initializers as fieldSet statements (declaration
@@ -11744,7 +11756,8 @@ function captureInitStmts(L: Lowerer, info: ClassInfo, thisLocal: IrLocal, param
 function genericNewTarget(L: Lowerer, expr: ts.NewExpression, info: ClassInfo): ClassInfo {
   if (!info.generic) return info;
   const t = L.typeOf(expr);
-  const mapped = L.mapTypeOf(t);
+  // `new Foo<string, unknown>(x)` constructs the monomorph, never an erased view (lower-erasedview.ts).
+  const mapped = withoutErasedViews(() => L.mapTypeOf(t));
   const instInfo = mapped?.kind === "object" ? L.classes.get(mapped.className) : undefined;
   // Unmappable type arguments (or a poisoned instantiation): the site
   // reports the type it cannot compile — the instantiation's own

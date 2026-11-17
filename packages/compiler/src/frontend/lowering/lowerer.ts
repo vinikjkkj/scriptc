@@ -81,6 +81,7 @@ import { applyInstanceOverrides, applyLateInstalls, applyProtoSlots, dynFnChecke
 import { applyProtoTabs, hasProtoTab, scanProtoTabs, upgradeLateMethodsOverTables } from "./lower-prototab.js";
 import { graftOnlyHelperRanges } from "./lower-emitter-mixin.js";
 import { applyDatumKeyRows } from "./lower-protodata.js";
+import { clearErasedViews, erasedViewsNoted, erasedViewsSignature, noteErasedViewFlow } from "./lower-erasedview.js";
 import { OWN_SHADOW_ROOTS, applyFieldNotes, applyOwnShadows, inOwnShadowFamily, prescanLiteralMethodShadows } from "./lower-ownshadow.js";
 import { CLASS_BUILTIN_CTORLESS, CLASS_NO_DYN_NEW, EVAL_NO_SRC_CLASSES, GRAFTED_EMITTER_CLASSES, GRAFTED_EMITTER_CELL_CLASSES, GRAFTED_ROWS_FENCED_OPS, GRAFTED_PROPS_EXACT_OPS, EVAL_STATIC_CLASSES, dynReflectionSite, emitterStateWriteSites, graftedBoxSites, moduleBoxesEmitters } from "../../ir/nodes.js";
 import { computeTwinEdits, type TwinEdits } from "./emitter-twin.js";
@@ -868,6 +869,7 @@ export function lowerToIr(
     );
   }
   const ffiImports = options.ffiImports ?? [];
+  clearErasedViews(); // the erased views of THIS program: the discovery pass registers them, every later pass reads them
   OWN_SHADOW_ROOTS.clear(); // the families of THIS program: the discovery pass fills it, the emit pass reads it
   clearClassFedInterfaces(); // the interfaces class instances flow into: discovery fills it, every later pass maps them to the boxed object
   computeJsDocParamPlans(program, program.getTypeChecker()); // the JSDoc scalar claims the whole program proves, before any type is mapped
@@ -902,8 +904,9 @@ export function lowerToIr(
   // such a record lowers differently once the source is one. Discovery runs again, from a fresh lowerer, until the grant set
   // stops growing (bounded), so the emit pass interns every shape it will need as a view. Programs with no such conversion
   // never enter the loop.
-  for (let round = 0; round < 3 && (viewConversionNoted || classFedInterfacesNoted()); round++) {
-    const grantSig = (): string => [...viewShapeKeys].sort().join("\n") + "|" + [...structViewDeniedKeys].sort().join("\n") + "|" + [...classViewNeeded].sort().join("\n") + "|" + [...CLASS_FED_INTERFACES].map(([k, v]) => `${k}=${v}`).sort().join("\n");
+  // Each registered erased view can unlock the next flow, so a program that registers one gets more rounds than the grants alone allow.
+  for (let round = 0; round < (erasedViewsNoted() ? 8 : 3) && (viewConversionNoted || classFedInterfacesNoted() || erasedViewsNoted()); round++) {
+    const grantSig = (): string => [...viewShapeKeys].sort().join("\n") + "|" + [...structViewDeniedKeys].sort().join("\n") + "|" + [...classViewNeeded].sort().join("\n") + "|" + [...CLASS_FED_INTERFACES].map(([k, v]) => `${k}=${v}`).sort().join("\n") + "|" + erasedViewsSignature();
     const before = grantSig();
     discovery = new Lowerer(program, entry, moduleOrder, dynamic, {
       targetPlatform,
@@ -8618,6 +8621,9 @@ export class Lowerer {
    * validator ICEs on them as the usual backstop. */
   requireExactShape(node: ts.Node, actual: IrType, expected: IrType): void {
     if (typeEquals(actual, expected)) return;
+    // One instantiation of a generic class reaching a slot of another that differs only where the slot says `unknown`: the erased view
+    // (lower-erasedview.ts) makes the flow an upcast on the discovery rerun; the refusal below stands for a pass that did not get one.
+    if (actual.kind === "object" && (expected.kind === "object" || expected.kind === "union")) noteErasedViewFlow(this, actual, expected);
     // A class instance reaching a slot of an INTERFACE's record shape: the interface's values must be the objects themselves, so record the
     // interface; discovery runs again and every pass after it maps that interface to the boxed object (types.ts mapRecordTypeInner).
     if (actual.kind === "object" && expected.kind === "record") {
