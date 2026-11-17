@@ -23274,7 +23274,16 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
         // Anything else that is statically NOT a URL (a primitive, a record,
         // a class instance, an array, a union with no url arm) is false.
         // The operand still evaluates first, for its effects.
-        if (left.type.kind !== "dyn" && left.type.kind !== "jsval" && left.type.kind !== "url" && left.type.kind !== "union") {
+        //
+        // A checked-dynamic ('unknown') operand is in the same class: no value of
+        // the checked-dynamic tree is a URL, because converting a URL into
+        // 'unknown' is refused (SC1101: canConvertToDyn has no url arm and
+        // DYN_HANDLE_KINDS no url handle), so the constant is licensed by that
+        // fence exactly as the boxed-wrapper constants below are by theirs --
+        // if URL values ever cross into 'unknown', this arm must become a test
+        // of the handle. An engine-held value (jsval) stays refused: the engine
+        // may hold any object.
+        if (left.type.kind !== "jsval" && left.type.kind !== "url" && left.type.kind !== "union") {
           const result: IrExpr = { kind: "boolLit", value: false, type: BOOL, loc };
           if (pureUrlRead) return result;
           return {
@@ -23287,7 +23296,7 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
         }
         if (left.type.kind === "union") {
           const def = L.unions.get(left.type.unionId);
-          if (def && !def.arms.some((a) => a.kind === "dyn" || a.kind === "jsval")) {
+          if (def && !def.arms.some((a) => a.kind === "jsval")) {
             const result: IrExpr = { kind: "boolLit", value: false, type: BOOL, loc };
             return {
               kind: "seqExpr",
