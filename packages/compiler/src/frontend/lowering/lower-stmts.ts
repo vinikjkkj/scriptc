@@ -12,7 +12,7 @@ import type { Lowerer } from "./lowerer.js";
 import { lowerCastViewOverrideWrite } from "./lower-instoverride.js";
 import { isEmitterMixinStatement } from "./lower-emitter-mixin.js";
 import { timersPromisesIntervalCallOf, lowerForAwaitTimersInterval, lowerForAwaitAsyncGenerator, lowerForOfGenerator, lowerYieldStarStatement, hasEscapingLabeledJump, genIterableOf, genIterableOpenCall } from "./lower-generators.js";
-import { RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, BIGINT, BOOL, isRefCounted, BYTES_U8, bytesValueType, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrLocal, type IrRecordShape, IrStmt, IrType, JSVAL, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
+import { RUNTIME_STREAM_CLASSES, BIGINT, BOOL, isRefCounted, BYTES_U8, bytesValueType, CAUGHT, DYN, F64, IrExpr, IrGlobal, IrLocal, type IrRecordShape, IrStmt, IrType, JSVAL, SEARCH_PARAMS_T, STRING, SrcLoc, UNDEFINED_T, VOID, arrayOf, isUnitType, shapeHasAccessorSlots, typeEquals } from "../../ir/nodes.js";
 import { PoisonError, boundIdentifiersOf, dynFallbackType, dynUndefinedExpr, importCallHandleType, neverTaintedJsType, nodeThrowExpr, stmtUsesIsland, uncheckedOverloadHandleCall } from "./lowerer.js";
 import { dtsTwinOwnedConst, wholeExportRootRebindable } from "./lower-modules.js";
 import { builtinImportAwaitSpecOf, builtinImportBindingStmts, dynImportBindingDeclOf, dynImportBindingStmts } from "./lower-island.js";
@@ -11785,7 +11785,7 @@ function prototypeInstallerCallStmt(L: Lowerer, expr: ts.Expression): IrStmt | n
    * identifier target assigns per pass; destructuring heads are tsc
    * errors. */
   /** True when a class's instances enumerate exactly through the dyn member table:
-   * no class in its chain is a runtime stream or error class (the same conditions the
+   * no class in its chain is a runtime stream class (an Error root is exact: scr_dyn_class.c dyn_cls_ops_walk_error; the same conditions the
    * runtime gate checks). */
   function classEnumerableForIn(L: Lowerer, className: string): boolean {
     for (let info: ClassInfo | null | undefined = L.classes.get(className); info; info = info.base) {
