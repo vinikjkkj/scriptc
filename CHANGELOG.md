@@ -4,11 +4,34 @@ All notable changes to scriptc will be documented in this file.
 
 ## Unreleased
 
+<!-- release:start -->
+
+## 0.2.0
+
+The first release since 0.1.2, covering about 3,500 commits. The three packages move together as before: `@scriptc-fork/compiler` pins `@scriptc-fork/runtime` exactly and `@scriptc-fork/scriptc` pins the compiler exactly.
+
+### Features
+
+- **More TypeScript and JavaScript compiles natively.** The static tier now lowers arrays of sync and async generators, variable-length tuples, `any[]`, a `Map` keyed by a union of mixed kinds, `WeakMap` over any key, TypeScript `export =` modules, `AggregateError`, `process` stdio reads, `tty.isatty`, and method-only interfaces of dozens of members. Classes can be passed to untyped code and read back (`x.constructor`), and symbol-keyed properties live on boxed class instances. Node-version and environment probes (`process.version` comparisons and similar) fold at build time to the branch Node would take.
+- **Much more of Node's runtime surface is implemented natively and checked against Node's own output.** This includes `util.inspect` with `compact`, `colors`, `showHidden` and `getters`; `Intl` and `toLocale*String` formatting from bundled ICU data and Node's zone history on every platform; `BigInt64Array`, `BigUint64Array` and `Uint8ClampedArray`; the Buffer-only methods; multi-byte `TextDecoder` labels; `Promise` statics and the `Promise` constructor as a value; `Proxy` traps that receive symbol keys; `Error.captureStackTrace`; `AbortSignal.throwIfAborted`; unconnected `net.Socket` lifecycle with `ref`, `unref` and keep-alive; objectMode streams; and `tls.checkServerIdentity` using Node's identity algorithm.
+- **npm packages that publish no attestation can still be compiled**, from their installed tarball verified against the lockfile, and are labelled `local://` in the provenance listing. `mysql2` joins the default list of authored-JS packages.
+- **Profile-guided function ordering.** `scriptc build --pgo` records which functions a run executes and lays the next build out in that order; `--layout-profile` and `--layout-order` expose the two halves, and the compiler warns once when an order file has gone stale. Ordered builds link with `ld.lld` when GNU `ld` cannot apply the ordering file.
+
+### Changes
+
+- **The `--best-effort` flag is removed** from `scriptc build`. A construct the compiler cannot compile exactly is refused with a diagnostic instead of being compiled approximately.
+- The compiler skips lowering when only the C compiler flags or the object order change, so flag-only rebuilds and `--layout-order` edits re-run just the C compiler and the link.
+- Large reductions in memory and in runtime cost for typical programs: promises park their first waiter inline, closures and dynamic values carry smaller payloads, the cycle collector's pacing estimate counts shared strings, the allocator's heap is trimmed at idle, and many hot paths of the dynamic tier read straight from packed arrays. These change no program output.
+
 ### Fixes
 
-- **`surface-manifest.json` is restamped with the version it ships under.** RELEASING.md step 2 requires `node scripts/sync-versions.mjs` and `pnpm manifest` after a bump; 0.1.1 and 0.1.2 both bumped the package versions by hand and skipped the restamp, so the committed manifest kept declaring `compilerVersion` 0.1.0 and `tests/harness/surface-manifest.test.ts` was red from 0.1.1 onward. Only the stamp was stale: the 411 entries and the coverage prose regenerate byte-identically, so the published manifests describe the right surface under the wrong version number.
+- **A failed `fetch` rejects with its underlying error as the `cause`**, and network errors print in full, as Node does.
+- **A TLS connection to an IP-literal host is verified against the certificate's IP entries** and raises Node's identity error, instead of failing differently.
+- **Windows file paths are UTF-8 end to end.** opening, `stat`, `access`, `chmod`, creating, removing, renaming and resolving a path go through the wide CRT, and `rename` replaces an existing destination as libuv does.
+- **`surface-manifest.json` is restamped with the version it ships under.** RELEASING.md step 2 requires `node scripts/sync-versions.mjs` and `pnpm manifest` after a bump; 0.1.1 and 0.1.2 skipped the restamp, so the committed manifest kept declaring `compilerVersion` 0.1.0 and `tests/harness/surface-manifest.test.ts` was red from 0.1.1 onward.
+- Over a thousand further fixes to lowering, the runtime and both code generators are recorded one by one in the commit history, each with a test row compared against Node on the C and LLVM backends.
 
-<!-- release:start -->
+<!-- release:end -->
 
 ## 0.1.2
 
@@ -19,8 +42,6 @@ All notable changes to scriptc will be documented in this file.
 ### Changes
 
 - All three packages move together. `@scriptc-fork/compiler` pins `@scriptc-fork/runtime` exactly and `@scriptc-fork/scriptc` pins the compiler exactly, so publishing one alone strands consumers on the previous graph.
-
-<!-- release:end -->
 
 ## 0.1.1
 
