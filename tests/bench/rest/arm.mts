@@ -117,6 +117,7 @@ try {
     await req('POST', '/x', 'not json at all')
     await sleep(2000)
     for (const g of ['/store/messages?thread=55119101000@s.whatsapp.net', '/store/threads', '/store/counts', '/events']) await req('GET', g)
+    if (process.env.RR_SIGUSR1_END) { client.kill('SIGUSR1'); await sleep(500) } // layout profile: the END epoch starts where the shutdown starts
     await req('POST', '/s/drive/shutdown')
 } catch (e) { results.push({ driverError: String(e) }) }
 for (let i = 0; i < 40 && exited === null; i++) await sleep(250)

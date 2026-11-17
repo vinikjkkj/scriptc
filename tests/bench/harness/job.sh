@@ -33,10 +33,13 @@ if [ "$program" = rest ]; then
     if [ "$LAYOUT" = order ] && [ -f "$o/zapo-rest-mysql-$BACKEND.bin" ]; then
       SCC_CLI=$(cli_of $side) EXTRA_ARGS="--layout-profile" bash "$BENCH_DIR/harness/rest-build.sh" "$BACKEND" "$o" -prof || { echo "instrumented build of $side failed"; continue; }
       mkdir -p "$ART/layout/$side"
-      $BENCH_NODE "$BENCH_DIR/harness/rest-run.mjs" --out "$ART/layout/$side" --profile "$o/zapo-rest-mysql-$BACKEND-prof.bin" "$ART/layout/$side/profile.txt" || { echo "profile run of $side failed"; continue; }
+      # END_EPOCH=1: the CANDIDATE side's profile run sends a second SIGUSR1 right before the shutdown request, so the order file gets an END tier (the base side keeps today's two epochs)
+      endv=""; [ "$side" = cand ] && [ -n "${END_EPOCH:-}" ] && endv=1
+      RR_SIGUSR1_END=$endv $BENCH_NODE "$BENCH_DIR/harness/rest-run.mjs" --out "$ART/layout/$side" --profile "$o/zapo-rest-mysql-$BACKEND-prof.bin" "$ART/layout/$side/profile.txt" || { echo "profile run of $side failed"; continue; }
       $BENCH_NODE "$(cli_of $side)" layout-order "$o/zapo-rest-mysql-$BACKEND-prof.bin" "$ART/layout/$side/profile.txt" -o "$ART/layout/$side/order.txt" || continue
       SCC_CLI=$(cli_of $side) EXTRA_ARGS="--layout-order $ART/layout/$side/order.txt" bash "$BENCH_DIR/harness/rest-build.sh" "$BACKEND" "$o" -ordered || { echo "ordered build of $side failed"; continue; }
       arms+=("$side-ordered:$o/zapo-rest-mysql-$BACKEND-ordered.bin")
+      if [ -n "${ORDER_AA:-}" ] && [ "$side" = cand ]; then cp "$o/zapo-rest-mysql-$BACKEND-ordered.bin" "$o/zapo-rest-mysql-$BACKEND-ordered-aa.bin"; arms+=("$side-ordered-aa:$o/zapo-rest-mysql-$BACKEND-ordered-aa.bin"); fi
     fi
   done
   [ ${#arms[@]} -gt 0 ] || { echo "no REST binary was built"; exit 1; }
@@ -101,6 +104,7 @@ for side in "${sides[@]}"; do
     $BENCH_NODE "$(cli_of $side)" layout-order "$o/messaging-$store-$BACKEND-prof.bin" "$ART/layout/$side/profile.txt" -o "$ART/layout/$side/order.txt" || continue
     SCC_CLI=$(cli_of $side) EXTRA_ARGS="--layout-order $ART/layout/$side/order.txt" bash "$BENCH_DIR/harness/build.sh" "$store" "$BACKEND" "$o" plain -ordered || { echo "ordered build of $side failed"; continue; }
     f=$o/messaging-$store-$BACKEND-ordered.bin; [ -f "$f" ] && { chmod +x "$f"; arms+=("$side-ordered:$f"); }
+    if [ -n "${ORDER_AA:-}" ] && [ "$side" = cand ] && [ -f "$f" ]; then cp "$f" "$o/messaging-$store-$BACKEND-ordered-aa.bin"; chmod +x "$o/messaging-$store-$BACKEND-ordered-aa.bin"; arms+=("$side-ordered-aa:$o/messaging-$store-$BACKEND-ordered-aa.bin"); fi
   fi
 done
 [ ${#arms[@]} -gt 0 ] || { echo "no binary was built"; exit 1; }
