@@ -13271,6 +13271,12 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
           if (e.kind === "numLit" || e.kind === "strLit" || e.kind === "boolLit" || e.kind === "bigLit") return true;
           if (e.kind === "unitLit") return true;
           if (e.kind === "unionWrap") return orderIndependent(e.value);
+          // Pure combinators of order-independent operands (`phoneJid ?? inputJid`, `a ? b : c`, `a && b`): no call, no read of a mutable or heap value, so
+          // nothing the hoisted source call does can change what they yield.
+          if (e.kind === "nullish" || e.kind === "orDefault" || e.kind === "logical") return orderIndependent(e.left) && orderIndependent(e.right);
+          if (e.kind === "ternary") return orderIndependent(e.cond) && orderIndependent(e.then) && orderIndependent(e.else_);
+          if (e.kind === "toBool") return orderIndependent(e.operand);
+          if (e.kind === "unary" && e.op === "!") return orderIndependent(e.operand);
           if (e.kind !== "varRef") return false;
           const local = L.ctx.locals.find((l) => l.id === e.localId);
           // A TDZ const is excluded: reading it before its initializer
