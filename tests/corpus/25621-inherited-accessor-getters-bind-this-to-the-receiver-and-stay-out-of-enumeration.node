@@ -1,0 +1,11 @@
+a: ["A","none:beta","v:1"]
+b: ["none:alpha","B","v:2"]
+chain: ["A","v:3"]
+for-in: ["id","_alpha"]
+keys: ["id","_alpha"]
+keys-proto: []
+has: [true,false,true]
+json: "{\"id\":1,\"_alpha\":\"A\"}"
+assign: ["id","_alpha"]
+entries: [["id",1],["_alpha","A"]]
+getter-this-free: "free"

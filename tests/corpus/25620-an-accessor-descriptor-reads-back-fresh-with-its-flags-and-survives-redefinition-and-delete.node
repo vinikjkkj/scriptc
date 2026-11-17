@@ -1,0 +1,15 @@
+keys-plain: ["get","set","enumerable","configurable"]
+flags-plain: [false,false,true,"function"]
+fresh: true
+fresh-after-mutation: "function"
+keys-both: ["get","set","enumerable","configurable"]
+flags-both: [false,true,"function","function"]
+flags-shown: [true,true]
+same-getter: true
+read-after-set: ["g:set-through","set-through"]
+redefined: ["again:set-through",["get","set","enumerable","configurable"]]
+sealed-redefine: "TypeError"
+delete-sealed: "TypeError"
+still-there: "g:set-through"
+delete-configurable: true
+gone: ["undefined",true]

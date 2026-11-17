@@ -16484,6 +16484,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25620-an-accessor-descriptor-reads-back-fresh-with-its-flags-and-survives-redefinition-and-delete.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25620-an-accessor-descriptor-reads-back-fresh-with-its-flags-and-survives-redefinition-and-delete.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25621-inherited-accessor-getters-bind-this-to-the-receiver-and-stay-out-of-enumeration.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25621-inherited-accessor-getters-bind-this-to-the-receiver-and-stay-out-of-enumeration.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25622-hidden-accessor-positions-follow-the-members-through-deletes-and-large-tables.ts": {
+   "order": [
+    "<repo>/tests/corpus/25622-hidden-accessor-positions-follow-the-members-through-deletes-and-large-tables.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2563-stream-promises-pipeline.ts": {
    "order": [
     "<repo>/tests/corpus/2563-stream-promises-pipeline.ts"

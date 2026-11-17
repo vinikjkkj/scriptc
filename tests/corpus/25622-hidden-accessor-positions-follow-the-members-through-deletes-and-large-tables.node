@@ -1,0 +1,6 @@
+{ m0: 0, m1: 1, [h_a]: [Getter], m2: 2, [h_b]: [Getter], m3: 3 }
+{ m0: 0, [h_a]: [Getter], m2: 2, [h_b]: [Getter], m3: 3 }
+{ [h_a]: [Getter], m2: 2, [h_b]: [Getter], m3: 3 }
+{ [h_a]: [Getter], m2: 2, [h_b]: [Getter], m3: 3, [h_c]: [Getter] }
+12109 true true
+12095 true true late
