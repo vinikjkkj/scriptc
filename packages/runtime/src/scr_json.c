@@ -826,15 +826,15 @@ int scr_cycen_dyn_peek3(const void *hdr, unsigned *eks, char *key, unsigned long
   *eks = 0xFFFFFFFFu; key[0] = 0; *rc = (unsigned long long)d->rc; *e0src = 0;
   if (d->kind == SCR_DYN_ARR && d->v.arr.items != NULL) {
     unsigned v = 0xFFFFFFFFu;
-    for (unsigned i = 0; i < 4 && i < d->v.arr.len; i++) { v &= ~(0xFFu << (8 * i)); v |= ((unsigned)d->v.arr.items[i]->kind & 0xFFu) << (8 * i); }
+    for (unsigned i = 0; i < 4 && i < d->v.arr.len; i++) { v &= ~(0xFFu << (8 * i)); v |= (d->v.arr.items[i] != NULL ? ((unsigned)d->v.arr.items[i]->kind & 0xFFu) : 0xFEu) << (8 * i); }
     *eks = v;
-    if (d->v.arr.len > 0 && d->v.arr.items[0]->kind == SCR_DYN_STR && d->v.arr.items[0]->v.str != NULL) *e0src = (unsigned long long)d->v.arr.items[0]->v.str->rc;
+    if (d->v.arr.len > 0 && d->v.arr.items[0] != NULL && d->v.arr.items[0]->kind == SCR_DYN_STR && d->v.arr.items[0]->v.str != NULL) *e0src = (unsigned long long)d->v.arr.items[0]->v.str->rc;
   } else if (d->kind == SCR_DYN_OBJ && d->v.obj.entries != NULL) {
     unsigned v = 0xFFFFFFFFu, o = 0;
     for (unsigned i = 0; i < 2 && i < d->v.obj.len; i++) {
       const ScrDynEntry *e = &d->v.obj.entries[i];
-      v &= ~(0xFFu << (8 * i)); v |= ((unsigned)e->value->kind & 0xFFu) << (8 * i);
-      for (unsigned k = 0; k < e->key_len && o < 22; k++) key[o++] = e->key[k];
+      v &= ~(0xFFu << (8 * i)); v |= (e->value != NULL ? ((unsigned)e->value->kind & 0xFFu) : 0xFEu) << (8 * i);
+      for (unsigned k = 0; k < e->key_len && o < 22 && e->key != NULL; k++) key[o++] = e->key[k];
       if (i == 0 && d->v.obj.len > 1 && o < 22) key[o++] = '|';
     }
     key[o] = 0;
