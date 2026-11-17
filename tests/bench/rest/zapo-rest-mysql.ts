@@ -436,6 +436,7 @@ const rawPool = createMysqlPool({
   database: MYSQL_DATABASE,
   connectionLimit: POOL_SIZE,
   waitForConnections: true,
+  disableEval: true,
 });
 /* THE SEAM. One cast, in one place; nothing in this file names a mysql2 type
  * on either side of it. */
@@ -1711,6 +1712,7 @@ async function registryRoute(method: string, path: string, p: Bag): Promise<unkn
         database: MYSQL_DATABASE,
         connectionLimit: POOL_SIZE,
         waitForConnections: true,
+        disableEval: true,
       }) as unknown as MysqlPool;
     }
     const sp = secondPool;
