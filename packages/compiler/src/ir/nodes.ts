@@ -730,6 +730,19 @@ export function irFunctionValueCode(fn: IrFunction): number {
   return (fn.async === true ? 1 : 0) | (fn.generator !== undefined ? 2 : 0);
 }
 
+/** The name-table row code of a function: its inspect kind code, plus the row-only wrapper bits (SCR_FNK_WRAP_MASK in scr_runtime.h) for a lowerer
+ * adapter body (`%fn.adapt.N.impl`, one function value in capture 0: 01) and a bound-function body (`%bindthis.N`: 10 with the target in capture 0, 11
+ * when a receiver sits in capture 0 and the target in capture 1), whose closure's name is derived from the wrapped closure's at run time. */
+export function irFunctionNameRowCode(fn: IrFunction): number {
+  const caps = fn.captures;
+  if (/^%fn\.adapt\.[0-9a-z]+\.impl$/.test(fn.name) && caps?.length === 1 && caps[0]!.type.kind === "func") return irFunctionValueCode(fn) | 0x40;
+  if (fn.name.startsWith("%bindthis.") && caps !== undefined && caps.length >= 1) {
+    if (caps[0]!.name === "bt" && caps.length >= 2 && caps[1]!.name === "tf") return irFunctionValueCode(fn) | 0xc0;
+    if (caps[0]!.name === "tf") return irFunctionValueCode(fn) | 0x80;
+  }
+  return irFunctionValueCode(fn);
+}
+
 /** The function-name table's rows, shared by both emitters: one row per
  * closure entry point that has a name OR a non-zero kind code, sorted by
  * symbol so the output is a function of the program. The name is null for a

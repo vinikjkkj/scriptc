@@ -6948,8 +6948,6 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     return { kind: "dynKeyGet", key: { kind: "strLit", value: "prototype", type: STRING, loc }, value: cls, type: DYN, loc };
   }
 
-  /** `C.prototype.<member>` (a method as a function value, `constructor`): read through the prototype object's dyn box, left dyn (the checker's
-   * instance type for the receiver would bridge a function value into a method of an instance that is not there). */
   /** The program class a `C.prototype` / `C.prototype.<m>` expression names, or null (also null for `new.target.prototype`, whose class is the one being constructed). */
   export function protoRootClassOf(L: Lowerer, node: ts.Expression): ClassInfo | null {
     let e: ts.Expression = node;
@@ -6960,6 +6958,8 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     return symbol === null ? null : L.classBySymbol.get(symbol) ?? null;
   }
 
+  /** `C.prototype.<member>` (a method as a function value, `constructor`): read through the prototype object's dyn box, left dyn (the checker's
+   * instance type for the receiver would bridge a function value into a method of an instance that is not there). */
   export function lowerClassPrototypeMember(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
     if (expr.questionDotToken !== undefined) return null;
     let inner: ts.Expression = expr.expression;
