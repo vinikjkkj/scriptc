@@ -16214,6 +16214,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25570-many-string-literals-through-hot-and-cold-functions.ts": {
+   "order": [
+    "<repo>/tests/corpus/25570-many-string-literals-through-hot-and-cold-functions.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25571-string-literal-identity-escapes-and-unicode-across-functions.ts": {
+   "order": [
+    "<repo>/tests/corpus/25571-string-literal-identity-escapes-and-unicode-across-functions.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2558-index-signature-func-values.ts": {
    "order": [
     "<repo>/tests/corpus/2558-index-signature-func-values.ts"
