@@ -28806,6 +28806,18 @@
     "<repo>/tests/corpus/25548-a-cast-of-an-error-to-a-record-lists-the-errors-own-keys.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25662-hasownproperty-call-over-a-record-with-optional-fields-through-an-alias.ts": {
+   "order": [
+    "<repo>/tests/corpus/25662-hasownproperty-call-over-a-record-with-optional-fields-through-an-alias.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25663-hasownproperty-call-over-index-signature-and-required-field-records.ts": {
+   "order": [
+    "<repo>/tests/corpus/25663-hasownproperty-call-over-index-signature-and-required-field-records.ts"
+   ],
+   "diags": []
   }
  }
 }
