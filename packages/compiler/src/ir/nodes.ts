@@ -4518,6 +4518,7 @@ export type IrLibFn =
   | "net.sockWriteDyn"
   | "net.sockEndDyn"
   | "net.sockDestroy"
+  | "net.sockDestroyErr"
   | "net.sockPipe"
   /** socket.pipe(res) — raw socket chunks into a ServerResponse body
    * (the extended-CONNECT bridge leg): each chunk is a body write (the

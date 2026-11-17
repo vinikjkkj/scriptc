@@ -1308,6 +1308,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "net.sockWriteDyn": "scr_net_sock_write_dynv",
   "net.sockEndDyn": "scr_net_sock_end_dynv",
   "net.sockDestroy": "scr_net_sock_destroy",
+  "net.sockDestroyErr": "scr_net_sock_destroy_errv",
   "net.sockPipe": "scr_net_sock_pipe",
   "net.sockDestroyed": "scr_net_sock_destroyed",
   "net.sockWritable": "scr_net_sock_writable",

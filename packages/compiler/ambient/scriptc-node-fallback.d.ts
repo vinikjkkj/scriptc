@@ -2363,7 +2363,7 @@ declare module "net" {
     readonly bytesWritten: number;
     write(data: string | Uint8Array): void;
     end(data?: string | Uint8Array): void;
-    destroy(): void;
+    destroy(error?: Error): void;
     /* Flow control: pause holds reads off (kernel/TCP backpressure is
      * the buffer); resume flows — and discards without listeners, so
      * 'end' stays reachable. Both chain, Node's shape. */

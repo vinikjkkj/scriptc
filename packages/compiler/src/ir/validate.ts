@@ -689,6 +689,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "net.sockWriteDyn": { argTypes: [NETSOCKET_T, DYN], result: VOID },
   "net.sockEndDyn": { argTypes: [NETSOCKET_T, DYN], result: VOID },
   "net.sockDestroy": { argTypes: [NETSOCKET_T], result: VOID },
+  "net.sockDestroyErr": { argTypes: [NETSOCKET_T, DYN], result: VOID },
   "net.sockPipe": { argTypes: [NETSOCKET_T, NETSOCKET_T], result: VOID },
   "net.sockPipeRes": { argTypes: [NETSOCKET_T, HTTPRES_T], result: VOID },
   "net.sockOnData": { argTypes: [NETSOCKET_T, null, BOOL], result: VOID },
