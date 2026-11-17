@@ -16070,6 +16070,66 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25500-any-members-in-an-unannotated-object-variable.ts": {
+   "order": [
+    "<repo>/tests/corpus/25500-any-members-in-an-unannotated-object-variable.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25501-any-members-in-unannotated-array-and-map-variables.ts": {
+   "order": [
+    "<repo>/tests/corpus/25501-any-members-in-unannotated-array-and-map-variables.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25502-any-members-reassigned-and-captured.ts": {
+   "order": [
+    "<repo>/tests/corpus/25502-any-members-reassigned-and-captured.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25503-any-spread-in-printed-and-variable-literals.ts": {
+   "order": [
+    "<repo>/tests/corpus/25503-any-spread-in-printed-and-variable-literals.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25504-any-and-unknown-elements-in-printed-sets.ts": {
+   "order": [
+    "<repo>/tests/corpus/25504-any-and-unknown-elements-in-printed-sets.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25505-any-errors-in-unannotated-variables.ts": {
+   "order": [
+    "<repo>/tests/corpus/25505-any-errors-in-unannotated-variables.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25506-any-members-through-json-and-inspect-of-variables.ts": {
+   "order": [
+    "<repo>/tests/corpus/25506-any-members-through-json-and-inspect-of-variables.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25507-any-members-beside-typed-members-and-functions.ts": {
+   "order": [
+    "<repo>/tests/corpus/25507-any-members-beside-typed-members-and-functions.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25508-any-class-instance-and-subclass-in-variable-literals.ts": {
+   "order": [
+    "<repo>/tests/corpus/25508-any-class-instance-and-subclass-in-variable-literals.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25509-any-members-in-nested-variable-literals.ts": {
+   "order": [
+    "<repo>/tests/corpus/25509-any-members-in-nested-variable-literals.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2551-generics-value-aliases.ts": {
    "order": [
     "<repo>/tests/corpus/2551-generics-value-aliases.ts"
