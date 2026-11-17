@@ -65,14 +65,6 @@ const ROWS: readonly { name: string; src: string; forbidden: string[] }[] = [
     forbidden: ["OUT", "message", "name"],
   },
   {
-    name: "util.inspect of a boxed Error subclass",
-    src:
-      ERR_HEAD +
-      "function use(x: any): void { console.log(x) }\n" +
-      "use(new MyErr())\n",
-    forbidden: ["MyErr {", "code:"],
-  },
-  {
     name: "JSON.stringify of a boxed EventEmitter subclass",
     src:
       BUS_HEAD +
@@ -112,6 +104,16 @@ const ANSWERS: readonly { name: string; src: string; out: string }[] = [
       "function use(x: any): string { return String(x) }\n" +
       "console.log('OUT ' + use(new MyErr()))\n",
     out: "OUT Error: boom\n",
+  },
+  {
+    name: "util.inspect of a boxed Error subclass",
+    src:
+      "(Error as any).stackTraceLimit = 0\n" +
+      ERR_HEAD +
+      "function use(x: any): void { console.log(x) }\n" +
+      "use(new MyErr())\n",
+    // Node (v24.15.0): the subclass kept the default name, so improveStack prefixes the constructor; the assigned `code` prints in the braces.
+    out: "[MyErr [Error]: boom] { code: 'X' }\n",
   },
   {
     name: "Object.keys of a boxed Error subclass",
