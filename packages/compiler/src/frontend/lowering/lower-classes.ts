@@ -13001,7 +13001,7 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
             ? seedArg.elements.filter(isPairLit)
             : null;
         let tsType = L.typeOf(expr);
-        let mapped = L.mapTypeOf(tsType);
+        let mapped = L.mapPrintedLiteralTypeOf(expr, tsType);
         // An explicit any-typed context beats the seed's inferred type
         // arguments (see anyContainerContext): `new Map([["a", 1]])` types
         // as Map<string, number> by the seed alone, and a typed box would
