@@ -12704,7 +12704,10 @@ ScrDyn *scr_dyn_fn_get(const ScrDyn *d, const char *key, size_t key_len) {
      * with `this` bound to the FUNCTION, as in JS, once per read. A set-only accessor reads undefined. */
     if (r == NULL && table != NULL) {
       ScrDyn *found = NULL;
-      if (scr_dyn_obj_resolve(table, key, key_len, &found, NULL) == SCR_PROP_ACCESSOR) {
+      const ScrPropKind pk = scr_dyn_obj_resolve(table, key, key_len, &found, NULL);
+      /* a LAZY member of the table is forced by the resolve and is a plain data member now */
+      if (pk == SCR_PROP_DATA && found != NULL) r = scr_dyn_retain(found);
+      if (pk == SCR_PROP_ACCESSOR) {
         ScrDyn *getter = scr_hid_getter(found);
         if (getter->kind != SCR_DYN_FUNC) r = scr_dyn_retain(scr_dyn_undefined());
         else {
