@@ -40,6 +40,7 @@ import {
   setProvenanceSources,
 } from "@scriptc/compiler";
 import { extractVerifiedTarball, lookupNpmLock, lookupPnpmLock, parseSri } from "../../packages/compiler/src/frontend/provenance-lockfile.js";
+import { unpacksSourceTarballInProcess } from "../../packages/compiler/src/frontend/provenance.js";
 
 const execFileAsync = promisify(execFile);
 const repoRoot = join(import.meta.dirname, "../..");
@@ -549,6 +550,32 @@ describe("in-process tarball extraction (no tar child process)", () => {
     /* Positive control: the same archive without the bad entry extracts. */
     await extractVerifiedTarball(makeTgz([{ name: "package/ok.js", data: "x" }]), dest);
     expect(listTree(dest)).toEqual(["ok.js"]);
+  });
+
+  test("a source checkout's links are skipped by name on request, every other member extracts, and the default still refuses them", async () => {
+    const entries: TarEntry[] = [
+      { name: "repo-abc/", type: "5" },
+      { name: "repo-abc/CLAUDE.md", data: "rules" },
+      { name: "repo-abc/AGENTS.md", type: "2" },
+      { name: "repo-abc/hard", type: "1" },
+      { name: "repo-abc/lib/", type: "5" },
+      { name: "repo-abc/lib/a.js", data: "a" },
+    ];
+    const dest = join(tmp(), "out");
+    await extractVerifiedTarball(makeTgz(entries), dest, { links: "skip" });
+    expect(listTree(dest)).toEqual(["CLAUDE.md", "lib/a.js"]);
+    /* Positive control: without the option the same archive is refused, naming the link, and writes nothing. */
+    const refused = join(tmp(), "out");
+    await expect(extractVerifiedTarball(makeTgz(entries), refused)).rejects.toThrow(/symlink/);
+    expect(existsSync(refused)).toBe(false);
+    /* The option skips links only: a path that escapes, or is absolute, is still refused. */
+    await expect(extractVerifiedTarball(makeTgz([{ name: "repo-abc/../../x", data: "x" }]), join(tmp(), "o"), { links: "skip" })).rejects.toThrow(/escapes/);
+    await expect(extractVerifiedTarball(makeTgz([{ name: "/etc/x", data: "x" }]), join(tmp(), "o"), { links: "skip" })).rejects.toThrow(/absolute/);
+  });
+
+  test("only Windows unpacks a source tarball in-process: no tar flavor, no --force-local, on the one host whose tar differs", () => {
+    expect(unpacksSourceTarballInProcess("win32")).toBe(true);
+    for (const p of ["linux", "darwin", "freebsd", "android"] as const) expect(unpacksSourceTarballInProcess(p)).toBe(false);
   });
 
   test("absolute paths, symlinks and hard links are refused", async () => {
