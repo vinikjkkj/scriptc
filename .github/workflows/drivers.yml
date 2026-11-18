@@ -306,6 +306,7 @@ jobs:
         shell: pwsh
         env:
           DRIVER: ${{ matrix.driver }}
+          DRIVER_NODE_HEAP_MB: ${{ inputs.node_heap_mb }}
         run: |
           $out = Join-Path $env:GITHUB_WORKSPACE 'out'
           New-Item -ItemType Directory -Force $out | Out-Null
@@ -315,7 +316,8 @@ jobs:
           $bin = Join-Path $out ($env:DRIVER + '.bin')
           $txt = Join-Path $out ($env:DRIVER + '.txt')
           $sw = [Diagnostics.Stopwatch]::StartNew()
-          cmd /c "node `"$cli`" build $entry --provenance-sources --npm-static mysql2 --backend $backend -o `"$bin`" > `"$txt`" 2>&1"
+          $heap = if ($env:DRIVER_NODE_HEAP_MB) { $env:DRIVER_NODE_HEAP_MB } else { '12288' }
+          cmd /c "node --max-old-space-size=$heap `"$cli`" build $entry --provenance-sources --npm-static mysql2 --backend $backend -o `"$bin`" > `"$txt`" 2>&1"
           $rc = $LASTEXITCODE
           Add-Content -Path $txt -Value "rc=$rc"
           Add-Content -Path $txt -Value ("seconds=" + [int]$sw.Elapsed.TotalSeconds)
