@@ -40,6 +40,10 @@ if [ "$program" = rest ]; then
     fi
   done
   [ ${#arms[@]} -gt 0 ] || { echo "no REST binary was built"; exit 1; }
+  if [ "${REST_REFUSED:-0}" = 1 ]; then # LAB (connref1): no MySQL reachable
+    $BENCH_NODE "$BENCH_DIR/harness/rest-refused.mjs" --out "$BENCH_WORK/result" "${arms[@]}" | tee "$BENCH_WORK/result-summary.txt"; rc=${PIPESTATUS[0]}
+    { echo "### rest refused ($BACKEND)"; echo '```'; cat "$BENCH_WORK/result-summary.txt"; echo '```'; } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"; exit $rc
+  fi
   $BENCH_NODE "$BENCH_DIR/harness/rest-run.mjs" --out "$BENCH_WORK/result" --reps "$REPS" --smaps "${arms[@]}" | tee "$BENCH_WORK/result-summary.txt"
   summary "$BENCH_WORK/result"; exit 0
 fi
