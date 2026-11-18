@@ -110,3 +110,5 @@ test("an unused view built by Object.entries over a read-only frozen table is dr
   const kept = verdict(deadInitPass(lower({ "main.ts": VIEWED("const boxed: unknown = SPEC; console.log(typeof boxed);", FROZEN) })), "UNUSED_VIEW");
   expect(kept).toMatch(/^keep: /);
 });
+
+// The init-order cases (table boxed by a module that runs after the view's module: dropped; before it: kept) are multi-file, so they are corpus rows 25698 and 25699.
