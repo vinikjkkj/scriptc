@@ -86,7 +86,11 @@ const h = new Holder(); const b = h.box; ${EMIT}
     const r = fe.lower({});
     const adv = r.advisories.filter((a) => a.code === "SC6005");
     expect(adv.length).toBe(1);
-    const rendered = renderAll(adv, fe.sourceTexts(), { color: false }).replaceAll(dir + "/", "");
+    // Windows renders the temp dir in its 8.3 short form (C:/Users/RUNNER~1/...), which is not the string tmpdir() returned: cut the path by the
+    // directory's own unique prefix, and take CRLF lines to the POSIX text the snapshot holds.
+    const rendered = renderAll(adv, fe.sourceTexts(), { color: false })
+      .replaceAll("\r\n", "\n")
+      .replace(/\S*scriptc-twinadv-[A-Za-z0-9]+[\\/]/g, "");
     await expect(rendered).toMatchFileSnapshot("__snapshots__/twin-advice-sc6005.txt");
   } finally {
     fe.dispose();
