@@ -16874,6 +16874,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25711-numeric-fields-copied-from-another-field-or-compared-to-a-literal-take-lanes-and-overflow-exactly.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25711-numeric-fields-copied-from-another-field-or-compared-to-a-literal-take-lanes-and-overflow-exactly.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2572-readable-emitted-readable-flag.cjs": {
    "order": [
     "<repo>/tests/corpus/2572-readable-emitted-readable-flag.cjs"

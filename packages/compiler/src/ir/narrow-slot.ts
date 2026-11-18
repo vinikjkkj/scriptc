@@ -5,8 +5,8 @@
  *  - the class is standalone (no base, nobody extends it) and not runtime-provided;
  *  - the field is a dyn-typed declared field the class owns (not `%`/`#`/`__@`), with no absent/hidden/prototype-data treatment;
  *  - EVERY write is a fieldSet in the owner's constructor, or the synthesized `%C.%dynSet` / `%C.%dynClone` of a boxed class; at least one constructor write;
- *  - NUMERIC by use: some read of the field is an operand of dyn arithmetic / comparison / a number check, or a constructor write is an arithmetic /
- *    large-literal store, or a property read of a property the program writes as a number;
+ *  - NUMERIC by use: some read of the field is an operand of dyn arithmetic / comparison / a number check / a strict equality against a number literal, or a constructor
+ *    write is an arithmetic / large-literal store, a property read of a property the program writes as a number, or a copy of an eligible field of `this`;
  *  - no struct view (`%class:<C>`) names the class, no unionDisc names the field.
  * A class is worth a narrow block when it has at least NARROW_MIN_FIELDS such fields (the mask word and the overflow pointer cost 16 B).
  * SCRIPTC_NARROW_WHY=1 prints one `NARROW class <name> fields=<n> [<list>]` line per class with at least one eligible field, and a refusal line per
@@ -82,6 +82,11 @@ export function narrowSlotScope(mod: IrModule): NarrowScope[] {
       if (kind === "fieldSet" && node["unset"] !== true && fn.name === `%${cls}.constructor`) f.ctorWrites.push(node["value"] as IrExpr);
       else if (kind === "fieldSet" && node["unset"] !== true && (fn.name.endsWith(".%dynSet") || fn.name.endsWith(".%dynClone"))) void 0;
       else f.other = true;
+    } else if (kind === "dynScalarEq") {
+      // `x === 31` / `x !== 0`: a strict equality against a number literal is a numeric use of the other operand (it can only be true for a number).
+      const l = node["left"] as IrExpr, r = node["right"] as IrExpr;
+      if (r.kind === "numLit") noteRead(l);
+      else if (l.kind === "numLit") noteRead(r);
     } else if (kind === "unionDisc" && typeof node["field"] === "string") unionRead.add(node["field"]);
     else if (kind === "libCall" && NUM_USE_FNS.has(node["fn"] as string)) for (const a of node["args"] as IrExpr[]) noteRead(a);
     else if (kind === "dynCheck" && (node["type"] as { kind: string }).kind === "f64") noteRead(node["value"] as IrExpr);
@@ -111,6 +116,23 @@ export function narrowSlotScope(mod: IrModule): NarrowScope[] {
       else if (!ff.numericUse && !ff.ctorWrites.some(numericSource)) no("no numeric use of any read and no numeric source");
       else eligible.push(f.name);
     }
+    // A field whose every constructor write copies an ELIGIBLE field of `this` (`this.type = this.columnType`) is numeric by source: iterate to a fixed point, then restore the
+    // class's field order (the lane index is the position in this list).
+    for (let changed = true; changed; ) {
+      changed = false;
+      for (let i = refused.length - 1; i >= 0; i--) {
+        const r = refused[i]!;
+        if (r.reason !== "no numeric use of any read and no numeric source") continue;
+        const ff = facts.get(`${c.name}\0${r.field}`)!;
+        if (ff.ctorWrites.every((w) => w.kind === "fieldGet" && w.type.kind === "dyn" && isThis(w.obj) && eligible.includes(w.field))) {
+          eligible.push(r.field);
+          refused.splice(i, 1);
+          changed = true;
+        }
+      }
+    }
+    const order = new Map(c.fields.map((f, i) => [f.name, i] as const));
+    eligible.sort((x, y) => order.get(x)! - order.get(y)!);
     if (eligible.length > 0 || refused.length > 0) out.push({ className: c.name, eligible, refused });
   }
   return out;
