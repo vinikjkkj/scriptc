@@ -793,6 +793,8 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
         E.line(`{${E.srcComment(s.loc)}`);
         E.indent++;
         E.scopes.push([]);
+        const savedRunScope = E.runScope;
+        E.runScope = ++E.runScopeCounter;
         predeclareFieldRunTables(E, s.body);
         if (s.init) E.emitStmt(s.init);
         E.line(`for (;;) {`);
@@ -833,6 +835,7 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
         // as the fall-through path).
         if (loop.usedEnd) E.line(`${loop.endLabel}:;`);
         E.releaseFrame(E.scopes.pop()!);
+        E.runScope = savedRunScope;
         E.indent--;
         E.line(`}`);
         break;
