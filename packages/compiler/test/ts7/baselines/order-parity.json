@@ -16802,6 +16802,66 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25700-a-uint8array-write-past-the-end-or-at-an-invalid-index-is-ignored.ts": {
+   "order": [
+    "<repo>/tests/corpus/25700-a-uint8array-write-past-the-end-or-at-an-invalid-index-is-ignored.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25701-a-uint8array-read-at-an-invalid-index-is-undefined.ts": {
+   "order": [
+    "<repo>/tests/corpus/25701-a-uint8array-read-at-an-invalid-index-is-undefined.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25702-a-uint8array-read-past-the-end-in-arithmetic-is-nan.ts": {
+   "order": [
+    "<repo>/tests/corpus/25702-a-uint8array-read-past-the-end-in-arithmetic-is-nan.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25703-a-buffer-read-or-write-past-the-end-follows-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25703-a-buffer-read-or-write-past-the-end-follows-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25704-typed-array-elements-of-every-kind-read-and-write-past-the-end-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25704-typed-array-elements-of-every-kind-read-and-write-past-the-end-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25705-an-out-of-range-element-read-keeps-undefined-through-locals-calls-and-fields.ts": {
+   "order": [
+    "<repo>/tests/corpus/25705-an-out-of-range-element-read-keeps-undefined-through-locals-calls-and-fields.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25706-a-view-an-empty-array-and-a-loop-that-probes-for-the-end-follow-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25706-a-view-an-empty-array-and-a-loop-that-probes-for-the-end-follow-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25707-a-parameter-declared-number-or-undefined-takes-the-out-of-range-read.ts": {
+   "order": [
+    "<repo>/tests/corpus/25707-a-parameter-declared-number-or-undefined-takes-the-out-of-range-read.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25708-compound-assignment-and-increment-on-an-out-of-range-element-change-nothing.ts": {
+   "order": [
+    "<repo>/tests/corpus/25708-compound-assignment-and-increment-on-an-out-of-range-element-change-nothing.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25709-a-protocol-reader-that-probes-past-the-packet-matches-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25709-a-protocol-reader-that-probes-past-the-packet-matches-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2571-searchparams-arg-validation.cjs": {
    "order": [
     "<repo>/tests/corpus/2571-searchparams-arg-validation.cjs"
