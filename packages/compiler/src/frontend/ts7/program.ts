@@ -15,6 +15,7 @@
  * 387 cold). createProgram() takes an optional shared host — the default
  * spawns a private one that dispose() closes. */
 
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { API } from "typescript/unstable/sync";
@@ -106,6 +107,29 @@ function keepLeadingBom(program: object): void {
 
 let nextConfigId = 0;
 
+/** THE DESUGAR MEMO. A reload (the pin and twin passes) reads every file again, and jsDesugar re-parses and rewrites a big file from scratch each
+ * time: on zapo's 1.87 MB `spec/proto/index.js` that is about 18 s of Node CPU per load, repeated for a text that did not change. jsDesugar is a
+ * function of the file name and its text (it reads other files from DISK, which does not change during a build, and nothing else), so the answer
+ * is kept per (name, sha1 of the text) for the texts big enough to matter. An edited file hashes differently and misses. The memory is bounded: only
+ * texts of at least DESUGAR_MEMO_MIN chars are kept, and the kept output strings stop at DESUGAR_MEMO_MAX chars in total (a null answer is free). */
+const DESUGAR_MEMO_MIN = 100_000;
+const DESUGAR_MEMO_MAX = 8_000_000;
+const desugarMemo = new Map<string, string | null>();
+let desugarMemoChars = 0;
+function memoDesugar(fileName: string, text: string): string | null {
+  if (text.length < DESUGAR_MEMO_MIN) return jsDesugar(fileName, text);
+  const key = `${fileName}\0${text.length}\0${createHash("sha1").update(text).digest("hex")}`;
+  const hit = desugarMemo.get(key);
+  if (hit !== undefined) return hit;
+  const out = jsDesugar(fileName, text);
+  const cost = out === null ? 0 : out.length;
+  if (desugarMemoChars + cost <= DESUGAR_MEMO_MAX) {
+    desugarMemo.set(key, out);
+    desugarMemoChars += cost;
+  }
+  return out;
+}
+
 /** The desugared text (js-desugar.ts) of a plain-JS file, given the text a
  * shadow already derived for it (or undefined to read the disk), or the
  * shadow's own text unchanged when nothing in the file needs desugaring.
@@ -122,7 +146,7 @@ function desugaredJs(fileName: string, derived: string | undefined): string | un
     }
     if (text === undefined) return derived;
   }
-  const out = jsDesugar(fileName, text);
+  const out = memoDesugar(fileName, text);
   if (out === null) return derived;
   // srcSite (the C emitter) maps a SrcLoc OFFSET back to file:line:col by
   // reading the file a second time: record what was actually served.
