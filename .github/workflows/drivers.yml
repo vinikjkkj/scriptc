@@ -27,6 +27,10 @@ on:
         description: "linux (default), windows (the zapo-core / zapo-startup entries on windows-latest with zig cc, the target of the Windows CI lane) or both"
         required: false
         default: linux
+      gnu_tar:
+        description: "true (default): the windows lane puts Git for Windows' GNU tar first on PATH; false: the runner's default PowerShell PATH, where tar is the Windows bsdtar"
+        required: false
+        default: "true"
       node_heap_mb:
         description: "Override of the node heap (MB) the driver build runs with (default 12288); a tiny value is the positive control that a build which dies fails the zapo gate"
         required: false
@@ -286,6 +290,17 @@ jobs:
         with:
           path: ${{ github.workspace }}\.scriptc-provenance-cache
           key: provenance-win-${{ matrix.driver }}-${{ hashFiles('rigsrc/tests/driver-rigs/pnpm-lock.yaml') }}
+      - name: Put Git's GNU tar first on PATH
+        if: ${{ inputs.gnu_tar != 'false' }}
+        shell: pwsh
+        run: |
+          Write-Host "tar before: $((Get-Command tar).Source)"
+          "C:\Program Files\Git\usr\bin" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Which tar the build will use
+        shell: pwsh
+        run: |
+          (Get-Command tar).Source | Write-Host
+          tar --version | Select-Object -First 1 | Write-Host
       - name: Build the driver
         working-directory: rigsrc/tests/driver-rigs
         shell: pwsh
