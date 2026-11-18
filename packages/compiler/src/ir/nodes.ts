@@ -3645,6 +3645,13 @@ export type IrLibFn =
   | "dyn.keySet"
   /** `dyn.keySet` at a SLOPPY-mode site (CommonJS without "use strict", outside a class body): an assignment to a non-writable property (a class's `prototype`) is ignored silently, as Node does. */
   | "dyn.keySetSloppy"
+  /** `dyn.keySet(recv, "k", thunk())` with the call DEFERRED (ir/lazy-init.ts): the third argument is a zero-argument function VALUE; the member stands as an
+   * enumerable accessor until the first operation that needs the value runs it once (runtime: scr_dyn_key_set_lazy). A receiver the lazy form cannot
+   * represent exactly runs the thunk now. All borrowed; void; in the may-throw seed set (the eager fallback can throw). */
+  | "dyn.keySetLazy"
+  /** The install-time guard of a lazy member: is the dyn value a function value whose source text is exactly the string literal (scr_dyn_fn_src_is). Both
+   * borrowed, never throws. */
+  | "dyn.fnSrcIs"
   /** Binds a compiled function value's LIFTED member (an expando
    * member the frontend stores in a module global — lower-expando.ts) to
    * an accessor PAIR, so a dyn box over that function reaches the same
@@ -12466,7 +12473,7 @@ const DYN_EXT_LIB_FNS: ReadonlySet<string> = new Set([
  * scr_bytes_own.c and installs its ops (cc.ts / the install call). Programs without one keep their size class. */
 export function moduleUsesBytesOwn(mod: IrModule): boolean {
   let found = false;
-  const SINKS = new Set(["dyn.keySet", "dyn.keySetSloppy", "dyn.reflectSet", "dyn.reflectDefine", "dyn.defineProp", "dyn.defineProps", "dyn.assign", "dyn.assignAll", "sym.dynSet", "sym.dynSetSloppy", "sym.dynSetSelf", "sym.dynSetSelfSloppy", "sym.dynDefine"]);
+  const SINKS = new Set(["dyn.keySet", "dyn.keySetSloppy", "dyn.keySetLazy", "dyn.reflectSet", "dyn.reflectDefine", "dyn.defineProp", "dyn.defineProps", "dyn.assign", "dyn.assignAll", "sym.dynSet", "sym.dynSetSloppy", "sym.dynSetSelf", "sym.dynSetSelfSloppy", "sym.dynDefine"]);
   const visit = (v: unknown): void => {
     if (found || v === null || typeof v !== "object") return;
     if (Array.isArray(v)) {
@@ -15510,6 +15517,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "regex.new",
   "dyn.keySet",
   "dyn.keySetSloppy",
+  "dyn.keySetLazy",
   "sym.dynGet",
   "sym.anySet",
   "sym.anySetSloppy",

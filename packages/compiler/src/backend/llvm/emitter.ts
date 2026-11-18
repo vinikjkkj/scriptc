@@ -1115,6 +1115,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "sqlite.errorClassValue": "scr_sqlite_value_error_class",
   "dyn.keySet": "scr_dyn_key_set",
   "dyn.keySetSloppy": "scr_dyn_key_set_sloppy",
+  "dyn.keySetLazy": "scr_dyn_key_set_lazy",
+  "dyn.fnSrcIs": "scr_dyn_fn_src_is",
   "dyn.expandoBind": "scr_dyn_expando_bind",
   "dyn.keyDelete": "scr_dyn_key_delete",
   "dyn.keyDeleteSloppy": "scr_dyn_key_delete_sloppy",
