@@ -230,6 +230,16 @@ export function registerProtoData(
     writes.set(name, list);
   }
   for (const [name, list] of writes) {
+    // `C.prototype.constructor = v` rebinds what `x.constructor` answers for every instance, and with it `x.constructor.name`, the label
+    // `console.log(x)` / util.inspect print and the constructor-based checks. Those are answered from the class itself (lower-exprs),
+    // so a stored datum under this name would be read back correctly by `===` and wrongly everywhere else: refused, never compiled wrong. The
+    // class's own back-link (`C.prototype.constructor = C`) is the value the class answers anyway and keeps its lowering.
+    if (name === "constructor" && !list.every((w) => ts.isIdentifier(w.right) && L.checker.getSymbolAtLocation(w.right) === classSymbol)) {
+      const msg = `the prototype member 'constructor' of class '${info.def.name}' (assigning it changes x.constructor.name, the inspect label and the constructor reads the compiler answers from the class itself)`;
+      L.protoDataFenced.set(`${info.def.name}.constructor`, msg);
+      for (const w of list) fencedWrites.set(w, msg);
+      continue;
+    }
     const fieldT = info.fields.get(name) ?? null;
     const first = list[0]!;
     let type: IrType | null = fieldT;
