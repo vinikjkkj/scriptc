@@ -1,0 +1,21 @@
+// subarray views are bounded by the view, not the owner; an empty array has no element; a loop may test for undefined to find the end; a destructuring past the end binds undefined.
+const owner = new Uint8Array([1, 2, 3, 4, 5, 6]);
+const view = owner.subarray(1, 3);
+let i = 2;
+console.log(view[0], view[1], view[i], view[i] === undefined, view.length, owner[i + 1]);
+view[i] = 99;
+view[-1] = 99;
+console.log(owner.join(","));
+const empty = new Uint8Array(0);
+console.log(empty[0], empty[0] === undefined, empty.length);
+let n = 0;
+for (let k = 0; owner[k] !== undefined; k++) n += owner[k];
+console.log(n);
+let steps = 0;
+for (let k = 0; view[k] !== undefined; k++) steps += 1;
+console.log(steps);
+const [p, q, r, s] = view;
+console.log(p, q, r, s, r === undefined, s === undefined);
+const two = new Uint8Array([4, 5]);
+const [a0, a1, a2] = two;
+console.log(a0, a1, a2, a2 === undefined);

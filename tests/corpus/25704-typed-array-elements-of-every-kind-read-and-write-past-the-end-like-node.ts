@@ -1,0 +1,22 @@
+// Every element kind: Float64Array, Float32Array, Int32Array, Uint32Array, Int16Array, Uint16Array, Int8Array and Uint8ClampedArray.
+const f64 = new Float64Array([1.5, 2.5]);
+const f32 = new Float32Array([0.5, 1.5]);
+const i32 = new Int32Array([-1, 2]);
+const u32 = new Uint32Array([4000000000, 2]);
+const i16 = new Int16Array([-300, 2]);
+const u16 = new Uint16Array([60000, 2]);
+const i8 = new Int8Array([-5, 2]);
+const c8 = new Uint8ClampedArray([255, 2]);
+let i = 2;
+let neg = -1;
+console.log(f64[i], f32[i], i32[i], u32[i], i16[i], u16[i], i8[i], c8[i]);
+console.log(f64[neg], f32[neg], i32[neg], u32[neg], i16[neg], u16[neg], i8[neg], c8[neg]);
+console.log(f64[i] === undefined, f32[i] === undefined, i32[i] === undefined, u32[i] === undefined, i16[i] === undefined, u16[i] === undefined, i8[i] === undefined, c8[i] === undefined);
+console.log(f64[0] === undefined, f32[1] === undefined, i32[1] === undefined, c8[0]);
+console.log(f64[i] + 1, f32[i] * 2, i32[i] | 0, u32[i] >>> 0, f64[i] ?? -1, i32[neg] ?? -1);
+f64[i] = 9; f32[i] = 9; i32[i] = 9; u32[i] = 9; i16[i] = 9; u16[i] = 9; i8[i] = 9; c8[i] = 9;
+f64[neg] = 9; f32[neg] = 9; i32[neg] = 9; u32[neg] = 9; i16[neg] = 9; u16[neg] = 9; i8[neg] = 9; c8[neg] = 9;
+f64[0.5] = 9; i32[Number("x")] = 9;
+console.log(f64[0], f64[1], f32[0], f32[1], i32[0], i32[1], u32[0], u32[1]);
+console.log(i16[0], i16[1], u16[0], u16[1], i8[0], i8[1], c8[0], c8[1]);
+console.log(f64.length, f32.length, i32.length, u32.length, i16.length, u16.length, i8.length, c8.length);

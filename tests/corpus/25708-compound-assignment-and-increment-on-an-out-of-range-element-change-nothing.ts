@@ -1,0 +1,20 @@
+// b[i] += 1, b[i] |= 4, b[i]++ and --b[i] at an index naming no element read undefined (NaN once converted) and write nothing; the value the expression answers is NaN, or the assigned value for =.
+const b = new Uint8Array([1, 2, 3]);
+let i = 3;
+console.log(b[i] += 1, b[i] -= 1, b[i] *= 2, b[i] |= 4, b[i] &= 1, b[i] <<= 1);
+console.log(b[i]++, b[i]--, ++b[i], --b[i], b[i] = 8, b[i]);
+b[i] += 5;
+b[i]++;
+--b[i];
+console.log(b.join(","), b.length, b[i]);
+let j = 1;
+console.log(b[j] += 10, b[j]++, ++b[j], b[j]);
+const f = new Float64Array(2);
+let k = 2;
+f[k] += 1.5;
+f[k]++;
+console.log(f[0], f[1], f[k], f[k] + 1, f[k] === undefined);
+const buf = Buffer.alloc(2);
+buf[k] += 3;
+buf[k + 5] |= 1;
+console.log(buf.toString("hex"), buf[k]);
