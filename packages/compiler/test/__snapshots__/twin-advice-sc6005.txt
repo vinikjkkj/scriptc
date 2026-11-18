@@ -1,0 +1,8 @@
+main.ts:6:67 - advice SC6005: this typed emitter listener has no erased twin (no statement position can hold the twin (a class field initializer, a parameter default, a computed key, a decorator or a static block))
+
+  5 | 
+  6 | class Holder { seen = 0; box = new Box(); hook = this.box.on("x", (v: R) => { this.seen += v.id; }); }
+    |                                                                   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  7 | const h = new Holder(); const b = h.box; const hold: { v: any } = { v: b }; hold.v.emit.apply(hold.v, ["x", { id: 1, tags: ["a"] }]);
+
+  hint: a dynamic emit can hand this listener a value outside its declared parameter types; Node passes it through, but here the typed body throws a TypeError at the checked boundary. The program is exact for payloads that match the declared types. Declare the parameters with the widest type the payload can have to avoid the boundary
