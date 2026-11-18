@@ -1451,9 +1451,9 @@ async function compileTracked(
     }
     if (lowered.module === null) return fail(lowered.diagnostics);
 
+    lazyInitPass(lowered.module!);
     captureByValue(lowered.module!);
     deadInitPass(lowered.module!);
-    lazyInitPass(lowered.module!);
     reportNarrowScope(lowered.module!);
     narrowSlotPass(lowered.module!);
     numSlotPass(lowered.module!);
