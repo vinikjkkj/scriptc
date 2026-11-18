@@ -164,12 +164,25 @@ export function lazyInitPass(mod: IrModule): LazyInitResult {
               (s["body"] as unknown[]).forEach(st); return;
             }
             case "exprStmt": {
-              const e = s["expr"] as Node;
-              if (kindOf(e) === "libCall" && e["fn"] === "dyn.keySet") {
+              let e = s["expr"] as Node;
+              // `t[k] = v` with a dynamic key lowers to `seqExpr { varDecl r = t; varDecl k = <key>; result: sym.anySet(r, k, toString(k), v) }`
+              if (kindOf(e) === "seqExpr") {
+                for (const q of e["stmts"] as unknown[]) {
+                  if (kindOf(q) !== "varDecl") refuse("seqExpr with a non-declaration");
+                  const qn = q as Node;
+                  declared.add(qn["localId"] as string);
+                  if (qn["init"] !== null && qn["init"] !== undefined) {
+                    ex(qn["init"]);
+                    if (kindOf(qn["init"]) === "varRef" && fresh.has((qn["init"] as Node)["localId"] as string)) fresh.add(qn["localId"] as string);
+                  }
+                }
+                e = e["result"] as Node;
+              }
+              if (kindOf(e) === "libCall" && (e["fn"] === "dyn.keySet" || e["fn"] === "sym.anySet")) {
                 const a = e["args"] as Node[];
                 const recv = a[0];
                 if (kindOf(recv) !== "varRef" || !fresh.has((recv as Node)["localId"] as string)) refuse("write to a non-fresh object");
-                ex(a[1]); ex(a[2]); return;
+                a.slice(1).forEach(ex); return;
               }
               if (mode === "why" && calleeSample === "") calleeSample = `${fnName}: ${JSON.stringify(stripIr(s)).slice(0, 1400)}`;
               return refuse(`effectful expression statement (${kindOf(e)}${kindOf(e) === "libCall" ? " " + String(e["fn"]) : ""})`);
