@@ -15,6 +15,14 @@
  *     arguments are plain literal data built inside F, and the callee returns a closure on every path (so a `defineProperty` accessor cannot throw late). When the guard
  *     fails the install falls back to the eager statement. The guard is a run-time test, so no closed-world claim about other stores to `G.m` is made.
  *
+ *    WHY A SOURCE-TEXT GUARD IS SOUND. The guard accepts any function value whose source text equals a pure callee's, including one built elsewhere in
+ *    a different environment. That is safe only because calleePure accepts a callee that owns EVERY binding it names: it captures nothing from an enclosing
+ *    function (`captures` empty, which also rules out a returned inner closure that forwards an outer binding), reads and writes no global, calls nothing,
+ *    and writes only to objects it made. Such a function has no free variable, so its behaviour is a function of its text and its arguments alone: an
+ *    identical text in another scope cannot read another environment. The guard decides only whether the CALL may be deferred; the call is made on the value
+ *    that was read, so the result is that value's own closure. A callee that captures anything is refused (rows: the sample with a captured `let`, and the
+ *    one whose returned closure names an outer binding).
+ *
  * Anything else keeps the statement. SCRIPTC_LAZYINIT=report prints one `LAZYINIT lazy|keep <where> <key> [why]` line per candidate plus the whole-program store
  * inventory of every guarded callee key; SCRIPTC_LAZYINIT=why additionally prints the hoists and callees of each lazy verdict. Default (unset) = analysis not run. */
 import type { IrFunction, IrModule, IrParam } from "./nodes.js";
