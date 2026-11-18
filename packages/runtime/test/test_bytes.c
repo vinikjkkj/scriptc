@@ -3,34 +3,11 @@
  * bytes.test.ts, which also asserts the trap modes abort:
  *
  *   <scratch-dir>       run all assertions; prints "N/N cases passed"
- *   --crash-get-oob     element read past the end   → RangeError + abort()
- *   --crash-get-frac    fractional element index    → RangeError + abort()
- *   --crash-set-oob     element write past the end  → RangeError + abort()
  *
- * and the index minefield, one mode per ARM of scr_bytes_check_index. The
- * fast arm tests the bound and integrality in the INTEGER domain and the
- * slow arm keeps the original double expression; they accept the same set
- * only if every edge of the window between them is walked, and
- * test_index_window below walks the accepting side. The array runtime has
- * carried this minefield since 39b8bcd9; the typed-array path had the same
- * expression and none of the tests.
- *
- *   --crash-get-nan      NaN                    → fails `i >= 0`
- *   --crash-get-neg      -1                     → fails `i >= 0`
- *   --crash-get-inf      +Infinity              → above the window
- *   --crash-get-neginf   -Infinity              → fails `i >= 0`
- *   --crash-get-2p53     2^53 exactly           → the window's own edge
- *   --crash-get-2p32     2^32                   → in the window, past len
- *   --crash-get-at-len   i == len exactly       → typed arrays never append
- *   --crash-get-empty    any read of a 0-length → limit 0 accepts nothing
- *   --crash-get-ulp      1 + 1ulp               → the smallest non-integer
- *   --crash-set-neg      write at -1            → the write arm
- *
- * and the same set again through the INLINE accessors the emitter actually
- * lowers `bytes[i]` to (--crash-inl-*), which must abort with byte-identical
- * text because the inline arm declines and hands over rather than trapping
- * on its own. -DSCR_NO_FASTARM compiles the inline arm out, and
- * bytes.test.ts builds this file both ways and runs every mode on each.
+ * An index that names no element (negative, fractional, NaN, infinite, 2^53, past the end, any index of an empty array) is a typed array's
+ * `undefined` read and ignored write: test_index_misses walks every such index through every accessor arm (direct, inline, the undefined-aware
+ * read, on u8, f64 and i32 elements), under both SCR_FASTIDX settings and with the inline arm compiled in and out. The old crash modes
+ * (RangeError + abort) are gone with the trap.
  *
  * SCR_FASTIDX=0 forces every access down the slow arm. bytes.test.ts runs
  * the whole file under both settings and requires identical output, which
@@ -617,113 +594,46 @@ static void test_rc(void) {
 #endif
 }
 
-int main(int argc, char **argv) {
-  if (argc > 1 && strncmp(argv[1], "--crash-", 8) == 0) {
-    ScrBytes *b = scr_bytes_new(SCR_BYTES_U8, 1);
-    if (strcmp(argv[1], "--crash-get-oob") == 0) {
-      scr_bytes_get(b, 1);
-    } else if (strcmp(argv[1], "--crash-get-frac") == 0) {
-      scr_bytes_get(b, 0.5);
-    } else if (strcmp(argv[1], "--crash-set-oob") == 0) {
-      scr_bytes_set(b, 1, 7); /* JS ignores; we trap (no appends either) */
-    } else if (strcmp(argv[1], "--crash-get-nan") == 0) {
-      scr_bytes_get(b, 0.0 / 0.0);
-    } else if (strcmp(argv[1], "--crash-get-neg") == 0) {
-      scr_bytes_get(b, -1);
-    } else if (strcmp(argv[1], "--crash-get-inf") == 0) {
-      scr_bytes_get(b, 1.0 / 0.0);
-    } else if (strcmp(argv[1], "--crash-get-neginf") == 0) {
-      scr_bytes_get(b, -1.0 / 0.0);
-    } else if (strcmp(argv[1], "--crash-get-2p53") == 0) {
-      scr_bytes_get(b, 9007199254740992.0); /* the fast window's own edge */
-    } else if (strcmp(argv[1], "--crash-get-2p32") == 0) {
-      scr_bytes_get(b, 4294967296.0); /* inside the window, past len */
-    } else if (strcmp(argv[1], "--crash-get-at-len") == 0) {
-      scr_bytes_get(b, 1); /* len is 1; a typed array never appends */
-    } else if (strcmp(argv[1], "--crash-get-empty") == 0) {
-      scr_bytes_release(b);
-      b = scr_bytes_new(SCR_BYTES_U8, 0);
-      scr_bytes_get(b, 0); /* limit 0 accepts nothing, not even 0 */
-    } else if (strcmp(argv[1], "--crash-get-ulp") == 0) {
-      scr_bytes_get(b, nextafter(1.0, 2.0)); /* the smallest non-integer > 1 */
-    } else if (strcmp(argv[1], "--crash-set-neg") == 0) {
-      scr_bytes_set(b, -1, 9);
-    /* The same refusals reached through the INLINE accessors, which is how
-     * the compiled program reaches them: `bytes[i]` lowers to
-     * scr_bytes_get_inl / scr_bytes_set_inl. The inline arm declines and
-     * hands over, so the message must be byte-identical to the direct
-     * modes above -- a fast arm that trapped on its own would be a second
-     * copy of the text to keep in step. */
-    } else if (strcmp(argv[1], "--crash-inl-get-oob") == 0) {
-      scr_bytes_get_inl(b, 1);
-    } else if (strcmp(argv[1], "--crash-inl-get-frac") == 0) {
-      scr_bytes_get_inl(b, 0.5);
-    } else if (strcmp(argv[1], "--crash-inl-get-nan") == 0) {
-      scr_bytes_get_inl(b, 0.0 / 0.0);
-    } else if (strcmp(argv[1], "--crash-inl-get-neg") == 0) {
-      scr_bytes_get_inl(b, -1);
-    } else if (strcmp(argv[1], "--crash-inl-get-inf") == 0) {
-      scr_bytes_get_inl(b, 1.0 / 0.0);
-    } else if (strcmp(argv[1], "--crash-inl-get-2p53") == 0) {
-      scr_bytes_get_inl(b, 9007199254740992.0);
-    } else if (strcmp(argv[1], "--crash-inl-set-oob") == 0) {
-      scr_bytes_set_inl(b, 1, 7);
-    } else if (strcmp(argv[1], "--crash-inl-set-neg") == 0) {
-      scr_bytes_set_inl(b, -1, 9);
-    } else if (strcmp(argv[1], "--crash-inl-set-nan-idx") == 0) {
-      scr_bytes_set_inl(b, 0.0 / 0.0, 9);
-    /* The same refusals on an F64 buffer. The u8 modes above cannot reach
-     * the f64 arm at all -- they fail its kind test before its index test --
-     * so without these the arm's DECLINING path is untested and a bad bound
-     * there would return a stale element instead of trapping. Length 1 and
-     * the same indices, so the expected text is character for character the
-     * text the u8 modes pin. */
-    } else if (strcmp(argv[1], "--crash-inl-f64-get-oob") == 0) {
-      scr_bytes_release(b);
-      b = scr_bytes_new(SCR_BYTES_F64, 1);
-      scr_bytes_get_inl(b, 1);
-    } else if (strcmp(argv[1], "--crash-inl-f64-get-frac") == 0) {
-      scr_bytes_release(b);
-      b = scr_bytes_new(SCR_BYTES_F64, 1);
-      scr_bytes_get_inl(b, 0.5);
-    } else if (strcmp(argv[1], "--crash-inl-f64-get-nan") == 0) {
-      scr_bytes_release(b);
-      b = scr_bytes_new(SCR_BYTES_F64, 1);
-      scr_bytes_get_inl(b, 0.0 / 0.0);
-    } else if (strcmp(argv[1], "--crash-inl-f64-get-neg") == 0) {
-      scr_bytes_release(b);
-      b = scr_bytes_new(SCR_BYTES_F64, 1);
-      scr_bytes_get_inl(b, -1);
-    } else if (strcmp(argv[1], "--crash-inl-f64-get-2p53") == 0) {
-      scr_bytes_release(b);
-      b = scr_bytes_new(SCR_BYTES_F64, 1);
-      scr_bytes_get_inl(b, 9007199254740992.0);
-    } else if (strcmp(argv[1], "--crash-inl-f64-set-oob") == 0) {
-      scr_bytes_release(b);
-      b = scr_bytes_new(SCR_BYTES_F64, 1);
-      scr_bytes_set_inl(b, 1, 7);
-    } else if (strcmp(argv[1], "--crash-inl-f64-set-neg") == 0) {
-      scr_bytes_release(b);
-      b = scr_bytes_new(SCR_BYTES_F64, 1);
-      scr_bytes_set_inl(b, -1, 9);
-    } else if (strcmp(argv[1], "--crash-inl-f64-set-nan-idx") == 0) {
-      scr_bytes_release(b);
-      b = scr_bytes_new(SCR_BYTES_F64, 1);
-      scr_bytes_set_inl(b, 0.0 / 0.0, 9);
-    } else {
-      fprintf(stderr, "unknown mode %s\n", argv[1]);
-      return 2;
+/* An index that names no element: a read answers NaN (the undefined-aware read answers the marked undefined) and a write changes nothing. */
+static void test_index_misses(void) {
+  const double nan = 0.0 / 0.0, inf = 1.0 / 0.0;
+  const double misses[] = {1, 2, 7, 4294967296.0, 9007199254740992.0, 1e300, -1, -2, 0.5, 1.5, nextafter(1.0, 2.0), nan, inf, -inf};
+  const int kinds[] = {SCR_BYTES_U8, SCR_BYTES_F64, SCR_BYTES_I32};
+  for (size_t k = 0; k < sizeof kinds / sizeof kinds[0]; k++) {
+    ScrBytes *b = scr_bytes_new((ScrBytesElem)kinds[k], 1);
+    scr_bytes_set(b, 0, 42);
+    for (size_t m = 0; m < sizeof misses / sizeof misses[0]; m++) {
+      double i = misses[m];
+      check(isnan(scr_bytes_get(b, i)) && !scr_num_is_undef(scr_bytes_get(b, i)), "a miss reads plain NaN");
+      check(isnan(scr_bytes_get_inl(b, i)) && !scr_num_is_undef(scr_bytes_get_inl(b, i)), "a miss reads plain NaN (inline)");
+      check(scr_num_is_undef(scr_bytes_get_undef(b, i)), "a miss reads the marked undefined");
+      check(scr_num_is_undef(scr_bytes_get_undef_inl(b, i)), "a miss reads the marked undefined (inline)");
+      check(scr_num_is_undef(scr_bytes_get_fast_undef(b, i)), "a miss reads the marked undefined (fast)");
+      scr_bytes_set(b, i, 9);
+      scr_bytes_set_inl(b, i, 9);
+      scr_bytes_set_fast(b, i, 9);
+      check(scr_bytes_get(b, 0) == 42, "a write to a miss changes nothing");
     }
-    fprintf(stderr, "expected a trap, still alive\n");
-    return 2;
+    check(scr_bytes_get(b, -0.0) == 42 && scr_bytes_get_undef(b, -0.0) == 42 && scr_bytes_get_undef_inl(b, -0.0) == 42, "-0 names element 0");
+    scr_bytes_set(b, -0.0, 5);
+    check(scr_bytes_get(b, 0) == 5, "a write at -0 lands on element 0");
+    scr_bytes_release(b);
   }
+  ScrBytes *e = scr_bytes_new(SCR_BYTES_U8, 0);
+  check(scr_num_is_undef(scr_bytes_get_undef(e, 0)) && isnan(scr_bytes_get(e, 0)), "any read of an empty array misses");
+  scr_bytes_set(e, 0, 1);
+  scr_bytes_release(e);
+}
+
+int main(int argc, char **argv) {
   if (argc != 2) {
-    fprintf(stderr, "usage: test_bytes <scratch-dir> | --crash-*\n");
+    fprintf(stderr, "usage: test_bytes <scratch-dir>\n");
     return 2;
   }
 
   test_construction();
   test_index_window();
+  test_index_misses();
   test_inline_accessors();
   test_coercion_matrix();
   test_slice_set_copy();

@@ -7811,6 +7811,9 @@ export type IrExpr =
       receiver: IrExpr;
       args: IrExpr[];
       type: IrType;
+      /** `get` only: the read's value is the ToNumeric of the element (an increment's old value), so an index naming no element answers a plain
+       * NaN, never the NaN-marked undefined, wherever the value goes. */
+      numeric?: true;
       loc: SrcLoc;
     }
   /** `new Map<K, V>()` — allocate an empty map. `type` is the map type

@@ -1764,7 +1764,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "byteLength":
             return E.newTemp(e.type, `scr_bytes_byte_len(${r.name})`);
           case "get":
-            // Any invalid index traps (the array runtime's discipline).
+            // An index naming no element reads NaN here (`undefined` where the plan says it is observed).
             // scr_bytes_get_inl, not scr_bytes_get: the inline arm answers
             // the u8-in-bounds case here and calls the function for
             // everything else, which is the same answer either way (see
@@ -1773,6 +1773,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             // A bigint view's element is a fresh +1 bigint (scr_bigint.c).
             if (e.type.kind === "bigint") return E.newTemp(e.type, `scr_bytes_get_big(${r.name}, ${args[0]!.name})`);
             // An f64 element read straight into a marker-free local is canonicalised here, so the local's arithmetic need not be (ir/num-canon.ts).
+            // A read whose value the program can observe as undefined answers the NaN-marked undefined for an index naming no element.
+            if (E.undefLoad(e)) return E.newTemp(e.type, `scr_bytes_get_undef_inl(${r.name}, ${args[0]!.name})`);
             if (E.canonLoad(e)) return E.newTemp(e.type, `scr_num_canon(scr_bytes_get_inl(${r.name}, ${args[0]!.name}))`);
             return E.newTemp(e.type, `scr_bytes_get_inl(${r.name}, ${args[0]!.name})`);
           case "fillBig": {
@@ -3439,9 +3441,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // (bigint's ScrBigInt*, keyobj's ScrKeyObject*) falling through to
         // the throw; vAdapters is the single RC-adapter registry that
         // answers for all of them.
-        // STEP 2a: a flagged number[] read wrapped into a union: the marker is
+        // STEP 2a: a flagged number[] read (or an element read of a typed array, which answers the marker for an index naming no element) wrapped into a union: the marker is
         // Node's undefined, so the union takes its undefined arm, not the number arm.
-        if (arm.kind === "f64" && e.value.kind === "arrayGet" && e.value.holeOnMiss) {
+        if (arm.kind === "f64" && ((e.value.kind === "arrayGet" && e.value.holeOnMiss) || (e.value.kind === "bytesIntrinsic" && e.value.method === "get"))) {
           const undefTag = E.undefinedArmTag({ kind: "union", unionId: e.unionId } as IrType);
           if (undefTag >= 0) {
             return E.newTemp(
