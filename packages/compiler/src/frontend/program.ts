@@ -640,7 +640,7 @@ function loadProgramImpl(
   let { host, load } = open(null);
   // THE RETYPE PIN (retype-pin.ts) is decided on the same checked program and
   // applied by the same second load as the seed pin.
-  const retypePins = process.env["SCRIPTC_RETYPE_PIN"] !== "0" ? computeRetypePins(load.program) : new Map<string, RetypePin[]>();
+  const retypePins = process.env["SCRIPTC_RETYPE_PIN"] !== "0" ? span("retype.pins", () => computeRetypePins(load.program)) : new Map<string, RetypePin[]>();
   // THE EMPTY-COLLECTION PIN (empty-collection-pin.ts): a fresh `new Map()` the checker leaves `Map<any, any>` takes the
   // Map<K, V> its destination declares. Same second load, same replacement edits.
   if (process.env["SCRIPTC_EMPTY_PIN"] !== "0") {
