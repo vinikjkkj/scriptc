@@ -614,6 +614,14 @@ export function runFrontend(entryPath: string, npmStatic?: readonly string[] | "
   const foldWhy = (msg: string): void => {
     if (process.env["SCRIPTC_TWIN_WHY"] !== undefined) process.stderr.write(`[twinfold] ${msg}\n`);
   };
+  /** SCRIPTC_TWIN_WHY: the served text around a diagnostic of a twin load (the text, not the author's source, is what the checker refused). */
+  const whySnip = (l: LoadResult, ds: readonly { code: string; message: string; loc: SrcLoc }[]): string =>
+    ds.slice(0, 3).map((d) => {
+      const f = d.loc.file.split("\\").join("/");
+      const sf = l.program.getSourceFiles().find((x) => x.fileName.split("\\").join("/") === f);
+      const t = sf?.text ?? "";
+      return `${d.code} ${d.message.slice(0, 100)} @${f.split("/").slice(-2).join("/")}:${d.loc.start} [${JSON.stringify(t.slice(Math.max(0, d.loc.start - 160), d.loc.start))} <<HERE>> ${JSON.stringify(t.slice(d.loc.start, d.loc.start + 80))}]`;
+    }).join(" | ");
   let foldVerifyTexts: Map<string, string> | null = null;
   const normFile = (f: string): string => f.split("\\").join("/");
   const tryFold = (first: LowerResult, opts: LowerOptions): LowerResult | null => {
@@ -628,7 +636,7 @@ export function runFrontend(entryPath: string, npmStatic?: readonly string[] | "
       load = loadProgram(entryPath, { desugarMemo, npmStatic: effective, textEdits: pins, twinEdits: applied, ...(decidedPins !== undefined ? { decidedPins } : {}) });
       const pre = checkPreflight(load);
       if (pre.length > 0) {
-        foldWhy(`fallback: preflight of the folded program is not clean (${pre.length}: ${pre.slice(0, 3).map((d) => `${d.code} ${d.message.slice(0, 160)} @${d.loc.file.split("/").slice(-2).join("/")}:${d.loc.start}`).join(" | ")})`);
+        foldWhy(`fallback: preflight of the folded program is not clean (${pre.length}: ${whySnip(load, pre)})`);
         return null;
       }
       const again = lowerToIr(load.program, load.entry, load.moduleOrder, {
@@ -640,7 +648,7 @@ export function runFrontend(entryPath: string, npmStatic?: readonly string[] | "
       });
       const bad = again.module === null ? [] : validateModule(again.module);
       if (again.module === null || again.diagnostics.length > 0 || bad.length > 0) {
-        foldWhy(`fallback: the folded program does not lower clean (${again.diagnostics[0]?.code ?? bad[0]?.message ?? "no module"})`);
+        foldWhy(`fallback: the folded program does not lower clean (${again.diagnostics.length} diagnostic(s): ${whySnip(load, again.diagnostics)}${bad[0] !== undefined ? ` invalid: ${bad[0].message}` : ""})`);
         return null;
       }
       if (again.foldCheck?.ok !== true) {
@@ -769,7 +777,7 @@ export function runFrontend(entryPath: string, npmStatic?: readonly string[] | "
         twinLoad = loadProgram(entryPath, { desugarMemo, npmStatic: effective, ...(done.pins !== undefined ? { textEdits: done.pins } : {}), twinEdits: edits, ...(decidedPins !== undefined ? { decidedPins } : {}) });
         const twinPre = checkPreflight(twinLoad);
         if (twinPre.length > 0) {
-          foldWhy(`sequential twin reload refused by preflight (${twinPre.length}: ${twinPre.slice(0, 3).map((d) => `${d.code} ${d.message.slice(0, 160)} @${d.loc.file.split("/").slice(-2).join("/")}:${d.loc.start}`).join(" | ")})`);
+          foldWhy(`sequential twin reload refused by preflight (${twinPre.length}: ${whySnip(twinLoad, twinPre)})`);
           return keep;
         }
         if (foldVerifyTexts !== null) {
@@ -790,6 +798,7 @@ export function runFrontend(entryPath: string, npmStatic?: readonly string[] | "
         if (again.module === null || again.diagnostics.length > 0 || bad.length > 0) {
           if (process.env["SCRIPTC_TWIN_WHY"] !== undefined) {
             for (const d of again.diagnostics.slice(0, 5)) process.stderr.write(`[twin] reload refused: ${d.code} ${d.message}\n`);
+            foldWhy(`sequential twin reload refused with ${again.diagnostics.length} diagnostic(s): ${whySnip(twinLoad!, again.diagnostics)}`);
             for (const v of bad.slice(0, 5)) process.stderr.write(`[twin] reload invalid: ${v.message}\n`);
           }
           return keep;
