@@ -104,7 +104,7 @@ const EVT_C_SYMS: Record<string, string> = {
 /** The static constant tables of a field run (ir/field-run-loops.ts). They are declared by `predeclareFieldRunTables` at the loop that owns the run, BEFORE the loop, so
  * every reader in the loop body, in whatever nested block, sees one declaration. `kind` is "off" (member offsets), "bits" (own-mask byte, bit pairs) or "keys". */
 function fieldRunTableC(E: CEmitter, shapeId: string, run: string[], kind: "off" | "bits" | "keys" | "kinds"): string {
-  const key = `${E.currentFn?.name ?? ""}|${kind}|${shapeId}|${run.join("\u0001")}`;
+  const key = `${E.currentFn?.name ?? ""}|${kind}${kind === "keys" || kind === "kinds" ? `@${E.runScope}` : ""}|${shapeId}|${run.join("\u0001")}`;
   const have = E.fieldRunTables.get(key);
   if (have !== undefined) return have;
   const name = `sc_fr${E.tempCounter++}`;
