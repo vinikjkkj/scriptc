@@ -46,7 +46,7 @@ import { dynSymbolKeyOf, classSymbolBag, lowerSubclassFieldRead, pureReemittable
 import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerHttpClientFnCall } from "./lower-server.js";
 import { isAnyDynContainer, lowerProxyNew, CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, definePropSlotSiteOf, errorWithCause, definePropTableSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, requireVirtualSlotFit, virtualViewFitsSlot, type ClassInfo } from "./lower-classes.js";
 import { boundEmitDispatcher, boundSubscribeDispatcher, emitterEventNames, emitterRooted, lowerEmitApplyCall, lowerEmitterMethodCall, lowerUnnamedEmitterCall } from "./lower-emitter.js";
-import { emitterCtorCallOnGraft, lowerEmitterMixinCall } from "./lower-emitter-mixin.js";
+import { emitterCtorCallOnGraft, lowerEmitterMixinCall, refuseUnmodelledCopyLoopCall } from "./lower-emitter-mixin.js";
 import { internalBox } from "./lower-ownshadow.js";
 import { erasedViewMemberRefusal } from "./lower-erasedview.js";
 import { ArgHoist, lowerConsoleInspectArg, lowerFormatCall, lowerUtilFormatApply, refuseCodecCoercionCall, refuseCodecInspect } from "./lower-inspect.js";
@@ -4815,6 +4815,7 @@ function descriptorAccessorCallRefusal(L: Lowerer, expr: ts.CallExpression): str
 export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     // A codec reaching a string sink (String, JSON, Object.prototype.toString, toString/join): refuse.
     refuseCodecCoercionCall(L, expr);
+    refuseUnmodelledCopyLoopCall(L, expr);
     const loc = locOf(expr);
     {
       const viaForward = lowerForwardedRequireMemberCall(L, expr);
