@@ -11260,7 +11260,7 @@ export function moduleUsesEmitter(mod: IrModule): boolean {
  * can reach ANY listener the module registers, so each typed listener also carries the dyn
  * function box the compiler built for it (scr_emitter_on_boxed). False keeps the registration
  * exactly as it was, byte for byte. */
-export function moduleBoxesEmitters(mod: IrModule): boolean {
+export function moduleBoxesEmitters(mod: IrModule, skip?: (loc: SrcLoc) => boolean): boolean {
   const byName = new Map((mod.classes ?? []).map((c) => [c.name, c] as const));
   const emitterish = new Map<string, boolean>();
   const isEmitterish = (name: string): boolean => {
@@ -11283,7 +11283,8 @@ export function moduleBoxesEmitters(mod: IrModule): boolean {
       for (const item of v) visit(item);
       return;
     }
-    const node = v as { kind?: unknown; fn?: unknown; value?: { type?: { kind?: unknown; className?: unknown } } };
+    const node = v as { kind?: unknown; fn?: unknown; loc?: SrcLoc; value?: { type?: { kind?: unknown; className?: unknown } } };
+    if (skip !== undefined && node.loc !== undefined && skip(node.loc)) return; // code the caller leaves out (a twin copy)
     if (node.kind === "libCall" && node.fn === "emitter.emitDyn") {
       found = true;
       return;

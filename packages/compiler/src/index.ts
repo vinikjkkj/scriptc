@@ -618,10 +618,78 @@ export function runFrontend(entryPath: string, npmStatic?: readonly string[] | "
       const t = l.program.getSourceFiles().find((x) => x.fileName.split("\\").join("/") === f)?.text ?? "";
       return `${d.code} @${f.split("/").slice(-2).join("/")}:${d.loc.start} [${JSON.stringify(t.slice(Math.max(0, d.loc.start - 160), d.loc.start))} <<HERE>> ${JSON.stringify(t.slice(d.loc.start, d.loc.start + 80))}]`;
     }).join(" | ");
-  const lowerPinned = (opts: LowerOptions): { result: LowerResult; pins?: NonNullable<LowerResult["pinReload"]> } => {
+  // THE FOLDED TWIN: SCRIPTC_TWIN_FOLD=off keeps today's sequential pin reload then twin reload; "verify" runs the sequential path but
+  // first builds the folded program and compares its twinned files byte for byte with the sequential reload's (prints [twinfold]).
+  const foldMode = process.env["SCRIPTC_TWIN_FOLD"] ?? "on";
+  const foldWhy = (msg: string): void => {
+    if (process.env["SCRIPTC_TWIN_WHY"] !== undefined) process.stderr.write(`[twinfold] ${msg}\n`);
+  };
+  let foldVerifyTexts: Map<string, string> | null = null;
+  const normFile = (f: string): string => f.split("\\").join("/");
+  const tryFold = (first: LowerResult, opts: LowerOptions): LowerResult | null => {
+    const pins = first.pinReload!;
+    const applied = first.twinFold!;
+    foldWhy(`attempt: ${[...pins.values()].reduce((n, l) => n + l.length, 0)} pin(s), ${[...applied.values()].reduce((n, l) => n + l.filter((e) => e.text.startsWith("/*@sctwin")).length, 0)} twin marker(s)`);
+    pinnedLoad?.dispose();
+    pinnedLoad = null;
+    freeFinalLoad();
+    let load: (LoadResult & { dispose: () => void }) | null = null;
+    try {
+      load = loadProgram(entryPath, { desugarMemo, npmStatic: effective, textEdits: pins, twinEdits: applied, ...(decidedPins !== undefined ? { decidedPins } : {}) });
+      const pre = checkPreflight(load);
+      if (pre.length > 0) {
+        foldWhy(`fallback: preflight of the folded program is not clean (${pre.length}: ${twinWhy(load, pre)})`);
+        return null;
+      }
+      notePassFiles("fold", load.program.getSourceFiles().filter((sf) => !sf.isDeclarationFile));
+      const again = tapped("lower.fold", () => lowerToIr(load!.program, load!.entry, load!.moduleOrder, {
+        ...opts,
+        startupCrash: load!.startupCrash ?? null,
+        noPinReload: true,
+        noTwinReload: true,
+        twinFoldApplied: applied,
+      }));
+      const bad = again.module === null ? [] : tapped("validate.fold", () => validateModule(again.module!));
+      if (again.module === null || again.diagnostics.length > 0 || bad.length > 0) {
+        foldWhy(`fallback: the folded program does not lower clean (${again.diagnostics.length} diagnostic(s): ${twinWhy(load, again.diagnostics)}${bad[0] !== undefined ? ` invalid: ${bad[0].message}` : ""})`);
+        return null;
+      }
+      if (again.foldCheck?.ok !== true) {
+        foldWhy(`fallback: check failed: ${again.foldCheck?.why ?? "no check ran"}`);
+        return null;
+      }
+      foldWhy(`folded: ${again.foldCheck.why}`);
+      if (first.twinFoldSkipped !== undefined) again.twinSkipped = first.twinFoldSkipped;
+      if (foldMode === "verify") {
+        const texts = new Map<string, string>();
+        for (const sf of load.program.getSourceFiles()) if (applied.has(sf.fileName) || applied.has(normFile(sf.fileName))) texts.set(normFile(sf.fileName), sf.text);
+        foldVerifyTexts = texts;
+        return null;
+      }
+      const edits = applied;
+      for (const d of again.advisories) {
+        const es = edits.get(d.loc.file) ?? edits.get(normFile(d.loc.file));
+        if (es !== undefined) {
+          const m = twinBackMap(es);
+          d.loc = { ...d.loc, start: m(d.loc.start), end: m(d.loc.end) };
+        }
+      }
+      return again;
+    } catch (e) {
+      foldWhy(`fallback: ${(e as Error).message}`);
+      return null;
+    } finally {
+      load?.dispose();
+    }
+  };
+  const lowerPinned = (opts: LowerOptions): { result: LowerResult; pins?: NonNullable<LowerResult["pinReload"]>; folded?: true } => {
       const first = tapped("lower.1st", () => lowerToIr(finalLoad.program, finalLoad.entry, finalLoad.moduleOrder, { ...opts, startupCrash: finalLoad.startupCrash ?? null }));
       if (first.pinReload === undefined) return { result: first };
       if (process.env["SCRIPTC_TWIN_WHY"] !== undefined) process.stderr.write("[pin] reload\n");
+      if (first.twinFold !== undefined && foldMode !== "off") {
+        const folded = tryFold(first, opts);
+        if (folded !== null) return { result: folded, pins: first.pinReload, folded: true };
+      }
       // Class fields untyped code writes another type (DynPins): load the
       // program again with those initializers cast to `any`, and lower THAT
       // (its first pass is final: noPinReload). The first load stays the
@@ -701,7 +769,12 @@ export function runFrontend(entryPath: string, npmStatic?: readonly string[] | "
         for (const a of skippedAdvice) byWhy.set(a.message, (byWhy.get(a.message) ?? 0) + 1);
         for (const [m, n] of byWhy) process.stderr.write(`[twin] skipped ${n} listener(s): ${m}\n`);
       }
+      if (done.folded === true) {
+        done.result.advisories.push(...skippedAdvice);
+        return done.result;
+      }
       if (done.result.twinReload === undefined) {
+        if (foldVerifyTexts !== null) process.stderr.write("[twinfold] verify DIFFER: the sequential path made no twin reload\n");
         done.result.advisories.push(...skippedAdvice);
         return done.result;
       }
@@ -734,6 +807,14 @@ export function runFrontend(entryPath: string, npmStatic?: readonly string[] | "
         if (twinPre.length > 0) {
           if (process.env["SCRIPTC_TWIN_WHY"] !== undefined) process.stderr.write(`[twin] reload refused by preflight: ${twinWhy(twinLoad, twinPre)}\n`);
           return refuseTwin(`the twin program fails preflight: ${twinPre[0]!.code} ${twinPre[0]!.message.slice(0, 120)}`, twinBack(twinPre[0]!.loc));
+        }
+        if (foldVerifyTexts !== null) {
+          const diff: string[] = [];
+          const seq = new Map<string, string>();
+          for (const sf of twinLoad.program.getSourceFiles()) if (edits.has(sf.fileName) || edits.has(normFile(sf.fileName))) seq.set(normFile(sf.fileName), sf.text);
+          for (const [f, t] of seq) if (foldVerifyTexts.get(f) !== t) diff.push(f);
+          for (const f of foldVerifyTexts.keys()) if (!seq.has(f)) diff.push(f);
+          process.stderr.write(`[twinfold] verify ${diff.length === 0 ? "EQUAL" : "DIFFER"}: ${seq.size} twinned file(s) compared byte for byte${diff.length > 0 ? `; differ: ${diff.join(", ")}` : ""}\n`);
         }
         notePassFiles("twin", twinLoad.program.getSourceFiles().filter((sf) => !sf.isDeclarationFile));
         const again = tapped("lower.twin", () => lowerToIr(twinLoad!.program, twinLoad!.entry, twinLoad!.moduleOrder, {
