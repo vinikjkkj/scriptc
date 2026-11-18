@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { ccCompile, expectCasesPassed, exeSuffix } from "./cc.js";
-import { afterAll, beforeAll, expect, test } from "vitest";
+import { afterAll, beforeAll, test } from "vitest";
 
 const execFileAsync = promisify(execFile);
 const testDir = import.meta.dirname;
