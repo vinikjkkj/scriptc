@@ -4322,6 +4322,12 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_dyn_expando_bind(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
           case "dyn.keySetSloppy":
             return finish(`scr_dyn_key_set_sloppy(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "dyn.keySetLazy":
+            // recv[key] = thunk() with the call deferred (see nodes.ts): all three borrowed
+            return finish(`scr_dyn_key_set_lazy(${arg(0)}, ${arg(1)}, ${arg(2)})`);
+          case "dyn.fnSrcIs":
+            // install-time guard of a lazy member: borrowed value, borrowed string literal, a bool answer
+            return finish(`scr_dyn_fn_src_is(${arg(0)}, ${arg(1)})`);
           case "dyn.keySet":
             // Keyed write on a dyn receiver: all three borrowed (the
             // member retains the value in); throws Node's TypeErrors on
