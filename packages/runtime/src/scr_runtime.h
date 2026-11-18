@@ -7382,9 +7382,9 @@ ScrDyn *scr_dyn_fn_get(const ScrDyn *d, const char *key, size_t key_len);
  * see the same properties. That is also why the emitted per-USE box is
  * correct and no declaration-site interning is needed. */
 ScrDyn *scr_dyn_fn_props(ScrDyn *d);
-/* LAZY MEMBERS (see scr_json.c "LAZY MEMBERS"): `recv[key] = thunk()` with the call deferred to the first operation that needs the value. All borrowed. The
- * receiver forms the lazy form cannot represent exactly take the eager path (the thunk runs now). */
-void scr_dyn_key_set_lazy(ScrDyn *recv, ScrStr *key, ScrDyn *thunk);
+/* LAZY MEMBERS (see scr_json.c "LAZY MEMBERS"): `recv[key] = thunk()` with the call deferred to the first operation that needs the value. All borrowed. `guard` is the
+ * install-time test the compiler built (false: run the thunk now). The receiver forms the lazy form cannot represent exactly take the eager path too. */
+void scr_dyn_key_set_lazy(ScrDyn *recv, ScrStr *key, ScrDyn *thunk, bool guard);
 /* Materialize one lazy member / every lazy member of an object; false when the thunk could not be run to the end (its exception is pending). */
 bool scr_dyn_lazy_force(ScrDyn *o, const char *key, size_t key_len);
 void scr_dyn_obj_force_lazy_all(const ScrDyn *d);

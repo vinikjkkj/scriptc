@@ -10035,11 +10035,13 @@ void scr_dyn_lazy_force_key_any(ScrDyn *t, const char *key, size_t key_len) {
   }
 }
 
-void scr_dyn_key_set_lazy(ScrDyn *recv, ScrStr *key, ScrDyn *thunk) {
+void scr_dyn_key_set_lazy(ScrDyn *recv, ScrStr *key, ScrDyn *thunk, bool guard) {
   ScrDyn *target = NULL; /* +1 when the receiver is a function value's own-property table */
   ScrDyn *tbl = recv;
   bool lazy_ok = false;
-  if (recv->kind == SCR_DYN_OBJ) {
+  if (!guard) {
+    /* the compiler's install-time guard failed: run the thunk now, exactly as the eager statement would */
+  } else if (recv->kind == SCR_DYN_OBJ) {
     lazy_ok = !recv->static_copy && !recv->module_ns && !scr_dyn_is_minted_proto(recv) && !scr_dyn_obj_is_strdec(recv);
   } else if (recv->kind == SCR_DYN_FUNC && !err_cls_is(recv) && (scr_dyn_class_ops == NULL || scr_dyn_class_ops->class_of_value(recv) == NULL)) {
     /* a function value's own properties: the table behind scr_dyn_fn_get. The built-in names and a program that links classes take the eager path. */

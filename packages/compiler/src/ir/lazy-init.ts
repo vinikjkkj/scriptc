@@ -660,8 +660,9 @@ export function lazyInitPass(mod: IrModule): LazyInitResult {
     }
     const loc = stmt["loc"];
     const keyNode = ((stmt["expr"] as Node)["args"] as Node[])[1] as Node;
-    const eager: Node = { kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.keySet", args: [clone(recv), clone(keyNode), withCallee(((stmt["expr"] as Node)["args"] as Node[])[2], clone(rootClosure))], type: { kind: "void" }, loc: L(loc) }, loc: L(loc) };
-    const lazy: Node = { kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.keySetLazy", args: [clone(recv), clone(keyNode), { kind: "dynFrom", value: clone(rootClosure), type: DYN_T, loc: L(loc) }], type: { kind: "void" }, loc: L(loc) }, loc: L(loc) };
+    // ONE straight-line statement (the candidate sits in a sequence expression, whose statements may not branch): the runtime runs the thunk now when the guard is false
+    const guardNode: Node = guard ?? { kind: "boolLit", value: true, type: BOOL_T, loc: L(loc) };
+    const lazy: Node = { kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.keySetLazy", args: [clone(recv), clone(keyNode), { kind: "dynFrom", value: clone(rootClosure), type: DYN_T, loc: L(loc) }, guardNode], type: { kind: "void" }, loc: L(loc) }, loc: L(loc) };
     for (const nf of newFns) mod.functions.push(nf);
     // drop the originals nothing else creates
     const drop = (name: string): void => {
@@ -675,13 +676,8 @@ export function lazyInitPass(mod: IrModule): LazyInitResult {
     };
     drop(c.fnName);
     out2.hoistedReads += hoists.length;
-    if (guard === undefined) {
-      out2.lazy++;
-      return [...pre, lazy];
-    }
     out2.lazy++;
-    out2.guardedEager += 0;
-    return [...pre, { kind: "if", cond: guard, then: [lazy], else_: [eager], loc: L(loc) }];
+    return [...pre, lazy];
   };
 
   if (mode === "on") {
