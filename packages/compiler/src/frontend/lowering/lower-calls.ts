@@ -47,6 +47,7 @@ import { httpClientFnBindingOf, isStreamUndefCallExpr, lowerHttpClientFnCall } f
 import { isAnyDynContainer, lowerProxyNew, CLASS_PROPS_FIELD, EMITTER_API_MEMBERS, definePropSlotSiteOf, errorWithCause, definePropTableSiteOf, exactInstanceClassOf, findGenericMethodOn, lowerClassGenericMethodCall, lowerStaticMethodCall, requireVirtualSlotFit, virtualViewFitsSlot, type ClassInfo } from "./lower-classes.js";
 import { boundEmitDispatcher, boundSubscribeDispatcher, emitterEventNames, emitterRooted, lowerEmitApplyCall, lowerEmitterMethodCall, lowerUnnamedEmitterCall } from "./lower-emitter.js";
 import { emitterCtorCallOnGraft, lowerEmitterMixinCall, refuseUnmodelledCopyLoopCall } from "./lower-emitter-mixin.js";
+import { familyRebindsConstructor } from "./lower-protodata.js";
 import { internalBox } from "./lower-ownshadow.js";
 import { erasedViewMemberRefusal } from "./lower-erasedview.js";
 import { ArgHoist, lowerConsoleInspectArg, lowerFormatCall, lowerUtilFormatApply, refuseCodecCoercionCall, refuseCodecInspect } from "./lower-inspect.js";
@@ -13896,6 +13897,15 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     // kind its intrinsic; null and undefined throw Node's TypeError (the runtime's scr_dyn_get_prototype_of).
     if (member === "getPrototypeOf" && !reflectOwnKeys && call.arguments.length === 1 && !ts.isSpreadElement(call.arguments[0]!)) {
       const pv = L.lowerExpr(call.arguments[0]!);
+      // A program whose class family rebinds `constructor` (D.prototype.constructor = M): the prototype object this returns would answer D's own
+      // class for `.constructor`. The direct `Object.getPrototypeOf(x).constructor` read is lowered as `x.constructor` before it gets here; any other use
+      // of the prototype of such an instance (or of a value that could be one) is refused rather than answered wrong.
+      if (L.ctorRebinds.size > 0) {
+        const rinfo = pv.type.kind === "object" ? L.classes.get(pv.type.className) : undefined;
+        if (pv.type.kind === "dyn" || (rinfo !== undefined && familyRebindsConstructor(L, rinfo))) {
+          L.unsupported("SC1090", call, "Object.getPrototypeOf of an instance (or of a value that could be one) in a program that assigns another class to a class prototype's constructor: only the direct `Object.getPrototypeOf(x).constructor` read is modelled there");
+        }
+      }
       const pd: IrExpr | null =
         pv.type.kind === "dyn" ? pv
         : canConvertToDyn(pv.type, (id) => L.shapes.get(id), (id) => L.unions.get(id)) ? L.coerceToExpected(pv, DYN)

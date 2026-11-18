@@ -1,0 +1,6 @@
+a-prototype-object-of-an-instance-whose-family-rebinds-constructor-is-refused.cjs:16:11 - error SC1090: Object.getPrototypeOf of an instance (or of a value that could be one) in a program that assigns another class to a class prototype's constructor: only the direct `Object.getPrototypeOf(x).constructor` read is modelled there is not supported yet
+
+  15 | const d = new D()
+  16 | const p = Object.getPrototypeOf(d)
+     |           ^~~~~~~~~~~~~~~~~~~~~~~~
+  17 | console.log(p.constructor.name)

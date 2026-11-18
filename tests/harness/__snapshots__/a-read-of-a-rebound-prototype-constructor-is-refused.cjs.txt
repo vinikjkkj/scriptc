@@ -1,0 +1,6 @@
+a-read-of-a-rebound-prototype-constructor-is-refused.cjs:14:13 - error SC1090: the static member 'prototype' of class 'D' (initializer-less static fields and one-sided static accessors have no lowering, and Function members like .call/.bind/.prototype have no value form) is not supported yet
+
+  13 | D.prototype.constructor = M
+  14 | console.log(D.prototype.constructor === M)
+     |             ^~~~~~~~~~~
+  15 | 
