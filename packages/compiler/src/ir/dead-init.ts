@@ -108,23 +108,45 @@ function deadInitPassImpl(mod: IrModule): DeadInitResult {
   const ids = new Set(globals.filter((g) => !g.mutable && g.tdz !== true && !g.name.startsWith("%")).map((g) => g.id));
   const occ = new Map<string, number>(); // id -> occurrences as a string anywhere (assign.localId counted)
   const assigns = new Map<string, number>();
-  const walk = (n: unknown): void => {
+  // ONE walk of the whole IR feeds this pass: the string occurrences of every const global id (occ), their single assignments, every varRef use of such a
+  // global with its parent kind, key and top-level statement (gUseMap, read by plainGlobal), and every call of an `%init.K` (initCallNodes, read by the loose
+  // test). Everything the later analyses need about global uses is recorded here so no later phase walks the IR again.
+  type GUse = { fn: string; stmt: number; parent: string; key: string; call?: { callee: string; idx: number } };
+  const gUseMap = new Map<string, GUse[]>();
+  const initCallNodes: Node[] = [];
+  let curFn = "", curStmt = -1;
+  const walk = (n: unknown, parent: Node | null, key: string): void => {
     if (typeof n === "string") {
       if (ids.has(n)) occ.set(n, (occ.get(n) ?? 0) + 1);
       return;
     }
     if (Array.isArray(n)) {
-      for (const x of n) walk(x);
+      for (const x of n) walk(x, parent, key);
       return;
     }
     if (!isNode(n)) return;
-    if (n["kind"] === "assign" && typeof n["localId"] === "string" && ids.has(n["localId"] as string)) assigns.set(n["localId"] as string, (assigns.get(n["localId"] as string) ?? 0) + 1);
+    const nk = n["kind"];
+    if (nk === "assign" && typeof n["localId"] === "string" && ids.has(n["localId"] as string)) assigns.set(n["localId"] as string, (assigns.get(n["localId"] as string) ?? 0) + 1);
+    else if (nk === "varRef" && typeof n["localId"] === "string" && ids.has(n["localId"] as string)) {
+      const id = n["localId"] as string;
+      let list = gUseMap.get(id);
+      if (list === undefined) { list = []; gUseMap.set(id, list); }
+      const pk = parent === null ? "root" : kindOf(parent);
+      if (pk === "call" && key === "args") {
+        const ix = (parent!["args"] as unknown[]).indexOf(n);
+        list.push(ix >= 0 ? { fn: curFn, stmt: curStmt, parent: "call", key, call: { callee: parent!["callee"] as string, idx: ix } } : { fn: curFn, stmt: curStmt, parent: "call", key });
+      } else list.push({ fn: curFn, stmt: curStmt, parent: pk, key });
+    } else if (nk === "call" && typeof n["callee"] === "string" && (n["callee"] as string).startsWith("%init.")) initCallNodes.push(n);
     for (const k of Object.keys(n)) {
       if (k === "loc") continue;
-      walk(n[k]);
+      walk(n[k], n, k);
     }
   };
-  for (const fn of mod.functions) walk(fn.body);
+  for (const fn of mod.functions) {
+    curFn = fn.name;
+    if (fn.name.startsWith("%init.") && Array.isArray(fn.body)) (fn.body as unknown as Node[]).forEach((st, j) => { curStmt = j; walk(st, null, ""); });
+    else { curStmt = -1; walk(fn.body, null, ""); }
+  }
   for (const fn of mod.functions) {
     if (!fn.name.startsWith("%init.") || !Array.isArray(fn.body)) continue;
     (fn.body as unknown as Node[]).forEach((st, idx) => {
@@ -209,13 +231,7 @@ function deadInitPassImpl(mod: IrModule): DeadInitResult {
         if (!guard || hasReturn(body.slice(1))) loose.add(fn.name);
       }
     }
-    const scan = (n: unknown): void => {
-      if (Array.isArray(n)) { n.forEach(scan); return; }
-      if (!isNode(n)) return;
-      if (n["kind"] === "call" && typeof n["callee"] === "string" && (n["callee"] as string).startsWith("%init.") && !topNodes.has(n)) loose.add(n["callee"] as string);
-      for (const k of Object.keys(n)) if (k !== "loc") scan(n[k]);
-    };
-    for (const fn of mod.functions) scan(fn.body);
+    for (const cn of initCallNodes) if (!topNodes.has(cn)) loose.add(cn["callee"] as string);
     const spread = (x: string): void => { for (const y of topEdges.get(x) ?? []) if (!loose.has(y)) { loose.add(y); spread(y); } };
     for (const x of [...loose]) spread(x);
   }
@@ -256,41 +272,6 @@ function deadInitPassImpl(mod: IrModule): DeadInitResult {
   };
   let curCandInit = "";
 
-  type GUse = { fn: string; stmt: number; parent: string; key: string; call?: { callee: string; idx: number } };
-  let gUsesMemo: Map<string, { raw: number; uses: GUse[] }> | null = null;
-  const gUses = (): Map<string, { raw: number; uses: GUse[] }> => {
-    if (gUsesMemo !== null) return gUsesMemo;
-    const m = new Map<string, { raw: number; uses: GUse[] }>();
-    const slot = (id: string): { raw: number; uses: GUse[] } => { let e = m.get(id); if (e === undefined) { e = { raw: 0, uses: [] }; m.set(id, e); } return e; };
-    let fnName = "", stmt = -1;
-    const walk = (n: unknown, parent: Node | null, key: string): void => {
-      if (Array.isArray(n)) {
-        for (const x of n) { if (typeof x === "string") { if (ids.has(x)) slot(x).raw++; } else walk(x, parent, key); }
-        return;
-      }
-      if (!isNode(n)) return;
-      if (n["kind"] === "varRef" && typeof n["localId"] === "string" && ids.has(n["localId"] as string)) {
-        const id = n["localId"] as string;
-        if (parent !== null && kindOf(parent) === "call" && key === "args") {
-          const ix = (parent["args"] as unknown[]).indexOf(n);
-          if (ix >= 0) slot(id).uses.push({ fn: fnName, stmt, parent: "call", key, call: { callee: parent["callee"] as string, idx: ix } });
-          else slot(id).uses.push({ fn: fnName, stmt, parent: "call", key });
-        } else slot(id).uses.push({ fn: fnName, stmt, parent: parent === null ? "root" : kindOf(parent), key });
-      }
-      for (const k of Object.keys(n)) {
-        if (k === "loc") continue;
-        const v = n[k];
-        if (typeof v === "string") { if (ids.has(v)) slot(v).raw++; } else walk(v, n, k);
-      }
-    };
-    for (const fn of mod.functions) {
-      fnName = fn.name;
-      if (fn.name.startsWith("%init.") && Array.isArray(fn.body)) (fn.body as unknown as Node[]).forEach((st, j) => { stmt = j; walk(st, null, ""); });
-      else { stmt = -1; walk(fn.body, null, ""); }
-    }
-    gUsesMemo = m;
-    return m;
-  };
   const nvWhy = new Map<string, string>();
   const plainGlobal = (id: string): boolean => {
     const mkey = `${id}|${curCandInit}`;
@@ -304,7 +285,7 @@ function deadInitPassImpl(mod: IrModule): DeadInitResult {
       const v = st["value"] as Node;
       if (kindOf(v) === "recordLit" && (v["fields"] as Node[]).every((f) => f["viewSlot"] !== true)) {
         // every use of the global, from ONE walk of the whole IR shared by all candidates (gUses)
-        const gu = gUses().get(id) ?? { raw: 0, uses: [] };
+        const gu = { raw: occ.get(id) ?? 0, uses: gUseMap.get(id) ?? [] };
         let allowed = 0;
         const raw = gu.raw;
         const calls: { callee: string; idx: number }[] = [];
