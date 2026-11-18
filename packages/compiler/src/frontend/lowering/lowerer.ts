@@ -25,7 +25,7 @@ import type { CjsExportRecord } from "./cjs-export-record.js";
 import { isLiveAliasName } from "./cjs-live-exports.js";
 import { copyListStmts, type CopyPart } from "./key-list-fill.js";
 import { applyEnumRefill, applyNullProto, applyOwnKey, applySlotFilled, flushPatchCensus } from "./ir-patch.js";
-import { CLASS_FED_MIXED, classFedInterfacesNoted, clearClassFedInterfaces, flushMintOrder, mintPhaseControl, noteClassFedInterface, resetClassFedInterfacesGrew, resetMintLog, setGenGateKeys, setMintPhase, undefSlotWiden, CLASS_FED_INTERFACES } from "../types.js";
+import { refreshMapTypeEnv, CLASS_FED_MIXED, classFedInterfacesNoted, clearClassFedInterfaces, flushMintOrder, mintPhaseControl, noteClassFedInterface, resetClassFedInterfacesGrew, resetMintLog, setGenGateKeys, setMintPhase, undefSlotWiden, CLASS_FED_INTERFACES } from "../types.js";
 import { flushFragmentCensus } from "./fragment-census.js";
 import { fenceDynRecordCasts } from "./dyn-record-fence.js";
 import { fenceNullProtoRecordCasts } from "./null-proto-fence.js";
@@ -823,6 +823,7 @@ export function lowerToIr(
   options: LowerOptions = {},
 ): LowerResult {
   const dynamic = options.dynamic ?? false;
+  refreshMapTypeEnv();
   // The OVERFLOW GRANT's registry is per-compilation: the discovery pass
   // fills it, the emit pass's ShapeRegistry consults it while interning.
   // Cleared here so one program's casts can never grant another's shapes
@@ -7537,6 +7538,7 @@ export class Lowerer {
     const prevMemo = process.env.SCRIPTC_NO_MEMO;
     process.env.SCRIPTC_MAP_TRACE = "1";
     process.env.SCRIPTC_NO_MEMO = "1";
+    refreshMapTypeEnv();
     try {
       const fresh = mapType(widened, this.typeCtx);
       console.error(`DYNWHY   fresh-answer=${fresh ? typeKey(fresh).slice(0, 90) : "null"}`);
@@ -7545,6 +7547,7 @@ export class Lowerer {
       else process.env.SCRIPTC_MAP_TRACE = prevTrace;
       if (prevMemo === undefined) delete process.env.SCRIPTC_NO_MEMO;
       else process.env.SCRIPTC_NO_MEMO = prevMemo;
+      refreshMapTypeEnv();
     }
     if (ts.isPropertyAccessExpression(node)) {
       const recvT = mapType(this.typeOf(node.expression), this.typeCtx);
