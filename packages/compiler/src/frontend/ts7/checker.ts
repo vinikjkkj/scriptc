@@ -547,6 +547,24 @@ export class CheckerFacade {
     distinct.forEach((s, i) => this.typeOfSymbol.set(s, symbolTypes[i] ?? NONE));
   }
 
+  /** Batch-answers getSymbolAtLocation for a caller's EXACT node list (the scan knows what it is about to ask), whatever the size of the file: the
+   * sweep above is a bet on the hit rate and is capped, this is not a bet. The memo it fills is the one the per-node path fills, with the same panic
+   * fence, so a later getSymbolAtLocation of any of these nodes is a hit and answers what it would have answered. */
+  prefetchSymbolsOf(nodes: readonly Node[]): void {
+    const todo = nodes.filter((n) => !this.symbolAtLocation.has(n));
+    if (todo.length < 2) return;
+    const symbols = chunked(todo, (chunk) => withPanicFence(chunk, (c) => this.raw.getSymbolAtLocation(c)));
+    todo.forEach((n, i) => this.symbolAtLocation.set(n, symbols[i] ?? NONE));
+  }
+
+  /** The same for getTypeAtLocation. */
+  prefetchTypesOf(nodes: readonly Node[]): void {
+    const todo = nodes.filter((n) => !this.typeAtLocation.has(n));
+    if (todo.length < 2) return;
+    const types = chunked(todo, (chunk) => this.typesWithPanicFence(chunk));
+    todo.forEach((n, i) => this.typeAtLocation.set(n, types[i] ?? NONE));
+  }
+
   private autoPrefetch(node: Node, kind: "types" | "symbols"): void {
     if (this.options.autoPrefetch === false) return;
     const sf = node.getSourceFile();

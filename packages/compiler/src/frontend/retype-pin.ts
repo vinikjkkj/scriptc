@@ -154,6 +154,10 @@ function expandoPins(checker: ts.TypeChecker, sf: ts.SourceFile): RetypePin[] {
     }
     return undefined;
   });
+  // The loop below asks the symbol of EVERY receiver and the type of each receiver that has one, in this order and nothing else, so the two
+  // sets are known now and ride in batches instead of one round trip each (the answers and the memo are the per-node path's).
+  checker.prefetchSymbolsOf(writes.map((w) => w.expression));
+  checker.prefetchTypesOf(writes.map((w) => w.expression).filter((r) => checker.getSymbolAtLocation(r) !== undefined));
   for (const access of writes) {
     const recv = access.expression as ts.Identifier;
     const prop = access.name.text;
@@ -252,6 +256,9 @@ function jsdocNumberParamPin(sf: ts.SourceFile, fn: ts.Node, param: string, why:
  * expando `Obj.m = function m(...)` counts. Same-file calls only. */
 function jsdocBigintPins(checker: ts.TypeChecker, sf: ts.SourceFile): RetypePin[] {
   const out: RetypePin[] = [];
+  // A pin is only ever produced by jsdocNumberParamPin, which needs `@param <ws> {number}` in the file's own text (its regex and its `m[1] === "number"`
+  // test). A file without that text cannot yield one, so the walk (a resolved signature per call, a type per argument) would only fill the checker's memo.
+  if (!/@param\s+\{number\}/.test(sf.text)) return out;
   ts.walkPreorder(sf, (n) => {
     if (!ts.isCallExpression(n)) return undefined;
     const sig = checker.getResolvedSignature(n);
