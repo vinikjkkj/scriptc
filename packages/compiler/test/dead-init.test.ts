@@ -84,3 +84,29 @@ test("SCRIPTC_DEADINIT=off drops nothing", () => {
   const r = deadInitPass(lower({ "main.ts": TABLE }));
   expect(r.dropped).toEqual([]);
 });
+
+// deadinit2: a record shape that also has a dyn cast keeps a view arm in every `Object.entries` over it. The arm is dead when the iterated record is a
+// frozen literal confined to read-only uses; it is live (kept) when the table is boxed to a dyn first or the iteration is over a Proxy.
+const VIEWED = (extra: string, table: string): string => `
+const SPEC = ${table};
+type Spec = typeof SPEC;
+type Cfg = { code: number; type: string; defaultValue: number | boolean | string };
+function fromJson(s: string): Spec { return JSON.parse(s) as Spec; }
+function build(spec: Spec): Record<string, { c: number; t: string; d: number | boolean | string }> {
+  const view = {} as Record<string, { c: number; t: string; d: number | boolean | string }>;
+  for (const [name, entry] of Object.entries(spec)) view[name] = Object.freeze({ c: entry.code, t: entry.type, d: entry.defaultValue });
+  return Object.freeze(view);
+}
+${extra}
+export const UNUSED_VIEW = build(SPEC);
+const other = fromJson("{}");
+console.log(SPEC.alpha.code, other);
+`;
+const FROZEN = `Object.freeze({ alpha: Object.freeze({ code: 1, type: "int", defaultValue: 10 }), beta: Object.freeze({ code: 2, type: "bool", defaultValue: false }), gamma: Object.freeze({ code: 3, type: "string", defaultValue: "g" }) })`;
+
+test("an unused view built by Object.entries over a read-only frozen table is dropped; boxing the table to a dyn first keeps it", () => {
+  expect(verdict(deadInitPass(lower({ "main.ts": VIEWED("", FROZEN) })), "UNUSED_VIEW")).toBe("drop");
+  // positive control for the negative below: the same program with the table escaping to dyn code must be KEPT (the view arm may then be live)
+  const kept = verdict(deadInitPass(lower({ "main.ts": VIEWED("const boxed: unknown = SPEC; console.log(typeof boxed);", FROZEN) })), "UNUSED_VIEW");
+  expect(kept).toMatch(/^keep: /);
+});

@@ -25,6 +25,51 @@ interface Cx {
   callable: Set<string>;
   /** canonical for-loop counters in scope (initialised from a non-negative integer literal, only ever stepped by a positive literal) */
   counters: Set<string>;
+  /** locals proven never to be a view (a plain-record parameter confined in this function, see staticNonView) */
+  nonView: Set<string>;
+  /** locals initialised from a record literal (candidates for a staticNonView proof) */
+  freshRec: Set<string>;
+  /** iterator-state locals opened over a fresh array (`dyn.iterOpen(dynFrom(array))`) and the dyn locals read out of them */
+  packs: Set<string>;
+  plain: Set<string>;
+  /** f64 locals initialised from the literal 0 (iterator indexes) */
+  zero: Set<string>;
+  /** the body of the function being analysed (undefined for a global initializer expression) */
+  body?: unknown;
+}
+const mkCx = (body?: unknown): Cx => ({ fresh: new Set(), callable: new Set(), counters: new Set(), nonView: new Set(), freshRec: new Set(), packs: new Set(), plain: new Set(), zero: new Set(), body });
+
+/** Parents under which a record operand is only READ: none of them can make the record a view (promotion happens only when a record is boxed into a dyn). */
+const READ_PARENTS = new Set(["recordIsView", "recordView", "recordGet", "recordKeyGet", "recordGetAt", "recordOvfHas", "recordOvfSlotGet", "recordOvfSlots", "recordOvfKeys", "recordKeyPresent", "recordKeyPresentAt", "recordSlotFilled"]);
+
+/** Every use of `id` inside `body`: how many are read-only (READ_PARENTS under key obj, plus `extra`), the calls it is passed to, and the raw count of string occurrences (any other use makes raw exceed the sum). */
+function usesOf(body: unknown, id: string, extra?: (parent: Node, key: string, self: Node) => boolean): { raw: number; allowed: number; calls: { callee: string; idx: number }[] } {
+  const r = { raw: 0, allowed: 0, calls: [] as { callee: string; idx: number }[] };
+  const walk = (n: unknown, parent: Node | null, key: string): void => {
+    if (Array.isArray(n)) {
+      for (const x of n) {
+        if (x === id) r.raw++;
+        else walk(x, parent, key);
+      }
+      return;
+    }
+    if (!isNode(n)) return;
+    if (n["kind"] === "varRef" && n["localId"] === id) {
+      if (parent !== null && ((READ_PARENTS.has(kindOf(parent)) && key === "obj") || (extra?.(parent, key, n) ?? false))) r.allowed++;
+      else if (parent !== null && kindOf(parent) === "call" && key === "args") {
+        const ix = (parent["args"] as unknown[]).indexOf(n);
+        if (ix >= 0) r.calls.push({ callee: parent["callee"] as string, idx: ix });
+      }
+    }
+    for (const k of Object.keys(n)) {
+      if (k === "loc") continue;
+      const v = n[k];
+      if (v === id) r.raw++;
+      else walk(v, n, k);
+    }
+  };
+  walk(body, null, "");
+  return r;
 }
 
 export interface DeadInitResult {
@@ -99,6 +144,75 @@ export function deadInitPass(mod: IrModule): DeadInitResult {
   };
   const scalarType = (t: unknown): boolean => isNode(t) && (t["kind"] === "f64" || t["kind"] === "bool" || t["kind"] === "string");
 
+  // 1b. STATIC NON-VIEW. A record of a view-granted shape is a "view" once it has been boxed into a dyn (scr_rec_view_promote) or was cast from one; a
+  // record that only ever flows into read-only positions (READ_PARENTS) and was built by a record literal can never be one, so `recordIsView` on it is
+  // false and the dyn fallback arm it guards is dead. Fail closed: any other use of the binding (stored, boxed, captured, returned) refuses the proof.
+  const constMemo = new Map<string, boolean>();
+  const paramMemo = new Map<string, boolean>();
+  const callsConfined = (calls: { callee: string; idx: number }[]): boolean =>
+    calls.every((c) => {
+      const f = fnByName.get(c.callee);
+      const pid = f?.params[c.idx]?.localId;
+      return f !== undefined && pid !== undefined && paramConfined(f, pid);
+    });
+  function paramConfined(fn: IrFunction, pid: string): boolean {
+    const key = `${fn.name}\0${pid}`;
+    const memo = paramMemo.get(key);
+    if (memo !== undefined) return memo;
+    paramMemo.set(key, true); // co-inductive: a recursive pass-through is confined when everything else is
+    const u = usesOf(fn.body, pid);
+    const ok = (fn.captures?.length ?? 0) === 0 && u.raw === u.allowed + u.calls.length && callsConfined(u.calls);
+    paramMemo.set(key, ok);
+    return ok;
+  }
+  /** A const, non-tdz global assigned exactly once, by a record literal, whose every use is read-only. */
+  const plainGlobal = (id: string): boolean => {
+    const memo = constMemo.get(id);
+    if (memo !== undefined) return memo;
+    constMemo.set(id, false);
+    let ok = false;
+    const c = candidates.get(id);
+    if (c !== undefined && (assigns.get(id) ?? 0) === 1 && ids.has(id)) {
+      const st = (c.fn.body as unknown as Node[])[c.idx]!;
+      const v = st["value"] as Node;
+      if (kindOf(v) === "recordLit" && (v["fields"] as Node[]).every((f) => f["viewSlot"] !== true)) {
+        let raw = 0, allowed = 0;
+        const calls: { callee: string; idx: number }[] = [];
+        for (const fn of mod.functions) {
+          const u = usesOf(fn.body, id);
+          raw += u.raw; allowed += u.allowed; calls.push(...u.calls);
+        }
+        ok = raw === allowed + calls.length + 1 && callsConfined(calls);
+      }
+    }
+    constMemo.set(id, ok);
+    return ok;
+  };
+  const staticNonView = (e: unknown, cx: Cx): boolean => {
+    if (kindOf(e) !== "varRef") return false;
+    const id = (e as Node)["localId"] as string;
+    if (cx.nonView.has(id)) return true;
+    if (id.startsWith("%g.")) return plainGlobal(id);
+    if (!cx.freshRec.has(id) || !cx.fresh.has(id) || cx.body === undefined) return false;
+    // a local built from a record literal: reads, keyed writes into it, and (at the very end) boxing it as the function's return value
+    const retDyn = new Set<unknown>();
+    const scanRet = (n: unknown): void => {
+      if (Array.isArray(n)) { n.forEach(scanRet); return; }
+      if (!isNode(n)) return;
+      if (n["kind"] === "return" && isNode(n["value"])) {
+        let v = n["value"] as Node;
+        if (kindOf(v) === "dynCheck" && isNode(v["value"])) v = v["value"] as Node;
+        if (kindOf(v) === "dynFrom") retDyn.add(v);
+      }
+      for (const k of Object.keys(n)) if (k !== "loc") scanRet(n[k]);
+    };
+    scanRet(cx.body);
+    const u = usesOf(cx.body, id, (parent, key, self) => ((parent["kind"] === "recordKeySet" || parent["kind"] === "recordSet") && key === "obj") || (parent["kind"] === "dynFrom" && key === "value" && retDyn.has(parent) && self === parent["value"]));
+    return u.raw === u.allowed + u.calls.length + 1 && u.calls.length === 0; // +1: the varDecl
+  };
+  /** `recordIsView(<statically non-view>)`: always false. */
+  const isDeadViewCond = (c: unknown, cx: Cx): boolean => kindOf(c) === "recordIsView" && staticNonView((c as Node)["obj"], cx);
+
   const pureExpr = (e: unknown, cx: Cx): boolean => {
     if (!isNode(e)) return no("non-node expression");
     const k = e["kind"] as string;
@@ -166,7 +280,39 @@ export function deadInitPass(mod: IrModule): DeadInitResult {
       case "toBool":
         return sub(e["operand"]);
       case "ternary":
+        if (isDeadViewCond(e["cond"], cx)) return sub(e["else_"]);
         return sub(e["cond"]) && sub(e["then"]) && sub(e["else_"]);
+      case "libCall": {
+        const fn = e["fn"] as string;
+        const a = e["args"] as Node[];
+        const isLocal = (x: unknown, set: Set<string>): boolean => kindOf(x) === "varRef" && set.has((x as Node)["localId"] as string);
+        if (fn === "dyn.iterOpen") {
+          // iterating a FRESH typed array boxed to a dyn: the array iterator over our own array, no user code, cannot throw (the existing forOf rule)
+          let src: unknown = a[0];
+          while (kindOf(src) === "ternary" && isDeadViewCond((src as Node)["cond"], cx)) src = (src as Node)["else_"];
+          const t = isNode(src) && kindOf(src) === "dynFrom" ? ((src as Node)["value"] as Node)["type"] as Node | undefined : undefined;
+          return t !== undefined && t["kind"] === "array" && sub(src) ? true : no("dyn.iterOpen over something other than a boxed typed array");
+        }
+        if (fn === "dyn.iterVal" && isLocal(a[0], cx.packs) && kindOf(a[1]) === "varRef") return true;
+        if (fn === "dyn.iterPack" && isLocal(a[0], cx.plain) && kindOf(a[1]) === "strLit") return true;
+        return no(`expression kind libCall ${fn}`);
+      }
+      case "recordIsView":
+        return sub(e["obj"]);
+      case "runKindAt":
+      case "runKeyAt":
+        return sub(e["index"]);
+      case "dynFrom": {
+        // boxing a typed array/record: allocates, promotes the boxed records (a representation detail: nothing else holds the box), cannot throw
+        const t = (e["value"] as Node)["type"] as Node | undefined;
+        return t !== undefined && (t["kind"] === "array" || t["kind"] === "record") ? sub(e["value"]) : no("dynFrom of a non-container");
+      }
+      case "dynCheck":
+        return sub(e["value"]); // a representation check (Node performs none)
+      case "dynKeyGet": {
+        const v = e["value"] as Node;
+        return kindOf(v) === "varRef" && cx.plain.has(v["localId"] as string) && sub(e["key"]) ? true : no("dynKeyGet over a dyn that is not a plain iteration element");
+      }
       case "arrIntrinsic": {
         const m = e["method"] as string;
         const recv = e["receiver"] as Node;
@@ -196,7 +342,9 @@ export function deadInitPass(mod: IrModule): DeadInitResult {
           } else if (!sub(a)) return false;
         }
         if (REPR_TRAP_CALL.test(callee)) return true;
-        return fnIsPure(callee, callable) ? true : no(`call of impure or unknown function ${callee}`);
+        const nv: number[] = [];
+        for (let i = 0; i < args.length; i++) if (staticNonView(args[i], cx)) nv.push(i);
+        return fnIsPure(callee, callable, nv) ? true : no(`call of impure or unknown function ${callee}`);
       }
       case "callValue": {
         const c = e["callee"] as Node;
@@ -225,7 +373,14 @@ export function deadInitPass(mod: IrModule): DeadInitResult {
           const init = st["init"];
           if (init !== null && !pureExpr(init, cx)) return false;
           const ik = kindOf(init);
-          if (init !== null && (ik === "recordLit" || ik === "arrayLit")) cx.fresh.add(st["localId"] as string);
+          const lid = st["localId"] as string;
+          if (init !== null && (ik === "recordLit" || ik === "arrayLit")) cx.fresh.add(lid);
+          if (ik === "recordLit") cx.freshRec.add(lid);
+          if (ik === "libCall") {
+            const f = (init as Node)["fn"];
+            if (f === "dyn.iterOpen") cx.packs.add(lid);
+            else if (f === "dyn.iterVal" || f === "dyn.iterPack") cx.plain.add(lid);
+          } else if (ik === "numLit" && (init as Node)["value"] === 0) cx.zero.add(lid);
           break;
         }
         case "assign":
@@ -240,8 +395,57 @@ export function deadInitPass(mod: IrModule): DeadInitResult {
           if (st["value"] !== null && !pureExpr(st["value"], cx)) return false;
           break;
         case "if":
+          if (isDeadViewCond(st["cond"], cx)) {
+            if (st["else_"] !== null && !pureStmts(st["else_"], cx)) return false;
+            break;
+          }
           if (!pureExpr(st["cond"], cx) || !pureStmts(st["then"], cx) || (st["else_"] !== null && !pureStmts(st["else_"], cx))) return false;
           break;
+        case "break":
+          break;
+        case "tryCatch": {
+          // only the iterator-close shape: try { <pure> } finally { dyn.iterClose(pack) }
+          const fin = st["finallyBody"] as Node[] | null;
+          const one = Array.isArray(fin) && fin.length === 1 ? fin[0]! : undefined;
+          const ce = one !== undefined && kindOf(one) === "exprStmt" ? (one["expr"] as Node) : undefined;
+          const closes = ce !== undefined && kindOf(ce) === "libCall" && ce["fn"] === "dyn.iterClose" && kindOf((ce["args"] as Node[])[0]) === "varRef" && cx.packs.has(((ce["args"] as Node[])[0] as Node)["localId"] as string);
+          if (st["catchBody"] !== null || st["catchLocalId"] !== null || !closes) return no("try statement that is not an iterator close");
+          if (!pureStmts(st["tryBody"], cx)) return false;
+          break;
+        }
+        case "while": {
+          // the lowered for-of over a boxed fresh array: `while (true) { if (!iterStep(pack, i)) break; ...; i = i + 1 }`. It ends because iterStep
+          // answers false at the array's end and the index only ever advances by that one assignment (no `continue` may skip it).
+          const body = st["body"] as Node[];
+          const c = st["cond"] as Node;
+          const f0 = body[0];
+          const sc = f0 !== undefined && kindOf(f0) === "if" ? (f0["cond"] as Node) : undefined;
+          const step = sc !== undefined && kindOf(sc) === "unary" && sc["op"] === "!" ? (sc["operand"] as Node) : undefined;
+          const sa = step !== undefined && kindOf(step) === "libCall" && step["fn"] === "dyn.iterStep" ? (step["args"] as Node[]) : undefined;
+          const packOk = sa !== undefined && kindOf(sa[0]) === "varRef" && cx.packs.has((sa[0] as Node)["localId"] as string);
+          const idxId = sa !== undefined && kindOf(sa[1]) === "varRef" ? ((sa[1] as Node)["localId"] as string) : "";
+          const thenBrk = f0 !== undefined && f0["else_"] === null && Array.isArray(f0["then"]) && (f0["then"] as Node[]).length === 1 && kindOf((f0["then"] as Node[])[0]) === "break";
+          if (kindOf(c) !== "boolLit" || c["value"] !== true || st["labels"] !== undefined || !packOk || !cx.zero.has(idxId) || !thenBrk) return no("while loop that is not an iterator-step loop");
+          let bad = "";
+          const scan = (n: unknown): void => {
+            if (bad !== "") return;
+            if (Array.isArray(n)) { n.forEach(scan); return; }
+            if (!isNode(n)) return;
+            const nk = n["kind"];
+            if (nk === "continue" || nk === "labeled" || nk === "while" || nk === "doWhile") bad = `loop body with ${String(nk)}`;
+            if (nk === "assign" && n["localId"] === idxId) {
+              const v = n["value"] as Node;
+              if (!(kindOf(v) === "bin" && v["op"] === "+" && kindOf(v["left"]) === "varRef" && (v["left"] as Node)["localId"] === idxId && kindOf(v["right"]) === "numLit" && (v["right"] as Node)["value"] === 1)) bad = "iterator index written other than +1";
+            }
+            if ((nk === "assign" || nk === "varDecl") && cx.packs.has(n["localId"] as string)) bad = "iterator state reassigned";
+            if (nk === "incDec" || nk === "assignExpr") bad = "assignment expression in iterator loop";
+            for (const key of Object.keys(n)) if (key !== "loc") scan(n[key]);
+          };
+          scan(body.slice(1));
+          if (bad !== "") return no(bad);
+          if (!pureStmts(body.slice(1), cx)) return false;
+          break;
+        }
         case "block":
           if (!pureStmts(st["body"], cx)) return false;
           break;
@@ -314,8 +518,8 @@ export function deadInitPass(mod: IrModule): DeadInitResult {
     return pureExpr(cond, cx) && pureStmts(st["body"], cx);
   };
 
-  function fnIsPure(name: string, callable: ReadonlySet<number> = new Set<number>()): boolean {
-    const key = callable.size === 0 ? name : `${name}#${[...callable].join(",")}`;
+  function fnIsPure(name: string, callable: ReadonlySet<number> = new Set<number>(), nonViewIdx: readonly number[] = []): boolean {
+    const key = callable.size === 0 && nonViewIdx.length === 0 ? name : `${name}#${[...callable].join(",")}#nv${nonViewIdx.join(",")}`;
     const memo = fnPure.get(key);
     if (memo === "pending") return no(`recursive function ${name}`);
     if (memo !== undefined) return memo;
@@ -325,7 +529,13 @@ export function deadInitPass(mod: IrModule): DeadInitResult {
     fnPure.set(key, "pending");
     const saved = lastWhy;
     lastWhy = "";
-    const ok = pureStmts(fn.body, { fresh: new Set<string>(), callable: new Set([...callable].map((ix) => fn.params[ix]?.localId ?? "")), counters: new Set<string>() });
+    const cx = mkCx(fn.body);
+    cx.callable = new Set([...callable].map((ix) => fn.params[ix]?.localId ?? ""));
+    for (const ix of nonViewIdx) {
+      const pid = fn.params[ix]?.localId;
+      if (pid !== undefined && paramConfined(fn, pid)) cx.nonView.add(pid);
+    }
+    const ok = pureStmts(fn.body, cx);
     if (!ok) why.set(name, lastWhy);
     lastWhy = ok ? saved : saved === "" ? lastWhy : saved;
     fnPure.set(key, ok);
@@ -340,7 +550,7 @@ export function deadInitPass(mod: IrModule): DeadInitResult {
     if ((occ.get(g.id) ?? 0) !== 1 || (assigns.get(g.id) ?? 0) !== 1) continue; // read somewhere, or written twice: not a candidate (not reported)
     lastWhy = "";
     const st = (c.fn.body as unknown as Node[])[c.idx]!;
-    const ok = pureExpr(st["value"], { fresh: new Set<string>(), callable: new Set<string>(), counters: new Set<string>() });
+    const ok = pureExpr(st["value"], mkCx());
     if (ok) {
       drops.push({ fn: c.fn, idx: c.idx, id: g.id });
       out.dropped.push(g.id);
