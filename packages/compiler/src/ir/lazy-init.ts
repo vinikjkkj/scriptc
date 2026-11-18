@@ -52,6 +52,7 @@ const refuse = (why: string): never => {
 };
 
 export function lazyInitPass(mod: IrModule): LazyInitResult {
+  const t0 = Date.now();
   const out: LazyInitResult = { verdicts: [], inventory: [] };
   const mode = process.env["SCRIPTC_LAZYINIT"] ?? "on";
   if (mode !== "report" && mode !== "why" && mode !== "on") return out;
@@ -704,7 +705,7 @@ export function lazyInitPass(mod: IrModule): LazyInitResult {
       if (done.has(f.name) || removed.has(f.name) || !Array.isArray(f.body)) continue;
       walkLists(f.body, f);
     }
-    if (out2.lazy > 0 && process.env["SCRIPTC_LAZYINIT_LOG"] === "1") process.stderr.write(`LAZYINIT rewrite lazy=${out2.lazy} hoistedReads=${out2.hoistedReads} newFunctions=${done.size}\n`);
+    if (out2.lazy > 0 && process.env["SCRIPTC_LAZYINIT_LOG"] === "1") process.stderr.write(`LAZYINIT rewrite lazy=${out2.lazy} hoistedReads=${out2.hoistedReads} newFunctions=${done.size} passMs=${Date.now() - t0}\n`);
   }
 
   const countNested = (v: LazyVerdict): number => 1 + v.nested.reduce((a, n) => a + countNested(n), 0);
