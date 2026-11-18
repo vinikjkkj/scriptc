@@ -65,7 +65,7 @@ import { programHasTsUntypedWeakNew, setTsUntypedWeakAdmission, scanUndefArrayEl
 import { applyRetypePins, computeRetypePins, shiftRetypePins, type RetypePin } from "./retype-pin.js";
 import { computeEmptyCollectionPins } from "./empty-collection-pin.js";
 import { cjsLexerVisibleNames } from "./cjs-lexer.js";
-import { applyTwinEdits, clearTwinSpans, type TwinEdit } from "./lowering/emitter-twin.js";
+import { applyTwinEdits, clearTwinSpans, insideTwinSpan, type TwinEdit } from "./lowering/emitter-twin.js";
 import {
   ADOPTED_OPTIONS,
   ambientDtsPath,
@@ -738,6 +738,15 @@ function checkPreflightImpl(load: LoadResult): ScrDiagnostic[] {
  *  - TS2314 ("generic type requires N type arguments") on a bare generic in JSDoc (`@returns {Array}`): in a JS file
  *    5.9.3 reads the missing arguments as `any`, tsgo reports the omission (denque's toArray). */
 const TS7_JS_RELAXED_EXTRA: ReadonlySet<number> = new Set([2309, 2323, 2314]);
+
+/** The "implicitly has an 'any' type" family (TS7005..7057). Inside an ERASED TWIN COPY (emitter-twin.ts) they are expected, not errors: the copy's
+ * parameters are `any`, so a callback written inside the body (`v.tags.map((t) => t.length)`) loses the contextual type it had over the typed parameter
+ * and its own parameter is implicitly `any`, a dynamic value at run time, which is exactly what the twin exists to run. The author never wrote that
+ * text, so the strictness gate does not apply to it. */
+const TWIN_IMPLICIT_ANY: ReadonlySet<number> = new Set([7005, 7006, 7008, 7010, 7011, 7015, 7019, 7022, 7023, 7024, 7031, 7034, 7053, 7057]);
+function twinCopyImplicitAny(d: ts.Diagnostic): boolean {
+  return TWIN_IMPLICIT_ANY.has(d.code) && d.fileName !== undefined && d.pos !== undefined && insideTwinSpan(d.fileName, d.pos);
+}
 
 function suppressedJsStrictness7(d: ts.Diagnostic): boolean {
   const file = d.fileName;
@@ -3042,6 +3051,7 @@ function preflight7(load: LoadResult): {
       (d) =>
         d.category === ts.DiagnosticCategory.Error &&
         !suppressedJsStrictness7(d) &&
+        !twinCopyImplicitAny(d) &&
         !npmStaticFileSuppressed(d) &&
         !provenanceFileSuppressed(d) &&
         !nodeModulesJsSuppressed(d) &&
