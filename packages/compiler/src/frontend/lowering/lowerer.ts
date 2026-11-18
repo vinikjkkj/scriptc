@@ -2339,6 +2339,8 @@ export class Lowerer {
   /** The structural TS type of each binding a CommonJS JSON require bound, by
    * symbol: the checker types `require` as `any`, so typeOf answers this. */
   readonly jsonBindingTypes = new Map<ts.Symbol, ts.Type>();
+  /** Whether the program has a `.json` source file at all (lower-modules.ts jsonOverrideLive), decided on first use. */
+  jsonSourceFilesPresent: boolean | undefined = undefined;
   /** The embedded npm runtime graph (collectNpmImports), attached to the
    * emitted module. Null without npm imports or without --dynamic. */
   npmEmbedded: IrModule["embedded"] | null = null;
