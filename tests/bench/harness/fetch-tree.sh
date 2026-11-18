@@ -1,9 +1,9 @@
 #!/bin/bash
-# fetch-tree.sh: materialise the zapo-js 1.8.2 checkout the bench programs are built from, plus the app's npm dependencies.
-# The commit is the one scriptc's own provenance resolves zapo-js@1.8.2 to (757a8071b819...). Idempotent.
+# fetch-tree.sh: materialise the zapo-js 1.12.0 checkout the bench programs are built from, plus the app's npm dependencies.
+# The commit is the one scriptc's own provenance resolves zapo-js@1.12.0 to (1147011e218e...). Idempotent.
 set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/env.sh"
-ZAPO_SHA=${ZAPO_SHA:-757a8071b819699437b353865b17cacffe95e9fb}
+ZAPO_SHA=${ZAPO_SHA:-1147011e218eff028b4b7ebcbf7aa7a3f8dc7284}
 mkdir -p "$ZB_APP"
 if [ ! -f "$TREE/.fetched-$ZAPO_SHA" ]; then
   rm -rf "$TREE"; mkdir -p "$TREE"
