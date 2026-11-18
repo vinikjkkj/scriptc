@@ -8441,7 +8441,10 @@ export function decoderCtorSpec(L: Lowerer, expr: ts.NewExpression): { enc: stri
         srcIr?.kind === "bytes" &&
         (peeled !== null ? L.isStdlibMember(first as ts.PropertyAccessExpression) : srcIr.elem === "buf")
       ) {
-        const receiver = L.lowerExpr(viewSrc);
+        // An unpeeled ArrayBuffer-typed value may arrive as a dyn (the answer of a
+        // dyn call the checker types ArrayBuffer, e.g. an awaited SubtleCrypto.digest):
+        // it is checked into the ArrayBuffer flavor here, not handed over as dyn.
+        const receiver = peeled === null ? L.lowerExprExpecting(viewSrc, srcIr) : L.lowerExpr(viewSrc);
         const idxArgs = args.slice(1).map((a) => L.lowerExprExpecting(a, F64));
         bytesViewCtors++;
         if (process.env["SCRIPTC_BYTESVIEW_WHY"] !== undefined) {
@@ -9537,7 +9540,7 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
     }
     const srcIr = L.mapTypeOf(L.typeOf(first));
     if (srcIr?.kind === "bytes" && srcIr.elem === "buf") {
-      const receiver = L.lowerExpr(first);
+      const receiver = L.lowerExprExpecting(first, srcIr);
       const idx = args.slice(1).map((a) => L.lowerExprExpecting(a, F64));
       return markFlavor({ kind: "bytesIntrinsic", method: "dataViewNew", receiver, args: idx, type: BYTES_U8, loc }, "buffer", loc);
     }

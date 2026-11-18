@@ -4584,10 +4584,17 @@ function mapTypeInner(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   // (scr_webcrypto.c), reached through the dyn tree. The TYPE maps to dyn, so a
   // typed binding of a key (`const k = await crypto.subtle.importKey(...)`) keeps
   // the key object itself: a typed record would copy its fields and lose the key
-  // kind that sign() checks. The SubtleCrypto and Crypto types keep their own
-  // mapping (the member-call route is lowerWebCryptoMemberCall).
+  // kind that sign() checks. The SubtleCrypto and Crypto types map to dyn too:
+  // the WebCrypto singleton and its `.subtle` are runtime values reached through
+  // the dyn tree (dyn.webCrypto), so a binding, parameter or field the checker
+  // types SubtleCrypto / Crypto (a TypeScript annotation, a `crypto.subtle`
+  // alias, or a JSDoc `@type SubtleCrypto` that @types/node 26 resolves because
+  // it declares the global interface) holds that value and its member calls take
+  // the dynInvoke route; the served members and the compile-time refusals of the
+  // rest stay keyed on the declared type (lower-exprs.ts webCryptoKindOf).
   if (
-    (psym?.name === "CryptoKey" || psym?.name === "KeyAlgorithm") &&
+    (psym?.name === "CryptoKey" || psym?.name === "KeyAlgorithm" ||
+      psym?.name === "SubtleCrypto" || psym?.name === "Crypto") &&
     checker.declarationsOf(psym).some(
       (d) => (ts.isInterfaceDeclaration(d) || ts.isClassDeclaration(d)) && ctx.isStdlibFile(d.getSourceFile()),
     )
