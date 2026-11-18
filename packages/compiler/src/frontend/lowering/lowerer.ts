@@ -1045,6 +1045,7 @@ export function lowerToIr(
           }
         }
       }
+      lowerProfileFlush();
       // The caller re-loads the program with the edits and lowers THAT.
       // Nothing of this pass is kept: its discovery only answered the
       // question.
