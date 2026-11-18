@@ -3645,9 +3645,9 @@ export type IrLibFn =
   | "dyn.keySet"
   /** `dyn.keySet` at a SLOPPY-mode site (CommonJS without "use strict", outside a class body): an assignment to a non-writable property (a class's `prototype`) is ignored silently, as Node does. */
   | "dyn.keySetSloppy"
-  /** `dyn.keySet(recv, "k", thunk())` with the call DEFERRED (ir/lazy-init.ts): the third argument is a zero-argument function VALUE; the member stands as an
+  /** `dyn.keySet(recv, "k", thunk())` with the call DEFERRED (ir/lazy-init.ts): the third argument is a zero-argument function VALUE and the fourth the install-time GUARD (false: the thunk runs now); the member stands as an
    * enumerable accessor until the first operation that needs the value runs it once (runtime: scr_dyn_key_set_lazy). A receiver the lazy form cannot
-   * represent exactly runs the thunk now. All borrowed; void; in the may-throw seed set (the eager fallback can throw). */
+   * represent exactly runs the thunk now. Straight-line (usable inside a seqExpr). All borrowed; void; in the may-throw seed set (the eager fallback can throw). */
   | "dyn.keySetLazy"
   /** The install-time guard of a lazy member: is the dyn value a function value whose source text is exactly the string literal (scr_dyn_fn_src_is). Both
    * borrowed, never throws. */
