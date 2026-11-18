@@ -629,6 +629,22 @@ function loadProgramImpl(
   let load!: LoadResult & { disposeAll: () => void };
   let decided: DecidedPins | undefined = opts?.decidedPins;
   if (decided !== undefined && (decided.seed.size > 0 || decided.retype.size > 0 || textEdits !== undefined || twinEdits !== undefined)) {
+    if (process.env["SCRIPTC_PINREUSE_VERIFY"] !== undefined) {
+      // LAB ASSERTION: decide the pins the historical way on a plain open and require them equal to the handed-over ones.
+      const chk = open(null);
+      const rp = process.env["SCRIPTC_RETYPE_PIN"] !== "0" ? computeRetypePins(chk.load.program) : new Map<string, RetypePin[]>();
+      if (process.env["SCRIPTC_EMPTY_PIN"] !== "0") {
+        for (const [file, list] of computeEmptyCollectionPins(chk.load.program)) rp.set(file, [...(rp.get(file) ?? []), ...list]);
+      }
+      const rk = new Map<string, readonly RetypePin[]>();
+      for (const [file, list] of rp) rk.set(file.split("\\").join("/"), list);
+      const sp = process.env["SCRIPTC_SEED_PIN"] !== "0" ? computeSeedPins(chk.load.program) : new Map<string, SeedPin[]>();
+      const canon = (m: ReadonlyMap<string, unknown>): string => JSON.stringify([...m].sort((x, y) => (x[0] < y[0] ? -1 : 1)));
+      const same = canon(sp) === canon(decided.seed) && canon(rk) === canon(decided.retype);
+      process.stderr.write(`[pinverify] ${same ? "EQUAL" : "DIFFER"} seed=${sp.size}/${decided.seed.size} retype=${rk.size}/${decided.retype.size}\n`);
+      chk.load.disposeAll();
+      chk.host.close();
+    }
     ({ host, load } = open(decided.seed.size > 0 ? decided.seed : null, decided.retype.size > 0 ? decided.retype : null, true));
   } else {
   ({ host, load } = open(null));
