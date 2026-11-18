@@ -7,7 +7,7 @@
 import { erasedViewMemberRefusal } from "./lower-erasedview.js";
 import { readFileSync } from "node:fs";
 import { evalStaticInfoOf, lowerEvalClassInstanceOf } from "./lower-evalclass.js";
-import { protoDataFieldRead, protoDataHasKey, protoDataMemberRead } from "./lower-protodata.js";
+import { familyRebindsConstructor, protoDataFieldRead, protoDataHasKey, protoDataMemberRead } from "./lower-protodata.js";
 import { dynFnCheckedAsFunc, dynFnReadable, fnReturnsProjection, protoSlotOf, slotReadOr } from "./lower-protoslots.js";
 import * as ts from "../ts7/adapter.js";
 import { dirname, relative } from "node:path";
@@ -3109,6 +3109,11 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       if (whole !== null) return whole;
     }
     if (ts.isPropertyAccessExpression(expr)) {
+      // `Object.getPrototypeOf(x).constructor` where x's class family rebinds `constructor`: the instance's own `.constructor` read.
+      if (expr.name.text === "constructor" && expr.questionDotToken === undefined && protoCtorReceiver(L, expr) !== null) {
+        const viaProto = lowerInstanceConstructorRead(L, expr);
+        if (viaProto !== null) return viaProto;
+      }
       // `.name` / `.length` of a token-typed builtin constructor (Map, Set, Date, ...): the builtin's own fixed facts.
       {
         const tf = expr.name.text === "name" || expr.name.text === "length" ? tokenCtorFactsOf(L, expr.expression) : null;
@@ -21792,8 +21797,25 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
    * already shown what an unmeasured fold costs. It keeps the fence. */
   /** Is `expr` `x.constructor` with `x` an instance of a PROGRAM class (no
    * runtime-provided class in its chain)? */
+  /** The instance whose prototype `Object.getPrototypeOf(x).constructor` reads, when x is an instance of a class in a family that rebinds
+   * `constructor` (`D.prototype.constructor = M`): Node reads the first own `constructor` up x's chain, which for an instance with no
+   * own one is exactly `x.constructor`, so the read lowers as that. Null for every other receiver (the read keeps its lowering). */
+  function protoCtorReceiver(L: Lowerer, expr: ts.PropertyAccessExpression): ts.Expression | null {
+    if (L.ctorRebinds.size === 0) return null;
+    let c: ts.Expression = expr.expression;
+    while (ts.isParenthesizedExpression(c)) c = c.expression;
+    if (!ts.isCallExpression(c) || c.arguments.length !== 1 || ts.isSpreadElement(c.arguments[0]!) || !ts.isPropertyAccessExpression(c.expression)) return null;
+    if (c.expression.name.text !== "getPrototypeOf" || !ts.isIdentifier(c.expression.expression) || !L.isStdlibGlobal(c.expression.expression, "Object")) return null;
+    const arg = c.arguments[0]!;
+    const t = L.mapTypeOf(L.typeOf(arg));
+    if (t?.kind !== "object") return null;
+    const info = L.classes.get(t.className);
+    return info !== undefined && familyRebindsConstructor(L, info) ? arg : null;
+  }
+
   function isInstanceConstructorRead(L: Lowerer, expr: ts.Expression): expr is ts.PropertyAccessExpression {
     if (!ts.isPropertyAccessExpression(expr) || expr.name.text !== "constructor" || expr.questionDotToken !== undefined) return false;
+    if (protoCtorReceiver(L, expr) !== null) return true;
     const recvT = L.mapTypeOf(L.typeOf(expr.expression));
     if (recvT?.kind !== "object") return false;
     const info = L.classes.get(recvT.className);
@@ -21970,7 +21992,7 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
   function lowerInstanceConstructorRead(L: Lowerer, expr: ts.Expression): IrExpr | null {
     if (!isInstanceConstructorRead(L, expr)) return null;
     const loc = locOf(expr);
-    const recv = L.lowerExpr(expr.expression);
+    const recv = L.lowerExpr(protoCtorReceiver(L, expr as ts.PropertyAccessExpression) ?? expr.expression);
     if (recv.type.kind !== "object") return null;
     // An instance of a per-evaluation class: its constructor IS the evaluation
     // object its hidden field names.
