@@ -88,6 +88,8 @@ export function lazyInitPass(mod: IrModule): LazyInitResult {
   };
   for (const f of mod.functions) scan(f.body);
 
+  let calleeSample = "";
+  const stripIr = (o: unknown, d = 0): unknown => (Array.isArray(o) ? o.map((x) => stripIr(x, d + 1)) : isNode(o) ? Object.fromEntries(Object.entries(o).filter(([k]) => k !== "loc" && k !== "type" && k !== "fnSrc" && k !== "srcText").map(([k, v]) => [k, d > 8 ? "..." : stripIr(v, d + 1)])) : o);
   // ── a callee is pure for plain arguments ──
   const calleeMemo = new Map<string, string>(); // "" = pure, else the reason
   const calleePure = (fnName: string): string => {
@@ -127,7 +129,7 @@ export function lazyInitPass(mod: IrModule): LazyInitResult {
               if (e["fn"] === "dyn.lt" || e["fn"] === "dyn.le" || e["fn"] === "dyn.gt" || e["fn"] === "dyn.ge") { (e["args"] as unknown[]).forEach(ex); return; }
               return refuse(`libCall ${String(e["fn"])}`);
             default:
-              return refuse(`expression ${String(e["kind"])}`);
+              return refuse(`expression ${String(e["kind"])}${e["kind"] === "libCall" ? " " + String(e["fn"]) : ""}`);
           }
         };
         const st = (s: unknown): void => {
@@ -169,7 +171,8 @@ export function lazyInitPass(mod: IrModule): LazyInitResult {
                 if (kindOf(recv) !== "varRef" || !fresh.has((recv as Node)["localId"] as string)) refuse("write to a non-fresh object");
                 ex(a[1]); ex(a[2]); return;
               }
-              return refuse("effectful expression statement");
+              if (mode === "why" && calleeSample === "") calleeSample = `${fnName}: ${JSON.stringify(stripIr(s)).slice(0, 1400)}`;
+              return refuse(`effectful expression statement (${kindOf(e)}${kindOf(e) === "libCall" ? " " + String(e["fn"]) : ""})`);
             }
             case "return": {
               let v: unknown = s["value"];
@@ -300,7 +303,7 @@ export function lazyInitPass(mod: IrModule): LazyInitResult {
             return;
           }
           default:
-            return refuse(`expression ${String(e["kind"])}`);
+            return refuse(`expression ${String(e["kind"])}${e["kind"] === "libCall" ? " " + String(e["fn"]) : ""}`);
         }
       };
       const st = (s: unknown): void => {
@@ -409,6 +412,7 @@ export function lazyInitPass(mod: IrModule): LazyInitResult {
 
   const countNested = (v: LazyVerdict): number => 1 + v.nested.reduce((a, n) => a + countNested(n), 0);
   const lines: string[] = [];
+  if (calleeSample !== "") lines.push(`LAZYINIT callee-sample ${calleeSample}`);
   for (const v of out.verdicts) {
     lines.push(`LAZYINIT ${v.lazy ? "lazy" : "keep"} ${v.where} ${v.key}${v.lazy ? "" : `: ${v.why}`}${v.nested.length > 0 ? ` (nested ${v.nested.filter((n) => n.lazy).length}/${v.nested.length})` : ""}`);
     if (mode === "why" && v.lazy) lines.push(`LAZYINIT   hoists ${[...new Set(v.hoists)].join(", ")}; callees ${v.callees.join(", ")}`);
