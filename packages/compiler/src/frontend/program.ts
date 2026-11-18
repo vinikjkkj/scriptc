@@ -217,7 +217,15 @@ function projectHasSqliteTypes(entryPath: string): boolean {
   return npm !== null && isSqliteTypesPath(npm.typesFile);
 }
 
+/** The pins a load decided on its plain program (see THE PIN HAND-OVER in loadProgram). */
+export interface DecidedPins {
+  readonly seed: ReadonlyMap<string, readonly SeedPin[]>;
+  readonly retype: ReadonlyMap<string, readonly RetypePin[]>;
+}
+
 export interface LoadResult {
+  /** The pins this load decided (or was handed), for a reload of the same program to be given back. */
+  decidedPins?: DecidedPins;
   program: ts.Program;
   entry: ts.SourceFile;
   /** User source files in Node's evaluation order: depth-first postorder
@@ -461,6 +469,9 @@ export function loadProgram(
     /** The twin reload's insertions (LowerResult.twinReload), applied after every other edit: offsets
      * are into the text the previous lowering's checker saw (emitter-twin.ts). */
     twinEdits?: ReadonlyMap<string, readonly TwinEdit[]>;
+    /** THE PIN HAND-OVER: the pins an earlier load of THIS SAME program (same entry, --npm-static selection and files) of the SAME compile decided
+     * (LoadResult.decidedPins). A reload applies them directly instead of opening the plain program to decide them again. */
+    decidedPins?: DecidedPins;
   },
 ): LoadResult & { dispose: () => void } {
   // Absolute from the start: tsgo's world is absolute-path-keyed (the CLI
@@ -608,7 +619,18 @@ export function loadProgram(
     const host = new ts.Ts7Host({ cwd: dirname(entryPath), fsShadow });
     return { host, load: loadProgram7(host, entryPath) };
   };
-  let { host, load } = open(null);
+  /* THE PIN HAND-OVER. Every load opens the program TWICE: once plain, to decide the retype, empty-collection and seed pins (three scans of the checked
+   * program), then again with those pins applied. The plain open depends only on the entry, the --npm-static selection and the files (the edits of a
+   * reload are applied by the SECOND open only), and the comment at the edit application below already says a reload "re-derives and re-applies the very
+   * same pins first, from the same unedited program". So a reload that is HANDED the pins of the load before it (opts.decidedPins, given only inside one
+   * compile) skips the plain program, its snapshot (about 16 s on REST), its desugar and the three scans, and goes straight to the second open. */
+  let host!: ts.Ts7Host;
+  let load!: LoadResult & { disposeAll: () => void };
+  let decided: DecidedPins | undefined = opts?.decidedPins;
+  if (decided !== undefined && (decided.seed.size > 0 || decided.retype.size > 0 || textEdits !== undefined || twinEdits !== undefined)) {
+    ({ host, load } = open(decided.seed.size > 0 ? decided.seed : null, decided.retype.size > 0 ? decided.retype : null, true));
+  } else {
+  ({ host, load } = open(null));
   // THE RETYPE PIN (retype-pin.ts) is decided on the same checked program and
   // applied by the same second load as the seed pin.
   const retypePins = process.env["SCRIPTC_RETYPE_PIN"] !== "0" ? computeRetypePins(load.program) : new Map<string, RetypePin[]>();
@@ -637,17 +659,20 @@ export function loadProgram(
         for (const pin of list) process.stderr.write(`[seedpin] ${pin.why} at ${file}:${pin.start}\n`);
       }
     }
+    decided = { seed: pins, retype: retypeKeyed };
     if (pins.size > 0 || retypeKeyed.size > 0 || textEdits !== undefined || twinEdits !== undefined) {
       load.disposeAll();
       host.close();
       ({ host, load } = open(pins.size > 0 ? pins : null, retypeKeyed.size > 0 ? retypeKeyed : null, true));
     }
   }
+  }
   // The untyped WeakMap admission is decided on the FINAL load (see types.ts).
   setTsUntypedWeakAdmission(programHasTsUntypedWeakNew(load.program));
   scanUndefArrayElems(load.program);
   return {
     ...load,
+    ...(decided !== undefined ? { decidedPins: decided } : {}),
     dispose: () => {
       load.disposeAll();
       host.close();

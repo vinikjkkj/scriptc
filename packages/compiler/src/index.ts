@@ -582,6 +582,8 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
   }
 
   const finalLoad = load;
+  // The pins the first load decided ride to the reloads of this same compile (loadProgram: THE PIN HAND-OVER).
+  const decidedPins = finalLoad.decidedPins;
   let pinnedLoad: (LoadResult & { dispose: () => void }) | null = null;
   // What the frontend answers about the FIRST load (entry text, exports, source texts). A reload (pin, twin) frees that load before
   // the next program loads, so the answers are taken first and memoised: the peak holds one program, not up to three.
@@ -613,7 +615,7 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
       // one preflight, the contract and the identity hashes read.
       pinnedLoad?.dispose();
       freeFinalLoad();
-      pinnedLoad = loadProgram(entryPath, { npmStatic: effective, textEdits: first.pinReload });
+      pinnedLoad = loadProgram(entryPath, { npmStatic: effective, textEdits: first.pinReload, ...(decidedPins !== undefined ? { decidedPins } : {}) });
       checkPreflight(pinnedLoad);
       const second = lowerToIr(pinnedLoad.program, pinnedLoad.entry, pinnedLoad.moduleOrder, {
         ...opts,
@@ -691,7 +693,7 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
         pinnedLoad?.dispose();
         pinnedLoad = null;
         freeFinalLoad();
-        twinLoad = loadProgram(entryPath, { npmStatic: effective, ...(done.pins !== undefined ? { textEdits: done.pins } : {}), twinEdits: edits });
+        twinLoad = loadProgram(entryPath, { npmStatic: effective, ...(done.pins !== undefined ? { textEdits: done.pins } : {}), twinEdits: edits, ...(decidedPins !== undefined ? { decidedPins } : {}) });
         if (checkPreflight(twinLoad).length > 0) return keep;
         const again = lowerToIr(twinLoad.program, twinLoad.entry, twinLoad.moduleOrder, {
           ...opts,
