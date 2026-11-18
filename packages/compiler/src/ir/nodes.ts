@@ -3652,6 +3652,8 @@ export type IrLibFn =
   /** The install-time guard of a lazy member: is the dyn value a function value whose source text is exactly the string literal (scr_dyn_fn_src_is). Both
    * borrowed, never throws. */
   | "dyn.fnSrcIs"
+  /** Is `recv[key]` (a string literal key) an OWN plain data member of an ordinary object: not a proxy, not a function, no accessor, not a lazy slot, so a keyed read cannot run code or throw (scr_dyn_is_plain_data). Both borrowed, never throws. */
+  | "dyn.isPlainData"
   /** Binds a compiled function value's LIFTED member (an expando
    * member the frontend stores in a module global — lower-expando.ts) to
    * an accessor PAIR, so a dyn box over that function reaches the same

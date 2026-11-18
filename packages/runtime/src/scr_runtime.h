@@ -7393,6 +7393,7 @@ void scr_dyn_lazy_force_all_any(ScrDyn *t);
 void scr_dyn_lazy_force_key_any(ScrDyn *t, const char *key, size_t key_len);
 /* The install-time guard of a lazy member: is `v` a function value whose source text is exactly `text`. */
 bool scr_dyn_fn_src_is(const ScrDyn *v, const ScrStr *text);
+bool scr_dyn_is_plain_data(const ScrDyn *o, const ScrStr *key);
 /* A closure that ADAPTS the function value `fn` (a typed-slot wrapper over a boxed function) answers the same own properties: it takes `fn`'s table,
  * allocated now if the function has none yet, so a write through either is seen through both. */
 void scr_dyn_fn_share_props(ScrClosure *adapter, const ScrDyn *fn);
