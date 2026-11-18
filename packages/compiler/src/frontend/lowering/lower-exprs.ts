@@ -10948,9 +10948,8 @@ function lowerDiscriminantDispatchLiteral(
   const def = L.unions.get(ctxUnion.unionId);
   if (def === undefined) return null;
   const members = ts.constituentTypes(ctxTs);
-  // the arm of each member: a record arm of the slot's union with exactly the literal's property names
-  const memberArm = new Map<ts.Type, { shapeId: string; tag: number }>();
-  for (const m of members) {
+  // the arm of a member: a record arm of the slot's union with exactly the literal's property names
+  const armOfMember = (m: ts.Type): { shapeId: string; tag: number } | null => {
     const mm = L.mapTypeOf(m);
     if (mm?.kind !== "record") return null;
     const shape = L.shapes.get(mm.shapeId);
@@ -10958,9 +10957,12 @@ function lowerDiscriminantDispatchLiteral(
     if (shape.fields.length !== props.length || !props.every((p) => shape.fields.some((f) => f.name === p.name))) return null;
     const tag = def.arms.findIndex((a) => a.kind === "record" && a.shapeId === mm.shapeId);
     if (tag < 0) return null;
-    memberArm.set(m, { shapeId: mm.shapeId, tag });
-  }
-  // the discriminant: the property whose literal type is a union of the members' literal values
+    return { shapeId: mm.shapeId, tag };
+  };
+  // the discriminant: the property whose literal type is a union of string literals each naming exactly one member of the context union. Members whose
+  // literal the discriminant's type does not contain (`Exclude<Item['kind'], 'a' | 'b'>` leaves the arms 'a' and 'b' out, and they may carry other
+  // properties) are unreachable from this literal and are not built; every member must still declare ONE string literal for the property, or the
+  // property does not discriminate (a `string`-typed member would accept any of the values).
   const litOf = (m: ts.Type, name: string): string | null => {
     const sym = L.checker.getPropertyOfType(m, name);
     if (sym === undefined) return null;
@@ -10973,16 +10975,22 @@ function lowerDiscriminantDispatchLiteral(
     const t = L.typeOf(p.node);
     const lits = t.isUnionType() ? ts.constituentTypes(t) : [t];
     if (lits.length < 2 || !lits.every((x) => x.isStringLiteralType())) continue;
-    const byLit = new Map<string, { shapeId: string; tag: number }>();
+    const memberOfLit = new Map<string, ts.Type>();
     let ok = true;
     for (const m of members) {
       const v = litOf(m, p.name);
-      if (v === null) { ok = false; break; }
-      if (byLit.has(v)) { ok = false; break; } // two members share a literal: not a discriminant
-      byLit.set(v, memberArm.get(m)!);
+      if (v === null || memberOfLit.has(v)) { ok = false; break; } // not a single literal, or two members share it: not a discriminant
+      memberOfLit.set(v, m);
     }
     if (!ok) continue;
-    if (!lits.every((x) => byLit.has((x as ts.Type & { value: string }).value))) continue;
+    const byLit = new Map<string, { shapeId: string; tag: number }>();
+    for (const x of lits) {
+      const m = memberOfLit.get((x as ts.Type & { value: string }).value);
+      const arm = m === undefined ? null : armOfMember(m);
+      if (arm === null) { ok = false; break; }
+      byLit.set((x as ts.Type & { value: string }).value, arm);
+    }
+    if (!ok) continue;
     disc = p;
     for (const [k, v] of byLit) armOfLiteral.set(k, v);
     break;
