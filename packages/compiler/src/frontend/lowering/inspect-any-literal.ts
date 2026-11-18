@@ -55,6 +55,27 @@ function literalSite(node: ts.Node): "print" | "init" | null {
   }
 }
 
+/** A literal handed (through nested literals only) as an ARGUMENT whose parameter is declared `any` or `unknown`: the callee takes a dynamic value, so the literal's
+ * `any` members are checked-dynamic slots exactly as in a printed literal. `push(sess, "auth_qr", { qr: e.qr })` over an `any` listener parameter (the erased twin of a typed
+ * emitter listener, emitter-twin.ts) is the shape that was refused (SC2001) while the same call over the typed parameter compiled. The contextual type is the checker's answer
+ * for the OUTERMOST literal, so a parameter of any other type keeps the refusal. */
+export function isDynArgLiteral(checker: Pick<Lowerer["checker"], "getContextualType">, node: ts.Node): boolean {
+  if (!isLiteralLike(node) || ts.isNewExpression(node)) return false;
+  let n: ts.Node = node;
+  for (;;) {
+    const p: ts.Node | undefined = n.parent;
+    if (p === undefined) return false;
+    if (ts.isParenthesizedExpression(p) || ts.isArrayLiteralExpression(p) || ts.isObjectLiteralExpression(p) || ts.isShorthandPropertyAssignment(p)) { n = p; continue; }
+    if (ts.isPropertyAssignment(p) && same(p.initializer, n)) { n = p; continue; }
+    if (ts.isCallExpression(p) && p.arguments.some((a) => same(a, n))) {
+      const ctx = checker.getContextualType(n as ts.Expression);
+     
+      return ctx !== undefined && (ctx.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0;
+    }
+    return false;
+  }
+}
+
 /** True when `node` is an object/array literal or a `new` expression that sits, through nested literals only, in an argument of console.log/info/warn/error/debug/dir,
  * util.inspect/format or JSON.stringify, or is the initializer of an unannotated variable. */
 export function isPrintedLiteral(node: ts.Node): boolean {

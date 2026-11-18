@@ -150,7 +150,7 @@ import { settleOrValueArms,
 import { CompoundOp, IslandFnEntry, boundaryIntoIslandMsg, boundaryOutOfIslandMsg, BuiltinModuleFn, builtinConstLit, builtinModuleConstOf, builtinModulesArrayLit, builtinFenceHintOf, builtinModuleFnOf, stdlibMemberFence, isStdlibMember, isStdlibSymbol, isStdlibGlobal, stdlibGlobalMember, nodeTypesOnlySymbol } from "./surfaces.js";
 import { FileParts, isNestedClassDeclaration, splitFiles, collectProgram, collectNpmImports, collectJsonImports,
   collectJsonRequires, jsonRequireTypeOverride, jsonAwareChecker, collectDeclTwinExportBridges, moduleArtifacts, collectGlobals, declSymbolOf, defaultExportSymbolOf, lowerFileInit, lowerDefaultExport, buildMain, appendDynamicImportModules } from "./lower-modules.js";
-import { isAnyLiteralAssignRhs, isAnyLiteralBinding, isAnyResultCall, isPrintedLiteral } from "./inspect-any-literal.js";
+import { isAnyLiteralAssignRhs, isAnyLiteralBinding, isAnyResultCall, isDynArgLiteral, isPrintedLiteral } from "./inspect-any-literal.js";
 import { scanDefinePropStringTables, scanDefinePropSymbolSlots, scanUntypedSymbolWrites } from "./lower-classes.js";
 import { protoClassArmOn, protoClassInstanceType } from "./proto-class-consume.js";
 import { genIterableDrainCall, genValueDrainCall, scanGenGate } from "./lower-generators.js";
@@ -1213,7 +1213,7 @@ export function dynFallbackType(L: Lowerer, node: ts.Node, t: ts.Type): IrType |
   if (!isJsSourceFile(node.getSourceFile())) {
     if (t.flags & ts.TypeFlags.Any) return DYN;
     // A variable whose type is its literal initializer's inferred type (`const r = { n }`, n: any): the any members are the checked-dynamic slot (inspect-any-literal.ts).
-    if (isAnyLiteralBinding(L.checker, node) || isPrintedLiteral(node) || isAnyLiteralAssignRhs(L.checker, node) || isAnyResultCall(node)) {
+    if (isAnyLiteralBinding(L.checker, node) || isPrintedLiteral(node) || isAnyLiteralAssignRhs(L.checker, node) || isAnyResultCall(node) || isDynArgLiteral(L.checker, node)) {
       const m = mapType(t, { ...L.typeCtx, anyDyn: true });
       if (m !== null && m.kind !== "void") {
         L.registerAnyLiteralType(t, node, 0);
@@ -8091,7 +8091,7 @@ export class Lowerer {
   mapPrintedLiteralTypeOf(node: ts.Node, t: ts.Type): IrType | null {
     const plain = this.mapTypeOf(t);
     // TypeScript sources only: a JavaScript file's `any` residue already has its own checked-dynamic fallbacks (the dyn literal arms), which must keep deciding it.
-    if (plain !== null || isJsSourceFile(node.getSourceFile()) || !(isPrintedLiteral(node) || isAnyLiteralAssignRhs(this.checker, node))) return plain;
+    if (plain !== null || isJsSourceFile(node.getSourceFile()) || !(isPrintedLiteral(node) || isAnyLiteralAssignRhs(this.checker, node) || isDynArgLiteral(this.checker, node))) return plain;
     return mapType(t, { ...this.typeCtx, anyDyn: true });
   }
 
