@@ -92,6 +92,15 @@ export function noteHash(label: string, ...texts: (string | null | undefined)[])
   hashes[`${label}.units`] = units.join(",");
 }
 
+const passFiles: Record<string, Record<string, string>> = {};
+/** Record, per load of the program ("first", "pin", "twin"), the sha1 of every source file's text, so a file's text can be compared across the reloads. Lab only. */
+export function notePassFiles(label: string, files: Iterable<{ fileName: string; text: string }>): void {
+  if (!phaseTimesOn) return;
+  const m: Record<string, string> = {};
+  for (const f of files) m[f.fileName] = createHash("sha1").update(f.text).digest("hex").slice(0, 10) + ":" + f.text.length;
+  passFiles[label] = m;
+}
+
 function statusKb(pid: number | undefined, key: string): number {
   if (pid === undefined || process.platform !== "linux") return 0;
   try {
@@ -131,6 +140,7 @@ function install(): void {
         argv: process.argv.slice(2),
         cli: process.argv[1],
         hashes,
+        passFiles,
         cpus: (globalThis as { navigator?: { hardwareConcurrency?: number } }).navigator?.hardwareConcurrency ?? 0,
         wallMs: wall,
         rootMs,
