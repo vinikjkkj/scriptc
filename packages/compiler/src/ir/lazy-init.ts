@@ -253,6 +253,14 @@ export function lazyInitPass(mod: IrModule): LazyInitResult {
         if (k === "varRef") return plainLocals.has((x as Node)["localId"] as string);
         return false;
       };
+      const isFreshValue = (x0: unknown): boolean => {
+        let x: unknown = x0;
+        while (kindOf(x) === "dynFrom") x = (x as Node)["value"];
+        const k = kindOf(x);
+        if (k === "varRef") return fresh.has((x as Node)["localId"] as string); // an alias of a fresh local
+        if (k === "closure" || k === "dynObjLit" || k === "arrayLit" || k === "dynArrLit") return true;
+        return k === "libCall" && (x as Node)["fn"] === "dyn.objCreateProto";
+      };
       const ex = (e: unknown): void => {
         if (!isNode(e)) return refuse("non-node expression");
         switch (e["kind"]) {
@@ -267,6 +275,12 @@ export function lazyInitPass(mod: IrModule): LazyInitResult {
             return ex(e["value"] ?? e["operand"]);
           case "bin":
             ex(e["left"]); return ex(e["right"]);
+          case "libCall":
+            if (e["fn"] === "dyn.objCreateProto" && Array.isArray(e["args"]) && (e["args"] as unknown[]).length === 1 && isFreshRoot((e["args"] as unknown[])[0])) return;
+            return refuse(`expression libCall ${String(e["fn"])}`);
+          case "seqExpr":
+            (e["stmts"] as unknown[]).forEach(st);
+            return ex(e["result"]);
           case "dynCheck":
             return ex(e["value"]); // a representation cast of a hoistable value: hoisted with it, so it traps at the original position
           case "closure":
@@ -330,7 +344,7 @@ export function lazyInitPass(mod: IrModule): LazyInitResult {
               ex(init);
               let x: unknown = init;
               while (kindOf(x) === "dynFrom") x = (x as Node)["value"];
-              if (kindOf(x) === "closure" || kindOf(x) === "dynObjLit" || kindOf(x) === "arrayLit") fresh.add(id);
+              if (isFreshValue(init)) fresh.add(id); else fresh.delete(id);
             }
             return;
           }
@@ -340,6 +354,7 @@ export function lazyInitPass(mod: IrModule): LazyInitResult {
             if (captured.has(id)) refuse(`writes the captured binding ${id}`);
             ex(s["value"]);
             if (plainArg(s["value"])) plainLocals.add(id);
+            if (isFreshValue(s["value"])) fresh.add(id); else fresh.delete(id);
             return;
           }
           case "block":
