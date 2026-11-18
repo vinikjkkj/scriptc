@@ -472,6 +472,8 @@ export function loadProgram(
     /** THE PIN HAND-OVER: the pins an earlier load of THIS SAME program (same entry, --npm-static selection and files) of the SAME compile decided
      * (LoadResult.decidedPins). A reload applies them directly instead of opening the plain program to decide them again. */
     decidedPins?: DecidedPins;
+    /** The compile's desugar memo (ts7/program.ts DesugarMemo): created by the compile, shared by its loads. */
+    desugarMemo?: ts.DesugarMemo;
   },
 ): LoadResult & { dispose: () => void } {
   // Absolute from the start: tsgo's world is absolute-path-keyed (the CLI
@@ -616,7 +618,7 @@ export function loadProgram(
       hideFile: (path: string) =>
         (npmShadow?.hideFile(path) ?? false) || projectDtsRuntimeSibling(path) !== null,
     };
-    const host = new ts.Ts7Host({ cwd: dirname(entryPath), fsShadow });
+    const host = new ts.Ts7Host({ cwd: dirname(entryPath), fsShadow, ...(opts?.desugarMemo !== undefined ? { desugarMemo: opts.desugarMemo } : {}) });
     return { host, load: loadProgram7(host, entryPath) };
   };
   /* THE PIN HAND-OVER. Every load opens the program TWICE: once plain, to decide the retype, empty-collection and seed pins (three scans of the checked
