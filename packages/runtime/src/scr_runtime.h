@@ -7388,6 +7388,9 @@ void scr_dyn_key_set_lazy(ScrDyn *recv, ScrStr *key, ScrDyn *thunk);
 /* Materialize one lazy member / every lazy member of an object; false when the thunk could not be run to the end (its exception is pending). */
 bool scr_dyn_lazy_force(ScrDyn *o, const char *key, size_t key_len);
 void scr_dyn_obj_force_lazy_all(const ScrDyn *d);
+/* The same for an object or a function value's own-property table (the surfaces that expose a property's shape call these first). */
+void scr_dyn_lazy_force_all_any(ScrDyn *t);
+void scr_dyn_lazy_force_key_any(ScrDyn *t, const char *key, size_t key_len);
 /* The install-time guard of a lazy member: is `v` a function value whose source text is exactly `text`. */
 bool scr_dyn_fn_src_is(const ScrDyn *v, const ScrStr *text);
 /* A closure that ADAPTS the function value `fn` (a typed-slot wrapper over a boxed function) answers the same own properties: it takes `fn`'s table,

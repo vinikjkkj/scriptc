@@ -64,6 +64,7 @@ static bool gopd_index(const ScrStr *key, size_t *out) {
 
 /* An OBJ's own property: the member table (ordinary data), else the hidden table (its recorded flags). NULL when absent. */
 static ScrDyn *gopd_obj(const ScrDyn *v, const char *key, size_t len) {
+  scr_dyn_lazy_force_key_any((ScrDyn *)v, key, len); /* a lazy member is reported as the data property it stands for */
   bool is_data = true, writable = false, configurable = false, enumerable = false;
   if (scr_dyn_obj_hidden_attrs(v, key, len, &is_data, &writable, &configurable, &enumerable)) {
     const ScrDyn *h = scr_dyn_ext(v)->hidden;
