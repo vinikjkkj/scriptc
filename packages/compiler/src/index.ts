@@ -9,7 +9,7 @@ import { emitModule, emitModuleProgram } from "./backend/emission/emitter.js";
 import { coroPlans } from "./ir/coro-plans.js";
 import { emitFinalKeyReadWidths, emitFinalNarrowBridges, flushKeyReadCensus, flushNarrowBridgeCensus, keyReadCensusOnly } from "./frontend/lowering/keyread-census.js";
 import { emitLlvmModule, LlvmUnsupportedError, type LlvmEmitStats } from "./backend/llvm/emitter.js";
-import { checkerPanicDiag, ffiNativeBuildDiag, unsupportedDiag, libAsyncExportDiag, libAsyncSurfaceDiag, libExportUnresolvedDiag, libGenericExportDiag, libIntBoundaryDiag, libNpmIneligibleDiag, libSidecarDiag, libUnmappableSignatureDiag, iceDiag, isCheckerPanic, LIB_INBOUND_BYTES_TRAP_CODE, LIB_RUNTIME_TRAP_CODES, type ScrDiagnostic } from "./diagnostics/diagnostic.js";
+import { checkerPanicDiag, ffiNativeBuildDiag, unsupportedDiag, libAsyncExportDiag, libAsyncSurfaceDiag, libExportUnresolvedDiag, libGenericExportDiag, libIntBoundaryDiag, libNpmIneligibleDiag, libSidecarDiag, libUnmappableSignatureDiag, iceDiag, twinMissingAdvice, isCheckerPanic, LIB_INBOUND_BYTES_TRAP_CODE, LIB_RUNTIME_TRAP_CODES, type ScrDiagnostic } from "./diagnostics/diagnostic.js";
 import { checkLibraryIntegerSlots, classSeed, hasIntSlots, numberCarrierKind, type FnIntSlots, type IntSlotConfig } from "./library/int-infer.js";
 import { loadLibraryProfile, profileRemediation, profileTeaching, type LibraryProfile } from "./library/profile.js";
 import { decorateLibraryRefusals, evaluateLibraryFences } from "./library/fence-eval.js";
@@ -294,7 +294,7 @@ export interface AnalyzeOptions {
  * parse scan and lower-comptime's transpileModule). Everything after
  * lowering is IR-world, so analyze() and compile() consume this one
  * Frontend shape. */
-interface Frontend {
+export interface Frontend {
   preflight: ScrDiagnostic[];
   /** The entry source file's text (emitModule's header comment input). */
   entryText: () => string;
@@ -435,7 +435,7 @@ function packagesNamedByDiag(message: string, optedIn: ReadonlySet<string>): Set
  * status the shared loops record becomes compileLibrary's SC4020
  * static-or-refuse teaching, and the detection closes over the opted-in
  * packages' own bare edges (no island exists to serve a dep from). */
-function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" | "lib"): Frontend {
+export function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" | "lib"): Frontend {
   // ONE COMPILE'S desugar memo (ts7/program.ts DesugarMemo): every load of this frontend shares it, the next compile starts empty.
   const desugarMemo = new DesugarMemo();
   const statuses: NpmStaticStatus[] = [];
@@ -661,6 +661,7 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
         return { ...l, start: map(l.start), end: map(l.end) };
       };
       for (const d of [...second.diagnostics, ...second.advisories]) d.loc = back(d.loc);
+      if (second.twinSkipped !== undefined) for (const x of second.twinSkipped) x.loc = back(x.loc);
       return { result: second, pins: first.pinReload };
   };
 
@@ -693,12 +694,33 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
     sourceTexts: answerSourceTexts,
     lower: (opts) => {
       const done = lowerPinned(opts);
-      if (done.result.twinReload === undefined) return done.result;
+      // The listeners the generator skipped keep the typed body behind the checked boundary: say so (SC6005), on whichever result is kept.
+      const skippedAdvice: ScrDiagnostic[] = (done.result.twinSkipped ?? []).map((x) => twinMissingAdvice(x.why, x.loc));
+      if (process.env["SCRIPTC_TWIN_WHY"] !== undefined && skippedAdvice.length > 0) {
+        const byWhy = new Map<string, number>();
+        for (const a of skippedAdvice) byWhy.set(a.message, (byWhy.get(a.message) ?? 0) + 1);
+        for (const [m, n] of byWhy) process.stderr.write(`[twin] skipped ${n} listener(s): ${m}\n`);
+      }
+      if (done.result.twinReload === undefined) {
+        done.result.advisories.push(...skippedAdvice);
+        return done.result;
+      }
       // THE TWIN RELOAD (emitter-twin.ts): the lowering is complete, and a dynamic emit can reach typed
       // listeners it registers. Load the program again with the erased twins inserted and lower THAT. A
       // load or lowering that does not come out clean keeps the complete first result: the twin is an
-      // improvement of what a dynamic emit hands a typed listener, never a reason to refuse a program.
+      // improvement of what a dynamic emit hands a typed listener. A twin load that does not come out clean is an INTERNAL ERROR: the
+      // pin-only result it would fall back to hands a typed listener a value outside its declared type through the checked boundary
+      // (a TypeError where Node carries on), so keeping it silently ships a program that may be wrong. The generator must build every
+      // twin it decides on, and a reload it cannot is a compiler defect to report, not a program to compile.
       const keep = done.result;
+      const refuseTwin = (what: string, loc: SrcLoc): LowerResult => ({
+        ...keep,
+        module: null,
+        diagnostics: [
+          ...keep.diagnostics,
+          iceDiag(`the erased twins of ${[...keep.twinReload!.values()].reduce((n, l) => n + l.filter((e) => e.text.startsWith("/*@sctwin")).length, 0)} typed emitter listener(s) could not be built (${what}), and the typed listeners would be left on the checked boundary`, loc),
+        ],
+      });
       const edits = keep.twinReload!;
       if (process.env["SCRIPTC_TWIN_WHY"] !== undefined) process.stderr.write(`[twin] reload: ${[...edits.values()].reduce((n, l) => n + l.filter((e) => e.text.startsWith("/*@sctwin")).length, 0)} listener(s)\n`);
       let twinLoad: (LoadResult & { dispose: () => void }) | null = null;
@@ -711,7 +733,7 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
         const twinPre = checkPreflight(twinLoad);
         if (twinPre.length > 0) {
           if (process.env["SCRIPTC_TWIN_WHY"] !== undefined) process.stderr.write(`[twin] reload refused by preflight: ${twinWhy(twinLoad, twinPre)}\n`);
-          return keep;
+          return refuseTwin(`the twin program fails preflight: ${twinPre[0]!.code} ${twinPre[0]!.message.slice(0, 120)}`, twinBack(twinPre[0]!.loc));
         }
         notePassFiles("twin", twinLoad.program.getSourceFiles().filter((sf) => !sf.isDeclarationFile));
         const again = tapped("lower.twin", () => lowerToIr(twinLoad!.program, twinLoad!.entry, twinLoad!.moduleOrder, {
@@ -727,13 +749,22 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
             process.stderr.write(`[twin] refused at: ${twinWhy(twinLoad, again.diagnostics)}\n`);
             for (const v of bad.slice(0, 5)) process.stderr.write(`[twin] reload invalid: ${v.message}\n`);
           }
-          return keep;
+          const d0 = again.diagnostics[0];
+          if (d0 !== undefined && bad.length === 0) {
+            // The copy's body needs a dynamic operation the compiler does not lower yet (a refusal the program's own `any` code would get too): the
+            // listeners stay on the checked boundary and the build says so, naming the first refusal. A form that compiles today does not stop compiling.
+            keep.advisories.push(...skippedAdvice);
+            for (const d of again.diagnostics.slice(0, 3)) keep.advisories.push(twinMissingAdvice(`its erased copy does not lower: ${d.code} ${d.message.slice(0, 140)}`, twinBack(d.loc)));
+            return keep;
+          }
+          return refuseTwin(d0 !== undefined ? `the twin program does not lower: ${d0.code} ${d0.message.slice(0, 120)}` : bad[0] !== undefined ? `the twin IR is invalid: ${bad[0].message.slice(0, 120)}` : "the twin program lowers to no module", d0 !== undefined ? twinBack(d0.loc) : { file: entryPath, start: 0, end: 0 });
         }
         for (const d of again.advisories) d.loc = twinBack(d.loc);
+        again.advisories.push(...skippedAdvice);
         return again;
       } catch (e) {
         if (process.env["SCRIPTC_TWIN_WHY"] !== undefined) process.stderr.write(`[twin] reload failed: ${(e as Error).message}\n`);
-        return keep;
+        return refuseTwin(`the twin reload threw: ${(e as Error).message.slice(0, 160)}`, { file: entryPath, start: 0, end: 0 });
       } finally {
         twinLoad?.dispose();
       }
