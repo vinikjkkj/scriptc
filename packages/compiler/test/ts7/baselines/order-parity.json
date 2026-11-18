@@ -26295,6 +26295,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/diagnostics/a-class-prototype-constructor-assigned-another-class-is-refused.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/a-class-prototype-constructor-assigned-another-class-is-refused.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/diagnostics/a-dynamic-only-call-on-a-receiver-that-cannot-be-read.ts": {
    "order": [
     "<repo>/tests/diagnostics/a-dynamic-only-call-on-a-receiver-that-cannot-be-read.ts"
@@ -26316,6 +26322,12 @@
   "<repo>/tests/diagnostics/a-map-of-unknown-parameter-that-reads-or-writes-a-value-keeps-refusing-a-typed-map.ts": {
    "order": [
     "<repo>/tests/diagnostics/a-map-of-unknown-parameter-that-reads-or-writes-a-value-keeps-refusing-a-typed-map.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/a-prototype-copy-loop-over-a-program-class-mixin-is-refused.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/a-prototype-copy-loop-over-a-program-class-mixin-is-refused.ts"
    ],
    "diags": []
   },
