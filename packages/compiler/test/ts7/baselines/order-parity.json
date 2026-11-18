@@ -16868,6 +16868,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25710-a-dyn-typed-array-method-name-picks-its-method-exactly-and-an-unknown-name-throws-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25710-a-dyn-typed-array-method-name-picks-its-method-exactly-and-an-unknown-name-throws-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2572-readable-emitted-readable-flag.cjs": {
    "order": [
     "<repo>/tests/corpus/2572-readable-emitted-readable-flag.cjs"
