@@ -608,6 +608,13 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
     finalFreed = true;
     finalLoad.dispose();
   };
+  /** SCRIPTC_TWIN_WHY: the served text around the diagnostics of a refused twin load (the text the checker refused, not the author's source). */
+  const twinWhy = (l: LoadResult, ds: readonly { code: string; message: string; loc: SrcLoc }[]): string =>
+    ds.slice(0, 3).map((d) => {
+      const f = d.loc.file.split("\\").join("/");
+      const t = l.program.getSourceFiles().find((x) => x.fileName.split("\\").join("/") === f)?.text ?? "";
+      return `${d.code} @${f.split("/").slice(-2).join("/")}:${d.loc.start} [${JSON.stringify(t.slice(Math.max(0, d.loc.start - 160), d.loc.start))} <<HERE>> ${JSON.stringify(t.slice(d.loc.start, d.loc.start + 80))}]`;
+    }).join(" | ");
   const lowerPinned = (opts: LowerOptions): { result: LowerResult; pins?: NonNullable<LowerResult["pinReload"]> } => {
       const first = lowerToIr(finalLoad.program, finalLoad.entry, finalLoad.moduleOrder, { ...opts, startupCrash: finalLoad.startupCrash ?? null });
       if (first.pinReload === undefined) return { result: first };
@@ -697,7 +704,11 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
         pinnedLoad = null;
         freeFinalLoad();
         twinLoad = loadProgram(entryPath, { desugarMemo, npmStatic: effective, ...(done.pins !== undefined ? { textEdits: done.pins } : {}), twinEdits: edits, ...(decidedPins !== undefined ? { decidedPins } : {}) });
-        if (checkPreflight(twinLoad).length > 0) return keep;
+        const twinPre = checkPreflight(twinLoad);
+        if (twinPre.length > 0) {
+          if (process.env["SCRIPTC_TWIN_WHY"] !== undefined) process.stderr.write(`[twin] reload refused by preflight: ${twinWhy(twinLoad, twinPre)}\n`);
+          return keep;
+        }
         const again = lowerToIr(twinLoad.program, twinLoad.entry, twinLoad.moduleOrder, {
           ...opts,
           startupCrash: twinLoad.startupCrash ?? null,
@@ -708,6 +719,7 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
         if (again.module === null || again.diagnostics.length > 0 || bad.length > 0) {
           if (process.env["SCRIPTC_TWIN_WHY"] !== undefined) {
             for (const d of again.diagnostics.slice(0, 5)) process.stderr.write(`[twin] reload refused: ${d.code} ${d.message}\n`);
+            process.stderr.write(`[twin] refused at: ${twinWhy(twinLoad, again.diagnostics)}\n`);
             for (const v of bad.slice(0, 5)) process.stderr.write(`[twin] reload invalid: ${v.message}\n`);
           }
           return keep;
