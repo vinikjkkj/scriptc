@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, test } from "vitest";
 import { runFrontend } from "../src/index.js";
+import { renderAll } from "../src/diagnostics/render.js";
 
 const HEAD = `
 import { EventEmitter } from "node:events";
@@ -71,4 +72,23 @@ ${EMIT}
 `);
   expect(r.ok).toBe(true);
   expect(r.codes).toEqual([]);
+}, 120_000);
+
+test("SC6005 renders with its code frame and hint (snapshot)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "scriptc-twinadv-"));
+  const file = join(dir, "main.ts");
+  writeFileSync(file, `${HEAD}
+class Holder { seen = 0; box = new Box(); hook = this.box.on("x", (v: R) => { this.seen += v.id; }); }
+const h = new Holder(); const b = h.box; ${EMIT}
+`);
+  const fe = runFrontend(file);
+  try {
+    const r = fe.lower({});
+    const adv = r.advisories.filter((a) => a.code === "SC6005");
+    expect(adv.length).toBe(1);
+    const rendered = renderAll(adv, fe.sourceTexts(), { color: false }).replaceAll(dir + "/", "");
+    await expect(rendered).toMatchFileSnapshot("__snapshots__/twin-advice-sc6005.txt");
+  } finally {
+    fe.dispose();
+  }
 }, 120_000);
