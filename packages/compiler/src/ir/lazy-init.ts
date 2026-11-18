@@ -363,13 +363,39 @@ export function lazyInitPass(mod: IrModule): LazyInitResult {
     return v;
   };
 
-  for (const f of mod.functions) {
-    if (!Array.isArray(f.body)) continue;
-    // candidates at the top level of any function body (module init in practice)
-    (f.body as unknown[]).forEach((st, idx) => {
-      const c = isCandidate(st);
-      if (c !== undefined) out.verdicts.push(analyse(c.fnName, `${f.name}#${idx}`, c.key, 0));
-    });
+  // Candidates: every `dyn.keySet(R, "K", callValue(closure F, []))` anywhere in a function body (a statement, or an operand of a sequence expression, as a
+  // generated table lowers to), except the ones nested in a candidate's own thunk (those are analysed as part of it). `shapes` counts what a keySet with a
+  // literal key and a call value looks like when it is NOT a candidate, so a zero is explained.
+  const shapes = new Map<string, number>();
+  let sample = "";
+  const asCand = (e: unknown): { recv: Node; key: string; fnName: string } | undefined => {
+    if (kindOf(e) !== "libCall" || (e as Node)["fn"] !== "dyn.keySet") return undefined;
+    return isCandidate({ kind: "exprStmt", expr: e });
+  };
+  const strip = (o: unknown, d = 0): unknown => (Array.isArray(o) ? o.map((x) => strip(x, d + 1)) : isNode(o) ? Object.fromEntries(Object.entries(o).filter(([k]) => k !== "loc" && k !== "type" && k !== "fnSrc" && k !== "srcText").map(([k, v]) => [k, d > 6 ? "..." : strip(v, d + 1)])) : o);
+  const nestedCands = new Set<unknown>();
+  const find = (n: unknown, where: string, top: boolean): void => {
+    if (Array.isArray(n)) { n.forEach((x) => find(x, where, top)); return; }
+    if (!isNode(n)) return;
+    const c = asCand(n);
+    if (c !== undefined) {
+      out.verdicts.push(analyse(c.fnName, where, c.key, 0));
+      // do not descend into the thunk's own body: it is another function and is reached through mod.functions
+    } else if (kindOf(n) === "libCall" && n["fn"] === "dyn.keySet" && Array.isArray(n["args"]) && (n["args"] as unknown[]).length === 3 && kindOf((n["args"] as unknown[])[1]) === "strLit") {
+      let v: unknown = (n["args"] as unknown[])[2];
+      while (kindOf(v) === "dynFrom") v = (v as Node)["value"];
+      const sh = kindOf(v) === "callValue" ? `callValue(callee=${kindOf((v as Node)["callee"])},args=${((v as Node)["args"] as unknown[]).length})` : kindOf(v);
+      shapes.set(sh, (shapes.get(sh) ?? 0) + 1);
+      if (sh.startsWith("callValue") && sample === "") sample = JSON.stringify(strip(n)).slice(0, 1500);
+    }
+    for (const key of Object.keys(n)) if (key !== "loc") find(n[key], where, top);
+  };
+  void nestedCands;
+  for (const f of mod.functions) if (Array.isArray(f.body)) find(f.body, f.name, true);
+  {
+    const l = [...shapes.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k, v]) => `${k}=${v}`).join(" ");
+    process.stderr.write(`LAZYINIT shapes (literal-key dyn.keySet value kinds, non-candidates) ${l}\n`);
+    if (mode === "why" && sample !== "") process.stderr.write(`LAZYINIT sample ${sample}\n`);
   }
   for (const k of guardKeys) {
     const set = closuresByKey.get(k) ?? new Set<string>();
