@@ -461,6 +461,8 @@ export function loadProgram(
     /** The twin reload's insertions (LowerResult.twinReload), applied after every other edit: offsets
      * are into the text the previous lowering's checker saw (emitter-twin.ts). */
     twinEdits?: ReadonlyMap<string, readonly TwinEdit[]>;
+    /** The compile's desugar memo (ts7/program.ts DesugarMemo): created by the compile, shared by its loads. */
+    desugarMemo?: ts.DesugarMemo;
   },
 ): LoadResult & { dispose: () => void } {
   // Absolute from the start: tsgo's world is absolute-path-keyed (the CLI
@@ -605,7 +607,7 @@ export function loadProgram(
       hideFile: (path: string) =>
         (npmShadow?.hideFile(path) ?? false) || projectDtsRuntimeSibling(path) !== null,
     };
-    const host = new ts.Ts7Host({ cwd: dirname(entryPath), fsShadow });
+    const host = new ts.Ts7Host({ cwd: dirname(entryPath), fsShadow, ...(opts?.desugarMemo !== undefined ? { desugarMemo: opts.desugarMemo } : {}) });
     return { host, load: loadProgram7(host, entryPath) };
   };
   let { host, load } = open(null);

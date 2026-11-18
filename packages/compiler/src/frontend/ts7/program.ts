@@ -15,6 +15,7 @@
  * 387 cold). createProgram() takes an optional shared host — the default
  * spawns a private one that dispose() closes. */
 
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { API } from "typescript/unstable/sync";
@@ -106,12 +107,47 @@ function keepLeadingBom(program: object): void {
 
 let nextConfigId = 0;
 
+/** THE DESUGAR MEMO. A reload (the pin and twin passes) reads every file again, and jsDesugar parses and rewrites a big file from scratch each
+ * time: on zapo's 1.87 MB `spec/proto/index.js` that is about 18 s of Node CPU per load, repeated for a text that did not change. The answer is kept
+ * per (file name, sha1 of the text) for the texts big enough to matter. An edited file hashes differently and misses.
+ *
+ * ONE COMPILE'S, never the process's. jsDesugar reads OTHER files from disk (the names a `__exportStar(require("./dep"), exports)` copies come from
+ * `./dep`), so the same file name and text can desugar differently once a neighbour changed; the in-process callers (the test workers, a watch loop)
+ * compile many programs in one process. The memo is therefore an object the compile creates (runFrontend), hands to every load of that compile
+ * through LoadOptions.desugarMemo and drops with the compile; a load given none desugars without a memo. Inside one compile the disk does not change
+ * (every load already assumes it), so a hit is exact.
+ *
+ * Bounded: only texts of at least MIN chars are kept, and the kept output strings stop at MAX chars in total (a null answer is free). */
+export class DesugarMemo {
+  static readonly MIN = 100_000;
+  static readonly MAX = 8_000_000;
+  private readonly entries = new Map<string, string | null>();
+  private chars = 0;
+  desugar(fileName: string, text: string): string | null {
+    if (text.length < DesugarMemo.MIN) return jsDesugar(fileName, text);
+    const key = `${fileName}\0${text.length}\0${createHash("sha1").update(text).digest("hex")}`;
+    const hit = this.entries.get(key);
+    if (hit !== undefined) return hit;
+    const out = jsDesugar(fileName, text);
+    const cost = out === null ? 0 : out.length;
+    if (this.chars + cost <= DesugarMemo.MAX) {
+      this.entries.set(key, out);
+      this.chars += cost;
+    }
+    return out;
+  }
+  /** Entries kept (for the tests that show the memo is live). */
+  get size(): number {
+    return this.entries.size;
+  }
+}
+
 /** The desugared text (js-desugar.ts) of a plain-JS file, given the text a
  * shadow already derived for it (or undefined to read the disk), or the
  * shadow's own text unchanged when nothing in the file needs desugaring.
  * Undefined means "serve nothing of mine": not a .js/.cjs file, or no
  * desugaring applies and no shadow text exists. */
-function desugaredJs(fileName: string, derived: string | undefined): string | undefined {
+function desugaredJs(fileName: string, derived: string | undefined, memo: DesugarMemo | null): string | undefined {
   if (!/\.c?js$/.test(fileName) || fileName.endsWith(".d.ts")) return derived;
   let text = derived;
   if (text === undefined) {
@@ -122,7 +158,7 @@ function desugaredJs(fileName: string, derived: string | undefined): string | un
     }
     if (text === undefined) return derived;
   }
-  const out = jsDesugar(fileName, text);
+  const out = memo === null ? jsDesugar(fileName, text) : memo.desugar(fileName, text);
   if (out === null) return derived;
   // srcSite (the C emitter) maps a SrcLoc OFFSET back to file:line:col by
   // reading the file a second time: record what was actually served.
@@ -142,6 +178,8 @@ export class Ts7Host {
   constructor(options?: {
     cwd?: string;
     collectTiming?: boolean;
+    /** The compile's desugar memo (DesugarMemo); none = every file desugars afresh. */
+    desugarMemo?: DesugarMemo;
     /** Optional real-path shadow (the --npm-static resolution lever):
      * `readFile` may answer REPLACEMENT content for a real file (a
      * types-stripped package.json) and `hideFile` may shadow a real file
@@ -154,6 +192,7 @@ export class Ts7Host {
   }) {
     const virtualFiles = this.virtualFiles;
     const shadow = options?.fsShadow ?? null;
+    const desugarMemo = options?.desugarMemo ?? null;
     this.api = new API({
       cwd: options?.cwd ?? process.cwd(),
       ...(options?.collectTiming !== undefined ? { collectTiming: options.collectTiming } : {}),
@@ -181,7 +220,7 @@ export class Ts7Host {
           // source with a spelling that means a sequence of already-modeled
           // forms is served desugared on top of whatever it derived
           // (js-desugar.ts). Every other file falls through exactly as before.
-          const replacement = desugaredJs(fileName, shadow?.readFile(fileName));
+          const replacement = desugaredJs(fileName, shadow?.readFile(fileName), desugarMemo);
           if (replacement !== undefined) {
             // The bytes served were derived from the disk through helpers of
             // their own. Record the disk bytes here regardless, so no amount
