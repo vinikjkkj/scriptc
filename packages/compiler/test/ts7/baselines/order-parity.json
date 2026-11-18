@@ -29333,6 +29333,96 @@
     "<repo>/tests/corpus/25696-an-unused-view-whose-module-is-loaded-by-dynamic-import-is-kept/main.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25730-a-util-field-reassigned-between-install-and-first-read-keeps-the-value-read-at-install.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25730-a-util-field-reassigned-between-install-and-first-read-keeps-the-value-read-at-install.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25731-a-getter-backed-util-field-is-read-at-install-time-not-at-first-use.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25731-a-getter-backed-util-field-is-read-at-install-time-not-at-first-use.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25732-descriptor-keys-for-in-json-and-inspect-of-a-namespace-agree-before-and-after-first-read.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25732-descriptor-keys-for-in-json-and-inspect-of-a-namespace-agree-before-and-after-first-read.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25733-defineproperty-delete-and-assignment-over-a-member-before-its-first-read-follow-node.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25733-defineproperty-delete-and-assignment-over-a-member-before-its-first-read-follow-node.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25734-a-nested-constructor-member-is-built-on-the-first-read-of-its-parent-and-keeps-its-place.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25734-a-nested-constructor-member-is-built-on-the-first-read-of-its-parent-and-keeps-its-place.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25735-a-replaced-callee-takes-the-eager-path-and-runs-at-install.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25735-a-replaced-callee-takes-the-eager-path-and-runs-at-install.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25736-an-initializer-that-throws-throws-at-install-not-at-first-read.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25736-an-initializer-that-throws-throws-at-install-not-at-first-read.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25737-a-descriptor-that-node-rejects-throws-at-install-not-at-first-read.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25737-a-descriptor-that-node-rejects-throws-at-install-not-at-first-read.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25738-spread-assign-entries-hasown-in-and-identity-over-unread-members.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25738-spread-assign-entries-hasown-in-and-identity-over-unread-members.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25739-getownpropertynames-and-descriptors-of-a-namespace-with-some-members-read.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25739-getownpropertynames-and-descriptors-of-a-namespace-with-some-members-read.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25760-is-frozen-sealed-and-extensible-of-a-namespace-with-unread-members-follow-node.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25760-is-frozen-sealed-and-extensible-of-a-namespace-with-unread-members-follow-node.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25761-structuredclone-assign-spread-values-entries-ownkeys-and-json-force-unread-members.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25761-structuredclone-assign-spread-values-entries-ownkeys-and-json-force-unread-members.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25762-inspect-with-getters-and-console-log-of-a-namespace-with-unread-members.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25762-inspect-with-getters-and-console-log-of-a-namespace-with-unread-members.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25763-a-proxy-without-traps-over-a-namespace-with-unread-members-forwards-like-node.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25763-a-proxy-without-traps-over-a-namespace-with-unread-members-forwards-like-node.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25764-reflect-operations-and-an-object-that-inherits-from-a-namespace-with-unread-members-follow-node.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25764-reflect-operations-and-an-object-that-inherits-from-a-namespace-with-unread-members-follow-node.cjs"
+   ],
+   "diags": []
   }
  }
 }
