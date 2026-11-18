@@ -13,7 +13,7 @@ importers:
         version: 1.2.0(mongodb@7.7.0)(zapo-js@1.12.0)
       '@zapo-js/store-mysql':
         specifier: 1.2.0
-        version: 1.2.0(mysql2@3.24.6(@types/node@26.6.6))(zapo-js@1.12.0)
+        version: 1.2.0(mysql2@3.24.6(@types/node@24.13.3))(zapo-js@1.12.0)
       '@zapo-js/store-postgres':
         specifier: 1.2.0
         version: 1.2.0(pg@8.23.1)(zapo-js@1.12.0)
@@ -28,7 +28,7 @@ importers:
         version: 7.7.0
       mysql2:
         specifier: 3.24.6
-        version: 3.24.6(@types/node@26.6.6)
+        version: 3.24.6(@types/node@24.13.3)
       pg:
         specifier: 8.23.1
         version: 8.23.1
@@ -40,8 +40,8 @@ importers:
         version: 1.12.0
     devDependencies:
       '@types/node':
-        specifier: 26.6.6
-        version: 26.6.6
+        specifier: 24.13.3
+        version: 24.13.3
       '@types/pg':
         specifier: ^8.11.0
         version: 8.23.1
@@ -53,6 +53,9 @@ packages:
 
   '@mongodb-js/saslprep@1.6.3':
     resolution: {integrity: sha512-aHGFvT95c82CoQ7hb6qXpz8Hcc5PJb3ZtQ+P01QDBbyQday0mjcrJPeNJOHCgWe0pGX0zKmKP+1mWi/I/BCX9Q==}
+
+  '@types/node@24.13.3':
+    resolution: {integrity: sha512-Dh8vAsV36ig5wa9OX4pXvMc9D3Veibfw2wix0CUwYODLD8nkj9UsLjASr49nPg+2eKzxhBV+v7L8pXvT4e639Q==}
 
   '@types/node@26.6.6':
     resolution: {integrity: sha512-MzQj+8Kx3XI40OmUAE6Qoh58ZMNstNNMwn2nfd3qWsfe7nDNSqJNzes4njhz6AHwrSHOffSLwXU6yb474Q4aog==}
@@ -391,6 +394,9 @@ packages:
     engines: {node: '>=16.20.0'}
     hasBin: true
 
+  undici-types@7.18.2:
+    resolution: {integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==}
+
   undici-types@8.9.0:
     resolution: {integrity: sha512-KTDyRTYX8sWmKXAikPHHSyc63CRPETMctyjKFupcC6OBLXT3xsN0e9aF7m+mIXutFWpUXuedtowG7iLOzp0kQg==}
 
@@ -428,6 +434,10 @@ snapshots:
   '@mongodb-js/saslprep@1.6.3':
     dependencies:
       sparse-bitfield: 3.0.3
+
+  '@types/node@24.13.3':
+    dependencies:
+      undici-types: 7.18.2
 
   '@types/node@26.6.6':
     dependencies:
@@ -510,9 +520,9 @@ snapshots:
       mongodb: 7.7.0
       zapo-js: 1.12.0
 
-  '@zapo-js/store-mysql@1.2.0(mysql2@3.24.6(@types/node@26.6.6))(zapo-js@1.12.0)':
+  '@zapo-js/store-mysql@1.2.0(mysql2@3.24.6(@types/node@24.13.3))(zapo-js@1.12.0)':
     dependencies:
-      mysql2: 3.24.6(@types/node@26.6.6)
+      mysql2: 3.24.6(@types/node@24.13.3)
       zapo-js: 1.12.0
 
   '@zapo-js/store-postgres@1.2.0(pg@8.23.1)(zapo-js@1.12.0)':
@@ -577,9 +587,9 @@ snapshots:
 
   ms@2.1.3: {}
 
-  mysql2@3.24.6(@types/node@26.6.6):
+  mysql2@3.24.6(@types/node@24.13.3):
     dependencies:
-      '@types/node': 26.6.6
+      '@types/node': 24.13.3
       aws-ssl-profiles: 1.1.2
       generate-function: 2.3.1
       iconv-lite: 0.7.3
@@ -679,6 +689,8 @@ snapshots:
       '@typescript/typescript-sunos-x64': 7.0.2
       '@typescript/typescript-win32-arm64': 7.0.2
       '@typescript/typescript-win32-x64': 7.0.2
+
+  undici-types@7.18.2: {}
 
   undici-types@8.9.0: {}
 
