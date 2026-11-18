@@ -178,7 +178,9 @@ function declTwin(
     const init = d.initializer;
     if (!ts.isArrowFunction(init) && !ts.isFunctionExpression(init)) return null;
     const t = erasedText(init, sf, js);
-    return t === null ? null : { key: d, at: stmt.end, text: ` const ${name} = ${t};` };
+    // A statement written without its semicolon (ASI style) ends at its last token: the twin declaration follows on the SAME
+    // line, where `const a = () => {} const b = ...` is a syntax error (no newline for ASI to act on). End the statement first.
+    return t === null ? null : { key: d, at: stmt.end, text: `${sf.text.charAt(stmt.end - 1) === ";" ? "" : ";"} const ${name} = ${t};` };
   }
   return null;
 }
