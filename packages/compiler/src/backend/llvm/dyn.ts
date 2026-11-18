@@ -226,7 +226,7 @@ export interface DynHost extends WalkerHost {
   classFieldGep(className: string, field: string): number;
   /** The hidden f64 half of a number-slot field (ir/num-slot.ts), or undefined. */
   numSlotHalfOf(className: string, field: string): string | undefined;
-  narrowSlotOf(className: string, field: string): { def: IrClassDef; idx: number } | undefined;
+  narrowSlotOf(className: string, field: string): { def: IrClassDef; idx: number; cold?: { absent: boolean } } | undefined;
   /** The GEP index of a class's per-instance order record (-1 when its hierarchy has none). */
   classOrdGep(className: string): number;
 }
@@ -6259,6 +6259,14 @@ export class LlDyn {
             B.line(`${t} = getelementptr inbounds %${struct}, ptr %o, i64 0, i32 ${host.classFieldGep(className, name)} ; .${name}`);
             return t;
           };
+          if (nwRow.cold !== undefined) {
+            const xp = gp(d.ext);
+            const xv = B.tmp();
+            B.line(`${xv} = load ptr, ptr ${xp}`);
+            slotOut = B.tmp();
+            host.declare(`declare ptr @scr_nc_get_v(ptr, i32, i32)`);
+            B.line(`${slotOut} = call ptr @scr_nc_get_v(ptr ${xv}, i32 ${nwRow.idx}, i32 ${nwRow.cold.absent ? 1 : 0})`);
+          } else {
           const lp = gp(d.lanes[0]!);
           const mp = gp(d.mask);
           const xp = gp(d.ext);
@@ -6267,6 +6275,7 @@ export class LlDyn {
           slotOut = B.tmp();
           host.declare(`declare ptr @scr_nw_get_v(ptr, ptr, ptr, i32)`);
           B.line(`${slotOut} = call ptr @scr_nw_get_v(ptr ${lp}, ptr ${mp}, ptr ${xv}, i32 ${nwRow.idx})`);
+          }
         }
         const slotHalf = nwRow === undefined && row.type.kind === "dyn" ? host.numSlotHalfOf(className, row.name) : undefined;
         if (slotHalf !== undefined) {

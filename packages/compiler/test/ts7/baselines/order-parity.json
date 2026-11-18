@@ -16880,6 +16880,54 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25712-an-absent-until-written-field-keeps-in-hasown-keys-and-the-prototype-fallback.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25712-an-absent-until-written-field-keeps-in-hasown-keys-and-the-prototype-fallback.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25713-cold-fields-share-the-overflow-array-with-lane-overflow-in-either-order.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25713-cold-fields-share-the-overflow-array-with-lane-overflow-in-either-order.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25714-an-instance-reachable-from-its-own-absent-field-is-collected-with-the-field-in-the-overflow-array.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25714-an-instance-reachable-from-its-own-absent-field-is-collected-with-the-field-in-the-overflow-array.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25715-an-absent-until-written-field-read-and-listed-through-an-untyped-view.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25715-an-absent-until-written-field-read-and-listed-through-an-untyped-view.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25716-two-classes-and-a-subclass-with-absent-fields-keep-their-own-slots.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25716-two-classes-and-a-subclass-with-absent-fields-keep-their-own-slots.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25717-many-absent-fields-beyond-the-cold-limit-keep-every-slot-exact.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25717-many-absent-fields-beyond-the-cold-limit-keep-every-slot-exact.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25718-an-instance-asks-its-own-absent-fields-from-inside-its-methods.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25718-an-instance-asks-its-own-absent-fields-from-inside-its-methods.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25719-console-log-of-an-instance-lists-written-absent-fields-in-creation-order.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25719-console-log-of-an-instance-lists-written-absent-fields-in-creation-order.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2572-readable-emitted-readable-flag.cjs": {
    "order": [
     "<repo>/tests/corpus/2572-readable-emitted-readable-flag.cjs"
