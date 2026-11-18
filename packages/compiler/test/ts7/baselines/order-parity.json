@@ -16988,6 +16988,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25750-a-nested-typed-listener-twinned-in-the-folded-reload-keeps-the-pin-wrapped-fields.ts": {
+   "order": [
+    "<repo>/tests/corpus/25750-a-nested-typed-listener-twinned-in-the-folded-reload-keeps-the-pin-wrapped-fields.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25751-a-twin-copy-of-a-listener-carries-the-dyn-pins-inside-it.ts": {
+   "order": [
+    "<repo>/tests/corpus/25751-a-twin-copy-of-a-listener-carries-the-dyn-pins-inside-it.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25752-twins-of-a-lone-statement-an-expression-arrow-and-named-listeners-fold-with-the-pin-reload.ts": {
+   "order": [
+    "<repo>/tests/corpus/25752-twins-of-a-lone-statement-an-expression-arrow-and-named-listeners-fold-with-the-pin-reload.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/25753-a-twin-of-a-const-listener-in-a-program-without-semicolons-is-valid-syntax.ts": {
    "order": [
     "<repo>/tests/corpus/25753-a-twin-of-a-const-listener-in-a-program-without-semicolons-is-valid-syntax.ts"
