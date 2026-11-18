@@ -9,6 +9,9 @@
  *    write is an arithmetic / large-literal store, a property read of a property the program writes as a number, or a copy of an eligible field of `this`;
  *  - no struct view (`%class:<C>`) names the class, no unionDisc names the field.
  * A class is worth a narrow block when it has at least NARROW_MIN_FIELDS such fields (the mask word and the overflow pointer cost 16 B).
+ * COLD fields ride the same block: a dyn field that no constructor writes and that starts as the ABSENT marker (`absentInit`: prototype data under an instance name, a lazily
+ *    filled cache) owns no struct word and no lane; it is entry 16+k of the overflow array and reads as the absent marker until a write (ir/nodes.ts narrowSlotOf). A class with
+ *    at least NARROW_MIN_FIELDS cold fields is narrowed even without lane fields.
  * SCRIPTC_NARROW_WHY=1 prints one `NARROW class <name> fields=<n> [<list>]` line per class with at least one eligible field, and a refusal line per
  * constructor-written dyn field of an otherwise standalone class that failed a condition, with the reason. */
 import type { IrClassDef, IrExpr, IrFunction, IrModule } from "./nodes.js";
@@ -21,11 +24,15 @@ interface Facts {
   ctorWrites: IrExpr[];
   other: boolean;
   numericUse: boolean;
+  /** a `fieldIncDec` writes it (never allowed for a cold field: the narrow emitters have no read-modify-write form) */
+  incDec: boolean;
 }
 
 export interface NarrowScope {
   className: string;
   eligible: string[];
+  /** COLD fields: dyn fields the constructor never writes that start as the absent marker (absent until written); they take no lane and no struct word */
+  cold: string[];
   refused: { field: string; reason: string }[];
 }
 
@@ -38,7 +45,7 @@ export function narrowSlotScope(mod: IrModule): NarrowScope[] {
   const factsOf = (cls: string, field: string): Facts => {
     const k = `${cls}\0${field}`;
     let f = facts.get(k);
-    if (f === undefined) facts.set(k, (f = { ctorWrites: [], other: false, numericUse: false }));
+    if (f === undefined) facts.set(k, (f = { ctorWrites: [], other: false, numericUse: false, incDec: false }));
     return f;
   };
   const viewed = new Set<string>();
@@ -79,6 +86,7 @@ export function narrowSlotScope(mod: IrModule): NarrowScope[] {
       const cls = node["className"] as string;
       const field = node["field"] as string;
       const f = factsOf(cls, field);
+      if (kind === "fieldIncDec") f.incDec = true;
       if (kind === "fieldSet" && node["unset"] !== true && fn.name === `%${cls}.constructor`) f.ctorWrites.push(node["value"] as IrExpr);
       else if (kind === "fieldSet" && node["unset"] !== true && (fn.name.endsWith(".%dynSet") || fn.name.endsWith(".%dynClone"))) void 0;
       else f.other = true;
@@ -104,10 +112,16 @@ export function narrowSlotScope(mod: IrModule): NarrowScope[] {
     if (c.runtime === true || c.base !== undefined || extended.has(c.name) || byName.get(c.name) === undefined) continue;
     const eligible: string[] = [];
     const refused: { field: string; reason: string }[] = [];
+    const cold: string[] = [];
     for (const f of c.fields) {
       if (f.type.kind !== "dyn" || f.name.startsWith("%") || f.name.startsWith("#") || f.name.startsWith("__@")) continue;
       const ff = facts.get(`${c.name}\0${f.name}`);
-      if (ff === undefined || ff.ctorWrites.length === 0) continue;
+      if (ff === undefined || ff.ctorWrites.length === 0) {
+        // COLD: absent until written (the IR says so: `absentInit`), written by no constructor and by no read-modify-write, not hidden/absent-declared, not read through a
+        // union arm or a struct view. Its value is the absent marker until a write replaces it, which the overflow array answers for an unwritten entry.
+        if (c.absentInit?.includes(f.name) === true && ff?.incDec !== true && c.absentFields?.includes(f.name) !== true && c.hiddenFields?.includes(f.name) !== true && !unionRead.has(f.name) && !viewed.has(c.name)) cold.push(f.name);
+        continue;
+      }
       const no = (reason: string): void => void refused.push({ field: f.name, reason });
       if (ff.other) no("written outside the constructor");
       else if (c.absentInit?.includes(f.name) || c.absentFields?.includes(f.name) || c.hiddenFields?.includes(f.name) || c.dynFieldData?.some((d) => d.name === f.name)) no("absent/hidden/prototype-data field");
@@ -133,7 +147,7 @@ export function narrowSlotScope(mod: IrModule): NarrowScope[] {
     }
     const order = new Map(c.fields.map((f, i) => [f.name, i] as const));
     eligible.sort((x, y) => order.get(x)! - order.get(y)!);
-    if (eligible.length > 0 || refused.length > 0) out.push({ className: c.name, eligible, refused });
+    if (eligible.length > 0 || refused.length > 0 || cold.length > 0) out.push({ className: c.name, eligible, cold, refused });
   }
   return out;
 }
@@ -142,11 +156,13 @@ export function reportNarrowScope(mod: IrModule): void {
   if (process.env["SCRIPTC_NARROW_WHY"] !== "1") return;
   for (const s of narrowSlotScope(mod)) {
     if (s.eligible.length > 0) process.stderr.write(`NARROW class ${s.className} fields=${s.eligible.length}${s.eligible.length >= NARROW_MIN_FIELDS ? " WORTH" : ""} [${s.eligible.join(",")}]\n`);
+    if (s.cold.length > 0) process.stderr.write(`NARROW class ${s.className} cold=${s.cold.length}${s.eligible.length >= NARROW_MIN_FIELDS || s.cold.length >= NARROW_MIN_FIELDS ? " WORTH" : ""} [${s.cold.join(",")}]\n`);
     for (const r of s.refused) process.stderr.write(`NARROW refuse ${s.className}.${r.field}: ${r.reason}\n`);
   }
 }
 
 export const NARROW_MAX_FIELDS = 16; // the presence mask is 16 bits
+export const NARROW_MAX_COLD = 16; // the overflow-array size argument carries one absent bit per cold field above its low byte
 
 /** The pass: every standalone class with at least NARROW_MIN_FIELDS eligible fields keeps those fields in its layout list but gives them no storage (IrClassDef.narrow).
  * SCRIPTC_NARROW=off disables it (the A/B arm); a second run over an already narrowed module is a no-op. Returns the picks as "Class.field". */
@@ -157,21 +173,23 @@ export function narrowSlotPass(mod: IrModule): string[] {
   const why = process.env["SCRIPTC_NARROW_WHY"] === "1";
   const picks: string[] = [];
   for (const sc of narrowSlotScope(mod)) {
-    if (sc.eligible.length < NARROW_MIN_FIELDS) continue;
+    if (sc.eligible.length < NARROW_MIN_FIELDS && sc.cold.length < NARROW_MIN_FIELDS) continue;
     const def = classes.find((c) => c.name === sc.className);
     if (def === undefined) continue;
-    const fields = sc.eligible.slice(0, NARROW_MAX_FIELDS);
+    const laneFields = sc.eligible.slice(0, NARROW_MAX_FIELDS);
+    const coldFields = sc.cold.slice(0, NARROW_MAX_COLD);
+    const fields = [...laneFields, ...coldFields];
     const lanes: string[] = [];
-    for (let k = 0; k < Math.ceil(fields.length / 2); k++) lanes.push(`%nwl:${def.name}:${k}`);
+    for (let k = 0; k < Math.ceil(laneFields.length / 2); k++) lanes.push(`%nwl:${def.name}:${k}`);
     // The 16-bit presence mask is two adjacent bytes (bool-typed hidden fields) placed FIRST among the fields: they fill the padding the order record leaves before the
     // first 8-byte field, where an f64 mask word would have taken a word of its own. Accessors read them as one unaligned-safe 16-bit value.
     const mask = `%nwm:${def.name}:0`;
     const maskHi = `%nwm:${def.name}:1`;
     const ext = `%nwx:${def.name}`;
     def.fields = [{ name: mask, type: { kind: "bool" as const } }, { name: maskHi, type: { kind: "bool" as const } }, ...def.fields, ...lanes.map((n) => ({ name: n, type: { kind: "f64" as const } })), { name: ext, type: { kind: "dyn" as const } }];
-    def.narrow = { fields, lanes, mask, maskHi, ext };
+    def.narrow = { fields, lanes, mask, maskHi, ext, ...(coldFields.length > 0 ? { coldFrom: laneFields.length, coldAbsent: coldFields.filter((f) => def.absentInit?.includes(f) === true) } : {}) };
     for (const f of fields) picks.push(`${def.name}.${f}`);
-    if (why) process.stderr.write(`narrow: pick ${def.name} (${fields.length} fields: ${fields.join(",")})\n`);
+    if (why) process.stderr.write(`narrow: pick ${def.name} (${laneFields.length} lane fields: ${laneFields.join(",")}${coldFields.length > 0 ? `; ${coldFields.length} cold fields: ${coldFields.join(",")}` : ""})\n`);
   }
   return picks;
 }
