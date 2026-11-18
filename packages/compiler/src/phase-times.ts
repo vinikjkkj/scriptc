@@ -19,7 +19,8 @@
  * THE SUM CONTROL: every span's EXCLUSIVE time (dt minus its children's dt) is reported, and the exclusive times of all spans plus the unattributed
  * root remainder add up to the root span's dt by construction; `wallMs` (process start to exit) minus the root dt is the node startup and teardown. */
 import { createHash } from "node:crypto";
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { gzipSync } from "node:zlib";
 
 const OUT = process.env["SCRIPTC_PHASE_TIMES"];
 export const phaseTimesOn: boolean = OUT !== undefined && OUT !== "";
@@ -66,8 +67,29 @@ const hashes: Record<string, string> = {};
 export function noteHash(label: string, ...texts: (string | null | undefined)[]): void {
   if (!phaseTimesOn) return;
   const h = createHash("sha256");
-  for (const t of texts) h.update(t ?? "\u0000");
+  const masked = createHash("sha256");
+  const units: string[] = [];
+  const dump = process.env["SCRIPTC_PHASE_DUMP"];
+  let i = 0;
+  for (const t of texts) {
+    h.update(t ?? "\u0000");
+    // The symbol-id mask: tsgo numbers late-bound symbol keys (`__@name@117`, mangled `_x40_117`) in checker order, which is not stable across runs.
+    const m = (t ?? "\u0000").replace(/@\d+/g, "@N").replace(/_x40_\d+/g, "_x40_N");
+    masked.update(m);
+    units.push(createHash("sha256").update(t ?? "\u0000").digest("hex").slice(0, 12) + "/" + createHash("sha256").update(m).digest("hex").slice(0, 12));
+    if (dump !== undefined && t != null) {
+      try {
+        mkdirSync(dump, { recursive: true });
+        writeFileSync(`${dump}/${label}.${i}.${process.pid}.gz`, gzipSync(t, { level: 1 }));
+      } catch {
+        /* lab only */
+      }
+    }
+    i++;
+  }
   hashes[label] = h.digest("hex");
+  hashes[`${label}.masked`] = masked.digest("hex");
+  hashes[`${label}.units`] = units.join(",");
 }
 
 function statusKb(pid: number | undefined, key: string): number {
