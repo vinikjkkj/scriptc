@@ -31,6 +31,10 @@ on:
         description: "true (default): the windows lane puts Git for Windows' GNU tar first on PATH; false: the runner's default PowerShell PATH, where tar is the Windows bsdtar"
         required: false
         default: "true"
+      fresh_cache:
+        description: "true: the windows lane starts with an empty provenance cache (a cached source tree skips the tarball extraction, so it hides an extraction defect)"
+        required: false
+        default: "false"
       node_heap_mb:
         description: "Override of the node heap (MB) the driver build runs with (default 12288); a tiny value is the positive control that a build which dies fails the zapo gate"
         required: false
@@ -287,6 +291,7 @@ jobs:
         shell: pwsh
         run: pnpm install --frozen-lockfile --ignore-workspace --ignore-scripts --config.strict-dep-builds=false --config.minimumReleaseAge=0
       - uses: actions/cache@v4
+        if: ${{ inputs.fresh_cache != 'true' }}
         with:
           path: ${{ github.workspace }}\.scriptc-provenance-cache
           key: provenance-win-${{ matrix.driver }}-${{ hashFiles('rigsrc/tests/driver-rigs/pnpm-lock.yaml') }}
