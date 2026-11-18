@@ -4015,6 +4015,7 @@ ScrDyn *scr_dyn_define_props(ScrDyn *target, ScrDyn *descs) {
                         strlen("Object.defineProperties called on non-object"));
     return NULL;
   }
+  scr_dyn_lazy_force_all_any(target);
   /* ES reads each descriptor out of the MAP with [[Get]], so a
    * descriptor delivered by an ENUMERABLE ACCESSOR is legal there; this
    * walk reads the member table and would see the SLOT instead, and
@@ -4123,6 +4124,7 @@ ScrDyn *scr_dyn_define_prop(ScrDyn *target, ScrStr *key, ScrDyn *desc) {
                         strlen("Object.defineProperty called on non-object"));
     return NULL;
   }
+  scr_dyn_lazy_force_key_any(target, key->data, key->len); /* defining over a lazy member redefines the data property it stands for */
   if (target->kind == SCR_DYN_OBJ && target->module_ns && target->null_proto) {
     /* A module namespace's [[DefineOwnProperty]] only accepts a descriptor that changes nothing; every other (and every NEW key) throws.
      * `null_proto` is what scr_dyn_module_ns_finish sets and a mapped CommonJS package's exports bag (flagged module_ns by its static copy, and

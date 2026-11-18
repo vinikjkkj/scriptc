@@ -3239,6 +3239,7 @@ static ScrStr *insp_sh_class_value(ScrDyn *d, const ScrDynClass *vc, const ScrDy
 ScrStr *(*scr_insp_hook)(ScrDyn *d, const char *cn, double recurse, double depth) = NULL;
 
 ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
+  if (d->kind == SCR_DYN_OBJ || d->kind == SCR_DYN_FUNC) scr_dyn_lazy_force_all_any(d); /* a lazy member prints as the value it stands for, never as [Getter] */
   switch (d->kind) {
     case SCR_DYN_NULL:
       return insp_sty_lit("null", INSP_STY_NULL);

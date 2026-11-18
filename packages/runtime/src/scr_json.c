@@ -9750,6 +9750,8 @@ void scr_dyn_own_names_ctor(ScrDyn *names, const ScrDyn *o) {
  * argument fail for it: scr_dyn_own_names_skip. */
 void scr_dyn_own_names_fence(const ScrDyn *d) {
   if (d == NULL || d->kind != SCR_DYN_OBJ || scr_dyn_ext(d)->hidden == NULL) return;
+  scr_dyn_obj_force_lazy_all(d); /* a lazy member is a data property here, not a creation-order-less accessor */
+  if (scr_dyn_ext(d)->hidden == NULL) return;
   if (d->v.obj.len == 0 && scr_dyn_minted_proto_has_ctor(d)) return; /* a class prototype: scr_dyn_own_names_ctor lists it */
   if (scr_dyn_ext(d)->hidden->v.obj.len == 0) return;
   size_t refusing = 0;
@@ -10003,6 +10005,33 @@ void scr_dyn_obj_force_lazy_all(const ScrDyn *d0) {
       continue; /* a forced row left the table: the next one stands at the same index */
     }
     i++;
+  }
+}
+
+/* The lazy members of an object OR of a function value's own-property table, forced; the entry points of the surfaces that expose a property's SHAPE
+ * (descriptors, defineProperty, inspect) call these so that what they see is the data property an eager definition would have made. */
+void scr_dyn_lazy_force_all_any(ScrDyn *t) {
+  if (t == NULL) return;
+  if (t->kind == SCR_DYN_OBJ) {
+    scr_dyn_obj_force_lazy_all(t);
+  } else if (t->kind == SCR_DYN_FUNC && scr_closure_props(scr_dyn_fn_clo(t))) {
+    ScrDyn *table = (ScrDyn *)scr_box_get_ref(scr_closure_props(scr_dyn_fn_clo(t))); /* +1 */
+    if (table != NULL) {
+      scr_dyn_obj_force_lazy_all(table);
+      scr_dyn_release(table);
+    }
+  }
+}
+void scr_dyn_lazy_force_key_any(ScrDyn *t, const char *key, size_t key_len) {
+  if (t == NULL) return;
+  if (t->kind == SCR_DYN_OBJ) {
+    if (scr_dyn_lazy_force(t, key, key_len) == false) scr_exc_clear();
+  } else if (t->kind == SCR_DYN_FUNC && scr_closure_props(scr_dyn_fn_clo(t))) {
+    ScrDyn *table = (ScrDyn *)scr_box_get_ref(scr_closure_props(scr_dyn_fn_clo(t))); /* +1 */
+    if (table != NULL) {
+      if (scr_dyn_lazy_force(table, key, key_len) == false) scr_exc_clear();
+      scr_dyn_release(table);
+    }
   }
 }
 
