@@ -10082,6 +10082,13 @@ bool scr_dyn_fn_src_is(const ScrDyn *v, const ScrStr *text) {
   return src != NULL && strlen(src) == text->len && memcmp(src, text->data, text->len) == 0;
 }
 
+/* Is `key` an own plain DATA member of the ordinary object `o`? Then a keyed read of it runs no code and cannot throw, so the compiler may read it once and
+ * share the value (ir/lazy-init.ts). False for anything else: a non-object, a proxy, a function, an accessor, a lazy slot, a hidden member. */
+bool scr_dyn_is_plain_data(const ScrDyn *o, const ScrStr *key) {
+  if (o == NULL || o->kind != SCR_DYN_OBJ || scr_dyn_obj_is_strdec(o)) return false;
+  return scr_dyn_obj_get(o, key->data, key->len) != NULL;
+}
+
 /* A SYMBOL-KEYED member of a record crossing into the tree (the mapper spells
  * `[Symbol.asyncDispose]` as `__@asyncDispose@13`). The tree has string keys
  * only and a symbol key is never an own enumerable string key — Object.keys,

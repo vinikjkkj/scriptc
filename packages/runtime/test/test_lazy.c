@@ -153,6 +153,25 @@ int main(void) {
   check(num_is(v, 42) && key_at(o5, 0, "m"), "existing key: value replaced in place");
   scr_dyn_release(v);
 
+  /* the plain-data predicate behind the shared reads: an own enumerable data member of an ordinary object, nothing else */
+  {
+    ScrDyn *pd = scr_dyn_new_obj();
+    setn(pd, "p", 1);
+    setlazy(pd, "lz", th);
+    ScrStr *kp = S("p"), *kl = S("lz"), *kx = S("absent");
+    check(scr_dyn_is_plain_data(pd, kp), "plain data: own data member");
+    check(!scr_dyn_is_plain_data(pd, kx), "plain data: absent key");
+    check(!scr_dyn_is_plain_data(pd, kl), "plain data: a lazy slot is not plain");
+    ScrDyn *nn = scr_dyn_new_num(3);
+    check(!scr_dyn_is_plain_data(nn, kp), "plain data: a non-object");
+    check(!scr_dyn_is_plain_data(NULL, kp), "plain data: NULL");
+    scr_dyn_release(nn);
+    scr_str_release(kp);
+    scr_str_release(kl);
+    scr_str_release(kx);
+    scr_dyn_release(pd);
+  }
+
   scr_dyn_release(o);
   scr_dyn_release(o2);
   scr_dyn_release(o3);
