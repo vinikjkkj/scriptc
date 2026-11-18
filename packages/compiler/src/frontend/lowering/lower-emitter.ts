@@ -1929,9 +1929,11 @@ export function lowerEmitterMethodCall(L: Lowerer, call: ts.CallExpression,
       // twin; the marker the reload left finds it.
       const k = twinMarkOf(args[1]!);
       const id = k === null ? null : twinIdentOf(args[1]!, k);
+      L.twinSites.push(args[1]!);
       if (id !== null) {
         const tw = L.lowerExpr(id);
         if (tw.type.kind === "func") {
+          L.twinApplied.push(args[1]!);
           return {
             kind: "libCall",
             fn: "emitter.onTwin",
