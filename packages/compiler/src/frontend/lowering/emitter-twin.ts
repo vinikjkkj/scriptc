@@ -25,6 +25,10 @@
 import * as ts from "../ts7/adapter.js";
 import { isJsSourceFile } from "../program.js";
 
+export interface TwinEditOptions {
+  /** Collects the candidates the generator does NOT twin, with the shape that stopped it (reported as an advisory: those listeners stay on the checked boundary). */
+  skipped?: { node: ts.Expression; why: string }[];
+}
 export interface TwinEdit {
   at: number;
   text: string;
@@ -188,7 +192,7 @@ function declTwin(
 /** The insertions for every candidate listener, or null when none can be twinned. A candidate is the
  * registration's listener argument: an inline function expression, or an identifier naming a function
  * declaration / const function expression of the same file. */
-export function computeTwinEdits(cands: readonly ts.Expression[], checker: ts.TypeChecker): TwinEdits | null {
+export function computeTwinEdits(cands: readonly ts.Expression[], checker: ts.TypeChecker, opts?: TwinEditOptions): TwinEdits | null {
   const out: TwinEdits = new Map();
   const counters = new Map<string, number>();
   const seen = new Set<string>();
@@ -220,7 +224,10 @@ export function computeTwinEdits(cands: readonly ts.Expression[], checker: ts.Ty
     };
     if (ts.isArrowFunction(f) || ts.isFunctionExpression(f)) {
       const body = erasedText(f, sf, js, inner());
-      if (body === null) continue;
+      if (body === null) {
+        opts?.skipped?.push({ node: f, why: "a parameter shape the erased copy cannot spell: an unparenthesized arrow parameter, a destructured rest, or a JavaScript rest pack" });
+        continue;
+      }
       k = counters.get(sf.fileName) ?? 0;
       const name = `__sctwin_${k}`;
       hoist = `const ${name} = ${body}; void ${name}; `;
@@ -237,17 +244,22 @@ export function computeTwinEdits(cands: readonly ts.Expression[], checker: ts.Ty
       } else {
         k = counters.get(sf.fileName) ?? 0;
         const dt = declTwin(f, `__sctwin_${k}`, checker, sf, js);
-        if (dt === null) continue;
+        if (dt === null) {
+          opts?.skipped?.push({ node: f, why: "the named listener is not a single same-file function declaration or const function expression whose copy can be spelled" });
+          continue;
+        }
         declK.set(dt.key, k);
         declEdit = { at: dt.at, text: dt.text };
         hoist = `void __sctwin_${k}; `;
       }
     } else {
+      opts?.skipped?.push({ node: f, why: "the listener is neither an inline function nor a named function" });
       continue;
     }
     const place = placement(f, sf, hoist);
     if (place === null) {
       if (declEdit !== null) declK.forEach((v, key2) => { if (v === k) declK.delete(key2); });
+      opts?.skipped?.push({ node: f, why: "no statement position can hold the twin (a class field initializer, a parameter default, a computed key, a decorator or a static block)" });
       continue;
     }
     if (declEdit !== null) {
@@ -265,6 +277,12 @@ export function computeTwinEdits(cands: readonly ts.Expression[], checker: ts.Ty
  * function value (Function.prototype.toString) must be the author's, so a function that CONTAINS an insertion
  * (a nested listener's twin) drops it (functionSourceText). */
 const insertedSpans = new Map<string, { s: number; e: number }[]>();
+
+/** Is `pos` inside a twin copy (inserted text) of this file's current twin load? */
+export function insideTwinSpan(file: string, pos: number): boolean {
+  const all = insertedSpans.get(file.split("\\").join("/"));
+  return all !== undefined && all.some((x) => x.s <= pos && pos < x.e);
+}
 
 export function clearTwinSpans(): void {
   insertedSpans.clear();
