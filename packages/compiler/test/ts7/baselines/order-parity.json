@@ -16928,6 +16928,42 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25740-a-method-called-detached-writes-null-over-a-timer-field.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25740-a-method-called-detached-writes-null-over-a-timer-field.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25741-refused-connect-emits-error-then-close-with-had-error.ts": {
+   "order": [
+    "<repo>/tests/corpus/25741-refused-connect-emits-error-then-close-with-had-error.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25742-refused-connect-error-carries-the-system-error-fields.ts": {
+   "order": [
+    "<repo>/tests/corpus/25742-refused-connect-error-carries-the-system-error-fields.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25743-pool-style-connect-once-error-then-fatal-close-path.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25743-pool-style-connect-once-error-then-fatal-close-path.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25744-a-prototype-handler-bound-to-a-socket-survives-a-refused-connect.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25744-a-prototype-handler-bound-to-a-socket-survives-a-refused-connect.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25745-js-handler-clears-a-timer-field-to-null-on-a-socket-error.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25745-js-handler-clears-a-timer-field-to-null-on-a-socket-error.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2572-readable-emitted-readable-flag.cjs": {
    "order": [
     "<repo>/tests/corpus/2572-readable-emitted-readable-flag.cjs"
