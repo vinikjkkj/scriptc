@@ -460,6 +460,22 @@ export function recordWidthCopyDiag(
   };
 }
 
+/** SC6005 — a typed emitter listener that has NO erased twin. A dynamic emit (emit.apply, a spread, a call with runtime arguments) can reach the listener with a
+ * value outside its declared parameter types; Node simply passes the value, while the typed body behind the checked-dynamic boundary throws a TypeError. The
+ * erased twin (emitter-twin.ts) runs the same body over `any` parameters and answers exactly, so a listener without one is a place where the compiled program can
+ * differ from Node on a payload the declared types do not describe. ADVICE, not a refusal: a program whose payloads match the declared types is exact. */
+export function twinMissingAdvice(why: string, loc: SrcLoc): ScrDiagnostic {
+  return {
+    code: "SC6005",
+    severity: "advice",
+    message: `this typed emitter listener has no erased twin (${why})`,
+    loc,
+    hint:
+      "a dynamic emit can hand this listener a value outside its declared parameter types; Node passes it through, but here the typed body throws a TypeError at the " +
+      "checked boundary. The program is exact for payloads that match the declared types. Declare the parameters with the widest type the payload can have to avoid the boundary",
+  };
+}
+
 /* ── SC5xxx: native FFI ───────────────────────────────────────────────── */
 
 /** SC5001 — the outbound native-FFI manifest is malformed or unreadable. */

@@ -560,6 +560,8 @@ export interface LowerResult {
    * caller loads the program again with these insertions, lowers that, and keeps THIS result if that load or
    * lowering fails. */
   twinReload?: TwinEdits;
+  /** Set alongside a complete module whose twin decision skipped some typed listeners: where each is and the shape that stopped the generator (SC6005). */
+  twinSkipped?: { loc: SrcLoc; why: string }[];
   /** Present iff diagnostics is empty. */
   module: IrModule | null;
   diagnostics: ScrDiagnostic[];
@@ -987,8 +989,14 @@ export function lowerToIr(
     }
   }
   if (options.noTwinReload !== true && result.module !== null && emit.twinCandidates.length > 0 && moduleBoxesEmitters(result.module)) {
-    const twinReload = computeTwinEdits(emit.twinCandidates, emit.checker);
-    if (twinReload !== null) result = { ...result, twinReload };
+    const skipped: { node: ts.Expression; why: string }[] = [];
+    const twinReload = computeTwinEdits(emit.twinCandidates, emit.checker, { skipped });
+    // The listeners the generator does not twin, as source locations of THIS program's text (the caller reports them: SC6005).
+    const twinSkipped = skipped.map((x) => {
+      const sf = x.node.getSourceFile();
+      return { loc: { file: sf.fileName, start: x.node.getStart(sf), end: x.node.end }, why: x.why };
+    });
+    result = { ...result, ...(twinReload !== null ? { twinReload } : {}), ...(twinSkipped.length > 0 ? { twinSkipped } : {}) };
   }
   // A function member read as a value (not called) in a module that runs engine code is the engine function itself, unbound.
   if (result.module !== null) unbindEngineMemberReads(result.module);
