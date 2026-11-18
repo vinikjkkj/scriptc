@@ -393,18 +393,8 @@ static uint32_t scr_bytes_to_u32(double v) {
   return scr_bytes_to_u32_slow(v);
 }
 
-double scr_bytes_get(const ScrBytes *b, double i) {
-#ifdef SCR_ARRCEN_ON
-  /* tests/perf/arrcensus/scr_arr_census.h. Inert -- the switch is
-   * undefined -- unless that header is -include'd. The profile gives this
-   * function a SHARE; only a count prices a per-call change. */
-  scr_arrcen_note_bytes(SCR_ARRCEN_BYTESGET, (long long)b->len, (int)b->elem);
-#ifdef SCR_ARRCEN_HAS_ARM
-  scr_arrcen_note_arm(SCR_ARRCEN_BYTESGET, (long long)b->len, (int)b->elem, i, 0.0);
-#endif
-#endif
-  size_t idx = scr_bytes_check_index(b, i);
-  if (idx == SCR_BYTES_NO_INDEX) return NAN; /* JS reads undefined; see above */
+/* The element at an index that names one (the switch scr_bytes_get and scr_bytes_get_undef share). */
+static inline double scr_bytes_load(const ScrBytes *b, size_t idx) {
   switch (b->elem) {
     case SCR_BYTES_U8:
     case SCR_BYTES_U8C:
@@ -478,6 +468,21 @@ double scr_bytes_get(const ScrBytes *b, double i) {
   return 0; /* unreachable */
 }
 
+double scr_bytes_get(const ScrBytes *b, double i) {
+#ifdef SCR_ARRCEN_ON
+  /* tests/perf/arrcensus/scr_arr_census.h. Inert -- the switch is
+   * undefined -- unless that header is -include'd. The profile gives this
+   * function a SHARE; only a count prices a per-call change. */
+  scr_arrcen_note_bytes(SCR_ARRCEN_BYTESGET, (long long)b->len, (int)b->elem);
+#ifdef SCR_ARRCEN_HAS_ARM
+  scr_arrcen_note_arm(SCR_ARRCEN_BYTESGET, (long long)b->len, (int)b->elem, i, 0.0);
+#endif
+#endif
+  size_t idx = scr_bytes_check_index(b, i);
+  if (idx == SCR_BYTES_NO_INDEX) return NAN; /* JS reads undefined; see above */
+  return scr_bytes_load(b, idx);
+}
+
 /* The LIBCALL face of scr_runtime.h's inline element accessors, for the
  * LLVM lane. One implementation, two faces: everything these can answer,
  * the inline above answers with the same expression, and everything else
@@ -487,8 +492,9 @@ double scr_bytes_get_fast_undef(const ScrBytes *b, double i) { return scr_bytes_
 void scr_bytes_set_fast(ScrBytes *b, double i, double v) { scr_bytes_set_inl(b, i, v); }
 
 double scr_bytes_get_undef(const ScrBytes *b, double i) {
-  if (scr_bytes_check_index(b, i) == SCR_BYTES_NO_INDEX) return scr_num_undef();
-  return scr_bytes_get(b, i);
+  const size_t idx = scr_bytes_check_index(b, i);
+  if (idx == SCR_BYTES_NO_INDEX) return scr_num_undef();
+  return scr_bytes_load(b, idx);
 }
 
 void scr_bytes_set(ScrBytes *b, double i, double v) {
