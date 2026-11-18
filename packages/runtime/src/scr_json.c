@@ -9235,6 +9235,13 @@ static bool scr_hid_enumerable(const ScrDyn *q) {
 static bool scr_hid_lead(const ScrDyn *q) {
   return q->v.arr.len >= 6 && scr_dyn_truthy(q->v.arr.items[5]);
 }
+/* The EIGHTH element, written only by scr_dyn_key_set_lazy: this enumerable accessor is a LAZY MEMBER. Its getter is a compiled thunk that builds
+ * the member's value; the first operation that is not a bare listing of the key runs it ONCE, stores the value in the member table where the slot stood
+ * (the position is kept) and drops this row, so the property is from then on exactly the plain data property an eager `o.k = v` would have made. */
+static bool scr_hid_lazy(const ScrDyn *q) {
+  return q->v.arr.len >= 8 && scr_dyn_truthy(q->v.arr.items[7]);
+}
+bool scr_dyn_lazy_force(ScrDyn *o, const char *key, size_t key_len);
 
 /* Is this key's member-table entry an accessor SLOT rather than a value?
  * Pointer identity against the one immortal node, and nothing else — no
@@ -9256,8 +9263,13 @@ bool scr_dyn_obj_entry_is_slot(const ScrDyn *d, const char *key, size_t key_len)
  * to be able to ask, and the reason it is cheap: an object with no
  * hidden table at all — which is nearly every object in a program —
  * answers on one NULL test and never touches the member table. */
+void scr_dyn_obj_force_lazy_all(const ScrDyn *d);
 bool scr_dyn_obj_has_enum_acc(const ScrDyn *d) {
   if (d == NULL || d->kind != SCR_DYN_OBJ || scr_dyn_ext(d)->hidden == NULL) return false;
+  /* a surface that asks this question is about to walk the object as a whole (or has not been taught the slot): every LAZY member is materialized first, so
+   * to it a lazy member is the plain data property it would have been, and only a REAL enumerable accessor refuses */
+  scr_dyn_obj_force_lazy_all(d);
+  if (scr_dyn_ext(d)->hidden == NULL) return false;
   const ScrDyn *h = scr_dyn_ext(d)->hidden;
   for (size_t i = 0; i < h->v.obj.len; i++) {
     const ScrDyn *ent = h->v.obj.entries[i].value;
@@ -9326,6 +9338,15 @@ ScrDyn *scr_dyn_obj_entry_read(ScrDyn *recv, const ScrDynEntry *e, bool *skip) {
      * `undefined` if it does — a slot whose descriptor is gone. */
     *skip = true;
     return NULL;
+  }
+  if (scr_hid_lazy(ent) && !scr_hid_is_data(ent)) {
+    if (scr_dyn_lazy_force(recv, e->key, e->key_len)) {
+      /* the entry now holds the value (the table may have been reallocated by the thunk's own work: look it up again) */
+      ScrDyn *v = scr_dyn_obj_get(recv, e->key, e->key_len);
+      if (v != NULL) return scr_dyn_retain(v);
+    } else {
+      return NULL; /* the thunk's own exception is pending */
+    }
   }
   ScrDyn *getter = scr_hid_getter(ent);
   /* A set-only accessor READS as undefined in JS. It is still an own
@@ -9402,6 +9423,8 @@ static ScrPropKind scr_dyn_obj_resolve(const ScrDyn *d, const char *key, size_t 
   const ScrDyn *o = d;
   for (size_t steps = 0; o != NULL && steps <= SCR_PROTO_MAX_DEPTH; steps++) {
     if (o->kind != SCR_DYN_OBJ) break;
+    bool forced = false;
+  again:;
     ScrDyn *m = scr_dyn_obj_get(o, key, key_len);
     if (m != NULL) {
       *out = m;
@@ -9410,6 +9433,14 @@ static ScrPropKind scr_dyn_obj_resolve(const ScrDyn *d, const char *key, size_t 
     }
     if (scr_dyn_ext(o)->hidden != NULL) {
       ScrDyn *ent = scr_dyn_obj_get(scr_dyn_ext(o)->hidden, key, key_len);
+      /* A LAZY member is forced here, so [[Get]], [[Set]], [[Delete]] and `in` all meet an ordinary data property. A thunk that cannot be run to the end
+       * (stack exhaustion) leaves the row an ordinary accessor whose getter is that thunk: the caller's own getter call then raises the same error. */
+      if (ent != NULL && !forced && ent->kind == SCR_DYN_ARR && !scr_hid_is_data(ent) && scr_hid_lazy(ent)) {
+        forced = true;
+        if (scr_dyn_lazy_force((ScrDyn *)o, key, key_len)) goto again;
+        scr_exc_clear();
+        ent = scr_dyn_obj_get(scr_dyn_ext(o)->hidden, key, key_len);
+      }
       if (ent != NULL) {
         *out = ent;
         if (holder != NULL) *holder = o;
@@ -9897,6 +9928,127 @@ void scr_dyn_obj_define_hidden_data(ScrDyn *recv, const char *key, size_t key_le
    * one set. */
   scr_dyn_obj_put_hidden(recv, key, key_len, true, value, w, configurable, false);
   scr_dyn_release(w);
+}
+
+/* ── LAZY MEMBERS ───────────────────────────────────────────────────────
+ *
+ * `scr_dyn_key_set_lazy(recv, key, thunk)` is `recv[key] = thunk()` with the call DEFERRED to the first operation that needs the value. The compiler proves
+ * the call has no effect Node could see, cannot throw, and that every read it makes was already performed (hoisted into the thunk) at this very position
+ * (ir/lazy-init.ts), so running it later is unobservable; what remains is the property's own shape, which this keeps exact:
+ *
+ *   - the property is an ENUMERABLE ACCESSOR (slot in the member table, row in `hidden`, the 8th element of the row marks it lazy) until it is forced;
+ *     Object.keys, for-in and the key ORDER never need the value, and see the slot where the key stands (scr_dyn_obj_entry_listed);
+ *   - every operation that is not that listing meets an ordinary data property: [[Get]], [[Set]], [[Delete]] and `in` force it in scr_dyn_obj_resolve, a
+ *     value read of an entry (scr_dyn_obj_entry_read) forces it, and every surface that asks scr_dyn_obj_has_enum_acc / scr_dyn_obj_acc_fence /
+ *     scr_dyn_own_names_fence, getOwnPropertyDescriptor(s), defineProperty and defineProperties force them ALL first;
+ *   - forcing runs the thunk once, writes the value into the member table where the slot stood (so the position is kept) and drops the row.
+ *
+ * A receiver the lazy form cannot represent exactly (a proxy, a static or minted prototype, a module namespace, a key that already exists anywhere on
+ * the chain, a function value's built-in names) just takes the eager path: the thunk runs now and the value is stored by scr_dyn_key_set. */
+bool scr_dyn_lazy_force(ScrDyn *o, const char *key, size_t key_len) {
+  if (o == NULL || o->kind != SCR_DYN_OBJ || scr_dyn_ext(o)->hidden == NULL) return true;
+  ScrDyn *hid = scr_dyn_ext_w(o)->hidden;
+  ScrDyn *row = scr_dyn_obj_get(hid, key, key_len);
+  if (row == NULL || row->kind != SCR_DYN_ARR || scr_hid_is_data(row) || !scr_hid_lazy(row)) return true;
+  ScrDyn *getter = scr_dyn_retain(scr_hid_getter(row));
+  scr_dyn_this_push_dyn(o);
+  ScrDyn *r = scr_dyn_call(getter, NULL, 0, "getter");
+  scr_dyn_this_pop();
+  scr_dyn_release(getter);
+  if (r == NULL) return false;
+  /* the thunk ran compiled code: look everything up again */
+  hid = scr_dyn_ext_w(o)->hidden;
+  row = hid != NULL ? scr_dyn_obj_get(hid, key, key_len) : NULL;
+  if (row == NULL || row->kind != SCR_DYN_ARR || scr_hid_is_data(row) || !scr_hid_lazy(row)) {
+    scr_dyn_release(r);
+    return true;
+  }
+  ScrDynEntry *slot = NULL;
+  for (size_t i = 0; i < o->v.obj.len; i++) {
+    if (SCR_DYN_KEY_EQ(&o->v.obj.entries[i], key, key_len)) {
+      slot = &o->v.obj.entries[i];
+      break;
+    }
+  }
+  if (slot == NULL || slot->value != scr_dyn_acc_slot()) {
+    scr_dyn_release(r);
+    return true;
+  }
+  scr_dyn_obj_unset(hid, key, key_len); /* the row goes (a plain table: no position bookkeeping) */
+  ScrDyn *old = slot->value;
+  slot->value = r; /* ownership of the +1 moves in */
+  scr_dyn_release(old);
+  return true;
+}
+
+void scr_dyn_obj_force_lazy_all(const ScrDyn *d0) {
+  if (d0 == NULL || d0->kind != SCR_DYN_OBJ) return;
+  ScrDyn *d = (ScrDyn *)d0;
+  for (size_t i = 0; scr_dyn_ext(d)->hidden != NULL && i < scr_dyn_ext(d)->hidden->v.obj.len;) {
+    ScrDyn *h = scr_dyn_ext_w(d)->hidden;
+    ScrDyn *row = h->v.obj.entries[i].value;
+    if (row != NULL && row->kind == SCR_DYN_ARR && !scr_hid_is_data(row) && scr_hid_lazy(row)) {
+      /* the key is copied: forcing drops the row that owns it */
+      size_t kl = h->v.obj.entries[i].key_len;
+      char *kc = (char *)malloc(kl + 1);
+      if (kc == NULL) return;
+      memcpy(kc, h->v.obj.entries[i].key, kl);
+      kc[kl] = 0;
+      const bool ok = scr_dyn_lazy_force(d, kc, kl);
+      free(kc);
+      if (!ok) {
+        scr_exc_clear(); /* the row stays an accessor: the surface's own read of it raises the thunk's error */
+        i++;
+      }
+      continue; /* a forced row left the table: the next one stands at the same index */
+    }
+    i++;
+  }
+}
+
+void scr_dyn_key_set_lazy(ScrDyn *recv, ScrStr *key, ScrDyn *thunk) {
+  ScrDyn *target = NULL; /* +1 when the receiver is a function value's own-property table */
+  ScrDyn *tbl = recv;
+  bool lazy_ok = false;
+  if (recv->kind == SCR_DYN_OBJ) {
+    lazy_ok = !recv->static_copy && !recv->module_ns && !scr_dyn_is_minted_proto(recv) && !scr_dyn_obj_is_strdec(recv);
+  } else if (recv->kind == SCR_DYN_FUNC && !err_cls_is(recv) && (scr_dyn_class_ops == NULL || scr_dyn_class_ops->class_of_value(recv) == NULL)) {
+    /* a function value's own properties: the table behind scr_dyn_fn_get. The built-in names and a program that links classes take the eager path. */
+    const bool builtin = (key->len == 4 && memcmp(key->data, "name", 4) == 0) || (key->len == 6 && memcmp(key->data, "length", 6) == 0) ||
+                         (key->len == 9 && memcmp(key->data, "prototype", 9) == 0);
+    if (!builtin) {
+      target = scr_dyn_fn_props(recv);
+      tbl = target;
+      lazy_ok = target != NULL && target->kind == SCR_DYN_OBJ;
+    }
+  }
+  if (lazy_ok) {
+    ScrDyn *found = NULL;
+    lazy_ok = scr_dyn_obj_resolve(tbl, key->data, key->len, &found, NULL) == SCR_PROP_ABSENT;
+  }
+  if (lazy_ok && thunk->kind == SCR_DYN_FUNC) {
+    scr_dyn_obj_put_hidden(tbl, key->data, key->len, false, thunk, scr_dyn_undefined(), true, true);
+    ScrDyn *row = scr_dyn_obj_get(scr_dyn_ext(tbl)->hidden, key->data, key->len);
+    scr_dyn_arr_push(row, scr_dyn_new_bool(true)); /* the 8th element: lazy */
+    if (target != NULL) scr_dyn_release(target);
+    return;
+  }
+  if (target != NULL) scr_dyn_release(target);
+  scr_dyn_this_push_dyn(recv);
+  ScrDyn *v = scr_dyn_call(thunk, NULL, 0, "getter");
+  scr_dyn_this_pop();
+  if (v == NULL) return; /* the thunk's exception is pending */
+  scr_dyn_key_set(recv, key, v);
+  scr_dyn_release(v);
+}
+
+/* Is `v` a function value whose source text is exactly `text`? The install-time GUARD of a lazy member: a callee the compiler proved pure (no free variable
+ * it reads or writes, no call, writes only to objects it made) behaves as a function of its source text alone, so a value read at the original position that
+ * carries that text may be called later. A function value without source text is never a match. */
+bool scr_dyn_fn_src_is(const ScrDyn *v, const ScrStr *text) {
+  if (v == NULL || v->kind != SCR_DYN_FUNC) return false;
+  const char *src = scr_dyn_fn_src(v);
+  return src != NULL && strlen(src) == text->len && memcmp(src, text->data, text->len) == 0;
 }
 
 /* A SYMBOL-KEYED member of a record crossing into the tree (the mapper spells
