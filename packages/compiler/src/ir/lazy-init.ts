@@ -212,7 +212,8 @@ export function lazyInitPass(mod: IrModule): LazyInitResult {
     try {
       if (f === undefined || !Array.isArray(f.body)) refuse("no body");
       if ((f!.params as unknown[]).length !== 0) refuse("takes parameters");
-      if (((f!.captures as unknown[]) ?? []).length !== 0) refuse("captures locals");
+      // A binding the thunk captures from its enclosing function is state the thunk did not create: READ it = a hoisted read (exact, as for a global), WRITE it = refused.
+      const captured = new Set<string>(((f!.captures as unknown[]) ?? []).map((c) => (typeof c === "string" ? c : String((c as Node)["localId"] ?? (c as Node)["id"] ?? JSON.stringify(c)))));
       const locals = new Set<string>();
       const fresh = new Set<string>();
       const plainLocals = new Set<string>();
@@ -243,7 +244,7 @@ export function lazyInitPass(mod: IrModule): LazyInitResult {
             return;
           case "varRef": {
             const id = e["localId"] as string;
-            if (isGlobalId(id)) v.hoists.push(id);
+            if (isGlobalId(id) || captured.has(id)) v.hoists.push(id);
             return;
           }
           case "dynFrom": case "toString": case "unary":
@@ -263,6 +264,7 @@ export function lazyInitPass(mod: IrModule): LazyInitResult {
           case "assignExpr": {
             const id = e["localId"] as string;
             if (isGlobalId(id)) refuse("writes a global");
+            if (captured.has(id)) refuse(`writes the captured binding ${id}`);
             ex(e["value"]);
             if (plainArg(e["value"])) plainLocals.add(id);
             return;
@@ -271,7 +273,7 @@ export function lazyInitPass(mod: IrModule): LazyInitResult {
             ex(e["key"]);
             let r: unknown = e["value"];
             while (kindOf(r) === "dynFrom") r = (r as Node)["value"];
-            if (kindOf(r) === "varRef" && isGlobalId((r as Node)["localId"]) && kindOf(e["key"]) === "strLit") {
+            if (kindOf(r) === "varRef" && (isGlobalId((r as Node)["localId"]) || captured.has((r as Node)["localId"] as string)) && kindOf(e["key"]) === "strLit") {
               v.hoists.push(`${(r as Node)["localId"] as string}.${((e["key"] as Node)["value"] as string)}`);
               return;
             }
@@ -281,7 +283,7 @@ export function lazyInitPass(mod: IrModule): LazyInitResult {
           case "dynInvoke": {
             let r: unknown = e["recv"];
             while (kindOf(r) === "dynFrom") r = (r as Node)["value"];
-            if (kindOf(r) !== "varRef" || !isGlobalId((r as Node)["localId"]) || e["methodKey"] != null) return refuse("dyn call on a non-global receiver or runtime key");
+            if (kindOf(r) !== "varRef" || !(isGlobalId((r as Node)["localId"]) || captured.has((r as Node)["localId"] as string)) || e["methodKey"] != null) return refuse("dyn call on a receiver that is neither a global nor a captured binding, or a runtime key");
             const m = e["method"] as string;
             const args = e["args"] as unknown[];
             args.forEach(ex);
@@ -317,6 +319,7 @@ export function lazyInitPass(mod: IrModule): LazyInitResult {
           case "assign": {
             const id = s["localId"] as string;
             if (isGlobalId(id)) refuse("writes a global");
+            if (captured.has(id)) refuse(`writes the captured binding ${id}`);
             ex(s["value"]);
             if (plainArg(s["value"])) plainLocals.add(id);
             return;
