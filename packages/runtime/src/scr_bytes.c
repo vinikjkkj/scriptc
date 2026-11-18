@@ -394,6 +394,9 @@ static uint32_t scr_bytes_to_u32(double v) {
 }
 
 /* The element at an index that names one (the switch scr_bytes_get and scr_bytes_get_undef share). */
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((always_inline))
+#endif
 static inline double scr_bytes_load(const ScrBytes *b, size_t idx) {
   switch (b->elem) {
     case SCR_BYTES_U8:
