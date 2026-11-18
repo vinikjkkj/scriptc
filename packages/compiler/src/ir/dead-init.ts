@@ -43,8 +43,8 @@ const mkCx = (body?: unknown): Cx => ({ fresh: new Set(), callable: new Set(), c
 const READ_PARENTS = new Set(["recordIsView", "recordView", "recordGet", "recordKeyGet", "recordGetAt", "recordOvfHas", "recordOvfSlotGet", "recordOvfSlots", "recordOvfKeys", "recordKeyPresent", "recordKeyPresentAt", "recordSlotFilled"]);
 
 /** Every use of `id` inside `body`: how many are read-only (READ_PARENTS under key obj, plus `extra`), the calls it is passed to, and the raw count of string occurrences (any other use makes raw exceed the sum). */
-function usesOf(body: unknown, id: string, extra?: (parent: Node, key: string, self: Node) => boolean): { raw: number; allowed: number; calls: { callee: string; idx: number }[] } {
-  const r = { raw: 0, allowed: 0, calls: [] as { callee: string; idx: number }[] };
+function usesOf(body: unknown, id: string, extra?: (parent: Node, key: string, self: Node) => boolean): { raw: number; allowed: number; calls: { callee: string; idx: number }[]; bad: string[] } {
+  const r = { raw: 0, allowed: 0, calls: [] as { callee: string; idx: number }[], bad: [] as string[] };
   const walk = (n: unknown, parent: Node | null, key: string): void => {
     if (Array.isArray(n)) {
       for (const x of n) {
@@ -59,7 +59,7 @@ function usesOf(body: unknown, id: string, extra?: (parent: Node, key: string, s
       else if (parent !== null && kindOf(parent) === "call" && key === "args") {
         const ix = (parent["args"] as unknown[]).indexOf(n);
         if (ix >= 0) r.calls.push({ callee: parent["callee"] as string, idx: ix });
-      }
+      } else r.bad.push(parent === null ? "root" : `${kindOf(parent)}.${key}`);
     }
     for (const k of Object.keys(n)) {
       if (k === "loc") continue;
@@ -166,6 +166,7 @@ export function deadInitPass(mod: IrModule): DeadInitResult {
     return ok;
   }
   /** A const, non-tdz global assigned exactly once, by a record literal, whose every use is read-only. */
+  const nvWhy = new Map<string, string>();
   const plainGlobal = (id: string): boolean => {
     const memo = constMemo.get(id);
     if (memo !== undefined) return memo;
@@ -178,12 +179,19 @@ export function deadInitPass(mod: IrModule): DeadInitResult {
       if (kindOf(v) === "recordLit" && (v["fields"] as Node[]).every((f) => f["viewSlot"] !== true)) {
         let raw = 0, allowed = 0;
         const calls: { callee: string; idx: number }[] = [];
+        const bad = new Set<string>();
         for (const fn of mod.functions) {
           const u = usesOf(fn.body, id);
           raw += u.raw; allowed += u.allowed; calls.push(...u.calls);
+          for (const b of u.bad) bad.add(`${fn.name}:${b}`);
+          if (u.raw !== u.allowed + u.calls.length + u.bad.length + (fn.name.startsWith("%init.") ? 1 : 0) && u.bad.length === 0 && u.raw > 0) bad.add(`${fn.name}:non-varRef string use (capture or id)`);
         }
         ok = raw === allowed + calls.length + 1 && callsConfined(calls);
-      }
+        if (!ok) {
+          const badCalls = calls.filter((c) => { const f = fnByName.get(c.callee); const pid = f?.params[c.idx]?.localId; return !(f !== undefined && pid !== undefined && paramConfined(f, pid)); }).map((c) => `call ${c.callee}#${c.idx}`);
+          nvWhy.set(id, [...bad, ...badCalls].slice(0, 8).join("; ") || `raw=${raw} allowed=${allowed} calls=${calls.length}`);
+        }
+      } else nvWhy.set(id, "not a single-assignment record-literal const");
     }
     constMemo.set(id, ok);
     return ok;
@@ -291,7 +299,15 @@ export function deadInitPass(mod: IrModule): DeadInitResult {
           let src: unknown = a[0];
           while (kindOf(src) === "ternary" && isDeadViewCond((src as Node)["cond"], cx)) src = (src as Node)["else_"];
           const t = isNode(src) && kindOf(src) === "dynFrom" ? ((src as Node)["value"] as Node)["type"] as Node | undefined : undefined;
-          return t !== undefined && t["kind"] === "array" && sub(src) ? true : no("dyn.iterOpen over something other than a boxed typed array");
+          if (t !== undefined && t["kind"] === "array" && sub(src)) return true;
+          let why = "";
+          if (kindOf(src) === "ternary" && kindOf((src as Node)["cond"]) === "recordIsView") {
+            const ov = ((src as Node)["cond"] as Node)["obj"] as Node;
+            const oid = kindOf(ov) === "varRef" ? (ov["localId"] as string) : "";
+            plainGlobal(oid);
+            why = ` [recordIsView(${oid}) unresolved: ${nvWhy.get(oid) ?? "not a global"}]`;
+          }
+          return no(`dyn.iterOpen over something other than a boxed typed array${why}`);
         }
         if (fn === "dyn.iterVal" && isLocal(a[0], cx.packs) && kindOf(a[1]) === "varRef") return true;
         if (fn === "dyn.iterPack" && isLocal(a[0], cx.plain) && kindOf(a[1]) === "strLit") return true;
