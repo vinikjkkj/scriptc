@@ -936,6 +936,7 @@ export function lowerToIr(
   if (options.noPinReload !== true) {
     const pinReload = discovery.computeDynPinEdits();
     if (pinReload !== null) {
+      lowerProfileFlush();
       // The caller re-loads the program with the edits and lowers THAT.
       // Nothing of this pass is kept: its discovery only answered the
       // question.

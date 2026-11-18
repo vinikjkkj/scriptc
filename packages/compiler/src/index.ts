@@ -2,7 +2,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { readFileSync } from "node:fs";
 import { cDefinedNames, layoutMatchStats, layoutStaleWarning, llvmDefinedNames, parseLayoutOrder, reorderLlvmText, type LayoutOrder } from "./backend/layout-order.js";
 import { tapPhase, tapped } from "./phase-tap.js";
-import { noteHash, spanAsync } from "./phase-times.js";
+import { noteHash, notePassFiles, spanAsync } from "./phase-times.js";
 import { basename, dirname, join, resolve } from "node:path";
 import { cacheRootDir, CcCompileError, compileC, compileLibArchive, layoutLinkOrderingAvailable, resolveCc, targetPlatform } from "./backend/cc.js";
 import { emitModule, emitModuleProgram } from "./backend/emission/emitter.js";
@@ -589,6 +589,7 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
   const finalLoad = load;
   // The pins the first load decided ride to the reloads of this same compile (loadProgram: THE PIN HAND-OVER).
   const decidedPins = finalLoad.decidedPins;
+  notePassFiles("first", finalLoad.program.getSourceFiles().filter((sf) => !sf.isDeclarationFile));
   let pinnedLoad: (LoadResult & { dispose: () => void }) | null = null;
   // What the frontend answers about the FIRST load (entry text, exports, source texts). A reload (pin, twin) frees that load before
   // the next program loads, so the answers are taken first and memoised: the peak holds one program, not up to three.
@@ -629,6 +630,7 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
       freeFinalLoad();
       pinnedLoad = loadProgram(entryPath, { desugarMemo, npmStatic: effective, textEdits: first.pinReload, ...(decidedPins !== undefined ? { decidedPins } : {}) });
       checkPreflight(pinnedLoad);
+      notePassFiles("pin", pinnedLoad.program.getSourceFiles().filter((sf) => !sf.isDeclarationFile));
       const second = tapped("lower.pin", () => lowerToIr(pinnedLoad!.program, pinnedLoad!.entry, pinnedLoad!.moduleOrder, {
         ...opts,
         startupCrash: pinnedLoad!.startupCrash ?? null,
@@ -711,6 +713,7 @@ function runFrontend(entryPath: string, npmStatic?: readonly string[] | "auto" |
           if (process.env["SCRIPTC_TWIN_WHY"] !== undefined) process.stderr.write(`[twin] reload refused by preflight: ${twinWhy(twinLoad, twinPre)}\n`);
           return keep;
         }
+        notePassFiles("twin", twinLoad.program.getSourceFiles().filter((sf) => !sf.isDeclarationFile));
         const again = tapped("lower.twin", () => lowerToIr(twinLoad!.program, twinLoad!.entry, twinLoad!.moduleOrder, {
           ...opts,
           startupCrash: twinLoad!.startupCrash ?? null,
