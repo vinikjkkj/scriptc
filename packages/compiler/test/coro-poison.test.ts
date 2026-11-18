@@ -16,7 +16,7 @@
  */
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, expect, test } from "vitest";
+import { afterEach, beforeAll, expect, test } from "vitest";
 import { compile } from "@scriptc/compiler";
 import { BOOL, F64, STRING, VOID, type IrFunction, type IrType } from "../src/ir/nodes.js";
 import {
@@ -221,10 +221,29 @@ async function buildArm(knob: boolean, poison: string | undefined): Promise<stri
   }
 }
 
+/* THE CLEAN ARM RUNS IN A HOOK, NOT IN THE TEST, because it is where the cold cost lands.
+ *
+ * The first `compile()` of a shard builds the runtime's objects (the object cache is empty at the start of every CI job, and
+ * SCRIPTC_CC_JOBS=1 makes that build serial) while up to four test files do the same at once. On the Windows lane (zig cc) that
+ * is the whole cost of this file; the program itself is four lines. MEASURED from the CI logs of 2026-11-17/18 (Windows shard 2/20,
+ * the file's own duration, 13 attempts): passes took 53.4, 54.3, 54.7, 56.8, 61.4, 80.5, 81.3, 90.9, 94.6 and 116.3 s, and three
+ * attempts hit the old 120 s cap of the single test (121.2 s each, runs 44208476143, 44213505036, 44175567057): the legitimate
+ * cost has a tail past 120 s, so the cap was cutting real work, and every cut costs a rerun of the shard (about an hour of queue).
+ * MEASURED here on Linux (clang): cold object cache 9.2 s for the test, warm 1.8 s, so the arm after the first costs about a fifth.
+ *
+ * The test keeps its 120 s for what is its own: the poisoned build (a warm program compile, about 1 s on Linux) and the
+ * assertions. The hook gets 600 s, 5x the worst cold cost seen, for the shared start-up cost. Nothing it checks is weakened: the same
+ * two builds, the same four assertions on the same two artifacts; and both knobs of the controls below (the substitution is
+ * absent, the f64 count moves by exactly the bool count) still decide the test. */
+let cleanArm = "";
+beforeAll(async () => {
+  cleanArm = await buildArm(true, undefined);
+}, 600_000);
+
 test("knob-ON C DIFFERS with the poison set, and the ARTIFACT accounts for every site", { timeout: 120_000 }, async () => {
   // The must-change line. Without it the test above is green when the poison
   // does nothing at all -- including when it was never wired up.
-  const on = await buildArm(true, undefined);
+  const on = cleanArm;
   expect(on, "the knob did not reach the emitter").toMatch(/scr_coro_finish_bool/);
 
   arm("finish-arm");
