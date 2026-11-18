@@ -41,7 +41,7 @@ static void setn(ScrDyn *o, const char *k, double n) {
 }
 static void setlazy(ScrDyn *o, const char *k, ScrDyn *th) {
   ScrStr *ks = S(k);
-  scr_dyn_key_set_lazy(o, ks, th);
+  scr_dyn_key_set_lazy(o, ks, th, true);
   scr_str_release(ks);
 }
 static size_t nkeys(ScrDyn *o) {
@@ -127,6 +127,20 @@ int main(void) {
   scr_dyn_release(num);
   scr_str_release(t);
   scr_str_release(t2);
+
+  /* a failed guard runs the thunk now, as the eager statement would */
+  ScrDyn *og = scr_dyn_new_obj();
+  calls = 0;
+  {
+    ScrStr *ks = S("g");
+    scr_dyn_key_set_lazy(og, ks, th, false);
+    scr_str_release(ks);
+  }
+  check(calls == 1, "failed guard: the thunk ran at install");
+  v = get(og, "g");
+  check(num_is(v, 42) && calls == 1 && !scr_dyn_obj_has_enum_acc(og), "failed guard: a plain data property");
+  scr_dyn_release(v);
+  scr_dyn_release(og);
 
   /* a key that already exists takes the eager path: value stored now, position kept */
   ScrDyn *o5 = scr_dyn_new_obj();
