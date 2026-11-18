@@ -5,11 +5,11 @@ ns.A=function(){function e(e){if(e)for(var t=Object.keys(e),n=0;n<t.length;++n)n
 ns.B=function(){function e(e){if(e)for(var t=Object.keys(e),n=0;n<t.length;++n)null!=e[t[n]]&&(this[t[n]]=e[t[n]])}var t;return e.prototype.g=M.emptyArray,Object.defineProperty(e.prototype,"_g",{get:M.oneOfGetter(t=["g"]),set:M.oneOfSetter(t)}),e}();
 ns.C=function(){function e(e){if(e)for(var t=Object.keys(e),n=0;n<t.length;++n)null!=e[t[n]]&&(this[t[n]]=e[t[n]])}var t;return e.prototype.h=M.emptyArray,Object.defineProperty(e.prototype,"_h",{get:M.oneOfGetter(t=["h"]),set:M.oneOfSetter(t)}),e}();
 function show(tag){
+  var d=Object.getOwnPropertyDescriptor(ns,"B");
+  console.log(tag,"desc",typeof d.value,d.writable,d.enumerable,d.configurable,typeof d.get,typeof d.set);
   console.log(tag,"keys",Object.keys(ns).join(","));
   var s=[];for(var k in ns)s.push(k);console.log(tag,"forin",s.join(","));
   console.log(tag,"json",JSON.stringify(ns),JSON.stringify(Object.keys(ns)));
-  var d=Object.getOwnPropertyDescriptor(ns,"B");
-  console.log(tag,"desc",typeof d.value,d.writable,d.enumerable,d.configurable,typeof d.get,typeof d.set);
   console.log(tag,"names",Object.getOwnPropertyNames(ns).join(","));
   console.log(tag,"hasown",Object.prototype.hasOwnProperty.call(ns,"A"),"C" in ns);
 }
