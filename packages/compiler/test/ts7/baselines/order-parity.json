@@ -29235,6 +29235,48 @@
     "<repo>/tests/corpus/25619-an-unused-mutable-module-binding-keeps-its-initializer-and-its-effects.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25690-an-unused-view-built-by-iterating-a-frozen-spec-is-not-built-and-the-spec-is-unchanged.ts": {
+   "order": [
+    "<repo>/tests/corpus/25690-an-unused-view-built-by-iterating-a-frozen-spec-is-not-built-and-the-spec-is-unchanged.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25691-a-table-mutated-before-the-view-is-built-is-seen-by-the-view-that-is-read.ts": {
+   "order": [
+    "<repo>/tests/corpus/25691-a-table-mutated-before-the-view-is-built-is-seen-by-the-view-that-is-read.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25692-a-proxy-whose-ownkeys-throws-throws-at-module-evaluation-for-the-unused-view.ts": {
+   "order": [
+    "<repo>/tests/corpus/25692-a-proxy-whose-ownkeys-throws-throws-at-module-evaluation-for-the-unused-view.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25693-a-table-mutated-after-the-unused-view-is-built-keeps-its-own-state.ts": {
+   "order": [
+    "<repo>/tests/corpus/25693-a-table-mutated-after-the-unused-view-is-built-keeps-its-own-state.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25694-a-table-passed-to-unknown-code-and-mutated-there-is-seen-by-the-view-that-is-read.ts": {
+   "order": [
+    "<repo>/tests/corpus/25694-a-table-passed-to-unknown-code-and-mutated-there-is-seen-by-the-view-that-is-read.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25695-an-unused-view-over-a-table-that-escaped-to-unknown-code-is-kept.ts": {
+   "order": [
+    "<repo>/tests/corpus/25695-an-unused-view-over-a-table-that-escaped-to-unknown-code-is-kept.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25697-two-unused-views-over-one-frozen-spec-are-both-dropped-and-a-read-view-is-kept.ts": {
+   "order": [
+    "<repo>/tests/corpus/25697-two-unused-views-over-one-frozen-spec-are-both-dropped-and-a-read-view-is-kept.ts"
+   ],
+   "diags": []
   }
  }
 }
