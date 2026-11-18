@@ -224,6 +224,16 @@ export function deadInitPass(mod: IrModule): DeadInitResult {
     exec((mod as { entry?: string }).entry!);
   }
   /** Does the candidate's init `cand` finish strictly before top-level statement `j` of init `k` first executes? Fail closed. */
+  const lateWhy = (cand: string, k: string, j: number): string => {
+    if (initCallsTotal !== initCallsTop) return `${initCallsTotal - initCallsTop} of ${initCallsTotal} init calls are not top-level statements`;
+    if (!initShapeOk) return "an init lacks the run-once guard shape or has another return";
+    if ((mod as { entry?: string }).entry === undefined) return "no entry";
+    const fin = finishTime.get(cand), t = stmtTime.get(k)?.[j];
+    if (cand === k) return "the use is in the candidate's own init";
+    if (fin === undefined) return "the candidate's init is never reached from the entry";
+    if (t === undefined) return `init ${k} is never reached from the entry`;
+    return `${k} statement ${j} executes at ${t}, candidate init ${cand} finishes at ${fin}`;
+  };
   const initFinishedBefore = (cand: string, k: string, j: number): boolean => {
     const fin = finishTime.get(cand), t = stmtTime.get(k)?.[j];
     return cand !== k && fin !== undefined && t !== undefined && t > fin;
@@ -252,7 +262,8 @@ export function deadInitPass(mod: IrModule): DeadInitResult {
           const u = { raw: 0, allowed: 0, calls: [] as { callee: string; idx: number }[], bad: [] as string[] };
           for (const part of parts) {
             const pu = usesOf(part.body, id, part.late ? (parent, key) => parent["kind"] === "dynFrom" && key === "value" : undefined);
-            u.raw += pu.raw; u.allowed += pu.allowed; u.calls.push(...pu.calls); u.bad.push(...pu.bad);
+            u.raw += pu.raw; u.allowed += pu.allowed; u.calls.push(...pu.calls);
+            for (const b of pu.bad) u.bad.push(!part.late && stmts !== null && b === "dynFrom.value" ? `${b} (${lateWhy(curCandInit, fn.name, parts.indexOf(part))})` : b);
           }
           raw += u.raw; allowed += u.allowed; calls.push(...u.calls);
           for (const b of u.bad) bad.add(`${fn.name}:${b}`);
