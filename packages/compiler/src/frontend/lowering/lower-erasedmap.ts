@@ -18,8 +18,6 @@ import type { Lowerer } from "./lowerer.js";
 import { typeEquals, type IrExpr, type IrType } from "../../ir/nodes.js";
 import { declDescendsFrom } from "./lower-classes.js";
 
-type ParamDecl = { fn: ts.FunctionLikeDeclaration; index: number };
-
 const memo = new WeakMap<Lowerer, Map<string, boolean>>();
 const byName = new WeakMap<Lowerer, Map<string, ts.MethodDeclaration[]>>();
 
