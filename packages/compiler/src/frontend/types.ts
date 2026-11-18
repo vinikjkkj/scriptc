@@ -1909,6 +1909,18 @@ let voidUnionMappings = 0;
  * SCRIPTC_NO_MEMO bypasses the cache entirely, for A/B against it. */
 const mapTypeMemo = new WeakMap<ts.Type, Map<string, { ctx: TypeMapperCtx; result: IrType | null }>>();
 
+/** SCRIPTC_NO_MEMO / SCRIPTC_MEMO_AUDIT, read once instead of on every mapType call: `process.env` is a getenv through a C++ interceptor, and
+ * mapType runs millions of times per build (it measured 9% of the lowerer's own CPU on a one-file profile). The two flags are read at module
+ * load and re-read by refreshMapTypeEnv(), which lowerToIr calls on entry and which the one in-process writer of them (the DYNWHY
+ * diagnostic, lowerer.ts) calls after each write, so the cached values always equal what a per-call read would answer. */
+let mapTypeMemoOff = false;
+let mapTypeMemoAudit = false;
+export function refreshMapTypeEnv(): void {
+  mapTypeMemoOff = !!process.env.SCRIPTC_NO_MEMO;
+  mapTypeMemoAudit = !!process.env.SCRIPTC_MEMO_AUDIT;
+}
+refreshMapTypeEnv();
+
 /** ONE SLOT PER MAPPING MODE, not one slot per type.
  *
  * memoUsableUnder already names the three mode flags as things that must
@@ -2148,7 +2160,7 @@ export function admitWeakTableIr(
 
 export function mapType(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   if (mapTypeDepth >= MAP_TYPE_MAX_DEPTH) return null;
-  const slots = process.env.SCRIPTC_NO_MEMO ? undefined : mapTypeMemo.get(type);
+  const slots = mapTypeMemoOff ? undefined : mapTypeMemo.get(type);
   const hit = slots?.get(memoModeKey(ctx));
   if (redundNote) {
     const tid = (type as unknown as { id?: number }).id;
@@ -2159,7 +2171,7 @@ export function mapType(type: ts.Type, ctx: TypeMapperCtx): IrType | null {
   }
   // Same run, same registries, same mapping mode: see memoUsableUnder.
   if (hit !== undefined && memoUsableUnder(hit.ctx, ctx)) {
-    if (process.env.SCRIPTC_MEMO_AUDIT) {
+    if (mapTypeMemoAudit) {
       // Recompute and compare the ANSWER, not the type's rendering: a type
       // parameter renders the same under every instantiation, so comparing
       // typeToString cannot see the unsoundness we are hunting.
