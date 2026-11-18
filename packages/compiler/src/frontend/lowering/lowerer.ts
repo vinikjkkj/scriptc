@@ -84,7 +84,7 @@ import { applyDatumKeyRows } from "./lower-protodata.js";
 import { clearErasedViews, erasedViewsNoted, erasedViewsSignature, noteErasedViewFlow } from "./lower-erasedview.js";
 import { OWN_SHADOW_ROOTS, applyFieldNotes, applyOwnShadows, inOwnShadowFamily, prescanLiteralMethodShadows } from "./lower-ownshadow.js";
 import { CLASS_BUILTIN_CTORLESS, CLASS_NO_DYN_NEW, EVAL_NO_SRC_CLASSES, GRAFTED_EMITTER_CLASSES, GRAFTED_EMITTER_CELL_CLASSES, GRAFTED_ROWS_FENCED_OPS, GRAFTED_PROPS_EXACT_OPS, EVAL_STATIC_CLASSES, dynReflectionSite, emitterStateWriteSites, graftedBoxSites, moduleBoxesEmitters } from "../../ir/nodes.js";
-import { computeTwinEdits, type TwinEdits } from "./emitter-twin.js";
+import { computeTwinEdits, shiftTwinEdits, TwinFoldRefused, insideTwinSpan, twinBackMap, twinMarkOf, type TwinEdits } from "./emitter-twin.js";
 import { unbindEngineMemberReads } from "./engine-fn-unbind.js";
 import { canBoxFuncIntoDyn } from "../../ir/nodes.js";
 import { arrayTypeHasLiveView, procStreamDynMemberFence, NULL_T, strandTrap, armDiscrimLits, arrayOf, BOOL, isIntegerKeyName, canBoxClassIntoDyn, internalSlotFields, isRefCounted, canAdaptDynFuncTo, dynRestApplyable, canDynCheckTo, discrimSeparates, dynCheckArmOrder, funcOf, shapeHasAccessorSlots, canConvertToDyn, canCrossIslandBoundary, canExitIslandToType, canMarshalTypedFuncIntoIsland, DYN, F64, httpReqIsReadableIn, isJsonSafeType, isUndefinedArmedUnion, isUnitType, JSVAL, READABLE_T, RUNTIME_EMITTER_CLASS, RUNTIME_STREAM_CLASSES, RUNTIME_ERROR_CLASSES, streamDuplexWidensToWritable, STRING, typeEquals, UNDEFINED_T, VOID } from "../../ir/nodes.js";
@@ -550,6 +550,14 @@ export interface LowerResult {
   twinReload?: TwinEdits;
   /** Set alongside a complete module whose twin decision skipped some typed listeners: where each is and the shape that stopped the generator (SC6005). */
   twinSkipped?: { loc: SrcLoc; why: string }[];
+  /** Set ALONGSIDE pinReload (index.ts, THE FOLDED TWIN): the twin insertions the first pass decided, already moved to the pin-edited
+   * text, so one reload can carry the pins and the twins. */
+  twinFold?: TwinEdits;
+  /** Set by an emit pass that was handed LowerOptions.twinFoldApplied: whether that program has exactly the twins today's sequential
+   * twin reload would have given it (see foldedTwinCheck). */
+  foldCheck?: { ok: boolean; why: string };
+  /** Set with twinFold: the typed listeners the first pass's twin decision skipped, at their positions in the UNEDITED text (SC6005). */
+  twinFoldSkipped?: { loc: SrcLoc; why: string }[];
   /** Present iff diagnostics is empty. */
   module: IrModule | null;
   diagnostics: ScrDiagnostic[];
@@ -615,6 +623,9 @@ export interface LowerOptions {
   /** Do not answer with a pin reload (LowerResult.pinReload): this program
    * IS the pinned reload, or the caller cannot reload. */
   noPinReload?: boolean;
+  /** This program is the FOLDED reload (pins and twins together); these are the twin insertions it carries, in its coordinates
+   * (offsets into the pin-edited text). The emit pass checks them (LowerResult.foldCheck) instead of deciding twins. */
+  twinFoldApplied?: TwinEdits;
 }
 
 /** The Lowerer's pass configuration (see lowerToIr). */
@@ -818,6 +829,69 @@ const classViewDeclined = new Set<string>();
 const classViewProbed = new Set<string>();
 const classViewNeeded = new Set<string>();
 
+const TWIN_MARK_TEXT = /^\/\*@sctwin (\d+)\*\/ $/;
+/** The twin edits that carry the twins themselves (a marker, a hoisted copy, a declaration twin), one string per edit, sorted:
+ * `file@offset#text`. The edits that only open or close a statement (the braces of a lone statement, the block of an expression-bodied
+ * arrow) are left out, and the opener of such a wrapper is removed from the hoist that carries it: in the program that already has
+ * the twins those statements ARE in a block, so the rerun spells them as a plain hoist. `back` moves an offset to the text without twins. */
+function twinContent(edits: TwinEdits, back: (file: string) => (p: number) => number, wrapped: boolean): string[] {
+  const out: string[] = [];
+  for (const [file, list] of edits) {
+    const mv = back(file);
+    for (const e of list) {
+      if (!e.text.includes("__sctwin_") && !TWIN_MARK_TEXT.test(e.text)) continue;
+      // (a declaration twin that ended an ASI-style statement with `;` is, in the program that has it, part of that statement: the rerun sees the `;` as written and adds none)
+      const text = wrapped ? e.text.replace(/^\{ (?=(const|void) __sctwin_)/, "").replace(/ return $/, "").replace(/^; (?=const __sctwin_)/, " ") : e.text;
+      out.push(`${file.split("\\").join("/")}@${mv(e.at)}#${text}`);
+    }
+  }
+  return out.sort();
+}
+
+/** THE CHECK OF THE FOLDED TWIN. The program this pass lowered carries `applied` (twin insertions decided from the first pass, in
+ * pin-edited coordinates). Today's way would have lowered the pin-edited program WITHOUT twins, taken its twin candidates and its gate,
+ * and inserted twins for them. The two agree iff all of these hold, each measured on THIS pass:
+ *   1. the twins the program carries are exactly what computeTwinEdits makes of the registration sites of this program: the full
+ *      computation is rerun in `applied` mode over every site outside the copies, in lowering order (so the same candidates, the same
+ *      numbers, the same placements and the same copied text, pin wrappers inside the copies included), and every edit that carries a
+ *      twin is compared with the applied one, moved back to the text without twins. A site the fold missed shows as an edit the rerun
+ *      has and the program lacks; a twin the fold added for a site today's way would skip, or numbered or copied differently, as the
+ *      reverse;
+ *   2. every marker was found by the lowering (the site registered through emitter.onTwin), at the same places and numbers;
+ *   3. the gate holds on the IR with the code of the copies left out (the copies are the only difference between this program and
+ *      today's pin-edited one, and a copy's `any` parameters could box an emitter that the original does not).
+ * Any miss is reported and the caller discards this lowering and runs the sequential path. */
+function foldedTwinCheck(emit: Lowerer, module: IrModule | null, applied: TwinEdits): { ok: boolean; why: string } {
+  if (module === null) return { ok: false, why: "no module" };
+  if ((process.env["SCRIPTC_TWIN_FOLD_BREAK"] ?? "").split(",").includes("nocheck")) return { ok: true, why: "check skipped (BREAK=nocheck)" };
+  const pOf = (file: string): ((p: number) => number) => {
+    const es = applied.get(file) ?? applied.get(file.split("\\").join("/"));
+    return es === undefined ? (p) => p : twinBackMap(es);
+  };
+  const sites = emit.twinSites.filter((n) => !insideTwinSpan(n.getSourceFile().fileName, n.getStart(n.getSourceFile())));
+  const rerun = sites.length === 0 ? new Map() : computeTwinEdits(sites, emit.checker, { applied: true }) ?? new Map();
+  const want = twinContent(applied, () => (p) => p, true);
+  const got = twinContent(rerun, pOf, false);
+  const same = (a: string[], b: string[]): boolean => a.length === b.length && a.every((x, i) => x === b[i]);
+  if (!same(want, got)) {
+    const d = want.find((x) => !got.includes(x)) ?? got.find((x) => !want.includes(x));
+    return { ok: false, why: `twins differ: applied ${want.length} edit(s), recomputed ${got.length}, first diff ${(d ?? "").slice(0, 160)}` };
+  }
+  const marks = (xs: string[]): string[] => xs.filter((x) => x.includes("#/*@sctwin "));
+  const reg: string[] = [];
+  for (const n of emit.twinApplied) {
+    const sf = n.getSourceFile();
+    const at = n.getStart(sf);
+    if (insideTwinSpan(sf.fileName, at)) continue;
+    reg.push(`${sf.fileName.split("\\").join("/")}@${pOf(sf.fileName)(at)}#/*@sctwin ${twinMarkOf(n)}*/ `);
+  }
+  const regU = [...new Set(reg)].sort();
+  const wantMarks = marks(want);
+  if (!same(wantMarks, regU)) return { ok: false, why: `markers not all registered: applied ${wantMarks.length}, registered ${regU.length}, first diff ${(wantMarks.find((x) => !regU.includes(x)) ?? regU.find((x) => !wantMarks.includes(x)) ?? "").slice(0, 120)}` };
+  if (!moduleBoxesEmitters(module, (loc) => insideTwinSpan(loc.file, loc.start))) return { ok: false, why: "gate false outside the copies" };
+  return { ok: true, why: `${wantMarks.length} twin marker(s), ${want.length} twin edit(s) rechecked` };
+}
+
 export function lowerToIr(
   program: ts.Program,
   entry: ts.SourceFile,
@@ -925,6 +999,39 @@ export function lowerToIr(
   if (options.noPinReload !== true) {
     const pinReload = discovery.computeDynPinEdits();
     if (pinReload !== null) {
+      // THE FOLDED TWIN: decide the twins now, from this pass's discovery, and hand them over moved to the pin-edited text, so the
+      // caller loads the program ONCE with both. Only a hint: the folded reload's emit pass checks it (foldedTwinCheck) and the
+      // caller falls back to the sequential pin reload + twin reload on any doubt.
+      let twinFold: TwinEdits | undefined;
+      let twinFoldSkipped: { loc: SrcLoc; why: string }[] | undefined;
+      if (process.env["SCRIPTC_TWIN_FOLD"] !== "off" && options.noTwinReload !== true && discovery.twinCandidates.length > 0) {
+        const defs = [...discovery.classes.values()].map((c) => c.def);
+        if (moduleBoxesEmitters({ classes: defs, functions: discovery.classIr } as unknown as IrModule)) {
+          try {
+            // BREAK (tests only): deliberately wrong folds, each of which the check or the verify mode must catch
+            const brk = (process.env["SCRIPTC_TWIN_FOLD_BREAK"] ?? "").split(",");
+            const cands = brk.includes("dropone") ? discovery.twinCandidates.slice(0, -1) : discovery.twinCandidates;
+            const foldSkipped: { node: ts.Expression; why: string }[] = [];
+            const raw = cands.length === 0 ? null : computeTwinEdits(cands, discovery.checker, { pins: pinReload, skipped: foldSkipped });
+            twinFoldSkipped = foldSkipped.map((x) => {
+              const sf = x.node.getSourceFile();
+              return { loc: { file: sf.fileName, start: x.node.getStart(sf), end: x.node.end }, why: x.why };
+            });
+            if (raw !== null) {
+              if (brk.includes("renumber")) {
+                for (const list of raw.values()) {
+                  const i = list.findIndex((e) => e.text.startsWith("/*@sctwin "));
+                  if (i >= 0) { list[i] = { at: list[i]!.at, text: list[i]!.text.replace(/\d+/, (d) => String(Number(d) + 50)) }; break; }
+                }
+              }
+              twinFold = brk.includes("shift") ? raw : shiftTwinEdits(raw, pinReload);
+            }
+          } catch (e) {
+            if (!(e instanceof TwinFoldRefused)) throw e;
+            if (process.env["SCRIPTC_TWIN_WHY"] !== undefined) process.stderr.write(`[twinfold] refused: ${e.message}\n`);
+          }
+        }
+      }
       // The caller re-loads the program with the edits and lowers THAT.
       // Nothing of this pass is kept: its discovery only answered the
       // question.
@@ -934,6 +1041,8 @@ export function lowerToIr(
         advisories: [],
         stats: { statementsTotal: 0, statementsFailed: 0, statementsIsland: 0, functionsSkipped: 0 },
         pinReload,
+        ...(twinFold !== undefined ? { twinFold } : {}),
+        ...(twinFold !== undefined && twinFoldSkipped !== undefined && twinFoldSkipped.length > 0 ? { twinFoldSkipped } : {}),
       };
     }
   }
@@ -975,7 +1084,9 @@ export function lowerToIr(
       };
     }
   }
-  if (options.noTwinReload !== true && result.module !== null && emit.twinCandidates.length > 0 && moduleBoxesEmitters(result.module)) {
+  if (options.twinFoldApplied !== undefined) {
+    result = { ...result, foldCheck: foldedTwinCheck(emit, result.module, options.twinFoldApplied) };
+  } else if (options.noTwinReload !== true && result.module !== null && emit.twinCandidates.length > 0 && moduleBoxesEmitters(result.module)) {
     const skipped: { node: ts.Expression; why: string }[] = [];
     const twinReload = computeTwinEdits(emit.twinCandidates, emit.checker, { skipped });
     // The listeners the generator does not twin, as source locations of THIS program's text (the caller reports them: SC6005).
@@ -2596,6 +2707,11 @@ export class Lowerer {
   /** The inline listener functions registered through the TYPED emitter path whose parameters are not all
    * dyn (emitter-twin.ts): the candidates for an erased twin if a dynamic emit can reach the emitter. */
   readonly twinCandidates: ts.Expression[] = [];
+  /** Every registration the twin logic considered, in lowering order (emitter-twin.ts): the candidates plus the sites that already
+   * carried a twin marker. */
+  readonly twinSites: ts.Expression[] = [];
+  /** The sites that registered through emitter.onTwin (their marker was found). */
+  readonly twinApplied: ts.Expression[] = [];
   readonly dynWriteByName = new Map<string, Set<string>>();
   readonly dynWriteAnyKey = new Set<string>();
   /** Every inferred, pinnable field slot the class collection met (class
@@ -10326,7 +10442,7 @@ export class Lowerer {
   /** Pairs this lowerer is probing (see classViewHelperFor). */
   private readonly classProbeNow = new Set<string>();
   /** Every body discovery lowered, for analyzeClassViews. */
-  private readonly classIr: IrFunction[] = [];
+  readonly classIr: IrFunction[] = [];
 
   /** Discovery's verdict on the class views its probes lowered: a pair the per-site proof cannot clear (or any use outside a direct call argument) needs
    * the view grant; the rest keep the copy and no record of their shape carries a view slot. Reruns discovery when the needed set grows. */
