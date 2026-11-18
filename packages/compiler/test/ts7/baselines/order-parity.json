@@ -29513,6 +29513,12 @@
     "<repo>/tests/corpus/25764-reflect-operations-and-an-object-that-inherits-from-a-namespace-with-unread-members-follow-node.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25765-a-table-built-by-one-comma-expression-installs-its-members-lazily-and-matches-node.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25765-a-table-built-by-one-comma-expression-installs-its-members-lazily-and-matches-node.cjs"
+   ],
+   "diags": []
   }
  }
 }
