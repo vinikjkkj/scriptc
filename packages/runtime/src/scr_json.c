@@ -9344,7 +9344,14 @@ ScrDyn *scr_dyn_obj_own_enum_read(ScrDyn *recv, const char *key, size_t key_len)
  * property was found ON — [[Set]] needs it, because JS treats an
  * INHERITED writable data property differently from an own one (the
  * write creates a fresh ordinary own property instead of updating). */
-static ScrPropKind scr_dyn_obj_resolve(const ScrDyn *d, const char *key, size_t key_len,
+/* The out-of-line, cold half of the lazy-member force in scr_dyn_obj_resolve: keeping it out of the resolver keeps the resolver as small as it was
+ * before lazy members, so the compiler still inlines it into the hot readers. True: the member is forced, look again. False: the thunk failed. */
+static __attribute__((noinline, cold)) bool scr_dyn_resolve_force(ScrDyn *o, const char *key, size_t key_len) {
+  if (scr_dyn_lazy_force(o, key, key_len)) return true;
+  scr_exc_clear();
+  return false;
+}
+static inline __attribute__((always_inline)) ScrPropKind scr_dyn_obj_resolve(const ScrDyn *d, const char *key, size_t key_len,
                                        ScrDyn **out, const ScrDyn **holder) {
   const ScrDyn *o = d;
   for (size_t steps = 0; o != NULL && steps <= SCR_PROTO_MAX_DEPTH; steps++) {
@@ -9361,10 +9368,9 @@ static ScrPropKind scr_dyn_obj_resolve(const ScrDyn *d, const char *key, size_t 
       ScrDyn *ent = scr_dyn_obj_get(scr_dyn_ext(o)->hidden, key, key_len);
       /* A LAZY member is forced here, so [[Get]], [[Set]], [[Delete]] and `in` all meet an ordinary data property. A thunk that cannot be run to the end
        * (stack exhaustion) leaves the row an ordinary accessor whose getter is that thunk: the caller's own getter call then raises the same error. */
-      if (ent != NULL && !forced && ent->kind == SCR_DYN_ARR && !scr_hid_is_data(ent) && scr_hid_lazy(ent)) {
+      if (__builtin_expect(ent != NULL && !forced && ent->kind == SCR_DYN_ARR && ent->v.arr.len >= 8 && scr_hid_lazy(ent) && !scr_hid_is_data(ent), 0)) {
         forced = true;
-        if (scr_dyn_lazy_force((ScrDyn *)o, key, key_len)) goto again;
-        scr_exc_clear();
+        if (scr_dyn_resolve_force((ScrDyn *)o, key, key_len)) goto again;
         ent = scr_dyn_obj_get(scr_dyn_ext(o)->hidden, key, key_len);
       }
       if (ent != NULL) {
