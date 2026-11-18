@@ -29163,6 +29163,12 @@
     "<repo>/tests/corpus/25728-table-strings-are-the-same-values-as-the-literals-they-replaced.js"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25729-a-run-whose-table-repeats-a-string-keeps-every-row.js": {
+   "order": [
+    "<repo>/tests/corpus/25729-a-run-whose-table-repeats-a-string-keeps-every-row.js"
+   ],
+   "diags": []
   }
  }
 }
