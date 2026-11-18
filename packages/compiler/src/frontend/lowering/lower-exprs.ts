@@ -19162,7 +19162,12 @@ export function detachedThisWriteFirst(L: Lowerer, expr: ts.BinaryExpression): b
 
 export function hoistDetachedWriteRhs(L: Lowerer, expr: ts.BinaryExpression): IrStmt[] {
   const loc = locOf(expr);
-  const targetT = L.mapTypeOf(L.typeOf(expr.left));
+  // The right side is built at the type the write itself will store (the slot's / setter's write type, exactly as the non-detached
+  // property write does): the checker's type of the member can carry a union with no `null` arm over a slot that holds any value
+  // (a JS field assigned both a handle and `null`), and building `null` at THAT type stranded it ("null is not representable in the
+  // target union") on the first run of `this.connectTimeout = null` in a detached `_handleNetworkError` -- mysql2's refused connect.
+  const wt = ts.isPropertyAccessExpression(expr.left) ? L.fieldTarget(expr.left, true) : null;
+  const targetT = wt !== null ? writeTypeOf(wt) : L.mapTypeOf(L.typeOf(expr.left));
   const rhs = targetT !== null ? L.lowerExprExpecting(expr.right, targetT) : L.lowerExpr(expr.right);
   // A literal `null` / `undefined` right side has no value to keep in a local (a bare unit type owns no storage) and no effect to
   // order before the throw: it lowers in place.
