@@ -16994,6 +16994,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25754-a-twin-whose-copy-builds-an-object-literal-from-an-any-event-for-an-unknown-parameter.ts": {
+   "order": [
+    "<repo>/tests/corpus/25754-a-twin-whose-copy-builds-an-object-literal-from-an-any-event-for-an-unknown-parameter.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2576-string-destructuring-assign.ts": {
    "order": [
     "<repo>/tests/corpus/2576-string-destructuring-assign.ts"
