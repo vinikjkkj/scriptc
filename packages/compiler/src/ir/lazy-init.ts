@@ -98,10 +98,12 @@ export function lazyInitPass(mod: IrModule): LazyInitResult {
     let r = "";
     if (f === undefined) r = "no body";
     else if (!Array.isArray(f.body)) r = "no body";
+    else if (((f.captures as unknown[]) ?? []).length !== 0) r = "captures a binding of an enclosing function (it could change between install and first read)";
     else {
       try {
         const params = new Set<string>((f.params as unknown as { localId: string }[]).map((p) => p.localId));
         const fresh = new Set<string>();
+        const declared = new Set<string>(params);
         let returnsClosure = false;
         const ex = (e: unknown): void => {
           if (!isNode(e)) return refuse("non-node expression");
@@ -110,6 +112,7 @@ export function lazyInitPass(mod: IrModule): LazyInitResult {
               return;
             case "varRef":
               if (isGlobalId(e["localId"])) refuse("reads a global");
+              if (!declared.has(e["localId"] as string)) refuse("reads a binding it does not own");
               return;
             case "dynFrom": case "toString": case "unary":
               return ex(e["value"] ?? e["operand"]);
@@ -131,11 +134,13 @@ export function lazyInitPass(mod: IrModule): LazyInitResult {
           if (!isNode(s)) return refuse("non-node statement");
           switch (s["kind"]) {
             case "varDecl":
+              declared.add(s["localId"] as string);
               if (s["init"] !== null && s["init"] !== undefined) ex(s["init"]);
               return;
             case "assign": {
               const id = s["localId"] as string;
               if (isGlobalId(id)) refuse("writes a global");
+              if (!declared.has(id)) refuse("writes a binding it does not own");
               if (params.has(id)) refuse("writes a parameter");
               const v = s["value"] as Node;
               ex(v);
