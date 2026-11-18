@@ -115,6 +115,66 @@ export function emitterMixinCallTarget(L: Lowerer, call: ts.CallExpression): ts.
   return target;
 }
 
+/** A function that calls `Object.defineProperty(P.prototype, key, desc)` with P one of its own parameters and a key that is not a
+ * literal: it installs members on whatever class the CALLER passes, by a name only the run time knows. That is the copy loop in
+ * any spelling (typed parameters, a non-null assertion on the descriptor, a `for` loop, a skipped `constructor`). */
+function definesComputedKeyOnParameterPrototype(L: Lowerer, fn: ts.Node): boolean {
+  if (!ts.isFunctionDeclaration(fn) && !ts.isFunctionExpression(fn) && !ts.isArrowFunction(fn)) return false;
+  if (fn.body === undefined) return false;
+  const params = new Set<ts.Symbol>();
+  for (const prm of fn.parameters) {
+    if (!ts.isIdentifier(prm.name)) continue;
+    const sym = L.checker.getSymbolAtLocation(prm.name);
+    if (sym) params.add(sym);
+  }
+  if (params.size === 0) return false;
+  let found = false;
+  ts.walkPreorder(fn.body, (n) => {
+    if (found) return "stop";
+    if (!ts.isCallExpression(n) || n.arguments.length < 3 || !ts.isPropertyAccessExpression(n.expression)) return undefined;
+    if (n.expression.name.text !== "defineProperty" || !L.isStdlibGlobal(n.expression.expression, "Object")) return undefined;
+    let target = n.arguments[0]!;
+    while (ts.isParenthesizedExpression(target)) target = target.expression;
+    if (!ts.isPropertyAccessExpression(target) || target.name.text !== "prototype" || !ts.isIdentifier(target.expression)) return undefined;
+    const sym = L.checker.getSymbolAtLocation(target.expression);
+    if (!sym || !params.has(sym)) return undefined;
+    const key = n.arguments[1]!;
+    if (ts.isStringLiteral(key) || ts.isNoSubstitutionTemplateLiteral(key) || ts.isNumericLiteral(key)) return undefined;
+    found = true;
+    return "stop";
+  });
+  return found;
+}
+
+/** The helper-function nodes known to be (or not to be) the canonical descriptor copy loop, so a call site costs one map read. */
+const copyLoopHelperMemo = new WeakMap<ts.Node, boolean>();
+
+/** A call of a function whose whole body is the descriptor copy loop (`Object.getOwnPropertyNames(M.prototype).forEach(name =>
+ * Object.defineProperty(D.prototype, name, Object.getOwnPropertyDescriptor(M.prototype, name)))`), keyed on that shape and never on
+ * a package name. The only form this compiler models is the recognised `applyMixin(Y, EventEmitter)` graft, which the statement
+ * lowering consumes before it reaches a call. Any other mixin reaching here (a program class, a call nested in a function, an
+ * argument that does not resolve) used to compile and then run Node-different: the copied members were not installed on the
+ * derived prototype, or the `constructor` descriptor read as undefined. Refused at compile time instead. */
+export function refuseUnmodelledCopyLoopCall(L: Lowerer, call: ts.CallExpression): void {
+  if (call.arguments.length !== 2 || !ts.isIdentifier(call.arguments[0]!)) return;
+  const callee = unwrapCallee(call.expression);
+  const calleeName = ts.isPropertyAccessExpression(callee) ? callee.name : ts.isIdentifier(callee) ? callee : null;
+  if (calleeName === null) return;
+  const helper = helperFunctionOf(L, symbolOfName(L, calleeName));
+  if (helper === null) return;
+  let isLoop = copyLoopHelperMemo.get(helper);
+  if (isLoop === undefined) {
+    isLoop = isApplyMixinBody(helper) || definesComputedKeyOnParameterPrototype(L, helper);
+    copyLoopHelperMemo.set(helper, isLoop);
+  }
+  if (!isLoop) return;
+  L.unsupported(
+    "SC1090",
+    call,
+    "a prototype copy loop (Object.getOwnPropertyNames(M.prototype) copied onto D.prototype through defineProperty/getOwnPropertyDescriptor) over a mixin other than a top-level applyMixin(Class, EventEmitter): the copied methods, accessors and 'constructor' are not installed on the derived class here, so the call is refused rather than compiled to a different program",
+  );
+}
+
 /** True when a top-level `applyMixin(<decl>, EventEmitter)` statement grafts
  * the emitter onto the class declared by `decl`. */
 export function appliesEmitterMixin(L: Lowerer, decl: ts.ClassLikeDeclaration): boolean {

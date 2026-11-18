@@ -1,0 +1,6 @@
+a-prototype-copy-loop-over-a-program-class-mixin-is-refused.ts:17:1 - error SC1090: a prototype copy loop (Object.getOwnPropertyNames(M.prototype) copied onto D.prototype through defineProperty/getOwnPropertyDescriptor) over a mixin other than a top-level applyMixin(Class, EventEmitter): the copied methods, accessors and 'constructor' are not installed on the derived class here, so the call is refused rather than compiled to a different program is not supported yet
+
+  16 | }
+  17 | applyMixin(Base, Mixin);
+     | ^~~~~~~~~~~~~~~~~~~~~~~
+  18 | console.log((new Base() as any).hello());
