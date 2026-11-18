@@ -52,8 +52,13 @@ yields halves that store as U+FFFD. Same cause as 1.
 
 ### 4 - An invalid array index TRAPS where JS reads undefined
 
-`xs[i]` and typed-array element reads trap on any index outside `[0, len)`,
-where JS answers `undefined`. One exception: under `--npm-static`, package
+`xs[i]` traps on any index outside `[0, len)`, where JS answers `undefined`.
+Typed arrays and Buffers do NOT diverge any more: an index naming no element
+reads `undefined` and a write to it is ignored, exactly as in JS (a number
+slot holds the NaN-marked undefined, and `=== undefined`, `??`, `typeof`,
+string conversion and the console all tell it from a NaN). The one typed read
+that still traps is an element of a BigInt64Array/BigUint64Array (a bigint slot
+has no undefined to hold); its writes are ignored like every other. One exception: under `--npm-static`, package
 files get an OOB-SAFE read answering `elem | undefined`, because package JS is
 inference-typed guard-style code whose last-element probes the trap would break.
 

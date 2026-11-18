@@ -1123,6 +1123,7 @@ void scr_big_dyn_install(void) {
  * exact for INT64_MIN as well. Fresh +1 bigint, like every bigint producer. */
 ScrBigInt *scr_bytes_get_big(const ScrBytes *b, double i) {
   const size_t idx = scr_bytes_index_checked(b, i);
+  if (idx == (size_t)-1) scr_trap_fmt("scriptc: RangeError: typed array index out of bounds (length %zu): a BigInt view has no undefined element to answer\n", b->len);
   if (b->elem == SCR_BYTES_U64) {
     uint64_t u;
     memcpy(&u, b->data + idx * 8, 8);
@@ -1140,6 +1141,7 @@ ScrBigInt *scr_bytes_get_big(const ScrBytes *b, double i) {
  * and out-of-range values wrap exactly as the spec's modular conversion. */
 void scr_bytes_set_big(ScrBytes *b, double i, const ScrBigInt *v) {
   const size_t idx = scr_bytes_index_checked(b, i);
+  if (idx == (size_t)-1) return; /* an index naming no element: the write is ignored, as in JS */
   const uint64_t bits = scr_big_low_u64(v);
   memcpy(b->data + idx * 8, &bits, 8);
 }

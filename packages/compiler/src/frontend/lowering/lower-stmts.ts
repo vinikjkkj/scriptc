@@ -9136,7 +9136,11 @@ function prototypeInstallerCallStmt(L: Lowerer, expr: ts.Expression): IrStmt | n
         if (kind === "incdec") {
           // ++/-- are ToNumeric, then +-1: the OLD value yielded by the postfix form is that number.
           let old: IrExpr;
-          if (read.type.kind === "f64") old = read;
+          if (read.type.kind === "f64") {
+            // ToNumeric of an element no index names is NaN, not undefined: the old value an increment yields is never the marked undefined.
+            if (read.kind === "bytesIntrinsic" && read.method === "get") read.numeric = true;
+            old = read;
+          }
           else if (read.type.kind === "dyn") old = { kind: "libCall", fn: "dyn.toNumber", args: [read], type: F64, loc };
           else return null;
           const oldTmp = L.declareHiddenLocal("%elOld", F64);

@@ -10127,9 +10127,9 @@ class LlEmitter {
           this.emitExpr(e.value);
           return this.own({ name: this.unitInstanceRef(e.unionId, e.tag), type: e.type });
         }
-        // STEP 2a: a flagged number[] read wrapped into a union: the marker is
+        // STEP 2a: a flagged number[] read (or an element read of a typed array, which answers the marker for an index naming no element) wrapped into a union: the marker is
         // Node's undefined, so the union takes its undefined arm (immortal unit).
-        if (arm.kind === "f64" && e.value.kind === "arrayGet" && e.value.holeOnMiss) {
+        if (arm.kind === "f64" && ((e.value.kind === "arrayGet" && e.value.holeOnMiss) || (e.value.kind === "bytesIntrinsic" && e.value.method === "get"))) {
           const undefTag = this.undefinedArmTag({ kind: "union", unionId: e.unionId } as IrType);
           if (undefTag >= 0) {
             const B2 = this.B;
@@ -16722,7 +16722,7 @@ class LlEmitter {
       case "byteLength":
         return call("scr_bytes_byte_len", "double (ptr)", `ptr ${r.name}`, false, false);
       case "get":
-        // Any invalid index traps (the array runtime's discipline).
+        // An index naming no element reads NaN (undefined where the plan says it is observed).
         // scr_bytes_get_FAST, not scr_bytes_get: the u8-in-bounds arm
         // without the element switch or the double-domain bound, which is
         // 18.2 executed instructions per read cheaper and answers the same
@@ -16764,6 +16764,10 @@ class LlEmitter {
         // A bigint view's element is a fresh +1 bigint (scr_bigint.c).
         if (e.type.kind === "bigint") {
           return call("scr_bytes_get_big", "ptr (ptr, double)", `ptr ${r.name}, double ${args[0]!.name}`, true, false);
+        }
+        if (this.canonPlan()?.undefLoads.has(e) === true) {
+          // observable as undefined: an index naming no element answers the NaN-marked undefined (and an f64 element is canonicalised in the callee)
+          return call("scr_bytes_get_fast_undef", "double (ptr, double)", `ptr ${r.name}, double ${args[0]!.name}`, false, false);
         }
         {
           const got = call("scr_bytes_get_fast", "double (ptr, double)", `ptr ${r.name}, double ${args[0]!.name}`, false, false);
