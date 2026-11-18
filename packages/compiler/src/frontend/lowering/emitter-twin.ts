@@ -25,16 +25,98 @@
 import * as ts from "../ts7/adapter.js";
 import { isJsSourceFile } from "../program.js";
 
-export interface TwinEditOptions {
-  /** Collects the candidates the generator does NOT twin, with the shape that stopped it (reported as an advisory: those listeners stay on the checked boundary). */
-  skipped?: { node: ts.Expression; why: string }[];
-}
 export interface TwinEdit {
   at: number;
   text: string;
 }
 /** fileName -> insertions into the text that file was lowered from. */
 export type TwinEdits = Map<string, TwinEdit[]>;
+
+/* THE FOLDED TWIN (index.ts, SCRIPTC_TWIN_FOLD): the twin edits are decided in the FIRST pass, from text that does not carry the pin
+ * wrappers, and applied in ONE reload together with them. Two things follow. The copy of a listener must be the text the pin-edited
+ * program has (so the pin wrappers inside the listener are carried into the copy), and every insertion point must be moved from the
+ * unedited text to the pin-edited one (shiftTwinEdits). A shape this cannot place with certainty throws TwinFoldRefused and the
+ * caller keeps today's sequential path. */
+export interface PinSpan {
+  start: number;
+  end: number;
+  ts: boolean;
+}
+export type PinSpans = ReadonlyMap<string, readonly PinSpan[]>;
+export class TwinFoldRefused extends Error {}
+
+const pinPre = (p: PinSpan): string => (p.ts ? "(" : "/** @type {any} */ (");
+const pinPost = (p: PinSpan): string => (p.ts ? " as any)" : ")");
+
+function pinsOfFile(pins: PinSpans | undefined, file: string): readonly PinSpan[] {
+  if (pins === undefined) return [];
+  return pins.get(file) ?? pins.get(file.split("\\").join("/")) ?? [];
+}
+
+/** The pins of one file, sorted. Pins that nest, share a boundary or touch are refused: the order their wrappers take at a shared
+ * offset is not something the forward translation may guess. */
+function sortedPins(pins: PinSpans | undefined, file: string): PinSpan[] {
+  const list = [...pinsOfFile(pins, file)].sort((a, b) => a.start - b.start || a.end - b.end);
+  for (let i = 1; i < list.length; i++) {
+    if (list[i]!.start <= list[i - 1]!.end) throw new TwinFoldRefused(`pins overlap or touch in ${file}`);
+  }
+  return list;
+}
+
+/** Move an offset of the unedited text to the pin-edited text. An offset at a pin's start stays BEFORE its opener, one at its end goes
+ * AFTER its closer, one inside takes the opener only. */
+function forwardOffset(list: readonly PinSpan[], p: number): number {
+  let shift = 0;
+  for (const e of list) {
+    if (e.start >= p) break;
+    const pre = pinPre(e).length;
+    if (p >= e.end) shift += pre + pinPost(e).length;
+    else shift += pre;
+  }
+  return p + shift;
+}
+
+/** The twin edits (offsets into the unedited text, texts already carrying the pin wrappers of their copies) moved to the pin-edited text. */
+export function shiftTwinEdits(edits: TwinEdits, pins: PinSpans): TwinEdits {
+  const out: TwinEdits = new Map();
+  for (const [file, list] of edits) {
+    const ps = sortedPins(pins, file);
+    out.set(file, list.map((e) => ({ at: forwardOffset(ps, e.at), text: e.text })));
+  }
+  return out;
+}
+
+/** The pin wrappers inside [lo, hi) of one file as replacement records: closers first, openers last, so that at one offset a twin
+ * insertion lands after a closer and before an opener (the order a statement start or end has in the pin-edited text). */
+function pinReps(list: readonly PinSpan[], lo: number, hi: number): { closers: Rep[]; openers: Rep[] } {
+  const closers: Rep[] = [];
+  const openers: Rep[] = [];
+  // positive control (tests only): a fold whose copies ignore the pins inside them
+  if ((process.env["SCRIPTC_TWIN_FOLD_BREAK"] ?? "").split(",").includes("nopin")) return { closers, openers };
+  for (const p of list) {
+    if (p.end <= lo || p.start >= hi) continue; // disjoint
+    if (p.start <= lo && p.end >= hi) {
+      // the copy sits inside the pin: the wrappers are outside it, unless they touch its ends
+      if (p.start === lo) throw new TwinFoldRefused("a pin wraps a twin copy");
+      continue;
+    }
+    if (p.start < lo || p.end > hi) throw new TwinFoldRefused("a pin straddles a twin copy");
+    closers.push({ start: p.end, end: p.end, text: pinPost(p) });
+    openers.push({ start: p.start, end: p.start, text: pinPre(p) });
+  }
+  if (closers.length > 0 && process.env["SCRIPTC_TWIN_WHY"] !== undefined) process.stderr.write(`[twinfold] a twin copy carries ${closers.length} pin(s)\n`);
+  return { closers, openers };
+}
+
+export interface TwinEditOptions {
+  /** Fold mode: the pins the program will carry. */
+  pins?: PinSpans;
+  /** Check mode: the program ALREADY carries the twins (the folded reload). Nested twins are in the text, so they are not added
+   * again, and a listener's size is measured without the insertions inside it, as today's pass (no insertions) would see it. */
+  applied?: boolean;
+  /** Collects the candidates the generator does NOT twin, with the shape that stopped it (reported as an advisory: those listeners stay on the checked boundary). */
+  skipped?: { node: ts.Expression; why: string }[];
+}
 
 const STATEMENT_KINDS = new Set<ts.SyntaxKind>([
   ts.SyntaxKind.ExpressionStatement,
@@ -156,7 +238,7 @@ function erasedText(f: Fn, sf: ts.SourceFile, js: boolean, extra: readonly Rep[]
 /** The twin DECLARATION of a function the registration names by identifier (same file only, a single
  * declaration): where it goes (right after the original) and its text, or null. */
 function declTwin(
-  id: ts.Identifier, name: string, checker: ts.TypeChecker, sf: ts.SourceFile, js: boolean,
+  id: ts.Identifier, name: string, checker: ts.TypeChecker, sf: ts.SourceFile, js: boolean, pins?: readonly PinSpan[],
 ): { key: ts.Node; at: number; text: string } | null {
   const sym = checker.getSymbolAtLocation(id);
   if (sym === undefined) return null;
@@ -171,6 +253,11 @@ function declTwin(
         extra.push({ start: m.getStart(sf), end: m.end, text: "" });
       }
     }
+    if (pins !== undefined) {
+      const pr = pinReps(pins, d.getStart(sf), d.end);
+      extra.unshift(...pr.closers.reverse());
+      extra.push(...pr.openers);
+    }
     const t = erasedText(d, sf, js, extra);
     return t === null ? null : { key: d, at: d.end, text: ` ${t.trim()}` };
   }
@@ -181,7 +268,12 @@ function declTwin(
     if (!ts.isVariableStatement(stmt) || list.declarations.length !== 1) return null;
     const init = d.initializer;
     if (!ts.isArrowFunction(init) && !ts.isFunctionExpression(init)) return null;
-    const t = erasedText(init, sf, js);
+    let reps: Rep[] = [];
+    if (pins !== undefined) {
+      const pr = pinReps(pins, init.getStart(sf), init.end);
+      reps = [...pr.closers.reverse(), ...pr.openers];
+    }
+    const t = erasedText(init, sf, js, reps);
     // A statement written without its semicolon (ASI style) ends at its last token: the twin declaration follows on the SAME
     // line, where `const a = () => {} const b = ...` is a syntax error (no newline for ASI to act on). End the statement first.
     return t === null ? null : { key: d, at: stmt.end, text: `${sf.text.charAt(stmt.end - 1) === ";" ? "" : ";"} const ${name} = ${t};` };
@@ -193,13 +285,28 @@ function declTwin(
  * registration's listener argument: an inline function expression, or an identifier naming a function
  * declaration / const function expression of the same file. */
 export function computeTwinEdits(cands: readonly ts.Expression[], checker: ts.TypeChecker, opts?: TwinEditOptions): TwinEdits | null {
+  const applied = opts?.applied === true;
+  const pinOpts = opts?.pins;
+  const pinCache = new Map<string, PinSpan[]>();
+  const pinList = (file: string): PinSpan[] => {
+    let l = pinCache.get(file);
+    if (l === undefined) pinCache.set(file, (l = sortedPins(pinOpts, file)));
+    return l;
+  };
+  const size = (x: ts.Node): number => {
+    const sf = x.getSourceFile();
+    const lo = x.getStart(sf);
+    let n = x.end - lo;
+    if (applied) for (const sp of twinSpansIn(sf.fileName, lo, x.end)) n -= sp.e - sp.s;
+    return n;
+  };
   const out: TwinEdits = new Map();
   const counters = new Map<string, number>();
   const seen = new Set<string>();
   const declK = new Map<ts.Node, number>();
   // Innermost first: a listener registered inside another listener's body is part of the outer twin's text, so
   // the outer copy is taken AFTER the inner insertions exist (its own registrations get twins too).
-  const ordered = [...cands].sort((x, y) => (x.end - x.getStart()) - (y.end - y.getStart()));
+  const ordered = [...cands].sort((x, y) => size(x) - size(y));
   for (const f of ordered) {
     const sf = f.getSourceFile();
     const key = `${sf.fileName}@${f.getStart(sf)}`;
@@ -217,10 +324,14 @@ export function computeTwinEdits(cands: readonly ts.Expression[], checker: ts.Ty
     const inner = (): Rep[] => {
       const lo = f.getStart(sf);
       const reps: Rep[] = [];
-      for (const e of out.get(sf.fileName) ?? []) {
-        if (e.at > lo && e.at <= f.end) reps.push({ start: e.at, end: e.at, text: e.text });
+      if (!applied) {
+        for (const e of out.get(sf.fileName) ?? []) {
+          if (e.at > lo && e.at <= f.end) reps.push({ start: e.at, end: e.at, text: e.text });
+        }
       }
-      return reps;
+      if (pinOpts === undefined) return reps;
+      const pr = pinReps(pinList(sf.fileName), lo, f.end);
+      return [...pr.closers.reverse(), ...reps, ...pr.openers];
     };
     if (ts.isArrowFunction(f) || ts.isFunctionExpression(f)) {
       const body = erasedText(f, sf, js, inner());
@@ -243,7 +354,7 @@ export function computeTwinEdits(cands: readonly ts.Expression[], checker: ts.Ty
         hoist = `void __sctwin_${k}; `;
       } else {
         k = counters.get(sf.fileName) ?? 0;
-        const dt = declTwin(f, `__sctwin_${k}`, checker, sf, js);
+        const dt = declTwin(f, `__sctwin_${k}`, checker, sf, js, pinOpts === undefined ? undefined : pinList(sf.fileName));
         if (dt === null) {
           opts?.skipped?.push({ node: f, why: "the named listener is not a single same-file function declaration or const function expression whose copy can be spelled" });
           continue;
