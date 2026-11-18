@@ -252,7 +252,19 @@ export type ObjFieldProj =
   | { absent: true; utag: number }
   | { method: BoundMethodProj };
 
-export class PoisonError extends Error {}
+/** Control flow, not a failure: thrown to unwind a lowering whose refusal is already reported, and caught by the lowering that owns it. The
+ * stack V8 captures at construction is never read, and capturing it was 1% of the lowerer's samples on a one-file profile, so none is. */
+export class PoisonError extends Error {
+  constructor() {
+    const limit = Error.stackTraceLimit;
+    Error.stackTraceLimit = 0;
+    try {
+      super();
+    } finally {
+      Error.stackTraceLimit = limit;
+    }
+  }
+}
 
 /** Own-property lookup for the surface tables. They are plain object
  * literals, so a bare `table[name]` would also find Object.prototype
