@@ -34,6 +34,7 @@ import { captureByValue } from "./ir/capture-by-value.js";
 import { numSlotPass } from "./ir/num-slot.js";
 import { cbitPass } from "./ir/cbit.js";
 import { deadInitPass } from "./ir/dead-init.js";
+import { lazyInitPass } from "./ir/lazy-init.js";
 import { narrowSlotPass, reportNarrowScope } from "./ir/narrow-slot.js";
 import { canonicalBuiltinModule, checkPreflight, isNodeTypesPath, loadProgram, locOf, requiresOf, resolveNpmImport, type LoadResult } from "./frontend/program.js";
 import { DesugarMemo } from "./frontend/ts7/program.js";
@@ -1440,6 +1441,7 @@ async function compileTracked(
 
     captureByValue(lowered.module!);
     deadInitPass(lowered.module!);
+    lazyInitPass(lowered.module!);
     reportNarrowScope(lowered.module!);
     narrowSlotPass(lowered.module!);
     numSlotPass(lowered.module!);
