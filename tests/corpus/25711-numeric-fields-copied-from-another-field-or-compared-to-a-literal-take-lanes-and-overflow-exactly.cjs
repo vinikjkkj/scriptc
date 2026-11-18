@@ -1,11 +1,11 @@
-// A class whose constructor copies one numeric field into another (`this.kind = this.code`) and stores a call result that is only ever compared against a number literal
-// (`this.scale === 31`) keeps all of them exactly: lane values, and the overflow answers for fractions, negatives, NaN, -0, too-large numbers and non-numbers.
+// A class whose constructor copies one numeric field into another (`this.type = this.code`) and stores a call result that is only ever compared against a number literal
+// (`this.scale === 31`) keeps all of them exactly, even when the program also reads a field NAMED `type` through a tagged union of unrelated records: lane values, and the overflow answers for fractions, negatives, NaN, -0, too-large numbers and non-numbers.
 class Col {
   constructor(a, b, c, d, scale) {
     this.a = a;
     this.b = b;
     this.code = c;
-    this.kind = this.code;
+    this.type = this.code;
     this.d = d;
     this.scale = scale;
   }
@@ -17,7 +17,7 @@ class Col {
   }
 }
 function show(c) {
-  console.log(c.a, c.b, c.code, c.kind, c.d, c.scale, c.label(), Object.is(c.a, -0), typeof c.kind, Object.keys(c).join(","));
+  console.log(c.a, c.b, c.code, c.type, c.d, c.scale, c.label(), Object.is(c.a, -0), typeof c.type, Object.keys(c).join(","));
 }
 show(new Col(1, 2, 3, 4, 31));
 show(new Col(0, 255, 253, 4294967295, 0));
@@ -35,7 +35,11 @@ for (let i = 0; i < 1000; i++) {
 }
 let sum = 0;
 for (const c of many) sum += c.a + c.b;
-console.log(sum, many.length, c31.label(), first.label(), c31.kind);
+console.log(sum, many.length, c31.label(), first.label(), c31.type);
 console.log(new Col(1, 2, 3, 4, 31).total(), new Col(1.5, 2, 3, 4, 31).total());
 const o = new Col(1, 2, 3, 4, "five");
-console.log(o.scale, o.kind, o.label(), o.code, o.total());
+console.log(o.scale, o.type, o.label(), o.code, o.total());
+function tagged(n) { return n > 1 ? { type: "a", x: n } : { type: "b", y: "s" }; }
+const t1 = tagged(2);
+const t2 = tagged(0);
+console.log(t1.type === "a" ? t1.x : t1.y, t2.type === "a" ? t2.x : t2.y);

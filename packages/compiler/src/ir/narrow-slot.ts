@@ -14,7 +14,7 @@
  *    at least NARROW_MIN_FIELDS cold fields is narrowed even without lane fields.
  * SCRIPTC_NARROW_WHY=1 prints one `NARROW class <name> fields=<n> [<list>]` line per class with at least one eligible field, and a refusal line per
  * constructor-written dyn field of an otherwise standalone class that failed a condition, with the reason. */
-import type { IrClassDef, IrExpr, IrFunction, IrModule } from "./nodes.js";
+import type { IrClassDef, IrExpr, IrFunction, IrModule, IrUnionDef } from "./nodes.js";
 
 export const NARROW_MIN_FIELDS = 4;
 const NUM_USE_FNS: ReadonlySet<string> = new Set(["dyn.add", "dyn.lt", "dyn.le", "dyn.gt", "dyn.ge", "dyn.toNumber", "dyn.numberOf"]);
@@ -49,7 +49,15 @@ export function narrowSlotScope(mod: IrModule): NarrowScope[] {
     return f;
   };
   const viewed = new Set<string>();
-  const unionRead = new Set<string>();
+  const unionsOf = new Map<string, IrUnionDef>((mod.unions ?? []).map((u) => [u.id, u]));
+  /** is `field` read through a union that has class `cls` as an arm? */
+  const unionReadsClass = (cls: string, field: string): boolean => {
+    for (const id of unionRead.get(field) ?? []) if (unionsOf.get(id)?.arms.some((a) => a.kind === "object" && a.className === cls) !== false) return true;
+    return false;
+  };
+  // field name -> the unions some `unionDisc` reads it through: a field is blocked for a class only when one of those unions HAS that class as an arm (a tagged union of unrelated
+  // records that happens to use the name `type` cannot read this class's storage)
+  const unionRead = new Map<string, Set<string>>();
   const numericProps = new Set<string>();
   for (const c of classes) for (const f of c.fields) if (f.type.kind === "f64" && !f.name.startsWith("%")) numericProps.add(f.name);
 
@@ -95,8 +103,11 @@ export function narrowSlotScope(mod: IrModule): NarrowScope[] {
       const l = node["left"] as IrExpr, r = node["right"] as IrExpr;
       if (r.kind === "numLit") noteRead(l);
       else if (l.kind === "numLit") noteRead(r);
-    } else if (kind === "unionDisc" && typeof node["field"] === "string") unionRead.add(node["field"]);
-    else if (kind === "libCall" && NUM_USE_FNS.has(node["fn"] as string)) for (const a of node["args"] as IrExpr[]) noteRead(a);
+    } else if (kind === "unionDisc" && typeof node["field"] === "string") {
+      const ids = unionRead.get(node["field"]) ?? new Set<string>();
+      ids.add(node["unionId"] as string);
+      unionRead.set(node["field"], ids);
+    } else if (kind === "libCall" && NUM_USE_FNS.has(node["fn"] as string)) for (const a of node["args"] as IrExpr[]) noteRead(a);
     else if (kind === "dynCheck" && (node["type"] as { kind: string }).kind === "f64") noteRead(node["value"] as IrExpr);
     for (const k of Object.keys(node)) {
       const v = node[k];
@@ -119,13 +130,13 @@ export function narrowSlotScope(mod: IrModule): NarrowScope[] {
       if (ff === undefined || ff.ctorWrites.length === 0) {
         // COLD: absent until written (the IR says so: `absentInit`), written by no constructor and by no read-modify-write, not hidden/absent-declared, not read through a
         // union arm or a struct view. Its value is the absent marker until a write replaces it, which the overflow array answers for an unwritten entry.
-        if (c.absentInit?.includes(f.name) === true && ff?.incDec !== true && c.absentFields?.includes(f.name) !== true && c.hiddenFields?.includes(f.name) !== true && !unionRead.has(f.name) && !viewed.has(c.name)) cold.push(f.name);
+        if (c.absentInit?.includes(f.name) === true && ff?.incDec !== true && c.absentFields?.includes(f.name) !== true && c.hiddenFields?.includes(f.name) !== true && !unionReadsClass(c.name, f.name) && !viewed.has(c.name)) cold.push(f.name);
         continue;
       }
       const no = (reason: string): void => void refused.push({ field: f.name, reason });
       if (ff.other) no("written outside the constructor");
       else if (c.absentInit?.includes(f.name) || c.absentFields?.includes(f.name) || c.hiddenFields?.includes(f.name) || c.dynFieldData?.some((d) => d.name === f.name)) no("absent/hidden/prototype-data field");
-      else if (unionRead.has(f.name)) no("read through a union arm");
+      else if (unionReadsClass(c.name, f.name)) no("read through a union arm");
       else if (viewed.has(c.name)) no("a struct view reads the class");
       else if (!ff.numericUse && !ff.ctorWrites.some(numericSource)) no("no numeric use of any read and no numeric source");
       else eligible.push(f.name);
