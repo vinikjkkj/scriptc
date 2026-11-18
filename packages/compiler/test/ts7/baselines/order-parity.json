@@ -17000,6 +17000,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25755-an-implicitly-any-callback-in-a-twin-copy-does-not-refuse-the-twin.ts": {
+   "order": [
+    "<repo>/tests/corpus/25755-an-implicitly-any-callback-in-a-twin-copy-does-not-refuse-the-twin.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2576-string-destructuring-assign.ts": {
    "order": [
     "<repo>/tests/corpus/2576-string-destructuring-assign.ts"
