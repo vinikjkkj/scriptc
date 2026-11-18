@@ -1347,22 +1347,29 @@ export function jsonRequireTypeOverride(L: Lowerer, node: ts.Node): ts.Type | nu
  * symbol for `doc.name` falls back to a same-named library global (`name`,
  * `length`), so the member's name and type come from the document's type. */
 export function jsonAwareChecker(L: Lowerer, base: ts.TypeChecker): ts.TypeChecker {
+  // The two overridden members are built once per checker and every other method is bound once per name: a Proxy `get` runs on EVERY checker
+  // access (millions per build), and answering each with a fresh closure or a fresh `bind` was 1.4% of a one-file profile (self time of this trap).
+  // The bound copy is keyed by the function it wraps and rebuilt when the target's member changes, so it answers exactly what a per-access bind did.
+  const symbolAtLocation = (node: ts.Node): ts.Symbol | undefined => {
+    if (ts.isIdentifier(node) && ts.isPropertyAccessExpression(node.parent) && node.parent.name === node) {
+      const recv = jsonRequireTypeOverride(L, node.parent.expression);
+      if (recv !== null) return base.getPropertyOfType(recv, node.text) ?? undefined;
+    }
+    return base.getSymbolAtLocation(node);
+  };
+  const typeAtLocation = (node: ts.Node): ts.Type => jsonRequireTypeOverride(L, node) ?? base.getTypeAtLocation(node);
+  const bound = new Map<string | symbol, { fn: unknown; bound: unknown }>();
   return new Proxy(base, {
     get(target, prop) {
-      if (prop === "getSymbolAtLocation") {
-        return (node: ts.Node): ts.Symbol | undefined => {
-          if (ts.isIdentifier(node) && ts.isPropertyAccessExpression(node.parent) && node.parent.name === node) {
-            const recv = jsonRequireTypeOverride(L, node.parent.expression);
-            if (recv !== null) return target.getPropertyOfType(recv, node.text) ?? undefined;
-          }
-          return target.getSymbolAtLocation(node);
-        };
-      }
-      if (prop === "getTypeAtLocation") {
-        return (node: ts.Node): ts.Type => jsonRequireTypeOverride(L, node) ?? target.getTypeAtLocation(node);
-      }
+      if (prop === "getSymbolAtLocation") return symbolAtLocation;
+      if (prop === "getTypeAtLocation") return typeAtLocation;
       const v = Reflect.get(target, prop, target);
-      return typeof v === "function" ? v.bind(target) : v;
+      if (typeof v !== "function") return v;
+      const hit = bound.get(prop);
+      if (hit !== undefined && hit.fn === v) return hit.bound;
+      const b = (v as (...a: unknown[]) => unknown).bind(target);
+      bound.set(prop, { fn: v, bound: b });
+      return b;
     },
   });
 }
