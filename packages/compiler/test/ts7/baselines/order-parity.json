@@ -29115,6 +29115,54 @@
     "<repo>/tests/corpus/25619-an-unused-mutable-module-binding-keeps-its-initializer-and-its-effects.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25720-a-run-of-identical-accessor-definitions-differing-only-in-names-prints-what-node-prints.js": {
+   "order": [
+    "<repo>/tests/corpus/25720-a-run-of-identical-accessor-definitions-differing-only-in-names-prints-what-node-prints.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25721-a-near-miss-statement-inside-a-run-is-not-folded-into-it-and-behaves-as-written.js": {
+   "order": [
+    "<repo>/tests/corpus/25721-a-near-miss-statement-inside-a-run-is-not-folded-into-it-and-behaves-as-written.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25722-an-exception-thrown-mid-run-at-row-37-leaves-the-first-36-rows-done.js": {
+   "order": [
+    "<repo>/tests/corpus/25722-an-exception-thrown-mid-run-at-row-37-leaves-the-first-36-rows-done.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25723-definitions-on-a-proxy-keep-the-trap-calls-and-their-order-through-a-run.js": {
+   "order": [
+    "<repo>/tests/corpus/25723-definitions-on-a-proxy-keep-the-trap-calls-and-their-order-through-a-run.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25724-a-run-inside-a-loop-stays-unrolled-and-a-short-run-outside-it-is-folded.js": {
+   "order": [
+    "<repo>/tests/corpus/25724-a-run-inside-a-loop-stays-unrolled-and-a-short-run-outside-it-is-folded.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25725-a-run-of-default-stores-keeps-its-key-order-and-values.js": {
+   "order": [
+    "<repo>/tests/corpus/25725-a-run-of-default-stores-keeps-its-key-order-and-values.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25727-statements-that-differ-in-a-number-are-different-shapes.js": {
+   "order": [
+    "<repo>/tests/corpus/25727-statements-that-differ-in-a-number-are-different-shapes.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25728-table-strings-are-the-same-values-as-the-literals-they-replaced.js": {
+   "order": [
+    "<repo>/tests/corpus/25728-table-strings-are-the-same-values-as-the-literals-they-replaced.js"
+   ],
+   "diags": []
   }
  }
 }
