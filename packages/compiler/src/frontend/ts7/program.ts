@@ -26,6 +26,7 @@ import type {
 } from "typescript/unstable/sync";
 import type { SourceFile } from "typescript/unstable/ast";
 import { CheckerFacade } from "./checker.js";
+import { installSymbolCanon } from "./symbol-canon.js";
 import { enumKeyOf, ModuleKind, ModuleResolutionKind, ScriptTarget } from "./enums.js";
 import { tsgoPath } from "../shared.js";
 import { jsDesugar } from "../js-desugar.js";
@@ -249,6 +250,7 @@ export class Ts7Host {
       throw new Error(`ts7 createProgram: project failed to open for ${first}`);
     }
     keepLeadingBom(project.program);
+    installSymbolCanon(project.checker);
     return new Ts7Program(project, snapshot, this, !programOwnsHost);
   }
 
