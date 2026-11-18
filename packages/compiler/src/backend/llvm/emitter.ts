@@ -81,7 +81,7 @@ import { BUFFER_NUM_ACCESSOR_METHODS, dynKeyGetUsesLitTwin, propsTableRoot, erro
 import { setDynOrderPlan, setDynInspExt } from "../dyn-members.js";
 import { rewriteArmDescriptors } from "./armvt.js";
 import { rewriteStringUnions } from "./strunion.js";
-import { orderRecordPlanCached, moduleUsesInspColors, numSlotHalf, narrowSlotOf, classCbit } from "../../ir/nodes.js";
+import { orderRecordPlanCached, moduleUsesInspColors, numSlotHalf, narrowSlotOf, narrowExtArg, classCbit } from "../../ir/nodes.js";
 import type { IrClassDef } from "../../ir/nodes.js";
 import { concatFn, fieldRunAbsentCheck, flattenStrConcat } from "../emission/emit-exprs.js";
 import { classvalCandidates, dynClassDisplayName, dynDescBase, dynEmitterSlot, dynRuntimeBaseInfo, dynRuntimeRoot, dynEnumerationFenced, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
@@ -4155,7 +4155,7 @@ class LlEmitter {
   classFieldGep(className: string, field: string): number {
     return classFieldIndex(this.classMetaOf(className), field).index;
   }
-  narrowSlotOf(className: string, field: string): { def: IrClassDef; idx: number } | undefined {
+  narrowSlotOf(className: string, field: string): { def: IrClassDef; idx: number; cold?: { absent: boolean } } | undefined {
     return narrowSlotOf(this.mod.classes, className, field);
   }
   numSlotHalfOf(className: string, field: string): string | undefined {
@@ -7810,11 +7810,18 @@ class LlEmitter {
           this.moveTemp(v);
           const d = narrowDef.def.narrow!;
           const cn = (s as { className: string }).className;
-          const lp = this.classFieldPtr(obj.name, cn, d.lanes[0]!);
-          const mp = this.classFieldPtr(obj.name, cn, d.mask);
-          const xp = this.classFieldPtr(obj.name, cn, d.ext);
-          this.declare(`declare void @scr_nw_put_v(ptr, ptr, ptr, i32, i32, ptr)`);
-          B.line(`call void @scr_nw_put_v(ptr ${lp.ptr}, ptr ${mp.ptr}, ptr ${xp.ptr}, i32 ${narrowDef.idx}, i32 ${d.fields.length}, ptr ${v.name})`);
+          if (narrowDef.cold !== undefined) {
+            // a COLD field has no lane: entry `idx` of the overflow array only
+            const xp = this.classFieldPtr(obj.name, cn, d.ext);
+            this.declare(`declare void @scr_nc_put_v(ptr, i32, i32, ptr)`);
+            B.line(`call void @scr_nc_put_v(ptr ${xp.ptr}, i32 ${narrowDef.idx}, i32 ${narrowExtArg(d)}, ptr ${v.name})`);
+          } else {
+            const lp = this.classFieldPtr(obj.name, cn, d.lanes[0]!);
+            const mp = this.classFieldPtr(obj.name, cn, d.mask);
+            const xp = this.classFieldPtr(obj.name, cn, d.ext);
+            this.declare(`declare void @scr_nw_put_v(ptr, ptr, ptr, i32, i32, ptr)`);
+            B.line(`call void @scr_nw_put_v(ptr ${lp.ptr}, ptr ${mp.ptr}, ptr ${xp.ptr}, i32 ${narrowDef.idx}, i32 ${narrowExtArg(d)}, ptr ${v.name})`);
+          }
         } else if (slotHalf !== undefined) {
           // A NUMBER-SLOT field (ir/num-slot.ts): a number is unboxed into the raw half and the dyn slot takes the marker.
           this.moveTemp(v);
@@ -11078,6 +11085,14 @@ class LlEmitter {
         const nwGet = e.type.kind === "dyn" ? narrowSlotOf(this.mod.classes, e.className, e.field) : undefined;
         if (nwGet !== undefined) {
           const d = nwGet.def.narrow!;
+          if (nwGet.cold !== undefined) {
+            const xp = this.classFieldPtr(obj.name, e.className, d.ext);
+            const xv = this.loadField(xp.ptr, xp.type);
+            const r = B.tmp();
+            this.declare(`declare ptr @scr_nc_get_v(ptr, i32, i32)`);
+            B.line(`${r} = call ptr @scr_nc_get_v(ptr ${xv}, i32 ${nwGet.idx}, i32 ${nwGet.cold.absent ? 1 : 0})`);
+            return this.own({ name: r, type: e.type });
+          }
           const lp = this.classFieldPtr(obj.name, e.className, d.lanes[0]!);
           const mp = this.classFieldPtr(obj.name, e.className, d.mask);
           const xp = this.classFieldPtr(obj.name, e.className, d.ext);

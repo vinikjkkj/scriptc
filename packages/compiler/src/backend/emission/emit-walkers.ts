@@ -267,6 +267,7 @@ function typeMayHoldFunc(E: CEmitter, t: IrType): boolean {
             if (nw !== undefined) {
               const d = nw.def.narrow!;
               const st = `((${struct} *)o)`;
+              if (nw.cold !== undefined) return `  return scr_nc_get(${st}->${mangleField(d.ext)}, ${nw.idx}, ${nw.cold.absent});`;
               return `  return scr_nw_get((const uint32_t *)&${st}->${mangleField(d.lanes[0]!)}, (const uint8_t *)&${st}->${mangleField(d.mask)}, ${st}->${mangleField(d.ext)}, ${nw.idx});`;
             }
             const half = row.type.kind === "dyn" ? numSlotHalf(E.mod.classes, className, row.name) : undefined;

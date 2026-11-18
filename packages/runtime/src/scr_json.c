@@ -2637,6 +2637,8 @@ static ScrDyn *scr_dyn_new_num_kept(double n) {
 /* The number-slot marker (scr_runtime.h): immortal, undefined-kind, never handed to a reader. */
 ScrDyn scr_numslot_node = { SIZE_MAX, SCR_DYN_UNDEF, { false } };
 ScrDyn *scr_nw_get_v(const uint32_t *lanes, const uint8_t *mask, ScrDyn *ext, unsigned idx) { return scr_nw_get(lanes, mask, ext, idx); }
+ScrDyn *scr_nc_get_v(ScrDyn *ext, unsigned idx, int absent) { return scr_nc_get(ext, idx, absent != 0); }
+void scr_nc_put_v(ScrDyn **ext, unsigned idx, unsigned n, ScrDyn *v) { scr_nc_put(ext, idx, n, v); }
 void scr_nw_put_v(uint32_t *lanes, uint8_t *mask, ScrDyn **ext, unsigned idx, unsigned n, ScrDyn *v) { scr_nw_put(lanes, mask, ext, idx, n, v); }
 void scr_nw_ghosts_v(const uint8_t *mask) { SCR_PROPS_GHOST_SUB(SCR_NW_GHOSTS(mask)); }
 /* The overflow array is created on the first value that does not fit a lane, `n` entries of the (immortal) undefined value; entry `idx` takes `v` (moved in)
@@ -2646,7 +2648,10 @@ void scr_nw_ext_store(ScrDyn **ext, unsigned idx, unsigned n, ScrDyn *v) {
   if (a == NULL || a->kind != SCR_DYN_ARR) {
     ScrDyn *old = a;
     a = scr_dyn_new_arr();
-    for (unsigned i = 0; i < n; i++) scr_dyn_arr_push(a, scr_dyn_undefined());
+    /* `n` is the entry count in its low byte and, above it, one bit per COLD field (entry 16+k) that starts as the absent marker (the compiler's narrowExtArg): a class
+     * with no cold field passes its plain field count, so the high bits are 0 and every entry starts undefined, as before. */
+    const unsigned len = n & 0xffu, absent = n >> 8;
+    for (unsigned i = 0; i < len; i++) scr_dyn_arr_push_slot(a, (i >= 16 && ((absent >> (i - 16)) & 1u)) ? scr_dyn_absent() : scr_dyn_undefined()); /* _slot: scr_dyn_arr_push turns the absent marker into undefined */
     *ext = a;
     scr_dyn_release(old); /* the undefined the field was initialised with: immortal, a no-op */
   }

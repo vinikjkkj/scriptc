@@ -2741,6 +2741,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           const nw = narrowSlotOf(E.mod.classes, e.className, e.field);
           if (nw !== undefined) {
             const d = nw.def.narrow!;
+            if (nw.cold !== undefined) return E.newTemp(e.type, `scr_nc_get(${obj.name}->${mangleField(d.ext)}, ${nw.idx}, ${nw.cold.absent})`);
             return E.newTemp(e.type, `scr_nw_get((const uint32_t *)&${obj.name}->${mangleField(d.lanes[0]!)}, (const uint8_t *)&${obj.name}->${mangleField(d.mask)}, ${obj.name}->${mangleField(d.ext)}, ${nw.idx})`);
           }
         }

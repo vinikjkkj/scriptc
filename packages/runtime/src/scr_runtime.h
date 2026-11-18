@@ -6997,6 +6997,15 @@ ScrDyn *scr_nw_get_v(const uint32_t *lanes, const uint8_t *mask, ScrDyn *ext, un
 void scr_nw_put_v(uint32_t *lanes, uint8_t *mask, ScrDyn **ext, unsigned idx, unsigned n, ScrDyn *v);
 void scr_nw_ghosts_v(const uint8_t *mask);
 void scr_nw_ext_store(ScrDyn **ext, unsigned idx, unsigned n, ScrDyn *v);
+/* COLD narrow fields (compiler ir/narrow-slot.ts, IrClassDef.narrow.coldFrom): a dyn field no constructor writes owns no struct word and no lane; it is entry `idx` (>= 16) of the same
+ * overflow array, and an unwritten entry (or no array at all) reads as the field's initial marker, the absent marker or undefined (`absent`, a compile-time constant). */
+static inline ScrDyn *scr_nc_get(ScrDyn *ext, unsigned idx, bool absent) {
+  if (ext != NULL && ext->kind == SCR_DYN_ARR && idx < ext->v.arr.len && ext->v.arr.items[idx] != NULL) return scr_dyn_retain(ext->v.arr.items[idx]);
+  return absent ? scr_dyn_absent() : scr_dyn_undefined();
+}
+static inline void scr_nc_put(ScrDyn **ext, unsigned idx, unsigned n, ScrDyn *v) { scr_nw_ext_store(ext, idx, n, v); }
+ScrDyn *scr_nc_get_v(ScrDyn *ext, unsigned idx, int absent);
+void scr_nc_put_v(ScrDyn **ext, unsigned idx, unsigned n, ScrDyn *v);
 void scr_nw_ext_clear(ScrDyn *ext, unsigned idx);
 static inline ScrDyn *scr_nw_get(const uint32_t *lanes, const uint8_t *mask, ScrDyn *ext, unsigned idx) {
   if (scr_nw_mask_rd(mask) & (1u << idx)) return scr_dyn_new_num((double)lanes[idx]);
