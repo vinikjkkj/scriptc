@@ -875,6 +875,15 @@ static ScrBytes *scr_bv_direct(const ScrDyn *v, const ScrDyn *enc) {
 ScrBytes *scr_bv_from_dyn(const ScrDyn *v) { return scr_bv_direct(v, scr_dyn_undefined()); }
 ScrBytes *scr_bv_from_dyn_enc(const ScrDyn *v, const ScrDyn *enc) { return scr_bv_direct(v, enc); }
 
+/* Buffer.from(arrayBuffer, byteOffset, length): the value path with all three arguments. +1 ScrBytes, NULL with the exception pending. */
+ScrBytes *scr_bv_from_dyn3(const ScrDyn *v, const ScrDyn *a1, const ScrDyn *a2) {
+  ScrDyn *d = scr_bv_from_val(v, a1, a2, 0);
+  if (d == NULL) return NULL;
+  ScrBytes *b = scr_bytes_retain(d->v.bytes);
+  scr_dyn_release(d);
+  return b;
+}
+
 static ScrDyn *scr_bv_s_from(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
   (void)clo;
   return scr_bv_from_val(scr_bv_arg(args, argc, 0), scr_bv_arg(args, argc, 1), scr_bv_arg(args, argc, 2), 0);

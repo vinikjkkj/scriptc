@@ -11005,6 +11005,7 @@ bool scr_text_decoder_ignore_bom(const ScrStr *codec);
 ScrBytes *scr_bytes_from_str(const ScrStr *s, const ScrStr *enc);
 ScrStr *scr_dyn_to_string_range_dyn(const struct ScrDyn *d, const struct ScrDyn *enc, struct ScrDyn *start, struct ScrDyn *end, const ScrStr *what); /* d.toString(enc, start, end) with a run-time encoding (scr_json.c) */
 ScrBytes *scr_bv_from_dyn_enc(const struct ScrDyn *v, const struct ScrDyn *enc); /* direct Buffer.from(value, encoding) over untyped operands: +1 bytes, NULL with the exception pending (scr_buffer_val.c, the value path) */
+ScrBytes *scr_bv_from_dyn3(const struct ScrDyn *v, const struct ScrDyn *a1, const struct ScrDyn *a2); /* direct Buffer.from(arrayBuffer, byteOffset, length): +1 u8 view sharing the ArrayBuffer, NULL with the exception pending (scr_buffer_val.c) */
 ScrBytes *scr_bv_from_dyn(const struct ScrDyn *v); /* direct Buffer.from(dyn): +1 u8 bytes, NULL with the exception pending (scr_buffer_val.c, the value path) */
 ScrBytes *scr_bytes_arg_chk(const struct ScrDyn *v, const ScrStr *name); /* checked Uint8Array argument: +1 same payload, throws ERR_INVALID_ARG_TYPE (scr_json.c) */
 ScrBytes *scr_crypto_input_bytes(const struct ScrDyn *v);

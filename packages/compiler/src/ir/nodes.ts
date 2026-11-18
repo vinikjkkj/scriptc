@@ -3863,6 +3863,11 @@ export type IrLibFn =
    * (unknown throws ERR_UNKNOWN_ENCODING), every other value takes the
    * `Buffer.from(dyn)` ladder with the encoding ignored. May throw. */
   | "buffer.fromDynEnc"
+  /** `Buffer.from(arrayBuffer, byteOffset, length)` over an ArrayBuffer value (scr_buffer_val.c):
+   * Node's fromArrayBuffer checks (ERR_BUFFER_OUT_OF_BOUNDS "offset" / "length"), then a Buffer
+   * view sharing the ArrayBuffer's storage. The offset and length are dyn (an omitted length is
+   * the undefined literal). May throw. */
+  | "buffer.fromDyn3"
   | "fs.readFileSync"
   /** readFileSync(path) — the Buffer read (+1 bytes); throws catchably
    * like the utf8 form. */
@@ -12493,7 +12498,7 @@ export function moduleUsesBufferValue(mod: IrModule): boolean {
       return;
     }
     const node = v as { kind?: unknown; fn?: unknown; key?: { kind?: unknown; value?: unknown } };
-    if (node.kind === "libCall" && (node.fn === "dyn.bufferValue" || node.fn === "buffer.fromDyn" || node.fn === "buffer.fromDynEnc")) {
+    if (node.kind === "libCall" && (node.fn === "dyn.bufferValue" || node.fn === "buffer.fromDyn" || node.fn === "buffer.fromDynEnc" || node.fn === "buffer.fromDyn3")) {
       found = true;
       return;
     }
@@ -15581,6 +15586,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "dyn.toStringRange",
   "dyn.toStringRangeDyn",
   "buffer.fromDynEnc",
+  "buffer.fromDyn3",
   // util.format's %s runs an object's OWN toString (Node's
   // hasBuiltInToString test) — user code, so its throw is the
   // program's.

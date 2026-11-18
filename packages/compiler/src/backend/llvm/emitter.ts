@@ -1158,6 +1158,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "dyn.toStringRange": "scr_dyn_to_string_range",
   "dyn.toStringRangeDyn": "scr_dyn_to_string_range_dyn",
   "buffer.fromDynEnc": "scr_bv_from_dyn_enc",
+  "buffer.fromDyn3": "scr_bv_from_dyn3",
   "dyn.this": "scr_dyn_this_get",
   "error.noMessage": "scr_error_no_message",
   "dyn.thisSloppy": "scr_dyn_this_get_sloppy",

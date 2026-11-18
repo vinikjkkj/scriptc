@@ -181,6 +181,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "dyn.toStringRange": { argTypes: [DYN, STRING, DYN, DYN, STRING], result: STRING },
   "dyn.toStringRangeDyn": { argTypes: [DYN, DYN, DYN, DYN, STRING], result: STRING },
   "buffer.fromDynEnc": { argTypes: [DYN, DYN], result: BYTES_U8 },
+  "buffer.fromDyn3": { argTypes: [DYN, DYN, DYN], result: BYTES_U8 },
   "dyn.defineProps": { argTypes: [DYN, DYN], result: DYN },
   "dyn.defineProp": { argTypes: [DYN, STRING, DYN], result: DYN },
   "dyn.captureStack": { argTypes: [DYN], result: VOID },

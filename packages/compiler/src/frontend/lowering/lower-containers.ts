@@ -9584,6 +9584,24 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
           return markFlavor({ kind: "bytesIntrinsic", method: "dataViewNew", receiver, args: idxArgs, type: BYTES_U8, loc }, "buffer", loc);
         }
       }
+      // Buffer.from(arrayBuffer[, byteOffset[, length]]): a Buffer VIEW sharing the
+      // ArrayBuffer's storage, answered by the runtime's Node-exact fromArrayBuffer
+      // (scr_buffer_val.c: the ERR_BUFFER_OUT_OF_BOUNDS "offset" / "length" checks, the
+      // NaN offset, the clamped length). The operand is a value the checker types
+      // ArrayBuffer (bytes<buf>): a declared ArrayBuffer, or an awaited
+      // SubtleCrypto.digest / sign / deriveBits answer.
+      if (args.length >= 1 && args.length <= 3 && !args.some(ts.isSpreadElement)) {
+        const abIr = L.mapTypeOf(L.typeOf(args[0]!));
+        if (abIr?.kind === "bytes" && abIr.elem === "buf") {
+          const v = L.lowerExprExpecting(args[0]!, DYN);
+          if (args.length === 1) {
+            return markFlavor({ kind: "libCall", fn: "buffer.fromDyn", args: [v], type: BYTES_U8, loc }, "buffer", loc);
+          }
+          const off = L.lowerExprExpecting(args[1]!, DYN);
+          const len = args[2] !== undefined ? L.lowerExprExpecting(args[2], DYN) : dynUndefinedExpr(loc);
+          return markFlavor({ kind: "libCall", fn: "buffer.fromDyn3", args: [v, off, len], type: BYTES_U8, loc }, "buffer", loc);
+        }
+      }
       if (args.length >= 1 && args.length <= 2 && !ts.isSpreadElement(args[0]!)) {
         const argNode = args[0]!;
         if (ts.isArrayLiteralExpression(argNode) && !argNode.elements.some(ts.isSpreadElement)) {
@@ -9625,6 +9643,17 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
           }
         }
       }
+      // A checked-dynamic operand with the (byteOffset, length) pair: the runtime kind ladder, whose
+      // ArrayBuffer arm runs Node's fromArrayBuffer checks (every other kind ignores the pair).
+      if (args.length === 3 && !args.some(ts.isSpreadElement)) {
+        const srcT = L.mapTypeOf(L.typeOf(args[0]!));
+        if (srcT === null || srcT.kind === "dyn") {
+          const v = L.lowerExprExpecting(args[0]!, DYN);
+          const off = L.lowerExprExpecting(args[1]!, DYN);
+          const len = L.lowerExprExpecting(args[2]!, DYN);
+          return markFlavor({ kind: "libCall", fn: "buffer.fromDyn3", args: [v, off, len], type: BYTES_U8, loc }, "buffer", loc);
+        }
+      }
       // A checked-dynamic operand (an untyped value): the runtime kind ladder.
       if (args.length === 1 && !ts.isSpreadElement(args[0]!)) {
         const maybeDyn = L.mapTypeOf(L.typeOf(args[0]!));
@@ -9639,8 +9668,8 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
         "Buffer.from with this argument shape",
         call,
         "supported: Buffer.from(string, encoding?) with a literal encoding, Buffer.from(u8Array) — a copy — " +
-          "Buffer.from(number[]), or Buffer.from(x.buffer, byteOffset?, length?) — a view sharing x's " +
-          "storage (no free-standing ArrayBuffer value exists; narrow unions first)",
+          "Buffer.from(number[]), or Buffer.from(x.buffer | arrayBuffer, byteOffset?, length?) — a view sharing " +
+          "the storage (narrow unions first)",
       );
     }
     if (member === "alloc" || member === "allocUnsafe") {
