@@ -39,6 +39,14 @@ const kindOf = (n: unknown): string => (isNode(n) && typeof n["kind"] === "strin
 const REPR_TRAP_CALL = /^%(union\.narrow|rec\.width)\./;
 
 export function deadInitPass(mod: IrModule): DeadInitResult {
+  const report = process.env["SCRIPTC_DEADINIT"] === "report";
+  const t0 = report ? performance.now() : 0;
+  const r = deadInitPassImpl(mod);
+  if (report) process.stderr.write(`DEADINIT time ${(performance.now() - t0).toFixed(1)} ms (functions ${mod.functions.length}, globals ${mod.globals?.length ?? 0}, dropped ${r.dropped.length}, kept ${r.kept.length})\n`);
+  return r;
+}
+
+function deadInitPassImpl(mod: IrModule): DeadInitResult {
   const out: DeadInitResult = { dropped: [], kept: [] };
   const mode = process.env["SCRIPTC_DEADINIT"];
   if (mode === "off") return out;
