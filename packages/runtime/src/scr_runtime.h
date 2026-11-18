@@ -10677,13 +10677,18 @@ bool scr_dataview_set_bits64(ScrBytes *b, double byte_off, uint64_t bits, bool l
 typedef struct ScrBigInt ScrBigInt; /* full definition below (C11 repeat) */
 void scr_dataview_set_big(ScrBytes *b, double byte_off, const ScrBigInt *value, bool le);
 
-/* Element read/write. Any invalid index — negative, fractional, NaN, or
- * out of bounds — TRAPS like the array runtime (SEMANTICS.md documents
- * the divergence from JS's undefined-read/ignored-write). Writes coerce
+/* Element read/write. An index naming no element — negative, fractional,
+ * NaN, infinite or out of bounds — reads as NaN (the lowering asks
+ * the index itself first wherever the program can tell NaN from the
+ * `undefined` JS answers) and a write to it is ignored, never a trap.
+ * Writes coerce
  * JS-exactly: u8/u32 by modular truncation (NaN/±Infinity → 0, truncate
  * toward zero, wrap mod 2^8/2^32), f32 by double→float rounding. */
 double scr_bytes_get(const ScrBytes *b, double i);
 void scr_bytes_set(ScrBytes *b, double i, double v);
+/* The read for a value the program can observe as `undefined` (it is not only an arithmetic operand): an index naming no element answers
+ * the NaN-marked undefined (scr_num_undef), and an f64 element is canonicalised. */
+double scr_bytes_get_undef(const ScrBytes *b, double i);
 
 /* ── the inlinable element accessors ───────────────────────────────────
  * `bytes[i]` lowers at exactly one emitter site per lane, and after
@@ -10758,6 +10763,9 @@ void scr_bytes_set(ScrBytes *b, double i, double v);
 static inline double scr_bytes_get_inl(const ScrBytes *b, double i) {
   return scr_bytes_get(b, i);
 }
+static inline double scr_bytes_get_undef_inl(const ScrBytes *b, double i) {
+  return scr_bytes_get_undef(b, i);
+}
 static inline void scr_bytes_set_inl(ScrBytes *b, double i, double v) {
   scr_bytes_set(b, i, v);
 }
@@ -10772,6 +10780,14 @@ static inline double scr_bytes_get_inl(const ScrBytes *b, double i) {
     if ((double)n == i && (uint64_t)n < (uint64_t)b->len) return (double)b->data[n];
   }
   return scr_bytes_get(b, i);
+}
+
+static inline double scr_bytes_get_undef_inl(const ScrBytes *b, double i) {
+  if (b->elem == SCR_BYTES_U8 && i >= 0.0 && i < SCR_FAST_INT_MAX) {
+    int64_t n = (int64_t)i;
+    if ((double)n == i && (uint64_t)n < (uint64_t)b->len) return (double)b->data[n];
+  }
+  return scr_bytes_get_undef(b, i);
 }
 
 static inline void scr_bytes_set_inl(ScrBytes *b, double i, double v) {
@@ -10832,6 +10848,23 @@ static inline double scr_bytes_get_inl(const ScrBytes *b, double i) {
   return scr_bytes_get(b, i);
 }
 
+/* The same arms for a read whose value the program can observe: the f64 element is canonicalised (a forged payload never becomes a marker) and an
+ * index naming no element answers the NaN-marked undefined, both in the out-of-line function. */
+static inline double scr_bytes_get_undef_inl(const ScrBytes *b, double i) {
+  if (i >= 0.0 && i < SCR_FAST_INT_MAX) {
+    int64_t n = (int64_t)i;
+    if ((double)n == i && (uint64_t)n < (uint64_t)b->len) {
+      if (b->elem == SCR_BYTES_F64) {
+        double v;
+        memcpy(&v, b->data + n * 8, 8);
+        return scr_num_canon(v);
+      }
+      if (b->elem == SCR_BYTES_U8) return (double)b->data[n];
+    }
+  }
+  return scr_bytes_get_undef(b, i);
+}
+
 static inline void scr_bytes_set_inl(ScrBytes *b, double i, double v) {
   if (i >= 0.0 && i < SCR_FAST_INT_MAX) {
     int64_t n = (int64_t)i;
@@ -10874,6 +10907,7 @@ static inline void scr_bytes_set_inl(ScrBytes *b, double i, double v) {
  * so a C-lane-only element accessor would have reached none of the
  * 515,725,184 accesses the change exists for. */
 double scr_bytes_get_fast(const ScrBytes *b, double i);
+double scr_bytes_get_fast_undef(const ScrBytes *b, double i);
 void scr_bytes_set_fast(ScrBytes *b, double i, double v);
 
 /* TypedArray.prototype.slice(start, end): relative indices clamp like

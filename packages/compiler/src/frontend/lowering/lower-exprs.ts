@@ -15552,9 +15552,10 @@ function rejectThisInObjectMethodIn(L: Lowerer, node: ts.Node, mayStop: boolean)
         );
       }
     }
-    // Typed-array element read `b[i]` — like arrayGet with a scalar
-    // result; any invalid index traps (the array discipline; JS would
-    // read undefined — divergence 4's policy).
+    // Typed-array element read `b[i]` — a scalar result; an index naming no
+    // element reads undefined, exactly as JS does (the runtime answers NaN,
+    // or the NaN-marked undefined where ir/num-canon.ts finds the value can
+    // be observed as one).
     if (receiverIr?.kind === "bytes") {
       const recv = L.lowerExpr(expr.expression);
       // A typed-array .d.ts surface whose VALUE is an island handle

@@ -330,13 +330,18 @@ static int scr_bytes_fastidx(void) {
   return c >= 0 ? c : scr_bytes_fastidx_init();
 }
 
+/* An index that names no element (negative, fractional, NaN, infinite, or at
+ * or past the length) answers SCR_BYTES_NO_INDEX. A typed array is an exotic
+ * integer-indexed object: a read of such an index is `undefined` and a write is
+ * ignored, in sloppy and strict code alike, and neither ever throws. The
+ * element accessors turn the sentinel into NaN (the read, which every numeric
+ * context of the compiled program takes as the undefined it stands for) or
+ * into nothing (the write); the lowering tests the index itself where the
+ * program can tell the two apart. */
+#define SCR_BYTES_NO_INDEX ((size_t)-1)
+
 SCR_BYTES_COLD static size_t scr_bytes_check_index_slow(const ScrBytes *b, double i) {
-  if (!(i >= 0) || i != trunc(i) || i >= (double)b->len) {
-    char buf[32];
-    scr_f64_to_str(i, buf);
-    scr_trap_fmt("scriptc: RangeError: typed array index %s out of bounds (length %zu)\n",
-                 buf, b->len);
-  }
+  if (!(i >= 0) || i != trunc(i) || i >= (double)b->len) return SCR_BYTES_NO_INDEX;
   return (size_t)i;
 }
 
@@ -358,7 +363,8 @@ SCR_BYTES_COLD static void scr_bytes_bigint_as_double(const char *op, size_t idx
                "lowering bug\n", op, idx, len);
 }
 
-/* The exported element index check (the gated bigint unit calls it). */
+/* The exported element index check (the gated bigint unit calls it): the
+ * element's index, or SCR_BYTES_NO_INDEX when the index names none. */
 size_t scr_bytes_index_checked(const ScrBytes *b, double i) {
   return scr_bytes_check_index(b, i);
 }
@@ -398,6 +404,7 @@ double scr_bytes_get(const ScrBytes *b, double i) {
 #endif
 #endif
   size_t idx = scr_bytes_check_index(b, i);
+  if (idx == SCR_BYTES_NO_INDEX) return NAN; /* JS reads undefined; see above */
   switch (b->elem) {
     case SCR_BYTES_U8:
     case SCR_BYTES_U8C:
@@ -476,7 +483,13 @@ double scr_bytes_get(const ScrBytes *b, double i) {
  * the inline above answers with the same expression, and everything else
  * falls through to the function below in both. */
 double scr_bytes_get_fast(const ScrBytes *b, double i) { return scr_bytes_get_inl(b, i); }
+double scr_bytes_get_fast_undef(const ScrBytes *b, double i) { return scr_bytes_get_undef_inl(b, i); }
 void scr_bytes_set_fast(ScrBytes *b, double i, double v) { scr_bytes_set_inl(b, i, v); }
+
+double scr_bytes_get_undef(const ScrBytes *b, double i) {
+  if (scr_bytes_check_index(b, i) == SCR_BYTES_NO_INDEX) return scr_num_undef();
+  return scr_bytes_get(b, i);
+}
 
 void scr_bytes_set(ScrBytes *b, double i, double v) {
 #ifdef SCR_ARRCEN_ON
@@ -486,6 +499,7 @@ void scr_bytes_set(ScrBytes *b, double i, double v) {
 #endif
 #endif
   size_t idx = scr_bytes_check_index(b, i);
+  if (idx == SCR_BYTES_NO_INDEX) return; /* JS ignores the write; see above */
   switch (b->elem) {
     case SCR_BYTES_U8:
       b->data[idx] = (uint8_t)scr_bytes_to_u32(v);

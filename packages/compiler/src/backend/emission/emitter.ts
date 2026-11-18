@@ -486,6 +486,9 @@ export class CEmitter {
     return this.currentFn !== null && canonPlanOf(this.currentFn).elided.has(n);
   }
   /** Is this f64 typed-array element read canonicalised at the load (it feeds a marker-free local)? */
+  undefLoad(n: object): boolean {
+    return this.currentFn !== null && canonPlanOf(this.currentFn).undefLoads.has(n);
+  }
   canonLoad(n: object): boolean {
     return this.currentFn !== null && canonPlanOf(this.currentFn).canonLoads.has(n);
   }

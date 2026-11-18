@@ -30,9 +30,12 @@ export interface CanonPlan {
   readonly canonLoads: ReadonlySet<object>;
   /** `bytesSet` statements whose value must be canonicalised before the store. */
   readonly canonStores: ReadonlySet<object>;
+  /** `bytesIntrinsic get` nodes (any element kind) whose result can be observed as `undefined`: an index naming no element answers the NaN-marked
+   * undefined there (and an f64 element is canonicalised), where every other read answers a plain NaN. */
+  readonly undefLoads: ReadonlySet<object>;
 }
 
-const EMPTY: CanonPlan = { elided: new Set(), canonLoads: new Set(), canonStores: new Set() };
+const EMPTY: CanonPlan = { elided: new Set(), canonLoads: new Set(), canonStores: new Set(), undefLoads: new Set() };
 const CACHE = new WeakMap<IrFunction, CanonPlan>();
 
 type Ctx =
@@ -81,6 +84,7 @@ function computePlan(fn: IrFunction): CanonPlan {
   const uses: { local: string; ctx: Ctx }[] = []; // every read of a candidate local
   const exprs: { node: Node; ctx: Ctx }[] = []; // arithmetic nodes
   const loads: { node: Node; ctx: Ctx }[] = []; // f64 typed-array element reads
+  const allLoads: { node: Node; ctx: Ctx }[] = []; // every typed-array element read (any element kind)
   const stores: { node: Node; value: Node }[] = []; // typed-array element writes
 
   const walk = (x: unknown, ctx: Ctx): void => {
@@ -156,6 +160,7 @@ function computePlan(fn: IrFunction): CanonPlan {
         const args = n["args"] as Node[];
         if (n["method"] === "get") {
           if (isF64Elem(n)) loads.push({ node: n, ctx });
+          if (isF64(n["type"]) && n["numeric"] !== true) allLoads.push({ node: n, ctx });
           walk(n["receiver"], UNSAFE);
           for (const a of args) walk(a, SAFE);
           return;
@@ -247,13 +252,23 @@ function computePlan(fn: IrFunction): CanonPlan {
   // of a typed-array write (an element-to-element copy keeps its bytes).
   const canonLoads = new Set<object>();
   for (const l of loads) if (l.ctx.k !== "operand" && l.ctx.k !== "store") canonLoads.add(l.node);
+  // An element read of an index that names no element is `undefined` in JS. Where the value is only an arithmetic/compare/bitwise operand or the
+  // value of a typed-array write, NaN says the same thing (ToNumber(undefined) is NaN); anywhere else (a call argument, a return, a field or slot
+  // store, `===`, `??`, `typeof`, a string conversion, a local with such a use) the read answers the NaN-marked undefined, which every one of those
+  // places already tells from a NaN. A read that is the definition of a local kept internal above is blind to the difference too.
+  const undefLoads = new Set<object>();
+  for (const l of allLoads) {
+    if (l.ctx.k === "operand" || l.ctx.k === "store") continue;
+    if (l.ctx.k === "assign" && M.has(l.ctx.local)) continue;
+    undefLoads.add(l.node);
+  }
   const canonStores = new Set<object>();
   for (const s of stores) {
     const v = s.value;
     if (elided.has(v) || (v.kind === "varRef" && M.has(v["localId"] as string))) canonStores.add(s.node);
   }
-  if (elided.size === 0 && canonLoads.size === 0) return EMPTY;
-  return { elided, canonLoads, canonStores };
+  if (elided.size === 0 && canonLoads.size === 0 && undefLoads.size === 0) return EMPTY;
+  return { elided, canonLoads, canonStores, undefLoads };
 }
 
 export type { IrExpr };

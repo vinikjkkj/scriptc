@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { ccCompile, expectAbort, expectCasesPassed, exeSuffix } from "./cc.js";
+import { ccCompile, expectCasesPassed, exeSuffix } from "./cc.js";
 import { afterAll, beforeAll, expect, test } from "vitest";
 
 const execFileAsync = promisify(execFile);
@@ -112,68 +112,3 @@ test.each([
   expectCasesPassed(stderr);
 });
 
-// JS reads undefined / ignores writes out of bounds on typed arrays; both
-// are unrepresentable, so the runtime traps (documented divergence, the
-// array runtime's exact discipline).
-// One mode per ARM of scr_bytes_check_index, and each one is run under BOTH
-// settings of SCR_FASTIDX: a value the fast window rejects must reach the
-// same trap with byte-identical text as the original expression, because the
-// index reaches the message as a formatted double and a validator change can
-// rename it silently.
-const CRASH_MODES: readonly (readonly [string, string])[] = [
-  ["--crash-get-oob", "typed array index 1 out of bounds (length 1)"],
-  ["--crash-get-frac", "typed array index 0.5 out of bounds (length 1)"],
-  ["--crash-set-oob", "typed array index 1 out of bounds (length 1)"],
-  ["--crash-get-nan", "typed array index NaN out of bounds (length 1)"],
-  ["--crash-get-neg", "typed array index -1 out of bounds (length 1)"],
-  ["--crash-get-inf", "typed array index Infinity out of bounds (length 1)"],
-  ["--crash-get-neginf", "typed array index -Infinity out of bounds (length 1)"],
-  ["--crash-get-2p53", "typed array index 9007199254740992 out of bounds (length 1)"],
-  ["--crash-get-2p32", "typed array index 4294967296 out of bounds (length 1)"],
-  ["--crash-get-at-len", "typed array index 1 out of bounds (length 1)"],
-  ["--crash-get-empty", "typed array index 0 out of bounds (length 0)"],
-  ["--crash-get-ulp", "typed array index 1.0000000000000002 out of bounds (length 1)"],
-  ["--crash-set-neg", "typed array index -1 out of bounds (length 1)"],
-  // The same refusals through the inline accessors the emitter lowers
-  // `bytes[i]` to. Identical text is the requirement: the inline arm
-  // declines and hands over, it never formats a message of its own.
-  ["--crash-inl-get-oob", "typed array index 1 out of bounds (length 1)"],
-  ["--crash-inl-get-frac", "typed array index 0.5 out of bounds (length 1)"],
-  ["--crash-inl-get-nan", "typed array index NaN out of bounds (length 1)"],
-  ["--crash-inl-get-neg", "typed array index -1 out of bounds (length 1)"],
-  ["--crash-inl-get-inf", "typed array index Infinity out of bounds (length 1)"],
-  ["--crash-inl-get-2p53", "typed array index 9007199254740992 out of bounds (length 1)"],
-  ["--crash-inl-set-oob", "typed array index 1 out of bounds (length 1)"],
-  ["--crash-inl-set-neg", "typed array index -1 out of bounds (length 1)"],
-  ["--crash-inl-set-nan-idx", "typed array index NaN out of bounds (length 1)"],
-  // Through an F64 buffer's inline accessor. The u8 modes above never enter
-  // the f64 branch, so these are the only cases that prove IT hands over --
-  // and the expected text is identical, which is the point.
-  ["--crash-inl-f64-get-oob", "typed array index 1 out of bounds (length 1)"],
-  ["--crash-inl-f64-get-frac", "typed array index 0.5 out of bounds (length 1)"],
-  ["--crash-inl-f64-get-nan", "typed array index NaN out of bounds (length 1)"],
-  ["--crash-inl-f64-get-neg", "typed array index -1 out of bounds (length 1)"],
-  ["--crash-inl-f64-get-2p53", "typed array index 9007199254740992 out of bounds (length 1)"],
-  ["--crash-inl-f64-set-oob", "typed array index 1 out of bounds (length 1)"],
-  ["--crash-inl-f64-set-neg", "typed array index -1 out of bounds (length 1)"],
-  ["--crash-inl-f64-set-nan-idx", "typed array index NaN out of bounds (length 1)"],
-];
-
-test.each(
-  CRASH_MODES.flatMap(([mode, message]) =>
-    [undefined, "0"].flatMap((fastidx) =>
-      (["on", "nofast", "nof64"] as const).map((arm) => [mode, message, fastidx, arm] as const),
-    ),
-  ),
-)("trap aborts (%s, SCR_FASTIDX=%s, arm=%s)", async (mode, message, fastidx, arm) => {
-  const env = { ...process.env, ...(fastidx === undefined ? {} : { SCR_FASTIDX: fastidx }) };
-  const exe = arm === "nofast" ? binNoFast : arm === "nof64" ? binNoF64 : bin;
-  const err = await execFileAsync(exe, [mode], { env }).then(
-    () => {
-      throw new Error(`expected ${mode} to abort`);
-    },
-    (e: Error & { signal?: string; stderr?: string }) => e,
-  );
-  expectAbort(err);
-  expect(err.stderr).toContain(`scriptc: RangeError: ${message}`);
-});
