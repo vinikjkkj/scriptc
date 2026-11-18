@@ -167,44 +167,53 @@ export function deadInitPass(mod: IrModule): DeadInitResult {
   }
   /** A const, non-tdz global assigned exactly once, by a record literal, whose every use is read-only. */
   // 1c. INIT ORDER. A record promoted to a view AFTER the candidate has been evaluated cannot make the candidate's `recordIsView` true. Module evaluation
-  // order is the static order of the init functions when (a) every call of an `%init.K` is a top-level statement of an init function or of the entry,
-  // (b) each init starts with the run-once guard `if (%loaded) return` and has no other `return`: then it is simulated exactly, depth first, marking an
-  // init at its start (a guard hit on a cycle returns at once), and every top-level statement gets the time it first executes.
+  // order is the static order of the init functions, simulated exactly (depth first over the top-level init-call statements, marking an init at its start so a
+  // guard hit on a cycle returns at once), for every init that is not "loose". An init is LOOSE when it can start at a time the simulation does not model:
+  // it is the callee of an init call that is not a top-level statement (a require in a function or a nested block, an async start), or it lacks the run-once
+  // guard `if (%loaded) return` / has another `return`; everything a loose init starts at top level is loose too. A boxing use is ordered only when the
+  // candidate's init and the init holding the use are both not loose.
   const initFnByName = new Map<string, IrFunction>();
-  let initCallsTotal = 0, initCallsTop = 0, initShapeOk = true;
+  const topEdges = new Map<string, string[]>();
+  const loose = new Set<string>();
   {
-    const countAll = (n: unknown): void => {
-      if (Array.isArray(n)) { n.forEach(countAll); return; }
-      if (!isNode(n)) return;
-      if (n["kind"] === "call" && typeof n["callee"] === "string" && (n["callee"] as string).startsWith("%init.")) initCallsTotal++;
-      for (const k of Object.keys(n)) if (k !== "loc") countAll(n[k]);
-    };
+    const topNodes = new Set<unknown>();
     const hasReturn = (n: unknown): boolean => {
       if (Array.isArray(n)) return n.some(hasReturn);
       if (!isNode(n)) return false;
       if (n["kind"] === "return") return true;
       return Object.keys(n).some((k) => k !== "loc" && hasReturn(n[k]));
     };
-    for (const fn of mod.functions) countAll(fn.body);
+    const entryName = (mod as { entry?: string }).entry;
     for (const fn of mod.functions) {
-      const isEntry = fn.name === (mod as { entry?: string }).entry;
+      const isEntry = fn.name === entryName;
       if (!(fn.name.startsWith("%init.") || isEntry) || !Array.isArray(fn.body)) continue;
       initFnByName.set(fn.name, fn);
       const body = fn.body as unknown as Node[];
+      const es: string[] = [];
       for (const st of body) {
         const ex = kindOf(st) === "exprStmt" ? (st["expr"] as Node) : undefined;
-        if (ex !== undefined && kindOf(ex) === "call" && typeof ex["callee"] === "string" && (ex["callee"] as string).startsWith("%init.") && (ex["args"] as unknown[]).length === 0) initCallsTop++;
+        if (ex !== undefined && kindOf(ex) === "call" && typeof ex["callee"] === "string" && (ex["callee"] as string).startsWith("%init.") && (ex["args"] as unknown[]).length === 0) { es.push(ex["callee"] as string); topNodes.add(ex); }
       }
+      topEdges.set(fn.name, es);
       if (!isEntry) {
         const g = body[0];
         const guard = g !== undefined && kindOf(g) === "if" && g["else_"] === null && Array.isArray(g["then"]) && (g["then"] as Node[]).length === 1 && kindOf((g["then"] as Node[])[0]) === "return" && kindOf(g["cond"]) === "varRef";
-        if (!guard || hasReturn(body.slice(1))) initShapeOk = false;
+        if (!guard || hasReturn(body.slice(1))) loose.add(fn.name);
       }
     }
+    const scan = (n: unknown): void => {
+      if (Array.isArray(n)) { n.forEach(scan); return; }
+      if (!isNode(n)) return;
+      if (n["kind"] === "call" && typeof n["callee"] === "string" && (n["callee"] as string).startsWith("%init.") && !topNodes.has(n)) loose.add(n["callee"] as string);
+      for (const k of Object.keys(n)) if (k !== "loc") scan(n[k]);
+    };
+    for (const fn of mod.functions) scan(fn.body);
+    const spread = (x: string): void => { for (const y of topEdges.get(x) ?? []) if (!loose.has(y)) { loose.add(y); spread(y); } };
+    for (const x of [...loose]) spread(x);
   }
   const stmtTime = new Map<string, number[]>(); // init -> the time each top-level statement first executes (-1: never)
   const finishTime = new Map<string, number>();
-  if (initCallsTotal === initCallsTop && initShapeOk && (mod as { entry?: string }).entry !== undefined) {
+  if ((mod as { entry?: string }).entry !== undefined) {
     let clock = 0;
     const started = new Set<string>();
     const exec = (x: string): void => {
@@ -223,20 +232,19 @@ export function deadInitPass(mod: IrModule): DeadInitResult {
     };
     exec((mod as { entry?: string }).entry!);
   }
-  /** Does the candidate's init `cand` finish strictly before top-level statement `j` of init `k` first executes? Fail closed. */
   const lateWhy = (cand: string, k: string, j: number): string => {
-    if (initCallsTotal !== initCallsTop) return `${initCallsTotal - initCallsTop} of ${initCallsTotal} init calls are not top-level statements`;
-    if (!initShapeOk) return "an init lacks the run-once guard shape or has another return";
-    if ((mod as { entry?: string }).entry === undefined) return "no entry";
+    if (loose.has(cand)) return `the candidate's init ${cand} is loose (started by a non-top-level init call, or no run-once guard shape)`;
+    if (loose.has(k)) return `init ${k} is loose (started by a non-top-level init call, or no run-once guard shape)`;
     const fin = finishTime.get(cand), t = stmtTime.get(k)?.[j];
     if (cand === k) return "the use is in the candidate's own init";
     if (fin === undefined) return "the candidate's init is never reached from the entry";
     if (t === undefined) return `init ${k} is never reached from the entry`;
     return `${k} statement ${j} executes at ${t}, candidate init ${cand} finishes at ${fin}`;
   };
+  /** Does the candidate's init `cand` finish strictly before top-level statement `j` of init `k` first executes? Fail closed. */
   const initFinishedBefore = (cand: string, k: string, j: number): boolean => {
     const fin = finishTime.get(cand), t = stmtTime.get(k)?.[j];
-    return cand !== k && fin !== undefined && t !== undefined && t > fin;
+    return cand !== k && !loose.has(cand) && !loose.has(k) && fin !== undefined && t !== undefined && t > fin;
   };
   let curCandInit = "";
 
