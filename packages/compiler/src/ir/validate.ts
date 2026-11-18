@@ -4128,7 +4128,8 @@ function validateFunction(
           err(`${e.kind} constant index ${e.index.value} is outside the run of ${e.run.length} field(s)`, e.loc);
         }
         if (e.run.length === 0) err(`${e.kind} over an empty run`, e.loc);
-        if (new Set(e.run).size !== e.run.length) err(`${e.kind} run names a field twice`, e.loc);
+        // a runKeyAt table is a list of string values read by index (ir/stmt-run-loops.ts: the same literal may repeat across rows); only a FIELD run names distinct members
+        if (e.kind !== "runKeyAt" && new Set(e.run).size !== e.run.length) err(`${e.kind} run names a field twice`, e.loc);
         if (e.kind === "runKeyAt") {
           if (e.type.kind !== "string") err(`runKeyAt must be string, got ${e.type.kind}`, e.loc);
           break;
