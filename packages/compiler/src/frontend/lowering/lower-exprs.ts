@@ -13428,7 +13428,27 @@ export function lowerObjectLiteral(L: Lowerer, expr: ts.ObjectLiteralExpression)
           // throw — an effect JS never reaches.
           return local !== undefined && !local.mutable && local.tdz !== true;
         };
-        const earlierStable = fields.every((f) => f.value === undefined || orderIndependent(f.value));
+        let earlierStable = fields.every((f) => f.value === undefined || orderIndependent(f.value));
+        // An earlier explicit field that is NOT order-independent (a read of a `let` the call could reach through a closure, a tag-checked narrowing
+        // `inputJid` of a union-typed const, any call) still lets the call be hoisted: its own value is evaluated into a hidden slot in the prelude,
+        // in source order, AHEAD of the call. That is JS's own order (earlier fields, then the call), so nothing is reordered and nothing is assumed
+        // about what the call can write or whether a narrowing can throw. Fields that are order-independent stay where they are: nothing the call
+        // or the slots do can change them. Only plain explicit entries qualify; a copied, dropped, overflow or ownership-tracked entry keeps the fence.
+        if (
+          srcLowered &&
+          !pureReemittable(srcLowered) &&
+          afterExplicit &&
+          !earlierStable &&
+          fields.every((f) => f.expl === true && f.drop !== true && f.overflow !== true && f.own !== true && f.ownIf === undefined)
+        ) {
+          for (const f of fields) {
+            if (orderIndependent(f.value)) continue;
+            const fslot = L.declareHiddenLocal("%spreadfield", f.value.type);
+            prelude.push({ kind: "varDecl", localId: fslot.id, init: f.value, loc: f.value.loc });
+            f.value = { kind: "varRef", localId: fslot.id, type: f.value.type, loc: f.value.loc };
+          }
+          earlierStable = true;
+        }
         if (srcLowered && !pureReemittable(srcLowered) && (!afterExplicit || earlierStable)) {
           // `pureReemittable` is about re-READING a value cheaply and so
           // starts at `varRef`; a LITERAL is not one of its kinds even
