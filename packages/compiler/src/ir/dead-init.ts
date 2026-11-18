@@ -166,11 +166,76 @@ export function deadInitPass(mod: IrModule): DeadInitResult {
     return ok;
   }
   /** A const, non-tdz global assigned exactly once, by a record literal, whose every use is read-only. */
+  // 1c. INIT ORDER. A record promoted to a view AFTER the candidate has been evaluated cannot make the candidate's `recordIsView` true. Module evaluation
+  // order is the static order of the init functions when (a) every call of an `%init.K` is a top-level statement of an init function or of the entry,
+  // (b) each init starts with the run-once guard `if (%loaded) return` and has no other `return`: then it is simulated exactly, depth first, marking an
+  // init at its start (a guard hit on a cycle returns at once), and every top-level statement gets the time it first executes.
+  const initFnByName = new Map<string, IrFunction>();
+  let initCallsTotal = 0, initCallsTop = 0, initShapeOk = true;
+  {
+    const countAll = (n: unknown): void => {
+      if (Array.isArray(n)) { n.forEach(countAll); return; }
+      if (!isNode(n)) return;
+      if (n["kind"] === "call" && typeof n["callee"] === "string" && (n["callee"] as string).startsWith("%init.")) initCallsTotal++;
+      for (const k of Object.keys(n)) if (k !== "loc") countAll(n[k]);
+    };
+    const hasReturn = (n: unknown): boolean => {
+      if (Array.isArray(n)) return n.some(hasReturn);
+      if (!isNode(n)) return false;
+      if (n["kind"] === "return") return true;
+      return Object.keys(n).some((k) => k !== "loc" && hasReturn(n[k]));
+    };
+    for (const fn of mod.functions) countAll(fn.body);
+    for (const fn of mod.functions) {
+      const isEntry = fn.name === (mod as { entry?: string }).entry;
+      if (!(fn.name.startsWith("%init.") || isEntry) || !Array.isArray(fn.body)) continue;
+      initFnByName.set(fn.name, fn);
+      const body = fn.body as unknown as Node[];
+      for (const st of body) {
+        const ex = kindOf(st) === "exprStmt" ? (st["expr"] as Node) : undefined;
+        if (ex !== undefined && kindOf(ex) === "call" && typeof ex["callee"] === "string" && (ex["callee"] as string).startsWith("%init.") && (ex["args"] as unknown[]).length === 0) initCallsTop++;
+      }
+      if (!isEntry) {
+        const g = body[0];
+        const guard = g !== undefined && kindOf(g) === "if" && g["else_"] === null && Array.isArray(g["then"]) && (g["then"] as Node[]).length === 1 && kindOf((g["then"] as Node[])[0]) === "return" && kindOf(g["cond"]) === "varRef";
+        if (!guard || hasReturn(body.slice(1))) initShapeOk = false;
+      }
+    }
+  }
+  const stmtTime = new Map<string, number[]>(); // init -> the time each top-level statement first executes (-1: never)
+  const finishTime = new Map<string, number>();
+  if (initCallsTotal === initCallsTop && initShapeOk && (mod as { entry?: string }).entry !== undefined) {
+    let clock = 0;
+    const started = new Set<string>();
+    const exec = (x: string): void => {
+      const fn = initFnByName.get(x);
+      if (fn === undefined || started.has(x)) return;
+      started.add(x);
+      const body = fn.body as unknown as Node[];
+      const ts = new Array<number>(body.length).fill(-1);
+      stmtTime.set(x, ts);
+      body.forEach((st, j) => {
+        const ex = kindOf(st) === "exprStmt" ? (st["expr"] as Node) : undefined;
+        if (ex !== undefined && kindOf(ex) === "call" && typeof ex["callee"] === "string" && (ex["callee"] as string).startsWith("%init.")) exec(ex["callee"] as string);
+        ts[j] = clock++;
+      });
+      finishTime.set(x, clock++);
+    };
+    exec((mod as { entry?: string }).entry!);
+  }
+  /** Does the candidate's init `cand` finish strictly before top-level statement `j` of init `k` first executes? Fail closed. */
+  const initFinishedBefore = (cand: string, k: string, j: number): boolean => {
+    const fin = finishTime.get(cand), t = stmtTime.get(k)?.[j];
+    return cand !== k && fin !== undefined && t !== undefined && t > fin;
+  };
+  let curCandInit = "";
+
   const nvWhy = new Map<string, string>();
   const plainGlobal = (id: string): boolean => {
-    const memo = constMemo.get(id);
+    const mkey = `${id}|${curCandInit}`;
+    const memo = constMemo.get(mkey);
     if (memo !== undefined) return memo;
-    constMemo.set(id, false);
+    constMemo.set(mkey, false);
     let ok = false;
     const c = candidates.get(id);
     if (c !== undefined && (assigns.get(id) ?? 0) === 1 && ids.has(id)) {
@@ -181,10 +246,16 @@ export function deadInitPass(mod: IrModule): DeadInitResult {
         const calls: { callee: string; idx: number }[] = [];
         const bad = new Set<string>();
         for (const fn of mod.functions) {
-          const u = usesOf(fn.body, id);
+          // a top-level statement of an init function that boxes the record AFTER the candidate's init has finished is allowed
+          const stmts = fn.name.startsWith("%init.") && Array.isArray(fn.body) ? (fn.body as unknown as Node[]) : null;
+          const parts: { body: unknown; late: boolean }[] = stmts === null ? [{ body: fn.body, late: false }] : stmts.map((st, j) => ({ body: st, late: curCandInit !== "" && initFinishedBefore(curCandInit, fn.name, j) }));
+          const u = { raw: 0, allowed: 0, calls: [] as { callee: string; idx: number }[], bad: [] as string[] };
+          for (const part of parts) {
+            const pu = usesOf(part.body, id, part.late ? (parent, key) => parent["kind"] === "dynFrom" && key === "value" : undefined);
+            u.raw += pu.raw; u.allowed += pu.allowed; u.calls.push(...pu.calls); u.bad.push(...pu.bad);
+          }
           raw += u.raw; allowed += u.allowed; calls.push(...u.calls);
           for (const b of u.bad) bad.add(`${fn.name}:${b}`);
-          if (u.raw !== u.allowed + u.calls.length + u.bad.length + (fn.name.startsWith("%init.") ? 1 : 0) && u.bad.length === 0 && u.raw > 0) bad.add(`${fn.name}:non-varRef string use (capture or id)`);
         }
         ok = raw === allowed + calls.length + 1 && callsConfined(calls);
         if (!ok) {
@@ -193,7 +264,7 @@ export function deadInitPass(mod: IrModule): DeadInitResult {
         }
       } else nvWhy.set(id, "not a single-assignment record-literal const");
     }
-    constMemo.set(id, ok);
+    constMemo.set(mkey, ok);
     return ok;
   };
   const staticNonView = (e: unknown, cx: Cx): boolean => {
@@ -565,6 +636,7 @@ export function deadInitPass(mod: IrModule): DeadInitResult {
     if (c === undefined) continue;
     if ((occ.get(g.id) ?? 0) !== 1 || (assigns.get(g.id) ?? 0) !== 1) continue; // read somewhere, or written twice: not a candidate (not reported)
     lastWhy = "";
+    curCandInit = c.fn.name;
     const st = (c.fn.body as unknown as Node[])[c.idx]!;
     const ok = pureExpr(st["value"], mkCx());
     if (ok) {
@@ -576,6 +648,7 @@ export function deadInitPass(mod: IrModule): DeadInitResult {
       if (report) process.stderr.write(`DEADINIT keep ${g.id}: ${lastWhy}\n`);
     }
   }
+  if (report) for (const [id, w] of nvWhy) process.stderr.write(`DEADINIT nonview-refused ${id}: ${w}\n`);
   // Remove back to front so the indices of one function stay valid.
   drops.sort((a, b) => b.idx - a.idx);
   for (const d of drops) (d.fn.body as unknown as Node[]).splice(d.idx, 1);
