@@ -16988,6 +16988,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25753-a-twin-of-a-const-listener-in-a-program-without-semicolons-is-valid-syntax.ts": {
+   "order": [
+    "<repo>/tests/corpus/25753-a-twin-of-a-const-listener-in-a-program-without-semicolons-is-valid-syntax.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2576-string-destructuring-assign.ts": {
    "order": [
     "<repo>/tests/corpus/2576-string-destructuring-assign.ts"
