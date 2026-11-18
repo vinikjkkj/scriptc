@@ -13699,8 +13699,11 @@ static ScrDyn *tbm_copy_within(ScrDyn *recv, ScrDyn *const *args, size_t argc, c
  * *known is false when the name is none of these; the caller then falls
  * through to scr_dyn_bytes_method. +1 on success; NULL with an exception
  * pending on a throw. */
-/* The first byte decides almost every compare of a name against this chain (a Buffer method call walks all of it). */
-static inline bool scr_bo_is(const char *m, const char *n) { return m[0] == n[0] && strcmp(m, n) == 0; }
+/* The first two bytes decide almost every compare of a name against this chain (a Buffer method call walks all of it); m[1] is read only when m[0] is not the terminator. */
+#if defined(__GNUC__) || defined(__clang__)
+__attribute__((always_inline))
+#endif
+static inline bool scr_bo_is(const char *m, const char *n) { return m[0] == n[0] && (m[0] == 0 || m[1] == n[1]) && strcmp(m, n) == 0; }
 static const char *scr_bo_slice_enc(const char *m) {
   static const char *const names[7] = {"asciiSlice", "base64Slice", "base64urlSlice", "latin1Slice",
                                        "hexSlice", "ucs2Slice", "utf8Slice"};
@@ -13942,7 +13945,7 @@ ScrDyn *scr_dyn_bytes_method(ScrDyn *recv, const char *method, ScrDyn *const *ar
   ScrBytes *bytes = recv->v.bytes;
   size_t blen = bytes->len;
   *known = true;
-  if (strcmp(method, "at") == 0) {
+  if (scr_bo_is(method, "at")) {
     double iD = scr_dyn_index_arg(args, argc, 0, 0, what);
     if (scr_exc_pending()) return NULL;
     double idx = iD < 0 ? (double)blen + iD : iD;
@@ -13950,29 +13953,29 @@ ScrDyn *scr_dyn_bytes_method(ScrDyn *recv, const char *method, ScrDyn *const *ar
     return scr_dyn_new_num((double)bytes->data[(size_t)idx]);
   }
   /* The rest of the typed-array surface (the tbm_* block above). */
-  if (strcmp(method, "fill") == 0) return tbm_fill(recv, args, argc, what);
-  if (strcmp(method, "indexOf") == 0) return tbm_search(recv, args, argc, what, 0);
-  if (strcmp(method, "lastIndexOf") == 0) return tbm_search(recv, args, argc, what, 1);
-  if (strcmp(method, "includes") == 0) return tbm_search(recv, args, argc, what, 2);
-  if (strcmp(method, "join") == 0) return tbm_join(recv, args, argc);
-  if (strcmp(method, "forEach") == 0) return tbm_iterate(recv, args, argc, TBM_FOREACH);
-  if (strcmp(method, "map") == 0) return tbm_iterate(recv, args, argc, TBM_MAP);
-  if (strcmp(method, "filter") == 0) return tbm_iterate(recv, args, argc, TBM_FILTER);
-  if (strcmp(method, "some") == 0) return tbm_iterate(recv, args, argc, TBM_SOME);
-  if (strcmp(method, "every") == 0) return tbm_iterate(recv, args, argc, TBM_EVERY);
-  if (strcmp(method, "find") == 0) return tbm_iterate(recv, args, argc, TBM_FIND);
-  if (strcmp(method, "findIndex") == 0) return tbm_iterate(recv, args, argc, TBM_FINDINDEX);
-  if (strcmp(method, "findLast") == 0) return tbm_iterate(recv, args, argc, TBM_FINDLAST);
-  if (strcmp(method, "findLastIndex") == 0) return tbm_iterate(recv, args, argc, TBM_FINDLASTINDEX);
-  if (strcmp(method, "reduce") == 0) return tbm_reduce(recv, args, argc, false);
-  if (strcmp(method, "reduceRight") == 0) return tbm_reduce(recv, args, argc, true);
-  if (strcmp(method, "reverse") == 0) return tbm_reverse(recv, false);
-  if (strcmp(method, "toReversed") == 0) return tbm_reverse(recv, true);
-  if (strcmp(method, "sort") == 0) return tbm_sort(recv, args, argc, false);
-  if (strcmp(method, "toSorted") == 0) return tbm_sort(recv, args, argc, true);
-  if (strcmp(method, "with") == 0) return tbm_with(recv, args, argc, what);
-  if (strcmp(method, "copyWithin") == 0) return tbm_copy_within(recv, args, argc, what);
-  if (strcmp(method, "slice") == 0 || strcmp(method, "subarray") == 0) {
+  if (scr_bo_is(method, "fill")) return tbm_fill(recv, args, argc, what);
+  if (scr_bo_is(method, "indexOf")) return tbm_search(recv, args, argc, what, 0);
+  if (scr_bo_is(method, "lastIndexOf")) return tbm_search(recv, args, argc, what, 1);
+  if (scr_bo_is(method, "includes")) return tbm_search(recv, args, argc, what, 2);
+  if (scr_bo_is(method, "join")) return tbm_join(recv, args, argc);
+  if (scr_bo_is(method, "forEach")) return tbm_iterate(recv, args, argc, TBM_FOREACH);
+  if (scr_bo_is(method, "map")) return tbm_iterate(recv, args, argc, TBM_MAP);
+  if (scr_bo_is(method, "filter")) return tbm_iterate(recv, args, argc, TBM_FILTER);
+  if (scr_bo_is(method, "some")) return tbm_iterate(recv, args, argc, TBM_SOME);
+  if (scr_bo_is(method, "every")) return tbm_iterate(recv, args, argc, TBM_EVERY);
+  if (scr_bo_is(method, "find")) return tbm_iterate(recv, args, argc, TBM_FIND);
+  if (scr_bo_is(method, "findIndex")) return tbm_iterate(recv, args, argc, TBM_FINDINDEX);
+  if (scr_bo_is(method, "findLast")) return tbm_iterate(recv, args, argc, TBM_FINDLAST);
+  if (scr_bo_is(method, "findLastIndex")) return tbm_iterate(recv, args, argc, TBM_FINDLASTINDEX);
+  if (scr_bo_is(method, "reduce")) return tbm_reduce(recv, args, argc, false);
+  if (scr_bo_is(method, "reduceRight")) return tbm_reduce(recv, args, argc, true);
+  if (scr_bo_is(method, "reverse")) return tbm_reverse(recv, false);
+  if (scr_bo_is(method, "toReversed")) return tbm_reverse(recv, true);
+  if (scr_bo_is(method, "sort")) return tbm_sort(recv, args, argc, false);
+  if (scr_bo_is(method, "toSorted")) return tbm_sort(recv, args, argc, true);
+  if (scr_bo_is(method, "with")) return tbm_with(recv, args, argc, what);
+  if (scr_bo_is(method, "copyWithin")) return tbm_copy_within(recv, args, argc, what);
+  if (scr_bo_is(method, "slice") || scr_bo_is(method, "subarray")) {
     /* slice COPIES and subarray is a VIEW — JS's own split, and the one
      * the STATIC spelling has always taken (scr_bytes_subarray, chain
      * depth 1). The dyn arm used to copy for BOTH, so
@@ -14001,7 +14004,7 @@ ScrDyn *scr_dyn_bytes_method(ScrDyn *recv, const char *method, ScrDyn *const *ar
     scr_bytes_release(out);
     return d;
   }
-  if (strcmp(method, "set") == 0 && bytes->elem != SCR_BYTES_BUF) {
+  if (scr_bo_is(method, "set") && bytes->elem != SCR_BYTES_BUF) {
     /* %TypedArray%.prototype.set(source[, offset]) — the BULK WRITE, and
      * the one protobufjs's Writer cannot do without: its `writeBytes`
      * chunk is literally `function (val, buf, pos) { buf.set(val, pos); }`,
@@ -14126,7 +14129,7 @@ ScrDyn *scr_dyn_bytes_method(ScrDyn *recv, const char *method, ScrDyn *const *ar
       return scr_dyn_retain(scr_dyn_undefined());
     }
   }
-  if (strcmp(method, "toString") == 0) {
+  if (scr_bo_is(method, "toString")) {
     /* A dyn receiver reaching `toString(enc)` through the METHOD spelling
      * — the frontend routes here when the argument is not a literal
      * encoding, because the same call on a NUM or OBJ receiver is a radix
