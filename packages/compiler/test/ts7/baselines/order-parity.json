@@ -16964,6 +16964,42 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25770-a-class-whose-prototype-constructor-is-another-class-answers-it-and-prints-no-label.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25770-a-class-whose-prototype-constructor-is-another-class-answers-it-and-prints-no-label.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25771-a-subclass-of-a-rebinding-class-keeps-its-own-constructor.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25771-a-subclass-of-a-rebinding-class-keeps-its-own-constructor.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25772-a-class-rebinding-its-own-base-is-labelled-by-that-base.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25772-a-class-rebinding-its-own-base-is-labelled-by-that-base.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25773-a-base-typed-value-answers-the-constructor-of-the-instance-it-holds.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25773-a-base-typed-value-answers-the-constructor-of-the-instance-it-holds.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25774-a-rebound-constructor-inside-containers-and-templates.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25774-a-rebound-constructor-inside-containers-and-templates.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25775-object-get-prototype-of-an-instance-reads-the-rebound-constructor.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25775-object-get-prototype-of-an-instance-reads-the-rebound-constructor.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2578-jsval-into-unknown-rows.ts": {
    "order": [
     "<repo>/tests/corpus/2578-jsval-into-unknown-rows.ts"
@@ -26295,9 +26331,9 @@
    ],
    "diags": []
   },
-  "<repo>/tests/diagnostics/a-class-prototype-constructor-assigned-another-class-is-refused.cjs": {
+  "<repo>/tests/diagnostics/a-class-prototype-constructor-assigned-a-non-class-is-refused.cjs": {
    "order": [
-    "<repo>/tests/diagnostics/a-class-prototype-constructor-assigned-another-class-is-refused.cjs"
+    "<repo>/tests/diagnostics/a-class-prototype-constructor-assigned-a-non-class-is-refused.cjs"
    ],
    "diags": []
   },
@@ -26328,6 +26364,18 @@
   "<repo>/tests/diagnostics/a-prototype-copy-loop-over-a-program-class-mixin-is-refused.ts": {
    "order": [
     "<repo>/tests/diagnostics/a-prototype-copy-loop-over-a-program-class-mixin-is-refused.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/a-prototype-object-of-an-instance-whose-family-rebinds-constructor-is-refused.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/a-prototype-object-of-an-instance-whose-family-rebinds-constructor-is-refused.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/a-read-of-a-rebound-prototype-constructor-is-refused.cjs": {
+   "order": [
+    "<repo>/tests/diagnostics/a-read-of-a-rebound-prototype-constructor-is-refused.cjs"
    ],
    "diags": []
   },
