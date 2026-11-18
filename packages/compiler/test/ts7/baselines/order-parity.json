@@ -29519,6 +29519,30 @@
     "<repo>/tests/corpus/25765-a-table-built-by-one-comma-expression-installs-its-members-lazily-and-matches-node.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25766-a-proxy-util-object-is-read-through-its-traps-at-install-in-member-order-for-a-whole-run.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25766-a-proxy-util-object-is-read-through-its-traps-at-install-in-member-order-for-a-whole-run.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25767-a-util-field-written-between-two-members-of-a-comma-chain-splits-the-run.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25767-a-util-field-written-between-two-members-of-a-comma-chain-splits-the-run.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25768-a-member-stored-under-a-util-key-ends-the-shared-reads-of-its-run.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25768-a-member-stored-under-a-util-key-ends-the-shared-reads-of-its-run.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25769-a-util-object-that-is-undefined-throws-at-the-member-it-fails-in.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25769-a-util-object-that-is-undefined-throws-at-the-member-it-fails-in.cjs"
+   ],
+   "diags": []
   }
  }
 }
