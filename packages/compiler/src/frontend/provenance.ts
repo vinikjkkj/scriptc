@@ -487,10 +487,23 @@ function cacheRoot(): string {
   return process.env["SCRIPTC_PROVENANCE_CACHE"] ?? defaultCacheRoot();
 }
 
+/** Does this host unpack a source tarball in-process instead of through a `tar` child? Windows does: `tar` there is whichever of GNU tar (Git for
+ * Windows, which needs `--force-local` for a drive-letter path) and the bsdtar in System32 (which rejects that flag, the default on Windows 10 and
+ * 11) comes first on PATH, and a path spelling that is exact for one is an error for the other. Reading the archive here takes neither a flag nor
+ * a flavor probe, and unpacks the same way on every Windows host. Other hosts keep the system `tar`, byte for byte as before. */
+export function unpacksSourceTarballInProcess(platform: NodeJS.Platform): boolean {
+  return platform === "win32";
+}
+
 /** Extract a gzip tarball (one leading directory stripped) to `dest`,
  * atomically: into a temp tree first, then renamed into place. A racing
  * compile that wins the rename leaves identical content. */
 async function extractTarballTo(bytes: Buffer, dest: string): Promise<void> {
+  if (unpacksSourceTarballInProcess(process.platform)) {
+    await extractVerifiedTarball(bytes, dest, { links: "skip" });
+    if (!isDirectory(dest)) throw new Error("source cache publish failed");
+    return;
+  }
   await mkdir(dirname(dest), { recursive: true });
   const tmp = await mkdtemp(join(tmpdir(), "scriptc-provenance-"));
   try {
@@ -498,21 +511,8 @@ async function extractTarballTo(bytes: Buffer, dest: string): Promise<void> {
     await writeFile(tarball, bytes);
     const extractDir = join(tmp, "tree");
     await mkdir(extractDir);
-    // On Windows both halves of the path spelling matter to GNU tar: the
-    // drive-letter colon parses as a remote host:path ("Cannot connect to
-    // G: resolve failed") without --force-local, and backslashes come out
-    // mangled through its argument handling, so the paths go in
-    // slash-normalized. bsdtar (macOS) rejects unknown options, so the
-    // flag only rides on the platform whose tar needs it.
-    const win = process.platform === "win32";
-    const tarPath = (p: string): string => (win ? p.replaceAll("\\", "/") : p);
     try {
-      await execFileAsync("tar", [
-        ...(win ? ["--force-local"] : []),
-        "-xzf", tarPath(tarball),
-        "-C", tarPath(extractDir),
-        "--strip-components=1",
-      ]);
+      await execFileAsync("tar", ["-xzf", tarball, "-C", extractDir, "--strip-components=1"]);
     } catch (e) {
       // GNU tar on Windows cannot create a symlink without the developer
       // privilege, and a repo that ships one exits 2 having extracted

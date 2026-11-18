@@ -375,7 +375,8 @@ function safeEntryPath(name: string): string | null {
 /** Extract a gzip tarball (first path component stripped) into `dest`,
  * atomically (temp tree, then rename). Throws an Error naming any refused
  * entry. */
-export async function extractVerifiedTarball(bytes: Buffer, dest: string): Promise<void> {
+export async function extractVerifiedTarball(bytes: Buffer, dest: string, opts: { links?: "refuse" | "skip" } = {}): Promise<void> {
+  const skipLinks = opts.links === "skip";
   const tar = gunzipSync(bytes);
   const files: { path: string; data: Buffer }[] = [];
   const dirs: string[] = [];
@@ -409,6 +410,9 @@ export async function extractVerifiedTarball(bytes: Buffer, dest: string): Promi
     if (pax?.has("path") === true) name = pax.get("path")!;
     longName = null;
     pax = null;
+    // A source checkout (not a verified npm tarball) may carry links (mysql2 ships three, `AGENTS.md` -> `CLAUDE.md`); no link is a
+    // compilable source file, and the `tar` this replaces on Windows could not create one either. Skipped by name, nothing else is.
+    if (skipLinks && (type === "1" || type === "2")) continue;
     if (type !== "0" && type !== "5") {
       const kind = type === "2" ? "a symlink" : type === "1" ? "a hard link" : `type '${type}'`;
       throw new Error(`tarball entry "${name}" is ${kind}; only regular files and directories are extracted`);
