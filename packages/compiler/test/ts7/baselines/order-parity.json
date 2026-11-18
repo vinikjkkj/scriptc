@@ -29194,12 +29194,6 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/25692-a-proxy-whose-ownkeys-throws-throws-at-module-evaluation-for-the-unused-view.ts": {
-   "order": [
-    "<repo>/tests/corpus/25692-a-proxy-whose-ownkeys-throws-throws-at-module-evaluation-for-the-unused-view.ts"
-   ],
-   "diags": []
-  },
   "<repo>/tests/corpus/25693-a-table-mutated-after-the-unused-view-is-built-keeps-its-own-state.ts": {
    "order": [
     "<repo>/tests/corpus/25693-a-table-mutated-after-the-unused-view-is-built-keeps-its-own-state.ts"
