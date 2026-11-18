@@ -29157,6 +29157,24 @@
     "<repo>/tests/corpus/25697-two-unused-views-over-one-frozen-spec-are-both-dropped-and-a-read-view-is-kept.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25698-an-unused-view-is-dropped-when-the-table-is-boxed-by-a-module-that-runs-after-it/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/25698-an-unused-view-is-dropped-when-the-table-is-boxed-by-a-module-that-runs-after-it/spec.ts",
+    "<repo>/tests/corpus/25698-an-unused-view-is-dropped-when-the-table-is-boxed-by-a-module-that-runs-after-it/view.ts",
+    "<repo>/tests/corpus/25698-an-unused-view-is-dropped-when-the-table-is-boxed-by-a-module-that-runs-after-it/box.ts",
+    "<repo>/tests/corpus/25698-an-unused-view-is-dropped-when-the-table-is-boxed-by-a-module-that-runs-after-it/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25699-an-unused-view-is-kept-when-the-table-is-boxed-by-a-module-that-runs-before-it/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/25699-an-unused-view-is-kept-when-the-table-is-boxed-by-a-module-that-runs-before-it/spec.ts",
+    "<repo>/tests/corpus/25699-an-unused-view-is-kept-when-the-table-is-boxed-by-a-module-that-runs-before-it/box.ts",
+    "<repo>/tests/corpus/25699-an-unused-view-is-kept-when-the-table-is-boxed-by-a-module-that-runs-before-it/view.ts",
+    "<repo>/tests/corpus/25699-an-unused-view-is-kept-when-the-table-is-boxed-by-a-module-that-runs-before-it/main.ts"
+   ],
+   "diags": []
   }
  }
 }
