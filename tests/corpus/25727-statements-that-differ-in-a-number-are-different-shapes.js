@@ -1,0 +1,14 @@
+'use strict';
+var o = {};
+var r = [];
+r.push(o["a0"] = 0, o["b0"] = "x0");
+r.push(o["a1"] = 1, o["b1"] = "x1");
+r.push(o["a2"] = 2, o["b2"] = "x2");
+r.push(o["a3"] = 3, o["b3"] = "x3");
+r.push(o["a4"] = 4, o["b4"] = "x4");
+r.push(o["a5"] = 5, o["b5"] = "x5");
+r.push(o["a6"] = 6, o["b6"] = "x6");
+r.push(o["a7"] = 7, o["b7"] = "x7");
+r.push(o["a8"] = 8, o["b8"] = "x8");
+r.push(o["a9"] = 9, o["b9"] = "x9");
+console.log(r.length, Object.keys(o).join(","));

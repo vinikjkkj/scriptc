@@ -1,0 +1,28 @@
+'use strict';
+function Msg() {}
+Msg.prototype.k0=null;
+Msg.prototype.k1=null;
+Msg.prototype.k2=null;
+Msg.prototype.k3=null;
+Msg.prototype.k4=null;
+Msg.prototype.k5=null;
+Msg.prototype.k6=null;
+Msg.prototype.k7=null;
+Msg.prototype.k8=null;
+Msg.prototype.k9=null;
+Msg.prototype.k10=null;
+Msg.prototype.k11=null;
+Msg.prototype.k12=null;
+Msg.prototype.k13=null;
+Msg.prototype.k14=null;
+Msg.prototype.k15=null;
+Msg.prototype.k16=null;
+Msg.prototype.k17=null;
+Msg.prototype.k18=null;
+Msg.prototype.k19=null;
+Msg.prototype.k20=null;
+Msg.prototype.k21=null;
+Msg.prototype.k22=null;
+Msg.prototype.k23=null;
+var m = new Msg(); m.k7 = 3;
+console.log(m.k7, m.k8, Object.keys(Msg.prototype).length, "k23" in m);
