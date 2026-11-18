@@ -178,12 +178,21 @@ export function collectProtoDataNames(L: Lowerer, sf: ts.SourceFile): void {
     const lhsRecv = ((w.stmt.left as ts.PropertyAccessExpression).expression as ts.PropertyAccessExpression).expression as ts.Identifier;
     const csym = L.resolveValueSymbol(lhsRecv) ?? undefined;
     const names = csym === undefined ? undefined : (dataByClass.get(csym) ?? dataByClass.set(csym, new Set()).get(csym)!);
+    if (w.name === "constructor" && csym !== undefined && ctorRebindTarget(L, w.stmt, csym) !== undefined) continue;
     const alias = names !== undefined && isDatumAlias(L, w.stmt.right, csym, names);
     if (alias || isDataRhs(w.stmt.right)) names?.add(w.name);
     if (alias ? L.protoDataNonUndef.has(protoMemberSource(w.stmt.right)!.name) : isDataRhs(w.stmt.right) && !undefinedRhs(w.stmt.right)) {
       L.protoDataNonUndef.add(w.name);
     }
   }
+}
+
+/** `C.prototype.constructor = M` where M is another program class (a plain, non-generic class declaration): M's declaration, else undefined. */
+export function ctorRebindTarget(L: Lowerer, stmt: ts.BinaryExpression, classSymbol: ts.Symbol): ts.ClassDeclaration | undefined {
+  if (!ts.isIdentifier(stmt.right) || L.checker.getSymbolAtLocation(stmt.right) === classSymbol) return undefined;
+  const rsym = L.resolveValueSymbol(stmt.right);
+  const rdecl = rsym ? L.checker.valueDeclarationOf(rsym) : undefined;
+  return rdecl !== undefined && ts.isClassDeclaration(rdecl) && rdecl.typeParameters === undefined && rdecl.name !== undefined ? rdecl : undefined;
 }
 
 /** The names of the top-level prototype-data writes of class `decl`, for the
@@ -198,6 +207,7 @@ export function protoDataFieldNames(
   const out: string[] = [];
   const isThisClass = (recv: ts.Expression): boolean => L.checker.getSymbolAtLocation(recv) === classSymbol;
   for (const w of topLevelProtoWrites(decl.getSourceFile(), isThisClass)) {
+    if (w.name === "constructor" && ctorRebindTarget(L, w.stmt, classSymbol) !== undefined) continue;
     if ((!isDataRhs(w.stmt.right) && !isDatumAlias(L, w.stmt.right, classSymbol, new Set(out))) || isMethodRhs(w.stmt.right)) continue;
     if (!out.includes(w.name)) out.push(w.name);
   }
@@ -234,6 +244,16 @@ export function registerProtoData(
     // `console.log(x)` / util.inspect print and the constructor-based checks. Those are answered from the class itself (lower-exprs),
     // so a stored datum under this name would be read back correctly by `===` and wrongly everywhere else: refused, never compiled wrong. The
     // class's own back-link (`C.prototype.constructor = C`) is the value the class answers anyway and keeps its lowering.
+    if (name === "constructor" && list.length === 1 && ts.isIdentifier(list[0]!.right) && L.checker.getSymbolAtLocation(list[0]!.right) !== classSymbol) {
+      const rsym = L.resolveValueSymbol(list[0]!.right);
+      const rdecl = rsym ? L.checker.valueDeclarationOf(rsym) : undefined;
+      if (rdecl !== undefined && ts.isClassDeclaration(rdecl) && rdecl.typeParameters === undefined && rdecl.name !== undefined) {
+        // Modelled: D's instances answer M for `.constructor` (the `%dynCls` row) and print the label Node derives (the `%inspLabel` row).
+        L.ctorRebinds.set(info.def.name, rdecl);
+        L.ctorRebindWrites.add(list[0]!);
+        continue;
+      }
+    }
     if (name === "constructor" && !list.every((w) => ts.isIdentifier(w.right) && L.checker.getSymbolAtLocation(w.right) === classSymbol)) {
       const msg = `the prototype member 'constructor' of class '${info.def.name}' (assigning it changes x.constructor.name, the inspect label and the constructor reads the compiler answers from the class itself)`;
       L.protoDataFenced.set(`${info.def.name}.constructor`, msg);
@@ -544,6 +564,7 @@ export function protoDataHasKey(L: Lowerer, recv: ts.Expression, key: string): b
 
 /** The lowered statement for a registered prototype-data write, or null. */
 export function protoDataAssignStmt(L: Lowerer, expr: ts.BinaryExpression): IrStmt | null {
+  if (L.ctorRebindWrites.has(expr)) return { kind: "block", body: [], loc: locOf(expr) };
   const fenced = fencedWrites.get(expr);
   if (fenced !== undefined) L.unsupported("SC1090", expr, fenced);
   const slot = L.protoDataAssigns.get(expr);
@@ -677,4 +698,56 @@ export function applyDatumKeyRows(L: Lowerer, fnLists: IrFunction[][]): void {
     fnLists[0]!.push(fn);
     info.def.dynMethods = [...(info.def.dynMethods ?? []), { name: "%dynDatumKeys", fn: fn.name }];
   }
+}
+
+/** Does `info`, an ancestor of it or a descendant of it rebind `constructor` (L.ctorRebinds)? A value typed by any of them can hold an instance of the rebinder. */
+export function familyRebindsConstructor(L: Lowerer, info: ClassInfo): boolean {
+  for (let c: ClassInfo | null | undefined = info; c; c = c.base) if (L.ctorRebinds.has(c.def.name)) return true;
+  const below = (c: ClassInfo): boolean => c.subclasses.some((s) => L.ctorRebinds.has(s.def.name) || below(s));
+  return below(info);
+}
+
+/** The `%dynCls` and `%inspLabel` member rows of a class whose family rebinds `constructor` (`D.prototype.constructor = M`, L.ctorRebinds).
+ * Node answers per prototype-chain position: an instance of D reads M, an instance of a subclass S of D reads S (S.prototype owns its own
+ * `constructor`), and util.inspect labels an instance with the first prototype whose own `constructor` the instance is an instance of: M when
+ * D is M or a subclass of M, else the nearest ancestor's own class, else no label (the chain reached Object). Null for a class outside such a family. */
+export function ctorRebindRows(L: Lowerer, info: ClassInfo): { fns: IrFunction[]; list: { name: string; fn: string }[] } | null {
+  let rebinder: ClassInfo | null = null;
+  for (let c: ClassInfo | null | undefined = info; c; c = c.base) {
+    if (L.ctorRebinds.has(c.def.name)) { rebinder = c; break; }
+  }
+  if (rebinder === null) return null;
+  const loc = info.decl !== null ? locOf(info.decl) : info.def.loc;
+  const thisT: IrType = { kind: "object", className: info.def.name };
+  const mkFn = (suffix: string, body: IrExpr): IrFunction => ({
+    name: `%${info.def.name}.%${suffix}`,
+    params: [{ localId: "this.0", name: "this", type: thisT }],
+    returnType: DYN,
+    locals: [{ id: "this.0", name: "this", type: thisT, mutable: false }],
+    body: [{ kind: "return", value: body, loc }],
+    loc,
+  });
+  const classVal = (cn: string): IrExpr => ({ kind: "dynFrom", value: { kind: "classRef", className: cn, type: { kind: "classval", className: cn }, loc }, type: DYN, loc });
+  let ctorName = info.def.name;
+  let label: string | null = info.def.jsName ?? info.def.name;
+  if (rebinder === info) {
+    const decl = L.ctorRebinds.get(info.def.name)!;
+    const msym = L.checker.getSymbolAtLocation(decl.name!);
+    const minfo = msym ? L.classBySymbol.get(msym) : undefined;
+    if (minfo === undefined) return null;
+    ctorName = minfo.def.name;
+    const isSelfOrAncestor = ((): boolean => { for (let c: ClassInfo | null | undefined = info; c; c = c.base) if (c === minfo) return true; return false; })();
+    if (isSelfOrAncestor) label = minfo.def.jsName ?? minfo.def.name;
+    else {
+      label = null;
+      const anc = info.base;
+      if (anc) label = anc.def.jsName ?? anc.def.name;
+    }
+  }
+  const labelExpr: IrExpr = label === null
+    ? { kind: "dynFrom", value: { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc }, type: DYN, loc }
+    : { kind: "dynFrom", value: { kind: "strLit", value: label, type: STRING, loc }, type: DYN, loc };
+  const f1 = mkFn("dynCls", classVal(ctorName));
+  const f2 = mkFn("inspLabel", labelExpr);
+  return { fns: [f1, f2], list: [{ name: "%dynCls", fn: f1.name }, { name: "%inspLabel", fn: f2.name }] };
 }

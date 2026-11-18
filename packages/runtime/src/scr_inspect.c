@@ -4075,6 +4075,25 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       }
 #endif
       const char *icn = scr_dyn_objinst_cls(d);
+      /* A family that rebinds `constructor` (`D.prototype.constructor = M`): the compiler derived the label Node prints (the first prototype whose own
+       * `constructor` the instance is an instance of) and lists it as the `%inspLabel` row; undefined means the chain reached Object (no prefix). */
+      char insp_lbl_buf[256];
+      {
+        const ScrDynClassMember *lm = scr_dyn_objinst_member(d, "%inspLabel", 10);
+        if (lm != NULL && lm->call != NULL) {
+          ScrDyn *lv = lm->call(d->v.inst.o, NULL, 0, "%inspLabel");
+          if (lv == NULL) return scr_str_new("", 0);
+          if (lv->kind == SCR_DYN_STR && lv->v.str->len < sizeof insp_lbl_buf) {
+            memcpy(insp_lbl_buf, lv->v.str->data, lv->v.str->len);
+            insp_lbl_buf[lv->v.str->len] = '\0';
+            icn = insp_lbl_buf;
+          } else {
+            insp_lbl_buf[0] = '\0';
+            icn = insp_lbl_buf;
+          }
+          scr_dyn_release(lv);
+        }
+      }
       /* The class that applyMixin(Y, EventEmitter) grafted onto (rt_root 7) has had its own `constructor` overwritten by
        * EventEmitter's, and util.inspect skips a constructor the instance is not an instance of: it names the first
        * ancestor that still has its own (the immediate base), or prints no prefix when the chain reaches Object. */

@@ -39,6 +39,7 @@ import { isNetSocketCtor, lowerHttpAgentNew, lowerHttpServerNew, lowerNetSocketN
 import { ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedClassSymbolOf, ambientUndefinedFnSymbolOf, fenceEarlyAliasUse, fenceEarlyNsMemberRef, nsMemberIdentOf, nsUndefRead } from "./lower-namespaces.js";
 import { classSourceText } from "../fn-srctext.js";
 import { classProtoPlan, dynProtoFns } from "./lower-evalclass.js";
+import { ctorRebindRows, familyRebindsConstructor } from "./lower-protodata.js";
 import { EVAL_ENV_SYM, classCtorLength, dynLenFn, dynSrcFn, dynNewArgExpr, ensureEvalClass, evalDynFns, evalInstanceDynFns, evalStaticInfoOf, isEvalClassNode, lowerEvalClassExpr, lowerEvalClassNew, lowerEvalClassProperty } from "./lower-evalclass.js";
 import { bodylessMixinCalleeOf, mixinResultBindingClassOf, type MixinInstanceInfo } from "./lower-mixins.js";
 
@@ -8123,6 +8124,8 @@ export function collectClassShapeInner(L: Lowerer, decl: ts.ClassLikeDeclaration
     if (!info) return null;
     if (info.builtinEmitter || info.builtinStream !== undefined) return null;
     if (info.decl !== null && info.def.jsName === undefined) return null;
+    // A family that rebinds `constructor` (D.prototype.constructor = M): the vtable name is not the answer, the dyn class value is.
+    if (L.ctorRebinds.size > 0 && familyRebindsConstructor(L, info)) return null;
     const recv = L.lowerExpr(inner.expression);
     if (recv.type.kind !== "object") return null;
     return { kind: "libCall", fn: "class.instanceName", args: [recv], type: STRING, loc: locOf(expr) };
@@ -9808,6 +9811,14 @@ export function lowerClassMembers(L: Lowerer, info: ClassInfo): IrFunction[] {
           const ei = evalInstanceDynFns(L, info);
           out.push(...ei.fns);
           info.def.dynMethods = [...(info.def.dynMethods ?? []), ...ei.list];
+        }
+        // A class in a family that rebinds `constructor` (`D.prototype.constructor = M`): the rows `x.constructor` and the inspect label read.
+        {
+          const cr = L.ctorRebinds.size > 0 ? ctorRebindRows(L, info) : null;
+          if (cr !== null) {
+            out.push(...cr.fns);
+            info.def.dynMethods = [...(info.def.dynMethods ?? []), ...cr.list];
+          }
         }
         // A per-evaluation static side: the members its class-value box answers through.
         if (info.evalStaticOf !== undefined) {
