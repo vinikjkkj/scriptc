@@ -23,6 +23,10 @@ if [ -n "${RAMAP:-}" ] && [ $rc -eq 0 ]; then
   cp "$O/zapo-rest-mysql-$BE$TAG.symfile.tsv" "$BENCH_WORK/artifacts/" 2>/dev/null || true
   rm -f "$O"/zapo-rest-mysql*.ir.json
 fi
+# RAMAP=1: the text symbols with their addresses (nm -n, gzipped), so a census reader can symbolize return addresses without the binary
+if [ -n "${RAMAP:-}" ] && [ $rc -eq 0 ]; then
+  nm -n "$O/build-$BE$TAG.bin" 2>/dev/null | awk 'NF==3 && $2 ~ /^[tTwW]$/' | gzip -9 > "$BENCH_WORK/artifacts/zapo-rest-mysql-$BE$TAG.nm.gz" || true
+fi
 secs=$(( $(date +%s) - s ))
 echo "rc=$rc secs=$secs" | tee -a "$O/zapo-rest-mysql-$BE$TAG.build.log"
 [ $rc -eq 0 ] && cp "$O/build-$BE$TAG.bin" "$O/zapo-rest-mysql-$BE$TAG.bin"
