@@ -631,6 +631,13 @@ function loadProgramImpl(
   if (decided !== undefined && (decided.seed.size > 0 || decided.retype.size > 0 || textEdits !== undefined || twinEdits !== undefined)) {
     if (process.env["SCRIPTC_PINREUSE_VERIFY"] !== undefined) {
       // LAB ASSERTION: decide the pins the historical way on a plain open and require them equal to the handed-over ones.
+      // SCRIPTC_PINREUSE_LAB_DROP is its POSITIVE CONTROL: it drops the first handed retype pin (a seed pin when there is no retype one), so the
+      // comparison must say DIFFER.
+      if (process.env["SCRIPTC_PINREUSE_LAB_DROP"] !== undefined) {
+        decided = decided.retype.size > 0
+          ? { seed: decided.seed, retype: new Map([...decided.retype].slice(1)) }
+          : { seed: new Map([...decided.seed].slice(1)), retype: decided.retype };
+      }
       const chk = open(null);
       const rp = process.env["SCRIPTC_RETYPE_PIN"] !== "0" ? computeRetypePins(chk.load.program) : new Map<string, RetypePin[]>();
       if (process.env["SCRIPTC_EMPTY_PIN"] !== "0") {
