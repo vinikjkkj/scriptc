@@ -84,6 +84,14 @@ const kindOf = (n: unknown): string => (isNode(n) && typeof n["kind"] === "strin
 const REPR_TRAP_CALL = /^%(union\.narrow|rec\.width)\./;
 
 export function deadInitPass(mod: IrModule): DeadInitResult {
+  const report = process.env["SCRIPTC_DEADINIT"] === "report";
+  const t0 = report ? performance.now() : 0;
+  const r = deadInitPassImpl(mod);
+  if (report) process.stderr.write(`DEADINIT time ${(performance.now() - t0).toFixed(1)} ms (functions ${mod.functions.length}, globals ${mod.globals?.length ?? 0}, dropped ${r.dropped.length}, kept ${r.kept.length})\n`);
+  return r;
+}
+
+function deadInitPassImpl(mod: IrModule): DeadInitResult {
   const out: DeadInitResult = { dropped: [], kept: [] };
   const mode = process.env["SCRIPTC_DEADINIT"];
   if (mode === "off") return out;
@@ -248,6 +256,41 @@ export function deadInitPass(mod: IrModule): DeadInitResult {
   };
   let curCandInit = "";
 
+  type GUse = { fn: string; stmt: number; parent: string; key: string; call?: { callee: string; idx: number } };
+  let gUsesMemo: Map<string, { raw: number; uses: GUse[] }> | null = null;
+  const gUses = (): Map<string, { raw: number; uses: GUse[] }> => {
+    if (gUsesMemo !== null) return gUsesMemo;
+    const m = new Map<string, { raw: number; uses: GUse[] }>();
+    const slot = (id: string): { raw: number; uses: GUse[] } => { let e = m.get(id); if (e === undefined) { e = { raw: 0, uses: [] }; m.set(id, e); } return e; };
+    let fnName = "", stmt = -1;
+    const walk = (n: unknown, parent: Node | null, key: string): void => {
+      if (Array.isArray(n)) {
+        for (const x of n) { if (typeof x === "string") { if (ids.has(x)) slot(x).raw++; } else walk(x, parent, key); }
+        return;
+      }
+      if (!isNode(n)) return;
+      if (n["kind"] === "varRef" && typeof n["localId"] === "string" && ids.has(n["localId"] as string)) {
+        const id = n["localId"] as string;
+        if (parent !== null && kindOf(parent) === "call" && key === "args") {
+          const ix = (parent["args"] as unknown[]).indexOf(n);
+          if (ix >= 0) slot(id).uses.push({ fn: fnName, stmt, parent: "call", key, call: { callee: parent["callee"] as string, idx: ix } });
+          else slot(id).uses.push({ fn: fnName, stmt, parent: "call", key });
+        } else slot(id).uses.push({ fn: fnName, stmt, parent: parent === null ? "root" : kindOf(parent), key });
+      }
+      for (const k of Object.keys(n)) {
+        if (k === "loc") continue;
+        const v = n[k];
+        if (typeof v === "string") { if (ids.has(v)) slot(v).raw++; } else walk(v, n, k);
+      }
+    };
+    for (const fn of mod.functions) {
+      fnName = fn.name;
+      if (fn.name.startsWith("%init.") && Array.isArray(fn.body)) (fn.body as unknown as Node[]).forEach((st, j) => { stmt = j; walk(st, null, ""); });
+      else { stmt = -1; walk(fn.body, null, ""); }
+    }
+    gUsesMemo = m;
+    return m;
+  };
   const nvWhy = new Map<string, string>();
   const plainGlobal = (id: string): boolean => {
     const mkey = `${id}|${curCandInit}`;
@@ -260,21 +303,17 @@ export function deadInitPass(mod: IrModule): DeadInitResult {
       const st = (c.fn.body as unknown as Node[])[c.idx]!;
       const v = st["value"] as Node;
       if (kindOf(v) === "recordLit" && (v["fields"] as Node[]).every((f) => f["viewSlot"] !== true)) {
-        let raw = 0, allowed = 0;
+        // every use of the global, from ONE walk of the whole IR shared by all candidates (gUses)
+        const gu = gUses().get(id) ?? { raw: 0, uses: [] };
+        let allowed = 0;
+        const raw = gu.raw;
         const calls: { callee: string; idx: number }[] = [];
         const bad = new Set<string>();
-        for (const fn of mod.functions) {
-          // a top-level statement of an init function that boxes the record AFTER the candidate's init has finished is allowed
-          const stmts = fn.name.startsWith("%init.") && Array.isArray(fn.body) ? (fn.body as unknown as Node[]) : null;
-          const parts: { body: unknown; late: boolean }[] = stmts === null ? [{ body: fn.body, late: false }] : stmts.map((st, j) => ({ body: st, late: curCandInit !== "" && initFinishedBefore(curCandInit, fn.name, j) }));
-          const u = { raw: 0, allowed: 0, calls: [] as { callee: string; idx: number }[], bad: [] as string[] };
-          for (const part of parts) {
-            const pu = usesOf(part.body, id, part.late ? (parent, key) => parent["kind"] === "dynFrom" && key === "value" : undefined);
-            u.raw += pu.raw; u.allowed += pu.allowed; u.calls.push(...pu.calls);
-            for (const b of pu.bad) u.bad.push(!part.late && stmts !== null && b === "dynFrom.value" ? `${b} (${lateWhy(curCandInit, fn.name, parts.indexOf(part))})` : b);
-          }
-          raw += u.raw; allowed += u.allowed; calls.push(...u.calls);
-          for (const b of u.bad) bad.add(`${fn.name}:${b}`);
+        for (const u of gu.uses) {
+          if (u.call !== undefined) calls.push(u.call);
+          else if (READ_PARENTS.has(u.parent) && u.key === "obj") allowed++;
+          else if (u.parent === "dynFrom" && u.key === "value" && u.stmt >= 0 && curCandInit !== "" && initFinishedBefore(curCandInit, u.fn, u.stmt)) allowed++;
+          else bad.add(`${u.fn}:${u.parent}.${u.key}${u.parent === "dynFrom" && u.stmt >= 0 ? ` (${lateWhy(curCandInit, u.fn, u.stmt)})` : ""}`);
         }
         ok = raw === allowed + calls.length + 1 && callsConfined(calls);
         if (!ok) {
