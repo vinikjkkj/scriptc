@@ -1,6 +1,0 @@
-a-class-prototype-constructor-assigned-another-class-is-refused.cjs:14:1 - error SC1090: the prototype member 'constructor' of class 'D' (assigning it changes x.constructor.name, the inspect label and the constructor reads the compiler answers from the class itself) is not supported yet
-
-  13 | }
-  14 | D.prototype.constructor = M
-     | ^~~~~~~~~~~~~~~~~~~~~~~~~~~
-  15 | const d = new D()

@@ -18602,6 +18602,10 @@ export class Lowerer {
   readonly protoDataSlots = new Map<string, Map<string, import("./lower-protodata.js").ProtoDataSlot>>();
   /** The top-level prototype-data write statements and the slot each one stores into. */
   readonly protoDataAssigns = new Map<ts.Node, import("./lower-protodata.js").ProtoDataSlot>();
+  /** `D.prototype.constructor = M` of a JS class D (M a program class): D's name -> M's class declaration (lower-protodata.ts). */
+  readonly ctorRebinds = new Map<string, ts.ClassDeclaration>();
+  /** The write statements of those rebinds (they lower to nothing: the rebind lives in D's `%dynCls` / `%inspLabel` rows). */
+  readonly ctorRebindWrites = new Set<ts.Node>();
   /** Names some ES class writes a non-undefined prototype datum to (program-wide, lower-protodata.ts). */
   readonly protoDataNonUndef = new Set<string>();
   /** `class.name` of a prototype datum fenced at collection, with the reason (reads and writes refuse). */
