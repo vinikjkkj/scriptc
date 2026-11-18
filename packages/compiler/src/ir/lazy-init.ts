@@ -251,6 +251,8 @@ export function lazyInitPass(mod: IrModule): LazyInitResult {
             return ex(e["value"] ?? e["operand"]);
           case "bin":
             ex(e["left"]); return ex(e["right"]);
+          case "dynCheck":
+            return ex(e["value"]); // a representation cast of a hoistable value: hoisted with it, so it traps at the original position
           case "closure":
             return; // creation only; its body runs at call time, exactly as in the eager program
           case "arrayLit": case "dynArrLit":
