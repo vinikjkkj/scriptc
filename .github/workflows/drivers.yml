@@ -329,7 +329,11 @@ jobs:
         if: always()
         with:
           name: windriver-${{ matrix.driver }}
-          path: out
+          # only the build log and the binary: a kept translation unit is 300+ MB and the account's artifact egress is limited
+          path: |
+            out/*.txt
+            out/*.bin
+            out/*.exe
           retention-days: 14
 
   # zapo-startup on Windows: the built binary and Node run the same entry (nothing connects), stdout, stderr and the exit code compared.
