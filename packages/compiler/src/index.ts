@@ -625,8 +625,9 @@ export function runFrontend(entryPath: string, npmStatic?: readonly string[] | "
     let load: (LoadResult & { dispose: () => void }) | null = null;
     try {
       load = loadProgram(entryPath, { npmStatic: effective, textEdits: pins, twinEdits: applied, ...(decidedPins !== undefined ? { decidedPins } : {}) });
-      if (checkPreflight(load).length > 0) {
-        foldWhy("fallback: preflight of the folded program is not clean");
+      const pre = checkPreflight(load);
+      if (pre.length > 0) {
+        foldWhy(`fallback: preflight of the folded program is not clean (${pre.length}: ${pre.slice(0, 3).map((d) => `${d.code} ${d.message.slice(0, 160)} @${d.loc.file.split("/").slice(-2).join("/")}:${d.loc.start}`).join(" | ")})`);
         return null;
       }
       notePassFiles("fold", load.program.getSourceFiles().filter((sf) => !sf.isDeclarationFile));
@@ -767,7 +768,11 @@ export function runFrontend(entryPath: string, npmStatic?: readonly string[] | "
         pinnedLoad = null;
         freeFinalLoad();
         twinLoad = loadProgram(entryPath, { npmStatic: effective, ...(done.pins !== undefined ? { textEdits: done.pins } : {}), twinEdits: edits, ...(decidedPins !== undefined ? { decidedPins } : {}) });
-        if (checkPreflight(twinLoad).length > 0) return keep;
+        const twinPre = checkPreflight(twinLoad);
+        if (twinPre.length > 0) {
+          foldWhy(`sequential twin reload refused by preflight (${twinPre.length}: ${twinPre.slice(0, 3).map((d) => `${d.code} ${d.message.slice(0, 160)} @${d.loc.file.split("/").slice(-2).join("/")}:${d.loc.start}`).join(" | ")})`);
+          return keep;
+        }
         if (foldVerifyTexts !== null) {
           const diff: string[] = [];
           const seq = new Map<string, string>();
