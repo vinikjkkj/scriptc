@@ -29241,6 +29241,14 @@
     "<repo>/tests/corpus/25699-an-unused-view-is-kept-when-the-table-is-boxed-by-a-module-that-runs-before-it/main.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25696-an-unused-view-whose-module-is-loaded-by-dynamic-import-is-kept/main.ts": {
+   "order": [
+    "<repo>/tests/corpus/25696-an-unused-view-whose-module-is-loaded-by-dynamic-import-is-kept/spec.ts",
+    "<repo>/tests/corpus/25696-an-unused-view-whose-module-is-loaded-by-dynamic-import-is-kept/box.ts",
+    "<repo>/tests/corpus/25696-an-unused-view-whose-module-is-loaded-by-dynamic-import-is-kept/main.ts"
+   ],
+   "diags": []
   }
  }
 }
