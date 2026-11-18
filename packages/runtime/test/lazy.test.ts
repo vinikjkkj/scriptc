@@ -2,7 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { ccCompile, exeSuffix, testBin } from "./cc.js";
+import { ccCompile, exeSuffix } from "./cc.js";
 import { beforeAll, expect, test } from "vitest";
 
 const execFileAsync = promisify(execFile);

@@ -167,7 +167,10 @@ export function lazyInitPass(mod: IrModule): LazyInitResult {
               (s["body"] as unknown[]).forEach(st); return;
             case "for": {
               const init = s["init"];
-              if (init !== null && init !== undefined) kindOf(init) === "block" ? ((init as Node)["body"] as unknown[]).forEach(st) : st(init);
+              if (init !== null && init !== undefined) {
+                if (kindOf(init) === "block") ((init as Node)["body"] as unknown[]).forEach(st);
+                else st(init);
+              }
               ex(s["cond"]);
               // canonical, bounded: update is `i = i + 1` (a positive literal step)
               const u = s["update"] as Node | undefined;
