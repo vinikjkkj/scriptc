@@ -13,7 +13,7 @@
  *  3. A call `G.m(args)` on a global receiver (a dyn invoke) is allowed only when the callee value read at the original position is GUARDED at install time to be
  *     one of the closures stored under the key `m` anywhere in the program (a closure literal) that is statically pure for plain arguments (see calleePure), the
  *     arguments are plain literal data built inside F, and the callee returns a closure on every path (so a `defineProperty` accessor cannot throw late). When the guard
- *     fails the install falls back to the eager statement. The guard is a run-time test, so no closed-world claim about other stores to `G.m` is made.
+ *     fails the install runs the thunk at once and reads the globals live (dyn.keySetLazy with a false flag), the eager statement exactly. The guard is a run-time test, so no closed-world claim about other stores to `G.m` is made.
  *
  *    WHY A SOURCE-TEXT GUARD IS SOUND. The guard accepts any function value whose source text equals a pure callee's, including one built elsewhere in
  *    a different environment. That is safe only because calleePure accepts a callee that owns EVERY binding it names: it captures nothing from an enclosing
@@ -495,17 +495,20 @@ export function lazyInitPass(mod: IrModule): LazyInitResult {
 
 
   // ── the REWRITE (SCRIPTC_LAZYINIT=on) ──
-  // For a candidate the analysis judged deferrable, in the statement list that holds it:
-  //     h1 = <hoisted read 1>; h2 = ...;                   (in evaluation order, at the ORIGINAL position)
-  //     if (guard over the callee values) R.K = lazy(F')   else R.K = F'()
-  // where F' is F with every hoisted read replaced by a captured local, and a call `G.m(args)` replaced by
-  // `typeof h_m === "function" ? Reflect.apply(h_m, h_G, [args]) : h_m(args)` (the receiver and the method read once, at install; `this` and the not-a-function
-  // TypeError preserved). A nested member inside F is built into F' the same way, eagerly (its reads were hoisted into the parent's install).
+  // A RUN of consecutive deferrable members (one statement list, nothing between them) is installed as ONE group:
+  //     ok  = isPlainData(O, K) for every (outer binding O, literal key K) the members read  &&  fnSrcIs(O.m, <pure callee text>) for every called key m
+  //     P_O = ok ? { K: O.K, ... } : O          (a snapshot of the keys read, taken ONCE at the position of the first member)
+  //     B_O = O                                  (for an outer binding the members use as a plain value)
+  //     keySetLazy(R, K, F', ok)                 for each member, F' = F with O replaced by P_O / B_O everywhere
+  // Between two members of a run only fresh-object stores and other lazy installs happen (a store whose key is one of the snapshot keys ends the run), and a
+  // plain data member is read without running code, so the snapshot equals what each member's own eager reads would have seen. When `ok` is false P_O IS O and
+  // the runtime runs each thunk at once: F' then reads O live, which is the eager program exactly (getters, proxies, a replaced callee all land there).
+  // F' keeps the shape of F: a read `O.K` becomes `P_O.K` and a call `O.m(a)` becomes `P_O.m(a)`, so the code is no larger than the original thunk's.
   const clone = <T,>(x: T): T => JSON.parse(JSON.stringify(x)) as T;
-  /** LAB ONLY (a positive control, never a feature): SCRIPTC_LAZYINIT_BREAK=lateread performs the hoisted reads when the thunk runs, skipguard installs lazily
-   * without testing the callee. A row that does not DIFFER under the matching break does not test that mechanism. */
+  /** LAB ONLY (a positive control, never a feature): SCRIPTC_LAZYINIT_BREAK=lateread makes the thunk read the outer bindings live when it runs, skipguard
+   * installs lazily without testing the callee. A row that does not DIFFER under the matching break does not test that mechanism. */
   const brk = process.env["SCRIPTC_LAZYINIT_BREAK"] ?? "";
-  const out2 = { lazy: 0, guardedEager: 0, skipped: 0, hoistedReads: 0 };
+  const out2 = { lazy: 0, groups: 0, guardedEager: 0, skipped: 0, hoistedReads: 0 };
   const done = new Set<string>(); // functions this pass built: never rewritten again
   const removed = new Set<string>(); // originals this pass replaced and dropped
   let serial = 0;
@@ -513,75 +516,83 @@ export function lazyInitPass(mod: IrModule): LazyInitResult {
   const STR_T = { kind: "string" };
   const BOOL_T = { kind: "bool" };
   const L = (loc: unknown): unknown => loc;
+  const stripDyn = (e: unknown): unknown => { let x = e; while (kindOf(x) === "dynFrom") x = (x as Node)["value"]; return x; };
 
-  interface Hoist { id: string; init: unknown; callee?: string[] | undefined }
-  const rewriteMember = (owner: IrFunction, stmt: Node): unknown[] | undefined => {
+  interface Use { id: string; node: Node; keys: Map<string, string[] | undefined>; bare: boolean; pid: string; bid: string }
+  const lazyMemo = new Map<unknown, boolean>();
+  const lazyCand = (stmt: unknown): boolean => {
+    const m = lazyMemo.get(stmt);
+    if (m !== undefined) return m;
     const c = isCandidate(stmt);
-    if (c === undefined) return undefined;
-    const F = fnByName.get(c.fnName);
-    if (F === undefined) return undefined;
-    const top = analyse(c.fnName, owner.name, c.key, 0);
-    if (!top.lazy) return undefined;
-    const stripToCall = (x: unknown): Node => { let y = x; while (kindOf(y) === "dynFrom") y = (y as Node)["value"]; return y as Node; };
-    const withCallee = (arg: unknown, callee: Node): Node => { const cp = clone(arg as Node); stripToCall(cp)["callee"] = callee; return cp; };
-    const call = stripToCall(((stmt["expr"] as Node)["args"] as Node[])[2]);
-    const origClosure = call["callee"] as Node;
-    const hoists: Hoist[] = [];
+    const r = c !== undefined && fnByName.get(c.fnName) !== undefined && analyse(c.fnName, "", c.key, 0).lazy;
+    lazyMemo.set(stmt, r);
+    return r;
+  };
+  const recvOf = (stmt: Node): Node => ((stmt["expr"] as Node)["args"] as Node[])[0] as Node;
+  const simpleRecv = (stmt: Node): boolean => kindOf(stripDyn(recvOf(stmt))) === "varRef";
+
+  const rewriteRun = (owner: IrFunction, run: Node[]): unknown[] | undefined => {
+    const uses = new Map<string, Use>();
+    const okId = `lzok${serial++}.0`;
+    const idType = new Map<string, Node>([[okId, BOOL_T]]);
     const stack: Set<string>[] = [];
-    const outerCaps = new Set<string>(((F.captures as unknown[]) ?? []).map((x) => String((x as Node)["localId"])));
     const newFns: IrFunction[] = [];
-    let failed = "";
+    const origNames: string[] = [];
+    let outerCaps = new Set<string>();
     const fail = (why: string): never => {
-      failed = why;
       throw new Refuse(why);
     };
     const use = (id: string): void => { for (const s2 of stack) s2.add(id); };
-    const mkHoist = (init: Node, callee?: string[]): string => {
-      if (kindOf(init) === undefined) fail("hoist of a non-node");
-      const t = init["type"] as Node | undefined;
-      if (t === undefined || t["kind"] !== "dyn") fail("hoisted read is not a dyn value");
-      const id = `lzh${serial++}.0`;
-      hoists.push({ id, init, callee });
-      use(id);
-      return id;
-    };
-    const ref = (id: string, loc: unknown): Node => ({ kind: "varRef", localId: id, type: DYN_T, loc: L(loc) });
-    const stripDyn = (e: unknown): unknown => { let x = e; while (kindOf(x) === "dynFrom") x = (x as Node)["value"]; return x; };
+    const refT = (id: string, loc: unknown): Node => ({ kind: "varRef", localId: id, type: idType.get(id) ?? DYN_T, loc: L(loc) });
     const isOuter = (id: string, fnCaps: Set<string>): boolean => isGlobalId(id) || (fnCaps.has(id) && outerCaps.has(id));
     const textsOf = (m: string): string[] => {
       const set = closuresByKey.get(m);
       if (set === undefined) return fail(`no closure stored under ${m}`);
       return [...set].map((fnName) => fnText.get(fnName) ?? fail(`closure ${fnName} carries no source text`));
     };
-    // rewrite one expression/statement tree of function `fn` (clone-and-replace)
+    const useOf = (r: Node): Use => {
+      const id = r["localId"] as string;
+      let u = uses.get(id);
+      if (u === undefined) {
+        const t = r["type"] as Node | undefined;
+        if (t === undefined || t["kind"] !== "dyn") fail("outer binding is not a dyn value");
+        u = { id, node: clone(r), keys: new Map(), bare: false, pid: `lzp${serial++}.0`, bid: `lzb${serial++}.0` };
+        uses.set(id, u);
+      }
+      return u;
+    };
     const rw = (n: unknown, fnCaps: Set<string>): unknown => {
       if (Array.isArray(n)) return rwList(n, fnCaps);
       if (!isNode(n)) return n;
       const k = n["kind"];
       if (k === "closure") return clone(n); // body runs at call time, as in the eager program
-      if (k === "varRef" && isOuter(n["localId"] as string, fnCaps)) return ref(mkHoist(clone(n)), n["loc"]);
-      if (k === "dynKeyGet") {
-        const r = stripDyn(n["value"]);
-        if (kindOf(r) === "varRef" && isOuter((r as Node)["localId"] as string, fnCaps) && kindOf(n["key"]) === "strLit") return ref(mkHoist(clone(n)), n["loc"]);
-      }
-      if (k === "dynInvoke") {
-        const r = stripDyn(n["recv"]);
-        if (kindOf(r) !== "varRef" || !isOuter((r as Node)["localId"] as string, fnCaps) || n["methodKey"] != null) return fail("dyn call shape");
-        const m = n["method"] as string;
-        const texts = textsOf(m);
-        const hr = mkHoist(clone(r as Node));
-        const hm = mkHoist({ kind: "dynKeyGet", key: { kind: "strLit", value: m, type: STR_T, loc: L(n["loc"]) }, value: ref(hr, n["loc"]), type: DYN_T, loc: L(n["loc"]) }, texts);
-        const args = (n["args"] as unknown[]).map((a) => rw(a, fnCaps));
-        const callName = n["calleeName"] as string;
-        const loc = n["loc"];
-        return {
-          kind: "ternary",
-          cond: { kind: "strEq", negated: false, left: { kind: "libCall", fn: "dyn.typeof", args: [ref(hm, loc)], type: STR_T, loc: L(loc) }, right: { kind: "strLit", value: "function", type: STR_T, loc: L(loc) }, type: BOOL_T, loc: L(loc) },
-          then: { kind: "libCall", fn: "dyn.reflectApply", args: [ref(hm, loc), ref(hr, loc), { kind: "dynArrLit", elems: clone(args), type: DYN_T, loc: L(loc) }], type: DYN_T, loc: L(loc) },
-          else_: { kind: "dynCall", callee: ref(hm, loc), calleeName: callName, args: clone(args), type: n["type"], loc: L(loc) },
-          type: n["type"],
-          loc: L(loc),
-        };
+      if (brk !== "lateread") {
+        if (k === "varRef" && isOuter(n["localId"] as string, fnCaps)) {
+          const u = useOf(n);
+          u.bare = true;
+          use(u.bid);
+          return refT(u.bid, n["loc"]);
+        }
+        if (k === "dynKeyGet" && kindOf(n["key"]) === "strLit") {
+          const r = stripDyn(n["value"]);
+          if (kindOf(r) === "varRef" && isOuter((r as Node)["localId"] as string, fnCaps)) {
+            const u = useOf(r as Node);
+            u.keys.set(((n["key"] as Node)["value"] as string), undefined);
+            use(u.pid);
+            return { ...clone(n), value: refT(u.pid, n["loc"]) };
+          }
+        }
+        if (k === "dynInvoke") {
+          const r = stripDyn(n["recv"]);
+          if (kindOf(r) !== "varRef" || !isOuter((r as Node)["localId"] as string, fnCaps) || n["methodKey"] != null) return fail("dyn call shape");
+          const m = n["method"] as string;
+          const u = useOf(r as Node);
+          u.keys.set(m, textsOf(m));
+          use(u.pid);
+          const o: Node = {};
+          for (const key of Object.keys(n)) o[key] = key === "loc" || key === "type" ? n[key] : key === "recv" ? refT(u.pid, n["loc"]) : rw(n[key], fnCaps);
+          return o;
+        }
       }
       const o: Node = {};
       for (const key of Object.keys(n)) o[key] = key === "loc" || key === "type" ? n[key] : rw(n[key], fnCaps);
@@ -591,103 +602,122 @@ export function lazyInitPass(mod: IrModule): LazyInitResult {
       const fnCaps = new Set<string>(((fn.captures as unknown[]) ?? []).map((x) => String((x as Node)["localId"])));
       const mine = new Set<string>();
       stack.push(mine);
-      const body = rwBody(fn.body as unknown[], fnCaps);
+      const body = rwList(fn.body as unknown[], fnCaps);
       stack.pop();
       const name = `${fn.name}$lz${serial++}`;
-      const addCaps: IrParam[] = [...mine].map((id) => ({ localId: id, name: id, type: DYN_T as never }));
+      const addCaps: IrParam[] = [...mine].map((id) => ({ localId: id, name: id, type: (idType.get(id) ?? DYN_T) as never }));
       const nf: IrFunction = { ...clone(fn), name, body: body as never, captures: [...(clone(fn.captures) ?? []), ...addCaps], locals: [...clone(fn.locals), ...addCaps.map((p) => ({ id: p.localId, name: p.name, type: p.type, mutable: false, boxed: true as const }))] } as IrFunction;
       newFns.push(nf);
+      origNames.push(fn.name);
       done.add(name);
       return { ...clone(closureNode), fnName: name, captures: [...((closureNode["captures"] as string[]) ?? []), ...mine] };
     };
-    const rwBody = (list: unknown[], fnCaps: Set<string>): unknown[] => rwList(list, fnCaps);
     const rwList = (list: unknown[], fnCaps: Set<string>): unknown[] => {
       const res: unknown[] = [];
       for (const st of list) {
         const nc = isNode(st) ? isCandidate(st) : undefined;
         if (nc !== undefined && stack.length > 0 && fnByName.get(nc.fnName) !== undefined) {
-          // a nested member: its function is rebuilt with the same hoisting, and called eagerly where it stood
+          // a nested member: its function is rebuilt the same way and installed lazily too, under the group's flag
           const G = fnByName.get(nc.fnName)!;
           const e = (st as Node)["expr"] as Node;
           const a = e["args"] as Node[];
-          const gCall = stripToCall(a[2]);
+          const gCall = stripDyn(a[2]) as Node;
           const gClosure = buildFn(G, gCall["callee"] as Node);
-          res.push({ ...clone(st as Node), expr: { ...clone(e), args: [rw(a[0], fnCaps), clone(a[1]), withCallee(a[2], gClosure)] } });
+          use(okId);
+          const loc = (st as Node)["loc"];
+          res.push({ kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.keySetLazy", args: [rw(a[0], fnCaps), clone(a[1]), { kind: "dynFrom", value: gClosure, type: DYN_T, loc: L(loc) }, refT(okId, loc)], type: { kind: "void" }, loc: L(loc) }, loc: L(loc) });
           continue;
         }
         res.push(rw(st, fnCaps));
       }
       return res;
     };
-    let rootClosure: Node;
     try {
-      rootClosure = buildFn(F, origClosure);
+      const members: { recv: Node; key: Node; closure: Node; stmt: Node }[] = [];
+      for (const stmt of run) {
+        const c = isCandidate(stmt)!;
+        const F = fnByName.get(c.fnName)!;
+        outerCaps = new Set<string>(((F.captures as unknown[]) ?? []).map((x) => String((x as Node)["localId"])));
+        const call = stripDyn(((stmt["expr"] as Node)["args"] as Node[])[2]) as Node;
+        members.push({ recv: recvOf(stmt), key: ((stmt["expr"] as Node)["args"] as Node[])[1] as Node, closure: buildFn(F, call["callee"] as Node), stmt });
+      }
+      // a store that could alias one of the snapshot keys ends the run
+      for (const m of members) {
+        const kk = (m.key["value"] as string);
+        for (const u of uses.values()) if (u.keys.has(kk)) fail(`member key ${kk} is also a snapshot key`);
+      }
+      const loc = run[0]!["loc"];
+      const pre: unknown[] = [];
+      const lit = (v: string): Node => ({ kind: "strLit", value: v, type: STR_T, loc: L(loc) });
+      const kget = (u: Use, key: string): Node => ({ kind: "dynKeyGet", key: lit(key), value: clone(u.node), type: DYN_T, loc: L(loc) });
+      // the first receiver is evaluated before the group's reads (it may have effects); later receivers are plain variables
+      const recvs: Node[] = [];
+      members.forEach((m, i) => {
+        if (i === 0 && kindOf(stripDyn(m.recv)) !== "varRef") {
+          const rid = `lzr${serial++}.0`;
+          owner.locals.push({ id: rid, name: rid, type: DYN_T as never, mutable: false } as never);
+          pre.push({ kind: "varDecl", localId: rid, init: clone(m.recv), loc: L(loc) });
+          recvs.push(refT(rid, loc));
+        } else recvs.push(clone(m.recv));
+      });
+      const plain: Node[] = [];
+      const src: Node[] = [];
+      for (const u of uses.values()) {
+        for (const [key, texts] of u.keys) {
+          plain.push({ kind: "libCall", fn: "dyn.isPlainData", args: [clone(u.node), lit(key)], type: BOOL_T, loc: L(loc) });
+          if (texts !== undefined && brk !== "skipguard") {
+            let any: Node | undefined;
+            for (const text of texts) {
+              const t: Node = { kind: "libCall", fn: "dyn.fnSrcIs", args: [kget(u, key), lit(text)], type: BOOL_T, loc: L(loc) };
+              any = any === undefined ? t : { kind: "logical", op: "||", left: any, right: t, type: BOOL_T, loc: L(loc) };
+            }
+            src.push(any as Node);
+          }
+        }
+      }
+      // a BALANCED conjunction (a deep left chain would overflow the validator's recursion), in order: every plain test before any source-text test
+      const tree = (xs: Node[]): Node => {
+        if (xs.length === 1) return xs[0]!;
+        const mid = xs.length >> 1;
+        return { kind: "logical", op: "&&", left: tree(xs.slice(0, mid)), right: tree(xs.slice(mid)), type: BOOL_T, loc: L(loc) };
+      };
+      const terms = [...plain, ...src];
+      const okInit: Node = terms.length === 0 ? { kind: "boolLit", value: true, type: BOOL_T, loc: L(loc) } : tree(terms);
+      const newLocals: Record<string, unknown>[] = [];
+      const decl = (id: string, init: Node, type: Node): void => {
+        newLocals.push({ id, name: id, type, mutable: false, boxed: true });
+        pre.push({ kind: "varDecl", localId: id, init, loc: L(loc) });
+      };
+      decl(okId, okInit, BOOL_T);
+      for (const u of uses.values()) {
+        if (u.keys.size > 0) {
+          const fields = [...u.keys.keys()].map((key) => ({ key: lit(key), value: kget(u, key) }));
+          decl(u.pid, { kind: "ternary", cond: refT(okId, loc), then: { kind: "dynObjLit", fields, type: DYN_T, loc: L(loc) }, else_: clone(u.node), type: DYN_T, loc: L(loc) }, DYN_T);
+        }
+        if (u.bare) decl(u.bid, clone(u.node), DYN_T);
+      }
+      for (const nl of newLocals) owner.locals.push(nl as never);
+      members.forEach((m, i) => {
+        pre.push({ kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.keySetLazy", args: [recvs[i]!, clone(m.key), { kind: "dynFrom", value: m.closure, type: DYN_T, loc: L(loc) }, refT(okId, loc)], type: { kind: "void" }, loc: L(loc) }, loc: L(m.stmt["loc"]) });
+      });
+      for (const nf of newFns) mod.functions.push(nf);
+      for (const name of origNames) {
+        if ((refs.get(name) ?? 0) <= 1) {
+          const i = mod.functions.findIndex((x) => x.name === name);
+          if (i >= 0) {
+            mod.functions.splice(i, 1);
+            removed.add(name);
+          }
+        }
+      }
+      out2.hoistedReads += [...uses.values()].reduce((a, u) => a + u.keys.size + (u.bare ? 1 : 0), 0);
+      out2.lazy += members.length;
+      out2.groups++;
+      return pre;
     } catch (err) {
       if (!(err instanceof Refuse)) throw err;
       return undefined;
     }
-    void failed;
-    if (brk === "lateread") {
-      const rootFn = newFns[newFns.length - 1]!; // buildFn pushes the root LAST (nested are pushed while it is built)
-      const hs = new Set(hoists.map((h) => h.id));
-      rootFn.captures = (rootFn.captures ?? []).filter((c2) => !hs.has(c2.localId));
-      (rootFn.body as unknown[]).unshift(...hoists.map((h) => ({ kind: "varDecl", localId: h.id, init: h.init, loc: stmt["loc"] })));
-      (rootClosure["captures"] as string[]) = (rootClosure["captures"] as string[]).filter((c2) => !hs.has(c2));
-      hoists.length = 0;
-    }
-    // the receiver: evaluated once, first (it may itself have effects)
-    const pre: unknown[] = [];
-    const recvExpr = (((stmt["expr"] as Node)["args"] as Node[])[0]) as Node;
-    let recv: Node = recvExpr;
-    if (kindOf(recvExpr) !== "varRef") {
-      const rid = `lzr${serial++}.0`;
-      owner.locals.push({ id: rid, name: rid, type: DYN_T as never, mutable: false } as never);
-      pre.push({ kind: "varDecl", localId: rid, init: clone(recvExpr), loc: stmt["loc"] });
-      recv = ref(rid, stmt["loc"]);
-    }
-    for (const h of hoists) {
-      owner.locals.push({ id: h.id, name: h.id, type: DYN_T as never, mutable: false, boxed: true } as never);
-      pre.push({ kind: "varDecl", localId: h.id, init: h.init, loc: stmt["loc"] });
-    }
-    // The guard is the AND of one OR-of-texts test per callee read. A thunk with hundreds of calls (a message with many nested members) would make a
-    // left-deep chain whose depth overflows the IR validator's recursion, so the conjunction is a BALANCED tree (depth log n).
-    const conds: Node[] = [];
-    for (const h of hoists) {
-      if (h.callee === undefined || brk === "skipguard") continue;
-      let any: Node | undefined;
-      for (const text of h.callee) {
-        const t: Node = { kind: "libCall", fn: "dyn.fnSrcIs", args: [ref(h.id, stmt["loc"]), { kind: "strLit", value: text, type: STR_T, loc: L(stmt["loc"]) }], type: BOOL_T, loc: L(stmt["loc"]) };
-        any = any === undefined ? t : { kind: "logical", op: "||", left: any, right: t, type: BOOL_T, loc: L(stmt["loc"]) };
-      }
-      conds.push(any as Node);
-    }
-    const tree = (xs: Node[]): Node | undefined => {
-      if (xs.length === 0) return undefined;
-      if (xs.length === 1) return xs[0];
-      const mid = xs.length >> 1;
-      return { kind: "logical", op: "&&", left: tree(xs.slice(0, mid)) as Node, right: tree(xs.slice(mid)) as Node, type: BOOL_T, loc: L(stmt["loc"]) };
-    };
-    const guard = tree(conds);
-    const loc = stmt["loc"];
-    const keyNode = ((stmt["expr"] as Node)["args"] as Node[])[1] as Node;
-    // ONE straight-line statement (the candidate sits in a sequence expression, whose statements may not branch): the runtime runs the thunk now when the guard is false
-    const guardNode: Node = guard ?? { kind: "boolLit", value: true, type: BOOL_T, loc: L(loc) };
-    const lazy: Node = { kind: "exprStmt", expr: { kind: "libCall", fn: "dyn.keySetLazy", args: [clone(recv), clone(keyNode), { kind: "dynFrom", value: clone(rootClosure), type: DYN_T, loc: L(loc) }, guardNode], type: { kind: "void" }, loc: L(loc) }, loc: L(loc) };
-    for (const nf of newFns) mod.functions.push(nf);
-    // drop the originals nothing else creates
-    const drop = (name: string): void => {
-      if ((refs.get(name) ?? 0) <= 1) {
-        const i = mod.functions.findIndex((x) => x.name === name);
-        if (i >= 0) {
-          mod.functions.splice(i, 1);
-          removed.add(name);
-        }
-      }
-    };
-    drop(c.fnName);
-    out2.hoistedReads += hoists.length;
-    out2.lazy++;
-    return [...pre, lazy];
   };
 
   if (mode === "on") {
@@ -695,10 +725,16 @@ export function lazyInitPass(mod: IrModule): LazyInitResult {
       if (Array.isArray(n)) {
         for (let i = 0; i < n.length; i++) {
           const el = n[i];
-          if (isNode(el) && el["kind"] === "exprStmt") {
-            const rep = rewriteMember(owner, el);
+          if (isNode(el) && el["kind"] === "exprStmt" && lazyCand(el)) {
+            const run: Node[] = [el];
+            for (let j = i + 1; j < n.length; j++) {
+              const nx = n[j];
+              if (!(isNode(nx) && nx["kind"] === "exprStmt" && lazyCand(nx) && simpleRecv(nx))) break;
+              run.push(nx);
+            }
+            const rep = rewriteRun(owner, run);
             if (rep !== undefined) {
-              n.splice(i, 1, ...rep);
+              n.splice(i, run.length, ...rep);
               i += rep.length - 1;
               continue;
             }
@@ -714,7 +750,7 @@ export function lazyInitPass(mod: IrModule): LazyInitResult {
       if (done.has(f.name) || removed.has(f.name) || !Array.isArray(f.body)) continue;
       walkLists(f.body, f);
     }
-    if (out2.lazy > 0 && process.env["SCRIPTC_LAZYINIT_LOG"] === "1") process.stderr.write(`LAZYINIT rewrite lazy=${out2.lazy} hoistedReads=${out2.hoistedReads} newFunctions=${done.size} passMs=${Date.now() - t0}\n`);
+    if (out2.lazy > 0 && process.env["SCRIPTC_LAZYINIT_LOG"] === "1") process.stderr.write(`LAZYINIT rewrite lazy=${out2.lazy} groups=${out2.groups} sharedReads=${out2.hoistedReads} newFunctions=${done.size} passMs=${Date.now() - t0}\n`);
   }
 
   const countNested = (v: LazyVerdict): number => 1 + v.nested.reduce((a, n) => a + countNested(n), 0);
