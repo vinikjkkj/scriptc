@@ -816,6 +816,41 @@ const classViewDeclined = new Set<string>();
 const classViewProbed = new Set<string>();
 const classViewNeeded = new Set<string>();
 
+/* LAB (fold1-verify): SCRIPTC_TWINVERIFY decides the twin set the candidate way (from the FIRST pass's discovery, before the pin reload) and the
+ * way it is decided today (from the emit pass of the pin reload), and prints whether they agree. Nothing here changes what the build does. */
+interface LabTwinFirst {
+  gate: boolean;
+  keys: string[];
+  pin: ReadonlyMap<string, readonly { start: number; end: number; ts: boolean }[]>;
+}
+let labTwinFirst: LabTwinFirst | null = null;
+function labTwinKeys(cands: readonly ts.Expression[], map: (file: string, p: number) => number): string[] {
+  const out = new Set<string>();
+  for (const f of cands) {
+    const sf = f.getSourceFile();
+    out.add(`${sf.fileName.split("/").slice(-3).join("/")}@${map(sf.fileName, f.getStart(sf))}`);
+  }
+  return [...out].sort();
+}
+/** An offset of the pin-edited text back to the unedited text (the inverse of the inserted wrappers; same rule as index.ts's `back`). */
+function labMapBack(pin: LabTwinFirst["pin"], file: string, p: number): number {
+  const es = pin.get(file) ?? pin.get(file.split("\\").join("/"));
+  if (es === undefined) return p;
+  let shift = 0;
+  for (const e of [...es].sort((a, b) => a.start - b.start)) {
+    const pre = e.ts ? 1 : "/** @type {any} */ (".length;
+    const post = e.ts ? " as any)".length : 1;
+    const S = e.start + shift;
+    if (p < S) break;
+    if (p < S + pre) return e.start;
+    const innerEnd = S + pre + (e.end - e.start);
+    if (p < innerEnd) return p - shift - pre;
+    if (p < innerEnd + post) return e.end;
+    shift += pre + post;
+  }
+  return p - shift;
+}
+
 export function lowerToIr(
   program: ts.Program,
   entry: ts.SourceFile,
@@ -923,6 +958,12 @@ export function lowerToIr(
   if (options.noPinReload !== true) {
     const pinReload = discovery.computeDynPinEdits();
     if (pinReload !== null) {
+      if (process.env["SCRIPTC_TWINVERIFY"] !== undefined) {
+        const defs = [...discovery.classes.values()].map((c) => c.def);
+        const gate = discovery.twinCandidates.length > 0 && moduleBoxesEmitters({ classes: defs, functions: discovery.classIr } as unknown as IrModule);
+        labTwinFirst = { gate, keys: labTwinKeys(discovery.twinCandidates, (_f, p) => p), pin: pinReload };
+        process.stderr.write(`[twinverify] first pass: candidates=${discovery.twinCandidates.length} gate=${gate}\n`);
+      }
       // The caller re-loads the program with the edits and lowers THAT.
       // Nothing of this pass is kept: its discovery only answered the
       // question.
@@ -972,6 +1013,24 @@ export function lowerToIr(
         ],
       };
     }
+  }
+  if (process.env["SCRIPTC_TWINVERIFY"] !== undefined && labTwinFirst !== null && options.noPinReload === true && options.noTwinReload !== true) {
+    const first = labTwinFirst;
+    const gateA = result.module !== null && emit.twinCandidates.length > 0 && moduleBoxesEmitters(result.module);
+    const keysA = labTwinKeys(emit.twinCandidates, (f, p) => labMapBack(first.pin, f, p));
+    let gateB = first.gate;
+    let keysB = first.keys;
+    if (process.env["SCRIPTC_TWINVERIFY_PERTURB"] !== undefined) {
+      // POSITIVE CONTROL: drop one candidate of the candidate-way set (flip the gate when it has none) so the comparison must say DIFFER.
+      if (keysB.length > 0) keysB = keysB.slice(1);
+      else gateB = !gateB;
+    }
+    const setA = gateA ? keysA : [];
+    const setB = gateB ? keysB : [];
+    const same = gateA === gateB && JSON.stringify(setA) === JSON.stringify(setB);
+    process.stderr.write(`[twinverify] ${same ? "EQUAL" : "DIFFER"} gate today=${gateA} candidate=${gateB} families today=${setA.length} candidate=${setB.length}\n`);
+    for (const k of setA) process.stderr.write(`[twinverify]   today     ${k}${setB.includes(k) ? "" : "   (not in candidate)"}\n`);
+    for (const k of setB) if (!setA.includes(k)) process.stderr.write(`[twinverify]   candidate ${k}   (not today)\n`);
   }
   if (options.noTwinReload !== true && result.module !== null && emit.twinCandidates.length > 0 && moduleBoxesEmitters(result.module)) {
     const twinReload = computeTwinEdits(emit.twinCandidates, emit.checker);
@@ -10318,7 +10377,7 @@ export class Lowerer {
   /** Pairs this lowerer is probing (see classViewHelperFor). */
   private readonly classProbeNow = new Set<string>();
   /** Every body discovery lowered, for analyzeClassViews. */
-  private readonly classIr: IrFunction[] = [];
+  readonly classIr: IrFunction[] = [];
 
   /** Discovery's verdict on the class views its probes lowered: a pair the per-site proof cannot clear (or any use outside a direct call argument) needs
    * the view grant; the rest keep the copy and no record of their shape carries a view slot. Reruns discovery when the needed set grows. */
