@@ -17018,6 +17018,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25780-a-subtlecrypto-alias-binding-serves-digest-import-sign-derive.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25780-a-subtlecrypto-alias-binding-serves-digest-import-sign-derive.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25782-buffer-from-a-digest-arraybuffer-is-a-view-with-node-bounds-checks.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25782-buffer-from-a-digest-arraybuffer-is-a-view-with-node-bounds-checks.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25783-pg-sasl-shape-over-jsdoc-typed-subtlecrypto.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25783-pg-sasl-shape-over-jsdoc-typed-subtlecrypto.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2579-jsval-object-param-crossing.js": {
    "order": [
     "<repo>/tests/corpus/2579-jsval-object-param-crossing.js"
