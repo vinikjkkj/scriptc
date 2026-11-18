@@ -42,6 +42,7 @@
 
 import { span } from "../phase-times.js";
 import { builtinModules } from "node:module";
+import { createHash } from "node:crypto";
 import { existsSync, readdirSync } from "node:fs";
 import { dirname, relative, resolve } from "node:path";
 import * as ts from "./ts7/adapter.js";
@@ -420,6 +421,9 @@ function loadProgram7(host: ts.Ts7Host, entryPath: string): LoadResult & { dispo
     baseRoots.push(...seed);
     seeded = true;
   }
+  if (process.env["SCRIPTC_CTXIMPORT_WHY"] !== undefined) {
+    console.error(`[ctxseed] key=${ctxKey.length}:${createHash("sha1").update(ctxKey).digest("hex").slice(0, 10)} roots=${baseRoots.length} seed=${seed === undefined ? "none" : seed.length} memoKeys=${contextRootsMemo.size}`);
+  }
   let program = ts.createProgram(baseRoots, options, host);
   if (seeded) {
     const named = new Set(contextImportRoots(program, true));
@@ -439,6 +443,7 @@ function loadProgram7(host: ts.Ts7Host, entryPath: string): LoadResult & { dispo
     baseRoots.push(...ctx);
     program = ts.createProgram(baseRoots, options, host);
   }
+  if (process.env["SCRIPTC_CTXIMPORT_WHY"] !== undefined) console.error(`[ctxseed] done seeded=${seeded} final=${baseRoots.length - bareRoots.length}`);
   contextRootsMemo.set(ctxKey, baseRoots.slice(bareRoots.length));
   /* The two-phase ORACLE for the prescan`s spec-twin selection (see
    * provenanceSpecTwinsInProgram). Off by default -- the scan already put the
