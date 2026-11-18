@@ -649,7 +649,9 @@ export function lazyInitPass(mod: IrModule): LazyInitResult {
       owner.locals.push({ id: h.id, name: h.id, type: DYN_T as never, mutable: false, boxed: true } as never);
       pre.push({ kind: "varDecl", localId: h.id, init: h.init, loc: stmt["loc"] });
     }
-    let guard: Node | undefined;
+    // The guard is the AND of one OR-of-texts test per callee read. A thunk with hundreds of calls (a message with many nested members) would make a
+    // left-deep chain whose depth overflows the IR validator's recursion, so the conjunction is a BALANCED tree (depth log n).
+    const conds: Node[] = [];
     for (const h of hoists) {
       if (h.callee === undefined || brk === "skipguard") continue;
       let any: Node | undefined;
@@ -657,8 +659,15 @@ export function lazyInitPass(mod: IrModule): LazyInitResult {
         const t: Node = { kind: "libCall", fn: "dyn.fnSrcIs", args: [ref(h.id, stmt["loc"]), { kind: "strLit", value: text, type: STR_T, loc: L(stmt["loc"]) }], type: BOOL_T, loc: L(stmt["loc"]) };
         any = any === undefined ? t : { kind: "logical", op: "||", left: any, right: t, type: BOOL_T, loc: L(stmt["loc"]) };
       }
-      guard = guard === undefined ? any : { kind: "logical", op: "&&", left: guard, right: any as Node, type: BOOL_T, loc: L(stmt["loc"]) };
+      conds.push(any as Node);
     }
+    const tree = (xs: Node[]): Node | undefined => {
+      if (xs.length === 0) return undefined;
+      if (xs.length === 1) return xs[0];
+      const mid = xs.length >> 1;
+      return { kind: "logical", op: "&&", left: tree(xs.slice(0, mid)) as Node, right: tree(xs.slice(mid)) as Node, type: BOOL_T, loc: L(stmt["loc"]) };
+    };
+    const guard = tree(conds);
     const loc = stmt["loc"];
     const keyNode = ((stmt["expr"] as Node)["args"] as Node[])[1] as Node;
     // ONE straight-line statement (the candidate sits in a sequence expression, whose statements may not branch): the runtime runs the thunk now when the guard is false
