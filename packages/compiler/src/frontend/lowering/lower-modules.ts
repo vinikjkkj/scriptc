@@ -1308,10 +1308,24 @@ function jsonFileOfRelativeSpec(L: Lowerer, call: ts.CallExpression): ts.SourceF
   return modSf && modSf.fileName.endsWith(".json") ? modSf : null;
 }
 
+/** False when the override below can only answer null: every form it answers needs a `.json` SourceFile of the program (jsonBindingTypes is
+ * filled only from one, jsonFileOfRelativeSpec reads one from the program, jsonModuleOfRequire takes one from a declaration), so a program
+ * without any answers null for every node. It is asked for every checker query the lowering makes (millions per build, each paying the AST getters
+ * of the property-name test), and the answer is fixed for the Lowerer's program. */
+function jsonOverrideLive(L: Lowerer): boolean {
+  let live = L.jsonSourceFilesPresent;
+  if (live === undefined) {
+    live = L.jsonBindingTypes.size > 0 || L.program.getSourceFiles().some((sf) => sf.fileName.endsWith(".json"));
+    L.jsonSourceFilesPresent = live;
+  }
+  return live;
+}
+
 /** Lowerer.typeOf for the JSON require forms: a `require("./x.json")` call
  * answers the document's structural type, and a binding a JSON require
  * bound answers the type recorded for its symbol. Null for everything else. */
 export function jsonRequireTypeOverride(L: Lowerer, node: ts.Node): ts.Type | null {
+  if (!jsonOverrideLive(L)) return null;
   if (ts.isIdentifier(node)) {
     if (L.jsonBindingTypes.size === 0) return null;
     const sym = L.checker.getSymbolAtLocation(node);
@@ -1351,9 +1365,16 @@ export function jsonAwareChecker(L: Lowerer, base: ts.TypeChecker): ts.TypeCheck
   // access (millions per build), and answering each with a fresh closure or a fresh `bind` was 1.4% of a one-file profile (self time of this trap).
   // The bound copy is keyed by the function it wraps and rebuilt when the target's member changes, so it answers exactly what a per-access bind did.
   const symbolAtLocation = (node: ts.Node): ts.Symbol | undefined => {
-    if (ts.isIdentifier(node) && ts.isPropertyAccessExpression(node.parent) && node.parent.name === node) {
-      const recv = jsonRequireTypeOverride(L, node.parent.expression);
-      if (recv !== null) return base.getPropertyOfType(recv, node.text) ?? undefined;
+    if (!jsonOverrideLive(L)) return base.getSymbolAtLocation(node);
+    if (ts.isIdentifier(node)) {
+      const access = node.parent;
+      // An identifier child of a property access is its expression or its name. The expression starts where the access starts; the name starts
+      // after the expression and the dot, so the two positions differ exactly for the name. The test is one DataView read where `access.name`
+      // is a child lookup (kind, property table, child mask, `next` walk), and this runs for every symbol query of every identifier.
+      if (ts.isPropertyAccessExpression(access) && node.pos !== access.pos) {
+        const recv = jsonRequireTypeOverride(L, access.expression);
+        if (recv !== null) return base.getPropertyOfType(recv, node.text) ?? undefined;
+      }
     }
     return base.getSymbolAtLocation(node);
   };
