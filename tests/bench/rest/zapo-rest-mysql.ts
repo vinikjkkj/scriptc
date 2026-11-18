@@ -2372,7 +2372,7 @@ async function route(method: string, path: string, p: Bag, sess: Session): Promi
   if (path === "/message/getReachoutTimelock") return await sess.client.message.getReachoutTimelock();
   if (path === "/message/getNewChatMessageCapping") return await sess.client.message.getNewChatMessageCapping();
   if (path === "/message/syncSignalSession") {
-    await sess.client.message.syncSignalSession(reqStr(p, "jid"), bool(p, "reasonIdentity"));
+    await sess.client.message.syncSignalSession(reqStr(p, "jid"), { reasonIdentity: bool(p, "reasonIdentity") });
     return { synced: true };
   }
 
