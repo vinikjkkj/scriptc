@@ -17396,6 +17396,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25950-a-primitive-or-wrapper-constructor-is-the-global-constructor-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25950-a-primitive-or-wrapper-constructor-is-the-global-constructor-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2596-net-arg-ladders.cjs": {
    "order": [
     "<repo>/tests/corpus/2596-net-arg-ladders.cjs"
