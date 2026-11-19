@@ -11,6 +11,7 @@ import { boxAccess, cDecl, cStringLiteral, cType, elemAccess, vAdapters } from "
 import { KEYLIST_MEMBER, OVERFLOW_MEMBER, OWNMASK_MEMBER, ownPresentCondC } from "./emit-shapes.js";
 import { emitStableReceiver, predeclareFieldRunTables } from "./emit-exprs.js";
 import { writesLocal } from "../../ir/analysis.js";
+import { rawReceivers } from "../../ir/f64-raw.js";
 import { coroPrologue, coroDispatch, coroFinish, coroField } from "./emit-coro.js";
 import { genCoroFinish } from "./emit-gen-coro.js";
 /* A converted GENERATOR completes WITHOUT settling a promise -- it owns
@@ -390,6 +391,9 @@ export function emitFunction(E: CEmitter, fn: IrFunction): void {
         E.line(`${cDecl(local.type, mangleLocal(local.id))}${init}; /* ${local.name} */`);
       }
     }
+
+    // The data pointers of the Float64Array parameters a versioned body reads through `raw` accesses (ir/f64-raw.ts): the entry guard sets each one.
+    for (const id of rawReceivers(fn)) E.line(`uint8_t *${E.f64DataName(id)} = NULL; /* data of ${id} (raw f64 access) */`);
 
     // WHERE THE DISPATCH WILL GO. It cannot be written yet: it emits one
     // `case` per EMITTED state, and how many states the body emits is not
@@ -909,6 +913,11 @@ export function emitStmt(E: CEmitter, s: IrStmt): void {
         const arr = emitStableReceiver(E, s.arr, [s.index, s.value]);
         const idx = E.emitExpr(s.index);
         const v = E.emitExpr(s.value);
+        if (s.raw === true && s.arr.kind === "varRef") {
+          // A covered element of a Float64Array parameter (ir/f64-raw.ts): the entry guard proved kind and length, the index is proven in range.
+          E.line(`scr_f64_raw_set(${E.f64DataName(s.arr.localId)}, (size_t)${idx.name}, ${E.canonStore(s) ? `scr_num_canon(${v.name})` : v.name});${E.srcComment(s.loc)}`);
+          break;
+        }
         // The inline arm's twin of the read site in emit-exprs — same
         // subset, same answer, the call for everything it declines.
         if (s.value.type.kind === "bigint") {

@@ -131,7 +131,7 @@ import {
   PromotedTempInPhiError,
 } from "./blocks.js";
 import { BORROWING_DYN_LIBCALLS, isStableReceiverOperand, operandsKeepBinding, singleWriterLocals, writesLocal } from "../../ir/analysis.js";
-import { SCR_BYTES_LEN_OFFSET } from "./runtime-layout.js";
+import { SCR_BYTES_DATA_OFFSET, SCR_BYTES_ELEM_OFFSET, SCR_BYTES_LEN_OFFSET } from "./runtime-layout.js";
 import {
   buildClassGraph,
   classFieldIndex,
@@ -7761,6 +7761,24 @@ class LlEmitter {
         const arr = this.emitStableReceiver(s.arr, [s.index, s.value]);
         const idx = this.emitExpr(s.index);
         const v = this.emitExpr(s.value);
+        if (s.raw === true && s.arr.kind === "varRef" && B.f64Data.has(s.arr.localId)) {
+          // The write twin of the raw read (ir/f64-raw.ts): a store at data + 8 * index.
+          let sv = v.name;
+          if (this.canonPlan()?.canonStores.has(s) === true) {
+            sv = B.tmp();
+            this.canonInto(sv, v.name);
+          }
+          const dv = B.tmp();
+          const ix = B.tmp();
+          const off = B.tmp();
+          const ep = B.tmp();
+          B.line(`${dv} = load ptr, ptr ${B.f64Data.get(s.arr.localId)!}`);
+          B.line(`${ix} = fptosi double ${idx.name} to i64`);
+          B.line(`${off} = shl i64 ${ix}, 3`);
+          B.line(`${ep} = getelementptr i8, ptr ${dv}, i64 ${off}`);
+          B.line(`store double ${sv}, ptr ${ep}, align 1`);
+          break;
+        }
         // The write twin of the read site above -- same fast arm, same
         // answer, the full function for everything it declines.
         if (s.value.type.kind === "bigint") {
@@ -16711,7 +16729,7 @@ class LlEmitter {
     // The readNum/writeNum family above deliberately does NOT borrow: it
     // is fallible and its result rides a pending check.
     const directElementAccess =
-      method === "length" || method === "byteLength" || method === "get";
+      method === "length" || method === "byteLength" || method === "get" || method === "f64Ok";
     const r = directElementAccess
       ? this.emitStableReceiver(e.receiver, e.args)
       : this.emitExpr(e.receiver);
@@ -16742,7 +16760,59 @@ class LlEmitter {
       }
       case "byteLength":
         return call("scr_bytes_byte_len", "double (ptr)", `ptr ${r.name}`, false, false);
+      case "f64Ok": {
+        // The entry guard of a function versioned by ir/f64-raw.ts: elem == F64 && len >= minLen, and the data pointer the raw accesses load.
+        const min = (e.args[0] as { value: number }).value;
+        if (e.receiver.kind === "varRef") {
+          const id = e.receiver.localId;
+          let slot = B.f64Data.get(id);
+          if (slot === undefined) {
+            slot = B.slot();
+            B.entryAllocas.push(`${slot} = alloca ptr`);
+            B.f64Data.set(id, slot);
+          }
+          const dp = B.tmp();
+          const dv = B.tmp();
+          B.line(`${dp} = getelementptr inbounds i8, ptr ${r.name}, i64 ${SCR_BYTES_DATA_OFFSET}`);
+          B.line(`${dv} = load ptr, ptr ${dp}`);
+          B.line(`store ptr ${dv}, ptr ${slot}`);
+        }
+        const ep = B.tmp();
+        const ev = B.tmp();
+        const eok = B.tmp();
+        const lp = B.tmp();
+        const lv = B.tmp();
+        const lok = B.tmp();
+        const ok = B.tmp();
+        B.line(`${ep} = getelementptr inbounds i8, ptr ${r.name}, i64 ${SCR_BYTES_ELEM_OFFSET}`);
+        B.line(`${ev} = load i32, ptr ${ep}`);
+        B.line(`${eok} = icmp eq i32 ${ev}, ${(BYTES_ELEM_NUM as Record<string, number>)["f64"]}`);
+        B.line(`${lp} = getelementptr inbounds i8, ptr ${r.name}, i64 ${SCR_BYTES_LEN_OFFSET}`);
+        B.line(`${lv} = load i64, ptr ${lp}`);
+        B.line(`${lok} = icmp uge i64 ${lv}, ${min}`);
+        B.line(`${ok} = and i1 ${eok}, ${lok}`);
+        return { name: ok, type: e.type };
+      }
       case "get":
+        if (e.raw === true && e.receiver.kind === "varRef" && B.f64Data.has(e.receiver.localId)) {
+          // A covered element of a Float64Array parameter (ir/f64-raw.ts): a load at data + 8 * index, no kind or bound test.
+          const dv = B.tmp();
+          const ix = B.tmp();
+          const off = B.tmp();
+          const ep = B.tmp();
+          const val = B.tmp();
+          B.line(`${dv} = load ptr, ptr ${B.f64Data.get(e.receiver.localId)!}`);
+          B.line(`${ix} = fptosi double ${args[0]!.name} to i64`);
+          B.line(`${off} = shl i64 ${ix}, 3`);
+          B.line(`${ep} = getelementptr i8, ptr ${dv}, i64 ${off}`);
+          B.line(`${val} = load double, ptr ${ep}, align 1`);
+          if (this.canonPlan()?.undefLoads.has(e) === true || this.canonPlan()?.canonLoads.has(e) === true) {
+            const c = B.tmp();
+            this.canonInto(c, val);
+            return { name: c, type: e.type };
+          }
+          return { name: val, type: e.type };
+        }
         // An index naming no element reads NaN (undefined where the plan says it is observed).
         // scr_bytes_get_FAST, not scr_bytes_get: the u8-in-bounds arm
         // without the element switch or the double-domain bound, which is
