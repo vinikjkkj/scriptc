@@ -834,10 +834,43 @@ const recordIdentityObserved = new Set<string>();
 /** Parent node kinds that cannot observe the identity of a record operand: they read a member of it, store it, pass it, return it or serialise it. Every
  * other kind with a record-typed operand marks that record's shapes as identity-observed (the safe default for a kind this list does not know). */
 const IDENTITY_BLIND_PARENTS = new Set([
-  "varRef", "varDecl", "assign", "assignExpr", "return", "call", "callValue", "virtualCall", "recordGet", "recordGetAt", "recordKeyGet", "recordLit",
-  "unionWrap", "unionNarrow", "unionDisc", "unionKeyGet", "ternary", "seqExpr", "exprStmt", "block", "if", "closure", "arrayGet", "arrayLit", "forOf",
-  "jsonStringify", "optChain", "nullish", "orDefault", "toBool", "arraySet", "recordSet", "recordKeySet", "void",
-  "unionIsTag", "recordKeyPresent", "recordKeyPresentAt", "recordSlotFilled", "recordKeyOrderIs", "recordOvfHas", "recordOvfKeys", "recordOvfSlotGet", "recordOvfSlots", "recordProtoHasKey", "recordOrd",
+  // One line per kind: why a record-typed operand under it cannot observe the record's identity, the order of its keys, or write it.
+  "varRef", // reads a binding and yields the same pointer; whatever then uses the pointer is its own node, judged on its own
+  "varDecl", // binds the pointer to a name, a pure store of the reference
+  "assign", // stores the pointer into a binding; no comparison, no key or member access
+  "assignExpr", // as assign, in value position
+  "return", // hands the pointer to the caller, whose use is a node of its own
+  "call", // passes the pointer to a compiled callee: the callee's body is in the census, and any identity use in it is a node with a record operand of the same shape
+  "callValue", // as call, through a closure value: every closure body that takes the shape is a compiled body in the census
+  "virtualCall", // as call, through a vtable slot: every override body is a compiled body in the census
+  "recordGet", // reads one declared member by its struct slot; no key enumeration, no identity
+  "recordGetAt", // as recordGet through a computed slot index
+  "recordKeyGet", // reads one member by a computed key and yields that member's value; no key enumeration, no identity of the receiver
+  "recordLit", // stores the pointer as a member of a new record; nothing is compared or enumerated
+  "unionWrap", // tags the same pointer as one arm of a union; observing the arm later is a unionIsTag / unionEq node
+  "unionNarrow", // untags the pointer of the matching arm, same pointer
+  "unionDisc", // reads the discriminant string of the arm, a member read
+  "unionKeyGet", // reads one member of the arm, a member read
+  "unionIsTag", // compares the arm TAG (an integer), never the pointer
+  "ternary", // selects between two pointers, yields one of them unchanged
+  "seqExpr", // evaluates for effect and yields the last pointer unchanged
+  "exprStmt", // evaluates and discards the value
+  "block", // groups statements
+  "if", // branches on a bool computed by another node
+  "closure", // captures a binding by reference; the body is in the census
+  "arrayGet", // reads one element pointer out of an array of records
+  "arrayLit", // stores the pointers in a new array; the array's own uses (indexOf, includes, Set) are nodes with an array-of-record operand, which the walk marks
+  "forOf", // binds each element pointer to a loop variable; the body is in the census
+  "jsonStringify", // serialises by value in declaredOrder, which the order check of the pair already made equal on both sides
+  "optChain", // selects the member of a non-null pointer, a member read
+  "nullish", // picks the pointer or the fallback, unchanged
+  "orDefault", // picks the pointer or the default, unchanged
+  "arraySet", // stores the pointer into an array slot
+  "recordSet", // a write: the shape is marked WRITTEN by the write census (noteRecordWrite), which keeps the view; the stored value is a plain store
+  "recordKeySet", // a write, as recordSet
+  "recordKeyPresent", // asks whether an own key is present (an own-key bit), no identity and no value
+  "recordKeyPresentAt", // as recordKeyPresent through a computed index
+  "recordSlotFilled", // asks whether a struct slot holds a value, no identity
 ]);
 const classViewDeclined = new Set<string>();
 /** `Class->shapeKey` pairs discovery probed (lowered through the view helper without the grant) and the subset whose probe found a use the per-site proof
