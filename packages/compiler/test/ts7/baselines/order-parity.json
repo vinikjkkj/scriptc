@@ -29645,6 +29645,18 @@
     "<repo>/tests/corpus/25769-a-util-object-that-is-undefined-throws-at-the-member-it-fails-in.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25840-a-table-entry-read-through-a-widening-cast-is-one-object-for-map-set-weakmap-and-indexof.ts": {
+   "order": [
+    "<repo>/tests/corpus/25840-a-table-entry-read-through-a-widening-cast-is-one-object-for-map-set-weakmap-and-indexof.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25841-a-frozen-table-entry-keyed-in-a-map-is-found-through-the-widened-table.ts": {
+   "order": [
+    "<repo>/tests/corpus/25841-a-frozen-table-entry-keyed-in-a-map-is-found-through-the-widened-table.ts"
+   ],
+   "diags": []
   }
  }
 }
