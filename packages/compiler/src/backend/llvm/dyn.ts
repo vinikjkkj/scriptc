@@ -1178,6 +1178,7 @@ export class LlDyn {
     const boxable = canConvertToDyn(srcT, (id) => host.recordsById.get(id), (id) => host.unionsById.get(id));
     const conv = boxable ? this.toDynHelper(srcT) : "";
     host.declare(`declare ptr @scr_dyn_origin_mark(ptr, ptr, ptr, ptr, ptr)`);
+    host.declare(`declare ptr @scr_dyn_origin_rectraced(ptr)`);
     const offOf = (idx: number): string => `i64 ptrtoint (ptr getelementptr inbounds (%${st}, ptr null, i64 0, i32 ${idx}) to i64)`;
     const offs = to.fields.map((f) => {
       if (classMeta !== undefined) {
@@ -1203,7 +1204,9 @@ export class LlDyn {
         `define internal ptr @${name}_cross(ptr %p) ${FN_ATTRS} {`,
         `  %t = call ptr @${conv}(ptr %p)`,
         `  %m = call ptr @scr_dyn_origin_mark(ptr %t, ptr %p, ptr ${host.cstr(typeKey(srcT))}, ptr ${retain}, ptr ${release})`,
-        `  ret ptr %m`,
+        ...((srcT.kind === "record" && host.tracedShapes.has(`record:${srcT.shapeId}`)) || (srcT.kind === "object" && host.tracedShapes.has(`object:${srcT.className}`))
+          ? [`  %mt = call ptr @scr_dyn_origin_rectraced(ptr %m)`, `  ret ptr %mt`]
+          : [`  ret ptr %m`]),
         `}`,
       ] : []),
       `@${name} = internal constant { i64, ptr, i64, ptr, ptr, ptr, ptr, ptr, ptr } { i64 ${n}, ptr @${name}_off, ${ownOff}, ptr @${name}_ob, ptr @${name}_obit, ptr ${retain}, ptr ${release}, ptr ${boxable ? `@${name}_snap` : "null"}, ptr ${boxable ? `@${name}_cross` : "null"} }`,
@@ -1243,6 +1246,13 @@ export class LlDyn {
     }
     host.declare(`declare ptr @scr_dyn_origin_mark${sfx}(ptr, ptr, ptr, ptr, ptr)`);
     B.line(`${m} = call ptr @scr_dyn_origin_mark${sfx}(ptr ${conv}, ptr ${obj}, ptr ${host.cstr(typeKey(t))}, ptr ${retain}, ptr ${release})`);
+    // A record of a traced shape is a cycle node: the collector must follow the copy -> origin edge (scr_dyn_origin_rectraced).
+    if ((t.kind === "record" && host.tracedShapes.has(`record:${t.shapeId}`)) || (t.kind === "object" && host.tracedShapes.has(`object:${t.className}`))) {
+      host.declare(`declare ptr @scr_dyn_origin_rectraced(ptr)`);
+      const f = B.tmp();
+      B.line(`${f} = call ptr @scr_dyn_origin_rectraced(ptr ${m})`);
+      return f;
+    }
     return m;
   }
 
