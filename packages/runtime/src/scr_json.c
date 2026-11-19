@@ -5836,7 +5836,19 @@ static __attribute__((noinline)) const ScrDynClassMember *scr_cm_probe(const Scr
   }
 }
 
+/* LAB ONLY (cpu4 oicen). Never lands. */
+static unsigned long long oc_calls[8][2][2], oc_scan[8][2][2]; /* [nmembers bucket][is %props][hit] */
+static unsigned long long oc_sh_calls, oc_sh_bagnull, oc_sh_found;
+static int oc_reg;
+void scr_oc_shadows(int bagnull, int found) { oc_sh_calls++; oc_sh_bagnull += bagnull; oc_sh_found += found; }
+static void oc_report(void) {
+  static const char *nm[8] = {"0", "1-3", "4-7", "8-15", "16-31", "32-63", "64+", "x"};
+  for (int b = 0; b < 7; b++) for (int p = 0; p < 2; p++) for (int h = 0; h < 2; h++) if (oc_calls[b][p][h]) fprintf(stderr, "OBJCEN rowscan nm %s props %d hit %d calls %llu scanned %llu\n", nm[b], p, h, oc_calls[b][p][h], oc_scan[b][p][h]);
+  fprintf(stderr, "OBJCEN shadows calls %llu bagnull %llu found %llu\n", oc_sh_calls, oc_sh_bagnull, oc_sh_found);
+}
 const ScrDynClassMember *scr_dyn_objinst_row_scan(const ScrDynClass *c, const char *k, size_t klen) {
+  if (!oc_reg) { oc_reg = 1; atexit(oc_report); }
+  { size_t n = c->nmembers; int bk = n == 0 ? 0 : n < 4 ? 1 : n < 8 ? 2 : n < 16 ? 3 : n < 32 ? 4 : n < 64 ? 5 : 6; int pr = (klen == 6 && k[0] == '%' && memcmp(k, "%props", 6) == 0); size_t pos = 0; int hit = 0; for (; pos < n; pos++) { if (c->members[pos].enumerable == 3) continue; if (c->members[pos].len == klen && scr_dyn_bytes_eq(c->members[pos].name, k, klen)) { hit = 1; pos++; break; } } oc_calls[bk][pr][hit]++; oc_scan[bk][pr][hit] += pos; }
 #ifndef SCR_OBJ_NOIDX
   if (__builtin_expect(c->nmembers >= SCR_CM_IDX_MIN, 0)) {
     const struct ScrCmIdx *ix = NULL;

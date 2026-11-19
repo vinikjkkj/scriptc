@@ -1385,9 +1385,10 @@ static bool dyn_cls_objinst_own_shadows(const ScrDyn *d, const char *k, size_t k
   const unsigned char rt = scr_dyn_objinst_class_of(d)->rt_root;
   if (rt != 3 && rt != 4 && rt != 6 && rt != 8) return false;
   ScrDyn *bag = dyn_cls_props_bag(d);
-  if (bag == NULL) return false;
+  { extern void scr_oc_shadows(int, int); if (bag == NULL) { scr_oc_shadows(1, 0); return false; } }
   const ScrDyn *e = scr_dyn_obj_get(bag, k, klen);
   scr_dyn_release(bag);
+  { extern void scr_oc_shadows(int, int); scr_oc_shadows(0, e != NULL); }
   return e != NULL;
 }
 
