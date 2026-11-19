@@ -17303,6 +17303,38 @@ ScrDyn *scr_dyn_origin_mark_elem(ScrDyn *d, void *obj, const char *tkey, void *(
   }
   return r;
 }
+/* DYN VIEW IDENTITY: one typed record per (dynamic object, shape). A record that is a view of a dynamic object (the checked cast of an
+ * object into a view-granted shape) is the same JavaScript object however many times it is read off, so `===`, Map and Set keys, WeakMap
+ * keys and indexOf, which compare record pointers, must see ONE pointer. The table is the struct-view table above (the key is the shape's
+ * release function, never a ScrRecSrcMap): it does not own the records, a record leaves it when it dies (scr_dynview_unreg, from the
+ * shape's release and cycle teardown; the dyn pointer is only a key there, never dereferenced). canon takes the freshly built record
+ * `rec` (+1): the first one of its (view, shape) is registered and answered; a later one has its fresh contents exchanged into the
+ * registered record (the sync of its snapshot, as scr_rec_swap_body does for a read) and is released, and the registered record is
+ * answered (+1). */
+void *scr_dynview_canon(void *rec, const void *view, const void *key, size_t size, void *(*retain)(void *), void (*release)(void *)) {
+  if (rec == NULL || view == NULL) return rec;
+  void *f = scr_recsrc_find((void *)view, (const ScrRecSrcMap *)key);
+  if (f == NULL) {
+    scr_recsrc_register(rec, (void *)view, (const ScrRecSrcMap *)key);
+    return rec;
+  }
+  if (f != rec) {
+    scr_rec_swap_body(f, rec, size);
+    release(rec);
+  }
+  return retain(f);
+}
+void scr_dynview_unreg(void *rec, const void *view, const void *key) {
+  if (recsrc_cap == 0 || view == NULL) return;
+  for (size_t i = recsrc_hash(view, (const ScrRecSrcMap *)key, recsrc_cap), n = 0; n < recsrc_cap; i = (i + 1) & (recsrc_cap - 1), n++) {
+    ScrRecSrcEnt *e = &recsrc_tab[i];
+    if (e->state == 0) return;
+    if (e->state == 1 && e->src == view && e->map == (const ScrRecSrcMap *)key) {
+      if (e->rec == rec) e->state = 2;
+      return;
+    }
+  }
+}
 void scr_rec_swap_body(void *a, void *b, size_t size) {
   unsigned char *x = (unsigned char *)a + sizeof(size_t), *y = (unsigned char *)b + sizeof(size_t);
   for (size_t i = 0; i + sizeof(size_t) < size; i++) { unsigned char t = x[i]; x[i] = y[i]; y[i] = t; }
