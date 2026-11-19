@@ -340,7 +340,44 @@ static void test_gcm_streaming(void) {
   check("streaming GCM empty tag", t2, t1, 16);
 }
 
+/* GHASH multiply: the PCLMULQDQ arm against the portable loop over 100,000 random (z, h) pairs plus the edge values, and the arms' agreement is
+ * only meaningful if the CLMUL arm actually ran (printed). A bit-exact arm and a bit-flipped one (-DSCR_GHASH_TEST_MUTATE) are told apart here. */
+static uint64_t rng_state = 0x9e3779b97f4a7c15ULL;
+static uint64_t rng(void) {
+  rng_state ^= rng_state << 13;
+  rng_state ^= rng_state >> 7;
+  rng_state ^= rng_state << 17;
+  return rng_state * 0x2545F4914F6CDD1DULL;
+}
+
+static void test_ghash_arms(void) {
+  const uint64_t edge[] = {0, 1, 0x8000000000000000ULL, 0xe100000000000000ULL, ~0ULL, 0x0123456789abcdefULL};
+  const int have = scr_ghash_have_clmul();
+  long bad = 0, n = 0;
+  for (size_t i = 0; i < 6; i++)
+    for (size_t j = 0; j < 6; j++)
+      for (size_t k = 0; k < 6; k++)
+        for (size_t l = 0; l < 6; l++) {
+          uint64_t z1[2] = {edge[i], edge[j]}, z2[2] = {edge[i], edge[j]}, h[2] = {edge[k], edge[l]};
+          scr_ghash_mul_portable(z1, h);
+          scr_ghash_mul_clmul(z2, h);
+          n++;
+          if (z1[0] != z2[0] || z1[1] != z2[1]) bad++;
+        }
+  for (int i = 0; i < 100000; i++) {
+    uint64_t z1[2] = {rng(), rng()}, h[2] = {rng(), rng()};
+    uint64_t z2[2] = {z1[0], z1[1]};
+    scr_ghash_mul_portable(z1, h);
+    scr_ghash_mul_clmul(z2, h);
+    n++;
+    if (z1[0] != z2[0] || z1[1] != z2[1]) bad++;
+  }
+  fprintf(stderr, "ghash arms: clmul=%d pairs=%ld mismatches=%ld\n", have, n, bad);
+  check_true("ghash clmul arm equals the portable loop", bad == 0);
+}
+
 int main(void) {
+  test_ghash_arms();
   test_block();
   test_cbc_vectors();
   test_ctr_vectors();
