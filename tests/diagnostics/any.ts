@@ -4,6 +4,6 @@
 // semantics can run. Each site reports the choice: opt into the embedded
 // engine, or stay static with 'unknown' + a checked cast.
 const n: any = 41;
-var { x } = <any>0; // destructuring a non-object 'any' — engine only
+var { x }: { x: number } = <any>0; // destructuring an any value into a typed binding — engine only
 for (const v of n as any) console.log(v); // iterating an 'any' value
 export const marker: number = 1;

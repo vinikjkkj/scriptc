@@ -1808,7 +1808,11 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
     if (
       L.anyOrigin(decl.initializer) &&
       !isJsSourceFile(decl.getSourceFile()) &&
-      init.type.kind !== "record" && init.type.kind !== "array" && init.type.kind !== "jsval"
+      init.type.kind !== "record" && init.type.kind !== "array" && init.type.kind !== "jsval" &&
+      // A checked-dynamic source whose pattern the dyn arms serve (array patterns pack through dyn.iterPack; an object pattern whose
+      // bindings are all dyn reads one key per element) is NOT an engine-only construct: JS files already lower it.
+      !(init.type.kind === "dyn" &&
+        (ts.isArrayBindingPattern(decl.name) || dynObjectPatternBindsOnlyDyn(L, decl.name as ts.ObjectBindingPattern)))
     ) {
       L.anyOpFence("destructuring", decl);
     }
@@ -1958,8 +1962,55 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
       isLet,
       out,
       dynSpell,
+      v8SourceText(decl.initializer!) ?? undefined,
     );
     return out;
+  }
+
+/** V8's CallPrinter spelling of a destructuring SOURCE in "Cannot destructure property 'x' of '<source>' as it is undefined."
+   * Identifiers and member chains print as written, a call prints its callee with `(...)`; every other expression is not modelled (null). */
+  export function v8SourceText(e: ts.Expression): string | null {
+    while (ts.isParenthesizedExpression(e) || ts.isNonNullExpression(e) || ts.isAsExpression(e) || ts.isSatisfiesExpression(e) || ts.isTypeAssertion(e)) e = e.expression;
+    if (ts.isIdentifier(e)) return e.text;
+    if (e.kind === ts.SyntaxKind.ThisKeyword) return "this";
+    if (ts.isPropertyAccessExpression(e) && !e.questionDotToken) {
+      const o = v8SourceText(e.expression);
+      return o === null ? null : `${o}.${e.name.text}`;
+    }
+    if (ts.isCallExpression(e) && !e.questionDotToken && (ts.isIdentifier(e.expression) || ts.isPropertyAccessExpression(e.expression))) {
+      const c = v8SourceText(e.expression);
+      return c === null ? null : `${c}(...)`;
+    }
+    return null;
+  }
+
+/** The null/undefined guards of an OBJECT pattern over a checked-dynamic source: JS throws V8's destructuring TypeError BEFORE any element
+   * reads (`Cannot destructure property 'x' of 'a' as it is null.`; with no first plain key — an empty pattern, a computed key, a rest —
+   * `Cannot destructure 'a' as it is null.`). A PARAMETER source (srcText "@param") is spelled by its value: 'undefined' / 'object null'. */
+  function dynObjectPatternNullGuards(L: Lowerer, pattern: ts.ObjectBindingPattern, srcRef: () => IrExpr, srcText: string, out: IrStmt[]): void {
+    const loc = locOf(pattern);
+    const first = pattern.elements[0];
+    let prop: string | null = null;
+    if (first !== undefined && first.dotDotDotToken === undefined) {
+      const key: ts.Node | undefined = first.propertyName ?? first.name;
+      if (key !== undefined && (ts.isIdentifier(key) || ts.isStringLiteralLike(key) || ts.isNumericLiteral(key))) prop = patternKeyNameOf(L, key as ts.PropertyName);
+      // V8 quirk (measured): a plain first key carrying a default (`{ x = 1 } = a`, `{ x: y = 2 } = a`) reports the element READ instead,
+      // "Cannot read properties of null (reading 'x')", which the keyed read below already throws.
+      if (prop !== null && first.initializer !== undefined) return;
+    }
+    for (const which of ["undefined", "null"] as const) {
+      const shown = srcText === "@param" ? (which === "null" ? "object null" : "undefined") : srcText;
+      const msg = prop !== null
+        ? `Cannot destructure property '${prop}' of '${shown}' as it is ${which}.`
+        : `Cannot destructure '${shown}' as it is ${which}.`;
+      out.push({
+        kind: "if",
+        cond: { kind: "dynTest", test: which, value: srcRef(), type: BOOL, loc },
+        then: [{ kind: "exprStmt", expr: nodeThrowExpr(1, "", msg, VOID, loc), loc }],
+        else_: null,
+        loc,
+      });
+    }
   }
 
 /** One pattern level: emits a declaration (or global assignment) per
@@ -1969,7 +2020,8 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
     srcType: IrType,
     isLet: boolean,
     out: IrStmt[],
-    dynSpell?: string,): void {
+    dynSpell?: string,
+    srcText?: string,): void {
     if (ts.isArrayBindingPattern(pattern)) {
       // Tuple sources: each position is a field read of the tuple's record
       // shape — the positional twin of object destructuring below.
@@ -2266,7 +2318,11 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
       // nothing else — a pure no-op past the source's own evaluation for
       // every statically non-nullish kind, record or not (the assignment
       // path's rule); possibly-nullish sources would throw in JS and keep
-      // a fence.
+      // a fence. A checked-dynamic source answers by its runtime kind: null/undefined throw V8's TypeError.
+      if (srcType.kind === "dyn" && srcText !== undefined && ts.isObjectBindingPattern(pattern)) {
+        dynObjectPatternNullGuards(L, pattern, srcRef, srcText, out);
+        return;
+      }
       if (
         isUnitType(srcType) ||
         (srcType.kind === "union" && (L.unions.get(srcType.unionId)?.arms.some(isUnitType) ?? true))
@@ -2309,15 +2365,41 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
       srcType.kind === "dyn" &&
       (isJsSourceFile(pattern.getSourceFile()) || dynObjectPatternBindsOnlyDyn(L, pattern) || patternDestructuresImportNamespace(pattern))
     ) {
+      if (srcText !== undefined) dynObjectPatternNullGuards(L, pattern, srcRef, srcText, out);
       for (const el of pattern.elements) {
         if (el.name === undefined) continue;
         const loc = locOf(el);
         if (el.dotDotDotToken) {
-          L.unsupported(
-            "SC1031",
-            el,
-            "rest elements over checked-dynamic sources (the remaining-fields object has no lowering yet)",
-          );
+          // `{ a, ...rest } = src` over a checked-dynamic source: a fresh dyn object holding every own enumerable key of the source
+          // (CopyDataProperties), minus the keys the siblings consumed. Computed sibling keys make the consumed set a runtime fact: fenced.
+          const consumed = new Set<string>();
+          for (const sib of pattern.elements) {
+            if (sib === el || sib.name === undefined || sib.dotDotDotToken) continue;
+            const keyNode: ts.PropertyName = sib.propertyName ?? (sib.name as ts.Identifier);
+            const folded = ts.isIdentifier(keyNode) || ts.isComputedPropertyName(keyNode) || ts.isStringLiteralLike(keyNode) || ts.isNumericLiteral(keyNode)
+              ? patternKeyNameOf(L, keyNode)
+              : null;
+            if (folded === null) L.unsupported("SC1031", el, "rest bindings beside computed keys (the consumed set is a runtime fact)");
+            consumed.add(folded);
+          }
+          const t = L.declareHiddenLocal("%rest", DYN);
+          const tRef = (): IrExpr => ({ kind: "varRef", localId: t.id, type: DYN, loc });
+          const restValue: IrExpr = {
+            kind: "seqExpr",
+            stmts: [
+              { kind: "varDecl", localId: t.id, init: { kind: "libCall", fn: "dyn.assign", args: [{ kind: "dynObjLit", fields: [], type: DYN, loc }, srcRef()], type: DYN, loc }, loc },
+              ...[...consumed].map((c): IrStmt => ({
+                kind: "exprStmt",
+                expr: { kind: "libCall", fn: "dyn.keyDelete", args: [tRef(), { kind: "strLit", value: c, type: STRING, loc }], type: BOOL, loc },
+                loc,
+              })),
+            ],
+            result: tRef(),
+            type: DYN,
+            loc,
+          };
+          L.bindPatternTarget(el.name, restValue, isLet, out);
+          continue;
         }
         const prop = el.propertyName ?? el.name;
         const propName = ts.isIdentifier(prop) || ts.isComputedPropertyName(prop) || ts.isStringLiteralLike(prop) || ts.isNumericLiteral(prop)
@@ -2783,7 +2865,13 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
   function dynObjectPatternBindsOnlyDyn(L: Lowerer, pattern: ts.ObjectBindingPattern): boolean {
     for (const el of pattern.elements) {
       if (el.name === undefined) continue;
-      if (el.dotDotDotToken !== undefined) return false;
+      if (el.dotDotDotToken !== undefined) {
+        // A rest binding of a checked-dynamic source is the dyn object of the unconsumed own keys.
+        if (!ts.isIdentifier(el.name)) return false;
+        const rt = patternBindingType(L, el.name);
+        if (rt !== null && rt.kind !== "dyn") return false;
+        continue;
+      }
       if (ts.isIdentifier(el.name)) {
         const t = patternBindingType(L, el.name);
         if (t !== null && t.kind !== "dyn") return false;

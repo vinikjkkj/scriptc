@@ -4,7 +4,7 @@
 // all of which RUN under --dynamic — and static rejections that no flag
 // fixes.
 const v: any = 21;
-const { widthOf } = v; // destructuring an any value stays engine-only (operators over it lower)
+const { widthOf }: { widthOf: number } = v; // destructuring an any value into a typed binding stays engine-only (the dyn read would have to trap where JS binds undefined)
 const root = Math.sqrt(81);
 const up = (19.99).toPrecision(3);
 const parsed = Number.parseFloat("1.5"); // the global's string form is static now; the Number static keeps the island

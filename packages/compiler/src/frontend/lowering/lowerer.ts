@@ -18991,7 +18991,7 @@ export class Lowerer {
             const pickedT = abi;
             srcType = pickedT;
             srcRef = () => ({ kind: "varRef", localId: src.id, type: pickedT, loc });
-            this.lowerBindingPattern(decl.name, srcRef, srcType, true, prologue);
+            this.lowerBindingPattern(decl.name, srcRef, srcType, true, prologue, undefined, "@param");
             return;
           }
           if (abi.kind !== "union") this.unsupported("SC1090", decl, "this parameter form"); // defensive
@@ -19026,7 +19026,7 @@ export class Lowerer {
           srcType = pickedT;
           srcRef = () => ({ kind: "varRef", localId: src.id, type: pickedT, loc });
         }
-        this.lowerBindingPattern(decl.name, srcRef, srcType, true, prologue);
+        this.lowerBindingPattern(decl.name, srcRef, srcType, true, prologue, undefined, "@param");
         return;
       }
       const name = (decl.name as ts.Identifier).text;
@@ -19716,7 +19716,8 @@ export class Lowerer {
     srcType: IrType,
     isLet: boolean,
     out: IrStmt[],
-    dynSpell?: string,): void {
+    dynSpell?: string,
+    srcText?: string,): void {
     // An ISLAND source (`const { readFileSync } = await import("fs")` —
     // a namespace handle, or any 'any'-typed object): each bound name is
     // an engine property read, mirroring the island property-read rule —
@@ -19787,7 +19788,7 @@ export class Lowerer {
       }
       return;
     }
-    return lowerBindingPattern(this, pattern, srcRef, srcType, isLet, out, dynSpell);
+    return lowerBindingPattern(this, pattern, srcRef, srcType, isLet, out, dynSpell, srcText);
   }
 
   checkBindingElement(el: ts.BindingElement, allowDefault = false): void {

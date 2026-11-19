@@ -1,8 +1,8 @@
 any.ts:7:5 - error SC2011: destructuring on 'any'-typed values runs in the embedded dynamic engine, which this build does not include
 
   6 | const n: any = 41;
-  7 | var { x } = <any>0; // destructuring a non-object 'any' — engine only
-    |     ^~~~~~~~~~~~~~
+  7 | var { x }: { x: number } = <any>0; // destructuring an any value into a typed binding — engine only
+    |     ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
   8 | for (const v of n as any) console.log(v); // iterating an 'any' value
 
   hint: build with --dynamic to run 'any'-typed code in the embedded engine (adds ~620KB to the binary), or stay static with 'unknown' and a checked cast ('x as T')
