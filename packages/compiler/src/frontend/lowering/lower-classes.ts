@@ -32,7 +32,7 @@ import { lowerAbsentRequireNew } from "./lower-require-absent.js";
 import { STREAM_API_MEMBERS, STREAM_PROP_MEMBERS, UNDERSCORE_METHODS, lowerStreamNew, lowerStreamSuperCall, streamCtorShape } from "./lower-stream.js";
 import { erasableSuperDelegation } from "./lower-emitter.js";
 import { emitOverrideShapeReason, emitSpecSuperForward, emitterRooted, lowerEmitterSuperCall, type EmitOverrideRec } from "./lower-emitter.js";
-import { declSymbolOf } from "./lower-modules.js";
+import { declSymbolOf, identifierIndexOf } from "./lower-modules.js";
 import { erasedViewOfRef, viewBaseOfInstance, withoutErasedViews } from "./lower-erasedview.js";
 import { boundedKeyValuesOf, uniqueSymbolKeyOf } from "./lower-exprs.js";
 import { isNetSocketCtor, lowerHttpAgentNew, lowerHttpServerNew, lowerNetSocketNew } from "./lower-server.js";
@@ -2887,6 +2887,76 @@ export function prototypeInstallerSteps(L: Lowerer, e: ts.Expression, classSymbo
   /** The members whose FIRST argument is a key (Map) or an element (Set). */
   const KEYED_MEMBERS: ReadonlySet<string> = new Set(["set", "get", "has", "delete", "add"]);
 
+/** The syntactic half of inferContainerTypeFromUses: every use of the container's binding in the program, as the key and value argument nodes of its
+   * member calls, or null when the value escapes or is never written. It reads the AST and the checker's symbol answers and nothing of the
+   * Lowerer's state, so for one program (one `moduleOrder`, whose nodes and symbols are fixed) the answer is fixed: it is kept per `new` expression.
+   * Without the memo every `m.set(...)` site that asks (markProxyBindings asks once per site of a dyn-flavored container, the lowering asks again
+   * per pass) walked EVERY module of the program and queried the checker about every identifier in it. The types of the arguments, which do depend on
+   * the Lowerer's registries, are mapped by the caller on every ask. */
+  const containerUseScans = new WeakMap<ts.Node, { order: readonly ts.SourceFile[]; flavor: "map" | "set"; scan: { keyArgs: ts.Expression[]; valArgs: ts.Expression[] } | null }>();
+  function containerUseScan(
+    L: Lowerer,
+    expr: ts.NewExpression,
+    decl: ts.VariableDeclaration,
+    sym: ts.Symbol,
+    flavor: "map" | "set",
+  ): { keyArgs: ts.Expression[]; valArgs: ts.Expression[] } | null {
+    const hit = containerUseScans.get(expr);
+    if (hit !== undefined && hit.order === L.moduleOrder && hit.flavor === flavor) return hit.scan;
+    const members = flavor === "map" ? MAP_USE_MEMBERS : SET_USE_MEMBERS;
+    const writer = flavor === "map" ? "set" : "add";
+    const keyArgs: ts.Expression[] = [];
+    const valArgs: ts.Expression[] = [];
+    let writes = 0;
+    let escaped = false;
+
+    // Only an identifier spelled like the binding can resolve to its symbol, so the program's per-file text index (identifierIndexOf, built once
+    // per file and shared with the activation scans) names the candidates and the checker is asked about those alone. The walk this replaced
+    // asked about EVERY identifier of EVERY module, once per container: containers x program size symbol queries and AST steps (4% of the
+    // CPU of a folded mysql2 build). The members found are the same set; their order cannot change an answer (escaped and writes are
+    // order-free, and oneOf below returns null on any null or unequal type whatever the order).
+    const name = (decl.name as ts.Identifier).text;
+    const use = (node: ts.Identifier): void => {
+      if (escaped) return;
+      if (node !== decl.name && L.checker.getSymbolAtLocation(node) === sym) {
+        const p = node.parent;
+        // `for (const [k, v] of m)` — iteration over the container is a
+        // read of the container, not a handing-out of it.
+        if (ts.isForOfStatement(p) && p.expression === node) return;
+        if (ts.isTypeOfExpression(p)) return;
+        if (!ts.isPropertyAccessExpression(p) || p.expression !== node) { escaped = true; return; }
+        const mname = p.name.text;
+        if (!members.has(mname)) { escaped = true; return; }
+        const call = p.parent;
+        const isCall = ts.isCallExpression(call) && call.expression === p;
+        if (KEYED_MEMBERS.has(mname)) {
+          if (!isCall) { escaped = true; return; }
+          const a0 = call.arguments[0];
+          if (a0 === undefined) { escaped = true; return; }
+          keyArgs.push(a0);
+          if (mname === writer) {
+            writes++;
+            if (flavor === "map") {
+              const a1 = call.arguments[1];
+              if (a1 === undefined) { escaped = true; return; }
+              valArgs.push(a1);
+            }
+          }
+        }
+      }
+    };
+    for (const sf of L.moduleOrder) {
+      for (const id of identifierIndexOf(sf).get(name) ?? []) {
+        use(id);
+        if (escaped) break;
+      }
+      if (escaped) break;
+    }
+    const scan = escaped || writes === 0 ? null : { keyArgs, valArgs };
+    containerUseScans.set(expr, { order: L.moduleOrder, flavor, scan });
+    return scan;
+  }
+
 /** JavaScript has no type-argument syntax, so `const m = new Map()` types
    * `Map<any, any>` however the program goes on to use it, and `any` is
    * not a supported map key — the container has no static home and the
@@ -2939,47 +3009,9 @@ export function prototypeInstallerSteps(L: Lowerer, e: ts.Expression, classSymbo
     const sym = L.checker.getSymbolAtLocation(decl.name);
     if (!sym) return null;
 
-    const members = flavor === "map" ? MAP_USE_MEMBERS : SET_USE_MEMBERS;
-    const writer = flavor === "map" ? "set" : "add";
-    const keyArgs: ts.Expression[] = [];
-    const valArgs: ts.Expression[] = [];
-    let writes = 0;
-    let escaped = false;
-
-    const visit = (node: ts.Node): void => {
-      if (escaped) return;
-      if (ts.isIdentifier(node) && node !== decl.name &&
-          L.checker.getSymbolAtLocation(node) === sym) {
-        const p = node.parent;
-        // `for (const [k, v] of m)` — iteration over the container is a
-        // read of the container, not a handing-out of it.
-        if (ts.isForOfStatement(p) && p.expression === node) return;
-        if (ts.isTypeOfExpression(p)) return;
-        if (!ts.isPropertyAccessExpression(p) || p.expression !== node) { escaped = true; return; }
-        const name = p.name.text;
-        if (!members.has(name)) { escaped = true; return; }
-        const call = p.parent;
-        const isCall = ts.isCallExpression(call) && call.expression === p;
-        if (KEYED_MEMBERS.has(name)) {
-          if (!isCall) { escaped = true; return; }
-          const a0 = call.arguments[0];
-          if (a0 === undefined) { escaped = true; return; }
-          keyArgs.push(a0);
-          if (name === writer) {
-            writes++;
-            if (flavor === "map") {
-              const a1 = call.arguments[1];
-              if (a1 === undefined) { escaped = true; return; }
-              valArgs.push(a1);
-            }
-          }
-        }
-        return;
-      }
-      ts.forEachChild(node, visit);
-    };
-    for (const sf of L.moduleOrder) { visit(sf); if (escaped) return null; }
-    if (escaped || writes === 0) return null;
+    const scan = containerUseScan(L, expr, decl, sym, flavor);
+    if (scan === null) return null;
+    const { keyArgs, valArgs } = scan;
 
     const oneOf = (nodes: readonly ts.Expression[]): IrType | null => {
       let acc: IrType | null = null;

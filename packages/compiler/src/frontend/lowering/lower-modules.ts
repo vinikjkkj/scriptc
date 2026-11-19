@@ -3356,7 +3356,7 @@ function preDeclarationSlot(
  * quadratic. Keyed on the node, so a dropped program drops the index. */
 const identifierIndexBySf = new WeakMap<ts.SourceFile, Map<string, ts.Identifier[]>>();
 
-function identifierIndexOf(sf: ts.SourceFile): Map<string, ts.Identifier[]> {
+export function identifierIndexOf(sf: ts.SourceFile): Map<string, ts.Identifier[]> {
   const cached = identifierIndexBySf.get(sf);
   if (cached) return cached;
   const index = new Map<string, ts.Identifier[]>();
