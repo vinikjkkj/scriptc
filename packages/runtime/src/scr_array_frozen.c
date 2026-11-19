@@ -5,6 +5,7 @@
 
 #include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* ── the GUARDED stores and pushes ─────────────────────────────────────
@@ -256,5 +257,162 @@ ScrDyn *scr_dyn_arr_freeze(ScrDyn *d) {
   return scr_dyn_retain(d);
 }
 
-static const ScrDynFrozenOps frozen_ops = { frozen_dyn_set, frozen_dyn_delete, frozen_dyn_invoke };
+/* ── Object.freeze / seal / preventExtensions over a dyn OBJECT ────────
+ * The level (1 non-extensible, 2 sealed, 3 frozen) is one number in the object's internal-slot table under "%integrity": a table nothing else enumerates, so no
+ * answer can see it (the inspect, keys and JSON walks skip a `%` slot, and deepStrictEqual ignores it). The core consults it only for an object that HAS a slot
+ * table, through scr_dyn_frozen_ops, so a program that never freezes an object pays one pointer test per keyed write. Strict sites throw V8's TypeErrors, sloppy
+ * sites (scr_dyn_sloppy_write) ignore the refused write, exactly like the frozen array. */
+static int obj_level(const ScrDyn *o) {
+  if (o == NULL || o->kind != SCR_DYN_OBJ) return 0;
+  const ScrDyn *v = scr_dyn_obj_slot_get(o, "%integrity", 10);
+  return v != NULL && v->kind == SCR_DYN_NUM ? (int)v->v.num : 0;
+}
+
+static void obj_recv_name(char *out, size_t cap, const ScrDyn *recv) {
+  if (recv->kind == SCR_DYN_OBJ && recv->null_proto) snprintf(out, cap, "[object Object]");
+  else {
+    const char *cname = recv->kind == SCR_DYN_OBJ ? scr_dyn_ext(recv)->cname : NULL;
+    snprintf(out, cap, "#<%s>", cname != NULL ? cname : "Object");
+  }
+}
+
+static void obj_throw(const char *a, const ScrStr *key, const char *b, const ScrDyn *recv, const char *c) {
+  char rn[96];
+  obj_recv_name(rn, sizeof rn, recv);
+  size_t cap = key->len + 256;
+  char *buf = (char *)malloc(cap);
+  int n = snprintf(buf, cap, "%s%.*s%s%s%s", a, (int)key->len, key->data, b, rn, c);
+  scr_throw_error_msg(SCR_ERR_TYPE, buf, (size_t)n);
+  free(buf);
+}
+
+static bool obj_set_refused(ScrDyn *recv, const ScrStr *key) {
+  int lv = obj_level(recv);
+  if (lv == 0) return false;
+  bool own = scr_dyn_obj_has_own_prop(recv, key->data, key->len);
+  if (own && lv < 3) return false; /* a sealed or non-extensible object still writes its own data properties */
+  if (scr_dyn_sloppy_write()) return true;
+  if (own) obj_throw("Cannot assign to read only property '", key, "' of object '", recv, "'");
+  else {
+    size_t cap = key->len + 64;
+    char *buf = (char *)malloc(cap);
+    int n = snprintf(buf, cap, "Cannot add property %.*s, object is not extensible", (int)key->len, key->data);
+    scr_throw_error_msg(SCR_ERR_TYPE, buf, (size_t)n);
+    free(buf);
+  }
+  return true;
+}
+
+static bool obj_del_refused(ScrDyn *recv, const ScrStr *key, bool *ans) {
+  int lv = obj_level(recv);
+  if (lv < 2 || !scr_dyn_obj_has_own_prop(recv, key->data, key->len)) return false;
+  if (scr_dyn_sloppy_write()) {
+    *ans = false;
+    return true;
+  }
+  obj_throw("Cannot delete property '", key, "' of ", recv, "");
+  *ans = false;
+  return true;
+}
+
+/* A define of `key` on a guarded object: a NEW own property needs an extensible object; a frozen object's own property is non-configurable and non-writable.
+ * (Node accepts a redefine that changes nothing; this refuses every redefine of a frozen own key, a divergence limited to that no-op form.) */
+static bool obj_add_refused(ScrDyn *recv, const ScrStr *key, bool redefine) {
+  (void)redefine;
+  int lv = obj_level(recv);
+  if (lv == 0) return false;
+  bool own = scr_dyn_obj_has_own_prop(recv, key->data, key->len);
+  if (!own) {
+    size_t cap = key->len + 64;
+    char *buf = (char *)malloc(cap);
+    int n = snprintf(buf, cap, "Cannot define property %.*s, object is not extensible", (int)key->len, key->data);
+    scr_throw_error_msg(SCR_ERR_TYPE, buf, (size_t)n);
+    free(buf);
+    return true;
+  }
+  if (lv == 3) {
+    size_t cap = key->len + 64;
+    char *buf = (char *)malloc(cap);
+    int n = snprintf(buf, cap, "Cannot redefine property: %.*s", (int)key->len, key->data);
+    scr_throw_error_msg(SCR_ERR_TYPE, buf, (size_t)n);
+    free(buf);
+    return true;
+  }
+  return false;
+}
+
+/* Object.assign(target, src) into a guarded target: the source's own enumerable string keys, in order, each through the guarded [[Set]] (strict: Object.assign
+ * throws). Answers false with an exception pending when a write is refused; a source kind this walk does not model is a loud error. */
+static bool obj_assign_guarded(ScrDyn *target, const ScrDyn *src) {
+  if (obj_level(target) == 0) return true;
+  switch (src->kind) {
+  case SCR_DYN_UNDEF: case SCR_DYN_NULL: case SCR_DYN_BOOL: case SCR_DYN_NUM: case SCR_DYN_BIG:
+    return true; /* nothing to copy */
+  case SCR_DYN_OBJ: {
+    ScrDyn *snap = scr_dyn_retain((ScrDyn *)src);
+    for (size_t i = 0; i < snap->v.obj.len; i++) {
+      ScrStr *k = scr_str_new(snap->v.obj.entries[i].key, snap->v.obj.entries[i].key_len);
+      ScrDyn *v = snap->v.obj.entries[i].value;
+      scr_dyn_key_set(target, k, v);
+      scr_str_release(k);
+      if (scr_exc_pending()) {
+        scr_dyn_release(snap);
+        return false;
+      }
+    }
+    scr_dyn_release(snap);
+    return true;
+  }
+  default: {
+    static const char msg[] = "Object.assign into a frozen, sealed or non-extensible object from this kind of source is not supported yet";
+    scr_throw_error_msg(SCR_ERR_ERROR, msg, sizeof msg - 1);
+    return false;
+  }
+  }
+}
+
+ScrDyn *scr_dyn_integrity_apply(ScrDyn *d, double level) {
+  const char *what = level >= 3 ? "Object.freeze" : level >= 2 ? "Object.seal" : "Object.preventExtensions";
+  switch (d->kind) {
+  case SCR_DYN_NULL: case SCR_DYN_UNDEF: case SCR_DYN_BOOL: case SCR_DYN_NUM: case SCR_DYN_STR: case SCR_DYN_BIG:
+  case SCR_DYN_MAP: case SCR_DYN_PROMISE: case SCR_DYN_ARRBUF:
+    return scr_dyn_retain(d); /* a primitive is its own frozen self; these kinds hold no own properties this runtime can write */
+  case SCR_DYN_OBJ: {
+    if (d->static_copy) {
+      scr_dyn_static_copy_refuse(what);
+      return NULL;
+    }
+    int cur = obj_level(d);
+    if ((int)level > cur) scr_dyn_obj_set_slot(d, "%integrity", 10, scr_dyn_new_num(level));
+    return scr_dyn_retain(d);
+  }
+  case SCR_DYN_ARR:
+    if (level >= 3) {
+      if (d->static_copy) {
+        scr_dyn_static_copy_refuse(what);
+        return NULL;
+      }
+      return scr_dyn_arr_freeze(d);
+    }
+    break;
+  case SCR_DYN_BYTES:
+    if (level >= 3) {
+      if (d->v.bytes->len != 0) {
+        static const char msg[] = "Cannot freeze array buffer views with elements";
+        scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+        return NULL;
+      }
+      return scr_dyn_retain(d);
+    }
+    break;
+  default:
+    break;
+  }
+  char buf[160];
+  int n = snprintf(buf, sizeof buf, "%s of this kind of dynamic value is not supported yet", what);
+  scr_throw_error_msg(SCR_ERR_ERROR, buf, (size_t)n);
+  return NULL;
+}
+
+static const ScrDynFrozenOps frozen_ops = { frozen_dyn_set, frozen_dyn_delete, frozen_dyn_invoke, obj_level, obj_set_refused, obj_del_refused, obj_add_refused, obj_assign_guarded };
 __attribute__((constructor)) static void frozen_install(void) { scr_dyn_frozen_ops = &frozen_ops; }

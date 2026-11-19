@@ -955,6 +955,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "sp.fromDyn": "scr_sp_from_dyn",
   "arr.freeze": "scr_arr_freeze",
   "dyn.freezeArr": "scr_dyn_arr_freeze",
+  "dyn.integrityApply": "scr_dyn_integrity_apply",
   "arr.isFrozen": "scr_arr_is_frozen",
   "arr.frozenFail": "scr_arr_frozen_fail",
   "sp.with": "scr_sp_with",

@@ -4209,6 +4209,8 @@ export type IrLibFn =
   | "arr.freeze"
   /** Object.freeze over a FRESH dyn array (sets the frozen flag, answers the same dyn). */
   | "dyn.freezeArr"
+  /** Object.freeze (3) / Object.seal (2) / Object.preventExtensions (1) over any checked-dynamic value (args: value, level); answers the same dyn. MAY THROW. */
+  | "dyn.integrityApply"
   /** The frozen bit (Object.isFrozen / isSealed over a typed array, and the guard of a mutation in a program that freezes arrays). */
   | "arr.isFrozen"
   /** arr.isFrozen over an array reference that may still be NULL (a hoisted loop-entry test: the loop may never touch the array): NULL answers false. */
@@ -12519,7 +12521,7 @@ const DYN_ARRAY_METHODS: ReadonlySet<string> = new Set(["pop", "shift", "join", 
 const DYN_ARRAY_LIB_FNS: ReadonlySet<string> = new Set(["array.sortDyn", "array.toSortedDyn", "array.fromDynIter", "array.toF64Dyn"]);
 
 /** The library calls that live in scr_array_frozen.c. */
-const FROZEN_ARRAY_LIB_FNS: ReadonlySet<string> = new Set(["arr.freeze", "arr.frozenFail", "dyn.freezeArr"]);
+const FROZEN_ARRAY_LIB_FNS: ReadonlySet<string> = new Set(["arr.freeze", "arr.frozenFail", "dyn.freezeArr", "dyn.integrityApply"]);
 
 /** True when the module freezes an array or guards the writes of one (a frozenGuard marker, a freeze libCall): the link switch for scr_array_frozen.c, so a
  * program that freezes no array carries none of it. */
@@ -15654,6 +15656,7 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "sp.fromDyn",
   "arr.frozenFail",
   "dyn.freezeArr",
+  "dyn.integrityApply",
   "fs.statSync",
   "crypto.randomBytesToString",
   "crypto.randomBytes",

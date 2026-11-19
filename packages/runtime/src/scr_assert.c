@@ -722,11 +722,14 @@ static bool scr_assert_dyn_deep_eq(const ScrDyn *a, const ScrDyn *b) {
        * same silent PASS on an assertion that must fail. */
       {
         const ScrDyn *sa = scr_dyn_ext(a)->slots, *sb = scr_dyn_ext(b)->slots;
-        size_t na = sa != NULL ? sa->v.obj.len : 0;
-        size_t nb = sb != NULL ? sb->v.obj.len : 0;
+        /* the "%integrity" slot (Object.freeze / seal / preventExtensions) is not part of the value: deepStrictEqual does not compare it */
+        size_t na = 0, nb = 0;
+        for (size_t i = 0; sa != NULL && i < sa->v.obj.len; i++) na += !(sa->v.obj.entries[i].key_len == 10 && memcmp(sa->v.obj.entries[i].key, "%integrity", 10) == 0);
+        for (size_t i = 0; sb != NULL && i < sb->v.obj.len; i++) nb += !(sb->v.obj.entries[i].key_len == 10 && memcmp(sb->v.obj.entries[i].key, "%integrity", 10) == 0);
         if (na != nb) return false;
-        for (size_t i = 0; i < na; i++) {
+        for (size_t i = 0; sa != NULL && i < sa->v.obj.len; i++) {
           const ScrDynEntry *ent = &sa->v.obj.entries[i];
+          if (ent->key_len == 10 && memcmp(ent->key, "%integrity", 10) == 0) continue;
           ScrDyn *bv = scr_dyn_obj_get(sb, ent->key, ent->key_len);
           if (!bv || !scr_assert_dyn_deep_eq(ent->value, bv)) return false;
         }

@@ -1,0 +1,30 @@
+"use strict";
+function mk() { return JSON.parse('{"a":1}'); }
+const o = mk();
+let log = [];
+Object.defineProperty(o, "acc", { get() { return log.length; }, set(v) { log.push(v); }, enumerable: true, configurable: true });
+Object.defineProperty(o, "hid", { value: 5, writable: true, enumerable: false, configurable: true });
+Object.freeze(o);
+const w = (f) => { try { f(); console.log("ok"); } catch (e) { console.log(e.constructor.name, e.message); } };
+w(() => { o.acc = 3; });
+console.log(o.acc, log, Object.isFrozen(o));
+w(() => { o.hid = 6; });
+w(() => { o.a = 6; });
+w(() => { delete o.hid; });
+w(() => { delete o.acc; });
+const s = mk(); Object.seal(s);
+w(() => { s.a = 2; s.b = 3; });
+console.log(s, Object.isSealed(s), Object.isFrozen(s));
+function mix(x) { Object.freeze(x); return x; }
+const m = mix(mk());
+w(() => { m.a++; });
+w(() => { m.a += 1; });
+w(() => { m["a"] = 1; });
+const assert = require("assert");
+assert.deepStrictEqual(Object.freeze(mk()), mk());
+console.log("deepEqual ok");
+console.log(Object.isFrozen(mix(JSON.parse("{}"))), Object.isFrozen(Object.seal(JSON.parse("{}"))));
+const inner = JSON.parse('{"i":{"j":1}}');
+(function deep(v) { Object.freeze(v); for (const k of Object.keys(v)) if (typeof v[k] === "object") deep(v[k]); })(inner);
+w(() => { inner.i.j = 2; });
+console.log(inner, require("util").inspect(inner));

@@ -14534,6 +14534,19 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
         return { kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: subject, loc: locOf(call) }], result: { kind: "boolLit", value: true, type: BOOL, loc: locOf(call) }, type: BOOL, loc: locOf(call) };
       }
     }
+    // Object.seal / Object.preventExtensions: observable (isSealed, a later add or delete), so only a CHECKED-DYNAMIC operand takes them, as the runtime integrity
+    // level of the dyn object; a primitive is its own sealed self. Every typed shape keeps the SC2020 fence (a static shape has no per-object bit).
+    if ((member === "seal" || member === "preventExtensions") && call.arguments.length === 1 && !ts.isSpreadElement(call.arguments[0]!)) {
+      const probedArg = probeLower(L, call.arguments[0]!);
+      if (probedArg !== null && probedArg.type.kind === "dyn") {
+        const subject = L.lowerExpr(call.arguments[0]!);
+        L.dynArrayFrozen = true;
+        return { kind: "libCall", fn: "dyn.integrityApply", args: [subject, { kind: "numLit", value: member === "seal" ? 2 : 1, type: F64, loc: locOf(call) }], type: DYN, loc: locOf(call) };
+      }
+      if (probedArg !== null && (probedArg.type.kind === "string" || probedArg.type.kind === "f64" || probedArg.type.kind === "bool" || probedArg.type.kind === "symbol" || isUnitType(probedArg.type))) {
+        return L.lowerExpr(call.arguments[0]!);
+      }
+    }
     if (member === "freeze") {
       if (call.arguments.length !== 1 || ts.isSpreadElement(call.arguments[0]!)) {
         L.noLowering(`Object.freeze with ${call.arguments.length} arguments`, call);
@@ -14612,6 +14625,12 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       }
       if (ts.isIdentifier(inner) && freezeFreshLocal(L, inner, call)) {
         return value;
+      }
+      // A CHECKED-DYNAMIC value (an `any` / `unknown` / `object` slot, an untyped JS value): its integrity level is a runtime fact of the dyn object itself
+      // (scr_array_frozen.c), enforced on every dyn write path, so the freeze is exact however many aliases exist.
+      if (value.type.kind === "dyn") {
+        L.dynArrayFrozen = true;
+        return { kind: "libCall", fn: "dyn.integrityApply", args: [value, { kind: "numLit", value: 3, type: F64, loc: locOf(call) }], type: DYN, loc: locOf(call) };
       }
       L.noLowering(
         "Object.freeze of a possibly-aliased value",

@@ -4892,6 +4892,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_sp_from_dyn(${arg(0)})`);
           case "dyn.freezeArr":
             return finish(`scr_dyn_arr_freeze(${arg(0)})`);
+          case "dyn.integrityApply":
+            return finish(`scr_dyn_integrity_apply(${arg(0)}, ${arg(1)})`);
           case "arr.freeze":
             return finish(`scr_arr_freeze(${arg(0)})`);
           case "arr.isFrozenNullSafe": {

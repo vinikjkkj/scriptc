@@ -144,6 +144,14 @@ ScrDyn *scr_dyn_set_prototype_of(const ScrDyn *o, const ScrDyn *proto) {
     scr_throw_error(SCR_ERR_ERROR, scr_str_new("Object.setPrototypeOf over this kind of object is not supported yet (the [[Prototype]] link holds a plain object here)", 117));
     return NULL;
   }
+  if (scr_dyn_ext(o)->slots != NULL && scr_dyn_frozen_ops != NULL && scr_dyn_frozen_ops->obj_level(o) != 0) {
+    /* a non-extensible object keeps its [[Prototype]] (a no-op set of the SAME prototype is allowed) */
+    if (scr_dyn_obj_proto_ref(o) != (proto->kind == SCR_DYN_NULL ? NULL : (ScrDyn *)proto)) {
+      scr_throw_error(SCR_ERR_TYPE, scr_str_new("#<Object> is not extensible", 27));
+      return NULL;
+    }
+    return scr_dyn_retain((ScrDyn *)o);
+  }
   if (proto->kind == SCR_DYN_OBJ) {
     ScrDyn *cur = scr_dyn_obj_proto_ref(proto);
     bool cyc = proto == o;

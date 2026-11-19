@@ -3764,6 +3764,17 @@ bool scr_dyn_integrity(const ScrDyn *d, double which) {
   switch (d == NULL ? SCR_DYN_UNDEF : d->kind) {
   case SCR_DYN_OBJ:
     if (d->module_ns) { sealed = true; ext = false; }
+    else if (scr_dyn_ext(d)->slots != NULL && scr_dyn_frozen_ops != NULL) {
+      /* Object.freeze / seal / preventExtensions (scr_array_frozen.c): the level, and what it implies of an object with this many own properties. A
+       * non-extensible object with no own property is sealed AND frozen; a sealed one is frozen when no own data property is left writable. */
+      int lv = scr_dyn_frozen_ops->obj_level(d);
+      if (lv >= 1) {
+        ext = false;
+        bool empty = d->v.obj.len == 0 && (scr_dyn_ext(d)->hidden == NULL || scr_dyn_ext(d)->hidden->v.obj.len == 0);
+        sealed = lv >= 2 || empty;
+        frozen = lv >= 3 || empty;
+      }
+    }
     break;
   case SCR_DYN_ARR:
     if (d->null_proto) { frozen = sealed = true; ext = false; }
@@ -10095,6 +10106,10 @@ bool scr_dyn_key_delete(ScrDyn *recv, ScrStr *key) {
     return false;
   }
   if (recv->kind == SCR_DYN_OBJ) {
+    if (scr_dyn_ext(recv)->slots != NULL && scr_dyn_frozen_ops != NULL) {
+      bool refused_answer = true;
+      if (scr_dyn_frozen_ops->obj_del(recv, key, &refused_answer)) return refused_answer;
+    }
     /* The implicit own `constructor` of a function's minted prototype
      * (scr_dyn_fn_prototype) is CONFIGURABLE in Node, so this delete
      * succeeds — and it has to be RECORDED, because the property's
@@ -10529,9 +10544,13 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
      * at all — the common object pays one NULL test per write. */
     ScrDyn *found = NULL;
     const ScrDyn *holder = NULL;
+    /* A frozen / sealed / non-extensible object (Object.freeze and friends, scr_array_frozen.c) carries its level in its slot table: only an object that has
+     * one asks, so every other write pays this one pointer test. */
+    const bool guarded = scr_dyn_ext(recv)->slots != NULL && scr_dyn_frozen_ops != NULL && scr_dyn_frozen_ops->obj_level(recv) != 0;
     if (scr_dyn_ext(recv)->hidden != NULL || scr_dyn_ext(recv)->proto != NULL) {
       ScrPropKind pk = scr_dyn_obj_resolve(recv, key->data, key->len, &found, &holder);
       if (pk == SCR_PROP_HIDDEN_DATA) {
+        if (guarded && holder == recv && scr_dyn_frozen_ops->obj_set(recv, key)) return;
         if (!scr_hid_writable(found)) {
           ScrJsonBuf sb;
           scr_jb_init(&sb);
@@ -10573,6 +10592,7 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
         return;
       }
     }
+    if (guarded && scr_dyn_frozen_ops->obj_set(recv, key)) return;
     /* The ONE own property this representation knows Node has and does
      * not STORE: a function's minted prototype is born carrying
      * `constructor`, a data property { writable, NON-enumerable,
@@ -16101,6 +16121,10 @@ ScrDyn *scr_dyn_assign(ScrDyn *target, const ScrDyn *src) {
     }
   }
 #endif
+  if (target->kind == SCR_DYN_OBJ && scr_dyn_ext(target)->slots != NULL && scr_dyn_frozen_ops != NULL &&
+      scr_dyn_frozen_ops->obj_level(target) != 0) {
+    return scr_dyn_frozen_ops->obj_assign(target, src) ? scr_dyn_retain(target) : NULL;
+  }
   scr_dyn_assign_from(target, src);
   return scr_dyn_retain(target);
 }

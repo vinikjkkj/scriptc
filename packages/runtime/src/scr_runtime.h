@@ -7104,7 +7104,19 @@ typedef struct ScrDynFrozenOps {
   void (*set)(ScrDyn *recv, ScrStr *key);
   bool (*del)(ScrDyn *recv, ScrStr *key);
   bool (*invoke)(ScrDyn *recv, const char *method, ScrDyn **args, size_t argc);
+  /* The OBJ arm (Object.freeze / seal / preventExtensions over a dyn object: scr_array_frozen.c). The level lives in the object's internal-slot table
+   * (1 non-extensible, 2 sealed, 3 frozen); the core asks only objects that HAVE a slot table. `obj_level` answers it (0 = ordinary). `obj_set`: true when the
+   * write of `key` is refused (sloppy sites ignore it, strict ones throw: exception pending). `obj_del`: true when the delete is refused; the answer is *ans.
+   * `obj_add`: true when a NEW own property of that name cannot be created (define paths). `obj_copy_ok`: false (with a loud error pending) when Object.assign
+   * cannot copy `src` into a guarded `target` exactly. */
+  int (*obj_level)(const ScrDyn *o);
+  bool (*obj_set)(ScrDyn *recv, const ScrStr *key);
+  bool (*obj_del)(ScrDyn *recv, const ScrStr *key, bool *ans);
+  bool (*obj_add)(ScrDyn *recv, const ScrStr *key, bool redefine);
+  bool (*obj_assign)(ScrDyn *target, const ScrDyn *src);
 } ScrDynFrozenOps;
+/* Object.freeze (level 3) / Object.seal (2) / Object.preventExtensions (1) over ANY dyn value; answers the value +1. */
+ScrDyn *scr_dyn_integrity_apply(ScrDyn *d, double level);
 extern const ScrDynFrozenOps *scr_dyn_frozen_ops;
 void scr_arr_drop_value(const ScrArr *a, void *v);
 /* `key in v` with a runtime key — the dynHasKey fold per value (OBJ own
