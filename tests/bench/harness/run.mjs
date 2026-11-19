@@ -66,7 +66,7 @@ if (irMsgs > 0) for (const a of arms) {
   mkdirSync(`${out}/cg`, { recursive: true }); copyFileSync(bin(a), `${out}/cg/prog`); spawnSync('chmod', ['+x', `${out}/cg/prog`])
   const cg = `${out}/${label}.callgrind.out`
   const env = { ...envFor(), ZAPO_BENCH_MESSAGES: String(irMsgs), ZAPO_BENCH_PREKEY_TIMEOUT_MS: '600000' }
-  const r = spawnSync('valgrind', ['--tool=callgrind', `--callgrind-out-file=${cg}`, `${out}/cg/prog`], { cwd: TREE, env, maxBuffer: 1 << 28, timeout: 3 * 3600e3 })
+  const r = spawnSync('valgrind', ['--tool=callgrind', ...(process.env.VG_EXTRA ?? '').split(' ').filter(Boolean), `--callgrind-out-file=${cg}`, `${out}/cg/prog`], { cwd: TREE, env, maxBuffer: 1 << 28, timeout: 3 * 3600e3 })
   const m = /Collected\s*:\s*(\d+)/.exec(r.stderr.toString())
   results.ir[label] = m ? Number(m[1]) : null
 }
