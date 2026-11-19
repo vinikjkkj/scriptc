@@ -415,6 +415,9 @@ ScrDyn *scr_dyn_integrity_apply(ScrDyn *d, double level) {
     }
     int cur = obj_level(d);
     if ((int)level > cur) scr_dyn_obj_set_slot(d, "%integrity", 10, scr_dyn_new_num(level));
+    /* scr_dyn_key_set asks for the level only behind its `hidden || proto` gate (the plain write pays nothing for freeze): an object that carries a level
+     * therefore carries a hidden table too, empty when it has no hidden members (an empty table already means "none": defineProperty makes one too). */
+    if (scr_dyn_ext(d)->hidden == NULL) scr_dyn_ext_w(d)->hidden = scr_dyn_new_obj();
 #ifdef SCR_SYMTAB
     if (scr_dyn_ext(d)->syms != NULL && scr_dyn_sym_integrity != NULL) scr_dyn_sym_integrity(d, (int)level);
 #endif

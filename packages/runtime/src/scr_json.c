@@ -10575,11 +10575,11 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
      * at all — the common object pays one NULL test per write. */
     ScrDyn *found = NULL;
     const ScrDyn *holder = NULL;
-    /* A frozen / sealed / non-extensible object (Object.freeze and friends, scr_array_frozen.c) carries its level in its slot table: only an object that has
-     * one asks, so every other write pays this one pointer test. */
-    const ScrDynObjExt *ex0 = scr_dyn_ext(recv);
-    const bool guarded = ex0->slots != NULL && scr_dyn_frozen_ops != NULL && scr_dyn_frozen_ops->obj_level(recv) != 0;
-    if (ex0->hidden != NULL || ex0->proto != NULL) {
+    /* A frozen / sealed / non-extensible object (Object.freeze and friends, scr_array_frozen.c) carries its level in its slot table, and freezing gives it
+     * a hidden table (possibly empty): the level is asked only behind this gate, so the plain write pays nothing for it. */
+    if (scr_dyn_ext(recv)->hidden != NULL || scr_dyn_ext(recv)->proto != NULL) {
+      const ScrDynObjExt *ex0 = scr_dyn_ext(recv);
+      const bool guarded = ex0->slots != NULL && scr_dyn_frozen_ops != NULL && scr_dyn_frozen_ops->obj_level(recv) != 0;
       ScrPropKind pk = scr_dyn_obj_resolve(recv, key->data, key->len, &found, &holder);
       if (pk == SCR_PROP_HIDDEN_DATA) {
         if (guarded && holder == recv && scr_dyn_frozen_ops->obj_set(recv, key)) return;
@@ -10623,8 +10623,8 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
         scr_dyn_release(r); /* NULL-tolerant: a throwing setter leaves it pending */
         return;
       }
+      if (guarded && scr_dyn_frozen_ops->obj_set(recv, key)) return;
     }
-    if (guarded && scr_dyn_frozen_ops->obj_set(recv, key)) return;
     /* The ONE own property this representation knows Node has and does
      * not STORE: a function's minted prototype is born carrying
      * `constructor`, a data property { writable, NON-enumerable,
