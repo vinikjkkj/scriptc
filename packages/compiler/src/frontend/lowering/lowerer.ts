@@ -12699,6 +12699,21 @@ export class Lowerer {
     }
     if (viewShapes.size === 0) return;
     const liftedBefore = this.liftedFns.length;
+    // DYN VIEW IDENTITY: the view shapes whose records are identity-observed by a container (see IrRecordShape.canon).
+    const identityShapes = new Set<string>();
+    const noteIdentityKey = (t: IrType | undefined): void => {
+      if (t === undefined) return;
+      if (t.kind === "record") {
+        if (viewShapes.has(t.shapeId)) identityShapes.add(t.shapeId);
+      } else if (t.kind === "union") {
+        for (const arm of this.unions.get(t.unionId)?.arms ?? []) noteIdentityKey(arm);
+      }
+    };
+    const noteContainer = (t: IrType | undefined): void => {
+      if (t === undefined) return;
+      if (t.kind === "map" || t.kind === "weakmap") noteIdentityKey(t.key);
+      else if (t.kind === "set") noteIdentityKey(t.elem);
+    };
     for (const fn of [...functions]) {
       let n = 0;
       const temp = (type: IrType): IrLocal => {
@@ -12750,6 +12765,12 @@ export class Lowerer {
         }
         for (const v of Object.values(node as Record<string, unknown>)) visit(v);
         const o = node as Record<string, unknown> & { kind?: unknown };
+        if (o.kind === "mapNew" || o.kind === "setNew") noteContainer(o["type"] as IrType);
+        else if (o.kind === "mapIntrinsic" || o.kind === "setIntrinsic") noteContainer((o["receiver"] as IrExpr).type);
+        else if (o.kind === "arrIntrinsic" && (o["method"] === "indexOf" || o["method"] === "includes" || o["method"] === "lastIndexOf")) {
+          const rt = (o["receiver"] as IrExpr).type;
+          if (rt.kind === "array") noteIdentityKey(rt.elem);
+        }
         if (o.kind === "recordGet" && this.classViewOnly(o["shapeId"] as string)) {
           // A record only a class instance (or nothing) is a view of: a method is the record's own slot (a view stores its bound closure there), a
           // data member is the instance struct's slot when the view slot holds a source and the record's own otherwise, in one test.
@@ -12816,6 +12837,10 @@ export class Lowerer {
       };
       unshare(fn.body);
       visit(fn.body);
+    }
+    for (const id of identityShapes) {
+      const sh = this.shapes.get(id);
+      if (sh !== undefined) sh.canon = true;
     }
     // Closures minted by the rewrite (an optional method read per access) join the program.
     functions.push(...this.liftedFns.slice(liftedBefore));
