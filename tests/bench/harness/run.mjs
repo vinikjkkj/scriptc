@@ -37,6 +37,7 @@ function one(label, cmd, rep) {
   const stdout = r.stdout.toString()
   writeFileSync(`${out}/${label}.${rep}.stdout.txt`, stdout)
   writeFileSync(`${out}/${label}.${rep}.stderr.txt`, r.stderr.toString().slice(-20000))
+  for (const l of r.stderr.toString().split('\n')) if (l.startsWith('OBJCEN')) lines.push(`${label}.${rep} ${l}`)
   let pm = null; try { pm = JSON.parse(readFileSync(pj, 'utf8')) } catch {}
   const run = { label, rep, exit: pm ? pm.exit : r.status, rss_peak_kb: pm?.rss_peak_kb ?? null, cpu_self_ms: pm?.cpu_self_ms ?? null, wall_ms: pm?.wall_ms ?? null, parity_md5: mask(scenarios(stdout)) }
   results.runs.push(run)
@@ -101,4 +102,5 @@ for (const l of [...(withNode ? ['node'] : []), ...labels]) {
   rows.push(`| ${l} | ${rs.map((r) => r.rss_peak_kb).join(' / ')} | ${rssMed(l)} | ${hasBase ? pct(rssMed(baseL), rssMed(l)) : ''} | ${[...new Set(rs.map((r) => r.parity))].join('/')} | ${results.ir[l] ?? ''} | ${hasBase ? pct(results.ir[baseL], results.ir[l]) : ''} | ${sm && sm.classes ? sm.classes['heap(brk)']?.Rss ?? 0 : ''} | ${fb} | ${sm && sm.classes ? sm.classes['main-binary:code(r-x)']?.Rss ?? 0 : ''} | ${sm && sm.classes ? sm.classes['main-binary:rodata(r--)']?.Rss ?? 0 : ''} |`)
 }
 writeFileSync(`${out}/summary.md`, `store: ${store}, reps: ${reps}, node ${results.node}\n\n` + rows.join('\n') + '\n')
+for (const l of lines) if (typeof l === 'string' && l.includes('OBJCEN')) console.log(l)
 console.log(sumlines.join('\n'))
