@@ -45,6 +45,8 @@ export const SRCPROTO_MEMBER = "sc_srcproto";
 /** The hidden member of a VIEW-capable shape (IrRecordShape.view): the dyn OBJECT the record is a view of,
  * NULL when the record was built any other way. Last in the struct, so no existing member moves. */
 export const VIEW_MEMBER = "sc_view";
+/** Test control (SCRIPTC_DYNVIEW_MUTANT=nounreg): leave the registry's release hooks out, so SCR_DYNVIEW_CHECK=1 has a missed hook to find. */
+const DYNVIEW_NOUNREG = process.env["SCRIPTC_DYNVIEW_MUTANT"] === "nounreg";
 /** The hidden member of a shape with several key orders (IrRecordShape.keyOrders): which one this instance was built in.
  * Last in the struct, so no existing member moves; zero (the shape's declaredOrder) on every record built any other way. */
 export const KEYIX_MEMBER = "sc_kx";
@@ -420,7 +422,7 @@ export interface ClassMeta {
           `  if (!o || o->rc == SIZE_MAX) return;`,
           `  if (--o->rc == 0) {`,
         );
-        if (s.canon === true) out.push(`    scr_dynview_unreg(o, o->${VIEW_MEMBER}, (const void *)&${s.release}); /* the one record of its dynamic view leaves the table */`);
+        if (s.canon === true && !DYNVIEW_NOUNREG) out.push(`    scr_dynview_unreg(o, o->${VIEW_MEMBER}, (const void *)&${s.release}); /* the one record of its dynamic view leaves the table */`);
         {
           const g = numSlotGhostsC(s.meta?.def);
           if (g !== "") out.push(`    SCR_PROPS_GHOST_SUB(${g});`);
@@ -473,7 +475,7 @@ export interface ClassMeta {
         `  if (--o->rc == 0) {`,
         `    scr_cyc_on_dead(o);`,
       );
-      if (s.canon === true) out.push(`    scr_dynview_unreg(o, o->${VIEW_MEMBER}, (const void *)&${s.release}); /* the one record of its dynamic view leaves the table */`);
+      if (s.canon === true && !DYNVIEW_NOUNREG) out.push(`    scr_dynview_unreg(o, o->${VIEW_MEMBER}, (const void *)&${s.release}); /* the one record of its dynamic view leaves the table */`);
       {
         const g = numSlotGhostsC(s.meta?.def);
         if (g !== "") out.push(`    SCR_PROPS_GHOST_SUB(${g});`);
@@ -509,7 +511,7 @@ export interface ClassMeta {
         ),
         `}`,
         `${E.link}void ${s.gcFree}(void *o0) {`,
-        ...(s.canon === true ? [`  scr_dynview_unreg(o0, ((${s.struct} *)o0)->${VIEW_MEMBER}, (const void *)&${s.release}); /* the view pointer is a key here, never read */`] : []),
+        ...(s.canon === true && !DYNVIEW_NOUNREG ? [`  scr_dynview_unreg(o0, ((${s.struct} *)o0)->${VIEW_MEMBER}, (const void *)&${s.release}); /* the view pointer is a key here, never read */`] : []),
         ...(untracedRefFields.length > 0 || cbit || numSlotGhostsC(s.meta?.def) !== ""
           ? [
               `  ${s.struct} *o = (${s.struct} *)o0;`,

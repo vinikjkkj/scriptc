@@ -2740,7 +2740,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             d.push(`    ${cDecl(t, "r")} = ${mangleRecordNew(t.shapeId)}();`);
             d.push(`    r->${VIEW_MEMBER} = scr_dyn_retain((ScrDyn *)d);`);
             if (shape.tostr) d.push(`    r->${TOSTR_MEMBER} = scr_dyn_tostr_closure(d);`);
-            d.push(shape.canon === true ? `    return (${cType(t).trim()})scr_dynview_canon(r, r->${VIEW_MEMBER}, (const void *)&${mangleRecordRelease(t.shapeId)}, sizeof *r, ${mangleRecordRetain(t.shapeId)}_v, ${mangleRecordRelease(t.shapeId)}_v);` : `    return r;`);
+            d.push(shape.canon === true ? `    return (${cType(t).trim()})scr_dynview_canon(r, r->${VIEW_MEMBER}, (const void *)&${mangleRecordRelease(t.shapeId)}, sizeof *r, offsetof(${mangleRecordStruct(t.shapeId)}, ${VIEW_MEMBER}), ${mangleRecordRetain(t.shapeId)}_v, ${mangleRecordRelease(t.shapeId)}_v);` : `    return r;`);
             d.push(`  }`);
           }
           d.push(`  if (d->kind != SCR_DYN_OBJ) {`);
@@ -3130,7 +3130,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         if (wide || inst || jsv) d.push(`  if (sc_proj) scr_dyn_release(sc_proj);`);
         // DYN VIEW IDENTITY: a view of an object is ONE record per (object, shape), so `===`, Map and Set keys, WeakMap keys and indexOf see
         // JavaScript's one object however often it is read off (scr_dynview_canon: a later build is swapped into the registered record).
-        d.push(shape.canon === true ? `  return (${cType(t).trim()})scr_dynview_canon(r, r->${VIEW_MEMBER}, (const void *)&${mangleRecordRelease(t.shapeId)}, sizeof *r, ${mangleRecordRetain(t.shapeId)}_v, ${mangleRecordRelease(t.shapeId)}_v);` : `  return r;`);
+        d.push(shape.canon === true ? `  return (${cType(t).trim()})scr_dynview_canon(r, r->${VIEW_MEMBER}, (const void *)&${mangleRecordRelease(t.shapeId)}, sizeof *r, offsetof(${mangleRecordStruct(t.shapeId)}, ${VIEW_MEMBER}), ${mangleRecordRetain(t.shapeId)}_v, ${mangleRecordRelease(t.shapeId)}_v);` : `  return r;`);
         break;
       }
       case "array": {

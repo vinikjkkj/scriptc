@@ -797,7 +797,7 @@ export function emitRecordShapes(host: ShapeHost, mod: IrModule): { typeDefs: st
       host.declare(`declare void @scr_cyc_on_dead(ptr)`);
       rel.push(`  call void @scr_cyc_on_dead(ptr %o)`);
     }
-    if (shape.canon) {
+    if (shape.canon && process.env["SCRIPTC_DYNVIEW_MUTANT"] !== "nounreg") {
       // DYN VIEW IDENTITY: the one record of its dynamic view leaves the table (the C twin's scr_dynview_unreg line).
       host.declare(`declare void @scr_dynview_unreg(ptr, ptr, ptr)`);
       rel.push(
@@ -913,7 +913,7 @@ export function emitRecordShapes(host: ShapeHost, mod: IrModule): { typeDefs: st
         `define internal void @${mangleRecordGcFree(shape.id)}(ptr %o) ${FN_ATTRS} {`,
         `entry:`,
       ];
-      if (shape.canon) {
+      if (shape.canon && process.env["SCRIPTC_DYNVIEW_MUTANT"] !== "nounreg") {
         host.declare(`declare void @scr_dynview_unreg(ptr, ptr, ptr)`);
         gf.push(
           `  %uvp = getelementptr inbounds %${struct}, ptr %o, i64 0, i32 ${viewSlotIndex(shape)}`,
