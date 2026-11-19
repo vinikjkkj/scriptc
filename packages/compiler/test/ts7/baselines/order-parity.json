@@ -17084,6 +17084,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25800-destructuring-an-any-value-binds-dyn-reads-defaults-rest-and-v8-null-errors.ts": {
+   "order": [
+    "<repo>/tests/corpus/25800-destructuring-an-any-value-binds-dyn-reads-defaults-rest-and-v8-null-errors.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25801-object-entries-of-an-any-value-length-and-tuple-destructuring-callbacks.ts": {
+   "order": [
+    "<repo>/tests/corpus/25801-object-entries-of-an-any-value-length-and-tuple-destructuring-callbacks.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25802-js-destructuring-a-nullish-dyn-source-throws-the-v8-message-and-rest-copies-own-keys.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25802-js-destructuring-a-nullish-dyn-source-throws-the-v8-message-and-rest-copies-own-keys.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25803-object-freeze-seal-and-prevent-extensions-over-checked-dynamic-objects-sloppy-and-strict.ts": {
+   "order": [
+    "<repo>/tests/corpus/25803-object-freeze-seal-and-prevent-extensions-over-checked-dynamic-objects-sloppy-and-strict.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25804-frozen-and-sealed-dyn-objects-keep-accessors-hidden-keys-and-deep-equality.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25804-frozen-and-sealed-dyn-objects-keep-accessors-hidden-keys-and-deep-equality.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2581-jsval-routed-calls.js": {
    "order": [
     "<repo>/tests/corpus/2581-jsval-routed-calls.js"
