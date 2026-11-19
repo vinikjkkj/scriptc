@@ -1313,7 +1313,8 @@ static JSValue isl_from_dyn(const ScrDyn *d);
  * definition; "__proto__" is such a key), and only while Object.prototype's shape fingerprint (address, property count, deleted count) is
  * the one recorded when the first template was made: a key added to Object.prototype afterwards ends the fast path for good. */
 #define ISL_TPL_SLOTS 64
-#define ISL_TPL_MAXKEYS 32
+#define ISL_TPL_MAXKEYS 128
+#define ISL_TPL_STACKKEYS 32 /* wider sequences hold their values on the heap, so a deep tree costs 512 B of stack per level as before */
 enum { ISL_TPL_EMPTY = 0, ISL_TPL_OK = 1, ISL_TPL_BAD = 2 };
 typedef struct IslTpl {
   uint32_t hash;
@@ -1519,20 +1520,25 @@ static JSValue isl_from_dyn(const ScrDyn *d) {
       /* A key sequence this island has marshalled before: the object is made over the SAME hashed shape the property-by-property path
        * ends with (JS_NewObjectLikeTemplate), the values converted in the same order. */
       size_t n = d->v.obj.len;
-      JSValue vals[ISL_TPL_MAXKEYS];
+      JSValue vals_stack[ISL_TPL_STACKKEYS];
+      JSValue *vals = n <= ISL_TPL_STACKKEYS ? vals_stack : (JSValue *)malloc(n * sizeof *vals);
+      if (vals == NULL) return JS_ThrowOutOfMemory(isl_ctx);
       for (size_t i = 0; i < n; i++) {
         vals[i] = isl_from_dyn(d->v.obj.entries[i].value);
         if (JS_IsException(vals[i])) {
           for (size_t j = 0; j < i; j++) JS_FreeValue(isl_ctx, vals[j]);
+          if (vals != vals_stack) free(vals);
           return JS_EXCEPTION;
         }
       }
       JSValue fast = JS_NewObjectLikeTemplate(isl_ctx, tpl->tmpl, (int)n, vals);
       if (JS_IsException(fast)) {
         for (size_t j = 0; j < n; j++) JS_FreeValue(isl_ctx, vals[j]);
+        if (vals != vals_stack) free(vals);
         return fast;
       }
       if (!JS_IsUndefined(fast)) {
+        if (vals != vals_stack) free(vals);
 #ifdef SCR_SYMTAB
         if (!isl_define_sym_rows(fast, d)) {
           JS_FreeValue(isl_ctx, fast);
@@ -1543,6 +1549,7 @@ static JSValue isl_from_dyn(const ScrDyn *d) {
       }
       /* The template no longer fits (nothing was taken): the ordinary path, and never the fast one again for this slot. */
       for (size_t j = 0; j < n; j++) JS_FreeValue(isl_ctx, vals[j]);
+      if (vals != vals_stack) free(vals);
       tpl->state = ISL_TPL_BAD;
       tpl = NULL;
     }
