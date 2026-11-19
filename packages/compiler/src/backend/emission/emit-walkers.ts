@@ -11,7 +11,7 @@ import { rcSitesRequested } from "./emitter.js";
 import { moduleFuncLaneShapes, moduleUsesEngineFn, accessorKeyOrderOf, accessorSlotProp, shapeHasAccessorSlots, VOID, arrayTypeHasLiveView, bytesAliasOnExtract, canConvertToDyn, canDynCheckTo, moduleUsesDynView, moduleInstanceLaneNeedsKg, moduleUsesInstanceRecordLane } from "../../ir/nodes.js";
 import { CLASS_PROPS_FIELD, propsTableRoot, EVAL_STATIC_CLASSES, moduleUsesInspColors, dynNeverArm, dynNeverIn, armDiscrimLits, dynErrorClassKind, isDynErrorClass, canAdaptDynFuncTo, dynRestApplyable, canBoxClassIntoDyn, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, IrType, UNION_ARM_JS_OBJECT_KINDS, isRefCounted, strandedFuncReason, typeEquals, typeKey } from "../../ir/nodes.js";
 import { cDecl, cStringLiteral, cType, elemAccess, releaseCallC, retainCallC, vAdapters } from "./emit-types.js";
-import { mangleAsyncSpawn, mangleClassStruct, mangleField, mangleFunction, mangleFnClosure, mangleRecordNew, mangleRecordRelease, mangleRecordStruct } from "../mangle.js";
+import { mangleAsyncSpawn, mangleClassStruct, mangleField, mangleFunction, mangleFnClosure, mangleRecordNew, mangleRecordRelease, mangleRecordRetain, mangleRecordStruct } from "../mangle.js";
 import type { ClassMeta } from "./emit-shapes.js";
 import { RUNTIME_EMITTER_CLASS as RUNTIME_EMITTER_CLASS_W } from "../../ir/nodes.js";
 import { isIntegerKeyName } from "../../ir/nodes.js";
@@ -2740,7 +2740,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             d.push(`    ${cDecl(t, "r")} = ${mangleRecordNew(t.shapeId)}();`);
             d.push(`    r->${VIEW_MEMBER} = scr_dyn_retain((ScrDyn *)d);`);
             if (shape.tostr) d.push(`    r->${TOSTR_MEMBER} = scr_dyn_tostr_closure(d);`);
-            d.push(`    return r;`);
+            d.push(`    return (${cType(t).trim()})scr_dynview_canon(r, r->${VIEW_MEMBER}, (const void *)&${mangleRecordRelease(t.shapeId)}, sizeof *r, ${mangleRecordRetain(t.shapeId)}_v, ${mangleRecordRelease(t.shapeId)}_v);`);
             d.push(`  }`);
           }
           d.push(`  if (d->kind != SCR_DYN_OBJ) {`);
@@ -3128,7 +3128,9 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
           d.push(`  }`);
         }
         if (wide || inst || jsv) d.push(`  if (sc_proj) scr_dyn_release(sc_proj);`);
-        d.push(`  return r;`);
+        // DYN VIEW IDENTITY: a view of an object is ONE record per (object, shape), so `===`, Map and Set keys, WeakMap keys and indexOf see
+        // JavaScript's one object however often it is read off (scr_dynview_canon: a later build is swapped into the registered record).
+        d.push(shape.view === true ? `  return (${cType(t).trim()})scr_dynview_canon(r, r->${VIEW_MEMBER}, (const void *)&${mangleRecordRelease(t.shapeId)}, sizeof *r, ${mangleRecordRetain(t.shapeId)}_v, ${mangleRecordRelease(t.shapeId)}_v);` : `  return r;`);
         break;
       }
       case "array": {

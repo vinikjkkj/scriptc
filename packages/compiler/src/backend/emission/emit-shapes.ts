@@ -418,6 +418,7 @@ export interface ClassMeta {
           `  if (!o || o->rc == SIZE_MAX) return;`,
           `  if (--o->rc == 0) {`,
         );
+        if (s.view === true) out.push(`    scr_dynview_unreg(o, o->${VIEW_MEMBER}, (const void *)&${s.release}); /* the one record of its dynamic view leaves the table */`);
         {
           const g = numSlotGhostsC(s.meta?.def);
           if (g !== "") out.push(`    SCR_PROPS_GHOST_SUB(${g});`);
@@ -470,6 +471,7 @@ export interface ClassMeta {
         `  if (--o->rc == 0) {`,
         `    scr_cyc_on_dead(o);`,
       );
+      if (s.view === true) out.push(`    scr_dynview_unreg(o, o->${VIEW_MEMBER}, (const void *)&${s.release}); /* the one record of its dynamic view leaves the table */`);
       {
         const g = numSlotGhostsC(s.meta?.def);
         if (g !== "") out.push(`    SCR_PROPS_GHOST_SUB(${g});`);
@@ -505,6 +507,7 @@ export interface ClassMeta {
         ),
         `}`,
         `${E.link}void ${s.gcFree}(void *o0) {`,
+        ...(s.view === true ? [`  scr_dynview_unreg(o0, ((${s.struct} *)o0)->${VIEW_MEMBER}, (const void *)&${s.release}); /* the view pointer is a key here, never read */`] : []),
         ...(untracedRefFields.length > 0 || cbit || numSlotGhostsC(s.meta?.def) !== ""
           ? [
               `  ${s.struct} *o = (${s.struct} *)o0;`,

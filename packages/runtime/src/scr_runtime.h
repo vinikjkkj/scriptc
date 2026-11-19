@@ -6677,6 +6677,10 @@ void scr_recsrc_register(void *rec, void *src, const ScrRecSrcMap *map);
 /* VIEW GRANT, SYNC: exchange everything after the refcount word of two records of one shape (the view's snapshot
  * for a freshly read one); the caller then releases the second, which owns the old contents. */
 void scr_rec_swap_body(void *a, void *b, size_t size);
+/* DYN VIEW IDENTITY (scr_json.c): the checked cast of one dynamic object into one view-granted shape answers ONE record; unreg is the
+ * record's death hook. The key is the shape's release function. */
+void *scr_dynview_canon(void *rec, const void *view, const void *key, size_t size, void *(*retain)(void *), void (*release)(void *));
+void scr_dynview_unreg(void *rec, const void *view, const void *key);
 
 /* [[Get]] / `in` along a saved [[Prototype]] chain, keyed by a ScrStr:
  * the record's miss path once its own keys have answered nothing. */
