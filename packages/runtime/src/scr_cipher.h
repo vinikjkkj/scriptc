@@ -36,10 +36,18 @@
 typedef struct ScrAes256 {
   uint32_t enc[4 * (SCR_AES256_ROUNDS + 1)];
   uint32_t dec[4 * (SCR_AES256_ROUNDS + 1)];
+  /* The encrypt schedule as bytes in the order AES-NI wants it (each word big-endian): filled by scr_aes256_init on every target, read only by
+   * the AES-NI arm of the block encrypt. */
+  unsigned char encb[16 * (SCR_AES256_ROUNDS + 1)];
 } ScrAes256;
 
 /* Expands a 32-byte key into both schedules. */
 void scr_aes256_init(ScrAes256 *st, const unsigned char key[SCR_AES256_KEY]);
+/* The block encrypt's two arms, exported so test_cipher.c can run them against each other: the T-table loop, and the AES-NI arm
+ * (scr_aes_have_ni() says whether this CPU has it; without it, or on a target without the arm, the "ni" entry is the T-table loop). */
+void scr_aes256_encrypt_block_portable(const ScrAes256 *st, const unsigned char in[SCR_AES_BLOCK], unsigned char out[SCR_AES_BLOCK]);
+void scr_aes256_encrypt_block_ni(const ScrAes256 *st, const unsigned char in[SCR_AES_BLOCK], unsigned char out[SCR_AES_BLOCK]);
+int scr_aes_have_ni(void);
 void scr_aes256_encrypt_block(const ScrAes256 *st, const unsigned char in[SCR_AES_BLOCK],
                               unsigned char out[SCR_AES_BLOCK]);
 void scr_aes256_decrypt_block(const ScrAes256 *st, const unsigned char in[SCR_AES_BLOCK],

@@ -126,6 +126,7 @@ void scr_aes256_init(ScrAes256 *st, const unsigned char key[SCR_AES256_KEY]) {
   }
   /* The equivalent inverse schedule: the same round keys in reverse, with
    * InvMixColumns applied to every one but the first and last. */
+  for (int i = 0; i < total; i++) scr_store_be32(st->encb + 4 * i, st->enc[i]);
   for (int i = 0; i < total; i++) st->dec[i] = st->enc[total - 4 - (i & ~3) + (i & 3)];
   for (int i = 4; i < total - 4; i++) {
     uint32_t w = st->dec[i];
@@ -136,8 +137,8 @@ void scr_aes256_init(ScrAes256 *st, const unsigned char key[SCR_AES256_KEY]) {
 
 /* ── block encrypt / decrypt ─────────────────────────────────────────── */
 
-void scr_aes256_encrypt_block(const ScrAes256 *st, const unsigned char in[SCR_AES_BLOCK],
-                              unsigned char out[SCR_AES_BLOCK]) {
+void scr_aes256_encrypt_block_portable(const ScrAes256 *st, const unsigned char in[SCR_AES_BLOCK],
+                                       unsigned char out[SCR_AES_BLOCK]) {
   const uint32_t *rk = st->enc;
   uint32_t s0 = scr_load_be32(in) ^ rk[0];
   uint32_t s1 = scr_load_be32(in + 4) ^ rk[1];
@@ -174,6 +175,69 @@ void scr_aes256_encrypt_block(const ScrAes256 *st, const unsigned char in[SCR_AE
                             ((uint32_t)scr_sbox[(s0 >> 16) & 0xff]) << 16 |
                             ((uint32_t)scr_sbox[(s1 >> 8) & 0xff]) << 8 |
                             (uint32_t)scr_sbox[s2 & 0xff]) ^ rk[3]);
+}
+
+/* The AES-NI arm of the block encrypt: one aesenc per round over the byte-order schedule (encb). Chosen by CPUID at first use, x86-64 with
+ * <immintrin.h> only, like the SHA-256 arm in scr_lib.c and the PCLMULQDQ arm of GHASH above; every other target and CPU keeps the T-table loop.
+ * SCR_AES_NI=0 compiles the arm out and restores the previous code path exactly (the ablation control). */
+#ifndef SCR_AES_NI
+#if defined(__x86_64__) && defined(__has_include)
+#if __has_include(<immintrin.h>)
+#define SCR_AES_NI 1
+#endif
+#endif
+#endif
+#ifndef SCR_AES_NI
+#define SCR_AES_NI 0
+#endif
+
+#if SCR_AES_NI
+#include <immintrin.h>
+
+static int scr_aes_probe(void) {
+  unsigned a = 0, b = 0, c = 0, d = 0;
+  __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(0u), "c"(0u));
+  if (a < 1) return 0;
+  __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(1u), "c"(0u));
+  return (int)((c >> 25) & 1); /* AES */
+}
+
+static int scr_aes_ni_cache = -1;
+int scr_aes_have_ni(void) {
+  int v = scr_aes_ni_cache;
+  if (v < 0) {
+    v = scr_aes_probe();
+    scr_aes_ni_cache = v;
+  }
+  return v;
+}
+
+__attribute__((target("aes,sse2"))) void scr_aes256_encrypt_block_ni(const ScrAes256 *st, const unsigned char in[SCR_AES_BLOCK],
+                                                                    unsigned char out[SCR_AES_BLOCK]) {
+  const __m128i *rk = (const __m128i *)(const void *)st->encb;
+  __m128i b = _mm_xor_si128(_mm_loadu_si128((const __m128i *)(const void *)in), _mm_loadu_si128(rk));
+  for (int r = 1; r < SCR_AES256_ROUNDS; r++) b = _mm_aesenc_si128(b, _mm_loadu_si128(rk + r));
+  b = _mm_aesenclast_si128(b, _mm_loadu_si128(rk + SCR_AES256_ROUNDS));
+#ifdef SCR_AES_TEST_MUTATE
+  b = _mm_xor_si128(b, _mm_set_epi64x(0, 1)); /* the mutation control: one wrong bit */
+#endif
+  _mm_storeu_si128((__m128i *)(void *)out, b);
+}
+#else
+int scr_aes_have_ni(void) { return 0; }
+void scr_aes256_encrypt_block_ni(const ScrAes256 *st, const unsigned char in[SCR_AES_BLOCK], unsigned char out[SCR_AES_BLOCK]) {
+  scr_aes256_encrypt_block_portable(st, in, out);
+}
+#endif
+
+void scr_aes256_encrypt_block(const ScrAes256 *st, const unsigned char in[SCR_AES_BLOCK], unsigned char out[SCR_AES_BLOCK]) {
+#if SCR_AES_NI
+  if (scr_aes_have_ni()) {
+    scr_aes256_encrypt_block_ni(st, in, out);
+    return;
+  }
+#endif
+  scr_aes256_encrypt_block_portable(st, in, out);
 }
 
 void scr_aes256_decrypt_block(const ScrAes256 *st, const unsigned char in[SCR_AES_BLOCK],
