@@ -10905,6 +10905,32 @@ static inline void scr_bytes_set_inl(ScrBytes *b, double i, double v) {
 #endif
 #endif
 
+/* The raw Float64Array accessors of a function versioned by the compiler (ir/f64-raw.ts): the function tests `scr_bytes_f64_ok` ONCE at entry for
+ * each Float64Array parameter it indexes at a proven-in-range index, and its fast copy reads and writes the elements with nothing but a load or
+ * a store. `elem` and `len` of a ScrBytes never change after construction, so the entry test holds for the whole body. The element is a memcpy
+ * for the reason the inline arm above gives (a subarray view's data need not be 8-aligned) and is the same eight bytes scr_bytes_get / _set
+ * read and write for an F64 element. Under SCR_ARRCEN_ON / SCR_NO_FASTARM the test answers false, so the census still sees every access
+ * and the A/B control still runs the old path everywhere. */
+#if defined(SCR_ARRCEN_ON) || defined(SCR_NO_FASTARM)
+static inline bool scr_bytes_f64_ok(const ScrBytes *b, size_t n) {
+  (void)b;
+  (void)n;
+  return false;
+}
+#else
+static inline bool scr_bytes_f64_ok(const ScrBytes *b, size_t n) {
+  return b->elem == SCR_BYTES_F64 && b->len >= n;
+}
+#endif
+static inline double scr_f64_raw_get(const uint8_t *data, size_t i) {
+  double v;
+  memcpy(&v, data + i * 8, 8);
+  return v;
+}
+static inline void scr_f64_raw_set(uint8_t *data, size_t i, double v) {
+  memcpy(data + i * 8, &v, 8);
+}
+
 /* The same two arms under the LIBCALL convention, for the LLVM lane, which
  * cannot inline a diamond at an expression site AND has no knowledge of
  * this struct's field offsets -- putting them in the IR emitter would be a

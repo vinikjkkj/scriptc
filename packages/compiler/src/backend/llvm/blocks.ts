@@ -215,6 +215,8 @@ export class BlockBuilder {
    * allocas (locals, result slots, the log-arg array) all live there so
    * every block is dominated by them. */
   readonly entryAllocas: string[] = [];
+  /** Float64Array parameter local id -> the alloca slot holding its data pointer, in a body versioned by ir/f64-raw.ts (set by the `f64Ok` guard). */
+  readonly f64Data = new Map<string, string>();
   private tempCounter = 0;
   private labelCounter = 0;
 

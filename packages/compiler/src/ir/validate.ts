@@ -3173,6 +3173,8 @@ function validateFunction(
         const sig: { argTypes: IrType[]; minArgs: number; result: IrType } = extraSig ?? (
           e.method === "length" || e.method === "byteLength" || e.method === "byteOffset"
             ? { argTypes: [], minArgs: 0, result: F64 }
+            : e.method === "f64Ok"
+              ? { argTypes: [F64], minArgs: 1, result: BOOL }
             : e.method === "get"
               ? { argTypes: [F64], minArgs: 1, result: bytesValueType(recv.elem) }
               : e.method === "fillBig"
