@@ -146,7 +146,9 @@ describe("the dyn->static recovery is a copy, and the store into it is lost", ()
     // whole effect and additionally records the object the copy was made
     // FROM — so the marking this row is about is unchanged, and only its
     // call site's name moved.
-    expect(c).toMatch(/scr_dyn_origin_mark\(sc_td_[0-9a-z]+\(/);
+    // A record of a traced shape (a cycle node the collector follows to the object it was made from) is marked through `scr_dyn_origin_mark_t`,
+    // the same crossing with the origin entry born flagged: again only the call site's name moved, and the census below still counts the one lost write.
+    expect(c).toMatch(/scr_dyn_origin_mark(?:_t)?\(sc_td_[0-9a-z]+\(/);
     expect(c).toMatch(/sc_dyn_key_get\(/);
   });
 

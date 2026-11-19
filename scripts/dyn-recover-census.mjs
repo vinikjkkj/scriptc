@@ -164,7 +164,7 @@ function analyse(src, kinds, listLimit) {
     const marked = new Set();
     for (let pass = 0; pass < 4; pass++) {
       for (const line of fn.body) {
-        // BOTH spellings of the mark. `scr_dyn_origin_mark` performs
+        // ALL spellings of the mark (the _t form is what a traced origin gets). `scr_dyn_origin_mark` performs
         // scr_dyn_mark_static_copy's whole effect and additionally records
         // the object the copy was made from; it is what the emitter writes
         // at an observable crossing now, and the bare form survives for any
@@ -173,7 +173,7 @@ function analyse(src, kinds, listLimit) {
         // silent lost writes -- a clean bill of health produced by not
         // looking, which is the failure mode this file's self-test exists
         // to prevent.
-        let m2 = /^\s*(?:const\s+)?ScrDyn\s*\*\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:scr_dyn_mark_static_copy|scr_dyn_origin_mark)\(/.exec(line);
+        let m2 = /^\s*(?:const\s+)?ScrDyn\s*\*\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:scr_dyn_mark_static_copy|scr_dyn_origin_mark(?:_t)?)\(/.exec(line);
         if (m2) { marked.add(m2[1]); continue; }
         m2 = /^\s*(?:(?:const\s+)?ScrDyn\s*\*\s*)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(?:sc_dyn_key_get|scr_dyn_retain|scr_dyn_obj_get|sc_dyn_idx_get)\(\s*([A-Za-z_][A-Za-z0-9_]*)/.exec(line);
         if (m2 && marked.has(m2[2])) { marked.add(m2[1]); continue; }
@@ -461,7 +461,7 @@ const res = analyse(src, kinds, listLimit);
 report(file, kinds, res);
 // The static->dyn direction, for scale: how many conversions the compiler
 // already judged observable and marked.
-const marks = (src.match(/scr_dyn_mark_static_copy\(|scr_dyn_origin_mark\(/g) || []).length;
+const marks = (src.match(/scr_dyn_mark_static_copy\(|scr_dyn_origin_mark(?:_t)?\(/g) || []).length;
 console.log("  for scale, the OTHER direction: " + marks + " static-copy mark sites (already loud on write)");
 if (res.totals.recoveries === 0) { console.error("ZERO DENOMINATOR"); process.exit(2); }
 process.exit(0);
