@@ -29657,6 +29657,12 @@
     "<repo>/tests/corpus/25841-a-frozen-table-entry-keyed-in-a-map-is-found-through-the-widened-table.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25842-identity-compared-through-find-object-is-seeded-sets-and-union-keys-follows-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25842-identity-compared-through-find-object-is-seeded-sets-and-union-keys-follows-node.ts"
+   ],
+   "diags": []
   }
  }
 }
