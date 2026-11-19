@@ -17036,6 +17036,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25852-a-keyed-read-of-a-wrapper-or-a-string-decoder-keeps-its-special-surface.ts": {
+   "order": [
+    "<repo>/tests/corpus/25852-a-keyed-read-of-a-wrapper-or-a-string-decoder-keeps-its-special-surface.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2576-string-destructuring-assign.ts": {
    "order": [
     "<repo>/tests/corpus/2576-string-destructuring-assign.ts"
