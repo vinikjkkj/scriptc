@@ -7107,14 +7107,18 @@ typedef struct ScrDynFrozenOps {
   /* The OBJ arm (Object.freeze / seal / preventExtensions over a dyn object: scr_array_frozen.c). The level lives in the object's internal-slot table
    * (1 non-extensible, 2 sealed, 3 frozen); the core asks only objects that HAVE a slot table. `obj_level` answers it (0 = ordinary). `obj_set`: true when the
    * write of `key` is refused (sloppy sites ignore it, strict ones throw: exception pending). `obj_del`: true when the delete is refused; the answer is *ans.
-   * `obj_add`: true when a NEW own property of that name cannot be created (define paths). `obj_copy_ok`: false (with a loud error pending) when Object.assign
-   * cannot copy `src` into a guarded `target` exactly. */
+   * `obj_define`: Object.defineProperty over a guarded target: 0 proceed, 1 refused (TypeError pending), 2 accepted as a no-op (a compatible redefine of a
+   * non-configurable property). `obj_assign`: Object.assign of `src` into a guarded `target` (false with the exception pending). */
   int (*obj_level)(const ScrDyn *o);
   bool (*obj_set)(ScrDyn *recv, const ScrStr *key);
   bool (*obj_del)(ScrDyn *recv, const ScrStr *key, bool *ans);
-  bool (*obj_add)(ScrDyn *recv, const ScrStr *key, bool redefine);
+  int (*obj_define)(ScrDyn *recv, const ScrStr *key, const ScrDyn *desc);
   bool (*obj_assign)(ScrDyn *target, const ScrDyn *src);
 } ScrDynFrozenOps;
+/* Own-property facts of a dyn OBJ for the integrity unit: 0 none, 1 data, 2 accessor; v0 = the value or getter, v1 = the setter (borrowed). */
+int scr_dyn_obj_own_facts(const ScrDyn *d, const char *key, size_t key_len, bool *enumerable, bool *writable, ScrDyn **v0, ScrDyn **v1);
+/* Installed by the symbol unit: applies an integrity level to the symbol-keyed rows of an object (seal: non-configurable; freeze: also non-writable). */
+extern void (*scr_dyn_sym_integrity)(ScrDyn *o, int level);
 /* Object.freeze (level 3) / Object.seal (2) / Object.preventExtensions (1) over ANY dyn value; answers the value +1. */
 ScrDyn *scr_dyn_integrity_apply(ScrDyn *d, double level);
 extern const ScrDynFrozenOps *scr_dyn_frozen_ops;

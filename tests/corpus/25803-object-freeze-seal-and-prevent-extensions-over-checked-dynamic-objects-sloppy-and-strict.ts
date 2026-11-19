@@ -1,8 +1,7 @@
-// Object.freeze / seal / preventExtensions over checked-dynamic objects: the integrity level is a runtime fact of the dyn object, enforced on every write path.
-// The first half runs sloppy (refused writes are ignored), the second half the same program strict (V8's TypeErrors).
-function sloppyRun() {
-  function mk(): any { return JSON.parse('{"a":1,"b":{"c":2}}'); }
-  const o = mk();
+// Object.freeze / seal / preventExtensions over checked-dynamic objects made by JSON.parse / Object.create: the integrity level is a runtime fact of the dyn
+// object, enforced on every write path. The first half runs sloppy (refused writes are ignored), the second half the same program strict (V8's TypeErrors).
+function sloppyBody(): void {
+  const o: any = JSON.parse('{"a":1,"b":{"c":2}}');
   console.log(Object.isFrozen(o), Object.isSealed(o), Object.isExtensible(o));
   Object.freeze(o);
   console.log(Object.isFrozen(o), Object.isSealed(o), Object.isExtensible(o));
@@ -12,38 +11,48 @@ function sloppyRun() {
   w(() => { delete o.a; });
   w(() => { o.b.c = 5; });
   console.log(o);
-  const p = mk(); Object.seal(p);
+  const p: any = Object.create(Object.prototype);
+  p.a = 1; p.b = { c: 2 };
+  Object.seal(p);
   console.log(Object.isFrozen(p), Object.isSealed(p), Object.isExtensible(p));
   w(() => { p.a = 5; });
   w(() => { p.z = 1; });
   w(() => { delete p.a; });
   w(() => { delete p.nope; });
   console.log(p);
-  const q = mk(); Object.preventExtensions(q);
+  const q: any = Object.create(Object.prototype);
+  q.a = 1; q.b = { c: 2 };
+  Object.preventExtensions(q);
   console.log(Object.isFrozen(q), Object.isSealed(q), Object.isExtensible(q));
   w(() => { q.z = 1; });
   w(() => { q.a = 9; });
   w(() => { delete q.a; });
   console.log(q);
-  const e: any = JSON.parse('{}'); Object.preventExtensions(e);
+  const e: any = Object.create(Object.prototype);
+  Object.preventExtensions(e);
   console.log(Object.isFrozen(e), Object.isSealed(e), Object.isExtensible(e));
   w(() => { Object.assign(o, { a: 7 }); });
   w(() => { Object.assign(q, { b: 7 }); });
   w(() => { Object.assign(q, { zz: 7 }); });
+  w(() => { Object.assign(q, "xy"); });
+  w(() => { Object.assign(o, [1, 2]); });
+  w(() => { Object.assign(o, null, undefined, 5); });
   w(() => { Object.defineProperty(o, "n", { value: 1 }); });
   w(() => { Object.defineProperty(p, "n", { value: 1 }); });
-  console.log({ ...o }, Object.keys(o), JSON.stringify(o), Object.entries(p));
+  w(() => { Object.defineProperty(o, "a", { value: 1 }); });
+  w(() => { Object.defineProperty(o, "a", { value: 2 }); });
+  w(() => { Object.defineProperty(o, "a", { value: 1, writable: true }); });
+  w(() => { Object.defineProperty(o, "a", { configurable: true }); });
+  w(() => { Object.defineProperty(o, "a", { enumerable: true, configurable: false, writable: false }); });
+  w(() => { Object.defineProperty(p, "a", { value: 6 }); });
+  console.log(p.a, { ...o }, Object.keys(o), JSON.stringify(o), Object.entries(p));
   const cp: any = Object.assign({}, o); cp.a = 99; console.log(cp.a, Object.isFrozen(cp));
-  const prim: any = 5; console.log(`${Object.freeze(prim)}`, Object.isFrozen(prim));
+  const prim: number = 5; console.log(`${Object.freeze(prim)}`, Object.isFrozen(prim));
   const arr: any = JSON.parse("[1,2]"); Object.freeze(arr); console.log(Object.isFrozen(arr)); w(() => { arr.push(3); });
-
 }
-sloppyRun();
-console.log("--- strict");
-function strictRun() {
+function strictBody(): void {
   "use strict";
-  function mk(): any { return JSON.parse('{"a":1,"b":{"c":2}}'); }
-  const o = mk();
+  const o: any = JSON.parse('{"a":1,"b":{"c":2}}');
   console.log(Object.isFrozen(o), Object.isSealed(o), Object.isExtensible(o));
   Object.freeze(o);
   console.log(Object.isFrozen(o), Object.isSealed(o), Object.isExtensible(o));
@@ -53,30 +62,45 @@ function strictRun() {
   w(() => { delete o.a; });
   w(() => { o.b.c = 5; });
   console.log(o);
-  const p = mk(); Object.seal(p);
+  const p: any = Object.create(Object.prototype);
+  p.a = 1; p.b = { c: 2 };
+  Object.seal(p);
   console.log(Object.isFrozen(p), Object.isSealed(p), Object.isExtensible(p));
   w(() => { p.a = 5; });
   w(() => { p.z = 1; });
   w(() => { delete p.a; });
   w(() => { delete p.nope; });
   console.log(p);
-  const q = mk(); Object.preventExtensions(q);
+  const q: any = Object.create(Object.prototype);
+  q.a = 1; q.b = { c: 2 };
+  Object.preventExtensions(q);
   console.log(Object.isFrozen(q), Object.isSealed(q), Object.isExtensible(q));
   w(() => { q.z = 1; });
   w(() => { q.a = 9; });
   w(() => { delete q.a; });
   console.log(q);
-  const e: any = JSON.parse('{}'); Object.preventExtensions(e);
+  const e: any = Object.create(Object.prototype);
+  Object.preventExtensions(e);
   console.log(Object.isFrozen(e), Object.isSealed(e), Object.isExtensible(e));
   w(() => { Object.assign(o, { a: 7 }); });
   w(() => { Object.assign(q, { b: 7 }); });
   w(() => { Object.assign(q, { zz: 7 }); });
+  w(() => { Object.assign(q, "xy"); });
+  w(() => { Object.assign(o, [1, 2]); });
+  w(() => { Object.assign(o, null, undefined, 5); });
   w(() => { Object.defineProperty(o, "n", { value: 1 }); });
   w(() => { Object.defineProperty(p, "n", { value: 1 }); });
-  console.log({ ...o }, Object.keys(o), JSON.stringify(o), Object.entries(p));
+  w(() => { Object.defineProperty(o, "a", { value: 1 }); });
+  w(() => { Object.defineProperty(o, "a", { value: 2 }); });
+  w(() => { Object.defineProperty(o, "a", { value: 1, writable: true }); });
+  w(() => { Object.defineProperty(o, "a", { configurable: true }); });
+  w(() => { Object.defineProperty(o, "a", { enumerable: true, configurable: false, writable: false }); });
+  w(() => { Object.defineProperty(p, "a", { value: 6 }); });
+  console.log(p.a, { ...o }, Object.keys(o), JSON.stringify(o), Object.entries(p));
   const cp: any = Object.assign({}, o); cp.a = 99; console.log(cp.a, Object.isFrozen(cp));
-  const prim: any = 5; console.log(`${Object.freeze(prim)}`, Object.isFrozen(prim));
+  const prim: number = 5; console.log(`${Object.freeze(prim)}`, Object.isFrozen(prim));
   const arr: any = JSON.parse("[1,2]"); Object.freeze(arr); console.log(Object.isFrozen(arr)); w(() => { arr.push(3); });
-
 }
-strictRun();
+sloppyBody();
+console.log("--- strict");
+strictBody();

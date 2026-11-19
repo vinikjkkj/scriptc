@@ -271,6 +271,7 @@ void scr_sym_dyn_install(void) {
 
 static void scr_sym_key_release_hook(ScrSym *k) { scr_sym_release(k); }
 static void scr_dsym_copy_enum(ScrDyn *target, const ScrDyn *src);
+static void scr_dsym_apply_integrity(ScrDyn *o, int level);
 static ScrDyn *scr_dsym_row_value(const ScrDyn *self, const ScrDynSymEnt *row);
 static bool scr_dsym_proto_test(int op, ScrDyn *recv, ScrSym *k);
 
@@ -370,6 +371,7 @@ static void scr_dsym_install_hooks(void) {
   scr_dyn_sym_key_release = &scr_sym_key_release_hook;
   scr_dyn_sym_key_str = &scr_sym_to_string;
   scr_dyn_sym_copy_enum = &scr_dsym_copy_enum;
+  scr_dyn_sym_integrity = &scr_dsym_apply_integrity;
   scr_dyn_sym_row_value = &scr_dsym_row_value;
   scr_dyn_sym_proto_test = &scr_dsym_proto_test;
 }
@@ -844,12 +846,29 @@ static void scr_dsym_set(ScrDyn *recv, ScrSym *k, ScrDyn *v, bool strict, ScrDyn
       }
     }
   }
+  if (recv->kind == SCR_DYN_OBJ && scr_dyn_ext(recv)->slots != NULL && scr_dyn_frozen_ops != NULL && scr_dyn_frozen_ops->obj_level(recv) != 0) {
+    if (strict) scr_dsym_throw("Cannot add property ", k, ", object is not extensible"); /* sloppy: the write is ignored */
+    return;
+  }
   ScrDynObjExt *x = scr_dsym_host(recv, true, &none);
   if (x == NULL) {
     scr_dsym_fence(recv, "writing");
     return;
   }
   scr_dsym_add(x, k, scr_dyn_retain(v), SCR_SYMP_ENUM | SCR_SYMP_WRITE | SCR_SYMP_CONFIG);
+}
+
+/* Object.seal / Object.freeze over the symbol-keyed rows: every row turns non-configurable, a frozen data row also non-writable, so the ordinary set, delete
+ * and define paths above refuse them with Node's own messages. */
+static void scr_dsym_apply_integrity(ScrDyn *o, int level) {
+  bool none;
+  ScrDynObjExt *x = scr_dsym_host(o, false, &none);
+  if (x == NULL || x->syms == NULL || level < 2) return;
+  for (uint32_t i = 0; i < x->syms->len; i++) {
+    ScrDynSymEnt *r = &x->syms->e[i];
+    r->flags &= ~(uint32_t)SCR_SYMP_CONFIG;
+    if (level >= 3 && !(r->flags & SCR_SYMP_ACC)) r->flags &= ~(uint32_t)SCR_SYMP_WRITE;
+  }
 }
 
 ScrDyn *scr_dyn_sym_get(ScrDyn *recv, ScrSym *k) { return scr_dsym_get(recv, k, recv); }
@@ -1205,6 +1224,11 @@ ScrDyn *scr_dyn_sym_define(ScrDyn *recv, ScrSym *k, ScrDyn *desc) {
     }
     r->flags = flags;
     return scr_dyn_retain(recv);
+  }
+  if (recv->kind == SCR_DYN_OBJ && scr_dyn_ext(recv)->slots != NULL && scr_dyn_frozen_ops != NULL && scr_dyn_frozen_ops->obj_level(recv) != 0) {
+    scr_dyn_release(cell);
+    scr_dsym_throw("Cannot define property ", k, ", object is not extensible");
+    return NULL;
   }
   ScrDynObjExt *x = scr_dsym_host(recv, true, &none);
   if (x == NULL) {

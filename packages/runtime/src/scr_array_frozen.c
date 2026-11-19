@@ -315,60 +315,91 @@ static bool obj_del_refused(ScrDyn *recv, const ScrStr *key, bool *ans) {
   return true;
 }
 
-/* A define of `key` on a guarded object: a NEW own property needs an extensible object; a frozen object's own property is non-configurable and non-writable.
- * (Node accepts a redefine that changes nothing; this refuses every redefine of a frozen own key, a divergence limited to that no-op form.) */
-static bool obj_add_refused(ScrDyn *recv, const ScrStr *key, bool redefine) {
-  (void)redefine;
+/* Object.defineProperty over a guarded object (ValidateAndApplyPropertyDescriptor for the guarded cases): a NEW own property needs an extensible object; a
+ * sealed or frozen object's own property is non-configurable (frozen: also non-writable if it is data), so only a compatible descriptor is accepted: no
+ * `configurable: true`, an unchanged `enumerable`, no change of kind, and on a non-writable data property no `writable: true` and a SameValue `value`.
+ * 0 = proceed with the ordinary define, 1 = refused (TypeError pending), 2 = accepted and nothing changes. */
+static int obj_define_guard(ScrDyn *recv, const ScrStr *key, const ScrDyn *desc) {
   int lv = obj_level(recv);
-  if (lv == 0) return false;
+  if (lv == 0) return 0;
   bool own = scr_dyn_obj_has_own_prop(recv, key->data, key->len);
+  size_t cap = key->len + 80;
+  char *buf = (char *)malloc(cap);
   if (!own) {
-    size_t cap = key->len + 64;
-    char *buf = (char *)malloc(cap);
     int n = snprintf(buf, cap, "Cannot define property %.*s, object is not extensible", (int)key->len, key->data);
     scr_throw_error_msg(SCR_ERR_TYPE, buf, (size_t)n);
     free(buf);
-    return true;
+    return 1;
   }
-  if (lv == 3) {
-    size_t cap = key->len + 64;
-    char *buf = (char *)malloc(cap);
+  if (lv < 2 || desc == NULL || desc->kind != SCR_DYN_OBJ) {
+    free(buf);
+    return 0;
+  }
+  bool en = false, wr = false;
+  ScrDyn *v0 = NULL, *v1 = NULL;
+  int kind = scr_dyn_obj_own_facts(recv, key->data, key->len, &en, &wr, &v0, &v1);
+  if (kind == 0) {
+    free(buf);
+    return 0;
+  }
+  if (lv >= 3 && kind == 1) wr = false;
+  ScrDyn *dg = scr_dyn_obj_get(desc, "get", 3), *ds = scr_dyn_obj_get(desc, "set", 3);
+  ScrDyn *dv = scr_dyn_obj_get(desc, "value", 5), *dw = scr_dyn_obj_get(desc, "writable", 8);
+  ScrDyn *de = scr_dyn_obj_get(desc, "enumerable", 10), *dc = scr_dyn_obj_get(desc, "configurable", 12);
+  bool bad = false;
+  if (dc != NULL && scr_dyn_truthy(dc)) bad = true;
+  if (de != NULL && scr_dyn_truthy(de) != en) bad = true;
+  if (dg != NULL || ds != NULL) {
+    if (kind == 1) bad = true;
+    else if ((dg != NULL && !scr_dyn_same_value(dg, v0)) || (ds != NULL && !scr_dyn_same_value(ds, v1))) bad = true;
+  }
+  if (dv != NULL || dw != NULL) {
+    if (kind == 2) bad = true;
+    else if (!wr) {
+      if (dw != NULL && scr_dyn_truthy(dw)) bad = true;
+      if (dv != NULL && !scr_dyn_same_value(dv, v0)) bad = true;
+    }
+  }
+  int r = 0;
+  if (bad) {
     int n = snprintf(buf, cap, "Cannot redefine property: %.*s", (int)key->len, key->data);
     scr_throw_error_msg(SCR_ERR_TYPE, buf, (size_t)n);
-    free(buf);
-    return true;
+    r = 1;
+  } else if (lv >= 3 || kind == 2 || !wr) {
+    r = 2; /* nothing about this property can change */
   }
-  return false;
+  free(buf);
+  return r;
 }
 
-/* Object.assign(target, src) into a guarded target: the source's own enumerable string keys, in order, each through the guarded [[Set]] (strict: Object.assign
- * throws). Answers false with an exception pending when a write is refused; a source kind this walk does not model is a loud error. */
+/* Object.assign(target, src) into a guarded target: the source's own enumerable string keys in order, each through the guarded [[Set]] (strict: Object.assign
+ * throws), then its enumerable symbol rows (the symbol unit's copy goes through the same guarded set). */
 static bool obj_assign_guarded(ScrDyn *target, const ScrDyn *src) {
   if (obj_level(target) == 0) return true;
   switch (src->kind) {
   case SCR_DYN_UNDEF: case SCR_DYN_NULL: case SCR_DYN_BOOL: case SCR_DYN_NUM: case SCR_DYN_BIG:
     return true; /* nothing to copy */
-  case SCR_DYN_OBJ: {
-    ScrDyn *snap = scr_dyn_retain((ScrDyn *)src);
-    for (size_t i = 0; i < snap->v.obj.len; i++) {
-      ScrStr *k = scr_str_new(snap->v.obj.entries[i].key, snap->v.obj.entries[i].key_len);
-      ScrDyn *v = snap->v.obj.entries[i].value;
-      scr_dyn_key_set(target, k, v);
-      scr_str_release(k);
+  default:
+    break;
+  }
+  ScrDyn *ents = scr_dyn_obj_entries(src);
+  if (ents == NULL) return false;
+  if (ents->kind == SCR_DYN_ARR) {
+    for (size_t i = 0; i < ents->v.arr.len; i++) {
+      const ScrDyn *pair = ents->v.arr.items[i];
+      if (pair->kind != SCR_DYN_ARR || pair->v.arr.len < 2 || pair->v.arr.items[0]->kind != SCR_DYN_STR) continue;
+      scr_dyn_key_set(target, pair->v.arr.items[0]->v.str, pair->v.arr.items[1]);
       if (scr_exc_pending()) {
-        scr_dyn_release(snap);
+        scr_dyn_release(ents);
         return false;
       }
     }
-    scr_dyn_release(snap);
-    return true;
   }
-  default: {
-    static const char msg[] = "Object.assign into a frozen, sealed or non-extensible object from this kind of source is not supported yet";
-    scr_throw_error_msg(SCR_ERR_ERROR, msg, sizeof msg - 1);
-    return false;
-  }
-  }
+  scr_dyn_release(ents);
+#ifdef SCR_SYMTAB
+  if ((src->kind == SCR_DYN_OBJ || src->kind == SCR_DYN_ARR) && scr_dyn_ext(src)->syms != NULL && scr_dyn_sym_copy_enum != NULL) scr_dyn_sym_copy_enum(target, src);
+#endif
+  return !scr_exc_pending();
 }
 
 ScrDyn *scr_dyn_integrity_apply(ScrDyn *d, double level) {
@@ -384,6 +415,9 @@ ScrDyn *scr_dyn_integrity_apply(ScrDyn *d, double level) {
     }
     int cur = obj_level(d);
     if ((int)level > cur) scr_dyn_obj_set_slot(d, "%integrity", 10, scr_dyn_new_num(level));
+#ifdef SCR_SYMTAB
+    if (scr_dyn_ext(d)->syms != NULL && scr_dyn_sym_integrity != NULL) scr_dyn_sym_integrity(d, (int)level);
+#endif
     return scr_dyn_retain(d);
   }
   case SCR_DYN_ARR:
@@ -414,5 +448,5 @@ ScrDyn *scr_dyn_integrity_apply(ScrDyn *d, double level) {
   return NULL;
 }
 
-static const ScrDynFrozenOps frozen_ops = { frozen_dyn_set, frozen_dyn_delete, frozen_dyn_invoke, obj_level, obj_set_refused, obj_del_refused, obj_add_refused, obj_assign_guarded };
+static const ScrDynFrozenOps frozen_ops = { frozen_dyn_set, frozen_dyn_delete, frozen_dyn_invoke, obj_level, obj_set_refused, obj_del_refused, obj_define_guard, obj_assign_guarded };
 __attribute__((constructor)) static void frozen_install(void) { scr_dyn_frozen_ops = &frozen_ops; }

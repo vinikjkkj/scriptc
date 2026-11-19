@@ -159,6 +159,7 @@ ScrDynObjExt *scr_dyn_ext_w(ScrDyn *d) {
 void (*scr_dyn_sym_key_release)(ScrSym *k) = NULL;
 ScrStr *(*scr_dyn_sym_key_str)(ScrSym *k) = NULL;
 void (*scr_dyn_sym_copy_enum)(ScrDyn *target, const ScrDyn *src) = NULL;
+void (*scr_dyn_sym_integrity)(ScrDyn *o, int level) = NULL;
 bool (*scr_dyn_has_key_full_hook)(const ScrDyn *v, const ScrStr *key) = NULL;
 ScrDyn *(*scr_dyn_define_prop_hook)(ScrDyn *target, ScrStr *key, ScrDyn *desc) = NULL;
 ScrDyn *(*scr_dyn_sym_row_value)(const ScrDyn *self, const ScrDynSymEnt *row) = NULL;
@@ -9335,6 +9336,36 @@ ScrDyn *scr_dyn_obj_own_enum_read(ScrDyn *recv, const char *key, size_t key_len)
  * INHERITED writable data property differently from an own one (the
  * write creates a fresh ordinary own property instead of updating). */
 static ScrPropKind scr_dyn_obj_resolve(const ScrDyn *d, const char *key, size_t key_len,
+                                       ScrDyn **out, const ScrDyn **holder);
+int scr_dyn_obj_own_facts(const ScrDyn *d, const char *key, size_t key_len, bool *enumerable, bool *writable, ScrDyn **v0, ScrDyn **v1) {
+  ScrDyn *e = scr_dyn_obj_get(d, key, key_len);
+  if (e != NULL) {
+    *enumerable = true;
+    *writable = true;
+    *v0 = e;
+    *v1 = NULL;
+    return 1;
+  }
+  ScrDyn *found = NULL;
+  const ScrDyn *holder = NULL;
+  ScrPropKind pk = scr_dyn_obj_resolve(d, key, key_len, &found, &holder);
+  if (holder != d || (pk != SCR_PROP_HIDDEN_DATA && pk != SCR_PROP_ACCESSOR)) return 0;
+  bool is_data = true, w = false, c = false, en = false;
+  scr_dyn_obj_hidden_attrs(d, key, key_len, &is_data, &w, &c, &en);
+  *enumerable = en;
+  if (pk == SCR_PROP_HIDDEN_DATA) {
+    *writable = scr_hid_writable(found);
+    *v0 = found->v.arr.items[1];
+    *v1 = NULL;
+    return 1;
+  }
+  *writable = false;
+  *v0 = scr_hid_getter(found);
+  *v1 = scr_hid_setter(found);
+  return 2;
+}
+
+static ScrPropKind scr_dyn_obj_resolve(const ScrDyn *d, const char *key, size_t key_len,
                                        ScrDyn **out, const ScrDyn **holder) {
   const ScrDyn *o = d;
   for (size_t steps = 0; o != NULL && steps <= SCR_PROTO_MAX_DEPTH; steps++) {
@@ -10546,8 +10577,9 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
     const ScrDyn *holder = NULL;
     /* A frozen / sealed / non-extensible object (Object.freeze and friends, scr_array_frozen.c) carries its level in its slot table: only an object that has
      * one asks, so every other write pays this one pointer test. */
-    const bool guarded = scr_dyn_ext(recv)->slots != NULL && scr_dyn_frozen_ops != NULL && scr_dyn_frozen_ops->obj_level(recv) != 0;
-    if (scr_dyn_ext(recv)->hidden != NULL || scr_dyn_ext(recv)->proto != NULL) {
+    const ScrDynObjExt *ex0 = scr_dyn_ext(recv);
+    const bool guarded = ex0->slots != NULL && scr_dyn_frozen_ops != NULL && scr_dyn_frozen_ops->obj_level(recv) != 0;
+    if (ex0->hidden != NULL || ex0->proto != NULL) {
       ScrPropKind pk = scr_dyn_obj_resolve(recv, key->data, key->len, &found, &holder);
       if (pk == SCR_PROP_HIDDEN_DATA) {
         if (guarded && holder == recv && scr_dyn_frozen_ops->obj_set(recv, key)) return;

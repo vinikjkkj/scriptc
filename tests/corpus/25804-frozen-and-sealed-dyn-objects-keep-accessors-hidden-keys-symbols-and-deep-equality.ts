@@ -1,0 +1,47 @@
+// A frozen / sealed dyn object keeps running its accessors, refuses writes to its hidden keys and its symbol-keyed rows, and still compares deep-equal.
+import assert from "node:assert";
+const sym = Symbol("tag");
+const sym2 = Symbol("late");
+function run(): void {
+  "use strict";
+  const w = (f: () => void) => { try { f(); console.log("ok"); } catch (e) { console.log((e as Error).constructor.name, (e as Error).message); } };
+  const o: any = JSON.parse('{"a":1}');
+  const log: unknown[] = [];
+  Object.defineProperty(o, "acc", { get() { return log.length; }, set(v: unknown) { log.push(v); }, enumerable: true, configurable: true });
+  Object.defineProperty(o, "hid", { value: 5, writable: true, enumerable: false, configurable: true });
+  o[sym] = "s1";
+  Object.freeze(o);
+  w(() => { o.acc = 3; });
+  console.log(o.acc, log, Object.isFrozen(o));
+  w(() => { o.hid = 6; });
+  w(() => { o.a = 6; });
+  w(() => { delete o.hid; });
+  w(() => { delete o.acc; });
+  w(() => { o[sym] = "s2"; });
+  w(() => { o[sym2] = "x"; });
+  w(() => { delete o[sym]; });
+  w(() => { Object.defineProperty(o, sym, { value: "s1" }); });
+  w(() => { Object.defineProperty(o, sym, { value: "zz" }); });
+  w(() => { Object.defineProperty(o, sym2, { value: "zz" }); });
+  console.log(o[sym], o[sym2]);
+  const s: any = Object.create(Object.prototype);
+  s.a = 1; s[sym] = 1;
+  Object.seal(s);
+  w(() => { s.a = 2; s.b = 3; });
+  w(() => { s[sym] = 2; });
+  w(() => { s[sym2] = 2; });
+  w(() => { delete s[sym]; });
+  console.log(s.a, s[sym], Object.isSealed(s), Object.isFrozen(s));
+  const m: any = JSON.parse('{"a":1}');
+  Object.freeze(m);
+  w(() => { m.a++; });
+  w(() => { m.a += 1; });
+  w(() => { m["a"] = 1; });
+  assert.deepStrictEqual(m, JSON.parse('{"a":1}'));
+  console.log("deepEqual ok");
+  const inner: any = JSON.parse('{"j":1}');
+  Object.freeze(inner);
+  w(() => { inner.j = 2; });
+  console.log(inner);
+}
+run();

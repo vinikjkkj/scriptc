@@ -4123,9 +4123,10 @@ ScrDyn *scr_dyn_define_prop(ScrDyn *target, ScrStr *key, ScrDyn *desc) {
                         strlen("Object.defineProperty called on non-object"));
     return NULL;
   }
-  if (target->kind == SCR_DYN_OBJ && scr_dyn_ext(target)->slots != NULL && scr_dyn_frozen_ops != NULL && scr_dyn_frozen_ops->obj_level(target) != 0 &&
-      scr_dyn_frozen_ops->obj_add(target, key, true)) {
-    return NULL; /* frozen / sealed / non-extensible: the TypeError is pending */
+  if (target->kind == SCR_DYN_OBJ && scr_dyn_ext(target)->slots != NULL && scr_dyn_frozen_ops != NULL && scr_dyn_frozen_ops->obj_level(target) != 0) {
+    int guard = scr_dyn_frozen_ops->obj_define(target, key, desc);
+    if (guard == 1) return NULL; /* the TypeError is pending */
+    if (guard == 2) return scr_dyn_retain(target); /* a compatible redefine of a non-configurable property: nothing changes */
   }
   if (target->kind == SCR_DYN_OBJ && target->module_ns && target->null_proto) {
     /* A module namespace's [[DefineOwnProperty]] only accepts a descriptor that changes nothing; every other (and every NEW key) throws.
