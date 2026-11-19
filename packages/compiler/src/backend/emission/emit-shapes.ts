@@ -201,6 +201,7 @@ export interface ClassMeta {
       /** View-capable records (IrRecordShape.view): one more trailing `ScrDyn *`, treated as one more
        * (dyn-typed) field by new/release/trace. */
       view?: true;
+      canon?: true;
       /** A record with several key orders (IrRecordShape.keyOrders): one more trailing plain byte, carried by neither the RC
        * members nor the trace. */
       keyOrders?: string[][];
@@ -246,6 +247,7 @@ export interface ClassMeta {
         ...(rec.ownmask ? { ownmask: true as const } : {}),
         ...(rec.srcproto ? { srcproto: true as const } : {}),
         ...(rec.view ? { view: true as const } : {}),
+        ...(rec.canon ? { canon: true as const } : {}),
         ...(rec.keyOrders ? { keyOrders: rec.keyOrders } : {}),
         ...(rec.keyList ? { keyList: true as const } : {}),
         comment: `record ${rec.id} { ${rec.fields.map((f) => f.name).join("; ")}${rec.indexValue ? "; [key: string]" : ""} }`,
@@ -418,7 +420,7 @@ export interface ClassMeta {
           `  if (!o || o->rc == SIZE_MAX) return;`,
           `  if (--o->rc == 0) {`,
         );
-        if (s.view === true) out.push(`    scr_dynview_unreg(o, o->${VIEW_MEMBER}, (const void *)&${s.release}); /* the one record of its dynamic view leaves the table */`);
+        if (s.canon === true) out.push(`    scr_dynview_unreg(o, o->${VIEW_MEMBER}, (const void *)&${s.release}); /* the one record of its dynamic view leaves the table */`);
         {
           const g = numSlotGhostsC(s.meta?.def);
           if (g !== "") out.push(`    SCR_PROPS_GHOST_SUB(${g});`);
@@ -471,7 +473,7 @@ export interface ClassMeta {
         `  if (--o->rc == 0) {`,
         `    scr_cyc_on_dead(o);`,
       );
-      if (s.view === true) out.push(`    scr_dynview_unreg(o, o->${VIEW_MEMBER}, (const void *)&${s.release}); /* the one record of its dynamic view leaves the table */`);
+      if (s.canon === true) out.push(`    scr_dynview_unreg(o, o->${VIEW_MEMBER}, (const void *)&${s.release}); /* the one record of its dynamic view leaves the table */`);
       {
         const g = numSlotGhostsC(s.meta?.def);
         if (g !== "") out.push(`    SCR_PROPS_GHOST_SUB(${g});`);
@@ -507,7 +509,7 @@ export interface ClassMeta {
         ),
         `}`,
         `${E.link}void ${s.gcFree}(void *o0) {`,
-        ...(s.view === true ? [`  scr_dynview_unreg(o0, ((${s.struct} *)o0)->${VIEW_MEMBER}, (const void *)&${s.release}); /* the view pointer is a key here, never read */`] : []),
+        ...(s.canon === true ? [`  scr_dynview_unreg(o0, ((${s.struct} *)o0)->${VIEW_MEMBER}, (const void *)&${s.release}); /* the view pointer is a key here, never read */`] : []),
         ...(untracedRefFields.length > 0 || cbit || numSlotGhostsC(s.meta?.def) !== ""
           ? [
               `  ${s.struct} *o = (${s.struct} *)o0;`,

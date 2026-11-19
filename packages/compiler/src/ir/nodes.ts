@@ -2099,6 +2099,10 @@ export interface IrRecordShape {
    * the OBJECT the record is a view of (NULL when the record was built any other way). Part of the shape's
    * interned identity, like `indexValue`. */
   view?: true;
+  /** DYN VIEW IDENTITY: set by viewRewrite on a view shape whose records are the key of a Map / Set / WeakMap or searched by indexOf /
+   * includes / lastIndexOf somewhere in the program. Only those shapes build ONE record per (dynamic object, shape) and pay for the
+   * registry (scr_dynview_canon); a plain field read of any other view shape builds its record exactly as before. */
+  canon?: true;
   /** Frontend-assigned shape id (`r0`, `r1`, ...). */
   id: string;
   /** Sorted by field name (canonical order). Types are never void. */
