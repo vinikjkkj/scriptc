@@ -17282,6 +17282,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25918-x25519-shared-secrets-match-the-rfc-7748-vectors-and-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25918-x25519-shared-secrets-match-the-rfc-7748-vectors-and-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/25930-typed-array-element-access-and-retained-references-keep-node-answers-at-every-index-and-kind.ts": {
    "order": [
     "<repo>/tests/corpus/25930-typed-array-element-access-and-retained-references-keep-node-answers-at-every-index-and-kind.ts"
