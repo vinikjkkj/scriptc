@@ -17210,6 +17210,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25876-float64-sixteen-limb-square-with-two-sum-shapes-and-a-carry-chain-keeps-node-bits.ts": {
+   "order": [
+    "<repo>/tests/corpus/25876-float64-sixteen-limb-square-with-two-sum-shapes-and-a-carry-chain-keeps-node-bits.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2588-array-entries-chains.ts": {
    "order": [
     "<repo>/tests/corpus/2588-array-entries-chains.ts"
