@@ -29597,6 +29597,12 @@
     "<repo>/tests/corpus/25838-a-table-cast-to-a-narrower-and-a-wider-record-writes-through-both.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25839-a-widened-table-passed-to-a-function-that-compares-it-keeps-one-identity.ts": {
+   "order": [
+    "<repo>/tests/corpus/25839-a-widened-table-passed-to-a-function-that-compares-it-keeps-one-identity.ts"
+   ],
+   "diags": []
   }
  }
 }
