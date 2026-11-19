@@ -1274,9 +1274,10 @@ ScrStr *scr_str_regrow(ScrStr *s, size_t newcap) {
   return r;
 }
 
-void scr_str_release(ScrStr *s) {
-  if (!s || s->rc == SCR_STR_IMMORTAL) return; /* NULL: an uninitialized `let` */
-  if (--s->rc == 0) {
+/* The teardown of a string whose count just reached zero. Out of line so scr_str_release below is a leaf the compiler need not give a
+ * register-saving prologue: the decrement that does not free, and the immortal and NULL early outs, are a handful of instructions. */
+static __attribute__((noinline)) void scr_str_release_final(ScrStr *s) {
+  {
     /* A WEAK ENTRY MUST DIE WITH ITS STRING, AND IT MUST DIE HERE. Below
      * this point the block can go to the pool, to the spare slot or to
      * free(), and every one of those RECYCLES THE ADDRESS -- a stale entry
@@ -1316,6 +1317,13 @@ void scr_str_release(ScrStr *s) {
 #endif
     free(s);
   }
+}
+
+/* noinline: the body is small enough that the compiler would copy it into every release site of this unit; one shared leaf keeps the
+ * runtime (and every Windows size anchor) where it was. */
+__attribute__((noinline)) void scr_str_release(ScrStr *s) {
+  if (!s || s->rc == SCR_STR_IMMORTAL) return; /* NULL: an uninitialized `let` */
+  if (--s->rc == 0) scr_str_release_final(s);
 }
 
 ScrStr *scr_str_concat(ScrStr *a, ScrStr *b) {
