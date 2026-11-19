@@ -20413,11 +20413,45 @@ class LlEmitter {
       // expression site the way the C lane does, but the call still pays:
       // measured on zapo's feMul carry chain, 681 -> 536 executed
       // instructions, -21.29%, against -29.07% for the inlined C arm.
-      const fn = e.fn === "math.floor" ? "scr_math_floor" : e.fn === "math.trunc" ? "scr_math_trunc" : "scr_math_ceil";
+      //
+      // INLINED, since the call is what the paragraph above prices: it also forces every live double out of its register, because the SysV
+      // x86-64 ABI has no callee-saved xmm register (the sixteen limbs of feMul's carry chain are spilled and reloaded around each of the 32
+      // calls). The body is the runtime function's own (scr_floor, scr_runtime.h) written as straight-line selects: for x inside the int64
+      // window the int64 cast truncates toward zero, floor backs off by one when the cast overshot (ceil: when it undershot), and copysign
+      // restores the -0 the cast loses; for x outside the window (|x| >= 2^63, an infinity, a NaN) every one of the three is the identity,
+      // because every double that large is already an integer and a NaN stays itself, so the answer is x. A cast of an out-of-window value is
+      // poison in LLVM, but only the arm the select drops reads it.
       const v = this.emitExpr(e.args[0]!);
-      this.declare(`declare double @${fn}(double)`);
+      const x = v.name;
+      const lo = B.tmp();
+      const hi = B.tmp();
+      const inr = B.tmp();
+      const n = B.tmp();
+      const r = B.tmp();
+      B.line(`${lo} = fcmp oge double ${x}, ${f64Lit(-9223372036854775808)}`);
+      B.line(`${hi} = fcmp olt double ${x}, ${f64Lit(9223372036854775808)}`);
+      B.line(`${inr} = and i1 ${lo}, ${hi}`);
+      B.line(`${n} = fptosi double ${x} to i64`);
+      B.line(`${r} = sitofp i64 ${n} to double`);
+      let adj = r;
+      if (e.fn !== "math.trunc") {
+        const over = B.tmp();
+        const step = B.tmp();
+        adj = B.tmp();
+        if (e.fn === "math.floor") {
+          B.line(`${over} = fcmp ogt double ${r}, ${x}`);
+          B.line(`${step} = fsub double ${r}, ${f64Lit(1)}`);
+        } else {
+          B.line(`${over} = fcmp olt double ${r}, ${x}`);
+          B.line(`${step} = fadd double ${r}, ${f64Lit(1)}`);
+        }
+        B.line(`${adj} = select i1 ${over}, double ${step}, double ${r}`);
+      }
+      this.declare(`declare double @llvm.copysign.f64(double, double)`);
+      const cs = B.tmp();
       const t = B.tmp();
-      B.line(`${t} = call double @${fn}(double ${v.name})`);
+      B.line(`${cs} = call double @llvm.copysign.f64(double ${adj}, double ${x})`);
+      B.line(`${t} = select i1 ${inr}, double ${cs}, double ${x}`);
       return { name: t, type: e.type };
     }
     if (e.fn === "math.log") {
