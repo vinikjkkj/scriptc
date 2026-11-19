@@ -7567,7 +7567,34 @@ class LlEmitter {
       // they are skipped so no dropped SSA definition can leak forward.
       if (this.B.isTerminated()) return;
       this.emitStmt(s);
+      const spill = s.kind === "varDecl" || s.kind === "assign" ? s.spillAfter : undefined;
+      if (spill !== undefined) this.emitSpill(spill);
     }
+  }
+
+  /** A run of independent f64 accumulations ends here (ir/f64-raw.ts): the locals go through one scratch array and a compiler barrier, so the stores are
+   * seeds for the vectoriser. The values come back bit for bit. */
+  private emitSpill(ids: string[]): void {
+    const B = this.B;
+    const arr = B.slot();
+    const ty = `[${ids.length} x double]`;
+    B.entryAllocas.push(`${arr} = alloca ${ty}, align 16`);
+    const slots = ids.map((id) => this.binding(id).slot);
+    ids.forEach((_, k) => {
+      const v = B.tmp();
+      const p = B.tmp();
+      B.line(`${v} = load double, ptr ${slots[k]!}`);
+      B.line(`${p} = getelementptr inbounds ${ty}, ptr ${arr}, i64 0, i64 ${k}`);
+      B.line(`store double ${v}, ptr ${p}`);
+    });
+    B.line(`call void asm sideeffect "", "r,~{memory}"(ptr ${arr})`);
+    ids.forEach((_, k) => {
+      const v = B.tmp();
+      const p = B.tmp();
+      B.line(`${p} = getelementptr inbounds ${ty}, ptr ${arr}, i64 0, i64 ${k}`);
+      B.line(`${v} = load double, ptr ${p}`);
+      B.line(`store double ${v}, ptr ${slots[k]!}`);
+    });
   }
 
   /** Emits a block in its own lexical scope (refcounted locals released at

@@ -23,7 +23,7 @@
  * plan says so).
  *
  * SCOPE. Only functions whose body is made of the node kinds below (a leaf numeric kernel: no call, closure, try, await, string or allocation) and that
- * hold at least MIN_ACCESSES covered accesses; a body over MAX_NODES is left alone (the code is emitted twice). SCRIPTC_F64RAW=off disables the pass, =report prints one `F64RAW <name> <sites> <guards>` line per versioned function to stderr, and =nofwd keeps the element reads in their locals, =nobarrier (a POSITIVE CONTROL) forwards them past element writes, =noguard
+ * hold at least MIN_ACCESSES covered accesses; a body over MAX_NODES is left alone (the code is emitted twice). SCRIPTC_F64RAW=off disables the pass, =report prints one `F64RAW <name> <sites> <guards>` line per versioned function to stderr, and =nofwd keeps the element reads in their locals, =nospill skips the scratch spill of accumulation runs, =nobarrier (a POSITIVE CONTROL) forwards them past element writes, =noguard
  * (a POSITIVE CONTROL for the test rows, never a mode to ship) ORs the guard with `true` (the guard still runs, so the data pointers are set) so the rows that hand a function a short array must differ. */
 import { BOOL, F64 } from "./nodes.js";
 import type { IrExpr, IrFunction, IrModule, IrStmt } from "./nodes.js";
@@ -294,6 +294,52 @@ function forwardLoads(fn: IrFunction, arm: IrStmt[], noBarrier: boolean): number
   return done;
 }
 
+/** Mark runs of heavy independent f64 accumulations in the raw arm for the emitters' spill (IrStmt.spillAfter).
+ *
+ * WHY. clang's SLP vectoriser seeds from stores (and reductions). Sixteen 16-term accumulations whose results feed a SERIAL carry chain have neither: the
+ * hand-written C of feMul's multiply compiles to 589 instructions when the sums are stored and 1671 when a scalar chain consumes them (measured, same
+ * arithmetic, same compiler). Storing the sums into a scratch array behind a compiler barrier gives the vectoriser its seeds back (770 instructions).
+ *
+ * WHAT. In a top-level statement list: RUN_MIN or more consecutive varDecl/assign statements to distinct, unboxed f64 locals whose values each hold at
+ * least RUN_HEAVY arithmetic nodes. The last statement of the run gets the list of those locals. */
+const RUN_MIN = 8;
+const RUN_HEAVY = 12;
+function markSpills(fn: IrFunction, arm: IrStmt[]): number {
+  const locals = new Map(fn.locals.map((l) => [l.id, l]));
+  const heavy = (x: unknown): number => {
+    if (Array.isArray(x)) return x.reduce((n: number, y) => n + heavy(y), 0);
+    if (!isNode(x)) return 0;
+    let n = x["kind"] === "bin" ? 1 : 0;
+    for (const [k, v] of Object.entries(x)) if (k !== "loc" && k !== "type") n += heavy(v);
+    return n;
+  };
+  const accum = (st: IrStmt): string | null => {
+    const n = st as Node;
+    if ((n["kind"] !== "varDecl" && n["kind"] !== "assign") || typeof n["localId"] !== "string") return null;
+    const l = locals.get(n["localId"] as string);
+    if (l === undefined || l.boxed === true || l.tdz === true || (l.type as { kind?: string }).kind !== "f64") return null;
+    const v = (n["kind"] === "varDecl" ? n["init"] : n["value"]) as Node | null;
+    if (v === null || v["kind"] !== "bin" || heavy(v) < RUN_HEAVY) return null;
+    return n["localId"] as string;
+  };
+  let marked = 0;
+  for (let i = 0; i < arm.length; ) {
+    const ids: string[] = [];
+    let j = i;
+    for (; j < arm.length; j++) {
+      const id = accum(arm[j]!);
+      if (id === null || ids.includes(id)) break;
+      ids.push(id);
+    }
+    if (ids.length >= RUN_MIN) {
+      (arm[j - 1] as Node)["spillAfter"] = ids;
+      marked++;
+    }
+    i = Math.max(j, i + 1);
+  }
+  return marked;
+}
+
 export interface F64RawStats {
   versioned: number;
   accesses: number;
@@ -315,6 +361,7 @@ export function f64RawPass(mod: IrModule): F64RawStats {
     });
     if (second.sites !== first.sites) continue; // the two walks must agree, or leave the function alone
     if (mode !== "nofwd") forwardLoads(fn, copy, mode === "nobarrier");
+    if (mode !== "nospill") markSpills(fn, copy);
     const loc = fn.body[0]!.loc;
     let cond: IrExpr | null = null;
     for (const p of fn.params) {

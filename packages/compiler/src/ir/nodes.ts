@@ -2873,8 +2873,10 @@ export type IrStmt =
    * assignment on every path, so backends never need a runtime
    * initialized-check; refcounted locals simply stay NULL until the first
    * `assign`. */
-  | { kind: "varDecl"; localId: string; init: IrExpr | null; loc: SrcLoc }
-  | { kind: "assign"; localId: string; value: IrExpr; loc: SrcLoc }
+  | { kind: "varDecl"; localId: string; init: IrExpr | null; spillAfter?: string[]; loc: SrcLoc }
+  /** `spillAfter` (set only by ir/f64-raw.ts, on the last statement of a run of heavy independent accumulations): the emitters store these f64 locals into
+   * one scratch array and read them back through a compiler barrier, which hands the vectoriser the consecutive stores it seeds from. No value changes. */
+  | { kind: "assign"; localId: string; value: IrExpr; spillAfter?: string[]; loc: SrcLoc }
   | { kind: "exprStmt"; expr: IrExpr; loc: SrcLoc }
   | { kind: "if"; cond: IrExpr; then: IrStmt[]; else_: IrStmt[] | null; loc: SrcLoc }
   /** `labels` (here and on doWhile/for/forOf/switch/block): the JS label
