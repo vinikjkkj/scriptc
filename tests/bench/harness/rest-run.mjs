@@ -74,7 +74,7 @@ if (smaps) for (const a of all) {
   const sj = `${run}/smaps.json`
   const cmd = label === 'node' ? [NODE, `${APPDIR}/zapo-rest-mysql.ts`] : [bin]
   const env = { ...process.env, RR_OUT: run, RR_APPDIR: APPDIR, RR_DBPORT: process.env.ZAPO_TEST_MYSQL_PORT ?? '3306', ZAPO_FAKE_SERVER: `${TREE}/packages/fake-server`, SMAPS_STDOUT: 'inherit' }
-  const r = spawnSync(NODE, ['--import', 'tsx', `${ROOT}/rest/arm.mts`, 'arm', db, 'python3', `${ROOT}/harness/smapspeak.py`, sj, '--', ...cmd], { cwd: TREE, env, maxBuffer: 1 << 28, timeout: 900e3 })
+  const r = spawnSync(NODE, ['--import', 'tsx', `${ROOT}/rest/arm.mts`, 'arm', db, 'python3', `${ROOT}/harness/${process.env.RAMAP ? 'ramap.py' : 'smapspeak.py'}`, sj, '--', ...cmd], { cwd: TREE, env, maxBuffer: 1 << 28, timeout: 900e3 })
   writeFileSync(`${run}/arm.stdout.txt`, r.stdout.toString()); writeFileSync(`${run}/arm.stderr.txt`, r.stderr.toString().slice(-20000))
   let sm = null, tm = null; try { sm = JSON.parse(readFileSync(sj, 'utf8')) } catch {}
   try { tm = JSON.parse(readFileSync(`${run}/arm/times.json`, 'utf8')) } catch {}
@@ -98,6 +98,29 @@ for (const l of labels) { const sm = results.smaps[l]; if (!sm) continue
   smapsLines.push('| class | Rss kB | Pss kB | Private_Dirty kB | Anonymous kB |', '|---|---|---|---|---|')
   for (const [k, v] of Object.entries(sm.classes ?? sm.by_class ?? {}).sort((a, b) => (b[1].Rss ?? 0) - (a[1].Rss ?? 0))) smapsLines.push(`| ${k} | ${v.Rss} | ${v.Pss} | ${v.Private_Dirty} | ${v.Anonymous} |`)
   smapsLines.push(`timeline (s, VmRSS kB): ${JSON.stringify(sm.timeline)}`)
+  if (sm.mappings) {
+    smapsLines.push(`\nramap ${l}: kept snapshot VmRSS ${sm.snap_vmrss_kb} kB (VmHWM at that poll ${sm.snap_hwm_kb}), final VmHWM seen ${sm.final_hwm_seen_kb} kB, gap ${sm.peak_gap_kb} kB, HWM-rise snapshots ${sm.hwm_events}`)
+    smapsLines.push('| class | Rss | Pss | Shared_Clean | Private_Clean | Private_Dirty | Anonymous |', '|---|---|---|---|---|---|---|')
+    for (const [k, v] of Object.entries(sm.classes ?? {}).sort((a, b) => b[1].Rss - a[1].Rss)) smapsLines.push(`| ${k} | ${v.Rss} | ${v.Pss} | ${v.Shared_Clean} | ${v.Private_Clean} | ${v.Private_Dirty} | ${v.Anonymous} |`)
+    smapsLines.push('', 'libs: ' + JSON.stringify(Object.fromEntries(Object.entries(sm.libs ?? {}).map(([k, v]) => [k, { Rss: v.Rss, Shared_Clean: v.Shared_Clean, Private_Dirty: v.Private_Dirty }]))))
+    smapsLines.push('| top mappings | class | perms | Size | Rss | Shared_Clean | Private_Dirty | Anonymous |', '|---|---|---|---|---|---|---|---|')
+    for (const m of sm.mappings.slice(0, 14)) smapsLines.push(`| ${m.name.split('/').pop()} ${m.range} | ${m.class} | ${m.perms} | ${m.Size} | ${m.Rss} | ${m.Shared_Clean} | ${m.Private_Dirty} | ${m.Anonymous} |`)
+    if (sm.text_pages) smapsLines.push(`text pages at the snapshot: ${JSON.stringify(sm.text_pages)}`)
+    if (sm.text_origin) {
+      smapsLines.push('| text origin | functions | bytes in binary | bytes in resident pages | functions with a resident page |', '|---|---|---|---|---|')
+      for (const [k, v] of Object.entries(sm.text_origin).slice(0, 14)) smapsLines.push(`| ${k} | ${v.functions} | ${v.bytes_total} | ${v.bytes_in_resident_pages} | ${v.functions_with_resident_page} |`)
+    }
+    const snapTable = (title, sn) => {
+      smapsLines.push(`\n${title} (${l}): t=${sn.t}s, VmRSS ${sn.snap_vmrss_kb} kB`)
+      smapsLines.push('| class | Rss | Pss | Shared_Clean | Private_Clean | Private_Dirty | Anonymous |', '|---|---|---|---|---|---|---|')
+      for (const [k, v] of Object.entries(sn.classes ?? {}).sort((a, b) => b[1].Rss - a[1].Rss)) smapsLines.push(`| ${k} | ${v.Rss} | ${v.Pss} | ${v.Shared_Clean} | ${v.Private_Clean} | ${v.Private_Dirty} | ${v.Anonymous} |`)
+      if (sn.text_pages) smapsLines.push(`text pages: ${JSON.stringify(sn.text_pages)}`)
+      if (sn.text_origin) { smapsLines.push('| text origin | functions | bytes in binary | bytes in resident pages |', '|---|---|---|---|'); for (const [k, v] of Object.entries(sn.text_origin).slice(0, 12)) smapsLines.push(`| ${k} | ${v.functions} | ${v.bytes_total} | ${v.bytes_in_resident_pages} |`) }
+    }
+    if (sm.post_drop_peak) snapTable('post-text-drop peak', sm.post_drop_peak)
+    for (const sn of sm.steady ?? []) snapTable('steady snapshot', sn)
+    if (sm.text_top30) smapsLines.push('top 30 functions with a resident page, by size: ' + sm.text_top30.map((f) => `${f.name}(${f.size},${f.origin.split('(')[0]})`).join(' '))
+  }
 }
 writeFileSync(`${out}/summary.md`, `REST (zapo-rest-mysql), reps: ${reps}, node ${results.node}\n\n` + rows.join('\n') + '\n' + smapsLines.join('\n') + '\n')
 writeFileSync(`${out}/summary.txt`, labels.map((l) => { const rs = results.runs.filter((r) => r.label === l); return `rest ${l} reps=${rs.length} exit=${rs.map((r) => r.exit).join(',')} vmhwm_kb=${rs.map((r) => r.vmhwm_kb).join(',')} median=${med(rs.map((r) => r.vmhwm_kb))} parity=${[...new Set(rs.map((r) => r.parity))].join('/')}` }).join('\n') + '\n')

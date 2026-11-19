@@ -196,6 +196,23 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: bash tests/bench/harness/fetch-tree.sh
+      - name: System facts (THP, fault-around) and the optional FAULT_AROUND=<bytes> setting (lab)
+        env:
+          EXTRA_ENV: ${{ inputs.extra_env }}
+        run: |
+          mkdir -p bench-work/artifacts
+          {
+            echo "kernel: $(uname -r)"
+            for f in enabled defrag shmem_enabled hpage_pmd_size khugepaged/defrag khugepaged/enabled; do echo "thp/$f: $(cat /sys/kernel/mm/transparent_hugepage/$f 2>&1)"; done
+            sudo mount -t debugfs none /sys/kernel/debug 2>&1 || true
+            echo "fault_around_bytes (default): $(sudo cat /sys/kernel/debug/fault_around_bytes 2>&1)"
+            grep -E 'CONFIG_READ_ONLY_THP_FOR_FS|CONFIG_TRANSPARENT_HUGEPAGE=' /boot/config-$(uname -r) 2>&1 | head -3
+            grep -E 'MemTotal|MemAvailable|Cached' /proc/meminfo
+          } | tee bench-work/artifacts/sysinfo.txt
+          if [[ "$EXTRA_ENV" =~ FAULT_AROUND=([0-9]+) ]]; then
+            echo "${BASH_REMATCH[1]}" | sudo tee /sys/kernel/debug/fault_around_bytes
+            echo "fault_around_bytes now: $(sudo cat /sys/kernel/debug/fault_around_bytes 2>&1)" | tee -a bench-work/artifacts/sysinfo.txt
+          fi
       - name: Build, run and measure (tests/bench/harness/job.sh)
         working-directory: benchsrc
         env:

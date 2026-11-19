@@ -40,6 +40,20 @@ if [ "$program" = rest ]; then
     fi
   done
   [ ${#arms[@]} -gt 0 ] || { echo "no REST binary was built"; exit 1; }
+  # RAMAP_MATRIX=1: one wrapper arm per (built arm, knob set) so a SINGLE binary is A/B'd by environment alone (the lab runtime's SCR_TEXT_DROP_AFTER_MS / SCR_TEXT_MADV).
+  # The wrapper execs the binary, so pmon and the sampler see the app's own pid.
+  if [ -n "${RAMAP_MATRIX:-}" ]; then
+    base_arms=("${arms[@]}")
+    for a in "${base_arms[@]}"; do
+      lab=${a%%:*}; bin=${a#*:}
+      for cfg in "after0:SCR_TEXT_DROP_AFTER_MS=0" "after30:SCR_TEXT_DROP_AFTER_MS=30" "rand:SCR_TEXT_MADV=random" "rand-after0:SCR_TEXT_MADV=random SCR_TEXT_DROP_AFTER_MS=0" "nohuge:SCR_TEXT_MADV=nohuge"; do
+        cn=${cfg%%:*}; kv=${cfg#*:}
+        w="$(dirname "$bin")/wrap-$lab-$cn.sh"
+        printf '#!/bin/sh\nexec env %s "%s" "$@"\n' "$kv" "$bin" > "$w"; chmod +x "$w"
+        arms+=("$lab-$cn:$w")
+      done
+    done
+  fi
   $BENCH_NODE "$BENCH_DIR/harness/rest-run.mjs" --out "$BENCH_WORK/result" --reps "$REPS" --smaps "${arms[@]}" | tee "$BENCH_WORK/result-summary.txt"
   summary "$BENCH_WORK/result"; exit 0
 fi

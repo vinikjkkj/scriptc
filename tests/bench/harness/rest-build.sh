@@ -15,8 +15,18 @@ fi
 cp "$APP" "$R/zapo-rest-mysql.ts"
 cd "$R"
 s=$(date +%s); set +e
-$BENCH_NODE --max-old-space-size=${NODE_HEAP_MB:-12288} "$SCC_CLI" build zapo-rest-mysql.ts --provenance-sources --npm-static mysql2 ${EXTRA_ARGS:-} --backend "$BE" -o "$O/build-$BE$TAG.bin" > "$O/zapo-rest-mysql-$BE$TAG.build.log" 2>&1
+$BENCH_NODE --max-old-space-size=${NODE_HEAP_MB:-12288} "$SCC_CLI" build zapo-rest-mysql.ts --provenance-sources --npm-static mysql2 ${EXTRA_ARGS:-} ${RAMAP:+--emit-ir} --backend "$BE" -o "$O/build-$BE$TAG.bin" > "$O/zapo-rest-mysql-$BE$TAG.build.log" 2>&1
 rc=$?; set -e
+# RAMAP=1: the IR dump gives every function its source file (ramap.py's origin split: the C comment names the entry file only); the dump is then deleted
+if [ -n "${RAMAP:-}" ] && [ $rc -eq 0 ]; then
+  python3 "$BENCH_DIR/harness/symfile.py" "$O/zapo-rest-mysql-$BE$TAG.symfile.tsv" "$O"/zapo-rest-mysql.ir.json | tee -a "$O/zapo-rest-mysql-$BE$TAG.build.log" || true
+  cp "$O/zapo-rest-mysql-$BE$TAG.symfile.tsv" "$BENCH_WORK/artifacts/" 2>/dev/null || true
+  rm -f "$O"/zapo-rest-mysql*.ir.json
+fi
+# RAMAP=1: the text symbols with their addresses (nm -n, gzipped), so a census reader can symbolize return addresses without the binary
+if [ -n "${RAMAP:-}" ] && [ $rc -eq 0 ]; then
+  nm -n "$O/build-$BE$TAG.bin" 2>/dev/null | awk 'NF==3 && $2 ~ /^[tTwW]$/' | gzip -9 > "$BENCH_WORK/artifacts/zapo-rest-mysql-$BE$TAG.nm.gz" || true
+fi
 secs=$(( $(date +%s) - s ))
 echo "rc=$rc secs=$secs" | tee -a "$O/zapo-rest-mysql-$BE$TAG.build.log"
 [ $rc -eq 0 ] && cp "$O/build-$BE$TAG.bin" "$O/zapo-rest-mysql-$BE$TAG.bin"
