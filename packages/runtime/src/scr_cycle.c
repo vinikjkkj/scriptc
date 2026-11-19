@@ -2054,6 +2054,8 @@ static bool scr_collecting = false;
 
 /* The base threshold (SCR_CYCLE_THRESHOLD, default 256); 0 = not read yet. */
 static size_t scr_cyc_thr_base = 0;
+/* LAB ONLY (lab/cpu5-cyc): the release path pacing quantum as a run-time value, SCR_CYCLE_PACE, default 8. */
+static size_t scr_cyc_pace_v = 8;
 /* The floor the release path's inline trigger test compares against: the base threshold, SIZE_MAX while a pass runs (so the single compare
  * also answers "not collecting"), and 0 before the env is read (so the first call takes the slow path, which reads it). */
 static size_t scr_cyc_floor = 0;
@@ -2063,6 +2065,7 @@ static size_t scr_cyc_threshold(void) {
     const char *env = getenv("SCR_CYCLE_THRESHOLD");
     long v = env ? strtol(env, NULL, 10) : 0;
     scr_cyc_thr_base = v > 0 ? (size_t)v : 256;
+    { const char *pe = getenv("SCR_CYCLE_PACE"); long pv = pe ? strtol(pe, NULL, 10) : 0; if (pv > 0) scr_cyc_pace_v = (size_t)pv; }
   }
   return scr_cyc_thr_base;
 }
@@ -2099,7 +2102,7 @@ static size_t scr_cyc_threshold(void) {
  * pays for a pass mid-run. Event-loop quiescence used to be on that list
  * too; scr_collect_cycles_idle below is why it no longer is.
  */
-#define SCR_CYC_PACE 8
+#define SCR_CYC_PACE scr_cyc_pace_v
 
 /* ── the event loop's between-turns pass ──────────────────────
  * The loop calls this every time the ready queue drains (scr_loop_run's
