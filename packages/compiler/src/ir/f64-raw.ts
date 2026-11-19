@@ -127,9 +127,30 @@ function canonicalLoop(s: Node, bodyWrites: (id: string) => number): { id: strin
   return { id, range: { lo, hi } };
 }
 
+/** True when every node kind in `x` is one a leaf numeric kernel may hold (stops at the first that is not: most functions fail on their first call or string). */
+function onlyAllowedKinds(x: unknown): boolean {
+  if (Array.isArray(x)) {
+    for (const y of x) if (!onlyAllowedKinds(y)) return false;
+    return true;
+  }
+  if (!isNode(x)) return true;
+  const kind = x["kind"];
+  if (typeof kind === "string") {
+    if (!ALLOWED.has(kind)) return false;
+    if (kind === "libCall" && !String(x["fn"]).startsWith("math.")) return false;
+    if (kind === "bytesIntrinsic" && x["method"] !== "get" && x["method"] !== "length") return false;
+  }
+  for (const [k, v] of Object.entries(x)) if (k !== "loc" && k !== "type" && !onlyAllowedKinds(v)) return false;
+  return true;
+}
+
 /** Walks `body`; `mark` (clone pass) is called with every covered access node. Returns the need map and whether every node kind is allowed. */
 function scan(fn: IrFunction, body: IrStmt[], params: ReadonlySet<string>, mark: ((n: Node) => void) | null): Scan {
   const out: Scan = { ok: true, nodes: 0, need: new Map(), covered: 0, sites: 0 };
+  if (!onlyAllowedKinds(body)) {
+    out.ok = false;
+    return out;
+  }
   // Locals written anywhere in the body (the loop counters must not be, outside their own update; the params must not be at all).
   const writes = new Map<string, number>();
   const countWrites = (x: unknown): void => {
@@ -161,6 +182,7 @@ function scan(fn: IrFunction, body: IrStmt[], params: ReadonlySet<string>, mark:
     mark?.(n);
   };
   const walk = (x: unknown, ranges: ReadonlyMap<string, Range>): void => {
+    if (!out.ok) return; // a node kind outside ALLOWED: the function is left alone, so stop reading it
     if (Array.isArray(x)) {
       for (const y of x) walk(y, ranges);
       return;
@@ -251,24 +273,9 @@ function forwardLoads(fn: IrFunction, arm: IrStmt[], noBarrier: boolean): number
   };
   let barrier = arm.findIndex((st) => holdsWrite(st));
   if (barrier < 0 || noBarrier) barrier = arm.length;
-  const refs = (x: unknown, id: string, out: { n: number }): void => {
-    if (Array.isArray(x)) {
-      for (const y of x) refs(y, id, out);
-      return;
-    }
-    if (!isNode(x)) return;
-    if (x["kind"] === "varRef" && x["localId"] === id) out.n++;
-    if ((x["kind"] === "assign" || x["kind"] === "assignExpr" || x["kind"] === "incDec") && x["localId"] === id) out.n += 1000000;
-    for (const [k, v] of Object.entries(x)) if (k !== "loc" && k !== "type") refs(v, id, out);
-  };
-  const replace = (x: unknown, id: string, load: Node): unknown => {
-    if (Array.isArray(x)) return x.map((y) => replace(y, id, load));
-    if (!isNode(x)) return x;
-    if (x["kind"] === "varRef" && x["localId"] === id) return cloneNode(load);
-    for (const [k, v] of Object.entries(x)) if (k !== "loc" && k !== "type") x[k] = replace(v, id, load);
-    return x;
-  };
-  let done = 0;
+  // candidates: a top-level statement before the barrier that defines a local from a literal-index raw read
+  const defAt = new Map<string, number>();
+  const loadOf = new Map<string, Node>();
   for (let i = 0; i < barrier; i++) {
     const st = arm[i] as Node;
     if (st["kind"] !== "varDecl" || typeof st["localId"] !== "string") continue;
@@ -278,20 +285,52 @@ function forwardLoads(fn: IrFunction, arm: IrStmt[], noBarrier: boolean): number
     if (args.length !== 1 || args[0]!["kind"] !== "numLit") continue;
     const id = st["localId"] as string;
     const l = locals.get(id);
-    if (l === undefined || l.boxed === true || l.tdz === true) continue;
-    // every use must sit in a top-level statement before the barrier, and the local must have no other write
-    const total = { n: 0 };
-    refs(arm.filter((_, j) => j !== i), id, total);
-    const early = { n: 0 };
-    for (let j = i + 1; j < barrier; j++) refs(arm[j], id, early);
-    if (total.n !== early.n || total.n >= 1000000) continue;
-    for (let j = i + 1; j < barrier; j++) arm[j] = replace(arm[j], id, init) as IrStmt;
-    arm.splice(i, 1);
-    barrier--;
-    i--;
-    done++;
+    if (l === undefined || l.boxed === true || l.tdz === true || defAt.has(id)) continue;
+    defAt.set(id, i);
+    loadOf.set(id, init);
   }
-  return done;
+  if (defAt.size === 0) return 0;
+  // ONE walk: every use must sit in a top-level statement after the def and before the barrier, and the local must have no other write
+  const bad = new Set<string>();
+  const walkUses = (x: unknown, at: number): void => {
+    if (Array.isArray(x)) {
+      for (const y of x) walkUses(y, at);
+      return;
+    }
+    if (!isNode(x)) return;
+    const k = x["kind"];
+    if (k === "varRef" || k === "assign" || k === "assignExpr" || k === "incDec") {
+      const id = x["localId"] as string;
+      const d = defAt.get(id);
+      if (d !== undefined) {
+        if (k !== "varRef" || at <= d || at >= barrier) bad.add(id);
+      }
+    }
+    for (const [key, v] of Object.entries(x)) if (key !== "loc" && key !== "type") walkUses(v, at);
+  };
+  arm.forEach((st, at) => {
+    const n = st as Node;
+    // the defining statement itself names the local once (its own varDecl), which is not a use
+    if (n["kind"] === "varDecl" && defAt.get(n["localId"] as string) === at) walkUses(n["init"], at);
+    else walkUses(st, at);
+  });
+  const ok = new Set([...defAt.keys()].filter((id) => !bad.has(id)));
+  if (ok.size === 0) return 0;
+  const replace = (x: unknown): unknown => {
+    if (Array.isArray(x)) return x.map(replace);
+    if (!isNode(x)) return x;
+    if (x["kind"] === "varRef" && ok.has(x["localId"] as string)) return cloneNode(loadOf.get(x["localId"] as string)!);
+    for (const [k, v] of Object.entries(x)) if (k !== "loc" && k !== "type") x[k] = replace(v);
+    return x;
+  };
+  const out: IrStmt[] = [];
+  arm.forEach((st, at) => {
+    const n = st as Node;
+    if (n["kind"] === "varDecl" && ok.has(n["localId"] as string) && defAt.get(n["localId"] as string) === at) return; // forwarded: the def goes
+    out.push(at < barrier ? (replace(st) as IrStmt) : st);
+  });
+  arm.splice(0, arm.length, ...out);
+  return ok.size;
 }
 
 /** Mark runs of heavy independent f64 accumulations in the raw arm for the emitters' spill (IrStmt.spillAfter).
