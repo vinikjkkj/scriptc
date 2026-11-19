@@ -17108,15 +17108,21 @@
    ],
    "diags": []
   },
-  "<repo>/tests/corpus/25804-frozen-and-sealed-dyn-objects-keep-accessors-hidden-keys-and-deep-equality.cjs": {
+  "<repo>/tests/corpus/25804-frozen-and-sealed-dyn-objects-keep-accessors-hidden-keys-symbols-and-deep-equality.ts": {
    "order": [
-    "<repo>/tests/corpus/25804-frozen-and-sealed-dyn-objects-keep-accessors-hidden-keys-and-deep-equality.cjs"
+    "<repo>/tests/corpus/25804-frozen-and-sealed-dyn-objects-keep-accessors-hidden-keys-symbols-and-deep-equality.ts"
    ],
    "diags": []
   },
   "<repo>/tests/corpus/25805-reflect-get-own-property-descriptor-and-get-own-property-descriptors-over-dyn-values.ts": {
    "order": [
     "<repo>/tests/corpus/25805-reflect-get-own-property-descriptor-and-get-own-property-descriptors-over-dyn-values.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25806-sloppy-writes-into-a-frozen-or-sealed-dyn-object-are-ignored-for-string-and-symbol-keys.cjs": {
+   "order": [
+    "<repo>/tests/corpus/25806-sloppy-writes-into-a-frozen-or-sealed-dyn-object-are-ignored-for-string-and-symbol-keys.cjs"
    ],
    "diags": []
   },
@@ -27128,6 +27134,12 @@
   "<repo>/tests/diagnostics/freeze-behind-a-cast.ts": {
    "order": [
     "<repo>/tests/diagnostics/freeze-behind-a-cast.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/diagnostics/freeze-seal-of-a-dyn-operand-of-unknown-kind-stays-refused.ts": {
+   "order": [
+    "<repo>/tests/diagnostics/freeze-seal-of-a-dyn-operand-of-unknown-kind-stays-refused.ts"
    ],
    "diags": []
   },
