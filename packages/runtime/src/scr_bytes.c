@@ -228,6 +228,10 @@ void scr_bytes_weak_mark(void *key) {
   if (key != NULL) ((ScrBytes *)key)->weakkey = 1;
 }
 
+#ifdef SCR_RRT_ON
+#pragma push_macro("scr_bytes_release")
+#undef scr_bytes_release
+#endif
 void scr_bytes_release(ScrBytes *b) {
   if (!b || b->rc == SIZE_MAX) return; /* NULL: an uninitialized `let` local */
   if (--b->rc == 0) {
@@ -254,6 +258,9 @@ void scr_bytes_release(ScrBytes *b) {
     free(b);
   }
 }
+#ifdef SCR_RRT_ON
+#pragma pop_macro("scr_bytes_release")
+#endif
 
 /* The own named-property ops (ScrBytesOwn, scr_bytes_own.c). NULL unless the program's install call ran (the
  * compiler emits it when the program holds a dyn keyed write, which is the only way a value gets an own table). */

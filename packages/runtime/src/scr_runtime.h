@@ -13369,4 +13369,81 @@ void scr_console_log(size_t n, const ScrLogArg *args);
  * keeps source order. */
 void scr_console_error(size_t n, const ScrLogArg *args);
 
+/* LAB ONLY (branch cpu1b-rt, never landed): retain/release call-site census. Build with -DSCR_RRT_ON; SCR_RRT_OUT=<file> gets one row per
+ * (kind, function, line): flags counts n_null n_immortal n_nonfinal n_final (release) / n_retain (retain). Main thread only. */
+#ifdef SCR_RRT_ON
+#include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <unistd.h>
+#define SCR_RRT_SLOTS (1u << 20)
+struct scr_rrt_ent { const char *fn; uint32_t line, kind; uint64_t c[5]; };
+extern struct scr_rrt_ent scr_rrt_tbl[SCR_RRT_SLOTS];
+extern pthread_t scr_rrt_main;
+extern unsigned long long scr_rrt_lost;
+void scr_rrt_note(unsigned kind, const char *fn, unsigned line, unsigned flag);
+void scr_rrt_dump(void);
+struct scr_rrt_ent scr_rrt_tbl[SCR_RRT_SLOTS] __attribute__((weak));
+pthread_t scr_rrt_main __attribute__((weak));
+unsigned long long scr_rrt_lost __attribute__((weak));
+__attribute__((weak)) void scr_rrt_note(unsigned kind, const char *fn, unsigned line, unsigned flag) {
+  if (!pthread_equal(pthread_self(), scr_rrt_main)) return;
+  uint64_t h = ((uint64_t)(uintptr_t)fn * 0x9E3779B97F4A7C15ull) ^ ((uint64_t)line * 0xC2B2AE3D27D4EB4Full) ^ ((uint64_t)kind << 56);
+  h ^= h >> 29;
+  uint32_t i = (uint32_t)h & (SCR_RRT_SLOTS - 1);
+  for (uint32_t n = 0; n < 64; n++, i = (i + 1) & (SCR_RRT_SLOTS - 1)) {
+    struct scr_rrt_ent *e = &scr_rrt_tbl[i];
+    if (e->fn == NULL) { e->fn = fn; e->line = line; e->kind = kind; }
+    if (e->fn == fn && e->line == line && e->kind == kind) { e->c[flag]++; return; }
+  }
+  scr_rrt_lost++;
+}
+__attribute__((weak)) void scr_rrt_dump(void) {
+  static int done;
+  if (done) return;
+  done = 1;
+  const char *path = getenv("SCR_RRT_OUT");
+  if (!path) return;
+  char pbuf[1024];
+  snprintf(pbuf, sizeof pbuf, "%s.%ld", path, (long)getpid());
+  FILE *f = fopen(pbuf, "w");
+  if (!f) return;
+  fprintf(f, "# lost %llu\n", scr_rrt_lost);
+  for (uint32_t i = 0; i < SCR_RRT_SLOTS; i++) {
+    struct scr_rrt_ent *e = &scr_rrt_tbl[i];
+    if (e->fn) fprintf(f, "%u %s %u %llu %llu %llu %llu %llu\n", e->kind, e->fn, e->line, (unsigned long long)e->c[0], (unsigned long long)e->c[1], (unsigned long long)e->c[2], (unsigned long long)e->c[3], (unsigned long long)e->c[4]);
+  }
+  fclose(f);
+}
+__attribute__((constructor)) __attribute__((weak)) void scr_rrt_install(void) {
+  scr_rrt_main = pthread_self();
+  atexit(scr_rrt_dump);
+}
+#define SCR_RRT_REL(K, fnc, x) ({ __auto_type scr_rrt_p = (x); scr_rrt_note(K, __func__, __LINE__, scr_rrt_p == NULL ? 0u : scr_rrt_p->rc == SIZE_MAX ? 1u : scr_rrt_p->rc > 1 ? 2u : 3u); fnc(scr_rrt_p); })
+#define SCR_RRT_RET(K, fnc, x) (scr_rrt_note(K, __func__, __LINE__, 4u), fnc(x))
+#define scr_str_release(x) SCR_RRT_REL(1, scr_str_release, x)
+#define scr_arr_release(x) SCR_RRT_REL(2, scr_arr_release, x)
+#define scr_dyn_release(x) SCR_RRT_REL(3, scr_dyn_release, x)
+#define scr_union_release(x) SCR_RRT_REL(4, scr_union_release, x)
+#define scr_bytes_release(x) SCR_RRT_REL(5, scr_bytes_release, x)
+#define scr_box_release(x) SCR_RRT_REL(6, scr_box_release, x)
+#define scr_closure_release(x) SCR_RRT_REL(7, scr_closure_release, x)
+#define scr_map_release(x) SCR_RRT_REL(8, scr_map_release, x)
+#define scr_promise_release(x) SCR_RRT_REL(9, scr_promise_release, x)
+#define scr_str_retain(x) SCR_RRT_RET(1, scr_str_retain, x)
+#define scr_arr_retain(x) SCR_RRT_RET(2, scr_arr_retain, x)
+#define scr_dyn_retain(x) SCR_RRT_RET(3, scr_dyn_retain, x)
+#define scr_union_retain(x) SCR_RRT_RET(4, scr_union_retain, x)
+#define scr_bytes_retain(x) SCR_RRT_RET(5, scr_bytes_retain, x)
+#define scr_box_retain(x) SCR_RRT_RET(6, scr_box_retain, x)
+#define scr_closure_retain(x) SCR_RRT_RET(7, scr_closure_retain, x)
+#define scr_map_retain(x) SCR_RRT_RET(8, scr_map_retain, x)
+#define scr_promise_retain(x) SCR_RRT_RET(9, scr_promise_retain, x)
+#ifdef _Exit
+#undef _Exit
+#endif
+#define _Exit(c) (scr_rrt_dump(), _Exit(c))
+#endif /* SCR_RRT_ON */
+
 #endif /* SCR_RUNTIME_H */

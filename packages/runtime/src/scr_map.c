@@ -662,6 +662,10 @@ ScrMap *scr_map_new(ScrMapKeyKind key_kind, ScrMapValKind val_kind,
   return m;
 }
 
+#ifdef SCR_RRT_ON
+#pragma push_macro("scr_map_retain")
+#undef scr_map_retain
+#endif
 ScrMap *scr_map_retain(ScrMap *m) {
   if (m->rc != SIZE_MAX) {
     m->rc++;
@@ -669,7 +673,14 @@ ScrMap *scr_map_retain(ScrMap *m) {
   }
   return m;
 }
+#ifdef SCR_RRT_ON
+#pragma pop_macro("scr_map_retain")
+#endif
 
+#ifdef SCR_RRT_ON
+#pragma push_macro("scr_map_release")
+#undef scr_map_release
+#endif
 void scr_map_release(ScrMap *m) {
   if (!m || m->rc == SIZE_MAX) return; /* NULL: an uninitialized `let` local */
   if (--m->rc == 0) {
@@ -695,6 +706,9 @@ void scr_map_release(ScrMap *m) {
     scr_cyc_on_release(m); /* possible cycle root; may collect — m is done */
   }
 }
+#ifdef SCR_RRT_ON
+#pragma pop_macro("scr_map_release")
+#endif
 
 void *scr_map_retain_v(void *m) { return scr_map_retain((ScrMap *)m); }
 void scr_map_release_v(void *m) { scr_map_release((ScrMap *)m); }

@@ -121,6 +121,10 @@ ScrUnion *scr_union_new_ref(uint32_t tag, void *v, void *(*retain)(void *), void
   return scr_union_new_ref_rt(tag, v, retain, release, trace);
 }
 
+#ifdef SCR_RRT_ON
+#pragma push_macro("scr_union_release")
+#undef scr_union_release
+#endif
 void scr_union_release(ScrUnion *u) {
   if (!u || u->rc == SIZE_MAX) return; /* NULL: an uninitialized `let` local */
   if (--u->rc == 0) {
@@ -138,6 +142,9 @@ void scr_union_release(ScrUnion *u) {
     scr_cyc_on_release(u); /* may collect — u is done */
   }
 }
+#ifdef SCR_RRT_ON
+#pragma pop_macro("scr_union_release")
+#endif
 
 double scr_union_get_f64(ScrUnion *u) {
   double v;

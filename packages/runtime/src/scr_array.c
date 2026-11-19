@@ -558,6 +558,10 @@ void scr_arr_weak_mark(void *key) {
 
 void (*scr_arr_idx_died_hook)(void *arr) = NULL;
 
+#ifdef SCR_RRT_ON
+#pragma push_macro("scr_arr_release")
+#undef scr_arr_release
+#endif
 void scr_arr_release(ScrArr *a) {
   if (!a || a->rc == SIZE_MAX) return; /* NULL: an uninitialized `let` local */
   if (--a->rc == 0) {
@@ -592,6 +596,9 @@ void scr_arr_release(ScrArr *a) {
     scr_cyc_on_release(a); /* possible cycle root; may collect */
   }
 }
+#ifdef SCR_RRT_ON
+#pragma pop_macro("scr_arr_release")
+#endif
 
 double scr_arr_len(ScrArr *a) { return (double)a->len; }
 

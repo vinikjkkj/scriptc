@@ -1132,6 +1132,10 @@ ScrBox *scr_cap_from_dyn(ScrDyn *d) {
   return (ScrBox *)((uintptr_t)(d != NULL ? scr_dyn_retain(d) : NULL) | SCR_CAP_TAG_DYN);
 }
 
+#ifdef SCR_RRT_ON
+#pragma push_macro("scr_dyn_release")
+#undef scr_dyn_release
+#endif
 __attribute__((noinline)) void scr_dyn_release(ScrDyn *d) {
   if (!d || d->rc == SIZE_MAX) return; /* NULL: an uninitialized `let` local */
   if (--d->rc != 0) {
@@ -1152,6 +1156,9 @@ __attribute__((noinline)) void scr_dyn_release(ScrDyn *d) {
   }
   scr_dyn_release_final(d);
 }
+#ifdef SCR_RRT_ON
+#pragma pop_macro("scr_dyn_release")
+#endif
 
 
 /* scr_dyn_bytes_eq (the fast key compare) is defined in scr_runtime.h beside the per-instance property table lookup that shares it. */

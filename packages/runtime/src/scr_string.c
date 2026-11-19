@@ -1274,6 +1274,10 @@ ScrStr *scr_str_regrow(ScrStr *s, size_t newcap) {
   return r;
 }
 
+#ifdef SCR_RRT_ON
+#pragma push_macro("scr_str_release")
+#undef scr_str_release
+#endif
 void scr_str_release(ScrStr *s) {
   if (!s || s->rc == SCR_STR_IMMORTAL) return; /* NULL: an uninitialized `let` */
   if (--s->rc == 0) {
@@ -1317,6 +1321,9 @@ void scr_str_release(ScrStr *s) {
     free(s);
   }
 }
+#ifdef SCR_RRT_ON
+#pragma pop_macro("scr_str_release")
+#endif
 
 ScrStr *scr_str_concat(ScrStr *a, ScrStr *b) {
   /* The cast is on an OPERAND, not on the sum. With 32-bit lengths

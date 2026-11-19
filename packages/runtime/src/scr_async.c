@@ -504,6 +504,10 @@ void scr_promise_mark_handled(ScrPromise *p) {
   scr_prom_observe(p);
 }
 
+#ifdef SCR_RRT_ON
+#pragma push_macro("scr_promise_retain")
+#undef scr_promise_retain
+#endif
 ScrPromise *scr_promise_retain(ScrPromise *p) {
   if (p && p->rc != SIZE_MAX) {
     p->rc++;
@@ -511,6 +515,9 @@ ScrPromise *scr_promise_retain(ScrPromise *p) {
   }
   return p;
 }
+#ifdef SCR_RRT_ON
+#pragma pop_macro("scr_promise_retain")
+#endif
 
 static void scr_promise_release_payload(ScrPromise *p) {
   if (p->payload_kind == SCR_EXC_STR) scr_str_release((ScrStr *)p->payload);
@@ -520,6 +527,10 @@ static void scr_promise_release_payload(ScrPromise *p) {
   p->payload = NULL;
 }
 
+#ifdef SCR_RRT_ON
+#pragma push_macro("scr_promise_release")
+#undef scr_promise_release
+#endif
 void scr_promise_release(ScrPromise *p) {
   if (!p || p->rc == SIZE_MAX) return;
   if (--p->rc == 0) {
@@ -547,6 +558,9 @@ void scr_promise_release(ScrPromise *p) {
     scr_cyc_on_release(p); /* possible cycle root; may collect — p is done */
   }
 }
+#ifdef SCR_RRT_ON
+#pragma pop_macro("scr_promise_release")
+#endif
 
 /* Drop the memo list. `release` distinguishes the two teardown paths:
  * the refcount path owns the entries' references, the collector path

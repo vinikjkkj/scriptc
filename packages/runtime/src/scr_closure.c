@@ -184,6 +184,10 @@ static inline bool scr_box_may_cycle(const ScrBox *b) {
 #endif
 }
 
+#ifdef SCR_RRT_ON
+#pragma push_macro("scr_box_release")
+#undef scr_box_release
+#endif
 void scr_box_release(ScrBox *b) {
   if (!b || b->rc == SIZE_MAX) return; /* NULL: a switch jumped past the decl */
   if (--b->rc == 0) {
@@ -201,6 +205,9 @@ void scr_box_release(ScrBox *b) {
     scr_cyc_on_release(b); /* possible cycle root; may collect — b is done */
   }
 }
+#ifdef SCR_RRT_ON
+#pragma pop_macro("scr_box_release")
+#endif
 
 double scr_box_get_f64(ScrBox *b) {
   double v;
@@ -662,6 +669,10 @@ void scr_closure_free_dead(ScrClosure *c) {
   scr_cyc_free(c);
 }
 
+#ifdef SCR_RRT_ON
+#pragma push_macro("scr_closure_release")
+#undef scr_closure_release
+#endif
 void scr_closure_release(ScrClosure *c) {
   if (!c || c->rc == SIZE_MAX) return; /* NULL: an uninitialized `let` local */
   if (--c->rc == 0) {
@@ -670,6 +681,9 @@ void scr_closure_release(ScrClosure *c) {
     scr_cyc_on_release(c); /* possible cycle root; may collect — c is done */
   }
 }
+#ifdef SCR_RRT_ON
+#pragma pop_macro("scr_closure_release")
+#endif
 
 /* Teardown for an INTERNED function-value closure — the emitted static
  * literal whose `rc` is SIZE_MAX, so neither release path above can ever
