@@ -17024,6 +17024,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25850-a-large-dynamic-dictionary-answers-reads-writes-in-and-delete-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25850-a-large-dynamic-dictionary-answers-reads-writes-in-and-delete-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25851-a-class-with-many-members-dispatches-by-computed-name-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25851-a-class-with-many-members-dispatches-by-computed-name-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2576-string-destructuring-assign.ts": {
    "order": [
     "<repo>/tests/corpus/2576-string-destructuring-assign.ts"
