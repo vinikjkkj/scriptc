@@ -122,7 +122,7 @@ static void scr_json_key_free(char *key, size_t key_len) {
  * pool, not the key pool: a pool is only self-consistent if every block
  * in it was sized by one rule.
  */
-const ScrDynObjExt scr_dyn_obj_ext_none = {NULL, NULL, NULL, NULL, NULL, NULL};
+const ScrDynObjExt scr_dyn_obj_ext_none = {NULL, NULL, NULL, NULL, NULL, NULL, NULL};
 
 #if SCR_JSON_KEY_POOL
 static ScrPool scr_dyn_ext_blocks;
@@ -148,6 +148,7 @@ ScrDynObjExt *scr_dyn_ext_w(ScrDyn *d) {
   e->slots = NULL;
   e->extras = NULL;
   e->syms = NULL;
+  e->idx = NULL;
   d->v.obj.ext = e;
   return e;
 }
@@ -183,6 +184,7 @@ static __attribute__((noinline)) void scr_dyn_ext_drop_block(ScrDynObjExt *e, bo
 #ifdef SCR_SYMTAB
   if (e->syms != NULL) scr_dyn_sym_free_table(e->syms, release);
 #endif
+  free(e->idx); /* the member index owns no reference: just its block (free(NULL) is the common case) */
 #if SCR_JSON_KEY_POOL
   if (scr_pool_give(&scr_dyn_ext_blocks, e, sizeof *e)) return;
 #endif
@@ -1157,12 +1159,155 @@ __attribute__((noinline)) void scr_dyn_release(ScrDyn *d) {
 /* scr_dyn_bytes_eq (the fast key compare) is defined in scr_runtime.h beside the per-instance property table lookup that shares it. */
 #define SCR_DYN_KEY_EQ(ent, kp, len) ((ent)->key_len == (len) && scr_dyn_bytes_eq((ent)->key, (kp), (len)))
 
+/* ── the member index ──────────────────────────────────────────────────
+ *
+ * A dyn object's members are an insertion-ordered array that every keyed read walks linearly. That is the right shape for the thousands of
+ * small objects a program holds and the wrong one for a dictionary: a 500-member table keyed by jid costs ~250 compares (and, past 16 bytes,
+ * a memcmp call each) per lookup, per `in`, and per duplicate check of every store into it (messaging-redis: ~64 M memcmp calls from one
+ * walk, ~7% of the run's instructions).
+ *
+ * From SCR_OBJ_IDX_MIN members up an object carries an open-addressing HASH of positions in its ext (`idx`). The entries array stays the one
+ * source of truth for order, ownership and enumeration -- the index is only "which position holds this key" and owns nothing, so no
+ * enumeration, release, trace or copy path knows it exists. It is exact by construction:
+ *   - a lookup answers the entry the scan would have answered (keys are unique in a table, a hit is verified by the same key compare);
+ *   - the one appender (scr_dyn_obj_put_k) inserts the new position, the one remover (scr_dyn_obj_unset) drops the index, and a lookup that
+ *     finds `used != len` rebuilds it, so a table edited any other way degrades to a rebuild, never to a wrong answer;
+ *   - positions are stored +1 (0 = empty), as 16-bit slots below 65,535 members and 32-bit above.
+ * -DSCR_OBJ_NOIDX restores the pure scan (the A/B control); -DSCR_OBJ_PLANT_BUG=3 makes a hit answer the NEXT entry (the planted defect). */
+#ifndef SCR_OBJ_IDX_MIN
+#define SCR_OBJ_IDX_MIN 16
+#endif
+typedef struct ScrDynObjIdx {
+  uint32_t cap;  /* slots, a power of two >= 2 * used */
+  uint32_t used; /* positions inserted == the table's len when in step */
+  uint32_t wide; /* slots are uint32 (else uint16) */
+  uint32_t pad;
+  /* slots follow */
+} ScrDynObjIdx;
+
+static inline uint32_t scr_dyn_key_hash(const char *k, size_t n) {
+  uint64_t h = (uint64_t)n * 0x9E3779B97F4A7C15ull;
+  while (n > 8) {
+    uint64_t w;
+    memcpy(&w, k, 8);
+    h = (h ^ w) * 0xff51afd7ed558ccdull;
+    h ^= h >> 32;
+    k += 8;
+    n -= 8;
+  }
+  uint64_t w = 0;
+  if (n >= 4) {
+    uint32_t a, b;
+    memcpy(&a, k, 4);
+    memcpy(&b, k + n - 4, 4);
+    w = ((uint64_t)a << 32) | b;
+  } else if (n != 0) {
+    w = (uint64_t)(uint8_t)k[0] | ((uint64_t)(uint8_t)k[n >> 1] << 8) | ((uint64_t)(uint8_t)k[n - 1] << 16);
+  }
+  h = (h ^ w) * 0xc4ceb9fe1a85ec53ull;
+  return (uint32_t)(h >> 32);
+}
+
+static inline uint32_t scr_idx_get(const ScrDynObjIdx *ix, uint32_t i) {
+  return ix->wide ? ((const uint32_t *)(ix + 1))[i] : ((const uint16_t *)(ix + 1))[i];
+}
+static inline void scr_idx_put(ScrDynObjIdx *ix, uint32_t i, uint32_t v) {
+  if (ix->wide) ((uint32_t *)(ix + 1))[i] = v;
+  else ((uint16_t *)(ix + 1))[i] = (uint16_t)v;
+}
+
+/* Position of the first free slot for `key` (the table has room: used <= cap / 2). */
+static inline void scr_idx_insert_at(ScrDynObjIdx *ix, const char *key, size_t key_len, uint32_t pos) {
+  const uint32_t mask = ix->cap - 1;
+  uint32_t i = scr_dyn_key_hash(key, key_len) & mask;
+  while (scr_idx_get(ix, i) != 0) i = (i + 1) & mask;
+  scr_idx_put(ix, i, pos + 1);
+  ix->used++;
+}
+
+/* (Re)build over entries [0, len). Replaces any previous index. */
+static __attribute__((noinline)) ScrDynObjIdx *scr_dyn_obj_idx_build(ScrDyn *obj) {
+  const uint32_t len = obj->v.obj.len;
+  uint32_t cap = 64;
+  while (cap < 2u * len + 2u) cap <<= 1;
+  const uint32_t wide = len + 1u >= 65535u;
+  ScrDynObjIdx *ix = (ScrDynObjIdx *)calloc(1, sizeof *ix + (size_t)cap * (wide ? 4 : 2));
+  if (ix == NULL) scr_json_oom();
+  ix->cap = cap;
+  ix->wide = wide;
+  const ScrDynEntry *ents = obj->v.obj.entries;
+  for (uint32_t i = 0; i < len; i++) scr_idx_insert_at(ix, ents[i].key, ents[i].key_len, i);
+  ScrDynObjExt *x = scr_dyn_ext_w(obj);
+  free(x->idx);
+  x->idx = ix;
+  return ix;
+}
+
+/* The index of a table that has one worth having, in step with the entries (built or rebuilt here when it is not). */
+static inline ScrDynObjIdx *scr_dyn_obj_idx_of(const ScrDyn *obj) {
+  ScrDynObjIdx *ix = obj->v.obj.ext != NULL ? obj->v.obj.ext->idx : NULL;
+  if (__builtin_expect(ix == NULL || ix->used != obj->v.obj.len, 0)) ix = scr_dyn_obj_idx_build((ScrDyn *)obj);
+  return ix;
+}
+
+/* The entry holding `key`, or NULL. Only for a table of >= SCR_OBJ_IDX_MIN members. */
+static __attribute__((noinline)) const ScrDynEntry *scr_dyn_obj_idx_find(const ScrDyn *obj, const char *key, size_t key_len) {
+  const ScrDynObjIdx *ix = scr_dyn_obj_idx_of(obj);
+  const ScrDynEntry *ents = obj->v.obj.entries;
+  const uint32_t mask = ix->cap - 1;
+  uint32_t i = scr_dyn_key_hash(key, key_len) & mask;
+  for (;;) {
+    const uint32_t s = scr_idx_get(ix, i);
+    if (s == 0) return NULL;
+    const ScrDynEntry *e = &ents[s - 1];
+    if (SCR_DYN_KEY_EQ(e, key, key_len)) {
+#ifdef SCR_OBJ_PLANT_BUG
+      if (SCR_OBJ_PLANT_BUG == 3 && s < obj->v.obj.len) return &ents[s];
+#endif
+      return e;
+    }
+    i = (i + 1) & mask;
+  }
+}
+
+static __attribute__((noinline)) ScrDyn *scr_dyn_obj_get_big(const ScrDyn *d, const char *key, size_t key_len) {
+  const ScrDynEntry *e = scr_dyn_obj_idx_find(d, key, key_len);
+  if (e == NULL) return NULL;
+  ScrDyn *v = e->value;
+  return __builtin_expect(v == scr_dyn_acc_slot(), 0) ? NULL : v;
+}
+
+/* The appender's half: the entry at `pos` was just stored. Keeps an existing index in step (growing it when half full); a table that
+ * reaches the threshold is indexed by its first lookup, not here, so a bulk fill never pays to hash keys nobody reads. */
+static inline void scr_dyn_obj_idx_note_append(ScrDyn *obj, uint32_t pos) {
+  ScrDynObjIdx *ix = obj->v.obj.ext != NULL ? obj->v.obj.ext->idx : NULL;
+  if (__builtin_expect(ix == NULL, 1)) return;
+  if (ix->used != pos || 2u * (ix->used + 1u) > ix->cap || (!ix->wide && pos + 2u >= 65535u)) {
+    ix->used = ~0u; /* out of step or full: the next lookup rebuilds over the new length */
+    return;
+  }
+  const ScrDynEntry *e = &obj->v.obj.entries[pos];
+  scr_idx_insert_at(ix, e->key, e->key_len, pos);
+}
+
+/* The remover's half: positions shift, so the index goes (the next lookup of a large table rebuilds it). */
+static inline void scr_dyn_obj_idx_drop(ScrDyn *obj) {
+  ScrDynObjExt *x = obj->v.obj.ext;
+  if (x != NULL && x->idx != NULL) {
+    free(x->idx);
+    x->idx = NULL;
+  }
+}
+
 ScrDyn *scr_dyn_obj_get(const ScrDyn *d, const char *key, size_t key_len) {
   /* A COUNT-DOWN WALK THAT KEEPS ITS COUNTER. With 24-byte entries clang rewrites a counted loop into "advance until the end pointer", whose setup
    * is len * 24 (an lea and a shift) on every call where the 32-byte entry was one shift; this is the hottest loop over dyn objects, so that one
    * instruction per call showed up as +0.75% on a lookup-dominated micro. The empty asm makes the counter a live value the loop must keep, so the
    * test stays dec/jnz and no end pointer is formed. It emits no instruction of its own. */
   const ScrDynEntry *e = d->v.obj.entries;
+#ifndef SCR_OBJ_NOIDX
+  if (__builtin_expect(d->v.obj.len >= SCR_OBJ_IDX_MIN, 0)) return scr_dyn_obj_get_big(d, key, key_len); /* a tail call: the small walk is untouched */
+#endif
   for (size_t n = d->v.obj.len; n != 0; n--, e++) {
     __asm__("" : "+r"(n));
     if (SCR_DYN_KEY_EQ(e, key, key_len)) {
@@ -2209,7 +2354,15 @@ static void scr_dyn_obj_put_k(ScrDyn *obj, char *key, size_t key_len, ScrDyn *va
   scr_dyncen_key_note(&scr_dyncen_keyrun, key, (long long)key_len);
 #endif
   ScrDynEntry *se = obj->v.obj.entries;
-  for (size_t n = obj->v.obj.len; n != 0; n--, se++) {
+  size_t scan_n = obj->v.obj.len;
+#ifndef SCR_OBJ_NOIDX
+  if (__builtin_expect(scan_n >= SCR_OBJ_IDX_MIN, 0)) {
+    /* A large table: the duplicate check is one index probe, and a hit is handled by the SAME branch below (a one-entry walk from the hit). */
+    se = (ScrDynEntry *)scr_dyn_obj_idx_find(obj, key, key_len);
+    scan_n = se != NULL ? 1 : 0;
+  }
+#endif
+  for (size_t n = scan_n; n != 0; n--, se++) {
     __asm__("" : "+r"(n)); /* keep the counter: see scr_dyn_obj_get */
     if (SCR_DYN_KEY_EQ(se, key, key_len)) {
       /* UNLINK BEFORE RELEASE (scr_cycle.c's second global invariant): the
@@ -2269,6 +2422,7 @@ static void scr_dyn_obj_put_k(ScrDyn *obj, char *key, size_t key_len, ScrDyn *va
   e->key_static = key_static;
   e->value_borrowed = 0;
   e->value = value;
+  scr_dyn_obj_idx_note_append(obj, obj->v.obj.len - 1);
 #ifdef SCR_WRAP_WATCH
   /* A NEW member named toString / valueOf can change what a primitive-wrapper subclass answers (scr_dyn_wrapper_user_member's cache).
    * Compiled in only for a program that holds such a subclass or relinks a prototype (moduleUsesWrapWatch). */
@@ -9828,6 +9982,7 @@ static void scr_dyn_obj_put_hidden(ScrDyn *recv, const char *key, size_t key_len
    * yet. The claim is made at the end of the member table, which is
    * where a property created now belongs. A slot is never withdrawn when
    * `enumerable` goes false: it becomes a tombstone, so a later
+      scr_dyn_obj_idx_drop(obj); /* positions after i shift */
    * redefinition back to true restores the key to the position it had
    * rather than to a new one. */
   if (enumerable && !slot_held) {

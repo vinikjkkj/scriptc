@@ -5436,6 +5436,9 @@ typedef struct ScrDynObjExt {
    * cycle the collector reclaims); the symbol keys are plain refcounts and
    * never part of a cycle. */
   struct ScrDynSymTab *syms;
+  /* OBJ receivers only: the HASH INDEX of a large member table (scr_json.c, "the member index"). NULL for every object under
+   * SCR_OBJ_IDX_MIN members, and dropped by the one operation that moves entries (a delete). Last, so no earlier offset moves. */
+  struct ScrDynObjIdx *idx;
 } ScrDynObjExt;
 
 /* Attribute bits of one symbol-keyed property. A plain assignment makes all

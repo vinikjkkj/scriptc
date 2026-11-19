@@ -227,6 +227,77 @@ int main(void) {
     scr_str_release(out);
   }
 
+  /* ── the member index (scr_json.c): a large table answers exactly what the scan answers ──
+   * A shadow model (present/value per key) is checked after every phase; entries[] must keep creation order across deletes and re-adds. */
+  {
+    static const size_t sizes[] = {15, 16, 17, 31, 32, 33, 100, 5000, 70000};
+    for (size_t si = 0; si < sizeof sizes / sizeof sizes[0]; si++) {
+      const size_t n = sizes[si];
+      char (*names)[16] = malloc(n * 2 * sizeof *names); /* [0,n) stored, [n,2n) never stored */
+      int *val = calloc(n, sizeof *val);
+      bool *live = calloc(n, 1);
+      size_t *order = malloc(n * sizeof *order); /* expected enumeration */
+      size_t norder = 0;
+      for (size_t i = 0; i < 2 * n; i++) snprintf(names[i], sizeof *names, "key_%zu_%s", i % n, i < n ? "s" : "m");
+      ScrDyn *o = scr_dyn_new_obj();
+      bool ok = true;
+      for (size_t i = 0; i < n; i++) {
+        scr_dyn_obj_set(o, names[i], strlen(names[i]), scr_dyn_new_num((double)(i + 1)));
+        val[i] = (int)(i + 1);
+        live[i] = true;
+        order[norder++] = i;
+      }
+      /* overwrite every 7th (position must not move), delete every 5th (order of the rest must hold) */
+      for (size_t i = 0; i < n; i += 7) {
+        scr_dyn_obj_set(o, names[i], strlen(names[i]), scr_dyn_new_num(-(double)(i + 1)));
+        val[i] = -(int)(i + 1);
+      }
+      for (size_t i = 0; i < n; i += 5) {
+        ScrStr *k = S(names[i]);
+        ok = ok && scr_dyn_key_delete(o, k);
+        scr_str_release(k);
+        live[i] = false;
+        size_t w = 0;
+        for (size_t r = 0; r < norder; r++) if (order[r] != i) order[w++] = order[r];
+        norder = w;
+        if (n < 6000 || i % 50 == 0) {
+          /* a lookup right after a delete: the index was dropped and must rebuild (positions shifted) */
+          ScrDyn *g = scr_dyn_obj_get(o, names[(i + 1) % n], strlen(names[(i + 1) % n]));
+          size_t j = (i + 1) % n;
+          ok = ok && ((live[j] && g != NULL && (int)g->v.num == val[j]) || (!live[j] && g == NULL));
+        }
+      }
+      /* re-add a third of the deleted ones: they land at the END */
+      for (size_t i = 0; i < n; i += 15) {
+        if (live[i]) continue;
+        scr_dyn_obj_set(o, names[i], strlen(names[i]), scr_dyn_new_num(1000000.0 + (double)i));
+        val[i] = 1000000 + (int)i;
+        live[i] = true;
+        order[norder++] = i;
+      }
+      for (size_t i = 0; i < n; i++) {
+        ScrDyn *g = scr_dyn_obj_get(o, names[i], strlen(names[i]));
+        if (live[i]) ok = ok && g != NULL && g->kind == SCR_DYN_NUM && (int)g->v.num == val[i];
+        else ok = ok && g == NULL;
+        ScrDyn *m = scr_dyn_obj_get(o, names[n + i], strlen(names[n + i]));
+        ok = ok && m == NULL;
+      }
+      ok = ok && o->v.obj.len == norder;
+      for (size_t r = 0; ok && r < norder; r++) {
+        const ScrDynEntry *e = &o->v.obj.entries[r];
+        ok = e->key_len == strlen(names[order[r]]) && memcmp(e->key, names[order[r]], e->key_len) == 0;
+      }
+      char nm[96];
+      snprintf(nm, sizeof nm, "member index: %zu keys, overwrite/delete/re-add match the shadow model and keep creation order", n);
+      check(ok, nm);
+      scr_dyn_release(o);
+      free(names);
+      free(val);
+      free(live);
+      free(order);
+    }
+  }
+
   printf("%d/%d checks passed\n", checks - failures, checks);
   return failures == 0 ? 0 : 1;
 }
