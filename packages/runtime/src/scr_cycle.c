@@ -2238,14 +2238,6 @@ void scr_cyc_on_release(void *obj) {
 /* The gathered white set (freed after the walk completes). */
 static void **scr_white = NULL;
 static size_t scr_nwhite = 0, scr_white_cap = 0;
-static void scr_white_push(void *o) {
-  if (scr_nwhite == scr_white_cap) {
-    scr_white_cap = scr_white_cap ? scr_white_cap * 2 : 64;
-    scr_white = realloc(scr_white, scr_white_cap * sizeof *scr_white);
-    if (!scr_white) scr_cyc_oom();
-  }
-  scr_white[scr_nwhite++] = o;
-}
 
 /* ── the four phases, over an explicit worklist ─────────────────────
  * Same algorithm, same visit-order guarantees, no C stack.
@@ -2343,14 +2335,11 @@ static void scr_scan_visit(void *child, void *ctx) {
   if (h->color != SCR_CYC_GRAY) return;
   if (SCR_RC(child) > 0) {
     /* Externally referenced: this whole subgraph stays. Nested on the same
-     * stack, bounded by the mark scr_scan_black takes on entry. A childless node's
-     * subgraph is itself. */
-    if (scr_cyc_childless(h, child, 0)) h->color = SCR_CYC_BLACK;
-    else scr_scan_black(child);
+     * stack, bounded by the mark scr_scan_black takes on entry. */
+    scr_scan_black(child);
     return;
   }
   h->color = SCR_CYC_WHITE;
-  if (scr_cyc_childless(h, child, 0)) return; /* nothing to scan below it */
   scr_wl_push(child);
 }
 static void scr_scan(void *obj) {
@@ -2379,10 +2368,6 @@ static void scr_cw_visit(void *child, void *ctx) {
   ScrCycHdr *h = scr_cyc_hdr(child);
   if (h->color != SCR_CYC_WHITE || SCR_CYC_BUFFERED(h)) return;
   h->color = SCR_CYC_BLACK; /* visited marker — prevents re-gathering */
-  if (scr_cyc_childless(h, child, 0)) {
-    scr_white_push(child); /* straight to the white set: its trace would visit nothing */
-    return;
-  }
   scr_wl_push(child);
 }
 static void scr_collect_white(void *obj) {
@@ -2394,7 +2379,12 @@ static void scr_collect_white(void *obj) {
   while (scr_wl_n > floor) {
     void *o = scr_wl[--scr_wl_n];
     scr_cyc_trace_call(scr_cyc_hdr(o), o, scr_cw_visit, NULL);
-    scr_white_push(o);
+    if (scr_nwhite == scr_white_cap) {
+      scr_white_cap = scr_white_cap ? scr_white_cap * 2 : 64;
+      scr_white = realloc(scr_white, scr_white_cap * sizeof *scr_white);
+      if (!scr_white) scr_cyc_oom();
+    }
+    scr_white[scr_nwhite++] = o;
   }
 }
 

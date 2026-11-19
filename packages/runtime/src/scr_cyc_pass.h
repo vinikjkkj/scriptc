@@ -58,6 +58,16 @@ static inline __attribute__((always_inline)) void scr_cyc_sb_one(void *child, in
   scr_wl_push(child);
 }
 
+/* The same two bodies out of line, for an edge that is visited once per node. */
+static __attribute__((noinline, unused)) void scr_cyc_mg_edge(void *child, int known_dyn) {
+  if (known_dyn) scr_cyc_mg_one(child, 1);
+  else scr_cyc_mg_one(child, 0);
+}
+static __attribute__((noinline, unused)) void scr_cyc_sb_edge(void *child, int known_dyn) {
+  if (known_dyn) scr_cyc_sb_one(child, 1);
+  else scr_cyc_sb_one(child, 0);
+}
+
 /* The generic visitors, as pointers for the traces that cannot inline (every kind but dyn; a dyn node's own rare arms). */
 static inline void scr_cyc_mg_visit_fn(void *child, void *ctx) {
   (void)ctx;

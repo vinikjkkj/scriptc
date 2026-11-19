@@ -843,12 +843,25 @@ ScrDyn *scr_dyn_alloc_proxy(void) { return scr_dyn_alloc(SCR_DYN_PROXY); }
     else if (phase == 2) scr_cyc_sb_one(sv_, 1); \
     else visit(sv_, ctx); \
   } while (0)
+/* The single-edge fields (the tables, the links, a closure, an instance) are mostly NULL and only ever one edge each: a NULL test inline and a direct call for the rest
+ * keeps the three instances small (the loops over elements and members are where the inlining pays). */
 #define SVX(x) \
   do { \
     void *sv_ = (x); \
-    if (phase == 1) scr_cyc_mg_one(sv_, 0); \
-    else if (phase == 2) scr_cyc_sb_one(sv_, 0); \
-    else visit(sv_, ctx); \
+    if (sv_ != NULL) { \
+      if (phase == 1) scr_cyc_mg_edge(sv_, 0); \
+      else if (phase == 2) scr_cyc_sb_edge(sv_, 0); \
+      else visit(sv_, ctx); \
+    } \
+  } while (0)
+#define SV1(x) \
+  do { \
+    void *sv_ = (x); \
+    if (sv_ != NULL) { \
+      if (phase == 1) scr_cyc_mg_edge(sv_, 1); \
+      else if (phase == 2) scr_cyc_sb_edge(sv_, 1); \
+      else visit(sv_, ctx); \
+    } \
   } while (0)
 static inline __attribute__((always_inline)) void scr_dyn_trace_t(void *o, ScrTraceVisit visit, void *ctx, int phase) {
   ScrDyn *d = (ScrDyn *)o;
@@ -856,7 +869,7 @@ static inline __attribute__((always_inline)) void scr_dyn_trace_t(void *o, ScrTr
   case SCR_DYN_ARR:
     for (size_t i = 0; i < d->v.arr.len; i++) SV(d->v.arr.items[i]);
     /* the named-property table of an exec result / expando'd array */
-    SV(scr_dyn_ext(d)->extras);
+    SV1(scr_dyn_ext(d)->extras);
     if (d->static_copy && dyn_origin_ntraced != 0) dyn_origin_trace(d, visit, ctx);
 #ifdef SCR_SYMTAB
     if (scr_dyn_ext(d)->syms != NULL) scr_dyn_sym_trace_table(scr_dyn_ext(d)->syms, visit, ctx);
@@ -869,11 +882,11 @@ static inline __attribute__((always_inline)) void scr_dyn_trace_t(void *o, ScrTr
      * table is where a getter/setter pair lives (an OBJ dyn of ARR dyn
      * entries holding two FUNC dyns), which is the edge that makes an
      * accessor descriptor collectible at all. Both are NULL-tolerant. */
-    SV(scr_dyn_ext(d)->proto);
-    SV(scr_dyn_ext(d)->hidden);
+    SV1(scr_dyn_ext(d)->proto);
+    SV1(scr_dyn_ext(d)->hidden);
     /* scriptc's internal-slot table: an ordinary OBJ dyn holding ordinary
      * dyn values, so a cycle through one collects like any other. */
-    SV(scr_dyn_ext(d)->slots);
+    SV1(scr_dyn_ext(d)->slots);
     if (d->static_copy && dyn_origin_ntraced != 0) dyn_origin_trace(d, visit, ctx);
 #ifdef SCR_SYMTAB
     if (scr_dyn_ext(d)->syms != NULL) scr_dyn_sym_trace_table(scr_dyn_ext(d)->syms, visit, ctx);
@@ -883,8 +896,8 @@ static inline __attribute__((always_inline)) void scr_dyn_trace_t(void *o, ScrTr
     SVX(scr_dyn_fn_clo(d));
     break;
   case SCR_DYN_PROXY:
-    SV(d->v.proxy.target);
-    SV(d->v.proxy.handler);
+    SV1(d->v.proxy.target);
+    SV1(d->v.proxy.handler);
     break;
   case SCR_DYN_OBJINST:
     /* A COLLECTOR-OWNED instance (its class is scr_cyc_alloc'd, cls->cyc) is a
@@ -900,6 +913,7 @@ static inline __attribute__((always_inline)) void scr_dyn_trace_t(void *o, ScrTr
 }
 
 #undef SV
+#undef SV1
 #undef SVX
 static void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx) { scr_dyn_trace_t(o, visit, ctx, 0); }
 static void scr_dyn_trace_mg(void *o) { scr_dyn_trace_t(o, scr_cyc_mg_visit_fn, NULL, 1); }
