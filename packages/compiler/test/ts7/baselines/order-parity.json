@@ -17234,6 +17234,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25898-relational-operators-on-strings-order-a-supplementary-character-before-a-private-use-one.ts": {
+   "order": [
+    "<repo>/tests/corpus/25898-relational-operators-on-strings-order-a-supplementary-character-before-a-private-use-one.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2590-object-create-dynamic.js": {
    "order": [
     "<repo>/tests/corpus/2590-object-create-dynamic.js"
