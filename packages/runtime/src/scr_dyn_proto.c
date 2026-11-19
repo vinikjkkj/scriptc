@@ -336,12 +336,20 @@ static ScrDyn *scr_builtin_object_ctor(ScrClosure *clo, ScrDyn *const *args, siz
   if (argc == 0) return scr_dyn_new_obj();
   return scr_dyn_to_object(args[0]);
 }
-static ScrDyn *scr_builtin_string_ctor(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
-  (void)clo;
-  ScrStr *r = argc == 0 ? scr_str_new("", 0) : scr_dyn_string_coerce(args[0]);
+/* String(x) as a CALL renders a Symbol as Symbol(desc) (SymbolDescriptiveString); `new String(sym)` (the wrapper construction below,
+ * `is_call` false) throws like any ToString of a Symbol. */
+static ScrDyn *scr_builtin_string_conv(ScrDyn *const *args, size_t argc, bool is_call) {
+  ScrStr *r = argc == 0 ? scr_str_new("", 0)
+            : is_call && scr_dyn_is_symbol(args[0]) ? scr_dyn_symbol_descriptive(args[0])
+                                                    : scr_dyn_string_coerce(args[0]);
+  if (r == NULL) return NULL;
   ScrDyn *out = scr_dyn_new_str(r);
   scr_str_release(r);
   return out;
+}
+static ScrDyn *scr_builtin_string_ctor(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
+  (void)clo;
+  return scr_builtin_string_conv(args, argc, true);
 }
 static ScrDyn *scr_builtin_number_ctor(ScrClosure *clo, ScrDyn *const *args, size_t argc) {
   (void)clo;
@@ -526,7 +534,7 @@ static ScrDyn *proto_construct_builtin(const ScrDyn *fn, const ScrDyn *args, boo
     *handled = true;
     ScrDyn *const *items = args != NULL && args->kind == SCR_DYN_ARR ? args->v.arr.items : NULL;
     size_t n = args != NULL && args->kind == SCR_DYN_ARR ? args->v.arr.len : 0;
-    ScrDyn *prim = WRAPPED[i] == SCR_BI_STRING ? scr_builtin_string_ctor(NULL, items, n)
+    ScrDyn *prim = WRAPPED[i] == SCR_BI_STRING ? scr_builtin_string_conv(items, n, false)
                  : WRAPPED[i] == SCR_BI_NUMBER ? scr_builtin_number_ctor(NULL, items, n)
                                                : scr_builtin_boolean_ctor(NULL, items, n);
     if (prim == NULL) return NULL; /* pending */
