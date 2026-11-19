@@ -7,7 +7,9 @@
  * THE CONTROLS THAT FIRE (-DSCR_OBJ_PLANT_BUG=<n>): 3 makes an indexed dyn lookup answer the NEXT entry (row 25850 must differ), 4 makes an
  * indexed class lookup answer the next row (25851 must differ), 5 paints the LOOSEST containing class into the registry memo (25851 must
  * differ), 6 treats every OBJECT as plain in the keyed [[Get]] fast path (row 25852, a wrapper and a StringDecoder, must differ). A row that
- * does not move under its plant never reached the mechanism. */
+ * does not move under its plant never reached the mechanism. Rows 25853-25857 are the primitive-wrapper reads (Object(prim) sees String / Number /
+ * Boolean.prototype by read and by `in`, and its `constructor` names the builtin); 7 makes a wrapper read as a plain object again, 8 restores the old
+ * `constructor` fence. */
 import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -19,7 +21,7 @@ import { exeName } from "./exe.js";
 const repoRoot = join(import.meta.dirname, "../..");
 const rowFile = (id: string): string => readdirSync(join(repoRoot, "tests/corpus")).find((n) => n.startsWith(id + "-"))!;
 const rowSrcOf = (id: string): string => readFileSync(join(repoRoot, "tests/corpus", rowFile(id)), "utf8");
-const IDS = ["25850", "25851", "25852"] as const;
+const IDS = ["25850", "25851", "25852", "25853", "25854", "25855", "25856", "25857"] as const;
 
 interface Run { stdout: string; exitCode: number }
 function run(cmd: string, args: string[], cwd: string): Promise<Run> {
@@ -72,7 +74,7 @@ describe.each(["c", "llvm"] as const)("the member indexes (%s)", (backend) => {
       expect(r.stdout).toBe(nodeOut[id]);
     }
   }, 900_000);
-  test.each([["25850", 3], ["25851", 4], ["25851", 5], ["25852", 6]] as const)("CONTROL: row %s under planted defect %i differs from Node", async (id, n) => {
+  test.each([["25850", 3], ["25851", 4], ["25851", 5], ["25852", 6], ["25853", 7], ["25856", 8], ["25857", 7]] as const)("CONTROL: row %s under planted defect %i differs from Node", async (id, n) => {
     const bin = await build(id, `plant${n}-${id}-${backend}`, backend, `-DSCR_OBJ_PLANT_BUG=${n}`, false);
     const r = await run(bin, [], work);
     expect(r.stdout).not.toBe(nodeOut[id]);
