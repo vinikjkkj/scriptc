@@ -40,13 +40,13 @@
  * A/A floor. The depth is the reason it is here.
  */
 #include "scr_runtime.h"
+#include "scr_cyc_pass.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-/* Every heap object's first member is `size_t rc`. */
-#define SCR_RC(obj) (*(size_t *)(obj))
+/* Every heap object's first member is `size_t rc` (SCR_RC, scr_cyc_pass.h). */
 
 static void scr_cyc_oom(void) {
   scr_trap("scriptc: out of memory\n");
@@ -2234,13 +2234,18 @@ void scr_cyc_on_release(void *obj) {
 
 /* ── trial deletion ───────────────────────────────────────────────────── */
 
-/* Child filter shared by every phase: nothing to do for NULL (unassigned
- * slots) or immortal (interned statics have no header at all). */
-#define SCR_CYC_SKIP(child) ((child) == NULL || SCR_RC(child) == SIZE_MAX)
 
 /* The gathered white set (freed after the walk completes). */
 static void **scr_white = NULL;
 static size_t scr_nwhite = 0, scr_white_cap = 0;
+static void scr_white_push(void *o) {
+  if (scr_nwhite == scr_white_cap) {
+    scr_white_cap = scr_white_cap ? scr_white_cap * 2 : 64;
+    scr_white = realloc(scr_white, scr_white_cap * sizeof *scr_white);
+    if (!scr_white) scr_cyc_oom();
+  }
+  scr_white[scr_nwhite++] = o;
+}
 
 /* ── the four phases, over an explicit worklist ─────────────────────
  * Same algorithm, same visit-order guarantees, no C stack.
@@ -2294,46 +2299,16 @@ static size_t scr_nwhite = 0, scr_white_cap = 0;
  *   scanBlack nests INSIDE scan on the same stack, bounded by the mark it
  *   took on entry. It cannot escape below that mark, so the outer phase's
  *   pending nodes are untouched. */
-static void **scr_wl = NULL;
-static size_t scr_wl_n = 0, scr_wl_cap = 0;
+void **scr_wl = NULL;
+size_t scr_wl_n = 0, scr_wl_cap = 0;
+ScrCycDynPassFn scr_cyc_dyn_mg = NULL, scr_cyc_dyn_sb = NULL;
 
-static void scr_wl_push(void *obj) {
-  if (scr_wl_n == scr_wl_cap) {
-    scr_wl_cap = scr_wl_cap ? scr_wl_cap * 2 : 256;
-    scr_wl = realloc(scr_wl, scr_wl_cap * sizeof *scr_wl);
-    if (!scr_wl) scr_cyc_oom();
-  }
-  scr_wl[scr_wl_n++] = obj;
+__attribute__((noinline)) void scr_wl_grow(void) {
+  scr_wl_cap = scr_wl_cap ? scr_wl_cap * 2 : 256;
+  scr_wl = realloc(scr_wl, scr_wl_cap * sizeof *scr_wl);
+  if (!scr_wl) scr_cyc_oom();
 }
 
-/* CHILDLESS DYN NODES. The dyn trace (scr_dyn_trace) visits children for exactly five kinds; every other kind of dyn node (numbers, strings, booleans, null, undefined,
- * bytes, bigints, handles, promises, maps, ...) has none. A child of that sort needs its colour and count updated by each phase and nothing else, so it never goes on
- * the worklist: it would be pushed, popped, and handed to a trace function that visits nothing. kind_lo == SCR_CYC_KIND_DYN alone identifies a dyn node (see
- * scr_runtime.h). If scr_dyn_trace ever visits children of another kind, add it here (the planted-defect control in tests/perf/collector shows what a miss costs). */
-#define SCR_DYN_TRACED_MASK ((1u << SCR_DYN_ARR) | (1u << SCR_DYN_OBJ) | (1u << SCR_DYN_FUNC) | (1u << SCR_DYN_PROXY) | (1u << SCR_DYN_OBJINST))
-static inline __attribute__((always_inline)) int scr_cyc_childless(const ScrCycHdr *h, void *child) {
-  return h->kind_lo == SCR_CYC_KIND_DYN && ((1u << (unsigned)((const ScrDyn *)child)->kind) & SCR_DYN_TRACED_MASK) == 0;
-}
-
-static void scr_white_push(void *o) {
-  if (scr_nwhite == scr_white_cap) {
-    scr_white_cap = scr_white_cap ? scr_white_cap * 2 : 64;
-    scr_white = realloc(scr_white, scr_white_cap * sizeof *scr_white);
-    if (!scr_white) scr_cyc_oom();
-  }
-  scr_white[scr_nwhite++] = o;
-}
-
-static void scr_mg_visit(void *child, void *ctx) {
-  (void)ctx;
-  if (SCR_CYC_SKIP(child)) return;
-  SCR_RC(child) -= 1; /* trial-delete this internal edge */
-  ScrCycHdr *h = scr_cyc_hdr(child);
-  if (h->color == SCR_CYC_GRAY) return;
-  h->color = SCR_CYC_GRAY;
-  if (scr_cyc_childless(h, child)) return;
-  scr_wl_push(child);
-}
 static void scr_mark_gray(void *obj) {
   ScrCycHdr *h = scr_cyc_hdr(obj);
   size_t floor = scr_wl_n;
@@ -2342,20 +2317,12 @@ static void scr_mark_gray(void *obj) {
   scr_wl_push(obj);
   while (scr_wl_n > floor) {
     void *o = scr_wl[--scr_wl_n];
-    scr_cyc_trace_call(scr_cyc_hdr(o), o, scr_mg_visit, NULL);
+    const ScrCycHdr *oh = scr_cyc_hdr(o);
+    if (oh->kind_lo == SCR_CYC_KIND_DYN) scr_cyc_dyn_mg(o);
+    else scr_cyc_trace_call(oh, o, scr_cyc_mg_visit_fn, NULL);
   }
 }
 
-static void scr_sb_visit(void *child, void *ctx) {
-  (void)ctx;
-  if (SCR_CYC_SKIP(child)) return;
-  SCR_RC(child) += 1; /* restore the trial decrement */
-  ScrCycHdr *h = scr_cyc_hdr(child);
-  if (h->color == SCR_CYC_BLACK) return;
-  h->color = SCR_CYC_BLACK;
-  if (scr_cyc_childless(h, child)) return;
-  scr_wl_push(child);
-}
 /* NOT always_inline: inlined into the scan phase it grew scr_collect_cycles by about 150 bytes and measured slower on redis (v4); out of line it is one call per black subtree. */
 static __attribute__((noinline)) void scr_scan_black(void *obj) {
   size_t floor = scr_wl_n;
@@ -2363,7 +2330,9 @@ static __attribute__((noinline)) void scr_scan_black(void *obj) {
   scr_wl_push(obj);
   while (scr_wl_n > floor) {
     void *o = scr_wl[--scr_wl_n];
-    scr_cyc_trace_call(scr_cyc_hdr(o), o, scr_sb_visit, NULL);
+    const ScrCycHdr *oh = scr_cyc_hdr(o);
+    if (oh->kind_lo == SCR_CYC_KIND_DYN) scr_cyc_dyn_sb(o);
+    else scr_cyc_trace_call(oh, o, scr_cyc_sb_visit_fn, NULL);
   }
 }
 
@@ -2376,12 +2345,12 @@ static void scr_scan_visit(void *child, void *ctx) {
     /* Externally referenced: this whole subgraph stays. Nested on the same
      * stack, bounded by the mark scr_scan_black takes on entry. A childless node's
      * subgraph is itself. */
-    if (scr_cyc_childless(h, child)) h->color = SCR_CYC_BLACK;
+    if (scr_cyc_childless(h, child, 0)) h->color = SCR_CYC_BLACK;
     else scr_scan_black(child);
     return;
   }
   h->color = SCR_CYC_WHITE;
-  if (scr_cyc_childless(h, child)) return; /* nothing to scan below it */
+  if (scr_cyc_childless(h, child, 0)) return; /* nothing to scan below it */
   scr_wl_push(child);
 }
 static void scr_scan(void *obj) {
@@ -2410,7 +2379,7 @@ static void scr_cw_visit(void *child, void *ctx) {
   ScrCycHdr *h = scr_cyc_hdr(child);
   if (h->color != SCR_CYC_WHITE || SCR_CYC_BUFFERED(h)) return;
   h->color = SCR_CYC_BLACK; /* visited marker — prevents re-gathering */
-  if (scr_cyc_childless(h, child)) {
+  if (scr_cyc_childless(h, child, 0)) {
     scr_white_push(child); /* straight to the white set: its trace would visit nothing */
     return;
   }

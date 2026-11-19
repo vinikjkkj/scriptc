@@ -22,6 +22,7 @@
  *   serializers (and the error messages here).
  */
 #include "scr_runtime.h"
+#include "scr_cyc_pass.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -639,6 +640,8 @@ __attribute__((constructor)) static void scr_dyn_idle_trim_reg(void) { scr_cyc_i
  * edge is uncollectable (what the whole tree was before this change),
  * whereas a traced edge the teardown also releases is a double free. */
 static void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx);
+static void scr_dyn_trace_mg(void *o);
+static void scr_dyn_trace_sb(void *o);
 static size_t dyn_origin_ntraced;
 static void dyn_origin_trace(ScrDyn *d, ScrTraceVisit visit, void *ctx);
 static void dyn_origin_forget_x(ScrDyn *d, bool from_collector);
@@ -732,7 +735,11 @@ void scr_throw_dyn(ScrDyn *v) {
 static __attribute__((noinline)) ScrDyn *scr_dyn_alloc_fresh(ScrDynKind kind) {
   /* The dyn node's kind index is a reserved one (SCR_CYC_KIND_DYN), so the collector can call scr_dyn_trace directly. */
   static uint16_t dyn_ck;
-  if (__builtin_expect(dyn_ck == 0, 0)) dyn_ck = scr_cyc_kind_fixed(SCR_CYC_KIND_DYN, &scr_dyn_trace, &scr_dyn_gcfree);
+  if (__builtin_expect(dyn_ck == 0, 0)) {
+    dyn_ck = scr_cyc_kind_fixed(SCR_CYC_KIND_DYN, &scr_dyn_trace, &scr_dyn_gcfree);
+    scr_cyc_dyn_mg = &scr_dyn_trace_mg;
+    scr_cyc_dyn_sb = &scr_dyn_trace_sb;
+  }
   ScrDyn *fresh = scr_cyc_alloc_k(scr_dyn_node_bytes(kind), dyn_ck);
   fresh->rc = 1;
   fresh->kind = kind;
@@ -826,13 +833,30 @@ ScrDyn *scr_dyn_alloc_proxy(void) { return scr_dyn_alloc(SCR_DYN_PROXY); }
 
 /* The traced children: every one is a ScrDyn or a ScrClosure, so every one
  * carries a header (or is immortal, which the visit filter skips). */
-static void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx) {
+/* PHASE 0 = generic (the visitor is called through `visit`); 1 = markGray's visit inlined; 2 = scanBlack's. SV is one child edge whose target is a dyn node by
+ * construction; SVX one whose target may be anything with a header (a closure, a class instance). `phase` is a constant at every instantiation, so each
+ * instance carries only its own arm; the bodies are scr_cyc_mg_one / scr_cyc_sb_one, the text the generic visitors in scr_cycle.c run. */
+#define SV(x) \
+  do { \
+    void *sv_ = (x); \
+    if (phase == 1) scr_cyc_mg_one(sv_, 1); \
+    else if (phase == 2) scr_cyc_sb_one(sv_, 1); \
+    else visit(sv_, ctx); \
+  } while (0)
+#define SVX(x) \
+  do { \
+    void *sv_ = (x); \
+    if (phase == 1) scr_cyc_mg_one(sv_, 0); \
+    else if (phase == 2) scr_cyc_sb_one(sv_, 0); \
+    else visit(sv_, ctx); \
+  } while (0)
+static inline __attribute__((always_inline)) void scr_dyn_trace_t(void *o, ScrTraceVisit visit, void *ctx, int phase) {
   ScrDyn *d = (ScrDyn *)o;
   switch (d->kind) {
   case SCR_DYN_ARR:
-    for (size_t i = 0; i < d->v.arr.len; i++) visit(d->v.arr.items[i], ctx);
+    for (size_t i = 0; i < d->v.arr.len; i++) SV(d->v.arr.items[i]);
     /* the named-property table of an exec result / expando'd array */
-    visit(scr_dyn_ext(d)->extras, ctx);
+    SV(scr_dyn_ext(d)->extras);
     if (d->static_copy && dyn_origin_ntraced != 0) dyn_origin_trace(d, visit, ctx);
 #ifdef SCR_SYMTAB
     if (scr_dyn_ext(d)->syms != NULL) scr_dyn_sym_trace_table(scr_dyn_ext(d)->syms, visit, ctx);
@@ -840,40 +864,46 @@ static void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx) {
     break;
   case SCR_DYN_OBJ:
     for (size_t i = 0; i < d->v.obj.len; i++)
-      if (!d->v.obj.entries[i].value_borrowed) visit(d->v.obj.entries[i].value, ctx);
+      if (!d->v.obj.entries[i].value_borrowed) SV(d->v.obj.entries[i].value);
     /* The [[Prototype]] link and the non-enumerable/ACCESSOR table. The
      * table is where a getter/setter pair lives (an OBJ dyn of ARR dyn
      * entries holding two FUNC dyns), which is the edge that makes an
      * accessor descriptor collectible at all. Both are NULL-tolerant. */
-    visit(scr_dyn_ext(d)->proto, ctx);
-    visit(scr_dyn_ext(d)->hidden, ctx);
+    SV(scr_dyn_ext(d)->proto);
+    SV(scr_dyn_ext(d)->hidden);
     /* scriptc's internal-slot table: an ordinary OBJ dyn holding ordinary
      * dyn values, so a cycle through one collects like any other. */
-    visit(scr_dyn_ext(d)->slots, ctx);
+    SV(scr_dyn_ext(d)->slots);
     if (d->static_copy && dyn_origin_ntraced != 0) dyn_origin_trace(d, visit, ctx);
 #ifdef SCR_SYMTAB
     if (scr_dyn_ext(d)->syms != NULL) scr_dyn_sym_trace_table(scr_dyn_ext(d)->syms, visit, ctx);
 #endif
     break;
   case SCR_DYN_FUNC:
-    visit(scr_dyn_fn_clo(d), ctx);
+    SVX(scr_dyn_fn_clo(d));
     break;
   case SCR_DYN_PROXY:
-    visit(d->v.proxy.target, ctx);
-    visit(d->v.proxy.handler, ctx);
+    SV(d->v.proxy.target);
+    SV(d->v.proxy.handler);
     break;
   case SCR_DYN_OBJINST:
     /* A COLLECTOR-OWNED instance (its class is scr_cyc_alloc'd, cls->cyc) is a
      * cycle node: without this edge a cycle through it (instance -> field or
      * property -> dyn -> instance) is invisible and leaks under the RC audit.
      * A calloc'd instance has no cycle header, so it is never visited. */
-    if (d->v.inst.cls->cyc) visit(d->v.inst.o, ctx);
+    if (d->v.inst.cls->cyc) SVX(d->v.inst.o);
     break;
   default:
     break; /* scalars, strings, bytes, handles, promises, jsvals, bigints:
             * nothing traced (see scr_dyn_alloc) */
   }
 }
+
+#undef SV
+#undef SVX
+static void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx) { scr_dyn_trace_t(o, visit, ctx, 0); }
+static void scr_dyn_trace_mg(void *o) { scr_dyn_trace_t(o, scr_cyc_mg_visit_fn, NULL, 1); }
+static void scr_dyn_trace_sb(void *o) { scr_dyn_trace_t(o, scr_cyc_sb_visit_fn, NULL, 2); }
 
 void scr_dyn_trace_v(void *o, ScrTraceVisit visit, void *ctx) {
   scr_dyn_trace(o, visit, ctx);
