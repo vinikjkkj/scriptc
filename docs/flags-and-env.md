@@ -457,6 +457,7 @@ Each is an `#ifndef`-guarded default in `packages/runtime/src`; a build override
 
 | Name | Class | What it does | Default |
 |---|---|---|---|
+| `SCR_AES_NI` | tuning knob | SCR_AES_NI=0 compiles the AES-NI arm of the AES-256 block encrypt out and restores the T-table loop exactly (the ablation control). Default 1 on x86-64 with <immintrin.h>, chosen by CPUID at first use; other targets keep the T-table loop. The decrypt side is unchanged. | `1` |
 | `SCR_ARR_VM` | tuning knob | No comment at the definition names this macro (defined in `packages/runtime/src/scr_array.c`). | `1` |
 | `SCR_ARR_VM_MIN` | tuning knob | No comment at the definition names this macro (defined in `packages/runtime/src/scr_array.c`). | `8192u` |
 | `SCR_ARR_VM_RESERVE` | tuning knob | No comment at the definition names this macro (defined in `packages/runtime/src/scr_array.c`). | `((size_t)16 << 20)` |

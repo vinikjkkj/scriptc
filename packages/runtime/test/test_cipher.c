@@ -376,7 +376,36 @@ static void test_ghash_arms(void) {
   check_true("ghash clmul arm equals the portable loop", bad == 0);
 }
 
+/* AES-256 block encrypt: the AES-NI arm against the T-table loop over 100,000 random (key, block) pairs, a fresh key schedule each 8 blocks.
+ * The FIPS 197 vector above runs through the dispatching entry, so on an AES-NI machine it pins the NI arm to the published answer. */
+static void test_aes_arms(void) {
+  const int have = scr_aes_have_ni();
+  long bad = 0, n = 0;
+  ScrAes256 st;
+  for (int i = 0; i < 100000; i++) {
+    if (i % 8 == 0) {
+      unsigned char key[SCR_AES256_KEY];
+      for (int j = 0; j < SCR_AES256_KEY; j += 8) {
+        uint64_t v = rng();
+        memcpy(key + j, &v, 8);
+      }
+      scr_aes256_init(&st, key);
+    }
+    unsigned char in[SCR_AES_BLOCK], o1[SCR_AES_BLOCK], o2[SCR_AES_BLOCK];
+    uint64_t a = rng(), b = rng();
+    memcpy(in, &a, 8);
+    memcpy(in + 8, &b, 8);
+    scr_aes256_encrypt_block_portable(&st, in, o1);
+    scr_aes256_encrypt_block_ni(&st, in, o2);
+    n++;
+    if (memcmp(o1, o2, SCR_AES_BLOCK) != 0) bad++;
+  }
+  fprintf(stderr, "aes arms: ni=%d blocks=%ld mismatches=%ld\n", have, n, bad);
+  check_true("aes-ni arm equals the T-table loop", bad == 0);
+}
+
 int main(void) {
+  test_aes_arms();
   test_ghash_arms();
   test_block();
   test_cbc_vectors();
