@@ -1505,62 +1505,29 @@ int scr_str_cmp(ScrStr *a, ScrStr *b) {
   return a->len < b->len ? -1 : (a->len > b->len ? 1 : 0);
 }
 
-/* UTF-16 code-unit comparison over well-formed UTF-8 (the default
- * Array.sort/toSorted and URLSearchParams.sort order). Byte order ALMOST
- * matches — the exception is U+E000..U+FFFF (3-byte UTF-8, single high code
- * units) vs supplementary code points (4-byte UTF-8, surrogate pairs
- * 0xD800..0xDFFF): bytes put the 4-byte form last, code units put it first.
- * Decode code points and compare their leading UTF-16 units. */
-static uint32_t scr_str_lead_u16(const unsigned char *s, size_t len,
-                                size_t *adv) {
-  unsigned char b = s[0];
-  uint32_t cp;
-  size_t n;
-  if (b < 0x80) {
-    cp = b; n = 1;
-  } else if ((b & 0xe0) == 0xc0) {
-    cp = b & 0x1fu; n = 2;
-  } else if ((b & 0xf0) == 0xe0) {
-    cp = b & 0x0fu; n = 3;
-  } else {
-    cp = b & 0x07u; n = 4;
-  }
-  if (n > len) n = len; /* defensive: strings are well-formed by contract */
-  for (size_t i = 1; i < n; i++) cp = (cp << 6) | (s[i] & 0x3fu);
-  *adv = n;
-  if (cp >= 0x10000) return 0xd800 + ((cp - 0x10000) >> 10);
-  return cp;
-}
-
+/* UTF-16 code-unit order of two well-formed UTF-8 strings. The bytes of the two strings are equal up to the first differing byte k, so everything
+ * before k compares equal and the order is decided AT k. UTF-8 byte order is code point order, and code point order equals code unit order except
+ * between U+E000..U+FFFF (a 3-byte sequence whose lead is 0xEE or 0xEF) and a supplementary code point (a 4-byte sequence whose lead is 0xF0..0xF4,
+ * whose first UTF-16 unit is a high surrogate 0xD800..0xDBFF): there the supplementary one sorts FIRST. A first difference inside a sequence is a
+ * continuation byte on both sides (the leads were equal), and continuation bytes are below 0xC0, so the exception can only arise at a lead byte. When
+ * one string is a prefix of the other the shorter sorts first. The scan is word-wise, then bytewise for the last difference. */
 int scr_str_cmp_u16(ScrStr *a, ScrStr *b) {
-  size_t ia = 0, ib = 0;
-  while (ia < a->len && ib < b->len) {
-    size_t na, nb;
-    uint32_t ua = scr_str_lead_u16(
-        (const unsigned char *)a->data + ia, a->len - ia, &na);
-    uint32_t ub = scr_str_lead_u16(
-        (const unsigned char *)b->data + ib, b->len - ib, &nb);
-    if (ua != ub) return ua < ub ? -1 : 1;
-    /* Equal leading units: equal whole code points (both single units or
-     * both pairs with equal highs — lows only differ if cps differ). */
-    if (na == 4 && nb == 4) {
-      uint32_t cpa = 0, cpb = 0;
-      for (size_t i = 0; i < 4; i++) {
-        cpa = (cpa << 6) |
-              (i == 0 ? (unsigned char)a->data[ia] & 0x07u
-                      : (unsigned char)a->data[ia + i] & 0x3fu);
-        cpb = (cpb << 6) |
-              (i == 0 ? (unsigned char)b->data[ib] & 0x07u
-                      : (unsigned char)b->data[ib + i] & 0x3fu);
-      }
-      if (cpa != cpb) return cpa < cpb ? -1 : 1;
-    }
-    ia += na;
-    ib += nb;
+  const unsigned char *da = (const unsigned char *)a->data, *db = (const unsigned char *)b->data;
+  size_t min = a->len < b->len ? a->len : b->len;
+  size_t i = 0;
+  while (i + 8 <= min) {
+    uint64_t x, y;
+    memcpy(&x, da + i, 8);
+    memcpy(&y, db + i, 8);
+    if (x != y) break;
+    i += 8;
   }
-  if (ia < a->len) return 1;
-  if (ib < b->len) return -1;
-  return 0;
+  while (i < min && da[i] == db[i]) i++;
+  if (i == min) return a->len < b->len ? -1 : (a->len > b->len ? 1 : 0);
+  unsigned x = da[i], y = db[i];
+  if (x >= 0xF0 && (y == 0xEE || y == 0xEF)) return -1;
+  if (y >= 0xF0 && (x == 0xEE || x == 0xEF)) return 1;
+  return x < y ? -1 : 1;
 }
 
 /* ── interned strings ─────────────────────────────────────────────────
