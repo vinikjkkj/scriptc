@@ -1525,7 +1525,26 @@ static bool dyn_kind_knows(const ScrDyn *recv, const char *m) {
        * refuses it for the same reason. The OWN/chain walk has already
        * missed by the time this is asked (the caller checks), so this is
        * only ever Object.prototype's set. */
-      return !recv->null_proto && (dyn_objproto_knows(m) || dyn_plain_obj_knows(recv, m));
+      if (recv->null_proto) return false;
+      {
+        /* A primitive WRAPPER (Object("s"), Object(1), Object(true)) inherits String/Number/Boolean.prototype: the call arm
+         * delegates every absent name to the primitive, so the read and `in` must say the same name for name (they answered
+         * `undefined` / false for `typeof w.toUpperCase` while `w.toUpperCase()` ran). The caller has already missed on the
+         * wrapper's own members, so only the prototype's names are asked. Symbol and BigInt wrappers keep the plain-object answer. */
+        const ScrDyn *wp = scr_dyn_wrapper_prim(recv);
+#ifdef SCR_OBJ_PLANT_BUG
+        if (SCR_OBJ_PLANT_BUG == 7) wp = NULL; /* the planted defect: wrappers read as plain objects again */
+#endif
+        if (wp != NULL && wp->kind == SCR_DYN_STR) {
+          /* a String wrapper's own `length` and index properties (the read answers them in scr_dyn_proto.c; `in` counts them too) */
+          double ix = 0;
+          if (dyn_name_is(m, "length")) return true;
+          if (scr_dyn_key_is_index(m, strlen(m), &ix) && ix < scr_str_utf16_len(wp->v.str)) return true;
+        }
+        if (wp != NULL && (wp->kind == SCR_DYN_STR || wp->kind == SCR_DYN_NUM || wp->kind == SCR_DYN_BOOL) &&
+            (dyn_kind_knows(wp, m) || dyn_name_is(m, "constructor"))) return true; /* `constructor`: the builtin, answered by scr_dyn_obj_key_get */
+      }
+      return dyn_objproto_knows(m) || dyn_plain_obj_knows(recv, m);
     case SCR_DYN_PROMISE:
       /* THE ARM 4242's comment said could not be exercised. It can now: a
        * DOT read of `then` off an `unknown` (`typeof (v as { then?:

@@ -9783,6 +9783,16 @@ ScrDyn *scr_dyn_obj_key_get(ScrDyn *recv, const char *key, size_t key_len) {
     }
   }
   if (key_len == 11 && memcmp(key, "constructor", 11) == 0) {
+    /* A primitive wrapper with no prototype link of its own inherits String / Number / Boolean.prototype, whose `constructor` is that builtin
+     * (the read missed the wrapper's own members above). A wrapper of a subclass (a prototype link) keeps the chain's answer below. */
+#ifdef SCR_OBJ_PLANT_BUG
+    if (SCR_OBJ_PLANT_BUG != 8) /* the planted defect (8): a wrapper's constructor takes the old fence again */
+#endif
+    if (scr_builtin_ctor_provider != NULL && scr_dyn_ext(recv)->proto == NULL) {
+      const ScrDyn *wp = scr_dyn_wrapper_prim(recv);
+      if (wp != NULL && (wp->kind == SCR_DYN_STR || wp->kind == SCR_DYN_NUM || wp->kind == SCR_DYN_BOOL))
+        return scr_builtin_ctor_provider(wp->kind == SCR_DYN_STR ? 3.0 : wp->kind == SCR_DYN_NUM ? 4.0 : 5.0);
+    }
     /* %Error.prototype% first: it is REACHED from the receiver (or IS
      * it), and its reason is its own — there is no `Error` function
      * value in a static build for the back-link to name, where the
