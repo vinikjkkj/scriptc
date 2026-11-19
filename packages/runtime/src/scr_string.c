@@ -4,6 +4,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#if defined(__SSE2__) && defined(__x86_64__)
+#include <emmintrin.h>
+#endif
 
 /* See scr_runtime.h: the exit audit's extension point, null unless a translation unit registered a release. */
 void (*scr_audit_release_hook)(void) = NULL;
@@ -1681,6 +1684,32 @@ static size_t scr_utf16_units(const ScrStr *s) {
    * byte length. Every population this project has censused is 100% ASCII,
    * and the classification below cannot be cheaper than not running. */
   if (scr_utf8_all_ascii(d, s->len)) return s->len;
+#if defined(__SSE2__) && defined(__x86_64__)
+  /* The strings that get here are NOT ascii (binary payloads carried as strings, accented text), and the word loop below spends about 4.4
+   * instructions a byte on them (measured: callgrind, 3,000 strings of 11 KB, 49,000 instructions per string). A code unit is every byte that is
+   * not a continuation byte (10xxxxxx) plus one more for each 4-byte lead (11110xxx), so a 16-byte block needs two compares, two masks and two
+   * lane-wise accumulations, no popcount (POPCNT is not in the x86-64 baseline). The byte lanes saturate at 255 blocks, so the lanes are folded
+   * into the 64-bit sums by psadbw every 255 blocks. Exactly the formula of the word loop: the tail below is shared. */
+  {
+    const __m128i m_c0 = _mm_set1_epi8((char)0xC0), m_80 = _mm_set1_epi8((char)0x80);
+    const __m128i m_f8 = _mm_set1_epi8((char)0xF8), m_f0 = _mm_set1_epi8((char)0xF0);
+    const __m128i zero = _mm_setzero_si128();
+    while (i + 16 <= s->len) {
+      size_t blocks = (s->len - i) / 16;
+      if (blocks > 255) blocks = 255;
+      __m128i cont = zero, lead4 = zero;
+      for (size_t b = 0; b < blocks; b++, i += 16) {
+        __m128i v = _mm_loadu_si128((const __m128i *)(const void *)(d + i));
+        cont = _mm_sub_epi8(cont, _mm_cmpeq_epi8(_mm_and_si128(v, m_c0), m_80));
+        lead4 = _mm_sub_epi8(lead4, _mm_cmpeq_epi8(_mm_and_si128(v, m_f8), m_f0));
+      }
+      __m128i sc = _mm_sad_epu8(cont, zero), sl = _mm_sad_epu8(lead4, zero);
+      size_t ncont = (size_t)_mm_cvtsi128_si64(sc) + (size_t)_mm_cvtsi128_si64(_mm_srli_si128(sc, 8));
+      size_t nlead = (size_t)_mm_cvtsi128_si64(sl) + (size_t)_mm_cvtsi128_si64(_mm_srli_si128(sl, 8));
+      units += blocks * 16 - ncont + nlead;
+    }
+  }
+#else
   while (i + 8 <= s->len) {
     uint64_t w;
     memcpy(&w, d + i, 8);
@@ -1694,6 +1723,8 @@ static size_t scr_utf16_units(const ScrStr *s) {
     units += 8 - (size_t)__builtin_popcountll(cont) +
              (size_t)__builtin_popcountll(lead4);
   }
+#endif
+  (void)hibits;
   while (i < s->len) {
     unsigned char c = d[i++];
     if ((c & 0xC0) == 0x80) continue;  /* continuation byte */
