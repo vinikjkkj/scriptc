@@ -13420,7 +13420,7 @@ __attribute__((constructor)) __attribute__((weak)) void scr_rrt_install(void) {
   scr_rrt_main = pthread_self();
   atexit(scr_rrt_dump);
 }
-#define SCR_RRT_REL(K, fnc, x) ({ __auto_type scr_rrt_p = (x); scr_rrt_note(K, __func__, __LINE__, scr_rrt_p == NULL ? 0u : scr_rrt_p->rc == SIZE_MAX ? 1u : scr_rrt_p->rc > 1 ? 2u : 3u); fnc(scr_rrt_p); })
+#define SCR_RRT_REL(K, fnc, x) ({ __auto_type scr_rrt_p = (x); scr_rrt_note(K, __func__, __LINE__, scr_rrt_p == NULL ? 0u : scr_rrt_p->rc == (__typeof__(scr_rrt_p->rc))-1 ? 1u : scr_rrt_p->rc > 1 ? 2u : 3u); fnc(scr_rrt_p); })
 #define SCR_RRT_RET(K, fnc, x) (scr_rrt_note(K, __func__, __LINE__, 4u), fnc(x))
 #define scr_str_release(x) SCR_RRT_REL(1, scr_str_release, x)
 #define scr_arr_release(x) SCR_RRT_REL(2, scr_arr_release, x)
@@ -13430,7 +13430,6 @@ __attribute__((constructor)) __attribute__((weak)) void scr_rrt_install(void) {
 #define scr_box_release(x) SCR_RRT_REL(6, scr_box_release, x)
 #define scr_closure_release(x) SCR_RRT_REL(7, scr_closure_release, x)
 #define scr_map_release(x) SCR_RRT_REL(8, scr_map_release, x)
-#define scr_promise_release(x) SCR_RRT_REL(9, scr_promise_release, x)
 #define scr_str_retain(x) SCR_RRT_RET(1, scr_str_retain, x)
 #define scr_arr_retain(x) SCR_RRT_RET(2, scr_arr_retain, x)
 #define scr_dyn_retain(x) SCR_RRT_RET(3, scr_dyn_retain, x)
@@ -13439,7 +13438,6 @@ __attribute__((constructor)) __attribute__((weak)) void scr_rrt_install(void) {
 #define scr_box_retain(x) SCR_RRT_RET(6, scr_box_retain, x)
 #define scr_closure_retain(x) SCR_RRT_RET(7, scr_closure_retain, x)
 #define scr_map_retain(x) SCR_RRT_RET(8, scr_map_retain, x)
-#define scr_promise_retain(x) SCR_RRT_RET(9, scr_promise_retain, x)
 #ifdef _Exit
 #undef _Exit
 #endif
