@@ -641,7 +641,22 @@ export function emitFunction(E: CEmitter, fn: IrFunction): void {
   }
 
 export function emitStmts(E: CEmitter, stmts: IrStmt[]): void {
-    for (const s of stmts) E.emitStmt(s);
+    for (const s of stmts) {
+      E.emitStmt(s);
+      const spill = s.kind === "varDecl" || s.kind === "assign" ? s.spillAfter : undefined;
+      if (spill !== undefined) {
+        // A run of independent f64 accumulations ends here (ir/f64-raw.ts): the locals go through one scratch array and a barrier, so the
+        // stores are seeds for the vectoriser. The values come back bit for bit.
+        const arr = `sc_sp${E.tempCounter++}`;
+        E.line(`{ double ${arr}[${spill.length}] __attribute__((aligned(16)));`);
+        E.indent++;
+        spill.forEach((id, k) => E.line(`${arr}[${k}] = ${mangleLocal(id)};`));
+        E.line(`__asm__ volatile("" : : "r"(${arr}) : "memory");`);
+        spill.forEach((id, k) => E.line(`${mangleLocal(id)} = ${arr}[${k}];`));
+        E.indent--;
+        E.line(`}`);
+      }
+    }
   }
 
 export function emitStmt(E: CEmitter, s: IrStmt): void {
