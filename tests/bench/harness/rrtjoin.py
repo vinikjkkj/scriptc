@@ -62,7 +62,11 @@ for cf in cfiles:
                     asg = re.compile(r'(?<![\w>])%s\s*(=(?!=)|\+\+|--)|&\s*%s\b|_release\(%s\)' % (re.escape(v), re.escape(v), re.escape(v)))
                     cls = 'local' if any(asg.search(x) for x in mid) else 'stablelocal'
             w = ret.get((KR[kind], name, rline), 0)
-            pairs.append((kind, name, rline, rels[0], src, cls, w))
+            use = next((x for x in body[off+1:rels[0]-s] if re.search(r'\b%s\b' % tmp, x)), '')
+            cm = re.search(r'(\w+)\([^;]*\b%s\b' % tmp, use)
+            callee = cm.group(1) if cm else ('?' + use.strip()[:40])
+            ctx = '\n'.join(body[off:min(rels[0]-s+1, off+7)])
+            pairs.append((kind, name, rline, rels[0], src, cls, w, callee, ctx))
 print("static pairs found:", len(pairs))
 agg = collections.defaultdict(int)
 for p in pairs: agg[(p[0], p[5])] += p[6]
@@ -74,3 +78,12 @@ for p in sorted(pairs, key=lambda p: -p[6])[:60]: print("  %d %s %s %s %d %s" % 
 # per-function totals of all retains (any pair status) and releases
 print("TOP SITES by nonfinal release count (kind fn line nonfinal final)")
 for k, v in sorted(rel.items(), key=lambda kv: -kv[1][2])[:40]: print("  %s %s %d %d %d" % (KN.get(k[0],k[0]), k[1], k[2], v[2], v[3]))
+
+agg2 = collections.defaultdict(int)
+for p in pairs:
+    if p[5] == 'stablelocal': agg2[(p[0], p[7])] += p[6]
+print("STABLELOCAL BY CONSUMER (kind callee executions)")
+for k, v in sorted(agg2.items(), key=lambda kv: -kv[1])[:80]: print("  %d %s %s" % (v, k[0], k[1]))
+print("CONTEXT of the top stablelocal pairs")
+for p in sorted([p for p in pairs if p[5]=='stablelocal'], key=lambda p: -p[6])[:40]:
+    print("--- %d %s %s %d" % (p[6], p[0], p[1], p[2])); print(p[8])
