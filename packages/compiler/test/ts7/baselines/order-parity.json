@@ -29759,6 +29759,12 @@
     "<repo>/tests/corpus/25917-keys-values-and-entries-of-island-objects-with-accessors-and-exotic-objects.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25972-a-class-ring-reached-through-a-boundary-copy-of-its-record-array-or-tuple-is-collected-while-the-program-runs.ts": {
+   "order": [
+    "<repo>/tests/corpus/25972-a-class-ring-reached-through-a-boundary-copy-of-its-record-array-or-tuple-is-collected-while-the-program-runs.ts"
+   ],
+   "diags": []
   }
  }
 }
