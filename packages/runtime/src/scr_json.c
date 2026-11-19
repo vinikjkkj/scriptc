@@ -9657,13 +9657,30 @@ static inline __attribute__((always_inline)) ScrPropKind scr_dyn_obj_resolve(con
  * reimplementing the walk, so neither can answer a property the other
  * cannot — the split estado-protochain.md §2e found the hard way. */
 ScrDyn *scr_dyn_obj_key_get(ScrDyn *recv, const char *key, size_t key_len) {
-  if (scr_dyn_proto_ops != NULL) {
+  /* The two special-surface probes below (an intrinsic prototype or primitive wrapper in scr_dyn_proto.c, a StringDecoder here) both answer
+   * nothing for an ordinary OBJECT with no ext, or an ext with neither slots nor cname (a large table's member index lives there): a wrapper keeps
+   * its primitive in ext->slots, a decoder its name in ext->cname, and an intrinsic prototype is the immortal (rc == SIZE_MAX) sentinel. Such an
+   * object -- nearly every dyn object a program reads -- goes straight
+   * to the resolver instead of paying an indirect call, a slot lookup and a name test to learn that. -DSCR_OBJ_NOIDX keeps the probes. */
+#ifndef SCR_OBJ_NOIDX
+  const bool plain0 = recv->kind == SCR_DYN_OBJ && recv->rc != SIZE_MAX &&
+                     (recv->v.obj.ext == NULL || (recv->v.obj.ext->slots == NULL && recv->v.obj.ext->cname == NULL));
+#ifdef SCR_OBJ_PLANT_BUG
+  /* the planted defect: every non-immortal OBJECT is "plain", so a wrapper's primitive surface and a StringDecoder's are never probed */
+  const bool plain = SCR_OBJ_PLANT_BUG == 6 ? (recv->kind == SCR_DYN_OBJ && recv->rc != SIZE_MAX) : plain0;
+#else
+  const bool plain = plain0;
+#endif
+#else
+  const bool plain = false;
+#endif
+  if (!plain && scr_dyn_proto_ops != NULL) {
     /* An intrinsic prototype's builtin member, or a primitive wrapper's own surface (scr_dyn_proto.c). */
     ScrDyn *pr = scr_dyn_proto_ops->key_get(recv, key, key_len);
     if (pr != NULL) return pr;
   }
-  if (scr_dyn_obj_is_strdec(recv) && (strcmp(key, "lastNeed") == 0 || strcmp(key, "lastTotal") == 0 ||
-                                      strcmp(key, "lastChar") == 0))
+  if (!plain && scr_dyn_obj_is_strdec(recv) && (strcmp(key, "lastNeed") == 0 || strcmp(key, "lastTotal") == 0 ||
+                                                strcmp(key, "lastChar") == 0))
     return scr_strdec_obj_last(recv, key);
   ScrDyn *found = NULL;
   ScrPropKind k = scr_dyn_obj_resolve(recv, key, key_len, &found, NULL);
