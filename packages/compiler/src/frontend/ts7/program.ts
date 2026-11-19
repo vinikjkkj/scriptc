@@ -19,6 +19,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { API } from "typescript/unstable/sync";
+import { installNodeStringCache } from "./node-string-cache.js";
 import type {
   CompilerOptions,
   Diagnostic,
@@ -331,7 +332,9 @@ export class Ts7Program {
 
   getSourceFile(fileName: string): SourceFile | undefined {
     // resolve() spells a Windows path with backslashes; the project's file names are slash-normalized (tsgoPath)
-    return this.project.program.getSourceFile(tsgoPath(resolve(fileName)));
+    const sf = this.project.program.getSourceFile(tsgoPath(resolve(fileName)));
+    if (sf !== undefined) installNodeStringCache(sf);
+    return sf;
   }
 
   getSourceFileNames(): readonly string[] {
@@ -348,6 +351,7 @@ export class Ts7Program {
         .getSourceFileNames()
         .map((name) => program.getSourceFile(name))
         .filter((sf): sf is SourceFile => sf !== undefined);
+      if (this.sourceFilesCache.length > 0) installNodeStringCache(this.sourceFilesCache[0]!);
     }
     return this.sourceFilesCache;
   }
