@@ -17186,6 +17186,42 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25890-a-string-receiver-reassigned-by-a-later-argument-keeps-its-value-at-the-read.ts": {
+   "order": [
+    "<repo>/tests/corpus/25890-a-string-receiver-reassigned-by-a-later-argument-keeps-its-value-at-the-read.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25891-an-array-read-whose-index-writes-or-grows-the-array-local-sees-the-array-it-started-with.ts": {
+   "order": [
+    "<repo>/tests/corpus/25891-an-array-read-whose-index-writes-or-grows-the-array-local-sees-the-array-it-started-with.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25892-a-typed-array-write-from-a-string-char-code-reads-the-string-and-the-buffer-it-started-with.ts": {
+   "order": [
+    "<repo>/tests/corpus/25892-a-typed-array-write-from-a-string-char-code-reads-the-string-and-the-buffer-it-started-with.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25893-a-dyn-local-read-by-string-conversion-or-scalar-equality-survives-calls-in-the-other-operand.ts": {
+   "order": [
+    "<repo>/tests/corpus/25893-a-dyn-local-read-by-string-conversion-or-scalar-equality-survives-calls-in-the-other-operand.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25894-a-borrowed-receiver-in-a-loop-with-a-throwing-later-operand-releases-everything-once.ts": {
+   "order": [
+    "<repo>/tests/corpus/25894-a-borrowed-receiver-in-a-loop-with-a-throwing-later-operand-releases-everything-once.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25895-a-borrowed-local-is-not-held-across-an-await-in-a-later-operand.ts": {
+   "order": [
+    "<repo>/tests/corpus/25895-a-borrowed-local-is-not-held-across-an-await-in-a-later-operand.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2590-object-create-dynamic.js": {
    "order": [
     "<repo>/tests/corpus/2590-object-create-dynamic.js"
