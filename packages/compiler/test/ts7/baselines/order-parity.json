@@ -17042,6 +17042,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25853-a-string-wrapper-read-sees-string-prototype-members-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25853-a-string-wrapper-read-sees-string-prototype-members-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25854-a-number-wrapper-read-sees-number-prototype-members-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25854-a-number-wrapper-read-sees-number-prototype-members-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25855-a-boolean-wrapper-read-sees-boolean-prototype-members-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25855-a-boolean-wrapper-read-sees-boolean-prototype-members-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25856-a-primitive-wrapper-constructor-read-names-the-builtin-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25856-a-primitive-wrapper-constructor-read-names-the-builtin-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25857-a-wrapper-method-read-and-call-agree-through-a-computed-name.ts": {
+   "order": [
+    "<repo>/tests/corpus/25857-a-wrapper-method-read-and-call-agree-through-a-computed-name.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2576-string-destructuring-assign.ts": {
    "order": [
     "<repo>/tests/corpus/2576-string-destructuring-assign.ts"
