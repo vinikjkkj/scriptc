@@ -19,6 +19,7 @@ for _p in "${_kv[@]}"; do
   _v=${_v//@LAB@/$LAB}; _v=${_v//@OUT@/$ART}; _v=${_v//@BENCHSRC@/$BENCH_ROOT}
   export "$_k=$_v"; echo "extra_env: $_k=$_v"
 done
+[ -n "${SCR_RRT_OUT:-}" ] && export RRT_KEEP="$ART/rrt-c"
 cli_of() { if [ "$1" = cand ]; then echo "$WT_DIR/packages/cli/dist/main.js"; else echo "$WT_BASE_DIR/packages/cli/dist/main.js"; fi; }
 sides=(base cand); [ -z "${WT_BASE_DIR:-}" ] && sides=(cand)
 summary() { # <result-dir>
@@ -69,3 +70,8 @@ flags=(--store "$store" --out "$BENCH_WORK/result" --reps "$REPS" --smaps)
 [ "${MASSIF:-0}" != 0 ] && flags+=(--massif "$MASSIF")
 $BENCH_NODE "$BENCH_DIR/harness/run.mjs" "${flags[@]}" "${arms[@]}" | tee "$BENCH_WORK/result-summary.txt"
 summary "$BENCH_WORK/result"
+if [ -n "${SCR_RRT_OUT:-}" ]; then
+  python3 "$BENCH_DIR/harness/rrtjoin.py" "$SCR_RRT_OUT".* -- "$ART"/rrt-c/*.c > "$ART/rrt-summary.txt" 2>&1 || echo "rrtjoin failed"
+  { ls -la "$ART" "$ART/rrt-c" | head -30; head -40 "$ART/rrt-summary.txt"; } || true
+  rm -f "$ART"/rrt-c/*.c
+fi

@@ -24,5 +24,7 @@ set -e
 secs=$(( $(date +%s) - s ))
 echo "rc=$rc secs=$secs variant=$VAR" | tee -a "$O/messaging-$S-$BE$suffix.build.log"
 [ $rc -eq 0 ] && cp "$BUILD" "$O/messaging-$S-$BE$suffix.bin"
+# lab: keep the emitted program TU(s) for the retain/release census join
+if [ -n "${RRT_KEEP:-}" ]; then mkdir -p "$RRT_KEEP"; ls -la "$O/build" 2>&1 | head -20 || true; for f in "$O"/build/*.c; do if [ -f "$f" ]; then cp "$f" "$RRT_KEEP/$(basename "$f")"; fi; done; fi
 echo "$S $BE $VAR$TAG rc=$rc build_secs=$secs" >> "$O/build-summary.txt"
 exit $rc
