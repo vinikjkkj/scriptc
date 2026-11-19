@@ -29693,6 +29693,18 @@
     "<repo>/tests/corpus/25843-view-records-keyed-freed-and-reallocated-in-a-loop-never-meet-a-stale-entry.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25914-island-arguments-of-wide-objects-copy-exactly-on-every-repeat.ts": {
+   "order": [
+    "<repo>/tests/corpus/25914-island-arguments-of-wide-objects-copy-exactly-on-every-repeat.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25915-island-wide-objects-follow-object-prototype-changes.ts": {
+   "order": [
+    "<repo>/tests/corpus/25915-island-wide-objects-follow-object-prototype-changes.ts"
+   ],
+   "diags": []
   }
  }
 }
