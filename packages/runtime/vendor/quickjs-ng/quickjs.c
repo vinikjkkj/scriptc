@@ -6297,6 +6297,59 @@ JSValue JS_NewObjectProto(JSContext *ctx, JSValueConst proto)
     return JS_NewObjectProtoClass(ctx, proto, JS_CLASS_OBJECT);
 }
 
+/* LOCAL PATCH (scriptc island1; see ../README.md). A plain object that shares the shape of `tmpl`, with `values[0..count)` as the
+   property values in shape order. `tmpl` is a plain object (class Object, hashed shape, `count` live properties, every one a
+   writable, enumerable, configurable data property) made by the ordinary property-adding path, so the result is the object the
+   same sequence of JS_SetPropertyStr calls ends with: the same prototype, the same hashed shape, the same order and flags. Takes
+   ownership of the values on success. Returns JS_UNDEFINED, taking nothing, when `tmpl` is not of that kind (the caller falls
+   back to the ordinary path). */
+JSValue JS_NewObjectLikeTemplate(JSContext *ctx, JSValueConst tmpl, int count, const JSValue *values)
+{
+    JSObject *t;
+    JSShape *sh;
+    JSShapeProperty *pr;
+    JSProperty stack_props[16], *props;
+    JSValue ret;
+    int i;
+
+    if (JS_VALUE_GET_TAG(tmpl) != JS_TAG_OBJECT)
+        return JS_UNDEFINED;
+    t = JS_VALUE_GET_OBJ(tmpl);
+    sh = t->shape;
+    if (t->class_id != JS_CLASS_OBJECT || !sh->is_hashed || sh->prop_count != count || sh->deleted_prop_count != 0 ||
+        count < 1 || sh->proto != JS_VALUE_GET_OBJ(ctx->class_proto[JS_CLASS_OBJECT]))
+        return JS_UNDEFINED;
+    pr = get_shape_prop(sh);
+    for (i = 0; i < count; i++)
+        if (pr[i].flags != JS_PROP_C_W_E)
+            return JS_UNDEFINED;
+    props = count <= (int)countof(stack_props) ? stack_props : js_malloc(ctx, sizeof(JSProperty) * count);
+    if (!props)
+        return JS_EXCEPTION;
+    for (i = 0; i < count; i++)
+        props[i].u.value = values[i];
+    ret = JS_NewObjectFromShape(ctx, js_dup_shape(sh), JS_CLASS_OBJECT, props);
+    if (props != stack_props)
+        js_free(ctx, props);
+    return ret;
+}
+
+/* LOCAL PATCH (scriptc island1). Object.prototype of this context (a new reference), and what changes when properties are added to or
+   removed from an object whose shape is edited in place, as a prototype's is: the shape's address, its property count and its deleted
+   count. The island uses them to notice that Object.prototype grew a key. */
+JSValue JS_GetObjectPrototype(JSContext *ctx)
+{
+    return JS_DupValue(ctx, ctx->class_proto[JS_CLASS_OBJECT]);
+}
+
+void JS_ObjectPrototypeFingerprint(JSContext *ctx, uintptr_t *shape, int *count, int *deleted)
+{
+    JSShape *sh = JS_VALUE_GET_OBJ(ctx->class_proto[JS_CLASS_OBJECT])->shape;
+    *shape = (uintptr_t)sh;
+    *count = sh->prop_count;
+    *deleted = sh->deleted_prop_count;
+}
+
 JSValue JS_NewObjectFrom(JSContext *ctx, int count, const JSAtom *props,
                          const JSValue *values)
 {

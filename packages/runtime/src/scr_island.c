@@ -37,6 +37,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+static void isl_tpl_teardown(void); /* island1: the marshalling shape templates, defined with isl_from_dyn */
+
 #include "quickjs.h"
 
 #if defined(__APPLE__)
@@ -522,6 +524,7 @@ static void isl_teardown_at_exit(void) {
   isl_syms_teardown();
 #endif
   for (int i = 0; i < ISL_H_COUNT; i++) JS_FreeValue(isl_ctx, isl_helpers[i]);
+  isl_tpl_teardown();
   isl_free_boot();
   JS_FreeContext(isl_ctx);
   JS_FreeRuntime(isl_rt);
@@ -1295,6 +1298,130 @@ static JSValue isl_date_from_handle(const ScrDyn *d) {
 }
 
 static JSValue isl_from_dyn(const ScrDyn *d);
+
+/* ── the marshalling shape templates (island1) ───────────────────────────
+ * Copying a dynamic object into the engine adds its properties one by one: an atom lookup, a shape-table lookup and a property-array growth
+ * for every property of every object of every call, and the intermediate shapes die with the copy, so the next call builds them again.
+ * A direct-mapped cache keeps, per key SEQUENCE, a template object built by that very path (so its shape is what the path ends with: the
+ * hashed shape over Object.prototype, the keys in insertion order, every property writable/enumerable/configurable); a later object with
+ * the same key sequence is created over the same shape with its values stored positionally (JS_NewObjectLikeTemplate, a vendored local
+ * patch). Each result is its own object with its own property array: nothing is shared but the immutable-by-copy-on-write shape, exactly
+ * as for any two objects the ordinary path builds.
+ *
+ * What keeps it identical to the ordinary path: a template is only made for a sequence none of whose keys Object.prototype carries (an
+ * inherited setter or read-only property would make the ordinary path's JS_SetPropertyStr behave differently from an own-property
+ * definition; "__proto__" is such a key), and only while Object.prototype's shape fingerprint (address, property count, deleted count) is
+ * the one recorded when the first template was made: a key added to Object.prototype afterwards ends the fast path for good. */
+#define ISL_TPL_SLOTS 64
+#define ISL_TPL_MAXKEYS 32
+enum { ISL_TPL_EMPTY = 0, ISL_TPL_OK = 1, ISL_TPL_BAD = 2 };
+typedef struct IslTpl {
+  uint32_t hash;
+  int state;
+  size_t n;
+  unsigned misses; /* lookups that found another sequence in an OK slot */
+  char **keys; /* n copies */
+  JSValue tmpl;
+} IslTpl;
+static IslTpl isl_tpls[ISL_TPL_SLOTS];
+static bool isl_objproto_known;
+static uintptr_t isl_op_shape;
+static int isl_op_count, isl_op_deleted;
+
+static IslTpl *isl_tpl_slot(const ScrDyn *d, uint32_t *hash) {
+  size_t n = d->v.obj.len;
+  if (n < 1 || n > ISL_TPL_MAXKEYS) return NULL;
+  uint32_t h = 2166136261u ^ (uint32_t)n;
+  for (size_t i = 0; i < n; i++) {
+    for (const unsigned char *k = (const unsigned char *)d->v.obj.entries[i].key; *k; k++) h = (h ^ *k) * 16777619u;
+    h = (h ^ 0xffu) * 16777619u;
+  }
+  *hash = h;
+  return &isl_tpls[h % ISL_TPL_SLOTS];
+}
+
+static bool isl_objproto_unchanged(void) {
+  uintptr_t sh;
+  int cnt, del;
+  JS_ObjectPrototypeFingerprint(isl_ctx, &sh, &cnt, &del);
+  return sh == isl_op_shape && cnt == isl_op_count && del == isl_op_deleted;
+}
+
+/* true: the slot holds a usable template for exactly this key sequence (state OK, Object.prototype unchanged). */
+static bool isl_tpl_matches(const IslTpl *t, uint32_t hash, const ScrDyn *d) {
+  if (t->state != ISL_TPL_OK || t->hash != hash || t->n != d->v.obj.len) return false;
+  for (size_t i = 0; i < t->n; i++)
+    if (strcmp(t->keys[i], d->v.obj.entries[i].key) != 0) return false;
+  return isl_objproto_unchanged();
+}
+
+static void isl_tpl_clear(IslTpl *t) {
+  if (t->state == ISL_TPL_EMPTY) return;
+  for (size_t i = 0; i < t->n; i++) free(t->keys[i]);
+  free(t->keys);
+  JS_FreeValue(isl_ctx, t->tmpl);
+  memset(t, 0, sizeof *t);
+  t->tmpl = JS_UNDEFINED;
+}
+
+/* Called after the ordinary path built `d`'s object successfully: remember its key sequence in the slot. */
+static void isl_tpl_build(IslTpl *t, uint32_t hash, const ScrDyn *d) {
+  /* An unchanged sequence that already failed (BAD) is not rebuilt: it stays BAD until another sequence takes the slot. */
+  if (t->state == ISL_TPL_BAD && t->hash == hash && t->n == d->v.obj.len) {
+    bool same = true;
+    for (size_t i = 0; i < t->n && same; i++) same = strcmp(t->keys[i], d->v.obj.entries[i].key) == 0;
+    if (same) return;
+  }
+  isl_tpl_clear(t);
+  size_t n = d->v.obj.len;
+  t->keys = (char **)malloc(n * sizeof *t->keys);
+  if (t->keys == NULL) return;
+  size_t made = 0;
+  for (; made < n; made++) {
+    t->keys[made] = strdup(d->v.obj.entries[made].key);
+    if (t->keys[made] == NULL) break;
+  }
+  t->n = made;
+  t->hash = hash;
+  t->tmpl = JS_UNDEFINED;
+  t->state = ISL_TPL_BAD;
+  if (made != n) return;
+  JSValue proto = JS_GetObjectPrototype(isl_ctx);
+  bool clean = true;
+  for (size_t i = 0; i < n && clean; i++) {
+    JSAtom a = JS_NewAtom(isl_ctx, t->keys[i]);
+    if (a == JS_ATOM_NULL) clean = false;
+    else {
+      clean = JS_HasProperty(isl_ctx, proto, a) == 0;
+      JS_FreeAtom(isl_ctx, a);
+    }
+  }
+  if (!clean) {
+    JS_FreeValue(isl_ctx, proto);
+    return;
+  }
+  JSValue tmpl = JS_NewObject(isl_ctx);
+  bool ok = !JS_IsException(tmpl);
+  for (size_t i = 0; i < n && ok; i++) ok = JS_SetPropertyStr(isl_ctx, tmpl, t->keys[i], JS_UNDEFINED) >= 0;
+  if (!ok) {
+    JS_FreeValue(isl_ctx, tmpl);
+    JS_FreeValue(isl_ctx, proto);
+    return;
+  }
+  if (!isl_objproto_known) {
+    JS_ObjectPrototypeFingerprint(isl_ctx, &isl_op_shape, &isl_op_count, &isl_op_deleted);
+    isl_objproto_known = true;
+  }
+  JS_FreeValue(isl_ctx, proto);
+  t->tmpl = tmpl;
+  t->state = ISL_TPL_OK;
+}
+
+static void isl_tpl_teardown(void) {
+  for (int i = 0; i < ISL_TPL_SLOTS; i++) isl_tpl_clear(&isl_tpls[i]);
+  isl_objproto_known = false;
+}
+
 #ifdef SCR_SYMTAB
 /* The symbol-keyed rows of an OBJ / ARR onto its engine copy, each with its own attributes; an accessor row crosses as the
  * engine accessor over the host-function shim of its getter / setter. false = the exception is pending. */
@@ -1386,6 +1513,39 @@ static JSValue isl_from_dyn(const ScrDyn *d) {
      * copy would carry the getter's value. Loud rather than short. */
     scr_dyn_obj_acc_fence(d, "marshalling an object into the island");
     if (scr_exc_pending()) return JS_EXCEPTION;
+    uint32_t tpl_hash = 0;
+    IslTpl *tpl = isl_tpl_slot(d, &tpl_hash);
+    if (tpl != NULL && isl_tpl_matches(tpl, tpl_hash, d)) {
+      /* A key sequence this island has marshalled before: the object is made over the SAME hashed shape the property-by-property path
+       * ends with (JS_NewObjectLikeTemplate), the values converted in the same order. */
+      size_t n = d->v.obj.len;
+      JSValue vals[ISL_TPL_MAXKEYS];
+      for (size_t i = 0; i < n; i++) {
+        vals[i] = isl_from_dyn(d->v.obj.entries[i].value);
+        if (JS_IsException(vals[i])) {
+          for (size_t j = 0; j < i; j++) JS_FreeValue(isl_ctx, vals[j]);
+          return JS_EXCEPTION;
+        }
+      }
+      JSValue fast = JS_NewObjectLikeTemplate(isl_ctx, tpl->tmpl, (int)n, vals);
+      if (JS_IsException(fast)) {
+        for (size_t j = 0; j < n; j++) JS_FreeValue(isl_ctx, vals[j]);
+        return fast;
+      }
+      if (!JS_IsUndefined(fast)) {
+#ifdef SCR_SYMTAB
+        if (!isl_define_sym_rows(fast, d)) {
+          JS_FreeValue(isl_ctx, fast);
+          return JS_EXCEPTION;
+        }
+#endif
+        return fast;
+      }
+      /* The template no longer fits (nothing was taken): the ordinary path, and never the fast one again for this slot. */
+      for (size_t j = 0; j < n; j++) JS_FreeValue(isl_ctx, vals[j]);
+      tpl->state = ISL_TPL_BAD;
+      tpl = NULL;
+    }
     JSValue obj = JS_NewObject(isl_ctx);
     if (JS_IsException(obj)) return obj;
     for (size_t i = 0; i < d->v.obj.len; i++) {
@@ -1397,6 +1557,7 @@ static JSValue isl_from_dyn(const ScrDyn *d) {
         return JS_EXCEPTION;
       }
     }
+    if (tpl != NULL && (tpl->state != ISL_TPL_OK || ++tpl->misses > 8)) isl_tpl_build(tpl, tpl_hash, d);
 #ifdef SCR_SYMTAB
     if (!isl_define_sym_rows(obj, d)) {
       JS_FreeValue(isl_ctx, obj);
