@@ -73,6 +73,31 @@ const RETAINS: readonly { sym: string; name: string; body: () => string[] }[] = 
   { sym: "scr_dyn_retain_v", name: "sc_inl_dyn_retain", body: () => wordRetain("dyn", "always") },
 ];
 
+/* The remaining `scr_<T>_{retain,release}_v` adapters are a cast around an OUT-OF-LINE function the C emission calls directly: each LLVM call paid
+ * a second call level. The two tables below are exactly the adapters of scr_*.c of the form `{ [return] scr_<T>_<op>((<T> *)p); }` whose target is
+ * extern in a header and not `static inline` (the inline ones are defined above). test/llvm-inline-rt.test.ts recomputes both tables from the runtime
+ * sources, so a new adapter, or an adapter whose target turns inline, fails the test instead of silently missing the pass. */
+export const DIRECT_RETAINS: readonly string[] = [
+  "scr_abort_signal_retain", "scr_big_retain", "scr_child_retain", "scr_child_stream_retain", "scr_cipher_retain", "scr_date_retain",
+  "scr_dgram_retain", "scr_emitter_retain", "scr_error_retain", "scr_event_retain", "scr_fetch_headers_retain", "scr_fetch_init_retain",
+  "scr_fh_retain", "scr_gen_retain", "scr_hash_retain", "scr_hmac_retain", "scr_http2_session_retain", "scr_http2_stream_retain",
+  "scr_http_client_retain", "scr_http_req_retain", "scr_http_res_retain", "scr_jsval_retain", "scr_keyobj_retain", "scr_map_retain",
+  "scr_net_server_retain", "scr_net_sock_retain", "scr_opaque_retain", "scr_promise_retain", "scr_request_retain", "scr_response_retain",
+  "scr_secure_ctx_retain", "scr_sp_retain", "scr_spawn_res_retain", "scr_sqlite_db_retain", "scr_sqlite_stmt_retain", "scr_stats_retain",
+  "scr_stream_retain", "scr_sym_retain", "scr_testctx_retain", "scr_url_retain", "scr_watcher_retain", "scr_weak_retain",
+];
+export const DIRECT_RELEASES: readonly string[] = [
+  "scr_abort_signal_release", "scr_arr_release", "scr_big_release", "scr_bytes_release", "scr_child_release", "scr_child_stream_release",
+  "scr_cipher_release", "scr_closure_release", "scr_date_release", "scr_dgram_release", "scr_dyn_release", "scr_emitter_release",
+  "scr_error_release", "scr_event_release", "scr_fetch_headers_release", "scr_fetch_init_release", "scr_fh_release", "scr_gen_release",
+  "scr_hash_release", "scr_hmac_release", "scr_http2_session_release", "scr_http2_stream_release", "scr_http_client_release",
+  "scr_http_req_release", "scr_http_res_release", "scr_jsval_release", "scr_keyobj_release", "scr_map_release", "scr_net_server_release",
+  "scr_net_sock_release", "scr_opaque_release", "scr_promise_release", "scr_regex_release", "scr_request_release", "scr_response_release",
+  "scr_secure_ctx_release", "scr_sp_release", "scr_spawn_res_release", "scr_sqlite_db_release", "scr_sqlite_stmt_release",
+  "scr_stats_release", "scr_str_release", "scr_stream_release", "scr_sym_release", "scr_testctx_release", "scr_union_release",
+  "scr_url_release", "scr_watcher_release", "scr_weak_release",
+];
+
 /** The shared test of scr_bytes_{get,set}_inl: 0 <= i < 2^53, n = (int64)i exact, n < len. Leaves %n in `ok`'s dominated block. */
 function indexGate(): string[] {
   return [
@@ -169,6 +194,18 @@ export function inlineRuntimeHelpers(text: string): string {
     out = out.split(call).join(`call ptr @${r.name}(`);
     defs.push(...r.body(), ``);
   }
+  const declared = (sym: string): boolean => out.includes(`@${sym}(`) && new RegExp(`^declare [^\\n]* @${sym}\\(`, "m").test(out);
+  const extra: string[] = [];
+  // The tables hold the TARGETS' full names (scr_big_release), so llvm-runtime-abi.test.ts checks each against its header prototype; the adapter is `<target>_v`.
+  for (const [targets, ret] of [[DIRECT_RETAINS, "ptr"], [DIRECT_RELEASES, "void"]] as const) {
+    for (const target of targets) {
+      const from = `call ${ret} @${target}_v(`;
+      if (!out.includes(from)) continue;
+      out = out.split(from).join(`call ${ret} @${target}(`);
+      if (!declared(target)) extra.push(`declare ${ret} @${target}(ptr)`);
+    }
+  }
+  if (extra.length > 0) out = `${out}\n${extra.join("\n")}\n`;
   const swaps: readonly { from: string; to: string; body: () => string[] }[] = [
     { from: "call double @scr_bytes_get_fast_undef(", to: "call double @sc_inl_bytes_get_undef(", body: () => bytesGet(true) },
     { from: "call double @scr_bytes_get_fast(", to: "call double @sc_inl_bytes_get(", body: () => bytesGet(false) },
