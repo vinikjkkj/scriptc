@@ -1299,12 +1299,22 @@ static inline void scr_dyn_obj_idx_drop(ScrDyn *obj) {
   }
 }
 
+/* LAB ONLY (cpu4 objcensus): length buckets of the tables scr_dyn_obj_get walks. Never lands. */
+static unsigned long long cen_calls[8], cen_scanned[8], cen_hits[8];
+static int cen_registered;
+static void cen_report(void) {
+  static const char *nm[8] = {"0", "1-3", "4-7", "8-15", "16-31", "32-63", "64+", "x"};
+  for (int i = 0; i < 7; i++) fprintf(stderr, "OBJCEN len %s calls %llu hits %llu scanned %llu\n", nm[i], cen_calls[i], cen_hits[i], cen_scanned[i]);
+}
+static inline int cen_bucket(size_t n) { return n == 0 ? 0 : n < 4 ? 1 : n < 8 ? 2 : n < 16 ? 3 : n < 32 ? 4 : n < 64 ? 5 : 6; }
 ScrDyn *scr_dyn_obj_get(const ScrDyn *d, const char *key, size_t key_len) {
   /* A COUNT-DOWN WALK THAT KEEPS ITS COUNTER. With 24-byte entries clang rewrites a counted loop into "advance until the end pointer", whose setup
    * is len * 24 (an lea and a shift) on every call where the 32-byte entry was one shift; this is the hottest loop over dyn objects, so that one
    * instruction per call showed up as +0.75% on a lookup-dominated micro. The empty asm makes the counter a live value the loop must keep, so the
    * test stays dec/jnz and no end pointer is formed. It emits no instruction of its own. */
   const ScrDynEntry *e = d->v.obj.entries;
+  if (!cen_registered) { cen_registered = 1; atexit(cen_report); }
+  { int bk = cen_bucket(d->v.obj.len); cen_calls[bk]++; size_t pos = 0; const ScrDynEntry *q = d->v.obj.entries; for (; pos < d->v.obj.len; pos++, q++) if (SCR_DYN_KEY_EQ(q, key, key_len)) { cen_hits[bk]++; pos++; break; } cen_scanned[bk] += pos; }
 #ifndef SCR_OBJ_NOIDX
   if (__builtin_expect(d->v.obj.len >= SCR_OBJ_IDX_MIN, 0)) return scr_dyn_obj_get_big(d, key, key_len); /* a tail call: the small walk is untouched */
 #endif
