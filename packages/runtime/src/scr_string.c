@@ -103,7 +103,8 @@ static size_t scr_u16_appended(const char *d, size_t n) {
 }
 
 
-static ScrSidx *scr_sidx(const ScrStr *s) {
+/* The entry of `s`, or NULL when none is cached. Brings a length cached before an in-place append up to date (see below). */
+static ScrSidx *scr_sidx_find(const ScrStr *s) {
   for (int i = 0; i < SCR_SIDX_N; i++) {
     if (scr_sidx_tab[i].s == s) {
       ScrSidx *h = &scr_sidx_tab[i];
@@ -116,6 +117,12 @@ static ScrSidx *scr_sidx(const ScrStr *s) {
       return h;
     }
   }
+  return NULL;
+}
+
+static ScrSidx *scr_sidx(const ScrStr *s) {
+  ScrSidx *h = scr_sidx_find(s);
+  if (h != NULL) return h;
   ScrSidx *e = &scr_sidx_tab[scr_sidx_clock++ % SCR_SIDX_N];
   e->s = s;
   e->u16len = SCR_U16_UNKNOWN;
@@ -1318,6 +1325,26 @@ void scr_str_release(ScrStr *s) {
   }
 }
 
+/* A copying concat hands the UTF-16 length it already knows to its result. `s` holds a's bytes followed by the tails (all valid UTF-8, so no code point
+ * spans a join and the units simply add), and when a's length is cached the answer for `s` is a's units plus the units of the tails: counting those
+ * is O(tail), where the scan `s.length` would otherwise start from scratch is O(len). The accumulator loop `buf += chunk; if (buf.length > n)` reaches
+ * the copy path every iteration (the variable and the temp both hold buf, so rc == 2) and was re-scanning the whole buffer each time.
+ *
+ * The cache entry MOVES from a to s (one slot, cursor included: s starts with a's bytes, so a cursor inside them is still right). a is the string the
+ * caller is replacing; if it is asked for its length again it is scanned once, which is what it cost before this existed. Only for a left side of at
+ * least SCR_SIDX_HANDOFF_MIN bytes: below that the scan is a few dozen instructions and moving the entry would only evict a useful one. */
+#define SCR_SIDX_HANDOFF_MIN 128
+static void scr_sidx_handoff(const ScrStr *a, ScrStr *s, ScrStr *const *tails, size_t nt) {
+  if (a->len < SCR_SIDX_HANDOFF_MIN) return;
+  ScrSidx *e = scr_sidx_find(a);
+  if (e == NULL || e->u16len == SCR_U16_UNKNOWN) return;
+  size_t units = e->u16len;
+  for (size_t i = 0; i < nt; i++) units += scr_u16_appended(tails[i]->data, tails[i]->len);
+  e->s = s;
+  e->u16len = units;
+  e->ub = s->len;
+}
+
 ScrStr *scr_str_concat(ScrStr *a, ScrStr *b) {
   /* The cast is on an OPERAND, not on the sum. With 32-bit lengths
    * `a->len + b->len` is evaluated in unsigned int and WRAPS before the
@@ -1401,6 +1428,7 @@ ScrStr *scr_str_concat(ScrStr *a, ScrStr *b) {
   memcpy(s->data + a->len, b->data, b->len);
   s->data[newlen] = '\0';
   if (iwant) scr_str_intern_put(islot, s);
+  scr_sidx_handoff(a, s, &b, 1);
   return s;
 }
 
@@ -1437,6 +1465,7 @@ static ScrStr *scr_str_concat_n(ScrStr *const *ops, size_t n) {
     off += ops[i]->len;
   }
   s->data[total] = '\0';
+  scr_sidx_handoff(a, s, ops + 1, n - 1);
   return s;
 }
 
