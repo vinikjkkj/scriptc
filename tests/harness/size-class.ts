@@ -2462,7 +2462,13 @@ export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 72_950 : null;
  * "the regex program .text GREW by 1648 bytes: 135766 against the recorded 134118"; the sum is an ESTIMATE until a CI Windows 3/20 log of the combined head reports the real figure. The growth is the always-linked closure core: the ext side table
  * (lookup, insert, erase), scr_closure_free_dead shared with scr_dyn_release, the embedded-closure arms of the FUNC release and the descriptor readers, and
  * scr_fn_box. It is the price of removing one 48-byte function node per boxing; the hello-world class stayed inside its tolerance. */
-export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 136_022 : null;
+/* 2026-11-19 (cpu2, the dyn member indexes): RE-RECORDED 136_022 -> 138_262 (+2_240). SOURCE: CI Windows 3/20 of run 44474569099 on 63e002889, "the regex program .text GREW by
+ * 2240 bytes: 138262 against the recorded 136022"; the local zig 0.16.0 windows-gnu cross build of this probe (SCRIPTC_CC=zigcc SCRIPTC_TARGET=x86_64-windows-gnu --backend c, the
+ * PE .text VirtualSize) reproduces 138,262 exactly for the final tree, and 136,246 with -DSCR_OBJ_NOIDX (the same tree with every index compiled out; main's own drift since the
+ * 136,022 record is the 224 between that and 136,022). The always-linked growth is scr_json.c's hash index of a large dyn object (the hash, build, probe, the appender's
+ * and remover's hooks and the tail-called big-table read), the per-descriptor hash of a large class's member table and its probe, the registry-position memo painted once for
+ * scr_dyn_objinst_class_of, and the keyed [[Get]] fast path. The hello-world class stayed inside its tolerance. It buys -10% Ir on messaging-redis and -3.2% on messaging-mysql. */
+export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 138_262 : null;
 
 /* 2026-10-21 -- THE LINK NOW COLLECTS DEAD SECTIONS, and every figure above moves.
  * The numbers in this block, and the two ceilings (STATIC_CLASS_MAX and
