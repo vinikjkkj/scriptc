@@ -230,7 +230,7 @@ int main(void) {
   /* ── the member index (scr_json.c): a large table answers exactly what the scan answers ──
    * A shadow model (present/value per key) is checked after every phase; entries[] must keep creation order across deletes and re-adds. */
   {
-    static const size_t sizes[] = {15, 16, 17, 31, 32, 33, 100, 5000, 70000};
+    static const size_t sizes[] = {15, 16, 33, 63, 64, 65, 100, 5000, 70000};
     for (size_t si = 0; si < sizeof sizes / sizeof sizes[0]; si++) {
       const size_t n = sizes[si];
       char (*names)[16] = malloc(n * 2 * sizeof *names); /* [0,n) stored, [n,2n) never stored */

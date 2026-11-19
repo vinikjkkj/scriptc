@@ -12,7 +12,7 @@ function ck(ok: boolean, what: string): void {
     console.log("BAD " + what);
   }
 }
-for (const n of [15, 16, 17, 31, 32, 33, 64, 300]) {
+for (const n of [15, 31, 32, 33, 63, 64, 65, 300]) {
   const d = mk();
   const model: Record<string, number> = {};
   const order: string[] = [];
