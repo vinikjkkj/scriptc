@@ -10485,6 +10485,12 @@ ScrDyn *scr_dyn_idx_get(ScrDyn *d, double i, bool opt, ScrDyn *(*slow)(ScrDyn *,
   return r;
 }
 
+/* Object.freeze / seal / preventExtensions over a dyn object (scr_array_frozen.c): true when the write was taken (refused or ignored) by the object's level.
+ * Out of line and cold: only an object with an internal-slot table gets here, and scr_dyn_key_set's hot body carries just the table's NULL test. */
+static __attribute__((noinline, cold)) bool scr_dyn_frozen_set_guard(ScrDyn *recv, ScrStr *key) {
+  return scr_dyn_frozen_ops != NULL && scr_dyn_frozen_ops->obj_level(recv) != 0 && scr_dyn_frozen_ops->obj_set(recv, key);
+}
+
 void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
 #ifdef SCR_DYNCEN_ON
   scr_dyncen_note_korigin(SCR_DYNCEN_KO_KEYSET);
@@ -10578,11 +10584,9 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
     /* A frozen / sealed / non-extensible object (Object.freeze and friends, scr_array_frozen.c) carries its level in its slot table, and freezing gives it
      * a hidden table (possibly empty): the level is asked only behind this gate, so the plain write pays nothing for it. */
     if (scr_dyn_ext(recv)->hidden != NULL || scr_dyn_ext(recv)->proto != NULL) {
-      const ScrDynObjExt *ex0 = scr_dyn_ext(recv);
-      const bool guarded = ex0->slots != NULL && scr_dyn_frozen_ops != NULL && scr_dyn_frozen_ops->obj_level(recv) != 0;
       ScrPropKind pk = scr_dyn_obj_resolve(recv, key->data, key->len, &found, &holder);
       if (pk == SCR_PROP_HIDDEN_DATA) {
-        if (guarded && holder == recv && scr_dyn_frozen_ops->obj_set(recv, key)) return;
+        if (__builtin_expect(scr_dyn_ext(recv)->slots != NULL, 0) && holder == recv && scr_dyn_frozen_set_guard(recv, key)) return;
         if (!scr_hid_writable(found)) {
           ScrJsonBuf sb;
           scr_jb_init(&sb);
@@ -10623,7 +10627,7 @@ void scr_dyn_key_set(ScrDyn *recv, ScrStr *key, ScrDyn *value) {
         scr_dyn_release(r); /* NULL-tolerant: a throwing setter leaves it pending */
         return;
       }
-      if (guarded && scr_dyn_frozen_ops->obj_set(recv, key)) return;
+      if (__builtin_expect(scr_dyn_ext(recv)->slots != NULL, 0) && scr_dyn_frozen_set_guard(recv, key)) return;
     }
     /* The ONE own property this representation knows Node has and does
      * not STORE: a function's minted prototype is born carrying
