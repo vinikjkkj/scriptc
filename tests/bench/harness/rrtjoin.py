@@ -87,3 +87,15 @@ for k, v in sorted(agg2.items(), key=lambda kv: -kv[1])[:80]: print("  %d %s %s"
 print("CONTEXT of the top stablelocal pairs")
 for p in sorted([p for p in pairs if p[5]=='stablelocal'], key=lambda p: -p[6])[:40]:
     print("--- %d %s %s %d" % (p[6], p[0], p[1], p[2])); print(p[8])
+print("OTHER-CLASS (retain of a non-local source) BY SHAPE (kind shape executions)")
+sh = collections.defaultdict(int); shc = collections.defaultdict(int)
+for p in pairs:
+    if p[5] == 'other':
+        shape = re.sub(r'sc_t\d+', 'T', re.sub(r'sc_(fld|l|g|p)_\w+', r'\1', p[4]))[:70]
+        sh[(p[0], shape)] += p[6]; shc[(p[0], shape, p[7])] += p[6]
+for k, v in sorted(sh.items(), key=lambda kv: -kv[1])[:40]: print("  %d %s %s" % (v, k[0], k[1]))
+print("OTHER-CLASS BY SHAPE AND CONSUMER")
+for k, v in sorted(shc.items(), key=lambda kv: -kv[1])[:60]: print("  %d %s %s -> %s" % (v, k[0], k[1], k[2]))
+print("CONTEXT of the top other-class pairs")
+for p in sorted([p for p in pairs if p[5]=='other'], key=lambda p: -p[6])[:40]:
+    print("--- %d %s %s %d src=%s" % (p[6], p[0], p[1], p[2], p[4])); print(p[8])
