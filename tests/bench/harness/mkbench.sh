@@ -18,5 +18,5 @@ fi
 KEEP=$([ "$S" = memory ] && echo none || echo "$S") $BENCH_NODE $H/ladder-onestore.mjs "$D"
 if [ "$S" = mysql ] || [ "$S" = postgres ]; then KEEP=$S $BENCH_NODE $H/ladder-notrace.mjs "$D"; fi
 if [ "$S" = postgres ]; then $BENCH_NODE $H/ladder-pgstatic.mjs "$D"; fi
-if [ "$S" = mysql ]; then $BENCH_NODE $H/ladder-poolorder.mjs "$D"; $BENCH_NODE $H/ladder-mysqlstatic.mjs "$D"; fi
+if [ "$S" = mysql ]; then $BENCH_NODE $H/ladder-poolorder.mjs "$D"; $BENCH_NODE $H/ladder-mysqlstatic.mjs "$D"; $BENCH_NODE $H/ladder-disableeval.mjs "$D"; fi
 echo "built $D"
