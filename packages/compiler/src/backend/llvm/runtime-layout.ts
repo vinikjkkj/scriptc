@@ -56,6 +56,9 @@ export const SCR_BYTES_DATA_OFFSET = 24;
 /** `elem` is a ScrBytesElem (a C enum: 32 bits); SCR_BYTES_F64 is its fifth member (BYTES_ELEM_NUM.f64). */
 export const SCR_BYTES_ELEM_OFFSET = 16;
 
+/** ScrArr.elem_trace: the pointer scr_arr_retain tests before marking the array live. */
+export const SCR_ARR_ELEM_TRACE_OFFSET = 48;
+
 /** ScrStr { uint32_t rc; uint32_t len; uint32_t cap; char data[]; }
  *  `data` is a flexible array member, so its offset is sizeof of the header
  *  and the literal tables in scr_string.c depend on exactly this number. */
@@ -89,6 +92,13 @@ export const RUNTIME_FIELD_OFFSETS: readonly RuntimeFieldOffset[] = [
   { struct: "ScrBytes", field: "len", offset: SCR_BYTES_LEN_OFFSET },
   { struct: "ScrBytes", field: "data", offset: SCR_BYTES_DATA_OFFSET },
   { struct: "ScrBytes", field: "elem", offset: SCR_BYTES_ELEM_OFFSET },
+  { struct: "ScrArr", field: "elem_trace", offset: SCR_ARR_ELEM_TRACE_OFFSET },
+  { struct: "ScrStr", field: "rc", offset: 0 },
+  { struct: "ScrBytes", field: "rc", offset: 0 },
+  { struct: "ScrArr", field: "rc", offset: 0 },
+  { struct: "ScrUnion", field: "rc", offset: 0 },
+  { struct: "ScrClosure", field: "rc", offset: 0 },
+  { struct: "ScrDyn", field: "rc", offset: 0 },
   { struct: "ScrStr", field: "len", offset: SCR_STR_LEN_OFFSET },
   { struct: "ScrStr", field: "data", offset: SCR_STR_DATA_OFFSET },
   { struct: "ScrCoroBase", field: "resume", offset: 0 },

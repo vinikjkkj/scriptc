@@ -81,6 +81,7 @@ import { BUFFER_NUM_ACCESSOR_METHODS, dynKeyGetUsesLitTwin, propsTableRoot, erro
 import { setDynOrderPlan, setDynInspExt } from "../dyn-members.js";
 import { rewriteArmDescriptors } from "./armvt.js";
 import { rewriteStringUnions } from "./strunion.js";
+import { inlineRuntimeHelpers } from "./inline-rt.js";
 import { orderRecordPlanCached, moduleUsesInspColors, numSlotHalf, narrowSlotOf, narrowExtArg, classCbit } from "../../ir/nodes.js";
 import type { IrClassDef } from "../../ir/nodes.js";
 import { concatFn, fieldRunAbsentCheck, flattenStrConcat } from "../emission/emit-exprs.js";
@@ -254,7 +255,9 @@ export function emitLlvmModule(mod: IrModule, stats?: LlvmEmitStats, audit = fal
   setDynOrderPlan(orderRecordPlanCached(mod.classes ?? []));
   setDynInspExt(moduleUsesInspColors(mod));
   const e = new LlEmitter(mod, audit);
-  const out = e.emit();
+  const emitted = e.emit();
+  // An audit (--sanitize) build keeps the runtime's own adapters: scr_arr_retain checks the dead-source tombstone there.
+  const out = audit ? emitted : inlineRuntimeHelpers(emitted);
   if (stats !== undefined) stats.coroLowered = e.coroLoweredCount();
   return out;
 }
