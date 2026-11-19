@@ -23,7 +23,7 @@
  * plan says so).
  *
  * SCOPE. Only functions whose body is made of the node kinds below (a leaf numeric kernel: no call, closure, try, await, string or allocation) and that
- * hold at least MIN_ACCESSES covered accesses; a body over MAX_NODES is left alone (the code is emitted twice). SCRIPTC_F64RAW=off disables the pass, =report prints one `F64RAW <name> <sites> <guards>` line per versioned function to stderr, and =noguard
+ * hold at least MIN_ACCESSES covered accesses; a body over MAX_NODES is left alone (the code is emitted twice). SCRIPTC_F64RAW=off disables the pass, =report prints one `F64RAW <name> <sites> <guards>` line per versioned function to stderr, and =nofwd keeps the element reads in their locals, =nobarrier (a POSITIVE CONTROL) forwards them past element writes, =noguard
  * (a POSITIVE CONTROL for the test rows, never a mode to ship) ORs the guard with `true` (the guard still runs, so the data pointers are set) so the rows that hand a function a short array must differ. */
 import { BOOL, F64 } from "./nodes.js";
 import type { IrExpr, IrFunction, IrModule, IrStmt } from "./nodes.js";
@@ -232,6 +232,68 @@ function cloneNode<T>(x: T): T {
   return x;
 }
 
+/** Forward a literal-index element read held in a local to its uses, in the raw copy of a body.
+ *
+ *   const a0 = a[0]; ...; t = a0 * b0 + ...; ...; o[0] = t     =>     t = a[0] * b[0] + ...      (each use reads the element again)
+ *
+ * Sound when no write can sit between the def and a use: the local is defined once by a top-level statement, never reassigned, and every use is in
+ * a top-level statement BEFORE the first one that holds an element write (the arm has no call and no other mutation: see ALLOWED). The loads then
+ * read the same bytes at the use as at the def. What it buys is the SHAPE the backends' vectoriser wants: sixteen independent accumulations over
+ * consecutive elements become consecutive loads at the use sites instead of 32 scalars live across the whole body (feMul: 63 live doubles over 16
+ * registers, 1200 spill instructions). Returns the number of locals forwarded. */
+function forwardLoads(fn: IrFunction, arm: IrStmt[], noBarrier: boolean): number {
+  const locals = new Map(fn.locals.map((l) => [l.id, l]));
+  const holdsWrite = (x: unknown): boolean => {
+    if (Array.isArray(x)) return x.some(holdsWrite);
+    if (!isNode(x)) return false;
+    if (x["kind"] === "bytesSet") return true;
+    return Object.entries(x).some(([k, v]) => k !== "loc" && k !== "type" && holdsWrite(v));
+  };
+  let barrier = arm.findIndex((st) => holdsWrite(st));
+  if (barrier < 0 || noBarrier) barrier = arm.length;
+  const refs = (x: unknown, id: string, out: { n: number }): void => {
+    if (Array.isArray(x)) {
+      for (const y of x) refs(y, id, out);
+      return;
+    }
+    if (!isNode(x)) return;
+    if (x["kind"] === "varRef" && x["localId"] === id) out.n++;
+    if ((x["kind"] === "assign" || x["kind"] === "assignExpr" || x["kind"] === "incDec") && x["localId"] === id) out.n += 1000000;
+    for (const [k, v] of Object.entries(x)) if (k !== "loc" && k !== "type") refs(v, id, out);
+  };
+  const replace = (x: unknown, id: string, load: Node): unknown => {
+    if (Array.isArray(x)) return x.map((y) => replace(y, id, load));
+    if (!isNode(x)) return x;
+    if (x["kind"] === "varRef" && x["localId"] === id) return cloneNode(load);
+    for (const [k, v] of Object.entries(x)) if (k !== "loc" && k !== "type") x[k] = replace(v, id, load);
+    return x;
+  };
+  let done = 0;
+  for (let i = 0; i < barrier; i++) {
+    const st = arm[i] as Node;
+    if (st["kind"] !== "varDecl" || typeof st["localId"] !== "string") continue;
+    const init = st["init"] as Node | null;
+    if (init === null || init["kind"] !== "bytesIntrinsic" || init["raw"] !== true || init["method"] !== "get") continue;
+    const args = init["args"] as Node[];
+    if (args.length !== 1 || args[0]!["kind"] !== "numLit") continue;
+    const id = st["localId"] as string;
+    const l = locals.get(id);
+    if (l === undefined || l.boxed === true || l.tdz === true) continue;
+    // every use must sit in a top-level statement before the barrier, and the local must have no other write
+    const total = { n: 0 };
+    refs(arm.filter((_, j) => j !== i), id, total);
+    const early = { n: 0 };
+    for (let j = i + 1; j < barrier; j++) refs(arm[j], id, early);
+    if (total.n !== early.n || total.n >= 1000000) continue;
+    for (let j = i + 1; j < barrier; j++) arm[j] = replace(arm[j], id, init) as IrStmt;
+    arm.splice(i, 1);
+    barrier--;
+    i--;
+    done++;
+  }
+  return done;
+}
+
 export interface F64RawStats {
   versioned: number;
   accesses: number;
@@ -252,6 +314,7 @@ export function f64RawPass(mod: IrModule): F64RawStats {
       n["raw"] = true;
     });
     if (second.sites !== first.sites) continue; // the two walks must agree, or leave the function alone
+    if (mode !== "nofwd") forwardLoads(fn, copy, mode === "nobarrier");
     const loc = fn.body[0]!.loc;
     let cond: IrExpr | null = null;
     for (const p of fn.params) {
