@@ -9,12 +9,12 @@ import { readFileSync, writeFileSync, mkdirSync, statSync, copyFileSync } from '
 import { createHash } from 'node:crypto'
 const W = process.env.BENCH_WORK, ROOT = process.env.BENCH_DIR, NODE = process.env.BENCH_NODE || 'node', TREE = process.env.TREE
 const args = process.argv.slice(2)
-let store = 'memory', out = 'out', reps = 3, withNode = false, smaps = false, irMsgs = 0, massifMsgs = 0
+let store = 'memory', out = 'out', reps = 3, withNode = false, smaps = false, irMsgs = 0, massifMsgs = 0, perfRun = false
 const arms = []
 for (let i = 0; i < args.length; i++) {
   const a = args[i]
   if (a === '--store') store = args[++i]; else if (a === '--out') out = args[++i]; else if (a === '--reps') reps = Number(args[++i])
-  else if (a === '--node') withNode = true; else if (a === '--smaps') smaps = true; else if (a === '--ir') irMsgs = Number(args[++i]); else if (a === '--massif') massifMsgs = Number(args[++i])
+  else if (a === '--node') withNode = true; else if (a === '--smaps') smaps = true; else if (a === '--ir') irMsgs = Number(args[++i]); else if (a === '--massif') massifMsgs = Number(args[++i]); else if (a === '--perf') perfRun = true
   else arms.push(a)
 }
 mkdirSync(out, { recursive: true })
@@ -69,6 +69,30 @@ if (irMsgs > 0) for (const a of arms) {
   const r = spawnSync('valgrind', ['--tool=callgrind', `--callgrind-out-file=${cg}`, `${out}/cg/prog`], { cwd: TREE, env, maxBuffer: 1 << 28, timeout: 3 * 3600e3 })
   const m = /Collected\s*:\s*(\d+)/.exec(r.stderr.toString())
   results.ir[label] = m ? Number(m[1]) : null
+}
+
+// --perf: one run per arm and one on Node under `perf record` (time sampling). Compiled arms: DWARF unwinding (the binaries keep no frame pointers); Node: frame pointers + the V8
+// perf map (--perf-basic-prof) so JIT frames get names. Each profile is reduced on the runner to folded stacks (comm-filtered, one line per unique stack) and a self/children top list.
+if (perfRun) {
+  const PERF = process.env.PERF_BIN || 'perf'
+  mkdirSync(`${out}/perf`, { recursive: true })
+  const prof = (label, cmd, dwarf) => {
+    resetdb()
+    const data = `${out}/perf/${label}.data`
+    const rec = dwarf ? ['record', '-F', '799', '--call-graph', 'dwarf,8192', '-o', data, '--', ...cmd] : ['record', '-F', '999', '-g', '-o', data, '--', ...cmd]
+    const r = spawnSync(PERF, rec, { cwd: TREE, env: envFor(), maxBuffer: 1 << 28, timeout: 3600e3 })
+    writeFileSync(`${out}/perf/${label}.record.stderr.txt`, (r.stderr || '').toString().slice(-8000))
+    if (r.status !== 0 && r.status !== null) { writeFileSync(`${out}/perf/${label}.FAILED`, String(r.status)); return }
+    for (const [name, extra] of [['self', ['--no-children', '--sort', 'symbol,dso']], ['children', ['--children', '--sort', 'symbol,dso']]]) {
+      const rep = spawnSync(PERF, ['report', '-i', data, '--stdio', '--percent-limit', '0.15', '--no-inline', ...extra], { maxBuffer: 1 << 28, timeout: 3600e3 })
+      writeFileSync(`${out}/perf/${label}.${name}.txt`, (rep.stdout || '').toString().split('\n').filter((l) => !l.startsWith('#') && l.trim() !== '').slice(0, 400).join('\n'))
+    }
+    const sc = spawnSync('sh', ['-c', `${PERF} script -i ${data} -F comm,tid,ip,sym --no-inline 2>/dev/null | python3 ${ROOT}/harness/perfcollapse.py | gzip -9 > ${out}/perf/${label}.folded.gz`], { maxBuffer: 1 << 28, timeout: 3600e3 })
+    writeFileSync(`${out}/perf/${label}.collapse.status`, String(sc.status))
+    spawnSync('rm', ['-f', data])
+  }
+  for (const a of arms) prof(a.split(':')[0], [bin(a)], true)
+  if (withNode) prof('node', [NODE, '--perf-basic-prof', '--interpreted-frames-native-stack', '--import', 'tsx', entry], false)
 }
 if (massifMsgs > 0) for (const a of arms) {
   const label = a.split(':')[0]; resetdb()

@@ -37,6 +37,10 @@ on:
         description: "true: also run the same bench entry on Node (tsx) as the output-parity reference and the Node RSS baseline"
         required: false
         default: "true"
+      perf:
+        description: "1: one extra run per arm (and Node) under perf record (time sampling), folded stacks and top-function reports go to the artifacts"
+        required: false
+        default: "0"
       ir:
         description: "Messages per scenario for one callgrind run per variant (0 = no callgrind). The only CPU figure; 250 takes about an hour"
         required: false
@@ -183,6 +187,15 @@ jobs:
       - name: Tools (valgrind for the Ir and massif runs)
         if: ${{ inputs.ir != '0' || inputs.massif != '0' }}
         run: sudo apt-get update -q && sudo apt-get install -y -q valgrind
+      - name: Tools (perf for the time-sampling runs)
+        if: ${{ inputs.perf != '0' }}
+        continue-on-error: true
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q linux-tools-common linux-tools-$(uname -r) || sudo apt-get install -y -q linux-tools-generic || true
+          sudo sysctl -w kernel.perf_event_paranoid=-1 kernel.kptr_restrict=0 || true
+          P=$(command -v perf || ls /usr/lib/linux-tools/*/perf 2>/dev/null | head -1 || true)
+          echo "PERF_BIN=$P" >> "$GITHUB_ENV"; echo "perf at: $P"; "$P" --version || true
       - name: Tools (lld for the ordered link of layout=order, on a runner whose GNU ld predates --section-ordering-file)
         if: ${{ inputs.layout != 'none' }}
         run: sudo apt-get update -q && sudo apt-get install -y -q lld && ld.lld --version
@@ -206,6 +219,7 @@ jobs:
           REPS: ${{ inputs.reps }}
           NODE_REF: ${{ inputs.node_ref }}
           IR: ${{ inputs.ir }}
+          PERF: ${{ inputs.perf }}
           MASSIF: ${{ inputs.massif }}
           LAYOUT: ${{ inputs.layout }}
           EXTRA_ENV: ${{ inputs.extra_env }}

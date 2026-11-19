@@ -67,5 +67,6 @@ flags=(--store "$store" --out "$BENCH_WORK/result" --reps "$REPS" --smaps)
 [ "${NODE_REF:-true}" = true ] && flags+=(--node)
 [ "${IR:-0}" != 0 ] && flags+=(--ir "$IR")
 [ "${MASSIF:-0}" != 0 ] && flags+=(--massif "$MASSIF")
+[ "${PERF:-0}" != 0 ] && flags+=(--perf)
 $BENCH_NODE "$BENCH_DIR/harness/run.mjs" "${flags[@]}" "${arms[@]}" | tee "$BENCH_WORK/result-summary.txt"
 summary "$BENCH_WORK/result"
