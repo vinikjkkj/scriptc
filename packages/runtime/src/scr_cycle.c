@@ -2050,7 +2050,6 @@ void scr_cyc_free(void *obj) {
 void **scr_roots = NULL; /* external: scr_json.c's pacing sample reads the buffered candidates */
 size_t scr_nroots = 0;
 static size_t scr_roots_cap = 0;
-static bool scr_collecting = false;
 
 /* The base threshold (SCR_CYCLE_THRESHOLD, default 256); 0 = not read yet. */
 static size_t scr_cyc_thr_base = 0;
@@ -2058,14 +2057,6 @@ static size_t scr_cyc_thr_base = 0;
  * also answers "not collecting"), and 0 before the env is read (so the first call takes the slow path, which reads it). */
 static size_t scr_cyc_floor = 0;
 
-static size_t scr_cyc_threshold(void) {
-  if (scr_cyc_thr_base == 0) {
-    const char *env = getenv("SCR_CYCLE_THRESHOLD");
-    long v = env ? strtol(env, NULL, 10) : 0;
-    scr_cyc_thr_base = v > 0 ? (size_t)v : 256;
-  }
-  return scr_cyc_thr_base;
-}
 
 /* ── pacing ───────────────────────────────────────────────────────────
  * The threshold counts BUFFERED CANDIDATES, but a pass costs O(the graph
@@ -2196,26 +2187,30 @@ void scr_cyc_on_dead(void *obj) {
   SCR_CYC_CLR_BUFFERED(h);
 }
 
-/* The trigger test of scr_cyc_on_release when its inline compare says "at or above the limit": the exact condition the release path always
- * had (`!collecting && nroots >= max(live / PACE, base)`), plus the one-time read of the env. Out of line so the common release (below the
- * limit) is a compare and a return. */
-static __attribute__((noinline)) void scr_cyc_trigger_slow(void) {
-  size_t base = scr_cyc_threshold();
-  if (scr_cyc_floor == 0) scr_cyc_floor = base;
+/* The cold half of scr_cyc_on_release, one function so the minimal program links one: (1) with `obj`, the candidate buffer is full: double it and insert `obj`
+ * (the caller has already bought the header); (2) the trigger test, reached when the inline compare says the buffered count is at or above the limit, or after
+ * a growth: the exact condition the release path always had (`nroots >= max(live / PACE, base)` outside a pass), plus the one-time read of the env. Out of
+ * line so the common release (below the limit) is a compare and a return, with no value live across a call and no register-saving prologue. */
+static __attribute__((noinline, cold, minsize)) void scr_cyc_release_slow(void *obj) {
+  if (obj != NULL) {
+    size_t ncap = scr_roots_cap ? scr_roots_cap * 2 : 64;
+    /* The 27-bit index of the cycle header addresses at most SCR_CYC_IDX_MASK + 1 slots; past that the buffer cannot be indexed, which is the same abort as running out of memory. */
+    void *nr = ncap > (size_t)SCR_CYC_IDX_MASK + 1u ? NULL : realloc(scr_roots, ncap * sizeof *scr_roots);
+    if (!nr) scr_cyc_oom();
+    scr_roots = nr;
+    scr_roots_cap = ncap;
+    scr_cyc_on_release(obj); /* room now: inserts, and runs the trigger test, exactly as an ordinary release */
+    return;
+  }
+  size_t base = scr_cyc_thr_base;
+  if (base == 0) {
+    const char *env = getenv("SCR_CYCLE_THRESHOLD");
+    long v = env ? atol(env) : 0;
+    scr_cyc_thr_base = scr_cyc_floor = base = v > 0 ? (size_t)v : 256; /* the floor is 0 only while the base is (see scr_cyc_floor) */
+  }
+  /* Never reached while a pass runs: the floor is SIZE_MAX then, and no count reaches it. */
   size_t paced = scr_cyc_live / SCR_CYC_PACE;
-  if (!scr_collecting && scr_nroots >= (paced > base ? paced : base)) scr_collect_cycles();
-}
-
-/* The candidate buffer is full: double it, then insert. Out of line and cold, and it takes over the insert, so scr_cyc_on_release has no value live across a call
- * and needs no register-saving prologue. */
-static __attribute__((noinline, cold)) void scr_cyc_buffer_grow(void *obj, ScrCycHdr *h) {
-  scr_roots_cap = scr_roots_cap ? scr_roots_cap * 2 : 64;
-  /* The 27-bit index of the cycle header addresses at most SCR_CYC_IDX_MASK + 1 slots; past that the buffer cannot be indexed, which is the same abort as running out of memory. */
-  if (scr_roots_cap > (size_t)SCR_CYC_IDX_MASK + 1u) scr_cyc_oom();
-  scr_roots = realloc(scr_roots, scr_roots_cap * sizeof *scr_roots);
-  if (!scr_roots) scr_cyc_oom();
-  h->w = (h->w & ~SCR_CYC_IDX_MASK) | SCR_CYC_BUF | (uint32_t)scr_nroots;
-  scr_roots[scr_nroots++] = obj;
+  if (scr_nroots >= (paced > base ? paced : base)) scr_collect_cycles();
 }
 
 void scr_cyc_on_release(void *obj) {
@@ -2223,18 +2218,18 @@ void scr_cyc_on_release(void *obj) {
   h->color = SCR_CYC_PURPLE;
   if (!SCR_CYC_BUFFERED(h)) {
     if (__builtin_expect(scr_nroots == scr_roots_cap, 0)) {
-      scr_cyc_buffer_grow(obj, h);
-    } else {
-      h->w = (h->w & ~SCR_CYC_IDX_MASK) | SCR_CYC_BUF | (uint32_t)scr_nroots;
-      scr_roots[scr_nroots++] = obj;
+      scr_cyc_release_slow(obj); /* grows, inserts, and runs the trigger test */
+      return;
     }
+    h->w = (h->w & ~SCR_CYC_IDX_MASK) | SCR_CYC_BUF | (uint32_t)scr_nroots;
+    scr_roots[scr_nroots++] = obj;
   }
-  /* Threshold trigger. Never re-entered: a teardown's releases of untraced
-   * children can buffer new candidates mid-collection, but they only wait
-   * for the next pass. */
+  /* Threshold trigger. Never re-entered: a teardown's releases of untraced children
+   * can buffer new candidates mid-collection, but they only wait for the next pass
+   * (the floor is SIZE_MAX while a pass runs). */
   size_t lim = scr_cyc_live / SCR_CYC_PACE;
   if (lim < scr_cyc_floor) lim = scr_cyc_floor;
-  if (__builtin_expect(scr_nroots >= lim, 0)) scr_cyc_trigger_slow();
+  if (__builtin_expect(scr_nroots >= lim, 0)) scr_cyc_release_slow(NULL);
 }
 
 /* ── trial deletion ───────────────────────────────────────────────────── */
@@ -2413,8 +2408,7 @@ static void scr_collect_white(void *obj) {
 }
 
 void scr_collect_cycles(void) {
-  if (scr_collecting || scr_nroots == 0) return;
-  scr_collecting = true;
+  if (scr_cyc_floor == SIZE_MAX || scr_nroots == 0) return; /* SIZE_MAX is the floor of a running pass */
   scr_cyc_floor = SIZE_MAX; /* the release path's inline trigger test cannot fire while a pass runs */
   SCR_CS_PASS_BEGIN();
 
@@ -2470,8 +2464,7 @@ void scr_collect_cycles(void) {
    * Nothing at all unless SCR_PAGECEN_EVERY says otherwise. */
   SCR_CYC_PR_SWEEP();
   SCR_PC_PASS();
-  scr_collecting = false;
-  scr_cyc_floor = scr_cyc_threshold();
+  scr_cyc_floor = scr_cyc_thr_base; /* 0 when the env was never read: the next release takes the slow path, which reads it */
   /* The sweep is over and nothing is walking: parked dyn buffers past their keep size go back to the allocator. */
   if (scr_cyc_idle_trim_hook != NULL) scr_cyc_idle_trim_hook();
 }
