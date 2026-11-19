@@ -821,6 +821,24 @@ const objectViewKeys = new Set<string>();
  * classViewDeclined: a writer found later reruns discovery. */
 const classViewWrites = new Set<string>();
 let classViewWriteAny = false;
+/** viewShapeKey of every record shape the program MUTATES IN PLACE after construction (recordSet, recordKeySet, recordKeyDelete), plus the shapes a struct view
+ * aliases onto another (recordSrcView names both): the census a READ-ONLY WIDTH PAIR is judged by (viewConversion). Filled by discovery (noteDynBoxEdges), persists
+ * across its reruns. */
+const recordShapeWrites = new Set<string>();
+/** viewShapeKey of the shapes of a width pair viewConversion kept as the plain field copy for lack of a writer: a writer found later reruns discovery. */
+const recordWidthDeclined = new Set<string>();
+/** viewShapeKey of every record shape some node uses where object IDENTITY can be observed (anything but a plain read, store, pass or return of the value:
+ * a comparison, a Map/Set key, a dynamic crossing, an upcast...). A width copy is a second object, so a pair whose shapes are in this set keeps the view,
+ * which is one object (row 24068). Filled by discovery with the write census. */
+const recordIdentityObserved = new Set<string>();
+/** Parent node kinds that cannot observe the identity of a record operand: they read a member of it, store it, pass it, return it or serialise it. Every
+ * other kind with a record-typed operand marks that record's shapes as identity-observed (the safe default for a kind this list does not know). */
+const IDENTITY_BLIND_PARENTS = new Set([
+  "varRef", "varDecl", "assign", "assignExpr", "return", "call", "callValue", "virtualCall", "recordGet", "recordGetAt", "recordKeyGet", "recordLit",
+  "unionWrap", "unionNarrow", "unionDisc", "unionKeyGet", "ternary", "seqExpr", "exprStmt", "block", "if", "closure", "arrayGet", "arrayLit", "forOf",
+  "jsonStringify", "optChain", "nullish", "orDefault", "toBool", "arraySet", "recordSet", "recordKeySet", "void",
+  "unionIsTag", "recordKeyPresent", "recordKeyPresentAt", "recordSlotFilled", "recordKeyOrderIs", "recordOvfHas", "recordOvfKeys", "recordOvfSlotGet", "recordOvfSlots", "recordProtoHasKey", "recordOrd",
+]);
 const classViewDeclined = new Set<string>();
 /** `Class->shapeKey` pairs discovery probed (lowered through the view helper without the grant) and the subset whose probe found a use the per-site proof
  * (downgradeClassViews) cannot cover: only those pairs take the view grant, so a program whose projections are all provably unobservable pays nothing
@@ -851,6 +869,9 @@ export function lowerToIr(
   objectViewKeys.clear();
   classViewWrites.clear();
   classViewWriteAny = false;
+  recordShapeWrites.clear();
+  recordWidthDeclined.clear();
+  recordIdentityObserved.clear();
   classViewDeclined.clear();
   classViewProbed.clear();
   classViewNeeded.clear();
@@ -918,8 +939,8 @@ export function lowerToIr(
   // stops growing (bounded), so the emit pass interns every shape it will need as a view. Programs with no such conversion
   // never enter the loop.
   // Each registered erased view can unlock the next flow, so a program that registers one gets more rounds than the grants alone allow.
-  for (let round = 0; round < (erasedViewsNoted() ? 8 : 3) && (viewConversionNoted || classFedInterfacesNoted() || erasedViewsNoted()); round++) {
-    const grantSig = (): string => [...viewShapeKeys].sort().join("\n") + "|" + [...structViewDeniedKeys].sort().join("\n") + "|" + [...classViewNeeded].sort().join("\n") + "|" + [...CLASS_FED_INTERFACES].map(([k, v]) => `${k}=${v}`).sort().join("\n") + "|" + erasedViewsSignature();
+  for (let round = 0; round < (erasedViewsNoted() ? 8 : recordWidthDeclined.size > 0 ? 6 : 3) && (viewConversionNoted || classFedInterfacesNoted() || erasedViewsNoted()); round++) {
+    const grantSig = (): string => [...viewShapeKeys].sort().join("\n") + "|" + [...structViewDeniedKeys].sort().join("\n") + "|" + [...classViewNeeded].sort().join("\n") + "|" + [...CLASS_FED_INTERFACES].map(([k, v]) => `${k}=${v}`).sort().join("\n") + "|" + erasedViewsSignature() + "|" + [...recordShapeWrites].sort().join("\n") + "|" + [...recordWidthDeclined].sort().join("\n") + "|" + [...recordIdentityObserved].sort().join("\n");
     const before = grantSig();
     discovery = new Lowerer(program, entry, moduleOrder, dynamic, {
       targetPlatform,
@@ -5456,6 +5477,161 @@ export class Lowerer {
    * Mirrors `canConvertToDyn`'s recursion rather than restating a domain:
    * a leaf this misses is a method the emitted table cannot carry, and a
    * leaf it invents is only a body that stays alive. */
+  /** A record shape is written in place somewhere (or aliased by a struct view): note it, and rerun discovery when a width pair was kept as a copy for its sake. */
+  private noteRecordWrite(shapeId: string): void {
+    const sh = this.shapes.get(shapeId);
+    if (sh === undefined) return;
+    const key = viewShapeKey(sh.fields, sh.indexValue);
+    if (recordShapeWrites.has(key)) return;
+    recordShapeWrites.add(key);
+    if (recordWidthDeclined.has(key)) viewConversionNoted = true;
+  }
+
+  /** A node that is not identity-blind: every direct operand whose type reaches record shapes marks those shapes identity-observed. */
+  private noteIdentityOperands(node: Record<string, unknown>): void {
+    const visit = (c: unknown): void => {
+      if (c === null || typeof c !== "object") return;
+      const t = (c as { type?: IrType }).type;
+      if (t === undefined || typeof t !== "object" || typeof (c as { kind?: unknown }).kind !== "string") return;
+      if (t.kind !== "record" && t.kind !== "array" && t.kind !== "union") return;
+      const keys = new Set<string>();
+      this.reachRecordKeys(t, keys, new Set());
+      for (const k of keys) {
+        if (recordIdentityObserved.has(k)) continue;
+        recordIdentityObserved.add(k);
+        if (process.env["SCRIPTC_RECORD_WIDTH_WHY"] === "2") console.error(`[widthcopy] identity operand: node '${String(node["kind"])}' takes a record of ${k.slice(0, 60)}`);
+        if (recordWidthDeclined.has(k)) viewConversionNoted = true;
+      }
+    };
+    for (const v of Object.values(node)) {
+      if (Array.isArray(v)) for (const x of v) visit(x);
+      else visit(v);
+    }
+  }
+
+  /** Every record shape key reachable from `t` through arrays, unions and record fields (other kinds hold none that matter here). */
+  private reachRecordKeys(t: IrType, out: Set<string>, seen: Set<string>): void {
+    switch (t.kind) {
+      case "array":
+        this.reachRecordKeys(t.elem, out, seen);
+        return;
+      case "union": {
+        if (seen.has(`u:${t.unionId}`)) return;
+        seen.add(`u:${t.unionId}`);
+        for (const a of this.unions.get(t.unionId)?.arms ?? []) this.reachRecordKeys(a, out, seen);
+        return;
+      }
+      case "record": {
+        if (seen.has(`r:${t.shapeId}`)) return;
+        seen.add(`r:${t.shapeId}`);
+        const sh = this.shapes.get(t.shapeId);
+        if (sh === undefined) return;
+        out.add(viewShapeKey(sh.fields, sh.indexValue));
+        for (const f of sh.fields) this.reachRecordKeys(f.type, out, seen);
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
+  /** The viewShapeKeys of every record shape reachable from `t` (through arrays, unions, record fields), or null when the type graph holds anything
+   * outside plain data (a dyn, a class, a map, a function...): such a pair is never judged read-only. */
+  private plainRecordKeysOf(t: IrType, out: Set<string>, seen: Set<string>): boolean {
+    switch (t.kind) {
+      case "f64":
+      case "string":
+      case "bool":
+      case "undefinedT":
+      case "nullT":
+        return true;
+      case "array":
+        return this.plainRecordKeysOf(t.elem, out, seen);
+      case "union": {
+        if (seen.has(`u:${t.unionId}`)) return true;
+        seen.add(`u:${t.unionId}`);
+        const u = this.unions.get(t.unionId);
+        if (u === undefined) return false;
+        return u.arms.every((a) => this.plainRecordKeysOf(a, out, seen));
+      }
+      case "record": {
+        if (seen.has(`r:${t.shapeId}`)) return true;
+        seen.add(`r:${t.shapeId}`);
+        const sh = this.shapes.get(t.shapeId);
+        if (sh === undefined || sh.indexValue !== undefined || sh.tuple) return false;
+        out.add(viewShapeKey(sh.fields, sh.indexValue));
+        return sh.fields.every((f) => this.plainRecordKeysOf(f.type, out, seen));
+      }
+      default:
+        return false;
+    }
+  }
+
+  /** The copy a width pair makes lists its keys in the TARGET shape's order, the view lists them in the order of the object it views: the two agree only when every
+   * record pair along the conversion has the same fields in the same sequence (a mapped `Record<K, V>` takes the union's order, a literal its own). Leaves must be
+   * plain data of one kind; anything else declines. */
+  private widthOrderAgrees(from: IrType, to: IrType, seen: Set<string>): boolean {
+    if (from.kind === "array" && to.kind === "array") return this.widthOrderAgrees(from.elem, to.elem, seen);
+    if (from.kind === "record" && to.kind === "record") {
+      const key = `${from.shapeId}:${to.shapeId}`;
+      if (seen.has(key)) return true;
+      seen.add(key);
+      const a = this.shapes.get(from.shapeId);
+      const b = this.shapes.get(to.shapeId);
+      if (a === undefined || b === undefined || a.indexValue !== undefined || b.indexValue !== undefined || a.tuple || b.tuple) return false;
+      if (a.fields.length !== b.fields.length || a.keyOrder !== undefined || b.keyOrder !== undefined || (a as { keyOrders?: unknown }).keyOrders !== undefined || (b as { keyOrders?: unknown }).keyOrders !== undefined) return false;
+      // The key order a copy answers is the target's declaredOrder, the view's is the viewed object's (the source shape's): they must be the same list.
+      const oa = a.declaredOrder ?? a.fields.map((f) => f.name);
+      const ob = b.declaredOrder ?? b.fields.map((f) => f.name);
+      if (oa.length !== ob.length || oa.some((n, i) => n !== ob[i])) {
+        if (process.env["SCRIPTC_RECORD_WIDTH_WHY"] === "2") console.error(`[widthcopy] order differs ${from.shapeId}[${oa.join(",").slice(0, 80)}] vs ${to.shapeId}[${ob.join(",").slice(0, 80)}]`);
+        return false;
+      }
+      for (let i = 0; i < a.fields.length; i++) {
+        if (a.fields[i]!.name !== b.fields[i]!.name) return false;
+        if (!this.widthOrderAgrees(a.fields[i]!.type, b.fields[i]!.type, seen)) return false;
+      }
+      return true;
+    }
+    if (from.kind === "record" || to.kind === "record" || from.kind === "array" || to.kind === "array") return false;
+    // a union on either side may carry records in an arm: only unions of plain scalars are leaves
+    const plainLeaf = (t: IrType): boolean => {
+      if (t.kind === "f64" || t.kind === "string" || t.kind === "bool" || t.kind === "undefinedT" || t.kind === "nullT") return true;
+      if (t.kind !== "union") return false;
+      return (this.unions.get(t.unionId)?.arms ?? []).every(plainLeaf);
+    };
+    return plainLeaf(from) && plainLeaf(to);
+  }
+
+  /** A record-to-record width pair is READ-ONLY when no record shape reachable from either side is ever mutated in place (no recordSet / recordKeySet /
+   * recordKeyDelete, no struct view aliasing): then the copy the width helper makes is observationally the view, because the view's reads are of the
+   * snapshot taken at the cast (the crossing copy is static_copy) and nothing can write either side afterwards. Answers false (keep the view) for anything
+   * it cannot enumerate. SCRIPTC_RECORD_WIDTH_COPY=0 turns the rule off. */
+  private widthPairIsReadOnly(from: IrType, to: IrType): boolean {
+    if (process.env["SCRIPTC_RECORD_WIDTH_COPY"] === "0") return false;
+    const keys = new Set<string>();
+    if (!this.plainRecordKeysOf(from, keys, new Set()) || !this.plainRecordKeysOf(to, keys, new Set())) return false;
+    if (process.env["SCRIPTC_RECORD_WIDTH_MUTANT"] !== "ignoreorder" && !this.widthOrderAgrees(from, to, new Set())) {
+      if (this.onEdge === null && process.env["SCRIPTC_RECORD_WIDTH_WHY"] !== undefined) console.error(`[widthcopy] pair ${(from as { shapeId?: string }).shapeId}->${(to as { shapeId?: string }).shapeId} keeps the view: the key order or a leaf kind of the two shapes differs`);
+      return false;
+    }
+    // SCRIPTC_RECORD_WIDTH_MUTANT=ignorewrites / ignoreidentity switch one half of the proof off on purpose: the controls (rows 25831-25832) must fail under them.
+    const mutant = process.env["SCRIPTC_RECORD_WIDTH_MUTANT"];
+    for (const k of keys) {
+      if (mutant !== "ignoreidentity" && recordIdentityObserved.has(k)) {
+        if (this.onEdge === null && process.env["SCRIPTC_RECORD_WIDTH_WHY"] !== undefined) console.error(`[widthcopy] pair ${(from as { shapeId?: string }).shapeId}->${(to as { shapeId?: string }).shapeId} keeps the view: the identity of a shape of it is observed`);
+        return false;
+      }
+      if (mutant !== "ignorewrites" && recordShapeWrites.has(k)) {
+        if (this.onEdge === null && process.env["SCRIPTC_RECORD_WIDTH_WHY"] !== undefined) console.error(`[widthcopy] pair ${(from as { shapeId?: string }).shapeId}->${(to as { shapeId?: string }).shapeId} keeps the view: a shape of it is written in place`);
+        return false;
+      }
+    }
+    if (this.onEdge !== null) for (const k of keys) recordWidthDeclined.add(k);
+    else if (process.env["SCRIPTC_RECORD_WIDTH_WHY"] !== undefined) console.error(`[widthcopy] read-only pair ${(from as { shapeId?: string }).shapeId}->${(to as { shapeId?: string }).shapeId} shapes=${keys.size} kept as the field copy`);
+    return true;
+  }
+
   /** A value of type `t` crosses into a dynamic slot: every struct-view target it carries loses the struct form (see
    * structViewDeniedKeys), and discovery runs again so the pair is converted through the object path. */
   private noteStructViewCrossing(t: IrType, seen: Set<string>): void {
@@ -5713,6 +5889,12 @@ export class Lowerer {
         return;
       }
       const o = n as { kind?: unknown; value?: { type?: IrType } };
+      if (typeof o.kind === "string" && !IDENTITY_BLIND_PARENTS.has(o.kind)) this.noteIdentityOperands(n as Record<string, unknown>);
+      if (o.kind === "recordSet" || o.kind === "recordKeySet" || o.kind === "recordKeyDelete") this.noteRecordWrite((o as unknown as { shapeId: string }).shapeId);
+      else if (o.kind === "recordSrcView") {
+        this.noteRecordWrite((o as unknown as { srcShapeId: string }).srcShapeId);
+        this.noteRecordWrite((o as unknown as { shapeId: string }).shapeId);
+      }
       {
         const w = o as unknown as { field?: unknown; own?: unknown; fn?: unknown; args?: IrExpr[] };
         if (o.kind === "fieldSet" || o.kind === "fieldIncDec" || (o.kind === "recordSet" && w.own !== true)) {
@@ -10302,6 +10484,9 @@ export class Lowerer {
       this.recordViewShapes.add(expected.shapeId);
       return { kind: "recordSrcView", src: expr, srcShapeId: (expr.type as IrType & { kind: "record" }).shapeId, shapeId: expected.shapeId, type: expected, loc: expr.loc };
     }
+    // A READ-ONLY WIDTH PAIR keeps the plain field copy (recordWidthHelper): nothing mutates either side, so the view could only ever answer what the copy
+    // answers, and the view costs a transient dynamic tree of the whole graph plus the snapshot built from it.
+    if (this.widthPairIsReadOnly(expr.type as IrType, expected as IrType)) return null;
     // The grant is decided by the DISCOVERY pass, before shapes are interned. The emit pass converts through views only where
     // both shapes were granted there: a conversion that first appears in the emit pass (a spread that became a dynamic copy
     // once its source was granted) would cast into a shape with no view slot, a silent copy, so it keeps the field copy and the
