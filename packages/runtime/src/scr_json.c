@@ -5545,9 +5545,15 @@ static size_t scr_error_members_present_impl(const ScrError *e) {
   return n;
 }
 
+static const ScrDynClass **scr_cls_by_pre = NULL; /* the memo of scr_dyn_objinst_class_of's registry walk, see there */
+static size_t scr_cls_by_pre_n = 0;
+
 void scr_dyn_objinst_registry(const ScrDynClass *const *descs, size_t n) {
   scr_cls_reg = descs;
   scr_cls_reg_n = n;
+  free(scr_cls_by_pre);
+  scr_cls_by_pre = NULL;
+  scr_cls_by_pre_n = 0;
   scr_error_install_members_present(&scr_error_members_present_impl);
 }
 
@@ -5600,6 +5606,29 @@ const ScrDyn *scr_dyn_objinst_props_table(const ScrDyn *d) {
   return *(const ScrDyn *const *)((const char *)d->v.inst.o + off);
 }
 
+/* Paints scr_cls_by_pre. The table spans [0, max post]; a registry whose numbering is implausibly wide leaves it at length 0 and every call
+ * walks. Ties (equal intervals) keep the FIRST registry entry, as the walk's strict `<` does. */
+static __attribute__((noinline)) void scr_cls_by_pre_build(void) {
+  size_t maxp = 0;
+  for (size_t i = 0; i < scr_cls_reg_n; i++)
+    if (scr_cls_reg[i]->post > maxp) maxp = scr_cls_reg[i]->post;
+  size_t n = scr_cls_reg_n != 0 && maxp < (1u << 20) ? maxp + 1 : 0;
+  const ScrDynClass **tab = (const ScrDynClass **)calloc(n != 0 ? n : 1, sizeof *tab);
+  if (tab == NULL) scr_json_oom();
+  for (size_t i = 0; i < scr_cls_reg_n; i++) {
+    const ScrDynClass *c = scr_cls_reg[i];
+    for (size_t p = c->pre; p <= c->post && p < n; p++) {
+      const ScrDynClass *b = tab[p];
+#ifdef SCR_OBJ_PLANT_BUG
+      if (SCR_OBJ_PLANT_BUG == 5) { if (b == NULL || (c->post - c->pre) > (b->post - b->pre)) tab[p] = c; continue; } /* the planted defect: the LOOSEST containing class wins */
+#endif
+      if (b == NULL || (c->post - c->pre) < (b->post - b->pre)) tab[p] = c;
+    }
+  }
+  scr_cls_by_pre = tab;
+  scr_cls_by_pre_n = n;
+}
+
 const ScrDynClass *scr_dyn_objinst_class_of(const ScrDyn *d) {
   const ScrDynClass *own = d->v.inst.cls;
   /* A STANDALONE class needs no scan, and this is not an optimization
@@ -5622,6 +5651,14 @@ const ScrDynClass *scr_dyn_objinst_class_of(const ScrDyn *d) {
    * instance's position and the TIGHTEST containing one is the instance's
    * own class. Linear over the program's boxable classes, which is
    * nothing beside the call this is about to dispatch. */
+  /* The answer depends only on `p` (the registry is installed once, at startup, and never changes), so it is computed ONCE per position into a
+   * table indexed by preorder number: the same tightest-containing-interval rule, painted for every position instead of re-walked for every
+   * call (one walk was ~1,000 Ir over a few hundred classes, per call, on every dyn member read of a hierarchy instance). A position outside
+   * the table (or an unpainted one) takes the walk, so the memo can only answer what the walk answers. */
+#ifndef SCR_OBJ_NOIDX
+  if (__builtin_expect(scr_cls_by_pre == NULL, 0)) scr_cls_by_pre_build();
+  if (p < scr_cls_by_pre_n && scr_cls_by_pre[p] != NULL) return scr_cls_by_pre[p];
+#endif
   const ScrDynClass *best = NULL;
   for (size_t i = 0; i < scr_cls_reg_n; i++) {
     const ScrDynClass *c = scr_cls_reg[i];
@@ -5668,7 +5705,79 @@ bool scr_dyn_objinst_emitter_api(const ScrDyn *d, size_t pre, size_t post, const
  * A function of (class table, key bytes) alone, and the class tables are emitted `const` data that no runtime code writes, so its
  * answer for a fixed (class, key) can never change. The per-INSTANCE half (an own property shadowing a method) is
  * scr_dyn_objinst_row_visible, evaluated on every read. */
+/* A class with a LARGE member table (ioredis's Redis class lists every command: hundreds of rows) is looked up through a hash of positions built
+ * once per descriptor, instead of a walk that compared every row's name on every dyn call (~5,000 Ir per call there). Descriptors are
+ * compiler-emitted `const` statics, never freed or edited, so a built index stays exact for the life of the process. It answers what the walk
+ * answers: the FIRST non-shadow (enumerable != 3) row of a name wins, a later duplicate is skipped at build. A table too small to be worth it, or
+ * a cache that is full, walks. -DSCR_OBJ_NOIDX restores the walk; -DSCR_OBJ_PLANT_BUG=4 makes a hit answer the next row. */
+#ifndef SCR_CM_IDX_MIN
+#define SCR_CM_IDX_MIN 16
+#endif
+#define SCR_CM_IDX_SLOTS 32
+static struct ScrCmIdx {
+  const ScrDynClass *cls;
+  uint32_t mask;
+  uint32_t *slots; /* position + 1, 0 = empty */
+} scr_cm_idx[SCR_CM_IDX_SLOTS];
+static size_t scr_cm_idx_n = 0;
+
+static __attribute__((noinline)) const struct ScrCmIdx *scr_cm_idx_build(const ScrDynClass *c) {
+  if (scr_cm_idx_n == SCR_CM_IDX_SLOTS) return NULL;
+  uint32_t cap = 64;
+  while (cap < 2u * (uint32_t)c->nmembers + 2u) cap <<= 1;
+  uint32_t *slots = (uint32_t *)calloc(cap, sizeof *slots);
+  if (slots == NULL) scr_json_oom();
+  for (size_t i = 0; i < c->nmembers; i++) {
+    const ScrDynClassMember *m = &c->members[i];
+    if (m->enumerable == 3) continue;
+    uint32_t h = scr_dyn_key_hash(m->name, m->len) & (cap - 1);
+    bool dup = false;
+    while (slots[h] != 0) {
+      const ScrDynClassMember *o = &c->members[slots[h] - 1];
+      if (o->len == m->len && scr_dyn_bytes_eq(o->name, m->name, m->len)) {
+        dup = true;
+        break;
+      }
+      h = (h + 1) & (cap - 1);
+    }
+    if (!dup) slots[h] = (uint32_t)i + 1;
+  }
+  struct ScrCmIdx *e = &scr_cm_idx[scr_cm_idx_n++];
+  e->cls = c;
+  e->mask = cap - 1;
+  e->slots = slots;
+  return e;
+}
+
+static __attribute__((noinline)) const ScrDynClassMember *scr_cm_probe(const ScrDynClass *c, const struct ScrCmIdx *ix, const char *k, size_t klen) {
+  uint32_t h = scr_dyn_key_hash(k, klen) & ix->mask;
+  for (;;) {
+    const uint32_t s = ix->slots[h];
+    if (s == 0) return NULL;
+    const ScrDynClassMember *m = &c->members[s - 1];
+    if (m->len == klen && scr_dyn_bytes_eq(m->name, k, klen)) {
+#ifdef SCR_OBJ_PLANT_BUG
+      if (SCR_OBJ_PLANT_BUG == 4 && s < c->nmembers) return &c->members[s];
+#endif
+      return m;
+    }
+    h = (h + 1) & ix->mask;
+  }
+}
+
 const ScrDynClassMember *scr_dyn_objinst_row_scan(const ScrDynClass *c, const char *k, size_t klen) {
+#ifndef SCR_OBJ_NOIDX
+  if (__builtin_expect(c->nmembers >= SCR_CM_IDX_MIN, 0)) {
+    const struct ScrCmIdx *ix = NULL;
+    for (size_t i = 0; i < scr_cm_idx_n; i++)
+      if (scr_cm_idx[i].cls == c) {
+        ix = &scr_cm_idx[i];
+        break;
+      }
+    if (ix == NULL) ix = scr_cm_idx_build(c);
+    if (ix != NULL) return scr_cm_probe(c, ix, k, klen); /* NULL (a full cache) falls through to the walk */
+  }
+#endif
   /* nmembers and not a NULL `members`: a class with an empty table is a
    * class with no members, and reading through a NULL pointer to prove
    * it would be the same bug the SCR_DYN_KIND_COUNT note above records. */
@@ -5677,7 +5786,7 @@ const ScrDynClassMember *scr_dyn_objinst_row_scan(const ScrDynClass *c, const ch
      * it is listed by the enumerating walks, and a read or call by name
      * belongs to the method row that follows it. */
     if (c->members[i].enumerable == 3) continue;
-    if (c->members[i].len == klen && memcmp(c->members[i].name, k, klen) == 0) return &c->members[i];
+    if (c->members[i].len == klen && scr_dyn_bytes_eq(c->members[i].name, k, klen)) return &c->members[i];
   }
   return NULL;
 }
@@ -9873,6 +9982,7 @@ static void scr_dyn_obj_unset(ScrDyn *obj, const char *key, size_t key_len) {
   for (size_t i = 0; i < obj->v.obj.len; i++) {
     ScrDynEntry *e = &obj->v.obj.entries[i];
     if (SCR_DYN_KEY_EQ(e, key, key_len)) {
+      scr_dyn_obj_idx_drop(obj); /* positions after i shift */
       /* unlink before release: the entry must be out of the table before
        * the value's release can trigger a collection */
       ScrDyn *old = e->value;
@@ -9982,7 +10092,6 @@ static void scr_dyn_obj_put_hidden(ScrDyn *recv, const char *key, size_t key_len
    * yet. The claim is made at the end of the member table, which is
    * where a property created now belongs. A slot is never withdrawn when
    * `enumerable` goes false: it becomes a tombstone, so a later
-      scr_dyn_obj_idx_drop(obj); /* positions after i shift */
    * redefinition back to true restores the key to the position it had
    * rather than to a new one. */
   if (enumerable && !slot_held) {
