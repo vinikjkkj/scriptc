@@ -48,6 +48,13 @@
 /* Every heap object's first member is `size_t rc`. */
 #define SCR_RC(obj) (*(size_t *)(obj))
 
+/* The knobs of this file are read once each, through one shared reader: the getenv-and-strtol pair, inlined at every site, was the largest part of the file's
+ * always-linked cold text. */
+static __attribute__((noinline)) long scr_cyc_env_long(const char *name, long dflt) {
+  const char *e = getenv(name);
+  return e != NULL ? strtol(e, NULL, 10) : dflt;
+}
+
 static void scr_cyc_oom(void) {
   scr_trap("scriptc: out of memory\n");
 }
@@ -699,9 +706,7 @@ static long long scr_cyc_vm_recommitfail = 0;
 static int scr_cyc_vm_on(void) {
   static int cached = -1;
   if (cached < 0) {
-    const char *e = getenv("SCR_CYCLE_ARENA_VM");
-    cached = e != NULL ? (strtol(e, NULL, 10) != 0)
-                       : (SCR_CYC_ARENA_VM_DEFAULT != 0);
+    cached = scr_cyc_env_long("SCR_CYCLE_ARENA_VM", SCR_CYC_ARENA_VM_DEFAULT) != 0;
   }
   return cached;
 }
@@ -1017,8 +1022,7 @@ static __attribute__((cold)) void scr_cyc_pr_arm(void) {
 static inline __attribute__((always_inline)) int scr_cyc_pr_on(void) {
   static int cached = -1;
   if (cached < 0) {
-    const char *e = getenv("SCR_CYCLE_PAGERETURN");
-    cached = e != NULL ? (strtol(e, NULL, 10) != 0) : (SCR_CYC_PAGERETURN != 0);
+    cached = scr_cyc_env_long("SCR_CYCLE_PAGERETURN", SCR_CYC_PAGERETURN) != 0;
   }
   return cached;
 }
@@ -1060,8 +1064,7 @@ static unsigned char scr_cyc_pr_freemap[SCR_CYC_ARENA_CHUNK / 16u];
 static unsigned scr_cyc_pr_thresh(void) {
   static int cached = -1;
   if (cached < 0) {
-    const char *e = getenv("SCR_CYCLE_PAGERETURN_MIN");
-    cached = e != NULL ? (int)strtol(e, NULL, 10) : 1;
+    cached = (int)scr_cyc_env_long("SCR_CYCLE_PAGERETURN_MIN", 1);
     if (cached < 1) cached = 1;
   }
   return (unsigned)cached;
@@ -1491,8 +1494,7 @@ static int scr_cyc_arena_on(void) {
 #else
   static int cached = -1;
   if (cached < 0) {
-    const char *env = getenv("SCR_CYCLE_ARENA");
-    cached = env != NULL ? (strtol(env, NULL, 10) != 0) : (SCR_CYC_ARENA != 0);
+    cached = scr_cyc_env_long("SCR_CYCLE_ARENA", SCR_CYC_ARENA) != 0;
   }
   return cached;
 #endif
@@ -2130,11 +2132,8 @@ static size_t scr_cyc_idle_pace(void) {
   static bool once = false;
   static size_t cached = SCR_CYC_IDLE_PACE;
   if (!once) {
-    const char *env = getenv("SCR_CYCLE_IDLE_PACE");
-    if (env != NULL) {
-      long v = strtol(env, NULL, 10);
-      if (v >= 0) cached = (size_t)v;
-    }
+    long v = scr_cyc_env_long("SCR_CYCLE_IDLE_PACE", -1);
+    if (v >= 0) cached = (size_t)v;
     once = true;
   }
   return cached;
@@ -2204,8 +2203,7 @@ static __attribute__((noinline, cold, minsize)) void scr_cyc_release_slow(void *
   }
   size_t base = scr_cyc_thr_base;
   if (base == 0) {
-    const char *env = getenv("SCR_CYCLE_THRESHOLD");
-    long v = env ? atol(env) : 0;
+    long v = scr_cyc_env_long("SCR_CYCLE_THRESHOLD", 0);
     scr_cyc_thr_base = scr_cyc_floor = base = v > 0 ? (size_t)v : 256; /* the floor is 0 only while the base is (see scr_cyc_floor) */
   }
   /* Never reached while a pass runs: the floor is SIZE_MAX then, and no count reaches it. */
