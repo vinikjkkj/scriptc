@@ -2949,7 +2949,7 @@ export type IrStmt =
    * (ToUint8/ToUint32 modular truncation, double→float rounding). Unlike
    * arraySet there is NO append at i == len: typed arrays are
    * fixed-length. */
-  | { kind: "bytesSet"; arr: IrExpr; index: IrExpr; value: IrExpr; loc: SrcLoc }
+  | { kind: "bytesSet"; arr: IrExpr; index: IrExpr; value: IrExpr; raw?: true; loc: SrcLoc }
   /** `for (const x of arr)`: iterates by ascending index, re-reading the
    * length each iteration (JS-exact for arrays). `localId` is a fresh const
    * binding per iteration holding the element (for refcounted elements: an
@@ -3304,6 +3304,9 @@ export type IrBytesIntrinsicMethod =
   | "copyWithin"
   | "length"
   | "byteLength"
+  /** `f64Ok` [minLen numLit]: the guard of a function versioned by ir/f64-raw.ts. True when the receiver is a Float64Array of at least minLen
+   * elements (elem == F64 && len >= minLen); never throws, no side effect. */
+  | "f64Ok"
   | "get"
   | "slice"
   | "subarray"
@@ -3412,7 +3415,7 @@ export const DV_BIG_SET_METHODS: ReadonlySet<IrBytesIntrinsicMethod> = new Set([
  * rather than a second hand-maintained copy. */
 const BYTES_INTRINSIC_METHOD_SET: Record<IrBytesIntrinsicMethod, true> = {
   copyWithin: true,
-  length: true, byteLength: true, get: true, slice: true,
+  length: true, byteLength: true, f64Ok: true, get: true, slice: true,
   fillBig: true, indexOfBig: true, includesBig: true, lastIndexOfBig: true, toArrayBig: true, sortBig: true,
   subarray: true, toReversed: true, with: true, join: true,
   toArray: true, setFrom: true, toString: true, readNum: true,
@@ -7831,6 +7834,9 @@ export type IrExpr =
       /** `get` only: the read's value is the ToNumeric of the element (an increment's old value), so an index naming no element answers a plain
        * NaN, never the NaN-marked undefined, wherever the value goes. */
       numeric?: true;
+      /** `get` on a Float64Array only: the receiver is proven an F64 view whose length covers this index (ir/f64-raw.ts guards the whole function
+       * with `f64Ok`), so the emitters read the element straight from memory: no kind test, no bound test. */
+      raw?: true;
       loc: SrcLoc;
     }
   /** `new Map<K, V>()` — allocate an empty map. `type` is the map type

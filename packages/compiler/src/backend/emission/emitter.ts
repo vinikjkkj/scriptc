@@ -481,6 +481,10 @@ export class CEmitter {
   /** The function being emitted. The coroutine await site needs its locals
    * list to know what to spill. */
   currentFn: IrFunction | null = null;
+  /** The C local holding the data pointer of Float64Array parameter `localId` in a versioned body (ir/f64-raw.ts). */
+  f64DataName(localId: string): string {
+    return `sc_fd_${mangleLocal(localId)}`;
+  }
   /** Does this arithmetic node skip scr_num_canon (ir/num-canon.ts proves no operand can carry a marker and the result is consumed where NaN bits are unobservable)? */
   canonElided(n: object): boolean {
     return this.currentFn !== null && canonPlanOf(this.currentFn).elided.has(n);

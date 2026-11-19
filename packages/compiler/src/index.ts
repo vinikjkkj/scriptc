@@ -33,6 +33,7 @@ import { validateModule } from "./ir/validate.js";
 import { captureByValue } from "./ir/capture-by-value.js";
 import { numSlotPass } from "./ir/num-slot.js";
 import { cbitPass } from "./ir/cbit.js";
+import { f64RawPass } from "./ir/f64-raw.js";
 import { deadInitPass } from "./ir/dead-init.js";
 import { lazyInitPass } from "./ir/lazy-init.js";
 import { narrowSlotPass, reportNarrowScope } from "./ir/narrow-slot.js";
@@ -1569,6 +1570,7 @@ async function compileTracked(
     narrowSlotPass(lowered.module!);
     numSlotPass(lowered.module!);
     cbitPass(lowered.module!);
+    f64RawPass(lowered.module!);
     const validation = tapped("fe.validate", () => validateModule(lowered.module!));
     if (validation.length > 0) {
       return fail(validation.map((v) => iceDiag(v.message, v.loc)));
@@ -2544,6 +2546,7 @@ export async function compileLibrary(opts: CompileLibraryOptions): Promise<Compi
   narrowSlotPass(mod);
   numSlotPass(mod);
   cbitPass(mod);
+  f64RawPass(mod);
   const validation = validateModule(mod);
   if (validation.length > 0) return fail(validation.map((v) => iceDiag(v.message, v.loc)));
 

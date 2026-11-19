@@ -53,6 +53,8 @@ export interface RuntimeFieldOffset {
  *  so every access to it is one of these raw offsets. */
 export const SCR_BYTES_LEN_OFFSET = 8;
 export const SCR_BYTES_DATA_OFFSET = 24;
+/** `elem` is a ScrBytesElem (a C enum: 32 bits); SCR_BYTES_F64 is its fifth member (BYTES_ELEM_NUM.f64). */
+export const SCR_BYTES_ELEM_OFFSET = 16;
 
 /** ScrStr { uint32_t rc; uint32_t len; uint32_t cap; char data[]; }
  *  `data` is a flexible array member, so its offset is sizeof of the header
@@ -86,6 +88,7 @@ export const SCR_CORO_BASE_STATE_OFFSET = 24;
 export const RUNTIME_FIELD_OFFSETS: readonly RuntimeFieldOffset[] = [
   { struct: "ScrBytes", field: "len", offset: SCR_BYTES_LEN_OFFSET },
   { struct: "ScrBytes", field: "data", offset: SCR_BYTES_DATA_OFFSET },
+  { struct: "ScrBytes", field: "elem", offset: SCR_BYTES_ELEM_OFFSET },
   { struct: "ScrStr", field: "len", offset: SCR_STR_LEN_OFFSET },
   { struct: "ScrStr", field: "data", offset: SCR_STR_DATA_OFFSET },
   { struct: "ScrCoroBase", field: "resume", offset: 0 },

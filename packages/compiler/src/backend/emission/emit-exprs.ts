@@ -1747,7 +1747,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // code, so a stable binding can keep owning its receiver across
         // the access instead of the emitter taking a reference for it.
         const directElementAccess =
-          method === "length" || method === "byteLength" || method === "get";
+          method === "length" || method === "byteLength" || method === "get" || method === "f64Ok";
         const r = directElementAccess
           ? emitStableReceiver(E, e.receiver, e.args)
           : E.emitExpr(e.receiver);
@@ -1763,7 +1763,17 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return E.newTemp(e.type, `(double)${r.name}->len`);
           case "byteLength":
             return E.newTemp(e.type, `scr_bytes_byte_len(${r.name})`);
+          case "f64Ok": {
+            // The entry guard of a function versioned by ir/f64-raw.ts: kind and length once, and the data pointer the raw accesses use.
+            const min = `(size_t)${args[0]!.name}`;
+            if (e.receiver.kind === "varRef") return E.newTemp(e.type, `(${E.f64DataName(e.receiver.localId)} = ${r.name}->data, scr_bytes_f64_ok(${r.name}, ${min}))`);
+            return E.newTemp(e.type, `scr_bytes_f64_ok(${r.name}, ${min})`);
+          }
           case "get":
+            if (e.raw === true && e.receiver.kind === "varRef") {
+              const raw = `scr_f64_raw_get(${E.f64DataName(e.receiver.localId)}, (size_t)${args[0]!.name})`;
+              return E.newTemp(e.type, E.undefLoad(e) || E.canonLoad(e) ? `scr_num_canon(${raw})` : raw);
+            }
             // An index naming no element reads NaN here (`undefined` where the plan says it is observed).
             // scr_bytes_get_inl, not scr_bytes_get: the inline arm answers
             // the u8-in-bounds case here and calls the function for
