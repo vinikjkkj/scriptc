@@ -29543,6 +29543,60 @@
     "<repo>/tests/corpus/25769-a-util-object-that-is-undefined-throws-at-the-member-it-fails-in.cjs"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25830-a-read-only-literal-table-widened-by-a-cast-reads-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25830-a-read-only-literal-table-widened-by-a-cast-reads-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25831-a-widened-table-that-is-written-through-the-cast-stays-one-object.ts": {
+   "order": [
+    "<repo>/tests/corpus/25831-a-widened-table-that-is-written-through-the-cast-stays-one-object.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25832-a-widened-table-used-as-a-map-key-keeps-one-identity.ts": {
+   "order": [
+    "<repo>/tests/corpus/25832-a-widened-table-used-as-a-map-key-keeps-one-identity.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25833-a-table-written-after-the-cast-is-seen-through-the-wide-name.ts": {
+   "order": [
+    "<repo>/tests/corpus/25833-a-table-written-after-the-cast-is-seen-through-the-wide-name.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25834-a-read-only-numeric-key-table-and-its-name-table-read-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25834-a-read-only-numeric-key-table-and-its-name-table-read-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25835-a-nested-record-graph-with-arrays-widened-by-a-cast-reads-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25835-a-nested-record-graph-with-arrays-widened-by-a-cast-reads-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25836-a-widening-cast-inside-a-function-called-twice-reads-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25836-a-widening-cast-inside-a-function-called-twice-reads-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25837-a-widened-table-whose-key-order-differs-from-its-type-order-keeps-the-source-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/25837-a-widened-table-whose-key-order-differs-from-its-type-order-keeps-the-source-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25838-a-table-cast-to-a-narrower-and-a-wider-record-writes-through-both.ts": {
+   "order": [
+    "<repo>/tests/corpus/25838-a-table-cast-to-a-narrower-and-a-wider-record-writes-through-both.ts"
+   ],
+   "diags": []
   }
  }
 }
