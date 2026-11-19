@@ -26,6 +26,8 @@ TweetNaCl shape a from-scratch version would reach, and it is audited code
 rather than freshly written crypto. Chosen over mbedTLS (already vendored)
 because mbedTLS has no Ed25519 at all.
 
+Local additions (scriptc): `monocypher-fe64.h` (five-limb 2^51 field, auto-selected with a 128-bit integer) and `monocypher-x25519-64.h` + `monocypher-x25519-64-body.h` (a four-limb 2^64 field and ladder used by `crypto_x25519` only, on x86-64 with clang; compiled plain and with `target("bmi2")`, picked by cpuid; `-DSCR_NO_X25519_4X64` removes it; Ed25519 and the other scalar multiplications are untouched). Checked against the five-limb path: RFC 7748 vectors, 100k random and edge-point differential, field operations against big-integer arithmetic.
+
 ## quickjs-ng/
 
 - Project: https://github.com/quickjs-ng/quickjs
