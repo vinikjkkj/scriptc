@@ -916,9 +916,8 @@ ScrStr *scr_str_concat8(ScrStr *a, ScrStr *b, ScrStr *c, ScrStr *d, ScrStr *e, S
 
 bool scr_str_eq(ScrStr *a, ScrStr *b);
 
-/* memcmp byte order == code-point order (see SEMANTICS.md: diverges from
- * JS UTF-16 code-unit order only for non-BMP vs U+E000..U+FFFF). Returns
- * <0, 0, >0. */
+/* ECMAScript string order (UTF-16 code units) over well-formed UTF-8: byte order except that a supplementary character sorts before
+ * U+E000..U+FFFF. Returns <0, 0, >0. */
 int scr_str_cmp(ScrStr *a, ScrStr *b);
 
 /* ECMAScript string-list ordering: compare UTF-16 code units even though
@@ -7256,7 +7255,7 @@ bool scr_dyn_typeof_is_object(const ScrDyn *d);
  *                      hence a dyn result (+1).
  *   scr_dyn_lt/le/gt/ge  abstract relational comparison (7.2.13) — two
  *                      strings compare AS strings (scr_str_cmp's
- *                      documented code-point order, matching the typed
+ *                      UTF-16 code-unit order, matching the typed
  *                      strCmp node), everything else through ToNumber
  *                      with NaN answering false.
  * The REFERENCE kinds (object/array/function/bytes/handle/promise/island

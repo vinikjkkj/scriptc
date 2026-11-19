@@ -105,6 +105,7 @@ int main(void) {
     ScrStr *a = scr_str_new(A, al), *b = scr_str_new(B, bl);
     int got = sgn(scr_str_cmp_u16(a, b));
     CHECK(got == oracle(A, al, B, bl, 0));
+    CHECK(sgn(scr_str_cmp(a, b)) == got); /* the relational operators' entry point is the same order */
     if (oracle(A, al, B, bl, 1) != got) ctl_disagree++;
     CHECK(sgn(scr_str_cmp_u16(b, a)) == -got);
     pairs++;

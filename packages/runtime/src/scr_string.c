@@ -1498,20 +1498,13 @@ bool scr_str_eq(ScrStr *a, ScrStr *b) {
   return a == b || (a->len == b->len && memcmp(a->data, b->data, a->len) == 0);
 }
 
-int scr_str_cmp(ScrStr *a, ScrStr *b) {
-  size_t min = a->len < b->len ? a->len : b->len;
-  int c = memcmp(a->data, b->data, min);
-  if (c != 0) return c;
-  return a->len < b->len ? -1 : (a->len > b->len ? 1 : 0);
-}
-
-/* UTF-16 code-unit order of two well-formed UTF-8 strings. The bytes of the two strings are equal up to the first differing byte k, so everything
+/* String ordering: ECMAScript's, UTF-16 code units, over well-formed UTF-8 (every relational operator on strings, the default sort, URLSearchParams.sort). The bytes of the two strings are equal up to the first differing byte k, so everything
  * before k compares equal and the order is decided AT k. UTF-8 byte order is code point order, and code point order equals code unit order except
  * between U+E000..U+FFFF (a 3-byte sequence whose lead is 0xEE or 0xEF) and a supplementary code point (a 4-byte sequence whose lead is 0xF0..0xF4,
  * whose first UTF-16 unit is a high surrogate 0xD800..0xDBFF): there the supplementary one sorts FIRST. A first difference inside a sequence is a
  * continuation byte on both sides (the leads were equal), and continuation bytes are below 0xC0, so the exception can only arise at a lead byte. When
  * one string is a prefix of the other the shorter sorts first. The scan is word-wise, then bytewise for the last difference. */
-int scr_str_cmp_u16(ScrStr *a, ScrStr *b) {
+int scr_str_cmp(ScrStr *a, ScrStr *b) {
   const unsigned char *da = (const unsigned char *)a->data, *db = (const unsigned char *)b->data;
   size_t min = a->len < b->len ? a->len : b->len;
   size_t i = 0;
@@ -1529,6 +1522,9 @@ int scr_str_cmp_u16(ScrStr *a, ScrStr *b) {
   if (y >= 0xF0 && (x == 0xEE || x == 0xEF)) return 1;
   return x < y ? -1 : 1;
 }
+
+/* The same order under its older name (the default sort comparator and URLSearchParams.sort call it). */
+int scr_str_cmp_u16(ScrStr *a, ScrStr *b) { return scr_str_cmp(a, b); }
 
 /* ── interned strings ─────────────────────────────────────────────────
  * The empty string and every single-character ASCII string are immortal
