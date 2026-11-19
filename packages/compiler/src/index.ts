@@ -640,13 +640,13 @@ export function runFrontend(entryPath: string, npmStatic?: readonly string[] | "
         foldWhy(`fallback: preflight of the folded program is not clean (${pre.length}: ${twinWhy(load, pre)})`);
         return null;
       }
-      const again = lowerToIr(load.program, load.entry, load.moduleOrder, {
+      const again = tapped("lower.fold", () => lowerToIr(load!.program, load!.entry, load!.moduleOrder, {
         ...opts,
-        startupCrash: load.startupCrash ?? null,
+        startupCrash: load!.startupCrash ?? null,
         noPinReload: true,
         noTwinReload: true,
         twinFoldApplied: applied,
-      });
+      }));
       const bad = again.module === null ? [] : validateModule(again.module);
       if (again.module === null || again.diagnostics.length > 0 || bad.length > 0) {
         foldWhy(`fallback: the folded program does not lower clean (${again.diagnostics.length} diagnostic(s): ${twinWhy(load, again.diagnostics)}${bad[0] !== undefined ? ` invalid: ${bad[0].message}` : ""})`);
