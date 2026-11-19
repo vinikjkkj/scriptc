@@ -17282,6 +17282,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25899-the-utf16-length-of-long-strings-with-multibyte-characters-is-exact-across-block-boundaries.ts": {
+   "order": [
+    "<repo>/tests/corpus/25899-the-utf16-length-of-long-strings-with-multibyte-characters-is-exact-across-block-boundaries.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2590-object-create-dynamic.js": {
    "order": [
     "<repo>/tests/corpus/2590-object-create-dynamic.js"
