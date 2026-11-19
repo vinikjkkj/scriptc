@@ -966,17 +966,53 @@ static void scr_dyn_gcfree(void *o) {
   scr_cyc_free(d);
 }
 
-/* A WeakMap key died: the one cold arm of scr_dyn_release_final (the story is in the comment there). */
-static __attribute__((noinline, cold)) void scr_dyn_weak_dead(ScrDyn *d) {
-  ScrCycHdr *wh = scr_cyc_hdr(d);
-  wh->blk = (uint8_t)(wh->blk & (uint8_t)~SCR_CYC_WEAKKEY);
-  if (scr_weak_died_hook != NULL) scr_weak_died_hook(d);
-}
-
-/* The children half of the teardown of a dyn whose count just reached zero: whatever the kind owns beyond the node itself. Answers true when the node is
- * already gone (an embedded closure is one object with one teardown). Out of line so scr_dyn_release_final, which every dead node passes through, is
- * a small function: a scalar (null, bool, number, undefined) owns nothing and never calls here. */
-static __attribute__((noinline)) bool scr_dyn_release_children(ScrDyn *d) {
+/* The whole teardown of a dead dyn, any kind; scr_dyn_release_final below is its scalar fast path. */
+static __attribute__((noinline)) void scr_dyn_release_final_full(ScrDyn *d) {
+  if (SCR_CYC_BUFFERED(scr_cyc_hdr(d))) scr_cyc_on_dead(d); /* drop any candidate-buffer entry before teardown (the test is inline: most dyn nodes were never buffered) */
+  /* THE WEAK-KEY DEATH HOOK, AND THE ROUTE scr_cyc_free CANNOT SEE.
+   *
+   * A dyn ARR or OBJ built in dyn-land has no second representation, so a
+   * WeakMap over `object` keys it on the BOX (scr_dyn_strict_eq's default
+   * arm: the box IS the JS value for these two kinds). Every other admitted
+   * weak key reaches a free, and scr_cyc_free's hook covers every
+   * cycle-headered one — but a ScrDyn usually does not reach scr_cyc_free
+   * at all. It is PARKED on the freelist below with its buffer intact, and
+   * scr_dyn_alloc hands the SAME ADDRESS straight back out, up to
+   * SCR_DYN_FREE_MAX deep. Left to scr_cyc_free the entry would survive the
+   * park and the next node at that address would read the dead key's value:
+   * the wrong answer the head of scr_weak.c exists to prevent, not a leak.
+   *
+   * So the hook goes HERE, above both of this function's exits (the park
+   * and the scr_cyc_free tail), and the collector's route keeps the one it
+   * already had — scr_dyn_gcfree ends at scr_cyc_free.
+   *
+   * THE STAMP IS CLEARED, and that half is required rather than tidy.
+   * scr_cyc_stamp rewrites `blk` wholesale at every scr_cyc_alloc, which is
+   * what makes a recycled cycle block arrive clean; the ScrDyn freelist
+   * BYPASSES that call, so a parked node would carry its mark into its next
+   * life and make an unrelated value walk the registry on its own free.
+   * Never a wrong answer (the walk finds nothing), but nothing here may
+   * rely on a mark outliving its object, and clearing it is one AND.
+   *
+   * The cost to a program with no WeakMap is one test of a byte
+   * scr_cyc_on_dead has just loaded: `blk`'s top bit, which only
+   * scr_cyc_weak_mark ever sets and which no key can carry before
+   * scr_weak_new has installed the hook. */
+  {
+    ScrCycHdr *wh = scr_cyc_hdr(d);
+    if ((wh->blk & SCR_CYC_WEAKKEY) != 0) {
+      wh->blk = (uint8_t)(wh->blk & (uint8_t)~SCR_CYC_WEAKKEY);
+      if (scr_weak_died_hook != NULL) scr_weak_died_hook(d);
+    }
+  }
+#ifdef SCR_DYNCEN_ON
+  scr_dyncen_note_dead(d); /* the refcount's exit from the live set. It runs
+                            * whether the node is then PARKED on a freelist
+                            * or handed to scr_cyc_free: a parked node is
+                            * resident but the program no longer holds it,
+                            * and that distinction is the whole point of a
+                            * lane above scr_json.c rather than below it. */
+#endif
   switch (d->kind) {
   case SCR_DYN_STR:
     scr_str_release(d->v.str);
@@ -1013,7 +1049,7 @@ static __attribute__((noinline)) bool scr_dyn_release_children(ScrDyn *d) {
   case SCR_DYN_FUNC:
     if (((ScrClosure *)d)->isdyn) { /* an embedded closure: the one object, the one teardown (its own header is dropped again there, harmlessly) */
       scr_closure_free_dead((ScrClosure *)d);
-      return true;
+      return;
     }
     scr_closure_release(scr_dyn_fn_clo(d)); /* sig/name are static literals */
     break;
@@ -1057,52 +1093,6 @@ static __attribute__((noinline)) bool scr_dyn_release_children(ScrDyn *d) {
   default:
     break; /* null/bool/num have no children */
   }
-  return false;
-}
-
-/* The whole teardown of a dead dyn, any kind; scr_dyn_release_final below is its scalar fast path. */
-static __attribute__((noinline)) void scr_dyn_release_final_full(ScrDyn *d) {
-  if (SCR_CYC_BUFFERED(scr_cyc_hdr(d))) scr_cyc_on_dead(d); /* drop any candidate-buffer entry before teardown (the test is inline: most dyn nodes were never buffered) */
-  /* THE WEAK-KEY DEATH HOOK, AND THE ROUTE scr_cyc_free CANNOT SEE.
-   *
-   * A dyn ARR or OBJ built in dyn-land has no second representation, so a
-   * WeakMap over `object` keys it on the BOX (scr_dyn_strict_eq's default
-   * arm: the box IS the JS value for these two kinds). Every other admitted
-   * weak key reaches a free, and scr_cyc_free's hook covers every
-   * cycle-headered one — but a ScrDyn usually does not reach scr_cyc_free
-   * at all. It is PARKED on the freelist below with its buffer intact, and
-   * scr_dyn_alloc hands the SAME ADDRESS straight back out, up to
-   * SCR_DYN_FREE_MAX deep. Left to scr_cyc_free the entry would survive the
-   * park and the next node at that address would read the dead key's value:
-   * the wrong answer the head of scr_weak.c exists to prevent, not a leak.
-   *
-   * So the hook goes HERE, above both of this function's exits (the park
-   * and the scr_cyc_free tail), and the collector's route keeps the one it
-   * already had — scr_dyn_gcfree ends at scr_cyc_free.
-   *
-   * THE STAMP IS CLEARED, and that half is required rather than tidy.
-   * scr_cyc_stamp rewrites `blk` wholesale at every scr_cyc_alloc, which is
-   * what makes a recycled cycle block arrive clean; the ScrDyn freelist
-   * BYPASSES that call, so a parked node would carry its mark into its next
-   * life and make an unrelated value walk the registry on its own free.
-   * Never a wrong answer (the walk finds nothing), but nothing here may
-   * rely on a mark outliving its object, and clearing it is one AND.
-   *
-   * The cost to a program with no WeakMap is one test of a byte
-   * scr_cyc_on_dead has just loaded: `blk`'s top bit, which only
-   * scr_cyc_weak_mark ever sets and which no key can carry before
-   * scr_weak_new has installed the hook. */
-  if (__builtin_expect((scr_cyc_hdr(d)->blk & SCR_CYC_WEAKKEY) != 0, 0)) scr_dyn_weak_dead(d);
-#ifdef SCR_DYNCEN_ON
-  scr_dyncen_note_dead(d); /* the refcount's exit from the live set. It runs
-                            * whether the node is then PARKED on a freelist
-                            * or handed to scr_cyc_free: a parked node is
-                            * resident but the program no longer holds it,
-                            * and that distinction is the whole point of a
-                            * lane above scr_json.c rather than below it. */
-#endif
-  /* null, bool, number and undefined own nothing beyond the node: only the other kinds enter the children half. */
-  if ((((1u << SCR_DYN_NULL) | (1u << SCR_DYN_BOOL) | (1u << SCR_DYN_NUM) | (1u << SCR_DYN_UNDEF)) >> (unsigned)d->kind & 1u) == 0 && scr_dyn_release_children(d)) return;
 #ifdef SCR_RC_AUDIT
   scr_live_dyns--;
   scr_dyn_live_by_kind[d->kind]--;
@@ -1144,8 +1134,7 @@ static __attribute__((noinline)) void scr_dyn_release_final_full(ScrDyn *d) {
 /* The teardown of a dyn whose count just reached zero. Out of line and cold so scr_dyn_release below is a leaf the compiler need not give
  * a register-saving prologue: a decrement that does not free (about 4 releases in 5 on the mysql arm) is a handful of instructions.
  *
- * The dead node that is a number, bool, null or undefined (about 9 in 10 on the mysql arm: scr_dyn_release_children is entered by the other
- * kinds only) owns nothing, is never a candidate root and is never a WeakMap key, so its teardown is the park on the freelist and nothing
+ * The dead node that is a number, bool, null or undefined (about 9 in 10 on the mysql arm) owns nothing, is never a candidate root and is never a WeakMap key, so its teardown is the park on the freelist and nothing
  * else. That case is its own function with no call on its path, hence no register-saving prologue; any other node, a full freelist, and the
  * instrumented builds (which must see every death) take scr_dyn_release_final_full, which is the whole teardown in one piece. */
 static __attribute__((noinline)) void scr_dyn_release_final(ScrDyn *d) {
