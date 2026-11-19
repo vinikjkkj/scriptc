@@ -4417,7 +4417,9 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
       const ops = viewElemOpsC(E, t);
       return `scr_dyn_origin_mark_elem${sfx}(${conv}, (void *)${obj}, ${tk}, ${retain}, ${release}, ${ops})`;
     }
-    return `scr_dyn_origin_mark${sfx}(${conv}, (void *)${obj}, ${tk}, ${retain}, ${release})`;
+    // An origin that is a cycle node (a record or class of a traced shape) is flagged at birth, so the collector follows the copy -> origin edge.
+    const traced = (t.kind === "record" && E.tracedShapes.has(`record:${t.shapeId}`)) || (t.kind === "object" && E.tracedShapes.has(`object:${t.className}`));
+    return `scr_dyn_origin_mark${traced ? "_t" : sfx}(${conv}, (void *)${obj}, ${tk}, ${retain}, ${release})`;
   }
 
   /** A class FIELD read as dyn: the converter's copy, marked with the field's

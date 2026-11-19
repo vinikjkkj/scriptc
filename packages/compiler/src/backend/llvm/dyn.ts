@@ -1178,6 +1178,7 @@ export class LlDyn {
     const boxable = canConvertToDyn(srcT, (id) => host.recordsById.get(id), (id) => host.unionsById.get(id));
     const conv = boxable ? this.toDynHelper(srcT) : "";
     host.declare(`declare ptr @scr_dyn_origin_mark(ptr, ptr, ptr, ptr, ptr)`);
+    host.declare(`declare ptr @scr_dyn_origin_mark_t(ptr, ptr, ptr, ptr, ptr)`);
     const offOf = (idx: number): string => `i64 ptrtoint (ptr getelementptr inbounds (%${st}, ptr null, i64 0, i32 ${idx}) to i64)`;
     const offs = to.fields.map((f) => {
       if (classMeta !== undefined) {
@@ -1202,7 +1203,7 @@ export class LlDyn {
         `}`,
         `define internal ptr @${name}_cross(ptr %p) ${FN_ATTRS} {`,
         `  %t = call ptr @${conv}(ptr %p)`,
-        `  %m = call ptr @scr_dyn_origin_mark(ptr %t, ptr %p, ptr ${host.cstr(typeKey(srcT))}, ptr ${retain}, ptr ${release})`,
+        `  %m = call ptr @scr_dyn_origin_mark${(srcT.kind === "record" && host.tracedShapes.has(`record:${srcT.shapeId}`)) || (srcT.kind === "object" && host.tracedShapes.has(`object:${srcT.className}`)) ? "_t" : ""}(ptr %t, ptr %p, ptr ${host.cstr(typeKey(srcT))}, ptr ${retain}, ptr ${release})`,
         `  ret ptr %m`,
         `}`,
       ] : []),
@@ -1241,8 +1242,11 @@ export class LlDyn {
       B.line(`${m} = call ptr @scr_dyn_origin_mark_elem${sfx}(ptr ${conv}, ptr ${obj}, ptr ${host.cstr(typeKey(t))}, ptr ${retain}, ptr ${release}, ptr ${this.viewElemOps(t)})`);
       return m;
     }
-    host.declare(`declare ptr @scr_dyn_origin_mark${sfx}(ptr, ptr, ptr, ptr, ptr)`);
-    B.line(`${m} = call ptr @scr_dyn_origin_mark${sfx}(ptr ${conv}, ptr ${obj}, ptr ${host.cstr(typeKey(t))}, ptr ${retain}, ptr ${release})`);
+    // An origin that is a cycle node (a record or class of a traced shape) is flagged at birth, so the collector follows the copy -> origin edge.
+    const traced = (t.kind === "record" && host.tracedShapes.has(`record:${t.shapeId}`)) || (t.kind === "object" && host.tracedShapes.has(`object:${t.className}`));
+    const fn = `scr_dyn_origin_mark${traced ? "_t" : sfx}`;
+    host.declare(`declare ptr @${fn}(ptr, ptr, ptr, ptr, ptr)`);
+    B.line(`${m} = call ptr @${fn}(ptr ${conv}, ptr ${obj}, ptr ${host.cstr(typeKey(t))}, ptr ${retain}, ptr ${release})`);
     return m;
   }
 

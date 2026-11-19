@@ -6737,6 +6737,10 @@ ScrDyn *scr_dyn_origin_mark_elem(ScrDyn *d, void *obj, const char *tkey, void *(
 const ScrDynElemOps *scr_dyn_origin_elem_ops(const ScrDyn *d);
 ScrDyn *scr_dyn_origin_mark(ScrDyn *d, void *obj, const char *tkey,
                             void *(*retain)(void *), void (*release)(void *));
+/* scr_dyn_origin_mark for a crossing whose origin is a record or class of a TRACED shape (a cycle node): the entry is flagged at birth so the collector follows
+ * the copy -> origin edge. Emitted only where the compiler knows the shape is traced; every other crossing keeps the plain mark. */
+ScrDyn *scr_dyn_origin_mark_t(ScrDyn *d, void *obj, const char *tkey,
+                              void *(*retain)(void *), void (*release)(void *));
 /* The same two marks for an ARRAY crossing whose source local is dead after the call: when the call's operand temp and that local are
  * the only references (rc == 2) the mark and the pin it takes on the source are skipped; any other count marks exactly as above. */
 ScrDyn *scr_dyn_origin_mark_own(ScrDyn *d, void *obj, const char *tkey,

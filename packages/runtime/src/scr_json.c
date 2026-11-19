@@ -639,6 +639,9 @@ __attribute__((constructor)) static void scr_dyn_idle_trim_reg(void) { scr_cyc_i
  * edge is uncollectable (what the whole tree was before this change),
  * whereas a traced edge the teardown also releases is a double free. */
 static void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx);
+static size_t dyn_origin_ntraced;
+static void dyn_origin_trace(ScrDyn *d, ScrTraceVisit visit, void *ctx);
+static void dyn_origin_forget_x(ScrDyn *d, bool from_collector);
 static void scr_dyn_gcfree(void *o);
 /* The ghost weight (scr_runtime.h SCR_PROPS_GHOST) of a property table that is being torn down: one out-of-line copy for the release and the
  * collector's teardown, so neither carries the loop. */
@@ -830,6 +833,7 @@ static void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx) {
     for (size_t i = 0; i < d->v.arr.len; i++) visit(d->v.arr.items[i], ctx);
     /* the named-property table of an exec result / expando'd array */
     visit(scr_dyn_ext(d)->extras, ctx);
+    if (d->static_copy && dyn_origin_ntraced != 0) dyn_origin_trace(d, visit, ctx);
 #ifdef SCR_SYMTAB
     if (scr_dyn_ext(d)->syms != NULL) scr_dyn_sym_trace_table(scr_dyn_ext(d)->syms, visit, ctx);
 #endif
@@ -846,6 +850,7 @@ static void scr_dyn_trace(void *o, ScrTraceVisit visit, void *ctx) {
     /* scriptc's internal-slot table: an ordinary OBJ dyn holding ordinary
      * dyn values, so a cycle through one collects like any other. */
     visit(scr_dyn_ext(d)->slots, ctx);
+    if (d->static_copy && dyn_origin_ntraced != 0) dyn_origin_trace(d, visit, ctx);
 #ifdef SCR_SYMTAB
     if (scr_dyn_ext(d)->syms != NULL) scr_dyn_sym_trace_table(scr_dyn_ext(d)->syms, visit, ctx);
 #endif
@@ -897,7 +902,7 @@ static void scr_dyn_gcfree(void *o) {
    * switch has none, because an array's items are TRACED and there is
    * otherwise nothing for it to do. */
   if (d->static_copy && (d->kind == SCR_DYN_ARR || d->kind == SCR_DYN_OBJ))
-    scr_dyn_origin_forget(d);
+    dyn_origin_forget_x(d, true);
   /* An array's named-property table: the collector has accounted for the
    * extras object (the trace visits it), so the block frees without
    * releasing it — the OBJ arm's own rule, below. */
@@ -3639,12 +3644,26 @@ typedef struct {
   void *obj;        /* the static origin, RETAINED for the copy's lifetime */
   const char *tkey; /* compiler-emitted static literal; never owned */
   void (*release)(void *);
-  const void *elemops; /* the converters of a union-element array's live view (ScrDynElemOps), or NULL */
+  const void *elemops; /* the converters of a union-element array's live view (ScrDynElemOps), or NULL; BIT 0 is the traced flag (dyn_origin_ent_traced), the ops are 8-aligned */
 } ScrDynOriginEnt;
 
 static ScrDynOriginEnt *dyn_origin_tab = NULL;
 static size_t dyn_origin_cap = 0;  /* always a power of two, or 0 */
 static size_t dyn_origin_len = 0;
+/* How many origin entries name a COLLECTOR-VISIBLE origin (see dyn_origin_ent_traced). Zero in a program that never crosses one, which keeps the
+ * collector's trace of a boundary copy to a load and a compare. */
+static size_t dyn_origin_ntraced = 0;
+
+/* The origin edge, seen by the collector. A boundary copy owns a counted reference to the static object it was made from, through this table, and
+ * that edge was invisible: a cycle (instance -> field -> copy -> origin record -> instance) kept the instance's count above its internal
+ * references forever, so it was never collected. An origin that is a cycle node (an ARRAY whose elements are traced, which is allocated
+ * under a cycle header, or a record of a traced shape, which the compiler says so by emitting scr_dyn_origin_mark_t) is therefore a traced child
+ * of the copy, and the collector's teardown of the copy does not release it again (it frees it itself when it is garbage, and the
+ * decrement the trace made is the release when it is not). Any other origin (a leaf array, an untraced record, which are calloc'd or malloc'd
+ * with no header) cannot be part of a cycle and keeps the plain counted reference. */
+#define SCR_ORIGIN_TRACED 1u /* the flag's bit in ScrDynOriginEnt::elemops; stored at the mark, so asking costs no load of the origin */
+static inline bool dyn_origin_ent_traced(const ScrDynOriginEnt *e) { return ((uintptr_t)e->elemops & SCR_ORIGIN_TRACED) != 0; }
+static inline const void *dyn_origin_ent_ops(const ScrDynOriginEnt *e) { return (const void *)((uintptr_t)e->elemops & ~(uintptr_t)SCR_ORIGIN_TRACED); }
 
 static size_t dyn_origin_hash(const ScrDyn *d) {
   /* Fibonacci scramble of the pointer: the low bits of a malloc'd
@@ -3681,6 +3700,7 @@ static void dyn_origin_teardown(void) {
   dyn_origin_tab = NULL;
   dyn_origin_cap = 0;
   dyn_origin_len = 0;
+  dyn_origin_ntraced = 0;
   for (size_t i = 0; i < cap; i++) {
     if (tab[i].d == NULL) continue;
     if (tab[i].release) tab[i].release(tab[i].obj);
@@ -3724,8 +3744,7 @@ static void dyn_mark_fresh_copy(ScrDyn *d) {
   }
 }
 
-ScrDyn *scr_dyn_origin_mark(ScrDyn *d, void *obj, const char *tkey,
-                            void *(*retain)(void *), void (*release)(void *)) {
+static ScrDyn *dyn_origin_mark_x(ScrDyn *d, void *obj, const char *tkey, void *(*retain)(void *), void (*release)(void *), bool rectraced) {
   /* The crossing's whole effect: the existing static-copy mark over the
    * subtree, plus this node's origin. The mark comes FIRST because the
    * table is only ever consulted behind `static_copy`. */
@@ -3755,7 +3774,12 @@ ScrDyn *scr_dyn_origin_mark(ScrDyn *d, void *obj, const char *tkey,
   dyn_origin_tab[i].obj = taken;
   dyn_origin_tab[i].tkey = tkey;
   dyn_origin_tab[i].release = release;
-  dyn_origin_tab[i].elemops = NULL;
+  /* Whether the origin is a cycle node the collector can visit: a record or class of a traced shape (the compiler says so, rectraced), or an array whose
+   * elements are traced (it is allocated under a cycle header; decided here, once). */
+  uintptr_t fl = rectraced || (release == &scr_arr_release_v && ((const ScrArr *)taken)->elem == SCR_ELEM_REF && ((const ScrArr *)taken)->elem_trace != NULL) ? SCR_ORIGIN_TRACED : 0;
+  dyn_origin_tab[i].elemops = (const void *)fl;
+  if (fl) dyn_origin_ntraced++;
+  if (old.d != NULL && dyn_origin_ent_traced(&old)) dyn_origin_ntraced--;
   /* Re-marking a node that already carries an origin: the LAST crossing
    * wins, which is the only one whose static value is still the one this
    * copy was built from. Cannot happen from the emitted crossing (the
@@ -3764,6 +3788,16 @@ ScrDyn *scr_dyn_origin_mark(ScrDyn *d, void *obj, const char *tkey,
    * true. */
   if (old.d != NULL && old.release) old.release(old.obj);
   return d;
+}
+
+ScrDyn *scr_dyn_origin_mark(ScrDyn *d, void *obj, const char *tkey, void *(*retain)(void *), void (*release)(void *)) {
+  return dyn_origin_mark_x(d, obj, tkey, retain, release, false);
+}
+
+/* The same crossing for an origin the compiler knows is a cycle node (a record or class of a traced shape): the entry is born flagged, so the collector
+ * follows the copy -> origin edge and no second table lookup is paid. */
+ScrDyn *scr_dyn_origin_mark_t(ScrDyn *d, void *obj, const char *tkey, void *(*retain)(void *), void (*release)(void *)) {
+  return dyn_origin_mark_x(d, obj, tkey, retain, release, true);
 }
 
 /* The crossing of a typed ARRAY whose source local is dead after this call (the compiler proves a single use). The origin exists so a
@@ -3778,6 +3812,13 @@ static inline bool dyn_origin_sole_array(const ScrDyn *d, void *obj, void (*rele
 ScrDyn *scr_dyn_origin_mark_own(ScrDyn *d, void *obj, const char *tkey, void *(*retain)(void *), void (*release)(void *)) {
   if (dyn_origin_sole_array(d, obj, release)) return d;
   return scr_dyn_origin_mark(d, obj, tkey, retain, release);
+}
+
+/* The trace of a boundary copy's origin edge (scr_dyn_trace). */
+static void dyn_origin_trace(ScrDyn *d, ScrTraceVisit visit, void *ctx) {
+  if (dyn_origin_cap == 0) return;
+  const ScrDynOriginEnt *e = &dyn_origin_tab[dyn_origin_slot(d)];
+  if (e->d == d && dyn_origin_ent_traced(e)) visit(e->obj, ctx);
 }
 
 void *scr_dyn_origin_take(const ScrDyn *d, const char *tkey) {
@@ -3839,7 +3880,9 @@ void *scr_dyn_origin_peek(const ScrDyn *d, int *is_array) {
   return dyn_origin_tab[i].obj;
 }
 
-void scr_dyn_origin_forget(ScrDyn *d) {
+/* from_collector: the collector's teardown of a white copy. A traced origin was visited by the trace, so it is accounted for (freed by the collector when
+ * it is garbage too, released by the trace's own decrement when it is not): only the table entry goes, the origin is not released a second time. */
+static void dyn_origin_forget_x(ScrDyn *d, bool from_collector) {
   /* Called from BOTH teardowns (scr_dyn_release's switch and the
    * collector's scr_dyn_gcfree), behind `static_copy`. Back-shift
    * deletion, so the probe path stays hole-free and no tombstone kind is
@@ -3860,6 +3903,8 @@ void scr_dyn_origin_forget(ScrDyn *d) {
   size_t i = dyn_origin_slot(d);
   if (dyn_origin_tab[i].d == NULL) return;
   ScrDynOriginEnt gone = dyn_origin_tab[i];
+  bool traced = dyn_origin_ent_traced(&gone);
+  if (traced) dyn_origin_ntraced--;
   dyn_origin_tab[i].d = NULL;
   dyn_origin_len--;
   size_t j = i;
@@ -3877,8 +3922,10 @@ void scr_dyn_origin_forget(ScrDyn *d) {
     }
   }
   /* The table is whole again; now the origin may go, re-entrantly or not. */
-  if (gone.release) gone.release(gone.obj);
+  if (gone.release && !(traced && from_collector)) gone.release(gone.obj);
 }
+
+void scr_dyn_origin_forget(ScrDyn *d) { dyn_origin_forget_x(d, false); }
 
 /* The live-view unit (scr_dyn_view.c) installs its operations here; NULL in a program that never links it. */
 const ScrDynViewOps *scr_dyn_view_ops = NULL;
@@ -17590,7 +17637,7 @@ void scr_rec_view_promote(ScrDyn **slot, ScrDyn *obj) {
 const ScrDynElemOps *scr_dyn_origin_elem_ops(const ScrDyn *d) {
   if (d == NULL || !d->static_copy || dyn_origin_cap == 0) return NULL;
   ScrDynOriginEnt *e = &dyn_origin_tab[dyn_origin_slot(d)];
-  return e->d == d ? (const ScrDynElemOps *)e->elemops : NULL;
+  return e->d == d ? (const ScrDynElemOps *)dyn_origin_ent_ops(e) : NULL;
 }
 
 ScrDyn *scr_dyn_origin_mark_elem_own(ScrDyn *d, void *obj, const char *tkey, void *(*retain)(void *),
@@ -17604,7 +17651,7 @@ ScrDyn *scr_dyn_origin_mark_elem(ScrDyn *d, void *obj, const char *tkey, void *(
   ScrDyn *r = scr_dyn_origin_mark(d, obj, tkey, retain, release);
   if (ops != NULL && r != NULL && r->static_copy && dyn_origin_cap != 0) {
     ScrDynOriginEnt *e = &dyn_origin_tab[dyn_origin_slot(r)];
-    if (e->d == r) e->elemops = ops;
+    if (e->d == r) e->elemops = (const void *)((uintptr_t)ops | ((uintptr_t)e->elemops & SCR_ORIGIN_TRACED));
   }
   return r;
 }
