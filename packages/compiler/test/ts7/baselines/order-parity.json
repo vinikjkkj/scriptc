@@ -17174,6 +17174,42 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25870-float64-kernels-over-short-and-long-arrays-read-and-write-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25870-float64-kernels-over-short-and-long-arrays-read-and-write-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25871-float64-kernel-forged-nan-payloads-keep-node-bits.ts": {
+   "order": [
+    "<repo>/tests/corpus/25871-float64-kernel-forged-nan-payloads-keep-node-bits.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25872-math-floor-trunc-ceil-answer-node-bits-at-the-edges-of-the-int64-window.ts": {
+   "order": [
+    "<repo>/tests/corpus/25872-math-floor-trunc-ceil-answer-node-bits-at-the-edges-of-the-int64-window.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25873-float64-kernel-reads-before-a-write-see-the-value-the-write-replaces.ts": {
+   "order": [
+    "<repo>/tests/corpus/25873-float64-kernel-reads-before-a-write-see-the-value-the-write-replaces.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25874-float64-elements-with-forged-nan-payloads-as-direct-operands-keep-node-bits.ts": {
+   "order": [
+    "<repo>/tests/corpus/25874-float64-elements-with-forged-nan-payloads-as-direct-operands-keep-node-bits.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25875-float64-limb-multiply-with-a-carry-chain-keeps-node-bits.ts": {
+   "order": [
+    "<repo>/tests/corpus/25875-float64-limb-multiply-with-a-carry-chain-keeps-node-bits.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2588-array-entries-chains.ts": {
    "order": [
     "<repo>/tests/corpus/2588-array-entries-chains.ts"
