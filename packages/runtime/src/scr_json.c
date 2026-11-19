@@ -1171,7 +1171,7 @@ __attribute__((noinline)) void scr_dyn_release(ScrDyn *d) {
  * a memcmp call each) per lookup, per `in`, and per duplicate check of every store into it (messaging-redis: ~64 M memcmp calls from one
  * walk, ~7% of the run's instructions).
  *
- * From SCR_OBJ_IDX_MIN (64) members up an object carries an open-addressing HASH of positions in its ext (`idx`). The entries array stays the one
+ * From SCR_OBJ_IDX_MIN (32) members up an object carries an open-addressing HASH of positions in its ext (`idx`). The entries array stays the one
  * source of truth for order, ownership and enumeration -- the index is only "which position holds this key" and owns nothing, so no
  * enumeration, release, trace or copy path knows it exists. It is exact by construction:
  *   - a lookup answers the entry the scan would have answered (keys are unique in a table, a hit is verified by the same key compare);
@@ -1180,7 +1180,7 @@ __attribute__((noinline)) void scr_dyn_release(ScrDyn *d) {
  *   - positions are stored +1 (0 = empty), as 16-bit slots below 65,535 members and 32-bit above.
  * -DSCR_OBJ_NOIDX restores the pure scan (the A/B control); -DSCR_OBJ_PLANT_BUG=3 makes a hit answer the NEXT entry (the planted defect). */
 #ifndef SCR_OBJ_IDX_MIN
-#define SCR_OBJ_IDX_MIN 64
+#define SCR_OBJ_IDX_MIN 32
 #endif
 typedef struct ScrDynObjIdx {
   uint32_t cap;  /* slots, a power of two >= 1.5 * used */

@@ -1,4 +1,4 @@
-/* The member indexes behind a dyn object's key lookup and a class's member lookup (scr_json.c): from 64 members a dyn object answers
+/* The member indexes behind a dyn object's key lookup and a class's member lookup (scr_json.c): from 32 members a dyn object answers
  * through a hash of positions, from 16 members a class table does, and the class registry walk behind a hierarchy instance is memoised
  * per preorder position. Rows 25850 (a large dictionary: reads, `in`, overwrite, delete, re-add, accessors, past 65,535 members) and
  * 25851 (a class and its subclasses with many members, called by computed name through any) must match Node on both backends, plain and
