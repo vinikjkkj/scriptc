@@ -37,6 +37,10 @@ on:
         description: "true: also run the same bench entry on Node (tsx) as the output-parity reference and the Node RSS baseline"
         required: false
         default: "true"
+      strace:
+        description: "1: one extra run per arm (and Node) under strace -c -f (syscall counts and time) and one under strace -f -tt -T on the wait/poll/socket-option syscalls"
+        required: false
+        default: "0"
       perf:
         description: "1: one extra run per arm (and Node) under perf record (time sampling), folded stacks and top-function reports go to the artifacts"
         required: false
@@ -187,6 +191,10 @@ jobs:
       - name: Tools (valgrind for the Ir and massif runs)
         if: ${{ inputs.ir != '0' || inputs.massif != '0' }}
         run: sudo apt-get update -q && sudo apt-get install -y -q valgrind
+      - name: Tools (strace)
+        if: ${{ inputs.strace != '0' }}
+        continue-on-error: true
+        run: sudo apt-get update -q && sudo apt-get install -y -q strace && strace -V | head -1
       - name: Tools (perf for the time-sampling runs)
         if: ${{ inputs.perf != '0' }}
         continue-on-error: true
@@ -220,6 +228,7 @@ jobs:
           NODE_REF: ${{ inputs.node_ref }}
           IR: ${{ inputs.ir }}
           PERF: ${{ inputs.perf }}
+          STRACE: ${{ inputs.strace }}
           MASSIF: ${{ inputs.massif }}
           LAYOUT: ${{ inputs.layout }}
           EXTRA_ENV: ${{ inputs.extra_env }}

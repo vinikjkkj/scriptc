@@ -9,12 +9,12 @@ import { readFileSync, writeFileSync, mkdirSync, statSync, copyFileSync } from '
 import { createHash } from 'node:crypto'
 const W = process.env.BENCH_WORK, ROOT = process.env.BENCH_DIR, NODE = process.env.BENCH_NODE || 'node', TREE = process.env.TREE
 const args = process.argv.slice(2)
-let store = 'memory', out = 'out', reps = 3, withNode = false, smaps = false, irMsgs = 0, massifMsgs = 0, perfRun = false
+let store = 'memory', out = 'out', reps = 3, withNode = false, smaps = false, irMsgs = 0, massifMsgs = 0, perfRun = false, straceRun = false
 const arms = []
 for (let i = 0; i < args.length; i++) {
   const a = args[i]
   if (a === '--store') store = args[++i]; else if (a === '--out') out = args[++i]; else if (a === '--reps') reps = Number(args[++i])
-  else if (a === '--node') withNode = true; else if (a === '--smaps') smaps = true; else if (a === '--ir') irMsgs = Number(args[++i]); else if (a === '--massif') massifMsgs = Number(args[++i]); else if (a === '--perf') perfRun = true
+  else if (a === '--node') withNode = true; else if (a === '--smaps') smaps = true; else if (a === '--ir') irMsgs = Number(args[++i]); else if (a === '--massif') massifMsgs = Number(args[++i]); else if (a === '--perf') perfRun = true; else if (a === '--strace') straceRun = true
   else arms.push(a)
 }
 mkdirSync(out, { recursive: true })
@@ -93,6 +93,23 @@ if (perfRun) {
   }
   for (const a of arms) prof(a.split(':')[0], [bin(a)], true)
   if (withNode) prof('node', [NODE, '--perf-basic-prof', '--interpreted-frames-native-stack', '--import', 'tsx', entry], false)
+}
+
+// --strace: per arm and on Node, one run under `strace -f -c` (syscall counts and kernel time per syscall) and one under `strace -f -tt -T` restricted to the wait/poll/timer/socket-option
+// syscalls (the off-CPU view: how long each epoll_wait/poll blocked, with which timeout, what it returned, who set TCP_NODELAY). Output: result/strace/<label>.{c,t}.txt(.gz).
+if (straceRun) {
+  mkdirSync(`${out}/strace`, { recursive: true })
+  const st = (label, cmd) => {
+    resetdb()
+    const rc = spawnSync('strace', ['-f', '-c', '-o', `${out}/strace/${label}.c.txt`, '--', ...cmd], { cwd: TREE, env: envFor(), maxBuffer: 1 << 28, timeout: 3600e3 })
+    writeFileSync(`${out}/strace/${label}.c.status`, String(rc.status))
+    resetdb()
+    const tr = spawnSync('strace', ['-f', '-tt', '-T', '-e', 'trace=epoll_wait,epoll_pwait,epoll_pwait2,epoll_ctl,ppoll,poll,select,pselect6,nanosleep,clock_nanosleep,setsockopt,connect,accept4,shutdown,eventfd2,timerfd_settime,futex', '-o', `${out}/strace/${label}.t.txt`, '--', ...cmd], { cwd: TREE, env: envFor(), maxBuffer: 1 << 28, timeout: 3600e3 })
+    writeFileSync(`${out}/strace/${label}.t.status`, String(tr.status))
+    spawnSync('gzip', ['-9', '-f', `${out}/strace/${label}.t.txt`])
+  }
+  for (const a of arms) st(a.split(':')[0], [bin(a)])
+  if (withNode) st('node', [NODE, '--import', 'tsx', entry])
 }
 if (massifMsgs > 0) for (const a of arms) {
   const label = a.split(':')[0]; resetdb()
