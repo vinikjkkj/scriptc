@@ -251,7 +251,14 @@ function computePlan(fn: IrFunction): CanonPlan {
   // everywhere except an arithmetic/compare/bitwise operand (the parent's own canon, or its comparison, absorbs the payload) and the value
   // of a typed-array write (an element-to-element copy keeps its bytes).
   const canonLoads = new Set<object>();
-  for (const l of loads) if (l.ctx.k !== "operand" && l.ctx.k !== "store") canonLoads.add(l.node);
+  // A read that defines a local kept INTERNAL above needs no canon either: every read of such a local is a place blind to NaN bits (the fixed
+  // point above demoted the local otherwise), and what leaves those places is canonical again (an arithmetic parent canonicalises its own
+  // result unless it is elided, which needs its consumer blind in turn; a typed-array store sets `canonStores`).
+  for (const l of loads) {
+    if (l.ctx.k === "operand" || l.ctx.k === "store") continue;
+    if (l.ctx.k === "assign" && M.has(l.ctx.local)) continue;
+    canonLoads.add(l.node);
+  }
   // An element read of an index that names no element is `undefined` in JS. Where the value is only an arithmetic/compare/bitwise operand or the
   // value of a typed-array write, NaN says the same thing (ToNumber(undefined) is NaN); anywhere else (a call argument, a return, a field or slot
   // store, `===`, `??`, `typeof`, a string conversion, a local with such a use) the read answers the NaN-marked undefined, which every one of those
