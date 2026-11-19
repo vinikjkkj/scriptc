@@ -17114,6 +17114,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25805-reflect-get-own-property-descriptor-and-get-own-property-descriptors-over-dyn-values.ts": {
+   "order": [
+    "<repo>/tests/corpus/25805-reflect-get-own-property-descriptor-and-get-own-property-descriptors-over-dyn-values.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2581-jsval-routed-calls.js": {
    "order": [
     "<repo>/tests/corpus/2581-jsval-routed-calls.js"
