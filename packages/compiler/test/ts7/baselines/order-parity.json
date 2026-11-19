@@ -17222,6 +17222,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25896-default-sort-order-of-strings-puts-a-supplementary-character-before-a-private-use-one.ts": {
+   "order": [
+    "<repo>/tests/corpus/25896-default-sort-order-of-strings-puts-a-supplementary-character-before-a-private-use-one.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25897-a-string-accumulator-keeps-an-exact-utf16-length-through-copying-appends-of-mixed-width-chunks.ts": {
+   "order": [
+    "<repo>/tests/corpus/25897-a-string-accumulator-keeps-an-exact-utf16-length-through-copying-appends-of-mixed-width-chunks.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2590-object-create-dynamic.js": {
    "order": [
     "<repo>/tests/corpus/2590-object-create-dynamic.js"
