@@ -17131,6 +17131,7 @@ typedef struct ScrRecSrcEnt {
   const ScrRecSrcMap *map;
   void *rec;
   int state; /* 0 empty, 1 live, 2 deleted */
+  int dyn_held; /* check mode: this entry holds an extra reference on its dynamic object */
 } ScrRecSrcEnt;
 static ScrRecSrcEnt *recsrc_tab = NULL;
 static size_t recsrc_cap = 0, recsrc_used = 0;
@@ -17171,6 +17172,7 @@ void scr_recsrc_register(void *rec, void *src, const ScrRecSrcMap *map) {
   recsrc_tab[i].src = src;
   recsrc_tab[i].map = map;
   recsrc_tab[i].rec = rec;
+  recsrc_tab[i].dyn_held = 0;
   recsrc_tab[i].state = 1;
 }
 static void recsrc_unregister(void *src, const ScrRecSrcMap *map) {
@@ -17311,12 +17313,48 @@ ScrDyn *scr_dyn_origin_mark_elem(ScrDyn *d, void *obj, const char *tkey, void *(
  * `rec` (+1): the first one of its (view, shape) is registered and answered; a later one has its fresh contents exchanged into the
  * registered record (the sync of its snapshot, as scr_rec_swap_body does for a read) and is released, and the registered record is
  * answered (+1). */
-void *scr_dynview_canon(void *rec, const void *view, const void *key, size_t size, void *(*retain)(void *), void (*release)(void *)) {
+/* CHECK MODE (SCR_DYNVIEW_CHECK=1, test only): the registry is verified instead of trusted. Each registered entry holds one extra reference
+ * on its dynamic object, so the object's address cannot be reused while the entry stands (a stale entry can never be hit by another node's
+ * lookup); a hit must name a record whose view slot is the looked-up object; and at exit every record has died, so an entry still standing
+ * names a record that died without scr_dynview_unreg (a missed release hook): that aborts with a message. */
+static int dynview_check = -1;
+static size_t dynview_live = 0;
+static void dynview_exit_check(void) {
+  size_t left = 0;
+  for (size_t i = 0; i < recsrc_cap; i++) {
+    ScrRecSrcEnt *e = &recsrc_tab[i];
+    if (e->state == 1 && e->dyn_held) left++;
+  }
+  if (left != 0) {
+    fprintf(stderr, "scr_dynview: %zu registry entr%s outlived the record%s (a release hook missed)\n", left, left == 1 ? "y" : "ies", left == 1 ? "" : "s");
+    fflush(stderr);
+    _Exit(70);
+  }
+}
+void *scr_dynview_canon(void *rec, const void *view, const void *key, size_t size, size_t view_off, void *(*retain)(void *), void (*release)(void *)) {
   if (rec == NULL || view == NULL) return rec;
+  if (__builtin_expect(dynview_check < 0, 0)) {
+    const char *e = getenv("SCR_DYNVIEW_CHECK");
+    dynview_check = (e != NULL && e[0] == '1') ? 1 : 0;
+    if (dynview_check) atexit(dynview_exit_check);
+  }
   void *f = scr_recsrc_find((void *)view, (const ScrRecSrcMap *)key);
   if (f == NULL) {
     scr_recsrc_register(rec, (void *)view, (const ScrRecSrcMap *)key);
+    if (dynview_check) {
+      scr_dyn_retain((ScrDyn *)view);
+      for (size_t i = recsrc_hash(view, (const ScrRecSrcMap *)key, recsrc_cap), n = 0; n < recsrc_cap; i = (i + 1) & (recsrc_cap - 1), n++) {
+        ScrRecSrcEnt *e = &recsrc_tab[i];
+        if (e->state == 1 && e->src == view && e->map == (const ScrRecSrcMap *)key) { e->dyn_held = 1; break; }
+      }
+      dynview_live++;
+    }
     return rec;
+  }
+  if (dynview_check && *(void *const *)((const unsigned char *)f + view_off) != view) {
+    fprintf(stderr, "scr_dynview: a registry hit names a record whose view is another object (stale entry)\n");
+    fflush(stderr);
+    _Exit(70);
   }
   if (f != rec) {
     scr_rec_swap_body(f, rec, size);
@@ -17330,7 +17368,10 @@ void scr_dynview_unreg(void *rec, const void *view, const void *key) {
     ScrRecSrcEnt *e = &recsrc_tab[i];
     if (e->state == 0) return;
     if (e->state == 1 && e->src == view && e->map == (const ScrRecSrcMap *)key) {
-      if (e->rec == rec) e->state = 2;
+      if (e->rec == rec) {
+        e->state = 2;
+        if (e->dyn_held) { e->dyn_held = 0; dynview_live--; scr_dyn_release((ScrDyn *)view); }
+      }
       return;
     }
   }

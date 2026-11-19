@@ -1885,11 +1885,11 @@ export class LlDyn {
               B.line(`store ptr ${ts}, ptr ${tsp}`);
             }
             if (shape.canon === true) {
-              host.declare(`declare ptr @scr_dynview_canon(ptr, ptr, ptr, i64, ptr, ptr)`);
+              host.declare(`declare ptr @scr_dynview_canon(ptr, ptr, ptr, i64, i64, ptr, ptr)`);
               const lcv = B.tmp();
               const lvv = B.tmp();
               B.line(`${lvv} = load ptr, ptr ${vlp}`);
-              B.line(`${lcv} = call ptr @scr_dynview_canon(ptr %rl, ptr ${lvv}, ptr @${mangleRecordRelease(t.shapeId)}, i64 ptrtoint (ptr getelementptr (%${struct}, ptr null, i32 1) to i64), ptr @${mangleRecordRetain(t.shapeId)}, ptr @${mangleRecordRelease(t.shapeId)})`);
+              B.line(`${lcv} = call ptr @scr_dynview_canon(ptr %rl, ptr ${lvv}, ptr @${mangleRecordRelease(t.shapeId)}, i64 ptrtoint (ptr getelementptr (%${struct}, ptr null, i32 1) to i64), i64 ptrtoint (ptr getelementptr (%${struct}, ptr null, i32 0, i32 ${viewSlotIndex(shape)}) to i64), ptr @${mangleRecordRetain(t.shapeId)}, ptr @${mangleRecordRelease(t.shapeId)})`);
               B.terminate(`ret ptr ${lcv}`);
             } else {
               B.terminate(`ret ptr %rl`);
@@ -2541,13 +2541,13 @@ export class LlDyn {
         }
         if (shape.canon === true) {
           // DYN VIEW IDENTITY: one record per (object, shape) - the C twin's scr_dynview_canon return.
-          host.declare(`declare ptr @scr_dynview_canon(ptr, ptr, ptr, i64, ptr, ptr)`);
+          host.declare(`declare ptr @scr_dynview_canon(ptr, ptr, ptr, i64, i64, ptr, ptr)`);
           const cvp = B.tmp();
           const cvv = B.tmp();
           const cvr = B.tmp();
           B.line(`${cvp} = getelementptr inbounds %${struct}, ptr %r0, i64 0, i32 ${viewSlotIndex(shape)} ; <view>`);
           B.line(`${cvv} = load ptr, ptr ${cvp}`);
-          B.line(`${cvr} = call ptr @scr_dynview_canon(ptr %r0, ptr ${cvv}, ptr @${mangleRecordRelease(t.shapeId)}, i64 ptrtoint (ptr getelementptr (%${struct}, ptr null, i32 1) to i64), ptr @${mangleRecordRetain(t.shapeId)}, ptr @${mangleRecordRelease(t.shapeId)})`);
+          B.line(`${cvr} = call ptr @scr_dynview_canon(ptr %r0, ptr ${cvv}, ptr @${mangleRecordRelease(t.shapeId)}, i64 ptrtoint (ptr getelementptr (%${struct}, ptr null, i32 1) to i64), i64 ptrtoint (ptr getelementptr (%${struct}, ptr null, i32 0, i32 ${viewSlotIndex(shape)}) to i64), ptr @${mangleRecordRetain(t.shapeId)}, ptr @${mangleRecordRelease(t.shapeId)})`);
           B.terminate(`ret ptr ${cvr}`);
         } else {
           B.terminate(`ret ptr %r0`);
