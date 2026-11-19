@@ -29621,6 +29621,12 @@
     "<repo>/tests/corpus/25842-identity-compared-through-find-object-is-seeded-sets-and-union-keys-follows-node.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25843-view-records-keyed-freed-and-reallocated-in-a-loop-never-meet-a-stale-entry.ts": {
+   "order": [
+    "<repo>/tests/corpus/25843-view-records-keyed-freed-and-reallocated-in-a-loop-never-meet-a-stale-entry.ts"
+   ],
+   "diags": []
   }
  }
 }
