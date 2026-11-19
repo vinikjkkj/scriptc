@@ -32,7 +32,7 @@
  *   ScrDynPath { parent, key, index } — the %ScrDynPath type. */
 import type { IrBytesElem, IrClassDef, IrFunction, IrRecordShape, IrType } from "../../ir/nodes.js";
 import { EMITTER_MIXIN_FIELD_NAME, RUNTIME_EMITTER_CLASS, accessorKeyOrderOf, accessorSlotProp, shapeHasAccessorSlots, VOID, arrayTypeHasLiveView, bytesAliasOnExtract, canConvertToDyn, canDynCheckTo, dynErrorClassKind, isDynErrorClass } from "../../ir/nodes.js";
-import { armDiscrimLits, dynNeverArm, dynNeverIn, canAdaptDynFuncTo, dynRestApplyable, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey } from "../../ir/nodes.js";
+import { armDiscrimLits, dynNeverArm, dynNeverIn, canAdaptDynFuncTo, dynRestApplyable, canBoxFuncIntoDyn, dynCheckArmOrder, internalSlotFields, isUndefinedArmedUnion, slotStorageKey, unionHasDiscrim, DYN_BYTES_KINDS, DYN_HANDLE_KINDS, isRefCounted, strandedFuncReason, typeKey, primitiveCtorBoxOf } from "../../ir/nodes.js";
 import { EVAL_STATIC_CLASSES } from "../../ir/nodes.js";
 import { isIntegerKeyName } from "../../ir/nodes.js";
 import { nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit as maskKeyBit } from "../../ir/nodes.js";
@@ -6630,9 +6630,21 @@ export class LlDyn {
     host.declare(`declare ptr @scr_closure_retain_v(ptr)`);
     host.declare(`declare ptr @scr_dyn_new_func_src(ptr, ptr, i32, ptr, ptr, ptr)`);
     const sigLit = host.cstr(key);
+    // The program's `String` / `Number` / `Boolean` taken as a value boxes as the runtime's one builtin function box (ir/nodes.ts primitiveCtorBoxOf).
+    const prim = primitiveCtorBoxOf(t, host.fnByName);
+    if (prim.length > 0) host.declare(`declare ptr @scr_dyn_builtin_ctor_value(double)`);
+    for (const p of prim) host.noteFnValue(p.fnName);
     this.defs.push(
       `define internal ptr @${name}(ptr %v, ptr %fname, ptr %fsrc) ${FN_ATTRS} { ; box ${key} into dyn`,
       `entry:`,
+      ...prim.flatMap((p, i) => [
+        `  %isb${i} = icmp eq ptr %v, @${mangleFnClosure(p.fnName)}`,
+        `  br i1 %isb${i}, label %bi${i}, label %go${i}`,
+        `bi${i}:`,
+        `  %bb${i} = call ptr @scr_dyn_builtin_ctor_value(double ${f64Lit(p.which)})`,
+        `  ret ptr %bb${i}`,
+        `go${i}:`,
+      ]),
       `  %c = call ptr @scr_closure_retain_v(ptr %v)`,
       `  %r = call ptr @scr_dyn_new_func_src(ptr %c, ptr @${thunk}, i32 ${t.params.length}, ptr ${sigLit}, ptr %fname, ptr %fsrc)`,
       `  ret ptr %r`,

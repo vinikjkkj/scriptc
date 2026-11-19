@@ -730,6 +730,26 @@ export function irFunctionValueCode(fn: IrFunction): number {
   return (fn.async === true ? 1 : 0) | (fn.generator !== undefined ? 2 : 0);
 }
 
+/** The program's interned coercion closures of a global primitive constructor taken as a VALUE (`String`, `Number`, `Boolean`) whose signature is the
+ * func type `t`, each with the runtime's builtin index (scr_dyn_builtin_ctor_value: 3 String, 4 Number, 5 Boolean). Two families exist per program:
+ * `%builtin.<Name>` (lower-exprs primitiveCtorClosure, `(string) => primitive`) and `%builtin.dyn.<Name>` (lower-fnvalue dynBuiltinFnValueOf, over a
+ * dyn operand). Boxing one of those closures into dyn answers the runtime's ONE builtin function box instead of a second function value, so
+ * `v.constructor === String` and a Map keyed by the constructor are identity like Node (both emitters' dyn function box helper). Empty for any other
+ * signature or a program that never took the constructor as a value. */
+export function primitiveCtorBoxOf(t: IrType & { kind: "func" }, fnByName: ReadonlyMap<string, IrFunction>): { fnName: string; which: number }[] {
+  const key = typeKey(t);
+  const out: { fnName: string; which: number }[] = [];
+  for (const prefix of ["%builtin.", "%builtin.dyn."]) {
+    for (const [name, which] of [["String", 3], ["Number", 4], ["Boolean", 5]] as const) {
+      const fnName = `${prefix}${name}`;
+      const fn = fnByName.get(fnName);
+      if (fn === undefined || fn.captures !== undefined) continue;
+      if (typeKey({ kind: "func", params: fn.params.map((p) => p.type), ret: fn.returnType }) === key) out.push({ fnName, which });
+    }
+  }
+  return out;
+}
+
 /** The name-table row code of a function: its inspect kind code, plus the row-only wrapper bits (SCR_FNK_WRAP_MASK in scr_runtime.h) for a lowerer
  * adapter body (`%fn.adapt.N.impl`, one function value in capture 0: 01) and a bound-function body (`%bindthis.N`: 10 with the target in capture 0, 11
  * when a receiver sits in capture 0 and the target in capture 1), whose closure's name is derived from the wrapped closure's at run time. */
@@ -13576,8 +13596,14 @@ export function moduleUsesDynProto(mod: IrModule): boolean {
     for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
   };
   visit(mod);
-  return found;
+  if (found) return true;
+  // A program that takes the global String / Number / Boolean as a value boxes it as the runtime's builtin function box
+  // (primitiveCtorBoxOf): the dyn function box helper calls scr_dyn_builtin_ctor_value.
+  return mod.functions.some((f) => PRIMITIVE_CTOR_FN_NAMES.has(f.name));
 }
+const PRIMITIVE_CTOR_FN_NAMES: ReadonlySet<string> = new Set(
+  ["%builtin.", "%builtin.dyn."].flatMap((p) => ["String", "Number", "Boolean"].map((n) => p + n)),
+);
 
 /** The program formats a Date as text (scr_date_fmt.c plus the generated ICU
  * zone-name table, ~35 KB): a date.toString/date.format libCall, or a Date
