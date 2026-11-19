@@ -38,6 +38,8 @@
 #include <string.h>
 
 static void isl_tpl_teardown(void); /* island1: the marshalling shape templates, defined with isl_from_dyn */
+static void isl_walk_capture(void);
+static void isl_walk_release(void);
 
 #include "quickjs.h"
 
@@ -524,6 +526,7 @@ static void isl_teardown_at_exit(void) {
   isl_syms_teardown();
 #endif
   for (int i = 0; i < ISL_H_COUNT; i++) JS_FreeValue(isl_ctx, isl_helpers[i]);
+  isl_walk_release();
   isl_tpl_teardown();
   isl_free_boot();
   JS_FreeContext(isl_ctx);
@@ -549,6 +552,45 @@ static void isl_teardown_at_exit(void) {
 #endif
 }
 
+/* The host walk of a plain object's own keys / values / entries (isl_dynjs_obj_walk): the same result as the JS helper's Object.keys /
+ * values / entries, without the engine array, the call or the per-element conversions through it. Taken only for an ordinary object with
+ * data properties only (nothing can run while it is read, so the walk is the helper's) and only while the global Object and its three
+ * statics are the builtins captured before any program text ran (the helper looks them up when it runs). */
+static JSValue isl_walk_object, isl_walk_fns[3];
+static bool isl_walk_ok;
+static void isl_walk_capture(void) {
+  static const char *const names[3] = {"keys", "values", "entries"};
+  JSValue g = JS_GetGlobalObject(isl_ctx);
+  isl_walk_object = JS_GetPropertyStr(isl_ctx, g, "Object");
+  JS_FreeValue(isl_ctx, g);
+  isl_walk_ok = JS_IsObject(isl_walk_object);
+  for (int i = 0; i < 3; i++) {
+    isl_walk_fns[i] = isl_walk_ok ? JS_GetPropertyStr(isl_ctx, isl_walk_object, names[i]) : JS_UNDEFINED;
+    if (!JS_IsFunction(isl_ctx, isl_walk_fns[i])) isl_walk_ok = false;
+  }
+}
+static void isl_walk_release(void) {
+  JS_FreeValue(isl_ctx, isl_walk_object);
+  for (int i = 0; i < 3; i++) JS_FreeValue(isl_ctx, isl_walk_fns[i]);
+  isl_walk_object = JS_UNDEFINED;
+  for (int i = 0; i < 3; i++) isl_walk_fns[i] = JS_UNDEFINED;
+  isl_walk_ok = false;
+}
+static bool isl_walk_builtins_intact(int mode) {
+  JSValue g = JS_GetGlobalObject(isl_ctx);
+  JSValue o = JS_GetPropertyStr(isl_ctx, g, "Object");
+  JS_FreeValue(isl_ctx, g);
+  bool ok = JS_IsObject(o) && JS_VALUE_GET_PTR(o) == JS_VALUE_GET_PTR(isl_walk_object);
+  if (ok) {
+    static const char *const names[3] = {"keys", "values", "entries"};
+    JSValue f = JS_GetPropertyStr(isl_ctx, o, names[mode]);
+    ok = JS_IsObject(f) && JS_VALUE_GET_PTR(f) == JS_VALUE_GET_PTR(isl_walk_fns[mode]);
+    JS_FreeValue(isl_ctx, f);
+  }
+  JS_FreeValue(isl_ctx, o);
+  return ok;
+}
+
 static void isl_init(void) {
   isl_rt = JS_NewRuntime2(&isl_mf, NULL);
   if (!isl_rt) {
@@ -571,6 +613,7 @@ static void isl_init(void) {
     isl_helpers[i] = JS_GetPropertyUint32(isl_ctx, arr, i); /* owned */
   }
   JS_FreeValue(isl_ctx, arr);
+  isl_walk_capture();
   /* Web-platform globals (scr_web.c): BEFORE the module system boots —
    * embedded module evaluation may subclass TransformStream (eventsource-
    * parser does, at eval time). The fetch glue (installed by main in
@@ -1806,6 +1849,32 @@ static bool isl_dynjs_is_nullish(ScrJsval *cell) {
 
 static ScrDyn *isl_dynjs_obj_walk(ScrJsval *cell, int mode) {
   isl_entry();
+  if (isl_walk_ok && mode >= 0 && mode <= 2 && JS_IsPlainDataObject(isl_ctx, cell->v) && isl_walk_builtins_intact(mode)) {
+    JSPropertyEnum *tab = NULL;
+    uint32_t n = 0;
+    if (JS_GetOwnPropertyNames(isl_ctx, &tab, &n, cell->v, JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) == 0) {
+      ScrDyn *out = scr_dyn_new_arr();
+      for (uint32_t i = 0; i < n; i++) {
+        JSValue k = mode == 1 ? JS_UNDEFINED : JS_AtomToString(isl_ctx, tab[i].atom);
+        JSValue v = mode == 0 ? JS_UNDEFINED : JS_GetProperty(isl_ctx, cell->v, tab[i].atom);
+        if (mode == 0) {
+          scr_dyn_arr_push(out, isl_dyn_from_value(k));
+        } else if (mode == 1) {
+          scr_dyn_arr_push(out, isl_dyn_from_value(v));
+        } else {
+          ScrDyn *pair = scr_dyn_new_arr();
+          scr_dyn_arr_push(pair, isl_dyn_from_value(k));
+          scr_dyn_arr_push(pair, isl_dyn_from_value(v));
+          scr_dyn_arr_push(out, pair);
+        }
+        JS_FreeValue(isl_ctx, k);
+        JS_FreeValue(isl_ctx, v);
+      }
+      JS_FreePropertyEnum(isl_ctx, tab, n);
+      return out;
+    }
+    JS_FreeValue(isl_ctx, JS_GetException(isl_ctx)); /* out of memory in the name table: the helper path below reports it */
+  }
   JSValue m = JS_NewInt32(isl_ctx, mode);
   JSValue argv[2] = {cell->v, m};
   JSValue r = JS_Call(isl_ctx, isl_helpers[ISL_H_OBJWALK], JS_UNDEFINED, 2, argv);

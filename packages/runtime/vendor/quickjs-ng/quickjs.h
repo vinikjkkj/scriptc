@@ -934,6 +934,7 @@ JS_EXTERN JSValue JS_NewObject(JSContext *ctx);
 JS_EXTERN JSValue JS_NewObjectLikeTemplate(JSContext *ctx, JSValueConst tmpl, int count, const JSValue *values);
 JS_EXTERN JSValue JS_GetObjectPrototype(JSContext *ctx);
 JS_EXTERN void JS_ObjectPrototypeFingerprint(JSContext *ctx, uintptr_t *shape, int *count, int *deleted);
+JS_EXTERN int JS_IsPlainDataObject(JSContext *ctx, JSValueConst v);
 JS_EXTERN JSValue JS_NewObjectFrom(JSContext *ctx, int count,
                                    const JSAtom *props,
                                    const JSValue *values);

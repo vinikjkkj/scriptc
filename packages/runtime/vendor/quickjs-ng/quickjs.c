@@ -6342,6 +6342,29 @@ JSValue JS_GetObjectPrototype(JSContext *ctx)
     return JS_DupValue(ctx, ctx->class_proto[JS_CLASS_OBJECT]);
 }
 
+/* LOCAL PATCH (scriptc objwalk-1). 1 when `v` is an ordinary object (class Object) whose own properties are all plain data properties
+   (no accessor, no variable reference, no lazy initialiser): reading its names and values runs no user code, so a host walk of them
+   is observably the same as Object.keys / values / entries. */
+int JS_IsPlainDataObject(JSContext *ctx, JSValueConst v)
+{
+    JSObject *p;
+    JSShape *sh;
+    JSShapeProperty *pr;
+    int i;
+
+    if (JS_VALUE_GET_TAG(v) != JS_TAG_OBJECT)
+        return 0;
+    p = JS_VALUE_GET_OBJ(v);
+    if (p->class_id != JS_CLASS_OBJECT)
+        return 0;
+    sh = p->shape;
+    pr = get_shape_prop(sh);
+    for (i = 0; i < sh->prop_count; i++)
+        if (pr[i].atom != JS_ATOM_NULL && (pr[i].flags & JS_PROP_TMASK) != JS_PROP_NORMAL)
+            return 0;
+    return 1;
+}
+
 void JS_ObjectPrototypeFingerprint(JSContext *ctx, uintptr_t *shape, int *count, int *deleted)
 {
     JSShape *sh = JS_VALUE_GET_OBJ(ctx->class_proto[JS_CLASS_OBJECT])->shape;

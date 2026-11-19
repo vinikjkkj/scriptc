@@ -213,7 +213,7 @@ const QJS_COMMIT = "3c8f3d68953955950074c41c6e4d999562ae82a7";
 
 /** Revision of the one local change to the vendored engine (quickjs.c's lre_* hooks answer a NULL opaque; see vendor/README.md).
  * Keys the engine archive cache and the runtime fingerprint, so a stale archive built from the unmodified hooks is never reused. */
-const QJS_LOCAL_PATCH = "lre-null-opaque-1+objlike-1";
+const QJS_LOCAL_PATCH = "lre-null-opaque-1+objlike-1+objwalk-1";
 
 /** The pinned mbedTLS snapshot under packages/runtime/vendor/mbedtls (see
  * vendor/README.md — update both together). Keys the archive cache so a
