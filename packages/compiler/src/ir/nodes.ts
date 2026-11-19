@@ -6106,9 +6106,8 @@ export type IrLibFn =
    * strings the answer is the string ordering — `'a' < 'b'` is not a
    * number question — otherwise both go through ToNumber and an
    * unordered (NaN) result answers false for all four. String ordering is
-   * scr_str_cmp, scriptc's documented code-point order, the same order
-   * the statically-typed `<` on strings already uses (strCmp without
-   * `utf16`). Borrows; throws on the reference kinds. */
+   * scr_str_cmp, ECMAScript's UTF-16 code-unit order, the same order
+   * the statically-typed `<` on strings uses (strCmp). Borrows; throws on the reference kinds. */
   | "dyn.lt"
   | "dyn.le"
   | "dyn.gt"
@@ -7596,9 +7595,8 @@ export type IrExpr =
   | { kind: "logical"; op: "&&" | "||"; left: IrExpr; right: IrExpr; type: IrType; loc: SrcLoc }
   | { kind: "strConcat"; left: IrExpr; right: IrExpr; type: IrType; loc: SrcLoc }
   | { kind: "strEq"; negated: boolean; left: IrExpr; right: IrExpr; type: IrType; loc: SrcLoc }
-  /** String ordering. Ordinary source comparisons omit `utf16` and retain
-   * scriptc's documented code-point order; the default Array sort comparator
-   * sets it to request ECMAScript's UTF-16 code-unit order. */
+  /** String ordering: ECMAScript's UTF-16 code-unit order, with or without `utf16` (the flag is kept for the default Array sort comparator and
+   * names the same order). */
   | { kind: "strCmp"; op: IrStrCmpOp; left: IrExpr; right: IrExpr; utf16?: boolean; type: IrType; loc: SrcLoc }
   /** f64|bool → string, JS-exact (Number::toString / "true"/"false").
    * Union operands dispatch through the per-union ToString helper (arms
