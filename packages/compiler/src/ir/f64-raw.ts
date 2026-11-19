@@ -341,6 +341,18 @@ function forwardLoads(fn: IrFunction, arm: IrStmt[], noBarrier: boolean): number
  *
  * WHAT. In a top-level statement list: RUN_MIN or more consecutive varDecl/assign statements to distinct, unboxed f64 locals whose values each hold at
  * least RUN_HEAVY arithmetic nodes. The last statement of the run gets the list of those locals. */
+/** The operator skeleton of an expression with every leaf (local, literal, element read) collapsed: two sums of the same shape differ only in which leaves they read. */
+function shapeOf(x: unknown): string {
+  if (!isNode(x)) return "?";
+  switch (x["kind"]) {
+    case "bin":
+      return `(${shapeOf(x["left"])}${String(x["op"])}${shapeOf(x["right"])})`;
+    case "unary":
+      return `${String(x["op"])}${shapeOf(x["operand"])}`;
+    default:
+      return "L";
+  }
+}
 const RUN_MIN = 8;
 const RUN_HEAVY = 12;
 function markSpills(fn: IrFunction, arm: IrStmt[]): number {
@@ -371,7 +383,17 @@ function markSpills(fn: IrFunction, arm: IrStmt[]): number {
       ids.push(id);
     }
     if (ids.length >= RUN_MIN) {
-      (arm[j - 1] as Node)["spillAfter"] = ids;
+      // Consecutive scratch slots are the vectoriser's lanes: put locals whose expressions have the same SHAPE next to each other (feSqr's even and
+      // odd sums are two shapes; feMul's sixteen are one), keeping source order inside a shape.
+      const sig = new Map<string, string>();
+      for (let q = i; q < j; q++) {
+        const n = arm[q] as Node;
+        sig.set(n["localId"] as string, shapeOf((n["kind"] === "varDecl" ? n["init"] : n["value"]) as Node));
+      }
+      const order = new Map<string, number>();
+      for (const v of sig.values()) if (!order.has(v)) order.set(v, order.size);
+      const sorted = ids.map((id, at) => ({ id, at, o: order.get(sig.get(id)!)! })).sort((x, y) => x.o - y.o || x.at - y.at).map((x) => x.id);
+      (arm[j - 1] as Node)["spillAfter"] = sorted;
       marked++;
     }
     i = Math.max(j, i + 1);
