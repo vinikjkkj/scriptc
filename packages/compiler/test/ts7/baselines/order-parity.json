@@ -29723,6 +29723,18 @@
     "<repo>/tests/corpus/25915-island-wide-objects-follow-object-prototype-changes.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25916-keys-values-and-entries-of-island-objects-follow-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25916-keys-values-and-entries-of-island-objects-follow-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25917-keys-values-and-entries-of-island-objects-with-accessors-and-exotic-objects.ts": {
+   "order": [
+    "<repo>/tests/corpus/25917-keys-values-and-entries-of-island-objects-with-accessors-and-exotic-objects.ts"
+   ],
+   "diags": []
   }
  }
 }
