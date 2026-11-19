@@ -7106,11 +7106,9 @@ scr_add_done:
  * not a number question — otherwise both go through ToNumber and an
  * unordered (NaN) result answers false for all four operators.
  *
- * String ordering is scr_str_cmp, scriptc's documented code-point order:
- * the same order the statically-typed `<` on strings already uses (the
- * strCmp node without `utf16`), so the two spellings of one comparison
- * agree with each other and carry one documented divergence between them,
- * not two. Borrows; throws only on the reference kinds. */
+ * String ordering is scr_str_cmp, ECMAScript's UTF-16 code-unit order:
+ * the same order the statically-typed `<` on strings uses (the strCmp
+ * node). Borrows; throws only on the reference kinds. */
 /* One side a BigInt (IsLessThan's ToNumeric and StringToBigInt arms): the
  * order of x against y, -1/0/1, or 2 when unordered. A non-BigInt side
  * other than a string is ToNumeric'd; the BigInt side never is. */
