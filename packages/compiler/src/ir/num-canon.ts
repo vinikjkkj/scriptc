@@ -215,8 +215,9 @@ function computePlan(fn: IrFunction): CanonPlan {
         );
       case "bytesIntrinsic": {
         if (e["method"] !== "get") return false;
-        // an integer or f32 element is never a marker; an f64 element is made canonical at the load (see below)
-        return !f64Elem(e) || loadOk.has(e);
+        // an integer or f32 element is never a marker; an f64 element is made canonical at the load (see below), or is a direct operand of the
+        // arithmetic that reads it: the parent either canonicalises its own result or is elided in turn, which needs ITS consumer blind
+        return !f64Elem(e) || loadOk.has(e) || operandLoads.has(e);
       }
       case "incDec":
         return isF64(e["type"]) && M.has(e["localId"] as string);
@@ -224,7 +225,10 @@ function computePlan(fn: IrFunction): CanonPlan {
         return false;
     }
   };
-  // An f64 element read counts only when it is a direct definition of a candidate local (the emitter canonicalises it there).
+  // An f64 element read counts only when it is a direct definition of a candidate local (the emitter canonicalises it there), or sits in an
+  // operand place (a direct operand of an arithmetic, comparison or bitwise expression, a Math.* argument), where its NaN bits are unobservable.
+  const operandLoads = new Set<Node>();
+  for (const l of loads) if (l.ctx.k === "operand") operandLoads.add(l.node);
   const loadOk = new Set<Node>();
   for (const d of defs) if (d.value.kind === "bytesIntrinsic" && d.value["method"] === "get" && f64Elem(d.value)) loadOk.add(d.value);
   const sink = (ctx: Ctx): boolean => ctx.k === "operand" || ctx.k === "store" || (ctx.k === "assign" && M.has(ctx.local));
