@@ -295,7 +295,7 @@ long scr_aes256_cbc_decrypt_unpad(const ScrAes256 *st, unsigned char iv[SCR_AES_
  * as 0xe1 in the top byte. The shift-and-add form is used rather than a
  * precomputed table — the table would be 4KB of state per key for a
  * handshake that hashes a few dozen blocks. */
-static void scr_ghash_mul(uint64_t z[2], const uint64_t h[2]) {
+void scr_ghash_mul_portable(uint64_t z[2], const uint64_t h[2]) {
   uint64_t zh = 0, zl = 0;
   uint64_t vh = h[0], vl = h[1];
   for (int i = 0; i < 128; i++) {
@@ -310,6 +310,106 @@ static void scr_ghash_mul(uint64_t z[2], const uint64_t h[2]) {
   }
   z[0] = zh;
   z[1] = zl;
+}
+
+
+/* The PCLMULQDQ arm (Gueron and Kounavis, "Intel Carry-Less Multiplication Instruction and its Usage for Computing the GCM Mode", the
+ * gfmul of section 5.3 with the reflected-input form). The vector for (hi, lo) = (y[0], y[1]) is exactly the byte-reversed block that
+ * paper loads with its byte-swap mask: the low qword of the reversed 16 bytes is the big-endian word of bytes 8..15, which is y[1].
+ * Chosen by CPUID at first use; CPUID is a pure function of the machine, so two racing first uses store the same int. Gated to x86-64
+ * with <immintrin.h>, like the SHA-256 arm in scr_lib.c: every other target (aarch64, i386, freestanding) keeps the portable loop.
+ * SCR_GHASH_PCLMUL=0 compiles the arm out and restores the previous code path exactly (the ablation control). */
+#ifndef SCR_GHASH_PCLMUL
+#if defined(__x86_64__) && defined(__has_include)
+#if __has_include(<immintrin.h>)
+#define SCR_GHASH_PCLMUL 1
+#endif
+#endif
+#endif
+#ifndef SCR_GHASH_PCLMUL
+#define SCR_GHASH_PCLMUL 0
+#endif
+
+#if SCR_GHASH_PCLMUL
+#include <immintrin.h>
+
+static int scr_ghash_probe(void) {
+  unsigned a = 0, b = 0, c = 0, d = 0;
+  __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(0u), "c"(0u));
+  if (a < 1) return 0;
+  __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(1u), "c"(0u));
+  return (int)((c >> 1) & 1); /* PCLMULQDQ */
+}
+
+static int scr_ghash_clmul_cache = -1;
+int scr_ghash_have_clmul(void) {
+  int v = scr_ghash_clmul_cache;
+  if (v < 0) {
+    v = scr_ghash_probe();
+    scr_ghash_clmul_cache = v;
+  }
+  return v;
+}
+
+__attribute__((target("pclmul,sse2"))) void scr_ghash_mul_clmul(uint64_t z[2], const uint64_t h[2]) {
+  const __m128i a = _mm_set_epi64x((long long)z[0], (long long)z[1]);
+  const __m128i b = _mm_set_epi64x((long long)h[0], (long long)h[1]);
+  __m128i t3 = _mm_clmulepi64_si128(a, b, 0x00);
+  __m128i t4 = _mm_clmulepi64_si128(a, b, 0x10);
+  __m128i t5 = _mm_clmulepi64_si128(a, b, 0x01);
+  __m128i t6 = _mm_clmulepi64_si128(a, b, 0x11);
+  t4 = _mm_xor_si128(t4, t5);
+  t5 = _mm_slli_si128(t4, 8);
+  t4 = _mm_srli_si128(t4, 8);
+  t3 = _mm_xor_si128(t3, t5);
+  t6 = _mm_xor_si128(t6, t4);
+  /* shift the 256-bit product left by one: the reflected form's extra bit */
+  __m128i t7 = _mm_srli_epi32(t3, 31);
+  __m128i t8 = _mm_srli_epi32(t6, 31);
+  t3 = _mm_slli_epi32(t3, 1);
+  t6 = _mm_slli_epi32(t6, 1);
+  const __m128i t9 = _mm_srli_si128(t7, 12);
+  t8 = _mm_slli_si128(t8, 4);
+  t7 = _mm_slli_si128(t7, 4);
+  t3 = _mm_or_si128(t3, t7);
+  t6 = _mm_or_si128(t6, t8);
+  t6 = _mm_or_si128(t6, t9);
+  /* reduce modulo x^128 + x^7 + x^2 + x + 1 */
+  t7 = _mm_slli_epi32(t3, 31);
+  t8 = _mm_slli_epi32(t3, 30);
+  __m128i t10 = _mm_slli_epi32(t3, 25);
+  t7 = _mm_xor_si128(t7, t8);
+  t7 = _mm_xor_si128(t7, t10);
+  t8 = _mm_srli_si128(t7, 4);
+  t7 = _mm_slli_si128(t7, 12);
+  t3 = _mm_xor_si128(t3, t7);
+  __m128i r2 = _mm_srli_epi32(t3, 1);
+  __m128i r4 = _mm_srli_epi32(t3, 2);
+  __m128i r5 = _mm_srli_epi32(t3, 7);
+  r2 = _mm_xor_si128(r2, r4);
+  r2 = _mm_xor_si128(r2, r5);
+  r2 = _mm_xor_si128(r2, t8);
+  t3 = _mm_xor_si128(t3, r2);
+  t6 = _mm_xor_si128(t6, t3);
+#ifdef SCR_GHASH_TEST_MUTATE
+  t6 = _mm_xor_si128(t6, _mm_set_epi64x(0, 1)); /* the mutation control: one wrong bit */
+#endif
+  z[0] = (uint64_t)_mm_cvtsi128_si64(_mm_srli_si128(t6, 8));
+  z[1] = (uint64_t)_mm_cvtsi128_si64(t6);
+}
+#else
+int scr_ghash_have_clmul(void) { return 0; }
+void scr_ghash_mul_clmul(uint64_t z[2], const uint64_t h[2]) { scr_ghash_mul_portable(z, h); }
+#endif
+
+static void scr_ghash_mul(uint64_t z[2], const uint64_t h[2]) {
+#if SCR_GHASH_PCLMUL
+  if (scr_ghash_have_clmul()) {
+    scr_ghash_mul_clmul(z, h);
+    return;
+  }
+#endif
+  scr_ghash_mul_portable(z, h);
 }
 
 static uint64_t scr_load_be64(const unsigned char *p) {

@@ -88,6 +88,13 @@ typedef struct ScrGcm {
   uint64_t hkey[2]; /* H = E(K, 0^128), as two big-endian halves */
 } ScrGcm;
 
+/* GHASH's GF(2^128) multiply, both arms, exported so test_cipher.c can run them against each other: the portable shift-and-add loop, the
+ * PCLMULQDQ arm (scr_ghash_have_clmul() says whether this CPU has it; without it, or on a target without the arm, the "clmul" entry is the
+ * portable loop). z = z * h, both as the two big-endian words of the block. */
+void scr_ghash_mul_portable(uint64_t z[2], const uint64_t h[2]);
+void scr_ghash_mul_clmul(uint64_t z[2], const uint64_t h[2]);
+int scr_ghash_have_clmul(void);
+
 void scr_gcm256_init(ScrGcm *g, const unsigned char key[SCR_AES256_KEY]);
 
 /* The STREAMING form, for a Cipher handle whose update() must return the
