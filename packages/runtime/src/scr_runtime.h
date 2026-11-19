@@ -7741,6 +7741,11 @@ bool scr_dyn_any_has(ScrDyn *recv, ScrDyn *key, ScrStr *keystr);
 bool scr_dyn_any_has_own(ScrDyn *recv, ScrDyn *key, ScrStr *keystr);
 /* Object.getOwnPropertyDescriptor over a dyn receiver (scr_dyn_gopd.c; the symbol arm in scr_symbol.c): the descriptor object or undefined, +1; NULL with a pending throw. */
 ScrDyn *scr_dyn_get_own_desc(ScrDyn *recv, ScrStr *key);
+/* Reflect.getOwnPropertyDescriptor: the same answer, but a primitive receiver is the TypeError "Reflect.getOwnPropertyDescriptor called on non-object". */
+ScrDyn *scr_dyn_reflect_get_own_desc(ScrDyn *recv, ScrStr *key);
+/* Object.getOwnPropertyDescriptors over the STRING keys: `names` is the receiver's own-names dyn array (the compiler's own-names walk); the answer is a fresh dyn
+ * object of key -> descriptor in that order (+1), or NULL with the exception pending. Borrows both. */
+ScrDyn *scr_dyn_get_own_descs(ScrDyn *names, ScrDyn *recv);
 ScrDyn *scr_dyn_sym_get_own_desc(ScrDyn *recv, ScrSym *k);
 ScrDyn *scr_dyn_any_get_own_desc(ScrDyn *recv, ScrDyn *key, ScrStr *keystr);
 ScrDyn *scr_dyn_any_define(ScrDyn *recv, ScrDyn *key, ScrStr *keystr, ScrDyn *desc); /* the table on `recv` holds an accessor row */

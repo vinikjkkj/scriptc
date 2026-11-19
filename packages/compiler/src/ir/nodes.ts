@@ -6137,6 +6137,10 @@ export type IrLibFn =
   | "dyn.hasOwn"
   /** Object.getOwnPropertyDescriptor over a dyn receiver (scr_dyn_gopd.c): the own property's descriptor object or undefined; throws on nullish. */
   | "dyn.getOwnPropDesc"
+  /** Reflect.getOwnPropertyDescriptor over a dyn receiver (a primitive receiver is a TypeError). MAY THROW. */
+  | "dyn.reflectGetOwnPropDesc"
+  /** Object.getOwnPropertyDescriptors over a dyn receiver's string keys (args: own-names dyn array, receiver). MAY THROW. */
+  | "dyn.getOwnPropDescs"
   /** The for-in visit guard's accessor arm: an own enumerable accessor key of a dyn object (no getter runs). */
   | "dyn.forInAccessor"
   /** for-in's key list over a dyn object: Object.keys, plus an EventEmitter-rooted instance's inherited enumerable keys. */
@@ -11393,7 +11397,7 @@ export function dynReflectionSite(functions: readonly IrFunction[], fenced: (op:
   let fresh: ((e: unknown, fnIdx: number) => boolean) | null = null;
   let curIdx = 0;
   const REFLECT_FNS = new Set([
-    "dyn.assign", "dyn.assignAll", "dyn.hasOwn", "dyn.getOwnPropDesc", "dyn.forInKeys", "dyn.forInCertain", "dyn.forInPlain", "dyn.forInAccessor",
+    "dyn.assign", "dyn.assignAll", "dyn.hasOwn", "dyn.getOwnPropDesc", "dyn.reflectGetOwnPropDesc", "dyn.getOwnPropDescs", "dyn.forInKeys", "dyn.forInCertain", "dyn.forInPlain", "dyn.forInAccessor",
     "dyn.objKeys", "dyn.objValues", "dyn.objEntries", "dyn.structuredClone", "dyn.cloneOwn", "dyn.ownNamesCtor",
     "dyn.ownNamesFence", "dyn.objCreateProto", "dyn.objCreateDescs",
   ]);
@@ -13415,7 +13419,7 @@ export function moduleUsesDynGopd(mod: IrModule): boolean {
       return;
     }
     const node = v as { kind?: unknown; fn?: unknown };
-    if (node.kind === "libCall" && (node.fn === "dyn.getOwnPropDesc" || node.fn === "sym.anyGetOwnDesc")) {
+    if (node.kind === "libCall" && (node.fn === "dyn.getOwnPropDesc" || node.fn === "dyn.reflectGetOwnPropDesc" || node.fn === "dyn.getOwnPropDescs" || node.fn === "sym.anyGetOwnDesc")) {
       found = true;
       return;
     }
@@ -15500,6 +15504,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "dyn.forInKeys",
   "dyn.hasOwn",
   "dyn.getOwnPropDesc",
+  "dyn.reflectGetOwnPropDesc",
+  "dyn.getOwnPropDescs",
   "dyn.assign",
   // variadic Object.assign: spread flattening throws V8's spread-call
   // TypeErrors; the final copy throws ToObject on a nullish target

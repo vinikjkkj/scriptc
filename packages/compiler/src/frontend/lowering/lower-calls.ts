@@ -13384,7 +13384,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
   /** `Object.getOwnPropertyDescriptor(o, k)` over a value the checked-dynamic tree can hold (scr_dyn_gopd.c): the receiver crosses into dyn (a dyn
    * receiver as it is), the key stringifies (ToPropertyKey) and a symbol key takes the symbol table's own answer. Null when the receiver has no dyn
    * form (the call keeps its fence). */
-  function lowerGetOwnDescOverDyn(L: Lowerer, call: ts.CallExpression): IrExpr | null {
+  function lowerGetOwnDescOverDyn(L: Lowerer, call: ts.CallExpression, reflect = false): IrExpr | null {
     const recvNode = call.arguments[0];
     const keyNode = call.arguments[1];
     if (recvNode === undefined || keyNode === undefined || call.arguments.length !== 2) return null;
@@ -13405,7 +13405,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       key = { kind: "toString", operand: key, type: STRING, loc: locOf(keyNode) };
     }
     if (key.type.kind !== "string") return null;
-    const desc: IrExpr = { kind: "libCall", fn: "dyn.getOwnPropDesc", args: [receiver, key], type: DYN, loc };
+    const desc: IrExpr = { kind: "libCall", fn: reflect ? "dyn.reflectGetOwnPropDesc" : "dyn.getOwnPropDesc", args: [receiver, key], type: DYN, loc };
     // A BINDING of the result (a declaration, an assignment, a return) takes the checker's `PropertyDescriptor | undefined`: the descriptor
     // object converts into that record through its own CHECKED builder (the accessor halves adapt to the record's function fields), not through the
     // union arm matcher, whose function leaves match by exact signature only and would refuse a user getter. Any other context keeps the dyn value.
@@ -13848,6 +13848,14 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       const rv = lowerProxyNew(L, call, locOf(call), "dyn.proxyRevocable");
       if (rv !== null) return rv;
     }
+    // Reflect.getOwnPropertyDescriptor(o, k): Object.getOwnPropertyDescriptor's answer, except that a primitive target is a TypeError.
+    if (
+      L.isStdlibGlobal(access.expression, "Reflect") && access.name.text === "getOwnPropertyDescriptor" &&
+      call.arguments.length === 2 && !call.arguments.some(ts.isSpreadElement)
+    ) {
+      const reflected = lowerGetOwnDescOverDyn(L, call, true);
+      if (reflected !== null) return reflected;
+    }
     // Reflect.ownKeys(o) is the own-NAMES walk (Object.getOwnPropertyNames)
     // over everything this lowering can hold: no symbol-keyed or
     // non-enumerable member exists outside it.
@@ -13867,6 +13875,34 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       access.name.text === "ownKeys" && call.arguments.length === 1 && L.isStdlibGlobal(access.expression, "Reflect");
     if (!reflectOwnKeys && !L.isStdlibGlobal(access.expression, "Object")) return null;
     const member = reflectOwnKeys ? "getOwnPropertyNames" : access.name.text;
+    // Object.getOwnPropertyDescriptors(o) over a value the checked-dynamic tree holds: the own-names walk (the one getOwnPropertyNames answers: it fences an object
+    // whose non-enumerable keys have no recorded position) with one descriptor per name. A program that keeps symbol-keyed properties on untyped values keeps the
+    // fence, since the symbol half of the answer lives in the symbol table.
+    if (member === "getOwnPropertyDescriptors" && call.arguments.length === 1 && !ts.isSpreadElement(call.arguments[0]!) && !L.untypedSymbolWrites()) {
+      const recvNode = call.arguments[0]!;
+      const probed = probeLower(L, recvNode);
+      if (probed !== null && (probed.type.kind === "dyn" || L.dynConvertible(probed.type))) {
+        const loc = locOf(call);
+        const receiver = probed.type.kind === "dyn" ? L.lowerExpr(recvNode) : L.lowerExprExpecting(recvNode, DYN);
+        if (receiver.type.kind === "dyn") {
+          const tmp = L.declareHiddenLocal("%gopds", DYN);
+          const ref = (): IrExpr => ({ kind: "varRef", localId: tmp.id, type: DYN, loc });
+          return {
+            kind: "seqExpr",
+            stmts: [{ kind: "varDecl", localId: tmp.id, init: receiver, loc }],
+            result: {
+              kind: "libCall",
+              fn: "dyn.getOwnPropDescs",
+              args: [{ kind: "call", callee: dynOwnNamesHelper(L, loc), args: [ref()], type: DYN, loc }, ref()],
+              type: DYN,
+              loc,
+            },
+            type: DYN,
+            loc,
+          };
+        }
+      }
+    }
     if (member === "getOwnPropertyDescriptor") {
       const desc = protoMethodDescriptorOf(L, call);
       if (desc !== null) return desc;

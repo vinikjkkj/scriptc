@@ -273,3 +273,35 @@ ScrDyn *scr_dyn_get_own_desc(ScrDyn *v, ScrStr *key) {
       return gopd_undefined();
   }
 }
+
+ScrDyn *scr_dyn_reflect_get_own_desc(ScrDyn *recv, ScrStr *key) {
+  switch (recv == NULL ? SCR_DYN_UNDEF : recv->kind) {
+  case SCR_DYN_NULL: case SCR_DYN_UNDEF: case SCR_DYN_BOOL: case SCR_DYN_NUM: case SCR_DYN_STR: case SCR_DYN_BIG: {
+    static const char msg[] = "Reflect.getOwnPropertyDescriptor called on non-object";
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+    return NULL;
+  }
+  default:
+    return scr_dyn_get_own_desc(recv, key);
+  }
+}
+
+ScrDyn *scr_dyn_get_own_descs(ScrDyn *names, ScrDyn *recv) {
+  ScrDyn *out = scr_dyn_new_obj();
+  if (names == NULL || names->kind != SCR_DYN_ARR) return out;
+  for (size_t i = 0; i < names->v.arr.len; i++) {
+    const ScrDyn *n = names->v.arr.items[i];
+    if (n->kind != SCR_DYN_STR) continue;
+    ScrDyn *d = scr_dyn_get_own_desc(recv, n->v.str);
+    if (d == NULL) {
+      scr_dyn_release(out);
+      return NULL;
+    }
+    if (d->kind == SCR_DYN_UNDEF) {
+      scr_dyn_release(d);
+      continue;
+    }
+    scr_dyn_obj_set(out, n->v.str->data, n->v.str->len, d); /* moves d in */
+  }
+  return out;
+}

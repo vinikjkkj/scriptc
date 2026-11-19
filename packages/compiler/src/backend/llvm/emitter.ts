@@ -1524,6 +1524,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "dyn.objKeys": "scr_dyn_obj_keys",
   "dyn.hasOwn": "scr_dyn_has_own",
   "dyn.getOwnPropDesc": "scr_dyn_get_own_desc",
+  "dyn.reflectGetOwnPropDesc": "scr_dyn_reflect_get_own_desc",
+  "dyn.getOwnPropDescs": "scr_dyn_get_own_descs",
   "dyn.forInAccessor": "scr_dyn_for_in_accessor",
   "dyn.forInKeys": "scr_dyn_forin_keys",
   "dyn.forInCertain": "scr_dyn_forin_certain",

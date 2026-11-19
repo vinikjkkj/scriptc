@@ -1401,6 +1401,8 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "dyn.objKeys": { argTypes: [DYN], result: DYN },
   "dyn.hasOwn": { argTypes: [DYN, STRING], result: BOOL },
   "dyn.getOwnPropDesc": { argTypes: [DYN, STRING], result: DYN },
+  "dyn.reflectGetOwnPropDesc": { argTypes: [DYN, STRING], result: DYN },
+  "dyn.getOwnPropDescs": { argTypes: [DYN, DYN], result: DYN },
   "dyn.forInAccessor": { argTypes: [DYN, STRING], result: BOOL },
   "dyn.forInKeys": { argTypes: [DYN], result: DYN },
   "dyn.forInCertain": { argTypes: [DYN, STRING], result: BOOL },

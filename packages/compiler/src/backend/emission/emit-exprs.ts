@@ -8332,6 +8332,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "dyn.getOwnPropDesc":
             // Object.getOwnPropertyDescriptor over a dyn receiver: both borrowed, the descriptor object or undefined +1; throws on nullish.
             return finish(`scr_dyn_get_own_desc(${arg(0)}, ${arg(1)})`);
+          case "dyn.reflectGetOwnPropDesc":
+            return finish(`scr_dyn_reflect_get_own_desc(${arg(0)}, ${arg(1)})`);
+          case "dyn.getOwnPropDescs":
+            return finish(`scr_dyn_get_own_descs(${arg(0)}, ${arg(1)})`);
           case "dyn.hasOwn":
             // Object.hasOwn over a dyn receiver (throws on nullish, like
             // Node's ToObject).
