@@ -29765,6 +29765,12 @@
     "<repo>/tests/corpus/25972-a-class-ring-reached-through-a-boundary-copy-of-its-record-array-or-tuple-is-collected-while-the-program-runs.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25919-members-of-tables-between-31-and-64-keys-answer-like-node-after-every-edit.ts": {
+   "order": [
+    "<repo>/tests/corpus/25919-members-of-tables-between-31-and-64-keys-answer-like-node-after-every-edit.ts"
+   ],
+   "diags": []
   }
  }
 }
