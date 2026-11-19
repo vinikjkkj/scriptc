@@ -1648,6 +1648,7 @@ async function compileTracked(
 async function emitLlvmFile(mod: IrModule, llStats: LlvmEmitStats, llPath: string, audit: boolean, layout?: LayoutOrder): Promise<{ members: boolean; lit: boolean; procStream: boolean }> {
   let ll = tapped("emit.llvm", () => emitLlvmModule(mod, llStats, audit));
   if (layout !== undefined) ll = reorderLlvmText(ll, layout);
+  ll += "\n; lowperf1 positive control\n";
   noteHash("emit.llvm", ll);
   await writeFile(llPath, ll);
   return { members: DYN_DISPATCH_REF.test(ll), lit: DYN_LIT_REF.test(ll), procStream: PROC_STREAM_REF.test(ll) };
