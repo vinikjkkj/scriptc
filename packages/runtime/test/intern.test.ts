@@ -19,7 +19,9 @@ const srcDir = join(testDir, "../src");
  * At the shipping 65,536 the same test would prove nothing: nothing would
  * ever collide, and "the hot entry survived" would be true for the wrong
  * reason. */
-const DEFINES = ["-DSCR_RC_AUDIT", "-DSCR_STR_INTERN_BITS=6"];
+// The address filter in front of scr_str_intern_forget (scr_string.c): two buckets that saturate at 3, so a 64-entry table collides and hits the sticky arm constantly.
+const FILTER_DEFINES = ["-DSCR_STR_IFILT_BITS=1", "-DSCR_STR_IFILT_CAP=3"];
+const DEFINES = ["-DSCR_RC_AUDIT", "-DSCR_STR_INTERN_BITS=6", ...FILTER_DEFINES];
 
 let built: Promise<string> | undefined;
 function build(): Promise<string> {
@@ -160,4 +162,34 @@ test("the direct-mapped control loses hot entries the shipping table keeps", asy
   const admitOnly = score(await run({ SCR_STRING_INTERN_WEAK: "0", SCR_STRING_INTERN_WAYS: "1" }));
   expect(waysOnly.kept).toBeGreaterThan(control.kept);
   expect(admitOnly.kept).toBe(admitOnly.admitted);
+});
+
+// POSITIVE CONTROL of the filter test: the same file built with a filter that never counts an entry (it answers "absent" for everything, so every free
+// leaves a dangling pointer in the weak table) must FAIL, under AddressSanitizer. A passing run here would mean the intern tests cannot see a false "absent".
+test("content interning: a filter that never counts an entry is caught (positive control)", async () => {
+  const buildDir = join(testDir, "build");
+  await mkdir(buildDir, { recursive: true });
+  const bin = testBin(buildDir, "test_intern_filterbreak");
+  await ccCompile([
+    "-std=c11", "-O1", "-Wall", "-Wextra",
+    "-fsanitize=address", ...DEFINES, "-DSCR_STR_IFILT_BREAK",
+    "-o", bin,
+    join(testDir, "test_intern.c"),
+    join(srcDir, "scr_string.c"),
+    join(srcDir, "scr_number.c"),
+    join(srcDir, "scr_array.c"),
+    join(srcDir, "scr_bytes.c"),
+    join(srcDir, "scr_error.c"),
+    join(srcDir, "scr_exception.c"),
+    join(srcDir, "scr_object.c"),
+    join(srcDir, "scr_cycle.c"),
+    ...(process.platform === "linux" ? ["-D_GNU_SOURCE", "-lm"] : []),
+  ]);
+  let failed = false;
+  try {
+    await execFileAsync(bin, [], { env: { ...process.env } });
+  } catch {
+    failed = true;
+  }
+  expect(failed).toBe(true);
 });

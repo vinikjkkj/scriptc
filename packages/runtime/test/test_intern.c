@@ -98,6 +98,37 @@ static ScrStr *mk(size_t n, unsigned seed) {
   return r;
 }
 
+/* ── I5: the address filter never gives a false "absent" ───────────────────
+ * scr_str_intern_forget skips its hash when a counting filter over the entries' ADDRESSES says the string is not in the table (scr_string.c states the
+ * invariant: F == CAP or F == T). A false "absent" would leave a freed string's pointer in the weak table, and the next lookup of byte-equal content would
+ * hand it back: a use-after-free that AddressSanitizer reports and a content check here catches. This runs with a 2-bucket filter whose counts saturate at 3
+ * (the test build's -DSCR_STR_IFILT_BITS=1 -DSCR_STR_IFILT_CAP=3) over a 64-entry table, so every bucket collides constantly, saturates, and is then
+ * decremented around the sticky value by evictions and by forgets. Strings are released in a scattered order while their content is re-created, which is
+ * the exact shape (free while interned, intern the same bytes again) a stale entry would break. */
+static void t_filter(void) {
+  enum { N = 300, ROUNDS = 6 };
+  ScrStr *held[N];
+  unsigned r, i, k;
+  scr_str_intern_drain();
+  for (r = 0; r < ROUNDS; r++) {
+    for (i = 0; i < N; i++) held[i] = mk(24, r * 1000u + i);
+    for (k = 0; k < N; k++) {
+      ScrStr *expect, *again;
+      i = (k * 7u) % N; /* 7 is coprime with 300: every index exactly once, scattered */
+      expect = mk(24, r * 1000u + i);
+      CHECK(scr_str_eq(expect, held[i])); /* the held string is intact (a 64-entry table may have evicted it, so identity is not asserted) */
+      scr_str_release(expect);
+      scr_str_release(held[i]);
+      if (k % 3 == 0) {
+        again = mk(24, r * 1000u + i); /* re-intern the bytes just freed: a stale table entry would return freed memory here */
+        CHECK(again->len == 24 && again->data[24] == '\0');
+        scr_str_release(again);
+      }
+    }
+    CHECK(scr_str_live_objects() == 0); /* weak table: nothing is retained once the program lets go */
+  }
+}
+
 /* ── I1: sharing is by value, and only inside the band ─────────────────── */
 static void t_band(void) {
   static const size_t below[] = {0, 1, 2, 15};
@@ -465,6 +496,7 @@ int main(int argc, char **argv) {
      * reason. t_weak carries their replacements. */
     t_band();
     t_weak();
+    t_filter();
     t_walk();
     CHECK(scr_str_live_count() == 0);
     fprintf(stderr, "intern WEAK: ways=%s admit=%s\n", ways ? ways : "default",
