@@ -29723,6 +29723,12 @@
     "<repo>/tests/corpus/25915-island-wide-objects-follow-object-prototype-changes.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25918-x25519-shared-secrets-match-the-rfc-7748-vectors-and-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25918-x25519-shared-secrets-match-the-rfc-7748-vectors-and-node.ts"
+   ],
+   "diags": []
   }
  }
 }
