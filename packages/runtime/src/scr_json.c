@@ -17319,6 +17319,7 @@ ScrDyn *scr_dyn_origin_mark_elem(ScrDyn *d, void *obj, const char *tkey, void *(
  * names a record that died without scr_dynview_unreg (a missed release hook): that aborts with a message. */
 static int dynview_check = -1;
 static size_t dynview_live = 0;
+#ifndef SCR_LIB
 static void dynview_exit_check(void) {
   size_t left = 0;
   for (size_t i = 0; i < recsrc_cap; i++) {
@@ -17331,12 +17332,16 @@ static void dynview_exit_check(void) {
     _Exit(70);
   }
 }
+#endif
 void *scr_dynview_canon(void *rec, const void *view, const void *key, size_t size, size_t view_off, void *(*retain)(void *), void (*release)(void *)) {
   if (rec == NULL || view == NULL) return rec;
   if (__builtin_expect(dynview_check < 0, 0)) {
     const char *e = getenv("SCR_DYNVIEW_CHECK");
     dynview_check = (e != NULL && e[0] == '1') ? 1 : 0;
+#ifndef SCR_LIB
+    /* Test-only exit verification; a library build has no process exit to hook (its reset hook runs with live records), so only the per-hit checks apply there. */
     if (dynview_check) atexit(dynview_exit_check);
+#endif
   }
   void *f = scr_recsrc_find((void *)view, (const ScrRecSrcMap *)key);
   if (f == NULL) {
