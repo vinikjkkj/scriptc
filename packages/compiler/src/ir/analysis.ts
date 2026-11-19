@@ -8,6 +8,7 @@
  * likely to catch quickly (both lanes have to be wrong in the same way to
  * agree, but only one has to be wrong to diverge from Node). */
 import type { IrExpr } from "./nodes.js";
+import { SUSPENDING_LIB_CALLS, SUSPENDING_NODE_KINDS } from "./suspends.js";
 
 /** True when evaluating `e` cannot overwrite the binding `receiverLocalId`.
  *
@@ -67,9 +68,55 @@ export function isStableReceiverOperand(e: IrExpr, receiverLocalId: string): boo
         e.receiver.kind === "varRef" &&
         e.args.every((arg) => isStableReceiverOperand(arg, receiverLocalId))
       );
+    case "strIntrinsic":
+      // Pure reads of a string: no allocation of anything user-visible, no user code, nothing assigned except through the operands (checked).
+      return (
+        (e.method === "length" || e.method === "charCodeAt") &&
+        isStableReceiverOperand(e.receiver, receiverLocalId) &&
+        e.args.every((arg) => isStableReceiverOperand(arg, receiverLocalId))
+      );
+    case "arrayGet":
+      return isStableReceiverOperand(e.arr, receiverLocalId) && isStableReceiverOperand(e.index, receiverLocalId);
+    case "arrIntrinsic":
+      return (
+        e.method === "length" &&
+        isStableReceiverOperand(e.receiver, receiverLocalId) &&
+        e.args.every((arg) => isStableReceiverOperand(arg, receiverLocalId))
+      );
     default:
       return false;
   }
+}
+
+/** True when evaluating `e` can park the running function (an await, a yield, or a suspending library call anywhere inside it). A stackless
+ * coroutine spills only its frame temps across a park, so a borrowed pointer held in a plain C local would not survive one. Generic walk, like
+ * writesLocal: it cannot forget a node kind. */
+export function mayPark(e: unknown): boolean {
+  const seen = new Set<object>();
+  const walk = (n: unknown): boolean => {
+    if (n === null || typeof n !== "object") return false;
+    if (seen.has(n)) return false;
+    seen.add(n);
+    if (Array.isArray(n)) return n.some(walk);
+    const rec = n as Record<string, unknown>;
+    const kind = rec["kind"];
+    if (typeof kind === "string" && (SUSPENDING_NODE_KINDS as readonly string[]).includes(kind)) return true;
+    if (kind === "libCall" && typeof rec["fn"] === "string" && (SUSPENDING_LIB_CALLS as readonly string[]).includes(rec["fn"])) return true;
+    for (const k in rec) {
+      if (k === "loc" || k === "type") continue;
+      if (walk(rec[k])) return true;
+    }
+    return false;
+  };
+  return walk(e);
+}
+
+/** The condition a BORROWED local needs from the operands evaluated after it (`following`): none of them reassigns the binding and none of
+ * them can park the function. A NON-BOXED, non-captured local is nameable from this function alone, so a call in `following` (user code, a
+ * getter, a callback) cannot write it: only the writes SPELLED in the operands matter, which is what writesLocal finds structurally. The
+ * narrower isStableReceiverOperand whitelist stays as the fast accept; this is the general answer, and it errs toward the owned path. */
+export function operandsKeepBinding(following: readonly IrExpr[], localId: string): boolean {
+  return following.every((f) => isStableReceiverOperand(f, localId) || (!writesLocal(f, localId) && !mayPark(f)));
 }
 
 /** The dyn operator library calls whose arguments the runtime only BORROWS (it never keeps or frees one): the JS operator conversions

@@ -130,7 +130,7 @@ import {
   type CoroViolations,
   PromotedTempInPhiError,
 } from "./blocks.js";
-import { BORROWING_DYN_LIBCALLS, isStableReceiverOperand, singleWriterLocals, writesLocal } from "../../ir/analysis.js";
+import { BORROWING_DYN_LIBCALLS, isStableReceiverOperand, operandsKeepBinding, singleWriterLocals, writesLocal } from "../../ir/analysis.js";
 import { SCR_BYTES_LEN_OFFSET } from "./runtime-layout.js";
 import {
   buildClassGraph,
@@ -6367,7 +6367,7 @@ class LlEmitter {
       !operand.nullTest &&
       isRefCounted(operand.type) &&
       !this.captureIds.has(operand.localId) &&
-      following.every((f) => isStableReceiverOperand(f, operand.localId))
+      operandsKeepBinding(following, operand.localId)
     ) {
       const b = this.binding(operand.localId);
       if (b.kind !== "boxed" && b.kind !== "global") {
@@ -9099,8 +9099,8 @@ class LlEmitter {
         return this.own({ name: t, type: e.type });
       }
       case "strEq": {
-        const l = this.emitExpr(e.left);
-        const r = this.emitExpr(e.right);
+        const l = this.emitBorrowedLocal(e.left, [e.right]);
+        const r = this.emitBorrowedLocal(e.right, []);
         this.declare(`declare zeroext i1 @scr_str_eq(ptr, ptr)`);
         const eq = B.tmp();
         B.line(`${eq} = call zeroext i1 @scr_str_eq(ptr ${l.name}, ptr ${r.name})`);
@@ -9110,8 +9110,8 @@ class LlEmitter {
         return { name: t, type: e.type };
       }
       case "strCmp": {
-        const l = this.emitExpr(e.left);
-        const r = this.emitExpr(e.right);
+        const l = this.emitBorrowedLocal(e.left, [e.right]);
+        const r = this.emitBorrowedLocal(e.right, []);
         const fn = e.utf16 === true ? "scr_str_cmp_u16" : "scr_str_cmp";
         this.declare(`declare i32 @${fn}(ptr, ptr)`);
         const c = B.tmp();
@@ -9122,7 +9122,7 @@ class LlEmitter {
         return { name: t, type: e.type };
       }
       case "toString": {
-        const v = this.emitExpr(e.operand);
+        const v = e.operand.type.kind === "dyn" ? this.emitBorrowedLocal(e.operand, []) : this.emitExpr(e.operand);
         if (v.type.kind === "union") {
           // The ARM value's ToString: an inline tag switch (unit arms are
           // interned literals, string arms retain the payload, f64/bool
@@ -9382,7 +9382,7 @@ class LlEmitter {
         return out;
       }
       case "arrayGet": {
-        const arr = this.emitExpr(e.arr);
+        const arr = this.emitBorrowedLocal(e.arr, [e.index]);
         const idx = this.emitExpr(e.index);
         if (e.arr.type.kind !== "array") throw new Error("llvm emitter bug: arrayGet on non-array");
         // Ref-element reads return +1 (the runtime retains); own registers
@@ -10214,7 +10214,7 @@ class LlEmitter {
       }
       case "unionIsTag": {
         // A pure tag compare — the box is borrowed, no payload is touched.
-        const u = this.emitExpr(e.value);
+        const u = this.emitBorrowedLocal(e.value, []);
         const tag = this.unionTag(u.name);
         const t = B.tmp();
         B.line(`${t} = icmp ${e.negated ? "ne" : "eq"} i32 ${tag}, ${e.tag}`);
@@ -15530,8 +15530,8 @@ class LlEmitter {
     // hand back a +1 reference, which own() registers like any other.
     // Omitted optional args get the C-side defaults from the strIntrinsic convention (ir/nodes.ts).
     const B = this.B;
-    const r = this.emitExpr(e.receiver);
-    const args = e.args.map((a) => this.emitExpr(a));
+    const r = this.emitBorrowedLocal(e.receiver, e.args);
+    const args = e.args.map((a, i) => this.emitBorrowedLocal(a, e.args.slice(i + 1)));
     const call = (sym: string, sig: string, argText: string, retTy: string, owned: boolean): LlValue => {
       // sig reads "<ret> (<params>)" — respelled to LLVM's declare form.
       const m = /^(.+?) \((.*)\)$/.exec(sig);
@@ -15674,7 +15674,9 @@ class LlEmitter {
     // binding keeps owning its receiver (no retain/release pair per test).
     const r = e.method === "hasSlot" || e.method === "hasIndex"
       ? this.emitStableReceiver(e.receiver, e.args)
-      : this.emitExpr(e.receiver);
+      : e.method === "length"
+        ? this.emitBorrowedLocal(e.receiver, e.args)
+        : this.emitExpr(e.receiver);
     if (e.receiver.type.kind !== "array") throw new Error("llvm emitter bug: arrIntrinsic on non-array");
     const elem = e.receiver.type.elem;
     const acc = elemAccess(elem);

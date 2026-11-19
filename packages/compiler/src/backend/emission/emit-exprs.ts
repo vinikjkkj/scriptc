@@ -20,7 +20,7 @@ import { KEYIX_MEMBER, KEYLIST_MEMBER, OVERFLOW_MEMBER, OWNMASK_MEMBER, SRCPROTO
 import { dynDestrCheckHelper, dynIterNHelper, dynKeyGetHelper, originMarkC, recSrcMapC, viewSyncHelper } from "./emit-walkers.js";
 import { genResultThunkFor } from "./emit-async.js";
 import { emitCoroAwait, emitCoroHop, emitCoroUnionSuspend } from "./emit-coro.js";
-import { BORROWING_DYN_LIBCALLS, isStableReceiverOperand } from "../../ir/analysis.js";
+import { BORROWING_DYN_LIBCALLS, isStableReceiverOperand, operandsKeepBinding } from "../../ir/analysis.js";
 import { dynRoundTripShare } from "../../ir/dyn-keep.js";
 import { wsGlobalCtorFor } from "./emit-ws.js";
 
@@ -193,7 +193,7 @@ export function emitBorrowedLocal(E: CEmitter, operand: IrExpr, following: IrExp
     operand.kind === "varRef" &&
     !operand.nullTest &&
     isRefCounted(operand.type) &&
-    following.every((f) => isStableReceiverOperand(f, operand.localId))
+    operandsKeepBinding(following, operand.localId)
   ) {
     const local = E.currentLocals.get(operand.localId);
     if (local !== undefined && !local.boxed && !local.tdz && !E.globalsById.has(operand.localId)) {
@@ -1001,18 +1001,19 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         return E.newTemp(e.type, `scr_str_concat(${l.name}, ${r.name})`);
       }
       case "strEq": {
-        const l = E.emitExpr(e.left);
-        const r = E.emitExpr(e.right);
+        const l = emitBorrowedLocal(E, e.left, [e.right]);
+        const r = emitBorrowedLocal(E, e.right, []);
         return E.newTemp(e.type, `${e.negated ? "!" : ""}scr_str_eq(${l.name}, ${r.name})`);
       }
       case "strCmp": {
-        const l = E.emitExpr(e.left);
-        const r = E.emitExpr(e.right);
+        const l = emitBorrowedLocal(E, e.left, [e.right]);
+        const r = emitBorrowedLocal(E, e.right, []);
         const fn = e.utf16 === true ? "scr_str_cmp_u16" : "scr_str_cmp";
         return E.newTemp(e.type, `${fn}(${l.name}, ${r.name}) ${e.op} 0`);
       }
       case "toString": {
-        const v = E.emitExpr(e.operand);
+        // String(dyn) only looks at the value (the result is a new string): a plain local dyn is read where it lives.
+        const v = e.operand.type.kind === "dyn" ? emitBorrowedLocal(E, e.operand, []) : E.emitExpr(e.operand);
         if (v.type.kind === "union") {
           // The ARM value's ToString via the per-union interned helper
           // (unit arms are interned literals, string arms retain the
@@ -1094,8 +1095,10 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // other owned string temp. Omitted optional args get the C-side
         // defaults from the strIntrinsic convention (ir/nodes.ts): indexOf position 0, slice start 0,
         // slice end INFINITY (math.h is always included).
-        const r = E.emitExpr(e.receiver);
-        const args = e.args.map((a) => E.emitExpr(a));
+        // Every scr_str_* method only borrows its operands, so a plain local operand is read where it lives (emitBorrowedLocal): no retain,
+        // no frame entry, no release.
+        const r = emitBorrowedLocal(E, e.receiver, e.args);
+        const args = e.args.map((a, i) => emitBorrowedLocal(E, a, e.args.slice(i + 1)));
         const method = e.method;
         switch (method) {
           case "length":
@@ -1403,7 +1406,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         return arr;
       }
       case "arrayGet": {
-        const arr = E.emitExpr(e.arr);
+        // The read only looks at the array (a ref element comes back +1, retained by the runtime): a plain local array is read where it lives.
+        const arr = emitBorrowedLocal(E, e.arr, [e.index]);
         const idx = E.emitExpr(e.index);
         if (e.arr.type.kind !== "array") throw new Error("emitter bug: arrayGet on non-array");
         // Ref-element reads return +1 (the runtime retains); newTemp
@@ -1426,7 +1430,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // stable binding keeps owning its receiver (no retain/release pair per test).
         const r = e.method === "hasSlot" || e.method === "hasIndex"
           ? emitStableReceiver(E, e.receiver, e.args)
-          : E.emitExpr(e.receiver);
+          : e.method === "length"
+            ? emitBorrowedLocal(E, e.receiver, e.args)
+            : E.emitExpr(e.receiver);
         if (e.receiver.type.kind !== "array") throw new Error("emitter bug: arrIntrinsic on non-array");
         const acc = elemAccess(e.receiver.type.elem);
         const method = e.method;
@@ -3619,7 +3625,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
       }
       case "unionIsTag": {
         // A pure tag compare — the box is borrowed, no payload is touched.
-        const u = E.emitExpr(e.value);
+        const u = emitBorrowedLocal(E, e.value, []);
         return E.newTemp(e.type, `${u.name}->tag ${e.negated ? "!=" : "=="} ${e.tag}`);
       }
       case "dynKeyGet": {
