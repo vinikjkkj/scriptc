@@ -9036,6 +9036,12 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
         anyArrayTuple = true;
       }
     }
+    // `.length` of a checker ARRAY whose element type has no mapping (`Object.entries(anyValue)` is `[string, any][]`) while the VALUE lowers
+    // as the checked-dynamic array the runtime walk answers: the dyn-world length read below (a validated keyed read) is exactly Node's.
+    if (kind === undefined && expr.name.text === "length" && L.checker.isArrayType(L.typeOf(expr.expression))) {
+      const probe = probeLower(L, expr.expression);
+      if (probe?.type.kind === "dyn") kind = "array";
+    }
     // `m.size` on a JS `const m = new Map()`. JavaScript has no
     // type-argument syntax, so the checker says `Map<any, any>` — which
     // maps to nothing — while the VALUE lowered as a real Map off the

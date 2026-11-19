@@ -394,6 +394,18 @@ export interface GenericInstance {
         }
         return { type: abi, mode: "omittable", bodyType };
       }
+      // `([k, v]) => ...` over the entries of an `any` value (`Object.entries(anyValue).map(...)`): the checker types the element
+      // `[string, any]`, which has no static mapping, while the value is the checked-dynamic pair the runtime walk built. The slot is
+      // the dyn value and the prologue destructures it through the dyn array pattern.
+      if (ts.isArrayBindingPattern(param.name) && !isJsSourceFile(param.getSourceFile())) {
+        const pt = L.typeOf(param.name);
+        if (
+          L.mapTypeOf(pt) === null && L.checker.isTupleType(pt) &&
+          L.checker.getTypeArguments(pt as ts.TypeReference).some((a) => (a.flags & ts.TypeFlags.Any) !== 0)
+        ) {
+          return { type: DYN, mode: "required" };
+        }
+      }
       return { type: L.irTypeOf(param.name), mode: "required" };
     }
     if (param.dotDotDotToken) {
