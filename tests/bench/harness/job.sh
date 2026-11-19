@@ -9,7 +9,7 @@ set -u
 program=${1:?program}
 ART=$BENCH_WORK/artifacts; mkdir -p "$ART" "$BENCH_WORK/out" "$BENCH_WORK/result"
 LAB=${WT_DIR:?}
-BACKEND=${BACKEND:-c}; VARIANTS=${VARIANTS:-plain}; VARIANTS=${VARIANTS//,/ }; REPS=${REPS:-3}; LAYOUT=${LAYOUT:-none}
+BACKEND=${BACKEND:-c}; BACKEND_CAND=$BACKEND; VARIANTS=${VARIANTS:-plain}; VARIANTS=${VARIANTS//,/ }; REPS=${REPS:-3}; LAYOUT=${LAYOUT:-none}
 # extra_env: K=V pairs separated by ';', never evaluated; the key must be a plain identifier
 IFS=';' read -ra _kv <<< "${EXTRA_ENV:-}"
 for _p in "${_kv[@]}"; do
@@ -46,6 +46,7 @@ fi
 store=${program#messaging-}
 bash "$BENCH_DIR/harness/mkbench.sh" "$store" messaging
 for side in "${sides[@]}"; do
+  [ "$side" = base ] && BACKEND=${BASE_BACKEND:-$BACKEND_CAND} || BACKEND=$BACKEND_CAND
   o=$BENCH_WORK/out/$side
   for v in $VARIANTS; do
     SCC_CLI=$(cli_of $side) bash "$BENCH_DIR/harness/build.sh" "$store" "$BACKEND" "$o" "$v" || echo "build of $side/$v failed"

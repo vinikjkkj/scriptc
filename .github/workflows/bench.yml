@@ -33,6 +33,10 @@ on:
         description: c or llvm
         required: false
         default: c
+      base_backend:
+        description: "lab: backend of the BASE arm (c or llvm), empty = same as backend"
+        required: false
+        default: ""
       node_ref:
         description: "true: also run the same bench entry on Node (tsx) as the output-parity reference and the Node RSS baseline"
         required: false
@@ -223,6 +227,7 @@ jobs:
           WT_DIR: ${{ github.workspace }}/wt
           WT_BASE_DIR: ${{ inputs.base != '' && format('{0}/wt-base', github.workspace) || '' }}
           BACKEND: ${{ inputs.backend }}
+          BASE_BACKEND: ${{ inputs.base_backend }}
           VARIANTS: ${{ inputs.variants }}
           REPS: ${{ inputs.reps }}
           NODE_REF: ${{ inputs.node_ref }}
