@@ -1884,6 +1884,11 @@ ScrDyn *scr_dyn_intrinsic_method_get(ScrDyn *recv, const ScrStr *key) {
   /* An array's `.constructor` is the Array function value: the one `Array` as a value is (scr_dyn_builtin_ctor_value). */
   if (recv->kind == SCR_DYN_ARR && key->len == 11 && memcmp(key->data, "constructor", 11) == 0 && scr_builtin_ctor_provider != NULL)
     return scr_builtin_ctor_provider(1);
+  /* A primitive's `.constructor` is its wrapper's constructor value (String, Number, Boolean): the runtime's one builtin box, so
+   * `v.constructor === String` is identity like Node. */
+  if ((recv->kind == SCR_DYN_STR || recv->kind == SCR_DYN_NUM || recv->kind == SCR_DYN_BOOL) && key->len == 11 &&
+      memcmp(key->data, "constructor", 11) == 0 && scr_builtin_ctor_provider != NULL)
+    return scr_builtin_ctor_provider(recv->kind == SCR_DYN_STR ? 3 : recv->kind == SCR_DYN_NUM ? 4 : 5);
   if (!dyn_kind_knows(recv, key->data)) return NULL;
   /* An OWN or INHERITED member of the same name SHADOWS the prototype's,
    * and the caller has already read it — but `o.toString = undefined`
