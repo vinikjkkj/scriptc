@@ -367,6 +367,40 @@ __attribute__((constructor)) static void scr_poolstat_reg_string(void) {
 #endif
 
 static ScrStr *scr_str_itab[SCR_STR_INTERN_SLOTS];
+/* A counting prefilter over the table's entries, keyed by the entry's ADDRESS: scr_str_intern_forget runs on every release of a string in the length
+ * band, and nearly all of them were never interned, yet each paid an FNV over the whole string just to find that out. The filter holds, per address bucket,
+ * a count of the table entries that live in it, so a count of zero PROVES the string is not in the table and the hash is skipped.
+ *
+ * SOUNDNESS (a false "absent" would leave a dangling pointer in the weak table, so the filter must never give one). Let T be the true number of table
+ * entries whose address falls in a bucket and F the stored byte. The invariant is   F == CAP  OR  F == T   (so F == 0 implies T == 0).
+ *   - start:   F == T == 0.
+ *   - add (an entry is stored):  T grows by one. If F < CAP it grows by one too (F == T still holds, or F has just become CAP); at CAP it stays CAP.
+ *   - del (an entry is removed): T shrinks by one. F shrinks by one only when 0 < F < CAP, so F == T is kept; at CAP it is STICKY (never decremented), so
+ *     the CAP arm of the invariant is never left, and F never falls below T.
+ *   - del is called only for an entry that is really in the table (the evicted victim, which the full-set branch proved non-NULL; the way forget found;
+ *     a non-NULL slot in the drain), so T never goes negative and a 0 is never decremented.
+ * Hence F == 0 is only ever observed with T == 0. Every store to scr_str_itab pairs with exactly one add or del below. SCR_STR_IFILT_CAP is the saturation
+ * point (255, the width of the byte); the unit test lowers it to exercise the sticky arm with a table too small to reach 255. */
+#ifndef SCR_STR_IFILT_BITS
+#define SCR_STR_IFILT_BITS 12
+#endif
+#ifndef SCR_STR_IFILT_CAP
+#define SCR_STR_IFILT_CAP 255
+#endif
+static uint8_t scr_str_ifilt[1u << SCR_STR_IFILT_BITS];
+static inline unsigned scr_str_ifilt_ix(const ScrStr *s) { return (unsigned)(((uint32_t)((uintptr_t)s >> 4) * 2654435761u) >> (32 - SCR_STR_IFILT_BITS)); }
+static inline void scr_str_ifilt_add(const ScrStr *s) {
+#ifndef SCR_STR_IFILT_BREAK
+  uint8_t *c = &scr_str_ifilt[scr_str_ifilt_ix(s)];
+  if (*c != SCR_STR_IFILT_CAP) (*c)++;
+#else
+  (void)s; /* TEST CONTROL: a filter that never counts an entry answers "absent" for everything */
+#endif
+}
+static inline void scr_str_ifilt_del(const ScrStr *s) {
+  uint8_t *c = &scr_str_ifilt[scr_str_ifilt_ix(s)];
+  if (*c != SCR_STR_IFILT_CAP && *c != 0) (*c)--;
+}
 /* Non-NULL slots. Only so the drain below can be O(1) when nothing was ever
  * interned: a table-wide scan would otherwise fault in all 512 KiB of BSS
  * in a program that never made a single concat in the band. */
@@ -487,6 +521,7 @@ static void scr_str_intern_put(unsigned base, ScrStr *s) {
     if (e == NULL) {
       if (!weak) s->rc++; /* the table's OWN reference; see the note on rc >= 1 above */
       scr_str_itab[base + i] = s;
+      scr_str_ifilt_add(s);
       scr_str_itab_used++;
       SCR_CS_BUMP(siput);
       return;
@@ -511,6 +546,8 @@ static void scr_str_intern_put(unsigned base, ScrStr *s) {
     ScrStr *e = scr_str_itab[victim];
     if (!weak) s->rc++;
     scr_str_itab[victim] = s;
+    scr_str_ifilt_del(e);
+    scr_str_ifilt_add(s);
     SCR_CS_BUMP(siput);
     SCR_CS_BUMP(sievict);
     if (!weak) scr_str_release(e);
@@ -533,11 +570,13 @@ static void scr_str_intern_forget(ScrStr *s) {
   if (scr_str_itab_used == 0) return;
   n = (size_t)s->len;
   if (n < SCR_STR_INTERN_MINLEN || n > SCR_STR_INTERN_MAXLEN) return;
+  if (scr_str_ifilt[scr_str_ifilt_ix(s)] == 0) return; /* proven absent: no hash */
   w = scr_str_intern_ways();
   base = scr_str_ihash(s->data, n, NULL, 0) & ~(w - 1u);
   for (i = 0; i < w; i++) {
     if (scr_str_itab[base + i] == s) {
       scr_str_itab[base + i] = NULL;
+      scr_str_ifilt_del(s);
       scr_str_itab_used--;
       return;
     }
@@ -557,6 +596,7 @@ void scr_str_intern_drain(void) {
     ScrStr *e = scr_str_itab[i];
     if (e == NULL) continue;
     scr_str_itab[i] = NULL;
+    scr_str_ifilt_del(e);
     /* A weak entry is a borrowed pointer: releasing it here would drop a
      * reference the table never took, and the audit lane -- which is where
      * this function matters -- would report the deficit as a leak in the

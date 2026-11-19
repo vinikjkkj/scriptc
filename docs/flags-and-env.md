@@ -502,6 +502,8 @@ Each is an `#ifndef`-guarded default in `packages/runtime/src`; a build override
 | `SCR_STR_CHAIN_SLACK` | tuning knob | [source comment] Below 512 a result falls to the SCR_STR_CHAIN_SLACK arm and grows by a constant instead, so a string built from empty pays at most 512/SCR_STR_CHAIN_SLACK = 64 extra reallocations and 512^2/(2*8) = 16 KiB of extra copying on its way to the threshold, once, and nothing after it. That is the whole worst case. | `8` |
 | `SCR_STR_GROWTH_MIN` | tuning knob | No comment at the definition names this macro (defined in `packages/runtime/src/scr_string.c`). | `512` |
 | `SCR_STR_IDLE_DRAIN_MS` | tuning knob | [source comment] Off by default; SCR_STR_IDLE_DRAIN_MS=0 costs one integer compare. | `0` |
+| `SCR_STR_IFILT_BITS` | tuning knob | No comment at the definition names this macro (defined in `packages/runtime/src/scr_string.c`). | `12` |
+| `SCR_STR_IFILT_CAP` | tuning knob | [source comment] SCR_STR_IFILT_CAP is the saturation point (255, the width of the byte); the unit test lowers it to exercise the sticky arm with a table too small to reach 255. | `255` |
 | `SCR_STR_INTERN` | tuning knob | No comment at the definition names this macro (defined in `packages/runtime/src/scr_string.c`). | `1` |
 | `SCR_STR_INTERN_BITS` | tuning knob | No comment at the definition names this macro (defined in `packages/runtime/src/scr_string.c`). | `16` |
 | `SCR_STR_INTERN_MAXLEN` | tuning knob | No comment at the definition names this macro (defined in `packages/runtime/src/scr_string.c`). | `128` |
