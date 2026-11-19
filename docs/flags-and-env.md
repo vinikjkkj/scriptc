@@ -463,6 +463,7 @@ Each is an `#ifndef`-guarded default in `packages/runtime/src`; a build override
 | `SCR_BXC_BITS` | tuning knob | No comment at the definition names this macro (defined in `packages/runtime/src/scr_json.c`). | `12` |
 | `SCR_BXC_MAXLEN` | tuning knob | [source comment] Only short strings (<= SCR_BXC_MAXLEN) take part. The cache is a direct-mapped table keyed by the string block's address. | `256u` |
 | `SCR_BXC_SWEEP_EVERY` | tuning knob | [source comment] It is weak in effect, not in mechanism: every SCR_BXC_SWEEP_EVERY insertions a sweep drops the entries whose box nothing else holds (rc == 1), so a box lives at most that many insertions past its last user, and a collision evicts. No work is added to the death of any node. | `4096u` |
+| `SCR_CM_IDX_MIN` | tuning knob | Smallest member table of a boxed class (a descriptor's `nmembers`) that is looked up through a hash of positions built once per descriptor instead of a walk (defined in `packages/runtime/src/scr_json.c`). `-DSCR_OBJ_NOIDX` restores every walk. | `16` |
 | `SCR_CS_ARM` | debug/lab | No comment at the definition names this macro (defined in `packages/runtime/src/scr_string.c`). | `((void)0)` |
 | `SCR_CS_BUMP` | debug/lab | No comment at the definition names this macro (defined in `packages/runtime/src/scr_string.c`). | `((void)0)` |
 | `SCR_CS_PASS_BEGIN` | debug/lab | No comment at the definition names this macro (defined in `packages/runtime/src/scr_cycle.c`). | `((void)0)` |
@@ -491,6 +492,7 @@ Each is an `#ifndef`-guarded default in `packages/runtime/src`; a build override
 | `SCR_MAP_SHRINK` | tuning knob | No comment at the definition names this macro (defined in `packages/runtime/src/scr_map.c`). | `1` |
 | `SCR_MAP_SHRINK_MIN_ECAP` | tuning knob | No comment at the definition names this macro (defined in `packages/runtime/src/scr_map.c`). | `32` |
 | `SCR_MAP_SHRINK_STAT` | debug/lab | No comment at the definition names this macro (defined in `packages/runtime/src/scr_map.c`). | `0` |
+| `SCR_OBJ_IDX_MIN` | tuning knob | Smallest member count of a dyn object that is looked up through a hash of entry positions kept in its ext (defined in `packages/runtime/src/scr_json.c`); below it the insertion-ordered entry walk answers. Measured on the CI benches: 16 and 64 gave the same Ir (messaging-redis -10.1% / -9.8%, messaging-mysql -3.2% / -3.2%), 64 keeps the REST resident set where it was. `-DSCR_OBJ_NOIDX` restores every walk and the plain-object [[Get]] probes. | `64` |
 | `SCR_OIM_POLICY` | tuning knob | No comment at the definition names this macro (defined in `packages/runtime/src/scr_dyn_oim.c`). | `1` |
 | `SCR_PIN_ATTR` | tuning knob | No comment at the definition names this macro (defined in `packages/runtime/src/scr_runtime.h`). | `__attribute__((used))` |
 | `SCR_POOL_BUDGET` | tuning knob | [source comment] SCR_POOL_BUDGET: the total PHYSICAL BYTES one pool may hold across all classes, as an alternative bound to the per-class depth above. | `16777216` |
