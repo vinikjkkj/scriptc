@@ -1766,8 +1766,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "f64Ok": {
             // The entry guard of a function versioned by ir/f64-raw.ts: kind and length once, and the data pointer the raw accesses use.
             const min = `(size_t)${args[0]!.name}`;
-            if (e.receiver.kind === "varRef") return E.newTemp(e.type, `(${E.f64DataName(e.receiver.localId)} = ${r.name}->data, scr_bytes_f64_ok(${r.name}, ${min}))`);
-            return E.newTemp(e.type, `scr_bytes_f64_ok(${r.name}, ${min})`);
+            // The guard almost always holds (the old body is the rare short or foreign-kind receiver): the hint puts that body out of line.
+            if (e.receiver.kind === "varRef") return E.newTemp(e.type, `(${E.f64DataName(e.receiver.localId)} = ${r.name}->data, __builtin_expect(scr_bytes_f64_ok(${r.name}, ${min}), 1))`);
+            return E.newTemp(e.type, `__builtin_expect(scr_bytes_f64_ok(${r.name}, ${min}), 1)`);
           }
           case "get":
             if (e.raw === true && e.receiver.kind === "varRef") {

@@ -16789,7 +16789,11 @@ class LlEmitter {
         B.line(`${lv} = load i64, ptr ${lp}`);
         B.line(`${lok} = icmp uge i64 ${lv}, ${min}`);
         B.line(`${ok} = and i1 ${eok}, ${lok}`);
-        return { name: ok, type: e.type };
+        // The guard almost always holds (the old body is the rare short or foreign-kind receiver): the hint puts that body out of line.
+        this.declare(`declare i1 @llvm.expect.i1(i1, i1)`);
+        const hot = B.tmp();
+        B.line(`${hot} = call i1 @llvm.expect.i1(i1 ${ok}, i1 true)`);
+        return { name: hot, type: e.type };
       }
       case "get":
         if (e.raw === true && e.receiver.kind === "varRef" && B.f64Data.has(e.receiver.localId)) {
