@@ -13381,6 +13381,32 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
    * Known residual gap: a prototype reached without the name (e.g.
    * Object.getPrototypeOf(new K())) is not walked here. */
   const classProtoNamesCache = new WeakMap<ts.ClassDeclaration, string[] | null>();
+  /** The operands whose checked-dynamic KIND is known from where the value was made, so the integrity operation is exact for it: a call to `Object.create(...)`
+   * (a dyn OBJ), and for freeze also `JSON.parse(...)` and `structuredClone(...)` (an OBJ, an array or a primitive: every one of them freezes exactly), either
+   * as the operand itself or as the initializer of the const binding it names. Every other dyn operand (`any`, `unknown`, a parameter, a field) has a kind the
+   * build cannot see (a function, a class instance and a handle have no write table to guard), so it keeps the compile-time refusal. */
+  function dynIntegrityOperandOk(L: Lowerer, node: ts.Expression, freezing: boolean): boolean {
+    let e: ts.Expression = node;
+    const unwrap = (x: ts.Expression): ts.Expression => {
+      while (ts.isParenthesizedExpression(x) || ts.isAsExpression(x) || ts.isSatisfiesExpression(x) || ts.isTypeAssertion(x) || ts.isNonNullExpression(x)) x = x.expression;
+      return x;
+    };
+    e = unwrap(e);
+    if (ts.isIdentifier(e)) {
+      const sym = L.resolveValueSymbol(e);
+      const decl = sym ? L.checker.valueDeclarationOf(sym) : undefined;
+      if (!decl || !ts.isVariableDeclaration(decl) || decl.initializer === undefined || (decl.parent.flags & ts.NodeFlags.Const) === 0) return false;
+      e = unwrap(decl.initializer);
+    }
+    if (!ts.isCallExpression(e)) return false;
+    const c = unwrap(e.expression);
+    if (ts.isPropertyAccessExpression(c) && ts.isIdentifier(c.expression)) {
+      if (c.name.text === "create" && L.isStdlibGlobal(c.expression, "Object")) return true;
+      if (freezing && c.name.text === "parse" && L.isStdlibGlobal(c.expression, "JSON")) return true;
+    }
+    return freezing && ts.isIdentifier(c) && c.text === "structuredClone" && L.isStdlibGlobal(c, "structuredClone");
+  }
+
   /** `Object.getOwnPropertyDescriptor(o, k)` over a value the checked-dynamic tree can hold (scr_dyn_gopd.c): the receiver crosses into dyn (a dyn
    * receiver as it is), the key stringifies (ToPropertyKey) and a symbol key takes the symbol table's own answer. Null when the receiver has no dyn
    * form (the call keeps its fence). */
@@ -14574,7 +14600,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     // level of the dyn object; a primitive is its own sealed self. Every typed shape keeps the SC2020 fence (a static shape has no per-object bit).
     if ((member === "seal" || member === "preventExtensions") && call.arguments.length === 1 && !ts.isSpreadElement(call.arguments[0]!)) {
       const probedArg = probeLower(L, call.arguments[0]!);
-      if (probedArg !== null && probedArg.type.kind === "dyn") {
+      if (probedArg !== null && probedArg.type.kind === "dyn" && dynIntegrityOperandOk(L, call.arguments[0]!, false)) {
         const subject = L.lowerExpr(call.arguments[0]!);
         L.dynArrayFrozen = true;
         return { kind: "libCall", fn: "dyn.integrityApply", args: [subject, { kind: "numLit", value: member === "seal" ? 2 : 1, type: F64, loc: locOf(call) }], type: DYN, loc: locOf(call) };
@@ -14664,7 +14690,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
       }
       // A CHECKED-DYNAMIC value (an `any` / `unknown` / `object` slot, an untyped JS value): its integrity level is a runtime fact of the dyn object itself
       // (scr_array_frozen.c), enforced on every dyn write path, so the freeze is exact however many aliases exist.
-      if (value.type.kind === "dyn") {
+      if (value.type.kind === "dyn" && dynIntegrityOperandOk(L, argNode, true)) {
         L.dynArrayFrozen = true;
         return { kind: "libCall", fn: "dyn.integrityApply", args: [value, { kind: "numLit", value: 3, type: F64, loc: locOf(call) }], type: DYN, loc: locOf(call) };
       }
