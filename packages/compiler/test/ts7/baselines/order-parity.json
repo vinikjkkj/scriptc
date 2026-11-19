@@ -29765,6 +29765,18 @@
     "<repo>/tests/corpus/25972-a-class-ring-reached-through-a-boundary-copy-of-its-record-array-or-tuple-is-collected-while-the-program-runs.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/25970-cyclic-garbage-is-collected-while-the-program-runs-so-resident-memory-stays-bounded-through-class-rings-and-dyn-rings.ts": {
+   "order": [
+    "<repo>/tests/corpus/25970-cyclic-garbage-is-collected-while-the-program-runs-so-resident-memory-stays-bounded-through-class-rings-and-dyn-rings.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25971-dead-dyn-scalars-and-strings-recycle-through-their-freelists-with-every-kind-intact-and-cyclic-rings-between-them-still-collect.ts": {
+   "order": [
+    "<repo>/tests/corpus/25971-dead-dyn-scalars-and-strings-recycle-through-their-freelists-with-every-kind-intact-and-cyclic-rings-between-them-still-collect.ts"
+   ],
+   "diags": []
   }
  }
 }
