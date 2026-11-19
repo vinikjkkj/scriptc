@@ -1570,7 +1570,7 @@ async function compileTracked(
     narrowSlotPass(lowered.module!);
     numSlotPass(lowered.module!);
     cbitPass(lowered.module!);
-    f64RawPass(lowered.module!);
+    tapped("fe.f64raw", () => f64RawPass(lowered.module!));
     const validation = tapped("fe.validate", () => validateModule(lowered.module!));
     if (validation.length > 0) {
       return fail(validation.map((v) => iceDiag(v.message, v.loc)));
@@ -2546,7 +2546,7 @@ export async function compileLibrary(opts: CompileLibraryOptions): Promise<Compi
   narrowSlotPass(mod);
   numSlotPass(mod);
   cbitPass(mod);
-  f64RawPass(mod);
+  tapped("fe.f64raw", () => f64RawPass(mod));
   const validation = validateModule(mod);
   if (validation.length > 0) return fail(validation.map((v) => iceDiag(v.message, v.loc)));
 
