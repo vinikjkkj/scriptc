@@ -37,7 +37,7 @@ import { EVAL_STATIC_CLASSES } from "../../ir/nodes.js";
 import { isIntegerKeyName } from "../../ir/nodes.js";
 import { nullProtoRule, OWNMASK_COMPLETED, OWNMASK_SRC_NULL_PROTO, OWNMASK_VALID, ownMaskKeyBit as maskKeyBit } from "../../ir/nodes.js";
 import { INTERNAL_SLOT_WANT_TEXT } from "../emission/emit-walkers.js";
-import { mangleAsyncSpawn, mangleClassRelease, mangleClassRetain, mangleClassStruct, mangleFnClosure, mangleFunction, mangleRecordNew, mangleRecordRelease, mangleRecordStruct } from "../mangle.js";
+import { mangleAsyncSpawn, mangleClassRelease, mangleClassRetain, mangleClassStruct, mangleFnClosure, mangleFunction, mangleRecordNew, mangleRecordRelease, mangleRecordRetain, mangleRecordStruct } from "../mangle.js";
 import { dynMemberRows, dynStaticTable, type DynMemberClass } from "../dyn-members.js";
 import { classFieldIndex, type LlClassMeta } from "./classes.js";
 import { KINDGATE_WIDE_KINDS, kindgateJsvalLane, soleRecordArmWithFuncMember, kindgateFuncLane, kindgateInstanceLane, kindgateWideLane, readKindgateDials } from "../kindgate.js";
@@ -1884,7 +1884,12 @@ export class LlDyn {
               B.line(`${tsp} = getelementptr inbounds %${struct}, ptr %rl, i64 0, i32 ${toStrSlotIndex(shape)}`);
               B.line(`store ptr ${ts}, ptr ${tsp}`);
             }
-            B.terminate(`ret ptr %rl`);
+            host.declare(`declare ptr @scr_dynview_canon(ptr, ptr, ptr, i64, ptr, ptr)`);
+            const lcv = B.tmp();
+            const lvv = B.tmp();
+            B.line(`${lvv} = load ptr, ptr ${vlp}`);
+            B.line(`${lcv} = call ptr @scr_dynview_canon(ptr %rl, ptr ${lvv}, ptr @${mangleRecordRelease(t.shapeId)}, i64 ptrtoint (ptr getelementptr (%${struct}, ptr null, i32 1) to i64), ptr @${mangleRecordRetain(t.shapeId)}, ptr @${mangleRecordRelease(t.shapeId)})`);
+            B.terminate(`ret ptr ${lcv}`);
             B.startBlock(lEager);
           }
           const lObj = B.newLabel("dcr.wo");
@@ -2530,7 +2535,19 @@ export class LlDyn {
           B.line(`${p} = load ptr, ptr ${projSlot}`);
           B.line(`call void @scr_dyn_release(ptr ${p}) ; the wide lane's projection`);
         }
-        B.terminate(`ret ptr %r0`);
+        if (shape.view === true) {
+          // DYN VIEW IDENTITY: one record per (object, shape) - the C twin's scr_dynview_canon return.
+          host.declare(`declare ptr @scr_dynview_canon(ptr, ptr, ptr, i64, ptr, ptr)`);
+          const cvp = B.tmp();
+          const cvv = B.tmp();
+          const cvr = B.tmp();
+          B.line(`${cvp} = getelementptr inbounds %${struct}, ptr %r0, i64 0, i32 ${viewSlotIndex(shape)} ; <view>`);
+          B.line(`${cvv} = load ptr, ptr ${cvp}`);
+          B.line(`${cvr} = call ptr @scr_dynview_canon(ptr %r0, ptr ${cvv}, ptr @${mangleRecordRelease(t.shapeId)}, i64 ptrtoint (ptr getelementptr (%${struct}, ptr null, i32 1) to i64), ptr @${mangleRecordRetain(t.shapeId)}, ptr @${mangleRecordRelease(t.shapeId)})`);
+          B.terminate(`ret ptr ${cvr}`);
+        } else {
+          B.terminate(`ret ptr %r0`);
+        }
         break;
       }
       case "array": {

@@ -797,6 +797,15 @@ export function emitRecordShapes(host: ShapeHost, mod: IrModule): { typeDefs: st
       host.declare(`declare void @scr_cyc_on_dead(ptr)`);
       rel.push(`  call void @scr_cyc_on_dead(ptr %o)`);
     }
+    if (shape.view) {
+      // DYN VIEW IDENTITY: the one record of its dynamic view leaves the table (the C twin's scr_dynview_unreg line).
+      host.declare(`declare void @scr_dynview_unreg(ptr, ptr, ptr)`);
+      rel.push(
+        `  %uvp = getelementptr inbounds %${struct}, ptr %o, i64 0, i32 ${viewSlotIndex(shape)}`,
+        `  %uvv = load ptr, ptr %uvp`,
+        `  call void @scr_dynview_unreg(ptr %o, ptr %uvv, ptr @${mangleRecordRelease(shape.id)})`,
+      );
+    }
     let t = 0;
     for (const m of refMembers) {
       rel.push(
@@ -904,6 +913,14 @@ export function emitRecordShapes(host: ShapeHost, mod: IrModule): { typeDefs: st
         `define internal void @${mangleRecordGcFree(shape.id)}(ptr %o) ${FN_ATTRS} {`,
         `entry:`,
       ];
+      if (shape.view) {
+        host.declare(`declare void @scr_dynview_unreg(ptr, ptr, ptr)`);
+        gf.push(
+          `  %uvp = getelementptr inbounds %${struct}, ptr %o, i64 0, i32 ${viewSlotIndex(shape)}`,
+          `  %uvv = load ptr, ptr %uvp`,
+          `  call void @scr_dynview_unreg(ptr %o, ptr %uvv, ptr @${mangleRecordRelease(shape.id)}) ; the view pointer is a key here, never read`,
+        );
+      }
       untracedRefMembers.forEach((m, i) => {
         gf.push(
           `  %f${i} = getelementptr inbounds %${struct}, ptr %o, i64 0, i32 ${m.index}`,
