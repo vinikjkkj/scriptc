@@ -1870,7 +1870,10 @@ export const STATIC_CLASS_RECORDED = platform === "win32" ? 116_736 : null;
 /* 2026-11-15 (cloufunc1, a closure is its own dyn function value): RE-RECORDED 217_088 -> 220_672 (+3_584). SOURCE: CI Windows 3/20 of run 43712282700 on ccbdee537,
  * "expected 220672 to be less than 219648" (the ceiling check, reached once the text figure above had been re-recorded; the recorded check passes inside its page).
  * The always-linked closure core grew the regex program's .text by 1_648 and its sections by the rest; the ceiling below moves one page-multiple with it. */
-export const REGEX_CLASS_RECORDED = platform === "win32" ? 220_672 : null;
+/* 2026-11-19 (cpu2, the dyn member indexes): RE-RECORDED 220_672 -> 225_792 (+5_120). SOURCE: CI Windows 3/20 of run 44496656611 on 75c2ef42e, "the regex program GREW by 5120 bytes:
+ * 225792 against the recorded 220672" (reached once the .text figure above had been re-recorded), and the local zig 0.16.0 windows-gnu cross build of the probe measures 225,792 for
+ * the same tree. The .text grew 2,240 (see REGEX_CLASS_TEXT_RECORDED); the rest is the file-size granule of the sections (the PE file alignment), the same shape as the entry above. */
+export const REGEX_CLASS_RECORDED = platform === "win32" ? 225_792 : null;
 
 /** The complaint a recorded-figure check makes, or null when the size is
  * within one page of what was recorded. A string rather than a thrown
