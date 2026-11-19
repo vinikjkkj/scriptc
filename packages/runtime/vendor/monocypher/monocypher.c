@@ -1572,6 +1572,10 @@ static void scalarmult(u8 q[32], const u8 scalar[32], const u8 p[32],
 	WIPE_BUFFER(x3);  WIPE_BUFFER(z3);  WIPE_BUFFER(t1);
 }
 
+// scriptc: the four-limb 64-bit field ladder for X25519 alone (see monocypher-x25519-64.h); every other scalar multiplication
+// (the "dirty" and inverse variants, Ed25519) keeps scalarmult() above.
+#include "monocypher-x25519-64.h"
+
 void crypto_x25519(u8       raw_shared_secret[32],
                    const u8 your_secret_key  [32],
                    const u8 their_public_key [32])
@@ -1579,7 +1583,11 @@ void crypto_x25519(u8       raw_shared_secret[32],
 	// restrict the possible scalar values
 	u8 e[32];
 	crypto_eddsa_trim_scalar(e, your_secret_key);
+#ifdef SCR_X25519_4X64
+	scr_x25519_4x64(raw_shared_secret, e, their_public_key);
+#else
 	scalarmult(raw_shared_secret, e, their_public_key, 255);
+#endif
 	WIPE_BUFFER(e);
 }
 
