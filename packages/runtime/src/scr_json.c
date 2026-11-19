@@ -1178,7 +1178,7 @@ __attribute__((noinline)) void scr_dyn_release(ScrDyn *d) {
 #define SCR_OBJ_IDX_MIN 64
 #endif
 typedef struct ScrDynObjIdx {
-  uint32_t cap;  /* slots, a power of two >= 2 * used */
+  uint32_t cap;  /* slots, a power of two >= 1.5 * used */
   uint32_t used; /* positions inserted == the table's len when in step */
   uint32_t wide; /* slots are uint32 (else uint16) */
   uint32_t pad;
@@ -1216,7 +1216,7 @@ static inline void scr_idx_put(ScrDynObjIdx *ix, uint32_t i, uint32_t v) {
   else ((uint16_t *)(ix + 1))[i] = (uint16_t)v;
 }
 
-/* Position of the first free slot for `key` (the table has room: used <= cap / 2). */
+/* Insert at the first free slot for `key` (the table has room: used <= 2/3 of cap). */
 static inline void scr_idx_insert_at(ScrDynObjIdx *ix, const char *key, size_t key_len, uint32_t pos) {
   const uint32_t mask = ix->cap - 1;
   uint32_t i = scr_dyn_key_hash(key, key_len) & mask;
@@ -1229,7 +1229,7 @@ static inline void scr_idx_insert_at(ScrDynObjIdx *ix, const char *key, size_t k
 static __attribute__((noinline)) ScrDynObjIdx *scr_dyn_obj_idx_build(ScrDyn *obj) {
   const uint32_t len = obj->v.obj.len;
   uint32_t cap = 64;
-  while (cap < 2u * len + 2u) cap <<= 1;
+  while (cap < len + len / 2u + 2u) cap <<= 1; /* load <= 2/3: a probe still ends in about two slots, and the block stays near a quarter of the entries */
   const uint32_t wide = len + 1u >= 65535u;
   ScrDynObjIdx *ix = (ScrDynObjIdx *)calloc(1, sizeof *ix + (size_t)cap * (wide ? 4 : 2));
   if (ix == NULL) scr_json_oom();
@@ -1282,7 +1282,7 @@ static __attribute__((noinline)) ScrDyn *scr_dyn_obj_get_big(const ScrDyn *d, co
 static inline void scr_dyn_obj_idx_note_append(ScrDyn *obj, uint32_t pos) {
   ScrDynObjIdx *ix = obj->v.obj.ext != NULL ? obj->v.obj.ext->idx : NULL;
   if (__builtin_expect(ix == NULL, 1)) return;
-  if (ix->used != pos || 2u * (ix->used + 1u) > ix->cap || (!ix->wide && pos + 2u >= 65535u)) {
+  if (ix->used != pos || 3u * (ix->used + 1u) > 2u * ix->cap || (!ix->wide && pos + 2u >= 65535u)) {
     ix->used = ~0u; /* out of step or full: the next lookup rebuilds over the new length */
     return;
   }
@@ -5545,15 +5545,17 @@ static size_t scr_error_members_present_impl(const ScrError *e) {
   return n;
 }
 
-static const ScrDynClass **scr_cls_by_pre = NULL; /* the memo of scr_dyn_objinst_class_of's registry walk, see there */
-static size_t scr_cls_by_pre_n = 0;
+/* The memo of scr_dyn_objinst_class_of's registry walk (see there): preorder position -> class, one entry per position ever asked about. */
+typedef struct { uint32_t p1; /* position + 1, 0 = empty */ const ScrDynClass *cls; } ScrClsMemo;
+static ScrClsMemo *scr_cls_memo = NULL;
+static uint32_t scr_cls_memo_cap = 0, scr_cls_memo_used = 0;
 
 void scr_dyn_objinst_registry(const ScrDynClass *const *descs, size_t n) {
   scr_cls_reg = descs;
   scr_cls_reg_n = n;
-  free(scr_cls_by_pre);
-  scr_cls_by_pre = NULL;
-  scr_cls_by_pre_n = 0;
+  free(scr_cls_memo);
+  scr_cls_memo = NULL;
+  scr_cls_memo_cap = scr_cls_memo_used = 0;
   scr_error_install_members_present(&scr_error_members_present_impl);
 }
 
@@ -5606,27 +5608,29 @@ const ScrDyn *scr_dyn_objinst_props_table(const ScrDyn *d) {
   return *(const ScrDyn *const *)((const char *)d->v.inst.o + off);
 }
 
-/* Paints scr_cls_by_pre. The table spans [0, max post]; a registry whose numbering is implausibly wide leaves it at length 0 and every call
- * walks. Ties (equal intervals) keep the FIRST registry entry, as the walk's strict `<` does. */
-static __attribute__((noinline)) void scr_cls_by_pre_build(void) {
-  size_t maxp = 0;
-  for (size_t i = 0; i < scr_cls_reg_n; i++)
-    if (scr_cls_reg[i]->post > maxp) maxp = scr_cls_reg[i]->post;
-  size_t n = scr_cls_reg_n != 0 && maxp < (1u << 20) ? maxp + 1 : 0;
-  const ScrDynClass **tab = (const ScrDynClass **)calloc(n != 0 ? n : 1, sizeof *tab);
-  if (tab == NULL) scr_json_oom();
-  for (size_t i = 0; i < scr_cls_reg_n; i++) {
-    const ScrDynClass *c = scr_cls_reg[i];
-    for (size_t p = c->pre; p <= c->post && p < n; p++) {
-      const ScrDynClass *b = tab[p];
-#ifdef SCR_OBJ_PLANT_BUG
-      if (SCR_OBJ_PLANT_BUG == 5) { if (b == NULL || (c->post - c->pre) > (b->post - b->pre)) tab[p] = c; continue; } /* the planted defect: the LOOSEST containing class wins */
-#endif
-      if (b == NULL || (c->post - c->pre) < (b->post - b->pre)) tab[p] = c;
+/* Remember `c` as the answer for position `p`. The table is small (a program asks about the positions of the hierarchy classes it
+ * actually instantiates) and grows by doubling at two thirds full. */
+static __attribute__((noinline)) void scr_cls_memo_put(size_t p, const ScrDynClass *c) {
+  if (p >= 0xfffffff0u) return;
+  if (3u * (scr_cls_memo_used + 1u) > 2u * scr_cls_memo_cap) {
+    const uint32_t ncap = scr_cls_memo_cap ? scr_cls_memo_cap * 2u : 64u;
+    ScrClsMemo *nt = (ScrClsMemo *)calloc(ncap, sizeof *nt);
+    if (nt == NULL) scr_json_oom();
+    for (uint32_t i = 0; i < scr_cls_memo_cap; i++) {
+      if (scr_cls_memo[i].p1 == 0) continue;
+      uint32_t h = (scr_cls_memo[i].p1 * 0x9E3779B1u) & (ncap - 1u);
+      while (nt[h].p1 != 0) h = (h + 1u) & (ncap - 1u);
+      nt[h] = scr_cls_memo[i];
     }
+    free(scr_cls_memo);
+    scr_cls_memo = nt;
+    scr_cls_memo_cap = ncap;
   }
-  scr_cls_by_pre = tab;
-  scr_cls_by_pre_n = n;
+  uint32_t h = (((uint32_t)p + 1u) * 0x9E3779B1u) & (scr_cls_memo_cap - 1u);
+  while (scr_cls_memo[h].p1 != 0) h = (h + 1u) & (scr_cls_memo_cap - 1u);
+  scr_cls_memo[h].p1 = (uint32_t)p + 1u;
+  scr_cls_memo[h].cls = c;
+  scr_cls_memo_used++;
 }
 
 const ScrDynClass *scr_dyn_objinst_class_of(const ScrDyn *d) {
@@ -5651,13 +5655,17 @@ const ScrDynClass *scr_dyn_objinst_class_of(const ScrDyn *d) {
    * instance's position and the TIGHTEST containing one is the instance's
    * own class. Linear over the program's boxable classes, which is
    * nothing beside the call this is about to dispatch. */
-  /* The answer depends only on `p` (the registry is installed once, at startup, and never changes), so it is computed ONCE per position into a
-   * table indexed by preorder number: the same tightest-containing-interval rule, painted for every position instead of re-walked for every
-   * call (one walk was ~1,000 Ir over a few hundred classes, per call, on every dyn member read of a hierarchy instance). A position outside
-   * the table (or an unpainted one) takes the walk, so the memo can only answer what the walk answers. */
+  /* The answer depends only on `p` (the registry is installed once, at startup, and never changes), so it is remembered per position: the same
+   * tightest-containing-interval rule, walked once per position instead of once per call (one walk was ~1,000 Ir over a few hundred classes, per call,
+   * on every dyn member read of a hierarchy instance). Only a walk that FOUND a class is remembered, so the memo can only answer what the walk answers. */
 #ifndef SCR_OBJ_NOIDX
-  if (__builtin_expect(scr_cls_by_pre == NULL, 0)) scr_cls_by_pre_build();
-  if (p < scr_cls_by_pre_n && scr_cls_by_pre[p] != NULL) return scr_cls_by_pre[p];
+  if (scr_cls_memo_cap != 0 && p < 0xfffffff0u) {
+    uint32_t h = (((uint32_t)p + 1u) * 0x9E3779B1u) & (scr_cls_memo_cap - 1u);
+    while (scr_cls_memo[h].p1 != 0) {
+      if (scr_cls_memo[h].p1 == (uint32_t)p + 1u) return scr_cls_memo[h].cls;
+      h = (h + 1u) & (scr_cls_memo_cap - 1u);
+    }
+  }
 #endif
   const ScrDynClass *best = NULL;
   for (size_t i = 0; i < scr_cls_reg_n; i++) {
@@ -5667,6 +5675,22 @@ const ScrDynClass *scr_dyn_objinst_class_of(const ScrDyn *d) {
       best = c;
     }
   }
+#ifndef SCR_OBJ_NOIDX
+  if (best != NULL) {
+#ifdef SCR_OBJ_PLANT_BUG
+    if (SCR_OBJ_PLANT_BUG == 5) { /* the planted defect: the LOOSEST containing class is what gets remembered */
+      const ScrDynClass *loose = NULL;
+      for (size_t i = 0; i < scr_cls_reg_n; i++) {
+        const ScrDynClass *c = scr_cls_reg[i];
+        if (c->pre <= p && p <= c->post && (loose == NULL || (c->post - c->pre) > (loose->post - loose->pre))) loose = c;
+      }
+      scr_cls_memo_put(p, loose);
+      return loose;
+    }
+#endif
+    scr_cls_memo_put(p, best);
+  }
+#endif
   return best != NULL ? best : own;
 }
 
@@ -5713,19 +5737,19 @@ bool scr_dyn_objinst_emitter_api(const ScrDyn *d, size_t pre, size_t post, const
 #ifndef SCR_CM_IDX_MIN
 #define SCR_CM_IDX_MIN 16
 #endif
-#define SCR_CM_IDX_SLOTS 32
+#define SCR_CM_IDX_SLOTS 64
 static struct ScrCmIdx {
   const ScrDynClass *cls;
   uint32_t mask;
-  uint32_t *slots; /* position + 1, 0 = empty */
+  uint16_t *slots; /* position + 1, 0 = empty (a table of 65,535 rows or more is never indexed) */
 } scr_cm_idx[SCR_CM_IDX_SLOTS];
 static size_t scr_cm_idx_n = 0;
 
 static __attribute__((noinline)) const struct ScrCmIdx *scr_cm_idx_build(const ScrDynClass *c) {
-  if (scr_cm_idx_n == SCR_CM_IDX_SLOTS) return NULL;
-  uint32_t cap = 64;
-  while (cap < 2u * (uint32_t)c->nmembers + 2u) cap <<= 1;
-  uint32_t *slots = (uint32_t *)calloc(cap, sizeof *slots);
+  if (scr_cm_idx_n == SCR_CM_IDX_SLOTS || c->nmembers >= 65535u) return NULL;
+  uint32_t cap = 32;
+  while (cap < (uint32_t)c->nmembers + (uint32_t)c->nmembers / 2u + 2u) cap <<= 1;
+  uint16_t *slots = (uint16_t *)calloc(cap, sizeof *slots);
   if (slots == NULL) scr_json_oom();
   for (size_t i = 0; i < c->nmembers; i++) {
     const ScrDynClassMember *m = &c->members[i];
@@ -5740,7 +5764,7 @@ static __attribute__((noinline)) const struct ScrCmIdx *scr_cm_idx_build(const S
       }
       h = (h + 1) & (cap - 1);
     }
-    if (!dup) slots[h] = (uint32_t)i + 1;
+    if (!dup) slots[h] = (uint16_t)(i + 1);
   }
   struct ScrCmIdx *e = &scr_cm_idx[scr_cm_idx_n++];
   e->cls = c;
