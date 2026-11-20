@@ -4513,10 +4513,9 @@ class LlEmitter {
     const acc = B.tmp();
     B.line(`${acc} = load ptr, ptr ${b.slot} ; += accumulator: the binding's own reference moves into the concat`);
     this.own({ name: acc, type: b.type });
-    const cfa = this.mod.absentStrings === true ? "scr_str_concat_u" : "scr_str_concat";
-    this.declare(`declare ptr @${cfa}(ptr, ptr)`);
+    this.declare(`declare ptr @scr_str_concat(ptr, ptr)`);
     const t = B.tmp();
-    B.line(`${t} = call ptr @${cfa}(ptr ${acc}, ptr ${r.name})`);
+    B.line(`${t} = call ptr @scr_str_concat(ptr ${acc}, ptr ${r.name})`);
     B.line(`store ptr ${t}, ptr ${b.slot}`);
     return true;
   }
@@ -4531,12 +4530,11 @@ class LlEmitter {
     const acc = this.emitExpr(v.left);
     const r = this.emitExpr(v.right);
     this.declare(`declare ptr @scr_box_str_unshare(ptr, ptr)`);
-    const cfb = this.mod.absentStrings === true ? "scr_str_concat_u" : "scr_str_concat";
-    this.declare(`declare ptr @${cfb}(ptr, ptr)`);
+    this.declare(`declare ptr @scr_str_concat(ptr, ptr)`);
     const box = this.loadBox(b.slot);
     B.line(`call ptr @scr_box_str_unshare(ptr ${box}, ptr ${acc.name}) ; += accumulator: the box's own reference moves into the concat`);
     const t = B.tmp();
-    B.line(`${t} = call ptr @${cfb}(ptr ${acc.name}, ptr ${r.name})`);
+    B.line(`${t} = call ptr @scr_str_concat(ptr ${acc.name}, ptr ${r.name})`);
     this.boxSet(this.loadBox(b.slot), b.type, t);
     return true;
   }
@@ -5780,6 +5778,26 @@ class LlEmitter {
     B.startBlock(lJoin);
   }
 
+  /** A member use of a string receiver in a module that can hold the absent string: Node's TypeError, before the arguments evaluate. One inline
+   * pointer compare against the runtime's marker; the pending exception unwinds like a fallible call's. */
+  private emitAbsentMemberCheck(recv: string, member: string): void {
+    const B = this.B;
+    this.declare(`@scr_str_absent_sentinel = external constant ptr`);
+    this.declare(`declare void @scr_str_absent_member(ptr)`);
+    const sent = B.tmp();
+    const hit = B.tmp();
+    B.line(`${sent} = load ptr, ptr @scr_str_absent_sentinel`);
+    B.line(`${hit} = icmp eq ptr ${recv}, ${sent}`);
+    const lt = B.newLabel("abs.t");
+    const lj = B.newLabel("abs.j");
+    B.condBr(hit, lt, lj);
+    B.startBlock(lt);
+    B.line(`call void @scr_str_absent_member(ptr ${this.cstr(member)})`);
+    this.emitPendingCheck();
+    B.br(lj);
+    B.startBlock(lj);
+  }
+
   private emitPendingCheck(answered?: string): void {
     const B = this.B;
     if (B.isTerminated()) return;
@@ -5867,7 +5885,18 @@ class LlEmitter {
         B.line(`${rawLen} = load i32, ptr ${lenp}`);
         B.line(`${len} = zext i32 ${rawLen} to i64`);
         B.line(`${t} = icmp ne i64 ${len}, 0`);
-        return t;
+        if (this.mod.absentStrings !== true) return t;
+        // A module that can hold the absent string (Node's undefined, text "undefined" with a nonzero length): it is falsy.
+        this.declare(`@scr_str_absent_sentinel = external constant ptr`);
+        const sent = B.tmp();
+        const isAbs = B.tmp();
+        const notAbs = B.tmp();
+        const res = B.tmp();
+        B.line(`${sent} = load ptr, ptr @scr_str_absent_sentinel`);
+        B.line(`${isAbs} = icmp eq ptr ${v.name}, ${sent}`);
+        B.line(`${notAbs} = xor i1 ${isAbs}, true`);
+        B.line(`${res} = and i1 ${t}, ${notAbs}`);
+        return res;
       }
       case "array":
       case "record":
@@ -9143,7 +9172,7 @@ class LlEmitter {
             const take = Math.min(7, names.length - i);
             const group = [acc, ...names.slice(i, i + take)];
             const sig = group.map(() => "ptr").join(", ");
-            const cfn = concatFn(group.length, this.mod.absentStrings === true);
+            const cfn = concatFn(group.length);
             this.declare(`declare ptr @${cfn}(${sig})`);
             const ct = B.tmp();
             B.line(`${ct} = call ptr @${cfn}(${group.map((g) => `ptr ${g}`).join(", ")})`);
@@ -9155,10 +9184,9 @@ class LlEmitter {
         }
         const l = this.emitExpr(e.left);
         const r = this.emitExpr(e.right);
-        const cf2 = this.mod.absentStrings === true ? "scr_str_concat_u" : "scr_str_concat";
-        this.declare(`declare ptr @${cf2}(ptr, ptr)`);
+        this.declare(`declare ptr @scr_str_concat(ptr, ptr)`);
         const t = B.tmp();
-        B.line(`${t} = call ptr @${cf2}(ptr ${l.name}, ptr ${r.name})`);
+        B.line(`${t} = call ptr @scr_str_concat(ptr ${l.name}, ptr ${r.name})`);
         return this.own({ name: t, type: e.type });
       }
       case "strEq": {
@@ -9176,12 +9204,6 @@ class LlEmitter {
       case "strCmp": {
         const l = this.emitBorrowedLocal(e.left, [e.right]);
         const r = this.emitBorrowedLocal(e.right, []);
-        if (this.mod.absentStrings === true) {
-          this.declare(`declare zeroext i1 @scr_str_rel_u(ptr, ptr, i32)`);
-          const rel = B.tmp();
-          B.line(`${rel} = call zeroext i1 @scr_str_rel_u(ptr ${l.name}, ptr ${r.name}, i32 ${["<", "<=", ">", ">="].indexOf(e.op)})`);
-          return { name: rel, type: e.type };
-        }
         const fn = e.utf16 === true ? "scr_str_cmp_u16" : "scr_str_cmp";
         this.declare(`declare i32 @${fn}(ptr, ptr)`);
         const c = B.tmp();
@@ -9189,7 +9211,17 @@ class LlEmitter {
         const pred = { "<": "slt", "<=": "sle", ">": "sgt", ">=": "sge" }[e.op];
         B.line(`${c} = call i32 @${fn}(ptr ${l.name}, ptr ${r.name})`);
         B.line(`${t} = icmp ${pred} i32 ${c}, 0`);
-        return { name: t, type: e.type };
+        if (this.mod.absentStrings !== true) return { name: t, type: e.type };
+        // A module that can hold the absent string: every relational operator against it is false (undefined -> NaN).
+        this.declare(`@scr_str_absent_sentinel = external constant ptr`);
+        const sent = B.tmp(), la = B.tmp(), lb = B.tmp(), either = B.tmp(), none = B.tmp(), res = B.tmp();
+        B.line(`${sent} = load ptr, ptr @scr_str_absent_sentinel`);
+        B.line(`${la} = icmp eq ptr ${l.name}, ${sent}`);
+        B.line(`${lb} = icmp eq ptr ${r.name}, ${sent}`);
+        B.line(`${either} = or i1 ${la}, ${lb}`);
+        B.line(`${none} = xor i1 ${either}, true`);
+        B.line(`${res} = and i1 ${t}, ${none}`);
+        return { name: res, type: e.type };
       }
       case "toString": {
         const v = e.operand.type.kind === "dyn" ? this.emitBorrowedLocal(e.operand, []) : this.emitExpr(e.operand);
@@ -15603,11 +15635,7 @@ class LlEmitter {
     const r = this.emitBorrowedLocal(e.receiver, e.args);
     // A module that can hold the absent string: a member use of it is Node's TypeError, before the arguments evaluate (pending check follows).
     const absentMember = this.mod.absentStrings === true ? absentRecvMember(e.method) : undefined;
-    if (absentMember !== undefined) {
-      this.declare(`declare zeroext i1 @scr_str_recv_chk_u(ptr, ptr)`);
-      B.line(`call zeroext i1 @scr_str_recv_chk_u(ptr ${r.name}, ptr ${this.cstr(absentMember)})`);
-      this.emitPendingCheck();
-    }
+    if (absentMember !== undefined) this.emitAbsentMemberCheck(r.name, absentMember);
     const args = e.args.map((a, i) => this.emitBorrowedLocal(a, e.args.slice(i + 1)));
     const call = (sym: string, sig: string, argText: string, retTy: string, owned: boolean): LlValue => {
       // sig reads "<ret> (<params>)" — respelled to LLVM's declare form.
@@ -17267,26 +17295,13 @@ class LlEmitter {
   private emitRegexIntrinsic(e: IrExpr & { kind: "regexIntrinsic" }): LlValue {
     const B = this.B;
     const method = e.method;
-    let r = this.emitExpr(e.receiver);
-    // A module that can hold the absent string: a member use of it is Node's TypeError, before the arguments evaluate; the subject of
-    // exec/test is ToString'd, so it reads as the text "undefined".
-    const absentAware = this.mod.absentStrings === true;
-    const undefU = (v: LlValue): LlValue => {
-      this.declare(`declare ptr @scr_str_undef_u(ptr)`);
-      const t = B.tmp();
-      B.line(`${t} = call ptr @scr_str_undef_u(ptr ${v.name})`);
-      return { ...v, name: t };
-    };
-    if (absentAware && e.receiver.type.kind === "string") {
+    const r = this.emitExpr(e.receiver);
+    // A module that can hold the absent string: a member use of it is Node's TypeError, before the arguments evaluate.
+    if (this.mod.absentStrings === true && e.receiver.type.kind === "string") {
       const am = absentRegexRecvMember(method);
-      if (am !== undefined) {
-        this.declare(`declare zeroext i1 @scr_str_recv_chk_u(ptr, ptr)`);
-        B.line(`call zeroext i1 @scr_str_recv_chk_u(ptr ${r.name}, ptr ${this.cstr(am)})`);
-        this.emitPendingCheck();
-      } else if (method === "exec") r = undefU(r);
+      if (am !== undefined) this.emitAbsentMemberCheck(r.name, am);
     }
     const args = e.args.map((a) => this.emitExpr(a));
-    if (absentAware && method === "test" && e.args[0]?.type.kind === "string") args[0] = undefU(args[0]!);
     const fallible = (sym: string, argText: string): LlValue => {
       this.declare(`declare ptr @${sym}(${argText.split(", ").map(() => "ptr").join(", ")})`);
       const t = B.tmp();

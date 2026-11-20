@@ -3292,7 +3292,10 @@ export class CEmitter {
       case "f64":
         return `${t.name} == ${t.name} && ${t.name} != 0`;
       case "string":
-        return `${t.name}->len != 0`;
+        // A module that can hold the absent string (Node's undefined, text "undefined" with a nonzero length): it is falsy.
+        return this.mod.absentStrings === true
+          ? `(${t.name}->len != 0 && ${t.name} != (ScrStr *)scr_str_absent_sentinel)`
+          : `${t.name}->len != 0`;
       case "jsval":
         // Island truthiness: the engine's ToBoolean (never throws, no
         // ownership change) — jsval operands are legal in `logical`.

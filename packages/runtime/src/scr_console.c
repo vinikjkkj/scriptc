@@ -256,7 +256,7 @@ static void scr_console_write(FILE *out, size_t n, const ScrLogArg *args) {
     }
     case SCR_ARG_STR:
       /* The absent string (a regex or split capture that did not participate) is Node's undefined. */
-      if (a->v.s->len == 0 && scr_str_is_absent(a->v.s)) fputs("undefined", out);
+      if (scr_str_is_absent(a->v.s)) fputs("undefined", out);
       else fwrite(a->v.s->data, 1, a->v.s->len, out);
       break;
     case SCR_ARG_BOOL:
