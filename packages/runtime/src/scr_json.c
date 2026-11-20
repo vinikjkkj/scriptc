@@ -745,7 +745,13 @@ static __attribute__((noinline)) ScrDyn *scr_dyn_alloc_fresh(ScrDynKind kind) {
 #endif
   return fresh;
 }
+#ifdef SCR_REL_CENSUS
+unsigned long long scr_relc_new[24], scr_relc_esc[24];
+#endif
 static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
+#ifdef SCR_REL_CENSUS
+  scr_relc_new[kind]++;
+#endif
 #ifndef SCR_RC_AUDIT
   ScrDyn **list = scr_dyn_free_list(kind);
   ScrDyn *d = *list;
@@ -1304,12 +1310,41 @@ static inline void scr_dyn_obj_idx_drop(ScrDyn *obj) {
   }
 }
 
+#ifdef SCR_REL_CENSUS
+/* LAB ONLY (never defined in a shipped build): histogram of the dyn object lookups, written at exit to $SCR_REL_OUT. */
+static unsigned long long scr_relc_calls[8], scr_relc_hit[8], scr_relc_iter[8], scr_relc_pos[8], scr_relc_big;
+static unsigned long long scr_relc_pairs[8][8]; /* [bucket][position-bucket] hits */
+static int scr_relc_armed;
+static unsigned scr_relc_b(size_t n) { return n == 0 ? 0 : n < 4 ? 1 : n < 8 ? 2 : n < 16 ? 3 : n < 32 ? 4 : n < 64 ? 5 : 6; }
+static void scr_relc_dump(void) {
+  const char *o = getenv("SCR_REL_OUT");
+  FILE *f = o ? fopen(o, "w") : stderr;
+  if (!f) return;
+  fprintf(f, "# scr_dyn_obj_get census: bucket(len) calls hits iterations(sum of entries visited) | big-index calls %llu\n", scr_relc_big);
+  static const char *nm[] = {"0", "1-3", "4-7", "8-15", "16-31", "32-63", "64+"};
+  { static const char *kn[] = {"NULL","BOOL","NUM","STR","ARR","OBJ","UNDEF","BYTES","FUNC","HANDLE","PROMISE","JSVAL","OBJINST","ARRBUF","BIG","MAP","PROXY"}; extern unsigned long long scr_relc_new[24], scr_relc_esc[24];
+    for (int i = 0; i < 17; i++) fprintf(f, "box kind %-8s created %llu first-retained(rc 1->2) %llu\n", kn[i], scr_relc_new[i], scr_relc_esc[i]); }
+  for (int i = 0; i < 7; i++) fprintf(f, "len %-5s calls %llu hits %llu iters %llu\n", nm[i], scr_relc_calls[i], scr_relc_hit[i], scr_relc_iter[i]);
+  fclose(f);
+}
+#endif
 ScrDyn *scr_dyn_obj_get(const ScrDyn *d, const char *key, size_t key_len) {
   /* A COUNT-DOWN WALK THAT KEEPS ITS COUNTER. With 24-byte entries clang rewrites a counted loop into "advance until the end pointer", whose setup
    * is len * 24 (an lea and a shift) on every call where the 32-byte entry was one shift; this is the hottest loop over dyn objects, so that one
    * instruction per call showed up as +0.75% on a lookup-dominated micro. The empty asm makes the counter a live value the loop must keep, so the
    * test stays dec/jnz and no end pointer is formed. It emits no instruction of its own. */
   const ScrDynEntry *e = d->v.obj.entries;
+#ifdef SCR_REL_CENSUS
+  if (!scr_relc_armed) { scr_relc_armed = 1; atexit(scr_relc_dump); }
+  if (d->v.obj.len >= SCR_OBJ_IDX_MIN) scr_relc_big++;
+  else {
+    unsigned b = scr_relc_b(d->v.obj.len);
+    scr_relc_calls[b]++;
+    size_t it = 0;
+    for (size_t n = d->v.obj.len; n != 0; n--, it++) if (SCR_DYN_KEY_EQ(&e[it], key, key_len)) { scr_relc_hit[b]++; it++; break; }
+    scr_relc_iter[b] += it;
+  }
+#endif
 #ifndef SCR_OBJ_NOIDX
   if (__builtin_expect(d->v.obj.len >= SCR_OBJ_IDX_MIN, 0)) return scr_dyn_obj_get_big(d, key, key_len); /* a tail call: the small walk is untouched */
 #endif

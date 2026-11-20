@@ -5724,8 +5724,14 @@ static inline void scr_closure_init_static(ScrClosure *c, void *fn) {
 /* The closure a FUNC value calls: the value itself when it is an embedded closure (ScrClosure above), else the stand-alone node's pointer. */
 static inline ScrClosure *scr_dyn_fn_clo(const ScrDyn *d) { return ((const ScrClosure *)d)->isdyn ? (ScrClosure *)(uintptr_t)d : d->v.fn.clo; }
 
+#ifdef SCR_REL_CENSUS
+extern unsigned long long scr_relc_esc[24];
+#endif
 static inline ScrDyn *scr_dyn_retain(ScrDyn *d) {
   if (d->rc != SIZE_MAX) {
+#ifdef SCR_REL_CENSUS
+    if (d->rc == 1) scr_relc_esc[d->kind]++;
+#endif
     d->rc++;
     /* A dyn value carries a cycle header (scr_json.c): a re-retained
      * candidate is certainly not garbage. Guarded by the immortality test
