@@ -3036,7 +3036,7 @@ function lowerOptionalDefaultArg(
    *
    * `a.0` is the sorted container and `n.0` the count of elements to order; the caller has declared both. Local ids are prefixed m_
    * so they cannot meet the caller's. */
-  const SORT_RUN = 8;
+  const SORT_RUN = 32;
   function buildMergeSortStmts(cfg: {
     cType: IrType;
     vt: IrType;
@@ -3088,6 +3088,19 @@ function lowerOptionalDefaultArg(
       { kind: "varDecl", localId: "m_p.0", init: F("m_a.0"), loc },
       { kind: "varDecl", localId: "m_q.0", init: F("m_mid.0"), loc },
       { kind: "varDecl", localId: "m_k.0", init: F("m_a.0"), loc },
+      // two runs already in order (the last of the left is not after the first of the right) are only copied across: one comparison
+      // instead of a full merge, which is what keeps a sorted or nearly sorted input at about n comparisons like the old walk
+      {
+        kind: "if",
+        cond: { kind: "logical", op: "&&", left: lt(F("m_mid.0"), F("m_end.0")), right: { kind: "unary", op: "!", operand: takeRight(get("m_s.0", bin("-", F("m_mid.0"), num(1))), get("m_s.0", F("m_mid.0"))), type: BOOL, loc }, type: BOOL, loc },
+        then: [
+          { kind: "while", cond: lt(F("m_k.0"), F("m_end.0")), body: [set("m_d.0", F("m_k.0"), get("m_s.0", F("m_k.0"))), inc("m_k.0")], loc },
+          assign("m_p.0", F("m_mid.0")),
+          assign("m_q.0", F("m_end.0")),
+        ],
+        else_: [],
+        loc,
+      },
       {
         kind: "while",
         cond: { kind: "logical", op: "&&", left: lt(F("m_p.0"), F("m_mid.0")), right: lt(F("m_q.0"), F("m_end.0")), type: BOOL, loc },
@@ -3106,9 +3119,22 @@ function lowerOptionalDefaultArg(
       { kind: "while", cond: lt(F("m_p.0"), F("m_mid.0")), body: [set("m_d.0", F("m_k.0"), get("m_s.0", F("m_p.0"))), inc("m_p.0"), inc("m_k.0")], loc },
       { kind: "while", cond: lt(F("m_q.0"), F("m_end.0")), body: [set("m_d.0", F("m_k.0"), get("m_s.0", F("m_q.0"))), inc("m_q.0"), inc("m_k.0")], loc },
     ]);
+    // after the blocks: when every block boundary is already in order the whole array is (each block is sorted), and no copy is made
+    const ordered: IrStmt[] = [
+      { kind: "varDecl", localId: "m_ok.0", init: num(1), loc },
+      forLoop("m_b.0", num(SORT_RUN), lt(F("m_b.0"), F("n.0")), inc("m_b.0", num(SORT_RUN)), [
+        {
+          kind: "if",
+          cond: takeRight(get("a.0", bin("-", F("m_b.0"), num(1))), get("a.0", F("m_b.0"))),
+          then: [assign("m_ok.0", num(0)), { kind: "break", loc }],
+          else_: [],
+          loc,
+        },
+      ]),
+    ];
     const passes: IrStmt = {
       kind: "if",
-      cond: bin("<", num(SORT_RUN), F("n.0"), BOOL),
+      cond: { kind: "logical", op: "&&", left: bin("<", num(SORT_RUN), F("n.0"), BOOL), right: bin("<", F("m_ok.0"), num(1), BOOL), type: BOOL, loc },
       then: [
         { kind: "varDecl", localId: "m_s.0", init: ref("a.0", cType), loc },
         { kind: "varDecl", localId: "m_d.0", init: clone("a.0"), loc },
@@ -3141,9 +3167,9 @@ function lowerOptionalDefaultArg(
     const ids: [string, IrType, boolean][] = [
       ["m_lo.0", F64, true], ["m_hi.0", F64, false], ["m_i.0", F64, true], ["m_v.0", vt, false], ["m_j.0", F64, true],
       ["m_s.0", cType, true], ["m_d.0", cType, true], ["m_t.0", cType, false], ["m_w.0", F64, true], ["m_flip.0", F64, true],
-      ["m_a.0", F64, true], ["m_mid.0", F64, false], ["m_end.0", F64, false], ["m_p.0", F64, true], ["m_q.0", F64, true], ["m_k.0", F64, true], ["m_r.0", F64, true],
+      ["m_ok.0", F64, true], ["m_b.0", F64, true], ["m_a.0", F64, true], ["m_mid.0", F64, false], ["m_end.0", F64, false], ["m_p.0", F64, true], ["m_q.0", F64, true], ["m_k.0", F64, true], ["m_r.0", F64, true],
     ];
-    return { stmts: [insertion, passes], locals: ids.map(([id, type, mutable]) => ({ id, name: id.replace(/\.0$/, ""), type, mutable })) };
+    return { stmts: [insertion, ...ordered, passes], locals: ids.map(([id, type, mutable]) => ({ id, name: id.replace(/\.0$/, ""), type, mutable })) };
   }
 
   function buildArraySortFn(
