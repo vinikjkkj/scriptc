@@ -1710,6 +1710,13 @@ export interface TypeMapperCtx {
    * before any producer is seen, and two values of one interface must
    * share a layout. */
   nullPayloadPromiseProp?: (sym: ts.Symbol) => boolean;
+  /** The OPTIONAL members a cast in this program reads off a record type that does not declare them: `(store as { destroy?: () => void })
+   * .destroy?.()` over a `store: AuthStore` whose interface lacks `destroy`. TypeScript lets the cast through, and the value behind
+   * it (a class instance, a wider literal) HAS the member, so the record shape of the source type carries it as an optional slot:
+   * the producers that hold it (the class witness, a width copy off a wider literal) then keep it, and the cast reads it back instead
+   * of an always-undefined completion. Decided over the whole program (Lowerer.demandedOptionalMembers) because a shape is interned
+   * from the TYPE before any cast is seen. Only the source types of such a cast are touched; every other shape is unchanged. */
+  demandedOptionalMembers?: (t: ts.Type) => readonly { name: string; type: ts.Type }[] | undefined;
   /** --dynamic: `any` maps to the island handle type (jsval). Off, `any`
    * stays unmapped and the requires-dynamic diagnostic fires per site. */
   dynamic: boolean;
@@ -10010,6 +10017,13 @@ function mapRecordTypeInner(widened: ts.Type, ctx: TypeMapperCtx): IrType | Reco
     // indices, from folded numeric computed keys and quoted numeric keys)
     // enumerate FIRST ascending, then string keys in insertion order
     // (OrdinaryOwnPropertyKeys) — Object.keys/JSON/inspect all read it.
+    // The optional members a cast reads off this type though it does not declare them (see TypeMapperCtx.demandedOptionalMembers).
+    // Each is an undefined-armed slot, so a value that never sets it reads undefined exactly as before.
+    for (const d of ctx.demandedOptionalMembers?.(widened) ?? []) {
+      if (fields.some((f) => f.name === d.name)) continue;
+      const dt = mapType(d.type, ctx);
+      if (dt !== null && dt.kind === "union") fields.push({ name: d.name, type: dt });
+    }
     const declaredOrder = esOwnKeyOrder(fields.filter((f) => accessorSlotProp(f.name) === null).map((f) => f.name));
     // The full literal order with each accessor placed where it is declared
     // (its getter and setter slots collapse to one property name).
