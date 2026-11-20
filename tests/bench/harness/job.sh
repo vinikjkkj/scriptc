@@ -49,7 +49,7 @@ if [ "$program" = rest ]; then
   # RESTREACH: the compiler's own diagnostics of each REST build (warnings, SC codes, fences, refusals) go to the log through LABECHO
   for side in "${sides[@]}"; do
     _bl=$BENCH_WORK/out/$side/zapo-rest-mysql-$BACKEND.build.log
-    [ -f "$_bl" ] && { { echo "# build log $_bl: $(wc -l < "$_bl") lines; diagnostics (warning|SC[0-9]{4}|refus|fence|unsupported|note|error|fallback|dynamic), then the last 40 lines"; grep -nE "warning|SC[0-9]{4}|refus|fence|unsupported|note:|error|fallback|dynamic|engine|provenance" "$_bl" | head -600; echo "# ---- tail"; tail -40 "$_bl"; } > "$ART/diag-$side.txt"; }
+    [ -f "$_bl" ] && bash "$BENCH_DIR/harness/diag.sh" "$_bl" > "$ART/diag-$side.txt"
   done
   _rf=(--smaps); [ "${IR:-0}" != 0 ] && { _rf+=(--ir); export RR_SLOW=${RR_SLOW:-60}; }
   $BENCH_NODE "$BENCH_DIR/harness/rest-run.mjs" --out "$BENCH_WORK/result" --reps "$REPS" "${_rf[@]}" "${arms[@]}" | tee "$BENCH_WORK/result-summary.txt"
