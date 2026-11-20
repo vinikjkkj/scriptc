@@ -18200,6 +18200,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26463-own-key-surfaces-of-a-type-a-cast-reads-an-optional-member-from-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26463-own-key-surfaces-of-a-type-a-cast-reads-an-optional-member-from-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26464-own-key-surfaces-without-a-cast-reading-an-optional-member-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26464-own-key-surfaces-without-a-cast-reading-an-optional-member-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2647-top-level-await-modules/main.ts": {
    "order": [
     "<repo>/tests/corpus/2647-top-level-await-modules/shared.ts",
