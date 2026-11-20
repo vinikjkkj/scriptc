@@ -13068,23 +13068,35 @@ export function moduleUsesNet(mod: IrModule): boolean {
  * (`fn.text`): the link switch for scr_fntext.c and its ScrFnText table. */
 export function moduleUsesFnText(mod: IrModule): boolean {
   let found = false;
+  let funcToDyn = false;
   const visit = (v: unknown): void => {
     if (found || v === null || typeof v !== "object") return;
     if (Array.isArray(v)) {
       for (const item of v) visit(item);
       return;
     }
-    const node = v as { kind?: unknown; fn?: unknown };
+    const node = v as { kind?: unknown; fn?: unknown; name?: unknown; value?: { type?: { kind?: unknown } }; args?: { kind?: unknown; value?: { type?: { kind?: unknown } } }[] };
     // A construct site over a checked-dynamic value names a non-constructor's
     // text in its TypeError, so the text table is needed there too.
     if (node.kind === "libCall" && (node.fn === "fn.text" || node.fn === "dyn.construct" || node.fn === "dyn.reflectConstruct")) {
       found = true;
       return;
     }
+    // A function thrown or rejected with: an unhandled rejection's report names the reason by its source text (Node's UnhandledPromiseRejection).
+    if ((node.kind === "throw" && node.value?.type?.kind === "func") ||
+        (node.kind === "intrinsic" && node.name === "promise.reject" && node.args?.[0]?.kind === "dynFrom" && node.args[0].value?.type?.kind === "func")) {
+      found = true;
+      return;
+    }
+    // A function value boxed into a dyn value: it can reach an unhandled-rejection report as an untyped reason, which names it by source text.
+    if (node.kind === "dynFrom" && node.value?.type?.kind === "func") funcToDyn = true;
     for (const key of Object.keys(v)) visit((v as Record<string, unknown>)[key]);
   };
   visit(mod.functions);
-  return found;
+  if (found) return true;
+  // The closing rule: a program that has a promise rejection path (an async function or a created promise) AND a function that escapes to dyn
+  // links the text table, so the report never meets a function it cannot name. A program without async (hello world) is unaffected.
+  return funcToDyn && (moduleCreatesPromises(mod) || mod.functions.some((f) => f.async === true));
 }
 
 export function moduleUsesSymbol(mod: IrModule): boolean {
@@ -13605,6 +13617,39 @@ const PRIMITIVE_CTOR_FN_NAMES: ReadonlySet<string> = new Set(
   ["%builtin.", "%builtin.dyn."].flatMap((p) => ["String", "Number", "Boolean"].map((n) => p + n)),
 );
 
+/** The unhandled-rejection report must name a non-scalar reason (scr_urj_reason.c, gated): the program has a promise rejection path (an async
+ * function or a created promise) AND holds dyn values or typed payloads registered for conversion. A program with no dyn values reports only
+ * scalar reasons, which scr_async.c prints alone. A LINK GATE, not a fence: a wrong `false` leaves the old "[object]" text. */
+const urjMemo = new WeakMap<IrModule, boolean>();
+export function moduleUsesUrjReason(mod: IrModule): boolean {
+  const hit = urjMemo.get(mod);
+  if (hit !== undefined) return hit;
+  let r = false;
+  if (moduleCreatesPromises(mod) || mod.functions.some((f) => f.async === true)) {
+    const seen = new Set<object>();
+    const visit = (v: unknown): void => {
+      if (r || v === null || typeof v !== "object" || seen.has(v as object)) return;
+      seen.add(v as object);
+      if (Array.isArray(v)) {
+        for (const item of v) visit(item);
+        return;
+      }
+      const o = v as { kind?: unknown; type?: { kind?: unknown } };
+      if (o.kind === "dynFrom" || o.type?.kind === "dyn") {
+        r = true;
+        return;
+      }
+      for (const key of Object.keys(v)) {
+        if (key === "loc") continue;
+        visit((v as Record<string, unknown>)[key]);
+      }
+    };
+    visit(mod.functions);
+  }
+  urjMemo.set(mod, r);
+  return r;
+}
+
 /** Does any catch binding of the module convert its payload to a dyn value (a `caughtToDyn` node)? Memoized. */
 const caughtToDynMemo = new WeakMap<IrModule, boolean>();
 export function moduleUsesCaughtToDyn(mod: IrModule): boolean {
@@ -13641,8 +13686,9 @@ export function throwPayloadToDyn(mod: IrModule, t: IrType, errorRooted: (classN
   // A class instance that is not Error-rooted (an Error-rooted one crosses as its own error encoding) is boxed by reference.
   if (t.kind === "object") {
     if (!canBoxClassIntoDyn(t.className) || errorRooted(t.className)) return false;
-  } else if (t.kind !== "record" && t.kind !== "array" && t.kind !== "map" && t.kind !== "set") return false;
-  if (!moduleUsesCaughtToDyn(mod)) return false;
+  } else if (t.kind !== "record" && t.kind !== "array" && t.kind !== "map" && t.kind !== "set" && t.kind !== "func") return false;
+  // A catch binding read untyped, or a promise whose unhandled rejection the default report must name (Node's UnhandledPromiseRejection text).
+  if (!moduleUsesCaughtToDyn(mod) && !moduleCreatesPromises(mod) && !mod.functions.some((f) => f.async === true)) return false;
   let m = throwDynMemo.get(mod);
   if (m === undefined) {
     m = { records: new Map((mod.records ?? []).map((r) => [r.id, r] as const)), unions: new Map((mod.unions ?? []).map((u) => [u.id, u] as const)) };
