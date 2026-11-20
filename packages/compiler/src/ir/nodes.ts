@@ -13639,6 +13639,13 @@ export function moduleUsesUrjReason(mod: IrModule): boolean {
         r = true;
         return;
       }
+      // A thrown typed value (a record, array, map, set, class instance or function) rides the cell typed; its throw site registers a to-dyn
+      // converter the report reads through this unit.
+      const tv = o.kind === "throw" ? (o as { value?: { type?: { kind?: unknown } } }).value?.type?.kind : undefined;
+      if (tv === "record" || tv === "array" || tv === "map" || tv === "set" || tv === "object" || tv === "func") {
+        r = true;
+        return;
+      }
       for (const key of Object.keys(v)) {
         if (key === "loc") continue;
         visit((v as Record<string, unknown>)[key]);
