@@ -17587,6 +17587,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26139-a-nullish-default-after-a-member-of-a-class-cast-of-a-catch-binding-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26139-a-nullish-default-after-a-member-of-a-class-cast-of-a-catch-binding-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2614-trap-binding-later-writes.ts": {
    "order": [
     "<repo>/tests/corpus/2614-trap-binding-later-writes.ts"
