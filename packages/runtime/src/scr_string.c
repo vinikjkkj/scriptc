@@ -1480,14 +1480,6 @@ bool scr_str_eq(ScrStr *a, ScrStr *b) {
   return a == b || (a->len == b->len && memcmp(a->data, b->data, a->len) == 0);
 }
 
-/* KEY / VALUE equality that keeps the absent marker apart from the real string "undefined": Map and Set keys, includes/indexOf, and ===/switch in an
- * absent-aware program (IrModule.absentStrings) use this entry; scr_str_eq above is the property-key and everything-else equality, where the marker IS
- * the text "undefined" (obj[undefined] is obj["undefined"]) and which hot callers inline, so it keeps its exact body. */
-bool scr_str_eq_u(ScrStr *a, ScrStr *b) {
-  if (a == b) return true;
-  if (a->len != b->len || memcmp(a->data, b->data, a->len) != 0) return false;
-  return a->len != 9 || (a != (ScrStr *)&scr_lit_absent && b != (ScrStr *)&scr_lit_absent);
-}
 
 /* String ordering: ECMAScript's, UTF-16 code units, over well-formed UTF-8 (every relational operator on strings, the default sort, URLSearchParams.sort). The bytes of the two strings are equal up to the first differing byte k, so everything
  * before k compares equal and the order is decided AT k. UTF-8 byte order is code point order, and code point order equals code unit order except
