@@ -736,38 +736,49 @@ export interface CcDriver {
   linkArgs: string[];
 }
 
+/** The x86-64 baseline of every emitted program (user decision, 2026-11-19): x86-64-v2 = SSE3, SSSE3, SSE4.1, SSE4.2, POPCNT, CMPXCHG16B. It makes
+ * Math.floor / ceil / trunc one roundsd (the SSE2 sequence they replace is 12-17 instructions on every link of feMul's carry chain), and lets the
+ * compiler use SSE4.1 blends and the rest of v2 anywhere. NOT supported: x86-64 CPUs without SSE4.1/4.2 and POPCNT, i.e. Intel before Nehalem
+ * (2008: Core 2, Pentium Dual-Core, early Atom) and AMD before Bulldozer (2011: K8, K10 incl. Phenom II, Athlon II); such a CPU stops with an
+ * illegal instruction. Nothing beyond v2 is assumed (no AVX, no AVX2, no FMA, no BMI), and aarch64 targets are untouched. clang spells the level
+ * x86-64-v2 and zig cc x86_64_v2. */
+const X86_V2_CLANG = "-march=x86-64-v2";
+const X86_V2_ZIG = "-march=x86_64_v2";
+
 /** Resolve native platform flags independently of the machine running tests,
  * so the host-Linux contract remains pinned on every development host. */
-function nativePlatformArgs(platform: NodeJS.Platform): Pick<CcDriver, "targetArgs" | "linkArgs"> {
+function nativePlatformArgs(platform: NodeJS.Platform, march: string | null): Pick<CcDriver, "targetArgs" | "linkArgs"> {
   return platform === "linux"
-    ? { targetArgs: ["-D_GNU_SOURCE"], linkArgs: ["-lm"] }
-    : { targetArgs: [], linkArgs: [] };
+    ? { targetArgs: ["-D_GNU_SOURCE", ...(march === null ? [] : [march])], linkArgs: ["-lm"] }
+    : { targetArgs: march === null ? [] : [march], linkArgs: [] };
 }
 
 export function resolveCc(
   env: NodeJS.ProcessEnv = process.env,
   hostPlatform: NodeJS.Platform = process.platform,
+  hostArch: string = process.arch,
 ): CcDriver {
   const cc = env["SCRIPTC_CC"] ?? "";
   const target = env["SCRIPTC_TARGET"] ?? "";
-  const hostArgs = nativePlatformArgs(hostPlatform);
+  const hostX86 = hostArch === "x64";
   if (cc === "" || cc === "clang") {
     if (target !== "") {
       throw new Error(
         `SCRIPTC_TARGET=${target} requires SCRIPTC_CC=zigcc — the default clang path has no cross-target sysroots.`,
       );
     }
-    return { argv: ["clang"], target: null, ...hostArgs };
+    return { argv: ["clang"], target: null, ...nativePlatformArgs(hostPlatform, hostX86 ? X86_V2_CLANG : null) };
   }
   if (cc !== "zigcc") {
     throw new Error(`unknown SCRIPTC_CC '${cc}' (supported: clang, zigcc)`);
   }
-  if (target === "") return { argv: ["zig", "cc"], target: null, ...hostArgs };
+  if (target === "") return { argv: ["zig", "cc"], target: null, ...nativePlatformArgs(hostPlatform, hostX86 ? X86_V2_ZIG : null) };
   const linux = target.includes("linux");
+  const x86 = target.startsWith("x86_64");
   return {
     argv: ["zig", "cc"],
     target,
-    targetArgs: ["-target", target, ...(linux ? ["-D_GNU_SOURCE"] : [])],
+    targetArgs: ["-target", target, ...(linux ? ["-D_GNU_SOURCE"] : []), ...(x86 ? [X86_V2_ZIG] : [])],
     linkArgs: linux ? ["-lm"] : [],
   };
 }

@@ -520,6 +520,10 @@ Each is an `#ifndef`-guarded default in `packages/runtime/src`; a build override
 | `SCR_TEXT_DROP_EVERY_MS` | tuning knob | No comment at the definition names this macro (defined in `packages/runtime/src/scr_async.c`). | `500` |
 | `SCR_TEXT_DROP_FAULTS` | tuning knob | [source comment] Fault-triggered repeat (SCR_TEXT_DROP_FAULTS=N, default 256, 0 = off): a timer cannot react inside a burst of first-use code, but the kernel counts the faults that map it. | `256` |
 
+## Target baseline of emitted programs
+
+Every program and every runtime object compiled for an **x86-64** target (host-native or `SCRIPTC_TARGET=x86_64-*`, clang or `zig cc`) is built at `-march=x86-64-v2` (`-march=x86_64_v2` for zig): SSE3, SSSE3, SSE4.1, SSE4.2, POPCNT and CMPXCHG16B, and nothing beyond (no AVX, no AVX2, no FMA, no BMI; no `-ffast-math`). The point is `Math.floor` / `Math.ceil` / `Math.trunc` as one `roundsd`. **CPUs without SSE4.1/SSE4.2 and POPCNT are not supported** and stop with an illegal-instruction fault: Intel before Nehalem (2008: Core 2, Pentium Dual-Core, early Atom) and AMD before Bulldozer (2011: K8, K10 including Phenom II and Athlon II). aarch64 targets are unchanged. The flag lives in `resolveCc` (`packages/compiler/src/backend/cc.ts`, `X86_V2_CLANG` / `X86_V2_ZIG`) and rides every compile through `targetArgs`, so it is part of every build-cache key.
+
 ## How this file stays true
 
 `tests/harness/flags-env-inventory.ts` is the extractor and `tests/harness/flags-env-doc.test.ts` is the check; the test also plants a fake flag, a fake environment read and a fake `getenv` in in-memory copies of the sources and requires itself to fail on each, so an extractor that silently stopped seeing the code cannot pass. The first cell of every table row (all backticked names in it) is what counts as documented. Names the code mentions only in comments or messages are not inventory; the extraction rules are written at the top of the extractor.

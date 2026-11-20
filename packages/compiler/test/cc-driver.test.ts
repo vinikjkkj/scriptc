@@ -50,16 +50,20 @@ const lines = (s: string): string => s.split("\r\n").join("\n");
 
 test("default driver keeps bare clang while selecting host platform flags", () => {
   for (const env of [{}, { SCRIPTC_CC: "clang" }, { SCRIPTC_CC: "" }]) {
-    const d = resolveCc(env, "darwin");
+    const d = resolveCc(env, "darwin", "arm64");
     expect(d.argv).toEqual(["clang"]);
     expect(d.target).toBeNull();
     expect(d.targetArgs).toEqual([]);
     expect(d.linkArgs).toEqual([]);
 
-    const linux = resolveCc(env, "linux");
+    const linux = resolveCc(env, "linux", "arm64");
     expect(linux.argv).toEqual(["clang"]);
     expect(linux.target).toBeNull();
     expect(linux.targetArgs).toEqual(["-D_GNU_SOURCE"]);
+
+    // x86-64 hosts compile every program and runtime object at the x86-64-v2 baseline (clang spelling).
+    expect(resolveCc(env, "linux", "x64").targetArgs).toEqual(["-D_GNU_SOURCE", "-march=x86-64-v2"]);
+    expect(resolveCc(env, "darwin", "x64").targetArgs).toEqual(["-march=x86-64-v2"]);
     expect(linux.linkArgs).toEqual(["-lm"]);
   }
 });
@@ -74,12 +78,13 @@ test("unknown SCRIPTC_CC values are rejected", () => {
 });
 
 test("zigcc resolves to `zig cc`; linux triples add -target and -D_GNU_SOURCE", () => {
-  const native = resolveCc({ SCRIPTC_CC: "zigcc" }, "darwin");
+  const native = resolveCc({ SCRIPTC_CC: "zigcc" }, "darwin", "arm64");
   expect(native.argv).toEqual(["zig", "cc"]);
   expect(native.targetArgs).toEqual([]);
   expect(native.linkArgs).toEqual([]);
 
-  const nativeLinux = resolveCc({ SCRIPTC_CC: "zigcc" }, "linux");
+  const nativeLinux = resolveCc({ SCRIPTC_CC: "zigcc" }, "linux", "arm64");
+  expect(resolveCc({ SCRIPTC_CC: "zigcc" }, "linux", "x64").targetArgs).toEqual(["-D_GNU_SOURCE", "-march=x86_64_v2"]);
   expect(nativeLinux.targetArgs).toEqual(["-D_GNU_SOURCE"]);
   expect(nativeLinux.linkArgs).toEqual(["-lm"]);
 
@@ -95,7 +100,7 @@ test("zigcc resolves to `zig cc`; linux triples add -target and -D_GNU_SOURCE", 
 
   // Windows triples too: mingw-w64 headers expose everything by default.
   const win = resolveCc({ SCRIPTC_CC: "zigcc", SCRIPTC_TARGET: "x86_64-windows-gnu" });
-  expect(win.targetArgs).toEqual(["-target", "x86_64-windows-gnu"]);
+  expect(win.targetArgs).toEqual(["-target", "x86_64-windows-gnu", "-march=x86_64_v2"]);
   expect(win.linkArgs).toEqual([]);
 });
 
