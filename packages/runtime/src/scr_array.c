@@ -1217,7 +1217,7 @@ ScrStr *scr_arr_join(ScrArr *a, ScrStr *sep) {
         break;
       case SCR_ELEM_STR: {
         const ScrStr *s = (const ScrStr *)scr_slot_to_ptr(a->data[i]);
-        if (s != NULL) scr_join_append(&buf, &len, &cap, s->data, s->len); /* a hole joins as empty */
+        if (s != NULL && s != (const ScrStr *)scr_str_absent_sentinel) scr_join_append(&buf, &len, &cap, s->data, s->len); /* a hole and the absent string (undefined) join as empty */
         break;
       }
       case SCR_ELEM_ARR:
