@@ -7,9 +7,9 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { createRequire } from 'node:module'
 const W = process.env.BENCH_WORK, ROOT = process.env.BENCH_DIR, NODE = process.env.BENCH_NODE || 'node', TREE = process.env.TREE
 const args = process.argv.slice(2)
-let out = 'out', reps = 3, profile = null, smaps = false
+let out = 'out', reps = 3, profile = null, smaps = false, ir = false
 const arms = []
-for (let i = 0; i < args.length; i++) { const a = args[i]; if (a === '--out') out = args[++i]; else if (a === '--reps') reps = Number(args[++i]); else if (a === '--profile') { profile = [args[++i], args[++i]] } else if (a === '--smaps') smaps = true; else arms.push(a) }
+for (let i = 0; i < args.length; i++) { const a = args[i]; if (a === '--out') out = args[++i]; else if (a === '--reps') reps = Number(args[++i]); else if (a === '--profile') { profile = [args[++i], args[++i]] } else if (a === '--smaps') smaps = true; else if (a === '--ir') ir = true; else arms.push(a) }
 mkdirSync(out, { recursive: true })
 const req = createRequire(process.env.ZB_APP + '/package.json')
 const mysql = req('mysql2/promise')
@@ -80,6 +80,22 @@ if (smaps) for (const a of all) {
   try { tm = JSON.parse(readFileSync(`${run}/arm/times.json`, 'utf8')) } catch {}
   results.smaps[label] = sm ? { ...sm, times: tm } : null
   console.error(`smaps ${label}: peak_vmrss_kb=${sm?.peak_vmrss_kb}`)
+}
+// --ir: one run per compiled arm under callgrind (the whole scenario, RR_SLOW stretches the driver's waits); <label>.callgrind.out lands in the result dir for report.mjs / reach.mjs
+results.ir = {}
+if (ir) for (const a of arms) {
+  const label = a.split(':')[0], bin = a.slice(a.indexOf(':') + 1)
+  const db = `zapo_${label.replace(/[^a-z0-9]/gi, '')}cg`
+  const c = await mysql.createConnection({ host: process.env.ZAPO_TEST_MYSQL_HOST ?? '127.0.0.1', port: Number(process.env.ZAPO_TEST_MYSQL_PORT ?? 3306), user: 'root', password: process.env.ZAPO_TEST_MYSQL_PASSWORD ?? '' })
+  await c.query(`DROP DATABASE IF EXISTS ${db}`); await c.query(`CREATE DATABASE ${db}`); await c.end()
+  const run = `${out}/${label}.cg`; mkdirSync(run, { recursive: true })
+  const cg = `${out}/${label}.callgrind.out`
+  const env = { ...process.env, RR_OUT: run, RR_APPDIR: APPDIR, RR_DBPORT: process.env.ZAPO_TEST_MYSQL_PORT ?? '3306', ZAPO_FAKE_SERVER: `${TREE}/packages/fake-server`, RR_SLOW: process.env.RR_SLOW ?? '60' }
+  const r = spawnSync(NODE, ['--import', 'tsx', `${ROOT}/rest/arm.mts`, 'arm', db, 'valgrind', '--tool=callgrind', `--callgrind-out-file=${cg}`, bin], { cwd: TREE, env, maxBuffer: 1 << 28, timeout: 4 * 3600e3 })
+  writeFileSync(`${run}/arm.stdout.txt`, r.stdout.toString()); writeFileSync(`${run}/arm.stderr.txt`, r.stderr.toString().slice(-20000))
+  let ok = null; try { const t = readFileSync(cg, 'utf8'); const m = /^totals:\s*(\d+)/m.exec(t) ?? /^summary:\s*(\d+)/m.exec(t); ok = m ? Number(m[1]) : null } catch {}
+  results.ir[label] = ok
+  console.error(`callgrind ${label}: exit=${r.status} Ir=${ok}; http requests ${(() => { try { return JSON.parse(readFileSync(`${run}/arm/http.json`, 'utf8')).length } catch { return '?' } })()}`)
 }
 for (const r of results.runs) r.parity = nodeFp === null ? 'no-node-ref' : r.fp === nodeFp ? 'SAME' : 'DIFFERS'
 writeFileSync(`${out}/results.json`, JSON.stringify(results, null, 1))
