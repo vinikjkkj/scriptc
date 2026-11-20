@@ -173,7 +173,7 @@ import { lowerStaticFetchCall } from "./lower-fetch.js";
 import { lowerDgramDnsModuleCall, lowerDgramMethodCall } from "./lower-dgram.js";
 import { lowerNodeTestModuleCall, lowerTestDirectCall, lowerTestMethodCall, lowerTestCtxProperty } from "./lower-test.js";
 import { lowerAssertModuleCall, lowerAssertDirectCall } from "./lower-assert.js";
-import { lowerUtilModuleCall, rebuildRecordInspect } from "./lower-inspect.js";
+import { lowerUtilModuleCall, patchRegexRowInspect, rebuildRecordInspect } from "./lower-inspect.js";
 import { lowerComptime, comptimeBakeable, rejectComptimeCaptures, comptimeValueToIr } from "./lower-comptime.js";
 import { lowerDeleteValue, lowerElemValuePosition, lowerStmts, noteBlockedBindings, isBlockedBinding, lowerScopedBlock, predeclareForwardCapture, probeBindWhy, predeclareForwardFnDecl, predeclareForwardVar, rejectJumpCrossingFinally, lowerStmt, lowerVarStatement, lowerDestructuringDecl, lowerDestructuringAssignParts, lowerBindingPattern, lowerJsvalBindingPattern, checkBindingElement, bindPatternTarget, lowerVarDeclList, lowerVarDecl, lowerSwitch, lowerTry, lowerExprStatement, lowerForOf, lowerForStatement } from "./lower-stmts.js";
 import { lowerNewTargetMember, unboundMethodThunk, recordKeyResultOk, narrowBridgeDyn, FieldTarget, bufferValueIndexOf, bufferValueOf, lowerDynObjectLiteral, lowerDynSpreadObjectLiteral, lowerExpr, maybeNarrow, lowerUnitComparison, lowerNullishCoalesce, lowerOptionalChain, finishOptionalChain, lowerCondition, ensureBool, requireTruthyUnion, eqComparableUnion, lowerIntrinsicProperty, lowerArrayLiteral, lowerObjectLiteral, lowerShorthandValue, rejectThisInObjectMethod, lowerElementAccess, lowerElementWrite, lowerRecordKeyRead, ensureString, numberConvAtDynWidth, lowerTemplate, lowerAsExpression, lowerPrefixUnary, lowerBinary, lowerCaughtTypeofTest, caughtRead, caughtLocalOf, caughtToString, lowerInstanceOf, lowerRegexLiteral, lowerFieldRead, lowerUnionProperty, fieldTarget, fieldGetExpr, fieldSetStmt, lowerFieldCompound, uniqueSymbolKeyOf, foldedStringKeyOf } from "./lower-exprs.js";
@@ -4750,6 +4750,7 @@ export class Lowerer {
     // Every shape a dynCheck MATERIALISES arms its hidden own-key mask —
     // after the whole walk, so the answer does not depend on whether the
     // cast was lowered before or after the surface that enumerates it.
+    patchRegexRowInspect(this);
     if (this.diags.length === 0) this.armOwnMasks(functions, artifacts.records);
     // A class value's `prototype` object (one per class or evaluation, scr_dyn_class.c) is exact for READS. A WRITE into it cannot be
     // (an instance reaches its members through its class): a write, or an escape that could hide one, of a prototype object read from
@@ -4931,6 +4932,9 @@ export class Lowerer {
    * five members…})` compared EQUAL where Node throws. A silent PASS on
    * an assertion that must fail is the one trade this project does not
    * make. */
+  /** Set when the program builds a match row (exec, match, matchAll): the string[] printer then recognizes a row and prints
+   * it as Node's exec result (index, input, groups; patchRegexRowInspect). */
+  regexRowsBuilt = false;
   readonly nullProtoRenderings: { shapeId: string; patch: NullProtoPatch }[] = [];
 
   /** Register one such helper (see nullProtoRenderings). */
