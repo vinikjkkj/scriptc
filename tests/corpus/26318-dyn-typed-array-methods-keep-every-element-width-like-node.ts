@@ -1,0 +1,15 @@
+const w: any = new Float64Array([3.5, 1.5, 2, -1]);
+console.log(w.toSorted(), w.toReversed(), w.with(0, 9.5), w.slice(1), w.subarray(1, 3));
+w.reverse(); console.log(w);
+w.sort(); console.log(w);
+const i: any = new Int32Array([300000, -5, 70000]);
+i.sort(); console.log(i, i.indexOf(70000), i.includes(-5), i.join("-"), i.fill(7, 1));
+const m: any = new Int16Array([5, 6]).map((x: number) => x * 1000); console.log(m);
+const n: any = new Float64Array([NaN, 2, -0, 0, 1.5, NaN]);
+console.log(n.includes(NaN), n.indexOf(NaN), n.lastIndexOf(2), n.indexOf(0), n.join(";"), n.toSorted(), n.toSorted((a: number, b: number) => b - a));
+console.log(n.filter((x: number) => x > 1), n.map((x: number) => x * 2), n.lastIndexOf(1.5, -2));
+const f32: any = new Float32Array([0.1, 0.5]); console.log(f32.indexOf(0.5), f32.map((x: number) => x + 1), f32.join());
+const u: any = new Uint8Array([5, 1, 3]); console.log(u.toSorted(), u.filter((x: number) => x > 1), u.map((x: number) => x * 100), u.includes(3), u.reverse());
+const bf: any = Buffer.from([9, 4, 6]); console.log(bf.toSorted(), bf.filter((x: number) => x > 4), bf.map((x: number) => x + 1), bf.with(0, 1));
+const c: any = new Uint8ClampedArray([300, 5]); console.log(c.map((x: number) => x * 2), c.fill(7), c.toSorted());
+const i16: any = new Int16Array([40000, -2]); console.log(i16, i16.with(1, 70000), i16.toReversed());

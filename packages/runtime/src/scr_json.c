@@ -13972,7 +13972,7 @@ static ScrDyn *tbm_search(ScrDyn *recv, ScrDyn *const *args, size_t argc, const 
     double k = n >= 0 ? (n < (double)len - 1 ? n : (double)len - 1) : (double)len + n;
     if (!numeric || k < 0) return scr_dyn_new_num(-1);
     for (size_t i = (size_t)k + 1; i-- > 0;) {
-      if ((double)b->data[i] == want) return scr_dyn_new_num((double)i);
+      if (scr_bytes_get(b, (double)i) == want) return scr_dyn_new_num((double)i); /* the element at its own width; lastIndexOf is strict (NaN never matches) */
     }
     return scr_dyn_new_num(-1);
   }
@@ -13982,7 +13982,9 @@ static ScrDyn *tbm_search(ScrDyn *recv, ScrDyn *const *args, size_t argc, const 
   size_t k = n >= 0 ? (size_t)(n < (double)len ? n : (double)len) : tbm_rel(n, len);
   if (numeric) {
     for (size_t i = k; i < len; i++) {
-      if ((double)b->data[i] == want) return mode == 2 ? scr_dyn_new_bool(true) : scr_dyn_new_num((double)i);
+      const double got = scr_bytes_get(b, (double)i);
+      /* includes is SameValueZero (NaN finds NaN), indexOf is strict */
+      if (got == want || (mode == 2 && got != got && want != want)) return mode == 2 ? scr_dyn_new_bool(true) : scr_dyn_new_num((double)i);
     }
   }
   return mode == 2 ? scr_dyn_new_bool(false) : scr_dyn_new_num(-1);
@@ -14003,9 +14005,9 @@ static ScrDyn *tbm_join(ScrDyn *recv, ScrDyn *const *args, size_t argc) {
   scr_jb_init(&jb);
   for (size_t i = 0; i < b->len; i++) {
     if (i > 0) scr_jb_write(&jb, sep->data, sep->len);
-    char n[8];
-    snprintf(n, sizeof n, "%u", (unsigned)b->data[i]);
-    scr_jb_puts(&jb, n);
+    char n[40];
+    size_t nl = scr_f64_to_str(scr_bytes_get(b, (double)i), n); /* the element at its own width */
+    scr_jb_write(&jb, n, nl);
   }
   scr_str_release(sep);
   ScrStr *out = scr_jb_finish(&jb);
@@ -14029,13 +14031,13 @@ static ScrDyn *tbm_iterate(ScrDyn *recv, ScrDyn *const *args, size_t argc, TbmIt
   const size_t len = b->len;
   const bool rev = m == TBM_FINDLAST || m == TBM_FINDLASTINDEX;
   ScrBytes *mapped = NULL;
-  uint8_t *kept = NULL;
+  double *kept = NULL;
   size_t nkept = 0;
   if (m == TBM_MAP) {
-    mapped = scr_bytes_new(SCR_BYTES_U8, (double)len);
+    mapped = scr_bytes_new(b->elem, (double)len);
     if (mapped == NULL) return NULL;
   } else if (m == TBM_FILTER && len > 0) {
-    kept = (uint8_t *)malloc(len);
+    kept = (double *)malloc(len * sizeof(double));
     if (kept == NULL) scr_json_oom();
   }
   ScrDyn *result = NULL;
@@ -14066,7 +14068,7 @@ static ScrDyn *tbm_iterate(ScrDyn *recv, ScrDyn *const *args, size_t argc, TbmIt
       break;
     }
     case TBM_FILTER:
-      if (scr_dyn_truthy(r)) kept[nkept++] = b->data[i];
+      if (scr_dyn_truthy(r)) kept[nkept++] = scr_bytes_get(b, (double)i);
       break;
     case TBM_SOME:
       if (scr_dyn_truthy(r)) { result = scr_dyn_new_bool(true); done = true; }
@@ -14092,8 +14094,8 @@ static ScrDyn *tbm_iterate(ScrDyn *recv, ScrDyn *const *args, size_t argc, TbmIt
   case TBM_FOREACH: return scr_dyn_retain(scr_dyn_undefined());
   case TBM_MAP: return tbm_box_new(mapped, tbm_is_buffer(recv));
   case TBM_FILTER: {
-    ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)nkept);
-    if (out != NULL && nkept > 0) memcpy(out->data, kept, nkept);
+    ScrBytes *out = scr_bytes_new(b->elem, (double)nkept);
+    for (size_t ki = 0; out != NULL && ki < nkept; ki++) scr_bytes_set(out, (double)ki, kept[ki]);
     free(kept);
     return tbm_box_new(out, tbm_is_buffer(recv));
   }
@@ -14148,8 +14150,16 @@ typedef struct {
   bool failed;
 } TbmSort;
 
-static int tbm_sort_compare(TbmSort *c, uint8_t x, uint8_t y) {
-  if (c->cmp == NULL) return x < y ? -1 : (x > y ? 1 : 0);
+static int tbm_sort_compare(TbmSort *c, double x, double y) {
+  if (c->cmp == NULL) {
+    /* the default order: NaN last, -0 before +0, otherwise numeric */
+    if (x != x) return y != y ? 0 : 1;
+    if (y != y) return -1;
+    if (x < y) return -1;
+    if (x > y) return 1;
+    if (x == 0 && y == 0) return signbit(x) ? (signbit(y) ? 0 : -1) : (signbit(y) ? 1 : 0);
+    return 0;
+  }
   ScrDyn *ax = scr_dyn_new_num((double)x);
   ScrDyn *ay = scr_dyn_new_num((double)y);
   ScrDyn *av[2] = { ax, ay };
@@ -14166,7 +14176,7 @@ static int tbm_sort_compare(TbmSort *c, uint8_t x, uint8_t y) {
 /* Stable merge sort of work[0, n) through `aux`. False when the comparator
  * (or its ToNumber) threw: the spec sorts a COPY and writes it back only on
  * success, so a failure leaves the receiver untouched. */
-static bool tbm_merge_sort(TbmSort *c, uint8_t *work, uint8_t *aux, size_t lo, size_t hi) {
+static bool tbm_merge_sort(TbmSort *c, double *work, double *aux, size_t lo, size_t hi) {
   if (hi - lo < 2) return true;
   size_t mid = lo + (hi - lo) / 2;
   if (!tbm_merge_sort(c, work, aux, lo, mid)) return false;
@@ -14179,7 +14189,7 @@ static bool tbm_merge_sort(TbmSort *c, uint8_t *work, uint8_t *aux, size_t lo, s
   }
   while (i < mid) aux[k++] = work[i++];
   while (j < hi) aux[k++] = work[j++];
-  memcpy(work + lo, aux + lo, hi - lo);
+  memcpy(work + lo, aux + lo, (hi - lo) * sizeof(double));
   return true;
 }
 
@@ -14284,13 +14294,13 @@ static bool tbm_sort_arg(ScrDyn *const *args, size_t argc, ScrDyn **cmp) {
   return false;
 }
 
-/* Sorts a copy of recv's bytes into `out` (len bytes). False on a throw. */
-static bool tbm_sorted_copy(ScrDyn *recv, ScrDyn *cmp, uint8_t *out) {
+/* Sorts a copy of recv's elements (as doubles) into `out` (len doubles). False on a throw. */
+static bool tbm_sorted_copy(ScrDyn *recv, ScrDyn *cmp, double *out) {
   ScrBytes *b = recv->v.bytes;
   if (b->len == 0) return true;
-  uint8_t *aux = (uint8_t *)malloc(b->len);
+  double *aux = (double *)malloc(b->len * sizeof(double));
   if (aux == NULL) scr_json_oom();
-  memcpy(out, b->data, b->len);
+  for (size_t i = 0; i < b->len; i++) out[i] = scr_bytes_get(b, (double)i);
   TbmSort c = { cmp, false };
   bool ok = tbm_merge_sort(&c, out, aux, 0, b->len);
   free(aux);
@@ -14301,35 +14311,33 @@ static ScrDyn *tbm_sort(ScrDyn *recv, ScrDyn *const *args, size_t argc, bool cop
   ScrDyn *cmp;
   if (!tbm_sort_arg(args, argc, &cmp)) return NULL;
   ScrBytes *b = recv->v.bytes;
+  double *tmp = b->len ? (double *)malloc(b->len * sizeof(double)) : NULL;
+  if (b->len && tmp == NULL) scr_json_oom();
+  bool ok = tbm_sorted_copy(recv, cmp, tmp);
   if (!copy) {
-    uint8_t *tmp = b->len ? (uint8_t *)malloc(b->len) : NULL;
-    if (b->len && tmp == NULL) scr_json_oom();
-    bool ok = tbm_sorted_copy(recv, cmp, tmp);
-    if (ok && b->len) memcpy(b->data, tmp, b->len);
+    if (ok) for (size_t i = 0; i < b->len; i++) scr_bytes_set(b, (double)i, tmp[i]);
     free(tmp);
     return ok ? scr_dyn_retain(recv) : NULL;
   }
-  ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)b->len);
-  if (out == NULL) return NULL;
-  if (!tbm_sorted_copy(recv, cmp, out->data)) {
-    scr_bytes_release(out);
-    return NULL;
-  }
+  ScrBytes *out = ok ? scr_bytes_new(b->elem, (double)b->len) : NULL;
+  if (out != NULL) for (size_t i = 0; i < b->len; i++) scr_bytes_set(out, (double)i, tmp[i]);
+  free(tmp);
+  if (!ok || out == NULL) return NULL;
   return tbm_box_new(out, false);
 }
 
 static ScrDyn *tbm_reverse(ScrDyn *recv, bool copy) {
   ScrBytes *b = recv->v.bytes;
   if (copy) {
-    ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)b->len);
+    ScrBytes *out = scr_bytes_new(b->elem, (double)b->len);
     if (out == NULL) return NULL;
-    for (size_t i = 0; i < b->len; i++) out->data[i] = b->data[b->len - 1 - i];
+    for (size_t i = 0; i < b->len; i++) scr_bytes_set(out, (double)i, scr_bytes_get(b, (double)(b->len - 1 - i)));
     return tbm_box_new(out, false);
   }
   for (size_t i = 0, j = b->len; i + 1 < j; i++, j--) {
-    uint8_t t = b->data[i];
-    b->data[i] = b->data[j - 1];
-    b->data[j - 1] = t;
+    double t = scr_bytes_get(b, (double)i);
+    scr_bytes_set(b, (double)i, scr_bytes_get(b, (double)(j - 1)));
+    scr_bytes_set(b, (double)(j - 1), t);
   }
   return scr_dyn_retain(recv);
 }
@@ -14347,9 +14355,9 @@ static ScrDyn *tbm_with(ScrDyn *recv, ScrDyn *const *args, size_t argc, const ch
     scr_throw_error_msg(SCR_ERR_RANGE, msg, sizeof msg - 1);
     return NULL;
   }
-  ScrBytes *out = scr_bytes_new(SCR_BYTES_U8, (double)b->len);
+  ScrBytes *out = scr_bytes_new(b->elem, (double)b->len);
   if (out == NULL) return NULL;
-  if (b->len > 0) memcpy(out->data, b->data, b->len);
+  if (b->len > 0) memcpy(out->data, b->data, b->len * scr_bytes_elem_size(b->elem));
   scr_bytes_set(out, actual, v);
   return tbm_box_new(out, false);
 }
@@ -14643,7 +14651,16 @@ ScrDyn *scr_dyn_bytes_method(ScrDyn *recv, const char *method, ScrDyn *const *ar
     if (idx < 0 || idx >= (double)blen) return scr_dyn_retain(scr_dyn_undefined());
     return scr_dyn_bytes_elem(bytes, (size_t)idx);
   }
-  /* The rest of the typed-array surface (the tbm_* block above). */
+  /* The rest of the typed-array surface (the tbm_* block above): every body reads and writes elements at the view's own width as a double, so a bigint
+   * view (whose elements are bigints) is fenced by name here instead of answering through the double accessors. */
+  if (scr_dyn_bytes_is_big(bytes) && (scr_bo_is(method, "fill") || scr_bo_is(method, "indexOf") || scr_bo_is(method, "lastIndexOf") || scr_bo_is(method, "includes") ||
+      scr_bo_is(method, "join") || scr_bo_is(method, "map") || scr_bo_is(method, "filter") || scr_bo_is(method, "reverse") || scr_bo_is(method, "toReversed") ||
+      scr_bo_is(method, "sort") || scr_bo_is(method, "toSorted") || scr_bo_is(method, "with"))) {
+    char fence[96];
+    snprintf(fence, sizeof fence, "BigInt typed array .%s", method);
+    scr_dyn_big_fence(recv, fence);
+    return NULL;
+  }
   if (scr_bo_is(method, "fill")) return tbm_fill(recv, args, argc, what);
   if (scr_bo_is(method, "indexOf")) return tbm_search(recv, args, argc, what, 0);
   if (scr_bo_is(method, "lastIndexOf")) return tbm_search(recv, args, argc, what, 1);
