@@ -175,35 +175,8 @@ ScrBytes *scr_zlib_unzip(const ScrBytes *data) {
   return scr_zlib_inflate_mode(data, 3);
 }
 
-/* ── the promisified twins (util.promisify(deflate) / (unzip)) ──────────
- * Node runs these on the threadpool; a compiled binary has none, so the
- * codec runs synchronously and the result comes back as an ALREADY
- * SETTLED promise -- the fs/promises stance (SEMANTICS.md divergence 23).
- * The await still yields to the microtask queue, so ordering against
- * other promise work is unchanged; only the parallelism is absent, and
- * there was never any to observe in a single-threaded loop. A throw from
- * the codec propagates out of the call rather than rejecting the promise
- * -- the same shape the sync forms already have, and what the settled-
- * promise helper's callers rely on. */
-ScrPromise *scr_zlib_deflate_async(const ScrBytes *data) {
-  ScrBytes *b = scr_zlib_deflate(data);
-  return scr_promise_settled_ref(b, &scr_bytes_retain_v, &scr_bytes_release_v, NULL);
-}
-
-/* util.promisify(deflate) WITH an options object carrying a level. Node's
- * callback deflate takes { level }, and the level changes the OUTPUT BYTES
- * (it is a size/CPU tradeoff over a stream that inflates identically), so
- * the level has to reach the codec rather than being dropped. Mode 0 is the
- * zlib container, which is what the option-less form produces too. */
-ScrPromise *scr_zlib_deflate_async_level(const ScrBytes *data, double level) {
-  ScrBytes *b = scr_zlib_deflate_mode(data, 0, level);
-  return scr_promise_settled_ref(b, &scr_bytes_retain_v, &scr_bytes_release_v, NULL);
-}
-
-ScrPromise *scr_zlib_unzip_async(const ScrBytes *data) {
-  ScrBytes *b = scr_zlib_unzip(data);
-  return scr_promise_settled_ref(b, &scr_bytes_retain_v, &scr_bytes_release_v, NULL);
-}
+/* The promisified twins (scr_zlib_deflate_async and friends) ride the worker
+ * pool; they live at the end of this file, after the codec core they run. */
 
 /* ── the RAW twins (node:zlib's deflateRaw/inflateRaw) ───────────────────
  * Headerless DEFLATE (mode 1, windowBits -15): the same codec with no
@@ -216,16 +189,6 @@ ScrBytes *scr_zlib_deflate_raw(const ScrBytes *data) {
 
 ScrBytes *scr_zlib_inflate_raw(const ScrBytes *data) {
   return scr_zlib_inflate_mode(data, 1);
-}
-
-ScrPromise *scr_zlib_deflate_raw_async(const ScrBytes *data) {
-  ScrBytes *b = scr_zlib_deflate_raw(data);
-  return scr_promise_settled_ref(b, &scr_bytes_retain_v, &scr_bytes_release_v, NULL);
-}
-
-ScrPromise *scr_zlib_inflate_raw_async(const ScrBytes *data) {
-  ScrBytes *b = scr_zlib_inflate_raw(data);
-  return scr_promise_settled_ref(b, &scr_bytes_retain_v, &scr_bytes_release_v, NULL);
 }
 
 /* ── zlib over UNTYPED operands, with Node's options bag ───────────────────
@@ -395,96 +358,181 @@ static ScrBytes *zl_finish(uint8_t *buf, size_t len) {
   return out;
 }
 
-static ScrBytes *zl_deflate_opts(const ScrBytes *data, int mode, const ScrZlOpts *o) {
+/* ── the PURE codec core ────────────────────────────────────────────────
+ * Raw pointers in, a malloc'd result or a classified failure out, and NOTHING
+ * of the runtime touched (no ScrBytes, no throw, no trap): the worker pool
+ * runs it off the main thread. The main thread turns a ZlRes into a Buffer or
+ * Node's catchable Error (zl_res_take). The synchronous opts forms run the
+ * very same core, so the two can never disagree. */
+typedef struct {
+  int level, window_bits, mem_level, strategy;
+  double max_out;
+  const uint8_t *dict; /* NULL = none */
+  size_t dict_len;
+} ZlParams;
+
+enum { ZL_OK = 0, ZL_OOM, ZL_ZERR, ZL_TOO_LARGE };
+
+typedef struct {
+  uint8_t *buf; /* malloc'd, ZL_OK only */
+  size_t len;
+  int kind;
+  int rc;           /* ZL_ZERR: zlib's return code */
+  const char *code; /* ZL_ZERR: Node's err.code (static) */
+  char msg[96];     /* ZL_ZERR: the message (copied: zs.msg dies with the stream) */
+} ZlRes;
+
+static void zl_fail(ZlRes *r, int kind) {
+  r->kind = kind;
+  r->buf = NULL;
+  r->len = 0;
+}
+
+static void zl_zerr(ZlRes *r, int rc, const char *code, const char *msg) {
+  zl_fail(r, ZL_ZERR);
+  r->rc = rc;
+  r->code = code;
+  snprintf(r->msg, sizeof r->msg, "%s", msg);
+}
+
+static void zl_core_deflate(const uint8_t *in, size_t n, int mode, const ZlParams *p, ZlRes *r) {
   z_stream zs;
   memset(&zs, 0, sizeof zs);
-  int wbits = o->window_bits;
+  int wbits = p->window_bits;
   if (mode == 1) wbits = wbits == 8 ? -9 : -wbits; /* raw; zlib refuses 8 */
   else if (mode == 2) wbits += 16;
   else if (wbits == 8) wbits = 9;
-  if (deflateInit2(&zs, o->level, Z_DEFLATED, wbits, o->mem_level, o->strategy) != Z_OK) scr_zlib_oom();
-  if (o->dict && mode != 2) deflateSetDictionary(&zs, o->dict->data, (uInt)o->dict->len);
-  uLong cap = deflateBound(&zs, (uLong)data->len);
+  if (deflateInit2(&zs, p->level, Z_DEFLATED, wbits, p->mem_level, p->strategy) != Z_OK) { zl_fail(r, ZL_OOM); return; }
+  if (p->dict && mode != 2) deflateSetDictionary(&zs, p->dict, (uInt)p->dict_len);
+  uLong cap = deflateBound(&zs, (uLong)n);
   uint8_t *buf = malloc(cap ? cap : 1);
-  if (!buf) scr_zlib_oom();
-  zs.next_in = data->data;
-  zs.avail_in = (uInt)data->len;
+  if (!buf) {
+    deflateEnd(&zs);
+    { zl_fail(r, ZL_OOM); return; }
+  }
+  zs.next_in = (Bytef *)(uintptr_t)in;
+  zs.avail_in = (uInt)n;
   zs.next_out = buf;
   zs.avail_out = (uInt)cap;
   int rc = deflate(&zs, Z_FINISH);
-  if (rc != Z_STREAM_END) scr_zlib_oom();
+  if (rc != Z_STREAM_END) {
+    deflateEnd(&zs);
+    free(buf);
+    { zl_fail(r, ZL_OOM); return; }
+  }
   size_t len = cap - zs.avail_out;
   deflateEnd(&zs);
-  if ((double)len > o->max_out) {
+  if ((double)len > p->max_out) {
     free(buf);
-    zl_too_large(o->max_out);
-    return NULL;
+    { zl_fail(r, ZL_TOO_LARGE); return; }
   }
-  return zl_finish(buf, len);
+  r->kind = ZL_OK;
+  r->buf = buf;
+  r->len = len;
 }
 
-static ScrBytes *zl_inflate_opts(const ScrBytes *data, int mode, const ScrZlOpts *o) {
+static void zl_core_inflate(const uint8_t *in, size_t n, int mode, const ZlParams *p, ZlRes *r) {
   z_stream zs;
   memset(&zs, 0, sizeof zs);
-  int wbits = o->window_bits;
+  int wbits = p->window_bits;
   if (mode == 1) wbits = -wbits;
   else if (mode == 2) wbits += 16;
   else if (mode == 3) wbits += 32;
-  if (inflateInit2(&zs, wbits) != Z_OK) scr_zlib_oom();
-  if (o->dict && mode == 1) inflateSetDictionary(&zs, o->dict->data, (uInt)o->dict->len);
-  size_t cap = data->len > 64 ? data->len * 4 : 256;
+  if (inflateInit2(&zs, wbits) != Z_OK) { zl_fail(r, ZL_OOM); return; }
+  if (p->dict && mode == 1) inflateSetDictionary(&zs, p->dict, (uInt)p->dict_len);
+  size_t cap = n > 64 ? n * 4 : 256;
   uint8_t *buf = malloc(cap);
-  if (!buf) scr_zlib_oom();
-  zs.next_in = data->data;
-  zs.avail_in = (uInt)data->len;
+  if (!buf) {
+    inflateEnd(&zs);
+    { zl_fail(r, ZL_OOM); return; }
+  }
+  zs.next_in = (Bytef *)(uintptr_t)in;
+  zs.avail_in = (uInt)n;
   size_t len = 0;
   for (;;) {
     zs.next_out = buf + len;
     zs.avail_out = (uInt)(cap - len);
     int rc = inflate(&zs, Z_NO_FLUSH);
-    if (rc == Z_NEED_DICT && o->dict) {
-      if (inflateSetDictionary(&zs, o->dict->data, (uInt)o->dict->len) == Z_OK) continue;
+    if (rc == Z_NEED_DICT && p->dict) {
+      if (inflateSetDictionary(&zs, p->dict, (uInt)p->dict_len) == Z_OK) continue;
     }
     len = cap - zs.avail_out;
-    if ((double)len > o->max_out) {
+    if ((double)len > p->max_out) {
       inflateEnd(&zs);
       free(buf);
-      zl_too_large(o->max_out);
-      return NULL;
+      { zl_fail(r, ZL_TOO_LARGE); return; }
     }
     if (rc == Z_STREAM_END) break;
     if (rc == Z_OK || rc == Z_BUF_ERROR) {
       if (rc == Z_BUF_ERROR && zs.avail_in == 0 && zs.avail_out > 0) {
         inflateEnd(&zs);
         free(buf);
-        static const char msg[] = "unexpected end of file";
-        scr_throw_errno_error_raw(-5, "Z_BUF_ERROR", msg, sizeof msg - 1);
-        return NULL;
+        { zl_zerr(r, -5, "Z_BUF_ERROR", "unexpected end of file"); return; }
       }
       if (cap - len < 64) {
         size_t want = cap * 2;
-        if (isfinite(o->max_out) && want > (size_t)o->max_out + 64) want = (size_t)o->max_out + 64;
+        if (isfinite(p->max_out) && want > (size_t)p->max_out + 64) want = (size_t)p->max_out + 64;
         if (want <= cap) want = cap + 64;
         cap = want;
         uint8_t *grown = realloc(buf, cap);
-        if (!grown) scr_zlib_oom();
+        if (!grown) {
+          inflateEnd(&zs);
+          free(buf);
+          { zl_fail(r, ZL_OOM); return; }
+        }
         buf = grown;
       }
       continue;
     }
     const char *msg = zs.msg ? zs.msg : (rc == Z_NEED_DICT ? "Missing dictionary" : "zlib error");
-    size_t mlen = strlen(msg);
+    /* Node stamps the zlib return code's name (err.code) */
     const char *code = rc == Z_DATA_ERROR ? "Z_DATA_ERROR"
                        : rc == Z_NEED_DICT ? "Z_NEED_DICT"
                        : rc == Z_MEM_ERROR ? "Z_MEM_ERROR"
                                            : "Z_STREAM_ERROR";
+    zl_zerr(r, rc, code, msg);
     inflateEnd(&zs);
     free(buf);
-    scr_throw_errno_error_raw((double)rc, code, msg, mlen);
-    return NULL;
+    return;
   }
   inflateEnd(&zs);
-  return zl_finish(buf, len);
+  r->kind = ZL_OK;
+  r->buf = buf;
+  r->len = len;
+}
+
+/* The main-thread half: a result becomes a Buffer (+1) or the exception Node
+ * throws (NULL, throw pending). Consumes the result's block. */
+static ScrBytes *zl_res_take(ZlRes *r, double max_out) {
+  switch (r->kind) {
+  case ZL_OK: return zl_finish(r->buf, r->len);
+  case ZL_TOO_LARGE: zl_too_large(max_out); return NULL;
+  case ZL_ZERR: scr_throw_errno_error_raw((double)r->rc, r->code, r->msg, strlen(r->msg)); return NULL;
+  default: scr_zlib_oom(); return NULL;
+  }
+}
+
+static ZlParams zl_params_of(const ScrZlOpts *o) {
+  ZlParams p = {o->level, o->window_bits, o->mem_level, o->strategy, o->max_out, NULL, 0};
+  if (o->dict != NULL) {
+    p.dict = o->dict->data;
+    p.dict_len = o->dict->len;
+  }
+  return p;
+}
+
+static ScrBytes *zl_deflate_opts(const ScrBytes *data, int mode, const ScrZlOpts *o) {
+  ZlParams p = zl_params_of(o);
+  ZlRes r;
+  zl_core_deflate(data->data, data->len, mode, &p, &r);
+  return zl_res_take(&r, o->max_out);
+}
+
+static ScrBytes *zl_inflate_opts(const ScrBytes *data, int mode, const ScrZlOpts *o) {
+  ZlParams p = zl_params_of(o);
+  ZlRes r;
+  zl_core_inflate(data->data, data->len, mode, &p, &r);
+  return zl_res_take(&r, o->max_out);
 }
 
 static ScrBytes *zl_run(int op, const ScrDyn *data, const ScrDyn *opts, bool callback_form) {
@@ -509,12 +557,58 @@ ScrBytes *scr_zlib_sync_dyn(double op, const ScrDyn *data, const ScrDyn *opts) {
   return zl_run((int)op, data, opts, false);
 }
 
-static void zl_cb_fire(ScrClosure *c) {
-  ScrDyn *cb = (ScrDyn *)scr_box_get_ref(c->caps[0]);
-  ScrDyn *data = (ScrDyn *)scr_box_get_ref(c->caps[1]);
-  ScrDyn *opts = (ScrDyn *)scr_box_get_ref(c->caps[2]);
-  ScrDyn *opn = (ScrDyn *)scr_box_get_ref(c->caps[3]);
-  ScrBytes *out = zl_run((int)opn->v.num, data, opts, true);
+/* ── the worker-pool jobs ───────────────────────────────────────────────
+ * Node runs zlib's callback and promisified forms on libuv's threadpool and
+ * delivers in the poll phase. A job carries: a copy of the input (a u8 ScrBytes
+ * the MAIN thread allocated, so nothing is shared with the caller's buffer),
+ * the dictionary (retained by the main thread), the parameters (plain ints),
+ * and where the answer goes: a promise or a callback. The worker runs the PURE
+ * core on raw pointers; `done` runs on the main thread, builds the Buffer or
+ * Node's Error and settles/calls. */
+typedef struct {
+  ScrWork w;
+  bool inflating;
+  int mode;
+  ZlParams p;
+  ScrBytes *in;   /* owned +1 */
+  ScrBytes *dict; /* owned +1 or NULL; p.dict points into it */
+  ZlRes res;
+  ScrPromise *promise; /* promise form: retained; NULL for the callback form */
+  ScrDyn *cb;          /* callback form: retained; NULL for the promise form */
+} ZlJob;
+
+static void zl_job_run(ScrWork *w) {
+  ZlJob *j = (ZlJob *)w;
+  if (j->inflating) zl_core_inflate(j->in->data, j->in->len, j->mode, &j->p, &j->res);
+  else zl_core_deflate(j->in->data, j->in->len, j->mode, &j->p, &j->res);
+}
+
+static void zl_job_free(ZlJob *j) {
+  scr_bytes_release(j->in);
+  if (j->dict) scr_bytes_release(j->dict);
+  free(j);
+}
+
+static void zl_job_done(ScrWork *w, bool ran) {
+  ZlJob *j = (ZlJob *)w;
+  ScrPromise *promise = j->promise;
+  ScrDyn *cb = j->cb;
+  if (!ran) {
+    /* dropped at teardown: a finished-undelivered job still owns its block */
+    if (j->res.kind == ZL_OK && j->res.buf != NULL) free(j->res.buf);
+    if (promise) scr_promise_release(promise);
+    if (cb) scr_dyn_release(cb);
+    zl_job_free(j);
+    return;
+  }
+  ScrBytes *out = zl_res_take(&j->res, j->p.max_out);
+  zl_job_free(j);
+  if (promise != NULL) {
+    if (out != NULL) scr_promise_fulfill_ref(promise, out, &scr_bytes_retain_v, &scr_bytes_release_v, NULL);
+    else scr_promise_reject_pending(promise);
+    scr_promise_release(promise);
+    return;
+  }
   ScrDyn *args[2];
   if (out != NULL) {
     args[0] = scr_dyn_new_null();
@@ -536,22 +630,37 @@ static void zl_cb_fire(ScrClosure *c) {
   scr_dyn_release(args[0]);
   scr_dyn_release(args[1]);
   scr_dyn_release(cb);
-  scr_dyn_release(data);
-  scr_dyn_release(opts);
-  scr_dyn_release(opn);
 }
 
-static ScrBox *zl_box(ScrDyn *v /* +1 moves */) {
-  ScrBox *b = scr_box_new_obj(scr_dyn_retain_v, scr_dyn_release_v, NULL);
-  scr_box_set_ref(b, v);
-  return b;
+/* Takes `in` and `dict` (+1 each, moved). Estimated cost in microseconds:
+ * deflate ~40 ns/byte, inflate ~20 ns/input byte (a 4:1 stream at 100+ MB/s). */
+static ZlJob *zl_job_new(bool inflating, int mode, const ZlParams *p, ScrBytes *in, ScrBytes *dict) {
+  ZlJob *j = calloc(1, sizeof *j);
+  if (j == NULL) scr_zlib_oom();
+  j->w.run = zl_job_run;
+  j->w.done = zl_job_done;
+  j->inflating = inflating;
+  j->mode = mode;
+  j->p = *p;
+  j->in = in;
+  j->dict = dict;
+  if (dict != NULL) {
+    j->p.dict = dict->data;
+    j->p.dict_len = dict->len;
+  }
+  return j;
+}
+
+static void zl_job_submit(ZlJob *j) {
+  scr_work_submit_cost(&j->w, (double)j->in->len * (j->inflating ? 0.02 : 0.04));
 }
 
 /* zlib.<op>(data[, options], callback): the callback is validated now
  * (ERR_INVALID_ARG_TYPE, like Node's callback check), the data and options
- * are captured, and the codec runs and the callback fires from an immediate.
- * An argument error is delivered the same way Node delivers it: thrown
- * synchronously for the buffer and options, never through the callback. */
+ * are captured, the codec runs on the worker pool, and the callback fires
+ * from the poll station. An argument error is delivered the same way Node
+ * delivers it: thrown synchronously for the buffer and options, never
+ * through the callback. */
 void scr_zlib_cb_dyn(double op, const ScrDyn *data, const ScrDyn *a1, const ScrDyn *a2) {
   const ScrDyn *opts = a1;
   const ScrDyn *cb = a2;
@@ -564,16 +673,62 @@ void scr_zlib_cb_dyn(double op, const ScrDyn *data, const ScrDyn *a1, const ScrD
     return;
   }
   /* Node validates the buffer and options before scheduling anything. */
-  ScrBytes *probe = zl_input_bytes(data, true);
-  if (probe == NULL) return;
-  scr_bytes_release(probe);
+  ScrBytes *in = zl_input_bytes(data, true);
+  if (in == NULL) return;
   ScrZlOpts o;
-  if (!zl_parse_opts(opts, &o)) return;
-  zl_opts_free(&o);
-  ScrClosure *c = scr_closure_new((void *)zl_cb_fire, 4);
-  c->caps[0] = zl_box(scr_dyn_retain((ScrDyn *)cb));
-  c->caps[1] = zl_box(scr_dyn_retain((ScrDyn *)data));
-  c->caps[2] = zl_box(opts == NULL ? scr_dyn_retain(scr_dyn_undefined()) : scr_dyn_retain((ScrDyn *)opts));
-  c->caps[3] = zl_box(scr_dyn_new_num(op));
-  scr_set_immediate(c);
+  if (!zl_parse_opts(opts, &o)) {
+    scr_bytes_release(in);
+    return;
+  }
+  static const int mode_of[7] = {0, 0, 2, 2, 3, 1, 1};
+  int opi = (int)op;
+  ZlParams p = zl_params_of(&o);
+  ScrBytes *dict = o.dict; /* moves into the job */
+  ZlJob *j = zl_job_new(!(opi == 0 || opi == 2 || opi == 5), mode_of[opi], &p, in, dict);
+  j->cb = scr_dyn_retain((ScrDyn *)cb);
+  zl_job_submit(j);
+}
+
+/* ── the promisified twins (util.promisify(deflate) / (unzip) / ...) ─────
+ * The promise is PENDING on return and settles from the poll station, as
+ * Node's does; a codec failure REJECTS it. The input is copied into the job
+ * (Node's zlib reads the caller's buffer on its thread; a copy cannot
+ * dangle and cannot race with the caller). */
+static ScrPromise *zl_async(bool inflating, int mode, int level, const ScrBytes *data) {
+  ZlParams p = {level, 15, 8, Z_DEFAULT_STRATEGY, INFINITY, NULL, 0};
+  size_t n = data->len * scr_bytes_elem_size(data->elem);
+  ScrBytes *in = scr_bytes_new(SCR_BYTES_U8, (double)n);
+  if (n > 0) memcpy(in->data, data->data, n);
+  ZlJob *j = zl_job_new(inflating, mode, &p, in, NULL);
+  ScrPromise *pr = scr_promise_new();
+  j->promise = scr_promise_retain(pr);
+  zl_job_submit(j);
+  return pr;
+}
+
+ScrPromise *scr_zlib_deflate_async(const ScrBytes *data) {
+  return zl_async(false, 0, Z_DEFAULT_COMPRESSION, data);
+}
+
+/* util.promisify(deflate) WITH an options object carrying a level. Node's
+ * callback deflate takes { level }, and the level changes the OUTPUT BYTES
+ * (it is a size/CPU tradeoff over a stream that inflates identically), so
+ * the level has to reach the codec rather than being dropped. Mode 0 is the
+ * zlib container, which is what the option-less form produces too. */
+ScrPromise *scr_zlib_deflate_async_level(const ScrBytes *data, double level) {
+  int lvl = (int)level;
+  if (lvl < -1 || lvl > 9) lvl = Z_DEFAULT_COMPRESSION;
+  return zl_async(false, 0, lvl, data);
+}
+
+ScrPromise *scr_zlib_unzip_async(const ScrBytes *data) {
+  return zl_async(true, 3, Z_DEFAULT_COMPRESSION, data);
+}
+
+ScrPromise *scr_zlib_deflate_raw_async(const ScrBytes *data) {
+  return zl_async(false, 1, Z_DEFAULT_COMPRESSION, data);
+}
+
+ScrPromise *scr_zlib_inflate_raw_async(const ScrBytes *data) {
+  return zl_async(true, 1, Z_DEFAULT_COMPRESSION, data);
 }
