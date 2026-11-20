@@ -1839,9 +1839,17 @@ export class LlDyn {
           B.line(`${eg} = load i32, ptr @scr_rec_sync_eager`);
           B.line(`store i32 0, ptr @scr_rec_sync_eager`);
           B.line(`${egb} = icmp ne i32 ${eg}, 0`);
+          // Lazy only over an ENGINE object (SCR_DYN_JSVAL), like the C builder: a parsed or tree object keeps its boundary validation.
+          const lzk = this.kindOf(B, "%d");
+          const lzj = B.tmp();
+          const lzn = B.tmp();
+          B.line(`${lzj} = icmp eq i32 ${lzk}, ${DK.JSVAL}`);
+          B.line(`${lzn} = xor i1 ${lzj}, true`);
+          const lzo = B.tmp();
+          B.line(`${lzo} = or i1 ${egb}, ${lzn}`);
           const lLz = B.newLabel("dcr.il");
           const lEg = B.newLabel("dcr.ie");
-          B.condBr(egb, lEg, lLz);
+          B.condBr(lzo, lEg, lLz);
           B.startBlock(lLz);
           B.line(`%rl = call ptr @${mangleRecordNew(t.shapeId)}()`);
           const vlp = B.tmp();

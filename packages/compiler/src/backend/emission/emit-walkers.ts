@@ -2706,7 +2706,9 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         const lazyIdx = process.env["SCRIPTC_RECVIEW_MUTANT"] !== "eagercast" && !soft && shape.view === true && shape.indexValue !== undefined && shape.fields.length === 0 && !shape.keyOrders && !shape.tostr;
         const lazyIdxLane = (): void => {
           d.push(`  { int sc_eager = scr_rec_sync_eager; scr_rec_sync_eager = 0;`);
-          d.push(`    if (!sc_eager) {`);
+          // Lazy only over an ENGINE object (SCR_DYN_JSVAL): a getter exists there and must not run at the cast. A parsed or tree object has
+          // no getter to protect, and its cast keeps validating every member at the boundary (the dynamic-boundary checks).
+          d.push(`    if (!sc_eager && d->kind == SCR_DYN_JSVAL) {`);
           d.push(`      ${cDecl(t, "r")} = ${mangleRecordNew(t.shapeId)}();`);
           d.push(`      r->${VIEW_MEMBER} = scr_dyn_retain((ScrDyn *)d);`);
           if (shape.ownmask) d.push(`      r->${OWNMASK_MEMBER}[0] = scr_dyn_is_null_proto(d) ? ${OWNMASK_VALID | OWNMASK_SRC_NULL_PROTO} : ${OWNMASK_VALID};`);
