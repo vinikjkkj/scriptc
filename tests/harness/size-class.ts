@@ -2292,7 +2292,7 @@ export const TEXT_DRIFT_TOLERANCE = 256;
  * two-sweep candidate mask), always linked; scr_box_new_objd / scr_armvt_enc and the descriptor-decoding release and retain paths in scr_closure.c;
  * the static shared-box tables' constructors checks in scr_union_new_f64 / scr_union_new_bool. Against that, a box and a union no longer store three
  * function pointers each. */
-export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 72_646 : null;
+export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 72_998 : null;
 
 /** .text VirtualSize of the canonical regex program, same commit, same lane.
  * Recorded separately rather than derived: the two classes do not move
@@ -2471,7 +2471,7 @@ export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 72_646 : null;
  * 136,022 record is the 224 between that and 136,022). The always-linked growth is scr_json.c's hash index of a large dyn object (the hash, build, probe, the appender's
  * and remover's hooks and the tail-called big-table read), the per-descriptor hash of a large class's member table and its probe, the registry-position memo painted once for
  * scr_dyn_objinst_class_of, and the keyed [[Get]] fast path. The hello-world class stayed inside its tolerance. It buys -10% Ir on messaging-redis and -3.2% on messaging-mysql. */
-export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 137_510 : null;
+export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 137_782 : null;
 
 /* 2026-10-21 -- THE LINK NOW COLLECTS DEAD SECTIONS, and every figure above moves.
  * The numbers in this block, and the two ceilings (STATIC_CLASS_MAX and
@@ -2556,3 +2556,19 @@ export function recordedTextComplaint(
  * (4,096) over the OLD recorded file figure 116,736 -- that figure was itself 3,584 stale against the lane (the base measures 120,320), so it is re-recorded to the lane's
  * own 120,832 rather than nudged. The regex file anchor (225,792) is unchanged: the new binary measures exactly it. Both .text anchors move by the measured amount: the
  * base sat inside their tolerance (+240 and -176 against 72,950 / 138,262), the change sits outside it (-304 and -752). */
+
+/* 2026-11-21 -- THE WORD-AT-A-TIME INTERNING HASH (branch prof1-concat, scr_str_ihash) re-records both .text anchors. Measured on the zig x86_64-windows-gnu lane (SCRIPTC_CC=zigcc
+ * SCRIPTC_TARGET=x86_64-windows-gnu, PE .text VirtualSize), the hash source file as the only variable, the same two programs regex.test.ts builds:
+ *
+ *   regex-free program (console.log("hello", "world"))   base 72,518   hash 72,998   (+480)   file 120,832 -> 121,344
+ *   regex program                                        base 137,638  hash 137,782  (+144)   file 225,792 -> 226,304
+ *
+ * The local figure for the hash equals the CI lane's own number to the byte (72,998 read from the failing island.test / regex.test message of run 44784669926), so these two
+ * values are the lane's, not estimates. THE BASE SAT INSIDE the old tolerance (-128 and +128 against 72,646 / 137,510); the change sits outside it (+352 and +272).
+ * WHAT THE BYTES BOUGHT: scr_str_intern_get / put / forget and the regrow rehash all hash the string they probe, 5 Ir per byte as byte-at-a-time FNV; the 8-bytes-per-step hash
+ * with overlapping tail loads is always linked (scr_string.c carries concat), ~380 bytes of function against ~80. A/B (bench Ir, ir 250, base the branch below the hash,
+ * runs 44784676803 mysql / 44784687613 redis): scr_str_concat -107.8M / -171.3M, scr_str_intern_forget -205.6M / -309.3M, the new out-of-line scr_str_ihash +218.5M / +282.8M, net
+ * -94.9M (mysql) and -197.8M (redis) Ir at function level; total Ir -0.082% / -0.269% against A/A -0.140% / +0.127% (not resolved at the total). Smaller variants were measured
+ * and rejected: a byte-assembled tail (+160 hello but +944 regex), an accumulator tail (+336 / +1,472), and noinline forms (+784..1,344 hello): none got both programs inside the old
+ * tolerance, and the overlapping-load form is also the fastest (hash 94.2M -> 38.3M Ir in a concat micro against 67.6M for the byte-assembled one). The file anchors (120,832 / 225,792)
+ * are NOT moved: the files grew one 512-byte granule, inside the one-page file tolerance. */
