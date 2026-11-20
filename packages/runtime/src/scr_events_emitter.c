@@ -1173,24 +1173,32 @@ static const char *const EE_OP_NAMES[EEOP_N] = {
   "getMaxListeners",
 };
 
-/* The lengths of EE_OP_NAMES, in the same order, as compile-time constants: the lookup used to run strlen on every name (15 calls per question),
- * and it is asked of every dyn method call and key read on a class instance that is an emitter (2.7 M times, ~40 M strlen calls, in one mysql bench run). */
-static const uint8_t EE_OP_LEN[EEOP_N] = {
-  sizeof "on" - 1, sizeof "once" - 1, sizeof "off" - 1, sizeof "emit" - 1, sizeof "addListener" - 1, sizeof "removeListener" - 1,
-  sizeof "removeAllListeners" - 1, sizeof "prependListener" - 1, sizeof "prependOnceListener" - 1, sizeof "listenerCount" - 1,
-  sizeof "listeners" - 1, sizeof "rawListeners" - 1, sizeof "eventNames" - 1, sizeof "setMaxListeners" - 1, sizeof "getMaxListeners" - 1,
-};
-
+/* The member a name denotes, or -1. A switch on the length: each length has one to three candidates, so a question costs one jump and at most three
+ * memcmp of known size, where the first version of this lookup walked all 15 names (a strlen each, then a length compare each) and 2.7 M questions
+ * in one mysql bench run paid for it. EE_IS spells each candidate through EE_OP_NAMES, so the table and the switch cannot disagree about a name;
+ * the lengths are literals, and row 26191 asks every member by its real name (a wrong literal fails it). */
+#define EE_IS(op, len) (memcmp(name, EE_OP_NAMES[op], (len)) == 0)
 static int ee_op_of(const char *name, size_t n) {
 #ifdef SCR_OBJ_PLANT_BUG
   if (SCR_OBJ_PLANT_BUG == 10 && n == 4) return -1; /* the planted defect: every four-letter member (once, emit) reads as unknown */
 #endif
-  if (n < 2 || n > 19) return -1; /* the shortest and longest member names: nearly every other question ends here */
-  for (int i = 0; i < EEOP_N; i++) {
-    if (EE_OP_LEN[i] == n && EE_OP_NAMES[i][0] == name[0] && memcmp(EE_OP_NAMES[i], name, n) == 0) return i;
+  switch (n) {
+    case 2: return EE_IS(EEOP_ON, 2) ? EEOP_ON : -1;
+    case 3: return EE_IS(EEOP_OFF, 3) ? EEOP_OFF : -1;
+    case 4: return EE_IS(EEOP_ONCE, 4) ? EEOP_ONCE : EE_IS(EEOP_EMIT, 4) ? EEOP_EMIT : -1;
+    case 9: return EE_IS(EEOP_LISTENERS, 9) ? EEOP_LISTENERS : -1;
+    case 10: return EE_IS(EEOP_NAMES, 10) ? EEOP_NAMES : -1;
+    case 11: return EE_IS(EEOP_ADD, 11) ? EEOP_ADD : -1;
+    case 12: return EE_IS(EEOP_RAW, 12) ? EEOP_RAW : -1;
+    case 13: return EE_IS(EEOP_COUNT, 13) ? EEOP_COUNT : -1;
+    case 14: return EE_IS(EEOP_REMOVE, 14) ? EEOP_REMOVE : -1;
+    case 15: return EE_IS(EEOP_PREPEND, 15) ? EEOP_PREPEND : EE_IS(EEOP_SET_MAX, 15) ? EEOP_SET_MAX : EE_IS(EEOP_GET_MAX, 15) ? EEOP_GET_MAX : -1;
+    case 18: return EE_IS(EEOP_REMOVE_ALL, 18) ? EEOP_REMOVE_ALL : -1;
+    case 19: return EE_IS(EEOP_PREPEND_ONCE, 19) ? EEOP_PREPEND_ONCE : -1;
+    default: return -1;
   }
-  return -1;
 }
+#undef EE_IS
 
 static bool ee_knows(const char *name, size_t n) { return ee_op_of(name, n) >= 0; }
 
