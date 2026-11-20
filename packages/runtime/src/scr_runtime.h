@@ -7122,6 +7122,10 @@ ScrDyn *scr_dyn_idx_get(ScrDyn *d, double i, bool opt, ScrDyn *(*slow)(ScrDyn *,
  * non-configurable own accessor, Node's ToObject TypeError on an
  * undefined/null receiver, and a loud refusal for an array-element delete
  * (a hole has no representation here) — may-throw. */
+/* The lazy record-view cast (a pure index-signature view builds NOTHING at the cast) reads this flag once and clears it: the snapshot sync of a
+ * view (recordViewSync) sets it around its call of the checked builder to get the EAGER build. Single-threaded by use: both sides run on the
+ * thread that owns the dyn tree. */
+extern int scr_rec_sync_eager;
 bool scr_dyn_key_delete(ScrDyn *recv, ScrStr *key);
 bool scr_dyn_key_delete_sloppy(ScrDyn *recv, ScrStr *key);
 /* Object.freeze over a FRESH dyn ARRAY (the compiler proves the value is one): sets the frozen flag -- the `null_proto` byte, which only an OBJ reads -- and
