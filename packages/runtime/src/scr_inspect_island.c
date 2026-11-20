@@ -17,8 +17,6 @@
 #include <string.h>
 
 ScrStr *scr_insp_jsval(ScrJsval *v, double recurse, double depth) {
-  (void)recurse;
-  (void)depth;
   if (scr_jsval_is_undefined(v)) return scr_str_new("undefined", 9);
   if (scr_jsval_is_nullish(v)) return scr_str_new("null", 4);
   ScrStr *ty = scr_jsval_typeof(v);
@@ -39,6 +37,12 @@ ScrStr *scr_insp_jsval(ScrJsval *v, double recurse, double depth) {
   if (ty && strcmp(ty->data, "boolean") == 0) {
     scr_str_release(ty);
     return scr_jsval_truthy(v) ? scr_str_new("true", 4) : scr_str_new("false", 5);
+  }
+  if (scr_insp_jsval_hook != NULL) {
+    ScrInspHostOpts ho;
+    scr_inspect_host_opts(&ho, recurse, depth);
+    if (ty) scr_str_release(ty);
+    return scr_insp_jsval_hook(v, &ho); /* NULL with the engine's exception pending */
   }
   char buf[192];
   int n = snprintf(buf, sizeof buf,

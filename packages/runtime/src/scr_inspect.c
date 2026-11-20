@@ -3238,6 +3238,20 @@ static ScrStr *insp_sh_class_value(ScrDyn *d, const ScrDynClass *vc, const ScrDy
  * in the checked-dynamic tree's documented Uint8Array identity (SEMANTICS.md). */
 ScrStr *(*scr_insp_hook)(ScrDyn *d, const char *cn, double recurse, double depth) = NULL;
 
+void scr_inspect_host_opts(ScrInspHostOpts *o, double recurse, double depth) {
+  o->depth = depth;
+  o->break_length = g_opts.break_length;
+  o->compact = g_opts.compact;
+  o->compact_kind = g_opts.compact_kind == INSP_COMPACT_OFF ? 0 : g_opts.compact_kind == INSP_COMPACT_TRUE ? 1 : 2;
+  o->max_array = g_opts.max_array;
+  o->max_string = g_opts.max_string;
+  o->numeric_sep = g_opts.numeric_sep;
+  o->sorted = g_opts.sorted;
+  o->colors = INSP_COLORS_ON;
+  o->show_hidden = INSP_SH;
+  o->recurse = recurse;
+}
+
 ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
   if (d->kind == SCR_DYN_OBJ || d->kind == SCR_DYN_FUNC) scr_dyn_lazy_force_all_any(d); /* a lazy member prints as the value it stands for, never as [Getter] */
   switch (d->kind) {
@@ -4501,6 +4515,14 @@ ScrStr *scr_insp_dyn(ScrDyn *d, double recurse, double depth) {
       return scr_str_new("", 0);
     }
     case SCR_DYN_JSVAL: {
+      /* The engine's own util.inspect (node:util's shim, evaluated standalone) renders it when an engine is linked. */
+      if (scr_insp_jsval_hook != NULL) {
+        ScrInspHostOpts ho;
+        scr_inspect_host_opts(&ho, recurse, depth);
+        ScrStr *r = scr_insp_jsval_hook(d->v.jsval.cell, &ho);
+        if (r != NULL) return r;
+        if (scr_exc_pending()) return scr_str_new("", 0);
+      }
       /* An island value inside the checked-dynamic tree: Node prints the engine object's
        * property dump — fence loudly, naming the engine typeof (the
        * scr_insp_jsval wording for bare 'any' composites). */

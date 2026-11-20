@@ -11315,6 +11315,16 @@ ScrStr *scr_insp_format(ScrDyn *arr);
  * compiler-emitted pending checks). */
 ScrStr *scr_insp_jsval(ScrJsval *v, double recurse, double depth);
 #endif
+/* The renderer's options as the engine-side util.inspect needs them (scr_inspect_host_opts fills it from the active options), and the
+ * hook the island installs so a composite ENGINE value inspects natively (node:util's own inspect, evaluated standalone): NULL where no
+ * engine is linked. The hook answers a +1 string, or NULL with an exception pending. */
+typedef struct ScrInspHostOpts {
+  double depth, break_length, compact, max_array, max_string, recurse;
+  int compact_kind; /* 0 off (false), 1 true, 2 a number */
+  int numeric_sep, sorted, colors, show_hidden;
+} ScrInspHostOpts;
+extern ScrStr *(*scr_insp_jsval_hook)(ScrJsval *cell, const ScrInspHostOpts *o);
+void scr_inspect_host_opts(ScrInspHostOpts *o, double recurse, double depth);
 void scr_insp_begin(double recurse);
 /* util.inspect options (scr_inspect.c): opts_push installs an options object
  * (NULL or any value keeps Node's defaults) as the active set and saves the
