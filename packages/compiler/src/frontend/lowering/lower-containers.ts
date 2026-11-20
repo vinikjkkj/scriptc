@@ -9071,6 +9071,16 @@ export function decoderCtorSpec(L: Lowerer, expr: ts.NewExpression): { enc: stri
         // source's flavor, it takes the constructor's.
         return markFlavor({ kind: "bytesNew", source: src, type, loc }, "plain", loc);
       }
+      // A numeric typed array of ANOTHER kind (`new Float64Array(int32array)`): the element list and the constructor's own conversion over it, exactly what
+      // `T.from(view)` does (every element of a numeric view is an f64). The bigint views mix with no numeric kind, DataView and ArrayBuffer views have no
+      // elements: those keep the refusal.
+      if (
+        src.type.kind === "bytes" && ARRAY_FROM_NUMERIC_VIEW.has(src.type.elem) && ARRAY_FROM_NUMERIC_VIEW.has(elem) &&
+        !/DataView|ArrayBufferView/.test(L.checker.typeToString(L.typeOf(argNode)))
+      ) {
+        const values: IrExpr = { kind: "bytesIntrinsic", method: "toArray", receiver: src, args: [], type: arrayOf(F64), loc };
+        return markFlavor({ kind: "bytesNew", source: values, type, loc }, "plain", loc);
+      }
       if (src.type.kind === "bytes") {
         L.noLowering(
           `new ${name} over a '${L.fmt(src.type)}'`,
@@ -10455,7 +10465,7 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
   export function lowerBytesStaticFromCall(L: Lowerer, call: ts.CallExpression,
     access: ts.PropertyAccessExpression,): IrExpr | null {
     if (L.chainBlocked(access, call)) return null;
-    if (access.name.text !== "from") return null;
+    if (access.name.text !== "from" && access.name.text !== "of") return null;
     if (!ts.isIdentifier(access.expression)) return null;
     const name = access.expression.text;
     const elem = own(BYTES_CTORS, name);
@@ -10463,6 +10473,14 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
     const args = call.arguments;
     const type = bytesOf(elem);
     const loc = locOf(call);
+    if (access.name.text === "of") {
+      // `T.of(a, b, ...)` is `new T([a, b, ...])`: each item converted by the constructor's own element rule. Spread items keep the refusal.
+      if (args.some(ts.isSpreadElement) || elem === "buf") return null;
+      const big = elem === "i64" || elem === "u64";
+      const elemT = big ? BIGINT : F64;
+      const seed: IrExpr = { kind: "arrayLit", elems: args.map((a) => L.lowerExprExpecting(a, elemT)), type: arrayOf(elemT), loc };
+      return markFlavor({ kind: "bytesNew", source: seed, type, loc }, "plain", loc);
+    }
     // `Uint8Array.from({ length: n }, mapfn)` — the COUNTED-GENERATION
     // idiom, the one mapped form with an answer that is already built.
     // ES2024 23.2.2.1 step 6: the source has no index properties, so
