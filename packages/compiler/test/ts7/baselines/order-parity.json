@@ -17515,6 +17515,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26070-randomfill-completions-each-get-a-checkpoint-and-run-before-a-later-timer-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26070-randomfill-completions-each-get-a-checkpoint-and-run-before-a-later-timer-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26071-a-slow-pool-job-does-not-hold-back-a-fast-one-or-the-main-thread-like-node.cjs": {
+   "order": [
+    "<repo>/tests/corpus/26071-a-slow-pool-job-does-not-hold-back-a-fast-one-or-the-main-thread-like-node.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26072-process-exit-with-pool-jobs-pending-drops-them-silently-like-node.cjs": {
+   "order": [
+    "<repo>/tests/corpus/26072-process-exit-with-pool-jobs-pending-drops-them-silently-like-node.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2608-regex-named-groups.ts": {
    "order": [
     "<repo>/tests/corpus/2608-regex-named-groups.ts"
