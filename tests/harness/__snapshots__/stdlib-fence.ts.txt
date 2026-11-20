@@ -91,7 +91,7 @@ stdlib-fence.ts:44:14 - error SC2020: 'string.toLocaleUpperCase' is part of the 
      |              ^~~~~~~~~~~~~~~~~~~~~~~
   45 | const limited = "a,b,c".split(",", 2); // the string-separator split lowers; the limit form stays fenced
 
-  hint: collation, plural/relative-time/list/segment/display-name and DateTimeFormat locale data are not in the static runtime (the localeCompare stance: code-unit order) — what lowers: number and bigint toLocaleString and the composed new Intl.NumberFormat(locales, options).format(x) for every ICU locale, option and numbering system, and Date toLocale*String and the composed new Intl.DateTimeFormat(locales, options).format(x) for every locale, calendar, numbering system and time zone
+  hint: collation, plural/relative-time/list/segment/display-name and DateTimeFormat locale data are not in the static runtime (localeCompare orders by the CLDR root collation; Intl.Collator and locale or options arguments have no lowering) — what lowers: number and bigint toLocaleString and the composed new Intl.NumberFormat(locales, options).format(x) for every ICU locale, option and numbering system, and Date toLocale*String and the composed new Intl.DateTimeFormat(locales, options).format(x) for every locale, calendar, numbering system and time zone
 
 stdlib-fence.ts:51:15 - error SC2020: '.indexOf with 2 arguments' is part of the standard library types but has no scriptc lowering yet
 
