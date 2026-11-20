@@ -17846,6 +17846,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26340-a-buffer-held-in-a-uint8array-slot-prints-as-a-buffer-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26340-a-buffer-held-in-a-uint8array-slot-prints-as-a-buffer-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26341-a-missed-element-read-takes-a-null-or-string-default-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26341-a-missed-element-read-takes-a-null-or-string-default-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2635-trap-binding-unmappable-written.ts": {
    "order": [
     "<repo>/tests/corpus/2635-trap-binding-unmappable-written.ts"
