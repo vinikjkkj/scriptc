@@ -67,6 +67,18 @@ static ScrExcCell test_cell; /* kind 0 = none */
 ScrExcCell *scr_exc_cur_cell = &test_cell;
 void scr_bytes_io_oom(void) { abort(); }
 
+/* promise stand-ins for scr_promise_settle_later: an object that only
+ * counts what the pool does to it. */
+struct ScrPromise {
+  int retains, releases, handled, copied_from_src;
+  struct ScrPromise *copy_src;
+};
+ScrPromise *scr_promise_new(void) { return calloc(1, sizeof(ScrPromise)); }
+ScrPromise *scr_promise_retain(ScrPromise *p) { p->retains++; return p; }
+void scr_promise_release(ScrPromise *p) { p->releases++; }
+void scr_promise_mark_handled(ScrPromise *p) { p->handled++; }
+void scr_promise_adapt_copy(ScrPromise *dst, ScrPromise *src) { dst->copy_src = src; src->copied_from_src++; }
+
 /* ── jobs ────────────────────────────────────────────────────────────── */
 typedef struct Job {
   ScrWork w;
@@ -305,6 +317,31 @@ int main(int argc, char **argv) {
     }
     CHECK(lost == 0);
     for (int i = 0; i < idx; i++) CHECK(pool_jobs[i].done_count == 1);
+  }
+
+  /* 9. settle-later: the pending promise takes the settled one's outcome from
+   * the poll station only, the carrier is marked handled at once, and a
+   * teardown drops it without copying. */
+  {
+    ScrPromise *carrier = calloc(1, sizeof *carrier);
+    carrier->retains = 1; /* the caller's +1, consumed by settle_later */
+    ScrPromise *dst = scr_promise_settle_later(carrier);
+    CHECK(carrier->handled == 1);
+    CHECK(dst->copy_src == NULL); /* nothing delivered before the poll station */
+    CHECK(hook_pending());
+    wait_ready(1000);
+    hook_dispatch();
+    CHECK(dst->copy_src == carrier && carrier->copied_from_src == 1);
+    CHECK(carrier->releases == 1 && dst->releases == 1); /* the job's own references */
+    CHECK(!hook_pending());
+    free(carrier);
+    free(dst);
+    ScrPromise *c2 = calloc(1, sizeof *c2);
+    ScrPromise *d2 = scr_promise_settle_later(c2);
+    hook_teardown();
+    CHECK(d2->copy_src == NULL && c2->releases == 1 && d2->releases == 1);
+    free(c2);
+    free(d2);
   }
 
   /* the pool is reusable after a teardown (a resumed loop). */
