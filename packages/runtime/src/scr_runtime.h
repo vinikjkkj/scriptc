@@ -916,10 +916,10 @@ ScrStr *scr_str_concat8(ScrStr *a, ScrStr *b, ScrStr *c, ScrStr *d, ScrStr *e, S
 
 bool scr_str_eq(ScrStr *a, ScrStr *b);
 /* Absent-aware twins (see scr_string.c "ABSENT-AWARE STRING OPERATIONS"): selected per program by IrModule.absentStrings. */
-bool scr_str_eq_u(ScrStr *a, ScrStr *b);
 bool scr_str_rel_u(ScrStr *a, ScrStr *b, int op);
 void scr_str_absent_member(const char *member);
 extern const void *const scr_str_absent_sentinel;
+extern const void *const scr_str_undefined_key;
 
 /* ECMAScript string order (UTF-16 code units) over well-formed UTF-8: byte order except that a supplementary character sorts before
  * U+E000..U+FFFF. Returns <0, 0, >0. */

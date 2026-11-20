@@ -1474,7 +1474,11 @@ ScrStr *scr_str_concat8(ScrStr *a, ScrStr *b, ScrStr *c, ScrStr *d, ScrStr *e, S
 }
 
 bool scr_str_eq(ScrStr *a, ScrStr *b) {
-  return a == b || (a->len == b->len && memcmp(a->data, b->data, a->len) == 0);
+  if (a == b) return true;
+  if (a->len != b->len || memcmp(a->data, b->data, a->len) != 0) return false;
+  /* Equal text in two objects. The absent marker (Node's undefined, text "undefined", length 9) is not the real string "undefined": Map and Set
+   * keys, includes/indexOf and === tell them apart. Only a length-9 pair can be one, so every other equal pair pays one compare. */
+  return a->len != 9 || !(scr_str_is_absent(a) || scr_str_is_absent(b));
 }
 
 /* String ordering: ECMAScript's, UTF-16 code units, over well-formed UTF-8 (every relational operator on strings, the default sort, URLSearchParams.sort). The bytes of the two strings are equal up to the first differing byte k, so everything
@@ -1541,16 +1545,15 @@ const void *const scr_str_absent_sentinel = &scr_lit_absent;
  * The absent marker (a regex capture group that did not participate: match/exec/matchAll rows, split captures) is Node's `undefined` held in a
  * string-typed slot. Its TEXT is "undefined" (length 9), so every operation that stringifies, concatenates, compares or looks up its operand
  * (`"p" + x`, a template hole, `x === ""`, Number(x), localeCompare, includes/indexOf, a Map key, an object key) already answers as for Node's
- * undefined with no check on the hot path. What the text cannot say is carried by the entries below, selected per program by
- * IrModule.absentStrings (Lowerer.absentStrRisk: a match/exec/matchAll/split whose regex may leave a group unfilled): equality against a real
- * "undefined" string, the relational operators (every one is false against undefined), and the TypeError of a member use. An ordinary
- * program keeps the plain entries and their exact text. */
-bool scr_str_eq_u(ScrStr *a, ScrStr *b) {
-  if (a == b) return true;
-  if (a->len != b->len || memcmp(a->data, b->data, a->len) != 0) return false;
-  /* equal text, different objects: the real string "undefined" is not the marker */
-  return !(scr_str_is_absent(a) || scr_str_is_absent(b));
-}
+ * undefined with no check on the hot path. scr_str_eq tells the marker from the real string "undefined" (Map/Set keys, includes, ===). What
+ * the text cannot say is carried by the entries below, selected per program by IrModule.absentStrings (Lowerer.absentStrRisk: a
+ * match/exec/matchAll/split whose regex may leave a group unfilled): the relational operators (every one is false against undefined),
+ * truthiness, the property key of a record, and the TypeError of a member use. An ordinary program keeps the plain entries. */
+
+/* The real string "undefined", as the property key an absent marker stands for: `obj[x]` ToStrings its key, so the marker is the key "undefined"
+ * (a Map, Set or array search keeps them apart: scr_str_eq). Emitted inline as a pointer select at the record key sites of an absent-aware program. */
+static const SCR_STR_LIT(10) scr_lit_undefined_key = {SCR_STR_IMMORTAL, 9, 9, "undefined"};
+const void *const scr_str_undefined_key = &scr_lit_undefined_key;
 
 /* The relational operators over strings: an operand that is the absent marker is undefined, ToNumber gives NaN, and every comparison is false.
  * op: 0 <, 1 <=, 2 >, 3 >=. */
