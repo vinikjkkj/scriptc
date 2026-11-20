@@ -17500,12 +17500,78 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26040-number-to-precision-and-to-exponential-digits-round-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26040-number-to-precision-and-to-exponential-digits-round-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26041-an-any-array-literal-is-a-dynamic-array-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26041-an-any-array-literal-is-a-dynamic-array-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26042-an-aliased-object-prototype-tostring-call-answers-the-class-tag-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26042-an-aliased-object-prototype-tostring-call-answers-the-class-tag-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26043-object-tostring-call-over-a-dyn-symbol-answers-its-tag-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26043-object-tostring-call-over-a-dyn-symbol-answers-its-tag-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26044-a-hoisted-js-alias-of-object-prototype-tostring-answers-the-class-tag-like-node.js": {
+   "order": [
+    "<repo>/tests/corpus/26044-a-hoisted-js-alias-of-object-prototype-tostring-answers-the-class-tag-like-node.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26045-an-aliased-object-prototype-tostring-read-as-a-value-still-probes-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26045-an-aliased-object-prototype-tostring-read-as-a-value-still-probes-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26046-a-set-of-any-holds-every-kind-by-samevaluezero-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26046-a-set-of-any-holds-every-kind-by-samevaluezero-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26047-array-prototype-read-methods-call-over-strings-and-array-likes-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26047-array-prototype-read-methods-call-over-strings-and-array-likes-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26048-a-hoisted-js-alias-of-an-array-prototype-method-borrows-through-call-like-node.js": {
+   "order": [
+    "<repo>/tests/corpus/26048-a-hoisted-js-alias-of-an-array-prototype-method-borrows-through-call-like-node.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26049-a-const-alias-of-an-array-prototype-method-borrows-through-call-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26049-a-const-alias-of-an-array-prototype-method-borrows-through-call-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2605-cycle-three-module/main.ts": {
    "order": [
     "<repo>/tests/corpus/2605-cycle-three-module/c.ts",
     "<repo>/tests/corpus/2605-cycle-three-module/b.ts",
     "<repo>/tests/corpus/2605-cycle-three-module/a.ts",
     "<repo>/tests/corpus/2605-cycle-three-module/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26050-array-prototype-method-borrows-through-apply-with-a-literal-list-like-node.js": {
+   "order": [
+    "<repo>/tests/corpus/26050-array-prototype-method-borrows-through-apply-with-a-literal-list-like-node.js"
    ],
    "diags": []
   },
