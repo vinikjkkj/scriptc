@@ -243,10 +243,10 @@ unfilled (or whose regex is unknown) is ABSENT-AWARE (IrModule.absentStrings, lo
 `typeof x`, `x ?? d`, `x === "undefined"` (false: the real string is not the marker), truthiness (falsy), `x < "a"` and the other
 relational operators (false), `switch (x)` and a member use of `x` (`.length`, `.trim()`, `.match(...)`, `.search(...)`: the TypeError
 `Cannot read properties of undefined (reading 'm')`, one inline pointer compare) follow Node. Every other program emits the plain entries.
-`join` prints the marker as empty. Still answered wrongly even in such a program: `x.replace("a", "b")` (answers "undefined" where Node
-throws), `x.codePointAt(0)` and `[...x]` and `x[0]` (a TypeError that names the wrong member), `x?.length` (throws; Node answers undefined),
-`JSON.stringify(x)` over a bare string (answers null; Node undefined), the truthiness of the marker inside a string-arm union, and an
-object key or Map key spelled with the real text "undefined" (it collides with the marker). `$1` in a replacement string substitutes
+`join` prints the marker as empty. Map and Set keys, `includes`/`indexOf` and `===` keep the marker apart from the real string "undefined" (scr_str_eq); a record keyed by
+the marker names the property "undefined", as `obj[undefined]` does. Still answered wrongly even in such a program: `x.codePointAt(0)`,
+`[...x]` and `x[0]` (a TypeError that names the wrong member), `x?.length` (throws; Node answers undefined), `JSON.stringify(x)` over a
+bare string (answers null; Node undefined), and the truthiness of the marker inside a string-arm union. `$1` in a replacement string substitutes
 `""`, as Node does. A function replacer's unprovable group parameter is refused at COMPILE time rather than quietly answered `""`.
 
     packages/compiler/src/frontend/lowering/lower-exprs.ts:19739
