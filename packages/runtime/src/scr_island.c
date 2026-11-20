@@ -5652,6 +5652,202 @@ static const char isl_util_src[] =
     ")";
 
 
+static const char isl_console_src[] =
+    "(host) => {\n"
+    "  \"use strict\";\n"
+    "  const util = () => host.util();\n"
+    "  const fmt = (...a) => util().formatWithOptions({}, ...a);\n"
+    "  const inspect = (v, o) => util().inspect(v, o);\n"
+    "  let indent = \"\";\n"
+    "  const write = (fd, s) => {\n"
+    "    if (indent !== \"\") {\n"
+    "      if (s.indexOf(\"\\n\") !== -1) s = s.replace(/\\n/g, \"\\n\" + indent);\n"
+    "      s = indent + s;\n"
+    "    }\n"
+    "    host.write(fd, s + \"\\n\");\n"
+    "  };\n"
+    "  const warnOnce = { traced: false };\n"
+    "  const emitWarning = (msg) => {\n"
+    "    let text = \"(node:\" + host.pid() + \") Warning: \" + msg + \"\\n\";\n"
+    "    if (!warnOnce.traced) {\n"
+    "      warnOnce.traced = true;\n"
+    "      text += \"(Use `node --trace-warnings ...` to show where the warning was created)\\n\";\n"
+    "    }\n"
+    "    host.write(2, text);\n"
+    "  };\n"
+    "  const isFull = (cp) =>\n"
+    "    cp >= 0x1100 && (cp <= 0x115f || cp === 0x2329 || cp === 0x232a ||\n"
+    "      (cp >= 0x2e80 && cp <= 0x3247 && cp !== 0x303f) || (cp >= 0x3250 && cp <= 0x4dbf) ||\n"
+    "      (cp >= 0x4e00 && cp <= 0xa4c6) || (cp >= 0xa960 && cp <= 0xa97c) || (cp >= 0xac00 && cp <= 0xd7a3) ||\n"
+    "      (cp >= 0xf900 && cp <= 0xfaff) || (cp >= 0xfe10 && cp <= 0xfe19) || (cp >= 0xfe30 && cp <= 0xfe6b) ||\n"
+    "      (cp >= 0xff01 && cp <= 0xff60) || (cp >= 0xffe0 && cp <= 0xffe6) || (cp >= 0x1b000 && cp <= 0x1b001) ||\n"
+    "      (cp >= 0x1f200 && cp <= 0x1f251) || (cp >= 0x1f300 && cp <= 0x1f64f) || (cp >= 0x20000 && cp <= 0x3fffd));\n"
+    "  const isZero = (cp) => cp <= 0x1f || (cp >= 0x7f && cp <= 0x9f) || (cp >= 0x300 && cp <= 0x36f) ||\n"
+    "    (cp >= 0x200b && cp <= 0x200f) || (cp >= 0x20d0 && cp <= 0x20ff) || (cp >= 0xfe00 && cp <= 0xfe0f) ||\n"
+    "    (cp >= 0xfe20 && cp <= 0xfe2f) || (cp >= 0xe0100 && cp <= 0xe01ef);\n"
+    "  const width = (s) => {\n"
+    "    let w = 0;\n"
+    "    for (const ch of String(s)) {\n"
+    "      const cp = ch.codePointAt(0);\n"
+    "      if (isFull(cp)) w += 2;\n"
+    "      else if (!isZero(cp)) w++;\n"
+    "    }\n"
+    "    return w;\n"
+    "  };\n"
+    "  const chars = { middleMiddle: \"─\", rowMiddle: \"┼\", topRight: \"┐\", topLeft: \"┌\", leftMiddle: \"├\", topMiddle: \"┬\",\n"
+    "    bottomRight: \"┘\", bottomLeft: \"└\", bottomMiddle: \"┴\", rightMiddle: \"┤\", left: \"│ \", right: \" │\", middle: \" │ \" };\n"
+    "  const renderRow = (row, widths) => {\n"
+    "    let out = chars.left;\n"
+    "    for (let i = 0; i < row.length; i++) {\n"
+    "      const cell = row[i];\n"
+    "      out += cell + \" \".repeat(widths[i] - width(cell));\n"
+    "      if (i !== row.length - 1) out += chars.middle;\n"
+    "    }\n"
+    "    return out + chars.right;\n"
+    "  };\n"
+    "  const cliTable = (head, columns) => {\n"
+    "    const rows = [];\n"
+    "    const widths = head.map((h) => width(h));\n"
+    "    const longest = Math.max(...columns.map((a) => a.length));\n"
+    "    for (let i = 0; i < head.length; i++) {\n"
+    "      const column = columns[i];\n"
+    "      for (let j = 0; j < longest; j++) {\n"
+    "        if (rows[j] === undefined) rows[j] = [];\n"
+    "        const value = rows[j][i] = Object.prototype.hasOwnProperty.call(column, j) ? column[j] : \"\";\n"
+    "        widths[i] = Math.max(widths[i] || 0, width(value));\n"
+    "      }\n"
+    "    }\n"
+    "    const divider = widths.map((i) => chars.middleMiddle.repeat(i + 2));\n"
+    "    let result = chars.topLeft + divider.join(chars.topMiddle) + chars.topRight + \"\\n\" +\n"
+    "      renderRow(head, widths) + \"\\n\" + chars.leftMiddle + divider.join(chars.rowMiddle) + chars.rightMiddle + \"\\n\";\n"
+    "    for (const row of rows) result += renderRow(row, widths) + \"\\n\";\n"
+    "    return result + chars.bottomLeft + divider.join(chars.bottomMiddle) + chars.bottomRight;\n"
+    "  };\n"
+    "  const counts = new Map();\n"
+    "  const timers = new Map();\n"
+    "  const pad2 = (v) => String(v).padStart(2, \"0\");\n"
+    "  const formatTime = (ms) => {\n"
+    "    let hours = 0, minutes = 0, seconds = 0;\n"
+    "    if (ms >= 1000) {\n"
+    "      if (ms >= 60000) {\n"
+    "        if (ms >= 3600000) { hours = Math.floor(ms / 3600000); ms = ms % 3600000; }\n"
+    "        minutes = Math.floor(ms / 60000); ms = ms % 60000;\n"
+    "      }\n"
+    "      seconds = ms / 1000;\n"
+    "    }\n"
+    "    if (hours !== 0 || minutes !== 0) {\n"
+    "      const parts = seconds.toFixed(3).split(\".\");\n"
+    "      const res = hours !== 0 ? hours + \":\" + pad2(minutes) : minutes;\n"
+    "      return res + \":\" + pad2(parts[0]) + \".\" + parts[1] + \" (\" + (hours !== 0 ? \"h:m\" : \"\") + \"m:ss.mmm)\";\n"
+    "    }\n"
+    "    if (seconds !== 0) return seconds.toFixed(3) + \"s\";\n"
+    "    return Number(ms.toFixed(3)) + \"ms\";\n"
+    "  };\n"
+    "  const now = () => host.hrtime();\n"
+    "  const log = (...a) => write(1, fmt(...a));\n"
+    "  const warn = (...a) => write(2, fmt(...a));\n"
+    "  const c = {\n"
+    "    log, info: log, debug: log, warn, error: warn,\n"
+    "    dir(obj, options) { write(1, inspect(obj, { customInspect: false, ...options })); },\n"
+    "    dirxml(...a) { log(...a); },\n"
+    "    assert(cond, ...args) {\n"
+    "      if (!cond) {\n"
+    "        if (typeof args[0] === \"string\") args[0] = `Assertion failed: ${args[0]}`;\n"
+    "        else args.unshift(\"Assertion failed\");\n"
+    "        warn(...args);\n"
+    "      }\n"
+    "    },\n"
+    "    count(label = \"default\") {\n"
+    "      label = `${label}`;\n"
+    "      const n = (counts.get(label) || 0) + 1;\n"
+    "      counts.set(label, n);\n"
+    "      log(label + \": \" + n);\n"
+    "    },\n"
+    "    countReset(label = \"default\") {\n"
+    "      label = `${label}`;\n"
+    "      if (!counts.has(label)) { emitWarning(\"Count for '\" + label + \"' does not exist\"); return; }\n"
+    "      counts.delete(label);\n"
+    "    },\n"
+    "    group(...label) {\n"
+    "      if (label.length > 0) log(...label);\n"
+    "      indent += \"  \";\n"
+    "    },\n"
+    "    groupEnd() { indent = indent.slice(0, indent.length - 2); },\n"
+    "    time(label = \"default\") {\n"
+    "      label = `${label}`;\n"
+    "      if (timers.has(label)) { emitWarning(\"Label '\" + label + \"' already exists for console.time()\"); return; }\n"
+    "      timers.set(label, now());\n"
+    "    },\n"
+    "    timeEnd(label = \"default\") {\n"
+    "      label = `${label}`;\n"
+    "      if (!timers.has(label)) { emitWarning(\"No such label '\" + label + \"' for console.timeEnd()\"); return; }\n"
+    "      const ms = now() - timers.get(label);\n"
+    "      timers.delete(label);\n"
+    "      log(\"%s: %s\", label, formatTime(ms));\n"
+    "    },\n"
+    "    timeLog(label = \"default\", ...data) {\n"
+    "      label = `${label}`;\n"
+    "      if (!timers.has(label)) { emitWarning(\"No such label '\" + label + \"' for console.timeLog()\"); return; }\n"
+    "      const ms = now() - timers.get(label);\n"
+    "      log(\"%s: %s\", label, formatTime(ms), ...data);\n"
+    "    },\n"
+    "    trace(...args) { warn(\"Trace\" + (args.length === 0 ? \"\" : \": \" + fmt(...args))); },\n"
+    "    table(tabularData, properties) {\n"
+    "      if (properties !== undefined && !Array.isArray(properties)) {\n"
+    "        const e = new TypeError('The \"properties\" argument must be an instance of Array.' + \" Received \" + inspect(properties));\n"
+    "        e.code = \"ERR_INVALID_ARG_TYPE\";\n"
+    "        throw e;\n"
+    "      }\n"
+    "      if (tabularData === null || typeof tabularData !== \"object\") return log(tabularData);\n"
+    "      const final = (k, v) => log(cliTable(k, v));\n"
+    "      const _inspect = (v) => {\n"
+    "        const depth = v !== null && typeof v === \"object\" && !Array.isArray(v) && Object.keys(v).length > 2 ? -1 : 0;\n"
+    "        return inspect(v, { depth, maxArrayLength: 3, breakLength: Infinity });\n"
+    "      };\n"
+    "      const getIndexArray = (length) => Array.from({ length }, (_, i) => _inspect(i));\n"
+    "      if (tabularData instanceof Map) {\n"
+    "        const keys = [], values = [];\n"
+    "        let length = 0;\n"
+    "        for (const [k, v] of tabularData) { keys.push(_inspect(k)); values.push(_inspect(v)); length++; }\n"
+    "        return final([\"(iteration index)\", \"Key\", \"Values\"], [getIndexArray(length), keys, values]);\n"
+    "      }\n"
+    "      if (tabularData instanceof Set) {\n"
+    "        const values = [];\n"
+    "        let length = 0;\n"
+    "        for (const v of tabularData) { values.push(_inspect(v)); length++; }\n"
+    "        return final([\"(iteration index)\", \"Values\"], [getIndexArray(length), values]);\n"
+    "      }\n"
+    "      const map = Object.create(null);\n"
+    "      let hasPrimitives = false;\n"
+    "      const valuesKeyArray = [];\n"
+    "      const indexKeyArray = Object.keys(tabularData);\n"
+    "      for (let i = 0; i < indexKeyArray.length; i++) {\n"
+    "        const item = tabularData[indexKeyArray[i]];\n"
+    "        const primitive = item === null || (typeof item !== \"function\" && typeof item !== \"object\");\n"
+    "        if (properties === undefined && primitive) {\n"
+    "          hasPrimitives = true;\n"
+    "          valuesKeyArray[i] = _inspect(item);\n"
+    "        } else {\n"
+    "          const keys = properties || Object.keys(item);\n"
+    "          for (const key of keys) {\n"
+    "            if (map[key] === undefined) map[key] = [];\n"
+    "            if ((primitive && properties) || !Object.prototype.hasOwnProperty.call(item, key)) map[key][i] = \"\";\n"
+    "            else map[key][i] = _inspect(item[key]);\n"
+    "          }\n"
+    "        }\n"
+    "      }\n"
+    "      const keys = Object.keys(map);\n"
+    "      const values = Object.values(map);\n"
+    "      if (hasPrimitives) { keys.push(\"Values\"); values.push(valuesKeyArray); }\n"
+    "      keys.unshift(\"(index)\");\n"
+    "      values.unshift(indexKeyArray);\n"
+    "      return final(keys, values);\n"
+    "    },\n"
+    "  };\n"
+    "  c.groupCollapsed = c.group;\n"
+    "  return c;\n"
+    "}\n";
+
 /* ── the native inspect of engine values ───────────────────────────────
  * node:util's shim (isl_util_src) evaluated STANDALONE with a three-member env (the promise peek; no process, no stdout), so a program with no
  * module system renders an engine composite exactly as the npm builds do: the static renderer's hook (scr_insp_jsval_hook) calls it with the
@@ -11249,44 +11445,54 @@ ScrDyn *scr_jsval_fn_box(ScrJsval *cell) {
  * island timers. The engine itself, its module-free prelude, and the
  * promise-job drain are all the island needs. The --dynamic build links
  * scr_web.c, which provides these for real. */
-/* The engine's console in a build with no web prelude: node's own formatting (util.formatWithOptions through the standalone util shim, so an
- * object prints as util.inspect prints it) written to the real fds the static console.log writes. log/info/debug go to stdout, warn/error to
- * stderr. */
-static JSValue isl_console_write(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv, int magic) {
+/* The engine's console in a build with no web prelude (isl_console_src, the whole Console surface as JS over three host calls): node's own
+ * formatting through the standalone util shim, written to the real fds the static console writes. */
+static JSValue isl_console_host_write(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val;
-  JSValue util = isl_native_util();
-  JSValue fmt = JS_GetPropertyStr(ctx, util, "formatWithOptions");
-  JSValue args = JS_NewArray(ctx);
-  JS_SetPropertyUint32(ctx, args, 0, JS_NewObject(ctx));
-  for (int i = 0; i < argc; i++) JS_SetPropertyUint32(ctx, args, (uint32_t)i + 1, JS_DupValue(ctx, argv[i]));
-  /* fmt.apply(util, args) through the engine */
-  JSValue apply = JS_GetPropertyStr(ctx, fmt, "apply");
-  JSValue aargv[2] = {util, args};
-  JSValue s = JS_Call(ctx, apply, fmt, 2, aargv);
-  JS_FreeValue(ctx, apply);
-  JS_FreeValue(ctx, args);
-  JS_FreeValue(ctx, fmt);
-  if (JS_IsException(s)) return s;
-  size_t len = 0;
-  const char *t = JS_ToCStringLen(ctx, &len, s);
-  if (t) {
-    scr_stdio_write(magic, t, len);
-    scr_stdio_write(magic, "\n", 1);
-    JS_FreeCString(ctx, t);
-  }
-  JS_FreeValue(ctx, s);
+  (void)argc;
+  int32_t fd = 1;
+  JS_ToInt32(ctx, &fd, argv[0]);
+  size_t len;
+  const char *t = JS_ToCStringLen(ctx, &len, argv[1]);
+  if (!t) return JS_EXCEPTION;
+  scr_stdio_write(fd, t, len);
+  JS_FreeCString(ctx, t);
   return JS_UNDEFINED;
+}
+static JSValue isl_console_host_util(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  (void)argc;
+  (void)argv;
+  return JS_DupValue(ctx, isl_native_util());
+}
+static JSValue isl_console_host_now(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+  (void)this_val;
+  (void)argc;
+  (void)argv;
+  return JS_NewFloat64(ctx, scr_now_ms());
 }
 
 void scr_island_web_boot(void *jsctx) {
   JSContext *ctx = (JSContext *)jsctx;
-  JSValue g = JS_GetGlobalObject(ctx);
-  JSValue c = JS_NewObject(ctx);
-  static const struct { const char *name; int fd; } rows[] = {{"log", 1}, {"info", 1}, {"debug", 1}, {"warn", 2}, {"error", 2}};
-  for (size_t i = 0; i < sizeof rows / sizeof rows[0]; i++) {
-    JS_SetPropertyStr(ctx, c, rows[i].name, JS_NewCFunctionMagic(ctx, isl_console_write, rows[i].name, 0, JS_CFUNC_generic_magic, rows[i].fd));
+  JSValue fn = JS_Eval(ctx, isl_console_src, sizeof isl_console_src - 1, "<scr-console>", JS_EVAL_TYPE_GLOBAL);
+  if (JS_IsException(fn)) {
+    fprintf(stderr, "scriptc: island console failed to evaluate\n");
+    abort();
   }
-  JS_SetPropertyStr(ctx, g, "console", c);
+  JSValue host = JS_NewObject(ctx);
+  JS_SetPropertyStr(ctx, host, "write", JS_NewCFunction(ctx, isl_console_host_write, "write", 2));
+  JS_SetPropertyStr(ctx, host, "util", JS_NewCFunction(ctx, isl_console_host_util, "util", 0));
+  JS_SetPropertyStr(ctx, host, "hrtime", JS_NewCFunction(ctx, isl_console_host_now, "hrtime", 0));
+  JS_SetPropertyStr(ctx, host, "pid", JS_NewCFunction(ctx, isl_host_pid, "pid", 0));
+  JSValue con = JS_Call(ctx, fn, JS_UNDEFINED, 1, (JSValueConst *)&host);
+  JS_FreeValue(ctx, host);
+  JS_FreeValue(ctx, fn);
+  if (JS_IsException(con)) {
+    fprintf(stderr, "scriptc: island console failed to run\n");
+    abort();
+  }
+  JSValue g = JS_GetGlobalObject(ctx);
+  JS_SetPropertyStr(ctx, g, "console", con);
   JS_FreeValue(ctx, g);
 }
 double scr_island_timers_deadline(void) { return 1.0 / 0.0; }
