@@ -23713,11 +23713,14 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
         if (left.kind === "varRef" && (ts.isIdentifier(expr.right) || expr.right.kind === ts.SyntaxKind.ThisKeyword)) {
           return { kind: "boolLit", value, type: BOOL, loc };
         }
-        L.unsupported(
-          "SC1090",
-          expr,
-          "statically-decided 'instanceof' on computed operands (bind the values to variables first)",
-        );
+        // Computed operands: the answer is still static, and both operands evaluate first, left then right, for their effects.
+        {
+          const stmts: IrStmt[] = [{ kind: "exprStmt", expr: left, loc }];
+          if (!(ts.isIdentifier(expr.right) || expr.right.kind === ts.SyntaxKind.ThisKeyword)) {
+            stmts.push({ kind: "exprStmt", expr: L.lowerExpr(expr.right), loc });
+          }
+          return { kind: "seqExpr", stmts, result: { kind: "boolLit", value, type: BOOL, loc }, type: BOOL, loc };
+        }
       }
       // `x instanceof Buffer` — Node defines Buffer.isBuffer(x) as exactly this test,
       // and the flavor machinery behind it (union arm + the value's own flavor, a
@@ -24080,11 +24083,14 @@ function unionNeverEqualsScalar(L: Lowerer, left: IrExpr, right: IrExpr): boolea
     if (left.kind === "varRef") {
       return { kind: "boolLit", value, type: BOOL, loc };
     }
-    L.unsupported(
-      "SC1090",
-      expr,
-      "statically-decided 'instanceof' on computed operands (bind the value to a variable first)",
-    );
+    // A computed operand: the answer is still static, and the operand evaluates first for its effects.
+    return {
+      kind: "seqExpr",
+      stmts: [{ kind: "exprStmt", expr: left, loc }],
+      result: { kind: "boolLit", value, type: BOOL, loc },
+      type: BOOL,
+      loc,
+    };
   }
 
 /** `#name in obj` — the ergonomic brand check. In this closed world a
