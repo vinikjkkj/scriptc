@@ -9561,7 +9561,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           case "string.lastIndexOf":
             return finish(`scr_str_last_index_of(${arg(0)}, ${arg(1)})`);
           case "string.replaceStr":
-            // s.replace(str, str) / s.replaceAll(str, str); +1 string.
+            // s.replace(str, str) / s.replaceAll(str, str); +1 string. A module that can hold the absent string: a member use of it is Node's TypeError.
+            if (E.mod.absentStrings === true) emitAbsentMemberCheckC(E, arg(0), e.args[3]?.kind === "boolLit" && e.args[3].value ? "replaceAll" : "replace");
             return finish(`scr_str_replace_str(${arg(0)}, ${arg(1)}, ${arg(2)}, ${arg(3)})`);
           case "string.raw":
             // Raw literals + pre-stringified substitutions; +1 string.
