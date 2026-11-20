@@ -2336,6 +2336,7 @@ void scr_regex_dyn_install(void) {
   scr_dyn_handle_install(SCR_DYNH_REGEX, &scr_regex_dynh_ops);
 }
 
+#ifdef SCR_DYN_STREXT /* only a program that links scr_dyn_invoke.c has a caller of the hook (cc.ts derives the define from the source list) */
 /* ── dyn String methods that need this unit (split / replace / replaceAll / search / normalize / codePointAt / isWellFormed /
  * toWellFormed / toLocaleLowerCase / toLocaleUpperCase) ──────────────────────────────────────────────────────────────────────
  * scr_dyn_invoke's String arm calls this hook (installed below, so a program that does not link this unit keeps the loud
@@ -2623,3 +2624,4 @@ static ScrDyn *scr_dyn_str_ext_method(ScrDyn *recv, const char *m, ScrDyn *const
   return NULL;
 }
 __attribute__((constructor)) static void scr_regex_install_strext_hook(void) { scr_dyn_str_ext_hook = scr_dyn_str_ext_method; }
+#endif /* SCR_DYN_STREXT */

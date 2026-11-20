@@ -2801,6 +2801,9 @@ export async function compileC(opts: CcOptions): Promise<void> {
     // it off the list itself means the two cannot disagree even if the gate
     // moves later. Two sources for one fact is what made the four faces.
     ...(coreRuntimeSources(url, coro, dynArr, frozenArr).includes("scr_coro.c") ? ["-DSCR_CORO_LANE"] : []),
+    // The dyn String methods that need the regex unit (scr_regex.c's hook) have a caller only in scr_dyn_invoke.c: defined exactly when that unit is in
+    // this link, so a regex program with no dynamic method call does not carry the hook's code, the locale-case tables or the normalization data.
+    ...(opts.dynInvoke || opts.dynAsync || opts.dc || tpValue || engineAny ? ["-DSCR_DYN_STREXT"] : []),
     ...coreRuntimeSources(url, coro, dynArr, frozenArr).map((f) => rt(join(rtDir, f))),
     // --layout-profile: the profiler unit that owns the coverage callbacks (compiled uninstrumented: its functions carry no_sanitize).
     ...(opts.layoutProfile ? [rt(join(rtDir, "scr_layout_prof.c"))] : []),
@@ -3197,6 +3200,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
     // buildArgs actually emitted, so if scr_coro.c is in this link the define
     // is in these cflags, and the cached object flavour matches the binary.
     ...(rtInputs.some((f) => basename(f) === "scr_coro.c") ? ["-DSCR_CORO_LANE"] : []),
+    ...(rtInputs.some((f) => basename(f) === "scr_dyn_invoke.c") ? ["-DSCR_DYN_STREXT"] : []), // see buildArgs
   ];
 
   // Compile `sources` as parallel `-c` jobs with the option set every unit sees (cflags), largest first so the pool's wall
