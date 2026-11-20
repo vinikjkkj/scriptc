@@ -230,13 +230,15 @@ no-ops.
     packages/compiler/src/frontend/lowering/lower-builtins.ts:3585
     packages/compiler/src/frontend/lowering/lower-builtins.ts:3684
 
-### 51 - A nonparticipating capture group reads `""`, not `undefined`
+### 51 - A nonparticipating capture group is the ABSENT string, which is `undefined` only where it is asked
 
-`match`/`matchAll`/`exec` and `$1` answer `""` for a group that did not
-participate, where Node distinguishes it from a participating-empty `""` by
-answering `undefined`. Both are falsy, so only guarded forms are
-byte-comparable. A function replacer's unprovable group parameter is refused at
-COMPILE time rather than quietly answered `""`.
+A match row (`match`/`matchAll`/`exec`) holds the one immortal ABSENT string (the same marker a `split` capture uses) for a
+group that did not participate, and records `index`, `input` and the group names beside the row, so printing a row, `m.input`, `m.index`,
+`m.groups`, an indexed read (`m[2] === undefined`, `m[2] ?? d`, a template, `typeof m[2]`), a destructuring default, `x === undefined` /
+`x == null` over a string-typed binding and `console.log(x)` all answer Node's `undefined`. Everything else sees the empty string it
+always was: `typeof x` over a string-typed binding (a callback parameter, a for-of variable), `x ?? d` and `"p" + x` over such a binding,
+and `x === ""` are answered as for `""`. `$1` in a replacement string substitutes `""`, as Node does. A function replacer's unprovable
+group parameter is refused at COMPILE time rather than quietly answered `""`.
 
     packages/compiler/src/frontend/lowering/lower-exprs.ts:19739
     tests/corpus/2608-regex-named-groups.ts:49
