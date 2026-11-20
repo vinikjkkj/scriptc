@@ -1235,7 +1235,8 @@ static uint32_t scr_greek_base(uint32_t cp, uint32_t *marks, int *nm) {
 static bool scr_greek_vowel(uint32_t b) {
   switch (b) {
     case 0x391: case 0x395: case 0x397: case 0x399: case 0x39f: case 0x3a5: case 0x3a9:
-    case 0x3b1: case 0x3b5: case 0x3b7: case 0x3b9: case 0x3bf: case 0x3c5: case 0x3c9: return true;
+    case 0x3b1: case 0x3b5: case 0x3b7: case 0x3b9: case 0x3bf: case 0x3c5: case 0x3c9:
+    case 0x3f5: /* the lunate epsilon symbol is an epsilon for the diphthong rule */ return true;
     default: return false;
   }
 }
