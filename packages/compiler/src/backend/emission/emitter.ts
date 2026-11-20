@@ -446,6 +446,9 @@ export class CEmitter {
    * cycle collector's child filter (SCR_CYC_SKIP), so the missing cycle
    * header is fine even when a traced container points at one. */
   readonly unitInstances = new Map<string, string>();
+  /** Interned bigint literals: the literal's spelling -> { static symbol, 32-bit limbs, least significant first }. A literal is an
+   * immortal static (rc == SIZE_MAX) built here, so evaluating it costs no parse and no allocation. */
+  readonly bigInstances = new Map<string, { sym: string; limbs: number[] }>();
   /** Interned regex literals: "<flags>/<pattern>" → static symbol. One
    * immortal (rc == SIZE_MAX) ScrRegex per distinct (pattern, flags) pair —
    * the bytecode slot starts NULL and the runtime compiles it lazily on
@@ -1632,6 +1635,14 @@ export class CEmitter {
       );
     }
     if (this.unitInstances.size > 0) out.push("");
+    for (const { sym, limbs } of this.bigInstances.values()) {
+      const k = Math.max(1, limbs.length);
+      this.declData(`extern SCR_BIG_LIT(${k}) ${sym};`);
+      out.push(
+        `${this.link}SCR_BIG_LIT(${k}) ${sym} = { SIZE_MAX, ${limbs.length === 0 ? 0 : 1}, ${limbs.length}, ${k}, { ${(limbs.length === 0 ? [0] : limbs).map((l) => `${l}u`).join(", ")} } };`,
+      );
+    }
+    if (this.bigInstances.size > 0) out.push("");
     for (const line of structDefs) out.push(line); // program-sized: never spread
     for (const [key, sym] of this.regexInstances) {
       // One immortal ScrRegex per (pattern, flags) literal, pointing at the
@@ -3035,6 +3046,21 @@ export class CEmitter {
     this.emitUnwind();
     this.indent--;
     this.line(`}`);
+  }
+
+  /** The immortal static for a bigint literal, or null when the spelling is not one BigInt() reads. */
+  internBig(text: string): string | null {
+    let ent = this.bigInstances.get(text);
+    if (!ent) {
+      let v: bigint;
+      try { v = BigInt(text); } catch { return null; }
+      if (v < 0n) return null;
+      const limbs: number[] = [];
+      for (; v > 0n; v >>= 32n) limbs.push(Number(v & 0xffffffffn));
+      ent = { sym: `sc_big_${this.bigInstances.size}`, limbs };
+      this.bigInstances.set(text, ent);
+    }
+    return ent.sym;
   }
 
   internLiteral(text: string): string {
