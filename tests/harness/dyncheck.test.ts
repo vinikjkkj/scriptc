@@ -1563,7 +1563,9 @@ console.log("unreachable");
     );
   });
 
-  test("util.inspect (console.log) of an island-held unknown fences with the engine typeof", async () => {
+  test("util.inspect (console.log) of an island-held unknown prints the engine value like Node", async () => {
+    // The old fence ("util.inspect of a composite 'any' value ... is not supported yet") is retired: Node prints
+    // `{ a: 1, list: [ 1, 2, 3 ] }` and exits 0 for this program (measured, node 24.15.0).
     const r = await compileAndRun(
       "jsval-inspect",
       wrapPreamble + `console.log(u);
@@ -1571,10 +1573,8 @@ console.log("unreachable");
       "ts",
       true,
     );
-    expect(r.exitCode).toBe(1);
-    expect(r.stderr).toContain(
-      "util.inspect of a composite 'any' value (typeof 'object') is not supported yet",
-    );
+    expect(r.exitCode).toBe(0);
+    expect(r.stdout).toBe("{ a: 1, list: [ 1, 2, 3 ] }\n");
   });
 
   test("destructuring and for-of over an island-held unknown drain the engine's own iterator", async () => {
