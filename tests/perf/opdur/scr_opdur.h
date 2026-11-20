@@ -12,6 +12,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
+#include <signal.h>
+#include <unistd.h>
 #define OPD_NT 64
 #define OPD_NB 32
 #define OPD_NOINST __attribute__((no_instrument_function, used))
@@ -39,6 +41,7 @@ static OPD_NOINST void opd_dump(void) {
   if (f != stderr) fclose(f);
 }
 #define OPD_A(n, s) opd_add((void *)opd_sym_##n, #s);
+static OPD_NOINST void opd_sig(int sg) { opd_dump(); signal(sg, SIG_DFL); raise(sg); } /* a server lane is stopped by a signal: dump first */
 static OPD_NOINST void opd_init(void) {
   if (opd_ready) return; opd_ready = 1; opd_t0 = opd_now(); opd_tsc0 = __builtin_ia32_rdtsc();
   { struct timespec w = {0, 4000000}; double a = opd_now(); uint64_t c = __builtin_ia32_rdtsc(); nanosleep(&w, 0); opd_ns_per_tick = (opd_now() - a) / (double)(__builtin_ia32_rdtsc() - c); }
@@ -48,7 +51,7 @@ static OPD_NOINST void opd_init(void) {
   OPD_A(16, scr_crypto_hash_digest_str_raw) OPD_A(17, scr_crypto_hash_digest_bytes) OPD_A(18, scr_crypto_hash_digest_str) OPD_A(19, scr_arr_sort_dyn) OPD_A(20, scr_bytes_sort_big)
   OPD_A(21, scr_cipher_update) OPD_A(22, scr_cipher_final) OPD_A(23, scr_str_split) OPD_A(24, scr_str_replace_str) OPD_A(25, scr_str_index_of) OPD_A(26, scr_sp_sort)
   OPD_A(27, scr_str_concat) OPD_A(28, scr_crypto_digest_raw) OPD_A(29, scr_text_decode_view) OPD_A(30, scr_jsval_from_json)
-  atexit(opd_dump);
+  atexit(opd_dump); signal(SIGTERM, opd_sig); signal(SIGINT, opd_sig); signal(SIGHUP, opd_sig);
 }
 __attribute__((weak, constructor, no_instrument_function, used)) void opd_ctor(void) { opd_init(); }
 __attribute__((weak, no_instrument_function, used)) void __cyg_profile_func_enter(void *fn, void *cs) {
