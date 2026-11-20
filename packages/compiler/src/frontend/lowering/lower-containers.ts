@@ -751,6 +751,47 @@ function lowerInsertedItems(L: Lowerer, args: readonly ts.Expression[], elem: Ir
       const receiver = L.lowerExpr(access.expression);
       const shape: ("e" | "a")[] = [];
       const args: IrExpr[] = [];
+      // `a.concat(...parts)`: the ONE spread argument, drained by a loop over the run-time list. `parts` of same-element arrays appends each (JS spreads every
+      // array argument one level); `parts` of plain elements appends each element. Mixed spread and explicit arguments, and the array-of-arrays ambiguity, keep the fence.
+      if (call.arguments.length === 1 && ts.isSpreadElement(call.arguments[0]!)) {
+        const spreadSrc = (call.arguments[0]! as ts.SpreadElement).expression;
+        const partsIr = L.mapTypeOf(L.typeOf(spreadSrc));
+        const arrT = arrayOf(elem);
+        const partsOfArrays = partsIr?.kind === "array" && typeEquals(partsIr.elem, arrT);
+        const partsOfElems = partsIr?.kind === "array" && typeEquals(partsIr.elem, elem) && elem.kind !== "array" && elem.kind !== "jsval" && elem.kind !== "dyn" && elem.kind !== "union";
+        if (partsIr?.kind === "array" && (partsOfArrays || partsOfElems) && !(elem.kind === "array")) {
+          const parts = L.lowerExpr(spreadSrc);
+          if (parts.type.kind !== "array") L.badType(spreadSrc, L.typeOf(spreadSrc));
+          const key = `concatSpread:${typeKey(elem)}:${partsOfArrays ? "a" : "e"}`;
+          let helper = L.arrHofHelpers.get(key);
+          if (!helper) {
+            helper = `%arr.concatSpread.${L.arrHofHelpers.size}`;
+            L.arrHofHelpers.set(key, helper);
+            const partT = partsOfArrays ? arrT : elem;
+            const partsT = arrayOf(partT);
+            const ref = (localId: string, type: IrType): IrExpr => ({ kind: "varRef", localId, type, loc });
+            const append = (src: IrExpr, how: "pushAll" | "push"): IrStmt => ({ kind: "exprStmt", expr: { kind: "arrIntrinsic", method: how, receiver: ref("out.0", arrT), args: [src], type: F64, loc }, loc });
+            L.liftedFns.push({
+              name: helper,
+              params: [{ localId: "a.0", name: "a", type: arrT }, { localId: "p.0", name: "p", type: partsT }],
+              returnType: arrT,
+              locals: [
+                { id: "a.0", name: "a", type: arrT, mutable: false }, { id: "p.0", name: "p", type: partsT, mutable: false }, { id: "n.0", name: "n", type: F64, mutable: false },
+                { id: "i.0", name: "i", type: F64, mutable: true }, { id: "out.0", name: "out", type: arrT, mutable: false },
+              ],
+              body: [
+                { kind: "varDecl", localId: "out.0", init: { kind: "arrayLit", elems: [], type: arrT, loc }, loc },
+                append(ref("a.0", arrT), "pushAll"),
+                { kind: "varDecl", localId: "n.0", init: { kind: "arrIntrinsic", method: "length", receiver: ref("p.0", partsT), args: [], type: F64, loc }, loc },
+                countedForLoop(loc, [append({ kind: "arrayGet", arr: ref("p.0", partsT), index: ref("i.0", F64), type: partT, loc }, partsOfArrays ? "pushAll" : "push")]),
+                { kind: "return", value: ref("out.0", arrT), loc },
+              ],
+              loc,
+            });
+          }
+          return { kind: "call", callee: helper, args: [receiver, parts], type: receiverIr, loc };
+        }
+      }
       for (const argNode of call.arguments) {
         if (ts.isSpreadElement(argNode)) {
           L.unsupported("SC1090", argNode, "spread arguments to concat (pass the array itself — concat already spreads array arguments)");
