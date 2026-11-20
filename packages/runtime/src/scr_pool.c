@@ -89,6 +89,10 @@ static struct {
   scr_pl_thread *threads;
   unsigned nspawned;          /* entries valid in threads[] */
   size_t outstanding;         /* submitted - delivered */
+  bool stats;                 /* SCR_POOL_STATS: print the census at exit */
+  size_t n_submitted, n_inline, n_threaded;
+  double worker_cpu_ns;       /* guarded by m: thread CPU spent inside run() on workers */
+  double inline_cpu_ns;       /* main thread only: CPU spent inside run() inline */
   ScrWork *batch_head, *batch_tail; /* taken from dq, `done` not yet run */
 #if defined(_WIN32)
   HANDLE ev;
@@ -130,6 +134,19 @@ static void scr_pl_wake_clear(void) {
 
 /* ── workers ─────────────────────────────────────────────────────────── */
 
+/* CPU time of the calling thread, ns (the SCR_POOL_STATS census only). */
+static double scr_pl_thread_cpu_ns(void) {
+#if defined(_WIN32)
+  FILETIME c, e, k, u;
+  if (!GetThreadTimes(GetCurrentThread(), &c, &e, &k, &u)) return 0;
+  return (double)(((uint64_t)k.dwHighDateTime << 32 | k.dwLowDateTime) + ((uint64_t)u.dwHighDateTime << 32 | u.dwLowDateTime)) * 100.0;
+#else
+  struct timespec ts;
+  if (clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts) != 0) return 0;
+  return (double)ts.tv_sec * 1e9 + (double)ts.tv_nsec;
+#endif
+}
+
 static void scr_pl_push_done_locked(ScrWork *w, bool *was_empty) {
   w->next = NULL;
   *was_empty = P.dq_head == NULL;
@@ -145,6 +162,11 @@ static void *scr_pl_worker(void *arg)
 #endif
 {
   (void)arg;
+#if defined(__linux__)
+  /* A name in the task comm file, so a per-thread CPU report can tell
+   * the pool from the main thread (libuv names its workers `libuv-worker`). */
+  pthread_setname_np(pthread_self(), "scr-worker");
+#endif
   SCR_PL_LOCK(&P.m);
   for (;;) {
     while (P.wq_head == NULL && !P.stop) {
@@ -162,9 +184,12 @@ static void *scr_pl_worker(void *arg)
     if (P.wq_head == NULL) P.wq_tail = NULL;
     P.wq_len--;
     SCR_PL_UNLOCK(&P.m);
+    double t0 = P.stats ? scr_pl_thread_cpu_ns() : 0;
     w->run(w);
+    double dt = P.stats ? scr_pl_thread_cpu_ns() - t0 : 0;
     bool was_empty;
     SCR_PL_LOCK(&P.m);
+    P.worker_cpu_ns += dt;
     scr_pl_push_done_locked(w, &was_empty);
     if (was_empty) scr_pl_wake();
   }
@@ -309,6 +334,14 @@ static unsigned scr_pl_size(void) {
   return (unsigned)n;
 }
 
+static void scr_pl_report(void) {
+  SCR_PL_LOCK(&P.m);
+  double ns = P.worker_cpu_ns;
+  SCR_PL_UNLOCK(&P.m);
+  fprintf(stderr, "scr-pool: submitted=%zu inline=%zu threaded=%zu worker_cpu_ms=%.1f inline_cpu_ms=%.1f threads=%u\n",
+          P.n_submitted, P.n_inline, P.n_threaded, ns / 1e6, P.inline_cpu_ns / 1e6, P.nthreads);
+}
+
 static void scr_pl_init(void) {
   P.max = scr_pl_size();
   {
@@ -341,6 +374,10 @@ static void scr_pl_init(void) {
 #endif
 #endif
   P.inited = true;
+  if (getenv("SCR_POOL_STATS") != NULL) {
+    P.stats = true;
+    atexit(scr_pl_report);
+  }
 #if defined(_WIN32)
   scr_loop_set_pool(scr_pl_pending, scr_pl_dispatch, scr_pl_pollfd, scr_pl_wait, scr_pl_teardown);
 #else
@@ -363,10 +400,14 @@ void scr_work_submit_cost(ScrWork *w, double est_us) {
   if (!P.inited) scr_pl_init();
   w->next = NULL;
   P.outstanding++;
+  P.n_submitted++;
   SCR_PL_LOCK(&P.m);
   if (est_us < P.inline_us && P.wq_head == NULL && (P.idle > 0 || P.nthreads < P.max)) {
     SCR_PL_UNLOCK(&P.m);
+    P.n_inline++;
+    double ti = P.stats ? scr_pl_thread_cpu_ns() : 0;
     w->run(w);
+    if (P.stats) P.inline_cpu_ns += scr_pl_thread_cpu_ns() - ti;
     bool was_empty;
     SCR_PL_LOCK(&P.m);
     scr_pl_push_done_locked(w, &was_empty);
@@ -374,6 +415,7 @@ void scr_work_submit_cost(ScrWork *w, double est_us) {
     SCR_PL_UNLOCK(&P.m);
     return;
   }
+  P.n_threaded++;
   if (P.wq_tail != NULL) P.wq_tail->next = w;
   else P.wq_head = w;
   P.wq_tail = w;
