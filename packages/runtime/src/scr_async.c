@@ -4100,6 +4100,10 @@ static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed, bool cjs_ent
     if (scr_pending_immediates > 0) due = now;
     if (io) {
       if (kids && due > now + SCR_CHILD_POLL_MS) due = now + SCR_CHILD_POLL_MS;
+      /* A worker-pool completion can't wake curl's fd wait either, and a
+       * finished job should not wait a signal-poll period to be delivered:
+       * while jobs are outstanding the wait is capped at reap granularity. */
+      else if (pool && due > now + SCR_CHILD_POLL_MS) due = now + SCR_CHILD_POLL_MS;
       /* Signals/stdin/net can't wake curl's fd wait (and its poll retries
        * on EINTR), so they re-impose a coarser cap — bounded Ctrl-C and
        * socket latency during a fetch, without the reap-granularity
@@ -4123,6 +4127,7 @@ static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed, bool cjs_ent
       if (evw && due > now + SCR_SIGNAL_POLL_MS) due = now + SCR_SIGNAL_POLL_MS;
       if ((net || dgram || watch) && due > now + SCR_CHILD_POLL_MS) due = now + SCR_CHILD_POLL_MS;
       if (kids && due > now + SCR_CHILD_POLL_MS) due = now + SCR_CHILD_POLL_MS;
+      if (pool && (evw || net || dgram || watch || kids) && due > now + SCR_CHILD_POLL_MS) due = now + SCR_CHILD_POLL_MS;
       if (pool && !evw && !net && !dgram && !watch && !kids && scr_pool_wait_fn != NULL) {
         /* Pool completions only: the wake Event ends the wait. */
         if (due > now) (void)scr_pool_wait_fn(due - now);
