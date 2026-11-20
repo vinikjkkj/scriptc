@@ -5779,6 +5779,21 @@ class LlEmitter {
     B.startBlock(lJoin);
   }
 
+  /** The property key of a record in a module that can hold the absent string: `obj[x]` ToStrings its key, so the marker (Node's undefined) names the
+   * property "undefined" (scr_str_eq's marker identity belongs to Map, Set and includes, not to a record's overflow map). One inline select. */
+  private recordKeyOf(key: LlValue): LlValue {
+    if (this.mod.absentStrings !== true || key.type.kind !== "string") return key;
+    const B = this.B;
+    this.declare(`@scr_str_absent_sentinel = external constant ptr`);
+    this.declare(`@scr_str_undefined_key = external constant ptr`);
+    const sent = B.tmp(), und = B.tmp(), isAbs = B.tmp(), sel = B.tmp();
+    B.line(`${sent} = load ptr, ptr @scr_str_absent_sentinel`);
+    B.line(`${und} = load ptr, ptr @scr_str_undefined_key`);
+    B.line(`${isAbs} = icmp eq ptr ${key.name}, ${sent}`);
+    B.line(`${sel} = select i1 ${isAbs}, ptr ${und}, ptr ${key.name}`);
+    return { ...key, name: sel };
+  }
+
   /** A member use of a string receiver in a module that can hold the absent string: Node's TypeError, before the arguments evaluate. One inline
    * pointer compare against the runtime's marker; the pending exception unwinds like a fallible call's. */
   private emitAbsentMemberCheck(recv: string, member: string): void {
@@ -7973,7 +7988,7 @@ class LlEmitter {
         // `delete obj[k]` on a pure index-signature shape: a Map delete on
         // the overflow (key and value released; absent keys no-op).
         const obj = this.emitExpr(s.obj);
-        const key = this.emitExpr(s.key);
+        const key = this.recordKeyOf(this.emitExpr(s.key));
         const ovf = this.recordOvfPtr(obj.name, s.shapeId);
         this.declare(`declare zeroext i1 @scr_map_delete_str(ptr, ptr)`);
         const t = B.tmp();
@@ -7987,7 +8002,7 @@ class LlEmitter {
         // keys insert/replace in the overflow map. Evaluation order: obj,
         // key, value; the write OWNS the value (+1 moves in).
         const obj = this.emitExpr(s.obj);
-        const key = this.emitExpr(s.key);
+        const key = this.recordKeyOf(this.emitExpr(s.key));
         const v = this.emitExpr(s.value);
         if (isRefCounted(v.type)) this.moveTemp(v);
         const shape = this.recordShape(s.shapeId);
@@ -8746,9 +8761,8 @@ class LlEmitter {
       const t = this.emitExpr(c.test);
       const hit = B.tmp();
       if (c.test.type.kind === "string") {
-        const swEq = this.mod.absentStrings === true ? "scr_str_eq_u" : "scr_str_eq";
-        this.declare(`declare zeroext i1 @${swEq}(ptr, ptr)`);
-        B.line(`${hit} = call zeroext i1 @${swEq}(ptr ${disc.name}, ptr ${t.name})`);
+        this.declare(`declare zeroext i1 @scr_str_eq(ptr, ptr)`);
+        B.line(`${hit} = call zeroext i1 @scr_str_eq(ptr ${disc.name}, ptr ${t.name})`);
       } else if (c.test.type.kind === "bool") {
         B.line(`${hit} = icmp eq i1 ${disc.name}, ${t.name}`);
       } else {
@@ -9193,10 +9207,9 @@ class LlEmitter {
       case "strEq": {
         const l = this.emitBorrowedLocal(e.left, [e.right]);
         const r = this.emitBorrowedLocal(e.right, []);
-        const eqf = this.mod.absentStrings === true ? "scr_str_eq_u" : "scr_str_eq";
-        this.declare(`declare zeroext i1 @${eqf}(ptr, ptr)`);
+        this.declare(`declare zeroext i1 @scr_str_eq(ptr, ptr)`);
         const eq = B.tmp();
-        B.line(`${eq} = call zeroext i1 @${eqf}(ptr ${l.name}, ptr ${r.name})`);
+        B.line(`${eq} = call zeroext i1 @scr_str_eq(ptr ${l.name}, ptr ${r.name})`);
         if (!e.negated) return { name: eq, type: e.type };
         const t = B.tmp();
         B.line(`${t} = xor i1 ${eq}, true`);
@@ -10190,7 +10203,7 @@ class LlEmitter {
       case "recordOvfHas": {
         // Own-key membership of the overflow map; both operands borrowed.
         const obj = this.emitExpr(e.obj);
-        const key = this.emitExpr(e.key);
+        const key = this.recordKeyOf(this.emitExpr(e.key));
         const ovf = this.recordOvfPtr(obj.name, e.shapeId);
         this.declare(`declare zeroext i1 @scr_map_has_str(ptr, ptr)`);
         const t = B.tmp();
@@ -17422,7 +17435,7 @@ class LlEmitter {
   private emitRecordKeyGet(e: IrExpr & { kind: "recordKeyGet" }): LlValue {
     const B = this.B;
     const obj = this.emitExpr(e.obj);
-    const k = this.emitExpr(e.key);
+    const k = this.recordKeyOf(this.emitExpr(e.key));
     const ty = this.llType(e.type);
     const slot = B.slot();
     B.entryAllocas.push(`${slot} = alloca ${ty}`);
