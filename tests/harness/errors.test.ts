@@ -132,8 +132,8 @@ throw new TypeError("boom");
   });
 
   test("a subclass prints its name PROPERTY — 'Error' when never assigned", async () => {
-    // Node's uncaught display would show the constructor name (PlainSub)
-    // even though .name is "Error"; we print the property — divergence 11.
+    // Node's uncaught display shows the constructor name decorated around the
+    // .name property: `PlainSub [Error]: unnamed sub` (measured on v24.15.0).
     const r = await compileAndRun(
       "uncaught-subclass",
       `class PlainSub extends Error {}
@@ -141,7 +141,7 @@ throw new PlainSub("unnamed sub");
 `,
     );
     expect(r.exitCode).toBe(1);
-    expect(r.stderr).toBe("Uncaught Error: unnamed sub\n");
+    expect(r.stderr).toBe("Uncaught PlainSub [Error]: unnamed sub\n");
   });
 
   test("toString's empty-half rules shape the line", async () => {
