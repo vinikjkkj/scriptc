@@ -134,5 +134,11 @@ for (const f of existsSync(dir) ? readdirSync(dir).sort() : []) {
   console.log(`-- perf leaves ${m[1]} (self, top ${perfTop}; exit ${r.status})`)
   for (const x of ls.slice(0, perfTop)) console.log('   ' + x.trim().replace(/\s+/g, ' ').slice(0, 140))
   if (ls.length === 0) console.log('   (no samples: ' + (r.stderr || '').split('\n')[0] + ')')
+  for (const [title, sort, lim] of [['by thread comm', 'comm', 60], ['by comm,dso', 'comm,dso', 60], ['by comm,dso,sym', 'comm,dso,sym', 120]]) {
+    const q = spawnSync('perf', ['report', '-i', `${dir}/${f}`, '--stdio', '--no-children', '-n', '--sort', sort, '--percent-limit', sort === 'comm' ? '0' : '0.25'], { encoding: 'utf8', maxBuffer: 1 << 26 })
+    const qs = (q.stdout || '').split('\n').filter((x) => x.trim() !== '' && !x.startsWith('#'))
+    console.log(`-- perf ${title} ${m[1]} (percent, samples at 999 Hz ~ ms)`)
+    for (const x of qs.slice(0, lim)) console.log('   ' + x.trim().replace(/\s+/g, ' ').slice(0, 160))
+  }
 }
 console.log('===== BENCHREPORT end =====')
