@@ -18158,6 +18158,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26319-bigint-typed-array-methods-match-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26319-bigint-typed-array-methods-match-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2632-dyn-jsval-iterate.js": {
    "order": [
     "<repo>/tests/corpus/2632-dyn-jsval-iterate.js"
