@@ -648,6 +648,9 @@ static ScrStr *isl_dyn_reason_text(const ScrDyn *d);
 static void isl_init(void) {
   isl_rt = JS_NewRuntime2(&isl_mf, NULL);
   if (!isl_rt) {
+#ifndef SCR_DYNAMIC
+static void isl_job_enqueued(void *opaque);
+#endif
     fprintf(stderr, "scriptc: island engine runtime allocation failed\n");
     abort();
   }
@@ -689,6 +692,10 @@ static void isl_init(void) {
   scr_loop_set_island_rejections(isl_report_rejections,
                                  scr_island_drain_jobs);
   /* Armed island timers (AbortSignal.timeout) cap the loop's idle sleep
+#ifndef SCR_DYNAMIC
+  /* One static microtask per engine job: the two queues interleave in the order the jobs were queued, like one V8 queue. */
+  JS_SetJobEnqueueHook(isl_rt, isl_job_enqueued, NULL);
+#endif
    * so they fire on time while the poller waits on socket readiness —
    * without keeping the loop alive by themselves (Node's unref'd timer).
    * The curl fetch bridge capped its own poll instead; the native bridge
@@ -808,6 +815,28 @@ int scr_island_drain_jobs(void) {
 static bool isl_io_pending(void) {
   if (isl_rt != NULL && JS_IsJobPending(isl_rt)) return true;
   /* A DUE island timer is pending work (fire it this turn); a merely
+#ifndef SCR_DYNAMIC
+/* The marker the enqueue hook posts on the static microtask queue: it runs the oldest engine job (a drain that already ran it makes this a no-op). */
+static void isl_job_marker(void *arg) {
+  (void)arg;
+  JSContext *jctx;
+  int r = JS_ExecutePendingJob(isl_rt, &jctx);
+  if (r < 0) {
+    JSValue exc = JS_GetException(jctx);
+    const char *msg = JS_ToCString(jctx, exc);
+    fflush(stdout);
+    fprintf(stderr, "Uncaught %s\n", msg ? msg : "island job exception");
+    if (msg) JS_FreeCString(jctx, msg);
+    JS_FreeValue(jctx, exc);
+    _Exit(1);
+  }
+}
+static void isl_job_enqueued(void *opaque) {
+  (void)opaque;
+  scr_queue_microtask_raw(isl_job_marker, NULL, NULL);
+}
+#endif
+
    * ARMED one is not — AbortSignal.timeout is unref'd like Node's and
    * must never keep the loop alive by itself. */
   if (isl_rt != NULL && scr_island_timers_due()) return true;

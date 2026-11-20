@@ -1633,7 +1633,9 @@ static void web_timer_fire_cb(ScrClosure *env) {
     scr_island_bridge_exception();
   } else {
     JS_FreeValue(h->ctx, r);
-    scr_island_drain_jobs();
+#ifdef SCR_DYNAMIC
+    scr_island_drain_jobs(); /* the engine-only build's enqueue hook already queued each job behind the static ones */
+#endif
   }
   web_timerfn_release(h);
 }
