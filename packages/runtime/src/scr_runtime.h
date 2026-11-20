@@ -917,6 +917,12 @@ ScrStr *scr_str_concat8(ScrStr *a, ScrStr *b, ScrStr *c, ScrStr *d, ScrStr *e, S
 bool scr_str_eq(ScrStr *a, ScrStr *b);
 /* Absent-aware twins (see scr_string.c "ABSENT-AWARE STRING OPERATIONS"): selected per program by IrModule.absentStrings. */
 bool scr_str_eq_u(ScrStr *a, ScrStr *b);
+/* The inline form of scr_str_eq_u for the keyed containers (scr_map.c, scr_array.c): equal text, and not the absent marker against the real string "undefined". */
+extern const void *const scr_str_absent_sentinel;
+static inline bool scr_str_eq_k(const ScrStr *a, const ScrStr *b) {
+  return a == b || (a->len == b->len && memcmp(a->data, b->data, a->len) == 0 &&
+                    (__builtin_expect(a->len != 9, 1) || (a != (const ScrStr *)scr_str_absent_sentinel && b != (const ScrStr *)scr_str_absent_sentinel)));
+}
 bool scr_str_rel_u(ScrStr *a, ScrStr *b, int op);
 void scr_str_absent_member(const char *member);
 extern const void *const scr_str_absent_sentinel;
