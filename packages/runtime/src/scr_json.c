@@ -17271,6 +17271,16 @@ void scr_error_set_errors(ScrError *e, ScrDyn *arr) {
   scr_dyn_release(arr); /* the caller's +1 */
 }
 
+/* An own NON-ENUMERABLE data property of the bag (an engine error's `secret` that crossed the boundary). Borrows both. */
+void scr_error_prop_define_hidden(ScrError *e, const char *key, size_t key_len, ScrDyn *value) {
+  scr_error_install_props_drop(&scr_error_props_drop_impl);
+  if (e->props == NULL || e->props->kind != SCR_DYN_OBJ) {
+    scr_dyn_release(e->props);
+    e->props = scr_dyn_new_obj();
+  }
+  scr_dyn_obj_define_hidden_data(e->props, key, key_len, value, true, true);
+}
+
 void scr_error_set_cause(ScrError *e, ScrDyn *value) {
   scr_error_install_props_drop(&scr_error_props_drop_impl);
   if (e->props == NULL || e->props->kind != SCR_DYN_OBJ) {

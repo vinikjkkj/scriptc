@@ -904,10 +904,86 @@ static ScrStr *isl_prop_str(JSValueConst obj, const char *prop, const char *fall
  * conversion both bridge directions' reasons ride: thrown engine
  * exceptions (below) and rejected engine promises crossing through the
  * promise bridge (isl_bridge_settle). */
+static ScrJsval *isl_cell_new(JSValue v);
+/* An engine property value as a dyn (+1), NULL when it cannot cross: the value is owned by the cell for the conversion only. */
+static ScrDyn *isl_prop_dyn(JSValue v) {
+  ScrJsval *cell = isl_cell_new(v); /* takes v */
+  ScrDyn *d = scr_dyn_from_jsval(cell);
+  scr_jsval_release(cell);
+  if (d == NULL) scr_exc_clear();
+  return d;
+}
+
+/* The thrown engine Error keeps what the static ScrError has slots for beyond name and message: its own enumerable properties (`code`,
+ * `status`, ...) and its own `cause`, so `catch (e: any)` reads them like Node. Converted BEFORE the throw (a conversion can fail),
+ * attached to the pending error after. */
+typedef struct { ScrStr *key; ScrDyn *val; bool hidden; } IslErrExtra;
+static void isl_throw_error_with_extras(JSValueConst exc) {
+  IslErrExtra *ex = NULL;
+  size_t n = 0, cap = 0;
+  JSPropertyEnum *tab = NULL;
+  uint32_t tn = 0;
+  if (JS_GetOwnPropertyNames(isl_ctx, &tab, &tn, exc, JS_GPN_STRING_MASK) == 0) {
+    for (uint32_t i = 0; i < tn; i++) {
+      const char *k = JS_AtomToCString(isl_ctx, tab[i].atom);
+      if (k == NULL) continue;
+      bool skip = strcmp(k, "stack") == 0 || strcmp(k, "message") == 0 || strcmp(k, "cause") == 0;
+      JSPropertyDescriptor pd;
+      bool hidden = false;
+      if (!skip && JS_GetOwnProperty(isl_ctx, &pd, exc, tab[i].atom) == 1) {
+        hidden = !(pd.flags & JS_PROP_ENUMERABLE);
+        JS_FreeValue(isl_ctx, pd.value);
+        JS_FreeValue(isl_ctx, pd.getter);
+        JS_FreeValue(isl_ctx, pd.setter);
+      }
+      JSValue v = skip ? JS_UNDEFINED : JS_GetProperty(isl_ctx, exc, tab[i].atom);
+      if (!skip && JS_IsException(v)) {
+        JS_FreeValue(isl_ctx, JS_GetException(isl_ctx));
+        skip = true;
+      }
+      ScrDyn *d = skip ? NULL : isl_prop_dyn(v);
+      if (d != NULL) {
+        if (n == cap) {
+          cap = cap ? cap * 2 : 4;
+          ex = realloc(ex, cap * sizeof *ex);
+          if (!ex) abort();
+        }
+        ex[n].key = scr_str_new(k, strlen(k));
+        ex[n].val = d;
+        ex[n].hidden = hidden;
+        n++;
+      }
+      JS_FreeCString(isl_ctx, k);
+    }
+    JS_FreePropertyEnum(isl_ctx, tab, tn);
+  }
+  ScrDyn *cause = NULL;
+  JSAtom ca = JS_NewAtom(isl_ctx, "cause");
+  int has = JS_GetOwnProperty(isl_ctx, NULL, exc, ca);
+  if (has == 1) {
+    JSValue v = JS_GetProperty(isl_ctx, exc, ca);
+    if (JS_IsException(v)) JS_FreeValue(isl_ctx, JS_GetException(isl_ctx));
+    else cause = isl_prop_dyn(v);
+  }
+  JS_FreeAtom(isl_ctx, ca);
+  scr_throw_error_named(isl_prop_str(exc, "name", "Error"), isl_prop_str(exc, "message", ""));
+  ScrError *e = scr_exc_pending_payload();
+  for (size_t i = 0; i < n; i++) {
+    if (e != NULL && ex[i].hidden) scr_error_prop_define_hidden(e, ex[i].key->data, ex[i].key->len, ex[i].val);
+    else if (e != NULL) scr_error_prop_set(e, ex[i].key, ex[i].val);
+    scr_str_release(ex[i].key);
+    scr_dyn_release(ex[i].val);
+  }
+  free(ex);
+  if (cause != NULL) {
+    if (e != NULL) scr_error_set_cause(e, cause);
+    scr_dyn_release(cause);
+  }
+}
+
 static void isl_throw_reason(JSValueConst exc) {
   if (JS_IsError(exc)) {
-    scr_throw_error_named(isl_prop_str(exc, "name", "Error"),
-                           isl_prop_str(exc, "message", ""));
+    isl_throw_error_with_extras(exc);
     return;
   }
   size_t len;
@@ -1960,7 +2036,7 @@ static ScrDyn *isl_dynjs_obj_walk(ScrJsval *cell, int mode) {
   if (isl_walk_ok && mode >= 0 && mode <= 2 && JS_IsPlainDataObject(isl_ctx, cell->v) && isl_walk_builtins_intact(mode)) {
     JSPropertyEnum *tab = NULL;
     uint32_t n = 0;
-    if (JS_GetOwnPropertyNames(isl_ctx, &tab, &n, cell->v, JS_GPN_STRING_MASK | JS_GPN_ENUM_ONLY) == 0) {
+    if (JS_GetOwnPropertyNames(isl_ctx, &tab, &n, cell->v, JS_GPN_STRING_MASK) == 0) {
       ScrDyn *out = scr_dyn_new_arr();
       for (uint32_t i = 0; i < n; i++) {
         JSValue k = mode == 1 ? JS_UNDEFINED : JS_AtomToString(isl_ctx, tab[i].atom);

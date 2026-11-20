@@ -1172,6 +1172,7 @@ void scr_error_prop_set(ScrError *e, ScrStr *key, struct ScrDyn *value);
  * is an ordinary enumerable property and goes through scr_error_prop_set).
  * Borrows both; stores a +1 copy. */
 void scr_error_set_cause(ScrError *e, struct ScrDyn *value);
+void scr_error_prop_define_hidden(ScrError *e, const char *key, size_t key_len, struct ScrDyn *value); /* borrows both */
 void scr_error_install_options(ScrError *e, struct ScrDyn *options);
 void scr_error_install_required_cause(ScrError *e, struct ScrDyn *options);
 /* AggregateError's non-enumerable `errors` (arr owned) */
