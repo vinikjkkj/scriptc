@@ -12506,12 +12506,13 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     if (!ts.isIdentifier(nameNode)) return false;
     const hasOwn = stdlibHasOwnMemberOf(L, init);
     const toStr = !hasOwn && init !== undefined && isObjectProtoToStringMember(L, init);
-    if (!hasOwn && !toStr) return false;
+    const arrProto = !hasOwn && !toStr && init !== undefined && arrayProtoMemberName(L, init) !== null;
+    if (!hasOwn && !toStr && !arrProto) return false;
     const sym = L.resolveValueSymbol(nameNode) ?? L.checker.getSymbolAtLocation(nameNode);
     if (sym === undefined || sym === null) return false;
     const decls = L.checker.declarationsOf(sym);
     if (decls.length !== 1) return false;
-    if (toStr && !aliasOnlyCalled(L, sym, nameNode)) return false;
+    if ((toStr || arrProto) && !aliasOnlyCalled(L, sym, nameNode, arrProto ? "array" : "toString")) return false;
     return bindingNeverReassigned(L, sym, decls[0]!);
   }
 
@@ -12538,7 +12539,7 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
    * plumbing lowers. Any other use (a value read, `.apply`, `.bind`, an
    * export) needs the binding to hold the real function, so the declaration
    * keeps its storage and the uses take their ordinary lowering. */
-  function aliasOnlyCalled(L: Lowerer, sym: ts.Symbol, nameNode: ts.Identifier): boolean {
+  function aliasOnlyCalled(L: Lowerer, sym: ts.Symbol, nameNode: ts.Identifier, kind: "toString" | "array"): boolean {
     const memo = aliasOnlyCalledMemo.get(sym);
     if (memo !== undefined) return memo;
     let ok = true;
@@ -12548,9 +12549,10 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
         (L.resolveValueSymbol(n) ?? L.checker.getSymbolAtLocation(n)) === sym) {
         const pa = n.parent;
         const call = pa?.parent;
-        ok = pa !== undefined && ts.isPropertyAccessExpression(pa) && pa.expression === n && pa.name.text === "call" &&
+        ok = pa !== undefined && ts.isPropertyAccessExpression(pa) && pa.expression === n &&
+          (pa.name.text === "call" || (kind === "array" && pa.name.text === "apply")) &&
           call !== undefined && ts.isCallExpression(call) && call.expression === pa &&
-          call.arguments.length <= 1 && !call.arguments.some((a) => ts.isSpreadElement(a));
+          (kind === "array" ? call.arguments.length >= 1 : call.arguments.length <= 1) && !call.arguments.some((a) => ts.isSpreadElement(a));
         return;
       }
       ts.forEachChild(n, visit);
@@ -16217,6 +16219,30 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverr
     "forEach", "keys", "values", "entries", "toString",
   ]);
 
+  /** `Array.prototype.<m>` written as a member access (the stdlib's), or null: the method name. */
+  function arrayProtoMemberName(L: Lowerer, e: ts.Expression): string | null {
+    let x: ts.Expression = e;
+    while (ts.isParenthesizedExpression(x) || ts.isNonNullExpression(x)) x = x.expression;
+    if (!ts.isPropertyAccessExpression(x) || !ts.isPropertyAccessExpression(x.expression)) return null;
+    const proto = x.expression;
+    if (!ts.isIdentifier(proto.expression) || proto.expression.text !== "Array" || proto.name.text !== "prototype") return null;
+    return L.isStdlibMember(x) ? x.name.text : null;
+  }
+
+  /** `var slice = Array.prototype.slice` (never reassigned, one declaration): the method name the alias borrows. The hoisted-alias spelling
+   * every small JavaScript library uses; its `.call(recv, ...)` uses lower exactly like the member-access spelling. */
+  function arrayProtoAliasMethod(L: Lowerer, e: ts.Identifier): string | null {
+    const sym = L.resolveValueSymbol(e) ?? L.checker.getSymbolAtLocation(e);
+    if (sym === undefined || sym === null) return null;
+    const decls = L.checker.declarationsOf(sym);
+    if (decls.length !== 1) return null;
+    const d = decls[0]!;
+    if (!ts.isVariableDeclaration(d) || !ts.isIdentifier(d.name) || d.initializer === undefined) return null;
+    const name = arrayProtoMemberName(L, d.initializer);
+    if (name === null || !bindingNeverReassigned(L, sym, d)) return null;
+    return name;
+  }
+
   /** `Array.prototype.<m>.call(recv, ...args)`: a builtin Array method borrowed
    * through Function.prototype.call (the fence this arm sits ahead of named it as a
    * compiled function value). Node reads the receiver as an ARRAY-LIKE, so the receiver
@@ -16225,22 +16251,31 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverr
    * through), and the method then runs dynamically on that array. Only the receiver-first
    * `.call` spelling lowers; `.apply` and `.bind` keep their fences. */
   export function lowerArrayProtoBorrowedCall(L: Lowerer, call: ts.CallExpression, access: ts.Expression): IrExpr | null {
-    if (!ts.isPropertyAccessExpression(access) || access.name.text !== "call") return null;
+    if (!ts.isPropertyAccessExpression(access) || (access.name.text !== "call" && access.name.text !== "apply")) return null;
+    const isApply = access.name.text === "apply";
     const borrowed = access.expression;
-    if (!ts.isPropertyAccessExpression(borrowed) || !ts.isPropertyAccessExpression(borrowed.expression)) return null;
-    const proto = borrowed.expression;
-    if (!ts.isIdentifier(proto.expression) || proto.expression.text !== "Array" || proto.name.text !== "prototype") return null;
-    if (!L.isStdlibMember(borrowed)) return null;
+    const methodName = arrayProtoMemberName(L, borrowed) ?? (ts.isIdentifier(borrowed) ? arrayProtoAliasMethod(L, borrowed) : null);
+    if (methodName === null) return null;
     if (call.arguments.length < 1 || call.arguments.some((a) => ts.isSpreadElement(a))) return null;
+    // `.apply(recv)` and `.apply(recv, [a, b])` with a literal argument list spell the same borrow; a list built at run time has no static arity.
+    let argNodes: readonly ts.Expression[] = call.arguments.slice(1);
+    if (isApply) {
+      if (call.arguments.length > 2) return null;
+      if (call.arguments.length === 2) {
+        const lst = call.arguments[1]!;
+        if (!ts.isArrayLiteralExpression(lst) || lst.elements.some((e) => ts.isSpreadElement(e) || ts.isOmittedExpression(e))) return null;
+        argNodes = lst.elements;
+      }
+    }
     const loc = locOf(call);
     const recv = L.lowerExprExpecting(call.arguments[0]!, DYN);
-    const args = call.arguments.slice(1).map((a) => L.lowerExprExpecting(a, DYN));
+    const args = argNodes.map((a) => L.lowerExprExpecting(a, DYN));
     // A READ-ONLY method whose callback (if any) cannot observe the array argument may run on a COPY of an array-like (a string, a plain
     // object with `length` and dense indices): the copy is exact. A mutator, or a callback that could read its third (fourth, for reduce)
     // parameter, keeps scr_arrlike_from, whose receivers are the ones that are shared or elements-only.
-    const name = borrowed.name.text;
+    const name = methodName;
     const arrayArgAt = name === "reduce" || name === "reduceRight" ? 3 : 2;
-    const cb = call.arguments[1];
+    const cb = argNodes[0];
     const callbackSafe = (): boolean => {
       if (cb === undefined) return false;
       let f: ts.Expression = cb;
@@ -16253,7 +16288,7 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverr
     const READ_CB = new Set(["map", "filter", "forEach", "some", "every", "reduce", "reduceRight", "find", "findIndex", "findLast", "findLastIndex"]);
     const readOnly = READ_NO_CB.has(name) || (READ_CB.has(name) && callbackSafe());
     const arr: IrExpr = { kind: "libCall", fn: readOnly ? "arrlike.fromRead" : "arrlike.from", args: [recv], type: DYN, loc };
-    return { kind: "dynInvoke", recv: arr, method: borrowed.name.text, calleeName: borrowed.getText(), args, type: DYN, loc };
+    return { kind: "dynInvoke", recv: arr, method: methodName, calleeName: borrowed.getText(), args, type: DYN, loc };
   }
 
   /** A method call on a class instance read through a NULLABLE slot in JavaScript source (`this.shardedSubscribers.start()` where
