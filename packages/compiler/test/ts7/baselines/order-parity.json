@@ -17912,6 +17912,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26247-engine-url-parses-mutates-and-prints-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26247-engine-url-parses-mutates-and-prints-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26248-engine-web-globals-print-their-node-shapes.ts": {
+   "order": [
+    "<repo>/tests/corpus/26248-engine-web-globals-print-their-node-shapes.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2625-bytes-views.ts": {
    "order": [
     "<repo>/tests/corpus/2625-bytes-views.ts"
