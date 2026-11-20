@@ -106,8 +106,10 @@ const NOT_ROUTED: ReadonlyMap<string, string> = new Map([
   // `constructor` is no prototype name any fence lists, so the generic own-member arm already emits its dynInvoke. (isPrototypeOf and
   // propertyIsEnumerable are ROUTED: the runtime answers both for every kind, an array's and a string's indices included.)
   ["constructor", "not a prototype name any fence lists: the generic own-member arm already emits dynInvoke"],
+  // toLowerCase / toUpperCase joined the family when the runtime's String arm learned them (through scr_dyn_str_case_hook, installed by the regex unit):
+  // both are in DYN_STRING_ONLY_METHODS, so the dotted spelling keeps the string lowering and only the element spelling reaches the arm.
   ...(["charAt", "charCodeAt", "endsWith", "padEnd", "padStart", "repeat",
-    "startsWith", "substr", "substring", "trim", "trimEnd", "trimStart"] as const).map(
+    "startsWith", "substr", "substring", "toLowerCase", "toUpperCase", "trim", "trimEnd", "trimStart"] as const).map(
     (n) => [n, "claimed by DYN_STRING_ONLY_METHODS before the dispatch set; the element spelling reaches the runtime arm"] as const,
   ),
 ]);
