@@ -18182,6 +18182,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26460-a-cast-to-a-wider-optional-method-finds-it-on-a-record-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26460-a-cast-to-a-wider-optional-method-finds-it-on-a-record-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26461-a-cast-to-a-wider-optional-method-finds-it-on-a-class-instance-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26461-a-cast-to-a-wider-optional-method-finds-it-on-a-class-instance-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26462-a-cast-to-a-wider-optional-field-reads-the-value-behind-it-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26462-a-cast-to-a-wider-optional-field-reads-the-value-behind-it-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2647-top-level-await-modules/main.ts": {
    "order": [
     "<repo>/tests/corpus/2647-top-level-await-modules/shared.ts",
