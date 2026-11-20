@@ -17575,6 +17575,36 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26051-a-method-value-that-reads-this-keeps-its-receiver-through-call-and-apply-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26051-a-method-value-that-reads-this-keeps-its-receiver-through-call-and-apply-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26052-string-and-number-prototype-methods-borrowed-through-an-any-prototype-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26052-string-and-number-prototype-methods-borrowed-through-an-any-prototype-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26053-array-prototype-as-an-any-value-carries-its-methods-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26053-array-prototype-as-an-any-value-carries-its-methods-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26054-math-max-and-min-borrowed-through-apply-and-call-fold-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26054-math-max-and-min-borrowed-through-apply-and-call-fold-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26055-from-char-code-push-and-math-max-apply-over-runtime-arrays-like-node.js": {
+   "order": [
+    "<repo>/tests/corpus/26055-from-char-code-push-and-math-max-apply-over-runtime-arrays-like-node.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2606-dynamic-import-cycle/main.ts": {
    "order": [
     "<repo>/tests/corpus/2606-dynamic-import-cycle/main.ts"
