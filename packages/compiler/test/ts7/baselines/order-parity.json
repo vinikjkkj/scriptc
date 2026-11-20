@@ -18170,6 +18170,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26320-concat-with-one-spread-argument-appends-each-part-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26320-concat-with-one-spread-argument-appends-each-part-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2633-island-promise-crossing.js": {
    "order": [
     "<repo>/tests/corpus/2633-island-promise-crossing.js"
