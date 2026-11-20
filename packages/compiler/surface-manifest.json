@@ -2829,6 +2829,13 @@
       "note": "the lowered call form takes no arguments"
     },
     {
+      "id": "stdlib.string.localeCompare",
+      "kind": "stdlib",
+      "name": "string.prototype.localeCompare",
+      "status": "static",
+      "note": "the lowered call form takes exactly 1 argument"
+    },
+    {
       "id": "stdlib.string.normalize",
       "kind": "stdlib",
       "name": "string.prototype.normalize",
@@ -2904,6 +2911,20 @@
       "name": "string.prototype.substring",
       "status": "static",
       "note": "the lowered call form takes 1 to 2 arguments"
+    },
+    {
+      "id": "stdlib.string.toLocaleLowerCase",
+      "kind": "stdlib",
+      "name": "string.prototype.toLocaleLowerCase",
+      "status": "static",
+      "note": "the lowered call form takes 0 to 1 arguments"
+    },
+    {
+      "id": "stdlib.string.toLocaleUpperCase",
+      "kind": "stdlib",
+      "name": "string.prototype.toLocaleUpperCase",
+      "status": "static",
+      "note": "the lowered call form takes 0 to 1 arguments"
     },
     {
       "id": "stdlib.string.toLowerCase",
