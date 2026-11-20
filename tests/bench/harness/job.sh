@@ -54,6 +54,7 @@ if [ "$program" = rest ]; then
   _rf=(--smaps); [ "${IR:-0}" != 0 ] && { _rf+=(--ir); export RR_SLOW=${RR_SLOW:-60}; }
   $BENCH_NODE "$BENCH_DIR/harness/rest-run.mjs" --out "$BENCH_WORK/result" --reps "$REPS" "${_rf[@]}" "${arms[@]}" | tee "$BENCH_WORK/result-summary.txt"
   [ "${IR:-0}" != 0 ] && $BENCH_NODE "$BENCH_DIR/harness/reach.mjs" "$BENCH_WORK/result" "$ART" || true
+  [ "${IR:-0}" != 0 ] && $BENCH_NODE "$BENCH_DIR/harness/callers.mjs" "$BENCH_WORK/result" "$ART" '^(__strlen|strlen|lre_exec|ee_knows|scr_ord_note|scr_dyn_release|scr_dyn_release_final|scr_cyc_on_release|malloc|free|calloc|realloc|_int_malloc|_int_free|sc_dyn_key_get_lit|scr_cm_probe|scr_dyn_obj_get|scr_dyn_objinst_row_scan)(_avx2|_evex|_sse2)?$' || true
   summary "$BENCH_WORK/result"; report "$BENCH_WORK/result"; labecho; exit 0
 fi
 store=${program#messaging-}
