@@ -51,14 +51,15 @@ const rj = existsSync(`${dir}/results.json`) ? JSON.parse(readFileSync(`${dir}/r
 console.log(`===== BENCHREPORT begin (dir ${dir}, top ${top}) =====`)
 if (rj) {
   const labels = [...new Set(rj.runs.map((r) => r.label))]
-  const stat = (l, k) => med(rj.runs.filter((r) => r.label === l).map((r) => r[k]))
+  const ALT = { cpu_self_ms: 'cpu_ms', rss_peak_kb: 'vmhwm_kb' } // rest-run.mjs names its fields cpu_ms / vmhwm_kb and records no wall
+  const stat = (l, k) => med(rj.runs.filter((r) => r.label === l).map((r) => r[k] ?? r[ALT[k]]))
   console.log(`-- medians over reps (node ${rj.node}, store ${rj.store}, reps ${rj.reps}); ratio columns are arm/node and cand/base`)
   console.log('arm | n | cpu_self_ms (all reps) | cpu_self med | wall med | rss_peak_kb med | cpu/node | wall/node | cpu/base | wall/base')
   for (const l of labels) {
     const rs = rj.runs.filter((r) => r.label === l)
     const b = l.startsWith('cand') ? 'base' + l.slice(4) : null
     const hb = b && labels.includes(b)
-    console.log([l, rs.length, rs.map((r) => Math.round(r.cpu_self_ms)).join('/'), stat(l, 'cpu_self_ms'), stat(l, 'wall_ms'), stat(l, 'rss_peak_kb'),
+    console.log([l, rs.length, rs.map((r) => Math.round(r.cpu_self_ms ?? r.cpu_ms)).join('/'), stat(l, 'cpu_self_ms'), stat(l, 'wall_ms'), stat(l, 'rss_peak_kb'),
       ratio(stat(l, 'cpu_self_ms'), stat('node', 'cpu_self_ms')), ratio(stat(l, 'wall_ms'), stat('node', 'wall_ms')),
       hb ? ratio(stat(l, 'cpu_self_ms'), stat(b, 'cpu_self_ms')) : '', hb ? ratio(stat(l, 'wall_ms'), stat(b, 'wall_ms')) : ''].join(' | '))
   }
