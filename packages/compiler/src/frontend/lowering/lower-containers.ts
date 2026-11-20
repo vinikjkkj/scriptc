@@ -7262,10 +7262,12 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
       })();
     if ((receiverKind === "string" || nullableStringRecv) && name === "match") {
       const arg0 = call.arguments[0];
-      if (!arg0 || L.mapTypeOf(L.typeOf(arg0))?.kind !== "regex") return null; // string-pattern match: the SC2020 fence
+      const strPattern = arg0 !== undefined && L.mapTypeOf(L.typeOf(arg0))?.kind === "string";
+      if (!arg0 || (L.mapTypeOf(L.typeOf(arg0))?.kind !== "regex" && !strPattern)) return null; // a string | RegExp union argument: the SC2020 fence
       if (call.arguments.length !== 1) return null;
       const receiver = nullableStringRecv ? L.lowerExprExpecting(access.expression, STRING) : lowerReceiver();
-      const re = L.lowerExpr(arg0);
+      // A string argument is RegExp(pattern) (a bad pattern throws Node's catchable SyntaxError at the call).
+      const re = strPattern ? stringPatternRegex(L, arg0, loc) : L.lowerExpr(arg0);
       // RegExpMatchArray | null maps to the string[] | null union by
       // itself; intern it directly when the checker's spelling doesn't —
       // or when it maps to something WIDER (an optional-chain call node
@@ -7308,10 +7310,11 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
     // 0, exactly Node. Never throws.
     if (receiverKind === "string" && name === "search") {
       const arg0 = call.arguments[0];
-      if (!arg0 || L.mapTypeOf(L.typeOf(arg0))?.kind !== "regex") return null; // string-pattern form: the SC2020 fence
+      const strPattern = arg0 !== undefined && L.mapTypeOf(L.typeOf(arg0))?.kind === "string";
+      if (!arg0 || (L.mapTypeOf(L.typeOf(arg0))?.kind !== "regex" && !strPattern)) return null; // a string | RegExp union argument: the SC2020 fence
       if (call.arguments.length !== 1) return null;
       const receiver = lowerReceiver();
-      const re = L.lowerExpr(arg0);
+      const re = strPattern ? stringPatternRegex(L, arg0, loc) : L.lowerExpr(arg0);
       return { kind: "regexIntrinsic", method: "search", receiver, args: [re], type: F64, loc };
     }
     if (
@@ -8064,6 +8067,13 @@ function staticNumberOf(L: Lowerer, node: ts.Expression): number | null {
   }
   return null;
 }
+
+/** The RegExp a string pattern argument of match/search stands for: `new RegExp(pattern)` (flag-free), compiled eagerly so a bad pattern
+   * throws Node's catchable SyntaxError at the call. */
+  function stringPatternRegex(L: Lowerer, arg: ts.Expression, loc: SrcLoc): IrExpr {
+    const pattern = L.lowerExpr(arg);
+    return { kind: "libCall", fn: "regex.new", args: [pattern, { kind: "strLit", value: "", type: STRING, loc }], type: { kind: "regex" }, loc };
+  }
 
 /** `a.localeCompare(b)` — the one-argument form (the locales/options forms select tailored collations and options that have no
    * lowering yet): the CLDR root collation, the order Node answers with ICU in the default locale (scr_collate.c;
