@@ -24,6 +24,7 @@ function fingerprint(dir) {
     let t = ''; try { t = readFileSync(`${dir}/${f}`, 'utf8') } catch { t = 'MISSING' }
     if (f === 'http.json') { try { t = JSON.stringify(JSON.parse(t).map((r) => ({ s: r.status, h: Object.fromEntries(Object.entries(r.headers || {}).filter(([k]) => k !== 'date')), b: norm(r.body_resp ?? String(r.error)) }))) } catch {} }
     else if (f === 'exit.json') { try { t = JSON.stringify(JSON.parse(t).exited) } catch {} }
+    else if (f === 'stanzas.json') { try { const j = JSON.parse(t); t = Array.isArray(j) ? j.map((x) => norm(typeof x === 'string' ? x : JSON.stringify(x))).sort().join('\n') : norm(t) } catch { t = norm(t) } } // sorted multiset: the order of two timing-dependent stanzas is reported by stanza-order, not by the verdict
     else t = norm(t)
     parts.push(f + ':' + t.length + ':' + [...t].reduce((h, c) => (h * 31 + c.charCodeAt(0)) | 0, 7))
   }
@@ -110,6 +111,15 @@ const recsOf = (dir, f) => {
   return norm(t).split('\n')
 }
 const nodeRun = results.runs.find((r) => r.label === 'node')
+// stanza-order: the verdict above compares stanzas.json as a sorted multiset; this line keeps a reorder visible per compiled run (positions that differ vs the first node run).
+if (nodeRun) for (const r of results.runs) {
+  if (r.label === 'node') continue
+  const A = recsOf(`${out}/node.${nodeRun.rep}/arm`, 'stanzas.json'), B = recsOf(`${out}/${r.label}.${r.rep}/arm`, 'stanzas.json')
+  const sa = [...A].sort(), sb = [...B].sort()
+  const same = sa.length === sb.length && sa.every((x, i) => x === sb[i])
+  const pos = []; for (let i = 0; i < Math.max(A.length, B.length); i++) if (A[i] !== B[i]) pos.push(i)
+  console.error(`stanza-order: ${r.label} rep ${r.rep}: ${!same ? `CONTENT-DIFFERS(${A.length} vs ${B.length} records)` : pos.length === 0 ? 'SAME' : `REORDERED(${pos.join(',')})`}`)
+}
 if (nodeRun) for (const r of results.runs) {
   if (r.label === 'node' || r.parity !== 'DIFFERS') continue
   for (const f of ['http.json', 'stanzas.json', 'exit.json']) {
