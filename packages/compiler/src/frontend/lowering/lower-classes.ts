@@ -13540,6 +13540,16 @@ export function lowerNew(L: Lowerer, expr: ts.NewExpression): IrExpr {
         if (mapped === null) {
           const anySet = dynAnyContainer(L, expr, tsType, "set", loc);
           if (anySet !== null) return anySet;
+          // TypeScript `new Set<any>()` / `new Set<unknown>()` / a bare `new Set()` whose uses fix no element type: no static Set holds dyn
+          // elements, so the dyn-flavored Set (the form a JavaScript `new Set()` takes) is the value; its binding is the checked-dynamic slot
+          // (dynFallbackType).
+          if (!isJsSourceFile(expr.getSourceFile())) {
+            const targ0 = L.checker.getTypeArguments(tsType as ts.TypeReference)[0];
+            if (targ0 !== undefined && ((targ0.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0)) {
+              const dynSet = dynAnyContainer(L, expr, tsType, "set", loc, true, true);
+              if (dynSet !== null) return dynSet;
+            }
+          }
         }
         if ((expr.arguments?.length ?? 0) > 0) {
           L.noLowering(
