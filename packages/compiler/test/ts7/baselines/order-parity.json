@@ -17605,6 +17605,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26134-a-class-cast-of-a-catch-binding-reads-members-of-whatever-was-thrown.ts": {
+   "order": [
+    "<repo>/tests/corpus/26134-a-class-cast-of-a-catch-binding-reads-members-of-whatever-was-thrown.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2614-trap-binding-later-writes.ts": {
    "order": [
     "<repo>/tests/corpus/2614-trap-binding-later-writes.ts"
