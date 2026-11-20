@@ -2749,7 +2749,39 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // the read answers the strict-mode plain-call undefined, the old
       // constant. TypeScript keeps the fence (noImplicitThis makes it a
       // compile-time story there).
-      if (isJsSourceFile(expr.getSourceFile()) || L.dynThisInLiterals > 0) {
+      // A TypeScript function that DECLARES its receiver (`function f(this: T, ...)`, a function expression with a `this:` parameter) reads the same
+      // ambient receiver: `.call` / `.apply` and method dispatch bind it, and the declared type T checks each read.
+      const declaresThis = ((): boolean => {
+        let o: ts.Node | undefined = expr.parent;
+        while (o !== undefined && !(ts.isFunctionLike(o) && !ts.isArrowFunction(o))) o = o.parent;
+        if (o === undefined || !ts.isFunctionLike(o)) return false;
+        const first = o.parameters[0];
+        if (!(first !== undefined && ts.isIdentifier(first.name) && first.name.text === "this")) return false;
+        // Only where the receiver always arrives through .call / .apply (or the function is handed to a call as a callback): a method-position
+        // call on an object that merely holds the function does not bind it in the static object model, so those keep the fence.
+        let nameNode: ts.Identifier | undefined;
+        if (ts.isFunctionDeclaration(o) && o.name !== undefined) nameNode = o.name;
+        else if (ts.isFunctionExpression(o) && ts.isVariableDeclaration(o.parent) && ts.isIdentifier(o.parent.name)) nameNode = o.parent.name;
+        else return ts.isFunctionExpression(o) && ts.isCallExpression(o.parent); // an inline callback
+        const sym = L.resolveValueSymbol(nameNode) ?? L.checker.getSymbolAtLocation(nameNode);
+        if (sym === undefined || sym === null) return false;
+        let ok = true;
+        const visit = (n: ts.Node): void => {
+          if (!ok) return;
+          if (ts.isIdentifier(n) && n !== nameNode && n.text === nameNode!.text && (L.resolveValueSymbol(n) ?? L.checker.getSymbolAtLocation(n)) === sym) {
+            const pa = n.parent;
+            const viaCall = pa !== undefined && ts.isPropertyAccessExpression(pa) && pa.expression === n && (pa.name.text === "call" || pa.name.text === "apply") &&
+              pa.parent !== undefined && ts.isCallExpression(pa.parent) && pa.parent.expression === pa;
+            const asArg = pa !== undefined && ts.isCallExpression(pa) && pa.arguments.some((a) => a === n);
+            ok = viaCall || asArg;
+            return;
+          }
+          ts.forEachChild(n, visit);
+        };
+        visit(nameNode.getSourceFile());
+        return ok;
+      })();
+      if (isJsSourceFile(expr.getSourceFile()) || L.dynThisInLiterals > 0 || declaresThis) {
         return { kind: "libCall", fn: sloppyThisFnOf(expr) ? "dyn.thisSloppy" : "dyn.this", args: [], type: DYN, loc };
       }
       L.unsupported("SC1080", expr);
