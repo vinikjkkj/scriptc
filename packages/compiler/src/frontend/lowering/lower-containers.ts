@@ -10248,7 +10248,11 @@ const DV_SETTERS: Record<string, { method: IrBytesIntrinsicMethod; le: boolean }
                 type: tupleT!,
                 loc,
               };
-      body.push(
+      // A PURE index shape's keys are the record's key list itself: no slot walk, and (for a record that is a VIEW of an object) no read of any
+      // member, which is what Node's Object.keys / for-in do not do either (viewRewriteIndexOp answers recordOvfKeys from the object's keys).
+      if (member === "keys" && shape.fields.length === 0) {
+        body.push({ kind: "return", value: { kind: "recordOvfKeys", obj: rRef, shapeId: argIr.shapeId, type: resultT, loc }, loc });
+      } else body.push(
         { kind: "varDecl", localId: "sls.0", init: { kind: "recordOvfSlots", obj: rRef, shapeId: argIr.shapeId, type: ksT, loc }, loc },
         {
           kind: "for",

@@ -13248,7 +13248,13 @@ export class Lowerer {
       const key = hoist(e["key"] as IrExpr);
       copy["key"] = key();
       out = { kind: "ternary", cond: isView(), then: { kind: "libCall", fn: "dyn.hasOwn", args: [view(), key()], type: BOOL, loc }, else_: copy as unknown as IrExpr, type: BOOL, loc };
-    } else if (kind === "recordOvfKeys" || kind === "recordOvfSlots") {
+    } else if (kind === "recordOvfKeys") {
+      // The KEY LIST of a view is the object's own keys, read as Object.keys reads them: no member is touched (a getter does not run, a
+      // key a getter would have deleted is still listed), where the sync below re-reads every value to build the snapshot.
+      const keysT = e["type"] as IrType;
+      const via = this.coerceToExpected({ kind: "libCall", fn: "dyn.objKeys", args: [view()], type: DYN, loc }, keysT);
+      out = { kind: "ternary", cond: isView(), then: via, else_: copy as unknown as IrExpr, type: keysT, loc };
+    } else if (kind === "recordOvfSlots") {
       stmts.push({ kind: "exprStmt", expr: { kind: "recordViewSync", obj: ref(), shapeId, type: VOID, loc }, loc });
       out = copy as unknown as IrExpr;
     } else {

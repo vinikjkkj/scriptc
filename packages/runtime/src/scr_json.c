@@ -10656,6 +10656,8 @@ static void scr_jb_put_recv_ctor(ScrJsonBuf *b, const ScrDyn *recv) {
  * than answered wrongly. Other kinds carry no own properties a delete
  * could remove, so they answer true like JS. Both borrowed. */
 static void scr_dyn_module_ns_throw(const char *a, const ScrStr *key, const char *b);
+int scr_rec_sync_eager = 0;
+
 bool scr_dyn_key_delete(ScrDyn *recv, ScrStr *key) {
   if (recv != NULL && recv->kind == SCR_DYN_PROXY) return SCR_PX->del(recv, key);
   if (recv != NULL && recv->kind == SCR_DYN_BYTES && !recv->static_copy && recv->v.bytes->own != NULL) {
