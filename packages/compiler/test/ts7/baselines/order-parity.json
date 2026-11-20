@@ -18116,6 +18116,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26312-typed-array-keys-values-and-entries-drained-where-made-match-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26312-typed-array-keys-values-and-entries-drained-where-made-match-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26313-typed-array-to-locale-string-formats-each-element-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26313-typed-array-to-locale-string-formats-each-element-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26314-typed-array-json-and-object-walks-match-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26314-typed-array-json-and-object-walks-match-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2632-dyn-jsval-iterate.js": {
    "order": [
     "<repo>/tests/corpus/2632-dyn-jsval-iterate.js"
