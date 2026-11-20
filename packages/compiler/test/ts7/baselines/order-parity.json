@@ -17690,6 +17690,48 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26240-engine-timers-immediates-and-microtasks-interleave-with-the-static-ones-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26240-engine-timers-immediates-and-microtasks-interleave-with-the-static-ones-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26241-engine-timer-functions-validate-and-expose-handles-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26241-engine-timer-functions-validate-and-expose-handles-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26242-engine-web-globals-encode-clone-abort-and-dispatch-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26242-engine-web-globals-encode-clone-abort-and-dispatch-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26243-engine-console-misuse-warnings-are-deferred-to-the-next-tick-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26243-engine-console-misuse-warnings-are-deferred-to-the-next-tick-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26244-engine-console-table-measures-width-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26244-engine-console-table-measures-width-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26245-engine-errors-carry-the-v8-stack-header-and-message-wording.ts": {
+   "order": [
+    "<repo>/tests/corpus/26245-engine-errors-carry-the-v8-stack-header-and-message-wording.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26246-percent-o-prints-the-hidden-length-of-arrays-and-the-typed-array-surface.ts": {
+   "order": [
+    "<repo>/tests/corpus/26246-percent-o-prints-the-hidden-length-of-arrays-and-the-typed-array-surface.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2625-bytes-views.ts": {
    "order": [
     "<repo>/tests/corpus/2625-bytes-views.ts"
