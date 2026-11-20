@@ -4018,7 +4018,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       // `prim.constructor.name` on a primitive (or a union of scalar arms): the
       // builtin wrapper's name, per arm, as Node answers it.
       {
-        const primName = lowerPrimCtorName(L, expr);
+        const primName = lowerPrimCtorName(L, expr) ?? lowerBytesCtorName(L, expr);
         if (primName !== null) return L.maybeNarrow(primName, expr);
       }
       if (isInstanceConstructorRead(L, expr.expression) && expr.questionDotToken === undefined) {
@@ -22207,6 +22207,46 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
     return r;
   }
 
+  /** The typed-array constructors whose receivers carry ONE element kind (u8 is shared by Uint8Array, Buffer and DataView, which have their own flavor tests). */
+  const BYTES_CTOR_ELEMS: ReadonlyMap<string, string> = new Map(Object.entries(TYPED_ARRAY_CTOR_ELEM).filter(([k]) => k !== "DataView"));
+
+  /** `x.constructor.name` over a typed array: the constructor's name, a constant for every width but u8, and the flavor question for u8 (Uint8Array, Buffer or DataView, asked of the value at run time). */
+  function lowerBytesCtorName(L: Lowerer, expr: ts.PropertyAccessExpression): IrExpr | null {
+    if (expr.name.text !== "name" || expr.questionDotToken !== undefined) return null;
+    const c = expr.expression;
+    if (!ts.isPropertyAccessExpression(c) || c.name.text !== "constructor" || c.questionDotToken !== undefined) return null;
+    const recvT = L.mapTypeOf(L.typeOf(c.expression));
+    if (recvT?.kind !== "bytes" || recvT.elem === "buf") return null;
+    if (!L.isStdlibMember(c)) return null;
+    const loc = locOf(expr);
+    const value = L.lowerExpr(c.expression);
+    if (value.type.kind !== "bytes" || value.type.elem === "buf") return null;
+    const str = (v: string): IrExpr => ({ kind: "strLit", value: v, type: STRING, loc });
+    if (value.type.elem !== "u8") {
+      let nm: string | undefined;
+      for (const [k, e] of BYTES_CTOR_ELEMS) if (e === value.type.elem) nm = k;
+      if (nm === undefined) return null;
+      if (ts.isIdentifier(c.expression) || c.expression.kind === ts.SyntaxKind.ThisKeyword) return str(nm);
+      return { kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: value, loc }], result: str(nm), type: STRING, loc };
+    }
+    const line = c.expression.getSourceFile().getLineAndCharacterOfPosition(c.expression.getStart()).line + 1;
+    const why: IrExpr = str(`constructor.name at ${loc.file}:${line}`);
+    const tmp = L.declareHiddenLocal("%ctorRecv", value.type);
+    const ref: IrExpr = { kind: "varRef", localId: tmp.id, type: value.type, loc };
+    const test = (fn: "bytes.isPlainU8" | "bytes.isBuffer"): IrExpr => ({ kind: "libCall", fn, args: [ref, why], type: BOOL, loc });
+    return {
+      kind: "seqExpr",
+      stmts: [{ kind: "varDecl", localId: tmp.id, init: value, loc }],
+      result: {
+        kind: "ternary", cond: test("bytes.isPlainU8"), then: str("Uint8Array"),
+        else_: { kind: "ternary", cond: test("bytes.isBuffer"), then: str("Buffer"), else_: str("DataView"), type: STRING, loc },
+        type: STRING, loc,
+      },
+      type: STRING,
+      loc,
+    };
+  }
+
   function lowerBytesCtorTest(L: Lowerer, expr: ts.BinaryExpression, loc: SrcLoc): IrExpr | null {
     const negated = expr.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsEqualsToken;
     for (const [a, b] of [
@@ -22217,6 +22257,18 @@ export function lowerBinary(L: Lowerer, expr: ts.BinaryExpression): IrExpr {
       if (!ts.isIdentifier(b)) continue;
       const rSym = L.resolveValueSymbol(b);
       if (!rSym || !L.isStdlibSymbol(rSym)) continue;
+      // A typed-array constructor other than Uint8Array / Buffer: every width but u8 names exactly one constructor, so the answer is a constant after the
+      // receiver's own effects (a u8 receiver is never one of them: Uint8Array, Buffer and DataView share its representation, and only they are asked below).
+      const wantElem = BYTES_CTOR_ELEMS.get(rSym.name) ?? (rSym.name === "Uint8Array" || rSym.name === "Buffer" ? "u8" : undefined);
+      const recvAny = wantElem === undefined ? null : L.mapTypeOf(L.typeOf(a.expression));
+      if (wantElem !== undefined && recvAny?.kind === "bytes" && recvAny.elem !== "buf" && !(wantElem === "u8" && recvAny.elem === "u8")) {
+        const operand = L.lowerExpr(a.expression);
+        if (operand.type.kind !== "bytes") continue;
+        const same = operand.type.elem === wantElem;
+        const answer: IrExpr = { kind: "boolLit", value: negated ? !same : same, type: BOOL, loc };
+        if (ts.isIdentifier(a.expression) || a.expression.kind === ts.SyntaxKind.ThisKeyword) return answer;
+        return { kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: operand, loc }], result: answer, type: BOOL, loc };
+      }
       const wantBuffer = rSym.name === "Buffer" ? true : rSym.name === "Uint8Array" ? false : null;
       if (wantBuffer === null) continue;
       // The CHECKER's type decides only whether this rule applies at all
