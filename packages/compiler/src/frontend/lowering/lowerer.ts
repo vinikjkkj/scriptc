@@ -1325,6 +1325,24 @@ export function nodeThrowExpr(kind: 0 | 1 | 2, code: string, message: string, ty
  * this fallback for `any` (mapType answers jsval first).
  *
  * Null for void (no value exists to represent). */
+function isAnySetDecl(L: Lowerer, node: ts.Node, t: ts.Type): boolean {
+  // The RETURN slot of a function declaration (the caller names the declaration itself).
+  if (ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node) || ts.isArrowFunction(node) || ts.isFunctionExpression(node)) return isAnyElemSetType(L, t);
+  const d = node.parent;
+  if (d === undefined || !(ts.isParameter(d) || ts.isPropertyDeclaration(d) || ts.isVariableDeclaration(d) || ts.isPropertySignature(d))) return false;
+  if (d.name !== node) return false;
+  return isAnyElemSetType(L, t);
+}
+
+/** The standard library's `Set<any>` / `Set<unknown>` (TypeScript sources): the dyn-flavored Set's checker type. */
+export function isAnyElemSetType(L: Lowerer, t: ts.Type): boolean {
+  const sym = t.getSymbol();
+  if (sym === undefined || sym.name !== "Set") return false;
+  if (!L.checker.declarationsOf(sym).some((x) => ts.isInterfaceDeclaration(x) && L.isStdlibFile(x.getSourceFile()))) return false;
+  const targs = L.checker.getTypeArguments(t as ts.TypeReference);
+  return targs.length === 1 && (targs[0]!.flags & (ts.TypeFlags.Any | ts.TypeFlags.Unknown)) !== 0;
+}
+
 function spelledAnyArrayDecl(node: ts.Node): boolean {
   const d = node.parent;
   if (d === undefined) return false;
@@ -1357,6 +1375,9 @@ export function dynFallbackType(L: Lowerer, node: ts.Node, t: ts.Type): IrType |
     // stance. Only the spelled annotation: an inferred any[] keeps the
     // evolving-array rules that own it.
     if (L.checker.isArrayType(t) && spelledAnyArrayDecl(node)) return DYN;
+    // A declaration whose type is a Set of any/unknown (`const s = new Set<any>()`, `visited: Set<unknown>`): the dyn-flavored Set
+    // (dynMapNew) the constructor builds; its box carries the Set method table.
+    if (isAnySetDecl(L, node, t)) return DYN;
     // TS single-call-signature function types: per-piece fallback, but
     // ONLY `any` pieces fall to dyn — any other unmappable piece keeps
     // the whole type's own fence.
