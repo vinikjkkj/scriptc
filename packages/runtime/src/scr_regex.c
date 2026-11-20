@@ -2336,6 +2336,9 @@ void scr_regex_dyn_install(void) {
   scr_dyn_handle_install(SCR_DYNH_REGEX, &scr_regex_dynh_ops);
 }
 
+/* scr_collate.c installs the CLDR root collation here; scr_collate.c's constructor names it, so it is defined whether or not the dyn String hook below is compiled in. */
+double (*scr_str_collate_hook)(const ScrStr *a, const ScrStr *b) = NULL;
+
 #ifdef SCR_DYN_STREXT /* only a program that links scr_dyn_invoke.c has a caller of the hook (cc.ts derives the define from the source list) */
 /* ── dyn String methods that need this unit (split / replace / replaceAll / search / normalize / codePointAt / isWellFormed /
  * toWellFormed / toLocaleLowerCase / toLocaleUpperCase) ──────────────────────────────────────────────────────────────────────
@@ -2436,8 +2439,6 @@ static ScrDyn *dyn_strext_str(ScrStr *r) {
 
 static bool dyn_strext_is(const char *m, const char *n) { return strcmp(m, n) == 0; }
 
-/* scr_collate.c installs the CLDR root collation here; a program whose dyn localeCompare links it (moduleUsesCollate) always has it. */
-double (*scr_str_collate_hook)(const ScrStr *a, const ScrStr *b) = NULL;
 
 extern ScrDyn *(*scr_regex_matchall_dyn_fn)(ScrStr *s, ScrRegex *re);
 extern ScrStr *(*scr_regex_replace_fn_dyn_fn)(ScrStr *s, const ScrDyn *pat, const ScrDyn *fn, bool all);
