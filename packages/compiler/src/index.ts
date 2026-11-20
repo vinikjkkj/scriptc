@@ -53,6 +53,7 @@ import {
   compilerImplementationDir,
   compilerImplementationFingerprint,
   publishEarlyBuildCache,
+  writeEmitted,
   readEarlyBuildCache,
   cacheVerifyEnabled,
   cacheVerificationDivergences,
@@ -1755,7 +1756,7 @@ async function compileTracked(
 async function emitLlvmFile(mod: IrModule, llStats: LlvmEmitStats, llPath: string, audit: boolean, layout?: LayoutOrder): Promise<{ members: boolean; lit: boolean; procStream: boolean }> {
   let ll = tapped("emit.llvm", () => emitLlvmModule(mod, llStats, audit));
   if (layout !== undefined) ll = reorderLlvmText(ll, layout);
-  await writeFile(llPath, ll);
+  await writeEmitted(llPath, ll);
   return { members: DYN_DISPATCH_REF.test(ll), lit: DYN_LIT_REF.test(ll), procStream: PROC_STREAM_REF.test(ll) };
 }
 
@@ -1770,7 +1771,7 @@ async function emitCFiles(
   layout?: LayoutOrder,
 ): Promise<{ programUnits: string[]; programHeader: string | undefined; readsObjinstMembers: boolean; readsLitKey: boolean; readsProcStream: boolean }> {
   const program = tapped("emit.c", () => emitModuleProgram(mod, entryText, headerName, layout));
-  await writeFile(cPath, program.units[0]!);
+  await writeEmitted(cPath, program.units[0]!);
   const readsObjinstMembers = program.units.some((u) => DYN_DISPATCH_REF.test(u)) || (program.header !== null && DYN_DISPATCH_REF.test(program.header));
   const readsLitKey = program.units.some((u) => DYN_LIT_REF.test(u)) || (program.header !== null && DYN_LIT_REF.test(program.header));
   const readsProcStream = program.units.some((u) => PROC_STREAM_REF.test(u)) || (program.header !== null && PROC_STREAM_REF.test(program.header));
@@ -1778,9 +1779,9 @@ async function emitCFiles(
   let programUnits: string[] = [];
   if (program.header !== null) {
     programHeader = join(outDir, headerName);
-    await writeFile(programHeader, program.header);
+    await writeEmitted(programHeader, program.header);
     programUnits = program.units.slice(1).map((_, i) => join(outDir, `${stem}.part${i + 1}.c`));
-    await Promise.all(programUnits.map((p, i) => writeFile(p, program.units[i + 1]!)));
+    await Promise.all(programUnits.map((p, i) => writeEmitted(p, program.units[i + 1]!)));
   }
   return { programUnits, programHeader, readsObjinstMembers, readsLitKey, readsProcStream };
 }
