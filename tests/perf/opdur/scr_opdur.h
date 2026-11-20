@@ -23,6 +23,7 @@ OPD_T(6, scr_buffer_concat_dyn) OPD_T(7, scr_buffer_concat_dyn_len) OPD_T(8, scr
 OPD_T(11, scr_hash_digest_raw_buf) OPD_T(12, scr_hash_digest_enc) OPD_T(13, scr_hmac_digest_raw_buf) OPD_T(14, scr_hmac_digest_enc) OPD_T(15, scr_crypto_hash_digest_bytes_raw)
 OPD_T(16, scr_crypto_hash_digest_str_raw) OPD_T(17, scr_crypto_hash_digest_bytes) OPD_T(18, scr_crypto_hash_digest_str) OPD_T(19, scr_arr_sort_dyn) OPD_T(20, scr_bytes_sort_big)
 OPD_T(21, scr_cipher_update) OPD_T(22, scr_cipher_final) OPD_T(23, scr_str_split) OPD_T(24, scr_str_replace_str) OPD_T(25, scr_str_index_of) OPD_T(26, scr_sp_sort)
+OPD_T(31, scr_key_sign_async) OPD_T(32, scr_key_verify_async) OPD_T(33, scr_key_gen_async) OPD_T(34, scr_key_dh) OPD_T(35, scr_key_sign) OPD_T(36, scr_key_verify) OPD_T(37, scr_key_gen) OPD_T(38, scr_asym_dh)
 OPD_T(27, scr_str_concat) OPD_T(28, scr_crypto_digest_raw) OPD_T(29, scr_text_decode_view) OPD_T(30, scr_jsval_from_json)
 typedef struct { void *addr; const char *name; uint64_t calls, c20, c100, tot, t20, t100, start; int depth; uint32_t hist[OPD_NB]; } OpdT;
 __attribute__((weak)) OpdT opd_t[OPD_NT]; __attribute__((weak)) int opd_n; __attribute__((weak)) int opd_ready; __attribute__((weak)) double opd_ns_per_tick; __attribute__((weak)) uint64_t opd_tsc0; __attribute__((weak)) double opd_t0; __attribute__((weak)) short opd_h[256]; 
@@ -50,6 +51,7 @@ static OPD_NOINST void opd_init(void) {
   OPD_A(11, scr_hash_digest_raw_buf) OPD_A(12, scr_hash_digest_enc) OPD_A(13, scr_hmac_digest_raw_buf) OPD_A(14, scr_hmac_digest_enc) OPD_A(15, scr_crypto_hash_digest_bytes_raw)
   OPD_A(16, scr_crypto_hash_digest_str_raw) OPD_A(17, scr_crypto_hash_digest_bytes) OPD_A(18, scr_crypto_hash_digest_str) OPD_A(19, scr_arr_sort_dyn) OPD_A(20, scr_bytes_sort_big)
   OPD_A(21, scr_cipher_update) OPD_A(22, scr_cipher_final) OPD_A(23, scr_str_split) OPD_A(24, scr_str_replace_str) OPD_A(25, scr_str_index_of) OPD_A(26, scr_sp_sort)
+  OPD_A(31, scr_key_sign_async) OPD_A(32, scr_key_verify_async) OPD_A(33, scr_key_gen_async) OPD_A(34, scr_key_dh) OPD_A(35, scr_key_sign) OPD_A(36, scr_key_verify) OPD_A(37, scr_key_gen) OPD_A(38, scr_asym_dh)
   OPD_A(27, scr_str_concat) OPD_A(28, scr_crypto_digest_raw) OPD_A(29, scr_text_decode_view) OPD_A(30, scr_jsval_from_json)
   atexit(opd_dump); signal(SIGTERM, opd_sig); signal(SIGINT, opd_sig); signal(SIGHUP, opd_sig);
 }
