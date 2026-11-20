@@ -94,3 +94,11 @@ export function absentStrRiskOf(L: Lowerer): boolean {
   L.absentStrMemo = risk;
   return risk;
 }
+
+/** Can this string-typed IR expression evaluate to the absent marker? A literal cannot, and neither can a read with NO operands (`navigator.userAgent`,
+ * `process.platform`): nothing the program holds flows into it, so it is never a regex capture. Keeping these foldable matters: pg's
+ * `typeof navigator.userAgent === 'string'` is statically true and the code after its early return (`new Response`) must stay dead. */
+export function operandMayHoldAbsent(e: { kind: string; args?: readonly unknown[] }): boolean {
+  if (e.kind === "strLit") return false;
+  return !(e.kind === "libCall" && e.args !== undefined && e.args.length === 0);
+}
