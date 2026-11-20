@@ -4148,6 +4148,8 @@ export type IrLibFn =
   | "num.toExponential"
   | "num.toFixed0"
   | "num.toFixed"
+  | "num.toExponentialDigits"
+  | "num.toPrecision"
   | "num.toStringRadix"
   /** Object.is over two numbers — the spec's SameValue on doubles: NaN
    * equals NaN, +0 differs from -0, everything else is `===`. Plain bool
@@ -15292,6 +15294,8 @@ export const MAY_THROW_LIB_FNS: ReadonlySet<IrLibFn> = new Set([
   "fs.readStreamOpts",
   "fs.writeStreamOpts",
   "num.toFixed",
+  "num.toExponentialDigits",
+  "num.toPrecision",
   "num.toStringRadix",
   // The four fetch body consumers: a SECOND read of a body throws Node's
   // TypeError SYNCHRONOUSLY (not a rejection), which is where Node puts

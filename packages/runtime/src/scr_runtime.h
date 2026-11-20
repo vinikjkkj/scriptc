@@ -10039,6 +10039,11 @@ bool scr_num_is_safe_integer(double x);
 ScrStr *scr_num_to_exponential(double x);
 ScrStr *scr_num_to_fixed0(double x);
 ScrStr *scr_num_to_fixed(double x, double fraction_digits);
+/* toExponential(fractionDigits) / toPrecision(precision) with an explicit
+ * argument: exact binary-value digits, ties toward the larger n, V8's
+ * catchable RangeError outside 0..100 / 1..100. +1 results. */
+ScrStr *scr_num_to_exponential_digits(double x, double fraction_digits);
+ScrStr *scr_num_to_precision(double x, double precision);
 
 /* Object.is over two numbers — the spec's SameValue on doubles: NaN
  * equals NaN, +0 differs from -0, everything else is ==. Never throws. */

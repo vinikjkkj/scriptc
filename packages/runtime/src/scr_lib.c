@@ -5459,6 +5459,117 @@ ScrStr *scr_num_to_fixed(double x, double fraction_digits) {
   return scr_str_new(out, (size_t)o);
 }
 
+/* Number.prototype.toExponential(fractionDigits) and toPrecision(precision)
+ * with an explicit argument. Both need the first p significant digits of the
+ * EXACT binary value rounded with the spec's tie rule ("if there are two
+ * such sets of e and n, pick the e and n for which n x 10^(e-p+1) is
+ * larger"), which printf's half-even does not give: (2.5).toPrecision(1) is
+ * "3", (0.5).toExponential(0) is "5e-1" and (1.25).toExponential(1) is
+ * "1.3e+0". glibc prints the exact expansion for any precision, so 780
+ * fraction digits (a double has at most 767 significant digits) yield the
+ * whole value, and rounding half-up on the digit string is exact: digit p
+ * is >= '5' iff the remainder is >= one half. */
+static void scr_num_sig_digits(double a, int p, char *dig, int *e10) {
+  char buf[800];
+  int len = snprintf(buf, sizeof buf, "%.780e", a);
+  const char *ep = memchr(buf, 'e', (size_t)len);
+  int e = atoi(ep + 1);
+  dig[0] = buf[0];
+  for (int i = 1; i < p; i++) dig[i] = buf[i + 1]; /* skip the '.' */
+  /* buf[1] is '.', so significant digit k (k >= 1) is buf[k + 1]. */
+  bool up = buf[p + 1] >= '5';
+  if (up) {
+    int i = p - 1;
+    while (i >= 0 && dig[i] == '9') dig[i--] = '0';
+    if (i >= 0) {
+      dig[i]++;
+    } else {
+      dig[0] = '1';
+      for (int k = 1; k < p; k++) dig[k] = '0';
+      e++;
+    }
+  }
+  *e10 = e;
+}
+
+static ScrStr *scr_num_exp_text(bool neg, const char *dig, int p, int e) {
+  char out[160];
+  int o = 0;
+  if (neg) out[o++] = '-';
+  out[o++] = dig[0];
+  if (p > 1) {
+    out[o++] = '.';
+    for (int i = 1; i < p; i++) out[o++] = dig[i];
+  }
+  out[o++] = 'e';
+  out[o++] = e < 0 ? '-' : '+';
+  o += snprintf(out + o, sizeof out - (size_t)o, "%d", e < 0 ? -e : e);
+  return scr_str_new(out, (size_t)o);
+}
+
+ScrStr *scr_num_to_exponential_digits(double x, double fraction_digits) {
+  double fd = isnan(fraction_digits) ? 0 : trunc(fraction_digits);
+  if (!isfinite(x)) return scr_f64_to_scrstr(x);
+  if (!(fd >= 0 && fd <= 100)) {
+    static const char msg[] =
+        "toExponential() argument must be between 0 and 100";
+    scr_throw_error_msg(SCR_ERR_RANGE, msg, sizeof msg - 1);
+    return NULL;
+  }
+  int f = (int)fd;
+  if (x == 0) {
+    char dig[102];
+    memset(dig, '0', sizeof dig);
+    return scr_num_exp_text(false, dig, f + 1, 0);
+  }
+  char dig[104];
+  int e;
+  scr_num_sig_digits(fabs(x), f + 1, dig, &e);
+  return scr_num_exp_text(x < 0, dig, f + 1, e);
+}
+
+ScrStr *scr_num_to_precision(double x, double precision) {
+  double pd = isnan(precision) ? 0 : trunc(precision);
+  if (!isfinite(x)) return scr_f64_to_scrstr(x);
+  if (!(pd >= 1 && pd <= 100)) {
+    static const char msg[] =
+        "toPrecision() argument must be between 1 and 100";
+    scr_throw_error_msg(SCR_ERR_RANGE, msg, sizeof msg - 1);
+    return NULL;
+  }
+  int p = (int)pd;
+  char dig[104];
+  int e;
+  bool neg = x < 0;
+  if (x == 0) {
+    memset(dig, '0', sizeof dig);
+    e = 0;
+  } else {
+    scr_num_sig_digits(fabs(x), p, dig, &e);
+  }
+  if (x != 0 && (e < -6 || e >= p)) return scr_num_exp_text(neg, dig, p, e);
+  char out[160];
+  int o = 0;
+  if (neg) out[o++] = '-';
+  if (e == p - 1) {
+    memcpy(out + o, dig, (size_t)p);
+    o += p;
+  } else if (e >= 0) {
+    memcpy(out + o, dig, (size_t)(e + 1));
+    o += e + 1;
+    out[o++] = '.';
+    memcpy(out + o, dig + e + 1, (size_t)(p - (e + 1)));
+    o += p - (e + 1);
+  } else {
+    out[o++] = '0';
+    out[o++] = '.';
+    for (int i = 0; i < -(e + 1); i++) out[o++] = '0';
+    memcpy(out + o, dig, (size_t)p);
+    o += p;
+  }
+  return scr_str_new(out, (size_t)o);
+}
+
 /* Increment a decimal digit string in place. Returns true on overflow —
  * the value becomes 1 followed by len zeros (the caller folds the zeros
  * into its scale); an EMPTY string increments to "1" the same way (the

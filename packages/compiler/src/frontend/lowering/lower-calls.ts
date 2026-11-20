@@ -8353,6 +8353,9 @@ export const DYN_DISPATCH_METHODS = new Set<string>([
   // Number.prototype.toFixed: the same runtime formatter the typed spelling
   // calls; every non-number kind meets the not-a-function ladder.
   "toFixed",
+  // Its siblings: the exact-value formatters (scr_num_to_exponential_digits,
+  // scr_num_to_precision) behind the same dispatch.
+  "toExponential", "toPrecision",
   // The native-handle receiver surface (SCR_DYN_HANDLE — req/res/socket
   // boxed through the checked-dynamic boundary): these names dispatch on
   // the runtime kind so a boxed IncomingMessage/ServerResponse/Socket
@@ -9335,6 +9338,82 @@ const inliningPredicates = new Set<ts.Symbol>();
     );
   }
 
+/** `n.toExponential(d)` / `n.toPrecision(p)` over a number receiver. The
+   * argument is a number (the exact-value runtime formatter), an absent or
+   * undefined value (the omitted-argument form), or `number | undefined`
+   * (picked at run time; receiver and argument each evaluated once, in
+   * order). Null for argument types with no lowering here. */
+  function lowerNumberDigitsFormat(L: Lowerer, call: ts.CallExpression, recv: ts.Expression,
+    name: "toExponential" | "toPrecision", loc: SrcLoc,): IrExpr | null {
+    const operand = L.lowerExpr(recv);
+    if (operand.type.kind !== "f64") return null;
+    const omitted = (x: IrExpr): IrExpr =>
+      name === "toExponential"
+        ? { kind: "libCall", fn: "num.toExponential", args: [x], type: STRING, loc }
+        : { kind: "toString", operand: x, type: STRING, loc };
+    const fn: IrLibFn = name === "toExponential" ? "num.toExponentialDigits" : "num.toPrecision";
+    if (call.arguments.length === 0) return omitted(operand);
+    const digits = L.lowerExpr(call.arguments[0]!);
+    const unitDigits = (): IrExpr => {
+      if (droppableStatic(digits)) return omitted(operand);
+      const r = L.declareHiddenLocal("%numrecv", F64);
+      return {
+        kind: "seqExpr",
+        stmts: [
+          { kind: "varDecl", localId: r.id, init: operand, loc },
+          { kind: "exprStmt", expr: digits, loc: digits.loc },
+        ],
+        result: omitted({ kind: "varRef", localId: r.id, type: F64, loc }),
+        type: STRING,
+        loc,
+      };
+    };
+    if (digits.type.kind === "f64") {
+      return { kind: "libCall", fn, args: [operand, digits], type: STRING, loc };
+    }
+    if (digits.type.kind === "undefinedT" || digits.type.kind === "void") return unitDigits();
+    if (digits.type.kind === "union") {
+      const def = L.unions.get(digits.type.unionId);
+      if (def?.arms.every(isUnitType)) return unitDigits();
+      if (
+        def?.arms.length === 2 &&
+        def.arms.some((arm) => arm.kind === "f64") &&
+        def.arms.some((arm) => arm.kind === "undefinedT")
+      ) {
+        const r = L.declareHiddenLocal("%numrecv", F64);
+        const d = L.declareHiddenLocal("%numdigits", digits.type);
+        const rRef = (): IrExpr => ({ kind: "varRef", localId: r.id, type: F64, loc });
+        const dRef = (): IrExpr => ({ kind: "varRef", localId: d.id, type: digits.type, loc });
+        const zero: IrExpr = { kind: "numLit", value: 0, type: F64, loc };
+        return {
+          kind: "seqExpr",
+          stmts: [
+            { kind: "varDecl", localId: r.id, init: operand, loc },
+            { kind: "varDecl", localId: d.id, init: digits, loc },
+          ],
+          result: {
+            kind: "ternary",
+            cond: {
+              kind: "unionIsTag", unionId: digits.type.unionId, tag: L.armTag(digits.type.unionId, UNDEFINED_T),
+              negated: false, value: dRef(), type: BOOL, loc,
+            },
+            then: omitted(rRef()),
+            else_: {
+              kind: "libCall", fn,
+              args: [rRef(), { kind: "nullish", left: dRef(), right: zero, type: F64, loc }],
+              type: STRING, loc,
+            },
+            type: STRING,
+            loc,
+          },
+          type: STRING,
+          loc,
+        };
+      }
+    }
+    return null;
+  }
+
 /** The remaining PRIMITIVE prototype surface with a static story, in both
    * member spellings (`x.hasOwnProperty(...)` and `x['hasOwnProperty'](...)`
    * — JS resolves the two identically, so the element spelling routes here
@@ -9409,6 +9488,15 @@ const inliningPredicates = new Set<ts.Symbol>();
       if (operand.type.kind !== "f64") return null;
       const fn = name === "toExponential" ? "num.toExponential" : "num.toFixed0";
       return { kind: "libCall", fn, args: [operand], type: STRING, loc };
+    }
+    // Number.prototype.toExponential(fractionDigits) / toPrecision(precision):
+    // the exact-value formatters (scr_num_to_exponential_digits /
+    // scr_num_to_precision). An omitted or undefined argument is the spec's
+    // "as many digits as necessary" (toExponential) and ToString (toPrecision).
+    if ((name === "toExponential" || name === "toPrecision") && recvKind === "f64" &&
+        call.arguments.length <= 1 && !call.arguments.some((x) => ts.isSpreadElement(x))) {
+      const fmt = lowerNumberDigitsFormat(L, call, recv, name, loc);
+      if (fmt) return fmt;
     }
     if (name === "toFixed" && recvKind === "f64" && call.arguments.length === 1) {
       const operand = L.lowerExpr(recv);

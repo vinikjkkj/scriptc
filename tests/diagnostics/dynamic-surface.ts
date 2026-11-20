@@ -10,6 +10,6 @@
 // now and no longer appear here.)
 const up = Math.sqrt(2);
 const tau = Math.cbrt(8) * 2;
-const price = (19.99).toPrecision(4);
+const price = "hello".at(1);
 const ch = "hello".at(0);
 const n = Number.parseFloat("3.14");
