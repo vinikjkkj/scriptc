@@ -9,7 +9,8 @@
  * differ), 6 treats every OBJECT as plain in the keyed [[Get]] fast path (row 25852, a wrapper and a StringDecoder, must differ). A row that
  * does not move under its plant never reached the mechanism. Rows 25853-25857 are the primitive-wrapper reads (Object(prim) sees String / Number /
  * Boolean.prototype by read and by `in`, and its `constructor` names the builtin); 7 makes a wrapper read as a plain object again, 8 restores the old
- * `constructor` fence. Row 26190 is the position hint of the indexed read (scr_dyn_obj_get_big): 9 makes the hint answer without comparing the key. */
+ * `constructor` fence. Row 26190 is the position hint of the indexed read (scr_dyn_obj_get_big): 9 makes the hint answer without comparing the key. Row 26191 is the
+ * EventEmitter member-name lookup of the dyn view (scr_events_emitter.c ee_op_of): 10 makes every four-letter member read as unknown. */
 import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -21,7 +22,7 @@ import { exeName } from "./exe.js";
 const repoRoot = join(import.meta.dirname, "../..");
 const rowFile = (id: string): string => readdirSync(join(repoRoot, "tests/corpus")).find((n) => n.startsWith(id + "-"))!;
 const rowSrcOf = (id: string): string => readFileSync(join(repoRoot, "tests/corpus", rowFile(id)), "utf8");
-const IDS = ["25850", "25851", "25852", "25853", "25854", "25855", "25856", "25857", "26190"] as const;
+const IDS = ["25850", "25851", "25852", "25853", "25854", "25855", "25856", "25857", "26190", "26191"] as const;
 
 interface Run { stdout: string; exitCode: number }
 function run(cmd: string, args: string[], cwd: string): Promise<Run> {
@@ -74,7 +75,7 @@ describe.each(["c", "llvm"] as const)("the member indexes (%s)", (backend) => {
       expect(r.stdout).toBe(nodeOut[id]);
     }
   }, 900_000);
-  test.each([["25850", 3], ["25851", 4], ["25851", 5], ["25852", 6], ["25853", 7], ["25856", 8], ["25857", 7], ["26190", 9]] as const)("CONTROL: row %s under planted defect %i differs from Node", async (id, n) => {
+  test.each([["25850", 3], ["25851", 4], ["25851", 5], ["25852", 6], ["25853", 7], ["25856", 8], ["25857", 7], ["26190", 9], ["26191", 10]] as const)("CONTROL: row %s under planted defect %i differs from Node", async (id, n) => {
     const bin = await build(id, `plant${n}-${id}-${backend}`, backend, `-DSCR_OBJ_PLANT_BUG=${n}`, false);
     const r = await run(bin, [], work);
     expect(r.stdout).not.toBe(nodeOut[id]);
