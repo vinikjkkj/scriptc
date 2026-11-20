@@ -103,7 +103,7 @@ for (const r of results.runs) r.parity = nodeFp === null ? 'no-node-ref' : r.fp 
 const recsOf = (dir, f) => {
   let t = ''; try { t = readFileSync(`${dir}/${f}`, 'utf8') } catch { return ['MISSING'] }
   try {
-    if (f === 'http.json') return JSON.parse(t).map((r) => norm(JSON.stringify({ s: r.status, h: Object.fromEntries(Object.entries(r.headers || {}).filter(([k]) => k !== 'date')), b: r.body_resp ?? String(r.error) })))
+    if (f === 'http.json') return JSON.parse(t).map((r) => JSON.stringify({ s: r.status, h: Object.fromEntries(Object.entries(r.headers || {}).filter(([k]) => k !== 'date')), b: norm(r.body_resp ?? String(r.error)) }))
     if (f === 'exit.json') return [JSON.stringify(JSON.parse(t).exited)]
     const j = JSON.parse(t); if (Array.isArray(j)) return j.map((x) => norm(typeof x === 'string' ? x : JSON.stringify(x)))
   } catch {}
@@ -120,7 +120,7 @@ if (nodeRun) for (const r of results.runs) {
     const same = sa.length === sb.length && sa.every((x, i) => x === sb[i])
     console.error(`PARITYDIFF ${r.label} rep ${r.rep} ${f}: node ${A.length} records, compiled ${B.length}; multiset ${same ? 'EQUAL (ordering only)' : 'DIFFERENT (content)'}`)
     let shown = 0
-    for (let i = 0; i < Math.max(A.length, B.length) && shown < 12; i++) if (A[i] !== B[i]) { shown++; console.error(`  [${i}] node: ${String(A[i]).slice(0, 300)}\n  [${i}] comp: ${String(B[i]).slice(0, 300)}`) }
+    for (let i = 0; i < Math.max(A.length, B.length) && shown < 12; i++) if (A[i] !== B[i]) { shown++; { const a = String(A[i]), b = String(B[i]); let k = 0; while (k < a.length && a[k] === b[k]) k++; const w = (s) => s.slice(Math.max(0, k - 80), k + 160); console.error(`  [${i}] first difference at char ${k}\n  [${i}] node: ...${w(a)}\n  [${i}] comp: ...${w(b)}`) } }
     if (!same) {
       const cnt = (xs) => { const m = new Map(); for (const x of xs) m.set(x, (m.get(x) ?? 0) + 1); return m }
       const ma = cnt(A), mb = cnt(B); let k = 0
