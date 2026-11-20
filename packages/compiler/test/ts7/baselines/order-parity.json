@@ -17408,6 +17408,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25952-a-cast-of-a-catch-binding-reads-a-member-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25952-a-cast-of-a-catch-binding-reads-a-member-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/25953-a-thrown-plain-object-crosses-an-async-boundary-like-node.ts": {
    "order": [
     "<repo>/tests/corpus/25953-a-thrown-plain-object-crosses-an-async-boundary-like-node.ts"
