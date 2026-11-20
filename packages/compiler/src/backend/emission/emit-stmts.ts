@@ -1738,7 +1738,7 @@ function emitBoxedStrAccum(E: CEmitter, s: Extract<IrStmt, { kind: "assign" }>, 
   const acc = E.newTemp(local.type, `(ScrStr *)scr_box_get_ref(${target})`);
   const r = E.emitExpr(v.right);
   E.line(`scr_box_str_unshare(${target}, ${acc.name}); /* += accumulator: the box's own reference moves into the concat */`);
-  const res = E.newTemp(v.type, `${E.mod.absentStrings === true ? "scr_str_concat_u" : "scr_str_concat"}(${acc.name}, ${r.name})`);
+  const res = E.newTemp(v.type, `scr_str_concat(${acc.name}, ${r.name})`);
   E.moveTemp(res);
   E.line(`scr_box_set_ref(${target}, ${res.name});${E.srcComment(s.loc)}`);
   return true;
@@ -1812,7 +1812,7 @@ function emitStrAccum(E: CEmitter, s: Extract<IrStmt, { kind: "assign" }>, local
   const r = E.emitExpr(v.right);
   E.line(`/* += accumulator: the binding's own reference moves into the concat */`);
   const acc = E.newTemp(local.type, target);
-  const res = E.newTemp(v.type, `${E.mod.absentStrings === true ? "scr_str_concat_u" : "scr_str_concat"}(${acc.name}, ${r.name})`);
+  const res = E.newTemp(v.type, `scr_str_concat(${acc.name}, ${r.name})`);
   E.moveTemp(res);
   E.line(`${target} = ${res.name};${E.srcComment(s.loc)}`);
   return true;
