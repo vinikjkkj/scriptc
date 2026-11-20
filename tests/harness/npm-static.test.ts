@@ -1017,7 +1017,10 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     // literal, because equality of the two spellings is the property that
     // was broken; the fenced row is asserted against its exact message,
     // because the message is what changed.
-    expect(rows.get("dUpper")).toBe("THREW 'String.prototype.toUpperCase' on a dynamic value is not supported yet");
+    // dUpper: CLOSED since the runtime's String arm answers toUpperCase/toLowerCase through scr_dyn_str_case_hook (installed by scr_regex.c, which
+    // such a program links): Node prints AB (tests/fixtures/npm/cases/4114-keyed-method-call-reach-on-purpose/main.ts under node v24.15.0).
+    expect(rows.get("dUpper")).toBe("AB");
+    expect(rows.get("dUpper")).toBe(rows.get("tUpper"));
     expect(rows.get("dToString")).toBe("5");
     expect(rows.get("tUpper")).toBe("AB");
     expect(rows.get("tToString")).toBe("5");
@@ -1350,9 +1353,12 @@ describe(`npm-static pilots${sanitize ? " (sanitized)" : ""}`, () => {
     // every binary that makes any dyn method call. An ASCII-only inline
     // conversion was refused outright -- it would be a silent wrong answer
     // for non-ASCII, the failure mode this whole line of work is about.
-    expect(rows.get("rUpper")).toBe("THREW 'String.prototype.toUpperCase' on a dynamic value is not supported yet | AB | DIFFER");
-    expect(rows.get("rLower")).toBe("THREW 'String.prototype.toLowerCase' on a dynamic value is not supported yet | ab | DIFFER");
-    expect(rows.get("rSplitFenced")).toBe("THREW 'String.prototype.split' on a dynamic value is not supported yet");
+    // rUpper / rLower: CLOSED (the String arm answers them through scr_dyn_str_case_hook); Node v24.15.0 prints "AB | AB | SAME" and "ab | ab | SAME"
+    // for the fixture, and so does the binary.
+    expect(rows.get("rUpper")).toBe("AB | AB | SAME");
+    expect(rows.get("rLower")).toBe("ab | ab | SAME");
+    // rSplitFenced: CLOSED too (split on a dyn string runs through the regex unit's hook): Node v24.15.0 prints "a,b".
+    expect(rows.get("rSplitFenced")).toBe("a,b");
     expect(rows.get("rToFixedFenced")).toBe("1.50");
     expect(rows.get("rSplitDot")).toBe("a,b");
     expect(rows.get("rTrulyMissing")).toBe('THREW s["nope"] is not a function');
