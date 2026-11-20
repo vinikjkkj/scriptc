@@ -3492,6 +3492,180 @@ function lowerBytesLoopCall(L: Lowerer, call: ts.CallExpression, access: ts.Prop
   return { kind: "call", callee: helper, args: [receiver, ...args], type, loc };
 }
 
+type BytesHofKind = "forEach" | "map" | "filter" | "every" | "some" | "find" | "findIndex" | "findLast" | "findLastIndex" | "reduce" | "reduceRight";
+
+/** The typed-array callback methods as interned IR loops over `get` / `bytesSet`, one per (method, width, callback arity). Elements are read LIVE at each
+ *  step (a callback that writes the array is seen by later steps, as in JS); `map` and `filter` build their result from a copy of the receiver so
+ *  the result keeps the receiver's flavor (a Buffer's map answers a Buffer). */
+function buildBytesHofFn(name: string, method: BytesHofKind, bytesT: IrType & { kind: "bytes" }, fnT: IrType & { kind: "func" }, arity: number,
+  resultT: IrType | null, foundTag: number, undefTag: number, hasInit: boolean, loc: SrcLoc): IrFunction {
+  const ref = (localId: string, type: IrType = F64): IrExpr => ({ kind: "varRef", localId, type, loc });
+  const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
+  const bin = (op: "<" | ">=" | "+" | "-" | "===", left: IrExpr, right: IrExpr, type: IrType = BOOL): IrExpr => ({ kind: "bin", op, left, right, type, loc });
+  const assign = (localId: string, value: IrExpr): IrStmt => ({ kind: "assign", localId, value, loc });
+  const get = (index: IrExpr): IrExpr => ({ kind: "bytesIntrinsic", method: "get", receiver: ref("a.0", bytesT), args: [index], type: F64, loc });
+  const set = (arr: string, index: IrExpr, value: IrExpr): IrStmt => ({ kind: "bytesSet", arr: ref(arr, bytesT), index, value, loc });
+  const callF = (args: IrExpr[]): IrExpr => ({ kind: "callValue", callee: ref("f.0", fnT), args: args.slice(0, arity), type: fnT.ret, loc });
+  const callAt = (idx: IrExpr, v: IrExpr = get(idx)): IrExpr => callF([v, idx, ref("a.0", bytesT)]);
+  const truthy = (e: IrExpr): IrExpr => predToBool(e);
+  const lenOf: IrStmt = { kind: "varDecl", localId: "n.0", init: { kind: "bytesIntrinsic", method: "length", receiver: ref("a.0", bytesT), args: [], type: F64, loc }, loc };
+  const params: IrParam[] = [{ localId: "a.0", name: "a", type: bytesT }, { localId: "f.0", name: "f", type: fnT }];
+  const locals: IrLocal[] = [
+    { id: "a.0", name: "a", type: bytesT, mutable: false }, { id: "f.0", name: "f", type: fnT, mutable: false },
+    { id: "n.0", name: "n", type: F64, mutable: false }, { id: "i.0", name: "i", type: F64, mutable: true },
+  ];
+  const addLocal = (id: string, type: IrType, mutable: boolean): void => { locals.push({ id, name: id.split(".")[0]!, type, mutable }); };
+  const last = method === "findLast" || method === "findLastIndex" || method === "reduceRight";
+  const loop = (body: IrStmt[]): IrStmt => (last ? reverseCountedForLoop : countedForLoop)(loc, body);
+  const bool = (value: boolean): IrExpr => ({ kind: "boolLit", value, type: BOOL, loc });
+  let returnType: IrType = VOID;
+  let body: IrStmt[];
+  switch (method) {
+    case "forEach":
+      body = [lenOf, loop([{ kind: "exprStmt", expr: callAt(ref("i.0")), loc }])];
+      break;
+    case "map": {
+      returnType = bytesT;
+      addLocal("out.0", bytesT, false);
+      body = [
+        lenOf,
+        { kind: "varDecl", localId: "out.0", init: { kind: "bytesIntrinsic", method: "slice", receiver: ref("a.0", bytesT), args: [], type: bytesT, loc }, loc },
+        loop([set("out.0", ref("i.0"), callAt(ref("i.0")))]),
+        { kind: "return", value: ref("out.0", bytesT), loc },
+      ];
+      break;
+    }
+    case "filter": {
+      returnType = bytesT;
+      addLocal("tmp.0", bytesT, false);
+      addLocal("k.0", F64, true);
+      addLocal("v.0", F64, false);
+      body = [
+        lenOf,
+        { kind: "varDecl", localId: "tmp.0", init: { kind: "bytesIntrinsic", method: "slice", receiver: ref("a.0", bytesT), args: [], type: bytesT, loc }, loc },
+        { kind: "varDecl", localId: "k.0", init: num(0), loc },
+        loop([
+          { kind: "varDecl", localId: "v.0", init: get(ref("i.0")), loc },
+          { kind: "if", cond: truthy(callAt(ref("i.0"), ref("v.0"))), then: [set("tmp.0", ref("k.0"), ref("v.0")), assign("k.0", bin("+", ref("k.0"), num(1), F64))], else_: null, loc },
+        ]),
+        { kind: "return", value: { kind: "bytesIntrinsic", method: "slice", receiver: ref("tmp.0", bytesT), args: [num(0), ref("k.0")], type: bytesT, loc }, loc },
+      ];
+      break;
+    }
+    case "every":
+    case "some": {
+      returnType = BOOL;
+      const isEvery = method === "every";
+      addLocal("v.0", F64, false);
+      body = [
+        lenOf,
+        loop([
+          { kind: "varDecl", localId: "v.0", init: get(ref("i.0")), loc },
+          { kind: "if", cond: truthy(callAt(ref("i.0"), ref("v.0"))), then: isEvery ? [] : [{ kind: "return", value: bool(true), loc }], else_: isEvery ? [{ kind: "return", value: bool(false), loc }] : null, loc },
+        ]),
+        { kind: "return", value: bool(isEvery), loc },
+      ];
+      break;
+    }
+    case "find":
+    case "findLast": {
+      returnType = resultT!;
+      addLocal("v.0", F64, false);
+      const uid = (resultT as { unionId: string }).unionId;
+      body = [
+        lenOf,
+        loop([
+          { kind: "varDecl", localId: "v.0", init: get(ref("i.0")), loc },
+          { kind: "if", cond: truthy(callAt(ref("i.0"), ref("v.0"))), then: [{ kind: "return", value: { kind: "unionWrap", unionId: uid, tag: foundTag, value: ref("v.0"), type: resultT!, loc }, loc }], else_: null, loc },
+        ]),
+        { kind: "return", value: { kind: "unionWrap", unionId: uid, tag: undefTag, value: { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc }, type: resultT!, loc }, loc },
+      ];
+      break;
+    }
+    case "findIndex":
+    case "findLastIndex": {
+      returnType = F64;
+      body = [lenOf, loop([{ kind: "if", cond: truthy(callAt(ref("i.0"))), then: [{ kind: "return", value: ref("i.0"), loc }], else_: null, loc }]), { kind: "return", value: num(-1), loc }];
+      break;
+    }
+    default: {
+      // reduce / reduceRight: with an initial value, or seeded from the first (last) element.
+      returnType = F64;
+      addLocal("acc.0", F64, true);
+      const cb = (idx: IrExpr): IrExpr => callF([ref("acc.0"), get(idx), idx, ref("a.0", bytesT)]);
+      const step: IrStmt = assign("acc.0", cb(ref("i.0")));
+      if (hasInit) {
+        params.push({ localId: "init.0", name: "init", type: F64 });
+        locals.push({ id: "init.0", name: "init", type: F64, mutable: false });
+        body = [lenOf, { kind: "varDecl", localId: "acc.0", init: ref("init.0"), loc }, loop([step]), { kind: "return", value: ref("acc.0"), loc }];
+      } else {
+        const emptyMsg: IrExpr = { kind: "strLit", value: "Reduce of empty array with no initial value", type: STRING, loc };
+        const seedIdx = last ? bin("-", ref("n.0"), num(1), F64) : num(0);
+        const from: IrStmt = last
+          ? { kind: "for", init: { kind: "varDecl", localId: "i.0", init: bin("-", ref("n.0"), num(2), F64), loc }, cond: bin(">=", ref("i.0"), num(0)), update: assign("i.0", bin("-", ref("i.0"), num(1), F64)), body: [step], loc }
+          : { kind: "for", init: { kind: "varDecl", localId: "i.0", init: num(1), loc }, cond: bin("<", ref("i.0"), ref("n.0")), update: assign("i.0", bin("+", ref("i.0"), num(1), F64)), body: [step], loc };
+        body = [
+          lenOf,
+          { kind: "if", cond: bin("===", ref("n.0"), num(0)), then: [throwTypeError(emptyMsg, loc)], else_: null, loc },
+          { kind: "varDecl", localId: "acc.0", init: get(seedIdx), loc },
+          from,
+          { kind: "return", value: ref("acc.0"), loc },
+        ];
+      }
+    }
+  }
+  return { name, params, returnType, locals, body, loc };
+}
+
+/** The typed-array callback methods (`forEach`, `map`, `filter`, `every`, `some`, `find*`, `reduce*`) over every numeric width. Null when the call is not
+ *  one of them or the callback does not fit the (value, index, array) number signature. */
+function lowerBytesHofCall(L: Lowerer, call: ts.CallExpression, access: ts.PropertyAccessExpression, bytesT: IrType & { kind: "bytes" }, loc: SrcLoc): IrExpr | null {
+  const method = access.name.text as BytesHofKind;
+  const isReduce = method === "reduce" || method === "reduceRight";
+  const HOFS = new Set<string>(["forEach", "map", "filter", "every", "some", "find", "findIndex", "findLast", "findLastIndex", "reduce", "reduceRight"]);
+  if (!HOFS.has(method) || !bytesNumericElem(bytesT.elem) || call.arguments.some(ts.isSpreadElement)) return null;
+  const nArgs = call.arguments.length;
+  if (isReduce ? nArgs < 1 || nArgs > 2 : nArgs < 1 || nArgs > 2) return null;
+  // A Buffer's map/filter answer a Buffer (species) -- the flavor-keeping copy below does that -- but the receiver's own flavor is a runtime stamp.
+  const argNode = call.arguments[0]!;
+  if (!isReduce && nArgs === 2) L.hofThisArgs.set(argNode, call.arguments[1]!);
+  const receiver = L.lowerExpr(access.expression);
+  const lead: IrType[] = isReduce ? [F64, F64] : [F64];
+  const { fnArg, arity } = hofCallbackArg(L, argNode, lead, bytesT, undefined);
+  const p = fnArg.type.params;
+  const wantParams: IrType[] = isReduce ? [F64, F64, F64, bytesT] : [F64, F64, bytesT];
+  const okParams = p.length <= wantParams.length && p.every((t, k) => typeEquals(t, wantParams[k]!));
+  if (!okParams) L.badType(argNode, L.typeOf(argNode));
+  const ret = fnArg.type.ret;
+  const needsBool = method !== "forEach" && method !== "map" && !isReduce;
+  const truthyRet = ret.kind === "bool" || ret.kind === "f64" || ret.kind === "string";
+  if (needsBool && !truthyRet) L.badType(argNode, L.typeOf(argNode));
+  if ((method === "map" || isReduce) && ret.kind !== "f64") L.badType(argNode, L.typeOf(argNode));
+  let resultT: IrType | null = null;
+  let foundTag = -1;
+  let undefTag = -1;
+  if (method === "find" || method === "findLast") {
+    resultT = L.irTypeOf(call);
+    if (resultT.kind !== "union") L.badType(call, L.typeOf(call));
+    foundTag = L.armTag(resultT.unionId, F64);
+    undefTag = L.armTag(resultT.unionId, UNDEFINED_T);
+    if (foundTag < 0 || undefTag < 0) L.badType(call, L.typeOf(call));
+  }
+  const hasInit = isReduce && nArgs === 2;
+  const key = `bytes.hof:${method}:${bytesT.elem}:${arity}:${typeKey(ret)}:${hasInit ? "init" : "seed"}`;
+  let helper = L.arrHofHelpers.get(key);
+  if (!helper) {
+    helper = `%bytes.${method}.${L.arrHofHelpers.size}`;
+    L.arrHofHelpers.set(key, helper);
+    L.liftedFns.push(buildBytesHofFn(helper, method, bytesT, fnArg.type, arity, resultT, foundTag, undefTag, hasInit, loc));
+  }
+  const args: IrExpr[] = [receiver, fnArg];
+  if (hasInit) args.push(L.lowerExprExpecting(call.arguments[1]!, F64));
+  const type: IrType = method === "forEach" ? VOID : method === "map" || method === "filter" ? bytesT : method === "every" || method === "some" ? BOOL
+    : method === "find" || method === "findLast" ? resultT! : F64;
+  return { kind: "call", callee: helper, args, type, loc };
+}
+
 /** `(a, b) => ...` of the typed-array DEFAULT order over doubles: NaN after every number, -0 before +0, otherwise numeric. */
 function buildFloatDefaultCmpFn(name: string, loc: SrcLoc): IrFunction {
   const ref = (localId: string): IrExpr => ({ kind: "varRef", localId, type: F64, loc });
@@ -9051,7 +9225,7 @@ export function decoderCtorSpec(L: Lowerer, expr: ts.NewExpression): { enc: stri
       };
     }
     if (!bytesMemberDeclaredOnBuffer(L, access)) {
-      const looped = lowerBytesLoopCall(L, call, access, receiverIr, loc);
+      const looped = lowerBytesLoopCall(L, call, access, receiverIr, loc) ?? lowerBytesHofCall(L, call, access, receiverIr, loc);
       if (looped !== null) return looped;
     }
     if (receiverIr.elem !== "buf" && name === "toSorted") {
