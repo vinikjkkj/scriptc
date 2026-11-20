@@ -17582,6 +17582,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26190-a-position-hint-on-a-large-dyn-object-never-answers-a-neighbouring-member.ts": {
+   "order": [
+    "<repo>/tests/corpus/26190-a-position-hint-on-a-large-dyn-object-never-answers-a-neighbouring-member.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2620-ee-override-once-order.ts": {
    "order": [
     "<repo>/tests/corpus/2620-ee-override-once-order.ts"
