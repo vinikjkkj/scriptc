@@ -27,6 +27,7 @@ import { copyListStmts, type CopyPart } from "./key-list-fill.js";
 import { applyEnumRefill, applyNullProto, applyOwnKey, applySlotFilled, flushPatchCensus } from "./ir-patch.js";
 import { refreshMapTypeEnv, CLASS_FED_MIXED, classFedInterfacesNoted, clearClassFedInterfaces, flushMintOrder, mintPhaseControl, noteClassFedInterface, resetClassFedInterfacesGrew, resetMintLog, setGenGateKeys, setMintPhase, undefSlotWiden, CLASS_FED_INTERFACES } from "../types.js";
 import { flushFragmentCensus } from "./fragment-census.js";
+import { absentStrRiskOf } from "./lower-absent-str.js";
 import { fenceDynRecordCasts } from "./dyn-record-fence.js";
 import { fenceNullProtoRecordCasts } from "./null-proto-fence.js";
 import { fenceSymbolRecordCrossings, routeAnyKeysToSymbols } from "./symbol-record-fence.js";
@@ -4860,6 +4861,7 @@ export class Lowerer {
             entry: ENTRY_NAME,
             ...(this.ffiImports.length > 0 ? { ffiImports: [...this.ffiImports] } : {}),
             ...(isCjsEntryFile(this.entry) ? { entryCjs: true } : {}),
+            ...(this.absentStrRisk() ? { absentStrings: true } : {}),
           };
     return {
       module,
@@ -4935,6 +4937,14 @@ export class Lowerer {
   /** Set when the program builds a match row (exec, match, matchAll): the string[] printer then recognizes a row and prints
    * it as Node's exec result (index, input, groups; patchRegexRowInspect). */
   regexRowsBuilt = false;
+
+  /** Memo of absentStrRisk (lower-absent-str.ts): undefined until a consumer asks. */
+  absentStrMemo: boolean | undefined = undefined;
+  /** Can this program hold the absent string in a string-typed slot (a regex group that may not participate)? A whole-program syntactic scan,
+   * computed once on first ask; see lower-absent-str.ts. */
+  absentStrRisk(): boolean {
+    return absentStrRiskOf(this);
+  }
   readonly nullProtoRenderings: { shapeId: string; patch: NullProtoPatch }[] = [];
 
   /** Register one such helper (see nullProtoRenderings). */
@@ -17022,6 +17032,15 @@ export class Lowerer {
           k === ts.SyntaxKind.EqualsEqualsToken || k === ts.SyntaxKind.ExclamationEqualsToken) && isUnit(other)
       ) return "peel";
       if ((k === ts.SyntaxKind.QuestionQuestionToken || k === ts.SyntaxKind.BarBarToken) && par.left === p) return "peel";
+      // A strict comparison against a string VALUE that is not itself a read (a literal, a call) in a program that can hold the ABSENT string
+      // (lower-absent-str.ts): `undefined === ""` is false, so the read's union answers it where a checked extraction would trap. Against another
+      // read the comparison stays string-to-string (both sides hold the marker, scr_str_eq_u compares it by identity).
+      if (
+        (k === ts.SyntaxKind.EqualsEqualsEqualsToken || k === ts.SyntaxKind.ExclamationEqualsEqualsToken) &&
+        (this.typeOf(other).flags & ts.TypeFlags.StringLike) !== 0 && (this.typeOf(p as ts.Expression).flags & ts.TypeFlags.StringLike) !== 0 &&
+        !(ts.isIdentifier(other) || ts.isPropertyAccessExpression(other) || ts.isElementAccessExpression(other)) &&
+        this.absentStrRisk()
+      ) return "peel";
       // String `+` takes the wider value only against an operand that is not
       // itself a (possibly widened) read: `u + v` over two union-typed operands has no lowering.
       // `undefined + 1n` (and the other bigint operators): Node throws this
