@@ -420,9 +420,9 @@ bool scr_regex_test(ScrRegex *re, ScrStr *s) {
  * element, return value). The array's `execidx` byte makes scr_arr_release
  * call scr_regex_idx_died, so an address is never reused with a stale entry.
  * Open addressing, linear probing, backward-shift deletion. */
-/* `absent` is the row's PARTICIPATION mask: bit k set = capture group k did not participate (the row holds "" there,
+/* `absent` is the row's PARTICIPATION mask: bit k set = capture group k did not participate (the row holds the absent string there,
  * where Node's slot is undefined: SEMANTICS.md 51). NULL when every group participated. Owned by the entry. */
-typedef struct { ScrArr *key; double idx; uint8_t *absent; size_t nabs; } ScrIdxEnt;
+typedef struct { ScrArr *key; double idx; uint8_t *absent; size_t nabs; ScrStr *input; char *names; size_t names_len; } ScrIdxEnt;
 static ScrIdxEnt *scr_idx_tab = NULL;
 static size_t scr_idx_cap = 0, scr_idx_n = 0;
 
@@ -446,14 +446,20 @@ static void scr_regex_idx_died(void *arr) {
   while (scr_idx_tab[i].key != NULL && scr_idx_tab[i].key != arr) i = (i + 1) & (scr_idx_cap - 1);
   if (scr_idx_tab[i].key == NULL) return;
   free(scr_idx_tab[i].absent);
+  free(scr_idx_tab[i].names);
+  if (scr_idx_tab[i].input != NULL) scr_str_release(scr_idx_tab[i].input);
   scr_idx_tab[i].key = NULL;
   scr_idx_tab[i].absent = NULL;
+  scr_idx_tab[i].names = NULL;
+  scr_idx_tab[i].input = NULL;
   scr_idx_n--;
   size_t j = (i + 1) & (scr_idx_cap - 1);
   while (scr_idx_tab[j].key != NULL) { /* re-insert the cluster tail */
     ScrIdxEnt e = scr_idx_tab[j];
     scr_idx_tab[j].key = NULL;
     scr_idx_tab[j].absent = NULL;
+    scr_idx_tab[j].names = NULL;
+    scr_idx_tab[j].input = NULL;
     scr_idx_n--;
     scr_idx_insert_raw(e);
     j = (j + 1) & (scr_idx_cap - 1);
@@ -461,7 +467,7 @@ static void scr_regex_idx_died(void *arr) {
 }
 
 /* Records the row's `.index` and, when some group did not participate, which ones. */
-static void scr_regex_note_row(ScrArr *m, double idx, uint8_t *const *capture, int count) {
+static void scr_regex_note_row(ScrArr *m, double idx, uint8_t *const *capture, int count, ScrStr *input, const uint8_t *bc) {
   if (scr_idx_n * 2 >= scr_idx_cap) {
     size_t ncap = scr_idx_cap ? scr_idx_cap * 2 : 64;
     ScrIdxEnt *old = scr_idx_tab;
@@ -474,7 +480,17 @@ static void scr_regex_note_row(ScrArr *m, double idx, uint8_t *const *capture, i
     free(old);
   }
   scr_arr_idx_died_hook = scr_regex_idx_died;
-  ScrIdxEnt e = { m, idx, NULL, 0 };
+  ScrIdxEnt e = { m, idx, NULL, 0, scr_str_retain(input), NULL, 0 };
+  /* The group-name table (one NUL-terminated name plus the trailer per capture), copied so the entry owns it:
+   * `.groups` of a printed row is rebuilt from it and the row's own elements. */
+  if (lre_get_flags(bc) & LRE_FLAG_NAMED_GROUPS) {
+    const char *p0 = lre_get_groupnames(bc), *p = p0;
+    for (int k = 1; k < count; k++) p += strlen(p) + LRE_GROUP_NAME_TRAILER_LEN;
+    e.names_len = (size_t)(p - p0);
+    e.names = malloc(e.names_len ? e.names_len : 1);
+    if (!e.names) scr_regex_oom();
+    memcpy(e.names, p0, e.names_len);
+  }
   for (int k = 0; k < count; k++) {
     if (capture[2 * k] != NULL && capture[2 * k + 1] != NULL) continue;
     if (e.absent == NULL) {
@@ -530,13 +546,13 @@ ScrArr *scr_regex_exec(ScrStr *s, ScrRegex *re) {
     for (int k = 0; k < count; k++) {
       const uint8_t *cs = capture[2 * k], *ce = capture[2 * k + 1];
       if (cs == NULL || ce == NULL) {
-        scr_arr_push_ref(out, scr_str_new("", 0));
+        scr_arr_push_ref(out, scr_str_absent());
       } else {
         scr_arr_push_ref(
             out, scr_str_from_utf16(u, (int)((cs - ubase) >> 1), (int)((ce - ubase) >> 1)));
       }
     }
-    scr_regex_note_row(out, scr_last_exec_idx, capture, count);
+    scr_regex_note_row(out, scr_last_exec_idx, capture, count, s, bc);
   }
   free(capture);
   free(u);
@@ -654,13 +670,13 @@ static ScrArr *scr_regex_match_all_core(ScrStr *s, ScrRegex *re, ScrArr *indices
     for (int k = 0; k < capture_count; k++) {
       const uint8_t *cs = capture[2 * k], *ce = capture[2 * k + 1];
       if (cs == NULL || ce == NULL) {
-        scr_arr_push_ref(row, scr_str_new("", 0));
+        scr_arr_push_ref(row, scr_str_absent());
       } else {
         scr_arr_push_ref(
             row, scr_str_from_utf16(u, (int)((cs - ubase) >> 1), (int)((ce - ubase) >> 1)));
       }
     }
-    scr_regex_note_row(row, (double)start, capture, capture_count);
+    scr_regex_note_row(row, (double)start, capture, capture_count, s, bc);
     scr_arr_push_ref(out, row);
     if (indices != NULL) scr_arr_push_f64(indices, (double)start);
     if (for_replace && !global) {
@@ -2099,6 +2115,61 @@ static ScrStr *scr_regex_dynh_replace_fn(ScrStr *s, const ScrDyn *pat, const Scr
   ScrStr *res = scr_jb_finish(&out);
   if (!ok) { scr_str_release(res); return NULL; }
   return res;
+}
+
+/* A static match row as Node's exec-shaped result (dyn, +1): the row's strings (the absent string is undefined) plus index,
+ * input and groups from the side table. NULL when `m` is not a row a regex built. Used by the printer, which then prints
+ * the dyn tree exactly as it prints a dyn exec result. */
+ScrDyn *scr_regex_row_dyn_new(ScrArr *m) {
+  if (m == NULL || scr_idx_cap == 0) return scr_dyn_retain(scr_dyn_undefined());
+  size_t h = scr_idx_hash(m) & (scr_idx_cap - 1);
+  while (scr_idx_tab[h].key != NULL && scr_idx_tab[h].key != m) h = (h + 1) & (scr_idx_cap - 1);
+  if (scr_idx_tab[h].key == NULL) return scr_dyn_retain(scr_dyn_undefined());
+  const ScrIdxEnt *e = &scr_idx_tab[h];
+  const size_t n = (size_t)scr_arr_len(m);
+  ScrDyn *out = scr_dyn_new_arr();
+  for (size_t k = 0; k < n; k++) {
+    ScrStr *v = scr_arr_get_ref(m, (double)k); /* +1 */
+    scr_dyn_arr_push(out, scr_str_is_absent(v) ? scr_dyn_retain(scr_dyn_undefined()) : scr_dyn_new_str(v));
+    scr_str_release(v);
+  }
+  scr_dyn_arr_extra_set(out, "index", 5, scr_dyn_new_num(e->idx));
+  scr_dyn_arr_extra_set(out, "input", 5, scr_dyn_new_str(e->input));
+  ScrDyn *groups;
+  if (e->names == NULL) {
+    groups = scr_dyn_retain(scr_dyn_undefined());
+  } else {
+    groups = scr_dyn_new_obj();
+    groups->null_proto = true;
+    const char *p = e->names;
+    for (size_t k = 1; k < n; k++) {
+      const size_t glen = strlen(p);
+      if (glen > 0) {
+        ScrStr *v = scr_arr_get_ref(m, (double)k); /* +1 */
+        const bool part = !scr_str_is_absent(v);
+        ScrDyn *existing = scr_dyn_obj_get(groups, p, glen);
+        if (existing == NULL || (existing->kind == SCR_DYN_UNDEF && part)) {
+          scr_dyn_obj_set(groups, p, glen, part ? scr_dyn_new_str(v) : scr_dyn_retain(scr_dyn_undefined()));
+        }
+        scr_str_release(v);
+      }
+      p += glen + LRE_GROUP_NAME_TRAILER_LEN;
+    }
+  }
+  scr_dyn_arr_extra_set(out, "groups", 6, groups);
+  return out;
+}
+
+/* The row's captured subject (`m.input`), +1; "" for an array no regex built (a cast that lied about its type). */
+ScrStr *scr_regex_row_input_new(ScrArr *m) {
+  if (m != NULL && scr_idx_cap != 0) {
+    size_t h = scr_idx_hash(m) & (scr_idx_cap - 1);
+    while (scr_idx_tab[h].key != NULL) {
+      if (scr_idx_tab[h].key == m) return scr_str_retain(scr_idx_tab[h].input);
+      h = (h + 1) & (scr_idx_cap - 1);
+    }
+  }
+  return scr_str_new("", 0);
 }
 
 /* exec is reachable ONLY through the dyn dispatch unit (scr_dyn_invoke.c's
