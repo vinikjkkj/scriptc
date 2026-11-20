@@ -29,6 +29,7 @@ report() { # <result-dir>: top-N callgrind functions, non-collector Ir, cpu/wall
   [ "${REPORT_TOP:-40}" = 0 ] && return 0
   $BENCH_NODE "$BENCH_DIR/harness/report.mjs" "$1" --top "${REPORT_TOP:-40}" || echo "report.mjs failed (rc $?)"
 }
+labecho() { for _f in "$ART"/*.txt; do [ -f "$_f" ] || continue; echo "=== LABECHO $(basename "$_f") ($(wc -c < "$_f") bytes, first 30000 shown)"; head -c 30000 "$_f"; echo; echo "=== END LABECHO"; done; }
 arms=()
 if [ "$program" = rest ]; then
   for side in "${sides[@]}"; do
@@ -46,7 +47,7 @@ if [ "$program" = rest ]; then
   done
   [ ${#arms[@]} -gt 0 ] || { echo "no REST binary was built"; exit 1; }
   $BENCH_NODE "$BENCH_DIR/harness/rest-run.mjs" --out "$BENCH_WORK/result" --reps "$REPS" --smaps "${arms[@]}" | tee "$BENCH_WORK/result-summary.txt"
-  summary "$BENCH_WORK/result"; report "$BENCH_WORK/result"; exit 0
+  summary "$BENCH_WORK/result"; report "$BENCH_WORK/result"; labecho; exit 0
 fi
 store=${program#messaging-}
 bash "$BENCH_DIR/harness/mkbench.sh" "$store" messaging
@@ -78,3 +79,5 @@ $BENCH_NODE "$BENCH_DIR/harness/run.mjs" "${flags[@]}" "${arms[@]}" | tee "$BENC
 summary "$BENCH_WORK/result"
 # the figures that otherwise live only in the artifact, echoed to the job log (REPORT_TOP = how many functions per arm, 0 = off)
 report "$BENCH_WORK/result"
+# lab counters (extra_env pointing @OUT@/x.txt at a file) reach the log too: every *.txt under artifacts/, capped, between LABECHO markers
+labecho
