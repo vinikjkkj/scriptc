@@ -17641,6 +17641,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26135-a-typescript-function-as-a-rejection-reason-prints-its-stripped-source-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26135-a-typescript-function-as-a-rejection-reason-prints-its-stripped-source-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26136-an-unhandled-typescript-function-reason-exits-one-instead-of-aborting.ts": {
+   "order": [
+    "<repo>/tests/corpus/26136-an-unhandled-typescript-function-reason-exits-one-instead-of-aborting.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2614-trap-binding-later-writes.ts": {
    "order": [
     "<repo>/tests/corpus/2614-trap-binding-later-writes.ts"
