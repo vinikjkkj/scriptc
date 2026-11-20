@@ -17605,6 +17605,30 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26056-string-prototype-split-replace-search-normalize-borrowed-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26056-string-prototype-split-replace-search-normalize-borrowed-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26057-dyn-string-methods-and-members-of-their-results-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26057-dyn-string-methods-and-members-of-their-results-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26058-a-function-returning-an-any-array-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26058-a-function-returning-an-any-array-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26059-a-function-declaring-this-reads-its-receiver-through-call-and-apply-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26059-a-function-declaring-this-reads-its-receiver-through-call-and-apply-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2606-dynamic-import-cycle/main.ts": {
    "order": [
     "<repo>/tests/corpus/2606-dynamic-import-cycle/main.ts"
