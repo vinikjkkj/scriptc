@@ -17677,6 +17677,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26104-dyn-string-match-and-match-all-answer-exec-results-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26104-dyn-string-match-and-match-all-answer-exec-results-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26105-dyn-string-replace-with-a-function-replacer-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26105-dyn-string-replace-with-a-function-replacer-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2611-regex-named-groups-js.cjs": {
    "order": [
     "<repo>/tests/corpus/2611-regex-named-groups-js.cjs"

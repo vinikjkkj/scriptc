@@ -1565,6 +1565,40 @@ static ScrDyn *scr_regex_dyn_groups(const uint8_t *bc, const uint16_t *u, uint8_
   return g;
 }
 
+/* The exec-shaped result of one match: [whole, ...captures] with undefined for a group that did not participate, plus index, input,
+ * groups (and indices under /d). `capture` is scr_exec's output over `u`; `s` is the subject. +1. */
+static ScrDyn *scr_regex_dyn_result(ScrRegex *re, const uint8_t *bc, const uint16_t *u, ScrStr *s, uint8_t **capture) {
+  const uint8_t *ubase = (const uint8_t *)u;
+  const int count = lre_get_capture_count(bc);
+  ScrDyn *out = scr_dyn_new_arr();
+  for (int k = 0; k < count; k++) {
+    const uint8_t *cs = capture[2 * k], *ce = capture[2 * k + 1];
+    if (cs == NULL || ce == NULL) {
+      scr_dyn_arr_push(out, scr_dyn_retain(scr_dyn_undefined()));
+    } else {
+      scr_dyn_arr_push(out, scr_regex_dyn_slice(u, (int)((cs - ubase) >> 1), (int)((ce - ubase) >> 1)));
+    }
+  }
+  scr_dyn_arr_extra_set(out, "index", 5, scr_dyn_new_num((double)((capture[0] - ubase) >> 1)));
+  ScrDyn *input = scr_dyn_new_str(s);
+  scr_dyn_arr_extra_set(out, "input", 5, input);
+  scr_dyn_arr_extra_set(out, "groups", 6, scr_regex_dyn_groups(bc, u, capture, count, false));
+  if (scr_regex_dynh_has_flag(re, 'd')) {
+    ScrDyn *ind = scr_dyn_new_arr();
+    for (int k = 0; k < count; k++) {
+      const uint8_t *cs = capture[2 * k], *ce = capture[2 * k + 1];
+      if (cs == NULL || ce == NULL) {
+        scr_dyn_arr_push(ind, scr_dyn_retain(scr_dyn_undefined()));
+      } else {
+        scr_dyn_arr_push(ind, scr_regex_dyn_pair((int)((cs - ubase) >> 1), (int)((ce - ubase) >> 1)));
+      }
+    }
+    scr_dyn_arr_extra_set(ind, "groups", 6, scr_regex_dyn_groups(bc, u, capture, count, true));
+    scr_dyn_arr_extra_set(out, "indices", 7, ind);
+  }
+  return out;
+}
+
 static ScrDyn *scr_regex_dynh_exec(ScrRegex *re, ScrDyn *const *args, size_t argc) {
   /* ToString(argument): a missing argument is the string "undefined". */
   ScrStr *s = scr_dyn_string_coerce_js(argc > 0 ? args[0] : scr_dyn_undefined());
@@ -1574,43 +1608,188 @@ static ScrDyn *scr_regex_dynh_exec(ScrRegex *re, ScrDyn *const *args, size_t arg
   uint16_t *u = scr_to_utf16(s, &len);
   uint8_t **capture = scr_capture_alloc(bc);
   const int rc = scr_regex_run(re, bc, u, len, capture);
-  ScrDyn *out;
-  if (rc != 1) {
-    out = scr_dyn_new_null();
-  } else {
-    const uint8_t *ubase = (const uint8_t *)u;
-    const int count = lre_get_capture_count(bc);
-    out = scr_dyn_new_arr();
-    for (int k = 0; k < count; k++) {
-      const uint8_t *cs = capture[2 * k], *ce = capture[2 * k + 1];
-      if (cs == NULL || ce == NULL) {
-        scr_dyn_arr_push(out, scr_dyn_retain(scr_dyn_undefined()));
-      } else {
-        scr_dyn_arr_push(out, scr_regex_dyn_slice(u, (int)((cs - ubase) >> 1), (int)((ce - ubase) >> 1)));
-      }
-    }
-    scr_dyn_arr_extra_set(out, "index", 5, scr_dyn_new_num((double)((capture[0] - ubase) >> 1)));
-    ScrDyn *input = scr_dyn_new_str(s);
-    scr_dyn_arr_extra_set(out, "input", 5, input);
-    scr_dyn_arr_extra_set(out, "groups", 6, scr_regex_dyn_groups(bc, u, capture, count, false));
-    if (scr_regex_dynh_has_flag(re, 'd')) {
-      ScrDyn *ind = scr_dyn_new_arr();
-      for (int k = 0; k < count; k++) {
-        const uint8_t *cs = capture[2 * k], *ce = capture[2 * k + 1];
-        if (cs == NULL || ce == NULL) {
-          scr_dyn_arr_push(ind, scr_dyn_retain(scr_dyn_undefined()));
-        } else {
-          scr_dyn_arr_push(ind, scr_regex_dyn_pair((int)((cs - ubase) >> 1), (int)((ce - ubase) >> 1)));
-        }
-      }
-      scr_dyn_arr_extra_set(ind, "groups", 6, scr_regex_dyn_groups(bc, u, capture, count, true));
-      scr_dyn_arr_extra_set(out, "indices", 7, ind);
-    }
-  }
+  ScrDyn *out = rc != 1 ? scr_dyn_new_null() : scr_regex_dyn_result(re, bc, u, s, capture);
   free(capture);
   free(u);
   scr_str_release(s);
   return out;
+}
+
+/* s.matchAll(re) on a dyn receiver: the exec-shaped result of every match, drained eagerly into a dyn array (the lane's
+ * iterator convention, like map.entries()). A non-global regex throws Node's TypeError. The spec clones the regex with its
+ * lastIndex, so the drain starts there. */
+static ScrDyn *scr_regex_dynh_match_all(ScrStr *s, ScrRegex *re) {
+  uint8_t *bc = scr_regex_bc(re);
+  const int re_flags = lre_get_flags(bc);
+  if (!(re_flags & LRE_FLAG_GLOBAL)) {
+    static const char msg[] = "String.prototype.matchAll called with a non-global RegExp argument";
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+    return NULL;
+  }
+  const bool unicode = (re_flags & (LRE_FLAG_UNICODE | LRE_FLAG_UNICODE_SETS)) != 0;
+  int len;
+  uint16_t *u = scr_to_utf16(s, &len);
+  uint8_t **capture = scr_capture_alloc(bc);
+  const uint8_t *ubase = (const uint8_t *)u;
+  ScrDyn *out = scr_dyn_new_arr();
+  const double li = scr_regex_to_length(re->last_index);
+  int pos = li > (double)len ? len + 1 : (int)li;
+  while (pos <= len) {
+    if (scr_exec(capture, bc, u, pos, len) != 1) break;
+    const int start = (int)((capture[0] - ubase) >> 1), end = (int)((capture[1] - ubase) >> 1);
+    scr_dyn_arr_push(out, scr_regex_dyn_result(re, bc, u, s, capture));
+    pos = end == start ? scr_advance(u, len, end, unicode) : end;
+  }
+  free(capture);
+  free(u);
+  return out;
+}
+
+/* UTF-16 units in the UTF-8 bytes [p, p + n). */
+static size_t scr_regex_utf16_units(const char *p, size_t n) {
+  size_t units = 0;
+  for (size_t i = 0; i < n; i++) {
+    const unsigned char c = (unsigned char)p[i];
+    if ((c & 0xC0) == 0x80) continue;
+    units += c >= 0xF0 ? 2 : 1;
+  }
+  return units;
+}
+
+/* s.replace / s.replaceAll(pattern, replacer function) on a dyn receiver. Every match is found before the first call (the spec
+ * collects the results, then calls the replacer), and each call gets (match, ...captures, position, string[, groups]). +1, or NULL
+ * with an exception pending. */
+static ScrStr *scr_regex_dynh_replace_fn(ScrStr *s, const ScrDyn *pat, const ScrDyn *fn, bool all) {
+  ScrRegex *re = pat != NULL && pat->kind == SCR_DYN_HANDLE && pat->v.handle.tag == SCR_DYNH_REGEX ? (ScrRegex *)pat->v.handle.ptr : NULL;
+  ScrJsonBuf out;
+  scr_jb_init(&out);
+  ScrDyn *sd = scr_dyn_new_str(s);
+  if (re == NULL) {
+    ScrStr *ps = scr_dyn_string_coerce_js(pat != NULL ? pat : scr_dyn_undefined());
+    if (ps == NULL) { scr_dyn_release(sd); return NULL; }
+    size_t from = 0, i = 0;
+    const size_t plen = ps->len;
+    for (;;) {
+      size_t at;
+      if (plen == 0) {
+        at = i;
+      } else {
+        const char *hit = i + plen <= s->len ? (const char *)memchr(s->data + i, ps->data[0], s->len - i - plen + 1) : NULL;
+        if (!hit) break;
+        at = (size_t)(hit - s->data);
+        if (memcmp(s->data + at, ps->data, plen) != 0) { i = at + 1; continue; }
+      }
+      scr_jb_write(&out, s->data + from, at - from);
+      ScrDyn *args[3] = { scr_dyn_new_str(ps), scr_dyn_new_num((double)scr_regex_utf16_units(s->data, at)), sd };
+      ScrDyn *r = scr_dyn_call(fn, args, 3, "replace");
+      scr_dyn_release(args[0]);
+      scr_dyn_release(args[1]);
+      ScrStr *rs = r != NULL ? scr_dyn_string_coerce_js(r) : NULL;
+      if (r != NULL) scr_dyn_release(r);
+      if (rs == NULL) { scr_str_release(ps); scr_dyn_release(sd); return NULL; }
+      scr_jb_write(&out, rs->data, rs->len);
+      scr_str_release(rs);
+      from = at + plen;
+      if (!all) break;
+      if (plen == 0) {
+        if (at >= s->len) break;
+        size_t step = 1;
+        const unsigned char c = (unsigned char)s->data[at];
+        if (c >= 0xF0) step = 4; else if (c >= 0xE0) step = 3; else if (c >= 0xC0) step = 2;
+        if (at + step > s->len) step = s->len - at;
+        i = at + step;
+        scr_jb_write(&out, s->data + at, step);
+        from = i;
+      } else {
+        i = from;
+      }
+    }
+    scr_jb_write(&out, s->data + from, s->len - from);
+    scr_str_release(ps);
+    scr_dyn_release(sd);
+    return scr_jb_finish(&out);
+  }
+  uint8_t *bc = scr_regex_bc(re);
+  const int re_flags = lre_get_flags(bc);
+  const bool global = (re_flags & LRE_FLAG_GLOBAL) != 0, sticky = (re_flags & LRE_FLAG_STICKY) != 0;
+  if (all && !global) {
+    static const char msg[] = "String.prototype.replaceAll called with a non-global RegExp argument";
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+    scr_dyn_release(sd);
+    return NULL;
+  }
+  const bool unicode = (re_flags & (LRE_FLAG_UNICODE | LRE_FLAG_UNICODE_SETS)) != 0;
+  const int count = lre_get_capture_count(bc);
+  int len;
+  uint16_t *u = scr_to_utf16(s, &len);
+  const uint8_t *ubase = (const uint8_t *)u;
+  /* the matches, each as its capture pointers (they point into u) */
+  size_t nm = 0, mcap = 4;
+  uint8_t **caps = malloc(sizeof(uint8_t *) * 2 * (size_t)count * mcap);
+  if (!caps) abort();
+  uint8_t **capture = scr_capture_alloc(bc);
+  double li = scr_regex_to_length(re->last_index);
+  if (global || !sticky) li = 0;
+  int pos = li > (double)len ? len + 1 : (int)li;
+  if (!global && sticky && li > (double)len) re->last_index = 0;
+  while (pos <= len) {
+    if (scr_exec(capture, bc, u, pos, len) != 1) { if (!global && sticky) re->last_index = 0; break; }
+    const int start = (int)((capture[0] - ubase) >> 1), end = (int)((capture[1] - ubase) >> 1);
+    if (nm == mcap) {
+      mcap *= 2;
+      caps = realloc(caps, sizeof(uint8_t *) * 2 * (size_t)count * mcap);
+      if (!caps) abort();
+    }
+    memcpy(caps + nm * 2 * (size_t)count, capture, sizeof(uint8_t *) * 2 * (size_t)count);
+    nm++;
+    if (!global) { if (sticky) re->last_index = (double)end; break; }
+    pos = end == start ? scr_advance(u, len, end, unicode) : end;
+  }
+  if (global) re->last_index = 0;
+  free(capture);
+  int from16 = 0;
+  bool ok = true;
+  for (size_t m = 0; m < nm && ok; m++) {
+    uint8_t **c = caps + m * 2 * (size_t)count;
+    const int start = (int)((c[0] - ubase) >> 1), end = (int)((c[1] - ubase) >> 1);
+    if (start >= from16) {
+      ScrStr *gap = scr_str_from_utf16(u, from16, start);
+      scr_jb_write(&out, gap->data, gap->len);
+      scr_str_release(gap);
+    }
+    ScrDyn *argv[64];
+    ScrDyn **args = (size_t)count + 3 <= 64 ? argv : malloc(sizeof(ScrDyn *) * ((size_t)count + 3));
+    size_t na = 0;
+    for (int k = 0; k < count; k++) {
+      const uint8_t *cs = c[2 * k], *ce = c[2 * k + 1];
+      args[na++] = cs == NULL || ce == NULL ? scr_dyn_retain(scr_dyn_undefined())
+                                            : scr_regex_dyn_slice(u, (int)((cs - ubase) >> 1), (int)((ce - ubase) >> 1));
+    }
+    args[na++] = scr_dyn_new_num((double)start);
+    args[na++] = scr_dyn_retain(sd);
+    ScrDyn *groups = scr_regex_dyn_groups(bc, u, c, count, false);
+    if (groups->kind != SCR_DYN_UNDEF) args[na++] = groups; else scr_dyn_release(groups);
+    ScrDyn *r = scr_dyn_call(fn, args, na, "replace");
+    for (size_t k = 0; k < na; k++) scr_dyn_release(args[k]);
+    if (args != argv) free(args);
+    ScrStr *rs = r != NULL ? scr_dyn_string_coerce_js(r) : NULL;
+    if (r != NULL) scr_dyn_release(r);
+    if (rs == NULL) { ok = false; break; }
+    scr_jb_write(&out, rs->data, rs->len);
+    scr_str_release(rs);
+    from16 = end;
+  }
+  if (ok) {
+    ScrStr *tail = scr_str_from_utf16(u, from16 < len ? from16 : len, len);
+    scr_jb_write(&out, tail->data, tail->len);
+    scr_str_release(tail);
+  }
+  free(caps);
+  free(u);
+  scr_dyn_release(sd);
+  ScrStr *res = scr_jb_finish(&out);
+  if (!ok) { scr_str_release(res); return NULL; }
+  return res;
 }
 
 /* exec is reachable ONLY through the dyn dispatch unit (scr_dyn_invoke.c's
@@ -1622,7 +1801,14 @@ static ScrDyn *scr_regex_dynh_exec(ScrRegex *re, ScrDyn *const *args, size_t arg
 /* Deliberately NOT static: a file-local pointer with one constant store lets the
  * optimizer turn it into a flag and a direct call, which links exec back in. */
 ScrDyn *(*scr_regex_exec_dyn_fn)(ScrRegex *re, ScrDyn *const *args, size_t argc) = NULL;
-void scr_regex_dyn_exec_install(void) { scr_regex_exec_dyn_fn = &scr_regex_dynh_exec; }
+/* The dyn String methods built on the same machinery (match, matchAll, a function replacer) install with it. */
+ScrDyn *(*scr_regex_matchall_dyn_fn)(ScrStr *s, ScrRegex *re) = NULL;
+ScrStr *(*scr_regex_replace_fn_dyn_fn)(ScrStr *s, const ScrDyn *pat, const ScrDyn *fn, bool all) = NULL;
+void scr_regex_dyn_exec_install(void) {
+  scr_regex_exec_dyn_fn = &scr_regex_dynh_exec;
+  scr_regex_matchall_dyn_fn = &scr_regex_dynh_match_all;
+  scr_regex_replace_fn_dyn_fn = &scr_regex_dynh_replace_fn;
+}
 
 static ScrDyn *scr_regex_dynh_invoke(void *h, ScrDyn *self, const char *method,
                                      ScrDyn *const *args, size_t argc, const char *what) {
@@ -1826,6 +2012,8 @@ static bool dyn_strext_is(const char *m, const char *n) { return strcmp(m, n) ==
 /* scr_collate.c installs the CLDR root collation here; a program whose dyn localeCompare links it (moduleUsesCollate) always has it. */
 double (*scr_str_collate_hook)(const ScrStr *a, const ScrStr *b) = NULL;
 
+extern ScrDyn *(*scr_regex_matchall_dyn_fn)(ScrStr *s, ScrRegex *re);
+extern ScrStr *(*scr_regex_replace_fn_dyn_fn)(ScrStr *s, const ScrDyn *pat, const ScrDyn *fn, bool all);
 static ScrDyn *scr_dyn_str_ext_method(ScrDyn *recv, const char *m, ScrDyn *const *args, size_t argc, bool *handled) {
   *handled = true;
   ScrStr *s = (ScrStr *)recv->v.str;
@@ -1869,31 +2057,54 @@ static ScrDyn *scr_dyn_str_ext_method(ScrDyn *recv, const char *m, ScrDyn *const
     }
     return scr_dyn_new_num(cu);
   }
-  if (dyn_strext_is(m, "match")) {
-    /* Only the GLOBAL form: Node answers a plain array of the whole matches (or null). The non-global result carries index / input /
-     * groups and undefined for non-participating captures, none of which the runtime's match rows hold, so it keeps the fence. */
+  if (dyn_strext_is(m, "match") || dyn_strext_is(m, "search") || dyn_strext_is(m, "matchAll")) {
+    const bool is_match = dyn_strext_is(m, "match"), is_all = dyn_strext_is(m, "matchAll");
     ScrRegex *re = dyn_strext_regex(a0);
-    if (re == NULL) { *handled = false; return NULL; }
-    ScrStr *fl = scr_regex_flags(re);
-    bool g = fl != NULL && memchr(fl->data, 'g', fl->len) != NULL;
-    if (fl != NULL) scr_str_release(fl);
-    if (!g) { *handled = false; return NULL; }
-    ScrArr *rows = scr_regex_match_all(s, re);
-    if (rows == NULL) return NULL;
-    ScrDyn *d = scr_dyn_new_arr();
-    for (size_t i = 0; i < rows->len; i++) {
-      ScrArr *row = (ScrArr *)(uintptr_t)rows->data[i];
-      if (row->len > 0) scr_dyn_arr_push(d, scr_dyn_new_str((ScrStr *)(uintptr_t)row->data[0]));
+    bool owned = false;
+    if (re == NULL) {
+      /* RegExpCreate(argument): ToString of it (undefined is the empty pattern), with the g flag for matchAll */
+      ScrStr *pat = u0 ? scr_str_new("", 0) : scr_dyn_string_coerce_js(a0);
+      if (pat == NULL) return NULL;
+      ScrStr *fl = scr_str_new(is_all ? "g" : "", is_all ? 1 : 0);
+      re = scr_regex_new(pat, fl);
+      scr_str_release(pat);
+      scr_str_release(fl);
+      if (re == NULL) return NULL; /* the SyntaxError is pending */
+      owned = true;
     }
-    size_t n = d->v.arr.len;
-    scr_arr_release(rows);
-    if (n == 0) { scr_dyn_release(d); return scr_dyn_new_null(); }
-    return d;
-  }
-  if (dyn_strext_is(m, "search")) {
-    ScrRegex *re = dyn_strext_regex(a0);
-    if (re == NULL) { *handled = false; return NULL; }
-    return scr_dyn_new_num(scr_regex_search(s, re));
+    ScrDyn *res = NULL;
+    if (!is_match && !is_all) {
+      res = scr_dyn_new_num(scr_regex_search(s, re));
+    } else if (is_all) {
+      if (scr_regex_matchall_dyn_fn == NULL) scr_trap("scriptc: matchAll on a dynamic value reached a program that did not install it\n");
+      res = scr_regex_matchall_dyn_fn(s, re);
+    } else {
+      ScrStr *fl = scr_regex_flags(re);
+      const bool g = fl != NULL && memchr(fl->data, 'g', fl->len) != NULL;
+      if (fl != NULL) scr_str_release(fl);
+      if (!g) {
+        /* RegExpExec: Node's exec-shaped result (index, input, groups, undefined for a group that did not take part), or null */
+        if (scr_regex_exec_dyn_fn == NULL) scr_trap("scriptc: match on a dynamic value reached a program that did not install it\n");
+        ScrDyn *arg = recv;
+        res = scr_regex_exec_dyn_fn(re, &arg, 1);
+      } else {
+        /* The global form: a plain array of the whole matches (or null), lastIndex left 0 */
+        ScrArr *rows = scr_regex_match_all(s, re);
+        if (rows != NULL) {
+          ScrDyn *d = scr_dyn_new_arr();
+          for (size_t i = 0; i < rows->len; i++) {
+            ScrArr *row = (ScrArr *)(uintptr_t)rows->data[i];
+            if (row->len > 0) scr_dyn_arr_push(d, scr_dyn_new_str((ScrStr *)(uintptr_t)row->data[0]));
+          }
+          const size_t n = d->v.arr.len;
+          scr_arr_release(rows);
+          if (n == 0) { scr_dyn_release(d); d = scr_dyn_new_null(); }
+          res = d;
+        }
+      }
+    }
+    if (owned) scr_regex_release(re);
+    return res;
   }
   if (dyn_strext_is(m, "split")) {
     double limit = 4294967295.0;
@@ -1930,7 +2141,12 @@ static ScrDyn *scr_dyn_str_ext_method(ScrDyn *recv, const char *m, ScrDyn *const
   }
   if (dyn_strext_is(m, "replace") || dyn_strext_is(m, "replaceAll")) {
     const bool all = dyn_strext_is(m, "replaceAll");
-    if (a1 != NULL && a1->kind == SCR_DYN_FUNC) { *handled = false; return NULL; } /* a replacer function: per-match calls */
+    if (a1 != NULL && a1->kind == SCR_DYN_FUNC) { /* a replacer function: one call per match */
+      if (scr_regex_replace_fn_dyn_fn == NULL) scr_trap("scriptc: replace with a function on a dynamic value reached a program that did not install it\n");
+      ScrStr *fr = scr_regex_replace_fn_dyn_fn(s, a0 != NULL ? a0 : scr_dyn_undefined(), a1, all);
+      if (fr == NULL) return NULL; /* the replacer's (or the pattern's) exception is pending */
+      return dyn_strext_str(fr);
+    }
     ScrStr *rep = scr_dyn_string_coerce(a1 != NULL ? a1 : scr_dyn_undefined());
     if (rep == NULL) return NULL;
     ScrRegex *re = dyn_strext_regex(a0);

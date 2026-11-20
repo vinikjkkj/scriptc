@@ -11136,7 +11136,7 @@ export function moduleUsesRegex(mod: IrModule): boolean {
     // A dyn String method that scr_dyn_str_ext_hook (scr_regex.c) runs: the hook exists only where this unit links.
     if (kind === "dynInvoke") {
       const m = (v as { method?: unknown }).method;
-      if (m === "split" || m === "match" || m === "replace" || m === "replaceAll" || m === "search" || m === "normalize" || m === "codePointAt" ||
+      if (m === "split" || m === "match" || m === "matchAll" || m === "replace" || m === "replaceAll" || m === "search" || m === "normalize" || m === "codePointAt" ||
           m === "isWellFormed" || m === "toWellFormed" || m === "toLocaleLowerCase" || m === "toLocaleUpperCase" || m === "localeCompare") {
         found = true;
         return;

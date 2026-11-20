@@ -7767,6 +7767,35 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     // IS Node's semantics for every possible dyn value. Shared names would
     // need a receiver-kind dispatch — they keep the fence.
     if (DYN_STRING_ONLY_METHODS.has(access.name.text)) {
+      // The forms whose answer needs the runtime's exec-shaped results or per-match calls (match without /g, matchAll, a replacer that
+      // declares more than the matched text, the string forms of search / match) dispatch on the dyn receiver: the static lane's rows
+      // are honest slices with "" for a group that did not take part, and fence the trailing offset / string / groups parameters.
+      {
+        const nm = access.name.text;
+        const a0 = call.arguments[0], a1 = call.arguments[1];
+        const a0Kind = a0 === undefined ? undefined : L.mapTypeOf(L.typeOf(a0))?.kind;
+        const a0Global = a0 !== undefined && ts.isRegularExpressionLiteral(a0) && /\/[a-z]*g[a-z]*$/.test(a0.text);
+        const toDyn =
+          nm === "matchAll" ||
+          (nm === "match" && !(a0Kind === "regex" && a0Global)) ||
+          (nm === "search" && a0 !== undefined && a0Kind !== "regex") ||
+          ((nm === "replace" || nm === "replaceAll") && a1 !== undefined && (() => {
+            if ((ts.isArrowFunction(a1) || ts.isFunctionExpression(a1)) && a1.parameters.some((p) => p.dotDotDotToken !== undefined)) return true;
+            const k = L.mapTypeOf(L.typeOf(a1));
+            return k?.kind === "func" && (k.params.length > 1 || k.rest === true || k.restIn === true || a0Kind !== "regex" || (nm === "replaceAll" && !a0Global));
+          })());
+        if (toDyn && !call.arguments.some((a) => ts.isSpreadElement(a))) {
+          return {
+            kind: "dynInvoke",
+            recv,
+            method: nm,
+            calleeName: v8CallSite(access),
+            args: lowerDynCallArgs(L, call.arguments),
+            type: DYN,
+            loc: locOf(call),
+          };
+        }
+      }
       const checked = (): IrExpr => dynStringReceiver(L, recv, access);
       return lowerRegexMethodCall(L, call, access, checked) ??
         L.lowerStringReplaceStrCall(call, access, checked) ??
