@@ -803,7 +803,48 @@ static void scr_put_substitution(ScrJsonBuf *b, const uint16_t *u, int len,
 /* The shared match loop (the shape of quickjs's JS_RegExpDelete): search
  * from `pos`, copy the gap, emit the substitution, continue from the match
  * end when global — advancing zero-length matches per AdvanceStringIndex. */
+/* A pattern that is a run of plain ASCII bytes (no metacharacter, no escape) under flags that do not fold case (no i) and do not anchor at lastIndex (no y)
+ * matches exactly where the same bytes occur in the subject. UTF-8 never carries an ASCII byte inside a multi-byte sequence, so a byte search over the stored
+ * subject is exact. 'a'-'z', 'A'-'Z', digits, and a few punctuation marks that are not syntax outside a class qualify. */
+static bool scr_literal_pattern(const ScrRegex *re) {
+  const ScrRegex *p = re->proto ? re->proto : re;
+  const ScrStr *src = p->source, *fl = p->flags;
+  if (src->len == 0 || src->len > 16) return false;
+  for (size_t i = 0; i < fl->len; i++) if (fl->data[i] == 'i' || fl->data[i] == 'y') return false;
+  for (size_t i = 0; i < src->len; i++) {
+    unsigned char c = (unsigned char)src->data[i];
+    bool ok = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_' || c == '=' || c == ',' || c == ':' ||
+              c == ';' || c == '@' || c == '#' || c == '%' || c == '&' || c == '~' || c == '!' || c == '<' || c == '>' || c == '"' || c == '\'' || c == ' ' || c == '/';
+    if (!ok) return false;
+  }
+  return true;
+}
+
+/* Does `hay` hold `nd` (nlen >= 1)? memchr on the first byte, memcmp of the rest (memmem is not portable to the Windows target). */
+static bool scr_bytes_contain(const char *hay, size_t hlen, const char *nd, size_t nlen) {
+#ifdef SCR_OBJ_PLANT_BUG
+  if (SCR_OBJ_PLANT_BUG == 20) return false; /* the planted defect: a literal pattern is never found, so a replace that has matches returns its subject */
+#endif
+  const char *p = hay, *end = hay + hlen;
+  while (hlen >= nlen && (p = (const char *)memchr(p, nd[0], (size_t)(end - p) - (nlen - 1))) != NULL) {
+    if (memcmp(p + 1, nd + 1, nlen - 1) == 0) return true;
+    p++;
+    hlen = (size_t)(end - p);
+  }
+  return false;
+}
+
 static ScrStr *scr_replace_impl(ScrStr *s, ScrRegex *re, ScrStr *rep) {
+  /* No occurrence of a pure-literal pattern: the result is the subject itself (+1). Skips the UTF-16 conversion, the capture and output buffers and the
+   * engine, which dominated a global replace that finds nothing. The global flag still leaves lastIndex 0, as the engine path does. */
+  if (scr_literal_pattern(re)) {
+    const ScrStr *src = (re->proto ? re->proto : re)->source;
+    if (!scr_bytes_contain(s->data, s->len, src->data, src->len)) {
+      const ScrStr *fl = (re->proto ? re->proto : re)->flags;
+      for (size_t i = 0; i < fl->len; i++) if (fl->data[i] == 'g') { re->last_index = 0; break; }
+      return scr_str_retain(s);
+    }
+  }
   uint8_t *bc = scr_regex_bc(re);
   int re_flags = lre_get_flags(bc);
   bool global = (re_flags & LRE_FLAG_GLOBAL) != 0;
