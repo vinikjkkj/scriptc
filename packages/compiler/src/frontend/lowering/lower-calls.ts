@@ -6835,6 +6835,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         lowerIteratorStaticFence(L, expr, expr.expression) ??
         lowerObjectStaticCall(L, expr, expr.expression) ??
         lowerArrayProtoBorrowedCall(L, expr, expr.expression) ??
+        lowerMathMinMaxBorrowedCall(L, expr, expr.expression) ??
         lowerObjectFromEntriesCall(L, expr, expr.expression) ??
         lowerArrayFromCall(L, expr, expr.expression) ??
         L.lowerArrayMethodCall(expr, expr.expression) ??
@@ -16241,6 +16242,52 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverr
       if (ts.isFunctionExpression(i)) return i.getText().includes("this");
     }
     return true;
+  }
+
+  /** `Math.max.apply(thisArg, xs)` / `Math.min.apply(null, xs)` / `Math.max.call(thisArg, a, b)`: Math's functions never read their receiver,
+   * so the borrow is the spread call (`Math.max(...xs)`) with the receiver evaluated for its effects: the same runtime folds
+   * (math.maxArr / math.minArr over the array, math.max / math.min over scalars), NaN and signed-zero exact. `.apply` takes a number[] (or
+   * nothing); a list built any other way keeps the fence. */
+  function lowerMathMinMaxBorrowedCall(L: Lowerer, call: ts.CallExpression, access: ts.Expression): IrExpr | null {
+    if (!ts.isPropertyAccessExpression(access) || (access.name.text !== "apply" && access.name.text !== "call")) return null;
+    let fnExpr: ts.Expression = access.expression;
+    while (ts.isParenthesizedExpression(fnExpr)) fnExpr = fnExpr.expression;
+    if (!ts.isPropertyAccessExpression(fnExpr) || (fnExpr.name.text !== "max" && fnExpr.name.text !== "min")) return null;
+    if (!ts.isIdentifier(fnExpr.expression) || !L.isStdlibGlobal(fnExpr.expression, "Math")) return null;
+    if (call.arguments.length < 1 || call.arguments.some((a) => ts.isSpreadElement(a))) return null;
+    const isApply = access.name.text === "apply";
+    if (isApply && call.arguments.length > 2) return null;
+    const loc = locOf(call);
+    const name = fnExpr.name.text;
+    const arrFn: IrLibFn = name === "max" ? "math.maxArr" : "math.minArr";
+    const scalarFn: IrLibFn = name === "max" ? "math.max" : "math.min";
+    // `Math` itself as the receiver (`Math.min.apply(Math, xs)`): the namespace has no value form, and the receiver is never read.
+    const arg0 = call.arguments[0]!;
+    const thisIr: IrExpr = ts.isIdentifier(arg0) && L.isStdlibGlobal(arg0, "Math")
+      ? { kind: "unitLit", unit: "undefined", type: UNDEFINED_T, loc }
+      : L.lowerExpr(arg0);
+    let result: IrExpr;
+    if (isApply) {
+      if (call.arguments.length === 1) {
+        result = { kind: "numLit", value: name === "max" ? -Infinity : Infinity, type: F64, loc };
+      } else {
+        const lst = call.arguments[1]!;
+        let inner: ts.Expression = lst;
+        while (ts.isParenthesizedExpression(inner)) inner = inner.expression;
+        const src = ts.isArrayLiteralExpression(inner) ? L.lowerExprExpecting(lst, arrayOf(F64)) : L.lowerExpr(lst);
+        if (src.type.kind !== "array" || src.type.elem.kind !== "f64") return null;
+        result = { kind: "libCall", fn: arrFn, args: [src], type: F64, loc };
+      }
+    } else {
+      const ops = call.arguments.slice(1).map((a) => L.lowerExprExpecting(a, F64));
+      if (ops.length === 0) {
+        result = { kind: "numLit", value: name === "max" ? -Infinity : Infinity, type: F64, loc };
+      } else {
+        result = ops.reduce((acc, o) => ({ kind: "libCall", fn: scalarFn, args: [acc, o], type: F64, loc }) as IrExpr);
+      }
+    }
+    if (droppableStatic(thisIr)) return result;
+    return { kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: thisIr, loc }], result, type: F64, loc };
   }
 
   /** `Array.prototype.<m>` written as a member access (the stdlib's), or null: the method name. */
