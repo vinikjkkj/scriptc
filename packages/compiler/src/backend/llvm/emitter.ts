@@ -360,6 +360,8 @@ const LIB_FN_SYMS: Record<string, string> = {
   "num.toExponential": "scr_num_to_exponential",
   "num.toFixed0": "scr_num_to_fixed0",
   "num.toFixed": "scr_num_to_fixed",
+  "num.toExponentialDigits": "scr_num_to_exponential_digits",
+  "num.toPrecision": "scr_num_to_precision",
   "num.toStringRadix": "scr_num_to_str_radix",
   "num.sameValue": "scr_num_same_value",
   "intl.numFormatEnUs": "scr_intl_num_format_en_us",

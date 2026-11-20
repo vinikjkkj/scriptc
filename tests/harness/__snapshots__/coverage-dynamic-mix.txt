@@ -7,4 +7,4 @@ scriptc coverage tests/coverage-fixtures/dynamic-mix.ts
       ×1  '__island_eval' requires the embedded dynamic engine, which this build does not include               SC2010
       ×1  destructuring on 'any'-typed values runs in the embedded dynamic engine, which this build does not include  SC2011
       ×1  'Math.sqrt' runs in the embedded dynamic engine, which this build does not include                    SC2012
-      ×1  '.toPrecision()' on numbers runs in the embedded dynamic engine, which this build does not include    SC2012
+      ×1  '.at()' on strings runs in the embedded dynamic engine, which this build does not include             SC2012
