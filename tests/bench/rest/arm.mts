@@ -16,6 +16,7 @@ const { buildAppStateSyncKeyShareMessage } = await imp('protocol/push/app-state-
 const { bytesToHex } = await imp('transport/util')
 const SELF = '5511920387975'
 const PORT = Number(process.env.RR_PORT ?? 18800)
+const SLOW = Number(process.env.RR_SLOW ?? 1) // callgrind runs ~50x slower: stretches the login wait and the exit wait
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 const log = createWriteStream(join(OUT, 'app.log'))
 const t0 = Date.now()
@@ -75,7 +76,7 @@ async function req(method: string, path: string, body?: any) {
     results.push(rec); return rec
 }
 try {
-    const pipeline = await Promise.race([loginP, sleep(60000).then(() => { throw new Error('no login in 60s') })])
+    const pipeline = await Promise.race([loginP, sleep(60000 * SLOW).then(() => { throw new Error('no login in ' + 60 * SLOW + 's') })])
     times.login = Date.now() - t0
     const self = await server.createFakePeer({ jid: `${SELF}@s.whatsapp.net` }, pipeline)
     const keys = Array.from({ length: 3 }, (_, i) => ({ keyId: new Uint8Array(16).fill(i + 1), keyData: new Uint8Array(32).fill(i + 9),
@@ -119,7 +120,7 @@ try {
     for (const g of ['/store/messages?thread=55119101000@s.whatsapp.net', '/store/threads', '/store/counts', '/events']) await req('GET', g)
     await req('POST', '/s/drive/shutdown')
 } catch (e) { results.push({ driverError: String(e) }) }
-for (let i = 0; i < 40 && exited === null; i++) await sleep(250)
+for (let i = 0; i < 40 * SLOW && exited === null; i++) await sleep(250)
 if (exited === null) { results.push({ note: 'app did not exit after shutdown; killing by pid', pid: client.pid }); client.kill('SIGTERM'); await sleep(1000) }
 writeFileSync(join(OUT, 'http.json'), JSON.stringify(results, null, 1))
 writeFileSync(join(OUT, 'stanzas.json'), JSON.stringify(stanzas, null, 1))
