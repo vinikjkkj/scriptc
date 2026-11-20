@@ -3,6 +3,7 @@
 # Env in: WT_DIR (candidate tree, built), WT_BASE_DIR (optional base tree, built), BACKEND, VARIANTS (plain/census), REPS, NODE_REF, IR (callgrind messages, 0 = off),
 #         MASSIF (massif messages, 0 = off), LAYOUT (none | order: instrumented build -> run once with SIGUSR1 where the work starts -> order.txt -> ordered build, A/B'd against plain),
 #         EXTRA_ENV ("K=V;K=V", exported for the build AND the run; @LAB@ = the candidate tree, @OUT@ = the artifacts dir, @BENCHSRC@ = the repo root of the dispatched ref).
+#         REPORT_TOP (functions per arm echoed to the log by report.mjs, default 40, 0 = off), PERF (1 = perf record per arm).
 # Everything a run writes goes under $BENCH_WORK: out/<side>/ (logs, binaries), result/ (pmon, smaps, stdout/stderr, summary.md), artifacts/ (layout files and anything extra_env points at).
 set -u
 . "$(dirname "${BASH_SOURCE[0]}")/env.sh"
@@ -24,6 +25,10 @@ sides=(base cand); [ -z "${WT_BASE_DIR:-}" ] && sides=(cand)
 summary() { # <result-dir>
   { echo "### $program ($BACKEND, layout=$LAYOUT)"; echo "candidate \`$(cat "$GITHUB_WORKSPACE/wt.sha" 2>/dev/null)\`$( [ -f "$GITHUB_WORKSPACE/wt-base.sha" ] && echo " base \`$(cat "$GITHUB_WORKSPACE/wt-base.sha")\`")"; echo; cat "$1/summary.md"; echo; echo '```'; cat "$BENCH_WORK"/out/*/build-summary.txt 2>/dev/null; echo '```'; } >> "${GITHUB_STEP_SUMMARY:-/dev/null}"
 }
+report() { # <result-dir>: top-N callgrind functions, non-collector Ir, cpu/wall medians vs Node, perf leaves; never fails the job
+  [ "${REPORT_TOP:-40}" = 0 ] && return 0
+  $BENCH_NODE "$BENCH_DIR/harness/report.mjs" "$1" --top "${REPORT_TOP:-40}" || echo "report.mjs failed (rc $?)"
+}
 arms=()
 if [ "$program" = rest ]; then
   for side in "${sides[@]}"; do
@@ -41,7 +46,7 @@ if [ "$program" = rest ]; then
   done
   [ ${#arms[@]} -gt 0 ] || { echo "no REST binary was built"; exit 1; }
   $BENCH_NODE "$BENCH_DIR/harness/rest-run.mjs" --out "$BENCH_WORK/result" --reps "$REPS" "${arms[@]}" | tee "$BENCH_WORK/result-summary.txt"
-  summary "$BENCH_WORK/result"; exit 0
+  summary "$BENCH_WORK/result"; report "$BENCH_WORK/result"; exit 0
 fi
 store=${program#messaging-}
 bash "$BENCH_DIR/harness/mkbench.sh" "$store" messaging
@@ -67,5 +72,8 @@ flags=(--store "$store" --out "$BENCH_WORK/result" --reps "$REPS" --smaps)
 [ "${NODE_REF:-true}" = true ] && flags+=(--node)
 [ "${IR:-0}" != 0 ] && flags+=(--ir "$IR")
 [ "${MASSIF:-0}" != 0 ] && flags+=(--massif "$MASSIF")
+[ "${PERF:-0}" = 1 ] && flags+=(--perf)
 $BENCH_NODE "$BENCH_DIR/harness/run.mjs" "${flags[@]}" "${arms[@]}" | tee "$BENCH_WORK/result-summary.txt"
 summary "$BENCH_WORK/result"
+# the figures that otherwise live only in the artifact, echoed to the job log (REPORT_TOP = how many functions per arm, 0 = off)
+report "$BENCH_WORK/result"

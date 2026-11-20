@@ -5,7 +5,7 @@ run-name: bench ${{ inputs.target }}${{ inputs.base != '' && format(' vs {0}', i
 # (tests/perf/dyncensus) and the clientbench transport come from the dispatched ref. One job per program: build once per (sha, program, codegen flags) and reuse the cached
 # lowering for flag-only variants (SCRIPTC_PROF_CFLAGS is not part of the lowering key), then run the binaries beside Node against service containers and upload the numbers.
 # CPU seconds on shared runners are noise: the only CPU figure produced here is callgrind Ir. Any slice dispatches it:
-#   gh workflow run bench.yml -R vinikjkkj/scriptc --ref bench -f target=<branch or FULL sha> [-f base=<branch or FULL sha>] -f programs="messaging-redis rest" -f reps=3 [-f ir=250] [-f extra_env='K=V;K=V'] [-f layout=order]
+#   gh workflow run bench.yml -R vinikjkkj/scriptc --ref bench -f target=<branch or FULL sha> [-f base=<branch or FULL sha>] -f programs="messaging-redis rest" -f reps=3 [-f ir=250] [-f extra_env='K=V;K=V'] [-f layout=order] [-f report=40] [-f perf=1]
 # Lab-only code (census headers, probe patches) goes on a lab/<name> branch used as `target`; nothing lab-only lands on main. See docs/ci-method.md "bench.yml".
 on:
   workflow_dispatch:
@@ -49,6 +49,14 @@ on:
         description: "K=V;K=V exported for the build AND the run. @LAB@ = the candidate tree, @OUT@ = the artifacts dir (uploaded), @BENCHSRC@ = the dispatched ref. E.g. SCRIPTC_PROF_CFLAGS=-include @LAB@/tests/perf/dyncensus/scr_dyn_census.h -I@LAB@/tests/perf/dyncensus;SCR_DYNCEN_OUT=@OUT@/dyn.txt"
         required: false
         default: ""
+      report:
+        description: "Functions per arm that the job LOG prints (top callgrind functions by exclusive Ir with call counts, total/collector/non-collector Ir, cpu_self/wall medians vs Node and vs base, base-to-cand deltas); 0 = off. The log carries these figures because artifact downloads can be unavailable"
+        required: false
+        default: "40"
+      perf:
+        description: "1: also one perf record per arm and for Node (self samples), top leaves printed to the log; installs linux-tools on the runner"
+        required: false
+        default: "0"
       layout:
         description: "none, or order: build instrumented (--layout-profile), run once with SIGUSR1 where the work starts, make order.txt, build ordered, and A/B ordered against plain per compiler"
         required: false
@@ -183,6 +191,13 @@ jobs:
       - name: Tools (valgrind for the Ir and massif runs)
         if: ${{ inputs.ir != '0' || inputs.massif != '0' }}
         run: sudo apt-get update -q && sudo apt-get install -y -q valgrind
+      - name: Tools (perf for the leaf profile)
+        if: ${{ inputs.perf == '1' }}
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q linux-tools-common "linux-tools-$(uname -r)" || sudo apt-get install -y -q linux-tools-generic
+          sudo sysctl -w kernel.perf_event_paranoid=-1 kernel.kptr_restrict=0
+          perf --version
       # The provenance cache holds the zapo source the compiler maps (fetched by commit from github).
       - uses: actions/cache@v4
         with:
@@ -206,6 +221,8 @@ jobs:
           MASSIF: ${{ inputs.massif }}
           LAYOUT: ${{ inputs.layout }}
           EXTRA_ENV: ${{ inputs.extra_env }}
+          REPORT_TOP: ${{ inputs.report }}
+          PERF: ${{ inputs.perf }}
         run: bash tests/bench/harness/job.sh "${{ matrix.program }}"
       # every file a run writes: logs, pmon and smaps json, stdout/stderr, callgrind/massif output, layout profile and order.txt, whatever extra_env pointed @OUT@ at
       - uses: actions/upload-artifact@v4
