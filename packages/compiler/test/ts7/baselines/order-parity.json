@@ -17402,6 +17402,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25951-a-thrown-plain-object-keeps-its-members-at-the-catch-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25951-a-thrown-plain-object-keeps-its-members-at-the-catch-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25953-a-thrown-plain-object-crosses-an-async-boundary-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25953-a-thrown-plain-object-crosses-an-async-boundary-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2596-net-arg-ladders.cjs": {
    "order": [
     "<repo>/tests/corpus/2596-net-arg-ladders.cjs"
