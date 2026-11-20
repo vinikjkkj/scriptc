@@ -18198,6 +18198,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26480-class-member-lookups-by-computed-name-and-untyped-property-writes-across-many-classes-like-node.js": {
+   "order": [
+    "<repo>/tests/corpus/26480-class-member-lookups-by-computed-name-and-untyped-property-writes-across-many-classes-like-node.js"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2649-top-level-await-pending.ts": {
    "order": [
     "<repo>/tests/corpus/2649-top-level-await-pending.ts"
