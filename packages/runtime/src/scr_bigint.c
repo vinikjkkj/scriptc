@@ -696,6 +696,8 @@ ScrBigInt *scr_big_from_f64(double v) {
   }
   int sign = v < 0 ? -1 : (v > 0 ? 1 : 0);
   double mag = fabs(v);
+  /* An integral double below 2^63 converts to uint64 exactly, and two limbs hold it: no peeling loop, no intermediate bigints. */
+  if (mag < 9223372036854775808.0) return scr_big_from_u64_signed((uint64_t)mag, sign);
   ScrBigInt *r = scr_big_alloc(4);
   memset(r->limbs, 0, r->cap * sizeof(uint32_t));
   /* Peel 32 bits at a time off the top; ldexp/fmod keep every step exact for
