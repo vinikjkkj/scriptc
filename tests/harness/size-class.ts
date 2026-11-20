@@ -2471,7 +2471,12 @@ export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 72_950 : null;
  * 136,022 record is the 224 between that and 136,022). The always-linked growth is scr_json.c's hash index of a large dyn object (the hash, build, probe, the appender's
  * and remover's hooks and the tail-called big-table read), the per-descriptor hash of a large class's member table and its probe, the registry-position memo painted once for
  * scr_dyn_objinst_class_of, and the keyed [[Get]] fast path. The hello-world class stayed inside its tolerance. It buys -10% Ir on messaging-redis and -3.2% on messaging-mysql. */
-export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 138_262 : null;
+/* 2026-11-19 (col1, the collector pass visits dyn children without an indirect call): RE-RECORDED 138_262 -> 139_462 (+1_200). SOURCE: the local zig 0.16.0 windows-gnu cross build
+ * (SCRIPTC_CC=zigcc SCRIPTC_TARGET=x86_64-windows-gnu --backend c, the PE .text VirtualSize) of this probe on the base (stack3 aeef7af96) is 138,102 and on this change 139,462 (+1,360);
+ * the same lane reproduces the hello-world 73,190 on the base, and the lane has reproduced CI's figure exactly before (cpu2 above). The growth is scr_json.c's two phase
+ * instances of the dyn trace (markGray's and scanBlack's element and member loops with the visit body inlined: ~450 B each) and the two out-of-line tails they share with the
+ * generic trace; the hello-world program LOSES 96 B (73,094) and stays inside its tolerance. It buys -1.575% Ir on messaging-redis (CI bench 44637354113, A/A -0.002%). */
+export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 139_462 : null;
 
 /* 2026-10-21 -- THE LINK NOW COLLECTS DEAD SECTIONS, and every figure above moves.
  * The numbers in this block, and the two ceilings (STATIC_CLASS_MAX and
