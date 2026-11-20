@@ -1326,7 +1326,45 @@ static inline void scr_dyn_obj_idx_drop(ScrDyn *obj) {
   }
 }
 
+/* LAB CENSUS (mt1, never lands): shape of every own-member lookup. */
+static uint64_t cen_n[7][12]; /* [len bucket][0 miss, 1..10 hit pos bucket (0,1,2,3,4-5,6-7,8-15,16-31,32-127,128+), 11 = memo-predicted hit] */
+static uint64_t cen_cmp[7], cen_memo_hit[7], cen_memo_stale[7], cen_calls[7], cen_litptr[7];
+static struct { const char *k; uint32_t pos; } cen_memo[4096];
+static ScrDyn *cen_impl(const ScrDyn *d, const char *key, size_t key_len);
+static void cen_dump(void) {
+  const char *p = getenv("SCR_OBJCEN_OUT");
+  if (!p) return;
+  FILE *f = fopen(p, "w");
+  if (!f) return;
+  static const char *lb[7] = {"0", "1-2", "3-4", "5-8", "9-16", "17-31", "32+"};
+  fprintf(f, "objcen: per len bucket: calls, miss, hit-pos buckets [0,1,2,3,4-5,6-7,8-15,16-31,32-127,128+], total entries compared (est), memo hit (predicted pos verified), memo stale-but-hit-elsewhere\n");
+  for (int i = 0; i < 7; i++) {
+    fprintf(f, "len %s calls %llu miss %llu hits", lb[i], (unsigned long long)cen_calls[i], (unsigned long long)cen_n[i][0]);
+    for (int j = 1; j <= 10; j++) fprintf(f, " %llu", (unsigned long long)cen_n[i][j]);
+    fprintf(f, " cmp %llu memohit %llu memostale %llu\n", (unsigned long long)cen_cmp[i], (unsigned long long)cen_memo_hit[i], (unsigned long long)cen_memo_stale[i]);
+  }
+  fclose(f);
+}
+__attribute__((constructor)) static void cen_init(void) { atexit(cen_dump); }
 ScrDyn *scr_dyn_obj_get(const ScrDyn *d, const char *key, size_t key_len) {
+  const uint32_t len = d->v.obj.len;
+  const int lbk = len == 0 ? 0 : len <= 2 ? 1 : len <= 4 ? 2 : len <= 8 ? 3 : len <= 16 ? 4 : len <= 31 ? 5 : 6;
+  cen_calls[lbk]++;
+  if (len >= 32) return cen_impl(d, key, key_len);
+  const ScrDynEntry *ents = d->v.obj.entries;
+  uint32_t pos = ~0u;
+  for (uint32_t i = 0; i < len; i++) if (SCR_DYN_KEY_EQ(&ents[i], key, key_len)) { pos = i; break; }
+  cen_cmp[lbk] += pos == ~0u ? len : pos + 1;
+  size_t h = (size_t)(((uintptr_t)key * 0x9E3779B97F4A7C15ull) >> 52);
+  if (pos == ~0u) cen_n[lbk][0]++;
+  else {
+    cen_n[lbk][pos == 0 ? 1 : pos == 1 ? 2 : pos == 2 ? 3 : pos == 3 ? 4 : pos <= 5 ? 5 : pos <= 7 ? 6 : pos <= 15 ? 7 : pos <= 31 ? 8 : pos <= 127 ? 9 : 10]++;
+    if (cen_memo[h].k == key && cen_memo[h].pos == pos) cen_memo_hit[lbk]++; else cen_memo_stale[lbk]++;
+    cen_memo[h].k = key; cen_memo[h].pos = pos;
+  }
+  return cen_impl(d, key, key_len);
+}
+static ScrDyn *cen_impl(const ScrDyn *d, const char *key, size_t key_len) {
   /* A COUNT-DOWN WALK THAT KEEPS ITS COUNTER. With 24-byte entries clang rewrites a counted loop into "advance until the end pointer", whose setup
    * is len * 24 (an lea and a shift) on every call where the 32-byte entry was one shift; this is the hottest loop over dyn objects, so that one
    * instruction per call showed up as +0.75% on a lookup-dominated micro. The empty asm makes the counter a live value the loop must keep, so the
