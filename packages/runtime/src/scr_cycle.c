@@ -2298,16 +2298,34 @@ __attribute__((noinline)) void scr_wl_grow(void) {
   if (!scr_wl) scr_cyc_oom();
 }
 
+/* LAB CENSUS (mt1, never lands): how big is each root's gray walk, and is the biggest walk of a pass the same object as the last pass's? */
+static struct { uint64_t passes, visits, roots, grayroots, top1_same, top1_bigger_half, top1_sum, top1_ge1000, passes_ge1000; void *prev_top1; uint64_t prev_top1_size, same_size_eq; } cen;
+static uint64_t cen_pass_visits, cen_top1; static void *cen_top1_obj;
+static void cen_dump(void) {
+  const char *p = getenv("SCR_COLCEN_OUT");
+  if (!p) return;
+  FILE *f = fopen(p, "w");
+  if (!f) return;
+  fprintf(f, "colcen: passes %llu roots(candidates) %llu gray-walk roots %llu mg visits %llu top1 sum %llu | passes where top1 walk > half of the pass's visits %llu | passes where top1 root == previous pass's top1 root %llu (of those with the same size %llu) | passes with top1 >= 1000 nodes %llu\n",
+    (unsigned long long)cen.passes, (unsigned long long)cen.roots, (unsigned long long)cen.grayroots, (unsigned long long)cen.visits, (unsigned long long)cen.top1_sum,
+    (unsigned long long)cen.top1_bigger_half, (unsigned long long)cen.top1_same, (unsigned long long)cen.same_size_eq, (unsigned long long)cen.passes_ge1000);
+  fclose(f);
+}
+__attribute__((constructor)) static void cen_init(void) { atexit(cen_dump); }
 static void scr_mark_gray(void *obj) {
   ScrCycHdr *h = scr_cyc_hdr(obj);
   size_t floor = scr_wl_n;
   if (h->color == SCR_CYC_GRAY) return;
   h->color = SCR_CYC_GRAY;
   scr_wl_push(obj);
+  uint64_t walked = 0;
   while (scr_wl_n > floor) {
     void *o = scr_wl[--scr_wl_n];
+    walked++;
     scr_cyc_trace_call(scr_cyc_hdr(o), o, scr_cyc_mg_visit_fn, NULL);
   }
+  cen.grayroots++; cen_pass_visits += walked;
+  if (walked > cen_top1) { cen_top1 = walked; cen_top1_obj = obj; }
 }
 
 /* NOT always_inline: inlined into the scan phase it grew scr_collect_cycles by about 150 bytes and measured slower on redis (v4); out of line it is one call per black subtree. */
@@ -2405,6 +2423,12 @@ void scr_collect_cycles(void) {
   scr_nroots = out;
   SCR_CS_PHASE_END(mark);
   SCR_CS_ADD(roots, scr_nroots);
+  cen.passes++; cen.roots += scr_nroots; cen.visits += cen_pass_visits; cen.top1_sum += cen_top1;
+  if (cen_top1 * 2 > cen_pass_visits && cen_pass_visits > 0) cen.top1_bigger_half++;
+  if (cen_top1 >= 1000) cen.passes_ge1000++;
+  if (cen_top1_obj != NULL && cen_top1_obj == cen.prev_top1) { cen.top1_same++; if (cen_top1 == cen.prev_top1_size) cen.same_size_eq++; }
+  cen.prev_top1 = cen_top1_obj; cen.prev_top1_size = cen_top1;
+  cen_pass_visits = 0; cen_top1 = 0; cen_top1_obj = NULL;
 
   SCR_CS_PHASE_BEGIN();
   for (size_t i = 0; i < scr_nroots; i++) scr_scan(scr_roots[i]);
