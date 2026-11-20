@@ -748,12 +748,14 @@ static bool scr_timer_before(const ScrTimer *a, const ScrTimer *b) {
  * Registered on the first arm, not at init: atexit is LIFO, so a hook
  * registered after scr_init's audit runs before it. Init cannot name this
  * unit, because the audit's own unit is link-gated in test subsets. */
+static void (*scr_pool_teardown_fn)(void); /* defined with its loop hook below */
 #ifdef SCR_RC_AUDIT
 static bool scr_abandon_registered = false;
 static void scr_abandon_at_exit(void) {
   if (scr_exit_code_hint_get() == 0) return;
   scr_timers_teardown();
   scr_children_teardown();
+  if (scr_pool_teardown_fn != NULL) scr_pool_teardown_fn();
 }
 void scr_abandon_arm(void) {
   if (scr_abandon_registered) return;
@@ -3582,6 +3584,25 @@ void scr_loop_set_watch(bool (*pending)(void), void (*dispatch)(void), int (*pol
   scr_watch_pollfd_fn = pollfd;
 }
 
+/* The worker-pool hook (scr_pool.c, registered by its first submit): the
+ * net hook's shape plus `wait` (the Windows bounded sleep that the pool's
+ * wake Event ends early) and `teardown` (drop undelivered jobs at exit).
+ * Byte-identical loop behavior when unset. */
+static bool (*scr_pool_pending_fn)(void) = NULL;
+static void (*scr_pool_dispatch_fn)(void) = NULL;
+static int (*scr_pool_pollfd_fn)(void) = NULL;
+static bool (*scr_pool_wait_fn)(double) = NULL;
+static void (*scr_pool_teardown_fn)(void) = NULL;
+
+void scr_loop_set_pool(bool (*pending)(void), void (*dispatch)(void), int (*pollfd)(void),
+                       bool (*wait)(double ms), void (*teardown)(void)) {
+  scr_pool_pending_fn = pending;
+  scr_pool_dispatch_fn = dispatch;
+  scr_pool_pollfd_fn = pollfd;
+  scr_pool_wait_fn = wait;
+  scr_pool_teardown_fn = teardown;
+}
+
 /* The stream hook (scr_stream.c, when linked): `pending` keeps the loop
  * alive while deferred stream ticks exist, `dispatch` drains them at the
  * TOP of every turn — before the events/net stations, the closest
@@ -3918,6 +3939,19 @@ static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed, bool cjs_ent
       }
       if (scr_ready_len > 0) continue;
     }
+    /* Worker-pool completions (scr_pool.c, when linked): Node's poll phase
+     * delivers the threadpool's finished jobs here, one MakeCallback scope
+     * per job (ticks, then promise jobs, between them) — the net hook's
+     * exact station. */
+    if (scr_pool_dispatch_fn != NULL) {
+      scr_pool_dispatch_fn();
+      if (scr_exc_pending()) return false; /* uncaught throw in a callback */
+      if (scr_loop_stopping()) {
+        rejection_failed = scr_loop_reject_stop;
+        break;
+      }
+      if (scr_ready_len > 0) continue;
+    }
     /* WebRTC dispatch (scr_wrtc.c, when linked): one pump of the
      * ICE/DTLS/SCTP transport with the loop's clock, then the events that
      * pump produced - open, message, close, and the four on*statechange
@@ -3965,7 +3999,8 @@ static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed, bool cjs_ent
           (scr_net_pending_fn != NULL && scr_net_pending_fn()) ||
           (scr_dgram_pending_fn != NULL && scr_dgram_pending_fn()) ||
           (scr_wrtc_pending_fn != NULL && scr_wrtc_pending_fn()) ||
-          (scr_watch_pending_fn != NULL && scr_watch_pending_fn());
+          (scr_watch_pending_fn != NULL && scr_watch_pending_fn()) ||
+          (scr_pool_pending_fn != NULL && scr_pool_pending_fn());
       if (held) {
         scr_children_poll();
         if (scr_exc_pending()) return false; /* uncaught throw in a listener */
@@ -3988,6 +4023,7 @@ static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed, bool cjs_ent
     bool net = scr_net_pending_fn != NULL && scr_net_pending_fn();
     bool dgram = scr_dgram_pending_fn != NULL && scr_dgram_pending_fn();
     bool watch = scr_watch_pending_fn != NULL && scr_watch_pending_fn();
+    bool pool = scr_pool_pending_fn != NULL && scr_pool_pending_fn();
     /* A peer connection with an answer applied is UNSETTLED work: the DTLS
      * handshake is in flight, or the channel is open and a message may
      * arrive, and either way the program is not finished. Folded into
@@ -4002,7 +4038,7 @@ static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed, bool cjs_ent
      * Children follow the same rule: an unref'd child is still REAPED
      * while the loop runs (kids drives the sweeps and sleeps above) but
      * only reffed ones keep the process alive. */
-    if (scr_reffed_timers == 0 && scr_reffed_immediates == 0 && !scr_children_reffed_pending() && !io && !events && !net && !dgram && !watch) break;
+    if (scr_reffed_timers == 0 && scr_reffed_immediates == 0 && !scr_children_reffed_pending() && !io && !events && !net && !dgram && !watch && !pool) break;
 #ifdef SCR_LOOP_WHY
     scr_loop_why_report(kids, io, events, net, dgram, watch);
 #endif
@@ -4068,11 +4104,11 @@ static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed, bool cjs_ent
        * on EINTR), so they re-impose a coarser cap — bounded Ctrl-C and
        * socket latency during a fetch, without the reap-granularity
        * cost. */
-      else if ((evw || net || dgram || watch) && due > now + SCR_SIGNAL_POLL_MS) due = now + SCR_SIGNAL_POLL_MS;
+      else if ((evw || net || dgram || watch || pool) && due > now + SCR_SIGNAL_POLL_MS) due = now + SCR_SIGNAL_POLL_MS;
       scr_io_poll_fn(due > now ? due - now : 0);
       now = scr_now_ms();
       if (scr_ready_len > 0) continue; /* io callbacks woke fibers */
-    } else if (evw || net || dgram || watch) {
+    } else if (evw || net || dgram || watch || pool) {
 #ifdef _WIN32
       /* The win32 arm: no poll(2), so the sleep is a capped nanosleep and
        * the next turn's dispatch does the work — signal flags (set by the
@@ -4087,7 +4123,10 @@ static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed, bool cjs_ent
       if (evw && due > now + SCR_SIGNAL_POLL_MS) due = now + SCR_SIGNAL_POLL_MS;
       if ((net || dgram || watch) && due > now + SCR_CHILD_POLL_MS) due = now + SCR_CHILD_POLL_MS;
       if (kids && due > now + SCR_CHILD_POLL_MS) due = now + SCR_CHILD_POLL_MS;
-      if (due > now) {
+      if (pool && !evw && !net && !dgram && !watch && !kids && scr_pool_wait_fn != NULL) {
+        /* Pool completions only: the wake Event ends the wait. */
+        if (due > now) (void)scr_pool_wait_fn(due - now);
+      } else if (due > now) {
         /* Readiness-driven when the poller backend can be: the wait ends
          * when a socket becomes ready instead of at the cap, so a
          * sequential request/response round trip stops paying a full
@@ -4109,7 +4148,7 @@ static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed, bool cjs_ent
        * events are pending); unrepresentable children keep the ~1ms reap cap
        * instead. Dispatch happens at the next turn's top — the poll only
        * decides how long to sleep. */
-      struct pollfd fds[6];
+      struct pollfd fds[7];
       int nfds = 0;
       int evfds[2];
       int nev = evw && scr_events_pollfds_fn != NULL ? scr_events_pollfds_fn(evfds) : 0;
@@ -4158,6 +4197,17 @@ static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed, bool cjs_ent
         int cfd = scr_children_wake_fd();
         if (cfd >= 0) {
           fds[nfds].fd = cfd;
+          fds[nfds].events = POLLIN;
+          fds[nfds++].revents = 0;
+        } else if (due > now + SCR_CHILD_POLL_MS) {
+          due = now + SCR_CHILD_POLL_MS;
+        }
+      }
+      if (pool) {
+        /* The pool's wake fd: a finished job ends the sleep at once. */
+        int pfd = scr_pool_pollfd_fn != NULL ? scr_pool_pollfd_fn() : -1;
+        if (pfd >= 0) {
+          fds[nfds].fd = pfd;
           fds[nfds].events = POLLIN;
           fds[nfds++].revents = 0;
         } else if (due > now + SCR_CHILD_POLL_MS) {
@@ -4271,6 +4321,7 @@ static bool scr_loop_run_inner(ScrPromise *top_level, bool resumed, bool cjs_ent
    * registry's references (their listeners never fire — the process is
    * exiting, Node's behavior; the OS reparents the children). */
   scr_children_teardown();
+  if (scr_pool_teardown_fn != NULL) scr_pool_teardown_fn();
   scr_fibers_abandoned = scr_fibers_live;
   scr_note_abandoned_fibers(scr_fibers_abandoned);
   return rejection_failed;

@@ -11407,11 +11407,23 @@ void scr_crypto_random_fill_deferred(ScrBytes *b, double offset, double size,
 /* crypto.randomInt(min, max): a uniform integer in [min, max) by
  * rejection sampling; Node's range errors verbatim. */
 double scr_crypto_random_int(double min, double max);
+/* The two halves of randomInt: Node's range ladder (throws; true when the
+ * range is admissible, `*range_out` = max - min) and the PURE draw the
+ * worker pool runs (scr_crypto_async.c). */
+bool scr_crypto_random_int_check(double min, double max, uint64_t *range_out);
+double scr_crypto_random_int_draw(double min, uint64_t range);
+/* The promisified forms ride the worker pool (scr_crypto_async.c): the
+ * promise is PENDING on return and settles in the poll station. */
 ScrPromise *scr_crypto_random_int_async(double min, double max);
 /* PBKDF2-HMAC-SHA256 (RFC 8018) over scr_crypto_hmac_raw. Borrowed
  * inputs; +1 result. Throws Node's range errors. */
 ScrBytes *scr_crypto_pbkdf2_sha256(const ScrBytes *password, const ScrBytes *salt,
                                    double iterations, double keylen);
+/* PBKDF2's two halves: Node's range ladder (throws) and the PURE
+ * derivation over raw pointers (no runtime object touched). */
+bool scr_crypto_pbkdf2_sha256_check(double iterations, double keylen);
+bool scr_crypto_pbkdf2_sha256_fill(const uint8_t *password, size_t pwlen, const uint8_t *salt, size_t saltlen,
+                                   unsigned long iters, uint8_t *out, size_t want);
 ScrPromise *scr_crypto_pbkdf2_sha256_async(const ScrBytes *password, const ScrBytes *salt,
                                            double iterations, double keylen); /* +1 */
 /* HKDF-HMAC-SHA256 (RFC 5869) over the same one-shot HMAC. Borrowed
@@ -13224,6 +13236,33 @@ void scr_watch_install(void);
 /* The loop-side registration (scr_async.c, always linked) — the net
  * hook's exact shape, one more nullable slot set. */
 void scr_loop_set_watch(bool (*pending)(void), void (*dispatch)(void), int (*pollfd)(void));
+
+/* ── the worker pool (scr_pool.c; design: docs/sonnet-queue.md "thr1 design")
+ * ONE generic work queue behind every async API that Node runs on libuv's
+ * threadpool. `run` executes on a WORKER thread and may touch ONLY the
+ * job's raw memory (malloc'd bytes, buffer data pointers, plain ints) and
+ * pure libc: no scr_* allocation, no retain/release (the refcounts are
+ * NON-ATOMIC), no throw, no ScrStr/ScrDyn/ScrPromise. `done` runs on the
+ * MAIN thread in the loop's poll station, after the whole tick+microtask
+ * checkpoint of the previous callback: it settles the promise or calls the
+ * callback, releases every buffer the main thread retained before submit,
+ * and frees the job. ran=false means the job is being DROPPED at shutdown:
+ * release only, never call JS. scr_work_submit is main-thread only. */
+typedef struct ScrWork ScrWork;
+struct ScrWork {
+  ScrWork *next; /* pool-owned linkage */
+  void (*run)(ScrWork *w);
+  void (*done)(ScrWork *w, bool ran);
+};
+void scr_work_submit(ScrWork *w);
+/* The same, with the consumer's estimate of the job's CPU cost in
+ * microseconds: a cheap job runs inline at submit (see scr_pool.c). */
+void scr_work_submit_cost(ScrWork *w, double est_us);
+/* The loop-side registration (scr_async.c, always linked). `wait` is the
+ * Windows bounded sleep (NULL elsewhere: the poll(2) fd serves); teardown
+ * drops every undelivered job (done(w,false)) after running ones finish. */
+void scr_loop_set_pool(bool (*pending)(void), void (*dispatch)(void), int (*pollfd)(void),
+                       bool (*wait)(double ms), void (*teardown)(void));
 
 /* ── node:test (scr_test.c — compiled only when the program imports it;
  * design note atop the file). Registration builds the test tree while
