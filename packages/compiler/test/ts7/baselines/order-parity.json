@@ -17570,6 +17570,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26091-concatenated-strings-in-the-interning-band-stay-equal-across-every-split-and-drop-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26091-concatenated-strings-in-the-interning-band-stay-equal-across-every-split-and-drop-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/26010-sorts-are-stable-and-n-log-n-over-strings-numbers-objects-and-typed-arrays-like-node.ts": {
    "order": [
     "<repo>/tests/corpus/26010-sorts-are-stable-and-n-log-n-over-strings-numbers-objects-and-typed-arrays-like-node.ts"
