@@ -6,7 +6,7 @@ import { protoDataAssignStmt } from "./lower-protodata.js";
 import { classOfValueNode, lateInstallMark, lateInstallStmt, protoSlotOf, protoSlotWriteStmt } from "./lower-protoslots.js";
 import { protoTabReadChain, protoTabWriteStmt } from "./lower-prototab.js";
 import { strictAt } from "./lower-protoescape.js";
-import { isShadowableMethodRead, lowerUnboundClassMethodValue, dynSymbolKeyOf, classSymbolBag } from "./lower-exprs.js";
+import { isShadowableMethodRead, lowerUnboundClassMethodValue, dynSymbolKeyOf, classSymbolBag, castDynBinding, markCastDynLocal } from "./lower-exprs.js";
 import * as ts from "../ts7/adapter.js";
 import type { Lowerer } from "./lowerer.js";
 import { lowerCastViewOverrideWrite } from "./lower-instoverride.js";
@@ -5231,11 +5231,19 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     // poisons, still declare the local when its type is representable, so
     // later references to this name don't produce cascading errors.
     let init: IrExpr;
+    let castDyn = false;
     try {
       const tableExpect = isLet ? null : uniformTupleArrayExpectation(L, decl);
-      init = tableExpect
-        ? L.lowerExprExpecting(decl.initializer, tableExpect)
-        : L.lowerExpr(decl.initializer);
+      // `const x = e as C` over a catch binding, used only as a member receiver: x holds the payload's dyn value (castDynBinding).
+      let castOperand: ts.Expression = decl.initializer;
+      while (ts.isParenthesizedExpression(castOperand)) castOperand = castOperand.expression;
+      const castInit = castDynBinding(L, decl) ? L.lowerExpr((castOperand as ts.AsExpression).expression) : null;
+      if (castInit !== null && castInit.type.kind === "dyn") castDyn = true;
+      init = castDyn && castInit !== null
+        ? castInit
+        : tableExpect
+          ? L.lowerExprExpecting(decl.initializer, tableExpect)
+          : L.lowerExpr(decl.initializer);
       if (process.env["SCRIPTC_TABLE_TRACE"] && ts.isIdentifier(decl.name)) {
         process.stderr.write(`TABLE ${decl.name.text}: expect=${tableExpect ? L.fmt(tableExpect) : "-"} got=${init.type.kind}
 `);
@@ -5559,6 +5567,7 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     if (declSymbol && namespaceConditionalOf(L, declSymbol)) type = init.type;
     // `const f = x.m` of a replaceable method: the read is the actual value, so the binding holds it as the checked-dynamic kind.
     if (decl.initializer !== undefined && init.type.kind === "dyn" && isShadowableMethodRead(L, decl.initializer)) type = init.type;
+    if (castDyn) type = DYN;
     // `const o = { ...x ?? {} }` whose spread source is checked-dynamic: the literal lowered to a dyn object (a copy with the source's own keys), so the
     // binding is that object even where the checker describes a closed record: the program deletes and adds keys the record has no slot for.
     if (decl.initializer !== undefined && init.type.kind === "dyn" && isJsSourceFile(decl.getSourceFile()) && type?.kind === "record") {
@@ -5751,6 +5760,7 @@ export function lowerVarDecl(L: Lowerer, decl: ts.VariableDeclaration, isLet: bo
     }
     init = L.coerceInto(decl.initializer, init, type);
     const local = L.declareLocal(decl.name, decl.name.text, type, isLet);
+    if (castDyn) markCastDynLocal(L, local.id);
     L.noteKeyRiskBinding(local.id, init);
     if (classPin !== null) {
       L.ctx.classPins.set(local.id, classPin);
