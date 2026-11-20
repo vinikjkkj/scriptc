@@ -57,6 +57,32 @@
 #include <stdio.h>
 #include <stdlib.h> /* arc4random_buf off win32 (scr_win.c declares the shim) */
 
+typedef struct {
+  ScrWork w;
+  ScrBytes *buf;
+  uint8_t *p;
+  size_t len;
+  ScrClosure *done;
+} ScrRandFillJob;
+
+/* WORKER thread: raw bytes only (arc4random_buf is thread-safe on glibc
+ * >= 2.36, macOS, and over RtlGenRandom on Windows). */
+static void scr_rf_run(ScrWork *w) {
+  ScrRandFillJob *j = (ScrRandFillJob *)w;
+  arc4random_buf(j->p, j->len);
+}
+
+/* MAIN thread, poll station. */
+static void scr_rf_done(ScrWork *w, bool ran) {
+  ScrRandFillJob *j = (ScrRandFillJob *)w;
+  ScrClosure *done = j->done;
+  ScrBytes *buf = j->buf;
+  free(j);
+  if (ran) ((void (*)(ScrClosure *))done->fn)(done);
+  scr_closure_release(done);
+  scr_bytes_release(buf);
+}
+
 void scr_crypto_random_fill_deferred(ScrBytes *b, double offset, double size,
                                      bool has_size, ScrClosure *done /*moves*/) {
   char recv[48];
@@ -115,6 +141,16 @@ void scr_crypto_random_fill_deferred(ScrBytes *b, double offset, double size,
     scr_closure_release(done);
     return;
   }
-  arc4random_buf(b->data + off, len);
-  scr_set_immediate(done); /* takes ownership; the handle is not exposed */
+  /* The fill runs on the worker pool (scr_pool.c). The main thread retains
+   * the buffer BEFORE submit, so the worker's pointer cannot dangle, and
+   * releases it in scr_rf_done; the worker touches nothing refcounted. */
+  ScrRandFillJob *j = malloc(sizeof *j);
+  if (j == NULL) scr_bytes_io_oom();
+  j->w.run = scr_rf_run;
+  j->w.done = scr_rf_done;
+  j->buf = scr_bytes_retain(b);
+  j->p = b->data + off;
+  j->len = len;
+  j->done = done; /* moves */
+  scr_work_submit_cost(&j->w, (double)len / 1000.0); /* arc4random: ~1 byte/ns */
 }

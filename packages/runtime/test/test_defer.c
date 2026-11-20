@@ -61,20 +61,43 @@ double scr_set_immediate(ScrClosure *cb /*moves*/) {
   return (double)qlen;
 }
 
+/* The worker pool's contract, standing in for scr_pool.c: a submitted job
+ * is owned by the queue; draining runs it (here on the calling thread) and
+ * delivers it with ran=true; teardown drops it with ran=false. */
+static ScrWork *wqueue[QCAP];
+static size_t wlen;
+
+void scr_work_submit_cost(ScrWork *w, double est_us) {
+  (void)est_us;
+  if (wlen >= QCAP) abort();
+  wqueue[wlen++] = w;
+}
+
+void scr_bytes_io_oom(void) { abort(); }
+
 static size_t drain(void) {
-  size_t n = qlen;
-  for (size_t i = 0; i < n; i++) {
+  size_t n = qlen + wlen;
+  for (size_t i = 0; i < qlen; i++) {
     ScrClosure *c = queue[i];
     ((void (*)(ScrClosure *))c->fn)(c);
     scr_closure_release(c);
   }
   qlen = 0;
+  size_t nw = wlen;
+  wlen = 0;
+  for (size_t i = 0; i < nw; i++) {
+    wqueue[i]->run(wqueue[i]);
+    wqueue[i]->done(wqueue[i], true);
+  }
   return n;
 }
 
 static void teardown(void) {
   for (size_t i = 0; i < qlen; i++) scr_closure_release(queue[i]);
   qlen = 0;
+  size_t nw = wlen;
+  wlen = 0;
+  for (size_t i = 0; i < nw; i++) wqueue[i]->done(wqueue[i], false);
 }
 
 /* ── the compiled shape of a lifted deferral thunk ──────────────────────
@@ -160,7 +183,7 @@ int main(void) {
   scr_crypto_random_fill_deferred(target, 4, 99, true, make_thunk("never", target));
   CHECK(scr_exc_pending());
   scr_exc_clear();
-  CHECK(qlen == 0);
+  CHECK(qlen + wlen == 0);
   CHECK(ran == 0);
   CHECK(scr_closure_live_count() == clo0);
   CHECK(scr_box_live_count() == box0);
@@ -169,17 +192,17 @@ int main(void) {
   scr_crypto_random_fill_deferred(target, -1, 1, true, make_thunk("never", target));
   CHECK(scr_exc_pending());
   scr_exc_clear();
-  CHECK(qlen == 0 && scr_closure_live_count() == clo0 && scr_box_live_count() == box0);
+  CHECK(qlen + wlen == 0 && scr_closure_live_count() == clo0 && scr_box_live_count() == box0);
 
   scr_crypto_random_fill_deferred(target, 9, 0, true, make_thunk("never", target));
   CHECK(scr_exc_pending());
   scr_exc_clear();
-  CHECK(qlen == 0 && scr_closure_live_count() == clo0 && scr_box_live_count() == box0);
+  CHECK(qlen + wlen == 0 && scr_closure_live_count() == clo0 && scr_box_live_count() == box0);
 
   scr_crypto_random_fill_deferred(target, 0, 2147483648.0, true, make_thunk("never", target));
   CHECK(scr_exc_pending());
   scr_exc_clear();
-  CHECK(qlen == 0 && scr_closure_live_count() == clo0 && scr_box_live_count() == box0);
+  CHECK(qlen + wlen == 0 && scr_closure_live_count() == clo0 && scr_box_live_count() == box0);
 
   /* ── 4. the fill itself ─────────────────────────────────────────────
    * Bytes outside [offset, offset+size) are untouched, and the callback
@@ -189,7 +212,7 @@ int main(void) {
   scr_crypto_random_fill_deferred(target, 2, 4, true, make_thunk("filled", target));
   CHECK(!scr_exc_pending());
   CHECK(ran == 0); /* deferred, never called in line */
-  CHECK(qlen == 1);
+  CHECK(qlen + wlen == 1);
   CHECK(target->data[0] == 0xAA && target->data[1] == 0xAA);
   CHECK(target->data[6] == 0xAA && target->data[7] == 0xAA);
   CHECK(drain() == 1);
@@ -201,6 +224,7 @@ int main(void) {
   for (size_t i = 0; i < 8; i++) target->data[i] = 0;
   scr_crypto_random_fill_deferred(target, 5, 0, false, make_thunk("to-end", target));
   CHECK(!scr_exc_pending());
+  CHECK(drain() == 1); /* the fill runs on the pool; the stand-in runs it here */
   CHECK(target->data[4] == 0); /* below the offset: untouched */
   {
     /* The tail is drawn: 3 bytes are zero together with probability
@@ -210,7 +234,6 @@ int main(void) {
     for (size_t i = 5; i < 8; i++) if (target->data[i] != 0) nz++;
     CHECK(nz > 0);
   }
-  CHECK(drain() == 1);
 
   /* A ZERO-length draw calls back IN LINE — Node's own quirk (a size of
    * 0, an empty buffer, or an offset at the end all answer synchronously;
@@ -220,13 +243,25 @@ int main(void) {
   scr_crypto_random_fill_deferred(target, 8, 0, true, make_thunk("empty", target));
   CHECK(!scr_exc_pending());
   CHECK(ran == 1);   /* called in line */
-  CHECK(qlen == 0);  /* and never queued */
+  CHECK(qlen + wlen == 0);  /* and never queued */
   CHECK(scr_closure_live_count() == clo0 && scr_box_live_count() == box0);
   ran = 0;
   scr_crypto_random_fill_deferred(target, 0, 0, false, make_thunk("empty-default", target));
-  CHECK(scr_exc_pending() == false && ran == 0 && qlen == 1); /* len 8: deferred */
+  CHECK(scr_exc_pending() == false && ran == 0 && qlen + wlen == 1); /* len 8: deferred */
   CHECK(drain() == 1 && ran == 1);
   CHECK(scr_closure_live_count() == clo0 && scr_box_live_count() == box0);
+
+  /* A fill still in flight when the loop tears down is DROPPED: the job's
+   * retained buffer and the callback thunk are released, the callback never
+   * runs, and the buffer's bytes were never written. */
+  for (size_t i = 0; i < 8; i++) target->data[i] = 0x11;
+  ran = 0;
+  scr_crypto_random_fill_deferred(target, 0, 8, true, make_thunk("dropped-fill", target));
+  CHECK(qlen + wlen == 1);
+  teardown();
+  CHECK(ran == 0 && target->data[0] == 0x11);
+  CHECK(scr_closure_live_count() == clo0 && scr_box_live_count() == box0);
+  CHECK(scr_bytes_live_count() == byt1);
 
   scr_bytes_release(target);
   CHECK(scr_bytes_live_count() == byt0);
