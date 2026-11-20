@@ -1837,7 +1837,11 @@ double scr_math_fround(double x);
  * sweep, and 20M random bit patterns -- comparing BITS, so a +0 answered
  * where -0 was due is a failure. Zero mismatches, with a positive control
  * proving the comparator sees a -0 error when one is there. */
-#ifdef SCR_NO_FASTARM
+/* A translation unit compiled for SSE4.1 (every x86-64 program and runtime object is: cc.ts compiles at -march=x86-64-v2) takes libm's floor, ceil
+ * and trunc, which clang lowers to ONE roundsd: exact for every input, -0 and NaN included, and shorter than the magic-number sequence below (feMul
+ * micro, 800k calls, Haswell: 1,368 M -> 771 M instructions, 8M calls 2.50 s -> 1.60 s). The sequence below is for builds without SSE4.1 (aarch64
+ * and any foreign compiler setup). */
+#if defined(SCR_NO_FASTARM) || defined(__SSE4_1__)
 static inline double scr_trunc(double x) { return trunc(x); }
 static inline double scr_floor(double x) { return floor(x); }
 static inline double scr_ceil(double x) { return ceil(x); }
