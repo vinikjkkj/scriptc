@@ -20509,87 +20509,16 @@ class LlEmitter {
       throw new LlvmUnsupportedError(`libCall:${e.fn}`, e.loc);
     }
     if (e.fn === "math.floor" || e.fn === "math.trunc" || e.fn === "math.ceil") {
-      // scr_math_floor/trunc/ceil, NOT llvm.floor.f64 and friends. The
-      // intrinsic lowers to a call into mingw's statically linked software
-      // rounding on the baseline target (no SSE4.1, so no roundsd), and the
-      // runtime function is an int64-domain leaf that answers the same
-      // double for every input. This lane cannot inline a diamond at an
-      // expression site the way the C lane does, but the call still pays:
-      // measured on zapo's feMul carry chain, 681 -> 536 executed
-      // instructions, -21.29%, against -29.07% for the inlined C arm.
-      //
-      // INLINED, since the call is what the paragraph above prices: it also forces every live double out of its register, because the SysV
-      // x86-64 ABI has no callee-saved xmm register (the sixteen limbs of feMul's carry chain are spilled and reloaded around each of the 32
-      // calls). The bodies are the runtime's own (scr_floor / scr_ceil / scr_trunc, scr_runtime.h).
-      //
-      // trunc: for x inside the int64 window the cast truncates toward zero and copysign restores the -0 it loses; outside the window (|x| >= 2^63,
-      // an infinity, a NaN) the answer is x itself, because every double that large is already an integer and a NaN stays itself. Written as selects
-      // (a cast of an out-of-window value is poison in LLVM, but only the arm the select drops reads it).
-      //
-      // floor and ceil: round through the ROUND-TO-NEAREST magic number (x + 1.5*2^52 - 1.5*2^52 is x rounded to the nearest integer, ties to even,
-      // for |x| < 2^51), with no int<->float conversion on the serial carry chain, then back off by one when the rounding went the wrong way. The
-      // rest (2^51 <= |x|, an infinity, a NaN) is the runtime function's: a branch, because it is a CALL and must not run on the hot path.
+      // The LLVM rounding intrinsics: Math.floor / ceil / trunc are exactly llvm.floor.f64 / ceil / trunc for every input (-0, NaN and the
+      // infinities answer themselves). On the x86-64 baseline every program is compiled at (x86-64-v2, SSE4.1, see cc.ts X86_V2_*) each is ONE
+      // roundsd, with no call, so no live double is forced out of its register around feMul's 32 carry links and no SSE2 magic-number sequence
+      // is needed; on aarch64 they are frintm / frintp / frintz. (Before the v2 baseline the intrinsic was a call into mingw's software rounding
+      // and this site inlined a 12-17 instruction sequence instead.)
       const v = this.emitExpr(e.args[0]!);
-      const x = v.name;
-      this.declare(`declare double @llvm.copysign.f64(double, double)`);
-      if (e.fn === "math.trunc") {
-        const lo = B.tmp();
-        const hi = B.tmp();
-        const inr = B.tmp();
-        const n = B.tmp();
-        const r = B.tmp();
-        const cs = B.tmp();
-        const t = B.tmp();
-        B.line(`${lo} = fcmp oge double ${x}, ${f64Lit(-9223372036854775808)}`);
-        B.line(`${hi} = fcmp olt double ${x}, ${f64Lit(9223372036854775808)}`);
-        B.line(`${inr} = and i1 ${lo}, ${hi}`);
-        B.line(`${n} = fptosi double ${x} to i64`);
-        B.line(`${r} = sitofp i64 ${n} to double`);
-        B.line(`${cs} = call double @llvm.copysign.f64(double ${r}, double ${x})`);
-        B.line(`${t} = select i1 ${inr}, double ${cs}, double ${x}`);
-        return { name: t, type: e.type };
-      }
-      const fl = e.fn === "math.floor";
-      const slot = B.slot();
-      B.entryAllocas.push(`${slot} = alloca double`);
-      const ab = B.tmp();
-      const inr = B.tmp();
-      this.declare(`declare double @llvm.fabs.f64(double)`);
-      B.line(`${ab} = call double @llvm.fabs.f64(double ${x})`);
-      B.line(`${inr} = fcmp olt double ${ab}, ${f64Lit(2251799813685248)}`);
-      const lf = B.newLabel("rnd.f");
-      const ls = B.newLabel("rnd.s");
-      const lj = B.newLabel("rnd.j");
-      B.condBr(inr, lf, ls);
-      B.startBlock(lf);
-      {
-        const sum = B.tmp();
-        const r = B.tmp();
-        const over = B.tmp();
-        const step = B.tmp();
-        const adj = B.tmp();
-        const cs = B.tmp();
-        B.line(`${sum} = fadd double ${x}, ${f64Lit(6755399441055744)}`);
-        B.line(`${r} = fsub double ${sum}, ${f64Lit(6755399441055744)}`);
-        B.line(`${over} = fcmp ${fl ? "ogt" : "olt"} double ${r}, ${x}`);
-        B.line(`${step} = ${fl ? "fsub" : "fadd"} double ${r}, ${f64Lit(1)}`);
-        B.line(`${adj} = select i1 ${over}, double ${step}, double ${r}`);
-        B.line(`${cs} = call double @llvm.copysign.f64(double ${adj}, double ${x})`);
-        B.line(`store double ${cs}, ptr ${slot}`);
-      }
-      B.br(lj);
-      B.startBlock(ls);
-      {
-        const fn = fl ? "scr_math_floor" : "scr_math_ceil";
-        const sv = B.tmp();
-        this.declare(`declare double @${fn}(double)`);
-        B.line(`${sv} = call double @${fn}(double ${x})`);
-        B.line(`store double ${sv}, ptr ${slot}`);
-      }
-      B.br(lj);
-      B.startBlock(lj);
+      const intr = e.fn === "math.floor" ? "floor" : e.fn === "math.ceil" ? "ceil" : "trunc";
+      this.declare(`declare double @llvm.${intr}.f64(double)`);
       const t = B.tmp();
-      B.line(`${t} = load double, ptr ${slot}`);
+      B.line(`${t} = call double @llvm.${intr}.f64(double ${v.name})`);
       return { name: t, type: e.type };
     }
     if (e.fn === "math.log") {
