@@ -2882,7 +2882,7 @@ function lowerOptionalDefaultArg(
    * toSorted takes its shallow snapshot INSIDE the helper, after the receiver
    * and comparator expressions have both been evaluated, then sorts and
    * returns that copy without touching the receiver. The loop is a
-   * binary-free INSERTION sort: stable (equal-comparing elements keep their
+   * stable merge sort (runs of 8 by insertion, then bottom-up merges; see buildMergeSortStmts): stable (equal-comparing elements keep their
    * source order, which is what Node's stable TimSort produces for any
    * consistent comparator) and JS-faithful on the comparator contract — an
    * element moves left only while cmp(left, v) > 0, so a NaN or 0 result holds
@@ -3021,20 +3021,131 @@ function lowerOptionalDefaultArg(
     return name;
   }
 
-/** The insertion-sort loop, from existing IR nodes:
+/** The shared stable O(n log n) body of every comparator sort, built from existing IR nodes (so both emitters get it with no emitter change):
    *
-   *   n = a.length;
-    *   for (i = 1; i < n; i++) {
-    *     v = a[i]; j = i - 1;
-    *     while (j >= 0) {
-    *       if (CompareArrayElements(a[j], v, f) > 0) {
-    *         a[j + 1] = a[j]; j = j - 1;
-    *       } else break;
-   *     }
-   *     a[j + 1] = v;
-   *   }
-   *   return a;
-   */
+   *   1. insertion sort on blocks of SORT_RUN (8) elements, in place in `a`;
+   *   2. when n > SORT_RUN, bottom-up merge passes of width 8, 16, 32, ... between `a` (or the working copy `m_s`) and a second copy
+   *      `m_d`, which swap roles after every pass; when the last pass leaves the answer in the copy it is written back into `a`.
+   *
+   * A merge takes from the RIGHT run only when `takeRight(left, right)` is true, which is the old insertion walk's own test
+   * (cmp(left, right) > 0, undefined sinking without a call): equal-comparing elements and NaN/0 results keep source order, so the
+   * sort is stable and a comparator result that is not a positive number holds position, exactly as before. The SEQUENCE of
+   * comparator calls differs from V8's TimSort (as it always did against the insertion walk); the sorted result of any consistent
+   * comparator is identical, and an inconsistent one still terminates (every loop is bounded by the run indices, never by the
+   * comparator's answers). The previous insertion sort was O(n^2): 20,000 strings took 6 s.
+   *
+   * `a.0` is the sorted container and `n.0` the count of elements to order; the caller has declared both. Local ids are prefixed m_
+   * so they cannot meet the caller's. */
+  const SORT_RUN = 8;
+  function buildMergeSortStmts(cfg: {
+    cType: IrType;
+    vt: IrType;
+    loc: SrcLoc;
+    get: (arr: string, index: IrExpr) => IrExpr;
+    set: (arr: string, index: IrExpr, value: IrExpr) => IrStmt;
+    clone: (arr: string) => IrExpr;
+    takeRight: (left: IrExpr, right: IrExpr) => IrExpr;
+  }): { stmts: IrStmt[]; locals: IrLocal[] } {
+    const { cType, vt, loc, get, set, clone, takeRight } = cfg;
+    const ref = (localId: string, type: IrType): IrExpr => ({ kind: "varRef", localId, type, loc });
+    const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
+    const bin = (op: "+" | "-" | "*" | "<" | ">=", left: IrExpr, right: IrExpr, type: IrType = F64): IrExpr =>
+      ({ kind: "bin", op, left, right, type, loc }) as IrExpr;
+    const lt = (l: IrExpr, r: IrExpr): IrExpr => bin("<", l, r, BOOL);
+    const minOf = (l: IrExpr, r: IrExpr): IrExpr => ({ kind: "ternary", cond: lt(l, r), then: l, else_: r, type: F64, loc });
+    const assign = (id: string, value: IrExpr): IrStmt => ({ kind: "assign", localId: id, value, loc });
+    const inc = (id: string, by: IrExpr = num(1)): IrStmt => assign(id, bin("+", ref(id, F64), by));
+    const F = (id: string): IrExpr => ref(id, F64);
+    const forLoop = (id: string, init: IrExpr, cond: IrExpr, update: IrStmt, body: IrStmt[]): IrStmt => ({
+      kind: "for", init: { kind: "varDecl", localId: id, init, loc }, cond, update, body, loc,
+    });
+    // phase 1: blocks of SORT_RUN, insertion sort in a.0
+    const insertion: IrStmt = forLoop("m_lo.0", num(0), lt(F("m_lo.0"), F("n.0")), inc("m_lo.0", num(SORT_RUN)), [
+      { kind: "varDecl", localId: "m_hi.0", init: minOf(bin("+", F("m_lo.0"), num(SORT_RUN)), F("n.0")), loc },
+      forLoop("m_i.0", bin("+", F("m_lo.0"), num(1)), lt(F("m_i.0"), F("m_hi.0")), inc("m_i.0"), [
+        { kind: "varDecl", localId: "m_v.0", init: get("a.0", F("m_i.0")), loc },
+        { kind: "varDecl", localId: "m_j.0", init: bin("-", F("m_i.0"), num(1)), loc },
+        {
+          kind: "while",
+          cond: bin(">=", F("m_j.0"), F("m_lo.0"), BOOL),
+          body: [{
+            kind: "if",
+            cond: takeRight(get("a.0", F("m_j.0")), ref("m_v.0", vt)),
+            then: [set("a.0", bin("+", F("m_j.0"), num(1)), get("a.0", F("m_j.0"))), assign("m_j.0", bin("-", F("m_j.0"), num(1)))],
+            else_: [{ kind: "break", loc }],
+            loc,
+          }],
+          loc,
+        },
+        set("a.0", bin("+", F("m_j.0"), num(1)), ref("m_v.0", vt)),
+      ]),
+    ]);
+    // phase 2: bottom-up merge passes, ping-pong between m_s and m_d
+    const w2 = (): IrExpr => bin("*", F("m_w.0"), num(2));
+    const merge: IrStmt = forLoop("m_a.0", num(0), lt(F("m_a.0"), F("n.0")), inc("m_a.0", w2()), [
+      { kind: "varDecl", localId: "m_mid.0", init: minOf(bin("+", F("m_a.0"), F("m_w.0")), F("n.0")), loc },
+      { kind: "varDecl", localId: "m_end.0", init: minOf(bin("+", F("m_a.0"), w2()), F("n.0")), loc },
+      { kind: "varDecl", localId: "m_p.0", init: F("m_a.0"), loc },
+      { kind: "varDecl", localId: "m_q.0", init: F("m_mid.0"), loc },
+      { kind: "varDecl", localId: "m_k.0", init: F("m_a.0"), loc },
+      {
+        kind: "while",
+        cond: { kind: "logical", op: "&&", left: lt(F("m_p.0"), F("m_mid.0")), right: lt(F("m_q.0"), F("m_end.0")), type: BOOL, loc },
+        body: [
+          {
+            kind: "if",
+            cond: takeRight(get("m_s.0", F("m_p.0")), get("m_s.0", F("m_q.0"))),
+            then: [set("m_d.0", F("m_k.0"), get("m_s.0", F("m_q.0"))), inc("m_q.0")],
+            else_: [set("m_d.0", F("m_k.0"), get("m_s.0", F("m_p.0"))), inc("m_p.0")],
+            loc,
+          },
+          inc("m_k.0"),
+        ],
+        loc,
+      },
+      { kind: "while", cond: lt(F("m_p.0"), F("m_mid.0")), body: [set("m_d.0", F("m_k.0"), get("m_s.0", F("m_p.0"))), inc("m_p.0"), inc("m_k.0")], loc },
+      { kind: "while", cond: lt(F("m_q.0"), F("m_end.0")), body: [set("m_d.0", F("m_k.0"), get("m_s.0", F("m_q.0"))), inc("m_q.0"), inc("m_k.0")], loc },
+    ]);
+    const passes: IrStmt = {
+      kind: "if",
+      cond: bin("<", num(SORT_RUN), F("n.0"), BOOL),
+      then: [
+        { kind: "varDecl", localId: "m_s.0", init: ref("a.0", cType), loc },
+        { kind: "varDecl", localId: "m_d.0", init: clone("a.0"), loc },
+        { kind: "varDecl", localId: "m_w.0", init: num(SORT_RUN), loc },
+        { kind: "varDecl", localId: "m_flip.0", init: num(0), loc },
+        {
+          kind: "while",
+          cond: lt(F("m_w.0"), F("n.0")),
+          body: [
+            merge,
+            { kind: "varDecl", localId: "m_t.0", init: ref("m_s.0", cType), loc },
+            assign("m_s.0", ref("m_d.0", cType)),
+            assign("m_d.0", ref("m_t.0", cType)),
+            assign("m_flip.0", bin("-", num(1), F("m_flip.0"))),
+            assign("m_w.0", w2()),
+          ],
+          loc,
+        },
+        {
+          kind: "if",
+          cond: bin(">=", F("m_flip.0"), num(1), BOOL),
+          then: [forLoop("m_r.0", num(0), lt(F("m_r.0"), F("n.0")), inc("m_r.0"), [set("a.0", F("m_r.0"), get("m_s.0", F("m_r.0")))])],
+          else_: [],
+          loc,
+        },
+      ],
+      else_: [],
+      loc,
+    };
+    const ids: [string, IrType, boolean][] = [
+      ["m_lo.0", F64, true], ["m_hi.0", F64, false], ["m_i.0", F64, true], ["m_v.0", vt, false], ["m_j.0", F64, true],
+      ["m_s.0", cType, true], ["m_d.0", cType, true], ["m_t.0", cType, false], ["m_w.0", F64, true], ["m_flip.0", F64, true],
+      ["m_a.0", F64, true], ["m_mid.0", F64, false], ["m_end.0", F64, false], ["m_p.0", F64, true], ["m_q.0", F64, true], ["m_k.0", F64, true], ["m_r.0", F64, true],
+    ];
+    return { stmts: [insertion, passes], locals: ids.map(([id, type, mutable]) => ({ id, name: id.replace(/\.0$/, ""), type, mutable })) };
+  }
+
   function buildArraySortFn(
     name: string,
     elem: IrType,
@@ -3047,107 +3158,54 @@ function lowerOptionalDefaultArg(
     const fnT = funcOf([elem, elem].slice(0, arity), F64);
     const ref = (localId: string, type: IrType): IrExpr => ({ kind: "varRef", localId, type, loc });
     const num = (value: number): IrExpr => ({ kind: "numLit", value, type: F64, loc });
-    const j = ref("j.0", F64);
-    const at = (index: IrExpr): IrExpr => ({ kind: "arrayGet", arr: ref("a.0", arrT), index, type: elem, loc });
-    const jPlus1: IrExpr = { kind: "bin", op: "+", left: j, right: num(1), type: F64, loc };
     const isUndefined = (value: IrExpr): IrExpr | null => {
       if (elem.kind === "union" && undefinedTag !== null) {
-        return {
-          kind: "unionIsTag",
-          unionId: elem.unionId,
-          tag: undefinedTag,
-          negated: false,
-          value,
-          type: BOOL,
-          loc,
-        };
+        return { kind: "unionIsTag", unionId: elem.unionId, tag: undefinedTag, negated: false, value, type: BOOL, loc };
       }
       if (elem.kind === "jsval") {
         return {
-          kind: "jsOp",
-          op: "eq",
-          args: [
-            value,
-            { kind: "jsOp", op: "undefLit", args: [], type: JSVAL, loc },
-          ],
-          type: BOOL,
-          loc,
+          kind: "jsOp", op: "eq",
+          args: [value, { kind: "jsOp", op: "undefLit", args: [], type: JSVAL, loc }],
+          type: BOOL, loc,
         };
       }
       return null;
     };
-    const compareGreater: IrExpr = {
-      kind: "bin",
-      op: ">",
-      left: {
-        kind: "callValue",
-        callee: ref("f.0", fnT),
-        args: [at(j), ref("v.0", elem)].slice(0, arity),
-        type: F64,
-        loc,
-      },
-      right: num(0),
-      type: BOOL,
-      loc,
+    // CompareArrayElements: undefined always sinks and never reaches the user comparator. The ternaries preserve that callback
+    // suppression. true = the RIGHT element goes before the LEFT one (cmp(left, right) > 0).
+    // Each operand is read into an ordinary expression ONCE per use, as the old walk did.
+    const takeRight = (left: IrExpr, right: IrExpr): IrExpr => {
+      const greater: IrExpr = {
+        kind: "bin", op: ">",
+        left: { kind: "callValue", callee: ref("f.0", fnT), args: [left, right].slice(0, arity), type: F64, loc },
+        right: num(0), type: BOOL, loc,
+      };
+      const leftUndefined = isUndefined(left);
+      const rightUndefined = isUndefined(right);
+      if (leftUndefined === null || rightUndefined === null) return greater;
+      return {
+        kind: "ternary",
+        cond: leftUndefined,
+        then: { kind: "unary", op: "!", operand: rightUndefined, type: BOOL, loc },
+        else_: { kind: "ternary", cond: isUndefined(right)!, then: { kind: "boolLit", value: false, type: BOOL, loc }, else_: greater, type: BOOL, loc },
+        type: BOOL, loc,
+      };
     };
-    const leftUndefined = isUndefined(at(j));
-    const valueUndefined = isUndefined(ref("v.0", elem));
-    // CompareArrayElements: undefined always sinks and never reaches the
-    // user comparator. Ternaries preserve that callback suppression.
-    const shouldShift: IrExpr =
-      leftUndefined !== null && valueUndefined !== null
-        ? {
-            kind: "ternary",
-            cond: leftUndefined,
-            then: {
-              kind: "unary",
-              op: "!",
-              operand: valueUndefined,
-              type: BOOL,
-              loc,
-            },
-            else_: {
-              kind: "ternary",
-              cond: valueUndefined,
-              then: { kind: "boolLit", value: false, type: BOOL, loc },
-              else_: compareGreater,
-              type: BOOL,
-              loc,
-            },
-            type: BOOL,
-            loc,
-          }
-        : compareGreater;
-    const shiftLoop: IrStmt = {
-      kind: "while",
-      cond: { kind: "bin", op: ">=", left: j, right: num(0), type: BOOL, loc },
-      body: [
-        {
-          kind: "if",
-          cond: shouldShift,
-          then: [
-            { kind: "arraySet", arr: ref("a.0", arrT), index: jPlus1, value: at(j), loc },
-            { kind: "assign", localId: "j.0", value: { kind: "bin", op: "-", left: j, right: num(1), type: F64, loc }, loc },
-          ],
-          else_: [{ kind: "break", loc }],
-          loc,
-        },
-      ],
+    const ms = buildMergeSortStmts({
+      cType: arrT,
+      vt: elem,
       loc,
-    };
+      get: (arr, index) => ({ kind: "arrayGet", arr: ref(arr, arrT), index, type: elem, loc }),
+      set: (arr, index, value) => ({ kind: "arraySet", arr: ref(arr, arrT), index, value, loc }),
+      clone: (arr) => ({ kind: "arrIntrinsic", method: "slice", receiver: ref(arr, arrT), args: [], type: arrT, loc }),
+      takeRight,
+    });
     const body: IrStmt[] = [
       ...(copyFirst
         ? [{
             kind: "assign" as const,
             localId: "a.0",
-            value: {
-              kind: "arrIntrinsic" as const,
-              method: "slice" as const,
-              receiver: ref("a.0", arrT),
-              args: [],
-              type: arrT,
-              loc,
-            },
+            value: { kind: "arrIntrinsic" as const, method: "slice" as const, receiver: ref("a.0", arrT), args: [], type: arrT, loc },
             loc,
           }]
         : []),
@@ -3156,24 +3214,7 @@ function lowerOptionalDefaultArg(
       copyFirst
         ? readLenStmt(arrT, loc)
         : { kind: "varDecl", localId: "n.0", init: { kind: "arrIntrinsic", method: "compactHoles", receiver: ref("a.0", arrT), args: [], type: F64, loc }, loc },
-      {
-        kind: "for",
-        init: { kind: "varDecl", localId: "i.0", init: num(1), loc },
-        cond: { kind: "bin", op: "<", left: ref("i.0", F64), right: ref("n.0", F64), type: BOOL, loc },
-        update: {
-          kind: "assign",
-          localId: "i.0",
-          value: { kind: "bin", op: "+", left: ref("i.0", F64), right: num(1), type: F64, loc },
-          loc,
-        },
-        body: [
-          { kind: "varDecl", localId: "v.0", init: getElemExpr(arrT, elem, loc), loc },
-          { kind: "varDecl", localId: "j.0", init: { kind: "bin", op: "-", left: ref("i.0", F64), right: num(1), type: F64, loc }, loc },
-          shiftLoop,
-          { kind: "arraySet", arr: ref("a.0", arrT), index: jPlus1, value: ref("v.0", elem), loc },
-        ],
-        loc,
-      },
+      ...ms.stmts,
       { kind: "return", value: ref("a.0", arrT), loc },
     ];
     return {
@@ -3187,9 +3228,7 @@ function lowerOptionalDefaultArg(
         { id: "a.0", name: "a", type: arrT, mutable: true },
         { id: "f.0", name: "f", type: fnT, mutable: true },
         { id: "n.0", name: "n", type: F64, mutable: false },
-        { id: "i.0", name: "i", type: F64, mutable: true },
-        { id: "v.0", name: "v", type: elem, mutable: false },
-        { id: "j.0", name: "j", type: F64, mutable: true },
+        ...ms.locals,
       ],
       body,
       loc,
@@ -3359,90 +3398,22 @@ function lowerOptionalDefaultArg(
       type: F64,
       loc,
     });
-    const j = ref("j.0", F64);
-    const at = (index: IrExpr): IrExpr => ({
-      kind: "bytesIntrinsic",
-      method: "get",
-      receiver: ref("a.0", bytesT),
-      args: [index],
-      type: vt,
+    const cmpCall = (left: IrExpr, right: IrExpr): IrExpr =>
+      hasComparator
+        ? { kind: "callValue", callee: ref("f.0", fnT), args: [left, right].slice(0, arity), type: F64, loc }
+        : bigElem
+          ? { kind: "libCall", fn: "big.cmp", args: [left, right], type: F64, loc }
+          : { kind: "bin", op: "-", left, right, type: F64, loc };
+    const takeRight = (left: IrExpr, right: IrExpr): IrExpr => ({ kind: "bin", op: ">", left: cmpCall(left, right), right: num(0), type: BOOL, loc });
+    const ms = buildMergeSortStmts({
+      cType: bytesT,
+      vt,
       loc,
+      get: (arr, index) => ({ kind: "bytesIntrinsic", method: "get", receiver: ref(arr, bytesT), args: [index], type: vt, loc }),
+      set: (arr, index, value) => ({ kind: "bytesSet", arr: ref(arr, bytesT), index, value, loc }),
+      clone: (arr) => ({ kind: "bytesIntrinsic", method: "slice", receiver: ref(arr, bytesT), args: [], type: bytesT, loc }),
+      takeRight,
     });
-    const jPlus1: IrExpr = {
-      kind: "bin",
-      op: "+",
-      left: j,
-      right: num(1),
-      type: F64,
-      loc,
-    };
-    const compare: IrExpr = hasComparator
-      ? {
-          kind: "callValue",
-          callee: ref("f.0", fnT),
-          args: [at(j), ref("v.0", vt)].slice(0, arity),
-          type: F64,
-          loc,
-        }
-      : bigElem
-        ? { kind: "libCall", fn: "big.cmp", args: [at(j), ref("v.0", vt)], type: F64, loc }
-        : {
-          kind: "bin",
-          op: "-",
-          left: at(j),
-          right: ref("v.0", vt),
-          type: F64,
-          loc,
-        };
-    const shiftLoop: IrStmt = {
-      kind: "while",
-      cond: {
-        kind: "bin",
-        op: ">=",
-        left: j,
-        right: num(0),
-        type: BOOL,
-        loc,
-      },
-      body: [
-        {
-          kind: "if",
-          cond: {
-            kind: "bin",
-            op: ">",
-            left: compare,
-            right: num(0),
-            type: BOOL,
-            loc,
-          },
-          then: [
-            {
-              kind: "bytesSet",
-              arr: ref("a.0", bytesT),
-              index: jPlus1,
-              value: at(j),
-              loc,
-            },
-            {
-              kind: "assign",
-              localId: "j.0",
-              value: {
-                kind: "bin",
-                op: "-",
-                left: j,
-                right: num(1),
-                type: F64,
-                loc,
-              },
-              loc,
-            },
-          ],
-          else_: [{ kind: "break", loc }],
-          loc,
-        },
-      ],
-      loc,
-    };
     const params: IrParam[] = [
       { localId: "a.0", name: "a", type: bytesT },
       ...(hasComparator
@@ -3455,9 +3426,7 @@ function lowerOptionalDefaultArg(
         ? [{ id: "f.0", name: "f", type: fnT, mutable: true }]
         : []),
       { id: "n.0", name: "n", type: F64, mutable: false },
-      { id: "i.0", name: "i", type: F64, mutable: true },
-      { id: "v.0", name: "v", type: vt, mutable: false },
-      { id: "j.0", name: "j", type: F64, mutable: true },
+      ...ms.locals,
       // `sort` keeps the receiver (o) beside the working copy (a): the
       // sorted values are blitted back into o at the end and o is the
       // answer, so the call yields the SAME typed array the caller
@@ -3500,66 +3469,7 @@ function lowerOptionalDefaultArg(
         },
         loc,
       },
-      {
-        kind: "for",
-        init: {
-          kind: "varDecl",
-          localId: "i.0",
-          init: num(1),
-          loc,
-        },
-        cond: {
-          kind: "bin",
-          op: "<",
-          left: ref("i.0", F64),
-          right: ref("n.0", F64),
-          type: BOOL,
-          loc,
-        },
-        update: {
-          kind: "assign",
-          localId: "i.0",
-          value: {
-            kind: "bin",
-            op: "+",
-            left: ref("i.0", F64),
-            right: num(1),
-            type: F64,
-            loc,
-          },
-          loc,
-        },
-        body: [
-          {
-            kind: "varDecl",
-            localId: "v.0",
-            init: at(ref("i.0", F64)),
-            loc,
-          },
-          {
-            kind: "varDecl",
-            localId: "j.0",
-            init: {
-              kind: "bin",
-              op: "-",
-              left: ref("i.0", F64),
-              right: num(1),
-              type: F64,
-              loc,
-            },
-            loc,
-          },
-          shiftLoop,
-          {
-            kind: "bytesSet",
-            arr: ref("a.0", bytesT),
-            index: jPlus1,
-            value: ref("v.0", vt),
-            loc,
-          },
-        ],
-        loc,
-      },
+      ...ms.stmts,
       // The write-back: `sort` mutates the receiver, so the sorted copy
       // is copied into it element by element (a bytesSet per index, which
       // is what makes a subarray receiver write through to its backing).
