@@ -17942,6 +17942,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26249-an-error-thrown-out-of-engine-text-keeps-its-cause-and-own-properties.ts": {
+   "order": [
+    "<repo>/tests/corpus/26249-an-error-thrown-out-of-engine-text-keeps-its-cause-and-own-properties.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2625-bytes-views.ts": {
    "order": [
     "<repo>/tests/corpus/2625-bytes-views.ts"
