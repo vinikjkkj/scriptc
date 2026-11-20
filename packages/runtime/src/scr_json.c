@@ -5945,9 +5945,27 @@ static __attribute__((noinline)) const ScrDynClassMember *scr_cm_probe(const Scr
   }
 }
 
+/* A HINT over the indexed lookup: (class, key address) -> the row the probe answered last time. A program asks the same few hundred (class, name)
+ * pairs over and over, and the name usually arrives as one emitted literal at one address, so the probe's hash and compares (~85 Ir) become a
+ * slot load and a name compare. The hint is a STARTING POINT that proves itself: it answers only when its row's own name equals the key's bytes
+ * (and the class is the slot's class), and then it is exactly the row the probe would answer, because the stored row is the probe's answer (the
+ * first non-shadow row named so, a function of the class table and the name alone) for bytes that are the very ones just compared. A key from a
+ * fresh buffer, a reused address, a collision, or a miss (NULL is never stored) takes the probe and re-points the slot. Main thread only. */
+#define SCR_CM_HINT_BITS 10
+typedef struct { const ScrDynClass *cls; const ScrDynClassMember *row; } ScrCmHint;
+static ScrCmHint scr_cm_hint[1u << SCR_CM_HINT_BITS];
+
 const ScrDynClassMember *scr_dyn_objinst_row_scan(const ScrDynClass *c, const char *k, size_t klen) {
 #ifndef SCR_OBJ_NOIDX
   if (__builtin_expect(c->nmembers >= SCR_CM_IDX_MIN, 0)) {
+    ScrCmHint *hs = &scr_cm_hint[(size_t)((((uint64_t)(uintptr_t)c * 0x9E3779B97F4A7C15ull) ^ ((uint64_t)(uintptr_t)k * 0xC2B2AE3D27D4EB4Full)) >> (64 - SCR_CM_HINT_BITS))];
+    if (hs->cls == c) {
+      const ScrDynClassMember *r = hs->row;
+#ifdef SCR_OBJ_PLANT_BUG
+      if (SCR_OBJ_PLANT_BUG == 13) return r; /* the planted defect: the hint answers without comparing the name */
+#endif
+      if (r->len == klen && scr_dyn_bytes_eq(r->name, k, klen)) return r;
+    }
     /* The index of `c` comes from a direct-mapped cache of the list below (the walk of up to 64 entries was ~50 Ir of every lookup). */
     const struct ScrCmIdx **ixc = &scr_cm_ixc[SCR_CM_IXC_SLOT(c)];
     const struct ScrCmIdx *ix = *ixc;
@@ -5965,7 +5983,14 @@ const ScrDynClassMember *scr_dyn_objinst_row_scan(const ScrDynClass *c, const ch
       if (ix == NULL) ix = scr_cm_idx_build(c);
       if (ix != NULL) *ixc = ix;
     }
-    if (ix != NULL) return scr_cm_probe(c, ix, k, klen); /* NULL (a full cache) falls through to the walk */
+    if (ix != NULL) {
+      const ScrDynClassMember *row = scr_cm_probe(c, ix, k, klen);
+      if (row != NULL) {
+        hs->cls = c;
+        hs->row = row;
+      }
+      return row;
+    } /* NULL (a full cache) falls through to the walk */
   }
 #endif
   /* nmembers and not a NULL `members`: a class with an empty table is a
