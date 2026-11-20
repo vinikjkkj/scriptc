@@ -1635,6 +1635,10 @@ export interface IrModule {
    * Its main body drains process.nextTick callbacks before promise jobs at
    * the first checkpoint; absent means an ES-module entry (jobs first). */
   entryCjs?: boolean;
+  /** The program can hold the ABSENT string (a regex capture group that did not participate, a split capture: Node's `undefined` in a
+   * string-typed slot; Lowerer.absentStrRisk). Both emitters then select the absent-aware string entries (scr_str_concat*_u, scr_str_eq_u,
+   * the receiver check of string members); a module without it emits exactly the plain entries. */
+  absentStrings?: boolean;
   /** LIBRARY mode: the profile's resolved export map plus the
    * mode-provided symbol names, landed ON the IR so both backends emit the
    * external-linkage wrappers and entries from the same facts — the two

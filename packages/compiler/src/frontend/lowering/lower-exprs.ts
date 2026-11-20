@@ -1787,6 +1787,18 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           loc,
         };
       }
+      // A string-typed operand in a program that can hold the ABSENT string (lower-absent-str.ts): the marker is Node's undefined.
+      // The operand is evaluated once, inside the test.
+      if (operand.type.kind === "string" && operand.kind !== "strLit" && L.absentStrRisk()) {
+        return {
+          kind: "ternary",
+          cond: { kind: "libCall", fn: "str.isAbsent", args: [operand], type: BOOL, loc },
+          then: { kind: "strLit", value: "undefined", type: STRING, loc },
+          else_: { kind: "strLit", value: "string", type: STRING, loc },
+          type: STRING,
+          loc,
+        };
+      }
       const FOLD: Partial<Record<string, string>> = {
         f64: "number", string: "string", bool: "boolean", func: "function",
         array: "object", object: "object", record: "object",
@@ -1863,13 +1875,29 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
               src = { kind: "varRef", localId: tmp.id, type: operand.type, loc };
             }
           }
+          // A string arm in a program that can hold the ABSENT string (lower-absent-str.ts): the arm holds Node's undefined when its payload is the
+          // marker, so the arm's own answer is split on that test (an exhaustive cover, so the last group still needs none).
+          const strTag = L.absentStrRisk() ? def.arms.findIndex((a) => a.kind === "string") : -1;
+          const uid = operand.type.unionId;
+          const tagTest = (t: number): IrExpr => ({ kind: "unionIsTag", unionId: uid, tag: t, negated: false, value: src, type: BOOL, loc });
+          const strAbsent = (): IrExpr => ({
+            kind: "libCall", fn: "str.isAbsent", type: BOOL, loc,
+            args: [{ kind: "unionNarrow", unionId: uid, tag: strTag, value: src, type: STRING, loc }],
+          });
+          const orTests = (ts_: IrExpr[]): IrExpr => ts_.reduce((l, r) => ({ kind: "logical", op: "||", left: l, right: r, type: BOOL, loc }) as IrExpr);
+          if (strTag >= 0 && !groups.has("undefined")) ordered.unshift(["undefined", []]);
           let result: IrExpr = { kind: "strLit", value: ordered[ordered.length - 1]![0], type: STRING, loc };
           for (const [answer, tags] of ordered.slice(0, -1).reverse()) {
-            let test: IrExpr = { kind: "unionIsTag", unionId: operand.type.unionId, tag: tags[0]!, negated: false, value: src, type: BOOL, loc };
-            for (const t of tags.slice(1)) {
-              test = { kind: "logical", op: "||", left: test, right: { kind: "unionIsTag", unionId: operand.type.unionId, tag: t, negated: false, value: src, type: BOOL, loc }, type: BOOL, loc };
+            const parts: IrExpr[] = [];
+            for (const t of tags) {
+              if (t === strTag) {
+                // answer "string": a present payload; answer "undefined": the marker
+                parts.push({ kind: "logical", op: "&&", left: tagTest(t), right: { kind: "unary", op: "!", operand: strAbsent(), type: BOOL, loc }, type: BOOL, loc });
+              } else parts.push(tagTest(t));
             }
-            result = { kind: "ternary", cond: test, then: { kind: "strLit", value: answer, type: STRING, loc }, else_: result, type: STRING, loc };
+            if (strTag >= 0 && answer === "undefined") parts.push({ kind: "logical", op: "&&", left: tagTest(strTag), right: strAbsent(), type: BOOL, loc });
+            if (parts.length === 0) continue;
+            result = { kind: "ternary", cond: orTests(parts), then: { kind: "strLit", value: answer, type: STRING, loc }, else_: result, type: STRING, loc };
           }
           return stmts.length === 0 ? result : { kind: "seqExpr", stmts, result, type: STRING, loc };
         }
@@ -7867,6 +7895,28 @@ function nullishArmBridge(L: Lowerer, left: IrExpr): IrExpr | null {
             loc,
           },
           type: F64,
+          loc,
+        };
+      }
+    }
+    // A string-typed left in a program that can hold the ABSENT string (lower-absent-str.ts): the marker takes the default.
+    if (left.type.kind === "string" && left.kind !== "strLit" && L.absentStrRisk()) {
+      const rightRaw = L.lowerExpr(expr.right);
+      if (rightRaw.type.kind === "string") {
+        const h = L.declareHiddenLocal("%strNullish", STRING);
+        const held: IrExpr = { kind: "varRef", localId: h.id, type: STRING, loc };
+        return {
+          kind: "seqExpr",
+          stmts: [{ kind: "varDecl", localId: h.id, init: left, loc }],
+          result: {
+            kind: "ternary",
+            cond: { kind: "libCall", fn: "str.isAbsent", args: [held], type: BOOL, loc },
+            then: rightRaw,
+            else_: held,
+            type: STRING,
+            loc,
+          },
+          type: STRING,
           loc,
         };
       }
