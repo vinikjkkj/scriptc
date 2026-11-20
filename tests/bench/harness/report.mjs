@@ -64,6 +64,29 @@ if (rj) {
       hb ? ratio(stat(l, 'cpu_self_ms'), stat(b, 'cpu_self_ms')) : '', hb ? ratio(stat(l, 'wall_ms'), stat(b, 'wall_ms')) : ''].join(' | '))
   }
 }
+// CPUMICRO: real CPU per arm at microsecond resolution (wait4 ru_utime+ru_stime of the lane, from pmon; the 10 ms tick figure above stays). The total is the kernel's
+// exact runtime sum; the user/sys SPLIT is tick-apportioned by the kernel, so read user and sys as approximate and the total as exact.
+if (rj && rj.runs.some((r) => r.cpu_ru_utime_us != null)) {
+  const labels = [...new Set(rj.runs.map((r) => r.label))]
+  const us = (r) => (r.cpu_ru_utime_us ?? 0) + (r.cpu_ru_stime_us ?? 0)
+  const of = (l) => rj.runs.filter((r) => r.label === l && r.cpu_ru_utime_us != null)
+  const m3 = (x) => (x == null ? '' : (x / 1000).toFixed(3))
+  console.log('-- cpu_ru (wait4 utime+stime, microsecond resolution); spread = (max-min)/median over reps; ratios are median arm/node and cand/base')
+  console.log('arm | n | cpu_ru_ms per rep | median | min | max | spread | user med ms | sys med ms | cpu_ru/node | cpu_ru/base')
+  for (const l of labels) {
+    const rs = of(l); if (!rs.length) continue
+    const t = rs.map(us), md = med(t), mn = Math.min(...t), mx = Math.max(...t)
+    const b = l.startsWith('cand') ? 'base' + l.slice(4) : null
+    const bt = b && labels.includes(b) ? med(of(b).map(us)) : null
+    const nt = labels.includes('node') ? med(of('node').map(us)) : null
+    console.log([l, rs.length, t.map(m3).join('/'), m3(md), m3(mn), m3(mx), (((mx - mn) / md) * 100).toFixed(2) + '%', m3(med(rs.map((r) => r.cpu_ru_utime_us))), m3(med(rs.map((r) => r.cpu_ru_stime_us))),
+      ratio(md, nt), bt != null ? ratio(md, bt) : ''].join(' | '))
+  }
+  const bs = labels.filter((l) => l.startsWith('base')), cs = labels.filter((l) => l.startsWith('cand'))
+  for (const c of cs) { const b = 'base' + c.slice(4); if (!bs.includes(b)) continue
+    const bt = of(b).map(us), ct = of(c).map(us)
+    console.log(`-- cpu_ru delta ${c} - ${b}: median ${m3(med(ct) - med(bt))} ms (${(((med(ct) - med(bt)) / med(bt)) * 100).toFixed(3)}%); base spread ${(((Math.max(...bt) - Math.min(...bt)) / med(bt)) * 100).toFixed(2)}%, cand spread ${(((Math.max(...ct) - Math.min(...ct)) / med(ct)) * 100).toFixed(2)}%`) }
+}
 const cgs = {}
 for (const f of existsSync(dir) ? readdirSync(dir).sort() : []) {
   const m = /^(.*)\.callgrind\.out$/.exec(f)

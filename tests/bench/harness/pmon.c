@@ -251,10 +251,11 @@ int main(int argc, char **argv) {
   FILE *o = out ? fopen(out, "w") : stderr;
   if (!o) o = stderr;
   fprintf(o, "{\"exit\":%d,\"signaled\":%d,\"wall_ms\":%.1f,\"cpu_self_ms\":%.1f,\"cpu_kids_ms\":%.1f,"
-             "\"cpu_ru_ms\":%.1f,\"rss_peak_kb\":%ld,\"rss_peak_ru_kb\":%ld,\"kids_rss_peak_kb\":%ld,\"hz\":%ld,\"marks\":[",
+             "\"cpu_ru_ms\":%.1f,\"rss_peak_kb\":%ld,\"rss_peak_ru_kb\":%ld,\"kids_rss_peak_kb\":%ld,\"hz\":%ld,\"cpu_ru_utime_us\":%lld,\"cpu_ru_stime_us\":%lld,\"marks\":[",
           code, WIFSIGNALED(status) ? 1 : 0, wall, cpu_self, cpu_kids,
           ru.ru_utime.tv_sec * 1e3 + ru.ru_utime.tv_usec / 1e3 + ru.ru_stime.tv_sec * 1e3 + ru.ru_stime.tv_usec / 1e3,
-          hwm_max, ru.ru_maxrss, kids_hwm_max, hz);
+          hwm_max, ru.ru_maxrss, kids_hwm_max, hz,
+          (long long)ru.ru_utime.tv_sec * 1000000LL + ru.ru_utime.tv_usec, (long long)ru.ru_stime.tv_sec * 1000000LL + ru.ru_stime.tv_usec);
   for (int m = 0; m < nmarks; m++) {
     fprintf(o, "%s{\"t_ms\":%.1f,\"cpu_ms\":%.1f,\"hwm_kb\":%ld,\"line\":\"", m ? "," : "", marks[m].t_ms, marks[m].cpu_ms, marks[m].hwm_kb);
     for (char *c = marks[m].line; *c; c++) { if (*c == '"' || *c == '\\') fputc('\\', o); if ((unsigned char)*c >= 32) fputc(*c, o); }

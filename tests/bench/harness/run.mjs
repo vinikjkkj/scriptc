@@ -38,7 +38,7 @@ function one(label, cmd, rep) {
   writeFileSync(`${out}/${label}.${rep}.stdout.txt`, stdout)
   writeFileSync(`${out}/${label}.${rep}.stderr.txt`, r.stderr.toString().slice(-20000))
   let pm = null; try { pm = JSON.parse(readFileSync(pj, 'utf8')) } catch {}
-  const run = { label, rep, exit: pm ? pm.exit : r.status, rss_peak_kb: pm?.rss_peak_kb ?? null, cpu_self_ms: pm?.cpu_self_ms ?? null, cpu_ru_ms: pm?.cpu_ru_ms ?? null, wall_ms: pm?.wall_ms ?? null, parity_md5: mask(scenarios(stdout)) }
+  const run = { label, rep, exit: pm ? pm.exit : r.status, rss_peak_kb: pm?.rss_peak_kb ?? null, cpu_self_ms: pm?.cpu_self_ms ?? null, cpu_ru_ms: pm?.cpu_ru_ms ?? null, cpu_ru_utime_us: pm?.cpu_ru_utime_us ?? null, cpu_ru_stime_us: pm?.cpu_ru_stime_us ?? null, wall_ms: pm?.wall_ms ?? null, parity_md5: mask(scenarios(stdout)) }
   results.runs.push(run)
   return run
 }

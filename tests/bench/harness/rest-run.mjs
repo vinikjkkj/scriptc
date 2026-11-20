@@ -59,7 +59,7 @@ for (let rep = 0; rep < reps; rep++) {
     let pm = null; try { pm = JSON.parse(readFileSync(pj, 'utf8')) } catch {}
     const fp = fingerprint(`${run}/arm`)
     if (label === 'node' && nodeFp === null) nodeFp = fp
-    results.runs.push({ label, rep, exit: pm ? pm.exit : r.status, vmhwm_kb: pm?.rss_peak_kb ?? null, cpu_ms: pm?.cpu_self_ms ?? null, fp })
+    results.runs.push({ label, rep, exit: pm ? pm.exit : r.status, vmhwm_kb: pm?.rss_peak_kb ?? null, cpu_ms: pm?.cpu_self_ms ?? null, cpu_ru_ms: pm?.cpu_ru_ms ?? null, cpu_ru_utime_us: pm?.cpu_ru_utime_us ?? null, cpu_ru_stime_us: pm?.cpu_ru_stime_us ?? null, fp })
     console.error(`rep ${rep} ${label}: exit=${pm ? pm.exit : r.status} vmhwm_kb=${pm?.rss_peak_kb}`)
   }
 }
