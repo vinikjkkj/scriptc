@@ -1850,6 +1850,11 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     // below this fence answers, member-or-refusal ladder, so no compile
     // fence belongs here.
     if (L.mapTypeOf(L.typeOf(recv))?.kind === "dyn") return;
+    // `(e as C).member` over a catch binding lowers its receiver to the payload's dyn value (lowerAsExpression), so the dyn keyed
+    // read answers whatever the thrown value has, like the erased cast in Node.
+    let castRecv: ts.Expression = recv;
+    while (ts.isParenthesizedExpression(castRecv)) castRecv = castRecv.expression;
+    if (ts.isAssertionExpression(castRecv) && L.caughtLocalOf((castRecv as ts.AsExpression).expression) !== null) return;
     // Name the container the way the source reads: the global's name when
     // the receiver IS a stdlib global (Math, process), the dotted path for
     // a member of one (process.stdout — its TYPE text would be the useless
