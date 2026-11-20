@@ -526,6 +526,33 @@ static const char web_prelude[] =
     "      }\n"
     "      return new Uint8Array(bytes);\n"
     "    }\n"
+    /* encodeInto: whole characters only; read counts UTF-16 code units, written counts bytes (WHATWG Encoding). */
+    "    encodeInto(src, dest) {\n"
+    "      if (!(dest instanceof Uint8Array)) {\n"
+    "        const e = new TypeError('The \"dest\" argument must be an instance of Uint8Array.' + received(dest));\n"
+    "        e.code = 'ERR_INVALID_ARG_TYPE';\n"
+    "        if (typeof e.stack === 'string') e.stack = e.stack.replace(/^TypeError/, 'TypeError [ERR_INVALID_ARG_TYPE]');\n"
+    "        throw e;\n"
+    "      }\n"
+    "      const s = String(src);\n"
+    "      let read = 0, written = 0;\n"
+    "      for (let i = 0; i < s.length; i++) {\n"
+    "        let c = s.charCodeAt(i), units = 1;\n"
+    "        if (c >= 0xd800 && c <= 0xdbff) {\n"
+    "          const n = i + 1 < s.length ? s.charCodeAt(i + 1) : 0;\n"
+    "          if (n >= 0xdc00 && n <= 0xdfff) { c = 0x10000 + ((c - 0xd800) << 10) + (n - 0xdc00); units = 2; }\n"
+    "          else c = 0xfffd;\n"
+    "        } else if (c >= 0xdc00 && c <= 0xdfff) c = 0xfffd;\n"
+    "        const need = c <= 0x7f ? 1 : c <= 0x7ff ? 2 : c <= 0xffff ? 3 : 4;\n"
+    "        if (written + need > dest.length) break;\n"
+    "        if (need === 1) dest[written] = c;\n"
+    "        else if (need === 2) { dest[written] = 0xc0 | (c >> 6); dest[written + 1] = 0x80 | (c & 63); }\n"
+    "        else if (need === 3) { dest[written] = 0xe0 | (c >> 12); dest[written + 1] = 0x80 | ((c >> 6) & 63); dest[written + 2] = 0x80 | (c & 63); }\n"
+    "        else { dest[written] = 0xf0 | (c >> 18); dest[written + 1] = 0x80 | ((c >> 12) & 63); dest[written + 2] = 0x80 | ((c >> 6) & 63); dest[written + 3] = 0x80 | (c & 63); }\n"
+    "        written += need; read += units; i += units - 1;\n"
+    "      }\n"
+    "      return { read, written };\n"
+    "    }\n"
     "  }\n"
     "\n"
     "  /* The WHATWG utf-8 decoder state machine, exactly (maximal-subpart\n"
@@ -558,7 +585,13 @@ static const char web_prelude[] =
     "      else throw new TypeError('TextDecoder.decode takes an ArrayBuffer or ArrayBufferView');\n"
     "      const units = [];\n"
     "      const fail = () => {\n"
-    "        if (this._fatal) { this._reset(); throw new TypeError('The encoded data was not valid utf-8'); }\n"
+    "        if (this._fatal) {\n"
+    "          this._reset();\n"
+    "          const e = new TypeError('The encoded data was not valid for encoding utf-8');\n"
+    "          e.code = 'ERR_ENCODING_INVALID_ENCODED_DATA';\n"
+    "          if (typeof e.stack === 'string') e.stack = e.stack.replace(/^TypeError/, 'TypeError [ERR_ENCODING_INVALID_ENCODED_DATA]');\n"
+    "          throw e;\n"
+    "        }\n"
     "        units.push(0xfffd);\n"
     "      };\n"
     "      const emit = (cp) => {\n"
@@ -1162,7 +1195,7 @@ static const char web_prelude[] =
     "    case 'undefined': case 'boolean': case 'number': case 'string': case 'bigint':\n"
     "      return v;\n"
     "    case 'symbol':\n"
-    "      throw new DOMException('symbol could not be cloned.', 'DataCloneError');\n"
+    "      throw new DOMException(String(v) + ' could not be cloned.', 'DataCloneError');\n"
     "    case 'function':\n"
     "      throw new DOMException(String(v) + ' could not be cloned.', 'DataCloneError');\n"
     "    }\n"
@@ -1663,41 +1696,6 @@ static JSValue web_host_set_timer(JSContext *ctx, JSValueConst this_val,
   return JS_NewFloat64(ctx, id);
 }
 
-static JSValue web_host_clear_timer(JSContext *ctx, JSValueConst this_val,
-                                    int argc, JSValueConst *argv) {
-  (void)this_val;
-  (void)argc;
-  double id = 0;
-  if (JS_ToFloat64(ctx, &id, argv[0])) return JS_EXCEPTION;
-  scr_clear_interval(id);
-  return JS_UNDEFINED;
-}
-
-/* Timeout.ref()/unref() over the static heap's own bookkeeping
- * (scr_timer_ref/scr_timer_unref — Node semantics: an unref'd island
- * timer still fires while the loop runs but no longer keeps it alive by
- * itself; npm code leans on this, e.g. periodic cache sweeps armed as
- * `setInterval(...).unref()`). */
-static JSValue web_host_ref_timer(JSContext *ctx, JSValueConst this_val,
-                                  int argc, JSValueConst *argv) {
-  (void)this_val;
-  (void)argc;
-  double id = 0;
-  if (JS_ToFloat64(ctx, &id, argv[0])) return JS_EXCEPTION;
-  if (JS_ToBool(ctx, argv[1]) > 0) {
-    scr_timer_ref(id);
-  } else {
-    scr_timer_unref(id);
-  }
-  return JS_UNDEFINED;
-}
-
-/* Timeout.hasRef(): live-and-reffed, from the heap's own answer (a fired
- * one-shot is gone from the heap and answers false, like Node's destroyed
- * Timeout). */
-static JSValue web_host_timer_has_ref(JSContext *ctx, JSValueConst this_val,
-                                      int argc, JSValueConst *argv) {
-  (void)this_val;
 static JSValue web_host_set_immediate(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
   (void)this_val;
   (void)argc;
@@ -1738,6 +1736,41 @@ static JSValue web_host_ref_immediate(JSContext *ctx, JSValueConst this_val, int
   return JS_UNDEFINED;
 }
 
+static JSValue web_host_clear_timer(JSContext *ctx, JSValueConst this_val,
+                                    int argc, JSValueConst *argv) {
+  (void)this_val;
+  (void)argc;
+  double id = 0;
+  if (JS_ToFloat64(ctx, &id, argv[0])) return JS_EXCEPTION;
+  scr_clear_interval(id);
+  return JS_UNDEFINED;
+}
+
+/* Timeout.ref()/unref() over the static heap's own bookkeeping
+ * (scr_timer_ref/scr_timer_unref — Node semantics: an unref'd island
+ * timer still fires while the loop runs but no longer keeps it alive by
+ * itself; npm code leans on this, e.g. periodic cache sweeps armed as
+ * `setInterval(...).unref()`). */
+static JSValue web_host_ref_timer(JSContext *ctx, JSValueConst this_val,
+                                  int argc, JSValueConst *argv) {
+  (void)this_val;
+  (void)argc;
+  double id = 0;
+  if (JS_ToFloat64(ctx, &id, argv[0])) return JS_EXCEPTION;
+  if (JS_ToBool(ctx, argv[1]) > 0) {
+    scr_timer_ref(id);
+  } else {
+    scr_timer_unref(id);
+  }
+  return JS_UNDEFINED;
+}
+
+/* Timeout.hasRef(): live-and-reffed, from the heap's own answer (a fired
+ * one-shot is gone from the heap and answers false, like Node's destroyed
+ * Timeout). */
+static JSValue web_host_timer_has_ref(JSContext *ctx, JSValueConst this_val,
+                                      int argc, JSValueConst *argv) {
+  (void)this_val;
   (void)argc;
   double id = 0;
   if (JS_ToFloat64(ctx, &id, argv[0])) return JS_EXCEPTION;
@@ -1919,6 +1952,9 @@ void scr_island_web_boot(void *jsctx) {
   JS_SetPropertyStr(ctx, host, "tzname", JS_NewCFunction(ctx, web_host_tzname, "tzname", 1));
   JS_SetPropertyStr(ctx, host, "timer", JS_NewCFunction(ctx, web_host_timer, "timer", 2));
   JS_SetPropertyStr(ctx, host, "setTimer", JS_NewCFunction(ctx, web_host_set_timer, "setTimer", 3));
+  JS_SetPropertyStr(ctx, host, "setImmediate", JS_NewCFunction(ctx, web_host_set_immediate, "setImmediate", 1));
+  JS_SetPropertyStr(ctx, host, "clearImmediate", JS_NewCFunction(ctx, web_host_clear_immediate, "clearImmediate", 1));
+  JS_SetPropertyStr(ctx, host, "refImmediate", JS_NewCFunction(ctx, web_host_ref_immediate, "refImmediate", 2));
   JS_SetPropertyStr(ctx, host, "clearTimer", JS_NewCFunction(ctx, web_host_clear_timer, "clearTimer", 1));
   JS_SetPropertyStr(ctx, host, "refTimer", JS_NewCFunction(ctx, web_host_ref_timer, "refTimer", 2));
   JS_SetPropertyStr(ctx, host, "timerHasRef", JS_NewCFunction(ctx, web_host_timer_has_ref, "timerHasRef", 1));
@@ -1932,13 +1968,10 @@ void scr_island_web_boot(void *jsctx) {
     abort();
   }
   JS_FreeValue(ctx, r);
-}
-
-#endif /* SCR_DYNAMIC || SCR_ENGINE */
-  JS_SetPropertyStr(ctx, host, "setImmediate", JS_NewCFunction(ctx, web_host_set_immediate, "setImmediate", 1));
-  JS_SetPropertyStr(ctx, host, "clearImmediate", JS_NewCFunction(ctx, web_host_clear_immediate, "clearImmediate", 1));
-  JS_SetPropertyStr(ctx, host, "refImmediate", JS_NewCFunction(ctx, web_host_ref_immediate, "refImmediate", 2));
 #ifndef SCR_DYNAMIC
   /* The engine-only build: the web prelude's String()-formatted console gives way to the engine console (Node's own formatting). */
   isl_console_boot(jsctx);
 #endif
+}
+
+#endif /* SCR_DYNAMIC || SCR_ENGINE */
