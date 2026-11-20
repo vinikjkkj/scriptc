@@ -1768,7 +1768,7 @@ export const SIZE_DRIFT_PAGE = 4_096;
  *     45be81090   713,216   +28,672, all of it in one commit (the fprintf)
  *     a9ee25126   685,056   after the recovery -- .text +512, nothing else
  */
-export const STATIC_CLASS_RECORDED = platform === "win32" ? 116_736 : null;
+export const STATIC_CLASS_RECORDED = platform === "win32" ? 120_832 : null;
 
 /* 2026-09-26 - +4,608 on the REGEX class only, and the bytes are accounted
  * for: non-owning intern entries (SCR_STRING_INTERN_WEAK; the default since 2026-11-16).
@@ -2292,7 +2292,7 @@ export const TEXT_DRIFT_TOLERANCE = 256;
  * two-sweep candidate mask), always linked; scr_box_new_objd / scr_armvt_enc and the descriptor-decoding release and retain paths in scr_closure.c;
  * the static shared-box tables' constructors checks in scr_union_new_f64 / scr_union_new_bool. Against that, a box and a union no longer store three
  * function pointers each. */
-export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 72_950 : null;
+export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 72_646 : null;
 
 /** .text VirtualSize of the canonical regex program, same commit, same lane.
  * Recorded separately rather than derived: the two classes do not move
@@ -2471,7 +2471,7 @@ export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 72_950 : null;
  * 136,022 record is the 224 between that and 136,022). The always-linked growth is scr_json.c's hash index of a large dyn object (the hash, build, probe, the appender's
  * and remover's hooks and the tail-called big-table read), the per-descriptor hash of a large class's member table and its probe, the registry-position memo painted once for
  * scr_dyn_objinst_class_of, and the keyed [[Get]] fast path. The hello-world class stayed inside its tolerance. It buys -10% Ir on messaging-redis and -3.2% on messaging-mysql. */
-export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 138_262 : null;
+export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 137_510 : null;
 
 /* 2026-10-21 -- THE LINK NOW COLLECTS DEAD SECTIONS, and every figure above moves.
  * The numbers in this block, and the two ceilings (STATIC_CLASS_MAX and
@@ -2541,3 +2541,18 @@ export function recordedTextComplaint(
     `A mismatch here is the FIRST thing to rule out.`
   );
 }
+
+/* 2026-11-19 -- THE x86-64-v2 BASELINE (user decision; cc.ts X86_V2_CLANG / X86_V2_ZIG; branch v2base) re-records the win32 section anchors. Measured here with the zig
+ * x86_64-windows-gnu lane on main aeef7af96, PE section sizes, the same tree with the baseline switched off (SCRIPTC_PROF_CFLAGS=-march=x86_64 appended, which reproduces
+ * the base to the byte: 73,190 / 138,086) against the default:
+ *
+ *   static hello-world   .text 73,190 -> 72,646  (-544)   .rdata 41,908 -> 42,724 (+816)   file 120,320 -> 120,832 (+512)
+ *   regex program        .text 138,086 -> 137,510 (-576)                                   file 225,280 -> 225,792 (+512)
+ *
+ * WHAT THE BYTES BOUGHT. .text SHRANK: with SSE4.1 every Math.floor / ceil / trunc is one roundsd (llvm.floor.f64 on the LLVM lane, libm floor lowered by clang on the C
+ * lane), where the SSE2 magic-number sequences cost 12-17 instructions per site (scr_floor / scr_ceil / scr_trunc inline in every caller, the runtime's own uses included);
+ * v2 also lets clang use SSE4.1 blends and POPCNT in always-linked runtime code. .rdata GREW by 816 bytes (INFERRED, not measured per symbol: the v2 vectoriser's constant
+ * pools, shuffle and blend masks for always-linked loops); the file rounds to 512-byte granules, so the +272 net lands as +512, which puts the hello-world exactly one page
+ * (4,096) over the OLD recorded file figure 116,736 -- that figure was itself 3,584 stale against the lane (the base measures 120,320), so it is re-recorded to the lane's
+ * own 120,832 rather than nudged. The regex file anchor (225,792) is unchanged: the new binary measures exactly it. Both .text anchors move by the measured amount: the
+ * base sat inside their tolerance (+240 and -176 against 72,950 / 138,262), the change sits outside it (-304 and -752). */
