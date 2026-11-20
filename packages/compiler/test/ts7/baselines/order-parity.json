@@ -17653,6 +17653,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26100-string-from-char-code-links-without-the-dispatch-unit-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26100-string-from-char-code-links-without-the-dispatch-unit-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2611-regex-named-groups-js.cjs": {
    "order": [
     "<repo>/tests/corpus/2611-regex-named-groups-js.cjs"

@@ -7363,6 +7363,7 @@ ScrDyn *scr_dyn_invoke_bufnum(ScrDyn *recv, const char *method, ScrDyn *const *a
  * so this answer can never depend on whether the program happens to make
  * a dyn method call somewhere else. */
 ScrDyn *scr_dyn_intrinsic_method_get(ScrDyn *recv, const ScrStr *key);
+extern ScrDyn *(*scr_dyn_intrinsic_method_hook)(ScrDyn *recv, const ScrStr *key);
 /* `k in o` over the same set. `in` walks the prototype chain, so every
  * name the READ above answers has to be a name `in` reports — otherwise
  * the close would trade one disagreement for another. Borrows; never

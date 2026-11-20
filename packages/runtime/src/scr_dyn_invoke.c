@@ -1938,6 +1938,9 @@ ScrDyn *scr_dyn_intrinsic_method_get(ScrDyn *recv, const ScrStr *key) {
   scr_box_set_ref(clo->caps[1], nameBox);           /* takes the +1 */
   return scr_dyn_new_func(clo, dyn_bound_intrinsic_thunk, 0, "()", "bound");
 }
+#ifdef SCR_DYN_PROTO
+__attribute__((constructor)) static void scr_dyn_install_intrinsic_method_hook(void) { scr_dyn_intrinsic_method_hook = scr_dyn_intrinsic_method_get; }
+#endif
 
 /* The keyed READ of a boxed class instance's member -- the emitted
  * sc_dyn_key_get's OBJINST arm, which before this answered the loud
