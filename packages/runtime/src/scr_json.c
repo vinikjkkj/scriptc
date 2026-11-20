@@ -10658,6 +10658,10 @@ static void scr_jb_put_recv_ctor(ScrJsonBuf *b, const ScrDyn *recv) {
 static void scr_dyn_module_ns_throw(const char *a, const ScrStr *key, const char *b);
 int scr_rec_sync_eager = 0;
 
+/* The island installs its native inspect of engine values here (the pointer lives in an always-linked unit so neither the renderer nor the engine
+ * pulls the other in); NULL where no engine is linked. */
+ScrStr *(*scr_insp_jsval_hook)(ScrJsval *cell, const ScrInspHostOpts *o) = NULL;
+
 bool scr_dyn_key_delete(ScrDyn *recv, ScrStr *key) {
   if (recv != NULL && recv->kind == SCR_DYN_PROXY) return SCR_PX->del(recv, key);
   if (recv != NULL && recv->kind == SCR_DYN_BYTES && !recv->static_copy && recv->v.bytes->own != NULL) {
