@@ -8228,6 +8228,35 @@ static bool can_store_error_stack(JSValueConst obj)
 #define JS_BACKTRACE_FLAG_SINGLE_LEVEL     (1 << 1)
 #define JS_BACKTRACE_FLAG_FILTER_FUNC      (1 << 2)
 
+/* scriptc local change: appends `Name: message\n` (V8's ErrorUtils::ToString shape: a missing name is "Error", an empty one is dropped, an
+   empty message leaves the name alone). A property read that throws counts as absent. */
+static void stack_header_put(JSContext *ctx, DynBuf *dbuf, JSValueConst obj)
+{
+    JSValue saved = JS_GetException(ctx);
+    JSValue name = JS_GetProperty(ctx, obj, JS_ATOM_name);
+    JSValue msg = JS_GetProperty(ctx, obj, JS_ATOM_message);
+    const char *n = NULL, *m = NULL;
+    if (!JS_IsUndefined(name) && !JS_IsException(name))
+        n = JS_ToCString(ctx, name);
+    if (!JS_IsUndefined(msg) && !JS_IsException(msg))
+        m = JS_ToCString(ctx, msg);
+    if (JS_IsException(name) || JS_IsException(msg) || (!JS_IsUndefined(name) && n == NULL) || (!JS_IsUndefined(msg) && m == NULL))
+        JS_FreeValue(ctx, JS_GetException(ctx));
+    dbuf_putstr(dbuf, JS_IsUndefined(name) ? "Error" : n ? n : "Error");
+    if ((JS_IsUndefined(name) || (n && n[0] != '\0')) && m != NULL && m[0] != '\0')
+        dbuf_putstr(dbuf, ": ");
+    if (m != NULL)
+        dbuf_putstr(dbuf, m);
+    dbuf_putc(dbuf, '\n');
+    if (n != NULL)
+        JS_FreeCString(ctx, n);
+    if (m != NULL)
+        JS_FreeCString(ctx, m);
+    JS_FreeValue(ctx, name);
+    JS_FreeValue(ctx, msg);
+    JS_Throw(ctx, saved);
+}
+
 /* if filename != NULL, an additional level is added with the filename
    and line number information (used for parse error). */
 static void build_backtrace(JSContext *ctx, JSValueConst error_val,
@@ -8291,6 +8320,13 @@ static void build_backtrace(JSContext *ctx, JSValueConst error_val,
             js_new_callsite_data2(ctx, &csd[i++], filename, line_num, col_num);
     } else {
         js_dbuf_init(ctx, &dbuf);
+        /* scriptc local change: V8's stack text starts with the error's header line, `Name: message`, which Node programs read and print.
+           V8 formats it on the first read of `stack` (a name or message assigned after construction shows), so an Error instance stores
+           its frames behind a \x01 marker and js_error_get_stack prepends the header then; other targets get it now. */
+        if (!has_filter_func && can_store_error_stack(error_obj))
+            dbuf_putc(&dbuf, '\x01');
+        else
+            stack_header_put(ctx, &dbuf, error_obj);
         if (stack_trace_limit == 0)
             goto done;
         if (filename) {
@@ -8410,6 +8446,9 @@ static void build_backtrace(JSContext *ctx, JSValueConst error_val,
         JS_FreeValue(ctx, prepare);
         JS_Throw(ctx, saved_exception);
     } else {
+        /* V8 leaves no newline after the last frame */
+        if (dbuf.size > 0 && dbuf.buf[dbuf.size - 1] == '\n')
+            dbuf.size--;
         if (dbuf_error(&dbuf))
             stack = JS_NULL;
         else
@@ -8662,7 +8701,9 @@ static JSValue JS_ThrowReferenceErrorNotDefined(JSContext *ctx, JSAtom name)
 static JSValue JS_ThrowReferenceErrorUninitialized(JSContext *ctx, JSAtom name)
 {
     char buf[ATOM_GET_STR_BUF_SIZE];
-    return JS_ThrowReferenceError(ctx, "%s is not initialized",
+    if (name == JS_ATOM_this)
+        return JS_ThrowReferenceError(ctx, "Must call super constructor in derived class before accessing 'this' or returning from derived constructor");
+    return JS_ThrowReferenceError(ctx, "Cannot access '%s' before initialization",
                                   name == JS_ATOM_NULL ? "lexical variable" :
                                   JS_AtomGetStr(ctx, buf, sizeof(buf), name));
 }
@@ -8973,7 +9014,7 @@ int JS_IsInstanceOf(JSContext *ctx, JSValueConst val, JSValueConst obj)
     /* legacy case */
     if (!JS_IsFunction(ctx, obj)) {
     fail:
-        JS_ThrowTypeError(ctx, "invalid 'instanceof' right operand");
+        JS_ThrowTypeError(ctx, JS_IsObject(obj) ? "Right-hand side of 'instanceof' is not callable" : "Right-hand side of 'instanceof' is not an object");
         return -1;
     }
     return JS_OrdinaryIsInstanceOf(ctx, val, obj);
@@ -9162,9 +9203,9 @@ static JSValue JS_GetPropertyInternal(JSContext *ctx, JSValueConst obj,
     if (unlikely(tag != JS_TAG_OBJECT)) {
         switch(tag) {
         case JS_TAG_NULL:
-            return JS_ThrowTypeErrorAtom(ctx, "cannot read property '%s' of null", prop);
+            return JS_ThrowTypeErrorAtom(ctx, "Cannot read properties of null (reading '%s')", prop);
         case JS_TAG_UNDEFINED:
-            return JS_ThrowTypeErrorAtom(ctx, "cannot read property '%s' of undefined", prop);
+            return JS_ThrowTypeErrorAtom(ctx, "Cannot read properties of undefined (reading '%s')", prop);
         case JS_TAG_EXCEPTION:
             return JS_EXCEPTION;
         case JS_TAG_STRING:
@@ -10088,9 +10129,9 @@ static JSValue JS_GetPropertyValue(JSContext *ctx, JSValueConst this_obj,
         if (unlikely(atom == JS_ATOM_NULL))
             return JS_EXCEPTION;
         if (tag == JS_TAG_NULL) {
-            JS_ThrowTypeErrorAtom(ctx, "cannot read property '%s' of null", atom);
+            JS_ThrowTypeErrorAtom(ctx, "Cannot read properties of null (reading '%s')", atom);
         } else {
-            JS_ThrowTypeErrorAtom(ctx, "cannot read property '%s' of undefined", atom);
+            JS_ThrowTypeErrorAtom(ctx, "Cannot read properties of undefined (reading '%s')", atom);
         }
         JS_FreeAtom(ctx, atom);
         return JS_EXCEPTION;
@@ -10551,7 +10592,7 @@ static JSValue js_allocate_fast_array(JSContext *ctx, int64_t len)
     int i;
 
     if (len > INT32_MAX)
-        return JS_ThrowRangeError(ctx, "invalid array length");
+        return JS_ThrowRangeError(ctx, "Invalid array length");
     arr = JS_NewArray(ctx);
     if (JS_IsException(arr))
         return arr;
@@ -10595,10 +10636,10 @@ static int JS_SetPropertyInternal2(JSContext *ctx, JSValueConst obj, JSAtom prop
 
     switch(JS_VALUE_GET_TAG(this_obj)) {
     case JS_TAG_NULL:
-        JS_ThrowTypeErrorAtom(ctx, "cannot set property '%s' of null", prop);
+        JS_ThrowTypeErrorAtom(ctx, "Cannot set properties of null (setting '%s')", prop);
         goto fail;
     case JS_TAG_UNDEFINED:
-        JS_ThrowTypeErrorAtom(ctx, "cannot set property '%s' of undefined", prop);
+        JS_ThrowTypeErrorAtom(ctx, "Cannot set properties of undefined (setting '%s')", prop);
         goto fail;
     case JS_TAG_OBJECT:
         p = JS_VALUE_GET_OBJ(this_obj);
@@ -14510,7 +14551,7 @@ static __exception int JS_ToArrayLengthFree(JSContext *ctx, uint32_t *plen,
                     return -1;
                 if (len1 != len) {
                 fail:
-                    JS_ThrowRangeError(ctx, "invalid array length");
+                    JS_ThrowRangeError(ctx, "Invalid array length");
                     return -1;
                 }
             }
@@ -14670,7 +14711,7 @@ static JSValue JS_ToStringInternal(JSContext *ctx, JSValueConst val,
         if (flags & JS_TO_STRING_IS_PROPERTY_KEY) {
             return js_dup(val);
         } else {
-            return JS_ThrowTypeError(ctx, "cannot convert symbol to string");
+            return JS_ThrowTypeError(ctx, "Cannot convert a Symbol value to a string");
         }
     case JS_TAG_FLOAT64:
         return js_dtoa2(ctx, JS_VALUE_GET_FLOAT64(val), 10, 0,
@@ -18683,7 +18724,7 @@ static JSValue JS_CallInternal(JSContext *caller_ctx, JSValueConst func_obj,
                 type = pc[4];
                 pc += 5;
                 if (type == JS_THROW_VAR_RO)
-                    JS_ThrowTypeErrorReadOnly(ctx, JS_PROP_THROW, atom);
+                    JS_ThrowTypeError(ctx, "Assignment to constant variable.");
                 else
                 if (type == JS_THROW_VAR_REDECL)
                     JS_ThrowSyntaxErrorVarRedeclaration(ctx, atom);
@@ -42580,6 +42621,33 @@ static JSValue js_error_get_stack(JSContext *ctx, JSValueConst this_val)
     p = JS_VALUE_GET_OBJ(this_val);
     if (p->class_id != JS_CLASS_ERROR)
         return JS_UNDEFINED;
+    if (JS_IsString(p->u.object_data)) {
+        size_t len;
+        const char *cs = JS_ToCStringLen(ctx, &len, p->u.object_data);
+        if (cs != NULL && len > 0 && cs[0] == '\x01') {
+            DynBuf dbuf;
+            JSValue full;
+            js_dbuf_init(ctx, &dbuf);
+            stack_header_put(ctx, &dbuf, this_val);
+            if (len > 1)
+                dbuf_put(&dbuf, (const uint8_t *)cs + 1, len - 1);
+            else
+                dbuf.size--;
+            JS_FreeCString(ctx, cs);
+            if (dbuf_error(&dbuf)) {
+                dbuf_free(&dbuf);
+                return JS_NULL;
+            }
+            full = JS_NewStringLen(ctx, (char *)dbuf.buf, dbuf.size);
+            dbuf_free(&dbuf);
+            if (JS_IsException(full))
+                return full;
+            JS_FreeValue(ctx, p->u.object_data);
+            p->u.object_data = full;
+        } else if (cs != NULL) {
+            JS_FreeCString(ctx, cs);
+        }
+    }
     return js_dup(p->u.object_data);
 }
 
@@ -43406,7 +43474,7 @@ static JSValue js_array_reduce(JSContext *ctx, JSValueConst this_val,
     } else {
         for(;;) {
             if (k >= len) {
-                JS_ThrowTypeError(ctx, "empty array");
+                JS_ThrowTypeError(ctx, "Reduce of empty array with no initial value");
                 goto exception;
             }
             k1 = (special & special_reduceRight) ? len - k - 1 : k;
@@ -44176,7 +44244,7 @@ static JSValue js_array_toSpliced(JSContext *ctx, JSValueConst this_val,
 
     newlen = len + add - del;
     if (newlen > MAX_SAFE_INTEGER) {
-        JS_ThrowTypeError(ctx, "invalid array length");
+        JS_ThrowTypeError(ctx, "Invalid array length");
         goto exception;
     }
 
@@ -46086,7 +46154,7 @@ static JSValue js_number_toFixed(JSContext *ctx, JSValueConst this_val,
     if (JS_ToInt32Sat(ctx, &f, argv[0]))
         return JS_EXCEPTION;
     if (f < 0 || f > 100)
-        return JS_ThrowRangeError(ctx, "invalid number of digits");
+        return JS_ThrowRangeError(ctx, "toFixed() digits argument must be between 0 and 100");
     if (fabs(d) >= 1e21)
         flags = JS_DTOA_FORMAT_FREE;
     else
@@ -46116,7 +46184,7 @@ static JSValue js_number_toExponential(JSContext *ctx, JSValueConst this_val,
         f = 0;
     } else {
         if (f < 0 || f > 100)
-            return JS_ThrowRangeError(ctx, "invalid number of digits");
+            return JS_ThrowRangeError(ctx, "toExponential() argument must be between 0 and 100");
         f++;
         flags = JS_DTOA_FORMAT_FIXED;
     }
@@ -46144,7 +46212,7 @@ static JSValue js_number_toPrecision(JSContext *ctx, JSValueConst this_val,
         return JS_ToStringFree(ctx,  __JS_NewFloat64(d));
     }
     if (p < 1 || p > 100)
-        return JS_ThrowRangeError(ctx, "invalid number of digits");
+        return JS_ThrowRangeError(ctx, "toPrecision() argument must be between 1 and 100");
     return js_dtoa2(ctx, d, 10, p, JS_DTOA_FORMAT_FIXED);
 }
 
@@ -47516,7 +47584,12 @@ static JSValue js_string_repeat(JSContext *ctx, JSValueConst this_val,
     if (JS_ToInt64Sat(ctx, &val, argv[0]))
         goto fail;
     if (val < 0 || val > 2147483647) {
-        JS_ThrowRangeError(ctx, "invalid repeat count");
+        {
+            const char *cs = JS_ToCString(ctx, argv[0]);
+            JS_ThrowRangeError(ctx, "Invalid count value: %s", cs ? cs : "");
+            if (cs)
+                JS_FreeCString(ctx, cs);
+        }
         goto fail;
     }
     n = val;
@@ -47809,7 +47882,7 @@ static JSValue js_string_normalize(JSContext *ctx, JSValueConst this_val,
         } else {
         bad_form:
             JS_FreeCString(ctx, form);
-            JS_ThrowRangeError(ctx, "bad normalization form");
+            JS_ThrowRangeError(ctx, "The normalization form should be one of NFC, NFD, NFKC, NFKD.");
         fail1:
             js_free(ctx, buf);
             return JS_EXCEPTION;
@@ -56359,7 +56432,7 @@ static int hex_decode(JSContext *ctx, JSString *p, int k) {
     if (k >= p->len || string_get(p, k) != '%')
         return js_throw_URIError(ctx, "expecting %%");
     if (k + 2 >= p->len || (c = string_get_hex(p, k + 1, 2)) < 0)
-        return js_throw_URIError(ctx, "expecting hex digit");
+        return js_throw_URIError(ctx, "URI malformed");
 
     return c;
 }
@@ -56910,7 +56983,7 @@ static JSValue get_date_string(JSContext *ctx, JSValueConst this_val,
         return JS_EXCEPTION;
     if (!res) {
         if (fmt == 2)
-            return JS_ThrowRangeError(ctx, "Date value is NaN");
+            return JS_ThrowRangeError(ctx, "Invalid time value");
         else
             return js_new_string8(ctx, "Invalid Date");
     }
@@ -59345,7 +59418,7 @@ static JSValue js_typed_array_set_internal(JSContext *ctx,
             goto fail;
         if (offset > dst_len - src_len) {
         range_error:
-            JS_ThrowRangeError(ctx, "invalid array length");
+            JS_ThrowRangeError(ctx, "Invalid array length");
             goto fail;
         }
     }
