@@ -1759,11 +1759,14 @@ static ScrDyn *dyn_rebound_intrinsic_call(const ScrDyn *fn, const ScrDyn *thisv,
     char msg[96];
     int ml = snprintf(msg, sizeof msg, "String.prototype.%s called on null or undefined", name->v.str->data);
     scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)ml);
-  } else if (recv0->kind == SCR_DYN_ARR && (thisv->kind == SCR_DYN_STR || thisv->kind == SCR_DYN_OBJ) &&
+  } else if (recv0->kind == SCR_DYN_ARR &&
+             (thisv->kind == SCR_DYN_STR || thisv->kind == SCR_DYN_OBJ || thisv->kind == SCR_DYN_BYTES || thisv->kind == SCR_DYN_ARRBUF ||
+              thisv->kind == SCR_DYN_NUM || thisv->kind == SCR_DYN_BOOL) &&
              (dyn_name_is(name->v.str->data, "slice") || dyn_name_is(name->v.str->data, "indexOf") ||
               dyn_name_is(name->v.str->data, "lastIndexOf") || dyn_name_is(name->v.str->data, "includes") ||
               dyn_name_is(name->v.str->data, "join") || dyn_name_is(name->v.str->data, "at"))) {
-    /* A read-only, callback-free Array.prototype method over a string or array-like object: an exact copy of its elements. */
+    /* A read-only, callback-free Array.prototype method over a string, a Buffer or typed array, a number or boolean (no elements) or an array-like
+     * object: an exact copy of its elements (scr_arrlike_from_read). */
     ScrDyn *al = scr_arrlike_from_read(thisv);
     if (al != NULL && !scr_exc_pending()) r = scr_dyn_invoke(al, name->v.str->data, args, argc, "a built-in method");
     if (al != NULL) scr_dyn_release(al);
