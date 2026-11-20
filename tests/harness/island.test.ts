@@ -326,7 +326,10 @@ main();
 `,
     );
     expect(r.stdout).toBe("armed\n");
-    expect(r.stderr).toBe("Unhandled promise rejection: plain reason\n");
+    // Node v24.15.0 reports a non-Error reason as an UnhandledPromiseRejection naming the reason.
+    expect(r.stderr).toBe(
+      "Unhandled promise rejection: UnhandledPromiseRejection: This error originated either by throwing inside of an async function without a catch block, or by rejecting a promise which was not handled with .catch(). The promise rejected with the reason \"plain reason\".\n",
+    );
     expect(r.exitCode).toBe(1);
   });
 
