@@ -13543,7 +13543,7 @@ function moduleUsesInspColorsWalk(mod: IrModule): boolean {
       return;
     }
     // util.inspect.styles / .colors read as live tables.
-    if (node.kind === "libCall" && (node.fn === "insp.styles" || node.fn === "insp.colorTable")) {
+    if (node.kind === "libCall" && (node.fn === "insp.styles" || node.fn === "insp.colorTable" || node.fn === "insp.dynH")) {
       found = true;
       return;
     }

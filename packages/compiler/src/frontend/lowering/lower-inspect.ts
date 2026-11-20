@@ -2501,6 +2501,11 @@ function formatSArg(L: Lowerer, node: ts.Expression, depth: number, loc: SrcLoc,
 function formatOArg(L: Lowerer, node: ts.Expression, depth: number, loc: SrcLoc, hoist?: ArgHoist): IrExpr {
   const lowered = L.lowerExpr(node);
   const value = hoist ? hoist.take(node, lowered) : lowered;
+  if (value.type.kind === "bytes" && depth === 4) {
+    // %o over a typed array: showHidden lists its five accessors and the buffer; the run-time renderer prints them over the boxed value.
+    const box: IrExpr = { kind: "dynFrom", value, type: DYN, loc };
+    return { kind: "libCall", fn: "insp.dynH", args: [box, num(4, loc)], type: STRING, loc };
+  }
   if (value.type.kind === "bytes") {
     L.noLowering(`util.format %${depth === 4 ? "o" : "O"} of typed-array values`, node, "pass util.inspect(buf) explicitly");
   }
