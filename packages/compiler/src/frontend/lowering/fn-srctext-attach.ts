@@ -138,6 +138,11 @@ export function attachFnSrcText(
   let protoWrite: SrcLoc | null = null;
   let staticBoundReach: SrcLoc | null = null;
   let primitiveStored: SrcLoc | null = null;
+  // A function that can reach an unhandled-rejection report as the reason (moduleUsesFnText's throw / Promise.reject / func-to-dyn
+  // rules) needs its text attached too, but never a refusal: the report is the only reader.
+  let reasonFn = false;
+  let funcToDynSeen = false;
+  let promisePath = functions.some((f) => f.async === true);
   const argDynFroms = new Set<unknown>();
   const targets = new Map<string, IrFunction | null>();
   const closureNames: string[] = [];
@@ -145,6 +150,13 @@ export function attachFnSrcText(
   // only these can reach a construct site as a value.
   const dynNames = new Map<string, SrcLoc>();
   forEachIrNode({ functions, globals }, (node) => {
+    if (node.kind === "throw" && (node.value as { type?: { kind?: string } } | undefined)?.type?.kind === "func") reasonFn = true;
+    if (node.kind === "intrinsic" && typeof node.name === "string" && node.name.startsWith("promise.")) promisePath = true;
+    if (node.kind === "intrinsic" && node.name === "promise.reject") {
+      const a0 = (node.args as { kind?: string; value?: { type?: { kind?: string } } }[] | undefined)?.[0];
+      if (a0?.kind === "dynFrom" && a0.value?.type?.kind === "func") reasonFn = true;
+    }
+    if (node.kind === "dynFrom" && (node.value as { type?: { kind?: string } } | undefined)?.type?.kind === "func") funcToDynSeen = true;
     if (node.kind === "libCall" && node.fn === "fn.text" && used === null) used = node.loc as SrcLoc;
     if (
       node.kind === "libCall" && (node.fn === "dyn.construct" || node.fn === "dyn.reflectConstruct") &&
@@ -193,7 +205,7 @@ export function attachFnSrcText(
   const result: FnTextAttachResult = { used, missing: null, constructMissing: null };
   // Texts are needed for the fn.text answer and for the non-constructor message of a
   // construct site; a program with neither needs none.
-  if (used === null && construct === null) return result;
+  if (used === null && construct === null && !(reasonFn || (funcToDynSeen && promisePath))) return result;
   const fileIndex = new Map<string, Map<string, ts.Node> | null>();
   for (const name of closureNames) {
     if (targets.has(name)) continue;
