@@ -56,6 +56,7 @@ import { hasProtoTab, keyAsString, protoTabHasOr, protoTabReadChain } from "./lo
 import { inOwnShadowFamily, internalBox, methodDeclaredInFamilyBelow, ownShadowWhy, registerOwnShadowFamily } from "./lower-ownshadow.js";
 import { refuseWebCryptoFlowsAt } from "./lower-webcrypto-fence.js";
 import { codecOfType, refuseCodecValue } from "../codec-shadow.js";
+import { operandMayHoldAbsent } from "./lower-absent-str.js";
 
 const OBJECT_PROTO_READ_NAMES: ReadonlySet<string> = new Set(["constructor", "__proto__", "hasOwnProperty", "isPrototypeOf", "propertyIsEnumerable", "toString", "toLocaleString", "valueOf"]);
 function isObjectPrototypeName(n: string): boolean { return OBJECT_PROTO_READ_NAMES.has(n); }
@@ -1789,7 +1790,7 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
       }
       // A string-typed operand in a program that can hold the ABSENT string (lower-absent-str.ts): the marker is Node's undefined.
       // The operand is evaluated once, inside the test.
-      if (operand.type.kind === "string" && operand.kind !== "strLit" && L.absentStrRisk()) {
+      if (operand.type.kind === "string" && operandMayHoldAbsent(operand) && L.absentStrRisk()) {
         return {
           kind: "ternary",
           cond: { kind: "libCall", fn: "str.isAbsent", args: [operand], type: BOOL, loc },
@@ -8001,7 +8002,7 @@ function nullishArmBridge(L: Lowerer, left: IrExpr): IrExpr | null {
       }
     }
     // A string-typed left in a program that can hold the ABSENT string (lower-absent-str.ts): the marker takes the default.
-    if (left.type.kind === "string" && left.kind !== "strLit" && L.absentStrRisk()) {
+    if (left.type.kind === "string" && operandMayHoldAbsent(left) && L.absentStrRisk()) {
       const rightRaw = L.lowerExpr(expr.right);
       if (rightRaw.type.kind === "string") {
         const h = L.declareHiddenLocal("%strNullish", STRING);
