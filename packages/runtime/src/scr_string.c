@@ -1755,16 +1755,24 @@ static double scr_to_integer_or_infinity(double x) {
   return trunc(x);
 }
 
-/* Naive byte substring search (needle and hay are both well-formed UTF-8,
+/* Byte substring search (needle and hay are both well-formed UTF-8,
  * so any byte-level match starts on a char boundary — UTF-8 is
  * self-synchronizing). Empty needle matches at hay. */
 static const char *scr_byte_find(const char *hay, size_t hay_len,
                                   const char *nee, size_t nee_len) {
   if (nee_len == 0) return hay;
   if (nee_len > hay_len) return NULL;
-  for (size_t i = 0; i + nee_len <= hay_len; i++) {
-    if (hay[i] == nee[0] && memcmp(hay + i, nee, nee_len) == 0)
-      return hay + i;
+  /* The first byte is found with memchr (a vector scan in every libc this links), the rest with memcmp: the same first match as the
+   * byte-by-byte walk it replaced, which measured ~500 Ir per call against ~145 on 60-120 byte haystacks (callgrind micro). A needle whose
+   * first byte is everywhere keeps the old O(n*m) worst case. */
+  if (nee_len == 1) return (const char *)memchr(hay, (unsigned char)nee[0], hay_len);
+  const char *p = hay;
+  const char *last = hay + (hay_len - nee_len); /* the last position a match can start */
+  while (p <= last) {
+    p = (const char *)memchr(p, (unsigned char)nee[0], (size_t)(last - p) + 1);
+    if (p == NULL) return NULL;
+    if (memcmp(p + 1, nee + 1, nee_len - 1) == 0) return p;
+    p++;
   }
   return NULL;
 }
