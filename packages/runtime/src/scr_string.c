@@ -1473,12 +1473,20 @@ ScrStr *scr_str_concat8(ScrStr *a, ScrStr *b, ScrStr *c, ScrStr *d, ScrStr *e, S
   return scr_str_concat_n(ops, 8);
 }
 
+/* The absent marker (see "ABSENT-AWARE STRING OPERATIONS" below): Node's undefined held in a string slot, text "undefined", one immortal object. Defined here so
+ * scr_str_eq can test its address inline. */
+static const SCR_STR_LIT(10) scr_lit_absent = {SCR_STR_IMMORTAL, 9, 9, "undefined"};
 bool scr_str_eq(ScrStr *a, ScrStr *b) {
+  return a == b || (a->len == b->len && memcmp(a->data, b->data, a->len) == 0);
+}
+
+/* KEY / VALUE equality that keeps the absent marker apart from the real string "undefined": Map and Set keys, includes/indexOf, and ===/switch in an
+ * absent-aware program (IrModule.absentStrings) use this entry; scr_str_eq above is the property-key and everything-else equality, where the marker IS
+ * the text "undefined" (obj[undefined] is obj["undefined"]) and which hot callers inline, so it keeps its exact body. */
+bool scr_str_eq_u(ScrStr *a, ScrStr *b) {
   if (a == b) return true;
   if (a->len != b->len || memcmp(a->data, b->data, a->len) != 0) return false;
-  /* Equal text in two objects. The absent marker (Node's undefined, text "undefined", length 9) is not the real string "undefined": Map and Set
-   * keys, includes/indexOf and === tell them apart. Only a length-9 pair can be one, so every other equal pair pays one compare. */
-  return a->len != 9 || !(scr_str_is_absent(a) || scr_str_is_absent(b));
+  return a->len != 9 || (a != (ScrStr *)&scr_lit_absent && b != (ScrStr *)&scr_lit_absent);
 }
 
 /* String ordering: ECMAScript's, UTF-16 code units, over well-formed UTF-8 (every relational operator on strings, the default sort, URLSearchParams.sort). The bytes of the two strings are equal up to the first differing byte k, so everything
@@ -1534,7 +1542,6 @@ ScrStr *scr_str_empty_obj(void) { return scr_str_empty(); }
 
 /* Same bytes as the empty literal, a different object: see scr_str_absent in
  * the header. Non-static and written through the same SCR_STR_LIT shape. */
-static const SCR_STR_LIT(10) scr_lit_absent = {SCR_STR_IMMORTAL, 9, 9, "undefined"};
 ScrStr *scr_str_absent(void) { return (ScrStr *)&scr_lit_absent; }
 bool scr_str_is_absent(const ScrStr *s) { return s == (const ScrStr *)&scr_lit_absent; }
 /* The same sentinel as data, for scr_arr_try_ref (no call on the hit path). */

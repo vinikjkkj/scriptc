@@ -1004,7 +1004,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
       case "strEq": {
         const l = emitBorrowedLocal(E, e.left, [e.right]);
         const r = emitBorrowedLocal(E, e.right, []);
-        return E.newTemp(e.type, `${e.negated ? "!" : ""}scr_str_eq(${l.name}, ${r.name})`);
+        return E.newTemp(e.type, `${e.negated ? "!" : ""}${E.mod.absentStrings === true ? "scr_str_eq_u" : "scr_str_eq"}(${l.name}, ${r.name})`);
       }
       case "strCmp": {
         const l = emitBorrowedLocal(E, e.left, [e.right]);
