@@ -1173,9 +1173,21 @@ static const char *const EE_OP_NAMES[EEOP_N] = {
   "getMaxListeners",
 };
 
+/* The lengths of EE_OP_NAMES, in the same order, as compile-time constants: the lookup used to run strlen on every name (15 calls per question),
+ * and it is asked of every dyn method call and key read on a class instance that is an emitter (2.7 M times, ~40 M strlen calls, in one mysql bench run). */
+static const uint8_t EE_OP_LEN[EEOP_N] = {
+  sizeof "on" - 1, sizeof "once" - 1, sizeof "off" - 1, sizeof "emit" - 1, sizeof "addListener" - 1, sizeof "removeListener" - 1,
+  sizeof "removeAllListeners" - 1, sizeof "prependListener" - 1, sizeof "prependOnceListener" - 1, sizeof "listenerCount" - 1,
+  sizeof "listeners" - 1, sizeof "rawListeners" - 1, sizeof "eventNames" - 1, sizeof "setMaxListeners" - 1, sizeof "getMaxListeners" - 1,
+};
+
 static int ee_op_of(const char *name, size_t n) {
+#ifdef SCR_OBJ_PLANT_BUG
+  if (SCR_OBJ_PLANT_BUG == 10 && n == 4) return -1; /* the planted defect: every four-letter member (once, emit) reads as unknown */
+#endif
+  if (n < 2 || n > 19) return -1; /* the shortest and longest member names: nearly every other question ends here */
   for (int i = 0; i < EEOP_N; i++) {
-    if (strlen(EE_OP_NAMES[i]) == n && memcmp(EE_OP_NAMES[i], name, n) == 0) return i;
+    if (EE_OP_LEN[i] == n && EE_OP_NAMES[i][0] == name[0] && memcmp(EE_OP_NAMES[i], name, n) == 0) return i;
   }
   return -1;
 }
