@@ -1837,7 +1837,9 @@ double scr_math_fround(double x);
  * sweep, and 20M random bit patterns -- comparing BITS, so a +0 answered
  * where -0 was due is a failure. Zero mismatches, with a positive control
  * proving the comparator sees a -0 error when one is there. */
-#ifdef SCR_NO_FASTARM
+/* A TU compiled for SSE4.1 (-msse4.1, -march=x86-64-v2 or newer, or any non-x86 target that sets __SSE4_1__ never): floor/ceil/trunc are ONE roundsd, exact for every input including -0 and NaN, which beats the
+ * magic-number sequence below (feMul micro, 8M calls, Haswell: 2.50 s -> 1.60 s, 1,368 M -> 753 M Ir per 800k calls). Without SSE4.1 the sequence below is used. */
+#if defined(SCR_NO_FASTARM) || defined(__SSE4_1__)
 static inline double scr_trunc(double x) { return trunc(x); }
 static inline double scr_floor(double x) { return floor(x); }
 static inline double scr_ceil(double x) { return ceil(x); }
