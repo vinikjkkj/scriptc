@@ -2992,6 +2992,7 @@ export class Lowerer {
       declTwinClassDecl: (d) => this.declTwinClassDecl(d),
       accessorProducerProp: (sym) => this.accessorProducerProp(sym),
       nullPayloadPromiseProp: (sym) => this.nullPayloadPromiseProp(sym),
+      demandedOptionalMembers: (t) => this.demandedOptionalMembers(t),
       unconstrainedTpArms: (tpDecl) => this.unconstrainedTpArms(tpDecl),
     };
     // --dynamic: modules reachable only through dynamic import() joined
@@ -20773,6 +20774,64 @@ export class Lowerer {
     if (!f || f.type.kind !== "promise") return null;
     if (f.type.inner.kind !== "void") return null;
     return f.type;
+  }
+
+  /** Optional members a cast reads off a record type that does not declare them (TypeMapperCtx.demandedOptionalMembers). Keyed by the source
+   * type's symbol (the interface or alias), or by the type itself for an instantiation of a generic. Computed on first ask, for
+   * accessorProducerCache's reason and with its timing rule: after fileTag is populated, before shape interning. */
+  private demandedOptionalCache: Map<ts.Symbol | ts.Type, { name: string; type: ts.Type }[]> | null = null;
+
+  demandedOptionalMembers(t: ts.Type): readonly { name: string; type: ts.Type }[] | undefined {
+    if (this.fileTag.size === 0) return undefined; // too early: the program files are not registered yet, and an answer now would be cached empty
+    this.demandedOptionalCache ??= this.scanDemandedOptionalMembers();
+    if (this.demandedOptionalCache.size === 0) return undefined;
+    return this.demandedOptionalCache.get(this.demandKeyOf(t));
+  }
+
+  private demandKeyOf(t: ts.Type): ts.Symbol | ts.Type {
+    const sym = t.getSymbol();
+    const generic = t.getAliasTypeArguments() !== undefined || ((t.flags & ts.TypeFlags.Object) !== 0 && (((t as ts.ObjectType).objectFlags & ts.ObjectFlags.Reference) !== 0) && this.checker.getTypeArguments(t as ts.TypeReference).length > 0);
+    return sym !== undefined && !generic ? sym : t;
+  }
+
+  private scanDemandedOptionalMembers(): Map<ts.Symbol | ts.Type, { name: string; type: ts.Type }[]> {
+    const out = new Map<ts.Symbol | ts.Type, { name: string; type: ts.Type }[]>();
+    const checker = this.checker;
+    const visit = (n: ts.Node): void => {
+      const asn = ts.isAsExpression(n) ? n : ts.isAssertionExpression(n) ? (n as unknown as ts.AsExpression) : null;
+      if (asn !== null && ts.isTypeLiteralNode(asn.type)) {
+        const src = checker.getTypeAtLocation(asn.expression);
+        const dst = checker.getTypeAtLocation(asn.type);
+        // A plain record source only: a class instance, a union, a primitive or a callable has its own representation.
+        const srcSym = src.getSymbol();
+        if (
+          (src.flags & ts.TypeFlags.Object) !== 0 &&
+          (src.flags & (ts.TypeFlags.Union | ts.TypeFlags.Intersection)) === 0 &&
+          (srcSym === undefined || (srcSym.flags & ts.SymbolFlags.Class) === 0) &&
+          checker.getCallSignatures(src).length === 0 &&
+          checker.getConstructSignatures(src).length === 0 &&
+          checker.getIndexInfosOfType(src).length === 0 &&
+          (dst.flags & ts.TypeFlags.Object) !== 0
+        ) {
+          for (const p of checker.getPropertiesOfType(dst)) {
+            if ((p.flags & ts.SymbolFlags.Optional) === 0) continue;
+            if (checker.getPropertyOfType(src, p.name) !== undefined) continue;
+            const key = this.demandKeyOf(src);
+            const list = out.get(key) ?? [];
+            if (!list.some((x) => x.name === p.name)) list.push({ name: p.name, type: checker.getTypeOfSymbol(p) });
+            out.set(key, list);
+          }
+        }
+      }
+      ts.forEachChild(n, visit);
+    };
+    for (const sf of this.fileTag.keys()) {
+      if (sf.isDeclarationFile) continue;
+      if (!sf.text.includes(" as {") && !sf.text.includes("<{")) continue;
+      ts.forEachChild(sf, visit);
+    }
+    if (process.env["SCRIPTC_DEMAND_WHY"] !== undefined) process.stderr.write(`[demand] keys=${String(out.size)} ${[...out.values()].map((v) => v.map((x) => x.name).join(",")).join(";")}\n`);
+    return out;
   }
 
   private scanNullPayloadPromiseProps(): Set<ts.Symbol> {
