@@ -430,6 +430,10 @@ ScrDyn *scr_dyn_builtin_ctor_value(double which) {
 
 __attribute__((constructor)) static void scr_dyn_proto_install_ctor_provider(void) { scr_builtin_ctor_provider = scr_dyn_builtin_ctor_value; }
 
+/* scr_dyn_invoke.c installs scr_dyn_intrinsic_method_get here: a program that links this unit without the dispatch unit (a String
+ * function value only) has no method table to ask, and a primitive prototype then answers no method. */
+ScrDyn *(*scr_dyn_intrinsic_method_hook)(ScrDyn *recv, const ScrStr *key) = NULL;
+
 /* The registry's own +1 on each prototype-method function minted by proto_intrinsic_member; released at exit. */
 static struct { char name[24]; ScrDyn *fn; } cache[4][48];
 static void proto_method_cache_teardown(void) {
@@ -461,7 +465,7 @@ static ScrDyn *proto_intrinsic_member(const ScrDyn *recv, const char *key, size_
         else if (slot == 2) sample = scr_dyn_new_bool(false);
         else sample = scr_dyn_new_arr();
         ScrStr *k = scr_str_new(key, key_len);
-        ScrDyn *fn = scr_dyn_intrinsic_method_get(sample, k);
+        ScrDyn *fn = scr_dyn_intrinsic_method_hook != NULL ? scr_dyn_intrinsic_method_hook(sample, k) : NULL;
         scr_str_release(k);
         scr_dyn_release(sample);
         if (fn != NULL && fn->kind == SCR_DYN_FUNC) {
