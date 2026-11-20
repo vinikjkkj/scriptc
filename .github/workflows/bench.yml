@@ -57,6 +57,10 @@ on:
         description: "1: also one perf record per arm and for Node (self samples), top leaves printed to the log; installs linux-tools on the runner"
         required: false
         default: "0"
+      threads:
+        description: "1: pmon samples /proc/<pid>/task/* of the lane and of its child every ~50 ms (CPU per thread group, blocked-syscall histogram); the log prints them. Adds a little pmon work, so compare only arms of the same run"
+        required: false
+        default: "0"
       layout:
         description: "none, or order: build instrumented (--layout-profile), run once with SIGUSR1 where the work starts, make order.txt, build ordered, and A/B ordered against plain per compiler"
         required: false
@@ -226,6 +230,7 @@ jobs:
           EXTRA_ENV: ${{ inputs.extra_env }}
           REPORT_TOP: ${{ inputs.report }}
           PERF: ${{ inputs.perf }}
+          THREADS: ${{ inputs.threads }}
         run: bash tests/bench/harness/job.sh "${{ matrix.program }}"
       # every file a run writes: logs, pmon and smaps json, stdout/stderr, callgrind/massif output, layout profile and order.txt, whatever extra_env pointed @OUT@ at
       - uses: actions/upload-artifact@v4

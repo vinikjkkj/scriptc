@@ -115,6 +115,57 @@ static long scan_kids_hwm(pid_t root) {
   return best;
 }
 
+
+/* PMON_THREADS=1: every ~50 ms read /proc/<pid>/task/<tid>/stat of the lane and of every descendant (the fake-server child included). Per (pid,tid): the last seen
+ * utime+stime (a floor: a thread that exits between two samples loses its tail), its comm, how many samples found it running (R) and, for the others, a histogram of
+ * the syscall it was blocked in (/proc/<pid>/task/<tid>/syscall, x86-64 numbers; -1 = not in a syscall). It answers "which thread burned the CPU" and "where did the
+ * wall time go while the thread was not on a CPU". */
+typedef struct { int pid, tid; char comm[20]; double cpu_ms; int n, run; unsigned short sys[512]; } Thr;
+static Thr *thr; static int nthr, capthr;
+static Thr *thr_get(int pid, int tid) {
+  for (int k = 0; k < nthr; k++) if (thr[k].pid == pid && thr[k].tid == tid) return &thr[k];
+  if (nthr == capthr) { capthr = capthr ? capthr * 2 : 64; thr = realloc(thr, capthr * sizeof(Thr)); }
+  Thr *t = &thr[nthr++]; memset(t, 0, sizeof *t); t->pid = pid; t->tid = tid; return t;
+}
+static void sample_task(int pid, int tid) {
+  char path[96], buf[1024];
+  snprintf(path, sizeof path, "/proc/%d/task/%d/stat", pid, tid);
+  FILE *f = fopen(path, "r"); if (!f) return;
+  size_t n = fread(buf, 1, sizeof buf - 1, f); fclose(f); buf[n] = 0;
+  char *a = strchr(buf, '('), *b = strrchr(buf, ')'); if (!a || !b) return;
+  char state; unsigned long long ut, st;
+  if (sscanf(b + 2, "%c %*d %*d %*d %*d %*d %*u %*u %*u %*u %*u %llu %llu", &state, &ut, &st) != 3) return;
+  Thr *t = thr_get(pid, tid);
+  size_t cl = (size_t)(b - a - 1); if (cl > sizeof t->comm - 1) cl = sizeof t->comm - 1;
+  memcpy(t->comm, a + 1, cl); t->comm[cl] = 0;
+  double c = (double)(ut + st) * 1000.0 / hz; if (c > t->cpu_ms) t->cpu_ms = c;
+  t->n++;
+  if (state == 'R') { t->run++; return; }
+  snprintf(path, sizeof path, "/proc/%d/task/%d/syscall", pid, tid);
+  f = fopen(path, "r"); if (!f) return;
+  long nr = -2; if (fscanf(f, "%ld", &nr) != 1) nr = -2; fclose(f);
+  if (nr >= 0 && nr < 512 && t->sys[nr] < 65535) t->sys[nr]++;
+}
+static void sample_proc_tasks(int pid) {
+  char path[64]; snprintf(path, sizeof path, "/proc/%d/task", pid);
+  DIR *d = opendir(path); if (!d) return;
+  struct dirent *e;
+  while ((e = readdir(d))) { if (e->d_name[0] < '1' || e->d_name[0] > '9') continue; sample_task(pid, atoi(e->d_name)); }
+  closedir(d);
+}
+static void sample_threads(pid_t root) {
+  sample_proc_tasks(root);
+  DIR *d = opendir("/proc"); if (!d) return;
+  struct dirent *e;
+  while ((e = readdir(d))) {
+    if (e->d_name[0] < '1' || e->d_name[0] > '9') continue;
+    pid_t p = (pid_t)atoi(e->d_name);
+    if (p == root || p == getpid() || !is_desc(p, root)) continue;
+    sample_proc_tasks(p);
+  }
+  closedir(d);
+}
+
 typedef struct { double t_ms, cpu_ms; long hwm_kb; char *line; } Mark;
 static Mark *marks; static int nmarks, capmarks;
 
@@ -145,7 +196,7 @@ int main(int argc, char **argv) {
   long hwm_max = 0, kids_hwm_max = 0; int pipe_open = 1;
   char linebuf[65536]; size_t ll = 0;
   char rb[65536];
-  double last_kids_scan = 0;
+  double last_kids_scan = 0, last_thr = 0; int thr_on = getenv("PMON_THREADS") && getenv("PMON_THREADS")[0] == '1';
   int exited = 0; siginfo_t si;
   memset(&si, 0, sizeof si);
   double cpu_self = 0, cpu_kids = 0;
@@ -177,6 +228,7 @@ int main(int argc, char **argv) {
     long h = read_hwm_kb(pid); if (h > hwm_max) hwm_max = h;
     double tn = now_ms();
     if (tn - last_kids_scan > 250) { long kh = scan_kids_hwm(pid); if (kh > kids_hwm_max) kids_hwm_max = kh; last_kids_scan = tn; }
+    if (thr_on && tn - last_thr > 50) { sample_threads(pid); last_thr = tn; }
     /* has the lane exited? (WNOWAIT keeps the zombie, so /proc stat survives) */
     si.si_pid = 0;
     if (waitid(P_PID, pid, &si, WEXITED | WNOHANG | WNOWAIT) == 0 && si.si_pid == pid) { exited = 1; }
@@ -207,6 +259,15 @@ int main(int argc, char **argv) {
     fprintf(o, "%s{\"t_ms\":%.1f,\"cpu_ms\":%.1f,\"hwm_kb\":%ld,\"line\":\"", m ? "," : "", marks[m].t_ms, marks[m].cpu_ms, marks[m].hwm_kb);
     for (char *c = marks[m].line; *c; c++) { if (*c == '"' || *c == '\\') fputc('\\', o); if ((unsigned char)*c >= 32) fputc(*c, o); }
     fprintf(o, "\"}");
+  }
+  fprintf(o, "],\"threads\":[");
+  for (int k = 0; k < nthr; k++) {
+    Thr *t = &thr[k];
+    fprintf(o, "%s{\"pid\":%d,\"tid\":%d,\"main\":%d,\"comm\":\"", k ? "," : "", t->pid, t->tid, t->pid == t->tid);
+    for (char *c = t->comm; *c; c++) { if (*c == '"' || *c == '\\') fputc('\\', o); if ((unsigned char)*c >= 32) fputc(*c, o); }
+    fprintf(o, "\",\"cpu_ms\":%.1f,\"samples\":%d,\"running\":%d,\"sys\":{", t->cpu_ms, t->n, t->run);
+    int first = 1; for (int q = 0; q < 512; q++) if (t->sys[q]) { fprintf(o, "%s\"%d\":%d", first ? "" : ",", q, t->sys[q]); first = 0; }
+    fprintf(o, "}}");
   }
   fprintf(o, "]}\n");
   if (o != stderr) fclose(o);

@@ -87,6 +87,44 @@ for (const l of Object.keys(cgs)) {
   console.log('   delta_Ir | base_Ir | cand_Ir | function')
   for (const [k, dv, a, c] of d.slice(0, top)) console.log(`   ${dv > 0 ? '+' : ''}${dv} | ${a} | ${c} | ${short(k)}`)
 }
+
+// threads (PMON_THREADS=1 -> pmon.c): CPU per thread group and where the non-running samples were blocked, from the FIRST rep of each arm's pmon json
+const SYS = { 0: 'read', 1: 'write', 7: 'poll', 17: 'pread64', 18: 'pwrite64', 23: 'select', 35: 'nanosleep', 44: 'sendto', 45: 'recvfrom', 46: 'sendmsg', 47: 'recvmsg', 202: 'futex', 230: 'clock_nanosleep', 232: 'epoll_wait', 270: 'pselect6', 271: 'ppoll', 281: 'epoll_pwait', 441: 'epoll_pwait2' }
+for (const f of existsSync(dir) ? readdirSync(dir).sort() : []) {
+  const m = /^(.*)\.0\.pmon\.json$/.exec(f)
+  if (!m) continue
+  let pj; try { pj = JSON.parse(readFileSync(`${dir}/${f}`, 'utf8')) } catch { continue }
+  if (!pj.marks) continue
+  const label = m[1]
+  if (pj.threads && pj.threads.length) {
+    const lane = pj.threads.find((t) => t.main && pj.threads.every((u) => u.pid >= t.pid || true))
+    const pids = [...new Set(pj.threads.map((t) => t.pid))]
+    const laneP = pids.reduce((a, b) => (a < b ? a : b)) // the lane is the first process pmon forked: the lowest pid (descendants fork later)
+    console.log(`-- threads ${label} rep 0 (wall ${pj.wall_ms} ms, pmon cpu_self ${pj.cpu_self_ms} ms; per-thread cpu is a floor, sampled every ~50 ms)`)
+    console.log('   process | thread group (comm) | n threads | cpu_ms | samples running | samples blocked by syscall')
+    const g = new Map()
+    for (const t of pj.threads) {
+      const k = `${t.pid === laneP ? 'LANE' : 'child ' + t.pid}|${t.comm.replace(/\d+$/, '')}`
+      const e = g.get(k) ?? { n: 0, cpu: 0, run: 0, tot: 0, sys: {} }
+      e.n++; e.cpu += t.cpu_ms; e.run += t.running; e.tot += t.samples
+      for (const [q, c] of Object.entries(t.sys)) e.sys[q] = (e.sys[q] ?? 0) + c
+      g.set(k, e)
+    }
+    for (const [k, e] of [...g].sort((a, b) => b[1].cpu - a[1].cpu).slice(0, 14)) {
+      const sy = Object.entries(e.sys).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([q, c]) => `${SYS[q] ?? 'sys' + q}=${c}`).join(' ')
+      console.log(`   ${k.split('|').join(' | ')} | ${e.n} | ${Math.round(e.cpu)} | ${e.run}/${e.tot} | ${sy}`)
+    }
+  }
+  if (pj.marks.length) {
+    console.log(`-- phases ${label} rep 0: wall ms | cpu_self ms | cpu/wall | mark`)
+    let pt = 0, pc = 0
+    for (const mk of pj.marks.slice(0, 60)) {
+      const dt = mk.t_ms - pt, dc = mk.cpu_ms - pc
+      console.log(`   ${Math.round(dt)} | ${Math.round(dc)} | ${dt > 0 ? (dc / dt).toFixed(2) : ''} | ${String(mk.line).slice(0, 70)}`)
+      pt = mk.t_ms; pc = mk.cpu_ms
+    }
+  }
+}
 for (const f of existsSync(dir) ? readdirSync(dir).sort() : []) {
   const m = /^(.*)\.perf\.data$/.exec(f)
   if (!m) continue
