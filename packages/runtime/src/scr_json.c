@@ -746,7 +746,7 @@ static __attribute__((noinline)) ScrDyn *scr_dyn_alloc_fresh(ScrDynKind kind) {
   return fresh;
 }
 #ifdef SCR_REL_CENSUS
-unsigned long long scr_relc_new[24], scr_relc_esc[24];
+unsigned long long scr_relc_new[24], scr_relc_esc[24], scr_relc_fin[24][2];
 #endif
 static ScrDyn *scr_dyn_alloc(ScrDynKind kind) {
 #ifdef SCR_REL_CENSUS
@@ -975,6 +975,9 @@ static void scr_dyn_gcfree(void *o) {
 /* The teardown of a dyn whose count just reached zero. Out of line and cold so scr_dyn_release below is a leaf the compiler need not give
  * a register-saving prologue: a decrement that does not free (about 4 releases in 5 on the mysql arm) is a handful of instructions. */
 static __attribute__((noinline)) void scr_dyn_release_final(ScrDyn *d) {
+#ifdef SCR_REL_CENSUS
+  if (d->kind == SCR_DYN_NUM || d->kind == SCR_DYN_BOOL) { scr_relc_fin[d->kind][d->null_proto ? 1 : 0]++; d->null_proto = false; }
+#endif
   scr_cyc_on_dead(d); /* drop any candidate-buffer entry before teardown */
   /* THE WEAK-KEY DEATH HOOK, AND THE ROUTE scr_cyc_free CANNOT SEE.
    *
@@ -1322,7 +1325,8 @@ static void scr_relc_dump(void) {
   if (!f) return;
   fprintf(f, "# scr_dyn_obj_get census: bucket(len) calls hits iterations(sum of entries visited) | big-index calls %llu\n", scr_relc_big);
   static const char *nm[] = {"0", "1-3", "4-7", "8-15", "16-31", "32-63", "64+"};
-  { static const char *kn[] = {"NULL","BOOL","NUM","STR","ARR","OBJ","UNDEF","BYTES","FUNC","HANDLE","PROMISE","JSVAL","OBJINST","ARRBUF","BIG","MAP","PROXY"}; extern unsigned long long scr_relc_new[24], scr_relc_esc[24];
+  { static const char *kn[] = {"NULL","BOOL","NUM","STR","ARR","OBJ","UNDEF","BYTES","FUNC","HANDLE","PROMISE","JSVAL","OBJINST","ARRBUF","BIG","MAP","PROXY"}; extern unsigned long long scr_relc_new[24], scr_relc_esc[24], scr_relc_fin[24][2];
+    for (int i = 1; i < 3; i++) fprintf(f, "scalar boxes FREED kind %s: never-retained %llu ever-retained %llu\n", kn[i], scr_relc_fin[i][0], scr_relc_fin[i][1]);
     for (int i = 0; i < 17; i++) fprintf(f, "box kind %-8s created %llu first-retained(rc 1->2) %llu\n", kn[i], scr_relc_new[i], scr_relc_esc[i]); }
   for (int i = 0; i < 7; i++) fprintf(f, "len %-5s calls %llu hits %llu iters %llu\n", nm[i], scr_relc_calls[i], scr_relc_hit[i], scr_relc_iter[i]);
   fclose(f);

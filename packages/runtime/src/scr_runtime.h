@@ -5731,6 +5731,7 @@ static inline ScrDyn *scr_dyn_retain(ScrDyn *d) {
   if (d->rc != SIZE_MAX) {
 #ifdef SCR_REL_CENSUS
     if (d->rc == 1) scr_relc_esc[d->kind]++;
+    if (d->kind == SCR_DYN_NUM || d->kind == SCR_DYN_BOOL) d->null_proto = true; /* LAB: the box was retained at least once (null_proto is unused by a scalar) */
 #endif
     d->rc++;
     /* A dyn value carries a cycle header (scr_json.c): a re-retained
