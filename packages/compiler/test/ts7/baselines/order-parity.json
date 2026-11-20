@@ -17426,9 +17426,99 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/25955-an-unhandled-plain-object-rejection-names-the-reason-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25955-an-unhandled-plain-object-rejection-names-the-reason-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25956-an-unhandled-class-instance-rejection-names-the-reason-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25956-an-unhandled-class-instance-rejection-names-the-reason-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25957-an-unhandled-number-rejection-names-the-reason-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25957-an-unhandled-number-rejection-names-the-reason-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25958-an-unhandled-array-rejection-names-the-reason-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25958-an-unhandled-array-rejection-names-the-reason-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25959-an-unhandled-date-rejection-names-the-reason-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25959-an-unhandled-date-rejection-names-the-reason-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2596-net-arg-ladders.cjs": {
    "order": [
     "<repo>/tests/corpus/2596-net-arg-ladders.cjs"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25960-an-unhandled-bigint-rejection-names-the-reason-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25960-an-unhandled-bigint-rejection-names-the-reason-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25961-an-unhandled-symbol-rejection-names-the-reason-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25961-an-unhandled-symbol-rejection-names-the-reason-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25962-an-unhandled-null-rejection-names-the-reason-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25962-an-unhandled-null-rejection-names-the-reason-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25963-an-unhandled-boolean-rejection-names-the-reason-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25963-an-unhandled-boolean-rejection-names-the-reason-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25964-an-unhandled-map-rejection-names-the-reason-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25964-an-unhandled-map-rejection-names-the-reason-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25965-an-unhandled-set-rejection-names-the-reason-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25965-an-unhandled-set-rejection-names-the-reason-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25966-an-unhandled-uint8array-rejection-names-the-reason-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25966-an-unhandled-uint8array-rejection-names-the-reason-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25967-an-unhandled-object-with-tostring-rejection-names-the-reason-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25967-an-unhandled-object-with-tostring-rejection-names-the-reason-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25968-an-unhandled-engine-object-rejection-names-the-reason-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25968-an-unhandled-engine-object-rejection-names-the-reason-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/25969-an-unhandled-regexp-rejection-names-the-reason-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/25969-an-unhandled-regexp-rejection-names-the-reason-like-node.ts"
    ],
    "diags": []
   },
