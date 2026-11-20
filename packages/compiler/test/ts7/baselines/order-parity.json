@@ -17953,6 +17953,18 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26168-an-absent-capture-in-a-string-typed-binding-is-undefined-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26168-an-absent-capture-in-a-string-typed-binding-is-undefined-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26169-a-split-capture-that-did-not-participate-is-undefined-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26169-a-split-capture-that-did-not-participate-is-undefined-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2617-enum-static-field-import/main.ts": {
    "order": [
     "<repo>/tests/corpus/2617-enum-static-field-import/a.ts",
