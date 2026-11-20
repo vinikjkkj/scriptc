@@ -69,6 +69,11 @@ for side in "${sides[@]}"; do
   fi
 done
 [ ${#arms[@]} -gt 0 ] || { echo "no binary was built"; exit 1; }
+# CECHO="name,name": the emitted C of functions whose identifier contains a name (the program TU the build kept next to the binary), echoed through LABECHO (first 2 definitions, 200 lines each)
+if [ -n "${CECHO:-}" ]; then
+  _c=$(find "$BENCH_WORK/out/cand" -name '*.c' -size +50k 2>/dev/null | head -1)
+  [ -n "$_c" ] && python3 -I "$BENCH_DIR/harness/cecho.py" "$ART" "$_c" "$CECHO" || echo "cecho: no kept C found under out/cand"
+fi
 flags=(--store "$store" --out "$BENCH_WORK/result" --reps "$REPS" --smaps)
 [ "${NODE_REF:-true}" = true ] && flags+=(--node)
 [ "${IR:-0}" != 0 ] && flags+=(--ir "$IR")
