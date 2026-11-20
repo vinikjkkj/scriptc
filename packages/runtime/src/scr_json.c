@@ -1328,6 +1328,9 @@ static inline void scr_dyn_obj_idx_drop(ScrDyn *obj) {
 
 /* LAB CENSUS (mt1, never lands): shape of every own-member lookup. */
 static uint64_t cen_n[7][12]; /* [len bucket][0 miss, 1..10 hit pos bucket (0,1,2,3,4-5,6-7,8-15,16-31,32-127,128+), 11 = memo-predicted hit] */
+static struct { const ScrDyn *d; uint64_t n; uint32_t len; char k0[24], k1[24]; } cen_obj[1024];
+static uint64_t cen_objmax;
+static uint64_t cen_big[3][4]; /* [key len <=8,<=16,>16][miss, hit, memo-hit, obj len>=128] */
 static uint64_t cen_cmp[7], cen_memo_hit[7], cen_memo_stale[7], cen_calls[7], cen_litptr[7];
 static struct { const char *k; uint32_t pos; } cen_memo[4096];
 static ScrDyn *cen_impl(const ScrDyn *d, const char *key, size_t key_len);
@@ -1343,6 +1346,8 @@ static void cen_dump(void) {
     for (int j = 1; j <= 10; j++) fprintf(f, " %llu", (unsigned long long)cen_n[i][j]);
     fprintf(f, " cmp %llu memohit %llu memostale %llu\n", (unsigned long long)cen_cmp[i], (unsigned long long)cen_memo_hit[i], (unsigned long long)cen_memo_stale[i]);
   }
+  for (int i = 0; i < 3; i++) fprintf(f, "big(len>=32) keylen-bucket %d: miss %llu hit %llu memohit %llu objlen>=128 %llu\n", i, (unsigned long long)cen_big[i][0], (unsigned long long)cen_big[i][1], (unsigned long long)cen_big[i][2], (unsigned long long)cen_big[i][3]);
+  for (int i = 0; i < 1024; i++) if (cen_obj[i].d && cen_obj[i].n >= 500000) fprintf(f, "bigobj len %u lookups(since slot taken) %llu first-key '%s' last-key '%s'\n", cen_obj[i].len, (unsigned long long)cen_obj[i].n, cen_obj[i].k0, cen_obj[i].k1);
   fclose(f);
 }
 __attribute__((constructor)) static void cen_init(void) { atexit(cen_dump); }
@@ -1350,7 +1355,23 @@ ScrDyn *scr_dyn_obj_get(const ScrDyn *d, const char *key, size_t key_len) {
   const uint32_t len = d->v.obj.len;
   const int lbk = len == 0 ? 0 : len <= 2 ? 1 : len <= 4 ? 2 : len <= 8 ? 3 : len <= 16 ? 4 : len <= 31 ? 5 : 6;
   cen_calls[lbk]++;
-  if (len >= 32) return cen_impl(d, key, key_len);
+  if (len >= 32) {
+    const ScrDynEntry *be = scr_dyn_obj_idx_find(d, key, key_len);
+    const int kb = key_len <= 8 ? 0 : key_len <= 16 ? 1 : 2;
+    size_t bh = (size_t)(((uintptr_t)key * 0x9E3779B97F4A7C15ull) >> 52);
+    if (be == NULL) cen_big[kb][0]++;
+    else {
+      uint32_t bp = (uint32_t)(be - d->v.obj.entries);
+      cen_big[kb][1]++;
+      if (cen_memo[bh].k == key && cen_memo[bh].pos == bp) cen_big[kb][2]++;
+      cen_memo[bh].k = key; cen_memo[bh].pos = bp;
+    }
+    if (len >= 128) cen_big[kb][3]++;
+    { size_t oh = (size_t)(((uintptr_t)d * 0x9E3779B97F4A7C15ull) >> 54);
+      if (cen_obj[oh].d != d) { cen_obj[oh].d = d; cen_obj[oh].n = 0; cen_obj[oh].len = len; const ScrDynEntry *e0 = d->v.obj.entries; snprintf(cen_obj[oh].k0, 24, "%.*s", (int)(e0[0].key_len < 23 ? e0[0].key_len : 23), e0[0].key); snprintf(cen_obj[oh].k1, 24, "%.*s", (int)(e0[len-1].key_len < 23 ? e0[len-1].key_len : 23), e0[len-1].key); }
+      cen_obj[oh].n++; if (cen_obj[oh].n > cen_objmax) { cen_objmax = cen_obj[oh].n; } }
+    return cen_impl(d, key, key_len);
+  }
   const ScrDynEntry *ents = d->v.obj.entries;
   uint32_t pos = ~0u;
   for (uint32_t i = 0; i < len; i++) if (SCR_DYN_KEY_EQ(&ents[i], key, key_len)) { pos = i; break; }
