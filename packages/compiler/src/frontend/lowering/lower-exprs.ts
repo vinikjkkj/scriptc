@@ -9768,7 +9768,16 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
       // `unknown[]` annotation or a collapsed `(string | object)[]` maps
       // to DYN wholesale now (mapType's dyn-element array rule), so the
       // literal IS the dyn array.
-      if (isJsSourceFile(expr.getSourceFile()) || mapped?.kind === "dyn") {
+      // An `any[]` literal (own or contextual type) with no static home: the
+      // whole-array checked-dynamic value, the same stance a spelled `any[]`
+      // declaration takes (dynFallbackType) -- `for (const v of [a, 1])` with
+      // `a: any` and `const xs: any[] = [a, 1]` were SC2011 while the same
+      // array built through a variable or an argument compiled.
+      const anyArrayLiteral = !L.dynamic && mapped === null &&
+        [tsType, L.typeOf(expr)].some((t) =>
+          L.checker.isArrayType(t) &&
+          ((L.checker.getTypeArguments(t as ts.TypeReference)[0]?.flags ?? 0) & ts.TypeFlags.Any) !== 0);
+      if (isJsSourceFile(expr.getSourceFile()) || mapped?.kind === "dyn" || anyArrayLiteral) {
         const spreads: { at: number; what: string | null }[] = [];
         const elems = expr.elements.map((el, i): IrExpr => {
           if (ts.isSpreadElement(el)) return lowerDynLiteralSpread(L, el, i, spreads);
