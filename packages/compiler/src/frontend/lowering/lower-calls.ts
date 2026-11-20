@@ -52,6 +52,7 @@ import { internalBox } from "./lower-ownshadow.js";
 import { erasedViewMemberRefusal } from "./lower-erasedview.js";
 import { ArgHoist, lowerConsoleInspectArg, lowerFormatCall, lowerUtilFormatApply, refuseCodecCoercionCall, refuseCodecInspect } from "./lower-inspect.js";
 import { STREAM_API_MEMBERS, lowerStreamMethodCall, lowerStreamModuleCall, lowerStreamStaticCall, streamSidesOf } from "./lower-stream.js";
+import { collatorModeOf } from "./lower-collator.js";
 import { isRequireBindingIdent, ambientNsRootOf, ambientUndefReadType, ambientUndefVarRootOf, ambientUndefinedFnSymbolOf, contextualUndefReadType, fenceEarlyAliasUse, fenceEarlyNsMemberRef, moduleNsOwnKeys, moduleNsSourceFileOf, nsMemberIdentOf, nsPathPrefix, nsUndefRead } from "./lower-namespaces.js";
 import { declSymbolOf } from "./lower-modules.js";
 import { expandoMemberRead } from "./lower-expando.js";
@@ -6826,6 +6827,7 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
         // The composed en-US Intl.NumberFormat form — before the member
         // fences (the receiver's Intl.NumberFormat type has no mapping).
         lowerIntlNumberFormatCall(L, expr, expr.expression) ??
+        lowerIntlCollatorCompareCall(L, expr, expr.expression) ??
         lowerIntlDateTimeFormatCall(L, expr, expr.expression) ??
         lowerGroupByStaticCall(L, expr, expr.expression) ??
         // Iterator-helper chains rooted at arr.values() — before the
@@ -13032,7 +13034,36 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
     return lowerDateLocaleFormat(L, ms, 7, ctorArgs[0], ctorArgs[1], loc, "Intl.DateTimeFormat");
   }
 
-  /** The composed en-US Intl.NumberFormat form: `new Intl.NumberFormat(
+  /** The composed collator form: `new Intl.Collator(locales, options).compare(a, b)` (and the callable spelling without `new`). A collator
+   * VALUE has no representation, so only the composed form lowers; its locales and options fold at compile time (lower-collator.ts) and
+   * the call is the localeCompare intrinsic over them. Null when the callee isn't a Collator-construction .compare. */
+  function lowerIntlCollatorCompareCall(L: Lowerer, call: ts.CallExpression,
+    access: ts.PropertyAccessExpression,): IrExpr | null {
+    if (L.chainBlocked(call, access)) return null;
+    if (access.name.text !== "compare") return null;
+    let recv: ts.Expression = access.expression;
+    while (ts.isParenthesizedExpression(recv)) recv = recv.expression;
+    if (!(ts.isNewExpression(recv) || (ts.isCallExpression(recv) && !recv.questionDotToken))) return null;
+    const ctor = recv.expression;
+    if (!ts.isPropertyAccessExpression(ctor) || ctor.questionDotToken || ctor.name.text !== "Collator" || !L.isStdlibGlobal(ctor.expression, "Intl")) return null;
+    const ctorArgs = recv.arguments ?? [];
+    const loc = locOf(call);
+    if (ctorArgs.length > 2 || ctorArgs.some((x) => ts.isSpreadElement(x))) {
+      L.noLowering(`Intl.Collator with ${ctorArgs.length} constructor arguments`, recv);
+    }
+    if (call.arguments.length !== 2 || call.arguments.some((x) => ts.isSpreadElement(x))) {
+      L.noLowering(`Intl.Collator(...).compare with ${call.arguments.length} arguments`, call);
+    }
+    const mode = collatorModeOf(L, ctorArgs[0], ctorArgs[1], recv);
+    const a = L.lowerExpr(call.arguments[0]!);
+    const b = L.lowerExpr(call.arguments[1]!);
+    if (a.type.kind !== "string") L.badType(call.arguments[0]!, L.typeOf(call.arguments[0]!));
+    if (b.type.kind !== "string") L.badType(call.arguments[1]!, L.typeOf(call.arguments[1]!));
+    if (mode === 3) return { kind: "strIntrinsic", method: "localeCompare", receiver: a, args: [b], type: F64, loc };
+    return { kind: "strIntrinsic", method: "localeCompareMode", receiver: a, args: [b, { kind: "numLit", value: mode, type: F64, loc }], type: F64, loc };
+  }
+
+/** The composed en-US Intl.NumberFormat form: `new Intl.NumberFormat(
    * "en-US").format(x)` (and the callable spelling without `new` — the
    * spec makes them the same formatter). Only the COMPOSED form lowers —
    * formatter values have no representation — and only the one locale

@@ -1985,7 +1985,7 @@ export const BUILTIN_MODULE_FENCE_HINTS: Record<string, Record<string, string | 
     ) {
       hint =
         "collation, plural/relative-time/list/segment/display-name and DateTimeFormat locale data " +
-        "are not in the static runtime (localeCompare orders by the CLDR root collation; Intl.Collator and locale or options arguments have no lowering) — what lowers: " +
+        "are not in the static runtime (localeCompare orders by the CLDR root collation, and takes literal locales and options for the languages that collate as the root, also as the composed new Intl.Collator(locales, options).compare(a, b); tailored languages and a hoisted collator value have no lowering) — what lowers: " +
         "number and bigint toLocaleString and the composed new Intl.NumberFormat(locales, options).format(x) " +
         "for every ICU locale, option and numbering system, and Date toLocale*String and the composed " +
         "new Intl.DateTimeFormat(locales, options).format(x) for every locale, calendar, numbering system and time zone";
