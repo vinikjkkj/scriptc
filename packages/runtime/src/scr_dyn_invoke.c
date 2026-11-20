@@ -878,6 +878,7 @@ static ScrDyn *dyn_object_proto_method(ScrDyn *recv, const char *method,
 /* Names each prototype declares BEYOND what's implemented here — these
  * fence loudly instead of mis-answering "is not a function". */
 ScrStr *(*scr_dyn_str_case_hook)(const ScrStr *s, int to_lower) = NULL;
+ScrDyn *(*scr_dyn_str_ext_hook)(ScrDyn *recv, const char *method, ScrDyn *const *args, size_t argc, bool *handled) = NULL;
 
 static bool dyn_str_proto_unimpl(const char *m) {
   /* One packed byte table, not an array of pointers: a pointer table is a startup relocation per entry (the gated compare below stopped
@@ -1755,8 +1756,9 @@ static ScrDyn *dyn_rebound_intrinsic_call(const ScrDyn *fn, const ScrDyn *thisv,
       scr_dyn_release(sv);
     }
   } else if (recv0->kind == SCR_DYN_STR) {
-    static const char msg[] = "String.prototype method called on null or undefined";
-    scr_throw_error_msg(SCR_ERR_TYPE, msg, sizeof msg - 1);
+    char msg[96];
+    int ml = snprintf(msg, sizeof msg, "String.prototype.%s called on null or undefined", name->v.str->data);
+    scr_throw_error_msg(SCR_ERR_TYPE, msg, (size_t)ml);
   } else if (recv0->kind == SCR_DYN_ARR && (thisv->kind == SCR_DYN_STR || thisv->kind == SCR_DYN_OBJ) &&
              (dyn_name_is(name->v.str->data, "slice") || dyn_name_is(name->v.str->data, "indexOf") ||
               dyn_name_is(name->v.str->data, "lastIndexOf") || dyn_name_is(name->v.str->data, "includes") ||
@@ -2989,6 +2991,11 @@ ScrDyn *scr_dyn_invoke(ScrDyn *recv, const char *method, ScrDyn *const *args, si
       return scr_dyn_retain(recv);
     }
     if (dyn_str_proto_unimpl(method)) {
+      if (scr_dyn_str_ext_hook != NULL) {
+        bool handled = false;
+        ScrDyn *er = scr_dyn_str_ext_hook(recv, method, args, argc, &handled);
+        if (handled) return er;
+      }
       dyn_throw_unsupported("String", method);
       return NULL;
     }
