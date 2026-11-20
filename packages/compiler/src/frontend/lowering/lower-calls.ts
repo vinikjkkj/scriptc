@@ -12503,12 +12503,61 @@ export function lowerPromiseMethodCall(L: Lowerer, call: ts.CallExpression,
    * every use is either a `.call(o, k)` this file lowers or an ordinary
    * fence at the use's own line. */
   export function hasOwnPropertyAliasDecl(L: Lowerer, nameNode: ts.Node, init: ts.Expression | undefined): boolean {
-    if (!ts.isIdentifier(nameNode) || !stdlibHasOwnMemberOf(L, init)) return false;
+    if (!ts.isIdentifier(nameNode)) return false;
+    const hasOwn = stdlibHasOwnMemberOf(L, init);
+    const toStr = !hasOwn && init !== undefined && isObjectProtoToStringMember(L, init);
+    if (!hasOwn && !toStr) return false;
     const sym = L.resolveValueSymbol(nameNode) ?? L.checker.getSymbolAtLocation(nameNode);
     if (sym === undefined || sym === null) return false;
     const decls = L.checker.declarationsOf(sym);
     if (decls.length !== 1) return false;
+    if (toStr && !aliasOnlyCalled(L, sym, nameNode)) return false;
     return bindingNeverReassigned(L, sym, decls[0]!);
+  }
+
+  /** `const toStr = Object.prototype.toString` (never reassigned): the same
+   * compile-time alias plumbing as the hasOwnProperty one, so `toStr.call(v)`
+   * is the `[[Class]]` probe through the binding. Before this the binding
+   * lowered to a closure of the method that dropped the `.call` receiver, and
+   * every probe answered "[object Undefined]". */
+  export function objectProtoToStringAliasBinding(L: Lowerer, e: ts.Expression): boolean {
+    if (!ts.isIdentifier(e)) return false;
+    const sym = L.resolveValueSymbol(e) ?? L.checker.getSymbolAtLocation(e);
+    if (sym === undefined || sym === null) return false;
+    const decls = L.checker.declarationsOf(sym);
+    if (decls.length !== 1) return false;
+    const d = decls[0]!;
+    if (!ts.isVariableDeclaration(d) || !ts.isIdentifier(d.name) || d.initializer === undefined) return false;
+    if (!isObjectProtoToStringMember(L, d.initializer)) return false;
+    return bindingNeverReassigned(L, sym, d);
+  }
+
+  const aliasOnlyCalledMemo = new WeakMap<ts.Symbol, boolean>();
+  /** True when every reference to the alias binding is the receiver of a
+   * `.call(v)` with at most one argument -- the only spelling the alias
+   * plumbing lowers. Any other use (a value read, `.apply`, `.bind`, an
+   * export) needs the binding to hold the real function, so the declaration
+   * keeps its storage and the uses take their ordinary lowering. */
+  function aliasOnlyCalled(L: Lowerer, sym: ts.Symbol, nameNode: ts.Identifier): boolean {
+    const memo = aliasOnlyCalledMemo.get(sym);
+    if (memo !== undefined) return memo;
+    let ok = true;
+    const visit = (n: ts.Node): void => {
+      if (!ok) return;
+      if (ts.isIdentifier(n) && n.text === nameNode.text && n !== nameNode &&
+        (L.resolveValueSymbol(n) ?? L.checker.getSymbolAtLocation(n)) === sym) {
+        const pa = n.parent;
+        const call = pa?.parent;
+        ok = pa !== undefined && ts.isPropertyAccessExpression(pa) && pa.expression === n && pa.name.text === "call" &&
+          call !== undefined && ts.isCallExpression(call) && call.expression === pa &&
+          call.arguments.length <= 1 && !call.arguments.some((a) => ts.isSpreadElement(a));
+        return;
+      }
+      ts.forEachChild(n, visit);
+    };
+    visit(nameNode.getSourceFile());
+    aliasOnlyCalledMemo.set(sym, ok);
+    return ok;
   }
 
   /** `Object.prototype.toString` written as a member access (the expression,
@@ -16671,7 +16720,7 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverr
       // time (kinds whose tag is not constant -- a record carrying a
       // Symbol.toStringTag member -- and every union go through the dyn
       // walk instead, which reads the runtime kind).
-      if (name === "call" && isObjectProtoToStringMember(L, access.expression) && call.arguments.length <= 1 &&
+      if (name === "call" && (isObjectProtoToStringMember(L, access.expression) || objectProtoToStringAliasBinding(L, access.expression)) && call.arguments.length <= 1 &&
         !call.arguments.some((a) => ts.isSpreadElement(a))) {
         const own = lowerObjectProtoToStringCall(L, call);
         if (own) return own;
