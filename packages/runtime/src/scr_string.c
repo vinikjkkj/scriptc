@@ -443,17 +443,32 @@ static inline unsigned long long scr_ih_mix(unsigned long long h, unsigned long 
  * call a concat makes before it has the result and the one-piece call the death and regrow paths make on the stored bytes give the SAME value for
  * every split point (the pairing the table depends on). The byte-at-a-time FNV this replaced cost ~5 Ir per byte, 157 Ir for a 35-byte result, and
  * was 27% of a concat-heavy callgrind micro. */
+/* The zero padded little-endian word of r (0 <= r < 8) bytes, from two overlapping loads and no libc call (a variable-length memcpy here became a
+ * call to the libc memcpy: +49M Ir on the mysql A/B that ate most of the hash's gain). Equal to memcpy of r bytes into a zeroed word on a little-endian host. */
+static inline unsigned long long scr_ih_tail(const char *p, size_t r) {
+  if (r >= 4) {
+    unsigned lo, hi;
+    memcpy(&lo, p, 4);
+    memcpy(&hi, p + r - 4, 4);
+    return (unsigned long long)lo | ((unsigned long long)hi << (8 * (r - 4)));
+  }
+  if (r >= 2) {
+    unsigned short lo, hi;
+    memcpy(&lo, p, 2);
+    memcpy(&hi, p + r - 2, 2);
+    return (unsigned long long)lo | ((unsigned long long)hi << (8 * (r - 2)));
+  }
+  return r == 1 ? (unsigned char)p[0] : 0ULL;
+}
 static unsigned scr_str_ihash(const char *x, size_t nx, const char *y, size_t ny) {
   unsigned long long h = 1469598103934665603ULL;
   size_t i = 0;
   for (; i + 8 <= nx; i += 8) { unsigned long long w; memcpy(&w, x + i, 8); h = scr_ih_mix(h, w); }
   size_t r = nx - i, j = 0;
   if (r != 0) { /* the tail of x joins the head of y in one word */
-    unsigned long long w = 0;
-    memcpy(&w, x + i, r);
     size_t take = 8 - r;
     if (take > ny) take = ny;
-    if (take != 0) memcpy((char *)&w + r, y, take);
+    unsigned long long w = scr_ih_tail(x + i, r) | (scr_ih_tail(y, take) << (8 * r));
     j = take;
     h = scr_ih_mix(h, w);
   }
@@ -461,7 +476,7 @@ static unsigned scr_str_ihash(const char *x, size_t nx, const char *y, size_t ny
   size_t yn = ny - j, k = 0;
   for (; k + 8 <= yn; k += 8) { unsigned long long w; memcpy(&w, yp + k, 8); h = scr_ih_mix(h, w); }
   size_t t = yn - k;
-  if (t != 0) { unsigned long long w = 0; memcpy(&w, yp + k, t); h = scr_ih_mix(h, w); }
+  if (t != 0) h = scr_ih_mix(h, scr_ih_tail(yp + k, t));
   h ^= (unsigned long long)(nx + ny) * 2654435761ULL;
   h ^= h >> 32;
   return (unsigned)h & (SCR_STR_INTERN_SLOTS - 1u);
