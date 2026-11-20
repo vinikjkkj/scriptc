@@ -8378,6 +8378,9 @@ typedef struct ScrDynJsvalOps {
   /* A symbol-keyed operation on the ENGINE object (scr_symbol.c routes here, ScrDsymEngineOp): the runtime symbol `k`
    * crosses as THE engine symbol of its identity (one per identity, both directions: scr_island.c's table). +1 result, or
    * NULL with the engine's exception pending. GET answers the value; SET/DEFINE/HAS/HAS_OWN/DELETE answer a dyn bool
+  /* `delete o[k]` in the ENGINE (the property goes from the REAL engine object, aliasing preserved): 1 = the engine answered true, 0 = false
+   * (a non-configurable own property), -1 = the engine threw (bridged, pending). */
+  int (*key_delete)(ScrJsval *cell, const ScrStr *k);
    * (`arg` is the value / descriptor); KEYS answers a dyn array of symbol handles (`arg` a dyn bool: enumerable only). */
   ScrDyn *(*sym_op)(ScrJsval *cell, int op, ScrSym *k, const ScrDyn *arg);
 #endif
