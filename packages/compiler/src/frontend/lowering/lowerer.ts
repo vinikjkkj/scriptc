@@ -17032,15 +17032,6 @@ export class Lowerer {
           k === ts.SyntaxKind.EqualsEqualsToken || k === ts.SyntaxKind.ExclamationEqualsToken) && isUnit(other)
       ) return "peel";
       if ((k === ts.SyntaxKind.QuestionQuestionToken || k === ts.SyntaxKind.BarBarToken) && par.left === p) return "peel";
-      // A strict comparison against a string VALUE that is not itself a read (a literal, a call) in a program that can hold the ABSENT string
-      // (lower-absent-str.ts): `undefined === ""` is false, so the read's union answers it where a checked extraction would trap. Against another
-      // read the comparison stays string-to-string (both sides hold the marker, scr_str_eq_u compares it by identity).
-      if (
-        (k === ts.SyntaxKind.EqualsEqualsEqualsToken || k === ts.SyntaxKind.ExclamationEqualsEqualsToken) &&
-        (this.typeOf(other).flags & ts.TypeFlags.StringLike) !== 0 && (this.typeOf(p as ts.Expression).flags & ts.TypeFlags.StringLike) !== 0 &&
-        !(ts.isIdentifier(other) || ts.isPropertyAccessExpression(other) || ts.isElementAccessExpression(other)) &&
-        this.absentStrRisk()
-      ) return "peel";
       // String `+` takes the wider value only against an operand that is not
       // itself a (possibly widened) read: `u + v` over two union-typed operands has no lowering.
       // `undefined + 1n` (and the other bigint operators): Node throws this
