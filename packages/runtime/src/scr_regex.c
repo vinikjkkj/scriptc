@@ -38,6 +38,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+static const char *scr_v8_regex_error(const char *lre, const char *pat, size_t patlen);
+
 #include "libregexp.h"
 
 static void scr_regex_oom(void) {
@@ -1639,7 +1641,7 @@ ScrRegex *scr_regex_new(ScrStr *pattern, ScrStr *flags) {
   if (!bc) {
     char msg[192];
     int n = snprintf(msg, sizeof msg, "Invalid regular expression: /%.64s/%.8s: %s",
-                     re->source->data, re->flags->data, error_msg);
+                     re->source->data, re->flags->data, scr_v8_regex_error(error_msg, re->source->data, re->source->len));
     scr_str_release(re->source);
     scr_str_release(re->flags);
     free(re);
@@ -1648,6 +1650,49 @@ ScrRegex *scr_regex_new(ScrStr *pattern, ScrStr *flags) {
   }
   re->bc = bc;
   return re;
+}
+
+/* libregexp's parse-error text as V8 words it ("Invalid regular expression: /(/: Unterminated group"): the table covers every
+ * error a pattern of the supported alphabet can raise that V8 also raises; one libregexp text that V8 splits in two is decided by the
+ * pattern ("unexpected end" is an unterminated class, or a trailing backslash). An unlisted text passes through. */
+static const char *scr_v8_regex_error(const char *lre, const char *pat, size_t patlen) {
+  static const struct { const char *from, *to; } map[] = {
+    {"expecting ')'", "Unterminated group"},
+    {"extraneous characters at the end", "Unmatched ')'"},
+    {"nothing to repeat", "Nothing to repeat"},
+    {"invalid repetition count", "numbers out of order in {} quantifier"},
+    {"duplicate group name", "Duplicate capture group name"},
+    {"invalid group", "Invalid group"},
+    {"invalid group name", "Invalid capture group name"},
+    {"expecting group name", "Invalid capture group name"},
+    {"group name not defined", "Invalid named capture referenced"},
+    {"unknown unicode property name", "Invalid property name"},
+    {"unknown unicode property value", "Invalid property name"},
+    {"unknown unicode script", "Invalid property name"},
+    {"unknown unicode general category", "Invalid property name"},
+    {"too many captures", "Regular expression too large"},
+  };
+  for (size_t i = 0; i < sizeof map / sizeof map[0]; i++)
+    if (strcmp(lre, map[i].from) == 0) return map[i].to;
+  if (strcmp(lre, "invalid class range") == 0) {
+    /* Only a unicode-mode pattern reaches this with a class escape beside the dash (`[\\d-a]`); a plain reversed range is out of order. */
+    for (size_t i = 0; i + 2 < patlen; i++) {
+      const char *cls = "dDwWsSpP";
+      if (pat[i] == '\\' && memchr(cls, pat[i + 1], 8) && pat[i + 2] == '-') return "Invalid character class";
+      if (pat[i] == '-' && pat[i + 1] == '\\' && i + 2 < patlen && memchr(cls, pat[i + 2], 8)) return "Invalid character class";
+    }
+    return "Range out of order in character class";
+  }
+  if (strcmp(lre, "unexpected end") == 0) {
+    size_t bs = 0;
+    while (bs < patlen && pat[patlen - 1 - bs] == '\\') bs++;
+    return (bs & 1) ? "\\ at end of pattern" : "Unterminated character class";
+  }
+  if (strcmp(lre, "invalid escape sequence in regular expression") == 0) {
+    for (size_t i = 0; i + 1 < patlen; i++) if (pat[i] == '\\' && pat[i + 1] == 'u') return "Invalid Unicode escape";
+    return "Invalid escape";
+  }
+  return lre;
 }
 
 /* Decode the code point at p (well-formed UTF-8 by the string
