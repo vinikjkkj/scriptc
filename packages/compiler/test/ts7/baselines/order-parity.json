@@ -17773,6 +17773,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26139-a-nullish-default-after-a-member-of-a-class-cast-of-a-catch-binding-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26139-a-nullish-default-after-a-member-of-a-class-cast-of-a-catch-binding-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/26135-a-typescript-function-as-a-rejection-reason-prints-its-stripped-source-like-node.ts": {
    "order": [
     "<repo>/tests/corpus/26135-a-typescript-function-as-a-rejection-reason-prints-its-stripped-source-like-node.ts"
