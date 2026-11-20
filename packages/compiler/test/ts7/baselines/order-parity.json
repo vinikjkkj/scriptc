@@ -29897,6 +29897,24 @@
     "<repo>/tests/corpus/26026-a-json-object-cast-to-a-record-follows-later-writes-to-the-original.ts"
    ],
    "diags": []
+  },
+  "<repo>/tests/corpus/26027-a-struct-cast-of-an-island-object-reads-nothing-until-a-member-is-read.ts": {
+   "order": [
+    "<repo>/tests/corpus/26027-a-struct-cast-of-an-island-object-reads-nothing-until-a-member-is-read.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26028-a-hybrid-cast-keeps-getters-and-deletes-in-the-objects-own-order.ts": {
+   "order": [
+    "<repo>/tests/corpus/26028-a-hybrid-cast-keeps-getters-and-deletes-in-the-objects-own-order.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26029-a-struct-cast-of-a-parsed-object-is-the-object-for-reads-writes-and-identity.ts": {
+   "order": [
+    "<repo>/tests/corpus/26029-a-struct-cast-of-a-parsed-object-is-the-object-for-reads-writes-and-identity.ts"
+   ],
+   "diags": []
   }
  }
 }

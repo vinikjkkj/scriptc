@@ -2703,13 +2703,13 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
         // (and a getter that deletes a later key must not have run before Object.keys). The snapshot stays empty until recordViewSync
         // (the viewSyncHelper below) builds it EAGERLY, which it asks for through scr_rec_sync_eager; every key-list, slot and value
         // consumer syncs first, and the keyed get/set/delete/presence go straight to the object.
-        const lazyIdx = process.env["SCRIPTC_RECVIEW_MUTANT"] !== "eagercast" && !soft && shape.view === true && shape.indexValue !== undefined && shape.fields.length === 0 && !shape.keyOrders && !shape.tostr;
+        const lazyIdx = process.env["SCRIPTC_RECVIEW_MUTANT"] !== "eagercast" && !soft && shape.view === true && !shape.keyOrders && !shape.tostr && !shape.fields.some((f) => typeMayHoldFunc(E, f.type));
         const lazyIdxLane = (): void => {
           d.push(`  { int sc_eager = scr_rec_sync_eager; scr_rec_sync_eager = 0;`);
           d.push(`    if (!sc_eager) {`);
           d.push(`      ${cDecl(t, "r")} = ${mangleRecordNew(t.shapeId)}();`);
           d.push(`      r->${VIEW_MEMBER} = scr_dyn_retain((ScrDyn *)d);`);
-          if (shape.ownmask) d.push(`      r->${OWNMASK_MEMBER}[0] = scr_dyn_is_null_proto(d) ? ${OWNMASK_VALID | OWNMASK_SRC_NULL_PROTO} : ${OWNMASK_VALID};`);
+          if (shape.ownmask && process.env["SCRIPTC_RECVIEW_MUTANT"] !== "nomask") d.push(`      r->${OWNMASK_MEMBER}[0] = scr_dyn_is_null_proto(d) ? ${OWNMASK_VALID | OWNMASK_SRC_NULL_PROTO} : ${OWNMASK_VALID};`);
           if (shape.srcproto) d.push(`      r->${SRCPROTO_MEMBER} = scr_dyn_obj_proto_ref(d);`);
           d.push(shape.canon === true ? `      return (${cType(t).trim()})scr_dynview_canon(r, r->${VIEW_MEMBER}, (const void *)&${mangleRecordRelease(t.shapeId)}, sizeof *r, offsetof(${mangleRecordStruct(t.shapeId)}, ${VIEW_MEMBER}), ${mangleRecordRetain(t.shapeId)}_v, ${mangleRecordRelease(t.shapeId)}_v);` : `      return r;`);
           d.push(`    }`);
@@ -2749,7 +2749,6 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             ...(wide ? [funcOnly ? `d->kind != SCR_DYN_FUNC` : `!sc_dyn_rec_wideable(d)`] : []),
           ].join(" && ");
           d.push(fail(`  `, "record.kind", kindOk, `NULL`));
-          if (lazyIdx) lazyIdxLane();
           // VIEW GRANT, INSTANCE RECEIVER (hard builder only): the record is a view of the instance and
           // nothing is read at the cast - a getter runs at each READ of the member, not here (a union arm
           // walker, which must read the members to pick an arm, keeps the eager build below, and so does a
@@ -2763,6 +2762,7 @@ export function jsonWriteHelper(E: CEmitter, t: IrType): string {
             d.push(shape.canon === true ? `    return (${cType(t).trim()})scr_dynview_canon(r, r->${VIEW_MEMBER}, (const void *)&${mangleRecordRelease(t.shapeId)}, sizeof *r, offsetof(${mangleRecordStruct(t.shapeId)}, ${VIEW_MEMBER}), ${mangleRecordRetain(t.shapeId)}_v, ${mangleRecordRelease(t.shapeId)}_v);` : `    return r;`);
             d.push(`  }`);
           }
+          if (lazyIdx) lazyIdxLane();
           d.push(`  if (d->kind != SCR_DYN_OBJ) {`);
           if (jsv) {
             const kt0 = shape.fields.length > 0 ? keysName : "NULL";
