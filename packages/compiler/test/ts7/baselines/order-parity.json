@@ -18134,6 +18134,24 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26315-typed-array-constructor-tests-and-names-match-node-at-every-width.ts": {
+   "order": [
+    "<repo>/tests/corpus/26315-typed-array-constructor-tests-and-names-match-node-at-every-width.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26316-typed-array-of-and-cross-kind-construction-match-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26316-typed-array-of-and-cross-kind-construction-match-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26317-typed-array-buffer-is-one-shared-array-buffer-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26317-typed-array-buffer-is-one-shared-array-buffer-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2632-dyn-jsval-iterate.js": {
    "order": [
     "<repo>/tests/corpus/2632-dyn-jsval-iterate.js"
