@@ -114,6 +114,55 @@ function lowerOptionalDefaultArg(
     : L.lowerExprExpecting(node, expected);
 }
 
+/** The inserted-items array of `a.splice(i, n, ...items)` / `a.unshift(...items)`: the arguments left to right, a spread contributing
+ *  its elements (an array literal's own elements flatten at lowering; a same-element array, Set or generator drains), every other
+ *  argument one element. A run of plain items is one literal, several segments join through the concat helper, so evaluation order
+ *  is source order and a lone spread of an array is handed over as is (the runtime snapshots it before touching the receiver). */
+function lowerInsertedItems(L: Lowerer, args: readonly ts.Expression[], elem: IrType, receiverIr: IrType, loc: SrcLoc): IrExpr {
+  const itemsT = arrayOf(elem);
+  type Seg = { kind: "run"; elems: ts.Expression[] } | { kind: "spread"; node: ts.SpreadElement };
+  const segs: Seg[] = [];
+  const push = (n: ts.Expression): void => {
+    if (ts.isSpreadElement(n)) {
+      let inner: ts.Expression = n.expression;
+      while (ts.isParenthesizedExpression(inner)) inner = inner.expression;
+      if (ts.isArrayLiteralExpression(inner) && !inner.elements.some((e) => ts.isOmittedExpression(e))) {
+        for (const e of inner.elements) push(e);
+        return;
+      }
+      segs.push({ kind: "spread", node: n });
+      return;
+    }
+    const last = segs[segs.length - 1];
+    if (last && last.kind === "run") last.elems.push(n);
+    else segs.push({ kind: "run", elems: [n] });
+  };
+  for (const a of args) push(a);
+  const lowered: { ir: IrExpr; shape: "e" | "a" }[] = [];
+  for (const s of segs) {
+    if (s.kind === "run") {
+      lowered.push({ ir: { kind: "arrayLit", elems: s.elems.map((el) => L.lowerExprExpecting(el, elem)), type: itemsT, loc }, shape: "a" });
+      continue;
+    }
+    let src = L.lowerExpr(s.node.expression);
+    if (src.type.kind === "set" && typeEquals(src.type.elem, elem)) {
+      src = { kind: "setIntrinsic", method: "toArray", receiver: src, args: [], type: arrayOf(src.type.elem), loc };
+    }
+    if (src.type.kind === "generator") {
+      const drained = L.classIteratorDrainCall(src, loc, elem);
+      if (drained) src = drained;
+    }
+    if (!typeEquals(src.type, itemsT)) {
+      L.unsupported("SC1090", s.node, `inserting a spread of '${L.fmt(src.type)}' into a '${L.fmt(receiverIr)}' array (only a same-element-type array spreads)`);
+    }
+    lowered.push({ ir: src, shape: "a" });
+  }
+  if (lowered.length === 0) return { kind: "arrayLit", elems: [], type: itemsT, loc };
+  if (lowered.length === 1) return lowered[0]!.ir;
+  const helper = arrayConcatHelper(L, elem, lowered.slice(1).map((l) => l.shape), loc);
+  return { kind: "call", callee: helper, args: lowered.map((l) => l.ir), type: itemsT, loc };
+}
+
 /** Ambient array method calls. `push`/`pop`/`indexOf`/`includes`/`join`
    * lower to arrIntrinsic; the HOF family — `map`/`filter`/`forEach`/
    * `find`/`some`/`every`/`flatMap`/`reduce`/`reduceRight` — desugars to a
@@ -565,13 +614,25 @@ function lowerOptionalDefaultArg(
       // elements wrap their arm), and refcounted ownership moves in.
       // Spread is fenced: `pushSpread`'s counterpart would have to insert
       // a whole run at once, and no site here needs it.
-      const spreadArg = call.arguments.find((a) => ts.isSpreadElement(a));
-      if (spreadArg) {
-        L.unsupported(
-          "SC1090",
-          spreadArg,
-          "spread arguments to unshift (pass the elements, or build a new array with concat)",
-        );
+      if (call.arguments.some((a) => ts.isSpreadElement(a))) {
+        // `a.unshift(...xs, y)` is `a.splice(0, 0, ...xs, y)` answering the new length: the receiver lives in a hidden local so the
+        // length read after the insertion sees the same array. The splice snapshots its items first, so `a.unshift(...a)` copies
+        // the pre-call elements exactly as JS does.
+        const recvIr = L.lowerExpr(access.expression);
+        const saved = L.declareHiddenLocal("%unshiftRecv", receiverIr);
+        const savedRef = (): IrExpr => ({ kind: "varRef", localId: saved.id, type: receiverIr, loc });
+        const zero = (): IrExpr => ({ kind: "numLit", value: 0, type: F64, loc });
+        const items = lowerInsertedItems(L, call.arguments, elem, receiverIr, loc);
+        return {
+          kind: "seqExpr",
+          stmts: [
+            { kind: "varDecl", localId: saved.id, init: recvIr, loc },
+            { kind: "exprStmt", expr: { kind: "arrIntrinsic", method: "splice", receiver: savedRef(), args: [zero(), zero(), items], type: receiverIr, loc }, loc },
+          ],
+          result: { kind: "arrIntrinsic", method: "length", receiver: savedRef(), args: [], type: F64, loc },
+          type: F64,
+          loc,
+        };
       }
       const receiver = L.lowerExpr(access.expression);
       const args = call.arguments.map((a) => L.lowerExprExpecting(a, elem));
@@ -760,17 +821,7 @@ function lowerOptionalDefaultArg(
         // lowered items, or the spread source itself when it is the only
         // rest argument). Spread mixed with other items is fenced.
         const rest = call.arguments.slice(2);
-        let items: IrExpr;
-        if (rest.length === 1 && ts.isSpreadElement(rest[0]!)) {
-          items = L.lowerExpr(rest[0]!.expression);
-          if (!typeEquals(items.type, arrayOf(elem))) {
-            L.unsupported("SC1090", rest[0]!, `splice of '${L.fmt(items.type)}' items into '${L.fmt(receiverIr)}' (only a same-element-type array spreads)`);
-          }
-        } else if (rest.some(ts.isSpreadElement)) {
-          L.unsupported("SC1090", call, "splice with a spread among several inserted items (spread the one array, or list the items)");
-        } else {
-          items = { kind: "arrayLit", elems: rest.map((el) => L.lowerExprExpecting(el, elem)), type: arrayOf(elem), loc };
-        }
+        const items = lowerInsertedItems(L, rest, elem, receiverIr, loc);
         if (ts.isSpreadElement(call.arguments[0]!) || ts.isSpreadElement(call.arguments[1]!)) {
           L.unsupported("SC1090", call, "splice with a spread start or deleteCount");
         }

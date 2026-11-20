@@ -1,0 +1,30 @@
+// splice(i, n, ...items) and unshift(...items) with spreads among other items: array, Set, tuple, literal, mixed order, aliasing the receiver.
+const a: number[] = [1, 2, 3];
+a.splice(1, 0, 9, 8);
+console.log(a);
+const r = a.splice(0, 2, 7);
+console.log(a, r);
+a.splice(1, 1, ...[4, 5]);
+console.log(a);
+a.unshift(...[0, 0]);
+console.log(a);
+const xs = [10, 11];
+console.log(a.unshift(...xs, 12, ...xs), a);
+a.splice(2, 1, 100, ...xs, 200);
+console.log(a);
+a.unshift(...a);
+console.log(a.length, a.slice(0, 4));
+const ss: string[] = ["z"];
+console.log(ss.unshift("a", ...new Set(["b", "c"]), "d"), ss);
+function mk() { console.log("mk"); return ss; }
+mk().unshift(...["q"]);
+console.log(ss);
+type P = { n: number };
+const ps: P[] = [{ n: 1 }];
+const qs: P[] = [{ n: 2 }, { n: 3 }];
+ps.unshift(...qs);
+ps.splice(1, 0, ...qs, { n: 4 });
+console.log(ps.map((p) => p.n).join());
+const t: [number, number] = [5, 6];
+a.splice(0, 0, ...t);
+console.log(a.slice(0, 3));
