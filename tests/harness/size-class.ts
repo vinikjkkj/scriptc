@@ -2471,7 +2471,12 @@ export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 72_998 : null;
  * 136,022 record is the 224 between that and 136,022). The always-linked growth is scr_json.c's hash index of a large dyn object (the hash, build, probe, the appender's
  * and remover's hooks and the tail-called big-table read), the per-descriptor hash of a large class's member table and its probe, the registry-position memo painted once for
  * scr_dyn_objinst_class_of, and the keyed [[Get]] fast path. The hello-world class stayed inside its tolerance. It buys -10% Ir on messaging-redis and -3.2% on messaging-mysql. */
-export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 137_782 : null;
+/* 2026-11-20 (cap2, rebase of the refuse chain onto main 4d951ec39): REGEX_CLASS_TEXT_RECORDED 137_782 -> 138_918 (+1_136; win32 only). Refuse chain helpers linked into regex
+ * programs; +1,136 vs 137,782. MEASURED locally, zig 0.16.0 x86_64-windows-gnu cross build (SCRIPTC_CC=zigcc SCRIPTC_TARGET=x86_64-windows-gnu --backend c, objdump -h .text Size) of
+ * this probe: main 4d951ec39 137,798 (anchor +16, so the method is faithful), this head 138,918. The same chain was already accepted once as +1,040 (137,510 -> 138,550, CI run
+ * 44700774999); the attribution to the chain (not to the absent-capture commits, which moved the regex probe -32 on the same base) is INFERRED. hello stays 72_998: it measured
+ * 73,078 (+80, inside its tolerance). */
+export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 138_918 : null;
 
 /* 2026-10-21 -- THE LINK NOW COLLECTS DEAD SECTIONS, and every figure above moves.
  * The numbers in this block, and the two ceilings (STATIC_CLASS_MAX and
