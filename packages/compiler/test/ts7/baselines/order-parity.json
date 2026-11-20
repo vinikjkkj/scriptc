@@ -18038,9 +18038,75 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26300-splice-and-unshift-insert-spread-and-mixed-items-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26300-splice-and-unshift-insert-spread-and-mixed-items-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26301-array-prototype-methods-applied-with-a-run-time-list-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26301-array-prototype-methods-applied-with-a-run-time-list-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26302-javascript-array-prototype-apply-with-arguments-and-run-time-lists-like-node.js": {
+   "order": [
+    "<repo>/tests/corpus/26302-javascript-array-prototype-apply-with-arguments-and-run-time-lists-like-node.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26303-new-string-number-boolean-build-wrapper-objects-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26303-new-string-number-boolean-build-wrapper-objects-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26304-javascript-new-string-number-boolean-wrappers-behave-like-node.js": {
+   "order": [
+    "<repo>/tests/corpus/26304-javascript-new-string-number-boolean-wrappers-behave-like-node.js"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26305-a-class-method-read-as-a-value-is-the-unbound-function-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26305-a-class-method-read-as-a-value-is-the-unbound-function-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26306-class-method-values-with-optional-parameters-overrides-and-lost-receivers-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26306-class-method-values-with-optional-parameters-overrides-and-lost-receivers-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26307-this-method-passed-as-a-callback-inside-its-class-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26307-this-method-passed-as-a-callback-inside-its-class-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26308-instanceof-with-a-computed-operand-evaluates-it-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26308-instanceof-with-a-computed-operand-evaluates-it-like-node.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26309-typed-array-search-order-and-copy-methods-match-node-at-every-width.ts": {
+   "order": [
+    "<repo>/tests/corpus/26309-typed-array-search-order-and-copy-methods-match-node-at-every-width.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2631-create-require/main.ts": {
    "order": [
     "<repo>/tests/corpus/2631-create-require/main.ts"
+   ],
+   "diags": []
+  },
+  "<repo>/tests/corpus/26310-typed-array-callback-methods-visit-live-elements-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26310-typed-array-callback-methods-visit-live-elements-like-node.ts"
    ],
    "diags": []
   },
