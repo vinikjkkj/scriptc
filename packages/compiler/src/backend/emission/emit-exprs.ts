@@ -2,6 +2,7 @@
  * expression lands in a fresh C temp, with RC ownership tracked on the
  * emitter's frames (see the discipline comment in emitter core). */
 import { type Fenced } from "../../ir/suspends.js";
+import { absentRecvMember, absentRegexRecvMember } from "./absent-recv.js";
 import { emitCoroYield } from "./emit-gen-coro.js";
 import type { CEmitter, Temp } from "./emitter.js";
 
@@ -990,7 +991,7 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
           while (i < names.length) {
             const take = Math.min(7, names.length - i);
             const group = [acc, ...names.slice(i, i + take)];
-            res = E.newTemp(e.type, `${concatFn(group.length)}(${group.join(", ")})`);
+            res = E.newTemp(e.type, `${concatFn(group.length, E.mod.absentStrings === true)}(${group.join(", ")})`);
             acc = res.name;
             i += take;
           }
@@ -998,16 +999,17 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         }
         const l = E.emitExpr(e.left);
         const r = E.emitExpr(e.right);
-        return E.newTemp(e.type, `scr_str_concat(${l.name}, ${r.name})`);
+        return E.newTemp(e.type, `${E.mod.absentStrings === true ? "scr_str_concat_u" : "scr_str_concat"}(${l.name}, ${r.name})`);
       }
       case "strEq": {
         const l = emitBorrowedLocal(E, e.left, [e.right]);
         const r = emitBorrowedLocal(E, e.right, []);
-        return E.newTemp(e.type, `${e.negated ? "!" : ""}scr_str_eq(${l.name}, ${r.name})`);
+        return E.newTemp(e.type, `${e.negated ? "!" : ""}${E.mod.absentStrings === true ? "scr_str_eq_u" : "scr_str_eq"}(${l.name}, ${r.name})`);
       }
       case "strCmp": {
         const l = emitBorrowedLocal(E, e.left, [e.right]);
         const r = emitBorrowedLocal(E, e.right, []);
+        if (E.mod.absentStrings === true) return E.newTemp(e.type, `scr_str_rel_u(${l.name}, ${r.name}, ${["<", "<=", ">", ">="].indexOf(e.op)})`);
         const fn = e.utf16 === true ? "scr_str_cmp_u16" : "scr_str_cmp";
         return E.newTemp(e.type, `${fn}(${l.name}, ${r.name}) ${e.op} 0`);
       }
@@ -1098,6 +1100,9 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // Every scr_str_* method only borrows its operands, so a plain local operand is read where it lives (emitBorrowedLocal): no retain,
         // no frame entry, no release.
         const r = emitBorrowedLocal(E, e.receiver, e.args);
+        // A module that can hold the absent string: a member use of it is Node's TypeError, before the arguments evaluate (pending check follows).
+        const absentMember = E.mod.absentStrings === true ? absentRecvMember(e.method) : undefined;
+        if (absentMember !== undefined) E.fallibleTemp(BOOL, `scr_str_recv_chk_u(${r.name}, ${JSON.stringify(absentMember)})`);
         const args = e.args.map((a, i) => emitBorrowedLocal(E, a, e.args.slice(i + 1)));
         const method = e.method;
         switch (method) {
@@ -1237,8 +1242,17 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
         // Receiver and args are borrowed frame temps; string/array results
         // come back +1 and join the frame via newTemp. replaceAll and split
         // may THROW (catchable) — fallibleTemp emits the pending check.
-        const r = E.emitExpr(e.receiver);
+        let r = E.emitExpr(e.receiver);
+        // A module that can hold the absent string: a member use of it is Node's TypeError, before the arguments evaluate; the subject of
+        // exec/test is ToString'd, so it reads as the text "undefined".
+        const absentAware = E.mod.absentStrings === true;
+        if (absentAware && e.receiver.type.kind === "string") {
+          const am = absentRegexRecvMember(e.method);
+          if (am !== undefined) E.fallibleTemp(BOOL, `scr_str_recv_chk_u(${r.name}, ${JSON.stringify(am)})`);
+          else if (e.method === "exec") r = { ...r, name: `scr_str_undef_u(${r.name})` };
+        }
         const args = e.args.map((a) => E.emitExpr(a));
+        if (absentAware && e.method === "test" && e.args[0]?.type.kind === "string") args[0] = { ...args[0]!, name: `scr_str_undef_u(${args[0]!.name})` };
         const method = e.method;
         switch (method) {
           case "test":
@@ -10452,6 +10466,6 @@ export function flattenStrConcat(e: Extract<IrExpr, { kind: "strConcat" }>): IrE
 }
 
 /** The runtime entry for a group of `n` operands: the binary scr_str_concat for two, scr_str_concat3..8 above. */
-export function concatFn(n: number): string {
-  return n === 2 ? "scr_str_concat" : `scr_str_concat${n}`;
+export function concatFn(n: number, absent = false): string {
+  return (n === 2 ? "scr_str_concat" : `scr_str_concat${n}`) + (absent ? "_u" : "");
 }

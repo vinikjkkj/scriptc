@@ -915,6 +915,18 @@ ScrStr *scr_str_concat7(ScrStr *a, ScrStr *b, ScrStr *c, ScrStr *d, ScrStr *e, S
 ScrStr *scr_str_concat8(ScrStr *a, ScrStr *b, ScrStr *c, ScrStr *d, ScrStr *e, ScrStr *f, ScrStr *g, ScrStr *h);
 
 bool scr_str_eq(ScrStr *a, ScrStr *b);
+/* Absent-aware twins (see scr_string.c "ABSENT-AWARE STRING OPERATIONS"): selected per program by IrModule.absentStrings. */
+bool scr_str_eq_u(ScrStr *a, ScrStr *b);
+ScrStr *scr_str_concat_u(ScrStr *a, ScrStr *b);
+ScrStr *scr_str_concat3_u(ScrStr *a, ScrStr *b, ScrStr *c);
+ScrStr *scr_str_concat4_u(ScrStr *a, ScrStr *b, ScrStr *c, ScrStr *d);
+ScrStr *scr_str_concat5_u(ScrStr *a, ScrStr *b, ScrStr *c, ScrStr *d, ScrStr *e);
+ScrStr *scr_str_concat6_u(ScrStr *a, ScrStr *b, ScrStr *c, ScrStr *d, ScrStr *e, ScrStr *f);
+ScrStr *scr_str_concat7_u(ScrStr *a, ScrStr *b, ScrStr *c, ScrStr *d, ScrStr *e, ScrStr *f, ScrStr *g);
+ScrStr *scr_str_concat8_u(ScrStr *a, ScrStr *b, ScrStr *c, ScrStr *d, ScrStr *e, ScrStr *f, ScrStr *g, ScrStr *h);
+bool scr_str_recv_chk_u(ScrStr *s, const char *member);
+ScrStr *scr_str_undef_u(ScrStr *s);
+bool scr_str_rel_u(ScrStr *a, ScrStr *b, int op);
 
 /* ECMAScript string order (UTF-16 code units) over well-formed UTF-8: byte order except that a supplementary character sorts before
  * U+E000..U+FFFF. Returns <0, 0, >0. */

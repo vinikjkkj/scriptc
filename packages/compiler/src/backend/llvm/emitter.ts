@@ -85,6 +85,7 @@ import { inlineRuntimeHelpers } from "./inline-rt.js";
 import { orderRecordPlanCached, moduleUsesInspColors, numSlotHalf, narrowSlotOf, narrowExtArg, classCbit } from "../../ir/nodes.js";
 import type { IrClassDef } from "../../ir/nodes.js";
 import { concatFn, fieldRunAbsentCheck, flattenStrConcat } from "../emission/emit-exprs.js";
+import { absentRecvMember, absentRegexRecvMember } from "../emission/absent-recv.js";
 import { classvalCandidates, dynClassDisplayName, dynDescBase, dynEmitterSlot, dynRuntimeBaseInfo, dynRuntimeRoot, dynEnumerationFenced, dynMemberTable, dynStaticTable, isErrorRootedClass } from "../dyn-members.js";
 import { computeMayThrow } from "../emission/may-throw.js";
 import { seqScopedLocals, stackCheckPolicy, stackCheckTargetHasFloor, stackMarginBytes, stackMarginSymbol } from "../emission/emit-stmts.js";
@@ -4512,9 +4513,10 @@ class LlEmitter {
     const acc = B.tmp();
     B.line(`${acc} = load ptr, ptr ${b.slot} ; += accumulator: the binding's own reference moves into the concat`);
     this.own({ name: acc, type: b.type });
-    this.declare(`declare ptr @scr_str_concat(ptr, ptr)`);
+    const cfa = this.mod.absentStrings === true ? "scr_str_concat_u" : "scr_str_concat";
+    this.declare(`declare ptr @${cfa}(ptr, ptr)`);
     const t = B.tmp();
-    B.line(`${t} = call ptr @scr_str_concat(ptr ${acc}, ptr ${r.name})`);
+    B.line(`${t} = call ptr @${cfa}(ptr ${acc}, ptr ${r.name})`);
     B.line(`store ptr ${t}, ptr ${b.slot}`);
     return true;
   }
@@ -4529,11 +4531,12 @@ class LlEmitter {
     const acc = this.emitExpr(v.left);
     const r = this.emitExpr(v.right);
     this.declare(`declare ptr @scr_box_str_unshare(ptr, ptr)`);
-    this.declare(`declare ptr @scr_str_concat(ptr, ptr)`);
+    const cfb = this.mod.absentStrings === true ? "scr_str_concat_u" : "scr_str_concat";
+    this.declare(`declare ptr @${cfb}(ptr, ptr)`);
     const box = this.loadBox(b.slot);
     B.line(`call ptr @scr_box_str_unshare(ptr ${box}, ptr ${acc.name}) ; += accumulator: the box's own reference moves into the concat`);
     const t = B.tmp();
-    B.line(`${t} = call ptr @scr_str_concat(ptr ${acc.name}, ptr ${r.name})`);
+    B.line(`${t} = call ptr @${cfb}(ptr ${acc.name}, ptr ${r.name})`);
     this.boxSet(this.loadBox(b.slot), b.type, t);
     return true;
   }
@@ -8713,8 +8716,9 @@ class LlEmitter {
       const t = this.emitExpr(c.test);
       const hit = B.tmp();
       if (c.test.type.kind === "string") {
-        this.declare(`declare zeroext i1 @scr_str_eq(ptr, ptr)`);
-        B.line(`${hit} = call zeroext i1 @scr_str_eq(ptr ${disc.name}, ptr ${t.name})`);
+        const swEq = this.mod.absentStrings === true ? "scr_str_eq_u" : "scr_str_eq";
+        this.declare(`declare zeroext i1 @${swEq}(ptr, ptr)`);
+        B.line(`${hit} = call zeroext i1 @${swEq}(ptr ${disc.name}, ptr ${t.name})`);
       } else if (c.test.type.kind === "bool") {
         B.line(`${hit} = icmp eq i1 ${disc.name}, ${t.name}`);
       } else {
@@ -9139,9 +9143,10 @@ class LlEmitter {
             const take = Math.min(7, names.length - i);
             const group = [acc, ...names.slice(i, i + take)];
             const sig = group.map(() => "ptr").join(", ");
-            this.declare(`declare ptr @${concatFn(group.length)}(${sig})`);
+            const cfn = concatFn(group.length, this.mod.absentStrings === true);
+            this.declare(`declare ptr @${cfn}(${sig})`);
             const ct = B.tmp();
-            B.line(`${ct} = call ptr @${concatFn(group.length)}(${group.map((g) => `ptr ${g}`).join(", ")})`);
+            B.line(`${ct} = call ptr @${cfn}(${group.map((g) => `ptr ${g}`).join(", ")})`);
             acc = ct;
             i += take;
             if (i >= names.length) return this.own({ name: ct, type: e.type });
@@ -9150,17 +9155,19 @@ class LlEmitter {
         }
         const l = this.emitExpr(e.left);
         const r = this.emitExpr(e.right);
-        this.declare(`declare ptr @scr_str_concat(ptr, ptr)`);
+        const cf2 = this.mod.absentStrings === true ? "scr_str_concat_u" : "scr_str_concat";
+        this.declare(`declare ptr @${cf2}(ptr, ptr)`);
         const t = B.tmp();
-        B.line(`${t} = call ptr @scr_str_concat(ptr ${l.name}, ptr ${r.name})`);
+        B.line(`${t} = call ptr @${cf2}(ptr ${l.name}, ptr ${r.name})`);
         return this.own({ name: t, type: e.type });
       }
       case "strEq": {
         const l = this.emitBorrowedLocal(e.left, [e.right]);
         const r = this.emitBorrowedLocal(e.right, []);
-        this.declare(`declare zeroext i1 @scr_str_eq(ptr, ptr)`);
+        const eqf = this.mod.absentStrings === true ? "scr_str_eq_u" : "scr_str_eq";
+        this.declare(`declare zeroext i1 @${eqf}(ptr, ptr)`);
         const eq = B.tmp();
-        B.line(`${eq} = call zeroext i1 @scr_str_eq(ptr ${l.name}, ptr ${r.name})`);
+        B.line(`${eq} = call zeroext i1 @${eqf}(ptr ${l.name}, ptr ${r.name})`);
         if (!e.negated) return { name: eq, type: e.type };
         const t = B.tmp();
         B.line(`${t} = xor i1 ${eq}, true`);
@@ -9169,6 +9176,12 @@ class LlEmitter {
       case "strCmp": {
         const l = this.emitBorrowedLocal(e.left, [e.right]);
         const r = this.emitBorrowedLocal(e.right, []);
+        if (this.mod.absentStrings === true) {
+          this.declare(`declare zeroext i1 @scr_str_rel_u(ptr, ptr, i32)`);
+          const rel = B.tmp();
+          B.line(`${rel} = call zeroext i1 @scr_str_rel_u(ptr ${l.name}, ptr ${r.name}, i32 ${["<", "<=", ">", ">="].indexOf(e.op)})`);
+          return { name: rel, type: e.type };
+        }
         const fn = e.utf16 === true ? "scr_str_cmp_u16" : "scr_str_cmp";
         this.declare(`declare i32 @${fn}(ptr, ptr)`);
         const c = B.tmp();
@@ -15588,6 +15601,13 @@ class LlEmitter {
     // Omitted optional args get the C-side defaults from the strIntrinsic convention (ir/nodes.ts).
     const B = this.B;
     const r = this.emitBorrowedLocal(e.receiver, e.args);
+    // A module that can hold the absent string: a member use of it is Node's TypeError, before the arguments evaluate (pending check follows).
+    const absentMember = this.mod.absentStrings === true ? absentRecvMember(e.method) : undefined;
+    if (absentMember !== undefined) {
+      this.declare(`declare zeroext i1 @scr_str_recv_chk_u(ptr, ptr)`);
+      B.line(`call zeroext i1 @scr_str_recv_chk_u(ptr ${r.name}, ptr ${this.cstr(absentMember)})`);
+      this.emitPendingCheck();
+    }
     const args = e.args.map((a, i) => this.emitBorrowedLocal(a, e.args.slice(i + 1)));
     const call = (sym: string, sig: string, argText: string, retTy: string, owned: boolean): LlValue => {
       // sig reads "<ret> (<params>)" — respelled to LLVM's declare form.
@@ -17247,8 +17267,26 @@ class LlEmitter {
   private emitRegexIntrinsic(e: IrExpr & { kind: "regexIntrinsic" }): LlValue {
     const B = this.B;
     const method = e.method;
-    const r = this.emitExpr(e.receiver);
+    let r = this.emitExpr(e.receiver);
+    // A module that can hold the absent string: a member use of it is Node's TypeError, before the arguments evaluate; the subject of
+    // exec/test is ToString'd, so it reads as the text "undefined".
+    const absentAware = this.mod.absentStrings === true;
+    const undefU = (v: LlValue): LlValue => {
+      this.declare(`declare ptr @scr_str_undef_u(ptr)`);
+      const t = B.tmp();
+      B.line(`${t} = call ptr @scr_str_undef_u(ptr ${v.name})`);
+      return { ...v, name: t };
+    };
+    if (absentAware && e.receiver.type.kind === "string") {
+      const am = absentRegexRecvMember(method);
+      if (am !== undefined) {
+        this.declare(`declare zeroext i1 @scr_str_recv_chk_u(ptr, ptr)`);
+        B.line(`call zeroext i1 @scr_str_recv_chk_u(ptr ${r.name}, ptr ${this.cstr(am)})`);
+        this.emitPendingCheck();
+      } else if (method === "exec") r = undefU(r);
+    }
     const args = e.args.map((a) => this.emitExpr(a));
+    if (absentAware && method === "test" && e.args[0]?.type.kind === "string") args[0] = undefU(args[0]!);
     const fallible = (sym: string, argText: string): LlValue => {
       this.declare(`declare ptr @${sym}(${argText.split(", ").map(() => "ptr").join(", ")})`);
       const t = B.tmp();
