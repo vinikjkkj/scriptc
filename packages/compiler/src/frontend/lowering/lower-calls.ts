@@ -8354,6 +8354,18 @@ const DYN_STRING_ONLY_METHODS = new Set([
           .map((tag): IrExpr => ({ kind: "unionIsTag", unionId: (arg.type as { unionId: string }).unionId, tag, negated: false, value: arg, type: BOOL, loc }))
           .reduce((left, right) => ({ kind: "logical", op: "||", left, right, type: BOOL, loc }));
       }
+      // A COMPUTED operand (a call, a method result): it evaluates once into a hidden local, and the tag tests read that.
+      if (!opaque && !freeRead && arrayTags.length !== 1) {
+        const unionId = arg.type.unionId;
+        const held = L.declareHiddenLocal("%isArrayArg", arg.type);
+        const heldRef: IrExpr = { kind: "varRef", localId: held.id, type: arg.type, loc };
+        const test: IrExpr = arrayTags.length === 0
+          ? { kind: "boolLit", value: false, type: BOOL, loc }
+          : arrayTags
+              .map((tag): IrExpr => ({ kind: "unionIsTag", unionId, tag, negated: false, value: heldRef, type: BOOL, loc }))
+              .reduce((left, right) => ({ kind: "logical", op: "||", left, right, type: BOOL, loc }));
+        return { kind: "seqExpr", stmts: [{ kind: "varDecl", localId: held.id, init: arg, loc }], result: test, type: BOOL, loc };
+      }
       L.unsupported(
         "SC1090",
         argNode,
@@ -8364,11 +8376,14 @@ const DYN_STRING_ONLY_METHODS = new Set([
     if (arg.kind === "varRef" || arg.kind === "recordGet" || arg.kind === "fieldGet") {
       return { kind: "boolLit", value: L.isJsArrayType(arg.type), type: BOOL, loc };
     }
-    L.unsupported(
-      "SC1090",
-      call,
-      "statically-decided Array.isArray on computed arguments (bind the value to a variable first)",
-    );
+    // A computed operand with a static answer: it still evaluates, once, first.
+    return {
+      kind: "seqExpr",
+      stmts: [{ kind: "exprStmt", expr: arg, loc }],
+      result: { kind: "boolLit", value: L.isJsArrayType(arg.type), type: BOOL, loc },
+      type: BOOL,
+      loc,
+    };
   }
 
 /** node:util/types' `isDate` / `isMap` / `isSet` (named import, destructured
