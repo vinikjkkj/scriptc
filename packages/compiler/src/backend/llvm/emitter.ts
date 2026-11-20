@@ -8761,8 +8761,9 @@ class LlEmitter {
       const t = this.emitExpr(c.test);
       const hit = B.tmp();
       if (c.test.type.kind === "string") {
-        this.declare(`declare zeroext i1 @scr_str_eq(ptr, ptr)`);
-        B.line(`${hit} = call zeroext i1 @scr_str_eq(ptr ${disc.name}, ptr ${t.name})`);
+        const swEq = this.mod.absentStrings === true ? "scr_str_eq_u" : "scr_str_eq";
+        this.declare(`declare zeroext i1 @${swEq}(ptr, ptr)`);
+        B.line(`${hit} = call zeroext i1 @${swEq}(ptr ${disc.name}, ptr ${t.name})`);
       } else if (c.test.type.kind === "bool") {
         B.line(`${hit} = icmp eq i1 ${disc.name}, ${t.name}`);
       } else {
@@ -9207,9 +9208,10 @@ class LlEmitter {
       case "strEq": {
         const l = this.emitBorrowedLocal(e.left, [e.right]);
         const r = this.emitBorrowedLocal(e.right, []);
-        this.declare(`declare zeroext i1 @scr_str_eq(ptr, ptr)`);
+        const eqf = this.mod.absentStrings === true ? "scr_str_eq_u" : "scr_str_eq";
+        this.declare(`declare zeroext i1 @${eqf}(ptr, ptr)`);
         const eq = B.tmp();
-        B.line(`${eq} = call zeroext i1 @scr_str_eq(ptr ${l.name}, ptr ${r.name})`);
+        B.line(`${eq} = call zeroext i1 @${eqf}(ptr ${l.name}, ptr ${r.name})`);
         if (!e.negated) return { name: eq, type: e.type };
         const t = B.tmp();
         B.line(`${t} = xor i1 ${eq}, true`);
