@@ -10678,6 +10678,15 @@ bool scr_dyn_key_delete(ScrDyn *recv, ScrStr *key) {
     scr_throw_error(SCR_ERR_TYPE, scr_jb_finish(&sb));
     return false;
   }
+  if (recv->kind == SCR_DYN_JSVAL) {
+    /* `delete o.k` removes the property from the REAL engine object (aliasing preserved, island-side readers see it). Before this arm the
+     * delete fell through every kind test below to the final `return true` and left the property in place. */
+#ifdef SCR_MUT_JSVAL_NODELETE /* planted defect for the corpus rows: the delete answers and removes nothing, as before the fix */
+    return true;
+#else
+    return scr_dyn_jsval_ops()->key_delete(recv->v.jsval.cell, key) > 0;
+#endif
+  }
   if (recv->static_copy) {
     if (recv->module_ns) {
       if (!scr_dyn_obj_has_own_prop(recv, key->data, key->len)) return true;
