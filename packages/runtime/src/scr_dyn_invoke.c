@@ -877,8 +877,8 @@ static ScrDyn *dyn_object_proto_method(ScrDyn *recv, const char *method,
 
 /* Names each prototype declares BEYOND what's implemented here — these
  * fence loudly instead of mis-answering "is not a function". */
-ScrStr *(*scr_dyn_str_case_hook)(const ScrStr *s, int to_lower) = NULL;
-ScrDyn *(*scr_dyn_str_ext_hook)(ScrDyn *recv, const char *method, ScrDyn *const *args, size_t argc, bool *handled) = NULL;
+/* scr_dyn_str_case_hook and scr_dyn_str_ext_hook are defined in scr_string.c (always linked): scr_regex.c installs them whether or not this
+ * unit is linked. */
 
 static bool dyn_str_proto_unimpl(const char *m) {
   /* One packed byte table, not an array of pointers: a pointer table is a startup relocation per entry (the gated compare below stopped
