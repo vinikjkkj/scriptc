@@ -1485,6 +1485,8 @@ ScrStr *scr_str_pad_end(ScrStr *s, double maxLength, ScrStr *fill);
 bool scr_str_is_well_formed(ScrStr *s);
 /* String.prototype.localeCompare(that) in the default locale (the CLDR root collation, scr_collate.c): -1, 0 or 1. */
 double scr_str_locale_compare(const ScrStr *a, const ScrStr *b);
+/* localeCompare under a compile-time collator: mode = strength | caseLevel << 2 | caseFirst << 3 | numeric << 5 | ignorePunctuation << 6. */
+double scr_str_locale_compare_mode(const ScrStr *a, const ScrStr *b, double mode);
 ScrStr *scr_str_to_well_formed(ScrStr *s);
 
 /* RegExp.escape(s) — ES2025 EncodeForRegExpEscape per code point: leading

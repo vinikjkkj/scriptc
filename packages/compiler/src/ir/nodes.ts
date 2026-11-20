@@ -3259,6 +3259,9 @@ export type IrStrIntrinsicMethod =
   // RangeError, scr_str_to_locale_case's exception cell). The no-tag form is toLowerCase/toUpperCase. scr_regex.c, lre-linked.
   | "toLocaleLowerCase"
   | "toLocaleUpperCase"
+  // localeCompare(that, locales, options) with a compile-time-known collator: args = [that, mode], mode = strength (1..3) | caseLevel << 2 |
+  // caseFirst << 3 (0 off, 1 upper, 2 lower) | numeric << 5 | ignorePunctuation << 6 (scr_str_locale_compare_mode, scr_collate.c).
+  | "localeCompareMode"
   // isWellFormed()/toWellFormed() — no-ops over the runtime's well-formed
   // storage (lone surrogates became U+FFFD at their producers): constant
   // true and the identity, per spec on well-formed input.
@@ -11135,7 +11138,7 @@ export function moduleUsesRegex(mod: IrModule): boolean {
     // case tables): they ride the same link switch as regex nodes.
     if (kind === "strIntrinsic") {
       const method = (v as { method?: unknown }).method;
-      if (method === "toLowerCase" || method === "toUpperCase" || method === "normalize" || method === "localeCompare" || method === "toLocaleLowerCase" || method === "toLocaleUpperCase") {
+      if (method === "toLowerCase" || method === "toUpperCase" || method === "normalize" || method === "localeCompare" || method === "localeCompareMode" || method === "toLocaleLowerCase" || method === "toLocaleUpperCase") {
         found = true;
         return;
       }
@@ -13602,7 +13605,7 @@ export function moduleUsesCollate(mod: IrModule): boolean {
       return;
     }
     const node = v as { kind?: unknown; method?: unknown };
-    if ((node.kind === "strIntrinsic" || node.kind === "dynInvoke") && node.method === "localeCompare") {
+    if ((node.kind === "strIntrinsic" || node.kind === "dynInvoke") && (node.method === "localeCompare" || node.method === "localeCompareMode")) {
       found = true;
       return;
     }

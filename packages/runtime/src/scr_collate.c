@@ -433,6 +433,11 @@ double scr_str_locale_compare(const ScrStr *a, const ScrStr *b) {
   return (double)scr_collate_compare(a, b, 3, false, 0, false, false);
 }
 
+double scr_str_locale_compare_mode(const ScrStr *a, const ScrStr *b, double mode) {
+  const int m = (int)mode;
+  return (double)scr_collate_compare(a, b, m & 3, (m >> 2 & 1) != 0, m >> 3 & 3, (m >> 5 & 1) != 0, (m >> 6 & 1) != 0);
+}
+
 /* The dyn String extension (scr_regex.c) reaches the comparison through this hook, installed only where this unit links. */
 extern double (*scr_str_collate_hook)(const ScrStr *a, const ScrStr *b);
 __attribute__((constructor)) static void scr_collate_install_hook(void) { scr_str_collate_hook = scr_str_locale_compare; }
