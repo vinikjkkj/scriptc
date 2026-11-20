@@ -35,11 +35,12 @@ typedef struct { uint64_t v[4]; } x4fe; /* value < 2^256, congruent mod p */
 #undef X4TGT
 static int x4_has_bmi2 = -1;
 static void scr_x25519_4x64(uint8_t q[32], const uint8_t s[32], const uint8_t p[32]) {
-  int b = x4_has_bmi2;
+  /* read and written with relaxed atomics: the first X25519 may run on a pool worker while another is on the main thread, and every writer stores the same value */
+  int b = __atomic_load_n(&x4_has_bmi2, __ATOMIC_RELAXED);
   if (b < 0) {
     unsigned a = 0, bx = 0, c = 0, d = 0;
     b = __get_cpuid_count(7, 0, &a, &bx, &c, &d) ? (int)((bx >> 8) & 1) : 0;
-    x4_has_bmi2 = b;
+    __atomic_store_n(&x4_has_bmi2, b, __ATOMIC_RELAXED);
   }
   if (b) x4_ladder_bmi2(q, s, p); else x4_ladder_plain(q, s, p);
 }

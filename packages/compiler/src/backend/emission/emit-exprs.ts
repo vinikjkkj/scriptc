@@ -9127,6 +9127,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_key_secret_str(${arg(0)})`);
           case "key.dh":
             return finish(`scr_key_dh(${arg(0)}, ${arg(1)})`);
+          case "key.dhAsync":
+            return finish(`scr_key_dh_async(${arg(0)}, ${arg(1)})`);
           case "key.sign":
             return finish(`scr_key_sign(${arg(0)}, ${arg(1)})`);
           case "key.verify":

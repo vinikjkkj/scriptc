@@ -474,3 +474,66 @@ ScrPromise *scr_key_gen_async(double curve, bool want_private) {
   ScrKeyObject *k = scr_key_gen(curve, want_private);
   return scr_promise_settle_later(scr_promise_settled_ref(k, &scr_keyobj_retain_v, &scr_keyobj_release_v, NULL));
 }
+
+/* The promisified diffieHellman on the worker pool (scr_pool.c). Node runs the agreement on libuv's threadpool and settles the promise in the
+ * poll phase; the validation ladder stays synchronous (a bad key REJECTS the returned promise, since the promisified form turns a throw into a
+ * rejection) and only an admissible call reaches the pool. The worker sees ONLY the two 32-byte scalars/points copied into the job (the
+ * KeyObjects' refcounts are non-atomic, so a worker never touches them) and writes 32 bytes back; the main thread builds the Buffer, settles
+ * the promise and wipes the secret. */
+typedef struct {
+  ScrWork w;
+  unsigned char priv[32];
+  unsigned char pub[32];
+  unsigned char out[32];
+  bool ok;
+  ScrPromise *p; /* retained by the main thread */
+} ScrDhJob;
+
+static void scr_dh_run(ScrWork *w) {
+  ScrDhJob *j = (ScrDhJob *)w;
+  crypto_x25519(j->out, j->priv, j->pub);
+  unsigned char acc = 0;
+  for (int i = 0; i < 32; i++) acc |= j->out[i];
+  j->ok = acc != 0;
+}
+
+static void scr_dh_done(ScrWork *w, bool ran) {
+  ScrDhJob *j = (ScrDhJob *)w;
+  ScrPromise *p = j->p;
+  if (ran) {
+    if (j->ok) {
+      scr_promise_fulfill_ref(p, scr_asym_bytes(j->out, 32), &scr_bytes_retain_v, &scr_bytes_release_v, NULL);
+    } else {
+      const char *m = "Unable to compute the shared secret";
+      scr_throw_error_msg(SCR_ERR_TYPE, m, strlen(m));
+      scr_promise_reject_pending(p);
+    }
+  }
+  crypto_wipe(j->priv, 32);
+  crypto_wipe(j->out, 32);
+  free(j);
+  scr_promise_release(p);
+}
+
+ScrPromise *scr_key_dh_async(const ScrKeyObject *priv, const ScrKeyObject *pub) {
+  if (priv->curve != SCR_CURVE_X25519 || pub->curve != SCR_CURVE_X25519) {
+    scr_asym_throw("diffieHellman requires two X25519 keys");
+    return scr_promise_settled_ref(NULL, &scr_bytes_retain_v, &scr_bytes_release_v, NULL);
+  }
+  if (!priv->is_private || pub->is_private) {
+    scr_asym_throw("diffieHellman needs a private key and a public key");
+    return scr_promise_settled_ref(NULL, &scr_bytes_retain_v, &scr_bytes_release_v, NULL);
+  }
+  ScrDhJob *j = malloc(sizeof *j);
+  if (j == NULL) scr_trap("scriptc: out of memory\n");
+  j->w.name = "diffieHellman";
+  j->w.run = scr_dh_run;
+  j->w.done = scr_dh_done;
+  memcpy(j->priv, priv->raw, 32);
+  memcpy(j->pub, pub->raw, 32);
+  j->ok = false;
+  ScrPromise *p = scr_promise_new(); /* +1: ours, returned */
+  j->p = scr_promise_retain(p);
+  scr_work_submit_cost(&j->w, 40.0); /* a Curve25519 ladder: tens of microseconds, past the inline cutoff */
+  return p;
+}

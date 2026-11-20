@@ -1190,6 +1190,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "key.secretBytes": "scr_key_secret_bytes",
   "key.secretStr": "scr_key_secret_str",
   "key.dh": "scr_key_dh",
+  "key.dhAsync": "scr_key_dh_async",
   "key.sign": "scr_key_sign",
   "key.verify": "scr_key_verify",
   "key.pubRaw": "scr_key_pub_raw",

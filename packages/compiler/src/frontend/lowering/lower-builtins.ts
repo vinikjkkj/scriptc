@@ -3922,13 +3922,9 @@ function fsWriteOptionsSignalFree(L: Lowerer, fn: string, expr: ts.CallExpressio
         body: [
           {
             kind: "return",
-            value: {
-              kind: "intrinsic",
-              name: "promise.resolve",
-              args: [{ kind: "libCall", fn: "key.dh", args: [read("privateKey"), read("publicKey")], type: BYTES_U8, loc }],
-              type: promiseT,
-              loc,
-            },
+            // the agreement runs on the worker pool and the promise settles in the poll phase, like Node's threadpool answer;
+            // a bad key rejects the promise (the promisified form turns the synchronous throw into a rejection)
+            value: { kind: "libCall", fn: "key.dhAsync", args: [read("privateKey"), read("publicKey")], type: promiseT, loc },
             loc,
           },
         ],

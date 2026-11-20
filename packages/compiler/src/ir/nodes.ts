@@ -6753,6 +6753,7 @@ export type IrLibFn =
   | "key.secretBytes"
   | "key.secretStr"
   | "key.dh"
+  | "key.dhAsync"
   | "key.sign"
   | "key.verify"
   | "key.pubRaw"

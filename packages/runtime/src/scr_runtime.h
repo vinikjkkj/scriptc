@@ -4278,6 +4278,8 @@ ScrStr *scr_key_jwk_d(const ScrKeyObject *key);
 bool scr_key_is_priv(const ScrKeyObject *key);
 ScrStr *scr_key_crv(const ScrKeyObject *key);
 ScrPromise *scr_key_sign_async(const ScrBytes *msg, const ScrKeyObject *key);
+/* The promisified diffieHellman, computed on the worker pool; the promise settles in the poll phase (scr_asym.c). */
+ScrPromise *scr_key_dh_async(const ScrKeyObject *priv, const ScrKeyObject *pub);
 ScrPromise *scr_key_verify_async(const ScrBytes *msg, const ScrKeyObject *key,
                                  const ScrBytes *sig);
 ScrPromise *scr_key_gen_async(double curve, bool want_private);

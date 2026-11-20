@@ -1619,6 +1619,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "key.secretBytes": { argTypes: [BYTES_U8_T], result: KEYOBJ_T },
   "key.secretStr": { argTypes: [STRING], result: KEYOBJ_T },
   "key.dh": { argTypes: [KEYOBJ_T, KEYOBJ_T], result: BYTES_U8_T },
+  "key.dhAsync": { argTypes: [KEYOBJ_T, KEYOBJ_T], result: { kind: "promise", inner: BYTES_U8_T } },
   "key.sign": { argTypes: [BYTES_U8_T, KEYOBJ_T], result: BYTES_U8_T },
   "key.verify": { argTypes: [BYTES_U8_T, KEYOBJ_T, BYTES_U8_T], result: BOOL },
   "key.pubRaw": { argTypes: [KEYOBJ_T], result: BYTES_U8_T },
