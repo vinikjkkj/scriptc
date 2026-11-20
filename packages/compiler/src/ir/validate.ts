@@ -1229,6 +1229,7 @@ export const LIB_FN_SIGS: Record<IrLibFn, { argTypes: (IrType | null)[]; result:
   "dyn.isBuffer": { argTypes: [DYN, STRING], result: BOOL },
   "bytes.isDataView": { argTypes: [BYTES_U8], result: BOOL },
   "bytes.isPlainU8": { argTypes: [BYTES_U8, STRING], result: BOOL },
+  "bytes.arrayBuffer": { argTypes: [null], result: bytesOf("buf") },
   // The checked-dynamic compare/equals validators (Node's argument
   // ladders over dyn-boxed invalid-input probes).
   "buffer.compareChk": { argTypes: [DYN, DYN], result: F64 },

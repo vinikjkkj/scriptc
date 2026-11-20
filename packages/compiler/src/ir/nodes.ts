@@ -5497,6 +5497,9 @@ export type IrLibFn =
    * where Node answers false. May-throw, exactly like isBuffer and for
    * the same reason -- an UNCLASSIFIED value has no honest answer. */
   | "bytes.isPlainU8"
+  /** `x.buffer` over a typed array: the ArrayBuffer window of the view's owning storage (scr_bytes_array_buffer; the same window every read of `.buffer` answers,
+   *  so `x.buffer === x.buffer`). Borrowed argument, owned result; never throws. */
+  | "bytes.arrayBuffer"
   /** The deprecated `new Buffer(number, 'enc')` string-arm rejection:
    * always throws Node's ERR_INVALID_ARG_TYPE ("The \"string\" argument
    * must be of type string. Received ..."). Borrowed dyn; may-throw. */

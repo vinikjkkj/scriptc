@@ -1,0 +1,12 @@
+const f = new Float64Array([1.5, 2.5, 3.5]);
+const ab = f.buffer;
+console.log(ab.byteLength, ab === f.buffer, f.buffer.byteLength);
+const v = new Uint8Array(ab);
+console.log(v.length, v[7], v[6]);
+f[0] = 1;
+console.log(v[7], v[6], v[0]);
+v[0] = 9;
+console.log(f[0] !== 1);
+const u = new Uint8Array([1, 2, 3, 4]);
+console.log(u.buffer.byteLength, u.subarray(1, 3).buffer === u.buffer, u.subarray(1).buffer.byteLength);
+console.log(new Int16Array(4).buffer.byteLength, new Float32Array(3).buffer.byteLength, new BigInt64Array(2).buffer.byteLength);

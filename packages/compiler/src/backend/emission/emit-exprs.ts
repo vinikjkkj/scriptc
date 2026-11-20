@@ -7499,6 +7499,8 @@ export function emitExpr(E: CEmitter, e: IrExpr): Temp {
             return finish(`scr_dyn_is_buffer(${arg(0)}, ${arg(1)})`);
           case "bytes.isPlainU8":
             return finish(`scr_bytes_is_plain_u8(${arg(0)}, ${arg(1)})`);
+          case "bytes.arrayBuffer":
+            return finish(`scr_bytes_array_buffer(${arg(0)})`);
           // The checked-dynamic compare/equals validators
           // (scr_bytes_io.c): Node's argument ladders throw catchably
           // (may-throw seed set); all dyn args borrowed.

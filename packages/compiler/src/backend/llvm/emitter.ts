@@ -582,6 +582,7 @@ const LIB_FN_SYMS: Record<string, string> = {
   "dyn.isBuffer": "scr_dyn_is_buffer",
   "bytes.isDataView": "scr_bytes_is_dataview",
   "bytes.isPlainU8": "scr_bytes_is_plain_u8",
+  "bytes.arrayBuffer": "scr_bytes_array_buffer",
   "buffer.newStringFail": "scr_buffer_new_string_fail",
   "fs.toUnixTimestamp": "scr_fs_to_unix_timestamp",
   "fs.existsChk": "scr_fs_exists_async",

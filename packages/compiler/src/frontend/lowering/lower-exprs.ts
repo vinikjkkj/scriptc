@@ -13,7 +13,7 @@ import * as ts from "../ts7/adapter.js";
 import { dirname, relative } from "node:path";
 import type { Lowerer, WidthLift } from "./lowerer.js";
 import { strictAt } from "./lower-protoescape.js";
-import { EVAL_STATIC_CLASSES, RUNTIME_EMITTER_CLASS, STATS_FIELD_INDEX, DATE_T, strandTrap, BIGINT, BOOL, BYTES_ELEM_SIZE, BYTES_U8, bytesValueType, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, canBoxClassIntoDyn, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrGlobal, IrJsOp, IrLocal, type IrParam, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
+import { EVAL_STATIC_CLASSES, RUNTIME_EMITTER_CLASS, STATS_FIELD_INDEX, DATE_T, strandTrap, BIGINT, BOOL, BYTES_ELEM_SIZE, BYTES_U8, bytesOf, bytesValueType, CAUGHT, DYN, internalSlotFields, ownMaskBit, isUndefinedArmedUnion, type IrLibFn, type IrNumBinOp, canBoxClassIntoDyn, DYN_HANDLE_KINDS, F64, IrExpr, IrFunction, IrGlobal, IrJsOp, IrLocal, type IrParam, IrRecordShape, IrStmt, IrType, JSVAL, KEYOBJ, NULL_T, REF_TRUTHY_KINDS, REGEX, RUNTIME_ERROR_CLASSES, RUNTIME_STREAM_CLASSES, SEARCH_PARAMS_T, STRING, SYMBOL_T, SrcLoc, UNDEFINED_T, VOID, arrayOf, canBoxFuncIntoDyn, canDynCheckTo, funcOf, isDynBytes, isJsonSafeType, isRefCounted, isUnitType, jsOpResultKind, httpReqIsReadableIn, shapeHasAccessorSlots, streamDuplexWidensToWritable, typeEquals, typeKey } from "../../ir/nodes.js";
 import { lowerAbortProperty } from "./lower-abort.js";
 import { lowerEventProperty } from "./lower-event.js";
 import { cjsRequireAliasTargetOf, cjsRequireBindingValueOf, dynImportBindingDeclOf, requireDepValueOf } from "./lower-island.js";
@@ -9592,6 +9592,13 @@ export function lowerOptionalChain(L: Lowerer, expr: ts.CallExpression | ts.Prop
         // receiver's evaluation is never discarded.
         const receiver = L.lowerExpr(expr.expression);
         return { kind: "bytesIntrinsic", method: "byteOffset", receiver, args: [], type: F64, loc };
+      }
+      if (name === "buffer" && !expr.questionDotToken && L.isStdlibMember(expr) && !/\bBuffer\b/.test(L.checker.typeToString(L.typeOf(expr.expression)))) {
+        // The ArrayBuffer window of the view's owning storage, shared by every read (so `x.buffer === x.buffer`, and a write through the view shows in it).
+        const owner = L.lowerExpr(expr.expression);
+        if (owner.type.kind === "bytes" && owner.type.elem !== "buf") {
+          return { kind: "libCall", fn: "bytes.arrayBuffer", args: [owner], type: bytesOf("buf"), loc };
+        }
       }
       if (name === "buffer") {
         // No ArrayBuffer VALUE exists — `.buffer` compiles only in the
