@@ -17965,6 +17965,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26270-gated-program-folds-typeof-of-a-builtin-string-member.cjs": {
+   "order": [
+    "<repo>/tests/corpus/26270-gated-program-folds-typeof-of-a-builtin-string-member.cjs"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2617-enum-static-field-import/main.ts": {
    "order": [
     "<repo>/tests/corpus/2617-enum-static-field-import/a.ts",
