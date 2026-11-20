@@ -4883,7 +4883,8 @@ export function lowerCall(L: Lowerer, expr: ts.CallExpression): IrExpr {
     // fence the value read had on main, never a deferred runtime throw.
     if (isJsSourceFile(expr.getSourceFile()) && ts.isPropertyAccessExpression(expr.expression) &&
         !expr.expression.questionDotToken && expr.expression.name.text === "apply" &&
-        L.checker.getCallSignatures(L.typeOf(expr.expression.expression)).length > 1) {
+        L.checker.getCallSignatures(L.typeOf(expr.expression.expression)).length > 1 &&
+        arrayProtoMemberName(L, expr.expression.expression) === null) {
       const applyRecv = probeLower(L, expr.expression.expression);
       if (applyRecv?.type.kind === "dyn") {
         L.noLowering(
@@ -16396,20 +16397,58 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverr
     if (!ts.isPropertyAccessExpression(access) || (access.name.text !== "call" && access.name.text !== "apply")) return null;
     const isApply = access.name.text === "apply";
     const borrowed = access.expression;
-    const methodName = arrayProtoMemberName(L, borrowed) ?? (ts.isIdentifier(borrowed) ? arrayProtoAliasMethod(L, borrowed) : null);
+    // `xs.push.apply(ys, b)`: the method read off an ARRAY VALUE is the same Array.prototype function (a stdlib member of an array type),
+    // so it borrows exactly like the prototype spelling; the array it was read off evaluates first, for its effects only.
+    let instanceRecv: ts.Expression | null = null;
+    let methodName = arrayProtoMemberName(L, borrowed) ?? (ts.isIdentifier(borrowed) ? arrayProtoAliasMethod(L, borrowed) : null);
+    if (methodName === null) {
+      let b: ts.Expression = borrowed;
+      while (ts.isParenthesizedExpression(b) || ts.isNonNullExpression(b)) b = b.expression;
+      if (ts.isPropertyAccessExpression(b) && b.questionDotToken === undefined && L.isStdlibMember(b) &&
+          L.checker.isArrayType(L.checker.getNonNullableType(L.typeOf(b.expression)))) {
+        methodName = b.name.text;
+        instanceRecv = b.expression;
+      }
+    }
     if (methodName === null) return null;
     if (call.arguments.length < 1 || call.arguments.some((a) => ts.isSpreadElement(a))) return null;
+    const afterRecv = (inner: IrExpr): IrExpr => {
+      if (instanceRecv === null) return inner;
+      let r: ts.Expression = instanceRecv;
+      while (ts.isParenthesizedExpression(r) || ts.isNonNullExpression(r)) r = r.expression;
+      if (r.kind === ts.SyntaxKind.ThisKeyword || ts.isIdentifier(r)) return inner;
+      return { kind: "seqExpr", stmts: [{ kind: "exprStmt", expr: L.lowerExpr(instanceRecv), loc: inner.loc }], result: inner, type: inner.type, loc: inner.loc };
+    };
     // `.apply(recv)` and `.apply(recv, [a, b])` with a literal argument list spell the same borrow; a list built at run time has no static arity.
     let argNodes: readonly ts.Expression[] = call.arguments.slice(1);
+    let runtimeList: ts.Expression | null = null;
     if (isApply) {
       if (call.arguments.length > 2) return null;
       if (call.arguments.length === 2) {
         const lst = call.arguments[1]!;
-        if (!ts.isArrayLiteralExpression(lst) || lst.elements.some((e) => ts.isSpreadElement(e) || ts.isOmittedExpression(e))) return null;
-        argNodes = lst.elements;
+        if (!ts.isArrayLiteralExpression(lst) || lst.elements.some((e) => ts.isSpreadElement(e) || ts.isOmittedExpression(e))) runtimeList = lst;
+        else argNodes = lst.elements;
       }
     }
     const loc = locOf(call);
+    if (runtimeList !== null) {
+      // A list built at run time (`push.apply(a, b)`, the concat idiom): the borrowed method is READ off the array-like receiver and applied
+      // with the dyn pack, whose length is the call's arity (scr_dyn_invoke's FUNC apply arm, JS's own arity and array-like rules).
+      const readOnlyNoCb = new Set(["slice", "indexOf", "lastIndexOf", "includes", "join", "at"]).has(methodName);
+      const recvDyn = L.lowerExprExpecting(call.arguments[0]!, DYN);
+      const arrLike: IrExpr = { kind: "libCall", fn: readOnlyNoCb ? "arrlike.fromRead" : "arrlike.from", args: [recvDyn], type: DYN, loc };
+      const held = L.declareHiddenLocal("%applyRecv", DYN);
+      const heldRef = (): IrExpr => ({ kind: "varRef", localId: held.id, type: DYN, loc });
+      const method: IrExpr = { kind: "dynKeyGet", key: { kind: "strLit", value: methodName, type: STRING, loc }, value: heldRef(), type: DYN, loc };
+      const pack = L.lowerExprExpecting(runtimeList, DYN);
+      return afterRecv({
+        kind: "seqExpr",
+        stmts: [{ kind: "varDecl", localId: held.id, init: arrLike, loc }],
+        result: { kind: "dynInvoke", recv: method, method: "apply", calleeName: `${borrowed.getText()}.apply`, args: [heldRef(), pack], type: DYN, loc },
+        type: DYN,
+        loc,
+      });
+    }
     const recv = L.lowerExprExpecting(call.arguments[0]!, DYN);
     const args = argNodes.map((a) => L.lowerExprExpecting(a, DYN));
     // A READ-ONLY method whose callback (if any) cannot observe the array argument may run on a COPY of an array-like (a string, a plain
@@ -16430,7 +16469,7 @@ export function lowerFunction(L: Lowerer, decl: ts.FunctionDeclaration, sigOverr
     const READ_CB = new Set(["map", "filter", "forEach", "some", "every", "reduce", "reduceRight", "find", "findIndex", "findLast", "findLastIndex"]);
     const readOnly = READ_NO_CB.has(name) || (READ_CB.has(name) && callbackSafe());
     const arr: IrExpr = { kind: "libCall", fn: readOnly ? "arrlike.fromRead" : "arrlike.from", args: [recv], type: DYN, loc };
-    return { kind: "dynInvoke", recv: arr, method: methodName, calleeName: borrowed.getText(), args, type: DYN, loc };
+    return afterRecv({ kind: "dynInvoke", recv: arr, method: methodName, calleeName: borrowed.getText(), args, type: DYN, loc });
   }
 
   /** A method call on a class instance read through a NULLABLE slot in JavaScript source (`this.shardedSubscribers.start()` where

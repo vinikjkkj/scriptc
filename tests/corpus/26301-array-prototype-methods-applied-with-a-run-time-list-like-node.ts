@@ -1,0 +1,24 @@
+// Array.prototype.<m>.apply with a list built at run time, and a method read off an array value, direct and through a hoisted alias.
+const a: number[] = [1, 2];
+const b: number[] = [3, 4, 5];
+console.log(Array.prototype.push.apply(a, b), a);
+const push = Array.prototype.push;
+console.log(push.apply(a, b.slice(1)), a);
+const names: string[] = ["x"];
+const more: string[] = ["y", "z"];
+Array.prototype.unshift.apply(names, more);
+console.log(names, Array.prototype.slice.apply(names, [1]));
+const idx: number[] = [1];
+console.log(Array.prototype.slice.apply(names, idx as any), Array.prototype.indexOf.apply(names, ["z"]));
+console.log(Array.prototype.concat.apply([], [[1, 2], [3]]));
+console.log(Array.prototype.splice.apply(a, [0, 2]), a);
+const empty: number[] = [];
+console.log(Array.prototype.push.apply(a, empty), a.length);
+console.log(Math.max.apply(null, b), Math.min.apply(Math, b));
+const c: number[] = [1, 2];
+c.push.apply(c, b);
+console.log(c);
+([] as number[]).push.apply(c, b);
+console.log(c, [].slice.apply(c, [1] as any));
+const s = "abc";
+console.log(Array.prototype.map.apply(s, [(ch: string) => ch + ch]), Array.prototype.map.call(s, (ch: string) => ch.toUpperCase()));
