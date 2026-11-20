@@ -235,16 +235,19 @@ no-ops.
 A match row (`match`/`matchAll`/`exec`) holds the one immortal ABSENT string (the same marker a `split` capture uses) for a
 group that did not participate, and records `index`, `input` and the group names beside the row, so printing a row, `m.input`, `m.index`,
 `m.groups`, an indexed read (`m[2] === undefined`, `m[2] ?? d`, a template, `typeof m[2]`), a destructuring default, `x === undefined` /
-`x == null` over a string-typed binding and `console.log(x)` all answer Node's `undefined`. A program whose sources contain a
-`match`/`matchAll`/`exec`/`split` that can leave a group unfilled (or whose regex is unknown) is ABSENT-AWARE (IrModule.absentStrings,
-lower-absent-str.ts: a whole-program syntactic scan): there `typeof x`, `x ?? d`, `"p" + x` and template holes, `x === ""`, `x < "a"`,
-`switch (x)`, `/re/.test(x)`, and a member use of `x` (`.length`, `.trim()`, `.match(...)` ... : the string members the lowering knows) over
-ANY string-typed binding (a callback parameter, a for-of variable, a call argument, a split capture) answer Node's `undefined` semantics,
-the member uses with Node's `TypeError: Cannot read properties of undefined (reading 'm')`. Every other program emits exactly the plain
-string entries, so ordinary strings pay nothing. Still answered as for `""` even in such a program: `x.replace(...)`, `x.codePointAt(...)`,
-`x?.length`, `Number(x)`, `"a".localeCompare(x)`, `JSON.stringify(x)`, an absent string as an array element searched by `includes`/`indexOf`,
-as a Map key, a Set member or an object key. `$1` in a replacement string substitutes `""`, as Node does. A function replacer's
-unprovable group parameter is refused at COMPILE time rather than quietly answered `""`.
+`x == null` over a string-typed binding and `console.log(x)` all answer Node's `undefined`. The absent string's TEXT is "undefined" (one
+immortal object, length 9), so over ANY string-typed binding (a callback parameter, a for-of variable, a call argument, a split capture)
+`"p" + x`, a template hole, `x === ""`, `Number(x)`, `"a".localeCompare(x)`, `includes`/`indexOf`, a Map or Set key and an object key answer
+as for Node's undefined with no check anywhere. A program whose sources contain a `match`/`matchAll`/`exec`/`split` that can leave a group
+unfilled (or whose regex is unknown) is ABSENT-AWARE (IrModule.absentStrings, lower-absent-str.ts: a whole-program syntactic scan): there
+`typeof x`, `x ?? d`, `x === "undefined"` (false: the real string is not the marker), truthiness (falsy), `x < "a"` and the other
+relational operators (false), `switch (x)` and a member use of `x` (`.length`, `.trim()`, `.match(...)`, `.search(...)`: the TypeError
+`Cannot read properties of undefined (reading 'm')`, one inline pointer compare) follow Node. Every other program emits the plain entries.
+`join` prints the marker as empty. Still answered wrongly even in such a program: `x.replace("a", "b")` (answers "undefined" where Node
+throws), `x.codePointAt(0)` and `[...x]` and `x[0]` (a TypeError that names the wrong member), `x?.length` (throws; Node answers undefined),
+`JSON.stringify(x)` over a bare string (answers null; Node undefined), the truthiness of the marker inside a string-arm union, and an
+object key or Map key spelled with the real text "undefined" (it collides with the marker). `$1` in a replacement string substitutes
+`""`, as Node does. A function replacer's unprovable group parameter is refused at COMPILE time rather than quietly answered `""`.
 
     packages/compiler/src/frontend/lowering/lower-exprs.ts:19739
     tests/corpus/2608-regex-named-groups.ts:49
