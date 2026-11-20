@@ -3039,6 +3039,7 @@ export async function compileC(opts: CcOptions): Promise<void> {
       ? [
           "-I", vendorEngineDir(),
           rt(join(rtDir, "scr_island.c")),
+          rt(join(rtDir, "scr_web.c")),
           engineArchive,
           ...(driver.linkArgs.includes("-lm") ? [] : ["-lm"]),
           ...gcSectionsLinkArgs(driver),

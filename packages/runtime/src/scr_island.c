@@ -11441,10 +11441,7 @@ ScrDyn *scr_jsval_fn_box(ScrJsval *cell) {
 
 #ifndef SCR_DYNAMIC
 /* SCR_ENGINE-only builds (a program whose Function constructor runs on the
- * engine, and nothing else of the --dynamic lane): no web globals, no
- * island timers. The engine itself, its module-free prelude, and the
- * promise-job drain are all the island needs. The --dynamic build links
- * scr_web.c, which provides these for real. */
+ * engine, and nothing else of the --dynamic lane) link scr_web.c too: the web globals and the timers on the shared static heap. */
 /* The engine's console in a build with no web prelude (isl_console_src, the whole Console surface as JS over three host calls): node's own
  * formatting through the standalone util shim, written to the real fds the static console writes. */
 static JSValue isl_console_host_write(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
@@ -11472,7 +11469,7 @@ static JSValue isl_console_host_now(JSContext *ctx, JSValueConst this_val, int a
   return JS_NewFloat64(ctx, scr_now_ms());
 }
 
-void scr_island_web_boot(void *jsctx) {
+void isl_console_boot(void *jsctx) {
   JSContext *ctx = (JSContext *)jsctx;
   JSValue fn = JS_Eval(ctx, isl_console_src, sizeof isl_console_src - 1, "<scr-console>", JS_EVAL_TYPE_GLOBAL);
   if (JS_IsException(fn)) {
@@ -11495,10 +11492,6 @@ void scr_island_web_boot(void *jsctx) {
   JS_SetPropertyStr(ctx, g, "console", con);
   JS_FreeValue(ctx, g);
 }
-double scr_island_timers_deadline(void) { return 1.0 / 0.0; }
-bool scr_island_timers_due(void) { return false; }
-bool scr_island_timers_fire_due(void) { return false; }
-void scr_island_timers_teardown(void) {}
 #endif /* !SCR_DYNAMIC */
 
 #endif /* SCR_DYNAMIC || SCR_ENGINE */

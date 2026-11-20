@@ -9536,6 +9536,8 @@ size_t scr_island_exit_code_version(void);
  * the island's JSContext as an opaque pointer — engine types stay out of
  * this header. */
 void scr_island_web_boot(void *jsctx);
+/* SCR_ENGINE-only builds: installs the engine console over the web prelude's (scr_island.c). */
+void isl_console_boot(void *jsctx);
 
 /* Runs the engine's pending promise-reaction jobs to exhaustion (no-op
  * before the engine boots). Returns the number executed. The loop's io
