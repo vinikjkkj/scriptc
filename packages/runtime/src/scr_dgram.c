@@ -951,6 +951,116 @@ static size_t scr_dns_order_answers(struct addrinfo *res, int order, struct addr
   return n;
 }
 
+/* ── dns.lookup on the worker pool ───────────────────────────────────────
+ * The worker owns only plain C memory: it runs getaddrinfo, orders the
+ * answers (scr_dns_order_answers is pure) and formats them. The main thread
+ * builds the ScrStr values and calls back from the poll station. */
+typedef struct {
+  ScrWork w;
+  char *host; /* copied */
+  int family_req, flags, order;
+  bool all;
+  ScrClosure *cb; /* +1, moved in */
+  ScrDnsLookupFn fn;
+  /* the answer, filled by the worker */
+  int rc;
+  int fam;          /* 4 or 6 (single-answer form) */
+  char ip[64];      /* single-answer form */
+  char lines[2048]; /* `all` form: "4:ip\n6:ip" */
+  size_t lines_len;
+} ScrDnsJob;
+
+static void scr_dns_job_run(ScrWork *w) {
+  ScrDnsJob *j = (ScrDnsJob *)w;
+  struct addrinfo hints;
+  memset(&hints, 0, sizeof hints);
+  hints.ai_family = j->family_req == 6 ? AF_INET6 : j->family_req == 4 ? AF_INET : AF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+  hints.ai_flags = j->flags;
+  struct addrinfo *res = NULL;
+  j->rc = getaddrinfo(j->host, NULL, &hints, &res);
+  if (j->rc != 0 || res == NULL) {
+    if (j->rc == 0) j->rc = EAI_FAIL;
+    return;
+  }
+  size_t nans = 0;
+  for (struct addrinfo *a = res; a != NULL; a = a->ai_next) nans++;
+  struct addrinfo **ans = (struct addrinfo **)malloc((nans + 1) * sizeof *ans);
+  if (!ans) {
+    freeaddrinfo(res);
+    j->rc = EAI_MEMORY;
+    return;
+  }
+  nans = scr_dns_order_answers(res, j->order, ans);
+  if (j->all) {
+    size_t lo = 0;
+    for (size_t i = 0; i < nans && lo + 80 < sizeof j->lines; i++) {
+      const struct addrinfo *a = ans[i];
+      char ip[64];
+      if (a->ai_family == AF_INET6) inet_ntop(AF_INET6, &((struct sockaddr_in6 *)a->ai_addr)->sin6_addr, ip, sizeof ip);
+      else inet_ntop(AF_INET, &((struct sockaddr_in *)a->ai_addr)->sin_addr, ip, sizeof ip);
+      lo += (size_t)snprintf(j->lines + lo, sizeof j->lines - lo, "%s%c:%s", lo ? "\n" : "", a->ai_family == AF_INET6 ? '6' : '4', ip);
+    }
+    j->lines_len = lo;
+  } else {
+    const struct addrinfo *a = nans > 0 ? ans[0] : res;
+    strcpy(j->ip, "0.0.0.0");
+    if (a->ai_family == AF_INET6) {
+      inet_ntop(AF_INET6, &((struct sockaddr_in6 *)a->ai_addr)->sin6_addr, j->ip, sizeof j->ip);
+      j->fam = 6;
+    } else {
+      inet_ntop(AF_INET, &((struct sockaddr_in *)a->ai_addr)->sin_addr, j->ip, sizeof j->ip);
+      j->fam = 4;
+    }
+  }
+  free(ans);
+  freeaddrinfo(res);
+}
+
+static void scr_dns_job_done(ScrWork *w, bool ran) {
+  ScrDnsJob *j = (ScrDnsJob *)w;
+  ScrClosure *cb = j->cb;
+  if (!ran) {
+    scr_closure_release(cb);
+    free(j->host);
+    free(j);
+    return;
+  }
+  ScrStr *errmsg = NULL, *addr = NULL;
+  double fam = 4;
+  if (j->rc == 0 && j->all) {
+    fam = -1;
+    addr = scr_str_new(j->lines, j->lines_len);
+  } else if (j->rc == 0) {
+    fam = j->fam;
+    addr = scr_str_new(j->ip, strlen(j->ip));
+  } else {
+    /* Node maps name-not-found (and macOS's EAI_NODATA) to ENOTFOUND;
+     * everything else surfaces its EAI_* name. Message shape:
+     * "getaddrinfo ENOTFOUND <hostname>". */
+    int rc = j->rc;
+    const char *code = (rc == EAI_NONAME
+#ifdef EAI_NODATA
+                        || rc == EAI_NODATA
+#endif
+                        )
+                           ? "ENOTFOUND"
+                       : rc == EAI_AGAIN ? "EAI_AGAIN"
+                                         : "EAI_FAIL";
+    char msg[192];
+    snprintf(msg, sizeof msg, "getaddrinfo %s %s", code, j->host);
+    errmsg = scr_str_new(msg, strlen(msg));
+    addr = NULL; /* Node passes undefined here */
+  }
+  ScrDnsLookupFn fn = j->fn;
+  free(j->host);
+  free(j);
+  if (!scr_exc_pending()) fn(cb, errmsg, addr, fam);
+  scr_closure_release(cb);
+  scr_str_release(errmsg);
+  scr_str_release(addr);
+}
+
 void scr_dns_lookup(ScrStr *hostname, double family, ScrClosure *cb, ScrDnsLookupFn fn) {
 #ifdef _WIN32
   /* getaddrinfo needs winsock started (WSANOTINITIALISED otherwise); the
@@ -1003,64 +1113,26 @@ void scr_dns_lookup(ScrStr *hostname, double family, ScrClosure *cb, ScrDnsLooku
       p->family = -1;
     }
   } else {
-    struct addrinfo hints;
-    memset(&hints, 0, sizeof hints);
-    hints.ai_family = family == 6 ? AF_INET6 : family == 4 ? AF_INET : AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    hints.ai_flags = scr_dns_lookup_flags;
-    struct addrinfo *res = NULL;
-    int rc = getaddrinfo(hostname->data, NULL, &hints, &res);
-    size_t nans = 0;
-    struct addrinfo **ans = NULL;
-    if (rc == 0 && res) {
-      for (struct addrinfo *a = res; a != NULL; a = a->ai_next) nans++;
-      ans = (struct addrinfo **)malloc((nans + 1) * sizeof *ans);
-      if (!ans) scr_dgram_oom();
-      nans = scr_dns_order_answers(res, scr_dns_lookup_order, ans);
-    }
-    if (rc == 0 && res && scr_dns_lookup_all) {
-      char lines[2048];
-      size_t lo = 0;
-      for (size_t i = 0; i < nans && lo + 80 < sizeof lines; i++) {
-        const struct addrinfo *a = ans[i];
-        char ip[64];
-        if (a->ai_family == AF_INET6) inet_ntop(AF_INET6, &((struct sockaddr_in6 *)a->ai_addr)->sin6_addr, ip, sizeof ip);
-        else inet_ntop(AF_INET, &((struct sockaddr_in *)a->ai_addr)->sin_addr, ip, sizeof ip);
-        lo += (size_t)snprintf(lines + lo, sizeof lines - lo, "%s%c:%s", lo ? "\n" : "", a->ai_family == AF_INET6 ? '6' : '4', ip);
-      }
-      p->family = -1;
-      p->addr = scr_str_new(lines, lo);
-    } else if (rc == 0 && res) {
-      const struct addrinfo *a = nans > 0 ? ans[0] : res;
-      char ip[64] = "0.0.0.0";
-      if (a->ai_family == AF_INET6) {
-        inet_ntop(AF_INET6, &((struct sockaddr_in6 *)a->ai_addr)->sin6_addr, ip, sizeof ip);
-        p->family = 6;
-      } else {
-        inet_ntop(AF_INET, &((struct sockaddr_in *)a->ai_addr)->sin_addr, ip, sizeof ip);
-        p->family = 4;
-      }
-      p->addr = scr_str_new(ip, strlen(ip));
-    } else {
-      /* Node maps name-not-found (and macOS's EAI_NODATA) to ENOTFOUND;
-       * everything else surfaces its EAI_* name. Message shape:
-       * "getaddrinfo ENOTFOUND <hostname>". */
-      const char *code =
-          (rc == EAI_NONAME
-#ifdef EAI_NODATA
-           || rc == EAI_NODATA
-#endif
-           )
-              ? "ENOTFOUND"
-          : rc == EAI_AGAIN ? "EAI_AGAIN"
-                            : "EAI_FAIL";
-      char msg[192];
-      snprintf(msg, sizeof msg, "getaddrinfo %s %s", code, hostname->data);
-      p->errmsg = scr_str_new(msg, strlen(msg));
-      p->addr = NULL; /* Node passes undefined here */
-    }
-    free(ans);
-    if (res) freeaddrinfo(res);
+    /* The resolver arm runs getaddrinfo on the WORKER POOL, as Node runs
+     * dns.lookup on libuv's threadpool: a slow or unreachable resolver no
+     * longer freezes the loop, and concurrent lookups overlap. The hostname
+     * is copied into the job; the answer is built into plain C buffers by the
+     * worker and turned into the strings the callback takes on delivery. */
+    free(p);
+    ScrDnsJob *j = calloc(1, sizeof *j);
+    if (!j) scr_dgram_oom();
+    j->w.run = scr_dns_job_run;
+    j->w.done = scr_dns_job_done;
+    j->host = strdup(hostname->data);
+    if (!j->host) scr_dgram_oom();
+    j->family_req = family == 6 ? 6 : family == 4 ? 4 : 0;
+    j->flags = scr_dns_lookup_flags;
+    j->order = scr_dns_lookup_order;
+    j->all = scr_dns_lookup_all;
+    j->cb = cb; /* moves */
+    j->fn = fn;
+    scr_work_submit(&j->w);
+    return;
   }
   /* Queue order: literals (nextTick) before resolver answers, FIFO within
    * each class. */
