@@ -1744,6 +1744,7 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
     const idxs = L.declareHiddenLocal("%midxs", idxsT);
     const local = L.declareLocal(decl.name, decl.name.text, rowsT, false);
     L.matchAllDrainIndexes.set(sym, { idxsLocalId: idxs.id, ctx: L.ctx });
+    L.regexRowsBuilt = true;
     return [
       { kind: "varDecl", localId: idxs.id, init: { kind: "arrayLit", elems: [], type: idxsT, loc }, loc },
       {
@@ -3161,10 +3162,13 @@ export function lowerStmt(L: Lowerer, stmt: ts.Statement): IrStmt | IrStmt[] | n
       });
       return undefArmDefault(L, blame, init, { kind: "varRef", localId: tmp.id, type: elemT, loc }, bodyT);
     }
-    // No undefined arm in bounds: the default fires exactly past the end.
+    // No undefined arm in bounds: the default fires exactly past the end. A STRING element can still be the ABSENT string (a
+    // regex or split capture that did not participate: Node's undefined), which fires it too.
     return {
       kind: "ternary",
-      cond: inRange,
+      cond: elemT.kind === "string" && read.type.kind === "string"
+        ? { kind: "logical", op: "&&", left: inRange, right: { kind: "unary", op: "!", operand: { kind: "libCall", fn: "str.isAbsent", args: [read], type: BOOL, loc }, type: BOOL, loc }, type: BOOL, loc }
+        : inRange,
       then: L.coerceInto(blame, read, bodyT),
       else_: L.lowerExprExpecting(init, bodyT),
       type: bodyT,
@@ -11182,6 +11186,7 @@ function prototypeInstallerCallStmt(L: Lowerer, expr: ts.Expression): IrStmt | n
         init: { kind: "arrayLit", elems: [], type: idxsT, loc },
         loc,
       });
+      L.regexRowsBuilt = true;
       rowsInit = {
         kind: "regexIntrinsic",
         method: "matchAllInto",

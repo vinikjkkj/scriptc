@@ -2157,6 +2157,7 @@ double scr_regex_index_of(ScrArr *m);
 /* Did capture group `i` of a match row not participate (the row holds "" there; Node: undefined)? False for an
  * index outside the row or an array no regex built. Borrowed; never throws. */
 bool scr_regex_row_absent(ScrArr *m, double i);
+ScrStr *scr_regex_row_input_new(ScrArr *m);
 double scr_regex_get_last_index(ScrRegex *re);
 void scr_regex_set_last_index(ScrRegex *re, double v);
 bool scr_regex_test(ScrRegex *re, ScrStr *s); /* /g or /y: stateful through lastIndex like exec */
@@ -6569,6 +6570,8 @@ ScrDyn *scr_dyn_new_null(void);
 ScrDyn *scr_dyn_new_bool(bool b);
 ScrDyn *scr_dyn_new_num(double n);
 ScrDyn *scr_dyn_new_str(ScrStr *s);
+/* A static match row as Node's exec-shaped dyn result (undefined for an absent group, index/input/groups), +1. */
+ScrDyn *scr_regex_row_dyn_new(ScrArr *m);
 /* The union walkers' forms: -1, 0, 1 and the empty string are shared immortal nodes (see scr_json.c). Retains like the plain forms. */
 ScrDyn *scr_dyn_new_num_sh(double n);
 ScrDyn *scr_dyn_new_str_sh(ScrStr *s);

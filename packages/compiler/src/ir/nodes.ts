@@ -3542,6 +3542,11 @@ export type IrRegexIntrinsicMethod =
   /** Did capture group `args[0]` of this match row NOT participate (the row holds "" there, SEMANTICS.md 51;
    * Node's slot is undefined)? False for an index outside the row and for an array no regex built. Never throws. */
   | "rowAbsent"
+  /** A match row as Node's exec-shaped result (a dyn array: undefined for the absent string, plus index, input, groups
+   * from the runtime's row table). Only the printer asks, for a string[] it found to be a row; +1. */
+  | "rowDyn"
+  /** `m.input` of a match row: the subject the regex ran over, +1. */
+  | "inputOf"
   /** `s.matchAll(re)` — every match as its honest string[] slice (match's
    * rule), drained EAGERLY into a fresh string[][]: the lazy iterator is
    * unobservable across the lowered surface (strings are immutable; the

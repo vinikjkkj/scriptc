@@ -3417,6 +3417,21 @@ function lowerExprInner(L: Lowerer, expr: ts.Expression): IrExpr {
           };
         }
       }
+      // `m.input` on any match row: the subject the regex ran over, recorded against the row beside its index.
+      if (expr.name.text === "input" && !expr.questionDotToken) {
+        const msym = L.typeOf(expr.expression).getSymbol();
+        if (msym !== undefined && (msym.name === "RegExpExecArray" || msym.name === "RegExpMatchArray") &&
+            L.isStdlibSymbol(msym)) {
+          return {
+            kind: "regexIntrinsic",
+            method: "inputOf",
+            receiver: L.lowerExpr(expr.expression),
+            args: [],
+            type: STRING,
+            loc,
+          };
+        }
+      }
       // `m.index` on a for-of-over-matchAll binding reads the companion-
       // index array at this iteration's cursor — always a number: every
       // drained row matched, so the lib's `.index` is never undefined
@@ -6947,6 +6962,12 @@ export function keyedCalleeAtUndefinedArm(L: Lowerer, expr: ts.CallExpression, c
       const test: IrExpr = { kind: "libCall", fn: "num.isUndef", args: [other], type: BOOL, loc };
       return negated ? { kind: "unary", op: "!", operand: test, type: BOOL, loc } : test;
     }
+    // A string-typed operand compared with undefined: the ABSENT string (a regex capture group that did not participate, a
+    // split capture) is the one string that IS undefined; null never equals a string.
+    if (other.type.kind === "string" && unit.unit === "undefined") {
+      const test: IrExpr = { kind: "libCall", fn: "str.isAbsent", args: [other], type: BOOL, loc };
+      return negated ? { kind: "unary", op: "!", operand: test, type: BOOL, loc } : test;
+    }
     // Non-union operand: it can never hold undefined/null at runtime (the
     // checker narrowed it to a concrete arm), so `=== unit` is false and
     // `!== unit` is true. JS still evaluates the operand first (`f() !==
@@ -7100,6 +7121,11 @@ export function keyedCalleeAtUndefinedArm(L: Lowerer, expr: ts.CallExpression, c
         type: BOOL,
         loc,
       };
+    }
+    if (other.type.kind === "string") {
+      // `s == null` on a string-typed operand: only the ABSENT string (an undefined regex/split capture) is nullish.
+      const test: IrExpr = { kind: "libCall", fn: "str.isAbsent", args: [other], type: BOOL, loc };
+      return negated ? { kind: "unary", op: "!", operand: test, type: BOOL, loc } : test;
     }
     if (other.type.kind === "jsval" || other.type.kind === "void") {
       return null; // no static tag to test — keep the fence

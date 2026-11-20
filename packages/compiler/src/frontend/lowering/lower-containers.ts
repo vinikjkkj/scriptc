@@ -7224,6 +7224,7 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
       const re = L.lowerExpr(access.expression);
       const subject = L.lowerExprExpecting(call.arguments[0]!, STRING);
       const resultT: IrType = { kind: "union", unionId: L.unions.intern([arrayOf(STRING), { kind: "nullT" }]) };
+      L.regexRowsBuilt = true;
       return { kind: "regexIntrinsic", method: "exec", receiver: subject, args: [re], type: resultT, loc };
     }
     // `re.toString()` — the spec's `"/" + source + "/" + flags`, built from
@@ -7273,6 +7274,7 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
       const exactT: IrType = { kind: "union", unionId: L.unions.intern([arrayOf(STRING), { kind: "nullT" }]) };
       const mapped = L.mapTypeOf(L.typeOf(call));
       const resultT: IrType = mapped && typeEquals(mapped, exactT) ? mapped : exactT;
+      L.regexRowsBuilt = true;
       return { kind: "regexIntrinsic", method: "match", receiver, args: [re], type: resultT, loc };
     }
     // `s.matchAll(re)` — the every-match iterator drained EAGERLY into a
@@ -7290,6 +7292,7 @@ const ITER_TERMINALS = new Set(["toArray", "forEach", "reduce", "some", "every",
       if (call.arguments.length !== 1) return null;
       const receiver = lowerReceiver();
       const re = L.lowerExpr(arg0);
+      L.regexRowsBuilt = true;
       return {
         kind: "regexIntrinsic",
         method: "matchAll",

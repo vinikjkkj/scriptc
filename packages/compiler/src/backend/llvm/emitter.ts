@@ -17305,6 +17305,18 @@ class LlEmitter {
         B.line(`${t} = call zeroext i1 @scr_regex_row_absent(ptr ${r.name}, double ${args[0]!.name})`);
         return { name: t, type: e.type };
       }
+      case "rowDyn": {
+        this.declare(`declare ptr @scr_regex_row_dyn_new(ptr)`);
+        const t = B.tmp();
+        B.line(`${t} = call ptr @scr_regex_row_dyn_new(ptr ${r.name})`);
+        return this.own({ name: t, type: e.type });
+      }
+      case "inputOf": {
+        this.declare(`declare ptr @scr_regex_row_input_new(ptr)`);
+        const t = B.tmp();
+        B.line(`${t} = call ptr @scr_regex_row_input_new(ptr ${r.name})`);
+        return this.own({ name: t, type: e.type });
+      }
       case "execIndexOf": {
         this.declare(`declare double @scr_regex_index_of(ptr)`);
         const t = B.tmp();

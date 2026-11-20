@@ -73,6 +73,8 @@ export const REGEX_INTRINSIC_SIGS: Record<
   setLastIndex: { receiver: REGEX, argTypes: [F64], result: VOID },
   execIndexOf: { receiver: arrayOf(STRING), argTypes: [], result: F64 },
   rowAbsent: { receiver: arrayOf(STRING), argTypes: [F64], result: BOOL },
+  rowDyn: { receiver: arrayOf(STRING), argTypes: [], result: DYN },
+  inputOf: { receiver: arrayOf(STRING), argTypes: [], result: STRING },
   matchAll: { receiver: STRING, argTypes: [REGEX], result: arrayOf(arrayOf(STRING)) },
   matchAllInto: { receiver: STRING, argTypes: [REGEX, arrayOf(F64)], result: arrayOf(arrayOf(STRING)) },
   replaceRowsInto: { receiver: STRING, argTypes: [REGEX, arrayOf(F64)], result: arrayOf(arrayOf(STRING)) },

@@ -1556,6 +1556,39 @@ function inspectHelper(L: Lowerer, t: IrType, loc: SrcLoc, rebuild = false): str
   return name;
 }
 
+/** A match row prints as Node's exec result, with `index`, `input` and `groups` after the elements and `undefined` for a group
+ * that did not participate. The string[] printer is built before the program's regex calls are all lowered, so a program that
+ * builds a row (Lowerer.regexRowsBuilt) gets the row test spliced into the printer after the depth gate; every other program's
+ * printer is untouched. */
+export function patchRegexRowInspect(L: Lowerer): void {
+  if (!L.regexRowsBuilt) return;
+  const name = L.inspectHelpers.get(`insp:${typeKey({ kind: "array", elem: STRING })}`);
+  if (name === undefined) return;
+  const fn = L.liftedFns.find((f) => f.name === name);
+  if (fn === undefined) return;
+  const loc = fn.loc;
+  const t: IrType = { kind: "array", elem: STRING };
+  const ref = (localId: string, type: IrType): IrExpr => ({ kind: "varRef", localId, type, loc });
+  const idx = (): IrExpr => ({ kind: "regexIntrinsic", method: "execIndexOf", receiver: ref("v.0", t), args: [], type: F64, loc });
+  const at = fn.body.findIndex((s) => s.kind === "if" && s.then.length === 1 && s.then[0]!.kind === "return" && (s.then[0] as { value?: IrExpr }).value?.kind === "strLit" && ((s.then[0] as { value: { value: string } }).value.value === "[Array]"));
+  if (at < 0) return;
+  fn.body.splice(at + 1, 0, {
+    kind: "if",
+    cond: { kind: "bin", op: "===", left: idx(), right: idx(), type: BOOL, loc },
+    then: [{
+      kind: "return",
+      value: {
+        kind: "libCall", fn: "insp.dyn",
+        args: [{ kind: "regexIntrinsic", method: "rowDyn", receiver: ref("v.0", t), args: [], type: DYN, loc }, ref("r.0", F64), ref("d.0", F64)],
+        type: STRING, loc,
+      },
+      loc,
+    }],
+    else_: null,
+    loc,
+  });
+}
+
 /** Rebuild a record's inspect helper over the key orders its shape now has (IrRecordShape.keyOrders). The helper was
  * built when the shape had one; the post-lowering order pass found the shape built in several and calls this to replace the
  * body in place. A shape that never had an inspect helper has nothing to rebuild. */
