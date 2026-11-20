@@ -453,3 +453,45 @@ void scr_work_submit_cost(ScrWork *w, double est_us) {
   if (was_empty) scr_pl_wake();
   SCR_PL_UNLOCK(&P.m);
 }
+
+/* ── settle-later: Node's poll-phase delivery for work that stays inline ──
+ * Some Node APIs run on the threadpool but are served here by a blocking
+ * call on the main thread whose outcome is already known when it returns
+ * (fs/promises, the asymmetric-crypto promises). The OUTCOME is computed
+ * now; what Node does differently is WHEN the promise settles: in the poll
+ * phase, after the synchronous run, the nextTick queue and the promise
+ * jobs. This returns a PENDING promise that takes `settled`'s outcome from
+ * the poll station through the same done queue and the same wake. `settled`
+ * (an already-settled promise, +1) is consumed. */
+typedef struct {
+  ScrWork w;
+  ScrPromise *src; /* +1, settled */
+  ScrPromise *dst; /* +1, pending */
+} ScrLaterJob;
+
+static void scr_later_run(ScrWork *w) { (void)w; }
+
+static void scr_later_done(ScrWork *w, bool ran) {
+  ScrLaterJob *j = (ScrLaterJob *)w;
+  ScrPromise *src = j->src, *dst = j->dst;
+  free(j);
+  if (ran) scr_promise_adapt_copy(dst, src);
+  scr_promise_release(src);
+  scr_promise_release(dst);
+}
+
+ScrPromise *scr_promise_settle_later(ScrPromise *settled) {
+  ScrLaterJob *j = malloc(sizeof *j);
+  if (j == NULL) scr_bytes_io_oom();
+  j->w.run = scr_later_run;
+  j->w.done = scr_later_done;
+  j->src = settled;
+  /* `settled` is an internal carrier: nobody can ever attach a handler to it,
+   * so a rejection must not enter the unhandled ledger on ITS account (the
+   * returned promise carries the rejection, and is judged when it settles). */
+  scr_promise_mark_handled(settled);
+  ScrPromise *dst = scr_promise_new();
+  j->dst = scr_promise_retain(dst);
+  scr_work_submit_cost(&j->w, 0.0); /* nothing to compute: always the inline arm unless the pool is saturated */
+  return dst;
+}

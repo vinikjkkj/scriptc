@@ -2819,71 +2819,72 @@ ScrPromise *scr_promise_settled_ref(void *v, void *(*retain)(void *), void (*rel
 }
 
 /* ── fs/promises ─────────────────────────────────────────────────────
- * The promise forms run the SAME sync operations and mint an already-
- * settled promise (scr_promise_settled_*): success fulfills, a pending
- * exception moves in as the rejection — catchable at the await, like
- * Node. DOCUMENTED DIVERGENCE (SEMANTICS.md): the syscall blocks the
- * event loop, so I/O never interleaves with timers or other fibers —
- * observable only in concurrent code, not in the sequential await
- * chains CLIs are made of. */
+ * The promise forms run the SAME sync operations and take their outcome
+ * from an already-settled promise (scr_promise_settled_*): success
+ * fulfills, a pending exception moves in as the rejection — catchable at
+ * the await, like Node. The RETURNED promise is pending and takes that
+ * outcome from the worker pool's poll station (scr_promise_settle_later),
+ * which is when Node settles it. DOCUMENTED DIVERGENCE (SEMANTICS.md): the
+ * syscall itself still blocks the event loop, so I/O never overlaps with
+ * timers or other fibers — only the settle time moved. */
 
 ScrPromise *scr_fsp_read_file(ScrStr *path) {
-  return scr_promise_settled_str(scr_fs_read_file(path));
+  return scr_promise_settle_later(scr_promise_settled_str(scr_fs_read_file(path)));
 }
 
 ScrPromise *scr_fsp_write_file(ScrStr *path, ScrStr *data) {
   scr_fs_write_file(path, data);
-  return scr_promise_settled_void();
+  return scr_promise_settle_later(scr_promise_settled_void());
 }
 
 ScrPromise *scr_fsp_mkdir(ScrStr *path) {
   scr_fs_mkdir(path);
-  return scr_promise_settled_void();
+  return scr_promise_settle_later(scr_promise_settled_void());
 }
 
 ScrPromise *scr_fsp_mkdir_mode(ScrStr *path, double mode) {
   scr_fs_mkdir_mode(path, mode);
-  return scr_promise_settled_void();
+  return scr_promise_settle_later(scr_promise_settled_void());
 }
 
 ScrPromise *scr_fsp_mkdir_recursive(ScrStr *path) {
   scr_fs_mkdir_recursive(path);
-  return scr_promise_settled_void();
+  return scr_promise_settle_later(scr_promise_settled_void());
 }
 
 ScrPromise *scr_fsp_mkdir_recursive_mode(ScrStr *path, double mode) {
   scr_fs_mkdir_recursive_mode(path, mode);
-  return scr_promise_settled_void();
+  return scr_promise_settle_later(scr_promise_settled_void());
 }
 
 ScrPromise *scr_fsp_unlink(ScrStr *path) {
   scr_fs_unlink(path);
-  return scr_promise_settled_void();
+  return scr_promise_settle_later(scr_promise_settled_void());
 }
 
 ScrPromise *scr_fsp_rename(ScrStr *oldpath, ScrStr *newpath) {
   scr_fs_rename(oldpath, newpath);
-  return scr_promise_settled_void();
+  return scr_promise_settle_later(scr_promise_settled_void());
 }
 
 ScrPromise *scr_fsp_chmod(ScrStr *path, double mode) {
   scr_fs_chmod(path, mode);
-  return scr_promise_settled_void();
+  return scr_promise_settle_later(scr_promise_settled_void());
 }
 
 ScrPromise *scr_fsp_readdir(ScrStr *path) {
   ScrArr *names = scr_fs_readdir(path);
-  return scr_promise_settled_ref(names, &scr_arr_retain_v, &scr_arr_release_v, NULL);
+  return scr_promise_settle_later(scr_promise_settled_ref(names, &scr_arr_retain_v, &scr_arr_release_v, NULL));
 }
 
 ScrPromise *scr_fsp_rm(ScrStr *path) {
   scr_fs_rm(path);
-  return scr_promise_settled_void();
+  return scr_promise_settle_later(scr_promise_settled_void());
 }
 
 ScrPromise *scr_fsp_stat(ScrStr *path) {
   ScrStats *st = scr_fs_stat(path);
-  return scr_promise_settled_ref(st, &scr_stats_retain_v, &scr_stats_release_v, NULL);
+  return scr_promise_settle_later(scr_promise_settled_ref(st, &scr_stats_retain_v, &scr_stats_release_v, NULL));
 }
 
 /* ── fs.stat(path, cb) ───────────────────────────────────────────────
