@@ -17533,6 +17533,12 @@
    ],
    "diags": []
   },
+  "<repo>/tests/corpus/26073-dns-lookup-resolves-on-the-pool-and-each-completion-gets-a-checkpoint-like-node.ts": {
+   "order": [
+    "<repo>/tests/corpus/26073-dns-lookup-resolves-on-the-pool-and-each-completion-gets-a-checkpoint-like-node.ts"
+   ],
+   "diags": []
+  },
   "<repo>/tests/corpus/2608-regex-named-groups.ts": {
    "order": [
     "<repo>/tests/corpus/2608-regex-named-groups.ts"
