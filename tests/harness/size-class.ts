@@ -2471,7 +2471,12 @@ export const STATIC_CLASS_TEXT_RECORDED = platform === "win32" ? 72_646 : null;
  * 136,022 record is the 224 between that and 136,022). The always-linked growth is scr_json.c's hash index of a large dyn object (the hash, build, probe, the appender's
  * and remover's hooks and the tail-called big-table read), the per-descriptor hash of a large class's member table and its probe, the registry-position memo painted once for
  * scr_dyn_objinst_class_of, and the keyed [[Get]] fast path. The hello-world class stayed inside its tolerance. It buys -10% Ir on messaging-redis and -3.2% on messaging-mysql. */
-export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 137_510 : null;
+/* 2026-11-20 -- REGEX_CLASS_TEXT_RECORDED 137,510 -> 138,550 (+1,040; win32 only). MEASURED by CI run 44700774999 (Windows 3/20, the zig x86_64-windows-gnu lane): "the regex program .text GREW by
+ * 1040 bytes". What the bytes bought is INFERRED, not measured (no local Windows lane): the regex link set carries the refuse chain's always-linked additions, the dyn String
+ * hooks' storage and the string-pattern/locale-case entry points that stay referenced by the static toLocaleLowerCase/UpperCase and localeCompare lowerings. The big part of the
+ * chain's growth (the dyn String extension hook, its locale-case tables and the normalization data: 264,184 -> 194,048 file bytes on Linux plain) is gated off a regex program with no
+ * dynamic method call (SCR_DYN_STREXT, cc.ts). The Linux plain ceiling (REGEX_CLASS_MAX 229,376) holds. */
+export const REGEX_CLASS_TEXT_RECORDED = platform === "win32" ? 138_550 : null;
 
 /* 2026-10-21 -- THE LINK NOW COLLECTS DEAD SECTIONS, and every figure above moves.
  * The numbers in this block, and the two ceilings (STATIC_CLASS_MAX and
